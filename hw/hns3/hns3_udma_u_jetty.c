@@ -197,13 +197,15 @@ static void udma_free_tjetty_tbl(struct udma_u_jetty *udma_jetty)
 	struct tgt_node *cur, *next;
 
 	if (udma_jetty->tjetty_tbl) {
-		(void)pthread_rwlock_rdlock(&udma_jetty->tjetty_tbl->rwlock);
+
+		(void)pthread_rwlock_wrlock(&udma_jetty->tjetty_tbl->rwlock);// 升级为写锁
 		HMAP_FOR_EACH_SAFE(cur, next, hmap_node, &udma_jetty->tjetty_tbl->hmap) {
-			(void)pthread_rwlock_unlock(&udma_jetty->tjetty_tbl->rwlock);
 			udma_u_unadvise_jetty(&udma_jetty->urma_jetty, cur->tjetty, false);
-			(void)pthread_rwlock_rdlock(&udma_jetty->tjetty_tbl->rwlock);
+                        HMAP_REMOVE(hmap_node, &udma_jetty->tjetty_tbl->hmap, cur);
+                        free(cur); // 释放节点内存		
 		}
 		(void)pthread_rwlock_unlock(&udma_jetty->tjetty_tbl->rwlock);
+                pthread_rwlock_destroy(&udma_jetty->tjetty_tbl->rwlock); // 销毁读写锁	       
 		udma_hmap_destroy(&udma_jetty->tjetty_tbl->hmap);
 		free(udma_jetty->tjetty_tbl);
 		udma_jetty->tjetty_tbl = NULL;
