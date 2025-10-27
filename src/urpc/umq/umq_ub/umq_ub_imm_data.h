@@ -1,0 +1,57 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+ * Description: UB imm data definition
+ * Create: 2025-9-16
+ */
+
+#ifndef UMQ_UB_IMM_DATA_H
+#define UMQ_UB_IMM_DATA_H
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define UMQ_UB_IMM_BITS (0xFFFFFFFFFFFFFFFF)
+#define UMQ_UB_IMM_WITHOUT_PRIVATE_BITS (0x7FFFFFFFFFFFFFFF)
+#define UMQ_UB_IMM_PRIVATE 1
+
+typedef enum umq_ub_imm_type {
+    IMM_TYPE_REVERSE_PULL_MEM,      // used for reverse pull mem in ub plus mode
+    IMM_TYPE_REVERSE_PULL_MEM_FREE, // used for free reverse pull mem in ub plus mode
+    IMM_TYPE_FLOW_CONTROL,          // used for flow control window exchange
+
+    IMM_TYPE_MAX,                   // max type should not exceed 32, for type is 5 bit
+} umq_ub_imm_type_t;
+
+typedef union umq_ub_imm {
+    uint64_t value;
+    struct {
+        uint64_t umq_private : 1;  // 0: user defined imm data, 1: umq defined imm data
+        uint64_t type : 5;
+        uint64_t rsvd1 : 58;
+    } bs;
+    struct {
+        uint64_t umq_private : 1;
+        uint64_t type : 5;
+        uint64_t rsvd1 : 10;
+        uint64_t msg_id : 16;
+        uint64_t msg_num : 16;
+        uint64_t rsvd2 : 16;
+    } ub_plus;
+    struct {
+        uint64_t umq_private : 1;
+        uint64_t type : 5;
+        uint64_t rsvd1 : 10;
+        uint64_t window : 16;
+        uint64_t rsvd2 : 32;
+    } flow_control;
+} umq_ub_imm_t;
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

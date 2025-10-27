@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) Huawei Technologies Co., Ltd. 2020-2025. All rights reserved.
+
+include_directories(/usr/include/umdk)
+include_directories(/usr/include/ub/umdk/urma)
+include_directories(/usr/include/umdk/umq)
+include_directories(${CMAKE_CURRENT_LIST_DIR})
+include_directories(${CMAKE_SOURCE_DIR}/../../include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../include/umq)
+
+aux_source_directory(${CMAKE_CURRENT_LIST_DIR} UMQ_EXAMPLE_DIR_SRCS)
+
+add_executable(urpc_umq_example
+    ${UMQ_EXAMPLE_DIR_SRCS})
+
+set_property(TARGET urpc_umq_example PROPERTY C_STANDARD 11)
+target_link_libraries(urpc_umq_example umq umq_buf)
+install(TARGETS urpc_umq_example DESTINATION /usr/bin)
+install(DIRECTORY DESTINATION /usr/share/doc/umdk-examples/urpc_example/urpc_umq_example)

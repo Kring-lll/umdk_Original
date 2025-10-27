@@ -1,0 +1,120 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+ * Description: umq example of base feature functions
+ */
+
+#include <unistd.h>
+#include <string.h>
+
+#include "umq_example_common.h"
+#include "umq_example_base.h"
+
+const char *EXAMPLE_CLIENT_ENQUEUE_DATA = "hello, this is umq client";
+const char *EXAMPLE_SERVER_ENQUEUE_DATA = "hello, this is umq server";
+
+int run_umq_example_server(struct urpc_example_config *cfg)
+{
+    int ret = -1;
+    uint32_t local_bind_info_size = UMQ_MAX_BIND_INFO_SIZE;
+    uint8_t local_bind_info[UMQ_MAX_BIND_INFO_SIZE] = {0};
+    uint64_t umqh = init_and_create_umq(cfg, local_bind_info, &local_bind_info_size);
+    if (umqh == UMQ_INVALID_HANDLE) {
+        LOG_PRINT_ERR("init and create umq failed\n");
+        return -1;
+    }
+
+    uint32_t remote_bind_info_size = UMQ_MAX_BIND_INFO_SIZE;
+    uint8_t remote_bind_info[UMQ_MAX_BIND_INFO_SIZE] = {0};
+    ret = server_exchange_bind_info(cfg->server_ip, cfg->tcp_port, local_bind_info,
+        local_bind_info_size, remote_bind_info, &remote_bind_info_size);
+    if (ret < 0 || remote_bind_info_size > UMQ_MAX_BIND_INFO_SIZE) {
+        LOG_PRINT_ERR("server_exchange_bind_info failed\n");
+        goto DESTROY;
+    }
+
+    ret = umq_bind(umqh, remote_bind_info, remote_bind_info_size);
+    if (ret != UMQ_SUCCESS) {
+        LOG_PRINT_ERR("server bind failed\n");
+        goto DESTROY;
+    }
+    LOG_PRINT("server bind success\n");
+
+    if (example_dequeue_data(umqh, EXAMPLE_CLIENT_ENQUEUE_DATA, strlen(EXAMPLE_CLIENT_ENQUEUE_DATA)) != 0) {
+        goto UNBIND;
+    }
+
+    bool use_shm_pool = (cfg->trans_mode == TRANS_MODE_UBMM) || (cfg->trans_mode == TRANS_MODE_UBMM_PLUS) ||
+                        (cfg->trans_mode == TRANS_MODE_IPC);
+    if (example_enqueue_data(umqh, EXAMPLE_SERVER_ENQUEUE_DATA, strlen(EXAMPLE_SERVER_ENQUEUE_DATA), use_shm_pool)) {
+        goto UNBIND;
+    }
+
+    usleep(EXAMPLE_SLEEP_TIME_US);
+    ret = 0;
+
+UNBIND:
+    umq_unbind(umqh);
+DESTROY:
+    umq_destroy(umqh);
+    umq_uninit();
+    return ret;
+}
+
+int run_umq_example_client(struct urpc_example_config *cfg)
+{
+    int ret = -1;
+    uint32_t local_bind_info_size = UMQ_MAX_BIND_INFO_SIZE;
+    uint8_t local_bind_info[UMQ_MAX_BIND_INFO_SIZE] = {0};
+    uint64_t umqh = init_and_create_umq(cfg, local_bind_info, &local_bind_info_size);
+    if (umqh == UMQ_INVALID_HANDLE) {
+        LOG_PRINT_ERR("init and create umq failed\n");
+        return -1;
+    }
+
+    uint32_t remote_bind_info_size = UMQ_MAX_BIND_INFO_SIZE;
+    uint8_t remote_bind_info[UMQ_MAX_BIND_INFO_SIZE] = {0};
+    ret = client_exchange_bind_info(cfg->server_ip, cfg->tcp_port, local_bind_info,
+        local_bind_info_size, remote_bind_info, &remote_bind_info_size);
+    if (ret < 0 || remote_bind_info_size > UMQ_MAX_BIND_INFO_SIZE) {
+        LOG_PRINT_ERR("client_exchange_bind_info failed\n");
+        goto DESTROY;
+    }
+
+    ret = umq_bind(umqh, remote_bind_info, remote_bind_info_size);
+    if (ret != UMQ_SUCCESS) {
+        LOG_PRINT_ERR("client bind failed\n");
+        goto DESTROY;
+    }
+    LOG_PRINT("client bind success\n");
+    sleep(1); // sleep 1s to wait for server ready
+
+    bool use_shm_pool = (cfg->trans_mode == TRANS_MODE_UBMM) || (cfg->trans_mode == TRANS_MODE_UBMM_PLUS) ||
+                        (cfg->trans_mode == TRANS_MODE_IPC);
+    if (example_enqueue_data(umqh, EXAMPLE_CLIENT_ENQUEUE_DATA, strlen(EXAMPLE_CLIENT_ENQUEUE_DATA), use_shm_pool)) {
+        goto UNBIND;
+    }
+
+    if (example_dequeue_data(umqh, EXAMPLE_SERVER_ENQUEUE_DATA, strlen(EXAMPLE_CLIENT_ENQUEUE_DATA)) != 0) {
+        goto UNBIND;
+    }
+    ret = 0;
+
+UNBIND:
+    umq_unbind(umqh);
+DESTROY:
+    umq_destroy(umqh);
+    umq_uninit();
+    return ret;
+}
+
+int run_umq_example(struct urpc_example_config *cfg)
+{
+    if (cfg->instance_mode == CLIENT) {
+        return run_umq_example_client(cfg);
+    } else if (cfg->instance_mode == SERVER) {
+        return run_umq_example_server(cfg);
+    }
+
+    return -1;
+}
