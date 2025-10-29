@@ -10,6 +10,8 @@
 #ifndef UMQ_ERRNO_H
 #define UMQ_ERRNO_H
 
+#include <errno.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -17,6 +19,14 @@ extern "C" {
 #define UMQ_SUCCESS                                (0)
 #define UMQ_FAIL                                   (-1)
 #define UMQ_INVALID_HANDLE                         (0)
+
+#define UMQ_ERR_EPERM                              (EPERM)
+#define UMQ_ERR_EAGAIN                             (EAGAIN)
+#define UMQ_ERR_ENOMEM                             (ENOMEM)
+#define UMQ_ERR_EBUSY                              (EBUSY)
+#define UMQ_ERR_EEXIST                             (EEXIST)
+#define UMQ_ERR_EINVAL                             (EINVAL)
+#define UMQ_ERR_ENODEV                             (ENODEV) 
 
 #ifdef __cplusplus
 }
