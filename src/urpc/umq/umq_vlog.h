@@ -14,8 +14,6 @@
 extern "C" {
 #endif
 
-#define UMQ_LOG_NAME   "UMQ"
-
 #define UMQ_VLOG_ERR(__format, ...)    \
     UTIL_VLOG(umq_get_log_ctx(), UTIL_VLOG_LEVEL_ERR, __format, ##__VA_ARGS__)
 #define UMQ_VLOG_WARN(__format, ...)   \
@@ -26,6 +24,17 @@ extern "C" {
     UTIL_VLOG(umq_get_log_ctx(), UTIL_VLOG_LEVEL_INFO, __format, ##__VA_ARGS__)
 #define UMQ_VLOG_DEBUG(__format, ...)  \
     UTIL_VLOG(umq_get_log_ctx(), UTIL_VLOG_LEVEL_DEBUG, __format, ##__VA_ARGS__)
+
+#define UMQ_LIMIT_VLOG_ERR(__format, ...)   \
+    UTIL_LIMIT_VLOG(umq_get_log_ctx(), UTIL_VLOG_LEVEL_ERR, __format, ##__VA_ARGS__)
+#define UMQ_LIMIT_VLOG_WARN(__format, ...)  \
+    UTIL_LIMIT_VLOG(umq_get_log_ctx(), UTIL_VLOG_LEVEL_WARN, __format, ##__VA_ARGS__)
+#define UMQ_LIMIT_VLOG_NOTICE(__format, ...)    \
+    UTIL_LIMIT_VLOG(umq_get_log_ctx(), UTIL_VLOG_LEVEL_NOTICE, __format, ##__VA_ARGS__)
+#define UMQ_LIMIT_VLOG_INFO(__format, ...)  \
+    UTIL_LIMIT_VLOG(umq_get_log_ctx(), UTIL_VLOG_LEVEL_INFO, __format, ##__VA_ARGS__)
+#define UMQ_LIMIT_VLOG_DEBUG(__format, ...)     \
+    UTIL_LIMIT_VLOG(umq_get_log_ctx(), UTIL_VLOG_LEVEL_DEBUG, __format, ##__VA_ARGS__)
 
 util_vlog_ctx_t *umq_get_log_ctx(void);
 

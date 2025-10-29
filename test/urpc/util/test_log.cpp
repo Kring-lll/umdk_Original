@@ -10,7 +10,7 @@
 
 TEST(UrpcLogTest, TestLevel) {
     urpc_log_level_t level = URPC_LOG_LEVEL_DEBUG;
-    bool res = urpc_log_drop(level);
+    bool res = util_vlog_drop(urpc_lib_get_vlog_ctx(), level);
     ASSERT_EQ(res, true);
 
     urpc_log_config_t log_cfg;
@@ -19,7 +19,7 @@ TEST(UrpcLogTest, TestLevel) {
     log_cfg.level = level;
     int ret = urpc_log_config_set(&log_cfg);
     ASSERT_EQ(ret, URPC_SUCCESS);
-    res = urpc_log_drop(level);
+    res = util_vlog_drop(urpc_lib_get_vlog_ctx(), level);
     ASSERT_EQ(res, false);
 
     level = URPC_LOG_LEVEL_MAX;
@@ -51,10 +51,10 @@ TEST(UrpcLogTest, TestSetLogLimitConfig)
     uint32_t count_call = 0;
     uint64_t last_time = 0;
     // test default configure
-    for (uint32_t i = 0; i < URPC_LOG_PRINT_TIMES; i++) {
-        ASSERT_EQ(urpc_log_limit(&count_call, &last_time), true);
+    for (uint32_t i = 0; i < UTIL_VLOG_PRINT_TIMES; i++) {
+        ASSERT_EQ(util_vlog_limit(urpc_lib_get_vlog_ctx(), &count_call, &last_time), true);
     }
-    ASSERT_EQ(urpc_log_limit(&count_call, &last_time), false);
+    ASSERT_EQ(util_vlog_limit(urpc_lib_get_vlog_ctx(), &count_call, &last_time), false);
 
     // test specified configure
     count_call = 0;
@@ -65,9 +65,9 @@ TEST(UrpcLogTest, TestSetLogLimitConfig)
     config.rate_limited.num = 3;
     ASSERT_EQ(urpc_log_config_set(&config), URPC_SUCCESS);
     for (uint32_t i = 0; i < config.rate_limited.num; i++) {
-        ASSERT_EQ(urpc_log_limit(&count_call, &last_time), true);
+        ASSERT_EQ(util_vlog_limit(urpc_lib_get_vlog_ctx(), &count_call, &last_time), true);
     }
-    ASSERT_EQ(urpc_log_limit(&count_call, &last_time), false);
+    ASSERT_EQ(util_vlog_limit(urpc_lib_get_vlog_ctx(), &count_call, &last_time), false);
 
     // test disable rate-limited log
     count_call = 0;
@@ -75,7 +75,7 @@ TEST(UrpcLogTest, TestSetLogLimitConfig)
     config.rate_limited.interval_ms = 0;
     config.rate_limited.num = 0;
     ASSERT_EQ(urpc_log_config_set(&config), URPC_SUCCESS);
-    ASSERT_EQ(urpc_log_limit(&count_call, &last_time), true);
+    ASSERT_EQ(util_vlog_limit(urpc_lib_get_vlog_ctx(), &count_call, &last_time), true);
 }
 
 static void urpc_log_test_print(int level, char *log_msg)

@@ -7,6 +7,7 @@
 
 #include <stdarg.h>
 
+#include "urpc_util.h"
 #include "util_vlog.h"
 
 typedef struct util_vlog_level_def {
@@ -14,14 +15,14 @@ typedef struct util_vlog_level_def {
     const char **alias_names;
 } util_vlog_level_def_t;
 
-static const char *g_emerg_alias_names_def[]   = { "emerg", "emergency", "0", NULL };
-static const char *g_alert_alias_names_def[]   = { "alert", "1", NULL };
-static const char *g_crit_alias_names_def[]   = { "crit", "critical", "2", NULL };
-static const char *g_err_alias_names_def[]   = { "err", "error", "3", NULL };
-static const char *g_warn_alias_names_def[]   = { "warn", "warning", "4", NULL };
-static const char *g_notice_alias_names_def[]   = { "notice", "5", NULL };
-static const char *g_info_alias_names_def[]   = { "info", "informational", "6", NULL };
-static const char *g_debug_alias_names_def[]   = { "debug", "7", NULL };
+static const char *g_emerg_alias_names_def[] = { "emerg", "emergency", "0", NULL };
+static const char *g_alert_alias_names_def[] = { "alert", "1", NULL };
+static const char *g_crit_alias_names_def[] = { "crit", "critical", "2", NULL };
+static const char *g_err_alias_names_def[] = { "err", "error", "3", NULL };
+static const char *g_warn_alias_names_def[] = { "warn", "warning", "4", NULL };
+static const char *g_notice_alias_names_def[] = { "notice", "5", NULL };
+static const char *g_info_alias_names_def[] = { "info", "informational", "6", NULL };
+static const char *g_debug_alias_names_def[] = { "debug", "7", NULL };
 
 static const util_vlog_level_def_t g_util_vlog_level_def[] = {
     { "EMERG", g_emerg_alias_names_def },
@@ -34,28 +35,32 @@ static const util_vlog_level_def_t g_util_vlog_level_def[] = {
     { "DEBUG", g_debug_alias_names_def },
 };
 
-int util_vlog_create_context(util_vlog_level_t level, char *vlog_name, util_vlog_ctx_t *ctx)
+static bool next_print_cycle(uint64_t *last_time, uint32_t time_interval)
 {
-    static util_vlog_ctx_t default_ctx = {
-        .level = UTIL_VLOG_LEVEL_INFO,
-        .vlog_name = "UTIL_VLOG",
-    };
-    if (level < 0 || level > UTIL_VLOG_LEVEL_MAX || ctx == NULL) {
-        if (level < 0 || level > UTIL_VLOG_LEVEL_MAX) {
-            UTIL_VLOG_ERR(&default_ctx, "Invalid vlog level(%d)\n", level);
-        } else if (ctx == NULL) {
-            UTIL_VLOG_ERR(&default_ctx, "Invalid vlog context input, which is NULL\n");
-        }
-        
-        return -1;
+    uint64_t now_time = urpc_get_cpu_cycles();
+    if (((now_time - *last_time) * MS_PER_SEC / urpc_get_cpu_hz()) >= time_interval) {
+        *last_time = now_time;
+        return true;
+    }
+    return false;
+}
+
+bool util_vlog_limit(util_vlog_ctx_t *ctx, uint32_t *print_count, uint64_t *last_time)
+{
+    if (ctx->rate_limited.interval_ms == 0) {
+        return true;
     }
 
-    ctx->level = level;
-    if (vlog_name != NULL) {
-        (void)strncpy(ctx->vlog_name, vlog_name, UTIL_VLOG_NAME_STR_LEN - 1);
+    if (next_print_cycle(last_time, ctx->rate_limited.interval_ms)) {
+        *print_count = 0;
     }
 
-    return 0;
+    if (*print_count < ctx->rate_limited.num) {
+        *print_count += 1;
+        return true;
+    }
+
+    return false;
 }
 
 void util_vlog_output(
@@ -75,7 +80,7 @@ void util_vlog_output(
         return;
     }
 
-    syslog(level, "%s", log_msg);
+    ctx->vlog_output_func(level, log_msg);
 }
 
 util_vlog_level_t util_vlog_level_converter_from_str(const char *str, util_vlog_level_t default_level)
