@@ -35,6 +35,9 @@ int umq_ub_unbind_impl(uint64_t umqh);
 int32_t umq_ub_register_memory_impl(uint8_t *ub_ctx, void *buf, uint64_t size);
 void umq_ub_unregister_memory_impl(uint8_t *ub_ctx);
 
+umq_buf_t *umq_tp_ub_alloc_impl(uint32_t request_size, uint32_t request_qbuf_num, uint64_t umqh_tp,
+    umq_alloc_option_t *option);
+void umq_tp_ub_buf_free_impl(umq_buf_t *qbuf, uint64_t umqh_tp);
 
 int umq_ub_post_impl(uint64_t umqh_tp, umq_buf_t *qbuf, umq_io_direction_t io_direction, umq_buf_t **bad_qbuf);
 int umq_ub_poll_impl(uint64_t umqh_tp, umq_io_direction_t io_direction, umq_buf_t **buf, uint32_t max_buf_count);

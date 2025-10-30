@@ -70,6 +70,17 @@ static int umq_tp_ub_unbind(uint64_t umqh_tp)
     return umq_ub_unbind_impl(umqh_tp);
 }
 
+static umq_buf_t *umq_tp_ub_buf_alloc(uint32_t request_size, uint32_t request_qbuf_num, uint64_t umqh_tp,
+    umq_alloc_option_t *option)
+{
+    return umq_tp_ub_alloc_impl(request_size, request_qbuf_num, umqh_tp, option);
+}
+
+static void umq_tp_ub_buf_free(umq_buf_t *qbuf, uint64_t umqh_tp)
+{
+    umq_tp_ub_buf_free_impl(qbuf, umqh_tp);
+}
+
 static int umq_tp_ub_enqueue(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
 {
     return umq_ub_enqueue_impl(umqh_tp, qbuf, bad_qbuf);
@@ -112,6 +123,8 @@ static umq_ops_t g_umq_ub_ops = {
     .umq_tp_unbind = umq_tp_ub_unbind,
 
     // datapath plane api
+    .umq_tp_buf_alloc = umq_tp_ub_buf_alloc,
+    .umq_tp_buf_free = umq_tp_ub_buf_free,
     .umq_tp_enqueue = umq_tp_ub_enqueue,
     .umq_tp_dequeue = umq_tp_ub_dequeue,
     .umq_tp_notify = umq_tp_ub_notify,

@@ -579,6 +579,25 @@ void umq_ub_unregister_memory_impl(uint8_t *ub_ctx)
     ctx->tseg = NULL;
 }
 
+umq_buf_t *umq_tp_ub_alloc_impl(uint32_t request_size, uint32_t request_qbuf_num, uint64_t umqh_tp,
+    umq_alloc_option_t *option)
+{
+    umq_buf_list_t head;
+    QBUF_LIST_INIT(&head);
+    if (umq_qbuf_alloc(request_size, request_qbuf_num, option, &head) != UMQ_SUCCESS) {
+        return NULL;
+    }
+
+    return QBUF_LIST_FIRST(&head);
+}
+
+void umq_tp_ub_buf_free_impl(umq_buf_t *qbuf, uint64_t umqh_tp)
+{
+    umq_buf_list_t head;
+    QBUF_LIST_FIRST(&head) = qbuf;
+    umq_qbuf_free(&head);
+}
+
 static uint32_t get_dev_by_eid_str(urma_transport_type_t type, urma_eid_t *eid, urma_device_t **urma_dev,
                                    uint32_t *eid_index)
 {
