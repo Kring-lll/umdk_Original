@@ -29,7 +29,7 @@ void umq_perf_uninit(void);
 
 static inline uint64_t umq_perf_get_start_timestamp_with_feature(uint32_t feature)
 {
-    if ((feature & UMQ_FEATURE_ENABLE_PERF) == 0){
+    if ((feature & UMQ_FEATURE_ENABLE_PERF) == 0) {
         return 0;
     }
     return umq_perf_get_start_timestamp();
@@ -37,7 +37,7 @@ static inline uint64_t umq_perf_get_start_timestamp_with_feature(uint32_t featur
 
 static inline void umq_perf_record_write_with_feature(umq_perf_record_type_t type, uint64_t start, uint32_t feature)
 {
-    if ((feature & UMQ_FEATURE_ENABLE_PERF) == 0){
+    if ((feature & UMQ_FEATURE_ENABLE_PERF) == 0) {
         return;
     }
     umq_perf_record_write(type, start);

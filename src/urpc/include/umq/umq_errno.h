@@ -26,7 +26,7 @@ extern "C" {
 #define UMQ_ERR_EBUSY                              (EBUSY)
 #define UMQ_ERR_EEXIST                             (EEXIST)
 #define UMQ_ERR_EINVAL                             (EINVAL)
-#define UMQ_ERR_ENODEV                             (ENODEV) 
+#define UMQ_ERR_ENODEV                             (ENODEV)
 
 #ifdef __cplusplus
 }

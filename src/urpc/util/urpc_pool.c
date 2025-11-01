@@ -18,7 +18,7 @@
 #define URPC_POOL_BLOCK_MAX (65536)    // max block num
 #define URPC_POOL_ELEMENT_MAX (65536)  // max element num per block
 #define URPC_POOL_ELEMENT_SIZE_MAX (8388608)
-#define URPC_POOL_LOCAL_MAX (1024)     // support 1k different ctx pool/thread is enough for now
+#define URPC_POOL_LOCAL_MAX (1024)  // support 1k different ctx pool/thread is enough for now
 
 typedef struct urpc_pool_context {
     urpc_pool_t *global_pool;

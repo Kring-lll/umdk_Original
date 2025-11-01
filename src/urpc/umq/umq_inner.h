@@ -63,7 +63,7 @@ static inline uint32_t umq_get_post_rx_num(uint32_t rx_depth, atomic_uint *requi
 static inline void umq_inc_ref(bool lock_free, volatile uint32_t *ref_cnt, uint32_t n)
 {
     if (lock_free) {
-        *ref_cnt =*ref_cnt + n;
+        *ref_cnt = *ref_cnt + n;
     } else {
         (void)__sync_fetch_and_add(ref_cnt, n);
     }
@@ -72,7 +72,7 @@ static inline void umq_inc_ref(bool lock_free, volatile uint32_t *ref_cnt, uint3
 static inline void umq_dec_ref(bool lock_free, volatile uint32_t *ref_cnt, uint32_t n)
 {
     if (lock_free) {
-        *ref_cnt =*ref_cnt - n;
+        *ref_cnt = *ref_cnt - n;
     } else {
         (void)__sync_fetch_and_sub(ref_cnt, n);
     }

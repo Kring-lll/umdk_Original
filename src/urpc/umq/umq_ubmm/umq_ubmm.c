@@ -36,7 +36,6 @@ UNINIT:
 
 static void umq_tp_ubmm_uninit(uint8_t *ctx)
 {
-    umq_qbuf_pool_unint();
     umq_ubmm_unregister_memory_impl(ctx);
     umq_ubmm_ctx_uninit_impl(ctx);
 }

@@ -40,8 +40,8 @@ typedef struct util_vlog_ctx {
     char vlog_name[UTIL_VLOG_NAME_STR_LEN];
     void (*vlog_output_func)(int level, char *log_msg);
     struct {
-        uint32_t interval_ms;   // rate-limited log output interval. If the value is 0, rate is not limited.
-        uint32_t num;           // maximum number of rate-limited logs that can be output in a specified interval.
+        uint32_t interval_ms;    // rate-limited log output interval. If the value is 0, rate is not limited.
+        uint32_t num;            // maximum number of rate-limited logs that can be output in a specified interval.
     } rate_limited;
 } util_vlog_ctx_t;
 

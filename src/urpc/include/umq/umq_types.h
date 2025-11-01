@@ -200,7 +200,7 @@ typedef struct umq_alloc_option {
     uint16_t headroom_size;
 } umq_alloc_option_t;
 
-typedef enum  umq_dfx_module_id {
+typedef enum umq_dfx_module_id {
     UMQ_DFX_MODULE_PERF,
     UMQ_DFX_MODULE_STATS,
     UMQ_DFX_MODULE_MAX
@@ -211,7 +211,7 @@ typedef enum umq_perf_cmd_id {
     UMQ_PERF_CMD_STOP,
     UMQ_PERF_CMD_CLEAR,
     UMQ_PERF_CMD_GET_RESULT,
-    UMQ_PERF_CMD_MAX,
+    UMQ_PERF_CMD_MAX
 } umq_perf_cmd_id_t;
 
 typedef enum umq_stats_cmd_id {
@@ -223,14 +223,14 @@ typedef enum umq_stats_cmd_id {
 } umq_stats_cmd_id_t;
 
 typedef enum umq_stats_type {
-    UMQ_STATS_TYPE_SEND,                // send cnt
-    UMQ_STATS_TYPE_RECEIVE,             // recv cnt
-    UMQ_STATS_TYPE_READ,                // read cnt
+    UMQ_STATS_TYPE_SEND,                   // send cnt
+    UMQ_STATS_TYPE_RECEIVE,                // recv cnt
+    UMQ_STATS_TYPE_READ,                   // read cnt
     UMQ_STATS_TYPE_MAX,
 } umq_stats_type_t;
 
 typedef enum umq_err_stats_type {
-    UMQ_ERR_STATS_TYPE_POST_PARM_INVALID,                   // post parmeter invalid cnt
+    UMQ_ERR_STATS_TYPE_POST_PARM_INVALID,                   // post parameter invalid cnt
     UMQ_ERR_STATS_TYPE_POST_SEND,                           // post send cnt
     UMQ_ERR_STATS_TYPE_POST_RECV,                           // post recv cnt
     UMQ_ERR_STATS_TYPE_POST_IO_DIRECTION_INVALID,           // post io direction invalid cnt
@@ -243,15 +243,15 @@ typedef enum umq_err_stats_type {
     UMQ_ERR_STATS_TYPE_POLL_PARM_INVALID,                   // poll cnt
     UMQ_ERR_STATS_TYPE_POLL_TX,                             // poll tx failed
     UMQ_ERR_STATS_TYPE_POLL_RX,                             // poll rx failed
-    UMQ_ERR_STATS_TYPE_POLL_IO_DIRECTION_INVALID,           // poll io direcion invalid cnt
+    UMQ_ERR_STATS_TYPE_POLL_IO_DIRECTION_INVALID,           // poll io direction invalid cnt
 
     UMQ_ERR_STATS_TYPE_READ,                                // read failed
     UMQ_ERR_STATS_TYPE_READ_BIND_CTX_INVALID,               // read bind ctx invalid cnt
-    UMQ_ERR_STATS_TYPE_READ_TSEG_INVALID,                   // read tseg ctx invalid cnt
+    UMQ_ERR_STATS_TYPE_READ_TSEG_INVALID,                   // read tseg invalid cnt
 
     UMQ_ERR_STATS_TYPE_ENQUEUE_PARM_INVALID,                // enqueue parameter invalid cnt
     UMQ_ERR_STATS_TYPE_ENQUEUE_DATA_NUM_INVALID,            // enqueue data num invalid cnt
-    UMQ_ERR_STATS_TYPE_ENQUEUE_POST_TX_BATCH,               // eneueue post tx batch failed
+    UMQ_ERR_STATS_TYPE_ENQUEUE_POST_TX_BATCH,               // enqueue post tx batch failed
     UMQ_ERR_STATS_TYPE_ENQUEUE_SGE_NUM_INVALID,             // enqueue sge num invalid cnt
 
     UMQ_ERR_STATS_TYPE_DEQUEUE_PARM_INVALID,                // dequeue parameter invalid cnt

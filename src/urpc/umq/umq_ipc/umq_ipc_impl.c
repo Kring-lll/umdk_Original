@@ -369,7 +369,7 @@ int32_t umq_ipc_bind_impl(uint64_t umqh_tp, uint8_t *bind_info, uint32_t bind_in
     ipc_bind_ctx_t *ctx = (ipc_bind_ctx_t *)calloc(1, sizeof(ipc_bind_ctx_t));
     if (ctx == NULL) {
         UMQ_VLOG_ERR("bind ctx alloc failed\n");
-        return -UMQ_ERR_ENODEV;
+        return -UMQ_ERR_ENOMEM;
     }
 
     umq_ipc_bind_info_t *tmp_info = (umq_ipc_bind_info_t *)bind_info;
@@ -528,7 +528,7 @@ umq_buf_t *umq_ipc_dequeue_impl(uint64_t umqh_tp)
     umq_buf_t *polled_buf = umq_shm_qbuf_dequeue(tp->umqh, umqh_tp, tp->bind_ctx->qbuf_pool_handle,
         &rendezvous, dequeue_data);
     if (polled_buf == NULL) {
-        UMQ_LIMIT_VLOG_ERR("umq_shm_qbuf_dequeue return nothing\n");
+        UMQ_LIMIT_VLOG_DEBUG("umq_shm_qbuf_dequeue return nothing\n");
     }
 
     return polled_buf;
@@ -623,11 +623,12 @@ static ALWAYS_INLINE int futex_wake(atomic_int *addr, int n)
 void umq_ipc_notify_impl(uint64_t umqh_tp)
 {
     umq_ipc_info_t *tp = (umq_ipc_info_t *)(uintptr_t)umqh_tp;
-    // notify peer that some events triggered
     if (tp->queue_mode != UMQ_MODE_INTERRUPT) {
         UMQ_LIMIT_VLOG_ERR("queue mode is not interrupt\n");
         return;
     }
+
+    // notify peer that some events triggered
     atomic_store(&tp->local_msg_ring->shm_tx_ring_hdr->cq_event_flag, 1);
     atomic_fetch_add(&tp->local_msg_ring->shm_tx_ring_hdr->pending_events, 1);
     futex_wake(&tp->local_msg_ring->shm_tx_ring_hdr->cq_event_flag, 1);
@@ -644,13 +645,8 @@ int umq_ipc_rearm_interrupt_impl(uint64_t umqh_tp, bool solicated, umq_interrupt
     umq_ipc_info_t *tp = (umq_ipc_info_t *)(uintptr_t)umqh_tp;
     if (tp->queue_mode != UMQ_MODE_INTERRUPT) {
         UMQ_LIMIT_VLOG_ERR("queue mode is not interrupt\n");
-        return -UMQ_ERR_EINVAL;
+        return UMQ_FAIL;
     }
-    shm_ring_hdr_t *hdr = option->direction == UMQ_IO_TX ? tp->local_msg_ring->shm_tx_ring_hdr :
-        tp->local_msg_ring->shm_rx_ring_hdr;
-
-    // clear cq_event_flag
-    atomic_store(&hdr->cq_event_flag, 0);
     return UMQ_SUCCESS;
 }
 

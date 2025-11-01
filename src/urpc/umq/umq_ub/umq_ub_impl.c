@@ -11,7 +11,6 @@
 #include <sys/queue.h>
 #include <malloc.h>
 
-#include "dfx.h"
 #include "perf.h"
 #include "urpc_util.h"
 #include "urpc_list.h"
@@ -190,7 +189,7 @@ typedef struct umq_ub_bind_info {
     urma_jetty_grp_policy_t policy;
     urma_jetty_id_t jetty_id;
     urma_target_type_t type;
-    uint8_t order_type;
+    urma_order_type_t order_type;
     urma_token_t token;
     urma_target_seg_t tseg;
     uint64_t notify_buf;
@@ -224,7 +223,7 @@ static int huge_qbuf_pool_memory_init(uint8_t mempool_id, enum HUGE_QBUF_POOL_SI
 {
     uint32_t total_len = (type == HUGE_QBUF_POOL_SIZE_TYPE_SMALL) ?
         HUGE_QBUF_POOL_SIZE_256K * HUGE_QBUF_BUFFER_INC_BATCH : HUGE_QBUF_POOL_SIZE_8M * HUGE_QBUF_BUFFER_INC_BATCH;
-    void *addr = (void*)memalign(UMQ_SIZE_8K, total_len);
+    void *addr = (void *)memalign(UMQ_SIZE_8K, total_len);
     if (addr == NULL) {
         UMQ_VLOG_ERR("memory alloc failed\n");
         return -UMQ_ERR_ENOMEM;
@@ -257,7 +256,7 @@ static int huge_qbuf_pool_memory_init(uint8_t mempool_id, enum HUGE_QBUF_POOL_SI
     };
     g_ub_ctx->tseg_list[mempool_id] = urma_register_seg(g_ub_ctx->urma_ctx, &seg_cfg);
     if (g_ub_ctx->tseg_list[mempool_id] == NULL) {
-        UMQ_VLOG_ERR("failed to register segment\n");
+        UMQ_VLOG_ERR("fail to register segment\n");
         free(addr);
         return -UMQ_ERR_EINVAL;
     }
@@ -323,35 +322,22 @@ void umq_ub_huge_qbuf_pool_uninit(void)
 
 static ALWAYS_INLINE urma_opcode_t transform_op_code(umq_opcode_t opcode)
 {
-    switch (opcode) {
-        case UMQ_OPC_WRITE:
-            return URMA_OPC_WRITE;
-        case UMQ_OPC_WRITE_IMM:
-            return URMA_OPC_WRITE_IMM;
-        case UMQ_OPC_READ:
-            return URMA_OPC_READ;
-        case UMQ_OPC_SEND:
-            return URMA_OPC_SEND;
-        case UMQ_OPC_SEND_IMM:
-            return URMA_OPC_SEND_IMM;
-        default:
-            return URMA_OPC_SEND;
-    }
     static const urma_opcode_t opcode_map[UMQ_OPC_LAST] = {
-        [UMQ_OPC_WRITE] = URMA_OPC_WRITE,
+        [UMQ_OPC_WRITE]     = URMA_OPC_WRITE,
         [UMQ_OPC_WRITE_IMM] = URMA_OPC_WRITE_IMM,
-        [UMQ_OPC_READ] = URMA_OPC_READ,
-        [UMQ_OPC_SEND] = URMA_OPC_SEND,
-        [UMQ_OPC_SEND_IMM] = URMA_OPC_SEND_IMM,
+        [UMQ_OPC_READ]      = URMA_OPC_READ,
+        [UMQ_OPC_SEND]      = URMA_OPC_SEND,
+        [UMQ_OPC_SEND_IMM]  = URMA_OPC_SEND_IMM,
     };
+
     uint32_t opcode_index = (uint32_t)opcode;
-    if (opcode_index <UMQ_OPC_LAST) {
-        urma_opcode_t code =opcode_map[opcode_index];
-        if(code ==0 &&(opcode_index !=UMQ_OPC_WRITE)) {
+    if (opcode_index < UMQ_OPC_LAST) {
+        urma_opcode_t code = opcode_map[opcode_index];
+        if (code == 0 && (opcode_index != UMQ_OPC_WRITE)) {
             return URMA_OPC_SEND;
         }
         return code;
-    } 
+    }
     return URMA_OPC_SEND;
 }
 
@@ -457,7 +443,7 @@ static int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf
             goto PUT_CUR_RX_CTX;
         }
 
-        wr_last_buf->qbuf_next = NULL; // last buffer of current wr
+        wr_last_buf->qbuf_next = NULL;  // last buffer of current wr
         recv_wr_ptr->src.sge = sges[wr_index];
         recv_wr_ptr->src.num_sge = sge_num;
         recv_wr_ptr->user_ctx = user_ctx;
@@ -481,7 +467,6 @@ static int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf
         }
         // if fails, add chain of qbuf back for rx
         process_bad_wr(queue, bad_wr, NULL);
-        umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
         return -UMQ_ERR_EAGAIN;
     }
     umq_perf_record_write_with_feature(UMQ_PERF_RECORD_TRANSPORT_POST_RECV, start_timestamp, queue->dev_ctx->feature);
@@ -495,7 +480,6 @@ PUT_CUR_RX_CTX:
 PUT_ALL_RX_CTX:
     // put rx buf in recv wr
     if (wr_index > 0) {
-        umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
         *bad_qbuf = ((rx_buf_ctx_t *)(uintptr_t)recv_wr->user_ctx)->buffer;
         process_bad_wr(queue, recv_wr, buffer);
     } else {
@@ -504,7 +488,7 @@ PUT_ALL_RX_CTX:
     return UMQ_FAIL;
 }
 
-static int umq_ub_post_rx(uint64_t umqh,umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
+static int umq_ub_post_rx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
 {
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
     umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
@@ -1185,7 +1169,7 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
 
     if (queue->bind_ctx != NULL) {
         UMQ_VLOG_ERR("umqh[%lu] has not been unbinded", umqh);
-        return -UMQ_ERR_EINVAL;
+        return -UMQ_ERR_ENODEV;
     }
     pthread_mutex_destroy(&queue->imported_tseg_list_mutex);
     umq_buf_free(queue->notify_buf);
@@ -1288,11 +1272,11 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
         UMQ_LIMIT_VLOG_ERR("umq malloc failed\n");
         return -UMQ_ERR_ENOMEM;
     }
-    // In the tx direction. user_ctx need to initialize reverse_pill_done
+    // In the tx direction, user_ctx needs to initialize imm data ub_plus type
     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)send_buf->qbuf_ext;
     umq_ub_imm_t imm_temp = {
         .ub_plus = {.umq_private = UMQ_UB_IMM_PRIVATE, .type = IMM_TYPE_UB_PLUS, .sub_type = IMM_TYPE_UB_PLUS_DEFAULT}};
-    buf_pro->imm_data =imm_temp.value;
+    buf_pro->imm_data = imm_temp.value;
     uint16_t msg_id = util_id_allocator_get(&g_umq_ub_id_allocator);
     queue->addr_list[msg_id] = (uint64_t)(uintptr_t)(*buffer);
 
@@ -1339,11 +1323,11 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
     sge.len = sizeof(umq_imm_head_t) +
         buf_index * sizeof(ub_ref_sge_t) + umq_imm_head->mempool_num * sizeof(ub_import_mempool_info_t);
     sge.tseg = queue->dev_ctx->tseg_list[send_buf->mempool_id];
-    umq_ub_imm_t imm = { .ub_plus = {.umq_private = UMQ_UB_IMM_PRIVATE,
-                                     .type = IMM_TYPE_UB_PLUS,
-                                     .sub_type = IMM_TYPE_REVERSE_PULL_MEM,
-                                     .msg_id = msg_id,
-                                     .msg_num = (uint16_t)buf_index} };
+    umq_ub_imm_t imm = {.ub_plus = {.umq_private = UMQ_UB_IMM_PRIVATE,
+                                    .type = IMM_TYPE_UB_PLUS,
+                                    .sub_type = IMM_TYPE_REVERSE_PULL_MEM,
+                                    .msg_id = msg_id,
+                                    .msg_num = (uint16_t)buf_index}};
     int ret = umq_ub_send_imm(queue, imm.value, &sge, user_ctx);
     if (ret != UMQ_SUCCESS) {
         umq_buf_free(send_buf);
@@ -1432,17 +1416,10 @@ int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicated, umq_interrupt_option_t *
         return -UMQ_ERR_EINVAL;
     }
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
-    if (option->direction == UMQ_IO_RX && urma_rearm_jfc(queue->jfr_jfc, solicated) != URMA_SUCCESS) {
-        UMQ_LIMIT_VLOG_ERR("rearm jfr jfc failed\n");
-        return UMQ_FAIL;
-    } else if (option->direction == UMQ_IO_TX && urma_rearm_jfc(queue->jfs_jfc, solicated) != URMA_SUCCESS) {
-        UMQ_LIMIT_VLOG_ERR("rearm jfs jfc failed\n");
-        return UMQ_FAIL;
-    }
-    urma_jfc_t *jfc = option->direction == UMQ_IO_RX? queue->jfr_jfc: queue->jfs_jfc;
+    urma_jfc_t *jfc = option->direction == UMQ_IO_RX ? queue->jfr_jfc : queue->jfs_jfc;
     urma_status_t status = urma_rearm_jfc(jfc, solicated);
     if (status != URMA_SUCCESS) {
-        UMQ_LIMIT_VLOG_ERR("rearm jfc failed\n");
+        UMQ_VLOG_ERR("rearm jfc failed\n");
         return -status;
     }
 
@@ -1492,6 +1469,7 @@ static int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
             sges_ptr->user_tseg = NULL;
             sges_ptr->tseg = tseg_list[buffer->mempool_id];
             sges_ptr++;
+
             if (rest_size < buffer->data_size) { // if cannot add up to total_size, return fail
                 UMQ_LIMIT_VLOG_ERR("cannot put together tx buffer, rest size is negative\n");
                 umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
@@ -1543,7 +1521,6 @@ static int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
         UMQ_LIMIT_VLOG_ERR("urma_post_jetty_send_wr failed, status %d\n", status);
         return -status;
     }
-
     umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
     return UMQ_SUCCESS;
 }
@@ -1576,8 +1553,8 @@ static umq_buf_t *umq_ub_read_ctx_create(
         return NULL;
     }
     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)ctx_buf->qbuf_ext;
-    umq_ub_imm_t imm_temp = {.ub_plus = {.umq_private = UMQ_UB_IMM_PRIVATE, 
-                                         .type = IMM_TYPE_UB_PLUS, 
+    umq_ub_imm_t imm_temp = {.ub_plus = {.umq_private = UMQ_UB_IMM_PRIVATE,
+                                         .type = IMM_TYPE_UB_PLUS,
                                          .sub_type = IMM_TYPE_REVERSE_PULL_MEM_DONE}};
     buf_pro->imm_data = imm_temp.value;
     user_ctx_t *user_ctx = (user_ctx_t *)ctx_buf->buf_data;
@@ -1720,8 +1697,8 @@ FREE_CTX_BUF:
 
 static int umq_ub_read_done(ub_queue_t *queue, uint16_t msg_id)
 {
-    umq_ub_imm_t imm = {.ub_plus = {.umq_private = UMQ_UB_IMM_PRIVATE, 
-                                    .type = IMM_TYPE_UB_PLUS, 
+    umq_ub_imm_t imm = {.ub_plus = {.umq_private = UMQ_UB_IMM_PRIVATE,
+                                    .type = IMM_TYPE_UB_PLUS,
                                     .sub_type = IMM_TYPE_REVERSE_PULL_MEM_FREE,
                                     .msg_id = msg_id}};
 
@@ -1781,7 +1758,7 @@ static int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
     pthread_mutex_lock(&queue->imported_tseg_list_mutex);
     ub_import_mempool_info_t *import_mempool_info = (ub_import_mempool_info_t *)
-             (rx_buf->buf_data + sizeof(umq_imm_head_t) + msg_num * sizeof(ub_ref_sge_t));
+            (rx_buf->buf_data + sizeof(umq_imm_head_t) + msg_num * sizeof(ub_ref_sge_t));
     for (uint32_t i = 0; i < umq_imm_head->mempool_num; i++) {
         if (queue->imported_tseg_list[import_mempool_info[i].mempool_id] != NULL) {
             UMQ_LIMIT_VLOG_INFO("mempool %u has been imported\n", import_mempool_info[i].mempool_id);
@@ -1820,11 +1797,11 @@ static int process_send_imm(umq_buf_t *rx_buf, umq_ub_imm_t imm, uint64_t umqh)
     if (imm.bs.umq_private == 0) {
         umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)rx_buf->qbuf_ext;
         buf_pro->imm_data = imm.value;
-         return UMQ_SUCCESS;
+        return UMQ_SUCCESS;
     }
     if (imm.bs.type != IMM_TYPE_UB_PLUS) {
         return ret;
-    } 
+    }
     if (imm.ub_plus.sub_type == IMM_TYPE_REVERSE_PULL_MEM) {
         if (umq_ub_data_plan_import_mem(umqh, rx_buf, imm.ub_plus.msg_num) != UMQ_SUCCESS) {
             UMQ_LIMIT_VLOG_ERR("import mem failed\n");
@@ -1872,12 +1849,16 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue)
     switch (cr->opcode) {
         case URMA_CR_OPC_WRITE_WITH_IMM: {
             if ((queue->dev_ctx->feature & UMQ_FEATURE_API_PRO) == 0) {
-                umq_buf_t *write_qbuf =umq_get_buf_by_user_ctx(queue, cr->user_ctx);
-                umq_buf_t *bad_buf = NULL;
-                if (umq_ub_post_rx_inner_impl(queue, write_qbuf, &bad_buf) != UMQ_SUCCESS) {
+                /* on condition of base feature, write imm is used for ubmm event notify,
+                 * and it counsumes one rqe, so fill rx buffer here.
+                 * on condition of pro feature, report it to user.
+                */
+                umq_buf_t *write_qbuf = umq_get_buf_by_user_ctx(queue, cr->user_ctx);
+                umq_buf_t *bad_qbuf = NULL;
+                if (umq_ub_post_rx_inner_impl(queue, write_qbuf, &bad_qbuf) != UMQ_SUCCESS) {
                     UMQ_LIMIT_VLOG_ERR("ub post rx failed\n");
                     umq_buf_free(write_qbuf);
-                } 
+                }
                 ret = UMQ_CONTINUE_FLAG;
             } else {
                 ret = UMQ_SUCCESS;
@@ -1988,7 +1969,6 @@ static int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
                 continue;
             }
         }
-        
 
         if (cr[i].user_ctx == 0) {
             continue;
@@ -2093,7 +2073,7 @@ int umq_ub_unbind_impl(uint64_t umqh)
     return UMQ_SUCCESS;
 }
 
-static void umq_ub_enqueue_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf) 
+static void umq_ub_enqueue_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
 {
     urma_cr_t cr[UMQ_POST_POLL_BATCH];
     int tx_cr_cnt = urma_poll_jfc(queue->jfs_jfc, UMQ_POST_POLL_BATCH, cr);
@@ -2116,7 +2096,7 @@ static void umq_ub_enqueue_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
                 continue;
             }
         }
-        
+
         if (cr[i].user_ctx == 0) {
             continue;
         }
@@ -2134,12 +2114,10 @@ static void umq_ub_enqueue_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
         umq_buf_free(buf[qbuf_cnt]);
         ++qbuf_cnt;
     }
-
     umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, qbuf_cnt);
 }
 
-
-static void umq_ub_enqueue_plus_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf) 
+static void umq_ub_enqueue_plus_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
 {
     urma_cr_t cr[UMQ_POST_POLL_BATCH];
     int tx_cr_cnt = urma_poll_jfc(queue->jfs_jfc, UMQ_POST_POLL_BATCH, cr);
@@ -2162,9 +2140,9 @@ static void umq_ub_enqueue_plus_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
                 continue;
             }
         }
-        
+
         if (cr[i].user_ctx == 0) {
-            if (cr[i].opcode ==URMA_CR_OPC_SEND_WITH_IMM) {
+            if (cr[i].opcode == URMA_CR_OPC_SEND_WITH_IMM) {
                 umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, 1);
             }
             continue;
@@ -2191,7 +2169,7 @@ static void umq_ub_enqueue_plus_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
                 umq_buf_free(tmp);
             }
             continue;
-        }  
+        }
         umq_buf_t *tmp_buf = buf[qbuf_cnt];
         uint32_t rest_data_size = tmp_buf->total_data_size;
         while (tmp_buf && rest_data_size > 0) {
@@ -2206,11 +2184,12 @@ static void umq_ub_enqueue_plus_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
         ++qbuf_cnt;
     }
 }
+
 static void process_bad_qbuf(urma_jfs_wr_t *bad_wr, umq_buf_t **bad_qbuf, umq_buf_t *qbuf, ub_queue_t *queue)
 {
     *bad_qbuf = (umq_buf_t *)(uintptr_t)bad_wr->user_ctx;
     umq_buf_t *tmp_qbuf = qbuf;
-    uint32_t count =0;
+    uint32_t count = 0;
     umq_buf_t *previous = NULL;
     while (tmp_qbuf != NULL && tmp_qbuf != *bad_qbuf) {
         count++;
@@ -2218,6 +2197,7 @@ static void process_bad_qbuf(urma_jfs_wr_t *bad_wr, umq_buf_t **bad_qbuf, umq_bu
         tmp_qbuf = tmp_qbuf->qbuf_next;
     }
     if (previous) {
+        // break chain of succeed qbuf and failed qbuf on tx
         previous->qbuf_next = NULL;
     }
     umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, count);
@@ -2226,7 +2206,7 @@ static void process_bad_qbuf(urma_jfs_wr_t *bad_wr, umq_buf_t **bad_qbuf, umq_bu
 int32_t umq_ub_enqueue_impl(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
 {
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
-    umq_buf_t *buf[UMQ_POST_POLL_BATCH] = {0};
+    umq_buf_t *buf[UMQ_POST_POLL_BATCH];
     umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
     umq_ub_enqueue_with_poll_tx(queue, buf);
     if (queue->bind_ctx == NULL) {
@@ -2245,6 +2225,7 @@ int32_t umq_ub_enqueue_impl(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_q
     uint32_t wr_index = 0;
     *bad_qbuf = NULL;
     urma_target_seg_t **tseg_list = queue->dev_ctx->tseg_list;
+
     uint32_t tx_outstanding = umq_fetch_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding);
     if (queue->tx_depth - tx_outstanding < UMQ_POST_POLL_BATCH) {
         return -EAGAIN;
@@ -2258,6 +2239,7 @@ int32_t umq_ub_enqueue_impl(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_q
             buf_pro->flag.bs.inline_flag = UMQ_INLINE_ENABLE;
         }
         buf_pro->opcode = UMQ_OPC_SEND;
+
         uint32_t rest_size = buffer->total_data_size;
         if (rest_size > queue->tx_buf_size) {
             UMQ_LIMIT_VLOG_ERR("total data size[%u] exceed max tx size[%u]\n", rest_size, queue->tx_buf_size);
@@ -2280,6 +2262,7 @@ int32_t umq_ub_enqueue_impl(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_q
             sges_ptr->user_tseg = NULL;
             sges_ptr->tseg = tseg_list[buffer->mempool_id];
             sges_ptr++;
+
             if (rest_size < buffer->data_size) { // if cannot add up to total_size, return fail
                 UMQ_LIMIT_VLOG_ERR("cannot put together tx buffer, rest size is negative\n");
                 umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
@@ -2304,9 +2287,6 @@ int32_t umq_ub_enqueue_impl(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_q
         urma_wr_ptr->opcode = URMA_OPC_SEND;
         urma_wr_ptr->flag.value = buf_pro->flag.value;
         urma_wr_ptr->tjetty = tjetty;
-        if (urma_wr_ptr->opcode == URMA_OPC_SEND_IMM) {
-            urma_wr_ptr->send.imm_data = buf_pro->imm_data;
-        }
         urma_wr_ptr++;
         (urma_wr_ptr - 1)->next = urma_wr_ptr;
 
@@ -2338,9 +2318,9 @@ int32_t umq_ub_enqueue_impl(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_q
     return UMQ_SUCCESS;
 }
 
-int umq_ub_enqueue_impl_plus(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
+int32_t umq_ub_enqueue_impl_plus(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
 {
-    umq_buf_t *buf[UMQ_POST_POLL_BATCH] = {0};
+    umq_buf_t *buf[UMQ_POST_POLL_BATCH];
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
     umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
     umq_ub_enqueue_plus_with_poll_tx(queue, buf);
@@ -2360,6 +2340,7 @@ int umq_ub_enqueue_impl_plus(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_
     uint32_t wr_index = 0;
     *bad_qbuf = NULL;
     urma_target_seg_t **tseg_list = queue->dev_ctx->tseg_list;
+
     uint32_t tx_outstanding = umq_fetch_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding);
     if (queue->tx_depth - tx_outstanding < UMQ_POST_POLL_BATCH) {
         return -EAGAIN;
@@ -2406,6 +2387,7 @@ int umq_ub_enqueue_impl_plus(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_
             sges_ptr->user_tseg = NULL;
             sges_ptr->tseg = tseg_list[buffer->mempool_id];
             sges_ptr++;
+
             if (rest_size < buffer->data_size) { // if cannot add up to total_size, return fail
                 UMQ_LIMIT_VLOG_ERR("cannot put together tx buffer, rest size is negative\n");
                 umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
@@ -2443,6 +2425,7 @@ int umq_ub_enqueue_impl_plus(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_
             return -UMQ_ERR_EINVAL;
         }
     }
+
     (urma_wr_ptr - 1)->next = NULL;
     urma_jfs_wr_t *bad_wr = NULL;
     uint64_t start_timestamp = umq_perf_get_start_timestamp_with_feature(queue->dev_ctx->feature);
@@ -2474,7 +2457,7 @@ static void umq_ub_fill_rx_buffer(ub_queue_t *queue, int rx_cnt)
             QBUF_LIST_INIT(&head);
             if (umq_qbuf_alloc(queue->rx_buf_size, cur_batch_count, NULL, &head) != UMQ_SUCCESS) {
                 atomic_fetch_add_explicit(&queue->require_rx_count, cur_batch_count, memory_order_relaxed);
-                UMQ_LIMIT_VLOG_ERR("alloc rx failed");
+                UMQ_LIMIT_VLOG_ERR("alloc rx failed\n");
                 break;
             }
             umq_buf_t *bad_buf = NULL;
@@ -2501,7 +2484,6 @@ static void umq_ub_merge_rx_buffer(umq_buf_t *cur_buf, umq_buf_t **previous_last
     if (*previous_last != NULL) {
         (*previous_last)->qbuf_next = tmp_buf;
     }
-
     uint32_t rest_data_size = tmp_buf->total_data_size;
     while (tmp_buf && rest_data_size > 0) {
         if (rest_data_size <= tmp_buf->data_size) {
@@ -2549,7 +2531,6 @@ static int umq_ub_dequeue_with_poll_rx(ub_queue_t *queue, urma_cr_t *cr, umq_buf
         UMQ_LIMIT_VLOG_ERR("UB RX reports rx_cr_cnt[%d]\n", rx_cr_cnt);
         return rx_cr_cnt;
     }
-
     // merge rx buffer
     umq_buf_t *previous_last = NULL;
     for (int i = 0; i < rx_cr_cnt; i++) {
@@ -2695,7 +2676,6 @@ static int umq_ub_dequeue_plus_with_poll_tx(ub_queue_t *queue, urma_cr_t *cr, um
         UMQ_LIMIT_VLOG_ERR("UB TX reports tx_cr_cnt[%d]\n", tx_cr_cnt);
         return return_rx_cnt;
     }
-
     int qbuf_cnt = 0;
     for (int i = 0; i < tx_cr_cnt; i++) {
         if (cr[i].status != URMA_CR_SUCCESS) {
@@ -2711,7 +2691,7 @@ static int umq_ub_dequeue_plus_with_poll_tx(ub_queue_t *queue, urma_cr_t *cr, um
             }
         }
         if (cr[i].user_ctx == 0) {
-            if (cr[i].opcode ==URMA_CR_OPC_SEND_WITH_IMM) {
+            if (cr[i].opcode == URMA_CR_OPC_SEND_WITH_IMM) {
                 umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, 1);
             }
             continue;
@@ -2759,7 +2739,7 @@ umq_buf_t *umq_ub_dequeue_impl_plus(uint64_t umqh_tp)
     if (rx_cnt < 0) {
         umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
         return NULL;
-    } else if (rx_cnt ==0) {
+    } else if (rx_cnt == 0) {
         return_rx_cnt = umq_ub_dequeue_plus_with_poll_tx(queue, cr, buf, rx_cnt);
         umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
         return return_rx_cnt > 0 ? buf[0] : NULL;

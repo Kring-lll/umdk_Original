@@ -540,6 +540,7 @@ urma_jetty_t *send_recv_create_jetty(
 
     jetty_cfg.flag.bs.share_jfr = true;
     jetty_cfg.shared.jfr = jfr;
+
     return urma_create_jetty(provider->urma_ctx, &jetty_cfg);
 }
 

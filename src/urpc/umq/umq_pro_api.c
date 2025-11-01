@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <dlfcn.h>
 
-#include "dfx.h"
 #include "perf.h"
 #include "umq_vlog.h"
 #include "umq_inner.h"

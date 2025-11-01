@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <errno.h>
 #include "libobmm.h"
 #include "umq_errno.h"
 #include "umq_vlog.h"
@@ -153,7 +154,6 @@ void *obmem_import_memory(obmem_import_memory_param_t *import_param, obmem_expor
         UMQ_VLOG_ERR("calloc failed\n");
         return NULL;
     }
-
     desc->addr = exp->uba;
     desc->length = exp->size;
     desc->tokenid = exp->token_id;
@@ -184,7 +184,7 @@ void *obmem_import_memory(obmem_import_memory_param_t *import_param, obmem_expor
     ptr = mmap(NULL, desc->length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (ptr == MAP_FAILED) {
         (void)close(fd);
-        UMQ_VLOG_ERR("mmap failed, len: %lu errno: %d.\n", desc->len, errno);
+        UMQ_VLOG_ERR("mmap failed, len: %lu errno: %d.\n", desc->length, errno);
         goto UNIMPORT_OBMM;
     }
 

@@ -28,7 +28,7 @@ static uint8_t *umq_tp_ub_plus_init(umq_init_cfg_t *cfg, void *addr, uint64_t le
     }
 
     if (umq_ub_huge_qbuf_pool_init(cfg) != UMQ_SUCCESS) {
-        UMQ_VLOG_ERR("init huge qbuf pool configuration faiiled\n");
+        UMQ_VLOG_ERR("init huge qbuf pool configuration failed\n");
         goto UNINIT_MEM;
     }
 

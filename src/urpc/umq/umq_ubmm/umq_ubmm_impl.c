@@ -15,7 +15,7 @@
 #include "umq_ub_imm_data.h"
 #include "umq_ubmm_impl.h"
 
-#define UMQ_MAX_TSGE_NUM 255
+#define UMQ_MAX_TSEG_NUM 255
 
 typedef struct umq_ubmm_init_ctx {
     uint8_t *ub_init_ctx;
@@ -278,7 +278,6 @@ uint64_t umq_ubmm_create_impl(uint64_t umqh, uint8_t *ubmm_ctx, umq_create_optio
     }
 
     tp->umq_id = util_id_allocator_get(&g_umq_id_allocator);
-
     qbuf_pool_cfg_t global_pool_cfg;
     umq_qbuf_config_get(&global_pool_cfg);
     // initialize shm_qbuf
@@ -637,10 +636,10 @@ static ALWAYS_INLINE umq_buf_t *umq_prepare_rendezvous_data(umq_ubmm_info_t *tp,
 
     umq_ubmm_ref_sge_info_t *ref_sge_info = (umq_ubmm_ref_sge_info_t *)(uintptr_t)send_buf->buf_data;
     umq_imm_head_t *umq_imm_head = (umq_imm_head_t *)(uintptr_t)ref_sge_info->ub_ref_info;
-    ub_ref_sge_t *ref_seg = (ub_ref_sge_t *)(uintptr_t)(umq_imm_head + 1);
+    ub_ref_sge_t *ref_sge = (ub_ref_sge_t *)(uintptr_t)(umq_imm_head + 1);
     ub_fill_umq_imm_head(umq_imm_head, qbuf);
 
-    ub_import_mempool_info_t import_mempool_info[UMQ_MAX_TSGE_NUM];
+    ub_import_mempool_info_t import_mempool_info[UMQ_MAX_TSEG_NUM];
     umq_buf_t *tmp_buf = qbuf;
     uint32_t idx = 0;
     while (tmp_buf != NULL) {
@@ -649,10 +648,11 @@ static ALWAYS_INLINE umq_buf_t *umq_prepare_rendezvous_data(umq_ubmm_info_t *tp,
             umq_buf_free(send_buf);
             return NULL;
         }
+
         ubmm_fill_big_data_ref_sge(
-            tp->ub_handle, ref_seg, tmp_buf, &import_mempool_info[umq_imm_head->mempool_num], umq_imm_head);
+            tp->ub_handle, ref_sge, tmp_buf, &import_mempool_info[umq_imm_head->mempool_num], umq_imm_head);
         tmp_buf = tmp_buf->qbuf_next;
-        ref_seg = ref_seg + 1;
+        ref_sge = ref_sge + 1;
         idx++;
     }
 
@@ -663,7 +663,7 @@ static ALWAYS_INLINE umq_buf_t *umq_prepare_rendezvous_data(umq_ubmm_info_t *tp,
             umq_buf_free(send_buf);
             return NULL;
         }
-        (void)memcpy(ref_seg,
+        (void)memcpy(ref_sge,
             import_mempool_info, sizeof(ub_import_mempool_info_t) * umq_imm_head->mempool_num);
     }
 
@@ -715,7 +715,7 @@ static ALWAYS_INLINE int dequeue_data(uint64_t umq, uint64_t *offset, uint32_t n
     // poll offset from shm, then transform to qbuf
     uint32_t polled_buf_size[num];
     int ret = msg_ring_poll_tx_batch(tp->bind_ctx->remote_msg_ring, (char **)&rx_data_ptr,
-                                     sizeof(uint64_t), polled_buf_size, num);
+        sizeof(uint64_t), polled_buf_size, num);
     if (ret < 0) {
         UMQ_LIMIT_VLOG_ERR("ipc poll rx failed\n");
         return -UMQ_ERR_EAGAIN;
