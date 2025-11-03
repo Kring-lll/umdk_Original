@@ -417,6 +417,13 @@ int umq_shm_qbuf_alloc(
 
     local_block_pool_t *lblk_pool = &local_pool->block_pool;
     global_block_pool_t *gblk_pool = &local_pool->global_pool->block_pool;
+    int32_t headroom_size = _pool->headroom_size;
+    if (option != NULL && (option->flag & UMQ_ALLOC_FLAG_HEAD_ROOM_SIZE) != 0) {
+        headroom_size = option->headroom_size;
+    }
+    uint32_t actual_buf_count = (_pool->mode == UMQ_BUF_SPLIT) ?
+        num * ((request_size + UMQ_SIZE_8K - 1 + headroom_size) >> UMQ_QBUF_SIZE_DIV_8192)
+        : num * ((request_size + UMQ_SIZE_8K - 1 + headroom_size + sizeof(umq_buf_t)) >> UMQ_QBUF_SIZE_DIV_8192);
     if (request_size == 0) {
         if (option != NULL && (option->flag & UMQ_ALLOC_FLAG_HEAD_ROOM_SIZE) && option->headroom_size > 0) {
             UMQ_VLOG_ERR("headroom_size not supported when request_size is 0\n");
@@ -429,40 +436,33 @@ int umq_shm_qbuf_alloc(
         }
 
         // fetch from global first, if thread local qbuf is not enough for allocate operation
-        while (lblk_pool->buf_cnt_without_data < num) {
+        while (lblk_pool->buf_cnt_without_data < actual_buf_count) {
             umq_shm_poll_and_fill_global(_pool);
             if (fetch_from_global(gblk_pool, lblk_pool, false, SHM_QBUF_POOL_BATCH_CNT) <= 0) {
                 return -UMQ_ERR_ENOMEM;
             }
         }
 
-        umq_qbuf_alloc_nodata(lblk_pool, num, list);
+        umq_qbuf_alloc_nodata(lblk_pool, actual_buf_count, list);
 
         return UMQ_SUCCESS;
     }
 
-    int32_t headroom_size = _pool->headroom_size;
-    if (option != NULL && (option->flag & UMQ_ALLOC_FLAG_HEAD_ROOM_SIZE) != 0) {
-        headroom_size = option->headroom_size;
-    }
-
-    uint32_t single_size = request_size + headroom_size + (_pool->mode == UMQ_BUF_COMBINE ? sizeof(umq_buf_t) : 0);
-    if (single_size > _pool->block_size) {
-        UMQ_VLOG_ERR("request size[%u] too large, support max size: %u\n", request_size, _pool->block_size);
-        return -UMQ_ERR_EINVAL;
-    }
-
     // fetch from global first, if thread local qbuf is not enough for allocate operation
-    while (lblk_pool->buf_cnt_with_data < num) {
+    while (lblk_pool->buf_cnt_with_data < actual_buf_count) {
         umq_shm_poll_and_fill_global(_pool);
         if (fetch_from_global(gblk_pool, lblk_pool, true, SHM_QBUF_POOL_BATCH_CNT) <= 0) {
             UMQ_VLOG_ERR("fetch from global failed, current size: %u, alloc num: %u\n",
-                lblk_pool->buf_cnt_with_data, num);
+                lblk_pool->buf_cnt_with_data, actual_buf_count);
             return -UMQ_ERR_ENOMEM;
         }
     }
 
-    umq_qbuf_alloc_data(lblk_pool, request_size, num, list, headroom_size);
+    if (_pool->mode == UMQ_BUF_SPLIT) {
+        umq_qbuf_alloc_data_with_split(lblk_pool, request_size, actual_buf_count, list, headroom_size);
+    } else {
+        umq_qbuf_alloc_data_with_combine(lblk_pool, request_size, actual_buf_count, list, headroom_size);
+    }
 
     return UMQ_SUCCESS;
 }

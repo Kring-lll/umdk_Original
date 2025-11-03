@@ -101,7 +101,7 @@ int umq_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
 
     if (cfg->mode == UMQ_BUF_SPLIT) {
         QBUF_LIST_INIT(&g_qbuf_pool.block_pool.head_without_data);
-        uint32_t blk_size = round_up(cfg->data_size + cfg->headroom_size, UMQ_SIZE_8K);
+        uint32_t blk_size = UMQ_SIZE_8K;
         uint32_t blk_num = cfg->total_size /
             ((UMQ_EMPTY_HEADER_COEFFICIENT + 1) * (uint32_t)sizeof(umq_buf_t) + blk_size);
 
@@ -143,7 +143,7 @@ int umq_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
         g_qbuf_pool.block_pool.buf_cnt_with_data = blk_num;
         g_qbuf_pool.block_pool.buf_cnt_without_data = head_without_data_count;
     } else if (cfg->mode == UMQ_BUF_COMBINE) {
-        uint32_t blk_size = round_up(cfg->data_size + cfg->headroom_size + sizeof(umq_buf_t), UMQ_SIZE_8K);
+        uint32_t blk_size = UMQ_SIZE_8K;
         uint32_t blk_num = cfg->total_size / blk_size;
 
         g_qbuf_pool.data_buffer = cfg->buf_addr;
@@ -194,7 +194,14 @@ int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *opti
     }
 
     local_block_pool_t *local_pool = get_thread_cache();
+    uint32_t headroom_size = g_qbuf_pool.headroom_size;
+    if (option != NULL && (option->flag & UMQ_ALLOC_FLAG_HEAD_ROOM_SIZE) != 0) {
+        headroom_size = option->headroom_size;
+    }
 
+    uint32_t actual_buf_count = (g_qbuf_pool.mode == UMQ_BUF_SPLIT) ?
+        num * ((request_size + UMQ_SIZE_8K - 1 + headroom_size) >> UMQ_QBUF_SIZE_DIV_8192)
+        : num * ((request_size + UMQ_SIZE_8K - 1 + headroom_size + sizeof(umq_buf_t)) >> UMQ_QBUF_SIZE_DIV_8192);
     if (request_size == 0) {
         if (option != NULL && (option->flag & UMQ_ALLOC_FLAG_HEAD_ROOM_SIZE) && option->headroom_size > 0) {
             UMQ_VLOG_ERR("headroom_size not supported when request_size is 0\n");
@@ -206,38 +213,30 @@ int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *opti
             return -UMQ_ERR_ENOMEM;
         }
 
-        while (local_pool->buf_cnt_without_data < num) {
+        while (local_pool->buf_cnt_without_data < actual_buf_count) {
             if (fetch_from_global(&g_qbuf_pool.block_pool, local_pool, false, QBUF_POOL_BATCH_CNT) <= 0) {
                 return -UMQ_ERR_ENOMEM;
             }
         }
 
-        umq_qbuf_alloc_nodata(local_pool, num, list);
+        umq_qbuf_alloc_nodata(local_pool, actual_buf_count, list);
 
         return 0;
     }
 
-    uint32_t headroom_size = g_qbuf_pool.headroom_size;
-    if (option != NULL && (option->flag & UMQ_ALLOC_FLAG_HEAD_ROOM_SIZE) != 0) {
-        headroom_size = option->headroom_size;
-    }
-
-    uint64_t single_size = request_size + headroom_size + (g_qbuf_pool.mode == UMQ_BUF_COMBINE ? sizeof(umq_buf_t) : 0);
-    if (single_size > g_qbuf_pool.block_size) {
-        UMQ_VLOG_ERR("request size[%u] too large, support max size: %u\n", request_size, g_qbuf_pool.block_size);
-        return -UMQ_ERR_EINVAL;
-    }
-
-    while (local_pool->buf_cnt_with_data < num) {
+    while (local_pool->buf_cnt_with_data < actual_buf_count) {
         if (fetch_from_global(&g_qbuf_pool.block_pool, local_pool, true, QBUF_POOL_BATCH_CNT) <= 0) {
             UMQ_VLOG_ERR("fetch from global failed, current size: %u, alloc num: %u\n",
-                         local_pool->buf_cnt_with_data, num);
+                         local_pool->buf_cnt_with_data, actual_buf_count);
             return -UMQ_ERR_ENOMEM;
         }
     }
 
-    umq_qbuf_alloc_data(local_pool, request_size, num, list, headroom_size);
-
+    if (g_qbuf_pool.mode == UMQ_BUF_SPLIT) {
+        umq_qbuf_alloc_data_with_split(local_pool, request_size, actual_buf_count, list, headroom_size);
+    } else {
+        umq_qbuf_alloc_data_with_combine(local_pool, request_size, actual_buf_count, list, headroom_size);
+    }
     return UMQ_SUCCESS;
 }
 
