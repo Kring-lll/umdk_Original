@@ -58,7 +58,7 @@ static void umq_perftest_server_run_qps_base_interrupt(uint64_t umqh, umq_perfte
     uint64_t start_cycle = get_cycles();
     double cycles_to_units = get_cpu_mhz(false);
     while (!is_perftest_force_quit() && (get_cycles() - start_cycle) / cycles_to_units < ITER_MAX_WAIT_TIME_US) {
-        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) < 1) {
+        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) != 1) {
             LOG_PRINT("umq_wait_interrupt failed\n");
             continue;
         }
@@ -196,7 +196,7 @@ static void umq_perftest_server_run_qps_pro_interrupt(uint64_t umqh, umq_perftes
     uint64_t start_cycle = get_cycles();
     double cycles_to_units = get_cpu_mhz(false);
     while (!is_perftest_force_quit() && (get_cycles() - start_cycle) / cycles_to_units < ITER_MAX_WAIT_TIME_US) {
-        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) < 1) {
+        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) != 1) {
             LOG_PRINT("umq_wait_interrupt failed\n");
             return;
         }
@@ -328,7 +328,7 @@ static void umq_perftest_client_run_qps_pro_interrupt(uint64_t umqh, umq_perftes
             umq_notify(umqh);
         }
 
-        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) < 1) {
+        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) != 1) {
             LOG_PRINT("umq_wait_interrupt failed\n");
             goto ERROR;
         }

@@ -2742,11 +2742,10 @@ umq_buf_t *umq_ub_dequeue_impl_plus(uint64_t umqh_tp)
         return_rx_cnt = umq_ub_dequeue_plus_with_poll_tx(queue, cr, buf, rx_cnt);
         umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
         return return_rx_cnt > 0 ? buf[0] : NULL;
-    } else {
-        return_rx_cnt = umq_ub_dequeue_plus_with_poll_tx(queue, cr, buf, rx_cnt);
-        umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
-        return buf[0];
     }
+    return_rx_cnt = umq_ub_dequeue_plus_with_poll_tx(queue, cr, buf, rx_cnt);
+    umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
+    return buf[0];
 }
 
 int umq_ub_write_imm(uint64_t umqh_tp, uint64_t target_addr, uint32_t len, uint64_t imm_value)

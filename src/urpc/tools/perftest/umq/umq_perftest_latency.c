@@ -66,7 +66,7 @@ static void umq_perftest_server_run_latency_base_interrupt(uint64_t umqh, umq_pe
         goto FINISH;
     }
     while (g_perftest_latency_ctx.iters < test_round && !is_perftest_force_quit()) {
-        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) < 1) {
+        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) != 1) {
             LOG_PRINT("umq_wait_interrupt failed\n");
             goto FINISH;
         }
@@ -205,7 +205,7 @@ static void umq_perftest_client_run_latency_base_interrupt(uint64_t umqh, umq_pe
         umq_notify(umqh);
 
         // recv return
-        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) < 1) {
+        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) != 1) {
             LOG_PRINT("umq_wait_interrupt failed\n");
             goto FINISH;
         }
@@ -413,7 +413,7 @@ static void umq_perftest_server_run_latency_pro_interrupt(uint64_t umqh, umq_per
     int ret = 0;
     while (g_perftest_latency_ctx.iters < test_round && !is_perftest_force_quit()) {
         // recv req, release rx
-        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) < 1) {
+        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) != 1) {
             LOG_PRINT("umq_wait_interrupt failed\n");
             goto FINISH;
         }
@@ -455,7 +455,7 @@ static void umq_perftest_server_run_latency_pro_interrupt(uint64_t umqh, umq_per
         }
         umq_notify(umqh);
 
-        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &tx_interrupt_option) < 1) {
+        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &tx_interrupt_option) != 1) {
             LOG_PRINT("umq_wait_interrupt failed\n");
             goto FINISH;
         }
@@ -629,7 +629,7 @@ static void umq_perftest_client_run_latency_pro_interrupt(uint64_t umqh, umq_per
         umq_notify(umqh);
 
         // poll tx cqe. tx buffer reuse, no release
-        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &tx_interrupt_option) < 1) {
+        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &tx_interrupt_option) != 1) {
             LOG_PRINT("umq_wait_interrupt failed\n");
             goto FINISH;
         }
@@ -647,7 +647,7 @@ static void umq_perftest_client_run_latency_pro_interrupt(uint64_t umqh, umq_per
         } while (ret == 0);
 
         // recv return, release rx
-        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) < 1) {
+        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) != 1) {
             LOG_PRINT("umq_wait_interrupt failed\n");
             goto FINISH;
         }
