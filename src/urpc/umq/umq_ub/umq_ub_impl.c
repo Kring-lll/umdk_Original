@@ -42,7 +42,6 @@
 #define UMQ_INLINE_ENABLE 1
 #define UMQ_UB_RW_SEGMENT_LEN 64 // ub_queue read/write buf splited 64B for each module, such as mem import/flow control
 #define UMQ_UB_FLOW_CONTROL_NOTIFY_THR 4
-#define UMQ_DATA_LIMIT_SIZE (8 * 1024) // 8KB
 
 typedef enum umq_ub_rw_segment_offset {
     OFFSET_MEM_IMPORT = 0,
@@ -247,12 +246,14 @@ typedef struct umq_ub_bind_info {
     uint32_t win_buf_len;
     uint32_t rx_depth;
     uint32_t tx_depth;
+    uint32_t rx_buf_szie;
 } umq_ub_bind_info_t;
 
 typedef struct ub_bind_ctx {
     umq_ub_bind_info_t bind_info;
     urma_target_jetty_t *tjetty;
     uint64_t remote_notify_addr;
+    uint32_t remote_rx_buf_size;
 } ub_bind_ctx_t;
 
 static umq_ub_ctx_t *g_ub_ctx = NULL;
@@ -775,6 +776,7 @@ int umq_ub_bind_info_get_impl(uint64_t umqh, uint8_t *bind_info, uint32_t bind_i
     info->notify_buf = umq_ub_notify_buf_addr_get(queue, OFFSET_MEM_IMPORT);
     info->rx_depth = queue->rx_depth;
     info->tx_depth = queue->tx_depth;
+    info->rx_buf_szie = queue->rx_buf_size;
     info->win_buf_addr = queue->flow_control.enabled ? umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL) : 0;
     info->win_buf_len = queue->flow_control.enabled ? UMQ_UB_RW_SEGMENT_LEN : 0;
     (void)memcpy(&info->tseg, queue->dev_ctx->tseg_list[UMQ_QBUF_DEFAULT_MEMPOOL_ID], sizeof(urma_target_seg_t));
@@ -1080,6 +1082,7 @@ static int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
     }
 
     ctx->tjetty = tjetty;
+    ctx->remote_rx_buf_size = info->rx_buf_szie;
     queue->bind_ctx = ctx;
     return UMQ_SUCCESS;
 
@@ -3117,6 +3120,7 @@ int32_t umq_ub_enqueue_impl_plus(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **
     umq_ub_enqueue_plus_with_poll_tx(queue, buf);
 
     uint32_t max_sge_num = queue->max_tx_sge;
+    uint32_t remote_rx_buf_size = queue->bind_ctx->remote_rx_buf_size;
     urma_jfs_wr_t urma_wr[UMQ_POST_POLL_BATCH];
     urma_jfs_wr_t *urma_wr_ptr = urma_wr;
     urma_sge_t sges[UMQ_POST_POLL_BATCH][max_sge_num];
@@ -3140,7 +3144,7 @@ int32_t umq_ub_enqueue_impl_plus(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **
         buf_pro->flag.bs.solicited_enable = 1;
         buf_pro->opcode = UMQ_OPC_SEND_IMM;
         uint32_t rest_size = buffer->total_data_size;
-        if (buffer->total_data_size >= UMQ_DATA_LIMIT_SIZE) {
+        if (rest_size > remote_rx_buf_size || rest_size > queue->tx_buf_size) {
             if (umq_ub_send_big_data(queue, &buffer) != UMQ_SUCCESS) {
                 UMQ_LIMIT_VLOG_ERR("send big data failed\n");
                 *bad_qbuf = qbuf;
@@ -3155,12 +3159,7 @@ int32_t umq_ub_enqueue_impl_plus(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **
             umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
             return UMQ_SUCCESS;
         }
-        if (rest_size > queue->tx_buf_size) {
-            UMQ_LIMIT_VLOG_ERR("total data size[%u] exceed max tx size[%u]\n", rest_size, queue->tx_buf_size);
-            *bad_qbuf = qbuf;
-            ret = -UMQ_ERR_EINVAL;
-            goto ERROR;
-        }
+
         sges_ptr = sges[wr_index];
         uint32_t sge_num = 0;
         uint64_t user_ctx = (uint64_t)(uintptr_t)buffer;
@@ -3617,4 +3616,11 @@ void umq_ub_remove_rendezvous_buf(uint64_t umqh_tp, uint16_t msg_id)
 util_id_allocator_t *umq_ub_get_msg_id_generator(uint64_t umqh_tp)
 {
     return &g_umq_ub_id_allocator;
+}
+
+bool umq_ub_need_read(uint64_t umqh_tp, uint32_t total_data_size)
+{
+    ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
+    // if toral data size exceed remote rx buf size or local tx buf size need read
+    return total_data_size > queue->bind_ctx->remote_rx_buf_size || total_data_size > queue->tx_buf_size;
 }

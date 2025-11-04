@@ -168,8 +168,8 @@ static int umq_perftest_create_umqh(umq_perftest_config_t *cfg)
         .trans_mode = (umq_trans_mode_t)cfg->trans_mode,
         .create_flag = UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_TX_BUF_SIZE |
             UMQ_CREATE_FLAG_RX_DEPTH | UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE,
-        .rx_buf_size = cfg->config.size,
-        .tx_buf_size = cfg->config.size,
+        .rx_buf_size = cfg->config.size > 8192 ? 8192 : cfg->config.size,
+        .tx_buf_size = cfg->config.size > 8192 ? 8192 : cfg->config.size,
         .rx_depth = cfg->config.rx_depth,
         .tx_depth = cfg->config.tx_depth,
         .mode = cfg->config.interrupt ? UMQ_MODE_INTERRUPT : UMQ_MODE_POLLING,
