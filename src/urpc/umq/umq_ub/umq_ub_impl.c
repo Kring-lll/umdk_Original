@@ -42,7 +42,6 @@
 #define UMQ_INLINE_ENABLE 1
 #define UMQ_UB_RW_SEGMENT_LEN 64 // ub_queue read/write buf splited 64B for each module, such as mem import/flow control
 #define UMQ_UB_FLOW_CONTROL_NOTIFY_THR 4
-#define UMQ_DATA_LIMIT_SIZE (8 * 1024) // 8KB
 
 typedef enum umq_ub_rw_segment_offset {
     OFFSET_MEM_IMPORT = 0,
@@ -3140,7 +3139,7 @@ int32_t umq_ub_enqueue_impl_plus(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **
         buf_pro->flag.bs.solicited_enable = 1;
         buf_pro->opcode = UMQ_OPC_SEND_IMM;
         uint32_t rest_size = buffer->total_data_size;
-        if (buffer->total_data_size >= UMQ_DATA_LIMIT_SIZE) {
+        if (buffer->total_data_size > UMQ_DATA_LIMIT_SIZE) {
             if (umq_ub_send_big_data(queue, &buffer) != UMQ_SUCCESS) {
                 UMQ_LIMIT_VLOG_ERR("send big data failed\n");
                 *bad_qbuf = qbuf;

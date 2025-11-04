@@ -18,6 +18,7 @@
 
 #define MEMPOOL_UBVA_SIZE 28
 #define UMQ_IMM_VERSION 0
+#define UMQ_DATA_LIMIT_SIZE (8 * 1024) // 8KB
 
 typedef enum umq_size_interal {
     UMQ_SIZE_INVALID_INTERAL = 0,   // invalid size, buffer lengths are inconsistent.
