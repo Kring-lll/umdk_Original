@@ -34,6 +34,7 @@ typedef struct umq_perftest_config {
     uint32_t deid;
     uint16_t eid_idx;
     bool buf_multiplex;
+    bool use_atomic_window;
 } umq_perftest_config_t;
 
 int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *cfg);

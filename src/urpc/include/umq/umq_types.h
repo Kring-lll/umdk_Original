@@ -114,6 +114,11 @@ typedef struct umq_trans_info {
 #define UMQ_FEATURE_ENABLE_TOKEN_POLICY     (1 << 1)    // enable token policy.
 #define UMQ_FEATURE_ENABLE_STATS            (1 << 2)    // enable stats collection
 #define UMQ_FEATURE_ENABLE_PERF             (1 << 3)    // enable performance collection
+#define UMQ_FEATURE_ENABLE_FLOW_CONTROL     (1 << 4)    // enable flow control
+
+typedef struct umq_flow_control_cfg {
+    bool use_atomic_window;  // use atomic variables as flow control window
+} umq_flow_control_cfg_t;
 
 typedef struct umq_init_cfg {
     umq_buf_mode_t buf_mode;
@@ -121,6 +126,7 @@ typedef struct umq_init_cfg {
     uint16_t headroom_size;         // header size of umq buffer
     bool io_lock_free;              // true: user should ensure thread safety when call io function
     uint8_t trans_info_num;
+    umq_flow_control_cfg_t flow_control; // used when UMQ_FEATURE_ENABLE_FLOW_CONTROL is set
     uint16_t eid_idx;
     uint16_t cna;
     uint32_t ubmm_eid;

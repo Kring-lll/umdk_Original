@@ -35,6 +35,7 @@ static struct option g_long_options[] = {
     {"cna", required_argument, NULL, 'N'},
     {"deid", required_argument, NULL, 'D'},
     {"eid-index", required_argument, NULL, 'E'},
+    {"use_atomic_window", no_argument, NULL, 'A'},
     {"buf_multiplex", no_argument, NULL, 'B'},
     {"num", required_argument, NULL, 'n'},
 
@@ -66,6 +67,7 @@ static void usage(void)
     (void)printf("      --tx-depth                      set queue tx-depth(default 512).\n");
     (void)printf("      --rx-depth                      set queue rx-depth(default 512).\n");
     (void)printf("      --eid-index                     set eid index.\n");
+    (void)printf("      --use_atomic_window             use atomic window when enable flow control.\n");
     (void)printf("      --num                           set number of iterations.\n");
     (void)printf("  -h, --help                          show help info.\n\n");
 }
@@ -86,6 +88,7 @@ static void init_cfg(umq_perftest_config_t *cfg)
     cfg->buf_mode = UMQ_BUF_SPLIT;
     cfg->trans_mode = UMQ_TRANS_MODE_IB;
     cfg->eid_idx = 0;
+    cfg->use_atomic_window = false;
     cfg->test_round = DEFAULT_LAT_TEST_ROUND;
 }
 
@@ -158,6 +161,9 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
                 break;
             case 'I':
                 cfg->config.interrupt = true;
+                break;
+            case 'A':
+                cfg->use_atomic_window = true;
                 break;
             case 'B':
                 cfg->config.buf_multiplex = true;

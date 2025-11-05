@@ -207,7 +207,7 @@ static void umq_perftest_server_run_qps_pro_interrupt(uint64_t umqh, umq_perftes
         }
         // recv req, release req buf after counting
         do {
-            poll_num = umq_poll(umqh, UMQ_IO_RX, polled_buf, UMQ_BATCH_SIZE);
+            poll_num = umq_poll(umqh, UMQ_IO_ALL, polled_buf, UMQ_BATCH_SIZE);
             if (poll_num < 0) {
                 LOG_PRINT("poll rx failed\n");
                 return;
@@ -251,7 +251,7 @@ static void umq_perftest_server_run_qps_pro_polling(uint64_t umqh, umq_perftest_
     double cycles_to_units = get_cpu_mhz(false);
     while (!is_perftest_force_quit() && (get_cycles() - start_cycle) / cycles_to_units < ITER_MAX_WAIT_TIME_US) {
         // recv req，release req buf after counting
-        poll_num = umq_poll(umqh, UMQ_IO_RX, polled_buf, UMQ_BATCH_SIZE);
+        poll_num = umq_poll(umqh, UMQ_IO_ALL, polled_buf, UMQ_BATCH_SIZE);
         if (poll_num < 0) {
             LOG_PRINT("poll rx failed\n");
             return;
@@ -291,6 +291,22 @@ static void umq_perftest_server_run_qps_pro(uint64_t umqh, umq_perftest_qps_arg_
     }
 }
 
+static inline uint32_t get_actual_send_num(umq_buf_t *req_buf, umq_buf_t *bad)
+{
+    uint32_t num = 0;
+    umq_buf_t *tmp = req_buf;
+    while (tmp) {
+        if (tmp == bad) {
+            break;
+        }
+
+        num++;
+        tmp = tmp->qbuf_next;
+    }
+
+    return num;
+}
+
 static void umq_perftest_client_run_qps_pro_interrupt(uint64_t umqh, umq_perftest_qps_arg_t *qps_arg)
 {
     // preparing req data, req data reuse
@@ -303,6 +319,7 @@ static void umq_perftest_client_run_qps_pro_interrupt(uint64_t umqh, umq_perftes
     umq_buf_t *tmp = req_buf;
     set_pro_data(tmp, qps_arg);
 
+    int ret;
     umq_buf_t *bad_buf = NULL;
     uint32_t can_send_num = qps_arg->cfg->config.tx_depth;
     umq_buf_t *polled_buf[UMQ_BATCH_SIZE];
@@ -320,14 +337,23 @@ static void umq_perftest_client_run_qps_pro_interrupt(uint64_t umqh, umq_perftes
     while (!is_perftest_force_quit() && (get_cycles() - start_cycle) / cycles_to_units < ITER_MAX_WAIT_TIME_US) {
         if (can_send_num >= UMQ_BATCH_SIZE) {
             // send req when tx depth is not fully utilized
-            if (umq_post(umqh, req_buf, UMQ_IO_TX, &bad_buf) != UMQ_SUCCESS) {
+            ret = umq_post(umqh, req_buf, UMQ_IO_TX, &bad_buf);
+            if (ret != UMQ_SUCCESS) {
+                if (ret == -UMQ_ERR_EAGAIN) {
+                    if (req_buf == bad_buf) {
+                        goto POLL;
+                    }
+                    can_send_num -= get_actual_send_num(req_buf, bad_buf);
+                    umq_notify(umqh);
+                    goto REARM;
+                }
                 LOG_PRINT("post tx failed\n");
                 goto ERROR;
             }
             can_send_num -= UMQ_BATCH_SIZE;
             umq_notify(umqh);
         }
-
+REARM:
         if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) != 1) {
             LOG_PRINT("umq_wait_interrupt failed\n");
             goto ERROR;
@@ -337,11 +363,14 @@ static void umq_perftest_client_run_qps_pro_interrupt(uint64_t umqh, umq_perftes
             LOG_PRINT("umq_rearm_interrupt failed\n");
             goto ERROR;
         }
+POLL:
         // poll tx cqe，increase the count
-        int ret = umq_poll(umqh, UMQ_IO_TX, polled_buf, UMQ_BATCH_SIZE);
+        ret = umq_poll(umqh, UMQ_IO_TX, polled_buf, UMQ_BATCH_SIZE);
         if (ret < 0) {
             LOG_PRINT("poll tx failed\n");
             goto ERROR;
+        } else if (ret == 0) {
+            continue;
         }
 
         (void)atomic_fetch_add(&g_umq_perftest_qps_ctx.reqs[thread_inx], ret);
@@ -368,6 +397,7 @@ static void umq_perftest_client_run_qps_pro_polling(uint64_t umqh, umq_perftest_
     umq_buf_t *tmp = req_buf;
     set_pro_data(tmp, qps_arg);
 
+    int ret;
     umq_buf_t *bad_buf = NULL;
     uint32_t can_send_num = qps_arg->cfg->config.tx_depth;
     umq_buf_t *polled_buf[UMQ_BATCH_SIZE];
@@ -377,19 +407,26 @@ static void umq_perftest_client_run_qps_pro_polling(uint64_t umqh, umq_perftest_
     while (!is_perftest_force_quit() && (get_cycles() - start_cycle) / cycles_to_units < ITER_MAX_WAIT_TIME_US) {
         if (can_send_num >= UMQ_BATCH_SIZE) {
             // send req when tx depth is not fully utilized
-            if (umq_post(umqh, req_buf, UMQ_IO_TX, &bad_buf) != UMQ_SUCCESS) {
+            ret = umq_post(umqh, req_buf, UMQ_IO_TX, &bad_buf);
+            if (ret != UMQ_SUCCESS) {
+                if (ret == -UMQ_ERR_EAGAIN) {
+                    can_send_num -= get_actual_send_num(req_buf, bad_buf);
+                    goto POLL;
+                }
                 LOG_PRINT("post tx failed\n");
                 goto ERROR;
             }
             can_send_num -= UMQ_BATCH_SIZE;
             umq_notify(umqh);
         }
-
+POLL:
         // poll tx cqe, increase the count
-        int ret = umq_poll(umqh, UMQ_IO_TX, polled_buf, UMQ_BATCH_SIZE);
+        ret = umq_poll(umqh, UMQ_IO_ALL, polled_buf, UMQ_BATCH_SIZE);
         if (ret < 0) {
             LOG_PRINT("poll tx failed\n");
             goto ERROR;
+        } else if (ret == 0) {
+            continue;
         }
 
         (void)atomic_fetch_add(&g_umq_perftest_qps_ctx.reqs[thread_inx], ret);

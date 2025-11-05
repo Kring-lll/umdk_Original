@@ -24,6 +24,8 @@
 #include "umq_perftest_qps.h"
 #include "umq_perftest_latency.h"
 
+#define PERFTEST_STR_SIZE 1024
+
 typedef struct umq_perftest_worker_arg {
     perftest_thread_arg_t thd_arg;
     umq_perftest_config_t *cfg;
@@ -76,6 +78,54 @@ static int fill_dev_info(umq_dev_assign_t *dev_info, umq_perftest_config_t *cfg)
     return 0;
 }
 
+typedef struct feature_and_string {
+    uint32_t feature;
+    const char *str;
+} feature_and_string_t;
+
+static void umq_perftest_show_feature(uint32_t feature)
+{
+    feature_and_string_t array[] = {
+        // UMQ_FEATURE_API_BASE need special handling
+        {.feature = UMQ_FEATURE_API_PRO, .str = "UMQ_FEATURE_API_PRO"},
+        {.feature = UMQ_FEATURE_ENABLE_TOKEN_POLICY, .str = "UMQ_FEATURE_ENABLE_TOKEN_POLICY"},
+        {.feature = UMQ_FEATURE_ENABLE_STATS, .str = "UMQ_FEATURE_ENABLE_STATS"},
+        {.feature = UMQ_FEATURE_ENABLE_PERF, .str = "UMQ_FEATURE_ENABLE_PERF"},
+        {.feature = UMQ_FEATURE_ENABLE_FLOW_CONTROL, .str = "UMQ_FEATURE_ENABLE_FLOW_CONTROL"},
+    };
+
+    char feature_str[PERFTEST_STR_SIZE] = {0};
+    int str_len = 0;
+    int ret = 0;
+
+    if ((feature & UMQ_FEATURE_API_PRO) == 0) {
+        ret = snprintf(feature_str, PERFTEST_STR_SIZE, "%s", "UMQ_FEATURE_API_BASE");
+        if (ret < 0) {
+            LOG_PRINT("set feature string: UMQ_FEATURE_API_BASE failed\n");
+            return;
+        }
+    }
+
+    str_len += ret;
+    for (uint32_t i = 0; i < sizeof(array) / sizeof(feature_and_string_t); i++) {
+        if ((feature & array[i].feature) == 0) {
+            continue;
+        }
+
+        if (str_len > 0) {
+            ret = snprintf(feature_str + str_len, PERFTEST_STR_SIZE - str_len, " | %s", array[i].str);
+        } else {
+            ret = snprintf(feature_str + str_len, PERFTEST_STR_SIZE - str_len, " %s", array[i].str);
+        }
+        if (ret < 0) {
+            LOG_PRINT("set feature string: %s failed\n", array[i].str);
+            return;
+        }
+        str_len += ret;
+    }
+    LOG_PRINT("umq init with feature: %s\n", feature_str);
+}
+
 static int umq_perftest_init_umq(umq_perftest_config_t *cfg)
 {
     umq_init_cfg_t *umq_config = (umq_init_cfg_t *)calloc(1, sizeof(*umq_config));
@@ -85,6 +135,7 @@ static int umq_perftest_init_umq(umq_perftest_config_t *cfg)
     }
     umq_config->buf_mode = cfg->buf_mode;
     umq_config->feature = cfg->feature;
+    umq_config->flow_control.use_atomic_window = cfg->use_atomic_window;
     umq_config->headroom_size = 0;
     umq_config->io_lock_free = true;
     umq_config->trans_info_num = 1;
@@ -102,6 +153,9 @@ static int umq_perftest_init_umq(umq_perftest_config_t *cfg)
         free(umq_config);
         return -1;
     }
+
+    umq_perftest_show_feature(umq_config->feature);
+
     free(umq_config);
     return 0;
 }

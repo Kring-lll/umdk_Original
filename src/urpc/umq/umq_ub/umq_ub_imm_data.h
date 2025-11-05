@@ -17,6 +17,7 @@ extern "C" {
 #define UMQ_UB_IMM_BITS (0xFFFFFFFFFFFFFFFF)
 #define UMQ_UB_IMM_WITHOUT_PRIVATE_BITS (0x7FFFFFFFFFFFFFFF)
 #define UMQ_UB_IMM_PRIVATE 1
+#define UMQ_UB_IMM_IN_USER_BUF 1  // user buffer with umq defined imm data
 
 typedef enum umq_ub_imm_type {
     IMM_TYPE_UB_PLUS,               // used for ub plus imm type
@@ -54,7 +55,8 @@ typedef union umq_ub_imm {
     struct {
         uint64_t umq_private : 1;
         uint64_t type : 5;
-        uint64_t rsvd1 : 10;
+        uint64_t in_user_buf : 1;
+        uint64_t rsvd1 : 9;
         uint64_t window : 16;
         uint64_t rsvd2 : 32;
     } flow_control;
