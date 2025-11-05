@@ -436,18 +436,20 @@ umq_buf_t *umq_buf_alloc(uint32_t request_size, uint32_t request_qbuf_num, uint6
     if (!g_umq_inited || request_qbuf_num == 0) {
         return NULL;
     }
-
+    qbuf_pool_cfg_t cfg;
+    umq_qbuf_config_get(&cfg);
+    uint32_t headroom_size = cfg.headroom_size;
     if (umqh == UMQ_INVALID_HANDLE) {
         umq_buf_list_t head;
         QBUF_LIST_INIT(&head);
-        if (request_size > UMQ_SIZE_8K) {
-            enum HUGE_QBUF_POOL_SIZE_TYPE type = (request_size > UMQ_SIZE_256K) ?
-                HUGE_QBUF_POOL_SIZE_TYPE_BIG : HUGE_QBUF_POOL_SIZE_TYPE_SMALL;
-            if (umq_huge_qbuf_alloc(type, request_size, request_qbuf_num, option, &head) != UMQ_SUCCESS) {
+        if (request_size + headroom_size < UMQ_SIZE_256K) {
+            if (umq_qbuf_alloc(request_size, request_qbuf_num, option, &head) != UMQ_SUCCESS) {
                 return NULL;
             }
         } else {
-            if (umq_qbuf_alloc(request_size, request_qbuf_num, option, &head) != UMQ_SUCCESS) {
+            enum HUGE_QBUF_POOL_SIZE_TYPE type = (request_size + headroom_size >= UMQ_SIZE_8M) ?
+                HUGE_QBUF_POOL_SIZE_TYPE_BIG : HUGE_QBUF_POOL_SIZE_TYPE_SMALL;
+            if (umq_huge_qbuf_alloc(type, request_size, request_qbuf_num, option, &head) != UMQ_SUCCESS) {
                 return NULL;
             }
         }

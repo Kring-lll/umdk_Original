@@ -220,9 +220,9 @@ static inline int umq_ub_token_generate(bool enable_token, uint32_t *token)
 
 static int huge_qbuf_pool_memory_init(uint8_t mempool_id, enum HUGE_QBUF_POOL_SIZE_TYPE type, void **buffer_addr)
 {
-    uint32_t total_len = (type == HUGE_QBUF_POOL_SIZE_TYPE_SMALL) ?
-        UMQ_SIZE_256K * HUGE_QBUF_BUFFER_INC_BATCH : UMQ_SIZE_8M * HUGE_QBUF_BUFFER_INC_BATCH;
-    void *addr = (void *)memalign(UMQ_SIZE_8K, total_len);
+    uint32_t align_size = (type == HUGE_QBUF_POOL_SIZE_TYPE_SMALL) ? UMQ_SIZE_256K : UMQ_SIZE_8M;
+    uint32_t total_len = align_size * HUGE_QBUF_BUFFER_INC_BATCH;
+    void *addr = (void *)memalign(align_size, total_len);
     if (addr == NULL) {
         UMQ_VLOG_ERR("memory alloc failed\n");
         return -UMQ_ERR_ENOMEM;

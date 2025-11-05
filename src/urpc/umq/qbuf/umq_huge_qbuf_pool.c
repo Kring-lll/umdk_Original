@@ -188,15 +188,15 @@ static int do_umq_huge_qbuf_config_init(huge_qbuf_pool_cfg_t *cfg)
     pool->data_size = g_huge_pool_size[cfg->type];
     pool->memory_init_callback = cfg->memory_init_callback;
     pool->memory_uninit_callback = cfg->memory_uninit_callback;
+    uint32_t blk_size = (cfg->type == HUGE_QBUF_POOL_SIZE_TYPE_SMALL) ? UMQ_SIZE_256K : UMQ_SIZE_8M;
 
     if (cfg->mode == UMQ_BUF_SPLIT) {
-        uint32_t blk_size = round_up(pool->data_size + cfg->headroom_size, UMQ_SIZE_8K);
         uint32_t blk_num = cfg->total_size / ((uint32_t)sizeof(umq_buf_t) + blk_size);
 
         pool->block_size = blk_size;
         pool->total_block_num = blk_num;
     } else if (cfg->mode == UMQ_BUF_COMBINE) {
-        uint32_t blk_size = round_up(pool->data_size + cfg->headroom_size + sizeof(umq_buf_t), UMQ_SIZE_8K);
+        uint32_t blk_size = blk_size;
         uint32_t blk_num = cfg->total_size / blk_size;
 
         pool->block_size = blk_size;
@@ -259,6 +259,94 @@ int umq_huge_qbuf_config_init(huge_qbuf_pool_cfg_t *cfg)
     return ret;
 }
 
+static ALWAYS_INLINE void umq_huge_qbuf_alloc_data_with_split(huge_pool_t *pool, uint32_t request_size,
+    uint32_t num, umq_buf_list_t *list, int32_t headroom_size)
+{
+    uint32_t cnt = 0;
+    umq_buf_t *cur_node;
+    uint32_t blk_size = pool->block_size;
+    int32_t headroom_size_temp = headroom_size;
+    uint32_t total_data_size = request_size;
+    uint32_t remaining_size = request_size;
+    uint32_t max_data_capacity = blk_size - headroom_size_temp;
+    QBUF_LIST_FOR_EACH(cur_node, &pool->block_pool.head_with_data) {
+        cur_node->buf_data = floor_to_align(cur_node->buf_data, blk_size) + headroom_size_temp;
+        cur_node->buf_size = blk_size + (uint32_t)sizeof(umq_buf_t);
+        cur_node->headroom_size = headroom_size_temp;
+        cur_node->total_data_size = total_data_size;
+        cur_node->data_size = remaining_size >= max_data_capacity ? max_data_capacity : remaining_size;
+        remaining_size -= cur_node->data_size;
+        if (remaining_size == 0) {
+            headroom_size_temp = headroom_size;
+            total_data_size = request_size;
+            remaining_size = request_size;
+            max_data_capacity = blk_size - headroom_size;
+        } else {
+            headroom_size_temp = 0;
+            total_data_size = 0;
+            max_data_capacity = blk_size;
+        }
+        if (++cnt == num) {
+            break;
+        }
+    }
+
+    umq_buf_t *head = QBUF_LIST_FIRST(&pool->block_pool.head_with_data);
+    // switch head node
+    QBUF_LIST_FIRST(&pool->block_pool.head_with_data) = QBUF_LIST_NEXT(cur_node);
+    QBUF_LIST_NEXT(cur_node) = QBUF_LIST_FIRST(list);
+
+    // set output
+    QBUF_LIST_FIRST(list) = head;
+    pool->block_pool.buf_cnt_with_data -= num;
+
+}
+
+static ALWAYS_INLINE void umq_huge_qbuf_alloc_data_with_combine(huge_pool_t *pool, uint32_t request_size,
+    uint32_t num, umq_buf_list_t *list, int32_t headroom_size)
+{
+
+    uint32_t cnt = 0;
+    umq_buf_t *cur_node;
+    uint32_t blk_size = pool->block_size;
+    int32_t headroom_size_temp = headroom_size;
+    uint32_t total_data_size = request_size;
+    uint32_t remaining_size = request_size;
+    uint32_t max_data_size = blk_size - sizeof(umq_buf_t);
+    uint32_t max_data_capacity = max_data_size - headroom_size_temp;
+    QBUF_LIST_FOR_EACH(cur_node, &pool->block_pool.head_with_data) {
+        cur_node->buf_data = cur_node->data + headroom_size_temp;
+        cur_node->buf_size = blk_size;
+        cur_node->headroom_size = headroom_size_temp;
+        cur_node->total_data_size = total_data_size;
+        cur_node->data_size = remaining_size >= max_data_capacity ? max_data_capacity : remaining_size;
+        remaining_size -= cur_node->data_size;
+        if (remaining_size == 0) {
+            headroom_size_temp = headroom_size;
+            total_data_size = request_size;
+            remaining_size = request_size;
+            max_data_capacity = max_data_size - headroom_size;
+        } else {
+            headroom_size_temp = 0;
+            total_data_size = 0;
+            max_data_capacity = max_data_size;
+        }
+        if (++cnt == num) {
+            break;
+        }
+    }
+
+    umq_buf_t *head = QBUF_LIST_FIRST(&pool->block_pool.head_with_data);
+    // switch head node
+    QBUF_LIST_FIRST(&pool->block_pool.head_with_data) = QBUF_LIST_NEXT(cur_node);
+    QBUF_LIST_NEXT(cur_node) = QBUF_LIST_FIRST(list);
+
+    // set output
+    QBUF_LIST_FIRST(list) = head;
+    pool->block_pool.buf_cnt_with_data -= num;
+
+}
+
 int umq_huge_qbuf_alloc(enum HUGE_QBUF_POOL_SIZE_TYPE type, uint32_t request_size, uint32_t num,
     umq_alloc_option_t *option, umq_buf_list_t *list)
 {
@@ -275,43 +363,31 @@ int umq_huge_qbuf_alloc(enum HUGE_QBUF_POOL_SIZE_TYPE type, uint32_t request_siz
     if (option != NULL && (option->flag & UMQ_ALLOC_FLAG_HEAD_ROOM_SIZE) != 0) {
         headroom_size = option->headroom_size;
     }
-
-    uint64_t single_size =
-        request_size + headroom_size + (g_huge_pool_ctx.mode == UMQ_BUF_COMBINE ? sizeof(umq_buf_t) : 0);
-    if (single_size > pool->block_size) {
-        (void)pthread_mutex_unlock(&pool->block_pool.global_mutex);
-        UMQ_VLOG_ERR("request size[%u] too large, support max size: %u\n", request_size, pool->block_size);
-        return -UMQ_ERR_EINVAL;
+    uint32_t div_num;
+    uint32_t align_size;
+    if (type == HUGE_QBUF_POOL_SIZE_TYPE_SMALL) {
+        div_num = UMQ_QBUF_SIZE_DIV_256K;
+        align_size = UMQ_SIZE_256K;
+    } else {
+        div_num = UMQ_QBUF_SIZE_DIV_8M;
+        align_size = UMQ_SIZE_8M;
     }
 
-    if (pool->block_pool.buf_cnt_with_data < num && umq_huge_qbuf_pool_init(type, pool) != UMQ_SUCCESS) {
-        (void)pthread_mutex_unlock(&pool->block_pool.global_mutex);
-        UMQ_VLOG_ERR("buffer not enough, rest count: %u\n", pool->block_pool.buf_cnt_with_data);
-        return -UMQ_ERR_ENOMEM;
-    }
-
-    uint32_t count = 0;
-    umq_buf_t *cur_node;
-    QBUF_LIST_FOR_EACH(cur_node, &pool->block_pool.head_with_data) {
-        cur_node->buf_data = (g_huge_pool_ctx.mode == UMQ_BUF_SPLIT) ?
-            floor_to_align(cur_node->buf_data, UMQ_SIZE_8K) + headroom_size : cur_node->data + headroom_size;
-        cur_node->headroom_size = headroom_size;
-        cur_node->data_size = request_size;
-        cur_node->total_data_size = request_size;
-        if (++count == num) {
-            break;
+    uint32_t actual_buf_count = (g_huge_pool_ctx.mode == UMQ_BUF_SPLIT) ?
+        num * ((request_size + align_size - 1 + headroom_size) >> div_num)
+        : num * ((request_size + align_size - 1 + headroom_size + sizeof(umq_buf_t)) >> div_num);
+    while (pool->block_pool.buf_cnt_with_data < actual_buf_count) {
+        if ( umq_huge_qbuf_pool_init(type, pool) != UMQ_SUCCESS) {
+            (void)pthread_mutex_unlock(&pool->block_pool.global_mutex);
+            UMQ_VLOG_ERR("buffer not enough, rest count: %u\n", pool->block_pool.buf_cnt_with_data);
+            return -UMQ_ERR_ENOMEM;
         }
     }
-
-    umq_buf_t *head = QBUF_LIST_FIRST(&pool->block_pool.head_with_data);
-    // switch head node
-    QBUF_LIST_FIRST(&pool->block_pool.head_with_data) = QBUF_LIST_NEXT(cur_node);
-    QBUF_LIST_NEXT(cur_node) = QBUF_LIST_FIRST(list);
-
-    // set output
-    QBUF_LIST_FIRST(list) = head;
-    pool->block_pool.buf_cnt_with_data -= count;
-
+    if (g_huge_pool_ctx.mode == UMQ_BUF_SPLIT) {
+        umq_huge_qbuf_alloc_data_with_split(pool, request_size, actual_buf_count, list, headroom_size);
+    } else {
+        umq_huge_qbuf_alloc_data_with_combine(pool, request_size, actual_buf_count, list, headroom_size);
+    }
     (void)pthread_mutex_unlock(&pool->block_pool.global_mutex);
 
     return UMQ_SUCCESS;
