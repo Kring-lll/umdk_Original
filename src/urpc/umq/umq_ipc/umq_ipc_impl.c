@@ -375,16 +375,16 @@ int32_t umq_ipc_bind_impl(uint64_t umqh_tp, uint8_t *bind_info, uint32_t bind_in
         UMQ_VLOG_ERR("bind_info_size is invalid\n");
         return -UMQ_ERR_EINVAL;
     }
-    ipc_bind_ctx_t *ctx = (ipc_bind_ctx_t *)calloc(1, sizeof(ipc_bind_ctx_t));
-    if (ctx == NULL) {
-        UMQ_VLOG_ERR("bind ctx alloc failed\n");
-        return -UMQ_ERR_ENOMEM;
-    }
 
     umq_ipc_bind_info_t *tmp_info = (umq_ipc_bind_info_t *)bind_info;
     if (tmp_info->trans_mode != UMQ_TRANS_MODE_IPC) {
         UMQ_VLOG_ERR("trans mode: %d is invalid, bind failed\n", tmp_info->trans_mode);
-        goto FREE_CTX;
+        return -UMQ_ERR_EINVAL;
+    }
+    ipc_bind_ctx_t *ctx = (ipc_bind_ctx_t *)calloc(1, sizeof(ipc_bind_ctx_t));
+    if (ctx == NULL) {
+        UMQ_VLOG_ERR("bind ctx alloc failed\n");
+        return -UMQ_ERR_ENOMEM;
     }
 
     ctx->remote_ring.shm_size = tmp_info->shm_total_size;

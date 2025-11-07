@@ -421,14 +421,17 @@ int32_t umq_ubmm_bind_impl(uint64_t umqh_tp, uint8_t *bind_info, uint32_t bind_i
         return -UMQ_ERR_ENOMEM;
     }
 
+    int ret = UMQ_FAIL;
     umq_ubmm_bind_info_t *tmp_info = (umq_ubmm_bind_info_t *)bind_info;
     if (tmp_info->trans_mode != UMQ_TRANS_MODE_UBMM && tmp_info->trans_mode != UMQ_TRANS_MODE_UBMM_PLUS) {
         UMQ_VLOG_ERR("trans mode: %d is invalid\n", tmp_info->trans_mode);
+        ret = -UMQ_ERR_EINVAL;
         goto FREE_CTX;
     }
+    ret = umq_ub_bind_impl(tp->ub_handle, bind_info + sizeof(umq_ubmm_bind_info_t), 
+                           bind_info_size - sizeof(umq_ubmm_bind_info_t));
 
-    if (umq_ub_bind_impl(tp->ub_handle,
-        bind_info + sizeof(umq_ubmm_bind_info_t), bind_info_size - sizeof(umq_ubmm_bind_info_t)) != UMQ_SUCCESS) {
+    if (ret != UMQ_SUCCESS) {
         UMQ_VLOG_ERR("ub bind failed");
         goto FREE_CTX;
     }
@@ -506,7 +509,7 @@ UB_UNBIND:
 FREE_CTX:
     free(ctx);
 
-    return UMQ_FAIL;
+    return ret;
 }
 
 int32_t umq_ubmm_unbind_impl(uint64_t umqh_tp)

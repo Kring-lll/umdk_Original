@@ -960,6 +960,11 @@ int umq_ub_bind_impl(uint64_t umqh, uint8_t *bind_info, uint32_t bind_info_size)
         UMQ_VLOG_ERR("umq has already been binded\n");
         return -UMQ_ERR_EEXIST;
     }
+    if (memcmp(&queue->jetty->jetty_id.eid, &info->jetty_id.eid, sizeof(urma_eid_t)) == 0 && 
+        queue->jetty->jetty_id.id == info->jetty_id.id) {
+        UMQ_VLOG_ERR("the queue cnanot bind itself\n");
+        return -UMQ_ERR_EINVAL;
+    }
 
     if (umq_ub_window_init(&queue->flow_control, queue, info) != UMQ_SUCCESS) {
         return -UMQ_ERR_EINVAL;
