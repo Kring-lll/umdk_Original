@@ -225,6 +225,11 @@ uint64_t umq_ipc_create_impl(uint64_t umqh, uint8_t *ipc_ctx, umq_create_option_
         return UMQ_INVALID_HANDLE;
     }
 
+    if (option->mode < 0 || option->mode >= UMQ_MODE_MAX) {
+        UMQ_VLOG_ERR("queue mode[%d] is invalid\n", option->mode);
+        return UMQ_INVALID_HANDLE;
+    }
+
     umq_inc_ref(ctx->io_lock_free, &ctx->ref_cnt, 1);
     umq_ipc_info_t *tp = (umq_ipc_info_t *)calloc(1, sizeof(umq_ipc_info_t));
     if (tp == NULL) {
