@@ -295,6 +295,10 @@ static int send_recv_delete_local_queue(queue_t *l_queue, delete_queue_callback_
     if (delete_queue_cb != NULL) {
         delete_queue_cb(l_queue);
     }
+
+    if (local_q->is_binded == URPC_TRUE) {
+        (void)local_q->queue.ops->unbind_queue(&local_q->queue);
+    }
     queue_slab_uninit(local_q);
     queue_list_pop(&local->local_q);
     send_recv_destroy_transport_resource(local);

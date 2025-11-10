@@ -232,6 +232,7 @@ typedef struct queue_remote {
     queue_t queue;                  // placed at the beginning of the definition to facilitate conversion of types
     urpc_qcfg_remote_get_t cfg;
     uint32_t timestamp;
+    uint32_t bind_local_qid;
     uint16_t qid;
 } queue_remote_t;
 

@@ -280,10 +280,32 @@ static uint32_t server_channel_connect_alloc_id(urpc_instance_key_t *key, uint32
     return id;
 }
 
+static int local_queue_unpair_by_qid(uint16_t qid)
+{
+    int ret = URPC_SUCCESS;
+    queue_local_t *local_q;
+    queue_transport_ctx_t *queue_ctx = get_queue_transport_ctx();
+    (void)pthread_mutex_lock(&queue_ctx->queue_list_mutex);
+    URPC_LIST_FOR_EACH(local_q, node, &queue_ctx->queue_list) {
+        if (local_q->qid == qid && local_q->is_binded == URPC_TRUE) {
+            ret = local_q->queue.ops->unbind_queue(&local_q->queue);
+            (void)pthread_mutex_unlock(&queue_ctx->queue_list_mutex);
+            return ret;
+        }
+    }
+    (void)pthread_mutex_unlock(&queue_ctx->queue_list_mutex);
+    URPC_LIB_LOG_INFO("not find queue %u\n", qid);
+    return ret;
+}
+
 void server_channel_remove_remote_queue(urpc_server_channel_info_t *channel, queue_node_t *cur_node)
 {
-    queue_t *queue = (queue_t *)(uintptr_t)cur_node->urpc_qh;
+    queue_remote_t *remote_q = (queue_remote_t *)(uintptr_t)cur_node->urpc_qh;
+    queue_t *queue = &remote_q->queue;
     URPC_SLIST_REMOVE(&channel->r_queue_nodes_head, cur_node, queue_node, node);
+    if (local_queue_unpair_by_qid(remote_q->bind_local_qid) != URPC_SUCCESS) {
+        URPC_LIB_LOG_ERR("queue %u unpair failed\n", remote_q->bind_local_qid);
+    }
     queue->ops->unimport_remote_queue(queue);
     /* server remote queue should be deleted when channel is freed */
     queue->ops->delete_remote_queue(queue);

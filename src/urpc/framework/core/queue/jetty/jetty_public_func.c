@@ -685,6 +685,7 @@ queue_t *send_recv_create_remote_queue(void *ptr, uint32_t remote_chid, uint16_t
     send_recv_remote_q->remote_q.queue.status = QUEUE_STATUS_IDLE;
     send_recv_remote_q->remote_q.timestamp = info->queue_info.timestamp;
     send_recv_remote_q->remote_q.qid = info->queue_info.qid;
+    send_recv_remote_q->remote_q.bind_local_qid = QUEUE_ID_MAX;
 
     URPC_LIB_LOG_DEBUG("create rjetty successful, EID: " EID_FMT ", Jetty id: %u, Uasid: %u\n",
                       EID_ARGS(send_recv_remote_q->rjetty->jetty_id.eid), send_recv_remote_q->rjetty->jetty_id.id,
