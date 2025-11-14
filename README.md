@@ -8,11 +8,13 @@ Lingqu UnifiedBus Memory Development Kit (UMDK) is a distributed communication s
 1. URMA: Unifies memory semantics, provides remote memory operation methods such as unilateral, bilateral, and atomic operations, serving as the foundation for communication between applications.
 It offers two types of interfaces: one is the northbound application programming interface, which provides communication APIs for applications, and the other is the southbound driver programming interface, which offers APIs for driver developers to access the UMDK.
 
-2. URPC: Unified remote procedure call, supporting Lingqu-native high-performance RPC communication between hosts and devices, as well as RPC acceleration.
+2. CAM: Super-node communication acceleration library, providing high-performance training and promotion communication acceleration based on Lingqu super-node affinity. It can connect to mainstream communities such as vllm, SGlang, and VeRL in the northbound direction and connect to Ascend super-node hardware and networking in the southbound direction.
 
-3. ULOCK: Unified State synchronization, featuring native Lingqu high-performance state synchronization with distributed lock support, accelerates global resource allocation for distributed applications such as databases.
+3. URPC: Unified remote procedure call, supporting Lingqu-native high-performance RPC communication between hosts and devices, as well as RPC acceleration.
 
-4. USOCK: Compatible with standard socket API, enabling TCP applications to enhance network communication performance with zero modifications.
+4. ULOCK: Unified State synchronization, featuring native Lingqu high-performance state synchronization with distributed lock support, accelerates global resource allocation for distributed applications such as databases.
+
+5. USOCK: Compatible with standard socket API, enabling TCP applications to enhance network communication performance with zero modifications.
 
 #### 3. Build and install
 1. Build Environment Requirements
