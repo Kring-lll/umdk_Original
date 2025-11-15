@@ -3,39 +3,11 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: create moe distribute base header file
  * Create: 2025-07-19
- * Note:
+ * Note: This file might be replaced! We will try to use the file from cann-toolkit in env when compiling.
  * History: 2025-07-19 create moe distribute base header file
  */
 #ifndef MOE_DISTRIBUTE_BASE_H
 #define MOE_DISTRIBUTE_BASE_H
-
-/* system tick: 50MHz */
-#define CAL_US(tick) (((tick) * 2) / 100)
-
-/* performance macro */
-// #define USE_256_TO_1__
-#ifdef USE_256_TO_1__
-#pragma message("use 256 to 1")
-#else
-#define USE_FOR_OPT__
-#define DISPATCH_USE_WRITE_SHUFFLE__
-#define USE_TOKEN_COUNT_SPLIT__
-#define USE_ONE_CORE_WAIT__
-
-#ifdef USE_ONE_CORE_WAIT__
-#pragma message("use one core wait")
-
-//  #define USE_ONE_CORE_GETCUMSUM__
-#endif
-#ifdef USE_FOR_OPT__
-#pragma message("use for optimization")
-#define FOR_OPT_MAX_BS__ 64
-#define FOR_OPT_MAX_MOE_RANK__ 256
-#endif
-// #define COMBINE_USE_DYNAMIC_QUANT
-#define OPT_RANK_OFFSET 512
-#define USE_WRITE_SHUFFLE
-#endif
 
 constexpr uint32_t LOCAL_NOTIFY_MAX_NUM = 64;
 constexpr uint32_t LOCAL_STREAM_MAX_NUM = 19;
