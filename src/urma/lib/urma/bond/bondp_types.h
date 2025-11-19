@@ -39,8 +39,6 @@ typedef struct bondp_global_context {
     uint32_t pid;
     topo_map_t *topo_map;
     bool skip_load_topo;
-    bool use_single_die;
-    bool disable_recovery;
 } bondp_global_context_t;
 
 extern bondp_global_context_t *g_bondp_global_ctx;
@@ -173,12 +171,6 @@ bool is_valid_bdp_tjetty(bondp_target_jetty_t *bdp_tjetty);
 
 bool is_valid_import_tseg(bondp_import_tseg_t *rtseg);
 
-/* Get index of matrix server port in bondp_context_t->port_ctxs[X] */
-static inline int get_matrix_port_ctx_idx(int primary_idx, int port_idx)
-{
-    return primary_idx * PORT_EID_MAX_NUM_PER_DEV + port_idx;
-}
-
 /* Get index of matrix server port in p_ctx, p_jetty, etc. */
 static inline int get_matrix_port_p_idx(int primary_idx, int port_idx)
 {
@@ -198,5 +190,10 @@ static inline bool is_multipath_jetty(urma_jetty_t *jetty)
 static inline bool is_multipath_comp(bondp_comp_t *bdp_comp)
 {
     return bdp_comp->is_multipath;
+}
+
+static inline bool is_single_dev_mode(urma_context_t *ctx)
+{
+    return ctx->aggr_mode == URMA_AGGR_MODE_STANDALONE;
 }
 #endif // BONDP_TYPES_H

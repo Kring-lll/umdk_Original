@@ -18,6 +18,7 @@
 #include "urma_ubagg.h"
 #include "bondp_jetty_ctx.h"
 #include "bondp_context_table.h"
+#include "bondp_provider_ops.h"
 #include "ubagg_ioctl.h"
 #include "urma_provider.h"
 #include "bondp_api.h"
@@ -227,8 +228,7 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
     if (is_in_matrix_server(bdp_ctx)) {
         if (cfg->flag.bs.multi_path == false) {
-            URMA_LOG_ERR("CONSTRAINT: JFS only support multi_path mode in matrix server,"
-                " but try to create single_path JFS.\n");
+            URMA_LOG_ERR("In matrix server, JFS don't support single-path mode.\n");
             return NULL;
         }
     }
@@ -530,13 +530,13 @@ urma_status_t bondp_modify_jfr(urma_jfr_t *jfr, urma_jfr_attr_t *attr)
     @param[out]attr->state:When both values returned by urma_query_jfr are identical, they are returned directly.
     If the two values differ and a single ready event exists, the ready event is returned.
     The scenario involving one reset and one error event is not considered at this stage.
- 
+
     @param[out]attr->rx_threshold:urma_query_jfr returns the smaller value if two are returned; returns the value
     directly if only one is returned; returns zero if neither is returned.
- 
+
     @param[out]attr->mask:Use bits to indicate whether the aforementioned two values are valid. The state remains
     valid at all times, whereas rx_threshold requires processing based on the return value of urma_query_jfr.
- 
+
     @param[out]cfg:Directly assign jfr_cfg to v_jfr
 */
 urma_status_t bondp_query_jfr(urma_jfr_t *jfr, urma_jfr_cfg_t *cfg, urma_jfr_attr_t *attr)
@@ -684,14 +684,11 @@ static void bondp_del_jetty_p_vjetty_info(bondp_comp_t *bdp_jetty)
 
 urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cfg)
 {
-    if (jetty_cfg->flag.bs.share_jfr != true || jetty_cfg->shared.jfr == NULL) {
-        URMA_LOG_ERR("UB device must use jetty share_jfr mode and shared.jfr should be valid.\n");
-        errno = EINVAL;
-        return NULL;
-    }
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
-    if (!is_valid_ctx(bdp_ctx)) {
-        URMA_LOG_ERR("Invalid param ctx\n");
+
+    if (jetty_cfg->flag.bs.share_jfr != true || jetty_cfg->shared.jfr == NULL) {
+        URMA_LOG_ERR("UB device must use shared jfr when create jetty.\n");
+        errno = EINVAL;
         return NULL;
     }
 
@@ -700,17 +697,22 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         return NULL;
     }
     if (is_in_matrix_server(bdp_ctx)) {
-        if (jetty_cfg->jfs_cfg.flag.bs.multi_path == false &&
-            (jetty_cfg->jfs_cfg.trans_mode == URMA_TM_RM || jetty_cfg->jfs_cfg.trans_mode == URMA_TM_UM)) {
-            URMA_LOG_ERR("CONSTRAINT: Jettys in Single-path mode only support trans_mode URMA_TM_RC, "
-                "try to create a jetty with trans_mode: %d\n", jetty_cfg->jfs_cfg.trans_mode);
-            errno = EINVAL;
-            return NULL;
-        }
-        if (jetty_cfg->id != 0 && jetty_cfg->jfs_cfg.flag.bs.multi_path == false) {
-            URMA_LOG_WARN("Wellknown jetty in matrix server mode must use multi-path mode, "
-                "set to multi_path mode forcely\n");
-            jetty_cfg->jfs_cfg.flag.bs.multi_path = true;
+        if (jetty_cfg->jfs_cfg.flag.bs.multi_path == false) {
+            if (jetty_cfg->jfs_cfg.trans_mode != URMA_TM_RC) {
+                URMA_LOG_ERR("In matrix server, jetty only supports single-path mode with RC.\n");
+                errno = EINVAL;
+                return NULL;
+            }
+            if (is_single_dev_mode(ctx)) {
+                URMA_LOG_ERR("In matrix server, multi-device mode don't support single path currently.\n");
+                errno = EINVAL;
+                return NULL;
+            }
+            if (jetty_cfg->id != 0) {
+                URMA_LOG_WARN("In matrix server, wellknown jetty must use multi-path mode, "
+                    "set to multi-path mode forcely\n");
+                jetty_cfg->jfs_cfg.flag.bs.multi_path = true;
+            }
         }
     }
 
@@ -907,11 +909,6 @@ urma_status_t bondp_modify_jetty(urma_jetty_t *jetty, urma_jetty_attr_t *attr)
 
 int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_out_t *out)
 {
-    bondp_context_t *bond_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
-    if (!is_valid_ctx(bond_ctx)) {
-        URMA_LOG_ERR("bonding context is invalid in user ctl");
-        return -1;
-    }
     switch (in->opcode) {
         case URMA_USER_CTL_BOND_GET_ID_INFO:
         case URMA_USER_CTL_BOND_ADD_RJFR_ID_INFO:
@@ -919,9 +916,15 @@ int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_ou
         case URMA_USER_CTL_BOND_GET_SEG_INFO:
         case URMA_USER_CTL_BOND_ADD_REMOTE_SEG_INFO:
             break;
+        case URMA_USER_CTL_BOND_SET_AGGR_MODE:
+            if (in->len != sizeof(urma_context_aggr_mode_t)) {
+                URMA_LOG_ERR("Invalid len");
+                return -EINVAL;
+            }
+            return bondp_set_aggr_mode(ctx, *(urma_context_aggr_mode_t *)in->addr);
         default: {
             URMA_LOG_ERR("Unsupported opcode, opcode:%d\n", in->opcode);
-            return -1;
+            return -EINVAL;
         }
     }
     return 0;
@@ -1159,7 +1162,7 @@ static int bondp_import_pjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *b
             ret = import_loopback_matrix_jetty(bdp_ctx, bdp_tjetty, udata_out, rjetty, rjetty_token);
         } else {
             if (is_well_known_jetty_id(rjetty->jetty_id.id)) {
-                int iodie_num = g_bondp_global_ctx->use_single_die ? SINGLE_DIE_IODIE_NUM : IODIE_NUM;
+                int iodie_num = is_single_dev_mode(&bdp_ctx->v_ctx) ? SINGLE_DIE_IODIE_NUM : IODIE_NUM;
                 bdp_tjetty->local_dev_num = iodie_num;
                 bdp_tjetty->target_dev_num = iodie_num;
                 bdp_tjetty->is_multipath = true;
@@ -1167,7 +1170,7 @@ static int bondp_import_pjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *b
             } else {
                 bdp_tjetty->is_multipath = udata_out->is_multipath;
                 if (bdp_tjetty->is_multipath) {
-                    int iodie_num = g_bondp_global_ctx->use_single_die ? SINGLE_DIE_IODIE_NUM : IODIE_NUM;
+                    int iodie_num = is_single_dev_mode(&bdp_ctx->v_ctx) ? SINGLE_DIE_IODIE_NUM : IODIE_NUM;
                     bdp_tjetty->local_dev_num = iodie_num;
                     bdp_tjetty->target_dev_num = iodie_num;
                     ret = import_primary_ports(bdp_ctx, bdp_tjetty, udata_out, rjetty, rjetty_token);
@@ -1543,6 +1546,7 @@ static int import_primary_ports_jfr(bondp_context_t *bdp_ctx, bondp_target_jetty
             URMA_LOG_WARN("Primary dev has NULL rjetty eid\n");
             continue;
         }
+        bdp_tjetty->target_valid[i] = true;
         p_rjfr.jfr_id = ex_info->slave_id[i];
         bdp_tjetty->p_tjetty[i][i] = urma_import_jfr(bdp_ctx->p_ctxs[i], &p_rjfr, rjfr_token);
         if (bdp_tjetty->p_tjetty[i][i] == NULL) {
@@ -1582,7 +1586,7 @@ static int bondp_import_pjfr(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
         bdp_tjetty->is_multipath = true; /* JFR currently only support multipath mode */
 
         if (bdp_tjetty->is_multipath) {
-            int iodie_num = g_bondp_global_ctx->use_single_die ? SINGLE_DIE_IODIE_NUM : IODIE_NUM;
+            int iodie_num = is_single_dev_mode(&bdp_ctx->v_ctx) ? SINGLE_DIE_IODIE_NUM : IODIE_NUM;
             bdp_tjetty->local_dev_num = iodie_num;
             bdp_tjetty->target_dev_num = iodie_num;
             ret = import_primary_ports_jfr(bdp_ctx, bdp_tjetty, udata_out, rjfr, token_value);
@@ -1797,7 +1801,7 @@ static void *get_jetty_and_ret(uint64_t addr, int *ret)
 static int init_elment_vjetty(urma_async_event_t *v_event, urma_async_event_t *p_event)
 {
     int ret = 0;
- 
+
     switch (p_event->event_type) {
         case URMA_EVENT_JFC_ERR:
             v_event->element.jfc = (urma_jfc_t *)get_jetty_and_ret(
@@ -1840,7 +1844,7 @@ urma_status_t bondp_get_async_event(urma_context_t *ctx, urma_async_event_t *v_e
     struct epoll_event event;
     urma_async_event_t *p_event;
     urma_status_t status;
- 
+
     int nfds = epoll_wait(ctx->async_fd, &event, 1, 0);
     if (nfds == -1) {
         URMA_LOG_ERR("epoll_wait no event or err.\n");
