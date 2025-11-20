@@ -697,6 +697,10 @@ int umq_ubmm_plus_enqueue_impl(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **ba
     uint16_t msg_id = 0;
     // handle rendezvous data
     if (qbuf->umqh == UMQ_INVALID_HANDLE) {
+        if (qbuf->total_data_size <= UMQ_DATA_LIMIT_SIZE) {
+            return umq_ub_enqueue_impl(tp->ub_handle, qbuf, bad_qbuf);
+        }
+
         rendezvous = true;
         send_buf = umq_prepare_rendezvous_data(tp, qbuf, &msg_id);
         if (send_buf == NULL) {
