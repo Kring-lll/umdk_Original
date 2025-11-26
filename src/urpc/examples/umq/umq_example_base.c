@@ -123,7 +123,10 @@ int run_umq_example_client(struct urpc_example_config *cfg)
         goto UNBIND;
     }
 
-    if (example_dequeue_data(umqh, EXAMPLE_SERVER_ENQUEUE_DATA, strlen(EXAMPLE_CLIENT_ENQUEUE_DATA)) != 0) {
+    // Mimic there is a time consuming job.
+    usleep(cfg->sleep_ms * 1000);
+
+    if (example_dequeue_data(umqh, EXAMPLE_SERVER_ENQUEUE_DATA, strlen(EXAMPLE_SERVER_ENQUEUE_DATA)) != 0) {
         goto UNBIND;
     }
     ret = 0;

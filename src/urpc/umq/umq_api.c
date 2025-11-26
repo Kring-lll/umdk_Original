@@ -16,6 +16,7 @@
 #include "umq_inner.h"
 #include "umq_qbuf_pool.h"
 #include "umq_huge_qbuf_pool.h"
+#include "umq_timer.h"
 #include "umq_errno.h"
 #include "urpc_util.h"
 
@@ -419,15 +420,38 @@ int umq_init(umq_init_cfg_t *cfg)
         goto FW_UNINIT;
     }
 
+    // timer pool
+    const uint64_t timer_pool_num_block = UMQ_TIMER_TOTAL_COUNT;
+    const uint64_t timer_pool_block_size = sizeof(umq_timer_t) + UMQ_TIMER_PAYLOAD_SIZE;
+    void *timer_pool_buf_addr = memalign(_Alignof(max_align_t), timer_pool_num_block * timer_pool_block_size);
+    if (timer_pool_buf_addr == NULL) {
+        UMQ_VLOG_ERR("memory alloc for timer pool failed\n");
+        goto QBUF_POOL_UNINIT;
+    }
+
+    umq_timer_pool_cfg_t timer_pool_cfg = {
+        .buf_addr = timer_pool_buf_addr,
+        .num_block = timer_pool_num_block,
+        .block_size = timer_pool_block_size,
+    };
+    if (umq_timer_pool_init(&timer_pool_cfg) != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR("timer pool init failed\n");
+        free(timer_pool_buf_addr);
+        goto QBUF_POOL_UNINIT;
+    }
+
     if (umq_dfx_init(cfg) != UMQ_SUCCESS) {
         UMQ_VLOG_ERR("umq dfx init failed\n");
-        goto POOL_UNINIT;
+        goto TIMER_POOL_UNINIT;
     }
 
     g_umq_inited = true;
     return UMQ_SUCCESS;
 
-POOL_UNINIT:
+TIMER_POOL_UNINIT:
+    umq_timer_pool_uninit();
+
+QBUF_POOL_UNINIT:
     umq_qbuf_pool_uninit();
 
 FW_UNINIT:

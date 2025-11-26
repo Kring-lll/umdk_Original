@@ -10,6 +10,7 @@
 #include <pthread.h>
 #include <sys/queue.h>
 #include <malloc.h>
+#include <assert.h>
 
 #include "perf.h"
 #include "urpc_util.h"
@@ -23,9 +24,12 @@
 #include "util_id_generator.h"
 #include "umq_ub_imm_data.h"
 #include "umq_ub_impl.h"
+#include "umq_timer.h"
 
 #define UMQ_DEFAULT_BUF_SIZE 4096
 #define UMQ_DEFAULT_DEPTH 1024
+#define DEFAULT_RNDV_TIMEOUT 1000    // 1000ms
+#define DEFAULT_RNDV_TIMEOUT_MIN 100 // 100ms
 #define DEFAULT_PRIORITY 5
 #define DEFAULT_RNR_RETRY 6      // Retry 6 times
 #define DEFAULT_ERR_TIMEOUT 2
@@ -33,7 +37,7 @@
 #define UMQ_MAX_SGE_NUM 16
 #define UMQ_REV_PULL_DONE 1
 #define UMQ_FLUSH_MAX_RETRY_TIMES 10000
-#define UMQ_MAX_ID_NUM (1 << 16)
+#define UMQ_MAX_ID_NUM ((1 << 16) - 1) // 1 .. 65535
 #define UMQ_CONTINUE_FLAG 1
 #define UMQ_MAX_QBUF_NUM 1
 #define UMQ_MAX_TSEG_NUM 255
@@ -143,6 +147,7 @@ typedef struct ub_queue {
     uint32_t tx_depth;
     uint32_t remote_rx_buf_size;
 
+    uint32_t rndv_timeout;      // the milliseconds of waiting for REVERSE_PULL_MEM_FREE msg (UB PLUS ONLY)
     uint8_t priority;           // priority of the queue
     uint8_t max_rx_sge;         // max sge number of receive array
     uint8_t max_tx_sge;         // max sge number of send array
@@ -153,6 +158,10 @@ typedef struct ub_queue {
     bool rx_flush_done;         // rx buf ctx all report
     umq_queue_mode_t mode;      // mode of queue, QUEUE_MODE_POLLING for default
     umq_state_t state;
+    umq_timer_list_t tx_timer_list;
+    pthread_mutex_t tx_timer_list_mutex;
+    umq_timer_list_t rx_timer_list;
+    pthread_mutex_t rx_timer_list_mutex;
     rx_buf_ctx_list_t rx_buf_ctx_list;
     umq_buf_t *notify_buf;      // qbuf for manage message exchange, such as mem import/initial flow control window
     uint64_t umqh;
@@ -259,6 +268,32 @@ typedef struct ub_bind_ctx {
     urma_target_jetty_t *tjetty;
     uint64_t remote_notify_addr;
 } ub_bind_ctx_t;
+
+/**
+ * Server needs a timer with umq_ub_on_pull_mem_done_timeout_ctx_t attached to
+ * handle cases, e.g. the client is down.
+ */
+typedef struct umq_ub_on_pull_mem_done_timeout_ctx {
+    uint16_t msg_id;    // Client sends a REVERSE_PULL_MEM meta message containing this msg_id
+    ub_queue_t *queue;  // The ub queue object
+    umq_buf_t *dst_buf; // The target bufs
+} umq_ub_on_pull_mem_done_timeout_ctx_t;
+
+/**
+ * Client needs a timer with umq_ub_on_pull_mem_free_timeout_ctx_t attached to
+ * handle cases, e.g. the server is down.
+ */
+typedef struct umq_ub_on_pull_mem_free_timeout_ctx {
+    uint16_t msg_id;   // To find the relevant BUFs
+    ub_queue_t *queue; // The ub queue object
+} umq_ub_on_pull_mem_free_timeout_ctx_t;
+
+// If you add a new timer context, please add it below.
+typedef union umq_ub_timer_ctx {
+    umq_ub_on_pull_mem_done_timeout_ctx_t on_pull_mem_done_timeout_ctx;
+    umq_ub_on_pull_mem_free_timeout_ctx_t on_pull_mem_free_timeout_ctx;
+} umq_ub_timer_ctx_t;
+static_assert(sizeof(umq_ub_timer_ctx_t) <= UMQ_TIMER_PAYLOAD_SIZE, "The timer context is too large");
 
 static umq_ub_ctx_t *g_ub_ctx = NULL;
 static uint32_t g_ub_ctx_count = 0;
@@ -1630,6 +1665,10 @@ static int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *optio
                         dev_ctx->dev_attr.dev_cap.max_jfr_sge : UMQ_MAX_SGE_NUM;
     queue->max_tx_sge = dev_ctx->dev_attr.dev_cap.max_jfs_sge < UMQ_MAX_SGE_NUM ?
                         dev_ctx->dev_attr.dev_cap.max_jfs_sge : UMQ_MAX_SGE_NUM;
+    queue->rndv_timeout =
+        (option->create_flag & UMQ_CREATE_FLAG_RNDV_TIMEOUT)
+            ? MAX(option->rndv_timeout, DEFAULT_RNDV_TIMEOUT_MIN)
+            : DEFAULT_RNDV_TIMEOUT;
     queue->priority = DEFAULT_PRIORITY;
     queue->err_timeout = DEFAULT_ERR_TIMEOUT;
     queue->rnr_retry = DEFAULT_RNR_RETRY;
@@ -1738,9 +1777,14 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
         goto DELETE_JFR;
     }
 
+    (void)pthread_mutex_init(&queue->tx_timer_list_mutex, NULL);
+    (void)pthread_mutex_init(&queue->rx_timer_list_mutex, NULL);
+    umq_timer_list_init(&queue->tx_timer_list);
+    umq_timer_list_init(&queue->rx_timer_list);
+
     if (rx_buf_ctx_list_init(queue) != UMQ_SUCCESS) {
         UMQ_VLOG_ERR("rx buf ctx list init failed\n");
-        goto DELETE_JETTY;
+        goto UNINIT_TIMER_LIST;
     }
 
     queue->notify_buf = umq_buf_alloc(1, 1, UMQ_INVALID_HANDLE, NULL);
@@ -1763,7 +1807,11 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
     return (uint64_t)(uintptr_t)queue;
 UNINIT_RX_CTX_LIST:
     (void)rx_buf_ctx_list_uninit(&queue->rx_buf_ctx_list);
-DELETE_JETTY:
+UNINIT_TIMER_LIST:
+    (void)umq_timer_list_uninit(&queue->tx_timer_list);
+    (void)umq_timer_list_uninit(&queue->rx_timer_list);
+    (void)pthread_mutex_destroy(&queue->tx_timer_list_mutex);
+    (void)pthread_mutex_destroy(&queue->rx_timer_list_mutex);
     (void)urma_delete_jetty(queue->jetty);
 DELETE_JFR:
     (void)urma_delete_jfr(queue->jfr);
@@ -1806,6 +1854,11 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
 
     umq_ub_flow_control_uninit(&queue->flow_control);
     rx_buf_ctx_list_uninit(&queue->rx_buf_ctx_list);
+
+    pthread_mutex_destroy(&queue->tx_timer_list_mutex);
+    pthread_mutex_destroy(&queue->rx_timer_list_mutex);
+    umq_timer_list_uninit(&queue->tx_timer_list);
+    umq_timer_list_uninit(&queue->rx_timer_list);
 
     if (urma_delete_jetty(queue->jetty) != URMA_SUCCESS) {
         UMQ_VLOG_ERR("delete jetty failed\n");
@@ -1893,6 +1946,47 @@ void ubmm_fill_big_data_ref_sge(uint64_t umqh_tp, ub_ref_sge_t *ref_sge,
     fill_big_data_ref_sge(queue, ref_sge, buffer, import_mempool_info, umq_imm_head);
 }
 
+static void on_pull_mem_free_timeout(void *arg)
+{
+    umq_ub_on_pull_mem_free_timeout_ctx_t *ctx = (umq_ub_on_pull_mem_free_timeout_ctx_t *)arg;
+
+    const uint16_t msg_id = ctx->msg_id;
+    if (URPC_LIKELY(msg_id != 0)) {
+        ub_queue_t *queue = ctx->queue;
+        umq_buf_t *buffer = (umq_buf_t *)queue->addr_list[msg_id];
+        int32_t rest_data_size = (int32_t)buffer->total_data_size;
+        for (umq_buf_t *current = buffer; current && rest_data_size > 0; current = current->qbuf_next) {
+            rest_data_size -= (int32_t)current->data_size;
+            // truncate qbuf list for many packages connected, only release one
+            // package, can't truncate qbuf list when send, because all qbufs of 128
+            // wr are connected, and the address of the first qbuf is placed in the
+            // user_ctx of the 128th wr, then released
+            if (rest_data_size <= 0) {
+                current->qbuf_next = NULL;
+                break;
+            }
+        }
+        umq_buf_free(buffer);
+        util_id_allocator_release(&g_umq_ub_id_allocator, msg_id);
+    }
+}
+
+static int umq_ub_read_done(ub_queue_t *queue, uint16_t msg_id);
+
+static void on_pull_mem_done_timeout(void *arg)
+{
+    umq_ub_on_pull_mem_done_timeout_ctx_t *ctx = (umq_ub_on_pull_mem_done_timeout_ctx_t *)arg;
+
+    const uint16_t msg_id = ctx->msg_id;
+    if (URPC_LIKELY(msg_id != 0)) {
+        ub_queue_t *queue = ctx->queue;
+        if (URPC_UNLIKELY(umq_ub_read_done(queue, msg_id) != UMQ_SUCCESS)) {
+            UMQ_LIMIT_VLOG_ERR("umq ub send imm failed\n");
+        }
+        umq_buf_free(ctx->dst_buf);
+    }
+}
+
 static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
 {
     // apply for one to avoid memory leak
@@ -1909,8 +2003,21 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
     uint16_t msg_id = util_id_allocator_get(&g_umq_ub_id_allocator);
     queue->addr_list[msg_id] = (uint64_t)(uintptr_t)(*buffer);
 
+    // Client: Create the timer for receiving REVERSE_PULL_MEM_FREE msg.
+    umq_ub_on_pull_mem_free_timeout_ctx_t ctx = {
+        .msg_id = msg_id,
+        .queue = queue,
+    };
+    umq_timer_t *timer =
+        umq_timer_create_with_id(umq_timer_pool_thread_cache(), on_pull_mem_free_timeout, &ctx, sizeof(ctx),
+                                 queue->rndv_timeout, msg_id);
+    if (URPC_UNLIKELY(timer == NULL)) {
+        UMQ_LIMIT_VLOG_ERR("umq malloc for timer failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
     umq_imm_head_t *umq_imm_head = (umq_imm_head_t *)(uintptr_t)send_buf->buf_data;
-    ub_fill_umq_imm_head(umq_imm_head, *buffer);
+    ub_fill_umq_imm_head(umq_imm_head, *buffer, queue->rndv_timeout);
     ub_ref_sge_t *ref_sge = (ub_ref_sge_t *)(uintptr_t)(umq_imm_head + 1);
 
     ub_import_mempool_info_t import_mempool_info[UMQ_MAX_TSEG_NUM];
@@ -1962,13 +2069,20 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
                                     .msg_num = (uint16_t)buf_index}};
     int ret = umq_ub_send_imm(queue, imm.value, &sge, user_ctx);
     if (ret != UMQ_SUCCESS) {
+        umq_timer_destroy(timer);
         umq_buf_free(send_buf);
         UMQ_LIMIT_VLOG_ERR("umq_ub_send_imm failed\n");
         return ret;
     }
+
+    URPC_WITH_LOCK(queue->rx_timer_list_mutex) {
+        umq_timer_list_add(&queue->rx_timer_list, timer);
+    }
+
     return UMQ_SUCCESS;
 
 FREE_BUF:
+    umq_timer_destroy(timer);
     umq_buf_free(send_buf);
     return UMQ_FAIL;
 }
@@ -2390,6 +2504,21 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm)
         return -UMQ_ERR_ENOMEM;
     }
 
+    // Server: Create the timer for arrival of all READ CQEs
+    const uint32_t rtt_ms = DEFAULT_RNDV_TIMEOUT_MIN;
+    umq_ub_on_pull_mem_done_timeout_ctx_t ctx = {
+        .msg_id = msg_id,
+        .queue = queue,
+        .dst_buf = ((user_ctx_t *)(ctx_buf->buf_data))->dst_buf,
+    };
+    umq_timer_t *timer =
+        umq_timer_create_with_id(umq_timer_pool_thread_cache(), on_pull_mem_done_timeout, &ctx, sizeof(ctx),
+                                 umq_imm_head->rndv_timeout - rtt_ms, msg_id);
+    if (URPC_UNLIKELY(timer == NULL)) {
+        UMQ_LIMIT_VLOG_ERR("create pull mem done timer failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
     urma_target_seg_t **tseg_list = queue->dev_ctx->tseg_list;
     user_ctx_t *user_ctx = (user_ctx_t *)ctx_buf->buf_data;
     umq_buf_t *dst_buf = user_ctx->dst_buf;
@@ -2429,11 +2558,17 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm)
             }
         }
     }
+
+    URPC_WITH_LOCK(queue->tx_timer_list_mutex) {
+        umq_timer_list_add(&queue->tx_timer_list, timer);
+    }
+
     dst_buf->total_data_size = total_data_size;
     umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, buf_num);
     return UMQ_SUCCESS;
 
 FREE_CTX_BUF:
+    umq_timer_destroy(timer);
     umq_ub_read_ctx_destory(ctx_buf);
     return UMQ_FAIL;
 }
@@ -2558,27 +2693,22 @@ static int process_send_imm(umq_buf_t *rx_buf, umq_ub_imm_t imm, uint64_t umqh)
         umq_buf_free(rx_buf); // release rx
         ret = UMQ_CONTINUE_FLAG;
     } else if (imm.ub_plus.sub_type == IMM_TYPE_REVERSE_PULL_MEM_FREE) {
-        uint16_t msg_id = (uint16_t)(imm.ub_plus.msg_id);
+        const uint16_t msg_id = (uint16_t)(imm.ub_plus.msg_id);
         if (msg_id != 0) {
             ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
-            umq_buf_t *buffer = (umq_buf_t *)queue->addr_list[msg_id];
-            int32_t rest_data_size = (int32_t)buffer->total_data_size;
-            umq_buf_t *tmp_buf = buffer;
-            while (tmp_buf && rest_data_size > 0) {
-                rest_data_size -= (int32_t)tmp_buf->data_size;
-                /*
-                 * truncate qbuf list for many packages connected, only release one package,
-                 * can't truncate qbuf list when send, because all qbufs of 128 wr are connected,
-                 * and the address of the first qbuf is placed in the user_ctx of the 128th wr, then released
-                 */
-                if (rest_data_size <= 0) {
-                    tmp_buf->qbuf_next = NULL;
-                    break;
-                }
-                tmp_buf = tmp_buf->qbuf_next;
+
+            umq_timer_t *timer = NULL;
+            URPC_WITH_LOCK(queue->rx_timer_list_mutex) {
+                timer = umq_timer_list_remove_by_id(&queue->rx_timer_list, msg_id);
             }
-            umq_buf_free(buffer); // release tx mem
-            util_id_allocator_release(&g_umq_ub_id_allocator, msg_id);
+
+            if (timer != NULL) {
+                // See on_pull_mem_free_timeout
+                umq_timer_invoke(timer);
+                umq_timer_destroy(timer);
+            } else {
+                UMQ_LIMIT_VLOG_WARN("server read done, but the timer has already been timed-out with msg_id %d\n", msg_id);
+            }
         }
         umq_buf_free(rx_buf); // release rx
         ret = UMQ_CONTINUE_FLAG;
@@ -2941,6 +3071,18 @@ static void umq_ub_enqueue_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
 
 static void umq_ub_enqueue_plus_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
 {
+    // If there are timers expired...
+    umq_timer_list_t expired;
+    umq_timer_list_init(&expired);
+    URPC_WITH_LOCK(queue->tx_timer_list_mutex) {
+        umq_timer_list_get_expired(&queue->tx_timer_list, &expired, get_timestamp_ms());
+    }
+
+    const int cnt = umq_timer_list_do_expire(&expired);
+    if (cnt > 0) {
+        UMQ_LIMIT_VLOG_INFO("%d timers are expired.", cnt);
+    }
+
     urma_cr_t cr[UMQ_POST_POLL_BATCH];
     int tx_cr_cnt = urma_poll_jfc(queue->jfs_jfc, UMQ_POST_POLL_BATCH, cr);
     if (tx_cr_cnt < 0) {
@@ -3435,6 +3577,19 @@ static inline int process_imm_msg(uint64_t umqh_tp, umq_buf_t *buf, urma_cr_t *c
 static int umq_ub_dequeue_plus_with_poll_rx(uint64_t umqh_tp, urma_cr_t *cr, umq_buf_t **buf)
 {
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
+
+    // Check for timer expiration.
+    umq_timer_list_t expired;
+    umq_timer_list_init(&expired);
+    URPC_WITH_LOCK(queue->rx_timer_list_mutex) {
+        umq_timer_list_get_expired(&queue->rx_timer_list, &expired, get_timestamp_ms());
+    }
+
+    const int cnt = umq_timer_list_do_expire(&expired);
+    if (cnt > 0) {
+        UMQ_LIMIT_VLOG_INFO("%d timers are expired.\n", cnt);
+    }
+
     int qbuf_cnt = 0;
     int rx_cr_cnt = urma_poll_jfc(queue->jfr_jfc, UMQ_POST_POLL_BATCH, cr);
     if (rx_cr_cnt < 0) {
@@ -3479,6 +3634,18 @@ static void umq_ub_rev_pull_tx_cqe(
     user_ctx_t *user_ctx = (user_ctx_t *)cur_tx_buf->buf_data;
     user_ctx->wr_cnt++;
     if (user_ctx->wr_cnt == user_ctx->wr_total) {
+        umq_timer_t *timer = NULL;
+        URPC_WITH_LOCK(queue->tx_timer_list_mutex) {
+            timer = umq_timer_list_remove_by_id(&queue->tx_timer_list, user_ctx->msg_id);
+        }
+
+        if (timer == NULL) {
+            UMQ_LIMIT_VLOG_WARN("The timer with msg_id %u has already been timed-out\n", user_ctx->msg_id);
+            return;
+        }
+
+        umq_timer_destroy(timer);
+
         if (umq_ub_read_done(queue, user_ctx->msg_id) != UMQ_SUCCESS) {
             UMQ_LIMIT_VLOG_ERR("umq ub send imm failed\n");
         }
@@ -3517,6 +3684,18 @@ static void umq_ub_non_rev_pull_tx_cqe(ub_queue_t *queue, umq_buf_t *cur_tx_buf,
 
 static int umq_ub_dequeue_plus_with_poll_tx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t **buf, int return_rx_cnt)
 {
+    // Check for timer expiration
+    umq_timer_list_t expired;
+    umq_timer_list_init(&expired);
+    URPC_WITH_LOCK(queue->tx_timer_list_mutex) {
+        umq_timer_list_get_expired(&queue->tx_timer_list, &expired, get_timestamp_ms());
+    }
+
+    const int cnt = umq_timer_list_do_expire(&expired);
+    if (cnt > 0) {
+        UMQ_LIMIT_VLOG_INFO("%d timers are expired.\n", cnt);
+    }
+
     umq_buf_t *tx_buf[UMQ_POST_POLL_BATCH];
     int tx_cr_cnt = urma_poll_jfc(queue->jfs_jfc, UMQ_POST_POLL_BATCH, cr);
     if (tx_cr_cnt < 0) {

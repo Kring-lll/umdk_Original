@@ -81,6 +81,8 @@ struct urpc_example_config {
     uint16_t cna;
     enum UMQ_TRANS_MODE sub_trans_mode;
     uint32_t deid;
+    uint32_t timeout;  // Timeout for PULL_MEM_FREE msg. The timer will be timed-out if sleep_ms >= timeout.
+    uint32_t sleep_ms; // Mimic there is a op between enqueue and dequeue in client
 };
 
 struct req_cb_arg {

@@ -12,7 +12,7 @@
 
 int util_id_allocator_init(util_id_allocator_t *id_allocator, uint32_t max_num, uint32_t start_id)
 {
-    if (id_allocator->available_ids != NULL) {
+    if (id_allocator->available_ids != NULL || id_allocator->recycled_ids != NULL) {
         return -1;
     }
 
@@ -21,8 +21,17 @@ int util_id_allocator_init(util_id_allocator_t *id_allocator, uint32_t max_num, 
         return -1;
     }
 
-    id_allocator->num_available = 0;
-    id_allocator->next_id = start_id;
+    id_allocator->recycled_ids = (uint32_t *)calloc(max_num, sizeof(uint32_t));
+    if (id_allocator->recycled_ids == NULL) {
+        return -1;
+    }
+
+    for (uint32_t i = 0; i < max_num; ++i) {
+        id_allocator->available_ids[i] = start_id++;
+    }
+
+    id_allocator->num_available = max_num;
+    id_allocator->num_recycled = 0;
     id_allocator->max_num = max_num;
     (void)pthread_mutex_init(&id_allocator->lock, NULL);
 
@@ -40,14 +49,15 @@ uint32_t util_id_allocator_get(util_id_allocator_t *id_allocator)
 {
     uint32_t id;
     (void)pthread_mutex_lock(&id_allocator->lock);
-    if (id_allocator->num_available > 0) {
-        id = id_allocator->available_ids[--id_allocator->num_available];
-    } else {
-        id = id_allocator->next_id++;
-        if (id >= id_allocator->max_num) {
-            id_allocator->next_id--;
-        }
+    if (id_allocator->num_available == 0) {
+        uint32_t *tmp = id_allocator->available_ids;
+        id_allocator->available_ids = id_allocator->recycled_ids;
+        id_allocator->recycled_ids = tmp;
+
+        id_allocator->num_available = id_allocator->num_recycled;
+        id_allocator->num_recycled = 0;
     }
+    id = id_allocator->available_ids[--id_allocator->num_available];
     (void)pthread_mutex_unlock(&id_allocator->lock);
 
     return id;
@@ -55,13 +65,11 @@ uint32_t util_id_allocator_get(util_id_allocator_t *id_allocator)
 
 void util_id_allocator_release(util_id_allocator_t *id_allocator, uint32_t util_id)
 {
-    if (id_allocator->available_ids == NULL) {
+    if (id_allocator->recycled_ids == NULL) {
         return;
     }
     (void)pthread_mutex_lock(&id_allocator->lock);
-    if (id_allocator->num_available < id_allocator->max_num) {
-        id_allocator->available_ids[id_allocator->num_available++] = util_id;
-    }
+    id_allocator->recycled_ids[id_allocator->num_recycled++] = util_id;
     (void)pthread_mutex_unlock(&id_allocator->lock);
     return;
 }
