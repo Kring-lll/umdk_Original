@@ -315,29 +315,29 @@ class UBUSHost(BaseObject):
                 pid_diff = pid_set2.difference(pid_set1)
                 if len(pid_diff) == 1:
                     pid = pid_diff.pop()
-                res = BackgroundCmdRes(self, res, timeout, silence, log_path, pid, port, exp_ret)
-                if silence <= 1:
-                    log.info(f" [ {self.manage_ip}  exec_cmd ] {cmd_args} pid={pid}")
-                self.process.append(res)
-            else:
-                if silence <= 1:
-                    log.info(f" [ {self.manage_ip}  exec_cmd ] {cmd_args}")
-                res = None
-                try:
-                    res  = self.conn.run(cmd, hide=True, timeout=timeout, out_stream=log_path, err_stream=log_path,
-                                         warn=True, pty=True, env=env)
-                    res.ret = res.return_code
-                    if silence == 0:
-                        log.info(f" [ {self.manage_ip}  exec_cmd end ] {cmd_args} ret={res.ret} stdout=\n{res.stdout}")
-                    if log_path is not None:
-                        log_path.close()
-                except Exception as reason:
-                    log.error(f" [ {self.manage_ip} exec_cmd failed ] cmd={cmd} reason:{reason}!!!")
-                finally:
-                    pass
-                if exp_ret is not None:
-                    self.assertEqual(res.ret, exp_ret)
-            return res
+            res = BackgroundCmdRes(self, res, timeout, silence, log_path, pid, port, exp_ret)
+            if silence <= 1:
+                log.info(f" [ {self.manage_ip}  exec_cmd ] {cmd_args} pid={pid}")
+            self.process.append(res)
+        else:
+            if silence <= 1:
+                log.info(f" [ {self.manage_ip}  exec_cmd ] {cmd_args}")
+            res = None
+            try:
+                res  = self.conn.run(cmd, hide=True, timeout=timeout, out_stream=log_path, err_stream=log_path,
+                                        warn=True, pty=True, env=env)
+                res.ret = res.return_code
+                if silence == 0:
+                    log.info(f" [ {self.manage_ip}  exec_cmd end ] {cmd_args} ret={res.ret} stdout=\n{res.stdout}")
+                if log_path is not None:
+                    log_path.close()
+            except Exception as reason:
+                log.error(f" [ {self.manage_ip} exec_cmd failed ] cmd={cmd} reason:{reason}!!!")
+            finally:
+                pass
+            if exp_ret is not None:
+                self.assertEqual(res.ret, exp_ret)
+        return res
 
     def try_put(self, src_path, dst_host, dst_path):
         _cmd = f"scp -P {dst_host.ssh_port} -r {src_path} {dst_host.ssh_ip}:{dst_path}"
