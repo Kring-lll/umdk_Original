@@ -77,6 +77,12 @@ extern "C" {
 #define URPC_RUNNING (1)
 #define URPC_INVALID_TASK_ID (-1)
 
+#define URPC_WITH_LOCK(mtx)                                                               \
+    for (int b = (pthread_mutex_lock(&(mtx)), 1); b; b = 0, pthread_mutex_unlock(&(mtx))) \
+
+#define URPC_WITH_TRYLOCK(mtx)                                                               \
+    for (int b = pthread_mutex_trylock(&(mtx)) == 0; b; b = 0, pthread_mutex_unlock(&(mtx))) \
+
 enum constructor_priority {
     CONSTRUCTOR_PRIORITY_GLOBAL = 101,
     CONSTRUCTOR_PRIORITY_DRIVER,

@@ -86,6 +86,32 @@ static inline void urpc_list_remove(struct urpc_list *node)
     node->prev = (struct urpc_list *)LIST_POSION_PREV;
 }
 
+static inline void urpc_list_splice_impl(struct urpc_list *list, struct urpc_list *prev, struct urpc_list *next)
+{
+    struct urpc_list *first = list->next;
+    struct urpc_list *last = list->prev;
+
+    first->prev = prev;
+    prev->next = first;
+
+    last->next = next;
+    next->prev = last;
+}
+
+static inline void urpc_list_splice(struct urpc_list *list, struct urpc_list *head)
+{
+    if (!urpc_list_is_empty(list)) {
+        urpc_list_splice_impl(list, head, head->next);
+    }
+}
+
+static inline void urpc_list_splice_tail(struct urpc_list *list, struct urpc_list *head)
+{
+    if (!urpc_list_is_empty(list)) {
+        urpc_list_splice_impl(list, head->prev, head);
+    }
+}
+
 static inline struct urpc_list *urpc_list_pop_front(struct urpc_list *list)
 {
     struct urpc_list *node = list->next;

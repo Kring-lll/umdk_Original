@@ -11,7 +11,8 @@
 typedef struct util_id_allocator {
     uint32_t *available_ids;
     uint32_t num_available;
-    uint32_t next_id;
+    uint32_t *recycled_ids;
+    uint32_t num_recycled;
     uint32_t max_num;
     pthread_mutex_t lock;
 } util_id_allocator_t;

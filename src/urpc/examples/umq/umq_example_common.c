@@ -10,6 +10,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <time.h>
 #include <sys/time.h>
 #include <arpa/inet.h>
@@ -56,6 +57,8 @@ static struct option g_long_options[] = {
     {"client",             no_argument,       NULL, 'l'},
     {"cna",                required_argument, NULL, 'C'},
     {"deid",               required_argument, NULL, 'D'},
+    {"timeout",            required_argument, NULL, 'x'},
+    {"sleep-ms",           required_argument, NULL, 'z'},
     {NULL,                 0,                 NULL,  0 }
 };
 
@@ -82,12 +85,13 @@ uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bin
     umq_create_option_t option = {
         .trans_mode = init_cfg->trans_info[0].trans_mode,
         .create_flag = UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_TX_BUF_SIZE | UMQ_CREATE_FLAG_RX_DEPTH |
-            UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE,
+            UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE | UMQ_CREATE_FLAG_RNDV_TIMEOUT,
         .rx_buf_size = EXAMPLE_BUFFER_SIZE,
         .tx_buf_size = EXAMPLE_BUFFER_SIZE,
         .rx_depth = EXAMPLE_DEPTH,
         .tx_depth = EXAMPLE_DEPTH,
-        .mode = (umq_queue_mode_t)cfg->poll_mode
+        .rndv_timeout = cfg->timeout,
+        .mode = (umq_queue_mode_t)cfg->poll_mode,
     };
     if (cfg->instance_mode == SERVER) {
         if (sprintf(option.name, "%s", "server") <= 0) {
@@ -474,10 +478,15 @@ int example_enqueue_data(uint64_t umqh, const char *data, uint32_t data_size)
         return -1;
     }
 
+    umq_buf_t *it = buf;
+    for (uint32_t offset = 0; offset < data_size; ) {
+        (void)memcpy(it->buf_data, data + offset, it->data_size);
+
+        offset += it->data_size;
+        it = it->qbuf_next;
+    }
     buf->io_direction = UMQ_IO_TX;
-    (void)memcpy(buf->buf_data, data, data_size);
-    buf->data_size = data_size;
-    buf->total_data_size = data_size;
+
     umq_buf_t *bad_buf = NULL;
     if (umq_enqueue(umqh, buf, &bad_buf) != UMQ_SUCCESS) {
         LOG_PRINT_ERR("enqueue failed\n");
@@ -486,6 +495,28 @@ int example_enqueue_data(uint64_t umqh, const char *data, uint32_t data_size)
     }
 
     return 0;
+}
+
+static bool umq_buf_memcmp(umq_buf_t *buf, const char *data, uint32_t sz)
+{
+    if (buf == NULL) {
+        return false;
+    }
+
+    if (buf->total_data_size != sz) {
+        return false;
+    }
+
+    while (buf) {
+        if (memcmp(buf->buf_data, data, buf->data_size) != 0) {
+            return false;
+        }
+
+        data += buf->data_size;
+        buf = buf->qbuf_next;
+    }
+
+    return true;
 }
 
 int example_dequeue_data(uint64_t umqh, const char *check_data, uint32_t data_size)
@@ -502,7 +533,7 @@ int example_dequeue_data(uint64_t umqh, const char *check_data, uint32_t data_si
         return -1;
     }
 
-    if (buf->buf_data == NULL || memcmp((char *)buf->buf_data, check_data, data_size) != 0) {
+    if (buf->buf_data == NULL || !umq_buf_memcmp(buf, check_data, data_size)) {
         LOG_PRINT_ERR("dequeue data[%s] doesn't match check data[%s]\n", (char *)buf->buf_data, check_data);
         umq_buf_free(buf);
         return -1;
@@ -630,6 +661,12 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
                 break;
             case 'D':
                 cfg->deid = (uint32_t)strtoul(optarg, NULL, 0);
+                break;
+            case 'x':
+                cfg->timeout = (uint32_t)strtoul(optarg, NULL, 0);
+                break;
+            case 'z':
+                cfg->sleep_ms = (uint32_t)strtoul(optarg, NULL, 0);
                 break;
             default:
                 return -1;

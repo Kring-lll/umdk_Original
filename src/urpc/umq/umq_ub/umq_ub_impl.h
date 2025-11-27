@@ -38,6 +38,7 @@ typedef struct umq_imm_head {
     uint32_t mem_interval : 2;
     uint32_t recv : 6;
     uint32_t mempool_num : 8;
+    uint32_t rndv_timeout;
 } umq_imm_head_t;
 
 typedef struct ub_ref_sge {
@@ -120,12 +121,13 @@ static inline uint32_t get_mem_interval(uint32_t used_mem_size)
     return UMQ_SIZE_MID_BIG_INTERVAL;
 }
 
-static inline void ub_fill_umq_imm_head(umq_imm_head_t *umq_imm_head, umq_buf_t *buffer)
+static inline void ub_fill_umq_imm_head(umq_imm_head_t *umq_imm_head, umq_buf_t *buffer, uint32_t timeout)
 {
     umq_imm_head->version = UMQ_IMM_VERSION;
     umq_imm_head->type = IMM_PROTOCAL_TYPE_NONE;
     umq_imm_head->mempool_num = 0;
     umq_imm_head->mem_interval = get_mem_interval(buffer->data_size);
+    umq_imm_head->rndv_timeout = timeout;
 }
 
 void ubmm_fill_big_data_ref_sge(uint64_t umqh_tp, ub_ref_sge_t *ref_sge,
