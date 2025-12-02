@@ -143,7 +143,7 @@ class UBUSFeature(BaseTest):
         log.info("校验urma_perftest打流结果")
         perf_ret = 0
         if p1.ret != 0 or p2.ret != 0:
-                perf_ret = -1
+            perf_ret = -1
         if not expect_failed:
             self.assertEqual(perf_ret, 0, "ERROR: 打流异常!")
         return perf_ret

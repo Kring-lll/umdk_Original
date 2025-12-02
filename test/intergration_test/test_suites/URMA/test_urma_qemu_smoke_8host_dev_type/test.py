@@ -22,7 +22,7 @@ class Test(UBUSFeature):
         log.info('---------- [ Test teardown ] ----------')
         super(Test, self).teardown()
  
-    def test_urma_qemu_smoke_8host_dev_tpye(self):
+    def test_urma_qemu_smoke_8host_dev_type(self):
         p_list = []
         cmd_list = ["read_bw", "write_bw", "send_bw", "read_lat", "write_lat", "send_lat"]
         mode_list = ["-p 0 --eid_idx 7", "-p 1  --eid_idx 7", "-p 0 --ctp", "-p 1 --ctp"]
