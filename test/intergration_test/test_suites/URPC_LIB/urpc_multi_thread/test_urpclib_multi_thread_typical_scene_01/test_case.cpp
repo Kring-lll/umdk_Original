@@ -6,24 +6,25 @@
 
 #include "urpc_lib_atom.h"
 
-#define TEST_POLL_TYIMEOUT1 10
+#define TEST_POLL_TIIMEOUT 10
  
 #define TEST_THREAD_NUM URPC_CLIENT_CHANNEL_ATTACH_MAX
  
 typedef struct {
     test_urpc_ctx_t *ctx;
-    pthread_barrier *barrier;
+    pthread_barrier_t *barrier;
     uint64_t va;
     uint64_t len;
     uint32_t index;
     int result;
- }
+ } thread_args_t;
 
 void *test_exec_thread(void *arg)
 {
     int ret = 0;
-    poll_thread_args_t *args = {poll_thread_args_t *}arg;
+    thread_args_t *args = (thread_args_t *)arg;
     test_func_args_t func_args = {0};
+    uint32_t i = args->index;
     TEST_LOG_INFO("--- thread start index:[%d] ----------\n", args->index);
 
     for (uint32_t r = 0; r < 10; r ++) {
@@ -33,18 +34,18 @@ void *test_exec_thread(void *arg)
         func_args.func_id = args->ctx->func_id;
         ret = test_func_call_recv_rsp_no_ack(&func_args);
         if (ret != TEST_SUCCESS) {
-            TEST_LOG_INFO("test round rsp_no_ack channel id=%u lqueue_ id=%d rqueue id=%u\n", i, i, i);
+            TEST_LOG_INFO("test round rsp_no_ack channel id=%u lqueue id=%u rqueue id=%u\n", i, i, i);
         }
         CHKERR_JUMP(ret != TEST_SUCCESS, "test_func_call_recv_rsp_no_ack", EXIT);
         ret = test_func_call_no_rsp_no_ack(&func_args);
         if (ret != TEST_SUCCESS) {
-            TEST_LOG_INFO("test round no_rsp_no_ack channel id=%u lqueue_ id=%d rqueue id=%u\n", i, i, i);
+            TEST_LOG_INFO("test round no_rsp_no_ack channel id=%u lqueue id=%u rqueue id=%u\n", i, i, i);
         }
         CHKERR_JUMP(ret != TEST_SUCCESS, "test_func_call_no_rsp_no_ack", EXIT);
     }
 EXIT:
-    args-?result = (ret == 0) ? TEST_SUCCESS : TEST_FAILED;
-    TEST_LOG_INFO("---thread end index:[%d] ret:[%d]----------\n", args->index, ret)
+    args->result = (ret == 0) ? TEST_SUCCESS : TEST_FAILED;
+    TEST_LOG_INFO("---thread end index:[%d] ret:[%d]----------\n", args->index, ret);
     pthread_barrier_wait(args->barrier);
 }
 
@@ -55,8 +56,8 @@ static int run_test(test_urpc_ctx_t *ctx)
     thread_args_t thread_args[TEST_THREAD_NUM];
     pthread_barrier_t barrier;
     pthread_barrier_init(&barrier, NULL, TEST_THREAD_NUM + 1);
-    ctx->queue_num = 1;
-    ctx->channel_num = 1;
+    ctx->queue_num = TEST_THREAD_NUM;
+    ctx->channel_num = TEST_THREAD_NUM;
     ctx->async_ops.flag = ASYNC_FLAG_BLOCK;
     if (ctx->app_id == PROC_1) {
         ret = test_server_prepare(ctx);
@@ -86,12 +87,12 @@ static int run_test(test_urpc_ctx_t *ctx)
             thread_args[i].barrier = &barrier;
             thread_args[i].index = i;
             thread_args[i].result = TEST_FAILED;
-            ret = TestPollAddWorker(test_exec_thread, (void *)&thread_args[i]);
-            CHKERR_JUMP(ret != TEST_SUCCESS, "TestPollAddWorker", EXIT);
+            ret = TestPoolAddWorker(test_exec_thread, (void *)&thread_args[i]);
+            CHKERR_JUMP(ret != TEST_SUCCESS, "TestPoolAddWorker", EXIT);
         }
         pthread_barrier_wait(&barrier);
         for (int i = 0; i < TEST_THREAD_NUM; i++){
-            TEST_LOG_INFO("check thread [%d] result:[%d \n]", i, thread_args[i],result)
+            TEST_LOG_INFO("check thread [%d] result:[%d] \n", i, thread_args[i].result)
             CHKERR_JUMP(thread_args[i].result != TEST_SUCCESS, "thread join", EXIT);
         }
     }

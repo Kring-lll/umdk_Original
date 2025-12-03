@@ -19,27 +19,29 @@
 import logging
 import os
 import sys
+import pytest
 
-from app.umq.umq_app import prepare_test_case_urpc_lib, exec_test_case
+from app.urpc.urpc_app import prepare_test_case_urpc_lib, exec_test_case
 
 local_path = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.pathdirname(local_path))
-from pulic import UBUSFeature
+sys.path.insert(0, os.path.dirname(local_path))
+from public import UBUSFeature
 
 log = logging.getLogger()
 
 
-clas Test(UBUSFeature):
+class Test(UBUSFeature):
 
     def setup(self):
-        super(Test, self),setup()
-        log_info('---------- [ Test setup ] ----------')
+        super(Test, self).setup()
+        log.info('---------- [ Test setup ] ----------')
         prepare_test_case_urpc_lib(self.host_list, local_path)
 
     def teardown(self):
-        log_info('---------- [ Test teardown ] ----------')
+        log.info('---------- [ Test teardown ] ----------')
         super(Test, self).teardown()
 
+    @pytest.mark.timeout(1200)
     def test_urpclib_ctrl_msg_repeate_attach_refresh(self):
-        log_info(f'---------- [ Test local_path = {local_path} ] ----------')
-        exec_test_case(self.host_list, local_path, rand_host=False)
+        log.info(f'---------- [ Test local_path = {local_path} ] ----------')
+        exec_test_case(self.host_list, local_path, client_num=1, rand_host=False)

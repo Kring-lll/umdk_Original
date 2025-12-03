@@ -14,6 +14,7 @@
     server_thread_arg_t targ[1] = {0};
     test_func_args_t func_args = {0};
     uint64_t stats_total[STATS_TYPE_MAX] = {0};
+    memset(&stats_total, 0, sizeof(uint64_t) * STATS_TYPE_MAX);
     int total_num = 0;
     ctx->async_ops.flag = ASYNC_FLAG_BLOCK;
     ctx->channel_num =1;
@@ -45,7 +46,7 @@
         for (uint32_t r = 0; r < TEST_ROUND_NUM; r++) {
             TEST_LOG_INFO("test round r=%u\n", r);
             for (uint32_t i = 0; i < ctx->channel_num; i++) {
-                TEST_LOG_INFO("test_channel id =%u\n", i);
+                TEST_LOG_INFO("test channel id =%u\n", i);
                 func_args.channel_id = ctx->channel_ids[i];
                 func_args.lqueue_handle = ctx->channel_ops[i].lqueue_ops[0].qh;
                 func_args.rqueue_handle = ctx->channel_ops[i].rqueue_ops[0].qh;
@@ -76,7 +77,7 @@
         CHKERR_JUMP(stats_total[STATS_TYPE_RESPONSE_SEND_CONFIRMED] != total_num, "resp_send_conf_num", EXIT);
         CHKERR_JUMP(stats_total[STATS_TYPE_REQUEST_RECEIVE] != total_num, "req_recv_num", EXIT);
     }
-    if (Ctx->app_id == PROC_2) {
+    if (ctx->app_id == PROC_2) {
         CHKERR_JUMP(stats_total[STATS_TYPE_REQUEST_SEND] != total_num, "req_send_num", EXIT);
         CHKERR_JUMP(stats_total[STATS_TYPE_REQUEST_SEND_CONFIRMED] != total_num, "req_send_conf_num", EXIT);
         CHKERR_JUMP(stats_total[STATS_TYPE_RESPONSE_RECEIVE] != total_num, "resp_recv_num", EXIT);
@@ -90,7 +91,7 @@ EXIT:
  int main(int argc, char *argv[])
 {
     int ret;
-    test_urpc_ctx_t *ctx = test_urpc_ctx_init(argc, argv);
+    test_urpc_ctx_t *ctx = test_urpc_ctx_init(argc, argv, 1);
     ret = run_test(ctx);
     TEST_LOG_INFO("run_test ret=%d\n", ret);
     ret += test_urpc_ctx_uninit(ctx);

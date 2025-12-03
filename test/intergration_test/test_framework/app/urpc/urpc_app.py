@@ -32,7 +32,7 @@ def exec_shell(host_list, _cmd):
             log.error(f'exec_shell failed! _cmd is {_cmd}')
             raise
 
-def prepare_test_case_urpc_lib(host_list, case_path, debug=False)
+def prepare_test_case_urpc_lib(host_list, case_path, debug=False):
     common_path = f'{local_path}/../common'
 
     case_cpp = os.path.join(case_path, "test_case.cpp")
@@ -42,11 +42,11 @@ def prepare_test_case_urpc_lib(host_list, case_path, debug=False)
     afi_cmd = '-g -O0'
 
     _cmd = f'cd {local_path};' \
-        f'g++ ../common/common.c ../common/test_log.c ../common/test_thread_pool.c ../common/ub_get_clock.c ' \
+        f'g++ ../common/common.c ../common/test_log.c ../common/test_thread_pool.c ' \
         f'urpc_lib_atom.cpp {case_cpp}'
     if os.path.exists(public_cpp):
         _cmd += f"{public_cpp} "
-    _cmd += f"{afi_cmd} - o {case_out} "
+    _cmd += f"{afi_cmd} -o {case_out} "
 
     lib_list = ['-lglib-2.0', '-lpthread', '-lboundscheck', '-lurpc_framework', f'-I {local_path}', f'-I {case_path}/../',
     f'-I {const.GCC_INCLUDE_PATH_URPC}']
@@ -77,10 +77,10 @@ def gen_random_port(host_list, port_num=2):
             if port.isdigit():
                 used_ports.add(int(port))
     for i in range(100):
-    tcp_port = random.randint(20000, 30000)
-    test_port = tcp_port + 10000
-    if tcp_port not in used_ports and test_port not in used_ports:
-        break
+        tcp_port = random.randint(20000, 30000)
+        test_port = tcp_port + 10000
+        if tcp_port not in used_ports and test_port not in used_ports:
+            break
     return tcp_port, test_port
 
 
@@ -107,11 +107,14 @@ def get_ip_addrs_cmd(ip_addrs):
     if ip_addrs:
         ip_num = len(ip_addrs.split(","))
         cmd = f' --ip_num {ip_num} --ip_addrs {ip_addrs}'
+        return cmd
+    else:
+        return ''
 
 def exec_test_case(host_list, path, server_num=1, client_num=1, rand_host=True, **kwargs):
     log.info(f'------------- [ Test path = {path} ] ------------')
     tcp_port, _test_port = gen_random_port(host_list)
-    seed = random.ranint(0, 10000)
+    seed = random.randint(0, 10000)
     app_num = server_num + client_num
     check = kwargs.get("check", True)
     debug = kwargs.get("debug", False)
@@ -137,16 +140,16 @@ def exec_test_case(host_list, path, server_num=1, client_num=1, rand_host=True, 
             test_host.append(host_list[1])
 
     if _case_name.startswith(("test_urpclib", "test_kurpc_")) and ip_version is None:
-        _test_ip = f'-i {test_host[0].test_nic1_ip}, {test_host[-1].test_nic1_ip} ' \
-            f'-I {test_host[0].test_nic1_ipv6}, {test_host[-1].test_nic1_ipv6} '
+        _test_ip = f'-i {test_host[0].test_nic1_ip},{test_host[-1].test_nic1_ip} ' \
+            f'-I {test_host[0].test_nic1_ipv6},{test_host[-1].test_nic1_ipv6} '
     
     trans_mode = URPC_TRANS_MODE_UB
 
     _appid = 1
     test_dev, test_dev2 = get_test_dev(_case_name, test_host, 0)
     test_eid = get_test_eid(_case_name, test_host, 0)
-    _cmd = f'{path}/test_case -a {app_num}:{_appid}:{tcp_port} -d {test_dev} -D {test_dev2}' \
-        f' -e {test_eid} -p {test_port} -s {seed} {_test_ip} -x {case_path} -m {trans_mode}{ip_addrs_cmd}'
+    _cmd = f'{path}/test_case -a {app_num}:{_appid}:{tcp_port} -d {test_dev} -D {test_dev2} -e {test_eid} -p {test_port} -s {seed} {_test_ip}' \
+        f' -x {case_path} -m {trans_mode}{ip_addrs_cmd}'
     p_list.append(test_host[0].exec_cmd(_cmd, background=True, timeout=timeout, port=test_port))
 
 
@@ -156,8 +159,8 @@ def exec_test_case(host_list, path, server_num=1, client_num=1, rand_host=True, 
         test_dev, test_dev2 = get_test_dev(_case_name, test_host, i)
         test_eid = get_test_eid(_case_name, test_host, i)
         _cmd = f'{path}/test_case -a {app_num}:{i + 1}:{tcp_port}:{test_host[0].manage_ip}' \
-            f'-d {test_dev} -D {test_dev2}' \
-            f' -e {test_eid} -p {test_port + i} -s {seed} {_test_ip} -x {case_path} -m {trans_mode}{ip_addrs_cmd}'
+            f' -d {test_dev} -D {test_dev2} -e {test_eid} -p {test_port + i} -s {seed} {_test_ip} -x {case_path} ' \
+            f' -m {trans_mode}{ip_addrs_cmd}'
         p_list.append(test_host[i].exec_cmd(_cmd, background=True, timeout=timeout, port=test_port))
 
     for i in range(server_num, app_num):
@@ -166,7 +169,7 @@ def exec_test_case(host_list, path, server_num=1, client_num=1, rand_host=True, 
         test_dev, test_dev2 = get_test_dev(_case_name, test_host, i)
         test_eid = get_test_eid(_case_name, test_host, i)
         _cmd = f'{path}/test_case -a {app_num}:{i + 1}:{tcp_port}:{test_host[0].manage_ip}' \
-            f'-d {test_dev} -D {test_dev2}' \
+            f' -d {test_dev} -D {test_dev2}' \
             f' -e {test_eid} -p {test_port} -s {seed} {_test_ip} -x {case_path} -m {trans_mode}{ip_addrs_cmd}'
         p_list.append(test_host[i].exec_cmd(_cmd, background=True, timeout=timeout, port=test_port))
 

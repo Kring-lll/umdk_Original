@@ -28,7 +28,7 @@ from app.umq.umq_app import prepare_test_case, exec_test_case
 
 local_path = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.pathdirname(local_path))
-from pulic import UBUSFeature
+from public import UBUSFeature
 
 log = logging.getLogger()
 
@@ -37,13 +37,13 @@ class Test(UBUSFeature):
 
     def setup(self):
         super(Test, self),setup()
-        log_info('---------- [ Test setup ] ----------')
-        prepare_test_Case(self.host_list, local_path)
+        log.info('---------- [ Test setup ] ----------')
+        prepare_test_case(self.host_list, local_path)
 
     def teardown(self):
-        log_info('---------- [ Test teardown ] ----------')
+        log.info('---------- [ Test teardown ] ----------')
         super(Test, self).teardown()
 
     def test_umq_demo_pro(self):
-        log_info(f'---------- [ Test local_path = {local_path} ] ----------')
+        log.info(f'---------- [ Test local_path = {local_path} ] ----------')
         exec_test_case(self.host_list, local_path, rand_host=False, mode=["UB_PLUS"])

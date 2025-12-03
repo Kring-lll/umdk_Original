@@ -32,17 +32,17 @@
     }
     sync_time("--------------------------2");
     if (ctx->app_id == PROC_1) {
-        ret = start_server_poll_thread(1, targ);
+        ret = start_server_poll_thread(THREAD_NUM, targ);
         CHKERR_JUMP(ret != TEST_SUCCESS, "start_server_poll_thread", EXIT);
     }
     sync_time("--------------------------3");
-    if (Ctx->app_id == PROC_2) {
+    if (ctx->app_id == PROC_2) {
         urpc_poll_msg_t msg = {};
         memset(&msg, 0, sizeof(urpc_poll_msg_t));
         urpc_poll_option_t option = {0};
         option.urpc_qh = ctx->queue_handles[0];
 
-        func_args.channel_id = ctx->channel_ids[0]
+        func_args.channel_id = ctx->channel_ids[0];
         func_args.lqueue_handle = ctx->queue_handles[0];
         func_args.func_id = ctx->func_id;
         func_args.call_option.timeout = timeout;
@@ -60,13 +60,13 @@
         polled_num = test_func_poll_one_queue(&option, &msg, 1);
         TEST_LOG_INFO("test_func_poll_one_queue polled_num=%d\n", polled_num);
         CHKERR_JUMP(polled_num != 1, "check polled_num", EXIT);
-        TEST_LOG_INFO("meg.event:%d\n", msg.event);
+        TEST_LOG_INFO("msg.event:%d\n", msg.event);
         CHKERR_JUMP(msg.event != POLL_EVENT_REQ_ERR, "check event", EXIT);
 
     }
     sync_time("--------------------------4");
     if (ctx->app_id == PROC_1) {
-        ret = stop_server_poll_thread(1, targ);
+        ret = stop_server_poll_thread(THREAD_NUM, targ);
         CHKERR_JUMP(ret != TEST_SUCCESS, "stop_server_poll_thread", EXIT);
     }
     rc = TEST_SUCCESS;
@@ -78,10 +78,11 @@ EXIT:
  int main(int argc, char *argv[])
 {
     int ret;
-    test_urpc_ctx_t *ctx = test_urpc_ctx_init(argc, argv);
+    test_urpc_ctx_t *ctx = test_urpc_ctx_init(argc, argv, 1);
+    test_log_set_level(TEST_LOG_LEVEL_INFO);
     ret = run_test(ctx);
     TEST_LOG_INFO("run_test ret=%d\n", ret);
-    // ret += test_urpc_ctx_uninit(ctx);
+    ret += test_urpc_ctx_uninit(ctx);
     TEST_LOG_INFO("test_urpc_ctx_uninit ret=%d\n", ret);
     return ret;
 }

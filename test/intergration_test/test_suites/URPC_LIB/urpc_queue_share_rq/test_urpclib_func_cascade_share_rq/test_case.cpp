@@ -12,10 +12,10 @@
 
  static int run_test(test_urpc_ctx_t *ctx)
  {
-    int rc = TEST_FAILED, ret = 0;
+    int rc = TEST_FAILED, ret;
     server_thread_arg_t targ[SERVER_POLL_THREAD_NUM] = {0};
     test_func_args_t func_args = {0};
-    ctx->async_ops.FLAG_LOCK_FREE = ASYNC_FLAG_BLOCK
+    ctx->async_ops.flag = ASYNC_FLAG_BLOCK;
     ctx->queue_num = SHARE_RQ_QUEUE_NUM;
     int chidx = 0;
     if (ctx->app_id == PROC_1) {
@@ -28,7 +28,7 @@
         ret = test_func_register(ctx);
         CHKERR_JUMP(ret != TEST_SUCCESS, "test_func_register", EXIT);
         ret = test_server_start(ctx);
-        CHKERR_JUMP(ret != TEST_SUCCESS, "test_server_start", EXIT);
+        CHKERR_JUMP(ret != TEST_SUCCESS, "urpc_server_start", EXIT);
     }
     sync_time("--------------------------1");
     if (ctx->app_id == PROC_2) {
@@ -37,23 +37,23 @@
         ret = test_allocator_register(ctx);
         CHKERR_JUMP(ret != TEST_SUCCESS, "test_allocator_register", EXIT);
 
-        ctx->queue_handle = (uint64_t *)calloc(ctx->queue_num, sizeof(uint64_t));
+        ctx->queue_handles = (uint64_t *)calloc(ctx->queue_num, sizeof(uint64_t));
         CHKERR_JUMP(ctx->queue_handles == NULL, "ctx->queue_handles error", EXIT);
 
-        ctx-> queue_handle[0] = create_original_queue();
-        CHKERR_JUMP(ctx->queue_handles[0] == 0, "urpc_queue_create error", EXIT);
+        ctx-> queue_handles[0] = create_original_queue();
+        CHKERR_JUMP(ctx->queue_handles[0] == 0, "urpc_queue_create", EXIT);
 
-        for (int i = 1; i < 2; i++) {
-            ctx->queue_handle[i] = create_share_rq_queue(Ctx->queue_handles[0]);
-            CHKERR_JUMP(ctx->queue_handles[0] == 0, "urpc_queue_create error", EXIT);
+        for (int i = 1; i <= 2; i++) {
+            ctx->queue_handles[i] = create_share_rq_queue(ctx->queue_handles[0]);
+            CHKERR_JUMP(ctx->queue_handles[i] == 0, "urpc_queue_create", EXIT);
         }
-        for (int i = 3; i < 4; i++) {
-            ctx->queue_handle[i] = create_share_rq_queue(Ctx->queue_handles[1]);
-            CHKERR_JUMP(ctx->queue_handles[0] == 0, "urpc_queue_create error", EXIT);
+        for (int i = 3; i <= 4; i++) {
+            ctx->queue_handles[i] = create_share_rq_queue(ctx->queue_handles[1]);
+            CHKERR_JUMP(ctx->queue_handles[i] == 0, "urpc_queue_create", EXIT);
         }
         for (int i = 5; i <= 6; i++) {
-            ctx->queue_handle[i] = create_share_rq_queue(Ctx->queue_handles[4]);
-            CHKERR_JUMP(ctx->queue_handles[0] == 0, "urpc_queue_create error", EXIT);
+            ctx->queue_handles[i] = create_share_rq_queue(ctx->queue_handles[4]);
+            CHKERR_JUMP(ctx->queue_handles[i] == 0, "urpc_queue_create", EXIT);
         }
         ctx->ctx_flag |= CTX_FLAG_QUEUE_CREATE;
 
@@ -76,7 +76,8 @@
         ret = test_urpc_queue_rx_post(ctx, 2);
         CHKERR_JUMP(ret != TEST_SUCCESS, "test_urpc_queue_rx_post", EXIT);
     } else {
-        ret = test_urpc_queue_rx_post(nullptr, 2, ctx->queue_handles[0])
+        ret = test_urpc_queue_rx_post(nullptr, 2, ctx->queue_handles[0]);
+        CHKERR_JUMP(ret != TEST_SUCCESS, "test_urpc_queue_rx_post", EXIT);
     }
     sync_time("--------------------------22");
     if (ctx->app_id == PROC_1) {
@@ -137,10 +138,10 @@
         }
 
         ret = test_func_call_all_type_by_one_channel(ctx, 6);
-        CHKERR_JUMP(ret != TEST_SUCCESS, "rm_queue_from_channel_and_destroy", EXIT);
+        CHKERR_JUMP(ret != TEST_SUCCESS, "test_func_call_all_type_by_one_channel", EXIT);
 
-        urpc_qcfg_get_t qcfg_get_cfg = print_queue_cfg(ctx->queue_handle[6]);
-        CHKERR_JUMP(qcfg_get_cfg.max_rx_sge != MAX_RX_SGE, "chack max_rx_sge", EXIT);
+        urpc_qcfg_get_t qcfg_get_cfg = print_queue_cfg(ctx->queue_handles[6]);
+        CHKERR_JUMP(qcfg_get_cfg.max_rx_sge != MAX_RX_SGE, "check max_rx_sge", EXIT);
         
         chidx = 6;
         ret = test_channel_queue_unpair(ctx, ctx->channel_ids[chidx], ctx->channel_ops[chidx].lqueue_ops[0].qh, ctx->channel_ops[chidx].rqueue_ops[0].qh);
@@ -149,8 +150,8 @@
         CHKERR_JUMP(ret != TEST_SUCCESS, "rm_queue_from_channel_and_destroy", EXIT);
         ctx->queue_handles[chidx] = 0;
 
-        ctx->flag &= ~CTX_FLAG_QUEUE_CREATE;
-        ctx->flag &= ~CTX_FLAG_CHANNEL_ADD_LOCAL_QUEUE;
+        ctx->ctx_flag &= ~CTX_FLAG_QUEUE_PAIR;
+        ctx->ctx_flag &= ~CTX_FLAG_CHANNEL_ADD_LOCAL_QUEUE;
         ret = test_rm_remote_queue(ctx);
         CHKERR_JUMP(ret != TEST_SUCCESS, "test_rm_remote_queue", EXIT);
     }
@@ -169,8 +170,8 @@ EXIT:
 {
     int ret;
     test_urpc_ctx_t *ctx = test_urpc_ctx_init(argc, argv, 1);
-    test_log_set_level(TEST_LOG_LEVEL_DEBUG)
-    ctx->unix_domain_file_path = "/tmp";
+    test_log_set_level(TEST_LOG_LEVEL_DEBUG);
+    ctx->unix_domain_file_path = "/tmp/";
     ret = run_test(ctx);
     TEST_LOG_INFO("run_test ret=%d\n", ret);
     ret += test_urpc_ctx_uninit(ctx);

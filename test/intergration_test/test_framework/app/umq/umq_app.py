@@ -34,7 +34,7 @@ def prepare_test_case(host_list, case_path):
     case_log = os.path.join(case_path, "*.log")
     _cmd = f'cd {local_path};' \
         f'g++ ../common/common.c ../common/test_log.c ../common/test_thread_pool.c ' \
-        f'umq_atom.cpp {case_cpp} -g -O0 - o {case_out} '
+        f'umq_atom.cpp {case_cpp} -g -O0 -o {case_out} '
     if os.path.exists(public_cpp):
         _cmd += f"{public_cpp} "
     
@@ -157,8 +157,8 @@ def exec_test_case(host_list, path, server_num=1, client_num=1, rand_host=True, 
                 else:
                     test_host.append(host_list[1])
         
-        _test_ip = f'-i {test_host[0].test_nic1_ip}, {test_host[-1].test_nic1_ip} ' \
-            f'-I {test_host[0].test_nic1_ipv6}, {test_host[-1].test_nic1_ipv6} '
+        _test_ip = f'-i {test_host[0].test_nic1_ip},{test_host[-1].test_nic1_ip} ' \
+            f'-I {test_host[0].test_nic1_ipv6},{test_host[-1].test_nic1_ipv6} '
 
         trans_mode = get_trans_mode(_mode)
 
@@ -176,7 +176,7 @@ def exec_test_case(host_list, path, server_num=1, client_num=1, rand_host=True, 
             test_dev, test_dev2 = get_test_dev(_case_name, dev_type, test_host, i)
             test_eid = get_test_eid(_case_name, dev_type, test_host, i)
             _cmd = f'{path}/test_case -a {app_num}:{i + 1}:{tcp_port}:{test_host[0].manage_ip}' \
-                f'-d {test_dev} -D {test_dev2} -e {test_eid} -p {test_port + i} -s {seed} {_test_ip}' \
+                f' -d {test_dev} -D {test_dev2} -e {test_eid} -p {test_port + i} -s {seed} {_test_ip}' \
                 f'-x {case_path} -m {trans_mode}{ip_addrs_cmd}'
             p_list.append(test_host[i].exec_cmd(_cmd, background=True, timeout=timeout, port=test_port))
 
@@ -186,7 +186,7 @@ def exec_test_case(host_list, path, server_num=1, client_num=1, rand_host=True, 
             test_dev, test_dev2 = get_test_dev(_case_name, dev_type, test_host, i)
             test_eid = get_test_eid(_case_name, dev_type, test_host, i)
             _cmd = f'{path}/test_case -a {app_num}:{i + 1}:{tcp_port}:{test_host[0].manage_ip}' \
-                f'-d {test_dev} -D {test_dev2} -e {test_eid} -p {test_port} -s {seed} {_test_ip} -x {case_path} ' \
+                f' -d {test_dev} -D {test_dev2} -e {test_eid} -p {test_port} -s {seed} {_test_ip} -x {case_path} ' \
                 f'-m {trans_mode}{ip_addrs_cmd}'
             p_list.append(test_host[i].exec_cmd(_cmd, background=True, timeout=timeout, port=test_port))
 

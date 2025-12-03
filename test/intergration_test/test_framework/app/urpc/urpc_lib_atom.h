@@ -34,7 +34,7 @@
 
 #define ALLOCATOR_SIZE (64 * 1024 * 1024)
 #define ALLOCATOR_BLOCK_SIZE (4 * 1024)
-#define ALLOCATOR_SIZE_BLOCK_COUNT (ALLOCATOR_SIZE / ALLOCATOR_BLOCK_SIZE) 
+#define ALLOCATOR_BLOCK_COUNT (ALLOCATOR_SIZE / ALLOCATOR_BLOCK_SIZE) 
 #define ALLOCATOR_BLOCK_NUM 2 
 #define MAX_ALLOC_SIZE (ALLOCATOR_BLOCK_NUM * ALLOCATOR_SIZE)
 
@@ -196,7 +196,7 @@ typedef struct {
     channel_ops_t *channel_ops;
     queue_ops_t queue_ops;
     async_ops_t async_ops;
-    urpc_config_t urpc_connig;
+    urpc_config_t urpc_config;
     urpc_server_info_t *server_info;
     urpc_qcfg_create_t *queue_cfg;
     urpc_control_plane_config_t *urpc_cp_config;
@@ -273,6 +273,11 @@ typedef struct test_custom_read_dma {
     uint32_t token_value;
 } test_custom_read_dma_t;
 
+typedef struct {
+    FILE *fd;
+    char file_name[MAX_FILE_NAME_LEN];
+    int inited : 1;
+} log_file_info_t;
 
 extern test_allocator_ctx_t *g_test_allocator_ctx;
 extern test_urpc_ctx_t g_test_urpc_ctx;
@@ -326,7 +331,7 @@ int test_queue_interrupt_fd_get(test_urpc_ctx_t *ctx, uint32_t qidx);
 int test_urpc_queue_rx_post(test_urpc_ctx_t *ctx, uint32_t rx_num, uint64_t urpc_qh = 0);
 int test_queue_create(test_urpc_ctx_t *ctx, urpc_queue_trans_mode_t trans_mode = QUEUE_TRANS_MODE_JETTY, urpc_qcfg_create_t *queue_cfg = nullptr);
 int test_destroy_one_queue(uint64_t queue_handle, uint32_t wait_time = 2, bool do_rx_post = false);
-int test_queue_destory(test_urpc_ctx_t *ctx, uint32_t wait_time = 2);
+int test_queue_destroy(test_urpc_ctx_t *ctx, uint32_t wait_time = 2);
 
 void test_urpc_handler_func(urpc_sge_t *args, uint32_t args_sge_num, void *ctx, urpc_sge_t **rsps, uint32_t *rsps_sge_num);
 int test_func_register(test_urpc_ctx_t *ctx);
@@ -369,7 +374,7 @@ int test_channel_queue_add_attach(test_urpc_ctx_t *ctx);
 void test_log_file_close(log_file_info_t **log_file_info = &g_test_log_file);
 
 unsigned int test_client_psk_cb_func(void *ssl, const char *hint, char *identity, unsigned int max_identity_len, unsigned char *psk, unsigned int max_psk_len);
-unsigned int test_server_psk_cb_func(void *ssl, char *identity, unsigned char *psk, unsigned int max_psk_len);
+unsigned int test_server_psk_cb_func(void *ssl, const char *identity, unsigned char *psk, unsigned int max_psk_len);
 int test_ssl_config_set(test_urpc_ctx_t *ctx);
 int test_server_prepare(test_urpc_ctx_t *ctx, urpc_config_t *cfg = nullptr, urpc_queue_trans_mode_t queue_trans_mode = QUEUE_TRANS_MODE_JETTY);
 int test_client_prepare(test_urpc_ctx_t *ctx, urpc_config_t *cfg = nullptr, urpc_queue_trans_mode_t queue_trans_mode = QUEUE_TRANS_MODE_JETTY);
@@ -416,12 +421,44 @@ int test_func_call_read_custom(test_func_args_t *func_args);
 int test_func_call_recv_rsp_no_ack(test_func_args_t *func_args);
 int test_func_call_no_rsp_no_ack(test_func_args_t *func_args);
 uint64_t create_original_queue(urpc_queue_trans_mode_t trans_mode = QUEUE_TRANS_MODE_JETTY);
-uint64_t create_share_rq_queue(uint64_t share_rq_handle, urpc_queue_trans_mode_t trans_mode = QUEUE_TRANS_MODE_JETTY);
+uint64_t create_share_rq_queue(uint64_t share_rq_handler, urpc_queue_trans_mode_t trans_mode = QUEUE_TRANS_MODE_JETTY);
 urpc_qcfg_get_t print_queue_cfg(uint64_t queue_handle);
 int test_get_queue_stats(uint64_t queue_handle, uint64_t *stats_total);
 void print_queue_stats(uint64_t *stats_total);
 int test_func_call_all_type_by_one_channel(test_urpc_ctx_t *ctx, uint32_t channel_idx = 0);
 int test_func_call_all_type(test_urpc_ctx_t *ctx);
+
+int start_ipv6_server(char *ipv6_addr, uint16_t port);
+int start_ipv4_server(char *ipv4_addr, uint16_t port);
+int start_ipv6_client(char *ipv6_addr, uint16_t port);
+int start_ipv4_client(char *ipv4_addr, uint16_t port);
+log_file_info_t *test_create_file(const char *file_name);
+
+#define NS_PER_SEC 1000000000UL
+#define MS_PER_SEC 1000
+#define NS_PER_MS 1000000
+#define MAX_CONNECTIONS 100
+
+static inline uint64_t get_timestamp_ns(void)
+{
+    struct timespec tc;
+    (void)clock_gettime(CLOCK_MONOTONIC, &tc);
+    return (uint64_t)(tc.tv_sec * NS_PER_SEC + tc.tv_nsec);
+}
+
+static inline uint64_t get_timestamp_ms(void)
+{
+    struct timespec tc;
+    (void)clock_gettime(CLOCK_MONOTONIC, &tc);
+    return (uint64_t)tc.tv_sec * MS_PER_SEC + tc.tv_nsec / NS_PER_MS;
+}
+
+static inline uint64_t get_timestamp_s(void)
+{
+    struct timespec tc;
+    (void)clock_gettime(CLOCK_MONOTONIC, &tc);
+    return tc.tv_sec;
+}
 
 #endif
 
