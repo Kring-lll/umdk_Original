@@ -249,6 +249,7 @@ void ums_ubcore_clnt_find_src_v_eid_and_ub_dev(struct ums_init_info *ini)
 		ini->ub_dev->ub_dev->dev_name, ini->src_v_eid.raw);
 }
 
+
 static int ums_ubcore_get_route_eid(union ubcore_eid *src_v_eid, union ubcore_eid *dst_v_eid,
 	union ubcore_eid *src_p_eid, union ubcore_eid *dst_p_eid)
 {
