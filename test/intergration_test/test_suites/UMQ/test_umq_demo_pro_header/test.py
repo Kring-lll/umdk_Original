@@ -27,7 +27,7 @@ import sys
 from app.umq.umq_app import prepare_test_case, exec_test_case
 
 local_path = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.pathdirname(local_path))
+sys.path.insert(0, os.path.dirname(local_path))
 from public import UBUSFeature
 
 log = logging.getLogger()
@@ -36,7 +36,7 @@ log = logging.getLogger()
 class Test(UBUSFeature):
 
     def setup(self):
-        super(Test, self),setup()
+        super(Test, self).setup()
         log.info('---------- [ Test setup ] ----------')
         prepare_test_case(self.host_list, local_path)
 

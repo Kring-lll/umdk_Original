@@ -8,11 +8,13 @@
 
 :Preparation
 
-
 :TestStep
-
+1、启动1个server，启动一个client，server端创建100个queue，client创建16channel，100个queue
+2、server启动一个线程poll、return rsp，client启动100个线程让每个channel都发送rpc请求
 
 :ExpectOutput
+1、启动成功
+2、client发送rpc请求成功，server处理rpc请求成功
 
 """
 

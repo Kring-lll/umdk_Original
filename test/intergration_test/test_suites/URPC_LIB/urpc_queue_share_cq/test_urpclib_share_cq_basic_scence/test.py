@@ -5,15 +5,20 @@
 """
 
 """
+共享JFS_JFC的典型场景
 
 :Preparation
-
+2HOST部署UMDK
 
 :TestStep
-
+1、server_client模式，创建共享queue，配置SHARE_TX_CQ
+2、client循环不通的queue发送rpc请求，poll使用同一个queue
+3、server端poll使用同一个queue
 
 :ExpectOutput
-
+1、创建成功
+2、发送成功
+3、发送成功
 """
 
 import logging

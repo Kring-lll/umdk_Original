@@ -39,7 +39,7 @@ def prepare_test_case_urpc_lib(host_list, case_path, debug=False):
     public_cpp = os.path.join(case_path, "../public.cpp")
     case_out = os.path.join(case_path, "test_case")
     case_log = os.path.join(case_path, "*.log")
-    afi_cmd = '-g -O0'
+    afi_cmd = ' -g -O0'
 
     _cmd = f'cd {local_path};' \
         f'g++ ../common/common.c ../common/test_log.c ../common/test_thread_pool.c ' \
@@ -48,7 +48,7 @@ def prepare_test_case_urpc_lib(host_list, case_path, debug=False):
         _cmd += f"{public_cpp} "
     _cmd += f"{afi_cmd} -o {case_out} "
 
-    lib_list = ['-lglib-2.0', '-lpthread', '-lboundscheck', '-lurpc_framework', f'-I {local_path}', f'-I {case_path}/../',
+    lib_list = ['-lglib-2.0', '-lpthread', '-lurpc_framework', f'-I {local_path}', f'-I {case_path}/../',
     f'-I {const.GCC_INCLUDE_PATH_URPC}']
 
     _cmd += " ".join(lib_list)

@@ -5,14 +5,20 @@
 """
 
 """
+设置queue中断模式，获取对应的epoll fd，发送不通场景的报文
 
 :Preparation
 
 
 :TestStep
-
+1、设置queue中断模式，server/client初始化
+2、获取对应的epoll fd，通过epoll_wait等待事件
+3、client发送不通场景的报文。检验收发统计信息
 
 :ExpectOutput
+1、初始化成功
+2、获取成功
+3、发送成功，统计信息正确
 
 """
 

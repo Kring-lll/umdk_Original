@@ -5,14 +5,15 @@
 """
 
 """
+携带ctrl_msg 重复attach detach
 
 :Preparation
 
-
 :TestStep
-
+1、两边注册ctrl_msg回调， 1channel， 携带ctrl_msg 重复attach refresh detach 100次，并且发送普通no ack场景
 
 :ExpectOutput
+1、成功
 
 """
 

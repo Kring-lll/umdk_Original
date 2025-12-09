@@ -5,14 +5,23 @@
 """
 
 """
+urpc lib token检验测试
+server、client端queue变更，server初始3个queue，client初始3个queue，server client再同时增加3个queue
 
 :Preparation
-
+2HOST部署UMDK
 
 :TestStep
-
+1、启动1个server，创建3个queue，启动1个client，创建3个queue，创建3个channel
+2、client做attach、mem_seg_remote_access_enable，发送SEND_READ请求
+3、server client再同时增加3个queue
+4、client做mem_seg_remote_access_enable、refresh、add remote queue和pair操作，发送SEND_READ请求
 
 :ExpectOutput
+1、启动成功
+2、client做attach、mem_seg_remote_access_enable成功，发送SEND_READ请求成功
+3、server client 创建queue成功
+4、client做mem_seg_remote_access_enable、refresh、add remote queue和pair操作，发送SEND_READ请求成功，server处理成功
 
 """
 
