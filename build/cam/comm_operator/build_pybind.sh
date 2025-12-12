@@ -7,7 +7,7 @@
 # History: 2025-12-09 create pybind building script
 
 set -e
-EXT_PATH=$MODULE_BUILD_PATH/pybind/
+EXT_PATH=$MODULE_BUILD_PATH/pybind
 DIST_OUT_PATH=$MODULE_BUILD_OUT_PATH
 
 if [ ! -d "$MODULE_BUILD_PATH" ]; then
@@ -22,7 +22,7 @@ build_pybind() {
     cp -rf $MODULE_SRC_PATH/pybind/pytorch_extension $BUILD_PATH
     cd $EXT_PATH
     python3 setup.py bdist_wheel
-    DIST_GEN_PATH=$EXT_PATH/dist/
+    DIST_GEN_PATH=$EXT_PATH/dist
     if [ -d "$DIST_GEN_PATH" ]; then
         echo "copy $DIST_GEN_PATH to $DIST_OUT_PATH/"
         cp -rf $DIST_GEN_PATH $DIST_OUT_PATH

@@ -65,7 +65,7 @@ at::Tensor fused_deep_moe_impl_npu(
     return output;
 }
 
-std::tuple<at::Tensor, at::Tensor> fused_deep_moe_backward_impl_npu(const at::Tensor &self)
+tensor_list fused_deep_moe_backward_impl_npu(const at::Tensor &self)
 {
     at::Tensor result = at::Tensor(self); // 创建输出内存
     return {result, result};

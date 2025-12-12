@@ -75,6 +75,8 @@ ext1 = NpuExtension(
         'gcov',
         'runtime', 'torch', 'ascendcl', 'profapi', 'opapi', 'cust_opapi'],
     sources=["./fused_deep_moe.cpp",
+             "./moe_dispatch_normal.cpp",
+             "./moe_combine_normal.cpp",
             "./pybind.cpp",
             ],
     
