@@ -34,7 +34,7 @@ at::Tensor fused_deep_moe_impl_autograd(
     int64_t quantMode, \
     int64_t globalBs);
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor>
+std::vector<at::Tensor>
 moe_dispatch_normal_impl_autograd(
     const at::Tensor &x, \
     const at::Tensor &topkIdx, \
