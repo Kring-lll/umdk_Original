@@ -173,7 +173,7 @@ public:
     }
 };
 
-tensor_list moe_dispatch_normal_impl_autograd(
+std::tuple<at::Tensor, at::Tensor, at::Tensor> moe_dispatch_normal_impl_autograd(
     const at::Tensor &x, \
     const at::Tensor &topkIdx, \
     const at::Tensor &sendOffset, \
@@ -193,7 +193,7 @@ tensor_list moe_dispatch_normal_impl_autograd(
     auto result = ExtMoeDispatchNormal::apply(x, topkIdx, sendOffset, sendTokenIdx, recvOffset, \
         recvCount, groupEp, epWorldSize, epRankId, \
         groupTp, tpWorldSize, tpRankId, moeExpertNum, quantMode, globalBs);
-    return result;
+    return std::make_tuple(result[0], result[1], result[2]);
 }
 
 // moe_dispatch_normal

@@ -58,7 +58,7 @@ moe_combine_normal_impl_autograd(
     const at::Tensor &tokenSrcInfo, \
     const at::Tensor &epRecvCounts, \
     const at::Tensor &recvTopkWeights, \
-    const std::optional<at::Tensor> &tpRecvCounts, \
+    const c10::optional<at::Tensor> &tpRecvCounts, \
     c10::string_view epGroupName, \
     int64_t epWorldSize, \
     int64_t epRankId, \
