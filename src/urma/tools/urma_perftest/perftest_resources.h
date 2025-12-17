@@ -38,6 +38,11 @@ typedef struct user_tp_ctx {
     urma_net_addr_info_t *net_addr_list;
 } user_tp_ctx_t;
 
+typedef struct perftest_tp_info {
+    uint64_t tp_handle;
+    uint32_t psn;
+} perftest_tp_info_t;
+
 typedef struct run_test_ctx {
     uint32_t duration;
     volatile duration_states_t state;
@@ -73,6 +78,7 @@ typedef struct perftest_context {
     urma_jfr_t **jfr;
     urma_jetty_t **jetty;
     uint32_t jetty_num;
+    urma_tp_info_t *tp_info;
 
     // buf
     uint64_t page_size;
@@ -82,9 +88,10 @@ typedef struct perftest_context {
     urma_target_seg_t **local_tseg;
 
     // remote info
-    urma_seg_t **remote_seg;
-    urma_jfr_t **remote_jfr;
-    urma_jetty_t **remote_jetty;
+    urma_seg_t *remote_seg;
+    urma_jetty_id_t *remote_jetty_id;
+    perftest_tp_info_t *local_tp_info;
+    perftest_tp_info_t *remote_tp_info;
 
     // import seg
     urma_target_seg_t **import_tseg;
@@ -101,7 +108,7 @@ typedef struct perftest_context {
     uint64_t **ctrl_buf;
     urma_target_seg_t **credit_seg;
     urma_token_id_t **credit_token_id;
-    urma_seg_t **remote_credit_seg;
+    urma_seg_t *remote_credit_seg;
     urma_target_seg_t **import_credit_seg;
 
     /* user tp */
