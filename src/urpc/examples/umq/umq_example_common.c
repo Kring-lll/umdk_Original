@@ -365,7 +365,7 @@ int example_post_rx(uint64_t umqh, uint32_t depth)
 
 int example_poll_rx(uint64_t umqh, const char *check_data, uint32_t data_size, bool with_imm_data)
 {
-    umq_buf_t **buf = (umq_buf_t **)calloc(EXAMPLE_MAX_POLL_BATCH, sizeof(umq_buf_t *));
+    umq_buf_t **buf = (umq_buf_t **)calloc(1, sizeof(umq_buf_t *));
     if (buf == NULL) {
         return -1;
     }
@@ -373,7 +373,7 @@ int example_poll_rx(uint64_t umqh, const char *check_data, uint32_t data_size, b
 
     uint64_t start = get_timestamp_ms();
     while (ret == 0 && get_timestamp_ms() - start < EXAMPLE_MAX_WAIT_TIME_MS) {
-        ret = umq_poll(umqh, UMQ_IO_RX, buf, EXAMPLE_MAX_POLL_BATCH);
+        ret = umq_poll(umqh, UMQ_IO_RX, buf, 1);
         usleep(EXAMPLE_SLEEP_TIME_US);
     }
 
@@ -408,7 +408,7 @@ FREE:
     return ret;
 }
 
-int example_post_tx(uint64_t umqh, const char *data, uint32_t data_size)
+int example_post_tx(uint64_t umqh, const char *data, uint32_t data_size, uint64_t imm_data)
 {
     umq_buf_t *buf = umq_buf_alloc(data_size, 1, umqh, NULL);
     if (buf == NULL) {
@@ -544,7 +544,7 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
         int c;
         unsigned long param;
 
-        c = getopt_long(argc, argv, "d:e:w:p:i:c:t:m:I:f:T:E:S:D:", g_long_options, NULL);
+        c = getopt_long(argc, argv, "d:e:w:p:i:c:t:m:I:f:T:E:S:D:o:", g_long_options, NULL);
         if (c == -1) {
             break;
         }
@@ -630,6 +630,13 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
                 break;
             case 'D':
                 cfg->deid = (uint32_t)strtoul(optarg, NULL, 0);
+                break;
+            case 'o':
+                param = (uint32_t)strtoul(optarg, NULL, 0);
+                if (param < 0 || param >= UMQ_OPC_MAX) {
+                    return -1;
+                }
+                cfg->opc_type = (int)param;
                 break;
             default:
                 return -1;
