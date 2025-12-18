@@ -11,7 +11,7 @@ import os
 import sys
 import random
 
-from app.ums.ums_app import prepare_test_case
+from app.ums.ums_app import prepare_test_case, exec_test_case
 
 local_path = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(local_path))
@@ -32,7 +32,7 @@ class Test(UBUSFeature):
 
     def test_ums_read_proc_net_ums_fbk(self):
         log.info(f'--------- [ Test local_path = {local_path} ] ---------')
-        self.exec_test_case(local_path=local_path)
+        self.exec_test_case(self.host_list, local_path)
 
 if __name__ == '__main__':
     Test.test1()

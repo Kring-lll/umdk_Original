@@ -14,16 +14,18 @@ logging.basicConfig(levev=logging.INFO)
 log = logging.getLogger()
 local_path = os.path.dirname(os.path.abspath(__file__))
 
-SEPERATE_CONN = 0
-UNI_CONN = 1
 
-def prepare_test_case(host_list, case_path):
-    common_path = f'{local_path}/../common'
+def prepare_test_case(host_list, case_path, case_name="test_case"):
+    case_cpp = os.path.join(case_path, f"{case_name}.cpp")
+    public_cpp = os.path.join(case_path, "../public.cpp")
+    case_out = os.path.join(case_path, "case_name")
 
     _cmd = f'cd {local_path};' \
-           f'gcc ums_atom.cpp {case_path}/test_case.cpp ../common/test_log.c ../common/common.c  ../common/test_thread_pool.c {case_path}/../public.cpp -g '\
+           f'gcc ums_atom.cpp {case_cpp} ../common/test_log.c ../common/common.c  {public_cpp} -g '\
            f'-rdynamic -lstdc++  -w -O0 -fPIC  -fpermissive -o {case_path}/test_case'
-
+    lib_list = ['-lsecurec', '-lglib-2.0', '-lpthread', f'-I {local_path}', '-I /usr/include/umdk/', \
+                '-ldl', '-I /usr/include/ub/umdk/ums/']
+    _cmd += " ".join(lib_list)
     p_list = []
     for host in host_list:
         p_list.append(host.exec_cmd(_cmd, background=True))
@@ -45,26 +47,20 @@ def gen_random_port(host_list, port_num=2):
     for host in host_list:
         host.exec_cmd(cmd)
     for i in range(100):
-        tcp_port = random.randint(30000, 40000)
-        log.info(f'---------- [ tcp_port = {i} {tcp_port} ] ----------')
+        _test_port = random.randint(30000, 40000)
+        log.info(f'---------- [ _test_port = {i} {_test_port} ] ----------')
         res = 0
         for j in range(port_num):
-            up = tcp_port + j
+            up = _test_port + j
             ret = check_port_nouse(host_list, up)
             res += ret
         if res == 0:
             break
-    for i in range(100):
-        udp_port = random.randint(40000, 50000)
-        log.info(f'---------- [ udp_port = {i} {tcp_port} ] ----------')
-        ret = check_port_nouse(host_list, up)
-        if ret == 0:
-            break
-    return tcp_port, udp_port
+    return _test_port
 
-def exec_test_case(host_list, path, server_num=1, client_num=1, random_host=True, **kwargs):
+def exec_test_case(host_list, path, server_num=1, client_num=1, **kwargs):
     log.info(f'---------- [Test path = {path} ] ----------')
-    tcp_port, _test_port = gen_random_port(host_list)
+    _test_port = gen_random_port(host_list)
     check = kwargs.get("check", True)
     app_num = server_num + client_num
     case_path = kwargs.get("case_path", "''")
@@ -81,15 +77,15 @@ def exec_test_case(host_list, path, server_num=1, client_num=1, random_host=True
     _test_ip = f'-i {test_host[0].test_nic1_ip},{test_host[-1].test_nic1_ip}' \
                f' -I {test_host[0].test_nic1_ip},{test_host[-1].test_nic1_ip}'
     
-    log.info(f'--------start app{1} server--------')
-    _cmd = f'{path}/test_case -a {app_num}:{1}:{tcp_port} -p {test_port} {_test_ip}' \
+    log.info(f'--------start app1 server--------')
+    _cmd = f'{path}/test_case -a {app_num}:1:{test_port} -p {test_port} {_test_ip}' \
            f'  -x {case_path}'
-    p_list.append(test_host[0].exec_cmd(_cmd, background=True, timeout=timeout, port=test_port))
+    p_list.append(test_host[0].exec_cmd(_cmd, background=True))
 
-    log.info(f'--------start app{2} client--------')
-    _cmd = f'{path}/test_case -a {app_num}:{2}:{tcp_port} -p {test_port} {_test_ip}' \
+    log.info(f'--------start app2 client--------')
+    _cmd = f'{path}/test_case -a {app_num}:2:{test_port} -p {test_port} {_test_ip}' \
            f'-x {case_path}'
-    p_list.append(test_host[1].exec_cmd(_cmd, background=True, timeout=timeout, port=test_port))
+    p_list.append(test_host[1].exec_cmd(_cmd, background=True))
 
     if check is True:
         for i in range(app_num):

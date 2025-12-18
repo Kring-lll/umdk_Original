@@ -8,9 +8,8 @@
 #include <string>
 
 using namespace std;
-using namespace publiccase;
 
-static int run_test()
+static int run_test(test_ums_ctx_t *ctx)
 {
     int ret = 0;
     int rc = TEST_FAILED;
@@ -53,6 +52,5 @@ int main(int argc, char *argv[]) {
     int ret;
     test_ums_ctx_t *ctx = test_ums_ctx_init(argc, argv, 1);
     ret = run_test(ctx);
-    ret += test_ums_ctx_uninit(ctx);
     return ret;
 }
