@@ -68,8 +68,21 @@ struct ubagg_slave_device {
     char slave_dev_name[URMA_UBAGG_DEV_MAX_NUM][UBAGG_MAX_DEV_NAME_LEN];
 };
 
+struct old_io_die_info {
+    char primary_eid[EID_LEN];
+    char port_eid[MAX_PORT_NUM][EID_LEN];
+    char peer_port_eid[MAX_PORT_NUM][EID_LEN];
+    int socket_id;
+};
+
+struct old_topo_info {
+    char bonding_eid[EID_LEN];
+    struct old_io_die_info io_die_info[MAX_IODIE_NUM];
+    bool is_cur_node;
+};
+
 struct ubagg_topo_info_out {
-    struct topo_info topo_info[MAX_NODE_NUM];
+    struct old_topo_info topo_info[MAX_NODE_NUM];
     uint32_t node_num;
 };
 #endif // UBAGG_IOCTL_H

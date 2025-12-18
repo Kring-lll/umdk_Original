@@ -231,12 +231,64 @@ static int get_dev_and_ctx_by_eid(urma_eid_t *eid, urma_device_t **dev, urma_con
     return 0;
 }
 
+static struct topo_map_idx get_topo_map_idx_by_port_eid(struct old_topo_info *topo_infos, uint32_t node_num, urma_eid_t *port_eid)
+{
+    struct topo_map_idx idx = {
+        .topo_info_idx = -1,
+        .plane_idx = -1,
+        .port_idx = -1,
+    };
+    for (int i = 0; i < node_num; ++i) {
+        struct old_topo_info *topo_info = &topo_infos[i];
+        for (int k = 0; k < MAX_IODIE_NUM; ++k) {
+            struct old_io_die_info *die_info = &topo_info->io_die_info[k];
+            for (int l = 0; l < MAX_PORT_NUM; ++l) {
+                if (is_urma_eid_equal((urma_eid_t *)die_info->port_eid[l], port_eid)) {
+                    idx.topo_info_idx = i;
+                    idx.plane_idx = k;
+                    idx.port_idx = l;
+                    return idx;
+                }
+            }
+        }
+    }
+    return idx;
+}
+
+
+static int trans_old_topo(topo_info_t *topo_infos, struct old_topo_info *old_infos, uint32_t node_num)
+{
+    for (int i = 0; i < (int)node_num; ++i) {
+        topo_info_t *topo_info = &topo_infos[i];
+        struct old_topo_info *old_info = &old_infos[i];
+        topo_info->id = i;
+        topo_info->is_cur_node = old_info->is_cur_node;
+        struct topo_dev_info *dev_info = &topo_info->dev[0];
+        memcpy(dev_info->bonding_eid, old_info->bonding_eid, EID_LEN);
+        for (int j = 0; j < MAX_IODIE_NUM; ++j) {
+            struct io_die_info *die_info = &dev_info->io_die_info[j];
+            die_info->socket_id = old_info->io_die_info[j].socket_id;
+            memcpy(die_info->primary_eid, old_info->io_die_info[j].primary_eid, EID_LEN);
+            for (int k = 0; k < MAX_PORT_NUM; ++k) {
+                memcpy(die_info->port_eid[k], old_info->io_die_info[j].port_eid[k], EID_LEN);
+                struct topo_map_idx idx = get_topo_map_idx_by_port_eid(old_infos, node_num, (urma_eid_t *)old_info->io_die_info[j].peer_port_eid[k]);
+                topo_info->links[j][k].topo_info_idx = idx.topo_info_idx;
+                topo_info->links[j][k].plane_idx = idx.plane_idx;
+                topo_info->links[j][k].port_idx = idx.port_idx;
+            }
+        }
+    }
+
+    return 0;
+}
+
 static int get_topo_info_from_ko(bondp_context_t *bond_ctx)
 {
     if (g_bondp_global_ctx->topo_map) {
         return 0;
     }
     struct ubagg_topo_info_out info_out;
+    topo_info_t topo_infos[MAX_NODE_NUM];
     urma_user_ctl_in_t in = {
         .opcode = GET_TOPO_INFO
     };
@@ -250,7 +302,8 @@ static int get_topo_info_from_ko(bondp_context_t *bond_ctx)
         g_bondp_global_ctx->skip_load_topo = true;
         return -1;
     }
-    g_bondp_global_ctx->topo_map = create_topo_map(info_out.topo_info, info_out.node_num);
+    trans_old_topo(topo_infos, info_out.topo_info, info_out.node_num);
+    g_bondp_global_ctx->topo_map = create_topo_map(topo_infos, info_out.node_num);
     if (g_bondp_global_ctx->topo_map == NULL) {
         URMA_LOG_ERR("Failed to create topo map\n");
         return -1;
@@ -443,7 +496,7 @@ DELETE_SLAVE_CTX:
 static int init_matrix_slave_devices(bondp_context_t *bond_ctx, urma_context_aggr_mode_t aggr_mode)
 {
     bond_ctx->topo_map = g_bondp_global_ctx->topo_map;
-    topo_info_t *topo_info = get_topo_info_by_bonding_eid(bond_ctx->topo_map, &bond_ctx->v_ctx.eid);
+    struct topo_dev_info *topo_info = get_topo_dev_info_by_bonding_eid(bond_ctx->topo_map, &bond_ctx->v_ctx.eid);
     if (topo_info == NULL) {
         URMA_LOG_ERR("Failed to get topo info by bonding eid\n");
         return -1;

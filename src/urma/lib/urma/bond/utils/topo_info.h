@@ -20,7 +20,8 @@
 #define MAX_PORT_NUM (9)
 #define MAX_ALL_PORT_NUM (18)
 #define MAX_NODE_NUM (16)
-#define IODIE_NUM (2)
+#define MAX_IODIE_NUM (2)
+#define MAX_DEV_NUM (64)
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,17 +30,8 @@ extern "C" {
 struct io_die_info {
     char primary_eid[EID_LEN];
     char port_eid[MAX_PORT_NUM][EID_LEN];
-    char peer_port_eid[MAX_PORT_NUM][EID_LEN];
     int socket_id;
 };
-
-struct topo_info {
-    char bonding_eid[EID_LEN];
-    struct io_die_info io_die_info[IODIE_NUM];
-    bool is_cur_node;
-};
-
-typedef struct topo_info topo_info_t;
 
 /* Locate a specific port in topo_infos */
 /* All params set to -1 means doesn't exist */
@@ -48,6 +40,21 @@ struct topo_map_idx {
     int plane_idx;
     int port_idx;
 };
+
+struct topo_dev_info {
+    char bonding_eid[EID_LEN];
+    struct io_die_info io_die_info[MAX_IODIE_NUM];
+};
+
+struct topo_info {
+    int id;
+    bool is_cur_node;
+    struct topo_map_idx links[MAX_IODIE_NUM][MAX_PORT_NUM];
+    struct topo_dev_info dev[MAX_DEV_NUM];
+};
+
+typedef struct topo_info topo_info_t;
+
 /**
  * Records information about all direct connections between the current device and the target device.
  */
@@ -65,7 +72,7 @@ typedef struct {
 
 int direct_dev_hash_table_create(bondp_hash_table_t *tbl, uint32_t size);
 
-int direct_dev_hash_table_add(bondp_hash_table_t *tbl, topo_info_t *topo_infos,
+int direct_dev_hash_table_add(bondp_hash_table_t *tbl, struct topo_dev_info *topo_info,
     struct topo_map_idx *local_map_idx, struct topo_map_idx *target_map_idx);
 
 direct_dev_node_t *direct_dev_hash_table_lookup(bondp_hash_table_t *tbl, urma_eid_t *key);
@@ -85,12 +92,12 @@ void delete_topo_map(topo_map_t *topo_map);
 /**
  * This function requires traversing all EIDS in the topo_map to return a result,
  * with a maximum time complexity of O(MAX_NODE_NUM(16) * (BONDING_EID_NUM(1) +
- * IODIE_NUM(2) * (PRIMARY_EID_NUM(1) + MAX_PORT_NUM(9)))) = O(336).
+ * MAX_IODIE_NUM(2) * (PRIMARY_EID_NUM(1) + MAX_PORT_NUM(9)))) = O(336).
  * @return 0 for success, other for error or not found
  */
 int get_bonding_eid_by_target_eid(topo_map_t *topo_map, urma_eid_t *target_eid, urma_eid_t *output);
 
-topo_info_t *get_topo_info_by_bonding_eid(topo_map_t *topo_map, urma_eid_t *bonding_eid);
+struct topo_dev_info *get_topo_dev_info_by_bonding_eid(topo_map_t *topo_map, urma_eid_t *bonding_eid);
 
 bool has_direct_route(topo_map_t *topo_map, urma_eid_t *bonding_eid);
 

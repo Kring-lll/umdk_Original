@@ -551,7 +551,7 @@ urma_status_t bondp_query_jfr(urma_jfr_t *jfr, urma_jfr_cfg_t *cfg, urma_jfr_att
     The sequential traversal from 0 to 2 is because JFR currently only supports multi-path configuration,
     hence it is only necessary to traverse the JFR corresponding to the primary EID.
     */
-    for (int i = 0; i < IODIE_NUM; i++) {
+    for (int i = 0; i < MAX_IODIE_NUM; i++) {
         if (bdp_jfr->p_jfr[i] == NULL) {
             continue;
         }
@@ -1062,7 +1062,7 @@ static int import_well_known_jetty(bondp_context_t *bdp_ctx, bondp_target_jetty_
     urma_rjetty_t p_rjetty = *rjetty;
     p_rjetty.tp_type = URMA_CTP; /* only support multi-path mode and use CTP */
 
-    topo_info_t *topo_info = get_topo_info_by_bonding_eid(bdp_ctx->topo_map, &rjetty->jetty_id.eid);
+    struct topo_dev_info *topo_info = get_topo_dev_info_by_bonding_eid(bdp_ctx->topo_map, &rjetty->jetty_id.eid);
     if (topo_info == NULL) {
         URMA_LOG_ERR("Failed to get topo info in import jetty\n");
         return -1;
@@ -1108,7 +1108,7 @@ static int import_loopback_matrix_jetty(bondp_context_t *bdp_ctx, bondp_target_j
         p_rjetty.tp_type = URMA_RTP;
     }
     /* Select the first available port EID for import, so start traversing from index 2. */
-    for (int i = IODIE_NUM; i < bdp_tjetty->local_dev_num; ++i) {
+    for (int i = MAX_IODIE_NUM; i < bdp_tjetty->local_dev_num; ++i) {
         if (bdp_ctx->p_ctxs[i] == NULL) {
             continue;
         }
@@ -1153,7 +1153,7 @@ static int bondp_import_pjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *b
     int ret = 0;
     if (bdp_tjetty->is_in_matrix_server) {
         if (is_well_known_jetty_id(rjetty->jetty_id.id)) {
-            int iodie_num = is_single_dev_mode(&bdp_ctx->v_ctx) ? SINGLE_DIE_IODIE_NUM : IODIE_NUM;
+            int iodie_num = is_single_dev_mode(&bdp_ctx->v_ctx) ? SINGLE_DIE_IODIE_NUM : MAX_IODIE_NUM;
             bdp_tjetty->local_dev_num = iodie_num;
             bdp_tjetty->target_dev_num = iodie_num;
             bdp_tjetty->is_multipath = true;
@@ -1161,7 +1161,7 @@ static int bondp_import_pjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *b
         } else {
             bdp_tjetty->is_multipath = udata_out->is_multipath;
             if (bdp_tjetty->is_multipath) {
-                int iodie_num = is_single_dev_mode(&bdp_ctx->v_ctx) ? SINGLE_DIE_IODIE_NUM : IODIE_NUM;
+                int iodie_num = is_single_dev_mode(&bdp_ctx->v_ctx) ? SINGLE_DIE_IODIE_NUM : MAX_IODIE_NUM;
                 bdp_tjetty->local_dev_num = iodie_num;
                 bdp_tjetty->target_dev_num = iodie_num;
                 ret = import_primary_ports(bdp_ctx, bdp_tjetty, udata_out, rjetty, rjetty_token);
@@ -1574,7 +1574,7 @@ static int bondp_import_pjfr(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
         bdp_tjetty->is_multipath = true; /* JFR currently only support multipath mode */
 
         if (bdp_tjetty->is_multipath) {
-            int iodie_num = is_single_dev_mode(&bdp_ctx->v_ctx) ? SINGLE_DIE_IODIE_NUM : IODIE_NUM;
+            int iodie_num = is_single_dev_mode(&bdp_ctx->v_ctx) ? SINGLE_DIE_IODIE_NUM : MAX_IODIE_NUM;
             bdp_tjetty->local_dev_num = iodie_num;
             bdp_tjetty->target_dev_num = iodie_num;
             ret = import_primary_ports_jfr(bdp_ctx, bdp_tjetty, udata_out, rjfr, token_value);
