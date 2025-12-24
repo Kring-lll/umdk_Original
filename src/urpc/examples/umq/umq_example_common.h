@@ -50,6 +50,15 @@ enum MEM_MODE {
     USER_PRIVATE
 };
 
+enum UMQ_OPCODE_TYPE {
+    UMQ_OPCODE_SEND,
+    UMQ_OPCODE_SEND_IMM,
+    UMQ_OPCODE_READ,
+    UMQ_OPCODE_WRITE,
+    UMQ_OPCODE_WRITE_IMM,
+    UMQ_OPC_MAX
+};
+
 enum TRANS_MODE {
     TRANS_MODE_UB = 0,              // ub, max io size 64K
     TRANS_MODE_IB,                  // ib, max io size 64K
@@ -68,6 +77,13 @@ enum UMQ_TRANS_MODE {
     UMQ_TM_MAX,
 };
 
+typedef struct umq_ub_ref_data {
+    uint64_t addr;
+    uint32_t len;
+    uint8_t mempool_id;
+    enum UMQ_OPCODE_TYPE opc;
+} umq_ub_ref_data_t;
+
 struct urpc_example_config {
     bool greeter_test_mode;                         /* true: enable greeter test mode */
     char *dev_name;                                 /* device name */
@@ -84,6 +100,7 @@ struct urpc_example_config {
     int16_t eid_idx;
     uint16_t cna;
     enum UMQ_TRANS_MODE sub_trans_mode;
+    enum UMQ_OPCODE_TYPE opc_type;
     uint32_t deid;
 };
 
@@ -104,7 +121,7 @@ int parse_trans_info(struct urpc_example_config *cfg, umq_init_cfg_t *init_cfg);
 
 int example_post_rx(uint64_t umqh, uint32_t depth);
 int example_poll_rx(uint64_t umqh, const char *check_data, uint32_t data_size, bool with_imm_data);
-int example_post_tx(uint64_t umqh, const char *data, uint32_t data_size);
+int example_post_tx(uint64_t umqh, const char *data, uint32_t data_size, uint64_t imm_data);
 int example_poll_tx(uint64_t umqh);
 int example_enqueue_data(uint64_t umqh, const char *data, uint32_t data_size);
 int example_dequeue_data(uint64_t umqh, const char *check_data, uint32_t data_size);
