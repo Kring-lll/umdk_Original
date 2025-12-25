@@ -4364,6 +4364,23 @@ util_id_allocator_t *umq_ub_get_msg_id_generator(uint64_t umqh_tp)
     return &g_umq_ub_id_allocator;
 }
 
+int umq_ub_state_set_impl(uint64_t umqh_tp, umq_state_t state)
+{
+    // todo add only support main umq judgement
+    if (state != QUEUE_STATE_ERR) {
+        UMQ_VLOG_ERR("set state only support error\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
+    if (queue->state == QUEUE_STATE_ERR) {
+        UMQ_VLOG_WARN("queue state already in error state\n");
+        return UMQ_SUCCESS;
+    }
+
+    return umq_modify_ubq_to_err(queue);
+}
+
 umq_state_t umq_ub_state_get_impl(uint64_t umqh_tp)
 {
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
