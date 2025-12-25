@@ -22,6 +22,8 @@
 
 #include "urma_admin_log.h"
 #include "admin_file_ops.h"
+#include "admin_log.h"
+
 #include "admin_parameters.h"
 
 int admin_str_to_u8(const char *buf, uint8_t *u8)
