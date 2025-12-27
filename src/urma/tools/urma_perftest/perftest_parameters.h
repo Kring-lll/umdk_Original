@@ -110,6 +110,9 @@
 
 #define PERFTEST_WRITE_DIRTY_PERIOD (50)
 #define PERFTEST_CHAR_MAX_VALUE (256)
+#define PERFTEST_SET_ATTR_BITMAP_UBOE 0x1FC
+#define PERFTEST_SET_ATTR_BITMAP_SL_FLAG 0x400
+#define PERFTEST_SET_ATTR_CNT_UBOE (7)
 
 #define PERFTEST_RESULT_LINE "---------------------------------------------------------------------------------------\n"
 
@@ -190,6 +193,11 @@ enum perftest_opts {
     PERFTEST_OPT_CTP,
     PERFTEST_OPT_SINGLE_PATH,
     PERFTEST_OPT_JETTY_ID,
+    PERFTEST_OPT_SIP,
+    PERFTEST_OPT_DIP,
+    PERFTEST_OPT_VLAN,
+    PERFTEST_OPT_DSCP,
+    PERFTEST_OPT_SL,
     PERFTEST_OPT_WAIT_JFC_TIMEOUT,
     PERFTEST_OPT_PAGE_SIZE,
     PERFTEST_OPT_AGGR_MODE,
@@ -200,6 +208,19 @@ typedef enum perftest_rate_limiter_units {
     PERFTEST_RATE_LIMIT_GIGA_BIT,
     PERFTEST_RATE_LIMIT_PS
 } perftest_rate_limiter_units_t;
+
+typedef union perftest_net_addr {
+    uint8_t raw[URMA_IP_ADDR_BYTES]; /* Network Order */
+    struct {
+        uint64_t resv;
+        uint32_t prefix;
+        uint32_t addr;
+    } in4;
+    struct {
+        uint64_t subnet_prefix;
+        uint64_t interface_id;
+    } in6;
+} perftest_net_addr_t;
 
 typedef struct perftest_config {
     perftest_cmd_type_t cmd;
@@ -291,6 +312,21 @@ typedef struct perftest_config {
     bool use_ctp;
     uint32_t jetty_id;
     int32_t wait_jfc_timeout;
+
+    bool uboe;
+    perftest_net_addr_t sip;
+    bool uboe_sip;
+    perftest_net_addr_t dip;
+    bool uboe_dip;
+    uint8_t smac[URMA_MAC_BYTES];
+    uint8_t dmac[URMA_MAC_BYTES];
+    uint16_t vlan_id;
+    bool uboe_vlan;
+    uint8_t dscp;
+    bool uboe_dscp;
+    uint8_t sl;
+    bool uboe_sl;
+
     urma_huge_page_size_t huge_page;
     bool use_huge_page;
     bool enable_aggr_mode;
