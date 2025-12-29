@@ -530,6 +530,11 @@ typedef struct umq_mempool_state {
     mempool_import_state_t import_state;
 } umq_mempool_state_t;
 
+typedef struct umq_cfg_get {
+    uint8_t max_rx_sge; // max sge number of receive array
+    uint8_t max_tx_sge; // max sge number of send array
+} umq_cfg_get_t;
+
 #ifdef __cplusplus
 }
 #endif

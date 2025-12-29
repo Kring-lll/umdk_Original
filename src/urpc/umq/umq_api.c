@@ -1082,3 +1082,14 @@ int umq_mempool_state_refresh(uint64_t umqh, uint32_t mempool_id)
 
     return umq->tp_ops->umq_tp_mempool_state_refresh(umq->umqh_tp, mempool_id);
 }
+
+int umq_queue_cfg_get(uint64_t umqh, umq_cfg_get_t *cfg)
+{
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+    if (umq == NULL || cfg == NULL || umq->umqh_tp == UMQ_INVALID_HANDLE || umq->tp_ops->umq_tp_cfg_get == NULL) {
+        UMQ_VLOG_ERR("parameter invalid\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    return umq->tp_ops->umq_tp_cfg_get(umq->umqh_tp, cfg);
+}
