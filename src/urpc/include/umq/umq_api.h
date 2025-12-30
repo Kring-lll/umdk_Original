@@ -295,6 +295,15 @@ int umq_mempool_state_get(uint64_t umqh, uint32_t mempool_id, umq_mempool_state_
  */
 int umq_mempool_state_refresh(uint64_t umqh, uint32_t mempool_id);
 
+/**
+ * Get umq handle configuration
+ * @param[in] urpc_qh: umq handle (umqh)
+ * @param[out] cfg: Configuration information for the umq (cfg)
+ * Return UMQ_SUCCESS on success, error code on failure, the specific error code is as follows
+ * -URPC_ERR_EINVAL: Invalid parameter
+ */
+int umq_queue_cfg_get(uint64_t umqh, umq_cfg_get_t *cfg);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1284,8 +1284,11 @@ static inline uint32_t get_mem_interval(uint32_t used_mem_size)
         return UMQ_SIZE_SMALL_MID_INTERVAL;
     } else if (used_mem_size <= umq_buf_size_big()) {
         return UMQ_SIZE_MID_BIG_INTERVAL;
+    } else if (used_mem_size <= umq_buf_size_huge()) {
+        return UMQ_SIZE_BIG_HUGE_INTERVAL;
     }
-    return UMQ_SIZE_BIG_HUGE_INTERVAL;
+
+    return UMQ_SIZE_HUGE_GIGANTIC_INTERVAL;
 }
 
 void ub_fill_umq_imm_head(umq_imm_head_t *umq_imm_head, umq_buf_t *buffer)
@@ -1826,7 +1829,7 @@ int umq_ub_write_imm(uint64_t umqh_tp, uint64_t target_addr, uint32_t len, uint6
         .flag.bs.inline_flag = URMA_INLINE_ENABLE,
         .tjetty = queue->bind_ctx->tjetty,
         .user_ctx = UINT16_MAX,     // do not report TX events
-        .rw = { 
+        .rw = {
                 .src = {.sge = &src_sge, .num_sge = 1},
                 .dst = {.sge = &dst_sge, .num_sge = 1},
                 .notify_data = imm_value, },

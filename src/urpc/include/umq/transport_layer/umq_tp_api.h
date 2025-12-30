@@ -252,6 +252,14 @@ typedef struct umq_ops {
      * Return: 0 on success, other value on error
      */
     int (*umq_tp_mempool_state_refresh)(uint64_t umqh_tp, uint32_t mempool_id);
+
+    /**
+     * Get queue cfg.
+     * @param[in] umqh_tp: umq tp handle
+     * @param[out] cfg: the address to put cfg
+     * Return: 0 on success, other value on error
+     */
+    int (*umq_tp_cfg_get)(uint64_t umqh_tp, umq_cfg_get_t *cfg);
 } umq_ops_t;
 
 typedef umq_ops_t* (*umq_ops_get_t)(void);

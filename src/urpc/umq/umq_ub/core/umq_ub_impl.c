@@ -1392,3 +1392,11 @@ FREE_BUF:
     umq_buf_free(send_buf);
     return ret;
 }
+
+int umq_ub_cfg_get_impl(uint64_t umqh_tp, umq_cfg_get_t *cfg)
+{
+    ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
+    cfg->max_rx_sge = queue->max_rx_sge;
+    cfg->max_tx_sge = queue->max_tx_sge;
+    return UMQ_SUCCESS;
+}
