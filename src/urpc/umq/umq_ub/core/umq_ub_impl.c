@@ -578,20 +578,20 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
         }
     }
 
-    if (umq_ub_flow_control_init(&queue->flow_control, queue, dev_ctx->feature, &dev_ctx->flow_control) !=
-        UMQ_SUCCESS) {
+    if(umq_ub_jfr_ctx_create(queue, dev_ctx, option, share_rq) != UMQ_SUCCESS) {
         goto FREE_QUEUE;
     }
 
-    if(umq_ub_jfr_ctx_create(queue, dev_ctx, option, share_rq) != UMQ_SUCCESS) {
-        goto UNINIT_FLOW_CONTROL;
+    if (umq_ub_flow_control_init(&queue->flow_control, queue, dev_ctx->feature, &dev_ctx->flow_control) !=
+        UMQ_SUCCESS) {
+        goto DESTROY_JFR_CTX;
     }
 
     if (queue->mode == UMQ_MODE_INTERRUPT) {
         queue->jfs_jfce = urma_create_jfce(dev_ctx->urma_ctx);
         if (queue->jfs_jfce == NULL) {
             UMQ_VLOG_ERR("create jfs_jfce failed\n");
-            goto DESTROY_JFR_CTX;
+            goto UNINIT_FLOW_CONTROL;
         }
     }
 
@@ -639,10 +639,13 @@ DELETE_JFCE:
     if (queue->mode == UMQ_MODE_INTERRUPT) {
         (void)urma_delete_jfce(queue->jfs_jfce);
     }
-DESTROY_JFR_CTX:
-    umq_ub_jfr_ctx_destroy(queue);
+
 UNINIT_FLOW_CONTROL:
     umq_ub_flow_control_uninit(&queue->flow_control);
+
+DESTROY_JFR_CTX:
+    umq_ub_jfr_ctx_destroy(queue);
+
 FREE_QUEUE:
     umq_dec_ref(dev_ctx->io_lock_free, &dev_ctx->ref_cnt, 1);
     free(queue);
