@@ -2108,7 +2108,7 @@ int urma_cmd_get_tp_attr(const urma_context_t *ctx, const uint64_t tp_handle, ui
 }
 
 int urma_cmd_exchange_tp_info(urma_context_t *ctx, urma_get_tp_cfg_t *cfg, uint64_t local_tp_handle, uint32_t tx_psn,
-                              uint64_t *peer_tp_handle, uint32_t *rx_psn)
+                              uint64_t *peer_tp_handle, uint32_t *rx_psn, uint32_t src_jetty_id, uint32_t dst_jetty_id)
 {
     if (ctx == NULL || cfg == NULL || peer_tp_handle == NULL || rx_psn == NULL) {
         URMA_LOG_ERR("Invalid parameter.\n");
@@ -2119,6 +2119,8 @@ int urma_cmd_exchange_tp_info(urma_context_t *ctx, urma_get_tp_cfg_t *cfg, uint6
     arg.in.get_tp_cfg = *cfg;
     arg.in.tp_handle = local_tp_handle;
     arg.in.tx_psn = tx_psn;
+    arg.in.src_jetty_id = src_jetty_id;
+    arg.in.dst_jetty_id = dst_jetty_id;
 
     int ret = urma_ioctl_exchange_tp_info(ctx->dev_fd, &arg);
     if (ret != URMA_SUCCESS) {

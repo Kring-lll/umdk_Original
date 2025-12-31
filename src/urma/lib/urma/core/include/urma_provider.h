@@ -327,6 +327,6 @@ int urma_cmd_set_tp_attr(const urma_context_t *ctx, const uint64_t tp_handle, co
 int urma_cmd_get_tp_attr(const urma_context_t *ctx, const uint64_t tp_handle, uint8_t *tp_attr_cnt,
                          uint32_t *tp_attr_bitmap, urma_tp_attr_value_t *tp_attr, urma_cmd_udrv_priv_t *udata);
 int urma_cmd_exchange_tp_info(urma_context_t *ctx, urma_get_tp_cfg_t *cfg, uint64_t local_tp_handle, uint32_t tx_psn,
-                              uint64_t *peer_tp_handle, uint32_t *rx_psn);
+                              uint64_t *peer_tp_handle, uint32_t *rx_psn, uint32_t src_jetty_id, uint32_t dst_jetty_id);
 
 #endif
