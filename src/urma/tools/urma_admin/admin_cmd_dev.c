@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include "admin_netlink.h"
+#include "admin_file_ops.h"
 
 #include "admin_cmd.h"
 
@@ -157,6 +158,9 @@ close_ns_fd:
 
 int admin_cmd_dev(admin_config_t *cfg)
 {
+    if (cfg->help) {
+        return cmd_dev_usage(cfg);
+    }
     static const admin_cmd_t cmds[] = {
         {NULL, cmd_dev_usage},          //
         {"set", cmd_dev_set},           //
@@ -204,4 +208,22 @@ int admin_cmd_set_dev_ns_legacy(admin_config_t *cfg)
     admin_nl_free_msg(msg);
     close(ns_fd);
     return ret;
+}
+
+int admin_cmd_set_reserved_jetty_id_range_legacy(admin_config_t *cfg)
+{
+    char jetty_id_range[VALUE_LEN_MAX] = {0};
+
+    if (cfg->min_rsvd_jetty_id > cfg->max_rsvd_jetty_id) {
+        (void)printf("set reserved jetty id range failed, min jetty id should not be larger than max jetty id.\n");
+        return -1;
+    }
+
+    int len = sprintf(jetty_id_range, "%u-%u", cfg->min_rsvd_jetty_id, cfg->max_rsvd_jetty_id);
+    if (len <= 0 || len >= VALUE_LEN_MAX) {
+        (void)printf("snprintf failed, dev_name: %s.\n", cfg->dev_name);
+        return -1;
+    }
+
+    return admin_write_dev_file(cfg->dev_name, "reserved_jetty_id", jetty_id_range, len + 1);
 }

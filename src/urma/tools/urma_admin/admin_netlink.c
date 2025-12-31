@@ -126,9 +126,9 @@ static int init_sock_and_genl_id()
     return 0;
 
 close_sock:
-    nl_close(sock);
+    nl_close(new_sock);
 free_sock:
-    nl_socket_free(sock);
+    nl_socket_free(new_sock);
     return ret;
 }
 

@@ -230,6 +230,9 @@ static int cmd_eid_set(admin_config_t *cfg)
 
 int admin_cmd_eid(admin_config_t *cfg)
 {
+    if (cfg->help) {
+        return cmd_eid_usage(cfg);
+    }
     static const admin_cmd_t cmds[] = {
         {NULL, cmd_eid_usage}, //
         {"add", cmd_eid_add},  //
