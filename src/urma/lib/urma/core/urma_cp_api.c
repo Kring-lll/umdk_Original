@@ -556,8 +556,9 @@ static urma_target_jetty_t *urma_import_jfr_compat(urma_context_t *ctx, urma_rjf
 
         /* Only exchange tp info for RM TP */
         if (trans_mode == URMA_TM_RM && rjfr->tp_type == URMA_RTP) {
+            /* Do not fill src_jetty_id/dst_jetty_id for RM mode */
             int ret = urma_cmd_exchange_tp_info(ctx, &get_tp_cfg, active_tp_cfg.tp_handle, active_tp_cfg.tp_attr.tx_psn,
-                                                &active_tp_cfg.peer_tp_handle, &active_tp_cfg.tp_attr.rx_psn);
+                                                &active_tp_cfg.peer_tp_handle, &active_tp_cfg.tp_attr.rx_psn, 0, 0);
             if (ret != 0) {
                 URMA_LOG_ERR("Failed to exchange tp info.\n");
                 errno = EIO;
@@ -1084,7 +1085,7 @@ static urma_target_jetty_t *urma_import_jetty_compat(urma_context_t *ctx, urma_r
         /* Only exchange tp info for RM TP */
         if (trans_mode == URMA_TM_RM && rjetty->tp_type == URMA_RTP) {
             int ret = urma_cmd_exchange_tp_info(ctx, &get_tp_cfg, active_tp_cfg.tp_handle, active_tp_cfg.tp_attr.tx_psn,
-                                                &active_tp_cfg.peer_tp_handle, &active_tp_cfg.tp_attr.rx_psn);
+                                                &active_tp_cfg.peer_tp_handle, &active_tp_cfg.tp_attr.rx_psn, 0, 0);
             if (ret != 0) {
                 URMA_LOG_ERR("Failed to exchange tp info.\n");
                 errno = EIO;
@@ -1200,7 +1201,7 @@ static urma_status_t urma_bind_jetty_compat(urma_jetty_t *jetty, urma_target_jet
     /* Only exchange tp info for RC TP */
     if (tjetty->tp_type == URMA_RTP) {
         int ret = urma_cmd_exchange_tp_info(ctx, &get_tp_cfg, active_tp_cfg.tp_handle, active_tp_cfg.tp_attr.tx_psn,
-                                            &active_tp_cfg.peer_tp_handle, &active_tp_cfg.tp_attr.rx_psn);
+            &active_tp_cfg.peer_tp_handle, &active_tp_cfg.tp_attr.rx_psn, jetty->jetty_id.id, tjetty->id.id);
         if (ret != 0) {
             URMA_LOG_ERR("Failed to exchange tp info.\n");
             return URMA_FAIL;
