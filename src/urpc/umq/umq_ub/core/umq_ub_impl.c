@@ -1020,6 +1020,33 @@ util_id_allocator_t *umq_ub_get_msg_id_generator(uint64_t umqh_tp)
     return umq_ub_id_allocator_get();
 }
 
+int umq_ub_state_set_impl(uint64_t umqh_tp, umq_state_t state)
+{
+    ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
+    if (queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) {
+        UMQ_VLOG_ERR("set state only support main umq\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    if (state != QUEUE_STATE_ERR) {
+        UMQ_VLOG_ERR("set state only support error\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    if (queue->state == QUEUE_STATE_ERR) {
+        UMQ_VLOG_INFO("queue state already in error state\n");
+        return UMQ_SUCCESS;
+    }
+
+    int ret = umq_modify_ubq_to_err(queue);
+    if (ret) {
+        UMQ_VLOG_ERR("modify queue state failed\n");
+        return -ret;
+    }
+
+    return UMQ_SUCCESS;
+}
+
 umq_state_t umq_ub_state_get_impl(uint64_t umqh_tp)
 {
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
