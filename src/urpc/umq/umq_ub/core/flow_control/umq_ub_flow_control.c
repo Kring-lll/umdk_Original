@@ -338,6 +338,7 @@ void umq_ub_window_read(ub_flow_control_t *fc, ub_queue_t *queue)
         .tjetty = queue->bind_ctx->tjetty};
     urma_status_t status = urma_post_jetty_send_wr(queue->jetty, &urma_wr, &bad_wr);
     if (status == URMA_SUCCESS) {
+        umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, 1);
         fc->remote_get = true;
         return;
     }
@@ -417,6 +418,7 @@ void umq_ub_rq_posted_notifier_update(ub_flow_control_t *fc, ub_queue_t *queue, 
     urma_jfs_wr_t *bad_wr = NULL;
     urma_status_t status = urma_post_jetty_send_wr(queue->jetty, &urma_wr, &bad_wr);
     if (status == URMA_SUCCESS) {
+        umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, 1);
         return;
     }
 
