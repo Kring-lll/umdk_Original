@@ -51,7 +51,6 @@ static int cmd_main_usage(admin_config_t *cfg)
     (void)printf("                                                           control plane not support.\n");
     (void)printf("  set_eid_mode <--dev> [--eid_mode]                      change eid mode of MUE device, only for\n");
     (void)printf("                                                           uvs, control plane not support.\n");
-    (void)printf("  set_reserved_jetty <--dev> <--min_id> <--max_id>       set reserved jetty id range.\n");
     (void)printf("  show_stats <--dev> <--resource_type> <--key>           show run stats of UB device, \n");
     (void)printf("                                                           control plane not support.\n");
     (void)printf("  show_topo                                              show topo_info of bonding device.\n");
@@ -97,8 +96,6 @@ static int cmd_main_usage(admin_config_t *cfg)
     (void)printf("  -C, --key_cnt <key>                         config key_cnt for rc res.\n");
     (void)printf("  -n, --ns </proc/$pid/ns/net>                ns path.\n");
     (void)printf("  -M, --ns_mode <0 or 1>                      ns_mode with (exclusive: 0) | (shared: 1).\n");
-    (void)printf("  -l, --min_id  <0 - U32_MAX>                 min reserved jetty id, U32_MAX means invalid.\n");
-    (void)printf("  -u, --max_id  <0 - U32_MAX>                 max reserved jetty id, U32_MAX means invalid.\n");
     return 0;
 }
 
@@ -109,8 +106,7 @@ static bool is_cmd_legacy(admin_config_t *cfg)
     }
 
     const char *legacy_cmds[] = {
-        "add_eid",  "del_eid",     "set_eid_mode", "show_stats",         "show_res",
-        "list_res", "set_ns_mode", "set_dev_ns",   "set_reserved_jetty",
+        "add_eid", "del_eid", "set_eid_mode", "show_stats", "show_res", "list_res", "set_ns_mode", "set_dev_ns",
     };
     const size_t legacy_cmds_count = sizeof(legacy_cmds) / sizeof(legacy_cmds[0]);
 
