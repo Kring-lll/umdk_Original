@@ -31,6 +31,8 @@ typedef struct umq_framework {
     char ops_get_funcname[MAX_FUNCNAME_LEN];
     umq_ops_get_t ops_get_func;
     umq_ops_t *tp_ops;
+
+
     uint8_t *ctx;
 
     char pro_ops_get_funcname[MAX_FUNCNAME_LEN];
