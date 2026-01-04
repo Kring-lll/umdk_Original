@@ -535,6 +535,37 @@ typedef struct umq_mempool_state {
     mempool_import_state_t import_state;
 } umq_mempool_state_t;
 
+#define UMQ_MAX_EID_CNT 64
+
+typedef struct umq_eid_info {
+    umq_eid_t eid;
+    uint32_t eid_index;
+} umq_eid_info_t;
+
+typedef struct umq_dev_info {
+    char dev_name[UMQ_DEV_NAME_SIZE];
+    umq_trans_mode_t umq_trans_mode;
+    union {
+        struct {
+            umq_eid_info_t eid_list[UMQ_MAX_EID_CNT];
+            uint32_t eid_cnt;
+        } ub;
+    };
+} umq_dev_info_t;
+
+typedef struct umq_cfg_get {
+    uint32_t create_flag;         // indicates which below creation property takes effect
+    uint32_t rx_buf_size;         // size of the receive buffer
+    uint32_t tx_buf_size;         // size of the send buffer
+    uint32_t rx_depth;            // depth of the receive buffer ring
+    uint32_t tx_depth;            // depth of the send buffer ring
+    uint64_t umq_ctx;             // umq ctx
+    uint64_t share_rq_umqh;       // share jfr queue handle
+    umq_trans_mode_t trans_mode;  // transmission mode of the queue
+    umq_queue_mode_t mode;        // mode of queue, QUEUE_MODE_POLLING for default
+    umq_state_t state;            // queue state
+} umq_cfg_get_t;
+
 #ifdef __cplusplus
 }
 #endif
