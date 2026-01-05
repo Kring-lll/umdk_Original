@@ -236,6 +236,246 @@ static ALWAYS_INLINE void flow_control_stats_query_atomic(struct ub_flow_control
     out->total_flow_controlled_wr = __atomic_load_n(&fc->total_flow_controlled_wr, __ATOMIC_RELAXED);
 }
 
+static ALWAYS_INLINE uint16_t available_credit_inc_atomic(ub_credit_pool_t *sjfr_credit, uint16_t count)
+{
+    uint16_t after, before = __atomic_load_n(&sjfr_credit->idle, __ATOMIC_RELAXED);
+    uint16_t ret = before;
+    uint32_t rx_sum;
+    do {
+        rx_sum = before + count;
+        if (URPC_UNLIKELY(rx_sum > UINT16_MAX)) {
+            UMQ_LIMIT_VLOG_WARN("rx posted exceed UINT16_MAX, current rx %d, new post %d, capacity %d\n",
+                                before, count, sjfr_credit->capacity);
+            ret = before;
+            break;
+        }
+
+        if (URPC_UNLIKELY(rx_sum > sjfr_credit->capacity)) {
+            UMQ_LIMIT_VLOG_WARN("rx posted exceed rx depth, current win %d, new win %d, capacity %d\n",
+                                before, count, sjfr_credit->capacity);
+
+        }
+        after = (uint16_t)rx_sum;
+        ret = after;
+    } while (
+        !__atomic_compare_exchange_n(&sjfr_credit->idle, &before, after, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+
+    if (URPC_UNLIKELY(ret == before)) {
+        (void)__atomic_add_fetch(&sjfr_credit->history_error_total, count, __ATOMIC_RELAXED);
+    } else {
+        (void)__atomic_add_fetch(&sjfr_credit->history_total, count, __ATOMIC_RELAXED);
+    }
+
+    return ret;
+}
+
+static ALWAYS_INLINE uint16_t leak_credit_load_atomic(ub_credit_pool_t *sjfr_credit)
+{
+    return __atomic_load_n(&sjfr_credit->leak, __ATOMIC_RELAXED);
+}
+
+static ALWAYS_INLINE uint16_t leak_credit_inc_atomic(ub_credit_pool_t *sjfr_credit, uint16_t count)
+{
+    uint16_t after, before = __atomic_load_n(&sjfr_credit->leak, __ATOMIC_RELAXED);
+    uint16_t ret = before;
+    uint32_t sum;
+    do {
+        sum = before + count;
+        if (URPC_UNLIKELY(sum > UINT16_MAX)) {
+            UMQ_LIMIT_VLOG_WARN("leak credit exceed UINT16_MAX, current leak credit %d, add leak credit %d\n",
+                before, count);
+            ret = before;
+            break;
+        }
+        after = (uint16_t)sum;
+        ret = after;
+    } while (
+        !__atomic_compare_exchange_n(&sjfr_credit->leak, &before, after, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+
+    return ret;
+}
+
+static ALWAYS_INLINE uint16_t available_credit_return_atomic(ub_credit_pool_t *sjfr_credit, uint16_t count)
+{
+    uint16_t after, before = __atomic_load_n(&sjfr_credit->idle, __ATOMIC_RELAXED);
+    uint16_t ret = before;
+    uint32_t sum;
+    do {
+        sum = before + count;
+        if (URPC_UNLIKELY(sum > UINT16_MAX)) {
+            UMQ_LIMIT_VLOG_WARN("credit exceed UINT16_MAX, current credit %d, add credit %d\n", before, count);
+            ret = before;
+            break;
+        }
+
+        if (URPC_UNLIKELY(sum > sjfr_credit->capacity)) {
+            UMQ_LIMIT_VLOG_WARN("rx posted exceed rx depth, current credit %d, add credit %d, capacity %d\n",
+                                before, count, sjfr_credit->capacity);
+        }
+        after = (uint16_t)sum;
+        ret = after;
+    } while (
+        !__atomic_compare_exchange_n(&sjfr_credit->idle, &before, after, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+
+    return ret;
+}
+
+static ALWAYS_INLINE uint16_t leak_credit_recycle_atomic(ub_credit_pool_t *sjfr_credit, uint16_t count)
+{
+    uint16_t after, before = __atomic_load_n(&sjfr_credit->leak, __ATOMIC_RELAXED);
+    uint16_t ret = before;
+    do {
+        if (URPC_UNLIKELY(before == 0)) {
+            ret = 0;
+            break;
+        }
+
+        after = before > count ? before - count : 0;
+        ret = before - after;
+    } while (
+        !__atomic_compare_exchange_n(&sjfr_credit->leak, &before, after, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+    (void)available_credit_return_atomic(sjfr_credit, ret);
+    return ret;
+}
+
+static ALWAYS_INLINE uint16_t available_credit_dec_atomic(ub_credit_pool_t *sjfr_credit, uint16_t count)
+{
+    uint16_t leak_count = leak_credit_load_atomic(sjfr_credit);
+    if (leak_count > sjfr_credit->leak_threshold) {
+        leak_credit_recycle_atomic(sjfr_credit, leak_count);
+    }
+    uint16_t after, before = __atomic_load_n(&sjfr_credit->idle, __ATOMIC_RELAXED);
+    uint16_t ret = before;
+    do {
+        if (URPC_UNLIKELY(before == 0)) {
+            ret = 0;
+            break;
+        }
+
+        after = before > count ? before - count : 0;
+        ret = before - after;
+    } while (
+        !__atomic_compare_exchange_n(&sjfr_credit->idle, &before, after, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+
+    return ret;
+}
+
+static ALWAYS_INLINE uint16_t available_credit_load_atomic(ub_credit_pool_t *sjfr_credit)
+{
+    return __atomic_load_n(&sjfr_credit->idle, __ATOMIC_RELAXED);
+}
+
+static ALWAYS_INLINE uint16_t available_credit_inc_non_atomic(ub_credit_pool_t *sjfr_credit, uint16_t count)
+{
+    uint32_t rx_sum = sjfr_credit->idle + count;
+    if (URPC_UNLIKELY(rx_sum > UINT16_MAX)) {
+        UMQ_LIMIT_VLOG_WARN("rx posted exceed UINT16_MAX, current rx %d, new post %d, capacity %d\n",
+                            sjfr_credit->idle, count, sjfr_credit->capacity);
+        sjfr_credit->history_error_total += count;
+        return sjfr_credit->idle;
+    }
+
+    if (URPC_UNLIKELY(rx_sum > sjfr_credit->capacity)) {
+        UMQ_LIMIT_VLOG_WARN("rx posted exceed rx depth, current win %d, new win %d, capacity %d\n",
+                            sjfr_credit->idle, count, sjfr_credit->capacity);
+    }
+    sjfr_credit->history_total += count;
+    sjfr_credit->idle = (uint16_t)rx_sum;
+    return sjfr_credit->idle;
+}
+
+static ALWAYS_INLINE uint16_t available_credit_dec_non_atomic(ub_credit_pool_t *sjfr_credit, uint16_t count)
+{
+    if (sjfr_credit->leak > sjfr_credit->leak_threshold) {
+        sjfr_credit->idle += sjfr_credit->leak;
+        sjfr_credit->leak = 0;
+    }
+    uint16_t idle = sjfr_credit->idle;
+    if (idle < count) {
+        sjfr_credit->idle  = 0;
+        return idle;
+    }
+
+    sjfr_credit->idle -= count;
+    return count;
+}
+
+static ALWAYS_INLINE uint16_t available_credit_load_non_atomic(ub_credit_pool_t *sjfr_credit)
+{
+    return sjfr_credit->idle;
+}
+
+static ALWAYS_INLINE uint16_t available_credit_return_non_atomic(ub_credit_pool_t *sjfr_credit, uint16_t count)
+{
+    uint32_t sum = sjfr_credit->idle + count;
+    if (URPC_UNLIKELY(sum > UINT16_MAX)) {
+        UMQ_LIMIT_VLOG_WARN("after return credit exceed UINT16_MAX, current credit %d, return credit %d, capacity %d\n",
+                            sjfr_credit->idle, count, sjfr_credit->capacity);
+        return sjfr_credit->idle;
+    }
+
+    sjfr_credit->idle = (uint16_t)sum;
+    return sjfr_credit->idle;
+}
+
+static ALWAYS_INLINE uint16_t leak_credit_load_non_atomic(ub_credit_pool_t *sjfr_credit)
+{
+    return sjfr_credit->leak;
+}
+
+static ALWAYS_INLINE uint16_t leak_credit_inc_non_atomic(ub_credit_pool_t *sjfr_credit, uint16_t count)
+{
+    uint32_t sum = sjfr_credit->leak + count;
+    if (URPC_UNLIKELY(sum > UINT16_MAX)) {
+        UMQ_LIMIT_VLOG_WARN("leak credit exceed UINT16_MAX, current leak %d, new leak credit %d\n",
+            sjfr_credit->leak, count);
+        return sjfr_credit->leak;
+    }
+
+    sjfr_credit->leak = (uint16_t)sum;
+    return sum;
+}
+
+static ALWAYS_INLINE uint16_t leak_credit_recycle_non_atomic(ub_credit_pool_t *sjfr_credit, uint16_t count)
+{
+    uint16_t leak = sjfr_credit->leak;
+    if (leak < count) {
+        sjfr_credit->leak = 0;
+        return leak;
+    }
+
+    sjfr_credit->leak -= count;
+    return count;
+}
+
+static void umq_ub_shared_jfr_cerdit_init(ub_queue_t *queue, uint32_t feature, umq_flow_control_cfg_t *cfg)
+{
+    ub_credit_pool_t *shared_jfr_credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    memset(shared_jfr_credit, 0, sizeof(ub_credit_pool_t));
+    shared_jfr_credit->capacity = queue->rx_depth;
+    shared_jfr_credit->leak_threshold = shared_jfr_credit->capacity >> 3;
+    if (shared_jfr_credit->leak_threshold == 0) {
+        shared_jfr_credit->leak_threshold = 1;
+    }
+
+    if (cfg->use_atomic_window) {
+        shared_jfr_credit->ops.available_credit_inc = available_credit_inc_atomic;
+        shared_jfr_credit->ops.available_credit_dec = available_credit_dec_atomic;
+        shared_jfr_credit->ops.available_credit_load = available_credit_load_atomic;
+        shared_jfr_credit->ops.available_credit_return = available_credit_return_atomic;
+        shared_jfr_credit->ops.leak_credit_inc = leak_credit_inc_atomic;
+        shared_jfr_credit->ops.leak_credit_recycle = leak_credit_recycle_atomic;
+    } else {
+        shared_jfr_credit->ops.available_credit_inc = available_credit_inc_non_atomic;
+        shared_jfr_credit->ops.available_credit_dec = available_credit_dec_non_atomic;
+        shared_jfr_credit->ops.available_credit_load = available_credit_load_non_atomic;
+        shared_jfr_credit->ops.available_credit_return = available_credit_return_non_atomic;
+        shared_jfr_credit->ops.leak_credit_inc = leak_credit_inc_non_atomic;
+        shared_jfr_credit->ops.leak_credit_recycle = leak_credit_recycle_non_atomic;
+    }
+}
+
+
 int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t feature, umq_flow_control_cfg_t *cfg)
 {
     memset(fc, 0, sizeof(ub_flow_control_t));
