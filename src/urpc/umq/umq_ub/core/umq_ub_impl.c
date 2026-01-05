@@ -583,7 +583,7 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
         goto FREE_QUEUE;
     }
 
-    if(umq_ub_jfr_ctx_create(queue, dev_ctx, option, share_rq) != UMQ_SUCCESS) {
+    if (umq_ub_jfr_ctx_create(queue, dev_ctx, option, share_rq) != UMQ_SUCCESS) {
         goto UNINIT_FLOW_CONTROL;
     }
 
