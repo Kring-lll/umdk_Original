@@ -216,12 +216,39 @@ typedef struct ub_bind_ctx {
     uint64_t remote_notify_addr;
 } ub_bind_ctx_t;
 
+struct ub_credit_pool;
+typedef struct ub_credit_pool_ops {
+    // update shared jfr rx_posted after post rx buffer
+    uint16_t (*available_credit_inc)(struct ub_credit_pool *shared_credit, uint16_t count);
+    // load idle credit
+    uint16_t (*available_credit_load)(struct ub_credit_pool *shared_credit);
+    // distribute x in batch
+    uint16_t (*available_credit_dec)(struct ub_credit_pool *shared_credit, uint16_t count);
+    // return unused credit
+    uint16_t (*available_credit_return)(struct ub_credit_pool *shared_credit, uint16_t count);
+    uint16_t (*leak_credit_inc)(struct ub_credit_pool *shared_credit, uint16_t count);
+    uint16_t (*leak_credit_recycle)(struct ub_credit_pool *shared_credit, uint16_t count);
+} ub_credit_pool_ops_t;
+
+typedef struct ub_credit_pool {
+    ub_credit_pool_ops_t ops;
+    volatile uint64_t history_total; // history total credit
+    volatile uint64_t history_error_total;
+    volatile uint64_t history_consumed; // history consumed credit, allocated
+    volatile uint64_t history_leak; // history consumed credit, allocated
+    volatile uint16_t leak; // leak credit
+    volatile uint16_t idle; // curent avilable credit
+    uint16_t capacity;
+    uint16_t leak_threshold;
+} ub_credit_pool_t;
+
 typedef struct jfr_ctx {
     urma_jfr_t *jfr;
     urma_jfc_t *jfr_jfc;
     urma_jfce_t *jfr_jfce;
     volatile uint32_t ref_cnt;
     rx_buf_ctx_list_t rx_buf_ctx_list;
+    ub_credit_pool_t credit;
 } jfr_ctx_t;
 
 typedef struct umq_v_jfce {
