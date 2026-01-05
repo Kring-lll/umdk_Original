@@ -29,6 +29,7 @@ int32_t umq_ub_destroy_impl(uint64_t umqh);
 int umq_ub_bind_info_get_impl(uint64_t umqh, uint8_t *bind_info, uint32_t bind_info_size);
 int umq_ub_bind_impl(uint64_t umqh, uint8_t *bind_info, uint32_t bind_info_size);
 int umq_ub_unbind_impl(uint64_t umqh);
+int umq_ub_state_set_impl(uint64_t umqh_tp, umq_state_t state);
 umq_state_t umq_ub_state_get_impl(uint64_t umqh_tp);
 
 int32_t umq_ub_register_memory_impl(void *buf, uint64_t size);
@@ -81,6 +82,7 @@ int umq_ub_user_ctl_impl(uint64_t umqh_tp, umq_user_ctl_in_t *in, umq_user_ctl_o
 int umq_ub_mempool_state_get_impl(uint64_t umqh_tp, uint32_t mempool_id, umq_mempool_state_t *mempool_state);
 int umq_ub_mempool_state_refresh_impl(uint64_t umqh_tp, uint32_t mempool_id);
 int umq_ub_dev_info_get_impl(char *umq_dev_name, umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq_dev_info);
+int umq_ub_cfg_get_impl(uint64_t umqh_tp, umq_cfg_get_t *cfg);
 
 #ifdef __cplusplus
 }

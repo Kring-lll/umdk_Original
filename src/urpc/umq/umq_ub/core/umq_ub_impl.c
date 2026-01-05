@@ -842,11 +842,18 @@ int umq_ub_unbind_impl(uint64_t umqh)
                   EID_ARGS(tjetty->id.eid), tjetty->id.id);
     (void)urma_unbind_jetty(queue->jetty);
     (void)urma_unimport_jetty(tjetty);
-    umq_modify_ubq_to_err(queue);
+    if (queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) {
+        UMQ_VLOG_DEBUG("sub umq only need set tx res error\n");
+        umq_modify_ubq_to_err(queue, UMQ_IO_TX);
+    } else {
+        umq_modify_ubq_to_err(queue, UMQ_IO_ALL);
+    }
 
     if ((queue->dev_ctx->feature & UMQ_FEATURE_API_PRO) == 0) {
         umq_flush_tx(queue, UMQ_FLUSH_MAX_RETRY_TIMES);
-        umq_flush_rx(queue, UMQ_FLUSH_MAX_RETRY_TIMES);
+        if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0) {
+            umq_flush_rx(queue, UMQ_FLUSH_MAX_RETRY_TIMES);
+        }
     }
 
     free(queue->bind_ctx);
@@ -1018,6 +1025,34 @@ void umq_ub_remove_rendezvous_buf(uint64_t umqh_tp, uint16_t msg_id)
 util_id_allocator_t *umq_ub_get_msg_id_generator(uint64_t umqh_tp)
 {
     return umq_ub_id_allocator_get();
+}
+
+int umq_ub_state_set_impl(uint64_t umqh_tp, umq_state_t state)
+{
+    ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
+    if (queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) {
+        UMQ_VLOG_ERR("set state only support main umq\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    if (state != QUEUE_STATE_ERR) {
+        UMQ_VLOG_ERR("set state only support error state\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    if (queue->state == QUEUE_STATE_ERR) {
+        UMQ_VLOG_INFO("queue state already in error state\n");
+        return UMQ_SUCCESS;
+    }
+
+    int ret = umq_modify_ubq_to_err(queue, UMQ_IO_ALL);
+    if (ret) {
+        UMQ_VLOG_ERR("modify queue state failed\n");
+        return -ret;
+    }
+
+    UMQ_VLOG_INFO("modify queue state %d success\n", state);
+    return UMQ_SUCCESS;
 }
 
 umq_state_t umq_ub_state_get_impl(uint64_t umqh_tp)
@@ -1411,6 +1446,25 @@ int umq_ub_dev_info_get_impl(char *dev_name, umq_trans_mode_t umq_trans_mode, um
     umq_dev_info->umq_trans_mode = umq_trans_mode;
     memcpy(umq_dev_info->dev_name, dev_name, strnlen(dev_name, UMQ_DEV_NAME_SIZE));
     urma_free_eid_list(eid_info_list);
+    return UMQ_SUCCESS;
+}
 
+int umq_ub_cfg_get_impl(uint64_t umqh_tp, umq_cfg_get_t *cfg)
+{
+    if (cfg == NULL) {
+        UMQ_VLOG_ERR("umq cfg is invalid\n");
+        return -UMQ_ERR_EINVAL;
+    }
+    ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
+    cfg->create_flag = queue->create_flag;
+    cfg->rx_buf_size = queue->rx_buf_size;
+    cfg->tx_buf_size = queue->tx_buf_size;
+    cfg->rx_depth = queue->rx_depth;
+    cfg->tx_depth = queue->tx_depth;
+    cfg->umq_ctx = queue->umq_ctx;
+    cfg->share_rq_umqh = queue->share_rq_umqh;
+    cfg->trans_mode = queue->umq_trans_mode;
+    cfg->mode = queue->mode;
+    cfg->state = queue->state;
     return UMQ_SUCCESS;
 }

@@ -228,6 +228,7 @@ typedef struct ub_queue {
     atomic_uint require_rx_count;
     volatile uint32_t tx_outstanding;
     uint32_t create_flag;
+    uint64_t umq_ctx;
     urma_target_seg_t **imported_tseg_list;   // read-only
     uint64_t addr_list[UMQ_MAX_ID_NUM];
 
@@ -305,7 +306,7 @@ int umq_ub_token_generate(bool enable_token, uint32_t *token);
 int umq_ub_bind_info_check(ub_queue_t *queue, umq_ub_bind_info_t *info);
 int umq_ub_eid_id_release(remote_imported_tseg_info_t *remote_imported_info, ub_bind_ctx_t *ctx);
 int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info);
-int umq_modify_ubq_to_err(ub_queue_t *queue);
+int umq_modify_ubq_to_err(ub_queue_t *queue, umq_io_direction_t direction);
 uint32_t umq_ub_get_urma_dev(umq_dev_assign_t *dev_info, urma_device_t **urma_dev, uint32_t *eid_index);
 int umq_ub_create_urma_ctx(urma_device_t *urma_dev, uint32_t eid_index, umq_ub_ctx_t *ub_ctx);
 int umq_ub_delete_urma_ctx(umq_ub_ctx_t *ub_ctx);
