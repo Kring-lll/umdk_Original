@@ -81,7 +81,7 @@ static uint32_t CountTensorListLen(gert::TilingContext *context, int descIndex)
     return count;
 }
 
-static ge::graphStatus CheckGmm1Shape(gert::TilingContext *context, DispatchGmmCombineDecodeTilingData *tilingData)
+static ge::graphStatus CheckGmm1Shape(gert::TilingContext *context, FusedDeepMoeTilingData *tilingData)
 {
     const char *nodeName = context->GetNodeName();
     uint32_t moeExpertNumPerRank = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
@@ -90,8 +90,8 @@ static ge::graphStatus CheckGmm1Shape(gert::TilingContext *context, DispatchGmmC
     auto gmm1FirstTensorElement = context->GetDynamicInputTensor(INPUT_GMM1_WEIGHT_INDEX, 0);
     auto gmm1FirstTensorElementShape = gmm1FirstTensorElement->GetOriginShape();
     uint32_t elementDims = gmm1FirstTensorElementShape.GetDimNum();
-    uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
-    uint32_t sharedExpertRankNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
+    uint32_t epRankId = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
+    uint32_t sharedExpertRankNum = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
     uint32_t localExpertNum = epRankId < sharedExpertRankNum ? 1 : moeExpertNumPerRank;
 
     OP_TILING_CHECK(elementDims != 2 && elementDims != 3, OP_LOGE(nodeName, "gmm1Weight shape is invalid."),
@@ -131,13 +131,13 @@ static ge::graphStatus CheckGmm1Shape(gert::TilingContext *context, DispatchGmmC
 }
 
 static ge::graphStatus CheckGmm1ScaleShape(gert::TilingContext *context,
-                                                DispatchGmmCombineDecodeTilingData *tilingData)
+                                                FusedDeepMoeTilingData *tilingData)
 {
     const char *nodeName = context->GetNodeName();
     uint32_t moeExpertNumPerRank = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     uint32_t n = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
-    uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
-    uint32_t sharedExpertRankNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
+    uint32_t epRankId = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
+    uint32_t sharedExpertRankNum = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
     uint32_t localExpertNum = epRankId < sharedExpertRankNum ? 1 : moeExpertNumPerRank;
 
     uint32_t gmm1ScaleListLen = CountTensorListLen(context, INPUT_GMM1_WEIGHT_SCALE_INDEX);
@@ -159,20 +159,20 @@ static ge::graphStatus CheckGmm1ScaleShape(gert::TilingContext *context,
             OP_TILING_CHECK(localExpertNum != gmm1ScaleFirstTensorElementShape.GetDim(0),
                 OP_LOGE(nodeName, "gmm1Scale does not match local expert number perRank."), return ge::GRAPH_FAILED);
             OP_TILING_CHECK(n != gmm1ScaleFirstTensorElementShape.GetDim(1),
-                OP_TILING_CHECK(nodeName, "gmm1Scale length does not equals to gmm1 hidden size."), return ge::GRAPH_FAILED);
+                OP_LOGE(nodeName, "gmm1Scale length does not equals to gmm1 hidden size."), return ge::GRAPH_FAILED);
         }
     }
     return ge::GRAPH_SUCCESS;
 }
 
-static ge::graphStatus CheckGmm2Shape(gert::TilingContext *context, DispatchGmmCombineDecodeTilingData *tilingData)
+static ge::graphStatus CheckGmm2Shape(gert::TilingContext *context, FusedDeepMoeTilingData *tilingData)
 {
     const char *nodeName = context->GetNodeName();
     uint32_t moeExpertNumPerRank = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     uint32_t h = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.h;
     uint32_t n = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
-    uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
-    uint32_t sharedExpertRankNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
+    uint32_t epRankId = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
+    uint32_t sharedExpertRankNum = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
     uint32_t localExpertNum = epRankId < sharedExpertRankNum ? 1 : moeExpertNumPerRank;
     
     uint32_t gmm2ListLen = CountTensorListLen(context, INPUT_GMM2_WEIGHT_INDEX);
@@ -207,13 +207,13 @@ static ge::graphStatus CheckGmm2Shape(gert::TilingContext *context, DispatchGmmC
 }
 
 static ge::graphStatus CheckGmm2ScaleShape(gert::TilingContext *context,
-                                                DispatchGmmCombineDecodeTilingData *tilingData)
+                                                FusedDeepMoeTilingData *tilingData)
 {
     const char *nodeName = context->GetNodeName();
     uint32_t moeExpertNumPerRank = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     uint32_t h = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.h;
-    uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
-    uint32_t sharedExpertRankNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
+    uint32_t epRankId = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
+    uint32_t sharedExpertRankNum = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
     uint32_t localExpertNum = epRankId < sharedExpertRankNum ? 1 : moeExpertNumPerRank;
 
     uint32_t gmm2ScaleListLen = CountTensorListLen(context, INPUT_GMM2_WEIGHT_SCALE_INDEX);
@@ -242,7 +242,7 @@ static ge::graphStatus CheckGmm2ScaleShape(gert::TilingContext *context,
 }
 
 static ge::graphStatus CheckWeightTensorList(gert::TilingContext *context,
-                                                DispatchGmmCombineDecodeTilingData *tilingData)
+                                                FusedDeepMoeTilingData *tilingData)
 {
     if (CheckGmm1Shape(context, tilingData) == ge::GRAPH_SUCCESS &&
         CheckGmm1ScaleShape(context, tilingData) == ge::GRAPH_SUCCESS &&
