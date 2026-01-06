@@ -702,7 +702,7 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
     return UMQ_SUCCESS;
 }
 
-int share_rq_param_check(ub_queue_t *queue, ub_queue_t *share_rq)
+int share_rq_param_check(ub_queue_t *queue, ub_queue_t *share_queue)
 {
     if (share_rq->state == QUEUE_STATE_ERR) {
         UMQ_VLOG_ERR("the share_rq is invalid\n");
