@@ -274,9 +274,11 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
         }
     }
     (urma_wr_ptr - 1)->next = NULL;
-    max_tx = opcode_consume_rqe ? umq_ub_window_dec(&queue->flow_control, queue, wr_index) : wr_index;
+    uint32_t inc_tx = umq_inc_tx_ref(queue, wr_index);
+    max_tx = opcode_consume_rqe ? umq_ub_window_dec(&queue->flow_control, queue, inc_tx) : inc_tx;
     if (max_tx == 0) {
         *bad_qbuf = qbuf;
+        umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, inc_tx);
         ret = -UMQ_ERR_EAGAIN;
         goto ERROR;
     } else if (max_tx < wr_index) {
@@ -290,9 +292,10 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
     if (status != URMA_SUCCESS) {
         ret = -(int)status;
         if (bad_wr != NULL) {
-            *bad_qbuf = (umq_buf_t *)(uintptr_t)bad_wr->user_ctx;
+            process_bad_qbuf(bad_wr, bad_qbuf, qbuf, queue, inc_tx);
         } else {
             *bad_qbuf = qbuf;
+            umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, inc_tx);
         }
         UMQ_LIMIT_VLOG_ERR("urma_post_jetty_send_wr failed, status %d, local eid: " EID_FMT ", "
                            "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n",
@@ -304,6 +307,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
     if (max_tx < wr_index) {
         *bad_qbuf = (umq_buf_t *)(uintptr_t)urma_wr[max_tx].user_ctx;
         umq_ub_recover_tx_imm(queue, urma_wr, wr_index, *bad_qbuf);
+        umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, inc_tx - max_tx);
         umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
         return -UMQ_ERR_EAGAIN;
     }
@@ -785,15 +789,18 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
             // recover flow control window and rx_posted
             if (cr[i].user_ctx == 0) {
                 queue->flow_control.remote_get = false;
+                umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, 1);
                 UMQ_LIMIT_VLOG_ERR("get remote window post read failed\n");
                 continue;
             } else if (cr[i].user_ctx <= UINT16_MAX) {
                 umq_ub_window_inc(&queue->flow_control, 1);
+                umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, 1);
                 umq_ub_rq_posted_notifier_inc(&queue->flow_control, (uint16_t)cr[i].user_ctx);
                 continue;
             }
         }
 
+        umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, 1);
         if (cr[i].user_ctx == 0) {
             // window read ok
             uint16_t *remote_win =
