@@ -22,7 +22,7 @@ static bool urpc_tlv_buf_validation(char *buf, uint32_t buf_size)
     return true;
 }
 
-urpc_tlv_head_t *urpc_tlv_search_element(char *buf, uint32_t buf_size, urpc_tlv_type_t type)
+urpc_tlv_head_t *urpc_tlv_search_element(const char *buf, uint32_t buf_size, urpc_tlv_type_t type)
 {
     if (!urpc_tlv_buf_validation(buf, buf_size)) {
         return NULL;
