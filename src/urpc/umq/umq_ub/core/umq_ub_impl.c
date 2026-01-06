@@ -886,17 +886,20 @@ int32_t umq_ub_enqueue_impl(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_q
     *bad_qbuf = NULL;
 
     int ret = UMQ_SUCCESS;
-    uint32_t tx_outstanding = umq_fetch_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding);
-    int remain_tx = queue->tx_depth - tx_outstanding;
-    if (remain_tx <= 0) {
-        ret = -UMQ_ERR_EAGAIN;
-        goto ERROR;
-    }
-    int wr_num = umq_ub_fill_wr_impl(qbuf, queue, urma_wr, (uint32_t)remain_tx);
+    int wr_num = umq_ub_fill_wr_impl(qbuf, queue, urma_wr);
     if (wr_num < 0) {
         *bad_qbuf = qbuf;
         ret = wr_num;
         goto ERROR;
+    }
+
+    uint32_t inc_tx = umq_inc_tx_ref(queue, wr_num);
+    if (inc_tx == 0) {
+        *bad_qbuf = qbuf;
+        ret = -UMQ_ERR_EAGAIN;
+        goto ERROR;
+    } else if (inc_tx < (uint32_t)wr_num) {
+        urma_wr[inc_tx - 1].next = NULL;
     }
     urma_jfs_wr_t *bad_wr = NULL;
     uint64_t start_timestamp = umq_perf_get_start_timestamp_with_feature(queue->dev_ctx->feature);
@@ -904,14 +907,22 @@ int32_t umq_ub_enqueue_impl(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_q
     umq_perf_record_write_with_feature(UMQ_PERF_RECORD_TRANSPORT_POST_SEND, start_timestamp, queue->dev_ctx->feature);
     if (status != URMA_SUCCESS) {
         if (bad_wr != NULL) {
-            process_bad_qbuf(bad_wr, bad_qbuf, qbuf, queue);
+            process_bad_qbuf(bad_wr, bad_qbuf, qbuf, queue, inc_tx);
+        } else {
+            *bad_qbuf = qbuf;
+            umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, inc_tx);
         }
         UMQ_LIMIT_VLOG_ERR("urma_post_jetty_send_wr failed, status %d\n", status);
         ret = -status;
         goto ERROR;
     }
 
-    umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, wr_num);
+    if (inc_tx < (uint32_t)wr_num) {
+        *bad_qbuf = (umq_buf_t *)(uintptr_t)urma_wr[inc_tx].user_ctx;
+        ret = -UMQ_ERR_EAGAIN;
+        goto ERROR;
+    }
+
     umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
     return ret;
 
@@ -934,15 +945,9 @@ int32_t umq_ub_enqueue_impl_plus(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **
 
     umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
     umq_ub_enqueue_plus_with_poll_tx(queue, buf);
-    uint32_t tx_outstanding = umq_fetch_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding);
-    int remain_tx = queue->tx_depth - tx_outstanding;
-    if (remain_tx <= 0) {
-        ret = -UMQ_ERR_EAGAIN;
-        goto DEC_REF;
-    }
 
     urma_jfs_wr_t urma_wr[UMQ_POST_POLL_BATCH];
-    int wr_num = umq_ub_plus_fill_wr_impl(qbuf, queue, urma_wr, (uint32_t)remain_tx);
+    int wr_num = umq_ub_plus_fill_wr_impl(qbuf, queue, urma_wr);
     if (wr_num < 0) {
         *bad_qbuf = qbuf;
         ret = wr_num;
@@ -951,20 +956,37 @@ int32_t umq_ub_enqueue_impl_plus(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **
         ret = UMQ_SUCCESS;
         goto DEC_REF;
     }
+    
+    uint32_t inc_tx = umq_inc_tx_ref(queue, wr_num);
+    if (inc_tx == 0) {
+        *bad_qbuf = qbuf;
+        ret = -UMQ_ERR_EAGAIN;
+        goto DEC_REF;
+    } else if (inc_tx < (uint32_t)wr_num) {
+        urma_wr[inc_tx - 1].next = NULL;
+    }
     urma_jfs_wr_t *bad_wr = NULL;
     uint64_t start_timestamp = umq_perf_get_start_timestamp_with_feature(queue->dev_ctx->feature);
     urma_status_t status = urma_post_jetty_send_wr(queue->jetty, urma_wr, &bad_wr);
     umq_perf_record_write_with_feature(UMQ_PERF_RECORD_TRANSPORT_POST_SEND, start_timestamp, queue->dev_ctx->feature);
     if (status != URMA_SUCCESS) {
         if (bad_wr != NULL) {
-            process_bad_qbuf(bad_wr, bad_qbuf, qbuf, queue);
+            process_bad_qbuf(bad_wr, bad_qbuf, qbuf, queue, inc_tx);
+        } else {
+            *bad_qbuf = qbuf;
+            umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, inc_tx);
         }
         UMQ_LIMIT_VLOG_ERR("urma_post_jetty_send_wr failed, status %d\n", status);
         ret = -status;
         goto DEC_REF;
     }
 
-    umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, wr_num);
+    if (inc_tx < (uint32_t)wr_num) {
+        *bad_qbuf = (umq_buf_t *)(uintptr_t)urma_wr[inc_tx].user_ctx;
+        ret = -UMQ_ERR_EAGAIN;
+        goto DEC_REF;
+    }
+
     umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
     return ret;
 
