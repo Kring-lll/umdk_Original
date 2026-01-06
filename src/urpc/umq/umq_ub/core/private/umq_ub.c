@@ -1605,7 +1605,7 @@ FREE_BUF:
     return UMQ_FAIL;
 }
 
-int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_wr_ptr, uint32_t remain_tx)
+int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_wr_ptr)
 {
     uint32_t max_sge_num = queue->max_tx_sge;
     urma_sge_t sges[UMQ_POST_POLL_BATCH][max_sge_num];
@@ -1681,10 +1681,10 @@ int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *
         urma_wr_ptr++;
         (urma_wr_ptr - 1)->next = urma_wr_ptr;
         wr_index++;
-        if ((wr_index == remain_tx || wr_index == UMQ_POST_POLL_BATCH) && buffer != NULL) {
-            // wr count exceed remain_tx or UMQ_POST_POLL_BATCH
-            UMQ_LIMIT_VLOG_ERR("wr count %u exceeds remain_tx %u or max_post_size %d, not supported\n", wr_index,
-                               remain_tx, UMQ_POST_POLL_BATCH);
+        if (wr_index == UMQ_POST_POLL_BATCH && buffer != NULL) {
+            // wr count exceed UMQ_POST_POLL_BATCH
+            UMQ_LIMIT_VLOG_ERR("wr count %u exceeds max_post_size %d, not supported\n", wr_index,
+                               UMQ_POST_POLL_BATCH);
             return -UMQ_ERR_EINVAL;
         }
     }
@@ -1860,7 +1860,7 @@ int umq_ub_dequeue_plus_with_poll_rx(uint64_t umqh_tp, urma_cr_t *cr, umq_buf_t 
     return qbuf_cnt;
 }
 
-void process_bad_qbuf(urma_jfs_wr_t *bad_wr, umq_buf_t **bad_qbuf, umq_buf_t *qbuf, ub_queue_t *queue)
+void process_bad_qbuf(urma_jfs_wr_t *bad_wr, umq_buf_t **bad_qbuf, umq_buf_t *qbuf, ub_queue_t *queue, uint32_t inc_tx)
 {
     *bad_qbuf = (umq_buf_t *)(uintptr_t)bad_wr->user_ctx;
     umq_buf_t *tmp_qbuf = qbuf;
@@ -1868,14 +1868,20 @@ void process_bad_qbuf(urma_jfs_wr_t *bad_wr, umq_buf_t **bad_qbuf, umq_buf_t *qb
     umq_buf_t *previous = NULL;
     while (tmp_qbuf != NULL && tmp_qbuf != *bad_qbuf) {
         count++;
-        previous = tmp_qbuf;
-        tmp_qbuf = tmp_qbuf->qbuf_next;
+        uint32_t rest_data_size = tmp_qbuf->total_data_size;
+        while (tmp_qbuf && rest_data_size > 0) {
+            if (rest_data_size <= tmp_qbuf->data_size) {
+                previous = tmp_qbuf;
+            }
+            rest_data_size -= tmp_qbuf->data_size;
+            tmp_qbuf = tmp_qbuf->qbuf_next;
+        }
     }
     if (previous) {
         // break chain of succeed qbuf and failed qbuf on tx
         previous->qbuf_next = NULL;
     }
-    umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, count);
+    umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, inc_tx - count);
 }
 
 void umq_ub_enqueue_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
@@ -2050,7 +2056,7 @@ int umq_ub_write_imm(uint64_t umqh_tp, uint64_t target_addr, uint32_t len, uint6
     return UMQ_SUCCESS;
 }
 
-int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_wr_ptr, uint32_t remain_tx)
+int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_wr_ptr)
 {
     uint32_t max_sge_num = queue->max_tx_sge;
     urma_sge_t sges[UMQ_POST_POLL_BATCH][max_sge_num];
@@ -2114,10 +2120,10 @@ int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_
         urma_wr_ptr++;
         (urma_wr_ptr - 1)->next = urma_wr_ptr;
         wr_index++;
-        if ((wr_index == remain_tx || wr_index == UMQ_POST_POLL_BATCH) && buffer != NULL) {
-            // wr count exceed remain_tx or UMQ_POST_POLL_BATCH
-            UMQ_LIMIT_VLOG_ERR("wr count %u exceeds remain_tx %u or max_post_size %d, not supported\n", wr_index,
-                               remain_tx, UMQ_POST_POLL_BATCH);
+        if (wr_index == UMQ_POST_POLL_BATCH && buffer != NULL) {
+            // wr count exceed UMQ_POST_POLL_BATCH
+            UMQ_LIMIT_VLOG_ERR("wr count %u exceeds or max_post_size %d, not supported\n", wr_index,
+                               UMQ_POST_POLL_BATCH);
             return -UMQ_ERR_EINVAL;
         }
     }
@@ -2160,5 +2166,34 @@ void umq_flush_tx(ub_queue_t *queue, uint32_t max_retry_times)
             (void)umq_buf_break_and_free(buf[i]);
         }
         retry_times++;
+    }
+}
+
+static uint32_t umq_inc_tx_ref_atomic(ub_queue_t *queue, uint32_t required_tx)
+{
+    uint32_t after, before, inc_tx = 0;
+    uint32_t tx_depth = queue->tx_depth;
+    do {
+        before = __atomic_load_n(&queue->tx_outstanding, __ATOMIC_RELAXED);
+        if (URPC_UNLIKELY(before == tx_depth)) {
+            inc_tx = 0;
+            break;
+        }
+
+        after = before + required_tx > tx_depth ? tx_depth : before + required_tx;
+        inc_tx = after - before;
+    } while (
+        !__atomic_compare_exchange_n(&queue->tx_outstanding, &before, after, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+    return inc_tx;
+}
+
+uint32_t umq_inc_tx_ref(ub_queue_t *queue, uint32_t n)
+{
+    if (queue->dev_ctx->io_lock_free) {
+        uint32_t old_value = queue->tx_outstanding;
+        queue->tx_outstanding = old_value + n >= queue->tx_depth ? queue->tx_depth : old_value + n;
+        return queue->tx_outstanding - old_value;
+    } else {
+        return umq_inc_tx_ref_atomic(queue, n);
     }
 }

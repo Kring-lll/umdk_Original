@@ -336,12 +336,18 @@ void umq_ub_window_read(ub_flow_control_t *fc, ub_queue_t *queue)
         .opcode = URMA_OPC_READ,
         .flag = {.bs = {.complete_enable = 1, .inline_flag = 0}},
         .tjetty = queue->bind_ctx->tjetty};
+    uint32_t inc_tx = umq_inc_tx_ref(queue, 1);
+    if (inc_tx == 0) {
+        UMQ_LIMIT_VLOG_ERR("flow control window read failed, tx_depth is used up\n");
+        return;
+    }
     urma_status_t status = urma_post_jetty_send_wr(queue->jetty, &urma_wr, &bad_wr);
     if (status == URMA_SUCCESS) {
         fc->remote_get = true;
         return;
     }
 
+    umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, 1);
     UMQ_LIMIT_VLOG_ERR("umq ub flow control get remote window failed, error %d, local eid: " EID_FMT ", "
                        "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n", (int)status,
                        EID_ARGS(queue->jetty->jetty_id.eid), queue->jetty->jetty_id.id,
@@ -415,11 +421,17 @@ void umq_ub_rq_posted_notifier_update(ub_flow_control_t *fc, ub_queue_t *queue, 
         .tjetty = queue->bind_ctx->tjetty,
         .opcode = URMA_OPC_SEND_IMM};
     urma_jfs_wr_t *bad_wr = NULL;
+    uint32_t inc_tx = umq_inc_tx_ref(queue, 1);
+    if (inc_tx == 0) {
+        UMQ_LIMIT_VLOG_ERR("flow control window send failed, tx_depth is used up\n");
+        return;
+    }
     urma_status_t status = urma_post_jetty_send_wr(queue->jetty, &urma_wr, &bad_wr);
     if (status == URMA_SUCCESS) {
         return;
     }
 
+    umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, 1);
     UMQ_LIMIT_VLOG_ERR("flow control window send failed, status %d, local eid: " EID_FMT ", "
                        "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n", (int)status,
                        EID_ARGS(queue->jetty->jetty_id.eid), queue->jetty->jetty_id.id,
