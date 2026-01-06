@@ -1,10 +1,10 @@
 /*
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
- * Description: add moe dispatch normal interface cpp file.
+ * Description: add moe dispatch normal interface header file.
  * Create: 2025-12-04
  * Note:
- * History: 2025-12-04 add moe dispatch normal interface cpp file.
+ * History: 2025-12-04 add moe dispatch normal interface header file.
  */
 
 #ifndef ACLNN_MOE_DISPATCH_NORMAL_H_

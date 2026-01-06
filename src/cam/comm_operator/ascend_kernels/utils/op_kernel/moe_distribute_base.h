@@ -6,6 +6,7 @@
  * Note: This file might be replaced! We will try to use the file from cann-toolkit in env when compiling.
  * History: 2025-07-19 create moe distribute base header file
  */
+
 #ifndef MOE_DISTRIBUTE_BASE_H
 #define MOE_DISTRIBUTE_BASE_H
 
