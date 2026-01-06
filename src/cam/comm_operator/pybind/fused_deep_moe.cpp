@@ -27,10 +27,10 @@ constexpr int KERNEL_PARAM_CNT = 3;
 std::vector<at::Tensor> fused_deep_moe_impl_npu(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
-    const at::Tensor &gmm1PermutedWeight, \
-    const at::Tensor &gmm1PermutedWeightScale, \
-    const at::Tensor &gmm2Weight, \
-    const at::Tensor &gmm2WeightScale, \
+    const at::TensorList &gmm1_permuted_weight, \
+    const at::TensorList &gmm1_permuted_weight_scale, \
+    const at::TensorList &gmm2_weight, \
+    const at::TensorList &gmm2_weight_scale, \
     const c10::optional<at::Tensor> &expertSmoothScalesOptional, \
     const c10::optional<at::Tensor> &expertScalesOptional, \
     c10::string_view groupEp, \
@@ -58,38 +58,25 @@ std::vector<at::Tensor> fused_deep_moe_impl_npu(
     } else {
         localExpertNum = epRankSize * (moeExpertNum / (epRankSize - sharedExpertRankNum));
     }
-    at::Tensor recvCountOutput = at::empty({localExpertNum}, expertIds.options()); // epranksize localexpert
+    auto opts = expertIds.options().dtype(at::kLong);
+    at::Tensor expert_token_nums = at::empty({localExpertNum}, opts);
     
     // 必须要求对齐fused_deep_moe.cpp 先input 跟着 attr， 然后output
     vector<char> group_ep_chrs(groupEp.begin(), groupEp.end());
     group_ep_chrs.push_back('\0');
     char *group_ep_ptr = &group_ep_chrs[0];
     
-    if (bs != 0) {
-        at::Tensor output = at::empty({bs, h}, x.options());
-        // 必须要求对齐fused_deep_moe.cpp 先input 跟着 attr, 然后output
-        EXEC_NPU_CMD(aclnnFusedDeepMoe,
-            // input
-            x, expertIds, gmm1PermutedWeight, gmm1PermutedWeightScale, gmm2Weight, gmm2WeightScale, \
-            expertSmoothScalesOptional, expertScalesOptional, \
-            // attr
-            group_ep_ptr, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs, \
-            // output
-            output, recvCountOutput);
-        return {output, recvCountOutput};
-    } else {
-        at::Tensor output_padding = at::empty({1, h}, x.options());
-        at::Tensor output = at::empty({0, h}, x.options());
-        EXEC_NPU_CMD(aclnnFusedDeepMoe,
-            // input
-            x, expertIds, gmm1PermutedWeight, gmm1PermutedWeightScale, gmm2Weight, gmm2WeightScale, \
-            expertSmoothScalesOptional, expertScalesOptional, \
-            // attr
-            group_ep_ptr, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs, \
-            // output
-            output_padding, recvCountOutput);
-        return {output, recvCountOutput};
-    }
+    at::Tensor output = at::empty({bs, h}, x.options());
+    // 必须要求对齐fused_deep_moe.cpp 先input 跟着 attr, 然后output
+    EXEC_NPU_CMD(aclnnFusedDeepMoe,
+        // input
+        x, expertIds, gmm1PermutedWeight, gmm1PermutedWeightScale, gmm2Weight, gmm2WeightScale, \
+        expertSmoothScalesOptional, expertScalesOptional, \
+        // attr
+        group_ep_ptr, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs, \
+        // output
+        output, expert_token_nums);
+    return {output, expert_token_nums};
 }
 
 std::vector<at::Tensor> fused_deep_moe_backward_impl_npu(const at::Tensor &self)
@@ -101,10 +88,10 @@ std::vector<at::Tensor> fused_deep_moe_backward_impl_npu(const at::Tensor &self)
 std::vector<at::Tensor> fused_deep_moe_impl_meta(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
-    const at::Tensor &gmm1PermutedWeight, \
-    const at::Tensor &gmm1PermutedWeightScale, \
-    const at::Tensor &gmm2Weight, \
-    const at::Tensor &gmm2WeightScale, \
+    const at::TensorList &gmm1_permuted_weight, \
+    const at::TensorList &gmm1_permuted_weight_scale, \
+    const at::TensorList &gmm2_weight, \
+    const at::TensorList &gmm2_weight_scale, \
     const c10::optional<at::Tensor> &expertSmoothScalesOptional, \
     const c10::optional<at::Tensor> &expertScalesOptional, \
     c10::string_view groupEp, \
@@ -129,17 +116,19 @@ std::vector<at::Tensor> fused_deep_moe_impl_meta(
     } else {
         localExpertNum = epRankSize * (moeExpertNum / (epRankSize - sharedExpertRankNum));
     }
-    at::Tensor recvCountResult = at::empty({localExpertNum}, expertIds.options().device(at::kMeta));
-    return {result, recvCountResult};
+    auto opts = expertIds.options().dtype(at::kLong); 
+    at::Tensor expert_token_nums = at::empty({localExpertNum}, opts.device(at::kMeta)); 
+    
+    return {output, expert_token_nums};
 }
 
 std::vector<at::Tensor> fused_deep_moe_impl(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
-    const at::Tensor &gmm1PermutedWeight, \
-    const at::Tensor &gmm1PermutedWeightScale, \
-    const at::Tensor &gmm2Weight, \
-    const at::Tensor &gmm2WeightScale, \
+    const at::TensorList &gmm1_permuted_weight, \
+    const at::TensorList &gmm1_permuted_weight_scale, \
+    const at::TensorList &gmm2_weight, \
+    const at::TensorList &gmm2_weight_scale, \
     const c10::optional<at::Tensor> &expertSmoothScalesOptional, \
     const c10::optional<at::Tensor> &expertScalesOptional, \
     c10::string_view groupEp, \
@@ -165,10 +154,10 @@ public:
     static std::vector<at::Tensor> forward(AutogradContext *ctx, \
                             const at::Tensor &x, \
                             const at::Tensor &expertIds, \
-                            const at::Tensor &gmm1PermutedWeight, \
-                            const at::Tensor &gmm1PermutedWeightScale, \
-                            const at::Tensor &gmm2Weight, \
-                            const at::Tensor &gmm2WeightScale, \
+                            const at::TensorList &gmm1_permuted_weight, \
+                            const at::TensorList &gmm1_permuted_weight_scale, \
+                            const at::TensorList &gmm2_weight, \
+                            const at::TensorList &gmm2_weight_scale, \
                             const c10::optional<at::Tensor> &expertSmoothScalesOptional, \
                             const c10::optional<at::Tensor> &expertScalesOptional, \
                             c10::string_view groupEp, \
@@ -205,10 +194,10 @@ public:
 std::vector<at::Tensor> fused_deep_moe_impl_autograd(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
-    const at::Tensor &gmm1PermutedWeight, \
-    const at::Tensor &gmm1PermutedWeightScale, \
-    const at::Tensor &gmm2Weight, \
-    const at::Tensor &gmm2WeightScale, \
+    const at::TensorList &gmm1_permuted_weight, \
+    const at::TensorList &gmm1_permuted_weight_scale, \
+    const at::TensorList &gmm2_weight, \
+    const at::TensorList &gmm2_weight_scale, \
     const c10::optional<at::Tensor> &expertSmoothScalesOptional, \
     const c10::optional<at::Tensor> &expertScalesOptional, \
     c10::string_view groupEp, \
