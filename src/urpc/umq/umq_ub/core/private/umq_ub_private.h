@@ -97,6 +97,10 @@ typedef struct ub_flow_control_window_ops {
     uint16_t (*remote_rx_window_exchange)(struct ub_flow_control *fc);
     // load current tx window
     uint16_t (*remote_rx_window_load)(struct ub_flow_control *fc);
+    // return current tx  window
+    uint16_t (*remote_rx_window_return)(struct ub_flow_control *fc);
+    // rollback return current  window rollback
+    uint16_t (*remote_rx_window_return_rollback)(struct ub_flow_control *fc, uint16_t return_win);
 
     // update rx_posted after post rx buffer
     uint16_t (*local_rx_posted_inc)(struct ub_flow_control *fc, uint16_t rx_posted);
@@ -104,6 +108,8 @@ typedef struct ub_flow_control_window_ops {
     uint16_t (*local_rx_posted_load)(struct ub_flow_control *fc);
     // exchange current rx_posted to 0 and return rx_posted
     uint16_t (*local_rx_posted_exchange)(struct ub_flow_control *fc);
+    // exchange current rx_posted to 0 and return rx_posted + retrun_credit
+    uint16_t (*local_rx_posted_return)(struct ub_flow_control *fc, uint16_t return_win);
 
     void (*stats_query)(struct ub_flow_control *fc, umq_flow_control_stats_t *out);
 } ub_flow_control_window_ops_t;
@@ -215,6 +221,8 @@ typedef struct ub_shared_jfr_credit_ops {
     uint16_t (*available_credit_load)(struct ub_shared_jfr_credit *shared_credit);
     // distribute x in batch
     uint16_t (*available_credit_dec)(struct ub_shared_jfr_credit *shared_credit, uint16_t count);
+    // return unused credit
+    uint16_t (*available_credit_return)(struct ub_shared_jfr_credit *shared_credit, uint16_t count);
 } ub_shared_jfr_credit_ops_t;
 
 typedef struct ub_shared_jfr_credit {
