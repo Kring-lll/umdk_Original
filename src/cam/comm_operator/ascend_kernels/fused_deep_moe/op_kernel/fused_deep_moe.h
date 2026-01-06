@@ -32,8 +32,6 @@
 #include "fused_deep_moe_tiling.h"
 #include "fused_deep_moe_base.h"
 
-#define ENABLE_GMM2_COMBINE
-
 using namespace Catlass;
 
 using MmadAtlasA2Custom =
@@ -63,7 +61,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
                                   layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
                                   GM_ADDR gmDequantScale, layout::VectorLayout layoutDequantScale, GM_ADDR gmWorkspace,
                                   GM_ADDR gmX, GM_ADDR debugGm, GM_ADDR gmexpertIds, GM_ADDR gmExpandIdx,
-                                  GM_ADDR gmEpSendCount, GM_ADDR gmResvered, GM_ADDR gmOutputRecvCount,
+                                  GM_ADDR gmEpSendCount, GM_ADDR gmResvered, GM_ADDR gmExpertTokenNums,
                                   uint32_t epRankSize, uint32_t epRankId, uint32_t moeExpertNum,
                                   uint32_t moeExpertNumPerRank, uint32_t sharedExpertNum, uint32_t sharedExpertRankNum,
                                   uint32_t quantMode, uint32_t globalBs, uint32_t bs, uint32_t topK, uint32_t tokenLen)
@@ -138,7 +136,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
                                            gmExpandIdx,
                                            gmEpSendCount,
                                            gmResvered,
-                                           gmOutputRecvCount,
+                                           gmExpertTokenNums,
                                            epRankSize,
                                            epRankId,
                                            moeExpertNum,
@@ -244,7 +242,7 @@ public:
         GM_ADDR x, GM_ADDR expert_ids, GM_ADDR gmm1_permuted_weight, GM_ADDR gmm1_permuted_weight_scale,
         GM_ADDR gmm2_weight, GM_ADDR gmm2_weight_scale, GM_ADDR expert_smooth_scales, GM_ADDR expert_scales,
         // output
-        GM_ADDR output, GM_ADDR outputRecvCount,
+        GM_ADDR output, GM_ADDR expertTokenNums,
         // system
         GM_ADDR workspaceGM, AscendC::TPipe *pipe, const FusedDeepMoeTilingData *tilingData);
     __aicore__ inline void Process();
@@ -257,7 +255,7 @@ private:
     GM_ADDR gmWeight2_;
     GM_ADDR gmScale2_;
     GM_ADDR gmOutput_;
-    GM_ADDR gmOutputRecvCount_;
+    GM_ADDR gmExpertTokenNums_;
     GM_ADDR workspaceGM_;
     GM_ADDR gmSmoothScales_;
     GM_ADDR gmexpertScales_;
@@ -294,7 +292,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     GM_ADDR x, GM_ADDR expert_ids, GM_ADDR gmm1_permuted_weight, GM_ADDR gmm1_permuted_weight_scale,
     GM_ADDR gmm2_weight, GM_ADDR gmm2_weight_scale, GM_ADDR expert_smooth_scales, GM_ADDR expert_scales,
     // output
-    GM_ADDR output, GM_ADDR outputRecvCount,
+    GM_ADDR output, GM_ADDR expertTokenNums,
     // system
     GM_ADDR workspaceGM, AscendC::TPipe *pipe, const FusedDeepMoeTilingData *tilingData)
 {
@@ -310,7 +308,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     gmWeight2_ = gmm2_weight;
     gmScale2_ = gmm2_weight_scale;
     gmOutput_ = output;
-    gmOutputRecvCount_ = outputRecvCount;
+    gmExpertTokenNums_ = expertTokenNums;
     workspaceGM_ = workspaceGM;
     gmexpertScales_ = expert_scales;
     tilingData_ = tilingData;
@@ -343,17 +341,6 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
 template <TemplateMC2TypeClass>
 __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
 {
-#ifdef ENABLE_GMM2_COMBINE
-    if (g_coreType == AscendC::AIV) {
-        ((FusedDeepMoeTilingData *)tilingData_)->disGmmDeqSwigluQuantGmmDeqComInfo.aicNum = get_block_num();
-        if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
-            ((FusedDeepMoeTilingData *)tilingData_)->disGmmDeqSwigluQuantGmmDeqComInfo.aivNum = get_block_num();
-        } else {
-            ((FusedDeepMoeTilingData *)tilingData_)->disGmmDeqSwigluQuantGmmDeqComInfo.aivNum =
-                get_block_num() * get_subblockdim();
-        }
-    }
-#endif
     GemmCoord gmm1ProblemShape{m_, n_, k_};
     GemmCoord gmm2ProblemShape{m_, n2_, k2_};
 
@@ -401,7 +388,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
             MoeDistributeDispatchImpl::CamMoeDistributeDispatch<ExpandXType, int8_t, false, true, false, false>
                 dispatcher;
             dispatcher.Init(gmX_, gmexpertIds_, gmSmoothScales_, gmX1Token, gmX1Scale, gmExpandIdx, gmGroupList,
-                            gmEpSendCount, gmOutputRecvCount_, nullptr, gmWorkspace, &tpipe, tilingData_);
+                            gmEpSendCount, gmExpertTokenNums_, nullptr, gmWorkspace, &tpipe, tilingData_);
             dispatcher.Process();
             tpipe.Destroy();
             icache_preload(8);
@@ -421,9 +408,9 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
         gmm1ProblemShape, groupCount_, gmGroupList, gmX1Token, layoutX1, gmPermuteWeight1_, layoutWeight1,
         gmPermuteScale1_, layoutScale1, gmX1Scale, layoutPerTokenScale1, gmX2, layoutX2, gmPerTokenScale2,
         layoutPerTokenScale2, gmWorkspace, gmX_, gmSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount, gmResvered,
-        gmOutputRecvCount_, epRankSize_, epRankId_, moeExpertNum_, moeExpertNumPerRank_, sharedExpertNum_,
+        gmExpertTokenNums_, epRankSize_, epRankId_, moeExpertNum_, moeExpertNumPerRank_, sharedExpertNum_,
         sharedExpertRankNum_, quantMode_, globalBs_, bs_, topK_, k_);
-#ifdef ENABLE_GMM2_COMBINE
+
     AscendC::PipeBarrier<PIPE_ALL>();
     Arch::CrossCoreFlag gmm1AivFinished{0};
     if constexpr (g_coreType == AscendC::AIV) {
@@ -442,6 +429,5 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
            Gmm2DispatchPolicy>(gmm2ProblemShape, groupCount_, gmGroupList, gmX2, layoutX2, gmWeight2_, layoutWeight2,
                                gmScale2_, layoutScale2, gmPerTokenScale2, layoutPerTokenScale2, gmGmm2DepOut,
                                layoutOutput, gmWorkspace, &combiner);
-#endif
 }
 #endif  // FUSED_DEEP_MOE_H
