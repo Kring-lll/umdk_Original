@@ -1206,6 +1206,12 @@ int umq_ub_dev_add_impl(umq_trans_info_t *info, umq_init_cfg_t *cfg)
         goto DELETE_IMPORT_INFO;
     }
 
+    g_ub_ctx[g_ub_ctx_count].umq_ctx_jetty_table = (uint64_t *)calloc(
+        g_ub_ctx[g_ub_ctx_count].dev_attr.dev_cap.max_jetty, sizeof(uint64_t));
+    if (g_ub_ctx[g_ub_ctx_count].umq_ctx_jetty_table == NULL) {
+        UMQ_VLOG_ERR("calloc umq_ctx_jetty_table failed\n");
+        goto DELETE_URMA_CTX;
+    }
     // register seg
     ret = umq_qbuf_register_seg((uint8_t *)&g_ub_ctx[g_ub_ctx_count], umq_ub_register_seg_callback);
     if (ret != UMQ_SUCCESS) {
