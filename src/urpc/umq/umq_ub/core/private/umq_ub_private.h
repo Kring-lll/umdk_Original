@@ -122,6 +122,7 @@ typedef struct ub_flow_control {
     volatile uint64_t total_remote_rx_received;
     volatile uint64_t total_remote_rx_consumed;
     volatile uint64_t total_remote_rx_received_error;
+    volatile uint64_t total_local_rx_allocted;
     volatile uint64_t total_flow_controlled_wr;
     uint64_t remote_win_buf_addr;
     uint32_t remote_win_buf_len;
@@ -170,6 +171,7 @@ typedef struct umq_ub_ctx {
     umq_trans_info_t trans_info;
     uint64_t remote_notify_addr;
     uint64_t *umq_ctx_jetty_table;
+    volatile uint64_t *rx_consumed_jetty_table;
 } umq_ub_ctx_t;
 
 typedef struct rx_buf_ctx {
@@ -223,6 +225,8 @@ typedef struct ub_shared_jfr_credit_ops {
     uint16_t (*available_credit_dec)(struct ub_shared_jfr_credit *shared_credit, uint16_t count);
     // return unused credit
     uint16_t (*available_credit_return)(struct ub_shared_jfr_credit *shared_credit, uint16_t count);
+    uint16_t (*leak_credit_inc)(struct ub_shared_jfr_credit *shared_credit, uint16_t count);
+    uint16_t (*leak_credit_recycle)(struct ub_shared_jfr_credit *shared_credit, uint16_t count);
 } ub_shared_jfr_credit_ops_t;
 
 typedef struct ub_shared_jfr_credit {
@@ -230,6 +234,7 @@ typedef struct ub_shared_jfr_credit {
     volatile uint64_t history_total; // history total credit
     volatile uint64_t history_error_total;
     volatile uint64_t history_consumed; // history consumed credit, allocated
+    volatile uint64_t history_leak; // history consumed credit, allocated
     volatile uint16_t leak; // leak credit
     volatile uint16_t idle; // curent avilable credit
     uint16_t capacity;
