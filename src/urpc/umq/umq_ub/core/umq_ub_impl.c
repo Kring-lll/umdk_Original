@@ -446,6 +446,16 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
             goto ROLLBACK_UB_CTX;
         }
 
+        g_ub_ctx[g_ub_ctx_count].rx_consumed_jetty_table = (volatile uint64_t *)calloc(
+            g_ub_ctx[g_ub_ctx_count].dev_attr.dev_cap.max_jetty, sizeof(uint64_t));
+        if (g_ub_ctx[g_ub_ctx_count].rx_consumed_jetty_table == NULL) {
+            UMQ_VLOG_ERR("calloc rx_consumed_jetty_table failed\n");
+            umq_ub_delete_urma_ctx(&g_ub_ctx[g_ub_ctx_count]);
+            umq_ub_ctx_imported_info_destroy(&g_ub_ctx[g_ub_ctx_count]);
+            free(g_ub_ctx[i].umq_ctx_jetty_table);
+            g_ub_ctx[i].umq_ctx_jetty_table = NULL;
+            goto ROLLBACK_UB_CTX;
+        }
         if (total_io_buf_size == 0) {
             total_io_buf_size = info->mem_cfg.total_size;
         }
@@ -490,6 +500,8 @@ ROLLBACK_UB_CTX:
         umq_ub_delete_urma_ctx(&g_ub_ctx[i]);
         free(g_ub_ctx[i].umq_ctx_jetty_table);
         g_ub_ctx[i].umq_ctx_jetty_table = NULL;
+        free((void*)g_ub_ctx[i].rx_consumed_jetty_table);
+        g_ub_ctx[i].rx_consumed_jetty_table = NULL;
     }
     g_ub_ctx_count = 0;
     (void)urma_uninit();

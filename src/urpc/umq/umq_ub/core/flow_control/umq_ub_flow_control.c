@@ -14,6 +14,20 @@
 
 #define UMQ_UB_FLOW_CONTROL_NOTIFY_THR 4
 
+typedef union umq_ub_fc_info {
+    uint64_t value;
+    struct {
+        uint64_t local_window : 16;
+        uint64_t local_rx_depth : 2;
+        uint64_t local_rsvd0 : 6;
+        uint64_t local_rsvd1 : 8;
+        uint64_t remote_window : 16;
+        uint64_t remote_rx_depth : 2;
+        uint64_t remote_rsvd0 : 6;
+        uint64_t remote_rsvd1 : 8;
+    } fc;
+} umq_ub_fc_info_t;
+
 static ALWAYS_INLINE uint16_t remote_rx_window_inc_non_atomic(struct ub_flow_control *fc, uint16_t new_win)
 {
     uint32_t win_sum = fc->remote_rx_window + new_win;
@@ -91,6 +105,13 @@ static ALWAYS_INLINE uint16_t local_rx_posted_exchange_non_atomic(struct ub_flow
 static ALWAYS_INLINE uint16_t local_rx_posted_load_non_atomic(struct ub_flow_control *fc)
 {
     return fc->local_rx_posted;
+}
+
+static ALWAYS_INLINE uint16_t local_rx_posted_return_non_atomic(struct ub_flow_control *fc, uint16_t return_credit)
+{
+    uint16_t posted = fc->local_rx_posted;
+    fc->local_rx_posted = 0;
+    return posted + return_credit;
 }
 
 static ALWAYS_INLINE void flow_control_stats_query_non_atomic(struct ub_flow_control *fc, umq_flow_control_stats_t *out)
@@ -223,6 +244,12 @@ static ALWAYS_INLINE uint16_t local_rx_posted_load_atomic(struct ub_flow_control
     return __atomic_load_n(&fc->local_rx_posted, __ATOMIC_RELAXED);
 }
 
+static ALWAYS_INLINE uint16_t local_rx_posted_return_atomic(struct ub_flow_control *fc, uint16_t return_credit)
+{
+    uint16_t posted = __atomic_exchange_n(&fc->local_rx_posted, 0, __ATOMIC_RELAXED);
+    return posted + return_credit;
+}
+
 static ALWAYS_INLINE void flow_control_stats_query_atomic(struct ub_flow_control *fc, umq_flow_control_stats_t *out)
 {
     out->local_rx_posted = __atomic_load_n(&fc->local_rx_posted, __ATOMIC_RELAXED);
@@ -234,6 +261,231 @@ static ALWAYS_INLINE void flow_control_stats_query_atomic(struct ub_flow_control
     out->total_remote_rx_consumed = __atomic_load_n(&fc->total_remote_rx_consumed, __ATOMIC_RELAXED);
     out->total_remote_rx_received_error = __atomic_load_n(&fc->total_remote_rx_received_error, __ATOMIC_RELAXED);
     out->total_flow_controlled_wr = __atomic_load_n(&fc->total_flow_controlled_wr, __ATOMIC_RELAXED);
+}
+
+static ALWAYS_INLINE uint16_t available_credit_inc_atomic(ub_shared_jfr_credit_t *sjfr_credit, uint16_t count)
+{
+    uint16_t after, before = __atomic_load_n(&sjfr_credit->idle, __ATOMIC_RELAXED);
+    uint16_t ret = before;
+    uint32_t rx_sum;
+    uint16_t actual_count = count;
+    uint16_t error_count = 0;
+    do {
+        rx_sum = before + count;
+        if (URPC_UNLIKELY(rx_sum > UINT16_MAX)) {
+            UMQ_LIMIT_VLOG_WARN("rx posted exceed UINT16_MAX, current rx %d, new post %d, capacity %d\n",
+                                before, count, sjfr_credit->capacity);
+            ret = before;
+            break;
+        }
+
+        if (URPC_UNLIKELY(rx_sum > sjfr_credit->capacity)) {
+            UMQ_LIMIT_VLOG_WARN("rx posted exceed rx depth, current win %d, new win %d, capacity %d\n",
+                                before, count, sjfr_credit->capacity);
+            rx_sum = sjfr_credit->capacity;
+            actual_count = count - (rx_sum - sjfr_credit->capacity);
+            error_count = rx_sum - sjfr_credit->capacity;
+
+        }
+        after = (uint16_t)rx_sum;
+        ret = after;
+    } while (
+        !__atomic_compare_exchange_n(&sjfr_credit->idle, &before, after, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+
+    if (URPC_UNLIKELY(ret == before)) {
+        (void)__atomic_add_fetch(&sjfr_credit->history_error_total, actual_count, __ATOMIC_RELAXED);
+    } else {
+        (void)__atomic_add_fetch(&sjfr_credit->history_error_total, error_count, __ATOMIC_RELAXED);
+        (void)__atomic_add_fetch(&sjfr_credit->history_total, actual_count, __ATOMIC_RELAXED);
+    }
+
+    return ret;
+}
+
+static ALWAYS_INLINE uint16_t available_credit_dec_atomic(ub_shared_jfr_credit_t *sjfr_credit, uint16_t count)
+{
+    uint16_t after, before = __atomic_load_n(&sjfr_credit->idle, __ATOMIC_RELAXED);
+    uint16_t ret = before;
+    do {
+        if (URPC_UNLIKELY(before == 0)) {
+            ret = 0;
+            break;
+        }
+
+        after = before > count ? before - count : 0;
+        ret = before - after;
+    } while (
+        !__atomic_compare_exchange_n(&sjfr_credit->idle, &before, after, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+
+    return ret;
+}
+
+static ALWAYS_INLINE uint16_t available_credit_load_atomic(ub_shared_jfr_credit_t *sjfr_credit)
+{
+    return __atomic_load_n(&sjfr_credit->idle, __ATOMIC_RELAXED);
+}
+
+static ALWAYS_INLINE uint16_t available_credit_return_atomic(ub_shared_jfr_credit_t *sjfr_credit, uint16_t count)
+{
+    uint16_t after, before = __atomic_load_n(&sjfr_credit->idle, __ATOMIC_RELAXED);
+    uint16_t ret = before;
+    uint32_t sum;
+    do {
+        sum = before + count;
+        if (URPC_UNLIKELY(sum > UINT16_MAX)) {
+            UMQ_LIMIT_VLOG_WARN("credit exceed UINT16_MAX, current credit %d, add credit %d\n", before, count);
+            ret = before;
+            break;
+        }
+
+        if (URPC_UNLIKELY(sum > sjfr_credit->capacity)) {
+            UMQ_LIMIT_VLOG_WARN("rx posted exceed rx depth, current credit %d, add credit %d, capacity %d\n",
+                                before, count, sjfr_credit->capacity);
+        }
+        after = (uint16_t)sum;
+        ret = after;
+    } while (
+        !__atomic_compare_exchange_n(&sjfr_credit->idle, &before, after, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+
+    return ret;
+}
+
+static ALWAYS_INLINE uint16_t leak_credit_inc_atomic(ub_shared_jfr_credit_t *sjfr_credit, uint16_t count)
+{
+    uint16_t after, before = __atomic_load_n(&sjfr_credit->leak, __ATOMIC_RELAXED);
+    uint16_t ret = before;
+    uint32_t sum;
+    do {
+        sum = before + count;
+        if (URPC_UNLIKELY(sum > UINT16_MAX)) {
+            UMQ_LIMIT_VLOG_WARN("leak credit exceed UINT16_MAX, current leak credit %d, add leak credit %d\n",
+                before, count);
+            ret = before;
+            break;
+        }
+        after = (uint16_t)sum;
+        ret = after;
+    } while (
+        !__atomic_compare_exchange_n(&sjfr_credit->leak, &before, after, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+
+    return ret;
+}
+
+static ALWAYS_INLINE uint16_t leak_credit_recycle_atomic(ub_shared_jfr_credit_t *sjfr_credit, uint16_t count)
+{
+    uint16_t after, before = __atomic_load_n(&sjfr_credit->leak, __ATOMIC_RELAXED);
+    uint16_t ret = before;
+    do {
+        if (URPC_UNLIKELY(before == 0)) {
+            ret = 0;
+            break;
+        }
+
+        after = before > count ? before - count : 0;
+        ret = before - after;
+    } while (
+        !__atomic_compare_exchange_n(&sjfr_credit->leak, &before, after, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+    (void)available_credit_return_atomic(sjfr_credit, ret);
+    return ret;
+}
+
+static ALWAYS_INLINE uint16_t available_credit_inc_non_atomic(ub_shared_jfr_credit_t *sjfr_credit, uint16_t count)
+{
+    uint32_t rx_sum = sjfr_credit->idle + count;
+    if (URPC_UNLIKELY(rx_sum > UINT16_MAX)) {
+        UMQ_LIMIT_VLOG_WARN("rx posted exceed UINT16_MAX, current rx %d, new post %d, capacity %d\n",
+                            sjfr_credit->idle, count, sjfr_credit->capacity);
+        sjfr_credit->history_error_total += count;
+        return sjfr_credit->idle;
+    }
+
+    if (URPC_UNLIKELY(rx_sum > sjfr_credit->capacity)) {
+        UMQ_LIMIT_VLOG_WARN("rx posted exceed rx depth, current win %d, new win %d, capacity %d\n",
+                            sjfr_credit->idle, count, sjfr_credit->capacity);
+        rx_sum = sjfr_credit->capacity;
+        sjfr_credit->history_total += (count - (rx_sum - sjfr_credit->capacity));
+        sjfr_credit->history_error_total += (rx_sum - sjfr_credit->capacity);
+    } else {
+        sjfr_credit->history_total += count;
+    }
+    sjfr_credit->idle = (uint16_t)rx_sum;
+    return sjfr_credit->idle;
+}
+
+static ALWAYS_INLINE uint16_t available_credit_dec_non_atomic(ub_shared_jfr_credit_t *sjfr_credit, uint16_t count)
+{
+    uint16_t idle = sjfr_credit->idle;
+    if (idle < count) {
+        sjfr_credit->idle  = 0;
+        return idle;
+    }
+
+    sjfr_credit->idle -= count;
+    return count;
+}
+
+static ALWAYS_INLINE uint16_t available_credit_load_non_atomic(ub_shared_jfr_credit_t *sjfr_credit)
+{
+    return sjfr_credit->idle;
+}
+
+static ALWAYS_INLINE uint16_t available_credit_return_non_atomic(ub_shared_jfr_credit_t *sjfr_credit, uint16_t count)
+{
+    uint32_t sum = sjfr_credit->idle + count;
+    if (URPC_UNLIKELY(sum > UINT16_MAX)) {
+        UMQ_LIMIT_VLOG_WARN("after return credit exceed UINT16_MAX, current credit %d, return credit %d, capacity %d\n",
+                            sjfr_credit->idle, count, sjfr_credit->capacity);
+        return sjfr_credit->idle;
+    }
+
+    sjfr_credit->idle = (uint16_t)sum;
+    return sjfr_credit->idle;
+}
+
+static ALWAYS_INLINE uint16_t leak_credit_inc_non_atomic(ub_shared_jfr_credit_t *sjfr_credit, uint16_t count)
+{
+    uint32_t sum = sjfr_credit->leak + count;
+    if (URPC_UNLIKELY(sum > UINT16_MAX)) {
+        UMQ_LIMIT_VLOG_WARN("leak credit exceed UINT16_MAX, current leak %d, new leak credit %d\n",
+            sjfr_credit->leak, count);
+        return sjfr_credit->leak;
+    }
+
+    sjfr_credit->leak = (uint16_t)sum;
+    return sum;
+}
+
+static ALWAYS_INLINE uint16_t leak_credit_recycle_non_atomic(ub_shared_jfr_credit_t *sjfr_credit, uint16_t count)
+{
+    uint16_t leak = sjfr_credit->leak;
+    if (leak < count) {
+        sjfr_credit->leak = 0;
+        return leak;
+    }
+
+    sjfr_credit->leak -= count;
+    return count;
+}
+
+__attribute__((unused)) static void umq_ub_shared_jfr_cerdit_init(ub_queue_t *queue, uint32_t feature, umq_flow_control_cfg_t *cfg)
+{
+    ub_shared_jfr_credit_t *shared_jfr_credit = &queue->jfr_ctx->credit;
+    memset(shared_jfr_credit, 0, sizeof(ub_shared_jfr_credit_t));
+    if (cfg->use_atomic_window) {
+        shared_jfr_credit->ops.available_credit_inc = available_credit_inc_atomic;
+        shared_jfr_credit->ops.available_credit_dec = available_credit_dec_atomic;
+        shared_jfr_credit->ops.available_credit_load = available_credit_load_atomic;
+        shared_jfr_credit->ops.available_credit_return = available_credit_return_atomic;
+        shared_jfr_credit->ops.leak_credit_inc = leak_credit_inc_atomic;
+        shared_jfr_credit->ops.leak_credit_recycle = leak_credit_recycle_atomic;
+    } else {
+        shared_jfr_credit->ops.available_credit_inc = available_credit_inc_non_atomic;
+        shared_jfr_credit->ops.available_credit_dec = available_credit_dec_non_atomic;
+        shared_jfr_credit->ops.available_credit_load = available_credit_load_non_atomic;
+        shared_jfr_credit->ops.available_credit_return = available_credit_return_non_atomic;
+        shared_jfr_credit->ops.leak_credit_inc = leak_credit_inc_non_atomic;
+        shared_jfr_credit->ops.leak_credit_recycle = leak_credit_recycle_non_atomic;
+    }
 }
 
 int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t feature, umq_flow_control_cfg_t *cfg)
@@ -270,7 +522,7 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
         fc->ops.local_rx_posted_inc = local_rx_posted_inc_atomic;
         fc->ops.local_rx_posted_load = local_rx_posted_load_atomic;
         fc->ops.local_rx_posted_exchange = local_rx_posted_exchange_atomic;
-
+        fc->ops.local_rx_posted_return = local_rx_posted_return_atomic;
         fc->ops.stats_query = flow_control_stats_query_atomic;
     } else {
         fc->ops.remote_rx_window_inc = remote_rx_window_inc_non_atomic;
@@ -281,7 +533,7 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
         fc->ops.local_rx_posted_inc = local_rx_posted_inc_non_atomic;
         fc->ops.local_rx_posted_load = local_rx_posted_load_non_atomic;
         fc->ops.local_rx_posted_exchange = local_rx_posted_exchange_non_atomic;
-
+        fc->ops.local_rx_posted_return = local_rx_posted_return_non_atomic;
         fc->ops.stats_query = flow_control_stats_query_non_atomic;
     }
 
@@ -355,6 +607,15 @@ void umq_ub_rq_posted_notifier_inc(ub_flow_control_t *fc, uint16_t rx_posted)
     }
 
     (void)fc->ops.local_rx_posted_inc(fc, rx_posted);
+}
+
+void umq_ub_shared_credit_recharge(ub_queue_t *queue, uint16_t recharge_count) {
+    ub_flow_control_t *fc = queue->flow_control;
+    if (recharge_count == 0 || !fc->enabled) {
+        return;
+    }
+    ub_shared_jfr_credit_t *shared_credit = &queue->jfr_ctx->credit;
+    shared_credit->ops.available_credit_inc(shared_credit, recharge_count);
 }
 
 void umq_ub_rq_posted_notifier_update(ub_flow_control_t *fc, ub_queue_t *queue, uint16_t rx_posted)
@@ -483,4 +744,217 @@ void umq_ub_recover_tx_imm(ub_queue_t *queue, urma_jfs_wr_t *urma_wr, uint16_t w
             buf_pro->imm_data = 0;
         }
     }
+}
+
+void umq_ub_shared_credit_init_allocted(ub_queue_t *queue, ub_flow_control_t *fc) {
+    //
+    ub_shared_jfr_credit_t *shared_credit = &queue->jfr_ctx->credit;
+    uint16_t initial_credit = queue->dev_ctx->flow_control.initial_credit;
+    uint16_t allocted_count = shared_credit->ops.available_credit_dec(shared_credit, initial_credit);
+    uint16_t notify = fc->ops.local_rx_posted_inc(fc, allocted_count);
+
+    if (!fc->local_set) {
+        notify = fc->ops.local_rx_posted_exchange(fc);
+        umq_ub_fc_info_t *local_data =
+            (umq_ub_fc_info_t *)(uintptr_t)umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL);
+        local_data->fc.local_window = notify;
+        local_data->fc.local_rx_depth = 2;
+        fc->local_set = true;
+        if (!fc->remote_get) {
+            // update local_data->fc.remote_window 和 remote_rx_depth
+            umq_ub_window_read(fc, queue);
+        }
+
+        return;
+    }
+}
+
+void umq_ub_shared_credit_req_send(ub_queue_t *queue)
+{
+    uint16_t credits_per_request = queue->dev_ctx->flow_control.credits_per_request;
+    urma_jetty_t *jetty  = NULL; // *jetty = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
+    urma_target_jetty_t *tjetty = NULL; // queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
+
+    umq_ub_imm_t imm = {
+        .flow_control = {
+            .umq_private = UMQ_UB_IMM_PRIVATE,
+            .type = IMM_TYPE_FLOW_CONTROL,
+            .sub_type = IMM_TYPE_FC_CREDIT_REQ,
+            .in_user_buf = 0,
+            .window = credits_per_request}
+        };
+
+    urma_jfs_wr_t urma_wr = {.user_ctx = credits_per_request,
+        .send = {.imm_data = imm.value},
+        .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
+        .tjetty = tjetty,
+        .opcode = URMA_OPC_SEND_IMM};
+    urma_jfs_wr_t *bad_wr = NULL;
+    urma_status_t status = urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
+    if (status == URMA_SUCCESS) {
+        return;
+    }
+
+    UMQ_LIMIT_VLOG_ERR("send credit req failed, status %d, local eid: " EID_FMT ", "
+                       "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n", (int)status,
+                       EID_ARGS(jetty->jetty_id.eid), jetty->jetty_id.id,
+                       EID_ARGS(tjetty->id.eid), tjetty->id.id);
+}
+
+static void umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
+{
+    urma_jetty_t *jetty  = NULL; // TODO queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
+    urma_target_jetty_t *tjetty = NULL; // queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
+    ub_flow_control_t *fc = &queue->flow_control;
+
+    umq_ub_imm_t imm = {
+        .flow_control = {
+            .umq_private = UMQ_UB_IMM_PRIVATE,
+            .type = IMM_TYPE_FLOW_CONTROL,
+            .sub_type = IMM_TYPE_FC_CREDIT_REP,
+            .in_user_buf = 0,
+            .window = notify}
+        };
+
+    urma_jfs_wr_t urma_wr = {.user_ctx = notify,
+        .send = {.imm_data = imm.value},
+        .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
+        .tjetty = tjetty,
+        .opcode = URMA_OPC_SEND_IMM};
+    urma_jfs_wr_t *bad_wr = NULL;
+    urma_status_t status = urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
+    if (status == URMA_SUCCESS) {
+        return;
+    }
+
+    UMQ_LIMIT_VLOG_ERR("send credit req failed, status %d, local eid: " EID_FMT ", "
+                       "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n", (int)status,
+                       EID_ARGS(jetty->jetty_id.eid), jetty->jetty_id.id,
+                       EID_ARGS(tjetty->id.eid), tjetty->id.id);
+    umq_ub_rq_posted_notifier_inc(fc, notify);
+}
+
+void umq_ub_shared_credit_req_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
+{
+    // supplememtary flow control rx and update count
+    ub_flow_control_t *fc = &queue->flow_control;
+    ub_shared_jfr_credit_t *shared_credit = &queue->jfr_ctx->credit;
+    uint16_t credits_per_request = imm->flow_control.window;
+    uint16_t notify;
+    if (fc->ops.local_rx_posted_load(fc) < credits_per_request) {
+        uint16_t allocted_count = shared_credit->ops.available_credit_dec(shared_credit, credits_per_request);
+        notify = fc->ops.local_rx_posted_inc(fc, allocted_count);
+    }
+    notify = fc->ops.local_rx_posted_exchange(fc);
+    umq_ub_shared_credit_resp_send(queue, notify);
+}
+
+void umq_ub_shared_credit_resp_handle(ub_queue_t *queue, umq_ub_imm_t *imm) {
+    // supplememtary flow control rx and update count
+    ub_flow_control_t *fc = &queue->flow_control;
+    uint16_t reply_credits = imm->flow_control.window;
+    if (reply_credits > 0) {
+        umq_ub_window_inc(fc, reply_credits);
+    }
+    return;
+}
+
+void umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
+{
+    urma_jetty_t *jetty  = NULL; // TODO queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
+    urma_target_jetty_t *tjetty = NULL; // queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
+    ub_flow_control_t *fc = &queue->flow_control;
+    uint16_t return_credit = fc->ops.remote_rx_window_exchange(fc);
+    umq_ub_imm_t imm = {
+        .flow_control = {
+            .umq_private = UMQ_UB_IMM_PRIVATE,
+            .type = IMM_TYPE_FLOW_CONTROL,
+            .sub_type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
+            .in_user_buf = 0,
+            .window = return_credit}
+        };
+
+    urma_jfs_wr_t urma_wr = {.user_ctx = return_credit,
+        .send = {.imm_data = imm.value},
+        .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
+        .tjetty = tjetty,
+        .opcode = URMA_OPC_SEND_IMM};
+    urma_jfs_wr_t *bad_wr = NULL;
+    urma_status_t status = urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
+    if (status == URMA_SUCCESS) {
+        return;
+    }
+
+    UMQ_LIMIT_VLOG_ERR("send credit req failed, status %d, local eid: " EID_FMT ", "
+                       "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n", (int)status,
+                       EID_ARGS(jetty->jetty_id.eid), jetty->jetty_id.id,
+                       EID_ARGS(tjetty->id.eid), tjetty->id.id);
+    fc->ops.remote_rx_window_return_rollback(fc, return_credit);
+}
+
+static void umq_ub_shared_credit_return_ack(ub_queue_t *queue)
+{
+    urma_jetty_t *jetty  = NULL; // TODO queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
+    urma_target_jetty_t *tjetty = NULL; // queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
+    ub_flow_control_t *fc = &queue->flow_control;
+    uint16_t return_credit = fc->ops.remote_rx_window_exchange(fc);
+    umq_ub_imm_t imm = {
+        .flow_control = {
+            .umq_private = UMQ_UB_IMM_PRIVATE,
+            .type = IMM_TYPE_FLOW_CONTROL,
+            .sub_type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
+            .in_user_buf = 0,
+            .window = return_credit}
+        };
+
+    urma_jfs_wr_t urma_wr = {.user_ctx = return_credit,
+        .send = {.imm_data = imm.value},
+        .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
+        .tjetty = tjetty,
+        .opcode = URMA_OPC_SEND_IMM};
+    urma_jfs_wr_t *bad_wr = NULL;
+    urma_status_t status = urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
+    if (status == URMA_SUCCESS) {
+        return;
+    }
+
+    UMQ_LIMIT_VLOG_ERR("send credit req failed, status %d, local eid: " EID_FMT ", "
+                       "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n", (int)status,
+                       EID_ARGS(jetty->jetty_id.eid), jetty->jetty_id.id,
+                       EID_ARGS(tjetty->id.eid), tjetty->id.id);
+}
+
+void umq_ub_shared_credit_return_req_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
+{
+    // supplememtary flow control rx and update count
+    ub_flow_control_t *fc = &queue->flow_control;
+    ub_shared_jfr_credit_t *shared_credit = &queue->jfr_ctx->credit;
+    uint16_t return_credit = imm->flow_control.window;
+    uint16_t actual_return_credit = fc->ops.local_rx_posted_return(fc, return_credit);
+    shared_credit->ops.available_credit_return(shared_credit, actual_return_credit);
+    umq_ub_shared_credit_return_ack(queue);
+}
+
+void umq_ub_shared_credit_return_ack_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
+{
+    ub_flow_control_t *fc = &queue->flow_control;
+    ub_shared_jfr_credit_t *shared_credit = &queue->jfr_ctx->credit;
+    uint16_t return_credit = imm->flow_control.window;
+    uint16_t actual_return_credit = fc->ops.local_rx_posted_return(fc, return_credit);
+    shared_credit->ops.available_credit_return(shared_credit, actual_return_credit);
+}
+
+void umq_ub_shared_credit_leak_update(ub_queue_t *queue)
+{
+    ub_shared_jfr_credit_t *shared_credit = &queue->jfr_ctx->credit;
+    uint64_t consumed_credit = queue->dev_ctx->rx_consumed_jetty_table[queue->jetty->jetty_id.id];
+    uint64_t allocted_credit = queue->flow_control.total_local_rx_allocted;
+    uint64_t leak = allocted_credit - consumed_credit;
+    shared_credit->ops.leak_credit_inc(shared_credit, leak);
+}
+
+void umq_ub_leak_credit_recycle(ub_queue_t *queue, uint16_t count)
+{
+    ub_shared_jfr_credit_t *shared_credit = &queue->jfr_ctx->credit;
+    shared_credit->ops.leak_credit_recycle(shared_credit, count);
 }

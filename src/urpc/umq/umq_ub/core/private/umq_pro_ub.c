@@ -620,6 +620,15 @@ static inline void umq_perf_record_write_poll(umq_perf_record_type_t type, uint6
     }
 }
 
+void umq_ub_rx_consumed_inc(bool lock_free, volatile uint64_t *var, uint64_t count)
+{
+    if (lock_free) {
+        *var = *var + count;
+    } else {
+        (void)__sync_fetch_and_add(var, count);
+    }
+}
+
 int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
 {
     if (buf_count == 0) {
@@ -648,6 +657,7 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
     int ret = 0;
     umq_buf_status_t qbuf_status;
     for (int i = 0; i < rx_cr_cnt; i++) {
+        umq_ub_rx_consumed_inc(queue->dev_ctx->io_lock_free, &queue->dev_ctx->rx_consumed_jetty_table[cr->local_id], 1);
         buf[qbuf_cnt] = umq_get_buf_by_user_ctx(queue, cr[i].user_ctx);
         ret = process_rx_msg(&cr[i], buf[qbuf_cnt], queue, &qbuf_status);
         if (ret == UMQ_CONTINUE_FLAG) {

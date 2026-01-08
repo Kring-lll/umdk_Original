@@ -22,6 +22,7 @@ void umq_ub_flow_control_uninit(ub_flow_control_t *fc);
 int umq_ub_window_init(ub_flow_control_t *fc, umq_ub_bind_info_t *info);
 void umq_ub_window_read(ub_flow_control_t *fc, ub_queue_t *queue);
 void umq_ub_rq_posted_notifier_update(ub_flow_control_t *fc, ub_queue_t *queue, uint16_t rx_posted);
+void umq_ub_credit_recharge(ub_queue_t *queue, uint16_t recharge_count);
 void umq_ub_fill_tx_imm(ub_flow_control_t *fc, urma_jfs_wr_t *urma_wr, umq_buf_pro_t *buf_pro);
 void umq_ub_recover_tx_imm(ub_queue_t *queue, urma_jfs_wr_t *urma_wr, uint16_t wr_index, umq_buf_t *bad);
 
