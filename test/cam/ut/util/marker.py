@@ -1,0 +1,15 @@
+import pytest
+from . import tool
+
+Author = pytest.mark.authoer
+MPTest = pytest.mark.multi_process_test
+SPTest = pytest.mark.single_process_test
+A2Test = pytest.mark.a2_test
+A3Test = pytest.mark.a3_test
+
+def SKIP_ENV_RANKSIZE_UNEQUAL(expect_ranksize, reason='skip if ranksize is not equal to '):
+    skip = False
+    if expect_ranksize != tool.get_world_size():
+        skip = True
+        reason += str(expect_ranksize)
+    return pytest.mark.skipif(condition=skip, reason=reason)
