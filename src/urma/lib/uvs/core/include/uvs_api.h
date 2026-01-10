@@ -44,6 +44,29 @@ typedef struct uvs_route_list {
 } uvs_route_list_t;
 
 /**
+ * Create an aggregation device in UVS.
+ * @param[in] aggr_eid  EID of the aggregation device to be created.
+ * @return 0 on success, other value on error.
+ */
+int uvs_create_aggr_dev(uvs_eid_t aggr_eid);
+
+/**
+ * Delete an aggregation device from UVS.
+ * @param[in] aggr_eid  EID of the aggregation device to be deleted.
+ * @return 0 on success, other value on error.
+ */
+int uvs_delete_aggr_dev(uvs_eid_t aggr_eid);
+
+/**
+ * Get device name by EID.
+ * @param[in] eid  EID of the device.
+ * @param[out] buf  Buffer to hold the device name.
+ * @param[in] len  Length of the buffer.
+ * @return 0 on success, other value on error.
+ */
+int uvs_get_dev_name_by_eid(uvs_eid_t eid, void *buf, uint32_t len);
+
+/**
  * UVS set topo info which gets from MXE module.
  * @param[in] topo: topo info of one bonding device
  * @param[in] topo_num: number of bonding devices

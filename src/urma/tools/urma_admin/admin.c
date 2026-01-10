@@ -11,24 +11,25 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+
+#include <dirent.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <limits.h>
-#include <dirent.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include<sys/types.h>
+#include <sys/types.h>
 
 #include "ub_list.h"
 #include "urma_types.h"
 #include "urma_types_str.h"
 
-#include "admin_parameters.h"
-#include "admin_file_ops.h"
-#include "urma_admin_log.h"
 #include "admin_cmd.h"
+#include "admin_file_ops.h"
+#include "admin_log.h"
+#include "admin_parameters.h"
 
 #define UINT8_INVALID (0xff)
 
@@ -66,9 +67,9 @@ static void admin_parse_port_attr(const char *sysfs_path, admin_show_ubep_t *ube
     free(port_path);
 }
 
-static bool has_bonding_dev_prefix(const char* dev_name)
+static bool has_bonding_dev_prefix(const char *dev_name)
 {
-    const char* prefix = "bonding_dev";
+    const char *prefix = "bonding_dev";
 
     for (int i = 0; prefix[i] != '\0'; i++) {
         if (dev_name[i] != prefix[i] || dev_name[i] == '\0') {
@@ -119,8 +120,8 @@ static int admin_parse_device_attr(const char *sysfs_path, admin_show_ubep_t *ub
     (void)admin_parse_file_value_u32(sysfs_path, "max_eid_cnt", &dev_attr->dev_cap.max_eid_cnt);
     (void)admin_parse_file_value_u32(sysfs_path, "max_tp_in_tpg", &dev_attr->dev_cap.max_tp_in_tpg);
 
-    admin_parse_reserved_jetty(sysfs_path, "reserved_jetty_id",
-        &dev_attr->reserved_jetty_id_min, &dev_attr->reserved_jetty_id_max);
+    admin_parse_reserved_jetty(sysfs_path, "reserved_jetty_id", &dev_attr->reserved_jetty_id_min,
+                               &dev_attr->reserved_jetty_id_max);
 
     if (dev_attr->dev_cap.max_jetty_in_jetty_grp > URMA_MAX_JETTY_IN_JETTY_GRP) {
         (void)printf("max_jetty_in_jetty_grp %u is larger than URMA_MAX_JETTY_IN_JETTY_GRP %u."
@@ -130,14 +131,14 @@ static int admin_parse_device_attr(const char *sysfs_path, admin_show_ubep_t *ub
     }
 
     if (dev_attr->port_cnt > MAX_PORT_CNT) {
-        (void)printf("port_cnt %u is larger than MAX_PORT_CNT %u. Use MAX_PORT_CNT.\n",
-            (uint32_t)dev_attr->port_cnt, (uint32_t)MAX_PORT_CNT);
+        (void)printf("port_cnt %u is larger than MAX_PORT_CNT %u. Use MAX_PORT_CNT.\n", (uint32_t)dev_attr->port_cnt,
+                     (uint32_t)MAX_PORT_CNT);
         dev_attr->port_cnt = MAX_PORT_CNT;
     }
 
     if (dev_attr->dev_cap.max_eid_cnt > URMA_MAX_EID_CNT) {
         (void)printf("max_eid_cnt %u is larger than URMA_MAX_EID_CNT %d. Use URMA_MAX_EID_CNT.\n",
-            dev_attr->dev_cap.max_eid_cnt, URMA_MAX_EID_CNT);
+                     dev_attr->dev_cap.max_eid_cnt, URMA_MAX_EID_CNT);
         dev_attr->dev_cap.max_eid_cnt = URMA_MAX_EID_CNT;
     }
 
@@ -289,9 +290,9 @@ static uint32_t get_valid_eid_cnt(const admin_show_ubep_t *ubep)
 static void print_ubep_simple_info(const admin_show_ubep_t *ubep, int *index, const tool_config_t *cfg)
 {
     if (get_valid_eid_cnt(ubep) == 0) {
-        (void)printf("%-3d  %-16s    %-56s    %-8s    %-16s \n",
-            (*index)++, ubep->dev_name, urma_tp_type_to_string(ubep->tp_type),
-            urma_port_state_to_string(ubep->dev_attr.port_attr[0].state), ubep->net_dev_name);
+        (void)printf("%-3d  %-16s    %-56s    %-8s    %-16s \n", (*index)++, ubep->dev_name,
+                     urma_tp_type_to_string(ubep->tp_type),
+                     urma_port_state_to_string(ubep->dev_attr.port_attr[0].state), ubep->net_dev_name);
 
         return;
     }
@@ -301,9 +302,9 @@ static void print_ubep_simple_info(const admin_show_ubep_t *ubep, int *index, co
         if (memcmp(&ubep->eid_list[i].eid, &eid, sizeof(urma_eid_t)) == 0) {
             continue;
         }
-        (void)printf("%-3d  %-16s    %-8s    eid%u "EID_FMT"    %-8s\n",
-            (*index)++, ubep->dev_name, urma_tp_type_to_string(ubep->tp_type), ubep->eid_list[i].eid_index,
-            EID_ARGS(ubep->eid_list[i].eid), urma_port_state_to_string(ubep->dev_attr.port_attr[0].state));
+        (void)printf("%-3d  %-16s    %-8s    eid%u " EID_FMT "    %-8s\n", (*index)++, ubep->dev_name,
+                     urma_tp_type_to_string(ubep->tp_type), ubep->eid_list[i].eid_index,
+                     EID_ARGS(ubep->eid_list[i].eid), urma_port_state_to_string(ubep->dev_attr.port_attr[0].state));
     }
 }
 
@@ -372,8 +373,8 @@ static void print_ubep_eids(const admin_show_ubep_t *ubep)
         if (memcmp(&ubep->eid_list[i].eid, &eid, sizeof(urma_eid_t)) == 0) {
             continue;
         }
-        (void)printf("  eid%u                     : "EID_FMT"\n", ubep->eid_list[i].eid_index,
-        EID_ARGS(ubep->eid_list[i].eid));
+        (void)printf("  eid%u                     : " EID_FMT "\n", ubep->eid_list[i].eid_index,
+                     EID_ARGS(ubep->eid_list[i].eid));
     }
 }
 
@@ -387,7 +388,7 @@ static void print_ubep_whole_info(const admin_show_ubep_t *ubep, int *index, con
     (void)printf("eids                       :\n");
     print_ubep_eids(ubep);
 
-    (void)printf("guid                       : "EID_FMT"\n", EID_ARGS(ubep->dev_attr.guid));
+    (void)printf("guid                       : " EID_FMT "\n", EID_ARGS(ubep->dev_attr.guid));
     print_device_feat_str(ubep->dev_attr.dev_cap.feature);
 
     (void)printf("max_jfc                    : %u\n", ubep->dev_attr.dev_cap.max_jfc);
@@ -425,15 +426,15 @@ static void print_ubep_whole_info(const admin_show_ubep_t *ubep, int *index, con
     for (i = 0; i < ubep->dev_attr.port_cnt && ubep->dev_attr.port_cnt != UINT8_INVALID; i++) {
         (void)printf("port%u:\n", (uint32_t)i);
         (void)printf("  max_mtu              : %u [%s]\n", ubep->dev_attr.port_attr[i].max_mtu,
-            urma_mtu_to_string(ubep->dev_attr.port_attr[i].max_mtu));
+                     urma_mtu_to_string(ubep->dev_attr.port_attr[i].max_mtu));
         (void)printf("  state                : %u [%s]\n", ubep->dev_attr.port_attr[i].state,
-            urma_port_state_to_string(ubep->dev_attr.port_attr[i].state));
+                     urma_port_state_to_string(ubep->dev_attr.port_attr[i].state));
         (void)printf("  active_width         : %u [%s]\n", ubep->dev_attr.port_attr[i].active_width,
-            urma_link_width_to_string(ubep->dev_attr.port_attr[i].active_width));
+                     urma_link_width_to_string(ubep->dev_attr.port_attr[i].active_width));
         (void)printf("  active_speed         : %u [%s]\n", ubep->dev_attr.port_attr[i].active_speed,
-            urma_speed_to_string(ubep->dev_attr.port_attr[i].active_speed));
+                     urma_speed_to_string(ubep->dev_attr.port_attr[i].active_speed));
         (void)printf("  active_mtu           : %u [%s]\n", ubep->dev_attr.port_attr[i].active_mtu,
-            urma_mtu_to_string(ubep->dev_attr.port_attr[i].active_mtu));
+                     urma_mtu_to_string(ubep->dev_attr.port_attr[i].active_mtu));
     }
     (void)printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
 }
@@ -449,7 +450,7 @@ static void print_ubep_list(const struct ub_list *ubep_list, const tool_config_t
         (void)printf("---  ----------------    --------    --------------------------------------------    --------\n");
     }
 
-    UB_LIST_FOR_EACH_SAFE(ubep, next, node, ubep_list) {
+    UB_LIST_FOR_EACH_SAFE (ubep, next, node, ubep_list) {
         if (ubep == NULL) {
             break;
         }
@@ -464,7 +465,7 @@ static void print_ubep_list(const struct ub_list *ubep_list, const tool_config_t
 static void free_ubep_list(struct ub_list *ubep_list)
 {
     admin_show_ubep_t *ubep, *next;
-    UB_LIST_FOR_EACH_SAFE(ubep, next, node, ubep_list) {
+    UB_LIST_FOR_EACH_SAFE (ubep, next, node, ubep_list) {
         if (ubep == NULL) {
             return;
         }
@@ -474,7 +475,7 @@ static void free_ubep_list(struct ub_list *ubep_list)
     }
 }
 
-static int admin_show_ubep(const tool_config_t *cfg)
+static int admin_show_ubep(tool_config_t *cfg)
 {
     int ret;
     struct ub_list ubep_list;
@@ -496,7 +497,7 @@ free_list:
     return ret;
 }
 
-static int admin_set_reserved_jetty_id_range(const tool_config_t *cfg)
+static int admin_set_reserved_jetty_id_range(tool_config_t *cfg)
 {
     char jetty_id_range[VALUE_LEN_MAX] = {0};
 
@@ -514,66 +515,31 @@ static int admin_set_reserved_jetty_id_range(const tool_config_t *cfg)
     return admin_write_dev_file(cfg->dev_name, "reserved_jetty_id", jetty_id_range, len + 1);
 }
 
-static int execute_command(const tool_config_t *cfg)
+static int admin_cmd_main(admin_config_t *cfg)
 {
-    if (
-        cfg->cmd == TOOL_CMD_ADD_EID ||
-        cfg->cmd == TOOL_CMD_DEL_EID ||
-        cfg->cmd == TOOL_CMD_SET_EID_MODE ||
-        cfg->cmd == TOOL_CMD_SET_NS_MODE ||
-        cfg->cmd == TOOL_CMD_SET_DEV_NS ||
-        cfg->cmd == TOOL_CMD_SET_RESERVED_JETTY
-    ) {
-        (void)printf("This command not support in control plane.\n");
-        return -1;
-    }
-
-    int ret;
-
-    switch (cfg->cmd) {
-        case TOOL_CMD_SHOW:
-            ret = admin_show_ubep(cfg);
-            break;
-        case TOOL_CMD_ADD_EID:
-            ret = admin_add_eid(cfg);
-            break;
-        case TOOL_CMD_DEL_EID:
-            ret = admin_del_eid(cfg);
-            break;
-        case TOOL_CMD_SET_EID_MODE:
-            ret = admin_set_eid_mode(cfg);
-            break;
-        case TOOL_CMD_SHOW_STATS:
-            ret = admin_show_stats(cfg);
-            break;
-        case TOOL_CMD_SHOW_RES:
-            ret = admin_show_res(cfg);
-            break;
-        case TOOL_CMD_SET_NS_MODE:
-            ret = admin_set_ns_mode(cfg);
-            break;
-        case TOOL_CMD_SET_DEV_NS:
-            ret = admin_set_dev_ns(cfg);
-            break;
-        case TOOL_CMD_LIST_RES:
-            ret = admin_list_res(cfg);
-            break;
-        case TOOL_CMD_SET_RESERVED_JETTY:
-            ret = admin_set_reserved_jetty_id_range(cfg);
-            break;
-        case TOOL_CMD_SHOW_TOPO_INFO:
-            ret = admin_show_topo_info(cfg);
-            break;
-        case TOOL_CMD_NUM:
-        default:
-            ret = -1;
-            break;
-    }
-
-    return ret;
+    static const admin_cmd_t cmds[] = {
+        {NULL, admin_show_ubep},
+        {"show", admin_show_ubep},
+        {"add_eid", admin_add_eid},
+        {"del_eid", admin_del_eid},
+        {"set_eid_mode", admin_set_eid_mode},
+        {"show_stats", admin_show_stats},
+        {"show_res", admin_show_res},
+        {"set_ns_mode", admin_set_ns_mode},
+        {"set_dev_ns", admin_set_dev_ns},
+        {"set_reserved_jetty", admin_set_reserved_jetty_id_range},
+        {"list_res", admin_list_res},
+        {"show_topo", admin_show_topo_info},
+        //
+        {"agg", admin_cmd_agg},
+        {"dev", admin_cmd_dev},
+        {"eid", admin_cmd_eid},
+        {0},
+    };
+    return exec_cmd(cfg, cmds);
 }
 
-#define  MAX_CMDLINE_LEN 896   /* must less than MAX_LOG_LEN */
+#define MAX_CMDLINE_LEN 896 /* must less than MAX_LOG_LEN */
 static int admin_check_cmd_len(int argc, char *argv[])
 {
     uint32_t len = 0;
@@ -606,38 +572,42 @@ static void admin_log_cmd(int argc, char *argv[], int ret)
 
 int main(int argc, char *argv[])
 {
-    int ret;
-    tool_config_t tool_cfg = {0};
-
     if (admin_check_cmd_len(argc, argv) != 0) {
         (void)printf("user: %s, cmd len out of range.\n", getlogin());
         return -1;
     }
 
-    ret = admin_parse_args(argc, argv, &tool_cfg);
+    int ret;
+    admin_config_t cfg = {
+        .ue_idx = OWN_UE_IDX,
+    };
+
+    ret = admin_parse_args(argc, argv, &cfg);
     if (ret != 0) {
         (void)printf("Invalid parameter.\n");
-        admin_log_cmd(argc, argv, ret);
-        return ret;
+        URMA_ADMIN_LOG("Invalid parameter\n.");
+        usage(argv[0]);
+        goto exit;
     }
-    if (tool_cfg.help) {
+    cfg.argc = argc - optind;
+    cfg.argv = argv + optind;
+
+    if (cfg.help) {
         /* Do not execute other operations for --help parameter */
         return 0;
     }
-    if (tool_cfg.cmd == TOOL_CMD_NUM) {
-        URMA_ADMIN_LOG("tool_cfg.cmd == TOOL_CMD_NUM\n.");
-        admin_log_cmd(argc, argv, ret);
-        return 0;
-    }
 
-    ret = execute_command(&tool_cfg);
+    ret = admin_cmd_main(&cfg);
     if (ret != 0) {
         (void)printf("Failed to execute command.\n");
         URMA_ADMIN_LOG("Failed to execute command\n.");
-        admin_log_cmd(argc, argv, ret);
-        return ret;
+        goto exit;
     }
 
+    admin_log_cmd(argc, argv, ret);
+    return 0;
+
+exit:
     admin_log_cmd(argc, argv, ret);
     return ret;
 }

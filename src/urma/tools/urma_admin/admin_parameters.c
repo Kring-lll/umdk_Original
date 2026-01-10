@@ -8,20 +8,22 @@
  * History: 2023-01-04   create file
  */
 
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <string.h>
-#include <getopt.h>
-#include <errno.h>
-#include <dirent.h>
-#include <unistd.h>
-#include <limits.h>
 #include <arpa/inet.h>
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <getopt.h>
+#include <limits.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
-#include "urma_admin_log.h"
 #include "admin_file_ops.h"
+#include "admin_log.h"
+
 #include "admin_parameters.h"
 
 int admin_str_to_u8(const char *buf, uint8_t *u8)
@@ -118,7 +120,7 @@ int admin_str_to_u64(const char *buf, uint64_t *u64)
     return 0;
 }
 
-static void usage(const char *argv0)
+void usage(const char *argv0)
 {
     (void)printf("Usage: %s command [command options]\n", argv0);
     (void)printf(" %s URMA configuration tool, chips do not support some values, which might be invalid.\n", argv0);
@@ -148,7 +150,7 @@ static void usage(const char *argv0)
     (void)printf("  -m, --eid_mode <eid_mode>                   the eid mode of UB device,/\n");
     (void)printf("                                              (change to dynamic_mode: cmd with -m,\n");
     (void)printf("                                              change to static_mode: cmd without -m).\n");
-    (void)printf("  -v, --ue_idx <ue_idx>                       the ue_idx of ubep device.\n" \
+    (void)printf("  -v, --ue_idx <ue_idx>                       the ue_idx of ubep device.\n"
                  "                                              when ue_idx == 0xffff or empty, it refers to MUE.\n");
     (void)printf("  -i, --idx <idx>                             idx defaults to 0.\n");
     (void)printf("  -w, --whole                                 show whole information.\n");
@@ -181,38 +183,8 @@ static void usage(const char *argv0)
     (void)printf("  -u, --max_id  <0 - U32_MAX>                 max reserved jetty id, U32_MAX means invalid.\n");
 }
 
-static tool_cmd_type_t parse_command(const char *argv1)
-{
-    int i;
-
-    tool_cmd_t cmd[] = {
-        {"show",                TOOL_CMD_SHOW},
-        {"add_eid",             TOOL_CMD_ADD_EID},
-        {"del_eid",             TOOL_CMD_DEL_EID},
-        {"set_eid_mode",        TOOL_CMD_SET_EID_MODE},
-        {"show_stats",          TOOL_CMD_SHOW_STATS},
-        {"show_res",            TOOL_CMD_SHOW_RES},
-        {"set_ns_mode",         TOOL_CMD_SET_NS_MODE},
-        {"set_dev_ns",          TOOL_CMD_SET_DEV_NS},
-        {"set_reserved_jetty",  TOOL_CMD_SET_RESERVED_JETTY},
-        {"list_res",            TOOL_CMD_LIST_RES},
-        {"show_topo",           TOOL_CMD_SHOW_TOPO_INFO}
-    };
-
-    for (i = 0; i < (int)TOOL_CMD_NUM; i++) {
-        if (strlen(argv1) != strlen(cmd[i].cmd)) {
-            continue;
-        }
-        if (strcmp(argv1, cmd[i].cmd) == 0) {
-            return cmd[i].type;
-        }
-    }
-
-    return TOOL_CMD_NUM;
-}
-
 #define IPV4_MAP_IPV6_PREFIX 0x0000ffff
-#define EID_STR_MIN_LEN 3
+#define EID_STR_MIN_LEN      3
 static inline void ipv4_map_to_eid(uint32_t ipv4, urma_eid_t *eid)
 {
     eid->in4.reserved = 0;
@@ -249,38 +221,8 @@ int admin_str_to_eid(const char *buf, urma_eid_t *eid)
         return 0;
     }
 
-    (void)printf("format error, ipv6: %d, ipv4:%d, errno:%d.\n",
-        err_ipv6, err_ipv4, errno);
+    (void)printf("format error, ipv6: %d, ipv4:%d, errno:%d.\n", err_ipv6, err_ipv4, errno);
     return -EINVAL;
-}
-
-static void init_tool_cfg(tool_config_t *cfg)
-{
-    (void)memset(cfg, 0, sizeof(tool_config_t));
-    cfg->specify_device = false;
-    cfg->whole_info = false;
-    cfg->ue_idx = OWN_UE_IDX;
-}
-
-static int check_query_type(const tool_config_t *cfg)
-{
-    if (cfg->cmd == TOOL_CMD_SHOW_STATS) {
-        if (cfg->key.type < TOOL_STATS_KEY_VTP || cfg->key.type > TOOL_STATS_KEY_URMA_DEV) {
-            (void)printf("Invalid type: %d.\n", (int)cfg->key.type);
-            return -1;
-        }
-        if (cfg->key.type == TOOL_STATS_KEY_TPG || cfg->key.type == TOOL_STATS_KEY_JETTY_GROUP) {
-            (void)printf("Type: %d currently not supported.\n", (int)cfg->key.type);
-            return -1;
-        }
-    }
-    if (cfg->cmd == TOOL_CMD_SHOW_RES) {
-        if (cfg->key.type < TOOL_RES_KEY_VTP || cfg->key.type > TOOL_RES_KEY_DEV_TA) {
-            (void)printf("Invalid type: %d.\n", (int)cfg->key.type);
-            return -1;
-        }
-    }
-    return 0;
 }
 
 static bool check_dev_name(char *dev_name)
@@ -309,47 +251,33 @@ static bool check_dev_name(char *dev_name)
 }
 
 static const struct option g_urma_admin_long_options[] = {
-    {"help",              no_argument,       NULL, 'h'},
-    {"dev",               required_argument, NULL, 'd'},
-    {"eid",               required_argument, NULL, 'e'},
-    {"eid_mode",          no_argument,       NULL, 'm'},
-    {"ue_idx",            required_argument, NULL, 'v'},
-    {"idx",               required_argument, NULL, 'i'},
-    {"whole",             no_argument,       NULL, 'w'},
-    {"resource_type",     required_argument, NULL, 'R'},
-    {"key",               required_argument, NULL, 'k'},
-    {"key_ext",           required_argument, NULL, 'K'},
-    {"key_cnt",           required_argument, NULL, 'C'},
-    {"ns",                required_argument, NULL, 'n'},
-    {"ns_mode",           required_argument, NULL, 'M'},
-    {"min_id",            required_argument, NULL, 'l'},
-    {"max_id",            required_argument, NULL, 'u'},
-    {NULL,                no_argument,       NULL, '\0'}
+    {"help", no_argument, NULL, 'h'},                //
+    {"dev", required_argument, NULL, 'd'},           //
+    {"eid", required_argument, NULL, 'e'},           //
+    {"eid_mode", no_argument, NULL, 'm'},            //
+    {"ue_idx", required_argument, NULL, 'v'},        //
+    {"idx", required_argument, NULL, 'i'},           //
+    {"whole", no_argument, NULL, 'w'},               //
+    {"resource_type", required_argument, NULL, 'R'}, //
+    {"key", required_argument, NULL, 'k'},           //
+    {"key_ext", required_argument, NULL, 'K'},       //
+    {"key_cnt", required_argument, NULL, 'C'},       //
+    {"ns", required_argument, NULL, 'n'},            //
+    {"ns_mode", required_argument, NULL, 'M'},       //
+    {"min_id", required_argument, NULL, 'l'},        //
+    {"max_id", required_argument, NULL, 'u'},        //
+    {NULL, no_argument, NULL, '\0'},                 //
 };
 
 static int admin_parse_dev_name(char *buf, tool_config_t *cfg)
 {
-    if (strnlen(buf, URMA_ADMIN_MAX_DEV_NAME) + 1 > URMA_ADMIN_MAX_DEV_NAME ||
-        check_dev_name(buf) == false) {
+    if (strnlen(buf, URMA_ADMIN_MAX_DEV_NAME) + 1 > URMA_ADMIN_MAX_DEV_NAME || check_dev_name(buf) == false) {
         (void)printf("dev_name:%s out of range(%d) or invalid.\n", buf, URMA_ADMIN_MAX_DEV_NAME);
         URMA_ADMIN_LOG("dev_name:%s out of range(%d) or invalid.\n", buf, URMA_ADMIN_MAX_DEV_NAME);
         return -1;
     }
     cfg->specify_device = true;
     (void)memcpy(cfg->dev_name, buf, strlen(buf));
-    return 0;
-}
-
-static int admin_parse_resource_type(char *buf, tool_config_t *cfg)
-{
-    if (admin_str_to_u32(buf, &cfg->key.type) != 0) {
-        return -1;
-    }
-    if (check_query_type(cfg) != 0) {
-        (void)printf("Failed to check query type: %u.\n", cfg->key.type);
-        URMA_ADMIN_LOG("Failed to check query type: %u.\n", cfg->key.type);
-        return -1;
-    }
     return 0;
 }
 
@@ -367,7 +295,7 @@ static int admin_parse_ns(char *buf, tool_config_t *cfg)
     return 0;
 }
 
-static int admin_inner_parse_args(int argc, char *argv[], tool_config_t *cfg)
+int admin_parse_args(int argc, char *argv[], tool_config_t *cfg)
 {
     int ret = 0;
     while (1) {
@@ -403,7 +331,7 @@ static int admin_inner_parse_args(int argc, char *argv[], tool_config_t *cfg)
                 cfg->whole_info = true;
                 break;
             case 'R':
-                ret = admin_parse_resource_type(optarg, cfg);
+                ret = admin_str_to_u32(optarg, &cfg->key.type);
                 break;
             case 'k':
                 ret = admin_str_to_u32(optarg, &cfg->key.key);
@@ -433,39 +361,180 @@ static int admin_inner_parse_args(int argc, char *argv[], tool_config_t *cfg)
             return -1;
         }
     }
-    if (optind < argc - 1) {
-        URMA_ADMIN_LOG("optind < argc - 1\n");
-        usage(argv[0]);
-        return -1;
-    }
     return 0;
 }
 
-int admin_parse_args(int argc, char *argv[], tool_config_t *cfg)
+char *pop_arg(admin_config_t *cfg)
 {
-    int ret = 0;
-
-    if (argc == 1 || cfg == NULL) {
-        URMA_ADMIN_LOG("Invalid parameter\n.");
-        usage(argv[0]);
-        return -1;
+    if (cfg->argc <= 0) {
+        return NULL;
     }
 
-    init_tool_cfg(cfg);
-    /* First parse the command */
-    cfg->cmd = parse_command(argv[1]);
+    char *arg = *cfg->argv;
+    cfg->argc--;
+    cfg->argv++;
 
-    /* Second parse the options */
-    ret = admin_inner_parse_args(argc, argv, cfg);
+    return arg;
+}
+
+int pop_arg_dev(admin_config_t *cfg)
+{
+    char *arg = pop_arg(cfg);
+    if (arg == NULL) {
+        printf("No device name specified.\n");
+        return -EINVAL;
+    }
+    return admin_parse_dev_name(arg, cfg);
+}
+
+int pop_arg_ns(admin_config_t *cfg)
+{
+    char *arg = pop_arg(cfg);
+    if (arg == NULL) {
+        printf("No namespace specified.\n");
+        return -EINVAL;
+    }
+    int ret = admin_parse_ns(arg, cfg);
+    return ret;
+}
+
+int pop_arg_eid(admin_config_t *cfg)
+{
+    char *arg = pop_arg(cfg);
+    int ret = admin_str_to_eid(arg, &cfg->eid);
     if (ret != 0) {
+        printf("No eid specified.\n");
+        return -EINVAL;
+    }
+    return ret;
+}
+
+int pop_arg_eid_idx(admin_config_t *cfg)
+{
+    char *arg = pop_arg(cfg);
+    int ret = admin_str_to_u16(arg, &cfg->idx);
+    if (ret != 0) {
+        printf("No eid idx specified.\n");
+        return -EINVAL;
+    }
+    return ret;
+}
+
+#define ADMIN_NET_NS_PATH_MAX_LEN  256
+/* Path1 format: /var/run/netns/$ns_name */
+#define ADMIN_NET_NS_PATH1_PREFIX  "/var/run/netns/"
+#define ADMIN_NET_NS_PATH1_MIN_LEN strlen(ADMIN_NET_NS_PATH1_PREFIX)
+/* Path2 format: /proc/$pid/ns/net */
+#define ADMIN_NET_NS_PATH2_PREFIX  "/proc/"
+#define ADMIN_NET_NS_PATH2_SUFFIX  "/ns/net"
+/* The minimum length of path2: $pid occupies at least 1 character */
+#define ADMIN_NET_NS_PATH2_MIN_LEN 14
+
+static bool urma_validate_ns_path(const char *path)
+{
+    /* ns path is a special symbolic link, cannot be checked by realpath */
+    /* check path format1: /var/run/netns/$ns_name->/proc/$pid/ns/net */
+    size_t path_len = strnlen(path, ADMIN_NET_NS_PATH_MAX_LEN);
+    if (path_len > ADMIN_NET_NS_PATH1_MIN_LEN && path_len < ADMIN_NET_NS_PATH_MAX_LEN &&
+        (strncmp(path, ADMIN_NET_NS_PATH1_PREFIX, ADMIN_NET_NS_PATH1_MIN_LEN) == 0)) {
+        /* check if there is still "/./" or "/../" after "ns/"-> check if there is any sub_str can be
+           splitted by "/" */
+        char ns_name[ADMIN_NET_NS_PATH_MAX_LEN + 1] = {0};
+        /* check ns_name not containing "/" */
+        int ret = sscanf(path + ADMIN_NET_NS_PATH1_MIN_LEN, "%[^/]", ns_name);
+        if (ret < 0 || strlen(ns_name) + ADMIN_NET_NS_PATH1_MIN_LEN != path_len) {
+            (void)printf("path 1 is invalid, ns_name: %s, ret: %d, errno: %d.\n", ns_name, ret, errno);
+            return false;
+        }
+        return true;
+    }
+
+    /* check path format2: /proc/$pid/ns/net */
+    if (path_len < ADMIN_NET_NS_PATH2_MIN_LEN || path_len >= ADMIN_NET_NS_PATH_MAX_LEN) {
+        (void)printf("The len of ns realpath:%s is invalid, len: %lu.\n", path, path_len);
+        return false;
+    }
+
+    /* /proc/ */
+    size_t sub_str_len = strlen(ADMIN_NET_NS_PATH2_PREFIX);
+    uint64_t offset = sub_str_len;
+    if (offset >= path_len || strncmp(path, ADMIN_NET_NS_PATH2_PREFIX, sub_str_len) != 0) {
+        (void)printf("path 2 is invalid, should start with '/proc/', path: %s.\n", path);
+        return false;
+    }
+
+    /* pid */
+    char num_str[ADMIN_NET_NS_PATH_MAX_LEN + 1] = {0};
+    /* check sub_str only containing number */
+    int success_len = sscanf(path + offset, "%[0-9]", num_str);
+    /* The return value of sscanf_s is the number of string successfully matched */
+    if (success_len != 1) {
+        (void)printf("failed to get pid.\n");
+        return false;
+    }
+    sub_str_len = strnlen(num_str, ADMIN_NET_NS_PATH_MAX_LEN);
+    offset += sub_str_len;
+
+    /* /ns/net */
+    if (strcmp(path + offset, ADMIN_NET_NS_PATH2_SUFFIX) != 0) {
+        (void)printf("path is not valid: should be /proc/pid/ns/net.\n");
+        return false;
+    }
+    return true;
+}
+
+int admin_get_ns_fd(const char *ns)
+{
+    int ns_fd;
+    /* validate input */
+    if (urma_validate_ns_path(ns) == false) {
         return -1;
     }
 
-    /* Increase illegal cmd return error */
-    if (cfg->cmd == TOOL_CMD_NUM && cfg->help == false) {
-        URMA_ADMIN_LOG("cfg->cmd == TOOL_CMD_NUM\n");
-        usage(argv[0]);
-        return -1;
+    ns_fd = open(ns, O_RDONLY | O_CLOEXEC);
+    if (ns_fd == -1) {
+        (void)printf("failed to open ns file %s, errno:%d", ns, errno);
+        return ns_fd;
     }
+    return ns_fd;
+}
+
+int exec_cmd(admin_config_t *cfg, const admin_cmd_t *cmds)
+{
+    const char *cmd_name = pop_arg(cfg);
+    if (cmd_name == NULL) {
+        return cmds[0].func(cfg);
+    }
+
+    const admin_cmd_t *cmd = cmds + 1;
+    while (cmd->name) {
+        if (strncmp(cmd->name, cmd_name, strlen(cmd->name) + 1) == 0) {
+            return cmd->func(cfg);
+        }
+        cmd++;
+    }
+
+    printf("Unknown cmd '%s'.\n", cmd_name);
     return 0;
+}
+
+bool is_1650(const char *dev_name)
+{
+    char *device_path = calloc(1, DEV_PATH_MAX);
+    if (device_path == NULL) {
+        return false;
+    }
+
+    if (snprintf(device_path, DEV_PATH_MAX - 1, "%s/%s/device", SYS_CLASS_PATH, dev_name) <= 0) {
+        (void)printf("snprintf failed, dev:%s.\n", dev_name);
+        free(device_path);
+        return false;
+    }
+
+    const uint32_t device_id_1650 = 0xa001;
+    uint32_t device_id;
+    (void)admin_parse_file_value_u32(device_path, "device", &device_id);
+
+    free(device_path);
+    return device_id == device_id_1650;
 }
