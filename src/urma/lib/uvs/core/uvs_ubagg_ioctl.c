@@ -20,6 +20,95 @@
 #define UVS_UBAGG_DEVICE_PATH "/dev/ubagg"
 #define UVS_UBCORE_DEVICE_PATH "/dev/ubcore/ubcore"
 
+int uvs_ubagg_ioctl_create_aggr_dev(uvs_eid_t aggr_eid)
+{
+    struct uvs_ubagg_create_dev_arg args = {0};
+    struct uvs_ubagg_cmd_hdr hdr = {0};
+    int ret;
+
+    args.in.aggr_eid = aggr_eid;
+
+    hdr.command = UVS_UBAGG_CMD_CREATE_DEV;
+    hdr.args_addr = (uint64_t)(uintptr_t)&args;
+    hdr.args_len = sizeof(args);
+
+    int dev_fd = open(UVS_UBAGG_DEVICE_PATH, O_RDWR);
+    if (dev_fd < 0) {
+        TPSA_LOG_ERR("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
+        return -1;
+    }
+
+    ret = ioctl(dev_fd, UVS_UBAGG_CMD, &hdr);
+    if (ret != 0) {
+        TPSA_LOG_ERR("ioctl to create aggr dev fail\n");
+        close(dev_fd);
+        return -1;
+    }
+
+    close(dev_fd);
+    return 0;
+}
+
+int uvs_ubagg_ioctl_delete_aggr_dev(uvs_eid_t aggr_eid)
+{
+    struct uvs_ubagg_delete_dev_arg args = {0};
+    struct uvs_ubagg_cmd_hdr hdr = {0};
+    int ret;
+
+    args.in.aggr_eid = aggr_eid;
+
+    hdr.command = UVS_UBAGG_CMD_DELETE_DEV;
+    hdr.args_addr = (uint64_t)(uintptr_t)&args;
+    hdr.args_len = sizeof(args);
+
+    int dev_fd = open(UVS_UBAGG_DEVICE_PATH, O_RDWR);
+    if (dev_fd < 0) {
+        TPSA_LOG_ERR("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
+        return -1;
+    }
+
+    ret = ioctl(dev_fd, UVS_UBAGG_CMD, &hdr);
+    if (ret != 0) {
+        TPSA_LOG_ERR("ioctl to remove aggr dev fail\n");
+        close(dev_fd);
+        return -1;
+    }
+
+    close(dev_fd);
+    return 0;
+}
+
+int uvs_ubagg_ioctl_get_dev_name_by_eid(uvs_eid_t eid, void *buf, uint32_t len)
+{
+    struct uvs_ubagg_get_dev_name_arg args = {0};
+    struct uvs_ubagg_cmd_hdr hdr = {0};
+    int ret;
+
+    args.in.eid = eid;
+    args.in.buf = buf;
+    args.in.len = len;
+
+    hdr.command = UVS_UBAGG_CMD_GET_DEV_NAME;
+    hdr.args_addr = (uint64_t)(uintptr_t)&args;
+    hdr.args_len = sizeof(args);
+
+    int dev_fd = open(UVS_UBAGG_DEVICE_PATH, O_RDWR);
+    if (dev_fd < 0) {
+        TPSA_LOG_ERR("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
+        return -1;
+    }
+
+    ret = ioctl(dev_fd, UVS_UBAGG_CMD, &hdr);
+    if (ret != 0) {
+        TPSA_LOG_ERR("ioctl to get dev name by eid fail\n");
+        close(dev_fd);
+        return -1;
+    }
+
+    close(dev_fd);
+    return 0;
+}
+
 int uvs_ubagg_ioctl_set_topo(void *topo_info, int topo_num)
 {
     struct uvs_ubagg_set_topo_info args = {0};
@@ -29,7 +118,7 @@ int uvs_ubagg_ioctl_set_topo(void *topo_info, int topo_num)
     args.in.topo = topo_info;
     args.in.topo_num = (uint32_t)topo_num;
 
-    hdr.command = UVS_UBAGG_CMD_SET_TOPO;
+    hdr.command = UVS_UBAGG_CMD_SET_TOPO_INFO;
     hdr.args_addr = (uint64_t)(uintptr_t)&args;
     hdr.args_len = sizeof(args);
 
