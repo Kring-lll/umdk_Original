@@ -15,41 +15,22 @@
 #define _GNU_SOURCE
 #endif
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 
+#include "urma_cmd.h"
 #include "urma_types.h"
 #include "urma_types_str.h"
-#include "urma_cmd.h"
 
-#define MAX_NODE_NUM (16)
-#define EID_LEN (16)
-#define MAX_PORT_NUM (9)
-#define IODIE_NUM (2)
+#define MAX_NODE_NUM            (16)
+#define EID_LEN                 (16)
+#define PORT_NUM            (9)
+#define IODIE_NUM               (2)
+#define DEV_NUM                 (128)
 #define URMA_ADMIN_MAX_DEV_NAME 64
-#define URMA_ADMIN_MAX_NS_PATH 128 /* /proc/$pid/ns/net */
-#define OWN_UE_IDX (0xffff)
-
-typedef enum tool_cmd_type {
-    TOOL_CMD_SHOW,
-    TOOL_CMD_ADD_EID,
-    TOOL_CMD_DEL_EID,
-    TOOL_CMD_SET_EID_MODE,
-    TOOL_CMD_SHOW_STATS,
-    TOOL_CMD_SHOW_RES,
-    TOOL_CMD_SET_NS_MODE,
-    TOOL_CMD_SET_DEV_NS,
-    TOOL_CMD_LIST_RES,
-    TOOL_CMD_SET_RESERVED_JETTY,
-    TOOL_CMD_SHOW_TOPO_INFO,
-    TOOL_CMD_NUM
-} tool_cmd_type_t;
-
-typedef struct tool_cmd {
-    char *cmd;
-    tool_cmd_type_t type;
-} tool_cmd_t;
+#define URMA_ADMIN_MAX_NS_PATH  128 /* /proc/$pid/ns/net */
+#define OWN_UE_IDX              (0xffff)
 
 /* refer to enum ubcore_stats_key_type */
 typedef enum tool_stats_key_type {
@@ -105,7 +86,7 @@ typedef struct tool_res_upi_val {
 
 typedef union urma_vtp_cfg_flag {
     struct {
-        uint32_t clan_tp :  1;
+        uint32_t clan_tp : 1;
         uint32_t migrate : 1;
         uint32_t reserve : 30;
     } bs;
@@ -155,12 +136,12 @@ typedef struct tool_res_tpg_val {
 /* refer to struct ubcore_utp_cfg_flag */
 typedef union tool_utp_cfg_flag {
     struct {
-        uint32_t loopback :  1;
-        uint32_t spray_en :  1;
+        uint32_t loopback : 1;
+        uint32_t spray_en : 1;
         uint32_t reserved : 30;
     } bs;
     uint32_t value;
-}tool_utp_cfg_flag_t;
+} tool_utp_cfg_flag_t;
 
 /* refer to struct ubcore_res_utp_val */
 typedef struct tool_res_utp_val {
@@ -237,18 +218,29 @@ typedef struct tool_res_seg_val {
     tool_seg_info_t *seg_list;
 } tool_res_seg_val_t;
 
-typedef struct tool_iodie_info {
+typedef struct tool_topo_ue {
+    uint32_t socket_id;
     char primary_eid[EID_LEN];
-    char port_eid[MAX_PORT_NUM][EID_LEN];
-    char peer_port_eid[MAX_PORT_NUM][EID_LEN];
-    int socket_id;
-} tool_iodie_info_t;
+    char port_eid[PORT_NUM][EID_LEN];
+} tool_topo_ue_t;
+
+typedef struct tool_topo_agg_dev {
+    char agg_eid[EID_LEN];
+    tool_topo_ue_t ues[IODIE_NUM];
+} tool_topo_agg_dev_t;
+
+typedef struct tool_topo_link {
+    uint32_t peer_node;
+    uint32_t peer_iodie;
+    uint32_t peer_port;
+} tool_topo_link_t;
 
 typedef struct tool_topo_info {
-    char bonding_eid[EID_LEN];
-    tool_iodie_info_t io_die_info[IODIE_NUM];
-    bool is_cur_node;
-} tool_topo_info_t;
+    uint32_t id;
+    uint32_t is_current;
+    tool_topo_link_t links[IODIE_NUM][PORT_NUM];
+    tool_topo_agg_dev_t agg_devs[DEV_NUM];
+}  tool_topo_info_t;
 
 typedef struct tool_topo_map {
     tool_topo_info_t topo_infos[MAX_NODE_NUM];
@@ -258,52 +250,68 @@ typedef struct tool_topo_map {
 /* refer to struct ubcore_res_dev_val */
 typedef struct tool_res_dev_val {
     uint32_t seg_cnt;
-    tool_seg_info_t *seg_list;      /* token_id of segment list */
+    tool_seg_info_t *seg_list; /* token_id of segment list */
     uint32_t jfs_cnt;
-    uint32_t *jfs_list;             /* jfs_id list */
+    uint32_t *jfs_list; /* jfs_id list */
     uint32_t jfr_cnt;
-    uint32_t *jfr_list;             /* jfr_id list */
+    uint32_t *jfr_list; /* jfr_id list */
     uint32_t jfc_cnt;
-    uint32_t *jfc_list;             /* jfc_id list */
+    uint32_t *jfc_list; /* jfc_id list */
     uint32_t jetty_cnt;
-    uint32_t *jetty_list;           /* jetty_id list */
+    uint32_t *jetty_list; /* jetty_id list */
     uint32_t jetty_group_cnt;
-    uint32_t *jetty_group_list;     /* jetty_group_id list */
+    uint32_t *jetty_group_list; /* jetty_group_id list */
     uint32_t rc_cnt;
-    uint32_t *rc_list;              /* RC */
+    uint32_t *rc_list; /* RC */
     uint32_t vtp_cnt;
-    uint32_t *vtp_list;             /* vtp */
+    uint32_t *vtp_list; /* vtp */
     uint32_t tp_cnt;
-    uint32_t *tp_list;              /* RC */
+    uint32_t *tp_list; /* RC */
     uint32_t tpg_cnt;
-    uint32_t *tpg_list;             /* RM */
+    uint32_t *tpg_list; /* RM */
     uint32_t utp_cnt;
-    uint32_t *utp_list;             /* UM */
+    uint32_t *utp_list; /* UM */
 } tool_res_dev_val_t;
 
-typedef struct tool_config {
-    tool_cmd_type_t cmd;
+typedef struct admin_config {
+    int argc;
+    char **argv;
+    char *filename;
     bool specify_device;
     bool whole_info;
     bool help;
-    char dev_name[URMA_ADMIN_MAX_DEV_NAME];       /* ubep device name */
+    char dev_name[URMA_ADMIN_MAX_DEV_NAME]; /* ubep device name */
     urma_eid_t eid;
     bool dynamic_eid_mode;
     uint16_t ue_idx;
     /* eid start */
-    uint16_t idx; /* eid idx */
+    uint16_t idx;                    /* eid idx */
     char ns[URMA_ADMIN_MAX_NS_PATH]; /* /proc/$pid/ns/net */
     /* eid end */
     tool_query_key_t key;
     uint8_t ns_mode; /* 0: exclusive, 1: shared */
-    uint32_t min_rsvd_jetty_id;
-    uint32_t max_rsvd_jetty_id;
-} tool_config_t;
+} admin_config_t;
 
 int admin_str_to_eid(const char *buf, urma_eid_t *eid);
 int admin_str_to_u8(const char *buf, uint8_t *u8);
 int admin_str_to_u16(const char *buf, uint16_t *u16);
 int admin_str_to_u32(const char *buf, uint32_t *u32);
 int admin_str_to_u64(const char *buf, uint64_t *u64);
-int admin_parse_args(int argc, char *argv[], tool_config_t *cfg);
+int admin_parse_args(admin_config_t *cfg);
+
+typedef struct admin_cmd {
+    char *name;
+    int (*func)(admin_config_t *cfg);
+} admin_cmd_t;
+
+char *pop_arg(admin_config_t *cmds);
+int pop_arg_dev(admin_config_t *cmds);
+int pop_arg_ns(admin_config_t *cfg);
+int pop_arg_sharing(admin_config_t *cfg);
+int pop_arg_eid(admin_config_t *cfg);
+int pop_arg_eid_idx(admin_config_t *cfg);
+int pop_arg_eid_mode(admin_config_t *cfg);
+
+int admin_get_ns_fd(const char *ns);
+
 #endif
