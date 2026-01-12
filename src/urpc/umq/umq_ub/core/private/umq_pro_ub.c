@@ -618,6 +618,60 @@ static inline void umq_perf_record_write_poll(umq_perf_record_type_t type, uint6
     }
 }
 
+static void umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm)
+{
+    switch (imm.bs.type) {
+        case IMM_TYPE_FLOW_CONTROL:
+            umq_ub_window_inc(&queue->flow_control, imm.flow_control.window);
+            break;
+        default:
+            break;
+    }
+}
+
+int umq_ub_poll_fc_rx(ub_queue_t *queue)
+{
+    umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
+    urma_cr_t cr[UMQ_UB_FLOW_CONTORL_JETTY_DEPTH];
+    uint64_t start_timestmap = umq_perf_get_start_timestamp_with_feature(queue->dev_ctx->feature);
+    int rx_cr_cnt =
+        urma_poll_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfc, UMQ_UB_FLOW_CONTORL_JETTY_DEPTH, cr);
+    umq_perf_record_write_poll(UMQ_PERF_RECORD_TRANSPORT_POLL_RX, start_timestmap, queue->dev_ctx->feature, rx_cr_cnt);
+    if (rx_cr_cnt < 0) {
+        umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
+        UMQ_LIMIT_VLOG_ERR("UB RX reports rx_cr_cnt[%d]\n", rx_cr_cnt);
+        return UMQ_FAIL;
+    }
+
+    umq_buf_t *buf;
+    for (int i = 0; i < rx_cr_cnt; i++) {
+        umq_ub_imm_t imm = {.value = cr[i].imm_data};
+        umq_ub_process_fc_msg(queue, imm);
+        (void)umq_ub_fill_fc_rx_buf(queue);
+    }
+    umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
+    return rx_cr_cnt;
+}
+
+int umq_ub_fill_fc_rx_buf(ub_queue_t *queue)
+{
+    urma_jfr_wr_t recv_wr = {
+        .src.sge = NULL,
+        .src.num_sge = 0,
+        .user_ctx = 0,
+    };
+    urma_jfr_wr_t *bad_wr = NULL;
+    uint64_t start_timestamp = umq_perf_get_start_timestamp_with_feature(queue->dev_ctx->feature);
+    if (urma_post_jetty_recv_wr(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL], &recv_wr, &bad_wr) != 0) {
+        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_POST_RECV, start_timestamp);
+        UMQ_LIMIT_VLOG_ERR("urma_post_jetty_recv_wr failed, eid: " EID_FMT ", jetty_id: %u\n",
+                           EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+                           queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id);
+        return UMQ_FAIL;
+    }
+    return UMQ_SUCCESS;
+}
+
 int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
 {
     if (buf_count == 0) {

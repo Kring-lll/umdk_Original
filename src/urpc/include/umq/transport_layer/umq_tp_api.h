@@ -278,6 +278,16 @@ typedef struct umq_ops {
      * Return: 0 on success, other value on error
      */
     int (*umq_tp_cfg_get)(uint64_t umqh_tp, umq_cfg_get_t *cfg);
+
+    /**
+     * wait umq ready
+     * @param[in] umqh_tp: Queue handle
+     * @param[in] time_out: max time to wait (milliseconds),
+     *            timeout = 0: return immediately event if no events are ready,
+     *            timeout = -1: an infinite timeout
+     * Return 0 on success, other value on error
+    */
+    int (*umq_tp_wait_ready)(uint64_t umqh_tp, int time_out);
 } umq_ops_t;
 
 typedef umq_ops_t* (*umq_ops_get_t)(void);
