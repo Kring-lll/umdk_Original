@@ -24,7 +24,7 @@ struct FusedDeepMoeInfo {
     uint32_t bs;                   // bs
     uint32_t k;                    // k
     uint32_t h;                    // h
-    uint32_t aicNum;               // aivNum
+    uint32_t aicNum;               // aicNum
     uint32_t aivNum;               // aivNum
     uint64_t totalUbSize;
     uint64_t totalWinSize;
@@ -71,4 +71,5 @@ constexpr uint32_t WORKSPACE_STAGES = 4;
 
 constexpr uint32_t EXEC_FLAG_DEEP_FUSE = (1U << 0);
 constexpr uint32_t EXEC_FLAG_TENSOR_LIST = (1U << 1);
+constexpr uint32_t EXEC_FLAG_X_ACTIVE_MASK = (1U << 2);
 #endif  // FUSED_DEEP_MOE_TILING_H

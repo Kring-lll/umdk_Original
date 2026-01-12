@@ -22,9 +22,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 
 TORCH_LIBRARY(umdk_cam_op_lib, m) {
     m.def("fused_deep_moe(Tensor x, Tensor expertIds, Tensor[] gmm1PermutedWeight, Tensor[] gmm1PermutedWeightScale, \
-    Tensor[] gmm2Weight, Tensor[] gmm2WeightScale, Tensor? expertSmoothScalesOptional, Tensor? expertScalesOptional, \
-    str groupEp, int epRankSize, int epRankId, int moeExpertNum, int sharedExpertNum, int sharedExpertRankNum, \
-    int quantMode, int globalBs) -> Tensor[]");
+    Tensor[] gmm2Weight, Tensor[] gmm2WeightScale, Tensor expertScales, Tensor? expertSmoothScales, \
+    Tensor? xActiveMask, str groupEp, int epRankSize, int epRankId, int moeExpertNum, int sharedExpertNum, \
+    int sharedExpertRankNum, int quantMode, int globalBs) -> Tensor[]");
     m.def("get_dispatch_layout(Tensor topk_idx, int num_experts, int num_ranks) -> (Tensor, Tensor, Tensor)");
     m.def("moe_dispatch_prefill(Tensor x, Tensor topk_idx, Tensor topk_weights, Tensor num_tokens_per_rank, \
     Tensor is_token_in_rank, Tensor num_tokens_per_expert, int num_worst_tokens, str group_ep, int rank, int num_ranks) \
