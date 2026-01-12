@@ -2,6 +2,29 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
 
 load("//:bazel/copts.bzl", "UMQ_DEFAULT_COPTS", "UMQ_DEFAULT_LINKOPTS")
+load("//:bazel/build_settings.bzl", "openssl_mode")
+
+openssl_mode(
+    name = "openssl_mode",
+    build_setting_default = "bazel",
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "openssl_system",
+    flag_values = {
+        ":openssl_mode": "system",
+    },
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "openssl_bazel",
+    flag_values = {
+        ":openssl_mode": "bazel",
+    },
+    visibility = ["//visibility:public"],
+)
 
 cc_library(
     name = "vlog",
