@@ -607,19 +607,20 @@ void umq_ub_window_read(ub_flow_control_t *fc, ub_queue_t *queue)
         .user_ctx = 0,
         .opcode = URMA_OPC_READ,
         .flag = {.bs = {.complete_enable = 1, .inline_flag = 0}},
-        .tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]};
-    urma_status_t status = urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_IO], &urma_wr, &bad_wr);
+        .tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL]};
+    urma_status_t status = urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL], &urma_wr, &bad_wr);
     if (status == URMA_SUCCESS) {
+        queue->interrupt_ctx.tx_fc_interrupt = true;
         fc->remote_get = true;
         return;
     }
 
     UMQ_LIMIT_VLOG_ERR("umq ub flow control get remote window failed, error %d, local eid: " EID_FMT ", "
-                       "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n", (int)status,
-                       EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
-                       queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id,
-                       EID_ARGS(queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid),
-                       queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.id);
+                       "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n",
+                       (int)status, EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+                       queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id,
+                       EID_ARGS(queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL]->id.eid),
+                       queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL]->id.id);
 }
 
 void umq_ub_rq_posted_notifier_inc(ub_flow_control_t *fc, uint16_t rx_posted)
@@ -679,13 +680,8 @@ void umq_ub_rq_posted_notifier_update(ub_flow_control_t *fc, ub_queue_t *queue, 
         return;
     }
 
-    if (umq_ub_window_dec(fc, queue, 1) != 1) {
-        return;
-    }
-
     notify = fc->ops.local_rx_posted_exchange(fc);
     if (notify == 0) {
-        umq_ub_window_inc(fc, 1);
         return;
     }
 
@@ -697,21 +693,20 @@ void umq_ub_rq_posted_notifier_update(ub_flow_control_t *fc, ub_queue_t *queue, 
     urma_jfs_wr_t urma_wr = {.user_ctx = notify,
         .send = {.imm_data = imm.value},
         .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
-        .tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO],
+        .tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL],
         .opcode = URMA_OPC_SEND_IMM};
     urma_jfs_wr_t *bad_wr = NULL;
-    urma_status_t status = urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_IO], &urma_wr, &bad_wr);
+    urma_status_t status = urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL], &urma_wr, &bad_wr);
     if (status == URMA_SUCCESS) {
         return;
     }
 
     UMQ_LIMIT_VLOG_ERR("flow control window send failed, status %d, local eid: " EID_FMT ", "
-                       "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n", (int)status,
-                       EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
-                       queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id,
-                       EID_ARGS(queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid),
-                       queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.id);
-    umq_ub_window_inc(fc, 1);
+                       "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n",
+                       (int)status, EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+                       queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id,
+                       EID_ARGS(queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL]->id.eid),
+                       queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL]->id.id);
     umq_ub_rq_posted_notifier_inc(fc, notify);
 }
 
