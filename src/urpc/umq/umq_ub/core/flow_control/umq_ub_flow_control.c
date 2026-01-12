@@ -690,3 +690,8 @@ void umq_ub_recover_tx_imm(ub_queue_t *queue, urma_jfs_wr_t *urma_wr, uint16_t w
         }
     }
 }
+
+uint32_t umq_ub_check_window(ub_flow_control_t *fc)
+{
+    return fc->ops.remote_rx_window_load(fc);
+}
