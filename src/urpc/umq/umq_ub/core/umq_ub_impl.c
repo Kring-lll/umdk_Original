@@ -31,6 +31,7 @@
 #include "umq_ub_private.h"
 #include "umq_ub_impl.h"
 
+#define UMQ_UB_WAIT_READY_SLEEP_US 100
 #define UMQ_FLUSH_MAX_RETRY_TIMES 10000
 #define DEV_STR_LENGTH 64
 
@@ -1488,4 +1489,30 @@ int umq_ub_cfg_get_impl(uint64_t umqh_tp, umq_cfg_get_t *cfg)
     cfg->mode = queue->mode;
     cfg->state = queue->state;
     return UMQ_SUCCESS;
+}
+
+int umq_ub_wait_ready_impl(uint64_t umqh_tp, int timeout)
+{
+    ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
+    if (!queue->flow_control.enabled) {
+        UMQ_LIMIT_VLOG_ERR("flow control is disabled\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    uint64_t start_time = urpc_get_cpu_cycles();
+    int ret = UMQ_SUCCESS;
+    do {
+        ret = umq_ub_poll_fc_rx(queue);
+        if (ret < 0) {
+            UMQ_LIMIT_VLOG_ERR("poll flow control rx failed\n");
+            return ret;
+        }
+
+        if (umq_ub_check_window(&queue->flow_control) > 0) {
+            return UMQ_SUCCESS;
+        }
+        usleep(UMQ_UB_WAIT_READY_SLEEP_US);
+    } while(timeout < 0 || ((urpc_get_cpu_cycles() - start_time) * MS_PER_SEC / urpc_get_cpu_hz()) < (uint64_t)timeout);
+
+    return -UMQ_ERR_ETIMEDOUT;
 }

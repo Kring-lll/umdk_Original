@@ -1141,3 +1141,14 @@ int umq_cfg_get(uint64_t umqh, umq_cfg_get_t *cfg)
     }
     return umq->tp_ops->umq_tp_cfg_get(umq->umqh_tp, cfg);
 }
+
+int umq_wait_ready(uint64_t umqh, int time_out)
+{
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+    if (umq == NULL || umq->umqh_tp == UMQ_INVALID_HANDLE || umq->tp_ops == NULL ||
+        umq->tp_ops->umq_tp_wait_ready == NULL) {
+        UMQ_VLOG_ERR("parameter invalid\n");
+        return -UMQ_ERR_EINVAL;
+    }
+    return umq->tp_ops->umq_tp_wait_ready(umq->umqh_tp, time_out);
+}

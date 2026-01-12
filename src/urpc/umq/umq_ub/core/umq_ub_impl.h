@@ -83,6 +83,7 @@ int umq_ub_mempool_state_get_impl(uint64_t umqh_tp, uint32_t mempool_id, umq_mem
 int umq_ub_mempool_state_refresh_impl(uint64_t umqh_tp, uint32_t mempool_id);
 int umq_ub_dev_info_get_impl(char *umq_dev_name, umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq_dev_info);
 int umq_ub_cfg_get_impl(uint64_t umqh_tp, umq_cfg_get_t *cfg);
+int umq_ub_wait_ready_impl(uint64_t umqh_tp, int timeout);
 
 #ifdef __cplusplus
 }
