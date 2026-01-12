@@ -610,13 +610,14 @@ void umq_ub_window_read(ub_flow_control_t *fc, ub_queue_t *queue)
         .tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]};
     urma_status_t status = urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_IO], &urma_wr, &bad_wr);
     if (status == URMA_SUCCESS) {
+        queue->interrupt_ctx.tx_fc_interrupt = true;
         fc->remote_get = true;
         return;
     }
 
     UMQ_LIMIT_VLOG_ERR("umq ub flow control get remote window failed, error %d, local eid: " EID_FMT ", "
-                       "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n", (int)status,
-                       EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
+                       "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n",
+                       (int)status, EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
                        queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id,
                        EID_ARGS(queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid),
                        queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.id);
