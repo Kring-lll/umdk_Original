@@ -50,6 +50,8 @@ static inline uint16_t umq_ub_window_dec(ub_flow_control_t *fc, ub_queue_t *queu
 
 void umq_ub_rq_posted_notifier_inc(ub_flow_control_t *fc, uint16_t rx_posted);
 
+uint32_t umq_ub_check_window(ub_flow_control_t *fc);
+
 #ifdef __cplusplus
 }
 #endif
