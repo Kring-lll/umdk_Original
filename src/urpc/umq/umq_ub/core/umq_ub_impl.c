@@ -31,6 +31,7 @@
 #include "umq_ub_private.h"
 #include "umq_ub_impl.h"
 
+#define UMQ_UB_WAIT_READY_SLEEP_US 100
 #define UMQ_FLUSH_MAX_RETRY_TIMES 10000
 #define DEV_STR_LENGTH 64
 

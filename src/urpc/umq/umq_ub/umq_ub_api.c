@@ -184,6 +184,7 @@ static int umq_tp_ub_cfg_get(uint64_t umqh_tp, umq_cfg_get_t *cfg)
     return umq_ub_cfg_get_impl(umqh_tp, cfg);
 }
 
+
 static umq_ops_t g_umq_ub_ops = {
     .mode = UMQ_TRANS_MODE_UB,
     // control plane api
