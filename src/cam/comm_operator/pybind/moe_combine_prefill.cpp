@@ -19,7 +19,7 @@
 
 using torch::autograd::AutogradContext;
 using torch::autograd::Function;
-using tensor_list = std::vector<at::Tensor>;
+using TensorVector = std::vector<at::Tensor>;
 using namespace at;
 using namespace std;
 
@@ -73,7 +73,7 @@ at::Tensor MoeCombinePrefillImplNpu(
     return combinedX;
 }
 
-tensor_list MoeCombinePrefillBackwardImplNpu(const at::Tensor &self)
+TensorVector MoeCombinePrefillBackwardImplNpu(const at::Tensor &self)
 {
     return {at::Tensor(), at::Tensor(), at::Tensor(), at::Tensor()};
 }
@@ -108,15 +108,14 @@ public:
         int64_t rank,
         int64_t numRanks)
     {
-        at::AutoDispatchBelowADInplaceOrView guard;
         auto result = MoeCombinePrefillImpl(x, topkIdx, topkWeights, srcIdx, sendHead, \
             groupEp, rank, numRanks);
         return result;
     }
 
-    static tensor_list backward(
+    static TensorVector backward(
         AutogradContext *ctx, \
-        tensor_list grad_outputs)
+        TensorVector grad_outputs)
     {
         return {at::Tensor(), at::Tensor(), at::Tensor(), at::Tensor()};
     }

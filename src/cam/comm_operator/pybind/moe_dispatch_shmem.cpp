@@ -18,13 +18,13 @@
 
 using torch::autograd::AutogradContext;
 using torch::autograd::Function;
-using tensor_list = std::vector<at::Tensor>;
+using TensorVector = std::vector<at::Tensor>;
 using namespace at;
 using namespace std;
 
 constexpr uint32_t DYNAMIC_QUANT_MODE = 2;
 
-inline tensor_list cam_generate_dispatch_output_tensor(
+inline TensorVector GenerateDispatchOutputTensor(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
     int64_t epWorldSize, \
@@ -101,7 +101,7 @@ inline tensor_list cam_generate_dispatch_output_tensor(
         tpSendCountOut = at::empty({tpWorldSize}, expertIds.options());
     }
 
-    tensor_list ret = {
+    TensorVector ret = {
         expandXOut,
         dynamicScalesOut,
         expandIdxOut,
@@ -113,7 +113,7 @@ inline tensor_list cam_generate_dispatch_output_tensor(
     return ret;
 }
 
-tensor_list moe_dispatch_shmem_impl_npu(
+TensorVector MoeDispatchShmemImplNpu(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
     const c10::optional<at::Tensor> &scales, \
@@ -131,7 +131,7 @@ tensor_list moe_dispatch_shmem_impl_npu(
     int64_t expertTokenNumsType, \
     int64_t extInfo)
 {
-    tensor_list outList = cam_generate_dispatch_output_tensor(x, expertIds, epWorldSize, epRankId, moeExpertNum,
+    TensorVector outList = GenerateDispatchOutputTensor(x, expertIds, epWorldSize, epRankId, moeExpertNum,
                                                             tpWorldSize, sharedExpertRankNum, quantMode, false);
     at::Tensor expandXOut = outList[0];
     at::Tensor dynamicScalesOut = outList[1];
@@ -152,13 +152,13 @@ tensor_list moe_dispatch_shmem_impl_npu(
     return outList;
 }
 
-tensor_list moe_dispatch_shmem_backward_impl_npu(const at::Tensor &self)
+TensorVector MoeDispatchShmemBackwardImplNpu(const at::Tensor &self)
 {
     at::Tensor result = at::Tensor(self); // 创建输出内存
     return {result, result, result};
 }
 
-tensor_list moe_dispatch_shmem_impl_meta(
+TensorVector MoeDispatchShmemImplMeta(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
     const c10::optional<at::Tensor> &scales, \
@@ -185,11 +185,11 @@ tensor_list moe_dispatch_shmem_impl_meta(
     (void) expertTokenNumsType;
     (void) extInfo;
 
-    return cam_generate_dispatch_output_tensor(x, expertIds, epWorldSize, epRankId, moeExpertNum,
+    return GenerateDispatchOutputTensor(x, expertIds, epWorldSize, epRankId, moeExpertNum,
         tpWorldSize, sharedExpertRankNum, quantMode, true);
 }
 
-tensor_list moe_dispatch_shmem_impl(
+TensorVector MoeDispatchShmemImpl(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
     const c10::optional<at::Tensor> &scales, \
@@ -209,7 +209,7 @@ tensor_list moe_dispatch_shmem_impl(
 {
     static auto op = torch::Dispatcher::singleton()
                         .findSchemaOrThrow("umdk_cam_op_lib::moe_dispatch_shmem", "")
-                        .typed<decltype(moe_dispatch_shmem_impl)>();
+                        .typed<decltype(MoeDispatchShmemImpl)>();
     return op.call(x, expertIds, scales, xActiveMask, \
         epWorldSize, epRankId, moeExpertNum, tpWorldSize, tpRankId, expertShardType, \
         sharedExpertNum, sharedExpertRankNum, quantMode, globalBS, expertTokenNumsType, extInfo);
@@ -218,7 +218,7 @@ tensor_list moe_dispatch_shmem_impl(
 // 通过继承torch::autograd::Function类实现前反向绑定
 class ExtMoeDispatchShmem : public torch::autograd::Function<ExtMoeDispatchShmem> {
 public:
-    static tensor_list forward(
+    static TensorVector forward(
         AutogradContext *ctx, \
         const at::Tensor &x, \
         const at::Tensor &expertIds, \
@@ -237,23 +237,22 @@ public:
         int64_t expertTokenNumsType, \
         int64_t extInfo)
     {
-        at::AutoDispatchBelowADInplaceOrView guard;
-        auto result = moe_dispatch_shmem_impl(x, expertIds, scales, xActiveMask, \
+        auto result = MoeDispatchShmemImpl(x, expertIds, scales, xActiveMask, \
             epWorldSize, epRankId, moeExpertNum, tpWorldSize, tpRankId, expertShardType, \
             sharedExpertNum, sharedExpertRankNum, quantMode, globalBS, expertTokenNumsType, extInfo);
 
         return result;
     }
 
-    static tensor_list backward(
+    static TensorVector backward(
         AutogradContext *ctx, \
-        tensor_list grad_outputs)
+        TensorVector grad_outputs)
     {
         return {at::Tensor(), at::Tensor(), at::Tensor()};
     }
 };
 
-tensor_list moe_dispatch_shmem_impl_autograd(
+TensorVector MoeDispatchShmemImplAutograd(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
     const c10::optional<at::Tensor> &scales, \
@@ -280,17 +279,17 @@ tensor_list moe_dispatch_shmem_impl_autograd(
 // moe_dispatch_shmem
 TORCH_LIBRARY_IMPL(umdk_cam_op_lib, PrivateUse1, m)
 {
-    m.impl("moe_dispatch_shmem", &moe_dispatch_shmem_impl_npu);
-    m.impl("moe_dispatch_shmem_backward", &moe_dispatch_shmem_backward_impl_npu);
+    m.impl("moe_dispatch_shmem", &MoeDispatchShmemImplNpu);
+    m.impl("moe_dispatch_shmem_backward", &MoeDispatchShmemBackwardImplNpu);
 }
 
 TORCH_LIBRARY_IMPL(umdk_cam_op_lib, AutogradPrivateUse1, m)
 {
-    m.impl("moe_dispatch_shmem", &moe_dispatch_shmem_impl_autograd);
+    m.impl("moe_dispatch_shmem", &MoeDispatchShmemImplAutograd);
 }
 
 // 为Meta设备注册前反向实现
 TORCH_LIBRARY_IMPL(umdk_cam_op_lib, Meta, m)
 {
-    m.impl("moe_dispatch_shmem", &moe_dispatch_shmem_impl_meta);
+    m.impl("moe_dispatch_shmem", &MoeDispatchShmemImplMeta);
 }

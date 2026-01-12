@@ -19,7 +19,7 @@
 
 using torch::autograd::AutogradContext;
 using torch::autograd::Function;
-using tensor_list = std::vector<at::Tensor>;
+using TensorVector = std::vector<at::Tensor>;
 using namespace at;
 using namespace std;
 
@@ -191,7 +191,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> MoeDispatchPrefillImp
     return {expandxOut, expandIdxOut, recvCount, numRecvTokensPerExpert};
 }
 
-tensor_list MoeDispatchPrefillBackwardImplNpu(const at::Tensor &self)
+TensorVector MoeDispatchPrefillBackwardImplNpu(const at::Tensor &self)
 {
     at::Tensor result = at::Tensor(self); // 创建输出内存
     return {result, result, result, result};
@@ -220,7 +220,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> MoeDispatchPrefillImp
 // 通过继承torch::autograd::Function类实现前反向绑定
 class ExtMoeDispatchPrefill : public torch::autograd::Function<ExtMoeDispatchPrefill> {
 public:
-    static tensor_list forward(
+    static TensorVector forward(
         AutogradContext *ctx, \
         const at::Tensor& x,
         const at::Tensor& topkIdx,
@@ -233,16 +233,15 @@ public:
         int64_t rank,
         int64_t numRanks)
     {
-        at::AutoDispatchBelowADInplaceOrView guard;
         auto result = MoeDispatchPrefillImpl(x, topkIdx, topkWeights, numTokensPerRank, \
             isTokenInRank, numTokensPerExpert, numWorstTokens, groupEp, rank, numRanks);
 
         return {std::get<0>(result), std::get<1>(result), std::get<2>(result), std::get<3>(result)};
     }
 
-    static tensor_list backward(
+    static TensorVector backward(
         AutogradContext *ctx, \
-        tensor_list grad_outputs)
+        TensorVector grad_outputs)
     {
         return {at::Tensor(), at::Tensor(), at::Tensor(), at::Tensor()};
     }

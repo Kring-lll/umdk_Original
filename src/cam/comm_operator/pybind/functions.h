@@ -64,7 +64,7 @@ at::Tensor MoeCombinePrefillImplAutograd(
     int64_t rank,
     int64_t numRanks);
 
-std::vector<at::Tensor> moe_dispatch_shmem_impl_autograd( \
+std::vector<at::Tensor> MoeDispatchShmemImplAutograd( \
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
     const c10::optional<at::Tensor> &scales, \
@@ -82,7 +82,7 @@ std::vector<at::Tensor> moe_dispatch_shmem_impl_autograd( \
     int64_t expertTokenNumsType, \
     int64_t extInfo);
 
-at::Tensor moe_combine_shmem_impl_autograd( \
+at::Tensor MoeCombineShmemImplAutograd( \
     const at::Tensor &expandX, \
     const at::Tensor &expertIds, \
     const at::Tensor &expandIdx, \

@@ -18,13 +18,13 @@
 
 using torch::autograd::AutogradContext;
 using torch::autograd::Function;
-using tensor_list = std::vector<at::Tensor>;
+using TensorVector = std::vector<at::Tensor>;
 using namespace at;
 using namespace std;
 
 constexpr int KERNEL_PARAM_CNT = 3;
 
-inline at::Tensor cam_generate_combine_output_tensor(
+inline at::Tensor GenerateCombineOutputTensor(
     const at::Tensor &expandX, \
     const at::Tensor &expertIds, \
     bool isMeta)
@@ -44,7 +44,7 @@ inline at::Tensor cam_generate_combine_output_tensor(
     return expandXOut;
 }
 
-at::Tensor moe_combine_shmem_impl_npu(
+at::Tensor MoeCombineShmemImplNpu(
     const at::Tensor &expandX, \
     const at::Tensor &expertIds, \
     const at::Tensor &expandIdx, \
@@ -70,7 +70,7 @@ at::Tensor moe_combine_shmem_impl_npu(
     int64_t outDtype, \
     int64_t groupListType)
 {
-    at::Tensor expandXOut = cam_generate_combine_output_tensor(expandX, expertIds, false);
+    at::Tensor expandXOut = GenerateCombineOutputTensor(expandX, expertIds, false);
 
     EXEC_NPU_CMD(aclnnMoeCombineShmem,
         // input
@@ -84,13 +84,13 @@ at::Tensor moe_combine_shmem_impl_npu(
     return expandXOut;
 }
 
-tensor_list moe_combine_shmem_backward_impl_npu(const at::Tensor &self)
+TensorVector MoeCombineShmemBackwardImplNpu(const at::Tensor &self)
 {
     at::Tensor result = at::Tensor(self);
     return {result, result};
 }
 
-at::Tensor moe_combine_shmem_impl_meta(
+at::Tensor MoeCombineShmemImplMeta(
     const at::Tensor &expandX, \
     const at::Tensor &expertIds, \
     const at::Tensor &expandIdx, \
@@ -140,10 +140,10 @@ at::Tensor moe_combine_shmem_impl_meta(
     (void) outDtype;
     (void) groupListType;
 
-    return cam_generate_combine_output_tensor(expandX, expertIds, true);
+    return GenerateCombineOutputTensor(expandX, expertIds, true);
 }
 
-at::Tensor moe_combine_shmem_impl(
+at::Tensor MoeCombineShmemImpl(
     const at::Tensor &expandX, \
     const at::Tensor &expertIds, \
     const at::Tensor &expandIdx, \
@@ -171,7 +171,7 @@ at::Tensor moe_combine_shmem_impl(
 {
     static auto op = torch::Dispatcher::singleton()
                         .findSchemaOrThrow("umdk_cam_op_lib::moe_combine_shmem", "")
-                        .typed<decltype(moe_combine_shmem_impl)>();
+                        .typed<decltype(MoeCombineShmemImpl)>();
     return op.call(expandX, expertIds, expandIdx, epSendCounts, expertScales, tpSendCounts, xActiveMask, activationScale,
         weightScale, groupList, expandScales, epWorldSize, epRankId, moeExpertNum, tpWorldSize, tpRankId, expertShardType,
         sharedExpertNum, sharedExpertRankNum, globalBS, commQuantMode, extInfo, outDtype, groupListType);
@@ -207,22 +207,21 @@ public:
         int64_t outDtype, \
         int64_t groupListType)
     {
-        at::AutoDispatchBelowADInplaceOrView guard;
-        auto result = moe_combine_shmem_impl(expandX, expertIds, expandIdx, epSendCounts, expertScales, tpSendCounts, xActiveMask, activationScale,
+        auto result = MoeCombineShmemImpl(expandX, expertIds, expandIdx, epSendCounts, expertScales, tpSendCounts, xActiveMask, activationScale,
         weightScale, groupList, expandScales, epWorldSize, epRankId, moeExpertNum, tpWorldSize, tpRankId, expertShardType,
         sharedExpertNum, sharedExpertRankNum, globalBS, commQuantMode, extInfo, outDtype, groupListType);
         return result;
     }
 
-    static tensor_list backward(
+    static TensorVector backward(
         AutogradContext *ctx, \
-        tensor_list grad_outputs)
+        TensorVector grad_outputs)
     {
         return {at::Tensor(), at::Tensor(), at::Tensor()};
     }
 };
 
-at::Tensor moe_combine_shmem_impl_autograd(
+at::Tensor MoeCombineShmemImplAutograd(
     const at::Tensor &expandX, \
     const at::Tensor &expertIds, \
     const at::Tensor &expandIdx, \
@@ -254,20 +253,20 @@ at::Tensor moe_combine_shmem_impl_autograd(
     return result;
 }
 
-// moe_dispatch_normal
+// moe_combine_shmem
 TORCH_LIBRARY_IMPL(umdk_cam_op_lib, PrivateUse1, m)
 {
-    m.impl("moe_combine_shmem", &moe_combine_shmem_impl_npu);
-    m.impl("moe_combine_shmem_backward", &moe_combine_shmem_backward_impl_npu);
+    m.impl("moe_combine_shmem", &MoeCombineShmemImplNpu);
+    m.impl("moe_combine_shmem_backward", &MoeCombineShmemBackwardImplNpu);
 }
 
 TORCH_LIBRARY_IMPL(umdk_cam_op_lib, AutogradPrivateUse1, m)
 {
-    m.impl("moe_combine_shmem", &moe_combine_shmem_impl_autograd);
+    m.impl("moe_combine_shmem", &MoeCombineShmemImplAutograd);
 }
 
 // 为Meta设备注册前反向实现
 TORCH_LIBRARY_IMPL(umdk_cam_op_lib, Meta, m)
 {
-    m.impl("moe_combine_shmem", &moe_combine_shmem_impl_meta);
+    m.impl("moe_combine_shmem", &MoeCombineShmemImplMeta);
 }

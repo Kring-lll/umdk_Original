@@ -16,8 +16,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     m.def("get_dispatch_layout", &GetDispatchLayoutImplAutograd, "get_dispatch_layout");
     m.def("moe_dispatch_prefill", &MoeDispatchPrefillImplAutograd, "moe_dispatch_prefill");
     m.def("moe_combine_prefill", &MoeCombinePrefillImplAutograd, "moe_combine_prefill");
-    m.def("moe_dispatch_shmem", &moe_dispatch_shmem_impl_autograd, "moe_dispatch_shmem");
-    m.def("moe_combine_shmem", &moe_combine_shmem_impl_autograd, "moe_combine_shmem");
+    m.def("moe_dispatch_shmem", &MoeDispatchShmemImplAutograd, "moe_dispatch_shmem");
+    m.def("moe_combine_shmem", &MoeCombineShmemImplAutograd, "moe_combine_shmem");
 }
 
 TORCH_LIBRARY(umdk_cam_op_lib, m) {
