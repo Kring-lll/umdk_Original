@@ -198,6 +198,11 @@ static int umq_tp_ub_plus_cfg_get(uint64_t umqh_tp, umq_cfg_get_t *cfg)
     return umq_ub_cfg_get_impl(umqh_tp, cfg);
 }
 
+static int umq_tp_ub_plus_wait_ready(uint64_t umqh_tp, int timeout)
+{
+    return umq_ub_wait_ready_impl(umqh_tp, timeout);
+}
+
 static umq_ops_t g_umq_ub_plus_ops = {
     .mode = UMQ_TRANS_MODE_UB_PLUS,
     // control plane api
@@ -220,6 +225,7 @@ static umq_ops_t g_umq_ub_plus_ops = {
     .umq_tp_mempool_state_refresh = umq_tp_ub_plus_mempool_state_refresh,
     .umq_tp_dev_info_get = umq_tp_ub_plus_dev_info_get,
     .umq_tp_cfg_get = umq_tp_ub_plus_cfg_get,
+    .umq_tp_wait_ready = umq_tp_ub_plus_wait_ready,
 
     // datapath plane api
     .umq_tp_buf_alloc = umq_tp_ub_plus_buf_alloc,
