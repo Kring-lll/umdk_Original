@@ -11,21 +11,13 @@
 #include <vector>
 #include <utility>
 
+#include "hfa_log.h"
 #include "hbm_fast_alloc.h"
 #include "acl_virtual_memory.h"
 #include "flex_alloc.h"
 
+
 using namespace hfa;
-
-#define ENABLE_LOGS 0
-
-#if ENABLE_LOGS
-    #define DEBUG_PRINT(...) do { fprintf(stdout, __VA_ARGS__); fflush(stdout); } while(0);
-    #define ERROR_PRINT(...) do { fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0);
-#else
-    #define DEBUG_PRINT(...) do {} while (0);
-    #define ERROR_PRINT(...) do {} while (0);
-#endif
 
 // general measures
 static const size_t GIGA = 1024UL * 1024UL * 1024UL;
@@ -47,27 +39,27 @@ bool HbmFastAlloc::init(int32_t device_id,
     mp_avm = new (std::nothrow) AclVirtualMemory(initial_free_pages);
     mp_fa = new (std::nothrow) FlexAlloc;
     if (mp_avm == nullptr) {
-        fprintf(stderr, "Error. failed to init HbmFastAlloc. ph_mem_size=%lu\n", ph_mem_size);
+        ERROR_PRINT("failed to init HbmFastAlloc. ph_mem_size=%lu\n", ph_mem_size);
         return false;
     }
     if (mp_fa == nullptr) {
-        fprintf(stderr, "Error. failed to init HbmFastAllocph_mem_size=%lu\n", ph_mem_size);
+        ERROR_PRINT("failed to init HbmFastAllocph_mem_size=%lu\n", ph_mem_size);
         return false;
     }
-    printf("allocating memory - npu: %d, virtual: %zuG, physical: %zuG, page size: %zuMB\n",
+    INFO_PRINT("allocating memory - npu: %d, virtual: %zuG, physical: %zuG, page size: %zuMB\n",
         device_id, vr_mem_size/GIGA, ph_mem_size/GIGA, ph_page_size/MEGA);
     auto result = mp_avm->alloc(device_id, vr_mem_size, ph_mem_size, ph_page_size);
     if (result.first != VmRet::SUCCESS) {
-        printf("Error. failed to initialize AclVirtualMemory. error=%s\n", mp_avm->error_info(result.first).c_str());
+        ERROR_PRINT("failed to initialize AclVirtualMemory. error=%s\n", mp_avm->error_info(result.first).c_str());
         return false;
     }
-    printf("\nAclVirtualMemory memory allocation has completed successfully\n");
+    INFO_PRINT("AclVirtualMemory memory allocation has completed successfully\n");
 
     if (!mp_fa->init(ph_mem_size)) {
-        printf("Error. failed to initialize flex allocator. region size:%lu\n", ph_mem_size);
+        ERROR_PRINT("failed to initialize flex allocator. region size:%lu\n", ph_mem_size);
         return false;
     }
-    printf("FlexAlloc init has completed successfully. region size:%lu\n", ph_mem_size);
+    INFO_PRINT("FlexAlloc init has completed successfully. region size:%lu\n", ph_mem_size);
 
     return true;
 }
@@ -116,23 +108,23 @@ bool HbmFastAlloc::try_defrag()
     DEBUG_PRINT("AVM is about to defrag with %lu free chunks\n", acl_free_chunks.size());
     VmRet ret = mp_avm->defrag(&acl_free_chunks);
     if (ret != VmRet::SUCCESS) {
-        ERROR_PRINT("Error: defrag failed\n");
+        ERROR_PRINT("defrag failed\n");
         return false;
     }
     if (acl_free_chunks.size() == 0) {
-        ERROR_PRINT("Error: defrag claims it succeeded but size of returned free-chunks-list is zero\n");
+        ERROR_PRINT("defrag claims it succeeded but size of returned free-chunks-list is zero\n");
         return false;
     }
 
     m_last_defrag_elem_size = acl_free_chunks.at(acl_free_chunks.size() - 1)->m_size;
 
-    // after realloc: add new free ranges to flex
+    // after defrag: add new free ranges to flex
     frs.clear();
     for (size_t i = 0; i < acl_free_chunks.size(); ++i) {
         FlexAlloc::FreeRange fr;
         AclChunk *p_chunk = acl_free_chunks.at(i);
         if (p_chunk == nullptr) {
-            ERROR_PRINT("Error: after defrag fail to get chunk at index %lu out of %lu\n",
+            ERROR_PRINT("after defrag fail to get chunk at index %lu out of %lu\n",
                 i, acl_free_chunks.size());
             return false;
         }
@@ -141,7 +133,7 @@ bool HbmFastAlloc::try_defrag()
         frs.push_back(fr);
     }
     if (!mp_fa->add_free_ranges(frs)) {
-        ERROR_PRINT("Error: failed to add %lu free ranges to flex after defrag\n", frs.size());
+        ERROR_PRINT("failed to add %lu free ranges to flex after defrag\n", frs.size());
         return false;
     }
     return true;
@@ -153,7 +145,7 @@ bool HbmFastAlloc::handle_defrag(size_t size, size_t &alloc_offset, size_t &allo
     m_defrag_ctr++;
     DEBUG_PRINT("failed to alloc size %lu due to fragmentation. will try to defrag\n", size);
     if (!try_defrag()) {
-        ERROR_PRINT("Error: defrag has failed\n");
+        ERROR_PRINT("defrag has failed\n");
         m_defrag_failed++;
         return false;
     }
@@ -163,7 +155,7 @@ bool HbmFastAlloc::handle_defrag(size_t size, size_t &alloc_offset, size_t &allo
     FlexAlloc::FlexRetCode ret =
         mp_fa->alloc(size, alloc_offset, alloc_size);
     if (ret != FlexAlloc::FLEX_RC_SUCCESS) {
-        ERROR_PRINT("Error: failed to alloc size %lu after defrag\n", size);
+        ERROR_PRINT("failed to alloc size %lu after defrag\n", size);
         return false;
     }
     DEBUG_PRINT("succeed to alloc size %lu after defrag\n", size);
@@ -202,19 +194,19 @@ void *HbmFastAlloc::alloc(size_t size)
 bool HbmFastAlloc::free(void *ptr)
 {
     if (ptr == nullptr) {
-        ERROR_PRINT("Error: invalid hbm address to free\n");
+        ERROR_PRINT("invalid hbm address to free\n");
         return false;
     }
 
     std::lock_guard<std::mutex> lock(m_alloc_map_lock);
     AllocMapIter iter = m_alloc_map.find(static_cast<uint8_t*>(ptr));
     if (iter == m_alloc_map.end()) {
-        ERROR_PRINT("Error: fail to find info for HBM address %p to free\n", ptr);
+        ERROR_PRINT("fail to find info for HBM address %p to free\n", ptr);
         return false;
     }
     m_alloc_map.erase(iter);
     if (!mp_fa->free(iter->second.first, iter->second.second)) {
-        ERROR_PRINT("Error: Flex failed to free HBM address %p (offset:%lu size:%lu)\n",
+        ERROR_PRINT("Flex failed to free HBM address %p (offset:%lu size:%lu)\n",
             ptr, iter->second.first, iter->second.second);
         return false;
     }
@@ -232,7 +224,7 @@ void HbmFastAlloc::free_all()
         size_t &offset = it.second.first;
         size_t &size = it.second.second;
         if (!mp_fa->free(offset, size)) {
-            ERROR_PRINT("Error: Flex failed to free HBM address %p (offset:%lu size:%lu)\n", it.first, offset, size);
+            ERROR_PRINT("Flex failed to free HBM address %p (offset:%lu size:%lu)\n", it.first, offset, size);
         }
     }
     m_alloc_map.clear();
