@@ -1,6 +1,5 @@
-#########################
-# HFA library
-#########################
+# SPDX-License-Identifier: MIT
+# Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 
 cmake_minimum_required(VERSION 3.18.0)
 

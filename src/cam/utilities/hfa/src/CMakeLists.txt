@@ -1,6 +1,5 @@
-########################################
-# HFA library - HBM fast access utility
-########################################
+# SPDX-License-Identifier: MIT
+# Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 add_compile_options(-fPIC)

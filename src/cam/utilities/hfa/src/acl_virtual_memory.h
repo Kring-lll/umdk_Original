@@ -1,7 +1,6 @@
 /**
- * @file acl_virtual_memory.h
- * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
- *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
  * This object enables increasing allocated virtual memory on HBM up to 128GB
  * Author: Adi Amir
  */
