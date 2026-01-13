@@ -18,13 +18,12 @@
 
 using torch::autograd::AutogradContext;
 using torch::autograd::Function;
-using tensor_list = std::vector<at::Tensor>;
+using TensorVector = std::vector<at::Tensor>;
 using namespace at;
 using namespace std;
 
-constexpr int KERNEL_PARAM_CNT = 3;
 
-std::vector<at::Tensor> fused_deep_moe_impl_npu(
+std::vector<at::Tensor> FusedDeepMoeImplNpu(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
     const at::TensorList &gmm1PermutedWeight, \
@@ -63,29 +62,29 @@ std::vector<at::Tensor> fused_deep_moe_impl_npu(
     at::Tensor expertTokenNums = at::empty({localExpertNum}, opts);
     
     // 必须要求对齐fused_deep_moe.cpp 先input 跟着 attr， 然后output
-    vector<char> group_ep_chrs(groupEp.begin(), groupEp.end());
-    group_ep_chrs.push_back('\0');
-    char *group_ep_ptr = &group_ep_chrs[0];
-    
+    vector<char> groupEpChrs(groupEp.begin(), groupEp.end());
+    groupEpChrs.push_back('\0');
+    char *groupEpPtr = &groupEpChrs[0];
+
     // 必须要求对齐fused_deep_moe.cpp 先input 跟着 attr, 然后output
     EXEC_NPU_CMD(aclnnFusedDeepMoe,
         // input
         x, expertIds, gmm1PermutedWeight, gmm1PermutedWeightScale, gmm2Weight, gmm2WeightScale, \
         expertScales, expertSmoothScales, xActiveMask, \
         // attr
-        group_ep_ptr, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs, \
+        groupEpPtr, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs, \
         // output
         output, expertTokenNums);
     return {output, expertTokenNums};
 }
 
-std::vector<at::Tensor> fused_deep_moe_backward_impl_npu(const at::Tensor &self)
+TensorVector FusedDeepMoeBackwardImplNpu(const at::Tensor &self)
 {
     at::Tensor result = at::Tensor(self); // 创建输出内存
     return {result, result};
 }
 
-std::vector<at::Tensor> fused_deep_moe_impl_meta(
+TensorVector FusedDeepMoeImplMeta(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
     const at::TensorList &gmm1PermutedWeight, \
@@ -122,7 +121,7 @@ std::vector<at::Tensor> fused_deep_moe_impl_meta(
     return {output, expertTokenNums};
 }
 
-std::vector<at::Tensor> fused_deep_moe_impl(
+TensorVector FusedDeepMoeImpl(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
     const at::TensorList &gmm1PermutedWeight, \
@@ -143,7 +142,7 @@ std::vector<at::Tensor> fused_deep_moe_impl(
 {
     static auto op = torch::Dispatcher::singleton()
                         .findSchemaOrThrow("umdk_cam_op_lib::fused_deep_moe", "")
-                        .typed<decltype(fused_deep_moe_impl)>();
+                        .typed<decltype(FusedDeepMoeImpl)>();
     return op.call(x, expertIds, gmm1PermutedWeight, gmm1PermutedWeightScale, gmm2Weight, gmm2WeightScale, \
         expertScales, expertSmoothScales, xActiveMask, \
         groupEp, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs);
@@ -152,7 +151,7 @@ std::vector<at::Tensor> fused_deep_moe_impl(
 // 通过继承torch::autograd::Function类实现前反向绑定
 class ExtFusedDeepMoe : public torch::autograd::Function<ExtFusedDeepMoe> {
 public:
-    static std::vector<at::Tensor> forward(AutogradContext *ctx, \
+    static TensorVector forward(AutogradContext *ctx, \
                             const at::Tensor &x, \
                             const at::Tensor &expertIds, \
                             const at::TensorList &gmm1PermutedWeight, \
@@ -171,14 +170,13 @@ public:
                             int64_t quantMode, \
                             int64_t globalBs)
     {
-        at::AutoDispatchBelowADInplaceOrView guard;
-        auto result = fused_deep_moe_impl(x, expertIds, gmm1PermutedWeight, gmm1PermutedWeightScale, gmm2Weight, \
+        auto result = FusedDeepMoeImpl(x, expertIds, gmm1PermutedWeight, gmm1PermutedWeightScale, gmm2Weight, \
             gmm2WeightScale, expertScales, expertSmoothScales, xActiveMask, \
             groupEp, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs);
         return result;
     }
 
-    static std::vector<at::Tensor> backward(AutogradContext *ctx, std::vector<at::Tensor> grad_outputs)
+    static TensorVector backward(AutogradContext *ctx, TensorVector grad_outputs)
     {
         return {at::Tensor(),
                 at::Tensor(),
@@ -193,7 +191,7 @@ public:
     }
 };
 
-std::vector<at::Tensor> fused_deep_moe_impl_autograd(
+TensorVector FusedDeepMoeImplAutograd(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
     const at::TensorList &gmm1PermutedWeight, \
@@ -221,17 +219,17 @@ std::vector<at::Tensor> fused_deep_moe_impl_autograd(
 // fused_deep_moe
 TORCH_LIBRARY_IMPL(umdk_cam_op_lib, PrivateUse1, m)
 {
-    m.impl("fused_deep_moe", &fused_deep_moe_impl_npu);
-    m.impl("fused_deep_moe_backward", &fused_deep_moe_backward_impl_npu);
+    m.impl("fused_deep_moe", &FusedDeepMoeImplNpu);
+    m.impl("fused_deep_moe_backward", &FusedDeepMoeBackwardImplNpu);
 }
 
 TORCH_LIBRARY_IMPL(umdk_cam_op_lib, AutogradPrivateUse1, m)
 {
-    m.impl("fused_deep_moe", &fused_deep_moe_impl_autograd);
+    m.impl("fused_deep_moe", &FusedDeepMoeImplAutograd);
 }
 
 // 为Meta设备注册前反向实现
 TORCH_LIBRARY_IMPL(umdk_cam_op_lib, Meta, m)
 {
-    m.impl("fused_deep_moe", &fused_deep_moe_impl_meta);
+    m.impl("fused_deep_moe", &FusedDeepMoeImplMeta);
 }
