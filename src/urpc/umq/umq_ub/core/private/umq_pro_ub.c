@@ -749,6 +749,53 @@ static int umq_ub_flush_sqe(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_cou
     return cnt;
 }
 
+int umq_ub_poll_fc_tx(ub_queue_t *queue)
+{
+    umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
+    urma_cr_t cr[UMQ_UB_FLOW_CONTORL_JETTY_DEPTH];
+    uint64_t start_timestmap = umq_perf_get_start_timestamp_with_feature(queue->dev_ctx->feature);
+    int tx_cr_cnt = urma_poll_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL], UMQ_UB_FLOW_CONTORL_JETTY_DEPTH, cr);
+    umq_perf_record_write_poll(UMQ_PERF_RECORD_TRANSPORT_POLL_TX, start_timestmap, queue->dev_ctx->feature, tx_cr_cnt);
+    if (tx_cr_cnt < 0) {
+        umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
+        UMQ_LIMIT_VLOG_ERR("UB TX reports tx_cr_cnt[%d]\n", tx_cr_cnt);
+        return UMQ_FAIL;
+    }
+
+    for (int i = 0; i < tx_cr_cnt; i++) {
+        if (cr[i].status != URMA_CR_SUCCESS) {
+            UMQ_LIMIT_VLOG_ERR("UB TX reports cr[%d] status[%d] jetty_id[%u]\n", i, cr[i].status, cr[i].local_id);
+            if (cr[i].status == URMA_CR_WR_FLUSH_ERR_DONE || cr[i].status == URMA_CR_WR_SUSPEND_DONE) {
+                continue;
+            }
+
+            if (cr[i].user_ctx == 0) {
+                queue->flow_control.remote_get = false;
+                UMQ_LIMIT_VLOG_ERR("get remote window post read failed\n");
+                continue;
+            }
+        }
+        if (cr[i].user_ctx == 0) {
+            // window read ok
+            uint16_t *remote_win =
+                (uint16_t *)(uintptr_t)(umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL) + sizeof(uint16_t));
+            if (*remote_win == 0) {
+                queue->flow_control.remote_get = false;
+                umq_ub_window_read(&queue->flow_control, queue);
+            } else {
+                UMQ_VLOG_DEBUG("umq ub flow control update initial window %d\n", *remote_win);
+                umq_ub_window_inc(&queue->flow_control, *remote_win);
+                queue->state = QUEUE_STATE_READY;
+            }
+            continue;
+        } else if (cr[i].user_ctx <= UINT16_MAX) {
+            continue;
+        }
+    }
+    umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
+    return UMQ_SUCCESS;
+}
+
 int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
 {
     if (buf_count == 0) {
