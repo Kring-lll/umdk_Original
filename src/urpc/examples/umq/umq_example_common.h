@@ -68,6 +68,20 @@ enum UMQ_TRANS_MODE {
     UMQ_TM_MAX,
 };
 
+enum UMQ_TP_TYPE {
+    UMQ_TP_TYPE_RTP = 0,
+    UMQ_TP_TYPE_CTP,
+    UMQ_TP_TYPE_UTP,
+    UMQ_TP_TYPE_MAX,
+};
+
+enum UMQ_TRANSPORT_MODE {
+    UMQ_TRANSPORT_MODE_RM = 0,
+    UMQ_TRANSPORT_MODE_RC,
+    UMQ_TRANSPORT_MODE_UM,
+    UMQ_TRANSPORT_MODE_MAX,
+};
+
 struct urpc_example_config {
     bool greeter_test_mode;                         /* true: enable greeter test mode */
     char *dev_name;                                 /* device name */
@@ -85,6 +99,8 @@ struct urpc_example_config {
     uint16_t cna;
     enum UMQ_TRANS_MODE sub_trans_mode;
     uint32_t deid;
+    enum UMQ_TRANSPORT_MODE transport_mode;
+    enum UMQ_TP_TYPE tp_type;
 };
 
 struct req_cb_arg {
