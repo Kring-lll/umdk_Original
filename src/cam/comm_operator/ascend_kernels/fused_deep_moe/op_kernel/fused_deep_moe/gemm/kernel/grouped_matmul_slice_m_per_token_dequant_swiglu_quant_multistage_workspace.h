@@ -1175,9 +1175,6 @@ public:
             }
             uint32_t winOffset = index;
             if (!isShareExpert && moeExpertNumPerRank > 1) {
-                // srcRank: index % epRankSize
-                // localExpertId: index / epRankSize
-                // Addr: (srcRank * moeExpertNumPerRank + localExpertId) * expertPerSizeOnWin
                 winOffset = (index % epRankSize) * moeExpertNumPerRank + index / epRankSize;
             }
             GM_ADDR wAddr = (__gm__ uint8_t *)(GET_WIND_ADDR_BY_RANK_ID(epRankId)) + winOffset * expertPerSizeOnWin;
