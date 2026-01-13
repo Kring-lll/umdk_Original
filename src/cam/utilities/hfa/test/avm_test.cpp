@@ -1,3 +1,12 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
+ * Description: HFA test
+ * Author: Adi Amir
+ * Note:
+ * History:
+ */
+
 #include <unistd.h>
 #include <fcntl.h>
 

@@ -1,7 +1,6 @@
 /**
- * @file acl_free_chunks.cpp
- * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
- *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
  * This object manages a list of free chunks to be used both by the flex manager and the AclVirtualMemory module
  * Author: Adi Amir
  */
