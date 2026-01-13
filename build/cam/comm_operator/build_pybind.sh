@@ -26,9 +26,10 @@ build_pybind() {
     if [ -d "$DIST_GEN_PATH" ]; then
         echo "copy $DIST_GEN_PATH to $DIST_OUT_PATH/"
         cp -rf $DIST_GEN_PATH $DIST_OUT_PATH
+        echo "Build packet successful!"
     else
         echo $DIST_GEN_PATH does not exist
-        echo "build_pybind fail"
+        echo "Build whl packet fail."
         return 1
     fi
 }
