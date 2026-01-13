@@ -2,6 +2,8 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
  * Description: HFA log utils
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
+ * Description: HFA logs
  * Author: David Yaron
  * Note:
  * History:
