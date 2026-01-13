@@ -16,7 +16,7 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include "torch_npu/csrc/core/npu/NPUStream.h"
 
-std::vector<at::Tensor> fused_deep_moe_impl_autograd(
+std::vector<at::Tensor> FusedDeepMoeImplAutograd(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
     const at::TensorList &gmm1PermutedWeight, \
