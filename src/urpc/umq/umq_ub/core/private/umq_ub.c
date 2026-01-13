@@ -7,6 +7,7 @@
  * History: 2025-12-22
  */
 
+#include <sys/epoll.h>
 #include "perf.h"
 #include "umq_qbuf_pool.h"
 #include "umq_ub_flow_control.h"
@@ -2180,4 +2181,114 @@ void umq_flush_tx(ub_queue_t *queue, uint32_t max_retry_times)
         }
         retry_times++;
     }
+}
+
+int umq_ub_create_v_jfr_jfce(ub_queue_t *queue)
+{
+    // create v jfr jfce fd
+    int epoll_fd = epoll_create(UB_QUEUE_JETTY_NUM);
+    if (epoll_fd < 0) {
+        UMQ_VLOG_ERR("create epoll fd failed, errno %d\n", errno);
+        return errno;
+    }
+
+    // insert io jfr jfce
+    struct epoll_event ev = {0};
+    ev.events = EPOLLIN;
+    ev.data.fd = queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfce->fd;
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfce->fd, &ev) != 0) {
+        UMQ_VLOG_ERR("fail to add fd:%d to epoll fd:%d, errno %d\n",
+            queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfce->fd, epoll_fd, errno);
+        goto CLOSE_EPOLL_FD;
+    }
+
+    // insert fc jfr jfce
+    ev.data.fd = queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfce->fd;
+    if (queue->flow_control.enabled && (queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) != 0) {
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfce->fd, &ev) != 0) {
+            UMQ_VLOG_ERR("fail to add fd:%d to epoll fd:%d, errno %d\n",
+                queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfce->fd, epoll_fd, errno);
+            goto REMOVE_IO_JFR_JFCE;
+        }
+    }
+    
+    queue->v_jfr_jfce = (umq_v_jfce_t *)malloc(sizeof(umq_v_jfce_t));
+    if (queue->v_jfr_jfce == NULL) {
+        UMQ_VLOG_ERR("malloc v_jfr_jfce failed\n");
+        goto REMOVE_FC_JFR_JFCE;
+    }
+    queue->v_jfr_jfce->fd = epoll_fd;
+    return UMQ_SUCCESS;
+
+REMOVE_FC_JFR_JFCE:
+    if (queue->flow_control.enabled && (queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) != 0) {
+        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfce->fd, NULL);
+    }
+
+REMOVE_IO_JFR_JFCE:
+    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfce->fd, NULL);
+
+CLOSE_EPOLL_FD:
+    close(epoll_fd);
+
+return UMQ_FAIL;
+}
+
+int umq_ub_wait_jfr_jfc(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
+{
+    struct epoll_event events[UB_QUEUE_JETTY_NUM] = {0};
+    int num = epoll_wait(queue->v_jfr_jfce->fd, events, UB_QUEUE_JETTY_NUM, time_out);
+    if (num < 0 || num > UB_QUEUE_JETTY_NUM) {
+        UMQ_LIMIT_VLOG_ERR("epoll wait err, ret:%d.\n", num);
+        return -1;
+    } else if (num == 0) {
+        return 0;
+    }
+
+    urma_jfce_t *fc_jfr_jfce =
+        queue->flow_control.enabled ? queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfce : NULL;
+
+    int actual_num = 0;
+    for (int i = 0; i < num; i++) {
+        urma_jfce_t *jfr_jfce = events[i].data.fd == queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfce->fd ?
+            queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfce : fc_jfr_jfce;
+        if (jfr_jfce == NULL) {
+            UMQ_LIMIT_VLOG_ERR("invalid jfce, skip\n");
+            continue;
+        }
+
+        urma_jfc_t *temp_jfc = NULL;
+        int p_num = urma_wait_jfc(jfr_jfce, 1, 0, &temp_jfc);
+        if (p_num <= 0) {
+            UMQ_LIMIT_VLOG_ERR("cannot wait jfc, skip\n");
+            continue;
+        }
+        uint32_t nevents = 1;
+        urma_ack_jfc(&temp_jfc, &nevents, 1);
+        jfc[actual_num++] = temp_jfc;
+    }
+
+    return actual_num;
+}
+
+int umq_ub_wait_jfs_jfc(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
+{
+    uint32_t jfc_cnt = 1;
+    if (queue->flow_control.enabled) {
+        jfc_cnt++;
+    }
+
+    urma_jfc_t *temp_jfc[jfc_cnt];
+    int p_num = urma_wait_jfc(queue->jfs_jfce, jfc_cnt, time_out, temp_jfc);
+    if (p_num <= 0) {
+        UMQ_LIMIT_VLOG_ERR("cannot wait jfc, skip\n");
+        return p_num;
+    }
+    uint32_t nevents[p_num];
+    for (int i = 0; i < p_num; i++) {
+        nevents[i] = 1;
+        jfc[i] = temp_jfc[i];
+    }
+    urma_ack_jfc(temp_jfc, nevents, p_num);
+    return p_num;
 }
