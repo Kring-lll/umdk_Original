@@ -113,7 +113,11 @@ typedef struct ub_flow_control_window_ops {
     uint16_t (*local_rx_posted_load)(struct ub_flow_control *fc);
     // exchange current rx_posted to 0 and return rx_posted
     uint16_t (*local_rx_posted_exchange)(struct ub_flow_control *fc);
-
+    // exchange current rx_posted to 0 and return rx_posted + retrun_credit
+    uint16_t (*local_rx_posted_return)(struct ub_flow_control *fc, uint16_t return_win);
+    uint64_t (*local_rx_allocted_inc)(struct ub_flow_control *fc, uint16_t new_win);
+    uint16_t (*local_rx_allocted_dec)(struct ub_flow_control *fc, uint16_t required_win);
+    uint64_t (*local_rx_allocted_load)(struct ub_flow_control *fc);
     void (*stats_query)(struct ub_flow_control *fc, umq_flow_control_stats_t *out);
 } ub_flow_control_window_ops_t;
 
@@ -173,6 +177,7 @@ typedef struct umq_ub_ctx {
     umq_trans_info_t trans_info;
     uint64_t remote_notify_addr;
     uint64_t *umq_ctx_jetty_table;
+    volatile uint64_t *rx_consumed_jetty_table;
 } umq_ub_ctx_t;
 
 typedef struct rx_buf_ctx {
