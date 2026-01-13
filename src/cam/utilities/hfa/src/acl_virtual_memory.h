@@ -24,9 +24,9 @@ const size_t MAX_VIRTUAL_MEM_SIZE = 128UL * 1024 * 1024 * 1024;  // 128GB
 const size_t PH_PAGE_ALIGN_SIZE = 2 * 1024 * 1024;
 
 // defaults
-// initial number of reserved elements in 'm_free_pages'
+// initial number free pages
 const size_t DEF_INITIAL_FREE_PAGES = 1024;
-// initial number of reserved elements in 'mp_free_chunks'
+// initial number of free chunks
 const size_t DEF_INITIAL_FREE_CHUNKS = 1024;
 
 const int ACL_BASE_ERROR = 0x200;
@@ -40,7 +40,7 @@ enum class VmRet {
     E_OUT_OF_MEMORY                                      = 0x100,
     // trying to call api(s) before instance initialized
     E_INSTANCE_NOT_INITIALIZED                           = 0x101,
-    // realloc() failed to obtain enough free memory
+    // defrag() failed to obtain enough free memory
     E_INSUFFICIENT_MEM                                   = 0x102,
     E_INVALID_PARAMETER                                  = 0x103,
     // invalid device id parameter
@@ -154,10 +154,10 @@ struct AclChunkProps {
     size_t num_pages_in_middle;
 
     void print() {
-        printf("\nchunk props: chunk_offset_start=%lu, first_page_no=%lu, "
+        printf("chunk props: chunk_offset_start=%lu, first_page_no=%lu, "
                "is_first_page_aligned=%d, chunk_offset_end=%lu, "
                "last_page_no=%lu, is_last_page_aligned=%d, "
-               "num_pages_in_middle=%lu",
+               "num_pages_in_middle=%lu\n",
                chunk_offset_start, first_page_no, is_first_page_aligned,
                chunk_offset_end, last_page_no,
                is_last_page_aligned, num_pages_in_middle);

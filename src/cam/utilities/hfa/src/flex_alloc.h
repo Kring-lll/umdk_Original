@@ -68,6 +68,8 @@ private:
     size_t m_total_free_bytes { 0 }; ///< Total bytes of allocated memory
     size_t m_total_alloc_objs { 0 }; ///< Total number of allocated objects
 
+    void eraseFromSizeIndex(typename StartMap::iterator it);
+
 public:
     FlexAlloc() {}
 
@@ -113,18 +115,6 @@ public:
      * @brief Print the current state of the allocator without locking
      */
     void print_ranges();
-
-private:
-    void eraseFromSizeIndex(typename StartMap::iterator it) {
-        length_t sz = it->second.size;
-        auto range = m_free_ranges_by_size.equal_range(sz);
-        for (auto sIt = range.first; sIt != range.second; ++sIt) {
-            if (sIt->second == it) {
-                m_free_ranges_by_size.erase(sIt);
-                break;
-            }
-        }
-    }
 };
 
 } // namespace hfa

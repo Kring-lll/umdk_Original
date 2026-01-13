@@ -6,22 +6,13 @@
  * History:
  */
 
-#include "flex_alloc.h"
 #include <cstdio>
 #include <algorithm>
 #include <utility>
+#include "hfa_log.h"
+#include "flex_alloc.h"
 
 using namespace hfa;
-
-#define ENABLE_LOGS 0
-
-#if ENABLE_LOGS
-    #define DEBUG_PRINT(...) do { fprintf(stdout, __VA_ARGS__); fflush(stdout); } while(0);
-    #define ERROR_PRINT(...) do { fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0);
-#else
-    #define DEBUG_PRINT(...) do {} while (0);
-    #define ERROR_PRINT(...) do {} while (0);
-#endif
 
 /**
  * @brief Round up a number to the nearest multiple of 2^n
@@ -39,7 +30,7 @@ T round_up_bits(T num, uint32_t nbits) {
 bool FlexAlloc::init(length_t size)
 {
     if (size < MIN_OBJ_SIZE) {
-        ERROR_PRINT("Error: init failed size %lu too small\n", size);
+        ERROR_PRINT("init failed size %lu too small\n", size);
         return false;
     }
     auto it = m_free_ranges_by_offset.emplace(0UL, Range{size}).first;
@@ -71,13 +62,12 @@ FlexAlloc::FlexRetCode FlexAlloc::alloc(length_t req_size, size_t &offset, size_
     auto sizeIt = m_free_ranges_by_size.lower_bound(alloc_size);
     if (sizeIt == m_free_ranges_by_size.end()) {
         if (get_total_free_mem() >= alloc_size) {
-            ERROR_PRINT("Error: flex_region:%p. "
-                "fail to alloc obj due to fragmentation. req_size:%lu alloc_size:%lu total_free_mem:%lu m_mem_size:%lu "
-                "m_total_alloc_bytes:%lu total_alloc_objs:%lu\n",
+            ERROR_PRINT("flex_region:%p. fail to alloc obj due to fragmentation. req_size:%lu alloc_size:%lu "
+                "total_free_mem:%lu m_mem_size:%lu m_total_alloc_bytes:%lu total_alloc_objs:%lu\n",
                 this, req_size, alloc_size, get_total_free_mem(), m_mem_size, m_total_alloc_bytes, m_total_alloc_objs);
             return FLEX_RC_ERR_FRAGMENTATION;
         } else {
-            ERROR_PRINT("Error: flex_region:%p. fail to alloc obj due to lack of memory. of req_size:%lu "
+            ERROR_PRINT("flex_region:%p. fail to alloc obj due to lack of memory. of req_size:%lu "
                 "alloc_size:%lu total_free_mem:%lu m_mem_size:%lu m_total_alloc_bytes:%lu total_alloc_objs:%lu\n",
                 this, req_size, alloc_size, get_total_free_mem(), m_mem_size, m_total_alloc_bytes, m_total_alloc_objs);
             return FLEX_RC_ERR_NO_MEM;
@@ -113,8 +103,7 @@ FlexAlloc::FlexRetCode FlexAlloc::alloc(length_t req_size, size_t &offset, size_
 bool FlexAlloc::free(offset_t offset, length_t size)
 {
     if (size == 0) {
-        ERROR_PRINT("Error: flex_region:%p. failed to free range "
-            "{offset:%lu, size:%lu} mem_size:%lu\n", this, offset, size);
+        ERROR_PRINT("flex_region:%p. failed to free range {offset:%lu, size:%lu}\n", this, offset, size);
         return false;
     }
 
@@ -192,7 +181,7 @@ bool FlexAlloc::add_free_ranges(std::vector<FreeRange> &frs)
     bool success = true;
     for (auto &fr : frs) {
         if (!free(fr.m_offset, fr.m_size)) {
-            ERROR_PRINT("Error: flex_region:%p. failed to add a free range "
+            ERROR_PRINT("flex_region:%p. failed to add a free range "
                 "{offset:%lu, size:%lu}\n", this, fr.m_offset, fr.m_size);
             success = false;
         }
@@ -218,5 +207,17 @@ void FlexAlloc::print_ranges()
     for (auto iter : m_free_ranges_by_offset) {
         DEBUG_PRINT("range:[%lu %lu] size:%lu\n",
             iter.first, iter.first + iter.second.size - 1, iter.second.size);
+    }
+}
+
+void FlexAlloc::eraseFromSizeIndex(typename StartMap::iterator it)
+{
+    length_t sz = it->second.size;
+    auto range = m_free_ranges_by_size.equal_range(sz);
+    for (auto sIt = range.first; sIt != range.second; ++sIt) {
+        if (sIt->second == it) {
+            m_free_ranges_by_size.erase(sIt);
+            break;
+        }
     }
 }
