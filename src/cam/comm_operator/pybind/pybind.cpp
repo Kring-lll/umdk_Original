@@ -12,7 +12,7 @@
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
-    m.def("fused_deep_moe", &fused_deep_moe_impl_autograd, "fused_deep_moe");
+    m.def("fused_deep_moe", &FusedDeepMoeImplAutograd, "fused_deep_moe");
     m.def("get_dispatch_layout", &GetDispatchLayoutImplAutograd, "get_dispatch_layout");
     m.def("moe_dispatch_prefill", &MoeDispatchPrefillImplAutograd, "moe_dispatch_prefill");
     m.def("moe_combine_prefill", &MoeCombinePrefillImplAutograd, "moe_combine_prefill");
