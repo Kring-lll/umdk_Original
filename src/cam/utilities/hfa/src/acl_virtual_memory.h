@@ -58,7 +58,8 @@ enum class VmRet {
     E_ACL_RESERVED_MEM_ADDRESS_FAILED                    = ACL_BASE_ERROR + 3,
     E_ACL_MALLOC_PHYSICAL_FAILED                         = ACL_BASE_ERROR + 4,
     E_ACL_MAP_MEM_FAILED                                 = ACL_BASE_ERROR + 5,
-    E_ACL_UNMAP_MEM_FAILED                               = ACL_BASE_ERROR + 6
+    E_ACL_UNMAP_MEM_FAILED                               = ACL_BASE_ERROR + 6,
+    E_ACL_GET_NUM_DEVICES_FAILED                         = ACL_BASE_ERROR + 7
 };
 
 inline const char* vm_error(VmRet error) {

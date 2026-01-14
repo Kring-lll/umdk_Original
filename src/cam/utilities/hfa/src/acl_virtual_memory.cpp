@@ -106,6 +106,7 @@ VmRet AclVirtualMemory::validate_params(int32_t* p_device_id,
         uint32_t num_devices = 8;
         if (aclrtGetDeviceCount(&num_devices) != ACL_SUCCESS) {
             ERROR_PRINT("aclrtGetDeviceCount() has failed\n");
+            return VmRet::E_ACL_GET_NUM_DEVICES_FAILED;
         }
         if (!(*p_device_id >= 0 && *p_device_id < static_cast<int32_t>(num_devices))) {
             ERROR_PRINT("invalid device id %d\n", *p_device_id);
@@ -116,7 +117,7 @@ VmRet AclVirtualMemory::validate_params(int32_t* p_device_id,
     // Validate virtual memory size
     // - should range: 0..MAX_VIRTUAL_MEM_SIZE
     if (p_vr_mem_size != nullptr) {
-        if (!(*p_vr_mem_size >= 0 && *p_vr_mem_size <= MAX_VIRTUAL_MEM_SIZE)) {
+        if (*p_vr_mem_size == 0 || !(*p_vr_mem_size <= MAX_VIRTUAL_MEM_SIZE)) {
             return VmRet::E_INVALID_PARAMETER_MAX_VR_ADDR_SIZE;
         }
     }
@@ -124,7 +125,7 @@ VmRet AclVirtualMemory::validate_params(int32_t* p_device_id,
     // Validate physical memory size
     // - should be multiple of 2MB
     if (p_ph_mem_size != nullptr) {
-        if (!((*p_ph_mem_size % PH_PAGE_ALIGN_SIZE) == 0)) {
+        if (*p_ph_mem_size == 0 || !((*p_ph_mem_size % PH_PAGE_ALIGN_SIZE) == 0)) {
             return VmRet::E_INVALID_PARAMETER_PH_MEM_SIZE;
         }
     }
@@ -132,7 +133,7 @@ VmRet AclVirtualMemory::validate_params(int32_t* p_device_id,
     // Validate physical page size
     // - should be multiple of 2MB
     if (p_ph_page_size != nullptr) {
-        if (!((*p_ph_page_size % PH_PAGE_ALIGN_SIZE) == 0)) {
+        if (*p_ph_page_size == 0 || !((*p_ph_page_size % PH_PAGE_ALIGN_SIZE) == 0)) {
             return VmRet::E_INVALID_PARAMETER_PH_PAGE_SIZE;
         }
     }
