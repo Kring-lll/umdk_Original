@@ -26,12 +26,12 @@ TORCH_LIBRARY(umdk_cam_op_lib, m)
     Tensor[] gmm2Weight, Tensor[] gmm2WeightScale, Tensor expertScales, Tensor? expertSmoothScales, \
     Tensor? xActiveMask, str groupEp, int epRankSize, int epRankId, int moeExpertNum, int sharedExpertNum, \
     int sharedExpertRankNum, int quantMode, int globalBs) -> Tensor[]");
-    m.def("get_dispatch_layout(Tensor topkIdx, int numExperts, int numRanks) -> (Tensor, Tensor)");
-    m.def("moe_dispatch_prefill(Tensor x, Tensor topkIdx, Tensor topkWeights, Tensor numTokensPerExpert, \
-    Tensor sendTokenIdxSmall, str groupEp, int rank, int numRanks, bool useQuant) \
+    m.def("get_dispatch_layout(Tensor topk_idx, int num_experts, int num_ranks) -> (Tensor, Tensor)");
+    m.def("moe_dispatch_prefill(Tensor x, Tensor topk_idx, Tensor topk_weights, Tensor num_tokens_per_expert, \
+    Tensor send_token_idx_small, str group_ep, int rank, int num_ranks, bool use_quant) \
     -> (Tensor, Tensor, Tensor, Tensor, Tensor)");
-    m.def("moe_combine_prefill(Tensor x, Tensor topkIdx, Tensor topkWeights, Tensor srcIdx, Tensor sendHead, \
-    str groupEp, int rank, int numRanks) -> Tensor");
+    m.def("moe_combine_prefill(Tensor x, Tensor topk_idx, Tensor topk_weights, Tensor src_idx, Tensor send_head, \
+    str group_ep, int rank, int num_ranks) -> Tensor");
     m.def("moe_dispatch_shmem(Tensor x, Tensor expertIds, Tensor? scales, Tensor? xActiveMask, \
     int epWorldSize, int epRankId, int moeExpertNum, int tpWorldSize, int tpRankId, \
     int expertShardType, int sharedExpertNum, int sharedExpertRankNum, int quantMode, int globalBS, int expertTokenNumsType, int extInfo) -> Tensor[]");
