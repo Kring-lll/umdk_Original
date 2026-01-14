@@ -178,7 +178,7 @@ static ALWAYS_INLINE urma_opcode_t transform_op_code(umq_opcode_t opcode)
     return URMA_OPC_SEND;
 }
 
-int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
+int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, uint32_t inc_tx, uint32_t *fail_num)
 {
     int ret = UMQ_SUCCESS;
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
@@ -232,13 +232,6 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
             sges_ptr->tseg = tseg_list[buffer->mempool_id];
             sges_ptr++;
 
-            if (rest_size < buffer->data_size) { // if cannot add up to total_size, return fail
-                UMQ_LIMIT_VLOG_ERR("cannot put together tx buffer, rest size is negative\n");
-                *bad_qbuf = qbuf;
-                ret = -UMQ_ERR_EINVAL;
-                goto ERROR;
-            }
-
             rest_size -= buffer->data_size;
             buffer = QBUF_LIST_NEXT(buffer);
         }
@@ -264,18 +257,15 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
         (urma_wr_ptr - 1)->next = urma_wr_ptr;
 
         wr_index++;
-        if (wr_index == UMQ_BATCH_SIZE && buffer != NULL) {
-            // wr count exceed UMQ_BATCH_SIZE
-            UMQ_LIMIT_VLOG_ERR("wr count exceeds %d, not supported\n", UMQ_BATCH_SIZE);
-            *bad_qbuf = qbuf;
-            ret = -UMQ_ERR_EINVAL;
-            goto ERROR;
+        if (wr_index == inc_tx && buffer != NULL) {
+            break;
         }
     }
     (urma_wr_ptr - 1)->next = NULL;
-    max_tx = opcode_consume_rqe ? umq_ub_window_dec(&queue->flow_control, queue, wr_index) : wr_index;
+    max_tx = opcode_consume_rqe ? umq_ub_window_dec(&queue->flow_control, queue, inc_tx) : inc_tx;
     if (max_tx == 0) {
         *bad_qbuf = qbuf;
+        *fail_num = inc_tx;
         ret = -UMQ_ERR_EAGAIN;
         umq_ub_shared_credit_req_send(queue);
         goto ERROR;
@@ -290,9 +280,10 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
     if (status != URMA_SUCCESS) {
         ret = -(int)status;
         if (bad_wr != NULL) {
-            *bad_qbuf = (umq_buf_t *)(uintptr_t)bad_wr->user_ctx;
+            *fail_num = inc_tx - process_bad_qbuf(bad_wr, bad_qbuf, qbuf, queue);
         } else {
             *bad_qbuf = qbuf;
+            *fail_num = inc_tx;
         }
         UMQ_LIMIT_VLOG_ERR("urma_post_jetty_send_wr failed, status %d, local eid: " EID_FMT ", "
                            "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n",
@@ -304,6 +295,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
     if (max_tx < wr_index) {
         *bad_qbuf = (umq_buf_t *)(uintptr_t)urma_wr[max_tx].user_ctx;
         umq_ub_shared_credit_req_send(queue);
+        *fail_num = inc_tx - max_tx;
         umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
         return -UMQ_ERR_EAGAIN;
     }
@@ -931,6 +923,7 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
             continue;
         }
 
+        umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, 1);
         buf[qbuf_cnt] = (umq_buf_t *)(uintptr_t)cr[i].user_ctx;
         buf[qbuf_cnt]->io_direction = UMQ_IO_TX;
         buf[qbuf_cnt]->status = (umq_buf_status_t)cr[i].status;
