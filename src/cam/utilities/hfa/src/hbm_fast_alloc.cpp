@@ -44,7 +44,7 @@ bool HbmFastAlloc::init(int32_t device_id,
         return false;
     }
     if (mp_fa == nullptr) {
-        ERROR_PRINT("failed to init HbmFastAllocph_mem_size=%lu\n", ph_mem_size);
+        ERROR_PRINT("failed to init HbmFastAlloc. ph_mem_size=%lu\n", ph_mem_size);
         return false;
     }
     INFO_PRINT("allocating memory - npu: %d, virtual: %zuG, physical: %zuG, page size: %zuMB\n",
@@ -205,13 +205,12 @@ bool HbmFastAlloc::free(void *ptr)
         ERROR_PRINT("fail to find info for HBM address %p to free\n", ptr);
         return false;
     }
-    m_alloc_map.erase(iter);
     if (!mp_fa->free(iter->second.first, iter->second.second)) {
         ERROR_PRINT("Flex failed to free HBM address %p (offset:%lu size:%lu)\n",
             ptr, iter->second.first, iter->second.second);
         return false;
     }
-
+    m_alloc_map.erase(iter);
     return true;
 }
 
