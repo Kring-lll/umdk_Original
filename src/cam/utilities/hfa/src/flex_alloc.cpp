@@ -82,7 +82,6 @@ FlexAlloc::FlexRetCode FlexAlloc::alloc(length_t req_size, size_t &offset, size_
     // Remove this free range from both indices
     m_free_ranges_by_size.erase(sizeIt);
     m_free_ranges_by_offset.erase(rangeIt);
-    alloc_size = alloc_size;
 
     // If there's leftover, insert the remainder back as a free range
     if (blkSz > alloc_size) {
