@@ -236,3 +236,17 @@ void HbmFastAlloc::get_defrag_ctrs(size_t &defrag_ctr, size_t &defrag_failed)
     defrag_ctr = m_defrag_ctr;
     defrag_failed = m_defrag_failed;
 }
+
+void HbmFastAlloc::set_log_level(int lvl)
+{
+    if (lvl < static_cast<int>(HFA_LOG_DEBUG) || lvl > static_cast<int>(HFA_LOG_ERROR)) {
+        ERROR_PRINT("invalid log level %d. should be 0==DEBUG, 1==INFO, 2==WARNING, 3==ERROR\n", lvl);
+        return;
+    }
+    hfa_set_log_level(static_cast<HfaLogLevel>(lvl));
+}
+
+int HbmFastAlloc::get_log_level()
+{
+    return static_cast<int>(hfa_get_log_level());
+}

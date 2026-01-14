@@ -21,11 +21,11 @@ enum HfaLogLevel {
 };
 
 // Global log level (single-definition via inline). Default: WARNING
-inline int g_hfa_log_level = HFA_LOG_WARNING;
+inline HfaLogLevel g_hfa_log_level = HFA_LOG_WARNING;
 
 // Setter / getter
-inline void hfa_set_log_level(int lvl) { g_hfa_log_level = lvl; }
-inline int  hfa_get_log_level()        { return g_hfa_log_level; }
+inline void hfa_set_log_level(HfaLogLevel lvl)  { g_hfa_log_level = lvl; }
+inline HfaLogLevel hfa_get_log_level()          { return g_hfa_log_level; }
 
 // Internal helper macro to print when message level >= current level.
 // Uses printf-style variadic args and flushes the stream. Prefixes messages
