@@ -480,7 +480,7 @@ static ALWAYS_INLINE uint16_t leak_credit_inc_non_atomic(ub_credit_pool_t *pool,
     return counter_inc_non_atomic_u16(pool, count, LEAKED_CREDIT_COUNT);
 }
 
-__attribute__((unused)) static void umq_ub_cerdit_pool_init(ub_queue_t *queue, uint32_t feature,
+static void umq_ub_cerdit_pool_init(ub_queue_t *queue, uint32_t feature,
     umq_flow_control_cfg_t *cfg)
 {
     ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
@@ -515,7 +515,10 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
     if (!fc->enabled) {
         return UMQ_SUCCESS;
     }
-
+    if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0) {
+        // main queue initializes credit pool
+        umq_ub_cerdit_pool_init(queue, feature, cfg);
+    }
     fc->local_rx_depth = queue->rx_depth;
     fc->local_tx_depth = queue->tx_depth;
     fc->initial_window = cfg->initial_window;
@@ -542,6 +545,9 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
         fc->ops.local_rx_posted_inc = local_rx_posted_inc_atomic;
         fc->ops.local_rx_posted_load = local_rx_posted_load_atomic;
         fc->ops.local_rx_posted_exchange = local_rx_posted_exchange_atomic;
+        fc->ops.local_rx_allocted_inc = local_rx_allocted_inc_atomic;
+        fc->ops.local_rx_allocted_dec = local_rx_allocted_dec_atomic;
+        fc->ops.local_rx_allocted_load = local_rx_allocted_load_atomic;
 
         fc->ops.stats_query = flow_control_stats_query_atomic;
     } else {
@@ -553,6 +559,9 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
         fc->ops.local_rx_posted_inc = local_rx_posted_inc_non_atomic;
         fc->ops.local_rx_posted_load = local_rx_posted_load_non_atomic;
         fc->ops.local_rx_posted_exchange = local_rx_posted_exchange_non_atomic;
+        fc->ops.local_rx_allocted_inc = local_rx_allocted_inc_non_atomic;
+        fc->ops.local_rx_allocted_dec = local_rx_allocted_dec_non_atomic;
+        fc->ops.local_rx_allocted_load = local_rx_allocted_load_non_atomic;
 
         fc->ops.stats_query = flow_control_stats_query_non_atomic;
     }
@@ -599,28 +608,35 @@ void umq_ub_window_read(ub_flow_control_t *fc, ub_queue_t *queue)
     // post read remote window
     urma_jfs_wr_t *bad_wr = NULL;
     urma_sge_t src_sge = {
-        .addr = fc->remote_win_buf_addr, .len = sizeof(uint16_t), .tseg = queue->imported_tseg_list[0]};
-    urma_sge_t dst_sge = {.addr = umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL) + sizeof(uint16_t),
-                          .len = sizeof(uint16_t),
+        .addr = fc->remote_win_buf_addr, .len = sizeof(uint32_t), .tseg = queue->imported_tseg_list[0]};
+    urma_sge_t dst_sge = {.addr = umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL) + sizeof(uint32_t),
+                          .len = sizeof(uint32_t),
                           .tseg = queue->dev_ctx->tseg_list[0]};
+    umq_ub_fc_user_ctx_t obj = {
+        .operator = {
+            .type = IMM_TYPE_FC_CREDIT_INIT,
+            .notify = 0,
+            .rsvd0 = 0,
+            .rsvd1 = 0
+        }
+    };
     urma_jfs_wr_t urma_wr = {.rw = {.src = {.sge = &src_sge, .num_sge = 1}, .dst = {.sge = &dst_sge, .num_sge = 1}},
-        .user_ctx = 0,
+        .user_ctx = obj.value,
         .opcode = URMA_OPC_READ,
         .flag = {.bs = {.complete_enable = 1, .inline_flag = 0}},
-        .tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]};
-    urma_status_t status = urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_IO], &urma_wr, &bad_wr);
+        .tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL]};
+    urma_status_t status = urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL], &urma_wr, &bad_wr);
     if (status == URMA_SUCCESS) {
-        queue->interrupt_ctx.tx_fc_interrupt = true;
         fc->remote_get = true;
         return;
     }
 
     UMQ_LIMIT_VLOG_ERR("umq ub flow control get remote window failed, error %d, local eid: " EID_FMT ", "
-                       "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n", (int)status,
-                       EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
-                       queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id,
-                       EID_ARGS(queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid),
-                       queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.id);
+                       "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n",
+                       (int)status, EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+                       queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id,
+                       EID_ARGS(queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL]->id.eid),
+                       queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL]->id.id);
 }
 
 void umq_ub_rq_posted_notifier_inc(ub_flow_control_t *fc, uint16_t rx_posted)
@@ -836,7 +852,6 @@ void umq_ub_shared_credit_req_send(ub_queue_t *queue)
     urma_jfs_wr_t *bad_wr = NULL;
 
     if (!umq_ub_sending_permission_acquire(fc)) {
-        UMQ_LIMIT_VLOG_WARN("umq credit req already send\n");
         return;
     }
     urma_status_t status = urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
