@@ -126,7 +126,6 @@ protected:
     }
 };
 
-
 /**
  * init-uninit test to ensure no memory leaks
  */
@@ -139,6 +138,12 @@ TEST_F(HfaInitUninitTest, TestJustInitUninit) {
         if (!hfa.init(dev_id, vr_mem_size, ph_mem_size, ph_page_size, DEF_INITIAL_FREE_PAGES)) {
             FAIL();
         }
+
+        // just verify log level methods work
+        int curr_log_level = hfa.get_log_level();
+        hfa.set_log_level(0);
+        hfa.set_log_level(curr_log_level);
+
         hfa_warmup(hfa);
         hfa.deinit();
         free_mem = GetFreeMem(__FUNCTION__);

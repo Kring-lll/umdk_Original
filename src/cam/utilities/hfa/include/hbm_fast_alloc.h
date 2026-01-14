@@ -79,6 +79,18 @@ public:
      */
     size_t get_last_defrag_elem_size() { return m_last_defrag_elem_size; }
 
+    /**
+     * @brief Set the global log level for HFA
+     * @param lvl Log level to set. 0==DEBUG, 1==INFO, 2==WARNING, 3==ERROR
+     */
+    static void set_log_level(int lvl);
+
+    /**
+     * @brief Get the current global log level for HFA
+     * @return Current log level.0==DEBUG, 1==INFO, 2==WARNING, 3==ERROR
+     */
+    static int get_log_level();
+
 private:
     void get_defrag_ctrs(size_t &defrag_ctr, size_t &defrag_failed);
 
