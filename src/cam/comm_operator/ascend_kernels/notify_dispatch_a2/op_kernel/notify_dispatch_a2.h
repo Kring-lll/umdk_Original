@@ -277,6 +277,15 @@ private:
             Ceil(rankSize * numExperts * MAX_BS * sizeof(int32_t), UB_ALIGN_SIZE) * UB_ALIGN_SIZE;
     }
 
+    template <typename T1, typename T2>
+    FORCE_INLINE_AICORE T1 CeilDiv(T1 a, T2 b)
+    {
+        if (b == 0) {
+            return 0;
+        }
+        return (a + b - 1) / b;
+    }
+
     __aicore__ inline void InitShare()
     {
         int64_t queNum = MAX_CORE_NUM;

@@ -3,9 +3,9 @@
 
 #include "kernel_operator.h"
 #include "kernel_tiling/kernel_tiling.h"
-#include "../cam_moe_distribute_dispatch_tiling.h"
-#include "../moe_distribute_base.h"
-#include "../comm_args.h"
+#include "cam_moe_distribute_dispatch_tiling.h"
+#include "moe_distribute_base.h"
+#include "comm_args.h"
 
 namespace MoeDistributeDispatchA2Impl {
 constexpr uint32_t STATE_OFFSET = 512;                 // 状态空间偏移地址

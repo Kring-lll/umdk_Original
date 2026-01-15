@@ -2,7 +2,7 @@
 // #include "notify_dispatch_a2.h"
 // #include "notify_dispatch_tiling_a2.h"
 // #include "a2/a2.h"
-#include "a2/cam_moe_distribute_dispatch_a2_layered.h"
+#include "cam_moe_distribute_dispatch_a2_layered.h"
 #include "cam_moe_distribute_dispatch_tiling.h"
 
 #define TILING_KEY_FLOAT16 20
