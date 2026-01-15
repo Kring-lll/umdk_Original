@@ -548,3 +548,8 @@ int umq_huge_qbuf_headroom_reset(umq_buf_t *qbuf, uint16_t headroom_size)
     }
     return headroom_reset(qbuf, headroom_size, g_huge_pool_ctx.mode, pool->block_size);
 }
+
+umq_buf_mode_t umq_huge_qbuf_mode_get(void)
+{
+    return g_huge_pool_ctx.mode;
+}
