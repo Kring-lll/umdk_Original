@@ -125,6 +125,27 @@ uint8_t umq_buf_size_pow_small(void)
     return g_umq_qbuf_size_pow_samll;
 }
 
+uint64_t umq_buf_to_id(char *buf, bool shm, bool with_data)
+{
+    if (!g_qbuf_pool.inited) {
+        return UMQ_INVALID_ID;
+    }
+
+    if (shm) {
+        if (with_data) {
+            return buf_to_id_with_data_split((char *)g_qbuf_pool.header_buffer, buf);
+        } else {
+            return buf_to_id_without_data_split((char *)g_qbuf_pool.ext_header_buffer, buf);
+        }
+    } else {
+        if (with_data) {
+            return buf_to_id_with_data_split((char *)g_qbuf_pool.header_buffer, buf);
+        } else {
+            return buf_to_id_without_data_split((char *)g_qbuf_pool.ext_header_buffer, buf);
+        }
+    }
+}
+
 void umq_qbuf_config_get(qbuf_pool_cfg_t *cfg)
 {
     cfg->buf_addr = g_qbuf_pool.data_buffer;
