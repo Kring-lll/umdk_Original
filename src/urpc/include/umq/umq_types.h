@@ -176,6 +176,8 @@ typedef struct umq_flow_control_cfg {
     uint16_t credits_per_request;
     // initial available credit for each umq
     uint16_t initial_credit;
+    // when tx < credit_request_threshold, trigger credit application request
+    uint16_t credit_request_threshold;
     // use atomic variables as flow control window
     bool use_atomic_window;
 } umq_flow_control_cfg_t;

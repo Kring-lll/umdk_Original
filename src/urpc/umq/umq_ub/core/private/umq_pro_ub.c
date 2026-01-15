@@ -188,7 +188,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
         return -UMQ_ERR_ENODEV;
     }
     umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
-
+    umq_ub_credit_check_and_request(queue);
     uint32_t max_sge_num = queue->max_tx_sge;
     urma_jfs_wr_t urma_wr[UMQ_POST_POLL_BATCH];
     urma_jfs_wr_t *urma_wr_ptr = urma_wr;

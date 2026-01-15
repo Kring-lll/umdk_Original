@@ -82,6 +82,15 @@ static inline uint16_t umq_ub_window_dec(ub_flow_control_t *fc, ub_queue_t *queu
 
 void umq_ub_rq_posted_notifier_inc(ub_flow_control_t *fc, uint16_t rx_posted);
 
+static inline void umq_ub_credit_check_and_request(ub_flow_control_t *fc, ub_queue_t *queue)
+{
+    ub_flow_control_t *fc = &queue->flow_control;
+    if (fc->ops->remote_rx_window_load(fc) < fc->credit_request_threshold) {
+        umq_ub_shared_credit_req_send(queue);
+    }
+    return;
+}
+
 #ifdef __cplusplus
 }
 #endif
