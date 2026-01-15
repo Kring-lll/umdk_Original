@@ -606,7 +606,7 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
     uint32_t jetty_token;
     if (umq_ub_token_generate(enable_token, &jetty_token) != 0) {
         UMQ_VLOG_ERR("generate jetty token failed\n");
-        return UMQ_INVALID_HANDLE;
+        return NULL;
     }
 
     umq_inc_ref(dev_ctx->io_lock_free, &dev_ctx->ref_cnt, 1);
