@@ -1,3 +1,12 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+ * Description: dispatch combine A2 interface part
+ * Create: 2026-01-15
+ * Note:
+ * History: 2026-01-15 create combine normal A2 interface part
+ */
+
 #include <string.h>
 #include "graph/types.h"
 #include "aclnn_moe_distribute_combine_a2.h"

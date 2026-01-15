@@ -1,3 +1,12 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+ * Description: notify dispatch kernel A2 part
+ * Create: 2026-01-15
+ * Note:
+ * History: 2026-01-15 create notify dispatch A2 kernel part
+ */
+
 #ifndef NOTIFY_DISPATCH_TILING_A2_H
 #define NOTIFY_DISPATCH_TILING_A2_H
 

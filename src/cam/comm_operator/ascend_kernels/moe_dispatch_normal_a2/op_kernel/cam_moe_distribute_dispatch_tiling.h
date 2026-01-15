@@ -1,5 +1,10 @@
-/**
- * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+ * Description: dispatch normal A2 kernel part
+ * Create: 2026-01-15
+ * Note:
+ * History: 2026-01-15 create dispatch normal A2 kernel part
  */
 
 #ifndef ASCENDC_CAM_H_COMM_MOE_DISTRIBUTE_DISPATCH_TILING_H

@@ -1,3 +1,12 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+ * Description: dispatch normal A2 host part
+ * Create: 2026-01-15
+ * Note:
+ * History: 2026-01-15 create dispatch normal A2 host part
+ */
+
 #include <queue>
 #include <vector>
 #include <dlfcn.h>

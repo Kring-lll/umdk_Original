@@ -1,7 +1,11 @@
-
 /*
- * calution: this file was generated automaticlly donot change it.
-*/
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+ * Description: notify dispatch A2 interface part
+ * Create: 2026-01-15
+ * Note:
+ * History: 2026-01-15 create notify dispatch A2 interface part
+ */
 
 #ifndef ACLNN_NOTIFY_DISPATCH_A2_H_
 #define ACLNN_NOTIFY_DISPATCH_A2_H_
