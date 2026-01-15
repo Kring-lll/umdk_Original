@@ -9,6 +9,7 @@
 
 #include <sys/epoll.h>
 #include "perf.h"
+#include "umq_tlv.h"
 #include "umq_qbuf_pool.h"
 #include "umq_ub_flow_control.h"
 #include "qbuf_list.h"
@@ -36,8 +37,9 @@ static inline bool umq_ub_bind_feature_check(uint32_t local_feature, uint32_t re
     return ((local_feature ^ remote_feature) & (~umq_ub_bind_fature_allowlist_get())) == 0;
 }
 
-int umq_ub_bind_info_check(ub_queue_t *queue, umq_ub_bind_info_t *info)
+int umq_ub_bind_info_check(ub_queue_t *queue, umq_ub_bind_info_list_t *info_list)
 {
+    umq_ub_bind_info_t *info = (umq_ub_bind_info_t *)(uintptr_t)info_list->bind_info[UMQ_UB_BIND_VERSION_0];
     if (info->umq_trans_mode != UMQ_TRANS_MODE_UB && info->umq_trans_mode != UMQ_TRANS_MODE_UB_PLUS &&
         info->umq_trans_mode != UMQ_TRANS_MODE_UBMM && info->umq_trans_mode != UMQ_TRANS_MODE_UBMM_PLUS) {
         UMQ_VLOG_ERR("trans mode %d is not UB\n", info->umq_trans_mode);
@@ -314,7 +316,7 @@ static void umq_ub_disconnect_jetty(ub_queue_t *queue, ub_bind_ctx_t *ctx, ub_qu
     ctx->tjetty[i] = NULL;
 }
 
-int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
+int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_list_t *info_list)
 {
     ub_bind_ctx_t *ctx = (ub_bind_ctx_t *)calloc(1, sizeof(ub_bind_ctx_t));
     if (ctx == NULL) {
@@ -322,6 +324,7 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
         return -UMQ_ERR_ENOMEM;
     }
 
+    umq_ub_bind_info_t *info = (umq_ub_bind_info_t *)(uintptr_t)info_list->bind_info[UMQ_UB_BIND_VERSION_0];
     ctx->remote_notify_addr = info->notify_buf;
     ctx->tjetty[UB_QUEUE_JETTY_IO] = umq_ub_connect_jetty(queue, info, UB_QUEUE_JETTY_IO);
     if (ctx->tjetty[UB_QUEUE_JETTY_IO] == NULL) {
@@ -385,6 +388,107 @@ DISCONNECT_IO_JETTY:
 FREE_CTX:
     free(ctx);
     return UMQ_FAIL;
+}
+
+uint32_t umq_ub_bind_info_serialize(ub_queue_t *queue, uint8_t *bind_info, uint32_t bind_info_size)
+{
+    uint32_t info_data_size = (uint32_t)sizeof(umq_ub_bind_info_t) + (uint32_t)sizeof(umq_tlv_head_t) +
+        (uint32_t)sizeof(umq_tlv_arr_head_t);
+    if (info_data_size > bind_info_size) {
+        UMQ_VLOG_ERR("bind info size insufficient\n");
+        return 0;
+    }
+
+    umq_tlv_arr_head_t *info_tlv_arr_head = (umq_tlv_arr_head_t *)(uintptr_t)bind_info;
+    info_tlv_arr_head->type = UMQ_TLV_TYPE_ARRAY;
+
+    // fill v0 bind info
+    umq_tlv_head_t *info_tlv_head = (umq_tlv_head_t *)(uintptr_t)info_tlv_arr_head->value.user_data;
+    umq_ub_bind_info_t *info = (umq_ub_bind_info_t *)(uintptr_t)info_tlv_head->value;
+    info->info_base.version = UMQ_UB_BIND_VERSION_0;
+    info->is_binded = queue->bind_ctx != NULL ? true : false;
+    info->umq_trans_mode = queue->dev_ctx->trans_info.trans_mode;
+    info->trans_mode = queue->dev_ctx->transport_mode;
+    info->tp_type = queue->dev_ctx->tp_type;
+    info->order_type = queue->dev_ctx->order_type;
+    info->jetty_id[UB_QUEUE_JETTY_IO] = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id;
+    info->type = URMA_JETTY;
+    info->token[UB_QUEUE_JETTY_IO] = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_cfg.shared.jfr->jfr_cfg.token_value;
+    info->notify_buf = umq_ub_notify_buf_addr_get(queue, OFFSET_MEM_IMPORT);
+    info->rx_depth = queue->rx_depth;
+    info->tx_depth = queue->tx_depth;
+    info->rx_buf_size = queue->rx_buf_size;
+    info->feature = queue->dev_ctx->feature;
+    info->state = queue->state;
+    info->pid = getpid();
+    (void)memcpy(&info->tseg, queue->dev_ctx->tseg_list[UMQ_QBUF_DEFAULT_MEMPOOL_ID], sizeof(urma_target_seg_t));
+    info->buf_pool_mode = umq_qbuf_mode_get();
+    if (queue->flow_control.enabled) {
+        info->jetty_id[UB_QUEUE_JETTY_FLOW_CONTROL] = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id;
+        info->token[UB_QUEUE_JETTY_FLOW_CONTROL] =
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_cfg.shared.jfr->jfr_cfg.token_value;
+        info->win_buf_addr = umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL);
+        info->win_buf_len = UMQ_UB_RW_SEGMENT_LEN;
+    } else {
+        memset(&info->jetty_id[UB_QUEUE_JETTY_FLOW_CONTROL], 0, sizeof(urma_jetty_id_t));
+        info->token[UB_QUEUE_JETTY_FLOW_CONTROL].token = 0;
+        info->win_buf_addr = 0;
+        info->win_buf_len = 0;
+    }
+    info_tlv_head->type = UMQ_TLV_TYPE_BIND_INFO;
+    info_tlv_head->len = sizeof(umq_ub_bind_info_t);
+    info_tlv_arr_head->value.arr_num++;
+    info_tlv_arr_head->len = umq_tlv_arr_get_value_len_by_user_data_len(umq_tlv_get_total_len(info_tlv_head));
+    return umq_tlv_arr_get_user_data_len(info_tlv_arr_head) + sizeof(info_tlv_arr_head);
+}
+
+static uint32_t umq_ub_bind_info_length_get(umq_ub_bind_version_t bind_version)
+{
+    switch(bind_version) {
+        case UMQ_UB_BIND_VERSION_0:
+            return sizeof(umq_ub_bind_info_t);
+        case UMQ_UB_BIND_VERSION_MAX:
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
+
+int umq_ub_bind_info_deserialize(uint8_t *bind_info, umq_ub_bind_info_list_t *info_list)
+{
+    umq_ub_bind_info_base_t **info = info_list->bind_info;
+    info_list->bind_info_cnt = 0;
+    umq_tlv_arr_head_t *info_tlv_arr_head = (umq_tlv_arr_head_t *)bind_info;
+    char *info_buf = info_tlv_arr_head->value.user_data;
+    uint32_t info_len = umq_tlv_arr_get_user_data_len(info_tlv_arr_head);
+    umq_tlv_head_t *info_tlv_head = (umq_tlv_head_t *)(uintptr_t)info_buf;
+    umq_ub_bind_info_base_t *info_base = NULL;
+    for (uint32_t v = UMQ_UB_BIND_VERSION_0; v < UMQ_UB_BIND_VERSION_MAX; v++) {
+        if (info_tlv_head == NULL) {
+            UMQ_VLOG_INFO("peer's version is lower than the local version\n");
+            break;
+        }
+
+        info_base = (umq_ub_bind_info_base_t *)(uintptr_t)info_tlv_head->value;
+        if (info_base->version != v) {
+            UMQ_VLOG_ERR("version numbers must be sorted in increasing order\n");
+            return -UMQ_ERR_EINVAL;
+        }
+
+        if (umq_ub_bind_info_length_get(info_base->version) != info_tlv_head->len) {
+            UMQ_VLOG_ERR("The size of mem information(%u) is smaller than the defined size(%u)\n",
+                info_tlv_head->len, umq_ub_bind_info_length_get(info_base->version))
+            return -UMQ_ERR_EINVAL;
+        }
+
+        info[info_base->version] = info_base;
+        info_list->bind_info_cnt++;
+        uint32_t left_len = umq_tlv_get_left_len(info_buf, info_len, info_tlv_head);
+        info_tlv_head = umq_tlv_search_next_element(info_tlv_head, left_len, UMQ_TLV_TYPE_BIND_INFO);
+    }
+    info_list->negotiation_version = info_base->version;
+    return UMQ_SUCCESS;
 }
 
 int umq_modify_ubq_to_err(ub_queue_t *queue, umq_io_direction_t direction, ub_queue_jetty_index_t jetty_idx)

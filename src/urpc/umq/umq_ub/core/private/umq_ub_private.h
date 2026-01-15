@@ -207,7 +207,23 @@ typedef struct rx_buf_ctx_list {
     urpc_list_t used_rx_buf_ctx_list;
 } rx_buf_ctx_list_t;
 
+typedef enum umq_ub_bind_version {
+    UMQ_UB_BIND_VERSION_0 = 0,
+    UMQ_UB_BIND_VERSION_MAX,
+} umq_ub_bind_version_t;
+
+typedef struct umq_ub_bind_info_base {
+    uint32_t version;
+} umq_ub_bind_info_base_t;
+
+typedef struct umq_ub_bind_info_list {
+    umq_ub_bind_version_t negotiation_version;
+    uint32_t bind_info_cnt;
+    umq_ub_bind_info_base_t *bind_info[UMQ_UB_BIND_VERSION_MAX];
+} umq_ub_bind_info_list_t;
+
 typedef struct umq_ub_bind_info {
+    umq_ub_bind_info_base_t info_base;
     bool is_binded;
     umq_trans_mode_t umq_trans_mode;
     urma_transport_mode_t trans_mode;
@@ -381,9 +397,11 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count);
 // token
 uint32_t token_policy_get(bool enable);
 int umq_ub_token_generate(bool enable_token, uint32_t *token);
-int umq_ub_bind_info_check(ub_queue_t *queue, umq_ub_bind_info_t *info);
+int umq_ub_bind_info_check(ub_queue_t *queue, umq_ub_bind_info_list_t *info_list);
 int umq_ub_eid_id_release(remote_imported_tseg_info_t *remote_imported_info, ub_bind_ctx_t *ctx);
-int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info);
+int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_list_t *info_list);
+uint32_t umq_ub_bind_info_serialize(ub_queue_t *queue, uint8_t *bind_info, uint32_t bind_info_size);
+int umq_ub_bind_info_deserialize(uint8_t *bind_info, umq_ub_bind_info_list_t *info_list);
 int umq_modify_ubq_to_err(ub_queue_t *queue, umq_io_direction_t direction, ub_queue_jetty_index_t jetty_idx);
 uint32_t umq_ub_get_urma_dev(umq_dev_assign_t *dev_info, urma_device_t **urma_dev, uint32_t *eid_index);
 int umq_ub_create_urma_ctx(urma_device_t *urma_dev, uint32_t eid_index, umq_ub_ctx_t *ub_ctx);
