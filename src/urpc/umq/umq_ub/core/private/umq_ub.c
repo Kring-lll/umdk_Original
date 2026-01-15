@@ -776,17 +776,32 @@ int share_rq_param_check(ub_queue_t *queue, ub_queue_t *share_rq)
         UMQ_VLOG_ERR("the dev_ctx of share_rq and creating queue is different\n");
         goto ERR;
     }
-    if ((queue->create_flag & UMQ_CREATE_FLAG_RX_BUF_SIZE) && (share_rq->rx_buf_size != queue->rx_buf_size)) {
-        UMQ_VLOG_ERR("the rx_buf_size of share_rq and creating queue is different\n");
-        goto ERR;
+    if (queue->create_flag & UMQ_CREATE_FLAG_RX_BUF_SIZE) {
+        if (share_rq->rx_buf_size != queue->rx_buf_size) {
+            UMQ_VLOG_ERR("the rx_buf_size is different, share_rq %u creating queue %u\n",
+                         share_rq->rx_buf_size, queue->rx_buf_size);
+            goto ERR;
+        }
+    } else {
+        queue->rx_buf_size = share_rq->rx_buf_size;
     }
-    if ((queue->create_flag & UMQ_CREATE_FLAG_RX_DEPTH) && (share_rq->rx_depth != queue->rx_depth)) {
-        UMQ_VLOG_ERR("the rx_depth of share_rq and creating queue is different\n");
-        goto ERR;
+    if (queue->create_flag & UMQ_CREATE_FLAG_RX_DEPTH) {
+        if (share_rq->rx_depth != queue->rx_depth) {
+            UMQ_VLOG_ERR("the rx_depth is different, share_rq %u creating queue %u\n",
+                         share_rq->rx_depth, queue->rx_depth);
+            goto ERR;
+        }
+    } else {
+        queue->rx_depth = share_rq->rx_depth;
     }
-    if ((queue->create_flag & UMQ_CREATE_FLAG_QUEUE_MODE) && (share_rq->mode != queue->mode)) {
-        UMQ_VLOG_ERR("the queue_mode of share_rq and creating queue is different\n");
-        goto ERR;
+    if (queue->create_flag & UMQ_CREATE_FLAG_QUEUE_MODE) {
+        if (share_rq->mode != queue->mode) {
+            UMQ_VLOG_ERR("the queue_mode is different, share_rq %u creating queue %u\n",
+                         share_rq->mode, queue->mode);
+            goto ERR;
+        }
+    } else {
+        queue->mode = share_rq->mode;
     }
     return UMQ_SUCCESS;
 ERR:
