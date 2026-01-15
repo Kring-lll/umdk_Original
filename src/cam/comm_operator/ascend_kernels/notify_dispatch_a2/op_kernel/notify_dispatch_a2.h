@@ -37,7 +37,6 @@ using namespace Moe;
         srcOffsetRankTokenIdxOutput, dstOffsetRankTokenIdxOutput, offsetInnerOutput, countOuterOutput,          \
         expandIdxOutput, totalRecvTokensOutput, workspace, tiling
 
-// #define ENABLE_PRINT
 #ifdef ENABLE_PRINT
 #define CAM_PRINT(fmt, ...)                  \
     do {                                     \
@@ -385,7 +384,6 @@ private:
     __aicore__ inline void SetInnerFlag(uint64_t magic, uint64_t eventID, int64_t setRank, int64_t setBlock)
     {
         uint64_t value = MergeMagicWithValue(magic, eventID);
-        // SetFlag((__gm__ uint64_t *)(shareAddrs[setRank]) + setBlock * FLAG_UNIT_INT_NUM, value);
         __gm__ uint64_t *setAddr = (__gm__ uint64_t *)(shareAddrs[setRank]) + setBlock * FLAG_UNIT_INT_NUM;
 
         SetWaitEvent<HardEvent::MTE3_S>(EVENT_ID0);
@@ -450,7 +448,6 @@ private:
             return;
         }
 
-        // printflag("ShareToShareSlice\n");
         int64_t recvCount = this->len;
         for (int i = startDataBlockId; i < endDataBlockId; ++i) {
             int32_t targetRankId = serverId * localRankSize + (i / serverNum);  // 表示从当前server第rankId去读
@@ -717,7 +714,6 @@ private:
 
     __aicore__ inline void BuildExpandIdxData()
     {
-        // printflag("enter BuildExpandIdxData\n");
         LocalTensor<int32_t> tmpLt = tempBuf2_.Get<int32_t>();
         LocalTensor<int32_t> dstLt = tempBuf9_.Get<int32_t>();
         DataCopyExtParams copyParams{1, static_cast<uint32_t>(MAX_BS * sizeof(int32_t)), 0, 0, 0};
