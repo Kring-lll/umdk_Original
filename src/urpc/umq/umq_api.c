@@ -706,58 +706,6 @@ void umq_buf_free(umq_buf_t *qbuf)
     umq->tp_ops->umq_tp_buf_free(qbuf, umq->umqh_tp);
 }
 
-umq_buf_t *umq_buf_break_and_free(umq_buf_t *qbuf)
-{
-    if (!g_umq_inited || qbuf == NULL) {
-        UMQ_VLOG_ERR("umq not initialized or qbuf is NULL\n");
-        return NULL;
-    }
-    // break qbuf list for many batchs connected, only release the first batch.
-    umq_buf_t *next_batch_qbuf = qbuf->qbuf_next; /* if request_size = 0, return qbuf->qbuf_next */
-    umq_buf_t *tmp_buf = qbuf;
-    uint32_t rest_data_size = tmp_buf->total_data_size;
-    while (tmp_buf && rest_data_size > 0) {
-        if (rest_data_size <= tmp_buf->data_size) {
-            next_batch_qbuf = tmp_buf->qbuf_next;
-            tmp_buf->qbuf_next = NULL;
-            break;
-        }
-        rest_data_size -= tmp_buf->data_size;
-        tmp_buf = tmp_buf->qbuf_next;
-    }
-    umq_buf_free(qbuf);
-    return next_batch_qbuf;
-}
-
-int umq_buf_headroom_reset(umq_buf_t *qbuf, uint16_t headroom_size)
-{
-    if (!g_umq_inited || qbuf == NULL) {
-        return -UMQ_ERR_EINVAL;
-    }
-
-    if (headroom_size > UMQ_HEADROOM_SIZE_LIMIT) {
-        UMQ_VLOG_ERR("headroom size %u exceeds the maximum value\n", headroom_size);
-        return -UMQ_ERR_EINVAL;
-    }
-
-    if (qbuf->umqh == UMQ_INVALID_HANDLE) {
-        if (qbuf->mempool_id == UMQ_QBUF_DEFAULT_MEMPOOL_ID) {
-            return umq_qbuf_headroom_reset(qbuf, headroom_size);
-        } else {
-            return umq_huge_qbuf_headroom_reset(qbuf, headroom_size);
-        }
-    }
-
-    umq_t *umq = (umq_t *)(uintptr_t)qbuf->umqh;
-    if ((umq->umqh_tp == UMQ_INVALID_HANDLE) || (umq->tp_ops == NULL) ||
-        (umq->tp_ops->umq_tp_buf_headroom_reset == NULL)) {
-        UMQ_VLOG_ERR("umqh or tp invalid\n");
-        return -UMQ_ERR_EINVAL;
-    }
-
-    return umq->tp_ops->umq_tp_buf_headroom_reset(qbuf, headroom_size);
-}
-
 int umq_buf_reset(umq_buf_t *qbuf)
 {
     if (!g_umq_inited || qbuf == NULL) {
@@ -765,15 +713,25 @@ int umq_buf_reset(umq_buf_t *qbuf)
     }
 
     umq_buf_t *head = qbuf;
+    umq_buf_t *tmp_buf = head;
     uint32_t total_data_size = 0;
+    uint32_t align_size = 0;
     while (head != NULL) {
-        head->data_size = head->buf_size;
-        total_data_size += head->data_size;
-
-        head = head->qbuf_next;
+        /* split mode: block_size = head->buf_size - sizeof(umq_buf_t); combine mode: block_size = head->buf_size */
+        align_size = head->buf_size - sizeof(umq_buf_t);
+        uint16_t headroom_size = head->headroom_size;
+        while (tmp_buf) {
+            tmp_buf->data_size = tmp_buf->first_fragment ? align_size - headroom_size : align_size;
+            total_data_size += tmp_buf->data_size;
+            tmp_buf = tmp_buf->qbuf_next;
+            if (tmp_buf == NULL || tmp_buf->first_fragment) {
+                break;
+            }
+        }
+        head->total_data_size = total_data_size;
+        head = tmp_buf;
+        total_data_size = 0;
     }
-    qbuf->total_data_size = total_data_size;
-
     return UMQ_SUCCESS;
 }
 
