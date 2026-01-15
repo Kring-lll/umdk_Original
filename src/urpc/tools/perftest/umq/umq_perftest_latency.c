@@ -320,7 +320,7 @@ static int process_flow_control_buf(uint64_t umqh, umq_buf_t *buf)
         return 1;
     }
 
-    if (umq_buf_reset(buf) != UMQ_SUCCESS) {
+    if (umq_buf_data_size_reset(buf) != UMQ_SUCCESS) {
         LOG_PRINT("reset rx buf failed\n");
         return -1;
     }

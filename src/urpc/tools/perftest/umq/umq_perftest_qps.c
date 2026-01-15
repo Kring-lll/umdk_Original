@@ -328,7 +328,7 @@ static int handle_qps_client_rx_buf(uint64_t umqh, umq_buf_t **rx_buf, uint32_t 
     uint32_t failed_idx = 0;
     for (uint32_t i = 0; i < poll_buf_cnt; i++) {
         buf = rx_buf[i];
-        if (umq_buf_reset(buf) != UMQ_SUCCESS) {
+        if (umq_buf_data_size_reset(buf) != UMQ_SUCCESS) {
             failed_idx = i;
             LOG_PRINT("reset rx buf failed\n");
             goto FREE_RX_BUF;

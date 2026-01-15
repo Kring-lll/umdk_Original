@@ -141,7 +141,7 @@ int umq_buf_headroom_reset(umq_buf_t *qbuf, uint16_t headroom_size);
  * @param[in] qbuf: list of qbuf
  * Return 0 on success, error code on failure
  */
-int umq_buf_reset(umq_buf_t *qbuf);
+int umq_buf_data_size_reset(umq_buf_t *qbuf);
 
 /**
  * User should ensure thread safety if io_lock_free is true
