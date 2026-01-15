@@ -141,7 +141,13 @@ int umq_ub_bind_info_get_impl(uint64_t umqh, uint8_t *bind_info, uint32_t bind_i
         return -UMQ_ERR_EINVAL;
     }
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
-    umq_ub_bind_info_t *info = (umq_ub_bind_info_t *)bind_info;
+
+    umq_ub_bind_info_head_t *info_head = (umq_ub_bind_info_head_t *)(uintptr_t)bind_info;
+    info_head->info_arr_len = sizeof(uint32_t);
+
+    // fill v0 bind info
+    umq_ub_bind_info_base_t *info_base = (umq_ub_bind_info_base_t *)(uintptr_t)info_head->info_arr.value;
+    umq_ub_bind_info_t *info = (umq_ub_bind_info_t *)info_base->info;
     info->is_binded = queue->bind_ctx != NULL ? true : false;
     info->umq_trans_mode = queue->dev_ctx->trans_info.trans_mode;
     info->trans_mode = queue->dev_ctx->transport_mode;
@@ -171,8 +177,42 @@ int umq_ub_bind_info_get_impl(uint64_t umqh, uint8_t *bind_info, uint32_t bind_i
         info->win_buf_addr = 0;
         info->win_buf_len = 0;
     }
+    info_base->version = UMQ_UB_BIND_VERSION_0;
+    info_base->info_len = sizeof(umq_ub_bind_info_t);
+    info_head->info_arr.cnt++;
+    info_head->info_arr_len += info_base->info_len;
 
-    return sizeof(umq_ub_bind_info_t);
+    return (int)(info_head->info_arr_len + sizeof(umq_ub_bind_info_head_t) - sizeof(uint32_t));
+}
+
+static int umq_ub_bind_info_deserialize(uint8_t *bind_info, umq_ub_bind_info_base_t **info)
+{
+    umq_ub_bind_info_head_t *info_head = (umq_ub_bind_info_head_t *)bind_info;
+    uint32_t remote_version = info_head->current_version;
+    uint32_t local_version = UMQ_UB_BIND_VERSION_MAX - 1;
+    uint32_t use_version = remote_version < local_version ? remote_version : local_version;
+    if (use_version > info_head->info_arr.cnt) {
+        UMQ_VLOG_ERR("bind info cnt too low, use version %u, info cnt %u\n", use_version, info_head->info_arr.cnt);
+        return -UMQ_ERR_EINVAL;
+    }
+
+    uint32_t value_len = info_head->info_arr_len - sizeof(uint32_t);
+    umq_ub_bind_info_base_t *info_base = (umq_ub_bind_info_base_t *)(uintptr_t)info_head->info_arr.value;
+    for (uint32_t v = UMQ_UB_BIND_VERSION_0; v <= use_version; v++) {
+        if (info_base->version != v) {
+            return -UMQ_ERR_EINVAL;
+        }
+
+        if (value_len < info_base->info_len) {
+            return -UMQ_ERR_EINVAL;
+        }
+
+        info[v] = info_base;
+        value_len -= info_base->info_len;
+        info_base = (umq_ub_bind_info_base_t *)(uintptr_t)((char *)(uintptr_t)info_base + info_base->info_len);
+    }
+
+    return UMQ_SUCCESS;
 }
 
 int umq_ub_bind_impl(uint64_t umqh, uint8_t *bind_info, uint32_t bind_info_size)
@@ -181,19 +221,23 @@ int umq_ub_bind_impl(uint64_t umqh, uint8_t *bind_info, uint32_t bind_info_size)
         UMQ_VLOG_ERR("bind info size invalid\n");
         return -UMQ_ERR_EINVAL;
     }
+    umq_ub_bind_info_base_t *info_list[UMQ_UB_BIND_VERSION_MAX];
+    int ret = umq_ub_bind_info_deserialize(bind_info, info_list);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR("deserialize bind info failed\n");
+        return ret;
+    }
 
-    umq_ub_bind_info_t *info = (umq_ub_bind_info_t *)bind_info;
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
-
-    int ret = umq_ub_bind_info_check(queue, info);
+    ret = umq_ub_bind_info_check(queue, info_list);
     if (ret != UMQ_SUCCESS) {
         return ret;
     }
 
-    if (umq_ub_window_init(&queue->flow_control, info) != UMQ_SUCCESS) {
+    if (umq_ub_window_init(&queue->flow_control, info_list) != UMQ_SUCCESS) {
         return -UMQ_ERR_EINVAL;
     }
-    return umq_ub_bind_inner_impl(queue, info);
+    return umq_ub_bind_inner_impl(queue, info_list);
 }
 
 int32_t umq_ub_register_memory_impl(void *buf, uint64_t size)
