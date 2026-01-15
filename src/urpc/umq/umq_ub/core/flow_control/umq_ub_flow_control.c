@@ -445,7 +445,7 @@ static ALWAYS_INLINE uint16_t available_credit_inc_non_atomic(ub_credit_pool_t *
     uint16_t before = pool->stats_u16[IDLE_CREDIT_COUNT];
     uint16_t ret = counter_inc_non_atomic_u16(pool, count, IDLE_CREDIT_COUNT);
     if (URPC_UNLIKELY(ret == before)) {
-        pool->stats_u16[CREDIT_ERR_TOTAL] += count;
+        pool->stats_u64[CREDIT_ERR_TOTAL] += count;
     } else {
         pool->stats_u16[CREDIT_TOTAL] += count;
     }
@@ -735,7 +735,6 @@ void umq_ub_shared_credit_req_send(ub_queue_t *queue)
         .tjetty = tjetty,
         .opcode = URMA_OPC_SEND_IMM};
     urma_jfs_wr_t *bad_wr = NULL;
-
     urma_status_t status = urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
     if (status == URMA_SUCCESS) {
         return;
