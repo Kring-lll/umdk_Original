@@ -27,7 +27,7 @@
 #include "tiling/platform/platform_ascendc.h"
 #include "tiling/hccl/hccl_tiling.h"
 
-#define USE_CANN83_PATH
+#define USE_CANN82_PATH
 
 #ifdef USE_CANN83_PATH
 #include "platform/platform_infos_def.h"

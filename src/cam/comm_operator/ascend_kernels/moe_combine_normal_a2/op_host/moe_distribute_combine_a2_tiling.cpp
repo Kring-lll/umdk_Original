@@ -25,8 +25,7 @@
 #include "tiling/tiling_api.h"
 #include "error_log.h"
 #include "graph/utils/type_utils.h"
-// #include "hcom_topo_info.h"
-// #include "error/ops_error.h"
+
 #include "register/op_def_registry.h"
 #include "../op_kernel/moe_distribute_combine_a2_tiling.h"
 #include "tiling_args.h"
