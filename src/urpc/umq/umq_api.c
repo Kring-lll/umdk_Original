@@ -758,22 +758,32 @@ int umq_buf_headroom_reset(umq_buf_t *qbuf, uint16_t headroom_size)
     return umq->tp_ops->umq_tp_buf_headroom_reset(qbuf, headroom_size);
 }
 
-int umq_buf_reset(umq_buf_t *qbuf)
+int umq_buf_data_reset(umq_buf_t *qbuf)
 {
     if (!g_umq_inited || qbuf == NULL) {
         return -UMQ_ERR_EINVAL;
     }
 
     umq_buf_t *head = qbuf;
+    umq_buf_t *tmp_buf = head;
     uint32_t total_data_size = 0;
+    uint32_t align_size = 0;
     while (head != NULL) {
-        head->data_size = head->buf_size;
-        total_data_size += head->data_size;
-
-        head = head->qbuf_next;
+        /* split mode: block_size = head->buf_size - sizeof(umq_buf_t); combine mode: block_size = head->buf_size */
+        align_size = head->buf_size - sizeof(umq_buf_t);
+        uint16_t headroom_size = head->headroom_size;
+        while (tmp_buf) {
+            tmp_buf->data_size = tmp_buf->first_fragment ? align_size - headroom_size : align_size;
+            total_data_size += tmp_buf->data_size;
+            tmp_buf = tmp_buf->qbuf_next;
+            if (tmp_buf == NULL || tmp_buf->first_fragment) {
+                break;
+            }
+        }
+        head->total_data_size = total_data_size;
+        head = tmp_buf;
+        total_data_size = 0;
     }
-    qbuf->total_data_size = total_data_size;
-
     return UMQ_SUCCESS;
 }
 
