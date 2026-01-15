@@ -758,6 +758,65 @@ int umq_buf_headroom_reset(umq_buf_t *qbuf, uint16_t headroom_size)
     return umq->tp_ops->umq_tp_buf_headroom_reset(qbuf, headroom_size);
 }
 
+static int umq_buf_reset_split(umq_buf_t *head)
+{
+    uint32_t total_data_size = 0;
+    uint32_t block_size = 0;
+    umq_buf_t *tmp_buf = head;
+    while (head != NULL) {
+        uint32_t remaining_size = head->total_data_size;
+        if (remaining_size == 0) {
+            tmp_buf = tmp_buf->qbuf_next;
+            head = tmp_buf;
+            continue;
+        }
+        block_size = head->buf_size - sizeof(umq_buf_t);
+        uint16_t headroom_size = head->headroom_size;
+        while (tmp_buf) {
+            tmp_buf->data_size = tmp_buf->first_fragment ? block_size - headroom_size : block_size;
+            total_data_size += tmp_buf->data_size;
+            tmp_buf = tmp_buf->qbuf_next;
+            if (tmp_buf->first_fragment) {
+                break;
+            }
+        }
+        head->total_data_size = total_data_size;
+        head = tmp_buf;
+        total_data_size = 0;
+    }
+    return UMQ_SUCCESS;
+}
+
+static int umq_buf_reset_combine(umq_buf_t *head)
+{
+    uint32_t total_data_size = 0;
+    uint32_t block_size = 0;
+    umq_buf_t *tmp_buf = head;
+    while (head != NULL) {
+        uint32_t remaining_size = head->total_data_size;
+        if (remaining_size == 0) {
+            tmp_buf = tmp_buf->qbuf_next;
+            head = tmp_buf;
+            continue;
+        }
+        block_size = head->buf_size;
+        uint32_t align_size = block_size - sizeof(umq_buf_t);
+        uint16_t headroom_size = head->headroom_size;
+        while (tmp_buf) {
+            tmp_buf->data_size = tmp_buf->first_fragment ? align_size - headroom_size : align_size;
+            total_data_size += tmp_buf->data_size;
+            tmp_buf = tmp_buf->qbuf_next;
+            if (tmp_buf->first_fragment) {
+                break;
+            }
+        }
+        head->total_data_size = total_data_size;
+        head = tmp_buf;
+        total_data_size = 0;
+    }
+    return UMQ_SUCCESS;
+}
+
 int umq_buf_reset(umq_buf_t *qbuf)
 {
     if (!g_umq_inited || qbuf == NULL) {
@@ -765,16 +824,12 @@ int umq_buf_reset(umq_buf_t *qbuf)
     }
 
     umq_buf_t *head = qbuf;
-    uint32_t total_data_size = 0;
-    while (head != NULL) {
-        head->data_size = head->buf_size;
-        total_data_size += head->data_size;
-
-        head = head->qbuf_next;
+    umq_buf_mode_t mode = qbuf->mempool_id == UMQ_QBUF_DEFAULT_MEMPOOL_ID ?
+        umq_qbuf_mode_get() : umq_huge_qbuf_mode_get();
+    if (mode == UMQ_BUF_SPLIT) {
+        return umq_buf_reset_split(head);
     }
-    qbuf->total_data_size = total_data_size;
-
-    return UMQ_SUCCESS;
+    return umq_buf_reset_combine(head);
 }
 
 umq_buf_t *umq_data_to_head(void *data)
