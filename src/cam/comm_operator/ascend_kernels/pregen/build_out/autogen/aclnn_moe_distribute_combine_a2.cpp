@@ -136,5 +136,3 @@ aclnnStatus aclnnMoeDistributeCombineA2(
 #ifdef __cplusplus
 }
 #endif
-
-#endif
