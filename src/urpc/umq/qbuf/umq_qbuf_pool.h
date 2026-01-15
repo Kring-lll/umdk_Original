@@ -33,6 +33,9 @@ extern "C" {
 // middle = small * 32, and big = middle * 32
 #define UMQ_QBUF_SIZE_POW_INTERVAL      (5)
 #define UMQ_QBUF_SIZE_MULTIPLE_INTERVAL (6)
+#define QBUF_ALLOC_STATE_FREE      0            // define qbuf free state
+#define QBUF_ALLOC_STATE_ALLOCATED 1            // define qbuf allocated state
+
 typedef struct qbuf_pool_cfg {
     void *buf_addr;             // buffer addr
     uint64_t total_size;        // total buffer size
@@ -122,6 +125,8 @@ int umq_qbuf_headroom_reset(umq_buf_t *qbuf, uint16_t headroom_size);
  */
 umq_buf_t *umq_qbuf_data_to_head(void *data);
 
+uint64_t umq_buf_to_id(char *buf, bool shm, bool with_data);
+
 void umq_qbuf_config_get(qbuf_pool_cfg_t *cfg);
 
 typedef struct local_block_pool {
@@ -180,6 +185,10 @@ static ALWAYS_INLINE uint32_t release_batch(umq_buf_list_t *input, umq_buf_list_
     umq_buf_t *cur_node;
     umq_buf_t *last_node = NULL;
     QBUF_LIST_FOR_EACH(cur_node, input) {
+        if (cur_node->alloc_state == QBUF_ALLOC_STATE_FREE) {
+            UMQ_VLOG_ERR("qbuf detect double free\n");
+        }
+        cur_node->alloc_state = QBUF_ALLOC_STATE_FREE;
         ++cnt;
         last_node = cur_node;
     }
@@ -313,24 +322,34 @@ static ALWAYS_INLINE void return_qbuf_to_global(global_block_pool_t *global_pool
     (void)pthread_mutex_unlock(&global_pool->global_mutex);
 }
 
-static ALWAYS_INLINE umq_buf_t *id_to_buf_with_data_split(char *addr, uint32_t id)
+static ALWAYS_INLINE umq_buf_t *id_to_buf_with_data_split(char *addr, uint64_t id)
 {
     return (umq_buf_t *)(addr + id * sizeof(umq_buf_t));
 }
 
-static ALWAYS_INLINE uint32_t buf_to_id_with_data_split(char *addr, char *buf)
+static ALWAYS_INLINE uint64_t buf_to_id_with_data_split(char *addr, char *buf)
 {
-    return (uint32_t)((buf - addr) / sizeof(umq_buf_t));
+    return (uint64_t)((buf - addr) / sizeof(umq_buf_t));
 }
 
-static ALWAYS_INLINE umq_buf_t *id_to_buf_without_data_split(char *addr, uint32_t id)
+static ALWAYS_INLINE umq_buf_t *id_to_buf_without_data_split(char *addr, uint64_t id)
 {
     return (umq_buf_t *)(addr + id * sizeof(umq_buf_t));
 }
 
-static ALWAYS_INLINE umq_buf_t *id_to_buf_combine(char *addr, uint32_t id, uint32_t block_size)
+static ALWAYS_INLINE uint64_t buf_to_id_without_data_split(char *addr, char *buf)
+{
+    return (uint64_t)((buf - addr) / sizeof(umq_buf_t));
+}
+
+static ALWAYS_INLINE umq_buf_t *id_to_buf_combine(char *addr, uint64_t id, uint32_t block_size)
 {
     return (umq_buf_t *)(addr + id * block_size);
+}
+
+static ALWAYS_INLINE uint64_t buf_to_id_combine(char *addr, char *buf, uint32_t block_size)
+{
+    return (uint64_t)((buf - addr) / block_size);
 }
 
 static ALWAYS_INLINE void umq_qbuf_alloc_nodata(local_block_pool_t *local_pool, uint32_t num, umq_buf_list_t *list)
@@ -338,6 +357,11 @@ static ALWAYS_INLINE void umq_qbuf_alloc_nodata(local_block_pool_t *local_pool, 
     uint32_t cnt = 0;
     umq_buf_t *cur_node;
     QBUF_LIST_FOR_EACH(cur_node, &local_pool->head_without_data) {
+        if (cur_node->alloc_state == QBUF_ALLOC_STATE_ALLOCATED) {
+            UMQ_VLOG_ERR("qbuf in without_data pool already allocated\n");
+        }
+        cur_node->alloc_state = QBUF_ALLOC_STATE_ALLOCATED;
+
         if (++cnt == num) {
             break;
         }
@@ -371,6 +395,11 @@ static ALWAYS_INLINE void umq_qbuf_alloc_data_with_split(local_block_pool_t *loc
         cur_node->total_data_size = total_data_size;
         cur_node->first_fragment = first_fragment;
         cur_node->data_size = remaining_size >= max_data_capacity ? max_data_capacity : remaining_size;
+        if (cur_node->alloc_state == QBUF_ALLOC_STATE_ALLOCATED) {
+            UMQ_VLOG_ERR("qbuf in with_data pool already allocated\n");
+        }
+        cur_node->alloc_state = QBUF_ALLOC_STATE_ALLOCATED;
+
         remaining_size -= cur_node->data_size;
         if (remaining_size == 0) {
             headroom_size_temp = headroom_size;
@@ -418,6 +447,11 @@ static ALWAYS_INLINE void umq_qbuf_alloc_data_with_combine(local_block_pool_t *l
         cur_node->total_data_size = total_data_size;
         cur_node->first_fragment = first_fragment;
         cur_node->data_size = remaining_size >= max_data_capacity ? max_data_capacity : remaining_size;
+        if (cur_node->alloc_state == QBUF_ALLOC_STATE_ALLOCATED) {
+            UMQ_VLOG_ERR("qbuf in combine pool already allocated\n");
+        }
+        cur_node->alloc_state = QBUF_ALLOC_STATE_ALLOCATED;
+
         remaining_size -= cur_node->data_size;
         if (remaining_size == 0) {
             headroom_size_temp = headroom_size;

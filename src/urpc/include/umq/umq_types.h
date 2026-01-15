@@ -76,6 +76,20 @@ typedef enum umq_trans_mode {
     UMQ_TRANS_MODE_MAX,
 } umq_trans_mode_t;
 
+typedef enum umq_transport_mode {
+    UMQ_TM_RC = 0,              /* Reliable connection */
+    UMQ_TM_RM,                  /* Reliable message */
+    UMQ_TM_UM,                  /* Unreliable message */
+    UMQ_TM_MAX,
+} umq_transport_mode_t;
+
+typedef enum umq_tp_type {
+    UMQ_TP_TYPE_RTP = 0,
+    UMQ_TP_TYPE_CTP,
+    UMQ_TP_TYPE_UTP,
+    UMQ_TP_TYPE_MAX,
+} umq_tp_type_t;
+
 typedef enum umq_dev_assign_mode {
     UMQ_DEV_ASSIGN_MODE_IPV4,
     UMQ_DEV_ASSIGN_MODE_IPV6,
@@ -159,9 +173,9 @@ typedef struct umq_flow_control_cfg {
     // notify when rx >= notify_interval, [1, rx_depth], otherwise use rx_depth / 16 by default
     uint16_t notify_interval;
     // number of credits allocated per request for each umq
- 	uint16_t credits_per_request;
- 	// initial available credit for each umq
- 	uint16_t initial_credit;
+    uint16_t credits_per_request;
+    // initial available credit for each umq
+    uint16_t initial_credit;
     // use atomic variables as flow control window
     bool use_atomic_window;
 } umq_flow_control_cfg_t;
@@ -183,6 +197,8 @@ typedef struct umq_buf_block_cfg {
 
 typedef struct umq_init_cfg {
     umq_buf_mode_t buf_mode;
+    umq_transport_mode_t transport_mode;
+    umq_tp_type_t tp_type;
     uint32_t feature;               // feature flags
     uint16_t headroom_size;         // header size of umq buffer, [0, UMQ_HEADROOM_SIZE_LIMIT]
     bool io_lock_free;              // true: user should ensure thread safety when call io function
@@ -252,7 +268,8 @@ struct umq_buf {
     uint32_t data_size;                   // size of umq buf data
     uint16_t headroom_size;               // size of umq buf headroom
     uint16_t first_fragment : 1;          // first piece of each batch buf
-    uint16_t rsvd1 : 15;
+    uint16_t alloc_state : 1;             // 0: free; 1: allocated
+    uint16_t rsvd1 : 14;
 
     uint32_t token_id : 20;               // token_id for reference operation
     uint32_t rsvd2 : 4;
