@@ -122,5 +122,3 @@ aclnnStatus aclnnNotifyDispatchA2(
 #ifdef __cplusplus
 }
 #endif
-
-#endif
