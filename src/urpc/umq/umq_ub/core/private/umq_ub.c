@@ -36,8 +36,9 @@ static inline bool umq_ub_bind_feature_check(uint32_t local_feature, uint32_t re
     return ((local_feature ^ remote_feature) & (~umq_ub_bind_fature_allowlist_get())) == 0;
 }
 
-int umq_ub_bind_info_check(ub_queue_t *queue, umq_ub_bind_info_t *info)
+int umq_ub_bind_info_check(ub_queue_t *queue, umq_ub_bind_info_list_t *info_list)
 {
+    umq_ub_bind_info_t *info = (umq_ub_bind_info_t *)(uintptr_t)info_list->bind_info[UMQ_UB_BIND_VERSION_0];
     if (info->umq_trans_mode != UMQ_TRANS_MODE_UB && info->umq_trans_mode != UMQ_TRANS_MODE_UB_PLUS &&
         info->umq_trans_mode != UMQ_TRANS_MODE_UBMM && info->umq_trans_mode != UMQ_TRANS_MODE_UBMM_PLUS) {
         UMQ_VLOG_ERR("trans mode %d is not UB\n", info->umq_trans_mode);
@@ -314,7 +315,7 @@ static void umq_ub_disconnect_jetty(ub_queue_t *queue, ub_bind_ctx_t *ctx, ub_qu
     ctx->tjetty[i] = NULL;
 }
 
-int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
+int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_list_t *info_list)
 {
     ub_bind_ctx_t *ctx = (ub_bind_ctx_t *)calloc(1, sizeof(ub_bind_ctx_t));
     if (ctx == NULL) {
@@ -322,6 +323,7 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
         return -UMQ_ERR_ENOMEM;
     }
 
+    umq_ub_bind_info_t *info = (umq_ub_bind_info_t *)(uintptr_t)info_list->bind_info[UMQ_UB_BIND_VERSION_0];
     ctx->remote_notify_addr = info->notify_buf;
     ctx->tjetty[UB_QUEUE_JETTY_IO] = umq_ub_connect_jetty(queue, info, UB_QUEUE_JETTY_IO);
     if (ctx->tjetty[UB_QUEUE_JETTY_IO] == NULL) {

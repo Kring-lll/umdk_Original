@@ -20,6 +20,7 @@
 #include "urpc_util.h"
 #include "urpc_list.h"
 #include "urma_api.h"
+#include "umq_tlv.h"
 #include "umq_vlog.h"
 #include "umq_errno.h"
 #include "umq_qbuf_pool.h"
@@ -141,7 +142,14 @@ int umq_ub_bind_info_get_impl(uint64_t umqh, uint8_t *bind_info, uint32_t bind_i
         return -UMQ_ERR_EINVAL;
     }
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
-    umq_ub_bind_info_t *info = (umq_ub_bind_info_t *)bind_info;
+
+    umq_tlv_arr_head_t *info_tlv_arr_head = (umq_tlv_arr_head_t *)(uintptr_t)bind_info;
+    info_tlv_arr_head->type = UMQ_TLV_TYPE_ARRAY;
+
+    // fill v0 bind info
+    umq_tlv_head_t *info_tlv_head = (umq_tlv_head_t *)(uintptr_t)info_tlv_arr_head->value.user_data;
+    umq_ub_bind_info_t *info = (umq_ub_bind_info_t *)(uintptr_t)info_tlv_head->value;
+    info->info_base.version = UMQ_UB_BIND_VERSION_0;
     info->is_binded = queue->bind_ctx != NULL ? true : false;
     info->umq_trans_mode = queue->dev_ctx->trans_info.trans_mode;
     info->trans_mode = queue->dev_ctx->transport_mode;
@@ -171,8 +179,61 @@ int umq_ub_bind_info_get_impl(uint64_t umqh, uint8_t *bind_info, uint32_t bind_i
         info->win_buf_addr = 0;
         info->win_buf_len = 0;
     }
+    info_tlv_head->type = UMQ_TLV_TYPE_BIND_INFO;
+    info_tlv_head->len = sizeof(umq_ub_bind_info_t);
+    info_tlv_arr_head->value.arr_num++;
+    info_tlv_arr_head->len = umq_tlv_arr_get_value_len_by_user_data_len(umq_tlv_get_total_len(info_tlv_head));
 
-    return sizeof(umq_ub_bind_info_t);
+    return umq_tlv_arr_get_user_data_len(info_tlv_arr_head) + sizeof(info_tlv_arr_head);
+}
+
+static uint32_t umq_ub_bind_info_length_get(umq_ub_bind_version_t bind_version)
+{
+    switch(bind_version) {
+        case UMQ_UB_BIND_VERSION_0:
+            return sizeof(umq_ub_bind_info_t);
+        case UMQ_UB_BIND_VERSION_MAX:
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
+
+static int umq_ub_bind_info_deserialize(uint8_t *bind_info, umq_ub_bind_info_list_t *info_list)
+{
+    umq_ub_bind_info_base_t **info = info_list->bind_info;
+    info_list->bind_info_cnt = 0;
+    umq_tlv_arr_head_t *info_tlv_arr_head = (umq_tlv_arr_head_t *)bind_info;
+    char *info_buf = info_tlv_arr_head->value.user_data;
+    uint32_t info_len = umq_tlv_arr_get_user_data_len(info_tlv_arr_head);
+    umq_tlv_head_t *info_tlv_head = (umq_tlv_head_t *)(uintptr_t)info_buf;
+    umq_ub_bind_info_base_t *info_base = NULL;
+    for (uint32_t v = UMQ_UB_BIND_VERSION_0; v < UMQ_UB_BIND_VERSION_MAX; v++) {
+        if (info_tlv_head == NULL) {
+            UMQ_VLOG_INFO("peer's version is lower than the local version\n");
+            break;
+        }
+
+        info_base = (umq_ub_bind_info_base_t *)(uintptr_t)info_tlv_head->value;
+        if (info_base->version != v) {
+            UMQ_VLOG_ERR("version numbers must be sorted in increasing order\n");
+            return -UMQ_ERR_EINVAL;
+        }
+
+        if (umq_ub_bind_info_length_get(info_base->version) != info_tlv_head->len) {
+            UMQ_VLOG_ERR("The size of mem information(%u) is smaller than the defined size(%u)\n",
+                info_tlv_head->len, umq_ub_bind_info_length_get(info_base->version))
+            return -UMQ_ERR_EINVAL;
+        }
+
+        info[info_base->version] = info_base;
+        info_list->bind_info_cnt++;
+        uint32_t left_len = umq_tlv_get_left_len(info_buf, info_len, info_tlv_head);
+        info_tlv_head = umq_tlv_search_next_element(info_tlv_head, left_len, UMQ_TLV_TYPE_BIND_INFO);
+    }
+    info_list->negotiation_version = info_base->version;
+    return UMQ_SUCCESS;
 }
 
 int umq_ub_bind_impl(uint64_t umqh, uint8_t *bind_info, uint32_t bind_info_size)
@@ -181,19 +242,23 @@ int umq_ub_bind_impl(uint64_t umqh, uint8_t *bind_info, uint32_t bind_info_size)
         UMQ_VLOG_ERR("bind info size invalid\n");
         return -UMQ_ERR_EINVAL;
     }
+    umq_ub_bind_info_list_t info_list;
+    int ret = umq_ub_bind_info_deserialize(bind_info, &info_list);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR("deserialize bind info failed\n");
+        return ret;
+    }
 
-    umq_ub_bind_info_t *info = (umq_ub_bind_info_t *)bind_info;
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
-
-    int ret = umq_ub_bind_info_check(queue, info);
+    ret = umq_ub_bind_info_check(queue, &info_list);
     if (ret != UMQ_SUCCESS) {
         return ret;
     }
 
-    if (umq_ub_window_init(&queue->flow_control, info) != UMQ_SUCCESS) {
+    if (umq_ub_window_init(&queue->flow_control, &info_list) != UMQ_SUCCESS) {
         return -UMQ_ERR_EINVAL;
     }
-    return umq_ub_bind_inner_impl(queue, info);
+    return umq_ub_bind_inner_impl(queue, &info_list);
 }
 
 int32_t umq_ub_register_memory_impl(void *buf, uint64_t size)

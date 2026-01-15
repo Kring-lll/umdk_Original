@@ -596,12 +596,13 @@ void umq_ub_flow_control_uninit(ub_flow_control_t *fc)
     UMQ_VLOG_INFO("umq flow control uninit success\n");
 }
 
-int umq_ub_window_init(ub_flow_control_t *fc, umq_ub_bind_info_t *info)
+int umq_ub_window_init(ub_flow_control_t *fc, umq_ub_bind_info_list_t *info_list)
 {
     if (!fc->enabled) {
         return UMQ_SUCCESS;
     }
 
+    umq_ub_bind_info_t *info = (umq_ub_bind_info_t *)(uintptr_t)info_list->bind_info[UMQ_UB_BIND_VERSION_0];
     if (info->win_buf_addr == 0 || info->win_buf_len < sizeof(uint16_t)) {
         UMQ_VLOG_ERR("umq window init failed, remote flow control qbuf is empty\n");
         return UMQ_FAIL;
