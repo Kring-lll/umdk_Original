@@ -143,7 +143,7 @@ static tool_topo_agg_dev_t *get_topo_agg_dev_by_agg_eid(tool_topo_map_t *topo_ma
 }
 
 // Expose VF device and its EIDs to the specified netns
-static int nl_expose_device_by_eid(const char *eid, const char *netns)
+static int nl_expose_device_by_eid(const char *eid, int ns_fd)
 {
     int ret = 0;
     urma_device_t *ub_dev = NULL;
@@ -152,11 +152,12 @@ static int nl_expose_device_by_eid(const char *eid, const char *netns)
         printf("Failed to get dev by eid.\n");
         return -1;
     }
-    printf("Exposing device %s in netns %s.\n", ub_dev->name, netns);
-    ret = admin_cmd_dev_expose(ub_dev->name, netns);
+
+    printf("Exposing device %s in netns %d.\n", ub_dev->name, ns_fd);
+    ret = admin_nl_expose_dev_ns(ub_dev->name, ns_fd);
     if (ret != 0) {
-        (void)printf("Failed to expose device %s in netns %s, ret=%d.\n", ub_dev->name, netns, ret);
-        return ret;
+        (void)printf("Failed to expose device %s in netns %d, ret=%d.\n", ub_dev->name, ns_fd, ret);
+        goto close_fd;
     }
 
     urma_eid_info_t *eid_infos = NULL;
@@ -164,10 +165,10 @@ static int nl_expose_device_by_eid(const char *eid, const char *netns)
     eid_infos = urma_get_eid_list(ub_dev, &eid_cnt);
     for (int i = 0; i < eid_cnt; i++) {
         urma_eid_info_t *eid_info = &eid_infos[i];
-        printf("Setting EID index %u in device %s, netns %s.\n", eid_info->eid_index, ub_dev->name, netns);
-        ret = admin_cmd_eid_set_eid_ns(ub_dev->name, eid_info->eid_index, netns);
+        printf("Setting EID index %u in device %s, netns %d.\n", eid_info->eid_index, ub_dev->name, ns_fd);
+        ret = admin_nl_set_eid_ns(ub_dev->name, eid_info->eid_index, ns_fd);
         if (ret != 0) {
-            (void)printf("Failed to expose device %s in netns %s, ret=%d.\n", ub_dev->name, netns, ret);
+            (void)printf("Failed to expose device %s in netns %d, ret=%d.\n", ub_dev->name, ns_fd, ret);
             goto unexpose_device;
         }
     }
@@ -175,21 +176,23 @@ static int nl_expose_device_by_eid(const char *eid, const char *netns)
     return ret;
 unexpose_device:
     urma_free_eid_list(eid_infos);
-    admin_cmd_dev_unexpose(ub_dev->name, netns);
+    admin_nl_unexpose_dev_ns(ub_dev->name, ns_fd);
+close_fd:
+    close(ns_fd);
     return ret;
 }
 
-static void nl_unexpose_device_by_eid(const char *eid, const char *netns)
+static void nl_unexpose_device_by_eid(const char *eid, int ns_fd)
 {
     urma_device_t *ub_dev = NULL;
     ub_dev = get_urma_device_by_eid(eid);
     if (ub_dev == NULL) {
         printf("Failed to get dev by eid.\n");
     }
-    printf("Unexposing device %s in netns %s.\n", ub_dev->name, netns);
-    int ret = admin_cmd_dev_unexpose(ub_dev->name, netns);
+    printf("Unexposing device %s in netns %d.\n", ub_dev->name, ns_fd);
+    int ret = admin_nl_unexpose_dev_ns(ub_dev->name, ns_fd);
     if (ret != 0) {
-        (void)printf("Failed to unexpose device %s in netns %s, ret=%d.\n", ub_dev->name, netns, ret);
+        (void)printf("Failed to unexpose device %s in netns %d, ret=%d.\n", ub_dev->name, ns_fd, ret);
     }
 }
 
@@ -197,14 +200,21 @@ static int nl_expose_agg_device(struct tool_topo_agg_dev *agg_dev, const char *n
 {
     int ret = 0;
     int ue_idx = 0;
-    ret = nl_expose_device_by_eid(agg_dev->agg_eid, netns);
+
+    int ns_fd = admin_get_ns_fd(netns);
+    if (ns_fd < 0) {
+        (void)printf("Failed to get ns fd, ns %s.\n", netns);
+        return ns_fd;
+    }
+
+    ret = nl_expose_device_by_eid(agg_dev->agg_eid, ns_fd);
     if (ret != 0) {
         printf("Failed to expose agg dev\n");
         return ret;
     }
     for (ue_idx = 0; ue_idx < IODIE_NUM; ue_idx++) {
         tool_topo_ue_t *ue = &agg_dev->ues[ue_idx];
-        ret = nl_expose_device_by_eid(ue->primary_eid, netns);
+        ret = nl_expose_device_by_eid(ue->primary_eid, ns_fd);
         if (ret != 0) {
             printf("Failed to expose vf dev\n");
             goto unexpose_agg_dev;
@@ -215,9 +225,9 @@ static int nl_expose_agg_device(struct tool_topo_agg_dev *agg_dev, const char *n
 unexpose_agg_dev:
     for (int i = ue_idx - 1; i >= 0; i--) {
         tool_topo_ue_t *ue = &agg_dev->ues[i];
-        nl_unexpose_device_by_eid(ue->primary_eid, netns);
+        nl_unexpose_device_by_eid(ue->primary_eid, ns_fd);
     }
-    nl_unexpose_device_by_eid(agg_dev->agg_eid, netns);
+    nl_unexpose_device_by_eid(agg_dev->agg_eid, ns_fd);
     return -1;
 }
 
