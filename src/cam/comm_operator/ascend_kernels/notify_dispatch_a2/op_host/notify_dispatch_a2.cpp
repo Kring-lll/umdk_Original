@@ -1,6 +1,6 @@
 /*
  * SPDX-License-Identifier: MIT
- * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
  * Description: notify dispatch A2 host part
  * Create: 2026-01-15
  * Note:
@@ -10,8 +10,7 @@
 #include "register/op_def_registry.h"
 
 namespace ops {
-class NotifyDispatchA2 : public OpDef
-{
+class NotifyDispatchA2 : public OpDef {
 public:
     explicit NotifyDispatchA2(const char *name) : OpDef(name)
     {
