@@ -22,6 +22,7 @@ typedef struct urpc_lib_log_config {
 } urpc_lib_log_config_t;
 
 static urpc_lib_log_config_t g_urpc_log_config = {
+    .log_flag = URPC_LOG_FLAG_LEVEL | URPC_LOG_FLAG_RATE_LIMITED,
     .ctx = {
         .vlog_name = "URPC_LOG",
         .vlog_output_func = default_vlog_output,
