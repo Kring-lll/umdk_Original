@@ -71,7 +71,14 @@ extern "C" __global__ __aicore__ void notify_dispatch_a2(GM_ADDR sendData, GM_AD
 
     if (TILING_KEY_IS(TILING_KEY_A2_INT)) {
         NotifyDispatchA2<int> opKernel(rank, rankSize, extraFlag);
-        opKernel.Init(KERNELS_ARGS_CALL_A2_ALL2ALL());
+        opKernel.Init(GM_ADDR sendDataInput, GM_ADDR tokenPerExpertDataInput, GM_ADDR tmpDataInput,
+            GM_ADDR sendDataOffsetOutput, GM_ADDR recvDataOutput, int64_t len, int64_t numTokens,
+            int64_t topkNum, int64_t numExperts, int op, int root, int cycleCount, GM_ADDR scale, int64_t scaleCount,
+            GM_ADDR offset, int localRank, int localRankSize, GM_ADDR tokenServerIdxOutput,
+            GM_ADDR tokensUniquePerServerOutput, GM_ADDR epRankTokenCntOutput, GM_ADDR localEpTokenCntOutput,
+            GM_ADDR srcOffsetRankTokenIdxOutput, GM_ADDR dstOffsetRankTokenIdxOutput,
+            GM_ADDR offsetInnerOutput, GM_ADDR countOuterOutput, GM_ADDR expandIdxOutput,
+            GM_ADDR totalRecvTokensOutput, GM_ADDR workspace, GM_ADDR tiling);
         opKernel.Process();
     }
 }
