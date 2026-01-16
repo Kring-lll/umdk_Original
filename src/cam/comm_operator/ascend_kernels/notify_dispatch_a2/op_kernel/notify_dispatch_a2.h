@@ -21,36 +21,6 @@
 using namespace AscendC;
 using namespace Moe;
 
-#define KERNELS_ARGS_FUN_A2_ALL2ALL()                                                                                  \
-    GM_ADDR sendDataInput, GM_ADDR tokenPerExpertDataInput, GM_ADDR tmpDataInput, GM_ADDR sendDataOffsetOutput,        \
-        GM_ADDR recvDataOutput, int64_t len, int64_t numTokens, int64_t topkNum, int64_t numExperts, int op, int root, \
-        int cycleCount, GM_ADDR scale, int64_t scaleCount, GM_ADDR offset, int localRank, int localRankSize,           \
-        GM_ADDR tokenServerIdxOutput, GM_ADDR tokensUniquePerServerOutput, GM_ADDR epRankTokenCntOutput,               \
-        GM_ADDR localEpTokenCntOutput, GM_ADDR srcOffsetRankTokenIdxOutput, GM_ADDR dstOffsetRankTokenIdxOutput,       \
-        GM_ADDR offsetInnerOutput, GM_ADDR countOuterOutput, GM_ADDR expandIdxOutput, GM_ADDR totalRecvTokensOutput,   \
-        GM_ADDR workspace, GM_ADDR tiling
-
-#define KERNELS_ARGS_CALL_A2_ALL2ALL()                                                                          \
-    sendDataInput, tokenPerExpertDataInput, tmpDataInput, sendDataOffsetOutput, recvDataOutput, len, numTokens, \
-        topkNum, numExperts, op, root, cycleCount, scale, scaleCount, offset, localRank, localRankSize,         \
-        tokenServerIdxOutput, tokensUniquePerServerOutput, epRankTokenCntOutput, localEpTokenCntOutput,         \
-        srcOffsetRankTokenIdxOutput, dstOffsetRankTokenIdxOutput, offsetInnerOutput, countOuterOutput,          \
-        expandIdxOutput, totalRecvTokensOutput, workspace, tiling
-
-#ifdef ENABLE_PRINT
-#define CAM_PRINT(fmt, ...)                  \
-    do {                                     \
-        AscendC::printf(fmt, ##__VA_ARGS__); \
-    } while (0)
-#else
-#define CAM_PRINT(fmt, ...)
-#endif
-
-#define printflag(ss)                                                      \
-    if (blockIdx < coreNumBetween) {                                       \
-        CAM_PRINT("========rank:%d coreIdx:%d " #ss "\n", rank, blockIdx); \
-    }
-
 template <AscendC::HardEvent event>
 __aicore__ inline void SyncFunc()
 {
@@ -60,8 +30,7 @@ __aicore__ inline void SyncFunc()
 }
 
 template <typename T>
-class NotifyDispatchA2
-{
+class NotifyDispatchA2 {
     constexpr static int32_t MAX_CORE_NUM = 20;
     constexpr static int64_t MULTI_RANK_SIZE = 4;  // 每个core最多往4个rank发送数据，64卡场景
     constexpr static int64_t MAX_RANK_SIZE = 64;   // 910B设备本算子最大支持的rank数，64卡场景
@@ -92,15 +61,30 @@ class NotifyDispatchA2
     // Synchronization flag occupies length
     constexpr static int64_t FLAG_UNIT_INT_NUM = 4;
     constexpr static int64_t MAGIC_MASK = ~((1LL << 32) - 1);
+    constexpr static int64_t NUM_2 = 2;
+    constexpr static int64_t NUM_3 = 3;
+    constexpr static int64_t NUM_4 = 4;
+    constexpr static int64_t NUM_1000 = 1000;
 
 public:
     __aicore__ inline NotifyDispatchA2(int rank, int rankSize, uint32_t extraFlag)
         : rank(rank), rankSize(rankSize), extraFlag(extraFlag)
     {}
 
-    __aicore__ inline void Init(KERNELS_ARGS_FUN_A2_ALL2ALL())
+    __aicore__ inline void Init(GM_ADDR sendDataInput, GM_ADDR tokenPerExpertDataInput, GM_ADDR tmpDataInput,
+        GM_ADDR sendDataOffsetOutput,
+        GM_ADDR recvDataOutput, int64_t len, int64_t numTokens, int64_t topkNum, int64_t numExperts, int op, int root,
+        int cycleCount, GM_ADDR scale, int64_t scaleCount, GM_ADDR offset, int localRank, int localRankSize,
+        GM_ADDR tokenServerIdxOutput, GM_ADDR tokensUniquePerServerOutput, GM_ADDR epRankTokenCntOutput,
+        GM_ADDR localEpTokenCntOutput, GM_ADDR srcOffsetRankTokenIdxOutput, GM_ADDR dstOffsetRankTokenIdxOutput,
+        GM_ADDR offsetInnerOutput, GM_ADDR countOuterOutput, GM_ADDR expandIdxOutput, GM_ADDR totalRecvTokensOutput,
+        GM_ADDR workspace, GM_ADDR tiling)
     {
-        InitAll2AllLayeredRdma(KERNELS_ARGS_CALL_A2_ALL2ALL());
+        InitAll2AllLayeredRdma(sendDataInput, tokenPerExpertDataInput, tmpDataInput, sendDataOffsetOutput,
+            recvDataOutput, len, numTokens, topkNum, numExperts, op, root, cycleCount, scale, scaleCount, offset,
+            localRank, localRankSize, tokenServerIdxOutput, tokensUniquePerServerOutput, epRankTokenCntOutput,
+            localEpTokenCntOutput, srcOffsetRankTokenIdxOutput, dstOffsetRankTokenIdxOutput, offsetInnerOutput,
+            countOuterOutput, expandIdxOutput, totalRecvTokensOutput, workspace, tiling);
 
         tokenPerExpertDataAlignLen = Ceil(numExperts * sizeof(int32_t), UB_ALIGN_SIZE) * UB_ALIGN_SIZE;
         sendDataOffsetAlignLen = Ceil(numExperts * sizeof(T), UB_ALIGN_SIZE) * UB_ALIGN_SIZE;
@@ -189,7 +173,14 @@ public:
     }
 
 private:
-    __aicore__ inline void InitAll2AllLayeredRdma(KERNELS_ARGS_FUN_A2_ALL2ALL())
+    __aicore__ inline void InitAll2AllLayeredRdma(GM_ADDR sendDataInput, GM_ADDR tokenPerExpertDataInput, 
+        GM_ADDR tmpDataInput, GM_ADDR sendDataOffsetOutput, 
+        GM_ADDR recvDataOutput, int64_t len, int64_t numTokens, int64_t topkNum, int64_t numExperts, int op, int root,
+        int cycleCount, GM_ADDR scale, int64_t scaleCount, GM_ADDR offset, int localRank, int localRankSize,
+        GM_ADDR tokenServerIdxOutput, GM_ADDR tokensUniquePerServerOutput, GM_ADDR epRankTokenCntOutput,
+        GM_ADDR localEpTokenCntOutput, GM_ADDR srcOffsetRankTokenIdxOutput, GM_ADDR dstOffsetRankTokenIdxOutput,
+        GM_ADDR offsetInnerOutput, GM_ADDR countOuterOutput, GM_ADDR expandIdxOutput, GM_ADDR totalRecvTokensOutput,
+        GM_ADDR workspace, GM_ADDR tiling)
     {
         this->root = 0;
         this->len = len;
@@ -220,7 +211,7 @@ private:
         hccl_.Init(contextGM0, mc2InitTiling);
         hccl_.SetCcTiling(mc2CcTiling);
         this->winContext_[COMM_EP_IDX] = (__gm__ HcclOpResParam *)contextGM0;
-        notifyMemoryOffset = winContext_[COMM_EP_IDX]->winSize - IPC_BUFF_MAX_SIZE * 2;
+        notifyMemoryOffset = winContext_[COMM_EP_IDX]->winSize - IPC_BUFF_MAX_SIZE * NUM_2;
         // 设置并自增magic
         magicTensor_.SetGlobalBuffer((__gm__ uint64_t *)(hccl_.GetWindowsInAddr(rank) + IPC_DATA_OFFSET -
                                                          blockNum * sizeof(uint64_t) * EXP_TOKEN_COUNT_FLAG_CNT +
@@ -634,9 +625,9 @@ private:
                         Ceil(MAX_BS * sizeof(int32_t), UB_ALIGN) * UB_ALIGN);  // MAX_BS <= 4096, 要能放下一个bs的数据
         pipe.InitBuffer(tempBuf10_, Ceil(numExperts * sizeof(int32_t), UB_ALIGN) * UB_ALIGN);  // 要能放numExpert个数据
 
-        pipe.InitBuffer(tempBuf4_, 1000 * sizeof(float));  // 要能放localExp从所有rank接收token的数据
-        pipe.InitBuffer(tempBuf5_, 1000 * sizeof(float));  // 存放中间临时数据
-        pipe.InitBuffer(tempBuf6_, 1000 * sizeof(float));  // 存放中间临时数据
+        pipe.InitBuffer(tempBuf4_, NUM_1000 * sizeof(float));  // 要能放localExp从所有rank接收token的数据
+        pipe.InitBuffer(tempBuf5_, NUM_1000 * sizeof(float));  // 存放中间临时数据
+        pipe.InitBuffer(tempBuf6_, NUM_1000 * sizeof(float));  // 存放中间临时数据
 
         pipe.InitBuffer(tempBuf11_, Ceil(1 * sizeof(int64_t), UB_ALIGN) * UB_ALIGN);  // 存放中间临时数据
 
@@ -656,15 +647,15 @@ private:
             if (blockIdx == 1) {
                 BuildTokenSeverIdxData();
             }
-            if (blockIdx == 2) {
+            if (blockIdx == NUM_2) {
                 BuildCountOuterData();
             }
-            if (blockIdx == 3) {
+            if (blockIdx == NUM_3) {
                 BuildExpandIdxData();
             }
-            if (blockIdx > 3) {
-                int32_t beginCoreId = 4;
-                int32_t remainCoreNum = coreNumPerFunc - 4;
+            if (blockIdx > NUM_3) {
+                int32_t beginCoreId = NUM_4;
+                int32_t remainCoreNum = coreNumPerFunc - NUM_4;
                 BuildOffsetInnerData(beginCoreId, remainCoreNum);
             }
         } else {
