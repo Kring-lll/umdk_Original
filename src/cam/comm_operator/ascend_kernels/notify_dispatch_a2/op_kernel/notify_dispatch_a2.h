@@ -173,8 +173,8 @@ public:
     }
 
 private:
-    __aicore__ inline void InitAll2AllLayeredRdma(GM_ADDR sendDataInput, GM_ADDR tokenPerExpertDataInput, 
-        GM_ADDR tmpDataInput, GM_ADDR sendDataOffsetOutput, 
+    __aicore__ inline void InitAll2AllLayeredRdma(GM_ADDR sendDataInput, GM_ADDR tokenPerExpertDataInput,
+        GM_ADDR tmpDataInput, GM_ADDR sendDataOffsetOutput,
         GM_ADDR recvDataOutput, int64_t len, int64_t numTokens, int64_t topkNum, int64_t numExperts, int op, int root,
         int cycleCount, GM_ADDR scale, int64_t scaleCount, GM_ADDR offset, int localRank, int localRankSize,
         GM_ADDR tokenServerIdxOutput, GM_ADDR tokensUniquePerServerOutput, GM_ADDR epRankTokenCntOutput,

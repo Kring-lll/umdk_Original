@@ -23,6 +23,7 @@
 #include "register/op_def_registry.h"
 #include "tiling/platform/platform_ascendc.h"
 #include "tiling/hccl/hccl_tiling.h"
+#include "mc2_tiling_utils.h"
 
 #define USE_CANN82_PATH
 
@@ -42,30 +43,6 @@ using namespace ge;
 using namespace Cam;
 
 namespace {
-class Mc2TilingUtils
-{
-public:
-#define HCCL_BUFFSIZE "HCCL_BUFFSIZE"
-    static uint64_t GetMaxWindowSize()
-    {
-        uint16_t defaultWindowSize = 200;
-        if (getenv(HCCL_BUFFSIZE) == nullptr) {
-            OP_LOGD("", "Env HCCL_BUFFSIZE don't set");
-        } else {
-            try {
-                std::string envStr(getenv(HCCL_BUFFSIZE));
-                defaultWindowSize = std::stoi(envStr);
-            } catch (const std::invalid_argument &ia) {
-                OP_LOGE("", "Invalid argument when parsing HCCL_BUFFSIZE: %s", ia.what());
-            } catch (const std::out_of_range &oor) {
-                OP_LOGE("", "Out of range when parsing HCCL_BUFFSIZE: %s", oor.what());
-            }
-        }
-        const uint64_t maxWindowSize = static_cast<uint64_t>(defaultWindowSize) * 1024UL * 1024UL;
-        OP_LOGI("", "Get maxWindowSize is %lu", maxWindowSize);
-        return maxWindowSize;
-    }
-};
 constexpr uint32_t X_INDEX = 0;
 constexpr uint32_t EXPERT_IDS_INDEX = 1;
 constexpr uint32_t SCALES_INDEX = 2;

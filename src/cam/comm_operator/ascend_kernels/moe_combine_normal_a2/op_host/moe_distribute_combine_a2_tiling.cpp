@@ -29,6 +29,7 @@
 #include "register/op_def_registry.h"
 #include "../op_kernel/moe_distribute_combine_a2_tiling.h"
 #include "tiling_args.h"
+#include "mc2_tiling_utils.h"
 
 #define OPS_CHECK OP_TILING_CHECK
 #define OPS_LOG_E OP_LOGE
