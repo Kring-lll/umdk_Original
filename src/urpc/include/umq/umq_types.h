@@ -152,6 +152,7 @@ typedef struct umq_trans_info {
 #define UMQ_FEATURE_ENABLE_STATS            (1 << 2)    // enable stats collection
 #define UMQ_FEATURE_ENABLE_PERF             (1 << 3)    // enable performance collection
 #define UMQ_FEATURE_ENABLE_FLOW_CONTROL     (1 << 4)    // enable flow control
+#define UMQ_FEATURE_ENABLE_TX_OUTSTANDING   (1 << 5)    // enable tx outstanding
 
 typedef struct umq_flow_control_cfg {
     // set when rx >= initial_window at first, [1, rx_depth], otherwise use rx_depth / 2 by default
