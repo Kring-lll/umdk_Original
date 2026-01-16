@@ -67,6 +67,8 @@ constexpr uint32_t OP_TYPE_ALL_TO_ALL = 8U;  // numeric representation of AlltoA
 constexpr uint32_t INPUT_SEND_DATA_INDEX = 0;
 constexpr uint32_t INPUT_TOKEN_PER_EXPERT_INDEX = 1;
 constexpr uint32_t INPUT_TMP_DATA_INDEX = 2;
+constexpr uint32_t NUM_2 = 2;
+constexpr uint32_t NUM_4 = 2;
 
 constexpr uint32_t OUTPUT_SEND_DATA_OFFSET_INDEX = 0;
 constexpr uint32_t OUTPUT_RECV_DATA_INDEX = 1;
@@ -227,9 +229,9 @@ static bool CheckTensorDataType(gert::TilingContext *context, const char *nodeNa
         return false);
     uint64_t dataSize;
     if ((sendData->GetDataType() == ge::DT_BF16) || (sendData->GetDataType() == ge::DT_FLOAT16)) {
-        dataSize = 2;
+        dataSize = NUM_2;
     } else {
-        dataSize = 4;
+        dataSize = NUM_4;
     }
     auto tokenPerExpertData = context->GetInputDesc(INPUT_TOKEN_PER_EXPERT_INDEX);
     OP_TILING_CHECK(tokenPerExpertData == nullptr, OP_LOGE(nodeName, "tokenPerExpertData is null."), return false);
