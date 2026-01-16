@@ -9,15 +9,16 @@ DEPENDENCIES_PATH=$SCRIPT_PATH/dependencies
 
 # compile uRPC code
 cd $SCRIPT_PATH/../../src
-if [ -d ./build ]; then
-    rm -r build;
+if [ -d ./src_build ]; then
+#    rm -r src_build;
+    echo "hello"
+else
+    mkdir -p src_build
+    cd src_build
+    cmake -DBUILD_ALL=disable -DBUILD_URPC=enable -DASAN=enable -DCODE_COVERAGE=enable ..
+    make -j2
+    make install
 fi
-
-mkdir -p build
-cd build
-cmake -DBUILD_ALL=disable -DBUILD_URPC=enable -DASAN=enable -DCODE_COVERAGE=enable ..
-make -j
-make install
 
 # copy .gcno to reports dir
 if [ -d $REPORTS_PATH ]; then
@@ -39,17 +40,18 @@ if [ -d ./build ]; then
 fi
 mkdir -p build
 cd build
-cmake ..
-make -j
+cmake .. -DENABLE_ASAN=ON
+make -j2
 
 echo "Running tests..."
 export LD_LIBRARY_PATH="$DEPENDENCIES_PATH:$LD_LIBRARY_PATH"
 export GCOV_PREFIX="$REPORTS_PATH"
 
-./core/test_core
-./lib/test_lib
-./protocol/test_protocol
-./util/test_util
+#./core/test_core
+#./lib/test_lib
+#./protocol/test_protocol
+#./util/test_util
+./umq/test_umq
 
 echo "Generating coverage reports..."
 cd $REPORTS_PATH

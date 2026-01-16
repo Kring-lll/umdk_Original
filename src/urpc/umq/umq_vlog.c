@@ -15,6 +15,7 @@
 #include "umq_vlog.h"
 
 static umq_vlog_config_t g_umq_log_config = {
+    .log_flag = UMQ_LOG_FLAG_LEVEL | UMQ_LOG_FLAG_RATE_LIMITED,
     .ctx = {
         .level = UTIL_VLOG_LEVEL_INFO,
         .vlog_name = "UMQ",

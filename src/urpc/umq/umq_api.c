@@ -270,9 +270,6 @@ int umq_log_config_get(umq_log_config_t *config)
     config->func = log_config->ctx.vlog_output_func;
     config->rate_limited.interval_ms = log_config->ctx.rate_limited.interval_ms;
     config->rate_limited.num = log_config->ctx.rate_limited.num;
-    if (config->func == default_vlog_output) {
-        config->func = NULL;
-    }
     (void)pthread_mutex_unlock(&log_config->log_lock);
 
     return UMQ_SUCCESS;

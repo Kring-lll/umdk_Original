@@ -186,7 +186,9 @@ static ALWAYS_INLINE uint32_t release_batch(umq_buf_list_t *input, umq_buf_list_
     umq_buf_t *last_node = NULL;
     QBUF_LIST_FOR_EACH(cur_node, input) {
         if (cur_node->alloc_state == QBUF_ALLOC_STATE_FREE) {
-            UMQ_VLOG_ERR("qbuf detect double free\n");
+            UMQ_VLOG_ERR("qbuf %p detect double free, next %p, total size %u, data size %u, buf size %u, state %d\n",
+                         cur_node, cur_node->qbuf_next, cur_node->total_data_size, cur_node->buf_size,
+                         cur_node->data_size, cur_node->alloc_state);
         }
         cur_node->alloc_state = QBUF_ALLOC_STATE_FREE;
         ++cnt;
