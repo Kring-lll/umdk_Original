@@ -213,7 +213,8 @@ static bool CheckTensorDataType(gert::TilingContext *context, const char *nodeNa
             "tokenPerExpertData datatype is invalid, datatype should be bf16 or float16 or float or int, but is %d.",
             static_cast<ge::DataType>(tokenPerExpertData->GetDataType())),
         return false);
-    auto tmpData = context->GetInputDesc(INPUT_TMP_DATA_INDEX);  // 用于算子中临时存数的空间，与recvData相同大小
+    // for saving intermiadiate vars in kernel, same size as recvData
+    auto tmpData = context->GetInputDesc(INPUT_TMP_DATA_INDEX);
     OP_TILING_CHECK(tmpData == nullptr, OP_LOGE(nodeName, "tmpData is null."), return false);
     OP_TILING_CHECK(
         (tmpData->GetDataType() != ge::DT_BF16) && (tmpData->GetDataType() != ge::DT_FLOAT16) &&

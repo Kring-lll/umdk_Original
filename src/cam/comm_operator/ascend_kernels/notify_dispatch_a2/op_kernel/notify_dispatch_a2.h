@@ -32,32 +32,32 @@ __aicore__ inline void SyncFunc()
 template <typename T>
 class NotifyDispatchA2 {
     constexpr static int32_t MAX_CORE_NUM = 20;
-    constexpr static int64_t MULTI_RANK_SIZE = 4;  // 每个core最多往4个rank发送数据，64卡场景
-    constexpr static int64_t MAX_RANK_SIZE = 64;   // 910B设备本算子最大支持的rank数，64卡场景
+    constexpr static int64_t MULTI_RANK_SIZE = 4;  // 64 rank scenario, each core sends to no more than 4 ranks
+    constexpr static int64_t MAX_RANK_SIZE = 64;   // 910B max rank size
     constexpr static int32_t INVALID_RANK = -1;
-    constexpr static uint32_t TEMP_BUF_LEN = 128 * 1024;  // tBuf注册长度为128K，剩余部分注册为其他buffer
+    constexpr static uint32_t TEMP_BUF_LEN = 128 * 1024;  // tBuf length 128K，other part for other buf
 
     constexpr static uint32_t BW_ITEM_SIZE = 32;                               // = sizeof(BatchWriteItem)
-    constexpr static uint32_t U64_PER_ITEM = BW_ITEM_SIZE / sizeof(uint64_t);  // 每个BatchWriteItem占多少个unit64
-    constexpr static uint32_t U32_PER_ITEM = BW_ITEM_SIZE / sizeof(uint32_t);  // 每个BatchWriteItem占多少个unit32
-    constexpr static uint32_t BW_MEB_OFFSET64_LOCAL_GM = 0;  // BatchWriteItem成员变量offset，按照sizeof(unit64)计算
-    constexpr static uint32_t BW_MEB_OFFSET64_REMOTE_GM = 1;  // BatchWriteItem成员变量offset，按照sizeof(unit64)计算
-    constexpr static uint32_t BW_MEB_OFFSET64_DATA_SIZE = 2;  // BatchWriteItem成员变量offset，按照sizeof(unit64)计算
-    constexpr static uint32_t BW_MEB_OFFSET32_DATA_TYPE = 6;  // BatchWriteItem成员变量offset，按照sizeof(unit32)计算
-    constexpr static uint32_t BW_MEB_OFFSET32_TARGET_RANK = 7;  // BatchWriteItem成员变量offset，按照sizeof(unit32)计算
+    constexpr static uint32_t U64_PER_ITEM = BW_ITEM_SIZE / sizeof(uint64_t);  // each BatchWriteItem unit64 num
+    constexpr static uint32_t U32_PER_ITEM = BW_ITEM_SIZE / sizeof(uint32_t);  // each BatchWriteItem unit32 num
+    constexpr static uint32_t BW_MEB_OFFSET64_LOCAL_GM = 0;  // BatchWriteItem offset，sizeof(unit64)
+    constexpr static uint32_t BW_MEB_OFFSET64_REMOTE_GM = 1;  // BatchWriteItem offset，sizeof(unit64)
+    constexpr static uint32_t BW_MEB_OFFSET64_DATA_SIZE = 2;  // BatchWriteItem offset，sizeof(unit64)
+    constexpr static uint32_t BW_MEB_OFFSET32_DATA_TYPE = 6;  // BatchWriteItem offset，sizeof(unit32)
+    constexpr static uint32_t BW_MEB_OFFSET32_TARGET_RANK = 7;  // BatchWriteItem offset，sizeof(unit32)
 
     constexpr static int32_t FLAG_VALUE = 0xFFFFFFFF;
-    constexpr static uint32_t STATUS_ENTRY_SIZE = 32;  // 每个status entry占用的空间大小, bytes
+    constexpr static uint32_t STATUS_ENTRY_SIZE = 32;  // each status entry size, bytes
     constexpr static uint32_t U32_STATUS_ENTRY = STATUS_ENTRY_SIZE / sizeof(int32_t);
-    constexpr static uint32_t FLAG_OFFSET = 8;          // status_flag 在 statusTensor中的offset, bytes
-    constexpr static uint32_t SOURCE_RANK_OFFSET = 16;  // sourceRankId 在 statusTensor中的offset, bytes
-    constexpr static uint32_t DEST_RANK_OFFSET = 20;    // destRankId 在 statusTensor中的offset, bytes
-    constexpr static uint32_t DATALEN_OFFSET = 24;      // dataLen 在 statusTensor中的offset, bytes
-    constexpr static uint32_t UB_ALIGN = 32;            // UB按32字节对齐
+    constexpr static uint32_t FLAG_OFFSET = 8;          // status_flag offset in statusTensor中, bytes
+    constexpr static uint32_t SOURCE_RANK_OFFSET = 16;  // sourceRankId offset in statusTensor, bytes
+    constexpr static uint32_t DEST_RANK_OFFSET = 20;    // destRankId offset in statusTensor, bytes
+    constexpr static uint32_t DATALEN_OFFSET = 24;      // dataLen offset in statusTensor, bytes
+    constexpr static uint32_t UB_ALIGN = 32;            // UB align
     constexpr static uint64_t EXP_TOKEN_COUNT_FLAG_CNT = UB_ALIGN / sizeof(uint64_t);  // 4
-    constexpr static uint32_t GM_ALIGN = 64;                                           // GM按64字节对齐
+    constexpr static uint32_t GM_ALIGN = 64;                                           // GM align
 
-    constexpr static uint32_t MAX_BS = 4096;  // 每卡支持的最大bs
+    constexpr static uint32_t MAX_BS = 4096;  // max batchsize for each rank
     // Synchronization flag occupies length
     constexpr static int64_t FLAG_UNIT_INT_NUM = 4;
     constexpr static int64_t MAGIC_MASK = ~((1LL << 32) - 1);
@@ -117,7 +117,7 @@ private:
 
         ctxIdx = COMM_EP_IDX;
 
-        // 初始化RDMA相关变量
+        // init RDMA params
         auto tilingData = (__gm__ NotifyDispatchA2TilingData *)tiling;
         __gm__ void *mc2InitTiling = (__gm__ void *)(&(tilingData->mc2InitTiling));
         __gm__ void *mc2CcTiling = (__gm__ void *)(&(tilingData->mc2CcTiling1));
@@ -128,7 +128,7 @@ private:
         hccl_.SetCcTiling(mc2CcTiling);
         this->winContext_[COMM_EP_IDX] = (__gm__ HcclOpResParam *)contextGM0;
         notifyMemoryOffset = winContext_[COMM_EP_IDX]->winSize - IPC_BUFF_MAX_SIZE * NUM_2;
-        // 设置并自增magic
+        // set self increase magic
         magicTensor_.SetGlobalBuffer((__gm__ uint64_t *)(hccl_.GetWindowsInAddr(rank) + IPC_DATA_OFFSET -
                                                          blockNum * sizeof(uint64_t) * EXP_TOKEN_COUNT_FLAG_CNT +
                                                          notifyMemoryOffset));
@@ -136,17 +136,17 @@ private:
         pipe.InitBuffer(this->tBuf, TEMP_BUF_LEN);
         LocalTensor<uint64_t> tempLocal = tBuf.Get<uint64_t>();
         tempLocal(0) = 1;
-        // 使用atomic方式实现+1
+        // +1 by atomic add
         AscendC::SetAtomicAdd<uint64_t>();
         AscendC::SetFlag<HardEvent::S_MTE3>(EVENT_ID0);
-        AscendC::WaitFlag<HardEvent::S_MTE3>(EVENT_ID0);  // 等待SetValue完成
+        AscendC::WaitFlag<HardEvent::S_MTE3>(EVENT_ID0);  // wait SetValue
         DataCopy(magicTensor_[blockIdx * EXP_TOKEN_COUNT_FLAG_CNT], tempLocal, EXP_TOKEN_COUNT_FLAG_CNT);
         AscendC::SetAtomicNone();
         AscendC::SetFlag<HardEvent::MTE3_S>(EVENT_ID0);
-        AscendC::WaitFlag<HardEvent::MTE3_S>(EVENT_ID0);  // 等待DataCopy完成
+        AscendC::WaitFlag<HardEvent::MTE3_S>(EVENT_ID0);  // wait DataCopy
         magic = magicTensor_.GetValue(blockIdx * EXP_TOKEN_COUNT_FLAG_CNT);
         PipeBarrier<PIPE_ALL>();
-        // 初始化目标rank的shareAddrs
+        // init target rank shareAddrs
         for (int i = 0; i < rankSize; i++) {
             this->shareAddrs[i] =
                 hccl_.GetWindowsInAddr(i) + notifyMemoryOffset + (magic % PING_PONG_SIZE) * IPC_BUFF_MAX_SIZE;
@@ -179,23 +179,23 @@ private:
 
     int64_t queLen;
     int64_t queSize;
-    int64_t queElemLen;  // 共享内存队列里每个元素大小（以sizeof(T)计）
+    int64_t queElemLen;  // share queue element size (sizeof(T))
 
-    int64_t coreNumBetween;  // 分层通信第一阶段，Server间通信使用的核数
-    int64_t coreNumWithin;   // 分层通信第二阶段，Server内通信使用的核数
-    int32_t rankNumPerCore;  // 每个核负责的rank数
+    int64_t coreNumBetween;  // step1，core num for comm between Server
+    int64_t coreNumWithin;   // step2，core num for comm inside server
+    int32_t rankNumPerCore;
 
-    // RDMA相关变量
-    int32_t serverNum;                    // Server数量
-    int32_t serverId;                     // 本卡所属的server ID
-    int32_t targetRank[MULTI_RANK_SIZE];  // 当前核心跨Server发送数据的目标rank Id，即数据最终的目标rank
-    int32_t targetRankNum;  // 当前核心跨Server发送数据的目标rank Id的数量，小于等于MULTI_RANK_SIZE
+    // RDMA params
+    int32_t serverNum;                    // Server num
+    int32_t serverId;                     // local server ID
+    int32_t targetRank[MULTI_RANK_SIZE];  // cross Server send data target rank Id，final target rank
+    int32_t targetRankNum;  // cross Server send target rank Id's num'，<=MULTI_RANK_SIZE
     int64_t perRankDataNum;
 
     int rank;
     int rankSize;
     int localRank = 0;
-    int localRankSize = 0;  // 在910A5中，表示一块板子上使用的卡数，在910B上表示单机内卡数。
+    int localRankSize = 0;
     int xRankSize = 0;
     int yRankSize = 0;
     int xRankIdx = 0;
@@ -208,28 +208,28 @@ private:
     int64_t numTokens;
     int64_t len;
     uint64_t magic;
-    int64_t blockIdx;  // 当前aicore序号
-    int64_t blockNum;  // 当前rank的总aicore数
+    int64_t blockIdx;
+    int64_t blockNum;
     int64_t timeout;
     GM_ADDR scale;
-    GM_ADDR shareAddrs[CAM_MAX_RANK_SIZE];  // 共享内存地址列表
+    GM_ADDR shareAddrs[CAM_MAX_RANK_SIZE];  // sharememory list
     __gm__ HcclOpResParam *winContext_[COMM_NUM]{nullptr, nullptr};
-    TPipe pipe;  // pipe工具类
+    TPipe pipe;  // pipe
     TBuf<QuePosition::VECCALC> tBuf;
 
     Hccl<HCCL_SERVER_TYPE_AICPU> hccl_;
     GM_ADDR windowInGM_;
     GM_ADDR windowOutGM_;
-    GlobalTensor<uint64_t> magicTensor_;  // 用于存放magic，位于windowInstatusTensor_之前
+    GlobalTensor<uint64_t> magicTensor_;  // saving magic，located before windowInstatusTensor_
     GlobalTensor<uint32_t> batchWriteInfoTensor_;
-    GlobalTensor<int32_t> windowInstatusTensor_;  // 用于rank间状态同步
+    GlobalTensor<int32_t> windowInstatusTensor_;  // status sync between rank
     GlobalTensor<T> windowInTensor_;
-    GlobalTensor<int32_t> windowOutstatusTensor_;  // 用于rank间状态同步
+    GlobalTensor<int32_t> windowOutstatusTensor_;  // status sync between rank
     GlobalTensor<T> windowOutTensor_;
-    TBuf<> batchWriteInfoBuf_;  // 临时存放 batch write info
+    TBuf<> batchWriteInfoBuf_;  // for saving tmp batch write info
     TBuf<> tempBuf_;
     TBuf<> statusBuf_;
-    LocalTensor<int32_t> statusTensor_;  // 临时存放statusFlag
+    LocalTensor<int32_t> statusTensor_;  // for saving tmp statusFlag
     TBuf<> tokenPerExpertDataBuf;
     TBuf<> sendDataOffsetBuf;
     TBuf<> sendDataBuf;
@@ -248,45 +248,55 @@ private:
     uint32_t tokenPerExpertDataAlignLen{0};
     uint32_t sendDataOffsetAlignLen{0};
 
-    uint32_t numTokensPerExpertAlignLen{0};   // 每个expert从本卡接收的token个数，对应一个rank的数据
-    uint32_t gNumTokensPerExpertAlignLen{0};  // 全局，包含所有rank的
-    uint32_t numTokensUniquePerServerAlignLen{0};  // 每个server从本卡接收的token个数(去重)，对应一个rank的
-    uint32_t gNumTokensUniquePerServerAlignLen{0};  // 全局，包含所有rank的
-    uint32_t numTokensPerServerAlignLen{0};  // 本卡每个token发到每个server的个数(不去重), 对应一个rank的
-    uint32_t gNumTokensPerServerAlignLen{0};  // 全局，包含所有rank的
-    uint32_t tokenServerCntAlignLen{0};       // 本卡每个token发给多少个server, 对应一个rank的
-    uint32_t gTokenServerCntAlignLen{0};      // 全局，包含所有rank的
-    uint32_t tokenServerIdxAlignLen{0};       // 本卡每个token发送给各个server的顺序, 对应一个rank的
-    uint32_t gTokenServerIdxAlignLen{0};      // 全局，包含所有rank的
-    uint32_t tokenExpertIdxAlignLen{0};       // 每个token发到expert的顺序, 对应一个rank的
-    uint32_t gTokenExpertIdxAlignLen{0};      // 全局，包含所有rank的
-    uint32_t expertMaxBsSrcOffsetAlignLen{0};  // 每个expert从本卡接收的token的server内offset, 对应一个rank的
-    uint32_t gExpertMaxBsSrcOffsetAlignLen{0};  // 全局，包含所有rank的
-    uint32_t expertMaxBsOriOffsetAlignLen{0};  // 每个expert从本卡接收的token在原卡上的origin_offset, 对应一个rank的
-    uint32_t gExpertMaxBsOriOffsetAlignLen{0};  // 全局，包含所有rank的
+    uint32_t numTokensPerExpertAlignLen{0};        // Tokens this card sends to each expert (per-rank view)
+    uint32_t gNumTokensPerExpertAlignLen{0};       // Global version: tokens per expert across all ranks
+    // Unique tokens this card sends to each server (per-rank, duplicates removed)
+    uint32_t numTokensUniquePerServerAlignLen{0};
+    uint32_t gNumTokensUniquePerServerAlignLen{0}; // Global version of the above
+    uint32_t numTokensPerServerAlignLen{0};        // Tokens this card sends to each server (per-rank, duplicates kept)
+    uint32_t gNumTokensPerServerAlignLen{0};       // Global version of the above
+    uint32_t tokenServerCntAlignLen{0};            // How many servers each token on this card is sent to (per-rank)
+    uint32_t gTokenServerCntAlignLen{0};           // Global version of the above
+    // Server indices each token on this card is sent to, in order (per-rank)
+    uint32_t tokenServerIdxAlignLen{0};
+    uint32_t gTokenServerIdxAlignLen{0};           // Global version of the above
+    uint32_t tokenExpertIdxAlignLen{0};            // Expert indices each token is sent to, in order (per-rank)
+    uint32_t gTokenExpertIdxAlignLen{0};           // Global version of the above
+    // Per-expert offset inside the server for tokens from this card (per-rank)
+    uint32_t expertMaxBsSrcOffsetAlignLen{0};
+    uint32_t gExpertMaxBsSrcOffsetAlignLen{0};     // Global version of the above
+    // Per-expert original offset on the source card for tokens from this card (per-rank)
+    uint32_t expertMaxBsOriOffsetAlignLen{0};
+    uint32_t gExpertMaxBsOriOffsetAlignLen{0};     // Global version of the above
     uint32_t notifyMemoryOffset{0};
 
-    GlobalTensor<int32_t> gRankEpTokenCntGT_;  // 临时数据
-    GlobalTensor<int32_t> gExpertMaxBsSrcGT_;  // 临时数据
+    GlobalTensor<int32_t> gRankEpTokenCntGT_;  // temp data
+    GlobalTensor<int32_t> gExpertMaxBsSrcGT_;  // temp data
 
-    GlobalTensor<int32_t>
-        tokenServerIdxOutputGT_;  // token发送给对应server的token序号，-1表示没有，0-N表示序号 [bs, serverNum]
-    GlobalTensor<int32_t>
-        tokensUniquePerServerOutputGT_;  // 当前rank发送给对应server的token个数 [serverNum] -> value:count数量
-    GlobalTensor<int32_t>
-        epRankTokenCntOutputGT_;  // 每个专家、从rank接收的token数量 [expert_num, rank_num] -> value:token_cnt
-    GlobalTensor<int64_t> localEpTokenCntOutputGT_;  // 本卡每个专家接收的token数量 [local_expert_num]
-    GlobalTensor<int32_t> srcOffsetRankTokenIdxOutputGT_;  // 每个专家、从rank接收的token源端偏移 [expert_num, rank_num,
-                                                           // token_idx] -> value:src_offset
-    GlobalTensor<int32_t> dstOffsetRankTokenIdxOutputGT_;  // 每个专家、从rank接收的token目的端偏移 [expert_num,
-                                                           // rank_num, token_idx] -> value:dst_offset
-    GlobalTensor<int32_t> countInnerOutputGT_;   // token给各个server发送个数    弃用
-    GlobalTensor<int32_t> offsetInnerOutputGT_;  // 存放全局的expandIdx, [globalBs, expertNum]
-    GlobalTensor<int32_t> countOuterOutputGT_;   // 每个token发送到的server数量 [bs] -> value:server数量
-    GlobalTensor<int32_t> offsetOuterOutputGT_;  // 每个token在server上的位次    同tokenServerIdxOutputGT_
-    GlobalTensor<int32_t>
-        expandIdxOutputGT_;  // 给同一专家的token个数 [bs * numExperts], topk_idx的同专家前缀和扩维到所有专家维度
-    GlobalTensor<int32_t> totalRecvTokensOutputGT_;  // 本卡收到的token总数, [1] -> value:count
+    // Token-to-server index: -1 = not sent, 0-N = ordinal on target server [bs, serverNum]
+    GlobalTensor<int32_t> tokenServerIdxOutputGT_;
+    // Tokens this rank sends to each server [serverNum] → value: count
+    GlobalTensor<int32_t> tokensUniquePerServerOutputGT_;
+    // Tokens each expert receives from every rank [expert_num, rank_num] → value: token_cnt
+    GlobalTensor<int32_t> epRankTokenCntOutputGT_;
+    // Tokens each local expert on this card receives [local_expert_num]
+    GlobalTensor<int64_t> localEpTokenCntOutputGT_;
+    // Per-expert, per-rank, per-token source offset [expert_num, rank_num, token_idx] → value: src_offset
+    GlobalTensor<int32_t> srcOffsetRankTokenIdxOutputGT_;
+    // Per-expert, per-rank, per-token destination offset [expert_num, rank_num, token_idx] → value: dst_offset
+    GlobalTensor<int32_t> dstOffsetRankTokenIdxOutputGT_;
+    // Tokens sent to each server (deprecated)
+    GlobalTensor<int32_t> countInnerOutputGT_;
+    // Global expand indices [globalBs, expertNum]
+    GlobalTensor<int32_t> offsetInnerOutputGT_;
+    // How many servers each token is sent to [bs] → value: server count
+    GlobalTensor<int32_t> countOuterOutputGT_;
+    // Ordinal position of each token on its target server (same semantics as tokenServerIdxOutputGT_)
+    GlobalTensor<int32_t> offsetOuterOutputGT_;
+    // Expanded per-expert token counts [bs * numExperts]; prefix-sum of top-k indices replicated across all experts
+    GlobalTensor<int32_t> expandIdxOutputGT_;
+    // Total tokens received by this card [1] → value: count
+    GlobalTensor<int32_t> totalRecvTokensOutputGT_;
 };
 
 template <typename T>
