@@ -592,6 +592,18 @@ typedef struct umq_cfg_get {
     umq_state_t state;            // queue state
 } umq_cfg_get_t;
 
+typedef struct umq_qbuf_info {
+    umq_buf_mode_t mode;                        // split or combine
+    uint64_t total_size;                        // 内存池管理的内存总大小
+    uint32_t block_size;                        // headroom size + data size以8K为大小向上取整，如果是combine模式还包括umq_qbuf_t结构体大小
+    uint64_t total_block_num;                   // 总的block数量
+    uint32_t headroom_size;                     // 预留的头部空间大小
+    uint64_t available_block_num_with_data;
+    uint64_t available_size_with_data;
+    uint64_t available_block_num_without_data; 
+    uint64_t available_size_without_data;
+} umq_qbuf_info_t;
+
 #ifdef __cplusplus
 }
 #endif

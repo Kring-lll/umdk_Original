@@ -88,6 +88,7 @@ void *umq_io_buf_malloc(umq_buf_mode_t buf_mode, uint64_t size);
 void umq_io_buf_free(void);
 void *umq_io_buf_addr(void);
 uint64_t umq_io_buf_size(void);
+int umq_qbuf_info_get_impl(umq_qbuf_info_t *qbuf_info);
 
 /*
  * init qbuf pool

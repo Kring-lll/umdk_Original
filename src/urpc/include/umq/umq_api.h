@@ -321,6 +321,13 @@ int umq_dev_info_get(char *dev_name, umq_trans_mode_t umq_trans_mode, umq_dev_in
  */
 int umq_cfg_get(uint64_t umqh, umq_cfg_get_t *cfg);
 
+/**
+ * Query qbuf info
+ * @param[out] qbuf_info: qbuf information for umq
+ * Return 0 on success, error code on failure
+ */
+int umq_qbuf_info_get(umq_qbuf_info_t *qbuf_info);
+
 #ifdef __cplusplus
 }
 #endif
