@@ -299,16 +299,36 @@ typedef struct umq_alloc_option {
     uint16_t headroom_size;
 } umq_alloc_option_t;
 
+typedef struct umq_credit_pool_stats {
+    uint64_t pool_idle; //当前信用池可用的信用数
+    uint64_t pool_be_allocated; //当前信用池被分配取走的信用数
+    uint64_t rsvd0[2];
+    uint64_t total_pool_idle;//当前信用池充值累计总额
+    uint64_t total_pool_be_allocated;
+    uint64_t rsvd1[2];
+    uint64_t total_pool_post_rx_err; //当前信用池补充失败的累计总额
+    uint64_t rsvd2[2];
+} umq_credit_pool_stats_t;
+
+typedef struct umq_credit_private_stats {
+    uint64_t queue_idle; // queue粒度待分配给对端接收的信用
+    uint64_t queue_be_allocted; // queue粒度已分配给对端的接收信用
+    uint64_t queue_acquired; //queue粒度从对端获取到的信用，用于本端TX方向发送
+    uint64_t rsvd0[2];
+    uint64_t total_queue_idle; // queue粒度待分配给对端接收信用累计值
+    uint64_t total_queue_acquired;//queue粒度从对端获取到的信用累计值，用于本端TX方向发送
+    uint64_t total_be_allocated; //queue粒度已分配给对端的接收信用累计值
+    uint64_t rsvd1[2];
+    uint64_t total_queue_post_tx_success;// queue粒度，回复失败，进行累计
+    uint64_t total_queue_be_allocted_err;// queue粒度，回复失败，进行累计
+    uint64_t total_queue_acquired_err; // 发送失败
+    uint64_t total_queue_post_tx_err; //本端发包由于对端接收队列可用信用不足失败的wr数量
+    uint64_t rsvd[4];
+} umq_credit_private_stats_t;
+
 typedef struct umq_flow_control_stats {
-    uint64_t local_rx_posted;
-    uint64_t remote_rx_window;
-    uint64_t total_local_rx_posted;
-    uint64_t total_local_rx_notified;
-    uint64_t total_local_rx_posted_error;
-    uint64_t total_remote_rx_received;
-    uint64_t total_remote_rx_consumed;
-    uint64_t total_remote_rx_received_error;
-    uint64_t total_flow_controlled_wr;
+    umq_credit_pool_stats_t pool_credit;
+    umq_credit_private_stats_t queue_credit;
 } umq_flow_control_stats_t;
 
 typedef enum umq_dfx_module_id {

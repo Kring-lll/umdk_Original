@@ -675,7 +675,7 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
     if (queue->flow_control.enabled) {
         // fc jetty
         umq_ub_rx_consumed_exchange(queue->dev_ctx->io_lock_free,
- 	        &queue->dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id], 0);
+            &queue->dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id], 0);
         queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL] =
             umq_ub_jfr_ctx_create(queue, dev_ctx, UB_QUEUE_JETTY_FLOW_CONTROL);
         if (queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL] == NULL) {
@@ -1498,9 +1498,10 @@ int umq_ub_user_ctl_impl(uint64_t umqh_tp, umq_user_ctl_in_t *in, umq_user_ctl_o
         UMQ_VLOG_ERR("umq ub user ctl parameter invalid\n");
         return -UMQ_ERR_EINVAL;
     }
-
     umq_flow_control_stats_t *stats = (umq_flow_control_stats_t *)(uintptr_t)out->addr;
-    queue->flow_control.ops.stats_query(&queue->flow_control, stats);
+    ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    pool->ops.stats_query(pool, &stats->pool_credit);
+    queue->flow_control.ops.stats_query(&queue->flow_control, queue, &stats->queue_credit);
     return UMQ_SUCCESS;
 }
 
