@@ -7,10 +7,10 @@
  * History: 2026-01-05 add notify dispatch interface cpp file.
  */
 
-#include "aclnn_notify_dispatch.h"
+#include <string.h>
 #include "aclnnInner_notify_dispatch.h"
 #include "graph/types.h"
-#include <string.h>
+#include "aclnn_notify_dispatch.h"
 
 extern void NnopbaseOpLogE(const aclnnStatus code, const char *const expr);
 
@@ -19,10 +19,10 @@ extern "C" {
 #endif
 
 namespace {
-    static constexpr int32_t NNOPBASE_HCCL_SERVER_TYPE_AICPU = 0;
-    static constexpr int32_t NNOPBASE_HCCL_SERVER_TYPE_MTE = 1;
-    static constexpr int32_t NNOPBASE_HCCL_SERVER_TYPE_END = 2;
-}; // namespace
+static constexpr int32_t NNOPBASE_HCCL_SERVER_TYPE_AICPU = 0;
+static constexpr int32_t NNOPBASE_HCCL_SERVER_TYPE_MTE = 1;
+static constexpr int32_t NNOPBASE_HCCL_SERVER_TYPE_END = 2;
+} // namespace
 extern "C" void __attribute__((weak)) NnopbaseSetHcclServerType(void *executor, int32_t sType);
 
 aclnnStatus aclnnNotifyDispatchGetWorkspaceSize(const aclTensor *sendData, const aclTensor *tokenPerExpertData,

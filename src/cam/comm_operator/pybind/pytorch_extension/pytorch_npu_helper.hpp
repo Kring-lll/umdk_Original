@@ -109,7 +109,7 @@ constexpr aclDataType kATenScalarTypeToAclDataTypeTable[static_cast<int64_t>(at:
 
 inline bool IsOpInputBaseFormat(const at::Tensor &tensor)
 {
-    if (tensor.device().type() != at::DeviceType::PrivateUse1) {
+    if (!tensor.is_privateuseone()) {
         return true;
     }
     const auto format = umdk::NPUBridge::GetNpuStorageImplDesc(tensor).npu_format_;
