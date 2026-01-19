@@ -185,6 +185,7 @@ static void nl_unexpose_device_by_eid(const char *eid, const char *netns)
     ub_dev = get_urma_device_by_eid(eid);
     if (ub_dev == NULL) {
         printf("Failed to get dev by eid.\n");
+        return;
     }
     printf("Unexposing device %s in netns %s.\n", ub_dev->name, netns);
     int ret = admin_cmd_dev_unexpose(ub_dev->name, netns);
@@ -213,9 +214,11 @@ static int nl_expose_agg_device(struct tool_topo_agg_dev *agg_dev, const char *n
     return 0;
 
 unexpose_agg_dev:
-    for (int i = ue_idx - 1; i >= 0; i--) {
-        tool_topo_ue_t *ue = &agg_dev->ues[i];
-        nl_unexpose_device_by_eid(ue->primary_eid, netns);
+    if (ue_idx > 0) {
+        for (int i = ue_idx - 1; i >= 0; i--) {
+            tool_topo_ue_t *ue = &agg_dev->ues[i];
+            nl_unexpose_device_by_eid(ue->primary_eid, netns);
+        }
     }
     nl_unexpose_device_by_eid(agg_dev->agg_eid, netns);
     return -1;
