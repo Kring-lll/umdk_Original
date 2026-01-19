@@ -421,6 +421,27 @@ umq_buf_mode_t umq_qbuf_mode_get(void)
     return g_qbuf_pool.mode;
 }
 
+int umq_qbuf_pool_info_get_impl(umq_qbuf_pool_info_t *qbuf_pool_info)
+{
+    if (!g_qbuf_pool.inited) {
+        UMQ_VLOG_ERR("qbuf pool has not been inited\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    uint32_t block_size = g_qbuf_pool.block_size;
+    uint32_t qbuf_size = (uint32_t)sizeof(umq_buf_t);
+    qbuf_pool_info->mode = g_qbuf_pool.mode;
+    qbuf_pool_info->total_size = g_qbuf_pool.total_size;
+    qbuf_pool_info->headroom_size = g_qbuf_pool.headroom_size;
+    qbuf_pool_info->block_size = block_size;
+    qbuf_pool_info->total_block_num = g_qbuf_pool.total_block_num;
+    qbuf_pool_info->available_block_num_with_data = g_qbuf_pool.block_pool.buf_cnt_with_data;
+    qbuf_pool_info->available_size_with_data = g_qbuf_pool.block_pool.buf_cnt_with_data * (block_size + qbuf_size);
+    qbuf_pool_info->available_block_num_without_data = g_qbuf_pool.block_pool.buf_cnt_without_data;
+    qbuf_pool_info->available_size_without_data = g_qbuf_pool.block_pool.buf_cnt_without_data * qbuf_size;
+    return UMQ_SUCCESS;
+}
+
 int umq_qbuf_register_seg(uint8_t *ctx, register_seg_callback_t register_seg_func)
 {
     return register_seg_func(ctx, UMQ_QBUF_DEFAULT_MEMPOOL_ID, g_qbuf_pool.data_buffer,  g_qbuf_pool.total_size);

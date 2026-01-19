@@ -1161,3 +1161,13 @@ int umq_cfg_get(uint64_t umqh, umq_cfg_get_t *cfg)
     }
     return umq->tp_ops->umq_tp_cfg_get(umq->umqh_tp, cfg);
 }
+
+int umq_qbuf_pool_info_get(umq_qbuf_pool_info_t *qbuf_pool_info)
+{
+    if (!g_umq_inited || qbuf_pool_info == NULL) {
+        UMQ_VLOG_ERR("umq has not been inited or qbuf_pool_info is null\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    return umq_qbuf_pool_info_get_impl(qbuf_pool_info);
+}
