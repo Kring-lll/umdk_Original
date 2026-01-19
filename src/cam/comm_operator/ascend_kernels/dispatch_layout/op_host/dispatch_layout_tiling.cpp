@@ -28,6 +28,7 @@
 #include "../op_kernel/dispatch_layout_tiling.h"
 
 using namespace ge;
+using namespace Moe;
 namespace {
 constexpr uint32_t INPUT_TOPK_IDX_INDEX = 0;
 
@@ -67,10 +68,10 @@ static void PrintTilingDataInfo(const char *nodeName, const DispatchLayoutTiling
     OP_LOGD(nodeName, "totalUbSize is %lu.", tilingData.dispatchLayoutInfo.totalUbSize);
 }
 
-static bool CheckIfA2MultiMachine(gert::TilingContext *context,
-                                  DispatchLayoutTilingData &tilingData)
+static bool CheckIfA2MultiMachine(const gert::TilingContext &context,
+                                  const DispatchLayoutTilingData &tilingData)
 {
-    fe::PlatFormInfos *platformInfoPtr = context->GetPlatformInfo();
+    fe::PlatFormInfos *platformInfoPtr = context.GetPlatformInfo();
     OP_TILING_CHECK(platformInfoPtr == nullptr, OP_LOGE("DispatchLayoutTilingFunc", "platformInfoPtr is nullptr."),
         return ge::GRAPH_FAILED);
     fe::PlatFormInfos &platformInfo = *platformInfoPtr;
@@ -88,7 +89,7 @@ static bool CheckIfA2MultiMachine(gert::TilingContext *context,
 }
 
 static ge::graphStatus GetAttrAndSetTilingData(const gert::TilingContext &context, const char *nodeName,
-    DispatchLayoutTilingData &tilingData)
+                                               DispatchLayoutTilingData &tilingData)
 {
     auto attrs = context.GetAttrs();
     OP_TILING_CHECK(attrs == nullptr, OP_LOGE(nodeName, "attrs is nullptr."), return ge::GRAPH_FAILED);
@@ -107,11 +108,13 @@ static ge::graphStatus GetAttrAndSetTilingData(const gert::TilingContext &contex
                     return ge::GRAPH_FAILED);
 
     OP_TILING_CHECK((*numRanksPtr <= 0) || (*numRanksPtr > MAX_COMM_WORLD_SIZE),
-        OP_LOGE(nodeName, "rankSize is invalid, only support (0, %ld], but got rankSize=%ld.",
-            MAX_COMM_WORLD_SIZE, *numRanksPtr), return ge::GRAPH_FAILED);
+                    OP_LOGE(nodeName, "rankSize is invalid, only support (0, %ld], but got rankSize=%ld.",
+                            MAX_COMM_WORLD_SIZE, *numRanksPtr),
+                    return ge::GRAPH_FAILED);
     OP_TILING_CHECK((*numExpertsPtr <= 0) || (*numExpertsPtr > MAX_MOE_EXPERTS_NUM),
-        OP_LOGE(nodeName, "numExperts is invalid, only support (0, %ld], but got numExperts=%ld.",
-            MAX_MOE_EXPERTS_NUM, *numExpertsPtr), return ge::GRAPH_FAILED);
+                    OP_LOGE(nodeName, "numExperts is invalid, only support (0, %ld], but got numExperts=%ld.",
+                            MAX_MOE_EXPERTS_NUM, *numExpertsPtr),
+                    return ge::GRAPH_FAILED);
     OP_TILING_CHECK((*numExpertsPtr % *numRanksPtr) != 0,
                     OP_LOGE(nodeName, "numExperts must be divisible by numRanks, but numExperts=%ld and numRanks=%ld.",
                             *numExpertsPtr, *numRanksPtr),
@@ -157,7 +160,7 @@ static bool CheckTensorDataType(const gert::TilingContext &context, const char *
     auto numTokensPerRank = context.GetOutputDesc(OUTPUT_NUM_TOKEN_PER_RANK_INDEX);
     auto numTokensPerExpert = context.GetOutputDesc(OUTPUT_NUM_TOKEN_PER_EXPERT_INDEX);
     auto isTokenInRank = context.GetOutputDesc(OUTPUT_IS_TOKEN_IN_RANK_INDEX);
-    auto notifySendData = context->GetOutputDesc(OUTPUT_NOTIFY_SEND_DATA_INDEX);
+    auto notifySendData = context.GetOutputDesc(OUTPUT_NOTIFY_SEND_DATA_INDEX);
 
     OP_TILING_CHECK(topkIdx == nullptr, OP_LOGE(nodeName, "topkIdx is null."), return false);
     OP_TILING_CHECK(numTokensPerRank == nullptr, OP_LOGE(nodeName, "numTokensPerRank is null."), return false);
@@ -202,7 +205,7 @@ static bool CheckTensorShape(const gert::TilingContext &context, const char *nod
     return true;
 }
 
-static ge::graphStatus TilingCheckTensor(gert::TilingContext &context, const char *nodeName)
+static ge::graphStatus TilingCheckTensor(const gert::TilingContext &context, const char *nodeName)
 {
     OP_TILING_CHECK(!CheckTensorDataType(context, nodeName), OP_LOGE(nodeName, "params dataType is invalid."),
                     return ge::GRAPH_FAILED);
@@ -251,7 +254,7 @@ static ge::graphStatus DispatchLayoutTilingFuncImpl(gert::TilingContext &context
 
 static ge::graphStatus DispatchLayoutTilingFunc(gert::TilingContext *context)
 {
-    ge::graphStatus ret = DispatchLayoutTilingFuncImpl(context);
+    ge::graphStatus ret = DispatchLayoutTilingFuncImpl(*context);
     return ret;
 }
 
