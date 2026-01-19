@@ -119,15 +119,6 @@ static inline bool urma_eid_is_valid(urma_eid_t *eid)
     return !(eid->in6.interface_id == 0 && eid->in6.subnet_prefix == 0);
 }
 
-static urma_device_t* get_urma_device_by_eid(const char *eid)
-{
-    urma_device_t *ub_dev = NULL;
-    urma_eid_t urma_eid = {0};
-    memcpy(&urma_eid, eid, sizeof(urma_eid_t));
-    ub_dev = urma_get_device_by_eid(urma_eid, URMA_TRANSPORT_UB);
-    return ub_dev;
-}
-
 static tool_topo_agg_dev_t *get_topo_agg_dev_by_agg_eid(tool_topo_map_t *topo_map, urma_eid_t *agg_eid)
 {
     for (int i = 0; i < topo_map->node_num; i++) {
@@ -146,50 +137,49 @@ static tool_topo_agg_dev_t *get_topo_agg_dev_by_agg_eid(tool_topo_map_t *topo_ma
 static int nl_expose_device_by_eid(const char *eid, const char *netns)
 {
     int ret = 0;
-    urma_device_t *ub_dev = NULL;
-    ub_dev = get_urma_device_by_eid(eid);
-    if (ub_dev == NULL) {
-        printf("Failed to get dev by eid.\n");
-        return -1;
-    }
-    printf("Exposing device %s in netns %s.\n", ub_dev->name, netns);
-    ret = admin_cmd_dev_expose(ub_dev->name, netns);
+    admin_device_info_t dev_info = {0};
+    ret = admin_get_device_info_by_eid((urma_eid_t *)eid, &dev_info);
     if (ret != 0) {
-        (void)printf("Failed to expose device %s in netns %s, ret=%d.\n", ub_dev->name, netns, ret);
+        (void)printf("Failed to get device name by eid, ret=%d.\n", ret);
+        return ret;
+    }
+    printf("Exposing device %s in netns %s.\n", dev_info.dev_name, netns);
+    ret = admin_cmd_dev_expose(dev_info.dev_name, netns);
+    if (ret != 0) {
+        (void)printf("Failed to expose device %s in netns %s, ret=%d.\n", dev_info.dev_name, netns, ret);
+        free(dev_info.eid_list);
         return ret;
     }
 
-    urma_eid_info_t *eid_infos = NULL;
-    uint32_t eid_cnt = 0;
-    eid_infos = urma_get_eid_list(ub_dev, &eid_cnt);
-    for (int i = 0; i < eid_cnt; i++) {
-        urma_eid_info_t *eid_info = &eid_infos[i];
-        printf("Setting EID index %u in device %s, netns %s.\n", eid_info->eid_index, ub_dev->name, netns);
-        ret = admin_cmd_eid_set_eid_ns(ub_dev->name, eid_info->eid_index, netns);
+    for (int i = 0; i < dev_info.dev_attr.dev_cap.max_eid_cnt; i++) {
+        urma_eid_info_t *eid_info = &dev_info.eid_list[i];
+        printf("Setting EID index %u in device %s, netns %s.\n", eid_info->eid_index, dev_info.dev_name, netns);
+        ret = admin_cmd_eid_set_eid_ns(dev_info.dev_name, eid_info->eid_index, netns);
         if (ret != 0) {
-            (void)printf("Failed to expose device %s in netns %s, ret=%d.\n", ub_dev->name, netns, ret);
+            (void)printf("Failed to expose device %s in netns %s, ret=%d.\n", dev_info.dev_name, netns, ret);
             goto unexpose_device;
         }
     }
-    urma_free_eid_list(eid_infos);
+    free(dev_info.eid_list);
     return ret;
 unexpose_device:
-    urma_free_eid_list(eid_infos);
-    admin_cmd_dev_unexpose(ub_dev->name, netns);
+    free(dev_info.eid_list);
+    admin_cmd_dev_unexpose(dev_info.dev_name, netns);
     return ret;
 }
 
 static void nl_unexpose_device_by_eid(const char *eid, const char *netns)
 {
-    urma_device_t *ub_dev = NULL;
-    ub_dev = get_urma_device_by_eid(eid);
-    if (ub_dev == NULL) {
-        printf("Failed to get dev by eid.\n");
-    }
-    printf("Unexposing device %s in netns %s.\n", ub_dev->name, netns);
-    int ret = admin_cmd_dev_unexpose(ub_dev->name, netns);
+    char dev_name[URMA_ADMIN_MAX_DEV_NAME];
+    int ret = admin_get_device_name_by_eid((urma_eid_t *)eid, dev_name, sizeof(dev_name));
     if (ret != 0) {
-        (void)printf("Failed to unexpose device %s in netns %s, ret=%d.\n", ub_dev->name, netns, ret);
+        printf("Failed to get dev by eid.\n");
+        return;
+    }
+    printf("Unexposing device %s in netns %s.\n", dev_name, netns);
+    ret = admin_cmd_dev_unexpose(dev_name, netns);
+    if (ret != 0) {
+        (void)printf("Failed to unexpose device %s in netns %s, ret=%d.\n", dev_name, netns, ret);
     }
 }
 
