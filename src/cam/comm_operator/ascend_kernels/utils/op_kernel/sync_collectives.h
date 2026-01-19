@@ -104,6 +104,12 @@ public:
         WaitOneRankPartFlag((__gm__ int64_t*)(shareAddrs[rank]) + eventID * FLAG_UNIT_INT_NUM, flagNum, v);
     }
 
+    __aicore__ inline void WaitSyncFlag(int32_t magic, int32_t value, int32_t eventID, int32_t rank, int64_t flagNum, int64_t offset)
+    {
+        int64_t v = MergeMagicWithValue(magic, value);
+        WaitOneRankPartFlag((__gm__ int64_t*)(shareAddrs[rank] + offset) + eventID * FLAG_UNIT_INT_NUM, flagNum, v);
+    }
+
     // Set inner-card synchronization flag (memory A)
     __aicore__ inline void SetInnerFlag(int32_t magic, int32_t eventID)
     {
