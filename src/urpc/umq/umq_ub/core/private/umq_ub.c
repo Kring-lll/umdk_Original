@@ -465,7 +465,7 @@ static ALWAYS_INLINE uint32_t umq_ub_queue_info_serialize(
     queue_info->notify_buf = umq_ub_notify_buf_addr_get(queue, OFFSET_MEM_IMPORT);
     queue_info->rx_depth = queue->rx_depth;
     queue_info->tx_depth = queue->tx_depth;
-    queue_info->rx_buf_size = queue->rx_buf_size; 
+    queue_info->rx_buf_size = queue->rx_buf_size;
     queue_info->state = queue->state;
     info_tlv_head->type = UMQ_UB_BIND_INFO_TYPE_QUEUE;
     info_tlv_head->len = sizeof(umq_ub_bind_queue_info_t);
@@ -2538,7 +2538,7 @@ int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
         }
         if (events[i].data.fd == queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfce->fd) {
             queue->interrupt_ctx.rx_io_interrupt = true;
-        } else if (queue->flow_control.enabled && 
+        } else if (queue->flow_control.enabled &&
                    events[i].data.fd == queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfce->fd) {
             queue->interrupt_ctx.rx_fc_interrupt = true;
         }
@@ -2586,6 +2586,8 @@ int umq_flow_control_stats_get(uint64_t umqh_tp, umq_user_ctl_in_t *in, umq_user
     }
 
     umq_flow_control_stats_t *stats = (umq_flow_control_stats_t *)(uintptr_t)out->addr;
-    queue->flow_control.ops.stats_query(&queue->flow_control, stats);
+    ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    pool->ops.stats_query(pool, &stats->pool_credit);
+    queue->flow_control.ops.stats_query(&queue->flow_control, queue, &stats->queue_credit);
     return UMQ_SUCCESS;
 }
