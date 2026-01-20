@@ -7,6 +7,7 @@
 #include "mockcpp/mockcpp.hpp"
 #include "gtest/gtest.h"
 
+#include "msg_ring.h"
 #include "umq_api.h"
 #include "umq_inner.h"
 
@@ -74,3 +75,11 @@ TEST_F(UmqAPITest, test_umq_log_config_set_and_get_success)
     // restore log config
     ASSERT_EQ(umq_log_config_set(&cfg0), 0);
 }
+
+// msg_ring_t *msg_ring_create(char *msg_ring_name, uint32_t msg_ring_name_len, msg_ring_option_t *opt)
+TEST_F(UmqAPITest, test_umq_msg_ring_create_failure)
+{
+    
+}
+
+
