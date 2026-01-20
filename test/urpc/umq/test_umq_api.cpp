@@ -76,10 +76,36 @@ TEST_F(UmqAPITest, test_umq_log_config_set_and_get_success)
     ASSERT_EQ(umq_log_config_set(&cfg0), 0);
 }
 
-// msg_ring_t *msg_ring_create(char *msg_ring_name, uint32_t msg_ring_name_len, msg_ring_option_t *opt)
-TEST_F(UmqAPITest, test_umq_msg_ring_create_failure)
+TEST(UmqRAWAPITest, test_umq_msg_ring_create_failure)
 {
-    
+    char name[MAX_MSG_RING_NAME + 1];
+    msg_ring_option_t cfg;
+    memset(&cfg, 0, sizeof(msg_ring_option_t));
+
+    cfg.owner = true;
+    cfg.tx_max_buf_size = 32;
+    cfg.tx_depth = 32;
+    cfg.rx_max_buf_size = 32;
+    cfg.rx_depth = 32;
+
+    ASSERT_EQ(msg_ring_create(name, sizeof(name), &cfg), nullptr);
+
+    MOCKER(shm_open).stubs().will(returnValue(-1));
+    ASSERT_EQ(msg_ring_create(name, MAX_MSG_RING_NAME, &cfg), nullptr);
+    GlobalMockObject::verify();
+
+    MOCKER(ftruncate).stubs().will(returnValue(-1));
+    ASSERT_EQ(msg_ring_create(name, MAX_MSG_RING_NAME, &cfg), nullptr);
+    GlobalMockObject::verify();
+
+    MOCKER(mmap).stubs().will(returnValue(MAP_FAILED));
+    ASSERT_EQ(msg_ring_create(name, MAX_MSG_RING_NAME, &cfg), nullptr);
+    GlobalMockObject::verify();
+
+    cfg.owner = false;
+    MOCKER(shm_open).stubs().will(returnValue(-1));
+    ASSERT_EQ(msg_ring_create(name, MAX_MSG_RING_NAME, &cfg), nullptr);
+    GlobalMockObject::verify();
 }
 
 
