@@ -1,3 +1,7 @@
 {
-    "cmake.sourceDirectory": "M:/work/repo/umdk/src"
+    "cmake.sourceDirectory": "M:/work/repo/umdk/src",
+    "files.associations": {
+        "urpc_pool.h": "c",
+        "state.h": "c"
+    }
 }
