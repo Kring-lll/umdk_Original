@@ -1498,9 +1498,10 @@ int umq_ub_user_ctl_impl(uint64_t umqh_tp, umq_user_ctl_in_t *in, umq_user_ctl_o
         UMQ_VLOG_ERR("umq ub user ctl parameter invalid\n");
         return -UMQ_ERR_EINVAL;
     }
-
     umq_flow_control_stats_t *stats = (umq_flow_control_stats_t *)(uintptr_t)out->addr;
-    queue->flow_control.ops.stats_query(&queue->flow_control, stats);
+    ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    pool->ops.stats_query(pool, &stats->pool_credit);
+    queue->flow_control.ops.stats_query(&queue->flow_control, queue, &stats->queue_credit);
     return UMQ_SUCCESS;
 }
 
