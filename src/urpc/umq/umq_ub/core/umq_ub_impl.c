@@ -702,13 +702,6 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
             &queue->dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id], 0);
     }
 
-    if (queue->mode == UMQ_MODE_INTERRUPT) {
-        if (umq_ub_create_rx_notfiy_fd(queue) != UMQ_SUCCESS) {
-            UMQ_VLOG_ERR("create virtual jfr jfce failed\n");
-            goto DELETE_FC_JETTY;
-        }
-    }
-
     UMQ_VLOG_INFO("umq create success\n");
     queue->require_rx_count = 0;
     queue->ref_cnt = 1;
@@ -717,11 +710,6 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
     queue->umqh = umqh;
     umq_ub_queue_ctx_list_push(&queue->qctx_node);
     return (uint64_t)(uintptr_t)queue;
-
-DELETE_FC_JETTY:
-    if (queue->flow_control.enabled) {
-        urma_delete_jetty(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]);
-    }
 
 DELETE_FC_JFS_JFC:
     if (queue->flow_control.enabled) {
@@ -768,10 +756,6 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
     if (umq_fetch_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt) != 1) {
         UMQ_VLOG_ERR("umqh ref cnt is not 0\n");
         return -UMQ_ERR_EBUSY;
-    }
-
-    if (queue->mode == UMQ_MODE_INTERRUPT) {
-        umq_ub_close_rx_notfiy_fd(queue);
     }
 
     if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0 &&
