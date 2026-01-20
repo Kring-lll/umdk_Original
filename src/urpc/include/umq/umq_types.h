@@ -297,16 +297,35 @@ typedef struct umq_alloc_option {
     uint16_t headroom_size;
 } umq_alloc_option_t;
 
+typedef struct umq_credit_pool_stats {
+    uint64_t pool_idle;
+    uint64_t pool_be_allocated;
+    uint64_t rsvd0[2];
+    uint64_t total_pool_idle;
+    uint64_t total_pool_be_allocated;
+    uint64_t rsvd1[2];
+    uint64_t total_pool_post_rx_err;
+    uint64_t rsvd2[2];
+} umq_credit_pool_stats_t;
+
+typedef struct umq_credit_private_stats {
+    uint64_t queue_idle;
+    uint64_t queue_be_allocted;
+    uint64_t queue_acquired;
+    uint64_t rsvd0[2];
+    uint64_t total_queue_idle;
+    uint64_t total_queue_acquired;
+    uint64_t total_queue_be_allocated;
+    uint64_t rsvd1[2];
+    uint64_t total_queue_post_tx_success;
+    uint64_t total_queue_post_tx_err;
+    uint64_t total_queue_acquired_err;
+    uint64_t rsvd[4];
+} umq_credit_private_stats_t;
+
 typedef struct umq_flow_control_stats {
-    uint64_t local_rx_posted;
-    uint64_t remote_rx_window;
-    uint64_t total_local_rx_posted;
-    uint64_t total_local_rx_notified;
-    uint64_t total_local_rx_posted_error;
-    uint64_t total_remote_rx_received;
-    uint64_t total_remote_rx_consumed;
-    uint64_t total_remote_rx_received_error;
-    uint64_t total_flow_controlled_wr;
+    umq_credit_pool_stats_t pool_credit; // credit-related statistics of a main queue
+    umq_credit_private_stats_t queue_credit; // credit-related statistics of a specific queue
 } umq_flow_control_stats_t;
 
 typedef enum umq_dfx_module_id {
