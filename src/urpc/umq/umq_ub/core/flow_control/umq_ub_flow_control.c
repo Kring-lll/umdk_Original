@@ -651,6 +651,7 @@ void umq_ub_window_read(ub_flow_control_t *fc, ub_queue_t *queue)
     urma_status_t status = urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL], &urma_wr, &bad_wr);
     if (status == URMA_SUCCESS) {
         fc->remote_get = true;
+        queue->interrupt_ctx.tx_fc_interrupt = true;
         return;
     }
 

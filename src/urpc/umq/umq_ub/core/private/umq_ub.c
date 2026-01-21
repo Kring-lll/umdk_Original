@@ -2560,7 +2560,6 @@ int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
     urma_jfc_t *temp_jfc[jfc_cnt];
     int p_num = urma_wait_jfc(queue->jfs_jfce, jfc_cnt, time_out, temp_jfc);
     if (p_num <= 0) {
-        UMQ_LIMIT_VLOG_ERR("cannot wait jfc, skip\n");
         return p_num;
     }
     uint32_t nevents[p_num];
