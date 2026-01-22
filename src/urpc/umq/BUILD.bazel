@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
 
-load("//:bazel/copts.bzl", "UMQ_DEFAULT_COPTS", "UMQ_DEFAULT_LINKOPTS")
+load("//:bazel/copts.bzl", "UMQ_DEFAULT_COPTS", "UMQ_DEFAULT_LINKOPTS", "UMQ_DEFAULT_STATIC_COPTS")
 load("//:bazel/build_settings.bzl", "openssl_mode")
 
 openssl_mode(
@@ -104,6 +104,35 @@ cc_shared_library(
     visibility = ["//visibility:public"],
 )
 
+cc_library(
+    name = "umq_static_lib",
+    srcs = [
+        "umq_api.c",
+        "umq_pro_api.c",
+    ],
+    includes = ["."],
+    copts = UMQ_DEFAULT_STATIC_COPTS + [
+        "-DUMQ_STATIC_LIB",
+    ],
+    linkopts = ["-lpthread"],
+    deps = [
+        "//include:umq_headers",
+        "//include:umq_tp_headers",
+        "//umq/dfx:dfx",
+        "//umq/qbuf:umq_buf_lib",
+        "//umq:vlog",
+        "//umq:umq_inner",
+        "//util:common_util",
+        "//umq/umq_ub:umq_ub_lib",
+    ],
+    features = [
+        "-pic",
+        "-supports_pic",
+    ],
+    linkstatic = True,
+    alwayslink = True,
+)
+
 filegroup(
     name = "libumq_so",
     srcs = [
@@ -112,4 +141,13 @@ filegroup(
         "//umq/umq_ipc:umq_ipc",
         "//umq/umq_ub:umq_ub",
     ]
+)
+
+genrule(
+    name = "libumq_a",
+    srcs = [":umq_static_lib"],
+    outs = ["libumq.a"],
+    cmd = "cp $(location :umq_static_lib) $@",
+    output_to_bindir = True,
+    visibility = ["//visibility:public"],
 )
