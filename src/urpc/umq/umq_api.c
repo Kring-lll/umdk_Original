@@ -18,6 +18,10 @@
 #include "umq_errno.h"
 #include "urpc_util.h"
 
+#ifdef UMQ_STATIC_LIB
+#include "umq_ub_api.h"
+#endif
+
 #define MAX_SO_NAME_LEN     (32)
 #define MAX_FUNCNAME_LEN    (32)
 
@@ -55,12 +59,20 @@ static umq_framework_t g_umq_fws[UMQ_TRANS_MODE_MAX] = {
         .dlhandler = NULL,
 
         .ops_get_funcname = "umq_ub_ops_get",
+#ifdef UMQ_STATIC_LIB
+        .ops_get_func = umq_ub_ops_get,
+#else
         .ops_get_func = NULL,
+#endif
         .tp_ops = NULL,
         .ctx = NULL,
 
         .pro_ops_get_funcname = "umq_pro_ub_ops_get",
+#ifdef UMQ_STATIC_LIB
+        .pro_ops_get_func = umq_pro_ub_ops_get,
+#else
         .pro_ops_get_func = NULL,
+#endif
         .pro_tp_ops = NULL,
     },
     [UMQ_TRANS_MODE_IB] = {
@@ -135,12 +147,20 @@ static umq_framework_t g_umq_fws[UMQ_TRANS_MODE_MAX] = {
         .dlhandler = NULL,
 
         .ops_get_funcname = "umq_ub_plus_ops_get",
+#ifdef UMQ_STATIC_LIB
+        .ops_get_func = umq_ub_plus_ops_get,
+#else
         .ops_get_func = NULL,
+#endif
         .tp_ops = NULL,
         .ctx = NULL,
 
         .pro_ops_get_funcname = "umq_pro_ub_plus_ops_get",
+#ifdef UMQ_STATIC_LIB
+        .pro_ops_get_func = umq_pro_ub_plus_ops_get,
+#else
         .pro_ops_get_func = NULL,
+#endif
         .pro_tp_ops = NULL,
     },
     [UMQ_TRANS_MODE_IB_PLUS] = {
@@ -334,6 +354,9 @@ static int load_symbol(void *handle, void **func, const char *symbol)
 
 static int umq_framework_init(umq_framework_t *umq_fw, umq_init_cfg_t *cfg)
 {
+#ifdef UMQ_STATIC_LIB
+    return UMQ_SUCCESS;
+#else
     umq_fw->dlhandler = dlopen(umq_fw->dlopen_so_name, RTLD_LAZY | RTLD_GLOBAL);
     if (umq_fw->dlhandler == NULL) {
         UMQ_VLOG_ERR("open so failed, err: %s\n", dlerror());
@@ -404,6 +427,7 @@ CLONE_SO:
     }
     umq_fw->enable = false;
     return UMQ_FAIL;
+#endif
 }
 
 int umq_init(umq_init_cfg_t *cfg)
@@ -439,6 +463,13 @@ int umq_init(umq_init_cfg_t *cfg)
 
     for (uint8_t trans_info_i = 0; trans_info_i < cfg->trans_info_num; trans_info_i++) {
         umq_trans_info_t *info = &cfg->trans_info[trans_info_i];
+#ifdef UMQ_STATIC_LIB
+        if (info->trans_mode != UMQ_TRANS_MODE_UB && info->trans_mode != UMQ_TRANS_MODE_UB_PLUS) {
+            UMQ_VLOG_ERR("umq static library only support UB transport mode\n");
+            return -UMQ_ERR_EINVAL;
+        }
+#endif
+
         if (info->trans_mode >= UMQ_TRANS_MODE_MAX || info->trans_mode < 0) {
             continue;
         }
@@ -990,6 +1021,14 @@ int umq_dev_add(umq_trans_info_t *trans_info)
         UMQ_VLOG_ERR("umq has not been inited\n");
         return -UMQ_ERR_EINVAL;
     }
+
+#ifdef UMQ_STATIC_LIB
+    if (trans_info->trans_mode != UMQ_TRANS_MODE_UB &&
+        trans_info->trans_mode != UMQ_TRANS_MODE_UB_PLUS) {
+        UMQ_VLOG_ERR("umq static library only support UB transport mode\n");
+        return -UMQ_ERR_EINVAL;
+    }
+#endif
 
     if (trans_info == NULL || trans_info->trans_mode >= UMQ_TRANS_MODE_MAX) {
         UMQ_VLOG_ERR("trans info invalid\n");
