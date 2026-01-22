@@ -713,7 +713,7 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
 
     max_batch -= qbuf_cnt;
     if (max_batch == 0 || (queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) != 0) {
-        return qbuf_cnt;
+        goto POLL_SUCCESS;
     }
 
     if (queue->state == QUEUE_STATE_ERR) {
@@ -721,8 +721,7 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
         if (!(queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ)) {
             qbuf_cnt += umq_report_incomplete_rx(queue, max_batch, &buf[qbuf_cnt]);
         }
-        umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
-        return qbuf_cnt;
+        goto POLL_SUCCESS;
     }
 
     urma_cr_t cr[max_batch];
@@ -762,6 +761,7 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
         ++qbuf_cnt;
     }
 
+POLL_SUCCESS:
     umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
     return qbuf_cnt;
 }
