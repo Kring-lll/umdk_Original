@@ -199,13 +199,17 @@ static void umq_perftest_server_run_qps_pro_interrupt(uint64_t umqh, umq_perftes
     umq_buf_t *polled_buf[UMQ_BATCH_SIZE];
     uint32_t thread_inx = perftest_thread_index();
 
-    umq_interrupt_option_t interrupt_option = {
+    static umq_interrupt_option_t interrupt_option = {
         .flag = UMQ_INTERRUPT_FLAG_IO_DIRECTION,
-        .direction = UMQ_IO_RX,
+        .direction = UMQ_IO_TX,
     };
+    umq_wait_interrupt(umqh, 0, &interrupt_option);
+    umq_rearm_interrupt(umqh, false, &interrupt_option);
+
     if (umq_rearm_interrupt(umqh, false, &interrupt_option) != 0) {
         LOG_PRINT("server umq_rearm_interrupt failed\n");
     }
+
     uint64_t start_cycle = get_cycles();
     double cycles_to_units = get_cpu_mhz(false);
     while (!is_perftest_force_quit() && (get_cycles() - start_cycle) / cycles_to_units < ITER_MAX_WAIT_TIME_US) {

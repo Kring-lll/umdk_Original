@@ -28,7 +28,8 @@ static const uint32_t EXAMPLE_MAX_POLL_BATCH = 64;
 static const uint32_t EXAMPLE_REQUEST_SIZE = 8192;
 static const uint32_t SOCKET_SEND_RECV_TIMEOUT = 5;
 static const uint32_t EXAMPLE_BUFFER_SIZE = 8192;
-static const uint32_t EXAMPLE_DEPTH = 128;
+static const uint32_t EXAMPLE_DEPTH = 1024;
+
 
 typedef struct exchange_info {
     uint32_t msg_len;
@@ -57,6 +58,10 @@ static struct option g_long_options[] = {
     {"deid",               required_argument, NULL, 'D'},
     {"transport-mode",     required_argument, NULL, 'M'},
     {"tp-type",            required_argument, NULL, 'P'},
+    {"queue_cnt",          required_argument, NULL, 'q'},
+    {"threadpool_size",    required_argument, NULL, 's'},
+    {"m_dev_name",         required_argument, NULL,  1},
+    {"m_eid_idx",          required_argument, NULL,  2},
     {NULL,                 0,                 NULL,  0 }
 };
 
@@ -552,6 +557,8 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
             break;
         }
 
+        char *tmp = NULL;
+        uint32_t idx = 0;
         switch (c) {
             case 'd':
                 /* need to free when exiting */
@@ -640,6 +647,55 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
                     return -1;
                 }
                 cfg->tp_type = param;
+                break;
+            case 'q':
+                cfg->queue_num = (uint32_t)strtoul(optarg, NULL, 0);
+                break;
+            case 's':
+                cfg->thread_poll_size = (uint32_t)strtoul(optarg, NULL, 0);
+                break;
+            case 1:
+                tmp = strdup(optarg);
+                idx = 0;
+                while(*tmp != '\0' && idx < EXAMPLE_MAX_DEV_NUM) {
+                    cfg->m_dev_name[idx++] = tmp;
+                    while(*tmp != ',' && *tmp != '\0') {
+                        tmp++;
+                    }
+
+                    if (*tmp == '\0') {
+                        break;
+                    }
+
+                    *tmp = '\0';
+                    tmp++; 
+                }
+
+                for (uint32_t i = 0;i < idx; i++) {
+                    LOG_PRINT("devname[%u]: %s\n", i, cfg->m_dev_name[i]);
+                }
+
+                break;
+            case 2:
+                tmp = strdup(optarg);
+                char *ptr = tmp;
+                idx = 0;
+                while(*tmp != '\0' && idx < EXAMPLE_MAX_DEV_NUM) {
+                    while(*tmp != ',' && *tmp != '\0') {
+                        tmp++;
+                    }
+                    if (*tmp == '\0') {
+                        break;
+                    }
+                    *tmp = '\0';
+                    cfg->m_eid_idx[idx++] = (uint32_t)strtoul(ptr, NULL, 0);
+                    tmp++; 
+                    ptr = tmp;
+                }
+                cfg->m_eid_idx[idx++] = (uint32_t)strtoul(ptr, NULL, 0);
+                for (uint32_t i = 0;i < idx; i++) {
+                    LOG_PRINT("dev idx[%u]: %u\n", i, cfg->m_eid_idx[i]);
+                }
                 break;
             default:
                 return -1;

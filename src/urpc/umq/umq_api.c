@@ -1034,12 +1034,12 @@ int umq_dev_add(umq_trans_info_t *trans_info)
 
     // new trans mode umq framework need init and add dev
     if (!umq_fw->enable) {
-        umq_fw->enable = true;
         ret = umq_framework_init(umq_fw, g_umq_config);
         if (ret != UMQ_SUCCESS) {
             UMQ_VLOG_ERR("umq framework init failed\n");
             goto DECREASE_TRANS_INFO_NUM;
         }
+        umq_fw->enable = true;
         pthread_mutex_unlock(&g_umq_config_mutex_lock);
         return UMQ_SUCCESS;
     }
