@@ -897,6 +897,8 @@ typedef struct urma_cmd_exchange_tp_info_t {
         struct urma_get_tp_cfg get_tp_cfg;
         uint64_t tp_handle;
         uint32_t tx_psn;
+        uint32_t src_jetty_id;
+        uint32_t dst_jetty_id;
     } in;
     struct {
         uint64_t peer_tp_handle;

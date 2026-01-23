@@ -1057,6 +1057,8 @@ int urma_ioctl_exchange_tp_info(int ioctl_fd, urma_cmd_exchange_tp_info_t *arg)
     ATTR(a++, EXCHANGE_TP_INFO_IN_PEER_EID, arg->in.get_tp_cfg.peer_eid);
     ATTR(a++, EXCHANGE_TP_INFO_IN_TP_HANDLE, arg->in.tp_handle);
     ATTR(a++, EXCHANGE_TP_INFO_IN_TX_PSN, arg->in.tx_psn);
+    ATTR(a++, EXCHANGE_TP_INFO_IN_SRC_JETTY_ID, arg->in.src_jetty_id);
+    ATTR(a++, EXCHANGE_TP_INFO_IN_DST_JETTY_ID, arg->in.dst_jetty_id);
     ATTR(a++, EXCHANGE_TP_INFO_OUT_PEER_TP_HANDLE, arg->out.peer_tp_handle);
     ATTR(a++, EXCHANGE_TP_INFO_OUT_RX_PSN, arg->out.rx_psn);
 

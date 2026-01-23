@@ -904,6 +904,8 @@ typedef enum urma_cmd_exchange_tp_info_type {
     EXCHANGE_TP_INFO_IN_PEER_EID,
     EXCHANGE_TP_INFO_IN_TP_HANDLE,
     EXCHANGE_TP_INFO_IN_TX_PSN,
+    EXCHANGE_TP_INFO_IN_SRC_JETTY_ID,
+    EXCHANGE_TP_INFO_IN_DST_JETTY_ID,
     EXCHANGE_TP_INFO_IN_NUM, /* Only for calculating number of types */
     /* Out type */
     EXCHANGE_TP_INFO_OUT_PEER_TP_HANDLE = URMA_CMD_OUT_TYPE_INIT,
