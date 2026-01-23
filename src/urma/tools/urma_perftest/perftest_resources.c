@@ -998,6 +998,8 @@ static void free_tp_info(perftest_context_t *ctx)
     ctx->tp_info = NULL;
 }
 
+
+
 static int create_tp_info(perftest_context_t *ctx, perftest_comm_t *comm, perftest_config_t *cfg)
 {
     if (!cfg->tp_aware) {
@@ -1034,6 +1036,40 @@ static int create_tp_info(perftest_context_t *ctx, perftest_comm_t *comm, perfte
         if (ret != URMA_SUCCESS || tp_cnt != 1) {
             (void)fprintf(stderr, "Failed to get tpid list, ret:%d, tp_cnt:%u!\n", ret, tp_cnt);
             goto free_buf;
+        }
+        if (cfg->uboe) {
+            uint32_t set_tp_attr_flag = PERFTEST_SET_ATTR_BITMAP_UBOE;
+            uint8_t set_tp_attr_cnt = PRTFTEST_SET_ATTR_CNT_UBOE;
+            if (cfg->use_ctp) {
+                (void)fprintf(stderr, "ctp is not supported by uboe!\n");
+                goto free_buf;
+            }
+            if (!cfg->uboe_dip || !cfg->uboe_sip) {
+                (void)fprintf(stderr, "uboe module need parametres: sip, dip, optional parametres: dscp, vlan, sl\n");
+                goto free_buf;
+            }
+            ret = urma_get_smac(ctx->urma_ctx, cfg->smac);
+            if (ret != URMA_SUCCESS) {
+                (void)fprintf(stderr, "Failed to get smac, ret:%d\n", ret);
+                goto free_buf;
+            }
+            urma_net_addr_t net_addr;
+            net_addr.sin_family = AF_INET;
+            net_addr.in4.s_addr = cfg->dip.in4.addr;
+            ret = urma_get_dmac(ctx->urma_ctx, &net_addr, cfg->dmac);
+            if (ret != URMA_SUCCESS) {
+                (void)fprintf(stderr, "Failed to get dmac, ret:%d\n", ret);
+                goto free_buf;
+            }
+
+            urma_tp_attr_value_t tp_attr = {0};
+            create_tp_info_get_attr_uboe(cfg, &tp_attr,&set_tp_attr_flag, &set_tp_attr_cnt);
+            ret = urma_set_tp_attr(ctx->urma_ctx, ctx->tp_info[i].tp_handle, set_tp_attr_cnt,
+                set_tp_attr_flag, &tp_attr);
+            if (ret != URMA_SUCCESS) {
+                (void)fprintf(stderr, "Failed to set_tp_attr, ret:%d\n", ret);
+                foto free_buf;
+            }
         }
     }
     return 0;

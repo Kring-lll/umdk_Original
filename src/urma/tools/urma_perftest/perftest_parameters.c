@@ -115,6 +115,8 @@ static void usage(const char *argv0)
     (void)printf("  -s, --size <size>           Size of message to exchange (default 2).\n");
     (void)printf("  -S, --server <ip>           Server ip for bind or connect, default: 127.0.0.1 .\n");
     (void)printf("  -T, --jfs_depth <dep>       Size of jfs depth (default 128 for BW, 1 for LAT).\n");
+    (void)printf("  -u, --uboe                  Enable uboe (default false), the parametre sip, dip are required.\
+                                                dscp, vlan, sl are optional\n");
     (void)printf("  -w, --warm_up               Choose to use warm_up function, only for read/write/atomic bw test.\n");
     (void)printf("  -y, --infinite[second]      Run perftest infinitely, only available for BW test.\n"
                  "                              Print period for infinite mode, default 2 seconds.\n");
@@ -148,6 +150,11 @@ default: disable.\n");
 default: disable.\n");
     (void)printf("  --pair_num <num>            Enable multiplayer model and set the number of connection, \
 default: disable.\n");
+    (void)printf("  --sip <ip>                  Set source ip address.\n");
+    (void)printf("  --dip <ip>                  Set dest ip address.\n");
+    (void)printf("  --dscp <dscp>               Set dscp.\n");
+    (void)printf("  --vlan <vlan_id>            Set vlan_id.\n");
+    (void)printf("  --sl <sl>                   Set sl.\n");
     (void)printf("  --async_import              Enable asynchronous connection establishment\n");
     (void)printf("  --tp_aware                  Enable tp aware connect, default: disable.\n");
     (void)printf("  --tp_reuse                  Reuse tp in RM mode if enable tp aware, default: disable.\n");
@@ -273,6 +280,13 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->comm.sock_fd = NULL;
     cfg->jfs_depth = (cfg->type == PERFTEST_BW) ? PERFTEST_DEF_JFS_DEPTH_BW : PERFTEST_DEF_JFS_DEPTH_LAT;
     cfg->trans_mode = URMA_TM_RM;
+
+    cfg->uboe = false;
+    cfg->uboe_vlan = false;
+    cfg->uboe_dscp = false;
+    cfg->uboe_sl = false;
+    cfg->uboe_dip = false;
+    cfg->uboe_sip = false;
 
     cfg->cache_line_size = (uint32_t)get_cache_line_size();
     cfg->page_size = (uint64_t)(uint32_t)getpagesize();
@@ -435,6 +449,22 @@ static int check_cfg_range(perftest_config_t *cfg)
     return 0;
 }
 
+static int str_to_ip(const char *str_ip, perftest_net_addr_t *ip)
+{
+    if (str_ip == NULL || ip == NULL) {
+        return -EINVAL;
+    }
+    if (inet_pton(AF_INET, str_ip, &ip->in4.addr) > 0) {
+        ip->in4.resv = 0;
+        ip->in4.prefix = 0;
+        return 0;
+    }
+    if (inet_pton(AF_INET6, str_ip, ip) > 0) {
+        return 0;
+    }
+    return -EINVAL;
+}
+
 int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
 {
     uint32_t offset;
@@ -487,6 +517,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"size",          required_argument, NULL, 's'},
         {"server",        required_argument, NULL, 'S'},
         {"jfs_depth",     required_argument, NULL, 'T'},
+        {"uboe",          no_argument,       NULL, 'u'},
         {"warm_up",       no_argument,       NULL, 'w'},
         {"infinite",      optional_argument, NULL, 'y'},
         {"use_bonding",   no_argument,       NULL, 'z'},
@@ -522,6 +553,11 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"ctp",           no_argument,       NULL, PERFTEST_OPT_CTP},
         {"jetty_id",      required_argument, NULL, PERFTEST_OPT_JETTY_ID },
         {"wait_jfc_timeout", required_argument, NULL, PERFTEST_OPT_WAIT_JFC_TIMEOUT },
+        {"sip",  no_argument,                NULL, PERFTEST_OPT_SIP},
+        {"dip",  no_argument,                NULL, PERFTEST_OPT_DIP},
+        {"dscp",  no_argument,               NULL, PERFTEST_OPT_DSCP},
+        {"vlan",  no_argument,               NULL, PERFTEST_OPT_VLAN},
+        {"sl",  no_argument,                 NULL, PERFTEST_OPT_SL},
         {"hugepage_size", required_argument, NULL, PERFTEST_OPT_PAGE_SIZE },
         {"aggr_mode",     required_argument, NULL, PERFTEST_OPT_AGGR_MODE },
         {"stdout",  no_argument,       NULL, PERFTEST_OPT_STDOUT },
@@ -530,7 +566,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
 
     /* Second parse the options */
     while (1) {
-        int c = getopt_long(argc, argv, "a::A:bBcC:d:t:D:eE:fFhI:j:J:K:n:Nl:Lo:O:p:P:Q:r:R:s:S:T:wy::z",
+        int c = getopt_long(argc, argv, "a::A:bBcC:d:t:D:eE:fFhI:j:J:K:n:Nl:Lo:O:p:P:Q:r:R:s:S:T:uwy::z",
             long_options, NULL);
         if (c == -1) {
             break;
@@ -685,6 +721,9 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
             case 'T':
                 (void)ub_str_to_u32(optarg, &cfg->jfs_depth);
                 break;
+            case 'u':
+                cfg->uboe = true;
+                break;
             case 'w':
                 cfg->warm_up = true;
                 break;
@@ -778,6 +817,26 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
             case PERFTEST_OPT_ACK_TIMEOUT:
                 (void)ub_str_to_u32(optarg, &cfg->ack_timeout);
                 break;
+            case PERFTEST_OPT_SIP:
+                (void)str_to_ip(optarg, &cfg->sip);
+                cfg->uboe_sip = true;
+                break;
+            case PERFTEST_OPT_DIP:
+                cfg->uboe_dip = true;
+                (void)str_to_ip(optarg, &cfg->dip);
+                break;
+            case PERFTEST_OPT_DSCP:
+                cfg->uboe_dscp = true;
+                (void)ub_str_to_u8(optarg, &cfg->dscp);
+                break;
+            case PERFTEST_OPT_VLAN:
+                cfg->uboe_vlan = true;
+                (void)ub_str_to_u8(optarg, &cfg->vlan_id);
+                break;
+            case PERFTEST_OPT_SL:
+                cfg->uboe_sl = true;
+                (void)ub_str_to_u8(optarg, &cfg->sl);
+                break;    
             case PERFTEST_OPT_SGE_NUM:
                 (void)ub_str_to_u32(optarg, &cfg->sge_num);
                 break;
