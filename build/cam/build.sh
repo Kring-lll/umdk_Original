@@ -37,6 +37,8 @@ function PrintHelp() {
     "
 }
 
+# test
+
 function ProcessArg() {
     while getopts "dh" opt; do
         case $opt in
