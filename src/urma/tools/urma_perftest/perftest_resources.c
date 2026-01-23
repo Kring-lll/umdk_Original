@@ -92,6 +92,17 @@ static int check_share_jfr(perftest_config_t *cfg, urma_device_t *urma_dev)
     return 0;
 }
 
+static uint32_t max_power_of_two_less_than(uint32_t n)
+{
+    if (n <= 1)
+        return 0;
+    uint32_t res = 1;
+    while ((1U << res) < n) {
+        res += 1;
+    }
+    return res;
+}
+
 static int check_dev_cap(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     struct urma_device *urma_dev = ctx->urma_ctx->dev;
@@ -120,6 +131,12 @@ static int check_dev_cap(perftest_context_t *ctx, perftest_config_t *cfg)
     if (cfg->sge_num > ctx->dev_attr.dev_cap.max_jfs_rsge) {
         (void)printf("Error: max_jfs_rsge out of range, max_jfs_rsge:%u.\n", ctx->dev_attr.dev_cap.max_jfs_rsge);
         return -1;
+    }
+
+    uint32_t max_order = max_power_of_two_less_than(ctx->dev_attr.dev_cap.max_msg_size);
+    if (cfg->order > max_order) {
+        (void)printf("Warning: order size out of range, max_order:%u.\n", max_order);
+        cfg->order = max_order;
     }
 
     if (cfg->jetty_mode == PERFTEST_JETTY_DUPLEX && cfg->jettys > ctx->dev_attr.dev_cap.max_jetty) {
