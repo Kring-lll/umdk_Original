@@ -39,6 +39,10 @@ constexpr uint32_t INPUT_GMM2_WEIGHT_SCALE_INDEX = 5;
 constexpr uint32_t INPUT_EXPERT_SCALE_INDEX = 6;
 constexpr uint32_t INPUT_SMOOTH_SCALE_INDEX = 7;
 constexpr uint32_t INPUT_SHARE_X_ACTIVE_MASK_INDEX = 8;
+constexpr uint32_t INPUT_SHARE_GMM1_WEIGHT_INDEX = 9;
+constexpr uint32_t INPUT_SHARE_GMM1_WEIGHT_SCALE_INDEX = 10;
+constexpr uint32_t INPUT_SHARE_GMM2_WEIGHT_INDEX = 11;
+constexpr uint32_t INPUT_SHARE_GMM2_WEIGHT_SCALE_INDEX = 12;
 
 constexpr uint32_t ATTR_GROUP_EP_INDEX = 0;
 constexpr uint32_t ATTR_EP_RANK_SIZE_INDEX = 1;
@@ -428,11 +432,12 @@ static ge::graphStatus CheckHcclBufferSize(const char *nodeName, const FusedDeep
 }
 
 static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *nodeName,
-                                    FusedDeepMoeTilingData &tilingData)
+                                    FusedDeepMoeTilingData &tilingData, bool calShareExpert)
 {
     size_t *workSpaces = context.GetWorkspaceSizes(1);
     OP_TILING_CHECK(workSpaces == nullptr, OP_LOGE(nodeName, "workSpaces is nullptr."), return ge::GRAPH_FAILED);
     size_t maxTokenNum;
+    size_t maxHandleTokenNum;
     uint32_t epRankSize = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize;
     uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
     uint32_t sharedExpertRankNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
@@ -450,15 +455,16 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
     } else {
         maxTokenNum = maxBatchSize * epRankSize * std::min(topK, moeExpertNumPerRank);
     }
+    maxHandleTokenNum = calShareExpert ? (batchSize + maxTokenNum) : maxTokenNum;
 
-    size_t x1TokenSize = maxTokenNum * h * sizeof(int8_t);
-    size_t x2TokenSize = maxTokenNum * gmm2HLen * sizeof(int8_t);
+    size_t x1TokenSize = maxHandleTokenNum * h * sizeof(int8_t);
+    size_t x2TokenSize = maxHandleTokenNum * gmm2HLen * sizeof(int8_t);
     size_t maxTokenSize = x1TokenSize < x2TokenSize ? x2TokenSize : x1TokenSize;
     maxTokenSize = CeilUp(maxTokenSize, GM_ALIGN_SIZE);
-    size_t tokenScaleSize = CeilUp(maxTokenNum * sizeof(float), GM_ALIGN_SIZE);
+    size_t tokenScaleSize = CeilUp(maxHandleTokenNum * sizeof(float), GM_ALIGN_SIZE);
     size_t CVSwapBufferSize =
         CeilUp(aicNum * L1_TILE_BYTE_SIZE * CUBE_WORKSPACE_STAGE * sizeof(int32_t), GM_ALIGN_SIZE);
-    size_t swigluOutSize = maxTokenNum * gmm1HLen * sizeof(float);
+    size_t swigluOutSize = maxHandleTokenNum * gmm1HLen * sizeof(float);
     size_t gmm2DepOutSize = maxTokenNum * h * TOKEN_DTYPE_BYTE_SIZE;
     size_t maxSwigluGmm2Size = swigluOutSize < gmm2DepOutSize ? gmm2DepOutSize : swigluOutSize;
     maxSwigluGmm2Size = CeilUp(maxSwigluGmm2Size, GM_ALIGN_SIZE);
@@ -519,7 +525,9 @@ static ge::graphStatus FusedDeepMoeTilingFuncImpl(gert::TilingContext &context)
                     return ge::GRAPH_FAILED);
     OP_TILING_CHECK(CheckXActiveMaskShape(context, nodeName, *tilingData) != ge::GRAPH_SUCCESS,
             OP_LOGE(nodeName, "CheckXActiveMaskShape failed."), return ge::GRAPH_FAILED);
-    OP_TILING_CHECK(SetWorkSpace(context, nodeName, *tilingData) != ge::GRAPH_SUCCESS,
+    const gert::StorageShape* shareGmm1WeightStorageShape = context.GetOptionalInputShape(INPUT_SHARE_GMM1_WEIGHT_INDEX);
+    bool calShareExpert = (shareGmm1WeightStorageShape != nullptr);
+    OP_TILING_CHECK(SetWorkSpace(context, nodeName, *tilingData, calShareExpert) != ge::GRAPH_SUCCESS,
                     OP_LOGE(nodeName, "Tiling set workspace failed."), return ge::GRAPH_FAILED);
     SetHcommCfg(context, *tilingData, groupEp);
     const gert::StorageShape* xActiveMaskStorageShape = context.GetOptionalInputShape(
@@ -529,12 +537,17 @@ static ge::graphStatus FusedDeepMoeTilingFuncImpl(gert::TilingContext &context)
     if (xActiveMaskEnable) {
         tilingKey |= EXEC_FLAG_X_ACTIVE_MASK;
     }
+    if (calShareExpert) {
+        tilingKey |= EXEC_FLAG_SHARED_EXPERT;
+    }
     if (tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank != 1) {
         tilingKey |= EXEC_FLAG_DEEP_FUSE;
     }
     if (tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.isTensorList) {
         tilingKey |= EXEC_FLAG_TENSOR_LIST;
     }
+    std::printf("[FusedDeepMoeTiling] Date: %s Time: %s | calShareExpert: %d, tilingKey: %lu\n",
+                __DATE__, __TIME__, static_cast<int>(calShareExpert), tilingKey);
     context.SetTilingKey(tilingKey);
     context.SetBlockDim(aicNum);
     return ge::GRAPH_SUCCESS;

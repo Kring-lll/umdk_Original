@@ -34,6 +34,10 @@ aclnnStatus aclnnFusedDeepMoeGetWorkspaceSize(
     const aclTensor *expertScales,
     const aclTensor *expertSmoothScalesOptional,
     const aclTensor *xActiveMaskOptional,
+    const aclTensor *shareGmm1PermutedWeightOptional,
+    const aclTensor *shareGmm1PermutedWeightScaleOptional,
+    const aclTensor *shareGmm2WeightOptional,
+    const aclTensor *shareGmm2WeightScaleOptional,
     char *groupEp,
     int64_t epRankSize,
     int64_t epRankId,
@@ -43,14 +47,17 @@ aclnnStatus aclnnFusedDeepMoeGetWorkspaceSize(
     int64_t quantMode,
     int64_t globalBs,
     const aclTensor *output,
+    const aclTensor *shareOutput,
     const aclTensor *expertTokenNums,
     uint64_t *workspaceSize,
     aclOpExecutor **executor)
 {
     return aclnnInnerFusedDeepMoeGetWorkspaceSize(x, expertIds, gmm1PermutedWeight, gmm1PermutedWeightScale,
-        gmm2Weight, gmm2WeightScale, expertScales, expertSmoothScalesOptional, xActiveMaskOptional, groupEp,
-        epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs,
-        output, expertTokenNums, workspaceSize, executor);
+        gmm2Weight, gmm2WeightScale, expertScales, expertSmoothScalesOptional, xActiveMaskOptional,
+        shareGmm1PermutedWeightOptional, shareGmm1PermutedWeightScaleOptional,
+        shareGmm2WeightOptional, shareGmm2WeightScaleOptional,
+        groupEp, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs,
+        output, shareOutput, expertTokenNums, workspaceSize, executor);
 }
 
 aclnnStatus aclnnFusedDeepMoe(

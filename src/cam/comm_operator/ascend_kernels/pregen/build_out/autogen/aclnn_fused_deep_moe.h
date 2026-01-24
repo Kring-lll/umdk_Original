@@ -26,6 +26,10 @@ __attribute__((visibility("default"))) aclnnStatus aclnnFusedDeepMoeGetWorkspace
     const aclTensor *expertScales,
     const aclTensor *expertSmoothScalesOptional,
     const aclTensor *xActiveMaskOptional,
+    const aclTensor *shareGmm1PermutedWeightOptional,
+    const aclTensor *shareGmm1PermutedWeightScaleOptional,
+    const aclTensor *shareGmm2WeightOptional,
+    const aclTensor *shareGmm2WeightScaleOptional,
     char *groupEp,
     int64_t epRankSize,
     int64_t epRankId,
@@ -35,6 +39,7 @@ __attribute__((visibility("default"))) aclnnStatus aclnnFusedDeepMoeGetWorkspace
     int64_t quantMode,
     int64_t globalBs,
     const aclTensor *output,
+    const aclTensor *shareOutput,
     const aclTensor *expertTokenNums,
     uint64_t *workspaceSize,
     aclOpExecutor **executor);

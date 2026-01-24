@@ -16,7 +16,8 @@ namespace ge {
 constexpr uint32_t EXPAND_X_INDEX = 0;
 constexpr uint32_t EXPERT_IDS_INDEX = 1;
 constexpr uint32_t OUTPUT_X_INDEX = 0;
-constexpr uint32_t OUTPUT_EXPERT_TOKEN_NUMS = 1;
+constexpr uint32_t OUTPUT_SHARE_OUTPUT_INDEX = 1;
+constexpr uint32_t OUTPUT_EXPERT_TOKEN_NUMS = 2;
 
 constexpr uint32_t ATTR_GROUP_EP_INDEX = 0;
 constexpr uint32_t ATTR_EP_RANK_SIZE_INDEX = 1;
@@ -36,9 +37,10 @@ static ge::graphStatus InferShape(gert::InferShapeContext *context)
     const gert::Shape *expandXShape = context->GetInputShape(EXPAND_X_INDEX);
     const gert::Shape *expertIdsShape = context->GetInputShape(EXPERT_IDS_INDEX);
     gert::Shape *expandXOutShape = context->GetOutputShape(OUTPUT_X_INDEX);
+    gert::Shape *shareOutputShape = context->GetOutputShape(OUTPUT_SHARE_OUTPUT_INDEX);
     gert::Shape *expertTokenNumsShape = context->GetOutputShape(OUTPUT_EXPERT_TOKEN_NUMS);
     if (expandXShape == nullptr || expertIdsShape == nullptr || expandXOutShape == nullptr ||
-        expertTokenNumsShape == nullptr) {
+        shareOutputShape == nullptr || expertTokenNumsShape == nullptr) {
         return GRAPH_FAILED;
     }
     if (expandXShape->GetDimNum() < DIM_TWO || expertIdsShape->GetDimNum() < DIM_ONE) {
@@ -51,6 +53,10 @@ static ge::graphStatus InferShape(gert::InferShapeContext *context)
     expandXOutShape->SetDimNum(expandXShape->GetDimNum());
     expandXOutShape->SetDim(0, bs);
     expandXOutShape->SetDim(1, h);
+
+    shareOutputShape->SetDimNum(expandXShape->GetDimNum());
+    shareOutputShape->SetDim(0, bs);
+    shareOutputShape->SetDim(1, h);
 
     // infer recvCount shape
     auto attrs = context->GetAttrs();
@@ -87,6 +93,7 @@ static ge::graphStatus InferDataType(gert::InferDataTypeContext *context)
 {
     const auto expandXDataType = context->GetInputDataType(EXPAND_X_INDEX);
     context->SetOutputDataType(OUTPUT_X_INDEX, expandXDataType);
+    context->SetOutputDataType(OUTPUT_SHARE_OUTPUT_INDEX, expandXDataType);
     context->SetOutputDataType(OUTPUT_EXPERT_TOKEN_NUMS, ge::DT_INT64);
     return ge::GRAPH_SUCCESS;
 }

@@ -14,6 +14,7 @@ import gc
 import os
 import sys
 from pathlib import Path
+import argparse
 
 import numpy as np
 import torch
@@ -244,7 +245,7 @@ class FusionOp(DecodeMoeOps):
                          shared_expert_rank_num, dynamic_eplb)
 
     def _apply_ops(self, x, expert_ids, smooth_scales, expert_scales, x_active_mask):
-        output, expert_token_nums = torch.ops.umdk_cam_op_lib.fused_deep_moe(
+        output, _, expert_token_nums = torch.ops.umdk_cam_op_lib.fused_deep_moe(
             x=x,
             expert_ids=expert_ids,
             gmm1_weight=self.gmm1_weight,
@@ -254,6 +255,10 @@ class FusionOp(DecodeMoeOps):
             expert_scales=expert_scales,
             expert_smooth_scales=smooth_scales,
             x_active_mask=x_active_mask,
+            share_gmm1_weight=None,
+            share_gmm1_weight_scale=None,
+            share_gmm2_weight=None,
+            share_gmm2_weight_scale=None,
             group_ep=self.ep_hcomm_info,
             ep_rank_size=self.ep_world_size,
             ep_rank_id=self.global_rank_id,
@@ -447,7 +452,9 @@ def test_fused_deep_moe_base():
     custom_kwargs = BASE_KWARGS
     ep_world_size = custom_kwargs["ep_world_size"]
     custom_args = tuple(custom_kwargs.values())
+    print(f"custom_kwargs: {custom_kwargs}")
     mp.spawn(run_once, args=custom_args, nprocs=ep_world_size, join=True)
+    print(f"custom_kwargs: {custom_kwargs}")
 
 
 @torch.inference_mode()
@@ -470,6 +477,30 @@ def test_fused_deep_moe_eplb():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--share_expert_rank_num", type=int, default=0)
+    parser.add_argument("--moe_expert_num", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--token_hidden_size", type=int, default=7168)
+    parser.add_argument("--moe_intermediate_size", type=int, default=2048)
+    parser.add_argument("--ep_world_size", type=int, default=16)
+    parser.add_argument("--shared_expert_rank_num", type=int, default=0)
+    parser.add_argument("--top_k", type=int, default=8)
+    parser.add_argument("--enable_dynamic_bs", action="store_true", default=False)
+    parser.add_argument("--test_graph", action="store_true", default=False)
+    parser.add_argument("--with_mc2_mask", action="store_true", default=False)
+    parser.add_argument("--dynamic_eplb", action="store_true", default=False)
+    args = parser.parse_args()
+    BASE_KWARGS["shared_expert_rank_num"] = args.share_expert_rank_num
+    BASE_KWARGS["moe_expert_num"] = args.moe_expert_num
+    BASE_KWARGS["batch_size"] = args.batch_size
+    BASE_KWARGS["token_hidden_size"] = args.token_hidden_size
+    BASE_KWARGS["moe_intermediate_size"] = args.moe_intermediate_size
+    BASE_KWARGS["ep_world_size"] = args.ep_world_size
+    BASE_KWARGS["shared_expert_rank_num"] = args.shared_expert_rank_num
+    BASE_KWARGS["top_k"] = args.top_k
+    BASE_KWARGS["enable_dynamic_bs"] = args.enable_dynamic_bs
+    BASE_KWARGS["test_graph"] = args.test_graph
+    BASE_KWARGS["with_mc2_mask"] = args.with_mc2_mask
+    BASE_KWARGS["dynamic_eplb"] = args.dynamic_eplb
     test_fused_deep_moe_base()
-    # test_fused_deep_moe_with_mc2_mask()
-    # test_fused_deep_moe_eplb()
