@@ -13,10 +13,10 @@
 extern "C" __global__ __aicore__ void fused_deep_moe(
     // input
     GM_ADDR x, GM_ADDR expert_ids, GM_ADDR gmm1_permuted_weight, GM_ADDR gmm1_permuted_weight_scale,
-    GM_ADDR gmm2_weight, GM_ADDR gmm2_weight_scale, GM_ADDR expert_scales, GM_ADDR expert_smooth_scales,
-    GM_ADDR x_active_mask,
+    GM_ADDR gmm2_weight, GM_ADDR gmm2_weight_scale, GM_ADDR expert_scales,
     GM_ADDR share_gmm1_permuted_weight, GM_ADDR share_gmm1_permuted_weight_scale,
     GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
+    GM_ADDR expert_smooth_scales, GM_ADDR x_active_mask,
     // output
     GM_ADDR output, GM_ADDR share_output, GM_ADDR expertTokenNums,
     // system
@@ -31,7 +31,8 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
                   TILING_KEY_IS(4) || TILING_KEY_IS(5) || TILING_KEY_IS(6) || TILING_KEY_IS(7)) {
         FusedDeepMoe<DTYPE_X, int32_t, false, TILING_KEY_VAR> op;
         op.Init(x, expert_ids, gmm1_permuted_weight, gmm1_permuted_weight_scale, gmm2_weight, gmm2_weight_scale,
-                expert_scales, expert_smooth_scales, x_active_mask,
+                expert_scales, share_gmm1_permuted_weight, share_gmm1_permuted_weight_scale,
+                share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, x_active_mask,
                 output, expertTokenNums,
                 workspace, nullptr, &tiling_data);
         op.Process();
@@ -40,7 +41,8 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
                   TILING_KEY_IS(12) || TILING_KEY_IS(13) || TILING_KEY_IS(14) || TILING_KEY_IS(15)) {
         FusedDeepMoe<DTYPE_X, int32_t, false, TILING_KEY_VAR> op;
         op.Init(x, expert_ids, gmm1_permuted_weight, gmm1_permuted_weight_scale, gmm2_weight, gmm2_weight_scale,
-                expert_scales, expert_smooth_scales, x_active_mask,
+                expert_scales, share_gmm1_permuted_weight, share_gmm1_permuted_weight_scale,
+                share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, x_active_mask,
                 output, expertTokenNums,
                 workspace, nullptr, &tiling_data);
         op.Process();

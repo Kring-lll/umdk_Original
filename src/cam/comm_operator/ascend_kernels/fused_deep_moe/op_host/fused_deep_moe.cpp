@@ -48,16 +48,6 @@ public:
             .DataType({ge::DT_FLOAT, ge::DT_FLOAT})
             .Format({ge::FORMAT_ND, ge::FORMAT_ND})
             .UnknownShapeFormat({ge::FORMAT_ND, ge::FORMAT_ND});
-        this->Input("expert_smooth_scales")
-            .ParamType(OPTIONAL)
-            .DataType({ge::DT_FLOAT, ge::DT_FLOAT})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND})
-            .UnknownShapeFormat({ge::FORMAT_ND, ge::FORMAT_ND});
-        this->Input("x_active_mask")
-            .ParamType(OPTIONAL)
-            .DataType({ge::DT_BOOL, ge::DT_BOOL})
-            .Format({ge::FORMAT_ND, ge::FORMAT_ND})
-            .UnknownShapeFormat({ge::FORMAT_ND, ge::FORMAT_ND});
         this->Input("share_gmm1_permuted_weight")
             .ParamType(OPTIONAL)
             .DataType({ge::DT_INT8, ge::DT_INT8})
@@ -76,6 +66,16 @@ public:
         this->Input("share_gmm2_weight_scale")
             .ParamType(OPTIONAL)
             .DataType({ge::DT_FLOAT, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND})
+            .UnknownShapeFormat({ge::FORMAT_ND, ge::FORMAT_ND});
+        this->Input("expert_smooth_scales")
+            .ParamType(OPTIONAL)
+            .DataType({ge::DT_FLOAT, ge::DT_FLOAT})
+            .Format({ge::FORMAT_ND, ge::FORMAT_ND})
+            .UnknownShapeFormat({ge::FORMAT_ND, ge::FORMAT_ND});
+        this->Input("x_active_mask")
+            .ParamType(OPTIONAL)
+            .DataType({ge::DT_BOOL, ge::DT_BOOL})
             .Format({ge::FORMAT_ND, ge::FORMAT_ND})
             .UnknownShapeFormat({ge::FORMAT_ND, ge::FORMAT_ND});
         this->Output("output")
