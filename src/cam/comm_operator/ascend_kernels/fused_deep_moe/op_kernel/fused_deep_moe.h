@@ -259,6 +259,11 @@ private:
     GM_ADDR gmWeight2_;
     GM_ADDR gmScale2_;
     GM_ADDR gmOutput_;
+
+    GM_ADDR gmShareWeight1_;
+    GM_ADDR gmShareWeight1Scale_;
+    GM_ADDR gmShareWeight2_;
+    GM_ADDR gmShareWeight2Scale_;
     GM_ADDR gmShareOutput_;
     GM_ADDR gmExpertTokenNums_;
     GM_ADDR workspaceGM_;
@@ -317,6 +322,10 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     gmWeight2_ = gmm2_weight;
     gmScale2_ = gmm2_weight_scale;
     gmOutput_ = output;
+    gmShareWeight1_ = share_gmm1_permuted_weight;
+    gmShareWeight1Scale_ = share_gmm1_permuted_weight_scale;
+    gmShareWeight2_ = share_gmm2_weight;
+    gmShareWeight2Scale_ = share_gmm2_weight_scale;
     gmShareOutput_ = share_output;
     gmExpertTokenNums_ = expertTokenNums;
     workspaceGM_ = workspaceGM;
@@ -365,26 +374,58 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     layout::VectorLayout layoutX2Scale{maxTokenNum_};
     layout::RowMajor layoutOutput{maxTokenNum_, gmm2OutputDim_};
 
+    GM_ADDR gmShareX1 = nullptr;
+    GM_ADDR gmShareX1Scale = nullptr;
+    GM_ADDR gmShareSwigluOut = nullptr;
+    GM_ADDR gmShareX2 = nullptr;
+    GM_ADDR gmShareX2Scale = nullptr;
+
+    GM_ADDR gmX1 = nullptr;
+    GM_ADDR gmX1Scale = nullptr;
+    GM_ADDR gmSwigluOut = nullptr;
+    GM_ADDR gmX2 = nullptr;
+    GM_ADDR gmX2Scale = nullptr;
+    size_t maxHandleTokenNum = maxTokenNum_;
+    if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+        maxHandleTokenNum += bs_;
+    }
     size_t workspaceOffset = 0;
     constexpr int32_t resveredWorkSpaceSize = 256 * 1024;
-    int64_t x1TokenSize = maxTokenNum_ * tokenHiddenSize_ * sizeof(int8_t);
-    int64_t x2TokenSize = maxTokenNum_ * gmm2InputDim_ * sizeof(int8_t);
+    int64_t x1TokenSize = maxHandleTokenNum * tokenHiddenSize_ * sizeof(int8_t);
+    int64_t x2TokenSize = maxHandleTokenNum * gmm2InputDim_ * sizeof(int8_t);
     int64_t maxTokenSize = x1TokenSize < x2TokenSize ? x2TokenSize : x1TokenSize;
-    int64_t tokenScaleSize = maxTokenNum_ * sizeof(float);
-    GM_ADDR gmX1 = workspaceGM_ + workspaceOffset;
-    GM_ADDR gmX2 = workspaceGM_ + workspaceOffset;
+    int64_t tokenScaleSize = maxHandleTokenNum * sizeof(float);
+    if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+        gmShareX1 = workspaceGM_ + workspaceOffset;
+        gmX1 = gmShareX1 + (static_cast<size_t>(bs_) * tokenHiddenSize_ * sizeof(int8_t));
+        gmShareX2 = gmShareX1;
+    } else {
+        gmX1 = workspaceGM_ + workspaceOffset;
+    }
+    gmX2 = gmX1;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(maxTokenSize);
-    GM_ADDR gmX1Scale = workspaceGM_ + workspaceOffset;
-    GM_ADDR gmX2Scale = workspaceGM_ + workspaceOffset;
+    if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+        gmShareX1Scale = workspaceGM_ + workspaceOffset;
+        gmX1Scale = gmShareX1Scale + (static_cast<size_t>(bs_) * sizeof(float));
+        gmShareX2Scale = gmShareX1Scale;
+    } else {
+        gmX1Scale = workspaceGM_ + workspaceOffset;
+    }
+    gmX2Scale = gmX1Scale;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(tokenScaleSize);
     GM_ADDR gmWorkspace = workspaceGM_ + workspaceOffset;
     GM_ADDR gmCVSwap = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(blockDim_) * (GMM1_L1M * GMM1_L1N) *
                                               WORKSPACE_STAGES * sizeof(int32_t));
-    int64_t swigluOutSize = maxTokenNum_ * gmm1OutputDim_ * sizeof(float);
+    int64_t swigluOutSize = maxHandleTokenNum * gmm1OutputDim_ * sizeof(float);
     int64_t gmm2OutSize = maxTokenNum_ * tokenHiddenSize_ * sizeof(ExpandXType);
     int64_t maxSwigluGmm2Size = swigluOutSize < gmm2OutSize ? gmm2OutSize : swigluOutSize;
-    GM_ADDR gmSwigluOut = workspaceGM_ + workspaceOffset;
+    if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+        gmShareSwigluOut = workspaceGM_ + workspaceOffset;
+        gmSwigluOut = gmShareSwigluOut + (static_cast<size_t>(bs_) * gmm1OutputDim_ * sizeof(float));
+    } else {
+        gmSwigluOut = workspaceGM_ + workspaceOffset;
+    }
     GM_ADDR gmGmm2DepOut = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(maxSwigluGmm2Size);
     GM_ADDR gmGroupList = workspaceGM_ + workspaceOffset;
