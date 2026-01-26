@@ -30,9 +30,8 @@ extern "C" {
 #define UMQ_QBUF_SIZE_POW_16K           (14)
 #define UMQ_QBUF_SIZE_POW_32K           (15)
 #define UMQ_QBUF_SIZE_POW_64K           (16)
-// middle = small * 32, and big = middle * 32
-#define UMQ_QBUF_SIZE_POW_INTERVAL      (5)
-#define UMQ_QBUF_SIZE_MULTIPLE_INTERVAL (6)
+// middle = small * 4, and big = middle * 4
+#define UMQ_QBUF_SIZE_POW_INTERVAL      (2)
 #define QBUF_ALLOC_STATE_FREE      0            // define qbuf free state
 #define QBUF_ALLOC_STATE_ALLOCATED 1            // define qbuf allocated state
 
@@ -54,19 +53,24 @@ int umq_buf_size_pow_small_set(umq_buf_block_size_t block_size);
 
 uint8_t umq_buf_size_pow_small(void);
 
-static inline uint8_t umq_buf_size_mul_middle(void)
+static inline uint8_t umq_buf_size_pow_middle(void)
 {
-    return UMQ_QBUF_SIZE_MULTIPLE_INTERVAL;
+    return (umq_buf_size_pow_small() + UMQ_QBUF_SIZE_POW_INTERVAL);
 }
 
-static inline uint8_t umq_buf_size_mul_big(void)
+static inline uint8_t umq_buf_size_pow_big(void)
 {
-    return (umq_buf_size_mul_middle() * UMQ_QBUF_SIZE_MULTIPLE_INTERVAL);
+    return (umq_buf_size_pow_middle() + UMQ_QBUF_SIZE_POW_INTERVAL);
 }
 
-static inline uint8_t umq_buf_size_mul_huge(void)
+static inline uint8_t umq_buf_size_pow_huge(void)
 {
-    return (umq_buf_size_mul_big() * UMQ_QBUF_SIZE_MULTIPLE_INTERVAL);
+    return (umq_buf_size_pow_big() + UMQ_QBUF_SIZE_POW_INTERVAL);
+}
+
+static inline uint8_t umq_buf_size_pow_gigantic(void)
+{
+    return (umq_buf_size_pow_huge() + UMQ_QBUF_SIZE_POW_INTERVAL);
 }
 
 // small qbuf block size: 8K, or 64K size
@@ -77,17 +81,22 @@ static inline uint32_t umq_buf_size_small(void)
 
 static inline uint32_t umq_buf_size_middle(void)
 {
-    return umq_buf_size_small() * umq_buf_size_mul_middle();
+    return (1 << umq_buf_size_pow_middle());
 }
 
 static inline uint32_t umq_buf_size_big(void)
 {
-    return umq_buf_size_small() * umq_buf_size_mul_big();
+    return (1 << umq_buf_size_pow_big());
 }
 
 static inline uint32_t umq_buf_size_huge(void)
 {
-    return umq_buf_size_small() * umq_buf_size_mul_huge();
+    return (1 << umq_buf_size_pow_huge());
+}
+
+static inline uint32_t umq_buf_size_gigantic(void)
+{
+    return  (1 << umq_buf_size_pow_gigantic());
 }
 
 void *umq_io_buf_malloc(umq_buf_mode_t buf_mode, uint64_t size);
