@@ -1017,12 +1017,11 @@ int32_t umq_ub_enqueue_impl(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **bad_q
 
     int ret = UMQ_SUCCESS;
     uint32_t tx_outstanding = umq_fetch_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding);
-    int remain_tx = queue->tx_depth - tx_outstanding;
-    if (remain_tx <= 0) {
+    if (queue->tx_depth <= tx_outstanding) {
         ret = -UMQ_ERR_EAGAIN;
         goto DEC_REF;
     }
-    int wr_num = umq_ub_fill_wr_impl(qbuf, queue, urma_wr, (uint32_t)remain_tx);
+    int wr_num = umq_ub_fill_wr_impl(qbuf, queue, urma_wr, queue->tx_depth - tx_outstanding);
     if (wr_num < 0) {
         *bad_qbuf = qbuf;
         ret = wr_num;
@@ -1066,14 +1065,13 @@ int32_t umq_ub_enqueue_impl_plus(uint64_t umqh_tp, umq_buf_t *qbuf, umq_buf_t **
     umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
     umq_ub_enqueue_plus_with_poll_tx(queue, buf);
     uint32_t tx_outstanding = umq_fetch_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding);
-    int remain_tx = queue->tx_depth - tx_outstanding;
-    if (remain_tx <= 0) {
+    if (queue->tx_depth <= tx_outstanding) {
         ret = -UMQ_ERR_EAGAIN;
         goto DEC_REF;
     }
 
     urma_jfs_wr_t urma_wr[UMQ_POST_POLL_BATCH];
-    int wr_num = umq_ub_plus_fill_wr_impl(qbuf, queue, urma_wr, (uint32_t)remain_tx);
+    int wr_num = umq_ub_plus_fill_wr_impl(qbuf, queue, urma_wr, queue->tx_depth - tx_outstanding);
     if (wr_num < 0) {
         *bad_qbuf = qbuf;
         ret = wr_num;
