@@ -430,9 +430,7 @@ public:
                GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_,
                GM_ADDR gmX_, GM_ADDR debugGm_, GM_ADDR gmexpertIds_, GM_ADDR gmExpandIdx_, GM_ADDR gmEpSendCount_,
                GM_ADDR gmXActiveMask_, GM_ADDR gmResvered_, GM_ADDR gmExpertTokenNums_,
-               uint32_t epRankSize_, uint32_t epRankId_, uint32_t moeExpertNum_, uint32_t moeExpertNumPerRank_,
-               uint32_t sharedExpertNum_, uint32_t sharedExpertRankNum_, uint32_t quantMode_, uint32_t globalBs_,
-               uint32_t bs_, uint32_t topK_, uint32_t h)
+               const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
             : problemShape(problemShape_),
               problemCount(problemCount_),
               ptrGroupList(reinterpret_cast<__gm__ ElementGroupList *>(ptrGroupList_)),
@@ -457,17 +455,17 @@ public:
               gmExpertTokenNums(gmExpertTokenNums_),
               gmXActiveMask(gmXActiveMask_),
               gmResvered(gmResvered_),
-              epRankSize(epRankSize_),
-              epRankId(epRankId_),
-              moeExpertNum(moeExpertNum_),
-              moeExpertNumPerRank(moeExpertNumPerRank_),
-              sharedExpertNum(sharedExpertNum_),
-              sharedExpertRankNum(sharedExpertRankNum_),
-              quantMode(quantMode_),
-              globalBs(globalBs_),
-              bs(bs_),
-              topK(topK_),
-              tokenLen(h)
+              epRankSize(disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize),
+              epRankId(disGmmDeqSwigluQuantGmmDeqComInfo.epRankId),
+              moeExpertNum(disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum),
+              moeExpertNumPerRank(disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank),
+              sharedExpertNum(disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertNum),
+              sharedExpertRankNum(disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum),
+              quantMode(disGmmDeqSwigluQuantGmmDeqComInfo.quantMode),
+              globalBs(disGmmDeqSwigluQuantGmmDeqComInfo.globalBs),
+              bs(disGmmDeqSwigluQuantGmmDeqComInfo.bs),
+              topK(disGmmDeqSwigluQuantGmmDeqComInfo.k),
+              tokenLen(disGmmDeqSwigluQuantGmmDeqComInfo.h)
         {}
     };
 

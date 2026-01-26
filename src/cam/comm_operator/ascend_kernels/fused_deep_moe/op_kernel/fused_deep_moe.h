@@ -63,9 +63,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
                                   GM_ADDR gmX, GM_ADDR debugGm, GM_ADDR gmexpertIds, GM_ADDR gmExpandIdx,
                                   GM_ADDR gmEpSendCount, GM_ADDR xActiveMask, GM_ADDR gmResvered,
                                   GM_ADDR gmExpertTokenNums,
-                                  uint32_t epRankSize, uint32_t epRankId, uint32_t moeExpertNum,
-                                  uint32_t moeExpertNumPerRank, uint32_t sharedExpertNum, uint32_t sharedExpertRankNum,
-                                  uint32_t quantMode, uint32_t globalBs, uint32_t bs, uint32_t topK, uint32_t tokenLen)
+                                  const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
 {
     using ArchTag = Arch::AtlasA2;
     using DispatchPolicy = DispatchPolicy_;
@@ -139,17 +137,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
                                            xActiveMask,
                                            gmResvered,
                                            gmExpertTokenNums,
-                                           epRankSize,
-                                           epRankId,
-                                           moeExpertNum,
-                                           moeExpertNumPerRank,
-                                           sharedExpertNum,
-                                           sharedExpertRankNum,
-                                           quantMode,
-                                           globalBs,
-                                           bs,
-                                           topK,
-                                           tokenLen};
+                                           disGmmDeqSwigluQuantGmmDeqComInfo};
         // call a kernel
         GemmKernel gemm;
         gemm(params);
@@ -282,18 +270,14 @@ private:
     uint32_t blockDim_{0};
     uint32_t epRankSize_{0};
     uint32_t epRankId_{0};
-    uint32_t moeExpertNum_{0};
     uint32_t moeExpertNumPerRank_{0};
-    uint32_t sharedExpertNum_{0};
     uint32_t sharedExpertRankNum_{0};
-    uint32_t quantMode_{0};
     uint32_t globalBs_{0};
     uint32_t bs_{0};
     uint32_t maxBs_{0};
     uint32_t topK_{0};
 
     AscendC::TPipe *tpipe_{nullptr};
-    __gm__ HcclOpResParam *winContext_{nullptr};
     const FusedDeepMoeTilingData *tilingData_;
 };
 
@@ -312,7 +296,6 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
 {
     tpipe_ = pipe;
     blockDim_ = AscendC::GetBlockNum();
-    winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
 
     gmSmoothScales_ = expert_smooth_scales;  // not used now
     gmX_ = x;                                // input token
@@ -334,11 +317,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     tilingData_ = tilingData;
     epRankSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize;
     epRankId_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
-    moeExpertNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum;
     moeExpertNumPerRank_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
-    sharedExpertNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertNum;
     sharedExpertRankNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
-    quantMode_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.quantMode;
     globalBs_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.globalBs;
     bs_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.bs;
     topK_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.k;
@@ -464,8 +444,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
         gmPermuteScale1_, layoutW1Scale, gmX1Scale, layoutX1Scale, gmX2, layoutX2, gmX2Scale,
         layoutX2Scale, gmWorkspace, gmX_, gmSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount,
         xActiveMask_, gmResvered,
-        gmExpertTokenNums_, epRankSize_, epRankId_, moeExpertNum_, moeExpertNumPerRank_, sharedExpertNum_,
-        sharedExpertRankNum_, quantMode_, globalBs_, bs_, topK_, tokenHiddenSize_);
+        gmExpertTokenNums_, tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo);
     AscendC::PipeBarrier<PIPE_ALL>();
     Arch::CrossCoreFlag gmm1AivFinished{0};
     if constexpr (g_coreType == AscendC::AIV) {
