@@ -401,6 +401,12 @@ public:
         GM_ADDR debugGm;
         GM_ADDR gmexpertIds;
         GM_ADDR gmXActiveMask;
+        GM_ADDR gmShareX1;
+        GM_ADDR gmShareX1Scale;
+        GM_ADDR gmShareSwigluOut;
+        GM_ADDR gmShareX2;
+        GM_ADDR gmShareX2Scale;
+        GM_ADDR gmSwigluOut;
 
         GM_ADDR gmExpandIdx;
         GM_ADDR gmEpSendCount;
@@ -430,6 +436,7 @@ public:
                GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_,
                GM_ADDR gmX_, GM_ADDR debugGm_, GM_ADDR gmexpertIds_, GM_ADDR gmExpandIdx_, GM_ADDR gmEpSendCount_,
                GM_ADDR gmXActiveMask_, GM_ADDR gmResvered_, GM_ADDR gmExpertTokenNums_,
+               GM_ADDR gmShareX1_, GM_ADDR gmShareX1Scale_, GM_ADDR gmShareSwigluOut_, GM_ADDR gmShareX2_, GM_ADDR gmShareX2Scale_, GM_ADDR gmSwigluOut_,
                const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
             : problemShape(problemShape_),
               problemCount(problemCount_),
@@ -455,6 +462,12 @@ public:
               gmExpertTokenNums(gmExpertTokenNums_),
               gmXActiveMask(gmXActiveMask_),
               gmResvered(gmResvered_),
+              gmShareX1(gmShareX1_),
+              gmShareX1Scale(gmShareX1Scale_),
+              gmShareSwigluOut(gmShareSwigluOut_),
+              gmShareX2(gmShareX2_),
+              gmShareX2Scale(gmShareX2Scale_),
+              gmSwigluOut(gmSwigluOut_),
               epRankSize(disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize),
               epRankId(disGmmDeqSwigluQuantGmmDeqComInfo.epRankId),
               moeExpertNum(disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum),
@@ -1580,9 +1593,7 @@ public:
             RecvCoreFunc((GM_ADDR)params.ptrA, (GM_ADDR)params.ptrPerTokenScale, (GM_ADDR)params.gmEpSendCount);
         }
 
-        auto gmSwigluOutput = reinterpret_cast<__gm__ float *>(
-            params.ptrWorkspace + sizeof(int32_t) *
-            (L1TileShape::M * aiCoreGroupNum * WORKSPACE_STAGES * L1TileShape::N));
+        auto gmSwigluOutput = reinterpret_cast<__gm__ float *>(params.gmSwigluOut);
         if (isCompCore) {
             CompCoreFunc(params.ptrWorkspace, params.ptrScale, params.ptrPerTokenScale, gmSwigluOutput,
                         params.problemShape.n(), params.problemShape.k(), params.layoutScale,
@@ -1784,6 +1795,12 @@ public:
         LayoutDequantScale layoutDequantScale;
         GM_ADDR ptrWorkspace;
 
+        GM_ADDR gmShareX1;
+        GM_ADDR gmShareX1Scale;
+        GM_ADDR gmShareSwigluOut;
+        GM_ADDR gmShareX2;
+        GM_ADDR gmShareX2Scale;
+        GM_ADDR gmSwigluOut;
         // Methods
         CATLASS_DEVICE
         Params() {}
@@ -1793,7 +1810,9 @@ public:
                LayoutA const &layoutA_, GM_ADDR ptrB_, LayoutB const &layoutB_, GM_ADDR ptrScale_,
                LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale const &layoutPerTokenScale_, GM_ADDR ptrOutput_, LayoutOutput const &layoutOutput_,
-               GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_)
+               GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_,
+               GM_ADDR gmShareX1_, GM_ADDR gmShareX1Scale_, GM_ADDR gmShareSwigluOut_, GM_ADDR gmShareX2_, GM_ADDR gmShareX2Scale_, GM_ADDR gmSwigluOut_,
+               const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
             : problemShape(problemShape_),
               problemCount(problemCount_),
               ptrGroupList(reinterpret_cast<__gm__ ElementGroupList *>(ptrGroupList_)),
@@ -1809,7 +1828,13 @@ public:
               layoutOutput(layoutOutput_),
               ptrDequantScale(reinterpret_cast<__gm__ ElementDequantScale *>(ptrDequantScale_)),
               layoutDequantScale(layoutDequantScale_),
-              ptrWorkspace(ptrWorkspace_)
+              ptrWorkspace(ptrWorkspace_),
+              gmShareX1(gmShareX1_),
+              gmShareX1Scale(gmShareX1Scale_),
+              gmShareSwigluOut(gmShareSwigluOut_),
+              gmShareX2(gmShareX2_),
+              gmShareX2Scale(gmShareX2Scale_),
+              gmSwigluOut(gmSwigluOut_)
         {}
     };
 
@@ -1948,7 +1973,7 @@ public:
         auto layoutC = layout::RowMajor{L1TileShape::M * coreNum * WORKSPACE_STAGES, L1TileShape::N};
 
         auto ptrD = reinterpret_cast<__gm__ float *>(
-            params.ptrWorkspace + sizeof(int32_t) * (L1TileShape::M * coreNum * WORKSPACE_STAGES * L1TileShape::N));
+            params.gmSwigluOut);
 
         uint32_t mActual = groupList.GetValue(params.problemCount - 1);
         uint32_t n = params.problemShape.n();
