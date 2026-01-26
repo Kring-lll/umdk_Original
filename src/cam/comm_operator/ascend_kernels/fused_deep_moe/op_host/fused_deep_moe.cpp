@@ -104,6 +104,7 @@ public:
 
         this->MC2().HcclGroup({"group_ep"});
         this->AICore().AddConfig("ascend910_93");
+        this->AICore().AddConfig("ascend910b");
     }
 };
 
