@@ -33,7 +33,7 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
         op.Init(x, expert_ids, gmm1_permuted_weight, gmm1_permuted_weight_scale, gmm2_weight, gmm2_weight_scale,
                 expert_scales, share_gmm1_permuted_weight, share_gmm1_permuted_weight_scale,
                 share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, x_active_mask,
-                output, share_output, expertTokenNums,
+                output, expertTokenNums,
                 workspace, nullptr, &tiling_data);
         op.Process();
     }
@@ -43,7 +43,7 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
         op.Init(x, expert_ids, gmm1_permuted_weight, gmm1_permuted_weight_scale, gmm2_weight, gmm2_weight_scale,
                 expert_scales, share_gmm1_permuted_weight, share_gmm1_permuted_weight_scale,
                 share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, x_active_mask,
-                output, share_output, expertTokenNums,
+                output, expertTokenNums,
                 workspace, nullptr, &tiling_data);
         op.Process();
     }
