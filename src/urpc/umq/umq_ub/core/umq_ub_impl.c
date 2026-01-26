@@ -1589,6 +1589,8 @@ int umq_ub_cfg_get_impl(uint64_t umqh_tp, umq_cfg_get_t *cfg)
     }
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
     cfg->create_flag = queue->create_flag;
+    cfg->max_rx_sge = queue->max_rx_sge;
+    cfg->max_tx_sge = queue->max_tx_sge;
     cfg->rx_buf_size = queue->rx_buf_size;
     cfg->tx_buf_size = queue->tx_buf_size;
     cfg->rx_depth = queue->rx_depth;
