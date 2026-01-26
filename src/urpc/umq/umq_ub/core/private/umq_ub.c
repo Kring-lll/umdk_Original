@@ -26,6 +26,13 @@
 
 static util_id_allocator_t g_umq_ub_id_allocator = {0};
 static ub_queue_ctx_list_t g_umq_ub_queue_ctx_list;
+static uint32_t (*g_umq_ub_pool_spec_size[UMQ_SIZE_INTERVAL_MAX])(void) = {
+    umq_buf_size_small,
+    umq_buf_size_middle,
+    umq_buf_size_big,
+    umq_buf_size_huge,
+    umq_buf_size_gigantic
+};
 
 static inline uint32_t umq_ub_bind_fature_allowlist_get(void)
 {
@@ -1421,18 +1428,12 @@ util_id_allocator_t *umq_ub_id_allocator_get(void)
 
 static uint32_t umq_read_alloc_mem_size(umq_size_interval_t size_interval)
 {
-    if (size_interval == UMQ_SIZE_0K_SMALL_INTERVAL) {
-        return umq_buf_size_small();
-    } else if (size_interval == UMQ_SIZE_SMALL_MID_INTERVAL) {
-        return umq_buf_size_middle();
-    } else if (size_interval == UMQ_SIZE_MID_BIG_INTERVAL) {
-        return umq_buf_size_big();
-    } else if (size_interval == UMQ_SIZE_BIG_HUGE_INTERVAL) {
-        return umq_buf_size_huge();
+    if (size_interval >= UMQ_SIZE_INTERVAL_MAX || size_interval < 0) {
+        UMQ_LIMIT_VLOG_ERR("size_interval: %d is invalid\n", size_interval);
+        return UINT32_MAX;
     }
 
-    UMQ_LIMIT_VLOG_ERR("size_interval: %d is invalid\n", size_interval);
-    return UINT32_MAX;
+    return g_umq_ub_pool_spec_size[size_interval]();
 }
 
 static ALWAYS_INLINE uint32_t umq_ub_get_read_pre_allocate_max_total_size(
@@ -1824,14 +1825,16 @@ int umq_ub_dequeue_plus_with_poll_tx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t
 
 static inline uint32_t get_mem_interval(uint32_t used_mem_size)
 {
-    if (used_mem_size <= umq_buf_size_small()) {
-        return UMQ_SIZE_0K_SMALL_INTERVAL;
-    } else if (used_mem_size <= umq_buf_size_middle()) {
-        return UMQ_SIZE_SMALL_MID_INTERVAL;
-    } else if (used_mem_size <= umq_buf_size_big()) {
-        return UMQ_SIZE_MID_BIG_INTERVAL;
+    uint32_t i;
+    for (i = UMQ_SIZE_0K_SMALL_INTERVAL; i < UMQ_SIZE_INTERVAL_MAX; i++) {
+        if (used_mem_size <= g_umq_ub_pool_spec_size[i]()) {
+            break;
+        }
     }
-    return UMQ_SIZE_BIG_HUGE_INTERVAL;
+    if (i == UMQ_SIZE_INTERVAL_MAX) {
+        return i - 1;
+    }
+    return i;
 }
 
 void ub_fill_umq_imm_head(umq_imm_head_t *umq_imm_head, umq_buf_t *buffer)
