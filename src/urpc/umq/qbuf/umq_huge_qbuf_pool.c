@@ -53,6 +53,7 @@ static uint32_t (*g_huge_pool_size[HUGE_QBUF_POOL_SIZE_TYPE_MAX])(void) = {
     umq_buf_size_middle,
     umq_buf_size_big,
     umq_buf_size_huge,
+    umq_buf_size_gigantic,
 };
 
 static int umq_huge_qbuf_pool_init(huge_qbuf_pool_size_type_t type, huge_pool_t *pool)
@@ -122,8 +123,10 @@ huge_qbuf_pool_size_type_t umq_huge_qbuf_get_type_by_size(uint32_t buf_size)
         type = HUGE_QBUF_POOL_SIZE_TYPE_MID;
     } else if (buf_size < umq_buf_size_huge()) {
         type = HUGE_QBUF_POOL_SIZE_TYPE_BIG;
-    } else {
+    } else if (buf_size < umq_buf_size_gigantic()) {
         type = HUGE_QBUF_POOL_SIZE_TYPE_HUGE;
+    } else {
+        type = HUGE_QBUF_POOL_SIZE_TYPE_GIGANTIC;
     }
 
     return type;
@@ -140,8 +143,11 @@ uint32_t umq_huge_qbuf_get_size_by_type(huge_qbuf_pool_size_type_t type)
         case HUGE_QBUF_POOL_SIZE_TYPE_BIG:
             blk_size = umq_buf_size_big();
             break;
-        case  HUGE_QBUF_POOL_SIZE_TYPE_HUGE:
+        case HUGE_QBUF_POOL_SIZE_TYPE_HUGE:
             blk_size = umq_buf_size_huge();
+            break;
+        case HUGE_QBUF_POOL_SIZE_TYPE_GIGANTIC:
+            blk_size = umq_buf_size_gigantic();
             break;
         default:
             break;
@@ -403,15 +409,17 @@ int umq_huge_qbuf_alloc(huge_qbuf_pool_size_type_t type, uint32_t request_size, 
 static huge_qbuf_pool_size_type_t umq_huge_qbuf_get_type_by_mempool_id(uint32_t mempool_id)
 {
     huge_qbuf_pool_size_type_t type;
-    uint32_t mid_big = HUGE_QBUF_POOL_IDX_SHIFT + HUGE_QBUF_POOL_NUM_MAX;
-    uint32_t big_huge = HUGE_QBUF_POOL_IDX_SHIFT + (HUGE_QBUF_POOL_NUM_MAX << 1);
-
+    uint32_t mid_big = g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_BIG].pool_idx_shift;
+    uint32_t big_huge = g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_HUGE].pool_idx_shift;
+    uint32_t huge_gigantic = g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_GIGANTIC].pool_idx_shift;
     if (mempool_id < mid_big) {
         type = HUGE_QBUF_POOL_SIZE_TYPE_MID;
     } else if (mempool_id < big_huge) {
         type = HUGE_QBUF_POOL_SIZE_TYPE_BIG;
-    } else {
+    } else if (mempool_id < huge_gigantic) {
         type = HUGE_QBUF_POOL_SIZE_TYPE_HUGE;
+    } else {
+        type = HUGE_QBUF_POOL_SIZE_TYPE_GIGANTIC;
     }
 
     return type;
@@ -449,60 +457,32 @@ int umq_huge_qbuf_register_seg(
 {
     int ret = 0;
     uint32_t failed_idx = 0;
-    // register mid mem pool
-    huge_pool_t *pool = &g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_MID];
-    for (uint32_t i = 0; i < pool->pool_idx; i++) {
-        ret = register_seg_func(ctx, pool->pool_idx_shift + i, pool->pool_info[i].data_buffer, pool->total_size);
-        if (ret != UMQ_SUCCESS) {
-            failed_idx = i;
-            UMQ_VLOG_ERR("register mid mem pool failed, ret: %d, pool idx %u\n", ret, i);
-            goto UNREGISTER_MID_SEG;
-        }
-    }
+    int failed_type = 0;
+    huge_pool_t *pool = NULL;
 
-    // register big mem pool
-    pool = &g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_BIG];
-    for (uint32_t i = 0; i < pool->pool_idx; i++) {
-        ret = register_seg_func(ctx, pool->pool_idx_shift + i, pool->pool_info[i].data_buffer, pool->total_size);
-        if (ret != UMQ_SUCCESS) {
-            failed_idx = i;
-            UMQ_VLOG_ERR("register big mem pool failed, ret: %d, pool idx %u\n", ret, i);
-            goto UNREGISTER_BIG_SEG;
-        }
-    }
-
-    // register huge mem pool
-    pool = &g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_HUGE];
-    for (uint32_t i = 0; i < pool->pool_idx; i++) {
-        ret = register_seg_func(ctx, pool->pool_idx_shift + i, pool->pool_info[i].data_buffer, pool->total_size);
-        if (ret != UMQ_SUCCESS) {
-            failed_idx = i;
-            UMQ_VLOG_ERR("register huge mem pool failed, ret: %d, pool idx %u\n", ret, i);
-            goto UNREGISTER_HUGE_SEG;
+    for (int i = 0; i < HUGE_QBUF_POOL_SIZE_TYPE_MAX; i++) {
+        pool = &g_huge_pool_ctx.pool[i];
+        for (uint32_t j = 0; j < pool->pool_idx; j++) {
+            ret = register_seg_func(ctx, pool->pool_idx_shift + j, pool->pool_info[j].data_buffer, pool->total_size);
+            if (ret != UMQ_SUCCESS) {
+                failed_idx = j;
+                failed_type = i;
+                UMQ_VLOG_ERR("register mid mem pool failed, ret: %d, pool idx: %u, pool type: %d\n", ret, j, i);
+                goto UNREGISTER_SEG;
+            }
         }
     }
     return UMQ_SUCCESS;
 
-UNREGISTER_HUGE_SEG:
-    pool = &g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_HUGE];
-    for (uint32_t i = 0; i < failed_idx; i++) {
-        (void)unregister_seg_func(ctx, pool->pool_idx_shift + i);
+UNREGISTER_SEG:
+    for (uint32_t j = 0; j < failed_idx; j++) {
+        (void)unregister_seg_func(ctx, pool->pool_idx_shift + j);
     }
-    pool = &g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_BIG];
-    failed_idx = pool->pool_idx;
-
-UNREGISTER_BIG_SEG:
-    pool = &g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_BIG];
-    for (uint32_t i = 0; i < failed_idx; i++) {
-        (void)unregister_seg_func(ctx, pool->pool_idx_shift + i);
-    }
-    pool = &g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_MID];
-    failed_idx = pool->pool_idx;
-
-UNREGISTER_MID_SEG:
-    pool = &g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_MID];
-    for (uint32_t i = 0; i < failed_idx; i++) {
-        (void)unregister_seg_func(ctx, pool->pool_idx_shift + i);
+    for (int i = 0; i < failed_type; i++) {
+        pool = &g_huge_pool_ctx.pool[i];
+        for (uint32_t j = 0; j < pool->pool_idx; j++) {
+            (void)unregister_seg_func(ctx, pool->pool_idx_shift + j);
+        }
     }
     return ret;
 }
@@ -510,30 +490,13 @@ UNREGISTER_MID_SEG:
 void umq_huge_qbuf_unregister_seg(uint8_t *ctx, unregister_seg_callback_t unregister_seg_func)
 {
     int ret = 0;
-    // register mid mem pool
-    huge_pool_t *pool = &g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_MID];
-    for (uint32_t i = 0; i < pool->pool_idx; i++) {
-        ret = unregister_seg_func(ctx, pool->pool_idx_shift + i);
-        if (ret != UMQ_SUCCESS) {
-            UMQ_VLOG_ERR("unregister mid mem pool failed, ret: %d, pool idx %u\n", ret, i);
-        }
-    }
-
-    // register big mem pool
-    pool = &g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_BIG];
-    for (uint32_t i = 0; i < pool->pool_idx; i++) {
-        ret = unregister_seg_func(ctx, pool->pool_idx_shift + i);
-        if (ret != UMQ_SUCCESS) {
-            UMQ_VLOG_ERR("unregister big mem pool failed, ret: %d, pool idx %u\n", ret, i);
-        }
-    }
-
-    // register huge mem pool
-    pool = &g_huge_pool_ctx.pool[HUGE_QBUF_POOL_SIZE_TYPE_HUGE];
-    for (uint32_t i = 0; i < pool->pool_idx; i++) {
-        ret = unregister_seg_func(ctx, pool->pool_idx_shift + i);
-        if (ret != UMQ_SUCCESS) {
-            UMQ_VLOG_ERR("unregister big mem pool failed, ret: %d, pool idx %u\n", ret, i);
+    for (int i = 0; i < HUGE_QBUF_POOL_SIZE_TYPE_MAX; i++) {
+        huge_pool_t *pool = &g_huge_pool_ctx.pool[i];
+        for (uint32_t j = 0; j < pool->pool_idx; j++) {
+            ret = unregister_seg_func(ctx, pool->pool_idx_shift + j);
+            if (ret != UMQ_SUCCESS) {
+                UMQ_VLOG_ERR("unregister big mem pool failed, ret: %d, pool idx: %u, type: %d\n", ret, j, i);
+            }
         }
     }
 }
