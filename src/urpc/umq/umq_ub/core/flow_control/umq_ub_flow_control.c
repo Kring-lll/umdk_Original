@@ -602,7 +602,7 @@ void umq_ub_default_credit_allocate(ub_queue_t *queue, ub_flow_control_t *fc)
 void umq_ub_shared_credit_req_send(ub_queue_t *queue)
 {
     ub_flow_control_t *fc = &queue->flow_control;
-    if (!fc->enabled) {
+    if (!fc->enabled || queue->bind_ctx == NULL) {
         return;
     }
     (void)umq_ub_poll_fc_tx(queue);
@@ -648,10 +648,14 @@ void umq_ub_shared_credit_req_send(ub_queue_t *queue)
 
 static void umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
 {
+    if (queue->bind_ctx == NULL) {
+        goto ROLLBACK;
+    }
     urma_jetty_t *jetty  = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     ub_flow_control_t *fc = &queue->flow_control;
     ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+
     umq_ub_imm_t imm = {
         .flow_control = {
             .umq_private = UMQ_UB_IMM_PRIVATE,
@@ -683,6 +687,7 @@ static void umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
                        "local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n", (int)status,
                        EID_ARGS(jetty->jetty_id.eid), jetty->jetty_id.id,
                        EID_ARGS(tjetty->id.eid), tjetty->id.id);
+ROLLBACK:
     (void)credit->ops.available_credit_return(credit, notify);
     (void)fc->ops.local_rx_allocted_dec(fc, notify);
 }
