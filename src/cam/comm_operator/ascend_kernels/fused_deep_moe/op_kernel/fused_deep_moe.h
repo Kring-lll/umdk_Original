@@ -246,7 +246,7 @@ public:
         GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
         GM_ADDR expert_smooth_scales, GM_ADDR x_active_mask,
         // output
-        GM_ADDR output, GM_ADDR expertTokenNums,
+        GM_ADDR output, GM_ADDR share_output, GM_ADDR expertTokenNums,
         // system
         GM_ADDR workspaceGM, AscendC::TPipe *pipe, const FusedDeepMoeTilingData *tilingData);
     __aicore__ inline void Process();
@@ -259,6 +259,7 @@ private:
     GM_ADDR gmWeight2_;
     GM_ADDR gmScale2_;
     GM_ADDR gmOutput_;
+    GM_ADDR gmShareOutput_;
     GM_ADDR gmExpertTokenNums_;
     GM_ADDR workspaceGM_;
     GM_ADDR gmSmoothScales_;
@@ -300,7 +301,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
     GM_ADDR expert_smooth_scales, GM_ADDR x_active_mask,
     // output
-    GM_ADDR output, GM_ADDR expertTokenNums,
+    GM_ADDR output, GM_ADDR share_output, GM_ADDR expertTokenNums,
     // system
     GM_ADDR workspaceGM, AscendC::TPipe *pipe, const FusedDeepMoeTilingData *tilingData)
 {
@@ -316,6 +317,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     gmWeight2_ = gmm2_weight;
     gmScale2_ = gmm2_weight_scale;
     gmOutput_ = output;
+    gmShareOutput_ = share_output;
     gmExpertTokenNums_ = expertTokenNums;
     workspaceGM_ = workspaceGM;
     gmexpertScales_ = expert_scales;
