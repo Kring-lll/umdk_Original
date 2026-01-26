@@ -2145,16 +2145,21 @@ int umq_ub_dequeue_plus_with_poll_rx(uint64_t umqh_tp, urma_cr_t *cr, umq_buf_t 
     return qbuf_cnt;
 }
 
-void process_bad_qbuf(urma_jfs_wr_t *bad_wr, umq_buf_t **bad_qbuf, umq_buf_t *qbuf, ub_queue_t *queue)
+void process_bad_qbuf(umq_buf_t *bad_qbuf, umq_buf_t *qbuf, ub_queue_t *queue)
 {
-    *bad_qbuf = (umq_buf_t *)(uintptr_t)bad_wr->user_ctx;
     umq_buf_t *tmp_qbuf = qbuf;
     uint32_t count = 0;
     umq_buf_t *previous = NULL;
-    while (tmp_qbuf != NULL && tmp_qbuf != *bad_qbuf) {
+    while (tmp_qbuf != NULL && tmp_qbuf != bad_qbuf) {
         count++;
-        previous = tmp_qbuf;
-        tmp_qbuf = tmp_qbuf->qbuf_next;
+        uint32_t rest_data_size = tmp_qbuf->total_data_size;
+        while (tmp_qbuf && rest_data_size > 0) {
+            if (rest_data_size <= tmp_qbuf->data_size) {
+                previous = tmp_qbuf;
+            }
+            rest_data_size -= tmp_qbuf->data_size;
+            tmp_qbuf = tmp_qbuf->qbuf_next;
+        }
     }
     if (previous) {
         // break chain of succeed qbuf and failed qbuf on tx
