@@ -1642,7 +1642,7 @@ static int process_send_imm(umq_buf_t *rx_buf, umq_ub_imm_t imm, uint64_t umqh)
         uint16_t msg_id = (uint16_t)(imm.ub_plus.msg_id);
         if (msg_id != 0) {
             ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
-            umq_buf_t *buffer = (umq_buf_t *)queue->addr_list[msg_id];
+            umq_buf_t *buffer = (umq_buf_t *)(uintptr_t)queue->addr_list[msg_id];
             /*
              * break qbuf list for many batches connected, only release the first batch,
              * can't break qbuf list when send, because all qbufs of 128 wr are connected,
@@ -1842,7 +1842,7 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
     ub_import_mempool_info_t import_mempool_info[UMQ_MAX_TSEG_NUM];
     uint32_t rest_size = (*buffer)->total_data_size;
     int32_t buf_index = 0;
-    uint16_t ref_sge_num = (umq_buf_size_small() - sizeof(umq_imm_head_t)) / sizeof(ub_ref_sge_t);
+    uint16_t ref_sge_num = (uint16_t)((size_t)umq_buf_size_small() - sizeof(umq_imm_head_t)) / sizeof(ub_ref_sge_t);
     urma_sge_t sge;
     uint32_t max_data_size = 0;
     while ((*buffer) && rest_size != 0) {
@@ -1900,10 +1900,10 @@ FREE_BUF:
     return UMQ_FAIL;
 }
 
-int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_wr_ptr, uint32_t remain_tx)
+int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_wr_ptr,
+                             urma_sge_t **sges, uint32_t remain_tx)
 {
     uint32_t max_sge_num = queue->max_tx_sge;
-    urma_sge_t sges[UMQ_POST_POLL_BATCH][max_sge_num];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO];
     urma_sge_t *sges_ptr;
     umq_buf_t *buffer = qbuf;
@@ -2347,10 +2347,10 @@ int umq_ub_write_imm(uint64_t umqh_tp, uint64_t target_addr, uint32_t len, uint6
     return UMQ_SUCCESS;
 }
 
-int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_wr_ptr, uint32_t remain_tx)
+int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_wr_ptr,
+                        urma_sge_t **sges, uint32_t remain_tx)
 {
     uint32_t max_sge_num = queue->max_tx_sge;
-    urma_sge_t sges[UMQ_POST_POLL_BATCH][max_sge_num];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO];
     urma_sge_t *sges_ptr;
     umq_buf_t *buffer = qbuf;
