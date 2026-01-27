@@ -19,8 +19,26 @@
 #include "catlass/gemm_coord.hpp"
 #include "catlass/matrix_coord.hpp"
 
-using namespace Cam;
+// Use this to make a callback
+template <typename Func>
+CATLASS_DEVICE
+Callback MakeCallbackWithCall(Func *func)
+{
+    Callback callback;
+    callback.func = func;
+    callback.caller = [](void const *f) {
+        static_cast<Func const *>(f)->Call();
+    };
+    return callback;
+}
+
+#define ENABLE_TENSOR_LIST
+
 namespace Catlass::Gemm::Kernel {
+namespace GMM2 {
+    constexpr uint32_t SOFT_SYNC_SPACE_SIZE = 512;
+    constexpr uint64_t SOFT_SYNC_OFFSET = 964 * 1024;
+}
 
 template <TemplateMC2TypeClass, class BlockMmad_, class BlockEpilogue_, class BlockScheduler_,
           uint32_t WORKSPACE_STAGES_, class ElementGroupList_>
@@ -66,6 +84,16 @@ public:
         LayoutPerTokenScale layoutPerTokenScale;
         __gm__ ElementD *ptrD;
         LayoutD layoutD;
+        uint32_t batchSize;
+        GemmCoord sharedGmm2ProblemShape;
+        __gm__ ElementA * ptrSharedA;
+        __gm__ ElementB * ptrSharedB;
+        __gm__ ElementD *ptrSharedD;
+        __gm__ ElementScale *ptrSharedScale;
+        __gm__ ElementPerTokenScale *ptrSharedPtrPerTokenScale;
+        layout::RowMajor sharedLayoutA;
+        layout::VectorLayout sharedLayoutPerTokenScale;
+        layout::RowMajor sharedLayoutOutput;
         GM_ADDR ptrWorkspace;
         void *combiner;
 
@@ -76,8 +104,11 @@ public:
         CATLASS_DEVICE
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_, LayoutA layoutA_,
                GM_ADDR ptrB_, LayoutB layoutB_, GM_ADDR ptrScale_, LayoutScale layoutScale_, GM_ADDR ptrPerTokenScale_,
-               LayoutPerTokenScale layoutPerTokenScale_, GM_ADDR ptrD_, LayoutD layoutD_, GM_ADDR ptrWorkspace_,
-               void *combiner_)
+               LayoutPerTokenScale layoutPerTokenScale_, GM_ADDR ptrD_, LayoutD layoutD_, uint32_t batchSize_,
+               GemmCoord sharedGmm2ProblemShape_, GM_ADDR ptrSharedA_, GM_ADDR ptrSharedB_, GM_ADDR ptrSharedD_,
+               GM_ADDR ptrSharedScale_, GM_ADDR ptrSharedPtrPerTokenScale_, layout::RowMajor sharedLayoutA_,
+               layout::VectorLayout sharedLayoutPerTokenScale_, layout::RowMajor sharedLayoutOutput_,
+               GM_ADDR ptrWorkspace_, void *combiner_)
             : problemShape(problemShape_),
               problemCount(problemCount_),
               ptrGroupList(reinterpret_cast<__gm__ ElementGroupList *>(ptrGroupList_)),
@@ -91,6 +122,13 @@ public:
               layoutPerTokenScale(layoutPerTokenScale_),
               ptrD(reinterpret_cast<__gm__ ElementD *>(ptrD_)),
               layoutD(layoutD_),
+              batchSize(batchSize_),
+              sharedGmm2ProblemShape(sharedGmm2ProblemShape_),
+              ptrSharedB(reinterpret_cast<__gm__ ElementB *>(ptrSharedB_)),
+              ptrSharedScale(reinterpret_cast<__gm__ ElementScale *>(ptrSharedScale_)),
+              ptrSharedD(reinterpret_cast<__gm__ ElementD *>(ptrSharedD_)),
+              ptrSharedA(reinterpret_cast<__gm__ ElementA *>(ptrSharedA_)),
+              ptrSharedPtrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrSharedPtrPerTokenScale_)),
               ptrWorkspace(ptrWorkspace_),
               combiner(combiner_)
         {}
@@ -98,7 +136,7 @@ public:
 
     // Methods
     CATLASS_DEVICE
-    GroupedMatmulSliceMPerTokenDequantMultiStageWorkspace()
+    GroupedMatmulSliceMPerTokenDequantMultiStageWorkspace(GM_ADDR commArgs = nullptr, uint32_t epRankId = 0)
     {
         Arch::FlagID flagId = 0;
         for (uint32_t stageId = 0; stageId < WORKSPACE_STAGES; ++stageId) {
@@ -107,6 +145,9 @@ public:
             aicWaitFuncList[stageId] = {this, stageId};
             aicSetFuncList[stageId] = {this, stageId};
         }
+        winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
+        syncGmAddr = (GM_ADDR)((winContext_)->localWindowsExp) + GMM2::SOFT_SYNC_OFFSET +
+                     get_block_idx() * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
     }
 
     template <int32_t CORE_TYPE = g_coreType>
@@ -197,9 +238,76 @@ public:
 
             gmGroupOffsetA += inGroupProblemShape.m() * inGroupProblemShape.k();
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
-                gmGroupOffsetB += inGroupProblemShape.k() * inGroupProblemShape.n();
+            gmGroupOffsetB += inGroupProblemShape.k() * inGroupProblemShape.n();
             }
             startCoreIdx = (startCoreIdx + coreLoops) % coreNum;
+        }
+        
+        bool skipWithSoft[WORKSPACE_STAGES] = {};
+        if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+            gmA.SetGlobalBuffer(params.ptrSharedA);
+            gmB.SetGlobalBuffer(params.ptrSharedB);
+            uint32_t softStageUsed = 0;
+            GemmCoord inGroupProblemShape{params.batchSize, params.problemShape.n(), params.problemShape.k()};
+
+            LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
+            LayoutB layoutB = params.layoutB;
+
+            blockScheduler.Update(inGroupProblemShape, MakeCoord(L1TileShape::M, L1TileShape::N));
+            uint32_t coreLoops = blockScheduler.GetCoreLoops();
+
+            // Determine the starting loopIdx of the current core under the current groupIdx
+            uint32_t startLoopIdx = ((coreIdx < startCoreIdx) ? (coreIdx + coreNum) : coreIdx) - startCoreIdx;
+            // Loop through the matmul of each groupIdx
+            for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += coreNum) {
+                // Compute block location
+                GemmCoord blockCoord = blockScheduler.GetBlockCoord(loopIdx);
+                GemmCoord actualBlockShape = blockScheduler.GetActualBlockShape(blockCoord);
+
+                Callback callbackBeforeFixpipe{};
+                if (softStageUsed == WORKSPACE_STAGES) {
+                    callbackBeforeFixpipe = MakeCallbackWithCall(&aicWaitFuncList[stageId]);
+                } else {
+                    if (stageUsed == WORKSPACE_STAGES) {
+                        callbackBeforeFixpipe = MakeCallback(&aicWaitFuncList[stageId]);
+                    } else {
+                        ++stageUsed;
+                    }
+                    ++softStageUsed;
+                    skipWithSoft[stageId] = true;
+                }
+                Callback callbackAfterFixpipe = MakeCallbackWithCall(&aicSetFuncList[stageId]);
+
+                // Compute initial location in logical coordinates
+                MatrixCoord offsetA{blockCoord.m() * L1TileShape::M, blockCoord.k() * L1TileShape::K};
+                MatrixCoord offsetB{blockCoord.k() * L1TileShape::K, blockCoord.n() * L1TileShape::N};
+                MatrixCoord offsetC{(stageId * coreNum + coreIdx) * L1TileShape::M, 0};
+                int64_t gmOffsetA = layoutA.GetOffset(offsetA);
+                int64_t gmOffsetB = layoutB.GetOffset(offsetB);
+                int64_t gmOffsetC = layoutC.GetOffset(offsetC);
+
+                // Compute block-scoped matrix multiply-add
+                if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
+                    blockMmad(
+                        gmA[gmOffsetA], layoutA,
+                        gmB[gmOffsetB], layoutB,
+                        gmC[gmOffsetC], layoutC,
+                        actualBlockShape,
+                        callbackBeforeFixpipe, callbackAfterFixpipe
+                    );
+                } else {
+                    callbackBeforeFixpipe();
+                    blockMmad(
+                        gmA[gmOffsetA], layoutA,
+                        gmB[gmOffsetB], layoutB,
+                        gmC[gmOffsetC], layoutC,
+                        actualBlockShape
+                    );
+                    callbackAfterFixpipe();
+                }
+
+                stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
+            }
         }
 
         if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
@@ -207,9 +315,14 @@ public:
         }
 
         while (stageUsed > 0) {
-            uint32_t aivComputeStageId =
-                (stageId >= stageUsed) ? (stageId - stageUsed) : (stageId + WORKSPACE_STAGES - stageUsed);
-            Arch::CrossCoreWaitFlag(flagAivFinishComputeList[aivComputeStageId]);
+            uint32_t aivComputeStageId = (stageId >= stageUsed) ?
+                (stageId - stageUsed) : (stageId + WORKSPACE_STAGES - stageUsed);
+            if (skipWithSoft[aivComputeStageId]) {
+                Callback callbackBeforeFixpipe = MakeCallbackWithCall(&aicWaitFuncList[stageId]);
+                callbackBeforeFixpipe();
+            } else {
+                Arch::CrossCoreWaitFlag(flagAivFinishComputeList[aivComputeStageId]);
+            }
             --stageUsed;
         }
     }
@@ -218,7 +331,7 @@ public:
     CATLASS_DEVICE void operator()<AscendC::AIV>(Params const &params)
     {
         auto *combiner = (MoeDistributeCombineImpl::CamMoeDistributeCombine<TemplateMC2TypeFunc> *)params.combiner;
-        {
+        do {
             if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
                 if (get_subblockid() == 0) {
                     AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
@@ -259,10 +372,10 @@ public:
                 EpilogueParams epilogueParams;
                 if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                     gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(
-                                    gmScaleListTensor.GetDataPtr<int32_t>(groupIdx));
+                                        gmScaleListTensor.GetDataPtr<int32_t>(groupIdx));
                     epilogueParams = EpilogueParams {
-                            gmScalePtr, layoutScale,
-                            params.ptrPerTokenScale + gmGroupOffsetPerTokenScale, layoutPerTokenScale,
+                        gmScalePtr, layoutScale,
+                        params.ptrPerTokenScale + gmGroupOffsetPerTokenScale, layoutPerTokenScale,
                             params.ptrD + gmGroupOffsetD, layoutD};
                 } else {
                     epilogueParams = EpilogueParams{gmScalePtr + gmGroupOffsetScale,
@@ -296,17 +409,72 @@ public:
                 }
 
                 if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
-                    gmGroupOffsetScale += inGroupProblemShape.n();
+                gmGroupOffsetScale += inGroupProblemShape.n();
                 }
                 gmGroupOffsetPerTokenScale += inGroupProblemShape.m();
                 gmGroupOffsetD += inGroupProblemShape.m() * inGroupProblemShape.n();
 
                 startCoreIdx = (startCoreIdx + coreLoops) % coreNum;
             }
-        }
+            if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+                if (get_subblockid() == 0) {
+                    AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::SEND_SYNC_EVENT_ID);
+                    if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
+                        AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
+                    }
+                    GemmCoord inGroupProblemShape{params.batchSize, params.problemShape.n(), params.problemShape.k()};
+
+                    LayoutScale layoutScale = params.layoutScale;
+                    LayoutPerTokenScale layoutPerTokenScale =
+                        params.layoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
+                    LayoutD layoutD = params.layoutD.GetTileLayout(inGroupProblemShape.GetCoordMN());
+
+                    EpilogueParams epilogueParams{
+                        params.ptrSharedScale, layoutScale,
+                        params.ptrSharedPtrPerTokenScale, layoutPerTokenScale,
+                        params.ptrSharedD, layoutD
+                    };
+
+                    blockScheduler.Update(inGroupProblemShape, L1TileShape::ToCoordMN());
+                    blockEpilogue.UpdateParams(epilogueParams);
+                    uint32_t coreLoops = blockScheduler.GetCoreLoops();
+
+                    GemmCoord blockShapeMNK = L1TileShape::ToCoord();
+                    uint32_t startLoopIdx = ((coreIdx < startCoreIdx) ? (coreIdx + coreNum) : coreIdx) - startCoreIdx;
+                    for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += coreNum) {
+                        GemmCoord blockCoordMNK = blockScheduler.GetBlockCoord(loopIdx);
+                        GemmCoord actualBlockShapeMNK = blockScheduler.GetActualBlockShape(blockCoordMNK);
+
+                        MatrixCoord offsetC{(stageId * coreNum + coreIdx) * L1TileShape::M, 0};
+                        int64_t gmOffsetC = layoutC.GetOffset(offsetC);
+                        auto gmBlockC = gmC[gmOffsetC];
+                        auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
+                        Callback callbackBeforeBlockEpilogue = MakeCallbackWithCall(&aicWaitFuncList[stageId]);
+                        Callback callbackAfterBlockEpilogue = MakeCallbackWithCall(&aicSetFuncList[stageId]);
+
+                        callbackBeforeBlockEpilogue();
+                        blockEpilogue(0, UINT32_MAX, blockShapeMNK, blockCoordMNK, actualBlockShapeMNK,
+                            gmBlockC, layoutBlockC);
+                        callbackAfterBlockEpilogue();
+
+                        stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
+                    }
+                    AscendC::CrossCoreWaitFlag(MoeDistributeCombineImpl::SEND_SYNC_EVENT_ID);
+                    AscendC::CrossCoreWaitFlag(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
+                }
+            }
+        } while(false);
 
         icache_preload(4);
-        if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
+        if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+            if (get_subblockid() == 1) {
+                resource.pipe.Init();
+                combiner->TPipeSet(&resource.pipe);
+                combiner->ProcessCombine();
+                combiner->TPipeSet(nullptr);
+                resource.pipe.Destroy();
+            }
+        } else if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
             if (get_subblockid() == 0) {
                 resource.pipe.Init();
                 combiner->TPipeSet(&resource.pipe);
@@ -342,6 +510,30 @@ private:
         AicWaitFunc() = default;
 
         CATLASS_DEVICE
+        void Call() const {
+            constexpr uint32_t waitValue = g_coreType == AscendC::AIC ? 0 : 1;
+            // 查看flag，类似wait flag
+            AscendC::PipeBarrier<PIPE_ALL>();
+            AscendC::GlobalTensor<uint8_t> global;
+            global.SetGlobalBuffer(ptr->syncGmAddr + stageId * GMM2::SOFT_SYNC_SPACE_SIZE);
+            while (true){
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<uint8_t,
+                            AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
+                __asm__ __volatile__("");
+                uint8_t value = global.GetValue(0);
+                if (value == waitValue) {
+                    __asm__ __volatile__("");
+                    AscendC::DataCacheCleanAndInvalid<uint8_t,
+                            AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
+                    __asm__ __volatile__("");
+                    break;
+                }
+            }
+            AscendC::PipeBarrier<PIPE_ALL>();
+        }
+
+        CATLASS_DEVICE
         void operator()() const
         {
             Arch::CrossCoreWaitFlag(ptr->flagAivFinishComputeList[stageId]);
@@ -360,6 +552,24 @@ private:
         AicSetFunc() = default;
 
         CATLASS_DEVICE
+        void Call() const {
+            constexpr uint32_t setValue = g_coreType == AscendC::AIC ? 1 : 0;
+            AscendC::PipeBarrier<PIPE_ALL>();
+            AscendC::GlobalTensor<uint8_t> global;
+            global.SetGlobalBuffer(ptr->syncGmAddr + stageId * GMM2::SOFT_SYNC_SPACE_SIZE);
+            __asm__ __volatile__("");
+            AscendC::DataCacheCleanAndInvalid<uint8_t,
+                            AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
+            __asm__ __volatile__("");
+            global.SetValue(0, setValue);
+            __asm__ __volatile__("");
+            AscendC::DataCacheCleanAndInvalid<uint8_t,
+                            AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
+            __asm__ __volatile__("");
+            AscendC::PipeBarrier<PIPE_ALL>();
+        }
+
+        CATLASS_DEVICE
         void operator()() const
         {
             Arch::CrossCoreSetFlag<0x2, PIPE_FIX>(ptr->flagAicFinishStoreList[stageId]);
@@ -374,6 +584,8 @@ private:
 
     AicWaitFunc aicWaitFuncList[WORKSPACE_STAGES];
     AicSetFunc aicSetFuncList[WORKSPACE_STAGES];
+    __gm__ HcclOpResParam *winContext_;
+    GM_ADDR syncGmAddr;
     Arch::Resource<ArchTag> resource;
 };
 
