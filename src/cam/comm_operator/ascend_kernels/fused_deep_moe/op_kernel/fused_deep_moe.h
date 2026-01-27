@@ -178,6 +178,12 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
                        layout::RowMajor layoutA, GM_ADDR gmB, layout::zN layoutB, GM_ADDR gmScale,
                        layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
                        layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
+                       uint32_t batchSize,
+                       GemmCoord sharedGmm2ProblemShape,
+                       GM_ADDR gmSharedA, GM_ADDR gmSharedB, GM_ADDR gmSharedD,
+                       GM_ADDR gmSharedScale, GM_ADDR gmSharedPtrPerTokenScale,
+                       layout::RowMajor sharedLayoutA, layout::VectorLayout sharedLayoutPerTokenScale,
+                       layout::RowMajor sharedLayoutOutput,
                        GM_ADDR gmWorkspace, void *combiner)
 {
     using ArchTag = Arch::AtlasA2;
@@ -221,9 +227,31 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using GemmKernel = Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantMultiStageWorkspace<
         TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
 
-    typename GemmKernel::Params params{
-        problemShape, groupCount,      gmGroupList,         gmA, layoutA, gmB,         layoutB, gmScale,
-        layoutScale,  gmPerTokenScale, layoutPerTokenScale, gmD, layoutD, gmWorkspace, combiner};
+    typename GemmKernel::Params params{problemShape,
+                                       groupCount,
+                                       gmGroupList,
+                                       gmA,
+                                       layoutA,
+                                       gmB,
+                                       layoutB,
+                                       gmScale,
+                                       layoutScale,
+                                       gmPerTokenScale,
+                                       layoutPerTokenScale,
+                                       gmD,
+                                       layoutD,
+                                       batchSize,
+                                       sharedGmm2ProblemShape,
+                                       gmSharedA,
+                                       gmSharedB,
+                                       gmSharedD,
+                                       gmSharedScale,
+                                       gmSharedPtrPerTokenScale,
+                                       sharedLayoutA,
+                                       sharedLayoutPerTokenScale,
+                                       sharedLayoutOutput,
+                                       gmWorkspace,
+                                       combiner};
 
     // call a kernel
     GemmKernel gemm;
@@ -361,6 +389,12 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     layout::VectorLayout layoutW2Scale{gmm2OutputDim_};
     layout::VectorLayout layoutX2Scale{maxTokenNum_};
     layout::RowMajor layoutOutput{maxTokenNum_, gmm2OutputDim_};
+    
+    // m_: 4096, n2: 7168, k2_: 2048
+    GemmCoord shareGmm2ProblemShape{bs_, gmm2OutputDim_, gmm2InputDim_};
+    layout::RowMajor shareLayoutX2{bs_, gmm2InputDim_};
+    layout::VectorLayout shareLayoutPerTokenScale2{bs_};
+    layout::RowMajor shareLayoutOutput{bs_, gmm2OutputDim_};
 
     GM_ADDR gmShareX1 = nullptr;
     GM_ADDR gmShareX1Scale = nullptr;
@@ -465,12 +499,14 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
 
     MoeDistributeCombineImpl::CamMoeDistributeCombine<TemplateMC2TypeFunc> combiner;
     if (g_coreType == AscendC::AIV) {
-        combiner.Init(gmGmm2DepOut, gmexpertIds_, gmExpandIdx, gmEpSendCount, nullptr, gmexpertScales_,
-                      xActiveMask_, gmOutput_, workspaceGM_, nullptr, tilingData_);
+        combiner.Init(gmGmm2DepOut, gmexpertIds_, gmExpandIdx, gmEpSendCount, nullptr, gmexpertScales_, xActiveMask_,
+                      gmOutput_, workspaceGM_, nullptr, tilingData_);
     }
     GmmDeq<TemplateMC2TypeFunc, Gmm2L1TileShape, Gmm2L0TileShape, Gmm2EpilogueTileShape, Gmm2BlockScheduler,
            Gmm2DispatchPolicy>(gmm2ProblemShape, groupCount_, gmGroupList, gmX2, layoutX2, gmWeight2_, layoutWeight2,
-                               gmScale2_, layoutW2Scale, gmX2Scale, layoutX2Scale, gmGmm2DepOut,
-                               layoutOutput, gmWorkspace, &combiner);
+                               gmScale2_, layoutW2Scale, gmX2Scale, layoutX2Scale, gmGmm2DepOut, layoutOutput, bs_,
+                               shareGmm2ProblemShape, gmShareX2, gmShareWeight2_, gmShareOutput_,
+                               gmShareWeight2Scale_, gmShareX2Scale, shareLayoutX2, shareLayoutPerTokenScale2,
+                               shareLayoutOutput, gmWorkspace, &combiner);
 }
 #endif  // FUSED_DEEP_MOE_H

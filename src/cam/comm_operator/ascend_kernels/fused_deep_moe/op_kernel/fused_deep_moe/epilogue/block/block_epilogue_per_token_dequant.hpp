@@ -620,8 +620,8 @@ public:
         auto tileShape = TileShape::ToCoord();
         EpilogueTileSwizzle epilogueTileSwizzle(actualBlockShape, tileShape);
         uint32_t tileLoops = epilogueTileSwizzle.GetLoops();
-        uint32_t subblockIdx = AscendC::GetSubBlockIdx();
-        uint32_t subblockNum = AscendC::GetSubBlockNum();
+        uint32_t subblockIdx = expertIdx == UINT32_MAX ? 0 : AscendC::GetSubBlockIdx();
+        uint32_t subblockNum = expertIdx == UINT32_MAX ? 1 : AscendC::GetSubBlockNum();
         for (uint32_t loopIdx = subblockIdx; loopIdx < tileLoops; loopIdx += subblockNum) {
             auto tileCoord = epilogueTileSwizzle.GetTileCoord(loopIdx);
             auto actualTileShape = epilogueTileSwizzle.GetActualTileShape(tileCoord);
@@ -695,7 +695,12 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
 
             if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
-                DoCombineSend(ubD, layoutGmTileD, layoutUbD, groupOffsetD, expertIdx, tileOffsetD);
+                if (expertIdx == UINT32_MAX) {
+                    auto gmTileD = gmD[tileOffsetD];
+                    copyUbToGmD(gmTileD, ubD, layoutGmTileD, layoutUbD);
+                } else {
+                    DoCombineSend(ubD, layoutGmTileD, layoutUbD, groupOffsetD, expertIdx, tileOffsetD);
+                }
             } else {
                 auto gmTileD = gmD[tileOffsetD];
                 copyUbToGmD(gmTileD, ubD, layoutGmTileD, layoutUbD);

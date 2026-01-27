@@ -66,6 +66,7 @@ public:
     __aicore__ inline void Process();
     __aicore__ inline void AllToAllSend();
     __aicore__ inline void ReducePermute();
+    __aicore__ inline void ProcessCombine();
 
     __aicore__ inline CombineCalcInfo &GetCalcInfo()
     {
@@ -842,6 +843,21 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::ReducePermu
     if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
         AscendC::CrossCoreWaitFlag(SEND_SYNC_EVENT_ID);
     }
+}
+
+template <TemplateMC2TypeClass>
+__aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::ProcessCombine()
+{
+    AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(SEND_SYNC_EVENT_ID);
+    AscendC::CrossCoreWaitFlag(SEND_SYNC_EVENT_ID);
+    if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
+        BuffInit();
+        SetWaitTpStatusAndDisPatch();
+    }
+    AlltoAllBuffInit();
+    SetStatus();
+    WaitDispatch();
+    LocalWindowCopy();
 }
 }  // namespace MoeDistributeCombineImpl
 
