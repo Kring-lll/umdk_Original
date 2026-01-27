@@ -394,8 +394,10 @@ public:
         __gm__ ElementGroupList_ *ptrGroupList;
         __gm__ ElementA *ptrA;
         LayoutA layoutA;
+        __gm__ ElementB *ptrShareB;
         __gm__ ElementB *ptrB;
         LayoutB layoutB;
+        __gm__ ElementScale *ptrShareScale;
         __gm__ ElementScale *ptrScale;
         LayoutScale layoutScale;
         __gm__ ElementPerTokenScale *ptrPerTokenScale;
@@ -438,7 +440,7 @@ public:
 
         CATLASS_DEVICE
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_,
-               LayoutA const &layoutA_, GM_ADDR ptrB_, LayoutB const &layoutB_, GM_ADDR ptrScale_,
+               LayoutA const &layoutA_, GM_ADDR ptrShareB_, GM_ADDR ptrB_, LayoutB const &layoutB_, GM_ADDR ptrShareScale_, GM_ADDR ptrScale_,
                LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale const &layoutPerTokenScale_, GM_ADDR ptrOutput_, LayoutOutput const &layoutOutput_,
                GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_,
@@ -451,8 +453,10 @@ public:
               ptrGroupList(reinterpret_cast<__gm__ ElementGroupList *>(ptrGroupList_)),
               ptrA(reinterpret_cast<__gm__ ElementA *>(ptrA_)),
               layoutA(layoutA_),
+              ptrShareB(reinterpret_cast<__gm__ ElementB *>(ptrShareB_)),
               ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
               layoutB(layoutB_),
+              ptrShareScale(reinterpret_cast<__gm__ ElementScale *>(ptrShareScale_)),
               ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
               layoutScale(layoutScale_),
               ptrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrPerTokenScale_)),
@@ -576,8 +580,8 @@ public:
         AscendC::GlobalTensor<ElementA> gmA;
         AscendC::GlobalTensor<ElementB> gmB;
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
-            gmA.SetGlobalBuffer(params.gmShareX1);
-            gmB.SetGlobalBuffer(params.gmShareMm1PermutedWeight);
+            gmA.SetGlobalBuffer((__gm__ ElementA*)params.gmShareX1);
+            gmB.SetGlobalBuffer((__gm__ ElementB*)params.ptrShareB);
             gmB.SetL2CacheHint(AscendC::CacheMode::CACHE_MODE_DISABLE);
         }
         AscendC::ListTensorDesc gmBlistTensorDesc(reinterpret_cast<__gm__ void *>(params.ptrB));
@@ -1277,7 +1281,7 @@ public:
             auto gmBlockC = gmC[gmOffsetC];
             auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
             CheckSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET,
-                static_cast<uint8_t>(COMP_AIV_CORE_NUM + shareSwigluCoreIdx), target); // AIV等待的信号在24~28
+                static_cast<uint8_t>(compCoreNum + shareSwigluCoreIdx), target); // AIV等待的信号在24~28
             target += 1;
             blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
             EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(shareSwigluCoreIdx));
@@ -1552,7 +1556,7 @@ public:
                 for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
                     // 此处虽然没有计算，但也进行等待
                     CheckSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET,
-                        static_cast<uint8_t>(COMP_AIV_CORE_NUM + compCoreIdx), target);
+                        static_cast<uint8_t>(compCoreNum + compCoreIdx), target);
                     target += 1;
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
                 }
@@ -1565,7 +1569,7 @@ public:
                 GemmCoord inGroupProblemShape{currentM, n, k};
                 LayoutPerTokenScale layoutPerTokenScale = 
                     wholeLayoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
-                LayoutD layoutD = layoutOutput.GetTileLayout(MakeCoord(currentM, n));
+                LayoutD layoutD = layout::RowMajor{currentM, n};
 
                 EpilogueParams epilogueParams{
                     gmShareMm1Scale, layoutScale,
@@ -1589,7 +1593,7 @@ public:
                     auto gmBlockC = gmC[gmOffsetC];
                     auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
                     CheckSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET,
-                        static_cast<uint8_t>(COMP_AIV_CORE_NUM + compCoreIdx), target); // AIV等待的信号在24~28
+                        static_cast<uint8_t>(compCoreNum + compCoreIdx), target); // AIV等待的信号在24~28
                     target += 1;
                     blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
                     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
@@ -1835,7 +1839,7 @@ public:
             AscendC::DataCopy(softSyncTensor[compCoreIdx * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)],
                                                 tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK); 
             // 后一半为V核写的Flag
-            AscendC::DataCopy(softSyncTensor[(compCoreIdx + COMP_AIV_CORE_NUM)
+            AscendC::DataCopy(softSyncTensor[(compCoreIdx + compCoreNum)
                             * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)], tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
         }
         if (aivIdx == aiCoreGroupNum * subBlockNum - 1) {
@@ -1897,7 +1901,7 @@ public:
         AivInitState();
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             if (isShareQuantCore) {
-                shareQuantCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmShareX1Token, (GM_ADDR)params.gmShareX1Scale);
+                shareQuantCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmShareX1, (GM_ADDR)params.gmShareX1Scale);
             }
         }
         if (isSendCore) {
@@ -1909,7 +1913,7 @@ public:
         // 使用发送核做swiglu同步比较麻烦，先使用接收核统一做swiglu计算 
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             if (isShareSwigluCore) {
-                shareSwigluCoreFunc(params.ptrWorkspace, (__gm__ float*)params.gmShareMm1PermutedWeightScale,
+                shareSwigluCoreFunc(params.ptrWorkspace, (__gm__ float*)params.ptrShareScale,
                     (__gm__ float*)params.gmShareX1Scale, gmShareSwigluOutput,
                     params.problemShape.n(), params.problemShape.k(), params.layoutScale,
                     params.layoutPerTokenScale, params.layoutOutput);
@@ -1922,7 +1926,7 @@ public:
 
         auto gmSwigluOutput = reinterpret_cast<__gm__ float *>(params.gmSwigluOut);
         if (isCompCore) {
-            CompCoreFunc(params.ptrWorkspace, (__gm__ float*)params.gmShareMm1PermutedWeightScale,  params.ptrScale,
+            CompCoreFunc(params.ptrWorkspace, (__gm__ float*)params.ptrShareScale,  params.ptrScale,
                 (__gm__ float*)params.gmShareX1Scale, (__gm__ float*)params.ptrPerTokenScale, 
                 gmShareSwigluOutput, gmSwigluOutput,
                 params.problemShape.n(), params.problemShape.k(), params.layoutScale,
@@ -1934,6 +1938,7 @@ public:
         AscendC::PipeBarrier<PIPE_ALL>();
 
         UpdateAndCleanInfo(params.ptrGroupList, params.gmEpSendCount, params.gmExpertTokenNums);
+        AscendC::PipeBarrier<PIPE_ALL>();
         {
             // dynamic quant
             AscendC::GlobalTensor<int32_t> sendCountsGlobal;
@@ -1952,12 +1957,13 @@ public:
             uint32_t quantRowOnce = 0;
             CalQuantRow(nOut, quantRowOnce);
             typename BlockQuant<ArchTag>::Params quantParams;
+            auto swigluLayout = layout::RowMajor{totalTokenCount, n};
             if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
                 quantParams = typename BlockQuant<ArchTag>::Params {
-                    (__gm__ float*)params.gmShareSwigluOut, params.layoutOutput,  // input: swiglu output
+                    (__gm__ float*)params.gmShareSwigluOut, swigluLayout,  // input: swiglu output
                     (__gm__ float*)params.gmShareX2Scale, params.layoutDequantScale,  // output: quant token scale
-                    (__gm__ int8_t*)params.gmShareX2Token, params.layoutOutput,
-                    quantRowOnce,           nOut} // output: x2};
+                    (__gm__ int8_t*)params.gmShareX2, params.layoutOutput, // output: x2
+                    quantRowOnce,           nOut};
             } else {
                 quantParams = typename BlockQuant<ArchTag>::Params {
                     gmSwigluOutput,   swigluLayout,        params.ptrDequantScale, params.layoutDequantScale,
@@ -2128,8 +2134,10 @@ public:
         __gm__ ElementGroupList_ *ptrGroupList;
         __gm__ ElementA *ptrA;
         LayoutA layoutA;
+        __gm__ ElementB *ptrShareB;
         __gm__ ElementB *ptrB;
         LayoutB layoutB;
+        __gm__ ElementScale *ptrShareScale;
         __gm__ ElementScale *ptrScale;
         LayoutScale layoutScale;
         __gm__ ElementPerTokenScale *ptrPerTokenScale;
@@ -2152,7 +2160,7 @@ public:
 
         CATLASS_DEVICE
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_,
-               LayoutA const &layoutA_, GM_ADDR ptrB_, LayoutB const &layoutB_, GM_ADDR ptrScale_,
+               LayoutA const &layoutA_, GM_ADDR ptrShareB_, GM_ADDR ptrB_, LayoutB const &layoutB_, GM_ADDR ptrShareScale_, GM_ADDR ptrScale_,
                LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale const &layoutPerTokenScale_, GM_ADDR ptrOutput_, LayoutOutput const &layoutOutput_,
                GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_,
@@ -2163,8 +2171,10 @@ public:
               ptrGroupList(reinterpret_cast<__gm__ ElementGroupList *>(ptrGroupList_)),
               ptrA(reinterpret_cast<__gm__ ElementA *>(ptrA_)),
               layoutA(layoutA_),
+              ptrShareB(reinterpret_cast<__gm__ ElementB *>(ptrShareB_)),
               ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
               layoutB(layoutB_),
+              ptrShareScale(reinterpret_cast<__gm__ ElementScale *>(ptrShareScale_)),
               ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
               layoutScale(layoutScale_),
               ptrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrPerTokenScale_)),
