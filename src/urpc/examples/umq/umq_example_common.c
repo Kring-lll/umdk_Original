@@ -636,7 +636,7 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
                 break;
             case 'P':
                 param = (uint32_t)strtoul(optarg, NULL, 0);
-                if (param < 0 || param >= TP_TYPE_MAX) {
+                if (param < 0 || param >= (uint32_t)TP_TYPE_MAX) {
                     return -1;
                 }
                 cfg->tp_type = param;

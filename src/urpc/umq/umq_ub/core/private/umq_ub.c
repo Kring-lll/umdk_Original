@@ -442,7 +442,7 @@ static ALWAYS_INLINE uint32_t umq_ub_dev_info_serialize(
     (void)memcpy(&dev_info->tseg, dev_ctx->tseg_list[UMQ_QBUF_DEFAULT_MEMPOOL_ID], sizeof(urma_target_seg_t));
     dev_info->buf_pool_mode = umq_qbuf_mode_get();
     dev_info->feature = dev_ctx->feature;
-    dev_info->pid = getpid();
+    dev_info->pid = (uint32_t)getpid();
     info_tlv_head->type = UMQ_UB_BIND_INFO_TYPE_DEV;
     info_tlv_head->len = (uint32_t)sizeof(umq_ub_bind_dev_info_t);
     return urpc_tlv_get_total_len(info_tlv_head);
@@ -494,7 +494,7 @@ static ALWAYS_INLINE uint32_t umq_ub_fc_info_serialize(
         fc_info->win_buf_len = 0;
     }
     info_tlv_head->type = UMQ_UB_BIND_INFO_TYPE_FC;
-    info_tlv_head->len = sizeof(umq_ub_bind_fc_info_t);
+    info_tlv_head->len = (uint64_t)sizeof(umq_ub_bind_fc_info_t);
     return urpc_tlv_get_total_len(info_tlv_head);
 }
 
@@ -1821,7 +1821,7 @@ void fill_big_data_ref_sge(ub_queue_t *queue, ub_ref_sge_t *ref_sge,
 static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
 {
     // apply for one to avoid memory leak
-    umq_buf_t *send_buf = umq_buf_alloc(umq_buf_size_small(), UMQ_MAX_QBUF_NUM, UMQ_INVALID_HANDLE, NULL);
+    umq_buf_t *send_buf = umq_buf_alloc(umq_buf_size_middle(), UMQ_MAX_QBUF_NUM, UMQ_INVALID_HANDLE, NULL);
     if (send_buf == NULL) {
         UMQ_LIMIT_VLOG_ERR("umq malloc failed\n");
         return -UMQ_ERR_ENOMEM;
@@ -1840,9 +1840,16 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
     ub_ref_sge_t *ref_sge = (ub_ref_sge_t *)(uintptr_t)(umq_imm_head + 1);
 
     ub_import_mempool_info_t import_mempool_info[UMQ_MAX_TSEG_NUM];
+    umq_buf_t *mempool_buf = umq_buf_alloc(umq_buf_size_middle(), UMQ_MAX_QBUF_NUM, UMQ_INVALID_HANDLE, NULL);
+    if (mempool_buf == NULL) {
+        UMQ_LIMIT_VLOG_ERR("mempool buf alloc failed\n");
+        umq_buf_free(send_buf);
+        return -UMQ_ERR_ENOMEM;
+    }
+    ub_import_mempool_info_t *import_mempool_info = (ub_import_mempool_info_t *)(uintptr_t)mempool_buf->buf_data;
     uint32_t rest_size = (*buffer)->total_data_size;
     int32_t buf_index = 0;
-    uint16_t ref_sge_num = (uint16_t)((size_t)umq_buf_size_small() - sizeof(umq_imm_head_t)) / sizeof(ub_ref_sge_t);
+    uint16_t ref_sge_num = (uint16_t)((size_t)umq_buf_size_middle() - sizeof(umq_imm_head_t)) / sizeof(ub_ref_sge_t);
     urma_sge_t sge;
     uint32_t max_data_size = 0;
     while ((*buffer) && rest_size != 0) {
@@ -1868,7 +1875,7 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
     if (umq_imm_head->type == IMM_PROTOCAL_TYPE_IMPORT_MEM) {
         if ((sizeof(umq_imm_head_t) + sizeof(ub_ref_sge_t) * buf_index +
                 sizeof(ub_import_mempool_info_t) * umq_imm_head->mempool_num) >
-            (umq_buf_size_small() * UMQ_MAX_QBUF_NUM)) {
+            (umq_buf_size_middle() * UMQ_MAX_QBUF_NUM)) {
             UMQ_LIMIT_VLOG_ERR("import mempool info is not enough\n");
             goto FREE_BUF;
         }
@@ -1888,6 +1895,7 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
                                     .msg_id = msg_id,
                                     .msg_num = (uint16_t)buf_index}};
     int ret = umq_ub_send_imm(queue, imm.value, &sge, user_ctx);
+    umq_buf_free(mempool_buf);
     if (ret != UMQ_SUCCESS) {
         umq_buf_free(send_buf);
         UMQ_LIMIT_VLOG_ERR("umq_ub_send_imm failed\n");
@@ -1896,6 +1904,7 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
     return UMQ_SUCCESS;
 
 FREE_BUF:
+    umq_buf_free(mempool_buf);
     umq_buf_free(send_buf);
     return UMQ_FAIL;
 }
