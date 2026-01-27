@@ -629,14 +629,14 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
                 break;
             case 'M':
                 param = (uint32_t)strtoul(optarg, NULL, 0);
-                if (param < 0 || param >= TRANSPORT_MODE_MAX) {
+                if (param >= (uint32_t)TRANSPORT_MODE_MAX) {
                     return -1;
                 }
                 cfg->transport_mode = param;
                 break;
             case 'P':
                 param = (uint32_t)strtoul(optarg, NULL, 0);
-                if (param < 0 || param >= TP_TYPE_MAX) {
+                if (param >= (uint32_t)TP_TYPE_MAX) {
                     return -1;
                 }
                 cfg->tp_type = param;

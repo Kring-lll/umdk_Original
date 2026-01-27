@@ -684,14 +684,14 @@ static ALWAYS_INLINE int enqueue_data(uint64_t umqh_tp, uint64_t *offset, uint32
 
 static ALWAYS_INLINE umq_buf_t *umq_prepare_rendezvous_data(umq_ubmm_info_t *tp, umq_buf_t *qbuf, uint16_t *msg_id)
 {
-    umq_buf_t *send_buf = umq_buf_alloc(umq_buf_size_small(), 1, tp->umqh, NULL);
+    umq_buf_t *send_buf = umq_buf_alloc(umq_buf_size_middle(), 1, tp->umqh, NULL);
     if (send_buf == NULL) {
         UMQ_LIMIT_VLOG_ERR("alloc rendezvoud buf failed\n");
         return NULL;
     }
 
     umq_ubmm_ref_sge_info_t *ref_sge_info = (umq_ubmm_ref_sge_info_t *)(uintptr_t)send_buf->buf_data;
-    uint32_t ub_ref_info_size = umq_buf_size_small() - sizeof(umq_ubmm_ref_sge_info_t);
+    uint32_t ub_ref_info_size = umq_buf_size_middle() - sizeof(umq_ubmm_ref_sge_info_t);
     if (ubmm_fill_ref_sge_info(tp->ub_handle, qbuf, ref_sge_info->ub_ref_info, ub_ref_info_size) != UMQ_SUCCESS) {
         umq_buf_free(send_buf);
         return NULL;
