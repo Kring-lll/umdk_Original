@@ -41,7 +41,8 @@ BASE_KWARGS = {
     "test_graph": False,
     "with_mc2_mask": False,
     "dynamic_eplb": False,
-    "with_share": False
+    "with_share": False,
+    "share_expert_intermediate_size": 2048  # shared expert gmm1HLen
 }
 
 def redirect_output(log_file_path):
@@ -73,6 +74,7 @@ class DecodeMoeOps(torch.nn.Module):
                  shared_expert_rank_num=0,
                  dynamic_eplb=False,
                  with_share=False,
+                 share_expert_intermediate_size=None,
                  share_gmm1_weight=None,
                  share_gmm1_weight_scale=None,
                  share_gmm2_weight=None,
@@ -82,6 +84,7 @@ class DecodeMoeOps(torch.nn.Module):
         self.batch_size = batch_size
         self.token_hidden_size = token_hidden_size
         self.moe_intermediate_size = moe_intermediate_size
+        self.share_expert_intermediate_size = share_expert_intermediate_size if share_expert_intermediate_size is not None else moe_intermediate_size
         self.ep_world_size = ep_world_size
         self.moe_expert_num = moe_expert_num
         self.global_rank_id = global_rank_id
@@ -177,6 +180,7 @@ class SmallOps(DecodeMoeOps):
                  shared_expert_rank_num=0,
                  dynamic_eplb=False,
                  with_share=False,
+                 share_expert_intermediate_size=None,
                  share_gmm1_weight=None,
                  share_gmm1_weight_scale=None,
                  share_gmm2_weight=None,
@@ -186,6 +190,7 @@ class SmallOps(DecodeMoeOps):
                          token_hidden_size, moe_intermediate_size,
                          ep_world_size, moe_expert_num, global_rank_id,
                          shared_expert_rank_num, dynamic_eplb, with_share,
+                         share_expert_intermediate_size,
                          share_gmm1_weight, share_gmm1_weight_scale,
                          share_gmm2_weight, share_gmm2_weight_scale)
         self.tp_hcomm_info = ""
@@ -293,6 +298,7 @@ class FusionOp(DecodeMoeOps):
                  shared_expert_rank_num=0,
                  dynamic_eplb=False,
                  with_share=False,
+                 share_expert_intermediate_size=None,
                  share_gmm1_weight=None,
                  share_gmm1_weight_scale=None,
                  share_gmm2_weight=None,
@@ -302,6 +308,7 @@ class FusionOp(DecodeMoeOps):
                          token_hidden_size, moe_intermediate_size,
                          ep_world_size, moe_expert_num, global_rank_id,
                          shared_expert_rank_num, dynamic_eplb, with_share,
+                         share_expert_intermediate_size,
                          share_gmm1_weight, share_gmm1_weight_scale,
                          share_gmm2_weight, share_gmm2_weight_scale)
 
@@ -389,7 +396,8 @@ def generate_datas(batch_size,
                    test_bfloat16=True,
                    enable_dynamic_bs=False,
                    with_mc2_mask=False,
-                   with_share=False):
+                   with_share=False,
+                   share_expert_intermediate_size=None):
     is_shared_expert = global_rank_id < shared_expert_rank_num
     moe_expert_num_per_rank = moe_expert_num // (ep_world_size - shared_expert_rank_num)
     actual_bs = int(
@@ -437,9 +445,12 @@ def generate_datas(batch_size,
     share_mm2_weight = None
     share_mm2_weight_scale = None
     if with_share:
-        share_mm1_weight = torch.ones([gmm1_input_dim, gmm1_output_dim]).to(torch.int8) * 4
-        share_mm2_weight = torch.ones([gmm2_input_dim, gmm2_output_dim]).to(torch.int8) * 4
-        share_mm1_weight_scale = torch.ones([gmm1_output_dim]) * 0.0015
+        # Use share_expert_intermediate_size for shared expert gmm1HLen
+        share_gmm2_input_dim = share_expert_intermediate_size if share_expert_intermediate_size is not None else moe_intermediate_size
+        share_gmm1_output_dim = share_gmm2_input_dim * 2
+        share_mm1_weight = torch.ones([gmm1_input_dim, share_gmm1_output_dim]).to(torch.int8) * 4
+        share_mm2_weight = torch.ones([share_gmm2_input_dim, gmm2_output_dim]).to(torch.int8) * 4
+        share_mm1_weight_scale = torch.ones([share_gmm1_output_dim]) * 0.0015
         share_mm2_weight_scale = torch.ones([gmm2_output_dim]) * 0.0015
         share_mm1_weight[:, ::2] = share_mm1_weight[:, ::2] * -1
         share_mm2_weight[:, ::2] = share_mm2_weight[:, ::2] * -1
@@ -479,7 +490,8 @@ def run_once(local_rank_id,
              test_graph=False,
              with_mc2_mask=False,
              dynamic_eplb=False,
-             with_share=False):
+             with_share=False,
+             share_expert_intermediate_size=None):
     # 配置日志输出文件名
     log_file = redirect_output(f"local_rank_{local_rank_id}.log"
                                ) if output_to_file(local_rank_id) else None
@@ -509,7 +521,7 @@ def run_once(local_rank_id,
                  ep_world_size, moe_expert_num, global_rank_id,
                  shared_expert_rank_num)
     input_datas, weight_datas, share_weight_datas, actual_bs, valid_token_num = generate_datas(
-        *parameter, top_k, test_bfloat16, enable_dynamic_bs, with_mc2_mask, with_share)
+        *parameter, top_k, test_bfloat16, enable_dynamic_bs, with_mc2_mask, with_share, share_expert_intermediate_size)
     input_datas = [
         data.npu() if data is not None else None for data in input_datas
     ]
@@ -521,9 +533,9 @@ def run_once(local_rank_id,
     ] if with_share else (None, None, None, None)
     
     small_ops = SmallOps(*weight_datas, ep_hcomm_info_small,
-                         *parameter, dynamic_eplb, with_share, *share_weight_datas).npu()  # type: ignore
+                         *parameter, dynamic_eplb, with_share, share_expert_intermediate_size, *share_weight_datas).npu()  # type: ignore
     fused_ops = FusionOp(*weight_datas, ep_hcomm_info_fused,
-                         *parameter, dynamic_eplb, with_share, *share_weight_datas).npu()  # type: ignore
+                         *parameter, dynamic_eplb, with_share, share_expert_intermediate_size, *share_weight_datas).npu()  # type: ignore
     if test_graph:
         config = torchair.CompilerConfig()
         config.mode = "reduce-overhead"
@@ -597,6 +609,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=81)
     parser.add_argument("--token_hidden_size", type=int, default=5120)
     parser.add_argument("--moe_intermediate_size", type=int, default=1536)
+    parser.add_argument("--share_expert_intermediate_size", type=int, default=None)
     parser.add_argument("--ep_world_size", type=int, default=16)
     parser.add_argument("--shared_expert_rank_num", type=int, default=0)
     parser.add_argument("--top_k", type=int, default=6)
@@ -611,6 +624,7 @@ if __name__ == "__main__":
     BASE_KWARGS["batch_size"] = args.batch_size
     BASE_KWARGS["token_hidden_size"] = args.token_hidden_size
     BASE_KWARGS["moe_intermediate_size"] = args.moe_intermediate_size
+    BASE_KWARGS["share_expert_intermediate_size"] = args.share_expert_intermediate_size if args.share_expert_intermediate_size is not None else args.moe_intermediate_size
     BASE_KWARGS["ep_world_size"] = args.ep_world_size
     BASE_KWARGS["shared_expert_rank_num"] = args.shared_expert_rank_num
     BASE_KWARGS["top_k"] = args.top_k
