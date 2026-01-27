@@ -1408,13 +1408,18 @@ int ubmm_fill_ref_sge_info(uint64_t umqh_tp, umq_buf_t *qbuf, char *ub_ref_info,
     ub_ref_sge_t *ref_sge = (ub_ref_sge_t *)(uintptr_t)(ub_ref_info + sizeof(umq_imm_head_t));
     ub_fill_umq_imm_head(umq_imm_head, qbuf);
 
-    ub_import_mempool_info_t import_mempool_info[UMQ_MAX_TSEG_NUM];
+    umq_buf_t *mempool_buf = umq_buf_alloc(umq_buf_size_middle(), UMQ_MAX_QBUF_NUM, UMQ_INVALID_HANDLE, NULL);
+    if (mempool_buf == NULL) {
+        UMQ_LIMIT_VLOG_ERR("mempool buf alloc failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+    ub_import_mempool_info_t *import_mempool_info = (ub_import_mempool_info_t *)(uintptr_t)mempool_buf->buf_data;
     umq_buf_t *tmp_buf = qbuf;
     uint32_t idx = 0;
     while (tmp_buf != NULL) {
         if (idx >= max_ref_sge_num) {
             UMQ_LIMIT_VLOG_ERR("rendezvoud buf count exceed max support count[%u]\n", max_ref_sge_num);
-            return UMQ_FAIL;
+            goto FREE_BUF;
         }
 
         fill_big_data_ref_sge(
@@ -1426,14 +1431,18 @@ int ubmm_fill_ref_sge_info(uint64_t umqh_tp, umq_buf_t *qbuf, char *ub_ref_info,
 
     if (umq_imm_head->type == IMM_PROTOCAL_TYPE_IMPORT_MEM) {
         if ((sizeof(umq_imm_head_t) + sizeof(ub_ref_sge_t) * idx +
-            sizeof(ub_import_mempool_info_t) * umq_imm_head->mempool_num) > umq_buf_size_small()) {
+            sizeof(ub_import_mempool_info_t) * umq_imm_head->mempool_num) > umq_buf_size_middle()) {
             UMQ_LIMIT_VLOG_ERR("import mempool info is not enough\n");
-            return UMQ_FAIL;
+            goto FREE_BUF;
         }
         (void)memcpy(ref_sge,
             import_mempool_info, sizeof(ub_import_mempool_info_t) * umq_imm_head->mempool_num);
     }
+    umq_buf_free(mempool_buf);
     return UMQ_SUCCESS;
+FREE_BUF:
+    umq_buf_free(mempool_buf);
+    return UMQ_FAIL;
 }
 
 int umq_ub_get_route_list_impl(const umq_route_t *route, umq_route_list_t *route_list)
