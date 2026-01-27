@@ -31,6 +31,7 @@ struct FusedDeepMoeInfo {
     uint64_t totalUbSize;
     uint64_t totalWinSize;
     uint64_t gmm1HLen;
+    uint64_t shareGmm1HLen;  // shared expert gmm1 hidden length
     bool isTensorList;
 };
 
