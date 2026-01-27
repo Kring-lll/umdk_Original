@@ -1,20 +1,21 @@
 # UMDK
 #### 1. UMDK Introduction
 Lingqu UnifiedBus Memory Development Kit (UMDK) is a distributed communication software library centered around memory semantics. It provides high-performance communication interfaces for data center networks, within super nodes, and between cards inside servers, enabling and unleashing the hardware capabilities of the Lingqu bus.
-
 ![UMDK Component Diagram](./doc/images/UMDK_component_image.png)
 
 #### 2. Component Introduction
-1. URMA: Unifies memory semantics, provides remote memory operation methods such as unilateral, bilateral, and atomic operations, serving as the foundation for communication between applications.
+1. URMA
+The UB Communication Foundation Library provides remote memory operation methods such as unilateral, bilateral, and atomic operations, serving as the foundation for communication between applications.
 It offers two types of interfaces: one is the northbound application programming interface, which provides communication APIs for applications, and the other is the southbound driver programming interface, which offers APIs for driver developers to access the UMDK.
 
-2. CAM: SuperPOD communication acceleration library, providing high-performance training and promotion communication acceleration based on Lingqu superPOD affinity. It can connect to mainstream communities such as vllm, SGlang, and VeRL in the northbound direction and connect to Ascend superPOD hardware and networking in the southbound direction.
+2. URPC
+    Unified Remote Procedure Call, supporting Lingqu-native high-performance RPC communication between hosts and devices, as well as RPC acceleration.
 
-3. URPC: Unified remote procedure call, supporting Lingqu-native high-performance RPC communication between hosts and devices, as well as RPC acceleration.
+3. ULOCK
+    State unification synchronization, featuring native Lingqu high-performance state synchronization with distributed lock support, accelerates global resource allocation for distributed applications such as databases.
 
-4. ULOCK: Unified State synchronization, featuring native Lingqu high-performance state synchronization with distributed lock support, accelerates global resource allocation for distributed applications such as databases.
-
-5. USOCK: Compatible with standard socket API, enabling TCP applications to enhance network communication performance with zero modifications.
+4. USOCK
+    Building the UB communication ecosystem: Compatible with standard socket API, enabling TCP applications to enhance network communication performance with zero modifications.
 
 #### 3. Build and install
 1. Build Environment Requirements
@@ -84,12 +85,14 @@ modprobe ums # if ums is required
 -  Add permissions
 ```bash
 # If you do not have the required permissions, you need to add them manually.
+chmod -R 777 /usr/lib64/urma
+chmod 777 /dev/ummu/tid
 chmod 755 /usr/lib64/liburma*
 ```
 
 #### 4. Contributing
 
-We warmly welcome contributions from developers. If you have discovered a bug or would like to discuss ideas, please feel free to [send an email to the development mailing list](https://openeuler.org/zh/community/mailing-list) or [submit an issue](https://gitee.com/openeuler/umdk/issues) 。
+We warmly welcome contributions from developers. If you have discovered a bug or would like to discuss ideas, please feel free to [send an email to the development mailing list](https://openeuler.org/zh/community/mailing-list) or [submit an issue](https://atomgit.com/openeuler/umdk/issues) 。
 
 #### 5. LICENSES
 
