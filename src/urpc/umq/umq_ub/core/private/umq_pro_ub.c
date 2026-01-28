@@ -588,6 +588,8 @@ static int umq_report_incomplete_rx(ub_queue_t *queue, uint32_t max_rx_ctx, umq_
         queue->rx_flush_done = true;
     }
 
+    ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    (void)counter_dec_atomic_u16(credit, buf_cnt, CREDIT_POOL_IDLE);
     return buf_cnt;
 }
 
