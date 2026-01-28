@@ -59,8 +59,8 @@ static struct option g_long_options[] = {
     {"tp-type",            required_argument, NULL, 'P'},
     {"queue_cnt",          required_argument, NULL, 'q'},
     {"threadpool_size",    required_argument, NULL, 's'},
-    {"m_dev_name",         required_argument, NULL,  1 },
-    {"m_eid_idx",          required_argument, NULL,  2 },
+    {"m_dev_name",         required_argument, NULL, 'n'},
+    {"m_eid_idx",          required_argument, NULL, 'x'},
     {NULL,                 0,                 NULL,  0 }
 };
 
@@ -653,7 +653,7 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
             case 's':
                 cfg->thread_poll_size = (uint32_t)strtoul(optarg, NULL, 0);
                 break;
-            case 1:
+            case 'n':
                 tmp = strdup(optarg);
                 idx = 0;
                 while(*tmp != '\0' && idx < EXAMPLE_MAX_DEV_NUM) {
@@ -670,7 +670,7 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
                     tmp++; 
                 }
                 break;
-            case 2:
+            case 'x':
                 tmp = strdup(optarg);
                 char *ptr = tmp;
                 idx = 0;
