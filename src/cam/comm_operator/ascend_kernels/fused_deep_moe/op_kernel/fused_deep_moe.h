@@ -56,10 +56,10 @@ using Gmm2DispatchPolicy =
 template <uint32_t EXEC_FLAG, typename XType_, class L1TileShape_, class L0TileShape_, class EpilogueTileShape_,
           class BlockScheduler_, class DispatchPolicy_ = MmadAtlasA2Custom>
 CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
-                                  layout::RowMajor layoutA, GM_ADDR gmShareB, GM_ADDR gmB, layout::zN layoutB, GM_ADDR gmShareScale, GM_ADDR gmScale,
+                                  layout::RowMajor layoutA, GM_ADDR gmShareB, layout::zN layoutShareB, GM_ADDR gmB, layout::zN layoutB, GM_ADDR gmShareScale, layout::VectorLayout layoutShareScale, GM_ADDR gmScale,
                                   layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
                                   layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
-                                  GM_ADDR gmDequantScale, layout::VectorLayout layoutDequantScale, GM_ADDR gmShareX1, GM_ADDR gmShareX1Scale, GM_ADDR gmShareSwigluOut, GM_ADDR gmShareX2, GM_ADDR gmShareX2Scale, GM_ADDR gmSwigluOut, GM_ADDR gmWorkspace,
+                                  GM_ADDR gmDequantScale, layout::VectorLayout layoutDequantScale, GM_ADDR gmShareX1, GM_ADDR gmShareX1Scale, GM_ADDR gmShareSwigluOut, GM_ADDR gmShareX2, layout::RowMajor layoutShareD, GM_ADDR gmShareX2Scale, GM_ADDR gmSwigluOut, GM_ADDR gmWorkspace,
                                   GM_ADDR gmX, GM_ADDR debugGm, GM_ADDR gmexpertIds, GM_ADDR gmExpandIdx,
                                   GM_ADDR gmEpSendCount, GM_ADDR xActiveMask, GM_ADDR gmResvered,
                                   GM_ADDR gmExpertTokenNums,
@@ -119,9 +119,11 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
                                            gmA,
                                            layoutA,
                                            gmShareB,
+                                           layoutShareB,
                                            gmB,
                                            layoutB,
                                            gmShareScale,
+                                           layoutShareScale,
                                            gmScale,
                                            layoutScale,
                                            gmPerTokenScale,
@@ -139,7 +141,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
                                            xActiveMask,
                                            gmResvered,
                                            gmExpertTokenNums,
-                                           gmShareX1, gmShareX1Scale, gmShareSwigluOut, gmShareX2, gmShareX2Scale, gmSwigluOut,
+                                           gmShareX1, gmShareX1Scale, gmShareSwigluOut, gmShareX2, layoutShareD, gmShareX2Scale, gmSwigluOut,
                                            disGmmDeqSwigluQuantGmmDeqComInfo};
         // call a kernel
         GemmKernel gemm;
@@ -151,9 +153,11 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
                                            gmA,
                                            layoutA,
                                            gmShareB,
+                                           layoutShareB,
                                            gmB,
                                            layoutB,
                                            gmShareScale,
+                                           layoutShareScale,
                                            gmScale,
                                            layoutScale,
                                            gmPerTokenScale,
@@ -163,7 +167,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
                                            gmDequantScale,
                                            layoutDequantScale,
                                            gmWorkspace,
-                                           gmShareX1, gmShareX1Scale, gmShareSwigluOut, gmShareX2, gmShareX2Scale, gmSwigluOut,
+                                           gmShareX1, gmShareX1Scale, gmShareSwigluOut, gmShareX2, layoutShareD, gmShareX2Scale, gmSwigluOut,
                                            disGmmDeqSwigluQuantGmmDeqComInfo
                                         };
         // call a kernel
@@ -268,10 +272,12 @@ private:
     GM_ADDR xActiveMask_;
 
     uint32_t maxTokenNum_{0};
+    uint32_t shareGmm1OutputDim_{0};
     uint32_t gmm1OutputDim_{0};
     uint32_t tokenHiddenSize_{0};
     uint32_t groupCount_{0};
     uint32_t gmm2OutputDim_{0};
+    uint32_t shareGmm2InputDim_{0};
     uint32_t gmm2InputDim_{0};
     uint32_t globalRankId_{0};
     uint32_t winSizePerRank_{0};
@@ -338,11 +344,12 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     } else {
         maxTokenNum_ = maxBs_ * epRankSize_ * (topK_ < moeExpertNumPerRank_ ? topK_ : moeExpertNumPerRank_);
     }
-
+    shareGmm1OutputDim_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.shareGmm1HLen;
     gmm1OutputDim_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
     tokenHiddenSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.h;
     groupCount_ = isShareExpert ? 1 : tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     gmm2OutputDim_ = tokenHiddenSize_;
+    shareGmm2InputDim_ = shareGmm1OutputDim_ / 2;
     gmm2InputDim_ = gmm1OutputDim_ / 2;
 }
 
@@ -353,9 +360,12 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     GemmCoord gmm2ProblemShape{maxTokenNum_, gmm2OutputDim_, gmm2InputDim_};
 
     layout::RowMajor layoutX1{maxTokenNum_, tokenHiddenSize_};
+    layout::zN layoutShareWeight1 = layout::zN::template MakeLayout<int8_t>(tokenHiddenSize_, shareGmm1OutputDim_);
     layout::zN layoutWeight1 = layout::zN::template MakeLayout<int8_t>(tokenHiddenSize_, gmm1OutputDim_);
+    layout::VectorLayout layoutShareW1Scale{shareGmm1OutputDim_};
     layout::VectorLayout layoutW1Scale{gmm1OutputDim_};
     layout::VectorLayout layoutX1Scale{maxTokenNum_};
+    layout::RowMajor layoutShareX2{bs_, shareGmm2InputDim_};
     layout::RowMajor layoutX2{maxTokenNum_, gmm2InputDim_};
     layout::zN layoutWeight2 = layout::zN::template MakeLayout<int8_t>(gmm2InputDim_, gmm2OutputDim_);
     layout::VectorLayout layoutW2Scale{gmm2OutputDim_};
@@ -373,50 +383,40 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     GM_ADDR gmSwigluOut = nullptr;
     GM_ADDR gmX2 = nullptr;
     GM_ADDR gmX2Scale = nullptr;
-    size_t maxHandleTokenNum = maxTokenNum_;
+    size_t shareExpertTokenNum = 0;
     if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
-        maxHandleTokenNum += bs_;
+        shareExpertTokenNum = bs_;
     }
+    size_t maxHandleTokenNum = maxTokenNum_ + shareExpertTokenNum;
     size_t workspaceOffset = 0;
     constexpr int32_t resveredWorkSpaceSize = 256 * 1024;
     int64_t x1TokenSize = maxHandleTokenNum * tokenHiddenSize_ * sizeof(int8_t);
-    int64_t x2TokenSize = maxHandleTokenNum * gmm2InputDim_ * sizeof(int8_t);
+    int64_t x2TokenSize = (maxTokenNum_ * gmm2InputDim_ + shareExpertTokenNum * shareGmm2InputDim_) * sizeof(int8_t);
     int64_t maxTokenSize = x1TokenSize < x2TokenSize ? x2TokenSize : x1TokenSize;
     int64_t tokenScaleSize = maxHandleTokenNum * sizeof(float);
-    if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
-        gmShareX1 = workspaceGM_ + workspaceOffset;
-        gmX1 = gmShareX1 + (static_cast<size_t>(bs_) * tokenHiddenSize_ * sizeof(int8_t));
-        gmShareX2 = gmShareX1;
-        gmX2 = gmShareX2 + (static_cast<size_t>(bs_) * gmm2InputDim_ * sizeof(int8_t));
-    } else {
-        gmX1 = workspaceGM_ + workspaceOffset;
-        gmX2 = gmX1;
-    }
+    gmShareX1 = workspaceGM_ + workspaceOffset;
+    gmShareX2 = workspaceGM_ + workspaceOffset;
+    gmX1 = gmShareX1 + (static_cast<size_t>(shareExpertTokenNum) * tokenHiddenSize_ * sizeof(int8_t));
+    gmX2 = gmShareX2 + (static_cast<size_t>(shareExpertTokenNum) * shareGmm2InputDim_ * sizeof(int8_t));
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(maxTokenSize);
-    if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
-        gmShareX1Scale = workspaceGM_ + workspaceOffset;
-        gmX1Scale = gmShareX1Scale + (static_cast<size_t>(bs_) * sizeof(float));
-        gmShareX2Scale = gmShareX1Scale;
-    } else {
-        gmX1Scale = workspaceGM_ + workspaceOffset;
-    }
-    gmX2Scale = gmX1Scale;
+    gmShareX1Scale = workspaceGM_ + workspaceOffset;
+    gmShareX2Scale = workspaceGM_ + workspaceOffset;
+    gmX1Scale = gmShareX1Scale + (static_cast<size_t>(shareExpertTokenNum) * sizeof(float));
+    gmX2Scale = gmShareX2Scale + (static_cast<size_t>(shareExpertTokenNum) * sizeof(float));
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(tokenScaleSize);
+
     GM_ADDR gmWorkspace = workspaceGM_ + workspaceOffset;
     GM_ADDR gmCVSwap = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(blockDim_) * (GMM1_L1M * GMM1_L1N) *
                                               WORKSPACE_STAGES * sizeof(int32_t));
-    int64_t swigluOutSize = maxHandleTokenNum * gmm1OutputDim_ * sizeof(float);
+    int64_t swigluOutSize = (maxTokenNum_ * gmm1OutputDim_ + shareExpertTokenNum * shareGmm1OutputDim_) * sizeof(float);
     int64_t gmm2OutSize = maxTokenNum_ * tokenHiddenSize_ * sizeof(ExpandXType);
     int64_t maxSwigluGmm2Size = swigluOutSize < gmm2OutSize ? gmm2OutSize : swigluOutSize;
-    if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
-        gmShareSwigluOut = workspaceGM_ + workspaceOffset;
-        gmSwigluOut = gmShareSwigluOut + (static_cast<size_t>(bs_) * gmm1OutputDim_ * sizeof(float));
-    } else {
-        gmSwigluOut = workspaceGM_ + workspaceOffset;
-    }
+    gmShareSwigluOut = workspaceGM_ + workspaceOffset;
+    gmSwigluOut = gmShareSwigluOut + (static_cast<size_t>(shareExpertTokenNum) * shareGmm1OutputDim_ * sizeof(float));
     GM_ADDR gmGmm2DepOut = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(maxSwigluGmm2Size);
+
     GM_ADDR gmGroupList = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(groupCount_) * sizeof(int64_t));
     GM_ADDR gmExpandIdx = workspaceGM_ + workspaceOffset;
@@ -449,9 +449,9 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     }
     GmmDeqSwigluQuant<EXEC_FLAG, ExpandXType, Gmm1L1TileShape, Gmm1L0TileShape, Gmm1EpilogueTileShape,
                       Gmm1BlockScheduler>(
-        gmm1ProblemShape, groupCount_, gmGroupList, gmX1, layoutX1, gmShareWeight1_, gmPermuteWeight1_, layoutWeight1,
-        gmShareWeight1Scale_, gmPermuteScale1_, layoutW1Scale, gmX1Scale, layoutX1Scale, gmX2, layoutX2, gmX2Scale,
-        layoutX2Scale, gmShareX1, gmShareX1Scale, gmShareSwigluOut, gmShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmX_, gmSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount,
+        gmm1ProblemShape, groupCount_, gmGroupList, gmX1, layoutX1, gmShareWeight1_, layoutShareWeight1, gmPermuteWeight1_, layoutWeight1,
+        gmShareWeight1Scale_, layoutShareW1Scale, gmPermuteScale1_, layoutW1Scale, gmX1Scale, layoutX1Scale, gmX2, layoutX2, gmX2Scale,
+        layoutX2Scale, gmShareX1, gmShareX1Scale, gmShareSwigluOut, gmShareX2, layoutShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmX_, gmSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount,
         xActiveMask_, gmResvered,
         gmExpertTokenNums_, tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo);
     AscendC::PipeBarrier<PIPE_ALL>();

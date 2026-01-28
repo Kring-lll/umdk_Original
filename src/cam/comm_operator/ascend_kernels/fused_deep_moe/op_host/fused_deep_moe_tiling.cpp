@@ -566,23 +566,26 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
     uint32_t moeExpertNumPerRank = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
     uint32_t aicNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.aicNum;
+    uint32_t shareExpertTokenNum = calShareExpert ? batchSize : 0;
+    uint64_t shareGmm1HLen = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.shareGmm1HLen;
+    uint64_t shareGmm2HLen = shareGmm1HLen / 2;
     uint64_t gmm1HLen = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
-    uint64_t gmm2HLen = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen / 2;
+    uint64_t gmm2HLen = gmm1HLen / 2;
     if (epRankId < sharedExpertRankNum) {
         maxTokenNum = maxBatchSize * epRankSize / sharedExpertRankNum;
     } else {
         maxTokenNum = maxBatchSize * epRankSize * std::min(topK, moeExpertNumPerRank);
     }
-    maxHandleTokenNum = calShareExpert ? (batchSize + maxTokenNum) : maxTokenNum;
+    maxHandleTokenNum = shareExpertTokenNum + maxTokenNum;
 
     size_t x1TokenSize = maxHandleTokenNum * h * sizeof(int8_t);
-    size_t x2TokenSize = maxHandleTokenNum * gmm2HLen * sizeof(int8_t);
+    size_t x2TokenSize = (maxTokenNum * gmm2HLen + shareExpertTokenNum * shareGmm2HLen)* sizeof(int8_t);
     size_t maxTokenSize = x1TokenSize < x2TokenSize ? x2TokenSize : x1TokenSize;
     maxTokenSize = CeilUp(maxTokenSize, GM_ALIGN_SIZE);
     size_t tokenScaleSize = CeilUp(maxHandleTokenNum * sizeof(float), GM_ALIGN_SIZE);
     size_t CVSwapBufferSize =
         CeilUp(aicNum * L1_TILE_BYTE_SIZE * CUBE_WORKSPACE_STAGE * sizeof(int32_t), GM_ALIGN_SIZE);
-    size_t swigluOutSize = maxHandleTokenNum * gmm1HLen * sizeof(float);
+    size_t swigluOutSize = (maxTokenNum * gmm1HLen + shareExpertTokenNum * shareGmm1HLen) * sizeof(float);
     size_t gmm2DepOutSize = maxTokenNum * h * TOKEN_DTYPE_BYTE_SIZE;
     size_t maxSwigluGmm2Size = swigluOutSize < gmm2DepOutSize ? gmm2DepOutSize : swigluOutSize;
     maxSwigluGmm2Size = CeilUp(maxSwigluGmm2Size, GM_ALIGN_SIZE);
