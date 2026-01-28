@@ -1841,8 +1841,8 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
 
     ub_import_mempool_info_t import_mempool_info[UMQ_MAX_TSEG_NUM];
     uint32_t rest_size = (*buffer)->total_data_size;
-    int32_t buf_index = 0;
-    uint16_t ref_sge_num = (uint16_t)((size_t)umq_buf_size_small() - sizeof(umq_imm_head_t)) / sizeof(ub_ref_sge_t);
+    uint32_t buf_index = 0;
+    uint32_t ref_sge_num = (uint32_t)((size_t)umq_buf_size_small() - sizeof(umq_imm_head_t)) / sizeof(ub_ref_sge_t);
     urma_sge_t sge;
     uint32_t max_data_size = 0;
     while ((*buffer) && rest_size != 0) {
@@ -1886,7 +1886,7 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
                                     .type = IMM_TYPE_UB_PLUS,
                                     .sub_type = IMM_TYPE_REVERSE_PULL_MEM,
                                     .msg_id = msg_id,
-                                    .msg_num = (uint16_t)buf_index}};
+                                    .msg_num = buf_index}};
     int ret = umq_ub_send_imm(queue, imm.value, &sge, user_ctx);
     if (ret != UMQ_SUCCESS) {
         umq_buf_free(send_buf);
