@@ -1949,9 +1949,9 @@ public:
         AscendC::PipeBarrier<PIPE_ALL>();
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             // dynamic quant
-            totalTokenCount = axisBS
-            uint32_t n = shareN;
-            uint32_t nOut = shareN / 2;
+            totalTokenCount = axisBS;
+            uint32_t n = params.shareN;
+            uint32_t nOut = params.shareN / 2;
             uint32_t quantRowOnce = 0;
             CalQuantRow(nOut, quantRowOnce);
             typename BlockQuant<ArchTag>::Params quantParams;
