@@ -402,9 +402,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     
     // m_: 4096, n2: 7168, k2_: 2048
     GemmCoord shareGmm2ProblemShape{bs_, gmm2OutputDim_, gmm2InputDim_};
-    layout::RowMajor shareLayoutX2{bs_, gmm2InputDim_};
-    layout::VectorLayout shareLayoutPerTokenScale2{bs_};
-    layout::RowMajor shareLayoutOutput{bs_, gmm2OutputDim_};
+    layout::VectorLayout layoutShareX2Scale{bs_};
+    layout::RowMajor layoutShareOutput{bs_, gmm2OutputDim_};
 
     GM_ADDR gmShareX1 = nullptr;
     GM_ADDR gmShareX1Scale = nullptr;
@@ -507,7 +506,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
            Gmm2DispatchPolicy>(gmm2ProblemShape, groupCount_, gmGroupList, gmX2, layoutX2, gmWeight2_, layoutWeight2,
                                gmScale2_, layoutW2Scale, gmX2Scale, layoutX2Scale, gmGmm2DepOut, layoutOutput, bs_,
                                shareGmm2ProblemShape, gmShareX2, gmShareWeight2_, gmShareOutput_,
-                               gmShareWeight2Scale_, gmShareX2Scale, shareLayoutX2, shareLayoutPerTokenScale2,
-                               shareLayoutOutput, gmWorkspace, &combiner);
+                               gmShareWeight2Scale_, gmShareX2Scale, layoutShareX2, layoutShareX2Scale,
+                               layoutShareOutput, gmWorkspace, &combiner);
 }
 #endif  // FUSED_DEEP_MOE_H
