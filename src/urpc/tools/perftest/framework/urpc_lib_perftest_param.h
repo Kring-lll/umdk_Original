@@ -32,6 +32,7 @@ typedef enum data_trans_mode {
 } data_trans_mode_t;
 
 #define DEFAULT_REQUEST_SIZE64 64
+#define DEFAULT_REQUEST_SIZE128 128
 #define DEFAULT_REQUEST_SIZE4K 4096
 #define URPC_PERFTEST_RX_BUF_SIZE 4096
 #define DEFAULT_RX_DEPTH 512
