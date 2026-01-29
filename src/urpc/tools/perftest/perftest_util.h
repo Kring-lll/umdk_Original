@@ -31,7 +31,7 @@ extern "C" {
 #define DEFAULT_LISTEN_PORT             19876
 #define MAX_SGE_SIZE                    32
 #define DEFAULT_LISTEN_IP_ADDR          "127.0.0.1"
-#define INTERRUPT_MAX_WAIT_TIME_MS      3000
+#define INTERRUPT_MAX_WAIT_TIME_MS      3000000
 #define ITER_MAX_WAIT_TIME_US           20000000
 
 #define URPC_PERFTEST_ACCEPT_WAIT_US    (10000)     // 10ms
