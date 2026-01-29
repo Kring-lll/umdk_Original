@@ -90,15 +90,13 @@ int urpc_pool_init(urpc_pool_config_t *cfg, urpc_pool_t *pool)
     uint32_t id = 0;
     if (URPC_UNLIKELY(cfg->element_size > URPC_POOL_ELEMENT_SIZE_MAX ||
                       cfg->element_num_per_block > URPC_POOL_ELEMENT_MAX || cfg->block_num > URPC_POOL_BLOCK_MAX)) {
-        UTIL_LOG_ERR("init urpc pool failed, element_size %u, element_num_per_block %u, block_num %u is invalid\n",
-            cfg->element_size,
-            cfg->element_num_per_block,
-            cfg->block_num);
+        UTIL_LOG_ERR("init urpc pool failed, element_size %u, element_num_per_block %u, block_num %u is invalid, "
+            "status: %d\n", cfg->element_size, cfg->element_num_per_block, cfg->block_num, -EINVAL);
         return -EINVAL;
     }
 
     if (URPC_UNLIKELY(urpc_pool_id_get(&id) != 0)) {
-        UTIL_LOG_ERR("malloc urpc pool id failed\n");
+        UTIL_LOG_ERR("malloc urpc pool id failed, status: %d\n", -ENOMEM);
         return -ENOMEM;
     }
 
@@ -106,7 +104,7 @@ int urpc_pool_init(urpc_pool_config_t *cfg, urpc_pool_t *pool)
         urpc_dbuf_malloc(URPC_DBUF_TYPE_UTIL, sizeof(urpc_pool_group_t) + cfg->block_num * sizeof(void *));
     if (pool->global_group == NULL) {
         urpc_pool_id_put(id);
-        UTIL_LOG_ERR("malloc urpc pool group failed\n");
+        UTIL_LOG_ERR("malloc urpc pool group failed, %d\n", -ENOMEM);
         return -ENOMEM;
     }
     pool->global_group->num = 0;
@@ -161,7 +159,7 @@ static int urpc_pool_local_init(urpc_pool_t *pool)
 
     g_urpc_pool_ctx[pool->id].local = urpc_dbuf_malloc(URPC_DBUF_TYPE_UTIL, pool->container_size);
     if (URPC_UNLIKELY(g_urpc_pool_ctx[pool->id].local == NULL)) {
-        UTIL_LIMIT_LOG_ERR("malloc local pool failed\n");
+        UTIL_LIMIT_LOG_ERR("malloc local pool failed, status: %d\n", -ENOMEM);
         return -ENOMEM;
     }
     g_urpc_pool_ctx[pool->id].global_pool = pool;

@@ -175,7 +175,7 @@ int urpc_timer_pool_add(uint32_t chid, uint32_t num, bool is_server)
         pthread_spin_unlock(&g_urpc_timing_wheel.p_lock);
 
         urpc_dbuf_free(new_entry);
-        UTIL_LOG_INFO("add new timer in pool failed, entry already existed\n");
+        UTIL_LOG_INFO("add new timer in pool failed, entry already existed, status: %d\n", -URPC_ERR_EEXIST);
         return -URPC_ERR_EEXIST;
     }
 
@@ -262,7 +262,7 @@ static int urpc_timer_pool_init(void)
 
     ret = urpc_timer_pool_add(URPC_INVALID_ID_U32, URPC_TIMER_DEFAULT_NUM, false);
     if (ret != URPC_SUCCESS) {
-        UTIL_LOG_ERR("timer pool hmap init failed\n");
+        UTIL_LOG_ERR("timer pool hmap init failed, status: %d\n", ret);
         urpc_timer_pool_delete(URPC_INVALID_ID_U32, false);
         urpc_hmap_uninit(&g_urpc_timing_wheel.pool);
         pthread_spin_destroy(&g_urpc_timing_wheel.p_lock);
@@ -587,7 +587,7 @@ int urpc_timing_wheel_init(void)
         goto UNINIT_TIMER_FD;
     }
 
-    UTIL_LOG_INFO("timing wheel init successful\n");
+    UTIL_LOG_INFO("timing wheel init success\n");
     return URPC_SUCCESS;
 
 UNINIT_TIMER_FD:
