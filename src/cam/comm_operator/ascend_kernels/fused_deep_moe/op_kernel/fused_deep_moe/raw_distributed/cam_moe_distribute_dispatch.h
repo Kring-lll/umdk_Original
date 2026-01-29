@@ -53,10 +53,11 @@ template <TemplateDispatchTypeClass>
 class CamMoeDistributeDispatch {
 public:
     __aicore__ inline CamMoeDistributeDispatch(){};
-    __aicore__ inline void Init(GM_ADDR x, GM_ADDR expertIds, GM_ADDR scales, GM_ADDR xActiveMask, GM_ADDR expandXOut,
-                                GM_ADDR dynamicScalesOut, GM_ADDR expandIdxOut, GM_ADDR expertTokenNumsOut,
-                                GM_ADDR sendCountsOut, GM_ADDR expertTokenNums, GM_ADDR tpSendCountsOut,
-                                GM_ADDR workspaceGM, TPipe *pipe, const FusedDeepMoeTilingData *tilingData);
+    __aicore__ inline void Init(GM_ADDR x, GM_ADDR expertIds, GM_ADDR scales, GM_ADDR shareX1Token, GM_ADDR xActiveMask,
+                                GM_ADDR expandXOut, GM_ADDR shareX1Scale, GM_ADDR dynamicScalesOut, GM_ADDR expandIdxOut,
+                                GM_ADDR expertTokenNumsOut, GM_ADDR sendCountsOut, GM_ADDR expertTokenNums,
+                                GM_ADDR tpSendCountsOut, GM_ADDR workspaceGM, TPipe *pipe,
+                                const FusedDeepMoeTilingData *tilingData);
     __aicore__ inline void Process();
 
 private:
@@ -76,6 +77,7 @@ private:
     __aicore__ inline void AllGatherSetStatusAndWait();
     __aicore__ inline void ResetStatus();
     __aicore__ inline void QuantInit(GM_ADDR scales);
+    __aicore__ inline void QuantForShareExpert();
     __aicore__ inline void TokenActiveMaskCal();
     __aicore__ inline void AllgatherProcessOut();
     __aicore__ inline void UpdataMultiMoeTokenNumsOut();
@@ -113,6 +115,8 @@ private:
     GlobalTensor<ExpandXOutType> expandXOutGMTensor_;
     GlobalTensor<float> dynamicScalesOutGMTensor_;
     GlobalTensor<int64_t> expertTokenNumsOutGMTensor_;
+    GlobalTensor<ExpandXOutType> shareX1TokenGMTensor_;
+    GlobalTensor<float> shareX1ScaleGMTensor_;
     GlobalTensor<ExpandXOutType> windowInQuantTensor_;
     GlobalTensor<int32_t> windowInstatusTensor_;
     GlobalTensor<float> windowInstatusFp32Tensor_;
@@ -221,9 +225,10 @@ private:
 
 template <TemplateDispatchTypeClass>
 __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
-    GM_ADDR x, GM_ADDR expertIds, GM_ADDR scales, GM_ADDR xActiveMask, GM_ADDR expandXOut, GM_ADDR dynamicScalesOut,
-    GM_ADDR expandIdxOut, GM_ADDR expertTokenNumsOut, GM_ADDR sendCountsOut, GM_ADDR expertTokenNums,
-    GM_ADDR tpSendCountsOut, GM_ADDR workspaceGM, TPipe *pipe, const FusedDeepMoeTilingData *tilingData)
+    GM_ADDR x, GM_ADDR expertIds, GM_ADDR scales, GM_ADDR xActiveMask, GM_ADDR shareX1Token, GM_ADDR expandXOut,
+    GM_ADDR shareX1Scale, GM_ADDR dynamicScalesOut, GM_ADDR expandIdxOut, GM_ADDR expertTokenNumsOut,
+    GM_ADDR sendCountsOut, GM_ADDR expertTokenNums, GM_ADDR tpSendCountsOut, GM_ADDR workspaceGM, TPipe *pipe,
+    const FusedDeepMoeTilingData *tilingData)
 {
     tpipe_ = pipe;
     aivId_ = GetBlockIdx();
@@ -267,6 +272,10 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
     axisK_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.k;
     aivNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.aivNum;
     tpWorldSize_ = 1;
+    if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+        shareX1TokenGMTensor_.SetGlobalBuffer((__gm__ ExpandXOutType *)shareX1Token);
+        shareX1ScaleGMTensor_.SetGlobalBuffer((__gm__ float *)shareX1Scale);
+    }
     xGMTensor_.SetGlobalBuffer((__gm__ XType *)x);
     expertIdsGMTensor_.SetGlobalBuffer((__gm__ int32_t *)expertIds);
     xActiveMaskGMTensor_.SetGlobalBuffer((__gm__ bool*)xActiveMask);
@@ -384,6 +393,39 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Quant
     smoothScalesTensor_ = smoothScalesBuf_.Get<float>();
     tpipe_->InitBuffer(dynamicScalesBuf_, axisBS_ * sizeof(float));
     dynamicScalesTensor_ = dynamicScalesBuf_.Get<float>();
+}
+
+template <TemplateDispatchTypeClass>
+__aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::QuantForShareExpert()
+{
+    uint32_t sendTokenNum = axisBS_ / aivNum_;       // 每个aiv需要发送的token数
+    uint32_t remainderTokenNum = axisBS_ % aivNum_;  // 余数
+    uint32_t startTokenId = sendTokenNum * aivId_;  // 每个aiv发送时的起始rankid
+    if (aivId_ < remainderTokenNum) {               // 前remainderRankNum个aiv需要多发1个卡的数据
+        sendTokenNum += 1;
+        startTokenId += aivId_;
+    } else {
+        startTokenId += remainderTokenNum;
+    }
+    uint32_t endTokenId = startTokenId + sendTokenNum;
+    if (startTokenId >= axisBS_) {
+        return;
+    }
+    DataCopyExtParams dataCopyParamsFloat = {1U, sizeof(float), 0U, 0U, 0U};
+    for (uint32_t tokenIndex = startTokenId; tokenIndex < endTokenId; ++tokenIndex) {
+        xInTensor_ = xInQueue_.AllocTensor<XType>();
+        DataCopy(xInTensor_, xGMTensor_[tokenIndex * axisH_], axisH_);  // 约束对齐
+        xInQueue_.EnQue(xInTensor_);
+        xInTensor_ = xInQueue_.DeQue<XType>();
+        xOutTensor_ = xOutQueue_.AllocTensor<ExpandXOutType>();
+        QuantProcess(0);
+        xOutQueue_.EnQue(xOutTensor_);
+        xOutTensor_ = xOutQueue_.DeQue<ExpandXOutType>();
+        LocalTensor<float> xOutFp32Tensor_ = xOutTensor_[axisH_].template ReinterpretCast<float>();
+        DataCopy(shareX1TokenGMTensor_[tokenIndex * axisH_], xOutTensor_, axisH_); 
+        DataCopyPad(shareX1ScaleGMTensor_[tokenIndex], xOutFp32Tensor_, dataCopyParamsFloat);
+        xOutQueue_.FreeTensor(xOutTensor_);
+    }
 }
 
 template <TemplateDispatchTypeClass>
@@ -1078,7 +1120,7 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Updat
             expertTokenNumsOutGMTensor_.SetValue(localMoeIndex, tokenSums);
             DataCacheCleanAndInvalid<int64_t, CacheLine::SINGLE_CACHE_LINE, DcciDst::CACHELINE_OUT>(
                 expertTokenNumsOutGMTensor_[localMoeIndex]);
-            expertTokenNumsTensor.SetValue(localMoeIndex, tokenSums);
+            expertTokenNumsTensor.SetValue(localMoeIndex, curMoeIndexCnt - preMoeIndexCnt);
             DataCacheCleanAndInvalid<int64_t, CacheLine::SINGLE_CACHE_LINE, DcciDst::CACHELINE_OUT>(
                 expertTokenNumsTensor[localMoeIndex]);
         }
@@ -1125,6 +1167,9 @@ template <TemplateDispatchTypeClass>
 __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Process()
 {
     if ASCEND_IS_AIV {
+        if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+            QuantForShareExpert();
+        }
         AlltoAllDispatch();
         SetStatus();
         WaitDispatch();

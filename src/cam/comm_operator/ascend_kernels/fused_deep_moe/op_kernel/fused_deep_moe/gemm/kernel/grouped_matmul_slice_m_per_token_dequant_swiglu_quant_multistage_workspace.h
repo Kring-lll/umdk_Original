@@ -2179,6 +2179,8 @@ public:
         LayoutOutput layoutShareOutput;
         GM_ADDR gmShareX2Scale;
         GM_ADDR gmSwigluOut;
+        uint32_t bs;
+        uint32_t shareN;
         // Methods
         CATLASS_DEVICE
         Params() {}
@@ -2217,7 +2219,9 @@ public:
               gmShareX2(gmShareX2_),
               layoutShareOutput(layoutShareOutput_),
               gmShareX2Scale(gmShareX2Scale_),
-              gmSwigluOut(gmSwigluOut_)
+              gmSwigluOut(gmSwigluOut_),
+              bs(disGmmDeqSwigluQuantGmmDeqComInfo.bs),
+              shareN(disGmmDeqSwigluQuantGmmDeqComInfo.shareGmm1HLen)
         {}
     };
 
@@ -2245,7 +2249,6 @@ public:
 
         // Represent the full gm
         AscendC::GlobalTensor<ElementA> gmA;
-        gmA.SetGlobalBuffer(params.ptrA);
         AscendC::GlobalTensor<ElementB> gmB;
         AscendC::ListTensorDesc gmBlistTensorDesc(reinterpret_cast<__gm__ void *>(params.ptrB));
         if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
@@ -2266,6 +2269,60 @@ public:
         uint32_t stageId = 0;
         uint32_t stageUsed = 0;
         uint32_t startCoreIdx = 0;
+        
+        // Process shared expert first if enabled
+        if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+            gmA.SetGlobalBuffer((__gm__ ElementA*)params.gmShareX1);
+            gmB.SetGlobalBuffer((__gm__ ElementB*)params.ptrShareB);
+            gmB.SetL2CacheHint(AscendC::CacheMode::CACHE_MODE_DISABLE);
+            
+            uint32_t currentM = params.bs;
+            GemmCoord inGroupProblemShape{currentM, params.shareN, params.problemShape.k()};
+            LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
+            LayoutB layoutB = params.layoutShareB;
+            blockScheduler.Update(inGroupProblemShape, MakeCoord(L1TileShape::M, L1TileShape::N));
+            uint32_t coreLoops = blockScheduler.GetCoreLoops();
+
+            uint32_t startLoopIdx = ((coreIdx < startCoreIdx) ? (coreIdx + coreNum) : coreIdx) - startCoreIdx;
+            for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += coreNum) {
+                GemmCoord blockCoord = blockScheduler.GetBlockCoord(loopIdx);
+                GemmCoord actualBlockShape = blockScheduler.GetActualBlockShape(blockCoord);
+
+                Callback callbackBeforeFixpipe{};
+                if (stageUsed == WORKSPACE_STAGES) {
+                    callbackBeforeFixpipe = MakeCallback(&aicWaitFuncList[stageId]);
+                } else {
+                    ++stageUsed;
+                }
+                Callback callbackAfterFixpipe = MakeCallback(&aicSetFuncList[stageId]);
+
+                MatrixCoord offsetA{blockCoord.m() * L1TileShape::M, blockCoord.k() * L1TileShape::K};
+                MatrixCoord offsetB{blockCoord.k() * L1TileShape::K, blockCoord.n() * L1TileShape::N};
+                MatrixCoord offsetC{(stageId * coreNum + coreIdx) * L1TileShape::M, 0};
+                int64_t gmOffsetA = layoutA.GetOffset(offsetA);
+                int64_t gmOffsetB = layoutB.GetOffset(offsetB);
+                int64_t gmOffsetC = layoutC.GetOffset(offsetC);
+
+                if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
+                    blockMmad(gmA[gmOffsetA], layoutA, gmB[gmOffsetB], layoutB,
+                              gmC[gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
+                } else {
+                    callbackBeforeFixpipe();
+                    blockMmad(gmA[gmOffsetA], layoutA, gmB[gmOffsetB], layoutB,
+                              gmC[gmOffsetC], layoutC, actualBlockShape);
+                    callbackAfterFixpipe();
+                }
+
+                stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
+            }
+            startCoreIdx = (startCoreIdx + coreLoops) % coreNum;
+        }
+        
+        // Process routing experts
+        gmA.SetGlobalBuffer(params.ptrA);
+        if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
+            gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(gmBlistTensorDesc.GetDataPtr<int32_t>(0)));
+        }
         for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
             if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                 gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(
@@ -2370,6 +2427,45 @@ public:
             uint32_t startCoreIdx = 0;
             AscendC::ListTensorDesc gmScaleListTensor;
             AscendC::GlobalTensor<int32_t> groupTokenNumStateTensor;
+            
+            // Process shared expert first if enabled
+            if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+                uint32_t currentM = params.bs;
+                GemmCoord inGroupProblemShape{currentM, params.shareN, params.problemShape.k()};
+                LayoutPerTokenScale layoutPerTokenScale = 
+                    params.layoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
+                LayoutD layoutD = layout::RowMajor{currentM, params.shareN};
+                
+                EpilogueParams epilogueParams{
+                    reinterpret_cast<__gm__ float*>(params.ptrShareScale), params.layoutShareScale,
+                    reinterpret_cast<__gm__ float*>(params.gmShareX1Scale), layoutPerTokenScale,
+                    reinterpret_cast<__gm__ float*>(params.gmShareSwigluOut), layoutD
+                };
+                
+                blockScheduler.Update(inGroupProblemShape, L1TileShape::ToCoordMN());
+                blockEpilogue.UpdateParams(epilogueParams);
+                uint32_t coreLoops = blockScheduler.GetCoreLoops();
+                
+                GemmCoord blockShapeMNK = L1TileShape::ToCoord();
+                uint32_t startLoopIdx = ((coreIdx < startCoreIdx) ? (coreIdx + coreNum) : coreIdx) - startCoreIdx;
+                for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += coreNum) {
+                    GemmCoord blockCoordMNK = blockScheduler.GetBlockCoord(loopIdx);
+                    GemmCoord actualBlockShapeMNK = blockScheduler.GetActualBlockShape(blockCoordMNK);
+                    
+                    MatrixCoord offsetC{(stageId * coreNum + coreIdx) * L1TileShape::M, 0};
+                    int64_t gmOffsetC = layoutC.GetOffset(offsetC);
+                    auto gmBlockC = gmC[gmOffsetC];
+                    auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
+                    
+                    Arch::CrossCoreWaitFlag(flagAicFinishStoreList[stageId]);
+                    blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
+                    Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(flagAivFinishComputeList[stageId]);
+                    
+                    stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
+                }
+                startCoreIdx = (startCoreIdx + coreLoops) % coreNum;
+            }
+            
             gmScaleListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(params.ptrScale));
             __gm__ ElementScale* gmScalePtr;
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
@@ -2435,6 +2531,35 @@ public:
         }
 
         Arch::CrossCoreBarrier<0x0, PIPE_MTE3>();
+
+        // Quantize shared expert output if enabled
+        if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+            uint32_t quantRowOnce = 0;
+            uint32_t shareNOut = params.shareN / 2;
+            CalQuantRow(shareNOut, quantRowOnce);
+            auto swigluLayout = layout::RowMajor{params.bs, params.shareN};
+            typename BlockQuant<ArchTag>::Params quantParams{
+                reinterpret_cast<__gm__ float*>(params.gmShareSwigluOut),
+                swigluLayout,
+                reinterpret_cast<__gm__ float*>(params.gmShareX2Scale),
+                params.layoutDequantScale,
+                reinterpret_cast<__gm__ int8_t*>(params.gmShareX2),
+                params.layoutShareOutput,
+                quantRowOnce,
+                shareNOut
+            };
+
+            BlockQuant<ArchTag> blockQuant(resource, quantParams);
+            MatrixCoord quantShape(params.bs, shareNOut);
+            MatrixCoord quantBlockShape((uint16_t)(AscendC::GetSubBlockNum() * quantRowOnce), shareNOut);
+            Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
+            for (uint32_t loopIdx = coreIdx; loopIdx < quantSwizzle.GetLoops(); loopIdx += coreNum) {
+                auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
+                auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
+
+                blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+            }
+        }
 
         {
             uint32_t quantRowOnce = 0;
