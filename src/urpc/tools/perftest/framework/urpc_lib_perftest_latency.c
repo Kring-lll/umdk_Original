@@ -177,7 +177,8 @@ static void urpc_perftest_server_run_latency(
 
     urpc_allocator_t *allocator = urpc_perftest_allocator_get();
     int poll_num;
-    uint32_t post_num = 0;
+    // uint32_t rsp_post_num = 0;
+    uint32_t req_post_num = 0;
     uint32_t posted_num = 0;
     urpc_qcfg_get_t cfg_get = {0};
     if (urpc_queue_cfg_get(qh, &cfg_get) != URPC_SUCCESS) {
@@ -209,7 +210,7 @@ static void urpc_perftest_server_run_latency(
             for (int j = 0; j < poll_num; j++) {
                 if (msgs[j].event == POLL_EVENT_REQ_RECVED) {
                     // recv request and server need to respond
-                    post_num++;
+                    req_post_num++;
                     req_recvd++;
                     allocator->put(msgs[j].req_recved.args, msgs[j].req_recved.args_sge_num, NULL);
                 } else {
@@ -219,13 +220,13 @@ static void urpc_perftest_server_run_latency(
                 }
             }
 
-            if (post_num > URPC_POST_RECV_WR_NUM || cfg_get.rx_depth < URPC_POST_RECV_WR_NUM) {
-                posted_num = perftest_post_rx_buff(qh, post_num, cfg_get.rx_buf_size);
+            if (req_post_num > URPC_POST_RECV_WR_NUM || cfg_get.rx_depth < URPC_POST_RECV_WR_NUM) {
+                posted_num = perftest_post_rx_buff(lat_arg->l_qhs[Q_FOR_RECV], req_post_num, cfg_get.rx_buf_size);
                 if (posted_num == URPC_U32_FAIL) {
                     LOG_PRINT("post rx buff faile\n");
                     goto FINISH;
                 }
-                post_num -= posted_num;
+                req_post_num -= posted_num;
             }
 
             if (args->state != PERFTEST_THREAD_RUNNING) {
@@ -261,7 +262,7 @@ static void urpc_perftest_server_run_latency(
             for (int j = 0; j < poll_num; j++) {
                 if (msgs[j].event == POLL_EVENT_REQ_RSPED) {
                     // early-rsp send successful, continue to wait for next request
-                    post_num++;
+                    // rsp_post_num++;
                     req_recvd++;
                     continue;
                 } else {
@@ -271,14 +272,14 @@ static void urpc_perftest_server_run_latency(
                 }
             }
 
-            if (post_num > URPC_POST_RECV_WR_NUM || cfg_get.rx_depth < URPC_POST_RECV_WR_NUM) {
-                posted_num = perftest_post_rx_buff(qh, post_num, cfg_get.rx_buf_size);
-                if (posted_num == URPC_U32_FAIL) {
-                    LOG_PRINT("post rx buff faile\n");
-                    goto FINISH;
-                }
-                post_num -= posted_num;
-            }
+            // if (rsp_post_num > URPC_POST_RECV_WR_NUM || cfg_get.rx_depth < URPC_POST_RECV_WR_NUM) {
+            //     posted_num = perftest_post_rx_buff(lat_arg->l_qhs[Q_FOR_SEND], rsp_post_num, cfg_get.rx_buf_size);
+            //     if (posted_num == URPC_U32_FAIL) {
+            //         LOG_PRINT("post rx buff faile\n");
+            //         goto FINISH;
+            //     }
+            //     rsp_post_num -= posted_num;
+            // }
 
             if (args->state != PERFTEST_THREAD_RUNNING) {
                 goto FINISH;
@@ -479,7 +480,8 @@ static void urpc_perftest_client_run_latency(
     uint64_t cycles[MAX_WR_NUM] = {0};
     urpc_allocator_t *allocator = urpc_perftest_allocator_get();
     int poll_num;
-    uint32_t post_num = 0;
+    // uint32_t rsp_post_num = 0;
+    uint32_t req_post_num = 0;
     uint32_t posted_num = 0;
     urpc_qcfg_get_t cfg_get = {0};
     if (urpc_queue_cfg_get(qh, &cfg_get) != URPC_SUCCESS) {
@@ -535,7 +537,7 @@ static void urpc_perftest_client_run_latency(
             for (int j = 0; j < poll_num; j++) {
                 if (msgs[j].event == POLL_EVENT_REQ_RSPED) {
                     // early-rsp send successful, continue to wait for server respond
-                    post_num++;
+                    // rsp_post_num++;
                     req_recvd++;
                     continue;
                 } else {
@@ -545,14 +547,14 @@ static void urpc_perftest_client_run_latency(
                 }
             }
 
-            if (post_num > URPC_POST_RECV_WR_NUM || cfg_get.rx_depth < URPC_POST_RECV_WR_NUM) {
-                posted_num = perftest_post_rx_buff(qh, post_num, cfg_get.rx_buf_size);
-                if (posted_num == URPC_U32_FAIL) {
-                    LOG_PRINT("post rx buff faile\n");
-                    goto FINISH;
-                }
-                post_num -= posted_num;
-            }
+            // if (rsp_post_num >= URPC_POST_RECV_WR_NUM || cfg_get.rx_depth < URPC_POST_RECV_WR_NUM) {
+            //     posted_num = perftest_post_rx_buff(lat_arg->l_qhs[Q_FOR_SEND], rsp_post_num, cfg_get.rx_buf_size);
+            //     if (posted_num == URPC_U32_FAIL) {
+            //         LOG_PRINT("post rx buff faile\n");
+            //         goto FINISH;
+            //     }
+            //     rsp_post_num -= posted_num;
+            // }
 
             if (args->state != PERFTEST_THREAD_RUNNING) {
                 goto FINISH;
@@ -576,7 +578,7 @@ static void urpc_perftest_client_run_latency(
                     // client report request received
                     dptr = (uint64_t*)(uintptr_t)(msgs[j].req_recved.args->addr + SIGN_LEN);
                     cycles[*dptr] = get_cycles() - cycles[*dptr];
-                    post_num++;
+                    req_post_num++;
                     req_recvd++;
                     allocator->put(msgs[j].req_recved.args, msgs[j].req_recved.args_sge_num, NULL);
                 } else {
@@ -586,13 +588,13 @@ static void urpc_perftest_client_run_latency(
                 }
             }
 
-            if (post_num > URPC_POST_RECV_WR_NUM || cfg_get.rx_depth < URPC_POST_RECV_WR_NUM) {
-                posted_num = perftest_post_rx_buff(qh, post_num, cfg_get.rx_buf_size);
+            if (req_post_num > URPC_POST_RECV_WR_NUM || cfg_get.rx_depth < URPC_POST_RECV_WR_NUM) {
+                posted_num = perftest_post_rx_buff(lat_arg->l_qhs[Q_FOR_RECV], req_post_num, cfg_get.rx_buf_size);
                 if (posted_num == URPC_U32_FAIL) {
                     LOG_PRINT("post rx buff faile\n");
                     goto FINISH;
                 }
-                post_num -= posted_num;
+                req_post_num -= posted_num;
             }
 
             if (args->state != PERFTEST_THREAD_RUNNING) {

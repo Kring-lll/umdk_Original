@@ -68,6 +68,7 @@ bool util_vlog_limit(util_vlog_ctx_t *ctx, uint32_t *print_count, uint64_t *last
 
 static inline bool util_vlog_drop(const util_vlog_ctx_t *ctx, util_vlog_level_t level)
 {
+    return false;
     return level > ctx->level;
 }
 

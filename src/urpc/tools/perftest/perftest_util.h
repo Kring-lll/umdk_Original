@@ -27,7 +27,7 @@ extern "C" {
 #define DEFAULT_REQUEST_SIZE64          64
 #define DEFAULT_DEPTH                   512
 #define PERFTEST_DEV_NAME_SIZE          128
-#define DEFAULT_LAT_TEST_ROUND          100000
+#define DEFAULT_LAT_TEST_ROUND          1000
 #define DEFAULT_LISTEN_PORT             19876
 #define MAX_SGE_SIZE                    32
 #define DEFAULT_LISTEN_IP_ADDR          "127.0.0.1"
