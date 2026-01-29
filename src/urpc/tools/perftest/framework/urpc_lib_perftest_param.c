@@ -96,7 +96,7 @@ static void init_cfg(perftest_framework_config_t *cfg)
     cfg->case_type = PERFTEST_CASE_LAT;
     cfg->thread_num = 1;
     cfg->cpu_affinity = UINT32_MAX;
-    cfg->size[0] = DEFAULT_REQUEST_SIZE64;
+    cfg->size[0] = DEFAULT_REQUEST_SIZE128;
     cfg->size_len = 1;
     cfg->tx_depth = DEFAULT_TX_DEPTH;
     cfg->rx_depth = DEFAULT_RX_DEPTH;
