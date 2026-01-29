@@ -1835,7 +1835,7 @@ public:
     CATLASS_DEVICE
     void UpdateAndCleanInfo(__gm__ ElementGroupList_ *ptrGroupList, GM_ADDR gmEpSendCount, GM_ADDR gmExpertTokenNums)
     {
-        if (isShareQuantCore) {
+        if (isCompCore) {
             // 清理软同步残留信息，避免影响别处或者下次运行
             AscendC::GlobalTensor<int32_t> softSyncTensor;
             softSyncTensor.SetGlobalBuffer((__gm__ int32_t*)(statusDataSpaceGm + SOFT_SYNC_OFFSET));
