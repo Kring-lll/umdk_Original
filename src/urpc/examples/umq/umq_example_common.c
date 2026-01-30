@@ -530,6 +530,56 @@ void example_flush(uint64_t umqh)
     }
 }
 
+static uint32_t str_get_u16_by_key(uint16_t *u16_list, uint32_t len, char *data, const char key)
+{
+    char *save;
+    char *new_data = strtok_r(data, &key, &save);
+    uint32_t i = 0;
+    while ((i < len) && (new_data != NULL)) {
+        u16_list[i] = (uint16_t)strtoul(new_data, NULL, 0);
+        new_data = strtok_r(NULL, ",", &save);
+        i++;
+    }
+    return i;
+}
+
+static uint32_t str_get_str_by_key(char **str_list, uint32_t len, char *data, const char key)
+{
+    char *save;
+    char *new_data = strtok_r(data, &key, &save);
+    uint32_t i = 0;
+    while ((i < len) && (new_data != NULL)) {
+        (void)sprintf(str_list[i], new_data);
+        new_data = strtok_r(NULL, ",", &save);
+        i++;
+    }
+    return i;
+}
+
+static inline void cfg_get_m_dev_name(struct urpc_example_config *cfg, char *optarg)
+{
+    char *name_list[EXAMPLE_MAX_DEV_NUM];
+    for (uint32_t i = 0; i < EXAMPLE_MAX_DEV_NUM; i++) {
+        name_list[i] = cfg->m_dev_name[i];
+    }
+    uint32_t dev_num = str_get_str_by_key(name_list, EXAMPLE_MAX_DEV_NUM, optarg, ',');
+    if (cfg->m_dev_num != 0) {
+        cfg->m_dev_num = cfg->m_dev_num < dev_num ? cfg->m_dev_num : dev_num;
+    } else {
+        cfg->m_dev_num = dev_num;
+    }
+}
+
+static inline void cfg_get_m_dev_idx(struct urpc_example_config *cfg, char *optarg)
+{
+    uint32_t dev_num = str_get_u16_by_key(cfg->m_eid_idx, EXAMPLE_MAX_DEV_NUM, optarg, ',');
+    if (cfg->m_dev_num != 0) {
+        cfg->m_dev_num = cfg->m_dev_num < dev_num ? cfg->m_dev_num : dev_num;
+    } else {
+        cfg->m_dev_num = dev_num;
+    }
+}
+
 /* Parse the command line parameters for client and server */
 int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
 {
@@ -548,8 +598,7 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
             break;
         }
 
-        char *tmp = NULL;
-        uint32_t idx = 0;
+        
         switch (c) {
             case 'd':
                 /* need to free when exiting */
@@ -630,42 +679,13 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
                 cfg->queue_num = (uint32_t)strtoul(optarg, NULL, 0);
                 break;
             case 's':
-                cfg->thread_poll_size = (uint32_t)strtoul(optarg, NULL, 0);
+                cfg->thread_poll_size = (int)strtol(optarg, NULL, 0);
                 break;
             case 'n':
-                tmp = strdup(optarg);
-                idx = 0;
-                while (*tmp != '\0' && idx < EXAMPLE_MAX_DEV_NUM) {
-                    cfg->m_dev_name[idx++] = tmp;
-                    while (*tmp != ',' && *tmp != '\0') {
-                        tmp++;
-                    }
-
-                    if (*tmp == '\0') {
-                        break;
-                    }
-
-                    *tmp = '\0';
-                    tmp++;
-                }
+                cfg_get_m_dev_name(cfg, optarg);
                 break;
             case 'x':
-                tmp = strdup(optarg);
-                char *ptr = tmp;
-                idx = 0;
-                while (*tmp != '\0' && idx < EXAMPLE_MAX_DEV_NUM) {
-                    while (*tmp != ',' && *tmp != '\0') {
-                        tmp++;
-                    }
-                    if (*tmp == '\0') {
-                        break;
-                    }
-                    *tmp = '\0';
-                    cfg->m_eid_idx[idx++] = (uint32_t)strtoul(ptr, NULL, 0);
-                    tmp++;
-                    ptr = tmp;
-                }
-                cfg->m_eid_idx[idx++] = (uint32_t)strtoul(ptr, NULL, 0);
+                cfg_get_m_dev_idx(cfg, optarg);
                 break;
             default:
                 return -1;
