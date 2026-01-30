@@ -91,9 +91,10 @@ public:
         __gm__ ElementD *ptrSharedD;
         __gm__ ElementScale *ptrSharedScale;
         __gm__ ElementPerTokenScale *ptrSharedPtrPerTokenScale;
-        layout::RowMajor sharedLayoutA;
-        layout::VectorLayout sharedLayoutPerTokenScale;
-        layout::RowMajor sharedLayoutOutput;
+        LayoutA sharedLayoutA;
+        LayoutB sharedLayoutB;
+        LayoutPerTokenScale sharedLayoutPerTokenScale;
+        LayoutD sharedLayoutD;
         GM_ADDR ptrWorkspace;
         void *combiner;
 
@@ -106,8 +107,9 @@ public:
                GM_ADDR ptrB_, LayoutB layoutB_, GM_ADDR ptrScale_, LayoutScale layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale layoutPerTokenScale_, GM_ADDR ptrD_, LayoutD layoutD_, uint32_t batchSize_,
                GemmCoord sharedGmm2ProblemShape_, GM_ADDR ptrSharedA_, GM_ADDR ptrSharedB_, GM_ADDR ptrSharedD_,
-               GM_ADDR ptrSharedScale_, GM_ADDR ptrSharedPtrPerTokenScale_, layout::RowMajor sharedLayoutA_,
-               layout::VectorLayout sharedLayoutPerTokenScale_, layout::RowMajor sharedLayoutOutput_,
+               GM_ADDR ptrSharedScale_, GM_ADDR ptrSharedPtrPerTokenScale_, LayoutA sharedLayoutA_,
+               LayoutB sharedLayoutB_,
+               LayoutPerTokenScale sharedLayoutPerTokenScale_, LayoutD sharedLayoutD_,
                GM_ADDR ptrWorkspace_, void *combiner_)
             : problemShape(problemShape_),
               problemCount(problemCount_),
@@ -129,6 +131,10 @@ public:
               ptrSharedD(reinterpret_cast<__gm__ ElementD *>(ptrSharedD_)),
               ptrSharedA(reinterpret_cast<__gm__ ElementA *>(ptrSharedA_)),
               ptrSharedPtrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrSharedPtrPerTokenScale_)),
+              sharedLayoutA(sharedLayoutA_),
+              sharedLayoutB(sharedLayoutB_),
+              sharedLayoutPerTokenScale(sharedLayoutPerTokenScale_),
+              sharedLayoutD(sharedLayoutD_),
               ptrWorkspace(ptrWorkspace_),
               combiner(combiner_)
         {}
@@ -248,10 +254,10 @@ public:
             gmA.SetGlobalBuffer(params.ptrSharedA);
             gmB.SetGlobalBuffer(params.ptrSharedB);
             uint32_t softStageUsed = 0;
-            GemmCoord inGroupProblemShape{params.batchSize, params.problemShape.n(), params.problemShape.k()};
+            GemmCoord inGroupProblemShape = params.sharedGmm2ProblemShape;
 
-            LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
-            LayoutB layoutB = params.layoutB;
+            LayoutA layoutA = params.sharedLayoutA;
+            LayoutB layoutB = params.sharedLayoutB;
 
             blockScheduler.Update(inGroupProblemShape, MakeCoord(L1TileShape::M, L1TileShape::N));
             uint32_t coreLoops = blockScheduler.GetCoreLoops();
@@ -422,12 +428,12 @@ public:
                     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
                         AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
                     }
-                    GemmCoord inGroupProblemShape{params.batchSize, params.problemShape.n(), params.problemShape.k()};
+                    GemmCoord inGroupProblemShape = params.sharedGmm2ProblemShape;
 
                     LayoutScale layoutScale = params.layoutScale;
                     LayoutPerTokenScale layoutPerTokenScale =
-                        params.layoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
-                    LayoutD layoutD = params.layoutD.GetTileLayout(inGroupProblemShape.GetCoordMN());
+                        params.sharedLayoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
+                    LayoutD layoutD = params.sharedLayoutD.GetTileLayout(inGroupProblemShape.GetCoordMN());
 
                     EpilogueParams epilogueParams{
                         params.ptrSharedScale, layoutScale,
