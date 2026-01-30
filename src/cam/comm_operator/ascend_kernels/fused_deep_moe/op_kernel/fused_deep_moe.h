@@ -186,8 +186,8 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
                        GemmCoord sharedGmm2ProblemShape,
                        GM_ADDR gmSharedA, GM_ADDR gmSharedB, GM_ADDR gmSharedD,
                        GM_ADDR gmSharedScale, GM_ADDR gmSharedPtrPerTokenScale,
-                       layout::RowMajor sharedLayoutA, layout::VectorLayout sharedLayoutPerTokenScale,
-                       layout::RowMajor sharedLayoutOutput,
+                       layout::RowMajor sharedLayoutA, layout::zN sharedLayoutB, layout::VectorLayout sharedLayoutPerTokenScale,
+                       layout::RowMajor sharedLayoutD,
                        GM_ADDR gmWorkspace, void *combiner)
 {
     using ArchTag = Arch::AtlasA2;
@@ -252,8 +252,9 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
                                        gmSharedScale,
                                        gmSharedPtrPerTokenScale,
                                        sharedLayoutA,
+                                       sharedLayoutB,
                                        sharedLayoutPerTokenScale,
-                                       sharedLayoutOutput,
+                                       sharedLayoutD,
                                        gmWorkspace,
                                        combiner};
 
@@ -393,7 +394,6 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     layout::VectorLayout layoutShareW1Scale{shareGmm1OutputDim_};
     layout::VectorLayout layoutW1Scale{gmm1OutputDim_};
     layout::VectorLayout layoutX1Scale{maxTokenNum_};
-    layout::RowMajor layoutShareX2{bs_, shareGmm2InputDim_};
     layout::RowMajor layoutX2{maxTokenNum_, gmm2InputDim_};
     layout::zN layoutWeight2 = layout::zN::template MakeLayout<int8_t>(gmm2InputDim_, gmm2OutputDim_);
     layout::VectorLayout layoutW2Scale{gmm2OutputDim_};
@@ -401,7 +401,9 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     layout::RowMajor layoutOutput{maxTokenNum_, gmm2OutputDim_};
     
     // m_: 4096, n2: 7168, k2_: 2048
-    GemmCoord shareGmm2ProblemShape{bs_, gmm2OutputDim_, gmm2InputDim_};
+    layout::RowMajor layoutShareX2{bs_, shareGmm2InputDim_};
+    layout::zN layoutShareWeight2 = layout::zN::template MakeLayout<int8_t>(shareGmm2InputDim_, gmm2OutputDim_);
+    GemmCoord shareGmm2ProblemShape{bs_, gmm2OutputDim_, shareGmm2InputDim_};
     layout::VectorLayout layoutShareX2Scale{bs_};
     layout::RowMajor layoutShareOutput{bs_, gmm2OutputDim_};
 
@@ -506,7 +508,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
            Gmm2DispatchPolicy>(gmm2ProblemShape, groupCount_, gmGroupList, gmX2, layoutX2, gmWeight2_, layoutWeight2,
                                gmScale2_, layoutW2Scale, gmX2Scale, layoutX2Scale, gmGmm2DepOut, layoutOutput, bs_,
                                shareGmm2ProblemShape, gmShareX2, gmShareWeight2_, gmShareOutput_,
-                               gmShareWeight2Scale_, gmShareX2Scale, layoutShareX2, layoutShareX2Scale,
+                               gmShareWeight2Scale_, gmShareX2Scale, layoutShareX2, layoutShareWeight2, layoutShareX2Scale,
                                layoutShareOutput, gmWorkspace, &combiner);
 }
 #endif  // FUSED_DEEP_MOE_H
