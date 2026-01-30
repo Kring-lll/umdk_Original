@@ -276,7 +276,7 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     activeMaskBsCnt_ = axisBS_;
     axisH_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.h;
     axisK_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.k;
-    if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
+    if constexpr (EXEC_FLAG & (EXEC_FLAG_DEEP_FUSE | EXEC_FLAG_SHARED_EXPERT)) {
         aivNum_ = get_block_num();
     } else {
         aivNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.aivNum;
@@ -318,7 +318,7 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     }
 
     InitStatusTargetSum();
-    if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
+    if constexpr (EXEC_FLAG & (EXEC_FLAG_DEEP_FUSE | EXEC_FLAG_SHARED_EXPERT)) {
         coreIdx_ = get_block_idx();
     }
     SplitCoreCal();
@@ -664,12 +664,8 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::WaitDispatc
         }
     }
 
-    if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
-        AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(RECV_SYNC_EVENT_ID);
-        AscendC::CrossCoreWaitFlag(RECV_SYNC_EVENT_ID);
-    } else {
-        SyncAll<true>();
-    }
+    AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(RECV_SYNC_EVENT_ID);
+    AscendC::CrossCoreWaitFlag(RECV_SYNC_EVENT_ID);
 }
 
 template <TemplateMC2TypeClass>
