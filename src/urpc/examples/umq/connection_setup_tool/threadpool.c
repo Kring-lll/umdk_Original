@@ -107,27 +107,28 @@ int threadpool_add(threadpool_t *pool, void (*function)(void *), void *arg, uint
     }
 
     (void)memcpy(work_arg, arg, arg_len);
-
     if (pool == NULL || function == NULL) {
-        return -1;
+        goto FREE_ARG;
     }
 
     pthread_mutex_lock(&(pool->lock));
     next = (pool->tail + 1) % pool->queue_size;
     if (pool->count == pool->queue_size || pool->shutdown != 0) {
-        err = -1;
+        goto FREE_ARG;
     } else {
         pool->queue[pool->tail].function = function;
         pool->queue[pool->tail].arg = work_arg;
         pool->tail = next;
         pool->count += 1;
-
-        if (pthread_cond_signal(&(pool->notify)) != 0) {
-            err = -1;
-        }
+        err = pthread_cond_signal(&(pool->notify));
     }
     pthread_mutex_unlock(&(pool->lock));
     return err;
+
+FREE_ARG:
+    free(work_arg);
+    return -1;
+
 }
 
 int threadpool_destroy(threadpool_t *pool)

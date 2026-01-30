@@ -42,5 +42,9 @@ EXIT:
         free(cfg.server_ip);
     }
 
+    if (cfg.m_dev_name[0] != NULL) {
+        free(cfg.m_dev_name[0]);
+    }
+
     return ret;
 }
