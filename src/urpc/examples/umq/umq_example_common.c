@@ -630,28 +630,32 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
                 cfg->queue_num = (uint32_t)strtoul(optarg, NULL, 0);
                 break;
             case 's':
-                cfg->thread_poll_size = (uint32_t)strtoul(optarg, NULL, 0);
+                cfg->thread_poll_size = (int)strtol(optarg, NULL, 0);
                 break;
-            case 'n':
-                tmp = strdup(optarg);
+            case 'n': {
                 idx = 0;
-                while (*tmp != '\0' && idx < EXAMPLE_MAX_DEV_NUM) {
-                    cfg->m_dev_name[idx++] = tmp;
-                    while (*tmp != ',' && *tmp != '\0') {
-                        tmp++;
+                cfg->m_dev_name[idx++] = strdup(optarg);
+                while (idx < EXAMPLE_MAX_DEV_NUM) {
+                    cfg->m_dev_name[idx] = cfg->m_dev_name[idx - 1];
+                    while (*cfg->m_dev_name[idx] != ',' && *cfg->m_dev_name[idx] != '\0') {
+                        cfg->m_dev_name[idx]++;
                     }
 
-                    if (*tmp == '\0') {
+                    if (*cfg->m_dev_name[idx] == '\0') {
                         break;
                     }
 
-                    *tmp = '\0';
-                    tmp++;
+                    *cfg->m_dev_name[idx] = '\0';
+                    cfg->m_dev_name[idx]++;
+                    idx++;
                 }
+                cfg->m_dev_name[idx] = NULL;
                 break;
-            case 'x':
-                tmp = strdup(optarg);
-                char *ptr = tmp;
+            }
+            case 'x': {
+                char *head = strdup(optarg);
+                tmp = head;
+                char *ptr = head;
                 idx = 0;
                 while (*tmp != '\0' && idx < EXAMPLE_MAX_DEV_NUM) {
                     while (*tmp != ',' && *tmp != '\0') {
@@ -666,7 +670,9 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
                     ptr = tmp;
                 }
                 cfg->m_eid_idx[idx++] = (uint32_t)strtoul(ptr, NULL, 0);
+                free(head);
                 break;
+            }
             default:
                 return -1;
         }
