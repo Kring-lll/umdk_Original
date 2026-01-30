@@ -157,7 +157,7 @@ int urpc_thread_create(const char *thread_name, urpc_thread_job_t *job, uint32_t
     }
 
     if (param->state == URPC_THREAD_RUNNING) {
-        UTIL_LOG_INFO("urpc thread %s create successful, thread_index: %d\n", param->name, thread_index);
+        UTIL_LOG_INFO("urpc thread %s create success, thread_index: %d\n", param->name, thread_index);
         return thread_index;
     }
 
@@ -189,7 +189,7 @@ void urpc_thread_destroy(int thread_index)
     param->id = -1;
     param->state = URPC_THREAD_INIT;
 
-    UTIL_LOG_INFO("urpc thread %s destroy successful, thread_index: %d\n", param->name, thread_index);
+    UTIL_LOG_INFO("urpc thread %s destroy success, thread_index: %d\n", param->name, thread_index);
 }
 
 int urpc_thread_ctx_init(void)
@@ -209,7 +209,7 @@ int urpc_thread_ctx_init(void)
         param->state = URPC_THREAD_INIT;
     }
 
-    UTIL_LOG_INFO("urpc_thread_ctx init successful\n");
+    UTIL_LOG_INFO("urpc_thread_ctx init success\n");
 
     return URPC_SUCCESS;
 }
@@ -228,5 +228,5 @@ void urpc_thread_ctx_uninit(void)
 
     urpc_id_generator_uninit(&g_urpc_thread_a_ctx.id_generator);
 
-    UTIL_LOG_INFO("urpc_thread_ctx uninit successful\n");
+    UTIL_LOG_INFO("urpc_thread_ctx uninit success\n");
 }
