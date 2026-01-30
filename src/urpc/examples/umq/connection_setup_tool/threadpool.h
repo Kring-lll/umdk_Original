@@ -10,6 +10,10 @@
 #ifndef THREADPOOL_H
 #define THREADPOOL_H
 
+
+#include <pthread.h>
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
