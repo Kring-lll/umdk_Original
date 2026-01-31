@@ -91,9 +91,7 @@ int urpc_pool_init(urpc_pool_config_t *cfg, urpc_pool_t *pool)
     if (URPC_UNLIKELY(cfg->element_size > URPC_POOL_ELEMENT_SIZE_MAX ||
                       cfg->element_num_per_block > URPC_POOL_ELEMENT_MAX || cfg->block_num > URPC_POOL_BLOCK_MAX)) {
         UTIL_LOG_ERR("init urpc pool failed, element_size %u, element_num_per_block %u, block_num %u is invalid\n",
-            cfg->element_size,
-            cfg->element_num_per_block,
-            cfg->block_num);
+            cfg->element_size, cfg->element_num_per_block, cfg->block_num);
         return -EINVAL;
     }
 
