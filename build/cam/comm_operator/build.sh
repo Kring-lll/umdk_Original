@@ -18,21 +18,7 @@ ENABLE_UT_BUILD=0
 ENABLE_PYBIND_BUILD=1
 ENABLE_SRC_BUILD=1
 
-BuildTest() {
-    cd ${MODULE_TEST_PATH}/ut_gtest
-    if [ -d "./build" ]; then
-        rm -rf "./build"
-    fi
-    mkdir ./build
-    cd build
-    cmake .. && make -j && make install
-    if [ $? -ne 0 ]; then
-        echo "BuildTest fail"
-        return 1
-    fi
-}
-
-PrintHelp() {
+print_help() {
     echo "
     ./build.sh comm_operator <opt>...
     -x Extract the run package
@@ -69,7 +55,7 @@ while getopts "c:xdtprh" opt; do
         export ENABLE_COV=1
         ;;
     h)
-        PrintHelp
+        print_help
         exit 0
         ;;
     esac
