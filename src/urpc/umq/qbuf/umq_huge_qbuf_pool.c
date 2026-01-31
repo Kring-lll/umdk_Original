@@ -60,14 +60,16 @@ static int umq_huge_qbuf_pool_init(huge_qbuf_pool_size_type_t type, huge_pool_t 
     void *buf_addr = NULL;
     uint8_t mempool_id = pool->pool_idx + pool->pool_idx_shift;
     if (pool->pool_idx >= HUGE_QBUF_POOL_NUM_MAX) {
-        UMQ_VLOG_ERR("huge qbuf pool has reached its maximum expansion limit(%d)\n", HUGE_QBUF_POOL_NUM_MAX);
+        UMQ_VLOG_ERR(VLOG_UMQ, "huge qbuf pool has reached its maximum expansion limit(%d)\n",
+            HUGE_QBUF_POOL_NUM_MAX);
         return -UMQ_ERR_EINVAL;
     }
 
     huge_pool_info_t *pool_info = &pool->pool_info[pool->pool_idx];
 
-    if (pool->memory_init_callback(mempool_id, type, &buf_addr) != UMQ_SUCCESS) {
-        UMQ_VLOG_ERR("memory generation callback executes failed\n");
+    int ret = pool->memory_init_callback(mempool_id, type, &buf_addr);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "memory generation callback executes failed, status: %d\n", ret);
         return -UMQ_ERR_ENOMEM;
     }
 
@@ -154,7 +156,7 @@ static int do_umq_huge_qbuf_config_init(huge_qbuf_pool_cfg_t *cfg)
 {
     huge_pool_t *pool = &g_huge_pool_ctx.pool[cfg->type];
     if (pool->inited) {
-        UMQ_VLOG_ERR("huge qbuf pool(type: %d) has already been inited\n", cfg->type);
+        UMQ_VLOG_ERR(VLOG_UMQ, "huge qbuf pool(type: %d) has already been inited\n", cfg->type);
         return -UMQ_ERR_EEXIST;
     }
 
@@ -211,22 +213,22 @@ void umq_huge_qbuf_pool_uninit(void)
 int umq_huge_qbuf_config_init(huge_qbuf_pool_cfg_t *cfg)
 {
     if (cfg == NULL) {
-        UMQ_VLOG_ERR("invalid input arguments\n");
+        UMQ_VLOG_ERR(VLOG_UMQ, "invalid input arguments\n");
         return -UMQ_ERR_EINVAL;
     }
 
     if (cfg->mode != UMQ_BUF_SPLIT && cfg->mode != UMQ_BUF_COMBINE) {
-        UMQ_VLOG_ERR("huge qbuf pool mode: %d is invalid\n", cfg->mode);
+        UMQ_VLOG_ERR(VLOG_UMQ, "huge qbuf pool mode: %d is invalid\n", cfg->mode);
         return -UMQ_ERR_EINVAL;
     }
 
     if (cfg->type < 0 || cfg->type >= HUGE_QBUF_POOL_SIZE_TYPE_MAX) {
-        UMQ_VLOG_ERR("huge qbuf pool type: %d is invalid\n", cfg->type);
+        UMQ_VLOG_ERR(VLOG_UMQ, "huge qbuf pool type: %d is invalid\n", cfg->type);
         return -UMQ_ERR_EINVAL;
     }
 
     if (cfg->memory_init_callback == NULL || cfg->memory_uninit_callback == NULL) {
-        UMQ_VLOG_ERR("invalid memory related callback\n");
+        UMQ_VLOG_ERR(VLOG_UMQ, "invalid memory related callback\n");
         return -UMQ_ERR_EINVAL;
     }
 
@@ -362,7 +364,7 @@ int umq_huge_qbuf_alloc(huge_qbuf_pool_size_type_t type, uint32_t request_size, 
     umq_alloc_option_t *option, umq_buf_list_t *list)
 {
     if (!g_huge_pool_ctx.inited) {
-        UMQ_VLOG_ERR("huge qbuf pool has not been inited\n");
+        UMQ_VLOG_ERR(VLOG_UMQ, "huge qbuf pool has not been inited\n");
         return -UMQ_ERR_ENOMEM;
     }
 
@@ -384,9 +386,11 @@ int umq_huge_qbuf_alloc(huge_qbuf_pool_size_type_t type, uint32_t request_size, 
     }
 
     while (pool->block_pool.buf_cnt_with_data < actual_buf_count) {
-        if (umq_huge_qbuf_pool_init(type, pool) != UMQ_SUCCESS) {
+        int ret = umq_huge_qbuf_pool_init(type, pool);
+        if (ret != UMQ_SUCCESS) {
             (void)pthread_mutex_unlock(&pool->block_pool.global_mutex);
-            UMQ_VLOG_ERR("buffer not enough, rest count: %u\n", pool->block_pool.buf_cnt_with_data);
+            UMQ_VLOG_ERR(VLOG_UMQ, "buffer not enough, rest count: %u, status: %d\n",
+                pool->block_pool.buf_cnt_with_data, ret);
             return -UMQ_ERR_ENOMEM;
         }
     }
@@ -420,7 +424,7 @@ static huge_qbuf_pool_size_type_t umq_huge_qbuf_get_type_by_mempool_id(uint32_t 
 void umq_huge_qbuf_free(umq_buf_list_t *list)
 {
     if (!g_huge_pool_ctx.inited) {
-        UMQ_VLOG_ERR("huge qbuf pool has not been inited\n");
+        UMQ_VLOG_ERR(VLOG_UMQ, "huge qbuf pool has not been inited\n");
         return;
     }
 
@@ -455,7 +459,7 @@ int umq_huge_qbuf_register_seg(
         ret = register_seg_func(ctx, pool->pool_idx_shift + i, pool->pool_info[i].data_buffer, pool->total_size);
         if (ret != UMQ_SUCCESS) {
             failed_idx = i;
-            UMQ_VLOG_ERR("register mid mem pool failed, ret: %d, pool idx %u\n", ret, i);
+            UMQ_VLOG_ERR(VLOG_UMQ, "register mid mem pool failed, status: %d, pool idx %u\n", ret, i);
             goto UNREGISTER_MID_SEG;
         }
     }
@@ -466,7 +470,7 @@ int umq_huge_qbuf_register_seg(
         ret = register_seg_func(ctx, pool->pool_idx_shift + i, pool->pool_info[i].data_buffer, pool->total_size);
         if (ret != UMQ_SUCCESS) {
             failed_idx = i;
-            UMQ_VLOG_ERR("register big mem pool failed, ret: %d, pool idx %u\n", ret, i);
+            UMQ_VLOG_ERR(VLOG_UMQ, "register big mem pool failed, status: %d, pool idx %u\n", ret, i);
             goto UNREGISTER_BIG_SEG;
         }
     }
@@ -477,7 +481,7 @@ int umq_huge_qbuf_register_seg(
         ret = register_seg_func(ctx, pool->pool_idx_shift + i, pool->pool_info[i].data_buffer, pool->total_size);
         if (ret != UMQ_SUCCESS) {
             failed_idx = i;
-            UMQ_VLOG_ERR("register huge mem pool failed, ret: %d, pool idx %u\n", ret, i);
+            UMQ_VLOG_ERR(VLOG_UMQ, "register huge mem pool failed, status: %d, pool idx %u\n", ret, i);
             goto UNREGISTER_HUGE_SEG;
         }
     }
@@ -515,7 +519,7 @@ void umq_huge_qbuf_unregister_seg(uint8_t *ctx, unregister_seg_callback_t unregi
     for (uint32_t i = 0; i < pool->pool_idx; i++) {
         ret = unregister_seg_func(ctx, pool->pool_idx_shift + i);
         if (ret != UMQ_SUCCESS) {
-            UMQ_VLOG_ERR("unregister mid mem pool failed, ret: %d, pool idx %u\n", ret, i);
+            UMQ_VLOG_ERR(VLOG_UMQ, "unregister mid mem pool failed, status: %d, pool idx %u\n", ret, i);
         }
     }
 
@@ -524,7 +528,7 @@ void umq_huge_qbuf_unregister_seg(uint8_t *ctx, unregister_seg_callback_t unregi
     for (uint32_t i = 0; i < pool->pool_idx; i++) {
         ret = unregister_seg_func(ctx, pool->pool_idx_shift + i);
         if (ret != UMQ_SUCCESS) {
-            UMQ_VLOG_ERR("unregister big mem pool failed, ret: %d, pool idx %u\n", ret, i);
+            UMQ_VLOG_ERR(VLOG_UMQ, "unregister big mem pool failed, status: %d, pool idx %u\n", ret, i);
         }
     }
 
@@ -533,7 +537,7 @@ void umq_huge_qbuf_unregister_seg(uint8_t *ctx, unregister_seg_callback_t unregi
     for (uint32_t i = 0; i < pool->pool_idx; i++) {
         ret = unregister_seg_func(ctx, pool->pool_idx_shift + i);
         if (ret != UMQ_SUCCESS) {
-            UMQ_VLOG_ERR("unregister big mem pool failed, ret: %d, pool idx %u\n", ret, i);
+            UMQ_VLOG_ERR(VLOG_UMQ, "unregister big mem pool failed, status: %d, pool idx %u\n", ret, i);
         }
     }
 }
@@ -543,7 +547,7 @@ int umq_huge_qbuf_headroom_reset(umq_buf_t *qbuf, uint16_t headroom_size)
     huge_qbuf_pool_size_type_t type = umq_huge_qbuf_get_type_by_mempool_id(qbuf->mempool_id);
     huge_pool_t *pool = &g_huge_pool_ctx.pool[type];
     if (!(pool->inited)) {
-        UMQ_VLOG_ERR("qbuf pool has not been inited\n");
+        UMQ_VLOG_ERR(VLOG_UMQ, "qbuf pool has not been inited\n");
         return -UMQ_ERR_ENOMEM;
     }
     return headroom_reset(qbuf, headroom_size, g_huge_pool_ctx.mode, pool->block_size);
