@@ -74,7 +74,7 @@ uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bin
     init_cfg->feature = cfg->feature;
     init_cfg->cna = cfg->cna;
     init_cfg->ubmm_eid = cfg->deid;
-    init_cfg->transport_mode = (umq_transport_mode_t)cfg->transport_mode;
+    init_cfg->transport_mode = (umq_tp_mode_t)cfg->transport_mode;
     init_cfg->tp_type = (umq_tp_type_t)cfg->tp_type;
 
     if (parse_trans_info(cfg, init_cfg) != 0) {
