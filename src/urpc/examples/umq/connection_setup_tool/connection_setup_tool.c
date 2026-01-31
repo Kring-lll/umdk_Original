@@ -103,8 +103,8 @@ static int init_umq(struct urpc_example_config *cfg)
 {
     umq_init_cfg_t init_cfg = {
         .feature = cfg->feature,
-        .transport_mode = (umq_transport_mode_t)cfg->transport_mode,
-        .tp_type = (umq_tp_type_t)cfg->tp_type,
+        .transport_mode = cfg->transport_mode,
+        .tp_type = cfg->tp_type,
         .flow_control.use_atomic_window = true,
         .flow_control.initial_credit = TOOL_INITIAL_CREDIT,
         .flow_control.credits_per_request = TOOL_REQIEST_CREDITS,
@@ -721,7 +721,7 @@ static int wait_work(threadpool_t *pool)
 {
     struct epoll_event events[CONNECTION_SETUP_LISTEN] = {0};
     fd_ctx_t *fd_ctx;
-    while (1) {
+    while (!is_example_force_quit()) {
         int num = epoll_wait(g_epoll_fd, events, CONNECTION_SETUP_LISTEN, -1);
         if (num < 0 || num > CONNECTION_SETUP_LISTEN) {
             LOG_PRINT_ERR("Epoll wait err, ret:%d.\n", num);
@@ -760,7 +760,7 @@ static int wait_work(threadpool_t *pool)
 
 static void *server_state_conn_info(void *arg)
 {
-    while (1) {
+    while (!is_example_force_quit()) {
         sleep(STATE_SLEEP_TIME_S);
         printf("=======================================================\n");
         printf("conn cnt: %u \n", g_state_total_conn_cnt);
@@ -869,7 +869,7 @@ CLOSE_FD:
 
 static void *client_state_conn_info(void *arg)
 {
-    while (1) {
+    while (!is_example_force_quit()) {
         sleep(STATE_SLEEP_TIME_S);
         printf("=======================================================\n");
         printf("connect cnt:\t %u \n", g_umq_cnt);
@@ -922,7 +922,7 @@ static int run_client(struct urpc_example_config *cfg)
         }
     }
 
-    while (1) {
+    while (!is_example_force_quit()) {
         for (uint32_t i = 0; i < g_umq_cnt; i++) {
             if (!g_umq_info_list[i].enable) {
                 continue;
