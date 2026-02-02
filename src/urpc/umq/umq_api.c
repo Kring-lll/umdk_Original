@@ -331,7 +331,7 @@ static int load_symbol(void *handle, void **func, const char *symbol)
 {
     *func = dlsym(handle, symbol);
     if (*func == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "dlsym failed, err: %d\n", dlerror());
+        UMQ_VLOG_ERR(VLOG_UMQ, "dlsym failed, err: %s\n", dlerror());
         return UMQ_FAIL;
     }
     return UMQ_SUCCESS;
