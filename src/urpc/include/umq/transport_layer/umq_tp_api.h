@@ -269,7 +269,9 @@ typedef struct umq_ops {
     * @param[out] umq_dev_info: device information
     * Return: 0 on success, other value on error
     */
-    int (*umq_tp_dev_info_get)(char *dev_name,  umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq_dev_info);
+    int (*umq_tp_dev_info_get)(char *dev_name, umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq_dev_info);
+
+    int (*umq_tp_dev_info_list_get)(umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq_dev_info, int dev_num);
 
     /**
      * Get umq cfg.
