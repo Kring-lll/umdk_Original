@@ -495,8 +495,8 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
     }
 
     UMQ_VLOG_INFO(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq flow control init success, use %s window\n",
-        EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO].jetty_id.eid),
-        queue->jetty[UB_QUEUE_JETTY_IO].jetty_id.id, cfg->use_atomic_window ? "atomic" : "non-atomic");
+        EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+        queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, cfg->use_atomic_window ? "atomic" : "non-atomic");
 
     return UMQ_SUCCESS;
 }
@@ -519,7 +519,8 @@ int umq_ub_window_init(ub_flow_control_t *fc, umq_ub_bind_info_t *bind_info)
     umq_ub_bind_fc_info_t *fc_info = (umq_ub_bind_fc_info_t *)(uintptr_t)bind_info->fc_info;
     umq_ub_bind_queue_info_t *queue_info = (umq_ub_bind_queue_info_t *)(uintptr_t)bind_info->queue_info;
     if (fc_info->win_buf_addr == 0 || fc_info->win_buf_len < sizeof(uint16_t)) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "umq window init failed, remote flow control qbuf is empty\n");
+        UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq window init failed, remote flow control qbuf "
+            "is empty\n", EID_ARGS(fc_info->jetty_id.eid), fc_info->jetty_id.id);
         return UMQ_FAIL;
     }
 
@@ -561,12 +562,12 @@ void umq_ub_window_read(ub_flow_control_t *fc, ub_queue_t *queue)
         return;
     }
 
-    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_post_jetty_send_wr for get flowcontrol remote window failed, "
-        "status: %d, local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n",
-        (int)status, EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
+        "remote jetty_id: %u, urma_post_jetty_send_wr for get flowcontrol remote window failed, status: %d, \n",
+        EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
         queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id,
         EID_ARGS(queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL]->id.eid),
-        queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL]->id.id);
+        queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL]->id.id, (int)status);
 }
 
 void umq_ub_shared_credit_recharge(ub_queue_t *queue, uint16_t recharge_count)
@@ -642,9 +643,9 @@ void umq_ub_shared_credit_req_send(ub_queue_t *queue)
         return;
     }
     umq_ub_permission_release(fc);
-    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_post_jetty_send_wr for send credit req failed, status: %d, "
-        "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n", (int)status,
-        EID_ARGS(jetty->jetty_id.eid), jetty->jetty_id.id, EID_ARGS(tjetty->id.eid), tjetty->id.id);
+    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
+        "remote jetty_id: %u, urma_post_jetty_send_wr for send credit req failed, status: %d\n",
+        EID_ARGS(jetty->jetty_id.eid), jetty->jetty_id.id, EID_ARGS(tjetty->id.eid), tjetty->id.id, (int)status);
 }
 
 static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
@@ -683,9 +684,9 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
         return UMQ_SUCCESS;
     }
 
-    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_post_jetty_send_wr for send credit req failed, status: %d, "
-        "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u\n", (int)status,
-        EID_ARGS(jetty->jetty_id.eid), jetty->jetty_id.id, EID_ARGS(tjetty->id.eid), tjetty->id.id);
+    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
+        "remote jetty_id: %u, urma_post_jetty_send_wr for send credit req failed, status: %d\n",
+        EID_ARGS(jetty->jetty_id.eid), jetty->jetty_id.id, EID_ARGS(tjetty->id.eid), tjetty->id.id, (int)status);
     return UMQ_FAIL;
 }
 
@@ -750,8 +751,9 @@ void umq_ub_credit_clean_up(ub_queue_t *queue)
     uint64_t allocated_credit = fc->ops.local_rx_allocated_load(fc);
     uint64_t unconsumed = allocated_credit - consumed_credit;
     if (unconsumed > UINT16_MAX) {
-        UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "unconsumed credit exceed UINT16_MAX, unconsumed credit %llu, capacity %d\n",
-            unconsumed, credit->capacity);
+        UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, unconsumed credit exceed UINT16_MAX, "
+            "unconsumed credit %llu, capacity %d\n", queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid,
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, unconsumed, credit->capacity);
         return;
     }
     (void)credit->ops.available_credit_return(credit, actual_return_credit + unconsumed);
