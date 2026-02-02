@@ -263,13 +263,22 @@ typedef struct umq_ops {
     int (*umq_tp_mempool_state_refresh)(uint64_t umqh_tp, uint32_t mempool_id);
 
     /**
-    * Get device information.
-    * @param[in] dev_name: device name
-    * @param[in] umq_trans_mode: umq trans mdoe
-    * @param[out] umq_dev_info: device information
-    * Return: 0 on success, other value on error
-    */
-    int (*umq_tp_dev_info_get)(char *dev_name,  umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq_dev_info);
+     * Get device information.
+     * @param[in] dev_name: device name
+     * @param[in] umq_trans_mode: umq trans mdoe
+     * @param[out] umq_dev_info: device information
+     * Return: 0 on success, other value on error
+     */
+    int (*umq_tp_dev_info_get)(char *dev_name, umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq_dev_info);
+
+    /**
+     * Get at most dev_num devices information.
+     * @param[in] umq_trans_mode: umq trans mdoe
+     * @param[out] umq_dev_info: device information array
+     * @param[in] dev_num: device information array size
+     * Return: actual device information num, negtive value on error
+     */
+    int (*umq_tp_dev_info_list_get)(umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq_dev_info, int dev_num);
 
     /**
      * Get umq cfg.
