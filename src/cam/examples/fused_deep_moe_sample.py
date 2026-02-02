@@ -302,7 +302,8 @@ class FusionOp(DecodeMoeOps):
                  share_gmm1_weight=None,
                  share_gmm1_weight_scale=None,
                  share_gmm2_weight=None,
-                 share_gmm2_weight_scale=None):
+                 share_gmm2_weight_scale=None,
+                 comm_args=None):
         super().__init__(gmm1_weight, gmm1_weight_scale, gmm2_weight,
                          gmm2_weight_scale, ep_hcomm_info, batch_size,
                          token_hidden_size, moe_intermediate_size,
@@ -311,6 +312,7 @@ class FusionOp(DecodeMoeOps):
                          share_expert_intermediate_size,
                          share_gmm1_weight, share_gmm1_weight_scale,
                          share_gmm2_weight, share_gmm2_weight_scale)
+        self.comm_args = comm_args
 
     def _apply_ops(self, x, expert_ids, smooth_scales, expert_scales, x_active_mask):
         output, share_output, expert_token_nums = torch.ops.umdk_cam_op_lib.fused_deep_moe(
@@ -327,6 +329,7 @@ class FusionOp(DecodeMoeOps):
             share_gmm2_weight_scale=self.share_gmm2_weight_scale_fp32,
             expert_smooth_scales=smooth_scales,
             x_active_mask=x_active_mask,
+            comm_args=self.comm_args,
             group_ep=self.ep_hcomm_info,
             ep_rank_size=self.ep_world_size,
             ep_rank_id=self.global_rank_id,
@@ -514,6 +517,10 @@ def run_once(local_rank_id,
         torch.device("npu")).get_hccl_comm_name(local_rank_id)
     ep_hcomm_info_small = ep_group_small._get_backend(
         torch.device("npu")).get_hccl_comm_name(local_rank_id)
+
+    commId = 0
+    comm_args = umdk_cam_op_lib.cam_get_comm(commId, global_rank_id, ep_world_size, os.environ["MASTER_ADDR"] + ":16007").npu()
+
     torch_npu.npu.synchronize(device_id)
 
     # 构建必要参数和权重数据
@@ -535,7 +542,7 @@ def run_once(local_rank_id,
     small_ops = SmallOps(*weight_datas, ep_hcomm_info_small,
                          *parameter, dynamic_eplb, with_share, share_expert_intermediate_size, *share_weight_datas).npu()  # type: ignore
     fused_ops = FusionOp(*weight_datas, ep_hcomm_info_fused,
-                         *parameter, dynamic_eplb, with_share, share_expert_intermediate_size, *share_weight_datas).npu()  # type: ignore
+                         *parameter, dynamic_eplb, with_share, share_expert_intermediate_size, *share_weight_datas, comm_args).npu()  # type: ignore
     if test_graph:
         config = torchair.CompilerConfig()
         config.mode = "reduce-overhead"

@@ -1,4 +1,6 @@
 export SCRIPT_PATH=$(dirname "$(readlink -f "$0")")
+export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/Ascend/ascend-toolkit/latest/opp/vendors/CAM/op_api/lib
+export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${SCRIPT_PATH}/src/build_out/comm_operator/lib
 
 cd ${SCRIPT_PATH}/
 find . -name "*.sh" | xargs -i chmod +x {}

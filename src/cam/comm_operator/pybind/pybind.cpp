@@ -9,9 +9,15 @@
 
 #include "functions.h"
 #include <torch/extension.h>
+#include "moe_utils.h"
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
+    m.def("cam_get_comm", &cam_get_comm, "cam_get_comm");
+    m.def("cam_free_comm", &cam_free_comm, "cam_free_comm");
+    m.def("cam_get_rank_size", &cam_get_rank_size, "cam_get_rank_size");
+    m.def("cam_get_and_increase_magic", &cam_get_and_increase_magic, "cam_get_and_increase_magic");
+    m.def("cam_get_magic", &cam_get_magic, "cam_get_magic");
     m.def("fused_deep_moe", &FusedDeepMoeImplAutograd, "fused_deep_moe");
     m.def("get_dispatch_layout", &GetDispatchLayoutImplAutograd, "get_dispatch_layout");
     m.def("moe_dispatch_prefill", &MoeDispatchPrefillImplAutograd, "moe_dispatch_prefill");
@@ -22,11 +28,13 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 
 TORCH_LIBRARY(umdk_cam_op_lib, m)
 {
+    m.def("cam_get_comm(int comm_id, int rank, int group_size, str server_ip_port) -> Tensor");
+    m.def("cam_free_comm(int comm_id) -> Tensor");
     m.def("fused_deep_moe(Tensor x, Tensor expert_ids, Tensor[] gmm1_weight, Tensor[] gmm1_weight_scale, \
     Tensor[] gmm2_weight, Tensor[] gmm2_weight_scale, Tensor expert_scales, \
     Tensor? share_gmm1_weight, Tensor? share_gmm1_weight_scale, \
     Tensor? share_gmm2_weight, Tensor? share_gmm2_weight_scale, \
-    Tensor? expert_smooth_scales, Tensor? x_active_mask, \
+    Tensor? expert_smooth_scales, Tensor? x_active_mask, Tensor? comm_args, \
     str group_ep, int ep_rank_size, int ep_rank_id, int moe_expert_num, int shared_expert_num, \
     int shared_expert_rank_num, int quant_mode, int global_bs) -> Tensor[]");
     m.def("get_dispatch_layout(Tensor topk_idx, int num_experts, int num_ranks) -> (Tensor, Tensor)");

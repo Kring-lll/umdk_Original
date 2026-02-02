@@ -34,7 +34,7 @@ if architecture.startswith("x86"):
 else:
     arch = "aarch64"
 
-env_names = ["ASCEND_HOME_PATH"]
+env_names = ["MODULE_SRC_PATH", "ASCEND_HOME_PATH"]
 for env_name in env_names:
     if env_name not in os.environ:
         print(f"{env_name} is not in env, please export {env_name} first")
@@ -55,6 +55,8 @@ exts = []
 ext1 = NpuExtension(
     name="umdk_cam_op_lib",
     include_dirs=[
+        os.path.join(os.environ["MODULE_SRC_PATH"], 'include/'),
+        os.path.join(os.environ["MODULE_SRC_PATH"], 'framework/communicator'),
         os.path.join(torch_npu_path, "include"),
         os.path.join(torch_npu_path, "include/third_party/acl/inc/acl/"),
         os.path.join(torch_npu_path, "include/third_party/acl/inc"),
@@ -66,10 +68,13 @@ ext1 = NpuExtension(
         os.path.join(os.path.dirname(__file__), "./", "pytorch_extension")],
 
     library_dirs=[
+        os.path.join(os.environ["MODULE_SRC_PATH"], 'build/'),
         os.path.join(torch_path, "lib"),
         os.path.join(torch_npu_path, "lib"),
         os.path.join(os.environ["ASCEND_HOME_PATH"], f"{arch}-linux", "lib64")],
     libraries=[
+        "cam",
+        "nnopbase",
         "torch_npu",
         "gcov",
         "runtime",
@@ -82,6 +87,7 @@ ext1 = NpuExtension(
              "./moe_combine_prefill.cpp",
              "./moe_dispatch_shmem.cpp",
              "./moe_combine_shmem.cpp",
+             "./moe_utils.cpp",
              "./pybind.cpp",
              "./pytorch_extension/NPUBridge.cpp",
              "./pytorch_extension/NPUStorageImpl.cpp",
