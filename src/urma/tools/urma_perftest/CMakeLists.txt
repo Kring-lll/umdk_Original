@@ -19,6 +19,8 @@ target_link_libraries(urma_perftest
         urma pthread m
 )
 
+target_compile_definitions(urma_perftest PRIVATE PERFTEST_VERSION="${PROJECT_VERSION}")
+
 install(TARGETS urma_perftest
     DESTINATION /usr/bin
 )

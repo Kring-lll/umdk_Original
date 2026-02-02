@@ -115,6 +115,7 @@ static void usage(const char *argv0)
     (void)printf("  -s, --size <size>           Size of message to exchange (default 2).\n");
     (void)printf("  -S, --server <ip>           Server ip for bind or connect, default: 127.0.0.1 .\n");
     (void)printf("  -T, --jfs_depth <dep>       Size of jfs depth (default 128 for BW, 1 for LAT).\n");
+    (void)printf("  -v, --version               Show the version.\n");
     (void)printf("  -w, --warm_up               Choose to use warm_up function, only for read/write/atomic bw test.\n");
     (void)printf("  -y, --infinite[second]      Run perftest infinitely, only available for BW test.\n"
                  "                              Print period for infinite mode, default 2 seconds.\n");
@@ -437,6 +438,7 @@ static int check_cfg_range(perftest_config_t *cfg)
 
 int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
 {
+    const int opt_args = 2;
     uint32_t offset;
     if (argc == 1) {
         (void)printf("Input invalid with argc: %d.\n", argc);
@@ -445,7 +447,34 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
     }
 
     (void)memset(cfg, 0, sizeof(perftest_config_t));
+    static const struct option first_options[] = {
 
+        {"version",       no_argument,       NULL, 'v'},
+        {"help",          no_argument,       NULL, 'h'},
+        {NULL,            no_argument,       NULL, '\0'}
+    };
+    while (1) {
+        int c = getopt_long(argc, argv, "+hv",
+            first_options, NULL);
+        if (c == -1) {
+            break;
+        }
+        switch (c) {
+            case 'h':
+                usage(argv[0]);
+                return -1;
+            case 'v':
+                #ifdef PERFTEST_VERSION
+                (void)printf("perftest_version: Version: A5-%s\n", PERFTEST_VERSION);
+                #else
+                (void)printf("The version remains undefined.\n");
+                #endif
+                return -1;
+            default:
+                break;
+        }
+    }
+    optind = opt_args;
     /* First parse the command */
     cfg->cmd = parse_command(argv[1]);
     if (cfg->cmd == PERFTEST_CMD_NUM) {
@@ -469,7 +498,6 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"err_timeout",   required_argument, NULL, 'E'},
         {"use_flat_api",  no_argument,       NULL, 'f'},
         {"cpu_freq_f",    no_argument,       NULL, 'F'},
-        {"help",          no_argument,       NULL, 'h'},
         {"inline_size",   required_argument, NULL, 'I'},
         {"share_jfr",     required_argument, NULL, 'j'},
         {"jettys",        required_argument, NULL, 'J'},
@@ -597,9 +625,6 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
             case 'F':
                 cfg->cpu_freq_f = true;
                 break;
-            case 'h':
-                usage(argv[0]);
-                return -1;
             case 'I':
                 if (cfg->api_type == PERFTEST_READ || cfg->api_type == PERFTEST_ATOMIC) {
                     (void)fprintf(stderr, "Warning: Inline feature not available for READ/ATOMIC.\n");
