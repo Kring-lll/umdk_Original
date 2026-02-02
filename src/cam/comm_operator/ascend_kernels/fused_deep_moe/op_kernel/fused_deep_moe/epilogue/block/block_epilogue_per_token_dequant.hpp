@@ -492,11 +492,16 @@ public:
 
     CATLASS_DEVICE GM_ADDR GetWinAddrByRankId(const int32_t rankId, const uint8_t expertLocalId = 0U)
     {
+#if ENABLE_CAM_COMM
+        return (GM_ADDR)calcInfo.epWinContext_.GetValue(rankId) + Moe::IPC_DATA_OFFSET + calcInfo.winDataSizeOffset_ +
+               expertLocalId * calcInfo.expertPerSizeOnWin_ + rankId * OPT_RANK_OFFSET;
+#else
         return (GM_ADDR)((calcInfo.epRankId_ == rankId) ?
                              calcInfo.epWinContext_->localWindowsIn :
                              ((HcclRankRelationResV2 *)(calcInfo.epWinContext_->remoteRes[rankId].nextDevicePtr))
                                  ->windowsIn) +
                calcInfo.winDataSizeOffset_ + expertLocalId * calcInfo.expertPerSizeOnWin_ + rankId * OPT_RANK_OFFSET;
+#endif
     }
 #if ENABLE_EP_SEND_COUNT_HASH
     CATLASS_DEVICE void InitTokenToEpRankHashLocalForEpRank(uint32_t &hashOffset, uint32_t epRank, uint32_t copyLen)

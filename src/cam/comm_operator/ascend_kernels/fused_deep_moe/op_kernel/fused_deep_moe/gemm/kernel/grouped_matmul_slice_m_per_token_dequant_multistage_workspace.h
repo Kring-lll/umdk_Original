@@ -151,9 +151,16 @@ public:
             aicWaitFuncList[stageId] = {this, stageId};
             aicSetFuncList[stageId] = {this, stageId};
         }
-        winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
-        syncGmAddr = (GM_ADDR)((winContext_)->localWindowsExp) + GMM2::SOFT_SYNC_OFFSET +
-                     get_block_idx() * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+        if (commArgs) {
+            epWinContext_.SetGlobalBuffer(&(reinterpret_cast<__gm__ Moe::CommArgs *>(commArgs))->peerMems[0],
+                                          Moe::CAM_MAX_RANK_SIZE);
+            syncGmAddr = ((GM_ADDR)epWinContext_.GetValue(epRankId)) + GMM2::SOFT_SYNC_OFFSET +
+                         get_block_idx() * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+        } else {
+            winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
+            syncGmAddr = (GM_ADDR)((winContext_)->localWindowsExp) + GMM2::SOFT_SYNC_OFFSET +
+                         get_block_idx() * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+        }
     }
 
     template <int32_t CORE_TYPE = g_coreType>
@@ -590,6 +597,7 @@ private:
 
     AicWaitFunc aicWaitFuncList[WORKSPACE_STAGES];
     AicSetFunc aicSetFuncList[WORKSPACE_STAGES];
+    AscendC::GlobalTensor<GM_ADDR> epWinContext_;
     __gm__ HcclOpResParam *winContext_;
     GM_ADDR syncGmAddr;
     Arch::Resource<ArchTag> resource;

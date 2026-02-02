@@ -17,6 +17,7 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
     GM_ADDR share_gmm1_permuted_weight, GM_ADDR share_gmm1_permuted_weight_scale,
     GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
     GM_ADDR expert_smooth_scales, GM_ADDR x_active_mask,
+    GM_ADDR comm_args,
     // output
     GM_ADDR output, GM_ADDR share_output, GM_ADDR expertTokenNums,
     // system
@@ -32,7 +33,7 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
         FusedDeepMoe<DTYPE_X, int32_t, false, TILING_KEY_VAR> op;
         op.Init(x, expert_ids, gmm1_permuted_weight, gmm1_permuted_weight_scale, gmm2_weight, gmm2_weight_scale,
                 expert_scales, share_gmm1_permuted_weight, share_gmm1_permuted_weight_scale,
-                share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, x_active_mask,
+                share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, x_active_mask, comm_args,
                 output, share_output, expertTokenNums,
                 workspace, nullptr, &tiling_data);
         op.Process();
@@ -42,7 +43,7 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
         FusedDeepMoe<DTYPE_X, int32_t, false, TILING_KEY_VAR> op;
         op.Init(x, expert_ids, gmm1_permuted_weight, gmm1_permuted_weight_scale, gmm2_weight, gmm2_weight_scale,
                 expert_scales, share_gmm1_permuted_weight, share_gmm1_permuted_weight_scale,
-                share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, x_active_mask,
+                share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, x_active_mask, comm_args,
                 output, share_output, expertTokenNums,
                 workspace, nullptr, &tiling_data);
         op.Process();

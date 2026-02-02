@@ -18,12 +18,12 @@
 #include "catlass/matrix_coord.hpp"
 #include "catlass/epilogue/tile/tile_swizzle.hpp"
 #include "catlass/epilogue/tile/tile_copy.hpp"
+#include "../../../comm_args.h"
 
 #include "../../../fused_deep_moe_base.h"
 
 constexpr uint32_t STATE_OFFSET = 512;
 constexpr uint64_t WIN_STATE_OFFSET = 512 * 1024;
-constexpr uint64_t STATE_WIN_OFFSET = 900 * 1024;
 constexpr uint64_t GROUP_TOKEN_NUM_OFFSET = 932 * 1024;
 constexpr uint64_t SOFT_SYNC_OFFSET = 964 * 1024;
 constexpr uint64_t SHARE_QUANT_SOFT_SYNC_OFFSET = 988 * 1024;
@@ -65,7 +65,7 @@ constexpr uint32_t QUANT_SPACE_FACTOR = 176 * 1024 / 11;  // up to 176KB for qua
     #pragma message("FusedDeepMoe kernel: USE_RECV_CORE_FOR_SHARE_SWIGLU")
 #endif
 
-using namespace Cam;
+using namespace Moe;
 namespace Catlass::Gemm::Kernel {
 
 template <class ArchTag>
@@ -416,6 +416,7 @@ public:
         GM_ADDR debugGm;
         GM_ADDR gmexpertIds;
         GM_ADDR gmXActiveMask;
+        GM_ADDR commArgs;
         GM_ADDR gmShareX1;
         GM_ADDR gmShareX1Scale;
         GM_ADDR gmShareSwigluOut;
@@ -452,7 +453,7 @@ public:
                LayoutPerTokenScale const &layoutPerTokenScale_, GM_ADDR ptrOutput_, LayoutOutput const &layoutOutput_,
                GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_,
                GM_ADDR gmX_, GM_ADDR debugGm_, GM_ADDR gmexpertIds_, GM_ADDR gmExpandIdx_, GM_ADDR gmEpSendCount_,
-               GM_ADDR gmXActiveMask_, GM_ADDR gmResvered_, GM_ADDR gmExpertTokenNums_,
+               GM_ADDR gmXActiveMask_, GM_ADDR commArgs_, GM_ADDR gmResvered_, GM_ADDR gmExpertTokenNums_,
                GM_ADDR gmShareX1_, GM_ADDR gmShareX1Scale_, GM_ADDR gmShareSwigluOut_, GM_ADDR gmShareX2_, LayoutOutput const &layoutShareOutput_, GM_ADDR gmShareX2Scale_, GM_ADDR gmSwigluOut_,
                const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
             : problemShape(problemShape_),
@@ -482,6 +483,7 @@ public:
               gmEpSendCount(gmEpSendCount_),
               gmExpertTokenNums(gmExpertTokenNums_),
               gmXActiveMask(gmXActiveMask_),
+              commArgs(commArgs_),
               gmResvered(gmResvered_),
               gmShareX1(gmShareX1_),
               gmShareX1Scale(gmShareX1Scale_),
@@ -530,18 +532,27 @@ public:
 
     __aicore__ inline GM_ADDR GetWindStateAddrByRankId(int64_t rankId)
     {
+#if ENABLE_CAM_COMM
+        return ((GM_ADDR)epWinContext_.GetValue(rankId) + dataState * WIN_STATE_OFFSET);
+#else
         return ((epRankId == rankId)
                 ? ((GM_ADDR)(winContext_->localWindowsExp))
                 : ((GM_ADDR)(((HcclRankRelationResV2 *)(winContext_->remoteRes[rankId].nextDevicePtr))->windowsExp))) +
             dataState * WIN_STATE_OFFSET;
+#endif
     }
 
     __aicore__ inline GM_ADDR GetWindAddrByRankId(int64_t rankId)
     {
+#if ENABLE_CAM_COMM
+        return ((GM_ADDR)epWinContext_.GetValue(rankId) + Moe::IPC_DATA_OFFSET + winDataSizeOffset +
+                rankId * OPT_RANK_OFFSET);
+#else
         return (((epRankId == rankId)
                 ? ((GM_ADDR)(winContext_->localWindowsIn))
                 : ((GM_ADDR)(((HcclRankRelationResV2 *)(winContext_->remoteRes[rankId].nextDevicePtr))->windowsIn))) +
             winDataSizeOffset + rankId * OPT_RANK_OFFSET);
+#endif
     }
 
     template <>
@@ -564,10 +575,16 @@ public:
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             shareQuantCoreNum = recvCoreNum;
         }
+#if ENABLE_CAM_COMM
+        epWinContext_.SetGlobalBuffer(
+            &(reinterpret_cast<__gm__ Moe::CommArgs *>(params.commArgs))->peerMems[0], Moe::CAM_MAX_RANK_SIZE);
+        statusDataSpaceGm = (GM_ADDR)epWinContext_.GetValue(params.epRankId);
+#else
         winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
+        statusDataSpaceGm = (GM_ADDR)(winContext_->localWindowsExp);
+#endif
 
         // state of cv flag
-        statusDataSpaceGm = (GM_ADDR)(winContext_->localWindowsExp);
         AscendC::GlobalTensor<int32_t> selfDataStatusTensor;
         selfDataStatusTensor.SetGlobalBuffer((__gm__ int32_t *)(statusDataSpaceGm + STATE_WIN_OFFSET));
         __asm__ __volatile__("");
@@ -1788,8 +1805,14 @@ public:
 
         stateOffset = STATE_OFFSET;
         expertPerSizeOnWin = maxAxisBs * tokenLength * sizeof(XType);
+#if ENABLE_CAM_COMM
+        epWinContext_.SetGlobalBuffer(
+            &(reinterpret_cast<__gm__ Moe::CommArgs *>(params.commArgs))->peerMems[0], Moe::CAM_MAX_RANK_SIZE);
+        statusDataSpaceGm = (GM_ADDR)epWinContext_.GetValue(params.epRankId);
+#else
         winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
         statusDataSpaceGm = (GM_ADDR)(winContext_->localWindowsExp);
+#endif
     }
 
     CATLASS_DEVICE
@@ -2213,6 +2236,7 @@ private:
     float sumTarget{0.0};
 
     // memory info
+    AscendC::GlobalTensor<GM_ADDR> epWinContext_;
     __gm__ HcclOpResParam *winContext_;
     GM_ADDR statusDataSpaceGm;
     uint32_t stateOffset{0};

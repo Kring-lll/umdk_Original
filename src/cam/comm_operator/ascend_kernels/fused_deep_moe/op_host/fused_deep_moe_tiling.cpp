@@ -19,7 +19,7 @@
 #include "../op_kernel/fused_deep_moe_tiling.h"
 
 using namespace ge;
-using namespace Cam;
+using namespace Moe;
 using namespace Util;
 namespace {
 constexpr uint32_t OP_TYPE_ALL_TO_ALL = 8;

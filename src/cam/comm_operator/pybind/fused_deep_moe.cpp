@@ -37,6 +37,7 @@ TensorVector FusedDeepMoeImplNpu(
     const c10::optional<at::Tensor> &shareGmm2WeightScaleOptional, \
     const c10::optional<at::Tensor> &expertSmoothScales, \
     const c10::optional<at::Tensor> &xActiveMask, \
+    const c10::optional<at::Tensor> &commArgs, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
     int64_t epRankId, \
@@ -77,7 +78,7 @@ TensorVector FusedDeepMoeImplNpu(
         expertScales, \
         shareGmm1PermutedWeightOptional, shareGmm1PermutedWeightScaleOptional, \
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
-        expertSmoothScales, xActiveMask, \
+        expertSmoothScales, xActiveMask, commArgs, \
         // attr
         groupEpPtr, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs, \
         // output
@@ -105,6 +106,7 @@ TensorVector FusedDeepMoeImplMeta(
     const c10::optional<at::Tensor> &shareGmm2WeightScaleOptional, \
     const c10::optional<at::Tensor> &expertSmoothScales, \
     const c10::optional<at::Tensor> &xActiveMask, \
+    const c10::optional<at::Tensor> &commArgs, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
     int64_t epRankId, \
@@ -147,6 +149,7 @@ TensorVector FusedDeepMoeImpl(
     const c10::optional<at::Tensor> &shareGmm2WeightScaleOptional, \
     const c10::optional<at::Tensor> &expertSmoothScales, \
     const c10::optional<at::Tensor> &xActiveMask, \
+    const c10::optional<at::Tensor> &commArgs, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
     int64_t epRankId, \
@@ -163,7 +166,7 @@ TensorVector FusedDeepMoeImpl(
         expertScales, \
         shareGmm1PermutedWeightOptional, shareGmm1PermutedWeightScaleOptional, \
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
-        expertSmoothScales, xActiveMask, \
+        expertSmoothScales, xActiveMask, commArgs, \
         groupEp, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs);
 }
 
@@ -184,6 +187,7 @@ public:
                             const c10::optional<at::Tensor> &shareGmm2WeightScaleOptional, \
                             const c10::optional<at::Tensor> &expertSmoothScales, \
                             const c10::optional<at::Tensor> &xActiveMask, \
+                            const c10::optional<at::Tensor> &commArgs, \
                             c10::string_view groupEp, \
                             int64_t epRankSize, \
                             int64_t epRankId, \
@@ -198,7 +202,7 @@ public:
             gmm2WeightScale, expertScales, \
             shareGmm1PermutedWeightOptional, shareGmm1PermutedWeightScaleOptional, \
             shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
-            expertSmoothScales, xActiveMask, \
+            expertSmoothScales, xActiveMask, commArgs, \
             groupEp, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs);
         return result;
     }
@@ -237,6 +241,7 @@ TensorVector FusedDeepMoeImplAutograd(
     const c10::optional<at::Tensor> &shareGmm2WeightScaleOptional, \
     const c10::optional<at::Tensor> &expertSmoothScales, \
     const c10::optional<at::Tensor> &xActiveMask, \
+    const c10::optional<at::Tensor> &commArgs, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
     int64_t epRankId, \
@@ -250,7 +255,7 @@ TensorVector FusedDeepMoeImplAutograd(
             gmm2WeightScale, expertScales, \
             shareGmm1PermutedWeightOptional, shareGmm1PermutedWeightScaleOptional, \
             shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
-            expertSmoothScales, xActiveMask, \
+            expertSmoothScales, xActiveMask, commArgs, \
             groupEp, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs);
         return result;
 }
