@@ -14,8 +14,9 @@
 #include "kernel_tiling/kernel_tiling.h"
 #include "../../fused_deep_moe_base.h"
 #include "../../fused_deep_moe_tiling.h"
+#include "../../comm_args.h"
 
-using namespace Cam;
+using namespace Moe;
 namespace MoeDistributeCombineImpl {
 constexpr uint8_t BUFFER_NUM = 2;  // multi-buf
 constexpr uint32_t STATE_OFFSET = 512;
@@ -28,7 +29,6 @@ constexpr uint32_t SELF_STATE_OFFSET = 256 * 1024;
 constexpr uint8_t EP_DOMAIN = 0;
 constexpr uint8_t TP_DOMAIN = 1;
 constexpr uint64_t WIN_STATE_OFFSET = 512 * 1024;
-constexpr uint64_t STATE_WIN_OFFSET = 900 * 1024;
 constexpr uint16_t SEND_SYNC_EVENT_ID = 9;
 constexpr uint16_t RECV_SYNC_EVENT_ID = 10;
 
@@ -52,7 +52,11 @@ struct CombineCalcInfo {
     uint32_t moeSendNum_;
     bool isShardExpert_;
     GM_ADDR epSendCount_;
+#if ENABLE_CAM_COMM
+    AscendC::GlobalTensor<GM_ADDR> epWinContext_;
+#else
     __gm__ HcclOpResParam *epWinContext_;
+#endif
     uint64_t winDataSizeOffset_;
 };
 
@@ -61,7 +65,7 @@ class CamMoeDistributeCombine {
 public:
     __aicore__ inline CamMoeDistributeCombine(){};
     __aicore__ inline void Init(GM_ADDR expandX, GM_ADDR expertIds, GM_ADDR expandIdx, GM_ADDR epSendCount,
-                                GM_ADDR tpSendCount, GM_ADDR scales, GM_ADDR xActiveMask, GM_ADDR XOut,
+                                GM_ADDR tpSendCount, GM_ADDR scales, GM_ADDR xActiveMask, GM_ADDR commArgs, GM_ADDR XOut,
                                 GM_ADDR workspaceGM, TPipe *pipe, const FusedDeepMoeTilingData *tilingData);
     __aicore__ inline void Process();
     __aicore__ inline void AllToAllSend();
@@ -95,6 +99,10 @@ private:
     __aicore__ inline void WaitDispatch();
     __aicore__ GM_ADDR GetWinAddrByRankId(const int32_t rankId, const uint8_t domain, const uint8_t expertLocalId = 0U)
     {
+#if ENABLE_CAM_COMM
+        return (GM_ADDR)epWinContext_.GetValue(rankId) + Moe::IPC_DATA_OFFSET + winDataSizeOffset_ +
+               expertLocalId * expertPerSizeOnWin_ + rankId * OPT_RANK_OFFSET;
+#else
         if (domain == EP_DOMAIN) {
             return (GM_ADDR)((epRankId_ == rankId)
                                  ? epWinContext_->localWindowsIn
@@ -108,10 +116,14 @@ private:
                                        ->windowsIn) +
                    winDataSizeOffset_ + rankId * OPT_RANK_OFFSET;
         }
+#endif
     }
 
     __aicore__ GM_ADDR GetWinStateAddrByRankId(const int32_t rankId, const uint8_t domain)
     {
+#if ENABLE_CAM_COMM
+        return (GM_ADDR)epWinContext_.GetValue(rankId) + dataState_ * WIN_STATE_OFFSET;
+#else
         if (domain == EP_DOMAIN) {
             return (GM_ADDR)((epRankId_ == rankId)
                                  ? epWinContext_->localWindowsExp
@@ -125,6 +137,7 @@ private:
                                        ->windowsExp) +
                    dataState_ * WIN_STATE_OFFSET;
         }
+#endif
     }
 
     __aicore__ inline uint32_t MIN(uint32_t x, uint32_t y)
@@ -188,8 +201,13 @@ private:
     uint32_t firstTpTokenEndIdx_{0};
     uint32_t firstTpTokenEndOffset_{0};
     uint32_t endTok_{0};
+#if ENABLE_CAM_COMM
+    AscendC::GlobalTensor<GM_ADDR> epWinContext_;
+    AscendC::GlobalTensor<GM_ADDR> tpWinContext_;
+#else
     __gm__ HcclOpResParam *epWinContext_{nullptr};
     __gm__ HcclOpResParam *tpWinContext_{nullptr};
+#endif
     uint32_t epDataOffsetOnWin_{0};
     uint32_t tpDataOffsetOnWin_{0};
     uint32_t epStateOffsetOnWin_{0};
@@ -238,15 +256,21 @@ private:
 template <TemplateMC2TypeClass>
 __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     GM_ADDR expandX, GM_ADDR expertIds, GM_ADDR expandIdx, GM_ADDR epSendCount, GM_ADDR tpSendCount, GM_ADDR scales,
-    GM_ADDR xActiveMask, GM_ADDR XOut, GM_ADDR workspaceGM, TPipe *pipe, const FusedDeepMoeTilingData *tilingData)
+    GM_ADDR xActiveMask, GM_ADDR commArgs, GM_ADDR XOut, GM_ADDR workspaceGM, TPipe *pipe, const FusedDeepMoeTilingData *tilingData)
 {
     tpipe_ = pipe;
     coreIdx_ = GetBlockIdx();
     epRankId_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
+#if ENABLE_CAM_COMM
+    epWinContext_.SetGlobalBuffer(
+            &(reinterpret_cast<__gm__ Moe::CommArgs *>(commArgs))->peerMems[0], Moe::CAM_MAX_RANK_SIZE);
+    GM_ADDR statusDataSpaceGm = (GM_ADDR)epWinContext_.GetValue(epRankId_);
+#else
     auto contextGM0 = AscendC::GetHcclContext<HCCL_GROUP_ID_0>();
     epWinContext_ = (__gm__ HcclOpResParam *)contextGM0;
-    GlobalTensor<int32_t> selfDataStatusTensor;
     GM_ADDR statusDataSpaceGm = (GM_ADDR)epWinContext_->localWindowsExp;
+#endif
+    GlobalTensor<int32_t> selfDataStatusTensor;
     selfDataStatusTensor.SetGlobalBuffer((__gm__ int32_t *)(statusDataSpaceGm + STATE_WIN_OFFSET));
     __asm__ __volatile__("");
     DataCacheCleanAndInvalid<int32_t, CacheLine::SINGLE_CACHE_LINE, DcciDst::CACHELINE_OUT>(

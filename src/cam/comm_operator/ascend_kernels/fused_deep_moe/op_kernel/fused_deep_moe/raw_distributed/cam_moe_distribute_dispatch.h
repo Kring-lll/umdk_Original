@@ -15,8 +15,9 @@
 #include "kernel_tiling/kernel_tiling.h"
 #include "../../fused_deep_moe_base.h"
 #include "../../fused_deep_moe_tiling.h"
+#include "../../comm_args.h"
 
-using namespace Cam;
+using namespace Moe;
 namespace MoeDistributeDispatchImpl {
 constexpr uint8_t BUFFER_NUM = 2;
 constexpr uint32_t STATE_OFFSET = 512;        // state space offset
@@ -29,7 +30,6 @@ constexpr uint8_t COMM_EP_IDX = 0;
 constexpr uint8_t COMM_TP_IDX = 1;
 constexpr uint32_t GATHER_NUM_PER_TIME = 6;
 constexpr uint64_t WIN_STATE_OFFSET = 512 * 1024;
-constexpr uint64_t STATE_WIN_OFFSET = 900 * 1024;
 constexpr uint32_t TP_STATE_SIZE = 100 * 1024;
 
 // loop optimization
@@ -53,7 +53,7 @@ template <TemplateDispatchTypeClass>
 class CamMoeDistributeDispatch {
 public:
     __aicore__ inline CamMoeDistributeDispatch(){};
-    __aicore__ inline void Init(GM_ADDR x, GM_ADDR expertIds, GM_ADDR scales, GM_ADDR shareX1Token, GM_ADDR xActiveMask,
+    __aicore__ inline void Init(GM_ADDR x, GM_ADDR expertIds, GM_ADDR scales, GM_ADDR shareX1Token, GM_ADDR xActiveMask, GM_ADDR commArgs,
                                 GM_ADDR expandXOut, GM_ADDR shareX1Scale, GM_ADDR dynamicScalesOut, GM_ADDR expandIdxOut,
                                 GM_ADDR expertTokenNumsOut, GM_ADDR sendCountsOut, GM_ADDR expertTokenNums,
                                 GM_ADDR tpSendCountsOut, GM_ADDR workspaceGM, TPipe *pipe,
@@ -84,16 +84,24 @@ private:
     __aicore__ inline void UpdataTokenNumsOut();
     __aicore__ inline GM_ADDR GetWindAddrByRankId(uint8_t ctxIdx, const int32_t rankId)
     {
+#if ENABLE_CAM_COMM
+        return (GM_ADDR)winContext_[ctxIdx].GetValue(rankId) + Moe::IPC_DATA_OFFSET + winDataSizeOffset_ +
+               rankId * OPT_RANK_OFFSET;
+#else
         uint32_t curRankId = ctxIdx == COMM_EP_IDX ? epRankId_ : tpRankId_;
         if (curRankId == rankId) {
             return (GM_ADDR)(winContext_[ctxIdx]->localWindowsIn) + winDataSizeOffset_ + rankId * OPT_RANK_OFFSET;
         }
         return (GM_ADDR)(((HcclRankRelationResV2 *)(winContext_[ctxIdx]->remoteRes[rankId].nextDevicePtr))->windowsIn) +
                winDataSizeOffset_ + rankId * OPT_RANK_OFFSET;
+#endif
     }
 
     __aicore__ inline GM_ADDR GetWindStateAddrByRankId(uint8_t ctxIdx, const int32_t rankId)
     {
+#if ENABLE_CAM_COMM
+        return (GM_ADDR)winContext_[ctxIdx].GetValue(rankId) + dataState_ * WIN_STATE_OFFSET;
+#else
         uint32_t curRankId = ctxIdx == COMM_EP_IDX ? epRankId_ : tpRankId_;
         if (curRankId == rankId) {
             return (GM_ADDR)(winContext_[ctxIdx]->localWindowsExp) + dataState_ * WIN_STATE_OFFSET;
@@ -101,6 +109,7 @@ private:
         return (GM_ADDR)(((HcclRankRelationResV2 *)(winContext_[ctxIdx]->remoteRes[rankId].nextDevicePtr))
                              ->windowsExp) +
                dataState_ * WIN_STATE_OFFSET;
+#endif
     }
 
     __aicore__ inline uint32_t MIN(uint32_t x, uint32_t y)
@@ -212,7 +221,11 @@ private:
     uint32_t gatherCount_{0};
     uint32_t expertTokenNumsType_{1};
     uint32_t preCnt_{0};
+#if ENABLE_CAM_COMM
+    AscendC::GlobalTensor<GM_ADDR> winContext_[COMM_NUM];
+#else
     __gm__ HcclOpResParam *winContext_[COMM_NUM]{nullptr, nullptr};
+#endif
     // loop optimization
     TBuf<> sendTableIdsBuf_;
     LocalTensor<countType> tableLocalTensor_;
@@ -225,7 +238,7 @@ private:
 
 template <TemplateDispatchTypeClass>
 __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
-    GM_ADDR x, GM_ADDR expertIds, GM_ADDR scales, GM_ADDR xActiveMask, GM_ADDR shareX1Token, GM_ADDR expandXOut,
+    GM_ADDR x, GM_ADDR expertIds, GM_ADDR scales, GM_ADDR xActiveMask, GM_ADDR commArgs, GM_ADDR shareX1Token, GM_ADDR expandXOut,
     GM_ADDR shareX1Scale, GM_ADDR dynamicScalesOut, GM_ADDR expandIdxOut, GM_ADDR expertTokenNumsOut,
     GM_ADDR sendCountsOut, GM_ADDR expertTokenNums, GM_ADDR tpSendCountsOut, GM_ADDR workspaceGM, TPipe *pipe,
     const FusedDeepMoeTilingData *tilingData)
@@ -236,10 +249,18 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
     GlobalTensor<int32_t> selfDataStatusTensor;
     GM_ADDR statusDataSpaceGm;
 
+#if ENABLE_CAM_COMM
+    winContext_[COMM_EP_IDX].SetGlobalBuffer(
+        &(reinterpret_cast<__gm__ Moe::CommArgs *>(commArgs))->peerMems[0], Moe::CAM_MAX_RANK_SIZE);
+    winContext_[COMM_TP_IDX].SetGlobalBuffer(
+        &(reinterpret_cast<__gm__ Moe::CommArgs *>(commArgs))->peerMems[0], Moe::CAM_MAX_RANK_SIZE);
+    statusDataSpaceGm = (GM_ADDR)(winContext_[COMM_EP_IDX].GetValue(epRankId_));
+#else
     winContext_[COMM_EP_IDX] = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<HCCL_GROUP_ID_0>();
     winContext_[COMM_TP_IDX] = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<1>();
-
     statusDataSpaceGm = (GM_ADDR)(winContext_[COMM_EP_IDX]->localWindowsExp);
+#endif
+
     selfDataStatusTensor.SetGlobalBuffer((__gm__ int32_t *)(statusDataSpaceGm + STATE_WIN_OFFSET));
 
     __asm__ __volatile__("");

@@ -13,7 +13,7 @@
 #include <cstdint>
 #include "kernel_tiling/kernel_tiling.h"
 
-namespace Cam {
+namespace Moe {
 struct FusedDeepMoeInfo {
     uint32_t epRankSize;           // epRankSize
     uint32_t epRankId;             // epRankId
@@ -76,5 +76,6 @@ constexpr uint32_t EXEC_FLAG_DEEP_FUSE = (1U << 0);
 constexpr uint32_t EXEC_FLAG_TENSOR_LIST = (1U << 1);
 constexpr uint32_t EXEC_FLAG_X_ACTIVE_MASK = (1U << 2);
 constexpr uint32_t EXEC_FLAG_SHARED_EXPERT = (1U << 3);
-} // namespace Cam
+#define ENABLE_CAM_COMM 1
+} // namespace Moe
 #endif  // FUSED_DEEP_MOE_TILING_H
