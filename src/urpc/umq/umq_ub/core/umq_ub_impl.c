@@ -1581,6 +1581,34 @@ int umq_ub_dev_info_get_impl(char *dev_name, umq_trans_mode_t umq_trans_mode, um
     return UMQ_SUCCESS;
 }
 
+int umq_ub_dev_info_list_get_impl(umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq_dev_info, int dev_num)
+{
+    int i, ret, urma_dev_num = 0;
+    if (umq_dev_info == NULL || dev_num == 0) {
+        UMQ_VLOG_ERR("invalid parameter\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    urma_device_t **urma_dev = urma_get_device_list(&urma_dev_num);
+    if (urma_dev == NULL || urma_dev_num == 0) {
+        return 0;
+    }
+
+    for (i = 0; i < urma_dev_num && i < dev_num; i++) {
+        (void)strcpy(umq_dev_info[i].dev_name, urma_dev[i]->name);
+        umq_dev_info[i].umq_trans_mode = umq_trans_mode;
+        umq_dev_info[i].ub.eid_cnt = 0;
+        ret = umq_ub_dev_info_get_impl(umq_dev_info[i].dev_name, umq_trans_mode, &umq_dev_info[i]);
+        if (ret != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR("get dev info for dev: %s failed, ret %d\n", umq_dev_info[i].dev_name, ret);
+        }
+    }
+
+    urma_free_device_list(urma_dev);
+
+    return i;
+}
+
 int umq_ub_cfg_get_impl(uint64_t umqh_tp, umq_cfg_get_t *cfg)
 {
     if (cfg == NULL) {
