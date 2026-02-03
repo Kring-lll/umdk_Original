@@ -1,0 +1,27 @@
+From 5b7001a505dec552804ecb38436a355a7b87b898 Mon Sep 17 00:00:00 2001
+From: Wen Chen <chenwen54@huawei.com>
+Date: Tue, 3 Feb 2026 12:05:13 +0800
+Subject: [PATCH] urma: support for ipoverurma
+
+---
+ src/urma/lib/urma/core/include/urma_types.h | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/urma/lib/urma/core/include/urma_types.h b/src/urma/lib/urma/core/include/urma_types.h
+index a4997df..f39ed99 100644
+--- a/src/urma/lib/urma/core/include/urma_types.h
++++ b/src/urma/lib/urma/core/include/urma_types.h
+@@ -157,7 +157,9 @@ typedef union urma_device_feature {
+         uint32_t mn                    : 1; /* [Public] for user tp */
+         uint32_t clan                  : 1; /* [Public] for user tp */
+         uint32_t muti_seg_per_token_id : 1;
+-        uint32_t reserved              : 15;
++        uint32_t ipourma_en            : 1;
++        uint32_t ctp_en                : 1;
++        uint32_t reserved              : 13;
+     } bs;
+     uint32_t value;
+ } urma_device_feature_t;
+-- 
+2.28.0.windows.1
+
