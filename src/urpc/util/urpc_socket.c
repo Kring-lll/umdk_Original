@@ -165,11 +165,11 @@ bool urpc_socket_check_connected(int fd)
     int error = 0;
     socklen_t len = (socklen_t)sizeof(error);
     if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &len) < 0) {
-        UTIL_LOG_ERR("failed to get sock option err: %s\n", strerror(errno));
+        UTIL_LOG_ERR("failed to get sock option error: %s\n", strerror(errno));
         return false;
     }
     if (error != 0) {
-        UTIL_LOG_ERR("socket err: %s\n", strerror(error));
+        UTIL_LOG_ERR("socket error: %s\n", strerror(error));
         return false;
     }
     return true;

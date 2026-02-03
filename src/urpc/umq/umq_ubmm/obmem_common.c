@@ -123,7 +123,7 @@ int obmem_release_export_memory(uint64_t handle, void *ptr, uint64_t len)
 
 void *obmem_import_memory(obmem_import_memory_param_t *import_param, obmem_export_info_t *exp, uint64_t *handle)
 {
-    UMQ_VLOG_INFO(VLOG_UMQ, "Enter obmem_import_memory\n");
+    UMQ_VLOG_INFO(VLOG_UMQ, "enter obmem_import_memory\n");
     void *ptr = NULL;
     mem_id memid = 0;
     unsigned long flags = OBMM_IMPORT_FLAG_ALLOW_MMAP;
