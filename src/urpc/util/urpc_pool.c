@@ -95,8 +95,9 @@ int urpc_pool_init(urpc_pool_config_t *cfg, urpc_pool_t *pool)
         return -EINVAL;
     }
 
-    if (URPC_UNLIKELY(urpc_pool_id_get(&id) != 0)) {
-        UTIL_LOG_ERR("malloc urpc pool id failed\n");
+    int ret = urpc_pool_id_get(&id);
+    if (URPC_UNLIKELY(ret != 0)) {
+        UTIL_LOG_ERR("malloc urpc pool id failed, status: %d\n", ret);
         return -ENOMEM;
     }
 
@@ -217,9 +218,10 @@ void *urpc_pool_element_get(urpc_pool_t *pool)
 void urpc_pool_element_put(urpc_pool_t *pool, void *element)
 {
     // may put 1 element which is fetched by other thread, and local is not initialized yet
-    if (URPC_UNLIKELY(urpc_pool_local_init(pool) != 0)) {
+    int ret = urpc_pool_local_init(pool);
+    if (URPC_UNLIKELY(ret != 0)) {
         // element will be freed when urpc_pool_uninit
-        UTIL_LIMIT_LOG_ERR("put pool element failed\n");
+        UTIL_LIMIT_LOG_ERR("put pool element failed, status: %u\n", ret);
         return;
     }
 
