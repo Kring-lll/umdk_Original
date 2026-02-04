@@ -170,7 +170,7 @@ int umq_perf_start(uint64_t *thresh_array, uint32_t thresh_num)
 {
     // IO perf record has been started, user must stop it first before restart
     if (g_umq_perf_record_ctx == NULL || g_umq_perf_record_enable || thresh_array == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "parameter invalid\n");
+        UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
         return -UMQ_ERR_EINVAL;
     }
 
@@ -230,7 +230,7 @@ int umq_perf_clear(void)
         g_umq_perf_record_ctx->perf_record_msg = NULL;
     }
     (void)pthread_mutex_unlock(&g_umq_perf_record_ctx->lock);
-    UMQ_VLOG_INFO(VLOG_UMQ, "IO perf record clear\n");
+    UMQ_VLOG_INFO(VLOG_UMQ, "IO perf record cleared\n");
     return UMQ_SUCCESS;
 }
 
