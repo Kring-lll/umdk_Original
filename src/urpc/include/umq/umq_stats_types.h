@@ -1,0 +1,74 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
+ * Description: Public header file of UMQ function types
+ * Create: 2026-2-4
+ * Note:
+ * History: 2026-2-4
+ */
+
+#ifndef UMQ_STATS_TYPES_H
+#define UMQ_STATS_TYPES_H
+#include <stdbool.h>
+#include <stdlib.h>
+#include <stdint.h>
+
+#include "umq_types.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define UMQ_STATS_QBUF_POOL_TYPE_MAX 16
+
+typedef struct umq_packet_state {
+    uint64_t send_cnt;
+    uint64_t send_success;
+    uint64_t recv_cnt;
+    uint64_t send_error_cnt;
+    uint64_t recv_error_cnt;
+} umq_packet_state_t;
+
+typedef struct umq_qbuf_pool_stats {
+    umq_qbuf_pool_info_t qbuf_pool_stats[UMQ_STATS_QBUF_POOL_TYPE_MAX];
+    uint32_t num;
+} umq_qbuf_pool_stats_t;
+
+typedef struct umq_info_stats {
+    umq_trans_mode_t trans_mode;
+    union {
+        struct {
+            uint32_t umq_id;
+            umq_eid_info_t eid;
+            char dev_name[UMQ_DEV_NAME_SIZE];
+            uint32_t local_io_jetty_id;
+            uint32_t local_fc_jetty_id;
+            uint32_t remote_io_jetty_id;
+            uint32_t remote_fc_jetty_id;
+        } ub;
+    };
+} umq_info_stats_t;
+
+#define UMQ_PERF_QUANTILE_MAX_NUM (8u)
+
+typedef struct umq_perf_stats {
+    struct {
+        uint64_t accumulation;
+        uint64_t min;
+        uint64_t max;
+        uint64_t cnt;
+        uint64_t bucket[UMQ_PERF_QUANTILE_MAX_NUM + 1];
+    } type_record[UMQ_PERF_RECORD_TYPE_MAX];
+    bool is_used;
+} umq_perf_stats_t;
+
+typedef struct umq_perf_stats_cfg {
+    uint64_t thresh_array[UMQ_PERF_QUANTILE_MAX_NUM];
+    uint32_t thresh_num;
+} umq_perf_stats_cfg_t;
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
