@@ -254,7 +254,7 @@ static int urpc_timer_pool_init(void)
 {
     int ret = urpc_hmap_init(&g_urpc_timing_wheel.pool, URPC_TIMER_HMAP_SIZE);
     if (ret != URPC_SUCCESS) {
-        UTIL_LOG_ERR("timer pool hmap init failed\n");
+        UTIL_LOG_ERR("timer pool hmap init failed, status: %d\n", ret);
         return URPC_FAIL;
     }
 
