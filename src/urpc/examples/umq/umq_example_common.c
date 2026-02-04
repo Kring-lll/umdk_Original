@@ -71,9 +71,46 @@ uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bin
         goto FREE_CFG;
     }
 
-    if (umq_init(init_cfg) != UMQ_SUCCESS) {
+#ifndef EID_FMT
+#define EID_FMT "%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x"
+#endif
+
+#ifndef EID_RAW_ARGS
+#define EID_RAW_ARGS(eid)                                                                                              \
+    eid[0], eid[1], eid[2], eid[3], eid[4], eid[5], eid[6], eid[7], eid[8], eid[9], eid[10], eid[11], eid[12],         \
+        eid[13], eid[14], eid[15]
+#endif
+
+#ifndef EID_ARGS
+#define EID_ARGS(eid) EID_RAW_ARGS((eid).raw)
+#endif
+
+    umq_init_cfg_t tmp;
+    memcpy(&tmp, init_cfg, sizeof(tmp));
+    tmp.trans_info_num = 1;
+    tmp.trans_info[0].dev_info.assign_mode = UMQ_DEV_ASSIGN_MODE_DUMMY;
+
+    if (umq_init(&tmp) != UMQ_SUCCESS) {
         LOG_PRINT_ERR("umq_init failed\n");
         goto FREE_CFG;
+    }
+
+    int cnt = 0;
+    umq_dev_info_t *info = umq_dev_info_list_get(tmp.trans_info[0].trans_mode, &cnt);
+    if (info != NULL) {
+        for (int i = 0; i < cnt; i++) {
+            LOG_PRINT_ERR("dev %d: %s\n", i, info[i].dev_name);
+            for (uint32_t j = 0; j < info[i].ub.eid_cnt; j++) {
+                LOG_PRINT_ERR("eid %d: " EID_FMT "\n", info[i].ub.eid_list[j].eid_index,
+                              EID_ARGS(info[i].ub.eid_list[j].eid));
+            }
+        }
+    }
+
+    umq_dev_info_list_free(tmp.trans_info[0].trans_mode, info);
+
+    if (umq_dev_add(&init_cfg->trans_info[0]) != 0) {
+        LOG_PRINT_ERR("umq_init failed\n");
     }
 
     umq_create_option_t option = {
