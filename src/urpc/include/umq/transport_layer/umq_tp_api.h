@@ -236,16 +236,6 @@ typedef struct umq_ops {
     int (*umq_tp_get_topo)(const umq_route_t *route, umq_route_list_t *route_list);
 
     /**
-     * Thread safety function
-     * User defined control of the context.
-     * @param[in] umqh_tp: umq tp handle
-     * @param[in] in: user ctl cmd
-     * @param[out] out: result of excution
-     * Return 0 on success, error code on failure
-     */
-    int (*umq_tp_user_ctl)(uint64_t umqh_tp, umq_user_ctl_in_t *in, umq_user_ctl_out_t *out);
-
-    /**
      * Get mempool config.
      * @param[in] umqh_tp: umq tp handle
      * @param[in] mempool_id: mempool id, the ID of the memory pool from which the buffer was obtained
