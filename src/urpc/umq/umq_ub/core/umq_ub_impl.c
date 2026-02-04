@@ -1388,7 +1388,6 @@ int ubmm_fill_ref_sge_info(uint64_t umqh_tp, umq_buf_t *qbuf, char *ub_ref_info,
             UMQ_LIMIT_VLOG_ERR("rendezvoud buf count exceed max support count[%u]\n", max_ref_sge_num);
             return UMQ_FAIL;
         }
-
         fill_big_data_ref_sge(
             queue, ref_sge, tmp_buf, &import_mempool_info[umq_imm_head->mempool_num], umq_imm_head);
         tmp_buf = tmp_buf->qbuf_next;

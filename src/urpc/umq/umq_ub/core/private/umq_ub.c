@@ -1903,7 +1903,6 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
             UMQ_LIMIT_VLOG_ERR("the buf num [%d] exceeds the maximum limit [%u]\n", buf_index, (uint32_t)ref_sge_num);
             goto FREE_BUF;
         }
-
         fill_big_data_ref_sge(
             queue, &ref_sge[buf_index], *buffer, &import_mempool_info[umq_imm_head->mempool_num], umq_imm_head);
 
