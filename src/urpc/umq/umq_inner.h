@@ -17,6 +17,7 @@
 #include "umq_pro_api.h"
 #include "umq_tp_api.h"
 #include "umq_pro_tp_api.h"
+#include "umq_tp_stats_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,6 +37,7 @@ typedef struct umq {
     umq_trans_mode_t mode;
     umq_ops_t *tp_ops;
     umq_pro_ops_t *pro_tp_ops;
+    umq_stats_ops_t *stats_ops;
     uint64_t umqh_tp;
 } umq_t;
 
