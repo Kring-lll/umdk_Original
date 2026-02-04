@@ -335,9 +335,18 @@ typedef struct umq_credit_private_stats {
     uint64_t rsvd[4];
 } umq_credit_private_stats_t;
 
+typedef struct umq_packet_state {
+    uint64_t send_cnt;
+    uint64_t send_success;
+    uint64_t recv_cnt;
+    uint64_t send_error_cnt;
+    uint64_t recv_error_cnt;
+} umq_packet_state_t;
+
 typedef struct umq_flow_control_stats {
     umq_credit_pool_stats_t pool_credit; // credit-related statistics of a main queue
     umq_credit_private_stats_t queue_credit; // credit-related statistics of a specific queue
+    umq_packet_state_t pcaket_state; 
 } umq_flow_control_stats_t;
 
 typedef enum umq_dfx_module_id {
