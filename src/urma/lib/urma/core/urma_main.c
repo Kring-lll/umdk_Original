@@ -37,6 +37,7 @@ static struct ub_list g_dev_list = UB_LIST_INITIALIZER(&g_dev_list);
 static uint32_t g_uasid;
 static pthread_spinlock_t g_dev_list_lock;
 static atomic_uint g_init_flag;
+static uint32_t g_urma_pid; /* process id, named as tgid in kernel */
 
 typedef struct urma_so {
     char path[URMA_MAX_LIB_PATH];
@@ -243,12 +244,14 @@ urma_status_t urma_init(urma_init_attr_t *conf)
     (void)pthread_spin_unlock(&g_dev_list_lock);
 
     atomic_fetch_add(&g_init_flag, 1);
+    g_urma_pid = (uint32_t)getpid();
     return URMA_SUCCESS;
 }
 
 urma_status_t urma_uninit(void)
 {
     urma_status_t ret = URMA_SUCCESS;
+    g_urma_pid = 0;
     if (atomic_load(&g_init_flag) == 0) {
         URMA_LOG_WARN("urma has not been initialized.\n");
         return ret;
@@ -275,6 +278,11 @@ urma_status_t urma_uninit(void)
 
     atomic_fetch_sub(&g_init_flag, 1);
     return ret;
+}
+
+uint32_t urma_get_pid(void)
+{
+    return g_urma_pid;
 }
 
 static urma_device_t **get_urma_device_list(int *num_devices)
