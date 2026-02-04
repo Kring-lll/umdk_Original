@@ -342,6 +342,8 @@ static void framework_uninit(void)
 {
     for (uint8_t fw_i = 0; fw_i < UMQ_TRANS_MODE_MAX; fw_i++) {
         umq_framework_t *umq_fw = &g_umq_fws[fw_i];
+        umq_fw->stats_tp_ops = NULL;
+        umq_fw->stats_ops_get_func = NULL;
         umq_fw->pro_tp_ops = NULL;
         umq_fw->pro_ops_get_func = NULL;
 
