@@ -97,8 +97,9 @@ uint8_t *umq_ubmm_ctx_init_impl(umq_init_cfg_t *cfg)
         return (uint8_t *)g_ubmm_ctx;
     }
 
-    if (util_id_allocator_init(&g_umq_id_allocator, UMQ_MAX_QUEUE_NUMBER, 0) != 0) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "id allocator init failed\n");
+    int ret = util_id_allocator_init(&g_umq_id_allocator, UMQ_MAX_QUEUE_NUMBER, 0);
+    if (ret != 0) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "id allocator init failed, status: %d\n", ret);
         return NULL;
     }
 
@@ -749,7 +750,7 @@ static ALWAYS_INLINE int dequeue_data(uint64_t umq, uint64_t *offset, uint32_t n
     int ret = msg_ring_poll_tx_batch(tp->bind_ctx->remote_msg_ring, (char **)&rx_data_ptr,
         sizeof(uint64_t), polled_buf_size, num);
     if (ret < 0) {
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "ipc poll rx failed\n");
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "ipc poll rx failed, status: %d\n", ret);
         return -UMQ_ERR_EAGAIN;
     }
 
@@ -785,8 +786,9 @@ umq_buf_t *umq_ubmm_plus_dequeue_impl(uint64_t umqh_tp)
             }
         };
         (void)umq_qbuf_headroom_reset(polled_buf, sizeof(umq_ubmm_ref_sge_info_t));
-        if (umq_ub_read(tp->ub_handle, polled_buf, imm_data) != UMQ_SUCCESS) {
-            UMQ_LIMIT_VLOG_DEBUG(VLOG_UMQ, "send read failed\n");
+        int ret = umq_ub_read(tp->ub_handle, polled_buf, imm_data);
+        if (ret != UMQ_SUCCESS) {
+            UMQ_LIMIT_VLOG_DEBUG(VLOG_UMQ, "send read failed, status: %d\n", ret);
             umq_buf_free(polled_buf);
         }
     } else {

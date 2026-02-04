@@ -185,6 +185,7 @@ static user_ctl_func g_umq_user_ctl_func[UMQ_TRANS_MODE_MAX] = {
 static int umq_fw_log_config_set(umq_log_config_t *config)
 {
     uint8_t fw_i = 0;
+    int ret = UMQ_SUCCESS;
     for (; fw_i < UMQ_TRANS_MODE_MAX; fw_i++) {
         umq_framework_t *umq_fw = &g_umq_fws[fw_i];
         if (!umq_fw->enable) {
@@ -194,8 +195,9 @@ static int umq_fw_log_config_set(umq_log_config_t *config)
             UMQ_VLOG_ERR(VLOG_UMQ, "umq_fw invalid\n");
             goto RESET_LOG;
         }
-        if (umq_fw->tp_ops->umq_tp_log_config_set(config) != UMQ_SUCCESS) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "log config set failed\n");
+        ret = umq_fw->tp_ops->umq_tp_log_config_set(config);
+        if (ret != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "log config set failed, status: %d\n", ret);
             goto RESET_LOG;
         }
     }
@@ -207,8 +209,9 @@ RESET_LOG:
         if (!umq_fw->enable) {
             continue;
         }
-        if (umq_fw->tp_ops->umq_tp_log_config_reset() != UMQ_SUCCESS) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "log config reset failed, j = %u\n", j);
+        ret = umq_fw->tp_ops->umq_tp_log_config_reset();
+        if (ret != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "log config reset failed, j = %u, status: %d\n", j, ret);
         }
     }
     return -UMQ_ERR_EINVAL;
@@ -331,7 +334,7 @@ static int load_symbol(void *handle, void **func, const char *symbol)
 {
     *func = dlsym(handle, symbol);
     if (*func == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "dlsym failed, err: %d\n", dlerror());
+        UMQ_VLOG_ERR(VLOG_UMQ, "dlsym failed, err: %s\n", dlerror());
         return UMQ_FAIL;
     }
     return UMQ_SUCCESS;
@@ -345,9 +348,9 @@ static int umq_framework_init(umq_framework_t *umq_fw, umq_init_cfg_t *cfg)
         return UMQ_FAIL;
     }
 
-    if (load_symbol(umq_fw->dlhandler,
-        (void **)&umq_fw->ops_get_func, umq_fw->ops_get_funcname) != UMQ_SUCCESS) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "load_symbol ops failed\n");
+    int ret = load_symbol(umq_fw->dlhandler, (void **)&umq_fw->ops_get_func, umq_fw->ops_get_funcname);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "load_symbol ops failed, status: %d\n", ret);
         goto CLONE_SO;
     }
 
@@ -359,7 +362,9 @@ static int umq_framework_init(umq_framework_t *umq_fw, umq_init_cfg_t *cfg)
 
     // register log func if needed
     if (g_umq_log_config.is_set && umq_fw->tp_ops->umq_tp_log_config_set != NULL) {
-        if (umq_fw->tp_ops->umq_tp_log_config_set(&g_umq_log_config.cfg) != UMQ_SUCCESS) {
+        ret = umq_fw->tp_ops->umq_tp_log_config_set(&g_umq_log_config.cfg);
+        if (ret != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "log config set failed, status: %d\n", ret);
             goto PUT_TP_OPS;
         }
     }
@@ -369,9 +374,9 @@ static int umq_framework_init(umq_framework_t *umq_fw, umq_init_cfg_t *cfg)
         goto RESET_LOG;
     }
 
-    if (load_symbol(umq_fw->dlhandler,
-        (void **)&umq_fw->pro_ops_get_func, umq_fw->pro_ops_get_funcname) != UMQ_SUCCESS) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "load_symbol pro_ops failed\n");
+    ret = load_symbol(umq_fw->dlhandler, (void **)&umq_fw->pro_ops_get_func, umq_fw->pro_ops_get_funcname);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "load_symbol pro_ops failed, status: %d\n", ret);
         goto UNINIT_UMQ_TP;
     }
 
@@ -433,9 +438,13 @@ int umq_init(umq_init_cfg_t *cfg)
         return -UMQ_ERR_EINVAL;
     }
 
-    if ((cfg->feature & UMQ_FEATURE_ENABLE_TOKEN_POLICY) != 0 && urpc_rand_seed_init() != 0) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "rand seed init failed\n");
-        return -UMQ_ERR_EINVAL;
+    int ret = 0;
+    if ((cfg->feature & UMQ_FEATURE_ENABLE_TOKEN_POLICY) != 0) {
+        ret = urpc_rand_seed_init();
+        if (ret != 0) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "rand seed init failed, status: %u\n", ret);
+            return -UMQ_ERR_EINVAL;
+        }
     }
 
     if (umq_buf_size_pow_small_set(cfg->block_cfg.small_block_size) != UMQ_SUCCESS) {
@@ -451,7 +460,6 @@ int umq_init(umq_init_cfg_t *cfg)
         g_umq_fws[info->trans_mode].enable = true;
     }
 
-    int ret = 0;
     for (uint8_t fw_i = 0; fw_i < UMQ_TRANS_MODE_MAX; fw_i++) {
         umq_framework_t *umq_fw = &g_umq_fws[fw_i];
         if (!umq_fw->enable) {
