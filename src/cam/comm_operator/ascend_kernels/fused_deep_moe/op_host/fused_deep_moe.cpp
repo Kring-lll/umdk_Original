@@ -23,12 +23,12 @@ public:
             .DataType({ge::DT_INT32, ge::DT_INT32})
             .Format({ge::FORMAT_ND, ge::FORMAT_ND})
             .UnknownShapeFormat({ge::FORMAT_ND, ge::FORMAT_ND});
-        this->Input("gmm1_permuted_weight")
+        this->Input("gmm1_weight")
             .ParamType(DYNAMIC)
             .DataType({ge::DT_INT8, ge::DT_INT8})
             .Format({ge::FORMAT_FRACTAL_NZ, ge::FORMAT_FRACTAL_NZ})
             .UnknownShapeFormat({ge::FORMAT_FRACTAL_NZ, ge::FORMAT_FRACTAL_NZ});
-        this->Input("gmm1_permuted_weight_scale")
+        this->Input("gmm1_weight_scale")
             .ParamType(DYNAMIC)
             .DataType({ge::DT_FLOAT, ge::DT_FLOAT})
             .Format({ge::FORMAT_ND, ge::FORMAT_ND})
@@ -48,12 +48,12 @@ public:
             .DataType({ge::DT_FLOAT, ge::DT_FLOAT})
             .Format({ge::FORMAT_ND, ge::FORMAT_ND})
             .UnknownShapeFormat({ge::FORMAT_ND, ge::FORMAT_ND});
-        this->Input("share_gmm1_permuted_weight")
+        this->Input("share_gmm1_weight")
             .ParamType(OPTIONAL)
             .DataType({ge::DT_INT8, ge::DT_INT8})
             .Format({ge::FORMAT_FRACTAL_NZ, ge::FORMAT_FRACTAL_NZ})
             .UnknownShapeFormat({ge::FORMAT_FRACTAL_NZ, ge::FORMAT_FRACTAL_NZ});
-        this->Input("share_gmm1_permuted_weight_scale")
+        this->Input("share_gmm1_weight_scale")
             .ParamType(OPTIONAL)
             .DataType({ge::DT_FLOAT, ge::DT_FLOAT})
             .Format({ge::FORMAT_ND, ge::FORMAT_ND})
@@ -107,7 +107,7 @@ public:
         this->Attr("quant_mode").Int();
         this->Attr("global_bs").Int();
 
-        this->MC2().HcclGroup({"group_ep"});
+        // this->MC2().HcclGroup({"group_ep"});
         this->AICore().AddConfig("ascend910_93");
         this->AICore().AddConfig("ascend910b");
     }

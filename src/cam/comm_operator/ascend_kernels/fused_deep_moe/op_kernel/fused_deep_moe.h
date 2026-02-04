@@ -503,6 +503,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     } else {
         Arch::CrossCoreWaitFlag(gmm1AivFinished);
     }
+    // return;
 
     MoeDistributeCombineImpl::CamMoeDistributeCombine<TemplateMC2TypeFunc> combiner;
     if (g_coreType == AscendC::AIV) {

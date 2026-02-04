@@ -555,6 +555,7 @@ public:
     template <>
     CATLASS_DEVICE void operator()<AscendC::AIC>(Params const &params)
     {
+        // return;
         aicIdx = AscendC::GetBlockIdx();
         subBlockNum = AscendC::GetSubBlockNum();
         aiCoreGroupNum = AscendC::GetBlockNum();
@@ -572,6 +573,7 @@ public:
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             shareQuantCoreNum = recvCoreNum;
         }
+        // return;
 #if ENABLE_CAM_COMM
         epWinContext_.SetGlobalBuffer(
             &(reinterpret_cast<__gm__ Moe::CommArgs *>(params.commArgs))->peerMems[0], Moe::CAM_MAX_RANK_SIZE);
@@ -627,6 +629,7 @@ public:
         aicSetFunc1 = {statusDataSpaceGm + SOFT_SYNC_OFFSET,
                        static_cast<uint8_t>(aicNum + AscendC::GetBlockIdx())};  // AIV wait for flags in latter part
         uint32_t target = 1;
+        // return;
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             uint32_t currentM = params.bs;
             GemmCoord inGroupProblemShape{currentM, params.shareN, params.problemShape.k()};
@@ -1736,6 +1739,7 @@ public:
         recvCoreNum = aivNum;
 
         moeExpertNumPerRank = params.moeExpertNumPerRank;
+        // return;
 
         epRankSize = params.epRankSize;
         epRankId = params.epRankId;
@@ -1756,6 +1760,7 @@ public:
             sendCoreNum = aiCoreGroupNum;
             recvCoreNum = aiCoreGroupNum;
         }
+        // return;
 
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             // 接收核参与计算共享专家量化
@@ -1779,6 +1784,7 @@ public:
 
         stateOffset = STATE_OFFSET;
         expertPerSizeOnWin = maxAxisBs * tokenLength * sizeof(XType);
+        // return;
 #if ENABLE_CAM_COMM
         epWinContext_.SetGlobalBuffer(
             &(reinterpret_cast<__gm__ Moe::CommArgs *>(params.commArgs))->peerMems[0], Moe::CAM_MAX_RANK_SIZE);
@@ -1928,13 +1934,17 @@ public:
     template <>
     CATLASS_DEVICE void operator()<AscendC::AIV>(Params const &params)
     {
+        // return;
         AivInitParams(params);
+        // return;
         AivInitState();
+        // return;
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             if (isShareQuantCore) {
                 shareQuantCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmShareX1, (GM_ADDR)params.gmShareX1Scale);
             }
         }
+        // return;
         if (isSendCore) {
             SendCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmexpertIds, (GM_ADDR)params.ptrA,
                         (GM_ADDR)params.ptrPerTokenScale, (GM_ADDR)params.gmExpandIdx, (GM_ADDR)params.gmXActiveMask);

@@ -654,7 +654,7 @@ static ge::graphStatus FusedDeepMoeTilingFuncImpl(gert::TilingContext &context)
     }
     OP_TILING_CHECK(SetWorkSpace(context, nodeName, *tilingData, calShareExpert) != ge::GRAPH_SUCCESS,
                     OP_LOGE(nodeName, "Tiling set workspace failed."), return ge::GRAPH_FAILED);
-    SetHcommCfg(context, *tilingData, groupEp);
+    // SetHcommCfg(context, *tilingData, groupEp);
     const gert::StorageShape* xActiveMaskStorageShape = context.GetOptionalInputShape(
         INPUT_SHARE_X_ACTIVE_MASK_INDEX);
     bool xActiveMaskEnable = (xActiveMaskStorageShape != nullptr);
