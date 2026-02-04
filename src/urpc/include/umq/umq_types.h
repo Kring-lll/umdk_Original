@@ -629,9 +629,9 @@ typedef struct umq_cfg_get {
 typedef struct umq_qbuf_pool_info {
     umq_buf_mode_t mode;                      // split or combine
     uint64_t total_size;                      // qbuf pool total size
-    uint64_t total_block_num;
-    uint32_t block_size;
-    uint32_t headroom_size;
+    uint64_t total_block_num;                 // total number of blocks
+    uint32_t block_size;                      // the size of each block in the memory pool
+    uint32_t headroom_size;                   // header size of umq buffer
     uint32_t data_size;                       // combine: block_size - umq_buf_t_size, split: block_size
     uint32_t buf_size;                        // combine: block_size, split: block_size + umq_buf_t_size
     uint32_t umq_buf_t_size;                  // size of umq_buf_t
