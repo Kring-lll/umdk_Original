@@ -11,7 +11,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "umq_types.h"
+#include "umq_stats_types.h"
 
 #ifdef __cplusplus
 extern "C" {
