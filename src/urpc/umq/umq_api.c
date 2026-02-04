@@ -36,6 +36,10 @@ typedef struct umq_framework {
     char pro_ops_get_funcname[MAX_FUNCNAME_LEN];
     umq_pro_ops_get_t pro_ops_get_func;
     umq_pro_ops_t *pro_tp_ops;
+
+    char stats_ops_get_funcname[MAX_FUNCNAME_LEN];
+    umq_stats_ops_get_t stats_ops_get_func;
+    umq_stats_ops_t *stats_tp_ops;
 } umq_framework_t;
 
 static bool g_umq_inited = false;
@@ -62,6 +66,10 @@ static umq_framework_t g_umq_fws[UMQ_TRANS_MODE_MAX] = {
         .pro_ops_get_funcname = "umq_pro_ub_ops_get",
         .pro_ops_get_func = NULL,
         .pro_tp_ops = NULL,
+
+        .stats_ops_get_funcname = "umq_ub_stats_ops_get",
+        .stats_ops_get_func = NULL,
+        .stats_tp_ops = NULL,
     },
     [UMQ_TRANS_MODE_IB] = {
         .mode = UMQ_TRANS_MODE_IB,
@@ -142,6 +150,10 @@ static umq_framework_t g_umq_fws[UMQ_TRANS_MODE_MAX] = {
         .pro_ops_get_funcname = "umq_pro_ub_plus_ops_get",
         .pro_ops_get_func = NULL,
         .pro_tp_ops = NULL,
+
+        .stats_ops_get_funcname = "umq_ub_plus_stats_ops_get",
+        .stats_ops_get_func = NULL,
+        .stats_tp_ops = NULL,
     },
     [UMQ_TRANS_MODE_IB_PLUS] = {
         .mode = UMQ_TRANS_MODE_IB_PLUS,
@@ -287,6 +299,8 @@ static void framework_uninit(void)
 {
     for (uint8_t fw_i = 0; fw_i < UMQ_TRANS_MODE_MAX; fw_i++) {
         umq_framework_t *umq_fw = &g_umq_fws[fw_i];
+        umq_fw->stats_tp_ops = NULL;
+        umq_fw->stats_ops_get_func = NULL;
         umq_fw->pro_tp_ops = NULL;
         umq_fw->pro_ops_get_func = NULL;
 
@@ -381,7 +395,25 @@ static int umq_framework_init(umq_framework_t *umq_fw, umq_init_cfg_t *cfg)
         goto UNLOAD_PRO_OPS_GET_FUNC;
     }
 
+    if (load_symbol(umq_fw->dlhandler,
+        (void **)&umq_fw->stats_ops_get_func, umq_fw->stats_ops_get_funcname) != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR("load_symbol stats_ops failed\n");
+        goto PUT_PRO_TP_OPS;
+    }
+
+    umq_fw->stats_tp_ops = umq_fw->stats_ops_get_func();
+    if (umq_fw->stats_tp_ops == NULL) {
+        UMQ_VLOG_ERR("get stats_ops func failed\n");
+        goto UNLOAD_STATS_OPS_GET_FUNC;
+    }
+
     return UMQ_SUCCESS;
+
+UNLOAD_STATS_OPS_GET_FUNC:
+    umq_fw->stats_ops_get_func = NULL;
+
+PUT_PRO_TP_OPS:
+    umq_fw->pro_tp_ops = NULL;
 
 UNLOAD_PRO_OPS_GET_FUNC:
     umq_fw->pro_ops_get_func = NULL;
