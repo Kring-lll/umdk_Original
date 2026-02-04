@@ -84,8 +84,9 @@ uint8_t *umq_ipc_ctx_init_impl(umq_init_cfg_t *cfg)
         return (uint8_t *)g_ipc_ctx;
     }
 
-    if (util_id_allocator_init(&g_umq_id_allocator, UMQ_MAX_QUEUE_NUMBER, 0) != 0) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "id allocator init failed\n");
+    int ret = util_id_allocator_init(&g_umq_id_allocator, UMQ_MAX_QUEUE_NUMBER, 0);
+    if (ret != 0) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "id allocator init failed, status: %d\n", ret);
         return NULL;
     }
 
@@ -258,8 +259,9 @@ uint64_t umq_ipc_create_impl(uint64_t umqh, uint8_t *ipc_ctx, umq_create_option_
     }
 
     tp->queue_mode = (option->create_flag & UMQ_CREATE_FLAG_QUEUE_MODE) ? option->mode : UMQ_MODE_POLLING;
-    if (umq_ipc_map_memory(&tp->local_ring) != 0) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "ipc map memory failed\n");
+    int ret = umq_ipc_map_memory(&tp->local_ring);
+    if (ret != 0) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "ipc map memory failed, status: %d\n", ret);
         goto FREE_TP;
     }
 
@@ -396,7 +398,7 @@ int32_t umq_ipc_bind_impl(uint64_t umqh_tp, uint8_t *bind_info, uint32_t bind_in
     }
 
     if (tmp_info->trans_mode != UMQ_TRANS_MODE_IPC) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "trans mode: %d is invalid\n", tmp_info->trans_mode);
+        UMQ_VLOG_ERR(VLOG_UMQ, "trans mode: %d is invalid, bind failed\n", tmp_info->trans_mode);
         return -UMQ_ERR_EINVAL;
     }
     ipc_bind_ctx_t *ctx = (ipc_bind_ctx_t *)calloc(1, sizeof(ipc_bind_ctx_t));
@@ -414,8 +416,9 @@ int32_t umq_ipc_bind_impl(uint64_t umqh_tp, uint8_t *bind_info, uint32_t bind_in
     ctx->remote_ring.owner = false;
     (void)memcpy(ctx->remote_ring.ipc_name, tmp_info->ipc_name, strlen(tmp_info->ipc_name));
 
-    if (umq_ipc_map_memory(&ctx->remote_ring) != 0) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "ipc map memory failed\n");
+    int ret = umq_ipc_map_memory(&ctx->remote_ring);
+    if (ret != 0) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "ipc map memory failed, status: %d\n", ret);
         goto FREE_CTX;
     }
 

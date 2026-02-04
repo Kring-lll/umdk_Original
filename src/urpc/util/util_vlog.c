@@ -12,7 +12,7 @@
 #include "urpc_util.h"
 #include "util_vlog.h"
 
-#define gettidv1() syscall(__NR_gettid)
+#define g_gettidv1() syscall(__NR_gettid)
 typedef struct util_vlog_level_def {
     const char *output_name;
     const char **alias_names;
@@ -73,7 +73,7 @@ void util_vlog_output(util_vlog_ctx_t *ctx, util_vlog_level_t level, util_vlog_t
     char log_msg[UTIL_VLOG_SIZE];
 
     int len = snprintf(log_msg, UTIL_VLOG_SIZE, "%s%s[%lu]|%s[%d]|", ctx->vlog_name, g_log_type_to_str[type],
-        gettidv1(), function, line);
+        g_gettidv1(), function, line);
     if (len < 0) {
         return;
     }
