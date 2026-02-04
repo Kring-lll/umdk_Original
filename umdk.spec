@@ -408,6 +408,8 @@ fi
     %{_includedir}/ub/umdk/urpc/umq/umq_pro_api.h
     %{_includedir}/ub/umdk/urpc/umq/umq_pro_types.h
     %{_includedir}/ub/umdk/urpc/umq/umq_types.h
+    %{_includedir}/ub/umdk/urpc/umq/umq_stats_api.h
+    %{_includedir}/ub/umdk/urpc/umq/umq_stats_types.h
 
 %files urpc-framework-example
 %defattr(-,root,root)
