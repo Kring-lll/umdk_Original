@@ -467,8 +467,8 @@ typedef enum umq_user_ctl_opcode {
     UMQ_OPCODE_FLOW_CONTROL_STATS_QUERY = 0,
     UMQ_OPCODE_QBUF_POOL_INFO_QUERY,
 
-    UMQ_OPCODE_MAX,
-} umq_user_ctl_opcode_t;
+     UMQ_OPCODE_MAX,
+ } umq_user_ctl_opcode_t;
 
 typedef struct umq_user_ctl_in {
     uint64_t addr;                  // the address of the input parameter buffer
