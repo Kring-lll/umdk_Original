@@ -1424,8 +1424,32 @@ static ALWAYS_INLINE int umq_ub_import_mem_done(ub_queue_t *queue, uint16_t memp
     return ret;
 }
 
+static ALWAYS_INLINE void umq_ub_return_import_ret(ub_queue_t *queue, uint16_t mempool_id, bool send_ack)
+{
+    if (send_ack) {
+        if (umq_ub_import_mem_done(queue, mempool_id) != UMQ_SUCCESS) {
+            // send import mem done failed not cause the data plane to be unavailable
+            UMQ_LIMIT_VLOG_WARN("send import mem done imm failed\n");
+        }
+    } else if (queue->wait_ack_import.wait_ack_idx != UMQ_MAX_TSEG_NUM) {
+        pthread_rwlock_rdlock(&queue->wait_ack_import.lock);
+        if (queue->wait_ack_import.wait_ack_pool_id == NULL) {
+            queue->wait_ack_import.wait_ack_pool_id = (uint16_t *)(uintptr_t)calloc(UMQ_MAX_TSEG_NUM, sizeof(uint16_t));
+            if (queue->wait_ack_import.wait_ack_pool_id == NULL) {
+                (void)pthread_rwlock_unlock(&queue->wait_ack_import.lock);
+                UMQ_LIMIT_VLOG_WARN("calloc wait_ack_pool_id failed\n");
+                return;
+            }
+        }
+        queue->wait_ack_import.wait_ack_pool_id[queue->wait_ack_import.wait_ack_idx++] = mempool_id;
+        (void)pthread_rwlock_unlock(&queue->wait_ack_import.lock);
+    } else {
+        UMQ_LIMIT_VLOG_WARN("record import mem done imm failed\n");
+    }
+}
+
 // The rx buf contains metadata including the IMM header, reference SGE and import memory details.
-int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t ref_seg_num)
+int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t ref_seg_num, bool send_ack)
 {
     umq_imm_head_t *umq_imm_head = (umq_imm_head_t *)rx_buf->buf_data;
     if (umq_imm_head->type == IMM_PROTOCAL_TYPE_NONE) {
@@ -1457,7 +1481,6 @@ int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t re
 
         if (queue->imported_tseg_list[import_mempool_info[i].mempool_id] != NULL) {
             UMQ_LIMIT_VLOG_INFO("mempool %u has been imported\n", import_mempool_info[i].mempool_id);
-            (void)umq_ub_import_mem_done(queue, import_mempool_info[i].mempool_id);
             continue;
         }
 
@@ -1476,12 +1499,9 @@ int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t re
             return UMQ_FAIL;
         }
 
-        if (umq_ub_import_mem_done(queue, import_mempool_info[i].mempool_id) != UMQ_SUCCESS) {
-            // send import mem done failed not cause the data plane to be unavailable
-            UMQ_LIMIT_VLOG_WARN("send import mem done imm failed\n");
-        }
+        umq_ub_return_import_ret(queue, import_mempool_info[i].mempool_id, send_ack);
         queue->dev_ctx->remote_imported_info->
-            imported_tseg_list[queue->bind_ctx->remote_eid_id][import_mempool_info[i].mempool_id] = imported_tseg;
+            imported_tseg_list[queue->bind_ctx->remote_eid_id][import_mempool_info[i].mempool_id] = imported_tseg;   
     }
     pthread_mutex_unlock(imported_tseg_list_mutex_lock);
     return UMQ_SUCCESS;
@@ -1595,7 +1615,7 @@ static int process_send_imm(umq_buf_t *rx_buf, umq_ub_imm_t imm, uint64_t umqh)
         return ret;
     }
     if (imm.ub_plus.sub_type == IMM_TYPE_REVERSE_PULL_MEM) {
-        if (umq_ub_data_plan_import_mem(umqh, rx_buf, imm.ub_plus.msg_num) != UMQ_SUCCESS) {
+        if (umq_ub_data_plan_import_mem(umqh, rx_buf, imm.ub_plus.msg_num, true) != UMQ_SUCCESS) {
             UMQ_LIMIT_VLOG_ERR("import mem failed\n");
             umq_buf_free(rx_buf); // release rx
             return UMQ_CONTINUE_FLAG;
@@ -2527,4 +2547,24 @@ int umq_flow_control_stats_get(uint64_t umqh_tp, umq_user_ctl_in_t *in, umq_user
     pool->ops.stats_query(pool, &stats->pool_credit);
     queue->flow_control.ops.stats_query(&queue->flow_control, queue, &stats->queue_credit);
     return UMQ_SUCCESS;
+}
+
+void umq_ub_ack_import_tseg(ub_queue_t *queue)
+{
+    if (queue->wait_ack_import.wait_ack_pool_id == NULL) {
+        return;
+    }
+
+    if (queue->bind_ctx == NULL) {
+        UMQ_LIMIT_VLOG_ERR("umq has not been binded\n");
+        return;
+    }
+
+    uint16_t mempool_id = 0;
+    while (queue->wait_ack_import.wait_ack_idx > 0) {
+        mempool_id = queue->wait_ack_import.wait_ack_pool_id[--queue->wait_ack_import.wait_ack_idx];
+        if (umq_ub_import_mem_done(queue, mempool_id) != UMQ_SUCCESS) {
+            UMQ_LIMIT_VLOG_WARN("send import mem done imm failed, pool id %u\n", mempool_id);
+        }
+    }
 }
