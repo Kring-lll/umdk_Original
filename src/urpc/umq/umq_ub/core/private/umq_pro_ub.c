@@ -486,14 +486,21 @@ static int umq_ub_on_rx_done(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t *rx_buf
         return UMQ_SUCCESS;
     }
 
+    ub_queue_t *real_queue = NULL;
     switch (imm.bs.type) {
         case IMM_TYPE_MEM:
             if (imm.mem_import.sub_type == IMM_TYPE_MEM_IMPORT) {
-                if (umq_ub_data_plan_import_mem((uint64_t)(uintptr_t)queue, rx_buf, 0) != UMQ_SUCCESS) {
-                    *qbuf_status = UMQ_MEMPOOL_UPDATE_FAILED;
+                real_queue = umq_ub_find_ub_queue_by_io_jetty(cr->local_id);
+                if (real_queue == NULL) {
+                    *qbuf_status = UMQ_IMPORT_TSEG_FAILED;
                     break;
                 }
-                *qbuf_status = UMQ_MEMPOOL_UPDATE_SUCCESS;
+
+                if (umq_ub_data_plan_import_mem((uint64_t)(uintptr_t)real_queue, rx_buf, 0, false) != UMQ_SUCCESS) {
+                    *qbuf_status = UMQ_IMPORT_TSEG_SUCCESS;
+                    break;
+                }
+                *qbuf_status = UMQ_IMPORT_TSEG_FAILED;
             }
             break;
         default:
@@ -716,6 +723,10 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
             qbuf_cnt += umq_report_incomplete_rx(queue, max_batch, &buf[qbuf_cnt]);
         }
         goto OUT;
+    }
+
+    if (queue->wait_ack_import.wait_ack_idx > 0) {
+        umq_ub_ack_import_tseg(queue);
     }
 
     uint64_t start_timestmap = umq_perf_get_start_timestamp_with_feature(queue->dev_ctx->feature);

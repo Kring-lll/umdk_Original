@@ -657,6 +657,7 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
     queue->tx_outstanding = 0;
     queue->state = queue->flow_control.enabled ? QUEUE_STATE_IDLE : QUEUE_STATE_READY;
     queue->umqh = umqh;
+    (void)pthread_rwlock_init(&queue->wait_ack_import.lock, NULL);
     umq_ub_queue_ctx_list_push(&queue->qctx_node);
     return (uint64_t)(uintptr_t)queue;
 
