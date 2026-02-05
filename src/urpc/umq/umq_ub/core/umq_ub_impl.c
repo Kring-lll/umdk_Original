@@ -8,17 +8,20 @@
  */
 
 #include <pthread.h>
+#include <sys/eventfd.h>
 #include <sys/queue.h>
 #include <malloc.h>
 #include <stdio.h>
 #include <unistd.h>
 
+#include "urpc_framework_errno.h"
 #include "urpc_hash.h"
 #include "urpc_hmap.h"
-#include "uvs_api.h"
+//#include "uvs_api.h"
 #include "perf.h"
 #include "urpc_util.h"
 #include "urpc_list.h"
+#include "urpc_timer.h"
 #include "urma_api.h"
 #include "umq_vlog.h"
 #include "umq_errno.h"
@@ -33,10 +36,33 @@
 
 #define UMQ_FLUSH_MAX_RETRY_TIMES 10000
 #define DEV_STR_LENGTH 64
+#define UMQ_UB_DEFAULT_SLOT_NUM 10
 
 static umq_ub_ctx_t *g_ub_ctx = NULL;
 static uint32_t g_ub_ctx_count = 0;
 static bool g_umq_ub_inited = false;
+
+urpc_timer_t *g_umq_ub_check_queue_idle_timer = NULL;
+
+// zlj to do
+
+typedef struct umq_ub_monitor_slot {
+    urpc_list_t monitored_links;
+    uint32_t slot_id;
+    pthread_mutex_t lock;
+} umq_ub_monitor_slot_t;
+
+typedef struct umq_ub_monitor_slots_array {
+    umq_ub_monitor_slot_t *monitor_slots;
+    volatile uint32_t current_slot;
+    uint32_t slot_num;
+    uint32_t timeout_us;
+    uint32_t interval_us;
+    urpc_timer_t *timer;
+    uint64_t timestamp[1000];
+} umq_ub_monitor_slots_array_t;
+
+static umq_ub_monitor_slots_array_t g_umq_monitor_slots = {0};
 
 typedef int (*ub_user_ctl_func)(uint64_t umqh_tp, umq_user_ctl_in_t *in, umq_user_ctl_out_t *out);
 static ub_user_ctl_func g_umq_ub_user_ctl_func[UMQ_TRANS_MODE_MAX] = {
@@ -381,6 +407,199 @@ static int umq_find_ub_device(umq_trans_info_t *info, umq_ub_ctx_t *ub_ctx)
     return UMQ_SUCCESS;
 }
 
+uint32_t current_get_and_next_update(void)
+{
+    uint32_t old_val, new_val;
+    do {
+        old_val = __atomic_load_n(&g_umq_monitor_slots.current_slot, __ATOMIC_RELAXED);
+        // next slot id
+        new_val = old_val + 1;
+        if (new_val >= g_umq_monitor_slots.slot_num) {
+        new_val = 0;
+    }
+
+    } while (!__atomic_compare_exchange_n(
+        &g_umq_monitor_slots.current_slot, &old_val, new_val,true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+
+    return old_val;
+}
+
+static uint32_t target_slot_id_calcuate(uint64_t expire_time, uint64_t current_time, uint32_t current_slot_id)
+{
+    uint32_t slot_num = g_umq_monitor_slots.slot_num;
+    uint32_t interval_us = g_umq_monitor_slots.interval_us;
+    uint32_t target_slot_id;
+    if (expire_time <= current_time) {
+        target_slot_id = current_slot_id;
+        return target_slot_id;
+    }
+
+    uint64_t delay_time = expire_time - current_time;
+    uint32_t delay_slots = (delay_time + interval_us - 1) / interval_us;
+    if (delay_slots >= slot_num) {
+        delay_slots = slot_num - 1;
+    }
+    target_slot_id = (current_slot_id + delay_slots) % slot_num;
+    return target_slot_id;
+}
+
+//static int record_timestamp_times = 0;
+void umq_ub_idle_queue_check(void *args)
+{
+    //UMQ_VLOG_ERR("umq_ub_idle_queue_check\n");
+    #if  0
+    if (record_timestamp_times <= 999) {
+        // g_umq_monitor_slots.timestamp[record_timestamp_times] = get_timestamp_ns(); //urpc_get_cpu_cycles();
+         g_umq_monitor_slots.timestamp[record_timestamp_times] = get_timestamp_ns(); //urpc_get_cpu_cycles();
+    }
+    record_timestamp_times ++;
+    #endif
+    uint32_t current_slot_id = current_get_and_next_update();
+    umq_ub_monitor_slot_t *current_slot_obj = &g_umq_monitor_slots.monitor_slots[current_slot_id];
+    ub_queue_t *cur_node, *next_node;
+    urpc_list_t temp_list;
+    urpc_list_init(&temp_list);
+    uint64_t value = 1;
+    uint64_t current_timestamp = get_timestamp_us();
+    uint64_t timeout_us = g_umq_monitor_slots.timeout_us;
+    (void)pthread_mutex_lock(&current_slot_obj->lock);
+    URPC_LIST_FOR_EACH_SAFE(cur_node, next_node, timeout_node, &current_slot_obj->monitored_links) {
+        if (__atomic_load_n(&cur_node->checker.need_remove, __ATOMIC_RELAXED)) {
+            urpc_list_remove(&cur_node->timeout_node);
+            umq_dec_ref(true, &cur_node->ref_cnt, 1);
+            continue;
+        }
+        uint64_t last_send = __atomic_load_n(&cur_node->checker.last_send, __ATOMIC_RELAXED);
+        if (current_timestamp >= last_send) {
+            uint64_t diff = (current_timestamp - last_send);
+            if (diff  >= timeout_us) {
+                __atomic_store_n(&cur_node->checker.need_return_credit, true, __ATOMIC_RELAXED);
+                if (eventfd_write(cur_node->checker.event_fd, value) == -1) {
+                    UMQ_VLOG_ERR("write event failed, err:%s\n", strerror(errno));
+                }
+            }
+        }
+        uint64_t expire_time = last_send + timeout_us;
+        uint32_t target_slot_id = target_slot_id_calcuate(expire_time, current_timestamp, current_slot_id);
+        if (target_slot_id != current_slot_id) {
+            // need to move
+            urpc_list_remove(&cur_node->timeout_node);
+            urpc_list_push_back(&temp_list, &cur_node->timeout_node);
+            __atomic_store_n(&cur_node->checker.target_slot_id, target_slot_id, __ATOMIC_RELAXED);
+        }
+    }
+    (void)pthread_mutex_unlock(&current_slot_obj->lock);
+    URPC_LIST_FOR_EACH_SAFE(cur_node, next_node, timeout_node, &temp_list) {
+        uint32_t target_slot_id = __atomic_load_n(&cur_node->checker.target_slot_id, __ATOMIC_RELAXED);
+        (void)pthread_mutex_lock(&g_umq_monitor_slots.monitor_slots[target_slot_id].lock);
+        urpc_list_remove(&cur_node->timeout_node);
+        urpc_list_push_back(&g_umq_monitor_slots.monitor_slots[target_slot_id].monitored_links, &cur_node->timeout_node);
+        (void)pthread_mutex_unlock(&g_umq_monitor_slots.monitor_slots[target_slot_id].lock);
+    }
+    return;
+}
+
+static int umq_ub_monitor_slots_init(umq_init_cfg_t *cfg)
+{
+    // check param
+    if (cfg->flow_control.slot_num == 0 ||
+        cfg->flow_control.timeout_ms == 0 || cfg->flow_control.timeout_ms % cfg->flow_control.slot_num != 0) {
+        g_umq_monitor_slots.slot_num = UMQ_UB_DEFAULT_SLOT_NUM;
+        g_umq_monitor_slots.timeout_us = US_PER_MS;
+    } else {
+        g_umq_monitor_slots.slot_num = cfg->flow_control.slot_num;
+        g_umq_monitor_slots.timeout_us = cfg->flow_control.timeout_ms * US_PER_MS;
+    }
+    g_umq_monitor_slots.interval_us = (g_umq_monitor_slots.timeout_us / g_umq_monitor_slots.slot_num) * US_PER_MS;
+    g_umq_monitor_slots.monitor_slots =
+        (umq_ub_monitor_slot_t *)calloc(cfg->flow_control.slot_num, sizeof(umq_ub_monitor_slot_t));
+    if (g_umq_monitor_slots.monitor_slots == NULL) {
+        UMQ_VLOG_ERR("umq monitor slots calloc failed\n");
+        return UMQ_FAIL;
+    }
+    for (uint32_t i = 0; i < cfg->flow_control.slot_num; i++) {
+        urpc_list_init(&g_umq_monitor_slots.monitor_slots[i].monitored_links);
+        g_umq_monitor_slots.monitor_slots[i].slot_id = i;
+        pthread_mutex_init(&g_umq_monitor_slots.monitor_slots[i].lock, NULL);
+    }
+    return UMQ_SUCCESS;
+}
+
+static ALWAYS_INLINE  void umq_ub_monitor_slots_uninit(void)
+{
+    for (uint32_t i  = 0; i < g_umq_monitor_slots.slot_num; i++) {
+        // remove node
+        pthread_mutex_destroy(&g_umq_monitor_slots.monitor_slots[i].lock);
+    }
+    if (g_umq_monitor_slots.monitor_slots != NULL) {
+        free(g_umq_monitor_slots.monitor_slots);
+    }
+    g_umq_monitor_slots.monitor_slots = NULL;
+    g_umq_monitor_slots.slot_num = 0;
+    #if 0
+    // test timer
+    for (int i = 0; i < 1000; i++) {
+        if (i > 0) {
+            uint64_t temp = g_umq_monitor_slots.timestamp[i] -  g_umq_monitor_slots.timestamp[i-1];
+            //uint64_t current_us = temp * US_PER_SEC / urpc_get_cpu_hz();
+            uint64_t current_us = temp/1000;
+            UMQ_VLOG_ERR("zzzz umq timer check cost %lu us\n", current_us);
+        }
+    }
+    #endif
+}
+
+static int umq_ub_check_idle_queue_timer_create(umq_init_cfg_t *cfg)
+{
+    if ((cfg->feature & UMQ_FEATURE_ENABLE_FLOW_CONTROL) == 0) {
+        // disable flow control
+        return UMQ_SUCCESS;
+    }
+    if ((cfg->feature & UMQ_FEATURE_ENABLE_SHARED) == 0) {
+        // disable shared
+        return UMQ_SUCCESS;
+    }
+
+    if (umq_ub_monitor_slots_init(cfg) != UMQ_SUCCESS) {
+        return UMQ_FAIL;
+    }
+
+    g_umq_monitor_slots.timer = urpc_timer_create(URPC_INVALID_ID_U32, false);
+    if (URPC_UNLIKELY(g_umq_monitor_slots.timer == NULL)) {
+        goto MONITOR_UNINIT;
+    }
+    void *args = NULL;
+    int ret = urpc_timer_start(
+        g_umq_monitor_slots.timer, g_umq_monitor_slots.interval_us / US_PER_MS, umq_ub_idle_queue_check, args, true);
+    if (URPC_UNLIKELY(ret != UMQ_SUCCESS)) {
+        goto TIMER_DESTROY;
+    }
+    return UMQ_SUCCESS;
+
+TIMER_DESTROY:
+    urpc_timer_destroy(g_umq_monitor_slots.timer);
+    g_umq_monitor_slots.timer = NULL;
+
+MONITOR_UNINIT:
+    umq_ub_monitor_slots_uninit();
+
+    return UMQ_FAIL;
+}
+
+static void umq_ub_check_idle_queue_timer_delete(void)
+{
+    if (g_umq_monitor_slots.timer != NULL) {
+        urpc_timer_destroy(g_umq_monitor_slots.timer);
+        g_umq_monitor_slots.timer = NULL;
+    }
+    umq_ub_monitor_slots_uninit();
+}
+
+uint32_t umq_ub_timer_timeout_get(void)
+{
+    return g_umq_monitor_slots.timeout_us;
+}
+
 uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
 {
     if (g_umq_ub_inited) {
@@ -479,10 +698,17 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
         goto IO_BUF_FREE;
     }
     umq_ub_queue_ctx_list_init();
+    if (umq_ub_check_idle_queue_timer_create(cfg) != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR("umq check idle queue timer create failed\n");
+        goto QUEUE_CTX_LIST_UNINIT;
+    }
 
     g_umq_ub_inited = true;
 
     return (uint8_t *)(uintptr_t)g_ub_ctx;
+
+QUEUE_CTX_LIST_UNINIT:
+    umq_ub_queue_ctx_list_uninit();
 
 IO_BUF_FREE:
     umq_io_buf_free();
@@ -510,6 +736,7 @@ UNINIT_ALLOCATOR:
 
 void umq_ub_ctx_uninit_impl(uint8_t *ctx)
 {
+    umq_ub_check_idle_queue_timer_delete();
     umq_ub_queue_ctx_list_uninit();
     umq_ub_ctx_t *context = (umq_ub_ctx_t *)ctx;
     if (context != g_ub_ctx) {
@@ -542,6 +769,31 @@ void umq_ub_ctx_uninit_impl(uint8_t *ctx)
     g_ub_ctx_count = 0;
     g_umq_ub_inited = false;
     urma_uninit();
+}
+
+static int umq_ub_idle_checker_init(ub_queue_t *queue)
+{
+    queue->checker.event_fd = UMQ_INVALID_FD;
+    if (!queue->flow_control.enabled || (queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0) {
+        return UMQ_SUCCESS;
+    }
+    queue->checker.event_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (queue->checker.event_fd == UMQ_INVALID_FD) {
+        UMQ_VLOG_ERR("create eventfd failed, err:%s\n", strerror(errno));
+        return UMQ_FAIL;
+    }
+    queue->checker.need_return_credit = false;
+    uint64_t current_time = get_timestamp_us();
+    queue->checker.last_send = current_time;
+    uint64_t expire_time = current_time + g_umq_monitor_slots.timeout_us;
+    uint32_t current_slot_id = __atomic_load_n(&g_umq_monitor_slots.current_slot, __ATOMIC_RELAXED);
+    uint32_t target_slot_id = target_slot_id_calcuate(expire_time, current_time, current_slot_id);
+    queue->checker.target_slot_id = target_slot_id;
+    queue->ref_cnt++;
+    (void)pthread_mutex_lock(&g_umq_monitor_slots.monitor_slots[target_slot_id].lock);
+    urpc_list_push_back(&g_umq_monitor_slots.monitor_slots[target_slot_id].monitored_links, &queue->timeout_node);
+    (void)pthread_mutex_unlock(&g_umq_monitor_slots.monitor_slots[target_slot_id].lock);
+    return UMQ_SUCCESS;
 }
 
 uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *option)
@@ -657,6 +909,8 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
     queue->tx_outstanding = 0;
     queue->state = queue->flow_control.enabled ? QUEUE_STATE_IDLE : QUEUE_STATE_READY;
     queue->umqh = umqh;
+    umq_ub_idle_checker_init(queue);
+
     umq_ub_queue_ctx_list_push(&queue->qctx_node);
     return (uint64_t)(uintptr_t)queue;
 
@@ -704,6 +958,8 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
         UMQ_VLOG_ERR("destroy umq failed, trans mode %d is not UB\n", queue->umq_trans_mode);
         return -UMQ_ERR_EINVAL;
     }
+
+    // shared scene sub queues and flow control enabled delay destroy
     if (umq_fetch_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt) != 1) {
         UMQ_VLOG_ERR("umqh ref cnt is not 0\n");
         return -UMQ_ERR_EBUSY;
@@ -791,7 +1047,6 @@ int umq_ub_wait_interrupt_impl(uint64_t wait_umqh_tp, int time_out, umq_interrup
     }
     urma_jfc_t *jfc[UB_QUEUE_JETTY_NUM];
     int cnt = 0;
-
     if (option->direction == UMQ_IO_RX) {
         cnt = umq_ub_wait_rx_interrupt(queue, time_out, jfc);
     } else {
@@ -820,6 +1075,9 @@ int umq_ub_interrupt_fd_get_impl(uint64_t umqh_tp, umq_interrupt_option_t *optio
     if (queue->jfs_jfce == NULL || queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfce == NULL) {
         UMQ_VLOG_ERR("get interrupt fd error, jfce is NULL\n");
         return -UMQ_ERR_EINVAL;
+    }
+    if (option->enable_event_fd) {
+        return queue->checker.event_fd;
     }
     if (option->direction == UMQ_IO_TX) {
         return queue->jfs_jfce->fd;
@@ -941,6 +1199,10 @@ int umq_ub_unbind_impl(uint64_t umqh)
                       "remote jetty_id: %u\n", EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
                       queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id,
                       EID_ARGS(tjetty->id.eid), tjetty->id.id);
+        if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) != 0) {
+            // mark pending remove node
+            __atomic_store_n(&queue->checker.need_remove, true, __ATOMIC_RELAXED);
+        }
         (void)urma_unbind_jetty(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]);
         (void)urma_unimport_jetty(tjetty);
         umq_modify_ubq_to_err(queue, UMQ_IO_ALL, UB_QUEUE_JETTY_FLOW_CONTROL);
@@ -1416,6 +1678,7 @@ int ubmm_fill_ref_sge_info(uint64_t umqh_tp, umq_buf_t *qbuf, char *ub_ref_info,
 
 int umq_ub_get_route_list_impl(const umq_route_t *route, umq_route_list_t *route_list)
 {
+    #if 0
     if (route == NULL || route_list == NULL) {
         UMQ_VLOG_ERR("invalid parameter\n");
         return -UMQ_ERR_EINVAL;
@@ -1445,6 +1708,7 @@ int umq_ub_get_route_list_impl(const umq_route_t *route, umq_route_list_t *route
         route_list->buf[i].chip_id = uvs_route_list.buf[i].chip_id;
     }
     route_list->len = uvs_route_list.len;
+    #endif
     return UMQ_SUCCESS;
 }
 
