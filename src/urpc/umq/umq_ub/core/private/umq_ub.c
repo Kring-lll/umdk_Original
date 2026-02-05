@@ -27,7 +27,6 @@
 
 static util_id_allocator_t g_umq_ub_id_allocator = {0};
 static ub_queue_ctx_list_t g_umq_ub_queue_ctx_list;
-
 static inline uint32_t umq_ub_bind_fature_allowlist_get(void)
 {
     return UMQ_FEATURE_ENABLE_STATS | UMQ_FEATURE_ENABLE_PERF;
@@ -381,7 +380,7 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
                 goto PUT_EID_ID;
             }
         }
-        umq_ub_default_credit_allocate(queue, &queue->flow_control);
+        umq_ub_fc_depth_exchange(queue, &queue->flow_control);
     }
 
     UMQ_VLOG_INFO("bind jetty success, local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "

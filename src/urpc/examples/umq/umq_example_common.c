@@ -66,7 +66,8 @@ uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bin
     init_cfg->feature = cfg->feature;
     init_cfg->cna = cfg->cna;
     init_cfg->ubmm_eid = cfg->deid;
-
+    init_cfg->flow_control.slot_num = 10;
+    init_cfg->flow_control.timeout_ms = 10;
     if (parse_trans_info(cfg, init_cfg) != 0) {
         goto FREE_CFG;
     }
@@ -541,7 +542,7 @@ static int cfg_get_dev_name(struct urpc_example_config *cfg, char *data)
         new_data = strtok_r(NULL, ",", &save);
         i++;
     }
-    
+
     if (cfg->m_dev_num != 0 && cfg->m_dev_num != i) {
         return -1;
     }
