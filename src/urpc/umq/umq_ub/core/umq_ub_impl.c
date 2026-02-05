@@ -657,6 +657,7 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
     queue->tx_outstanding = 0;
     queue->state = queue->flow_control.enabled ? QUEUE_STATE_IDLE : QUEUE_STATE_READY;
     queue->umqh = umqh;
+    (void)pthread_rwlock_init(&queue->wait_ack_import.lock, NULL);
     umq_ub_queue_ctx_list_push(&queue->qctx_node);
     return (uint64_t)(uintptr_t)queue;
 
@@ -760,6 +761,12 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
             UMQ_VLOG_ERR("delete jfs_jfce failed\n");
         }
     }
+
+    if (queue->wait_ack_import.wait_ack_pool_id != NULL) {
+        free(queue->wait_ack_import.wait_ack_pool_id);
+    }
+    (void)pthread_rwlock_destroy(&queue->wait_ack_import.lock);
+
     umq_ub_jfr_ctx_put(queue);
     umq_ub_queue_ctx_list_remove(&queue->qctx_node);
     umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->dev_ctx->ref_cnt, 1);
