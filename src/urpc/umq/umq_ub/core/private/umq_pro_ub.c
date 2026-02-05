@@ -7,6 +7,8 @@
  * History: 2025-12-22
  */
 
+#include <sys/eventfd.h>
+
 #include "urma_api.h"
 #include "perf.h"
 #include "umq_vlog.h"
@@ -638,6 +640,9 @@ static void umq_ub_fill_rx_buff_post_process(ub_queue_t *queue, umq_ub_imm_t imm
         case IMM_TYPE_FC_CREDIT_REP:
              umq_ub_permission_release(fc);
             break;
+        case IMM_TYPE_FC_CREDIT_RETURN_ACK:
+            umq_ub_permission_release(fc);
+            break;
         default:
             break;
     }
@@ -827,18 +832,14 @@ static void umq_ub_fc_process_tx(ub_queue_t *queue, umq_ub_fc_user_ctx_t *obj)
 {
     uint32_t type = obj->operator.type;
     umq_ub_fc_info_t *fc_info = NULL;
-    uint16_t remote_win;
     switch (type) {
         case IMM_TYPE_FC_CREDIT_INIT:
-            // window read ok
             fc_info = (umq_ub_fc_info_t *)(uintptr_t)(umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL));
-            remote_win = fc_info->fc.remote_window;
             if (fc_info->fc.remote_rx_depth != UMQ_UB_FLOW_CONTORL_JETTY_DEPTH) {
                 queue->flow_control.remote_get = false;
                 umq_ub_window_read(&queue->flow_control, queue);
             } else {
-                UMQ_VLOG_DEBUG("umq ub flow control update initial window %d\n", remote_win);
-                umq_ub_window_inc(&queue->flow_control, remote_win);
+                (void)umq_ub_shared_credit_req_send(queue);
                 queue->state = QUEUE_STATE_READY;
             }
             break;
@@ -864,6 +865,11 @@ static void umq_ub_fc_process_tx_error(ub_queue_t *queue, umq_ub_fc_user_ctx_t *
             (void)fc->ops.local_rx_allocted_dec(fc, notify);
             break;
         case IMM_TYPE_FC_CREDIT_REQ:
+            umq_ub_permission_release(fc);
+            break;
+        case IMM_TYPE_FC_CREDIT_RETURN_REQ:
+            notify = obj->operator.notify;
+            fc->ops.remote_rx_window_inc(fc, notify, true);
             umq_ub_permission_release(fc);
             break;
         default:
@@ -909,6 +915,15 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
     }
     uint32_t max_batch = buf_count > UMQ_POST_POLL_BATCH ? UMQ_POST_POLL_BATCH : buf_count;
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
+
+    if (queue->flow_control.enabled && (queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) != 0) {
+        uint64_t count;
+         if (__atomic_load_n(&queue->checker.need_return_credit, __ATOMIC_RELAXED)) {
+            umq_ub_shared_credit_return_req_send(queue);
+            __atomic_store_n(&queue->checker.need_remove, false, __ATOMIC_RELAXED);
+            (void)eventfd_read(queue->checker.event_fd, &count);
+         }
+    }
 
     if (queue->flow_control.enabled && (queue->mode == UMQ_MODE_POLLING || queue->interrupt_ctx.tx_fc_interrupt)) {
         (void)umq_ub_poll_fc_tx(queue);

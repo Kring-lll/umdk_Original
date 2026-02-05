@@ -76,7 +76,8 @@ uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bin
     init_cfg->ubmm_eid = cfg->deid;
     init_cfg->transport_mode = (umq_transport_mode_t)cfg->transport_mode;
     init_cfg->tp_type = (umq_tp_type_t)cfg->tp_type;
-
+    init_cfg->flow_control.slot_num = 10;
+    init_cfg->flow_control.timeout_ms = 10;
     if (parse_trans_info(cfg, init_cfg) != 0) {
         goto FREE_CFG;
     }
