@@ -106,6 +106,7 @@ void print_config(struct urpc_example_config *cfg);
 } while (0)
 
 void log_get_current_time(char *buffer, uint32_t len);
+uint64_t get_share_umq();
 
 #ifdef __cplusplus
 }

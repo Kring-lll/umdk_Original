@@ -50,6 +50,8 @@ typedef enum umq_buf_status {
     UMQ_BUF_REM_DATA_POISON,            /* Remote Data Poison */
 
     UMQ_BUF_FLOW_CONTROL_UPDATE = 128,  /* Umq flow control window is updated, this is not error case */
+    UMQ_IMPORT_TSEG_SUCCESS,
+    UMQ_IMPORT_TSEG_FAILED,
     UMQ_MEMPOOL_UPDATE_SUCCESS,
     UMQ_MEMPOOL_UPDATE_FAILED,
 

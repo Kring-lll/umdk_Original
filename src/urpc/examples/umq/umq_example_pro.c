@@ -37,29 +37,45 @@ int run_umq_example_pro_server(struct urpc_example_config *cfg)
         goto DESTROY;
     }
 
-    ret = umq_bind(umqh, remote_bind_info, remote_bind_info_size);
+    ret = umq_bind(get_share_umq(), remote_bind_info, remote_bind_info_size);
     if (ret != UMQ_SUCCESS) {
         LOG_PRINT_ERR("server bind failed\n");
         goto DESTROY;
     }
     LOG_PRINT("server bind success\n");
 
-    if (example_post_rx(umqh, EXAMPLE_MAX_DEPTH) != 0) {
+    if (example_post_rx(get_share_umq(), EXAMPLE_MAX_DEPTH) != 0) {
         LOG_PRINT_ERR("server post rx failed\n");
         goto UNBIND;
     }
     LOG_PRINT("server post rx succeeded\n");
 
+    int poll_cnt = 0;
+    umq_buf_t *qbuf;
+    while(1) {
+        poll_cnt = umq_poll(umqh, UMQ_IO_RX, &qbuf, 1);
+        if (poll_cnt < 0) {
+            goto UNBIND;
+        }
+        if (poll_cnt == 1 && qbuf->status == UMQ_IMPORT_TSEG_SUCCESS) {
+            LOG_PRINT("recv UMQ_IMPORT_TSEG_SUCCESS\n");
+            (void)umq_poll(get_share_umq(), UMQ_IO_RX, &qbuf, 1);
+            break;
+        }
+    }
+
+    sleep(10);
+
     umq_interrupt_option_t interrupt_option = {
         .flag = UMQ_INTERRUPT_FLAG_IO_DIRECTION,
         .direction = UMQ_IO_RX,
     };
-    if (umq_rearm_interrupt(umqh, false, &interrupt_option) != 0) {
+    if (umq_rearm_interrupt(get_share_umq(), false, &interrupt_option) != 0) {
         LOG_PRINT_ERR("server umq_rearm_interrupt failed\n");
         goto UNBIND;
     }
 
-    int32_t nevents = umq_wait_interrupt(umqh, EXAMPLE_MAX_WAIT_TIME_MS, &interrupt_option);
+    int32_t nevents = umq_wait_interrupt(get_share_umq(), EXAMPLE_MAX_WAIT_TIME_MS, &interrupt_option);
     if (nevents < 1) {
         LOG_PRINT_ERR("server umq_wait_interrupt failed, ret: %d\n", nevents);
         goto UNBIND;
@@ -76,19 +92,19 @@ int run_umq_example_pro_server(struct urpc_example_config *cfg)
     umq_ack_interrupt(umqh, nevents, &interrupt_option);
     LOG_PRINT("server ack interrupt succeeded\n");
 
-    if (example_post_tx(umqh, EXAMPLE_SERVER_POST_DATA, strlen(EXAMPLE_SERVER_POST_DATA)) != 0) {
+    if (example_post_tx(get_share_umq(), EXAMPLE_SERVER_POST_DATA, strlen(EXAMPLE_SERVER_POST_DATA)) != 0) {
         LOG_PRINT_ERR("server post_tx failed\n");
         goto UNBIND;
     }
     LOG_PRINT("server post tx succeeded\n");
 
-    umq_notify(umqh);
+    umq_notify(get_share_umq());
 
     uint64_t start = get_timestamp_ms();
-    int poll_ret = example_poll_tx(umqh);
+    int poll_ret = example_poll_tx(get_share_umq());
     while (poll_ret != 0 && get_timestamp_ms() - start < EXAMPLE_MAX_WAIT_TIME_MS) {
         usleep(EXAMPLE_SLEEP_TIME_US);
-        poll_ret = example_poll_tx(umqh);
+        poll_ret = example_poll_tx(get_share_umq());
         continue;
     }
 
@@ -151,6 +167,45 @@ int run_umq_example_pro_client(struct urpc_example_config *cfg)
         goto UNBIND;
     }
     LOG_PRINT("client post rx succeeded\n");
+
+    umq_buf_t *qbuf = umq_buf_alloc(1024 * 64, 1, umqh, NULL);
+    if (qbuf == NULL) {
+        LOG_PRINT_ERR("umq buf alloc failed\n");
+        goto UNBIND;
+    }
+    LOG_PRINT_ERR("umq buf alloc mempool id %u\n", qbuf->mempool_id);
+    umq_mempool_state_t mempool_state;
+    if (umq_mempool_state_get(umqh, qbuf->mempool_id, &mempool_state) != UMQ_SUCCESS) {
+        LOG_PRINT_ERR("umq_mempool_state_get failed\n");
+        goto UNBIND;
+    }
+    LOG_PRINT_ERR("umq_mempool_state %u\n", mempool_state.import_state);
+
+    if (umq_mempool_state_refresh(umqh, qbuf->mempool_id) != UMQ_SUCCESS) {
+        LOG_PRINT_ERR("umq_mempool_state_refresh failed\n");
+        goto UNBIND;
+    }
+
+    int poll_cnt = 0;
+    umq_buf_t *buf;
+    while(1) {
+        poll_cnt = umq_poll(umqh, UMQ_IO_RX, &buf, 1);
+        if (poll_cnt < 0) {
+            goto UNBIND;
+        }
+        if (poll_cnt == 1 && buf->status == UMQ_MEMPOOL_UPDATE_SUCCESS) {
+            LOG_PRINT_ERR("recv UMQ_MEMPOOL_UPDATE_SUCCESS\n");
+            break;
+        }
+    }
+
+    if (umq_mempool_state_get(umqh, qbuf->mempool_id, &mempool_state) != UMQ_SUCCESS) {
+        LOG_PRINT_ERR("umq_mempool_state_get failed\n");
+        goto UNBIND;
+    }
+    LOG_PRINT_ERR("umq_mempool_state %u\n", mempool_state.import_state);
+
+    sleep(10);
 
     if (example_post_tx(umqh, EXAMPLE_CLIENT_POST_DATA, strlen(EXAMPLE_CLIENT_POST_DATA)) != 0) {
         LOG_PRINT_ERR("client post_tx failed\n");

@@ -56,6 +56,13 @@ static struct option g_long_options[] = {
     {NULL,                 0,                 NULL,  0 }
 };
 
+uint64_t g_share_umq = 0;
+
+uint64_t get_share_umq()
+{
+    return g_share_umq;
+}
+
 uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bind_info, uint32_t *bind_info_size)
 {
     umq_init_cfg_t *init_cfg = (umq_init_cfg_t *)calloc(1, sizeof(*init_cfg));
@@ -107,7 +114,20 @@ uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bin
         goto UNINIT;
     }
 
-    *bind_info_size = umq_bind_info_get(umqh, local_bind_info, *bind_info_size);
+    if (cfg->instance_mode == SERVER) {
+        option.create_flag |= UMQ_CREATE_FLAG_SUB_UMQ | UMQ_CREATE_FLAG_SHARE_RQ | UMQ_CREATE_FLAG_SUB_UMQ;
+        option.share_rq_umqh = umqh;
+        option.umq_ctx = umqh;
+        g_share_umq = umq_create(&option);
+        if (g_share_umq == UMQ_INVALID_HANDLE) {
+            LOG_PRINT_ERR("umq_create failed\n");
+            goto UNINIT;
+        }
+    } else {
+        g_share_umq = umqh;
+    }
+
+    *bind_info_size = umq_bind_info_get(g_share_umq, local_bind_info, *bind_info_size);
     if (*bind_info_size == 0) {
         LOG_PRINT_ERR("umq_bind_info_get failed\n");
         goto DESTROY;
