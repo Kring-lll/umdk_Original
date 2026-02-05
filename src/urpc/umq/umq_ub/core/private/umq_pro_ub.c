@@ -489,7 +489,7 @@ static int umq_ub_on_rx_done(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t *rx_buf
     switch (imm.bs.type) {
         case IMM_TYPE_MEM:
             if (imm.mem_import.sub_type == IMM_TYPE_MEM_IMPORT) {
-                if (umq_ub_data_plan_import_mem((uint64_t)(uintptr_t)queue, rx_buf, 0) != UMQ_SUCCESS) {
+                if (umq_ub_data_plan_import_mem((uint64_t)(uintptr_t)queue, rx_buf, 0, false) != UMQ_SUCCESS) {
                     *qbuf_status = UMQ_MEMPOOL_UPDATE_FAILED;
                     break;
                 }

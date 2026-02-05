@@ -1502,7 +1502,7 @@ static ALWAYS_INLINE int umq_ub_import_mem_done(ub_queue_t *queue, uint16_t memp
 }
 
 // The rx buf contains metadata including the IMM header, reference SGE and import memory details.
-int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t ref_seg_num)
+int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t ref_seg_num, bool send_rsp)
 {
     umq_imm_head_t *umq_imm_head = (umq_imm_head_t *)rx_buf->buf_data;
     if (umq_imm_head->type == IMM_PROTOCAL_TYPE_NONE) {
@@ -1534,7 +1534,7 @@ int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t re
 
         if (queue->imported_tseg_list[import_mempool_info[i].mempool_id] != NULL) {
             UMQ_LIMIT_VLOG_INFO("mempool %u has been imported\n", import_mempool_info[i].mempool_id);
-            (void)umq_ub_import_mem_done(queue, import_mempool_info[i].mempool_id);
+            send_rsp ? (void)umq_ub_import_mem_done(queue, import_mempool_info[i].mempool_id) : 0;
             continue;
         }
 
@@ -1553,7 +1553,7 @@ int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t re
             return UMQ_FAIL;
         }
 
-        if (umq_ub_import_mem_done(queue, import_mempool_info[i].mempool_id) != UMQ_SUCCESS) {
+        if (send_rsp && umq_ub_import_mem_done(queue, import_mempool_info[i].mempool_id) != UMQ_SUCCESS) {
             // send import mem done failed not cause the data plane to be unavailable
             UMQ_LIMIT_VLOG_WARN("send import mem done imm failed\n");
         }
@@ -1672,7 +1672,7 @@ static int process_send_imm(umq_buf_t *rx_buf, umq_ub_imm_t imm, uint64_t umqh)
         return ret;
     }
     if (imm.ub_plus.sub_type == IMM_TYPE_REVERSE_PULL_MEM) {
-        if (umq_ub_data_plan_import_mem(umqh, rx_buf, imm.ub_plus.msg_num) != UMQ_SUCCESS) {
+        if (umq_ub_data_plan_import_mem(umqh, rx_buf, imm.ub_plus.msg_num, true) != UMQ_SUCCESS) {
             UMQ_LIMIT_VLOG_ERR("import mem failed\n");
             umq_buf_free(rx_buf); // release rx
             return UMQ_CONTINUE_FLAG;
