@@ -709,17 +709,28 @@ umq_buf_t *umq_buf_break_and_free(umq_buf_t *qbuf)
         return NULL;
     }
     // break qbuf list for many batchs connected, only release the first batch.
-    umq_buf_t *next_batch_qbuf = qbuf->qbuf_next; /* if request_size = 0, return qbuf->qbuf_next */
+    umq_buf_t *next_batch_qbuf = NULL;
     umq_buf_t *tmp_buf = qbuf;
     uint32_t rest_data_size = tmp_buf->total_data_size;
-    while (tmp_buf && rest_data_size > 0) {
-        if (rest_data_size <= tmp_buf->data_size) {
-            next_batch_qbuf = tmp_buf->qbuf_next;
-            tmp_buf->qbuf_next = NULL;
-            break;
+    if (rest_data_size > 0) {
+        while (tmp_buf && rest_data_size > 0) {
+            if (rest_data_size <= tmp_buf->data_size) {
+                next_batch_qbuf = tmp_buf->qbuf_next;
+                tmp_buf->qbuf_next = NULL;
+                break;
+            }
+            rest_data_size -= tmp_buf->data_size;
+            tmp_buf = tmp_buf->qbuf_next;
         }
-        rest_data_size -= tmp_buf->data_size;
-        tmp_buf = tmp_buf->qbuf_next;
+    } else { /* request_size = 0 */
+        umq_buf_t *pre_buf = NULL;
+        while (tmp_buf && rest_data_size == 0) {
+            pre_buf = tmp_buf;
+            tmp_buf = tmp_buf->qbuf_next;
+            rest_data_size = tmp_buf->total_data_size;
+        }
+        pre_buf->qbuf_next = NULL;
+        next_batch_qbuf = tmp_buf;
     }
     umq_buf_free(qbuf);
     return next_batch_qbuf;
