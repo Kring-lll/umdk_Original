@@ -329,7 +329,7 @@ typedef struct ub_queue {
     uint32_t create_flag;
     uint64_t umq_ctx;
     urma_target_seg_t **imported_tseg_list;   // read-only
-    uint64_t addr_list[UMQ_MAX_ID_NUM];
+    uint64_t *addr_list;
 
     // config param
     umq_trans_mode_t umq_trans_mode;

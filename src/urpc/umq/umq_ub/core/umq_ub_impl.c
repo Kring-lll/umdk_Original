@@ -762,6 +762,9 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
     umq_ub_jfr_ctx_put(queue);
     umq_ub_queue_ctx_list_remove(&queue->qctx_node);
     umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->dev_ctx->ref_cnt, 1);
+    if (queue->addr_list != NULL) {
+        free(queue->addr_list);
+    }
     free(queue);
     return UMQ_SUCCESS;
 }
@@ -1133,15 +1136,27 @@ umq_buf_t *umq_ub_dequeue_impl_plus(uint64_t umqh_tp)
     return buf[0];
 }
 
-void umq_ub_record_rendezvous_buf(uint64_t umqh_tp, uint16_t msg_id, umq_buf_t *buf)
+int umq_ub_record_rendezvous_buf(uint64_t umqh_tp, uint16_t msg_id, umq_buf_t *buf)
 {
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
+    if (queue->addr_list == NULL) {
+        queue->addr_list = calloc(UMQ_MAX_ID_NUM, sizeof(uint64_t));
+        if (queue->addr_list == NULL) {
+            UMQ_LIMIT_VLOG_ERR("umq malloc addr_list failed\n");
+            return -UMQ_ERR_ENOMEM;
+        }
+    }
+
     queue->addr_list[msg_id] = (uint64_t)(uintptr_t)buf;
+    return UMQ_SUCCESS;
 }
 
 void umq_ub_remove_rendezvous_buf(uint64_t umqh_tp, uint16_t msg_id)
 {
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
+    if (queue->addr_list == NULL) {
+        return;
+    }
     queue->addr_list[msg_id] = 0;
 }
 
