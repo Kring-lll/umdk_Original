@@ -120,7 +120,7 @@ void umq_buf_free(umq_buf_t *qbuf);
 
 /**
  * User should ensure thread safety if io_lock_free is true
- * Break and free the qbufs of first batch
+ * Break and free the qbufs of first batch, free connnected qbufs if qbuf's total_data_size equal to 0 
  * @param[in] qbuf: list of qbuf
  * Return first qbuf addr of next batch, return NULL if not exist
  */
