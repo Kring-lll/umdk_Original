@@ -76,6 +76,14 @@ uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bin
         goto FREE_CFG;
     }
 
+    umq_buf_t *qbuf = umq_buf_alloc(65536 * sizeof(uint64_t), 1, UMQ_INVALID_HANDLE, NULL);
+    if (qbuf != NULL) {
+        LOG_PRINT_ERR("umq_buf_alloc qbuf size %lu, next %p\n", qbuf->total_data_size, qbuf->qbuf_next);
+        umq_buf_free(qbuf);
+    } else {
+        LOG_PRINT_ERR("umq_buf_alloc %u failed\n", 65536 * sizeof(uint64_t));
+    }
+
     umq_create_option_t option = {
         .trans_mode = init_cfg->trans_info[0].trans_mode,
         .create_flag = UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_TX_BUF_SIZE | UMQ_CREATE_FLAG_RX_DEPTH |
