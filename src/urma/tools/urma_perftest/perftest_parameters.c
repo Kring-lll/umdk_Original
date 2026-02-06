@@ -1386,6 +1386,11 @@ static int check_both_side_cfg(const perftest_config_t *local_cfg, const perftes
         (void)fprintf(stderr, "Config inconsistent[write_dirty_period].\n");
         return -1;
     }
+
+    if (local_cfg->aggr_mode == URMA_AGGR_MODE_STANDALONE && local_cfg->jfs_post_list > 1) {
+        (void)fprintf(stderr, "Standalone aggr mode do not support wqe list currently.\n");
+        return -1;
+    }
     return 0;
 }
 
