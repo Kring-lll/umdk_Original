@@ -111,6 +111,7 @@ typedef enum umq_dev_assign_mode {
 typedef struct umq_interrupt_option {
     uint32_t flag;                      // indicates which below property takes effect
     umq_io_direction_t direction;
+    bool enable_event_fd;               // true, will return event fd(used to notify the user to return credit)
 } umq_interrupt_option_t;
 
 typedef union umq_eid {
@@ -177,6 +178,9 @@ typedef struct umq_flow_control_cfg {
     uint16_t credits_per_request;
     // initial available credit for each umq
     uint16_t initial_credit;
+    // credit return ratio divisor, return_ratio = 1: return all credit, return_ratio = 2: return half the credit
+    uint16_t return_ratio;
+    uint32_t timeout_ms;
     // use atomic variables as flow control window
     bool use_atomic_window;
 } umq_flow_control_cfg_t;
