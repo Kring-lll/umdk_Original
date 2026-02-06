@@ -659,11 +659,14 @@ uint32_t umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_coun
 
     if (rx_cr_cnt > 0) {
         queue->interrupt_ctx.rx_fc_interrupt = false;
+        umq_ub_fc_packet_stats(&queue->flow_control, (uint32_t)rx_cr_cnt, UB_PACKET_STATS_TYPE_RECV);
     }
+
     uint32_t qbuf_cnt = 0;
     for (int i = 0; i < rx_cr_cnt; i++) {
         if (cr[i].status != URMA_CR_SUCCESS) {
             (void)umq_ub_fill_fc_rx_buf(queue);
+            umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_RECV_ERROR);
             UMQ_LIMIT_VLOG_ERR("UB RX reports cr[%d] status[%d], remote eid " EID_FMT ", remote jetty_id %u\n", i,
                                cr[i].status, EID_ARGS(cr[i].remote_id.eid), cr[i].remote_id.id);
             continue;
@@ -888,9 +891,11 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue)
         queue->interrupt_ctx.tx_fc_interrupt = false;
     }
 
+    uint32_t success_cnt = 0;
     for (int i = 0; i < tx_cr_cnt; i++) {
         umq_ub_fc_user_ctx_t  obj = {.value = cr[i].user_ctx};
         if (cr[i].status != URMA_CR_SUCCESS) {
+            umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND_ERROR);
             if (cr[i].status == URMA_CR_WR_FLUSH_ERR_DONE || cr[i].status == URMA_CR_WR_SUSPEND_DONE) {
                 UMQ_LIMIT_VLOG_INFO("UB TX reports cr[%d] status[%d] jetty_id[%u]\n", i, cr[i].status, cr[i].local_id);
                 continue;
@@ -899,8 +904,14 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue)
             umq_ub_fc_process_tx_error(queue, &obj);
             continue;
         }
+        success_cnt++;
         umq_ub_fc_process_tx(queue, &obj);
     }
+
+    if (success_cnt > 0) {
+        umq_ub_fc_packet_stats(&queue->flow_control, success_cnt, UB_PACKET_STATS_TYPE_SEND_SUCCESS);
+    }
+
     return UMQ_SUCCESS;
 }
 

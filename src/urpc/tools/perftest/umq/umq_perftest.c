@@ -546,6 +546,7 @@ static int umq_perftest_client_exchange_data(void)
     return 0;
 }
 
+static void *printf_dfx(void *arg);
 static int umq_perftest_run_client(umq_perftest_config_t *cfg)
 {
     int ret = -1;
@@ -589,6 +590,13 @@ static int umq_perftest_run_client(umq_perftest_config_t *cfg)
         goto UNBIND;
     }
 
+    pthread_t state_threads;
+    if (pthread_create(&state_threads, NULL, printf_dfx, NULL) != 0) {
+        LOG_PRINT("pthread_create failed\n");
+        ret = -1;
+        goto UNBIND;
+    }
+
     // run test
     ret = umq_perftest_start_test_threads(cfg);
     if (ret != 0) {
@@ -603,6 +611,8 @@ static int umq_perftest_run_client(umq_perftest_config_t *cfg)
 
     // finish ferf and out reslut
     umq_perftest_finish_perf(cfg);
+
+    pthread_join(state_threads, NULL);
 
 UNBIND:
     // unbind and flush tx and rx
@@ -654,6 +664,105 @@ static int umq_perftest_server_exchange_and_bind(umq_perftest_config_t *cfg)
     return 0;
 }
 
+static void show_fc_stats(umq_flow_control_stats_t *fc_stats)
+{
+    printf("pool_credit pool_idle: %lu\n", fc_stats->pool_credit.pool_idle);
+    printf("pool_credit pool_be_allocated: %lu\n", fc_stats->pool_credit.pool_be_allocated);
+    printf("pool_credit total_pool_idle: %lu\n", fc_stats->pool_credit.total_pool_idle);
+    printf("pool_credit total_pool_be_allocated: %lu\n", fc_stats->pool_credit.total_pool_be_allocated);
+    printf("pool_credit total_pool_post_rx_err: %lu\n", fc_stats->pool_credit.total_pool_post_rx_err);
+
+    printf("queue_credit queue_idle: %lu\n", fc_stats->queue_credit.queue_idle);
+    printf("queue_credit queue_be_allocated: %lu\n", fc_stats->queue_credit.queue_be_allocated);
+    printf("queue_credit queue_acquired: %lu\n", fc_stats->queue_credit.queue_acquired);
+    printf("queue_credit total_queue_idle: %lu\n", fc_stats->queue_credit.total_queue_idle);
+    printf("queue_credit total_queue_acquired: %lu\n", fc_stats->queue_credit.total_queue_acquired);
+    printf("queue_credit total_queue_be_allocated: %lu\n", fc_stats->queue_credit.total_queue_be_allocated);
+    printf("queue_credit total_queue_post_tx_success: %lu\n", fc_stats->queue_credit.total_queue_post_tx_success);
+    printf("queue_credit total_queue_post_tx_err: %lu\n", fc_stats->queue_credit.total_queue_post_tx_err);
+    printf("queue_credit total_queue_acquired_err: %lu\n", fc_stats->queue_credit.total_queue_acquired_err);
+    
+    printf("packet_state send_cnt: %lu\n", fc_stats->packet_stats.send_cnt);
+    printf("packet_state send_success: %lu\n", fc_stats->packet_stats.send_success);
+    printf("packet_state recv_cnt: %lu\n", fc_stats->packet_stats.recv_cnt);
+    printf("packet_state send_error_cnt: %lu\n", fc_stats->packet_stats.send_error_cnt);
+    printf("packet_state recv_error_cnt: %lu\n", fc_stats->packet_stats.recv_error_cnt);
+}
+
+static void show_qbuf_pool_stats(umq_qbuf_pool_stats_t *qbuf_pool_stats)
+{
+    umq_qbuf_pool_info_t *pool_info = NULL;
+    for (uint32_t i = 0; i < qbuf_pool_stats->num; i++) {
+        pool_info = &qbuf_pool_stats->qbuf_pool_info[i];
+        printf("-------------------------pool %u---------------------------------\n", i);
+        printf("mode %u\n", pool_info->mode);
+        printf("total_size %lu\n", pool_info->total_size);
+        printf("total_block_num %lu\n", pool_info->total_block_num);
+        printf("block_size %u\n", pool_info->block_size);
+        printf("headroom_size %u\n", pool_info->headroom_size);
+        printf("data_size %u\n", pool_info->data_size);
+        printf("buf_size %u\n", pool_info->buf_size);
+        printf("umq_buf_t_size %u\n", pool_info->umq_buf_t_size);
+        printf("block_num_with_data %lu\n", pool_info->available_mem.split.block_num_with_data);
+        printf("size_with_data %lu\n", pool_info->available_mem.split.size_with_data);
+        printf("block_num_without_data %lu\n", pool_info->available_mem.split.block_num_without_data);
+        printf("size_without_data %lu\n", pool_info->available_mem.split.size_without_data);
+    }
+}
+
+#ifndef EID_FMT
+#define EID_FMT "%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x"
+#endif
+
+#ifndef EID_RAW_ARGS
+#define EID_RAW_ARGS(eid) eid.raw[0], eid.raw[1], eid.raw[2], eid.raw[3], eid.raw[4], eid.raw[5], eid.raw[6],\
+        eid.raw[7], eid.raw[8], eid.raw[9], eid.raw[10], eid.raw[11], eid.raw[12], eid.raw[13], eid.raw[14], eid.raw[15]
+#endif
+
+static void show_umq_info(umq_info_t *umq_info)
+{
+    printf("trans_mode %u\n", umq_info->trans_mode);
+    printf("umq_id %u\n", umq_info->ub.umq_id);
+    printf("eid " EID_FMT "\n", EID_RAW_ARGS(umq_info->ub.eid));
+    printf("umq_id %s\n", umq_info->ub.dev_name);
+    printf("local_io_jetty_id %u\n", umq_info->ub.local_io_jetty_id);
+    printf("local_fc_jetty_id %u\n", umq_info->ub.local_fc_jetty_id);
+    printf("remote_io_jetty_id %u\n", umq_info->ub.remote_io_jetty_id);
+    printf("remote_fc_jetty_id %u\n", umq_info->ub.remote_fc_jetty_id);
+}
+
+static void *printf_dfx(void *arg)
+{
+    uint64_t umqh = g_umq_perftest_ctx.umqh;
+    umq_flow_control_stats_t fc_stats = {0};
+    umq_qbuf_pool_stats_t qbuf_pool_stats = {0};
+    umq_info_t umq_info = {0};
+    while (!is_perftest_force_quit()) {
+        sleep(5);
+        printf("================================flow_control=========================================\n");
+        if (umq_stats_flow_control_get(umqh, &fc_stats) != UMQ_SUCCESS) {
+            LOG_PRINT("umq_stats_fc_get failed\n");
+            return NULL;
+        }
+        show_fc_stats(&fc_stats);
+        printf("\n================================qbuf_pool=========================================\n");
+        if (umq_stats_qbuf_pool_get(umqh, &qbuf_pool_stats) != UMQ_SUCCESS) {
+            LOG_PRINT("umq_stats_qbuf_pool_get failed\n");
+            return NULL;
+        }
+        show_qbuf_pool_stats(&qbuf_pool_stats);
+
+        printf("\n================================qbuf_pool=========================================\n");
+        if (umq_info_get(umqh, &umq_info) != UMQ_SUCCESS) {
+            LOG_PRINT("umq_info_get failed\n");
+            return NULL;
+        }
+        show_umq_info(&umq_info);
+        printf("\n================================end=========================================\n\n");
+    }
+    return NULL;
+}
+
 static int umq_perftest_run_server(umq_perftest_config_t *cfg)
 {
     int ret = -1;
@@ -702,6 +811,13 @@ static int umq_perftest_run_server(umq_perftest_config_t *cfg)
         goto UNBIND;
     }
 
+    pthread_t state_threads;
+    if (pthread_create(&state_threads, NULL, printf_dfx, NULL) != 0) {
+        LOG_PRINT("pthread_create failed\n");
+        ret = -1;
+        goto UNBIND;
+    }
+
     // run test
     ret = umq_perftest_start_test_threads(cfg);
     if (ret != 0) {
@@ -716,6 +832,7 @@ static int umq_perftest_run_server(umq_perftest_config_t *cfg)
 
     // finish ferf and out reslut
     umq_perftest_finish_perf(cfg);
+    pthread_join(state_threads, NULL);
 
 UNBIND:
     // unbind and flush rx and tx
