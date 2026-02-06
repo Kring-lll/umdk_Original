@@ -111,6 +111,7 @@ typedef enum umq_dev_assign_mode {
 typedef struct umq_interrupt_option {
     uint32_t flag;                      // indicates which below property takes effect
     umq_io_direction_t direction;
+    bool enable_event_fd;
 } umq_interrupt_option_t;
 
 typedef union umq_eid {
@@ -167,6 +168,7 @@ typedef struct umq_trans_info {
 #define UMQ_FEATURE_ENABLE_STATS            (1 << 2)    // enable stats collection
 #define UMQ_FEATURE_ENABLE_PERF             (1 << 3)    // enable performance collection
 #define UMQ_FEATURE_ENABLE_FLOW_CONTROL     (1 << 4)    // enable flow control
+#define UMQ_FEATURE_ENABLE_SHARED           (1 << 5)    // enable shared
 
 typedef struct umq_flow_control_cfg {
     // set when rx >= initial_window at first, [1, rx_depth], otherwise use rx_depth / 2 by default
@@ -178,6 +180,8 @@ typedef struct umq_flow_control_cfg {
     // initial available credit for each umq
     uint16_t initial_credit;
     // use atomic variables as flow control window
+    uint32_t slot_num;
+    uint32_t timeout_ms;
     bool use_atomic_window;
 } umq_flow_control_cfg_t;
 
