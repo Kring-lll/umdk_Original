@@ -44,8 +44,9 @@ int urpc_thread_index_get(void)
 static inline int urpc_thread_index_alloc(void)
 {
     uint32_t id = 0;
-    if (urpc_id_generator_alloc(&g_urpc_thread_a_ctx.id_generator, 0, &id) != 0) {
-        UTIL_LOG_ERR("urpc thread num exceeds max %d\n", URPC_THREAD_NUM_MAX);
+    int ret = urpc_id_generator_alloc(&g_urpc_thread_a_ctx.id_generator, 0, &id);
+    if (ret != 0) {
+        UTIL_LOG_ERR("urpc thread num exceeds max %d, status: %d\n", URPC_THREAD_NUM_MAX, ret);
         return -1;
     }
 
@@ -124,7 +125,7 @@ int urpc_thread_create(const char *thread_name, urpc_thread_job_t *job, uint32_t
         ret = snprintf(param->name, URPC_THREAD_NAME_SIZE, "%s", thread_name);
     }
     if (ret < 0) {
-        UTIL_LOG_ERR("urpc thread name copy failed, ret: %d\n", ret);
+        UTIL_LOG_ERR("urpc thread name copy failed, status: %d\n", ret);
         goto THREAD_INDEX_FREE;
     }
 
@@ -197,7 +198,7 @@ int urpc_thread_ctx_init(void)
     int ret =
         urpc_id_generator_init(&g_urpc_thread_a_ctx.id_generator, URPC_ID_GENERATOR_TYPE_BITMAP, URPC_THREAD_NUM_MAX);
     if (ret != 0) {
-        UTIL_LOG_ERR("urpc thread id generator init failed, ret: %d\n", ret);
+        UTIL_LOG_ERR("urpc thread id generator init failed, status: %d\n", ret);
         return URPC_FAIL;
     }
 
