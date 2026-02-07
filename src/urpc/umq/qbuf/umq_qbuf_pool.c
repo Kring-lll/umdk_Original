@@ -342,9 +342,10 @@ int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *opti
         }
 
         while (local_pool->buf_cnt_without_data < num) {
-            if (fetch_from_global(&g_qbuf_pool.block_pool, local_pool, false, QBUF_POOL_BATCH_CNT) <= 0) {
-                UMQ_VLOG_ERR(VLOG_UMQ, "fetch from global failed, current size: %u, alloc num: %u\n",
-                    local_pool->buf_cnt_without_data, num);
+            int ret = fetch_from_global(&g_qbuf_pool.block_pool, local_pool, false, QBUF_POOL_BATCH_CNT);
+            if (ret <= 0) {
+                UMQ_VLOG_ERR(VLOG_UMQ, "fetch from global failed, current size: %u, alloc num: %u, status: %d\n",
+                    local_pool->buf_cnt_without_data, num, ret);
                 return -UMQ_ERR_ENOMEM;
             }
         }
@@ -355,9 +356,10 @@ int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *opti
     }
 
     while (local_pool->buf_cnt_with_data < param.actual_buf_count) {
-        if (fetch_from_global(&g_qbuf_pool.block_pool, local_pool, true, QBUF_POOL_BATCH_CNT) <= 0) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "fetch from global failed, current size: %u, alloc num: %u\n",
-                local_pool->buf_cnt_with_data, param.actual_buf_count);
+        int ret = fetch_from_global(&g_qbuf_pool.block_pool, local_pool, true, QBUF_POOL_BATCH_CNT);
+        if (ret <= 0) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "fetch from global failed, current size: %u, alloc num: %u, status: %d\n",
+                local_pool->buf_cnt_with_data, param.actual_buf_count, ret);
             return -UMQ_ERR_ENOMEM;
         }
     }
