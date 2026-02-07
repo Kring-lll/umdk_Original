@@ -705,8 +705,7 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
         return -UMQ_ERR_EINVAL;
     }
     if (umq_fetch_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt) != 1) {
-        UMQ_VLOG_ERR("umqh ref cnt is not 0\n");
-        return -UMQ_ERR_EBUSY;
+        UMQ_VLOG_WARN("umqh ref cnt is not 0\n");
     }
 
     if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0 &&
