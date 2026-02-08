@@ -78,7 +78,7 @@ urma_device_t *urma_get_device_by_name(char *dev_name);
  * @param[in] [Required] type: device's transport type;
  * Return: urma_device; NULL means no device returned;
  */
-urma_device_t *urma_get_device_by_eid(urma_eid_t eid, urma_transport_type_t type);
+urma_device_t *urma_get_device_by_eid(urma_eid_t eid, urma_transport_type_t type, urma_device_t **device_list, int device_num);
 
 /**
  * Query the attributes and capabilities of urma devices.
