@@ -36,6 +36,8 @@
 
 /* manager of global table in bonding device */
 bondp_global_context_t *g_bondp_global_ctx = NULL;
+static urma_device_t *bondp_urma_get_device_by_eid(urma_eid_t eid, urma_transport_type_t type, urma_device_t **device_list, 
+    int dev_num);
 
 static urma_ops_t g_bond_ops = {
     /* OPs name */
@@ -211,9 +213,33 @@ static int get_dev_and_ctx_by_name(char *dev_name, urma_device_t **dev, urma_con
  * This function will only be called in matrix server mode
  * so all devices are UB devices
  */
-static int get_dev_and_ctx_by_eid(urma_eid_t *eid, urma_device_t **dev, urma_context_t **ctx)
+static urma_device_t *bondp_urma_get_device_by_eid(urma_eid_t eid, urma_transport_type_t type, urma_device_t **device_list, int dev_num)
 {
-    *dev = urma_get_device_by_eid(*eid, URMA_TRANSPORT_UB);
+    urma_eid_info_t *eid_list;
+    uint32_t cnt = 0;
+
+    urma_device_t *urma_dev = NULL;
+    for (int i = 0; i < dev_num; i++) {
+        if (device_list[i]->type != type) {
+            continue;
+        }
+        eid_list = urma_get_eid_list(device_list[i], &cnt);
+        for (uint32_t j = 0; eid_list != NULL && j < cnt; j++) {
+            if (memcmp(&eid_list[j].eid, &eid, sizeof(urma_eid_t)) == 0) {
+                urma_dev = device_list[i];
+                urma_free_eid_list(eid_list);
+                return urma_dev;
+            }
+        }
+        urma_free_eid_list(eid_list);
+    }
+    errno = ENODEV;
+    return urma_dev;
+}
+
+static int get_dev_and_ctx_by_eid(urma_eid_t *eid, urma_device_t **dev, urma_context_t **ctx, urma_device_t **device_list, int dev_num)
+{
+    *dev = bondp_urma_get_device_by_eid(*eid, URMA_TRANSPORT_UB, device_list, dev_num);
     if (*dev == NULL) {
         URMA_LOG_ERR("Failed to get device\n");
         return -1;
@@ -442,6 +468,12 @@ DELETE_SLAVE_CTX:
 
 static int init_matrix_slave_devices(bondp_context_t *bond_ctx, urma_context_aggr_mode_t aggr_mode)
 {
+    int device_num = 0;
+ 	urma_device_t **device_list = urma_get_device_list(&device_num);
+    if (device_list == NULL || device_num == 0) {
+        URMA_LOG_ERR("urma get device list failed!\n");
+        return -1;
+    }
     bond_ctx->topo_map = g_bondp_global_ctx->topo_map;
     bondp_topo_agg_dev_t *topo_info = get_topo_dev_info_by_agg_eid(bond_ctx->topo_map, &bond_ctx->v_ctx.eid);
     if (topo_info == NULL) {
@@ -484,7 +516,7 @@ static int init_matrix_slave_devices(bondp_context_t *bond_ctx, urma_context_agg
         if (eid_list[i] == NULL) {
             continue;
         }
-        int ret = get_dev_and_ctx_by_eid(eid_list[i], &bond_ctx->p_devs[i], &p_ctxs[i]);
+        int ret = get_dev_and_ctx_by_eid(eid_list[i], &bond_ctx->p_devs[i], &p_ctxs[i], device_list, device_num);
         if (ret != 0) {
             URMA_LOG_ERR("Failed to create ctx for primary eid[%d]\n", i);
             goto DELETE_CTX;
@@ -501,9 +533,11 @@ static int init_matrix_slave_devices(bondp_context_t *bond_ctx, urma_context_agg
     bond_ctx->dev_num = aggr_mode == URMA_AGGR_MODE_STANDALONE
         ? SINGLE_DIE_DEVNUM
         : PRIMARY_EID_NUM + PORT_EID_MAX_NUM;
+    urma_free_device_list(device_list);
     return init_slave_context_fd(bond_ctx);
 
 DELETE_CTX:
+    urma_free_device_list(device_list);
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
         if (p_ctxs[i] != NULL) {
             urma_delete_context(bond_ctx->p_ctxs[i]);
