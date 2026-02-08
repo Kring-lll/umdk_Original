@@ -425,17 +425,10 @@ urma_device_t *urma_get_device_by_name(char *dev_name)
     return urma_dev;
 }
 
-urma_device_t *urma_get_device_by_eid(urma_eid_t eid, urma_transport_type_t type)
+urma_device_t *urma_get_device_by_eid(urma_eid_t eid, urma_transport_type_t type, urma_device_t **device_list, int device_num)
 {
-    int device_num = 0;
     urma_eid_info_t *eid_list;
     uint32_t cnt = 0;
-
-    urma_device_t **device_list = urma_get_device_list(&device_num);
-    if (device_list == NULL || device_num == 0) {
-        URMA_LOG_ERR("urma get device list failed!\n");
-        return NULL;
-    }
 
     urma_device_t *urma_dev = NULL;
     for (int i = 0; i < device_num; i++) {
@@ -447,13 +440,11 @@ urma_device_t *urma_get_device_by_eid(urma_eid_t eid, urma_transport_type_t type
             if (memcmp(&eid_list[j].eid, &eid, sizeof(urma_eid_t)) == 0) {
                 urma_dev = device_list[i];
                 urma_free_eid_list(eid_list);
-                urma_free_device_list(device_list);
                 return urma_dev;
             }
         }
         urma_free_eid_list(eid_list);
     }
-    urma_free_device_list(device_list);
     errno = ENODEV;
     return urma_dev;
 }
