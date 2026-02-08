@@ -1854,7 +1854,7 @@ urma_status_t bondp_get_async_event(urma_context_t *ctx, urma_async_event_t *v_e
         v_event->urma_ctx = ctx;
         if (init_elment_vjetty(v_event, p_event) != 0) {
             free(p_event);
-            URMA_LOG_ERR("failed to get invalid jetty.\n");
+            URMA_LOG_ERR("failed to init vjetty.\n");
             return URMA_EINVAL;
         }
         v_event->event_type = p_event->event_type;
