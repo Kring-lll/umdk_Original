@@ -343,7 +343,7 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
 
     InitStatusTargetSum();
     if constexpr (EXEC_FLAG & (EXEC_FLAG_DEEP_FUSE | EXEC_FLAG_SHARED_EXPERT)) {
-        coreIdx_ = get_block_idx();
+        coreIdx_ = get_block_idx(); // AscendC::GetBlockIdx() / 2;
     }
     SplitCoreCal();
 

@@ -410,7 +410,8 @@ public:
         LayoutDequantScale layoutDequantScale;
         GM_ADDR ptrWorkspace;
         GM_ADDR gmX;
-        GM_ADDR debugGm;
+        GM_ADDR gmMoeSmoothScales;
+        GM_ADDR gmShareSmoothScales;
         GM_ADDR gmexpertIds;
         GM_ADDR gmXActiveMask;
         GM_ADDR commArgs;
@@ -449,7 +450,7 @@ public:
                LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale const &layoutPerTokenScale_, GM_ADDR ptrOutput_, LayoutOutput const &layoutOutput_,
                GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_,
-               GM_ADDR gmX_, GM_ADDR debugGm_, GM_ADDR gmexpertIds_, GM_ADDR gmExpandIdx_, GM_ADDR gmEpSendCount_,
+               GM_ADDR gmX_, GM_ADDR gmMoeSmoothScales_, GM_ADDR gmShareSmoothScales_, GM_ADDR gmexpertIds_, GM_ADDR gmExpandIdx_, GM_ADDR gmEpSendCount_,
                GM_ADDR gmXActiveMask_, GM_ADDR commArgs_, GM_ADDR gmResvered_, GM_ADDR gmExpertTokenNums_,
                GM_ADDR gmShareX1_, GM_ADDR gmShareX1Scale_, GM_ADDR gmShareSwigluOut_, GM_ADDR gmShareX2_, LayoutOutput const &layoutShareOutput_, GM_ADDR gmShareX2Scale_, GM_ADDR gmSwigluOut_,
                const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
@@ -474,7 +475,8 @@ public:
               layoutDequantScale(layoutDequantScale_),
               ptrWorkspace(ptrWorkspace_),
               gmX(gmX_),
-              debugGm(debugGm_),
+              gmMoeSmoothScales(gmMoeSmoothScales_),
+              gmShareSmoothScales(gmShareSmoothScales_),
               gmexpertIds(gmexpertIds_),
               gmExpandIdx(gmExpandIdx_),
               gmEpSendCount(gmEpSendCount_),
@@ -908,7 +910,7 @@ public:
     }
 
     CATLASS_DEVICE
-    void QuantToken(AscendC::LocalTensor<XType> &xInTensor, AscendC::LocalTensor<int8_t> &yInt8Tensor, int64_t ubOffset)
+    void QuantToken(AscendC::LocalTensor<XType> &xInTensor, AscendC::LocalTensor<float> &smoothScaleTensor, AscendC::LocalTensor<int8_t> &yInt8Tensor, int64_t ubOffset)
     {
         int64_t subUbOffset = ubOffset;
         AscendC::LocalTensor<float> xFp32TmpTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
@@ -924,7 +926,10 @@ public:
 
         AscendC::Cast(xFp32TmpTensor, xInTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
         AscendC::PipeBarrier<PIPE_V>();
+        AscendC::Mul(xFp32TmpTensor, xFp32TmpTensor, smoothScaleTensor, tokenLength);
+        AscendC::PipeBarrier<PIPE_V>();
         AscendC::Abs(xFp32AbsTensor, xFp32TmpTensor, tokenLength);
+        // AscendC::DumpTensor(xFp32AbsTensor, __LINE__, 5120);
         AscendC::PipeBarrier<PIPE_V>();
         AscendC::ReduceMax(xRowMaxTensor, xFp32AbsTensor, xFp32AbsTensor, tokenLength, false);
         AscendC::PipeBarrier<PIPE_V>();
@@ -932,6 +937,10 @@ public:
         AscendC::SetFlag<AscendC::HardEvent::V_S>(0);
         AscendC::WaitFlag<AscendC::HardEvent::V_S>(0);
         float dynamicQuantScale = float(127.0) / xRowMaxTensor.GetValue(0);
+
+        // AscendC::printf("xRowMaxTensor.GetValue(0)= %f, dynamicQuantScale= %f\n", xRowMaxTensor.GetValue(0), dynamicQuantScale);
+
+
         yFp32Tensor.SetValue(tokenLength / sizeof(float), float(1.0) / dynamicQuantScale);
         yInt32Tensor.SetValue(tokenLength / sizeof(int32_t) + 1, tokenFlag);
         AscendC::SetFlag<AscendC::HardEvent::S_V>(0);
@@ -1008,7 +1017,7 @@ public:
             AscendC::DataCopy(xInTensor[index], srcWinGMTensor[tokenIndex * tokenLength], tokenLength);
             AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventId);
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventId);
-            QuantToken(xInTensor[index], yInt8Tensor[index], ubOffset);
+            QuantToken(xInTensor[index], yFp32Tensor[index]/*ERROR!!!*/, yInt8Tensor[index], ubOffset);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventId);
             AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
 
@@ -1036,7 +1045,7 @@ public:
     }
 
     CATLASS_DEVICE
-    void SendToMoeExprt(GM_ADDR gmX, GM_ADDR gmExpandIdx)
+    void SendToMoeExprt(GM_ADDR gmX, GM_ADDR gmExpandIdx, GM_ADDR gmMoeSmoothScales)
     {
         uint32_t sendTokenNum = expertIdsCnt / sendToMoeAivNum;
         uint32_t remainderTokenNum = expertIdsCnt % sendToMoeAivNum;
@@ -1060,9 +1069,12 @@ public:
         AscendC::LocalTensor<XType> xInTensor[BUFFER_NUM];
         AscendC::LocalTensor<int8_t> yInt8Tensor[BUFFER_NUM];
         AscendC::LocalTensor<float> yFp32Tensor[BUFFER_NUM];
+        AscendC::LocalTensor<float> moeSmoothScaleTensor[BUFFER_NUM];
 
         AscendC::GlobalTensor<XType> srcWinGMTensor;
         srcWinGMTensor.SetGlobalBuffer((__gm__ XType *)gmX);
+        AscendC::GlobalTensor<float> moeSmoothScaleGMTensor;
+        moeSmoothScaleGMTensor.SetGlobalBuffer((__gm__ float*) gmMoeSmoothScales);
 
         xInTensor[0] = resource.ubBuf.template GetBufferByByte<XType>(ubOffset);
         ubOffset += CEIL_UP(tokenLength * sizeof(XType));
@@ -1072,6 +1084,10 @@ public:
         ubOffset += CEIL_UP(axisHCommu * sizeof(int8_t));
         yInt8Tensor[1] = resource.ubBuf.template GetBufferByByte<int8_t>(ubOffset);
         ubOffset += CEIL_UP(axisHCommu * sizeof(int8_t));
+        moeSmoothScaleTensor[0] = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
+        ubOffset += CEIL_UP(tokenLength * sizeof(float));
+        moeSmoothScaleTensor[1] = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
+        ubOffset += CEIL_UP(tokenLength * sizeof(float));
         AscendC::GlobalTensor<int8_t> dstWinGMTensor;
         AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
         AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(1);
@@ -1104,9 +1120,11 @@ public:
                 AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventId);
                 AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(eventId);
                 AscendC::DataCopy(xInTensor[index], srcWinGMTensor[tokenIndex / axisK * tokenLength], tokenLength);
+                AscendC::PipeBarrier<PIPE_MTE2>();
+                AscendC::DataCopy(moeSmoothScaleTensor[index], moeSmoothScaleGMTensor[dstExpertId * tokenLength], tokenLength);
                 AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventId);
                 AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventId);
-                QuantToken(xInTensor[index], yInt8Tensor[index], ubOffset);
+                QuantToken(xInTensor[index], moeSmoothScaleTensor[index], yInt8Tensor[index], ubOffset);
                 AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventId);
 
                 AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
@@ -1134,7 +1152,7 @@ public:
     }
 
     CATLASS_DEVICE void
-    SendCoreFunc(GM_ADDR gmX, GM_ADDR gmExpertIds, GM_ADDR gmX1, GM_ADDR gmX1Scale,
+    SendCoreFunc(GM_ADDR gmX, GM_ADDR gmExpertIds, GM_ADDR gmMoeSmoothScales, GM_ADDR gmX1, GM_ADDR gmX1Scale,
                  GM_ADDR gmExpandIdx, GM_ADDR gmXActiveMask)
     {
         ubOffset = 0;
@@ -1169,13 +1187,13 @@ public:
         if (hasShareExpert && sendCoreIdx >= sendToMoeAivNum) {
             SendToShareExprt(gmX, gmX1, gmX1Scale);
         } else {
-            SendToMoeExprt(gmX, gmExpandIdx);
+            SendToMoeExprt(gmX, gmExpandIdx, gmMoeSmoothScales);
         }
         AscendC::PipeBarrier<PIPE_ALL>();
     }
 
     CATLASS_DEVICE
-    void shareQuantCoreFunc(GM_ADDR gmX, GM_ADDR gmShareX1Token, GM_ADDR gmShareX1Scale)
+    void shareQuantCoreFunc(GM_ADDR gmX, GM_ADDR gmShareSmoothScales, GM_ADDR gmShareX1Token, GM_ADDR gmShareX1Scale)
     {
         int64_t subUbOffset = 0;
         uint32_t quantTokenPerCore = axisBS / shareQuantCoreNum; 
@@ -1198,6 +1216,8 @@ public:
         dstXInt8GMTensor.SetGlobalBuffer((__gm__ int8_t*)gmShareX1Token);
         AscendC::GlobalTensor<float> dstXScaleGMTensor; // token scale输出
         dstXScaleGMTensor.SetGlobalBuffer((__gm__ float*)gmShareX1Scale);
+        AscendC::GlobalTensor<float> shareSmoothScaleGMTensor;
+        shareSmoothScaleGMTensor.SetGlobalBuffer((__gm__ float*)gmShareSmoothScales);
     
         AscendC::LocalTensor<XType> xInTensor[BUFFER_NUM];
         AscendC::LocalTensor<int8_t> yInt8Tensor[BUFFER_NUM];
@@ -1212,6 +1232,12 @@ public:
         yInt8Tensor[1] = resource.ubBuf.template GetBufferByByte<int8_t>(subUbOffset);
         yFp32Tensor[1] = yInt8Tensor[1].template ReinterpretCast<float>();
         subUbOffset += CEIL_UP(axisHCommu * sizeof(int8_t));
+        AscendC::LocalTensor shareSmoothScaleTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
+        subUbOffset += CEIL_UP(tokenLength * sizeof(float));
+        AscendC::DataCopy(shareSmoothScaleTensor, shareSmoothScaleGMTensor, tokenLength);
+        AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(2);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(2);
+        // AscendC::DumpTensor(shareSmoothScaleTensor, 1111, 5120);
 
         // 输入输出开double buffer
         AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0); // MTE2等MTE3
@@ -1227,7 +1253,13 @@ public:
             AscendC::DataCopy(xInTensor[index], srcXGMTensor[tokenIndex * tokenLength], tokenLength);                                            
             AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventId);
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventId);
-            QuantToken(xInTensor[index], yInt8Tensor[index], subUbOffset);
+            QuantToken(xInTensor[index], shareSmoothScaleTensor, yInt8Tensor[index], subUbOffset);
+
+            // AscendC::DumpTensor(xInTensor[index], __LINE__, 5120);
+            // AscendC::DumpTensor(shareSmoothScaleTensor, __LINE__, 5120);
+            // AscendC::DumpTensor(yInt8Tensor[index], __LINE__, 5120);
+            // AscendC::DumpTensor(yFp32Tensor[index][tokenLength / sizeof(float)], __LINE__, 8);
+
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventId);
             AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventId);
@@ -1688,7 +1720,7 @@ public:
                     CheckSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET,
                         static_cast<uint8_t>(compCoreNum + compCoreIdx), target);
                     target += 1;
-                    blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
+                    blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC, false);
                     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
                 }
@@ -1941,12 +1973,12 @@ public:
         // return;
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             if (isShareQuantCore) {
-                shareQuantCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmShareX1, (GM_ADDR)params.gmShareX1Scale);
+                shareQuantCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmShareSmoothScales, (GM_ADDR)params.gmShareX1, (GM_ADDR)params.gmShareX1Scale);
             }
         }
         // return;
         if (isSendCore) {
-            SendCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmexpertIds, (GM_ADDR)params.ptrA,
+            SendCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmexpertIds, (GM_ADDR)params.gmMoeSmoothScales, (GM_ADDR)params.ptrA,
                         (GM_ADDR)params.ptrPerTokenScale, (GM_ADDR)params.gmExpandIdx, (GM_ADDR)params.gmXActiveMask);
         }
         auto gmShareSwigluOutput = reinterpret_cast<__gm__ float *>(params.gmShareSwigluOut);

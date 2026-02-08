@@ -164,7 +164,7 @@ public:
     CATLASS_DEVICE
     void operator()(GemmCoord const &blockShapeMNK, GemmCoord const &blockCoordMNK,
                     GemmCoord const &actualBlockShapeMNK, AscendC::GlobalTensor<ElementC> const &gmBlockC,
-                    LayoutC const &layoutBlockC, Callback &&callback = Callback{})
+                    LayoutC const &layoutBlockC, bool act_left = true, Callback &&callback = Callback{})
     {
         if (0 == actualBlockShapeMNK.k()) {
             return;
@@ -176,6 +176,7 @@ public:
         MatrixCoord actualBlockShape = actualBlockShapeMNK.GetCoordMN();
         MatrixCoord blockOffset = blockCoord * blockShape;
         bool isLeft = blockOffset.column() < (params.layoutD.shape(1) >> 1);
+        isLeft = act_left ? isLeft : (!isLeft);
         AscendC::GlobalTensor<ElementScale> gmScale;
         gmScale.SetGlobalBuffer(params.ptrScale);
         AscendC::GlobalTensor<ElementPerTokenScale> gmPerTokenScale;

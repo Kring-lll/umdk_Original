@@ -34,7 +34,7 @@ TORCH_LIBRARY(umdk_cam_op_lib, m)
     Tensor[] gmm2_weight, Tensor[] gmm2_weight_scale, Tensor expert_scales, \
     Tensor? share_gmm1_weight, Tensor? share_gmm1_weight_scale, \
     Tensor? share_gmm2_weight, Tensor? share_gmm2_weight_scale, \
-    Tensor? expert_smooth_scales, Tensor? x_active_mask, Tensor? comm_args, \
+    Tensor? expert_smooth_scales, Tensor? share_smooth_scales, Tensor? x_active_mask, Tensor? comm_args, \
     str group_ep, int ep_rank_size, int ep_rank_id, int moe_expert_num, int shared_expert_num, \
     int shared_expert_rank_num, int quant_mode, int global_bs) -> Tensor[]");
     m.def("get_dispatch_layout(Tensor topk_idx, int num_experts, int num_ranks) -> (Tensor, Tensor)");

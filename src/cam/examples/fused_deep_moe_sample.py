@@ -44,6 +44,7 @@ BASE_KWARGS = {
     "with_mc2_mask": False,
     "dynamic_eplb": False,
     "with_share": False,
+    "with_smooth": False,
     "share_expert_intermediate_size": 2048  # shared expert gmm1HLen
 }
 
@@ -158,11 +159,11 @@ class DecodeMoeOps(torch.nn.Module):
             self.share_gmm1_weight_scale_fp32 = None
             self.share_gmm2_weight_scale_fp32 = None
 
-    def _apply_ops(self, x, expert_ids, smooth_scales, expert_scales, x_active_mask):
+    def _apply_ops(self, x, expert_ids, smooth_scales, share_smooth_scales, expert_scales, x_active_mask):
         raise NotImplementedError("To be implemented in subclass")
 
-    def forward(self, x, expert_ids, smooth_scales, expert_scales, x_active_mask):
-        return self._apply_ops(x, expert_ids, smooth_scales, expert_scales, x_active_mask)
+    def forward(self, x, expert_ids, smooth_scales, share_smooth_scales, expert_scales, x_active_mask):
+        return self._apply_ops(x, expert_ids, smooth_scales, share_smooth_scales, expert_scales, x_active_mask)
 
 
 class SmallOps(DecodeMoeOps):
@@ -197,23 +198,24 @@ class SmallOps(DecodeMoeOps):
                          share_gmm2_weight, share_gmm2_weight_scale)
         self.tp_hcomm_info = ""
 
-    def share_compute(self, x):
-        x1_int8, x1_scale = torch_npu.npu_dynamic_quant(x)
+    def share_compute(self, x, share_smooth_scales):
+        x1_int8, x1_scale = torch_npu.npu_dynamic_quant(x, smooth_scales=share_smooth_scales)
         gmm1_result = torch_npu.npu_quant_matmul(x1_int8, self.share_gmm1_weight, self.share_gmm1_weight_scale, pertoken_scale=x1_scale, output_dtype=x.dtype)
         swiglu_out = torch_npu.npu_swiglu(gmm1_result)
         x2_int8, x2_scale = torch_npu.npu_dynamic_quant(swiglu_out)
         gmm2_result = torch_npu.npu_quant_matmul(x2_int8, self.share_gmm2_weight, self.share_gmm2_weight_scale, pertoken_scale=x2_scale, output_dtype=x.dtype)
         return gmm2_result
 
-    def _apply_ops(self, x, expert_ids, smooth_scales, expert_scales, x_active_mask):
+    def _apply_ops(self, x, expert_ids, smooth_scales, share_smooth_scales, expert_scales, x_active_mask):
         if self.with_share:
-            share_output = self.share_compute(x)
+            share_output = self.share_compute(x, share_smooth_scales)
         else:
             share_output = None
         outputs = torch_npu.npu_moe_distribute_dispatch_v2(
             x=x,
             expert_ids=expert_ids,
             expert_scales=expert_scales,
+            scales=smooth_scales,
             x_active_mask=x_active_mask,
             group_ep=self.ep_hcomm_info,
             ep_world_size=self.ep_world_size,
@@ -317,7 +319,7 @@ class FusionOp(DecodeMoeOps):
                          share_gmm2_weight, share_gmm2_weight_scale)
         self.comm_args = comm_args
 
-    def _apply_ops(self, x, expert_ids, smooth_scales, expert_scales, x_active_mask):
+    def _apply_ops(self, x, expert_ids, smooth_scales, share_smooth_scales, expert_scales, x_active_mask):
         output, share_output, expert_token_nums = torch.ops.umdk_cam_op_lib.fused_deep_moe(
             x=x,
             expert_ids=expert_ids,
@@ -331,6 +333,7 @@ class FusionOp(DecodeMoeOps):
             share_gmm2_weight=self.share_gmm2_weight,
             share_gmm2_weight_scale=self.share_gmm2_weight_scale_fp32,
             expert_smooth_scales=smooth_scales,
+            share_smooth_scales=share_smooth_scales,
             x_active_mask=x_active_mask,
             comm_args=self.comm_args,
             group_ep=self.ep_hcomm_info,
@@ -403,6 +406,7 @@ def generate_datas(batch_size,
                    enable_dynamic_bs=False,
                    with_mc2_mask=False,
                    with_share=False,
+                   with_smooth=False,
                    share_expert_intermediate_size=None):
     is_shared_expert = global_rank_id < shared_expert_rank_num
     moe_expert_num_per_rank = moe_expert_num // (ep_world_size - shared_expert_rank_num)
@@ -470,6 +474,10 @@ def generate_datas(batch_size,
     else:
         x = x.half()
     smooth_sales = None
+    share_smooth_scales = None
+    if with_smooth:
+        smooth_sales = torch.rand([moe_expert_num, token_hidden_size])
+        share_smooth_scales = torch.rand([token_hidden_size])
     x_active_mask = None
     valid_token_num = actual_bs
     if with_mc2_mask:
@@ -477,7 +485,7 @@ def generate_datas(batch_size,
         x_active_mask = torch.cat(
             (torch.ones(valid_token_num),
              torch.zeros(actual_bs - valid_token_num))).bool()
-    return (x, expert_ids, smooth_sales, expert_scales, x_active_mask), \
+    return (x, expert_ids, smooth_sales, share_smooth_scales, expert_scales, x_active_mask), \
             (gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale), \
             (share_mm1_weight, share_mm1_weight_scale, share_mm2_weight, share_mm2_weight_scale), \
             actual_bs, valid_token_num
@@ -497,6 +505,7 @@ def run_once(local_rank_id,
              with_mc2_mask=False,
              dynamic_eplb=False,
              with_share=False,
+             with_smooth=False,
              share_expert_intermediate_size=None):
     # 配置日志输出文件名
     log_file = redirect_output(f"local_rank_{local_rank_id}.log"
@@ -531,7 +540,7 @@ def run_once(local_rank_id,
                  ep_world_size, moe_expert_num, global_rank_id,
                  shared_expert_rank_num)
     input_datas, weight_datas, share_weight_datas, actual_bs, valid_token_num = generate_datas(
-        *parameter, top_k, test_bfloat16, enable_dynamic_bs, with_mc2_mask, with_share, share_expert_intermediate_size)
+        *parameter, top_k, test_bfloat16, enable_dynamic_bs, with_mc2_mask, with_share, with_smooth, share_expert_intermediate_size)
     input_datas = [
         data.npu() if data is not None else None for data in input_datas
     ]
@@ -557,7 +566,9 @@ def run_once(local_rank_id,
     # small_op_output = small_ops(*input_datas)
     torch_npu.npu.synchronize(device_id)
     if global_rank_id == 0 or True:
-        print(f"{fused_op_output= }")
+        print(f"{fused_op_output[0]= }")
+        print(f"{fused_op_output[0][0:valid_token_num]= }")
+        print(f"{fused_op_output[1]= }")
         # print(f"{fused_op_output= }")
     # small_op_token_output, small_op_share_output, small_op_count_output = small_op_output
     # fused_op_token_output, fused_op_share_output, fused_op_count_output = fused_op_output
@@ -631,6 +642,7 @@ if __name__ == "__main__":
     parser.add_argument("--enable_dynamic_bs", action="store_true", default=False)
     parser.add_argument("--test_graph", action="store_true", default=False)
     parser.add_argument("--with_mc2_mask", action="store_true", default=False)
+    parser.add_argument("--with_smooth", action="store_true", default=False)
     parser.add_argument("--dynamic_eplb", action="store_true", default=False)
     parser.add_argument("--with_share", action="store_true", default=False)
     args = parser.parse_args()
@@ -648,4 +660,5 @@ if __name__ == "__main__":
     BASE_KWARGS["with_mc2_mask"] = args.with_mc2_mask
     BASE_KWARGS["dynamic_eplb"] = args.dynamic_eplb
     BASE_KWARGS["with_share"] = args.with_share
+    BASE_KWARGS["with_smooth"] = args.with_smooth
     test_fused_deep_moe_base()

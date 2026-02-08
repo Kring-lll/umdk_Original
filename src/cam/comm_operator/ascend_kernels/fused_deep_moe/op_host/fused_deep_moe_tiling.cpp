@@ -42,7 +42,7 @@ constexpr uint32_t INPUT_SHARE_GMM1_WEIGHT_SCALE_INDEX = 8;
 constexpr uint32_t INPUT_SHARE_GMM2_WEIGHT_INDEX = 9;
 constexpr uint32_t INPUT_SHARE_GMM2_WEIGHT_SCALE_INDEX = 10;
 constexpr uint32_t INPUT_SMOOTH_SCALE_INDEX = 11;
-constexpr uint32_t INPUT_SHARE_X_ACTIVE_MASK_INDEX = 12;
+constexpr uint32_t INPUT_SHARE_X_ACTIVE_MASK_INDEX = 13;
 
 constexpr uint32_t ATTR_GROUP_EP_INDEX = 0;
 constexpr uint32_t ATTR_EP_RANK_SIZE_INDEX = 1;

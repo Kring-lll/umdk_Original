@@ -61,7 +61,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
                                   layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
                                   layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
                                   GM_ADDR gmDequantScale, layout::VectorLayout layoutDequantScale, GM_ADDR gmShareX1, GM_ADDR gmShareX1Scale, GM_ADDR gmShareSwigluOut, GM_ADDR gmShareX2, layout::RowMajor layoutShareD, GM_ADDR gmShareX2Scale, GM_ADDR gmSwigluOut, GM_ADDR gmWorkspace,
-                                  GM_ADDR gmX, GM_ADDR debugGm, GM_ADDR gmexpertIds, GM_ADDR gmExpandIdx,
+                                  GM_ADDR gmX, GM_ADDR gmMoeSmoothScales, GM_ADDR gmShareSmoothScales, GM_ADDR gmexpertIds, GM_ADDR gmExpandIdx,
                                   GM_ADDR gmEpSendCount, GM_ADDR xActiveMask, GM_ADDR commArgs, GM_ADDR gmResvered,
                                   GM_ADDR gmExpertTokenNums,
                                   const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
@@ -135,7 +135,8 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
                                            layoutDequantScale,
                                            gmWorkspace,
                                            gmX,
-                                           debugGm,
+                                           gmMoeSmoothScales,
+                                           gmShareSmoothScales,
                                            gmexpertIds,
                                            gmExpandIdx,
                                            gmEpSendCount,
@@ -276,7 +277,7 @@ public:
         GM_ADDR gmm2_weight, GM_ADDR gmm2_weight_scale, GM_ADDR expert_scales,
         GM_ADDR share_gmm1_permuted_weight, GM_ADDR share_gmm1_permuted_weight_scale,
         GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
-        GM_ADDR expert_smooth_scales, GM_ADDR x_active_mask, GM_ADDR comm_args,
+        GM_ADDR expert_smooth_scales, GM_ADDR share_smooth_scales, GM_ADDR x_active_mask, GM_ADDR comm_args,
         // output
         GM_ADDR output, GM_ADDR share_output, GM_ADDR expertTokenNums,
         // system
@@ -300,6 +301,7 @@ private:
     GM_ADDR gmExpertTokenNums_;
     GM_ADDR workspaceGM_;
     GM_ADDR gmSmoothScales_;
+    GM_ADDR gmShareSmoothScales_;
     GM_ADDR gmexpertScales_;
     GM_ADDR xActiveMask_;
     GM_ADDR commArgs_;
@@ -335,7 +337,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     GM_ADDR gmm2_weight, GM_ADDR gmm2_weight_scale, GM_ADDR expert_scales,
     GM_ADDR share_gmm1_permuted_weight, GM_ADDR share_gmm1_permuted_weight_scale,
     GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
-    GM_ADDR expert_smooth_scales, GM_ADDR x_active_mask, GM_ADDR comm_args,
+    GM_ADDR expert_smooth_scales, GM_ADDR share_smooth_scales, GM_ADDR x_active_mask, GM_ADDR comm_args,
     // output
     GM_ADDR output, GM_ADDR share_output, GM_ADDR expertTokenNums,
     // system
@@ -345,6 +347,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     blockDim_ = AscendC::GetBlockNum();
 
     gmSmoothScales_ = expert_smooth_scales;  // not used now
+    gmShareSmoothScales_ = share_smooth_scales;
     gmX_ = x;                                // input token
     gmexpertIds_ = expert_ids;
     gmPermuteWeight1_ = gmm1_permuted_weight;
@@ -466,6 +469,22 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     GM_ADDR gmResvered = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(resveredWorkSpaceSize);
 
+     // For Debug
+    // gmX1 = gmShareSmoothScales_;
+    // gmX1Scale = gmShareWeight1Scale_;
+    // gmSwigluOut = gmShareWeight2Scale_;
+    // gmX2 = gmShareSmoothScales_ + (256 * tokenHiddenSize_);
+    // gmX2Scale = gmShareWeight1Scale_ + 256 * 4;
+    /*
+    597736 * 2 = 1164k
+    */
+    // uint64_t token_num = 32;
+    // gmShareX1 = commArgs_ + 512; // 160k
+    // gmShareX2 = gmShareX1 + (token_num * tokenHiddenSize_); // 96k
+    // gmShareX1Scale = gmShareX2 + (token_num * shareGmm2InputDim_); // 128b
+    // gmShareX2Scale = gmShareX1Scale + token_num * 4; // 128b
+    // gmShareSwigluOut = gmShareX2Scale + token_num * 4; // 768k
+
     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
         if constexpr (g_coreType == AscendC::AIV) {
             AscendC::TPipe tpipe;
@@ -492,7 +511,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
                       Gmm1BlockScheduler>(
         gmm1ProblemShape, groupCount_, gmGroupList, gmX1, layoutX1, gmShareWeight1_, layoutShareWeight1, gmPermuteWeight1_, layoutWeight1,
         gmShareWeight1Scale_, layoutShareW1Scale, gmPermuteScale1_, layoutW1Scale, gmX1Scale, layoutX1Scale, gmX2, layoutX2, gmX2Scale,
-        layoutX2Scale, gmShareX1, gmShareX1Scale, gmShareSwigluOut, gmShareX2, layoutShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmX_, gmSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount,
+        layoutX2Scale, gmShareX1, gmShareX1Scale, gmShareSwigluOut, gmShareX2, layoutShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmX_, gmSmoothScales_, gmShareSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount,
         xActiveMask_, commArgs_, gmResvered,
         gmExpertTokenNums_, tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo);
     AscendC::PipeBarrier<PIPE_ALL>();

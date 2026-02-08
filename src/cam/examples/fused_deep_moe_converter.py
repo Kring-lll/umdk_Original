@@ -96,8 +96,8 @@ import umdk_cam_op_lib
  
 # This api is auto-generated from IR FusedDeepMoe
 @auto_convert_to_tensor(
-    [False, False, True, True, True, True, False, False, False, False, False, False, False, False],
-    [False, False, False, False, False, False, False, True, True, True, True, True, True, True]
+    [False, False, True, True, True, True, False, False, False, False, False, False, False, False, False],
+    [False, False, False, False, False, False, False, True, True, True, True, True, True, True, True]
 )
 def FusedDeepMoe(
     x: Tensor,
@@ -112,6 +112,7 @@ def FusedDeepMoe(
     share_gmm2_weight: Optional[Tensor] = None,
     share_gmm2_weight_scale: Optional[Tensor] = None,
     expert_smooth_scales: Optional[Tensor] = None,
+    share_smooth_scales: Optional[Tensor] = None,
     x_active_mask: Optional[Tensor] = None,
     comm_args: Optional[Tensor] = None,
     *,
@@ -195,6 +196,7 @@ def FusedDeepMoe(
     _add_optional_input(share_gmm2_weight, "share_gmm2_weight")
     _add_optional_input(share_gmm2_weight_scale, "share_gmm2_weight_scale")
     _add_optional_input(expert_smooth_scales, "expert_smooth_scales")
+    _add_optional_input(share_smooth_scales, "share_smooth_scales")
     _add_optional_input(x_active_mask, "x_active_mask")
     _add_optional_input(comm_args, "comm_args")
 
@@ -239,6 +241,7 @@ def convert_fused_deep_moe_default(
     share_gmm2_weight: Optional[Tensor] = None,
     share_gmm2_weight_scale: Optional[Tensor] = None,
     expert_smooth_scales: Optional[Tensor] = None,
+    share_smooth_scales: Optional[Tensor] = None,
     x_active_mask: Optional[Tensor] = None,
     comm_args: Optional[Tensor] = None,
     group_ep: str = "",
@@ -264,6 +267,7 @@ def convert_fused_deep_moe_default(
         share_gmm2_weight=share_gmm2_weight,
         share_gmm2_weight_scale=share_gmm2_weight_scale,
         expert_smooth_scales=expert_smooth_scales,
+        share_smooth_scales=share_smooth_scales,
         x_active_mask=x_active_mask,
         comm_args=comm_args,
         group_ep=group_ep,

@@ -29,6 +29,7 @@ std::vector<at::Tensor> FusedDeepMoeImplAutograd(
     const c10::optional<at::Tensor> &shareGmm2WeightOptional, \
     const c10::optional<at::Tensor> &shareGmm2WeightScaleOptional, \
     const c10::optional<at::Tensor> &expertSmoothScales, \
+    const c10::optional<at::Tensor> &shareSmoothScales, \
     const c10::optional<at::Tensor> &xActiveMask, \
     const c10::optional<at::Tensor> &commArgs, \
     c10::string_view groupEp, \
