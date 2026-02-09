@@ -1918,9 +1918,11 @@ static int bondp_poll_pjfc(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfc, int 
     int total_cqe_cnt = 0;
     int remaining_poll = cr_cnt;
     uintptr_t last_poll_idx = (uintptr_t)bdp_jfc->comp_ctx;
+
+    uint32_t jfc_num = (is_single_dev_mode(&bdp_ctx->v_ctx)) ? bdp_jfc->dev_num : IODIE_NUM;
     /* Starting from the next idx of the last obtainable CR from pjfc, prevent pjfc from starving. */
-    for (int i = 1; i <= bdp_jfc->dev_num; ++i) {
-        int dev_id = (last_poll_idx + i) % bdp_jfc->dev_num;
+    for (int i = 1; i <= jfc_num; ++i) {
+        int dev_id = (last_poll_idx + i) % jfc_num;
         if (remaining_poll <= 0) {
             break;
         }
@@ -2162,7 +2164,8 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr_output_array)
     }
     /* Handle each CR */
     int total_cnt = 0;
-    for (int dev_id = 0; dev_id< bdp_jfc->dev_num; ++dev_id) {
+    uint32_t jfc_num = (is_single_dev_mode(&bdp_ctx->v_ctx)) ? bdp_jfc->dev_num : IODIE_NUM;
+    for (int dev_id = 0; dev_id < jfc_num; ++dev_id) {
         if (bdp_jfc->p_jfc[dev_id] == NULL) {
             continue;
         }
