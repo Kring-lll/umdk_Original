@@ -177,13 +177,16 @@ static int umq_ub_eid_id_get(ub_queue_t *queue, umq_ub_bind_info_t *info, uint32
 {
     remote_imported_tseg_info_t *remote_imported_info = queue->dev_ctx->remote_imported_info;
     urma_eid_t *remote_eid = &info->queue_info->jetty_id.eid;
+    uint32_t hash_namespce = urpc_hash_bytes(info->dev_info->namespace, strlen(info->dev_info->namespace), 0);
     uint32_t hash_eid = urpc_hash_bytes(remote_eid, sizeof(urma_eid_t), 0);
-    uint32_t hash = urpc_hash_add(hash_eid, info->dev_info->pid);
+    uint32_t hash_eid_pid = urpc_hash_add(hash_eid, info->dev_info->pid);
+    uint32_t hash = urpc_hash_add(hash_eid_pid, hash_namespce);
     bool find = false;
     remote_eid_hmap_node_t *eid_node;
     pthread_mutex_lock(&remote_imported_info->remote_eid_id_table_lock);
     URPC_HMAP_FOR_EACH_WITH_HASH(eid_node, node, hash, &remote_imported_info->remote_eid_id_table) {
-        if ((memcmp(&eid_node->eid, remote_eid, sizeof(urma_eid_t)) == 0) && (info->dev_info->pid == eid_node->pid)) {
+        if ((memcmp(&eid_node->eid, remote_eid, sizeof(urma_eid_t)) == 0) && (info->dev_info->pid == eid_node->pid) &&
+            strcmp(info->dev_info->namespace, eid_node->namespace) == 0) {
             find = true;
             break;
         }
@@ -240,6 +243,7 @@ static int umq_ub_eid_id_get(ub_queue_t *queue, umq_ub_bind_info_t *info, uint32
     eid_node->pid = info->dev_info->pid;
     eid_node->remote_eid_id = eid_id;
     eid_node->ref_cnt = 1;
+    strcpy(eid_node->namespace, info->dev_info->namespace);
     *remote_eid_id = eid_id;
     (void)memset(remote_imported_info->tesg_imported[eid_id], 0, sizeof(bool) * UMQ_MAX_TSEG_NUM);
     remote_imported_info->tesg_imported[eid_id][UMQ_QBUF_DEFAULT_MEMPOOL_ID] = true;
@@ -256,14 +260,16 @@ int umq_ub_eid_id_release(remote_imported_tseg_info_t *remote_imported_info, ub_
         return -UMQ_ERR_EINVAL;
     }
     urma_eid_t *remote_eid = &ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid;
+    uint32_t hash_namespce = urpc_hash_bytes(ctx->remote_namespace, strlen(ctx->remote_namespace), 0);
     uint32_t hash_eid = urpc_hash_bytes(remote_eid, sizeof(urma_eid_t), 0);
-    uint32_t hash = urpc_hash_add(hash_eid, ctx->remote_pid);
+    uint32_t hash_eid_pid = urpc_hash_add(hash_eid, ctx->remote_eid_id);
+    uint32_t hash = urpc_hash_add(hash_eid_pid, hash_namespce);
     bool find = false;
     remote_eid_hmap_node_t *eid_node;
     pthread_mutex_lock(&remote_imported_info->remote_eid_id_table_lock);
     URPC_HMAP_FOR_EACH_WITH_HASH(eid_node, node, hash, &remote_imported_info->remote_eid_id_table) {
         if (memcmp(&eid_node->eid, remote_eid, sizeof(urma_eid_t)) == 0 && (ctx->remote_pid == eid_node->pid) &&
-            eid_node->remote_eid_id == ctx->remote_eid_id) {
+            eid_node->remote_eid_id == ctx->remote_eid_id && strcmp(ctx->remote_namespace, eid_node->namespace) == 0) {
             find = true;
             break;
         }
@@ -364,6 +370,7 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
     }
 
     ctx->remote_pid = info->dev_info->pid;
+    strcpy(ctx->remote_namespace, info->dev_info->namespace);
     queue->bind_ctx = ctx;
 
     if (umq_ub_eid_id_get(queue, info, &ctx->remote_eid_id) != UMQ_SUCCESS) {
@@ -424,6 +431,24 @@ static ALWAYS_INLINE uint32_t umq_ub_version_info_serialize(uint8_t *bind_info_b
     return urpc_tlv_get_total_len(info_tlv_head);
 }
 
+static int umq_ub_get_namespace(char *namespace)
+{
+    char buf[UMQ_UB_NAMESPACE_SIZE];
+    ssize_t len = readlink(UMQ_UB_NAMESPACE_PATH, buf, sizeof(buf) - 1);
+    if (len == -1 || len > UMQ_UB_NAMESPACE_SIZE) {
+        if (errno != ENOENT) {
+            UMQ_VLOG_ERR("readlink failed %d, %s\n", errno, strerror(errno));
+            return UMQ_FAIL;
+        }
+        len = 0;
+        UMQ_VLOG_WARN("%s file not exist\n", UMQ_UB_NAMESPACE_PATH);
+    }
+
+    buf[len] = '\0';
+    strcpy(namespace, buf);
+    return UMQ_SUCCESS;
+}
+
 static ALWAYS_INLINE uint32_t umq_ub_dev_info_serialize(
     umq_ub_ctx_t *dev_ctx, uint8_t *bind_info_buf, uint32_t left_buf_size)
 {
@@ -439,6 +464,10 @@ static ALWAYS_INLINE uint32_t umq_ub_dev_info_serialize(
     dev_info->buf_pool_mode = umq_qbuf_mode_get();
     dev_info->feature = dev_ctx->feature;
     dev_info->pid = (uint32_t)getpid();
+    if (umq_ub_get_namespace(dev_info->namespace) != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR("get name namespace failed\n")
+        return 0;
+    }
     info_tlv_head->type = UMQ_UB_BIND_INFO_TYPE_DEV;
     info_tlv_head->len = (uint32_t)sizeof(umq_ub_bind_dev_info_t);
     return urpc_tlv_get_total_len(info_tlv_head);
