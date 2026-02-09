@@ -34,7 +34,7 @@ int uvs_ubagg_ioctl_create_agg_dev(uvs_eid_t *agg_eid)
 
     int dev_fd = open(UVS_UBAGG_DEVICE_PATH, O_RDWR);
     if (dev_fd < 0) {
-        TPSA_LOG_ERR("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
+        TPSA_LOG_ERR("Failed to open dev_fd %s err: %s.\n", UVS_UBCORE_DEVICE_PATH, ub_strerror(errno));
         return -1;
     }
 
@@ -63,7 +63,7 @@ int uvs_ubagg_ioctl_delete_agg_dev(uvs_eid_t *agg_eid)
 
     int dev_fd = open(UVS_UBAGG_DEVICE_PATH, O_RDWR);
     if (dev_fd < 0) {
-        TPSA_LOG_ERR("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
+        TPSA_LOG_ERR("Failed to open dev_fd %s err: %s.\n", UVS_UBCORE_DEVICE_PATH, ub_strerror(errno));
         return -1;
     }
 
@@ -92,7 +92,7 @@ int uvs_ubagg_ioctl_get_dev_name_by_eid(uvs_eid_t *eid, char *buf, size_t len)
 
     int dev_fd = open(UVS_UBAGG_DEVICE_PATH, O_RDWR);
     if (dev_fd < 0) {
-        TPSA_LOG_ERR("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
+        TPSA_LOG_ERR("Failed to open dev_fd %s err: %s.\n", UVS_UBCORE_DEVICE_PATH, ub_strerror(errno));
         return -1;
     }
 
@@ -124,7 +124,7 @@ int uvs_ubagg_ioctl_set_topo(void *topo_info, int topo_num)
 
     int dev_fd = open(UVS_UBAGG_DEVICE_PATH, O_RDWR);
     if (dev_fd < 0) {
-        TPSA_LOG_ERR("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
+        TPSA_LOG_ERR("Failed to open dev_fd %s err: %s.\n", UVS_UBCORE_DEVICE_PATH, ub_strerror(errno));
         return -1;
     }
 
@@ -147,7 +147,7 @@ int uvs_ubcore_ioctl_set_topo(void *topo_info, int topo_num)
 
     int dev_fd = open(UVS_UBCORE_DEVICE_PATH, O_RDWR);
     if (dev_fd == -1) {
-        TPSA_LOG_ERR("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
+        TPSA_LOG_ERR("Failed to open dev_fd %s err: %s.\n", UVS_UBCORE_DEVICE_PATH, ub_strerror(errno));
         return -1;
     }
 
@@ -174,7 +174,7 @@ int uvs_ubcore_ioctl_get_route_list(const uvs_route_t *route, uvs_route_list_t *
 
     int dev_fd = open(UVS_UBCORE_DEVICE_PATH, O_RDWR);
     if (dev_fd == -1) {
-        TPSA_LOG_ERR("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
+        TPSA_LOG_ERR("Failed to open dev_fd %s err: %s.\n", UVS_UBCORE_DEVICE_PATH, ub_strerror(errno));
         return -1;
     }
 
