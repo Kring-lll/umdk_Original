@@ -17,7 +17,8 @@ extern "C" {
 #endif
 
 /**
- * User should ensure thread safety if io_lock_free is true
+ * User should ensure thread safety if io_lock_free is true. User should maintain the send count of tx messages
+ * and ensure the count does't exceed the maximum value
  * Post tx/rx buf to umq
  * @param[in] umqh: umq handle
  * @param[in] qbuf: qbuf need to post. no more than UMQ_BATCH_SIZE work requeses in one call
