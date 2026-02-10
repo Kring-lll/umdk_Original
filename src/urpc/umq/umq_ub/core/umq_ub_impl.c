@@ -373,7 +373,7 @@ uint32_t current_get_and_next_update(void)
             new_val = 0;
         }
     } while (!__atomic_compare_exchange_n(
-        &g_umq_monitor_slots.current_slot, &old_val, new_val,true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+        &g_umq_monitor_slots.current_slot, &old_val, new_val, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
 
     return old_val;
 }
@@ -390,9 +390,6 @@ static uint32_t target_slot_id_calcuate(uint64_t expire_time, uint64_t current_t
 
     uint64_t delay_time = expire_time - current_time;
     uint32_t delay_slots = (delay_time + interval_us - 1) / interval_us;
-    if (delay_slots >= slot_num) {
-        delay_slots = slot_num - 1;
-    }
     target_slot_id = (current_slot_id + delay_slots) % slot_num;
     return target_slot_id;
 }
@@ -429,14 +426,14 @@ void umq_ub_idle_queue_check(void *args)
         }
         ub_flow_control_t *fc = &queue->flow_control;
         uint16_t remote_credit = fc->ops.remote_rx_window_load(fc);
-        if (remote_credit == 0) {
+        if (remote_credit <= fc->initial_credit) {
             (void)pthread_mutex_unlock(&cur_node->lock);
             continue;
         }
         uint64_t last_send = __atomic_load_n(&cur_node->last_send, __ATOMIC_RELAXED);
         if (current_timestamp >= last_send) {
             uint64_t diff = (current_timestamp - last_send);
-            if (diff  >= timeout_us) {
+            if (diff >= timeout_us) {
                 __atomic_store_n(&cur_node->need_return_credit, true, __ATOMIC_RELAXED);
                 if (eventfd_write(cur_node->event_fd, value) == -1) {
                     UMQ_VLOG_ERR(VLOG_UMQ, "umq write event failed, err: %s\n", strerror(errno));
@@ -454,7 +451,7 @@ void umq_ub_idle_queue_check(void *args)
     }
     (void)pthread_mutex_unlock(&current_slot_obj->lock);
     URPC_LIST_FOR_EACH_SAFE(cur_node, next_node, node, &temp_list) {
-        uint32_t target_slot_id = __atomic_load_n(&cur_node->target_slot_id, __ATOMIC_RELAXED);
+        uint32_t target_slot_id = cur_node->target_slot_id;
         (void)pthread_mutex_lock(&g_umq_monitor_slots.monitor_slots[target_slot_id].lock);
         urpc_list_remove(&cur_node->node);
         urpc_list_push_back(&g_umq_monitor_slots.monitor_slots[target_slot_id].monitored_links, &cur_node->node);
