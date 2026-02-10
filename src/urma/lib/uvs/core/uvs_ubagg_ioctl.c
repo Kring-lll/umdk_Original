@@ -139,6 +139,36 @@ int uvs_ubagg_ioctl_set_topo(void *topo_info, int topo_num)
     return 0;
 }
 
+int uvs_ubagg_ioctl_get_topo(void *topo_info, int *topo_num)
+{
+    struct uvs_ubagg_get_topo_info args = {0};
+    struct uvs_ubagg_cmd_hdr hdr = {0};
+    int ret;
+
+    args.out.topo = topo_info;
+
+    hdr.command = UVS_UBAGG_CMD_GET_TOPO_INFO;
+    hdr.args_addr = (uint64_t)(uintptr_t)&args;
+    hdr.args_len = sizeof(args);
+
+    int dev_fd = open(UVS_UBAGG_DEVICE_PATH, O_RDWR);
+    if (dev_fd < 0) {
+        TPSA_LOG_ERR("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
+        return -1;
+    }
+
+    ret = ioctl(dev_fd, UVS_UBAGG_CMD, &hdr);
+    if (ret != 0) {
+        TPSA_LOG_ERR("Failed to set topo info, ret: %d, errno: %d.\n", ret, errno);
+        close(dev_fd);
+        return -1;
+    }
+    (*topo_num) = arg.out.topo_num;
+
+    close(dev_fd);
+    return 0;
+}
+
 int uvs_ubcore_ioctl_set_topo(void *topo_info, int topo_num)
 {
     tpsa_ioctl_ctx_t ioctl_ctx = {0};

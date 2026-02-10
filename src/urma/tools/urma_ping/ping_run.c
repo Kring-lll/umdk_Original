@@ -20,6 +20,7 @@
 
 #include "ping_log.h"
 #include "ping_stat.h"
+#include "ping_topo.h"
 
 #include "ping_run.h"
 
@@ -37,6 +38,38 @@ typedef struct ping_urma_resource {
     urma_jetty_t *jetty;
     urma_target_jetty_t *tjetty;
 } ping_urma_resource_t;
+
+void get_primary_eid_from_bonding(urma_eid_t *eid)
+{
+    int ret;
+    int topo_num;
+    urma_ping_ubagg_topo_node topo_info[MAX_NODE_NUM];
+    urma_eid_t dev_eid;
+    
+    ret = uvs_ubagg_ioctl_get_topo(topo_info, &topo_num);
+    if(ret != 0) {
+        LOG_ERROR("Failed to get ubagg topo, ret:%d\n", ret);
+        return;
+    }
+
+    for (int i = 0; i < topo_num; i++) {
+        for (int j = 0; j < DEV_NUM; j++) {
+            ret = str_to_eid(topo_info[i].agg_devs[j].agg_eid, &dev_eid);
+            if (ret != 0) {
+                LOG_ERROR("Failed to transform str to eid, ret:%d\n", ret);
+                return;
+            }
+
+            if (memcmp(&dev_eid, eid, sizeof(urma_eid_t)) == 0) {
+                ret = str_to_eid(topo_info[i].agg_devs[j].ues[0].primary_eid, eid);
+                if (ret != 0) {
+                    LOG_ERROR("Failed to transform str to eid, ret:%d\n", ret);
+                }
+                return;
+            }
+        }
+    }
+}
 
 static urma_device_t *find_first_urma_device()
 {
@@ -81,8 +114,35 @@ static int init_urma_resource(ping_cfg_t *cfg, ping_urma_resource_t *res)
         goto uninit_urma;
     }
 
+    uint32_t eid_cnt = 1;
+    uint32_t source_eid_index = 0;
+    urma_eid_t source_eid;
+    urma_eid_info_t *eid_list = urma_get_eid_list(dev, &eid_cnt);
+    if(eid_list == NULL || eid_cnt != 1) {
+        LOG_ERROR("Failed to get eid list.\n");
+        ret = -ENODEV;
+        goto uninit_urma;
+    }
+    
+    source_eid = eid_list[0].end;
+    get_primary_eid_from_bonding(&source_eid);
+    urma_device_t *primary_dev = urma_get_device_by_eid(&source_eid, URMA_TRANSPORT_UB);
+    if(primary_dev == NULL) {
+        LOG_ERROR("Failed to find urma device.\n");
+        ret = -ENODEV;
+        goto uninit_urma;
+    }
+
+    eid_list = urma_get_eid_list(primary_dev, &eid_cnt);
+    for (int i = 0; i < eid_cnt; i++) {
+        if(memcmp(&source_eid, &(eid_list[i].eid), sizeof(urma_eid_t)) == 0) {
+            source_eid_index = eid_list[i].eid_index;
+            break;
+        }
+    }
+
     urma_device_attr_t dev_attr = {0};
-    if ((ret = urma_query_device(dev, &dev_attr)) != URMA_SUCCESS) {
+    if ((ret = urma_query_device(primary_dev, &dev_attr)) != URMA_SUCCESS) {
         LOG_ERROR("Failed to query urma device attr, ret:%d\n", ret);
         goto uninit_urma;
     }
@@ -93,7 +153,7 @@ static int init_urma_resource(ping_cfg_t *cfg, ping_urma_resource_t *res)
         goto uninit_urma;
     }
 
-    res->ctx = urma_create_context(dev, 0);
+    res->ctx = urma_create_context(primary_dev, source_eid_index);
     if (res->ctx == NULL) {
         LOG_ERROR("Failed to create urma context.\n");
         ret = -EINVAL;
