@@ -76,6 +76,14 @@ int uvs_get_device_name_by_eid(uvs_eid_t *eid, char *buf, size_t len);
 int uvs_set_topo_info(void *topo, uint32_t topo_num);
 
 /**
+ * UVS get topo info.
+ * @param[out] topo: topo info
+ * @param[out] topo_num: number of nodes
+ * Return: 0 on success, other value on error
+ */
+int uvs_get_topo_info(void *topo, uint32_t *topo_num);
+
+/**
  * Get primary and port eid from topo info.
  * @param[in] route: parameter that contains src_v_eid and dst_v_eid,
  *                          refers to uvs_route_t;
