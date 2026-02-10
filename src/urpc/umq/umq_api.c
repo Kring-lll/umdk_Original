@@ -530,7 +530,7 @@ int umq_init(umq_init_cfg_t *cfg)
         ret = urpc_rand_seed_init();
         if (ret != 0) {
             UMQ_VLOG_ERR(VLOG_UMQ, "rand seed init failed, status: %u\n", ret);
-            return -UMQ_ERR_EINVAL;
+            return ret;
         }
     }
 
@@ -574,6 +574,7 @@ int umq_init(umq_init_cfg_t *cfg)
     g_umq_config = (umq_init_cfg_t *)malloc(sizeof(umq_init_cfg_t));
     if (g_umq_config == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "malloc umq config failed\n");
+        ret = -UMQ_ERR_ENOMEM;
         goto DFX_UNINIT;
     }
     (void)memcpy(g_umq_config, cfg, sizeof(umq_init_cfg_t));
@@ -588,7 +589,7 @@ DFX_UNINIT:
 
 FW_UNINIT:
     framework_uninit();
-    return UMQ_FAIL;
+    return ret;
 }
 
 uint64_t umq_create(umq_create_option_t *option)
