@@ -110,9 +110,9 @@ struct ub_flow_control;
 struct ub_queue;
 typedef struct ub_flow_control_window_ops {
     // update tx window after receive IMM_TYPE_FLOW_CONTROL
-    uint16_t (*remote_rx_window_inc)(struct ub_flow_control *fc, uint16_t new_win);
+    uint16_t (*remote_rx_window_inc)(struct ub_flow_control *fc, uint16_t new_win, bool is_return_rollback);
     // alloc tx window, may return [0, required_win]
-    uint16_t (*remote_rx_window_dec)(struct ub_flow_control *fc, uint16_t required_win);
+    uint16_t (*remote_rx_window_dec)(struct ub_flow_control *fc, uint16_t required_win, bool is_return);
     // exchange current tx window to 0 and return current tx window
     uint16_t (*remote_rx_window_exchange)(struct ub_flow_control *fc);
     // load current tx window
