@@ -1243,8 +1243,7 @@ int umq_get_route_list(const umq_route_t *route, umq_trans_mode_t umq_trans_mode
 #ifdef UMQ_STATIC_LIB
     if (umq_trans_mode != UMQ_TRANS_MODE_UB && umq_trans_mode != UMQ_TRANS_MODE_UB_PLUS) {
         UMQ_VLOG_ERR(VLOG_UMQ, "umq static library only support UB transport mode\n");
-        errno = UMQ_ERR_EINVAL;
-        return NULL;
+        return -UMQ_ERR_EINVAL;
     }
 #endif
 
@@ -1306,8 +1305,7 @@ int umq_dev_info_get(char *dev_name, umq_trans_mode_t umq_trans_mode, umq_dev_in
 #ifdef UMQ_STATIC_LIB
     if (umq_trans_mode != UMQ_TRANS_MODE_UB && umq_trans_mode != UMQ_TRANS_MODE_UB_PLUS) {
         UMQ_VLOG_ERR(VLOG_UMQ, "umq static library only support UB transport mode\n");
-        errno = UMQ_ERR_EINVAL;
-        return NULL;
+        return -UMQ_ERR_EINVAL;
     }
 #endif
 
@@ -1341,7 +1339,8 @@ umq_dev_info_t *umq_dev_info_list_get(umq_trans_mode_t umq_trans_mode, int *dev_
 #ifdef UMQ_STATIC_LIB
     if (umq_trans_mode != UMQ_TRANS_MODE_UB && umq_trans_mode != UMQ_TRANS_MODE_UB_PLUS) {
         UMQ_VLOG_ERR(VLOG_UMQ, "umq static library only support UB transport mode\n");
-        return;
+        errno = UMQ_ERR_EINVAL;
+        return NULL;
     }
 #endif
 
