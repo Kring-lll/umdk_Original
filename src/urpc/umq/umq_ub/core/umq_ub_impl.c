@@ -373,7 +373,7 @@ uint32_t current_get_and_next_update(void)
             new_val = 0;
         }
     } while (!__atomic_compare_exchange_n(
-        &g_umq_monitor_slots.current_slot, &old_val, new_val,true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+        &g_umq_monitor_slots.current_slot, &old_val, new_val, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
 
     return old_val;
 }
