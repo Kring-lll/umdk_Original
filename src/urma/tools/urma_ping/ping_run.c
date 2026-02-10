@@ -18,6 +18,8 @@
 #include "urma_api.h"
 #include "urma_types.h"
 
+#include "uvs_api.h"
+
 #include "ping_log.h"
 #include "ping_stat.h"
 
@@ -26,6 +28,8 @@
 const uint32_t PING_WK_JETTY_ID = 123;
 const uint32_t PING_SEND_DEPTH = 1024;
 const uint32_t PING_RECV_DEPTH = 1024;
+const uint32_t EID_STRLEN = 128;
+const uint32_t EID_MAX_VALUE = (1 << 30);
 
 typedef struct ping_urma_resource {
     urma_context_t *ctx;
@@ -37,6 +41,39 @@ typedef struct ping_urma_resource {
     urma_jetty_t *jetty;
     urma_target_jetty_t *tjetty;
 } ping_urma_resource_t;
+
+void log_eid_verbose(uint8_t *eid) {
+    char print_str[EID_STRLEN];
+    inet_ntop(AF_INET6, eid, print_str, EID_STRLEN);
+    LOG_VERBOSE("%s\n", print_str);
+}
+
+void get_primary_eid_from_bonding(urma_eid_t *eid)
+{
+    int ret;
+    urma_ping_ubcore_topo_map_t topo_map;
+    
+    ret = uvs_get_topo_info(&topo_map);
+    if(ret != 0) {
+        LOG_ERROR("Failed to get ubagg topo, ret:%d\n", ret);
+        return;
+    }
+    LOG_VERBOSE("Bonding eid: ");
+    log_eid_verbose(eid->raw);
+
+    for (int i = 0; i < (int)topo_map.node_num; i++) {
+        for (int j = 0; j < DEV_NUM; j++) {
+            if (memcmp(topo_map.topo_infos[i].agg_devs[j].agg_eid, eid->raw, sizeof(urma_eid_t)) == 0) {
+                memcpy(eid->raw, topo_map.topo_infos[i].agg_devs[j].ues[0].primary_eid, sizeof(urma_eid_t));
+                LOG_VERBOSE("Successful find primary eid: ");
+                log_eid_verbose(eid->raw);
+                return;
+            }
+        }
+    }
+
+    LOG_ERROR("Failed to find primary eid.\n");
+}
 
 static urma_device_t *find_first_urma_device()
 {
@@ -76,13 +113,51 @@ static int init_urma_resource(ping_cfg_t *cfg, ping_urma_resource_t *res)
 
     urma_device_t *dev = find_first_urma_device();
     if (dev == NULL) {
-        LOG_ERROR("Failed to find urma device.\n");
+        LOG_ERROR("Failed to find first urma device.\n");
         ret = -ENODEV;
         goto uninit_urma;
     }
 
+    uint32_t eid_cnt = 1;
+    uint32_t source_eid_index = EID_MAX_VALUE;
+    urma_eid_t source_eid;
+    urma_eid_info_t *eid_list = urma_get_eid_list(dev, &eid_cnt);
+    if (eid_list == NULL) {
+        LOG_ERROR("Failed to get eid list.\n");
+        ret = -ENODEV;
+        goto uninit_urma;
+    }
+    if (eid_cnt != 1) {
+        LOG_ERROR("More than one eid for bonding_dev.\n");
+        ret = -ENODEV;
+        goto uninit_urma;
+    }
+    
+    source_eid = eid_list[0].eid;
+    get_primary_eid_from_bonding(&source_eid);
+    urma_device_t *primary_dev = urma_get_device_by_eid(source_eid, URMA_TRANSPORT_UB);
+    if (primary_dev == NULL) {
+        LOG_ERROR("Failed to find primary urma device.\n");
+        ret = -ENODEV;
+        goto uninit_urma;
+    }
+
+    eid_list = urma_get_eid_list(primary_dev, &eid_cnt);
+    for (int i = 0; i < eid_cnt; i++) {
+        if (memcmp(&source_eid, &(eid_list[i].eid), sizeof(urma_eid_t)) == 0) {
+            source_eid_index = eid_list[i].eid_index;
+            break;
+        }
+    }
+    if (source_eid_index == EID_MAX_VALUE) {
+        LOG_ERROR("Failed to find primary eid_index.\n");
+        ret = -ENODEV;
+        goto uninit_urma;
+    }
+    LOG_VERBOSE("Get primary eid_index = %d\n", (int)source_eid_index);
+
     urma_device_attr_t dev_attr = {0};
-    if ((ret = urma_query_device(dev, &dev_attr)) != URMA_SUCCESS) {
+    if ((ret = urma_query_device(primary_dev, &dev_attr)) != URMA_SUCCESS) {
         LOG_ERROR("Failed to query urma device attr, ret:%d\n", ret);
         goto uninit_urma;
     }
@@ -93,7 +168,7 @@ static int init_urma_resource(ping_cfg_t *cfg, ping_urma_resource_t *res)
         goto uninit_urma;
     }
 
-    res->ctx = urma_create_context(dev, 0);
+    res->ctx = urma_create_context(primary_dev, source_eid_index);
     if (res->ctx == NULL) {
         LOG_ERROR("Failed to create urma context.\n");
         ret = -EINVAL;
@@ -238,7 +313,8 @@ static int fill_recv_wr(ping_cfg_t *cfg, ping_urma_resource_t *res)
             .num_sge = 1,
         },
     };
-    return urma_post_jetty_recv_wr(res->jetty, &wr, NULL);
+    urma_jfr_wr_t *bad_wr_placeholder;
+    return urma_post_jetty_recv_wr(res->jetty, &wr, &bad_wr_placeholder);
 }
 
 static int send_ping_msg(ping_cfg_t *cfg, ping_urma_resource_t *res, ping_per_seq_info_t *seq_info)
@@ -336,7 +412,6 @@ int start_ping(ping_cfg_t *cfg)
     }
 
     LOG_QUIET("URMA_PING " EID_FMT " %u bytes of data.\n", EID_ARGS(cfg->dest), cfg->size);
-    LOG_VERBOSE("Destination : %s\n", cfg->dest);
     LOG_VERBOSE("Count       : %u\n", cfg->count);
     LOG_VERBOSE("Interval(s) : %u\n", cfg->interval);
     LOG_VERBOSE("Size(bytes) : %u\n", cfg->size);
