@@ -28,6 +28,8 @@ int main(int argc, char *argv[])
         .interval = 1,
         .size = 4,
         .verbose_level = VLOG_LEVEL_NORMAL,
+        .deadline = 0,
+        .timeout = 1,
     };
 
     int ret = 0;
