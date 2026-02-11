@@ -202,6 +202,14 @@ static int schedule_send_target_idx_default(bjetty_ctx_t *bjetty_ctx, bdp_v_conn
     }
     return 0;
 }
+
+static int find_next_valid_jetty_idx_multi_dev(void)
+{
+    static int cnt = 0;
+
+    return (cnt++ % 3 == 2) ? 1 : 0;
+}
+
 /**
  * In matrix server, multipath mode has two different planes.
  * Each plane has one device which can connect to any other device identified by primary eid.
@@ -223,8 +231,7 @@ static int schedule_next_route_in_matrix_server_multipath(const urma_jfs_wr_t *w
         case URMA_OPC_SEND_INVALIDATE:
         case URMA_OPC_WRITE_IMM:
         case URMA_OPC_WRITE_NOTIFY:
-            v_conn->rqe_idx = find_next_valid_jetty_idx(v_conn->target_valid,
-                bdp_tjetty->target_dev_num, v_conn->rqe_idx);
+            v_conn->rqe_idx = find_next_valid_jetty_idx_multi_dev();
             if (v_conn->rqe_idx < 0) {
                 URMA_LOG_DEBUG("Failed to find valid target jetty idx for rqe_idx.\n");
                 return -1;
@@ -232,8 +239,7 @@ static int schedule_next_route_in_matrix_server_multipath(const urma_jfs_wr_t *w
             *target_idx = v_conn->rqe_idx;
             break;
         default:
-            v_conn->non_rqe_idx = find_next_valid_jetty_idx(v_conn->target_valid,
-                bdp_tjetty->target_dev_num, v_conn->non_rqe_idx);
+            v_conn->non_rqe_idx = find_next_valid_jetty_idx_multi_dev();
             if (v_conn->non_rqe_idx < 0) {
                 URMA_LOG_DEBUG("Failed to find valid target jetty idx for non_rqe_idx.\n");
                 return -1;
