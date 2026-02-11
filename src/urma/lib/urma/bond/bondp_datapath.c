@@ -71,6 +71,8 @@ static urma_status_t comp_post_send(bjetty_ctx_t *bjetty_ctx, int send_idx,
     urma_jfs_wr_t *send_wr, urma_jfs_wr_t **bad_wr)
 {
     urma_status_t ret;
+    bondp_comp_t *bdp_jetty = bjetty_ctx->bdp_comp;
+
     if (bjetty_ctx->bdp_comp->comp_type == BONDP_COMP_JETTY) {
         ret = urma_post_jetty_send_wr(bjetty_ctx->pjettys[send_idx], send_wr, bad_wr);
     } else if (bjetty_ctx->bdp_comp->comp_type == BONDP_COMP_JFS) {
@@ -78,6 +80,10 @@ static urma_status_t comp_post_send(bjetty_ctx_t *bjetty_ctx, int send_idx,
     } else {
         URMA_LOG_ERR("Invalid post jfs wr type: %d\n", bjetty_ctx->bdp_comp->comp_type);
         ret = URMA_EINVAL;
+    }
+    if (!is_single_dev_mode(&bjetty_ctx->bond_ctx->v_ctx) && ret == URMA_SUCCESS &&
+        send_idx < IODIE_NUM) {
+        bdp_jetty->tx_outstanding[send_idx]++;
     }
     return ret;
 }
@@ -202,29 +208,35 @@ static int schedule_send_target_idx_default(bjetty_ctx_t *bjetty_ctx, bdp_v_conn
     }
     return 0;
 }
+
+static int schedule_multi_dev_send_idx(bondp_comp_t *bdp_jetty)
+{
+    return bdp_jetty->tx_outstanding[0] <= bdp_jetty->tx_outstanding[1] ?
+        0 : 1;
+}
+
 /**
  * In matrix server, multipath mode has two different planes.
  * Each plane has one device which can connect to any other device identified by primary eid.
  * Choose target with RR and RQE requirement, then set send_idx = target_idx.
  * @param v_conn: can be NULL in single-die mode.
  */
-static int schedule_next_route_in_matrix_server_multipath(const urma_jfs_wr_t *wr, bondp_target_jetty_t *bdp_tjetty,
-    bdp_v_conn_t *v_conn,
-    int *send_idx, int *target_idx)
+static int schedule_next_route_in_matrix_server_multipath(bondp_comp_t *bdp_jetty, const urma_jfs_wr_t *wr,
+    bondp_target_jetty_t *bdp_tjetty, bdp_v_conn_t *v_conn, int *send_idx, int *target_idx)
 {
     if (is_single_dev_mode(bdp_tjetty->v_tjetty.urma_ctx)) {
         *send_idx = 0;
         *target_idx = 0;
         return 0;
     }
+    /* The follow is multi dev mode */
     switch (wr->opcode) {
         case URMA_OPC_SEND:
         case URMA_OPC_SEND_IMM:
         case URMA_OPC_SEND_INVALIDATE:
         case URMA_OPC_WRITE_IMM:
         case URMA_OPC_WRITE_NOTIFY:
-            v_conn->rqe_idx = find_next_valid_jetty_idx(v_conn->target_valid,
-                bdp_tjetty->target_dev_num, v_conn->rqe_idx);
+            v_conn->rqe_idx = schedule_multi_dev_send_idx(bdp_jetty);
             if (v_conn->rqe_idx < 0) {
                 URMA_LOG_DEBUG("Failed to find valid target jetty idx for rqe_idx.\n");
                 return -1;
@@ -232,8 +244,7 @@ static int schedule_next_route_in_matrix_server_multipath(const urma_jfs_wr_t *w
             *target_idx = v_conn->rqe_idx;
             break;
         default:
-            v_conn->non_rqe_idx = find_next_valid_jetty_idx(v_conn->target_valid,
-                bdp_tjetty->target_dev_num, v_conn->non_rqe_idx);
+            v_conn->non_rqe_idx = schedule_multi_dev_send_idx(bdp_jetty);
             if (v_conn->non_rqe_idx < 0) {
                 URMA_LOG_DEBUG("Failed to find valid target jetty idx for non_rqe_idx.\n");
                 return -1;
@@ -262,9 +273,10 @@ static int schedule_next_route_in_matrix_server_singlepath(bjetty_ctx_t *bjetty_
  * @param send_idx: output
  * @param target_idx: output
  */
-static int schedule_send(const urma_jfs_wr_t *wr, bjetty_ctx_t *bjetty_ctx, bdp_v_conn_t *v_conn,
+static int schedule_send(const urma_jfs_wr_t *wr, bondp_comp_t *bdp_jetty, bdp_v_conn_t *v_conn,
     int *send_idx, int *target_idx)
 {
+    bjetty_ctx_t *bjetty_ctx = bdp_jetty->comp_ctx;
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
     if (bdp_tjetty == NULL) {
         URMA_LOG_ERR("Invalid wr->tjetty: NULL\n");
@@ -275,7 +287,7 @@ static int schedule_send(const urma_jfs_wr_t *wr, bjetty_ctx_t *bjetty_ctx, bdp_
             bdp_tjetty->target_dev_num, wr->opcode, bdp_tjetty->v_tjetty.trans_mode, send_idx, target_idx);
     }
     if (is_multipath_comp(bjetty_ctx->bdp_comp)) {
-        return schedule_next_route_in_matrix_server_multipath(wr, bdp_tjetty, v_conn, send_idx, target_idx);
+        return schedule_next_route_in_matrix_server_multipath(bdp_jetty, wr, bdp_tjetty, v_conn, send_idx, target_idx);
     }
     return schedule_next_route_in_matrix_server_singlepath(bjetty_ctx, bdp_tjetty, send_idx, target_idx);
 }
@@ -833,10 +845,11 @@ static bdp_v_conn_t *get_v_conn_on_send(bjetty_ctx_t *bjetty_ctx, bondp_target_j
  * replace it with ptjetty and ptseg content,
  * and then send it.
  */
-static urma_status_t bondp_post_send_wr_no_store(bjetty_ctx_t *bjetty_ctx,
+static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_jetty,
     const urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
 {
     urma_status_t ret = URMA_SUCCESS;
+    bjetty_ctx_t *bjetty_ctx = bdp_jetty->comp_ctx;
     int local_port = -1;
     int target_port = -1;
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
@@ -848,7 +861,7 @@ static urma_status_t bondp_post_send_wr_no_store(bjetty_ctx_t *bjetty_ctx,
     if (v_conn == NULL) {
         return URMA_FAIL;
     }
-    ret = schedule_send(wr, bjetty_ctx, v_conn, &local_port, &target_port);
+    ret = schedule_send(wr, bdp_jetty, v_conn, &local_port, &target_port);
     if (ret) {
         return URMA_FAIL;
     }
@@ -874,9 +887,10 @@ DEL_AND_RET:
  * support failover functionality, and enable SO to handle in-order processing.
  * Compared to `bondp_post_send_wr_no_store`, it provides all designed features supported by the aggregation device.
  */
-static urma_status_t bondp_post_send_wr_and_store(bjetty_ctx_t *bjetty_ctx,
+static urma_status_t bondp_post_send_wr_and_store(bondp_comp_t *bdp_jetty,
     const urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
 {
+    bjetty_ctx_t *bjetty_ctx = bdp_jetty->comp_ctx;
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
     bdp_v_conn_t *v_conn = get_v_conn_on_send(bjetty_ctx, bdp_tjetty);
     if (v_conn == NULL) {
@@ -885,7 +899,7 @@ static urma_status_t bondp_post_send_wr_and_store(bjetty_ctx_t *bjetty_ctx,
     /* Schedule sending jetty */
     int send_idx = 0;
     int target_idx = 0;
-    urma_status_t ret = schedule_send(wr, bjetty_ctx, v_conn, &send_idx, &target_idx);
+    urma_status_t ret = schedule_send(wr, bdp_jetty, v_conn, &send_idx, &target_idx);
     if (ret) {
         return URMA_FAIL;
     }
@@ -971,11 +985,11 @@ urma_status_t bondp_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, u
     if (ret != URMA_SUCCESS) {
         return ret;
     }
-    bjetty_ctx_t *bjetty_ctx = bdp_jetty->comp_ctx;
+
     if (is_single_dev_mode(jetty->urma_ctx)) {
-        return bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
+        return bondp_post_send_wr_no_store(bdp_jetty, wr, bad_wr);
     } else {
-        return bondp_post_send_wr_and_store(bjetty_ctx, wr, bad_wr);
+        return bondp_post_send_wr_and_store(bdp_jetty, wr, bad_wr);
     }
 }
 
@@ -1455,6 +1469,11 @@ static bondp_cr_handler_ret_t handle_send(bjetty_ctx_t *bjetty_ctx, urma_cr_t *c
         URMA_LOG_ERR("Invalid bdp_comp type: %d\n", bjetty_ctx->bdp_comp->comp_type);
         return CR_HANDLER_ERR_AND_COPY;
     }
+
+    bondp_comp_t *bdp_jetty = bjetty_ctx->bdp_comp;
+    if (!is_single_dev_mode(&bjetty_ctx->bond_ctx->v_ctx) && send_idx < IODIE_NUM) {
+        bdp_jetty->tx_outstanding[send_idx]--;
+    }
     /* Device fail */
     if (is_all_pjetty_fail(bjetty_ctx)) {
         URMA_LOG_DEBUG("All pjetty fail in handle_send\n");
@@ -1518,6 +1537,8 @@ static bondp_cr_handler_ret_t handle_send(bjetty_ctx_t *bjetty_ctx, urma_cr_t *c
     /* Won't fail because we check before */
     (void)jfs_wr_buf_remove_wr(bjetty_ctx->jfs_bufs[send_idx], send_wr_id);
     restore_user_cr(cr, original_user_ctx);
+
+    if (!is_single_dev_mode())
     return CR_HANDLER_SUCCESS_AND_COPY;
 }
 
@@ -2133,7 +2154,6 @@ urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_
 {
     bondp_comp_t *bdp_jfs = CONTAINER_OF_FIELD(jfs, bondp_comp_t, v_jfs);
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
-    bjetty_ctx_t *bjetty_ctx = bdp_jfs->comp_ctx;
     urma_status_t ret = URMA_SUCCESS;
 
     ret = post_send_check_valid(bdp_jfs, bdp_tjetty, wr);
@@ -2141,9 +2161,9 @@ urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_
         return ret;
     }
     if (is_single_dev_mode(jfs->urma_ctx)) {
-        return bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
+        return bondp_post_send_wr_no_store(bdp_jfs, wr, bad_wr);
     } else {
-        return bondp_post_send_wr_and_store(bjetty_ctx, wr, bad_wr);
+        return bondp_post_send_wr_and_store(bdp_jfs, wr, bad_wr);
     }
 }
 

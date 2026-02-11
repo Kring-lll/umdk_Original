@@ -134,6 +134,8 @@ typedef struct bondp_comp {
     urma_ref_t use_cnt; /* Initialize to 0 */
     uint64_t p_orig_handle[URMA_UBAGG_DEV_MAX_NUM];
     uint64_t v_orig_handle;
+    /* For multi device mode, primary jetty */
+    uint32_t tx_outstanding[IODIE_NUM];
 } bondp_comp_t;
 
 typedef struct bondp_target_jetty {
