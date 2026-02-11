@@ -2045,7 +2045,6 @@ int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *
     urma_sge_t *sges_ptr;
     umq_buf_t *buffer = qbuf;
     uint32_t wr_index = 0;
-    uint32_t sge_index = 0;
     urma_target_seg_t **tseg_list = queue->dev_ctx->tseg_list;
     uint32_t remote_rx_buf_size = queue->remote_rx_buf_size;
     uint32_t sge_num = 0;
@@ -2081,8 +2080,7 @@ int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *
                 , EID_ARGS(*eid), id, rest_size, queue->tx_buf_size);
             return -UMQ_ERR_EINVAL;
         }
-        sge_index = wr_index * UMQ_POST_POLL_BATCH;
-        sges_ptr = &sges[sge_index];
+        sges_ptr = &sges[wr_index];
         sge_num = 0;
         uint64_t user_ctx = (uint64_t)(uintptr_t)buffer;
         while (buffer && rest_size > 0) { // try to add up to total_size
@@ -2113,7 +2111,7 @@ int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *
         }
 
         urma_wr_ptr->user_ctx = user_ctx;
-        urma_wr_ptr->send.src.sge = &sges[sge_index];
+        urma_wr_ptr->send.src.sge = &sges[wr_index];
         urma_wr_ptr->send.src.num_sge = sge_num;
         urma_wr_ptr->send.imm_data = buf_pro->imm_data;
         urma_wr_ptr->opcode = URMA_OPC_SEND_IMM;
@@ -2527,7 +2525,6 @@ int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_
     urma_sge_t *sges_ptr;
     umq_buf_t *buffer = qbuf;
     uint32_t wr_index = 0;
-    uint32_t sge_index = 0;
     urma_target_seg_t **tseg_list = queue->dev_ctx->tseg_list;
     uint32_t max_send_size =
         (queue->remote_rx_buf_size > queue->tx_buf_size) ? queue->tx_buf_size : queue->remote_rx_buf_size;
@@ -2551,8 +2548,7 @@ int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_
                 "\n", EID_ARGS(*eid), id, rest_size, max_send_size);
             return -UMQ_ERR_EINVAL;
         }
-        sge_index = wr_index * UMQ_POST_POLL_BATCH;
-        sges_ptr = &sges[sge_index];
+        sges_ptr = &sges[wr_index];
         uint64_t user_ctx = (uint64_t)(uintptr_t)buffer;
         sge_num = 0;
         while (buffer && rest_size > 0) { // try to add up to total_size
@@ -2583,7 +2579,7 @@ int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_
         }
 
         urma_wr_ptr->user_ctx = user_ctx;
-        urma_wr_ptr->send.src.sge = &sges[sge_index];
+        urma_wr_ptr->send.src.sge = &sges[wr_index];
         urma_wr_ptr->send.src.num_sge = sge_num;
         urma_wr_ptr->opcode = URMA_OPC_SEND;
         urma_wr_ptr->flag.value = buf_pro->flag.value;
