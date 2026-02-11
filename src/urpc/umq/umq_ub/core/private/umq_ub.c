@@ -2711,7 +2711,7 @@ int umq_status_convert(urma_status_t urma_status)
         case URMA_SUCCESS:
             return UMQ_SUCCESS;
         case URMA_FAIL:
-            return UMQ_FAIL;
+            return (int)URMA_FAIL;
         case URMA_EAGAIN:
             return UMQ_ERR_EAGAIN;
         case URMA_ENOMEM:
@@ -2724,10 +2724,10 @@ int umq_status_convert(urma_status_t urma_status)
             return UMQ_ERR_EINVAL;
         case URMA_EEXIST:
             return UMQ_ERR_EEXIST;
-        case URMA_EINPROGRESS:
+        case EINPROGRESS:
             return UMQ_ERR_EINPROGRESS;
         default:
             UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "unrecognized urma status: %d\n", (int)urma_status);
-            return UMQ_FAIL;
+            return (int)urma_status;
     };
 }
