@@ -119,11 +119,14 @@ int run_umq_example_client(struct urpc_example_config *cfg)
     LOG_PRINT("client bind success\n");
     sleep(1); // sleep 1s to wait for server ready
 
-    if (example_enqueue_data(umqh, EXAMPLE_CLIENT_ENQUEUE_DATA, strlen(EXAMPLE_CLIENT_ENQUEUE_DATA))) {
+#define test_msg_len 65536
+    char msg[test_msg_len] = {"hello enqueue dequeue message"};
+
+    if (example_enqueue_data(umqh, msg, test_msg_len)) {
         goto UNBIND;
     }
 
-    if (example_dequeue_data(umqh, EXAMPLE_SERVER_ENQUEUE_DATA, strlen(EXAMPLE_CLIENT_ENQUEUE_DATA)) != 0) {
+    if (example_dequeue_data(umqh, msg, test_msg_len) != 0) {
         goto UNBIND;
     }
     ret = 0;

@@ -475,8 +475,9 @@ int example_enqueue_data(uint64_t umqh, const char *data, uint32_t data_size)
     }
 
     buf->io_direction = UMQ_IO_TX;
-    (void)memcpy(buf->buf_data, data, data_size);
-    buf->data_size = data_size;
+    int cpy_size = buf->data_size < data_size ? buf->data_size : data_size;
+    (void)memcpy(buf->buf_data, data, cpy_size);
+    // buf->data_size = data_size;
     buf->total_data_size = data_size;
     umq_buf_t *bad_buf = NULL;
     if (umq_enqueue(umqh, buf, &bad_buf) != UMQ_SUCCESS) {
