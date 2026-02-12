@@ -1748,21 +1748,10 @@ int ubmm_fill_ref_sge_info(uint64_t umqh_tp, umq_buf_t *qbuf, char *ub_ref_info,
         }
 
         fill_big_data_ref_sge(queue, ref_sge, tmp_buf,
-            &import_mempool_info[umq_imm_head->mempool_num], umq_imm_head, mempool_info_record);
+            &import_mempool_info[umq_imm_head->mempool_num], umq_imm_head, mempool_info_record, UMQ_MAX_TSEG_NUM);
         tmp_buf = tmp_buf->qbuf_next;
         ref_sge = ref_sge + 1;
         idx++;
-    }
-
-    if (umq_imm_head->type == IMM_PROTOCAL_TYPE_IMPORT_MEM) {
-        if ((sizeof(umq_imm_head_t) + sizeof(ub_ref_sge_t) * idx +
-            sizeof(ub_import_mempool_info_t) * umq_imm_head->mempool_num) > umq_buf_size_small()) {
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, import mempool info is not enough\n",
-                EID_ARGS(*eid), id);
-            return UMQ_FAIL;
-        }
-        (void)memcpy(ref_sge,
-            import_mempool_info, sizeof(ub_import_mempool_info_t) * umq_imm_head->mempool_num);
     }
     return UMQ_SUCCESS;
 }

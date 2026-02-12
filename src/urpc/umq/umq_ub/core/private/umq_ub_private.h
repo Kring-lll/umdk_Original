@@ -493,7 +493,8 @@ int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *
 int umq_ub_dequeue_plus_with_poll_tx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t **buf, int return_rx_cnt);
 uint32_t umq_ub_ref_sge_cnt(umq_buf_t *buffer);
 void fill_big_data_ref_sge(ub_queue_t *queue, ub_ref_sge_t *ref_sge, umq_buf_t *buffer,
-    ub_import_mempool_info_t *import_mempool_info, umq_imm_head_t *umq_imm_head, bool *mempool_info_record);
+    ub_import_mempool_info_t *import_mempool_info, umq_imm_head_t *umq_imm_head, bool *mempool_info_record,
+    uint32_t pool_info_record_size);
 void umq_ub_fill_rx_buffer(ub_queue_t *queue, int rx_cnt);
 int umq_ub_dequeue_with_poll_rx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t **buf);
 int umq_ub_dequeue_plus_with_poll_rx(uint64_t umqh_tp, urma_cr_t *cr, umq_buf_t **buf);
