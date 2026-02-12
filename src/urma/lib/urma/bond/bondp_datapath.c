@@ -1896,7 +1896,7 @@ static int restore_cr_local_id(bondp_context_t *bdp_ctx,  int dev_idx, urma_cr_t
         .eid = bdp_ctx->p_ctxs[dev_idx]->eid,
         .id = cr->local_id,
     };
-    int ret = bdp_p_vjetty_id_table_lookup(&bdp_ctx->p_vjetty_id_table, pjetty_id, get_p_vjetty_type_by_cr(cr),
+    int ret = bdp_p_vjetty_id_table_lookup_lockless(&bdp_ctx->p_vjetty_id_table, pjetty_id, get_p_vjetty_type_by_cr(cr),
         &vjetty_id);
     if (ret) {
         URMA_LOG_ERR("Failed to get vjetty.id of local_id: %u, ret: %d\n", pjetty_id.id, ret);

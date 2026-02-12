@@ -248,7 +248,7 @@ static int eid_mapping_hash_table_add(bondp_hash_table_t *tbl, urma_eid_t *key, 
 eid_mapping_entry_t *eid_mapping_hash_table_lookup(bondp_hash_table_t *tbl, urma_eid_t *key)
 {
     hmap_node_t *node = NULL;
-    node = bondp_hash_table_lookup(tbl, key, tbl->hash_f(key));
+    node = bondp_hash_table_lookup_without_lock(tbl, key, tbl->hash_f(key));
     if (node == NULL) {
         return NULL;
     }
