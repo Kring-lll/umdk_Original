@@ -1924,12 +1924,13 @@ void ub_fill_umq_imm_head(umq_imm_head_t *umq_imm_head, umq_buf_t *buffer)
 }
 
 void fill_big_data_ref_sge(ub_queue_t *queue, ub_ref_sge_t *ref_sge, umq_buf_t *buffer,
-    ub_import_mempool_info_t *import_mempool_info, umq_imm_head_t *umq_imm_head, bool *mempool_info_record)
+    ub_import_mempool_info_t *import_mempool_info, umq_imm_head_t *umq_imm_head, bool *mempool_info_record,
+    uint32_t pool_info_record_size)
 {
     urma_target_seg_t *tseg = queue->dev_ctx->tseg_list[buffer->mempool_id];
     urma_seg_t *seg = &tseg->seg;
     if (!queue->dev_ctx->remote_imported_info->tesg_imported[queue->bind_ctx->remote_eid_id][buffer->mempool_id] &&
-        !mempool_info_record[buffer->mempool_id]) {
+        buffer->mempool_id < pool_info_record_size && !mempool_info_record[buffer->mempool_id]) {
         umq_imm_head->type = IMM_PROTOCAL_TYPE_IMPORT_MEM;
         umq_imm_head->mempool_num++;
         import_mempool_info->mempool_seg_flag = seg->attr.value;
@@ -2021,7 +2022,7 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
         }
 
         fill_big_data_ref_sge(queue, &ref_sge[buf_index], *buffer,
-            &import_mempool_info[umq_imm_head->mempool_num], umq_imm_head, mempool_info_record);
+            &import_mempool_info[umq_imm_head->mempool_num], umq_imm_head, mempool_info_record, UMQ_MAX_TSEG_NUM);
 
         max_data_size =  (*buffer)->data_size > max_data_size ? (*buffer)->data_size : max_data_size;
         rest_size -= (*buffer)->data_size;
