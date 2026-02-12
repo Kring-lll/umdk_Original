@@ -1032,6 +1032,12 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
                 "status: %d local_id: %u\n", EID_ARGS(*eid), id, i, cr[i].status, cr[i].local_id);
         }
 
+        /* After the read operation is complete, send_imm request with user_ctx equal to 0 will be sent. 
+         * This tx_cqe request does't need to be reported. */
+        if (cr[i].user_ctx == 0) {
+            continue;
+        }
+
         buf[qbuf_cnt] = (umq_buf_t *)(uintptr_t)cr[i].user_ctx;
         buf[qbuf_cnt]->io_direction = UMQ_IO_TX;
         buf[qbuf_cnt]->status = (umq_buf_status_t)cr[i].status;

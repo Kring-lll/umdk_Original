@@ -1874,6 +1874,8 @@ int umq_ub_dequeue_plus_with_poll_tx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t
                 continue;
             }
         }
+        /* After the read operation is complete, send_imm request with user_ctx equal to 0 will be sent. 
+         * This tx_cqe request does't need to be reported. */
         if (cr[i].user_ctx == 0) {
             if (cr[i].opcode == URMA_CR_OPC_SEND_WITH_IMM) {
                 umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, 1);
