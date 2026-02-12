@@ -64,6 +64,9 @@ int bdp_p_vjetty_id_table_del_without_lock(bondp_hash_table_t *tbl, urma_jetty_i
  */
 int bdp_p_vjetty_id_table_lookup(bondp_hash_table_t *tbl, urma_jetty_id_t pjetty_id, bdp_p_vjetty_type_t type,
                                  uint32_t *vjetty_id);
+
+int bdp_p_vjetty_id_table_lookup_lockless(bondp_hash_table_t *tbl, urma_jetty_id_t pjetty_id, bdp_p_vjetty_type_t type,
+    uint32_t *vjetty_id);
 /**
  * Return the bondp_comp corresponding to pjetty_id
  * Only perform table lookup operations, do not manage reference counts, external locking is required for use.
