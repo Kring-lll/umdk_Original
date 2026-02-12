@@ -852,21 +852,16 @@ static urma_status_t bondp_post_send_wr_no_store(bjetty_ctx_t *bjetty_ctx,
     if (ret) {
         return URMA_FAIL;
     }
-    urma_jfs_wr_t *copied_jfs_wr = deepcopy_jfs_wr(wr);
-    if (copied_jfs_wr == NULL) {
-        return URMA_FAIL;
-    }
-    urma_jfs_wr_t *cur_wr = copied_jfs_wr;
+    urma_jfs_wr_t *local_wr = (urma_jfs_wr_t *)wr;
+    urma_jfs_wr_t *cur_wr = local_wr;
     while (cur_wr != NULL) {
         ret = set_jfs_wr_ptseg_ptjetty(cur_wr, cur_wr->tjetty, local_port, target_port);
         if (ret) {
-            goto DEL_AND_RET;
+            return ret;
         }
         cur_wr = cur_wr->next;
     }
-    ret = comp_post_send(bjetty_ctx, local_port, copied_jfs_wr, bad_wr);
-DEL_AND_RET:
-    (void)delete_copied_jfs_wr(copied_jfs_wr);
+    ret = comp_post_send(bjetty_ctx, local_port, local_wr, bad_wr);
     return ret;
 }
 /**
@@ -1896,7 +1891,7 @@ static int restore_cr_local_id(bondp_context_t *bdp_ctx,  int dev_idx, urma_cr_t
         .eid = bdp_ctx->p_ctxs[dev_idx]->eid,
         .id = cr->local_id,
     };
-    int ret = bdp_p_vjetty_id_table_lookup(&bdp_ctx->p_vjetty_id_table, pjetty_id, get_p_vjetty_type_by_cr(cr),
+    int ret = bdp_p_vjetty_id_table_lookup_lockless(&bdp_ctx->p_vjetty_id_table, pjetty_id, get_p_vjetty_type_by_cr(cr),
         &vjetty_id);
     if (ret) {
         URMA_LOG_ERR("Failed to get vjetty.id of local_id: %u, ret: %d\n", pjetty_id.id, ret);
