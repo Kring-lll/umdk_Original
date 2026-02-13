@@ -215,3 +215,117 @@ TEST_F(UmqUBTest, test_ub_init_failure)
     ASSERT_NE(ret, 0);
 }
 
+/**
+ * # 将 <your_token> 替换为实际的 Token
+ * git remote set-url origin https://<your_token>@atomgit.com/zhaohongrui3/umdk.git
+ * # 然后重新操作
+ * git push origin main
+ */
+
+TEST_F(UmqUBTest, test_umq_ub_dev_functions)
+{
+    int ret;
+    umq_dev_assign_t dev_info = {0};
+    char dev_str[UMQ_UB_DEV_STR_LENGTH] = {0};
+    umq_ub_raw_dev_t raw_dev = {0};
+    umq_eid_t eid = {0};
+    (void)urma_str_to_eid("127.0.0.1", &eid.eid);
+
+    // 测试umq_ub_dev_str_get函数 - 设备模式
+    dev_info.assign_mode = UMQ_DEV_ASSIGN_MODE_DEV;
+    strcpy(dev_info.dev.dev_name, "bonding_dev_0");
+    dev_info.dev.eid_idx = 0;
+    ret = umq_ub_dev_str_get(&dev_info, dev_str, sizeof(dev_str));
+    ASSERT_EQ(ret, UMQ_SUCCESS);
+
+    // 测试umq_ub_dev_str_get函数 - EID模式
+    dev_info.assign_mode = UMQ_DEV_ASSIGN_MODE_EID;
+    dev_info.eid = eid;
+    ret = umq_ub_dev_str_get(&dev_info, dev_str, sizeof(dev_str));
+    ASSERT_EQ(ret, UMQ_SUCCESS);
+
+    // 测试umq_ub_dev_str_get函数 - IPv4模式
+    dev_info.assign_mode = UMQ_DEV_ASSIGN_MODE_IPV4;
+    strcpy(dev_info.ipv4.ip_addr, "192.168.1.1");
+    ret = umq_ub_dev_str_get(&dev_info, dev_str, sizeof(dev_str));
+    ASSERT_EQ(ret, UMQ_SUCCESS);
+
+    // 测试umq_ub_dev_str_get函数 - 无效模式
+    dev_info.assign_mode = (umq_dev_assign_mode_t)999;
+    ret = umq_ub_dev_str_get(&dev_info, dev_str, sizeof(dev_str));
+    ASSERT_NE(ret, UMQ_SUCCESS);
+
+    // 测试设备信息初始化和获取
+    MOCKER(urma_get_device_list).stubs().will(invoke(urma_get_device_list_mock));
+    MOCKER(urma_get_eid_list).stubs().with(mockcpp::any(), mockcpp::outBoundP((uint32_t *)mockcpp::any()))
+        .will(returnValue((urma_eid_info_t *)NULL));
+
+    ret = umq_ub_dev_info_init();
+    ASSERT_EQ(ret, UMQ_SUCCESS);
+
+    int dev_num = umq_ub_dev_num_get();
+    ASSERT_EQ(dev_num, 1);
+
+    // 测试设备信息转储
+    umq_dev_info_t dev_dump;
+    umq_ub_dev_info_dump(UMQ_TRANS_MODE_UB, 1, &dev_dump);
+    ASSERT_STREQ(dev_dump.dev_name, "bonding_dev_0");
+
+    // 测试按名称获取设备信息
+    ret = umq_ub_dev_info_dump_by_name("bonding_dev_0", UMQ_TRANS_MODE_UB, &dev_dump);
+    ASSERT_EQ(ret, UMQ_SUCCESS);
+    ASSERT_STREQ(dev_dump.dev_name, "bonding_dev_0");
+
+    // 测试查找不存在的设备
+    ret = umq_ub_dev_info_dump_by_name("nonexistent_dev", UMQ_TRANS_MODE_UB, &dev_dump);
+    ASSERT_NE(ret, UMQ_SUCCESS);
+
+    // 清理设备信息
+    umq_ub_dev_info_uninit();
+}
+
+TEST_F(UmqUBTest, test_rx_buf_ctx_list_functions)
+{
+    rx_buf_ctx_list_t rx_buf_ctx_list = {0};
+    uint32_t ctx_num = 10;
+
+    // 测试初始化
+    int ret = rx_buf_ctx_list_init(&rx_buf_ctx_list, ctx_num);
+    ASSERT_EQ(ret, UMQ_SUCCESS);
+    ASSERT_NE(rx_buf_ctx_list.addr, nullptr);
+
+    // 测试刷新
+    rx_buf_ctx_t *rx_buf_ctx = queue_rx_buf_ctx_flush(&rx_buf_ctx_list);
+    ASSERT_NE(rx_buf_ctx, nullptr);
+
+    // 测试反初始化
+    rx_buf_ctx_list_uninit(&rx_buf_ctx_list);
+    ASSERT_EQ(rx_buf_ctx_list.addr, nullptr);
+}
+
+TEST_F(UmqUBTest, test_umq_ub_bind_info_functions)
+{
+    ub_queue_t queue = {0};
+    umq_ub_bind_info_t bind_info = {0};
+    uint8_t bind_info_buf[512] = {0};
+    uint32_t bind_info_size = 512;
+
+    // 初始化队列结构
+    queue.state = QUEUE_STATE_READY;
+    queue.tp_mode = URMA_TRANSPORT_MODE_RAW;
+    queue.tp_type = URMA_TP_IB;
+    queue.flow_control.enabled = false;
+
+    // 测试绑定信息检查（无效情况）
+    int ret = umq_ub_bind_info_check(&queue, &bind_info);
+    ASSERT_NE(ret, UMQ_SUCCESS);
+
+    // 测试绑定信息序列化
+    ret = umq_ub_bind_info_serialize(&queue, bind_info_buf, bind_info_size);
+    ASSERT_GT(ret, 0);
+
+    // 测试绑定信息反序列化
+    ret = umq_ub_bind_info_deserialize(bind_info_buf, bind_info_size, &bind_info);
+    ASSERT_EQ(ret, UMQ_SUCCESS);
+}
+
