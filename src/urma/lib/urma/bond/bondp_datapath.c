@@ -26,6 +26,7 @@
 #define CALLBACK_SKIP (1)
 #define CALLBACK_FAIL (-1)
 #define RECV_WR_ID_MAX (1U << 31)
+#define BONDP_MAX_JFS_WR_NUM (32)
 
 typedef enum bondp_cr_handler_ret {
     CR_HANDLER_ERR_AND_COPY     = -1,
@@ -827,6 +828,43 @@ static bdp_v_conn_t *get_v_conn_on_send(bjetty_ctx_t *bjetty_ctx, bondp_target_j
     }
     return v_conn;
 }
+
+static void bondp_deep_copy_wr(urma_jfs_wr_t *t_wr, const urma_jfs_wr_t *s_wr,
+    urma_sge_t *src_sge, urma_sge_t *dst_sge)
+{
+    switch (s_wr->opcode) {
+        case URMA_OPC_SEND:
+        case URMA_OPC_SEND_IMM:
+        case URMA_OPC_SEND_INVALIDATE:
+            t_wr->send.src.sge = src_sge;
+            (void)memcpy(src_sge, s_wr->send.src.sge, sizeof(urma_sge_t));
+            break;
+        case URMA_OPC_WRITE:
+        case URMA_OPC_WRITE_IMM:
+        case URMA_OPC_WRITE_NOTIFY:
+        case URMA_OPC_READ:
+            t_wr->rw.src.sge = src_sge;
+            (void)memcpy(src_sge, s_wr->rw.src.sge, sizeof(urma_sge_t));
+            t_wr->rw.dst.sge = dst_sge;
+            (void)memcpy(dst_sge, s_wr->rw.dst.sge, sizeof(urma_sge_t));
+            break;
+        case URMA_OPC_CAS:
+            t_wr->cas.src = src_sge;
+            (void)memcpy(src_sge, s_wr->cas.src, sizeof(urma_sge_t));
+            t_wr->cas.dst = dst_sge;
+            (void)memcpy(dst_sge, s_wr->cas.dst, sizeof(urma_sge_t));
+            break;
+        case URMA_OPC_FADD:
+            t_wr->faa.src = src_sge;
+            (void)memcpy(src_sge, s_wr->faa.src, sizeof(urma_sge_t));
+            t_wr->faa.dst = dst_sge;
+            (void)memcpy(dst_sge, s_wr->faa.dst, sizeof(urma_sge_t));
+            break;
+        default:
+            break;
+    }
+}
+
 /**
  * Do not cache WR, nor perform reliability processing;
  * simply replicate the WR information,
@@ -839,6 +877,11 @@ static urma_status_t bondp_post_send_wr_no_store(bjetty_ctx_t *bjetty_ctx,
     urma_status_t ret = URMA_SUCCESS;
     int local_port = -1;
     int target_port = -1;
+    urma_jfs_wr_t wr_list[BONDP_MAX_JFS_WR_NUM] = {0};
+
+    urma_sge_t src_sge[BONDP_MAX_JFS_WR_NUM] = {0};
+    urma_sge_t dst_sge[BONDP_MAX_JFS_WR_NUM] = {0};
+
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
     if (bdp_tjetty == NULL) {
         URMA_LOG_ERR("WR->tjetty is NULL\n");
@@ -852,21 +895,23 @@ static urma_status_t bondp_post_send_wr_no_store(bjetty_ctx_t *bjetty_ctx,
     if (ret) {
         return URMA_FAIL;
     }
-    urma_jfs_wr_t *copied_jfs_wr = deepcopy_jfs_wr(wr);
-    if (copied_jfs_wr == NULL) {
-        return URMA_FAIL;
-    }
-    urma_jfs_wr_t *cur_wr = copied_jfs_wr;
+    int index = 0;
+    urma_jfs_wr_t *cur_wr = (urma_jfs_wr_t *)wr;
     while (cur_wr != NULL) {
-        ret = set_jfs_wr_ptseg_ptjetty(cur_wr, cur_wr->tjetty, local_port, target_port);
+        if (index >= BONDP_MAX_JFS_WR_NUM) {
+            URMA_LOG_ERR("Bondp supports at most %d wr_list.\n", BONDP_MAX_JFS_WR_NUM);
+            return URMA_EINVAL;
+        }
+        wr_list[index] = *cur_wr;
+        bondp_deep_copy_wr(&wr_list[index], cur_wr, &src_sge[index], &dst_sge[index]);
+        ret = set_jfs_wr_ptseg_ptjetty(&wr_list[index], cur_wr->tjetty, local_port, target_port);
         if (ret) {
-            goto DEL_AND_RET;
+            return ret;
         }
         cur_wr = cur_wr->next;
+        index++;
     }
-    ret = comp_post_send(bjetty_ctx, local_port, copied_jfs_wr, bad_wr);
-DEL_AND_RET:
-    (void)delete_copied_jfs_wr(copied_jfs_wr);
+    ret = comp_post_send(bjetty_ctx, local_port, wr_list, bad_wr);
     return ret;
 }
 /**
@@ -1896,7 +1941,7 @@ static int restore_cr_local_id(bondp_context_t *bdp_ctx,  int dev_idx, urma_cr_t
         .eid = bdp_ctx->p_ctxs[dev_idx]->eid,
         .id = cr->local_id,
     };
-    int ret = bdp_p_vjetty_id_table_lookup(&bdp_ctx->p_vjetty_id_table, pjetty_id, get_p_vjetty_type_by_cr(cr),
+    int ret = bdp_p_vjetty_id_table_lookup_lockless(&bdp_ctx->p_vjetty_id_table, pjetty_id, get_p_vjetty_type_by_cr(cr),
         &vjetty_id);
     if (ret) {
         URMA_LOG_ERR("Failed to get vjetty.id of local_id: %u, ret: %d\n", pjetty_id.id, ret);
