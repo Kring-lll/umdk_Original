@@ -362,6 +362,7 @@ typedef struct ub_queue {
     volatile uint32_t ref_cnt;
     volatile uint32_t require_rx_count;
     volatile uint32_t tx_outstanding;
+    volatile uint64_t packet_stats[UB_PACKET_STATS_TYPE_MAX];
     uint32_t create_flag;
     uint64_t umq_ctx;
     urma_target_seg_t **imported_tseg_list;   // read-only
