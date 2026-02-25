@@ -43,10 +43,12 @@ static inline void umq_perf_record_write_with_feature(umq_perf_record_type_t typ
     umq_perf_record_write(type, start);
 }
 
-int umq_perf_start(uint64_t *thresh_array, uint32_t thresh_num);
+int umq_perf_start(void);
+int umq_perf_reset(uint64_t *thresh_array, uint32_t thresh_num);
 int umq_perf_stop(void);
-int umq_perf_clear(void);
-int umq_perf_info_get(umq_perf_infos_t **perf_info);
+int umq_perf_info_get(umq_perf_stats_t *perf_info);
+int umq_perf_info_to_string(umq_perf_stats_t *perf_stats, umq_perf_stats_cfg_t *perf_stats_cfg,
+    char *umq_perf_stats_buf, int buf_szie);
 
 #ifdef __cplusplus
 }

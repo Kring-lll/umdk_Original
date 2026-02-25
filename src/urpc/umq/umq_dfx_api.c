@@ -8,6 +8,7 @@
 #include "umq_errno.h"
 #include "umq_qbuf_pool.h"
 #include "umq_huge_qbuf_pool.h"
+#include "perf.h"
 #include "umq_inner.h"
 
 int umq_stats_flow_control_get(uint64_t umqh, umq_flow_control_stats_t *flow_control_stats)
@@ -79,10 +80,35 @@ int umq_stats_io_reset(uint64_t umqh)
 
 int umq_stats_perf_get(umq_perf_stats_t *umq_perf_stats)
 {
-    return UMQ_SUCCESS;
+    return umq_perf_info_get(umq_perf_stats);
 }
 
 int umq_stats_perf_reset(umq_perf_stats_cfg_t *perf_stats_cfg)
 {
-    return UMQ_SUCCESS;
+    if (perf_stats_cfg == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "perf stats cfg invalid parameter\n");
+        return -UMQ_ERR_EINVAL;
+    }
+    return umq_perf_reset(perf_stats_cfg->thresh_array, perf_stats_cfg->thresh_num);
+}
+
+int umq_stats_perf_start(void)
+{
+    return umq_perf_start();
+}
+
+int umq_stats_perf_stop(void)
+{
+    return umq_perf_stop();
+}
+
+int umq_stats_perf_to_string(umq_perf_stats_t *umq_perf_stats, umq_perf_stats_cfg_t *perf_stats_cfg,
+    char *umq_perf_stats_buf, uint32_t buf_szie)
+{
+    return umq_perf_info_to_string(umq_perf_stats, perf_stats_cfg, umq_perf_stats_buf, buf_szie);
+}
+
+void umq_dfx_cmd_process(umq_dfx_cmd_t *cmd, umq_dfx_result_t *result_ctl)
+{
+    return;
 }
