@@ -9,7 +9,6 @@
 #include <dlfcn.h>
 #include <limits.h>
 
-#include "dfx.h"
 #include "perf.h"
 #include "umq_vlog.h"
 #include "umq_inner.h"
@@ -448,7 +447,7 @@ void umq_uninit(void)
         return;
     }
 
-    umq_dfx_uninit();
+    umq_perf_uninit();
     framework_uninit();
 
     if (g_umq_config != NULL) {
@@ -667,17 +666,11 @@ int umq_init(umq_init_cfg_t *cfg)
         }
     }
 
-    ret = umq_dfx_init(cfg);
-    if (ret != UMQ_SUCCESS) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "umq dfx init failed, status: %u\n", ret);
-        goto FW_UNINIT;
-    }
-
     g_umq_config = (umq_init_cfg_t *)malloc(sizeof(umq_init_cfg_t));
     if (g_umq_config == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "malloc umq config failed\n");
         ret = -UMQ_ERR_ENOMEM;
-        goto DFX_UNINIT;
+        goto FW_UNINIT;
     }
     (void)memcpy(g_umq_config, cfg, sizeof(umq_init_cfg_t));
 
@@ -685,9 +678,6 @@ int umq_init(umq_init_cfg_t *cfg)
 
     g_umq_inited = true;
     return UMQ_SUCCESS;
-
-DFX_UNINIT:
-    umq_dfx_uninit();
 
 FW_UNINIT:
     framework_uninit();
