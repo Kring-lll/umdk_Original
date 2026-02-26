@@ -51,8 +51,6 @@ static struct option g_long_options[] = {
     {"tp-type",            required_argument, NULL, 'P'},
     {"queue_cnt",          required_argument, NULL, 'q'},
     {"threadpool_size",    required_argument, NULL, 's'},
-    {"m_dev_name",         required_argument, NULL, 'n'},
-    {"m_eid_idx",          required_argument, NULL, 'x'},
     {NULL,                 0,                 NULL,  0 }
 };
 
@@ -531,42 +529,6 @@ void example_flush(uint64_t umqh)
     }
 }
 
-static int cfg_get_dev_name(struct urpc_example_config *cfg, char *data)
-{
-    char *save;
-    char *new_data = strtok_r(data, ",", &save);
-    uint32_t i = 0;
-    while (i < EXAMPLE_MAX_DEV_NUM && (new_data != NULL)) {
-        (void)strcpy(cfg->m_dev_name[i], new_data);
-        new_data = strtok_r(NULL, ",", &save);
-        i++;
-    }
-    
-    if (cfg->m_dev_num != 0 && cfg->m_dev_num != i) {
-        return -1;
-    }
-    cfg->m_dev_num = i;
-    return 0;
-}
-
-static int cfg_get_eid_idx(struct urpc_example_config *cfg, char *data)
-{
-    char *save;
-    char *new_data = strtok_r(data, ",", &save);
-    uint32_t i = 0;
-    while (i < EXAMPLE_MAX_DEV_NUM && (new_data != NULL)) {
-        cfg->m_eid_idx[i] = (uint16_t)strtoul(new_data, NULL, 0);
-        new_data = strtok_r(NULL, ",", &save);
-        i++;
-    }
-
-    if (cfg->m_dev_num != 0 && cfg->m_dev_num != i) {
-        return -1;
-    }
-    cfg->m_dev_num = i;
-    return 0;
-}
-
 /* Parse the command line parameters for client and server */
 int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
 {
@@ -666,16 +628,6 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
                 break;
             case 's':
                 cfg->thread_poll_size = (int)strtol(optarg, NULL, 0);
-                break;
-            case 'n':
-                if (cfg_get_dev_name(cfg, optarg) != 0) {
-                    return -1;
-                }
-                break;
-            case 'x':
-                if (cfg_get_eid_idx(cfg, optarg) != 0) {
-                    return -1;
-                }
                 break;
             default:
                 return -1;

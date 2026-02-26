@@ -60,9 +60,6 @@ struct urpc_example_config {
     umq_tp_type_t tp_type;
     uint32_t queue_num;
     int thread_poll_size;
-    char m_dev_name[EXAMPLE_MAX_DEV_NUM][EXAMPLE_DEV_NAME_LEN];
-    uint16_t m_eid_idx[EXAMPLE_MAX_DEV_NUM];
-    uint32_t m_dev_num;
 };
 
 struct req_cb_arg {
