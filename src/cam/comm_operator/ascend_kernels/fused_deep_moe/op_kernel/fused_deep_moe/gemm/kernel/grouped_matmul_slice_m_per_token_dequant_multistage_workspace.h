@@ -155,11 +155,11 @@ public:
             epWinContext_.SetGlobalBuffer(&(reinterpret_cast<__gm__ Moe::CommArgs *>(commArgs))->peerMems[0],
                                           Moe::CAM_MAX_RANK_SIZE);
             syncGmAddr = ((GM_ADDR)epWinContext_.GetValue(epRankId)) + GMM2::SOFT_SYNC_OFFSET +
-                         get_block_idx() * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+                         (AscendC::GetBlockIdx() / AscendC::GetSubBlockNum()) * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
         } else {
             winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
             syncGmAddr = (GM_ADDR)((winContext_)->localWindowsExp) + GMM2::SOFT_SYNC_OFFSET +
-                         get_block_idx() * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+                         (AscendC::GetBlockIdx() / AscendC::GetSubBlockNum()) * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
         }
     }
 
@@ -346,7 +346,7 @@ public:
         auto *combiner = (MoeDistributeCombineImpl::CamMoeDistributeCombine<TemplateMC2TypeFunc> *)params.combiner;
         do {
             if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
-                if (get_subblockid() == 0) {
+                if (AscendC::GetSubBlockIdx() == 0) {
                     AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
                 }
             }
@@ -430,7 +430,7 @@ public:
                 startCoreIdx = (startCoreIdx + coreLoops) % coreNum;
             }
             if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
-                if (get_subblockid() == 0) {
+                if (AscendC::GetSubBlockIdx() == 0) {
                     AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::SEND_SYNC_EVENT_ID);
                     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
                         AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
@@ -480,7 +480,7 @@ public:
 
         icache_preload(4);
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
-            if (get_subblockid() == 1) {
+            if (AscendC::GetSubBlockIdx() == 1) {
                 resource.pipe.Init();
                 combiner->TPipeSet(&resource.pipe);
                 combiner->ProcessCombine();
@@ -488,7 +488,7 @@ public:
                 resource.pipe.Destroy();
             }
         } else if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
-            if (get_subblockid() == 0) {
+            if (AscendC::GetSubBlockIdx() == 0) {
                 resource.pipe.Init();
                 combiner->TPipeSet(&resource.pipe);
                 combiner->AllToAllSend();

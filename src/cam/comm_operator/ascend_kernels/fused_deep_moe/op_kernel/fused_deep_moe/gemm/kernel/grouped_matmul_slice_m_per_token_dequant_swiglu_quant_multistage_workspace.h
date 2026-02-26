@@ -58,11 +58,11 @@ constexpr uint32_t QUANT_SPACE_FACTOR = 176 * 1024 / 11;  // up to 176KB for qua
 #define GROUP_INFO_SIZE 32
 
 // #define USE_SEND_CORE_FOR_SHARE_SWIGLU
-#ifdef USE_SEND_CORE_FOR_SHARE_SWIGLU
-    #pragma message("FusedDeepMoe kernel: USE_SEND_CORE_FOR_SHARE_SWIGLU")
-#else
-    #pragma message("FusedDeepMoe kernel: USE_RECV_CORE_FOR_SHARE_SWIGLU")
-#endif
+// #ifdef USE_SEND_CORE_FOR_SHARE_SWIGLU
+//     #pragma message("FusedDeepMoe kernel: USE_SEND_CORE_FOR_SHARE_SWIGLU")
+// #else
+//     #pragma message("FusedDeepMoe kernel: USE_RECV_CORE_FOR_SHARE_SWIGLU")
+// #endif
 
 using namespace Moe;
 namespace Catlass::Gemm::Kernel {

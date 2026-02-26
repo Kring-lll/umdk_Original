@@ -301,7 +301,7 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     axisH_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.h;
     axisK_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.k;
     if constexpr (EXEC_FLAG & (EXEC_FLAG_DEEP_FUSE | EXEC_FLAG_SHARED_EXPERT)) {
-        aivNum_ = get_block_num();
+        aivNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.aicNum;
     } else {
         aivNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.aivNum;
     }
@@ -343,7 +343,7 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
 
     InitStatusTargetSum();
     if constexpr (EXEC_FLAG & (EXEC_FLAG_DEEP_FUSE | EXEC_FLAG_SHARED_EXPERT)) {
-        coreIdx_ = get_block_idx(); // AscendC::GetBlockIdx() / 2;
+        coreIdx_ = AscendC::GetBlockIdx() / AscendC::GetSubBlockNum(); // AscendC::GetBlockIdx() / 2;
     }
     SplitCoreCal();
 
