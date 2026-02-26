@@ -19,9 +19,11 @@
 #define IODIE_NUM (2)
 #define PORT_NUM (9)
 #define DEV_NUM (128)
+#define ENTITY_AGG_DEV_NUM (3) // bonding device number per entity
 
 struct urma_ping_ubcore_topo_ue {
 	uint32_t chip_id;
+	uint32_t entity_id;
 	char primary_eid[EID_LEN];
 	char port_eid[PORT_NUM][EID_LEN];
 };
