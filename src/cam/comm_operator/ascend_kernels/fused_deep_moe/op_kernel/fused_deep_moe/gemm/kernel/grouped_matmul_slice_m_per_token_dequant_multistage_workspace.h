@@ -195,6 +195,8 @@ public:
         uint32_t stageId = 0;
         uint32_t stageUsed = 0;
         uint32_t startCoreIdx = 0;
+
+        MoeTracing(TRACE_POINT("process gmm2", "B"));
         for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
             if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                 gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(
@@ -331,13 +333,15 @@ public:
             uint32_t aivComputeStageId = (stageId >= stageUsed) ?
                 (stageId - stageUsed) : (stageId + WORKSPACE_STAGES - stageUsed);
             if (skipWithSoft[aivComputeStageId]) {
-                Callback callbackBeforeFixpipe = MakeCallbackWithCall(&aicWaitFuncList[stageId]);
+                Callback callbackBeforeFixpipe = MakeCallbackWithCall(&aicWaitFuncList[aivComputeStageId]);
                 callbackBeforeFixpipe();
             } else {
-                Arch::CrossCoreWaitFlag(flagAivFinishComputeList[aivComputeStageId]);
+                Callback callbackBeforeFixpipe = MakeCallback(&aicWaitFuncList[aivComputeStageId]);
+                callbackBeforeFixpipe();
             }
             --stageUsed;
         }
+        MoeTracing(TRACE_POINT("process gmm2", "E"));
     }
 
     template <>
@@ -373,6 +377,7 @@ public:
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                 gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(gmScaleListTensor.GetDataPtr<int32_t>(0));
             }
+            MoeTracing(TRACE_POINT("process blockEpilogue", "B"));
             for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
                 uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
                                                     : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
@@ -414,9 +419,11 @@ public:
                     auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
 
                     Arch::CrossCoreWaitFlag(flagAicFinishStoreList[stageId]);
+                    MoeTracing(TRACE_POINT("blockEpilogue", "B"), stageId);
                     blockEpilogue(gmGroupOffsetD, groupIdx, blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC,
                                   layoutBlockC);
                     Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(flagAivFinishComputeList[stageId]);
+                    MoeTracing(TRACE_POINT("blockEpilogue", "E"), stageId);
 
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
                 }
@@ -476,6 +483,7 @@ public:
                     AscendC::CrossCoreWaitFlag(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
                 }
             }
+            MoeTracing(TRACE_POINT("process blockEpilogue", "E"));
         } while(false);
 
         icache_preload(4);
@@ -525,6 +533,10 @@ private:
         CATLASS_DEVICE
         void Call() const {
             constexpr uint32_t waitValue = g_coreType == AscendC::AIC ? 0 : 1;
+            if constexpr (g_coreType == AscendC::AIC) {
+                MoeTracing(TRACE_POINT("gmm2", "e"), stageId);
+            }
+            MoeTracing(TRACE_POINT("waiting", "B"), stageId);
             // 查看flag，类似wait flag
             AscendC::PipeBarrier<PIPE_ALL>();
             AscendC::GlobalTensor<uint8_t> global;
@@ -544,12 +556,18 @@ private:
                 }
             }
             AscendC::PipeBarrier<PIPE_ALL>();
+            MoeTracing(TRACE_POINT("waiting", "E"), stageId);
         }
 
         CATLASS_DEVICE
         void operator()() const
         {
+            if constexpr (g_coreType == AscendC::AIC) {
+                MoeTracing(TRACE_POINT("gmm2", "e"), stageId);
+            }
+            MoeTracing(TRACE_POINT("waiting", "B"), stageId);
             Arch::CrossCoreWaitFlag(ptr->flagAivFinishComputeList[stageId]);
+            MoeTracing(TRACE_POINT("waiting", "E"), stageId);
         }
 
         MatmulKernel *ptr{nullptr};
@@ -580,12 +598,18 @@ private:
                             AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
             __asm__ __volatile__("");
             AscendC::PipeBarrier<PIPE_ALL>();
+            if constexpr (g_coreType == AscendC::AIC) {
+                MoeTracing(TRACE_POINT("gmm2", "b"), stageId);
+            }
         }
 
         CATLASS_DEVICE
         void operator()() const
         {
             Arch::CrossCoreSetFlag<0x2, PIPE_FIX>(ptr->flagAicFinishStoreList[stageId]);
+            if constexpr (g_coreType == AscendC::AIC) {
+                MoeTracing(TRACE_POINT("gmm2", "b"), stageId);
+            }
         }
 
         MatmulKernel *ptr{nullptr};

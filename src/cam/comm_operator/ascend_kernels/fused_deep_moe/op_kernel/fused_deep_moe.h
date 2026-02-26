@@ -390,6 +390,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
 template <TemplateMC2TypeClass>
 __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
 {
+    MoeTracing(TRACE_POINT("processing", "B"));
     GemmCoord gmm1ProblemShape{maxTokenNum_, gmm1OutputDim_, tokenHiddenSize_};
     GemmCoord gmm2ProblemShape{maxTokenNum_, gmm2OutputDim_, gmm2InputDim_};
 
@@ -515,5 +516,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
                                shareGmm2ProblemShape, gmShareX2, gmShareWeight2_, gmShareOutput_,
                                gmShareWeight2Scale_, gmShareX2Scale, layoutShareX2, layoutShareWeight2, layoutShareX2Scale,
                                layoutShareOutput, epRankId_, commArgs_, gmWorkspace, &combiner);
+
+    MoeTracing(TRACE_POINT("processing", "E"));
 }
 #endif  // FUSED_DEEP_MOE_H

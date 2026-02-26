@@ -10,6 +10,21 @@
 #include <kernel_operator.h>
 #include "lib/matmul_intf.h"
 
+__aicore__ inline void SetMoeProfilePtr(int64_t *profilePtr)
+{
+#if __CCE_AICORE__ == 220 || defined(__DAV_C310__) || defined(__DAV_310R6__)
+#ifdef SPLIT_CORE_CUBE
+    g_moeProfilePtrCube = profilePtr;
+#elif defined(SPLIT_CORE_VEC)
+    g_moeProfilePtrVec = profilePtr;
+#else
+    g_moeProfilePtr = profilePtr;
+#endif
+#else
+    g_moeProfilePtr = profilePtr;
+#endif
+}
+
 extern "C" __global__ __aicore__ void fused_deep_moe(
     // input
     GM_ADDR x, GM_ADDR expert_ids, GM_ADDR gmm1_permuted_weight, GM_ADDR gmm1_permuted_weight_scale,
@@ -19,11 +34,25 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
     GM_ADDR expert_smooth_scales, GM_ADDR x_active_mask,
     GM_ADDR comm_args,
     // output
-    GM_ADDR output, GM_ADDR share_output, GM_ADDR expertTokenNums,
+    GM_ADDR output, GM_ADDR share_output, GM_ADDR expertTokenNums, GM_ADDR profiling,
     // system
     GM_ADDR workspace, GM_ADDR tiling)
 {
     icache_preload(8);
+#if ENABLE_MOE_PROFILING
+    AscendC::PipeBarrier<PIPE_ALL>();
+    Arch::CrossCoreFlag gmm1AivFinished{0};
+    if constexpr (g_coreType == AscendC::AIV) {
+        Arch::CrossCoreBarrier<0x0, PIPE_MTE3>();
+        Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(gmm1AivFinished);
+    } else {
+        Arch::CrossCoreWaitFlag(gmm1AivFinished);
+    }
+    int64_t profData[PROF_SIZE_PER_CORE];
+    profData[0] = 1;
+    profData[PROF_SIZE_PER_CORE - 1] = AscendC::GetSystemCycle();
+    SetMoeProfilePtr(&profData[0]);
+#endif
     // New output recvCount
     REGISTER_TILING_DEFAULT(FusedDeepMoeTilingData);
     KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);  // 1C2V
@@ -48,4 +77,39 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
                 workspace, nullptr, &tiling_data);
         op.Process();
     }
+
+#if ENABLE_MOE_PROFILING
+    if (profiling) {
+        AscendC::GlobalTensor<int64_t> initGlobal = {};
+        initGlobal.SetGlobalBuffer((__gm__ int64_t *)(profiling));
+        AscendC::GlobalTensor<int64_t> coreGlobal;
+        if (g_coreType == AscendC::AIC) {
+            coreGlobal = initGlobal[AscendC::GetBlockIdx() * PROF_SIZE_PER_CORE];
+        } else {
+            coreGlobal = initGlobal[(get_block_num() + AscendC::GetBlockIdx()) * PROF_SIZE_PER_CORE];
+        }
+
+        AscendC::printf("YHB: coreGlobal %p profData[0] = %u\n", coreGlobal.GetPhyAddr(), profData[0]);
+        for (unsigned i = 0; i < profData[0]; ++i) {
+            coreGlobal(i) = profData[i];
+            coreGlobal(PROF_SIZE_PER_CORE - i - 1) = profData[PROF_SIZE_PER_CORE - i - 1];
+            AscendC::printf("YHB: i %u coreGlobal %p profData[0] = %u\n", i, coreGlobal[i].GetPhyAddr(), profData[i]);
+            AscendC::printf("YHB: i %u coreGlobal %p profData[0] = %u\n", PROF_SIZE_PER_CORE - i - 1, coreGlobal[PROF_SIZE_PER_CORE - i - 1].GetPhyAddr(), profData[PROF_SIZE_PER_CORE - i - 1]);
+        }
+        for (unsigned i = 0; i < profData[0]; ++i) {
+            if (i == 0 || (((uint64_t)coreGlobal[i].GetPhyAddr()) & 63) == 0) {
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<int64_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                AscendC::DcciDst::CACHELINE_OUT>(coreGlobal[i]);
+                __asm__ __volatile__("");
+            }
+            if (i == profData[PROF_SIZE_PER_CORE - 1] - 1 || (((uint64_t)coreGlobal[i].GetPhyAddr()) & 63) == 0) {
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<int64_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                AscendC::DcciDst::CACHELINE_OUT>(coreGlobal[i]);
+                __asm__ __volatile__("");
+            }
+        }
+    }
+#endif
 }

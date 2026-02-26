@@ -56,7 +56,8 @@ TensorVector FusedDeepMoeImplNpu(
     
     at::Tensor output = at::empty({bs, h}, x.options());
     at::Tensor shareOutput = at::empty({bs, h}, x.options());
-    
+    at::Tensor profiling = at::empty({PROF_TOTAL_CORE_NUM * PROF_SIZE_PER_CORE}, x.options().dtype(at::kLong));
+
     bool isShareExpert = (epRankId < sharedExpertRankNum);
     int64_t localExpertNum = 0;
     if (isShareExpert) {
@@ -82,8 +83,8 @@ TensorVector FusedDeepMoeImplNpu(
         // attr
         groupEpPtr, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs, \
         // output
-        output, shareOutput, expertTokenNums);
-    return {output, shareOutput, expertTokenNums};
+        output, shareOutput, expertTokenNums, profiling);
+    return {output, shareOutput, expertTokenNums, profiling};
 }
 
 TensorVector FusedDeepMoeBackwardImplNpu(const at::Tensor &self)
@@ -121,6 +122,8 @@ TensorVector FusedDeepMoeImplMeta(
     int bs = xShape[0];
     at::Tensor output = at::empty({bs, h}, x.options().device(at::kMeta));
     at::Tensor shareOutput = at::empty({bs, h}, x.options().device(at::kMeta));
+    at::Tensor profiling =
+        at::empty({PROF_TOTAL_CORE_NUM * PROF_SIZE_PER_CORE}, x.options().dtype(at::kLong).device(at::kMeta));
 
     bool isShareExpert = (epRankId < sharedExpertRankNum);
     int64_t localExpertNum = 0;
@@ -132,7 +135,7 @@ TensorVector FusedDeepMoeImplMeta(
     auto opts = expertIds.options().dtype(at::kLong);
     at::Tensor expertTokenNums = at::empty({localExpertNum}, opts.device(at::kMeta));
     
-    return {output, shareOutput, expertTokenNums};
+    return {output, shareOutput, expertTokenNums, profiling};
 }
 
 TensorVector FusedDeepMoeImpl(
