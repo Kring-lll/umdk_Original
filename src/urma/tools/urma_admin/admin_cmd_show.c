@@ -25,8 +25,15 @@
 
 static int cmd_show_usage(admin_config_t *cfg)
 {
-    printf("Usage: urma_admin show\n"
-           "       urma_admin show topo\n");
+    printf("Usage:"
+           "  urma_admin show [--dev <dev>] [--whole]  Show all URMA devices information\n"
+           "  urma_admin show topo                     Show topology of current node\n"
+           "  urma_admin show topo <node_id>           Show topology of specified node\n"
+           "\n"
+           "Options:\n"
+           "  <dev>      Device name (e.g., udma1)\n"
+           "  <node_id>  Node ID (e.g., 1)\n"
+           "  --whole    Show whole information of devices\n");
     return 0;
 }
 
@@ -73,15 +80,15 @@ static void admin_parse_priority_attr(const char *sysfs_path, admin_show_ubep_t 
     if (priority_path == NULL) {
         return;
     }
- 
+
     for (i = 0; i < URMA_MAX_PRIORITY_CNT; i++) {
         if (snprintf(priority_path, DEV_PATH_MAX - 1, "%s/priority/priority%u", sysfs_path, i) <= 0) {
             (void)printf("snprintf failed, path: %s, priority_num:%u.\n", sysfs_path, i);
             continue;
         }
- 
+
         struct urma_sl_info *priority_attr = &(ubep->dev_attr.dev_cap.priority_info[i]);
- 
+
         (void)admin_parse_file_value_u32(priority_path, "sl", (uint32_t *)&priority_attr->SL);
         (void)admin_parse_file_value_u32(priority_path, "tp_type", (uint32_t *)&priority_attr->tp_type.value);
     }
@@ -578,7 +585,7 @@ free_list:
     return ret;
 }
 
-int admin_get_device_info_by_eid(const urma_eid_t *eid, admin_device_info_t *device_info, 
+int admin_get_device_info_by_eid(const urma_eid_t *eid, admin_device_info_t *device_info,
                                  struct ub_list *ubep_list)
 {
     int ret = 0;
@@ -595,7 +602,7 @@ int admin_get_device_info_by_eid(const urma_eid_t *eid, admin_device_info_t *dev
         }
     }
 
-    UB_LIST_FOR_EACH_SAFE(ubep, next, node, ubep_list) {
+    UB_LIST_FOR_EACH_SAFE (ubep, next, node, ubep_list) {
         if (ubep == NULL) {
             break;
         }
