@@ -23,18 +23,18 @@ static void *threadpool_worker(void *threadpool)
     for (;;) {
         pthread_mutex_lock(&(pool->lock));
 
-        while ((pool->count == 0) && (pool->shutdown == 0)) {
+        while ((pool->task_queue.task_count == 0) && (pool->status == THRADPOOL_STATUS_READY)) {
             pthread_cond_wait(&(pool->notify), &(pool->lock));
         }
 
-        if (pool->shutdown == 1) {
+        if (pool->status == THRADPOOL_STATUS_SHUTDOWN) {
             break;
         }
 
-        task.function = pool->queue[pool->head].function;
-        task.arg = pool->queue[pool->head].arg;
-        pool->head = (pool->head + 1) % pool->queue_size;
-        pool->count--;
+        task.function = pool->task_queue.queue[pool->task_queue.queue_head].function;
+        task.arg = pool->task_queue.queue[pool->task_queue.queue_head].arg;
+        pool->task_queue.queue_head = (pool->task_queue.queue_head + 1) % pool->task_queue.queue_size;
+        pool->task_queue.task_count--;
         pthread_mutex_unlock(&(pool->lock));
         (*(task.function))(task.arg);
 
@@ -48,7 +48,7 @@ static void *threadpool_worker(void *threadpool)
 
 threadpool_t *threadpool_create(int thread_count, int queue_size)
 {
-    threadpool_t *pool;
+    threadpool_t *pool = NULL;
     int i;
     
     if (thread_count <= 0 || thread_count > MAX_THREAD_NUM || queue_size <= 0) {
@@ -60,17 +60,19 @@ threadpool_t *threadpool_create(int thread_count, int queue_size)
     }
 
     pool->thread_count = 0;
-    pool->queue_size = queue_size;
-    pool->head = pool->tail = pool->count = 0;
-    pool->shutdown = pool->started = 0;
+    pool->task_queue.queue_size = queue_size;
+    pool->task_queue.queue_head = 0;
+    pool->task_queue.queue_tail = 0;
+    pool->task_queue.task_count = 0;
+    pool->started = 0;
 
     pool->threads = (pthread_t *)malloc(sizeof(pthread_t) * thread_count);
     if (pool->threads == NULL) {
         goto err;
     }
 
-    pool->queue = (threadpool_task_t *)malloc(sizeof(threadpool_task_t) * queue_size);
-    if (pool->queue == NULL) {
+    pool->task_queue.queue = (threadpool_task_t *)malloc(sizeof(threadpool_task_t) * queue_size);
+    if (pool->task_queue.queue == NULL) {
         goto err;
     }
 
@@ -83,23 +85,24 @@ threadpool_t *threadpool_create(int thread_count, int queue_size)
         if (pthread_create(&(pool->threads[i]), NULL, threadpool_worker, (void *)pool) != 0) {
             goto err;
         }
-        pool->thread_count++;
         pool->started++;
     }
-    
+    pool->thread_count = thread_count;
+    pool->status = THRADPOOL_STATUS_READY;
     return pool;
 
 err:
     if (pool) {
         threadpool_free(pool);
+        pool = NULL;
     }
-    return NULL;
+    return pool;
 }
 
 int threadpool_add(threadpool_t *pool, void (*function)(void *), void *arg, uint32_t arg_len)
 {
     int err = 0;
-    int next;
+    uint32_t next;
     
     void *work_arg = malloc(arg_len);
     if (work_arg == NULL) {
@@ -112,15 +115,15 @@ int threadpool_add(threadpool_t *pool, void (*function)(void *), void *arg, uint
     }
 
     pthread_mutex_lock(&(pool->lock));
-    next = (pool->tail + 1) % pool->queue_size;
-    if (pool->count == pool->queue_size || pool->shutdown != 0) {
+    next = (pool->task_queue.queue_tail + 1) % pool->task_queue.queue_size;
+    if (pool->task_queue.task_count == pool->task_queue.queue_size || pool->status != THRADPOOL_STATUS_READY) {
         pthread_mutex_unlock(&pool->lock);
         goto FREE_ARG;
     } else {
-        pool->queue[pool->tail].function = function;
-        pool->queue[pool->tail].arg = work_arg;
-        pool->tail = next;
-        pool->count += 1;
+        pool->task_queue.queue[pool->task_queue.queue_tail].function = function;
+        pool->task_queue.queue[pool->task_queue.queue_tail].arg = work_arg;
+        pool->task_queue.queue_tail = next;
+        pool->task_queue.task_count += 1;
         err = pthread_cond_signal(&(pool->notify));
     }
     pthread_mutex_unlock(&(pool->lock));
@@ -139,10 +142,10 @@ int threadpool_destroy(threadpool_t *pool)
     }
 
     pthread_mutex_lock(&(pool->lock));
-    if (pool->shutdown != 0) {
+    if (pool->status != THRADPOOL_STATUS_READY) {
         err = -1;
     } else {
-        pool->shutdown = 1;
+        pool->status = THRADPOOL_STATUS_SHUTDOWN;
         if ((pthread_cond_broadcast(&(pool->notify)) != 0)) {
             err = -1;
         }
@@ -170,8 +173,8 @@ int threadpool_free(threadpool_t *pool)
     if (pool->threads) {
         free(pool->threads);
         pool->threads = NULL;
-        free(pool->queue);
-        pool->queue = NULL;
+        free(pool->task_queue.queue);
+        pool->task_queue.queue = NULL;
         pthread_mutex_destroy(&(pool->lock));
         pthread_cond_destroy(&(pool->notify));
     }
