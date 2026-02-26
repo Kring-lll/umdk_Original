@@ -19,7 +19,7 @@ constexpr int PARAM_ARGS_CNT = 1;
 at::Tensor cam_get_comm(const int64_t comm_id, const int64_t rank, const int64_t group_size,
     std::string serverIpPort)
 {
-    cam_comm_init(comm_id, rank, group_size, serverIpPort);
+    TORCH_CHECK(cam_comm_init(comm_id, rank, group_size, serverIpPort), "[ERROR] [CAM] cam_comm_init failed!!!!!");
     Moe::CamComm *cam_comm(static_cast<Moe::CamComm *>(g_comms[comm_id]));
     auto comm_size = sizeof(Moe::CommArgs);
 

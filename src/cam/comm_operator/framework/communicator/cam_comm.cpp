@@ -274,7 +274,7 @@ int CamComm::Init()
         ", localRankSize_ : " << localRankSize_ << "success";
     
     // set comm args in device
-    SyncCommArgs();
+    if (SyncCommArgs() != CAM_SUCCESS) {CAM_LOG(ERROR) << "SyncCommArgs failed!"; return CAM_ERROR_INTERNAL;}
     CAM_LOG(INFO) << "CamCommInit" << rank_  << "/" << rankSize_ << " success and extraFlag:" << commArgs_.extraFlag <<
         " commArgs_. localRank : " << commArgs_.localRank << "commArgs_.localRankSize : " << commArgs_.localRankSize;
     inited_ = true;
@@ -310,6 +310,9 @@ int CamComm::InitMem()
     // 申请并初始化IpcBuff
     CAM_LOG(DEBUG) << "maxBuffSize " << memLen_;
     void *peerMem = nullptr;
+    size_t totalSize = 0, freeSize = 0;
+    aclError memInfoRes = aclrtGetMemInfo(ACL_DDR_MEM, &freeSize, &totalSize);
+    CAM_LOG(INFO) << "check mem info " << __FILE__ << ":" <<__LINE__ << ": " << "memInfoRes= " << memInfoRes << ", totalSize= " << totalSize << ", freeSize= " << freeSize;
     aclError ret = aclrtMalloc(&peerMem,
         memLen_,
         (GetChipName() == ChipName::CHIP_310P3) ? ACL_MEM_MALLOC_HUGE_FIRST_P2P : ACL_MEM_MALLOC_HUGE_FIRST);
