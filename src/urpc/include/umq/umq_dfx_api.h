@@ -27,6 +27,16 @@ int umq_stats_flow_control_get(uint64_t umqh, umq_flow_control_stats_t *flow_con
 
 /**
  * Thread safety function
+ * Get flow control statistical results as string.
+ * @param[in] flow_control_stats: flow control statistical results
+ * @param[in] buf: buffer to store the string
+ * @param[in] buf_len: length of the buffer
+ * Return 0 on success, error code on failure
+ */
+int umq_stats_flow_control_get_str(const umq_flow_control_stats_t *flow_control_stats, char *buf, size_t buf_len);
+
+/**
+ * Thread safety function
  * Get qbuf pool statistical results.
  * @param[in] umqh: umq handle
  * @param[out] qbuf_pool_stats: qbuf pool statistical results
