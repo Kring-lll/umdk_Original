@@ -604,6 +604,55 @@ static int umq_perftest_run_client(umq_perftest_config_t *cfg)
     // finish ferf and out reslut
     umq_perftest_finish_perf(cfg);
 
+    umq_flow_control_stats_t flow_control_stats;
+    ret = umq_stats_flow_control_get(g_umq_perftest_ctx.umqh, &flow_control_stats);
+    if (ret != 0) {
+        LOG_PRINT("umq_stats_flow_control_get failed\n");
+        goto UNBIND;
+    }
+
+    char *dfx_str_buf = (char *)malloc(UMQ_PERFTEST_ERTF_INFO_STR_SIZE);
+    if (dfx_str_buf == NULL) {
+        LOG_PRINT("malloc perf info str failed\n");
+        goto UNBIND;
+    }
+    ret = umq_flow_control_stats_to_str(&flow_control_stats, dfx_str_buf, UMQ_PERFTEST_ERTF_INFO_STR_SIZE);
+    if (ret >= UMQ_PERFTEST_ERTF_INFO_STR_SIZE) {
+        dfx_str_buf[UMQ_PERFTEST_ERTF_INFO_STR_SIZE - 1] = '\0';
+        LOG_PRINT("flow control stats str buf too small\n");
+    }
+
+    printf("%s\n\n\n", dfx_str_buf);
+
+    umq_qbuf_pool_stats_t qbuf_pool_stats;
+    ret = umq_stats_qbuf_pool_get(g_umq_perftest_ctx.umqh, &qbuf_pool_stats);
+    if (ret != 0) {
+        LOG_PRINT("umq_stats_qbuf_pool_get failed\n");
+        goto UNBIND;
+    }
+
+    ret = umq_qbuf_pool_stats_to_str(&qbuf_pool_stats, dfx_str_buf, UMQ_PERFTEST_ERTF_INFO_STR_SIZE);
+    if (ret >= UMQ_PERFTEST_ERTF_INFO_STR_SIZE) {
+        dfx_str_buf[UMQ_PERFTEST_ERTF_INFO_STR_SIZE - 1] = '\0';
+        LOG_PRINT("flow control stats str buf too small\n");
+    }
+
+    printf("%s\n\n\n", dfx_str_buf);
+
+    umq_info_t umq_info;
+    ret = umq_info_get(g_umq_perftest_ctx.umqh, &umq_info);
+    if (ret != 0) {
+        LOG_PRINT("umq_info_get failed\n");
+        goto UNBIND;
+    }
+
+    ret = umq_info_to_str(&umq_info, dfx_str_buf, UMQ_PERFTEST_ERTF_INFO_STR_SIZE);
+    if (ret >= UMQ_PERFTEST_ERTF_INFO_STR_SIZE) {
+        dfx_str_buf[UMQ_PERFTEST_ERTF_INFO_STR_SIZE - 1] = '\0';
+        LOG_PRINT("flow control stats str buf too small\n");
+    }
+    printf("%s\n", dfx_str_buf);
+
 UNBIND:
     // unbind and flush tx and rx
     (void)umq_unbind(g_umq_perftest_ctx.umqh);
