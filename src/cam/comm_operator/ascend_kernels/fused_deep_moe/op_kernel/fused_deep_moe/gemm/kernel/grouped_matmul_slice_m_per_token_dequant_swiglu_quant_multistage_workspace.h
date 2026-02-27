@@ -27,6 +27,7 @@ constexpr uint64_t STATE_WIN_OFFSET = 900 * 1024;
 constexpr uint64_t GROUP_TOKEN_NUM_OFFSET = 932 * 1024;
 constexpr uint64_t SOFT_SYNC_OFFSET = 964 * 1024;
 constexpr uint64_t SHARE_QUANT_SOFT_SYNC_OFFSET = 988 * 1024;
+constexpr uint64_t SEND_RECV_SYNC_OFFSET = 1000 * 1024;
 constexpr uint32_t SELF_STATE_OFFSET = 256 * 1024;
 constexpr uint32_t SUM_TMP_TENSOR_SIZE = 1024;
 constexpr uint32_t UB_ALIGN = 32;
@@ -173,8 +174,10 @@ public:
         auto tileShape = MakeCoord(tileRow, tileColumn);
         EpilogueTileSwizzle epilogueTileSwizzle(actualBlockShape, tileShape);
         uint32_t tileLoops = epilogueTileSwizzle.GetLoops();
-        uint32_t subblockIdx = AscendC::GetSubBlockIdx();
-        uint32_t subblockNum = AscendC::GetSubBlockNum();
+        // uint32_t subblockIdx = AscendC::GetSubBlockIdx();
+        // uint32_t subblockNum = AscendC::GetSubBlockNum();
+        uint32_t subblockIdx = 0;
+        uint32_t subblockNum = 1;
         for (uint32_t loopIdx = subblockIdx; loopIdx < tileLoops; loopIdx += subblockNum) {
             auto tileCoord = epilogueTileSwizzle.GetTileCoord(loopIdx);
             auto actualTileShape = epilogueTileSwizzle.GetActualTileShape(tileCoord);
@@ -1608,6 +1611,17 @@ public:
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
                 }
                 startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
+                AscendC::PipeBarrier<PIPE_ALL>();
+                AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(0);
+                tmpLocalTensor.SetValue(CV_FLAG_INDEX, vToCFlag);
+                AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
+                AscendC::GlobalTensor<int32_t> swigluStateTensor;
+                swigluStateTensor.SetGlobalBuffer((__gm__ int32_t *)(statusDataSpaceGm + SEND_RECV_SYNC_OFFSET));
+                AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
+                AscendC::SetAtomicAdd<int32_t>();
+                AscendC::DataCopy(swigluStateTensor, tmpLocalTensor, INT32_COUNT_PER_BLOCK);
+                AscendC::SetAtomicNone();
+                AscendC::PipeBarrier<PIPE_ALL>();
             }
 #endif
             gmScaleListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(gmScale));
@@ -1680,6 +1694,18 @@ public:
                 gmGroupOffsetD += currentM * n;
 
                 startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
+                AscendC::PipeBarrier<PIPE_ALL>();
+                AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(0);
+                tmpLocalTensor.SetValue(CV_FLAG_INDEX, vToCFlag);
+                AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
+                AscendC::GlobalTensor<int32_t> swigluStateTensor;
+                swigluStateTensor.SetGlobalBuffer(
+                    (__gm__ int32_t *)(statusDataSpaceGm + SEND_RECV_SYNC_OFFSET + (groupIdx + 1) * SOFT_SYNC_SPACE_SIZE));
+                AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
+                AscendC::SetAtomicAdd<int32_t>();
+                AscendC::DataCopy(swigluStateTensor, tmpLocalTensor, INT32_COUNT_PER_BLOCK);
+                AscendC::SetAtomicNone();
+                AscendC::PipeBarrier<PIPE_ALL>();
             }
         }
         // clean
@@ -1839,6 +1865,8 @@ public:
             // 清理软同步残留信息，避免影响别处或者下次运行
             AscendC::GlobalTensor<int32_t> softSyncTensor;
             softSyncTensor.SetGlobalBuffer((__gm__ int32_t*)(statusDataSpaceGm + SOFT_SYNC_OFFSET));
+            AscendC::GlobalTensor<int32_t> sendRecvSyncTensor;
+            sendRecvSyncTensor.SetGlobalBuffer((__gm__ int32_t*)(statusDataSpaceGm + SEND_RECV_SYNC_OFFSET));
             AscendC::LocalTensor<int32_t> tmpZeroLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(0);
             AscendC::Duplicate(tmpZeroLocalTensor, (int32_t)0, INT32_COUNT_PER_BLOCK);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(0);
@@ -1849,6 +1877,8 @@ public:
             // 后一半为V核写的Flag
             AscendC::DataCopy(softSyncTensor[(compCoreIdx + compCoreNum)
                             * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)], tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
+            AscendC::DataCopy(sendRecvSyncTensor[compCoreIdx * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)],
+                                                tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK); 
         }
         if (aivIdx == aiCoreGroupNum * subBlockNum - 1) {
             // clean
@@ -1941,66 +1971,175 @@ public:
                 params.layoutPerTokenScale);
         }
 
+        if (isSendCore) {
+            uint32_t startCoreIdx = 0;
+            uint32_t coreNumPerGroup = recvCoreNum / localExpertNum;
+            int64_t gmSwigluOutputOffset = 0;
+            int64_t gmPtrOutputOffset = 0;
+            int64_t gmDequantScaleOffset = 0;
+            if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+                // dynamic quant
+                totalTokenCount = axisBS;
+                uint32_t n = params.shareN;
+                uint32_t nOut = params.shareN / 2;
+                uint32_t quantRowOnce = 0;
+                CalQuantRow(nOut, quantRowOnce);
+                typename BlockQuant<ArchTag>::Params quantParams;
+                auto swigluLayout = layout::RowMajor{totalTokenCount, n};
+                quantParams = typename BlockQuant<ArchTag>::Params {
+                    (__gm__ float*)params.gmShareSwigluOut, swigluLayout,  // input: swiglu output
+                    (__gm__ float*)params.gmShareX2Scale, params.layoutDequantScale,  // output: quant token scale
+                    (__gm__ int8_t*)params.gmShareX2, params.layoutShareOutput, // output: x2
+                    quantRowOnce,           nOut};
+                BlockQuant<ArchTag> blockQuant(resource, quantParams);
+                MatrixCoord quantShape(totalTokenCount, nOut);
+                MatrixCoord quantBlockShape((uint16_t)(quantRowOnce), nOut);
+                Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
+                uint32_t coreLoops = quantSwizzle.GetLoops();
+                uint32_t startLoopIdx =
+                        ((sendCoreIdx < startCoreIdx) ? (sendCoreIdx + aiCoreGroupNum) : sendCoreIdx) - startCoreIdx;
+                AscendC::GlobalTensor<int32_t> expertStateTensor;
+                expertStateTensor.SetGlobalBuffer((__gm__ int32_t *)(statusDataSpaceGm + SEND_RECV_SYNC_OFFSET));
+                while (true) {
+                    __asm__ __volatile__("");
+                    AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                    AscendC::DcciDst::CACHELINE_OUT>(expertStateTensor);
+                    __asm__ __volatile__("");
+                    if (expertStateTensor.GetValue(0) == recvCoreNum * vToCFlag) {
+                        break;
+                    }
+                }
+                for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
+                    auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
+                    auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
+                    blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+                }
+                startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
+                AscendC::PipeBarrier<PIPE_ALL>();
+            }
+            {
+                for (uint32_t groupIdx = 0; groupIdx < localExpertNum; ++groupIdx) {
+                    // dynamic quant
+                    AscendC::GlobalTensor<int32_t> sendCountsGlobal;
+                    sendCountsGlobal.SetGlobalBuffer((__gm__ int32_t *)
+                                                            (statusDataSpaceGm + GROUP_TOKEN_NUM_OFFSET) +
+                                                            groupIdx * GROUP_INFO_SIZE);
+                    while (true) {
+                        __asm__ __volatile__("");
+                        AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                        AscendC::DcciDst::CACHELINE_OUT>(sendCountsGlobal);
+                        __asm__ __volatile__("");
+                        if (sendCountsGlobal.GetValue(0) == coreNumPerGroup * vToCFlag) {
+                            break;
+                        }
+                    }
+                    uint32_t currentM = sendCountsGlobal.GetValue(GROUP_TOKEN_COUNT);
+                    AscendC::PipeBarrier<PIPE_ALL>();
+                    uint32_t n = params.problemShape.n();
+                    uint32_t nOut = params.problemShape.n() / 2;
+                    uint32_t quantRowOnce = 0;
+                    CalQuantRow(nOut, quantRowOnce);
+                    typename BlockQuant<ArchTag>::Params quantParams;
+                    auto swigluLayout = layout::RowMajor{currentM, n};
+                    quantParams = typename BlockQuant<ArchTag>::Params {
+                        gmSwigluOutput + gmSwigluOutputOffset, swigluLayout, params.ptrDequantScale + gmDequantScaleOffset, params.layoutDequantScale,
+                        params.ptrOutput + gmPtrOutputOffset, params.layoutOutput, quantRowOnce, nOut};
+                    BlockQuant<ArchTag> blockQuant(resource, quantParams);
+                    MatrixCoord quantShape(currentM, nOut);
+                    MatrixCoord quantBlockShape((uint16_t)(quantRowOnce), nOut);
+                    Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
+                    uint32_t coreLoops = quantSwizzle.GetLoops();
+                    uint32_t startLoopIdx =
+                        ((sendCoreIdx < startCoreIdx) ? (sendCoreIdx + aiCoreGroupNum) : sendCoreIdx) - startCoreIdx;
+                    AscendC::GlobalTensor<int32_t> expertStateTensor;
+                    expertStateTensor.SetGlobalBuffer((__gm__ int32_t *)(statusDataSpaceGm + SEND_RECV_SYNC_OFFSET +
+                                                                        (groupIdx + 1) * SOFT_SYNC_SPACE_SIZE));
+                    while (true) {
+                        __asm__ __volatile__("");
+                        AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                        AscendC::DcciDst::CACHELINE_OUT>(expertStateTensor);
+                        __asm__ __volatile__("");
+                        if (expertStateTensor.GetValue(0) == recvCoreNum * vToCFlag) {
+                            break;
+                        }
+                    }
+                    for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
+                        auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
+                        auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
+                        blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+                    }
+                    gmDequantScaleOffset += currentM;
+                    gmPtrOutputOffset += currentM * nOut;
+                    gmSwigluOutputOffset += currentM * n;
+                    startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
+                }
+            }
+            AscendC::PipeBarrier<PIPE_ALL>();
+        }
+
         icache_preload(8);
+        // AscendC::SyncAll<false>();
+        // AscendC::PipeBarrier<PIPE_ALL>();
+
+        // UpdateAndCleanInfo(params.ptrGroupList, params.gmEpSendCount, params.gmExpertTokenNums);
+        // AscendC::PipeBarrier<PIPE_ALL>();
+        // if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+        //     // dynamic quant
+        //     totalTokenCount = axisBS;
+        //     uint32_t n = params.shareN;
+        //     uint32_t nOut = params.shareN / 2;
+        //     uint32_t quantRowOnce = 0;
+        //     CalQuantRow(nOut, quantRowOnce);
+        //     typename BlockQuant<ArchTag>::Params quantParams;
+        //     auto swigluLayout = layout::RowMajor{totalTokenCount, n};
+        //     quantParams = typename BlockQuant<ArchTag>::Params {
+        //         (__gm__ float*)params.gmShareSwigluOut, swigluLayout,  // input: swiglu output
+        //         (__gm__ float*)params.gmShareX2Scale, params.layoutDequantScale,  // output: quant token scale
+        //         (__gm__ int8_t*)params.gmShareX2, params.layoutShareOutput, // output: x2
+        //         quantRowOnce,           nOut};
+        //     BlockQuant<ArchTag> blockQuant(resource, quantParams);
+        //     MatrixCoord quantShape(totalTokenCount, nOut);
+        //     MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
+        //     Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
+        //     for (uint32_t loopIdx = aiCoreGroupIdx; loopIdx < quantSwizzle.GetLoops(); loopIdx += aiCoreGroupNum) {
+        //         auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
+        //         auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
+        //         blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+        //     }
+        //     AscendC::PipeBarrier<PIPE_ALL>();
+        // }
+        // {
+        //     // dynamic quant
+        //     AscendC::GlobalTensor<int32_t> sendCountsGlobal;
+        //     sendCountsGlobal.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t *>(params.gmEpSendCount));
+        //     __asm__ __volatile__("");
+        //     AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+        //                                     AscendC::DcciDst::CACHELINE_OUT>(sendCountsGlobal);
+        //     __asm__ __volatile__("");
+        //     totalTokenCount = sendCountsGlobal.GetValue(localExpertNum * epRankSize - 1);
+        //     AscendC::PipeBarrier<PIPE_ALL>();
+        //     uint32_t n = params.problemShape.n();
+        //     uint32_t nOut = params.problemShape.n() / 2;
+        //     uint32_t quantRowOnce = 0;
+        //     CalQuantRow(nOut, quantRowOnce);
+        //     typename BlockQuant<ArchTag>::Params quantParams;
+        //     auto swigluLayout = layout::RowMajor{totalTokenCount, n};
+        //     quantParams = typename BlockQuant<ArchTag>::Params {
+        //         gmSwigluOutput,   swigluLayout,        params.ptrDequantScale, params.layoutDequantScale,
+        //         params.ptrOutput, params.layoutOutput, quantRowOnce,           nOut};
+        //     BlockQuant<ArchTag> blockQuant(resource, quantParams);
+        //     MatrixCoord quantShape(totalTokenCount, nOut);
+        //     MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
+        //     Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
+        //     for (uint32_t loopIdx = aiCoreGroupIdx; loopIdx < quantSwizzle.GetLoops(); loopIdx += aiCoreGroupNum) {
+        //         auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
+        //         auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
+        //         blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+        //     }
+        // }
         AscendC::SyncAll<false>();
         AscendC::PipeBarrier<PIPE_ALL>();
-
         UpdateAndCleanInfo(params.ptrGroupList, params.gmEpSendCount, params.gmExpertTokenNums);
-        AscendC::PipeBarrier<PIPE_ALL>();
-        if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
-            // dynamic quant
-            totalTokenCount = axisBS;
-            uint32_t n = params.shareN;
-            uint32_t nOut = params.shareN / 2;
-            uint32_t quantRowOnce = 0;
-            CalQuantRow(nOut, quantRowOnce);
-            typename BlockQuant<ArchTag>::Params quantParams;
-            auto swigluLayout = layout::RowMajor{totalTokenCount, n};
-            quantParams = typename BlockQuant<ArchTag>::Params {
-                (__gm__ float*)params.gmShareSwigluOut, swigluLayout,  // input: swiglu output
-                (__gm__ float*)params.gmShareX2Scale, params.layoutDequantScale,  // output: quant token scale
-                (__gm__ int8_t*)params.gmShareX2, params.layoutShareOutput, // output: x2
-                quantRowOnce,           nOut};
-            BlockQuant<ArchTag> blockQuant(resource, quantParams);
-            MatrixCoord quantShape(totalTokenCount, nOut);
-            MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
-            Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
-            for (uint32_t loopIdx = aiCoreGroupIdx; loopIdx < quantSwizzle.GetLoops(); loopIdx += aiCoreGroupNum) {
-                auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
-                auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
-                blockQuant(quantBlockShape, blockCoord, actualBlockShape);
-            }
-            AscendC::PipeBarrier<PIPE_ALL>();
-        }
-        {
-            // dynamic quant
-            AscendC::GlobalTensor<int32_t> sendCountsGlobal;
-            sendCountsGlobal.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t *>(params.gmEpSendCount));
-            __asm__ __volatile__("");
-            AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
-                                            AscendC::DcciDst::CACHELINE_OUT>(sendCountsGlobal);
-            __asm__ __volatile__("");
-            totalTokenCount = sendCountsGlobal.GetValue(localExpertNum * epRankSize - 1);
-            AscendC::PipeBarrier<PIPE_ALL>();
-            uint32_t n = params.problemShape.n();
-            uint32_t nOut = params.problemShape.n() / 2;
-            uint32_t quantRowOnce = 0;
-            CalQuantRow(nOut, quantRowOnce);
-            typename BlockQuant<ArchTag>::Params quantParams;
-            auto swigluLayout = layout::RowMajor{totalTokenCount, n};
-            quantParams = typename BlockQuant<ArchTag>::Params {
-                gmSwigluOutput,   swigluLayout,        params.ptrDequantScale, params.layoutDequantScale,
-                params.ptrOutput, params.layoutOutput, quantRowOnce,           nOut};
-            BlockQuant<ArchTag> blockQuant(resource, quantParams);
-            MatrixCoord quantShape(totalTokenCount, nOut);
-            MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
-            Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
-            for (uint32_t loopIdx = aiCoreGroupIdx; loopIdx < quantSwizzle.GetLoops(); loopIdx += aiCoreGroupNum) {
-                auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
-                auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
-                blockQuant(quantBlockShape, blockCoord, actualBlockShape);
-            }
-        }
     }
 
 private:
