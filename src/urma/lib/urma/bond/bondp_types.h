@@ -22,6 +22,9 @@
 #define BONDP_MAX_NUM_JETTYS (10240)
 #define BONDP_MAX_NUM_SEGS (10240)
 #define BONDP_MAX_NUM_RSEGS (10240)
+#define BONDP_MAX_WR_LIST_NUM (300)
+#define BONDP_MAX_SGE_NUM (32)
+#define BONDP_MAX_PJETTY_NUM (65536)
 #define PRIMARY_EID_NUM (2)
 #define PORT_EID_MAX_NUM_PER_DEV (9)
 #define PORT_EID_MAX_NUM (PORT_EID_MAX_NUM_PER_DEV * PRIMARY_EID_NUM)
@@ -84,6 +87,8 @@ typedef struct bondp_context {
     /* Record the mapping from the locally created jetty's pjetty.jetty_id.id to the vjetty.jetty_id.id, */
     /* used to restore the local_id in CR. */
     bondp_hash_table_t p_vjetty_id_table;
+    /* pjetty_id as index */
+    uint32_t vjetty_id[BONDP_MAX_PJETTY_NUM];
     /* The mapping of pjetty_ids to vjetty_ids of all remote jettys that have been obtained. */
     bondp_hash_table_t remote_p2v_jetty_id_table;
     int real_async_fd; /* vcontex async_fd */
@@ -94,6 +99,12 @@ typedef struct bondp_context {
     std::atomic_ulong token_id_cnt;
     #endif
 } bondp_context_t;
+
+typedef struct bondp_tx_wr_list {
+    urma_sge_t src_sge[BONDP_MAX_WR_LIST_NUM][BONDP_MAX_SGE_NUM];
+    urma_sge_t dst_sge[BONDP_MAX_WR_LIST_NUM][BONDP_MAX_SGE_NUM];
+    urma_jfs_wr_t wr_list[BONDP_MAX_WR_LIST_NUM];
+} bondp_tx_wr_list_t;
 
 typedef enum bondp_comp_type {
     BONDP_COMP_JFCE,
