@@ -9,6 +9,10 @@
 #include "umq_qbuf_pool.h"
 #include "umq_huge_qbuf_pool.h"
 #include "umq_inner.h"
+#include <stdarg.h>
+
+#define UMQ_DFX_EQUALS "=================================================================================="
+#define UMQ_DFX_UNDERLINE "----------------------------------------------------------------------------------"
 
 int umq_stats_flow_control_get(uint64_t umqh, umq_flow_control_stats_t *flow_control_stats)
 {
@@ -69,12 +73,117 @@ int umq_info_get(uint64_t umqh, umq_info_t *umq_info)
 
 int umq_stats_io_get(uint64_t umqh, umq_packet_stats_t *packet_stats)
 {
-    return UMQ_SUCCESS;
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+    if (umq == NULL || umq->umqh_tp == UMQ_INVALID_HANDLE || umq->dfx_tp_ops == NULL ||
+        umq->dfx_tp_ops->umq_tp_stats_io_get == NULL || packet_stats == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "umqh or packet stats parameter invalid\n");
+        return -UMQ_ERR_EINVAL;
+    }
+    return umq->dfx_tp_ops->umq_tp_stats_io_get(umq->umqh_tp, packet_stats);
 }
 
 int umq_stats_io_reset(uint64_t umqh)
 {
-    return UMQ_SUCCESS;
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+    if (umq == NULL || umq->umqh_tp == UMQ_INVALID_HANDLE || umq->dfx_tp_ops == NULL ||
+        umq->dfx_tp_ops->umq_tp_stats_io_reset == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "umqh parameter invalid\n");
+        return -UMQ_ERR_EINVAL;
+    }
+    return umq->dfx_tp_ops->umq_tp_stats_io_reset(umq->umqh_tp);
+}
+
+int umq_io_stats_to_str(const umq_packet_stats_t *packet_stats, char *buf, int max_buf_len)
+{
+    if (packet_stats == NULL || buf == NULL || max_buf_len == 0) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    int str_size = 0;
+    (void)memset(buf, 0, max_buf_len);
+
+    // Format IO Packet Statistics
+    int ret = snprintf(buf + str_size, max_buf_len - str_size, "%s\n", UMQ_DFX_EQUALS);
+    if (ret < 0 || ret >= max_buf_len - str_size) {
+        goto FORMAT_ERR;
+    }
+    str_size += ret;
+
+    ret = snprintf(buf + str_size, max_buf_len - str_size, "                              IO Packet Statistics\n");
+    if (ret < 0 || ret >= max_buf_len - str_size) {
+        goto FORMAT_ERR;
+    }
+    str_size += ret;
+
+    ret = snprintf(buf + str_size, max_buf_len - str_size, "%s\n", UMQ_DFX_EQUALS);
+    if (ret < 0 || ret >= max_buf_len - str_size) {
+        goto FORMAT_ERR;
+    }
+    str_size += ret;
+
+    ret = snprintf(buf + str_size, max_buf_len - str_size, "%-40s %-40s\n", "Type", "Value");
+    if (ret < 0 || ret >= max_buf_len - str_size) {
+        goto FORMAT_ERR;
+    }
+    str_size += ret;
+
+    ret = snprintf(buf + str_size, max_buf_len - str_size, "%s\n", UMQ_DFX_UNDERLINE);
+    if (ret < 0 || ret >= max_buf_len - str_size) {
+        goto FORMAT_ERR;
+    }
+    str_size += ret;
+
+    ret = snprintf(buf + str_size, max_buf_len - str_size, "%-40s %-40lu\n", "send_cnt", packet_stats->send_cnt);
+    if (ret < 0 || ret >= max_buf_len - str_size) {
+        goto FORMAT_ERR;
+    }
+    str_size += ret;
+
+    ret = snprintf(buf + str_size, max_buf_len - str_size, "%-40s %-40lu\n",
+        "send_success", packet_stats->send_success);
+    if (ret < 0 || ret >= max_buf_len - str_size) {
+        goto FORMAT_ERR;
+    }
+    str_size += ret;
+
+    ret = snprintf(buf + str_size, max_buf_len - str_size, "%-40s %-40lu\n", "recv_cnt", packet_stats->recv_cnt);
+    if (ret < 0 || ret >= max_buf_len - str_size) {
+        goto FORMAT_ERR;
+    }
+    str_size += ret;
+
+    ret = snprintf(buf + str_size, max_buf_len - str_size, "%-40s %-40lu\n",
+        "send_error_cnt", packet_stats->send_error_cnt);
+    if (ret < 0 || ret >= max_buf_len - str_size) {
+        goto FORMAT_ERR;
+    }
+    str_size += ret;
+
+    ret = snprintf(buf + str_size, max_buf_len - str_size, "%-40s %-40lu\n",
+        "recv_error_cnt", packet_stats->recv_error_cnt);
+    if (ret < 0 || ret >= max_buf_len - str_size) {
+        goto FORMAT_ERR;
+    }
+    str_size += ret;
+
+    ret = snprintf(buf + str_size, max_buf_len - str_size, "%s\n", UMQ_DFX_UNDERLINE);
+    if (ret < 0 || ret >= max_buf_len - str_size) {
+        goto FORMAT_ERR;
+    }
+    str_size += ret;
+
+    ret = snprintf(buf + str_size, max_buf_len - str_size, "%s\n", UMQ_DFX_EQUALS);
+    if (ret < 0 || ret >= max_buf_len - str_size) {
+        goto FORMAT_ERR;
+    }
+    str_size += ret;
+
+    return str_size;
+
+FORMAT_ERR:
+    UMQ_VLOG_ERR(VLOG_UMQ, "format output failed, ret: %d, str size %d, max buf len %d\n", ret, str_size, max_buf_len);
+    return ret;
 }
 
 int umq_stats_perf_get(umq_perf_stats_t *umq_perf_stats)
