@@ -1,0 +1,14 @@
+# 所有文本文件，提交时统一转为LF, 检出是保留原样
+* text=auto eol=lf
+
+# 二进制文件，不处理换行符
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.bmp binary
+*.tiff binary
+*.webp binary
+*.pdf binary
+*.zip binary
