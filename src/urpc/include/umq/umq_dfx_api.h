@@ -61,6 +61,16 @@ int umq_stats_io_reset(uint64_t umqh);
 
 /**
  * Thread safety function
+ * Convert io packet statistical results to string.
+ * @param[in] packet_stats: io packet statistical results
+ * @param[out] buf: buffer to store the string
+ * @param[in] buf_len: length of the buffer
+ * Return string len on success, error code on failure
+ */
+int umq_io_stats_to_str(const umq_packet_stats_t *packet_stats, char *buf, int buf_len);
+
+/**
+ * Thread safety function
  * Get io packet statistical results.
  * @param[out] umq_perf_stats: perf statistical results
  * Return 0 on success, error code on failure
