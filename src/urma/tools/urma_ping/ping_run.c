@@ -449,8 +449,8 @@ static void uninit_urma_resource(ping_urma_resource_t *res)
 
 typedef struct ping_per_seq_info {
     uint32_t seq;
-    clock_t start_time;
-    clock_t end_time;
+    double start_time;
+    double end_time;
     double rtt;
 } ping_per_seq_info_t;
 
@@ -475,7 +475,7 @@ static int fill_recv_wr(ping_cfg_t *cfg, ping_urma_resource_t *res)
 static int send_ping_msg(ping_cfg_t *cfg, ping_urma_resource_t *res, ping_per_seq_info_t *seq_info)
 {
     update_stat_on_send();
-    seq_info->start_time = clock();
+    seq_info->start_time = get_time_in_ms();
 
     urma_sge_t sge = {
         .addr = (uint64_t)(uintptr_t)res->buf,
@@ -511,8 +511,8 @@ static int recv_ping_msg(ping_cfg_t *cfg, ping_urma_resource_t *res, ping_per_se
     while (true) {
         int ret = urma_poll_jfc(res->recv_jfc, 1, &cr);
 
-        seq_info->end_time = clock();
-        seq_info->rtt = (double)(seq_info->end_time - seq_info->start_time) * 1000 / CLOCKS_PER_SEC;
+        seq_info->end_time = get_time_in_ms();
+        seq_info->rtt = seq_info->end_time - seq_info->start_time;
 
         bool unmatched = (ret > 0 && cr.imm_data != seq_info->seq);
         bool received = (ret > 0 && cr.imm_data == seq_info->seq);
@@ -577,7 +577,7 @@ int start_ping(ping_cfg_t *cfg)
 
     init_stat();
 
-    uint32_t ping_start_time = clock();
+    double ping_start_time = get_time_in_ms();
 
     for (uint32_t i = 0; i < cfg->count; i++) {
         ping_per_seq_info_t seq_info = {
@@ -600,9 +600,10 @@ int start_ping(ping_cfg_t *cfg)
             sleep(cfg->interval);
         }
 
-        uint32_t time_elapsed = (clock() - ping_start_time) / CLOCKS_PER_SEC;
-        LOG_VERBOSE("Time elapsed = %d\n", (int)time_elapsed);
-        if (cfg->deadline != 0 && time_elapsed > cfg->deadline) {
+        double time_elapsed = get_time_in_ms() - ping_start_time;
+        
+        LOG_VERBOSE("Time elapsed = %.3lfms\n", time_elapsed);
+        if (cfg->deadline != 0 && time_elapsed > cfg->deadline * 1000.0) {
             LOG_ERROR("URMA_PING time limit exceeded.\n");
             break;
         }
