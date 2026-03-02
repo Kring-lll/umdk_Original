@@ -1,0 +1,1164 @@
+From bd5e1118272eee4c40ad3f06a1bf5667e7d03716 Mon Sep 17 00:00:00 2001
+From: Heyu Hu <huheyu2@huawei.com>
+Date: Sun, 8 Feb 2026 14:32:11 +0800
+Subject: [PATCH] urma: ipourma resource management and err code
+
+Offering: URMA
+URMA inclusion
+category: feature
+bugzilla: NA
+
+----------------------------------------------
+
+This patch adds ipourma resource management module
+with device registration/deregistration, resource
+initialization/deinitialization, reserved interfaces,
+provides ip address resolution and error codes.
+
+Signed-off-by: Heyu Hu <huheyu2@huawei.com>
+---
+ drivers/ub/urma/ulp/ipourma/Makefile          |   3 +
+ .../ub/urma/ulp/ipourma/ipourma_addr_res.c    |  31 ++
+ .../ub/urma/ulp/ipourma/ipourma_addr_res.h    |  16 +
+ drivers/ub/urma/ulp/ipourma/ipourma_err.c     |  67 +++
+ drivers/ub/urma/ulp/ipourma/ipourma_err.h     |  15 +
+ drivers/ub/urma/ulp/ipourma/ipourma_ip.c      |  78 ++++
+ drivers/ub/urma/ulp/ipourma/ipourma_ip.h      |  16 +
+ drivers/ub/urma/ulp/ipourma/ipourma_main.c    |   4 -
+ drivers/ub/urma/ulp/ipourma/ipourma_netdev.c  | 216 ++++++++-
+ drivers/ub/urma/ulp/ipourma/ipourma_res.c     | 417 ++++++++++++++++++
+ drivers/ub/urma/ulp/ipourma/ipourma_res.h     |   6 +
+ drivers/ub/urma/ulp/ipourma/ipourma_ub.c      | 103 +++++
+ drivers/ub/urma/ulp/ipourma/ipourma_ub.h      |  14 +
+ 13 files changed, 980 insertions(+), 6 deletions(-)
+ create mode 100644 drivers/ub/urma/ulp/ipourma/ipourma_addr_res.c
+ create mode 100644 drivers/ub/urma/ulp/ipourma/ipourma_addr_res.h
+ create mode 100644 drivers/ub/urma/ulp/ipourma/ipourma_err.c
+ create mode 100644 drivers/ub/urma/ulp/ipourma/ipourma_err.h
+ create mode 100644 drivers/ub/urma/ulp/ipourma/ipourma_ip.c
+ create mode 100644 drivers/ub/urma/ulp/ipourma/ipourma_ip.h
+
+diff --git a/drivers/ub/urma/ulp/ipourma/Makefile b/drivers/ub/urma/ulp/ipourma/Makefile
+index 689e688fa71a..f50cf925b179 100644
+--- a/drivers/ub/urma/ulp/ipourma/Makefile
++++ b/drivers/ub/urma/ulp/ipourma/Makefile
+@@ -8,5 +8,8 @@ ipourma_main.o \
+ ipourma_netdev.o \
+ ipourma_res.o \
+ ipourma_ub.o \
++ipourma_err.o \
++ipourma_addr_res.o \
++ipourma_ip.o \
+ 
+ obj-$(CONFIG_UB_URMA) += ipourma.o
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_addr_res.c b/drivers/ub/urma/ulp/ipourma/ipourma_addr_res.c
+new file mode 100644
+index 000000000000..88368aca22e9
+--- /dev/null
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_addr_res.c
+@@ -0,0 +1,31 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
++ *
++ * Description: ipourma address resolution
++ */
++#include <linux/netdevice.h>
++#include <linux/ipv6.h>
++#include <linux/in6.h>
++#include "ipourma_err.h"
++#include "ipourma_addr_res.h"
++
++STATIC int ipourma_resolve_ipv6_from_eids(struct net_device *dev,
++	union ubcore_eid *eid, struct in6_addr *addr)
++{
++	memcpy(addr, eid, UBCORE_EID_SIZE);
++	return IPOURMA_OK;
++}
++
++int ipourma_resolve_ipaddr(struct net_device *dev,
++	u16 proto, union ubcore_eid *eid, struct in6_addr *addr)
++{
++	switch (proto) {
++	case ETH_P_IPV6:
++		return ipourma_resolve_ipv6_from_eids(dev, eid, addr);
++	default:
++		netdev_dbg(dev, "%s\n", ipourma_err_desc(IPOURMA_UNSUPPORTED_ETH_PROTO));
++		return IPOURMA_UNSUPPORTED_ETH_PROTO;
++	}
++	return IPOURMA_OK;
++}
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_addr_res.h b/drivers/ub/urma/ulp/ipourma/ipourma_addr_res.h
+new file mode 100644
+index 000000000000..94dc2803a7d6
+--- /dev/null
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_addr_res.h
+@@ -0,0 +1,16 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2021-2025. All rights reserved.
++ *
++ * Description: Functions definition of ipourma_addr_res
++ */
++
++#ifndef _IPOURMA_ADDR_RES_H
++#define _IPOURMA_ADDR_RES_H
++
++#include "ipourma_types.h"
++
++int ipourma_resolve_ipaddr(struct net_device *dev,
++	u16 proto, union ubcore_eid *eid, struct in6_addr *addr);
++
++#endif
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_err.c b/drivers/ub/urma/ulp/ipourma/ipourma_err.c
+new file mode 100644
+index 000000000000..271c58bd7506
+--- /dev/null
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_err.c
+@@ -0,0 +1,67 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
++ *
++ * Description: ipourma error description
++ */
++
++#include "ipourma_err.h"
++
++static char *err_desc[IPOURMA_MAX_ERRNO] = {
++	"IPoURMA status OK",
++	"IPoURMA invalid IPv6 address",
++	"IPoURMA unsupported ether protocol",
++	"IPoURMA alloc netdev object failed",
++	"IPoURMA alloc dev private data failed",
++	"IPoURMA alloc TX ring table failed",
++	"IPoURMA alloc RX ring table failed",
++	"IPoURMA alloc TX ring failed",
++	"IPoURMA alloc RX ring failed",
++	"IPoURMA TX ring is full",
++	"IPoURMA register segment failed",
++	"IPoURMA initialize urma resources failed",
++	"IPoURMA post send failed",
++	"IPoURMA post receive failed",
++	"IPoURMA allocate receive socket buffer failed",
++	"IPoURMA URMA post receive failed",
++	"IPoURMA rearm JFC failed",
++	"IPoURMA incorrect completion record status",
++	"IPoURMA incorrect WQE jetty index in the completion record",
++	"IPoURMA incorrect WQE index in the completion record",
++	"IPoURMA poll JFC failed",
++	"IPoURMA create JFR table failed",
++	"IPoURMA create Jetty table failed",
++	"IPoURMA create JFC failed",
++	"IPoURMA create JFR failed",
++	"IPoURMA create Jetty failed",
++	"IPoURMA source IP address doesn't match the source EID",
++	"IPoURMA doesn't support GSO or TSO",
++	"IPoURMA doesn't support giant packets",
++	"IPoURMA cannot support so many fragments",
++	"IPoURMA import jetty failed",
++	"IPoURMA TX CQE error",
++	"IPoURMA insufficient memory",
++	"IPoURMA the allocated memory address is not properly aligned",
++	"IPoURMA skb linear data exceeds the TX buffer size",
++	"IPoURMA replenish RX segment failed",
++	"IPoURMA construct Netlink Message failed",
++	"IPoURMA construct Netlink Data failed",
++	"IPoURMA send Netlink Message failed",
++	"IPoURMA received data length exceeds the skb length",
++	"IPoURMA initialize tjetty_hmap failed",
++	"IPoURMA ipourma alloc TX ring locks failed",
++	"IPoURMA ipourma alloc tjetty node failed",
++	"IPoURMA alloc cr failed",
++	"IPoURMA flush jetty failed",
++	"IPoURMA modify jetty failed",
++	"IPoURMA modify jfr failed",
++	"IPoURMA init rings table failed",
++};
++
++char *ipourma_err_desc(int err_num)
++{
++	if (err_num < 0 || err_num >= IPOURMA_MAX_ERRNO)
++		return "IPoURMA unknown error";
++
++	return err_desc[err_num];
++}
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_err.h b/drivers/ub/urma/ulp/ipourma/ipourma_err.h
+new file mode 100644
+index 000000000000..463379b5e9b7
+--- /dev/null
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_err.h
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2021-2025. All rights reserved.
++ *
++ * Description: Functions definition of ipourma_err
++ */
++
++#ifndef _IPOURMA_ERR_H
++#define _IPOURMA_ERR_H
++
++#include "ipourma_types.h"
++
++char *ipourma_err_desc(int err_num);
++
++#endif
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_ip.c b/drivers/ub/urma/ulp/ipourma/ipourma_ip.c
+new file mode 100644
+index 000000000000..b328e9c7792e
+--- /dev/null
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_ip.c
+@@ -0,0 +1,78 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
++ *
++ * Description: ipourma ip configuration support
++ */
++
++#include <net/netlink.h>
++#include <linux/skbuff.h>
++#include <linux/rtnetlink.h>
++#include <linux/inet.h>
++#include "ipourma_addr_res.h"
++#include "ipourma_ip.h"
++
++#define IPV6_PREFIX_LEN 64
++
++/* send ipv6 address by netlink */
++int ipourma_send_ipv6_netlink(struct net_device *dev, union ubcore_eid *eid, int msg_type)
++{
++	struct sk_buff *skb;
++	struct nlmsghdr *nlh;
++	struct ifaddrmsg *ifa;
++	struct in6_addr addr;
++	int ret;
++
++	ret = ipourma_resolve_ipaddr(dev, ETH_P_IPV6, eid, &addr);
++	if (ret != 0)
++		return ret;
++
++	size_t msg_size = NLMSG_SPACE(sizeof(struct ifaddrmsg))
++					+ (uint32_t)nla_total_size(sizeof(struct in6_addr));
++	skb = nlmsg_new(msg_size, GFP_KERNEL);
++	if (IS_ERR_OR_NULL(skb)) {
++		pr_err("send_ipv6_netlink:alloc skb failed\n");
++		return -ENOMEM;
++	}
++
++	nlh = nlmsg_put(skb, 0, 0, msg_type, sizeof(struct ifaddrmsg),
++		NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL);
++	if (IS_ERR_OR_NULL(nlh)) {
++		kfree_skb(skb);
++		pr_err("send_ipv6_netlink:construct netlink msg failed\n");
++		return -IPOURMA_NLMSG_ERR;
++	}
++
++	NETLINK_CB(skb).portid = 0;
++	NETLINK_CB(skb).dst_group = 0;
++	NETLINK_CB(skb).flags = NETLINK_SKB_DST;
++
++	ifa = nlmsg_data(nlh);
++	ifa->ifa_family = AF_INET6;
++	ifa->ifa_prefixlen = IPV6_PREFIX_LEN;
++	ifa->ifa_index = (uint32_t)dev->ifindex;
++	ifa->ifa_scope = RT_SCOPE_UNIVERSE;
++	ifa->ifa_flags = IFA_F_PERMANENT;
++
++	ret = nla_put(skb, IFA_ADDRESS, sizeof(struct in6_addr), &addr);
++	if (ret != 0) {
++		kfree_skb(skb);
++		pr_err("send_ipv6_netlink:construct netlink data failed: %d\n", ret);
++		return -IPOURMA_NLDATA_ERR;
++	}
++	nlmsg_end(skb, nlh);
++
++	/*
++	 * send a netlink message to the kernel to simulate the ${ip addr add} command
++	 * in the user space and trigger the
++	 * kernel to invoke the private function ipv6_add_addr.
++	 */
++	ret = rtnl_unicast(skb, dev_net(dev), 0);
++	if (ret != 0) {
++		kfree_skb(skb);
++		pr_err("send_ipv6_netlink:send netlink msg failed: %d\n", ret);
++		return -IPOURMA_NL_SEND_ERR;
++	}
++	pr_debug("send_ipv6_netlink success\n");
++	return 0;
++}
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_ip.h b/drivers/ub/urma/ulp/ipourma/ipourma_ip.h
+new file mode 100644
+index 000000000000..c714d1b0cf3b
+--- /dev/null
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_ip.h
+@@ -0,0 +1,16 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2021-2025. All rights reserved.
++ *
++ * Description: Functions definition of ipourma_ip
++ */
++
++#ifndef _IPOURMA_IP_H
++#define _IPOURMA_IP_H
++
++#include "ipourma_types.h"
++
++void ipourma_init_ipv6_addr(struct work_struct *work);
++int ipourma_send_ipv6_netlink(struct net_device *dev, union ubcore_eid *eid, int msg_type);
++
++#endif
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_main.c b/drivers/ub/urma/ulp/ipourma/ipourma_main.c
+index 076996c1add7..71e656e18796 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_main.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_main.c
+@@ -21,10 +21,6 @@
+ #include "ub/urma/ubcore_uapi.h"
+ #include "ipourma_main.h"
+ 
+-STATIC int enable_test;
+-module_param(enable_test, int, 0644);
+-MODULE_PARM_DESC(enable_test, "Manually configure the enable bit.");
+-
+ static int ipourma_ubcore_add_device(struct ubcore_device *ubc_dev);
+ static void ipourma_ubcore_remove_device(struct ubcore_device *ubc_dev, void *client_ctx);
+ static void ipourma_unregister_netdev(struct ipourma_dev_priv *priv);
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_netdev.c b/drivers/ub/urma/ulp/ipourma/ipourma_netdev.c
+index 3e7f1c0495f7..b1f2f63adbdf 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_netdev.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_netdev.c
+@@ -23,22 +23,234 @@
+ #include "ipourma_res.h"
+ #include "ipourma_ub.h"
+ #include "ipourma_main.h"
++#include "ipourma_ip.h"
++#include "ipourma_addr_res.h"
+ #include "ub/urma/ubcore_uapi.h"
+ #include "ipourma_netdev.h"
+ 
+ #define IN6_ADDR_BITS   (sizeof(struct in6_addr) * 8)
+ 
++STATIC u8 g_route_tbl_idx = 100;
++
++STATIC int prepare_route_rule(struct ipourma_dev_priv *priv, struct sk_buff *skb, int type,
++							  struct in6_addr *src_ipv6)
++{
++	struct fib_rule_hdr *frh;
++	struct nlmsghdr *nlh;
++
++	NETLINK_CB(skb).portid = 0;
++	NETLINK_CB(skb).dst_group = 0;
++	NETLINK_CB(skb).flags = NETLINK_SKB_DST;
++
++	nlh = nlmsg_put(skb, 0, 0, type,
++		sizeof(struct fib_rule_hdr), NLM_F_REQUEST | NLM_F_CREATE);
++	if (IS_ERR_OR_NULL(nlh))
++		return -EMSGSIZE;
++
++	frh = nlmsg_data(nlh);
++	memset(frh, 0, sizeof(*frh));
++	frh->family = AF_INET6;
++	frh->action = FR_ACT_TO_TBL;
++	frh->src_len = (u8)IN6_ADDR_BITS;
++	if (priv->route_tbl_idx)
++		frh->table = priv->route_tbl_idx;
++	else {
++		frh->table = g_route_tbl_idx;
++		priv->route_tbl_idx = g_route_tbl_idx++;
++	}
++
++	if (nla_put(skb, FRA_SRC, sizeof(struct in6_addr), src_ipv6))
++		return -EMSGSIZE;
++
++	nlmsg_end(skb, nlh);
++
++	return 0;
++}
++
++STATIC int ipourma_add_route_rule(struct ipourma_dev_priv *priv, union ubcore_eid *eid)
++{
++	struct in6_addr addr;
++	struct sk_buff *skb;
++	int ret;
++
++	if (IS_ERR_OR_NULL(priv) || IS_ERR_OR_NULL(eid))
++		return -EINVAL;
++
++	ret = ipourma_resolve_ipaddr(priv->dev, ETH_P_IPV6, eid, &addr);
++	if (ret != 0) {
++		netdev_err(priv->dev, "Faile to resolve eid "EID_FMT"\n", EID_ARGS(*eid));
++		return ret;
++	}
++
++	skb = nlmsg_new(NLMSG_GOODSIZE, GFP_KERNEL);
++	if (IS_ERR_OR_NULL(skb)) {
++		netdev_err(priv->dev, "Failed to alloc skb\n");
++		return -ENOMEM;
++	}
++
++	if (prepare_route_rule(priv, skb, RTM_NEWRULE, &addr)) {
++		netdev_err(priv->dev, "Failed to prepare rule\n");
++		kfree_skb(skb);
++		return -EMSGSIZE;
++	}
++
++	ret = rtnl_unicast(skb, dev_net(priv->dev), 0);
++	if (ret)
++		netdev_err(priv->dev, "Failed to new route\n");
++
++	return ret;
++}
++
++STATIC int prepare_route_entry(struct ipourma_dev_priv *priv, struct sk_buff *skb, int type)
++{
++	struct nlmsghdr *nlh;
++	struct rtmsg *rtm;
++
++	NETLINK_CB(skb).portid = 0;
++	NETLINK_CB(skb).dst_group = 0;
++	NETLINK_CB(skb).flags = NETLINK_SKB_DST;
++
++	nlh = nlmsg_put(skb, 0, 0, type,
++		sizeof(struct fib_rule_hdr), NLM_F_REQUEST | NLM_F_CREATE);
++	if (IS_ERR_OR_NULL(nlh))
++		return -EMSGSIZE;
++
++	rtm = nlmsg_data(nlh);
++	rtm->rtm_family = AF_INET6;
++	rtm->rtm_dst_len = 0;
++	rtm->rtm_src_len = 0;
++	rtm->rtm_protocol = RTPROT_STATIC;
++	rtm->rtm_scope = RT_SCOPE_UNIVERSE;
++	rtm->rtm_type = RTN_UNICAST;
++	rtm->rtm_table = priv->route_tbl_idx;
++
++	if (nla_put_u32(skb, RTA_OIF, priv->dev->ifindex))
++		return -EMSGSIZE;
++
++	nlmsg_end(skb, nlh);
++
++	return 0;
++}
++
++STATIC void ipourma_add_route_entry(struct work_struct *work)
++{
++	struct ipourma_dev_priv *priv;
++	struct sk_buff *skb;
++	int ret;
++
++	priv = container_of(work, struct ipourma_dev_priv, set_route_entry);
++
++	skb = nlmsg_new(NLMSG_GOODSIZE, GFP_KERNEL);
++	if (IS_ERR_OR_NULL(skb)) {
++		netdev_err(priv->dev, "Failed to alloc skb\n");
++		return;
++	}
++
++	if (prepare_route_entry(priv, skb, RTM_NEWROUTE)) {
++		netdev_err(priv->dev, "Failed to prepare route entry\n");
++		nlmsg_free(skb);
++		return;
++	}
++
++	ret = rtnl_unicast(skb, dev_net(priv->dev), 0);
++	if (ret)
++		netdev_err(priv->dev, "Failed to new route\n");
++}
++
++STATIC void ipourma_netdev_setup(struct net_device *dev)
++{
++	// dev->netdev_ops        = &ipourma_netdev_ops;
++
++	/* ipourma_set_ethtool_ops(dev);
++	 * ipourma_set_rtnl_link_ops(dev);
++	 */
++	dev->type              = ARPHRD_ETHER;
++	dev->hard_header_len   = IPOURMA_HARD_LEN;
++	dev->addr_len          = IPOURMA_ALEN;
++	dev->tx_queue_len      = DEFAULT_TX_QUEUE_LEN;
++	dev->needs_free_netdev = false;
++	dev->mtu               = IPOURMA_DEFAULT_MTU;
++	dev->flags            |= IFF_NOARP;
++	dev->features         |= NETIF_F_HIGHDMA |
++								NETIF_F_GRO;
++	dev->features         &= ~(NETIF_F_SG | NETIF_F_TSO | NETIF_F_GSO);
++	dev->num_rx_queues     = 1;
++	dev->num_tx_queues     = 1;
++	dev->watchdog_timeo    = HZ;
++	dev->priv_flags |= IFF_LIVE_ADDR_CHANGE | IFF_NO_ADDRCONF;
++
++	netif_keep_dst(dev);
++}
++
++STATIC int ipourma_priv_base_init(struct net_device *dev,
++	struct ubcore_device *urma_dev)
++{
++	return IPOURMA_OK;
++}
++
+ struct net_device *ipourma_alloc_netdev(struct ubcore_device *urma_dev)
+ {
+-	return NULL;
++	struct ipourma_dev_priv *priv;
++	struct net_device *dev;
++
++	pr_debug("alloc_netdev\n");
++	dev = alloc_netdev(sizeof(struct ipourma_dev_priv), "ipourma%d",
++					   NET_NAME_PREDICTABLE, ipourma_netdev_setup);
++	if (IS_ERR_OR_NULL(dev)) {
++		pr_err("Failed to allocate net_device\n");
++		return NULL;
++	}
++	priv = netdev_priv(dev);
++	if (unlikely(ipourma_priv_base_init(dev, urma_dev) != IPOURMA_OK)) {
++		free_netdev(dev);
++		return NULL;
++	}
++	if (unlikely(ipourma_init_tjetty_hmap(dev) != IPOURMA_OK)) {
++		/* free netdev which has been alloced before eid_init */
++		destroy_workqueue(priv->register_wq);
++		free_netdev(dev);
++		return NULL;
++	}
++	pr_debug("alloc_netdev completed.\n");
++
++	return dev;
++}
++
++STATIC inline void ipourma_priv_eid_uninit(struct ipourma_dev_priv *priv)
++{
++	kfree(priv->eid_info);
++	priv->eid_info = NULL;
++	kfree(priv->tx_ring_is_full);
++	priv->tx_ring_is_full = NULL;
++	priv->eid_count = 0;
+ }
+ 
+ int ipourma_unalloc_netdev(struct net_device *dev)
+ {
++	struct ipourma_dev_priv *priv = netdev_priv(dev);
++
++	if (priv->eid_info)
++		ipourma_priv_eid_uninit(priv);
++	free_netdev(dev);
+ 	return 0;
+ }
+ 
+ void ipourma_create_new_eid(struct ipourma_dev_priv *priv, u32 eid_idx)
+ {
+-	/* this function will be filled in the next commit */
++	int ret;
++
++	ret = ipourma_urma_init_by_eid(priv, eid_idx);
++	if (ret != IPOURMA_OK) {
++		memset(&priv->eid_info[eid_idx].eid, 0, UBCORE_EID_SIZE);
++		if (netif_running(priv->dev))
++			atomic_sub(1, &priv->need_set_ip_route);
++		return;
++	}
++
++	if (netif_running(priv->dev) && atomic_read(&priv->need_set_ip_route) > 0) {
++		ipourma_send_ipv6_netlink(priv->dev, &(priv->eid_info[eid_idx].eid), RTM_NEWADDR);
++		ipourma_add_route_rule(priv, &(priv->eid_info[eid_idx].eid));
++		ipourma_add_route_entry(&(priv->set_route_entry));
++		atomic_sub(1, &priv->need_set_ip_route);
++	}
+ }
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_res.c b/drivers/ub/urma/ulp/ipourma/ipourma_res.c
+index 5d3096031d49..f8838c7f1d0a 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_res.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_res.c
+@@ -5,6 +5,7 @@
+  * Description: ipourma urma resource management
+  */
+ #include <linux/timer.h>
++#include "ipourma_err.h"
+ #include "ipourma_ub.h"
+ #include "ub/urma/ubcore_uapi.h"
+ #include "ipourma_res.h"
+@@ -12,8 +13,424 @@
+ u32 ipourma_tx_ring_size __read_mostly = IPOURMA_TX_RING_SIZE;
+ u32 ipourma_rx_ring_size __read_mostly = IPOURMA_RX_RING_SIZE;
+ 
++STATIC void ipourma_uninit_tx_bufs(struct ipourma_dev_priv *priv, u32 eid_idx)
++{
++	if (IS_ERR_OR_NULL(priv->tx_ring[eid_idx]))
++		return;
++	for (u32 i = 0; i < ipourma_tx_ring_size; i++) {
++		priv->tx_ring[eid_idx][i].seg[0] = NULL;
++		priv->tx_ring[eid_idx][i].buf_aligned = NULL;
++	}
++
++	if (!IS_ERR_OR_NULL(priv->ipourma_ub_tx_seg[eid_idx])) {
++		for (size_t i = 0; i < priv->tx_buf_num; i++) {
++			if (IS_ERR_OR_NULL(priv->ipourma_ub_tx_seg[eid_idx][i]))
++				continue;
++			ubcore_unregister_seg(priv->ipourma_ub_tx_seg[eid_idx][i]);
++			priv->ipourma_ub_tx_seg[eid_idx][i] = NULL;
++		}
++		kfree(priv->ipourma_ub_tx_seg[eid_idx]);
++		priv->ipourma_ub_tx_seg[eid_idx] = NULL;
++	}
++
++	if (!IS_ERR_OR_NULL(priv->tx_buf_aligned[eid_idx])) {
++		for (size_t i = 0; i < priv->tx_buf_num; i++) {
++			if (IS_ERR_OR_NULL(priv->tx_buf_aligned[eid_idx][i]))
++				continue;
++			kfree(priv->tx_buf_aligned[eid_idx][i]);
++			priv->tx_buf_aligned[eid_idx][i] = NULL;
++		}
++		kfree(priv->tx_buf_aligned[eid_idx]);
++		priv->tx_buf_aligned[eid_idx] = NULL;
++	}
++}
++
++void ipourma_uninit_rx_bufs(struct ipourma_dev_priv *priv, u32 eid_idx)
++{
++	for (u32 i = 0; i < ipourma_rx_ring_size; i++) {
++		if (!IS_ERR_OR_NULL(priv->rx_ring[eid_idx][i].seg[0]))
++			priv->rx_ring[eid_idx][i].seg[0] = NULL;
++		if (!IS_ERR_OR_NULL(priv->rx_ring[eid_idx][i].buf_aligned))
++			priv->rx_ring[eid_idx][i].buf_aligned = NULL;
++
++		if (!IS_ERR_OR_NULL(priv->rx_ring[eid_idx][i].skb_pass_up)) {
++			dev_kfree_skb_any(priv->rx_ring[eid_idx][i].skb_pass_up);
++			priv->rx_ring[eid_idx][i].skb_pass_up = NULL;
++		}
++	}
++	if (IS_ERR_OR_NULL(priv->ipourma_ub_rx_seg[eid_idx]))
++		return;
++	for (u32 i = 0; i < priv->rx_buf_num; i++) {
++		if (IS_ERR_OR_NULL(priv->ipourma_ub_rx_seg[eid_idx][i]))
++			continue;
++		ubcore_unregister_seg(priv->ipourma_ub_rx_seg[eid_idx][i]);
++		priv->ipourma_ub_rx_seg[eid_idx][i] = NULL;
++		if (IS_ERR_OR_NULL(priv->rx_buf_aligned[eid_idx][i]))
++			continue;
++		kfree(priv->rx_buf_aligned[eid_idx][i]);
++		priv->rx_buf_aligned[eid_idx][i] = NULL;
++	}
++	kfree(priv->ipourma_ub_rx_seg[eid_idx]);
++	priv->ipourma_ub_rx_seg[eid_idx] = NULL;
++}
++
++void ipourma_uninit_rings_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx)
++{
++	/* this function will be filled in the next commit */
++}
++
++int ipourma_init_tjetty_hmap(struct net_device *dev)
++{
++	struct ipourma_dev_priv *priv = netdev_priv(dev);
++	struct ipourma_tjetty_hmap *tjetty_hmap = &priv->tjetty_lru.tjetty_hmap;
++	int ret = IPOURMA_OK;
++
++	tjetty_hmap->hash_seed = get_random_u32();
++	tjetty_hmap->buckets =
++		kcalloc(IPOURMA_TJETTY_HMAP_SIZE, sizeof(struct hlist_head), GFP_KERNEL);
++	if (IS_ERR_OR_NULL(tjetty_hmap->buckets)) {
++		netdev_warn(priv->dev, "%s\n",
++			ipourma_err_desc(IPOURMA_INIT_TJETTY_HMAP_FAILED));
++		return IPOURMA_INIT_TJETTY_HMAP_FAILED;
++	}
++
++	for (int i = 0; i < IPOURMA_TJETTY_HMAP_SIZE; i++)
++		INIT_HLIST_HEAD(tjetty_hmap->buckets + i);
++
++	ipourma_init_tjetty_aging_work(&priv->tjetty_lru);
++
++	return ret;
++}
++
++STATIC int ipourma_alloc_tx_buf_aligned(struct ipourma_dev_priv *priv, u32 eid_idx, u32 idx)
++{
++	u32 offset = (idx * priv->tx_buf_size) % IPOURMA_REGISTER_SEG_SIZE;
++	u32 blk_idx = idx * priv->tx_buf_size / IPOURMA_REGISTER_SEG_SIZE;
++	struct ipourma_tx_buf *tx_buf = &priv->tx_ring[eid_idx][idx];
++
++	tx_buf->buf_aligned = priv->tx_buf_aligned[eid_idx][blk_idx] + offset;
++
++	if (IS_ERR_OR_NULL(tx_buf->buf_aligned) ||
++		(u64)(tx_buf->buf_aligned) % IPOURMA_SEGMENT_ALIGN_SIZE != 0) {
++		tx_buf->buf_aligned = NULL;
++		netdev_warn(priv->dev, "%s: addr = 0x%llx, align = %d\n",
++					ipourma_err_desc(IPOURMA_ADDRESS_NOT_ALIGNED),
++					(u64)tx_buf->buf_aligned, IPOURMA_SEGMENT_ALIGN_SIZE);
++		return IPOURMA_ADDRESS_NOT_ALIGNED;
++	}
++
++	tx_buf->seg[0] = priv->ipourma_ub_tx_seg[eid_idx][blk_idx];
++	tx_buf->tx_sge[0].addr = (u64)tx_buf->buf_aligned;
++	tx_buf->tx_sge[0].tseg = tx_buf->seg[0];
++
++	return IPOURMA_OK;
++}
++
++STATIC inline void ipourma_init_tx_wr(struct ipourma_tx_buf *tx_buf)
++{
++	/* only init the fixed fields */
++	tx_buf->tx_wr.user_ctx = tx_buf->idx;
++	tx_buf->tx_wr.opcode = UBCORE_OPC_SEND;
++	tx_buf->tx_wr.send.src.sge = tx_buf->tx_sge;
++	tx_buf->tx_wr.flag.bs.complete_enable = 1;
++}
++
++STATIC inline void ipourma_init_rx_wr(struct ipourma_rx_buf *rx_buf)
++{
++	/* only init the fixed fields */
++	rx_buf->rx_wr.user_ctx = rx_buf->idx;
++	rx_buf->rx_wr.src.sge = rx_buf->rx_sge;
++	rx_buf->rx_wr.src.num_sge = IPOURMA_MAX_RX_SGES;
++}
++
++STATIC int ipourma_init_tx_bufs(struct ipourma_dev_priv *priv, u32 eid_idx)
++{
++	struct ubcore_seg_cfg cfg = { 0 };
++	int ret = IPOURMA_OK;
++	u32 i;
++
++	priv->tx_buf_aligned[eid_idx] = kcalloc(priv->tx_buf_num, sizeof(u8 *), GFP_KERNEL);
++	if (IS_ERR_OR_NULL(priv->tx_buf_aligned[eid_idx]))
++		goto alloc_tx_bufs_failed;
++	priv->ipourma_ub_tx_seg[eid_idx] = kcalloc(priv->tx_buf_num,
++						   sizeof(struct ubcore_target_seg **),
++						   GFP_KERNEL);
++	if (IS_ERR_OR_NULL(priv->ipourma_ub_tx_seg[eid_idx]))
++		goto alloc_tx_bufs_failed;
++	for (i = 0; i < priv->tx_buf_num; i++) {
++		priv->tx_buf_aligned[eid_idx][i] = kzalloc(IPOURMA_REGISTER_SEG_SIZE, GFP_KERNEL);
++		if (IS_ERR_OR_NULL(priv->tx_buf_aligned[eid_idx][i]))
++			goto alloc_tx_bufs_failed;
++		ipourma_build_seg_cfg(&cfg, (u64)priv->tx_buf_aligned[eid_idx][i],
++						IPOURMA_REGISTER_SEG_SIZE);
++		priv->ipourma_ub_tx_seg[eid_idx][i] = ubcore_register_seg(priv->urma_dev,
++									  &cfg, NULL);
++		if (IS_ERR_OR_NULL(priv->ipourma_ub_tx_seg[eid_idx][i]))
++			goto alloc_tx_bufs_failed;
++	}
++	for (i = 0; i < ipourma_tx_ring_size; i++) {
++		priv->tx_ring[eid_idx][i].priv = priv;
++		priv->tx_ring[eid_idx][i].idx = i;
++		priv->tx_ring[eid_idx][i].eid_index = eid_idx;
++		INIT_WORK(&(priv->tx_ring[eid_idx][i].work), ipourma_post_send);
++		ipourma_init_tx_wr(&(priv->tx_ring[eid_idx][i]));
++		ret = ipourma_alloc_tx_buf_aligned(priv, eid_idx, i);
++		if (ret != IPOURMA_OK)
++			goto alloc_tx_bufs_failed;
++	}
++
++	return ret;
++alloc_tx_bufs_failed:
++	ipourma_uninit_tx_bufs(priv, eid_idx);
++	return IPOURMA_ADDRESS_NOT_ALIGNED;
++}
++
++STATIC int ipourma_init_rx_bufs(struct ipourma_dev_priv *priv, u32 eid_idx)
++{
++	struct ubcore_seg_cfg cfg = { 0 };
++	size_t i;
++	int ret;
++
++	ret = IPOURMA_OK;
++	priv->rx_buf_aligned[eid_idx] = kcalloc(priv->rx_buf_num, sizeof(u8 *), GFP_KERNEL);
++	if (IS_ERR_OR_NULL(priv->rx_buf_aligned[eid_idx]))
++		return IPOURMA_ADDRESS_NOT_ALIGNED;
++	for (i = 0; i < priv->rx_buf_num; i++) {
++		priv->rx_buf_aligned[eid_idx][i] = kzalloc(IPOURMA_REGISTER_SEG_SIZE,
++							   GFP_KERNEL);
++		if (IS_ERR_OR_NULL(priv->rx_buf_aligned[eid_idx][i])) {
++			ret = IPOURMA_ADDRESS_NOT_ALIGNED;
++			goto alloc_rx_buf_aligned_err;
++		}
++	}
++	priv->ipourma_ub_rx_seg[eid_idx] = kcalloc(priv->rx_buf_num,
++				sizeof(struct ubcore_target_seg *), GFP_KERNEL);
++	if (IS_ERR_OR_NULL(priv->ipourma_ub_rx_seg[eid_idx])) {
++		ret = IPOURMA_ADDRESS_NOT_ALIGNED;
++		goto alloc_rx_seg_err;
++	}
++	for (i = 0; i < priv->rx_buf_num; i++) {
++		ipourma_build_seg_cfg(&cfg, (u64)priv->rx_buf_aligned[eid_idx][i],
++							IPOURMA_REGISTER_SEG_SIZE);
++		priv->ipourma_ub_rx_seg[eid_idx][i] = ubcore_register_seg(priv->urma_dev,
++										&cfg, NULL);
++		if (IS_ERR_OR_NULL(priv->ipourma_ub_rx_seg[eid_idx][i])) {
++			ret = IPOURMA_ADDRESS_NOT_ALIGNED;
++			goto reg_rx_seg_err;
++		}
++	}
++
++	for (i = 0; i < ipourma_rx_ring_size; i++) {
++		priv->rx_ring[eid_idx][i].priv = priv;
++		priv->rx_ring[eid_idx][i].idx = i;
++		priv->rx_ring[eid_idx][i].eid_index = eid_idx;
++		INIT_WORK(&(priv->rx_ring[eid_idx][i].work), ipourma_replenish_segments);
++		ipourma_init_rx_wr(&(priv->rx_ring[eid_idx][i]));
++	}
++
++	return IPOURMA_OK;
++reg_rx_seg_err:
++	for (i--; i >= 0; i--) {
++		if (IS_ERR_OR_NULL(priv->ipourma_ub_rx_seg[eid_idx][i]))
++			continue;
++		ubcore_unregister_seg(priv->ipourma_ub_rx_seg[eid_idx][i]);
++		priv->ipourma_ub_rx_seg[eid_idx][i] = NULL;
++		if (i == 0)
++			break;
++	}
++	kfree(priv->ipourma_ub_rx_seg[eid_idx]);
++	priv->ipourma_ub_rx_seg[eid_idx] = NULL;
++alloc_rx_seg_err:
++	i = priv->rx_buf_num;
++alloc_rx_buf_aligned_err:
++	for (i--; i >= 0; i--) {
++		if (IS_ERR_OR_NULL(priv->rx_buf_aligned[eid_idx][i]))
++			continue;
++		kfree(priv->rx_buf_aligned[eid_idx][i]);
++		priv->rx_buf_aligned[eid_idx][i] = NULL;
++		if (i == 0)
++			break;
++	}
++	kfree(priv->rx_buf_aligned[eid_idx]);
++	priv->rx_buf_aligned[eid_idx] = NULL;
++	return IPOURMA_ADDRESS_NOT_ALIGNED;
++}
++
++STATIC void cleanup_tx_ring_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx)
++{
++	struct ipourma_tx_buf *tx_ring = priv->tx_ring[eid_idx];
++	unsigned long flags;
++
++	if (IS_ERR_OR_NULL(tx_ring))
++		return;
++
++	spin_lock_irqsave(&priv->tx_ring_locks[eid_idx], flags);
++	priv->tx_head[eid_idx] = 0;
++	priv->tx_tail[eid_idx] = 0;
++	priv->tx_ring_is_full[eid_idx] = false;
++	for (u32 i = 0; i < ipourma_tx_ring_size; i++) {
++		if (unlikely(tx_ring[i].tx_buf_in_use == 1)) {
++			tx_ring[i].tx_buf_in_use = 0;
++			dev_kfree_skb_any(tx_ring[i].skb);
++		}
++	}
++	spin_unlock_irqrestore(&priv->tx_ring_locks[eid_idx], flags);
++}
++
++int ipourma_init_rings_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx)
++{
++	int ret = IPOURMA_OK;
++
++	priv->tx_ring[eid_idx] = vzalloc(sizeof(struct ipourma_tx_buf) * ipourma_tx_ring_size);
++	if (IS_ERR_OR_NULL(priv->tx_ring[eid_idx]))
++		return IPOURMA_ALLOC_TX_RING_FAILED;
++
++	ret = ipourma_init_tx_bufs(priv, eid_idx);
++	if (ret != IPOURMA_OK)
++		goto init_tx_bufs_failed;
++
++	priv->rx_ring[eid_idx] = kcalloc(ipourma_rx_ring_size, sizeof(struct ipourma_rx_buf),
++								GFP_KERNEL);
++	if (IS_ERR_OR_NULL(priv->rx_ring[eid_idx]))
++		goto alloc_rx_ring_failed;
++
++	ret = ipourma_init_rx_bufs(priv, eid_idx);
++	if (ret != IPOURMA_OK)
++		goto init_rx_bufs_failed;
++
++	spin_lock_init(&priv->tx_ring_locks[eid_idx]);
++	return ret;
++
++init_rx_bufs_failed:
++	kfree(priv->rx_ring[eid_idx]);
++	priv->rx_ring[eid_idx] = NULL;
++alloc_rx_ring_failed:
++	ipourma_uninit_tx_bufs(priv, eid_idx);
++init_tx_bufs_failed:
++	vfree(priv->tx_ring[eid_idx]);
++	priv->tx_ring[eid_idx] = NULL;
++	return ret;
++}
++
++STATIC void ipourma_reset_tx_bufs_by_eid(struct ipourma_dev_priv *priv,
++					 struct ubcore_cr *cr, u32 eid_idx)
++{
++	struct ubcore_jetty_attr attr = {
++		.mask = UBCORE_JETTY_STATE,
++		.state = UBCORE_JETTY_STATE_ERROR,
++	};
++	struct net_device *dev = priv->dev;
++	int tx_cr_num = 0;
++
++	if (IS_ERR_OR_NULL(priv->jetty[eid_idx]))
++		return;
++
++	/* Clear the SQEs that have not been processed by the hardware */
++	tx_cr_num = ubcore_flush_jetty(priv->jetty[eid_idx], ipourma_tx_ring_size, cr);
++	if (unlikely(tx_cr_num < 0)) {
++		netdev_err(dev, "%s\n", ipourma_err_desc(IPOURMA_FLUSH_JETTY_FAILED));
++		return;
++	}
++	for (int j = 0; j < tx_cr_num; j++) {
++		priv->runtime_stats.tx_stats.cqe_recved++;
++		ipourma_handle_tx_wc(dev, priv, &cr[j]);
++	}
++
++	/* Clear the SQEs currently being processed by the hardware */
++	if (unlikely(ubcore_modify_jetty(priv->jetty[eid_idx], &attr, NULL) != 0)) {
++		netdev_err(dev, "%s\n", ipourma_err_desc(IPOURMA_MODIFY_JETTY_FAILED));
++		return;
++	}
++	tx_cr_num = ubcore_poll_jfc(priv->tx_jfc, ipourma_tx_ring_size, cr);
++	if (unlikely(tx_cr_num < 0)) {
++		priv->runtime_stats.tx_stats.poll_jfc_failed++;
++		netdev_err(dev, "%s:%d\n", ipourma_err_desc(IPOURMA_POLL_JFC_FAILED),
++				tx_cr_num);
++		return;
++	}
++	for (int i = 0; i < tx_cr_num; i++) {
++		priv->runtime_stats.tx_stats.cqe_recved++;
++		ipourma_handle_tx_wc(dev, priv, &cr[i]);
++	}
++}
++
++STATIC int ipourma_reset_tx_bufs(struct ipourma_dev_priv *priv, struct ubcore_cr *cr)
++{
++	if (IS_ERR_OR_NULL(priv->jetty))
++		return IPOURMA_OK;
++	for (u32 i = 0; i < IPOURMA_MAX_EID_CNT; i++) {
++		ipourma_reset_tx_bufs_by_eid(priv, cr, i);
++		cleanup_tx_ring_by_eid(priv, i);
++		ipourma_uninit_tx_bufs(priv, i);
++	}
++	atomic_set(&priv->tx_ring_blocked, 0);
++	return IPOURMA_OK;
++}
++
++STATIC void ipourma_reset_rx_buf_by_eid(struct ipourma_dev_priv *priv,
++					struct ubcore_cr *cr, u32 eid_idx)
++{
++	struct ubcore_jfr_attr attr = {
++		.mask = UBCORE_JFR_STATE,
++		.state = UBCORE_JFR_STATE_ERROR,
++	};
++	struct net_device *dev = priv->dev;
++	int rx_cr_num = 0;
++
++	if (IS_ERR_OR_NULL(priv->jfr[eid_idx]))
++		return;
++	if (unlikely(ubcore_modify_jfr(priv->jfr[eid_idx], &attr, NULL) != 0)) {
++		netdev_err(dev, "%s\n", ipourma_err_desc(IPOURMA_MODIFY_JFR_FAILED));
++		return;
++	}
++	rx_cr_num = ubcore_poll_jfc(priv->rx_jfc, ipourma_rx_ring_size, cr);
++	if (unlikely(rx_cr_num < 0)) {
++		priv->runtime_stats.rx_stats.poll_jfc_failed++;
++		netdev_dbg(dev, "%s:%d\n", ipourma_err_desc(IPOURMA_POLL_JFC_FAILED),
++				rx_cr_num);
++		return;
++	}
++
++	for (int i = 0; i < rx_cr_num; i++) {
++		priv->runtime_stats.rx_stats.cqe_recved++;
++		ipourma_handle_rx_wc(dev, priv, &cr[i]);
++	}
++}
++
++STATIC int ipourma_reset_rx_bufs(struct ipourma_dev_priv *priv, struct ubcore_cr *cr)
++{
++	/* this function will be filled in the next commit */
++	ipourma_reset_rx_buf_by_eid(priv, cr, 0);
++	return 0;
++}
++
+ int ipourma_reset_rings(struct ipourma_dev_priv *priv)
+ {
++	size_t size = sizeof(struct ubcore_cr) * ipourma_rx_ring_size;
++	struct ubcore_cr *cr = NULL;
++
++	cr = vzalloc(size);
++	if (IS_ERR_OR_NULL(cr)) {
++		netdev_err(priv->dev, "%s\n", ipourma_err_desc(IPOURMA_ALLOC_CR_FAILED));
++		return IPOURMA_ALLOC_CR_FAILED;
++	}
++
++	ipourma_reset_tx_bufs(priv, cr);
++	ipourma_reset_rx_bufs(priv, cr);
++	for (u32 i = 0; i < IPOURMA_MAX_EID_CNT; i++)
++		ipourma_uninit_urma_resources_by_eid(priv, i);
++	vfree(cr);
++
+ 	return IPOURMA_OK;
+ }
+ 
++void ipourma_uninit_urma_resources_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx)
++{
++	/* this function will be filled in the next commit */
++}
++
++int ipourma_init_urma_resources_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx)
++{
++	/* this function will be filled in the next commit */
++	return 0;
++}
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_res.h b/drivers/ub/urma/ulp/ipourma/ipourma_res.h
+index e1787d2babe0..be262a630ced 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_res.h
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_res.h
+@@ -10,6 +10,12 @@
+ 
+ #include "ipourma_types.h"
+ 
++void ipourma_uninit_rings_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx);
++void ipourma_uninit_rx_bufs(struct ipourma_dev_priv *priv, u32 eid_idx);
++int ipourma_init_tjetty_hmap(struct net_device *dev);
+ int ipourma_reset_rings(struct ipourma_dev_priv *priv);
++int ipourma_init_rings_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx);
++void ipourma_uninit_urma_resources_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx);
++int ipourma_init_urma_resources_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx);
+ 
+ #endif
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_ub.c b/drivers/ub/urma/ulp/ipourma/ipourma_ub.c
+index 6b53ec8ad2c5..fc9f152f0e2c 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_ub.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_ub.c
+@@ -15,7 +15,110 @@
+ #include "ub/urma/ubcore_uapi.h"
+ #include "ipourma_ub.h"
+ 
++void ipourma_build_seg_cfg(struct ubcore_seg_cfg *cfg,
++			   uint64_t va, uint64_t len)
++{
++	union ubcore_reg_seg_flag flag = {
++		.bs.token_policy = UBCORE_TOKEN_NONE,
++		.bs.cacheable = UBCORE_NON_CACHEABLE,
++		.bs.access = UBCORE_ACCESS_LOCAL_ONLY,
++	};
++	cfg->va = va;
++	cfg->len = len;
++	cfg->flag = flag;
++}
++
++void ipourma_init_tjetty_aging_work(struct ipourma_tjetty_lru *tjetty_lru)
++{
++	/* this function will be filled in the next commit */
++}
++
++void ipourma_post_send(struct work_struct *work)
++{
++	/* this function will be filled in the next commit */
++}
++
++void ipourma_replenish_segments(struct work_struct *work)
++{
++	/* this function will be filled in the next commit */
++}
++
++STATIC int ipourma_alloc_rx_buffer(struct net_device *dev, u32 eid_idx, u32 idx)
++{
++	/* this function will be filled in the next commit */
++	return IPOURMA_OK;
++}
++
++int ipourma_urma_post_recv(struct net_device *dev, u32 eid_idx, u32 idx)
++{
++	/* this function will be filled in the next commit */
++	return IPOURMA_OK;
++}
++
++static int ipourma_post_recv_by_eid(struct net_device *dev, u32 eid_idx)
++{
++	struct ipourma_dev_priv *priv = netdev_priv(dev);
++	int ret = IPOURMA_OK;
++	u32 i;
++
++	for (i = 0; i < ipourma_rx_ring_size; i++) {
++		if (ipourma_alloc_rx_buffer(dev, eid_idx, i) != IPOURMA_OK) {
++			ret = IPOURMA_ALLOC_RX_SKB_FAILED;
++			goto post_recv_failed;
++		}
++
++		if (ipourma_urma_post_recv(dev, eid_idx, i) != IPOURMA_OK) {
++			ret = IPOURMA_URMA_POST_RECV_FAILED;
++			goto post_recv_failed;
++		}
++	}
++	return ret;
++
++post_recv_failed:
++	ipourma_uninit_rx_bufs(priv, eid_idx);
++	return ret;
++}
++
++int ipourma_urma_init_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx)
++{
++	int ret;
++
++	ret = ipourma_init_rings_by_eid(priv, eid_idx);
++	if (ret != IPOURMA_OK)
++		goto init_rings_by_eid_failed;
++
++	ret = ipourma_init_urma_resources_by_eid(priv, eid_idx);
++	if (ret != IPOURMA_OK)
++		goto init_urma_res_by_eid_failed;
++
++	ret = ipourma_post_recv_by_eid(priv->dev, eid_idx);
++	if (ret != IPOURMA_OK)
++		goto post_recv_by_eid_failed;
++
++	return ret;
++post_recv_by_eid_failed:
++	ipourma_uninit_urma_resources_by_eid(priv, eid_idx);
++init_urma_res_by_eid_failed:
++	ipourma_uninit_rings_by_eid(priv, eid_idx);
++init_rings_by_eid_failed:
++	return ret;
++}
++
+ void ipourma_urma_dev_uninit(struct net_device *dev)
+ {
+ 	/* this function will be filled in the next commit */
+ }
++
++void ipourma_handle_tx_wc(struct net_device *dev,
++			  struct ipourma_dev_priv *priv,
++			  struct ubcore_cr *cr)
++{
++	/* this function will be filled in the next commit */
++}
++
++void ipourma_handle_rx_wc(struct net_device *dev,
++			  struct ipourma_dev_priv *priv,
++			  struct ubcore_cr *cr)
++{
++	/* this function will be filled in the next commit */
++}
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_ub.h b/drivers/ub/urma/ulp/ipourma/ipourma_ub.h
+index ffd4dbc549dc..cb2b65f05d72 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_ub.h
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_ub.h
+@@ -10,5 +10,19 @@
+ 
+ #include "ipourma_types.h"
+ 
++void ipourma_build_seg_cfg(struct ubcore_seg_cfg *cfg,
++			   uint64_t va, uint64_t len);
++void ipourma_init_tjetty_aging_work(struct ipourma_tjetty_lru *tjetty_lru);
++int ipourma_urma_init_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx);
+ void ipourma_urma_dev_uninit(struct net_device *dev);
++void ipourma_post_send(struct work_struct *work);
++int ipourma_urma_post_recv(struct net_device *dev, u32 eid_idx, u32 idx);
++void ipourma_replenish_segments(struct work_struct *work);
++void ipourma_handle_tx_wc(struct net_device *dev,
++			  struct ipourma_dev_priv *priv,
++			  struct ubcore_cr *cr);
++void ipourma_handle_rx_wc(struct net_device *dev,
++			  struct ipourma_dev_priv *priv,
++			  struct ubcore_cr *cr);
++
+ #endif
+-- 
+2.43.0
+

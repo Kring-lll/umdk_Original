@@ -1,0 +1,449 @@
+From af177ad959fba21a1cff7156127b92c9f39c0a91 Mon Sep 17 00:00:00 2001
+From: Heyu Hu <huheyu2@huawei.com>
+Date: Fri, 27 Feb 2026 16:04:49 +0800
+Subject: [PATCH] urma: query priority and enable bit, support ring
+ size configuration
+
+Offering: URMA
+URMA inclusion
+category: feature
+bugzilla: NA
+
+----------------------------------------------
+
+This patch queries priority and enable bit query for jetty
+creation, supports ring size configuration via parameter,
+improves error handling logic in eid change event.
+
+Signed-off-by: Heyu Hu <huheyu2@huawei.com>
+---
+ Documentation/ub/index.rst                  |  1 +
+ drivers/ub/urma/ulp/ipourma/ipourma_main.c  | 55 +++++++++++-
+ drivers/ub/urma/ulp/ipourma/ipourma_res.c   | 95 +++++++++++++++------
+ drivers/ub/urma/ulp/ipourma/ipourma_res.h   |  1 +
+ drivers/ub/urma/ulp/ipourma/ipourma_sysfs.c |  4 +-
+ drivers/ub/urma/ulp/ipourma/ipourma_types.h | 10 +++
+ drivers/ub/urma/ulp/ipourma/ipourma_ub.c    |  8 +-
+ 7 files changed, 140 insertions(+), 34 deletions(-)
+
+diff --git a/Documentation/ub/index.rst b/Documentation/ub/index.rst
+index ee12df0aa405..c480e8ad6229 100644
+--- a/Documentation/ub/index.rst
++++ b/Documentation/ub/index.rst
+@@ -17,3 +17,4 @@ UnifiedBus Subsystem
+    ummu/index
+    cdma/index
+    urma/udma/index
++   urma/ipourma/index
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_main.c b/drivers/ub/urma/ulp/ipourma/ipourma_main.c
+index 103ce3da7d87..c3fd0fa4c5fc 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_main.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_main.c
+@@ -24,6 +24,18 @@
+ #include "ub/urma/ubcore_uapi.h"
+ #include "ipourma_main.h"
+ 
++static int tx_ring_size = IPOURMA_TX_RING_SIZE;
++module_param(tx_ring_size, int, 0644);
++MODULE_PARM_DESC(tx_ring_size, "size of tx ring, should be in [32, 2048]");
++
++static int rx_ring_size = IPOURMA_RX_RING_SIZE;
++module_param(rx_ring_size, int, 0644);
++MODULE_PARM_DESC(rx_ring_size, "size of rx ring, should be in [tx_ring_size, 4096]");
++
++static int page_level = IPOURMA_DEF_PAGE_LEVEL;
++module_param(page_level, int, 0644);
++MODULE_PARM_DESC(page_level, "register 2^page_level bytes memory at once, should be in [12, 21]");
++
+ static int ipourma_ubcore_add_device(struct ubcore_device *ubc_dev);
+ static void ipourma_ubcore_remove_device(struct ubcore_device *ubc_dev, void *client_ctx);
+ static void ipourma_unregister_netdev(struct ipourma_dev_priv *priv);
+@@ -43,7 +55,11 @@ static int ipourma_ubcore_add_device(struct ubcore_device *ubc_dev)
+ {
+ 	struct net_device *ipou_ndev = NULL;
+ 	struct ipourma_dev_priv *priv = NULL;
++	uint32_t ipourma_en;
+ 
++	ipourma_en = ubc_dev->attr.dev_cap.feature.bs.ipourma_en;
++	if (ipourma_en == 0)
++		return -EOPNOTSUPP;
+ 	/* need to skip unsupported device */
+ 	if (strstr(ubc_dev->dev_name, "udma") == NULL)
+ 		return -EOPNOTSUPP;
+@@ -317,16 +333,21 @@ static void ipourma_do_eid_change_handler(struct ubcore_event *event,
+ 	eid = ub_dev->eid_table.eid_entries[eid_idx].eid;
+ 	spin_unlock(&ub_dev->eid_table.lock);
+ 
++	if (eid_is_empty(&eid)) {
++		netdev_warn(priv->dev, "get an empty eid. eid index:%u\n", eid_idx);
++		return;
++	}
++
+ 	priv = ubcore_get_client_ctx_data(ub_dev, &g_ipourma_ubcore_client);
+ 	if (!IS_ERR_OR_NULL(priv)) {
+ 		if (!eid_is_empty(&priv->eid_info[eid_idx].eid)) {
+-			netdev_dbg(priv->dev, "get an old eid. eid index:%d, eid:"EID_FMT"\n",
++			netdev_dbg(priv->dev, "get an old eid. eid index:%u, eid:"EID_FMT"\n",
+ 			eid_idx, EID_ARGS(priv->eid_info[eid_idx].eid));
+ 			return;
+ 		}
+ 		priv->eid_info[eid_idx].eid = eid;
+ 		priv->eid_info[eid_idx].eid_index = eid_idx;
+-		netdev_dbg(priv->dev, " get a new eid. eid index:%d, eid:"EID_FMT"\n",
++		netdev_dbg(priv->dev, " get a new eid. eid index:%u, eid:"EID_FMT"\n",
+ 			eid_idx, EID_ARGS(priv->eid_info[eid_idx].eid));
+ 		atomic_add(1, &(priv->need_set_ip_route));
+ 		ipourma_create_new_eid(priv, eid_idx);
+@@ -337,10 +358,40 @@ static void ipourma_do_eid_change_handler(struct ubcore_event *event,
+ 	spin_unlock(&ub_dev->eid_table.lock);
+ }
+ 
++static int ipourma_param_init(void)
++{
++	if (tx_ring_size > IPOURMA_MAX_TX_RING_SIZE ||
++		rx_ring_size > IPOURMA_MAX_RX_RING_SIZE ||
++		tx_ring_size < IPOURMA_MIN_TX_RING_SIZE ||
++		rx_ring_size < IPOURMA_MIN_RX_RING_SIZE ||
++		tx_ring_size > rx_ring_size) {
++		pr_err("invalid ring size.\n");
++		return -EOPNOTSUPP;
++	}
++
++	if (page_level < IPOURMA_MIN_PAGE_LEVEL || page_level > IPOURMA_MAX_PAGE_LEVEL) {
++		pr_err("invalid page level.\n");
++		return -EOPNOTSUPP;
++	}
++
++	ipourma_tx_ring_size = tx_ring_size;
++	ipourma_rx_ring_size = rx_ring_size;
++	ipourma_register_seg_size = (1 << page_level);
++	ipourma_ub_size_init();
++
++	return 0;
++}
++
+ static int __init ipourma_init(void)
+ {
+ 	int ret = 0;
+ 
++	ret = ipourma_param_init();
++	if (ret != 0) {
++		pr_err("ipourma param init failed.\n");
++		return ret;
++	}
++
+ 	ret = ubcore_register_client(&g_ipourma_ubcore_client);
+ 	if (ret != 0) {
+ 		pr_err("Register ubcore client failed.\n");
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_res.c b/drivers/ub/urma/ulp/ipourma/ipourma_res.c
+index 9bce78526fbf..5a98eede3c10 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_res.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_res.c
+@@ -12,6 +12,19 @@
+ 
+ u32 ipourma_tx_ring_size __read_mostly = IPOURMA_TX_RING_SIZE;
+ u32 ipourma_rx_ring_size __read_mostly = IPOURMA_RX_RING_SIZE;
++u32 ipourma_register_seg_size __read_mostly = IPOURMA_REGISTER_SEG_SIZE;
++u32 ipourma_jfs_depth;
++static u32 ipourma_jfr_depth;
++u32 ipourma_tx_jfc_depth;
++static u32 ipourma_rx_jfc_depth;
++
++void ipourma_ub_size_init(void)
++{
++	ipourma_jfs_depth = ipourma_tx_ring_size;
++	ipourma_jfr_depth = ipourma_rx_ring_size;
++	ipourma_tx_jfc_depth = ipourma_jfs_depth * (IPOURMA_TX_JFC_DEPTH / IPOURMA_JFS_DEPTH);
++	ipourma_rx_jfc_depth = ipourma_jfr_depth * (IPOURMA_RX_JFC_DEPTH / IPOURMA_JFR_DEPTH);
++}
+ 
+ static void ipourma_uninit_tx_bufs(struct ipourma_dev_priv *priv, u32 eid_idx)
+ {
+@@ -58,20 +71,22 @@ void ipourma_uninit_rx_bufs(struct ipourma_dev_priv *priv, u32 eid_idx)
+ 			priv->rx_ring[eid_idx][i].skb_pass_up = NULL;
+ 		}
+ 	}
+-	if (IS_ERR_OR_NULL(priv->ipourma_ub_rx_seg[eid_idx]))
++
++	if (!IS_ERR_OR_NULL(priv->ipourma_ub_rx_seg[eid_idx])) {
++		kfree(priv->ipourma_ub_rx_seg[eid_idx]);
++		priv->ipourma_ub_rx_seg[eid_idx] = NULL;
++	}
++
++	if (IS_ERR_OR_NULL(priv->rx_buf_aligned[eid_idx]))
+ 		return;
+ 	for (u32 i = 0; i < priv->rx_buf_num; i++) {
+-		if (IS_ERR_OR_NULL(priv->ipourma_ub_rx_seg[eid_idx][i]))
+-			continue;
+-		ubcore_unregister_seg(priv->ipourma_ub_rx_seg[eid_idx][i]);
+-		priv->ipourma_ub_rx_seg[eid_idx][i] = NULL;
+ 		if (IS_ERR_OR_NULL(priv->rx_buf_aligned[eid_idx][i]))
+ 			continue;
+ 		kfree(priv->rx_buf_aligned[eid_idx][i]);
+ 		priv->rx_buf_aligned[eid_idx][i] = NULL;
+ 	}
+-	kfree(priv->ipourma_ub_rx_seg[eid_idx]);
+-	priv->ipourma_ub_rx_seg[eid_idx] = NULL;
++	kfree(priv->rx_buf_aligned[eid_idx]);
++	priv->rx_buf_aligned[eid_idx] = NULL;
+ }
+ 
+ void ipourma_uninit_rings_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx)
+@@ -134,8 +149,8 @@ void ipourma_uninit_rings(struct net_device *dev)
+ 
+ static int ipourma_alloc_tx_buf_aligned(struct ipourma_dev_priv *priv, u32 eid_idx, u32 idx)
+ {
+-	u32 offset = (idx * priv->tx_buf_size) % IPOURMA_REGISTER_SEG_SIZE;
+-	u32 blk_idx = idx * priv->tx_buf_size / IPOURMA_REGISTER_SEG_SIZE;
++	u32 offset = (idx * priv->tx_buf_size) % ipourma_register_seg_size;
++	u32 blk_idx = idx * priv->tx_buf_size / ipourma_register_seg_size;
+ 	struct ipourma_tx_buf *tx_buf = &priv->tx_ring[eid_idx][idx];
+ 
+ 	tx_buf->buf_aligned = priv->tx_buf_aligned[eid_idx][blk_idx] + offset;
+@@ -188,11 +203,11 @@ static int ipourma_init_tx_bufs(struct ipourma_dev_priv *priv, u32 eid_idx)
+ 	if (IS_ERR_OR_NULL(priv->ipourma_ub_tx_seg[eid_idx]))
+ 		goto alloc_tx_bufs_failed;
+ 	for (i = 0; i < priv->tx_buf_num; i++) {
+-		priv->tx_buf_aligned[eid_idx][i] = kzalloc(IPOURMA_REGISTER_SEG_SIZE, GFP_KERNEL);
++		priv->tx_buf_aligned[eid_idx][i] = kzalloc(ipourma_register_seg_size, GFP_KERNEL);
+ 		if (IS_ERR_OR_NULL(priv->tx_buf_aligned[eid_idx][i]))
+ 			goto alloc_tx_bufs_failed;
+ 		ipourma_build_seg_cfg(&cfg, (u64)priv->tx_buf_aligned[eid_idx][i],
+-						IPOURMA_REGISTER_SEG_SIZE);
++						ipourma_register_seg_size);
+ 		priv->ipourma_ub_tx_seg[eid_idx][i] = ubcore_register_seg(priv->urma_dev,
+ 									  &cfg, NULL);
+ 		if (IS_ERR_OR_NULL(priv->ipourma_ub_tx_seg[eid_idx][i]))
+@@ -226,7 +241,7 @@ static int ipourma_init_rx_bufs(struct ipourma_dev_priv *priv, u32 eid_idx)
+ 	if (IS_ERR_OR_NULL(priv->rx_buf_aligned[eid_idx]))
+ 		return IPOURMA_ADDRESS_NOT_ALIGNED;
+ 	for (i = 0; i < priv->rx_buf_num; i++) {
+-		priv->rx_buf_aligned[eid_idx][i] = kzalloc(IPOURMA_REGISTER_SEG_SIZE,
++		priv->rx_buf_aligned[eid_idx][i] = kzalloc(ipourma_register_seg_size,
+ 							   GFP_KERNEL);
+ 		if (IS_ERR_OR_NULL(priv->rx_buf_aligned[eid_idx][i])) {
+ 			ret = IPOURMA_ADDRESS_NOT_ALIGNED;
+@@ -241,7 +256,7 @@ static int ipourma_init_rx_bufs(struct ipourma_dev_priv *priv, u32 eid_idx)
+ 	}
+ 	for (i = 0; i < priv->rx_buf_num; i++) {
+ 		ipourma_build_seg_cfg(&cfg, (u64)priv->rx_buf_aligned[eid_idx][i],
+-							IPOURMA_REGISTER_SEG_SIZE);
++							ipourma_register_seg_size);
+ 		priv->ipourma_ub_rx_seg[eid_idx][i] = ubcore_register_seg(priv->urma_dev,
+ 										&cfg, NULL);
+ 		if (IS_ERR_OR_NULL(priv->ipourma_ub_rx_seg[eid_idx][i])) {
+@@ -513,7 +528,7 @@ int ipourma_restart_rings(struct ipourma_dev_priv *priv)
+ 
+ 		for (u32 j = 0; j < priv->rx_buf_num; j++) {
+ 			ipourma_build_seg_cfg(&cfg, (u64)priv->rx_buf_aligned[i][j],
+-							IPOURMA_REGISTER_SEG_SIZE);
++							ipourma_register_seg_size);
+ 			priv->ipourma_ub_rx_seg[i][j] = ubcore_register_seg(priv->urma_dev,
+ 											&cfg, NULL);
+ 		}
+@@ -588,9 +603,9 @@ int ipourma_init_rings(struct net_device *dev)
+ 		priv->tx_buf_size = IPOURMA_SEGMENT_ALIGN_SIZE;
+ 	}
+ 	priv->rx_buf_num = DIV_ROUND_UP(ipourma_rx_ring_size * priv->skb_buf_size,
+-					IPOURMA_REGISTER_SEG_SIZE);
++					ipourma_register_seg_size);
+ 	priv->tx_buf_num = DIV_ROUND_UP(ipourma_tx_ring_size * priv->tx_buf_size,
+-					IPOURMA_REGISTER_SEG_SIZE);
++					ipourma_register_seg_size);
+ 
+ 	return ret;
+ }
+@@ -628,6 +643,35 @@ int ipourma_init_tjetty_hmap(struct net_device *dev)
+ 	return ret;
+ }
+ 
++static int ipourma_jetty_set_priority(struct ipourma_dev_priv *priv,
++					struct ubcore_jetty_cfg *jetty_cfg)
++{
++	struct ubcore_device_attr attr = {0};
++	int set_priority_ret = 0;
++	int ret = 0;
++	int i;
++
++	ret = ubcore_query_device_attr(priv->urma_dev, &attr);
++	if (ret == 0) {
++		for (i = 0; i < UBCORE_MAX_PRIORITY_CNT; ++i) {
++			if (attr.dev_cap.priority_info[i].tp_type.bs.ctp == 1) {
++				jetty_cfg->priority = i;
++				netdev_info(priv->dev, "ipourma set ctp priority : %d\n", i);
++				set_priority_ret = 1;
++				break;
++			}
++		}
++		if (set_priority_ret == 0) {
++			netdev_err(priv->dev, "set priority default value : 0\n");
++			return -EINVAL;
++		}
++	} else {
++		netdev_err(priv->dev, "Failed to ubcore get dev_attr!\n");
++		return -EINVAL;
++	}
++	return IPOURMA_OK;
++}
++
+ static struct ubcore_jfr *ipourma_create_jfr(
+ 	struct net_device *dev, u32 depth, u32 eid_index)
+ {
+@@ -663,17 +707,16 @@ static struct ubcore_jetty *ipourma_create_jetty(struct net_device *dev,
+ 	jetty_cfg.trans_mode = UBCORE_TP_RM;
+ 	jetty_cfg.eid_index = priv->eid_info[eid_index].eid_index;
+ 	jetty_cfg.jfs_depth = IPOURMA_JFS_DEPTH;
+-	/* jetty_cfg.priority = 0; */
++	jetty_cfg.priority = 0;
+ 	jetty_cfg.max_send_sge = max_send_sge;
+ 	jetty_cfg.max_send_rsge = IPOURMA_MAX_URMA_RECV_SGES;
+-	jetty_cfg.jfr_depth = IPOURMA_JFR_DEPTH;
++	jetty_cfg.jfr_depth = ipourma_jfr_depth;
+ 	jetty_cfg.max_recv_sge = max_recv_sge;
+ 	jetty_cfg.send_jfc = priv->tx_jfc;
+ 	jetty_cfg.recv_jfc = priv->rx_jfc;
+ 	jetty_cfg.jfr = priv->jfr[eid_index];
+-	/* if (ipourma_jetty_set_priority(priv, &jetty_cfg) != IPOURMA_OK)
+-	 *	return NULL;
+-	 */
++	if (ipourma_jetty_set_priority(priv, &jetty_cfg) != IPOURMA_OK)
++		return NULL;
+ 
+ 	return ubcore_create_jetty(priv->urma_dev, &jetty_cfg, NULL, NULL);
+ }
+@@ -855,17 +898,17 @@ int ipourma_init_urma_resources_by_eid(struct ipourma_dev_priv *priv, u32 eid_id
+ 		goto invalid_name;
+ 	}
+ 
+-	priv->jfr[eid_idx] = ipourma_create_jfr(dev, IPOURMA_JFR_DEPTH, eid_idx);
++	priv->jfr[eid_idx] = ipourma_create_jfr(dev, ipourma_jfr_depth, eid_idx);
+ 	if (IS_ERR_OR_NULL(priv->jfr[eid_idx])) {
+ 		ret = IPOURMA_CREATE_JFR_FAILED;
+-		pr_err("create jfr error, dev: %s, i = %d\n", dev->name, eid_idx);
++		pr_err("create jfr error, dev: %s, i = %u\n", dev->name, eid_idx);
+ 		goto jfr_failed;
+ 	}
+ 	priv->jetty[eid_idx] = ipourma_create_jetty(dev,
+ 				IPOURMA_WELL_KNOWN_JETTY_ID + eid_idx, eid_idx);
+ 	if (IS_ERR_OR_NULL(priv->jetty[eid_idx])) {
+ 		ret = IPOURMA_CREATE_JETTY_FAILED;
+-		pr_err("create tx jetty error, dev: %s, i = %d\n", dev->name, eid_idx);
++		pr_err("create tx jetty error, dev: %s, i = %u\n", dev->name, eid_idx);
+ 		goto jetty_failed;
+ 	}
+ 
+@@ -893,14 +936,14 @@ int ipourma_init_urma_resources(struct net_device *dev)
+ 		goto init_table_failed;
+ 
+ 	priv->tx_jfc = ipourma_create_jfc(dev, ipourma_handle_tx_cqe,
+-								IPOURMA_TX_JFC_DEPTH);
++								ipourma_tx_jfc_depth);
+ 	if (IS_ERR_OR_NULL(priv->tx_jfc)) {
+ 		ret = IPOURMA_CREATE_JFC_FAILED;
+ 		pr_err("create tx jfc error, dev: %s\n", dev->name);
+ 		goto tx_jfc_failed;
+ 	}
+ 	priv->rx_jfc = ipourma_create_jfc(dev, ipourma_handle_rx_cqe,
+-								IPOURMA_RX_JFC_DEPTH);
++								ipourma_rx_jfc_depth);
+ 	if (IS_ERR_OR_NULL(priv->rx_jfc)) {
+ 		ret = IPOURMA_CREATE_JFC_FAILED;
+ 		pr_err("create rx jfc error, dev: %s\n", dev->name);
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_res.h b/drivers/ub/urma/ulp/ipourma/ipourma_res.h
+index f01b396338ee..71649d25c13d 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_res.h
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_res.h
+@@ -10,6 +10,7 @@
+ 
+ #include "ipourma_types.h"
+ 
++void ipourma_ub_size_init(void);
+ void ipourma_uninit_rings_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx);
+ void ipourma_uninit_rx_bufs(struct ipourma_dev_priv *priv, u32 eid_idx);
+ int ipourma_restart_rings(struct ipourma_dev_priv *priv);
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_sysfs.c b/drivers/ub/urma/ulp/ipourma/ipourma_sysfs.c
+index 602c2c314335..137a18bdd92b 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_sysfs.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_sysfs.c
+@@ -320,8 +320,8 @@ static ssize_t max_concurrent_conn_store(struct device *dev,
+ 	 * prefix: '0x'--hexadecimal, '0'--octal, others--decimal format
+ 	 */
+ 	ret = kstrtoint(buf, 0, &new_capacity);
+-	/* The new value must be between IPOURMA_JFS_DEPTH and IPOURMA_TX_JFC_DEPTH */
+-	if (ret != 0 || new_capacity < IPOURMA_JFS_DEPTH || new_capacity > IPOURMA_TX_JFC_DEPTH) {
++	/* The new value must be between ipourma_jfs_depth and ipourma_tx_jfc_depth */
++	if (ret != 0 || new_capacity < ipourma_jfs_depth || new_capacity > ipourma_tx_jfc_depth) {
+ 		pr_err("%s: invalid input!\n", __func__);
+ 		return -EINVAL;
+ 	}
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_types.h b/drivers/ub/urma/ulp/ipourma/ipourma_types.h
+index 271c71096a3b..213519acfeb6 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_types.h
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_types.h
+@@ -46,6 +46,9 @@ enum {
+ 	IPOURMA_TX_JFC_DEPTH        = 1024,
+ 	IPOURMA_RX_JFC_DEPTH        = 2048,
+ 	IPOURMA_SEGMENT_ALIGN_SIZE  = 4096,
++	IPOURMA_MIN_PAGE_LEVEL      = 12,
++	IPOURMA_DEF_PAGE_LEVEL      = 16,
++	IPOURMA_MAX_PAGE_LEVEL      = 21,
+ 	IPOURMA_REGISTER_SEG_SIZE   = 65536,
+ 	IPOURMA_MAX_URMA_SEND_SGES  = 13,
+ 	IPOURMA_MAX_URMA_RECV_SGES  = 1,
+@@ -58,6 +61,10 @@ enum {
+ 	IPOURMA_NAPI_TX_WEIGHT      = 16,
+ 	IPOURMA_TX_RING_SIZE        = 128,
+ 	IPOURMA_RX_RING_SIZE        = 256,
++	IPOURMA_MIN_TX_RING_SIZE    = 32,
++	IPOURMA_MAX_TX_RING_SIZE    = 2048,
++	IPOURMA_MIN_RX_RING_SIZE    = 32,
++	IPOURMA_MAX_RX_RING_SIZE    = 4096,
+ 	IPOURMA_URMA_MAX_MTU        = 4096,
+ 	IPOURMA_MAX_MTU             = (IPOURMA_URMA_MAX_MTU -
+ 					sizeof(struct ipourma_header)),
+@@ -137,6 +144,9 @@ enum {
+ #define IFLA_IPOURMA_MAX (__IFLA_IPOURMA_MAX - 1)
+ extern u32 ipourma_tx_ring_size;
+ extern u32 ipourma_rx_ring_size;
++extern u32 ipourma_jfs_depth;
++extern u32 ipourma_tx_jfc_depth;
++extern u32 ipourma_register_seg_size;
+ 
+ /* IPOURMA_MAX_CR_STATUS should be as same as the length of the enum ubcore_cr_status. Since
+  * ubcore_cr_status is contiguous and starts from 0, we can use the value of the last item
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_ub.c b/drivers/ub/urma/ulp/ipourma/ipourma_ub.c
+index e3548b86d7bb..f8a00f649c52 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_ub.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_ub.c
+@@ -495,7 +495,7 @@ int ipourma_register_rx_segments(struct net_device *dev,
+ 	u32 blk_idx;
+ 	u32 i;
+ 
+-	blk_idx = rx_req->idx * priv->skb_buf_size / IPOURMA_REGISTER_SEG_SIZE;
++	blk_idx = rx_req->idx * priv->skb_buf_size / ipourma_register_seg_size;
+ 
+ 	for (i = 0; i < IPOURMA_MAX_RX_SGES; i++) {
+ 		rx_req->seg[i] = priv->ipourma_ub_rx_seg[rx_req->eid_index][blk_idx];
+@@ -558,7 +558,7 @@ int ipourma_xmit(struct net_device *dev, struct sk_buff *skb,
+ 		priv->runtime_stats.tx_stats.tx_ring_full++;
+ 		return IPOURMA_TX_RING_FULL;
+ 	}
+-	tx_idx = priv->tx_head[eid_idx] & (ipourma_tx_ring_size - 1);
++	tx_idx = priv->tx_head[eid_idx] % ipourma_tx_ring_size;
+ 	tx_req = &priv->tx_ring[eid_idx][tx_idx];
+ 	tx_req->tx_buf_in_use = 1;
+ 	if ((priv->tx_head[eid_idx] - priv->tx_tail[eid_idx]) == ipourma_tx_ring_size - 1) {
+@@ -621,8 +621,8 @@ static int ipourma_alloc_rx_buffer(struct net_device *dev, u32 eid_idx, u32 idx)
+ 	if (IS_ERR_OR_NULL(skb_pass_up))
+ 		return IPOURMA_ALLOC_RX_SKB_FAILED;
+ 
+-	blk_idx = idx * priv->skb_buf_size / IPOURMA_REGISTER_SEG_SIZE;
+-	offset = (idx * priv->skb_buf_size) % IPOURMA_REGISTER_SEG_SIZE;
++	blk_idx = idx * priv->skb_buf_size / ipourma_register_seg_size;
++	offset = (idx * priv->skb_buf_size) % ipourma_register_seg_size;
+ 	priv->rx_ring[eid_idx][idx].buf_aligned = priv->rx_buf_aligned[eid_idx][blk_idx] + offset;
+ 
+ 	if (ipourma_register_rx_segments(dev, &cfg, &priv->rx_ring[eid_idx][idx])
+-- 
+2.50.1.windows.1
+

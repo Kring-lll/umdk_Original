@@ -1,0 +1,1220 @@
+From b2494ee18ba14a5dc5bb5c46d9caa9e3ff4f085d Mon Sep 17 00:00:00 2001
+From: Heyu Hu <huheyu2@huawei.com>
+Date: Thu, 12 Feb 2026 23:21:15 +0800
+Subject: [PATCH] urma: implement data plane interaction and statistics
+
+Offering: URMA
+URMA inclusion
+category: feature
+bugzilla: NA
+
+----------------------------------------------
+
+This patch implements the core logic for data plane interaction,
+supports the configuration of IPv6 address and policy-based
+routing, introduces sysfs for statistics.
+
+Signed-off-by: Heyu Hu <huheyu2@huawei.com>
+---
+ drivers/ub/urma/ulp/ipourma/Makefile          |   1 +
+ drivers/ub/urma/ulp/ipourma/ipourma_ethtool.c |   2 +-
+ drivers/ub/urma/ulp/ipourma/ipourma_ip.c      |  28 ++
+ drivers/ub/urma/ulp/ipourma/ipourma_ip.h      |   2 +-
+ drivers/ub/urma/ulp/ipourma/ipourma_main.c    |   5 +-
+ drivers/ub/urma/ulp/ipourma/ipourma_netdev.c  | 140 ++++++
+ drivers/ub/urma/ulp/ipourma/ipourma_res.c     |  16 +-
+ drivers/ub/urma/ulp/ipourma/ipourma_sysfs.c   | 472 ++++++++++++++++++
+ drivers/ub/urma/ulp/ipourma/ipourma_sysfs.h   |  18 +
+ drivers/ub/urma/ulp/ipourma/ipourma_types.h   |   1 +
+ drivers/ub/urma/ulp/ipourma/ipourma_ub.c      | 299 ++++++++---
+ drivers/ub/urma/ulp/ipourma/ipourma_ub.h      |   1 +
+ 12 files changed, 902 insertions(+), 83 deletions(-)
+ create mode 100644 drivers/ub/urma/ulp/ipourma/ipourma_sysfs.c
+ create mode 100644 drivers/ub/urma/ulp/ipourma/ipourma_sysfs.h
+
+diff --git a/drivers/ub/urma/ulp/ipourma/Makefile b/drivers/ub/urma/ulp/ipourma/Makefile
+index 870fbd99b9b6..b8e689bce033 100644
+--- a/drivers/ub/urma/ulp/ipourma/Makefile
++++ b/drivers/ub/urma/ulp/ipourma/Makefile
+@@ -14,5 +14,6 @@ ipourma_ip.o \
+ ipourma_ethtool.o \
+ ipourma_netlink.o \
+ ipourma_utils.o \
++ipourma_sysfs.o \
+ 
+ obj-$(CONFIG_UB_URMA) += ipourma.o
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_ethtool.c b/drivers/ub/urma/ulp/ipourma/ipourma_ethtool.c
+index 89bb4ef5cfda..939100154886 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_ethtool.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_ethtool.c
+@@ -194,7 +194,7 @@ static const struct ethtool_ops ipourma_ethtool_ops = {
+ 	.get_strings		= ipourma_get_strings,
+ 	.get_ethtool_stats	= ipourma_get_ethtool_stats,
+ 	.get_sset_count		= ipourma_get_sset_count,
+-	.get_link			= ethtool_op_get_link,
++	.get_link		= ethtool_op_get_link,
+ };
+ 
+ void ipourma_set_ethtool_ops(struct net_device *dev)
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_ip.c b/drivers/ub/urma/ulp/ipourma/ipourma_ip.c
+index b328e9c7792e..ab6ab079844c 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_ip.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_ip.c
+@@ -76,3 +76,31 @@ int ipourma_send_ipv6_netlink(struct net_device *dev, union ubcore_eid *eid, int
+ 	pr_debug("send_ipv6_netlink success\n");
+ 	return 0;
+ }
++
++void ipourma_init_ipv6_addr(struct work_struct *work)
++{
++	struct ipourma_dev_priv *priv;
++	struct net_device *dev;
++	int ret = 0;
++	int i;
++
++	priv = container_of(work, struct ipourma_dev_priv, set_ip);
++	dev = priv->dev;
++
++	for (i = 0; i < IPOURMA_MAX_EID_CNT; i++) {
++		if (eid_is_empty(&priv->eid_info[i].eid))
++			continue;
++		ret = ipourma_send_ipv6_netlink(dev, &(priv->eid_info[i].eid), RTM_NEWADDR);
++		if (ret != 0)
++			goto ipv6_uninit;
++	}
++
++	pr_debug("init_ipv6_addr success\n");
++	return;
++
++ipv6_uninit:
++	for (i--; i >= 0; i--)
++		ipourma_send_ipv6_netlink(dev, &(priv->eid_info[i].eid), RTM_DELADDR);
++
++	pr_err("init_ipv6_addr failed\n");
++}
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_ip.h b/drivers/ub/urma/ulp/ipourma/ipourma_ip.h
+index c714d1b0cf3b..c38566f1721f 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_ip.h
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_ip.h
+@@ -10,7 +10,7 @@
+ 
+ #include "ipourma_types.h"
+ 
+-void ipourma_init_ipv6_addr(struct work_struct *work);
+ int ipourma_send_ipv6_netlink(struct net_device *dev, union ubcore_eid *eid, int msg_type);
++void ipourma_init_ipv6_addr(struct work_struct *work);
+ 
+ #endif
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_main.c b/drivers/ub/urma/ulp/ipourma/ipourma_main.c
+index 71e656e18796..0979410b6d12 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_main.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_main.c
+@@ -17,6 +17,7 @@
+ #include "ipourma_netdev.h"
+ #include "ipourma_res.h"
+ #include "ipourma_ub.h"
++#include "ipourma_sysfs.h"
+ #include "ub/urma/ubcore_api.h"
+ #include "ub/urma/ubcore_uapi.h"
+ #include "ipourma_main.h"
+@@ -258,7 +259,7 @@ void ipourma_register_netdev(struct work_struct *work)
+ 	ipourma_proc_eid_exist(priv);
+ 	queue_work(priv->net_config_wq, &(priv->set_dev_up));
+ 
+-	// ipourma_register_sysfs(priv);
++	ipourma_register_sysfs(priv);
+ 	return;
+ 
+ ALLOC_RESOURCE_ERR:
+@@ -280,7 +281,7 @@ STATIC void ipourma_unregister_netdev(struct ipourma_dev_priv *priv)
+ {
+ 	ubcore_unregister_event_handler(priv->urma_dev, &priv->eid_change_handler);
+ 	ipourma_flush_register_wq(priv);
+-	// ipourma_unregister_sysfs(priv);
++	ipourma_unregister_sysfs(priv);
+ 	unregister_netdev(priv->dev);
+ 	ipourma_reset_rings(priv);
+ 	ipourma_cleanup_res(priv->dev);
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_netdev.c b/drivers/ub/urma/ulp/ipourma/ipourma_netdev.c
+index a5553a078ade..7738138322d9 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_netdev.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_netdev.c
+@@ -105,6 +105,35 @@ STATIC int ipourma_add_route_rule(struct ipourma_dev_priv *priv, union ubcore_ei
+ 	return ret;
+ }
+ 
++STATIC int ipourma_del_route_rule(struct ipourma_dev_priv *priv, union ubcore_eid *eid)
++{
++	struct in6_addr addr;
++	struct sk_buff *skb;
++	int ret;
++
++	if (IS_ERR_OR_NULL(priv) || IS_ERR_OR_NULL(eid))
++		return -EINVAL;
++
++	ret = ipourma_resolve_ipaddr(priv->dev, ETH_P_IPV6, eid, &addr);
++	if (ret != 0)
++		return ret;
++
++	skb = nlmsg_new(NLMSG_GOODSIZE, GFP_KERNEL);
++	if (IS_ERR_OR_NULL(skb))
++		return -ENOMEM;
++
++	if (prepare_route_rule(priv, skb, RTM_DELRULE, &addr)) {
++		kfree_skb(skb);
++		return -EMSGSIZE;
++	}
++
++	ret = rtnl_unicast(skb, dev_net(priv->dev), 0);
++	if (ret)
++		netdev_err(priv->dev, "Failed to new route\n");
++
++	return ret;
++}
++
+ STATIC int prepare_route_entry(struct ipourma_dev_priv *priv, struct sk_buff *skb, int type)
+ {
+ 	struct nlmsghdr *nlh;
+@@ -161,6 +190,71 @@ STATIC void ipourma_add_route_entry(struct work_struct *work)
+ 		netdev_err(priv->dev, "Failed to new route\n");
+ }
+ 
++STATIC int ipourma_del_route_entry(struct ipourma_dev_priv *priv)
++{
++	struct sk_buff *skb;
++	int ret;
++
++	if (IS_ERR_OR_NULL(priv))
++		return -EINVAL;
++
++	skb = nlmsg_new(NLMSG_GOODSIZE, GFP_KERNEL);
++	if (IS_ERR_OR_NULL(skb))
++		return -ENOMEM;
++
++	if (prepare_route_entry(priv, skb, RTM_DELROUTE)) {
++		kfree_skb(skb);
++		return -EMSGSIZE;
++	}
++
++	ret = rtnl_unicast(skb, dev_net(priv->dev), 0);
++	if (ret)
++		netdev_err(priv->dev, "Failed to new route\n");
++
++	return ret;
++}
++
++void ipourma_add_route(struct work_struct *work)
++{
++	struct ipourma_dev_priv *priv;
++	int i;
++	int ret = -1;
++	bool flag = false;
++
++	priv = container_of(work, struct ipourma_dev_priv, set_route);
++
++	for (i = 0; i < IPOURMA_MAX_EID_CNT; i++) {
++		if (eid_is_empty(&priv->eid_info[i].eid))
++			continue;
++		ret = ipourma_add_route_rule(priv, &(priv->eid_info[i].eid));
++		flag = true;
++		if (ret != 0)
++			goto ROUTE_ERR;
++	}
++	if (flag)
++		queue_work(priv->net_config_wq, &(priv->set_route_entry));
++	return;
++
++ROUTE_ERR:
++	for (i--; i >= 0; i--)
++		ipourma_del_route_rule(priv, &(priv->eid_info[i].eid));
++}
++
++STATIC void ipourma_del_route(struct work_struct *work)
++{
++	struct ipourma_dev_priv *priv;
++
++	priv = container_of(work, struct ipourma_dev_priv, unset_route);
++	ipourma_del_route_entry(priv);
++	if (!IS_ERR_OR_NULL(priv->eid_info)) {
++		for (int i = 0; i < IPOURMA_MAX_EID_CNT; i++) {
++			if (eid_is_empty(&priv->eid_info[i].eid))
++				continue;
++			ipourma_del_route_rule(priv, &priv->eid_info[i].eid);
++		}
++	}
++}
++
+ STATIC int ipourma_ndo_init(struct net_device *dev)
+ {
+ 	if (IS_ERR_OR_NULL(dev))
+@@ -439,9 +533,55 @@ STATIC void ipourma_netdev_setup(struct net_device *dev)
+ 	netif_keep_dst(dev);
+ }
+ 
++STATIC inline void ipourma_open_dev(struct work_struct *work)
++{
++	struct ipourma_dev_priv *priv = container_of(work, struct ipourma_dev_priv, set_dev_up);
++	struct net_device *dev = priv->dev;
++
++	rtnl_lock();
++	dev_change_flags(dev, dev->flags | IFF_UP, NULL);
++	rtnl_unlock();
++}
++
++STATIC inline void ipourma_init_stats(struct ipourma_dev_priv *priv)
++{
++	memset(&(priv->runtime_stats.tx_stats), 0, sizeof(priv->runtime_stats.tx_stats));
++	memset(&(priv->runtime_stats.rx_stats), 0, sizeof(priv->runtime_stats.rx_stats));
++	spin_lock_init(&(priv->runtime_stats.lock));
++}
++
+ STATIC int ipourma_priv_base_init(struct net_device *dev,
+ 	struct ubcore_device *urma_dev)
+ {
++	struct ipourma_dev_priv *priv = netdev_priv(dev);
++
++	spin_lock_init(&priv->lock);
++	priv->urma_dev = urma_dev;
++	priv->dev = dev;
++	priv->parent = NULL;
++	priv->eid_info = NULL;
++	priv->eid_count = 0;
++	priv->tjetty_lru.count = 0;
++	priv->need_restart_ring = false;
++	priv->tjetty_lru.tjetty_capacity = IPOURMA_DEFAULT_TJETTY_CAP;
++
++	atomic_set(&priv->need_set_ip_route, 1);
++	ipourma_init_stats(priv);
++	INIT_WORK(&(priv->set_dev_up), ipourma_open_dev);
++	INIT_WORK(&(priv->set_ip), ipourma_init_ipv6_addr);
++	INIT_WORK(&(priv->set_route), ipourma_add_route);
++	INIT_WORK(&(priv->unset_route), ipourma_del_route);
++	INIT_WORK(&(priv->set_route_entry), ipourma_add_route_entry);
++	INIT_WORK(&(priv->rx_cr_event), ipourma_rx_cr_event);
++	INIT_WORK(&(priv->register_netdev), ipourma_register_netdev);
++	atomic_set(&priv->rx_jfr_ref, 0);
++	atomic_set(&priv->tx_ring_blocked, 0);
++	spin_lock_init(&priv->tjetty_lru.lock);
++	INIT_LIST_HEAD(&priv->tjetty_lru.list);
++
++	priv->register_wq = alloc_workqueue("ipourma_register_wq", WQ_MEM_RECLAIM, 0);
++	if (IS_ERR_OR_NULL(priv->register_wq))
++		return -1;
+ 	return IPOURMA_OK;
+ }
+ 
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_res.c b/drivers/ub/urma/ulp/ipourma/ipourma_res.c
+index c5b803b23c3c..e94bb2553e99 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_res.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_res.c
+@@ -671,8 +671,20 @@ STATIC struct ubcore_jfc *ipourma_create_jfc(struct net_device *dev,
+ 					     ubcore_comp_callback_t jfce_handler,
+ 					     u32 depth)
+ {
+-	// this function will be filled in the next commit
+-	return NULL;
++	struct ubcore_jfc_cfg jfc_cfg = { 0 };
++	struct ubcore_jfc *jfc = NULL;
++	struct ipourma_dev_priv *priv = netdev_priv(dev);
++
++	jfc_cfg.depth = depth;
++	jfc = ubcore_create_jfc(priv->urma_dev, &jfc_cfg, jfce_handler, NULL, NULL);
++	if (IS_ERR_OR_NULL(jfc)) {
++		netdev_warn(dev, "%s\n", ipourma_err_desc(IPOURMA_CREATE_JFC_FAILED));
++		return NULL;
++	}
++	if (ubcore_rearm_jfc(jfc, false) != 0)
++		netdev_warn(dev, "%s\n", ipourma_err_desc(IPOURMA_REARM_JFC_FAILED));
++
++	return jfc;
+ }
+ 
+ STATIC void ipourma_uninit_misc(struct ipourma_dev_priv *priv)
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_sysfs.c b/drivers/ub/urma/ulp/ipourma/ipourma_sysfs.c
+new file mode 100644
+index 000000000000..473276afea88
+--- /dev/null
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_sysfs.c
+@@ -0,0 +1,472 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
++ *
++ * Description: ipourma sysfs support
++ */
++#include <linux/err.h>
++#include <linux/slab.h>
++#include <linux/mm.h>
++#include <linux/kernel.h>
++
++#include "ipourma_sysfs.h"
++
++// sysfs support for hard_header_len
++STATIC ssize_t hard_header_len_show(struct device *dev,
++	struct device_attribute *attr, char *buf)
++{
++	struct net_device *ndev = to_net_dev(dev);
++
++	return sysfs_emit(buf, "%u\n", ndev->hard_header_len);
++}
++
++STATIC DEVICE_ATTR_RO(hard_header_len);
++
++// sysfs support for urma_mtu
++STATIC ssize_t urma_mtu_show(struct device *dev,
++	struct device_attribute *attr, char *buf)
++{
++	struct net_device *ndev = to_net_dev(dev);
++	struct ipourma_dev_priv *priv = netdev_priv(ndev);
++
++	return sysfs_emit(buf, "%u\n", priv->urma_mtu);
++}
++
++STATIC DEVICE_ATTR_RO(urma_mtu);
++
++// sysfs support for ipourma_tx_ring_size
++STATIC ssize_t ipourma_tx_ring_size_show(struct device *dev,
++	struct device_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%d\n", ipourma_tx_ring_size);
++}
++
++STATIC DEVICE_ATTR_RO(ipourma_tx_ring_size);
++
++// sysfs support for ipourma_rx_ring_size
++STATIC ssize_t ipourma_rx_ring_size_show(struct device *dev,
++	struct device_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%d\n", ipourma_rx_ring_size);
++}
++
++STATIC DEVICE_ATTR_RO(ipourma_rx_ring_size);
++
++/*
++ * Description of status_name:
++ * The size of this array must be equal to IPOURMA_MAX_CR_STATUS
++ * The order of strings must be consistent with the members of ubcore_cr_status in ubcore_opcode.h
++ */
++STATIC const char * const status_names[] = {
++	"SUCCESS",
++	"UNSUPPORTED_OPCODE_ERR",
++	"LOC_LEN_ERR",
++	"LOC_OPERATION_ERR",
++	"LOC_ACCESS_ERR",
++	"REM_RESP_LEN_ERR",
++	"REM_UNSUPPORTED_REQ_ERR",
++	"REM_OPERATION_ERR",
++	"REM_ACCESS_ABORT_ERR",
++	"ACK_TIMEOUT_ERR",
++	"RNR_RETRY_CNT_EXC_ERR",
++	"FLUSH_ERR",
++	"WR_SUSPEND_DONE",
++	"WR_FLUSH_ERR_DONE",
++	"WR_UNHANDLED",
++	"LOC_DATA_POISON",
++	"REM_DATA_POISON"
++};
++_Static_assert(ARRAY_SIZE(status_names) == IPOURMA_MAX_CR_STATUS,
++		"ipourma: the length of status_names mismatch with IPOURMA_MAX_CR_STATUS!");
++
++/*
++ * Sysfs_emit is used to format the attribute string to the buffer and the
++ * return value is checked.Returns of Sysfs_emit in formmer functions are
++ * not checked because there only outputs one attribute.
++ * Here, dozens of attributes are output to one buffer, which may exceed the
++ * value of PAGE_SIZE.Therefore, the return value ret needs to be determined.
++ */
++STATIC ssize_t format_stats(char *buf, struct ipourma_dev_priv *priv, ssize_t buf_size)
++{
++	ssize_t len = 0;
++	ssize_t ret;
++
++	struct ipourma_tx_stats *ptx = &priv->runtime_stats.tx_stats;
++	struct ipourma_rx_stats *prx = &priv->runtime_stats.rx_stats;
++	/*
++	 * The sysfs_emit batch accumulation feature is used to write multiple
++	 * attributes in batches,reducing the number of function invoking times
++	 * and the number of return value judgment.Note that the cqe_status is
++	 * an array whose size is dynamically controlled.Therefore, the cqe_status
++	 * attribute is implemented by cyclic writing.
++	 */
++	ret = sysfs_emit(buf,
++			"==tx_stats==\n"
++			"/* start xmit */\n"
++			"num_recv_pkts_from_kernel: %llu\n"
++			"post_send_enque: %llu\n"
++			"post_send_bypass: %llu\n"
++			"gso_not_support: %llu\n"
++			"packet_size_error: %llu\n"
++			"frag_error: %llu\n"
++			"not_ipv6_proto: %llu\n"
++			"not_ipv6_addr: %llu\n"
++			"ip_eid_not_equal: %llu\n"
++			"tx_ring_full: %llu\n\n"
++			"/* post send */\n"
++			"post_send_start: %llu\n"
++			"num_import_jetty_real: %llu\n"
++			"num_import_jetty_bypass: %llu\n"
++			"num_tjetty_hash_hit: %llu\n"
++			"linear_len_oversize: %llu\n"
++			"import_jetty_failed: %llu\n"
++			"send_wr_failed: %llu\n\n"
++			"/* pass to ub */\n"
++			"pass_to_ub: %llu\n\n"
++			"/* tx cqe notify */\n"
++			"cqe_notify: %llu\n\n"
++			"/* tx poll */\n"
++			"num_napi_tx: %llu\n"
++			"cqe_recved: %llu\n"
++			"cqe_success: %llu\n"
++			"cqe_err: %llu\n"
++			"flush_jetty_success: %llu\n"
++			"+-cqe_status\n",
++			ptx->num_recv_pkts_from_kernel,
++			ptx->post_send_enque,
++			ptx->post_send_bypass,
++			ptx->gso_not_support,
++			ptx->packet_size_error,
++			ptx->frag_error,
++			ptx->not_ipv6_proto,
++			ptx->not_ipv6_addr,
++			ptx->ip_eid_not_equal,
++			ptx->tx_ring_full,
++			ptx->post_send_start,
++			ptx->num_import_jetty_real,
++			ptx->num_import_jetty_bypass,
++			ptx->num_tjetty_hash_hit,
++			ptx->linear_len_oversize,
++			ptx->import_jetty_failed,
++			ptx->send_wr_failed,
++			ptx->pass_to_ub,
++			ptx->cqe_notify,
++			ptx->num_napi_tx,
++			ptx->cqe_recved,
++			ptx->cqe_success,
++			ptx->cqe_err,
++			ptx->flush_jetty_success);
++	if (ret < 0 || ret >= buf_size)
++		goto FORMAT_ERR;
++
++	len += ret;
++	for (int i = 0; i < IPOURMA_MAX_CR_STATUS; i++) {
++		ret = sysfs_emit_at(buf, len, "--%s: %llu\n", status_names[i], ptx->cqe_stats[i]);
++		if (ret < 0 || ret + len >= buf_size)
++			goto FORMAT_ERR;
++		len += ret;
++	}
++
++	ret = sysfs_emit_at(buf, len,
++			"poll_jfc_success: %llu\n"
++			"poll_jfc_failed: %llu\n"
++			"rearm_success: %llu\n"
++			"rearm_failed: %llu\n\n\n"
++			"==rx_stats==\n"
++			"/* rx cqe notify */\n"
++			"cqe_notify: %llu\n\n"
++			"/* rx poll */\n"
++			"num_napi_rx: %llu\n"
++			"rx_enque: %llu\n"
++			"rx_deque: %llu\n"
++			"cqe_recved: %llu\n"
++			"cqe_success: %llu\n"
++			"cqe_err: %llu\n"
++			"+-cqe_status\n",
++			ptx->poll_jfc_success,
++			ptx->poll_jfc_failed,
++			ptx->rearm_success,
++			ptx->rearm_failed,
++			prx->cqe_notify,
++			prx->num_napi_rx,
++			prx->rx_enque,
++			prx->rx_deque,
++			prx->cqe_recved,
++			prx->cqe_success,
++			prx->cqe_err);
++	if (ret < 0 || ret + len >= buf_size)
++		goto FORMAT_ERR;
++	len += ret;
++
++	for (int i = 0; i < IPOURMA_MAX_CR_STATUS; i++) {
++		ret = sysfs_emit_at(buf, len, "--%s: %llu\n", status_names[i], prx->cqe_stats[i]);
++		if (ret < 0 || ret + len >= buf_size)
++			goto FORMAT_ERR;
++		len += ret;
++	}
++
++	ret = sysfs_emit_at(buf, len,
++		"poll_jfc_success: %llu\n"
++		"poll_jfc_failed: %llu\n"
++		"rearm_success: %llu\n"
++		"rearm_failed: %llu\n"
++		"cr_len_err: %llu\n"
++		"replenish_enque: %llu\n\n\n"
++		"/* pass to kernel */\n"
++		"pass_to_kernel: %llu\n\n"
++		"/* replenish */\n"
++		"replenish_deque: %llu\n"
++		"num_post_wr: %llu\n"
++		"alloc_skb_failed: %llu\n"
++		"register_seg_failed: %llu\n"
++		"post_wr_failed: %llu\n",
++		prx->poll_jfc_success,
++		prx->poll_jfc_failed,
++		prx->rearm_success,
++		prx->rearm_failed,
++		prx->cr_len_err,
++		prx->replenish_enque,
++		prx->pass_to_kernel,
++		prx->replenish_deque,
++		prx->num_post_wr,
++		prx->alloc_skb_failed,
++		prx->register_seg_failed,
++		prx->post_wr_failed);
++	if (ret < 0 || ret + len >= buf_size)
++		goto FORMAT_ERR;
++
++	len += ret;
++	return len;
++
++FORMAT_ERR:
++	pr_err("%s: format stats failed\n", __func__);
++	return 0;
++}
++
++STATIC ssize_t query_ipourma_stats_show(struct device *dev,
++	struct device_attribute *attr, char *buf)
++{
++	struct net_device *ndev = to_net_dev(dev);
++	struct ipourma_dev_priv *priv = netdev_priv(ndev);
++	ssize_t len;
++
++	spin_lock(&priv->runtime_stats.lock);
++	len = format_stats(buf, priv, (ssize_t)PAGE_SIZE);
++	spin_unlock(&priv->runtime_stats.lock);
++
++	return len;
++}
++
++STATIC DEVICE_ATTR_RO(query_ipourma_stats);
++
++
++#define INPUT_BUF_SIZE (sizeof(RESET_CMD) + 1)
++
++STATIC ssize_t reset_ipourma_stats_store(struct device *dev,
++	struct device_attribute *attr, const char *buf, size_t count)
++{
++	char input_buf[INPUT_BUF_SIZE] = {0};
++	const size_t reset_cmd_len = INPUT_BUF_SIZE - 2;
++
++	strscpy(input_buf, buf, INPUT_BUF_SIZE);
++	input_buf[INPUT_BUF_SIZE - 1] = '\0';
++
++	char *newline = strchr(input_buf, '\n');
++
++	if (newline != NULL)
++		*newline = '\0';
++	const size_t input_len = strlen(input_buf);
++	/* judge the input length to exclude the case where the prefix is the same */
++	if (input_len == reset_cmd_len && strncmp(input_buf, RESET_CMD, reset_cmd_len) == 0) {
++		struct net_device *ndev = to_net_dev(dev);
++		struct ipourma_dev_priv *priv = netdev_priv(ndev);
++
++		spin_lock(&priv->runtime_stats.lock);
++		memset(&priv->runtime_stats.tx_stats, 0, sizeof(struct ipourma_tx_stats));
++		memset(&priv->runtime_stats.rx_stats, 0, sizeof(struct ipourma_rx_stats));
++		spin_unlock(&priv->runtime_stats.lock);
++		return count;
++	}
++	return -EINVAL;
++}
++STATIC DEVICE_ATTR_WO(reset_ipourma_stats);
++
++STATIC ssize_t max_concurrent_conn_show(struct device *dev,
++	struct device_attribute *attr, char *buf)
++{
++	struct net_device *ndev = to_net_dev(dev);
++	struct ipourma_dev_priv *priv = netdev_priv(ndev);
++	int ret, current_cap;
++
++	spin_lock(&priv->tjetty_lru.lock);
++	current_cap = priv->tjetty_lru.tjetty_capacity;
++	spin_unlock(&priv->tjetty_lru.lock);
++
++	ret = sysfs_emit(buf, "%d\n", current_cap);
++
++	return ret;
++}
++
++STATIC ssize_t max_concurrent_conn_store(struct device *dev,
++	struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct net_device *ndev = to_net_dev(dev);
++	struct ipourma_dev_priv *priv = netdev_priv(ndev);
++	int new_capacity = 0;
++	int ret;
++
++	/*
++	 * The input para '0' means the system automatically indentifies the number entered
++	 * prefix: '0x'--hexadecimal, '0'--octal, others--decimal format
++	 */
++	ret = kstrtoint(buf, 0, &new_capacity);
++	/* The new value must be between IPOURMA_JFS_DEPTH and IPOURMA_TX_JFC_DEPTH */
++	if (ret != 0 || new_capacity < IPOURMA_JFS_DEPTH || new_capacity > IPOURMA_TX_JFC_DEPTH) {
++		pr_err("%s: invalid input!\n", __func__);
++		return -EINVAL;
++	}
++
++	spin_lock(&priv->tjetty_lru.lock);
++	priv->tjetty_lru.tjetty_capacity = new_capacity;
++	spin_unlock(&priv->tjetty_lru.lock);
++
++	return count;
++}
++STATIC DEVICE_ATTR_RW(max_concurrent_conn);
++
++STATIC ssize_t tjetty_aging_timeout_s_show(struct device *dev,
++	struct device_attribute *attr, char *buf)
++{
++	struct net_device *ndev = to_net_dev(dev);
++	struct ipourma_dev_priv *priv = netdev_priv(ndev);
++	uint16_t current_timeout;
++	int ret;
++
++	spin_lock(&priv->tjetty_lru.lock);
++	current_timeout = priv->tjetty_lru.tjetty_aging_timeout_s;
++	spin_unlock(&priv->tjetty_lru.lock);
++
++	ret = sysfs_emit(buf, "%hu\n", current_timeout);
++
++	return ret;
++}
++
++STATIC ssize_t tjetty_aging_timeout_s_store(struct device *dev,
++	struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct net_device *ndev = to_net_dev(dev);
++	struct ipourma_dev_priv *priv = netdev_priv(ndev);
++	uint16_t current_timeout, current_interval;
++	int ret;
++
++	ret = kstrtou16(buf, 0, &current_timeout);
++	if (ret != 0) {
++		pr_err("%s: invalid input! ret = %d\n", __func__, ret);
++		return -EINVAL;
++	}
++
++	spin_lock(&priv->tjetty_lru.lock);
++	current_interval = priv->tjetty_lru.tjetty_aging_interval_s;
++	spin_unlock(&priv->tjetty_lru.lock);
++	if (current_timeout < current_interval) {
++		pr_err("%s: invalid input! tjetty_aging_timeout_s should be in [%u,%d]\n",
++			__func__, current_interval, IPOURMA_TJETTY_TIMEOUT_MAX);
++		return -EINVAL;
++	}
++
++	spin_lock(&priv->tjetty_lru.lock);
++	priv->tjetty_lru.tjetty_aging_timeout_s = current_timeout;
++	spin_unlock(&priv->tjetty_lru.lock);
++
++	return count;
++}
++STATIC DEVICE_ATTR_RW(tjetty_aging_timeout_s);
++
++STATIC ssize_t tjetty_aging_interval_s_show(struct device *dev,
++	struct device_attribute *attr, char *buf)
++{
++	struct net_device *ndev = to_net_dev(dev);
++	struct ipourma_dev_priv *priv = netdev_priv(ndev);
++	uint16_t current_interval;
++	int ret;
++
++	spin_lock(&priv->tjetty_lru.lock);
++	current_interval = priv->tjetty_lru.tjetty_aging_interval_s;
++	spin_unlock(&priv->tjetty_lru.lock);
++
++	ret = sysfs_emit(buf, "%hu\n", current_interval);
++
++	return ret;
++}
++
++STATIC ssize_t tjetty_aging_interval_s_store(struct device *dev,
++	struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct net_device *ndev = to_net_dev(dev);
++	struct ipourma_dev_priv *priv = netdev_priv(ndev);
++	struct delayed_work *work = &priv->tjetty_lru.tjetty_aging_work;
++	uint16_t current_interval, current_timeout;
++	int ret;
++
++	ret = kstrtou16(buf, 0, &current_interval);
++	if (ret != 0) {
++		pr_err("%s: invalid input! ret = %d\n", __func__, ret);
++		return -EINVAL;
++	}
++
++	spin_lock(&priv->tjetty_lru.lock);
++	current_timeout = priv->tjetty_lru.tjetty_aging_timeout_s;
++	spin_unlock(&priv->tjetty_lru.lock);
++	if (current_interval < 1 || current_interval > current_timeout) {
++		pr_err("%s: invalid input! tjetty_aging_interval_s should be in [%d,%u]\n",
++			__func__, 1, current_timeout);
++		return -EINVAL;
++	}
++
++	spin_lock(&priv->tjetty_lru.lock);
++	priv->tjetty_lru.tjetty_aging_interval_s = current_interval;
++	spin_unlock(&priv->tjetty_lru.lock);
++
++	cancel_delayed_work_sync(work);
++	schedule_delayed_work(work, msecs_to_jiffies((u32)current_interval * MSEC_PER_SEC));
++
++	return count;
++}
++STATIC DEVICE_ATTR_RW(tjetty_aging_interval_s);
++
++STATIC struct device_attribute *ipourma_attrs[] = {
++	&dev_attr_hard_header_len,
++	&dev_attr_urma_mtu,
++	&dev_attr_ipourma_tx_ring_size,
++	&dev_attr_ipourma_rx_ring_size,
++	&dev_attr_query_ipourma_stats,
++	&dev_attr_reset_ipourma_stats,
++	&dev_attr_max_concurrent_conn,
++	&dev_attr_tjetty_aging_timeout_s,
++	&dev_attr_tjetty_aging_interval_s,
++	NULL
++};
++
++void ipourma_register_sysfs(struct ipourma_dev_priv *pos)
++{
++	int i, ret;
++
++	for (i = 0; ipourma_attrs[i] != NULL; i++) {
++		ret = device_create_file(&pos->dev->dev, ipourma_attrs[i]);
++		if (ret) {
++			pr_err("%s: Failed to create sysfs attribute:%d\n", __func__, i);
++			// delete former created attributes
++			while (--i >= 0)
++				device_remove_file(&pos->dev->dev, ipourma_attrs[i]);
++			break;
++		}
++	}
++}
++
++void ipourma_unregister_sysfs(struct ipourma_dev_priv *pos)
++{
++	int i;
++
++	for (i = 0; ipourma_attrs[i] != NULL; i++)
++		device_remove_file(&pos->dev->dev, ipourma_attrs[i]);
++}
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_sysfs.h b/drivers/ub/urma/ulp/ipourma/ipourma_sysfs.h
+new file mode 100644
+index 000000000000..2e741b0c767a
+--- /dev/null
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_sysfs.h
+@@ -0,0 +1,18 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) Huawei Technologies Co., Ltd. 2021-2025. All rights reserved.
++ *
++ * Description: Functions definition of ipourma_sysfs
++ */
++
++#ifndef _IPOURMA_SYSFS_H
++#define _IPOURMA_SYSFS_H
++
++#include "ipourma_types.h"
++
++#define RESET_CMD "reset all status"
++
++void ipourma_register_sysfs(struct ipourma_dev_priv *pos);
++void ipourma_unregister_sysfs(struct ipourma_dev_priv *pos);
++
++#endif
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_types.h b/drivers/ub/urma/ulp/ipourma/ipourma_types.h
+index 1f2449cc628d..beb2cb13027b 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_types.h
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_types.h
+@@ -306,6 +306,7 @@ struct ipourma_dev_priv {
+ 	spinlock_t *tx_ring_locks;
+ 	struct dentry *address_dentry;
+ 	atomic_t need_set_ip_route;
++	bool need_restart_ring;
+ 	struct workqueue_struct *net_config_wq;
+ 	struct work_struct set_dev_up;
+ 	struct work_struct set_ip;
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_ub.c b/drivers/ub/urma/ulp/ipourma/ipourma_ub.c
+index 476cf04c0fa4..b67e160ff107 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_ub.c
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_ub.c
+@@ -95,21 +95,59 @@ STATIC inline uint32_t hash_eids(union ubcore_eid *src_eid,
+ 				 union ubcore_eid *dst_eid,
+ 				 uint32_t hash_seed)
+ {
+-	// this function will be filled in the next commit
+-	return 0;
++	/* 2 * UBCORE_EID_SIZE / sizeof(uint32_t) */
++	u32 num_u32 = UBCORE_EID_SIZE >> 1;
++	u32 key[UBCORE_EID_SIZE >> 1];
++
++	memcpy(key, src_eid, UBCORE_EID_SIZE);
++	memcpy(key + (num_u32 >> 1), dst_eid, UBCORE_EID_SIZE);
++
++	return jhash2((const u32 *)key, num_u32, hash_seed);
++}
++
++STATIC inline void ipourma_build_tjetty_cfg(struct ubcore_tjetty_cfg *tjetty_cfg,
++	union ubcore_eid *dst_eid, uint32_t jetty_id, uint32_t eid_idx, uint32_t ctp_en)
++{
++	tjetty_cfg->id.eid = *dst_eid;
++	tjetty_cfg->id.id = jetty_id;
++	tjetty_cfg->flag.bs.token_policy = UBCORE_TOKEN_NONE;
++	tjetty_cfg->tp_type = ctp_en ? UBCORE_CTP : UBCORE_UTP;
++	tjetty_cfg->trans_mode = ctp_en ? UBCORE_TP_RM : UBCORE_TP_UM;
++	tjetty_cfg->type = UBCORE_JETTY;
++	tjetty_cfg->eid_index = eid_idx;
+ }
+ 
+ STATIC struct ubcore_tjetty *ipourma_import_jetty(struct net_device *dev,
+ 	union ubcore_eid *dst_eid, uint32_t jetty_id)
+ {
+-	// this function will be filled in the next commit
+-	return NULL;
++	u32 eid_index = jetty_id - IPOURMA_WELL_KNOWN_JETTY_ID;
++	struct ipourma_dev_priv *priv = netdev_priv(dev);
++	struct ubcore_device *urma_dev = priv->urma_dev;
++	struct ubcore_tjetty_cfg tjetty_cfg = { 0 };
++	struct ubcore_tjetty *tjetty;
++	uint32_t ctp_en;
++
++	ctp_en = urma_dev->attr.dev_cap.feature.bs.ctp_en;
++
++	ipourma_build_tjetty_cfg(&tjetty_cfg, dst_eid, jetty_id, eid_index, ctp_en);
++	tjetty = ubcore_import_jetty(urma_dev, &tjetty_cfg, NULL);
++	if (IS_ERR_OR_NULL(tjetty)) {
++		netdev_dbg(dev, "%s: dst EID = 0x%llx-0x%llx\n",
++					ipourma_err_desc(IPOURMA_IMPORT_JETTY_FAILED),
++					dst_eid->in6.subnet_prefix,
++					dst_eid->in6.interface_id);
++		return NULL;
++	}
++
++	return tjetty;
+ }
+ 
+ STATIC inline void ipourma_renew_tjetty_node(struct ipourma_tjetty_lru *tjetty_lru,
+ 					  struct ipourma_tjetty_hash_node *tjetty_node)
+ {
+-	// this function will be filled in the next commit
++	list_del(&tjetty_node->lru_list);
++	list_add(&tjetty_node->lru_list, &tjetty_lru->list);
++	tjetty_node->last_jiffies = get_jiffies_64();
+ }
+ 
+ STATIC struct ipourma_tjetty_hash_node *ipourma_locate_tjetty_node(
+@@ -142,7 +180,18 @@ STATIC struct ipourma_tjetty_hash_node *ipourma_locate_tjetty_node(
+ STATIC void ipourma_insert_tjetty_node(struct ipourma_tjetty_lru *tjetty_lru,
+ 					struct ipourma_tjetty_hash_node *tjetty_node)
+ {
+-	// this function will be filled in the next commit
++	struct ipourma_tjetty_hmap *tjetty_hmap = &tjetty_lru->tjetty_hmap;
++	uint32_t hash_seed = tjetty_hmap->hash_seed;
++	/* newly imported jetty has been checked before the calling of insert function */
++	uint32_t hash_key = hash_eids(&tjetty_node->key[0], &tjetty_node->key[1], hash_seed);
++
++	hash_key = hash_key & (IPOURMA_TJETTY_HMAP_SIZE - 1);
++	spin_lock(&tjetty_lru->lock);
++	hlist_add_head(&tjetty_node->hlist, &tjetty_hmap->buckets[hash_key]);
++	list_add(&tjetty_node->lru_list, &tjetty_lru->list);
++	tjetty_lru->count++;
++	tjetty_node->last_jiffies = get_jiffies_64();
++	spin_unlock(&tjetty_lru->lock);
+ }
+ 
+ STATIC inline void ipourma_delete_tjetty_node(struct ipourma_tjetty_hash_node *tjetty_node)
+@@ -183,7 +232,10 @@ void ipourma_lru_clear(struct ipourma_tjetty_lru *tjetty_lru)
+ STATIC void ipourma_lru_update(struct ipourma_tjetty_lru *tjetty_lru,
+ 				struct ipourma_tjetty_hash_node *tjetty_node)
+ {
+-	// this function will be filled in the next commit
++	spin_lock(&tjetty_lru->lock);
++	while (tjetty_lru->count > tjetty_lru->tjetty_capacity)
++		ipourma_lru_del_tail(tjetty_lru, true);
++	spin_unlock(&tjetty_lru->lock);
+ }
+ 
+ STATIC void tjetty_aging_callback(struct work_struct *work)
+@@ -235,7 +287,11 @@ void ipourma_init_tjetty_aging_work(struct ipourma_tjetty_lru *tjetty_lru)
+ 
+ STATIC void ipourma_unimport_tjetty_cb(struct work_struct *work)
+ {
+-	// this function will be filled in the next commit
++	struct ipourma_tjetty_hash_node *tjetty_node = NULL;
++
++	tjetty_node = container_of(work, struct ipourma_tjetty_hash_node, unimport_work);
++	ubcore_unimport_jetty(tjetty_node->tjetty);
++	kfree(tjetty_node);
+ }
+ 
+ STATIC struct ubcore_tjetty *ipourma_import_new_tjetty(
+@@ -647,36 +703,6 @@ void ipourma_replenish_segments(struct work_struct *work)
+ 		ipourma_urma_post_recv(priv->dev, rx_buf->eid_index, rx_buf->idx);
+ }
+ 
+-int ipourma_napi_tx_poll(struct napi_struct *napi, int budget)
+-{
+-	// this function will be filled in the next commit
+-	return 0;
+-}
+-
+-int ipourma_napi_rx_poll(struct napi_struct *napi, int budget)
+-{
+-	// this function will be filled in the next commit
+-	return 0;
+-}
+-
+-STATIC void ipourma_napi_add(struct net_device *dev)
+-{
+-	struct ipourma_dev_priv *priv = netdev_priv(dev);
+-
+-	netif_napi_add_weight(dev, &priv->napi_send, ipourma_napi_tx_poll,
+-						  IPOURMA_NAPI_TX_WEIGHT);
+-	netif_napi_add_weight(dev, &priv->napi_recv, ipourma_napi_rx_poll,
+-						  IPOURMA_NAPI_RX_WEIGHT);
+-}
+-
+-STATIC inline void ipourma_napi_del(struct net_device *dev)
+-{
+-	struct ipourma_dev_priv *priv = netdev_priv(dev);
+-
+-	netif_napi_del(&priv->napi_send);
+-	netif_napi_del(&priv->napi_recv);
+-}
+-
+ int ipourma_urma_init_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx)
+ {
+ 	int ret;
+@@ -702,45 +728,6 @@ int ipourma_urma_init_by_eid(struct ipourma_dev_priv *priv, u32 eid_idx)
+ 	return ret;
+ }
+ 
+-void ipourma_handle_rx_cqe(struct ubcore_jfc *jfc)
+-{
+-	// this function will be filled in the next commit
+-}
+-
+-void ipourma_handle_tx_cqe(struct ubcore_jfc *jfc)
+-{
+-	// this function will be filled in the next commit
+-}
+-
+-int ipourma_urma_dev_init(struct net_device *dev)
+-{
+-	int ret;
+-
+-	ipourma_napi_add(dev);
+-	ret = ipourma_init_rings(dev);
+-	if (ret != IPOURMA_OK)
+-		goto init_rings_failed;
+-
+-	ret = ipourma_init_urma_resources(dev);
+-	if (ret != IPOURMA_OK)
+-		goto init_urma_res_failed;
+-
+-	return ret;
+-init_urma_res_failed:
+-	ipourma_uninit_rings(dev);
+-init_rings_failed:
+-	ipourma_napi_del(dev);
+-	return ret;
+-}
+-
+-void ipourma_urma_dev_uninit(struct net_device *dev)
+-{
+-	ipourma_uninit_tjetty_hmap(dev);
+-	ipourma_uninit_urma_resources(dev);
+-	ipourma_uninit_rings(dev);
+-	ipourma_napi_del(dev);
+-}
+-
+ STATIC void ipourma_do_handle_tx_wc(struct net_device *dev,
+ 	struct ipourma_dev_priv *priv, u32 eid_idx, u32 idx, struct ubcore_cr *cr)
+ {
+@@ -881,3 +868,161 @@ void ipourma_handle_rx_wc(struct net_device *dev,
+ 	}
+ 	ipourma_do_handle_rx_wc(dev, priv, eid_idx, idx, cr);
+ }
++
++void ipourma_rx_cr_event(struct work_struct *work)
++{
++	struct ipourma_dev_priv *priv = container_of(work, struct ipourma_dev_priv, rx_cr_event);
++	int done = 0, budget = IPOURMA_NAPI_RX_WEIGHT;
++	int left, max_num, actual_num, i, ret;
++	struct net_device *dev = priv->dev;
++
++	priv->runtime_stats.rx_stats.rx_deque++;
++	while (done < budget) {
++		left = budget - done;
++		/* DO NOT exceed the weight */
++		max_num = min(IPOURMA_NAPI_RX_WEIGHT, left);
++		actual_num = ubcore_poll_jfc(priv->rx_jfc, max_num, priv->rx_cr);
++		/* actual_num may be < 0, but it's OK to break the loop a little later */
++		if (unlikely(actual_num < 0)) {
++			priv->runtime_stats.rx_stats.poll_jfc_failed++;
++			netdev_dbg(dev, "%s:%d\n", ipourma_err_desc(IPOURMA_POLL_JFC_FAILED),
++					actual_num);
++			break;
++		}
++		priv->runtime_stats.rx_stats.poll_jfc_success++;
++		for (i = 0; i < actual_num; i++) {
++			ipourma_handle_rx_wc(dev, priv, &priv->rx_cr[i]);
++			done++;
++			priv->runtime_stats.rx_stats.cqe_recved++;
++		}
++		if (actual_num != max_num) {
++			/* actual_num < 0 or no more crs to poll */
++			break;
++		}
++	}
++	ret = ubcore_rearm_jfc(priv->rx_jfc, false);
++	if (unlikely(ret != 0)) {
++		priv->runtime_stats.rx_stats.rearm_failed++;
++		netdev_dbg(dev, "%s:%d\n",
++					ipourma_err_desc(IPOURMA_REARM_JFC_FAILED), ret);
++	} else
++		priv->runtime_stats.rx_stats.rearm_success++;
++}
++
++void ipourma_handle_tx_cqe(struct ubcore_jfc *jfc)
++{
++	struct ipourma_dev_priv *priv = ubcore_get_client_ctx_data(
++		jfc->ub_dev, &g_ipourma_ubcore_client);
++
++	if (IS_ERR_OR_NULL(priv))
++		return;
++	priv->runtime_stats.tx_stats.cqe_notify++;
++	napi_schedule(&priv->napi_send);
++}
++
++void ipourma_handle_rx_cqe(struct ubcore_jfc *jfc)
++{
++	struct ipourma_dev_priv *priv = ubcore_get_client_ctx_data(
++		jfc->ub_dev, &g_ipourma_ubcore_client);
++
++	if (IS_ERR_OR_NULL(priv))
++		return;
++	priv->runtime_stats.rx_stats.cqe_notify++;
++	napi_schedule(&priv->napi_recv);
++}
++
++int ipourma_napi_tx_poll(struct napi_struct *napi, int budget)
++{
++	struct ipourma_dev_priv *priv =
++		container_of(napi, struct ipourma_dev_priv, napi_send);
++	struct net_device *dev = priv->dev;
++	int actual_num, i, ret;
++
++	priv->runtime_stats.tx_stats.num_napi_tx++;
++	actual_num = ubcore_poll_jfc(priv->tx_jfc, IPOURMA_NAPI_TX_WEIGHT, priv->tx_cr);
++	if (unlikely(actual_num < 0)) {
++		priv->runtime_stats.tx_stats.poll_jfc_failed++;
++		netdev_dbg(dev, "%s:%d\n", ipourma_err_desc(IPOURMA_POLL_JFC_FAILED),
++					actual_num);
++	} else
++		priv->runtime_stats.tx_stats.poll_jfc_success++;
++	for (i = 0; i < actual_num; i++) {
++		priv->runtime_stats.tx_stats.cqe_recved++;
++		ipourma_handle_tx_wc(dev, priv, &priv->tx_cr[i]);
++	}
++
++	if (actual_num < budget) {
++		/* no more crs to poll */
++		napi_complete(napi);
++	}
++	ret = ubcore_rearm_jfc(priv->tx_jfc, false);
++	if (unlikely(ret != 0)) {
++		priv->runtime_stats.tx_stats.rearm_failed++;
++		netdev_dbg(dev, "%s:%d\n",
++					ipourma_err_desc(IPOURMA_REARM_JFC_FAILED), ret);
++	} else
++		priv->runtime_stats.tx_stats.rearm_success++;
++
++	/* used up the budget, return w/o calling napi_complete */
++	return actual_num;
++}
++
++int ipourma_napi_rx_poll(struct napi_struct *napi, int budget)
++{
++	struct ipourma_dev_priv *priv =
++		container_of(napi, struct ipourma_dev_priv, napi_recv);
++
++	priv->runtime_stats.rx_stats.num_napi_rx++;
++	priv->runtime_stats.rx_stats.rx_enque++;
++	queue_work(priv->rx_wq, &(priv->rx_cr_event));
++	napi_complete(napi);
++
++	return 0;
++}
++
++STATIC void ipourma_napi_add(struct net_device *dev)
++{
++	struct ipourma_dev_priv *priv = netdev_priv(dev);
++
++	netif_napi_add_weight(dev, &priv->napi_send, ipourma_napi_tx_poll,
++						  IPOURMA_NAPI_TX_WEIGHT);
++	netif_napi_add_weight(dev, &priv->napi_recv, ipourma_napi_rx_poll,
++						  IPOURMA_NAPI_RX_WEIGHT);
++}
++
++STATIC inline void ipourma_napi_del(struct net_device *dev)
++{
++	struct ipourma_dev_priv *priv = netdev_priv(dev);
++
++	netif_napi_del(&priv->napi_send);
++	netif_napi_del(&priv->napi_recv);
++}
++
++int ipourma_urma_dev_init(struct net_device *dev)
++{
++	int ret;
++
++	ipourma_napi_add(dev);
++	ret = ipourma_init_rings(dev);
++	if (ret != IPOURMA_OK)
++		goto init_rings_failed;
++
++	ret = ipourma_init_urma_resources(dev);
++	if (ret != IPOURMA_OK)
++		goto init_urma_res_failed;
++
++	return ret;
++init_urma_res_failed:
++	ipourma_uninit_rings(dev);
++init_rings_failed:
++	ipourma_napi_del(dev);
++	return ret;
++}
++
++void ipourma_urma_dev_uninit(struct net_device *dev)
++{
++	ipourma_uninit_tjetty_hmap(dev);
++	ipourma_uninit_urma_resources(dev);
++	ipourma_uninit_rings(dev);
++	ipourma_napi_del(dev);
++}
+diff --git a/drivers/ub/urma/ulp/ipourma/ipourma_ub.h b/drivers/ub/urma/ulp/ipourma/ipourma_ub.h
+index 5fab230f1192..4d8a64e61b71 100644
+--- a/drivers/ub/urma/ulp/ipourma/ipourma_ub.h
++++ b/drivers/ub/urma/ulp/ipourma/ipourma_ub.h
+@@ -27,6 +27,7 @@ int ipourma_register_rx_segments(struct net_device *dev,
+ 	struct ubcore_seg_cfg *cfg, struct ipourma_rx_buf *rx_req);
+ int ipourma_urma_post_recv(struct net_device *dev, u32 eid_idx, u32 idx);
+ void ipourma_replenish_segments(struct work_struct *work);
++void ipourma_rx_cr_event(struct work_struct *work);
+ void ipourma_handle_tx_wc(struct net_device *dev,
+ 			  struct ipourma_dev_priv *priv,
+ 			  struct ubcore_cr *cr);
+-- 
+2.43.0
+
