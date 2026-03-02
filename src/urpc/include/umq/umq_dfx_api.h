@@ -87,16 +87,15 @@ int umq_stats_perf_start(void);
 int umq_stats_perf_stop(void);
 
 /**
+ * Thread safety function
  * Convert the perf statistics result to a string.
  * @param[in] umq_perf_stats: perf statistical results
- * @param[in] perf_stats_cfg: perf statistical results
- * @param[in] umq_perf_stats_buf: perf statistical results
- * @param[in] buf_szie: perf statistical results
+ * @param[in] buf: buffer to store the string
+ * @param[in] max_buf_szie: length of the buffer
  * Return string len on success, the length of the character to be written.
  * -UMQ_ERR_EINVAL: Invalid parameter
  */
-int umq_stats_perf_to_string(umq_perf_stats_t *umq_perf_stats, umq_perf_stats_cfg_t *perf_stats_cfg,
-    char *umq_perf_stats_buf, uint32_t buf_szie);
+int umq_stats_perf_to_string(umq_perf_stats_t *umq_perf_stats, char *buf, int max_buf_szie);
 
 #ifdef __cplusplus
 }

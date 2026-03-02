@@ -1062,6 +1062,7 @@ void umq_notify(uint64_t umqh)
 
 int umq_rearm_interrupt(uint64_t umqh, bool solicated, umq_interrupt_option_t *option)
 {
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
     umq_t *umq = (umq_t *)(uintptr_t)umqh;
 
     if (option == NULL || (umq == NULL) || (umq->umqh_tp == UMQ_INVALID_HANDLE) || (umq->tp_ops == NULL) ||
@@ -1070,11 +1071,14 @@ int umq_rearm_interrupt(uint64_t umqh, bool solicated, umq_interrupt_option_t *o
         return -UMQ_ERR_EINVAL;
     }
 
-    return umq->tp_ops->umq_tp_rearm_interrupt(umq->umqh_tp, solicated, option);
+    int ret = umq->tp_ops->umq_tp_rearm_interrupt(umq->umqh_tp, solicated, option);
+    umq_perf_record_write_interrupt_with_direction(UMQ_PERF_RECORD_REARM_TX, start_timestamp, option->direction);
+    return ret;
 }
 
 int32_t umq_wait_interrupt(uint64_t wait_umqh, int time_out, umq_interrupt_option_t *option)
 {
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
     umq_t *umq = (umq_t *)(uintptr_t)wait_umqh;
 
     if (option == NULL || (umq == NULL) || (umq->umqh_tp == UMQ_INVALID_HANDLE) || (umq->tp_ops == NULL) ||
@@ -1083,11 +1087,14 @@ int32_t umq_wait_interrupt(uint64_t wait_umqh, int time_out, umq_interrupt_optio
         return -UMQ_ERR_EINVAL;
     }
 
-    return umq->tp_ops->umq_tp_wait_interrupt(umq->umqh_tp, time_out, option);
+    int32_t ret = umq->tp_ops->umq_tp_wait_interrupt(umq->umqh_tp, time_out, option);
+    umq_perf_record_write_interrupt_with_direction(UMQ_PERF_RECORD_WAIT_TX, start_timestamp, option->direction);
+    return ret;
 }
 
 void umq_ack_interrupt(uint64_t umqh, uint32_t nevents, umq_interrupt_option_t *option)
 {
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
     umq_t *umq = (umq_t *)(uintptr_t)umqh;
 
     if (option == NULL || (umq == NULL) || (umq->umqh_tp == UMQ_INVALID_HANDLE) || (umq->tp_ops == NULL) ||
@@ -1096,7 +1103,8 @@ void umq_ack_interrupt(uint64_t umqh, uint32_t nevents, umq_interrupt_option_t *
         return;
     }
 
-    return umq->tp_ops->umq_tp_ack_interrupt(umq->umqh_tp, nevents, option);
+    umq->tp_ops->umq_tp_ack_interrupt(umq->umqh_tp, nevents, option);
+    umq_perf_record_write_interrupt_with_direction(UMQ_PERF_RECORD_ACK_TX, start_timestamp, option->direction);
 }
 
 int umq_buf_split(umq_buf_t *head, umq_buf_t *node)

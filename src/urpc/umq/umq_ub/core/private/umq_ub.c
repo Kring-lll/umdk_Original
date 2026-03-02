@@ -2682,7 +2682,9 @@ int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
     }
 
     urma_jfc_t *temp_jfc[jfc_cnt];
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
     int p_num = urma_wait_jfc(jfr_jfce, jfc_cnt, time_out, temp_jfc);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_WAIT_RX, start_timestamp);
     if (p_num <= 0) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_wait_jfc for rx failed, status: %d"
             "\n", EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
@@ -2700,7 +2702,9 @@ int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
             queue->interrupt_ctx.rx_fc_interrupt = true;
         }
     }
+    start_timestamp = umq_perf_get_start_timestamp();
     urma_ack_jfc(temp_jfc, nevents, p_num);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_ACK_RX, start_timestamp);
     return p_num;
 }
 
@@ -2712,7 +2716,9 @@ int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
     }
 
     urma_jfc_t *temp_jfc[jfc_cnt];
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
     int p_num = urma_wait_jfc(queue->jfs_jfce, jfc_cnt, time_out, temp_jfc);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_WAIT_TX, start_timestamp);
     if (p_num <= 0) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_wait_jfc for tx failed, status: %d"
             "\n", EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
@@ -2729,7 +2735,9 @@ int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
             queue->interrupt_ctx.tx_fc_interrupt = true;
         }
     }
+    start_timestamp = umq_perf_get_start_timestamp();
     urma_ack_jfc(temp_jfc, nevents, p_num);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_ACK_TX, start_timestamp);
     return p_num;
 }
 

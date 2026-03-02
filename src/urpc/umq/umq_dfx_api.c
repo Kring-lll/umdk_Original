@@ -98,8 +98,7 @@ int umq_stats_perf_stop(void)
     return umq_perf_stop();
 }
 
-int umq_stats_perf_to_string(umq_perf_stats_t *umq_perf_stats, umq_perf_stats_cfg_t *perf_stats_cfg,
-    char *umq_perf_stats_buf, uint32_t buf_szie)
+int umq_stats_perf_to_string(umq_perf_stats_t *umq_perf_stats, char *buf, int max_buf_szie)
 {
-    return umq_perf_info_to_string(umq_perf_stats, perf_stats_cfg, umq_perf_stats_buf, buf_szie);
+    return umq_perf_info_to_string(umq_perf_stats, buf, max_buf_szie);
 }
