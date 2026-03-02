@@ -24,9 +24,11 @@
 #define UMQ_MAX_QBUF_NUM 1
 #define UMQ_ENABLE_INLINE_LIMIT_SIZE 32
 #define UMQ_INLINE_ENABLE 1
+#define UMQ_MAX_PRIORITY 15
 
 static util_id_allocator_t g_umq_ub_id_allocator = {0};
 static ub_queue_ctx_list_t g_umq_ub_queue_ctx_list;
+static const char *g_umq_ub_tp_type_str[UMQ_TP_TYPE_MAX + 1] = {"rtp", "ctp", "utp", "unknown"};
 
 static inline uint32_t umq_ub_bind_fature_allowlist_get(void)
 {
@@ -892,6 +894,20 @@ static urma_tp_type_t umq_tp_type_convert(umq_tp_type_t tp_type)
     };
 }
 
+static umq_tp_type_t umq_tp_type_get(union urma_tp_type_en tp_type)
+{
+    if (tp_type.bs.rtp == 1 && tp_type.bs.ctp == 0 && tp_type.bs.utp == 0) {
+        return UMQ_TP_TYPE_RTP;
+    }
+    if (tp_type.bs.rtp == 0 && tp_type.bs.ctp == 1 && tp_type.bs.utp == 0) {
+        return UMQ_TP_TYPE_CTP;
+    }
+    if (tp_type.bs.rtp == 0 && tp_type.bs.ctp == 0 && tp_type.bs.utp == 1) {
+        return UMQ_TP_TYPE_UTP;
+    }
+    return UMQ_TP_TYPE_MAX;
+}
+
 int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_queue_t *queue)
 {
     if (option->create_flag & UMQ_CREATE_FLAG_RX_BUF_SIZE) {
@@ -982,11 +998,26 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
         queue->tp_type = umq_tp_type_convert(UMQ_TP_TYPE_RTP);
     }
 
+    if (option->create_flag & UMQ_CREATE_FLAG_PRIORITY) {
+        if (option->priority > UMQ_MAX_PRIORITY) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "priority[%u] is invalid\n", option->priority);
+            return -UMQ_ERR_EINVAL;
+        }
+        umq_tp_type_t tp_type = umq_tp_type_get(dev_ctx->dev_attr.dev_cap.priority_info[option->priority].tp_type);
+        if (option->tp_type != tp_type) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "priority[%u] is invalid, associated tp_type is %s\n",
+                option->priority, g_umq_ub_tp_type_str[tp_type]);
+            return -UMQ_ERR_EINVAL;
+        }
+        queue->priority = option->priority;
+    } else {
+        queue->priority = DEFAULT_PRIORITY;
+    }
+
     queue->max_rx_sge = dev_ctx->dev_attr.dev_cap.max_jfr_sge < UMQ_MAX_SGE_NUM ?
                         dev_ctx->dev_attr.dev_cap.max_jfr_sge : UMQ_MAX_SGE_NUM;
     queue->max_tx_sge = dev_ctx->dev_attr.dev_cap.max_jfs_sge < UMQ_MAX_SGE_NUM ?
                         dev_ctx->dev_attr.dev_cap.max_jfs_sge : UMQ_MAX_SGE_NUM;
-    queue->priority = DEFAULT_PRIORITY;
     queue->err_timeout = DEFAULT_ERR_TIMEOUT;
     queue->rnr_retry = DEFAULT_RNR_RETRY;
     queue->min_rnr_timer = DEFAULT_MIN_RNR_TIMER;
