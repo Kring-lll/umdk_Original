@@ -50,9 +50,21 @@ static __thread uint32_t g_perf_record_index = -1;
 static __thread pthread_once_t g_dp_thread_run_once = PTHREAD_ONCE_INIT;
 static bool g_umq_perf_record_enable = false;
 
+typedef struct umq_perf_record {
+    struct {
+        umq_perf_record_type_t type; // types of probe points supported by perf probe
+        uint64_t accumulation; // total latency
+        uint64_t min; // min latency
+        uint64_t max; // max latency
+        uint64_t cnt; // statistical count
+        uint64_t bucket[UMQ_PERF_QUANTILE_MAX_NUM + 1]; // sample count in each quantile bin
+    } type_record[UMQ_PERF_RECORD_TYPE_MAX]; // statistical results list for each type of probe poin
+    bool is_used; // the statistic item valid
+} umq_perf_record_t;
+
 typedef struct umq_perf_record_ctx {
     umq_perf_record_t perf_record_table[UMQ_PERF_REC_MAX_NUM];
-    uint64_t perf_quantile_thresh[UMQ_PERF_QUANTILE_MAX_NUM + 1];
+    uint64_t perf_quantile_thresh[UMQ_PERF_QUANTILE_MAX_NUM];
     pthread_mutex_t lock;
 } umq_perf_record_ctx_t;
 
@@ -272,6 +284,51 @@ static inline void umq_perf_convert_cycles_to_ns(umq_perf_record_t *perf_rec)
     }
 }
 
+static uint64_t umq_perf_cal_quantile(
+    umq_perf_record_t *record, umq_perf_record_type_t type, uint64_t count, uint64_t *thresh, uint32_t thresh_num)
+{
+    if (thresh_num == 0) {
+        return 0;
+    }
+
+    uint32_t idx;
+    uint64_t quantile_cnt = count;
+    for (idx = 0; idx < thresh_num; ++idx) {
+        if (record->type_record[type].bucket[idx] >= quantile_cnt) {
+            break;
+        }
+        quantile_cnt -= record->type_record[type].bucket[idx];
+    }
+
+    // the queried quantile cnt exceeds the maximum thresh records, return the max thresh
+    if (idx >= thresh_num) {
+        return thresh[thresh_num - 1];
+    }
+
+    if (record->type_record[type].bucket[idx] == 0) {
+        return 0;
+    }
+
+    uint64_t base = (idx == 0) ? 0 : thresh[idx - 1];
+    return ((double)quantile_cnt / record->type_record[type].bucket[idx]) * (thresh[idx] - base) + base;
+}
+
+static ALWAYS_INLINE umq_perf_record_add(umq_perf_record_t *perf_record, umq_perf_record_t *perf_record)
+{
+    total_perf_record.type_record[j].accumulation +=
+    g_umq_perf_record_ctx->perf_record_table[i].type_record[j].accumulation;
+    total_perf_record.type_record[j].min =
+        total_perf_record.type_record[j].min < g_umq_perf_record_ctx->perf_record_table[i].type_record[j].min ?
+        total_perf_record.type_record[j].min : g_umq_perf_record_ctx->perf_record_table[i].type_record[j].min;
+    total_perf_record.type_record[j].max =
+        total_perf_record.type_record[j].max > g_umq_perf_record_ctx->perf_record_table[i].type_record[j].max ?
+        total_perf_record.type_record[j].max : g_umq_perf_record_ctx->perf_record_table[i].type_record[j].max;
+    total_perf_record.type_record[j].cnt += g_umq_perf_record_ctx->perf_record_table[i].type_record[j].cnt;
+    for (uint32_t i = 0; i <= UMQ_PERF_QUANTILE_MAX_NUM ; i++) {
+        
+    }
+}
+
 int umq_perf_info_get(umq_perf_stats_t *perf_info)
 {
     if (g_umq_perf_record_ctx == NULL || perf_info == NULL) {
@@ -281,16 +338,22 @@ int umq_perf_info_get(umq_perf_stats_t *perf_info)
 
     (void)pthread_mutex_lock(&g_umq_perf_record_ctx->lock);
 
+    umq_perf_record_t total_perf_record = {0};
+
     perf_info->perf_record_num = 0;
     for (uint32_t i = 0; i < UMQ_PERF_REC_MAX_NUM; ++i) {
         if (!g_umq_perf_record_ctx->perf_record_table[i].is_used) {
             continue;
         }
-        
-        perf_info->perf_record[i] = g_umq_perf_record_ctx->perf_record_table[i];
-        perf_info->perf_record_num++;
-        umq_perf_convert_cycles_to_ns(&perf_info->perf_record[i]);
+
+        for (uint32_t j = 0; j < UMQ_PERF_RECORD_TYPE_MAX; j++) {
+            
+        }
     }
+
+    perf_info->perf_record[i] = g_umq_perf_record_ctx->perf_record_table[i];
+    perf_info->perf_record_num++;
+    umq_perf_convert_cycles_to_ns(&perf_info->perf_record[i]);
 
     (void)pthread_mutex_unlock(&g_umq_perf_record_ctx->lock);
     return 0;
