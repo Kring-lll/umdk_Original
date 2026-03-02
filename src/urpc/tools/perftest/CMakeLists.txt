@@ -1,7 +1,0 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) Huawei Technologies Co., Ltd. 2020-2025. All rights reserved.
-
-add_compile_definitions(_GNU_SOURCE)
-
-add_subdirectory(framework)
-add_subdirectory(umq)
