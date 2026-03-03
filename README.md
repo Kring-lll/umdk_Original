@@ -94,5 +94,4 @@ We warmly welcome contributions from developers. If you have discovered a bug or
 #### 5. LICENSES
 
 The license for code, please refer to [LICENSES](./LICENSES/README)
-
 The license for documents in doc directory, please refer to [LICENSE](./doc/LICENSE)
