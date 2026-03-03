@@ -322,6 +322,11 @@ typedef struct urpc_chinfo {
     uint32_t server_chid;
 } __attribute__((aligned(URPC_DEFAULT_ALIGN))) urpc_chinfo_t;
 
+static inline bool check_urpc_default_align(uint64_t addr)
+{
+    return (addr & URPC_DEFAULT_ALIGN) == 0;
+}
+
 typedef struct queue_create_option {
     urpc_qcfg_create_t *cfg;
     urpc_queue_type_t type;

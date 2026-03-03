@@ -21,8 +21,12 @@
 #error "__BYTE_ORDER must be defined"
 #endif
 
+
+
 #if !defined(__BIG_ENDIAN_BITFIELD) && !defined(__LITTLE_ENDIAN_BITFIELD)
-#error "__BIG_ENDIAN_BITFIELD or __LITTLE_ENDIAN_BITFIELD must be defined"
+// #error "__BIG_ENDIAN_BITFIELD or __LITTLE_ENDIAN_BITFIELD must be defined"
+#define __LITTLE_ENDIAN_BITFIELD 1
+// #error use __LITTLE_ENDIAN_BITFIELD"
 #endif
 
 #ifdef __cplusplus
