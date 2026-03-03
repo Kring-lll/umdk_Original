@@ -356,7 +356,7 @@ int umq_stats_perf_stop(void)
     return umq_perf_stop();
 }
 
-int umq_stats_perf_to_string(umq_perf_stats_t *umq_perf_stats, char *buf, int max_buf_len)
+int umq_stats_perf_to_str(umq_perf_stats_t *umq_perf_stats, char *buf, int max_buf_len)
 {
     if (umq_perf_stats == NULL || buf == NULL || max_buf_len <= 0) {
         UMQ_VLOG_ERR(VLOG_UMQ, "parameters invalid");

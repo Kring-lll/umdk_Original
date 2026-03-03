@@ -13,6 +13,8 @@
 extern "C" {
 #endif
 
+#define URPC_TLV_ALIGNMENT 4
+
 /* urpc tlv basic type ranges from 0 to 15(0xf)
  * urpc tlv complex type ranges from 16 to 65535(0xffff) */
 typedef enum urpc_tlv_type {
@@ -66,15 +68,20 @@ typedef struct urpc_tlv_arr_head {
     } value;
 } urpc_tlv_arr_head_t;
 
+static inline uint32_t urpc_tlv_get_aligned_len(uint32_t len)
+{
+    return ((len + URPC_TLV_ALIGNMENT -1) & ~(URPC_TLV_ALIGNMENT -1));
+}
+
 static inline urpc_tlv_head_t *urpc_tlv_get_next_element(urpc_tlv_head_t *head)
 {
-    return (urpc_tlv_head_t *)(head->value + head->len);
+    return (urpc_tlv_head_t *)(head->value + urpc_tlv_get_aligned_len(head->len));
 }
 
 /* total length = sizeof(urpc_tlv_head_t) + value length */
 static inline uint32_t urpc_tlv_get_total_len(urpc_tlv_head_t *head)
 {
-    return sizeof(urpc_tlv_head_t) + head->len;
+    return sizeof(urpc_tlv_head_t) + urpc_tlv_get_aligned_len(head->len);
 }
 
 /* Caller ensures the validity of 'type' */

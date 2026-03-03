@@ -22,6 +22,7 @@
 #include "urpc_hmap.h"
 #include "urpc_util.h"
 #include "urpc_list.h"
+#include "urpc_tlv.h"
 #include "umq_dfx_types.h"
 #include "umq_vlog.h"
 #include "umq_errno.h"

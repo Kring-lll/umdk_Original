@@ -40,7 +40,11 @@ urpc_tlv_head_t *urpc_tlv_search_element(char *buf, uint32_t buf_size, urpc_tlv_
         }
 
         if (tlv_head->type == (uint32_t)type) {
-            return tlv_head;
+            return (urpc_tlv_head_t *)(uintptr_t)(buf + offset);
+        }
+
+        if (urpc_tlv_get_aligned_len(tlv_head->len) >= UINT32_MAX - sizeof(urpc_tlv_head_t)) {
+            return NULL;
         }
 
         offset += urpc_tlv_get_total_len(tlv_head);
