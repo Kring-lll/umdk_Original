@@ -392,7 +392,12 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
     }
 
     ctx->remote_pid = info->dev_info->pid;
-    strcpy(ctx->remote_namespace, info->dev_info->bind_namespace);
+    if (info->dev_info->namespace_len > UMQ_UB_NAMESPACE_SIZE) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "dev info namespace len %u exceeds the maximum length %u\n",
+            info->dev_info->namespace_len, UMQ_UB_NAMESPACE_SIZE);
+        goto RESET_BIND_CTX;
+    }
+    memcpy(ctx->remote_namespace, info->dev_info->bind_namespace, info->dev_info->namespace_len);
     queue->bind_ctx = ctx;
 
     ret = umq_ub_eid_id_get(queue, info, &ctx->remote_eid_id);
