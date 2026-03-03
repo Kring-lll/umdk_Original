@@ -32,13 +32,18 @@ urpc_tlv_head_t *urpc_tlv_search_element(char *buf, uint32_t buf_size, urpc_tlv_
     /* Assure next tlv head not exceeds buf_size */
     while (offset <= buf_size - sizeof(urpc_tlv_head_t)) {
         urpc_tlv_head_t *tlv_head = (urpc_tlv_head_t *)(uintptr_t)(buf + offset);
+        if (urpc_tlv_get_aligned_len(tlv_head->len) >= UINT32_MAX - sizeof(urpc_tlv_head_t) || 
+            tlv_head->len > urpc_tlv_get_aligned_len(tlv_head->len)) {
+            return NULL;
+        }
+
         /* Assure current tlv element not exceeds buf_size:
          * 1. this tlv element is valid at least in length and user can parse this tlv element safely;
          * 2. offset can move safely by adding total length of current tlv element; */
         if (urpc_tlv_get_total_len(tlv_head) > buf_size - offset) {
             return NULL;
         }
-
+ 
         if (tlv_head->type == (uint32_t)type) {
             return tlv_head;
         }
@@ -51,13 +56,14 @@ urpc_tlv_head_t *urpc_tlv_search_element(char *buf, uint32_t buf_size, urpc_tlv_
 
 urpc_tlv_head_t *urpc_tlv_search_next_element(urpc_tlv_head_t *cur, uint32_t left_size, urpc_tlv_type_t type)
 {
+    
     if (!urpc_tlv_buf_validation((char *)(uintptr_t)cur, left_size)) {
         return NULL;
     }
 
     /* Assure the next tlv head is within the range of provided buffer */
     uint32_t total_len = urpc_tlv_get_total_len(cur);
-    if (left_size - sizeof(urpc_tlv_head_t) < total_len) {
+    if (left_size - sizeof(urpc_tlv_head_t) < total_len || total_len < sizeof(urpc_tlv_head_t)) {
         return NULL;
     }
 

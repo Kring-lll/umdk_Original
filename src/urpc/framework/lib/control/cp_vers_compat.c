@@ -245,6 +245,7 @@ static int attach_msg_v1_serialize_chmsg(bool is_server, bool is_manage, urpc_ch
 
     // 1. serialize channel information
     urpc_tlv_head_t *chinfo_tlv_head = (urpc_tlv_head_t *)(uintptr_t)chmsg_tlv_head->value;
+
     chmsg->chinfo = attach_msg_v1_serialize_chinfo(is_server, is_manage, chmsg_input, chinfo_tlv_head);
     if (chmsg->chinfo == NULL) {
         return URPC_FAIL;
@@ -252,6 +253,7 @@ static int attach_msg_v1_serialize_chmsg(bool is_server, bool is_manage, urpc_ch
 
     // 2. serialize queue information array
     urpc_tlv_head_t *qinfo_arr_tlv_head = urpc_tlv_get_next_element(chinfo_tlv_head);
+
     if (attach_msg_v1_serialize_qinfo_arr(chmsg_input->qh, chmsg_input->q_num,
         &chmsg->qinfo_arr, (urpc_tlv_arr_head_t *)(uintptr_t)qinfo_arr_tlv_head) != URPC_SUCCESS) {
         return URPC_FAIL;
@@ -525,7 +527,8 @@ static int attach_msg_v1_deserialize_chmsg_arr(urpc_tlv_arr_head_t *chmsg_arr_tl
      * ├── array number
      * ├── channel message 0(TL)                    URPC_TLV_TYPE_CHANNEL_MSG
      * └── channel message 1(TL)                    URPC_TLV_TYPE_CHANNEL_MSG */
-    if (chmsg_arr_tlv_head->value.arr_num > CHANNEL_INFO_MAX_NUM) {
+    if (chmsg_arr_tlv_head->len < (sizeof(urpc_tlv_arr_head_t) - sizeof(urpc_tlv_head_t)) ||
+        chmsg_arr_tlv_head->value.arr_num > CHANNEL_INFO_MAX_NUM) {
         URPC_LIB_LOG_ERR("the number of channel message exceeds upper limit\n");
         return -URPC_ERR_EINVAL;
     }
@@ -588,6 +591,10 @@ static int attach_msg_v1_deserialize_attach_msg(char *buf, uint32_t len, urpc_at
         return URPC_FAIL;
     }
 
+    if (chmsg_arr_tlv_head->len < sizeof(urpc_tlv_arr_head_t) - sizeof(urpc_tlv_head_t)) {
+        URPC_LIB_LOG_ERR("channel message array len invalid\n");
+        return URPC_FAIL;
+    }
     // 5. deserialize channel message array
     int ret = attach_msg_v1_deserialize_chmsg_arr(chmsg_arr_tlv_head, &data->chmsg_arr);
     if (ret != URPC_SUCCESS) {
@@ -1173,6 +1180,11 @@ static int connect_msg_deserialize_connect_msg(char *buf, uint32_t len, urpc_con
         return -URPC_ERR_EINVAL;
     }
 
+    if (chmsg_arr_tlv_head->len < sizeof(urpc_tlv_arr_head_t) - sizeof(urpc_tlv_head_t)) {
+        URPC_LIB_LOG_ERR("channel message array len invalid\n");
+        return URPC_FAIL;
+    }
+
     // 5. deserialize channel message array
     int ret = connect_msg_deserialize_chmsg_arr(chmsg_arr_tlv_head, &data->chmsg_arr);
     if (ret != URPC_SUCCESS) {
@@ -1225,6 +1237,11 @@ int urpc_connect_msg_extract_channel_count(char *buf, uint32_t len)
         urpc_tlv_search_next_element(connect_info_tlv_head, left_len, URPC_TLV_TYPE_ARRAY);
     if (chmsg_arr_tlv_head == NULL) {
         URPC_LIB_LOG_ERR("failed to find channel message array\n");
+        return URPC_FAIL;
+    }
+
+    if (chmsg_arr_tlv_head->len < sizeof(urpc_tlv_arr_head_t) - sizeof(urpc_tlv_head_t)) {
+        URPC_LIB_LOG_ERR("channel message array len invalid\n");
         return URPC_FAIL;
     }
 
