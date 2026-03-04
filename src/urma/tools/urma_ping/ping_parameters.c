@@ -184,5 +184,15 @@ int check_args(ping_cfg_t *cfg)
         return -EINVAL;
     }
 
+    if (cfg->timeout == 0) {
+        LOG_ERROR("Timeout must be greater than 0\n");
+        return -EINVAL;
+    }
+
+    if (cfg->size > 4096) {
+        LOG_ERROR("Size must be less than or equal to 4096\n");
+        return -EINVAL;
+    }
+
     return 0;
 }
