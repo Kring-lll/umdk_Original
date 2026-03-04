@@ -1022,12 +1022,7 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
         }
         queue->priority = option->priority;
     } else {
-        int ret = umq_default_priority_get(dev_ctx, actual_tp_type);
-        if (ret < 0) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "there is no priority for tp_type %s\n", g_umq_ub_tp_type_str[actual_tp_type]);
-            return -UMQ_ERR_EINVAL;
-        }
-        queue->priority = (uint8_t)ret;
+        queue->priority = 0;
     }
 
     queue->max_rx_sge = dev_ctx->dev_attr.dev_cap.max_jfr_sge < UMQ_MAX_SGE_NUM ?
