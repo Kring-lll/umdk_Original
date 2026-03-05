@@ -329,6 +329,7 @@ int admin_parse_args(admin_config_t *cfg)
     return 0;
 }
 
+//解析当前参数参数”
 char *pop_arg(admin_config_t *cfg)
 {
     if (cfg->argc <= 0) {
@@ -337,6 +338,7 @@ char *pop_arg(admin_config_t *cfg)
 
     char *arg = *cfg->argv;
     cfg->argc--;
+    // 指针右移
     cfg->argv++;
 
     return arg;
@@ -352,6 +354,7 @@ int pop_arg_dev(admin_config_t *cfg)
     return admin_parse_dev_name(arg, cfg);
 }
 
+// 解析网络命名空间参数
 int pop_arg_ns(admin_config_t *cfg)
 {
     char *arg = pop_arg(cfg);
@@ -374,6 +377,7 @@ int pop_arg_sharing(admin_config_t *cfg)
     return ret;
 }
 
+// 解析eid
 int pop_arg_eid(admin_config_t *cfg)
 {
     char *arg = pop_arg(cfg);
@@ -497,6 +501,10 @@ static bool urma_validate_ns_path(const char *path)
     return true;
 }
 
+/**
+ * 获取指定网络命名空间的文件描述
+ * 一个网络命令空间，有独立的网络设备，IPv4协议栈:，路由表，防火墙规则，端口号。每个docker容器就是一个网络命名空间
+ */
 int admin_get_ns_fd(const char *ns)
 {
     int ns_fd;

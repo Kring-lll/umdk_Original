@@ -269,6 +269,7 @@ static int find_ubep_list(struct ub_list *ubep_list, const admin_config_t *cfg)
     struct dirent *dent;
     admin_show_ubep_t *ubep;
 
+    // 从/sys/class/ubcore目录搜索设备
     class_dir = opendir(SYS_CLASS_PATH);
     if (class_dir == NULL) {
         (void)printf("%s open failed, errno: %d.\n", SYS_CLASS_PATH, errno);
@@ -792,11 +793,13 @@ static uint32_t get_cur_node_id(tool_topo_map_t *topo_map)
     return node_id;
 }
 
+// 查询拓扑信息
 int admin_cmd_get_topo_info(tool_topo_map_t *topo_map)
 {
     int ret = 0;
     admin_core_cmd_topo_info_t *arg = NULL;
     int node_num = MAX_NODE_NUM;
+    // 获取每个cpu
     for (int i = 0; i < node_num; ++i) {
         arg = calloc(1, sizeof(admin_core_cmd_topo_info_t));
         if (arg == NULL) {
@@ -805,20 +808,23 @@ int admin_cmd_get_topo_info(tool_topo_map_t *topo_map)
         }
         arg->in.node_idx = i;
 
+        // 创建病封装用于内核通信的msg
         struct nl_msg *msg = admin_nl_alloc_msg(URMA_CORE_GET_TOPO_INFO, 0);
         if (msg == NULL) {
             ret = -ENOMEM;
             goto free_topo;
         }
-
         admin_nl_put_u32(msg, UBCORE_HDR_ARGS_LEN, (uint32_t)sizeof(admin_core_cmd_topo_info_t));
         admin_nl_put_u64(msg, UBCORE_HDR_ARGS_ADDR, (uint64_t)(uintptr_t)arg);
+
+        // 调用内核查询
         ret = admin_nl_send_recv_msg_default(msg);
         admin_nl_free_msg(msg);
         if (ret < 0) {
             goto free_topo;
         }
 
+        // 填充节点信息
         topo_map->topo_infos[i] = arg->out.topo_info;
         topo_map->node_num = arg->out.node_num;
         node_num = arg->out.node_num;

@@ -275,23 +275,27 @@ unexpose_agg_dev:
     return ret;
 }
 
+// 将eid为首的聚合设备映射到ns中
 static int admin_cmd_agg_expose(urma_eid_t *eid, int ns_fd)
 {
     tool_topo_map_t *topo_map = calloc(1, sizeof(tool_topo_map_t));
     if (topo_map == NULL) {
         return -ENOMEM;
     }
+    // 获取topo
     int ret = admin_cmd_get_topo_info(topo_map);
     if (ret != 0) {
         (void)printf("Failed to get topo info, ret=%d.\n", ret);
         goto free_topo;
     }
+    // 定位设备：匹配聚合设备
     struct tool_topo_agg_dev *agg_dev = get_topo_agg_dev_by_agg_eid(topo_map, eid);
     if (agg_dev == NULL) {
         (void)printf("Failed to get agg dev by eid.\n");
         ret = -EINVAL;
         goto free_topo;
     }
+    // 暴露设备
     ret = nl_expose_agg_device(agg_dev, ns_fd);
     if (ret != 0) {
         (void)printf("Failed to expose agg device, ret=%d.\n", ret);
@@ -311,6 +315,7 @@ static int cmd_agg_expose(admin_config_t *cfg)
     if ((ret = pop_arg_ns(cfg)) != 0) {
         return ret;
     }
+    // 获取网络明明空间描述符
     int ns_fd = admin_get_ns_fd(cfg->ns);
     if (ns_fd < 0) {
         (void)printf("Failed to get ns fd, ns %s.\n", cfg->ns);

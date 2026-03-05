@@ -63,6 +63,7 @@ free_sock:
     return ret;
 }
 
+//向UBCORE_GENL发送消息
 int admin_nl_send_msg(struct nl_msg *msg)
 {
     int ret;
@@ -114,11 +115,13 @@ int admin_nl_send_recv_msg(struct nl_msg *msg, int (*cb)(struct nl_msg *msg, voi
 {
     int ret;
 
+    // 发送
     ret = admin_nl_send_msg(msg);
     if (ret != 0) {
         return ret;
     }
 
+    // 接收消息
     ret = admin_nl_recv_msg(cb, arg);
     if (ret != 0) {
         return ret;
@@ -137,6 +140,7 @@ int admin_nl_send_recv_msg_default(struct nl_msg *msg)
     return admin_nl_send_recv_msg(msg, nl_default_cb, NULL);
 }
 
+//创建内核message
 struct nl_msg *admin_nl_alloc_msg(uint8_t cmd, int flags)
 {
     int ret;

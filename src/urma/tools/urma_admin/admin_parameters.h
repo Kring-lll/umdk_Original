@@ -219,14 +219,19 @@ typedef struct tool_res_seg_val {
 } tool_res_seg_val_t;
 
 typedef struct tool_topo_ue {
+    // 硬件抽象
     uint32_t socket_id;
     uint32_t entity_id;
+    // entity id
     char primary_eid[EID_LEN];
+    // port id 网口id
     char port_eid[PORT_NUM][EID_LEN];
 } tool_topo_ue_t;
 
 typedef struct tool_topo_agg_dev {
+    // 聚合设备的eid
     char agg_eid[EID_LEN];
+    // 2 die
     tool_topo_ue_t ues[IODIE_NUM];
 } tool_topo_agg_dev_t;
 
@@ -236,13 +241,18 @@ typedef struct tool_topo_link {
     uint32_t peer_port;
 } tool_topo_link_t;
 
+// todo-cyc: 节点值得是啥？？ 是cpu么， 如果过不是cpu为啥使用io_die区分，应该有一个cpu_id
+// todo-cyc:  topo:一个cpu上有两个die,一个板上两个cpu, 一共八个交换板，每个算口是链接7个ub交换机？
 typedef struct tool_topo_info {
     uint32_t id;
     uint32_t is_current;
+    // 每个cpu与对端的链接关系                                             
     tool_topo_link_t links[IODIE_NUM][PORT_NUM];
+    //一个节点的所有聚合设备，为啥是128？？
     tool_topo_agg_dev_t agg_devs[DEV_NUM];
 }  tool_topo_info_t;
 
+// todo-cyc:16是指最多有16个节点互联, 1D硬件链路？？
 typedef struct tool_topo_map {
     tool_topo_info_t topo_infos[MAX_NODE_NUM];
     uint32_t node_num;
