@@ -13,8 +13,11 @@
 import gc
 import os
 import sys
+import time
 from pathlib import Path
 import argparse
+from typing import List
+import trace_utils
 
 import numpy as np
 import torch
@@ -576,6 +579,11 @@ def run_once(local_rank_id,
     torch_npu.npu.synchronize(device_id)
     print(f"rank-{global_rank_id} End, {actual_bs= }, {valid_token_num= }")
 
+    enable_moe_profiling = trace_utils.get_enable_moe_profiling()
+    
+    if enable_moe_profiling:
+        profiling = profiling.cpu()
+        trace_utils.save_profiling_data(profiling, global_rank_id)
     # 处理资源销毁
     # dist.destroy_process_group()
     # if log_file is not None:
