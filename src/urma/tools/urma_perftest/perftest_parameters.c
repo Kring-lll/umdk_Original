@@ -960,7 +960,6 @@ int check_local_cfg(perftest_config_t *cfg)
 
     if (strstr(cfg->dev_name, "bonding_dev") != NULL || !cfg->single_path) {
         cfg->use_ctp = true;
-        (void)printf("Warning: bonding_dev multi path only support ctp\n");
     }
 
     if (check_time_type(cfg) != 0) {
