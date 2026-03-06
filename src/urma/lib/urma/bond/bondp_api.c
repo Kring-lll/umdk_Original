@@ -243,10 +243,6 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
         if (cfg->flag.bs.multi_path == false) {
             URMA_LOG_ERR("In matrix server, JFS don't support single-path mode.\n");
             return NULL;
-        } else {
-            // Hacky: CTP must use priority 6, will query for available prioritues instead
-            const uint8_t ctp_priority = 6;
-            cfg->priority = ctp_priority;
         }
     }
 
@@ -730,10 +726,6 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
                     "set to multi-path mode forcely\n");
                 jetty_cfg->jfs_cfg.flag.bs.multi_path = true;
             }
-        } else {
-            // Hacky: CTP must use priority 6, will query for available prioritues instead
-            const uint8_t ctp_priority = 6;
-            jetty_cfg->jfs_cfg.priority = ctp_priority;
         }
     }
 
@@ -1255,10 +1247,32 @@ static int add_remote_jetty_id_info(bondp_context_t *bdp_ctx, urma_bond_id_info_
     return 0;
 }
 
+static bool urma_check_multi_path_and_tp_type(bool is_multipath, urma_tp_type_t tp_type)
+{
+    if (is_multipath == true && tp_type == URMA_RTP) {
+        URMA_LOG_ERR("Multi-path enabled does not support RTP mode, please switch to CTP.\n");
+        return false;
+    }
+    if (is_multipath == true && tp_type == URMA_CTP) {
+        return true;
+    }
+    if (is_multipath == false && tp_type == URMA_RTP) {
+        return true;
+    }
+    if (is_multipath == false && tp_type == URMA_CTP) {
+        URMA_LOG_ERR("Multi-path disabled does not support CTP mode, please switch to RTP.\n");
+        return false;
+    }
+    return URMA_EINVAL;
+}
+
 static bool bondp_import_jetty_is_valid(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
     urma_rjetty_t *rjetty, urma_bond_id_info_out_t *udata_out)
 {
     if (is_in_matrix_server(bdp_ctx)) {
+        if (urma_check_multi_path_and_tp_type(udata_out->is_multipath, rjetty->tp_type) == false) {
+            return false;
+        }
         /* Only allow the following combinations: */
         /* RC + single_path */
         /* RM + multi_path  */
