@@ -46,5 +46,7 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
+    print_stat();
+
     return 0;
 }

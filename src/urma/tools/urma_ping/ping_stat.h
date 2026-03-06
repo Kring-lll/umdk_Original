@@ -11,7 +11,12 @@
 #ifndef URMA_PING_STAT_H
 #define URMA_PING_STAT_H
 
+#define THOUSAND           (1000)
+#define THOUSAND_F         (1000.0)
+#define MILLION_F          (1000000.0)
+
 double get_time_in_ms(void);
+void print_stat(void);
 void init_stat(void);
 void update_stat_on_send(void);
 void update_stat_on_recv(double rtt);
