@@ -13,8 +13,11 @@
 import gc
 import os
 import sys
+import time
 from pathlib import Path
 import argparse
+from typing import List
+import trace_utils
 
 import numpy as np
 import torch
@@ -315,7 +318,7 @@ class FusionOp(DecodeMoeOps):
         self.comm_args = comm_args
 
     def _apply_ops(self, x, expert_ids, smooth_scales, expert_scales, x_active_mask):
-        output, share_output, expert_token_nums = torch.ops.umdk_cam_op_lib.fused_deep_moe(
+        output, share_output, expert_token_nums, profiling = torch.ops.umdk_cam_op_lib.fused_deep_moe(
             x=x,
             expert_ids=expert_ids,
             gmm1_weight=self.gmm1_weight,
@@ -338,7 +341,7 @@ class FusionOp(DecodeMoeOps):
             shared_expert_rank_num=self.shared_expert_rank_num,
             quant_mode=0,
             global_bs=self.batch_size * self.ep_world_size)
-        return (output, share_output, expert_token_nums)
+        return (output, share_output, expert_token_nums, profiling)
 
     def _process_weights_after_loading(self, gmm1_weight, gmm1_weight_scale,
                                        gmm2_weight, gmm2_weight_scale,
@@ -479,6 +482,35 @@ def generate_datas(batch_size,
             (share_mm1_weight, share_mm1_weight_scale, share_mm2_weight, share_mm2_weight_scale), \
             actual_bs, valid_token_num
 
+def split_by_core_type(profiling: torch.Tensor, core_num_list: List[int]) -> List[torch.Tensor]:
+    """按核心类型拆分tensor"""
+    split_tensors = []
+    start_idx = 0
+    
+    for core_num in core_num_list:
+        end_idx = start_idx + core_num
+        tensor = profiling[start_idx:end_idx].clone()  # 克隆一份
+        split_tensors.append(tensor)
+        start_idx = end_idx
+    
+    return split_tensors
+
+def save_profiling_data(profiling: torch.Tensor, core_num_list: List[int], 
+                        rank_id: int, output_dir: str = "output/cam/profiling_data") -> List[torch.Tensor]:
+    """保存追踪数据为.pt文件（只保存tensor数组）"""
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 拆分tensor
+    split_tensors = split_by_core_type(profiling, core_num_list)
+    
+    # 只保存tensor数组
+    pt_file = os.path.join(output_dir, f"rank{rank_id:03d}.pt")
+    torch.save(split_tensors, pt_file)
+    
+    print(f"Rank {rank_id} 数据已保存: {pt_file}")
+    print(f"  核心类型数量: {len(split_tensors)}")
+    for i, tensor in enumerate(split_tensors):
+        print(f"  类型{i}: {tensor.shape[0]} 个核心")
 
 def run_once(local_rank_id,
              batch_size,
@@ -549,14 +581,45 @@ def run_once(local_rank_id,
         npu_backend = torchair.get_npu_backend(compiler_config=config)
         fused_ops = torch.compile(fused_ops, backend=npu_backend)
     
-    small_op_output = small_ops(*input_datas)
-    fused_op_output = fused_ops(*input_datas)
+    small_op_output = None
+    for _ in range(10):
+        small_op_output = small_ops(*input_datas)
+    torch_npu.npu.synchronize(device_id)
+    start_s = time.perf_counter()
+    for _ in range(1000):
+        small_op_output = small_ops(*input_datas)
+    torch_npu.npu.synchronize(device_id)
+    end_s = time.perf_counter()
+    interval_ms = end_s - start_s
+    print(f"small_ops时间间隔: {interval_ms:.3f} ms")
+
+    fused_op_output = None
+    for _ in range(10):
+        fused_op_output = fused_ops(*input_datas)
+    torch_npu.npu.synchronize(device_id)
+    start_s = time.perf_counter()
+    for _ in range(1000):
+        fused_op_output = fused_ops(*input_datas)
+    torch_npu.npu.synchronize(device_id)
+    end_s = time.perf_counter()
+    interval_ms = end_s - start_s
+    print(f"fused_ops时间间隔: {interval_ms:.3f} ms")
     
     small_op_token_output, small_op_share_output, small_op_count_output = small_op_output
-    fused_op_token_output, fused_op_share_output, fused_op_count_output = fused_op_output
+    fused_op_token_output, fused_op_share_output, fused_op_count_output, profiling = fused_op_output
     
-    torch_npu.npu.synchronize(device_id)
 
+    prof_size_per_core = trace_utils.get_prof_size_per_core()
+    core_num_list = trace_utils.get_core_num_list()
+    profiling = profiling.view(sum(core_num_list), prof_size_per_core)
+
+    if (local_rank_id == 0):
+        print(f"YHB: prof ptr: {profiling.data_ptr()}")
+        print(f"YHB: prof count dev: {profiling[:, 0].tolist()}")
+    profiling = profiling.cpu()
+    if (local_rank_id == 0):
+        print(f"YHB: prof count: {profiling[:, 0].tolist()}")
+    save_profiling_data(profiling, core_num_list, global_rank_id)
     # 处理资源销毁
     dist.destroy_process_group()
     if log_file is not None:

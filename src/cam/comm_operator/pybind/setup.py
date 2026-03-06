@@ -12,6 +12,7 @@ import sys
 import torch
 import platform
 import importlib.util
+import trace_utils
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "./pytorch_extension"))
 from bdist_wheel_build import BdistWheelBuild
@@ -38,10 +39,14 @@ env_names = ["MODULE_SRC_PATH", "ASCEND_HOME_PATH"]
 for env_name in env_names:
     if env_name not in os.environ:
         print(f"{env_name} is not in env, please export {env_name} first")
+prof_size_per_core = trace_utils.get_prof_size_per_core()
+core_num_list = trace_utils.get_core_num_list()
 compile_args = [
     "-I" + os.path.join(PYTORCH_NPU_INSTALL_PATH, "include/third_party/acl/inc"),
     "-fPIC", "-fstack-protector-strong", "-w",
     "-D_FORTIFY_SOURCE=2",
+     f"-DPROF_SIZE_PER_CORE={prof_size_per_core}",
+     f"-DPROF_TOTAL_CORE_NUM={sum(core_num_list)}",
 ]
 if "BUILD_TYPE" in os.environ and os.environ.get("BUILD_TYPE") == "Debug":
     compile_args.extend(["-g", "-O0"])
@@ -57,6 +62,7 @@ ext1 = NpuExtension(
     include_dirs=[
         os.path.join(os.environ["MODULE_SRC_PATH"], 'include/'),
         os.path.join(os.environ["MODULE_SRC_PATH"], 'framework/communicator'),
+        os.path.join(os.environ["MODULE_SRC_PATH"], 'ascend_kernels/fused_deep_moe/op_host'),
         os.path.join(torch_npu_path, "include"),
         os.path.join(torch_npu_path, "include/third_party/acl/inc/acl/"),
         os.path.join(torch_npu_path, "include/third_party/acl/inc"),
