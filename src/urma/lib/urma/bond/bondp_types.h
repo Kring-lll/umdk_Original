@@ -174,7 +174,7 @@ static inline bool is_valid_dev_num(int dev_num)
     return dev_num > 0 && dev_num <= URMA_UBAGG_DEV_MAX_NUM;
 }
 
-static inline bool is_in_matrix_server(bondp_context_t *ctx)
+static inline bool is_in_matrix_server(const bondp_context_t *ctx)
 {
     return ctx->topo_map != NULL;
 }
@@ -193,7 +193,7 @@ static inline int get_matrix_port_p_idx(int primary_idx, int port_idx)
     return primary_idx * PORT_EID_MAX_NUM_PER_DEV + port_idx + PRIMARY_EID_NUM;
 }
 
-static inline bool is_empty_eid(urma_eid_t *eid)
+static inline bool is_empty_eid(const urma_eid_t *eid)
 {
     return eid->in6.interface_id == 0 && eid->in6.subnet_prefix == 0;
 }
@@ -208,7 +208,7 @@ static inline bool is_multipath_comp(bondp_comp_t *bdp_comp)
     return bdp_comp->is_multipath;
 }
 
-static inline bool is_single_dev_mode(urma_context_t *ctx)
+static inline bool is_single_dev_mode(const urma_context_t *ctx)
 {
     return ctx->aggr_mode == URMA_AGGR_MODE_STANDALONE;
 }
