@@ -11,8 +11,11 @@ from math import ceil
 from typing import List
 import gc
 import sys
+import time
 from pathlib import Path
 import argparse
+from typing import List
+import trace_utils
 
 import numpy as np  # type: ignore
 import pandas as pd  # type: ignore
@@ -408,7 +411,7 @@ class FusionOp(DecodeMoeOps):
         # torch.ops.air.scope_enter(["_super_kernel_scope", "_super_kernel_options"],["sp1", ""])
         # try:
         with torchair.scope.super_kernel("sp1", ""):
-            output, share_output, expert_token_nums = torch.ops.umdk_cam_op_lib.fused_deep_moe(
+            output, share_output, expert_token_nums, profiling = torch.ops.umdk_cam_op_lib.fused_deep_moe(
                 x=x,
                 expert_ids=expert_ids,
                 gmm1_weight=self.gmm1_weight,
@@ -432,7 +435,7 @@ class FusionOp(DecodeMoeOps):
                 shared_expert_rank_num=self.shared_expert_rank_num,
                 quant_mode=0,
                 global_bs=self.batch_size * self.ep_world_size)
-        return (output, share_output, expert_token_nums)
+        return (output, share_output, expert_token_nums, profiling)
 
     def _process_weights_after_loading(self, gmm1_weight, gmm1_weight_scale,
                                        gmm2_weight, gmm2_weight_scale,
@@ -676,11 +679,16 @@ def run_once(local_rank_id,
     #     print(f"[rank-{global_rank_id}] MOE output diff: max={torch.abs(small_op_output[0] - fused_op_output[0]).max().item():.6f}, mean={torch.abs(small_op_output[0] - fused_op_output[0]).mean().item():.6f}")
 
     small_op_token_output, small_op_share_output, small_op_count_output = small_op_output
-    fused_op_token_output, fused_op_share_output, fused_op_count_output = fused_op_output
+    fused_op_token_output, fused_op_share_output, fused_op_count_output, profiling = fused_op_output
     
     torch_npu.npu.synchronize(device_id)
     print(f"rank-{global_rank_id} End, {actual_bs= }, {valid_token_num= }")
 
+    enable_moe_profiling = trace_utils.get_enable_moe_profiling()
+    
+    if enable_moe_profiling:
+        profiling = profiling.cpu()
+        trace_utils.save_profiling_data(profiling, global_rank_id)
     # 处理资源销毁
     dist.destroy_process_group()
     if log_file is not None:

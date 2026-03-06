@@ -11,6 +11,12 @@
 
 #include "moe_distribute_base.h"
 
+/* profiling macros */
+#define ENABLE_MOE_PROFILING 1
+#define PROF_SIZE_PER_CORE 1024
+#define ENABLE_MOE_PROFILING_BARRIER false
+#define ENABLE_MOE_PROFILING_DETAIL 0
+
 /* log level macros */
 enum MoelogLevel {
     MOE_LOG_LEVEL_ERROR = 0,
@@ -45,5 +51,57 @@ enum MoelogLevel {
             XType, ExpandXOutType, StaticQuant, DynamicQuant, IsSmoothScaleExist, \
             IsNeedAllgater, EXEC_FLAG
 
+#if __CCE_AICORE__ == 220 || defined(__DAV_C310__) || defined(__DAV_310R6__)
+#ifdef SPLIT_CORE_CUBE
+__BLOCK_LOCAL__ __inline__ int64_t* g_moeProfilePtrCube;
+#elif defined(SPLIT_CORE_VEC)
+__BLOCK_LOCAL__ __inline__ int64_t* g_moeProfilePtrVec;
+#else
+__BLOCK_LOCAL__ __inline__ int64_t* g_moeProfilePtr;
+#endif
+#else
+__BLOCK_LOCAL__ __inline__ int64_t* g_moeProfilePtr;
+#endif
+
+__aicore__ inline int64_t* GetMoeProfilePtr(uint32_t idx = 0)
+{
+#if __CCE_AICORE__ == 220 || defined(__DAV_C310__) || defined(__DAV_310R6__)
+#ifdef SPLIT_CORE_CUBE
+    return &g_moeProfilePtrCube[idx];
+#elif defined(SPLIT_CORE_VEC)
+    return &g_moeProfilePtrVec[idx];
+#else
+    return &g_moeProfilePtr[idx];
+#endif
+#else
+    return &g_moeProfilePtr[idx];
+#endif
+}
+
+template <bool sync = ENABLE_MOE_PROFILING_BARRIER>
+__aicore__ inline void MoeTracing(int64_t data)
+{
+#if ENABLE_MOE_PROFILING
+    if constexpr (sync) {
+        AscendC::PipeBarrier<PIPE_ALL>();
+    }
+    
+    int64_t *profileData = GetMoeProfilePtr();
+    profileData[profileData[0]++] = data;
+    profileData[PROF_SIZE_PER_CORE - profileData[0]] = AscendC::GetSystemCycle();
+#endif
+}
+
+template <bool sync = ENABLE_MOE_PROFILING_BARRIER>
+__aicore__ inline void MoeTracing(int64_t data, uint32_t index)
+{
+    MoeTracing<sync>(data | (int64_t)(((uint64_t)index) << 32));
+}
+
+template <bool sync = ENABLE_MOE_PROFILING_BARRIER>
+__aicore__ inline void MoeTracing(int64_t data, uint32_t extraId, uint32_t index)
+{
+    MoeTracing<sync>(data, (extraId | (index << 8)));
+}
 #endif  // FUSED_DEEP_MOE_BASE_H
  
