@@ -135,7 +135,7 @@ TEST_F(PerfTest, PerfClearWhenStartedShouldFail) {
 }
 
 TEST_F(PerfTest, PerfClearAfterStopping) {
-    int ret = umq_perf_init();
+    int ret = umq_perf_start();
     ASSERT_EQ(ret, UMQ_SUCCESS);
 
     umq_perf_stats_cfg_t cfg = {0};
@@ -153,7 +153,7 @@ TEST_F(PerfTest, PerfClearAfterStopping) {
 }
 
 TEST_F(PerfTest, PerfInfoGetAfterStopping) {
-    int ret = umq_perf_init();
+    int ret = umq_perf_start();
     ASSERT_EQ(ret, UMQ_SUCCESS);
 
     umq_perf_stats_cfg_t cfg = {0};
@@ -171,7 +171,7 @@ TEST_F(PerfTest, PerfInfoGetAfterStopping) {
 }
 
 TEST_F(PerfTest, StartWithTooManyThresholds) {
-    umq_perf_init();
+    umq_perf_start();
 
     umq_perf_stats_cfg_t cfg = {0};
     // Create an array larger than UMQ_PERF_QUANTILE_MAX_NUM
@@ -185,7 +185,7 @@ TEST_F(PerfTest, StartWithTooManyThresholds) {
 }
 
 TEST_F(PerfTest, StartWithLargeThresholdValues) {
-    umq_perf_init();
+    umq_perf_start();
 
     // Test with threshold values larger than UMQ_PERF_MAX_THRESH_NS
     umq_perf_stats_cfg_t cfg = {0};
@@ -220,7 +220,7 @@ TEST_F(PerfTest, PerfRecordWriteWithDirection) {
 }
 
 TEST_F(PerfTest, PerfRecordAllocFunction) {
-    int ret = umq_perf_init();
+    int ret = umq_perf_start();
     ASSERT_EQ(ret, UMQ_SUCCESS);
 
     // Need to start perf first to enable recording
@@ -239,7 +239,7 @@ TEST_F(PerfTest, PerfRecordAllocFunction) {
 }
 
 TEST_F(PerfTest, PerfRecordAllocExhaustedCapacity) {
-    int ret = umq_perf_init();
+    int ret = umq_perf_start();
     ASSERT_EQ(ret, UMQ_SUCCESS);
 
     // Manually set all records as used to test exhaustion case
@@ -263,7 +263,7 @@ TEST_F(PerfTest, PerfRecordAllocExhaustedCapacity) {
 }
 
 TEST_F(PerfTest, FindPerfRecordBucketNoThreshold) {
-    int ret = umq_perf_init();
+    int ret = umq_perf_start();
     ASSERT_EQ(ret, UMQ_SUCCESS);
 
     // Directly test the internal function by creating appropriate context
@@ -288,7 +288,7 @@ TEST_F(PerfTest, FindPerfRecordBucketNoThreshold) {
 }
 
 TEST_F(PerfTest, FindPerfRecordBucketWithThresholds) {
-    int ret = umq_perf_init();
+    int ret = umq_perf_start();
     ASSERT_EQ(ret, UMQ_SUCCESS);
 
     umq_perf_stats_cfg_t cfg = {0};
@@ -310,7 +310,7 @@ TEST_F(PerfTest, FindPerfRecordBucketWithThresholds) {
 }
 
 TEST_F(PerfTest, PerfFillPerfRecordFunction) {
-    int ret = umq_perf_init();
+    int ret = umq_perf_start();
     ASSERT_EQ(ret, UMQ_SUCCESS);
 
     umq_perf_stats_cfg_t cfg = {0};
@@ -337,7 +337,7 @@ TEST_F(PerfTest, PerfFillPerfRecordFunction) {
 }
 
 TEST_F(PerfTest, PerfConvertCyclesToNs) {
-    int ret = umq_perf_init();
+    int ret = umq_perf_start();
     ASSERT_EQ(ret, UMQ_SUCCESS);
 
     umq_perf_stats_cfg_t cfg = {0};
@@ -358,7 +358,7 @@ TEST_F(PerfTest, PerfConvertCyclesToNs) {
 }
 
 TEST_F(PerfTest, PerfRecordWriteFunctionsEdgeCases) {
-    int ret = umq_perf_init();
+    int ret = umq_perf_start();
     ASSERT_EQ(ret, UMQ_SUCCESS);
 
     umq_perf_stats_cfg_t cfg = {0};
@@ -381,7 +381,7 @@ TEST_F(PerfTest, PerfRecordWriteFunctionsEdgeCases) {
 }
 
 TEST_F(PerfTest, PerfRecordAllocationBoundary) {
-    int ret = umq_perf_init();
+    int ret = umq_perf_start();
     ASSERT_EQ(ret, UMQ_SUCCESS);
 
     umq_perf_stats_cfg_t cfg = {0};
@@ -402,7 +402,7 @@ TEST_F(PerfTest, PerfRecordAllocationBoundary) {
 }
 
 TEST_F(PerfTest, ClearPerfRecordItem) {
-    int ret = umq_perf_init();
+    int ret = umq_perf_start();
     ASSERT_EQ(ret, UMQ_SUCCESS);
 
     umq_perf_stats_cfg_t cfg = {0};
@@ -417,7 +417,7 @@ TEST_F(PerfTest, ClearPerfRecordItem) {
 }
 
 TEST_F(PerfTest, ComprehensivePerfTest) {
-    int ret = umq_perf_init();
+    int ret = umq_perf_start();
     ASSERT_EQ(ret, UMQ_SUCCESS);
 
     // Set up thresholds
@@ -455,7 +455,7 @@ TEST_F(PerfTest, ComprehensivePerfTest) {
 }
 
 TEST_F(PerfTest, MinValueConditionTest) {
-    int ret = umq_perf_init();
+    int ret = umq_perf_start();
     ASSERT_EQ(ret, UMQ_SUCCESS);
 
     umq_perf_stats_cfg_t cfg = {0};
