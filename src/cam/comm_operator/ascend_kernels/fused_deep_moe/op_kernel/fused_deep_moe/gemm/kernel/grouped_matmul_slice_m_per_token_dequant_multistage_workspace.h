@@ -169,6 +169,7 @@ public:
     template <>
     CATLASS_DEVICE void operator()<AscendC::AIC>(Params const &params)
     {
+        MoeTracing(TRACE_POINT("gmm2-combine aic", "B"));
         BlockScheduler blockScheduler;
         BlockMmad blockMmad(resource);
 
@@ -195,7 +196,11 @@ public:
         uint32_t stageId = 0;
         uint32_t stageUsed = 0;
         uint32_t startCoreIdx = 0;
+        uint32_t tracingIdx = 0;
+
         for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
+            uint32_t groupTracingIdx = tracingIdx++;
+            MoeTracing(TRACE_POINT("gmm2-combine moe-gmm2", "B"), 0, groupTracingIdx);
             if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                 gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(
                         gmBlistTensorDesc.GetDataPtr<int32_t>(groupIdx)));
@@ -238,7 +243,8 @@ public:
                 // Compute block-scoped matrix multiply-add
                 if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
                     blockMmad(gmA[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
-                              gmC[gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
+                              gmC[gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe,
+                              stageId, tracingIdx++);
                 } else {
                     callbackBeforeFixpipe();
                     blockMmad(gmA[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
@@ -254,10 +260,12 @@ public:
             gmGroupOffsetB += inGroupProblemShape.k() * inGroupProblemShape.n();
             }
             startCoreIdx = (startCoreIdx + coreLoops) % coreNum;
+            MoeTracing(TRACE_POINT("gmm2-combine moe-gmm2", "E"), 0, groupTracingIdx);
         }
         
         bool skipWithSoft[WORKSPACE_STAGES] = {};
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+            MoeTracing(TRACE_POINT("gmm2-combine shared-gmm2", "B"));
             gmA.SetGlobalBuffer(params.ptrSharedA);
             gmB.SetGlobalBuffer(params.ptrSharedB);
             uint32_t softStageUsed = 0;
@@ -272,6 +280,7 @@ public:
             // Determine the starting loopIdx of the current core under the current groupIdx
             uint32_t startLoopIdx = ((coreIdx < startCoreIdx) ? (coreIdx + coreNum) : coreIdx) - startCoreIdx;
             // Loop through the matmul of each groupIdx
+            uint32_t tracingIdx = 0;
             for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += coreNum) {
                 // Compute block location
                 GemmCoord blockCoord = blockScheduler.GetBlockCoord(loopIdx);
@@ -306,7 +315,8 @@ public:
                         gmB[gmOffsetB], layoutB,
                         gmC[gmOffsetC], layoutC,
                         actualBlockShape,
-                        callbackBeforeFixpipe, callbackAfterFixpipe
+                        callbackBeforeFixpipe, callbackAfterFixpipe,
+                        stageId, tracingIdx++
                     );
                 } else {
                     callbackBeforeFixpipe();
@@ -321,30 +331,37 @@ public:
 
                 stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
             }
+            MoeTracing(TRACE_POINT("gmm2-combine shared-gmm2", "E"));
         }
 
         if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
+            MoeTracing(TRACE_POINT("gmm2-combine sync-gmm2", "B"));
             blockMmad.SynchronizeBlock();
+            MoeTracing(TRACE_POINT("gmm2-combine sync-gmm2", "E"));
         }
 
         while (stageUsed > 0) {
             uint32_t aivComputeStageId = (stageId >= stageUsed) ?
                 (stageId - stageUsed) : (stageId + WORKSPACE_STAGES - stageUsed);
             if (skipWithSoft[aivComputeStageId]) {
-                Callback callbackBeforeFixpipe = MakeCallbackWithCall(&aicWaitFuncList[stageId]);
+                Callback callbackBeforeFixpipe = MakeCallbackWithCall(&aicWaitFuncList[aivComputeStageId]);
                 callbackBeforeFixpipe();
             } else {
-                Arch::CrossCoreWaitFlag(flagAivFinishComputeList[aivComputeStageId]);
+                Callback callbackBeforeFixpipe = MakeCallback(&aicWaitFuncList[aivComputeStageId]);
+                callbackBeforeFixpipe();
             }
             --stageUsed;
         }
+        MoeTracing(TRACE_POINT("gmm2-combine aic", "E"));
     }
 
     template <>
     CATLASS_DEVICE void operator()<AscendC::AIV>(Params const &params)
     {
+        MoeTracing(TRACE_POINT("gmm2-combine aiv", "B"));
         auto *combiner = (MoeDistributeCombineImpl::CamMoeDistributeCombine<TemplateMC2TypeFunc> *)params.combiner;
         do {
+            MoeTracing(TRACE_POINT("gmm2-combine block-epilogue", "B"));
             if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
                 if (get_subblockid() == 0) {
                     AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
@@ -373,7 +390,10 @@ public:
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                 gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(gmScaleListTensor.GetDataPtr<int32_t>(0));
             }
+            uint32_t tracingIdx = 0;
             for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
+                uint32_t groupTracingIdx = tracingIdx++;
+                MoeTracing(TRACE_POINT("gmm2-combine block-epilogue group", "B"), 0, groupTracingIdx);
                 uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
                                                     : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
                 GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
@@ -413,10 +433,14 @@ public:
                     auto gmBlockC = gmC[gmOffsetC];
                     auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
 
+                    MoeTracing(TRACE_POINT("gmm2-combine block-epilogue waiting", "B"), stageId, tracingIdx);
                     Arch::CrossCoreWaitFlag(flagAicFinishStoreList[stageId]);
+                    MoeTracing(TRACE_POINT("gmm2-combine block-epilogue waiting", "E"), stageId, tracingIdx);
+                    MoeTracing(TRACE_POINT("gmm2-combine block-epilogue calc", "B"), stageId, tracingIdx);
                     blockEpilogue(gmGroupOffsetD, groupIdx, blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC,
                                   layoutBlockC);
                     Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(flagAivFinishComputeList[stageId]);
+                    MoeTracing(TRACE_POINT("gmm2-combine block-epilogue calc", "E"), stageId, tracingIdx++);
 
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
                 }
@@ -428,9 +452,12 @@ public:
                 gmGroupOffsetD += inGroupProblemShape.m() * inGroupProblemShape.n();
 
                 startCoreIdx = (startCoreIdx + coreLoops) % coreNum;
+                MoeTracing(TRACE_POINT("gmm2-combine block-epilogue group", "E"), 0, groupTracingIdx);
             }
             if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
                 if (get_subblockid() == 0) {
+                    uint32_t tracingIdx = 0;
+                    MoeTracing(TRACE_POINT("gmm2-combine block-epilogue shared-group", "B"));
                     AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::SEND_SYNC_EVENT_ID);
                     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
                         AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
@@ -465,49 +492,66 @@ public:
                         Callback callbackBeforeBlockEpilogue = MakeCallbackWithCall(&aicWaitFuncList[stageId]);
                         Callback callbackAfterBlockEpilogue = MakeCallbackWithCall(&aicSetFuncList[stageId]);
 
+                        MoeTracing(TRACE_POINT("gmm2-combine block-epilogue shared-waiting", "B"), stageId, tracingIdx);
                         callbackBeforeBlockEpilogue();
+                        MoeTracing(TRACE_POINT("gmm2-combine block-epilogue shared-waiting", "E"), stageId, tracingIdx);
+                        MoeTracing(TRACE_POINT("gmm2-combine block-epilogue shared-calc", "B"), stageId, tracingIdx);
                         blockEpilogue(0, UINT32_MAX, blockShapeMNK, blockCoordMNK, actualBlockShapeMNK,
                             gmBlockC, layoutBlockC);
                         callbackAfterBlockEpilogue();
+                        MoeTracing(TRACE_POINT("gmm2-combine block-epilogue shared-calc", "E"), stageId, tracingIdx++);
 
                         stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
                     }
+                    MoeTracing(TRACE_POINT("gmm2-combine block-epilogue shared-group", "E"));
+                    MoeTracing(TRACE_POINT("gmm2-combine block-epilogue shared-wait-combine", "B"));
                     AscendC::CrossCoreWaitFlag(MoeDistributeCombineImpl::SEND_SYNC_EVENT_ID);
                     AscendC::CrossCoreWaitFlag(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
+                    MoeTracing(TRACE_POINT("gmm2-combine block-epilogue shared-wait-combine", "E"));
                 }
             }
+            MoeTracing(TRACE_POINT("gmm2-combine block-epilogue", "E"));
         } while(false);
 
         icache_preload(4);
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             if (get_subblockid() == 1) {
+                MoeTracing(TRACE_POINT("gmm2-combine combine", "B"));
                 resource.pipe.Init();
                 combiner->TPipeSet(&resource.pipe);
                 combiner->ProcessCombine();
                 combiner->TPipeSet(nullptr);
                 resource.pipe.Destroy();
+                MoeTracing(TRACE_POINT("gmm2-combine combine", "E"));
             }
         } else if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
             if (get_subblockid() == 0) {
+                MoeTracing(TRACE_POINT("gmm2-combine combine-send", "B"));
                 resource.pipe.Init();
                 combiner->TPipeSet(&resource.pipe);
                 combiner->AllToAllSend();
                 combiner->TPipeSet(nullptr);
                 resource.pipe.Destroy();
+                MoeTracing(TRACE_POINT("gmm2-combine combine-send", "E"));
             } else {
+                MoeTracing(TRACE_POINT("gmm2-combine combine-recv", "B"));
                 resource.pipe.Init();
                 combiner->TPipeSet(&resource.pipe);
                 combiner->ReducePermute();
                 combiner->TPipeSet(nullptr);
                 resource.pipe.Destroy();
+                MoeTracing(TRACE_POINT("gmm2-combine combine-recv", "E"));
             }
         } else {
+            MoeTracing(TRACE_POINT("gmm2-combine combine", "B"));
             resource.pipe.Init();
             combiner->TPipeSet(&resource.pipe);
             combiner->Process();
             combiner->TPipeSet(nullptr);
             resource.pipe.Destroy();
+            MoeTracing(TRACE_POINT("gmm2-combine combine", "E"));
         }
+        MoeTracing(TRACE_POINT("gmm2-combine aiv", "E"));
     }
 
 private:
