@@ -558,6 +558,7 @@ public:
     template <>
     CATLASS_DEVICE void operator()<AscendC::AIC>(Params const &params)
     {
+        MoeTracing(TRACE_POINT("dispatch-gmm1 aic", "B"));
         aicIdx = AscendC::GetBlockIdx();
         subBlockNum = AscendC::GetSubBlockNum();
         aiCoreGroupNum = AscendC::GetBlockNum();
@@ -630,6 +631,8 @@ public:
         aicSetFunc1 = {statusDataSpaceGm + SOFT_SYNC_OFFSET,
                        static_cast<uint8_t>(aicNum + AscendC::GetBlockIdx())};  // AIV wait for flags in latter part
         uint32_t target = 1;
+        
+        MoeTracing(TRACE_POINT("dispatch-gmm1 shared-process", "B"));
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             uint32_t currentM = params.bs;
             GemmCoord inGroupProblemShape{currentM, params.shareN, params.problemShape.k()};
@@ -645,7 +648,9 @@ public:
             uint32_t waitFlagCount = params.bs < shareQuantCoreNum ? params.bs : shareQuantCoreNum;
             shareQuantTokenStateTensor.SetGlobalBuffer((__gm__ int32_t*)(statusDataSpaceGm + SHARE_QUANT_SOFT_SYNC_OFFSET));
             uint32_t expected = waitFlagCount * vToCFlag;
+            MoeTracing(TRACE_POINT("dispatch-gmm1 wait-shared-token", "B"));
             WaitGroupTokenNumReady(shareQuantTokenStateTensor, expected);
+            MoeTracing(TRACE_POINT("dispatch-gmm1 wait-shared-token", "E"));
             // Loop through the matmul of each groupIdx
             for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aicNum) {
                 // Compute block location
@@ -686,6 +691,7 @@ public:
             }
             startCoreIdx = (startCoreIdx + coreLoops) % aicNum;
         }
+        MoeTracing(TRACE_POINT("dispatch-gmm1 shared-process", "E"));
 
         gmA.SetGlobalBuffer(params.ptrA);
         if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
@@ -694,6 +700,7 @@ public:
         int64_t gmGroupOffsetA = 0;
         int64_t gmGroupOffsetB = 0;
         for (uint32_t groupIdx = 0; groupIdx < localExpertNum; ++groupIdx) {
+            MoeTracing(TRACE_POINT("dispatch-gmm1 moe-process", "B"), 0, groupIdx);
             if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                 gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(
                         gmBlistTensorDesc.GetDataPtr<int32_t>(groupIdx)));
@@ -702,7 +709,9 @@ public:
                                                      groupIdx * GROUP_INFO_SIZE);
             // wait AIV recv needed tokens
             uint32_t expected = coreNumPerGroup * vToCFlag;
+            MoeTracing(TRACE_POINT("dispatch-gmm1 wait-moe-token", "B"), 0, groupIdx);
             WaitGroupTokenNumReady(groupTokenNumStateTensor, expected);
+            MoeTracing(TRACE_POINT("dispatch-gmm1 wait-moe-token", "E"), 0, groupIdx);
             uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT);
             GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
 
@@ -759,10 +768,13 @@ public:
             }
 
             startCoreIdx = (startCoreIdx + coreLoops) % aicNum;
+            MoeTracing(TRACE_POINT("dispatch-gmm1 moe-process", "E"), 0, groupIdx);
         }
 
         if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
+            MoeTracing(TRACE_POINT("dispatch-gmm1 sync-block-mmad", "B"));
             blockMmad.SynchronizeBlock();
+            MoeTracing(TRACE_POINT("dispatch-gmm1 sync-block-mmad", "E"));
         }
 
         while (stageUsed > 0) {
@@ -771,7 +783,10 @@ public:
             target += 1;
             --stageUsed;
         }
+        MoeTracing(TRACE_POINT("dispatch-gmm1 sync-aic", "B"));
         AscendC::SyncAll<false>();
+        MoeTracing(TRACE_POINT("dispatch-gmm1 sync-aic", "E"));
+        MoeTracing(TRACE_POINT("dispatch-gmm1 aic", "E"));
     }
 
     CATLASS_DEVICE
@@ -997,6 +1012,7 @@ public:
         for (uint32_t tokenIndex = startTokenId; tokenIndex < endTokenId; ++tokenIndex) {
             uint32_t index = (tokenIndex & 1) ? 0 : 1;
             int32_t eventId = (tokenIndex & 1) ? 0 : 1;
+            MoeTracing(TRACE_POINT("dispatch-gmm1 shared-dispatch-send", "B"), eventId, 0);
             uint32_t temp = (epRankId * axisBS) / sharedExpertRankNum;
             uint32_t moeOnShareRank = CEIL((tokenIndex + 1 + temp) * sharedExpertRankNum, axisBS) - 1 - epRankId;
             uint32_t preCnt = (moeOnShareRank + epRankId) * axisBS / sharedExpertRankNum -
@@ -1028,6 +1044,7 @@ public:
             }
             AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(eventId);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventId);
+            MoeTracing(TRACE_POINT("dispatch-gmm1 shared-dispatch-send", "E"), eventId, 0);
         }
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(1);
@@ -1079,6 +1096,7 @@ public:
         AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(1);
         uint32_t sendValidTokenIndex = 0;
         for (uint32_t sendGroupIndex = 0; sendGroupIndex < moeExpertNumPerRank; ++sendGroupIndex) {
+            MoeTracing(TRACE_POINT("dispatch-gmm1 moe-dispatch-send", "B"));
             for (uint32_t tokenIndex = startTokenId; tokenIndex < endTokenId; ++tokenIndex) {
                 int32_t dstExpertId = expertIdsTensor_(tokenIndex);
                 if (dstExpertId < 0) {
@@ -1118,6 +1136,7 @@ public:
                 AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(eventId);
                 AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventId);
             }
+            MoeTracing(TRACE_POINT("dispatch-gmm1 moe-dispatch-send", "E"));
         }
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(1);
@@ -1166,12 +1185,14 @@ public:
         sendToMoeAivNum = sendCoreNum - sendToShareAivNum;
 
         AscendC::SetDeqScale((half)1.000000e+00f);
+        MoeTracing(TRACE_POINT("dispatch-gmm1 dispatch-send", "B"));
         if (hasShareExpert && sendCoreIdx >= sendToMoeAivNum) {
             SendToShareExprt(gmX, gmX1, gmX1Scale);
         } else {
             SendToMoeExprt(gmX, gmExpandIdx);
         }
         AscendC::PipeBarrier<PIPE_ALL>();
+        MoeTracing(TRACE_POINT("dispatch-gmm1 dispatch-send", "E"));
     }
 
     CATLASS_DEVICE
@@ -1570,6 +1591,7 @@ public:
             uint32_t startCoreIdx = 0;
             AscendC::ListTensorDesc gmScaleListTensor;
             AscendC::GlobalTensor<int32_t> groupTokenNumStateTensor;
+            MoeTracing(TRACE_POINT("dispatch-gmm1 shared-dispatch-swiglu", "B"));
 #ifdef USE_SEND_CORE_FOR_SHARE_SWIGLU
             // 陪同计算共享专家的状态
             if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
@@ -1620,8 +1642,10 @@ public:
                     int64_t gmOffsetC = layoutC.GetOffset(offsetC);
                     auto gmBlockC = gmC[gmOffsetC];
                     auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
+                    MoeTracing(TRACE_POINT("dispatch-gmm1 shared-dispatch-swiglu wait-flag", "B"), stageId, (loopIdx - startLoopIdx) / aiCoreGroupNum);
                     CheckSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET,
                         static_cast<uint8_t>(compCoreNum + compCoreIdx), target); // AIV等待的信号在24~28
+                    MoeTracing(TRACE_POINT("dispatch-gmm1 shared-dispatch-swiglu wait-flag", "E"), stageId, (loopIdx - startLoopIdx) / aiCoreGroupNum);
                     target += 1;
                     blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
                     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
@@ -1641,12 +1665,14 @@ public:
                 AscendC::PipeBarrier<PIPE_ALL>();
             }
 #endif
+            MoeTracing(TRACE_POINT("dispatch-gmm1 shared-dispatch-swiglu", "E"));
             gmScaleListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(gmScale));
             __gm__ ElementScale* gmScalePtr;
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                 gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(gmScaleListTensor.GetDataPtr<int32_t>(0));
             }
             for (uint32_t groupIdx = 0; groupIdx < localExpertNum; ++groupIdx) {
+                MoeTracing(TRACE_POINT("dispatch-gmm1 moe-dispatch-swiglu", "B"), 0, groupIdx);
                 // just like AIC
                 groupTokenNumStateTensor.SetGlobalBuffer((__gm__ int32_t *)
                                                          (statusDataSpaceGm + GROUP_TOKEN_NUM_OFFSET) +
@@ -1696,8 +1722,10 @@ public:
                     int64_t gmOffsetC = layoutC.GetOffset(offsetC);
                     auto gmBlockC = gmC[gmOffsetC];
                     auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
+                    MoeTracing(TRACE_POINT("dispatch-gmm1 moe-dispatch-swiglu wait-flag (with groupIdx)", "B"), stageId, (loopIdx - startLoopIdx) / aiCoreGroupNum);
                     CheckSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET,
                         static_cast<uint8_t>(compCoreNum + compCoreIdx), target);
+                    MoeTracing(TRACE_POINT("dispatch-gmm1 moe-dispatch-swiglu wait-flag (with groupIdx)", "B"), stageId, (loopIdx - startLoopIdx) / aiCoreGroupNum);
                     target += 1;
                     blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
                     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
@@ -1723,6 +1751,7 @@ public:
                 AscendC::DataCopy(swigluStateTensor, tmpLocalTensor, INT32_COUNT_PER_BLOCK);
                 AscendC::SetAtomicNone();
                 AscendC::PipeBarrier<PIPE_ALL>();
+                MoeTracing(TRACE_POINT("dispatch-gmm1 moe-dispatch-swiglu", "E"), 0, groupIdx);
             }
         }
         // clean
@@ -1958,40 +1987,55 @@ public:
     template <>
     CATLASS_DEVICE void operator()<AscendC::AIV>(Params const &params)
     {
+        MoeTracing(TRACE_POINT("dispatch-gmm1 aiv", "B"));
+        MoeTracing(TRACE_POINT("dispatch-gmm1 aiv-init-params", "B"));
         AivInitParams(params);
+        MoeTracing(TRACE_POINT("dispatch-gmm1 aiv-init-params", "E"));
+        MoeTracing(TRACE_POINT("dispatch-gmm1 aiv-init-state", "B"));
         AivInitState();
+        MoeTracing(TRACE_POINT("dispatch-gmm1 aiv-init-state", "E"));
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             if (isShareQuantCore) {
+                MoeTracing(TRACE_POINT("dispatch-gmm1 shareQuantCoreFunc", "B"));
                 shareQuantCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmShareX1, (GM_ADDR)params.gmShareX1Scale);
+                MoeTracing(TRACE_POINT("dispatch-gmm1 shareQuantCoreFunc", "E"));
             }
         }
         if (isSendCore) {
+            MoeTracing(TRACE_POINT("dispatch-gmm1 SendCoreFunc", "B"));
             SendCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmexpertIds, (GM_ADDR)params.ptrA,
                         (GM_ADDR)params.ptrPerTokenScale, (GM_ADDR)params.gmExpandIdx, (GM_ADDR)params.gmXActiveMask);
+            MoeTracing(TRACE_POINT("dispatch-gmm1 SendCoreFunc", "E"));
         }
         auto gmShareSwigluOutput = reinterpret_cast<__gm__ float *>(params.gmShareSwigluOut);
 #ifdef USE_SEND_CORE_FOR_SHARE_SWIGLU
         // 使用发送核做swiglu同步比较麻烦，先使用接收核统一做swiglu计算 
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             if (isShareSwigluCore) {
+                MoeTracing(TRACE_POINT("dispatch-gmm1 shareSwigluCoreFunc", "B"));
                 shareSwigluCoreFunc(params.ptrWorkspace, (__gm__ float*)params.ptrShareScale,
                     (__gm__ float*)params.gmShareX1Scale, gmShareSwigluOutput,
                     params.problemShape.n(), params.problemShape.k(), params.layoutScale,
                     params.layoutPerTokenScale, params.layoutOutput);
+                MoeTracing(TRACE_POINT("dispatch-gmm1 shareSwigluCoreFunc", "E"));
             }
         }
 #endif
         if (isRecvCore) {
+            MoeTracing(TRACE_POINT("dispatch-gmm1 RecvCoreFunc", "B"));
             RecvCoreFunc((GM_ADDR)params.ptrA, (GM_ADDR)params.ptrPerTokenScale, (GM_ADDR)params.gmEpSendCount);
+            MoeTracing(TRACE_POINT("dispatch-gmm1 RecvCoreFunc", "E"));
         }
 
         auto gmSwigluOutput = reinterpret_cast<__gm__ float *>(params.gmSwigluOut);
         if (isCompCore) {
+            MoeTracing(TRACE_POINT("dispatch-gmm1 CompCoreFunc", "B"));
             CompCoreFunc(params.ptrWorkspace, (__gm__ float*)params.ptrShareScale,  params.ptrScale,
                 (__gm__ float*)params.gmShareX1Scale, (__gm__ float*)params.ptrPerTokenScale, 
                 gmShareSwigluOutput, gmSwigluOutput,
                 params.shareN, params.problemShape.n(), params.problemShape.k(), params.layoutShareScale, params.layoutScale,
                 params.layoutPerTokenScale);
+            MoeTracing(TRACE_POINT("dispatch-gmm1 CompCoreFunc", "E"));
         }
 
         if (isSendCore) {
@@ -2001,6 +2045,7 @@ public:
             int64_t gmPtrOutputOffset = 0;
             int64_t gmDequantScaleOffset = 0;
             if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
+                MoeTracing(TRACE_POINT("dispatch-gmm1 shared-quant", "B"));
                 // dynamic quant
                 totalTokenCount = axisBS;
                 uint32_t n = params.shareN;
@@ -2039,9 +2084,11 @@ public:
                 }
                 startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
                 AscendC::PipeBarrier<PIPE_ALL>();
+                MoeTracing(TRACE_POINT("dispatch-gmm1 shared-quant", "E"));
             }
             {
                 for (uint32_t groupIdx = 0; groupIdx < localExpertNum; ++groupIdx) {
+                    MoeTracing(TRACE_POINT("dispatch-gmm1 moe-quant", "B"), 0, groupIdx);
                     // dynamic quant
                     AscendC::GlobalTensor<int32_t> sendCountsGlobal;
                     sendCountsGlobal.SetGlobalBuffer((__gm__ int32_t *)
@@ -2095,11 +2142,13 @@ public:
                     gmPtrOutputOffset += currentM * nOut;
                     gmSwigluOutputOffset += currentM * n;
                     startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
+                    MoeTracing(TRACE_POINT("dispatch-gmm1 moe-quant", "E"), 0, groupIdx);
                 }
             }
             AscendC::PipeBarrier<PIPE_ALL>();
         }
 
+        MoeTracing(TRACE_POINT("dispatch-gmm1 sync-aiv", "B"));
         icache_preload(8);
         // AscendC::SyncAll<false>();
         // AscendC::PipeBarrier<PIPE_ALL>();
@@ -2162,7 +2211,11 @@ public:
         // }
         AscendC::SyncAll<false>();
         AscendC::PipeBarrier<PIPE_ALL>();
+        MoeTracing(TRACE_POINT("dispatch-gmm1 sync-aiv", "E"));
+        MoeTracing(TRACE_POINT("dispatch-gmm1 UpdateAndCleanInfo", "B"));
         UpdateAndCleanInfo(params.ptrGroupList, params.gmEpSendCount, params.gmExpertTokenNums);
+        MoeTracing(TRACE_POINT("dispatch-gmm1 UpdateAndCleanInfo", "E"));
+        MoeTracing(TRACE_POINT("dispatch-gmm1 aiv", "E"));
     }
 
 private:
