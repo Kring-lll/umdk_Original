@@ -9,7 +9,6 @@
  */
 #include <stdint.h>
 #include <errno.h>
-#include <dirent.h>
 
 #include "urma_cmd.h"
 #include "tpsa_log.h"

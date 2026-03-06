@@ -8,9 +8,6 @@
  * History: 2024-08-06 create this file to support uvs cmd tlv
  */
 
-#include <stdlib.h>
-#include <errno.h>
-
 #include "tpsa_log.h"
 #include "tpsa_ioctl.h"
 #include "uvs_cmd_tlv.h"

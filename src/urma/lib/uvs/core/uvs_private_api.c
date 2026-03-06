@@ -15,7 +15,7 @@
 static pthread_mutex_t g_uvs_ops_lock;
 static pthread_rwlock_t g_uvs_api_rwlock = PTHREAD_RWLOCK_INITIALIZER;
 
-int uvs_ops_lock_init(void)
+static int uvs_ops_lock_init(void)
 {
     if (pthread_mutex_init(&g_uvs_ops_lock, NULL) != 0) {
         return -1;
@@ -23,12 +23,12 @@ int uvs_ops_lock_init(void)
     return 0;
 }
 
-void uvs_ops_lock_uninit(void)
+static void uvs_ops_lock_uninit(void)
 {
     (void)pthread_mutex_destroy(&g_uvs_ops_lock);
 }
 
-int uvs_ops_mutex_lock(void)
+static int uvs_ops_mutex_lock(void)
 {
     int ret;
 
@@ -40,7 +40,7 @@ int uvs_ops_mutex_lock(void)
     return 0;
 }
 
-int uvs_ops_mutex_unlock(void)
+static int uvs_ops_mutex_unlock(void)
 {
     int ret;
 
