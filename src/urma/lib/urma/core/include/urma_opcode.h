@@ -93,7 +93,7 @@
 #define URMA_TYPICAL_RNR_RETRY     7  /* typical value of rnr retry for jfs cfg */
 #define URMA_TYPICAL_ERR_TIMEOUT   17 /* typical value of err_timeout for jfs cfg */
 #define URMA_TYPICAL_MIN_RNR_TIMER 12 /* typical value of min_rnr_timer for jfr cfg */
-#define URMA_MAX_PRIORITY          15
+#define URMA_INVALID_PRIORITY      255
 
 /* operation information */
 typedef enum urma_place_order {
