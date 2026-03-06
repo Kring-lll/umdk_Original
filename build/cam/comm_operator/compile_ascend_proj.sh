@@ -90,6 +90,7 @@ BuildAscendProj() {
     rm -rf ./${proj_name}/op_host/add_custom*
     rm  -rf ./${proj_name}/op_kernel/add_custom*
     CopyOps "./ascend_kernels" "./${proj_name}"
+    python $SCRIPTS_PATH/comm_operator/trace_preprocessor.py "./${proj_name}" $BUILD_OUT_PATH/ --modify
     python $SCRIPTS_PATH/comm_operator/set_conf.py ./${proj_name}/CMakePresets.json $build_type True CAM
     cp -rf ./ascend_kernels/pregen ./${proj_name}
     # if need to compile shmem opts: replace msopgen camke files with pregen {.ascend_kernels/pregen/cmake}

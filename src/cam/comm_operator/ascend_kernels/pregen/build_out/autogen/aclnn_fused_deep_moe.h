@@ -42,6 +42,7 @@ __attribute__((visibility("default"))) aclnnStatus aclnnFusedDeepMoeGetWorkspace
     const aclTensor *output,
     const aclTensor *shareOutput,
     const aclTensor *expertTokenNums,
+    const aclTensor *profiling,
     uint64_t *workspaceSize,
     aclOpExecutor **executor);
 
