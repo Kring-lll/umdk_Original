@@ -253,10 +253,6 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
         if (cfg->flag.bs.multi_path == false) {
             URMA_LOG_ERR("In matrix server, JFS don't support single-path mode.\n");
             return NULL;
-        } else {
-            // Hacky: CTP must use priority 6, will query for available prioritues instead
-            const uint8_t ctp_priority = 6;
-            cfg->priority = ctp_priority;
         }
     }
 
@@ -728,10 +724,6 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
                     "set to multi-path mode forcely\n");
                 jetty_cfg->jfs_cfg.flag.bs.multi_path = true;
             }
-        } else {
-            // Hacky: CTP must use priority 6, will query for available prioritues instead
-            const uint8_t ctp_priority = 6;
-            jetty_cfg->jfs_cfg.priority = ctp_priority;
         }
     }
 
@@ -1041,7 +1033,7 @@ static int add_remote_jetty_id_info(bondp_context_t *bdp_ctx, bondp_target_jetty
     return 0;
 }
 
-urma_target_jetty_t * bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjetty, urma_token_t *token_value)
+urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjetty, urma_token_t *token_value)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
 
