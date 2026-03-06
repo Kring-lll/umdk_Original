@@ -144,6 +144,14 @@ typedef struct bondp_comp {
     uint64_t v_orig_handle;
 } bondp_comp_t;
 
+typedef struct urma_bond_id_info_out {
+    urma_jetty_id_t base_id;
+    urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
+    int dev_num;
+    bool is_in_matrix_server;
+    bool is_multipath;
+} urma_bond_id_info_out_t;
+
 typedef struct bondp_target_jetty {
     urma_target_jetty_t v_tjetty;
     urma_target_jetty_t *p_tjetty[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
