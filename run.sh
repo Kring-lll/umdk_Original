@@ -1,6 +1,7 @@
 export SCRIPT_PATH=$(dirname "$(readlink -f "$0")")
 export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/Ascend/ascend-toolkit/latest/opp/vendors/CAM/op_api/lib
 export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${SCRIPT_PATH}/src/build_out/comm_operator/lib
+export PYTHONPATH="${PYTHONPATH}:${SCRIPT_PATH}/build/cam/comm_operator"
 
 cd ${SCRIPT_PATH}/
 find . -name "*.sh" | xargs -i chmod +x {}
@@ -18,6 +19,7 @@ case $1 in
     1)
         echo "run"
         python src/cam/examples/fused_deep_moe_sample.py
+        python build/cam/comm_operator/trace_collector.py ${SCRIPT_PATH}/output/cam/profiling_data ${SCRIPT_PATH}/output/cam/point_map.json -o ${SCRIPT_PATH}/output/cam/trace.json
         ;;
     *)
         echo "invalid argument"
