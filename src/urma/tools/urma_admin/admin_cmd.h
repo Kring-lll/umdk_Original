@@ -199,7 +199,7 @@ int admin_cmd_list_res_legacy(admin_config_t *cfg);
 int admin_cmd_add_eid_legacy(admin_config_t *cfg);
 int admin_cmd_del_eid_legacy(admin_config_t *cfg);
 int admin_cmd_set_eid_mode_legacy(admin_config_t *cfg);
-int admin_cmd_set_ns_mode_legacy(admin_config_t *cfg);
+int admin_cmd_set_ns_mode_legacy(const admin_config_t *cfg);
 int admin_cmd_set_dev_ns_legacy(admin_config_t *cfg);
 
 // New command
