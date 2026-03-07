@@ -32,11 +32,28 @@ Callback MakeCallbackWithCall(Func *func)
     return callback;
 }
 
+template <typename Func>
+CATLASS_DEVICE
+Callback MakeCallbackWithCall2(Func *func)
+{
+    Callback callback;
+    callback.func = func;
+    callback.caller = [](void const *f) {
+        static_cast<Func const *>(f)->Call2();
+    };
+    return callback;
+}
+
 #define ENABLE_TENSOR_LIST
+#define ENABLE_FULL_SOFT_SYNC 0
 
 namespace Catlass::Gemm::Kernel {
 namespace GMM2 {
+#if ENABLE_FULL_SOFT_SYNC
+    constexpr uint32_t SOFT_SYNC_SPACE_SIZE = 256;
+#else
     constexpr uint32_t SOFT_SYNC_SPACE_SIZE = 512;
+#endif
     constexpr uint64_t SOFT_SYNC_OFFSET = 964 * 1024;
 }
 
@@ -151,15 +168,20 @@ public:
             aicWaitFuncList[stageId] = {this, stageId};
             aicSetFuncList[stageId] = {this, stageId};
         }
+#if ENABLE_FULL_SOFT_SYNC
+        const uint32_t syncGmAddrOffset =
+            GMM2::SOFT_SYNC_OFFSET + get_block_idx() * 2 * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+#else
+        const uint32_t syncGmAddrOffset =
+            GMM2::SOFT_SYNC_OFFSET + get_block_idx() * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+#endif
         if (commArgs) {
             epWinContext_.SetGlobalBuffer(&(reinterpret_cast<__gm__ Moe::CommArgs *>(commArgs))->peerMems[0],
                                           Moe::CAM_MAX_RANK_SIZE);
-            syncGmAddr = ((GM_ADDR)epWinContext_.GetValue(epRankId)) + GMM2::SOFT_SYNC_OFFSET +
-                         get_block_idx() * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+            syncGmAddr = ((GM_ADDR)epWinContext_.GetValue(epRankId)) + syncGmAddrOffset;
         } else {
             winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
-            syncGmAddr = (GM_ADDR)((winContext_)->localWindowsExp) + GMM2::SOFT_SYNC_OFFSET +
-                         get_block_idx() * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+            syncGmAddr = (GM_ADDR)((winContext_)->localWindowsExp) + syncGmAddrOffset;
         }
     }
 
@@ -226,11 +248,19 @@ public:
 
                 Callback callbackBeforeFixpipe{};
                 if (stageUsed == WORKSPACE_STAGES) {
+#if ENABLE_FULL_SOFT_SYNC
+                    callbackBeforeFixpipe = MakeCallbackWithCall2(&aicWaitFuncList[stageId]);
+#else
                     callbackBeforeFixpipe = MakeCallback(&aicWaitFuncList[stageId]);
+#endif
                 } else {
                     ++stageUsed;
                 }
+#if ENABLE_FULL_SOFT_SYNC
+                Callback callbackAfterFixpipe = MakeCallbackWithCall2(&aicSetFuncList[stageId]);
+#else
                 Callback callbackAfterFixpipe = MakeCallback(&aicSetFuncList[stageId]);
+#endif
 
                 // Compute initial location in logical coordinates
                 MatrixCoord offsetA{blockCoord.m() * L1TileShape::M, blockCoord.k() * L1TileShape::K};
@@ -291,7 +321,11 @@ public:
                     callbackBeforeFixpipe = MakeCallbackWithCall(&aicWaitFuncList[stageId]);
                 } else {
                     if (stageUsed == WORKSPACE_STAGES) {
+#if ENABLE_FULL_SOFT_SYNC
+                        callbackBeforeFixpipe = MakeCallbackWithCall2(&aicWaitFuncList[stageId]);
+#else
                         callbackBeforeFixpipe = MakeCallback(&aicWaitFuncList[stageId]);
+#endif
                     } else {
                         ++stageUsed;
                     }
@@ -315,7 +349,7 @@ public:
                         gmB[gmOffsetB], layoutB,
                         gmC[gmOffsetC], layoutC,
                         actualBlockShape,
-                        callbackBeforeFixpipe, callbackAfterFixpipe
+                        callbackBeforeFixpipe, callbackAfterFixpipe,
                         stageId, tracingIdx++
                     );
                 } else {
@@ -347,7 +381,11 @@ public:
                 Callback callbackBeforeFixpipe = MakeCallbackWithCall(&aicWaitFuncList[aivComputeStageId]);
                 callbackBeforeFixpipe();
             } else {
+#if ENABLE_FULL_SOFT_SYNC
+                Callback callbackBeforeFixpipe = MakeCallbackWithCall2(&aicWaitFuncList[aivComputeStageId]);
+#else
                 Callback callbackBeforeFixpipe = MakeCallback(&aicWaitFuncList[aivComputeStageId]);
+#endif
                 callbackBeforeFixpipe();
             }
             --stageUsed;
@@ -433,13 +471,26 @@ public:
                     auto gmBlockC = gmC[gmOffsetC];
                     auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
 
+#if ENABLE_FULL_SOFT_SYNC
+                    Callback callbackBeforeBlockEpilogue = MakeCallbackWithCall2(&aicWaitFuncList[stageId]);
+                    Callback callbackAfterBlockEpilogue = MakeCallbackWithCall2(&aicSetFuncList[stageId]);
+#endif
+
                     MoeTracing(TRACE_POINT("gmm2-combine block-epilogue waiting", "B"), stageId, tracingIdx);
+#if ENABLE_FULL_SOFT_SYNC
+                    callbackBeforeBlockEpilogue();
+#else
                     Arch::CrossCoreWaitFlag(flagAicFinishStoreList[stageId]);
+#endif
                     MoeTracing(TRACE_POINT("gmm2-combine block-epilogue waiting", "E"), stageId, tracingIdx);
                     MoeTracing(TRACE_POINT("gmm2-combine block-epilogue calc", "B"), stageId, tracingIdx);
                     blockEpilogue(gmGroupOffsetD, groupIdx, blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC,
                                   layoutBlockC);
+#if ENABLE_FULL_SOFT_SYNC
+                    callbackAfterBlockEpilogue();
+#else
                     Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(flagAivFinishComputeList[stageId]);
+#endif
                     MoeTracing(TRACE_POINT("gmm2-combine block-epilogue calc", "E"), stageId, tracingIdx++);
 
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
@@ -572,7 +623,7 @@ private:
             // 查看flag，类似wait flag
             AscendC::PipeBarrier<PIPE_ALL>();
             AscendC::GlobalTensor<uint8_t> global;
-            global.SetGlobalBuffer(ptr->syncGmAddr + stageId * GMM2::SOFT_SYNC_SPACE_SIZE);
+            global.SetGlobalBuffer(ptr->syncGmAddr + stageId * GMM2::SOFT_SYNC_SPACE_SIZE * 2);
             while (true){
                 __asm__ __volatile__("");
                 AscendC::DataCacheCleanAndInvalid<uint8_t,
@@ -585,6 +636,72 @@ private:
                             AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
                     __asm__ __volatile__("");
                     break;
+                }
+            }
+            AscendC::PipeBarrier<PIPE_ALL>();
+        }
+
+        CATLASS_DEVICE
+        void Call2() const {
+            constexpr uint32_t waitValue = g_coreType == AscendC::AIC ? 0 : 1;
+            // 查看flag，类似wait flag
+            AscendC::PipeBarrier<PIPE_ALL>();
+            AscendC::GlobalTensor<uint8_t> global;
+            global.SetGlobalBuffer(ptr->syncGmAddr + stageId * GMM2::SOFT_SYNC_SPACE_SIZE * 2);
+            int32_t waitOffset[2];
+            if constexpr (g_coreType == AscendC::AIC) {
+                waitOffset[0] = 0;
+                waitOffset[1] = GMM2::SOFT_SYNC_SPACE_SIZE;
+            } else {
+                waitOffset[0] = get_subblockid() * GMM2::SOFT_SYNC_SPACE_SIZE;
+            }
+
+            while (true){
+                if constexpr (g_coreType == AscendC::AIC) {
+                    if (waitOffset[0] != -1) {
+                        __asm__ __volatile__("");
+                        AscendC::DataCacheCleanAndInvalid<uint8_t,
+                                    AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
+                        __asm__ __volatile__("");
+                        uint8_t value = global.GetValue(waitOffset[0]);
+                        if (value == waitValue) {
+                            __asm__ __volatile__("");
+                            AscendC::DataCacheCleanAndInvalid<uint8_t,
+                                        AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
+                            __asm__ __volatile__("");
+                            waitOffset[0] = -1;
+                        }
+                    }
+                    if (waitOffset[1] != -1) {
+                        __asm__ __volatile__("");
+                        AscendC::DataCacheCleanAndInvalid<uint8_t,
+                                    AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[1]]);
+                        __asm__ __volatile__("");
+                        uint8_t value = global.GetValue(waitOffset[1]);
+                        if (value == waitValue) {
+                            __asm__ __volatile__("");
+                            AscendC::DataCacheCleanAndInvalid<uint8_t,
+                                        AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[1]]);
+                            __asm__ __volatile__("");
+                            waitOffset[1] = -1;
+                        }
+                    }
+                    if (waitOffset[0] == -1 && waitOffset[1] == -1) {
+                        break;
+                    }
+                } else {
+                    __asm__ __volatile__("");
+                    AscendC::DataCacheCleanAndInvalid<uint8_t,
+                                AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
+                    __asm__ __volatile__("");
+                    uint8_t value = global.GetValue(waitOffset[0]);
+                    if (value == waitValue) {
+                        __asm__ __volatile__("");
+                        AscendC::DataCacheCleanAndInvalid<uint8_t,
+                                    AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
+                        __asm__ __volatile__("");
+                        break;
+                    }
                 }
             }
             AscendC::PipeBarrier<PIPE_ALL>();
@@ -613,7 +730,7 @@ private:
             constexpr uint32_t setValue = g_coreType == AscendC::AIC ? 1 : 0;
             AscendC::PipeBarrier<PIPE_ALL>();
             AscendC::GlobalTensor<uint8_t> global;
-            global.SetGlobalBuffer(ptr->syncGmAddr + stageId * GMM2::SOFT_SYNC_SPACE_SIZE);
+            global.SetGlobalBuffer(ptr->syncGmAddr + stageId * GMM2::SOFT_SYNC_SPACE_SIZE * 2);
             __asm__ __volatile__("");
             AscendC::DataCacheCleanAndInvalid<uint8_t,
                             AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
@@ -623,6 +740,52 @@ private:
             AscendC::DataCacheCleanAndInvalid<uint8_t,
                             AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
             __asm__ __volatile__("");
+            AscendC::PipeBarrier<PIPE_ALL>();
+        }
+
+        CATLASS_DEVICE
+        void Call2() const {
+            constexpr uint32_t setValue = g_coreType == AscendC::AIC ? 1 : 0;
+            AscendC::PipeBarrier<PIPE_ALL>();
+            AscendC::GlobalTensor<uint8_t> global;
+            global.SetGlobalBuffer(ptr->syncGmAddr + stageId * GMM2::SOFT_SYNC_SPACE_SIZE * 2);
+            int32_t waitOffset[2];
+            if constexpr (g_coreType == AscendC::AIC) {
+                waitOffset[0] = 0;
+                waitOffset[1] = GMM2::SOFT_SYNC_SPACE_SIZE;
+            } else {
+                waitOffset[0] = get_subblockid() * (GMM2::SOFT_SYNC_SPACE_SIZE);
+            }
+            if constexpr (g_coreType == AscendC::AIC) {
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<uint8_t,
+                            AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
+                __asm__ __volatile__("");
+                global.SetValue(waitOffset[0], setValue);
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<uint8_t,
+                                AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
+                __asm__ __volatile__("");
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<uint8_t,
+                            AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[1]]);
+                __asm__ __volatile__("");
+                global.SetValue(waitOffset[1], setValue);
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<uint8_t,
+                                AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[1]]);
+                __asm__ __volatile__("");
+            } else {
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<uint8_t,
+                                AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
+                __asm__ __volatile__("");
+                global.SetValue(waitOffset[0], setValue);
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<uint8_t,
+                                AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
+                __asm__ __volatile__("");
+            }
             AscendC::PipeBarrier<PIPE_ALL>();
         }
 
