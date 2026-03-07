@@ -117,7 +117,7 @@ bjetty_ctx_t *create_bjetty_ctx(urma_context_t *ctx, bondp_comp_t *bdp_comp,
 {
     bjetty_ctx_t *bjetty_ctx = NULL;
 
-    if (hdr_buf_size & (BJETTY_CTX_PAGE_SIZE - 1)) {
+    if ((hdr_buf_size & (BJETTY_CTX_PAGE_SIZE - 1)) != 0) {
         URMA_LOG_ERR("Unaligned hdr_buf_size\n");
         return NULL;
     }
@@ -140,13 +140,13 @@ bjetty_ctx_t *create_bjetty_ctx(urma_context_t *ctx, bondp_comp_t *bdp_comp,
         bjetty_ctx->pjettys_valid[i] = true;
     }
 
-    if (create_bjetty_wr_bufs(bjetty_ctx, wr_buf_size)) {
+    if (create_bjetty_wr_bufs(bjetty_ctx, wr_buf_size) != 0) {
         goto FREE_CTX;
     }
-    if (create_bjetty_segments(ctx, bjetty_ctx, hdr_buf_size)) {
+    if (create_bjetty_segments(ctx, bjetty_ctx, hdr_buf_size) != 0) {
         goto DESTROY_WR_BUFS;
     }
-    if (bdp_v_conn_table_create(&bjetty_ctx->v_conn_table, BONDP_MAX_NUM_JETTYS)) {
+    if (bdp_v_conn_table_create(&bjetty_ctx->v_conn_table, BONDP_MAX_NUM_JETTYS) != 0) {
         goto DESTROY_SEGMENTS;
     }
 

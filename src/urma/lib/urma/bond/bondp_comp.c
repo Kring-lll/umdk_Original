@@ -280,7 +280,7 @@ static urma_jfs_cfg_t *bondp_jfs_get_args_list(bondp_context_t *bdp_ctx, urma_jf
         return NULL;
     }
 
-    if (cfg->flag.bs.multi_path) {
+    if (cfg->flag.bs.multi_path != 0) {
         if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
             dev_num = SINGLE_DIE_IODIE_NUM;
         } else {
@@ -367,7 +367,7 @@ static urma_jetty_cfg_t *bondp_jetty_get_args_list(bondp_context_t *bdp_ctx, urm
         return NULL;
     }
 
-    if (cfg->jfs_cfg.flag.bs.multi_path) {
+    if (cfg->jfs_cfg.flag.bs.multi_path != 0) {
         if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
             dev_num = SINGLE_DIE_IODIE_NUM;
         } else {
