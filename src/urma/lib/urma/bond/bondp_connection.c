@@ -35,11 +35,11 @@ int bdp_v_conn_init(bdp_v_conn_t *v_conn)
     v_conn->target_vjetty = NULL;
     v_conn->target_dev_num = 0;
     v_conn->msn = 0;
-    if (bdp_slide_wnd_init(&v_conn->recv_wnd, BONDP_MAX_BITMAP_SIZE, BONDP_RECV_WND_SIZE, 0)) {
+    if (bdp_slide_wnd_init(&v_conn->recv_wnd, BONDP_MAX_BITMAP_SIZE, BONDP_RECV_WND_SIZE, 0) != 0) {
         URMA_LOG_ERR("Failed to init slide window in bdp_v_conn_table_add");
         return -1;
     }
-    if (bdp_slide_wnd_init(&v_conn->send_wnd, BONDP_MAX_BITMAP_SIZE, BONDP_RECV_WND_SIZE, 0)) {
+    if (bdp_slide_wnd_init(&v_conn->send_wnd, BONDP_MAX_BITMAP_SIZE, BONDP_RECV_WND_SIZE, 0) != 0) {
         URMA_LOG_ERR("Failed to init sender slide window in bdp_v_conn_table_add");
         goto UNINIT_RCV_WND;
     }
@@ -118,7 +118,7 @@ int bdp_v_conn_table_add_on_send(bondp_hash_table_t *tbl, urma_jetty_id_t *targe
     if (v_conn_node == NULL) {
         return BONDP_HASH_MAP_ALLOC_ERROR;
     }
-    if (bdp_v_conn_init(&v_conn_node->v_conn)) {
+    if (bdp_v_conn_init(&v_conn_node->v_conn) != 0) {
         goto FREE_VCONN_NODE;
     }
     init_v_conn_on_send(&v_conn_node->v_conn, target_vjetty, target_dev_num);
@@ -145,7 +145,7 @@ int bdp_v_conn_table_add_on_recv(bondp_hash_table_t *tbl, urma_jetty_id_t *targe
     if (v_conn_node == NULL) {
         return BONDP_HASH_MAP_ALLOC_ERROR;
     }
-    if (bdp_v_conn_init(&v_conn_node->v_conn)) {
+    if (bdp_v_conn_init(&v_conn_node->v_conn) != 0) {
         goto FREE_VCONN_NODE;
     }
     v_conn_node->target_id = *target_id;
@@ -177,7 +177,7 @@ int bdp_v_conn_push_send_so(bdp_v_conn_t *v_conn, so_queue_data_t *data)
         return -1;
     }
     *queue_data = *data;
-    if (bdp_queue_push_tail(&v_conn->send_strong_order_queue, queue_data)) {
+    if (bdp_queue_push_tail(&v_conn->send_strong_order_queue, queue_data) != 0) {
         free(queue_data);
         return -1;
     }
@@ -190,7 +190,7 @@ int bdp_v_conn_pop_send_so(bdp_v_conn_t *v_conn, so_queue_data_t *data)
         return -1;
     }
     so_queue_data_t *queue_data = NULL;
-    if (bdp_queue_pop_head(&v_conn->send_strong_order_queue, (void **)&queue_data)) {
+    if (bdp_queue_pop_head(&v_conn->send_strong_order_queue, (void **)&queue_data) != 0) {
         return -1;
     }
     *data = *queue_data;
@@ -208,7 +208,7 @@ int bdp_v_conn_push_recv_so_cr(bdp_v_conn_t *v_conn, so_cr_queue_data_t *data)
         return -1;
     }
     *queue_data = *data;
-    if (bdp_queue_push_tail(&v_conn->recv_strong_order_cr_queue, queue_data)) {
+    if (bdp_queue_push_tail(&v_conn->recv_strong_order_cr_queue, queue_data) != 0) {
         free(queue_data);
         return -1;
     }
@@ -221,7 +221,7 @@ int bdp_v_conn_pop_recv_so_cr(bdp_v_conn_t *v_conn, so_cr_queue_data_t *data)
         return -1;
     }
     so_cr_queue_data_t *queue_data = NULL;
-    if (bdp_queue_pop_head(&v_conn->recv_strong_order_cr_queue, (void **)&queue_data)) {
+    if (bdp_queue_pop_head(&v_conn->recv_strong_order_cr_queue, (void **)&queue_data) != 0) {
         return -1;
     }
     *data = *queue_data;
