@@ -42,11 +42,10 @@ typedef struct urma_bond_id_info_in {
 } urma_bond_id_info_in_t;
 
 typedef struct urma_bond_id_info_out {
-    urma_jetty_id_t base_id;
     urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
     int dev_num;
-    bool is_in_matrix_server;
     bool is_multipath;
+    uint32_t ports[IODIE_NUM][PORT_NUM];
 } urma_bond_id_info_out_t;
 
 typedef struct urma_bond_id_info_out urma_bond_add_rjfr_id_info_in_t;
