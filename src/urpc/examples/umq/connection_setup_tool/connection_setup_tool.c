@@ -659,10 +659,18 @@ static int send_req(umq_info_t *umq_info)
     return 0;
 }
 
-static void return_rsp(umq_ctx_t *umq_ctx)
+static int return_rsp(umq_ctx_t *umq_ctx)
 {
+    if (umq_ctx == NULL) {
+        LOG_PRINT_ERR("umq_ctx invalid\n");
+        return -1;
+    }
     uint64_t umqh = umq_ctx->umqh;
     umq_buf_t *tx_post_buf = umq_buf_alloc(CONNETION_SETUP_MSG_SZIE, 1, umqh, NULL);
+    if (tx_post_buf == NULL) {
+        LOG_PRINT_ERR("tx_post_buf alloc failed\n");
+        return -1;
+    }
     (void)sprintf(tx_post_buf->buf_data, "hello client i am server");
     umq_buf_pro_t *pro = (umq_buf_pro_t *)tx_post_buf->qbuf_ext;
     pro->opcode = UMQ_OPC_SEND;
@@ -677,6 +685,7 @@ static void return_rsp(umq_ctx_t *umq_ctx)
         }
     }
     g_umq_info_list[umq_ctx->main_umq_idx].send_rsp_cnt++;
+    return 0;
 }
 
 static void process_tx_interrupt(fd_ctx_t *fd_ctx)
@@ -732,7 +741,7 @@ static void process_rx_interrupt(fd_ctx_t *fd_ctx)
             umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)(uintptr_t)buf->qbuf_ext;
             umq_ctx_t *umq_ctx = (umq_ctx_t *)(uintptr_t)buf_pro->umq_ctx;
             g_umq_info_list[umq_ctx->main_umq_idx].recv_req_cnt++;
-            return_rsp(umq_ctx);
+            (void)return_rsp(umq_ctx);
             umq_buf_reset(buf);
             umq_buf_t *bad_buf;
             if (umq_post(umq_ctx->umqh, buf, UMQ_IO_RX, &bad_buf) != UMQ_SUCCESS) {
