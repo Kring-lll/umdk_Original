@@ -162,7 +162,7 @@ urma_status_t bondp_uninit(void)
 
 static inline bool is_urma_eid_equal(urma_eid_t *eid1, urma_eid_t *eid2)
 {
-    return !memcmp(eid1, eid2, sizeof(urma_eid_t));
+    return memcmp(eid1, eid2, sizeof(urma_eid_t)) == 0;
 }
 
 static int get_eid_index(urma_device_t *dev, urma_eid_t *eid)
@@ -255,7 +255,7 @@ static int get_topo_info_from_ko(bondp_context_t *bond_ctx)
         .len = sizeof(info_out)
     };
     urma_udrv_t data = {0};
-    if (urma_cmd_user_ctl(&bond_ctx->v_ctx, &in, &out, &data)) {
+    if (urma_cmd_user_ctl(&bond_ctx->v_ctx, &in, &out, &data) != 0) {
         URMA_LOG_ERR("Failed to get topo info, change to general mode\n");
         g_bondp_global_ctx->skip_load_topo = true;
         return -1;
@@ -272,7 +272,7 @@ static int bondp_init_v_ctx(bondp_context_t *bond_ctx, urma_device_t *dev, uint3
 {
     urma_context_t *v_ctx = &bond_ctx->v_ctx;
 
-    if (urma_read_eid_with_index(dev->sysfs_dev, eid_index, &v_ctx->eid)) {
+    if (urma_read_eid_with_index(dev->sysfs_dev, eid_index, &v_ctx->eid) != 0) {
         URMA_LOG_ERR("Failed to query eid\n");
         return -1;
     }
@@ -293,23 +293,23 @@ static void bondp_uninit_v_ctx(bondp_context_t *bond_ctx)
 
 static int bondp_init_ctx_table(bondp_context_t *bond_ctx)
 {
-    if (bondp_bitmap_init(&bond_ctx->token_id_bitmap, BONDP_MAX_NUM_SEGS + 1)) {
+    if (bondp_bitmap_init(&bond_ctx->token_id_bitmap, BONDP_MAX_NUM_SEGS + 1) != 0) {
         URMA_LOG_ERR("Failed to create token_id_bitmap\n");
         return -1;
     }
-    if (bondp_id_store_init(&bond_ctx->ljetty_id_store, BONDP_MAX_NUM_JETTYS)) {
+    if (bondp_id_store_init(&bond_ctx->ljetty_id_store, BONDP_MAX_NUM_JETTYS) != 0) {
         URMA_LOG_ERR("Failed to create ljetty_id_store");
         goto FREE_TOKEN_ID_BITMAP;
     }
-    if (bdp_p_vjetty_id_table_create(&bond_ctx->p_vjetty_id_table, BONDP_MAX_NUM_JETTYS)) {
+    if (bdp_p_vjetty_id_table_create(&bond_ctx->p_vjetty_id_table, BONDP_MAX_NUM_JETTYS) != 0) {
         URMA_LOG_ERR("Failed to create p_vjetty_id_table\n");
         goto ID_STORE_UNINIT;
     }
-    if (bdp_r_p2v_jetty_id_table_create(&bond_ctx->remote_p2v_jetty_id_table, BONDP_MAX_NUM_JETTYS)) {
+    if (bdp_r_p2v_jetty_id_table_create(&bond_ctx->remote_p2v_jetty_id_table, BONDP_MAX_NUM_JETTYS) != 0) {
         URMA_LOG_ERR("Failed to create remote_p2v_jetty_id_table\n");
         goto FREE_P_VJETTY_ID_TABLE;
     }
-    if (bdp_r_v2p_token_id_table_create(&bond_ctx->remote_v2p_token_id_table, BONDP_MAX_NUM_RSEGS)) {
+    if (bdp_r_v2p_token_id_table_create(&bond_ctx->remote_v2p_token_id_table, BONDP_MAX_NUM_RSEGS) != 0) {
         URMA_LOG_ERR("Failed to create remote_v2p_token_id_table\n");
         goto FREE_V_PTOKEN_ID_TABLE;
     }
@@ -335,7 +335,7 @@ static void bondp_uninit_ctx_table(bondp_context_t *bond_ctx)
     bondp_bitmap_uninit(&bond_ctx->token_id_bitmap);
 }
 
-static bondp_context_t* bondp_create_ctx()
+static bondp_context_t* bondp_create_ctx(void)
 {
     bondp_context_t *bond_ctx = NULL;
 
@@ -343,7 +343,7 @@ static bondp_context_t* bondp_create_ctx()
     if (bond_ctx == NULL) {
         return NULL;
     }
-    if (bondp_init_ctx_table(bond_ctx)) {
+    if (bondp_init_ctx_table(bond_ctx) != 0) {
         free(bond_ctx);
         return NULL;
     }
@@ -417,7 +417,7 @@ static int init_general_slave_devices(bondp_context_t *bond_ctx)
     /* error handling param of urma_create_context */
     int i = 0;
 
-    if (urma_cmd_user_ctl(&bond_ctx->v_ctx, &in, &out, &data)) {
+    if (urma_cmd_user_ctl(&bond_ctx->v_ctx, &in, &out, &data) != 0) {
         URMA_LOG_ERR("Failed to get slave device info\n");
         return -1;
     }
@@ -435,7 +435,7 @@ static int init_general_slave_devices(bondp_context_t *bond_ctx)
     }
 
     for (i = 0; i < bond_ctx->dev_num; ++i) {
-        if (get_dev_and_ctx_by_name(dev_info.slave_dev_name[i], &bond_ctx->p_devs[i], &bond_ctx->p_ctxs[i])) {
+        if (get_dev_and_ctx_by_name(dev_info.slave_dev_name[i], &bond_ctx->p_devs[i], &bond_ctx->p_ctxs[i]) != 0) {
             URMA_LOG_ERR("Failed to create dev ctx %d in bonding\n", i);
             goto DELETE_SLAVE_CTX;
         }
@@ -544,7 +544,7 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
 
     int ret = 0;
     ret = bondp_init_v_ctx(bond_ctx, dev, eid_index, dev_fd);
-    if (ret) {
+    if (ret != 0) {
         URMA_LOG_ERR("Failed to init v_ctx\n");
         goto DELETE_CTX;
     }
@@ -558,7 +558,7 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
     };
     urma_cmd_udrv_priv_t udata = {0};
     ret = urma_cmd_create_context(&bond_ctx->v_ctx, &cfg, &udata);
-    if (ret) {
+    if (ret != 0) {
         URMA_LOG_ERR("Failed to create context\n");
         goto UNINIT_V_CTX;
     }
@@ -575,7 +575,7 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
     } else {
         ret = init_general_slave_devices(bond_ctx);
     }
-    if (ret) {
+    if (ret != 0) {
         goto CMD_DELETE_CONTEXT;
     }
 
@@ -602,14 +602,14 @@ urma_status_t bondp_delete_context(urma_context_t *ctx)
 
     (void)strcpy(dev_name, ctx->dev->name);
     for (int i = 0; i < bond_ctx->dev_num; ++i) {
-        if (bond_ctx->p_ctxs[i] && urma_delete_context(bond_ctx->p_ctxs[i])) {
+        if (bond_ctx->p_ctxs[i] && urma_delete_context(bond_ctx->p_ctxs[i]) != 0) {
             URMA_LOG_ERR("Failed to delete context %d", i);
             ret = URMA_FAIL;
         }
     }
     (void)close(bond_ctx->v_ctx.async_fd);
     bond_ctx->v_ctx.async_fd = bond_ctx->real_async_fd;
-    if (urma_cmd_delete_context(&bond_ctx->v_ctx)) {
+    if (urma_cmd_delete_context(&bond_ctx->v_ctx) != 0) {
         URMA_LOG_ERR("Failed to urma_cmd_delete_context");
         ret = URMA_FAIL;
     }
