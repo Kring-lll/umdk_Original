@@ -93,7 +93,11 @@ static int admin_cmd_agg_del(urma_eid_t eid)
     urma_uninit();
 
     if (is_dev_disallowed == 0) {
+<<<<<<< HEAD
         printf("bonding_dev_0 cannot be deleted now: %s.\n", ub_strerror(errno));
+=======
+        printf("bonding_dev_0 cannot be deleted now.\n");
+>>>>>>> 0c46152... Change Log Information
         return -1;
     }
 
