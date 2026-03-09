@@ -1975,25 +1975,6 @@ static int restore_cr_remote_id(bondp_context_t *bdp_ctx, urma_cr_t *cr)
     cr->remote_id = jetty_id;
     return 0;
 }
-/**
- * In scenarios where the remote_id cannot be restored,
- * the topo_map can be used to restore only the remote_id.eid field,
- * while other fields cannot be restored and will be set to 0.
- */
-static void restore_cr_remote_id_fallback(bondp_context_t *bdp_ctx, urma_cr_t *cr)
-{
-    urma_eid_t eid_output = {0};
-    int ret = get_bonding_eid_by_target_eid(bdp_ctx->topo_map, &cr->remote_id.eid, &eid_output);
-    if (ret != 0) {
-        // Set EID to all zero in error case
-        cr->remote_id.eid.in6.interface_id = 0;
-        cr->remote_id.eid.in6.subnet_prefix = 0;
-    } else {
-        cr->remote_id.eid = eid_output;
-    }
-    cr->remote_id.uasid = 0;
-    cr->remote_id.id = 0;
-}
 
 /**
  * @param dev_idx: The index of pjfc used when polling jfc.
@@ -2037,8 +2018,8 @@ static int bondp_handle_cr_no_store(bondp_context_t *bdp_ctx, int dev_idx, urma_
             // restore local_id, method #2 through bjetty_ctx
             cr->local_id = get_comp_urma_jetty_id(bjetty_ctx->bdp_comp)->id;
             // restore remote_id
-            if (restore_cr_remote_id(bdp_ctx, cr)) {
-                restore_cr_remote_id_fallback(bdp_ctx, cr);
+            if (restore_cr_remote_id(bdp_ctx, cr) != 0) {
+                return -1;
             }
             // report
             cr_output_array[(*total_cnt)++] = *cr;
@@ -2049,13 +2030,8 @@ static int bondp_handle_cr_no_store(bondp_context_t *bdp_ctx, int dev_idx, urma_
     if (restore_cr_local_id(bdp_ctx, dev_idx, cr)) {
         cr->local_id = 0; /* Replace with invalid value under exceptional circumstances */
     }
-    /* Perform remote_id restoration on both the sending and receiving ends.
-    Although the remote_id field on the sending end cannot be guaranteed to be correct,
-    according to the description of urma_cr_t.
-    However, it has been found in actual testing that this field is generally valid, hence this approach is taken.
-    */
     if (restore_cr_remote_id(bdp_ctx, cr)) {
-        restore_cr_remote_id_fallback(bdp_ctx, cr);
+        return -1;
     }
     /* When calling bondp_poll_pjfc,
        it can be ensured that the total number of processed CRs is less than the `cr_cnt` parameter passed by the user.
@@ -2083,7 +2059,7 @@ static int bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int dev_idx, int
         Even if it is incorrect, we can invalidate it using the fallback function.
         */
         if (restore_cr_remote_id(bdp_ctx, cr)) {
-            restore_cr_remote_id_fallback(bdp_ctx, cr);
+            return -1;
         }
         /* recover completion len */
         recover_cr_completion_len(cr);
@@ -2125,7 +2101,7 @@ static int bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int dev_idx, int
         However, it has been found in actual testing that this field is generally valid, hence this approach is taken.
         */
         if (restore_cr_remote_id(bdp_ctx, cr)) {
-            restore_cr_remote_id_fallback(bdp_ctx, cr);
+            return -1;
         }
         /* When calling bondp_poll_pjfc,
         it can be ensured that the total number of processed CRs is less than the `cr_cnt` parameter passed by the user.
