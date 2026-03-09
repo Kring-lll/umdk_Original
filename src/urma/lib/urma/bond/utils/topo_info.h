@@ -54,38 +54,15 @@ typedef struct bondp_topo_node {
     bondp_topo_agg_dev_t agg_devs[DEV_NUM];
 } bondp_topo_node_t;
 
-/**
- * Records information about all direct connections between the current device and the target device.
- */
-typedef struct direct_connect_device_info {
-    bondp_topo_link_t local_map_idx[MAX_ALL_PORT_NUM];
-    bondp_topo_link_t target_map_idx[MAX_ALL_PORT_NUM];
-    uint32_t direct_num;
-} direct_dev_info_t;
-
-typedef struct {
-    hmap_node_t hmap_node;
-    urma_eid_t agg_eid; /* key: eid of target dev */
-    direct_dev_info_t direct_dev_info;
-} direct_dev_node_t;
-
 typedef struct eid_mapping_entry {
     hmap_node_t hmap_node;
     urma_eid_t  key_eid;
     urma_eid_t  bonding_eid;
 } eid_mapping_entry_t;
 
-int direct_dev_hash_table_create(bondp_hash_table_t *tbl, uint32_t size);
-
-int direct_dev_hash_table_add(bondp_hash_table_t *tbl, bondp_topo_agg_dev_t *topo_info,
-    bondp_topo_link_t *local_map_idx, bondp_topo_link_t *target_map_idx);
-
-direct_dev_node_t *direct_dev_hash_table_lookup(bondp_hash_table_t *tbl, urma_eid_t *key);
-
 typedef struct topo_map {
     bondp_topo_node_t topo_infos[MAX_NODE_NUM];
     uint32_t node_num;
-    bondp_hash_table_t direct_dev_hash_table;
     bondp_hash_table_t eid_mapping_hash_table; 
 } topo_map_t;
 
