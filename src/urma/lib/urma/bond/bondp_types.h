@@ -144,6 +144,13 @@ typedef struct bondp_comp {
     uint64_t v_orig_handle;
 } bondp_comp_t;
 
+typedef struct urma_bond_id_info_out {
+    urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
+    int dev_num;
+    bool is_multipath;
+    uint32_t ports[IODIE_NUM][PORT_NUM];
+} urma_bond_id_info_out_t;
+
 typedef struct bondp_target_jetty {
     urma_target_jetty_t v_tjetty;
     urma_target_jetty_t *p_tjetty[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
@@ -151,9 +158,6 @@ typedef struct bondp_target_jetty {
     int target_dev_num;
     bool is_in_matrix_server;
     bool is_multipath;
-    int direct_local_port[PORT_EID_MAX_NUM];
-    int direct_tjetty_port[PORT_EID_MAX_NUM];
-    int direct_route_num;
     bool local_valid[URMA_UBAGG_DEV_MAX_NUM];
     bool target_valid[URMA_UBAGG_DEV_MAX_NUM];
     urma_bond_id_info_out_t rvjetty_id_info;   /* remote jetty id info */

@@ -7,6 +7,7 @@
  * Note:
  * History: 2025-02-05   Create File
  */
+
 #ifndef URMA_UBAGG_H
 #define URMA_UBAGG_H
 
@@ -41,17 +42,6 @@ typedef struct urma_bond_id_info_in {
     urma_target_type_t type;
 } urma_bond_id_info_in_t;
 
-typedef struct urma_bond_id_info_out {
-    urma_jetty_id_t base_id;
-    urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
-    int dev_num;
-    bool is_in_matrix_server;
-    bool is_multipath;
-} urma_bond_id_info_out_t;
-
-typedef struct urma_bond_id_info_out urma_bond_add_rjfr_id_info_in_t;
-typedef struct urma_bond_id_info_out urma_bond_add_rjetty_id_info_in_t;
-
 typedef struct urma_bond_seg_info_in {
     urma_target_seg_t *tseg;
 } urma_bond_seg_info_in_t;
@@ -66,4 +56,5 @@ typedef urma_bond_seg_info_out_t urma_bond_add_remote_seg_info_in_t;
 #ifdef __cplusplus
 }
 #endif
+
 #endif
