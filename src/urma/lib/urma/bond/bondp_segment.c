@@ -56,7 +56,7 @@ typedef struct bondp_seg_cfg {
 
 static bool is_same_eid(urma_eid_t *eid1, urma_eid_t *eid2)
 {
-    return !memcmp(eid1, eid2, sizeof(urma_eid_t));
+    return memcmp(eid1, eid2, sizeof(urma_eid_t)) == 0;
 }
 
 bool comp_func_va_vtseg_tbl(hmap_node_t *node, void *key)
@@ -65,13 +65,13 @@ bool comp_func_va_vtseg_tbl(hmap_node_t *node, void *key)
     return va_vtseg_info->va == *(uint64_t *)key;
 }
 
-void free_func_va_vtseg_tbl(hmap_node_t *node)
+static void free_func_va_vtseg_tbl(hmap_node_t *node)
 {
     bdp_va_vtseg_info_t *va_vtseg_info = CONTAINER_OF_FIELD(node, bdp_va_vtseg_info_t, hmap_node);
     free(va_vtseg_info);
 }
 
-uint32_t hash_func_va_vtseg_tbl(void *key)
+static uint32_t hash_func_va_vtseg_tbl(void *key)
 {
     return ub_hash_bytes(key, sizeof(uint64_t), BDP_VA_VTSEG_INFO_HASH_BASIS);
 }
@@ -118,7 +118,7 @@ urma_token_id_t *bondp_alloc_token_id(urma_context_t *ctx)
     if (token == NULL) {
         return NULL;
     }
-    if (bondp_bitmap_alloc_idx(&bdp_ctx->token_id_bitmap, &token->token_id)) {
+    if (bondp_bitmap_alloc_idx(&bdp_ctx->token_id_bitmap, &token->token_id) != 0) {
         URMA_LOG_ERR("Failed to alloc token id.\n");
         free(token);
         return NULL;
@@ -135,7 +135,7 @@ urma_status_t bondp_free_token_id(urma_token_id_t *token_id)
         URMA_LOG_ERR("Invalid bdp_ctx");
         return URMA_FAIL;
     }
-    if (bondp_bitmap_free_idx(&bdp_ctx->token_id_bitmap, token_id->token_id)) {
+    if (bondp_bitmap_free_idx(&bdp_ctx->token_id_bitmap, token_id->token_id) != 0) {
         URMA_LOG_ERR("Failed to free idx, tid: %u.\n", token_id->token_id);
         return URMA_FAIL;
     }
@@ -356,7 +356,7 @@ static bondp_ret_t import_matrix_port_seg_by_direct_route(bondp_context_t *bdp_c
         } else if (ret == BONDP_ERROR) {
             return BONDP_ERROR;
         } else {
-            success_import_num+=1;
+            success_import_num += 1;
         }
     }
     return (success_import_num > 0) ? BONDP_SUCCESS : BONDP_ERROR;
@@ -381,7 +381,7 @@ static bondp_ret_t import_matrix_port_seg_loopback(bondp_context_t *bdp_ctx,
     return (success_import_num > 0) ? BONDP_SUCCESS : BONDP_ERROR;
 }
 
-static bondp_ret_t import_matrix_port_seg(bondp_context_t *bdp_ctx, urma_seg_t *seg, bondp_seg_cfg_t *bondp_seg_cfg)
+static bondp_ret_t import_matrix_port_seg(bondp_context_t *bdp_ctx, const urma_seg_t *seg, bondp_seg_cfg_t *bondp_seg_cfg)
 {
     bondp_ret_t ret;
     urma_eid_t eid = seg->ubva.eid;
