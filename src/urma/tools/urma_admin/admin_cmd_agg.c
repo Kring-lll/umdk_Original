@@ -93,7 +93,7 @@ static int admin_cmd_agg_del(urma_eid_t eid)
     urma_uninit();
 
     if (is_dev_disallowed == 0) {
-        printf("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
+        printf("bonding_dev_0 cannot be deleted now.\n");
         return -1;
     }
 
