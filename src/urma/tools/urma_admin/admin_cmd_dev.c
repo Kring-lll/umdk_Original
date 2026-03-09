@@ -239,11 +239,7 @@ int admin_cmd_set_dev_ns_legacy(admin_config_t *cfg)
         return ns_fd;
     }
 
-    int ret = admin_nl_set_dev_ns(cfg->dev_name, ns_fd);
-    if (ret != 0) {
-        close(ns_fd);
-        return ret;
-    }
+    admin_nl_set_dev_ns(cfg->dev_name, ns_fd);
 
     close(ns_fd);
     return ret;
