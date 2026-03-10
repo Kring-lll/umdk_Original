@@ -712,3 +712,79 @@ TEST_F(SocketInterfaceTest, test_sockopt)
     getsockopt(g_connectFd, SOL_TCP, TCP_FASTOPEN, &get_val, &opt_len);
     EXPECT_TRUE(set_val == get_val);
 }
+
+// 新增测试用例：IPv6错误处理 - 连接到无效的IPv6地址
+TEST_F(SocketInterfaceTest, ipv6_error_handling_invalid_address)
+{
+    int32_t ret;
+    int32_t tempSockFd = socket(AF_SMC, SOCK_STREAM, 1); // AF_SMC IPv6
+    EXPECT_TRUE(tempSockFd >= 0);
+    
+    ret = SetSocketNonBlock(tempSockFd);
+    EXPECT_TRUE(ret == 0);
+    
+    struct sockaddr_in6 servaddr;
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin6_family = AF_INET6;
+    inet_pton(AF_INET6, "2001:db8::1", &(servaddr.sin6_addr)); // 无效的IPv6地址
+    servaddr.sin6_port = htons(9999);
+    
+    ret = connect(tempSockFd, (struct sockaddr *)&servaddr, sizeof(servaddr));
+    EXPECT_TRUE(ret < 0);
+    EXPECT_TRUE(errno == EINPROGRESS || errno == ECONNREFUSED);
+    
+    close(tempSockFd);
+}
+
+// 新增测试用例：错误处理 - 无效的socket选项设置
+TEST_F(SocketInterfaceTest, error_handling_invalid_sockopt)
+{
+    int32_t ret;
+    int32_t invalid_opt = 9999; // 无效的socket选项
+    int32_t value = 1;
+    socklen_t opt_len = sizeof(int);
+    
+    // 尝试设置无效的socket选项，应该返回错误
+    ret = setsockopt(g_connectFd, SOL_SOCKET, invalid_opt, &value, sizeof(value));
+    EXPECT_TRUE(ret < 0);
+    EXPECT_TRUE(errno == EINVAL);
+    
+    // 尝试获取无效的socket选项，应该返回错误
+    ret = getsockopt(g_connectFd, SOL_SOCKET, invalid_opt, &value, &opt_len);
+    EXPECT_TRUE(ret < 0);
+    EXPECT_TRUE(errno == EINVAL);
+}
+
+// 新增测试用例：超时处理 - 设置连接超时
+TEST_F(SocketInterfaceTest, timeout_handling_connect_timeout)
+{
+    int32_t ret;
+    struct timeval timeout;
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+    
+    // 设置发送超时
+    ret = setsockopt(g_connectFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    EXPECT_TRUE(ret == 0);
+    
+    // 设置接收超时
+    ret = setsockopt(g_connectFd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    EXPECT_TRUE(ret == 0);
+}
+
+// 新增测试用例：地址重用测试
+TEST_F(SocketInterfaceTest, address_reuse_test)
+{
+    int32_t ret;
+    int32_t reuse = 1;
+    
+    // 测试SO_REUSEADDR选项
+    ret = setsockopt(g_connectFd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    EXPECT_TRUE(ret == 0);
+    
+    int32_t get_reuse = 0;
+    socklen_t opt_len = sizeof(int);
+    ret = getsockopt(g_connectFd, SOL_SOCKET, SO_REUSEADDR, &get_reuse, &opt_len);
+    EXPECT_TRUE(ret == 0);
+    EXPECT_TRUE(get_reuse == reuse);
+}
