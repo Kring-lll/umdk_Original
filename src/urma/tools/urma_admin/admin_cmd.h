@@ -83,6 +83,32 @@ typedef struct admin_core_cmd_topo_info {
     } out;
 } admin_core_cmd_topo_info_t;
 
+/* Layout must match kernel urma_topo_bonding_dev (cross-state topo).
+ * Netlink message format follows urma_cmd_get_topo_bonding_dev_type_t (see urma_cmd_tlv.h):
+ *   in  -> GET_TOPO_BONDING_DEV_IN_AGG_EID,  out -> GET_TOPO_BONDING_DEV_OUT_BONDING_DEV */
+#define ADMIN_TOPO_DEV_NAME_LEN 64
+typedef struct admin_urma_topo_physical_dev {
+    char dev_name[ADMIN_TOPO_DEV_NAME_LEN];
+    uint32_t chip_id;
+    urma_eid_t primary_eid;
+    urma_eid_t port_eid[PORT_NUM];
+} admin_urma_topo_physical_dev_t;
+
+typedef struct admin_urma_topo_bonding_dev {
+    char dev_name[ADMIN_TOPO_DEV_NAME_LEN];
+    urma_eid_t bonding_eid;
+    admin_urma_topo_physical_dev_t physical_devs[IODIE_NUM];
+} admin_urma_topo_bonding_dev_t;
+
+typedef struct admin_core_cmd_topo_bonding_dev {
+    struct {
+        urma_eid_t agg_eid;
+    } in;
+    struct {
+        admin_urma_topo_bonding_dev_t bonding_dev;
+    } out;
+} admin_core_cmd_topo_bonding_dev_t;
+
 typedef struct admin_core_cmd_sl_info {
     struct {
         char dev_name[URMA_MAX_NAME];
@@ -103,6 +129,7 @@ enum {
     UBCORE_ATTR_DEV_NAME,
     UBCORE_ATTR_NS_FD,
     UBCORE_ATTR_EID_IDX,
+    UBCORE_ATTR_GET_TOPO_BONDING_DEV_AGG_EID, /* TLV IN: agg_eid only */
     UBCORE_ATTR_AFTER_LAST
 };
 
@@ -160,7 +187,7 @@ struct admin_cmd_hdr {
 };
 
 #define ADMIN_AGG_CMD_MAGIC 'B'
-#define ADMIN_AGG_CMD _IOWR(ADMIN_AGG_CMD_MAGIC, 1, struct admin_cmd_hdr)
+#define ADMIN_AGG_CMD_IOWR(ADMIN_AGG_CMD_MAGIC, 1, struct admin_cmd_hdr)
 
 struct cmd_agg_add_arg {
     struct {
@@ -188,9 +215,11 @@ int admin_nl_expose_dev_ns(const char *dev_name, int ns_fd);
 int admin_nl_unexpose_dev_ns(const char *dev_name, int ns_fd);
 int admin_nl_set_eid_ns(const char *dev_name, uint32_t eid_idx, int ns_fd);
 int admin_cmd_get_topo_info(tool_topo_map_t *topo_map);
+int admin_cmd_get_topo_bonding_dev_by_eid(const urma_eid_t *agg_eid,
+                                          admin_urma_topo_bonding_dev_t *out);
 int admin_get_device_name_by_eid(const urma_eid_t *eid, char *dev_name, size_t dev_name_len);
 int admin_get_eid_list_by_eid(urma_eid_t *eid, urma_eid_info_t **eid_info_list,
-                              char* dev_name);
+                              char *dev_name);
 
 // Legacy command
 int admin_cmd_show_stats_legacy(admin_config_t *cfg);
