@@ -86,7 +86,7 @@ typedef struct topo_map {
     bondp_topo_node_t topo_infos[MAX_NODE_NUM];
     uint32_t node_num;
     bondp_hash_table_t direct_dev_hash_table;
-    bondp_hash_table_t eid_mapping_hash_table; 
+    bondp_hash_table_t eid_mapping_hash_table;
 } topo_map_t;
 
 /* The following functions needs the caller to check the validity of the parameters */
