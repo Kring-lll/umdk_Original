@@ -77,9 +77,15 @@ int urpc_rand_seed_init(void)
 
 int urpc_rand_generate(uint8_t *buf, uint32_t num)
 {
+#ifdef UMQ_STATIC_LIB
+    if (RAND_bytes(buf, num) != 1) {
+        return -1;
+    }
+#else
     if (RAND_priv_bytes(buf, num) != 1) {
         return -1;
     }
+#endif
 
     return 0;
 }
