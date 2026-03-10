@@ -399,3 +399,123 @@ TEST_F(SocketInterfaceTest, io_multiplex_epoll)
     close(acceptFd);
     close(epollFd);
 }
+
+// 新增测试用例：错误处理 - 连接到不存在的服务器
+TEST_F(SocketInterfaceTest, error_handling_connect_failure)
+{
+    int32_t ret;
+    int32_t tempSockFd = socket(AF_SMC, SOCK_STREAM, 0);
+    EXPECT_TRUE(tempSockFd >= 0);
+    
+    ret = SetSocketNonBlock(tempSockFd);
+    EXPECT_TRUE(ret == 0);
+    
+    struct sockaddr_in servaddr;
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = inet_addr("192.0.2.1"); // 无效的IP地址
+    servaddr.sin_port = htons(9999);
+    
+    ret = connect(tempSockFd, (struct sockaddr *)&servaddr, sizeof(servaddr));
+    EXPECT_TRUE(ret < 0);
+    EXPECT_TRUE(errno == EINPROGRESS || errno == ECONNREFUSED);
+    
+    close(tempSockFd);
+}
+
+// 新增测试用例：边界条件 - 零字节传输
+TEST_F(SocketInterfaceTest, boundary_zero_byte_transfer)
+{
+    int32_t acceptFd;
+    int32_t ret;
+    
+    ret = ClientConnect(g_connectFd);
+    EXPECT_TRUE(ret == 0);
+    
+    usleep(100000);
+    
+    acceptFd = ServerAccept(g_listenFd);
+    EXPECT_TRUE(acceptFd >= 0);
+    
+    // 测试零字节write
+    ret = write(g_connectFd, g_sendBuff, 0);
+    EXPECT_TRUE(ret == 0);
+    
+    // 测试零字节read
+    ret = read(acceptFd, g_recvBuff, 0);
+    EXPECT_TRUE(ret == 0);
+    
+    close(acceptFd);
+}
+
+// 新增测试用例：边界条件 - 大文件传输
+TEST_F(SocketInterfaceTest, boundary_large_file_transfer)
+{
+    int32_t acceptFd;
+    int32_t ret;
+    size_t dataLen = 1 * 1024 * 1024; // 1MB数据
+    
+    ret = ClientConnect(g_connectFd);
+    EXPECT_TRUE(ret == 0);
+    
+    usleep(100000);
+    
+    acceptFd = ServerAccept(g_listenFd);
+    EXPECT_TRUE(acceptFd >= 0);
+    
+    // 发送大文件
+    ret = write(g_connectFd, g_sendBuff, dataLen);
+    EXPECT_TRUE(ret == (int32_t)dataLen);
+    
+    usleep(500000); // 等待数据传输完成
+    
+    // 接收大文件
+    ret = read(acceptFd, g_recvBuff, dataLen);
+    EXPECT_TRUE(ret == (int32_t)dataLen);
+    
+    close(acceptFd);
+}
+
+// 新增测试用例：socket选项 - TCP_NODELAY测试
+TEST_F(SocketInterfaceTest, socket_option_tcp_nodelay)
+{
+    int32_t ret;
+    int enable = 1;
+    int value = 0;
+    socklen_t opt_len = sizeof(int);
+    
+    // 设置TCP_NODELAY选项
+    ret = setsockopt(g_connectFd, IPPROTO_TCP, TCP_NODELAY, &enable, sizeof(enable));
+    EXPECT_TRUE(ret == 0);
+    
+    // 验证TCP_NODELAY选项是否设置成功
+    ret = getsockopt(g_connectFd, IPPROTO_TCP, TCP_NODELAY, &value, &opt_len);
+    EXPECT_TRUE(ret == 0);
+    EXPECT_TRUE(value == enable);
+}
+
+// 新增测试用例：半关闭状态测试
+TEST_F(SocketInterfaceTest, half_close_test)
+{
+    int32_t acceptFd;
+    int32_t ret;
+    size_t dataLen = 1000;
+    
+    ret = ClientConnect(g_connectFd);
+    EXPECT_TRUE(ret == 0);
+    
+    usleep(100000);
+    
+    acceptFd = ServerAccept(g_listenFd);
+    EXPECT_TRUE(acceptFd >= 0);
+    
+    // 客户端关闭写端
+    ret = shutdown(g_connectFd, SHUT_WR);
+    EXPECT_TRUE(ret == 0);
+    
+    // 服务器应该能读到EOF
+    ret = read(acceptFd, g_recvBuff, dataLen);
+    EXPECT_TRUE(ret == 0);
+    
+    close(acceptFd);
+}
