@@ -104,7 +104,7 @@ static void usage(const char *argv0)
     (void)printf("  -f, --use_flat_api          Choose to use flat API, only works in SIMPLEX mode.\n");
     (void)printf("  -F, --cpu_freq_f            To report warnings when CPU frequency drifts, default as NOT.\n");
     (void)printf("  -h, --help                  Show help info.\n");
-    (void)printf("  -I, --inline_size <size>    Max size of message to be sent in inline.\n");
+    (void)printf("  -I, --inline_size <size>    Max size of message to be sent in inline (default 0).\n");
     (void)printf("  -j, --share_jfr <true/false> share jfr on create jetty.\n");
     (void)printf("  -J, --jettys <num of jetty> Num of jettys(default 1).\n");
     (void)printf("  -K, --token_policy <policy> default 0: NONE, 1: PLAIN_TEXT, 2: SIGNED, 3: ALL_ENCRYPTED.\n");
@@ -259,7 +259,7 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->use_jfce = false;
     cfg->time_type.value = 0;
     // Update to max value of the device attr after creation context
-    cfg->inline_size = (cfg->type == PERFTEST_BW) ? PERFTEST_DEF_INLINE_BW : PERFTEST_DEF_INLINE_LAT;
+    cfg->inline_size = 0;
     cfg->jettys = PERFTEST_DEF_NUM_JETTYS;
     cfg->token_policy = URMA_TOKEN_NONE;
     cfg->iters = (cfg->type == PERFTEST_BW) ? PERFTEST_DEF_ITERS_BW : PERFTEST_DEF_ITERS_LAT;
@@ -423,7 +423,6 @@ static int check_cfg_range(perftest_config_t *cfg)
         { cfg->iters,        PERFTEST_ITERS_MIN,         PERFTEST_ITERS_MAX,        "Iteration num" },
         { cfg->jfs_depth,    PERFTEST_JFS_DEPTH_MIN,     PERFTEST_JFS_DEPTH_MAX,    "Jfs depth" },
         { cfg->jettys,       PERFTEST_JETTYS_MIN,        PERFTEST_JETTYS_MAX,       "Jettys" },
-        { cfg->inline_size,  PERFTEST_INLINE_MIN,        PERFTEST_INLINE_MAX,       "Inline size" },
         { cfg->jfr_depth,    PERFTEST_JFR_DEPTH_MIN,     PERFTEST_JFR_DEPTH_MAX,    "Jfr depth" },
         { cfg->cq_mod,       PERFTEST_CQ_MOD_MIN,        PERFTEST_CQ_MOD_MAX,       "Cq mod" },
         { cfg->order,        PERFTEST_MIN_ORDER,         PERFTEST_MAX_ORDER,        "Order" },
@@ -958,6 +957,10 @@ int check_local_cfg(perftest_config_t *cfg)
         return -1;
     }
 
+    if (strstr(cfg->dev_name, "bonding_dev") != NULL && !cfg->single_path) {
+        cfg->use_ctp = true;
+    }
+
     if (check_time_type(cfg) != 0) {
         return -1;
     }
@@ -1278,13 +1281,13 @@ int check_local_cfg(perftest_config_t *cfg)
     }
 
     if (cfg->api_type == PERFTEST_SEND) {
-        if (cfg->single_path && cfg->size > PERFTEST_RTP_MAX_SEND_SIZE && !cfg->all) {
-            (void)fprintf(stderr, "Invalid size: %u with single path for send opcode, max size: %u.\n",
+        if (!cfg->use_ctp && cfg->size > PERFTEST_RTP_MAX_SEND_SIZE && !cfg->all) {
+            (void)fprintf(stderr, "Invalid size: %u with rtp for send opcode, max size: %u.\n",
                 cfg->size, PERFTEST_RTP_MAX_SEND_SIZE);
             exit(1);
         }
-        if (!cfg->single_path && cfg->size > PERFTEST_CTP_MAX_SEND_SIZE && !cfg->all) {
-            (void)fprintf(stderr, "Invalid size: %u with multi path for send opcode, max size: %u.\n",
+        if (cfg->use_ctp && cfg->size > PERFTEST_CTP_MAX_SEND_SIZE && !cfg->all) {
+            (void)fprintf(stderr, "Invalid size: %u with ctp for send opcode, max size: %u.\n",
                 cfg->size, PERFTEST_CTP_MAX_SEND_SIZE);
             exit(1);
         }

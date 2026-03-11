@@ -40,12 +40,6 @@
 #define PERFTEST_SIZE_CQ_MOD_LIMIT (8192)
 #define PERFTEST_BW_NO_PEAK_INTERS (20000)
 
-#define PERFTEST_INLINE_LAT_RC (220)
-#define PERFTEST_INLINE_LAT_RM (236)
-#define PERFTEST_INLINE_LAT_UM (188)
-#define PERFTEST_DEF_INLINE_LAT PERFTEST_INLINE_LAT_RC
-#define PERFTEST_DEF_INLINE_BW (0)
-
 #define PERFTEST_DEF_CACHE_LINE_SIZE (64)
 #define PERFTEST_PAGE_SIZE (4096)
 
@@ -64,10 +58,6 @@
 // value range of perftest jettys
 #define PERFTEST_JETTYS_MIN  (1)
 #define PERFTEST_JETTYS_MAX  (0xFFFF)
-
-// value range of perftest inline size
-#define PERFTEST_INLINE_MIN  (0)
-#define PERFTEST_INLINE_MAX  (912)
 
 // value range of perftest jfr_depth
 #define PERFTEST_JFR_DEPTH_MIN  (1)
