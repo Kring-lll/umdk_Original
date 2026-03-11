@@ -21,6 +21,7 @@
 #include "admin_log.h"
 #include "admin_netlink.h"
 #include "admin_parameters.h"
+#include "urma_cmd_tlv.h"
 
 #include "admin_cmd.h"
 
@@ -857,6 +858,36 @@ int admin_cmd_get_topo_info(tool_topo_map_t *topo_map)
     return ret;
 free_topo:
     free(arg);
+    return ret;
+}
+
+/* GET_TOPO_BONDING_DEV: TLV fill IN (agg_eid only), parse OUT (bonding_dev to args_addr).
+ * Strictly follow urma_cmd_tlv: only GET_TOPO_BONDING_DEV_IN_AGG_EID / OUT_BONDING_DEV. */
+int admin_cmd_get_topo_bonding_dev_by_eid(const urma_eid_t *agg_eid,
+    admin_urma_topo_bonding_dev_t *out)
+{
+    int ret;
+
+    if (agg_eid == NULL || out == NULL)
+        return -EINVAL;
+
+    struct nl_msg *msg = admin_nl_alloc_msg(URMA_CORE_GET_TOPO_BONDING_DEV, 0);
+    if (msg == NULL)
+        return -ENOMEM;
+
+    /* TLV IN: GET_TOPO_BONDING_DEV_IN_AGG_EID only */
+    ret = admin_nl_put_binary(msg, UBCORE_ATTR_GET_TOPO_BONDING_DEV_AGG_EID,
+                              agg_eid, sizeof(urma_eid_t));
+    if (ret != 0) {
+        admin_nl_free_msg(msg);
+        return ret;
+    }
+    /* OUT buffer: kernel writes GET_TOPO_BONDING_DEV_OUT_BONDING_DEV here */
+    admin_nl_put_u32(msg, UBCORE_HDR_ARGS_LEN, (uint32_t)sizeof(admin_urma_topo_bonding_dev_t));
+    admin_nl_put_u64(msg, UBCORE_HDR_ARGS_ADDR, (uint64_t)(uintptr_t)out);
+
+    ret = admin_nl_send_recv_msg_default(msg);
+    admin_nl_free_msg(msg);
     return ret;
 }
 
