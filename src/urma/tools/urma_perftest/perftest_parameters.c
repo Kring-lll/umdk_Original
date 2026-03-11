@@ -104,7 +104,7 @@ static void usage(const char *argv0)
     (void)printf("  -f, --use_flat_api          Choose to use flat API, only works in SIMPLEX mode.\n");
     (void)printf("  -F, --cpu_freq_f            To report warnings when CPU frequency drifts, default as NOT.\n");
     (void)printf("  -h, --help                  Show help info.\n");
-    (void)printf("  -I, --inline_size <size>    default as 0, the system will assign device's max inline data length.\n");
+    (void)printf("  -I, --inline_size <size>    Max size of message to be sent in inline (default 0).\n");
     (void)printf("  -j, --share_jfr <true/false> share jfr on create jetty.\n");
     (void)printf("  -J, --jettys <num of jetty> Num of jettys(default 1).\n");
     (void)printf("  -K, --token_policy <policy> default 0: NONE, 1: PLAIN_TEXT, 2: SIGNED, 3: ALL_ENCRYPTED.\n");
