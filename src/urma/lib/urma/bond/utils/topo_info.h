@@ -22,6 +22,7 @@
 #define MAX_NODE_NUM (16)
 #define IODIE_NUM (2)
 #define DEV_NUM (128)
+#define MAX_DEV_NAME_LEN (64)
 
 #ifdef __cplusplus
 extern "C" {
@@ -88,6 +89,19 @@ typedef struct topo_map {
     bondp_hash_table_t direct_dev_hash_table;
     bondp_hash_table_t eid_mapping_hash_table; 
 } topo_map_t;
+
+struct urma_topo_physical_dev {
+    char dev_name[MAX_DEV_NAME_LEN];
+    uint32_t chip_id;
+    urma_eid_t primary_eid;
+    urma_eid_t port_eid[PORT_NUM];
+};
+
+struct urma_topo_bonding_dev {
+    char dev_name[MAX_DEV_NAME_LEN];
+    urma_eid_t bonding_eid;
+    struct urma_topo_physical_dev physical_devs[IODIE_NUM];
+};
 
 /* The following functions needs the caller to check the validity of the parameters */
 

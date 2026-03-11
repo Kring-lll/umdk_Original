@@ -20,6 +20,16 @@
 
 #define URMA_CMD_OUT_TYPE_INIT 0x80
 
+/* Core netlink admin: GET_TOPO_BONDING_DEV (see admin_core_cmd_topo_bonding_dev_t) */
+typedef enum urma_cmd_get_topo_bonding_dev_type {
+	/* In type */
+	GET_TOPO_BONDING_DEV_IN_AGG_EID,
+	GET_TOPO_BONDING_DEV_IN_NUM, /* Only for calculating number of types */
+	/* Out type */
+	GET_TOPO_BONDING_DEV_OUT_BONDING_DEV = URMA_CMD_OUT_TYPE_INIT,
+	GET_TOPO_BONDING_DEV_OUT_NUM, /* Only for calculating number of types */
+} urma_cmd_get_topo_bonding_dev_type_t;
+
 typedef enum urma_event_cmd {
     URMA_EVENT_CMD_WAIT_JFCE = 1,
     URMA_EVENT_CMD_GET_ASYNC_EVENT,
