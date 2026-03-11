@@ -218,10 +218,17 @@ static void umq_perftest_server_run_qps_pro_interrupt(uint64_t umqh, umq_perftes
     }
     uint64_t start_cycle = get_cycles();
     double cycles_to_units = get_cpu_mhz(false);
+    uint32_t fake_buf_cnt;
+    int ret;
+
     while (!is_perftest_force_quit() && (get_cycles() - start_cycle) / cycles_to_units < ITER_MAX_WAIT_TIME_US) {
-        if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) != 1) {
+        ret = umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option);
+        if (ret < 0) {
             LOG_PRINT("umq_wait_interrupt failed\n");
             return;
+        }
+        if (ret == 0) {
+            continue;
         }
         umq_ack_interrupt(umqh, 1, &interrupt_option);
         if (umq_rearm_interrupt(umqh, false, &interrupt_option) != 0) {
@@ -246,11 +253,17 @@ static void umq_perftest_server_run_qps_pro_interrupt(uint64_t umqh, umq_perftes
                 return;
             }
         } while (poll_num == 0 && !is_perftest_force_quit());
-
-        require_rx_cnt += (uint32_t)poll_num;
+        fake_buf_cnt = 0;
         for (int i = 0; i < poll_num; ++i) {
+            if (polled_buf[i]->status == UMQ_FAKE_BUF_FC_UPDATE) {
+                umq_buf_free(polled_buf[i]);
+                (fake_buf_cnt)++;
+                continue;
+            }
             umq_buf_free(polled_buf[i]);
         }
+        poll_num -= fake_buf_cnt;
+        require_rx_cnt += (uint32_t)poll_num;
         (void)atomic_fetch_add(&g_umq_perftest_qps_ctx.reqs[thread_inx], poll_num);
 
         // batch fill rx
@@ -283,6 +296,7 @@ static void umq_perftest_server_run_qps_pro_polling(uint64_t umqh, umq_perftest_
     uint32_t size = qps_arg->cfg->config.size;
     uint64_t start_cycle = get_cycles();
     double cycles_to_units = get_cpu_mhz(false);
+    uint32_t fake_buf_cnt;
     while (!is_perftest_force_quit() && (get_cycles() - start_cycle) / cycles_to_units < ITER_MAX_WAIT_TIME_US) {
         // recv req，release req buf after counting
         poll_num = umq_poll(umqh, UMQ_IO_ALL, polled_buf, UMQ_BATCH_SIZE);
@@ -290,11 +304,17 @@ static void umq_perftest_server_run_qps_pro_polling(uint64_t umqh, umq_perftest_
             LOG_PRINT("poll rx failed\n");
             return;
         }
-
-        require_rx_cnt += (uint32_t)poll_num;
+        fake_buf_cnt = 0;
         for (int i = 0; i < poll_num; ++i) {
+            if (polled_buf[i]->status == UMQ_FAKE_BUF_FC_UPDATE) {
+                umq_buf_free(polled_buf[i]);
+                (fake_buf_cnt)++;
+                continue;
+            }
             umq_buf_free(polled_buf[i]);
         }
+        poll_num -= fake_buf_cnt;
+        require_rx_cnt += (uint32_t)poll_num;
         (void)atomic_fetch_add(&g_umq_perftest_qps_ctx.reqs[thread_inx], poll_num);
 
         // batch fill rx
@@ -342,7 +362,7 @@ static inline uint32_t get_actual_send_num(umq_buf_t *req_buf, umq_buf_t *bad)
     return num;
 }
 
-static int handle_qps_client_rx_buf(uint64_t umqh, umq_buf_t **rx_buf, uint32_t poll_buf_cnt, uint32_t *fake_buf_cnt)
+static int handle_qps_rx_buf(uint64_t umqh, umq_buf_t **rx_buf, uint32_t poll_buf_cnt, uint32_t *fake_buf_cnt)
 {
     umq_buf_t *buf = NULL;
     uint32_t failed_idx = 0;
@@ -469,14 +489,13 @@ REARM:
         }
 
         if (umq_wait_interrupt(umqh, 0, &rx_interrupt_option) < 0) {
-            LOG_PRINT("umq wait tx interrupt failed\n");
+            LOG_PRINT("umq wait rx interrupt failed\n");
             goto ERROR;
         }
         if (umq_rearm_interrupt(umqh, false, &rx_interrupt_option) != 0) {
             LOG_PRINT("server umq rearm tx interrupt failed\n");
             goto ERROR;
         }
-
 POLL:
         // poll flowctrl win, increase the count
         ret = umq_poll(umqh, UMQ_IO_RX, rx_buf, UMQ_BATCH_SIZE);
@@ -485,7 +504,7 @@ POLL:
             goto ERROR;
         }
 
-        if (handle_qps_client_rx_buf(umqh, rx_buf, ret, &fake_buf_cnt) != UMQ_SUCCESS) {
+        if (handle_qps_rx_buf(umqh, rx_buf, ret, &fake_buf_cnt) != UMQ_SUCCESS) {
             LOG_PRINT("handle qps client rx buf failed\n");
             goto ERROR;
         }
@@ -558,7 +577,7 @@ POLL:
             goto ERROR;
         }
 
-        if (handle_qps_client_rx_buf(umqh, rx_buf, ret, &fake_buf_cnt) != UMQ_SUCCESS) {
+        if (handle_qps_rx_buf(umqh, rx_buf, ret, &fake_buf_cnt) != UMQ_SUCCESS) {
             LOG_PRINT("handle qps client rx buf failed\n");
             goto ERROR;
         }
