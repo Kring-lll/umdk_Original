@@ -290,8 +290,18 @@ public:
         auto tileShape = TileShape::ToCoord();
         EpilogueTileSwizzle epilogueTileSwizzle(actualBlockShape, tileShape);
         uint32_t tileLoops = epilogueTileSwizzle.GetLoops();
-        uint32_t subblockIdx = expertIdx == UINT32_MAX ? 0 : AscendC::GetSubBlockIdx();
-        uint32_t subblockNum = expertIdx == UINT32_MAX ? 1 : AscendC::GetSubBlockNum();
+
+        uint32_t subblockIdx;
+        uint32_t subblockNum;
+        if (expertIdx == UINT32_MAX) {
+            subblockIdx = 0;
+            subblockNum = 1;
+        } else {
+            static uint32_t subBlockMask = 0;
+            subblockIdx = AscendC::GetSubBlockIdx() ^ subBlockMask;
+            subblockNum = AscendC::GetSubBlockNum();
+            subBlockMask ^= 1;
+        }
         for (uint32_t loopIdx = subblockIdx; loopIdx < tileLoops; loopIdx += subblockNum) {
             auto tileCoord = epilogueTileSwizzle.GetTileCoord(loopIdx);
             auto actualTileShape = epilogueTileSwizzle.GetActualTileShape(tileCoord);
