@@ -1079,20 +1079,28 @@ urma_target_jetty_t * bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rje
         rvjetty_info->is_multipath = true;
     }
 
-    /* Only allow the following combinations:
-     * RC + single_path
-     * RM + multi_path
-     * RC + multi_path */
-    if (
-        bdp_tjetty->is_in_matrix_server &&
-        !((rjetty->trans_mode == URMA_TM_RC && !rvjetty_info->is_multipath) ||
-          (rjetty->trans_mode == URMA_TM_RM && rvjetty_info->is_multipath) ||
-          (rjetty->trans_mode == URMA_TM_RC && rvjetty_info->is_multipath))) {
-        URMA_LOG_ERR("Invalid import! Only support RC + single_path, RM + multi_path, RC + multi_path."
-                     "rjetty->trans_mode = %d, is_multipath = %d, rjetty->tp_type = %d.\n",
-                     rjetty->trans_mode, rvjetty_info->is_multipath, rjetty->tp_type);
-        errno = EINVAL;
-        goto unimport_vjetty;
+    if (rvjetty_info->is_multipath) {
+        if (rjetty->tp_type != URMA_CTP) {
+            URMA_LOG_ERR("Multi-path jetty only support CTP, tp_type:%d\n", rjetty->tp_type);
+            errno = EINVAL;
+            goto unimport_vjetty;
+        }
+        if (rjetty->trans_mode != URMA_TM_RM && rjetty->trans_mode != URMA_TM_RC) {
+            URMA_LOG_ERR("Multi-path jetty only support RM or RC, trans_mode:%d\n", rjetty->trans_mode);
+            errno = EINVAL;
+            goto unimport_vjetty;
+        }
+    } else {
+        if (rjetty->tp_type != URMA_UTP && rjetty->tp_type != URMA_RTP) {
+            URMA_LOG_ERR("Single-path jetty only support UTP or RTP, tp_type:%d\n", rjetty->tp_type);
+            errno = EINVAL;
+            goto unimport_vjetty;
+        }
+        if (rjetty->trans_mode != URMA_TM_RC) {
+            URMA_LOG_ERR("Single-path jetty only support RC, trans_mode:%d\n", rjetty->trans_mode);
+            errno = EINVAL;
+            goto unimport_vjetty;
+        }
     }
 
     if (bondp_import_pjetty(bdp_ctx, bdp_tjetty, rjetty, token_value, rvjetty_info) != 0) {
