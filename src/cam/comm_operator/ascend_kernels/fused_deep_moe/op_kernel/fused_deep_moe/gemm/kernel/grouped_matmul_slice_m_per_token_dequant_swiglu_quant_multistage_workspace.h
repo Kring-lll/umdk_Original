@@ -573,8 +573,7 @@ public:
         aivNum = aiCoreGroupNum * SUB_AIV_NUM;
         aicStateGlobalCoreIdx = aivNum + aicIdx;
         moeExpertNumPerRank = params.moeExpertNumPerRank;
-        isShareExpert = (params.epRankId < params.sharedExpertRankNum);
-        localExpertNum = isShareExpert ? 1 : moeExpertNumPerRank;
+        localExpertNum = moeExpertNumPerRank;
         // when localExpertNum=1, all cores send token and recv token in sequence
         recvCoreNum = aivNum;
         // when localExpertNum>1, half of cores send token and another half recv token in parallel
@@ -849,7 +848,7 @@ public:
     CATLASS_DEVICE
     void CalAndSendTokenCount()
     {
-        uint32_t totalExpertNum = sharedExpertRankNum + moeExpertNum;
+        uint32_t totalExpertNum = moeExpertNum;
         uint32_t sendCountExpertNum = totalExpertNum / sendCoreNum;
         uint32_t remainderRankNum = totalExpertNum % sendCoreNum;
         uint32_t startExpertId = sendCountExpertNum * sendCoreIdx;
@@ -879,20 +878,9 @@ public:
         AscendC::SetFlag<AscendC::HardEvent::V_S>(0);
         AscendC::WaitFlag<AscendC::HardEvent::V_S>(0);
 
-        if (!isShareExpert) {
-            for (uint32_t curSatatusExpId = 0; curSatatusExpId < sharedExpertRankNum; ++curSatatusExpId) {
-                int32_t curExpertCnt = (curSatatusExpId + 1 + epRankId) * axisBS / sharedExpertRankNum -
-                                       (curSatatusExpId + epRankId) * axisBS / sharedExpertRankNum;
-                statusTensor_((curSatatusExpId) * INT32_COUNT_PER_BLOCK + 1) = curExpertCnt;
-            }
-        }
-
         for (uint32_t curExpertId = startExpertId; curExpertId < endExpertId; ++curExpertId) {
-            if (curExpertId < sharedExpertRankNum) {
-                continue;
-            }
             int32_t curExpertCnt = 0;
-            int32_t dstExpertId = curExpertId - sharedExpertRankNum;
+            int32_t dstExpertId = curExpertId;
             CalExpandxIdx(dstExpertId, expertIdsCnt, curExpertCnt, ubOffset);
             int32_t cntPosIndex = curExpertId * INT32_COUNT_PER_BLOCK + 1;
             statusTensor_(cntPosIndex) = curExpertCnt;
@@ -905,10 +893,10 @@ public:
         uint32_t offset = stateOffset * epRankId;
         for (uint32_t rankIndex = startExpertId; rankIndex < endExpertId; ++rankIndex) {
             uint32_t dstRankId = rankIndex;
-            if (moeExpertNumPerRank > 1 && (rankIndex >= sharedExpertRankNum)) {
-                dstRankId = ((rankIndex - sharedExpertRankNum) / moeExpertNumPerRank + sharedExpertRankNum);
+            if (moeExpertNumPerRank > 1) {
+                dstRankId = ((rankIndex) / moeExpertNumPerRank);
                 offset =
-                    (epRankId + (rankIndex - sharedExpertRankNum) % moeExpertNumPerRank * epRankSize) * stateOffset;
+                    (epRankId + (rankIndex) % moeExpertNumPerRank * epRankSize) * stateOffset;
             }
             GM_ADDR rankGM = (__gm__ uint8_t *)(GetWindStateAddrByRankId(dstRankId) + offset);
             rankGMTensor.SetGlobalBuffer((__gm__ int32_t *)rankGM);
@@ -920,7 +908,6 @@ public:
     void QuantToken(AscendC::LocalTensor<XType> &xInTensor, AscendC::LocalTensor<float> &smoothScaleTensor, AscendC::LocalTensor<int8_t> &yInt8Tensor, int64_t ubOffset)
     {
         int64_t subUbOffset = ubOffset;
-        AscendC::SetDeqScale(static_cast<half>(1.0));
         AscendC::LocalTensor<float> xFp32TmpTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
         subUbOffset += CEIL_UP(tokenLength * sizeof(float));
         AscendC::LocalTensor<float> xFp32AbsTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
@@ -962,94 +949,6 @@ public:
         AscendC::Cast(yHalfTensor, ytmpInt32Tensor, AscendC::RoundMode::CAST_ROUND, tokenLength);
         AscendC::PipeBarrier<PIPE_V>();
         AscendC::Cast(yInt8Tensor, yHalfTensor, AscendC::RoundMode::CAST_TRUNC, tokenLength);
-    }
-
-    CATLASS_DEVICE
-    void SendToShareExprt(GM_ADDR gmX, GM_ADDR gmX1, GM_ADDR gmX1Scale)
-    {
-        uint32_t newAivId = sendCoreIdx - sendToMoeAivNum;
-        uint32_t sendTokenNum = activeMaskBsCnt / sendToShareAivNum;
-        uint32_t remainderTokenNum = activeMaskBsCnt % sendToShareAivNum;
-        uint32_t startTokenId = sendTokenNum * newAivId;
-        if (newAivId < remainderTokenNum) {
-            sendTokenNum += 1;
-            startTokenId += newAivId;
-        } else {
-            startTokenId += remainderTokenNum;
-        }
-        uint32_t endTokenId = startTokenId + sendTokenNum;
-        if (startTokenId >= activeMaskBsCnt) {
-            return;
-        }
-
-        AscendC::LocalTensor<XType> xInTensor[BUFFER_NUM];
-        AscendC::LocalTensor<int8_t> yInt8Tensor[BUFFER_NUM];
-        AscendC::LocalTensor<float> yFp32Tensor[BUFFER_NUM];
-
-        AscendC::GlobalTensor<XType> srcWinGMTensor;
-        srcWinGMTensor.SetGlobalBuffer((__gm__ XType *)gmX);
-
-        xInTensor[0] = resource.ubBuf.template GetBufferByByte<XType>(ubOffset);
-        ubOffset += CEIL_UP(tokenLength * sizeof(XType));
-        xInTensor[1] = resource.ubBuf.template GetBufferByByte<XType>(ubOffset);
-        ubOffset += CEIL_UP(tokenLength * sizeof(XType));
-        yInt8Tensor[0] = resource.ubBuf.template GetBufferByByte<int8_t>(ubOffset);
-        yFp32Tensor[0] = yInt8Tensor[0].template ReinterpretCast<float>();
-        ubOffset += CEIL_UP(axisHCommu * sizeof(int8_t));
-        yInt8Tensor[1] = resource.ubBuf.template GetBufferByByte<int8_t>(ubOffset);
-        yFp32Tensor[1] = yInt8Tensor[1].template ReinterpretCast<float>();
-        ubOffset += CEIL_UP(axisHCommu * sizeof(int8_t));
-        AscendC::GlobalTensor<int8_t> dstWinGMTensor;
-        AscendC::GlobalTensor<int8_t> expandXOutGlobal;
-        expandXOutGlobal.SetGlobalBuffer((__gm__ int8_t *)(gmX1));
-        AscendC::GlobalTensor<float> dynamicScalesOutGMTensor_;
-        dynamicScalesOutGMTensor_.SetGlobalBuffer((__gm__ float *)(gmX1Scale));
-
-        // double buffer
-        AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
-        AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(1);
-        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(0);
-        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(1);
-
-        for (uint32_t tokenIndex = startTokenId; tokenIndex < endTokenId; ++tokenIndex) {
-            uint32_t index = (tokenIndex & 1) ? 0 : 1;
-            int32_t eventId = (tokenIndex & 1) ? 0 : 1;
-            uint32_t temp = (epRankId * axisBS) / sharedExpertRankNum;
-            uint32_t moeOnShareRank = CEIL((tokenIndex + 1 + temp) * sharedExpertRankNum, axisBS) - 1 - epRankId;
-            uint32_t preCnt = (moeOnShareRank + epRankId) * axisBS / sharedExpertRankNum -
-                                epRankId * axisBS / sharedExpertRankNum;
-            dstWinGMTensor.SetGlobalBuffer(
-                (__gm__ int8_t *)(GetWindAddrByRankId(moeOnShareRank) + expertPerSizeOnWin * epRankId));
-            AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventId);
-            AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(eventId);
-            AscendC::DataCopy(xInTensor[index], srcWinGMTensor[tokenIndex * tokenLength], tokenLength);
-            AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventId);
-            AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventId);
-            QuantToken(xInTensor[index], yFp32Tensor[index]/*ERROR!!!*/, yInt8Tensor[index], ubOffset);
-            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventId);
-            AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
-
-            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventId);
-            if (isShareExpert) {
-                AscendC::DataCopyExtParams dataCopyParamsFloat = {1U, sizeof(float), 0U, 0U, 0U};
-                AscendC::DataCopy(expandXOutGlobal[tokenIndex * tokenLength], yInt8Tensor[index], tokenLength);
-                AscendC::PipeBarrier<PIPE_MTE3>();
-                AscendC::DataCopyPad(dynamicScalesOutGMTensor_[tokenIndex],
-                                     yFp32Tensor[index][tokenLength / sizeof(float)], dataCopyParamsFloat);
-            } else {
-                AscendC::DataCopy(dstWinGMTensor[(tokenIndex - preCnt) * axisHCommu], yInt8Tensor[index],
-                                  tokenLength);
-                AscendC::PipeBarrier<PIPE_MTE3>();
-                AscendC::DataCopy(dstWinGMTensor[(tokenIndex - preCnt) * axisHCommu + tokenLength],
-                                  yInt8Tensor[index][tokenLength], scaleParamPad);
-            }
-            AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(eventId);
-            AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventId);
-        }
-        AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
-        AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(1);
-        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(0);
-        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(1);
     }
 
     CATLASS_DEVICE
@@ -1125,7 +1024,7 @@ public:
                 int32_t curExpertCnt = 0;
                 CalExpandxIdx(dstExpertId, tokenIndex, curExpertCnt, ubOffset);
                 expertCountTensor(tokenIndex - startTokenId) = curExpertCnt;
-                uint32_t tempRankId = dstExpertId / moeExpertNumPerRank + sharedExpertRankNum;
+                uint32_t tempRankId = dstExpertId / moeExpertNumPerRank;
                 GM_ADDR rankGM = (__gm__ uint8_t *)(GetWindAddrByRankId(tempRankId) +
                                                     (expertPerSizeOnWin * (epRankId * moeExpertNumPerRank +
                                                                            dstExpertId % moeExpertNumPerRank)) +
@@ -1196,20 +1095,10 @@ public:
 
         CalAndSendTokenCount();
         AscendC::PipeBarrier<PIPE_ALL>();
-        if (hasShareExpert) {
-            sendToShareAivNum = sendCoreNum / (axisK + 1);
-            if (sendToShareAivNum == 0) {
-                sendToShareAivNum = 1;
-            }
-        }
-        sendToMoeAivNum = sendCoreNum - sendToShareAivNum;
+        sendToMoeAivNum = sendCoreNum;
 
         AscendC::SetDeqScale((half)1.000000e+00f);
-        if (hasShareExpert && sendCoreIdx >= sendToMoeAivNum) {
-            SendToShareExprt(gmX, gmX1, gmX1Scale);
-        } else {
-            SendToMoeExprt(gmX, gmExpandIdx, gmMoeSmoothScales);
-        }
+        SendToMoeExprt(gmX, gmExpandIdx, gmMoeSmoothScales);
         AscendC::PipeBarrier<PIPE_ALL>();
     }
 
@@ -1230,7 +1119,7 @@ public:
         if (startTokenId >= axisBS) {
             return;
         }
-
+        AscendC::SetDeqScale(static_cast<half>(1.0));
         AscendC::GlobalTensor<XType> srcXGMTensor; // token输入
         srcXGMTensor.SetGlobalBuffer((__gm__ XType*)gmX);
         AscendC::GlobalTensor<int8_t> dstXInt8GMTensor; // token输出
@@ -1374,7 +1263,7 @@ public:
     CATLASS_DEVICE
     void RecvCount(int64_t ubOffset)
     {
-        uint32_t recStatusNumPerCore = isShareExpert ? epRankSize : expertCntUp;
+        uint32_t recStatusNumPerCore = expertCntUp;
         uint32_t startStatusIndex = 0;  // every wait for all token counts
 
         int64_t subUbOffset = ubOffset;
@@ -1427,7 +1316,7 @@ public:
     {
         // calculate token index in output tensor
         int64_t subUbOffset = ubOffset;
-        uint32_t recStatusNumPerCore = isShareExpert ? epRankSize : expertCntUp;
+        uint32_t recStatusNumPerCore = expertCntUp;
         AscendC::LocalTensor<int32_t> statusTensor_ = resource.ubBuf.template GetBufferByByte<int32_t>(subUbOffset);
         subUbOffset += CEIL_UP(expertCntUp * UB_BLOCK_SIZE);
         AscendC::LocalTensor<uint32_t> gatherTmpTensor = (resource.ubBuf.template GetBufferByByte<uint32_t>
@@ -1436,13 +1325,6 @@ public:
         AscendC::LocalTensor<float> gatherMaskOutTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
         subUbOffset += CEIL_UP(expertCntUp * sizeof(float));
         AscendC::LocalTensor<float> statusFp32Tensor_ = statusTensor_.ReinterpretCast<float>();
-        if (isShareExpert) {
-            for (uint32_t curSatatusExpId = 0; curSatatusExpId < sharedExpertRankNum; ++curSatatusExpId) {
-                int32_t curExpertCnt = (curSatatusExpId + 1 + epRankId) * axisBS / sharedExpertRankNum -
-                                    (curSatatusExpId + epRankId) * axisBS / sharedExpertRankNum;
-                statusTensor_((curSatatusExpId)*INT32_COUNT_PER_BLOCK + 1) = curExpertCnt;
-            }
-        }
 
         uint64_t rsvdCnt = 0;
         gatherTmpTensor.SetValue(0, GATHER_SECOND_NUM);
@@ -1554,14 +1436,8 @@ public:
             uint32_t count = statusTensor_.GetValue(index * INT32_COUNT_PER_BLOCK + 1);
             coreTokenCount += count;
             beginIdx = gatherMaskOutCountTensor.GetValue(i) - count;
-            if (isShareExpert && index < sharedExpertRankNum) {
-                beginIdx += count;
-                continue;
-            }
             uint32_t winOffset = index;
-            if (!isShareExpert && moeExpertNumPerRank > 1) {
-                winOffset = (index % epRankSize) * moeExpertNumPerRank + index / epRankSize;
-            }
+            winOffset = (index % epRankSize) * moeExpertNumPerRank + index / epRankSize;
             GM_ADDR wAddr = (__gm__ uint8_t *)(GetWindAddrByRankId(epRankId)) + winOffset * expertPerSizeOnWin;
             AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
             for (uint32_t j = 0; j < count; j++) {
@@ -1627,7 +1503,7 @@ public:
         ubOffset = 0;
         RecvCount(ubOffset);
 
-        uint32_t recvExpertNum = isShareExpert ? epRankSize : expertCntUp;
+        uint32_t recvExpertNum = expertCntUp;
         uint32_t recvCoreNumPerGroup = recvCoreNum / localExpertNum;
         uint32_t recvRankNumPerCore = epRankSize / recvCoreNumPerGroup;
         uint32_t remainderRankNum = epRankSize % recvCoreNumPerGroup;
@@ -1893,9 +1769,9 @@ public:
         epRankId = params.epRankId;
         expertCntUp = epRankSize * moeExpertNumPerRank;
         sharedExpertRankNum = params.sharedExpertRankNum;
-        hasShareExpert = (sharedExpertRankNum > 0);
-        isShareExpert = (epRankId < sharedExpertRankNum);
-        localExpertNum = isShareExpert ? 1 : moeExpertNumPerRank;
+        hasShareExpert = false;
+        isShareExpert = false;
+        localExpertNum = moeExpertNumPerRank;
         moeExpertNum = params.moeExpertNum;
         tokenLength = params.tokenLen;
 
