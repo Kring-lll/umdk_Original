@@ -127,7 +127,11 @@ public:
                     AscendC::GlobalTensor<ElementB> const &gmBlockB, LayoutB const &layoutB,
                     AscendC::GlobalTensor<ElementC> const &gmBlockC, LayoutC const &layoutC,
                     GemmCoord const &actualShape, Callback const &callbackBeforeFixpipe,
+#if ENABLE_GMM2_MOVING_FORWARD
+                    MoeCallback const &callbackAfterFixpipe)
+#else
                     Callback const &callbackAfterFixpipe)
+#endif
     {
         uint32_t kTileCount = CeilDiv<L1TileShape::K>(actualShape.k());
         bool useResidentA =
@@ -224,7 +228,11 @@ private:
         AscendC::GlobalTensor<ElementC> gmBlockC;
         LayoutC layoutCInGm;
         Callback callbackBeforeFixpipe;
+#if ENABLE_GMM2_MOVING_FORWARD
+        MoeCallback callbackAfterFixpipe;
+#else
         Callback callbackAfterFixpipe;
+#endif
 
         CATLASS_DEVICE
         L1TileMmadParams() = default;

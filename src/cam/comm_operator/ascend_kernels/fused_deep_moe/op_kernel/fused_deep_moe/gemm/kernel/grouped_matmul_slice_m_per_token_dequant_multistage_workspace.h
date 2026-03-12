@@ -31,6 +31,44 @@ Callback MakeCallbackWithCall(Func *func)
     };
     return callback;
 }
+#define ENABLE_GMM2_MOVING_FORWARD 1
+
+#if ENABLE_GMM2_MOVING_FORWARD
+struct MoeCallback {
+    void const *func{nullptr};
+    void (*caller)(void const *, int32_t){nullptr};
+    int32_t index{0};
+    MoeCallback() = default;
+
+    CATLASS_DEVICE
+    void operator()() const
+    {
+        if (caller) {
+            caller(func, index);
+        }
+    }
+
+    CATLASS_DEVICE
+    operator bool() const
+    {
+        return func != nullptr;
+    }
+};
+
+template <typename Func>
+CATLASS_DEVICE
+MoeCallback MakeCallbackWithValue(Func *func, int32_t value)
+{
+    MoeCallback callback;
+    callback.index = value;
+    callback.func = func;
+    callback.caller = [](void const *f, int32_t idx) {
+        static_cast<Func const *>(f)->CallWithValue(idx);
+    };
+    return callback;
+}
+
+#endif
 
 template <typename Func>
 CATLASS_DEVICE
@@ -48,8 +86,9 @@ Callback MakeCallbackWithCall2(Func *func)
 
 namespace Catlass::Gemm::Kernel {
 namespace GMM2 {
-    constexpr uint32_t SOFT_SYNC_SPACE_SIZE = 128;
-    constexpr uint64_t SOFT_SYNC_OFFSET = 964 * 1024;
+    constexpr uint32_t SOFT_SYNC_SPACE_SIZE = 512;
+    constexpr uint64_t SOFT_SYNC_OFFSET = 1024 * 1024; // len: 24 * 4 * 512 = 48KB
+    constexpr uint64_t NOTIFY_GMM2_SOFT_SYNC_OFFSET = 1072 * 1024; // len: group_count * 512 = (group_count / 2)KB
 }
 
 template <TemplateMC2TypeClass, class BlockMmad_, class BlockEpilogue_, class BlockScheduler_,
@@ -96,19 +135,24 @@ public:
         LayoutPerTokenScale layoutPerTokenScale;
         __gm__ ElementD *ptrD;
         LayoutD layoutD;
+        __gm__ ElementC *ptrC;
+        LayoutC layoutC;
         uint32_t batchSize;
         GemmCoord sharedGmm2ProblemShape;
         __gm__ ElementA * ptrSharedA;
         __gm__ ElementB * ptrSharedB;
         __gm__ ElementD *ptrSharedD;
+        __gm__ ElementC *ptrSharedC;
         __gm__ ElementScale *ptrSharedScale;
         __gm__ ElementPerTokenScale *ptrSharedPtrPerTokenScale;
         LayoutA sharedLayoutA;
         LayoutB sharedLayoutB;
         LayoutPerTokenScale sharedLayoutPerTokenScale;
         LayoutD sharedLayoutD;
+        LayoutC sharedLayoutC;
         GM_ADDR ptrWorkspace;
         void *combiner;
+        uint32_t epRankSize;
 
         // Methods
         CATLASS_DEVICE
@@ -117,12 +161,12 @@ public:
         CATLASS_DEVICE
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_, LayoutA layoutA_,
                GM_ADDR ptrB_, LayoutB layoutB_, GM_ADDR ptrScale_, LayoutScale layoutScale_, GM_ADDR ptrPerTokenScale_,
-               LayoutPerTokenScale layoutPerTokenScale_, GM_ADDR ptrD_, LayoutD layoutD_, uint32_t batchSize_,
-               GemmCoord sharedGmm2ProblemShape_, GM_ADDR ptrSharedA_, GM_ADDR ptrSharedB_, GM_ADDR ptrSharedD_,
+               LayoutPerTokenScale layoutPerTokenScale_, GM_ADDR ptrD_, LayoutD layoutD_, GM_ADDR ptrC_, LayoutC layoutC_, uint32_t batchSize_,
+               GemmCoord sharedGmm2ProblemShape_, GM_ADDR ptrSharedA_, GM_ADDR ptrSharedB_, GM_ADDR ptrSharedD_, GM_ADDR ptrSharedC_,
                GM_ADDR ptrSharedScale_, GM_ADDR ptrSharedPtrPerTokenScale_, LayoutA sharedLayoutA_,
                LayoutB sharedLayoutB_,
-               LayoutPerTokenScale sharedLayoutPerTokenScale_, LayoutD sharedLayoutD_,
-               GM_ADDR ptrWorkspace_, void *combiner_)
+               LayoutPerTokenScale sharedLayoutPerTokenScale_, LayoutD sharedLayoutD_, LayoutC sharedLayoutC_,
+               GM_ADDR ptrWorkspace_, void *combiner_, uint32_t epRankSize_)
             : problemShape(problemShape_),
               problemCount(problemCount_),
               ptrGroupList(reinterpret_cast<__gm__ ElementGroupList *>(ptrGroupList_)),
@@ -136,19 +180,24 @@ public:
               layoutPerTokenScale(layoutPerTokenScale_),
               ptrD(reinterpret_cast<__gm__ ElementD *>(ptrD_)),
               layoutD(layoutD_),
+              ptrC(reinterpret_cast<__gm__ ElementC *>(ptrC_)),
+              layoutC(layoutC_),
               batchSize(batchSize_),
               sharedGmm2ProblemShape(sharedGmm2ProblemShape_),
               ptrSharedB(reinterpret_cast<__gm__ ElementB *>(ptrSharedB_)),
               ptrSharedScale(reinterpret_cast<__gm__ ElementScale *>(ptrSharedScale_)),
               ptrSharedD(reinterpret_cast<__gm__ ElementD *>(ptrSharedD_)),
+              ptrSharedC(reinterpret_cast<__gm__ ElementC *>(ptrSharedC_)),
               ptrSharedA(reinterpret_cast<__gm__ ElementA *>(ptrSharedA_)),
               ptrSharedPtrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrSharedPtrPerTokenScale_)),
               sharedLayoutA(sharedLayoutA_),
               sharedLayoutB(sharedLayoutB_),
               sharedLayoutPerTokenScale(sharedLayoutPerTokenScale_),
               sharedLayoutD(sharedLayoutD_),
+              sharedLayoutC(sharedLayoutC_),
               ptrWorkspace(ptrWorkspace_),
-              combiner(combiner_)
+              combiner(combiner_),
+              epRankSize(epRankSize_)
         {}
     };
 
@@ -157,21 +206,28 @@ public:
     GroupedMatmulSliceMPerTokenDequantMultiStageWorkspace(GM_ADDR commArgs = nullptr, uint32_t epRankId = 0)
     {
         Arch::FlagID flagId = 0;
+        GM_ADDR syncGmAddrBase = nullptr;
+        if (commArgs) {
+            epRankId_ = epRankId;
+            epWinContext_.SetGlobalBuffer(&(reinterpret_cast<__gm__ Moe::CommArgs *>(commArgs))->peerMems[0],
+                                          Moe::CAM_MAX_RANK_SIZE);
+            syncGmAddrBase = ((GM_ADDR)epWinContext_.GetValue(epRankId));
+        } else {
+            winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
+            syncGmAddrBase = (GM_ADDR)((winContext_)->localWindowsExp);
+        }
+
+        GM_ADDR prevSyncGmAddr = syncGmAddrBase + GMM2::NOTIFY_GMM2_SOFT_SYNC_OFFSET;
+        prevWaitFunc = {this, prevSyncGmAddr, 0};
+        prevSetFunc = {this, prevSyncGmAddr, 0};
+
+        GM_ADDR syncGmAddr =
+            syncGmAddrBase + +GMM2::SOFT_SYNC_OFFSET + AscendC::GetBlockIdx() / AscendC::GetSubBlockNum() * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
         for (uint32_t stageId = 0; stageId < WORKSPACE_STAGES; ++stageId) {
             flagAicFinishStoreList[stageId] = Arch::CrossCoreFlag(flagId++);
             flagAivFinishComputeList[stageId] = Arch::CrossCoreFlag(flagId++);
-            aicWaitFuncList[stageId] = {this, stageId};
-            aicSetFuncList[stageId] = {this, stageId};
-        }
-        if (commArgs) {
-            epWinContext_.SetGlobalBuffer(&(reinterpret_cast<__gm__ Moe::CommArgs *>(commArgs))->peerMems[0],
-                                          Moe::CAM_MAX_RANK_SIZE);
-            syncGmAddr = ((GM_ADDR)epWinContext_.GetValue(epRankId)) + GMM2::SOFT_SYNC_OFFSET +
-                         (AscendC::GetBlockIdx() / AscendC::GetSubBlockNum() * 3) * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
-        } else {
-            winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
-            syncGmAddr = (GM_ADDR)((winContext_)->localWindowsExp) + GMM2::SOFT_SYNC_OFFSET +
-                         (AscendC::GetBlockIdx() / AscendC::GetSubBlockNum() * 3) * WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+            aicWaitFuncList[stageId] = {this, syncGmAddr, stageId};
+            aicSetFuncList[stageId] = {this, syncGmAddr, stageId};
         }
     }
 
@@ -199,21 +255,30 @@ public:
         uint32_t coreNum = AscendC::GetBlockNum();
         int64_t gmGroupOffsetA = 0;
         int64_t gmGroupOffsetB = 0;
+        int64_t gmGroupOffsetC = 0;
 
         AscendC::GlobalTensor<ElementC> gmC;
-        gmC.SetGlobalBuffer(reinterpret_cast<__gm__ ElementC *>(params.ptrWorkspace));
+        gmC.SetGlobalBuffer(params.ptrC);
+#if !ENABLE_GMM2_MOVING_FORWARD
         auto layoutC = layout::RowMajor{L1TileShape::M * coreNum * WORKSPACE_STAGES, L1TileShape::N};
+#endif
 
         uint32_t stageId = 0;
         uint32_t stageUsed = 0;
         uint32_t startCoreIdx = 0;
+#if ENABLE_GMM2_MOVING_FORWARD
+        int32_t callIdx = 1;
+#endif
+
         for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
+            prevWaitFunc.CallWithAll(groupIdx, 24);
             if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                 gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(
                         gmBlistTensorDesc.GetDataPtr<int32_t>(groupIdx)));
             }
-            uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
-                                                : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
+            uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(params.epRankSize - 1)
+                                                : (groupList.GetValue((groupIdx + 1) * params.epRankSize - 1) -
+                                                   groupList.GetValue(groupIdx * params.epRankSize - 1));
             GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
 
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
@@ -221,6 +286,9 @@ public:
 
             blockScheduler.Update(inGroupProblemShape, MakeCoord(L1TileShape::M, L1TileShape::N));
             uint32_t coreLoops = blockScheduler.GetCoreLoops();
+#if ENABLE_GMM2_MOVING_FORWARD
+            auto layoutC = params.layoutC.GetTileLayout(inGroupProblemShape.GetCoordMN());
+#endif
 
             // Determine the starting loopIdx of the current core under the current
             // groupIdx
@@ -232,17 +300,25 @@ public:
                 GemmCoord actualBlockShape = blockScheduler.GetActualBlockShape(blockCoord);
 
                 Callback callbackBeforeFixpipe{};
+#if ENABLE_GMM2_MOVING_FORWARD
+                MoeCallback callbackAfterFixpipe = MakeCallbackWithValue(&aicSetFuncList[stageId], callIdx);
+#else
                 if (stageUsed == WORKSPACE_STAGES) {
                     callbackBeforeFixpipe = MakeCallbackWithCall2(&aicWaitFuncList[stageId]);
                 } else {
                     ++stageUsed;
                 }
-                Callback callbackAfterFixpipe = MakeCallbackWithCall2(&aicSetFuncList[stageId]);
+                Callback callbackAfterFixpipe = MakeCallback(&aicSetFuncList[stageId]);
+#endif
 
                 // Compute initial location in logical coordinates
                 MatrixCoord offsetA{blockCoord.m() * L1TileShape::M, blockCoord.k() * L1TileShape::K};
                 MatrixCoord offsetB{blockCoord.k() * L1TileShape::K, blockCoord.n() * L1TileShape::N};
+#if ENABLE_GMM2_MOVING_FORWARD
+                MatrixCoord offsetC{blockCoord.m() * L1TileShape::M, blockCoord.n() * L1TileShape::N};
+#else
                 MatrixCoord offsetC{(stageId * coreNum + coreIdx) * L1TileShape::M, 0};
+#endif
                 int64_t gmOffsetA = layoutA.GetOffset(offsetA);
                 int64_t gmOffsetB = layoutB.GetOffset(offsetB);
                 int64_t gmOffsetC = layoutC.GetOffset(offsetC);
@@ -250,21 +326,29 @@ public:
                 // Compute block-scoped matrix multiply-add
                 if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
                     blockMmad(gmA[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
-                              gmC[gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
+                              gmC[gmGroupOffsetC + gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
                 } else {
                     callbackBeforeFixpipe();
                     blockMmad(gmA[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
-                              gmC[gmOffsetC], layoutC, actualBlockShape);
+                              gmC[gmGroupOffsetC + gmOffsetC], layoutC, actualBlockShape);
                     callbackAfterFixpipe();
                 }
 
-                stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
+                if (++stageId == WORKSPACE_STAGES) {
+                    stageId = 0;
+#if ENABLE_GMM2_MOVING_FORWARD
+                    ++callIdx;
+#endif
+                }
             }
 
             gmGroupOffsetA += inGroupProblemShape.m() * inGroupProblemShape.k();
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
             gmGroupOffsetB += inGroupProblemShape.k() * inGroupProblemShape.n();
             }
+#if ENABLE_GMM2_MOVING_FORWARD
+            gmGroupOffsetC += inGroupProblemShape.m() * inGroupProblemShape.n();
+#endif
             startCoreIdx = (startCoreIdx + coreLoops) % coreNum;
         }
         
@@ -272,6 +356,10 @@ public:
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             gmA.SetGlobalBuffer(params.ptrSharedA);
             gmB.SetGlobalBuffer(params.ptrSharedB);
+#if ENABLE_GMM2_MOVING_FORWARD
+            gmC.SetGlobalBuffer(params.ptrSharedC);
+            auto layoutC = params.sharedLayoutC;
+#endif
             uint32_t softStageUsed = 0;
             GemmCoord inGroupProblemShape = params.sharedGmm2ProblemShape;
 
@@ -290,6 +378,9 @@ public:
                 GemmCoord actualBlockShape = blockScheduler.GetActualBlockShape(blockCoord);
 
                 Callback callbackBeforeFixpipe{};
+#if ENABLE_GMM2_MOVING_FORWARD
+                MoeCallback callbackAfterFixpipe = MakeCallbackWithValue(&aicSetFuncList[stageId], callIdx);
+#else
                 if (softStageUsed == WORKSPACE_STAGES) {
                     callbackBeforeFixpipe = MakeCallbackWithCall(&aicWaitFuncList[stageId]);
                 } else {
@@ -302,11 +393,16 @@ public:
                     skipWithSoft[stageId] = true;
                 }
                 Callback callbackAfterFixpipe = MakeCallbackWithCall(&aicSetFuncList[stageId]);
+#endif
 
                 // Compute initial location in logical coordinates
                 MatrixCoord offsetA{blockCoord.m() * L1TileShape::M, blockCoord.k() * L1TileShape::K};
                 MatrixCoord offsetB{blockCoord.k() * L1TileShape::K, blockCoord.n() * L1TileShape::N};
+#if ENABLE_GMM2_MOVING_FORWARD
+                MatrixCoord offsetC{blockCoord.m() * L1TileShape::M, blockCoord.n() * L1TileShape::N};
+#else
                 MatrixCoord offsetC{(stageId * coreNum + coreIdx) * L1TileShape::M, 0};
+#endif
                 int64_t gmOffsetA = layoutA.GetOffset(offsetA);
                 int64_t gmOffsetB = layoutB.GetOffset(offsetB);
                 int64_t gmOffsetC = layoutC.GetOffset(offsetC);
@@ -331,7 +427,12 @@ public:
                     callbackAfterFixpipe();
                 }
 
-                stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
+                if (++stageId == WORKSPACE_STAGES) {
+                    stageId = 0;
+#if ENABLE_GMM2_MOVING_FORWARD
+                    ++callIdx;
+#endif
+                }
             }
         }
 
@@ -339,6 +440,8 @@ public:
             blockMmad.SynchronizeBlock();
         }
 
+
+#if !ENABLE_GMM2_MOVING_FORWARD
         while (stageUsed > 0) {
             uint32_t aivComputeStageId = (stageId >= stageUsed) ?
                 (stageId - stageUsed) : (stageId + WORKSPACE_STAGES - stageUsed);
@@ -351,6 +454,7 @@ public:
             }
             --stageUsed;
         }
+#endif
     }
 
     template <>
@@ -375,11 +479,17 @@ public:
             groupList.SetGlobalBuffer(params.ptrGroupList);
 
             AscendC::GlobalTensor<ElementC> gmC;
-            gmC.SetGlobalBuffer(reinterpret_cast<__gm__ ElementC *>(params.ptrWorkspace));
+            gmC.SetGlobalBuffer(params.ptrC);
+#if !ENABLE_GMM2_MOVING_FORWARD
             auto layoutC = layout::RowMajor{L1TileShape::M * coreNum * WORKSPACE_STAGES, L1TileShape::N};
+#endif
 
             uint32_t stageId = 0;
             uint32_t startCoreIdx = 0;
+            int64_t gmGroupOffsetC = 0;
+#if ENABLE_GMM2_MOVING_FORWARD
+            int32_t callIdx = 1;
+#endif
             AscendC::ListTensorDesc gmScaleListTensor;
             gmScaleListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(params.ptrScale));
             __gm__ ElementScale* gmScalePtr;
@@ -387,9 +497,13 @@ public:
                 gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(gmScaleListTensor.GetDataPtr<int32_t>(0));
             }
             for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
-                uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
-                                                    : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
+                uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(params.epRankSize - 1)
+                                                    : (groupList.GetValue((groupIdx + 1) * params.epRankSize - 1) -
+                                                       groupList.GetValue(groupIdx * params.epRankSize - 1));
                 GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
+#if ENABLE_GMM2_MOVING_FORWARD
+                auto layoutC = params.layoutC.GetTileLayout(inGroupProblemShape.GetCoordMN());
+#endif
 
                 LayoutScale layoutScale = params.layoutScale;
                 LayoutPerTokenScale layoutPerTokenScale =
@@ -421,19 +535,32 @@ public:
                     GemmCoord blockCoordMNK = blockScheduler.GetBlockCoord(loopIdx);
                     GemmCoord actualBlockShapeMNK = blockScheduler.GetActualBlockShape(blockCoordMNK);
 
+#if ENABLE_GMM2_MOVING_FORWARD
+                    MatrixCoord offsetC{blockCoordMNK.m() * L1TileShape::M, blockCoordMNK.n() * L1TileShape::N};
+#else
                     MatrixCoord offsetC{(stageId * coreNum + coreIdx) * L1TileShape::M, 0};
+#endif
                     int64_t gmOffsetC = layoutC.GetOffset(offsetC);
-                    auto gmBlockC = gmC[gmOffsetC];
+                    auto gmBlockC = gmC[gmGroupOffsetC + gmOffsetC];
                     auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
-                    Callback callbackBeforeBlockEpilogue = MakeCallbackWithCall2(&aicWaitFuncList[stageId]);
-                    Callback callbackAfterBlockEpilogue = MakeCallbackWithCall2(&aicSetFuncList[stageId]);
 
-                    callbackBeforeBlockEpilogue();
+#if ENABLE_GMM2_MOVING_FORWARD
+                    aicWaitFuncList[stageId].CallWithValue(callIdx);
+#else
+                    Arch::CrossCoreWaitFlag(flagAicFinishStoreList[stageId]);
+#endif
                     blockEpilogue(gmGroupOffsetD, groupIdx, blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC,
                                   layoutBlockC);
-                    callbackAfterBlockEpilogue();
+#if !ENABLE_GMM2_MOVING_FORWARD
+                    Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(flagAivFinishComputeList[stageId]);
+#endif
 
-                    stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
+                    if (++stageId == WORKSPACE_STAGES) {
+                        stageId = 0;
+#if ENABLE_GMM2_MOVING_FORWARD
+                        ++callIdx;
+#endif
+                    }
                 }
 
                 if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
@@ -441,11 +568,18 @@ public:
                 }
                 gmGroupOffsetPerTokenScale += inGroupProblemShape.m();
                 gmGroupOffsetD += inGroupProblemShape.m() * inGroupProblemShape.n();
+#if ENABLE_GMM2_MOVING_FORWARD
+                gmGroupOffsetC += inGroupProblemShape.m() * inGroupProblemShape.n();
+#endif
 
                 startCoreIdx = (startCoreIdx + coreLoops) % coreNum;
             }
             if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
                 if (AscendC::GetSubBlockIdx() == 0) {
+#if ENABLE_GMM2_MOVING_FORWARD
+                    gmC.SetGlobalBuffer(params.ptrSharedC);
+                    auto layoutC = params.sharedLayoutC;
+#endif
                     AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::SEND_SYNC_EVENT_ID);
                     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
                         AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
@@ -473,19 +607,34 @@ public:
                         GemmCoord blockCoordMNK = blockScheduler.GetBlockCoord(loopIdx);
                         GemmCoord actualBlockShapeMNK = blockScheduler.GetActualBlockShape(blockCoordMNK);
 
+#if ENABLE_GMM2_MOVING_FORWARD
+                        MatrixCoord offsetC{blockCoordMNK.m() * L1TileShape::M, blockCoordMNK.n() * L1TileShape::N};
+#else
                         MatrixCoord offsetC{(stageId * coreNum + coreIdx) * L1TileShape::M, 0};
+#endif
                         int64_t gmOffsetC = layoutC.GetOffset(offsetC);
                         auto gmBlockC = gmC[gmOffsetC];
                         auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
+#if ENABLE_GMM2_MOVING_FORWARD
+                        MoeCallback callbackBeforeBlockEpilogue = MakeCallbackWithValue(&aicWaitFuncList[stageId], callIdx);
+#else
                         Callback callbackBeforeBlockEpilogue = MakeCallbackWithCall(&aicWaitFuncList[stageId]);
                         Callback callbackAfterBlockEpilogue = MakeCallbackWithCall(&aicSetFuncList[stageId]);
+#endif
 
                         callbackBeforeBlockEpilogue();
                         blockEpilogue(0, UINT32_MAX, blockShapeMNK, blockCoordMNK, actualBlockShapeMNK,
                             gmBlockC, layoutBlockC);
+#if !ENABLE_GMM2_MOVING_FORWARD
                         callbackAfterBlockEpilogue();
+#endif
 
-                        stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
+                        if (++stageId == WORKSPACE_STAGES) {
+                            stageId = 0;
+#if ENABLE_GMM2_MOVING_FORWARD
+                            ++callIdx;
+#endif
+                        }
                     }
                     AscendC::CrossCoreWaitFlag(MoeDistributeCombineImpl::SEND_SYNC_EVENT_ID);
                     AscendC::CrossCoreWaitFlag(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
@@ -523,6 +672,18 @@ public:
             combiner->TPipeSet(nullptr);
             resource.pipe.Destroy();
         }
+
+#if ENABLE_GMM2_MOVING_FORWARD
+        if (AscendC::GetSubBlockIdx() == 0) {
+            for (uint32_t i = 0; i < WORKSPACE_STAGES; ++i) {
+                aicSetFuncList[i].CallWithValue(0);
+            }
+            for (uint32_t i = (AscendC::GetBlockIdx() / AscendC::GetSubBlockNum()); i < params.problemCount; i += AscendC::GetBlockNum()) {
+                prevSetFunc.CallWithAll(i, 0);
+            }
+        }
+#endif
+
     }
 
 private:
@@ -542,17 +703,17 @@ private:
             constexpr uint32_t waitValue = g_coreType == AscendC::AIC ? 0 : 1;
             // 查看flag，类似wait flag
             AscendC::PipeBarrier<PIPE_ALL>();
-            AscendC::GlobalTensor<uint8_t> global;
-            global.SetGlobalBuffer(ptr->syncGmAddr + stageId * GMM2::SOFT_SYNC_SPACE_SIZE * 3 + GMM2::SOFT_SYNC_SPACE_SIZE * 2);
+            AscendC::GlobalTensor<int32_t> global;
+            global.SetGlobalBuffer((__gm__ int32_t *)(syncAddr + stageId * GMM2::SOFT_SYNC_SPACE_SIZE));
             while (true){
                 __asm__ __volatile__("");
-                AscendC::DataCacheCleanAndInvalid<uint8_t,
+                AscendC::DataCacheCleanAndInvalid<int32_t,
                             AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
                 __asm__ __volatile__("");
-                uint8_t value = global.GetValue(0);
+                int32_t value = global.GetValue(0);
                 if (value == waitValue) {
                     __asm__ __volatile__("");
-                    AscendC::DataCacheCleanAndInvalid<uint8_t,
+                    AscendC::DataCacheCleanAndInvalid<int32_t,
                             AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
                     __asm__ __volatile__("");
                     break;
@@ -562,69 +723,43 @@ private:
         }
 
         CATLASS_DEVICE
-        void Call2() const {
-            constexpr uint32_t waitValue = g_coreType == AscendC::AIC ? 0 : 1;
-            // 查看flag，类似wait flag
-            AscendC::PipeBarrier<PIPE_ALL>();
-            AscendC::GlobalTensor<uint8_t> global;
-            global.SetGlobalBuffer(ptr->syncGmAddr + stageId *  GMM2::SOFT_SYNC_SPACE_SIZE * 3);
-            int32_t waitOffset[2];
-            if constexpr (g_coreType == AscendC::AIC) {
-                waitOffset[0] = 0;
-                waitOffset[1] = GMM2::SOFT_SYNC_SPACE_SIZE;
-            } else {
-                waitOffset[0] = get_subblockid() * GMM2::SOFT_SYNC_SPACE_SIZE;
-            }
+        void CallWithValue(int32_t waitValue) const
+        {
+            CallWithAll(stageId, waitValue);
+        }
 
-            while (true){
-                if constexpr (g_coreType == AscendC::AIC) {
-                    if (waitOffset[0] != -1) {
-                        __asm__ __volatile__("");
-                        AscendC::DataCacheCleanAndInvalid<uint8_t,
-                                    AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
-                        __asm__ __volatile__("");
-                        uint8_t value = global.GetValue(waitOffset[0]);
-                        if (value == waitValue) {
-                            __asm__ __volatile__("");
-                            AscendC::DataCacheCleanAndInvalid<uint8_t,
-                                        AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
-                            __asm__ __volatile__("");
-                            waitOffset[0] = -1;
-                        }
-                    }
-                    if (waitOffset[1] != -1) {
-                        __asm__ __volatile__("");
-                        AscendC::DataCacheCleanAndInvalid<uint8_t,
-                                    AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[1]]);
-                        __asm__ __volatile__("");
-                        uint8_t value = global.GetValue(waitOffset[1]);
-                        if (value == waitValue) {
-                            __asm__ __volatile__("");
-                            AscendC::DataCacheCleanAndInvalid<uint8_t,
-                                        AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[1]]);
-                            __asm__ __volatile__("");
-                            waitOffset[1] = -1;
-                        }
-                    }
-                    if (waitOffset[0] == -1 && waitOffset[1] == -1) {
-                        break;
-                    }
-                } else {
+        CATLASS_DEVICE
+        void CallWithAll(int32_t index, int32_t waitValue) const
+        {
+#define YHB_ENABLE_SOFTSYNC_TIMEOUT 0
+#if YHB_ENABLE_SOFTSYNC_TIMEOUT
+            int64_t timeout = AscendC::GetSystemCycle() + 50 * 1000 * 100;
+#endif
+            AscendC::GlobalTensor<int32_t> global;
+            global.SetGlobalBuffer((__gm__ int32_t *)(syncAddr + index * GMM2::SOFT_SYNC_SPACE_SIZE));
+            while (true) {
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                  AscendC::DcciDst::CACHELINE_OUT>(global);
+                __asm__ __volatile__("");
+                int32_t value = global.GetValue(0);
+                if (value >= waitValue) {
                     __asm__ __volatile__("");
-                    AscendC::DataCacheCleanAndInvalid<uint8_t,
-                                AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
+                    AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                      AscendC::DcciDst::CACHELINE_OUT>(global);
                     __asm__ __volatile__("");
-                    uint8_t value = global.GetValue(waitOffset[0]);
-                    if (value == waitValue) {
-                        __asm__ __volatile__("");
-                        AscendC::DataCacheCleanAndInvalid<uint8_t,
-                                    AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
-                        __asm__ __volatile__("");
-                        break;
-                    }
+                    break;
                 }
+#if YHB_ENABLE_SOFTSYNC_TIMEOUT
+                if (AscendC::GetSystemCycle() - timeout > 0) {
+                    if (ptr->epRankId_ == 0) {
+                        AscendC::printf("YHB: sync timeout, index(%u) waitValue(%u) value(%u)\n", index, waitValue,
+                                        value);
+                    }
+                    break;
+                }
+#endif
             }
-            AscendC::PipeBarrier<PIPE_ALL>();
         }
 
         CATLASS_DEVICE
@@ -634,6 +769,7 @@ private:
         }
 
         MatmulKernel *ptr{nullptr};
+        GM_ADDR syncAddr;
         uint32_t stageId;
     };
 
@@ -649,63 +785,41 @@ private:
         void Call() const {
             constexpr uint32_t setValue = g_coreType == AscendC::AIC ? 1 : 0;
             AscendC::PipeBarrier<PIPE_ALL>();
-            AscendC::GlobalTensor<uint8_t> global;
-            global.SetGlobalBuffer(ptr->syncGmAddr + stageId * GMM2::SOFT_SYNC_SPACE_SIZE * 3 + GMM2::SOFT_SYNC_SPACE_SIZE * 2);
+            AscendC::GlobalTensor<int32_t> global;
+            global.SetGlobalBuffer((__gm__ int32_t *)(syncAddr + stageId * GMM2::SOFT_SYNC_SPACE_SIZE));
             __asm__ __volatile__("");
-            AscendC::DataCacheCleanAndInvalid<uint8_t,
+            AscendC::DataCacheCleanAndInvalid<int32_t,
                             AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
             __asm__ __volatile__("");
             global.SetValue(0, setValue);
             __asm__ __volatile__("");
-            AscendC::DataCacheCleanAndInvalid<uint8_t,
+            AscendC::DataCacheCleanAndInvalid<int32_t,
                             AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
             __asm__ __volatile__("");
             AscendC::PipeBarrier<PIPE_ALL>();
         }
 
         CATLASS_DEVICE
-        void Call2() const {
-            constexpr uint32_t setValue = g_coreType == AscendC::AIC ? 1 : 0;
+        void CallWithValue(int32_t setValue) const
+        {
+            CallWithAll(stageId, setValue);
+        }
+
+        CATLASS_DEVICE
+        void CallWithAll(uint32_t index, int32_t setValue) const
+        {
             AscendC::PipeBarrier<PIPE_ALL>();
-            AscendC::GlobalTensor<uint8_t> global;
-            global.SetGlobalBuffer(ptr->syncGmAddr + stageId * GMM2::SOFT_SYNC_SPACE_SIZE * 3);
-            int32_t waitOffset[2];
-            if constexpr (g_coreType == AscendC::AIC) {
-                waitOffset[0] = 0;
-                waitOffset[1] = GMM2::SOFT_SYNC_SPACE_SIZE;
-            } else {
-                waitOffset[0] = get_subblockid() * (GMM2::SOFT_SYNC_SPACE_SIZE);
-            }
-            if constexpr (g_coreType == AscendC::AIC) {
-                __asm__ __volatile__("");
-                AscendC::DataCacheCleanAndInvalid<uint8_t,
-                            AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
-                __asm__ __volatile__("");
-                global.SetValue(waitOffset[0], setValue);
-                __asm__ __volatile__("");
-                AscendC::DataCacheCleanAndInvalid<uint8_t,
-                                AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
-                __asm__ __volatile__("");
-                __asm__ __volatile__("");
-                AscendC::DataCacheCleanAndInvalid<uint8_t,
-                            AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[1]]);
-                __asm__ __volatile__("");
-                global.SetValue(waitOffset[1], setValue);
-                __asm__ __volatile__("");
-                AscendC::DataCacheCleanAndInvalid<uint8_t,
-                                AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[1]]);
-                __asm__ __volatile__("");
-            } else {
-                __asm__ __volatile__("");
-                AscendC::DataCacheCleanAndInvalid<uint8_t,
-                                AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
-                __asm__ __volatile__("");
-                global.SetValue(waitOffset[0], setValue);
-                __asm__ __volatile__("");
-                AscendC::DataCacheCleanAndInvalid<uint8_t,
-                                AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global[waitOffset[0]]);
-                __asm__ __volatile__("");
-            }
+            AscendC::GlobalTensor<int32_t> global;
+            global.SetGlobalBuffer((__gm__ int32_t *)(syncAddr + index * GMM2::SOFT_SYNC_SPACE_SIZE));
+            __asm__ __volatile__("");
+            AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                              AscendC::DcciDst::CACHELINE_OUT>(global);
+            __asm__ __volatile__("");
+            global.SetValue(0, setValue);
+            __asm__ __volatile__("");
+            AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                              AscendC::DcciDst::CACHELINE_OUT>(global);
+            __asm__ __volatile__("");
             AscendC::PipeBarrier<PIPE_ALL>();
         }
 
@@ -716,6 +830,7 @@ private:
         }
 
         MatmulKernel *ptr{nullptr};
+        GM_ADDR syncAddr;
         uint32_t stageId;
     };
 
@@ -724,9 +839,11 @@ private:
 
     AicWaitFunc aicWaitFuncList[WORKSPACE_STAGES];
     AicSetFunc aicSetFuncList[WORKSPACE_STAGES];
+    AicWaitFunc prevWaitFunc;
+    AicSetFunc prevSetFunc;
     AscendC::GlobalTensor<GM_ADDR> epWinContext_;
     __gm__ HcclOpResParam *winContext_;
-    GM_ADDR syncGmAddr;
+    uint32_t epRankId_{0};
     Arch::Resource<ArchTag> resource;
 };
 
