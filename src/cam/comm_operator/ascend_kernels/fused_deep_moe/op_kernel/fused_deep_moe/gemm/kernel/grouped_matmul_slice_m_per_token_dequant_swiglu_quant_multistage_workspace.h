@@ -24,6 +24,7 @@
 
 constexpr uint32_t STATE_OFFSET = 512;
 constexpr uint64_t WIN_STATE_OFFSET = 512 * 1024;
+constexpr uint64_t NOTIFY_GMM2_SOFT_SYNC_OFFSET = 1072 * 1024;
 constexpr uint64_t GROUP_TOKEN_NUM_OFFSET = 932 * 1024;
 constexpr uint64_t SOFT_SYNC_OFFSET = 964 * 1024;
 constexpr uint64_t SHARE_QUANT_SOFT_SYNC_OFFSET = 988 * 1024;
@@ -114,9 +115,8 @@ public:
     };
 
     CATLASS_DEVICE
-    BlockQuant(Arch::Resource<ArchTag> const &resource, Params const &params_) : params(params_)
+    BlockQuant(Arch::Resource<ArchTag> const &resource, Params const &params_, int64_t ubOffset = 0) : params(params_)
     {
-        int64_t ubOffset = 0;
         tileRow = params_.tileRow;
         tileColumn = params_.tileColumn;
         tileCount = tileRow * tileColumn;
@@ -783,9 +783,11 @@ public:
             target += 1;
             --stageUsed;
         }
-        MoeTracing(TRACE_POINT("dispatch-gmm1 sync-aic", "B"));
-        AscendC::SyncAll<false>();
-        MoeTracing(TRACE_POINT("dispatch-gmm1 sync-aic", "E"));
+
+        // MoeTracing(TRACE_POINT("dispatch-gmm1 sync-aic", "B"));
+        // AscendC::SyncAll<false>();
+        // MoeTracing(TRACE_POINT("dispatch-gmm1 sync-aic", "E"));
+
         MoeTracing(TRACE_POINT("dispatch-gmm1 aic", "E"));
     }
 
@@ -1950,8 +1952,6 @@ public:
 
         if (isRecvCore && recvCoreIdx == (recvCoreNum - 1)) {
             // record token count for each local expert
-            AscendC::GlobalTensor<int64_t> expertTokenNumsOutGMTensor_;
-            expertTokenNumsOutGMTensor_.SetGlobalBuffer((__gm__ int64_t *)(ptrGroupList));
             AscendC::GlobalTensor<int32_t> sendCountsGlobal;
             sendCountsGlobal.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t *>(gmEpSendCount));
             AscendC::GlobalTensor<int64_t> nonCumSumExpertTokenNumsTensor;
@@ -1965,16 +1965,10 @@ public:
                 __asm__ __volatile__("");
 
                 uint32_t tokenNum = sendCountsGlobal.GetValue(localMoeIndex * epRankSize + epRankSize - 1);
-                expertTokenNumsOutGMTensor_.SetValue(localMoeIndex, tokenNum);
                 uint32_t nonCumSumTokenNum = tokenNum - tmpTokenNum;
                 nonCumSumExpertTokenNumsTensor.SetValue(localMoeIndex, nonCumSumTokenNum);
                 tmpTokenNum = tokenNum;
-                
-                __asm__ __volatile__("");
-                AscendC::DataCacheCleanAndInvalid<int64_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
-                                                AscendC::DcciDst::CACHELINE_OUT>(
-                    expertTokenNumsOutGMTensor_[localMoeIndex]);
-                __asm__ __volatile__("");
+
                 __asm__ __volatile__("");
                 AscendC::DataCacheCleanAndInvalid<int64_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
                                                 AscendC::DcciDst::CACHELINE_OUT>(
@@ -2087,6 +2081,10 @@ public:
                 MoeTracing(TRACE_POINT("dispatch-gmm1 shared-quant", "E"));
             }
             {
+                AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(0);
+                tmpLocalTensor.SetValue(0, 1);
+                AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
+                AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
                 for (uint32_t groupIdx = 0; groupIdx < localExpertNum; ++groupIdx) {
                     MoeTracing(TRACE_POINT("dispatch-gmm1 moe-quant", "B"), 0, groupIdx);
                     // dynamic quant
@@ -2114,7 +2112,7 @@ public:
                     quantParams = typename BlockQuant<ArchTag>::Params {
                         gmSwigluOutput + gmSwigluOutputOffset, swigluLayout, params.ptrDequantScale + gmDequantScaleOffset, params.layoutDequantScale,
                         params.ptrOutput + gmPtrOutputOffset, params.layoutOutput, quantRowOnce, nOut};
-                    BlockQuant<ArchTag> blockQuant(resource, quantParams);
+                    BlockQuant<ArchTag> blockQuant(resource, quantParams, CEIL_UP(UB_BLOCK_SIZE));
                     MatrixCoord quantShape(currentM, nOut);
                     MatrixCoord quantBlockShape((uint16_t)(quantRowOnce), nOut);
                     Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
@@ -2143,9 +2141,19 @@ public:
                     gmSwigluOutputOffset += currentM * n;
                     startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
                     MoeTracing(TRACE_POINT("dispatch-gmm1 moe-quant", "E"), 0, groupIdx);
+
+                    AscendC::PipeBarrier<PIPE_ALL>();
+                    // AscendC::PipeBarrier<PIPE_MTE3>();
+                    // AscendC::PipeBarrier<PIPE_MTE2>();
+                    AscendC::GlobalTensor<int32_t> shareQuantTokenStateTensor;
+                    shareQuantTokenStateTensor.SetGlobalBuffer(
+                        (__gm__ int32_t *)(statusDataSpaceGm + NOTIFY_GMM2_SOFT_SYNC_OFFSET + groupIdx * SOFT_SYNC_SPACE_SIZE));
+                    AscendC::SetAtomicAdd<int32_t>();
+                    AscendC::DataCopy(shareQuantTokenStateTensor, tmpLocalTensor, INT32_COUNT_PER_BLOCK);
+                    AscendC::SetAtomicNone();
+                    AscendC::PipeBarrier<PIPE_ALL>();
                 }
             }
-            AscendC::PipeBarrier<PIPE_ALL>();
         }
 
         MoeTracing(TRACE_POINT("dispatch-gmm1 sync-aiv", "B"));
@@ -2153,7 +2161,7 @@ public:
         // AscendC::SyncAll<false>();
         // AscendC::PipeBarrier<PIPE_ALL>();
 
-        // UpdateAndCleanInfo(params.ptrGroupList, params.gmEpSendCount, params.gmExpertTokenNums);
+        // UpdateAndCleanInfo();
         // AscendC::PipeBarrier<PIPE_ALL>();
         // if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
         //     // dynamic quant
@@ -2209,7 +2217,8 @@ public:
         //         blockQuant(quantBlockShape, blockCoord, actualBlockShape);
         //     }
         // }
-        AscendC::SyncAll<false>();
+        AscendC::SyncAll<true>();
+        // AscendC::SyncAll<false>();
         AscendC::PipeBarrier<PIPE_ALL>();
         MoeTracing(TRACE_POINT("dispatch-gmm1 sync-aiv", "E"));
         MoeTracing(TRACE_POINT("dispatch-gmm1 UpdateAndCleanInfo", "B"));

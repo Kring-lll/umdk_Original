@@ -592,9 +592,15 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
     size_t groupListSize = CeilUp(moeExpertNumPerRank * sizeof(int64_t), GM_ALIGN_SIZE);
     size_t expandIdxSize = CeilUp(batchSize * topK * sizeof(int32_t), GM_ALIGN_SIZE);
     size_t epSendCountSize = CeilUp(epRankSize * moeExpertNumPerRank * sizeof(int32_t), GM_ALIGN_SIZE);
-    size_t resveredSize = CeilUp(RESERVED_WORKSPACE_SIZE, GM_ALIGN_SIZE);
+#if 1
+    size_t gmm2ResultSize = CeilUp((maxTokenNum * h + batchSize * h) * sizeof(float), GM_ALIGN_SIZE);
+#else
+    size_t gmm2ResultSize = CeilUp(RESERVED_WORKSPACE_SIZE, GM_ALIGN_SIZE);
+#endif
+    std::cout << "YHB: gmm2ResultSize: " << gmm2ResultSize << std::endl;
+    size_t resveredSize = 0;
     size_t usrSize = maxTokenSize + tokenScaleSize + CVSwapBufferSize + maxSwigluGmm2Size + groupListSize +
-                     expandIdxSize + epSendCountSize + resveredSize;
+                     expandIdxSize + epSendCountSize + gmm2ResultSize + resveredSize;
 
     workSpaces[0] = SYSTEM_NEED_WORKSPACE + usrSize;
     return ge::GRAPH_SUCCESS;

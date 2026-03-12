@@ -127,7 +127,11 @@ public:
                     AscendC::GlobalTensor<ElementB> const &gmBlockB, LayoutB const &layoutB,
                     AscendC::GlobalTensor<ElementC> const &gmBlockC, LayoutC const &layoutC,
                     GemmCoord const &actualShape, Callback const &callbackBeforeFixpipe,
+#if ENABLE_FULL_SOFT_SYNC
+                    MoeCallback const &callbackAfterFixpipe,
+#else
                     Callback const &callbackAfterFixpipe,
+#endif
                     uint32_t stageId, uint32_t tracingIdx)
     {
         uint32_t kTileCount = CeilDiv<L1TileShape::K>(actualShape.k());
@@ -229,7 +233,11 @@ private:
         AscendC::GlobalTensor<ElementC> gmBlockC;
         LayoutC layoutCInGm;
         Callback callbackBeforeFixpipe;
+#if ENABLE_FULL_SOFT_SYNC
+        MoeCallback callbackAfterFixpipe;
+#else
         Callback callbackAfterFixpipe;
+#endif
 
         CATLASS_DEVICE
         L1TileMmadParams() = default;
@@ -385,6 +393,11 @@ private:
                 copyL0CToGm(params.gmBlockC, l0CTensor, layoutCInGm, layoutCInL0, 0b11);
             }
             l0CListId = (l0CListId + 1 < L0C_STAGES) ? (l0CListId + 1) : 0;
+
+// #if ENABLE_FULL_SOFT_SYNC
+//             AscendC::SetFlag<AscendC::HardEvent::FIX_S>(params.stageId);
+//             AscendC::WaitFlag<AscendC::HardEvent::FIX_S>(params.stageId);
+// #endif
 
             params.callbackAfterFixpipe();
             MoeTracing(TRACE_POINT("gmm2-combine block-mmad copy-out", "E"), params.stageId, params.tracingIdx);

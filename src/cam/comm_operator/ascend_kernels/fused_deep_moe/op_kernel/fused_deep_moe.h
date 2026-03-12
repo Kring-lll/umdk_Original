@@ -184,14 +184,15 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
                        layout::RowMajor layoutA, GM_ADDR gmB, layout::zN layoutB, GM_ADDR gmScale,
                        layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
                        layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
+                       GM_ADDR gmC, layout::RowMajor layoutC,
                        uint32_t batchSize,
                        GemmCoord sharedGmm2ProblemShape,
-                       GM_ADDR gmSharedA, GM_ADDR gmSharedB, GM_ADDR gmSharedD,
+                       GM_ADDR gmSharedA, GM_ADDR gmSharedB, GM_ADDR gmSharedD, GM_ADDR gmSharedC,
                        GM_ADDR gmSharedScale, GM_ADDR gmSharedPtrPerTokenScale,
                        layout::RowMajor sharedLayoutA, layout::zN sharedLayoutB, layout::VectorLayout sharedLayoutPerTokenScale,
-                       layout::RowMajor sharedLayoutD,
+                       layout::RowMajor sharedLayoutD, layout::RowMajor sharedLayoutC,
                        uint32_t epRankId, GM_ADDR commArgs,
-                       GM_ADDR gmWorkspace, void *combiner)
+                       GM_ADDR gmWorkspace, void *combiner, uint32_t epRankSize)
 {
     using ArchTag = Arch::AtlasA2;
     using DispatchPolicy = DispatchPolicy_;
@@ -230,7 +231,7 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using BlockScheduler = BlockScheduler_;
 
     // kernel level
-    using ElementGroupList = int64_t;
+    using ElementGroupList = int32_t;
     using GemmKernel = Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantMultiStageWorkspace<
         TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
 
@@ -247,19 +248,23 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
                                        layoutPerTokenScale,
                                        gmD,
                                        layoutD,
+                                       gmC,
+                                       layoutC,
                                        batchSize,
                                        sharedGmm2ProblemShape,
                                        gmSharedA,
                                        gmSharedB,
                                        gmSharedD,
+                                       gmSharedC,
                                        gmSharedScale,
                                        gmSharedPtrPerTokenScale,
                                        sharedLayoutA,
                                        sharedLayoutB,
                                        sharedLayoutPerTokenScale,
                                        sharedLayoutD,
+                                       sharedLayoutC,
                                        gmWorkspace,
-                                       combiner};
+                                       combiner, epRankSize};
 
     // call a kernel
     GemmKernel gemm{commArgs, epRankId};
@@ -412,6 +417,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     GemmCoord shareGmm2ProblemShape{bs_, gmm2OutputDim_, shareGmm2InputDim_};
     layout::VectorLayout layoutShareX2Scale{bs_};
     layout::RowMajor layoutShareOutput{bs_, gmm2OutputDim_};
+    layout::RowMajor layoutGmm2Output{maxTokenNum_, gmm2OutputDim_};
+    layout::RowMajor layoutShareGmm2Output{bs_, gmm2OutputDim_};
 
     GM_ADDR gmShareX1 = nullptr;
     GM_ADDR gmShareX1Scale = nullptr;
@@ -464,6 +471,11 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(bs_) * topK_ * sizeof(int32_t));
     GM_ADDR gmEpSendCount = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(epRankSize_) * groupCount_ * sizeof(int32_t));
+    GM_ADDR gmGmm2Output = workspaceGM_ + workspaceOffset;
+    workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(maxTokenNum_) * gmm2OutputDim_ * sizeof(float));
+    GM_ADDR gmShareGmm2Output = workspaceGM_ + workspaceOffset;
+    workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(bs_) * gmm2OutputDim_ * sizeof(float));
+    GM_ADDR gmGmm2SoftSync = workspaceGM_ + workspaceOffset;
     GM_ADDR gmResvered = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(resveredWorkSpaceSize);
 
@@ -508,15 +520,6 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
 
     
     AscendC::PipeBarrier<PIPE_ALL>();
-    MoeTracing(TRACE_POINT("middle sync-all", "B"));
-    Arch::CrossCoreFlag gmm1AivFinished{0};
-    if constexpr (g_coreType == AscendC::AIV) {
-        Arch::CrossCoreBarrier<0x0, PIPE_MTE3>();
-        Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(gmm1AivFinished);
-    } else {
-        Arch::CrossCoreWaitFlag(gmm1AivFinished);
-    }
-    MoeTracing(TRACE_POINT("middle sync-all", "E"));
 
     MoeTracing(TRACE_POINT("gmm2-combine", "B"));
     MoeDistributeCombineImpl::CamMoeDistributeCombine<TemplateMC2TypeFunc> combiner;
@@ -527,11 +530,12 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
         MoeTracing(TRACE_POINT("combine init", "E"));
     }
     GmmDeq<TemplateMC2TypeFunc, Gmm2L1TileShape, Gmm2L0TileShape, Gmm2EpilogueTileShape, Gmm2BlockScheduler,
-           Gmm2DispatchPolicy>(gmm2ProblemShape, groupCount_, gmGroupList, gmX2, layoutX2, gmWeight2_, layoutWeight2,
-                               gmScale2_, layoutW2Scale, gmX2Scale, layoutX2Scale, gmGmm2DepOut, layoutOutput, bs_,
-                               shareGmm2ProblemShape, gmShareX2, gmShareWeight2_, gmShareOutput_,
-                               gmShareWeight2Scale_, gmShareX2Scale, layoutShareX2, layoutShareWeight2, layoutShareX2Scale,
-                               layoutShareOutput, epRankId_, commArgs_, gmWorkspace, &combiner);
+           Gmm2DispatchPolicy>(gmm2ProblemShape, groupCount_, gmEpSendCount, gmX2, layoutX2, gmWeight2_, layoutWeight2,
+                               gmScale2_, layoutW2Scale, gmX2Scale, layoutX2Scale, gmGmm2DepOut, layoutOutput,
+                               gmGmm2Output, layoutGmm2Output, bs_, shareGmm2ProblemShape, gmShareX2, gmShareWeight2_,
+                               gmShareOutput_, gmShareGmm2Output, gmShareWeight2Scale_, gmShareX2Scale, layoutShareX2,
+                               layoutShareWeight2, layoutShareX2Scale, layoutShareOutput, layoutShareGmm2Output,
+                               epRankId_, commArgs_, nullptr, &combiner, epRankSize_);
     MoeTracing(TRACE_POINT("gmm2-combine", "E"));
 
     MoeTracing(TRACE_POINT("processing", "E"));
