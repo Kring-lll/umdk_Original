@@ -324,7 +324,7 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     epStatusSpaceGlobalTensor_.SetGlobalBuffer((__gm__ float *)epStatusSpaceGm_);
     epDataOffsetOnWin_ = epRankId_ * moeExpertPerRankNum_ * static_cast<uint32_t>(expertPerSizeOnWin_);
     epStateOffsetOnWin_ = epRankId_ * stateOffset_;
-    isShardExpert_ = (epRankId_ < sharedExpertRankNum_);
+    isShardExpert_ = false;
     axisHFloatSize_ = axisH_ * sizeof(float);
     axisHExpandXTypeSize_ = axisH_ * sizeof(ExpandXType);
     bsKNum_ = axisBS_ * axisK_;
@@ -540,13 +540,8 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::ExpertAllto
     }
     uint32_t curRankExpertNum = 0;
     DataCopyExtParams epSendCntParams;
-    if (isShardExpert_) {
-        curRankExpertNum = 1;
-        epSendCntParams = {1U, static_cast<uint32_t>(epWorldSize_ * sizeof(uint32_t)), 0U, 0U, 0U};
-    } else {
-        curRankExpertNum = moeExpertPerRankNum_;
-        epSendCntParams = {1U, static_cast<uint32_t>(moeSendNum_ * sizeof(uint32_t)), 0U, 0U, 0U};
-    }
+    curRankExpertNum = moeExpertPerRankNum_;
+    epSendCntParams = {1U, static_cast<uint32_t>(moeSendNum_ * sizeof(uint32_t)), 0U, 0U, 0U};
     DataCopyPadExtParams<int32_t> copyPadParams{false, 0U, 0U, 0U};
     DataCopyPad(epSendCountLocal_, epSendCountGM_, epSendCntParams, copyPadParams);
     SyncFunc<AscendC::HardEvent::MTE2_S>();
@@ -578,9 +573,6 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::ExpertAllto
     uint32_t tokenNumLoop, uint32_t srcStartTokenIdx, uint32_t ep, uint32_t expertIdx)
 {
     GM_ADDR rankGM = GetWinAddrByRankId(ep, EP_DOMAIN, expertIdx) + epDataOffsetOnWin_;
-    if ((isShardExpert_) && (ep < sharedExpertRankNum_)) {
-        rankGM = GetWinAddrByRankId(epRankId_, EP_DOMAIN, expertIdx) + ep * moeExpertPerRankNum_ * expertPerSizeOnWin_;
-    }
     rankWindow_.SetGlobalBuffer((__gm__ ExpandXType *)rankGM);
     uint32_t dataCnt = axisH_;
     for (uint32_t loopIdx = 0; loopIdx < tokenNumLoop; loopIdx++) {
@@ -757,7 +749,6 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::LocalWindow
             }
             float scaleVal = expandScalesLocal.GetValue(index);
             GM_ADDR wAddr = (__gm__ uint8_t *)(epWindowGM_) +
-                            expertPerSizeOnWin_ * moeExpertPerRankNum_ * sharedExpertRankNum_ +
                             expertPerSizeOnWin_ * moeExpert +
                             indexCountsLocal.GetValue(index) * axisHExpandXTypeSize_ +
                             tokenOffset * sizeof(ExpandXType);
@@ -776,24 +767,6 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::LocalWindow
             moeSumQueue_.FreeTensor<ExpandXType>(tmpUb);
         }
         LocalTensor<ExpandXType> rowTmpLocal = tokenBuf_.Get<ExpandXType>();
-        if (sharedExpertRankNum_ > 0U) {
-            uint32_t temp = (epRankId_ * activeMaskBsCnt_) / sharedExpertRankNum_;
-            uint32_t moeOnShareRank = Ceil((tokenIndex + 1 + temp) * sharedExpertRankNum_, activeMaskBsCnt_) -
-                                      1 - epRankId_;
-            uint32_t preCnt = (moeOnShareRank + epRankId_) * activeMaskBsCnt_ / sharedExpertRankNum_ -
-                              epRankId_ * activeMaskBsCnt_ / sharedExpertRankNum_;
-            __gm__ ExpandXType *shareAddr =
-                (__gm__ ExpandXType *)(epWindowGM_ + moeOnShareRank * expertPerSizeOnWin_ * moeExpertPerRankNum_) +
-                (tokenIndex - preCnt) * axisH_ + tokenOffset;
-            GlobalTensor<ExpandXType> shareTokGlobal;
-            shareTokGlobal.SetGlobalBuffer((__gm__ ExpandXType *)(shareAddr));
-            SyncFunc<AscendC::HardEvent::V_MTE2>();
-            DataCopy(rowTmpLocal, shareTokGlobal, processLen);
-            SyncFunc<AscendC::HardEvent::MTE2_V>();
-            Cast(rowTmpFloatLocal, rowTmpLocal, AscendC::RoundMode::CAST_NONE, processLen);
-            AscendC::PipeBarrier<PIPE_V>();
-            AscendC::Add(sumFloatBufLocal, sumFloatBufLocal, rowTmpFloatLocal, processLen);
-        }
 
         AscendC::PipeBarrier<PIPE_V>();
         LocalTensor<ExpandXType> sumBufLocal = tokenBuf_.Get<ExpandXType>();
