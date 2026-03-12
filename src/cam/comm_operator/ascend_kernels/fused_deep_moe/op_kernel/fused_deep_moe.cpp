@@ -30,8 +30,8 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
     GET_TILING_DATA(tiling_data, tiling);
     // return;
     if constexpr (TILING_KEY_IS(0) || TILING_KEY_IS(1) || TILING_KEY_IS(2) || TILING_KEY_IS(3) ||
-                  TILING_KEY_IS(4) || TILING_KEY_IS(5) || TILING_KEY_IS(6) || TILING_KEY_IS(7)) {
-        FusedDeepMoe<DTYPE_X, int32_t, false, TILING_KEY_VAR> op;
+                TILING_KEY_IS(4) || TILING_KEY_IS(5) || TILING_KEY_IS(6) || TILING_KEY_IS(7)) {
+        FusedDeepMoe<DTYPE_X, DTYPE_GMM1_WEIGHT_SCALE, DTYPE_GMM2_WEIGHT_SCALE, int32_t, false, TILING_KEY_VAR> op;
         op.Init(x, expert_ids, gmm1_permuted_weight, gmm1_permuted_weight_scale, gmm2_weight, gmm2_weight_scale,
                 expert_scales, share_gmm1_permuted_weight, share_gmm1_permuted_weight_scale,
                 share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, share_smooth_scales, x_active_mask, comm_args,
@@ -40,8 +40,8 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
         op.Process();
     }
     else if constexpr (TILING_KEY_IS(8) || TILING_KEY_IS(9) || TILING_KEY_IS(10) || TILING_KEY_IS(11) ||
-                  TILING_KEY_IS(12) || TILING_KEY_IS(13) || TILING_KEY_IS(14) || TILING_KEY_IS(15)) {
-        FusedDeepMoe<DTYPE_X, int32_t, false, TILING_KEY_VAR> op;
+                TILING_KEY_IS(12) || TILING_KEY_IS(13) || TILING_KEY_IS(14) || TILING_KEY_IS(15)) {
+        FusedDeepMoe<DTYPE_X, DTYPE_GMM1_WEIGHT_SCALE, DTYPE_GMM2_WEIGHT_SCALE, int32_t, false, TILING_KEY_VAR> op;
         op.Init(x, expert_ids, gmm1_permuted_weight, gmm1_permuted_weight_scale, gmm2_weight, gmm2_weight_scale,
                 expert_scales, share_gmm1_permuted_weight, share_gmm1_permuted_weight_scale,
                 share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, share_smooth_scales, x_active_mask, comm_args,

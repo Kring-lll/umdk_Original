@@ -351,7 +351,7 @@ __aicore__ inline static void CalQuantRow(const uint32_t column, uint32_t &row)
     row = row < MAX_QUANT_ROW_ONCE ? row : MAX_QUANT_ROW_ONCE;
 }
 
-template <uint32_t EXEC_FLAG, typename XType_, class BlockMmad_, class BlockEpilogue_, class BlockScheduler_,
+template <TemplateMC2TypeClass, class BlockMmad_, class BlockEpilogue_, class BlockScheduler_,
           uint32_t WORKSPACE_STAGES_, class ElementGroupList_>
 class GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspace {
 public:
@@ -367,7 +367,7 @@ public:
     using ElementAccumulator = typename BlockMmad::ElementAccumulator;
 
     using BlockEpilogue = BlockEpilogue_;
-    using ElementScale = typename BlockEpilogue::ElementScale;
+    using ElementScale = typename BlockEpilogue::ElementRawScale;
     using LayoutScale = typename BlockEpilogue::LayoutScale;
     using ElementPerTokenScale = typename BlockEpilogue::ElementPerTokenScale;
     using LayoutPerTokenScale = typename BlockEpilogue::LayoutPerTokenScale;
@@ -384,7 +384,7 @@ public:
     static constexpr uint32_t WORKSPACE_STAGES = WORKSPACE_STAGES_;
     using ElementGroupList = ElementGroupList_;
 
-    using XType = XType_;
+    using XType = ExpandXType;
 
     // Parameters structure
     struct Params {
@@ -913,6 +913,7 @@ public:
     void QuantToken(AscendC::LocalTensor<XType> &xInTensor, AscendC::LocalTensor<float> &smoothScaleTensor, AscendC::LocalTensor<int8_t> &yInt8Tensor, int64_t ubOffset)
     {
         int64_t subUbOffset = ubOffset;
+        AscendC::SetDeqScale(static_cast<half>(1.0));
         AscendC::LocalTensor<float> xFp32TmpTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
         subUbOffset += CEIL_UP(tokenLength * sizeof(float));
         AscendC::LocalTensor<float> xFp32AbsTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
@@ -1999,7 +2000,7 @@ public:
 
         auto gmSwigluOutput = reinterpret_cast<__gm__ float *>(params.gmSwigluOut);
         if (isCompCore) {
-            CompCoreFunc(params.ptrWorkspace, (__gm__ float*)params.ptrShareScale,  params.ptrScale,
+            CompCoreFunc(params.ptrWorkspace, params.ptrShareScale,  params.ptrScale,
                 (__gm__ float*)params.gmShareX1Scale, (__gm__ float*)params.ptrPerTokenScale, 
                 gmShareSwigluOutput, gmSwigluOutput,
                 params.shareN, params.problemShape.n(), params.problemShape.k(), params.layoutShareScale, params.layoutScale,
@@ -2181,7 +2182,7 @@ private:
 
 namespace Catlass::Gemm::Kernel {
 
-template <uint32_t EXEC_FLAG, class BlockMmad_, class BlockEpilogue_, class BlockScheduler_, uint32_t WORKSPACE_STAGES_,
+template <TemplateMC2TypeClass, class BlockMmad_, class BlockEpilogue_, class BlockScheduler_, uint32_t WORKSPACE_STAGES_,
           class ElementGroupList_>
 class GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspaceWithShallowDispatch {
 public:
@@ -2197,7 +2198,7 @@ public:
     using ElementAccumulator = typename BlockMmad::ElementAccumulator;
 
     using BlockEpilogue = BlockEpilogue_;
-    using ElementScale = typename BlockEpilogue::ElementScale;
+    using ElementScale = typename BlockEpilogue::ElementRawScale;
     using LayoutScale = typename BlockEpilogue::LayoutScale;
     using ElementPerTokenScale = typename BlockEpilogue::ElementPerTokenScale;
     using LayoutPerTokenScale = typename BlockEpilogue::LayoutPerTokenScale;
@@ -2659,7 +2660,7 @@ private:
 
     struct AicWaitFunc {
         using MatmulKernel = GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspaceWithShallowDispatch<
-                                EXEC_FLAG, BlockMmad, BlockEpilogue, BlockScheduler,
+                                TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler,
                                 WORKSPACE_STAGES, ElementGroupList>;
 
         CATLASS_DEVICE
@@ -2677,7 +2678,7 @@ private:
 
     struct AicSetFunc {
         using MatmulKernel = GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspaceWithShallowDispatch<
-                                EXEC_FLAG, BlockMmad, BlockEpilogue, BlockScheduler,
+                                TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler,
                                 WORKSPACE_STAGES, ElementGroupList>;
 
         CATLASS_DEVICE

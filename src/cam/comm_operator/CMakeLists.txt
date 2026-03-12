@@ -69,6 +69,8 @@ include_directories(
     ${ASCEND_HOME_PATH}/${ARCH}-linux/include/experiment/runtime/
     ${ASCEND_HOME_PATH}/${ARCH}-linux/include/experiment/msprof/
     ${CUST_OPAPI_PATH}/include/
+    # [wangqk] 8.5
+    ${ASCEND_HOME_PATH}/${ARCH}-linux/pkg_inc/runtime/
 )
 
 link_directories(

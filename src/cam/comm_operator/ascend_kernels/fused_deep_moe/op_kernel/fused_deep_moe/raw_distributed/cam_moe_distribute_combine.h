@@ -29,8 +29,8 @@ constexpr uint32_t SELF_STATE_OFFSET = 256 * 1024;
 constexpr uint8_t EP_DOMAIN = 0;
 constexpr uint8_t TP_DOMAIN = 1;
 constexpr uint64_t WIN_STATE_OFFSET = 512 * 1024;
-constexpr uint16_t SEND_SYNC_EVENT_ID = 9;
-constexpr uint16_t RECV_SYNC_EVENT_ID = 10;
+constexpr uint16_t SEND_SYNC_EVENT_ID = 6;
+constexpr uint16_t RECV_SYNC_EVENT_ID = 7;
 
 template <AscendC::HardEvent event>
 __aicore__ inline void SyncFunc()

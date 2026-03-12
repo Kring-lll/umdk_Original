@@ -33,13 +33,22 @@ import umdk_cam_op_lib
 import fused_deep_moe_converter
 from fused_deep_moe_converter import *
 
+def setup_libs():
+    xpu_ops_lib = '/app/xpu_ops/src/build_out/lib/libxpu_ops.so'
+    if not os.path.exists(xpu_ops_lib):
+        print(xpu_ops_lib)
+        raise RuntimeError('can not find xpu ops lib')
+
+    torch.ops.load_library(xpu_ops_lib)
+    torch.classes.load_library(xpu_ops_lib)
+
 torch.manual_seed(42)
 torch_npu.npu.config.allow_internal_format = True
 LOG_NAME = "fused_deep_moe_sample_logs"
 BASE_KWARGS = {
-    "batch_size": 64,
+    "batch_size": 96,
     "token_hidden_size": 7168,
-    "moe_intermediate_size": 2048,
+    "moe_intermediate_size": 4096,
     "ep_world_size": 16,
     "moe_expert_num": 64,
     "shared_expert_rank_num": 0,
@@ -51,7 +60,7 @@ BASE_KWARGS = {
     "dynamic_eplb": False,
     "with_share": False,
     "with_smooth": False,
-    "share_expert_intermediate_size": 2048  # shared expert gmm1HLen
+    "share_expert_intermediate_size": 4096  # shared expert gmm1HLen
 }
 
 def redirect_output(log_file_path):
@@ -231,10 +240,31 @@ class SmallOps(DecodeMoeOps):
         return gmm2_result
 
     def _apply_ops(self, x, expert_ids, smooth_scales, share_smooth_scales, expert_scales, x_active_mask):
+        setup_libs()
         if self.with_share:
             share_output = self.share_compute(x, share_smooth_scales)
         else:
             share_output = None
+        outputs = torch.ops.xpu_ops.moe_distribute_dispatch_v2(
+            x,
+            expert_ids,
+            self.ep_hcomm_info,
+            self.ep_world_size,
+            self.global_rank_id,
+            self.moe_expert_num,
+            smooth_scales,
+            x_active_mask,
+            expert_scales,
+            self.tp_hcomm_info,
+            1, # tp_world_size
+            0, # tp_rank_id
+            0, # expert_shard_type
+            1, # shared_expert_num
+            self.shared_expert_rank_num, # shared_expert_rank_num
+            2, # quant_mode
+            self.batch_size * self.ep_world_size, # global_bs
+            1, # expert_token_nums_type
+             "fullmesh_v2")
         # outputs = torch_npu.npu_moe_distribute_dispatch_v2(
         #     x=x,
         #     expert_ids=expert_ids,
@@ -254,29 +284,8 @@ class SmallOps(DecodeMoeOps):
         #     quant_mode=2,
         #     global_bs=self.batch_size * self.ep_world_size,
         #     expert_token_nums_type=1,  # 0代表前缀和，1代表各自数量
+        #     # comm_alg="fullmesh_v2"
         # )
-        outputs = torch.ops.xpu_ops.moe_distribute_dispatch_v2(
-            x,
-            expert_ids,
-            self.ep_hcomm_info,
-            self.ep_world_size,
-            self.global_rank_id,
-            self.moe_expert_num,
-            smooth_scales,
-            x_active_mask,
-            None,
-            self.tp_hcomm_info,
-            1,
-            0,
-            0,
-            0,
-            self.shared_expert_rank_num,
-            2,
-            0,
-            1,  # 0代表前缀和，1代表各自数量
-            "fullmesh_v2"
-        )
-
         expand_x, dynamic_scales, assist_info_for_combine, expert_token_nums, ep_send_counts, tp_send_counts, expand_scales = outputs
         output_dtype = x.dtype
 
@@ -287,20 +296,32 @@ class SmallOps(DecodeMoeOps):
             group_list_type=1,  # 默认为0，代表前缀和形式
             group_type=0,  # 0代表m轴分组
             group_list=expert_token_nums,
-            output_dtype=torch.int32,
-            tuning_config=[256] # xpu-gpu add
-            )[0]
-        y1, y1_scale = torch_npu.npu_dequant_swiglu_quant(
-            x=y1_int32,
-            weight_scale=self.gmm1_weight_scale.to(torch.float32),
-            activation_scale=dynamic_scales,
-            bias=None,
-            quant_scale=None,
-            quant_offset=None,
-            group_index=expert_token_nums,
-            activate_left=False, # seed add!!!!!!!
-            quant_mode=1,
-        )
+            output_dtype=torch.int32)[0]
+        print(f"y1_int32 {y1_int32.shape}, dynamic_scales {dynamic_scales.shape}, self.gmm1_weight_scale {self.gmm1_weight_scale.shape}")
+        y1_fp32 = y1_int32.to(torch.float32)
+        start, end = 0, 0
+        print(f"{expert_token_nums= }")
+        for i in range(self.local_expert_num):
+            end = end + expert_token_nums[i]
+            print(f"start {start}, end {end}")
+            y1_fp32[start:end] = y1_int32[start:end].to(torch.float32) * dynamic_scales.view(-1, 1)[start:end] * self.gmm1_weight_scale[i].to(torch.float32).view(1, -1)
+            start = end
+        s1_fp32, _, _ = swiglu(y1_fp32, False)
+        s1_bf16 = s1_fp32.bfloat16()
+        y1, y1_scale = torch_npu.npu_dynamic_quant(s1_bf16)
+
+        # y1, y1_scale = torch_npu.npu_dequant_swiglu_quant(
+        #     x=y1_int32,
+        #     weight_scale=self.gmm1_weight_scale.to(torch.float32),
+        #     activation_scale=dynamic_scales,
+        #     bias=None,
+        #     quant_scale=None,
+        #     quant_offset=None,
+        #     group_index=expert_token_nums,
+        #     activate_left=False, # seed add!!!!!!!
+        #     quant_mode=1,
+        # )
+        # return
         y2 = torch_npu.npu_grouped_matmul(x=[y1],
                                           weight=[self.gmm2_weight],
                                           scale=[self.gmm2_weight_scale],
@@ -310,7 +331,29 @@ class SmallOps(DecodeMoeOps):
                                           group_type=0,
                                           group_list=expert_token_nums,
                                           output_dtype=output_dtype)[0]
-        # combine_output = torch_npu.npu_moe_distribute_combine_v2(
+        combine_output = torch.ops.xpu_ops.moe_distribute_combine_v2(
+            y2,
+            expert_ids,
+            assist_info_for_combine,
+            ep_send_counts,
+            expert_scales,
+            self.ep_hcomm_info,
+            self.ep_world_size,
+            self.global_rank_id,
+            self.moe_expert_num,
+            tp_send_counts,
+            x_active_mask,
+            expand_scales,
+            None,
+            self.tp_hcomm_info,
+            1,
+            0,
+            0,
+            1,
+            self.shared_expert_rank_num,
+            self.batch_size * self.ep_world_size,
+            0)
+        # combine_output = torch.ops.xpu_ops.moe_distribute_combine_v2(
         #     expand_x=y2,
         #     expert_ids=expert_ids,
         #     assist_info_for_combine=assist_info_for_combine,
@@ -329,33 +372,8 @@ class SmallOps(DecodeMoeOps):
         #     expert_shard_type=0,
         #     shared_expert_num=1,
         #     shared_expert_rank_num=self.shared_expert_rank_num,
-        #     global_bs=self.batch_size * self.ep_world_size,
-        #     )
-        combine_output = torch.ops.xpu_ops.moe_distribute_combine_v2(
-            y2,
-            expert_ids,
-            assist_info_for_combine,
-            ep_send_counts,
-            expert_scales,
-            self.ep_hcomm_info,
-            self.ep_world_size,
-            self.global_rank_id,
-            self.moe_expert_num,
-            tp_send_counts,
-            x_active_mask,
-            None,
-            None,
-            self.tp_hcomm_info,
-            1,
-            0,
-            0,
-            0,
-            self.shared_expert_rank_num,
-            0,
-            0 # xpu-ops add
-            )
+        #     global_bs=self.batch_size * self.ep_world_size)
         return (combine_output, share_output, expert_token_nums)
-
 
 class FusionOp(DecodeMoeOps):
 
@@ -391,19 +409,22 @@ class FusionOp(DecodeMoeOps):
         self.comm_args = comm_args
 
     def _apply_ops(self, x, expert_ids, smooth_scales, share_smooth_scales, expert_scales, x_active_mask):
-        with torchair.scope.super_kernel("sp1",""):
+        # setup_libs()
+        # with torchair.scope.super_kernel("sp1",""):
+        if True:
+            # tmp = torch_npu.npu_rms_norm(x, self.gamma, 1e-6)
             output, share_output, expert_token_nums = torch.ops.umdk_cam_op_lib.fused_deep_moe(
                 x=x,
                 expert_ids=expert_ids,
                 gmm1_weight=self.gmm1_weight,
                 gmm1_weight_scale=self.gmm1_weight_scale_fp32,
                 gmm2_weight=self.gmm2_weight,
-                gmm2_weight_scale=self.gmm2_weight_scale_fp32,
+                gmm2_weight_scale=self.gmm2_weight_scale_bf16,
                 expert_scales=expert_scales,
                 share_gmm1_weight=self.share_gmm1_weight,
                 share_gmm1_weight_scale=self.share_gmm1_weight_scale_fp32,
                 share_gmm2_weight=self.share_gmm2_weight,
-                share_gmm2_weight_scale=self.share_gmm2_weight_scale_fp32,
+                share_gmm2_weight_scale=self.share_gmm2_weight_scale_bf16,
                 expert_smooth_scales=smooth_scales,
                 share_smooth_scales=share_smooth_scales.float(), # !!!!!!!!!转fp32
                 x_active_mask=x_active_mask,
@@ -428,8 +449,8 @@ class FusionOp(DecodeMoeOps):
         gmm2_weight = torch_npu.npu_format_cast(gmm2_weight,
                                                 torch_npu.Format.FRACTAL_NZ)
         gmm1_weight_scale = gmm1_weight_scale.float()
-        gmm2_weight_scale = gmm2_weight_scale.float()
-
+        gmm2_weight_scale = gmm2_weight_scale.bfloat16()
+        self.gamma = torch.randn(5120, dtype=torch.float).npu()
         if self.dynamic_eplb:
             self.gmm1_weight = [
                 weight.clone() for weight in gmm1_weight.unbind(dim=0)
@@ -440,31 +461,31 @@ class FusionOp(DecodeMoeOps):
             self.gmm2_weight = [
                 weight.clone() for weight in gmm2_weight.unbind(dim=0)
             ]
-            self.gmm2_weight_scale_fp32 = [
+            self.gmm2_weight_scale_bf16 = [
                 weight.clone() for weight in gmm2_weight_scale.unbind(dim=0)
             ]
         else:
             self.gmm1_weight = [gmm1_weight.clone()]
             self.gmm1_weight_scale_fp32 = [gmm1_weight_scale.clone()]
             self.gmm2_weight = [gmm2_weight.clone()]
-            self.gmm2_weight_scale_fp32 = [gmm2_weight_scale.clone()]
+            self.gmm2_weight_scale_bf16 = [gmm2_weight_scale.clone()]
         
         # Process shared expert weights for fusion op (similar to routing expert, but not in list)
         if self.with_share and share_gmm1_weight is not None:
             share_gmm1_weight = torch_npu.npu_format_cast(share_gmm1_weight, 29)
             share_gmm2_weight = torch_npu.npu_format_cast(share_gmm2_weight, 29)
             share_gmm1_weight_scale = share_gmm1_weight_scale.float()
-            share_gmm2_weight_scale = share_gmm2_weight_scale.float()
+            share_gmm2_weight_scale = share_gmm2_weight_scale.bfloat16()
             
             self.share_gmm1_weight = share_gmm1_weight
             self.share_gmm1_weight_scale_fp32 = share_gmm1_weight_scale
             self.share_gmm2_weight = share_gmm2_weight
-            self.share_gmm2_weight_scale_fp32 = share_gmm2_weight_scale
+            self.share_gmm2_weight_scale_bf16 = share_gmm2_weight_scale
         else:
             self.share_gmm1_weight = None
             self.share_gmm1_weight_scale_fp32 = None
             self.share_gmm2_weight = None
-            self.share_gmm2_weight_scale_fp32 = None
+            self.share_gmm2_weight_scale_bf16 = None
 
 def generate_datas(batch_size,
                    token_hidden_size,
@@ -549,7 +570,7 @@ def generate_datas(batch_size,
     share_smooth_scales = None
     if with_smooth:
         smooth_sales = torch.rand([moe_expert_num, token_hidden_size])
-        share_smooth_scales = torch.rand([token_hidden_size])
+        share_smooth_scales = torch.rand([token_hidden_size], dtype=torch.bfloat16)
     x_active_mask = None
     valid_token_num = actual_bs
     if with_mc2_mask:
@@ -606,12 +627,12 @@ def run_once(local_rank_id,
     global_rank_id = local_rank_id
     device_id = local_rank_id % 16
     torch_npu.npu.set_device(device_id)
-    run_small = False
+    run_small = True
     init_small = True
 
     # 初始化分布式环境
     os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = "27500"  # 端口号随意
+    os.environ["MASTER_PORT"] = "29500"  # 端口号随意
     if init_small:
         dist.init_process_group(backend="hccl",
                                 rank=local_rank_id,
@@ -660,18 +681,23 @@ def run_once(local_rank_id,
         fused_ops = torch.compile(fused_ops, backend=npu_backend, dynamic=False)
         # fused_ops = torch.compile(fused_ops, backend=npu_backend)
     
+    # for _ in range(10):
     fused_op_output = fused_ops(*input_datas)
     if run_small:
         small_op_output = small_ops(*input_datas)
     torch_npu.npu.synchronize(device_id)
-    # if global_rank_id == 0 or True:
-    #     print(f"{fused_op_output[0]= }")
-    #     print(f"{fused_op_output[0][0:valid_token_num]= }")
-    #     print(f"{fused_op_output[1]= }")
+    if global_rank_id == 0 or True:
+        print(f"{fused_op_output[0][:,0:5] = }")
+        # print(f"{fused_op_output[0][0:valid_token_num]= }")
+        print(f"{small_op_output[0] [:,0:5]= }")
+        # print(f"{small_op_output[0][0:valid_token_num]= }")
+        # print(f"{fused_op_output[1]= }")
         # print(f"{fused_op_output= }")
+        
     if run_small:
         small_op_token_output, small_op_share_output, small_op_count_output = small_op_output
     fused_op_token_output, fused_op_share_output, fused_op_count_output = fused_op_output
+    print(f"[rank-{local_rank_id}] MOE output diff: max={torch.abs(small_op_token_output[:valid_token_num] - fused_op_token_output[:valid_token_num]).max().item():.6f}, mean={torch.abs(small_op_token_output[:valid_token_num] - fused_op_token_output[:valid_token_num]).mean().item():.6f}")
     
     torch_npu.npu.synchronize(device_id)
     print(f"rank-{global_rank_id} End, {actual_bs= }, {valid_token_num= }")
@@ -706,10 +732,10 @@ def run_once(local_rank_id,
 
             print(f"[rank-{local_rank_id}] {small_op_share_output= }")
         print(f"[rank-{local_rank_id}] {fused_op_share_output= }")
-        # torch.testing.assert_close(small_op_share_output.cpu(),
-        #                            fused_op_share_output.cpu(),
-        #                            atol=2.0,
-        #                            rtol=0.02)
+        torch.testing.assert_close(small_op_share_output.cpu(),
+                                   fused_op_share_output.cpu(),
+                                   atol=2.0,
+                                   rtol=0.02)
     gc.collect()
     torch.npu.empty_cache()
     torch.npu.reset_peak_memory_stats()
@@ -750,7 +776,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--share_expert_rank_num", type=int, default=0)
     parser.add_argument("--moe_expert_num", type=int, default=128)
-    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--batch_size", type=int, default=96)
     parser.add_argument("--token_hidden_size", type=int, default=5120)
     parser.add_argument("--moe_intermediate_size", type=int, default=1536)
     parser.add_argument("--share_expert_intermediate_size", type=int, default=3072)

@@ -65,7 +65,10 @@ ext1 = NpuExtension(
         os.path.join(os.environ["ASCEND_HOME_PATH"], f"{arch}-linux", "include", "experiment", "runtime"),
         os.path.join(os.environ["ASCEND_HOME_PATH"], f"{arch}-linux", "include", "experiment", "msprof"),
         os.path.join(torch_path, "include"),
-        os.path.join(os.path.dirname(__file__), "./", "pytorch_extension")],
+        os.path.join(os.path.dirname(__file__), "./", "pytorch_extension"),
+        # [wangqk]8.5
+        os.path.join(os.environ["ASCEND_HOME_PATH"], f"{arch}-linux", "pkg_inc", "runtime"),
+        ],
 
     library_dirs=[
         os.path.join(os.environ["MODULE_SRC_PATH"], 'build/'),
