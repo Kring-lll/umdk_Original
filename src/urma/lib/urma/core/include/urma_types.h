@@ -1402,6 +1402,34 @@ typedef enum urma_vlog_level {
 
 typedef void (*urma_log_cb_t)(int level, char *message);
 
+typedef struct urma_perf_attr {
+    uint64_t thresh_array[8]; /* quantile values list */
+    uint32_t thresh_num; /* number of valid quantile values */
+} urma_perf_attr_t;
+
+typedef struct urma_perf_type {
+    URMA_PERF_POST_JETTY_SEND_WR,
+    URMA_PERF_POST_JFS_WR,
+    URMA_PERF_POST_JETTY_RECV_WR,
+    URMA_PERF_POST_JFR_WR,
+    URMA_PERF_POLL_JFC,
+    URMA_PERF_WAIT_JFC,
+    URMA_PERF_RECORD_TYPE_MAX,
+} urma_perf_record_type_t;
+
+typedef struct urma_perf_stats {
+    struct {
+        urma_perf_record_type_t type;
+        uint64_t sample_num;
+        uint64_t average;
+        uint64_t mininum;
+        uint64_t maxinum;
+        uint64_t median;
+        uint64_t p90;
+        uint64_t p99;
+    } type_record[URMA_PERF_RECORD_TYPE_MAX];
+} urma_perf_stats_t;
+
 #ifdef __cplusplus
 }
 #endif
