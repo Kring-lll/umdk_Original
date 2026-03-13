@@ -38,6 +38,7 @@ typedef struct umq_perftest_config {
     bool enable_perf;
     uint64_t thresh_array[UMQ_PERF_QUANTILE_MAX_NUM];
     uint16_t thresh_num;
+    uint16_t tp_mode;
 } umq_perftest_config_t;
 
 int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *cfg);

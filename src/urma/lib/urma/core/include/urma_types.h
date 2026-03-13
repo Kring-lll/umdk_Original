@@ -756,6 +756,10 @@ typedef struct urma_rjetty {
     urma_target_type_t type;
     urma_import_jetty_flag_t flag;
     urma_tp_type_t tp_type;
+    struct {
+        uint64_t stag;
+        uint64_t dtag;
+    } tag;
 } urma_rjetty_t;
 
 typedef struct urma_target_jetty {
