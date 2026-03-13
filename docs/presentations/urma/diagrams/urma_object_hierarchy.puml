@@ -1,0 +1,184 @@
+@startuml urma_object_hierarchy
+!theme plain
+skinparam classAttributeIconSize 0
+skinparam nodesep 80
+skinparam ranksep 60
+
+title URMA 核心对象层次结构
+
+package "硬件层" #DDFFDD {
+    class Device <<Entity>> {
+        - name: char[64]
+        - path: char[4096]
+        - type: urma_transport_type_t
+        - ops: provider_ops*
+        --
+        + urma_query_device()
+    }
+    note right of Device
+        代表物理 UDMA 设备
+        通过 urma_get_device_list() 获取
+    end note
+}
+
+package "通信上下文" #FFDDDD {
+    class Context <<Entity>> {
+        - dev: urma_device_t*
+        - eid: urma_eid_t
+        - uasid: uint32_t
+        - async_fd: int
+        --
+        + urma_create_context()
+        + urma_delete_context()
+    }
+    note right of Context
+        进程级通信上下文
+        EID: 端点标识符 (类似 IP)
+        UASID: 用户地址空间 ID
+    end note
+}
+
+package "完成通知机制" #DDDDFF {
+    class JFCE <<Entity>> {
+        - fd: int
+        --
+        + urma_create_jfce()
+        + urma_delete_jfce()
+    }
+    class JFC <<Entity>> {
+        - depth: uint32_t
+        - jfc_id: urma_jfc_id_t
+        - jfce: urma_jfce_t*
+        --
+        + urma_create_jfc()
+        + urma_poll_jfc()
+        + urma_rearm_jfc()
+    }
+    note right of JFC
+        完成队列 (Completion Queue)
+        收集操作完成事件 (CQE)
+    end note
+}
+
+package "通信端点" #FFFFDD {
+    class JFS <<Entity>> {
+        - depth: uint32_t
+        - trans_mode: urma_transport_mode_t
+        - jfc: urma_jfc_t*
+        - max_inline_data: uint32_t
+        --
+        + urma_post_write()
+        + urma_post_read()
+        + urma_post_send()
+        + urma_post_atomic()
+    }
+    note right of JFS
+        Jetty Send Side (发送端)
+        支持 Write/Read/Send/Atomic
+    end note
+    
+    class JFR <<Entity>> {
+        - depth: uint32_t
+        - trans_mode: urma_transport_mode_t
+        - jfc: urma_jfc_t*
+        - token_value: urma_token_t
+        --
+        + urma_post_recv()
+    }
+    note right of JFR
+        Jetty Recv Side (接收端)
+        接收 Send 操作的数据
+    end note
+    
+    class Jetty <<Entity>> {
+        - jetty_id: urma_jetty_id_t
+        - jfs_cfg: urma_jfs_cfg_t
+        - jfr: urma_jfr_t*
+        - remote_jetty: urma_target_jetty_t*
+        --
+        + urma_create_jetty()
+        + urma_bind_jetty()
+    }
+    note bottom of Jetty
+        Jetty = JFS + JFR
+        组合模式，同时具备发送和接收能力
+    end note
+}
+
+package "内存管理" #FFDDFF {
+    class TokenID <<Entity>> {
+        - token_id: uint32_t
+        - flag: urma_token_id_flag_t
+        --
+        + urma_alloc_token_id()
+        + urma_free_token_id()
+    }
+    note right of TokenID
+        Token ID 用于权限控制
+        多个 Segment 可共享一个 Token ID
+    end note
+    
+    class Segment <<Entity>> {
+        - ubva: urma_ubva_t
+        - len: uint64_t
+        - token_id: uint32_t
+        - attr: urma_seg_attr_t
+        --
+        + urma_register_seg()
+        + urma_unregister_seg()
+    }
+    note right of Segment
+        注册的内存区域
+        UBVA: 统一总线虚拟地址
+        包含 EID + VA
+    end note
+    
+    class TargetSeg <<Entity>> {
+        - seg: urma_seg_t
+        - flag: urma_import_seg_flag_t
+        --
+        + urma_import_seg()
+        + urma_unimport_seg()
+    }
+    note right of TargetSeg
+        导入的远端内存段
+        用于单边操作 (Read/Write)
+    end note
+    
+    class TargetJetty <<Entity>> {
+        - id: urma_jetty_id_t
+        - trans_mode: urma_transport_mode_t
+        - tp: urma_tp_t
+        - flag: urma_import_jetty_flag_t
+        --
+        + urma_import_jetty()
+        + urma_bind_jetty()
+    }
+    note right of TargetJetty
+        导入的远端 Jetty
+        用于双边操作 (Send/Recv)
+    end note
+}
+
+Device "1" --> "1..*" Context : creates
+Context "1" --> "0..1" JFCE : creates
+Context "1" --> "0..*" JFC : creates
+Context "1" --> "0..*" JFS : creates
+Context "1" --> "0..*" JFR : creates
+Context "1" --> "0..*" Jetty : creates
+Context "1" --> "0..*" TokenID : allocates
+Context "1" --> "0..*" Segment : registers
+
+JFS --> JFC : binds to
+JFR --> JFC : binds to
+
+Jetty *-- JFS : contains
+Jetty --> JFR : shares or contains
+
+JFC --> JFCE : uses
+
+Segment ..> TokenID : uses
+TargetSeg --> Segment : imports
+TargetJetty --> Jetty : binds to
+
+@enduml

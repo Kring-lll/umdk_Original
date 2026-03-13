@@ -1,0 +1,60 @@
+@startuml two_sided_operations
+!theme plain
+title URMA 双边操作 (Two-sided Operations - Send/Recv)
+
+box "Host A (Sender)" #DDFFDD
+    participant "Application" as App_A
+    participant "Jetty A\n(JFS+JFR)" as Jetty_A
+    participant "JFC A" as JFC_A
+end box
+
+participant "Network\n(UDMA)" as Network
+
+box "Host B (Receiver)" #FFDDDD
+    participant "Jetty B\n(JFS+JFR)" as Jetty_B
+    participant "JFC B" as JFC_B
+    participant "Application" as App_B
+end box
+
+note over App_A, App_B
+    双边操作需要双方配合：
+    1. 接收方先 post_recv() 预留 buffer
+    2. 发送方 post_send() 发送数据
+end note
+
+== 准备阶段：接收方预留 buffer ==
+App_B -> Jetty_B : urma_post_recv()\n(buffer 预留给即将到来的消息)
+activate Jetty_B
+Jetty_B -> JFC_B : Register pending WR
+deactivate Jetty_B
+
+note right of App_B
+    接收方必须先 post_recv()
+    否则发送方会收到 RNR 错误
+    (Receiver Not Ready)
+end note
+
+== Send 操作 ==
+App_A -> Jetty_A : urma_post_send()\n(data, target_jetty)
+activate Jetty_A
+Jetty_A -> Network : Send Request\n(with data and target JFR ID)
+Network -> Jetty_B : Deliver to JFR\n(匹配 pending recv WR)
+Jetty_B -> JFC_B : Generate CQE\n(通知接收方)
+Jetty_B --> Network : ACK
+Network --> Jetty_A : Completion
+Jetty_A -> JFC_A : Generate CQE\n(通知发送方)
+Jetty_A --> App_A : CQE
+deactivate Jetty_A
+
+== 接收方处理数据 ==
+JFC_B --> App_B : urma_poll_jfc()\n(CQE 包含数据信息)
+App_B -> App_B : 处理接收到的数据
+
+note right of App_B
+    CQE 包含：
+    - 数据长度
+    - 发送方信息
+    - 立即数 (如果有)
+end note
+
+@enduml

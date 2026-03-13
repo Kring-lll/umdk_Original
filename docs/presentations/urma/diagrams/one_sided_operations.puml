@@ -1,0 +1,58 @@
+@startuml one_sided_operations
+!theme plain
+title URMA 单边操作 (One-sided Operations)
+
+box "Host A (Initiator)" #DDFFDD
+    participant "Application" as App_A
+    participant "JFS" as JFS_A
+    participant "Segment A\n(Local Buffer)" as SEG_A
+end box
+
+participant "Network\n(UDMA)" as Network
+
+box "Host B (Target)" #FFDDDD
+    participant "Segment B\n(Remote Buffer)" as SEG_B
+    participant "JFR" as JFR_B
+    participant "Application" as App_B
+end box
+
+note over App_B, SEG_B
+    远端应用无需感知单边操作
+    硬件直接 DMA 读写内存
+end note
+
+== Write 操作 (本地 → 远端) ==
+App_A -> JFS_A : urma_post_write()\nsrc=local_buf, dst=remote_seg
+activate JFS_A
+JFS_A -> SEG_A : Read local data
+SEG_A --> JFS_A : 
+JFS_A -> Network : DMA Write Request\n(with remote UBVA)
+Network -> SEG_B : DMA Write\n(直接写入远端内存)
+SEG_B --> Network : ACK
+Network --> JFS_A : Completion
+JFS_A --> App_A : CQE (Completion Queue Entry)
+deactivate JFS_A
+
+note right of App_A
+    Write 完成后可从 JFC 轮询 CQE
+    或通过 JFCE 收到事件通知
+end note
+
+== Read 操作 (远端 → 本地) ==
+App_A -> JFS_A : urma_post_read()\nsrc=remote_seg, dst=local_buf
+activate JFS_A
+JFS_A -> Network : DMA Read Request\n(with remote UBVA)
+Network -> SEG_B : DMA Read Request
+SEG_B --> Network : Data Response
+Network -> SEG_A : DMA Write\n(直接写入本地内存)
+SEG_A --> Network : ACK
+Network --> JFS_A : Completion
+JFS_A --> App_A : CQE
+deactivate JFS_A
+
+note right of App_A
+    Read 完成后，本地 buffer 已包含数据
+    无需 CPU 拷贝
+end note
+
+@enduml

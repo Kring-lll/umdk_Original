@@ -1,0 +1,98 @@
+@startuml urma_workflow
+!theme plain
+title URMA 典型工作流程
+
+|初始化阶段|
+start
+:urma_init();
+note right: 初始化 URMA 库
+
+:urma_get_device_list();
+note right: 获取可用设备列表
+
+:urma_create_context();
+note right: 创建通信上下文
+
+fork
+    :urma_create_jfce();
+    note right: 创建事件通道 (可选)
+fork again
+    :urma_create_jfc();
+    note right: 创建完成队列
+end fork
+
+|资源创建|
+fork
+    :urma_create_jfr();
+    note right: 创建接收端
+fork again
+    :urma_create_jetty();
+    note right: 创建 Jetty (JFS+JFR)
+end fork
+
+:urma_register_seg();
+note right: 注册内存区域
+
+|连接建立|
+:交换元数据
+(EID, Jetty ID, Segment info);
+note right
+    通过 TCP socket 或
+    其他带外机制
+end note
+
+:urma_import_jetty();
+note right: 导入远端 Jetty
+
+if (传输模式 == RC?) then (是)
+    :urma_bind_jetty();
+    note right: 建立连接
+else (否)
+    :无需 bind
+    note right: RM/UM 模式无连接
+endif
+
+|数据传输|
+repeat
+    fork
+        :单边操作;
+        note right
+            urma_post_write()
+            urma_post_read()
+        end note
+    fork again
+        :双边操作;
+        note right
+            urma_post_send()
+            urma_post_recv()
+        end note
+    end fork
+    
+    :urma_poll_jfc();
+    note right: 轮询完成事件
+    
+    :处理 CQE;
+repeat while (还有数据?) is (是) not (否)
+
+|清理阶段|
+:urma_unbind_jetty();
+note right: 解绑 (如果 bind 过)
+
+:urma_unimport_jetty();
+
+:urma_unregister_seg();
+
+:urma_delete_jetty();
+:urma_delete_jfr();
+:urma_delete_jfc();
+:urma_delete_jfce();
+
+:urma_delete_context();
+
+:urma_free_device_list();
+
+:urma_uninit();
+
+stop
+
+@enduml
