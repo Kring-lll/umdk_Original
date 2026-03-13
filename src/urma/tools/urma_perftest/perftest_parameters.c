@@ -22,6 +22,8 @@
 #include "urma_types_str.h"
 #include "perftest_communication.h"
 #include "perftest_parameters.h"
+#include "urma_api.h"
+
 #define PERFTEST_CACHE_LINE_FILE_SIZE (10)
 #define PERFTEST_JFC_MUL_THRESHOLD (4)
 #define PERFTEST_DEFAULT_DURATION (5)
@@ -30,6 +32,7 @@
 #define PERFTEST_CTP_MAX_SEND_SIZE (4096)
 #define PERFTEST_RTP_MAX_ORDER     (16)
 #define PERFTEST_CTP_MAX_ORDER     (12)
+#define PERFTEST_INVALID_PRIORITY  (255)
 
 typedef struct perftest_cmd {
     char *cmd;
@@ -259,7 +262,7 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->use_jfce = false;
     cfg->time_type.value = 0;
     // Update to max value of the device attr after creation context
-    cfg->inline_size = (cfg->type == PERFTEST_BW) ? PERFTEST_DEF_INLINE_BW : PERFTEST_DEF_INLINE_LAT;
+    cfg->inline_size = 0;
     cfg->jettys = PERFTEST_DEF_NUM_JETTYS;
     cfg->token_policy = URMA_TOKEN_NONE;
     cfg->iters = (cfg->type == PERFTEST_BW) ? PERFTEST_DEF_ITERS_BW : PERFTEST_DEF_ITERS_LAT;
@@ -293,7 +296,7 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->order = (cfg->api_type == PERFTEST_SEND) ? PERFTEST_CTP_MAX_ORDER : PERFTEST_SIZE_ORDER;
     cfg->err_timeout = URMA_TYPICAL_ERR_TIMEOUT;
     cfg->lock_free = false;
-    cfg->priority = URMA_MAX_PRIORITY;
+    cfg->priority = PERFTEST_INVALID_PRIORITY;
     cfg->share_jfr = false;
     cfg->jettys_pre_jfr = 0;
     cfg->is_rate_limit = false;
@@ -947,6 +950,31 @@ bool is_jfr_depth_valid(perftest_config_t *cfg)
     return (cfg->jfr_depth * (cfg->jettys / cfg->jettys_pre_jfr)) >= (cfg->jettys * cfg->jfr_post_list);
 }
 
+int get_jetty_priority_by_tp_type(char *name, union urma_tp_type_en tp_type)
+{
+    int pri = 0;
+    urma_device_t *urma_dev;
+    urma_device_attr_t dev_attr;
+
+    urma_dev = urma_get_device_by_name(name);
+    if (urma_dev == NULL) {
+        fprintf(stderr, "urma get device by name failed!\n");
+        return -1;
+    }
+    if (urma_query_device(urma_dev, &dev_attr) != URMA_SUCCESS) {
+        fprintf(stderr, "Failed to query device %s.\n", name);
+        return -1;
+    }
+    for (int i = 0; i <= URMA_MAX_PRIORITY; i++) {
+        if (tp_type.value == dev_attr.dev_cap.priority_info[i].tp_type.value) {
+            pri = i;
+            return pri;
+        }
+    }
+    fprintf(stderr, "Failed to get sl resources %s.\n", name);
+    return -1;
+}
+
 int check_local_cfg(perftest_config_t *cfg)
 {
     if (cfg == NULL) {
@@ -956,6 +984,10 @@ int check_local_cfg(perftest_config_t *cfg)
     if (strlen(cfg->dev_name) == 0 || strnlen(cfg->dev_name, URMA_MAX_NAME) >= URMA_MAX_NAME) {
         (void)fprintf(stderr, "No device specified, name: %s.\n", cfg->dev_name);
         return -1;
+    }
+
+    if (strstr(cfg->dev_name, "bonding_dev") != NULL && !cfg->single_path) {
+        cfg->use_ctp = true;
     }
 
     if (check_time_type(cfg) != 0) {
@@ -1278,13 +1310,13 @@ int check_local_cfg(perftest_config_t *cfg)
     }
 
     if (cfg->api_type == PERFTEST_SEND) {
-        if (cfg->single_path && cfg->size > PERFTEST_RTP_MAX_SEND_SIZE && !cfg->all) {
-            (void)fprintf(stderr, "Invalid size: %u with single path for send opcode, max size: %u.\n",
+        if (!cfg->use_ctp && cfg->size > PERFTEST_RTP_MAX_SEND_SIZE && !cfg->all) {
+            (void)fprintf(stderr, "Invalid size: %u with rtp for send opcode, max size: %u.\n",
                 cfg->size, PERFTEST_RTP_MAX_SEND_SIZE);
             exit(1);
         }
-        if (!cfg->single_path && cfg->size > PERFTEST_CTP_MAX_SEND_SIZE && !cfg->all) {
-            (void)fprintf(stderr, "Invalid size: %u with multi path for send opcode, max size: %u.\n",
+        if (cfg->use_ctp && cfg->size > PERFTEST_CTP_MAX_SEND_SIZE && !cfg->all) {
+            (void)fprintf(stderr, "Invalid size: %u with ctp for send opcode, max size: %u.\n",
                 cfg->size, PERFTEST_CTP_MAX_SEND_SIZE);
             exit(1);
         }
@@ -1306,13 +1338,18 @@ int check_local_cfg(perftest_config_t *cfg)
         exit(1);
     }
 
-    if (cfg->use_ctp) {
-        // Hacky: CTP must use priority 6, will query for available prioritues instead
-        const uint8_t ctp_priority = 6;
-        cfg->priority = ctp_priority;
-        (void)fprintf(stderr, "Warning: ctp should set priority to %hhu.\n", ctp_priority);
+    union urma_tp_type_en tp_type;
+    if (cfg->priority == PERFTEST_INVALID_PRIORITY) {
+        if (cfg->use_ctp) {
+            tp_type.bs.ctp = 1;
+            cfg->priority = get_jetty_priority_by_tp_type(cfg->dev_name, tp_type);
+        } else {
+            tp_type.bs.rtp = 1;
+            cfg->priority = get_jetty_priority_by_tp_type(cfg->dev_name, tp_type);
+        }
+        (void)fprintf(stderr, "Warning: %s should set priority to %hhu.\n",
+            (cfg->use_ctp == true ? "ctp" : "rtp"), cfg->priority);
     }
-
     return 0;
 }
 

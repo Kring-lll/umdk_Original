@@ -14,6 +14,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <signal.h>
 
 #include "urma_api.h"
 #include "urma_types.h"
@@ -86,10 +87,17 @@ static void primary_eid_to_main_primary_eid(urma_eid_t *primary_eid)
     for (int j = 0; j < DEV_NUM; j++) {
         for (int k = 0; k < IODIE_NUM; k++) {
             if (topo_map.topo_infos[target_node_id].agg_devs[j].ues[k].entity_id == target_entity_id) {
-                if (memcmp(topo_map.topo_infos[target_node_id].agg_devs[j].ues[k].primary_eid, empty_eid.raw, EID_LEN) == 0)
+                if (memcmp(topo_map.topo_infos[target_node_id].agg_devs[j].ues[k].primary_eid,
+                    empty_eid.raw,
+                    EID_LEN) == 0) {
                     continue;
-                if (memcmp(primary_eid->raw, topo_map.topo_infos[target_node_id].agg_devs[j].ues[k].primary_eid, EID_LEN) > 0) {
-                    memcpy(primary_eid->raw, topo_map.topo_infos[target_node_id].agg_devs[j].ues[k].primary_eid, EID_LEN);
+                }
+                if (memcmp(primary_eid->raw,
+                    topo_map.topo_infos[target_node_id].agg_devs[j].ues[k].primary_eid,
+                    EID_LEN) > 0) {
+                    memcpy(primary_eid->raw,
+                           topo_map.topo_infos[target_node_id].agg_devs[j].ues[k].primary_eid,
+                           EID_LEN);
                 }
             }
         }
@@ -270,7 +278,7 @@ static int init_urma_resource(ping_cfg_t *cfg, ping_urma_resource_t *res)
 
     primary_eid_to_main_primary_eid(&dest_eid);
 
-    LOG_VERBOSE("Successful find dest primary eid: ");
+    LOG_VERBOSE("Successful find main dest primary eid: ");
     log_eid_verbose(dest_eid.raw);
 
     urma_eid_info_t *eid_list = urma_get_eid_list(dev, &eid_cnt);
@@ -434,6 +442,7 @@ unregister_seg:
     urma_unregister_seg(res->seg);
 free_buf:
     free(res->buf);
+    res->buf = NULL;
 delete_context:
     urma_delete_context(res->ctx);
 uninit_urma:
@@ -448,6 +457,7 @@ static void uninit_urma_resource(ping_urma_resource_t *res)
     urma_delete_jfr(res->jfr);
     urma_unregister_seg(res->seg);
     free(res->buf);
+    res->buf = NULL;
     urma_delete_context(res->ctx);
     urma_uninit();
 }
@@ -521,7 +531,7 @@ static int recv_ping_msg(ping_cfg_t *cfg, ping_urma_resource_t *res, ping_per_se
 
         bool unmatched = (ret > 0 && cr.imm_data != seq_info->seq);
         bool received = (ret > 0 && cr.imm_data == seq_info->seq);
-        timed_out = (seq_info->rtt >= cfg->timeout * 1000);
+        timed_out = ((seq_info->rtt >= cfg->timeout * 1000) && (cfg->timeout != 0));
 
         if (unmatched) {
             LOG_VERBOSE("Unmatched reply received: expected seq=%d, got seq=%d\n",
@@ -557,6 +567,13 @@ static int recv_ping_msg(ping_cfg_t *cfg, ping_urma_resource_t *res, ping_per_se
     return 0;
 }
 
+static void signal_handler(int signum)
+{
+    LOG_VERBOSE("Received Signal: %d\n", signum);
+    print_stat();
+    exit(0);
+}
+
 int start_ping(ping_cfg_t *cfg)
 {
     verbose_set_level(cfg->verbose_level);
@@ -581,6 +598,7 @@ int start_ping(ping_cfg_t *cfg)
     LOG_VERBOSE("Timeout(s)  : %u\n", cfg->timeout);
 
     init_stat();
+    signal(SIGINT, signal_handler);
 
     double ping_start_time = get_time_in_ms();
 

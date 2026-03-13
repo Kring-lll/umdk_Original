@@ -90,7 +90,7 @@ static inline uint32_t urpc_tlv_get_left_len(char *buf, uint32_t buf_size, urpc_
 
 static inline uint32_t urpc_tlv_arr_get_user_data_len(urpc_tlv_arr_head_t *head)
 {
-    return head->len - sizeof(head->value);
+    return (head->len > sizeof(head->value)) ? (head->len - sizeof(head->value)) : 0;
 }
 
 static inline uint32_t urpc_tlv_arr_get_value_len_by_user_data_len(uint32_t user_data_len)
