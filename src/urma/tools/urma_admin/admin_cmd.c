@@ -18,7 +18,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -113,7 +112,7 @@ static int usage(admin_config_t *cfg)
            "  -n, --ns </proc/$pid/ns/net>                ns path.\n"
            "  -M, --ns_mode <0 or 1>                      ns_mode with (exclusive: 0) | (shared: 1).\n"
            "  -p, --priority  <0 - 15>                    the serial number of priority.\n"
-           "  -u, --max_id  <0 - 15>                      the serial number of SL.\n");
+           "  -s, --sl                                    the serial number of SL.\n");
     return 0;
 }
 
@@ -306,7 +305,7 @@ int exec_cmd(admin_config_t *cfg, const admin_cmd_t *cmds)
 
     const admin_cmd_t *cmd = cmds + 1;
     while (cmd->name) {
-        if (strncmp(cmd->name, cmd_name, strlen(cmd->name) + 1) == 0) {
+        if (strncmp(cmd->name, cmd_name, strnlen(cmd->name, MAX_CMDLINE_LEN) + 1) == 0) {
             return cmd->func(cfg);
         }
         cmd++;

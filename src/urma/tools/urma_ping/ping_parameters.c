@@ -20,6 +20,8 @@
 
 #include "ping_parameters.h"
 
+#define MAX_PING_SIZE 4096
+
 int str_to_u32(const char *buf, uint32_t *u32)
 {
     unsigned long ret;
@@ -139,10 +141,10 @@ int parse_args(ping_cfg_t *cfg)
                 break;
             case 'h':
                 usage(cfg->filename);
-                exit(EXIT_SUCCESS);
+                return -EINVAL;
             case 'V':
                 version();
-                exit(EXIT_SUCCESS);
+                return -EINVAL;
             case ':':
                 LOG_ERROR("Option -%c requires an argument\n", optopt);
                 return -EINVAL;
@@ -181,6 +183,11 @@ int check_args(ping_cfg_t *cfg)
 
     if (cfg->size == 0) {
         LOG_ERROR("Size must be greater than 0\n");
+        return -EINVAL;
+    }
+
+    if (cfg->size > MAX_PING_SIZE) {
+        LOG_ERROR("Size must be less than or equal to 4096\n");
         return -EINVAL;
     }
 
