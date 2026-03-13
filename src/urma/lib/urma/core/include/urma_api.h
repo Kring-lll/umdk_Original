@@ -1128,6 +1128,33 @@ urma_status_t urma_get_smac(const urma_context_t *ctx, uint8_t *mac);
  */
 urma_status_t urma_get_dmac(const urma_context_t *ctx, const urma_net_addr_t *net_addr, uint8_t *mac);
 
+/*
+ * configure performance attributes.
+ * @param[in] perf_attr: performance attributes to configure;
+ * Return: 0 on success, other value on error
+ */
+urma_status_t urma_config_perf_attr(urma_perf_attr_t *perf_attr);
+
+/*
+ * start performance monitoring.
+ * Return: 0 on success, other value on error
+ */
+urma_status_t urma_start_perf(void);
+
+/*
+ * stop performance monitoring.
+ * Return: 0 on success, other value on error
+ */
+urma_status_t urma_stop_perf(void);
+
+/*
+ * get performance information.
+ * @param[out] perf_buf: buffer to store performance information;
+ * @param[out] length: length of performance information;
+ * Return: 0 on success, other value on error
+ */
+urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length);
+
 #ifdef __cplusplus
  }
 #endif
