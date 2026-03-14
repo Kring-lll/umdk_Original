@@ -25,7 +25,7 @@
 
 #define MAX_NODE_NUM            (16)
 #define EID_LEN                 (16)
-#define PORT_NUM            (9)
+#define PORT_NUM                (9)
 #define IODIE_NUM               (2)
 #define DEV_NUM                 (128)
 #define URMA_ADMIN_MAX_DEV_NAME 64
@@ -250,7 +250,7 @@ typedef struct tool_topo_info {
     tool_topo_link_t links[IODIE_NUM][PORT_NUM];
     //一个节点的所有聚合设备，为啥是128？？
     tool_topo_agg_dev_t agg_devs[DEV_NUM];
-}  tool_topo_info_t;
+} tool_topo_info_t;
 
 // todo-cyc:16是指最多有16个节点互联, 1D硬件链路？？
 typedef struct tool_topo_map {
@@ -310,15 +310,17 @@ int admin_str_to_u8(const char *buf, uint8_t *u8);
 int admin_str_to_u16(const char *buf, uint16_t *u16);
 int admin_str_to_u32(const char *buf, uint32_t *u32);
 int admin_str_to_u64(const char *buf, uint64_t *u64);
-int admin_parse_args(admin_config_t *cfg);
+
+int admin_parse_dev_name(char *buf, admin_config_t *cfg);
+int admin_parse_ns(char *buf, admin_config_t *cfg);
 
 typedef struct admin_cmd {
     char *name;
     int (*func)(admin_config_t *cfg);
 } admin_cmd_t;
 
-char *pop_arg(admin_config_t *cmds);
-int pop_arg_dev(admin_config_t *cmds);
+char *pop_arg(admin_config_t *cfg);
+int pop_arg_dev(admin_config_t *cfg);
 int pop_arg_ns(admin_config_t *cfg);
 int pop_arg_sharing(admin_config_t *cfg);
 int pop_arg_eid(admin_config_t *cfg);

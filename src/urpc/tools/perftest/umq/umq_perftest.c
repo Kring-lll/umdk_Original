@@ -107,7 +107,7 @@ static void umq_perftest_show_feature(uint32_t feature)
 
     if ((feature & UMQ_FEATURE_API_PRO) == 0) {
         ret = snprintf(feature_str, PERFTEST_STR_SIZE, "%s", "UMQ_FEATURE_API_BASE");
-        if (ret < 0) {
+        if (ret < 0 || ret >= PERFTEST_STR_SIZE) {
             LOG_PRINT("set feature string: UMQ_FEATURE_API_BASE failed\n");
             return;
         }
@@ -124,7 +124,7 @@ static void umq_perftest_show_feature(uint32_t feature)
         } else {
             ret = snprintf(feature_str + str_len, PERFTEST_STR_SIZE - str_len, " %s", array[i].str);
         }
-        if (ret < 0) {
+        if (ret < 0 || ret >= (PERFTEST_STR_SIZE - str_len)) {
             LOG_PRINT("set feature string: %s failed\n", array[i].str);
             return;
         }
@@ -178,7 +178,7 @@ static void umq_perftest_finish_perf(umq_perftest_config_t *cfg)
         umq_perf_stats_cfg_t perf_stats_cfg;
         (void)memcpy(perf_stats_cfg.thresh_array, cfg->thresh_array, sizeof(uint64_t) * cfg->thresh_num);
         perf_stats_cfg.thresh_num = cfg->thresh_num;
-        int str_size = umq_stats_perf_to_string(&umq_perf_stats, perf_info_str_buf, UMQ_PERFTEST_ERTF_INFO_STR_SIZE);
+        int str_size = umq_stats_perf_to_str(&umq_perf_stats, perf_info_str_buf, UMQ_PERFTEST_ERTF_INFO_STR_SIZE);
         if (str_size >= UMQ_PERFTEST_ERTF_INFO_STR_SIZE) {
             perf_info_str_buf[UMQ_PERFTEST_ERTF_INFO_STR_SIZE - 1] = '\0';
             LOG_PRINT("perf info str buf too small, str_size %u\n", str_size);

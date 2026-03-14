@@ -394,7 +394,7 @@ static uint32_t target_slot_id_calcuate(uint64_t expire_time, uint64_t current_t
     return target_slot_id;
 }
 
-/* this function can be called only umq_ub_idle_queue_check or umq_ub_monitor_slots_uninit function*/
+/* this function can be called only umq_ub_idle_queue_check or umq_ub_monitor_slots_uninit function */
 static void umq_ub_idle_checker_uninit(ub_queue_idle_check_t *checker)
 {
     checker->umq = NULL;
@@ -1071,7 +1071,7 @@ int umq_ub_wait_interrupt_impl(uint64_t wait_umqh_tp, int time_out, umq_interrup
     if (cnt < 0) {
         if (errno != EAGAIN) {
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_wait_jfc failed, direction %u,"
-                " errno: %d\n", EID_ARGS(*eid), id, option->direction, errno);
+                " errno: %d, status: %d\n", EID_ARGS(*eid), id, option->direction, errno, cnt);
             return -1;
         }
         return 0;
@@ -1256,15 +1256,16 @@ int umq_ub_unbind_impl(uint64_t umqh)
         umq_modify_ubq_to_err(queue, UMQ_IO_ALL, UB_QUEUE_JETTY_IO);
     }
 
+    free(queue->bind_ctx);
+    queue->bind_ctx = NULL;
+    /* The `flush tx` and `flush rx` directives should be placed after `bind_ctx` is set to null,
+     * preventing requests from being sent under flow control. */
     if ((queue->dev_ctx->feature & UMQ_FEATURE_API_PRO) == 0) {
         umq_flush_tx(queue, UMQ_FLUSH_MAX_RETRY_TIMES);
         if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0) {
             umq_flush_rx(queue, UMQ_FLUSH_MAX_RETRY_TIMES);
         }
     }
-
-    free(queue->bind_ctx);
-    queue->bind_ctx = NULL;
 
     umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
 
@@ -1761,9 +1762,10 @@ int ubmm_fill_ref_sge_info(uint64_t umqh_tp, umq_buf_t *qbuf, char *ub_ref_info,
                 "exceeds the maximum limit [%u]\n", EID_ARGS(*eid), id, ref_sge_cnt, umq_imm_head->mempool_num);
             return UMQ_FAIL;
         }
-
         mempool_info_ctx.import_mempool_info = &import_mempool_info[umq_imm_head->mempool_num];
-        fill_big_data_ref_sge(queue, ref_sge, tmp_buf, &mempool_info_ctx);
+        if (fill_big_data_ref_sge(queue, ref_sge, tmp_buf, &mempool_info_ctx) != UMQ_SUCCESS) {
+            return UMQ_FAIL;
+        }
         tmp_buf = tmp_buf->qbuf_next;
         ref_sge = ref_sge + 1;
         idx++;
@@ -1945,6 +1947,34 @@ void umq_ub_dev_info_list_free_impl(umq_trans_mode_t umq_trans_mode, umq_dev_inf
     }
 }
 
+static umq_tp_mode_t umq_tp_mode_convert(urma_transport_mode_t tp_mode)
+{
+    switch (tp_mode) {
+        case URMA_TM_RC:
+            return UMQ_TM_RC;
+        case URMA_TM_RM:
+            return UMQ_TM_RM;
+        case URMA_TM_UM:
+            return UMQ_TM_UM;
+        default:
+            return UMQ_TM_RC;
+    };
+}
+
+static umq_tp_type_t umq_tp_type_convert(urma_tp_type_t tp_type)
+{
+    switch (tp_type) {
+        case URMA_RTP:
+            return UMQ_TP_TYPE_RTP;
+        case URMA_CTP:
+            return UMQ_TP_TYPE_CTP;
+        case URMA_UTP:
+            return UMQ_TP_TYPE_UTP;
+        default:
+            return UMQ_TP_TYPE_RTP;
+    };
+}
+
 int umq_ub_cfg_get_impl(uint64_t umqh_tp, umq_cfg_get_t *cfg)
 {
     if (cfg == NULL) {
@@ -1965,6 +1995,8 @@ int umq_ub_cfg_get_impl(uint64_t umqh_tp, umq_cfg_get_t *cfg)
     cfg->mode = queue->mode;
     cfg->state = queue->state;
     cfg->priority = queue->priority;
+    cfg->tp_mode = umq_tp_mode_convert(queue->tp_mode);
+    cfg->tp_type = umq_tp_type_convert(queue->tp_type);
     return UMQ_SUCCESS;
 }
 

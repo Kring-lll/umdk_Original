@@ -8,23 +8,16 @@
  * History: 2021-11-30   create file
  */
 
-#include <dirent.h>
-#include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 #include "admin_cmd.h"
 #include "admin_file_ops.h"
 #include "admin_log.h"
-#include "admin_parameters.h"
 
-#define MAX_CMDLINE_LEN 896 /* must less than MAX_LOG_LEN */
 static int admin_check_cmd_len(int argc, char *argv[])
 {
     uint32_t len = 0;
@@ -71,13 +64,8 @@ int main(int argc, char *argv[])
         .filename = argv[0],
     };
 
-    int ret;
-
-    if ((ret = admin_parse_args(&cfg)) != 0) {
-        goto fail;
-    }
-
-    if ((ret = admin_cmd_main(&cfg)) != 0) {
+    int ret = admin_cmd_main(&cfg);
+    if (ret != 0) {
         (void)printf("Failed to execute command.\n");
         URMA_ADMIN_LOG("Failed to execute command\n.");
         goto fail;

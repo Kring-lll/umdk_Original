@@ -13,6 +13,7 @@
 #include <stdio.h>
 
 #include "ub_list.h"
+#include "urma_private.h"
 #include "urma_types.h"
 #include "urma_types_str.h"
 
@@ -25,8 +26,15 @@
 
 static int cmd_show_usage(admin_config_t *cfg)
 {
-    printf("Usage: urma_admin show\n"
-           "       urma_admin show topo\n");
+    printf("Usage:"
+           "  urma_admin show [--dev <dev>] [--whole]  Show all URMA devices information\n"
+           "  urma_admin show topo                     Show topology of current node\n"
+           "  urma_admin show topo <node_id>           Show topology of specified node\n"
+           "\n"
+           "Options:\n"
+           "  <dev>      Device name (e.g., udma1)\n"
+           "  <node_id>  Node ID (e.g., 1)\n"
+           "  --whole    Show whole information of devices\n");
     return 0;
 }
 
@@ -73,15 +81,14 @@ static void admin_parse_priority_attr(const char *sysfs_path, admin_show_ubep_t 
     if (priority_path == NULL) {
         return;
     }
- 
     for (i = 0; i < URMA_MAX_PRIORITY_CNT; i++) {
         if (snprintf(priority_path, DEV_PATH_MAX - 1, "%s/priority/priority%u", sysfs_path, i) <= 0) {
             (void)printf("snprintf failed, path: %s, priority_num:%u.\n", sysfs_path, i);
             continue;
         }
- 
+
         struct urma_sl_info *priority_attr = &(ubep->dev_attr.dev_cap.priority_info[i]);
- 
+
         (void)admin_parse_file_value_u32(priority_path, "sl", (uint32_t *)&priority_attr->SL);
         (void)admin_parse_file_value_u32(priority_path, "tp_type", (uint32_t *)&priority_attr->tp_type.value);
     }
@@ -173,9 +180,7 @@ static int admin_parse_device_attr(const char *sysfs_path, admin_show_ubep_t *ub
 
     admin_parse_priority_attr(sysfs_path, ubep);
 
-    if (ubep->dev_attr.port_cnt > 0 && ubep->dev_attr.port_cnt != UINT8_INVALID) {
-        admin_parse_port_attr(sysfs_path, ubep);
-    }
+    admin_parse_port_attr(sysfs_path, ubep);
 
     if (has_bonding_dev_prefix(ubep->dev_name)) {
         ubep->dev_attr.port_attr[0].state = URMA_PORT_ACTIVE; /* bonding dev port 0 state is always active */
@@ -238,7 +243,7 @@ static void sort_ubep_list(struct ub_list *ubep_list)
     admin_show_ubep_t *ubep, *ubep_next;
     int flag = 0;
 
-    while (!flag) {
+    while (flag == 0) {
         flag = 1;
         if (ubep_list == NULL || ubep_list->next == NULL) {
             return;
@@ -338,7 +343,7 @@ static inline void print_device_feat_str(urma_device_feature_t feat)
 
     (void)printf("feature                    : 0x%x [", feat.value);
     for (i = 0; i < URMA_DEVICE_FEAT_NUM; i++) {
-        if (!!(feat.value & (1 << i))) {
+        if ((feat.value & (1 << i)) != 0) {
             (void)printf("%s ", urma_device_feat_to_string(i));
         }
     }
@@ -351,7 +356,7 @@ static inline void print_atomic_feat_str(urma_atomic_feature_t feat)
 
     (void)printf("atomic_feature             : 0x%x [", feat.value);
     for (i = 0; i < URMA_ATOMIC_FEAT_NUM; i++) {
-        if (!!(feat.value & (1 << i))) {
+        if ((feat.value & (1 << i)) != 0) {
             (void)printf("%s ", urma_atomic_feat_to_string(i));
         }
     }
@@ -365,7 +370,7 @@ static inline void print_congestion_ctrl_alg_str(uint16_t cc_alg)
 
     (void)printf("congestion_ctrl_alg        : 0x%x [", cc_alg);
     for (i = 0; i < sizeof(cc_alg) * urma_char_bits; i++) {
-        if (!!(cc_alg & (1 << i))) {
+        if ((cc_alg & (1 << i)) != 0) {
             (void)printf("%s ", urma_congestion_ctrl_alg_to_string(i));
         }
     }
@@ -375,13 +380,13 @@ static inline void print_congestion_ctrl_alg_str(uint16_t cc_alg)
 static void print_trans_mode_str(uint16_t trans_mode)
 {
     (void)printf("trans_mode                 : 0x%x [", (uint32_t)trans_mode);
-    if (!!(trans_mode & URMA_TM_RM)) {
+    if ((trans_mode & URMA_TM_RM) != 0) {
         (void)printf("%s ", urma_trans_mode_to_string(URMA_TM_RM));
     }
-    if (!!(trans_mode & URMA_TM_RC)) {
+    if ((trans_mode & URMA_TM_RC) != 0) {
         (void)printf("%s ", urma_trans_mode_to_string(URMA_TM_RC));
     }
-    if (!!(trans_mode & URMA_TM_UM)) {
+    if ((trans_mode & URMA_TM_UM) != 0) {
         (void)printf("%s ", urma_trans_mode_to_string(URMA_TM_UM));
     }
 
@@ -579,52 +584,83 @@ free_list:
     return ret;
 }
 
-int admin_get_device_info_by_eid(const urma_eid_t *eid, admin_device_info_t *device_info, 
-                                 struct ub_list *ubep_list)
+int admin_get_eid_list_by_eid(urma_eid_t *eid, urma_eid_info_t **eid_info_list, char *dev_name)
 {
     int ret = 0;
-    admin_show_ubep_t *ubep, *next;
-    admin_config_t cfg = {0};
-    cfg.specify_device = false;
-    admin_show_ubep_t *ubep_info = NULL;
+    int dev_fd = -1;
+    DIR *dir = NULL;
+    struct dirent *entry = NULL;
+    char dev_path[URMA_MAX_PATH] = {0};
+    urma_eid_info_t *tmp_eid_list = NULL;
+    uint32_t eid_cnt = 0;
+    bool found = false;
 
-    if (ub_list_is_empty(ubep_list)) {
-        ret = find_ubep_list(ubep_list, &cfg);
-        if (ret != 0) {
-            (void)printf("Failed to find ubep.\n");
-            return ret;
-        }
+    if (eid == NULL || dev_name == NULL || eid_info_list == NULL) {
+        printf("Invalid input parameters.\n");
+        return -1;
     }
 
-    UB_LIST_FOR_EACH_SAFE(ubep, next, node, ubep_list) {
-        if (ubep == NULL) {
-            break;
+    dir = opendir("/dev/uburma");
+    if (dir == NULL) {
+        printf("Failed to open /dev/uburma directory.\n");
+        return -1;
+    }
+
+    tmp_eid_list = (urma_eid_info_t *)calloc(1, URMA_MAX_EID_CNT * sizeof(urma_eid_info_t));
+    if (tmp_eid_list == NULL) {
+        printf("Failed to allocate memory for EID list.\n");
+        closedir(dir);
+        return -1;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
         }
-        for (uint32_t i = 0; i < ubep->dev_attr.dev_cap.max_eid_cnt; i++) {
-            if (is_eid_equal(&ubep->eid_list[i].eid, eid)) {
-                ubep_info = ubep;
+
+        if (snprintf(dev_path, URMA_MAX_PATH, "%s/%s", "/dev/uburma", entry->d_name) <= 0) {
+            printf("Failed to construct device path.\n");
+            continue;
+        }
+
+        dev_fd = urma_open_cdev(dev_path);
+        if (dev_fd < 0) {
+            printf("Failed to open device %s\n", entry->d_name);
+            continue;
+        }
+
+        ret = urma_cmd_get_eid_list(dev_fd, URMA_MAX_EID_CNT, tmp_eid_list, &eid_cnt);
+        if (ret != 0) {
+            printf("Device %s has no EID configured\n", entry->d_name);
+            close(dev_fd);
+            continue;
+        }
+
+        for (uint32_t i = 0; i < eid_cnt; i++) {
+            if (memcmp(&tmp_eid_list[i].eid, eid, sizeof(urma_eid_t)) == 0) {
+                found = true;
+                strncpy(dev_name, entry->d_name, URMA_MAX_NAME - 1);
+                dev_name[URMA_MAX_NAME - 1] = '\0';
+                *eid_info_list = tmp_eid_list;
                 break;
             }
         }
-    }
-    ret = (ubep_info != NULL) ? 0 : -1;
-    if (ret == 0) {
-        memcpy(device_info->dev_name, ubep_info->dev_name, sizeof(device_info->dev_name));
-        memcpy(device_info->net_dev_name, ubep_info->net_dev_name, sizeof(device_info->net_dev_name));
-        memcpy(&device_info->dev_attr, &ubep_info->dev_attr, sizeof(urma_device_attr_t));
-        memcpy(&device_info->tp_type, &ubep_info->tp_type, sizeof(urma_transport_type_t));
 
-        device_info->eid_list = calloc(1, ubep_info->dev_attr.dev_cap.max_eid_cnt * sizeof(urma_eid_info_t));
-        if (device_info->eid_list == NULL) {
-            (void)printf("Failed to malloc eid_list.\n");
-            ret = -1;
-        } else {
-            memcpy(device_info->eid_list, ubep_info->eid_list,
-                   ubep_info->dev_attr.dev_cap.max_eid_cnt * sizeof(urma_eid_info_t));
+        close(dev_fd);
+
+        if (found) {
+            break;
         }
     }
+    closedir(dir);
 
-    return ret;
+    if (!found) {
+        printf("EID not found.\n");
+        urma_free_eid_list(tmp_eid_list);
+        return -1;
+    }
+
+    return 0;
 }
 
 bool admin_is_eid_valid(const char *eid)
@@ -639,17 +675,19 @@ bool admin_is_eid_valid(const char *eid)
 
 static void urma_eid_to_ipv6_str(const urma_eid_t *eid, char *out, size_t out_len)
 {
-    uint16_t words[8];
+    uint8_t ipv6_addr_hex_count = 8, ipv6_min_compress_len = 2;
+    uint16_t words[ipv6_addr_hex_count];
     int i, zero_start = -1, zero_len = 0;
     int max_zero_start = -1, max_zero_len = 0;
 
     // 按2字节分组，转为16位整数（网络序）
-    for (i = 0; i < 8; ++i) {
-        words[i] = ((uint16_t)eid->raw[i * 2] << 8) | eid->raw[i * 2 + 1];
+    for (i = 0; i < ipv6_addr_hex_count; ++i) {
+        uint8_t offset = i * sizeof(uint16_t);
+        words[i] = ((uint16_t)eid->raw[offset] << 8) | eid->raw[offset + 1];
     }
 
     // 查找最长连续0区间
-    for (i = 0; i < 8; ++i) {
+    for (i = 0; i < ipv6_addr_hex_count; ++i) {
         if (words[i] == 0) {
             if (zero_start == -1) {
                 zero_start = i;
@@ -670,7 +708,7 @@ static void urma_eid_to_ipv6_str(const urma_eid_t *eid, char *out, size_t out_le
         max_zero_start = zero_start;
         max_zero_len = zero_len;
     }
-    if (max_zero_len < 2) { // 只缩写长度大于1的区间
+    if (max_zero_len < ipv6_min_compress_len) { // 只缩写长度大于1的区间
         max_zero_start = -1;
         max_zero_len = 0;
     }
@@ -678,37 +716,45 @@ static void urma_eid_to_ipv6_str(const urma_eid_t *eid, char *out, size_t out_le
     // 组装字符串
     char *ptr = out;
     size_t left = out_len;
-    int printed = 0;
-    for (i = 0; i < 8;) {
+    bool printed = false;
+    for (i = 0; i < ipv6_addr_hex_count;) {
+        int n = 0;
         if (i == max_zero_start) {
             if (!printed) {
-                snprintf(ptr, left, "::");
-                ptr += 2;
-                left -= 2;
+                n = snprintf(ptr, left, "::");
             } else {
-                snprintf(ptr, left, ":");
-                ptr += 1;
-                left -= 1;
+                n = snprintf(ptr, left, ":");
             }
+            if (n <= 0) {
+                printf("Failed convert eid to ipv6.\n");
+            }
+            ptr +=n;
+            left -= n;
             i += max_zero_len;
-            printed = 1;
+            printed = true;
             continue;
         }
         if (printed) {
-            snprintf(ptr, left, ":");
-            ptr += 1;
-            left -= 1;
+            n = snprintf(ptr, left, ":");
+            if (n <= 0) {
+                printf("Failed convert eid to ipv6.\n");
+            }
+            ptr += n;
+            left -= n;
         }
-        int n = snprintf(ptr, left, "%x", words[i]);
+        n = snprintf(ptr, left, "%x", words[i]);
+        if (n <= 0) {
+            printf("Failed convert eid to ipv6.\n");
+        }
         ptr += n;
         left -= n;
-        printed = 1;
+        printed = true;
         i++;
     }
     *ptr = '\0';
 }
 
-void admin_print_topo_map(tool_topo_map_t *topo_map, uint32_t node_id)
+static void admin_print_topo_map(tool_topo_map_t *topo_map, uint32_t node_id)
 {
     (void)printf("========================== topo map start =============================\n");
     tool_topo_info_t *cur_node_info = NULL;
@@ -738,29 +784,21 @@ void admin_print_topo_map(tool_topo_map_t *topo_map, uint32_t node_id)
         (void)printf("\n");
     }
     char eid_str[INET6_ADDRSTRLEN];
-    char dev_name[URMA_ADMIN_MAX_DEV_NAME];
     for (uint32_t agg_dev_idx = 0; agg_dev_idx < DEV_NUM; agg_dev_idx++) {
         tool_topo_agg_dev_t *agg_dev = &cur_node_info->agg_devs[agg_dev_idx];
         if (!admin_is_eid_valid(agg_dev->agg_eid)) {
             continue;
         }
         urma_eid_to_ipv6_str((urma_eid_t *)agg_dev->agg_eid, eid_str, sizeof(eid_str));
-        if (admin_get_device_name_by_eid((urma_eid_t *)agg_dev->agg_eid, dev_name, sizeof(dev_name)) == 0) {
-            (void)printf("Dev %d %s: %s\n", agg_dev_idx, dev_name, eid_str);
-        } else {
-            (void)printf("Dev %d: %s\n", agg_dev_idx, eid_str);
-        }
+        (void)printf("Dev %d: %s\n", agg_dev_idx, eid_str);
         for (uint32_t iodie_idx = 0; iodie_idx < IODIE_NUM; iodie_idx++) {
             tool_topo_ue_t *ue = &agg_dev->ues[iodie_idx];
             if (!admin_is_eid_valid(ue->primary_eid)) {
                 continue;
             }
             urma_eid_to_ipv6_str((urma_eid_t *)ue->primary_eid, eid_str, sizeof(eid_str));
-            if (admin_get_device_name_by_eid((urma_eid_t *)ue->primary_eid, dev_name, sizeof(dev_name)) == 0) {
-                (void)printf("\t UE %d %s:\n", iodie_idx, dev_name);
-            } else {
-                printf("\t UE %d:\n", iodie_idx);
-            }
+            
+            printf("\t UE %d:\n", iodie_idx);
             printf("\t\t Socket id: %d\n", ue->socket_id);
             printf("\t\t Entity id: %d\n", ue->entity_id);
             printf("\t\t Primary eid:\n");
@@ -785,7 +823,7 @@ static uint32_t get_cur_node_id(tool_topo_map_t *topo_map)
     uint32_t node_id = 0;
     for (uint32_t i = 0; i < topo_map->node_num; i++) {
         tool_topo_info_t *cur_node_info = topo_map->topo_infos + i;
-        if (cur_node_info->is_current) {
+        if (cur_node_info->is_current != 0) {
             node_id = cur_node_info->id;
             break;
         }
@@ -798,7 +836,7 @@ int admin_cmd_get_topo_info(tool_topo_map_t *topo_map)
 {
     int ret = 0;
     admin_core_cmd_topo_info_t *arg = NULL;
-    int node_num = MAX_NODE_NUM;
+    uint32_t node_num = MAX_NODE_NUM;
     // 获取每个cpu
     for (int i = 0; i < node_num; ++i) {
         arg = calloc(1, sizeof(admin_core_cmd_topo_info_t));

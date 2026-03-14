@@ -167,7 +167,7 @@ int umq_qbuf_pool_stats_to_str(const umq_qbuf_pool_stats_t *qbuf_pool_stats, cha
     // format qbuf pool statistics
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%s\n", UMQ_DFX_EQUALS);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR,
-        "%s\n", "                          Qbuf Pool Statistics\n");
+        "%s\n", "                          Qbuf Pool Statistics");
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%s\n", UMQ_DFX_EQUALS);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%-40s %-40s\n", "Type", "Value");
     
@@ -228,7 +228,7 @@ int umq_info_get(uint64_t umqh, umq_info_t *umq_info)
 
 int umq_info_to_str(const umq_info_t *umq_info, char *buf, int max_buf_len)
 {
-    if (umq_info == NULL || buf == NULL || max_buf_len <= 0) {
+    if (umq_info == NULL || umq_info->trans_mode >= UMQ_TRANS_MODE_MAX || buf == NULL || max_buf_len <= 0) {
         UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
         return -UMQ_ERR_EINVAL;
     }
@@ -249,7 +249,7 @@ int umq_info_to_str(const umq_info_t *umq_info, char *buf, int max_buf_len)
 
     // Format UMQ Info
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%s\n", UMQ_DFX_EQUALS);
-    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%s\n", "                               UMQ Info\n");
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%s\n", "                               UMQ Info");
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%s\n", UMQ_DFX_EQUALS);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%-40s %-40s\n", "Info", "Value");
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%s\n", UMQ_DFX_UNDERLINE);
@@ -304,7 +304,7 @@ int umq_stats_io_reset(uint64_t umqh)
 
 int umq_io_stats_to_str(const umq_packet_stats_t *packet_stats, char *buf, int max_buf_len)
 {
-    if (packet_stats == NULL || buf == NULL || max_buf_len == 0) {
+    if (packet_stats == NULL || buf == NULL || max_buf_len <= 0) {
         UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
         return -UMQ_ERR_EINVAL;
     }
@@ -356,7 +356,7 @@ int umq_stats_perf_stop(void)
     return umq_perf_stop();
 }
 
-int umq_stats_perf_to_string(umq_perf_stats_t *umq_perf_stats, char *buf, int max_buf_len)
+int umq_stats_perf_to_str(umq_perf_stats_t *umq_perf_stats, char *buf, int max_buf_len)
 {
     if (umq_perf_stats == NULL || buf == NULL || max_buf_len <= 0) {
         UMQ_VLOG_ERR(VLOG_UMQ, "parameters invalid");
