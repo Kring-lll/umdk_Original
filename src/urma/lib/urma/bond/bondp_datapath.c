@@ -819,8 +819,8 @@ static bdp_v_conn_t *get_v_conn_on_send(bjetty_ctx_t *bjetty_ctx, bondp_target_j
     bdp_v_conn_t *v_conn = bdp_v_conn_table_lookup(&bjetty_ctx->v_conn_table, vtjetty_id);
     if (!v_conn) {
         int ret = bdp_v_conn_table_add_on_send(&bjetty_ctx->v_conn_table, vtjetty_id,
-            bdp_tjetty, bdp_tjetty->target_dev_num, &v_conn);
-        if (ret != 0) {
+            bdp_tjetty, bdp_tjetty->target_dev_num, &v_conn, bjetty_ctx->bond_ctx->v_ctx.aggr_mode);
+        if (ret) {
             URMA_LOG_ERR("Failed to create v_conn for vjetty, ret: %d, "
                 "[" URMA_JETTY_ID_FMT " -> " URMA_JETTY_ID_FMT "]\n",
                 ret, URMA_JETTY_ID_ARGS(comp_jetty_id), URMA_JETTY_ID_ARGS(vtjetty_id));
@@ -1731,8 +1731,7 @@ static bondp_cr_handler_ret_t handle_recv(bjetty_ctx_t *bjetty_ctx, urma_cr_t *c
     }
     v_conn = bdp_v_conn_table_lookup(&bjetty_ctx->v_conn_table, &target_jetty_id);
     if (!v_conn) {
-        ret = bdp_v_conn_table_add_on_recv(&bjetty_ctx->v_conn_table, &target_jetty_id, &v_conn);
-        if (ret != 0) {
+        if (bdp_v_conn_table_add_on_recv(&bjetty_ctx->v_conn_table, &target_jetty_id, &v_conn, bjetty_ctx->bond_ctx->v_ctx.aggr_mode)) {
             /* get_comp_urma_jetty_id will return a non-null value,
                because we check bjetty_ctx->bdp_comp type at the entrance of this function. */
             urma_jetty_id_t *jfr_jetty_id = get_comp_urma_jetty_id(bjetty_ctx->bdp_comp);
