@@ -179,10 +179,10 @@ public:
         auto tileShape = MakeCoord(tileRow, tileColumn);
         EpilogueTileSwizzle epilogueTileSwizzle(actualBlockShape, tileShape);
         uint32_t tileLoops = epilogueTileSwizzle.GetLoops();
-        // uint32_t subblockIdx = AscendC::GetSubBlockIdx();
-        // uint32_t subblockNum = AscendC::GetSubBlockNum();
-        uint32_t subblockIdx = 0;
-        uint32_t subblockNum = 1;
+        uint32_t subblockIdx = AscendC::GetSubBlockIdx();
+        uint32_t subblockNum = AscendC::GetSubBlockNum();
+        // uint32_t subblockIdx = 0;
+        // uint32_t subblockNum = 1;
         for (uint32_t loopIdx = subblockIdx; loopIdx < tileLoops; loopIdx += subblockNum) {
             auto tileCoord = epilogueTileSwizzle.GetTileCoord(loopIdx);
             auto actualTileShape = epilogueTileSwizzle.GetActualTileShape(tileCoord);
@@ -316,7 +316,11 @@ __aicore__ inline static void EncreaseSyncFlag(__gm__ uint8_t *flagAddr, uint8_t
     // flag++, like set flag
     AscendC::PipeBarrier<PIPE_ALL>();
     AscendC::GlobalTensor<uint8_t> global;
-    global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE);
+    if constexpr (g_coreType == AscendC::AIV) {
+        global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE + AscendC::GetSubBlockIdx() * (SOFT_SYNC_SPACE_SIZE / SUB_AIV_NUM));
+    } else {
+        global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE);
+    }
     __asm__ __volatile__("");
     AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(
         global);
@@ -335,19 +339,52 @@ __aicore__ inline static void CheckSyncFlag(__gm__ uint8_t *flagAddr, uint8_t id
     //  check flag, like wait flag
     AscendC::PipeBarrier<PIPE_ALL>();
     AscendC::GlobalTensor<uint8_t> global;
-    global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE);
-    while (true) {
-        __asm__ __volatile__("");
-        AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
-                                          AscendC::DcciDst::CACHELINE_OUT>(global);
-        __asm__ __volatile__("");
-        uint8_t value = global.GetValue(0);
-        if (value >= target) {
+    if constexpr (g_coreType == AscendC::AIV) {
+        global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE);
+        while (true) {
             __asm__ __volatile__("");
             AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
-                                              AscendC::DcciDst::CACHELINE_OUT>(global);
+                                            AscendC::DcciDst::CACHELINE_OUT>(global);
             __asm__ __volatile__("");
-            break;
+            uint8_t value = global.GetValue(0);
+            if (value >= target) {
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                AscendC::DcciDst::CACHELINE_OUT>(global);
+                __asm__ __volatile__("");
+                break;
+            }
+        }
+    } else {
+        global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE);
+        while (true) {
+            __asm__ __volatile__("");
+            AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                            AscendC::DcciDst::CACHELINE_OUT>(global);
+            __asm__ __volatile__("");
+            uint8_t value = global.GetValue(0);
+            if (value >= target) {
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                AscendC::DcciDst::CACHELINE_OUT>(global);
+                __asm__ __volatile__("");
+                break;
+            }
+        }
+        global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE + 1 * (SOFT_SYNC_SPACE_SIZE / SUB_AIV_NUM));
+        while (true) {
+            __asm__ __volatile__("");
+            AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                            AscendC::DcciDst::CACHELINE_OUT>(global);
+            __asm__ __volatile__("");
+            uint8_t value = global.GetValue(0);
+            if (value >= target) {
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                AscendC::DcciDst::CACHELINE_OUT>(global);
+                __asm__ __volatile__("");
+                break;
+            }
         }
     }
     AscendC::PipeBarrier<PIPE_ALL>();
@@ -1625,20 +1662,21 @@ public:
                         static_cast<uint8_t>(compCoreNum + compCoreIdx), target); // AIV等待的信号在24~28
                     target += 1;
                     blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
-                    Arch::CrossCoreFlag doubleSwigluFlag{9};
-                    if (AscendC::GetSubBlockIdx() == 1) {
-                        Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
-                        Arch::CrossCorWaitFlag(doubleSwigluFlag);
-                    } else {
-                        Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
-                        Arch::CrossCorWaitFlag(doubleSwigluFlag);
-                        EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
-                    }
+                    // Arch::CrossCoreFlag doubleSwigluFlag{9};
+                    // if (AscendC::GetSubBlockIdx() == 1) {
+                    //     Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
+                    //     Arch::CrossCorWaitFlag(doubleSwigluFlag);
+                    // } else {
+                    //     Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
+                    //     Arch::CrossCorWaitFlag(doubleSwigluFlag);
+                    //     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
+                    // }
+                    EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
                 }
                 startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
                 AscendC::PipeBarrier<PIPE_ALL>();
-                if (AscendC::GetSubBlockIdx() == 1) {
+                // if (AscendC::GetSubBlockIdx() == 1) {
                     AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(0);
                     tmpLocalTensor.SetValue(CV_FLAG_INDEX, vToCFlag);
                     AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
@@ -1649,7 +1687,7 @@ public:
                     AscendC::DataCopy(swigluStateTensor, tmpLocalTensor, INT32_COUNT_PER_BLOCK);
                     AscendC::SetAtomicNone();
                     AscendC::PipeBarrier<PIPE_ALL>();
-                }
+                // }
             }
 #endif
             gmScaleListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(gmScale));
@@ -1711,15 +1749,16 @@ public:
                         static_cast<uint8_t>(compCoreNum + compCoreIdx), target);
                     target += 1;
                     blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC, false);
-                    Arch::CrossCoreFlag doubleSwigluFlag{9};
-                    if (AscendC::GetSubBlockIdx() == 1) {
-                        Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
-                        Arch::CrossCorWaitFlag(doubleSwigluFlag);
-                    } else {
-                        Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
-                        Arch::CrossCorWaitFlag(doubleSwigluFlag);
-                        EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
-                    }
+                    // Arch::CrossCoreFlag doubleSwigluFlag{9};
+                    // if (AscendC::GetSubBlockIdx() == 1) {
+                    //     Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
+                    //     Arch::CrossCorWaitFlag(doubleSwigluFlag);
+                    // } else {
+                    //     Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
+                    //     Arch::CrossCorWaitFlag(doubleSwigluFlag);
+                    //     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
+                    // }
+                    EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
                 }
 
@@ -1731,7 +1770,7 @@ public:
 
                 startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
                 AscendC::PipeBarrier<PIPE_ALL>();
-                if (AscendC::GetSubBlockIdx() == 0) {
+                // if (AscendC::GetSubBlockIdx() == 0) {
                     AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(0);
                     tmpLocalTensor.SetValue(CV_FLAG_INDEX, vToCFlag);
                     AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
@@ -1743,7 +1782,7 @@ public:
                     AscendC::DataCopy(swigluStateTensor, tmpLocalTensor, INT32_COUNT_PER_BLOCK);
                     AscendC::SetAtomicNone();
                     AscendC::PipeBarrier<PIPE_ALL>();
-                }
+                // }
             }
         }
         // clean
@@ -2015,7 +2054,7 @@ public:
                 params.layoutPerTokenScale);
         }
 
-        if (isSendCore) {
+        if (isCompCore) {
             uint32_t startCoreIdx = 0;
             uint32_t coreNumPerGroup = recvCoreNum / localExpertNum;
             int64_t gmSwigluOutputOffset = 0;
@@ -2049,7 +2088,7 @@ public:
                     AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
                                                     AscendC::DcciDst::CACHELINE_OUT>(expertStateTensor);
                     __asm__ __volatile__("");
-                    if (expertStateTensor.GetValue(0) == recvCoreNum * vToCFlag) {
+                    if (expertStateTensor.GetValue(0) == aivNum * vToCFlag) {
                         break;
                     }
                 }
@@ -2072,15 +2111,15 @@ public:
                     sendCountsGlobal.SetGlobalBuffer((__gm__ int32_t *)
                                                             (statusDataSpaceGm + GROUP_TOKEN_NUM_OFFSET) +
                                                             groupIdx * GROUP_INFO_SIZE);
-                    while (true) {
-                        __asm__ __volatile__("");
-                        AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
-                                                        AscendC::DcciDst::CACHELINE_OUT>(sendCountsGlobal);
-                        __asm__ __volatile__("");
-                        if (sendCountsGlobal.GetValue(0) == coreNumPerGroup * vToCFlag) {
-                            break;
-                        }
-                    }
+                    // while (true) {
+                    //     __asm__ __volatile__("");
+                    //     AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                    //                                     AscendC::DcciDst::CACHELINE_OUT>(sendCountsGlobal);
+                    //     __asm__ __volatile__("");
+                    //     if (sendCountsGlobal.GetValue(0) == coreNumPerGroup * vToCFlag) {
+                    //         break;
+                    //     }
+                    // }
                     uint32_t currentM = sendCountsGlobal.GetValue(GROUP_TOKEN_COUNT);
                     AscendC::PipeBarrier<PIPE_ALL>();
                     uint32_t n = params.problemShape.n();
@@ -2107,7 +2146,7 @@ public:
                         AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
                                                         AscendC::DcciDst::CACHELINE_OUT>(expertStateTensor);
                         __asm__ __volatile__("");
-                        if (expertStateTensor.GetValue(0) == recvCoreNum * vToCFlag) {
+                        if (expertStateTensor.GetValue(0) == aivNum * vToCFlag) {
                             break;
                         }
                     }
