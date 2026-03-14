@@ -15,8 +15,9 @@
 
 #include "urpc_thread_closure.h"
 
-#define QBUF_POOL_TLS_MAX (2048)     // max count of thread local buffer storage
-#define QBUF_POOL_BATCH_CNT (512)    // batch size when fetch from global or return to global
+#define QBUF_POOL_TLS_MAX (2048)    // max count of thread local buffer storage
+#define QBUF_POOL_BATCH_SIZE (512)    // batch size when fetch from global or return to global
+
 
 typedef struct local_qbuf_pool {
     bool inited;
@@ -33,6 +34,9 @@ typedef struct qbuf_pool {
     uint32_t block_size;        // headroom size + data size以8K为大小向上取整，如果是combine模式还包括umq_qbuf_t结构体大小
     uint32_t headroom_size;     // 预留的头部空间大小
     uint32_t data_size;
+
+    uint32_t tls_buf_capacity; // remaining size after return to global pool
+    uint32_t tls_alloc_batch_size; // batch size when fetch from global pool
 
     uint64_t total_block_num;
     umq_buf_mode_t mode;
@@ -221,6 +225,10 @@ int umq_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
     g_qbuf_pool.headroom_size = cfg->headroom_size;
     g_qbuf_pool.data_size = cfg->data_size;
 
+    g_qbuf_pool.tls_buf_capacity = cfg->tls_buf_capacity == 0 ? QBUF_POOL_TLS_MAX : cfg->tls_buf_capacity;
+    g_qbuf_pool.tls_alloc_batch_size = cfg->tls_alloc_batch_size == 0 ?
+        QBUF_POOL_BATCH_SIZE : cfg->tls_alloc_batch_size;
+
     if (cfg->mode == UMQ_BUF_SPLIT) {
         uint32_t blk_size = umq_buf_size_small();
         uint64_t blk_num = cfg->total_size /
@@ -343,7 +351,7 @@ int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *opti
         }
 
         while (local_pool->buf_cnt_without_data < num) {
-            ret = fetch_from_global(&g_qbuf_pool.block_pool, local_pool, false, QBUF_POOL_BATCH_CNT);
+            ret = fetch_from_global(&g_qbuf_pool.block_pool, local_pool, false, g_qbuf_pool.tls_alloc_batch_size);
             if (ret <= 0) {
                 UMQ_VLOG_ERR(VLOG_UMQ, "fetch from global failed, current size: %u, alloc num: %u, status: %d\n",
                     local_pool->buf_cnt_without_data, num, ret);
@@ -357,7 +365,7 @@ int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *opti
     }
 
     while (local_pool->buf_cnt_with_data < param.actual_buf_count) {
-        ret = fetch_from_global(&g_qbuf_pool.block_pool, local_pool, true, QBUF_POOL_BATCH_CNT);
+        ret = fetch_from_global(&g_qbuf_pool.block_pool, local_pool, true, g_qbuf_pool.tls_alloc_batch_size);
         if (ret <= 0) {
             UMQ_VLOG_ERR(VLOG_UMQ, "fetch from global failed, current size: %u, alloc num: %u, status: %d\n",
                 local_pool->buf_cnt_with_data, param.actual_buf_count, ret);
@@ -387,9 +395,9 @@ void umq_qbuf_free(umq_buf_list_t *list)
         uint32_t cnt = release_batch(list, &local_pool->head_without_data, false);
         local_pool->buf_cnt_without_data += cnt;
 
-        // if local list node count reaches QBUF_POOL_TLS_MAX + QBUF_POOL_BATCH_CNT, return some nodes to global
-        if (local_pool->buf_cnt_without_data >= QBUF_POOL_TLS_MAX + QBUF_POOL_BATCH_CNT) {
-            return_to_global(&g_qbuf_pool.block_pool, local_pool, false, QBUF_POOL_TLS_MAX);
+        // if local list node count reaches tls_buf_capacity + tls_alloc_batch_size, return some nodes to global
+        if (local_pool->buf_cnt_without_data >= g_qbuf_pool.tls_buf_capacity + g_qbuf_pool.tls_alloc_batch_size) {
+            return_to_global(&g_qbuf_pool.block_pool, local_pool, false, g_qbuf_pool.tls_buf_capacity);
         }
 
         return;
@@ -398,9 +406,9 @@ void umq_qbuf_free(umq_buf_list_t *list)
     uint32_t cnt = release_batch(list, &local_pool->head_with_data, false);
     local_pool->buf_cnt_with_data += cnt;
 
-    // if local list node count reaches QBUF_POOL_TLS_MAX + QBUF_POOL_BATCH_CNT, return some nodes to global
-    if (local_pool->buf_cnt_with_data > QBUF_POOL_TLS_MAX + QBUF_POOL_BATCH_CNT) {
-        return_to_global(&g_qbuf_pool.block_pool, local_pool, true, QBUF_POOL_TLS_MAX);
+    // if local list node count reaches tls_buf_capacity + tls_alloc_batch_size, return some nodes to global
+    if (local_pool->buf_cnt_with_data > g_qbuf_pool.tls_buf_capacity + g_qbuf_pool.tls_alloc_batch_size) {
+        return_to_global(&g_qbuf_pool.block_pool, local_pool, true, g_qbuf_pool.tls_buf_capacity);
     }
 }
 
