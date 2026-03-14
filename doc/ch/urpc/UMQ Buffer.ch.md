@@ -25,7 +25,6 @@ UMQ Buffer使用时主要涉及两个内存实体概念
 * `token_value`: UMQ内部使用的token value。
 * `status`: 当消息元数据被用户使用于数据面之后，如果出现异常则会将异常的Buffer返回给用户，并且将异常对应的错误码置于`status`字段以告知用户具体错误。
 * `io_direction`：用于指明当前Buffer将用于什么IO方向，如发送方向（TX）或者接收方向（RX）等。
-* `need_import`：UMQ内部标记，主要用于扩容时注册内存逻辑的快速触发，用户正常使用时无需感知此字段。
 * `buf_data`：指向实际消息载荷的地址。
 * `qbuf_ext`：扩展数据，对应`umq_buf_pro_t`或者`struct umq_buf_pro`定义。主要是用于内存在数据面接口使用时的参数配置，定义可以参考[umq_pro_types.h](../../../src/urpc/include/umq/umq_pro_types.h)。
 * `data`：combine模式的消息载荷起始地址，因为combine模式下消息元数据和消息载荷是连续的内存。
