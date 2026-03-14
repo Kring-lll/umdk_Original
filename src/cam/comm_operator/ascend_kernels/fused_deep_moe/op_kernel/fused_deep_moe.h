@@ -380,16 +380,11 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     topK_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.k;
     maxBs_ = globalBs_ / epRankSize_;
 
-    bool isShareExpert = (epRankId_ < sharedExpertRankNum_);
-    if (isShareExpert) {
-        maxTokenNum_ = maxBs_ * epRankSize_ / sharedExpertRankNum_;
-    } else {
-        maxTokenNum_ = maxBs_ * epRankSize_ * (topK_ < moeExpertNumPerRank_ ? topK_ : moeExpertNumPerRank_);
-    }
+    maxTokenNum_ = maxBs_ * epRankSize_ * (topK_ < moeExpertNumPerRank_ ? topK_ : moeExpertNumPerRank_);
     shareGmm1OutputDim_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.shareGmm1HLen;
     gmm1OutputDim_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
     tokenHiddenSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.h;
-    groupCount_ = isShareExpert ? 1 : tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
+    groupCount_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     gmm2OutputDim_ = tokenHiddenSize_;
     shareGmm2InputDim_ = shareGmm1OutputDim_ / 2;
     gmm2InputDim_ = gmm1OutputDim_ / 2;
