@@ -1625,21 +1625,31 @@ public:
                         static_cast<uint8_t>(compCoreNum + compCoreIdx), target); // AIV等待的信号在24~28
                     target += 1;
                     blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
-                    EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
+                    Arch::CrossCoreFlag doubleSwigluFlag{9};
+                    if (AscendC::GetSubBlockIdx() == 1) {
+                        Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
+                        Arch::CrossCorWaitFlag(doubleSwigluFlag);
+                    } else {
+                        Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
+                        Arch::CrossCorWaitFlag(doubleSwigluFlag);
+                        EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
+                    }
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
                 }
                 startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
                 AscendC::PipeBarrier<PIPE_ALL>();
-                AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(0);
-                tmpLocalTensor.SetValue(CV_FLAG_INDEX, vToCFlag);
-                AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
-                AscendC::GlobalTensor<int32_t> swigluStateTensor;
-                swigluStateTensor.SetGlobalBuffer((__gm__ int32_t *)(statusDataSpaceGm + SEND_RECV_SYNC_OFFSET));
-                AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
-                AscendC::SetAtomicAdd<int32_t>();
-                AscendC::DataCopy(swigluStateTensor, tmpLocalTensor, INT32_COUNT_PER_BLOCK);
-                AscendC::SetAtomicNone();
-                AscendC::PipeBarrier<PIPE_ALL>();
+                if (AscendC::GetSubBlockIdx() == 1) {
+                    AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(0);
+                    tmpLocalTensor.SetValue(CV_FLAG_INDEX, vToCFlag);
+                    AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
+                    AscendC::GlobalTensor<int32_t> swigluStateTensor;
+                    swigluStateTensor.SetGlobalBuffer((__gm__ int32_t *)(statusDataSpaceGm + SEND_RECV_SYNC_OFFSET));
+                    AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
+                    AscendC::SetAtomicAdd<int32_t>();
+                    AscendC::DataCopy(swigluStateTensor, tmpLocalTensor, INT32_COUNT_PER_BLOCK);
+                    AscendC::SetAtomicNone();
+                    AscendC::PipeBarrier<PIPE_ALL>();
+                }
             }
 #endif
             gmScaleListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(gmScale));
@@ -1701,7 +1711,15 @@ public:
                         static_cast<uint8_t>(compCoreNum + compCoreIdx), target);
                     target += 1;
                     blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC, false);
-                    EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
+                    Arch::CrossCoreFlag doubleSwigluFlag{9};
+                    if (AscendC::GetSubBlockIdx() == 1) {
+                        Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
+                        Arch::CrossCorWaitFlag(doubleSwigluFlag);
+                    } else {
+                        Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
+                        Arch::CrossCorWaitFlag(doubleSwigluFlag);
+                        EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
+                    }
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
                 }
 
@@ -1713,17 +1731,19 @@ public:
 
                 startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
                 AscendC::PipeBarrier<PIPE_ALL>();
-                AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(0);
-                tmpLocalTensor.SetValue(CV_FLAG_INDEX, vToCFlag);
-                AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
-                AscendC::GlobalTensor<int32_t> swigluStateTensor;
-                swigluStateTensor.SetGlobalBuffer(
-                    (__gm__ int32_t *)(statusDataSpaceGm + SEND_RECV_SYNC_OFFSET + (groupIdx + 1) * SOFT_SYNC_SPACE_SIZE));
-                AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
-                AscendC::SetAtomicAdd<int32_t>();
-                AscendC::DataCopy(swigluStateTensor, tmpLocalTensor, INT32_COUNT_PER_BLOCK);
-                AscendC::SetAtomicNone();
-                AscendC::PipeBarrier<PIPE_ALL>();
+                if (AscendC::GetSubBlockIdx() == 0) {
+                    AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(0);
+                    tmpLocalTensor.SetValue(CV_FLAG_INDEX, vToCFlag);
+                    AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
+                    AscendC::GlobalTensor<int32_t> swigluStateTensor;
+                    swigluStateTensor.SetGlobalBuffer(
+                        (__gm__ int32_t *)(statusDataSpaceGm + SEND_RECV_SYNC_OFFSET + (groupIdx + 1) * SOFT_SYNC_SPACE_SIZE));
+                    AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
+                    AscendC::SetAtomicAdd<int32_t>();
+                    AscendC::DataCopy(swigluStateTensor, tmpLocalTensor, INT32_COUNT_PER_BLOCK);
+                    AscendC::SetAtomicNone();
+                    AscendC::PipeBarrier<PIPE_ALL>();
+                }
             }
         }
         // clean
@@ -1751,7 +1771,7 @@ public:
         aiCoreGroupIdx = aivIdx / subBlockNum;
         aivStateGlobalCoreIdx = aivNum + aicNum + aivIdx;
 
-        isCompCore = (aivIdx % subBlockNum) == 0;
+        isCompCore = true;
         compCoreNum = aiCoreGroupNum;
         compCoreIdx = aiCoreGroupIdx;
         // when localExpertNum=1, all cores send token and recv token in sequence
