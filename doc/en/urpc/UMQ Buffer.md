@@ -27,7 +27,6 @@ The definition of message metadata can be referenced in [umq_types.h](../../../s
 * `token_value`: Internal UMQ token value for tracking.
 * `status`: Error code returned to users upon data-plane failures.
 * `io_direction`: Specifies I/O direction (e.g., TX for transmit, RX for receive).
-* `need_import`: Internal flag for memory registration during expansion (transparent to users).
 * `buf_data`: Pointer to the actual payload.
 * `qbuf_ext`: Extended configuration (`umq_buf_pro_t`/`struct umq_buf_pro`) for data-plane operations. Defined in [umq_pro_types.h](../../../src/urpc/include/umq/umq_pro_types.h).
 * `data`: Start address of the payload in combine mode (metadata and payload are contiguous).
