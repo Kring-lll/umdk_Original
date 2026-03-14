@@ -201,6 +201,42 @@ typedef struct umq_perf_stats_cfg {
     uint32_t thresh_num; // number of valid quantiles
 } umq_perf_stats_cfg_t;
 
+typedef enum umq_ub_perf_type {
+    UMQ_UB_PERF_POST_JETTY_SEND_WR,
+    UMQ_UB_PERF_POST_JFS_WR,
+    UMQ_UB_PERF_POST_JETTY_RECV_WR,
+    UMQ_UB_PERF_POST_JFR_WR,
+    UMQ_UB_PERF_POLL_JFC,
+    UMQ_UB_PERF_WAIT_JFC,
+    UMQ_UB_PERF_RECORD_TYPE_MAX,
+} umq_ub_perf_record_type_t;
+
+typedef struct umq_tp_perf_stats {
+    umq_trans_mode_t trans_mode;
+    union {
+        struct {
+            umq_ub_perf_record_type_t type;
+            uint64_t sample_num;
+            uint64_t average;
+            uint64_t mininum;
+            uint64_t maxinum;
+            uint64_t median;
+            uint64_t p90;
+            uint64_t p99;
+        } ub_type_record[UMQ_UB_PERF_RECORD_TYPE_MAX];
+    };
+} umq_tp_perf_stats_t;
+
+typedef struct umq_tp_perf_cfg {
+    umq_trans_mode_t trans_mode;
+    union {
+        struct {
+            uint64_t thresh_array[8]; /* quantile values list */
+            uint32_t thresh_num; /* number of valid quantile values */
+        } ub_perf_attr;
+    };
+} umq_tp_perf_stats_cfg_t;
+
 #ifdef __cplusplus
 }
 #endif
