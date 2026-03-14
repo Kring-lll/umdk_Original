@@ -1665,10 +1665,10 @@ public:
                     // Arch::CrossCoreFlag doubleSwigluFlag{9};
                     // if (AscendC::GetSubBlockIdx() == 1) {
                     //     Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
-                    //     Arch::CrossCorWaitFlag(doubleSwigluFlag);
+                    //     Arch::CrossCoreWaitFlag(doubleSwigluFlag);
                     // } else {
                     //     Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
-                    //     Arch::CrossCorWaitFlag(doubleSwigluFlag);
+                    //     Arch::CrossCoreWaitFlag(doubleSwigluFlag);
                     //     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
                     // }
                     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
@@ -1676,7 +1676,7 @@ public:
                 }
                 startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
                 AscendC::PipeBarrier<PIPE_ALL>();
-                // if (AscendC::GetSubBlockIdx() == 1) {
+                // if (AscendC::GetSubBlockIdx() == 0) {
                     AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(0);
                     tmpLocalTensor.SetValue(CV_FLAG_INDEX, vToCFlag);
                     AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
@@ -1752,10 +1752,10 @@ public:
                     // Arch::CrossCoreFlag doubleSwigluFlag{9};
                     // if (AscendC::GetSubBlockIdx() == 1) {
                     //     Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
-                    //     Arch::CrossCorWaitFlag(doubleSwigluFlag);
+                    //     Arch::CrossCoreWaitFlag(doubleSwigluFlag);
                     // } else {
                     //     Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
-                    //     Arch::CrossCorWaitFlag(doubleSwigluFlag);
+                    //     Arch::CrossCoreWaitFlag(doubleSwigluFlag);
                     //     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
                     // }
                     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
