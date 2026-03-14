@@ -914,24 +914,26 @@ static int umq_ub_flush_sqe(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_cou
     return cnt;
 }
 
+static void umq_ub_umq_status_get(ub_queue_t *queue)
+{
+    umq_ub_fc_info_t *fc_info = (umq_ub_fc_info_t *)(uintptr_t)(umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL));
+    if (fc_info->fc.remote_rx_depth == UMQ_UB_FLOW_CONTORL_JETTY_DEPTH) {
+        UMQ_VLOG_INFO(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq ub flow control ready\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id);
+        queue->state = QUEUE_STATE_READY;
+        (void)umq_ub_shared_credit_req_send(queue);
+    } else {
+        queue->interrupt_ctx.tx_fc_interrupt = true;
+    }
+}
+
 static void umq_ub_fc_process_tx(ub_queue_t *queue, umq_ub_fc_user_ctx_t *obj)
 {
     uint32_t type = obj->bs.type;
-    umq_ub_fc_info_t *fc_info = NULL;
     switch (type) {
         case IMM_TYPE_FC_CREDIT_INIT:
-            // window read ok
-            fc_info = (umq_ub_fc_info_t *)(uintptr_t)(umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL));
-            if (fc_info->fc.remote_rx_depth != UMQ_UB_FLOW_CONTORL_JETTY_DEPTH) {
-                queue->flow_control.remote_get = false;
-                umq_ub_window_read(&queue->flow_control, queue);
-            } else {
-                UMQ_VLOG_DEBUG(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq ub flow control ready\n",
-                    EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
-                    queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id);
-                (void)umq_ub_shared_credit_req_send(queue);
-                queue->state = QUEUE_STATE_READY;
-            }
+            UMQ_VLOG_INFO(VLOG_UMQ, "write ok\n");
             break;
         default:
             break;
@@ -1004,6 +1006,10 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue)
         }
         success_cnt++;
         umq_ub_fc_process_tx(queue, &obj);
+    }
+
+    if (queue->state < QUEUE_STATE_READY) {
+        umq_ub_umq_status_get(queue);
     }
 
     if (success_cnt > 0) {
