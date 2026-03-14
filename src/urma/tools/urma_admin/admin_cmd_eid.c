@@ -9,7 +9,9 @@
  */
 
 #include <netlink/genl/genl.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <errno.h>
 #include <unistd.h>
 
 #include "admin_netlink.h"
@@ -40,6 +42,9 @@ int admin_nl_set_eid_ns(const char *dev_name, uint32_t eid_idx, int ns_fd)
     struct nl_msg *msg = admin_nl_alloc_msg(URMA_CORE_SET_DEV_EID_NS, 0);
     if (msg == NULL) {
         return -ENOMEM;
+    }
+    if (eid_idx > UINT16_MAX) {
+        return -EINVAL;
     }
 
     admin_nl_put_string(msg, UBCORE_ATTR_DEV_NAME, dev_name);
