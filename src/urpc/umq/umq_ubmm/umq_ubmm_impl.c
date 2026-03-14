@@ -158,6 +158,9 @@ uint8_t *umq_ubmm_ctx_init_impl(umq_init_cfg_t *cfg)
         .data_size = umq_buf_size_small(),
         .headroom_size = cfg->headroom_size,
         .mode = cfg->buf_mode,
+        .tls_buf_capacity = cfg->tls_buf_capacity,
+        .tls_alloc_batch_size = cfg->tls_alloc_batch_size,
+        .tls_free_batch_size = cfg->tls_free_batch_size,
     };
     ret = umq_qbuf_pool_init(&qbuf_cfg);
     if (ret != UMQ_SUCCESS && ret != -UMQ_ERR_EEXIST) {
