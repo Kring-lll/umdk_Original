@@ -122,8 +122,8 @@ int32_t umq_ub_huge_qbuf_pool_init(umq_init_cfg_t *cfg)
     int ret = 0;
     uint32_t i = 0;
     huge_qbuf_pool_cfg_t pool_cfg = {
-        .headroom_size = cfg->headroom_size,
-        .mode = cfg->buf_mode,
+        .headroom_size = cfg->buf_pool_cfg.headroom_size,
+        .mode = cfg->buf_pool_cfg.buf_mode,
         .memory_init_callback = huge_qbuf_pool_memory_init,
         .memory_uninit_callback = huge_qbuf_pool_memory_uninit,
     };
@@ -636,7 +636,7 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
         ++g_ub_ctx_count;
     }
 
-    if (umq_io_buf_malloc(cfg->buf_mode, total_io_buf_size) == NULL) {
+    if (umq_io_buf_malloc(cfg->buf_pool_cfg.buf_mode, total_io_buf_size) == NULL) {
         goto ROLLBACK_UB_CTX;
     }
 
@@ -644,8 +644,10 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
         .buf_addr = umq_io_buf_addr(),
         .total_size = umq_io_buf_size(),
         .data_size = umq_buf_size_small(),
-        .headroom_size = cfg->headroom_size,
-        .mode = cfg->buf_mode,
+        .headroom_size = cfg->buf_pool_cfg.headroom_size,
+        .mode = cfg->buf_pool_cfg.buf_mode,
+        .tls_buf_capacity = cfg->buf_pool_cfg.tls_buf_capacity,
+        .tls_alloc_batch_size = cfg->buf_pool_cfg.tls_alloc_batch_size,
     };
     ret = umq_qbuf_pool_init(&qbuf_cfg);
     if (ret != UMQ_SUCCESS && ret != -UMQ_ERR_EEXIST) {
