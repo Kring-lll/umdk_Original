@@ -32,6 +32,8 @@
 - cna：使用方导入内存的UB控制器的CNA地址，仅UMQ_TRANS_MODE_UBMM和UMQ_TRANS_MODE_UBMM_PLUS模式有效
 - ubmm_eid: 用方导入内存的UB控制器的EID，仅UMQ_TRANS_MODE_UBMM和UMQ_TRANS_MODE_UBMM_PLUS模式有效
 - trans_info：数据面传输设备信息，用于初始化对应得设备
+- tls_buf_capacity: 向全局池归还后的剩余大小，默认2k
+- tls_alloc_batch_size：从全局内存池中每次分配qbuf的数量，默认512
 
 ### 说明
 1.当应用在UB模式下配置UMQ_FEATURE_ENABLE_TOKEN_POLICY参数时，将使能UB token校验能力，umq_bind_info中会携带UB token信息，如果应用需要安全传输该信息，请使用安全通道（如TLS等）交换umq_bind_info。

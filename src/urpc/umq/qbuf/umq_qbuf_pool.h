@@ -43,6 +43,8 @@ typedef struct qbuf_pool_cfg {
     uint32_t data_size;         // size of one data slab
     uint32_t headroom_size;     // reserve head room size
     umq_buf_mode_t mode;
+    uint32_t tls_buf_capacity; // remaining size after return to global pool
+    uint32_t tls_alloc_batch_size; // batch size when fetch from global pool
 } qbuf_pool_cfg_t;
 
 typedef struct qbuf_alloc_param {
