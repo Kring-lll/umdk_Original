@@ -215,14 +215,17 @@ typedef struct umq_buf_block_cfg {
 typedef struct umq_init_cfg {
     umq_buf_mode_t buf_mode;
     uint32_t feature;               // feature flags
-    uint16_t headroom_size;         // header size of umq buffer, [0, UMQ_HEADROOM_SIZE_LIMIT]
     bool io_lock_free;              // true: user should ensure thread safety when call io function
     uint8_t trans_info_num;
     umq_flow_control_cfg_t flow_control; // used when UMQ_FEATURE_ENABLE_FLOW_CONTROL is set
-    umq_buf_block_cfg_t block_cfg;
     uint16_t cna;
     uint32_t ubmm_eid;
     umq_trans_info_t trans_info[MAX_UMQ_TRANS_INFO_NUM];
+    uint16_t headroom_size;         // header size of umq buffer, [0, UMQ_HEADROOM_SIZE_LIMIT]
+    umq_buf_block_cfg_t block_cfg;
+    uint32_t tls_buf_capacity;      // max count of thread local buffer storage
+    uint32_t tls_alloc_batch_size;  // batch size when fetch from global
+    uint32_t tls_free_batch_size;   // batch size when return to global
 } umq_init_cfg_t;
 
 #define UMQ_NAME_MAX_LEN (32)
