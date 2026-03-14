@@ -19,6 +19,7 @@
 #include "urpc_hmap.h"
 #include "uvs_api.h"
 #include "perf.h"
+#include "urma_perf.h"
 #include "urpc_util.h"
 #include "urpc_list.h"
 #include "urpc_timer.h"
@@ -2231,4 +2232,19 @@ int umq_ub_stats_io_reset_impl(uint64_t umqh_tp)
         (void)__atomic_exchange_n(&queue->packet_stats[i], 0, __ATOMIC_RELAXED);
     }
     return UMQ_SUCCESS;
+}
+
+int umq_ub_stats_tp_perf_start_impl(void)
+{
+    return urma_start_perf();
+}
+
+int umq_ub_stats_tp_perf_stop_impl(void)
+{
+    return urma_stop_perf();
+}
+
+int umq_ub_stats_tp_perf_info_get_impl(char *perf_buf, uint32_t *length)
+{
+    return urma_get_perf_info(perf_buf, length);
 }
