@@ -13,13 +13,13 @@
 
 /* profiling macros */
 #define ENABLE_MOE_PROFILING 1
-#define PROF_SIZE_PER_CORE 1024
-#define ENABLE_MOE_PROFILING_BARRIER false
+#define PROF_SIZE_PER_CORE 2048
+#define ENABLE_MOE_PROFILING_BARRIER true
 #define ENABLE_MOE_PROFILING_DETAIL 0
 
 /* debug info macros */
 #define MOE_ENABLE_SOFTSYNC_TIMEOUT 0
-#define MOE_PROFILING_THRESHOLD 0
+#define MOE_PROFILING_THRESHOLD 60
 
 #if MOE_ENABLE_SOFTSYNC_TIMEOUT || MOE_PROFILING_THRESHOLD
 #define ENABLE_MOE_DEBUG_INFO 1
@@ -47,7 +47,7 @@ enum MoelogLevel {
     MOE_LOG_LEVEL_DETAIL = 4,
 };
 
-#define MOE_LOG_LEVEL MOE_LOG_LEVEL_DEBUG
+#define MOE_LOG_LEVEL MOE_LOG_LEVEL_ERROR
 
 #define MOE_LOG(level, fmt, ...)                                                                                       \
     do {                                                                                                               \
