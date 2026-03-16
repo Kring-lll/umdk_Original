@@ -127,7 +127,8 @@ public:
                     AscendC::GlobalTensor<ElementB> const &gmBlockB, LayoutB const &layoutB,
                     AscendC::GlobalTensor<ElementC> const &gmBlockC, LayoutC const &layoutC,
                     GemmCoord const &actualShape, Callback const &callbackBeforeFixpipe,
-                    Callback const &callbackAfterFixpipe)
+                    Callback const &callbackAfterFixpipe,
+                    uint32_t stageId, uint32_t tracingIdx)
     {
         uint32_t kTileCount = CeilDiv<L1TileShape::K>(actualShape.k());
         bool useResidentA =
@@ -185,6 +186,8 @@ public:
             l1TileMmadParams.kActual = kActual;
             l1TileMmadParams.isKLoopFirst = (kLoopIdx == 0);
             l1TileMmadParams.isKLoopLast = (kLoopIdx == kTileCount - 1);
+            l1TileMmadParams.stageId = stageId;
+            l1TileMmadParams.tracingIdx = tracingIdx;
             if (kLoopIdx == kTileCount - 1) {
                 l1TileMmadParams.gmBlockC = gmBlockC;
                 l1TileMmadParams.layoutCInGm = layoutC.GetTileLayout(actualShape.GetCoordMN());
@@ -219,6 +222,8 @@ private:
         uint32_t mRound;
         uint32_t nRound;
         uint32_t kActual;
+        uint32_t stageId;
+        uint32_t tracingIdx;
         bool isKLoopFirst;
         bool isKLoopLast;
         AscendC::GlobalTensor<ElementC> gmBlockC;
@@ -366,8 +371,11 @@ private:
         if (params.isKLoopLast) {
             auto layoutCInGm = params.layoutCInGm;
 
+            MoeTracing(TRACE_POINT("gmm2-combine block-mmad waiting", "B"), params.stageId, params.tracingIdx);
             params.callbackBeforeFixpipe();
+            MoeTracing(TRACE_POINT("gmm2-combine block-mmad waiting", "E"), params.stageId, params.tracingIdx);
 
+            MoeTracing(TRACE_POINT("gmm2-combine block-mmad copy-out", "B"), params.stageId, params.tracingIdx);
             if constexpr (!ENABLE_UNIT_FLAG) {
                 AscendC::SetFlag<AscendC::HardEvent::M_FIX>(l0CEventList[l0CListId]);
                 AscendC::WaitFlag<AscendC::HardEvent::M_FIX>(l0CEventList[l0CListId]);
@@ -379,6 +387,7 @@ private:
             l0CListId = (l0CListId + 1 < L0C_STAGES) ? (l0CListId + 1) : 0;
 
             params.callbackAfterFixpipe();
+            MoeTracing(TRACE_POINT("gmm2-combine block-mmad copy-out", "E"), params.stageId, params.tracingIdx);
         }
     }
 

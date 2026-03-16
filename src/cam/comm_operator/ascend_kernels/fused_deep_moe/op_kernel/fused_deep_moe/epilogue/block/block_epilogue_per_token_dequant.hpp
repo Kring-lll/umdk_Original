@@ -285,6 +285,7 @@ public:
         gmPerTokenScale.SetGlobalBuffer(params.ptrPerTokenScale);
         AscendC::GlobalTensor<ElementD> gmD;
         gmD.SetGlobalBuffer(params.ptrD);
+        static uint32_t tracingIdx = 0;
 
         auto ubTileStride = MakeCoord(static_cast<int64_t>(TileShape::COLUMN), 1L);
         auto tileShape = TileShape::ToCoord();
@@ -293,6 +294,7 @@ public:
         uint32_t subblockIdx = expertIdx == UINT32_MAX ? 0 : AscendC::GetSubBlockIdx();
         uint32_t subblockNum = expertIdx == UINT32_MAX ? 1 : AscendC::GetSubBlockNum();
         for (uint32_t loopIdx = subblockIdx; loopIdx < tileLoops; loopIdx += subblockNum) {
+            MoeTracing(TRACE_POINT("gmm2-combine dequant-calc", "B"), ubListId, tracingIdx);
             auto tileCoord = epilogueTileSwizzle.GetTileCoord(loopIdx);
             auto actualTileShape = epilogueTileSwizzle.GetActualTileShape(tileCoord);
             auto tileOffsetInBlock = tileCoord * tileShape;
@@ -374,6 +376,8 @@ public:
 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
 
+            MoeTracing(TRACE_POINT("gmm2-combine dequant-calc", "E"), ubListId, tracingIdx);
+            MoeTracing(TRACE_POINT("gmm2-combine send-calc", "B"), ubListId, tracingIdx);
             if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
                 if (expertIdx == UINT32_MAX) {
                     auto gmTileD = gmD[tileOffsetD];
@@ -387,6 +391,7 @@ public:
             }
 
             AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(eventUbDMTE3VList[ubListId]);
+            MoeTracing(TRACE_POINT("gmm2-combine send-calc", "E"), ubListId, tracingIdx++);
 
             ubListId = (ubListId + 1 < UB_STAGES) ? (ubListId + 1) : 0;
         }
