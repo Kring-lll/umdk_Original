@@ -47,6 +47,7 @@ void urma_admin_log(const char *function, int line, const char *format, ...)
 {
     va_list va;
 
+    openlog(NULL, LOG_PID | LOG_CONS | LOG_NDELAY, LOG_USER);
     va_start(va, format);
     (void)urma_admin_vlog(function, line, format, va);
     va_end(va);

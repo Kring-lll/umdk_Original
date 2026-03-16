@@ -197,6 +197,7 @@ void tpsa_log(const char *function, int line, uint32_t level, const char *format
 {
     va_list va;
 
+    openlog(NULL, LOG_PID | LOG_CONS | LOG_NDELAY, LOG_USER);
     va_start(va, format);
     (void)tpsa_vlog(function, line, level, format, va);
     va_end(va);

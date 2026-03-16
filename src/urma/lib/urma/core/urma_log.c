@@ -200,6 +200,7 @@ void urma_log(const char *function, int line, urma_vlog_level_t level, const cha
 {
     va_list va;
 
+    openlog(NULL, LOG_PID | LOG_CONS | LOG_NDELAY, LOG_USER);
     va_start(va, format);
     (void)urma_vlog(function, line, level, format, va);
     va_end(va);
