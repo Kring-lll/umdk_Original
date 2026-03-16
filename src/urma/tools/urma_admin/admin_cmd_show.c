@@ -27,13 +27,16 @@
 static int cmd_show_usage(admin_config_t *cfg)
 {
     printf("Usage:"
-           "  urma_admin show [--dev <dev>] [--whole]  Show all URMA devices information\n"
+           "  urma_admin show [--dev <dev>] [--brief|--all] [--whole]  Show URMA devices information\n"
            "  urma_admin show topo                     Show topology of current node\n"
            "  urma_admin show topo <node_id>           Show topology of specified node\n"
            "\n"
            "Options:\n"
            "  <dev>      Device name (e.g., udma1)\n"
            "  <node_id>  Node ID (e.g., 1)\n"
+           "  --brief    Default behavior. If bonding devices exist, show bonding devices only;\n"
+           "             otherwise show all udma devices.\n"
+           "  --all      Show all devices\n"
            "  --whole    Show whole information of devices\n");
     return 0;
 }
@@ -47,7 +50,13 @@ typedef struct admin_show_ubep {
     urma_transport_type_t tp_type;
     urma_eid_info_t *eid_list;
     char net_dev_name[URMA_ADMIN_MAX_DEV_NAME];
+    bool is_bonding_dev;
+    bool has_phy_dev_info;
+    char phy_dev_names[IODIE_NUM][URMA_ADMIN_MAX_DEV_NAME];
 } admin_show_ubep_t;
+
+static void parse_bonding_phy_devs(admin_show_ubep_t *ubep);
+static void format_phy_dev_names(const admin_show_ubep_t *ubep, char *buf, size_t buf_len);
 
 static void admin_parse_port_attr(const char *sysfs_path, admin_show_ubep_t *ubep)
 {
@@ -213,6 +222,7 @@ static admin_show_ubep_t *admin_get_ubep_info(const struct dirent *dent)
     if (admin_read_dev_file(dent->d_name, "ubdev", ubep->dev_name, URMA_ADMIN_MAX_DEV_NAME) <= 0) {
         ubep->dev_name[0] = 0;
     }
+    ubep->is_bonding_dev = has_bonding_dev_prefix(ubep->dev_name);
 
     int ret = admin_parse_file_value_u32(sysfs_path, "transport_type", (uint32_t *)&ubep->tp_type);
     if (ret != 0) {
@@ -226,6 +236,7 @@ static admin_show_ubep_t *admin_get_ubep_info(const struct dirent *dent)
         (void)printf("parse device attr failed, %s.\n", sysfs_path);
         goto free_sysfs_path;
     }
+    parse_bonding_phy_devs(ubep);
 
     free(sysfs_path);
     return ubep;
@@ -315,12 +326,84 @@ static uint32_t get_valid_eid_cnt(const admin_show_ubep_t *ubep)
     return cnt;
 }
 
-static void print_ubep_simple_info(const admin_show_ubep_t *ubep, int *index, const admin_config_t *cfg)
+static void parse_bonding_phy_devs(admin_show_ubep_t *ubep)
 {
+    if (ubep == NULL || ubep->is_bonding_dev == false || ubep->eid_list == NULL) {
+        return;
+    }
+
+    urma_eid_t invalid_eid = {0};
+    for (uint32_t i = 0; i < ubep->dev_attr.dev_cap.max_eid_cnt; i++) {
+        if (memcmp(&ubep->eid_list[i].eid, &invalid_eid, sizeof(urma_eid_t)) == 0) {
+            continue;
+        }
+
+        admin_urma_topo_bonding_dev_t bonding_dev = {0};
+        if (admin_cmd_get_topo_bonding_dev_by_eid(&ubep->eid_list[i].eid, &bonding_dev) != 0) {
+            continue;
+        }
+        for (uint32_t j = 0; j < IODIE_NUM; j++) {
+            if (bonding_dev.physical_devs[j].dev_name[0] == '\0') {
+                continue;
+            }
+            (void)snprintf(ubep->phy_dev_names[j], URMA_ADMIN_MAX_DEV_NAME, "%s",
+                           bonding_dev.physical_devs[j].dev_name);
+        }
+        ubep->has_phy_dev_info = true;
+        return;
+    }
+}
+
+static void format_phy_dev_names(const admin_show_ubep_t *ubep, char *buf, size_t buf_len)
+{
+    if (ubep == NULL || buf == NULL || buf_len == 0) {
+        return;
+    }
+
+    if (ubep->is_bonding_dev == false) {
+        (void)snprintf(buf, buf_len, "-");
+        return;
+    }
+
+    bool first = true;
+    int offset = 0;
+    for (uint32_t i = 0; i < IODIE_NUM; i++) {
+        if (ubep->phy_dev_names[i][0] == '\0') {
+            continue;
+        }
+        int ret = snprintf(buf + offset, buf_len - (size_t)offset, "%s%s", first ? "" : ",", ubep->phy_dev_names[i]);
+        if (ret < 0) {
+            return;
+        }
+        if ((size_t)ret >= buf_len - (size_t)offset) {
+            return;
+        }
+        offset += ret;
+        first = false;
+    }
+    if (first) {
+        (void)snprintf(buf, buf_len, "-");
+    }
+}
+
+static void print_ubep_simple_info(const admin_show_ubep_t *ubep, int *index, bool show_phy_dev_col)
+{
+    char phy_dev_names[URMA_ADMIN_MAX_DEV_NAME * IODIE_NUM] = {0};
+    if (show_phy_dev_col) {
+        format_phy_dev_names(ubep, phy_dev_names, sizeof(phy_dev_names));
+    }
+
     if (get_valid_eid_cnt(ubep) == 0) {
-        (void)printf("%-3d  %-16s    %-56s    %-8s    %-16s \n", (*index)++, ubep->dev_name,
-                     urma_tp_type_to_string(ubep->tp_type),
-                     urma_port_state_to_string(ubep->dev_attr.port_attr[0].state), ubep->net_dev_name);
+        if (show_phy_dev_col) {
+            (void)printf("%-3d  %-16s    %-56s    %-8s    %-16s    %-24s\n", (*index)++, ubep->dev_name,
+                         urma_tp_type_to_string(ubep->tp_type),
+                         urma_port_state_to_string(ubep->dev_attr.port_attr[0].state), ubep->net_dev_name,
+                         phy_dev_names);
+        } else {
+            (void)printf("%-3d  %-16s    %-56s    %-8s    %-16s \n", (*index)++, ubep->dev_name,
+                         urma_tp_type_to_string(ubep->tp_type),
+                         urma_port_state_to_string(ubep->dev_attr.port_attr[0].state), ubep->net_dev_name);
+        }
 
         return;
     }
@@ -330,9 +413,16 @@ static void print_ubep_simple_info(const admin_show_ubep_t *ubep, int *index, co
         if (memcmp(&ubep->eid_list[i].eid, &eid, sizeof(urma_eid_t)) == 0) {
             continue;
         }
-        (void)printf("%-3d  %-16s    %-8s    eid%u " EID_FMT "    %-8s\n", (*index)++, ubep->dev_name,
-                     urma_tp_type_to_string(ubep->tp_type), ubep->eid_list[i].eid_index,
-                     EID_ARGS(ubep->eid_list[i].eid), urma_port_state_to_string(ubep->dev_attr.port_attr[0].state));
+        if (show_phy_dev_col) {
+            (void)printf("%-3d  %-16s    %-8s    eid%u " EID_FMT "    %-8s    %-24s\n", (*index)++, ubep->dev_name,
+                         urma_tp_type_to_string(ubep->tp_type), ubep->eid_list[i].eid_index,
+                         EID_ARGS(ubep->eid_list[i].eid), urma_port_state_to_string(ubep->dev_attr.port_attr[0].state),
+                         phy_dev_names);
+        } else {
+            (void)printf("%-3d  %-16s    %-8s    eid%u " EID_FMT "    %-8s\n", (*index)++, ubep->dev_name,
+                         urma_tp_type_to_string(ubep->tp_type), ubep->eid_list[i].eid_index,
+                         EID_ARGS(ubep->eid_list[i].eid), urma_port_state_to_string(ubep->dev_attr.port_attr[0].state));
+        }
     }
 }
 
@@ -480,26 +570,55 @@ static void print_ubep_whole_info(const admin_show_ubep_t *ubep, int *index, con
                      urma_mtu_to_string(ubep->dev_attr.port_attr[i].active_mtu));
     }
     print_ubep_prioritys(ubep);
+    if (cfg->specify_device && ubep->is_bonding_dev) {
+        char phy_dev_names[URMA_ADMIN_MAX_DEV_NAME * IODIE_NUM] = {0};
+        format_phy_dev_names(ubep, phy_dev_names, sizeof(phy_dev_names));
+        (void)printf("physical_devs              : %s\n", phy_dev_names);
+    }
     (void)printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+}
+
+static bool ubep_list_has_bonding_dev(const struct ub_list *ubep_list)
+{
+    admin_show_ubep_t *ubep, *next;
+    UB_LIST_FOR_EACH_SAFE (ubep, next, node, ubep_list) {
+        if (ubep == NULL) {
+            break;
+        }
+        if (ubep->is_bonding_dev) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void print_ubep_list(const struct ub_list *ubep_list, const admin_config_t *cfg)
 {
     int cnt = 0;
     admin_show_ubep_t *ubep, *next;
+    bool has_bonding_dev = ubep_list_has_bonding_dev(ubep_list);
+    bool brief_only_bonding = (!cfg->specify_device && cfg->brief_info && has_bonding_dev);
+    bool show_phy_dev_col = (cfg->specify_device && has_bonding_dev);
 
     if (cfg->whole_info == false) {
-        (void)printf("num  ubep_dev            tp_type     eid                                             link\n");
-
-        (void)printf("---  ----------------    --------    --------------------------------------------    --------\n");
+        if (show_phy_dev_col) {
+            (void)printf("num  ubep_dev            tp_type     eid                                             link        sub_udma_devs\n");
+            (void)printf("---  ----------------    --------    --------------------------------------------    --------    ------------------------\n");
+        } else {
+            (void)printf("num  ubep_dev            tp_type     eid                                             link\n");
+            (void)printf("---  ----------------    --------    --------------------------------------------    --------\n");
+        }
     }
 
     UB_LIST_FOR_EACH_SAFE (ubep, next, node, ubep_list) {
         if (ubep == NULL) {
             break;
         }
+        if (brief_only_bonding && !ubep->is_bonding_dev) {
+            continue;
+        }
         if (cfg->whole_info == false) {
-            print_ubep_simple_info(ubep, &cnt, cfg);
+            print_ubep_simple_info(ubep, &cnt, show_phy_dev_col);
         } else {
             print_ubep_whole_info(ubep, &cnt, cfg);
         }
@@ -784,20 +903,32 @@ static void admin_print_topo_map(tool_topo_map_t *topo_map, uint32_t node_id)
     }
     char eid_str[INET6_ADDRSTRLEN];
     for (uint32_t agg_dev_idx = 0; agg_dev_idx < DEV_NUM; agg_dev_idx++) {
+        admin_urma_topo_bonding_dev_t bonding_dev = {0};
+        bool has_bonding_name = false;
         tool_topo_agg_dev_t *agg_dev = &cur_node_info->agg_devs[agg_dev_idx];
         if (!admin_is_eid_valid(agg_dev->agg_eid)) {
             continue;
         }
         urma_eid_to_ipv6_str((urma_eid_t *)agg_dev->agg_eid, eid_str, sizeof(eid_str));
-        (void)printf("Dev %d: %s\n", agg_dev_idx, eid_str);
+        if (admin_cmd_get_topo_bonding_dev_by_eid((urma_eid_t *)agg_dev->agg_eid, &bonding_dev) == 0 &&
+            bonding_dev.dev_name[0] != '\0') {
+            has_bonding_name = true;
+            (void)printf("Dev %d (%s): %s\n", agg_dev_idx, bonding_dev.dev_name, eid_str);
+        } else {
+            (void)printf("Dev %d: %s\n", agg_dev_idx, eid_str);
+        }
         for (uint32_t iodie_idx = 0; iodie_idx < IODIE_NUM; iodie_idx++) {
             tool_topo_ue_t *ue = &agg_dev->ues[iodie_idx];
             if (!admin_is_eid_valid(ue->primary_eid)) {
                 continue;
             }
             urma_eid_to_ipv6_str((urma_eid_t *)ue->primary_eid, eid_str, sizeof(eid_str));
-            
-            printf("\t UE %d:\n", iodie_idx);
+
+            if (has_bonding_name && bonding_dev.physical_devs[iodie_idx].dev_name[0] != '\0') {
+                printf("\t UE %d (%s):\n", iodie_idx, bonding_dev.physical_devs[iodie_idx].dev_name);
+            } else {
+                printf("\t UE %d:\n", iodie_idx);
+            }
             printf("\t\t Socket id: %d\n", ue->socket_id);
             printf("\t\t Entity id: %d\n", ue->entity_id);
             printf("\t\t Primary eid:\n");
