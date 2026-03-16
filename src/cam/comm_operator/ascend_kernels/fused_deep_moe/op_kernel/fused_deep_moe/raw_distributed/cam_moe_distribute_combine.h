@@ -841,16 +841,26 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::ReducePermu
 template <TemplateMC2TypeClass>
 __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::ProcessCombine()
 {
+    MoeTracing(TRACE_POINT("gmm2-combine combine-barrier-all", "B"));
+    MoeTracing<true>(TRACE_POINT("gmm2-combine combine-barrier-all", "E"));
+    MoeTracing(TRACE_POINT("gmm2-combine combine-wait-send", "B"));
     AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(SEND_SYNC_EVENT_ID);
     AscendC::CrossCoreWaitFlag(SEND_SYNC_EVENT_ID);
+    MoeTracing(TRACE_POINT("gmm2-combine combine-wait-send", "E"));
+    MoeTracing(TRACE_POINT("gmm2-combine combine-set-status", "B"));
     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
         BuffInit();
         SetWaitTpStatusAndDisPatch();
     }
     AlltoAllBuffInit();
     SetStatus();
+    MoeTracing(TRACE_POINT("gmm2-combine combine-set-status", "E"));
+    MoeTracing(TRACE_POINT("gmm2-combine combine-wait-status", "B"));
     WaitDispatch();
+    MoeTracing(TRACE_POINT("gmm2-combine combine-wait-status", "E"));
+    MoeTracing(TRACE_POINT("gmm2-combine combine-local-copy", "B"));
     LocalWindowCopy();
+    MoeTracing(TRACE_POINT("gmm2-combine combine-local-copy", "E"));
 }
 }  // namespace MoeDistributeCombineImpl
 
