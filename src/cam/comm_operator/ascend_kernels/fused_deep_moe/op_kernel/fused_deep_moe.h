@@ -393,6 +393,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
 template <TemplateMC2TypeClass>
 __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
 {
+    MoeTracing(TRACE_POINT("processing", "B"));
     GemmCoord gmm1ProblemShape{maxTokenNum_, gmm1OutputDim_, tokenHiddenSize_};
     GemmCoord gmm2ProblemShape{maxTokenNum_, gmm2OutputDim_, gmm2InputDim_};
 
@@ -492,20 +493,26 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     // gmShareX2Scale = gmShareX1Scale + token_num * 4; // 128b
     // gmShareSwigluOut = gmShareX2Scale + token_num * 4; // 768k
 
+    MoeTracing(TRACE_POINT("dispatch-gmm1", "B"));
     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
         if constexpr (g_coreType == AscendC::AIV) {
             AscendC::TPipe tpipe;
             MoeDistributeDispatchImpl::CamMoeDistributeDispatch<ExpandXType, int8_t,
                                                                 false, true, false, false, EXEC_FLAG> dispatcher;
+            MoeTracing(TRACE_POINT("dispatch init", "B"));
             dispatcher.Init(gmX_, gmexpertIds_, gmSmoothScales_, xActiveMask_, commArgs_, gmShareX1, gmX1, gmShareX1Scale,
                             gmX1Scale, gmExpandIdx, gmGroupList, gmEpSendCount, gmExpertTokenNums_, nullptr,
                             gmWorkspace, &tpipe, tilingData_);
+            MoeTracing(TRACE_POINT("dispatch init", "E"));
+            MoeTracing(TRACE_POINT("dispatch process", "B"));
             dispatcher.Process();
+            MoeTracing(TRACE_POINT("dispatch process", "E"));
             tpipe.Destroy();
             icache_preload(8);
         }
 
         AscendC::PipeBarrier<PIPE_ALL>();
+        MoeTracing(TRACE_POINT("dispatch sync-all", "B"));
         Arch::CrossCoreFlag gmm1AivFinished{0};
         if constexpr (g_coreType == AscendC::AIV) {
             Arch::CrossCoreBarrier<0x0, PIPE_MTE3>();
@@ -513,6 +520,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
         } else {
             Arch::CrossCoreWaitFlag(gmm1AivFinished);
         }
+        MoeTracing(TRACE_POINT("dispatch sync-all", "E"));
     }
     GmmDeqSwigluQuant<TemplateMC2TypeFunc, Gmm1L1TileShape, Gmm1L0TileShape, Gmm1EpilogueTileShape,
                       Gmm1BlockScheduler>(
@@ -521,12 +529,18 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
         layoutX2Scale, gmShareX1, gmShareX1Scale, gmShareSwigluOut, gmShareX2, layoutShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmX_, gmSmoothScales_, gmShareSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount,
         xActiveMask_, commArgs_, gmResvered,
         gmExpertTokenNums_, tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo);
+
+    MoeTracing(TRACE_POINT("dispatch-gmm1", "E"));
+
     AscendC::PipeBarrier<PIPE_ALL>();
 
+    MoeTracing(TRACE_POINT("gmm2-combine", "B"));
     MoeDistributeCombineImpl::CamMoeDistributeCombine<TemplateMC2TypeFunc> combiner;
     if (g_coreType == AscendC::AIV) {
+        MoeTracing(TRACE_POINT("combine init", "B"));
         combiner.Init(gmGmm2DepOut, gmexpertIds_, gmExpandIdx, gmEpSendCount, nullptr, gmexpertScales_, xActiveMask_, commArgs_,
                       gmOutput_, workspaceGM_, nullptr, tilingData_);
+        MoeTracing(TRACE_POINT("combine init", "E"));
     }
     GmmDeq<TemplateMC2TypeFunc, Gmm2L1TileShape, Gmm2L0TileShape, Gmm2EpilogueTileShape, Gmm2BlockScheduler,
            Gmm2DispatchPolicy>(gmm2ProblemShape, groupCount_, gmEpSendCount, gmX2, layoutX2, gmWeight2_, layoutWeight2,
@@ -535,5 +549,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
                                gmShareOutput_, gmShareGmm2Output, gmShareWeight2Scale_, gmShareX2Scale, layoutShareX2,
                                layoutShareWeight2, layoutShareX2Scale, layoutShareOutput, layoutShareGmm2Output,
                                epRankId_, commArgs_, nullptr, &combiner, epRankSize_);
+    MoeTracing(TRACE_POINT("gmm2-combine", "E"));
+    MoeTracing(TRACE_POINT("processing", "E"));
 }
 #endif  // FUSED_DEEP_MOE_H
