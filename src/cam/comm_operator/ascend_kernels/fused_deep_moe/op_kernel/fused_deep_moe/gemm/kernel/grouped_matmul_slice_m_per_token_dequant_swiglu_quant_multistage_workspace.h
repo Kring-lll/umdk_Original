@@ -1662,15 +1662,6 @@ public:
                         static_cast<uint8_t>(compCoreNum + compCoreIdx), target); // AIV等待的信号在24~28
                     target += 1;
                     blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
-                    // Arch::CrossCoreFlag doubleSwigluFlag{9};
-                    // if (AscendC::GetSubBlockIdx() == 1) {
-                    //     Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
-                    //     Arch::CrossCoreWaitFlag(doubleSwigluFlag);
-                    // } else {
-                    //     Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
-                    //     Arch::CrossCoreWaitFlag(doubleSwigluFlag);
-                    //     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
-                    // }
                     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
                 }
@@ -1749,15 +1740,6 @@ public:
                         static_cast<uint8_t>(compCoreNum + compCoreIdx), target);
                     target += 1;
                     blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC, false);
-                    // Arch::CrossCoreFlag doubleSwigluFlag{9};
-                    // if (AscendC::GetSubBlockIdx() == 1) {
-                    //     Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
-                    //     Arch::CrossCoreWaitFlag(doubleSwigluFlag);
-                    // } else {
-                    //     Arch::CrossCoreSetFlag<0x1, PIPE_MTE3>(doubleSwigluFlag);
-                    //     Arch::CrossCoreWaitFlag(doubleSwigluFlag);
-                    //     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
-                    // }
                     EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
                 }
@@ -1958,14 +1940,22 @@ public:
             AscendC::Duplicate(tmpZeroLocalTensor, (int32_t)0, INT32_COUNT_PER_BLOCK);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(0);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(0);
-            // 前一半为C核写的Flag
-            AscendC::DataCopy(softSyncTensor[compCoreIdx * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)],
-                                                tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
-            // 后一半为V核写的Flag
-            AscendC::DataCopy(softSyncTensor[(compCoreIdx + compCoreNum)
-                            * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)], tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
-            AscendC::DataCopy(sendRecvSyncTensor[compCoreIdx * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)],
-                                                tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK); 
+            if (AscendC::GetSubBlockIdx() == 0) {
+                // 前一半为V核写的Flag
+                AscendC::DataCopy(softSyncTensor[compCoreIdx * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)],
+                                                    tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
+                // 后一半为C核写的Flag
+                AscendC::DataCopy(softSyncTensor[(compCoreIdx + compCoreNum)
+                                * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)], tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
+             } else {
+                AscendC::DataCopy(softSyncTensor[compCoreIdx
+                                * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t) + (SOFT_SYNC_SPACE_SIZE / SUB_AIV_NUM / sizeof(int32_t))],
+                                tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
+                AscendC::DataCopy(sendRecvSyncTensor[compCoreIdx * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)],
+                                                    tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK); 
+             }
+
+
         }
         if (aivIdx == aiCoreGroupNum * subBlockNum - 1) {
             // clean
