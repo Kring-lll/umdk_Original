@@ -514,6 +514,8 @@ uint32_t urma_discover_devices(struct ub_list *dev_list, struct ub_list *driver_
     struct ub_list dev_name_list = UB_LIST_INITIALIZER(&dev_name_list);
     uint32_t cnt = (uint32_t)ub_list_size(dev_list);
 
+    struct timespec _start, _end; \
+    clock_gettime(CLOCK_MONOTONIC, &_start);
     class_dir = opendir(g_urma_class_path);
     if (class_dir == NULL) {
         URMA_LOG_ERR("%s open failed, errno: %d.\n", g_urma_class_path, errno);
@@ -547,9 +549,13 @@ uint32_t urma_discover_devices(struct ub_list *dev_list, struct ub_list *driver_
     if (closedir(class_dir) < 0) {
         URMA_LOG_ERR("Failed close dir: %s, errno: %d.\n", g_urma_class_path, errno);
     }
+    clock_gettime(CLOCK_MONOTONIC, &_end);
+    long long _diff_ns = (_end.tv_sec - _start.tv_sec) * 1000000000LL + (_end.tv_nsec - _start.tv_nsec);
+    (void)printf("      urma_discover_devices:find_dir cost time: %.1f us.\n", (_diff_ns / 1000.0));
 
     /* remove unloaded urma_device in dev_list */
     urma_sysfs_dev_t *next;
+    clock_gettime(CLOCK_MONOTONIC, &_start);
     UB_LIST_FOR_EACH_SAFE (sysfs_dev, next, node, dev_list) {
         if ((sysfs_dev->flag & URMA_SYSFS_DEV_FLAG_DRIVER_CREATED) != 0) {
             // sysfs_dev created by driver.
@@ -567,7 +573,9 @@ uint32_t urma_discover_devices(struct ub_list *dev_list, struct ub_list *driver_
         free(sysfs_dev);
         cnt--;
     }
-
+    clock_gettime(CLOCK_MONOTONIC, &_end);
+    _diff_ns = (_end.tv_sec - _start.tv_sec) * 1000000000LL + (_end.tv_nsec - _start.tv_nsec);
+    (void)printf("      urma_discover_devices:check load dev cost time: %.1f us.\n", (_diff_ns / 1000.0));
     urma_free_dev_name_list(&dev_name_list);
 
     return cnt;

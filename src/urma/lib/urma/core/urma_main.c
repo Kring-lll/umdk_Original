@@ -317,7 +317,7 @@ urma_device_t **urma_get_device_list(int *num_devices)
 
     (void)pthread_spin_lock(&g_dev_list_lock);
 #if !defined(__OHOS__) && !defined(__OH__) && !defined(__ANDROID__)
-    (void)urma_discover_devices(&g_dev_list, &g_driver_list);
+    TIME_STAT("    urma_get_device_list: urma_discover_devices", (void)urma_discover_devices(&g_dev_list, &g_driver_list));
 #endif
     *num_devices = (int)ub_list_size(&g_dev_list);
     if (*num_devices == 0) {
@@ -326,7 +326,8 @@ urma_device_t **urma_get_device_list(int *num_devices)
         return NULL;
     }
 
-    urma_device_t **device_list = get_urma_device_list(num_devices);
+    urma_device_t **device_list;
+    TIME_STAT("    urma_get_device_list: get_urma_device_list", device_list = get_urma_device_list(num_devices));
     (void)pthread_spin_unlock(&g_dev_list_lock);
     return device_list;
 }

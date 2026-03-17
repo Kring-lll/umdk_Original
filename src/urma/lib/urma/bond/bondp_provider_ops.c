@@ -436,13 +436,18 @@ DELETE_SLAVE_CTX:
 static int init_matrix_slave_devices(bondp_context_t *bond_ctx, urma_context_aggr_mode_t aggr_mode)
 {
     int device_num = 0;
-    urma_device_t **device_list = urma_get_device_list(&device_num);
+    struct timespec _start, _end;
+    long long _diff_ns;
+
+    urma_device_t **device_list;
+    TIME_STAT("  init_matrix_slave_devices: urma_get_device_list", device_list = urma_get_device_list(&device_num));
     if (device_list == NULL || device_num == 0) {
         URMA_LOG_ERR("urma get device list failed!\n");
         return -1;
     }
     bond_ctx->topo_map = g_bondp_global_ctx->topo_map;
-    bondp_topo_agg_dev_t *topo_info = get_topo_dev_info_by_agg_eid(bond_ctx->topo_map, &bond_ctx->v_ctx.eid);
+    bondp_topo_agg_dev_t *topo_info;
+    TIME_STAT("  init_matrix_slave_devices: get_topo_dev_info_by_agg_eid", topo_info = get_topo_dev_info_by_agg_eid(bond_ctx->topo_map, &bond_ctx->v_ctx.eid));
     if (topo_info == NULL) {
         URMA_LOG_ERR("Failed to get topo info by bonding eid\n");
         return -1;
@@ -453,6 +458,8 @@ static int init_matrix_slave_devices(bondp_context_t *bond_ctx, urma_context_agg
         : PRIMARY_EID_NUM;
 
     urma_eid_t *eid_list[URMA_UBAGG_DEV_MAX_NUM] = {0};
+
+    clock_gettime(CLOCK_MONOTONIC, &_start);
     for (int i = 0; i < iodie_num; ++i) {
         eid_list[i] = (urma_eid_t *)(topo_info->ues[i].primary_eid);
         if (is_empty_eid(eid_list[i])) {
@@ -477,8 +484,12 @@ static int init_matrix_slave_devices(bondp_context_t *bond_ctx, urma_context_agg
             return -1;
         }
     }
+    clock_gettime(CLOCK_MONOTONIC, &_end);
+    _diff_ns = (_end.tv_sec - _start.tv_sec) * 1000000000LL + (_end.tv_nsec - _start.tv_nsec);
+    (void)printf("  init_matrix_slave_devices:valid_port_eid cost time: %.1f us.\n", (_diff_ns / 1000.0));
 
     urma_context_t *p_ctxs[URMA_UBAGG_DEV_MAX_NUM] = {0};
+    clock_gettime(CLOCK_MONOTONIC, &_start);
     for (int i = 0; i < device_num; i++) {
         if (device_list[i]->type != URMA_TRANSPORT_UB) {
             continue;
@@ -501,6 +512,9 @@ static int init_matrix_slave_devices(bondp_context_t *bond_ctx, urma_context_agg
         ? SINGLE_DIE_DEVNUM
         : PRIMARY_EID_NUM + PORT_EID_MAX_NUM;
     urma_free_device_list(device_list);
+    clock_gettime(CLOCK_MONOTONIC, &_end);
+    _diff_ns = (_end.tv_sec - _start.tv_sec) * 1000000000LL + (_end.tv_nsec - _start.tv_nsec);
+    (void)printf("  init_matrix_slave_devices:get_dev_and_ctx_by_eid cost time: %.1f us.\n", (_diff_ns / 1000.0));
     return init_slave_context_fd(bond_ctx);
 
 DELETE_CTX:
@@ -515,23 +529,28 @@ DELETE_CTX:
 
 urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int dev_fd)
 {
+    // 检查全局上下文
     if (!g_bondp_global_ctx) {
         URMA_LOG_ERR("Uninitialized variables");
         return NULL;
     }
 
-    bondp_context_t *bond_ctx = bondp_create_ctx();
+    //创建binding设备上下文
+    bondp_context_t *bond_ctx;
+    TIME_STAT("bondp_create_context: bondp_create_ctx", bond_ctx = bondp_create_ctx());
     if (bond_ctx == NULL) {
         URMA_LOG_ERR("Failed to create ctx");
         return NULL;
     }
 
+    // 初始化虚拟上下文
     int ret = 0;
-    ret = bondp_init_v_ctx(bond_ctx, dev, eid_index, dev_fd);
+    TIME_STAT("bondp_create_context: bondp_init_v_ctx", ret = bondp_init_v_ctx(bond_ctx, dev, eid_index, dev_fd));
     if (ret) {
         URMA_LOG_ERR("Failed to init v_ctx\n");
         goto DELETE_CTX;
     }
+    // uiser_itl 创建上下文
     /* params of urma_cmd_user_ctl */
     urma_context_cfg_t cfg = {
         .dev = dev,
@@ -541,11 +560,12 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
         .ops = &g_bond_ops,
     };
     urma_cmd_udrv_priv_t udata = {0};
-    ret = urma_cmd_create_context(&bond_ctx->v_ctx, &cfg, &udata);
+    TIME_STAT("bondp_create_context: urma_cmd_create_context", ret = urma_cmd_create_context(&bond_ctx->v_ctx, &cfg, &udata));
     if (ret) {
         URMA_LOG_ERR("Failed to create context\n");
         goto UNINIT_V_CTX;
     }
+    // 创建epoll
     bond_ctx->real_async_fd = bond_ctx->v_ctx.async_fd;
     bond_ctx->v_ctx.async_fd = epoll_create(UBAGG_MAX_EVENT);
     if (bond_ctx->v_ctx.async_fd == -1) {
@@ -554,10 +574,11 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
     }
     bond_ctx->v_ctx.aggr_mode = URMA_AGGR_MODE_STANDALONE;
 
+    // 初始化从设备(从设备指的就是真实的)
     if (!g_bondp_global_ctx->skip_load_topo && get_topo_info_from_ko(bond_ctx) == 0) {
-        ret = init_matrix_slave_devices(bond_ctx, bond_ctx->v_ctx.aggr_mode);
+        TIME_STAT("bondp_create_context: init_matrix_slave_devices", ret = init_matrix_slave_devices(bond_ctx, bond_ctx->v_ctx.aggr_mode));
     } else {
-        ret = init_general_slave_devices(bond_ctx);
+        TIME_STAT("bondp_create_context: init_general_slave_devices", ret = init_general_slave_devices(bond_ctx));
     }
     if (ret) {
         goto CMD_DELETE_CONTEXT;

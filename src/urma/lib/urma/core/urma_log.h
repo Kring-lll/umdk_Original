@@ -42,6 +42,16 @@ urma_vlog_level_t urma_log_get_level_from_string(const char *level_string);
 
 #define URMA_LOG_DEBUG(...) URMA_LOG(DEBUG, __VA_ARGS__)
 
+#define TIME_STAT(label, statement) do { \
+    struct timespec _start, _end; \
+    clock_gettime(CLOCK_MONOTONIC, &_start); \
+    statement; \
+    clock_gettime(CLOCK_MONOTONIC, &_end); \
+    long long _diff_ns = (_end.tv_sec - _start.tv_sec) * 1000000000LL + \
+        (_end.tv_nsec - _start.tv_nsec); \
+    (void)printf("%s cost time: %.1f us.\n", (label), (_diff_ns / 1000.0)); \
+} while (0)
+
 #ifdef __cplusplus
 }
 #endif
