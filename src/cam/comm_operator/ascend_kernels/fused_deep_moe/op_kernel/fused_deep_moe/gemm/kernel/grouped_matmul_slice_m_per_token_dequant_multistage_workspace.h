@@ -271,7 +271,7 @@ public:
 #endif
 
         for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
-            prevWaitFunc.CallWithAll(groupIdx, 24);
+            prevWaitFunc.CallWithAll(groupIdx, 48);
             if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                 gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(
                         gmBlistTensorDesc.GetDataPtr<int32_t>(groupIdx)));
