@@ -1879,48 +1879,7 @@ static urma_status_t update_device_valid_state(bondp_context_t *bdp_ctx, int dev
     }
     return URMA_SUCCESS;
 }
-/**
- * Poll pjfc in sequence until cr_cnt is exhausted or all pjfc have no CRs available for acquisition.
- * The traversal order will start from the `last_poll_idx` stored in `bdp_jfc->comp_ctx`,
- * which is the index of the last poll that resulted in a non-zero value (otherwise, it remains unchanged).
- * Each iteration starts from the next idx of the last obtainable CR from pjfc to prevent pjfc from starving.
- * @return: The total number of all CQEs obtained from all pjfcs,
- * where negative values represent errors and 0 indicates no CQEs were obtained.
- */
-static int bondp_poll_pjfc(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfc, int cr_cnt,
-    int cqe_cnt[], urma_cr_t (*bdp_cr_buf)[URMA_UBAGG_MAX_CR_CNT_PER_DEV])
-{
-    int total_cqe_cnt = 0;
-    int remaining_poll = cr_cnt;
-    uintptr_t last_poll_idx = (uintptr_t)bdp_jfc->comp_ctx;
-    /* Starting from the next idx of the last obtainable CR from pjfc, prevent pjfc from starving. */
-    for (int i = 1; i <= bdp_jfc->dev_num; ++i) {
-        int dev_id = (last_poll_idx + i) % bdp_jfc->dev_num;
-        if (remaining_poll <= 0) {
-            break;
-        }
-        if (bdp_jfc->p_jfc[dev_id] == NULL) {
-            continue;
-        }
-        int current_cr_cnt = remaining_poll > URMA_UBAGG_MAX_CR_CNT_PER_DEV ?
-            URMA_UBAGG_MAX_CR_CNT_PER_DEV : remaining_poll;
-        cqe_cnt[dev_id] = urma_poll_jfc(bdp_jfc->p_jfc[dev_id], current_cr_cnt, bdp_cr_buf[dev_id]);
-        if (cqe_cnt[dev_id] < 0) {
-            return cqe_cnt[dev_id];
-        }
-        if (cqe_cnt[dev_id] == 0) {
-            continue;
-        }
-        total_cqe_cnt += cqe_cnt[dev_id];
-        remaining_poll -= cqe_cnt[dev_id];
-        bdp_jfc->comp_ctx = (void *)(uintptr_t)dev_id;
-        urma_status_t ret = update_device_valid_state(bdp_ctx, dev_id, cqe_cnt[dev_id], bdp_cr_buf[dev_id]);
-        if (ret != 0) {
-            return -ret;
-        }
-    }
-    return total_cqe_cnt;
-}
+
 /**
  * Convert the local_id field of a CR from pjetty.id to vjetty.id if possible.
  * @return: If conversion is possible, perform the conversion and return 0; otherwise, do not replace and return -1.
@@ -2113,40 +2072,61 @@ static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int
 
 int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
 {
+    static thread_local urma_cr_t pcr_buf[URMA_UBAGG_MAX_CR_CNT_PER_DEV];
+
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(jfc->urma_ctx, bondp_context_t, v_ctx);
     bondp_comp_t *bdp_jfc = CONTAINER_OF_FIELD(jfc, bondp_comp_t, v_jfc);
 
-    if (!is_valid_bondp_comp(bdp_jfc)) {
-        return -EINVAL;
-    }
+    int cr_cnt_remaining = cr_cnt;
 
-    /* Get all CR from pjfc and check device status */
-    int total_cqe_cnt = bondp_poll_pjfc(bdp_ctx, bdp_jfc, cr_cnt, g_bondp_cqe_cnt, g_bondp_cr_buf);
-    if (total_cqe_cnt <= 0) {
-        return total_cqe_cnt;
-    }
-    /* Handle each CR */
-    int total_cnt = 0;
-    for (int dev_id = 0; dev_id < bdp_jfc->dev_num; ++dev_id) {
-        if (bdp_jfc->p_jfc[dev_id] == NULL) {
+    /* Start polling from the next device index to avoid starvation. */
+    uintptr_t start_idx = ((uintptr_t)bdp_jfc->comp_ctx + 1);
+
+    for (int i = 0; i < bdp_jfc->dev_num && cr_cnt_remaining > 0; i++) {
+        int idx = (int)((start_idx + i) % (uintptr_t)bdp_jfc->dev_num);
+
+        if (bdp_jfc->p_jfc[idx] == NULL) {
             continue;
         }
-        for (int cr_id = 0; cr_id < g_bondp_cqe_cnt[dev_id]; ++cr_id) {
+
+        int pcr_cnt_max = cr_cnt_remaining > URMA_UBAGG_MAX_CR_CNT_PER_DEV
+                              ? URMA_UBAGG_MAX_CR_CNT_PER_DEV
+                              : cr_cnt_remaining;
+        int pcr_cnt = urma_poll_jfc(bdp_jfc->p_jfc[idx], pcr_cnt_max, pcr_buf);
+        if (pcr_cnt < 0) {
+            return pcr_cnt;
+        }
+        if (pcr_cnt == 0) {
+            continue;
+        }
+
+        for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
+            urma_cr_t *pcr = &pcr_buf[cr_id];
             cr_convert_ret_t conv_ret;
+
             if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
-                conv_ret = bondp_handle_cr_no_store(bdp_ctx, dev_id, &g_bondp_cr_buf[dev_id][cr_id]);
+                conv_ret = bondp_handle_cr_no_store(bdp_ctx, idx, pcr);
             } else {
-                conv_ret = bondp_handle_cr_with_store(bdp_ctx, dev_id, &g_bondp_cr_buf[dev_id][cr_id]);
+                conv_ret = bondp_handle_cr_with_store(bdp_ctx, idx, pcr);
             }
             if (conv_ret == CONVERT_FAIL) {
                 return -1;
             }
             if (conv_ret == CONVERT_SUCCESS) {
-                cr[total_cnt++] = g_bondp_cr_buf[dev_id][cr_id];
+                cr[cr_cnt - cr_cnt_remaining] = *pcr;
+                cr_cnt_remaining--;
             }
         }
+
+        bdp_jfc->comp_ctx = (void *)(uintptr_t)idx;
+        /* update device state based on the PCRs we consumed */
+        urma_status_t uret = update_device_valid_state(bdp_ctx, idx, pcr_cnt, pcr_buf);
+        if (uret != 0) {
+            return -uret;
+        }
     }
-    return total_cnt;
+
+    return cr_cnt - cr_cnt_remaining;
 }
 
 urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
@@ -2186,71 +2166,51 @@ urma_status_t bondp_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_
     }
 }
 
-static int bondp_flush_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty, int cr_cnt,
-    int flush_cnt[], urma_cr_t (*bdp_cr_buf)[URMA_UBAGG_MAX_CR_CNT_PER_DEV])
+int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
 {
-    int total_flush_cnt = 0;
-    int remaining_flush = cr_cnt;
+    static thread_local urma_cr_t pcr_buf[URMA_UBAGG_MAX_CR_CNT_PER_DEV];
 
-    for (int i = 0; i <= bdp_jetty->dev_num; ++i) {
-        if (remaining_flush <= 0) {
-            break;
-        }
+    bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(jetty->urma_ctx, bondp_context_t, v_ctx);
+    bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
+
+    int cr_cnt_remaining = cr_cnt;
+
+    for (int i = 0; i < bdp_jetty->dev_num && cr_cnt_remaining > 0; i++) {
         if (bdp_jetty->p_jetty[i] == NULL) {
             continue;
         }
-        int current_cr_cnt = remaining_flush > URMA_UBAGG_MAX_CR_CNT_PER_DEV ?
-            URMA_UBAGG_MAX_CR_CNT_PER_DEV : remaining_flush;
-        flush_cnt[i] = urma_flush_jetty(bdp_jetty->p_jetty[i], current_cr_cnt, bdp_cr_buf[i]);
-        if (flush_cnt[i] < 0) {
-            URMA_LOG_ERR("Failed to flush pjetty[%d]: %d\n", i, flush_cnt[i]);
-            return flush_cnt[i];
+
+        int pcr_cnt_max = cr_cnt_remaining > URMA_UBAGG_MAX_CR_CNT_PER_DEV
+                              ? URMA_UBAGG_MAX_CR_CNT_PER_DEV
+                              : cr_cnt_remaining;
+        int pcr_cnt = urma_flush_jetty(bdp_jetty->p_jetty[i], pcr_cnt_max, pcr_buf);
+
+        if (pcr_cnt < 0) {
+            URMA_LOG_ERR("Failed to flush pjetty[%d]: %d\n", i, pcr_cnt);
+            return pcr_cnt;
         }
-        if (flush_cnt[i] == 0) {
+        if (pcr_cnt == 0) {
             continue;
         }
-        total_flush_cnt += flush_cnt[i];
-        remaining_flush -= flush_cnt[i];
-    }
-    return total_flush_cnt;
-}
 
-int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr_output_array)
-{
-    bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(jetty->urma_ctx, bondp_context_t, v_ctx);
-    bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
-    urma_cr_t bdp_cr_buf[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_MAX_CR_CNT_PER_DEV] = {0};
-    int flush_cnt[URMA_UBAGG_DEV_MAX_NUM] = {0};
-
-    if (!is_valid_bondp_comp(bdp_jetty)) {
-        return -EINVAL;
-    }
-
-    /* Get all CR from pjetty and check device status */
-    int total_flush_cnt = bondp_flush_pjetty(bdp_ctx, bdp_jetty, cr_cnt, flush_cnt, bdp_cr_buf);
-    if (total_flush_cnt <= 0) {
-        return total_flush_cnt;
-    }
-    /* Handle each CR */
-    int total_cnt = 0;
-    for (int dev_id = 0; dev_id < bdp_jetty->dev_num; ++dev_id) {
-        if (bdp_jetty->p_jetty[dev_id] == NULL) {
-            continue;
-        }
-        for (int cr_id = 0; cr_id < flush_cnt[dev_id]; ++cr_id) {
+        for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
+            urma_cr_t *pcr = &pcr_buf[cr_id];
             cr_convert_ret_t conv_ret;
+
             if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
-                conv_ret = bondp_handle_cr_no_store(bdp_ctx, dev_id, &bdp_cr_buf[dev_id][cr_id]);
+                conv_ret = bondp_handle_cr_no_store(bdp_ctx, i, pcr);
             } else {
-                conv_ret = bondp_handle_cr_with_store(bdp_ctx, dev_id, &bdp_cr_buf[dev_id][cr_id]);
+                conv_ret = bondp_handle_cr_with_store(bdp_ctx, i, pcr);
             }
             if (conv_ret == CONVERT_FAIL) {
-                return total_cnt;
+                return -1;
             }
             if (conv_ret == CONVERT_SUCCESS) {
-                cr_output_array[total_cnt++] = bdp_cr_buf[dev_id][cr_id];
+                cr[cr_cnt - cr_cnt_remaining] = *pcr;
+                cr_cnt_remaining--;
             }
         }
     }
-    return total_cnt;
+
+    return cr_cnt - cr_cnt_remaining;
 }
