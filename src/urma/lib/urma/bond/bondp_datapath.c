@@ -977,24 +977,6 @@ static urma_status_t bondp_post_send_wr_and_store(bjetty_ctx_t *bjetty_ctx,
     } else {
         value.msn = -1; /* valid msn < 2^24, so -1 indicates invalid */
     }
-    /* Handle Strong Order */
-    /* Sender needs to delay sending SO WRs until all previous WRs are acked
-       So we use send_wr_id to mark the order */
-    if (send_wr->flag.bs.place_order == URMA_STRONG_ORDER && v_conn->send_wnd.head != bjetty_ctx->send_wr_id) {
-        /* If we can't send SO WR now, we need to cache it until the previous WR is acked */
-        so_queue_data_t so_data = {
-            .send_wr = send_wr,
-            .send_wr_id = bjetty_ctx->send_wr_id,
-            .ex_value = value
-        };
-        if (bdp_v_conn_push_send_so(v_conn, &so_data) != 0) {
-            ret = URMA_FAIL;
-            goto FREE_SEND_WR;
-        }
-        increase_id_after_send(&bjetty_ctx->send_wr_id, &v_conn->msn, wr->opcode);
-        ret = URMA_SUCCESS;
-        goto EXIT;
-    }
     /* get_comp_urma_jetty_id will return a non-null value,
        because the previous post_send_check_valid has performed validation. */
     ret = send_and_store_jfs_wr(bjetty_ctx, get_comp_urma_jetty_id(bjetty_ctx->bdp_comp)->id,
@@ -1784,7 +1766,7 @@ static bondp_cr_handler_ret_t handle_recv(bjetty_ctx_t *bjetty_ctx, urma_cr_t *c
  * @param total_cnt_limit: The maximum length of `cr_output`, is generally input by the user.
  * @param total_cnt(in/out): The length of the current cr queue, which will increase if an SO is dequeued.
  */
-static void handle_recv_so(bdp_v_conn_t *v_conn, urma_cr_t *cr_output, int so_cnt_limit, int total_cnt_limit,
+void handle_recv_so(bdp_v_conn_t *v_conn, urma_cr_t *cr_output, int so_cnt_limit, int total_cnt_limit,
     int *total_cnt)
 {
     if (v_conn == NULL) {
@@ -2072,7 +2054,7 @@ static inline bool is_cr_handler_ret_skip(bondp_cr_handler_ret_t ret)
     return ret == CR_HANDLER_SUCCESS_AND_SKIP || ret == CR_HANDLER_ERR_AND_SKIP;
 }
 
-static int bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int dev_idx, int total_cqe_cnt, int cr_cnt_limit,
+static int bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int dev_idx,
                                       urma_cr_t *cr, urma_cr_t *cr_output_array, int *total_cnt)
 {
     /* Handle CR with status URMA_CR_WR_SUSPEND_DONE or URMA_CR_WR_FLUSH_ERR_DONE */
@@ -2106,13 +2088,6 @@ static int bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int dev_idx, int
         /* handle recv */
         bdp_v_conn_t *v_conn = NULL;
         ret = handle_recv(bjetty_ctx, cr, pjetty_id, wr_id, &v_conn);
-        /* Since recv_so is cached in the queue, although it can ensure that total_cqe_cnt <= cr_cnt_limit,
-            this function will increase additional array space requirements.
-            The current implementation method results in a situation where,
-            when cr_cnt is not sufficiently large and the user still has an SO in the cache,
-            the user cannot retrieve the cached SO data when no messages are received from a certain Jetty.
-            This issue requires re-implementing the logic of handle_recv_so to resolve. */
-        handle_recv_so(v_conn, cr, cr_cnt_limit - total_cqe_cnt, cr_cnt_limit, total_cnt);
     } else {
         /* handle send */
         ret = handle_send(bjetty_ctx, cr, pjetty_id, wr_id);
@@ -2163,10 +2138,10 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
             int ret = 0;
             if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
                 ret = bondp_handle_cr_no_store(bdp_ctx, dev_id, &g_bondp_cr_buf[dev_id][cr_id],
-                    cr, &total_cnt);
+                                               cr, &total_cnt);
             } else {
-                ret = bondp_handle_cr_with_store(bdp_ctx, dev_id, total_cqe_cnt, cr_cnt,
-                    &g_bondp_cr_buf[dev_id][cr_id], cr, &total_cnt);
+                ret = bondp_handle_cr_with_store(bdp_ctx, dev_id, &g_bondp_cr_buf[dev_id][cr_id],
+                                                 cr, &total_cnt);
             }
             if (ret < 0) {
                 return ret;
@@ -2270,8 +2245,8 @@ int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr_output_arra
                 ret = bondp_handle_cr_no_store(bdp_ctx, dev_id, &bdp_cr_buf[dev_id][cr_id],
                     cr_output_array, &total_cnt);
             } else {
-                ret = bondp_handle_cr_with_store(bdp_ctx, dev_id, total_flush_cnt, cr_cnt,
-                    &bdp_cr_buf[dev_id][cr_id], cr_output_array, &total_cnt);
+                ret = bondp_handle_cr_with_store(bdp_ctx, dev_id, &bdp_cr_buf[dev_id][cr_id],
+                    cr_output_array, &total_cnt);
             }
             if (ret < 0) {
                 return total_cnt;
