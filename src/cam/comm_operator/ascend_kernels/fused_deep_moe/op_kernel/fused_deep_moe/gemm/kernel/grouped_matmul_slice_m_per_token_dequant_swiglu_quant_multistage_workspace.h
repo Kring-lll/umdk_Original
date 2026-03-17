@@ -1426,7 +1426,13 @@ public:
         AscendC::GlobalTensor<int8_t> expandXOutGlobal;
         AscendC::GlobalTensor<float> dynamicScalesOutGMTensor_;
         dynamicScalesOutGMTensor_.SetGlobalBuffer((__gm__ float *)(gmX1Scale));
+
+
+
         uint32_t beginIdx = 0;
+        uint32_t targetTokenCount = 0;
+        uint32_t curRecvTokenCount = 0;
+        
         for (uint32_t index = startRankId; index < endRankId; index++) {
             uint32_t i = index - startRankId;
             if (i > 0) {
@@ -1436,19 +1442,38 @@ public:
             uint32_t count = statusTensor_.GetValue(index * INT32_COUNT_PER_BLOCK + 1);
             coreTokenCount += count;
             beginIdx = gatherMaskOutCountTensor.GetValue(i) - count;
+            countPerRank[i] = count;
+            rankBeginIdx[i] = beginIdx;
+            curTokenIdx[i] = 0;
+            beginIdx += count;
+            targetTokenCount += count;
+        }
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
+        while (curRecvTokenCount < targetTokenCount) {
+        for (uint32_t index = startRankId; index < endRankId; index++) {
+            uint32_t i = index - startRankId;
+            // if (i > 0) {
+            //     gatherMaskOutCountTensor.SetValue(
+            //         i, gatherMaskOutCountTensor.GetValue(i - 1) + gatherMaskOutCountTensor.GetValue(index));
+            // }
+            // uint32_t count = statusTensor_.GetValue(index * INT32_COUNT_PER_BLOCK + 1);
+            // coreTokenCount += count;
+            // beginIdx = gatherMaskOutCountTensor.GetValue(i) - count;
+            beginIdx = rankBeginIdx[i];
             uint32_t winOffset = index;
             winOffset = (index % epRankSize) * moeExpertNumPerRank + index / epRankSize;
             GM_ADDR wAddr = (__gm__ uint8_t *)(GetWindAddrByRankId(epRankId)) + winOffset * expertPerSizeOnWin;
-            AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
-            for (uint32_t j = 0; j < count; j++) {
+            // AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
+            for (uint32_t j = curTokenIdx[i]; j < countPerRank[i]; j++) {
                 tokGlobal.SetGlobalBuffer((__gm__ int8_t *)(wAddr + j * hCommuSizeWithFlag));
                 expandXOutGlobal.SetGlobalBuffer((__gm__ int8_t *)(gmX1) + (beginIdx + j) * tokenLength, tokenLength);
                 int32_t arriveCount = 1; // debug 等待多少个token
-                while (true) {
-                    if (WaitDataArriveWithFlag(winOffset, j, arriveCount, subUbOffset) == arriveCount) {
-                        break;
-                    }
+
+                if (WaitDataArriveWithFlag(winOffset, j, arriveCount, subUbOffset) != arriveCount) {
+                    break;
                 }
+                curRecvTokenCount += 1;
+                curTokenIdx[i] += 1;
                 AscendC::PipeBarrier<PIPE_ALL>();
 
                 AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
@@ -1472,7 +1497,27 @@ public:
             }
 
             // clean flag
-            uint32_t cleanUpNum = count * blockCntPerToken;
+            // uint32_t cleanUpNum = count * blockCntPerToken;
+            // AscendC::GlobalTensor<uint32_t> cleanGlobal;
+            // cleanGlobal.SetGlobalBuffer((__gm__ uint32_t *)(wAddr));
+            // AscendC::DataCopyExtParams cleanUoParams = {uint16_t(cleanUpNum), sizeof(uint32_t), 0U, 508, 0U};
+
+            // AscendC::Duplicate<uint32_t>(cleanBuf, 0, 8);
+            // AscendC::PipeBarrier<PIPE_ALL>();
+            // DataCopyPad(cleanGlobal[480U / sizeof(uint32_t)], cleanBuf, cleanUoParams);
+            // AscendC::PipeBarrier<PIPE_ALL>();
+
+            // AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
+            // beginIdx += count;
+        }
+        }
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
+        for (uint32_t index = startRankId; index < endRankId; index++) {
+            uint32_t i = index - startRankId;
+            uint32_t winOffset = index;
+            winOffset = (index % epRankSize) * moeExpertNumPerRank + index / epRankSize;
+            GM_ADDR wAddr = (__gm__ uint8_t *)(GetWindAddrByRankId(epRankId)) + winOffset * expertPerSizeOnWin;
+            uint32_t cleanUpNum = countPerRank[i] * blockCntPerToken;
             AscendC::GlobalTensor<uint32_t> cleanGlobal;
             cleanGlobal.SetGlobalBuffer((__gm__ uint32_t *)(wAddr));
             AscendC::DataCopyExtParams cleanUoParams = {uint16_t(cleanUpNum), sizeof(uint32_t), 0U, 508, 0U};
@@ -1481,9 +1526,6 @@ public:
             AscendC::PipeBarrier<PIPE_ALL>();
             DataCopyPad(cleanGlobal[480U / sizeof(uint32_t)], cleanBuf, cleanUoParams);
             AscendC::PipeBarrier<PIPE_ALL>();
-
-            AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
-            beginIdx += count;
         }
         AscendC::PipeBarrier<PIPE_ALL>();
 
@@ -2224,6 +2266,11 @@ private:
     AscendC::LocalTensor<uint32_t> flagRecvGatherMask_;
     AscendC::LocalTensor<uint8_t> flagCompResultLtU8_;
     AscendC::LocalTensor<uint64_t> flagCompResultLtU64_;
+
+    // count info
+    int32_t countPerRank[16]{0};
+    int32_t curTokenIdx[16]{0};
+    int32_t rankBeginIdx[16]{0};
 
     // rank and expert info
     uint32_t epRankSize{0};
