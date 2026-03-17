@@ -1530,7 +1530,8 @@ static ALWAYS_INLINE uint32_t umq_ub_get_read_pre_allocate_max_total_size(
     return UINT32_MAX;
 }
 
-umq_buf_t *umq_ub_read_ctx_create(ub_queue_t *queue, umq_imm_head_t *umq_imm_head, uint16_t buf_num, uint16_t msg_id)
+umq_buf_t *umq_ub_read_ctx_create(ub_queue_t *queue, umq_imm_head_t *umq_imm_head, uint16_t buf_num, uint16_t msg_id,
+    ub_ref_sge_t *ref_sge)
 {
     umq_buf_t *ctx_buf = umq_buf_alloc(sizeof(user_ctx_t), 1, UMQ_INVALID_HANDLE, NULL);
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
@@ -1554,7 +1555,17 @@ umq_buf_t *umq_ub_read_ctx_create(ub_queue_t *queue, umq_imm_head_t *umq_imm_hea
         return NULL;
     }
 
-    user_ctx->dst_buf = umq_buf_alloc(total_size, 1, UMQ_INVALID_HANDLE, NULL);
+    umq_buf_t *pre_buf, *tmp_buf;
+    for (int i = 0; i < buf_num; i++) {
+        tmp_buf = umq_buf_alloc(ref_sge[i].length, 1, UMQ_INVALID_HANDLE, NULL);
+        if (i == 0) {
+            user_ctx->dst_buf = tmp_buf;
+        } else {
+            pre_buf->qbuf_next = tmp_buf;
+        }
+        pre_buf = tmp_buf;
+    }
+
     if (user_ctx->dst_buf == NULL) {
         umq_buf_free(ctx_buf);
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, dst_buf malloc failed\n", EID_ARGS(*eid), id);
@@ -1734,7 +1745,7 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm)
     uint16_t msg_id = imm.ub_plus.msg_id;
     umq_imm_head_t *umq_imm_head = (umq_imm_head_t *)(uintptr_t)rx_buf->buf_data;
     ub_ref_sge_t *ref_sge = (ub_ref_sge_t *)(uintptr_t)(umq_imm_head + 1);
-    umq_buf_t *ctx_buf = umq_ub_read_ctx_create(queue, umq_imm_head, buf_num, msg_id);
+    umq_buf_t *ctx_buf = umq_ub_read_ctx_create(queue, umq_imm_head, buf_num, msg_id, ref_sge);
     if (ctx_buf == NULL) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, create ctx buf failed\n", EID_ARGS(*eid), id);
         return -UMQ_ERR_ENOMEM;

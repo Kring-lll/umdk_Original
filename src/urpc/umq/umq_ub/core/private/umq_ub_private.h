@@ -490,7 +490,8 @@ int umq_ub_id_allocator_init(void);
 void umq_ub_id_allocator_uninit(void);
 util_id_allocator_t *umq_ub_id_allocator_get(void);
 
-umq_buf_t *umq_ub_read_ctx_create(ub_queue_t *queue, umq_imm_head_t *umq_imm_head, uint16_t buf_num, uint16_t msg_id);
+umq_buf_t *umq_ub_read_ctx_create(ub_queue_t *queue, umq_imm_head_t *umq_imm_head, uint16_t buf_num, uint16_t msg_id,
+    ub_ref_sge_t *ref_sge);
 
 int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_wr_ptr,
                              urma_sge_t *sges, uint32_t remain_tx);
