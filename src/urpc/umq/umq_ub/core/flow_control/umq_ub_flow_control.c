@@ -918,6 +918,19 @@ void umq_ub_shared_credit_return_req_handle(ub_queue_t *queue, umq_ub_imm_t *imm
     ub_flow_control_t *fc = &queue->flow_control;
     ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
     uint16_t return_credit = imm->flow_control.window;
+    uint64_t consumed_credit = umq_ub_rx_consumed_load(queue->dev_ctx->io_lock_free,
+        &queue->dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id]);
+    uint64_t allocated_credit = fc->ops.local_rx_allocated_load(fc);
+    uint64_t unconsumed = allocated_credit - consumed_credit;
+    if (return_credit > unconsumed) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
+            "handle return credit: %u > unconsumed credit: %" PRIu64 "\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id,
+            EID_ARGS(queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL]->id.eid), return_credit, unconsumed);
+        return_credit = unconsumed;
+    }
+
     credit->ops.available_credit_return(credit, return_credit);
     (void)fc->ops.local_rx_allocated_dec(fc, return_credit);
     umq_ub_shared_credit_return_ack(queue, return_credit);
