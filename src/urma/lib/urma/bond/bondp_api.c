@@ -670,9 +670,52 @@ static int bondp_create_vjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
     return ret;
 }
 
+static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty, urma_jetty_cfg_t *jetty_cfg)
+{
+    bondp_comp_t *bdp_jfs_jfc = CONTAINER_OF_FIELD(cfg->jfs_cfg.jfc, bondp_comp_t, base);
+    bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(cfg->shared.jfr, bondp_comp_t, base);
+    bondp_comp_t *bdp_rplc_jfc = CONTAINER_OF_FIELD(cfg->shared.jfc, bondp_comp_t, base);
+
+    urma_jetty_cfg_t p_cfg = *cfg;
+    for (int i = 0; i < bdp_jetty->dev_num; ++i) {
+        if (!bdp_ctx->p_ctxs[i]) {
+            continue;
+        }
+        p_cfg.jfs_cfg.jfc = bdp_jfs_jfc->p_jfc[i];
+        p_cfg.shared.jfr = bdp_jfr->p_jfr[i];
+        if (bdp_rplc_jfc) {
+            p_cfg.shared.jfc = bdp_rplc_jfc->p_jfc[i];
+        }
+        urma_jetty_t *jetty = urma_create_jetty(bdp_ctx->p_ctxs[i], &p_cfg);
+        if (jetty == NULL) {
+            URMA_LOG_ERR("Failed to create pjetty %d.\n", i);
+            return -1;
+        }
+        bdp_jetty->p_jetty[i] = jetty;
+    }
+    return 0;
+}
+
 static int bondp_delete_vjetty(bondp_comp_t *bdp_jetty)
 {
     return urma_cmd_delete_jetty(&bdp_jetty->v_jetty);
+}
+
+static int bondp_delete_pjetty(bondp_comp_t *bdp_jetty)
+{
+    int ret = 0;
+    for (int i = 0; i < bdp_jetty->dev_num; ++i) {
+        if (bdp_jetty->p_jetty[i] == NULL) {
+            continue;
+        }
+        int p_ret = urma_delete_jetty(bdp_jetty->p_jetty[i]);
+        if (p_ret) {
+            URMA_LOG_ERR("Failed to delete pjetty %d, ret: %d.\n", i, ret);
+            ret = p_ret;
+        }
+        bdp_jetty->p_jetty[i] = NULL;
+    }
+    return ret;
 }
 
 static int bondp_add_jetty_p_vjetty_id_info(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty, uint32_t jetty_id)
@@ -766,20 +809,37 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         }
     }
 
-    bondp_comp_t *bdp_jetty = bondp_create_comp(ctx, BONDP_COMP_JETTY, jetty_cfg);
+    bondp_comp_t *bdp_jetty = (bondp_comp_t *)calloc(1, sizeof(bondp_comp_t));
     if (bdp_jetty == NULL) {
         URMA_LOG_ERR("Failed to create bondp comp\n");
         return NULL;
     }
+    bdp_jetty->bondp_ctx = bdp_ctx;
+    bdp_jetty->comp_type = BONDP_COMP_JETTY;
+    atomic_init(&bdp_jetty->use_cnt.atomic_cnt, 0);
+    if (jetty_cfg->jfs_cfg.flag.bs.multi_path) {
+        if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
+            bdp_jetty->dev_num = SINGLE_DIE_IODIE_NUM;
+        } else {
+            bdp_jetty->dev_num = PRIMARY_EID_NUM;
+        }
+    } else {
+        bdp_jetty->dev_num = bdp_ctx->dev_num;
+    }
+
+    if (bondp_create_pjetty(bdp_ctx, bdp_jetty, jetty_cfg) != 0) {
+        URMA_LOG_ERR("Failed to create pjetty\n");
+        goto delete_pjetty;
+    }
 
     if (bondp_create_vjetty(bdp_ctx, bdp_jetty, jetty_cfg) != 0) {
         URMA_LOG_ERR("Failed to create vjetty, %u\n", jetty_cfg->id);
-        goto free_bondp_jetty;
+        goto delete_pjetty;
     }
 
     if (bondp_add_jetty_p_vjetty_id_info(bdp_ctx, bdp_jetty, bdp_jetty->v_jetty.jetty_id.id) != 0) {
         URMA_LOG_ERR("Failed to add jetty id to p_vjetty_id table\n");
-        goto DELETE_VJETTY;
+        goto delete_vjetty;
     }
     for (int i = 0; i < bdp_jetty->dev_num; ++i) {
         if (!bdp_jetty->p_jetty[i]) {
@@ -791,7 +851,7 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     bjetty_ctx_t *bjetty_ctx = create_bjetty_ctx(ctx, bdp_jetty, URMA_UBAGG_WR_BUF_SIZE, URMA_UBAGG_HDR_BUF_SIZE);
     if (bjetty_ctx == NULL) {
         URMA_LOG_ERR("Failed to create jetty ctx");
-        goto DEL_P_VJETTY_ID;
+        goto del_p_vjetty_id;
     }
     bdp_jetty->comp_ctx = bjetty_ctx;
     bdp_jetty->is_multipath = jetty_cfg->jfs_cfg.flag.bs.multi_path;
@@ -805,11 +865,12 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
 
     return &bdp_jetty->v_jetty;
 
-DEL_P_VJETTY_ID:
+del_p_vjetty_id:
     bondp_del_jetty_p_vjetty_info(bdp_jetty);
-DELETE_VJETTY:
+delete_vjetty:
     bondp_delete_vjetty(bdp_jetty);
-free_bondp_jetty:
+delete_pjetty:
+    bondp_delete_pjetty(bdp_jetty);
     bondp_delete_comp(bdp_jetty, BONDP_COMP_JETTY);
     return NULL;
 }
@@ -850,10 +911,11 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
         URMA_LOG_ERR("Failed to delete vjetty\n");
         ret = URMA_FAIL;
     }
-    if (bondp_delete_comp(jetty, BONDP_COMP_JETTY) != URMA_SUCCESS) {
-        URMA_LOG_ERR("Failed to delete bdp_jetty\n");
+    if (bondp_delete_pjetty(bdp_jetty) != URMA_SUCCESS) {
+        URMA_LOG_ERR("Failed to delete pjetty\n");
         ret = URMA_FAIL;
     }
+    free(bdp_jetty);
 
     atomic_fetch_sub(&bdp_jfr->use_cnt.atomic_cnt, 1);
     if (bdp_jfc != NULL) {
