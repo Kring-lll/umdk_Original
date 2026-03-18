@@ -22,7 +22,6 @@
 #include "urma_types_str.h"
 #include "perftest_communication.h"
 #include "perftest_parameters.h"
-#include "urma_api.h"
 
 #define PERFTEST_CACHE_LINE_FILE_SIZE (10)
 #define PERFTEST_JFC_MUL_THRESHOLD (4)
@@ -32,7 +31,6 @@
 #define PERFTEST_CTP_MAX_SEND_SIZE (4096)
 #define PERFTEST_RTP_MAX_ORDER     (16)
 #define PERFTEST_CTP_MAX_ORDER     (12)
-#define PERFTEST_INVALID_PRIORITY  (255)
 
 typedef struct perftest_cmd {
     char *cmd;
@@ -170,6 +168,7 @@ default: disable.\n");
     (void)printf("  --hugepage_size <size>      Page size for allocated memory. Only support \
 2MB or 1GB currently.\n");
     (void)printf("  --stdout                    Print logs to console.\n");
+    (void)printf("  --aggr_mode                 Set bond device aggregation mode, support: standalone、active_backup、balance.\n");
 }
 
 static perftest_cmd_type_t parse_command(const char *argv1)
@@ -431,7 +430,7 @@ static int check_cfg_range(perftest_config_t *cfg)
         { cfg->cq_mod,       PERFTEST_CQ_MOD_MIN,        PERFTEST_CQ_MOD_MAX,       "Cq mod" },
         { cfg->order,        PERFTEST_MIN_ORDER,         PERFTEST_MAX_ORDER,        "Order" },
         { cfg->err_timeout,  PERFTEST_ERR_TIMEOUT_MIN,   PERFTEST_ERR_TIMEOUT_MAX,  "err_timeout" },
-        { cfg->priority,     PERFTEST_PRIORITY_MIN,      PERFTEST_PRIORITY_MAX,     "priority" },
+        // { cfg->priority,     PERFTEST_PRIORITY_MIN,      PERFTEST_PRIORITY_MAX,     "priority" },
         { cfg->token_policy, URMA_TOKEN_NONE,            URMA_TOKEN_ALL_ENCRYPTED,  "token_policy" }
     };
     for (uint32_t i = 0; i < sizeof(value_range) / sizeof(perftest_value_range_t); i++) {
@@ -950,31 +949,6 @@ bool is_jfr_depth_valid(perftest_config_t *cfg)
     return (cfg->jfr_depth * (cfg->jettys / cfg->jettys_pre_jfr)) >= (cfg->jettys * cfg->jfr_post_list);
 }
 
-int get_jetty_priority_by_tp_type(char *name, union urma_tp_type_en tp_type)
-{
-    int pri = 0;
-    urma_device_t *urma_dev;
-    urma_device_attr_t dev_attr;
-
-    urma_dev = urma_get_device_by_name(name);
-    if (urma_dev == NULL) {
-        fprintf(stderr, "urma get device by name failed!\n");
-        return -1;
-    }
-    if (urma_query_device(urma_dev, &dev_attr) != URMA_SUCCESS) {
-        fprintf(stderr, "Failed to query device %s.\n", name);
-        return -1;
-    }
-    for (int i = 0; i <= URMA_MAX_PRIORITY; i++) {
-        if (tp_type.value == dev_attr.dev_cap.priority_info[i].tp_type.value) {
-            pri = i;
-            return pri;
-        }
-    }
-    fprintf(stderr, "Failed to get sl resources %s.\n", name);
-    return -1;
-}
-
 int check_local_cfg(perftest_config_t *cfg)
 {
     if (cfg == NULL) {
@@ -1336,19 +1310,6 @@ int check_local_cfg(perftest_config_t *cfg)
     if (cfg->aggr_mode != URMA_AGGR_MODE_STANDALONE && cfg->jfs_post_list > 1) {
         (void)fprintf(stderr, "Standalone aggregate mode currently does not support WQE list.\n");
         exit(1);
-    }
-
-    union urma_tp_type_en tp_type;
-    if (cfg->priority == PERFTEST_INVALID_PRIORITY) {
-        if (cfg->use_ctp) {
-            tp_type.bs.ctp = 1;
-            cfg->priority = get_jetty_priority_by_tp_type(cfg->dev_name, tp_type);
-        } else {
-            tp_type.bs.rtp = 1;
-            cfg->priority = get_jetty_priority_by_tp_type(cfg->dev_name, tp_type);
-        }
-        (void)fprintf(stderr, "Warning: %s should set priority to %hhu.\n",
-            (cfg->use_ctp == true ? "ctp" : "rtp"), cfg->priority);
     }
     return 0;
 }
