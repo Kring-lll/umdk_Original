@@ -40,6 +40,7 @@ static struct option g_long_options[] = {
     {"num", required_argument, NULL, 'n'},
     {"perf-thresh", required_argument, NULL, 't'},
     {"enable-perf", no_argument, NULL, 'F'},
+    {"blk-size", required_argument, NULL, 'L'},
     {NULL, 0, NULL, 0}
 };
 // clang-format on
@@ -95,6 +96,7 @@ static void init_cfg(umq_perftest_config_t *cfg)
     cfg->enable_perf = false;
     cfg->test_round = DEFAULT_LAT_TEST_ROUND;
     cfg->thresh_num = 0;
+    cfg->blk_mode = 0;
 }
 
 int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *cfg)
@@ -107,7 +109,7 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
     init_cfg(cfg);
     int start_idx = 0;
     while (1) {
-        int c = getopt_long(argc, argv, "c:d:f:l:r:p:u:s:hN:D:E:n:", g_long_options, NULL);
+        int c = getopt_long(argc, argv, "c:d:f:l:r:p:u:s:hN:D:E:n:L:", g_long_options, NULL);
         if (c == -1) {
             break;
         }
@@ -194,6 +196,9 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
                 break;
             case 'F':
                 cfg->enable_perf = true;
+                break;
+            case 'L':
+                cfg->blk_mode = (uint32_t)strtoul(optarg, NULL, 0);
                 break;
             default:
                 usage();
