@@ -617,8 +617,8 @@ int umq_init(umq_init_cfg_t *cfg)
         return -UMQ_ERR_EINVAL;
     }
 
-    if (cfg->headroom_size > UMQ_HEADROOM_SIZE_LIMIT) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "headroom size %u exceeds the maximum value\n", cfg->headroom_size);
+    if (cfg->buf_pool_cfg.headroom_size > UMQ_HEADROOM_SIZE_LIMIT) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "headroom size %u exceeds the maximum value\n", cfg->buf_pool_cfg.headroom_size);
         return -UMQ_ERR_EINVAL;
     }
 
@@ -630,7 +630,7 @@ int umq_init(umq_init_cfg_t *cfg)
         }
     }
 
-    if (umq_buf_size_pow_small_set(cfg->block_cfg.small_block_size) != UMQ_SUCCESS) {
+    if (umq_buf_size_pow_small_set(cfg->buf_pool_cfg.block_cfg.small_block_size) != UMQ_SUCCESS) {
         return -UMQ_ERR_EINVAL;
     }
 

@@ -95,10 +95,10 @@ TEST_F(UmqIPCTest, test_umq_init_failure)
     ASSERT_NE(ret, 0);
     cfg.trans_info_num = 0;
 
-    cfg.headroom_size = UMQ_HEADROOM_SIZE_LIMIT + 1;
+    cfg.buf_pool_cfg.headroom_size = UMQ_HEADROOM_SIZE_LIMIT + 1;
     ret = umq_init(&cfg);
     ASSERT_NE(ret, 0);
-    cfg.headroom_size = 0;
+    cfg.buf_pool_cfg.headroom_size = 0;
 
     MOCKER(urpc_rand_seed_init).stubs().will(returnValue(-1));
     cfg.feature = UMQ_FEATURE_ENABLE_TOKEN_POLICY;
@@ -107,10 +107,10 @@ TEST_F(UmqIPCTest, test_umq_init_failure)
     cfg.feature = 0;
     GlobalMockObject::verify();
 
-    cfg.block_cfg.small_block_size = BLOCK_SIZE_MAX;
+    cfg.buf_pool_cfg.block_cfg.small_block_size = BLOCK_SIZE_MAX;
     ret = umq_init(&cfg);
     ASSERT_NE(ret, 0);
-    cfg.block_cfg.small_block_size = BLOCK_SIZE_8K;
+    cfg.buf_pool_cfg.block_cfg.small_block_size = BLOCK_SIZE_8K;
 
     cfg.trans_info_num = 32;
     ret = umq_init(&cfg);
