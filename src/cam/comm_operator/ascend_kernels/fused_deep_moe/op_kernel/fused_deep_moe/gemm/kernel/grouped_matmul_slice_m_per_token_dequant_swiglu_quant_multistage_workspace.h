@@ -40,7 +40,7 @@ constexpr int32_t SUB_AIV_NUM = 2;
 constexpr int32_t ODD_EVEN_BASE = 2;
 constexpr int32_t BUFFER_NUM = 2;
 constexpr int32_t GATHER_SECOND_NUM = 2;
-constexpr uint32_t MAX_QUANT_ROW_ONCE = 8;
+constexpr uint32_t MAX_QUANT_ROW_ONCE = 4;
 constexpr uint32_t QUANT_SPACE_FACTOR = 176 * 1024 / 11;  // up to 176KB for quant
 constexpr uint32_t COMPARE_COUNT_PER_BLOCK = 256 / sizeof(int32_t);
 constexpr uint32_t BIT_NUM_IN_INT64 = 64;
@@ -2066,7 +2066,7 @@ public:
                     quantRowOnce,           nOut};
                 BlockQuant<ArchTag> blockQuant(resource, quantParams);
                 MatrixCoord quantShape(totalTokenCount, nOut);
-                MatrixCoord quantBlockShape((uint16_t)(quantRowOnce), nOut);
+                MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
                 Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
                 uint32_t coreLoops = quantSwizzle.GetLoops();
                 uint32_t startLoopIdx =
@@ -2123,7 +2123,7 @@ public:
                         params.ptrOutput + gmPtrOutputOffset, params.layoutOutput, quantRowOnce, nOut};
                     BlockQuant<ArchTag> blockQuant(resource, quantParams, CEIL_UP(UB_BLOCK_SIZE));
                     MatrixCoord quantShape(currentM, nOut);
-                    MatrixCoord quantBlockShape((uint16_t)(quantRowOnce), nOut);
+                    MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
                     Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
                     uint32_t coreLoops = quantSwizzle.GetLoops();
                     uint32_t startLoopIdx =
