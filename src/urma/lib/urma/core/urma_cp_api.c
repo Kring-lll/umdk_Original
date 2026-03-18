@@ -1198,7 +1198,8 @@ static urma_target_jetty_t *urma_import_jfr_compat(urma_context_t *ctx, urma_rjf
 
 urma_target_jetty_t *urma_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, urma_token_t *token_value)
 {
-    if (ctx == NULL || ctx->dev == NULL || ctx->dev->sysfs_dev == NULL || ctx->ops == NULL || rjfr == NULL) {
+    if (ctx == NULL || ctx->dev == NULL || ctx->dev->sysfs_dev == NULL || ctx->ops == NULL || rjfr == NULL ||
+        (rjfr->trans_mode != URMA_TM_RM || rjfr->trans_mode != URMA_TM_RC)) {
         URMA_LOG_ERR("Invalid parameter.\n");
         errno = EINVAL;
         return NULL;
@@ -1908,7 +1909,8 @@ static urma_target_jetty_t *urma_import_jetty_compat(urma_context_t *ctx, urma_r
 
 urma_target_jetty_t *urma_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjetty, urma_token_t *token_value)
 {
-    if (ctx == NULL || ctx->dev == NULL || ctx->dev->sysfs_dev == NULL || ctx->ops == NULL || rjetty == NULL) {
+    if (ctx == NULL || ctx->dev == NULL || ctx->dev->sysfs_dev == NULL || ctx->ops == NULL || rjetty == NULL ||
+        (rjetty->trans_mode != URMA_TM_RM || rjetty->trans_mode != URMA_TM_RC)) {
         URMA_LOG_ERR("Invalid parameter.\n");
         errno = EINVAL;
         return NULL;
