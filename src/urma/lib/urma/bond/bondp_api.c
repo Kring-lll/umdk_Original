@@ -381,9 +381,44 @@ static int bondp_create_vjfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg, bondp_com
     return 0;
 }
 
+static int bondp_create_pjfr(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfr, urma_jfr_cfg_t *cfg)
+{
+    urma_jfr_cfg_t p_cfg = *cfg;
+    for (int i = 0; i < bdp_jfr->dev_num; ++i) {
+        if (!bdp_ctx->p_ctxs[i]) {
+            continue;
+        }
+        p_cfg[i].jfc = bdp_jfr->p_jfc[i];
+        urma_jfr_t *jfr = urma_create_jfr(bdp_ctx->p_ctxs[i], &p_cfg);
+        if (jfr == NULL) {
+            URMA_LOG_ERR("Failed to create pjfr %d.\n", i);
+            return -1;
+        }
+        bdp_jfr->p_jfr[i] = jfr;
+    }
+    return 0;
+}
+
 static int bondp_delete_vjfr(bondp_comp_t *bdp_jfr)
 {
     return urma_cmd_delete_jfr(&bdp_jfr->v_jfr);
+}
+
+static int bondp_delete_pjfr(bondp_comp_t *bdp_jfr)
+{
+    int ret = 0;
+    for (int i = 0; i < bdp_jfr->dev_num; ++i) {
+        if (bdp_jfr->p_jfr[i] == NULL) {
+            continue;
+        }
+        int p_ret = urma_delete_jfr(bdp_jfr->p_jfr[i]);
+        if (p_ret) {
+            URMA_LOG_ERR("Failed to delete pjfr %d, ret: %d.\n", i, ret);
+            ret = p_ret;
+        }
+        bdp_jfr->p_jfr[i] = NULL;
+    }
+    return ret;
 }
 
 static int bondp_add_jfr_p_vjetty_id_info(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfr, uint32_t jetty_id)
@@ -446,17 +481,26 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
         URMA_LOG_INFO("CONSTRAINT: JFR only support multi_path mode in matrix server."
             "Set to multi_path mode forcely.\n");
     }
-    bondp_comp_t *bdp_jfr = bondp_create_comp(ctx, BONDP_COMP_JFR, cfg);
+
+    bondp_comp_t *bdp_jfr = (bondp_comp_t *)calloc(1, sizeof(bondp_comp_t));
     if (bdp_jfr == NULL) {
-        URMA_LOG_ERR("Failed to create bondp comp\n");
         return NULL;
     }
+    bdp_jfr->bondp_ctx = bdp_ctx;
+    bdp_jfr->comp_type = BONDP_COMP_JFR;
+    atomic_init(&bdp_jfr->use_cnt.atomic_cnt, 0);
+
+    if (bondp_create_pjfr(bdp_ctx, bdp_jfr, cfg)) {
+        URMA_LOG_ERR("Failed to create pjfr\n");
+        goto delete_pjfr;
+    }
+
     if (bondp_create_vjfr(ctx, cfg, bdp_jfr)) {
         URMA_LOG_ERR("Failed to create vjfr\n");
-        goto DELETE_COMP;
+        goto delete_pjfr;
     }
     if (bondp_add_jfr_p_vjetty_id_info(bdp_ctx, bdp_jfr, bdp_jfr->v_jfr.jfr_id.id)) {
-        goto DELETE_VJFR;
+        goto delete_vjfr;
     }
     for (int i = 0; i < bdp_jfr->dev_num; ++i) {
         if (bdp_jfr->p_jfr[i] == NULL) {
@@ -467,7 +511,7 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
     bjetty_ctx_t *jfr_datapath_ctx = create_bjetty_ctx(ctx, bdp_jfr, URMA_UBAGG_WR_BUF_SIZE, URMA_UBAGG_HDR_BUF_SIZE);
     if (jfr_datapath_ctx == NULL) {
         URMA_LOG_ERR("Failed to create jfr datapath ctx");
-        goto DEL_P_VJFR_ID;
+        goto del_p_vjfr_id;
     }
     bdp_jfr->comp_ctx = jfr_datapath_ctx;
 
@@ -475,12 +519,14 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
     atomic_fetch_add(&bdp_jfc->use_cnt.atomic_cnt, 1);
 
     return &bdp_jfr->v_jfr;
-DEL_P_VJFR_ID:
+
+del_p_vjfr_id:
     bondp_del_jfr_p_vjetty_info(bdp_jfr);
-DELETE_VJFR:
+delete_vjfr:
     (void)bondp_delete_vjfr(bdp_jfr);
-DELETE_COMP:
-    bondp_delete_comp(bdp_jfr, BONDP_COMP_JFR);
+delete_pjfr:
+    bondp_delete_pjfr(bdp_jfr);
+    free(bdp_jfr);
     return NULL;
 }
 
@@ -512,16 +558,17 @@ urma_status_t bondp_delete_jfr(urma_jfr_t *jfr)
     */
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
     destroy_bjetty_ctx(bdp_jfr->comp_ctx);
-    int del_ret = bondp_delete_vjfr(bdp_jfr);
-    if (del_ret) {
-        URMA_LOG_ERR("Failed to delete_vjfr: %d\n", del_ret);
+
+    if (bondp_delete_vjfr(bdp_jfr) != URMA_SUCCESS) {
+        URMA_LOG_ERR("Failed to delete_vjfr\n");
         ret = URMA_FAIL;
     }
-    del_ret = bondp_delete_comp(bdp_jfr, BONDP_COMP_JFR);
-    if (del_ret != URMA_SUCCESS) {
-        URMA_LOG_ERR("Failed to delete_comp: %d", del_ret);
-        ret = URMA_FAIL;
+    if (bondp_delete_pjfr(bdp_jfr) != URMA_SUCCESS) {
+        URMA_LOG_ERR("Failed to delete pjfr\n");
+        ret = URMA_FAIL
     }
+    free(bdp_jfr);
+
     atomic_fetch_sub(&bdp_jfc->use_cnt.atomic_cnt, 1);
     return ret;
 }
