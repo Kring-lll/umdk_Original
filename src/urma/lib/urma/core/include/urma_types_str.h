@@ -40,7 +40,7 @@ static const char *const g_urma_port_state_str[] = {
 
 static inline const char *urma_port_state_to_string(urma_port_state_t state)
 {
-    if (state > URMA_PORT_ACTIVE_DEFER) {
+    if ((int)state < (int)URMA_PORT_NOP || state > URMA_PORT_ACTIVE_DEFER) {
         return "Invalid Value";
     }
     return g_urma_port_state_str[state];
@@ -65,7 +65,7 @@ static const char *const g_urma_speed_str[] = {
 
 static inline const char *urma_speed_to_string(urma_speed_t speed)
 {
-    if (speed > URMA_SP_800G) {
+    if ((int)speed < (int)URMA_SP_10M || speed > URMA_SP_800G) {
         return "Invalid Value";
     }
     return g_urma_speed_str[speed];
@@ -83,7 +83,7 @@ static const char *const g_urma_link_width_str[] = {
 
 static inline const char *urma_link_width_to_string(urma_link_width_t width)
 {
-    if (width > URMA_LINK_X32) {
+    if ((int)width < 0 || width > URMA_LINK_X32) {
         return "Invalid Value";
     }
     return g_urma_link_width_str[width];
@@ -159,7 +159,7 @@ static const char *const g_urma_trans_mode_str[] = {
 
 static inline const char *urma_trans_mode_to_string(urma_transport_mode_t mode)
 {
-    if (mode > URMA_TM_UM) {
+    if ((int)mode < (int)URMA_TM_RM || mode > URMA_TM_UM) {
         return "Invalid Value";
     }
     return g_urma_trans_mode_str[mode];
@@ -191,7 +191,7 @@ static const char *const g_urma_congestion_ctrl_alg_str[] = {
 
 static inline const char *urma_congestion_ctrl_alg_to_string(uint8_t bit)
 {
-    if (bit > URMA_TP_CC_DIP) {
+    if (bit > URMA_TP_CC_ACC) {
         return "Invalid Value";
     }
     return g_urma_congestion_ctrl_alg_str[bit];
@@ -238,6 +238,66 @@ static inline const char *urma_jfr_state_to_string(uint8_t bit)
         return "Invalid Value";
     }
     return g_urma_jfr_state[bit];
+}
+
+static inline const char *urma_status_to_string(urma_status_t status)
+{
+    if (status == URMA_SUCCESS) {
+        return "SUCCESS";
+    }
+    if (status == URMA_EAGAIN) {
+        return "EAGAIN(Resource temporarily unavailable)";
+    }
+    if (status == URMA_ENOMEM) {
+        return "ENOMEM(Failed to allocate memory)";
+    }
+    if (status == URMA_ENOPERM) {
+        return "ENOPERM(Operation not permitted)";
+    }
+    if (status == URMA_ETIMEOUT) {
+        return "ETIMEOUT(Operation time out)";
+    }
+    if (status == URMA_EINVAL) {
+        return "EINVAL(Invalid argument)";
+    }
+    if (status == URMA_EEXIST) {
+        return "EEXIST(Already exists)";
+    }
+    if (status == URMA_EINPROGRESS) {
+        return "EINPROGRESS(In progress)";
+    }
+    if (status == URMA_FAIL) {
+        return "FAIL(General failure)";
+    }
+    return "Unknown";
+}
+
+static const char *const g_urma_cr_status_str[] = {
+    [URMA_CR_SUCCESS] = "SUCCESS",
+    [URMA_CR_UNSUPPORTED_OPCODE_ERR] = "UNSUPPORTED_OPCODE_ERR",
+    [URMA_CR_LOC_LEN_ERR] = "LOC_LEN_ERR(Local data too long)",
+    [URMA_CR_LOC_OPERATION_ERR] = "LOC_OPERATION_ERR(Local operation error)",
+    [URMA_CR_LOC_ACCESS_ERR] = "LOC_ACCESS_ERR(Local memory access error)",
+    [URMA_CR_REM_RESP_LEN_ERR] = "REM_RESP_LEN_ERR(Remote response length error)",
+    [URMA_CR_REM_UNSUPPORTED_REQ_ERR] = "REM_UNSUPPORTED_REQ_ERR",
+    [URMA_CR_REM_OPERATION_ERR] = "REM_OPERATION_ERR(Remote operation error)",
+    [URMA_CR_REM_ACCESS_ABORT_ERR] = "REM_ACCESS_ABORT_ERR(Remote access/abort error)",
+    [URMA_CR_ACK_TIMEOUT_ERR] = "ACK_TIMEOUT_ERR(Retransmission exceeded max)",
+    [URMA_CR_RNR_RETRY_CNT_EXC_ERR] = "RNR_RETRY_CNT_EXC_ERR(Remote jfr no buffer)",
+    [URMA_CR_WR_FLUSH_ERR] = "WR_FLUSH_ERR(Jetty in error state)",
+    [URMA_CR_WR_SUSPEND_DONE] = "WR_SUSPEND_DONE",
+    [URMA_CR_WR_FLUSH_ERR_DONE] = "WR_FLUSH_ERR_DONE",
+    [URMA_CR_WR_UNHANDLED] = "WR_UNHANDLED(HW not processed)",
+    [URMA_CR_LOC_DATA_POISON] = "LOC_DATA_POISON",
+    [URMA_CR_REM_DATA_POISON] = "REM_DATA_POISON",
+};
+
+static inline const char *urma_cr_status_to_string(urma_cr_status_t status)
+{
+    if (status < URMA_CR_SUCCESS || status > URMA_CR_REM_DATA_POISON) {
+        return "Unknown";
+    }
+    return g_urma_cr_status_str[status];
 }
 
 #endif

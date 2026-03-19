@@ -9,7 +9,8 @@
  */
 
 #include <stdio.h>
-#include <stdint.h>
+#include <errno.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 #include <getopt.h>
@@ -1451,7 +1452,8 @@ int check_remote_cfg(perftest_config_t *cfg)
         int sock_fd = cfg->comm.sock_fd[i];
         int ret = sock_sync_data(sock_fd, OFF_SET, (char *)cfg, (char *)&remote_cfg);
         if (ret != 0) {
-            (void)fprintf(stderr, "Failed to sync remote configuration, pair_num:%u, errno:%s.\n", i, strerror(errno));
+            (void)fprintf(stderr, "[Socket] Failed to sync remote configuration, pair_num:%u, errno:%s.\n",
+                i, strerror(errno));
             return ret;
         }
 

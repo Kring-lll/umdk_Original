@@ -11,6 +11,7 @@
 #include <stdio.h>
 
 #include "urma_api.h"
+#include "urma_types_str.h"
 
 #include "perftest_parameters.h"
 #include "perftest_communication.h"
@@ -30,7 +31,7 @@ static int run_test(perftest_context_t *ctx, perftest_config_t *cfg)
     for (i = 0; i < cfg->pair_num; i++) {
         ret = sync_time(cfg->comm.sock_fd[i], "Start test");
         if (ret != 0) {
-            (void)fprintf(stderr, "Failed to sync time, start test.\n");
+            (void)fprintf(stderr, "[Socket] Failed to sync time, start test.\n");
             return ret;
         }
     }
@@ -77,7 +78,7 @@ static int run_test(perftest_context_t *ctx, perftest_config_t *cfg)
     for (i = 0; i < cfg->pair_num; i++) {
         ret = sync_time(cfg->comm.sock_fd[i], "End test");
         if (ret != 0) {
-            (void)fprintf(stderr, "Failed to sync time, End test.\n");
+            (void)fprintf(stderr, "[Socket] Failed to sync time, End test.\n");
             return ret;
         }
     }
@@ -93,13 +94,15 @@ static int rearm_jfc(perftest_context_t *ctx, const perftest_config_t *cfg)
     for (uint32_t i = 0; i < cfg->jettys; i++) {
         status = urma_rearm_jfc(ctx->jfc_s[i], false);
         if (status != URMA_SUCCESS) {
-            (void)fprintf(stderr, "Couldn't rearm jfc_s %u\n", i);
+            (void)fprintf(stderr, "Couldn't rearm jfc_s %u, status:%d(%s).\n",
+                i, (int)status, urma_status_to_string(status));
             return -1;
         }
         if (cfg->api_type == PERFTEST_SEND) {
             status = urma_rearm_jfc(ctx->jfc_r[i], false);
             if (status != URMA_SUCCESS) {
-                (void)fprintf(stderr, "Couldn't rearm jfc_r %u\n", i);
+                (void)fprintf(stderr, "Couldn't rearm jfc_r %u, status:%d(%s).\n",
+                    i, (int)status, urma_status_to_string(status));
                 return -1;
             }
         }

@@ -33,7 +33,7 @@ static int ip_set_sockopts(int sockfd)
      * the problem of the connection failure of the client is solved */
     ret = setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &enable_reuse, sizeof(enable_reuse));
     if (ret < 0) {
-        (void)fprintf(stderr, "server socket set_opt failed. enable_reuse:%d, ret: %d, err: [%d]%s.\n",
+        (void)fprintf(stderr, "[Socket] server socket set_opt failed. enable_reuse:%d, ret: %d, err: [%d]%s.\n",
             SO_REUSEPORT, ret, errno, strerror(errno));
         return ret;
     }
@@ -41,7 +41,7 @@ static int ip_set_sockopts(int sockfd)
     // Close Nagle algorithm, and fix 42ms delay problem.
     ret = setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &enable_nodelay, sizeof(enable_nodelay));
     if (ret < 0) {
-        (void)fprintf(stderr, "server socket set_opt failed. opt:%d, ret: %d, err: [%d]%s.\n",
+        (void)fprintf(stderr, "[Socket] server socket set_opt failed. opt:%d, ret: %d, err: [%d]%s.\n",
             TCP_NODELAY, ret, errno, strerror(errno));
         return ret;
     }
@@ -61,7 +61,7 @@ static int check_add_port(int port, const char *server_ip, struct addrinfo *hint
 
     num = getaddrinfo(server_ip, service, hints, res);
     if (num < 0) {
-        (void)fprintf(stderr, "%s for %s:%d\n", gai_strerror(num), server_ip, port);
+        (void)fprintf(stderr, "[Socket] %s for %s:%d\n", gai_strerror(num), server_ip, port);
         return -1;
     }
 
@@ -99,7 +99,7 @@ static int client_connect(perftest_config_t *cfg)
 
     for (i = 0; i < cfg->pair_num; i++) {
         if (check_add_port((comm->port + i), comm->server_ip, &hints, &res)) {
-            fprintf(stderr, "Problem in resolving basic address and port\n");
+            (void)fprintf(stderr, "[Socket] Problem in resolving basic address and port\n");
             free(comm->sock_fd);
             return -1;
         }
@@ -118,12 +118,13 @@ static int client_connect(perftest_config_t *cfg)
         freeaddrinfo(res);
 
         if (comm->sock_fd[i] < 0) {
-            (void)fprintf(stderr, "Failed to connect %s:%d\n\n", comm->server_ip, (comm->port + i));
+            (void)fprintf(stderr, "[Socket] Failed to connect %s:%d\n\n", comm->server_ip, (comm->port + i));
             goto create_client_error;
         }
 
         if (ip_set_sockopts(comm->sock_fd[i]) !=  0) {
-            (void)fprintf(stderr, "Failed to set_sockopts, sockfd:%d, errno: %s\n", comm->sock_fd[i], strerror(errno));
+            (void)fprintf(stderr, "[Socket] Failed to set_sockopts, sockfd:%d, errno: %s\n",
+                comm->sock_fd[i], strerror(errno));
             (void)close(comm->sock_fd[i]);
             goto create_client_error;
         }
@@ -156,7 +157,7 @@ static int server_connect(perftest_config_t *cfg)
     hints.ai_socktype = SOCK_STREAM;
 
     if (check_add_port(comm->port, NULL, &hints, &res)) {
-        fprintf(stderr, "Problem in resolving basic address and port\n");
+        (void)fprintf(stderr, "[Socket] Problem in resolving basic address and port\n");
         free(comm->sock_fd);
         return -1;
     }
@@ -169,7 +170,7 @@ static int server_connect(perftest_config_t *cfg)
         comm->listen_fd = socket(tmp->ai_family, tmp->ai_socktype, tmp->ai_protocol);
         if (comm->listen_fd >= 0) {
             if (ip_set_sockopts(comm->listen_fd) !=  0) {
-                (void)fprintf(stderr, "Failed to set_sockopts, sockfd:%d, errno: %s\n",
+                (void)fprintf(stderr, "[Socket] Failed to set_sockopts, sockfd:%d, errno: %s\n",
                     comm->listen_fd, strerror(errno));
                 goto close_listen_fd;
             }
@@ -182,12 +183,12 @@ static int server_connect(perftest_config_t *cfg)
     }
 
     if (comm->listen_fd < 0) {
-        (void)fprintf(stderr, "Failed to bind, port:%d.\n", comm->port);
+        (void)fprintf(stderr, "[Socket] Failed to bind, port:%d.\n", comm->port);
         goto close_listen_fd;
     }
 
     if (listen(comm->listen_fd, PERFTEST_MAX_CONNECTIONS) != 0) {
-        (void)fprintf(stderr, "Failed to listen, listenfd:%d, errno: [%d]%s\n",
+        (void)fprintf(stderr, "[Socket] Failed to listen, listenfd:%d, errno: [%d]%s\n",
             comm->listen_fd, errno, strerror(errno));
         goto close_listen_fd;
     }
@@ -195,13 +196,13 @@ static int server_connect(perftest_config_t *cfg)
     while (accept_num < cfg->pair_num) {
         comm->sock_fd[accept_num] = accept(comm->listen_fd, NULL, 0);
         if (comm->sock_fd[accept_num] < 0) {
-            (void)fprintf(stderr, "Failed to accept, listenfd:%d, errno: [%d]%s\n",
+            (void)fprintf(stderr, "[Socket] Failed to accept, listenfd:%d, errno: [%d]%s\n",
                 comm->listen_fd, errno, strerror(errno));
             goto create_server_error;
         }
 
         if (ip_set_sockopts(comm->sock_fd[accept_num]) !=  0) {
-            (void)fprintf(stderr, "Failed to set_sockopts, sockfd:%d, errno: [%d]%s\n",
+            (void)fprintf(stderr, "[Socket] Failed to set_sockopts, sockfd:%d, errno: [%d]%s\n",
                 comm->sock_fd[accept_num], errno, strerror(errno));
             (void)close(comm->sock_fd[accept_num]);
             goto create_server_error;
@@ -265,7 +266,7 @@ int sock_sync_data(int sock_fd, int size, char *local_data, char *remote_data)
 
     rc = write(sock_fd, local_data, (size_t)size);
     if (rc < size) {
-        (void)fprintf(stderr, "Failed writing data during sock_sync_data, errno: %s.\n", strerror(errno));
+        (void)fprintf(stderr, "[Socket] Failed writing data during sock_sync_data, errno: %s.\n", strerror(errno));
     } else {
         rc = 0;
     }
@@ -283,7 +284,8 @@ int sock_sync_data(int sock_fd, int size, char *local_data, char *remote_data)
         return 0;
     }
 
-    (void)fprintf(stderr, "Failed to read data during sock_sync_data, errno: %s total_size:%d, expect_size:%d.\n",
+    (void)fprintf(stderr, "[Socket] Failed to read data during sock_sync_data, errno: %s total_size:%d, "
+        "expect_size:%d.\n",
         strerror(errno), total_read_bytes, size);
     return -1;
 }
@@ -291,7 +293,7 @@ int sock_sync_data(int sock_fd, int size, char *local_data, char *remote_data)
 int sync_time(int sock_fd, char *a)
 {
     if (a == NULL) {
-        (void)fprintf(stderr, "Invalid parameter with a nullptr.\n");
+        (void)fprintf(stderr, "[Socket] Invalid parameter with a nullptr.\n");
         return -1;
     }
     int len = (int)strlen(a);
@@ -302,13 +304,13 @@ int sync_time(int sock_fd, char *a)
     }
     ret = sock_sync_data(sock_fd, len, a, b);
     if (ret != 0) {
-        (void)fprintf(stderr, "sync time error, %s, ret: %d.\n", a, ret);
+        (void)fprintf(stderr, "[Socket] sync time error, %s, ret: %d.\n", a, ret);
         goto sync_ret;
     }
     ret = memcmp(a, b, (unsigned long)len);
     if (ret != 0) {
         b[len] = '\0';
-        (void)fprintf(stderr, "sync time error, %s != %s.\n", a, b);
+        (void)fprintf(stderr, "[Socket] sync time error, %s != %s.\n", a, b);
         goto sync_ret;
     }
 sync_ret:
