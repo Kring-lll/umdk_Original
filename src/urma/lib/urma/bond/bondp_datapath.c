@@ -1288,6 +1288,103 @@ static inline bool is_target_device_error(urma_cr_status_t status)
     return false;
 }
 
+static int recreate_single_pjfs(bjetty_ctx_t *bjetty_ctx, uint32_t send_idx)
+{
+    bondp_comp_t *bdp_comp = bjetty_ctx->bdp_comp;
+    bondp_context_t *bdp_ctx = bjetty_ctx->bond_ctx;
+    if (bdp_comp == NULL || bdp_ctx == NULL || bdp_comp->comp_type != BONDP_COMP_JFS) {
+        return -1;
+    }
+    if (send_idx >= (uint32_t)bdp_comp->dev_num || bdp_comp->p_jfs[send_idx] == NULL || bdp_ctx->p_ctxs[send_idx] == NULL) {
+        return -1;
+    }
+
+    urma_jfs_t *old_pjfs = bdp_comp->p_jfs[send_idx];
+    urma_jfs_cfg_t cfg = old_pjfs->jfs_cfg;
+    urma_jetty_id_t old_pjfs_id = old_pjfs->jfs_id;
+    urma_jfs_t *new_pjfs = NULL;
+    urma_jfs_t *rollback_pjfs = NULL;
+    int ret = 0;
+
+    /*
+     * Serialize p_jfs pointer swap with p_vjetty_id_table updates to avoid readers
+     * observing mixed state when polling/decoding CR in parallel.
+     */
+    pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
+    bdp_comp->p_jfs[send_idx] = NULL;
+    bjetty_ctx->pjettys[send_idx] = NULL;
+    if (urma_delete_jfs(old_pjfs) != URMA_SUCCESS) {
+        bdp_comp->p_jfs[send_idx] = old_pjfs;
+        bjetty_ctx->pjettys[send_idx] = (urma_jetty_t *)old_pjfs;
+        pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+        return -1;
+    }
+
+    new_pjfs = urma_create_jfs(bdp_ctx->p_ctxs[send_idx], &cfg);
+    if (new_pjfs == NULL) {
+        /* Best-effort rollback to keep p_jfs slot valid. */
+        rollback_pjfs = urma_create_jfs(bdp_ctx->p_ctxs[send_idx], &cfg);
+        if (rollback_pjfs != NULL) {
+            rollback_pjfs->jfs_cfg.user_ctx = (uint64_t)bdp_comp;
+            bdp_comp->p_jfs[send_idx] = rollback_pjfs;
+            bjetty_ctx->pjettys[send_idx] = (urma_jetty_t *)rollback_pjfs;
+            ret = bdp_p_vjetty_id_table_add_without_lock(&bdp_ctx->p_vjetty_id_table, rollback_pjfs->jfs_id, JFS,
+                bdp_comp->v_jfs.jfs_id.id, bdp_comp);
+            if (ret != 0) {
+                URMA_LOG_ERR("Failed to rollback p_jfs mapping idx %u, ret: %d\n", send_idx, ret);
+            }
+        } else {
+            URMA_LOG_ERR("Failed to recreate and rollback p_jfs at idx %u\n", send_idx);
+        }
+        pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+        return -1;
+    }
+    new_pjfs->jfs_cfg.user_ctx = (uint64_t)bdp_comp;
+    bdp_comp->p_jfs[send_idx] = new_pjfs;
+    bjetty_ctx->pjettys[send_idx] = (urma_jetty_t *)new_pjfs;
+
+    (void)bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, old_pjfs_id, JFS);
+    ret = bdp_p_vjetty_id_table_add_without_lock(&bdp_ctx->p_vjetty_id_table, new_pjfs->jfs_id, JFS,
+        bdp_comp->v_jfs.jfs_id.id, bdp_comp);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to update p_vjetty_id_table when recreate p_jfs idx %u, ret: %d\n", send_idx, ret);
+        /* Best-effort rollback to old cfg. */
+        bdp_comp->p_jfs[send_idx] = NULL;
+        bjetty_ctx->pjettys[send_idx] = NULL;
+        (void)urma_delete_jfs(new_pjfs);
+        rollback_pjfs = urma_create_jfs(bdp_ctx->p_ctxs[send_idx], &cfg);
+        if (rollback_pjfs != NULL) {
+            rollback_pjfs->jfs_cfg.user_ctx = (uint64_t)bdp_comp;
+            bdp_comp->p_jfs[send_idx] = rollback_pjfs;
+            bjetty_ctx->pjettys[send_idx] = (urma_jetty_t *)rollback_pjfs;
+            ret = bdp_p_vjetty_id_table_add_without_lock(&bdp_ctx->p_vjetty_id_table, rollback_pjfs->jfs_id, JFS,
+                bdp_comp->v_jfs.jfs_id.id, bdp_comp);
+            if (ret != 0) {
+                URMA_LOG_ERR("Failed to restore p_vjetty mapping idx %u, ret: %d\n", send_idx, ret);
+            }
+        } else {
+            URMA_LOG_ERR("Failed to rollback p_jfs instance idx %u after mapping failure\n", send_idx);
+        }
+        pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+        return -1;
+    }
+
+    bjetty_ctx->pjettys_valid[send_idx] = true;
+    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+    URMA_LOG_INFO("Recreated p_jfs at idx %u due to CR status %d\n", send_idx, URMA_CR_ACK_TIMEOUT_ERR);
+    return 0;
+}
+
+static void bondp_handle_send_cr_error_generic(bjetty_ctx_t *bjetty_ctx, urma_cr_t *cr, uint32_t send_idx)
+{
+    if (cr->status == URMA_CR_ACK_TIMEOUT_ERR) {
+        if (bjetty_ctx->bdp_comp->comp_type != BONDP_COMP_JFS) {
+            return;
+        }
+        (void)recreate_single_pjfs(bjetty_ctx, send_idx);
+    }
+}
+
 static inline bool is_local_device_error(bjetty_ctx_t *bjetty_ctx, int send_idx)
 {
     return !bjetty_ctx->pjettys_valid[send_idx];
@@ -1512,12 +1609,16 @@ static bondp_cr_handler_ret_t handle_send(bjetty_ctx_t *bjetty_ctx, urma_cr_t *c
         URMA_LOG_DEBUG("All pjetty fail in handle_send\n");
         return CR_HANDLER_ERR_AND_COPY;
     }
+    bool local_device_error = is_local_device_error(bjetty_ctx, (int)send_idx);
+    if (cr->status != URMA_CR_SUCCESS) {
+        bondp_handle_send_cr_error_generic(bjetty_ctx, cr, send_idx);
+    }
     if (is_target_device_error(cr->status)) {
         /* target error and change target */
         return handle_target_fail(bjetty_ctx, send_idx, send_wr_id);
     }
     /* Do migration */
-    if (is_local_device_error(bjetty_ctx, (int)send_idx)) {
+    if (local_device_error) {
         /*
         Do migration when the current jetty fail and at least one jetty is valid.
         Migrate all WRs from the current jetty to the next valid jetty
