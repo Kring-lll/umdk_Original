@@ -1163,6 +1163,11 @@ static urma_target_jetty_t *urma_import_jfr_compat(urma_context_t *ctx, urma_rjf
     URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, get_tp_list);
     URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, import_jfr_ex);
 
+    if (urma_check_trans_mode_valid(rjfr->trans_mode)) {
+        URMA_LOG_ERR("Invalid trans_mode.\n");
+        return NULL;
+    }
+
     if (trans_mode == URMA_TM_RM || trans_mode == URMA_TM_UM) {
         urma_get_tp_cfg_t get_tp_cfg = {0};
         urma_fill_get_tp_cfg(&get_tp_cfg, trans_mode, rjfr->tp_type, &ctx->eid, &rjfr->jfr_id.eid);
@@ -1198,7 +1203,8 @@ static urma_target_jetty_t *urma_import_jfr_compat(urma_context_t *ctx, urma_rjf
 
 urma_target_jetty_t *urma_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, urma_token_t *token_value)
 {
-    if (ctx == NULL || ctx->dev == NULL || ctx->dev->sysfs_dev == NULL || ctx->ops == NULL || rjfr == NULL) {
+    if (ctx == NULL || ctx->dev == NULL || ctx->dev->sysfs_dev == NULL || ctx->ops == NULL || rjfr == NULL ||
+        (rjfr->trans_mode != URMA_TM_RM && rjfr->trans_mode != URMA_TM_RC)) {
         URMA_LOG_ERR("Invalid parameter.\n");
         errno = EINVAL;
         return NULL;
@@ -1872,6 +1878,11 @@ static urma_target_jetty_t *urma_import_jetty_compat(urma_context_t *ctx, urma_r
 
     URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, get_tp_list);
     URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, import_jetty_ex);
+
+    if (urma_check_trans_mode_valid(rjetty->trans_mode)) {
+        URMA_LOG_ERR("Invalid trans_mode.\n");
+        return NULL;
+    }
 
     if (trans_mode == URMA_TM_RM || trans_mode == URMA_TM_UM) {
         urma_get_tp_cfg_t get_tp_cfg = {0};

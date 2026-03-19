@@ -175,7 +175,7 @@ static bondp_ret_t import_pseg(bondp_context_t *bdp_ctx, bondp_seg_cfg_t *seg_cf
     p_tseg->handle = (uint64_t)(seg_cfg->bdp_imprt_tseg);
     seg_cfg->bdp_imprt_tseg->p_tseg[local_idx][target_idx] = p_tseg;
 
-    URMA_LOG_INFO("Import seg [%d]("EID_FMT")<-[%d]("EID_FMT")\n",
+    URMA_LOG_DEBUG("Import seg [%d]("EID_FMT")<-[%d]("EID_FMT")\n",
             local_idx, EID_ARGS(bdp_ctx->p_ctxs[local_idx]->eid),
             target_idx, EID_ARGS(p_tseg->seg.ubva.eid));
 
