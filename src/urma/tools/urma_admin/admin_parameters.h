@@ -279,6 +279,7 @@ typedef struct admin_config {
     char **argv;
     char *filename;
     bool specify_device;
+    bool brief_info; /* show command default: true(brief), false(all) */
     bool whole_info;
     bool help;
     char dev_name[URMA_ADMIN_MAX_DEV_NAME]; /* ubep device name */
@@ -309,8 +310,8 @@ typedef struct admin_cmd {
     int (*func)(admin_config_t *cfg);
 } admin_cmd_t;
 
-char *pop_arg(admin_config_t *cmds);
-int pop_arg_dev(admin_config_t *cmds);
+char *pop_arg(admin_config_t *cfg);
+int pop_arg_dev(admin_config_t *cfg);
 int pop_arg_ns(admin_config_t *cfg);
 int pop_arg_sharing(admin_config_t *cfg);
 int pop_arg_eid(admin_config_t *cfg);
@@ -318,5 +319,6 @@ int pop_arg_eid_idx(admin_config_t *cfg);
 int pop_arg_eid_mode(admin_config_t *cfg);
 
 int admin_get_ns_fd(const char *ns);
+bool admin_is_eid_idx_valid(const char *dev_name, uint32_t eid_index);
 
 #endif

@@ -8,10 +8,8 @@
  * History: 2025-02-05
  */
 
-#include <endian.h>
 #include <arpa/inet.h>
 #include <net/if.h>
-#include <sys/ioctl.h>
 #include <dirent.h>
 #include <stdatomic.h>
 #include <sys/epoll.h>
@@ -34,7 +32,8 @@
 #define UBAGG_MAX_EVENT 1
 #define UBAGG_ENABLE_RECOVERY "UBAGG_ENABLE_RECOVERY"
 
-static int get_dev_and_ctx_by_eid(urma_eid_t **topo_eid_list, urma_device_t **dev, urma_context_t **ctx, urma_device_t *device);
+static int get_dev_and_ctx_by_eid(urma_eid_t **topo_eid_list, urma_device_t **dev,
+                                  urma_context_t **ctx, urma_device_t *device);
 
 /* manager of global table in bonding device */
 bondp_global_context_t *g_bondp_global_ctx = NULL;
@@ -68,9 +67,9 @@ static urma_ops_t g_bond_ops = {
     .delete_jetty = bondp_delete_jetty,
     .import_jetty = bondp_import_jetty,
     .unimport_jetty = bondp_unimport_jetty,
-    .advise_jetty = bondp_advise_jetty,         /* In case we need to bind two non-UB devices */
-    .unadvise_jetty = bondp_unadvise_jetty,     /* In case we need to bind two non-UB devices */
-    .advise_jetty_async = NULL,                 /* UB doesn't have this ops */
+    .advise_jetty = NULL,
+    .unadvise_jetty = NULL,
+    .advise_jetty_async = NULL,
     .bind_jetty = bondp_bind_jetty,
     .unbind_jetty = bondp_unbind_jetty,
     .create_jetty_grp = NULL,
@@ -213,13 +212,14 @@ static int get_dev_and_ctx_by_name(char *dev_name, urma_device_t **dev, urma_con
  * This function will only be called in matrix server mode
  * so all devices are UB devices
  */
-static int get_dev_and_ctx_by_eid(urma_eid_t **topo_eid_list, urma_device_t **dev, urma_context_t **ctx, urma_device_t *device)
+static int get_dev_and_ctx_by_eid(urma_eid_t **topo_eid_list, urma_device_t **dev,
+                                  urma_context_t **ctx, urma_device_t *device)
 {
- 	urma_eid_info_t *eid_list;
- 	uint32_t cnt = 0;
+    urma_eid_info_t *eid_list;
+    uint32_t cnt = 0;
 
- 	eid_list = urma_get_eid_list(device, &cnt);
- 	for (uint32_t j = 0; eid_list != NULL && j < cnt; j++) {
+    eid_list = urma_get_eid_list(device, &cnt);
+    for (uint32_t j = 0; eid_list != NULL && j < cnt; j++) {
         for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
             if (topo_eid_list[i] == NULL) {
                 continue;
@@ -232,10 +232,10 @@ static int get_dev_and_ctx_by_eid(urma_eid_t **topo_eid_list, urma_device_t **de
                     urma_free_eid_list(eid_list);
                     return -1;
                 }
- 	        }        
+            }
         }
- 	}
- 	urma_free_eid_list(eid_list);
+    }
+    urma_free_eid_list(eid_list);
     return 0;
 }
 
@@ -291,17 +291,9 @@ static void bondp_uninit_v_ctx(bondp_context_t *bond_ctx)
 
 static int bondp_init_ctx_table(bondp_context_t *bond_ctx)
 {
-    if (bondp_bitmap_init(&bond_ctx->token_id_bitmap, BONDP_MAX_NUM_SEGS + 1)) {
-        URMA_LOG_ERR("Failed to create token_id_bitmap\n");
-        return -1;
-    }
-    if (bondp_id_store_init(&bond_ctx->ljetty_id_store, BONDP_MAX_NUM_JETTYS)) {
-        URMA_LOG_ERR("Failed to create ljetty_id_store");
-        goto FREE_TOKEN_ID_BITMAP;
-    }
     if (bdp_p_vjetty_id_table_create(&bond_ctx->p_vjetty_id_table, BONDP_MAX_NUM_JETTYS)) {
         URMA_LOG_ERR("Failed to create p_vjetty_id_table\n");
-        goto ID_STORE_UNINIT;
+        return -1;
     }
     if (bdp_r_p2v_jetty_id_table_create(&bond_ctx->remote_p2v_jetty_id_table, BONDP_MAX_NUM_JETTYS)) {
         URMA_LOG_ERR("Failed to create remote_p2v_jetty_id_table\n");
@@ -317,10 +309,6 @@ FREE_V_PTOKEN_ID_TABLE:
     (void)bdp_r_p2v_jetty_id_table_destroy(&bond_ctx->remote_p2v_jetty_id_table);
 FREE_P_VJETTY_ID_TABLE:
     bdp_p_vjetty_id_table_destroy(&bond_ctx->p_vjetty_id_table);
-ID_STORE_UNINIT:
-    bondp_id_store_uninit(&bond_ctx->ljetty_id_store);
-FREE_TOKEN_ID_BITMAP:
-    bondp_bitmap_uninit(&bond_ctx->token_id_bitmap);
     return -1;
 }
 
@@ -329,11 +317,9 @@ static void bondp_uninit_ctx_table(bondp_context_t *bond_ctx)
     bdp_r_v2p_token_id_table_destroy(&bond_ctx->remote_v2p_token_id_table);
     bdp_r_p2v_jetty_id_table_destroy(&bond_ctx->remote_p2v_jetty_id_table);
     bdp_p_vjetty_id_table_destroy(&bond_ctx->p_vjetty_id_table);
-    bondp_id_store_uninit(&bond_ctx->ljetty_id_store);
-    bondp_bitmap_uninit(&bond_ctx->token_id_bitmap);
 }
 
-static bondp_context_t* bondp_create_ctx()
+static bondp_context_t* bondp_create_ctx(void)
 {
     bondp_context_t *bond_ctx = NULL;
 
@@ -450,11 +436,11 @@ DELETE_SLAVE_CTX:
 static int init_matrix_slave_devices(bondp_context_t *bond_ctx, urma_context_aggr_mode_t aggr_mode)
 {
     int device_num = 0;
- 	urma_device_t **device_list = urma_get_device_list(&device_num);
- 	if (device_list == NULL || device_num == 0) {
- 	    URMA_LOG_ERR("urma get device list failed!\n");
- 	    return -1;
- 	}
+    urma_device_t **device_list = urma_get_device_list(&device_num);
+    if (device_list == NULL || device_num == 0) {
+        URMA_LOG_ERR("urma get device list failed!\n");
+        return -1;
+    }
     bond_ctx->topo_map = g_bondp_global_ctx->topo_map;
     bondp_topo_agg_dev_t *topo_info = get_topo_dev_info_by_agg_eid(bond_ctx->topo_map, &bond_ctx->v_ctx.eid);
     if (topo_info == NULL) {
@@ -493,7 +479,7 @@ static int init_matrix_slave_devices(bondp_context_t *bond_ctx, urma_context_agg
     }
 
     urma_context_t *p_ctxs[URMA_UBAGG_DEV_MAX_NUM] = {0};
-    for (int i = 0; i < device_num; i++){
+    for (int i = 0; i < device_num; i++) {
         if (device_list[i]->type != URMA_TRANSPORT_UB) {
             continue;
         }

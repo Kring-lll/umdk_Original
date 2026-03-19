@@ -14,10 +14,6 @@
 
 #include <mutex>
 
-#ifdef UB_AGG
-#include "urma_ubagg.h"
-#endif /* UB_AGG */
-
 #include "dlock_types.h"
 #include "urma_ctx.h"
 #include "dlock_cipher.h"
@@ -45,7 +41,7 @@ public:
     void fill_send_wr(urma_jfs_wr_t *wr, urma_sge_t *src_sge, uint64_t wr_id, uint32_t len) const;
     dlock_status_t post_send(uint8_t *buf, uint32_t len, uint64_t wr_id) const override;
     dlock_status_t construct_jetty_xchg_info(struct urma_init_body *jetty_info, jetty_mgr *p_jetty_mgr) const override;
-    dlock_status_t create_jetty(void);
+    dlock_status_t create_jetty(urma_device_attr_t &dev_attr);
     dlock_status_t import_jetty(const urma_jetty_id_t jetty_id, uint32_t token_policy, uint32_t token);
     dlock_status_t bind_jetty(void) const;
     bool check_construct_succeed(jetty_mgr_uniconn *p_mgr_uniconn, bool rx_buf_check) const;
@@ -58,10 +54,6 @@ public:
     dlock_status_t post_read(uint32_t offset, uint64_t wr_id) const override;
     dlock_status_t post_faa(uint32_t offset, uint64_t operand, uint64_t wr_id) const override;
     dlock_status_t post_cas(uint32_t offset, uint64_t cmp_data, uint64_t swap_data, uint64_t wr_id) const override;
-
-#ifdef UB_AGG
-    dlock_status_t add_urma_bond_rjetty_id_info(urma_bond_add_rjetty_id_info_in_t *info) const;
-#endif /* UB_AGG */
 
 private:
     inline uint32_t get_jfr_depth(void) const
@@ -80,10 +72,6 @@ private:
     void modify_jetty_err(void);
 
     void fill_base_wr(urma_jfs_wr_t *wr, uint64_t wr_id) const override;
-
-#ifdef UB_AGG
-    dlock_status_t get_urma_bond_id_info(urma_bond_id_info_out_t *bond_id_info) const override;
-#endif /* UB_AGG */
 
     urma_jfr_t *m_share_jfr; /* for UB dev */
     urma_jetty_t *m_jetty;

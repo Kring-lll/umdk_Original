@@ -40,12 +40,6 @@
 #define PERFTEST_SIZE_CQ_MOD_LIMIT (8192)
 #define PERFTEST_BW_NO_PEAK_INTERS (20000)
 
-#define PERFTEST_INLINE_LAT_RC (220)
-#define PERFTEST_INLINE_LAT_RM (236)
-#define PERFTEST_INLINE_LAT_UM (188)
-#define PERFTEST_DEF_INLINE_LAT PERFTEST_INLINE_LAT_RC
-#define PERFTEST_DEF_INLINE_BW (0)
-
 #define PERFTEST_DEF_CACHE_LINE_SIZE (64)
 #define PERFTEST_PAGE_SIZE (4096)
 
@@ -112,7 +106,7 @@
 #define PERFTEST_CHAR_MAX_VALUE (256)
 
 #define PERFTEST_RESULT_LINE "---------------------------------------------------------------------------------------\n"
-
+#define PERFTEST_INVALID_PRIORITY  (255)
 
 typedef enum perftest_api_type {
     PERFTEST_READ,

@@ -47,34 +47,6 @@ static void print_log(int level, char *message)
     printf("%s|%s\n", log_level_str[level], message);
 }
 
-static void check_device_inline(perftest_config_t *cfg)
-{
-    uint32_t default_inline = 0;
-    uint32_t expect_inline = 0;
-    if (cfg->tp_type == URMA_TRANSPORT_UB) {
-        if (cfg->type == PERFTEST_LAT) {
-            if (cfg->api_type == PERFTEST_WRITE) {
-                default_inline = PERFTEST_DEF_INLINE_LAT;
-                expect_inline = default_inline;
-            } else if (cfg->api_type == PERFTEST_SEND) {
-                default_inline = PERFTEST_DEF_INLINE_LAT;
-                expect_inline = (cfg->trans_mode == URMA_TM_RC) ? PERFTEST_INLINE_LAT_RC :
-                    (cfg->trans_mode == URMA_TM_RM) ? PERFTEST_INLINE_LAT_RM : PERFTEST_INLINE_LAT_UM;
-            }
-        }
-    }
-
-    if (cfg->inline_size == default_inline) {
-        cfg->inline_size = expect_inline;
-    }
-    /* inline_size check only available for latency test */
-    if (cfg->type == PERFTEST_LAT && cfg->inline_size != default_inline &&
-        cfg->inline_size > expect_inline) {
-        (void)fprintf(stderr, "The recommended inline_size is no larger than: %u, but it is: %u, "
-            "which may lead to performance reduction.\n", expect_inline, cfg->inline_size);
-    }
-}
-
 static int check_share_jfr(perftest_config_t *cfg, urma_device_t *urma_dev)
 {
     if (urma_dev->type == URMA_TRANSPORT_UB && cfg->share_jfr == false) {
@@ -105,7 +77,6 @@ static int check_dev_cap(perftest_context_t *ctx, perftest_config_t *cfg)
     }
 
     cfg->tp_type = urma_dev->type;
-    check_device_inline(cfg);
 
     if (cfg->sge_num > ctx->dev_attr.dev_cap.max_jfs_sge) {
         (void)printf("Error: max_jfs_sge out of range, max_jfs_sge:%u.\n", ctx->dev_attr.dev_cap.max_jfs_sge);
@@ -161,6 +132,20 @@ static int check_dev_cap(perftest_context_t *ctx, perftest_config_t *cfg)
     return 0;
 }
 
+static int get_jetty_priority_by_tp_type(urma_device_attr_t *dev_attr, union urma_tp_type_en tp_type)
+{
+    int pri = -1;
+
+    for (int i = 0; i <= URMA_MAX_PRIORITY; i++) {
+        if (tp_type.value == dev_attr->dev_cap.priority_info[i].tp_type.value) {
+            pri = i;
+            return pri;
+        }
+    }
+    fprintf(stderr, "Failed to get sl resources");
+    return -1;
+}
+
 static int init_device(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     urma_status_t status;
@@ -199,6 +184,24 @@ static int init_device(perftest_context_t *ctx, perftest_config_t *cfg)
         goto uninit;
     }
 
+    union urma_tp_type_en tp_type = {0};
+    if (cfg->priority == PERFTEST_INVALID_PRIORITY) {
+        if (cfg->use_ctp) {
+            tp_type.bs.ctp = 1;
+            cfg->priority = (uint8_t)get_jetty_priority_by_tp_type(&ctx->dev_attr, tp_type);
+        } else {
+            tp_type.bs.rtp = 1;
+            cfg->priority = (uint8_t)get_jetty_priority_by_tp_type(&ctx->dev_attr, tp_type);
+        }
+        if (cfg->priority > URMA_MAX_PRIORITY) {
+            (void)fprintf(stderr, "The priority parameter %hhu is invalid; it should be 0-15.\n",
+                cfg->priority);
+        } else {
+            (void)fprintf(stderr, "Warning: %s should set priority to %hhu.\n",
+                (cfg->use_ctp == true ? "ctp" : "rtp"), cfg->priority);
+        }
+    }
+
     if (cfg->enable_user_tp == true &&
         (ctx->dev_attr.dev_cap.sub_trans_mode_cap & URMA_RC_USER_TP) == 0) {
         (void)fprintf(stderr, "The UB device does not support!\n");
@@ -213,7 +216,7 @@ static int init_device(perftest_context_t *ctx, perftest_config_t *cfg)
     ctx->eid = ctx->urma_ctx->eid;
 
     if (cfg->enable_aggr_mode) {
-        status = urma_set_context_opt( ctx->urma_ctx, URMA_OPT_AGGR_MODE, &cfg->aggr_mode, sizeof(cfg->aggr_mode));
+        status = urma_set_context_opt(ctx->urma_ctx, URMA_OPT_AGGR_MODE, &cfg->aggr_mode, sizeof(cfg->aggr_mode));
         if (status != URMA_SUCCESS) {
             (void)fprintf(stderr, "Failed to set aggregation mode, status:%d!\n", (int)status);
             goto del_ctx;
@@ -729,14 +732,14 @@ static int register_mem(perftest_context_t *ctx, perftest_config_t *cfg)
     ctx->page_size = cfg->page_size;
     if (cfg->use_huge_page) {
         switch (cfg->huge_page) {
-        case UB_HUGE_PAGE_SIZE_2MB:
-            ctx->page_size = page_size_2MB;
-            break;
-        case UB_HUGE_PAGE_SIZE_1GB:
-            ctx->page_size = page_size_1GB;
-            break;
-        default:
-            break;
+            case UB_HUGE_PAGE_SIZE_2MB:
+                ctx->page_size = page_size_2MB;
+                break;
+            case UB_HUGE_PAGE_SIZE_1GB:
+                ctx->page_size = page_size_1GB;
+                break;
+            default:
+                break;
         }
     }
 

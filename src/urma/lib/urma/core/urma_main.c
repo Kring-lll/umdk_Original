@@ -17,6 +17,8 @@
 #include <errno.h>
 #include <stdio.h>
 #include <syslog.h>
+#include <unistd.h>
+#include <sys/syscall.h>
 
 #include "urma_device.h"
 #include "urma_log.h"
@@ -388,6 +390,13 @@ urma_status_t urma_query_device(urma_device_t *dev, urma_device_attr_t *dev_attr
     }
 
     urma_update_port_attr(dev->sysfs_dev);
+
+    int ret = urma_query_device_attr(dev->sysfs_dev);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to query device attr, ret: %d.\n", ret);
+        return URMA_FAIL;
+    }
+
     (void)memcpy(dev_attr, &dev->sysfs_dev->dev_attr, sizeof(urma_device_attr_t));
 
     return URMA_SUCCESS;
@@ -633,12 +642,14 @@ static __attribute__((constructor)) void liburma_init(void)
 #if !defined(__OHOS__) && !defined(__OH__) && !defined(__ANDROID__)
     urma_discover_sysfs_path();
 #endif
-    syslog(LOG_INFO, "LogTag_URMA|%s[%d]|Start to init liburma.\n", __func__, __LINE__);
+    syslog(LOG_INFO, "URMA|liburma|%ld|-|%s[%d]|Start to init liburma.\n",
+        (long)syscall(__NR_gettid), __func__, __LINE__);
     return;
 }
 
 static __attribute__((destructor)) void liburma_uninit(void)
 {
-    syslog(LOG_INFO, "LogTag_URMA|%s[%d]|Finish to uninit liburma.\n", __func__, __LINE__);
+    syslog(LOG_INFO, "URMA|liburma|%ld|-|%s[%d]|Finish to uninit liburma.\n",
+        (long)syscall(__NR_gettid), __func__, __LINE__);
     return;
 }

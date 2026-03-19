@@ -22,17 +22,24 @@
 #include "utils.h"
 
 namespace dlock {
-dlock_status_t jetty_mgr_uniconn::create_jetty(void)
+dlock_status_t jetty_mgr_uniconn::create_jetty(urma_device_attr_t &dev_attr)
 {
     urma_jfs_cfg_t jfs_cfg;
     urma_jfr_cfg_t jfr_cfg;
     urma_jetty_cfg_t jetty_cfg;
 
+    int priority = get_jetty_priority_by_tp_type(dev_attr, URMA_RTP);
+    if (priority < 0) {
+        DLOCK_LOG_ERR("Failed to get jetty priority by tp_type: %d, dev_name: %s.",
+            URMA_RTP, (m_urma_ctx->get_urma_dev())->name);
+        return DLOCK_FAIL;
+    }
+
     static_cast<void>(memset(&jfs_cfg, 0, sizeof(urma_jfs_cfg_t)));
     static_cast<void>(memset(&jfr_cfg, 0, sizeof(urma_jfr_cfg_t)));
     static_cast<void>(memset(&jetty_cfg, 0, sizeof(urma_jetty_cfg_t)));
-    jfs_cfg_init(jfs_cfg, URMA_TM_RC, URMA_OL);
-    jfr_cfg_init(jfr_cfg, URMA_TM_RC, URMA_OL);
+    jfs_cfg_init(jfs_cfg, dev_attr, URMA_TM_RC, URMA_OL, static_cast<uint8_t>(priority));
+    jfr_cfg_init(jfr_cfg, dev_attr, URMA_TM_RC, URMA_OL);
     jetty_cfg.jfs_cfg = jfs_cfg;
 
     if (m_urma_ctx->get_urma_dev_type() == URMA_TRANSPORT_UB) {
@@ -103,7 +110,15 @@ dlock_status_t jetty_mgr_uniconn::jetty_mgr_uniconn_init(urma_ctx *p_urma_ctx, u
         return ret;
     }
 
-    ret = create_jetty();
+    urma_device_attr_t dev_attr;
+    urma_status_t rc = urma_query_device(m_urma_ctx->get_urma_dev(), &dev_attr);
+    if (rc != URMA_SUCCESS) {
+        DLOCK_LOG_ERR("Failed to query urma device, rc: %d, dev_name: %s",
+            static_cast<int>(rc), (m_urma_ctx->get_urma_dev())->name);
+        return DLOCK_FAIL;
+    }
+
+    ret = create_jetty(dev_attr);
     if (ret != DLOCK_SUCCESS) {
         DLOCK_LOG_ERR("create jetty failed");
         return ret;
@@ -195,12 +210,12 @@ void jetty_mgr_uniconn::modify_jetty_err(void)
     attr.mask = JETTY_STATE;
     attr.state = URMA_JETTY_STATE_ERROR;
 
-    m_modify_jetty2err = true;
+    m_modify_jetty2err.store(true);
     urma_status_t ret = urma_modify_jetty(m_jetty, &attr);
     if (ret != URMA_SUCCESS) {
         DLOCK_LOG_ERR("failed to modify jetty to URMA_JETTY_STATE_ERROR, ret: %d", static_cast<int>(ret));
         /* If modify jetty to error state failed, don't wait URMA_CR_WR_FLUSH_ERR_DONE CR */
-        m_flush_err_done = true;
+        m_flush_err_done.store(true);
     }
 
     modify_share_jfr_err();
@@ -230,12 +245,9 @@ dlock_status_t jetty_mgr_uniconn::construct_jetty_xchg_info(struct urma_init_bod
     static_cast<void>(memcpy(&(jetty_info->jetty_id), &(p_mgr_uniconn->m_jetty->jetty_id), sizeof(urma_jetty_id_t)));
     jetty_info->token = get_jfr_token();
     jetty_info->flag.bs.token_policy = get_token_policy();
+    jetty_info->flag.bs.reserved = 0;
 
-#ifdef UB_AGG
-    return construct_urma_bond_id_xchg_info(jetty_info);
-#else
     return DLOCK_SUCCESS;
-#endif /* UB_AGG */
 }
 
 dlock_status_t jetty_mgr_uniconn::import_jetty(const urma_jetty_id_t jetty_id, uint32_t token_policy, uint32_t token)
@@ -530,49 +542,4 @@ dlock_status_t jetty_mgr_uniconn::post_cas(uint32_t offset, uint64_t cmp_data, u
 
     return DLOCK_SUCCESS;
 }
-
-#ifdef UB_AGG
-dlock_status_t jetty_mgr_uniconn::get_urma_bond_id_info(urma_bond_id_info_out_t *bond_id_info) const
-{
-    urma_bond_id_info_in_t in = {0};
-    in.jetty = m_jetty;
-    in.type = URMA_JETTY;
-
-    urma_user_ctl_in_t user_ctl_in = {
-        .addr = (uint64_t)&in,
-        .len = sizeof(urma_bond_id_info_in_t),
-        .opcode = URMA_USER_CTL_BOND_GET_ID_INFO,
-    };
-
-    urma_user_ctl_out_t user_ctl_out = {
-        .addr = (uint64_t)bond_id_info,
-        .len = sizeof(urma_bond_id_info_out_t),
-    };
-
-    if (urma_user_ctl(m_jetty->urma_ctx, &user_ctl_in, &user_ctl_out)) {
-        DLOCK_LOG_ERR("failed to get ub bond jetty id info");
-        return DLOCK_FAIL;
-    }
-    return DLOCK_SUCCESS;
-}
-
-dlock_status_t jetty_mgr_uniconn::add_urma_bond_rjetty_id_info(urma_bond_add_rjetty_id_info_in_t *info) const
-{
-    urma_user_ctl_in_t user_ctl_in = {
-        .addr = (uint64_t)info,
-        .len = sizeof(urma_bond_add_rjetty_id_info_in_t),
-        .opcode = URMA_USER_CTL_BOND_ADD_RJETTY_ID_INFO,
-    };
-    urma_user_ctl_out_t user_ctl_out = {
-        .addr = 0,
-        .len = 0,
-    };
-
-    if (urma_user_ctl(m_urma_ctx->m_urma_ctx, &user_ctl_in, &user_ctl_out)) {
-        DLOCK_LOG_ERR("failed to add urma bond rjetty id info");
-        return DLOCK_FAIL;
-    }
-    return DLOCK_SUCCESS;
-}
-#endif /* UB_AGG */
 };

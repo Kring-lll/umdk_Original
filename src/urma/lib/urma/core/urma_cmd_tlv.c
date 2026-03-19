@@ -13,6 +13,9 @@
 
 #include "urma_cmd_tlv.h"
 
+/* between 1 and MAX_ERRNO */
+#define URMA_KERNEL_DRV_ERRNO 2048
+
 static inline void fill_attr(urma_cmd_attr_t *attr, uint16_t type, uint16_t field_size, uint16_t el_num,
                              uint16_t el_size, uintptr_t data)
 {
@@ -48,8 +51,9 @@ static int urma_tlv_ioctl(int ioctl_fd, urma_cmd_t cmd, urma_cmd_attr_t *args, u
      };
     int ret = ioctl(ioctl_fd, URMA_CMD, &hdr);
     if (ret != 0) {
-        URMA_LOG_ERR("ioctl failed, ret:%d, errno:%d, cmd:%u.\n", ret, errno, hdr.command);
-     }
+        URMA_LOG_ERR("ioctl failed, ret:%d, errno:%d, cmd:%u, kdrv_err: %d.\n",
+            ret, errno, hdr.command, (int)(errno == URMA_KERNEL_DRV_ERRNO));
+    }
     return ret;
 }
 
@@ -1262,6 +1266,13 @@ int urma_ioctl_query_dev_attr(int ioctl_fd, urma_cmd_query_device_attr_t *arg)
     ATTR_ARRAY(a++, QUERY_DEVICE_OUT_PORT_ATTR_ACTIVE_WIDTH, arg->out.attr.port_attr, active_width);
     ATTR_ARRAY(a++, QUERY_DEVICE_OUT_PORT_ATTR_ACTIVE_SPEED, arg->out.attr.port_attr, active_speed);
     ATTR_ARRAY(a++, QUERY_DEVICE_OUT_PORT_ATTR_ACTIVE_MTU, arg->out.attr.port_attr, active_mtu);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_RM_ORDER_CAP, arg->out.attr.dev_cap.rm_order_cap.value);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_RC_ORDER_CAP, arg->out.attr.dev_cap.rc_order_cap.value);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_RM_TP_CAP, arg->out.attr.dev_cap.rm_tp_cap.value);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_RC_TP_CAP, arg->out.attr.dev_cap.rc_tp_cap.value);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_UM_TP_CAP, arg->out.attr.dev_cap.um_tp_cap.value);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_TP_FEATURE, arg->out.attr.dev_cap.tp_feature.value);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_PRIORITY_INFO, arg->out.attr.dev_cap.priority_info);
 
     return urma_tlv_ioctl(ioctl_fd, URMA_CMD_QUERY_DEV_ATTR, attrs, sizeof(attrs));
 }
@@ -1284,7 +1295,7 @@ int urma_ioctl_wait_jfc(int ioctl_fd, urma_cmd_jfce_wait_t *arg)
     int ret = ioctl(ioctl_fd, URMA_CMD_WAIT_JFC, &hdr);
     if (ret != 0) {
         URMA_LOG_ERR("wait jfc ioctl failed, ret:%d, errno:%d.\n", ret, errno);
-     }
+    }
     return ret;
 }
 
@@ -1304,7 +1315,7 @@ int urma_ioctl_get_async_event(int ioctl_fd, urma_cmd_async_event_t *arg)
     int ret = ioctl(ioctl_fd, URMA_CMD_GET_ASYNC_EVENT, &hdr);
     if (ret != 0) {
         URMA_LOG_ERR("get async event ioctl failed, ret:%d, errno:%d.\n", ret, errno);
-     }
+    }
     return ret;
 }
 
@@ -1400,7 +1411,7 @@ int urma_ioctl_wait_notify(int ioctl_fd, urma_cmd_wait_notify_t *arg)
     int ret = ioctl(ioctl_fd, URMA_CMD_WAIT_NOTIFY, &hdr);
     if (ret != 0) {
         URMA_LOG_ERR("wait notify ioctl failed, ret:%d, errno:%d.\n", ret, errno);
-     }
+    }
     return ret;
 }
 

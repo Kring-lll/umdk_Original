@@ -30,6 +30,7 @@ typedef enum urma_bond_user_ctl_opcode {
     URMA_USER_CTL_BOND_GET_SEG_INFO,
     URMA_USER_CTL_BOND_ADD_REMOTE_SEG_INFO,
     URMA_USER_CTL_BOND_SET_AGGR_MODE,
+    URMA_USER_CTL_BOND_ENABLE_SEG_CACHE,
 } urma_bond_user_ctl_opcode_t;
 
 typedef struct urma_bond_id_info_in {
@@ -40,12 +41,14 @@ typedef struct urma_bond_id_info_in {
     urma_target_type_t type;
 } urma_bond_id_info_in_t;
 
+#define PORT_NUM (9)
+#define IODIE_NUM (2)
+
 typedef struct urma_bond_id_info_out {
-    urma_jetty_id_t base_id;
     urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
     int dev_num;
-    bool is_in_matrix_server;
     bool is_multipath;
+    uint32_t ports[IODIE_NUM][PORT_NUM];
 } urma_bond_id_info_out_t;
 
 typedef struct urma_bond_id_info_out urma_bond_add_rjfr_id_info_in_t;

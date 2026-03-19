@@ -16,7 +16,6 @@
 #include "qbuf_list.h"
 #include "umq_ub_api.h"
 
-#define DEFAULT_PRIORITY 5
 #define DEFAULT_RNR_RETRY 6      // Retry 6 times
 #define DEFAULT_ERR_TIMEOUT 2
 #define DEFAULT_MIN_RNR_TIMER 19 // RNR single retransmission time: 2us*2^19 = 1.049s
@@ -24,9 +23,11 @@
 #define UMQ_MAX_QBUF_NUM 1
 #define UMQ_ENABLE_INLINE_LIMIT_SIZE 32
 #define UMQ_INLINE_ENABLE 1
+#define UMQ_LEN_ALIGNMENT_4 4
 
 static util_id_allocator_t g_umq_ub_id_allocator = {0};
 static ub_queue_ctx_list_t g_umq_ub_queue_ctx_list;
+static const char *g_umq_ub_tp_type_str[UMQ_TP_TYPE_MAX + 1] = {"rtp", "ctp", "utp", "unknown"};
 
 static inline uint32_t umq_ub_bind_fature_allowlist_get(void)
 {
@@ -36,6 +37,34 @@ static inline uint32_t umq_ub_bind_fature_allowlist_get(void)
 static inline bool umq_ub_bind_feature_check(uint32_t local_feature, uint32_t remote_feature)
 {
     return ((local_feature ^ remote_feature) & (~umq_ub_bind_fature_allowlist_get())) == 0;
+}
+
+umq_tp_mode_t umq_tp_mode_convert(urma_transport_mode_t tp_mode)
+{
+    switch (tp_mode) {
+        case URMA_TM_RC:
+            return UMQ_TM_RC;
+        case URMA_TM_RM:
+            return UMQ_TM_RM;
+        case URMA_TM_UM:
+            return UMQ_TM_UM;
+        default:
+            return UMQ_TM_RC;
+    };
+}
+
+umq_tp_type_t umq_tp_type_convert(urma_tp_type_t tp_type)
+{
+    switch (tp_type) {
+        case URMA_RTP:
+            return UMQ_TP_TYPE_RTP;
+        case URMA_CTP:
+            return UMQ_TP_TYPE_CTP;
+        case URMA_UTP:
+            return UMQ_TP_TYPE_UTP;
+        default:
+            return UMQ_TP_TYPE_RTP;
+    };
 }
 
 int umq_ub_bind_info_check(ub_queue_t *queue, umq_ub_bind_info_t *info)
@@ -85,13 +114,13 @@ int umq_ub_bind_info_check(ub_queue_t *queue, umq_ub_bind_info_t *info)
 
     if (queue->tp_mode != queue_info->tp_mode) {
         UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, tp_mode misatch, local is %u but remote %u\n",
-            EID_ARGS(*eid), id, queue->tp_mode, queue_info->tp_mode);
+            EID_ARGS(*eid), id, umq_tp_mode_convert(queue->tp_mode), umq_tp_mode_convert(queue_info->tp_mode));
         return -UMQ_ERR_EINVAL;
     }
 
     if (queue->tp_type != queue_info->tp_type) {
         UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, tp_type misatch, local is %u but remote %u\n",
-            EID_ARGS(*eid), id, queue->tp_type, queue_info->tp_type);
+            EID_ARGS(*eid), id, umq_tp_type_convert(queue->tp_type), umq_tp_type_convert(queue_info->tp_type));
         return -UMQ_ERR_EINVAL;
     }
 
@@ -107,7 +136,7 @@ int umq_ub_bind_info_check(ub_queue_t *queue, umq_ub_bind_info_t *info)
         return -UMQ_ERR_EINVAL;
     }
 
-    if (queue->bind_ctx != NULL || queue_info->is_binded) {
+    if (queue->bind_ctx != NULL || queue_info->is_binded != 0) {
         UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq has already been binded\n", EID_ARGS(*eid), id);
         return -UMQ_ERR_EEXIST;
     }
@@ -334,6 +363,9 @@ static urma_target_jetty_t *umq_ub_connect_jetty(ub_queue_t *queue, umq_ub_bind_
             EID_ARGS(rjetty.jetty_id.eid), rjetty.jetty_id.id, i, errno);
         return NULL;
     }
+    if (queue->tp_mode != URMA_TM_RC) {
+        return tjetty;
+    }
 
     urma_status_t status = urma_bind_jetty(queue->jetty[i], tjetty);
     if (status != URMA_SUCCESS && status != URMA_EEXIST) {
@@ -392,7 +424,12 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
     }
 
     ctx->remote_pid = info->dev_info->pid;
-    strcpy(ctx->remote_namespace, info->dev_info->bind_namespace);
+    if (info->dev_info->namespace_len > UMQ_UB_NAMESPACE_SIZE) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "dev info namespace len %u exceeds the maximum length %u\n",
+            info->dev_info->namespace_len, UMQ_UB_NAMESPACE_SIZE);
+        goto RESET_BIND_CTX;
+    }
+    memcpy(ctx->remote_namespace, info->dev_info->bind_namespace, info->dev_info->namespace_len);
     queue->bind_ctx = ctx;
 
     ret = umq_ub_eid_id_get(queue, info, &ctx->remote_eid_id);
@@ -477,6 +514,10 @@ static int umq_ub_get_namespace(char *remote_namespace, uint32_t namespace_buf_s
         return UMQ_FAIL;
     }
     memcpy(remote_namespace, buf, len);
+    if ((uint32_t)len < namespace_buf_size) {
+        // clean remote_namespace
+        (void)memset(remote_namespace + len, 0, namespace_buf_size - (uint32_t)len);
+    }
     return (int)len;
 }
 
@@ -502,7 +543,9 @@ static ALWAYS_INLINE uint32_t umq_ub_dev_info_serialize(
         UMQ_VLOG_ERR(VLOG_UMQ, "get remote_namespace failed\n")
         return 0;
     }
-    dev_info->namespace_len = (uint32_t)ret;
+
+    // namespace len alignment 4 byte
+    dev_info->namespace_len = (((uint32_t)ret + UMQ_LEN_ALIGNMENT_4 - 1) & ~(UMQ_LEN_ALIGNMENT_4 - 1));
     info_tlv_head->type = UMQ_UB_BIND_INFO_TYPE_DEV;
     info_tlv_head->len = (uint32_t)sizeof(umq_ub_bind_dev_info_t) + dev_info->namespace_len;
     return urpc_tlv_get_total_len(info_tlv_head);
@@ -520,7 +563,7 @@ static ALWAYS_INLINE uint32_t umq_ub_queue_info_serialize(
     }
     urpc_tlv_head_t *info_tlv_head = (urpc_tlv_head_t *)(uintptr_t)bind_info_buf;
     umq_ub_bind_queue_info_t *queue_info = (umq_ub_bind_queue_info_t *)(uintptr_t)info_tlv_head->value;
-    queue_info->is_binded = queue->bind_ctx != NULL ? true : false;
+    queue_info->is_binded = queue->bind_ctx != NULL ? 1 : 0;
     queue_info->jetty_id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id;
     queue_info->type = URMA_JETTY;
     queue_info->token = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_cfg.shared.jfr->jfr_cfg.token_value;
@@ -615,29 +658,63 @@ int umq_ub_bind_info_deserialize(uint8_t *bind_info_buf, uint32_t bind_info_size
 
     uint32_t left_info_size = bind_info_size;
     urpc_tlv_head_t *info_tlv_head = (urpc_tlv_head_t *)(uintptr_t)bind_info_buf;
+    if (info_tlv_head->len > (UINT32_MAX - (uint32_t)sizeof(urpc_tlv_head_t))) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "bind info size insufficient\n");
+        return -UMQ_ERR_EINVAL;
+    }
     while (left_info_size >= urpc_tlv_get_total_len(info_tlv_head)) {
         switch (info_tlv_head->type) {
             case UMQ_UB_BIND_INFO_TYPE_VERSION:
+                if (info_tlv_head->len < (uint32_t)sizeof(umq_ub_bind_version_info_t)) {
+                    UMQ_VLOG_ERR(VLOG_UMQ, "bind version info size insufficient\n");
+                    return -UMQ_ERR_EINVAL;
+                }
                 bind_info->version_info = (umq_ub_bind_version_info_t *)(uintptr_t)info_tlv_head->value;
                 break;
             case UMQ_UB_BIND_INFO_TYPE_DEV:
+                if (info_tlv_head->len < (uint32_t)sizeof(umq_ub_bind_dev_info_t)) {
+                    UMQ_VLOG_ERR(VLOG_UMQ, "bind dev info size insufficient\n");
+                    return -UMQ_ERR_EINVAL;
+                }
                 bind_info->dev_info = (umq_ub_bind_dev_info_t *)(uintptr_t)info_tlv_head->value;
+                if (info_tlv_head->len != (sizeof(umq_ub_bind_dev_info_t) + bind_info->dev_info->namespace_len)) {
+                    UMQ_VLOG_ERR(VLOG_UMQ, "bind dev info namespace_len insufficient\n");
+                    return -UMQ_ERR_EINVAL;
+                }
+                size_t len = strnlen(bind_info->dev_info->bind_namespace, bind_info->dev_info->namespace_len);
+                if (len == bind_info->dev_info->namespace_len) {
+                    UMQ_VLOG_ERR(VLOG_UMQ, "bind dev info namespace not be null-terminated\n");
+                    return -UMQ_ERR_EINVAL;
+                }
                 break;
             case UMQ_UB_BIND_INFO_TYPE_QUEUE:
+                if (info_tlv_head->len < (uint32_t)sizeof(umq_ub_bind_queue_info_t)) {
+                    UMQ_VLOG_ERR(VLOG_UMQ, "bind queue info size insufficient\n");
+                    return -UMQ_ERR_EINVAL;
+                }
                 bind_info->queue_info = (umq_ub_bind_queue_info_t *)(uintptr_t)info_tlv_head->value;
                 break;
             case UMQ_UB_BIND_INFO_TYPE_FC:
+                if (info_tlv_head->len < (uint32_t)sizeof(umq_ub_bind_fc_info_t)) {
+                    UMQ_VLOG_ERR(VLOG_UMQ, "bind flow control info size insufficient\n");
+                    return -UMQ_ERR_EINVAL;
+                }
                 bind_info->fc_info = (umq_ub_bind_fc_info_t *)(uintptr_t)info_tlv_head->value;
                 break;
             default:
                 UMQ_VLOG_WARN(VLOG_UMQ, "unknown type %u\n", info_tlv_head->type);
                 break;
         }
+
         left_info_size -= urpc_tlv_get_total_len(info_tlv_head);
         if (left_info_size < (uint32_t)sizeof(urpc_tlv_head_t)) {
             break;
         }
         info_tlv_head = urpc_tlv_get_next_element(info_tlv_head);
+        if (info_tlv_head->len > (UINT32_MAX - (uint32_t)sizeof(urpc_tlv_head_t))) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "bind info size insufficient\n");
+            return -UMQ_ERR_EINVAL;
+        }
     }
     return UMQ_SUCCESS;
 }
@@ -864,7 +941,7 @@ urma_jetty_t *umq_create_jetty(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_queu
     return jetty;
 }
 
-static urma_transport_mode_t umq_tp_mode_convert(umq_tp_mode_t tp_mode)
+static urma_transport_mode_t umq_tp_mode_convert_to_urma(umq_tp_mode_t tp_mode)
 {
     switch (tp_mode) {
         case UMQ_TM_RC:
@@ -878,7 +955,7 @@ static urma_transport_mode_t umq_tp_mode_convert(umq_tp_mode_t tp_mode)
     };
 }
 
-static urma_tp_type_t umq_tp_type_convert(umq_tp_type_t tp_type)
+static urma_tp_type_t umq_tp_type_convert_to_urma(umq_tp_type_t tp_type)
 {
     switch (tp_type) {
         case UMQ_TP_TYPE_RTP:
@@ -890,6 +967,31 @@ static urma_tp_type_t umq_tp_type_convert(umq_tp_type_t tp_type)
         default:
             return URMA_RTP;
     };
+}
+
+static umq_tp_type_t umq_tp_type_get(union urma_tp_type_en tp_type)
+{
+    if (tp_type.bs.rtp == 1 && tp_type.bs.ctp == 0 && tp_type.bs.utp == 0) {
+        return UMQ_TP_TYPE_RTP;
+    }
+    if (tp_type.bs.rtp == 0 && tp_type.bs.ctp == 1 && tp_type.bs.utp == 0) {
+        return UMQ_TP_TYPE_CTP;
+    }
+    if (tp_type.bs.rtp == 0 && tp_type.bs.ctp == 0 && tp_type.bs.utp == 1) {
+        return UMQ_TP_TYPE_UTP;
+    }
+    return UMQ_TP_TYPE_MAX;
+}
+
+static int umq_default_priority_get(umq_ub_ctx_t *dev_ctx, umq_tp_type_t actual_tp_type)
+{
+    for (int i = 0; i < URMA_MAX_PRIORITY_CNT; i++) {
+        umq_tp_type_t tp_type = umq_tp_type_get(dev_ctx->dev_attr.dev_cap.priority_info[i].tp_type);
+        if (tp_type == actual_tp_type) {
+            return i;
+        }
+    }
+   return UMQ_FAIL;
 }
 
 int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_queue_t *queue)
@@ -963,30 +1065,52 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
     }
 
     if (option->create_flag & UMQ_CREATE_FLAG_TP_MODE) {
-        if (option->tp_mode != UMQ_TM_RC) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "tp_mode[%u] is invalid\n", option->tp_mode);
+        if (option->tp_mode > UMQ_TM_RM) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "tp_mode[%d] is invalid\n", option->tp_mode);
             return -UMQ_ERR_EINVAL;
         }
-        queue->tp_mode = umq_tp_mode_convert(option->tp_mode);
+        queue->tp_mode = umq_tp_mode_convert_to_urma(option->tp_mode);
     } else {
-        queue->tp_mode = umq_tp_mode_convert(UMQ_TM_RC);
+        queue->tp_mode = umq_tp_mode_convert_to_urma(UMQ_TM_RC);
     }
 
     if (option->create_flag & UMQ_CREATE_FLAG_TP_TYPE) {
         if (option->tp_type != UMQ_TP_TYPE_RTP) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "tp_type[%u] is invalid\n", option->tp_type);
+            UMQ_VLOG_ERR(VLOG_UMQ, "tp_type[%d] is invalid\n", option->tp_type);
             return -UMQ_ERR_EINVAL;
         }
-        queue->tp_type = umq_tp_type_convert(option->tp_type);
+        queue->tp_type = umq_tp_type_convert_to_urma(option->tp_type);
     } else {
-        queue->tp_type = umq_tp_type_convert(UMQ_TP_TYPE_RTP);
+        queue->tp_type = umq_tp_type_convert_to_urma(UMQ_TP_TYPE_RTP);
+    }
+
+    umq_tp_type_t actual_tp_type = (option->create_flag & UMQ_CREATE_FLAG_TP_TYPE) != 0 ?
+        option->tp_type : UMQ_TP_TYPE_RTP;
+    if (option->create_flag & UMQ_CREATE_FLAG_PRIORITY) {
+        if (option->priority > URMA_MAX_PRIORITY) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "priority[%u] is invalid\n", option->priority);
+            return -UMQ_ERR_EINVAL;
+        }
+        umq_tp_type_t tp_type = umq_tp_type_get(dev_ctx->dev_attr.dev_cap.priority_info[option->priority].tp_type);
+        if (tp_type != actual_tp_type) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "priority[%u] is invalid, associated tp_type is %s, actual tp_type is %s\n",
+                option->priority, g_umq_ub_tp_type_str[tp_type], g_umq_ub_tp_type_str[actual_tp_type]);
+            return -UMQ_ERR_EINVAL;
+        }
+        queue->priority = option->priority;
+    } else {
+        int ret = umq_default_priority_get(dev_ctx, actual_tp_type);
+        if (ret < 0) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "there is no priority for tp_type %s\n", g_umq_ub_tp_type_str[actual_tp_type]);
+            return -UMQ_ERR_EINVAL;
+        }
+        queue->priority = (uint8_t)ret;
     }
 
     queue->max_rx_sge = dev_ctx->dev_attr.dev_cap.max_jfr_sge < UMQ_MAX_SGE_NUM ?
                         dev_ctx->dev_attr.dev_cap.max_jfr_sge : UMQ_MAX_SGE_NUM;
     queue->max_tx_sge = dev_ctx->dev_attr.dev_cap.max_jfs_sge < UMQ_MAX_SGE_NUM ?
                         dev_ctx->dev_attr.dev_cap.max_jfs_sge : UMQ_MAX_SGE_NUM;
-    queue->priority = DEFAULT_PRIORITY;
     queue->err_timeout = DEFAULT_ERR_TIMEOUT;
     queue->rnr_retry = DEFAULT_RNR_RETRY;
     queue->min_rnr_timer = DEFAULT_MIN_RNR_TIMER;
@@ -1466,10 +1590,14 @@ static ALWAYS_INLINE uint32_t umq_ub_get_read_pre_allocate_max_total_size(
     }
 
     umq_buf_mode_t buf_mode = umq_qbuf_mode_get();
+    uint64_t temp_size = read_alloc_mem_size * buf_num;
+    if (temp_size >= UINT32_MAX || temp_size < umq_qbuf_headroom_get()) {
+        return UINT32_MAX;
+    }
     if (buf_mode == UMQ_BUF_SPLIT) {
-        return read_alloc_mem_size * buf_num - umq_qbuf_headroom_get();
+        return temp_size - umq_qbuf_headroom_get();
     } else if (buf_mode == UMQ_BUF_COMBINE) {
-        return read_alloc_mem_size * buf_num - sizeof(umq_buf_t) * buf_num - umq_qbuf_headroom_get();
+        return temp_size - sizeof(umq_buf_t) * buf_num - umq_qbuf_headroom_get();
     }
 
     UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "buf mode: %d is invalid\n", buf_mode);
@@ -1541,8 +1669,10 @@ static ALWAYS_INLINE void umq_ub_return_import_result(ub_queue_t *queue, uint16_
             UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, send import mem done imm failed",
                 EID_ARGS(*eid), id);
         }
-    } else if (queue->wait_ack_import.wait_ack_idx != UMQ_MAX_TSEG_NUM) {
-        pthread_rwlock_rdlock(&queue->wait_ack_import.lock);
+        return;
+    }
+    pthread_rwlock_wrlock(&queue->wait_ack_import.lock);
+    if (queue->wait_ack_import.wait_ack_idx != UMQ_MAX_TSEG_NUM) {
         if (queue->wait_ack_import.wait_ack_pool_id == NULL) {
             queue->wait_ack_import.wait_ack_pool_id = (uint16_t *)(uintptr_t)calloc(UMQ_MAX_TSEG_NUM, sizeof(uint16_t));
             if (queue->wait_ack_import.wait_ack_pool_id == NULL) {
@@ -1555,6 +1685,7 @@ static ALWAYS_INLINE void umq_ub_return_import_result(ub_queue_t *queue, uint16_
         queue->wait_ack_import.wait_ack_pool_id[queue->wait_ack_import.wait_ack_idx++] = mempool_id;
         (void)pthread_rwlock_unlock(&queue->wait_ack_import.lock);
     } else {
+        (void)pthread_rwlock_unlock(&queue->wait_ack_import.lock);
         UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, wait ack import table is full",
             EID_ARGS(*eid), id);
     }
@@ -1568,11 +1699,16 @@ int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t re
         return UMQ_SUCCESS;
     }
 
+    size_t temp_size = sizeof(umq_imm_head_t) + ref_seg_num * sizeof(ub_ref_sge_t);
     if (umq_imm_head->mempool_num >= UMQ_MAX_TSEG_NUM) {
         UMQ_LIMIT_VLOG_INFO(VLOG_UMQ, "mempool num invalid, mempool_num %u\n", umq_imm_head->mempool_num);
         return -UMQ_ERR_EINVAL;
     }
 
+    if (rx_buf->data_size < (uint32_t)(temp_size + umq_imm_head->mempool_num * sizeof(ub_import_mempool_info_t))) {
+        UMQ_LIMIT_VLOG_INFO(VLOG_UMQ, "rx_buf data size invalid, size %u\n", rx_buf->data_size);
+        return -UMQ_ERR_EINVAL;
+    }
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
     if (queue == NULL) {
         UMQ_LIMIT_VLOG_INFO(VLOG_UMQ, "umq has been destroy\n");
@@ -1590,8 +1726,7 @@ int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t re
     pthread_mutex_t *imported_tseg_list_mutex_lock =
         &queue->dev_ctx->remote_imported_info->imported_tseg_list_mutex[queue->bind_ctx->remote_eid_id];
     pthread_mutex_lock(imported_tseg_list_mutex_lock);
-    ub_import_mempool_info_t *import_mempool_info = (ub_import_mempool_info_t *)
-            (rx_buf->buf_data + sizeof(umq_imm_head_t) + ref_seg_num * sizeof(ub_ref_sge_t));
+    ub_import_mempool_info_t *import_mempool_info = (ub_import_mempool_info_t *)(rx_buf->buf_data + temp_size);
     for (uint32_t i = 0; i < umq_imm_head->mempool_num; i++) {
         if (import_mempool_info[i].mempool_id >= UMQ_MAX_TSEG_NUM) {
             pthread_mutex_unlock(imported_tseg_list_mutex_lock);
@@ -1641,9 +1776,12 @@ static ALWAYS_INLINE urma_status_t umq_ub_read_post_send(
         .tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]};
 
     urma_jfs_wr_t *bad_wr = NULL;
-    uint64_t start_timestamp = umq_perf_get_start_timestamp_with_feature(queue->dev_ctx->feature);
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
     urma_status_t status = urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_IO], &urma_wr, &bad_wr);
-    umq_perf_record_write_with_feature(UMQ_PERF_RECORD_TRANSPORT_READ, start_timestamp, queue->dev_ctx->feature);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_POST_SEND, start_timestamp);
+    if (status == URMA_SUCCESS) {
+        umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND, 1, queue->dev_ctx->io_lock_free);
+    }
     return status;
 }
 
@@ -1686,7 +1824,11 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm)
     uint32_t src_buf_length = 0;
     for (uint32_t i = 0; i < buf_num; i++) {
         src_buf_length = ref_sge[i].length;
-
+        if (tmp_buf == NULL || ref_sge[i].mempool_id >= UMQ_MAX_TSEG_NUM) {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, tmp_buf or mempool id: %u invalid\n",
+                EID_ARGS(*eid), id, ref_sge[i].mempool_id);
+            goto FREE_CTX_BUF;
+        }
         dst_sge[i].addr = (uint64_t)(uintptr_t)tmp_buf->buf_data;
         dst_sge[i].len = src_buf_length;
         dst_sge[i].user_tseg = NULL;
@@ -1700,7 +1842,11 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm)
                 EID_ARGS(*eid), id);
             goto FREE_CTX_BUF;
         }
-
+        if (src_buf_length > tmp_buf->data_size) {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, src_buf_length: %u invalid\n",
+                EID_ARGS(*eid), id, src_buf_length);
+            goto FREE_CTX_BUF;
+        }
         tmp_buf->data_size = src_buf_length;
         tmp_buf = QBUF_LIST_NEXT(tmp_buf);
         total_data_size += src_buf_length;
@@ -1778,8 +1924,12 @@ static int process_write_imm(umq_buf_t *rx_buf, umq_ub_imm_t imm, uint64_t umqh)
         buf_pro->imm_data = imm.value;
     } else if (imm.bs.type == IMM_TYPE_MEM && imm.mem_import.sub_type == IMM_TYPE_MEM_IMPORT_DONE) {
         ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
-        queue->dev_ctx->remote_imported_info->
-            tesg_imported[queue->bind_ctx->remote_eid_id][imm.mem_import.mempool_id] = true;
+        if (imm.mem_import.mempool_id >= UMQ_MAX_TSEG_NUM) {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "umq ub mempool_id: %u invalid\n", imm.mem_import.mempool_id);
+        } else {
+            queue->dev_ctx->remote_imported_info->
+                tesg_imported[queue->bind_ctx->remote_eid_id][imm.mem_import.mempool_id] = true;
+        }
         ret = UMQ_CONTINUE_FLAG;
         umq_buf_free(rx_buf);
     } else if (imm.bs.type == IMM_TYPE_NOTIFY) {
@@ -1860,6 +2010,8 @@ int umq_ub_dequeue_plus_with_poll_tx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t
         return return_rx_cnt;
     }
     int qbuf_cnt = 0;
+    uint32_t success_cnt = 0;
+    uint32_t failed_cnt = 0;
     for (int i = 0; i < tx_cr_cnt; i++) {
         if (cr[i].status != URMA_CR_SUCCESS) {
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx cr[%d] "
@@ -1873,6 +2025,9 @@ int umq_ub_dequeue_plus_with_poll_tx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t
             if (cr[i].status == URMA_CR_WR_SUSPEND_DONE) {
                 continue;
             }
+            failed_cnt++;
+        } else {
+            success_cnt++;
         }
         /* After the read operation is complete, send_imm request with user_ctx equal to 0 will be sent.
          * This tx_cqe request does't need to be reported. */
@@ -1891,6 +2046,15 @@ int umq_ub_dequeue_plus_with_poll_tx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t
         }
         umq_ub_non_rev_pull_tx_cqe(queue, tx_buf[qbuf_cnt], &qbuf_cnt);
     }
+
+    if (success_cnt > 0) {
+        umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND_SUCCESS, success_cnt, queue->dev_ctx->io_lock_free);
+    }
+
+    if (failed_cnt > 0) {
+        umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND_ERROR, failed_cnt, queue->dev_ctx->io_lock_free);
+    }
+
     return return_rx_cnt;
 }
 
@@ -1923,12 +2087,16 @@ void ub_fill_umq_imm_head(umq_imm_head_t *umq_imm_head, umq_buf_t *buffer)
     umq_imm_head->mem_interval = get_mem_interval(buffer->data_size);
 }
 
-void fill_big_data_ref_sge(ub_queue_t *queue, ub_ref_sge_t *ref_sge, umq_buf_t *buffer, mempool_info_ctx_t *ctx)
+int fill_big_data_ref_sge(ub_queue_t *queue, ub_ref_sge_t *ref_sge, umq_buf_t *buffer, mempool_info_ctx_t *ctx)
 {
+    if (buffer->mempool_id >= UMQ_MAX_TSEG_NUM) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "the buf mempool id [%u] invalid\n", buffer->mempool_id);
+        return UMQ_FAIL;
+    }
     urma_target_seg_t *tseg = queue->dev_ctx->tseg_list[buffer->mempool_id];
     urma_seg_t *seg = &tseg->seg;
     if (!queue->dev_ctx->remote_imported_info->tesg_imported[queue->bind_ctx->remote_eid_id][buffer->mempool_id] &&
-        buffer->mempool_id < UMQ_MAX_TSEG_NUM && !ctx->mempool_info_record[buffer->mempool_id]) {
+        !ctx->mempool_info_record[buffer->mempool_id]) {
         ub_import_mempool_info_t *import_mempool_info = ctx->import_mempool_info;
         ctx->umq_imm_head->type = IMM_PROTOCAL_TYPE_IMPORT_MEM;
         ctx->umq_imm_head->mempool_num++;
@@ -1946,6 +2114,7 @@ void fill_big_data_ref_sge(ub_queue_t *queue, ub_ref_sge_t *ref_sge, umq_buf_t *
     ref_sge->token_id = seg->token_id;
     ref_sge->mempool_id = buffer->mempool_id;
     ref_sge->token_value = tseg->user_ctx;
+    return UMQ_SUCCESS;
 }
 
 uint32_t umq_ub_ref_sge_cnt(umq_buf_t *buffer)
@@ -1955,7 +2124,8 @@ uint32_t umq_ub_ref_sge_cnt(umq_buf_t *buffer)
     uint32_t rest_size = tmp_buf->total_data_size;
     while (tmp_buf != NULL && rest_size != 0) {
         if (rest_size < tmp_buf->data_size) {
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "remaining size[%u] is smaller than data_size[%u]\n", rest_size, tmp_buf->data_size);
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "remaining size[%u] is smaller than data_size[%u]\n",
+                rest_size, tmp_buf->data_size);
             return 0;
         }
         rest_size -= tmp_buf->data_size;
@@ -2023,7 +2193,9 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
         }
 
         mempool_info_ctx.import_mempool_info = &import_mempool_info[umq_imm_head->mempool_num];
-        fill_big_data_ref_sge(queue, &ref_sge[buf_index], *buffer, &mempool_info_ctx);
+        if (fill_big_data_ref_sge(queue, &ref_sge[buf_index], *buffer, &mempool_info_ctx) != UMQ_SUCCESS) {
+            goto FREE_BUF;
+        }
 
         max_data_size =  (*buffer)->data_size > max_data_size ? (*buffer)->data_size : max_data_size;
         rest_size -= (*buffer)->data_size;
@@ -2097,8 +2269,8 @@ int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *
             return 0;
         }
         if (rest_size > queue->tx_buf_size) {
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, total data size[%u] exceed max tx size[%u]\n"
-                , EID_ARGS(*eid), id, rest_size, queue->tx_buf_size);
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, total data size[%u] exceed "
+                "max tx size[%u]\n", EID_ARGS(*eid), id, rest_size, queue->tx_buf_size);
             return -UMQ_ERR_EINVAL;
         }
         /* sges is defined as two-dimensional array, cast to a one-dimensional array for passing, and within the
@@ -2253,11 +2425,13 @@ int umq_ub_dequeue_with_poll_rx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t **bu
         return rx_cr_cnt;
     }
 
+    uint32_t success_cnt = 0;
     for (int i = 0; i < rx_cr_cnt; i++) {
         buf[i] = umq_get_buf_by_user_ctx(queue, cr[i].user_ctx, UB_QUEUE_JETTY_IO);
         buf[i]->io_direction = UMQ_IO_RX;
         buf[i]->status = (umq_buf_status_t)cr[i].status;
         if (cr[i].status != URMA_CR_SUCCESS) {
+            umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_RECV_ERROR, 1, queue->dev_ctx->io_lock_free);
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports rx cr[%d] "
                 "status: %d\n", EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
                 queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, i, cr[i].status);
@@ -2270,10 +2444,16 @@ int umq_ub_dequeue_with_poll_rx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t **bu
                 total_data_size -= tmp_buf->data_size;
                 tmp_buf = tmp_buf->qbuf_next;
             }
+            success_cnt++;
         }
         umq_ub_merge_rx_buffer(buf[i], &previous_last);
         qbuf_cnt++;
     }
+
+    if (qbuf_cnt > 0) {
+        umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_RECV, success_cnt, queue->dev_ctx->io_lock_free);
+    }
+
     return qbuf_cnt;
 }
 
@@ -2296,6 +2476,7 @@ int umq_ub_dequeue_plus_with_poll_rx(uint64_t umqh_tp, urma_cr_t *cr, umq_buf_t 
         return rx_cr_cnt;
     }
 
+    uint32_t success_cnt = 0;
     for (int i = 0; i < rx_cr_cnt; i++) {
         buf[qbuf_cnt] = umq_get_buf_by_user_ctx(queue, cr[i].user_ctx, UB_QUEUE_JETTY_IO);
         if (process_imm_msg(umqh_tp, buf[qbuf_cnt], cr + i) == UMQ_CONTINUE_FLAG) {
@@ -2315,10 +2496,16 @@ int umq_ub_dequeue_plus_with_poll_rx(uint64_t umqh_tp, urma_cr_t *cr, umq_buf_t 
                 total_data_size -= tmp_buf->data_size;
                 tmp_buf = tmp_buf->qbuf_next;
             }
+            success_cnt++;
         }
         umq_ub_merge_rx_buffer(buf[qbuf_cnt], &previous_last);
         ++qbuf_cnt;
     }
+
+    if (success_cnt > 0) {
+        umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_RECV, success_cnt, queue->dev_ctx->io_lock_free);
+    }
+
     if (rx_cr_cnt != 0) {
         umq_ub_fill_rx_buffer(queue, rx_cr_cnt);
     }
@@ -2333,6 +2520,11 @@ void process_bad_qbuf(umq_buf_t *bad_qbuf, umq_buf_t *qbuf, ub_queue_t *queue)
     while (tmp_qbuf != NULL && tmp_qbuf != bad_qbuf) {
         count++;
         uint32_t rest_data_size = tmp_qbuf->total_data_size;
+        if (rest_data_size == 0) {
+            previous = tmp_qbuf;
+            tmp_qbuf = tmp_qbuf->qbuf_next;
+            continue;
+        }
         while (tmp_qbuf && rest_data_size > 0) {
             if (rest_data_size < tmp_qbuf->data_size) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, cannot put together tx buffer, rest size"
@@ -2351,6 +2543,7 @@ void process_bad_qbuf(umq_buf_t *bad_qbuf, umq_buf_t *qbuf, ub_queue_t *queue)
         // break chain of succeed qbuf and failed qbuf on tx
         previous->qbuf_next = NULL;
     }
+    umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND, count, queue->dev_ctx->io_lock_free);
     umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, count);
 }
 
@@ -2367,6 +2560,8 @@ void umq_ub_enqueue_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
     }
 
     int32_t qbuf_cnt = 0;
+    uint32_t success_cnt = 0;
+    uint32_t failed_cnt = 0;
     for (int i = 0; i < tx_cr_cnt; i++) {
         if (cr[i].status != URMA_CR_SUCCESS) {
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx cr[%d] "
@@ -2380,11 +2575,21 @@ void umq_ub_enqueue_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
             if (cr[i].status == URMA_CR_WR_SUSPEND_DONE) {
                 continue;
             }
+            failed_cnt++;
+        } else {
+            success_cnt++;
         }
 
         buf[qbuf_cnt] = (umq_buf_t *)(uintptr_t)cr[i].user_ctx;
         (void)umq_buf_break_and_free(buf[qbuf_cnt]);
         ++qbuf_cnt;
+    }
+    if (success_cnt > 0) {
+        umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND_SUCCESS, success_cnt, queue->dev_ctx->io_lock_free);
+    }
+
+    if (failed_cnt > 0) {
+        umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND_ERROR, success_cnt, queue->dev_ctx->io_lock_free);
     }
     umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, qbuf_cnt);
 }
@@ -2402,6 +2607,8 @@ void umq_ub_enqueue_plus_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
     }
 
     int32_t qbuf_cnt = 0;
+    uint32_t success_cnt = 0;
+    uint32_t failed_cnt = 0;
     int ret = UMQ_SUCCESS;
     for (int i = 0; i < tx_cr_cnt; i++) {
         if (cr[i].status != URMA_CR_SUCCESS) {
@@ -2416,6 +2623,9 @@ void umq_ub_enqueue_plus_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
             if (cr[i].status == URMA_CR_WR_SUSPEND_DONE) {
                 continue;
             }
+            failed_cnt++;
+        } else {
+            success_cnt++;
         }
 
         if (cr[i].user_ctx == 0) {
@@ -2450,6 +2660,14 @@ void umq_ub_enqueue_plus_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
         (void)umq_buf_break_and_free(buf[qbuf_cnt]);
         ++qbuf_cnt;
     }
+
+    if (success_cnt > 0) {
+        umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND_SUCCESS, success_cnt, queue->dev_ctx->io_lock_free);
+    }
+
+    if (failed_cnt > 0) {
+        umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND_ERROR, failed_cnt, queue->dev_ctx->io_lock_free);
+    }
 }
 
 int umq_ub_send_imm(ub_queue_t *queue, uint64_t imm_value, urma_sge_t *sge, uint64_t user_ctx)
@@ -2468,9 +2686,9 @@ int umq_ub_send_imm(ub_queue_t *queue, uint64_t imm_value, urma_sge_t *sge, uint
         .tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO],
         .opcode = URMA_OPC_SEND_IMM};
     urma_jfs_wr_t *bad_wr = NULL;
-    uint64_t start_timestamp = umq_perf_get_start_timestamp_with_feature(queue->dev_ctx->feature);
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
     urma_status_t status = urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_IO], &urma_wr, &bad_wr);
-    umq_perf_record_write_with_feature(UMQ_PERF_RECORD_TRANSPORT_SEND_IMM, start_timestamp, queue->dev_ctx->feature);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_POST_SEND, start_timestamp);
     if (status != URMA_SUCCESS) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
             "remote jetty_id: %u, urma_post_jetty_send_wr failed, status: %d\n", EID_ARGS(*eid), id,
@@ -2478,6 +2696,7 @@ int umq_ub_send_imm(ub_queue_t *queue, uint64_t imm_value, urma_sge_t *sge, uint
             queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.id, (int)status);
         return umq_status_convert(status);
     }
+    umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND, 1, queue->dev_ctx->io_lock_free);
     umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, 1);
     return UMQ_SUCCESS;
 }
@@ -2522,9 +2741,9 @@ int umq_ub_write_imm(uint64_t umqh_tp, uint64_t target_addr, uint32_t len, uint6
     };
 
     urma_jfs_wr_t *bad_wr = NULL;
-    uint64_t start_timestamp = umq_perf_get_start_timestamp_with_feature(queue->dev_ctx->feature);
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
     urma_status_t status = urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_IO], &urma_wr, &bad_wr);
-    umq_perf_record_write_with_feature(UMQ_PERF_RECORD_TRANSPORT_WRITE_IMM, start_timestamp, queue->dev_ctx->feature);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_POST_SEND, start_timestamp);
     if (status != URMA_SUCCESS) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
             "remote jetty_id: %u, urma_post_jetty_send_wr failed, status: %d\n", EID_ARGS(*eid), id,
@@ -2532,6 +2751,7 @@ int umq_ub_write_imm(uint64_t umqh_tp, uint64_t target_addr, uint32_t len, uint6
             queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.id, (int)status);
         return umq_status_convert(status);
     }
+    umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND, 1, queue->dev_ctx->io_lock_free);
     return UMQ_SUCCESS;
 }
 
@@ -2682,11 +2902,10 @@ int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
     }
 
     urma_jfc_t *temp_jfc[jfc_cnt];
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
     int p_num = urma_wait_jfc(jfr_jfce, jfc_cnt, time_out, temp_jfc);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_WAIT_RX, start_timestamp);
     if (p_num <= 0) {
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_wait_jfc for rx failed, status: %d"
-            "\n", EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
-            queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, p_num);
         return p_num;
     }
     uint32_t nevents[p_num];
@@ -2700,7 +2919,9 @@ int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
             queue->interrupt_ctx.rx_fc_interrupt = true;
         }
     }
+    start_timestamp = umq_perf_get_start_timestamp();
     urma_ack_jfc(temp_jfc, nevents, p_num);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_ACK_RX, start_timestamp);
     return p_num;
 }
 
@@ -2712,11 +2933,10 @@ int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
     }
 
     urma_jfc_t *temp_jfc[jfc_cnt];
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
     int p_num = urma_wait_jfc(queue->jfs_jfce, jfc_cnt, time_out, temp_jfc);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_WAIT_TX, start_timestamp);
     if (p_num <= 0) {
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_wait_jfc for tx failed, status: %d"
-            "\n", EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
-            queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, p_num);
         return p_num;
     }
     uint32_t nevents[p_num];
@@ -2729,7 +2949,9 @@ int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
             queue->interrupt_ctx.tx_fc_interrupt = true;
         }
     }
+    start_timestamp = umq_perf_get_start_timestamp();
     urma_ack_jfc(temp_jfc, nevents, p_num);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_ACK_TX, start_timestamp);
     return p_num;
 }
 
@@ -2769,7 +2991,7 @@ void umq_ub_ack_import_tseg(ub_queue_t *queue)
 
 int umq_status_convert(urma_status_t urma_status)
 {
-    switch(urma_status) {
+    switch (urma_status) {
         case URMA_SUCCESS:
             return UMQ_SUCCESS;
         case URMA_FAIL:
