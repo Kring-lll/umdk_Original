@@ -132,6 +132,13 @@ typedef enum urpc_dev_assign_mode {
     DEV_ASSIGN_MODE_MAX
 } urpc_dev_assign_mode_t;
 
+typedef enum urpc_tp_type {
+    URPC_TP_TYPE_RTP = 0,
+    URPC_TP_TYPE_CTP,
+    URPC_TP_TYPE_UTP,
+    URPC_TP_TYPE_MAX,
+} urpc_tp_type_t;
+
 typedef struct urpc_trans_info {
     urpc_trans_mode_t trans_mode;
     urpc_dev_assign_mode_t assign_mode;
