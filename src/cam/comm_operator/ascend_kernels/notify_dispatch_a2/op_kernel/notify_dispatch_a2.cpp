@@ -77,5 +77,21 @@ extern "C" __global__ __aicore__ void notify_dispatch_a2(GM_ADDR sendData, GM_AD
             localEpTokenCntOutput, srcOffsetRankTokenIdxOutput, dstOffsetRankTokenIdxOutput, offsetInnerOutput,
             countOuterOutput, expandIdxOutput, totalRecvTokensOutput, workspace, tiling);
         opKernel.Process();
+    } else if (TILING_KEY_IS(TILING_KEY_A2_FLOAT16)) {
+        NotifyDispatchA2<float16_t> opKernel(rank, rankSize, extraFlag);
+        opKernel.Init(sendDataInput, tokenPerExpertDataInput, tmpDataInput, sendDataOffsetOutput,
+            recvDataOutput, len, numTokens, topkNum, numExperts, op, root, cycleCount, scale, scaleCount, offset,
+            localRank, localRankSize, tokenServerIdxOutput, tokensUniquePerServerOutput, epRankTokenCntOutput,
+            localEpTokenCntOutput, srcOffsetRankTokenIdxOutput, dstOffsetRankTokenIdxOutput, offsetInnerOutput,
+            countOuterOutput, expandIdxOutput, totalRecvTokensOutput, workspace, tiling);
+        opKernel.Process();
+    } else if (TILING_KEY_IS(TILING_KEY_A2_FLOAT)) {
+        NotifyDispatchA2<float> opKernel(rank, rankSize, extraFlag);
+        opKernel.Init(sendDataInput, tokenPerExpertDataInput, tmpDataInput, sendDataOffsetOutput,
+            recvDataOutput, len, numTokens, topkNum, numExperts, op, root, cycleCount, scale, scaleCount, offset,
+            localRank, localRankSize, tokenServerIdxOutput, tokensUniquePerServerOutput, epRankTokenCntOutput,
+            localEpTokenCntOutput, srcOffsetRankTokenIdxOutput, dstOffsetRankTokenIdxOutput, offsetInnerOutput,
+            countOuterOutput, expandIdxOutput, totalRecvTokensOutput, workspace, tiling);
+        opKernel.Process();
     }
 }
