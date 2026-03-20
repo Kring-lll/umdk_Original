@@ -49,7 +49,7 @@ constexpr uint32_t INPUT_SEND_DATA_INDEX = 0;
 constexpr uint32_t INPUT_TOKEN_PER_EXPERT_INDEX = 1;
 constexpr uint32_t INPUT_TMP_DATA_INDEX = 2;
 constexpr uint32_t NUM_2 = 2;
-constexpr uint32_t NUM_4 = 2;
+constexpr uint32_t NUM_4 = 4;
 
 constexpr uint32_t OUTPUT_SEND_DATA_OFFSET_INDEX = 0;
 constexpr uint32_t OUTPUT_RECV_DATA_INDEX = 1;
@@ -76,7 +76,7 @@ constexpr uint32_t ATTR_LOCAL_RANK_ID_INDEX = 8;
 
 constexpr size_t MAX_GROUP_NAME_LENGTH = 128UL;
 constexpr int64_t MAX_COMM_WORLD_SIZE = 384;
-constexpr int64_t MAX_A2_WORLD_SIZE = 64;
+constexpr int64_t SUPPORT_A2_WORLD_SIZE = 16;
 constexpr int64_t MAX_COMM_LOCAL_SIZE = 16;
 constexpr int64_t MAX_A2_LOCAL_SIZE = 8;
 
@@ -137,9 +137,9 @@ static ge::graphStatus GetAttrAndSetTilingData(const gert::TilingContext &contex
                     return ge::GRAPH_FAILED);
     OPS_ERR_IF(localRankIdPtr == nullptr, OPS_LOG_E(nodeName, "localRankIdPtr is null."), return ge::GRAPH_FAILED);
 
-    OPS_ERR_IF((*rankSizePtr <= 0) || (*rankSizePtr > MAX_A2_WORLD_SIZE),
-                    OPS_LOG_E(nodeName, "rankSize is invalid, only support (0, %ld], but got rankSize=%ld.",
-                            MAX_A2_WORLD_SIZE, *rankSizePtr),
+    OPS_ERR_IF((*rankSizePtr <= 0) || (*rankSizePtr != SUPPORT_A2_WORLD_SIZE),
+                    OPS_LOG_E(nodeName, "rankSize is invalid, only support %ld, but got rankSize=%ld.",
+                            SUPPORT_A2_WORLD_SIZE, *rankSizePtr),
                     return ge::GRAPH_FAILED);
     OPS_ERR_IF(
         (*rankIdPtr < 0) || (*rankIdPtr >= *rankSizePtr),
