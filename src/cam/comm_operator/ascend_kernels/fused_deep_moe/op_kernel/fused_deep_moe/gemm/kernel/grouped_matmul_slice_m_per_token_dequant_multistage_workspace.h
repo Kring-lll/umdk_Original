@@ -793,14 +793,14 @@ private:
                     AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
                                                       AscendC::DcciDst::CACHELINE_OUT>(global);
                     __asm__ __volatile__("");
+#if MOE_ENABLE_SOFTSYNC_TIMEOUT
+                    MOE_LOG_DETAIL("YHB: sync waited, index(%u) waitValue(%u) value(%u)", index, waitValue, value);
+#endif
                     break;
                 }
 #if YHB_ENABLE_SOFTSYNC_TIMEOUT
                 if (AscendC::GetSystemCycle() - timeout > 0) {
-                    if (ptr->epRankId_ == 0) {
-                        MOE_LOG_WARNING("YHB: sync timeout, index(%u) waitValue(%u) value(%u)\n", index, waitValue,
-                                        value);
-                    }
+                    MOE_LOG_WARNING("YHB: sync timeout, index(%u) waitValue(%u) value(%u)", index, waitValue, value);
                     break;
                 }
 #endif
