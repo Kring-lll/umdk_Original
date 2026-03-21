@@ -753,7 +753,7 @@ private:
 #if YHB_ENABLE_SOFTSYNC_TIMEOUT
                 if (AscendC::GetSystemCycle() - timeout > 0) {
                     if (ptr->epRankId_ == 0) {
-                        AscendC::printf("YHB: sync timeout, index(%u) waitValue(%u) value(%u)\n", index, waitValue,
+                        MOE_LOG_WARNING("YHB: sync timeout, index(%u) waitValue(%u) value(%u)\n", index, waitValue,
                                         value);
                     }
                     break;
