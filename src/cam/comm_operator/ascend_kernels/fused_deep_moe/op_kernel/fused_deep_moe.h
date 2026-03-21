@@ -368,6 +368,9 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     tilingData_ = tilingData;
     epRankSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize;
     epRankId_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
+#if ENABLE_MOE_DEBUG_INFO
+    DEBUG_EP_RANK_ID = epRankId_;
+#endif
     moeExpertNumPerRank_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     sharedExpertRankNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
     globalBs_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.globalBs;
@@ -546,5 +549,17 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
                                layoutShareOutput, epRankId_, commArgs_, gmWorkspace, &combiner);
     MoeTracing(TRACE_POINT("gmm2-combine", "E"));
     MoeTracing(TRACE_POINT("processing", "E"));
+#if MOE_PROFILING_THRESHOLD
+    if constexpr (EXEC_FLAG & EXEC_FLAG_X_ACTIVE_MASK) {
+        AscendC::GlobalTensor<bool> xActiveMaskGM_;
+        xActiveMaskGM_.SetGlobalBuffer((__gm__ bool *)xActiveMask_);
+        __asm__ __volatile__("");
+        AscendC::DataCacheCleanAndInvalid<bool, AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(xActiveMaskGM_[60]);
+        __asm__ __volatile__("");
+        DEBUG_INFO_ENABLE_PROFILING = xActiveMaskGM_(MOE_PROFILING_THRESHOLD) ? 1 : 0;
+    } else {
+        DEBUG_INFO_ENABLE_PROFILING = tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo.bs > MOE_PROFILING_THRESHOLD ? 1 : 0;
+    }
+#endif
 }
 #endif  // FUSED_DEEP_MOE_H
