@@ -25,6 +25,21 @@ __aicore__ inline void SetMoeProfilePtr(int64_t *profilePtr)
 #endif
 }
 
+__aicore__ inline void SetMoeDebugInfoPtr(int64_t *debugInfoPtr)
+{
+#if __CCE_AICORE__ == 220 || defined(__DAV_C310__) || defined(__DAV_310R6__)
+#ifdef SPLIT_CORE_CUBE
+    g_moeDebugInfoPtrCube = debugInfoPtr;
+#elif defined(SPLIT_CORE_VEC)
+    g_moeDebugInfoPtrVec = debugInfoPtr;
+#else
+    g_moeDebugInfoPtr = debugInfoPtr;
+#endif
+#else
+    g_moeDebugInfoPtr = debugInfoPtr;
+#endif
+}
+
 extern "C" __global__ __aicore__ void fused_deep_moe(
     // input
     GM_ADDR x, GM_ADDR expert_ids, GM_ADDR gmm1_permuted_weight, GM_ADDR gmm1_permuted_weight_scale,
@@ -39,6 +54,10 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
     GM_ADDR workspace, GM_ADDR tiling)
 {
     icache_preload(8);
+#if ENABLE_MOE_DEBUG_INFO
+    int64_t debugInfo[DEBUG_INFO_COUNT];
+    SetMoeDebugInfoPtr(&debugInfo[0]);
+#endif
 #if ENABLE_MOE_PROFILING
     AscendC::PipeBarrier<PIPE_ALL>();
     Arch::CrossCoreFlag gmm1AivFinished{0};
@@ -80,7 +99,7 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
     }
 
 #if ENABLE_MOE_PROFILING
-    if (share_smooth_scales) {
+    if (share_smooth_scales && (MOE_PROFILING_THRESHOLD == 0 || DEBUG_INFO_ENABLE_PROFILING != 0)) {
         AscendC::GlobalTensor<int64_t> initGlobal = {};
         initGlobal.SetGlobalBuffer((__gm__ int64_t *)(share_smooth_scales));
         AscendC::GlobalTensor<int64_t> coreGlobal;
