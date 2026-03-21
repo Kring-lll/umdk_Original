@@ -11,6 +11,30 @@
 
 #include "moe_distribute_base.h"
 
+/* log level macros */
+enum MoelogLevel {
+    MOE_LOG_LEVEL_ERROR = 0,
+    MOE_LOG_LEVEL_WARNING = 1,
+    MOE_LOG_LEVEL_INFO = 2,
+    MOE_LOG_LEVEL_DEBUG = 3,
+    MOE_LOG_LEVEL_DETAIL = 4,
+};
+
+#define MOE_LOG_LEVEL MOE_LOG_LEVEL_DEBUG
+
+#define MOE_LOG(level, fmt, ...)                                                                                       \
+    do {                                                                                                               \
+        if constexpr (level <= MOE_LOG_LEVEL) {                                                                        \
+            AscendC::printf("[FusedDeepMoe][%s] " fmt "\n", __FUNCTION__, ##__VA_ARGS__);                              \
+        }                                                                                                              \
+    } while (0)
+
+#define MOE_LOG_ERROR(fmt, ...)   MOE_LOG(MOE_LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
+#define MOE_LOG_WARNING(fmt, ...) MOE_LOG(MOE_LOG_LEVEL_WARNING, fmt, ##__VA_ARGS__)
+#define MOE_LOG_INFO(fmt, ...)    MOE_LOG(MOE_LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
+#define MOE_LOG_DEBUG(fmt, ...)   MOE_LOG(MOE_LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
+#define MOE_LOG_DETAIL(fmt, ...)  MOE_LOG(MOE_LOG_LEVEL_DETAIL, fmt, ##__VA_ARGS__)
+
 #define TemplateMC2TypeClass typename ExpandXType, typename W1ScaleType, typename W2ScaleType, typename ExpandIdxType, bool IsNeedReduceScatter, uint32_t EXEC_FLAG
 #define TemplateMC2TypeFunc ExpandXType, W1ScaleType, W2ScaleType, ExpandIdxType, IsNeedReduceScatter, EXEC_FLAG
 
