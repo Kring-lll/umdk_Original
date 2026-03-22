@@ -267,7 +267,6 @@ public:
         uint32_t stageId = 0;
         uint32_t stageUsed = 0;
         uint32_t startCoreIdx = 0;
-        uint32_t tracingIdx = 0;
 #if ENABLE_GMM2_MOVING_FORWARD
         int32_t callIdx = 1;
 #endif
