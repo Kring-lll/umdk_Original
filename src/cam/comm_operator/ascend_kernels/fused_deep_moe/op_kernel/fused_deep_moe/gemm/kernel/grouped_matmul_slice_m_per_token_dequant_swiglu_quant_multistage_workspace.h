@@ -308,7 +308,11 @@ __aicore__ inline static void EncreaseSyncFlag(__gm__ uint8_t *flagAddr, uint8_t
     // flag++, like set flag
     AscendC::PipeBarrier<PIPE_ALL>();
     AscendC::GlobalTensor<uint8_t> global;
-    global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE);
+    if constexpr (g_coreType == AscendC::AIV) {
+        global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE + AscendC::GetSubBlockIdx() * (SOFT_SYNC_SPACE_SIZE / SUB_AIV_NUM));
+    } else {
+        global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE);
+    }
     __asm__ __volatile__("");
     AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(
         global);
@@ -327,19 +331,52 @@ __aicore__ inline static void CheckSyncFlag(__gm__ uint8_t *flagAddr, uint8_t id
     //  check flag, like wait flag
     AscendC::PipeBarrier<PIPE_ALL>();
     AscendC::GlobalTensor<uint8_t> global;
-    global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE);
-    while (true) {
-        __asm__ __volatile__("");
-        AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
-                                          AscendC::DcciDst::CACHELINE_OUT>(global);
-        __asm__ __volatile__("");
-        uint8_t value = global.GetValue(0);
-        if (value >= target) {
+    if constexpr (g_coreType == AscendC::AIV) {
+        global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE);
+        while (true) {
             __asm__ __volatile__("");
             AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
-                                              AscendC::DcciDst::CACHELINE_OUT>(global);
+                                            AscendC::DcciDst::CACHELINE_OUT>(global);
             __asm__ __volatile__("");
-            break;
+            uint8_t value = global.GetValue(0);
+            if (value >= target) {
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                AscendC::DcciDst::CACHELINE_OUT>(global);
+                __asm__ __volatile__("");
+                break;
+            }
+        }
+    } else {
+        global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE);
+        while (true) {
+            __asm__ __volatile__("");
+            AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                            AscendC::DcciDst::CACHELINE_OUT>(global);
+            __asm__ __volatile__("");
+            uint8_t value = global.GetValue(0);
+            if (value >= target) {
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                AscendC::DcciDst::CACHELINE_OUT>(global);
+                __asm__ __volatile__("");
+                break;
+            }
+        }
+        global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE + 1 * (SOFT_SYNC_SPACE_SIZE / SUB_AIV_NUM));
+        while (true) {
+            __asm__ __volatile__("");
+            AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                            AscendC::DcciDst::CACHELINE_OUT>(global);
+            __asm__ __volatile__("");
+            uint8_t value = global.GetValue(0);
+            if (value >= target) {
+                __asm__ __volatile__("");
+                AscendC::DataCacheCleanAndInvalid<uint8_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                AscendC::DcciDst::CACHELINE_OUT>(global);
+                __asm__ __volatile__("");
+                break;
+            }
         }
     }
     AscendC::PipeBarrier<PIPE_ALL>();
@@ -1655,7 +1692,7 @@ public:
         aiCoreGroupIdx = aivIdx / subBlockNum;
         aivStateGlobalCoreIdx = aivNum + aicNum + aivIdx;
 
-        isCompCore = (aivIdx % subBlockNum) == 0;
+        isCompCore = false;
         compCoreNum = aiCoreGroupNum;
         compCoreIdx = aiCoreGroupIdx;
         // when localExpertNum=1, all cores send token and recv token in sequence
@@ -1800,12 +1837,18 @@ public:
             AscendC::Duplicate(tmpZeroLocalTensor, (int32_t)0, INT32_COUNT_PER_BLOCK);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(0);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(0);
-            // 前一半为C核写的Flag
-            AscendC::DataCopy(softSyncTensor[compCoreIdx * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)],
-                                                tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK); 
-            // 后一半为V核写的Flag
-            AscendC::DataCopy(softSyncTensor[(compCoreIdx + compCoreNum)
-                            * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)], tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
+            if (AscendC::GetSubBlockIdx() == 0) {
+                // 前一半为V核写的Flag
+                AscendC::DataCopy(softSyncTensor[compCoreIdx * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)],
+                                                    tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
+                // 后一半为C核写的Flag
+                AscendC::DataCopy(softSyncTensor[(compCoreIdx + compCoreNum)
+                                * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)], tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
+            } else {
+                AscendC::DataCopy(softSyncTensor[compCoreIdx
+                                * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t) + (SOFT_SYNC_SPACE_SIZE / SUB_AIV_NUM / sizeof(int32_t))],
+                                tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
+            }
         }
         if (aivIdx == aiCoreGroupNum * subBlockNum - 1) {
             // clean
@@ -1908,6 +1951,7 @@ public:
 
         UpdateAndCleanInfo(params.ptrGroupList, params.gmEpSendCount, params.gmExpertTokenNums);
         AscendC::PipeBarrier<PIPE_ALL>();
+        uint32_t startCoreIdx = 0;
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             // dynamic quant
             totalTokenCount = axisBS;
@@ -1926,11 +1970,15 @@ public:
             MatrixCoord quantShape(totalTokenCount, nOut);
             MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
             Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
-            for (uint32_t loopIdx = aiCoreGroupIdx; loopIdx < quantSwizzle.GetLoops(); loopIdx += aiCoreGroupNum) {
+            uint32_t coreLoops = quantSwizzle.GetLoops();
+            uint32_t startLoopIdx =	 
+                        ((sendCoreIdx < startCoreIdx) ? (sendCoreIdx + aiCoreGroupNum) : sendCoreIdx) - startCoreIdx;
+            for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
                 auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
                 auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
                 blockQuant(quantBlockShape, blockCoord, actualBlockShape);
             }
+            startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
             AscendC::PipeBarrier<PIPE_ALL>();
         }
         {
@@ -1955,8 +2003,11 @@ public:
             BlockQuant<ArchTag> blockQuant(resource, quantParams);
             MatrixCoord quantShape(totalTokenCount, nOut);
             MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
+            uint32_t coreLoops = quantSwizzle.GetLoops();	 
+            uint32_t startLoopIdx =	 
+                    ((sendCoreIdx < startCoreIdx) ? (sendCoreIdx + aiCoreGroupNum) : sendCoreIdx) - startCoreIdx;
             Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
-            for (uint32_t loopIdx = aiCoreGroupIdx; loopIdx < quantSwizzle.GetLoops(); loopIdx += aiCoreGroupNum) {
+            for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
                 auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
                 auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
                 blockQuant(quantBlockShape, blockCoord, actualBlockShape);

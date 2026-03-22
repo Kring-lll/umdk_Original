@@ -197,8 +197,8 @@ public:
         auto tileShape = TileShape::ToCoord();
         EpilogueTileSwizzle epilogueTileSwizzle(actualBlockShape, tileShape);
         uint32_t tileLoops = epilogueTileSwizzle.GetLoops();
-        uint32_t subblockIdx = 0;  // for 1C1V
-        uint32_t subblockNum = 1;  // for 1C1V
+        uint32_t subblockIdx = AscendC::GetSubBlockIdx();
+        uint32_t subblockNum = AscendC::GetSubBlockNum();
         for (uint32_t loopIdx = subblockIdx; loopIdx < tileLoops; loopIdx += subblockNum) {
             auto tileCoord = epilogueTileSwizzle.GetTileCoord(loopIdx);
             auto actualTileShape = epilogueTileSwizzle.GetActualTileShape(tileCoord);
