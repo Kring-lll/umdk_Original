@@ -555,6 +555,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     MoeTracing(TRACE_POINT("gmm2-combine", "E"));
     MoeTracing(TRACE_POINT("processing", "E"));
 #if MOE_PROFILING_THRESHOLD
+    GM_ADDR statusDataSpaceGm = (GM_ADDR)DEBUG_INFO_ENABLE_PROFILING + 990;
+
     if constexpr (EXEC_FLAG & EXEC_FLAG_X_ACTIVE_MASK) {
         AscendC::GlobalTensor<bool> xActiveMaskGM_;
         xActiveMaskGM_.SetGlobalBuffer((__gm__ bool *)xActiveMask_);
@@ -564,6 +566,50 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
         DEBUG_INFO_ENABLE_PROFILING = xActiveMaskGM_(MOE_PROFILING_THRESHOLD) ? 1 : 0;
     } else {
         DEBUG_INFO_ENABLE_PROFILING = tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo.bs > MOE_PROFILING_THRESHOLD ? 1 : 0;
+    }
+
+    constexpr uint32_t EP_LOCAL_RANK_SIZE = 16;
+    AscendC::GlobalTensor<int32_t> statusDataSpaceGlobal;
+    statusDataSpaceGlobal.SetGlobalBuffer((__gm__ int32_t *)statusDataSpaceGm);
+    __asm__ __volatile__("");
+    AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(
+        statusDataSpaceGlobal[(epRankId_ / EP_LOCAL_RANK_SIZE) * 8]);
+    __asm__ __volatile__("");
+    int32_t status = statusDataSpaceGlobal((epRankId_ / EP_LOCAL_RANK_SIZE) * 8);
+    AscendC::SyncAll<false>();
+    if ((epRankId_ % EP_LOCAL_RANK_SIZE) == 0 && g_coreType == AscendC::AIV && AscendC::GetBlockIdx() == 0) {
+        statusDataSpaceGlobal((epRankId_ / EP_LOCAL_RANK_SIZE) * 8 + 4) = (int32_t)DEBUG_INFO_ENABLE_PROFILING;
+        __asm__ __volatile__("");
+        AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                          AscendC::DcciDst::CACHELINE_OUT>(
+            statusDataSpaceGlobal[(epRankId_ / EP_LOCAL_RANK_SIZE) * 8 + 4]);
+        __asm__ __volatile__("" ::: "memory");
+        statusDataSpaceGlobal((epRankId_ / EP_LOCAL_RANK_SIZE) * 8) = status ^ 1;
+        __asm__ __volatile__("");
+        AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                          AscendC::DcciDst::CACHELINE_OUT>(
+            statusDataSpaceGlobal[(epRankId_ / EP_LOCAL_RANK_SIZE) * 8]);
+        __asm__ __volatile__("");
+    }
+    if (DEBUG_INFO_ENABLE_PROFILING == 0) {
+        for (uint32_t epRank = 0; epRank < epRankSize_; epRank += EP_LOCAL_RANK_SIZE) {
+            do {
+                __asm__ __volatile__("nop");
+                AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                  AscendC::DcciDst::CACHELINE_OUT>(
+                    statusDataSpaceGlobal[(epRank / EP_LOCAL_RANK_SIZE) * 8]);
+                __asm__ __volatile__("");
+            } while (statusDataSpaceGlobal((epRank / EP_LOCAL_RANK_SIZE) * 8) == status);
+            __asm__ __volatile__("" ::: "memory");
+            AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                              AscendC::DcciDst::CACHELINE_OUT>(
+                statusDataSpaceGlobal[(epRank / EP_LOCAL_RANK_SIZE) * 8 + 4]);
+            __asm__ __volatile__("");
+            if (statusDataSpaceGlobal((epRank / EP_LOCAL_RANK_SIZE) * 8 + 4) != 0) {
+                DEBUG_INFO_ENABLE_PROFILING = 1;
+                break;
+            }
+        }
     }
 #endif
 }
