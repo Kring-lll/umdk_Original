@@ -1347,6 +1347,8 @@ public:
         AscendC::GlobalTensor<float> dynamicScalesOutGMTensor_;
         dynamicScalesOutGMTensor_.SetGlobalBuffer((__gm__ float *)(gmX1Scale));
         uint32_t beginIdx = 0;
+        uint32_t targetTokenCount = 0;
+        uint32_t curRecvTokenCount = 0;
         for (uint32_t index = startRankId; index < endRankId; index++) {
             uint32_t i = index - startRankId;
             if (i > 0) {
@@ -1356,28 +1358,45 @@ public:
             uint32_t count = statusTensor_.GetValue(index * INT32_COUNT_PER_BLOCK + 1);
             coreTokenCount += count;
             beginIdx = gatherMaskOutCountTensor.GetValue(i) - count;
+            countPerRank[i] = count;
+            rankBeginIdx[i] = beginIdx;
+            curTokenIdx[i] = 0;
+            beginIdx += count;
+            targetTokenCount += count;
+        }
+        for (uint32_t index = startRankId; index < endRankId; index++) {
+            uint32_t i = index - startRankId;
+            // if (i > 0) {
+            //     gatherMaskOutCountTensor.SetValue(
+            //         i, gatherMaskOutCountTensor.GetValue(i - 1) + gatherMaskOutCountTensor.GetValue(index));
+            // }
+            // uint32_t count = statusTensor_.GetValue(index * INT32_COUNT_PER_BLOCK + 1);
+            // coreTokenCount += count;
+            beginIdx = rankBeginIdx[i];
             uint32_t winOffset = index;
             winOffset = (index % epRankSize) * moeExpertNumPerRank + index / epRankSize;
             GM_ADDR wAddr = (__gm__ uint8_t *)(GetWindAddrByRankId(epRankId)) + winOffset * expertPerSizeOnWin;
             AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
-            for (uint32_t j = 0; j < count; j++) {
+            while (curRecvTokenCount < targetTokenCount) {
+            for (uint32_t j = curTokenIdx[i]; j < countPerRank[i]; j++) {
                 tokGlobal.SetGlobalBuffer((__gm__ int8_t *)(wAddr + j * hCommuSize));
                 tokGlobalInt32.SetGlobalBuffer((__gm__ int32_t *)(wAddr + j * hCommuSize + hOutSize));
                 expandXOutGlobal.SetGlobalBuffer((__gm__ int8_t *)(gmX1) + (beginIdx + j) * tokenLength, tokenLength);
 
-                while (true) {
-                    AscendC::DataCopy(tmpLocalTensor, tokGlobalInt32, INT32_COUNT_PER_BLOCK);
-                    AscendC::SetFlag<AscendC::HardEvent::MTE2_S>(0);
-                    AscendC::WaitFlag<AscendC::HardEvent::MTE2_S>(0);
-                    if (tmpLocalTensor.GetValue(1) == tokenFlag) {
-                        tokGlobalInt32.SetValue(1, 0);
-                        __asm__ __volatile__("");
-                        AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
-                                                        AscendC::DcciDst::CACHELINE_OUT>(tokGlobalInt32[1]);
-                        __asm__ __volatile__("");
-                        break;
-                    }
+                AscendC::DataCopy(tmpLocalTensor, tokGlobalInt32, INT32_COUNT_PER_BLOCK);
+                AscendC::SetFlag<AscendC::HardEvent::MTE2_S>(0);
+                AscendC::WaitFlag<AscendC::HardEvent::MTE2_S>(0);
+                if (tmpLocalTensor.GetValue(1) == tokenFlag) {
+                    tokGlobalInt32.SetValue(1, 0);
+                    __asm__ __volatile__("");
+                    AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
+                                                    AscendC::DcciDst::CACHELINE_OUT>(tokGlobalInt32[1]);
+                    __asm__ __volatile__("");
+                } else {
+                    break;
                 }
+                curRecvTokenCount += 1;
+                curTokenIdx[i] += 1;
                 AscendC::PipeBarrier<PIPE_ALL>();
 
                 AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
@@ -1388,6 +1407,7 @@ public:
                                      xOutFp32Tensor_[tokenLength / sizeof(float)], dataCopyParamsFloat);
                 AscendC::DataCopy(expandXOutGlobal, xTmpTensor_, tokenLength);
                 AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
+            }
             }
             AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
             beginIdx += count;
@@ -1982,6 +2002,10 @@ private:
     Arch::Resource<ArchTag> resource;
 
     AscendC::LocalTensor<int32_t> expertIdsTensor_;
+     // count info
+    int32_t countPerRank[16]{0};
+    int32_t curTokenIdx[16]{0};
+    int32_t rankBeginIdx[16]{0};
 
     // rank and expert info
     uint32_t epRankSize{0};
