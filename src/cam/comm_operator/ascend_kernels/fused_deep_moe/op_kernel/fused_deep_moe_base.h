@@ -79,7 +79,7 @@ __aicore__ inline int64_t* GetMoeProfilePtr(uint32_t idx = 0)
 }
 
 template <bool sync = ENABLE_MOE_PROFILING_BARRIER>
-__aicore__ inline void MoeTracing(int64_t data)
+__aicore__ inline void MoeTracingWithCycle(int64_t data, int64_t cycle)
 {
 #if ENABLE_MOE_PROFILING
     if constexpr (sync) {
@@ -88,8 +88,26 @@ __aicore__ inline void MoeTracing(int64_t data)
     
     int64_t *profileData = GetMoeProfilePtr();
     profileData[profileData[0]++] = data;
-    profileData[PROF_SIZE_PER_CORE - profileData[0]] = AscendC::GetSystemCycle();
+    profileData[PROF_SIZE_PER_CORE - profileData[0]] = cycle;
 #endif
+}
+
+template <bool sync = ENABLE_MOE_PROFILING_BARRIER>
+__aicore__ inline void MoeTracingWithCycle(int64_t data, uint32_t index, int64_t cycle)
+{
+    MoeTracingWithCycle<sync>(data | (int64_t)(((uint64_t)index) << 32), cycle);
+}
+
+template <bool sync = ENABLE_MOE_PROFILING_BARRIER>
+__aicore__ inline void MoeTracingWithCycle(int64_t data, uint32_t extraId, uint32_t index, int64_t cycle)
+{
+    MoeTracingWithCycle<sync>(data, (extraId | (index << 8)), cycle);
+}
+
+template <bool sync = ENABLE_MOE_PROFILING_BARRIER>
+__aicore__ inline void MoeTracing(int64_t data)
+{
+    MoeTracingWithCycle(data, AscendC::GetSystemCycle());
 }
 
 template <bool sync = ENABLE_MOE_PROFILING_BARRIER>
