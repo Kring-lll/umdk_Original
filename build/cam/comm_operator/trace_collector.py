@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 增强版追踪数据收集器 - 支持64位组合ID（微秒时间戳，名称带seq，队列匹配，rank排序，两种extra_id模式）
-可选输出仅保留最底层片段（叶子事件）的trace文件，便于跨rank对比。
+支持按从叶子向上的层数过滤事件（--depth），1=所有叶子，2=叶子+父层，依此类推（适应不平衡树和区间交叠）。
 """
 
 import json
@@ -40,7 +40,6 @@ def parse_profiling_data(profiling_tensor: torch.Tensor, core_type: int = 0, cor
     for i in range(max_records):
         combined_id = profiling_tensor[core_id][1 + i].item()
         raw_timestamp = profiling_tensor[core_id][-2 - i].item()
-        # 计算64位无符号差值，直接转换为微秒
         diff = (raw_timestamp - initial_timestamp) & 0xFFFFFFFFFFFFFFFF
         timestamp_us = diff / CLOCK_DIVISOR
         base_point_id, extra_id = extract_point_id_parts(combined_id)
@@ -115,11 +114,72 @@ def convert_to_chrome_event_type(event_type: str) -> Tuple[str, str]:
     display_name = display_map.get(event_upper, 'Unknown')
     return event_upper, display_name
 
+def build_interval_tree(intervals):
+    """
+    构建区间树，计算每个区间到最深叶子的深度（叶子深度=1）。
+    intervals: 列表，每个元素为 {'start_ts', 'end_ts', 'interval_obj'}
+    返回：每个 interval_obj 被添加 'depth_from_leaf' 属性。
+    """
+    if not intervals:
+        return
+
+    # 按开始时间排序
+    intervals_sorted = sorted(intervals, key=lambda x: x['start_ts'])
+
+    # 为每个区间寻找直接父节点（包含它的最小区间）
+    # 方法：按结束时间逆序查找包含它的区间
+    # 简化：对所有区间，找到满足 start < cur.start and end > cur.end 且 end 最小的区间
+    # O(N^2)，但 N 一般不大
+    n = len(intervals_sorted)
+    parent = [None] * n
+    for i in range(n):
+        cur = intervals_sorted[i]
+        best_parent = None
+        best_parent_end = float('inf')
+        for j in range(n):
+            if i == j:
+                continue
+            other = intervals_sorted[j]
+            if other['start_ts'] < cur['start_ts'] and other['end_ts'] > cur['end_ts']:
+                if other['end_ts'] < best_parent_end:
+                    best_parent_end = other['end_ts']
+                    best_parent = j
+        parent[i] = best_parent
+
+    # 构建子节点列表
+    children = [[] for _ in range(n)]
+    for i, p in enumerate(parent):
+        if p is not None:
+            children[p].append(i)
+
+    # 后序遍历计算深度
+    depth = [0] * n
+    def dfs(node):
+        if not children[node]:
+            depth[node] = 1
+        else:
+            max_child_depth = 0
+            for child in children[node]:
+                dfs(child)
+                max_child_depth = max(max_child_depth, depth[child])
+            depth[node] = max_child_depth + 1
+
+    for i in range(n):
+        if parent[i] is None:  # 根节点
+            dfs(i)
+
+    # 将深度赋值给原始区间对象
+    for i, interval in enumerate(intervals_sorted):
+        interval['interval_obj']['depth_from_leaf'] = depth[i]
+
 def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                          output_file: str = "chrome_trace.json",
                          extra_mode: str = 'seq',
-                         leaf_only: bool = False):   # 新增参数：是否只保留叶子事件
-    """生成Chrome Tracing格式，微秒时间戳，支持两种extra_id模式和叶子过滤"""
+                         depth: int = 0):
+    """
+    生成Chrome Tracing格式，支持按从叶子向上的层数过滤事件。
+    depth: 0=全部保留，1=仅保留叶子节点，2=保留叶子及其父节点（最内两层），依此类推。
+    """
     rank_to_pid = {}
     next_pid = 0
     points = mapping.get('points', {})
@@ -145,8 +205,8 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
             'args': {'sort_index': rank_id}
         })
 
-    # 按tid分组的事件列表
-    tid_events = {}  # key: (rank_id, core_type, core_id) -> list of raw event dicts
+    # 按tid分组的事件列表（原始项）
+    tid_events = {}  # key: (rank_id, core_type, core_id) -> list of raw item dicts
     tid_metadata_set = set()
 
     for rank_id in sorted_rank_ids:
@@ -263,22 +323,27 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
 
             tid_events.setdefault(tid_key, []).append(raw_item)
 
-    # 配对：对每个tid，按base_name分组，根据不同模式处理
-    final_events = []
+    # 配对阶段：收集完整区间和孤立事件
+    all_intervals = []      # 每个元素: {'pid', 'tid', 'name', 'start_event', 'end_event', 'start_ts', 'end_ts', 'interval_obj' (指向自身用于深度记录)}
+    unpaired_events = []    # 孤立事件（只有B或只有E）的最终事件对象
+
     b_count = 0
     e_count = 0
     unpaired_count = 0
 
     for tid_key, raw_items in tid_events.items():
         raw_items.sort(key=lambda x: x['ts'])
+        pid = raw_items[0]['event_base']['pid']
+        tid_str = raw_items[0]['event_base']['tid']
 
         # 按base_name分组
-        groups = {}
+        groups = defaultdict(list)
         for item in raw_items:
-            groups.setdefault(item['base_name'], []).append(item)
+            groups[item['base_name']].append(item)
 
         for base_name, group in groups.items():
             group.sort(key=lambda x: x['ts'])
+
             if extra_mode == 'legacy':
                 # 模式A：队列匹配，分配seq
                 b_queue = deque()
@@ -316,23 +381,34 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                             e_event['args']['end_file'] = e_file
                             e_event['args']['end_line'] = e_line
 
-                            final_events.append(b_event)
-                            final_events.append(e_event)
+                            interval = {
+                                'pid': pid,
+                                'tid': tid_str,
+                                'name': full_name,
+                                'start_event': b_event,
+                                'end_event': e_event,
+                                'start_ts': b_event['ts'],
+                                'end_ts': e_event['ts'],
+                                'interval_obj': None  # 占位，稍后填充自身引用
+                            }
+                            interval['interval_obj'] = interval
+                            all_intervals.append(interval)
                             b_count += 1
                             e_count += 1
                         else:
+                            # 孤立E
                             print(f"警告: 孤立E事件，tid={tid_key}, base_name={base_name}, ts={item['ts']}")
                             item['seq'] = -1
                             e_event = item['event_base'].copy()
                             e_event['name'] = f"{base_name} #-1"
-                            final_events.append(e_event)
+                            unpaired_events.append(e_event)
                             e_count += 1
                             unpaired_count += 1
                     else:
                         print(f"警告: 未知事件类型 {item['ph']}，tid={tid_key}")
                         e_event = item['event_base'].copy()
                         e_event['name'] = base_name
-                        final_events.append(e_event)
+                        unpaired_events.append(e_event)
                         if item['ph'] == 'B':
                             b_count += 1
                         elif item['ph'] == 'E':
@@ -343,7 +419,7 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                     seq = item['seq']
                     b_event = item['event_base'].copy()
                     b_event['name'] = f"{base_name} #{seq}"
-                    final_events.append(b_event)
+                    unpaired_events.append(b_event)
                     b_count += 1
                     unpaired_count += 1
 
@@ -353,23 +429,13 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                 while i < n:
                     item = group[i]
                     if item['ph'] == 'B':
-                        # 寻找下一个E
+                        # 寻找下一个同seq的E
                         j = i + 1
-                        while j < n and group[j]['ph'] != 'E':
+                        while j < n and (group[j]['ph'] != 'E' or group[j]['seq'] != item['seq']):
                             j += 1
                         if j < n and group[j]['ph'] == 'E':
                             b_item = item
                             e_item = group[j]
-                            # 确保它们的seq相同
-                            if b_item['seq'] != e_item['seq']:
-                                print(f"错误: 配对B和E的seq不一致，tid={tid_key}, base_name={base_name}, "
-                                      f"B seq={b_item['seq']}, E seq={e_item['seq']}")
-                                # 跳过
-                                final_events.append(b_item['event_base'].copy())
-                                b_count += 1
-                                unpaired_count += 1
-                                i += 1
-                                continue
                             full_name = b_item['full_name']
                             b_file = b_item['point_info'].get('file', '')
                             b_line = b_item['point_info'].get('line', 0)
@@ -390,8 +456,18 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                             e_event['args']['end_file'] = e_file
                             e_event['args']['end_line'] = e_line
 
-                            final_events.append(b_event)
-                            final_events.append(e_event)
+                            interval = {
+                                'pid': pid,
+                                'tid': tid_str,
+                                'name': full_name,
+                                'start_event': b_event,
+                                'end_event': e_event,
+                                'start_ts': b_event['ts'],
+                                'end_ts': e_event['ts'],
+                                'interval_obj': None
+                            }
+                            interval['interval_obj'] = interval
+                            all_intervals.append(interval)
                             b_count += 1
                             e_count += 1
                             i = j + 1
@@ -399,7 +475,7 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                             print(f"警告: 孤立B事件，tid={tid_key}, base_name={base_name}, ts={item['ts']}")
                             b_event = item['event_base'].copy()
                             b_event['name'] = item['full_name']
-                            final_events.append(b_event)
+                            unpaired_events.append(b_event)
                             b_count += 1
                             unpaired_count += 1
                             i += 1
@@ -407,7 +483,7 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                         print(f"警告: 孤立E事件，tid={tid_key}, base_name={base_name}, ts={item['ts']}")
                         e_event = item['event_base'].copy()
                         e_event['name'] = item['full_name']
-                        final_events.append(e_event)
+                        unpaired_events.append(e_event)
                         e_count += 1
                         unpaired_count += 1
                         i += 1
@@ -415,75 +491,38 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                         print(f"警告: 未知事件类型 {item['ph']}，tid={tid_key}")
                         e_event = item['event_base'].copy()
                         e_event['name'] = item.get('full_name', base_name)
-                        final_events.append(e_event)
+                        unpaired_events.append(e_event)
                         i += 1
 
-    # ========== 新增叶子过滤逻辑 ==========
-    if leaf_only:
-        print("\n开始过滤：仅保留叶子事件...")
-        # 收集完整区间（有B和E）和不完整事件
-        intervals = {}          # key: (pid, tid, name) -> {'start': event, 'end': event}
-        incomplete_keys = set() # 记录不完整的key（只有B或只有E）
+    # ========== 深度计算与过滤（从叶子向上，支持不平衡树和交叠） ==========
+    final_events = []
 
-        # 先遍历final_events，构建区间字典
-        for ev in final_events:
-            key = (ev['pid'], ev['tid'], ev['name'])
-            if ev['ph'] == 'B':
-                if key in intervals:
-                    print(f"警告: 重复B事件，key={key}，覆盖")
-                intervals[key] = {'start': ev, 'start_ts': ev['ts'], 'end': None, 'end_ts': None}
-            elif ev['ph'] == 'E':
-                if key in intervals and intervals[key]['start'] is not None:
-                    intervals[key]['end'] = ev
-                    intervals[key]['end_ts'] = ev['ts']
-                else:
-                    # 没有对应的B，记录为不完整
-                    incomplete_keys.add(key)
-
-        # 移除只有开始没有结束的区间（也加入不完整）
-        keys_to_remove = []
-        for key, data in intervals.items():
-            if data['end'] is None:
-                incomplete_keys.add(key)
-                keys_to_remove.append(key)
-        for key in keys_to_remove:
-            del intervals[key]
-
+    if depth == 0:
+        # 全部保留
+        for interval in all_intervals:
+            final_events.append(interval['start_event'])
+            final_events.append(interval['end_event'])
+    else:
         # 按线程分组
-        thread_groups = defaultdict(list)  # (pid, tid) -> list of (key, start_ts, end_ts)
-        for key, data in intervals.items():
-            pid, tid, name = key
-            thread_groups[(pid, tid)].append((key, data['start_ts'], data['end_ts']))
+        intervals_by_thread = defaultdict(list)
+        for interval in all_intervals:
+            key = (interval['pid'], interval['tid'])
+            intervals_by_thread[key].append(interval)
 
-        leaf_keys = set()
-        for (pid, tid), group in thread_groups.items():
-            # 按开始时间排序
-            group.sort(key=lambda x: x[1])
-            n = len(group)
-            is_leaf = [True] * n
-            for i in range(n):
-                key_i, s_i, e_i = group[i]
-                for j in range(n):
-                    if i == j:
-                        continue
-                    _, s_j, e_j = group[j]
-                    # 如果区间j完全在i内部，则i不是叶子
-                    if s_i < s_j and e_j < e_i:
-                        is_leaf[i] = False
-                        break
-            for i, leaf in enumerate(is_leaf):
-                if leaf:
-                    leaf_keys.add(group[i][0])
+        for key, intervals in intervals_by_thread.items():
+            # 构建区间树并计算深度
+            # 准备数据格式
+            interval_list = [{'start_ts': iv['start_ts'], 'end_ts': iv['end_ts'], 'interval_obj': iv} for iv in intervals]
+            build_interval_tree(interval_list)
 
-        # 过滤final_events：保留叶子区间和不完整区间的事件
-        filtered_events = []
-        for ev in final_events:
-            key = (ev['pid'], ev['tid'], ev['name'])
-            if key in leaf_keys or key in incomplete_keys:
-                filtered_events.append(ev)
-        final_events = filtered_events
-        print(f"叶子过滤完成，剩余事件数: {len(final_events)}")
-    # ========== 叶子过滤结束 ==========
+        # 过滤：保留深度 <= depth 的区间
+        for interval in all_intervals:
+            if interval.get('depth_from_leaf', 0) <= depth:
+                final_events.append(interval['start_event'])
+                final_events.append(interval['end_event'])
+
+    # 添加所有未配对事件
+    final_events.extend(unpaired_events)
 
     all_events = metadata_events + final_events
 
@@ -501,7 +540,7 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
             "total_ranks": len(all_data),
             "clock_divisor": CLOCK_DIVISOR,
             "extra_mode": extra_mode,
-            "leaf_only": leaf_only   # 标记是否启用了叶子过滤
+            "depth": depth
         }
     }
 
@@ -519,7 +558,7 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
     print(f"总rank数: {len(all_data)}")
     print(f"时钟频率: {CLOCK_DIVISOR} MHz")
     print(f"extra_id模式: {extra_mode}")
-    print(f"叶子过滤: {'是' if leaf_only else '否'}")
+    print(f"保留深度(从叶子向上): {depth} (0=全部保留)")
 
     return trace_data
 
@@ -570,7 +609,7 @@ def analyze_data(all_data: Dict[int, Dict], mapping: Dict):
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description='追踪数据收集器 - 微秒时间戳，名称带seq，队列匹配，rank排序，两种extra_id模式')
+    parser = argparse.ArgumentParser(description='追踪数据收集器 - 支持按从叶子向上的层数过滤事件')
     parser.add_argument('data_dir', help='数据目录')
     parser.add_argument('mapping_file', help='映射表文件')
     parser.add_argument('-o', '--output', default='chrome_trace.json', help='输出文件')
@@ -579,8 +618,8 @@ def main():
     parser.add_argument('--debug-core', type=str, default=None, help='调试核心 rank,type,core')
     parser.add_argument('--extra-mode', choices=['legacy', 'seq'], default='seq',
                         help='extra_id解析模式: legacy=整体使用, seq=高24位作seq低8位作extra (默认)')
-    parser.add_argument('--leaf-only', action='store_true',   # 新增选项
-                        help='只保留最内层片段（叶子事件），删除父区间')
+    parser.add_argument('--depth', type=int, default=0,
+                        help='保留的层数（从叶子向上计数）：0=全部保留，1=仅叶子节点，2=叶子+父层，...')
     args = parser.parse_args()
 
     global CLOCK_DIVISOR
@@ -608,7 +647,7 @@ def main():
         print("\n生成Chrome trace...")
         generate_chrome_trace(all_data, mapping, args.output,
                               extra_mode=args.extra_mode,
-                              leaf_only=args.leaf_only)   # 传递叶子过滤标志
+                              depth=args.depth)
 
 if __name__ == "__main__":
     main()

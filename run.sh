@@ -25,6 +25,7 @@ case $1 in
         python src/cam/examples/fused_deep_moe_sample.py
         if $enable_profiling; then
             python build/cam/comm_operator/trace_collector.py ${SCRIPT_PATH}/output/cam/profiling_data ${SCRIPT_PATH}/output/cam/point_map.json -o ${SCRIPT_PATH}/output/cam/trace-${TEST_TAG}.json
+            python build/cam/comm_operator/trace_collector.py --depth 1 ${SCRIPT_PATH}/output/cam/profiling_data ${SCRIPT_PATH}/output/cam/point_map.json -o ${SCRIPT_PATH}/output/cam/trace-${TEST_TAG}-leaf.json
         fi
         cd ${SCRIPT_PATH}/output/cam/
         rm -fr trace.tar.gz
