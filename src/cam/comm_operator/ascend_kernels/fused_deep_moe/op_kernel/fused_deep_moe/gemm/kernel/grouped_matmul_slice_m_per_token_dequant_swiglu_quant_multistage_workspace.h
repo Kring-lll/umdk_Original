@@ -1388,7 +1388,7 @@ public:
     }
 
     CATLASS_DEVICE
-    uint32_t WaitDataArriveWithFlag(uint32_t srcExpDataIdx, int32_t beginIdx, int32_t count, int64_t ubOffset)
+    uint32_t WaitDataArriveWithFlag(uint32_t srcExpDataIdx, int32_t beginIdx, int32_t count, int64_t ubOffset, uint32_t recordIdx)
     {
         int64_t subUbOffset = ubOffset;
         uint32_t flagNum = blockCntPerToken * uint32_t(count);
@@ -1404,7 +1404,9 @@ public:
 
         GM_ADDR wAddr = (__gm__ uint8_t *)(GetWindAddrByRankId(epRankId)) + srcExpDataIdx * expertPerSizeOnWin +
                         beginIdx * hCommuSizeWithFlag + DATA_BLOCKSIZE_512 - UB_ALIGN;
-
+        int64_t records[4];
+        uint32_t recordCount = 0;
+        records[recordCount++] = AscendC::GetSystemCycle();
         AscendC::GlobalTensor<int32_t> tokGlobal;
         tokGlobal.SetGlobalBuffer((__gm__ int32_t *)(wAddr));
 
@@ -1412,6 +1414,7 @@ public:
         AscendC::DataCopyPad(flagRecvLt_, tokGlobal, expFlagCopyParams, expFlagPadParams);
 
         AscendC::PipeBarrier<PIPE_ALL>();
+        records[recordCount++] = AscendC::GetSystemCycle();
         AscendC::GatherMask(flagGatherLt_, flagRecvLt_, flagRecvGatherMask_, true, uint32_t(1),
                             {1, (uint16_t)(flagNum), 1, 0}, rsvdCnt);
 
@@ -1419,6 +1422,7 @@ public:
         AscendC::CompareScalar(flagCompResultLtU8_, flagGatherLt_, tokenFlag, AscendC::CMPMODE::EQ, comparCount);
         AscendC::PipeBarrier<PIPE_ALL>();
 
+        records[recordCount++] = AscendC::GetSystemCycle();
         for (uint32_t i = 0; i < compResultU64Num; i++) {
             uint64_t flagCopmMask = flagCompResultLtU64_(i);
             int64_t firstValidIdx = AscendC::ScalarGetSFFValue<0>(flagCopmMask);
@@ -1430,6 +1434,10 @@ public:
                 break;
             }
         }
+        records[recordCount++] = AscendC::GetSystemCycle();
+        recvTokenFlagCopyTime[recordIdx] += records[1] - records[0];
+        recvTokenFlagCompTime[recordIdx] += records[2] - records[1];
+        recvTokenFlagCheckTime[recordIdx] += records[3] - records[2];
         if (arriveFlagNum > flagNum)
             arriveFlagNum = flagNum;
         return uint32_t(arriveFlagNum / blockCntPerToken);
@@ -1495,6 +1503,8 @@ public:
             beginIdx += count;
             targetTokenCount += count;
         }
+        MoeTracing(TRACE_POINT("dispatch-gmm1 recv-token-calc", "B"));
+        int64_t flagCycle = AscendC::GetSystemCycle();
         AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
         while (curRecvTokenCount < targetTokenCount) {
             for (uint32_t index = startRankId; index < endRankId; index++) {
@@ -1508,9 +1518,28 @@ public:
                     expandXOutGlobal.SetGlobalBuffer((__gm__ int8_t *)(gmX1) + (beginIdx + j) * tokenLength, tokenLength);
                     int32_t arriveCount = 1; // debug 等待多少个token
 
-                    if (WaitDataArriveWithFlag(winOffset, j, arriveCount, subUbOffset) != arriveCount) {
+                    if (WaitDataArriveWithFlag(winOffset, j, arriveCount, subUbOffset, i) != arriveCount) {
                         break;
                     }
+                    uint32_t tracingIdx = j - curTokenIdx[i];
+                    AscendC::PipeBarrier<PIPE_ALL>();
+
+                    MoeTracingWithCycle(TRACE_POINT("dispatch-gmm1 recv-token-flag-copy", "B"), i, tracingIdx, flagCycle);
+                    flagCycle += recvTokenFlagCopyTime[i];
+                    recvTokenFlagCopyTime[i] = 0;
+                    MoeTracingWithCycle(TRACE_POINT("dispatch-gmm1 recv-token-flag-copy", "E"), i, tracingIdx, flagCycle);
+
+                    MoeTracingWithCycle(TRACE_POINT("dispatch-gmm1 recv-token-flag-compute", "B"), i, tracingIdx, flagCycle);
+                    flagCycle += recvTokenFlagCompTime[i];
+                    recvTokenFlagCompTime[i] = 0;
+                    MoeTracingWithCycle(TRACE_POINT("dispatch-gmm1 recv-token-flag-compute", "E"), i, tracingIdx, flagCycle);
+
+                    MoeTracingWithCycle(TRACE_POINT("dispatch-gmm1 recv-token-flag-check", "B"), i, tracingIdx, flagCycle);
+                    flagCycle += recvTokenFlagCompTime[i];
+                    recvTokenFlagCheckTime[i] = 0;
+                    MoeTracingWithCycle(TRACE_POINT("dispatch-gmm1 recv-token-flag-check", "E"), i, tracingIdx, flagCycle);
+
+                    MoeTracing(TRACE_POINT("dispatch-gmm1 recv-token-arrived", "B"), i, tracingIdx);
                     curRecvTokenCount += 1;
                     curTokenIdx[i] += 1;
                     AscendC::PipeBarrier<PIPE_ALL>();
@@ -1533,10 +1562,12 @@ public:
                                         scalesCopyParams);
                     AscendC::DataCopyPad(expandXOutGlobal, xTmpTensor_, tokenCopyParams);
                     AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
+                    MoeTracing(TRACE_POINT("dispatch-gmm1 recv-token-arrived", "E"), i, tracingIdx);
                 }
             }
         }
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
+        MoeTracing(TRACE_POINT("dispatch-gmm1 recv-token-calc", "E"));
         for (uint32_t index = startRankId; index < endRankId; index++) {
             uint32_t i = index - startRankId;
             uint32_t winOffset = index;
@@ -2254,6 +2285,9 @@ private:
     int32_t countPerRank[16]{0};
     int32_t curTokenIdx[16]{0};
     int32_t rankBeginIdx[16]{0};
+    int64_t recvTokenFlagCopyTime[16]{0};
+    int64_t recvTokenFlagCompTime[16]{0};
+    int64_t recvTokenFlagCheckTime[16]{0};
 
     // rank and expert info
     uint32_t epRankSize{0};
