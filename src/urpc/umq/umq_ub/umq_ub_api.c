@@ -13,6 +13,31 @@
 #include "umq_ub_impl.h"
 #include "umq_qbuf_pool.h"
 #include "umq_ub_api.h"
+#include "urma_symbol.h"
+#include "tpsa_symbol.h"
+
+static int umq_tp_ub_symbol_load(void)
+{
+    /* Load URMA symbols before calling any urma function */
+    urma_symbol_t *sym = urma_symbol_get();
+    if (!urma_symbol_available(sym)) {
+        if (urma_symbol_load(sym) != 0) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "Failed to load urma symbols, urma not available\n");
+            return -1;
+        }
+    }
+
+    /* Load UVS symbols before calling any uvs function */
+    tpsa_symbol_t *tpsa_sym = tpsa_symbol_get();
+    if (!tpsa_symbol_available(tpsa_sym)) {
+        if (tpsa_symbol_load(tpsa_sym) != 0) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "Failed to load uvs symbols, uvs not available\n");
+            return -1;
+        }
+    }
+
+    return 0;
+}
 
 static uint8_t *umq_tp_ub_init(umq_init_cfg_t *cfg)
 {
@@ -193,6 +218,7 @@ static int umq_tp_ub_cfg_get(uint64_t umqh_tp, umq_cfg_get_t *cfg)
 static umq_ops_t g_umq_ub_ops = {
     .mode = UMQ_TRANS_MODE_UB,
     // control plane api
+    .umq_tp_load_symbol = umq_tp_ub_symbol_load,
     .umq_tp_init = umq_tp_ub_init,
     .umq_tp_uninit = umq_tp_ub_uninit,
     .umq_tp_create = umq_tp_ub_create,
