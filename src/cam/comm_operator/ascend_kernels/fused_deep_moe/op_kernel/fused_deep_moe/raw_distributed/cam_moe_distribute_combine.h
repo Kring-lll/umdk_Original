@@ -270,9 +270,6 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     epWinContext_ = (__gm__ HcclOpResParam *)contextGM0;
     GM_ADDR statusDataSpaceGm = (GM_ADDR)epWinContext_->localWindowsExp;
 #endif
-#if MOE_PROFILING_THRESHOLD
-    DEBUG_INFO_ENABLE_PROFILING = (int64_t)statusDataSpaceGm;
-#endif
     GlobalTensor<int32_t> selfDataStatusTensor;
     selfDataStatusTensor.SetGlobalBuffer((__gm__ int32_t *)(statusDataSpaceGm + STATE_WIN_OFFSET));
     __asm__ __volatile__("");

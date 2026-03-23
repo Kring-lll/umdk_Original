@@ -555,62 +555,102 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     MoeTracing(TRACE_POINT("gmm2-combine", "E"));
     MoeTracing(TRACE_POINT("processing", "E"));
 #if MOE_PROFILING_THRESHOLD
-    GM_ADDR statusDataSpaceGm = (GM_ADDR)DEBUG_INFO_ENABLE_PROFILING + 990;
+    AscendC::PipeBarrier<PIPE_ALL>();
+#if ENABLE_CAM_COMM
+    AscendC::GlobalTensor<GM_ADDR> epWinContext_;
+    epWinContext_.SetGlobalBuffer(&(reinterpret_cast<__gm__ Moe::CommArgs *>(commArgs_))->peerMems[0],
+                                  Moe::CAM_MAX_RANK_SIZE);
+    GM_ADDR statusDataSpaceGm = (GM_ADDR)epWinContext_.GetValue(0);
+#else
+    __gm__ HcclOpResParam *epWinContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
+    GM_ADDR statusDataSpaceGm =
+        (GM_ADDR)((epRankId_ == 0)
+                      ? epWinContext_->localWindowsExp
+                      : ((HcclRankRelationResV2 *)(epWinContext_->remoteRes[0].nextDevicePtr))->windowsExp)
+#endif
+    statusDataSpaceGm += 990 * 1024;
 
     if constexpr (EXEC_FLAG & EXEC_FLAG_X_ACTIVE_MASK) {
         AscendC::GlobalTensor<bool> xActiveMaskGM_;
         xActiveMaskGM_.SetGlobalBuffer((__gm__ bool *)xActiveMask_);
         __asm__ __volatile__("");
-        AscendC::DataCacheCleanAndInvalid<bool, AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(xActiveMaskGM_[60]);
+        AscendC::DataCacheCleanAndInvalid<bool, AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(
+            xActiveMaskGM_[MOE_PROFILING_THRESHOLD]);
         __asm__ __volatile__("");
         DEBUG_INFO_ENABLE_PROFILING = xActiveMaskGM_(MOE_PROFILING_THRESHOLD) ? 1 : 0;
     } else {
-        DEBUG_INFO_ENABLE_PROFILING = tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo.bs > MOE_PROFILING_THRESHOLD ? 1 : 0;
+        DEBUG_INFO_ENABLE_PROFILING =
+            tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo.bs > MOE_PROFILING_THRESHOLD ? 1 : 0;
     }
 
-    constexpr uint32_t EP_LOCAL_RANK_SIZE = 16;
+#if EP_LOCAL_RANK_SIZE
+    constexpr uint32_t flagDataSize = 512 / sizeof(int32_t);
+    constexpr uint32_t flagOffset = 256 / sizeof(int32_t);
     AscendC::GlobalTensor<int32_t> statusDataSpaceGlobal;
     statusDataSpaceGlobal.SetGlobalBuffer((__gm__ int32_t *)statusDataSpaceGm);
     __asm__ __volatile__("");
     AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(
-        statusDataSpaceGlobal[(epRankId_ / EP_LOCAL_RANK_SIZE) * 8]);
+        statusDataSpaceGlobal[(epRankId_ / EP_LOCAL_RANK_SIZE) * flagDataSize]);
     __asm__ __volatile__("");
-    int32_t status = statusDataSpaceGlobal((epRankId_ / EP_LOCAL_RANK_SIZE) * 8);
+    int32_t status = statusDataSpaceGlobal((epRankId_ / EP_LOCAL_RANK_SIZE) * flagDataSize);
+    MOE_LOG_DEBUG("statusDataSpaceGm: %p status: %u enable: %u", statusDataSpaceGm, status, DEBUG_INFO_ENABLE_PROFILING);
+    MOE_LOG_DETAIL("epRankId_: %u g_coreType: %u GetBlockIdx: %u", epRankId_, g_coreType, AscendC::GetBlockIdx());
     AscendC::SyncAll<false>();
     if ((epRankId_ % EP_LOCAL_RANK_SIZE) == 0 && g_coreType == AscendC::AIV && AscendC::GetBlockIdx() == 0) {
-        statusDataSpaceGlobal((epRankId_ / EP_LOCAL_RANK_SIZE) * 8 + 4) = (int32_t)DEBUG_INFO_ENABLE_PROFILING;
+        statusDataSpaceGlobal((epRankId_ / EP_LOCAL_RANK_SIZE) * flagDataSize + flagOffset) = (int32_t)DEBUG_INFO_ENABLE_PROFILING;
+        MOE_LOG_DETAIL("write: %p value: %u", statusDataSpaceGlobal[(epRankId_ / EP_LOCAL_RANK_SIZE) * flagDataSize + flagOffset].GetPhyAddr(), DEBUG_INFO_ENABLE_PROFILING);
         __asm__ __volatile__("");
         AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
                                           AscendC::DcciDst::CACHELINE_OUT>(
-            statusDataSpaceGlobal[(epRankId_ / EP_LOCAL_RANK_SIZE) * 8 + 4]);
+            statusDataSpaceGlobal[(epRankId_ / EP_LOCAL_RANK_SIZE) * flagDataSize + flagOffset]);
         __asm__ __volatile__("" ::: "memory");
-        statusDataSpaceGlobal((epRankId_ / EP_LOCAL_RANK_SIZE) * 8) = status ^ 1;
+        statusDataSpaceGlobal((epRankId_ / EP_LOCAL_RANK_SIZE) * flagDataSize) = status ^ 1;
+        MOE_LOG_DETAIL("write: %p value: %u", statusDataSpaceGlobal[(epRankId_ / EP_LOCAL_RANK_SIZE) * flagDataSize].GetPhyAddr(), status ^ 1);
         __asm__ __volatile__("");
         AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
                                           AscendC::DcciDst::CACHELINE_OUT>(
-            statusDataSpaceGlobal[(epRankId_ / EP_LOCAL_RANK_SIZE) * 8]);
+            statusDataSpaceGlobal[(epRankId_ / EP_LOCAL_RANK_SIZE) * flagDataSize]);
         __asm__ __volatile__("");
     }
     if (DEBUG_INFO_ENABLE_PROFILING == 0) {
         for (uint32_t epRank = 0; epRank < epRankSize_; epRank += EP_LOCAL_RANK_SIZE) {
+            MOE_LOG_DETAIL("wait epRank: %u", epRank);
+#if MOE_ENABLE_SOFTSYNC_TIMEOUT
+            int64_t timeout = AscendC::GetSystemCycle() + 50 * 1000 * 1000; // 1s timeout
+#endif
             do {
+#if MOE_ENABLE_SOFTSYNC_TIMEOUT
+                if (AscendC::GetSystemCycle() - timeout > 0) {
+                    MOE_LOG_WARNING("timeout: wait epRank: %u", epRank);
+                    break;
+                }
+#endif
                 __asm__ __volatile__("nop");
                 AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
                                                   AscendC::DcciDst::CACHELINE_OUT>(
-                    statusDataSpaceGlobal[(epRank / EP_LOCAL_RANK_SIZE) * 8]);
+                    statusDataSpaceGlobal[(epRank / EP_LOCAL_RANK_SIZE) * flagDataSize]);
                 __asm__ __volatile__("");
-            } while (statusDataSpaceGlobal((epRank / EP_LOCAL_RANK_SIZE) * 8) == status);
+            } while (statusDataSpaceGlobal((epRank / EP_LOCAL_RANK_SIZE) * flagDataSize) == status);
+            MOE_LOG_DETAIL("read: %p value: %u", statusDataSpaceGlobal[(epRank / EP_LOCAL_RANK_SIZE) * flagDataSize].GetPhyAddr(),
+                           statusDataSpaceGlobal((epRank / EP_LOCAL_RANK_SIZE) * flagDataSize));
+            MOE_LOG_DETAIL("check epRank: %u", epRank);
             __asm__ __volatile__("" ::: "memory");
             AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
                                               AscendC::DcciDst::CACHELINE_OUT>(
-                statusDataSpaceGlobal[(epRank / EP_LOCAL_RANK_SIZE) * 8 + 4]);
+                statusDataSpaceGlobal[(epRank / EP_LOCAL_RANK_SIZE) * flagDataSize + flagOffset]);
             __asm__ __volatile__("");
-            if (statusDataSpaceGlobal((epRank / EP_LOCAL_RANK_SIZE) * 8 + 4) != 0) {
+            MOE_LOG_DETAIL("read: %p value: %u",
+                           statusDataSpaceGlobal[(epRank / EP_LOCAL_RANK_SIZE) * flagDataSize + flagOffset].GetPhyAddr(),
+                           statusDataSpaceGlobal((epRank / EP_LOCAL_RANK_SIZE) * flagDataSize + flagOffset));
+            if (statusDataSpaceGlobal((epRank / EP_LOCAL_RANK_SIZE) * flagDataSize + flagOffset) != 0) {
                 DEBUG_INFO_ENABLE_PROFILING = 1;
                 break;
             }
         }
     }
+    MOE_LOG_DEBUG("statusDataSpaceGm: %p status: %u final enable: %u", statusDataSpaceGm, status,
+                  DEBUG_INFO_ENABLE_PROFILING);
+#endif
 #endif
 }
 #endif  // FUSED_DEEP_MOE_H
