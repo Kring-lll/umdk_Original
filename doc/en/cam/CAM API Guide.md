@@ -189,8 +189,10 @@ Return value of this interface is a tuple made of 2 tensor, which stores number_
 4. Do not support dynamic graph when in GE mode; Do not support fullgraph=true.
 5. Other Constraits need to be satisfy:
  - top_k value range: (0, 16].
+ - batch_size value range: (0, 8000]
  - Required: num_experts % num_ranks == 0
  - Required: num_experts >= num_ranks
+
 
  #### 1.1.4 moe_dispatch_prefill ▶
 ##### 1.1.4.1 Prototype
