@@ -67,7 +67,7 @@ Output is a List of Tensor, which stores the following value sequencially: expan
 1. Input Shape should satisfy the shape definition above.
 2. expand_x data type is int8 when quan mode is on; expand_x data type is bfloat16 when quan mode is off.
 3. Current interface do not support A2.
-4. Current interface do not support concurrent usage.
+4. Current interface do not support concurrent usage.In extreme cases, repeatedly calling the same operator in a single forward pass may result in undefined behavior. To avoid potential asynchronous timing issues in such scenarios, torch.npu.synchronize() should be added between operator executions.
 5. Do not support dynamic graph when in GE mode; Do not support fullgraph=true.
 6. Data type of x do not support bfloat16.
 7. Current version does not support shared expert function.
