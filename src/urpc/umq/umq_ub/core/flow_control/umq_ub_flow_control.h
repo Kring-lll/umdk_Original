@@ -17,20 +17,6 @@
 extern "C" {
 #endif
 
-typedef union umq_ub_fc_info {
-    uint64_t value;
-    struct {
-        uint64_t local_window : 16;
-        uint64_t local_rx_depth : 2;
-        uint64_t local_rsvd0 : 6;
-        uint64_t local_rsvd1 : 8;
-        uint64_t remote_window : 16;
-        uint64_t remote_rx_depth : 2;
-        uint64_t remote_rsvd0 : 6;
-        uint64_t remote_rsvd1 : 8;
-    } fc;
-} umq_ub_fc_info_t;
-
 typedef union umq_ub_fc_user_ctx {
     uint64_t value;
     struct {
@@ -45,7 +31,6 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
 void umq_ub_flow_control_uninit(ub_flow_control_t *fc);
 int umq_ub_window_init(ub_flow_control_t *fc, umq_ub_bind_info_t *bind_info);
 void umq_ub_window_read(ub_flow_control_t *fc, ub_queue_t *queue);
-void umq_ub_fc_depth_exchange(ub_queue_t *queue, ub_flow_control_t *fc);
 void umq_ub_rx_consumed_inc(bool lock_free, volatile uint64_t *var, uint64_t count);
 uint64_t umq_ub_rx_consumed_exchange(bool lock_free, volatile uint64_t *var, uint64_t count);
 void umq_ub_shared_credit_req_send(ub_queue_t *queue);

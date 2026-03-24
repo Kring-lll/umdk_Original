@@ -22,6 +22,7 @@
 #define UMQ_UB_DEFAULT_CREDIT_MULTIPLE 2
 #define UMQ_UB_DEFAULT_MAX_CREDITS_REQUEST 512
 #define UMQ_UB_MIN_CREDITS_PER_REQUEST 2
+#define UMQ_UB_FC_MAX_IMM_DATA 1023
 
 static ALWAYS_INLINE uint64_t umq_ub_rx_consumed_load(bool lock_free, volatile uint64_t *var)
 {
@@ -515,8 +516,13 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
         cfg->max_credits_request > fc->local_rx_depth) {
         fc->max_credits_request = UMQ_UB_DEFAULT_MAX_CREDITS_REQUEST;
     }
-    if (fc->max_credits_request > fc->local_rx_depth) {
-        fc->max_credits_request = fc->local_rx_depth;
+    uint16_t temp = MIN(UMQ_UB_FC_MAX_IMM_DATA, fc->local_rx_depth);
+    if (fc->max_credits_request > temp) {
+        fc->max_credits_request = temp;
+    }
+
+    if (fc->initial_credit > UMQ_UB_FC_MAX_IMM_DATA) {
+        fc->initial_credit = UMQ_UB_FC_MAX_IMM_DATA;
     }
     fc->credits_per_request = fc->initial_credit;
     fc->credit_request_threshold = fc->min_reserved_credit;
@@ -635,21 +641,6 @@ void umq_ub_shared_credit_recharge(ub_queue_t *queue, uint16_t recharge_count)
     credit->ops.available_credit_inc(credit, recharge_count);
 }
 
-void umq_ub_fc_depth_exchange(ub_queue_t *queue, ub_flow_control_t *fc)
-{
-    if (!fc->local_set) {
-        umq_ub_fc_info_t *local_data =
-            (umq_ub_fc_info_t *)(uintptr_t)umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL);
-        local_data->fc.local_window = 0;
-        local_data->fc.local_rx_depth = UMQ_UB_FLOW_CONTORL_JETTY_DEPTH;
-        fc->local_set = true;
-        if (!fc->remote_get) {
-            umq_ub_window_read(fc, queue);
-        }
-        return;
-    }
-}
-
 void umq_ub_shared_credit_req_send(ub_queue_t *queue)
 {
     ub_flow_control_t *fc = &queue->flow_control;
@@ -663,12 +654,13 @@ void umq_ub_shared_credit_req_send(ub_queue_t *queue)
     urma_jetty_t *jetty  = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     uint16_t credits_per_request = fc->credits_per_request;
+    if (credits_per_request > UMQ_UB_FC_MAX_IMM_DATA) {
+        credits_per_request = UMQ_UB_FC_MAX_IMM_DATA;
+    }
     umq_ub_imm_t imm = {
         .flow_control = {
-            .umq_private = UMQ_UB_IMM_PRIVATE,
             .type = IMM_TYPE_FLOW_CONTROL,
             .sub_type = IMM_TYPE_FC_CREDIT_REQ,
-            .in_user_buf = 0,
             .window = credits_per_request}
         };
 
@@ -708,10 +700,8 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
 
     umq_ub_imm_t imm = {
         .flow_control = {
-            .umq_private = UMQ_UB_IMM_PRIVATE,
             .type = IMM_TYPE_FLOW_CONTROL,
             .sub_type = IMM_TYPE_FC_CREDIT_REP,
-            .in_user_buf = 0,
             .window = notify}
         };
     umq_ub_fc_user_ctx_t obj = {
@@ -811,14 +801,14 @@ void umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
     }
     urma_jetty_t *jetty  = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
-
+    if (return_credit > UMQ_UB_FC_MAX_IMM_DATA) {
+        return_credit = UMQ_UB_FC_MAX_IMM_DATA;
+    }
     return_credit = fc->ops.remote_rx_window_dec(fc, return_credit, true);
     umq_ub_imm_t imm = {
         .flow_control = {
-            .umq_private = UMQ_UB_IMM_PRIVATE,
             .type = IMM_TYPE_FLOW_CONTROL,
             .sub_type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
-            .in_user_buf = 0,
             .window = return_credit}
         };
 
@@ -860,10 +850,8 @@ static void umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_c
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     umq_ub_imm_t imm = {
         .flow_control = {
-            .umq_private = UMQ_UB_IMM_PRIVATE,
             .type = IMM_TYPE_FLOW_CONTROL,
             .sub_type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
-            .in_user_buf = 0,
             .window = return_credit}
         };
 
