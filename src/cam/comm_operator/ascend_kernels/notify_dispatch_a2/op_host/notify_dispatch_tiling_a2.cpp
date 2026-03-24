@@ -449,6 +449,18 @@ static ge::graphStatus NotifyDispatchA2TilingFuncImpl(gert::TilingContext &conte
     tilingData->notifyDispatchInfoA2.aivNum = aivNum;
     OPS_LOG_D(nodeName, "blockDim=%u, aivNum=%u, ubSize=%lu", blockDim, aivNum, ubSize);
     PrintTilingDataInfo(nodeName, *tilingData);
+
+    // Check platform - A2 operator kernel does not support A3 platform
+    fe::PlatFormInfos *platformInfoPtr2 = context.GetPlatformInfo();
+    OPS_ERR_IF(platformInfoPtr2 == nullptr, OPS_LOG_E(nodeName, "platformInfoPtr is nullptr."),
+        return ge::GRAPH_FAILED);
+    fe::PlatFormInfos &platformInfo2 = *platformInfoPtr2;
+    std::string socVersion2;
+    (void)platformInfo2.GetPlatformResWithLock("version", "Short_SoC_version", socVersion2);
+    OPS_ERR_IF(socVersion2 != "Ascend910B",
+        OPS_LOG_E(nodeName, "A2 operator kernel does not support %s platform.", socVersion2.c_str()),
+        return ge::GRAPH_FAILED);
+
     return ge::GRAPH_SUCCESS;
 }
 

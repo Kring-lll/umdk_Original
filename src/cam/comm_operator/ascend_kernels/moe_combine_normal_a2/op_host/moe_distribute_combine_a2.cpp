@@ -131,7 +131,19 @@ public:
             .ExtendCfgInfo("jitCompile.flag", "static_false")
             .ExtendCfgInfo("multiKernelSupportDynamicGraph.value", "multi_kernel");
 
+        OpAICoreConfig aicore_config_A3;
+        aicore_config_A3.DynamicCompileStaticFlag(true)
+            .DynamicFormatFlag(true)
+            .DynamicRankSupportFlag(true)
+            .DynamicShapeSupportFlag(true)
+            .NeedCheckSupportFlag(false)
+            .PrecisionReduceFlag(true)
+            .ExtendCfgInfo("aclnnSupport.value", "support_aclnn")
+            .ExtendCfgInfo("jitCompile.flag", "static_true")
+            .ExtendCfgInfo("multiKernelSupportDynamicGraph.value", "multi_kernel");
+
         this->AICore().AddConfig("ascend910b", aicore_config_A2);
+        this->AICore().AddConfig("ascend910_93", aicore_config_A3);
         this->MC2().HcclGroup("group_ep");  // A2 not support multiple comm fields
     }
 };
