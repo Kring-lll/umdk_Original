@@ -443,16 +443,8 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
     uint32_t max_msg_size = queue->dev_ctx->dev_attr.dev_cap.max_msg_size;
     queue->remote_rx_buf_size =
         (max_msg_size > info->queue_info->rx_buf_size) ? info->queue_info->rx_buf_size : max_msg_size;
-    if (queue->flow_control.enabled) {
-        for (uint32_t i = 0; i < UMQ_UB_FLOW_CONTORL_JETTY_DEPTH; i++) {
-            ret = umq_ub_fill_fc_rx_buf(queue);
-            if (ret != UMQ_SUCCESS) {
-                goto PUT_EID_ID;
-            }
-        }
-        umq_ub_fc_depth_exchange(queue, &queue->flow_control);
-    }
-
+    (void)umq_ub_shared_credit_req_send(queue);
+    queue->state = QUEUE_STATE_READY;
     UMQ_VLOG_INFO(VLOG_UMQ, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
                   "remote jetty_id: %u, remote eid id: %u, remote pid: %u, remote namespace: %s, bind jetty success\n",
                   EID_ARGS(*eid), id, EID_ARGS(ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid),
@@ -460,8 +452,8 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
                   ctx->remote_eid_id, info->dev_info->pid, info->dev_info->bind_namespace);
     return UMQ_SUCCESS;
 
-PUT_EID_ID:
-    (void)umq_ub_eid_id_release(queue->dev_ctx->remote_imported_info, queue->bind_ctx);
+//PUT_EID_ID:
+//    (void)umq_ub_eid_id_release(queue->dev_ctx->remote_imported_info, queue->bind_ctx);
 
 RESET_BIND_CTX:
     queue->bind_ctx = NULL;
@@ -1614,9 +1606,7 @@ umq_buf_t *umq_ub_read_ctx_create(ub_queue_t *queue, umq_imm_head_t *umq_imm_hea
         return NULL;
     }
     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)ctx_buf->qbuf_ext;
-    umq_ub_imm_t imm_temp = {.ub_plus = {.umq_private = UMQ_UB_IMM_PRIVATE,
-                                         .type = IMM_TYPE_UB_PLUS,
-                                         .sub_type = IMM_TYPE_REVERSE_PULL_MEM_DONE}};
+    umq_ub_imm_t imm_temp = {.ub_plus = {.type = IMM_TYPE_UB_PLUS, .sub_type = IMM_TYPE_REVERSE_PULL_MEM_DONE}};
     buf_pro->imm_data = imm_temp.value;
     user_ctx_t *user_ctx = (user_ctx_t *)ctx_buf->buf_data;
 
@@ -1643,8 +1633,8 @@ umq_buf_t *umq_ub_read_ctx_create(ub_queue_t *queue, umq_imm_head_t *umq_imm_hea
 
 static ALWAYS_INLINE int umq_ub_import_mem_done(ub_queue_t *queue, uint16_t mempool_id)
 {
-    umq_ub_imm_t imm = { .mem_import ={ .umq_private = UMQ_UB_IMM_PRIVATE,
-        .type = IMM_TYPE_MEM, .sub_type = IMM_TYPE_MEM_IMPORT_DONE, .mempool_id = mempool_id} };
+    umq_ub_imm_t imm = { .mem_import =
+        {.type = IMM_TYPE_MEM, .sub_type = IMM_TYPE_MEM_IMPORT_DONE, .mempool_id = mempool_id} };
     uint16_t max_tx = umq_ub_window_dec(&queue->flow_control, queue, 1);
     if (max_tx == 0) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, flow control window lack\n",
@@ -1876,11 +1866,6 @@ FREE_CTX_BUF:
 static int process_send_imm(umq_buf_t *rx_buf, umq_ub_imm_t imm, uint64_t umqh)
 {
     int ret = UMQ_SUCCESS;
-    if (imm.bs.umq_private == 0) {
-        umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)rx_buf->qbuf_ext;
-        buf_pro->imm_data = imm.value;
-        return UMQ_SUCCESS;
-    }
     if (imm.bs.type != IMM_TYPE_UB_PLUS) {
         return ret;
     }
@@ -1919,10 +1904,7 @@ static int process_send_imm(umq_buf_t *rx_buf, umq_ub_imm_t imm, uint64_t umqh)
 static int process_write_imm(umq_buf_t *rx_buf, umq_ub_imm_t imm, uint64_t umqh)
 {
     int ret = UMQ_SUCCESS;
-    if (imm.bs.umq_private == 0) {
-        umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)(uintptr_t)rx_buf->qbuf_ext;
-        buf_pro->imm_data = imm.value;
-    } else if (imm.bs.type == IMM_TYPE_MEM && imm.mem_import.sub_type == IMM_TYPE_MEM_IMPORT_DONE) {
+    if (imm.bs.type == IMM_TYPE_MEM && imm.mem_import.sub_type == IMM_TYPE_MEM_IMPORT_DONE) {
         ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
         if (imm.mem_import.mempool_id >= UMQ_MAX_TSEG_NUM) {
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "umq ub mempool_id: %u invalid\n", imm.mem_import.mempool_id);
@@ -1952,8 +1934,7 @@ static inline int process_imm_msg(uint64_t umqh_tp, umq_buf_t *buf, urma_cr_t *c
 
 static int umq_ub_read_done(ub_queue_t *queue, uint16_t msg_id)
 {
-    umq_ub_imm_t imm = {.ub_plus = {.umq_private = UMQ_UB_IMM_PRIVATE,
-                                    .type = IMM_TYPE_UB_PLUS,
+    umq_ub_imm_t imm = {.ub_plus = {.type = IMM_TYPE_UB_PLUS,
                                     .sub_type = IMM_TYPE_REVERSE_PULL_MEM_FREE,
                                     .msg_id = msg_id}};
 
@@ -2039,8 +2020,7 @@ int umq_ub_dequeue_plus_with_poll_tx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t
         tx_buf[qbuf_cnt] = (umq_buf_t *)(uintptr_t)cr[i].user_ctx;
         umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)(tx_buf[qbuf_cnt])->qbuf_ext;
         umq_ub_imm_t imm = {.value = buf_pro->imm_data};
-        if (imm.bs.type == IMM_TYPE_UB_PLUS && imm.bs.umq_private == UMQ_UB_IMM_PRIVATE &&
-            imm.ub_plus.sub_type == IMM_TYPE_REVERSE_PULL_MEM_DONE) {
+        if (imm.bs.type == IMM_TYPE_UB_PLUS && imm.ub_plus.sub_type == IMM_TYPE_REVERSE_PULL_MEM_DONE) {
             umq_ub_rev_pull_tx_cqe(queue, tx_buf[qbuf_cnt], buf, &qbuf_cnt, &return_rx_cnt);
             continue;
         }
@@ -2151,7 +2131,7 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
     // In the tx direction, user_ctx needs to initialize imm data ub_plus type
     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)send_buf->qbuf_ext;
     umq_ub_imm_t imm_temp = {
-        .ub_plus = {.umq_private = UMQ_UB_IMM_PRIVATE, .type = IMM_TYPE_UB_PLUS, .sub_type = IMM_TYPE_UB_PLUS_DEFAULT}
+        .ub_plus = {.type = IMM_TYPE_UB_PLUS, .sub_type = IMM_TYPE_UB_PLUS_DEFAULT}
     };
     buf_pro->imm_data = imm_temp.value;
     uint16_t msg_id = util_id_allocator_get(&g_umq_ub_id_allocator);
@@ -2202,7 +2182,10 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
         (*buffer) = QBUF_LIST_NEXT((*buffer));
         ++buf_index;
     }
-
+    if (buf_index >= UMQ_MAX_ID_NUM) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, the buf index [%d] "
+            "exceeds the maximum limit\n", EID_ARGS(*eid), id, buf_index);
+    }
     umq_imm_head->mem_interval = get_mem_interval(max_data_size);
 
     uint64_t user_ctx = (uint64_t)(uintptr_t)send_buf;
@@ -2210,8 +2193,7 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
     sge.len = sizeof(umq_imm_head_t) +
         buf_index * sizeof(ub_ref_sge_t) + umq_imm_head->mempool_num * sizeof(ub_import_mempool_info_t);
     sge.tseg = queue->dev_ctx->tseg_list[send_buf->mempool_id];
-    umq_ub_imm_t imm = {.ub_plus = {.umq_private = UMQ_UB_IMM_PRIVATE,
-                                    .type = IMM_TYPE_UB_PLUS,
+    umq_ub_imm_t imm = {.ub_plus = {.type = IMM_TYPE_UB_PLUS,
                                     .sub_type = IMM_TYPE_REVERSE_PULL_MEM,
                                     .msg_id = msg_id,
                                     .msg_num = (uint16_t)buf_index}};

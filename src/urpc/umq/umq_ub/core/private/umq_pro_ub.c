@@ -521,11 +521,6 @@ static int umq_ub_on_rx_done(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t *rx_buf
         buf_pro->umq_ctx = 0;
     }
     umq_ub_imm_t imm = {.value = cr->imm_data};
-    if (imm.bs.umq_private == 0) {
-        buf_pro->imm_data = imm.value;
-        goto OUT;
-    }
-
     switch (imm.bs.type) {
         case IMM_TYPE_MEM:
             if (imm.mem_import.sub_type == IMM_TYPE_MEM_IMPORT) {
@@ -540,7 +535,6 @@ static int umq_ub_on_rx_done(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t *rx_buf
             break;
     }
 
-OUT:
     if (real_queue != NULL) {
         umq_dec_ref(real_queue->dev_ctx->io_lock_free, &real_queue->ref_cnt, 1);
     }
@@ -571,12 +565,6 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_
                 ret = UMQ_CONTINUE_FLAG;
             } else {
                 umq_ub_imm_t imm = {.value = cr->imm_data};
-                if (imm.bs.umq_private == 0) {
-                    umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
-                    buf_pro->imm_data = imm.value;
-                    return UMQ_SUCCESS;
-                }
-
                 if (imm.mem_import.type == IMM_TYPE_MEM && imm.mem_import.sub_type == IMM_TYPE_MEM_IMPORT_DONE) {
                     if (imm.mem_import.mempool_id >= UMQ_MAX_TSEG_NUM) {
                         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, mempool id exceed maxinum\n",
@@ -874,9 +862,6 @@ static int process_tx_msg(umq_buf_t *buf, ub_queue_t *queue)
 {
     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
     umq_ub_imm_t imm = {.value = buf_pro->imm_data};
-    if (imm.bs.umq_private == 0) {
-        return UMQ_SUCCESS;
-    }
 
     switch (buf_pro->opcode) {
         case UMQ_OPC_WRITE_IMM:
@@ -926,8 +911,9 @@ static int umq_ub_flush_sqe(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_cou
 static void umq_ub_fc_process_tx(ub_queue_t *queue, umq_ub_fc_user_ctx_t *obj)
 {
     uint32_t type = obj->bs.type;
-    umq_ub_fc_info_t *fc_info = NULL;
+    // umq_ub_fc_info_t *fc_info = NULL;
     switch (type) {
+#if 0
         case IMM_TYPE_FC_CREDIT_INIT:
             // window read ok
             fc_info = (umq_ub_fc_info_t *)(uintptr_t)(umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL));
@@ -942,6 +928,7 @@ static void umq_ub_fc_process_tx(ub_queue_t *queue, umq_ub_fc_user_ctx_t *obj)
                 queue->state = QUEUE_STATE_READY;
             }
             break;
+#endif
         default:
             break;
     }

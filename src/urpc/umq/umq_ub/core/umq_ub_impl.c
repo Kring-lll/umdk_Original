@@ -792,6 +792,15 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, umq_create_opt
         goto DELETE_FC_JFS_JFC;
     }
 
+    if (queue->flow_control.enabled) {
+        for (uint32_t i = 0; i < UMQ_UB_FLOW_CONTORL_JETTY_DEPTH; i++) {
+            int ret = umq_ub_fill_fc_rx_buf(queue);
+            if (ret != UMQ_SUCCESS) {
+                goto DELETE_FC_JFS_JFC;
+            }
+        }
+    }
+
     dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id] =
         (uint64_t)(uintptr_t)queue;
 
@@ -1858,8 +1867,7 @@ int umq_ub_mempool_state_refresh_impl(uint64_t umqh_tp, uint32_t mempool_id)
     }
 
     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)send_buf->qbuf_ext;
-    umq_ub_imm_t imm = {.mem_import = {
-        .umq_private = UMQ_UB_IMM_PRIVATE, .type = IMM_TYPE_MEM, .sub_type = IMM_TYPE_MEM_IMPORT}};
+    umq_ub_imm_t imm = {.mem_import = {.type = IMM_TYPE_MEM, .sub_type = IMM_TYPE_MEM_IMPORT}};
     buf_pro->imm_data = imm.value;
     buf_pro->opcode = UMQ_OPC_SEND_IMM;
 
