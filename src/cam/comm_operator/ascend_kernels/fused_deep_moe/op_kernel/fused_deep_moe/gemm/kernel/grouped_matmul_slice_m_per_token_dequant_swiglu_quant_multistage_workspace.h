@@ -346,6 +346,7 @@ __aicore__ inline static void CheckSyncFlag(__gm__ uint8_t *flagAddr, uint8_t id
                 __asm__ __volatile__("");
                 break;
             }
+            SPIN_WAIT_CYCLES();
         }
     } else {
         global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE);
@@ -362,6 +363,7 @@ __aicore__ inline static void CheckSyncFlag(__gm__ uint8_t *flagAddr, uint8_t id
                 __asm__ __volatile__("");
                 break;
             }
+            SPIN_WAIT_CYCLES();
         }
         global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE + 1 * (SOFT_SYNC_SPACE_SIZE / SUB_AIV_NUM));
         while (true) {
@@ -377,6 +379,7 @@ __aicore__ inline static void CheckSyncFlag(__gm__ uint8_t *flagAddr, uint8_t id
                 __asm__ __volatile__("");
                 break;
             }
+            SPIN_WAIT_CYCLES();
         }
     }
     AscendC::PipeBarrier<PIPE_ALL>();
@@ -563,6 +566,7 @@ public:
             if (groupTokenNumStateTensor.GetValue(0) == static_cast<int32_t>(expected)) {
                 break;
             }
+            SPIN_WAIT_CYCLES();
         }
     }
 
@@ -1312,6 +1316,9 @@ public:
             AscendC::SetFlag<AscendC::HardEvent::V_S>(0);
             AscendC::WaitFlag<AscendC::HardEvent::V_S>(0);
             sumOfFlag = statusSumOutTensor.GetValue(0);
+            if ((sumOfFlag < minTarget) || (sumOfFlag > maxTarget)) {
+                SPIN_WAIT_CYCLES();
+            }
         }
     }
 
@@ -1412,6 +1419,7 @@ public:
                                                         AscendC::DcciDst::CACHELINE_OUT>(tokGlobalInt32[1]);
                         __asm__ __volatile__("");
                     } else {
+                        SPIN_WAIT_CYCLES(); // 注意，这里在首次测试时，没有加sleep
                         break;
                     }
                     curRecvTokenCount += 1;
@@ -1594,6 +1602,7 @@ public:
                     if (groupTokenNumStateTensor.GetValue(0) == coreNumPerGroup * vToCFlag) {
                         break;
                     }
+                    SPIN_WAIT_CYCLES();
                 }
                 uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT);
                 GemmCoord inGroupProblemShape{currentM, n, k};

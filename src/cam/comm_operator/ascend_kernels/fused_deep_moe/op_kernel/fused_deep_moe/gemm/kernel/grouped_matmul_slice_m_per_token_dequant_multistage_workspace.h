@@ -557,6 +557,7 @@ private:
                     __asm__ __volatile__("");
                     break;
                 }
+                SPIN_WAIT_CYCLES();
             }
             AscendC::PipeBarrier<PIPE_ALL>();
         }
@@ -623,6 +624,7 @@ private:
                         break;
                     }
                 }
+                SPIN_WAIT_CYCLES();
             }
             AscendC::PipeBarrier<PIPE_ALL>();
         }
