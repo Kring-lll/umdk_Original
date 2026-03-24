@@ -16,8 +16,8 @@ case $1 in
     0)
         echo "build"
         bash build/cam/build.sh -c ascend910_93 || exit
-        bash output/cam/comm_operator/run/CAM_ascend910_93*.run || exit
-        pip install --force-reinstall output/cam/comm_operator/dist/umdk_cam_op*.whl || exit
+        # bash output/cam/comm_operator/run/CAM_ascend910_93*.run || exit
+        # pip install --force-reinstall output/cam/comm_operator/dist/umdk_cam_op*.whl || exit
         ;;
     1)
         TEST_TAG="debug"
