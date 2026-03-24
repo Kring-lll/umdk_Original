@@ -21,5 +21,11 @@
             XType, ExpandXOutType, StaticQuant, DynamicQuant, IsSmoothScaleExist, \
             IsNeedAllgater, EXEC_FLAG
 
+#define SPIN_WAIT_CYCLES() \
+    do { \
+        int64_t st = AscendC::GetSystemCycle(); \
+        while (AscendC::GetSystemCycle() - st < (25)) { ; } \
+    } while (0)
+
 #endif  // FUSED_DEEP_MOE_BASE_H
  
