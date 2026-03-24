@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 增强版追踪数据收集器 - 支持64位组合ID（微秒时间戳，名称带seq，队列匹配，rank排序，两种extra_id模式）
-支持按从叶子向上的层数过滤事件（--depth），1=所有叶子，2=叶子+父层，依此类推（适应不平衡树和区间交叠）。
+支持按从叶子向上的层数过滤事件（--depth），1=所有叶子，2=叶子+父层，依此类推。
+使用整型时间戳（cycles）进行区间包含判断，避免浮点误差。
 """
 
 import json
@@ -47,6 +48,7 @@ def parse_profiling_data(profiling_tensor: torch.Tensor, core_type: int = 0, cor
             print(f"  记录{i}: 组合ID={combined_id:#x} (索引{1+i}), 时间戳={raw_timestamp} (索引{-2-i}), 差值={diff}, 时间戳_us={timestamp_us:.2f}")
         records.append({
             'timestamp_us': timestamp_us,
+            'timestamp_cycles': diff,              # 整型差值，用于比较
             'raw_timestamp': raw_timestamp,
             'initial_timestamp': initial_timestamp,
             'combined_id': int(combined_id),
@@ -114,24 +116,21 @@ def convert_to_chrome_event_type(event_type: str) -> Tuple[str, str]:
     display_name = display_map.get(event_upper, 'Unknown')
     return event_upper, display_name
 
-def build_interval_tree(intervals):
+def build_interval_tree(intervals, debug=False):
     """
-    构建区间树，计算每个区间到最深叶子的深度（叶子深度=1）。
-    intervals: 列表，每个元素为 {'start_ts', 'end_ts', 'interval_obj'}
-    返回：每个 interval_obj 被添加 'depth_from_leaf' 属性。
+    构建区间树，使用整型 cycles 比较，计算每个区间到最深叶子的深度（叶子深度=1）。
+    intervals: 列表，每个元素为 {'start_cycles', 'end_cycles', 'interval_obj'}
     """
     if not intervals:
         return
 
     # 按开始时间排序
-    intervals_sorted = sorted(intervals, key=lambda x: x['start_ts'])
+    intervals_sorted = sorted(intervals, key=lambda x: x['start_cycles'])
 
-    # 为每个区间寻找直接父节点（包含它的最小区间）
-    # 方法：按结束时间逆序查找包含它的区间
-    # 简化：对所有区间，找到满足 start < cur.start and end > cur.end 且 end 最小的区间
-    # O(N^2)，但 N 一般不大
     n = len(intervals_sorted)
     parent = [None] * n
+
+    # 为每个区间寻找直接父节点（包含它的最小区间）
     for i in range(n):
         cur = intervals_sorted[i]
         best_parent = None
@@ -140,10 +139,13 @@ def build_interval_tree(intervals):
             if i == j:
                 continue
             other = intervals_sorted[j]
-            if other['start_ts'] < cur['start_ts'] and other['end_ts'] > cur['end_ts']:
-                if other['end_ts'] < best_parent_end:
-                    best_parent_end = other['end_ts']
-                    best_parent = j
+            # 严格包含：other.start <= cur.start and other.end >= cur.end
+            if other['start_cycles'] <= cur['start_cycles'] and other['end_cycles'] >= cur['end_cycles']:
+                # 确保严格包含（长度更大）
+                if other['end_cycles'] - other['start_cycles'] > cur['end_cycles'] - cur['start_cycles']:
+                    if other['end_cycles'] < best_parent_end:
+                        best_parent_end = other['end_cycles']
+                        best_parent = j
         parent[i] = best_parent
 
     # 构建子节点列表
@@ -172,10 +174,16 @@ def build_interval_tree(intervals):
     for i, interval in enumerate(intervals_sorted):
         interval['interval_obj']['depth_from_leaf'] = depth[i]
 
+    if debug:
+        print(f"区间树深度统计: 共 {n} 个区间")
+        for i, interval in enumerate(intervals_sorted):
+            print(f"  区间 {interval['interval_obj']['name']}: start_cycles={interval['start_cycles']}, end_cycles={interval['end_cycles']}, depth={depth[i]}")
+
 def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                          output_file: str = "chrome_trace.json",
                          extra_mode: str = 'seq',
-                         depth: int = 0):
+                         depth: int = 0,
+                         debug_core: Optional[Tuple[int, int, int]] = None):
     """
     生成Chrome Tracing格式，支持按从叶子向上的层数过滤事件。
     depth: 0=全部保留，1=仅保留叶子节点，2=保留叶子及其父节点（最内两层），依此类推。
@@ -255,6 +263,7 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                     'ph': chrome_event_type,
                     'base_name': base_name,
                     'ts': record['timestamp_us'],
+                    'cycles': record['timestamp_cycles'],   # 整型时间戳差值
                     'point_info': point_info,
                     'need_seq': True
                 }
@@ -291,6 +300,7 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                     'base_name': base_name,
                     'full_name': full_name,
                     'ts': record['timestamp_us'],
+                    'cycles': record['timestamp_cycles'],
                     'point_info': point_info,
                     'need_seq': False,
                     'seq': high24
@@ -324,7 +334,7 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
             tid_events.setdefault(tid_key, []).append(raw_item)
 
     # 配对阶段：收集完整区间和孤立事件
-    all_intervals = []      # 每个元素: {'pid', 'tid', 'name', 'start_event', 'end_event', 'start_ts', 'end_ts', 'interval_obj' (指向自身用于深度记录)}
+    all_intervals = []      # 每个元素: {'pid', 'tid', 'name', 'start_event', 'end_event', 'start_cycles', 'end_cycles', 'interval_obj'}
     unpaired_events = []    # 孤立事件（只有B或只有E）的最终事件对象
 
     b_count = 0
@@ -387,9 +397,9 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                                 'name': full_name,
                                 'start_event': b_event,
                                 'end_event': e_event,
-                                'start_ts': b_event['ts'],
-                                'end_ts': e_event['ts'],
-                                'interval_obj': None  # 占位，稍后填充自身引用
+                                'start_cycles': b_item['cycles'],
+                                'end_cycles': item['cycles'],
+                                'interval_obj': None
                             }
                             interval['interval_obj'] = interval
                             all_intervals.append(interval)
@@ -462,8 +472,8 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                                 'name': full_name,
                                 'start_event': b_event,
                                 'end_event': e_event,
-                                'start_ts': b_event['ts'],
-                                'end_ts': e_event['ts'],
+                                'start_cycles': b_item['cycles'],
+                                'end_cycles': e_item['cycles'],
                                 'interval_obj': None
                             }
                             interval['interval_obj'] = interval
@@ -494,7 +504,7 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
                         unpaired_events.append(e_event)
                         i += 1
 
-    # ========== 深度计算与过滤（从叶子向上，支持不平衡树和交叠） ==========
+    # ========== 深度计算与过滤（从叶子向上，使用整型 cycles） ==========
     final_events = []
 
     if depth == 0:
@@ -510,10 +520,27 @@ def generate_chrome_trace(all_data: Dict[int, Dict], mapping: Dict,
             intervals_by_thread[key].append(interval)
 
         for key, intervals in intervals_by_thread.items():
-            # 构建区间树并计算深度
-            # 准备数据格式
-            interval_list = [{'start_ts': iv['start_ts'], 'end_ts': iv['end_ts'], 'interval_obj': iv} for iv in intervals]
-            build_interval_tree(interval_list)
+            # 判断当前线程是否需要调试
+            # debug_core 格式: (rank, type, core)
+            # 从 key 中提取 rank, core_type, core_id
+            # 注意 key 中的 tid 是字符串，但我们可以从 interval 中获取 rank_id? interval 中没有 rank_id。
+            # 从 metadata 中无法直接获得，但我们可以从 pid 映射回 rank_id，或者从 interval 的 start_event 中获取。
+            # 这里简单处理：如果 debug_core 不为 None，且当前线程匹配，则启用调试输出。
+            # 获取 rank_id: 可以从 interval['start_event']['args']['rank_id'] 获取
+            if debug_core is not None:
+                sample_interval = intervals[0]
+                rank_id = sample_interval['start_event']['args'].get('rank_id')
+                core_type = sample_interval['start_event']['args'].get('core_type')
+                core_id = sample_interval['start_event']['args'].get('core_id')
+                if (rank_id, core_type, core_id) == debug_core:
+                    debug = True
+                else:
+                    debug = False
+            else:
+                debug = False
+
+            interval_list = [{'start_cycles': iv['start_cycles'], 'end_cycles': iv['end_cycles'], 'interval_obj': iv} for iv in intervals]
+            build_interval_tree(interval_list, debug=debug)
 
         # 过滤：保留深度 <= depth 的区间
         for interval in all_intervals:
@@ -647,7 +674,8 @@ def main():
         print("\n生成Chrome trace...")
         generate_chrome_trace(all_data, mapping, args.output,
                               extra_mode=args.extra_mode,
-                              depth=args.depth)
+                              depth=args.depth,
+                              debug_core=debug_core)
 
 if __name__ == "__main__":
     main()
