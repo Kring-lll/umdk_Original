@@ -543,7 +543,6 @@ static int umq_ub_on_rx_done(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t *rx_buf
             break;
     }
 
-OUT:
     if (real_queue != NULL) {
         umq_dec_ref(real_queue->dev_ctx->io_lock_free, &real_queue->ref_cnt, 1);
     }
@@ -951,8 +950,9 @@ static int umq_ub_flush_sqe(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_cou
 static int umq_ub_fc_process_tx(ub_queue_t *queue, umq_ub_fc_user_ctx_t *obj)
 {
     uint32_t type = obj->bs.type;
-    umq_ub_fc_info_t *fc_info = NULL;
+    // umq_ub_fc_info_t *fc_info = NULL;
     switch (type) {
+#if 0
         case IMM_TYPE_FC_CREDIT_INIT:
             // window read ok
             fc_info = (umq_ub_fc_info_t *)(uintptr_t)(umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL));
@@ -968,6 +968,7 @@ static int umq_ub_fc_process_tx(ub_queue_t *queue, umq_ub_fc_user_ctx_t *obj)
                 return ret;
             }
             break;
+#endif
         default:
             break;
     }
