@@ -454,6 +454,18 @@ static ge::graphStatus MoeDistributeDispatchA2TilingFuncImpl(gert::TilingContext
     mc2CcTilingConfig.GetTiling(tilingData->mc2CcTiling);
 
     OPS_LOG_D(nodeName, "Leave MoeDistributeDispatchA2 tiling func.");
+
+    // Check platform - A2 operator kernel does not support A3 platform
+    fe::PlatFormInfos *platformInfoPtr = context.GetPlatformInfo();
+    OPS_ERR_IF(platformInfoPtr == nullptr, OPS_LOG_E(nodeName, "platformInfoPtr is nullptr."),
+        return ge::GRAPH_FAILED);
+    fe::PlatFormInfos &platformInfo = *platformInfoPtr;
+    std::string socVersion;
+    (void)platformInfo.GetPlatformResWithLock("version", "Short_SoC_version", socVersion);
+    OPS_ERR_IF(socVersion != "Ascend910B",
+        OPS_LOG_E(nodeName, "A2 operator kernel does not support %s platform.", socVersion.c_str()),
+        return ge::GRAPH_FAILED);
+
     return ge::GRAPH_SUCCESS;
 }
 

@@ -142,7 +142,11 @@ public:
         OpAICoreConfig aicore_config_A2 = aicore_config_base;
         aicore_config_A2.ExtendCfgInfo("jitCompile.flag", "static_false");
 
+        OpAICoreConfig aicore_config_A3 = aicore_config_base;
+        aicore_config_A3.ExtendCfgInfo("jitCompile.flag", "static_true");
+
         this->AICore().AddConfig("ascend910b", aicore_config_A2);
+        this->AICore().AddConfig("ascend910_93", aicore_config_A3);
         this->MC2().HcclGroup("group_ep");
     }
 };

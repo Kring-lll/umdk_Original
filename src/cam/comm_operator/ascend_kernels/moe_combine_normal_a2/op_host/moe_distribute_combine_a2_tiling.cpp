@@ -27,9 +27,18 @@
 #include "graph/utils/type_utils.h"
 
 #include "register/op_def_registry.h"
+#include "tiling/platform/platform_ascendc.h"
 #include "tiling_args.h"
 #include "mc2_tiling_utils.h"
 #include "../op_kernel/moe_distribute_combine_a2_tiling.h"
+
+#ifdef USE_CANN83_PATH
+#include "platform/platform_infos_def.h"
+#elif defined(USE_CANN82_PATH)
+#include "experiment/platform/platform/platform_infos_def.h"
+#else
+#error "CANN version not supported or platform_infos_def.h not found. Check CANN_VERSION_MACRO definition."
+#endif
 
 using namespace AscendC;
 using namespace ge;
@@ -295,6 +304,18 @@ static ge::graphStatus MoeDistributeCombineA2TilingFuncImpl(gert::TilingContext 
     mc2CcTilingConfig.GetTiling(tilingData->mc2CcTiling);
 
     OPS_LOG_I(nodeName, "Leave MoeDistributeCombineA2 tiling func.");
+
+    // Check platform - A2 operator kernel does not support A3 platform
+    fe::PlatFormInfos *platformInfoPtr = context.GetPlatformInfo();
+    OPS_ERR_IF(platformInfoPtr == nullptr, OPS_LOG_E(nodeName, "platformInfoPtr is nullptr."),
+        return ge::GRAPH_FAILED);
+    fe::PlatFormInfos &platformInfo = *platformInfoPtr;
+    std::string socVersion;
+    (void)platformInfo.GetPlatformResWithLock("version", "Short_SoC_version", socVersion);
+    OPS_ERR_IF(socVersion != "Ascend910B",
+        OPS_LOG_E(nodeName, "A2 operator kernel does not support %s platform.", socVersion.c_str()),
+        return ge::GRAPH_FAILED);
+
     return ge::GRAPH_SUCCESS;
 }
 
