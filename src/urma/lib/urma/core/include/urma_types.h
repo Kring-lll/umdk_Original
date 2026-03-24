@@ -1029,7 +1029,9 @@ typedef union urma_jfs_wr_flag {
                                           1: Notify local process after the task is completed. */
         uint32_t inline_flag      : 1; /* 0: not inline.
                                           1: inline data. */
-        uint32_t reserved         : 25;
+
+        uint32_t db_bypass        : 1;
+        uint32_t reserved         : 24;
     } bs;
     uint32_t value;
 } urma_jfs_wr_flag_t;
@@ -1377,7 +1379,13 @@ typedef struct urma_tp_attr_value {
     uint8_t at_times : 5;
     uint8_t sl       : 4;
     uint8_t ttl;
-    uint8_t reserved[78];
+    uint16_t ack_udp_srcport;
+    uint16_t data_udp_srcport;
+    uint8_t udp_srcport_range : 4;
+    uint8_t spray_en : 1;
+    uint8_t udp_global_en : 1;
+    uint8_t reserve_0 : 2;
+    uint8_t reserved[73];
 } urma_tp_attr_value_t;
 #pragma pack()
 
