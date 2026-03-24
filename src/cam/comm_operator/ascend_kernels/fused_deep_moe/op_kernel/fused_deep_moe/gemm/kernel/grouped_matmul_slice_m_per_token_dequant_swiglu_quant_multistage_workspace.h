@@ -1415,6 +1415,7 @@ public:
             beginIdx += count;
             targetTokenCount += count;
         }
+        MoeTracing(TRACE_POINT("dispatch-gmm1 recv-token-calc", "B"), 0, targetTokenCount);
         AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
         while (curRecvTokenCount < targetTokenCount) {
             for (uint32_t index = startRankId; index < endRankId; index++) {
@@ -1458,6 +1459,7 @@ public:
         }
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
         AscendC::PipeBarrier<PIPE_ALL>();
+        MoeTracing(TRACE_POINT("dispatch-gmm1 recv-token-calc", "E"), 0, targetTokenCount);
 
         AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
         AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
