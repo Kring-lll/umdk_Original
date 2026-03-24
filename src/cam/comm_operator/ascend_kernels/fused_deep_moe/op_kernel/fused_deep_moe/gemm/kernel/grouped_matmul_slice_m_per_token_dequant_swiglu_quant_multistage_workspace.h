@@ -554,7 +554,7 @@ public:
     CATLASS_DEVICE void operator()(Params const &params);
 
     __aicore__ inline void WaitGroupTokenNumReady(AscendC::GlobalTensor<int32_t>& groupTokenNumStateTensor,
-                                                      uint32_t expected)
+                                                      uint32_t expected, uint32_t time = 25)
     {
         while (true) {
             __asm__ __volatile__("");
@@ -566,7 +566,7 @@ public:
             if (groupTokenNumStateTensor.GetValue(0) == static_cast<int32_t>(expected)) {
                 break;
             }
-            SPIN_WAIT_CYCLES();
+            SPIN_WAIT_CYCLES_WITH_TIME(time);
         }
     }
 
@@ -752,7 +752,7 @@ public:
             // wait AIV recv needed tokens
             uint32_t expected = coreNumPerGroup * vToCFlag;
             MoeTracing(TRACE_POINT("dispatch-gmm1 wait-moe-token", "B"), 0, groupIdx);
-            WaitGroupTokenNumReady(groupTokenNumStateTensor, expected);
+            WaitGroupTokenNumReady(groupTokenNumStateTensor, expected, 5 * 50);
             MoeTracing(TRACE_POINT("dispatch-gmm1 wait-moe-token", "E"), 0, groupIdx);
             uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT);
             GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};

@@ -76,11 +76,12 @@ enum MoelogLevel {
             XType, ExpandXOutType, StaticQuant, DynamicQuant, IsSmoothScaleExist, \
             IsNeedAllgater, EXEC_FLAG
 
-#define SPIN_WAIT_CYCLES() \
+#define SPIN_WAIT_CYCLES_WITH_TIME(time) \
     do { \
         int64_t st = AscendC::GetSystemCycle(); \
-        while (AscendC::GetSystemCycle() - st < (25)) { ; } \
+        while (AscendC::GetSystemCycle() - st < (time)) { ; } \
     } while (0)
+#define SPIN_WAIT_CYCLES() SPIN_WAIT_CYCLES_WITH_TIME(25)
 
 #if __CCE_AICORE__ == 220 || defined(__DAV_C310__) || defined(__DAV_310R6__)
 #ifdef SPLIT_CORE_CUBE
