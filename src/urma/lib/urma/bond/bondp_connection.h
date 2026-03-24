@@ -16,7 +16,7 @@
 #include "wr_buffer.h"
 
 #define BONDP_RECV_WND_SIZE (1U << 12)
-#define BONDP_MAX_BITMAP_SIZE (1U << 24)
+#define BONDP_MAX_BITMAP_SIZE (1U << 16)
 #define BONDP_MAX_SO_QUEUE_SIZE (65535)
 
 /** A virtual connection between two vjettys.
