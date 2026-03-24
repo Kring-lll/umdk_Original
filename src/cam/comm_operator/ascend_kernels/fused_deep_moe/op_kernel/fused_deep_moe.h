@@ -398,7 +398,7 @@ template <TemplateMC2TypeClass> __aicore__ inline GM_ADDR FusedDeepMoe<TemplateM
     return (GM_ADDR)epWinContext_.GetValue(epRankId);
 #else
     __gm__ HcclOpResParam *epWinContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
-    return (GM_ADDR)((epRankId_ == 0)
+    return (GM_ADDR)((epRankId == 0)
                          ? epWinContext_->localWindowsExp
                          : ((HcclRankRelationResV2 *)(epWinContext_->remoteRes[epRankId].nextDevicePtr))->windowsExp)
 #endif
@@ -659,7 +659,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
                     AscendC::DataCopy(remoteStatus, statusDataSpaceGlobal, copyLen);
                     AscendC::SetFlag<AscendC::HardEvent::MTE2_S>(eventID);
                     AscendC::WaitFlag<AscendC::HardEvent::MTE2_S>(eventID);
-                    int32_t readstatus = remoteStatus(0);
+                    int32_t readStatus = remoteStatus(0);
 #else
                     __asm__ __volatile__("");
                     AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
@@ -672,8 +672,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
                     __asm__ __volatile__("");
 #endif
 
-                    if ((readstatus & 1) != status) {
-                        if (readstatus & 2) {
+                    if ((readStatus & 1) != status) {
+                        if (readStatus & 2) {
                             DEBUG_INFO_ENABLE_PROFILING = 1;
                         }
                         break;
