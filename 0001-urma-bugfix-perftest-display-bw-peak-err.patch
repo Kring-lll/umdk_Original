@@ -1,0 +1,25 @@
+From 054d7ebac02238b2868ad31175adf717c8aa6308 Mon Sep 17 00:00:00 2001
+From: Wen Chen <chenwen54@huawei.com>
+Date: Wed, 25 Mar 2026 14:44:46 +0800
+Subject: [PATCH] urma: bugfix perftest display bw peak err
+
+---
+ src/urma/tools/urma_perftest/perftest_parameters.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/urma/tools/urma_perftest/perftest_parameters.h b/src/urma/tools/urma_perftest/perftest_parameters.h
+index e174fc55..3672186f 100644
+--- a/src/urma/tools/urma_perftest/perftest_parameters.h
++++ b/src/urma/tools/urma_perftest/perftest_parameters.h
+@@ -38,7 +38,7 @@
+ #define PERFTEST_DEF_NUM_JETTYS   (1)
+ #define PERFTEST_DEF_ATOMIC_SIZE   (8)
+ #define PERFTEST_SIZE_CQ_MOD_LIMIT (8192)
+-#define PERFTEST_BW_NO_PEAK_INTERS (20000)
++#define PERFTEST_BW_NO_PEAK_INTERS (50000)
+ 
+ #define PERFTEST_DEF_CACHE_LINE_SIZE (64)
+ #define PERFTEST_PAGE_SIZE (4096)
+-- 
+2.28.0.windows.1
+
