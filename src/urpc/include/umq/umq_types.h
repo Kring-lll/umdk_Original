@@ -216,6 +216,7 @@ typedef struct umq_init_cfg {
     umq_buf_block_cfg_t block_cfg;
     uint16_t cna;
     uint32_t ubmm_eid;
+    uint32_t expansion_block_count;  // number of blocks per expansion
     umq_trans_info_t trans_info[MAX_UMQ_TRANS_INFO_NUM];
 } umq_init_cfg_t;
 
