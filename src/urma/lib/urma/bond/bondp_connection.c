@@ -87,12 +87,11 @@ static bool v_conn_comp(struct ub_hmap_node *node, void *key)
 static void v_conn_free(struct ub_hmap_node *node)
 {
     bdp_v_conn_node_t *v_conn_node = CONTAINER_OF_FIELD(node, bdp_v_conn_node_t, hmap_node);
-    bondp_target_jetty_t *bdp_tjetty = v_conn_node->v_conn.target_vjetty;
-    if (bdp_tjetty->v_tjetty.urma_ctx->aggr_mode != URMA_AGGR_MODE_STANDALONE) {
+    if (v_conn_node->v_conn.aggr_mode != URMA_AGGR_MODE_STANDALONE) {
         bdp_v_conn_uninit(&v_conn_node->v_conn);
     }
     free(v_conn_node);
-}
+    }
 
 static uint32_t v_conn_hash(void *key)
 {
@@ -129,6 +128,7 @@ int bdp_v_conn_table_add_on_send(bondp_hash_table_t *tbl, urma_jetty_id_t *targe
         }
     }
 
+    v_conn_node->v_conn.aggr_mode = aggr_mode;
     init_v_conn_on_send(&v_conn_node->v_conn, target_vjetty, target_dev_num);
     v_conn_node->target_id = *target_id;
     bondp_hash_table_add_with_hash(tbl, &v_conn_node->hmap_node, hash);
@@ -162,6 +162,7 @@ int bdp_v_conn_table_add_on_recv(bondp_hash_table_t *tbl, urma_jetty_id_t *targe
         }
     }
 
+    v_conn_node->v_conn.aggr_mode = aggr_mode;
     v_conn_node->target_id = *target_id;
     bondp_hash_table_add_with_hash(tbl, &v_conn_node->hmap_node, hash);
     *v_conn_out = &v_conn_node->v_conn;

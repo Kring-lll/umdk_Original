@@ -37,6 +37,8 @@ typedef struct bondp_v_connection {
     bdp_queue_t send_strong_order_queue; /* Cache SO WRs waiting to be sent */
     bdp_slide_wnd_t send_wnd;
     bdp_queue_t recv_strong_order_cr_queue; /* Cache SO CRs in polling */
+    /* Valid for both TX and RX side */
+    urma_context_aggr_mode_t aggr_mode;
 } bdp_v_conn_t;
 
 void init_v_conn_on_send(bdp_v_conn_t *v_conn, void *target_vjetty, int target_dev_num);
