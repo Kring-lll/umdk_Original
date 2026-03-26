@@ -678,6 +678,10 @@ public:
         uint32_t target = 1;
         // return;
         
+        MoeTracing(TRACE_POINT("dispatch-gmm1 sleep 300us", "B"));
+        int64_t timeout = AscendC::GetSystemCycle() + 50 * 300; // 300us timeout
+        while (AscendC::GetSystemCycle() - timeout <= 0);
+        MoeTracing(TRACE_POINT("dispatch-gmm1 sleep 300us", "E"));
         MoeTracing(TRACE_POINT("dispatch-gmm1 shared-process", "B"));
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             uint32_t currentM = params.bs;
