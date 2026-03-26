@@ -204,6 +204,7 @@ typedef struct umq_buf_block_cfg {
     // set block_size for umq_buf_size_small(), umq_buf_size_middle() and umq_buf_size_big() will be automically
     // adjusted
     umq_buf_block_size_t small_block_size;
+    uint32_t expansion_block_count;  // number of blocks per expansion
 } umq_buf_block_cfg_t;
 
 typedef struct umq_init_cfg {

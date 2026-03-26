@@ -552,6 +552,9 @@ uint32_t umq_ub_timer_timeout_get(void)
     return g_umq_monitor_slots.timeout_us;
 }
 
+static int umq_ub_register_seg_callback(uint8_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
+static int umq_ub_unregister_seg_callback(uint8_t *ctx, uint16_t mempool_id);
+
 uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
 {
     if (g_umq_ub_inited) {
@@ -650,6 +653,11 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
         .data_size = umq_buf_size_small(),
         .headroom_size = cfg->headroom_size,
         .mode = cfg->buf_mode,
+        .expansion_block_count = cfg->block_cfg.expansion_block_count,
+        .register_seg_callback = umq_ub_register_seg_callback,
+        .unregister_seg_callback = umq_ub_unregister_seg_callback,
+        .expansion_pool_id_min = 1 + (64 * HUGE_QBUF_POOL_SIZE_TYPE_MAX);
+        .expansion_pool_cnt_max = UMQ_MAX_TSEG_NUM - 1 - (64 * HUGE_QBUF_POOL_SIZE_TYPE_MAX)
     };
     ret = umq_qbuf_pool_init(&qbuf_cfg);
     if (ret != UMQ_SUCCESS && ret != -UMQ_ERR_EEXIST) {
@@ -1639,16 +1647,39 @@ static int umq_ub_register_seg_callback(uint8_t *ctx, uint16_t mempool_id, void 
         UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
         return -UMQ_ERR_EINVAL;
     }
-    return umq_ub_register_seg((umq_ub_ctx_t *)(uintptr_t)ctx, mempool_id, addr, size);
+    if (ctx != NULL) {
+        return umq_ub_register_seg((umq_ub_ctx_t *)(uintptr_t)ctx, mempool_id, addr, size);
+    }
+
+    if (g_ub_ctx == NULL || g_ub_ctx_count == 0) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "no device is available to register memory\n");
+        return -UMQ_ERR_ENODEV;
+    }
+
+    for (uint32_t i = 0; i < g_ub_ctx_count; i++) {
+        ret = umq_ub_register_seg(&g_ub_ctx[i], mempool_id, addr, size);
+        if (ret != UMQ_SUCCESS) {
+            MQ_VLOG_ERR(VLOG_UMQ, "register sge failed, status: %d, dev idx %u, eid: " EID_FMT "\n",
+                ret, i, EID_ARGS(g_ub_ctx[i].dev_info.eid.eid));
+            return ret;
+        }
+    }
+    return UMQ_SUCCESS;
 }
 
 static int umq_ub_unregister_seg_callback(uint8_t *ctx, uint16_t mempool_id)
 {
-    if (ctx == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
-        return -UMQ_ERR_EINVAL;
+    if (ctx != NULL) {
+        umq_ub_unregister_seg((umq_ub_ctx_t *)(uintptr_t)ctx, 1, mempool_id);
+        return UMQ_SUCCESS;
     }
-    umq_ub_unregister_seg((umq_ub_ctx_t *)(uintptr_t)ctx, 1, mempool_id);
+    
+    if (g_ub_ctx == NULL || g_ub_ctx_count == 0) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "no device is available to unregister memory\n");
+        return -UMQ_ERR_ENODEV;
+    }
+
+    umq_ub_unregister_seg(g_ub_ctx, g_ub_ctx_count, mempool_id);
     return UMQ_SUCCESS;
 }
 
