@@ -224,7 +224,7 @@ static ALWAYS_INLINE int fill_ring_info(umq_create_option_t *option, umq_ipc_rin
     }
 
     (void)memcpy(ring->ipc_name, option->name, strlen(option->name));
-
+    ring->ipc_name[MAX_MSG_RING_NAME] = '\0';
     ring->tx_buf_size = (option->create_flag & UMQ_CREATE_FLAG_TX_BUF_SIZE) ?
         option->tx_buf_size : UMQ_DEFAULT_BUF_SIZE;
     ring->tx_depth = (option->create_flag & UMQ_CREATE_FLAG_TX_DEPTH) ? option->tx_depth : UMQ_DEFAULT_DEPTH;
