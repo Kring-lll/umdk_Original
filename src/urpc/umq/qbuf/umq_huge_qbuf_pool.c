@@ -12,7 +12,6 @@
 #include "umq_huge_qbuf_pool.h"
 #include "util_lock.h"
 
-#define HUGE_QBUF_POOL_NUM_MAX (64)
 #define HUGE_QBUF_POOL_IDX_SHIFT (1)
 #define HUGE_QBUF_HEAD_POWER_OF_TWO (7)
 
@@ -428,8 +427,7 @@ void umq_huge_qbuf_free(umq_buf_list_t *list)
     (void)util_mutex_unlock(pool->block_pool.global_mutex);
 }
 
-int umq_huge_qbuf_register_seg(
-    uint8_t *ctx, register_seg_callback_t register_seg_func, unregister_seg_callback_t unregister_seg_func)
+int umq_huge_qbuf_register_seg(uint8_t *ctx, mempool_segment_ops_t *ops)
 {
     int ret = UMQ_SUCCESS;
     uint32_t failed_idx = 0;
@@ -439,7 +437,7 @@ int umq_huge_qbuf_register_seg(
     for (int i = 0; i < HUGE_QBUF_POOL_SIZE_TYPE_MAX; i++) {
         pool = &g_huge_pool_ctx.pool[i];
         for (uint32_t j = 0; j < pool->pool_idx; j++) {
-            ret = register_seg_func(ctx, pool->pool_idx_shift + j, pool->pool_info[j].data_buffer, pool->total_size);
+            ret = ops->register_seg_callback(ctx, pool->pool_idx_shift + j, pool->pool_info[j].data_buffer, pool->total_size);
             if (ret != UMQ_SUCCESS) {
                 failed_idx = j;
                 failed_type = i;
@@ -453,28 +451,23 @@ int umq_huge_qbuf_register_seg(
 
 UNREGISTER_SEG:
     for (uint32_t j = 0; j < failed_idx; j++) {
-        (void)unregister_seg_func(ctx, pool->pool_idx_shift + j);
+        ops->unregister_seg_callback(ctx, pool->pool_idx_shift + j);
     }
     for (int i = 0; i < failed_type; i++) {
         pool = &g_huge_pool_ctx.pool[i];
         for (uint32_t j = 0; j < pool->pool_idx; j++) {
-            (void)unregister_seg_func(ctx, pool->pool_idx_shift + j);
+            ops->unregister_seg_callback(ctx, pool->pool_idx_shift + j);
         }
     }
     return ret;
 }
 
-void umq_huge_qbuf_unregister_seg(uint8_t *ctx, unregister_seg_callback_t unregister_seg_func)
+void umq_huge_qbuf_unregister_seg(uint8_t *ctx, mempool_segment_ops_t *ops)
 {
-    int ret = UMQ_SUCCESS;
     for (int i = 0; i < HUGE_QBUF_POOL_SIZE_TYPE_MAX; i++) {
         huge_pool_t *pool = &g_huge_pool_ctx.pool[i];
         for (uint32_t j = 0; j < pool->pool_idx; j++) {
-            ret = unregister_seg_func(ctx, pool->pool_idx_shift + j);
-            if (ret != UMQ_SUCCESS) {
-                UMQ_VLOG_ERR(VLOG_UMQ, "unregister big mem pool failed, status: %d, pool idx: %u, type: %d\n",
-                    ret, j, i);
-            }
+            ops->unregister_seg_callback(ctx, pool->pool_idx_shift + j);
         }
     }
 }
