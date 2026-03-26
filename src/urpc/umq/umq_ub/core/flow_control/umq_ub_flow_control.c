@@ -566,10 +566,6 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
         cfg->max_credits_request > fc->local_rx_depth) {
         fc->max_credits_request = UMQ_UB_DEFAULT_MAX_CREDITS_REQUEST;
     }
-<<<<<<< HEAD
-
-=======
->>>>>>> 8da00c68... umq: immediate values ​​only support 16 bits.
     uint16_t temp = MIN(UMQ_UB_FC_MAX_IMM_DATA, fc->local_rx_depth);
     if (fc->max_credits_request > temp) {
         fc->max_credits_request = temp;
@@ -695,7 +691,6 @@ void umq_ub_shared_credit_recharge(ub_queue_t *queue, uint16_t recharge_count)
     credit->ops.available_credit_inc(credit, recharge_count);
 }
 
-<<<<<<< HEAD
 void umq_ub_fc_depth_exchange(ub_queue_t *queue, ub_flow_control_t *fc)
 {
     if (!fc->local_set) {
@@ -712,9 +707,6 @@ void umq_ub_fc_depth_exchange(ub_queue_t *queue, ub_flow_control_t *fc)
 }
 
 int umq_ub_shared_credit_req_send(ub_queue_t *queue)
-=======
-void umq_ub_shared_credit_req_send(ub_queue_t *queue)
->>>>>>> 8da00c68... umq: immediate values ​​only support 16 bits.
 {
     ub_flow_control_t *fc = &queue->flow_control;
     if (!fc->enabled || queue->bind_ctx == NULL) {
@@ -737,12 +729,7 @@ void umq_ub_shared_credit_req_send(ub_queue_t *queue)
     }
     umq_ub_imm_t imm = {
         .flow_control = {
-<<<<<<< HEAD
             .type = IMM_TYPE_FC_CREDIT_REQ,
-=======
-            .type = IMM_TYPE_FLOW_CONTROL,
-            .sub_type = IMM_TYPE_FC_CREDIT_REQ,
->>>>>>> 8da00c68... umq: immediate values ​​only support 16 bits.
             .window = credits_per_request}
         };
 
@@ -787,12 +774,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
     uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
     umq_ub_imm_t imm = {
         .flow_control = {
-<<<<<<< HEAD
             .type = IMM_TYPE_FC_CREDIT_REP,
-=======
-            .type = IMM_TYPE_FLOW_CONTROL,
-            .sub_type = IMM_TYPE_FC_CREDIT_REP,
->>>>>>> 8da00c68... umq: immediate values ​​only support 16 bits.
             .window = notify,
             .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
         }};
@@ -909,12 +891,7 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
     return_credit = fc->ops.remote_rx_window_dec(fc, return_credit, true);
     umq_ub_imm_t imm = {
         .flow_control = {
-<<<<<<< HEAD
             .type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
-=======
-            .type = IMM_TYPE_FLOW_CONTROL,
-            .sub_type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
->>>>>>> 8da00c68... umq: immediate values ​​only support 16 bits.
             .window = return_credit}
         };
 
@@ -960,12 +937,7 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     umq_ub_imm_t imm = {
         .flow_control = {
-<<<<<<< HEAD
             .type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
-=======
-            .type = IMM_TYPE_FLOW_CONTROL,
-            .sub_type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
->>>>>>> 8da00c68... umq: immediate values ​​only support 16 bits.
             .window = return_credit}
         };
 
