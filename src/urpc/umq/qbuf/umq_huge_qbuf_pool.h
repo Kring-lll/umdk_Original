@@ -30,6 +30,10 @@ typedef enum huge_qbuf_pool_size_type {
     HUGE_QBUF_POOL_SIZE_TYPE_MAX,
 } huge_qbuf_pool_size_type_t;
 
+#define HUGE_QBUF_POOL_NUM_MAX (64)
+#define HUGE_QBUF_POOL_TOTAL_NUM ((HUGE_QBUF_POOL_NUM_MAX * HUGE_QBUF_POOL_SIZE_TYPE_MAX))
+#define HUGE_QBUF_POOL_MEMPOOL_ID_MAX (1 + HUGE_QBUF_POOL_TOTAL_NUM)
+
 typedef struct huge_qbuf_pool_cfg {
     uint64_t total_size;        // total buffer size
     uint32_t data_size;         // size of one data slab
