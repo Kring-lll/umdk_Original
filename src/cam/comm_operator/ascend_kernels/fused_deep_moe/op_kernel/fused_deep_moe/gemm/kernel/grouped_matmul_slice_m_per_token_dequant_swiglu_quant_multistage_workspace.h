@@ -753,7 +753,7 @@ public:
             // wait AIV recv needed tokens
             uint32_t expected = coreNumPerGroup * vToCFlag;
             MoeTracing(TRACE_POINT("dispatch-gmm1 wait-moe-token", "B"), 0, groupIdx);
-            WaitGroupTokenNumReady(groupTokenNumStateTensor, expected, 5 * 50);
+            WaitGroupTokenNumReady(groupTokenNumStateTensor, expected);
             MoeTracing(TRACE_POINT("dispatch-gmm1 wait-moe-token", "E"), 0, groupIdx);
             uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT);
             GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
