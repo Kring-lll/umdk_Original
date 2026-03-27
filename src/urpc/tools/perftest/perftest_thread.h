@@ -28,12 +28,14 @@ typedef struct perftest_thread_arg perftest_thread_arg_t;
 
 struct perftest_thread_arg {
     void (*func)(perftest_thread_arg_t *);
+    void (*func1)(perftest_thread_arg_t *);
     pthread_t pid;
     uint32_t cpu_affinity;
     volatile perftest_thread_state_t state;
 };
 
 int perftest_worker_thread_create(perftest_thread_arg_t *args);
+int perftest_worker_thread_create1(perftest_thread_arg_t *args);
 void perftest_worker_thread_destroy(perftest_thread_arg_t *args);
 // thread index can only be used before perftest_worker_thread_destroy
 uint32_t perftest_thread_index(void);

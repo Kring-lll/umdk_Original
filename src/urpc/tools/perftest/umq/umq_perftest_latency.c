@@ -516,6 +516,7 @@ static void umq_perftest_server_run_latency_pro_interrupt(uint64_t umqh, umq_per
     }
     umq_buf_t *rx_buf;
     int ret = 0;
+    LOG_PRINT("---------thread perf post start\n");
     while (g_perftest_latency_ctx.iters < test_round && !is_perftest_force_quit()) {
         // recv req, release rx
         if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) != 1) {
@@ -603,6 +604,7 @@ static void umq_perftest_server_run_latency_pro_interrupt(uint64_t umqh, umq_per
         } while (send_cnt != 1 && !is_perftest_force_quit());
         g_perftest_latency_ctx.iters++;
     }
+    LOG_PRINT("---------thread perf post end\n");
 
 FINISH:
     umq_buf_free(rx_buf);

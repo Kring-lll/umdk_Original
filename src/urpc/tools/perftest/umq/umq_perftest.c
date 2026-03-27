@@ -36,6 +36,7 @@ typedef struct umq_perftest_worker_arg {
     perftest_thread_arg_t thd_arg;
     umq_perftest_config_t *cfg;
     uint64_t umqh;
+    uint64_t umqh1;
     union {
         umq_perftest_latency_arg_t lat_arg;
         umq_perftest_qps_arg_t qps_arg;
@@ -48,6 +49,7 @@ static struct umq_perftest_ctx {
     umq_perftest_config_t cfg;
 
     uint64_t umqh;
+    uint64_t umqh1;
     int fd;
     int accept_fd;
     volatile bool force_quit;
@@ -227,12 +229,13 @@ static int umq_perftest_create_umqh(umq_perftest_config_t *cfg)
     umq_create_option_t option = {
         .trans_mode = (umq_trans_mode_t)cfg->trans_mode,
         .create_flag = UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_TX_BUF_SIZE |
-            UMQ_CREATE_FLAG_RX_DEPTH | UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE,
+            UMQ_CREATE_FLAG_RX_DEPTH | UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE | UMQ_CREATE_FLAG_TP_MODE,
         .rx_buf_size = cfg->config.size,
         .tx_buf_size = cfg->config.size,
         .rx_depth = cfg->config.rx_depth,
         .tx_depth = cfg->config.tx_depth,
         .mode = cfg->config.interrupt ? UMQ_MODE_INTERRUPT : UMQ_MODE_POLLING,
+        .tp_mode = 0
     };
     char *name = cfg->config.instance_mode == PERF_INSTANCE_SERVER ? "umq_perftest_server" : "umq_perftest_client";
     (void)sprintf(option.name, "%s", name);
@@ -246,7 +249,14 @@ static int umq_perftest_create_umqh(umq_perftest_config_t *cfg)
         LOG_PRINT("umq_create failed\n");
         return -1;
     }
+    option.tp_mode = 1;
+    uint64_t umqh1 = umq_create(&option);
+    if (umqh == UMQ_INVALID_HANDLE) {
+        LOG_PRINT("umq_create failed\n");
+        return -1;
+    }
     g_umq_perftest_ctx.umqh = umqh;
+    g_umq_perftest_ctx.umqh1 = umqh1;
 
     return 0;
 }
@@ -279,6 +289,12 @@ static int umq_perftest_post_rx(umq_perftest_config_t *cfg)
             return -1;
         }
 
+        if (umq_post(g_umq_perftest_ctx.umqh1, buf, UMQ_IO_RX, &bad_buf) != UMQ_SUCCESS) {
+            LOG_PRINT("post rx failed\n");
+            umq_buf_free(bad_buf);
+            return -1;
+        }
+
         require_rx_count -= cur_batch_count;
     } while (require_rx_count > 0);
 
@@ -290,7 +306,18 @@ WAIT_UMQ_READY:
             break;
         }
 
+        ret = umq_poll(g_umq_perftest_ctx.umqh1, UMQ_IO_TX, &buf, 1);
+        if (ret != 0) {
+            LOG_PRINT("poll tx get unexpected result %d\n", ret);
+            break;
+        }
+
         umq_state = umq_state_get(g_umq_perftest_ctx.umqh);
+        if (umq_state != QUEUE_STATE_IDLE) {
+            break;
+        }
+
+        umq_state = umq_state_get(g_umq_perftest_ctx.umqh1);
         if (umq_state != QUEUE_STATE_IDLE) {
             break;
         }
@@ -312,11 +339,25 @@ static inline void umq_perftest_server_qps_work_load(perftest_thread_arg_t *args
     umq_perftest_run_qps(arg->umqh, &arg->qps_arg);
 }
 
+static inline void umq_perftest_server_qps_work_load1(perftest_thread_arg_t *args)
+{
+    umq_perftest_worker_arg_t *arg = (umq_perftest_worker_arg_t *)(uintptr_t)args;
+    arg->qps_arg.cfg = arg->cfg;
+    umq_perftest_run_qps(arg->umqh1, &arg->qps_arg);
+}
+
 static inline void umq_perftest_latency_work_load(perftest_thread_arg_t *args)
 {
     umq_perftest_worker_arg_t *arg = (umq_perftest_worker_arg_t *)(uintptr_t)args;
     arg->lat_arg.cfg = arg->cfg;
     umq_perftest_run_latency(arg->umqh, &arg->lat_arg);
+}
+
+static inline void umq_perftest_latency_work_load1(perftest_thread_arg_t *args)
+{
+    umq_perftest_worker_arg_t *arg = (umq_perftest_worker_arg_t *)(uintptr_t)args;
+    arg->lat_arg.cfg = arg->cfg;
+    umq_perftest_run_latency(arg->umqh1, &arg->lat_arg);
 }
 
 static int umq_perftest_start_test_threads(umq_perftest_config_t *cfg)
@@ -329,20 +370,34 @@ static int umq_perftest_start_test_threads(umq_perftest_config_t *cfg)
 
     if (cfg->config.case_type == PERFTEST_CASE_LAT) {
         g_umq_perftest_ctx.args->thd_arg.func = umq_perftest_latency_work_load;
+        g_umq_perftest_ctx.args->thd_arg.func1 = umq_perftest_latency_work_load1;
     } else {
         g_umq_perftest_ctx.args->thd_arg.func = umq_perftest_server_qps_work_load;
+        g_umq_perftest_ctx.args->thd_arg.func1 = umq_perftest_server_qps_work_load1;
     }
 
     g_umq_perftest_ctx.args->thd_arg.state = PERFTEST_THREAD_INIT;
     g_umq_perftest_ctx.args->thd_arg.cpu_affinity = cfg->config.cpu_affinity;
     g_umq_perftest_ctx.args->cfg = cfg;
     g_umq_perftest_ctx.args->umqh = g_umq_perftest_ctx.umqh;
+    g_umq_perftest_ctx.args->umqh1 = g_umq_perftest_ctx.umqh1;
     if (perftest_worker_thread_create(&g_umq_perftest_ctx.args->thd_arg) != 0) {
         LOG_PRINT("create worker thread failed\n");
         free(g_umq_perftest_ctx.args);
         g_umq_perftest_ctx.args = NULL;
         return -1;
     }
+    if (perftest_worker_thread_create1(&g_umq_perftest_ctx.args->thd_arg) != 0) {
+        LOG_PRINT("create worker thread failed\n");
+        free(g_umq_perftest_ctx.args);
+        g_umq_perftest_ctx.args = NULL;
+        return -1;
+    }
+    // LOG_PRINT("-----------------continue run pro\n");
+    // umq_perftest_worker_arg_t *arg = (umq_perftest_worker_arg_t *)(uintptr_t)(&g_umq_perftest_ctx.args->thd_arg);
+    // arg->lat_arg.cfg = arg->cfg;
+    // umq_perftest_run_latency(arg->umqh1, &arg->lat_arg);
+    // LOG_PRINT("---------------run pro finish\n");
 
     return 0;
 }
@@ -369,6 +424,35 @@ static void umq_perftest_stop_test_threads(perftest_config_t *cfg)
     perftest_worker_thread_destroy(&g_umq_perftest_ctx.args->thd_arg);
     free(g_umq_perftest_ctx.args);
     g_umq_perftest_ctx.args = NULL;
+}
+
+static int umq_perftest_client_exchange_data1(void)
+{
+    // 客户端先发送本端bind信息，然后接收server端的bind信息，然后进行绑定
+    exchange_info_t local_info = {0};
+    local_info.msg_len = umq_bind_info_get(g_umq_perftest_ctx.umqh1, local_info.data, MAX_INFO_SIZE);
+    if (local_info.msg_len == 0) {
+        LOG_PRINT("umq_bind_info_get2 failed\n");
+        return -1;
+    }
+
+    if (send_exchange_data(g_umq_perftest_ctx.fd, &local_info) < 0) {
+        return -1;
+    }
+    LOG_PRINT("client send bind info2 succeed, local bind info size: %u\n", local_info.msg_len);
+
+    exchange_info_t remote_info = {0};
+    if (recv_exchange_data(g_umq_perftest_ctx.fd, &remote_info) != 0) {
+        return -1;
+    }
+
+    if (umq_bind(g_umq_perftest_ctx.umqh1, remote_info.data, remote_info.msg_len) != 0) {
+        LOG_PRINT("client bind2 failed, remote bind info size: %u\n", remote_info.msg_len);
+        return -1;
+    }
+
+    LOG_PRINT("client bind2 succeed\n");
+    return 0;
 }
 
 static int umq_perftest_client_exchange_data(void)
@@ -431,6 +515,12 @@ static int umq_perftest_run_client(umq_perftest_config_t *cfg)
         goto CLOSE_SOC;
     }
 
+        // exchange bind info and bind
+    ret = umq_perftest_client_exchange_data1();
+    if (ret != 0) {
+        goto CLOSE_SOC;
+    }
+
     // post rx
     ret = umq_perftest_post_rx(cfg);
     if (ret != 0) {
@@ -444,7 +534,7 @@ static int umq_perftest_run_client(umq_perftest_config_t *cfg)
     }
 
     // run test
-    ret = umq_perftest_start_test_threads(cfg);
+    ret = umq_perftest_start_test_threads(cfg); //
     if (ret != 0) {
         goto UNBIND;
     }
@@ -475,6 +565,37 @@ UNINIT:
     umq_uninit();
 
     return ret;
+}
+
+static int umq_perftest_server_exchange_and_bind1(umq_perftest_config_t *cfg)
+{
+    /* 1. serevr recv client bind info
+     * 2. bind client
+     * 3. send bind info to client */
+    exchange_info_t remote_info = {0};
+    if (recv_exchange_data(g_umq_perftest_ctx.accept_fd, &remote_info) != 0) {
+        return -1;
+    }
+    LOG_PRINT("server recv bind info succeed, bind info size: %u\n", remote_info.msg_len);
+
+    exchange_info_t local_info = {0};
+    local_info.msg_len = umq_bind_info_get(g_umq_perftest_ctx.umqh1, local_info.data, MAX_INFO_SIZE);
+    if (local_info.msg_len == 0) {
+        LOG_PRINT("umq_bind_info_get failed\n");
+        return -1;
+    }
+    if (send_exchange_data(g_umq_perftest_ctx.accept_fd, &local_info) != 0) {
+        LOG_PRINT("server send bind info failed\n");
+        return -1;
+    }
+
+    if (umq_bind(g_umq_perftest_ctx.umqh1, remote_info.data, remote_info.msg_len) != 0) {
+        LOG_PRINT("server bind failed\n");
+        return -1;
+    }
+
+    LOG_PRINT("server send bind info2 succeed, bind info size: %u\n", local_info.msg_len);
+    return 0;
 }
 
 static int umq_perftest_server_exchange_and_bind(umq_perftest_config_t *cfg)
@@ -540,6 +661,12 @@ static int umq_perftest_run_server(umq_perftest_config_t *cfg)
 
     // exchange bind info and bind
     ret = umq_perftest_server_exchange_and_bind(cfg);
+    if (ret != 0) {
+        goto CLOSE_ACCEPT_FD;
+    }
+
+    // exchange bind info and bind1
+    ret = umq_perftest_server_exchange_and_bind1(cfg);
     if (ret != 0) {
         goto CLOSE_ACCEPT_FD;
     }

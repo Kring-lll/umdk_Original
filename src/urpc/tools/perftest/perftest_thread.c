@@ -88,8 +88,28 @@ static void *perftest_worker_func(void *arg)
     return NULL;
 }
 
+static void *perftest_worker_func1(void *arg)
+{
+    perftest_thread_arg_t *args = (perftest_thread_arg_t *)arg;
+
+    args->state = PERFTEST_THREAD_INIT;
+    if (perftest_thread_init(args->cpu_affinity) != 0) {
+        args->state = PERFTEST_THREAD_ERROR;
+        return NULL;
+    }
+
+    args->state = PERFTEST_THREAD_RUNNING;
+    args->func1((perftest_thread_arg_t *)args);
+    args->state = PERFTEST_THREAD_STOP;
+
+    perftest_thread_uninit();
+
+    return NULL;
+}
+
 int perftest_worker_thread_create(perftest_thread_arg_t *args)
 {
+    LOG_PRINT("create worker thread1 start\n");
     if (pthread_create(&args->pid, NULL, perftest_worker_func, args) != 0) {
         return -1;
     }
@@ -102,6 +122,27 @@ int perftest_worker_thread_create(perftest_thread_arg_t *args)
         (void)pthread_join(args->pid, NULL);
         return -1;
     }
+    LOG_PRINT("---------thread1 finish\n");
+
+    return 0;
+}
+
+int perftest_worker_thread_create1(perftest_thread_arg_t *args)
+{
+    LOG_PRINT("create worker thread2 start\n");
+    if (pthread_create(&args->pid, NULL, perftest_worker_func1, args) != 0) {
+        return -1;
+    }
+
+    while (args->state == PERFTEST_THREAD_INIT) {
+        (void)usleep(1);
+    }
+
+    if (args->state == PERFTEST_THREAD_ERROR) {
+        (void)pthread_join(args->pid, NULL);
+        return -1;
+    }
+    LOG_PRINT("---------thread2 finish\n");
 
     return 0;
 }
