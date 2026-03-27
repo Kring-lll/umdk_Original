@@ -40,6 +40,7 @@ constexpr int32_t BUFFER_NUM = 2;
 constexpr int32_t GATHER_SECOND_NUM = 2;
 constexpr uint32_t MAX_QUANT_ROW_ONCE = 8;
 constexpr uint32_t QUANT_SPACE_FACTOR = 176 * 1024 / 11;  // up to 176KB for quant
+constexpr uint32_t SEND_CORE_NUM = 24;
 #define OPT_RANK_OFFSET 512
 
 #define CEIL_UP(x) ((x + UB_ALIGN - 1) / UB_ALIGN * UB_ALIGN)
@@ -610,8 +611,8 @@ public:
         // when localExpertNum=1, all cores send token and recv token in sequence
         recvCoreNum = aivNum;
         // when localExpertNum>1, half of cores send token and another half recv token in parallel
-        recvCoreNum = (localExpertNum > 1) ? aiCoreGroupNum : recvCoreNum;
-        uint32_t coreNumPerGroup = recvCoreNum / localExpertNum;
+        recvCoreNum = (localExpertNum > 1) ? aivNum - SEND_CORE_NUM : recvCoreNum;
+        uint32_t coreNumPerGroup = recvCoreNum;
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             shareQuantCoreNum = recvCoreNum;
         }
@@ -1457,11 +1458,10 @@ public:
         RecvCount(ubOffset);
 
         uint32_t recvExpertNum = expertCntUp;
-        uint32_t recvCoreNumPerGroup = recvCoreNum / localExpertNum;
+        uint32_t recvCoreNumPerGroup = recvCoreNum;
         uint32_t recvRankNumPerCore = epRankSize / recvCoreNumPerGroup;
         uint32_t remainderRankNum = epRankSize % recvCoreNumPerGroup;
 
-        uint32_t groupId = recvCoreIdx / recvCoreNumPerGroup;
         uint32_t recvCoreIdxInGroup = recvCoreIdx % recvCoreNumPerGroup;
         uint32_t startRankIdInGroup = recvRankNumPerCore * recvCoreIdxInGroup;
         if (recvCoreIdxInGroup < remainderRankNum) {
@@ -1471,34 +1471,36 @@ public:
             startRankIdInGroup += remainderRankNum;
         }
         uint32_t endRankIdInGroup = startRankIdInGroup + recvRankNumPerCore;
-        uint32_t startRankId = epRankSize * groupId + startRankIdInGroup;
-        uint32_t endRankId = epRankSize * groupId + endRankIdInGroup;
+        uint32_t subUbOffset = CEIL_UP(expertCntUp * UB_BLOCK_SIZE) + CEIL_UP(UB_BLOCK_SIZE) + CEIL_UP(expertCntUp * sizeof(float));
+        for (uint32_t groupId = 0; groupId < localExpertNum; ++groupId) {
+            uint32_t startRankId = epRankSize * groupId + startRankIdInGroup;
+            uint32_t endRankId = epRankSize * groupId + endRankIdInGroup;
 
-        uint32_t coreTokenCount = 0;
+            uint32_t coreTokenCount = 0;
 
-        if (startRankId < recvExpertNum) {
-            // RecvCount, GetCumSum, RecvToken must use the same ubOffset to get right info
-            GetCumSum(startRankId, recvExpertNum, ubOffset);
-            RecvToken(gmX1, gmX1Scale, gmEpSendCount, coreTokenCount, startRankId, endRankId,
-                      recvRankNumPerCore, ubOffset);
+            if (startRankId < recvExpertNum) {
+                // RecvCount, GetCumSum, RecvToken must use the same ubOffset to get right info
+                GetCumSum(startRankId, recvExpertNum, ubOffset);
+                RecvToken(gmX1, gmX1Scale, gmEpSendCount, coreTokenCount, startRankId, endRankId,
+                        recvRankNumPerCore, ubOffset);
+            }
+
+            // recv finish, inform AIC
+            AscendC::PipeBarrier<PIPE_ALL>();
+            AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(subUbOffset);
+            tmpLocalTensor.SetValue(CV_FLAG_INDEX, vToCFlag);
+            tmpLocalTensor.SetValue(GROUP_ID_INDEX, groupId);
+            tmpLocalTensor.SetValue(SELF_COUNT_INDEX, coreTokenCount);
+            AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
+
+            AscendC::GlobalTensor<int32_t> groupTokenNumStateTensor;
+            groupTokenNumStateTensor.SetGlobalBuffer((__gm__ int32_t *)(statusDataSpaceGm + GROUP_TOKEN_NUM_OFFSET));
+            AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
+            AscendC::SetAtomicAdd<int32_t>();
+            AscendC::DataCopy(groupTokenNumStateTensor[groupId * GROUP_INFO_SIZE], tmpLocalTensor, INT32_COUNT_PER_BLOCK);
+            AscendC::SetAtomicNone();
+            AscendC::PipeBarrier<PIPE_ALL>();
         }
-
-        // recv finish, inform AIC
-        AscendC::PipeBarrier<PIPE_ALL>();
-        AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(0);
-        ubOffset += CEIL_UP(UB_BLOCK_SIZE);
-        tmpLocalTensor.SetValue(CV_FLAG_INDEX, vToCFlag);
-        tmpLocalTensor.SetValue(GROUP_ID_INDEX, groupId);
-        tmpLocalTensor.SetValue(SELF_COUNT_INDEX, coreTokenCount);
-        AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
-
-        AscendC::GlobalTensor<int32_t> groupTokenNumStateTensor;
-        groupTokenNumStateTensor.SetGlobalBuffer((__gm__ int32_t *)(statusDataSpaceGm + GROUP_TOKEN_NUM_OFFSET));
-        AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
-        AscendC::SetAtomicAdd<int32_t>();
-        AscendC::DataCopy(groupTokenNumStateTensor[groupId * GROUP_INFO_SIZE], tmpLocalTensor, INT32_COUNT_PER_BLOCK);
-        AscendC::SetAtomicNone();
-        AscendC::PipeBarrier<PIPE_ALL>();
     }
 
     CATLASS_DEVICE
@@ -1507,7 +1509,7 @@ public:
                 __gm__ float *gmShareSwigluOutput, __gm__ float *gmSwigluOutput, uint32_t shareN, uint32_t n, uint32_t k, LayoutScale layoutShareScale, LayoutScale layoutScale,
                 LayoutPerTokenScale wholeLayoutPerTokenScale)
     {
-        uint32_t coreNumPerGroup = recvCoreNum / localExpertNum;
+        uint32_t coreNumPerGroup = recvCoreNum;
         int64_t gmGroupOffsetScale = 0;
         int64_t gmGroupOffsetPerTokenScale = 0;
         int64_t gmGroupOffsetD = 0;
