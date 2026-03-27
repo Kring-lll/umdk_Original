@@ -231,11 +231,20 @@ SSL *crypto_ssl_init(int sockfd, bool is_server)
     }
 
     // Register the callback functions and establish the TLS-PSK connection.
-    if (is_server) {
-        SSL_set_psk_server_callback(ssl, (SSL_psk_server_cb_func)cfg.psk.server_cb_func);
+    if (cfg.max_tls_version == URPC_TLS_VERSION_1_3) {
+        if (is_server) {
+            SSL_set_psk_find_session_callback(ssl, (SSL_psk_find_session_cb_func)cfg.psk.server_cb_func);
+        } else {
+            SSL_set_psk_use_session_callback(ssl, (SSL_psk_use_session_cb_func)cfg.psk.client_cb_func);
+        }
     } else {
-        SSL_set_psk_client_callback(ssl, (SSL_psk_client_cb_func)cfg.psk.client_cb_func);
+        if (is_server) {
+            SSL_set_psk_server_callback(ssl, (SSL_psk_server_cb_func)cfg.psk.server_cb_func);
+        } else {
+            SSL_set_psk_client_callback(ssl, (SSL_psk_client_cb_func)cfg.psk.client_cb_func);
+        }
     }
+    
     return ssl;
 UNINIT_SSL:
     crypto_ssl_uninit(ssl);
