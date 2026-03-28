@@ -23,6 +23,7 @@ typedef struct jfs_wr_entry {
     struct bondp_jetty_ctx *bjetty_ctx;
     struct bondp_v_connection *v_conn;
     uint32_t send_idx;
+    uint32_t target_idx;
 } jfs_wr_entry_t;
 
 typedef struct jfr_wr_entry {
@@ -40,11 +41,31 @@ typedef struct xwr_buf {
     void *entries;
 } xwr_buf_t;
 
+static inline uint32_t __wr_id_to_idx(uint64_t wr_id, uint32_t max_wr_num)
+{
+    return (wr_id - 1) % max_wr_num;
+}
+static inline uint32_t __idx_to_wr_id(uint32_t idx)
+{
+    return (uint32_t)(idx + 1);
+}
+static inline void *__wr_buf_idx(xwr_buf_t *buf, uint32_t idx)
+{
+    return ((char *)buf->entries + idx * buf->wr_entry_size);
+}
+
 int wr_buf_init(xwr_buf_t *buf, uint32_t max_wr_num);
 void wr_buf_uninit(xwr_buf_t *buf);
 
-jfs_wr_entry_t *jfs_wr_buf_get(xwr_buf_t *buf, uint64_t wr_id);
-jfr_wr_entry_t *jfr_wr_buf_get(xwr_buf_t *buf, uint64_t wr_id);
+static inline jfs_wr_entry_t *jfs_wr_buf_get(xwr_buf_t *buf, uint64_t wr_id)
+{
+    return (jfs_wr_entry_t *)__wr_buf_idx(buf, __wr_id_to_idx(wr_id, buf->max_wr_num));
+}
+
+static inline jfr_wr_entry_t *jfr_wr_buf_get(xwr_buf_t *buf, uint64_t wr_id)
+{
+    return (jfr_wr_entry_t *)__wr_buf_idx(buf, __wr_id_to_idx(wr_id, buf->max_wr_num));
+}
 
 jfs_wr_entry_t *jfs_wr_buf_alloc(xwr_buf_t *buf);
 jfr_wr_entry_t *jfr_wr_buf_alloc(xwr_buf_t *buf);
