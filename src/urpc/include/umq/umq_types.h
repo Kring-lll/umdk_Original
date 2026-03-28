@@ -206,6 +206,12 @@ typedef struct umq_buf_block_cfg {
     umq_buf_block_size_t small_block_size;
 } umq_buf_block_cfg_t;
 
+typedef struct umq_buf_pool_cfg {
+    // local qbuf pool cfg
+    uint64_t tls_qbuf_pool_depth;
+    uint64_t tls_expand_qbuf_pool_depth;
+} umq_buf_pool_cfg_t;
+
 typedef struct umq_init_cfg {
     umq_buf_mode_t buf_mode;
     uint32_t feature;               // feature flags
@@ -217,6 +223,7 @@ typedef struct umq_init_cfg {
     uint16_t cna;
     uint32_t ubmm_eid;
     umq_trans_info_t trans_info[MAX_UMQ_TRANS_INFO_NUM];
+    umq_buf_pool_cfg_t buf_pool_cfg;
 } umq_init_cfg_t;
 
 #define UMQ_NAME_MAX_LEN (32)
