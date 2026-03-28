@@ -38,9 +38,7 @@ typedef struct bondp_jetty_ctx {
     // caching WRs
     jfs_wr_buf_t *jfs_bufs[URMA_UBAGG_DEV_MAX_NUM];  // store unacked jfs wr, in case of re-transmission
     jfr_wr_buf_t *jfr_bufs[URMA_UBAGG_DEV_MAX_NUM];  // store unacked jfr wr, in case of rearm
-    // id to distinguish posted WRs
-    uint32_t send_wr_id;
-    uint32_t recv_wr_id;
+    uint32_t inflight_cnt[URMA_UBAGG_DEV_MAX_NUM];
     // slide window and other status for de-duplication
     bondp_hash_table_t v_conn_table;
     // single path
