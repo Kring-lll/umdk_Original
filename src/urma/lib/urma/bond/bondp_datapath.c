@@ -19,6 +19,8 @@
 #include "bondp_jetty_ctx.h"
 #include "bondp_connection.h"
 #include "bondp_context_table.h"
+#include "bondp_convert_vwr_to_pwr.h"
+
 #include "bondp_datapath.h"
 
 #define PJETTY_ID_ENCODE_OFFSET (32)
@@ -130,23 +132,6 @@ static bool is_all_pjetty_fail(const bjetty_ctx_t *bjetty_ctx)
         }
     }
     return true;
-}
-
-/** Use user_ctx to store information of certain WR in post_jetty APIs.
- *  We need these params to find corresponding vjetty and wr_buf in bondp_poll_jfc
- */
-static inline void encode_wr_user_ctx(uint64_t *user_ctx, uint32_t wr_id, uint16_t vjetty_id, uint16_t pjetty_id)
-{
-    *user_ctx = wr_id;
-    *user_ctx |= (uint64_t)pjetty_id << PJETTY_ID_ENCODE_OFFSET;
-    *user_ctx |= (uint64_t)vjetty_id << VJETTY_ID_ENCODE_OFFSET;
-}
-
-static inline void decode_wr_user_ctx(uint64_t user_ctx, uint32_t *wr_id, uint16_t *vjetty_id, uint16_t *pjetty_id)
-{
-    *wr_id = user_ctx & 0xffffffff;
-    *pjetty_id = (user_ctx >> PJETTY_ID_ENCODE_OFFSET) & 0xffff;
-    *vjetty_id = (uint16_t)(user_ctx >> VJETTY_ID_ENCODE_OFFSET);
 }
 
 static int get_send_idx_with_least_load(bjetty_ctx_t *bjetty_ctx)
@@ -289,10 +274,6 @@ static int schedule_send(const urma_jfs_wr_t *wr, bjetty_ctx_t *bjetty_ctx, bdp_
     return schedule_next_route_in_matrix_server_singlepath(bjetty_ctx, bdp_tjetty, send_idx, target_idx);
 }
 
-static inline bool wr_buf_try_add(wr_buf_t *buf, uint32_t id)
-{
-    return !wr_buf_contain(buf, id);
-}
 /**
  * Local register seg only need param local_idx
  * Imported seg need both idxs
@@ -311,73 +292,6 @@ static inline urma_target_seg_t *get_p_tseg(urma_target_seg_t *tseg, int local_i
 static inline urma_target_jetty_t *get_p_tjetty(urma_target_jetty_t *tjetty, int send_idx, int target_idx)
 {
     return CONTAINER_OF_FIELD(tjetty, bondp_target_jetty_t, v_tjetty)->p_tjetty[send_idx][target_idx];
-}
-
-/** Reconstruct a new WR according to the user input.
- * Do the following steps:
- * 1. Deepcopy the input WR.
- * 2. Convert SEND opcode to SEND_IMM, so reliability metadata can be carried in imm_data.
- * Considering the WR split operation in the future (Fit for CTP/UTP), the return value is a list of WR, connected by
- * WR->next.
- * @return A list of WRs as the result of the split of input WR connected by WR->next.
- * Currently, it returns the modified WR of the input, and consider it as a single element. (It may have next != NULL)
- */
-static urma_jfs_wr_t *get_new_jfs_wr(const urma_jfs_wr_t *wr,
-    int *output_len)
-{
-    urma_jfs_wr_t *new_wrs = NULL;
-    urma_jfs_wr_t *copied_send_wr = NULL;
-    int wr_len = 1;
-
-    switch (wr->opcode) {
-        case URMA_OPC_SEND:
-        case URMA_OPC_SEND_IMM:
-        case URMA_OPC_SEND_INVALIDATE:
-            copied_send_wr = deepcopy_jfs_wr(wr);
-            if (copied_send_wr == NULL) {
-                goto EXIT;
-            }
-            if (wr->opcode == URMA_OPC_SEND || wr->opcode == URMA_OPC_SEND_INVALIDATE) {
-                /* Convert to SEND_IMM so reliability metadata can be carried in imm_data */
-                copied_send_wr->opcode = URMA_OPC_SEND_IMM;
-                copied_send_wr->send.imm_data = 0;
-            }
-            /* We need cqe to do deduplication, so we have to set this flag */
-            copied_send_wr->flag.bs.complete_enable = 1;
-            new_wrs = copied_send_wr;
-            *output_len = wr_len;
-            break;
-        case URMA_OPC_WRITE:
-        case URMA_OPC_WRITE_IMM:
-        case URMA_OPC_WRITE_NOTIFY:
-        case URMA_OPC_READ:
-        case URMA_OPC_CAS:
-        case URMA_OPC_FADD:
-            copied_send_wr = deepcopy_jfs_wr(wr);
-            if (copied_send_wr == NULL) {
-                goto EXIT;
-            }
-            /* We need cqe to do deduplication, so we have to set this flag */
-            copied_send_wr->flag.bs.complete_enable = 1;
-            new_wrs = copied_send_wr;
-            *output_len = wr_len;
-            break;
-        default:
-            URMA_LOG_ERR("unsupport opcode %d\n", wr->opcode);
-            new_wrs = NULL;
-            *output_len = 0;
-            break;
-    }
-EXIT:
-    return new_wrs;
-}
-
-static inline uint64_t encode_and_replace_jfs_user_ctx(urma_jfs_wr_t *wr, uint32_t send_wr_id,
-    uint16_t bjetty_id, uint16_t pjetty_id)
-{
-    uint64_t user_ctx = wr->user_ctx;
-    encode_wr_user_ctx(&wr->user_ctx, send_wr_id, bjetty_id, pjetty_id);
-    return user_ctx;
 }
 
 static urma_status_t get_original_opcode_tag(urma_opcode_t opcode, uint64_t *opcode_tag)
@@ -618,95 +532,6 @@ static urma_status_t set_jfs_wr_ptseg_ptjetty(urma_jfs_wr_t *send_wr, urma_targe
     return ret;
 }
 
-static urma_status_t encode_jfs_wr_reliable_info(urma_jfs_wr_t *send_wr, wr_buf_extra_value_t *value)
-{
-    switch (send_wr->opcode) {
-        case URMA_OPC_SEND:
-        case URMA_OPC_SEND_IMM:
-        case URMA_OPC_SEND_INVALIDATE:
-            return encode_imm_data(&send_wr->send.imm_data,
-                value->msn,
-                value->flag.bs.place_order == URMA_STRONG_ORDER,
-                value->original_opcode);
-        case URMA_OPC_WRITE:
-        case URMA_OPC_WRITE_IMM:
-        case URMA_OPC_WRITE_NOTIFY:
-        case URMA_OPC_READ:
-            if (send_wr->opcode == URMA_OPC_WRITE_IMM) {
-                /* We need to use the imm data field to carry msn to the target.
-                   So we have to limit user's data to WRITE_IMM_USER_BITS bits. */
-                return encode_imm_data(&send_wr->rw.notify_data, value->msn,
-                    value->flag.bs.place_order == URMA_STRONG_ORDER, value->original_opcode);
-            }
-            break;
-        default:
-            URMA_LOG_ERR("Unsupported send opcode\n");
-            return URMA_EINVAL;
-    }
-    return URMA_SUCCESS;
-}
-/**
- * 1. Change tseg in sges from v_tseg to p_tseg
- * 2. Change tjetty in send_wr from v_tjetty to p_tjetty
- * 3. Encode imm_data for SEND_IMM/WRITE_IMM opcode
- * @param send_wr: A copy of original jfs wr.
- * @param value: Extra value to send the current WR, including send/target idx and msn, etc.
- */
-static urma_status_t update_send_wr_before_post(urma_jfs_wr_t *send_wr, wr_buf_extra_value_t *value)
-{
-    urma_status_t ret = URMA_SUCCESS;
-    ret = set_jfs_wr_ptseg_ptjetty(send_wr, value->vtjetty, value->send_idx, value->target_idx);
-    if (ret != 0) {
-        URMA_LOG_ERR("Failed to set_jfs_wr_ptseg_ptjetty\n");
-        return ret;
-    }
-    ret = encode_jfs_wr_reliable_info(send_wr, value);
-    if (ret != 0) {
-        URMA_LOG_ERR("Failed to encode_jfs_wr_reliable_info\n");
-        return ret;
-    }
-    return ret;
-}
-/**
- * Post send jfs wr and store it in bjetty_ctx->jfs_bufs
- * @param send_wr: A copy of original jfs wr.
- * @param value: Extra value to send the current WR, including send/target idx and msn, etc.
- */
-static urma_status_t send_and_store_jfs_wr(bjetty_ctx_t *bjetty_ctx, uint32_t v_jetty_id, urma_jfs_wr_t *send_wr,
-    uint32_t send_wr_id, wr_buf_extra_value_t *value, urma_jfs_wr_t **bad_wr)
-{
-    urma_status_t ret = URMA_SUCCESS;
-
-    ret = update_send_wr_before_post(send_wr, value);
-    if (ret != URMA_SUCCESS) {
-        return ret;
-    }
-    /* We need user_ctx to find corresponding wr_buf entry in poll function,
-       so we need to encode user_ctx with key information and store the original one */
-    (void)encode_and_replace_jfs_user_ctx(send_wr, send_wr_id,
-        (uint16_t)v_jetty_id, (uint16_t)value->send_idx);
-    /* post send wr */
-    ret = comp_post_send(bjetty_ctx, value->send_idx, send_wr, bad_wr);
-    if (ret != URMA_SUCCESS) {
-        return ret;
-    }
-    /* store to jfs_wr_buf */
-    /* This operation may fail due to extremely high speed of sending
-       which consumes all send_wr_id space of 2^24 */
-    (void)jfs_wr_buf_add_wr(bjetty_ctx->jfs_bufs[value->send_idx], send_wr_id, send_wr, value);
-    return URMA_SUCCESS;
-}
-
-static inline void increase_id_after_send(uint32_t *send_wr_id, uint32_t *msn, urma_opcode_t opcode)
-{
-    (*send_wr_id)++;
-    (*send_wr_id) &= (BONDP_MAX_BITMAP_SIZE - 1);
-    if (opcode != URMA_OPC_WRITE && opcode != URMA_OPC_READ) {
-        (*msn)++;
-        (*msn) &= (BONDP_MAX_BITMAP_SIZE - 1);
-    }
-}
-
 static urma_status_t post_send_check_jfs_wr_valid(const bondp_context_t *bdp_ctx, const urma_jfs_wr_t *wr)
 {
     switch (wr->opcode) {
@@ -934,78 +759,114 @@ static urma_status_t bondp_post_send_wr_no_store(bjetty_ctx_t *bjetty_ctx,
     ret = comp_post_send(bjetty_ctx, local_port, wr_list, bad_wr);
     return ret;
 }
-/**
- * Enable WR caching during data transmission,
- * support failover functionality, and enable SO to handle in-order processing.
- * Compared to `bondp_post_send_wr_no_store`, it provides all designed features supported by the aggregation device.
- */
+
+static int convert_jfs_vwr_to_pwr_rw(urma_jfs_wr_t *wr, int send_idx, int target_idx, bdp_v_conn_t *v_conn)
+{
+    int ret;
+
+    if (wr->opcode == URMA_OPC_WRITE_NOTIFY || wr->opcode == URMA_OPC_WRITE_IMM) {
+        urma_opcode_t original_opcode = wr->opcode;
+        wr->opcode = URMA_OPC_WRITE_IMM;
+        ret = encode_imm_data(&wr->rw.notify_data, v_conn->msn, false, original_opcode);
+        v_conn->msn = (v_conn->msn + 1) % BONDP_MAX_BITMAP_SIZE;
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    ret = set_write_wr_ptseg_ptjetty(wr, wr->tjetty, send_idx, target_idx);
+    if (ret != 0) {
+        return ret;
+    }
+
+    return 0;
+}
+
+static int convert_jfs_vwr_to_pwr_send(urma_jfs_wr_t *wr, int send_idx, int target_idx, bdp_v_conn_t *v_conn)
+{
+    int ret;
+
+    urma_opcode_t original_opcode = wr->opcode;
+    wr->opcode = URMA_OPC_SEND_IMM;
+    ret = encode_imm_data(&wr->send.imm_data, v_conn->msn, false, original_opcode);
+    v_conn->msn = (v_conn->msn + 1) % BONDP_MAX_BITMAP_SIZE;
+
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = set_send_wr_ptseg_ptjetty(wr, wr->tjetty, send_idx, target_idx);
+    if (ret != 0) {
+        return ret;
+    }
+
+    return 0;
+}
+
+static int convert_jfs_vwr_to_pwr(const urma_jfs_wr_t *vwr, urma_jfs_wr_t *pwr,
+                                  int send_idx, int target_idx, bdp_v_conn_t *v_conn)
+{
+    if (copy_jfs_wr(vwr, pwr) != 0) {
+        URMA_LOG_ERR("Failed to copy jfs wr\n");
+        return -1;
+    }
+
+    /* We need cqe to do deduplication, so we have to set this flag */
+    pwr->flag.bs.complete_enable = 1;
+
+    if (is_rw_wr(pwr)) {
+        return convert_jfs_vwr_to_pwr_rw(pwr, send_idx, target_idx, v_conn);
+    } else if (is_send_wr(pwr)) {
+        return convert_jfs_vwr_to_pwr_send(pwr, send_idx, target_idx, v_conn);
+    } else {
+        URMA_LOG_ERR("unsupport opcode %d\n", pwr->opcode);
+        return -1;
+    }
+}
+
 static urma_status_t bondp_post_send_wr_and_store(bjetty_ctx_t *bjetty_ctx,
-    const urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
+    bondp_jfc_t *vjfc, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
 {
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
     bdp_v_conn_t *v_conn = get_v_conn_on_send(bjetty_ctx, bdp_tjetty);
     if (v_conn == NULL) {
         return URMA_FAIL;
     }
-    /* Schedule sending jetty */
-    int send_idx = 0;
-    int target_idx = 0;
-    urma_status_t ret = schedule_send(wr, bjetty_ctx, v_conn, &send_idx, &target_idx);
-    if (ret) {
+
+    int send_idx = 0, target_idx = 0;
+    urma_status_t ret;
+
+    ret = schedule_send(wr, bjetty_ctx, v_conn, &send_idx, &target_idx);
+    if (ret != 0) {
         return URMA_FAIL;
     }
-    /* We maintain the following statement:
-       wr_buf contains a certain WR <=> urma post api succeeds to send data
-       Therefore, if wr_buf can't cache the WR data, then we can't call post api to send */
-    if (!wr_buf_try_add(bjetty_ctx->jfs_bufs[send_idx], bjetty_ctx->send_wr_id)) {
-        /* get_comp_urma_jetty_id will return a non-null value,
-           because the previous post_send_check_valid has performed validation. */
+
+    jfs_wr_entry_t *wr_entry = jfs_wr_buf_alloc(&vjfc->wr_buf);
+    if (wr_entry == NULL) {
         return URMA_EAGAIN;
     }
-    /* get new wr */
-    /*
-    ! Currently, we assume param `next` is not NULL
-    This function will deepcopy WR and convert SEND to SEND_IMM
-    ! Only valid when we don't do WR split
-    */
-    int new_wrs_len = 0;
-    urma_jfs_wr_t *send_wr = get_new_jfs_wr(wr, &new_wrs_len);
-    if (send_wr == NULL) {
-        return URMA_FAIL;
+    wr_entry->user_ctx = wr->user_ctx;
+    wr_entry->bjetty_ctx = bjetty_ctx;
+    wr_entry->v_conn = v_conn;
+    wr_entry->send_idx = send_idx;
+
+    urma_jfs_wr_t *pwr = &wr_entry->wr;
+    ret = convert_jfs_vwr_to_pwr(wr, pwr, send_idx, target_idx, v_conn);
+    if (ret != 0) {
+        goto FREE_PWR;
     }
-    /* Store essential information to wr_buf when the WR is posted for the first time */
-    wr_buf_extra_value_t value = {
-        .user_ctx = wr->user_ctx,
-        .flag = wr->flag,
-        .original_opcode = wr->opcode,
-        .v_conn = v_conn,
-        .vtjetty = wr->tjetty,
-        .send_idx = send_idx,
-        .target_idx = target_idx,
-        .trans_mode = bdp_tjetty->v_tjetty.trans_mode
-    };
-    /* Only set msn for ops which need RQE */
-    if (wr->opcode != URMA_OPC_WRITE && wr->opcode != URMA_OPC_READ) {
-        value.msn = v_conn->msn;
-    } else {
-        value.msn = -1; /* valid msn < 2^24, so -1 indicates invalid */
-    }
-    /* get_comp_urma_jetty_id will return a non-null value,
-       because the previous post_send_check_valid has performed validation. */
-    ret = send_and_store_jfs_wr(bjetty_ctx, get_comp_urma_jetty_id(bjetty_ctx->bdp_comp)->id,
-        send_wr, bjetty_ctx->send_wr_id, &value, bad_wr);
+
+    pwr->user_ctx = wr_entry->wr_id;
+    ret = comp_post_send(bjetty_ctx, send_idx, pwr, bad_wr);
     if (ret != URMA_SUCCESS) {
-        goto FREE_SEND_WR;
+        goto FREE_PWR;
     }
-    increase_id_after_send(&bjetty_ctx->send_wr_id, &v_conn->msn, wr->opcode);
-    ret = URMA_SUCCESS;
-    /* The WRs copied from user input are already moved into the wr_buf
-       wr_buf takes the ownership of them and release them when destruct
-       But the array of WRs need to be released */
-    goto EXIT;
-FREE_SEND_WR:
-    delete_copied_jfs_wr(send_wr);
-EXIT:
+
+    return URMA_SUCCESS;
+
+FREE_PWR:
+    free_jfs_wr(pwr);
+    jfs_wr_buf_release(wr_entry);
     return ret;
 }
 
@@ -1017,13 +878,33 @@ urma_status_t bondp_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, u
     if (ret != URMA_SUCCESS) {
         return ret;
     }
+
     bjetty_ctx_t *bjetty_ctx = bdp_jetty->comp_ctx;
     if (is_single_dev_mode(jetty->urma_ctx)) {
         return bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
     } else {
-        return bondp_post_send_wr_and_store(bjetty_ctx, wr, bad_wr);
+        return bondp_post_send_wr_and_store(bjetty_ctx, bdp_jetty->send_jfc, wr, bad_wr);
     }
 }
+
+urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
+{
+    bondp_comp_t *bdp_jfs = CONTAINER_OF_FIELD(jfs, bondp_comp_t, v_jfs);
+    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
+    bjetty_ctx_t *bjetty_ctx = bdp_jfs->comp_ctx;
+    urma_status_t ret = URMA_SUCCESS;
+
+    ret = post_send_check_valid(bdp_jfs, bdp_tjetty, wr);
+    if (ret != URMA_SUCCESS) {
+        return ret;
+    }
+    if (is_single_dev_mode(jfs->urma_ctx)) {
+        return bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
+    } else {
+        return bondp_post_send_wr_and_store(bjetty_ctx, bdp_jfs->send_jfc, wr, bad_wr);
+    }
+}
+
 
 /** Select recv pjetty in post_jetty_recv_wr */
 static urma_status_t schedule_recv_idx_default(bjetty_ctx_t *bjetty_ctx, int *recv_idx)
@@ -1037,89 +918,6 @@ static urma_status_t schedule_recv_idx_default(bjetty_ctx_t *bjetty_ctx, int *re
     }
     *recv_idx = bjetty_ctx->post_recv_idx;
     return URMA_SUCCESS;
-}
-
-/** Reconstruct a new WR according to the user input.
- * Do the following steps:
- * 1. Deepcopy the input WR.
- * 2. Convert each vseg in src.sge to pseg.
- * Considering the Wr split operation in the future (Fit for CTP/UTP), the return value is a list of WR, connected by
- * WR->next.
- * @return A list of WRs as the result of the split of input WR connected by WR->next.
- * Currently, it returns the modified WR of the input, and consider it as a single element. (It may have next != NULL)
-*/
-static urma_jfr_wr_t *get_new_jfr_wr(const urma_jfr_wr_t *wr, bjetty_ctx_t *bjetty_ctx, int recv_idx, int *output_len)
-{
-    urma_jfr_wr_t *copied_jfr_wr = NULL;
-    int wr_len = 1;
-
-    copied_jfr_wr = deepcopy_jfr_wr(wr);
-    if (copied_jfr_wr == NULL) {
-        return NULL;
-    }
-    *output_len = wr_len;
-    for (int i = 0; i < wr->src.num_sge; ++i) {
-        copied_jfr_wr->src.sge[i].tseg = get_p_tseg(wr->src.sge[i].tseg, recv_idx, 0);
-    }
-    return copied_jfr_wr;
-}
-
-/**
- * Consider of message split, we need to know the certain WR of each splitted WRs.
- * We may need to encode this information in the encode function.
- * Currently we only use user_ctx to distinguish different WR.
-*/
-static uint64_t encode_and_replace_jfr_user_ctx(urma_jfr_wr_t *wr, uint32_t recv_wr_id,
-    uint16_t bjetty_id, uint16_t pjetty_id)
-{
-    uint64_t user_ctx = wr->user_ctx;
-    encode_wr_user_ctx(&wr->user_ctx, recv_wr_id, bjetty_id, pjetty_id);
-    return user_ctx;
-}
-
-static void update_bjetty_ctx_after_post_recv(bjetty_ctx_t *bjetty_ctx)
-{
-    bjetty_ctx->recv_wr_id++;
-    bjetty_ctx->recv_wr_id &= (RECV_WR_ID_MAX - 1);
-}
-
-static urma_status_t copy_store_and_post_jfr_wr(uint32_t v_jetty_id, bjetty_ctx_t *bjetty_ctx, int recv_idx,
-    urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr)
-{
-    /*
-    We maintain the following statement:
-    wr_buf contains a certain WR <=> urma post api succeeds to send data
-    Therefore, if wr_buf can't cache the WR data, then we can't call post api to send
-    */
-    if (!wr_buf_try_add(bjetty_ctx->jfr_bufs[recv_idx], bjetty_ctx->recv_wr_id)) {
-        return URMA_EAGAIN;
-    }
-    int new_wrs_len = 0;
-    urma_jfr_wr_t *recv_wr = get_new_jfr_wr(wr, bjetty_ctx, recv_idx, &new_wrs_len);
-    if (recv_wr == NULL) {
-        return URMA_FAIL;
-    }
-    uint64_t original_user_ctx = encode_and_replace_jfr_user_ctx(recv_wr, bjetty_ctx->recv_wr_id,
-        (uint16_t)v_jetty_id, (uint16_t)recv_idx);
-    /* post recv */
-    urma_status_t ret = 0;
-    ret = comp_post_recv(bjetty_ctx, recv_idx, recv_wr, bad_wr);
-    if (ret != URMA_SUCCESS) {
-        goto FREE_COPIED_JFR_WR;
-    }
-    /* store to jfr_wr_buf */
-    /* This operation won't fail because we check before */
-    wr_buf_extra_value_t value = {
-        .user_ctx = original_user_ctx
-    };
-    (void)jfr_wr_buf_add_wr(bjetty_ctx->jfr_bufs[recv_idx], bjetty_ctx->recv_wr_id, recv_wr, &value);
-    update_bjetty_ctx_after_post_recv(bjetty_ctx);
-    ret = URMA_SUCCESS;
-    goto EXIT;
-FREE_COPIED_JFR_WR:
-    delete_copied_jfr_wr(recv_wr);
-EXIT:
-    return ret;
 }
 
 static urma_status_t set_jfr_wr_ptjetty_ptseg_without_hdr(urma_jfr_wr_t *recv_wr, int local_idx, int target_idx)
@@ -1199,23 +997,43 @@ DELETE_JFR_WR:
     (void)delete_copied_jfr_wr(copied_jfr_wr);
     return ret;
 }
-/**
- * During the post_recv process,
- * cache the WR to allow for data deduplication operations when duplicate WRs are received subsequently.
- * Check bjetty_ctx is valid before calling this function.
-*/
-static urma_status_t bondp_post_recv_wr_and_store(bjetty_ctx_t *bjetty_ctx, urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr)
+
+static urma_status_t bondp_post_recv_wr_and_store(bjetty_ctx_t *bjetty_ctx, bondp_jfc_t *vjfc,
+                                                  urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr)
 {
-    bondp_comp_t *bdp_comp = bjetty_ctx->bdp_comp;
     int recv_idx = 0;
-    /* Schedule receiving jetty */
-    int ret = schedule_recv(bjetty_ctx, &recv_idx);
+    urma_status_t ret;
+
+    ret = schedule_recv(bjetty_ctx, &recv_idx);
     if (ret != 0) {
         return URMA_FAIL;
     }
-    /* get_comp_urma_jetty_id will return a non-null value,
-       because the previous post_recv_check_valid has performed validation. */
-    return copy_store_and_post_jfr_wr(get_comp_urma_jetty_id(bdp_comp)->id, bjetty_ctx, recv_idx, wr, bad_wr);
+
+    jfr_wr_entry_t *wr_entry = jfr_wr_buf_alloc(&vjfc->wr_buf);
+    if (wr_entry == NULL) {
+        return URMA_EAGAIN;
+    }
+    wr_entry->user_ctx = wr->user_ctx;
+    wr_entry->bjetty_ctx = bjetty_ctx;
+    wr_entry->recv_idx = recv_idx;
+
+    urma_jfr_wr_t *pwr = &wr_entry->wr;
+    pwr->user_ctx = wr_entry->wr_id;
+    ret = convert_jfr_vwr_to_pwr(wr, pwr, recv_idx);
+    if (ret != 0) {
+        goto FREE_PWR;
+    }
+
+    ret = comp_post_recv(bjetty_ctx, recv_idx, pwr, bad_wr);
+    if (ret != URMA_SUCCESS) {
+        goto FREE_PWR;
+    }
+    return URMA_SUCCESS;
+
+FREE_PWR:
+    free_jfr_wr(pwr);
+    jfr_wr_buf_release(wr_entry);
+    return ret;
 }
 
 static urma_status_t post_recv_check_jfr_wr_valid(const bondp_context_t *bdp_ctx, const urma_jfr_wr_t *wr)
@@ -1259,12 +1077,33 @@ urma_status_t bondp_post_jetty_recv_wr(urma_jetty_t *jetty, urma_jfr_wr_t *wr, u
     if (ret != URMA_SUCCESS) {
         return ret;
     }
+
     /* non-null bjetty_ctx value because post_recv_check_valid performed validation. */
     bjetty_ctx_t *bjetty_ctx = bdp_jetty->comp_ctx;
     if (is_single_dev_mode(jetty->urma_ctx)) {
         return bondp_post_recv_wr_no_store(bjetty_ctx, wr, bad_wr);
     } else {
-        return bondp_post_recv_wr_and_store(bjetty_ctx, wr, bad_wr);
+        return bondp_post_recv_wr_and_store(bjetty_ctx, bdp_jetty->recv_jfc, wr, bad_wr);
+    }
+}
+
+urma_status_t bondp_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr)
+{
+    bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jfr, bondp_comp_t, v_jfr);
+    urma_status_t ret = URMA_SUCCESS;
+    ret = post_recv_check_valid(bdp_jfr, wr);
+    if (ret != URMA_SUCCESS) {
+        return ret;
+    }
+
+    /* non-null bjetty_ctx value because post_recv_check_valid performed validation. */
+    bjetty_ctx_t *bjetty_ctx = bdp_jfr->comp_ctx;
+    // workaround, at this point, jfr only support multipath
+    bdp_jfr->is_multipath = true;
+    if (is_single_dev_mode(jfr->urma_ctx)) {
+        return bondp_post_recv_wr_no_store(bjetty_ctx, wr, bad_wr);
+    } else {
+        return bondp_post_recv_wr_and_store(bjetty_ctx, bdp_jfr->recv_jfc, wr, bad_wr);
     }
 }
 
@@ -1288,288 +1127,54 @@ static inline bool is_recv_cr(const urma_cr_t *cr)
     return cr->flag.bs.s_r == 1;
 }
 
-/** Callback function to migrate JFS WR buffer from a device in error to target device
- * The callback function is called on every wr_buf_node_t in the wr_buf
- * @return 0: Success
- * @return <0: Error
- * @return >0: Skip when the target WR buffer is full
- */
-static int resend_wr_in_error_device_buf(wr_buf_node_t *node, void *args)
-{
-    struct resend_args *ra = (struct resend_args *)args;
-    bjetty_ctx_t *bjetty_ctx = ra->bjetty_ctx;
-    uint32_t migrate_idx = ra->migrate_idx;
-    urma_jfs_wr_t **bad_wr = ra->bad_wr;
-    int ret = CALLBACK_SUCCESS;
-
-    if (!wr_buf_try_add(bjetty_ctx->jfs_bufs[migrate_idx], node->key)) {
-        /* skip if we can't add the WR */
-        ra->skip_count++;
-        URMA_LOG_DEBUG("Skip in resend_wr_in_error_device_buf\n");
-        return CALLBACK_SKIP;
-    }
-    node->value.send_idx = (int)migrate_idx;
-    node->value.target_idx = (int)migrate_idx;
-    /* get_comp_urma_jetty_id(bjetty_ctx->bdp_comp) always returns non-null value. */
-    /* Because resend funciton access stored bjetty_ctx pointer which has been validated in post_send_check_valid */
-    ret = send_and_store_jfs_wr(bjetty_ctx, get_comp_urma_jetty_id(bjetty_ctx->bdp_comp)->id,
-        node->jfs_wr, node->key, &node->value, bad_wr);
-    ra->ret = -ret;
-    return -ret;
-}
-
-/** Migrate the WRs in a failed jetty to another valid jetty
- * Any error occurs in the migration process will interrupt the whole procedure, until the next call
- * Repeat interruptions may cause the migration never succeed to be resent
- * @return 0: Data migration succeed, all the WRs are resend and stored in another jetty's wr_buf
- * @return <0: Error occurs in data migration, error code is the opposite of urma_status_t in urma_post_jetty_send_wr
- * @return >0: Data migration partially succeed. Return value is the number of WRs which are not migrated
- */
-static int resend_error_device(bjetty_ctx_t *bjetty_ctx, uint32_t err_idx,
-    uint32_t migrate_idx, urma_jfs_wr_t **bad_wr)
-{
-    if (wr_buf_count(bjetty_ctx->jfs_bufs[err_idx]) == 0) {
-        return 0;
-    }
-    struct resend_args args = {
-        .bjetty_ctx = bjetty_ctx,
-        .migrate_idx = migrate_idx,
-        .bad_wr = bad_wr,
-        .skip_count = 0,
-        .ret = 0,
-    };
-    wr_buf_traverse_and_remove(bjetty_ctx->jfs_bufs[err_idx], resend_wr_in_error_device_buf, &args);
-    return args.ret;
-}
-
-static urma_status_t resend_wr_from_node(bjetty_ctx_t *bjetty_ctx, wr_buf_node_t *node,
-    int send_idx, int target_idx, urma_jfs_wr_t **bad_wr)
-{
-    urma_status_t ret = URMA_SUCCESS;
-    urma_jfs_wr_t *send_wr = node->jfs_wr;
-    wr_buf_extra_value_t *value = &node->value;
-
-    switch (send_wr->opcode) {
-        case URMA_OPC_SEND:
-        case URMA_OPC_SEND_IMM:
-        case URMA_OPC_SEND_INVALIDATE:
-            ret = set_send_wr_ptseg_ptjetty(send_wr, value->vtjetty, send_idx, target_idx);
-            break;
-        case URMA_OPC_WRITE:
-        case URMA_OPC_WRITE_IMM:
-        case URMA_OPC_WRITE_NOTIFY:
-        case URMA_OPC_READ:
-            ret = set_write_wr_ptseg_ptjetty(send_wr, value->vtjetty, send_idx, target_idx);
-            break;
-        case URMA_OPC_CAS:
-            ret = set_cas_wr_ptseg_pjetty(send_wr, value->vtjetty, send_idx, target_idx);
-            break;
-        case URMA_OPC_FADD:
-            ret = set_fadd_wr_ptseg_pjetty(send_wr, value->vtjetty, send_idx, target_idx);
-            break;
-        default:
-            URMA_LOG_ERR("Unsupported send opcode\n");
-            return URMA_FAIL;
-    }
-    if (ret != URMA_SUCCESS) {
-        URMA_LOG_ERR("Failed to set ptseg_ptjetty\n");
-        return ret;
-    }
-    value->send_idx = send_idx;
-    value->target_idx = target_idx;
-    /* post send wr */
-    ret = comp_post_send(bjetty_ctx, send_idx, send_wr, bad_wr);
-    if (ret != URMA_SUCCESS) {
-        return ret;
-    }
-    /* We already have the node stored in jfs wr, so we don't need to store it again */
-    return URMA_SUCCESS;
-}
-
-static int handle_target_fail(bjetty_ctx_t *bjetty_ctx, uint32_t origin_send_idx, uint32_t send_wr_id)
-{
-    urma_jfs_wr_t *bad_wr = NULL;
-    wr_buf_node_t *node;
-    int send_idx = 0;
-    int target_idx = 0;
-    bdp_v_conn_t *v_conn = NULL;
-    int ret = 0;
-    node = jfs_wr_buf_get_node(bjetty_ctx->jfs_bufs[origin_send_idx], send_wr_id);
-    if (!node) {
-        /* Some error may cause receives a CR but we don't have the cache */
-        /* Such as we receive a duplicate data CR, which has been ACKed before */
-        URMA_LOG_DEBUG("Duplicate send CR, wr_id %u in handle_target_fail.\n", send_wr_id);
-        return CR_HANDLER_ERR_AND_COPY;
-    }
-    v_conn = (bdp_v_conn_t *)node->value.v_conn;
-    v_conn->target_valid[node->value.target_idx] = false;
-    /* change target */
-    ret = schedule_send_target_idx_default(bjetty_ctx, v_conn, bjetty_ctx->dev_num, v_conn->target_dev_num,
-        node->jfs_wr->opcode, node->value.trans_mode, &send_idx, &target_idx);
-    /* resend self to other dev */
-    ret = resend_wr_from_node(bjetty_ctx, node, send_idx, target_idx, &bad_wr);
-    if (ret != URMA_SUCCESS) {
-        return CR_HANDLER_ERR_AND_COPY;
-    } else {
-        return CR_HANDLER_SUCCESS_AND_SKIP;
-    }
-}
-/**
- * Perform the recovery operation for certain fields in the CR uniformly within the handle_send/handle_recv functions.
- * Subsequent updates may enhance the recovery capabilities for other fields in CR.
- */
-static void restore_user_cr(urma_cr_t *cr, uint64_t original_user_ctx)
-{
-    /* Restore the replaced value */
-    cr->user_ctx = original_user_ctx;
-}
-
 /**
  * @return 0: Success, Do copy CR
  * @return 1: Success, Do Not copy CR
  * @return <0: Error,  Do copy CR
  * @return >1: Error, and Do Not copy CR
  */
-static bondp_cr_handler_ret_t handle_send(bjetty_ctx_t *bjetty_ctx, urma_cr_t *cr,
-    uint32_t send_idx, uint32_t send_wr_id)
+static bondp_cr_handler_ret_t handle_send(urma_cr_t *cr, jfs_wr_entry_t *wr_entry)
 {
-    urma_jfs_wr_t *bad_wr = NULL;
-    wr_buf_node_t *node;
-    int migrate_idx = 0;
-    bdp_v_conn_t *v_conn = NULL;
+    bjetty_ctx_t *bjetty_ctx = wr_entry->bjetty_ctx;
+    uint32_t send_idx = wr_entry->send_idx;
+
     int ret = 0;
-    uint64_t original_user_ctx;
     if (bjetty_ctx->bdp_comp->comp_type != BONDP_COMP_JETTY && bjetty_ctx->bdp_comp->comp_type != BONDP_COMP_JFS) {
         URMA_LOG_ERR("Invalid bdp_comp type: %d\n", bjetty_ctx->bdp_comp->comp_type);
         return CR_HANDLER_ERR_AND_COPY;
     }
-    /* Device fail */
-    if (is_all_pjetty_fail(bjetty_ctx)) {
-        URMA_LOG_DEBUG("All pjetty fail in handle_send\n");
-        return CR_HANDLER_ERR_AND_COPY;
-    }
-    if (is_target_device_error(cr->status)) {
-        /* target error and change target */
-        return handle_target_fail(bjetty_ctx, send_idx, send_wr_id);
-    }
     /* Do migration */
-    if (is_local_device_error(bjetty_ctx, (int)send_idx)) {
+    if (is_local_device_error(bjetty_ctx, send_idx)) {
         /*
         Do migration when the current jetty fail and at least one jetty is valid.
         Migrate all WRs from the current jetty to the next valid jetty
         ! Migration may fail, but considering it transparent to user, so we return 1 to ignore CR
         */
-        if (is_in_matrix_server(bjetty_ctx->bond_ctx)) {
-            migrate_idx = (send_idx + 1) % PRIMARY_EID_NUM;
-            if (!bjetty_ctx->pjettys_valid[migrate_idx]) {
-                migrate_idx = -1;
-            }
-        } else {
-            migrate_idx = find_next_valid_jetty_idx(bjetty_ctx->pjettys_valid, bjetty_ctx->dev_num, (int)send_idx);
+        int migrate_idx = (send_idx + 1) % PRIMARY_EID_NUM;
+        if (!bjetty_ctx->pjettys_valid[migrate_idx]) {
+            return CR_HANDLER_SUCCESS_AND_SKIP;
         }
-        ret = resend_error_device(bjetty_ctx, send_idx, (uint32_t)migrate_idx, &bad_wr);
+        // TODO: resend
+        // urma_jfs_wr_t *bad_wr = NULL;
+        // ret = resend_error_device(bjetty_ctx, send_idx, (uint32_t)migrate_idx, &bad_wr);
         URMA_LOG_DEBUG("Migrate send from %d to %d, ret %d\n", send_idx, migrate_idx, ret);
         return CR_HANDLER_SUCCESS_AND_SKIP;
     }
-    /*
-    Do normal process
-    Check if the data is in the buffer
-    If not, user should not have sent this data
-    Return and don't copy CR
-    */
-    node = jfs_wr_buf_get_node(bjetty_ctx->jfs_bufs[send_idx], send_wr_id);
-    if (!node) {
-        /* Some error may cause receives a CR but we don't have the cache */
-        /* Such as we receive a duplicate data CR, which has been ACKed before */
-        URMA_LOG_DEBUG("Duplicate send CR, wr_id %u\n", send_wr_id);
-        return CR_HANDLER_SUCCESS_AND_SKIP;
-    }
+
     /* Handle v_conn slide window */
-    v_conn = (bdp_v_conn_t *)node->value.v_conn;
+    bdp_v_conn_t *v_conn = wr_entry->v_conn;
     if (cr->status != URMA_CR_SUCCESS) {
-        original_user_ctx = node->value.user_ctx;
-        /* Won't fail because we check before */
-        (void)jfs_wr_buf_remove_wr(bjetty_ctx->jfs_bufs[send_idx], send_wr_id);
-        restore_user_cr(cr, original_user_ctx);
+        cr->user_ctx = wr_entry->user_ctx;
         return CR_HANDLER_SUCCESS_AND_COPY;
     }
     /* Sender use send_wr_id to indicate the order of send, node->key is send_wr_id */
-    (void)bdp_slide_wnd_add(&v_conn->send_wnd, send_wr_id);
-    /* If this jfs wr doesn't ask for cqe, we simply remove it from buffer */
-    if (node->value.flag.bs.complete_enable == 0) {
-        (void)jfs_wr_buf_remove_wr(bjetty_ctx->jfs_bufs[send_idx], send_wr_id);
-        return CR_HANDLER_SUCCESS_AND_SKIP;
-    }
-    original_user_ctx = node->value.user_ctx;
-    /* Won't fail because we check before */
-    (void)jfs_wr_buf_remove_wr(bjetty_ctx->jfs_bufs[send_idx], send_wr_id);
-    restore_user_cr(cr, original_user_ctx);
+    (void)bdp_slide_wnd_add(&v_conn->send_wnd, wr_entry->wr_id);
+    cr->user_ctx = wr_entry->user_ctx;
     return CR_HANDLER_SUCCESS_AND_COPY;
 }
 
-/** Callback function to migrate JFR WR buffer from a device in error to target device
- * The callback function is called on every wr_buf_node_t in the wr_buf
- * @return 0: Success
- * @return <0: Error
- * @return >0: Skip when the target WR buffer is full
- */
-static int rearm_wr_in_error_device_buf(wr_buf_node_t *node, void *args)
+static int parse_imm_data(uint64_t imm_data, urma_cr_opcode_t *opcode, uint32_t *msn)
 {
-    struct rearm_args *ra = (struct rearm_args *)args;
-    bjetty_ctx_t *bjetty_ctx = ra->bjetty_ctx;
-    int migrate_idx = ra->migrate_idx;
-    urma_jfr_wr_t **bad_wr = ra->bad_wr;
-    int ret = 0;
-
-    if (!wr_buf_try_add(bjetty_ctx->jfr_bufs[migrate_idx], node->key)) {
-        /* skip if we can't add the WR */
-        ra->skip_count++;
-        URMA_LOG_DEBUG("Skip in rearm_wr_in_error_device_buf\n");
-        return CALLBACK_SKIP;
-    }
-    ret = comp_post_recv(bjetty_ctx, migrate_idx, node->wr, bad_wr);
-    if (ret != 0) {
-        /*
-        When we fail to post recv, the following post_recv operation will probably fail
-        Therefore we just directly exit the process
-        !If the WR always fail to post recv, we may need to construct CR by ourselves
-        Use negative value because urma_status_t could be 1
-        which conflicts with our error code
-        */
-        ra->ret = -ret;
-        return -ret;
-    }
-    /* This won't fail because of wr_buf_try_add */
-    (void)jfr_wr_buf_add_wr(bjetty_ctx->jfr_bufs[migrate_idx], node->key, node->wr, &node->value);
-    return CALLBACK_SUCCESS;
-}
-
-/** Rearm all WRs in a failed jetty to a valid one
- * Any error occurs in the migration process will interrupt the whole procedure, until the next call
- * Repeat interruptions may cause the migration never succeed to be resent
- * @return 0: Rearm succeed, all the WRs are rearmed and stored in another jetty's wr_buf
- * @return <0: Error occurs, error code is the opposite of urma_status_t in urma_post_jetty_recv_wr
- * @return >0: Rearm partially succeed. Return value is the number of WRs which are not rearmed.
- */
-static int rearm_error_device(bjetty_ctx_t *bjetty_ctx, int err_idx, int migrate_idx, urma_jfr_wr_t **bad_wr)
-{
-    if (wr_buf_count(bjetty_ctx->jfr_bufs[err_idx]) == 0) {
-        return 0;
-    }
-    struct rearm_args args = {
-        .bjetty_ctx = bjetty_ctx,
-        .migrate_idx = migrate_idx,
-        .bad_wr = bad_wr,
-        .skip_count = 0,
-        .ret = 0,
-    };
-    wr_buf_traverse_and_remove(bjetty_ctx->jfr_bufs[err_idx], rearm_wr_in_error_device_buf, &args);
-    return args.ret;
-}
-
-    static int parse_imm_data(uint64_t imm_data, bool *is_so, urma_cr_opcode_t *opcode, uint32_t *msn)
-{
-    *is_so = ((imm_data >> WRITE_IMM_IS_SO_SHIFT) & 1);
     *msn = (imm_data >> WRITE_IMM_USER_BITS) & (BONDP_MAX_BITMAP_SIZE - 1);
     if (parse_original_cr_opcode(imm_data, opcode) != 0) {
         return -1;
@@ -1598,25 +1203,18 @@ static inline bdp_r_p2v_jetty_id_type_t get_remote_id_type_by_cr(urma_cr_t *cr)
  * @return <0: Error,  Do copy CR
  * @return >1: Error, and Do Not copy CR
  */
-static bondp_cr_handler_ret_t handle_recv(bjetty_ctx_t *bjetty_ctx, urma_cr_t *cr, int recv_idx, uint32_t recv_wr_id,
-    bdp_v_conn_t **v_conn_out)
+static bondp_cr_handler_ret_t handle_recv(urma_cr_t *cr, jfr_wr_entry_t *wr_entry)
 {
+    bjetty_ctx_t *bjetty_ctx = wr_entry->bjetty_ctx;
+    uint32_t recv_idx = wr_entry->recv_idx;
+
     urma_jfr_wr_t *bad_wr = NULL;
     int ret = 0;
-    bool is_so = false;
-    uint64_t original_user_ctx = 0;
     uint32_t msn = 0;
-    int migrate_idx = 0;
     bdp_v_conn_t *v_conn = NULL;
-    urma_cr_opcode_t original_opcode = cr->opcode;
 
     if (bjetty_ctx->bdp_comp->comp_type != BONDP_COMP_JETTY && bjetty_ctx->bdp_comp->comp_type != BONDP_COMP_JFR) {
         URMA_LOG_ERR("Invalid bdp_comp type: %d\n", bjetty_ctx->bdp_comp->comp_type);
-        return CR_HANDLER_ERR_AND_COPY;
-    }
-    /* Device fail */
-    if (is_all_pjetty_fail(bjetty_ctx)) {
-        URMA_LOG_DEBUG("All pjetty fail in handle_recv");
         return CR_HANDLER_ERR_AND_COPY;
     }
     /* Do migration */
@@ -1626,20 +1224,13 @@ static bondp_cr_handler_ret_t handle_recv(bjetty_ctx_t *bjetty_ctx, urma_cr_t *c
         Migrate all WRs from the current jetty to the next valid jetty
         ! Migration may fail, but considering it transparent to user, so we return 1 to ignore CR
         */
-        migrate_idx = find_next_valid_jetty_idx(bjetty_ctx->pjettys_valid, bjetty_ctx->dev_num, recv_idx);
-        ret = rearm_error_device(bjetty_ctx, recv_idx, migrate_idx, &bad_wr);
+        int migrate_idx = find_next_valid_jetty_idx(bjetty_ctx->pjettys_valid, bjetty_ctx->dev_num, recv_idx);
+        // ret = rearm_error_device(bjetty_ctx, recv_idx, migrate_idx, &bad_wr);
         URMA_LOG_DEBUG("Migrate recv from %d to %d, ret: %d\n", recv_idx, migrate_idx, ret);
         return CR_HANDLER_SUCCESS_AND_SKIP;
     }
-    ret = jfr_wr_buf_get_user_ctx(bjetty_ctx->jfr_bufs[recv_idx], recv_wr_id, &original_user_ctx);
-    if (ret != 0) {
-        /*
-        This packet has been ACKed
-        Return directly
-        */
-        URMA_LOG_DEBUG("Failed to get user_ctx in jfr_wr_buf of recv_wr_id %u, skip\n", recv_wr_id);
-        return CR_HANDLER_SUCCESS_AND_SKIP;
-    }
+
+    cr->user_ctx = wr_entry->user_ctx;
 
     urma_jetty_id_t target_jetty_id = {0};
     ret = bdp_r_p2v_jetty_id_table_lookup(
@@ -1649,26 +1240,18 @@ static bondp_cr_handler_ret_t handle_recv(bjetty_ctx_t *bjetty_ctx, urma_cr_t *c
     if (ret != 0) {
         URMA_LOG_ERR("Failed to get target jetty id " EID_FMT " %u %u.\n",
             EID_ARGS(cr->remote_id.eid), cr->remote_id.id, cr->remote_id.uasid);
-        (void)jfr_wr_buf_remove_wr(bjetty_ctx->jfr_bufs[recv_idx], recv_wr_id);
-        restore_user_cr(cr, original_user_ctx);
         return CR_HANDLER_ERR_AND_COPY;
     }
+
+    urma_cr_opcode_t original_opcode = cr->opcode;
+    if (parse_imm_data(cr->imm_data, &original_opcode, &msn) != 0) {
+        URMA_LOG_ERR("Failed to parse original opcode from imm metadata\n");
+        return CR_HANDLER_ERR_AND_COPY;
+    }
+    cr->opcode = original_opcode;
+    cr->imm_data &= ((uint64_t)1 << WRITE_IMM_USER_BITS) - 1;
+
     /* Do de-duplicating */
-    if (cr->opcode == URMA_CR_OPC_WRITE_WITH_IMM || cr->opcode == URMA_CR_OPC_SEND_WITH_IMM) {
-        if (parse_imm_data(cr->imm_data, &is_so, &original_opcode, &msn) != 0) {
-            URMA_LOG_ERR("Failed to parse original opcode from imm metadata\n");
-            (void)jfr_wr_buf_remove_wr(bjetty_ctx->jfr_bufs[recv_idx], recv_wr_id);
-            restore_user_cr(cr, original_user_ctx);
-            return CR_HANDLER_ERR_AND_COPY;
-        }
-        cr->opcode = original_opcode;
-        cr->imm_data &= ((uint64_t)1 << WRITE_IMM_USER_BITS) - 1;
-    } else {
-        URMA_LOG_ERR("Unsupported CR opcode %u for bond metadata parsing\n", cr->opcode);
-        (void)jfr_wr_buf_remove_wr(bjetty_ctx->jfr_bufs[recv_idx], recv_wr_id);
-        restore_user_cr(cr, original_user_ctx);
-        return CR_HANDLER_ERR_AND_COPY;
-    }
     v_conn = bdp_v_conn_table_lookup(&bjetty_ctx->v_conn_table, &target_jetty_id);
     if (!v_conn) {
         ret = bdp_v_conn_table_add_on_recv(&bjetty_ctx->v_conn_table, &target_jetty_id, &v_conn,
@@ -1681,26 +1264,17 @@ static bondp_cr_handler_ret_t handle_recv(bjetty_ctx_t *bjetty_ctx, urma_cr_t *c
                 EID_ARGS(jfr_jetty_id->eid), jfr_jetty_id->id,
                 EID_ARGS(target_jetty_id.eid), target_jetty_id.id
             );
-            (void)jfr_wr_buf_remove_wr(bjetty_ctx->jfr_bufs[recv_idx], recv_wr_id);
-            restore_user_cr(cr, original_user_ctx);
             return CR_HANDLER_ERR_AND_COPY;
         }
     }
     if (!bdp_slide_wnd_seq_in_window(&v_conn->recv_wnd, msn) || bdp_slide_wnd_has(&v_conn->recv_wnd, msn)) {
-        ret = rearm_single_wr(bjetty_ctx, recv_idx, recv_wr_id, &bad_wr);
+        ret = rearm_single_wr(bjetty_ctx, recv_idx, wr_entry->wr_id, &bad_wr);
         URMA_LOG_DEBUG("Rearm recv WR due to: outside of window: %d or duplicate %d\n",
             !bdp_slide_wnd_seq_in_window(&v_conn->recv_wnd, msn),
             bdp_slide_wnd_has(&v_conn->recv_wnd, msn));
         return CR_HANDLER_SUCCESS_AND_SKIP;
     }
     (void)bdp_slide_wnd_add(&v_conn->recv_wnd, msn);
-    /*
-    We assure this entry exists by using jfs_wr_buf_get_user_ctx
-    So it won't fail
-    */
-    (void)jfr_wr_buf_remove_wr(bjetty_ctx->jfr_bufs[recv_idx], recv_wr_id);
-    restore_user_cr(cr, original_user_ctx);
-    *v_conn_out = v_conn;
     return CR_HANDLER_SUCCESS_AND_COPY;
 }
 
@@ -1898,7 +1472,7 @@ static cr_convert_ret_t bondp_handle_cr_no_store(bondp_context_t *bdp_ctx, int i
     return CONVERT_SUCCESS;
 }
 
-static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int idx, urma_cr_t *cr)
+static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, bondp_jfc_t *bdp_jfc, int idx, urma_cr_t *cr)
 {
     /* Handle CR with status URMA_CR_WR_SUSPEND_DONE or URMA_CR_WR_FLUSH_ERR_DONE */
     if (!is_cr_user_ctx_valid(cr)) {
@@ -1917,27 +1491,34 @@ static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int
         /* Caller should copy this CR to output array. */
         return CONVERT_SUCCESS;
     }
-    bjetty_ctx_t *bjetty_ctx = get_bjetty_ctx_by_cr(bdp_ctx, idx, cr);
-    if (bjetty_ctx == NULL) {
-        return CONVERT_FAIL;
+
+    const uint64_t wr_id = cr->user_ctx;
+    bjetty_ctx_t *bjetty_ctx;
+    bondp_cr_handler_ret_t ret;
+    if (is_recv_cr(cr)) {
+        jfr_wr_entry_t *wr_entry = jfr_wr_buf_get(&bdp_jfc->wr_buf, wr_id);
+        if (wr_entry == NULL) {
+            // wr_entry could not be NULL
+            return CONVERT_FAIL;
+        }
+        bjetty_ctx = wr_entry->bjetty_ctx;
+        ret = handle_recv(cr, wr_entry);
+        free_jfr_wr(&wr_entry->wr);
+        jfr_wr_buf_release(wr_entry);
+    } else {
+        jfs_wr_entry_t *wr_entry = jfs_wr_buf_get(&bdp_jfc->wr_buf, wr_id);
+        if (wr_entry == NULL) {
+            // pwr could not be NULL
+            return CONVERT_FAIL;
+        }
+        bjetty_ctx = wr_entry->bjetty_ctx;
+        ret = handle_send(cr, wr_entry);
+        free_jfs_wr(&wr_entry->wr);
+        jfs_wr_buf_release(wr_entry);
     }
 
     if (bjetty_ctx->pjettys_valid[idx] && is_device_error(cr->status)) {
         bjetty_ctx->pjettys_valid[idx] = false;
-    }
-
-    uint32_t wr_id = 0;
-    uint16_t _bjetty_id = 0;
-    uint16_t pjetty_id = 0;
-    decode_wr_user_ctx(cr->user_ctx, &wr_id, &_bjetty_id, &pjetty_id);
-    bondp_cr_handler_ret_t ret;
-    if (is_recv_cr(cr)) {
-        /* handle recv */
-        bdp_v_conn_t *v_conn = NULL;
-        ret = handle_recv(bjetty_ctx, cr, pjetty_id, wr_id, &v_conn);
-    } else {
-        /* handle send */
-        ret = handle_send(bjetty_ctx, cr, pjetty_id, wr_id);
     }
 
     if (ret != CR_HANDLER_SUCCESS_AND_SKIP && ret != CR_HANDLER_ERR_AND_SKIP) {
@@ -1954,10 +1535,8 @@ static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int
             restore_cr_remote_id_fallback(bdp_ctx, cr);
         }
         /* Caller should copy this CR to output array. */
-        put_bjetty_ctx(bjetty_ctx);
         return CONVERT_SUCCESS;
     }
-    put_bjetty_ctx(bjetty_ctx);
     return (ret == CR_HANDLER_ERR_AND_COPY || ret == CR_HANDLER_ERR_AND_SKIP) ? CONVERT_FAIL : CONVERT_SKIP;
 }
 
@@ -1996,9 +1575,9 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
             cr_convert_ret_t conv_ret;
 
             if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
-                conv_ret = bondp_handle_cr_no_store(bdp_ctx, idx, pcr);
+                conv_ret = bondp_handle_cr_no_store(bdp_ctx,idx, pcr);
             } else {
-                conv_ret = bondp_handle_cr_with_store(bdp_ctx, idx, pcr);
+                conv_ret = bondp_handle_cr_with_store(bdp_ctx, bdp_jfc, idx, pcr);
             }
             if (conv_ret == CONVERT_FAIL) {
                 return -1;
@@ -2013,43 +1592,6 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
     }
 
     return cr_cnt - cr_cnt_remaining;
-}
-
-urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
-{
-    bondp_comp_t *bdp_jfs = CONTAINER_OF_FIELD(jfs, bondp_comp_t, v_jfs);
-    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
-    bjetty_ctx_t *bjetty_ctx = bdp_jfs->comp_ctx;
-    urma_status_t ret = URMA_SUCCESS;
-
-    ret = post_send_check_valid(bdp_jfs, bdp_tjetty, wr);
-    if (ret != URMA_SUCCESS) {
-        return ret;
-    }
-    if (is_single_dev_mode(jfs->urma_ctx)) {
-        return bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
-    } else {
-        return bondp_post_send_wr_and_store(bjetty_ctx, wr, bad_wr);
-    }
-}
-
-urma_status_t bondp_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr)
-{
-    bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jfr, bondp_comp_t, v_jfr);
-    urma_status_t ret = URMA_SUCCESS;
-    ret = post_recv_check_valid(bdp_jfr, wr);
-    if (ret != URMA_SUCCESS) {
-        return ret;
-    }
-    /* non-null bjetty_ctx value because post_recv_check_valid performed validation. */
-    bjetty_ctx_t *bjetty_ctx = bdp_jfr->comp_ctx;
-    // workaround, at this point, jfr only support multipath
-    bdp_jfr->is_multipath = true;
-    if (is_single_dev_mode(jfr->urma_ctx)) {
-        return bondp_post_recv_wr_no_store(bjetty_ctx, wr, bad_wr);
-    } else {
-        return bondp_post_recv_wr_and_store(bjetty_ctx, wr, bad_wr);
-    }
 }
 
 int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
@@ -2086,7 +1628,7 @@ int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
             if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
                 conv_ret = bondp_handle_cr_no_store(bdp_ctx, i, pcr);
             } else {
-                conv_ret = bondp_handle_cr_with_store(bdp_ctx, i, pcr);
+                conv_ret = bondp_handle_cr_with_store(bdp_ctx, bdp_jetty->send_jfc, i, pcr);
             }
             if (conv_ret == CONVERT_FAIL) {
                 return -1;
