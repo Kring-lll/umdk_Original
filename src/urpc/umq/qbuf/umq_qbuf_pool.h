@@ -36,6 +36,7 @@ extern "C" {
 #define UMQ_QBUF_SIZE_MULTIPLE_INTERVAL (4)
 #define QBUF_ALLOC_STATE_FREE      0            // define qbuf free state
 #define QBUF_ALLOC_STATE_ALLOCATED 1            // define qbuf allocated state
+#define QBUF_POOL_GLOBAL_LOW_WATERMARK    (10)      // global available < this percentage triggers global shrink
 
 typedef struct qbuf_pool_cfg {
     void *buf_addr;             // buffer addr
@@ -43,6 +44,8 @@ typedef struct qbuf_pool_cfg {
     uint32_t data_size;         // size of one data slab
     uint32_t headroom_size;     // reserve head room size
     umq_buf_mode_t mode;
+    uint64_t tls_qbuf_pool_depth;
+    uint64_t tls_expand_qbuf_pool_depth;
 } qbuf_pool_cfg_t;
 
 typedef struct qbuf_alloc_param {
@@ -110,10 +113,17 @@ uint64_t umq_buf_to_id(char *buf, bool shm, bool with_data);
 void umq_qbuf_config_get(qbuf_pool_cfg_t *cfg);
 
 typedef struct local_block_pool {
+    pthread_spinlock_t pool_lock;        // spinlock for local pool & cross-thread shrink concurrency
+
     umq_buf_list_t head_with_data;
     uint64_t buf_cnt_with_data;
+    uint64_t capacity_with_data;
+    uint64_t last_used_with_data;
+
     umq_buf_list_t head_without_data;
     uint64_t buf_cnt_without_data;
+    uint64_t capacity_without_data;
+    uint64_t last_used_without_data;
 } local_block_pool_t;
 
 typedef struct global_block_pool {
@@ -206,6 +216,9 @@ static ALWAYS_INLINE uint32_t release_batch(umq_buf_list_t *input, umq_buf_list_
     return cnt;
 }
 
+// execute_global_shrink: called from fetch_from_global with global_mutex already held
+void execute_global_shrink(bool with_data);
+
 // fetch list nodes from to global to local cache
 static ALWAYS_INLINE int32_t fetch_from_global(
         global_block_pool_t *global_pool, local_block_pool_t *cache_pool, bool with_data, uint32_t batch_count)
@@ -231,22 +244,31 @@ static ALWAYS_INLINE int32_t fetch_from_global(
     }
 
     if (*global_buf_cnt < batch_count) {
-        pthread_mutex_unlock(&global_pool->global_mutex);
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "%s not enough, rest count: %u\n", with_data ? "buf with data" :
-            "buf with no data", *global_buf_cnt);
-        return -UMQ_ERR_ENOMEM;
+        execute_global_shrink(with_data);
+        // try again after global shrink 
+        if (*global_buf_cnt < batch_count) {
+            pthread_mutex_unlock(&global_pool->global_mutex);
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "%s not enough, rest count: %u\n", with_data ? "buf with data" :
+                "buf with no data", *global_buf_cnt);
+            return -UMQ_ERR_ENOMEM;
+        }
     }
 
     count = allocate_batch(global_head, batch_count, local_head);
     *global_buf_cnt -= count;
     *local_buf_cnt += count;
 
+    if (*global_buf_cnt < ((*global_buf_cnt) / QBUF_POOL_GLOBAL_LOW_WATERMARK) ||
+        *global_buf_cnt < batch_count) {
+        execute_global_shrink(with_data);
+    }
+
     pthread_mutex_unlock(&global_pool->global_mutex);
     return count;
 }
 
 // flush list nodes from local cache to global
-static ALWAYS_INLINE void return_to_global(
+static ALWAYS_INLINE void return_to_global_lock_free(
         global_block_pool_t *global_pool, local_block_pool_t *cache, bool with_data, uint32_t threshold)
 {
     uint32_t cnt = 0;
@@ -258,7 +280,6 @@ static ALWAYS_INLINE void return_to_global(
     umq_buf_list_t *global_head;
     uint64_t *local_buf_cnt;
     umq_buf_list_t *local_head;
-    (void)pthread_mutex_lock(&global_pool->global_mutex);
     if (with_data) {
         global_buf_cnt = &global_pool->buf_cnt_with_data;
         global_head = &global_pool->head_with_data;
@@ -282,14 +303,28 @@ static ALWAYS_INLINE void return_to_global(
         }
     }
 
-    // switch head node
-    umq_buf_t *head = QBUF_LIST_FIRST(global_head); // record original head node
-    QBUF_LIST_FIRST(global_head) = QBUF_LIST_NEXT(switch_node); // switch head node
-    QBUF_LIST_NEXT(last_node) = head; // append head node to last node
-    QBUF_LIST_NEXT(switch_node) = NULL; // break chain between switch_node and next of switch_node
+    if (threshold == 0) {
+        umq_buf_t *head = QBUF_LIST_FIRST(global_head); // record original head node
+        QBUF_LIST_FIRST(global_head) = QBUF_LIST_FIRST(local_head); // switch head node
+        QBUF_LIST_NEXT(last_node) = head; // append head node to last node
+        QBUF_LIST_FIRST(local_head) = NULL;
+    } else {
+        // switch head node
+        umq_buf_t *head = QBUF_LIST_FIRST(global_head); // record original head node
+        QBUF_LIST_FIRST(global_head) = QBUF_LIST_NEXT(switch_node); // switch head node
+        QBUF_LIST_NEXT(last_node) = head; // append head node to last node
+        QBUF_LIST_NEXT(switch_node) = NULL; // break chain between switch_node and next of switch_node
+    }
     *global_buf_cnt += remove_cnt;
     *local_buf_cnt -= remove_cnt;
+}
 
+// flush list nodes from local cache to global
+static ALWAYS_INLINE void return_to_global(
+        global_block_pool_t *global_pool, local_block_pool_t *cache, bool with_data, uint32_t threshold)
+{
+    (void)pthread_mutex_lock(&global_pool->global_mutex);
+    return_to_global_lock_free(global_pool, cache, with_data, threshold);
     (void)pthread_mutex_unlock(&global_pool->global_mutex);
 }
 
