@@ -88,9 +88,49 @@ static int bondp_create_vjfc(urma_context_t *ctx, bondp_comp_t *bdp_jfc, urma_jf
     return 0;
 }
 
+static int bondp_create_pjfc(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfc, urma_jfc_cfg_t *cfg)
+{
+    bondp_comp_t *bdp_jfce = CONTAINER_OF_FIELD(cfg->jfce, bondp_comp_t, base);
+    urma_jfc_cfg_t p_cfg = *cfg;
+
+    for (int i = 0; i < bdp_jfc->dev_num; ++i) {
+        if (bdp_ctx->p_ctxs[i] == NULL) {
+            continue;
+        }
+        p_cfg.jfce = bdp_jfce->p_jfce[i];
+        urma_jfc_t *jfc = urma_create_jfc(bdp_ctx->p_ctxs[i], &p_cfg);
+        if (jfc == NULL) {
+            URMA_LOG_ERR("Failed to create pjfc %d.\n", i);
+            return -1;
+        }
+        bdp_jfc->p_jfc[i] = jfc;
+    }
+    return 0;
+}
+
 static int bondp_delete_vjfc(bondp_comp_t *bdp_jfc)
 {
     return urma_cmd_delete_jfc(&bdp_jfc->v_jfc);
+}
+
+static int bondp_delete_pjfc(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfc)
+{
+    int ret = 0;
+
+    for (int i = 0; i < bdp_jfc->dev_num; ++i) {
+        if (bdp_jfc->p_jfc[i] == NULL) {
+            continue;
+        }
+
+        int p_ret = urma_delete_jfc(bdp_jfc->p_jfc[i]);
+        if (p_ret != URMA_SUCCESS) {
+            URMA_LOG_ERR("Failed to delete pjfc %d, ret: %d.\n", i, ret);
+            ret = p_ret;
+        }
+        bdp_jfc->p_jfc[i] = NULL;
+    }
+
+    return ret;
 }
 
 urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
