@@ -42,7 +42,9 @@ typedef struct urma_bond_id_info_in {
 } urma_bond_id_info_in_t;
 
 #define PORT_NUM (9)
-#define IODIE_NUM (2)
+#define IODIE_NUM_PER_CHIP (1)
+#define CHIP_NUM (2)
+#define IODIE_NUM IODIE_NUM_PER_CHIP * CHIP_NUM
 
 typedef struct urma_bond_id_info_out {
     urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
