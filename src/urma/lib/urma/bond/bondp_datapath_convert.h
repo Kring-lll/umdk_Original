@@ -26,12 +26,17 @@ static inline bool is_send_wr(const urma_jfs_wr_t *wr)
            wr->opcode == URMA_OPC_SEND_INVALIDATE;
 }
 
-int copy_jfs_wr(const urma_jfs_wr_t *src, urma_jfs_wr_t *dst);
-int copy_jfr_wr(const urma_jfr_wr_t *src, urma_jfr_wr_t *dst);
+int copy_jfs_wr(const urma_jfs_wr_t *src, urma_jfs_wr_t *dst,
+                urma_sge_t *prealloc_src_sge, urma_sge_t *prealloc_dst_sge);
+int copy_jfr_wr(const urma_jfr_wr_t *src, urma_jfr_wr_t *dst,
+                urma_sge_t *prealloc_src_sge);
 
 void free_jfr_wr(urma_jfr_wr_t *wr);
 void free_jfs_wr(urma_jfs_wr_t *wr);
 
-int convert_jfr_vwr_to_pwr(const urma_jfr_wr_t *vwr, urma_jfr_wr_t *pwr, int recv_idx);
+int convert_jfs_vwr_to_pwr_nostore(urma_jfs_wr_t *wr, int send_idx, int target_idx);
+int convert_jfs_vwr_to_pwr_store(urma_jfs_wr_t *wr, int send_idx, int target_idx, bdp_v_conn_t *v_conn);
+int convert_jfr_vwr_to_pwr_nostore(urma_jfr_wr_t *recv_wr, int recv_idx);
+int convert_jfr_vwr_to_pwr_store(urma_jfr_wr_t *pwr, int recv_idx);
 
 #endif // BONDP_DATAPATH_CONVERT_H
