@@ -26,7 +26,8 @@ static inline bool is_send_wr(const urma_jfs_wr_t *wr)
            wr->opcode == URMA_OPC_SEND_INVALIDATE;
 }
 
-int copy_jfs_wr(const urma_jfs_wr_t *src, urma_jfs_wr_t *dst);
+int copy_jfs_wr(const urma_jfs_wr_t *src, urma_jfs_wr_t *dst,
+                urma_sge_t *prealloc_src_sge, urma_sge_t *prealloc_dst_sge);
 int copy_jfr_wr(const urma_jfr_wr_t *src, urma_jfr_wr_t *dst);
 
 void free_jfr_wr(urma_jfr_wr_t *wr);
