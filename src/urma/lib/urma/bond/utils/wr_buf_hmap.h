@@ -22,6 +22,7 @@ typedef struct wr_buf_extra_value {
     uint64_t user_ctx;       /* Original user ctx */
     /* jfs wr only */
     urma_jfs_wr_flag_t flag; /* Original jfs flag */
+    urma_opcode_t original_opcode; /* Original jfs opcode before bond rewrites */
     uint32_t msn;            /* Current msn of tmp jfs wr */
     void *v_conn;            /* Should be NOT NULL */
     int send_idx;            /* Current  */

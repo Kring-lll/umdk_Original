@@ -275,7 +275,7 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
         }
         bdp_jfs->p_jfs[i]->jfs_cfg.user_ctx = (uint64_t)bdp_jfs;
     }
-    bjetty_ctx_t *jfs_datapath_ctx = create_bjetty_ctx(ctx, bdp_jfs, URMA_UBAGG_WR_BUF_SIZE, URMA_UBAGG_HDR_BUF_SIZE);
+    bjetty_ctx_t *jfs_datapath_ctx = create_bjetty_ctx(ctx, bdp_jfs, URMA_UBAGG_WR_BUF_SIZE);
     if (jfs_datapath_ctx == NULL) {
         URMA_LOG_ERR("Failed to create jfs datapath ctx");
         goto DEL_P_VJFS_ID;
@@ -464,7 +464,7 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
         }
         bdp_jfr->p_jfr[i]->jfr_cfg.user_ctx = (uint64_t)bdp_jfr;
     }
-    bjetty_ctx_t *jfr_datapath_ctx = create_bjetty_ctx(ctx, bdp_jfr, URMA_UBAGG_WR_BUF_SIZE, URMA_UBAGG_HDR_BUF_SIZE);
+    bjetty_ctx_t *jfr_datapath_ctx = create_bjetty_ctx(ctx, bdp_jfr, URMA_UBAGG_WR_BUF_SIZE);
     if (jfr_datapath_ctx == NULL) {
         URMA_LOG_ERR("Failed to create jfr datapath ctx");
         goto DEL_P_VJFR_ID;
@@ -749,7 +749,7 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         bdp_jetty->p_jetty[i]->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
     }
 
-    bjetty_ctx_t *bjetty_ctx = create_bjetty_ctx(ctx, bdp_jetty, URMA_UBAGG_WR_BUF_SIZE, URMA_UBAGG_HDR_BUF_SIZE);
+    bjetty_ctx_t *bjetty_ctx = create_bjetty_ctx(ctx, bdp_jetty, URMA_UBAGG_WR_BUF_SIZE);
     if (bjetty_ctx == NULL) {
         URMA_LOG_ERR("Failed to create jetty ctx");
         goto DEL_P_VJETTY_ID;
