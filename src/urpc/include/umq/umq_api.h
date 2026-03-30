@@ -329,6 +329,10 @@ void umq_dev_info_list_free(umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq
  */
 int umq_cfg_get(uint64_t umqh, umq_cfg_get_t *cfg);
 
+int umq_external_mutex_lock_ops_register(umq_external_mutex_lock_ops_t *ops);
+
+int umq_external_rw_mutex_lock_ops_register(umq_external_rw_mutex_lock_ops_t *ops);
+
 #ifdef __cplusplus
 }
 #endif
