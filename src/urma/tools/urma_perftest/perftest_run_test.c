@@ -91,7 +91,7 @@ static int wait_jfc_event(urma_jfce_t *jfce, int timeout)
 {
     urma_jfc_t *jfc;
     if (urma_wait_jfc(jfce, 1, timeout, &jfc) != 1) {
-        (void)printf("Failed to write wait_jfc\n");
+        (void)fprintf(stderr, "urma_wait_jfc failed: expected one JFC event (timeout or driver error)\n");
         return -1;
     }
     uint32_t ack_cnt = 1;
@@ -2511,7 +2511,7 @@ static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
     run_test_ctx_t *run_ctx = &ctx->run_ctx;
     uint32_t index;
     urma_status_t status;
-    int cqe_cnt;
+    int cqe_cnt = 0;
     int cr_id;
 
     /* Rate limiter */
@@ -2610,7 +2610,7 @@ static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
             }
         }
         if (tot_ccnt < tot_scnt) {
-            if (cfg->use_jfce == true) {
+            if (cfg->use_jfce == true && cqe_cnt == 0) {
                 if (wait_jfc_event(ctx->jfce_s[0], cfg->wait_jfc_timeout) != 0) {
                     (void)fprintf(stderr, "Couldn't wait jfce event.\n");
                     goto err_exit;
