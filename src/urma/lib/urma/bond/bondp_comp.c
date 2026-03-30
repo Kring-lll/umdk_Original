@@ -183,7 +183,7 @@ static urma_status_t bondp_jfce_init_comp_attr_not_single_die(bondp_comp_t *bdp_
         return URMA_FAIL;
     }
 
-    bdp_comp->comp_ctx = (void *)calloc(1, sizeof(bondp_hash_table_t));
+    bdp_comp->comp_ctx = (void *)calloc(1, sizeof(bondp_jfce_ctx_t));
     if (bdp_comp->comp_ctx == NULL) {
         goto close_fd;
     }
