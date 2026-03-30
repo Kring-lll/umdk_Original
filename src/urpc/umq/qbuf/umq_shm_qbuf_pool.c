@@ -95,7 +95,7 @@ static uint32_t release_thread_cache(local_qbuf_pool_t *tls_mgmt_pool)
     local_block_pool_t *lblk_pool = &local_pool->block_pool;
 
     // return thread local buffer storage to global pool
-    (void)pthread_mutex_lock(&gblk_pool->global_mutex);
+    (void)util_mutex_lock(&gblk_pool->global_mutex);
     if (lblk_pool->head_with_data.first != NULL) {
         // release thread cache no need check double free
         gblk_pool->buf_cnt_with_data += release_to_global(&lblk_pool->head_with_data,
@@ -106,7 +106,7 @@ static uint32_t release_thread_cache(local_qbuf_pool_t *tls_mgmt_pool)
         gblk_pool->buf_cnt_without_data += release_to_global(&lblk_pool->head_without_data,
             &gblk_pool->head_without_data);
     }
-    (void)pthread_mutex_unlock(&gblk_pool->global_mutex);
+    (void)util_mutex_unlock(&gblk_pool->global_mutex);
 
     // reset local record and free resource
     tls_mgmt_pool->pool = NULL;
@@ -120,7 +120,7 @@ static uint32_t release_thread_cache(local_qbuf_pool_t *tls_mgmt_pool)
 // release all thread cache to global pool. should be called when thread exits
 static ALWAYS_INLINE void release_thread_cache_array()
 {
-    (void)pthread_rwlock_wrlock(&g_register_rwlock);
+    (void)util_rwlock_wrlock(&g_register_rwlock);
     LIST_REMOVE(&g_register_list_node, node);
 
     for (uint32_t id = 0; id < UMQ_MAX_QUEUE_NUMBER; id++) {
@@ -131,14 +131,14 @@ static ALWAYS_INLINE void release_thread_cache_array()
         release_thread_cache(&g_thread_cache[id]);
     }
 
-    (void)pthread_rwlock_unlock(&g_register_rwlock);
+    (void)util_rwlock_unlock(&g_register_rwlock);
 }
 
 static void unregister_all_thread_cache(qbuf_pool_t *pool)
 {
     struct timespec start;
     register_list_node_t *cur = NULL;
-    (void)pthread_rwlock_rdlock(&g_register_rwlock);
+    (void)util_rwlock_rdlock(&g_register_rwlock);
     LIST_FOREACH(cur, &g_register_list_head, node) {
         uint32_t ref = 0;
         local_qbuf_pool_t *tls_mgmt_pool = &cur->thread_cache[pool->id];
@@ -167,7 +167,7 @@ static void unregister_all_thread_cache(qbuf_pool_t *pool)
             desired = ref;
         }
     }
-    (void)pthread_rwlock_unlock(&g_register_rwlock);
+    (void)util_rwlock_unlock(&g_register_rwlock);
 }
 
 static queue_local_pool_t *register_thread_cache(qbuf_pool_t *pool)
@@ -175,10 +175,10 @@ static queue_local_pool_t *register_thread_cache(qbuf_pool_t *pool)
     /* Here, only concurrency is guaranteed and not protect use after free. It is the user's responsibility
      * to ensure that the destroyed resources are not accessed. */
     if (!g_register_list_node.inited) {
-        (void)pthread_rwlock_wrlock(&g_register_rwlock);
+        (void)util_rwlock_wrlock(&g_register_rwlock);
         g_register_list_node.thread_cache = g_thread_cache;
         LIST_INSERT_HEAD(&g_register_list_head, &g_register_list_node, node);
-        (void)pthread_rwlock_unlock(&g_register_rwlock);
+        (void)util_rwlock_unlock(&g_register_rwlock);
         g_register_list_node.inited = true;
     }
 
@@ -296,7 +296,7 @@ uint64_t umq_shm_global_pool_init(shm_qbuf_pool_cfg_t *cfg)
         return UMQ_INVALID_HANDLE;
     }
 
-    (void)pthread_mutex_init(&pool->block_pool.global_mutex, NULL);
+    pool->block_pool.global_mutex = (pthread_mutex_t)util_mutex_lock_create(UTIL_MUTEX_ATTR_EXCLUSIVE);
     QBUF_LIST_INIT(&pool->block_pool.head_with_data);
     pool->type = cfg->type;
     pool->mode = cfg->mode;
@@ -326,7 +326,7 @@ void umq_shm_global_pool_uninit(uint64_t pool)
     }
 
     unregister_all_thread_cache(_pool);
-    pthread_mutex_destroy(&_pool->block_pool.global_mutex);
+    util_mutex_lock_destroy(&_pool->block_pool.global_mutex);
     free(_pool);
 }
 

@@ -291,7 +291,7 @@ int umq_log_config_set(umq_log_config_t *config)
     }
 
     umq_vlog_config_t *log_config = umq_get_log_config();
-    (void)pthread_mutex_lock(&log_config->log_lock);
+    (void)util_mutex_lock(&log_config->log_lock);
     if (config->log_flag & UMQ_LOG_FLAG_FUNC) {
         if (config->func == NULL) {
             log_config->ctx.vlog_output_func = default_vlog_output;
@@ -307,7 +307,7 @@ int umq_log_config_set(umq_log_config_t *config)
         UMQ_VLOG_INFO(VLOG_UMQ, "set log configuration success, log level: %d\n", config->level);
     }
     if (umq_fw_log_config_set(config) != UMQ_SUCCESS) {
-        (void)pthread_mutex_unlock(&log_config->log_lock);
+        (void)util_mutex_unlock(&log_config->log_lock);
         return -UMQ_ERR_EINVAL;
     }
     if ((config->log_flag & UMQ_LOG_FLAG_RATE_LIMITED)) {
@@ -316,7 +316,7 @@ int umq_log_config_set(umq_log_config_t *config)
         UMQ_VLOG_INFO(VLOG_UMQ, "set log configuration success, limited interval(ms): %u, limited num: %u\n",
                       config->rate_limited.interval_ms, config->rate_limited.num);
     }
-    (void)pthread_mutex_unlock(&log_config->log_lock);
+    (void)util_mutex_unlock(&log_config->log_lock);
 
     g_umq_log_config.cfg = *config;
     g_umq_log_config.is_set = true;
@@ -332,7 +332,7 @@ int umq_log_config_get(umq_log_config_t *config)
     }
 
     umq_vlog_config_t *log_config = umq_get_log_config();
-    (void)pthread_mutex_lock(&log_config->log_lock);
+    (void)util_mutex_lock(&log_config->log_lock);
     config->log_flag = log_config->log_flag;
     config->level = (umq_log_level_t)log_config->ctx.level;
     config->func = log_config->ctx.vlog_output_func;
@@ -341,7 +341,7 @@ int umq_log_config_get(umq_log_config_t *config)
     if (config->func == default_vlog_output) {
         config->func = NULL;
     }
-    (void)pthread_mutex_unlock(&log_config->log_lock);
+    (void)util_mutex_unlock(&log_config->log_lock);
 
     return UMQ_SUCCESS;
 }
@@ -1275,7 +1275,7 @@ int umq_dev_add(umq_trans_info_t *trans_info)
     }
 
     umq_framework_t *umq_fw = &g_umq_fws[trans_info->trans_mode];
-    pthread_mutex_lock(&g_umq_config_mutex_lock);
+    util_mutex_lock(&g_umq_config_mutex_lock);
     if (g_umq_config->trans_info_num >= MAX_UMQ_TRANS_INFO_NUM) {
         UMQ_VLOG_ERR(VLOG_UMQ, "trans info num[%u] exceeds maximum[%u] limit\n",
             g_umq_config->trans_info_num, MAX_UMQ_TRANS_INFO_NUM);
@@ -1292,7 +1292,7 @@ int umq_dev_add(umq_trans_info_t *trans_info)
             UMQ_VLOG_ERR(VLOG_UMQ, "umq framework init failed, status: %d\n", ret);
             goto DECREASE_TRANS_INFO_NUM;
         }
-        pthread_mutex_unlock(&g_umq_config_mutex_lock);
+        util_mutex_unlock(&g_umq_config_mutex_lock);
         return UMQ_SUCCESS;
     }
 
@@ -1308,14 +1308,14 @@ int umq_dev_add(umq_trans_info_t *trans_info)
         UMQ_VLOG_ERR(VLOG_UMQ, "add dev failed, status: %d\n", ret);
         goto DECREASE_TRANS_INFO_NUM;
     }
-    pthread_mutex_unlock(&g_umq_config_mutex_lock);
+    util_mutex_unlock(&g_umq_config_mutex_lock);
     return ret;
 
 DECREASE_TRANS_INFO_NUM:
     g_umq_config->trans_info_num--;
 
 UNLOCK:
-    pthread_mutex_unlock(&g_umq_config_mutex_lock);
+    util_mutex_unlock(&g_umq_config_mutex_lock);
 
 return ret;
 }
@@ -1489,4 +1489,16 @@ int umq_cfg_get(uint64_t umqh, umq_cfg_get_t *cfg)
         return -UMQ_ERR_EINVAL;
     }
     return umq->tp_ops->umq_tp_cfg_get(umq->umqh_tp, cfg);
+}
+
+int umq_external_mutex_lock_ops_register(umq_external_mutex_lock_ops_t *ops)
+{
+    if (ops == NULL) {
+
+    }
+}
+ 	 
+int umq_external_rw_mutex_lock_ops_register(umq_external_rw_mutex_lock_ops_t *ops)
+{
+    
 }

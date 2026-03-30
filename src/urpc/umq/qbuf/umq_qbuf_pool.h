@@ -215,7 +215,7 @@ static ALWAYS_INLINE int32_t fetch_from_global(
     umq_buf_list_t *global_head;
     uint64_t *local_buf_cnt;
     umq_buf_list_t *local_head;
-    pthread_mutex_lock(&global_pool->global_mutex);
+    util_mutex_lock(&global_pool->global_mutex);
     if (with_data) {
         global_buf_cnt = &global_pool->buf_cnt_with_data;
         global_head = &global_pool->head_with_data;
@@ -231,7 +231,7 @@ static ALWAYS_INLINE int32_t fetch_from_global(
     }
 
     if (*global_buf_cnt < batch_count) {
-        pthread_mutex_unlock(&global_pool->global_mutex);
+        util_mutex_unlock(&global_pool->global_mutex);
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "%s not enough, rest count: %u\n", with_data ? "buf with data" :
             "buf with no data", *global_buf_cnt);
         return -UMQ_ERR_ENOMEM;
@@ -241,7 +241,7 @@ static ALWAYS_INLINE int32_t fetch_from_global(
     *global_buf_cnt -= count;
     *local_buf_cnt += count;
 
-    pthread_mutex_unlock(&global_pool->global_mutex);
+    util_mutex_unlock(&global_pool->global_mutex);
     return count;
 }
 
@@ -258,7 +258,7 @@ static ALWAYS_INLINE void return_to_global(
     umq_buf_list_t *global_head;
     uint64_t *local_buf_cnt;
     umq_buf_list_t *local_head;
-    (void)pthread_mutex_lock(&global_pool->global_mutex);
+    (void)util_mutex_lock(&global_pool->global_mutex);
     if (with_data) {
         global_buf_cnt = &global_pool->buf_cnt_with_data;
         global_head = &global_pool->head_with_data;
@@ -290,7 +290,7 @@ static ALWAYS_INLINE void return_to_global(
     *global_buf_cnt += remove_cnt;
     *local_buf_cnt -= remove_cnt;
 
-    (void)pthread_mutex_unlock(&global_pool->global_mutex);
+    (void)util_mutex_unlock(&global_pool->global_mutex);
 }
 
 // flush polled buf to global
@@ -303,7 +303,7 @@ static ALWAYS_INLINE void return_qbuf_to_global(global_block_pool_t *global_pool
     uint64_t *global_buf_cnt;
     umq_buf_list_t *global_head;
 
-    (void)pthread_mutex_lock(&global_pool->global_mutex);
+    (void)util_mutex_lock(&global_pool->global_mutex);
     if (with_data) {
         global_buf_cnt = &global_pool->buf_cnt_with_data;
         global_head = &global_pool->head_with_data;
@@ -324,7 +324,7 @@ static ALWAYS_INLINE void return_qbuf_to_global(global_block_pool_t *global_pool
     QBUF_LIST_NEXT(last_node) = head; // append head node to last node
     *global_buf_cnt += cnt;
 
-    (void)pthread_mutex_unlock(&global_pool->global_mutex);
+    (void)util_mutex_unlock(&global_pool->global_mutex);
 }
 
 static ALWAYS_INLINE umq_buf_t *id_to_buf_with_data_split(char *addr, uint64_t id)
@@ -570,12 +570,12 @@ static ALWAYS_INLINE void umq_qbuf_block_pool_init(global_block_pool_t *block_po
     QBUF_LIST_INIT(&block_pool->head_without_data);
     block_pool->buf_cnt_with_data = 0;
     block_pool->buf_cnt_without_data = 0;
-    (void)pthread_mutex_init(&block_pool->global_mutex, NULL);
+    block_pool->global_mutex = (pthread_mutex_t)util_mutex_lock_create(UTIL_MUTEX_ATTR_EXCLUSIVE);
 }
 
 static ALWAYS_INLINE void umq_qbuf_block_pool_uninit(global_block_pool_t *block_pool)
 {
-    pthread_mutex_destroy(&block_pool->global_mutex);
+    util_mutex_lock_destroy(&block_pool->global_mutex);
 }
 
 uint32_t umq_qbuf_headroom_get(void);
