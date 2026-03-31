@@ -42,6 +42,16 @@ typedef struct shm_qbuf_pool_cfg {
 } shm_qbuf_pool_cfg_t;
 
 /*
+ * unregister shm qbuf rwlock
+ */
+void shm_qbuf_rwlock_unregister(void);
+
+/*
+ * register shm qbuf rwlock
+ */
+int shm_qbuf_rwlock_register(void);
+
+/*
  * init qbuf pool for shared memory
  */
 uint64_t umq_shm_global_pool_init(shm_qbuf_pool_cfg_t *cfg);

@@ -19,7 +19,6 @@ extern "C" {
 typedef struct umq_vlog_config {
     uint32_t log_flag;
     util_vlog_ctx_t ctx;
-    pthread_mutex_t log_lock;
 } umq_vlog_config_t;
 
 #define UMQ_VLOG_ERR(__type, __format, ...)    \
@@ -46,6 +45,8 @@ typedef struct umq_vlog_config {
 
 util_vlog_ctx_t *umq_get_log_ctx(void);
 umq_vlog_config_t *umq_get_log_config(void);
+int umq_log_config_lock_init(void);
+void umq_log_config_lock_uninit(void);
 
 #ifdef __cplusplus
 }
