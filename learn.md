@@ -102,8 +102,23 @@ NVshmem
 
 deepep 
 
-分为low-latency与normal模型，分别适用于decode和prefill。decode时bs小，需要低时延。prefill时bs大，需要高吞吐。
+分为low-latency与normal模式，分别适用于decode和prefill。decode时bs小，需要低时延。prefill时bs大，需要高吞吐。
 
 deepep支持fp8精度
 
 多个bs的时候，ll采用hook收发方式，由ibgda在后台异步进行数据收发，不占用SM资源。比如有两组bs。计算第一组bs的attention->第一组bs的dispatch->计算第二组bs的attention->第二组bs的dispatch->等待第一组bs到达->第一组bs的moe计算->第一组bs的combine->等待第二组bs到达->第二组bs的moe计算->第二组bs的combine->
+
+而双流掩盖的方案需要占用SM收发
+
+高吞吐
+
+notify输出
+
+- num\_tokens\_per\_rank : 每个rank接收的token数量
+- num\_tokens\_per\_rdma\_rank : RDMA节点间的token分布
+- num\_tokens\_per\_expert : 每个专家接收的token数量
+- is\_token\_in\_rank : token是否在当前rank
+
+dispatch-normal前，cpu根据rank实际接受token个数动态申请内存，此处会产生空泡
+
+dispatch-normal分为两个阶段，第一个阶段是机间rdma通信，第二个阶段是机内nvlink。这种方式减少了机间通信的数据量改为机内通信，降低了通信时延
