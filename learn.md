@@ -55,7 +55,7 @@ attention
 4.再用softmax @ V并通过output的线性层得到输出
 
 rope
-位置编码，作用于QK。如果dHead为128，则会有64个旋转平面，旋转平面序号为i，token位置为m，则每个token的逆时针旋转角度为m * 10000^(-2i/d)
+位置编码，作用于QK。如果dHead为128，则会有64个旋转平面，旋转平面序号为i，token位置为m，则每个token的逆时针旋转角度为m \* 10000^(-2i/d)
 
 gating
 1.attention的输出通过线性层得到对所有专家的原始分数
@@ -67,16 +67,18 @@ dispatch
 
 ffn
 ffn是专家对token的处理过程。为线性层升维，激活，再线性层降维。
-以下场景取激活函数为swiglu，入参token为x，线性层矩阵W1,W2，门控矩阵为Wg1，Wg2。swiglu = (x @ Wg1) * swish(x @ Wg2)。计算时常将Wg1 Wg2拼接成一个W1与x做乘法，之后再列切计算。
-w8a8场景，x和W1,W2都是int8类型，x_scale, W1_scale和W2_scale为float类型
+以下场景取激活函数为swiglu，入参token为x，线性层矩阵W1,W2，门控矩阵为Wg1，Wg2。swiglu = (x @ Wg1) \* swish(x @ Wg2)。计算时常将Wg1 Wg2拼接成一个W1与x做乘法，之后再列切计算。
+w8a8场景，x和W1,W2都是int8类型，x\_scale, W1\_scale和W2\_scale为float类型
+
 1. 计算获取 x @ W1，结果为float。
-2. 乘以W1_scale和x_scale，结果为float
+2. 乘以W1\_scale和x\_scale，结果为float
 3. 将结果列切带入swiglu计算得到激活值。结果为float
-4. 将结果量化为int8，同时输出quant_scale。
+4. 将结果量化为int8，同时输出quant\_scale。
 5. 计算 x @ W2，结果为float
-6. 乘以W2_scale和quant_scale，结果为float。最终转换为bfloat16输出
+6. 乘以W2\_scale和quant\_scale，结果为float。最终转换为bfloat16输出
 
 w16a16场景，x和W1,W2都是bfloat16类型
+
 1. 计算获取x @ W1，结果为float。
 2. 将结果列切带入swiglu计算得到激活值。结果为float
 3. 转换为bfloat16类型，与W2做乘法，结果为float。最终转换为bfloat16输出
@@ -91,7 +93,17 @@ NV
 NVshmem
 初始化时会在所有gpu上分批额一段大小相同、对齐方式相同的显存空间，NVshmem将显存映射到相同的虚拟空间
 对称虚拟地址管理+UCX/Libfabric传输调度+gpu直驱rdma就是nvshmem的跨机实现
-通过nvshmem_put，nvshmem_get
+通过nvshmem\_put，nvshmem\_get
 
 昇腾
 没有UVA支持，npu内存地址空间是隔离的。
+
+<br />
+
+deepep 
+
+分为low-latency与normal模型，分别适用于decode和prefill。decode时bs小，需要低时延。prefill时bs大，需要高吞吐。
+
+deepep支持fp8精度
+
+多个bs的时候，ll采用hook收发方式，由ibgda在后台异步进行数据收发，不占用SM资源。比如有两组bs。计算第一组bs的attention->第一组bs的dispatch->计算第二组bs的attention->第二组bs的dispatch->等待第一组bs到达->第一组bs的moe计算->第一组bs的combine->等待第二组bs到达->第二组bs的moe计算->第二组bs的combine->
