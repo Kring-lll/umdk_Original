@@ -603,6 +603,7 @@ typedef union urma_jfr_flag {
         uint32_t tag_matching : 1; /* 0: URMA_NO_TAG_MATCHING.
                                       1: URMA_WITH_TAG_MATCHING. */
         uint32_t lock_free    : 1;
+        uint32_t non_blocking : 1;
         uint32_t order_type   : 8; /* (0x0): default, auto config by driver */
                                    /* (0x1): OT, target ordering */
                                    /* (0x2): OI, initiator ordering */
