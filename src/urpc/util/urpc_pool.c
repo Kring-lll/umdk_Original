@@ -46,7 +46,7 @@ void urpc_pool_thread_closure(uint64_t arg __attribute__((unused)))
         }
 
         pool = g_urpc_pool_ctx[i].global_pool;
-        (void)pthread_mutex_lock(&pool->lock);
+        (void)util_mutex_lock(pool->lock);
         if (g_urpc_pool_ctx[i].local->free_num > 0) {
             urpc_list_push_front(&pool->global_free, &g_urpc_pool_ctx[i].local->node);
         } else {
@@ -54,7 +54,7 @@ void urpc_pool_thread_closure(uint64_t arg __attribute__((unused)))
         }
         g_urpc_pool_ctx[i].local = NULL;
         g_urpc_pool_ctx[i].global_pool = NULL;
-        (void)pthread_mutex_unlock(&pool->lock);
+        (void)util_mutex_unlock(pool->lock);
     }
 }
 
@@ -119,7 +119,7 @@ int urpc_pool_init(urpc_pool_config_t *cfg, urpc_pool_t *pool)
     pool->block_size = (uint32_t)block_size;
 
     pool->container_size = (uint32_t)sizeof(urpc_pool_block_t) + cfg->element_num_per_block * (uint32_t)sizeof(void *);
-    pthread_mutex_init(&pool->lock, NULL);
+    pool->lock = util_mutex_create();
     urpc_list_init(&pool->global_free);
     urpc_list_init(&pool->global_free_container);
     pool->id = id;
@@ -152,7 +152,7 @@ void urpc_pool_uninit(urpc_pool_t *pool)
     }
 
     urpc_pool_id_put(pool->id);
-    pthread_mutex_destroy(&pool->lock);
+    util_mutex_destroy(&pool->lock);
     pool->cfg.element_num_per_block = 0;
     pool->cfg.element_size = 0;
     pool->cfg.block_num = 0;
@@ -189,7 +189,7 @@ void *urpc_pool_element_get(urpc_pool_t *pool)
         return local->data_ptr[--local->free_num];
     }
 
-    (void)pthread_mutex_lock(&pool->lock);
+    (void)util_mutex_lock(pool->lock);
     if (URPC_LIKELY(!urpc_list_is_empty(&pool->global_free))) {
         urpc_pool_block_t *block;
         INIT_CONTAINER_PTR(block, pool->global_free.next, node);
@@ -199,14 +199,14 @@ void *urpc_pool_element_get(urpc_pool_t *pool)
         urpc_list_push_front(&pool->global_free_container, &block->node);
     } else {
         if (URPC_UNLIKELY(pool->global_group->num >= pool->cfg.block_num)) {
-            (void)pthread_mutex_unlock(&pool->lock);
+            (void)util_mutex_unlock(pool->lock);
             UTIL_LIMIT_LOG_ERR("global pool num %u exceed %u\n", pool->global_group->num, pool->cfg.block_num);
             return NULL;
         }
 
         void *block_mem = urpc_dbuf_malloc(URPC_DBUF_TYPE_UTIL, pool->block_size);
         if (block_mem == NULL) {
-            (void)pthread_mutex_unlock(&pool->lock);
+            (void)util_mutex_unlock(pool->lock);
             UTIL_LIMIT_LOG_ERR("malloc block memory failed\n");
             return NULL;
         }
@@ -217,7 +217,7 @@ void *urpc_pool_element_get(urpc_pool_t *pool)
                 (void *)((uintptr_t)block_mem + sizeof(urpc_pool_block_t) + i * pool->cfg.element_size);
         }
     }
-    (void)pthread_mutex_unlock(&pool->lock);
+    (void)util_mutex_unlock(pool->lock);
     return local->data_ptr[--local->free_num];
 }
 
@@ -237,7 +237,7 @@ void urpc_pool_element_put(urpc_pool_t *pool, void *element)
         return;
     }
 
-    (void)pthread_mutex_lock(&pool->lock);
+    (void)util_mutex_lock(pool->lock);
     urpc_pool_block_t *block;
     if (URPC_LIKELY(!urpc_list_is_empty(&pool->global_free_container))) {
         INIT_CONTAINER_PTR(block, pool->global_free_container.next, node);
@@ -245,7 +245,7 @@ void urpc_pool_element_put(urpc_pool_t *pool, void *element)
     } else {
         block = urpc_dbuf_malloc(URPC_DBUF_TYPE_UTIL, pool->container_size);
         if (URPC_UNLIKELY(block == NULL)) {
-            (void)pthread_mutex_unlock(&pool->lock);
+            (void)util_mutex_unlock(pool->lock);
             // element will be freed when urpc_pool_uninit
             UTIL_LIMIT_LOG_ERR("malloc block memory failed\n");
             return;
@@ -255,6 +255,6 @@ void urpc_pool_element_put(urpc_pool_t *pool, void *element)
     memcpy(block, local, pool->container_size);
     local->free_num = 0;
     urpc_list_push_front(&pool->global_free, &block->node);
-    (void)pthread_mutex_unlock(&pool->lock);
+    (void)util_mutex_unlock(pool->lock);
     local->data_ptr[local->free_num++] = element;
 }
