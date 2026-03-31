@@ -1066,6 +1066,22 @@ urma_status_t urma_delete_jfr(urma_jfr_t *jfr)
 
     URMA_CHECK_OP_INVALID_RETURN_STATUS(urma_ctx, ops, delete_jfr);
     urma_status_t status = ops->delete_jfr(jfr);
+    
+    if (jfr->jfr_cfg.flag.bs.non_blocking == true) {
+        return URMA_FAIL;
+    } else {
+        urma_cmd_delete_jfr_t arg = {0};
+        arg.in.handle = jfr->handle;
+        int ret;
+        ret = urma_ioctl_delete_jfr(jfr->urma_ctx->dev_fd, &arg);
+        (void)pthread_mutex_lock(jfr->event_mutex);
+        while (jfr->events_acked != jfr->events_reported) {
+            URMA_LOG_ERR("There is an event and it must be acked, acked:%u, reported:%u\n", jfr->events_acked, arg.out.events_reported);
+            (void)pthread_cond_wait(jr->event_cond, jfr->event_mutex);
+        }
+        (void)pthread_mutex_unlock(jfr->event_mutex);   
+    }
+
     if (status != URMA_SUCCESS) {
         URMA_LOG_ERR(
             "[DRV_ERR]Failed to delete jfr, dev_name: %s, eid_idx: %u, id: %u, status: %d.\n",
