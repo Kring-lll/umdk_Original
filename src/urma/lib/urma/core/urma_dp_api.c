@@ -15,6 +15,8 @@
 #include "urma_opcode.h"
 #include "urma_private.h"
 #include "urma_provider.h"
+#include "ub_get_clock.h"
+#include "urma_perf.h"
 
 static inline urma_ops_t *get_ops_by_urma_jfc(urma_jfc_t *jfc)
 {
@@ -214,7 +216,19 @@ int urma_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
         return -1;
     }
 
-    return dp_ops->poll_jfc(jfc, cr_cnt, cr);
+    int ret;
+    if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
+        uint64_t start = get_cycles();
+        ret = dp_ops->poll_jfc(jfc, cr_cnt, cr);
+        uint64_t end = get_cycles();
+        double mhz = get_cpu_mhz(false);
+        uint64_t elapsed_us = (end - start) / mhz;
+        urma_step_perf(UB_POLL_JFC, elapsed_us);
+    } else {
+        ret = dp_ops->poll_jfc(jfc, cr_cnt, cr);
+    }
+    
+    return ret;
 }
 
 urma_status_t urma_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
@@ -225,7 +239,19 @@ urma_status_t urma_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
         return URMA_EINVAL;
     }
 
-    return dp_ops->rearm_jfc(jfc, solicited_only);
+    urma_status_t ret;
+    if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
+        uint64_t start = get_cycles();
+        ret = dp_ops->rearm_jfc(jfc, solicited_only);
+        uint64_t end = get_cycles();
+        double mhz = get_cpu_mhz(false);
+        uint64_t elapsed_us = (end - start) / mhz;
+        urma_step_perf(UB_REARM_JFC, elapsed_us);
+    } else {
+        ret = dp_ops->rearm_jfc(jfc, solicited_only);
+    }
+    
+    return ret;
 }
 
 int urma_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t *jfc[])
@@ -236,7 +262,19 @@ int urma_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t 
         return -1;
     }
 
-    return dp_ops->wait_jfc(jfce, jfc_cnt, time_out, jfc);
+    int ret;
+    if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
+        uint64_t start = get_cycles();
+        ret = dp_ops->wait_jfc(jfce, jfc_cnt, time_out, jfc);
+        uint64_t end = get_cycles();
+        double mhz = get_cpu_mhz(false);
+        uint64_t elapsed_us = (end - start) / mhz;
+        urma_step_perf(UB_WAIT_JFC, elapsed_us);
+    } else {
+        ret = dp_ops->wait_jfc(jfce, jfc_cnt, time_out, jfc);
+    }
+
+    return ret;
 }
 
 void urma_ack_jfc(urma_jfc_t *jfc[], uint32_t nevents[], uint32_t jfc_cnt)
@@ -250,7 +288,16 @@ void urma_ack_jfc(urma_jfc_t *jfc[], uint32_t nevents[], uint32_t jfc_cnt)
         URMA_LOG_ERR("Invalid parameter.\n");
         return;
     }
-    dp_ops->ack_jfc(jfc, nevents, jfc_cnt);
+    if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
+        uint64_t start = get_cycles();
+        dp_ops->ack_jfc(jfc, nevents, jfc_cnt);
+        uint64_t end = get_cycles();
+        double mhz = get_cpu_mhz(false);
+        uint64_t elapsed_us = (end - start) / mhz;
+        urma_step_perf(UB_ACK_JFC, elapsed_us);
+    } else {
+        dp_ops->ack_jfc(jfc, nevents, jfc_cnt);
+    }
 }
 
 urma_status_t urma_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
@@ -261,7 +308,20 @@ urma_status_t urma_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_t
         URMA_LOG_ERR("Invalid parameter.\n");
         return URMA_EINVAL;
     }
-    return dp_ops->post_jfs_wr(jfs, wr, bad_wr);
+
+    urma_status_t ret;
+    if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
+        uint64_t start = get_cycles();
+        ret = dp_ops->post_jfs_wr(jfs, wr, bad_wr);
+        uint64_t end = get_cycles();
+        double mhz = get_cpu_mhz(false);
+        uint64_t elapsed_us = (end - start) / mhz;
+        urma_step_perf(UB_JFS_POST_SEND, elapsed_us);
+    } else {
+        ret = dp_ops->post_jfs_wr(jfs, wr, bad_wr);
+    }
+    
+    return ret;
 }
 
 urma_status_t urma_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr)
@@ -272,7 +332,20 @@ urma_status_t urma_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_t
         URMA_LOG_ERR("Invalid parameter.\n");
         return URMA_EINVAL;
     }
-    return dp_ops->post_jfr_wr(jfr, wr, bad_wr);
+
+    urma_status_t ret;
+    if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
+        uint64_t start = get_cycles();
+        ret = dp_ops->post_jfr_wr(jfr, wr, bad_wr);
+        uint64_t end = get_cycles();
+        double mhz = get_cpu_mhz(false);
+        uint64_t elapsed_us = (end - start) / mhz;
+        urma_step_perf(UB_POST_JFR_RECV, elapsed_us);
+    } else {
+        ret = dp_ops->post_jfr_wr(jfr, wr, bad_wr);
+    }
+
+    return ret;
 }
 
 urma_status_t urma_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
@@ -284,7 +357,19 @@ urma_status_t urma_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, ur
         return URMA_EINVAL;
     }
 
-    return dp_ops->post_jetty_send_wr(jetty, wr, bad_wr);
+    urma_status_t ret;
+    if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
+        uint64_t start = get_cycles();
+        ret = dp_ops->post_jetty_send_wr(jetty, wr, bad_wr);
+        uint64_t end = get_cycles();
+        double mhz = get_cpu_mhz(false);
+        uint64_t elapsed_us = (end - start) / mhz;
+        urma_step_perf(UB_JETTY_POST_SEND, elapsed_us);
+    } else {
+        ret = dp_ops->post_jetty_send_wr(jetty, wr, bad_wr);
+    }
+    
+    return ret;
 }
 
 urma_status_t urma_post_jetty_recv_wr(urma_jetty_t *jetty, urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr)
@@ -296,5 +381,17 @@ urma_status_t urma_post_jetty_recv_wr(urma_jetty_t *jetty, urma_jfr_wr_t *wr, ur
         return URMA_EINVAL;
     }
 
-    return dp_ops->post_jetty_recv_wr(jetty, wr, bad_wr);
+    urma_status_t ret;
+    if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
+        uint64_t start = get_cycles();
+        ret = dp_ops->post_jetty_recv_wr(jetty, wr, bad_wr);
+        uint64_t end = get_cycles();
+        double mhz = get_cpu_mhz(false);
+        uint64_t elapsed_us = (end - start) / mhz;
+        urma_step_perf(UB_JETTY_POST_RECV, elapsed_us);
+    } else {
+        ret = dp_ops->post_jetty_recv_wr(jetty, wr, bad_wr);
+    }
+    
+    return ret;
 }
