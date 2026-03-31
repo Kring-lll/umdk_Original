@@ -304,7 +304,7 @@ uint64_t umq_ipc_create_impl(uint64_t umqh, uint8_t *ipc_ctx, umq_create_option_
         .msg_ring = tp->local_msg_ring,
     };
 
-    tp->qbuf_pool_handle = umq_shm_global_pool_init(&sm_qbuf_pool_cfg);
+    tp->qbuf_pool_handle = umq_shm_global_pool_init(&sm_qbuf_pool_cfg); //
     if (tp->qbuf_pool_handle == UMQ_INVALID_HANDLE) {
         goto RELEASE_ID;
     }
