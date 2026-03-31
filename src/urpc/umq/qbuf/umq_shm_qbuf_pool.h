@@ -15,6 +15,7 @@
 #include "umq_types.h"
 #include "umq_qbuf_pool.h"
 #include "msg_ring.h"
+#include "urpc_lock.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,6 +41,16 @@ typedef struct shm_qbuf_pool_cfg {
     };
     msg_ring_t *msg_ring;
 } shm_qbuf_pool_cfg_t;
+
+/*
+ * unregister shm qbuf rwlock
+ */
+void shm_qbuf_init(void);
+
+/*
+ * register shm qbuf rwlock
+ */
+int shm_qbuf_uninit(void);
 
 /*
  * init qbuf pool for shared memory
