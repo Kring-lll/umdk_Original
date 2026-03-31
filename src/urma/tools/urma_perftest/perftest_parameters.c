@@ -113,7 +113,7 @@ static void usage(const char *argv0)
     (void)printf("  -N, --no_peak               Cancel peak-bw calculation.\n");
     (void)printf("  -l, --jfs_post_list <size>  Post list of send WQEs of <list size> size.\n");
     (void)printf("  -L, --lock_free             Jetty's interior is unlocked.\n");
-
+    (void)printf("  -O, --priority              set the priority of JFS, ranging from [0, 15].\n");
     (void)printf("  -p, --trans_mode <mode>     Transport mode: 0 for RM(default), 1 for RC, 2 for UM.\n");
     (void)printf("  -P, --port <id>             Server port for bind or connect, default 21115.\n");
     (void)printf("  -Q, --cq_mod <num>          Generate Cqe only after <--cq_mod> completion.\n");
@@ -486,7 +486,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"no_peak",       no_argument,       NULL, 'N'},
         {"jfs_post_list", required_argument, NULL, 'l'},
         {"lock_free",     no_argument,       NULL, 'L'},
-
+        {"priority",      required_argument, NULL, 'O'},
         {"trans_mode",    required_argument, NULL, 'p'},
         {"port",          required_argument, NULL, 'P'},
         {"cq_mod",        required_argument, NULL, 'Q'},
@@ -539,7 +539,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
 
     /* Second parse the options */
     while (1) {
-        int c = getopt_long(argc, argv, "a::A:bBcC:d:t:D:eE:fFhI:j:J:K:n:Nl:Lo:p:P:Q:r:R:s:S:T:wy::z",
+        int c = getopt_long(argc, argv, "a::A:bBcC:d:t:D:eE:fFhI:j:J:K:n:Nl:Lo:O:p:P:Q:r:R:s:S:T:wy::z",
             long_options, NULL);
         if (c == -1) {
             break;
@@ -652,7 +652,9 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
             case 'L':
                 cfg->lock_free = true;
                 break;
-
+            case 'O':
+                (void)ub_str_to_u8(optarg, &cfg->priority);
+                break;
             case 'p':
                 if (ub_str_to_u32(optarg, &offset) != 0) {
                     (void)fprintf(stderr, "Invalid trans_mode, it has been changed to URMA_TM_RM.\n");
@@ -946,6 +948,21 @@ bool is_jfr_depth_valid(perftest_config_t *cfg)
     return (cfg->jfr_depth * (cfg->jettys / cfg->jettys_pre_jfr)) >= (cfg->jettys * cfg->jfr_post_list);
 }
 
+static int check_ctp_single_path_cfg(const perftest_config_t *cfg)
+{
+    if (cfg->single_path && cfg->use_ctp) {
+        (void)fprintf(stderr, "Invalid config: --single_path: true conflicts with --ctp: true.\n");
+        return -1;
+    }
+
+    if (!cfg->single_path && !cfg->use_ctp) {
+        (void)fprintf(stderr, "Invalid config: --single_path: false requires --ctp: false.\n");
+        return -1;
+    }
+ 
+ 	return 0;
+}
+
 int check_local_cfg(perftest_config_t *cfg)
 {
     if (cfg == NULL) {
@@ -957,9 +974,13 @@ int check_local_cfg(perftest_config_t *cfg)
         return -1;
     }
 
-    if (strstr(cfg->dev_name, "bonding_dev") != NULL && !cfg->single_path && !cfg->use_ctp) {
-        cfg->use_ctp = true;
-        (void)fprintf(stderr, "Warning: ctp is enabled, and bonding_dev multi_path requires ctp to be enabled.\n");
+    if (strstr(cfg->dev_name, "bonding_dev") != NULL && check_ctp_single_path_cfg(cfg) != 0) {
+ 	    return -1;
+ 	}
+
+    if (cfg->priority != PERFTEST_INVALID_PRIORITY && cfg->priority > URMA_MAX_PRIORITY) {
+        (void)fprintf(stderr, "Invalid parameter(priority): %hhu, should be 0-15.\n", cfg->priority);
+        return -1;
     }
 
     if (check_time_type(cfg) != 0) {
