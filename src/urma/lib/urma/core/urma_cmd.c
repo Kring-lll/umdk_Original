@@ -998,15 +998,15 @@ int urma_cmd_delete_jfr(urma_jfr_t *jfr)
         return -1;
     }
 
-    // int ret;
+    int ret;
     urma_cmd_delete_jfr_t arg = {0};
     arg.in.handle = jfr->handle;
 
-    // ret = urma_ioctl_delete_jfr(jfr->urma_ctx->dev_fd, &arg);
-    // uburma_is_destroy_err(&ret);
-    // if (ret != 0) {
-    //     URMA_LOG_ERR("ioctl failed in urma_cmd_delete_jfr, ret:%d, errno:%d.\n", ret, errno);
-    // }
+    ret = urma_ioctl_delete_jfr(jfr->urma_ctx->dev_fd, &arg);
+    uburma_is_destroy_err(&ret);
+    if (ret != 0) {
+        URMA_LOG_ERR("ioctl failed in urma_cmd_delete_jfr, ret:%d, errno:%d.\n", ret, errno);
+    }
 
     if (jfr->jfr_cfg.flag.bs.non_blocking == 1) {
         if (jfr->async_events_acked != arg.out.async_events_reported) {
@@ -1015,11 +1015,6 @@ int urma_cmd_delete_jfr(urma_jfr_t *jfr)
             return URMA_SUCCESS;
         }
     } else {
-        int ret = urma_ioctl_delete_jfr(jfr->urma_ctx->dev_fd, &arg);
-        uburma_is_destroy_err(&ret);
-        if (ret != 0) {
-            URMA_LOG_ERR("ioctl failed in urma_cmd_delete_jfr, ret:%d, errno:%d.\n", ret, errno);
-        }
         (void)pthread_mutex_lock(&jfr->event_mutex);
         while (jfr->async_events_acked != arg.out.async_events_reported) {
             URMA_LOG_ERR("There is an event and it must be acked, acked:%u, reported:%u\n", jfr->async_events_acked, arg.out.async_events_reported);
