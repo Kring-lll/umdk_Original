@@ -1081,7 +1081,7 @@ urma_status_t urma_delete_jfr(urma_jfr_t *jfr)
         }
         (void)pthread_mutex_unlock(jfr->event_mutex);   
     }
-
+    
     if (status != URMA_SUCCESS) {
         URMA_LOG_ERR(
             "[DRV_ERR]Failed to delete jfr, dev_name: %s, eid_idx: %u, id: %u, status: %d.\n",
