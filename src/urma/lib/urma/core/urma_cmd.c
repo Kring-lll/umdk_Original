@@ -1158,15 +1158,17 @@ int urma_cmd_delete_jfc(urma_jfc_t *jfc)
         return ret;
     }
 
-    (void)pthread_mutex_lock(&jfc->event_mutex);
-    while (jfc->comp_events_acked != arg.out.comp_events_reported ||
-           jfc->async_events_acked != arg.out.async_events_reported) {
-        URMA_LOG_ERR("There is jfc event and it must be acked, jfc_comp:%u, comp:%u, jfc_async:%u, async:%u\n",
-            jfc->comp_events_acked, arg.out.comp_events_reported, jfc->async_events_acked,
-            arg.out.async_events_reported);
-        (void)pthread_cond_wait(&jfc->event_cond, &jfc->event_mutex);
+    if (jfc->jfc_cfg.flag.bs.non_blocking != 1) {
+        (void)pthread_mutex_lock(&jfc->event_mutex);
+        while (jfc->comp_events_acked != arg.out.comp_events_reported ||
+            jfc->async_events_acked != arg.out.async_events_reported) {
+            URMA_LOG_ERR("There is jfc event and it must be acked, jfc_comp:%u, comp:%u, jfc_async:%u, async:%u\n",
+                jfc->comp_events_acked, arg.out.comp_events_reported, jfc->async_events_acked,
+                arg.out.async_events_reported);
+            (void)pthread_cond_wait(&jfc->event_cond, &jfc->event_mutex);
+        }
+        (void)pthread_mutex_unlock(&jfc->event_mutex);
     }
-    (void)pthread_mutex_unlock(&jfc->event_mutex);
 
     return 0;
 }
