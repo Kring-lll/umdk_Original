@@ -609,7 +609,7 @@ typedef union urma_jfr_flag {
                                    /* (0x2): OI, initiator ordering */
                                    /* (0x3): OL, low layer ordering */
                                    /* (0x4): UNO, unreliable non ordering */
-        uint32_t reserved     : 19;
+        uint32_t reserved     : 18;
     } bs;
     uint32_t value;
 } urma_jfr_flag_t;
