@@ -18,6 +18,7 @@ extern "C" {
 #endif
 
 #define UMQ_UB_CREDIT_PERCENT 10
+#define IMM_TYPE_FC_CREDIT_INIT 0
 
 typedef union umq_ub_fc_info {
     uint64_t value;
