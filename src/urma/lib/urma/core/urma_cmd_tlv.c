@@ -1257,6 +1257,14 @@ int urma_ioctl_query_dev_attr(int ioctl_fd, urma_cmd_query_device_attr_t *arg)
     ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_MAX_OOR_CNT, arg->out.attr.dev_cap.max_oor_cnt);
     ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_MN, arg->out.attr.dev_cap.mn);
     ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_MAX_NETADDR_CN, arg->out.attr.dev_cap.max_netaddr_cnt);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_RM_ORDER_CAP, arg->out.attr.dev_cap.rm_order_cap.value);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_RC_ORDER_CAP, arg->out.attr.dev_cap.rc_order_cap.value);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_RM_TP_CAP, arg->out.attr.dev_cap.rm_tp_cap.value);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_RC_TP_CAP, arg->out.attr.dev_cap.rc_tp_cap.value);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_UM_TP_CAP, arg->out.attr.dev_cap.um_tp_cap.value);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_TP_FEATURE, arg->out.attr.dev_cap.tp_feature.value);
+    ATTR(a++, QUERY_DEVICE_OUT_DEV_CAP_PRIORITY_INFO, arg->out.attr.dev_cap.priority_info);
+
     ATTR(a++, QUERY_DEVICE_OUT_PORT_CNT, arg->out.attr.port_cnt);
     ATTR(a++, QUERY_DEVICE_OUT_RESERVED_JETTY_ID_MIN, arg->out.attr.reserved_jetty_id_min);
     ATTR(a++, QUERY_DEVICE_OUT_RESERVED_JETTY_ID_MAX, arg->out.attr.reserved_jetty_id_max);
