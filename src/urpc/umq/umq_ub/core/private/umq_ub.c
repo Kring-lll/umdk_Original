@@ -2246,7 +2246,10 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
         (*buffer) = QBUF_LIST_NEXT((*buffer));
         ++buf_index;
     }
-
+    if (buf_index >= UMQ_MAX_ID_NUM) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, the buf index [%d] "
+            "exceeds the maximum limit\n", EID_ARGS(*eid), id, buf_index);
+    }
     umq_imm_head->mem_interval = get_mem_interval(max_data_size);
 
     uint64_t user_ctx = (uint64_t)(uintptr_t)send_buf;
