@@ -2332,7 +2332,13 @@ int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *
             sges_ptr->addr = (uint64_t)(uintptr_t)buffer->buf_data;
             sges_ptr->len = buffer->data_size;
             sges_ptr->user_tseg = NULL;
-            sges_ptr->tseg = tseg_list[buffer->mempool_id];
+            if (buffer->mem_sec == 0) {
+                sges_ptr->tseg = tseg_list[buffer->mempool_id];
+            } else if ((sges_ptr->tseg = umq_ub_get_non_pool_tseg(queue, buffer)) == NULL) {
+                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, get non pool tseg failed\n",
+                    EID_ARGS(*eid), id, max_sge_num);
+                return -UMQ_ERR_EINVAL;
+            }
             sges_ptr++;
 
             if (rest_size < buffer->data_size) { // if cannot add up to total_size, return fail
@@ -2848,7 +2854,14 @@ int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_
             sges_ptr->addr = (uint64_t)(uintptr_t)buffer->buf_data;
             sges_ptr->len = buffer->data_size;
             sges_ptr->user_tseg = NULL;
-            sges_ptr->tseg = tseg_list[buffer->mempool_id];
+            
+            if (buffer->mem_sec == 0) {
+                sges_ptr->tseg = tseg_list[buffer->mempool_id];
+            } else if ((sges_ptr->tseg = umq_ub_get_non_pool_tseg(queue, buffer)) == NULL) {
+                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, get non pool tseg failed\n",
+                    EID_ARGS(*eid), id, max_sge_num);
+                return -UMQ_ERR_EINVAL;
+            }
             sges_ptr++;
 
             if (rest_size < buffer->data_size) { // if cannot add up to total_size, return fail

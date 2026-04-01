@@ -68,7 +68,7 @@ typedef struct non_pool_mem_info {
     struct urpc_hmap_node node;
     void *non_pool_mem_arg; // tseg
     void (*non_pool_mem_unregister)(void *arg);
-    void *buffer;
+    char *data_buffer;
     uint64_t buffer_size;
     umq_buf_t *qbuf;
 } non_pool_mem_info_t;
