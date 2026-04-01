@@ -20,6 +20,7 @@
 #include "urma_provider.h"
 #include "urma_types.h"
 #include "urma_cmd.h"
+#include "urma_cmd_tlv.h"
 
 #define URMA_CHECK_CTX_INVALID_RETURN_STATUS(urma_ctx)                                                                 \
     do {                                                                                                               \
@@ -1078,8 +1079,8 @@ urma_status_t urma_delete_jfr(urma_jfr_t *jfr)
             URMA_LOG_ERR("ioctl failed in urma_cmd_delete_jfr, ret:%d, errno:%d.\n", ret, errno);
         }
         (void)pthread_mutex_lock(&jfr->event_mutex);
-        while (jfr->events_acked != jfr->events_reported) {
-            URMA_LOG_ERR("There is an event and it must be acked, acked:%u, reported:%u\n", jfr->events_acked, arg.out.events_reported);
+        while (jfr->async_events_acked != arg.out.async_events_reported) {
+            URMA_LOG_ERR("There is an event and it must be acked, acked:%u, reported:%u\n", jfr->async_events_acked, arg.out.async_events_reported);
             (void)pthread_cond_wait(&jfr->event_cond, &jfr->event_mutex);
         }
         (void)pthread_mutex_unlock(&jfr->event_mutex);   
