@@ -1069,7 +1069,7 @@ urma_status_t urma_delete_jfr(urma_jfr_t *jfr)
     URMA_CHECK_OP_INVALID_RETURN_STATUS(urma_ctx, ops, delete_jfr);
     urma_status_t status = ops->delete_jfr(jfr);
     
-    if (jfr->jfr_cfg.flag.bs.non_blocking == true) {
+    if (jfr->jfr_cfg.flag.bs.non_blocking == 1) {
         return URMA_FAIL;
     } else {
         urma_cmd_delete_jfr_t arg = {0};
