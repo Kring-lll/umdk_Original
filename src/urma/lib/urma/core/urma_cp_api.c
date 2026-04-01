@@ -19,6 +19,7 @@
 #include "urma_private.h"
 #include "urma_provider.h"
 #include "urma_types.h"
+#include "urma_cmd.h"
 
 #define URMA_CHECK_CTX_INVALID_RETURN_STATUS(urma_ctx)                                                                 \
     do {                                                                                                               \
