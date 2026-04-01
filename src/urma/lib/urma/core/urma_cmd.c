@@ -999,8 +999,8 @@ int urma_cmd_delete_jfr(urma_jfr_t *jfr)
     }
 
     // int ret;
-    // urma_cmd_delete_jfr_t arg = {0};
-    // arg.in.handle = jfr->handle;
+    urma_cmd_delete_jfr_t arg = {0};
+    arg.in.handle = jfr->handle;
 
     // ret = urma_ioctl_delete_jfr(jfr->urma_ctx->dev_fd, &arg);
     // uburma_is_destroy_err(&ret);
@@ -1015,8 +1015,6 @@ int urma_cmd_delete_jfr(urma_jfr_t *jfr)
             return URMA_SUCCESS;
         }
     } else {
-        urma_cmd_delete_jfr_t arg = {0};
-        arg.in.handle = jfr->handle;
         int ret = urma_ioctl_delete_jfr(jfr->urma_ctx->dev_fd, &arg);
         uburma_is_destroy_err(&ret);
         if (ret != 0) {
