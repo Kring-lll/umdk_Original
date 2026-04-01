@@ -19,8 +19,6 @@
 #include "urma_private.h"
 #include "urma_provider.h"
 #include "urma_types.h"
-#include "urma_cmd.h"
-#include "urma_cmd_tlv.h"
 
 #define URMA_CHECK_CTX_INVALID_RETURN_STATUS(urma_ctx)                                                                 \
     do {                                                                                                               \
@@ -1068,7 +1066,6 @@ urma_status_t urma_delete_jfr(urma_jfr_t *jfr)
 
     URMA_CHECK_OP_INVALID_RETURN_STATUS(urma_ctx, ops, delete_jfr);
     urma_status_t status = ops->delete_jfr(jfr);
-
     if (status != URMA_SUCCESS) {
         URMA_LOG_ERR(
             "[DRV_ERR]Failed to delete jfr, dev_name: %s, eid_idx: %u, id: %u, status: %d.\n",
