@@ -1592,7 +1592,7 @@ void umq_ub_queue_ctx_list_remove(urpc_list_t *qctx_node)
 
 int umq_ub_id_allocator_init(void)
 {
-    return util_id_allocator_init(&g_umq_ub_id_allocator, UMQ_MAX_ID_NUM, 1);
+    return util_id_allocator_init(&g_umq_ub_id_allocator, UMQ_MAX_MSG_ID_NUM, 1);
 }
 
 void umq_ub_id_allocator_uninit(void)
@@ -2246,7 +2246,10 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
         (*buffer) = QBUF_LIST_NEXT((*buffer));
         ++buf_index;
     }
-
+    if (buf_index >= UMQ_MAX_MSG_ID_NUM) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, the buf index [%d] "
+            "exceeds the maximum limit\n", EID_ARGS(*eid), id, buf_index);
+    }
     umq_imm_head->mem_interval = get_mem_interval(max_data_size);
 
     uint64_t user_ctx = (uint64_t)(uintptr_t)send_buf;

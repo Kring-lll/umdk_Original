@@ -44,53 +44,45 @@ typedef enum umq_ub_import_mem_sub_type {
 } umq_ub_import_mem_sub_type_t;
 
 typedef enum umq_ub_flow_control_sub_type {
-    IMM_TYPE_FC_ASSOCIATE_IO_EXCHANGE,    // imm associated with io exchange
-    IMM_TYPE_FC_CREDIT_INIT,
     IMM_TYPE_FC_CREDIT_REQ,               // request credit
     IMM_TYPE_FC_CREDIT_REP,               // reply credit request
     IMM_TYPE_FC_CREDIT_RETURN_REQ,        // request for credit refund
     IMM_TYPE_FC_CREDIT_RETURN_ACK,        // answer refund credit
+    IMM_TYPE_FC_CREDIT_INIT,
 } umq_ub_flow_control_sub_type_t;
 
 typedef union umq_ub_imm {
-    uint64_t value;
+    uint16_t value;
     struct {
-        uint64_t umq_private : 1;  // 0: user defined imm data, 1: umq defined imm data
-        uint64_t type : 5;
-        uint64_t rsvd1 : 58;
+        uint16_t type : 2;
+		uint16_t umq_private : 1;
+        uint16_t rsvd1: 13;
     } bs;
     struct {
-        uint64_t umq_private : 1;
-        uint64_t type : 5;
-        uint64_t sub_type : 5;
-        uint64_t rsvd1 : 5;
-        uint64_t msg_id : 16;
-        uint64_t msg_num : 16;
-        uint64_t rsvd2 : 16;
+        uint16_t type : 2;
+        uint16_t umq_private : 1;
+        uint16_t sub_type : 2;
+        uint16_t msg_id : 5;
+        uint16_t msg_num : 5;
+        uint16_t rsvd1: 1;
     } ub_plus;
     struct {
-        uint64_t umq_private : 1;
-        uint64_t type : 5;
-        uint64_t sub_type : 5;
-        uint64_t in_user_buf : 1;
-        uint64_t rsvd1 : 4;
-        uint64_t window : 16;
-        uint64_t ratio : 2;     // 0: 10%, 1: 30%, 2: 50%, 3: 70%, min reserved credit: modify to 70%
-        uint64_t rsvd2 : 30;
+        uint16_t type : 2;
+        uint16_t sub_type : 2;
+        uint16_t window : 10;
+        uint16_t ratio : 2;     // 0: 10%, 1: 30%, 2: 50%, 3: 70%, min reserved credit: modify to 70%
     } flow_control;
     struct {
-        uint64_t umq_private : 1;
-        uint64_t type : 5;
-        uint64_t sub_type : 5;
-        uint64_t rsvd1 : 5;
-        uint64_t mempool_id : 12;
-        uint64_t rsvd3 : 4;
-        uint64_t rsvd2 : 32;
+        uint16_t type : 2;
+        uint16_t umq_private : 1;
+        uint16_t sub_type : 2;
+        uint16_t rsvd1 : 1;
+        uint16_t mempool_id : 10;
     } mem_import;
     struct {
-        uint64_t umq_private : 1;
-        uint64_t type : 5;
-        uint64_t rsvd1 : 58;
+        uint16_t type : 2;
+        uint16_t umq_private : 1;
+        uint16_t rsvd1 : 13;
     } notify;
 } umq_ub_imm_t;
 
