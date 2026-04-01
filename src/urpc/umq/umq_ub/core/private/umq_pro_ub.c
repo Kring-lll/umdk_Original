@@ -242,7 +242,14 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
             sges_ptr->addr = (uint64_t)(uintptr_t)buffer->buf_data;
             sges_ptr->len = buffer->data_size;
             sges_ptr->user_tseg = NULL;
-            sges_ptr->tseg = tseg_list[buffer->mempool_id];
+            if (buffer->mem_sec == 0) {
+                sges_ptr->tseg = tseg_list[buffer->mempool_id];
+            } else if ((sges_ptr->tseg = umq_ub_get_non_pool_tseg(queue, buffer)) == NULL) {
+                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, get non pool tseg failed\n",
+                    EID_ARGS(*eid), id, max_sge_num);
+                ret = -UMQ_ERR_EINVAL;
+                goto ERROR;
+            }
             sges_ptr++;
 
             if (rest_size < buffer->data_size) { // if cannot add up to total_size, return fail
@@ -375,6 +382,56 @@ static uint16_t umq_ub_post_rx_failed_num(urma_jfr_wr_t *recv_wr, uint16_t num, 
     return 0;
 }
 
+static urma_target_seg_t *umq_ub_get_non_pool_tseg(ub_queue_t *queue, umq_buf_t *buffer)
+{
+    umq_ub_ctx_t *ctx = queue->dev_ctx;
+    bool enable_token = (ctx->feature & UMQ_FEATURE_ENABLE_TOKEN_POLICY) != 0;
+    uint32_t mem_token;
+    int ret = umq_ub_token_generate(enable_token, &mem_token);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "generate memory token failed, status: %d\n", ret);
+        return NULL;
+    }
+    
+    urma_reg_seg_flag_t flag = {
+        .bs.token_policy = token_policy_get(enable_token),
+        .bs.cacheable = URMA_NON_CACHEABLE,
+        .bs.reserved = 0,
+        .bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE | URMA_ACCESS_ATOMIC
+    };
+    urma_token_t token = { .token = mem_token };
+
+    non_pool_mem_info_t *mem_info = umq_non_pool_mem_info_get(buffer);
+    if (mem_info == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "buffer not in non pool memory list\n");
+        return NULL;
+    }
+
+    if (mem_info->data_buffer == NULL) {
+        umq_non_pool_mem_list_unlock();
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "mem_info data buffer not exist\n");
+        return NULL;
+    }
+
+    urma_seg_cfg_t seg_cfg = {
+        .va = (uint64_t)(uintptr_t)mem_info->data_buffer,
+        .len = mem_info->buffer_size,
+        .token_id = NULL,
+        .token_value = token,
+        .flag = flag,
+        .user_ctx = token.token,
+        .iova = 0
+    };
+    umq_non_pool_mem_list_unlock();
+
+    urma_target_seg_t *tesg = umq_symbol_urma()->urma_register_seg(ctx->urma_ctx, &seg_cfg);
+    if (tesg == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_register_seg failed, errno: %d\n", errno);
+        return NULL;
+    }
+    return tesg;
+}
+
 int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
 {
     uint32_t max_sge_num = queue->max_rx_sge;
@@ -419,7 +476,14 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
             sges_ptr->addr = (uint64_t)(uintptr_t)buffer->buf_data;
             sges_ptr->len = buffer->data_size;
             sges_ptr->user_tseg = NULL;
-            sges_ptr->tseg = tseg_list[buffer->mempool_id];
+            if (buffer->mem_sec == 0) {
+                sges_ptr->tseg = tseg_list[buffer->mempool_id];
+            } else if ((sges_ptr->tseg = umq_ub_get_non_pool_tseg(queue, buffer)) == NULL) {
+                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, get non pool tseg failed\n",
+                    EID_ARGS(*eid), id, max_sge_num);
+                goto PUT_CUR_RX_CTX;
+            }
+
             sges_ptr++;
 
             if (rest_size < buffer->data_size) { // if cannot add up to total_size, return fail

@@ -8,20 +8,69 @@
  */
 
 #include <malloc.h>
+#include <unistd.h>
 
 #include "umq_errno.h"
 #include "umq_vlog.h"
 #include "umq_qbuf_pool.h"
+#include "urpc_list.h"
 
 #include "urpc_thread_closure.h"
 
 #define QBUF_POOL_TLS_MAX (2048)     // max count of thread local buffer storage
 #define QBUF_POOL_BATCH_CNT (512)    // batch size when fetch from global or return to global
 
+#define QBUF_POOL_EXPANSION_RATIO 10 // percentage that triggers expansion
+
+#define QBUF_POOL_DEFAULT_EXPANSION_COUNT 8192
+#define QBUF_POOL_SLOT_ARRAY_INIT_CAP 4
+#define QBUF_POOL_DEFAULT_EXPANSION_MEM_SIZE (2ULL * 1024 * 1024 * 1024)
+#define QBUF_POOL_CHECK_ASYNC_PERIOD_US (1000)
+
+typedef struct qbuf_expansion_pool_slot {
+    uint32_t slot_id;
+    void *buffer;
+    void *header_buffer;
+    uint64_t total_buf_size;
+
+    uint64_t total_block_cnt;
+    uint64_t free_block_cnt;
+    umq_buf_list_t free_block_list;
+} qbuf_expansion_pool_slot_t;
+
 typedef struct local_qbuf_pool {
     bool inited;
     local_block_pool_t block_pool;
 } local_qbuf_pool_t;
+
+
+typedef struct async_shrink_pool_param {
+    urpc_list_t node;
+    uint32_t slot_id;
+    bool with_data;
+} async_shrink_pool_param_t;
+
+typedef struct async_shrink_pool_param_list {
+    urpc_list_t head;
+    util_external_mutex_lock lock;
+} async_shrink_pool_task_list_t;
+
+typedef struct expansion_qbuf_pool {
+    util_external_mutex_lock expansion_pool_mutex;
+    volatile uint32_t is_async_expanding;
+    volatile uint32_t is_async_shrinking;
+    uint64_t trigger_expand_block_num;
+    uint32_t expansion_block_count; // number of blocks per expansion
+    uint32_t exp_pool_slot_list_capacity; // current capacity of the expansion pool slot
+    uint32_t expansion_pool_id_min; // minimum id for dynamically expanding qbuf pool
+    uint32_t expansion_pool_cnt_max; // maximum number for dynamic expansion
+    uint32_t expansion_count; // number of expansions already performed
+    qbuf_expansion_pool_slot_t **exp_slot_list; // expand qbuf pool list, dynamically increase
+    urpc_id_generator_t dynamic_id_gen; // dynamic expansion qbuf pool id allocator
+    uint64_t exp_total_block_num;
+    uint64_t exp_total_mem_pool_size;
+    async_shrink_pool_task_list_t shrink_task_list;
+} qbuf_expansion_pool_t;
 
 typedef struct qbuf_pool {
     bool inited;
@@ -38,6 +87,11 @@ typedef struct qbuf_pool {
     umq_buf_mode_t mode;
 
     global_block_pool_t block_pool;
+
+    uint64_t expansion_mem_size_max; // default 2G
+    mempool_segment_ops_t seg_ops;
+    qbuf_expansion_pool_t exp_pool_with_date;
+    qbuf_expansion_pool_t exp_pool_without_date;
 } qbuf_pool_t;
 
 static qbuf_pool_t g_qbuf_pool = {0};
@@ -46,6 +100,167 @@ static uint8_t g_umq_qbuf_size_pow_samll = UMQ_QBUF_SIZE_POW_8K;
 
 static void *g_buffer_addr = NULL;
 static uint64_t g_total_len = 0;
+
+static void free_expansion_pool_slot(qbuf_expansion_pool_t *exp_pool, uint32_t slot_id)
+{
+    qbuf_expansion_pool_slot_t *slot = exp_pool->exp_slot_list[slot_id];
+    exp_pool->exp_slot_list[slot_id] = NULL;
+    exp_pool->expansion_count--;
+    urpc_id_generator_free(&exp_pool->dynamic_id_gen, slot_id);
+
+    if (slot->buffer != NULL) {
+        free(slot->buffer);
+    }
+    exp_pool->exp_total_block_num -= slot->total_block_cnt;
+    exp_pool->exp_total_mem_pool_size -= slot->total_buf_size;
+    free(slot);
+}
+
+static void async_shrink_push_param(bool with_data, qbuf_expansion_pool_t *exp_pool, uint32_t slot_id)
+{
+    async_shrink_pool_param_t *param = (async_shrink_pool_param_t *)malloc(sizeof(async_shrink_pool_param_t));
+    if (param == NULL) {
+        UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "malloc async sharink param failed\n");
+        return;
+    }
+    param->slot_id = slot_id;
+    param->with_data = with_data;
+    (void)util_mutex_lock(exp_pool->shrink_task_list.lock);
+    urpc_list_push_back(&exp_pool->shrink_task_list.head, &param->node);
+    (void)util_mutex_unlock(exp_pool->shrink_task_list.lock);
+}
+
+static async_shrink_pool_param_t *async_shrink_pop_param(qbuf_expansion_pool_t *exp_pool)
+{
+    async_shrink_pool_param_t *param = NULL;
+    (void)util_mutex_lock(exp_pool->shrink_task_list.lock);
+    URPC_LIST_FIRST_NODE(param, node, &exp_pool->shrink_task_list.head);
+    if (param != NULL) {
+        urpc_list_remove(&param->node);
+    }
+    (void)util_mutex_unlock(exp_pool->shrink_task_list.lock);
+    return param;
+}
+
+static void *async_shrink_global_pool_callback(void *arg)
+{
+    qbuf_expansion_pool_t *exp_pool = (qbuf_expansion_pool_t *)arg;
+    async_shrink_pool_param_t *shrink_param = async_shrink_pop_param(exp_pool);
+    while (shrink_param == NULL) {
+        (void)util_mutex_lock(exp_pool->expansion_pool_mutex);
+        qbuf_expansion_pool_slot_t *slot = exp_pool->exp_slot_list[shrink_param->slot_id];
+        if (slot == NULL) {
+            (void)util_mutex_unlock(exp_pool->expansion_pool_mutex);
+            UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "exp slot not exist, slot id %u\n", shrink_param->slot_id);
+            continue;
+        }
+
+        if (slot->free_block_cnt == slot->total_block_cnt) {
+            if (shrink_param->with_data && g_qbuf_pool.seg_ops.unregister_seg_callback != NULL) {
+                uint16_t mempool_id = (uint16_t)(slot->slot_id + exp_pool->expansion_pool_id_min);
+                g_qbuf_pool.seg_ops.unregister_seg_callback(NULL, mempool_id);
+            }
+            free_expansion_pool_slot(exp_pool, shrink_param->slot_id);
+        }
+        (void)util_mutex_unlock(exp_pool->expansion_pool_mutex);
+        shrink_param = async_shrink_pop_param(exp_pool);
+    }
+    __atomic_store_n(&exp_pool->is_async_shrinking, 0, __ATOMIC_RELAXED);
+    return NULL;
+}
+
+void async_shrink_global_pool(bool with_data, qbuf_expansion_pool_t *exp_pool, uint32_t slot_id)
+{
+    async_shrink_push_param(with_data, exp_pool, slot_id);
+    static uint32_t async_shrink_expected = 0;
+    if (!__atomic_compare_exchange_n(
+        &exp_pool->is_async_shrinking, &async_shrink_expected, 1, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        return;
+    }
+
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, async_shrink_global_pool_callback, (void*)exp_pool) != 0) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "async expand global pool\n");
+    } else {
+        pthread_detach(tid);
+    }
+}
+
+static ALWAYS_INLINE void return_batch_to_expansion_pool(
+    uint16_t mempool_id, umq_buf_t *batch_head, umq_buf_t *batch_tail, uint32_t batch_cnt, bool with_data)
+{
+    qbuf_expansion_pool_t *exp_pool = with_data ? &g_qbuf_pool.exp_pool_with_date : &g_qbuf_pool.exp_pool_without_date;
+    (void)util_mutex_lock(exp_pool->expansion_pool_mutex);
+    uint32_t slot_id = mempool_id - exp_pool->expansion_pool_id_min;
+    if (slot_id >= exp_pool->exp_pool_slot_list_capacity) {
+        (void)util_mutex_unlock(exp_pool->expansion_pool_mutex);
+        UMQ_VLOG_ERR(VLOG_UMQ, "batch expansion pool id %u invalid, expansion pool capacity %u\n",
+            slot_id, exp_pool->exp_pool_slot_list_capacity);
+        return;
+    }
+
+    qbuf_expansion_pool_slot_t *slot = exp_pool->exp_slot_list[slot_id];
+    if (slot == NULL) {
+        (void)util_mutex_unlock(exp_pool->expansion_pool_mutex);
+        UMQ_VLOG_ERR(VLOG_UMQ, "batch expansion pool invalid, id %u\n", slot_id);
+        return;
+    }
+    QBUF_LIST_NEXT(batch_tail) = QBUF_LIST_FIRST(&slot->free_block_list);
+    QBUF_LIST_FIRST(&slot->free_block_list) = batch_head;
+    slot->free_block_cnt += batch_cnt;
+    exp_pool->exp_total_block_num += batch_cnt;
+
+    if (slot->free_block_cnt == slot->total_block_cnt) {
+        async_shrink_global_pool(with_data, exp_pool, slot_id);
+    }
+    (void)util_mutex_unlock(exp_pool->expansion_pool_mutex);
+}
+
+void return_list_to_pools(umq_buf_t *local_head, uint64_t *local_buf_cnt,
+    umq_buf_list_t *global_head, uint64_t *global_buf_cnt, bool with_data)
+{
+    umq_buf_t *batch_head = local_head;
+    umq_buf_t *batch_tail = local_head;
+    uint32_t batch_cnt = 1;
+    uint64_t return_buf_cnt = 1;
+    uint32_t batch_mempool_id = local_head->mempool_id;
+    umq_buf_t *cur = QBUF_LIST_NEXT(local_head);
+
+    while (cur != NULL) {
+        umq_buf_t *next = QBUF_LIST_NEXT(cur);
+        if (batch_mempool_id == cur->mempool_id) {
+            batch_tail = cur;
+            batch_cnt++;
+        } else {
+            QBUF_LIST_NEXT(batch_tail) = NULL;
+            if (batch_mempool_id != UMQ_QBUF_DEFAULT_MEMPOOL_ID) {
+                return_batch_to_expansion_pool(batch_mempool_id, batch_head, batch_tail, batch_cnt, with_data);
+            } else {
+                QBUF_LIST_NEXT(batch_tail) = QBUF_LIST_FIRST(global_head);
+                QBUF_LIST_FIRST(global_head) = batch_head;
+                *global_buf_cnt += batch_cnt;
+            }
+            batch_head = cur;
+            batch_tail = cur;
+            batch_cnt = 1;
+            batch_mempool_id = cur->mempool_id;
+        }
+        return_buf_cnt++;
+        cur = next;
+    }
+
+    if (batch_head != NULL) {
+        QBUF_LIST_NEXT(batch_tail) = NULL;
+        if (batch_mempool_id != UMQ_QBUF_DEFAULT_MEMPOOL_ID) {
+            return_batch_to_expansion_pool(batch_mempool_id, batch_head, batch_tail, batch_cnt, with_data);
+        } else {
+            QBUF_LIST_NEXT(batch_tail) = QBUF_LIST_FIRST(global_head);
+            QBUF_LIST_FIRST(global_head) = batch_head;
+            *global_buf_cnt += batch_cnt;
+        }
+    }
+    *local_buf_cnt -= return_buf_cnt;
+}
 
 void *umq_io_buf_malloc(umq_buf_mode_t buf_mode, uint64_t size)
 {
@@ -192,20 +407,131 @@ static ALWAYS_INLINE void release_thread_cache(uint64_t id)
     local_block_pool_t *local_pool = get_thread_cache();
     (void)util_mutex_lock(g_qbuf_pool.block_pool.global_mutex);
     if (local_pool->head_with_data.first != NULL) {
-        // release thread cache no need check double free
-        uint32_t cnt = release_to_global(&local_pool->head_with_data,
-            &g_qbuf_pool.block_pool.head_with_data);
-        g_qbuf_pool.block_pool.buf_cnt_with_data += cnt;
+        return_list_to_pools(QBUF_LIST_FIRST(&local_pool->head_with_data), &local_pool->buf_cnt_with_data,
+            &g_qbuf_pool.block_pool.head_with_data, &g_qbuf_pool.block_pool.buf_cnt_with_data, true);
     }
 
     if (local_pool->head_without_data.first != NULL) {
-        // release thread cache no need check double free
-        uint32_t cnt = release_to_global(&local_pool->head_without_data,
-            &g_qbuf_pool.block_pool.head_without_data);
-        g_qbuf_pool.block_pool.buf_cnt_without_data += cnt;
+        return_list_to_pools(QBUF_LIST_FIRST(&local_pool->head_without_data), &local_pool->buf_cnt_without_data,
+            &g_qbuf_pool.block_pool.head_without_data, &g_qbuf_pool.block_pool.buf_cnt_without_data, false);
     }
     (void)util_mutex_unlock(g_qbuf_pool.block_pool.global_mutex);
     g_thread_cache.inited = false;
+}
+
+static void umq_qbuf_exp_pool_inner_uninit(qbuf_expansion_pool_t *exp_pool, bool with_data)
+{
+    (void)util_mutex_lock(exp_pool->expansion_pool_mutex);
+    if (exp_pool->exp_slot_list != NULL) {
+        for (uint32_t i = 0; i < exp_pool->exp_pool_slot_list_capacity; i++) {
+            qbuf_expansion_pool_slot_t *slot = exp_pool->exp_slot_list[i];
+            if (slot == NULL) {
+                continue;
+            }
+            if (with_data && g_qbuf_pool.seg_ops.unregister_seg_callback != NULL && slot->buffer != NULL) {
+                uint16_t mempool_id = (uint16_t)(slot->slot_id + exp_pool->expansion_pool_id_min);
+                g_qbuf_pool.seg_ops.unregister_seg_callback(NULL, mempool_id);
+            }
+            if (slot->buffer != NULL) {
+                free(slot->buffer);
+            }
+            free(slot);
+        }
+        free(exp_pool->exp_slot_list);
+        exp_pool->exp_slot_list = NULL;
+    }
+    urpc_id_generator_uninit(&exp_pool->dynamic_id_gen);
+    exp_pool->exp_pool_slot_list_capacity = 0;
+    (void)util_mutex_unlock(exp_pool->expansion_pool_mutex);
+
+    // wait async end
+    while (__atomic_load_n(&exp_pool->is_async_expanding, __ATOMIC_RELAXED) != 0 ||
+        __atomic_load_n(&exp_pool->is_async_shrinking, __ATOMIC_RELAXED) != 0) {
+        // wait 1 ms
+        usleep(QBUF_POOL_CHECK_ASYNC_PERIOD_US);
+    }
+
+    (void)util_mutex_lock_destroy(exp_pool->expansion_pool_mutex);
+    exp_pool->expansion_pool_mutex = NULL;
+    (void)util_mutex_lock_destroy(exp_pool->shrink_task_list.lock);
+    exp_pool->shrink_task_list.lock = NULL;
+}
+
+static int umq_qbuf_exp_pool_inner_init(qbuf_expansion_pool_t *exp_pool, const qbuf_pool_cfg_t *cfg, bool with_data)
+{
+    exp_pool->exp_slot_list = NULL;
+    exp_pool->exp_pool_slot_list_capacity = 0;
+    exp_pool->expansion_count = 0;
+    if (with_data) {
+        exp_pool->expansion_block_count = (cfg->expansion_block_count == 0) ?
+            QBUF_POOL_DEFAULT_EXPANSION_COUNT : cfg->expansion_block_count;
+    } else {
+        exp_pool->expansion_block_count = UMQ_EMPTY_HEADER_COEFFICIENT *
+            ((cfg->expansion_block_count == 0) ? QBUF_POOL_DEFAULT_EXPANSION_COUNT : cfg->expansion_block_count);
+        exp_pool->trigger_expand_block_num = exp_pool->expansion_block_count / QBUF_POOL_EXPANSION_RATIO;
+    }
+    exp_pool->expansion_pool_id_min = cfg->expansion_pool_id_min;
+    exp_pool->expansion_pool_cnt_max = cfg->expansion_pool_cnt_max;
+
+    exp_pool->expansion_pool_mutex = util_mutex_lock_create(UTIL_MUTEX_ATTR_EXCLUSIVE);
+    if (exp_pool->expansion_pool_mutex == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "expansion pool mutex create failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    exp_pool->shrink_task_list.lock = util_mutex_lock_create(UTIL_MUTEX_ATTR_EXCLUSIVE);
+    if (exp_pool->shrink_task_list.lock == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "shrink task list mutex create failed\n");
+        goto DESTORY_EXP_POOL_MUTEX;
+    }
+
+    int ret = urpc_id_generator_init(&exp_pool->dynamic_id_gen, URPC_ID_GENERATOR_TYPE_BITMAP,
+        exp_pool->expansion_pool_cnt_max);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "failed to init dynamic_id_gen, ret: %d\n", ret);
+        goto DESTORY_SHRINK_TASK_MUTEX;
+    }
+
+    exp_pool->exp_slot_list = (qbuf_expansion_pool_slot_t **)calloc(QBUF_POOL_SLOT_ARRAY_INIT_CAP,
+        sizeof(qbuf_expansion_pool_slot_t *));
+    if (exp_pool->exp_slot_list == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "failed to alloc expansion_pool array\n");
+        goto UNINIT_ID_GEN;
+    }
+    exp_pool->exp_pool_slot_list_capacity = QBUF_POOL_SLOT_ARRAY_INIT_CAP;
+    urpc_list_init(&exp_pool->shrink_task_list.head);
+
+    return UMQ_SUCCESS;
+
+UNINIT_ID_GEN:
+    urpc_id_generator_uninit(&exp_pool->dynamic_id_gen);
+
+DESTORY_SHRINK_TASK_MUTEX:
+    util_mutex_lock_destroy(exp_pool->expansion_pool_mutex);
+
+DESTORY_EXP_POOL_MUTEX:
+    util_mutex_lock_destroy(exp_pool->shrink_task_list.lock);
+    exp_pool->shrink_task_list.lock = NULL;
+
+    return -UMQ_ERR_ENOMEM;
+}
+
+static int umq_qbuf_expansion_pool_init(const qbuf_pool_cfg_t *cfg)
+{
+    // with data;
+    int ret = umq_qbuf_exp_pool_inner_init(&g_qbuf_pool.exp_pool_with_date, cfg, true);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "init expansion pool with data failed, ret %d\n", ret);
+        return ret;
+    }
+    // without data
+    ret = umq_qbuf_exp_pool_inner_init(&g_qbuf_pool.exp_pool_without_date, cfg, false);
+    if (ret != UMQ_SUCCESS) {
+        umq_qbuf_exp_pool_inner_uninit(&g_qbuf_pool.exp_pool_with_date, true);
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "init expansion pool without data failed, ret %d\n", ret);
+        return ret;
+    }
+    return UMQ_SUCCESS;
 }
 
 int umq_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
@@ -224,14 +550,23 @@ int umq_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
     g_qbuf_pool.total_size = cfg->total_size;
     g_qbuf_pool.headroom_size = cfg->headroom_size;
     g_qbuf_pool.data_size = cfg->data_size;
+    g_qbuf_pool.expansion_mem_size_max = cfg->expansion_mem_size_max == 0 ?
+        QBUF_POOL_DEFAULT_EXPANSION_MEM_SIZE : cfg->expansion_mem_size_max;
+    g_qbuf_pool.seg_ops = cfg->seg_ops;
+
+    ret = umq_qbuf_expansion_pool_init(cfg);
+    if (ret != UMQ_SUCCESS) {
+        umq_qbuf_block_pool_uninit(&g_qbuf_pool.block_pool);
+        return ret;
+    }
 
     if (cfg->mode == UMQ_BUF_SPLIT) {
         uint32_t blk_size = umq_buf_size_small();
-        uint64_t blk_num = cfg->total_size /
-            ((UMQ_EMPTY_HEADER_COEFFICIENT + 1) * (uint32_t)sizeof(umq_buf_t) + blk_size);
+        uint64_t blk_num = cfg->total_size / ((uint32_t)sizeof(umq_buf_t) + blk_size);
 
         g_qbuf_pool.block_size = blk_size;
         g_qbuf_pool.total_block_num = blk_num;
+        g_qbuf_pool.exp_pool_with_date.trigger_expand_block_num = blk_num / QBUF_POOL_EXPANSION_RATIO;
 
         g_qbuf_pool.data_buffer = cfg->buf_addr;
         g_qbuf_pool.header_buffer = cfg->buf_addr + blk_num * blk_size;
@@ -245,28 +580,14 @@ int umq_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
             buf->total_data_size = buf->data_size;
             buf->headroom_size = 0;
             buf->buf_data = g_qbuf_pool.data_buffer + i * blk_size;
+            buf->mempool_without_data = 0;
             buf->mempool_id = 0;
             buf->alloc_state = QBUF_ALLOC_STATE_FREE;
             (void)memset(buf->qbuf_ext, 0, sizeof(buf->qbuf_ext));
             QBUF_LIST_INSERT_HEAD(&g_qbuf_pool.block_pool.head_with_data, buf);
         }
-
-        uint64_t head_without_data_count = blk_num * UMQ_EMPTY_HEADER_COEFFICIENT;
-        for (uint64_t i = 0; i < head_without_data_count; i++) {
-            umq_buf_t *head_buf = id_to_buf_without_data_split((char *)g_qbuf_pool.ext_header_buffer, i);
-            head_buf->umqh = UMQ_INVALID_HANDLE;
-            head_buf->buf_size = (uint32_t)sizeof(umq_buf_t);
-            head_buf->data_size = 0;
-            head_buf->total_data_size = 0;
-            head_buf->headroom_size = 0;
-            head_buf->buf_data = NULL;
-            head_buf->mempool_id = 0;
-            head_buf->alloc_state = QBUF_ALLOC_STATE_FREE;
-            (void)memset(head_buf->qbuf_ext, 0, sizeof(head_buf->qbuf_ext));
-            QBUF_LIST_INSERT_HEAD(&g_qbuf_pool.block_pool.head_without_data, head_buf);
-        }
         g_qbuf_pool.block_pool.buf_cnt_with_data = blk_num;
-        g_qbuf_pool.block_pool.buf_cnt_without_data = head_without_data_count;
+        g_qbuf_pool.block_pool.buf_cnt_without_data = 0;
     } else if (cfg->mode == UMQ_BUF_COMBINE) {
         uint32_t blk_size = umq_buf_size_small();
         uint64_t blk_num = cfg->total_size / blk_size;
@@ -277,6 +598,7 @@ int umq_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
 
         g_qbuf_pool.block_size = blk_size;
         g_qbuf_pool.total_block_num = blk_num;
+        g_qbuf_pool.exp_pool_with_date.trigger_expand_block_num = blk_num / QBUF_POOL_EXPANSION_RATIO;
 
         for (uint64_t i = 0; i < blk_num; i++) {
             umq_buf_t *buf = id_to_buf_combine((char *)g_qbuf_pool.data_buffer, i, g_qbuf_pool.block_size);
@@ -286,6 +608,7 @@ int umq_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
             buf->total_data_size = buf->data_size;
             buf->headroom_size = 0;
             buf->buf_data = (char *)buf + sizeof(umq_buf_t);
+            buf->mempool_without_data = 0;
             buf->mempool_id = 0;
             buf->alloc_state = QBUF_ALLOC_STATE_FREE;
             (void)memset(buf->qbuf_ext, 0, sizeof(buf->qbuf_ext));
@@ -303,15 +626,318 @@ int umq_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
     return UMQ_SUCCESS;
 }
 
+static void umq_qbuf_expansion_pool_uninit(void)
+{
+    // with data uninit
+    umq_qbuf_exp_pool_inner_uninit(&g_qbuf_pool.exp_pool_with_date, true);
+
+    // without data uninit
+    umq_qbuf_exp_pool_inner_uninit(&g_qbuf_pool.exp_pool_without_date, false);
+}
+
 void umq_qbuf_pool_uninit(void)
 {
     if (!g_qbuf_pool.inited) {
         return;
     }
     release_thread_cache(0);
+
+    umq_qbuf_expansion_pool_uninit();
+
     umq_qbuf_block_pool_uninit(&g_qbuf_pool.block_pool);
     memset(&g_qbuf_pool, 0, sizeof(qbuf_pool_t));
 }
+
+static int alloc_expansion_pool_slot(qbuf_expansion_pool_t *exp_pool, qbuf_expansion_pool_slot_t **slot)
+{
+    uint32_t id = 0;
+    int ret = urpc_id_generator_alloc(&exp_pool->dynamic_id_gen, 0, &id);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "failed to alloc dynamic id, ret: %d\n", ret);
+        return ret;
+    }
+
+    if (id >= exp_pool->exp_pool_slot_list_capacity) {
+        uint32_t new_capacity = (id + 1) * 2;
+        qbuf_expansion_pool_slot_t **new_array = (qbuf_expansion_pool_slot_t **)realloc(
+            exp_pool->exp_slot_list, new_capacity * sizeof(qbuf_expansion_pool_slot_t *));
+        if (new_array == NULL) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "failed to realloc expansion_pool array\n");
+            urpc_id_generator_free(&exp_pool->dynamic_id_gen, id);
+            return -UMQ_ERR_ENOMEM;
+        }
+        for (uint32_t i = exp_pool->exp_pool_slot_list_capacity; i < new_capacity; i++) {
+            new_array[i] = NULL;
+        }
+        exp_pool->exp_slot_list = new_array;
+        exp_pool->exp_pool_slot_list_capacity = new_capacity;
+    }
+
+    qbuf_expansion_pool_slot_t *tmp_slot = (qbuf_expansion_pool_slot_t *)calloc(1, sizeof(qbuf_expansion_pool_slot_t));
+    if (tmp_slot == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "failed to alloc qbuf_expansion_pool_slot_t\n");
+        urpc_id_generator_free(&exp_pool->dynamic_id_gen, id);
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    tmp_slot->slot_id = id;
+    QBUF_LIST_INIT(&tmp_slot->free_block_list);
+
+    exp_pool->exp_slot_list[id] = tmp_slot;
+    exp_pool->expansion_count++;
+    *slot = tmp_slot;
+    return UMQ_SUCCESS;
+}
+
+static int slot_with_data_init(qbuf_expansion_pool_t *exp_pool, qbuf_expansion_pool_slot_t *slot)
+{
+    uint64_t blk_size = umq_buf_size_small();
+    uint64_t blk_count = exp_pool->expansion_block_count;
+    uint64_t total_size;
+    if (g_qbuf_pool.mode == UMQ_BUF_SPLIT) {
+        uint64_t header_size = blk_count * sizeof(umq_buf_t);
+        total_size = blk_count * blk_size + header_size;
+        if (total_size + g_qbuf_pool.exp_pool_with_date.exp_total_mem_pool_size +
+            g_qbuf_pool.exp_pool_without_date.exp_total_mem_pool_size > g_qbuf_pool.expansion_mem_size_max) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "expansion mem size max: %llu, now expansion mem size: %llu\n",
+            g_qbuf_pool.expansion_mem_size_max, g_qbuf_pool.exp_pool_with_date.exp_total_mem_pool_size +
+            g_qbuf_pool.exp_pool_without_date.exp_total_mem_pool_size);
+            return -UMQ_ERR_ENOMEM;
+        }
+
+        slot->buffer = (void *)memalign(blk_size, total_size);
+        if (slot->buffer == NULL) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "failed to alloc expansion pool memory\n");
+            return -UMQ_ERR_ENOMEM;
+        }
+
+        slot->header_buffer = (char *)slot->buffer + blk_count * blk_size;
+        slot->total_buf_size = total_size;
+        slot->total_block_cnt = blk_count;
+        slot->free_block_cnt = blk_count;
+
+        for (uint64_t i = 0; i < blk_count; i++) {
+            umq_buf_t *buf = (umq_buf_t *)((char *)slot->header_buffer + i * sizeof(umq_buf_t));
+            buf->umqh = UMQ_INVALID_HANDLE;
+            buf->buf_size = blk_size + (uint32_t)sizeof(umq_buf_t);
+            buf->data_size = blk_size;
+            buf->total_data_size = buf->data_size;
+            buf->headroom_size = 0;
+            buf->buf_data = (char *)slot->buffer + i * blk_size;
+            buf->mempool_without_data = 0;
+            buf->mempool_id = (uint16_t)(slot->slot_id + exp_pool->expansion_pool_id_min);
+            buf->alloc_state = QBUF_ALLOC_STATE_FREE;
+            (void)memset(buf->qbuf_ext, 0, sizeof(buf->qbuf_ext));
+            QBUF_LIST_INSERT_HEAD(&slot->free_block_list, buf);
+        }
+    } else {
+        total_size = blk_count * blk_size;
+        if (total_size + g_qbuf_pool.exp_pool_with_date.exp_total_mem_pool_size > g_qbuf_pool.expansion_mem_size_max) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "expansion mem size max: %llu, now expansion mem size: %llu\n",
+            g_qbuf_pool.expansion_mem_size_max, g_qbuf_pool.exp_pool_with_date.exp_total_mem_pool_size);
+            return -UMQ_ERR_ENOMEM;
+        }
+
+        slot->buffer = (void *)memalign(blk_size, total_size);
+        if (slot->buffer == NULL) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "failed to alloc expansion pool memory\n");
+            return -UMQ_ERR_ENOMEM;
+        }
+
+        slot->header_buffer = NULL;
+        slot->total_buf_size = total_size;
+        slot->total_block_cnt = blk_count;
+        slot->free_block_cnt = blk_count;
+
+        for (uint64_t i = 0; i < blk_count; i++) {
+            umq_buf_t *buf = (umq_buf_t *)((char *)slot->buffer + i * blk_size);
+            buf->umqh = UMQ_INVALID_HANDLE;
+            buf->buf_size = blk_size;
+            buf->data_size = blk_size - (uint32_t)sizeof(umq_buf_t);
+            buf->total_data_size = buf->data_size;
+            buf->headroom_size = 0;
+            buf->buf_data = (char *)buf + sizeof(umq_buf_t);
+            buf->mempool_without_data = 0;
+            buf->mempool_id = (uint16_t)(slot->slot_id + exp_pool->expansion_pool_id_min);
+            buf->alloc_state = QBUF_ALLOC_STATE_FREE;
+            (void)memset(buf->qbuf_ext, 0, sizeof(buf->qbuf_ext));
+            QBUF_LIST_INSERT_HEAD(&slot->free_block_list, buf);
+        }
+    }
+
+    uint16_t mempool_id = (uint16_t)(slot->slot_id + exp_pool->expansion_pool_id_min);
+    int ret = g_qbuf_pool.seg_ops.register_seg_callback(NULL, mempool_id, slot->buffer, slot->total_buf_size);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "failed to register expansion pool seg, ret: %d\n", ret);
+        goto FREE_BUFFER;
+    }
+
+    exp_pool->exp_total_block_num += slot->total_block_cnt;
+    exp_pool->exp_total_mem_pool_size += slot->total_buf_size;
+
+    return UMQ_SUCCESS;
+
+FREE_BUFFER:
+    free(slot->buffer);
+    slot->buffer = NULL;
+
+    return ret;
+}
+
+static int slot_without_data_init(qbuf_expansion_pool_t *exp_pool, qbuf_expansion_pool_slot_t *slot)
+{
+    uint64_t blk_count = exp_pool->expansion_block_count;
+    uint64_t total_size = blk_count * sizeof(umq_buf_t);;
+    if (g_qbuf_pool.mode != UMQ_BUF_SPLIT) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "only split mode init slot without data\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    slot->buffer = (void *)memalign(umq_buf_size_small(), total_size);
+    if (slot->buffer == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "failed to alloc expansion pool memory\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    slot->header_buffer = (char *)slot->buffer;
+    slot->total_buf_size = total_size;
+    slot->total_block_cnt = blk_count;
+    slot->free_block_cnt = blk_count;
+
+    for (uint64_t i = 0; i < slot->total_block_cnt; i++) {
+        umq_buf_t *buf = (umq_buf_t *)((char *)slot->header_buffer + i * sizeof(umq_buf_t));
+        buf->umqh = UMQ_INVALID_HANDLE;
+        buf->buf_size = (uint32_t)sizeof(umq_buf_t);
+        buf->data_size = 0;
+        buf->total_data_size = 0;
+        buf->headroom_size = 0;
+        buf->buf_data = NULL;
+        buf->mempool_without_data = 1;
+        buf->mempool_id = (uint16_t)(slot->slot_id + exp_pool->expansion_pool_id_min);
+        buf->alloc_state = QBUF_ALLOC_STATE_FREE;
+        (void)memset(buf->qbuf_ext, 0, sizeof(buf->qbuf_ext));
+        QBUF_LIST_INSERT_HEAD(&slot->free_block_list, buf);
+    }
+    exp_pool->exp_total_block_num += slot->total_block_cnt;
+    exp_pool->exp_total_mem_pool_size += slot->total_buf_size;
+    return UMQ_SUCCESS;
+}
+
+int expand_global_pool(bool with_data)
+{
+    qbuf_expansion_pool_t *exp_pool = with_data ? &g_qbuf_pool.exp_pool_with_date : &g_qbuf_pool.exp_pool_without_date;
+    (void)util_mutex_lock(exp_pool->expansion_pool_mutex);
+    if (exp_pool->expansion_count >= exp_pool->expansion_pool_cnt_max) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "expansion pool count %u reached max %u\n",
+            exp_pool->expansion_count, exp_pool->expansion_pool_cnt_max);
+        goto UNLOCK;
+    }
+
+    if (with_data && g_qbuf_pool.seg_ops.register_seg_callback == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "register_seg_callback is NULL, expansion not supported\n");
+        goto UNLOCK;
+    }
+
+    qbuf_expansion_pool_slot_t *slot = NULL;
+    int ret = alloc_expansion_pool_slot(exp_pool, &slot);
+    if (ret != UMQ_SUCCESS) {
+        goto UNLOCK;
+    }
+
+    ret = with_data ? slot_with_data_init(exp_pool, slot) : slot_without_data_init(exp_pool, slot);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "init %s slot failed\n", with_data ? "with data" : "without_data\n");
+        goto FREE_SLOT;
+    }
+
+    (void)util_mutex_unlock(exp_pool->expansion_pool_mutex);
+
+    return UMQ_SUCCESS;
+
+FREE_SLOT:
+    free_expansion_pool_slot(exp_pool, slot->slot_id);
+
+UNLOCK:
+    (void)util_mutex_unlock(exp_pool->expansion_pool_mutex);
+    return -UMQ_ERR_ENOMEM;
+}
+
+typedef struct async_expand_pool_arg {
+    qbuf_expansion_pool_t *exp_pool;
+    bool with_data;
+} async_expand_pool_arg_t;
+
+static void *async_expand_global_pool_callback(void *arg)
+{
+    async_expand_pool_arg_t *async_arg = (async_expand_pool_arg_t *)arg;
+    (void)expand_global_pool(async_arg->with_data);
+    __atomic_store_n(&async_arg->exp_pool->is_async_expanding, 0, __ATOMIC_RELAXED);
+    return NULL;
+}
+
+void async_expand_global_pool(bool with_data, uint64_t g_buf_cnt)
+{
+    qbuf_expansion_pool_t *exp_pool = with_data ? &g_qbuf_pool.exp_pool_with_date : &g_qbuf_pool.exp_pool_without_date;
+    if (g_buf_cnt + exp_pool->exp_total_block_num < exp_pool->trigger_expand_block_num) {
+        static uint32_t async_expand_expected = 0;
+        if (!__atomic_compare_exchange_n(
+            &exp_pool->is_async_expanding, &async_expand_expected, 1, true, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            return;
+        }
+
+        pthread_t tid;
+        static async_expand_pool_arg_t arg;
+        arg.exp_pool = exp_pool;
+        arg.with_data = with_data;
+        if (pthread_create(&tid, NULL, async_expand_global_pool_callback, &arg) != 0) {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "async expand global pool\n");
+        } else {
+            pthread_detach(tid);
+        }
+    }
+}
+
+uint32_t fetch_from_expansion_pools(bool with_data, uint32_t need, umq_buf_list_t *local_head, uint64_t *local_buf_cnt)
+{
+    uint32_t count = 0;
+    qbuf_expansion_pool_t *exp_pool = with_data ? &g_qbuf_pool.exp_pool_with_date : &g_qbuf_pool.exp_pool_without_date;
+    (void)util_mutex_lock(exp_pool->expansion_pool_mutex);
+    for (uint32_t i = 0; i < exp_pool->expansion_count && need > 0; i++) {
+        qbuf_expansion_pool_slot_t *slot = exp_pool->exp_slot_list[i];
+        if (slot == NULL) {
+            continue;
+        }
+
+        umq_buf_list_t *exp_free_list = &slot->free_block_list;
+        uint64_t exp_free_cnt = slot->free_block_cnt;
+
+        uint64_t take_cnt = (need < exp_free_cnt) ? need : exp_free_cnt;
+        if (take_cnt > 0) {
+            uint64_t cnt = 0;
+            umq_buf_t *cur_node;
+            QBUF_LIST_FOR_EACH(cur_node, exp_free_list) {
+                if (++cnt == take_cnt || QBUF_LIST_NEXT(cur_node) == NULL) {
+                    break;
+                }
+            }
+
+            umq_buf_t *input_head = QBUF_LIST_FIRST(exp_free_list);
+            umq_buf_t *output_head = QBUF_LIST_FIRST(local_head);
+            QBUF_LIST_FIRST(exp_free_list) = QBUF_LIST_NEXT(cur_node);
+            QBUF_LIST_FIRST(local_head) = input_head;
+            // set output
+            QBUF_LIST_NEXT(cur_node) = output_head;
+            *local_buf_cnt += take_cnt;
+            slot->free_block_cnt -= take_cnt;
+            count += take_cnt;
+            need -= take_cnt;
+            exp_pool->exp_total_block_num -= take_cnt;
+        }
+    }
+    (void)util_mutex_unlock(exp_pool->expansion_pool_mutex);
+    return count;
+}
+
 
 int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *option, umq_buf_list_t *list)
 {
@@ -349,6 +975,9 @@ int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *opti
         while (local_pool->buf_cnt_without_data < num) {
             ret = fetch_from_global(&g_qbuf_pool.block_pool, local_pool, false, QBUF_POOL_BATCH_CNT);
             if (ret <= 0) {
+                if (ret == -UMQ_ERR_ENOMEM) {
+                    return non_pool_mem_alloc_nodata(num, list);
+                }
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "fetch from global failed, current size: %u, alloc num: %u, status: %d\n",
                     local_pool->buf_cnt_without_data, num, ret);
                 return ret;
@@ -357,15 +986,24 @@ int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *opti
 
         umq_qbuf_alloc_nodata(local_pool, num, list, param.shm);
 
-        return 0;
+        return UMQ_SUCCESS;
     }
 
     while (local_pool->buf_cnt_with_data < param.actual_buf_count) {
         ret = fetch_from_global(&g_qbuf_pool.block_pool, local_pool, true, QBUF_POOL_BATCH_CNT);
         if (ret <= 0) {
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "fetch from global failed, current size: %u, alloc num: %u, status: %d\n",
-                local_pool->buf_cnt_with_data, param.actual_buf_count, ret);
-            return ret;
+            if (ret != -UMQ_ERR_ENOMEM) {
+                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "fetch from global failed, current size: %u, alloc num: %u, status: %d\n",
+                    local_pool->buf_cnt_with_data, param.actual_buf_count, ret);
+                return ret;
+            }
+
+            if (g_qbuf_pool.mode == UMQ_BUF_SPLIT) {
+                non_pool_mem_alloc_with_data_split(request_size, &param, list);
+            } else {
+                non_pool_mem_alloc_with_data_combine(request_size, &param, list);
+            }
+            
         }
     }
 
@@ -384,9 +1022,13 @@ void umq_qbuf_free(umq_buf_list_t *list)
         return;
     }
 
+    if (QBUF_LIST_FIRST(list)->mem_src == 1) {
+        non_pool_mem_release_batch(list);
+    }
+
     local_block_pool_t *local_pool = get_thread_cache();
     // split mode and buf is in head no data zone
-    if (g_qbuf_pool.mode == UMQ_BUF_SPLIT && (void *)QBUF_LIST_FIRST(list) >= g_qbuf_pool.ext_header_buffer) {
+    if (g_qbuf_pool.mode == UMQ_BUF_SPLIT && QBUF_LIST_FIRST(list)->mempool_without_data == 1) {
         // put buf list before head of head_without_data
         uint32_t cnt = release_batch(list, &local_pool->head_without_data, false);
         local_pool->buf_cnt_without_data += cnt;
@@ -494,12 +1136,431 @@ int umq_qbuf_pool_info_get(umq_qbuf_pool_stats_t *qbuf_pool_stats)
     return UMQ_SUCCESS;
 }
 
-int umq_qbuf_register_seg(uint8_t *ctx, register_seg_callback_t register_seg_func)
+int umq_qbuf_register_seg(uint8_t *ctx, mempool_segment_ops_t *ops)
 {
-    return register_seg_func(ctx, UMQ_QBUF_DEFAULT_MEMPOOL_ID, g_qbuf_pool.data_buffer,  g_qbuf_pool.total_size);
+    int ret = ops->register_seg_callback(ctx, UMQ_QBUF_DEFAULT_MEMPOOL_ID, g_qbuf_pool.data_buffer, g_qbuf_pool.total_size);
+    if (ret != UMQ_SUCCESS) {
+        return ret;
+    }
+
+    qbuf_expansion_pool_t *exp_pool = &g_qbuf_pool.exp_pool_with_date;
+    (void)util_mutex_lock(exp_pool->expansion_pool_mutex);
+    uint32_t slot_idx = 0;
+    for (slot_idx = 0; slot_idx < exp_pool->exp_pool_slot_list_capacity; slot_idx++) {
+        qbuf_expansion_pool_slot_t *slot = exp_pool->exp_slot_list[slot_idx];
+        if (slot == NULL) {
+            continue;
+        }
+
+        uint16_t mempool_id = (uint16_t)(slot->slot_id + exp_pool->expansion_pool_id_min);
+        ret = ops->register_seg_callback(ctx, mempool_id, slot->buffer, slot->total_buf_size);
+        if (ret != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "failed to register expansion pool seg, ret: %d\n", ret);
+            goto UNREGISTER_SEG;
+        }
+    }
+    (void)util_mutex_unlock(exp_pool->expansion_pool_mutex);
+    return UMQ_SUCCESS;
+
+UNREGISTER_SEG:
+    for (uint32_t i = 0; i < slot_idx; i++) {
+        qbuf_expansion_pool_slot_t *slot = exp_pool->exp_slot_list[i];
+        if (slot == NULL) {
+            continue;
+        }
+
+        uint16_t mempool_id = (uint16_t)(slot->slot_id + exp_pool->expansion_pool_id_min);
+        ops->unregister_seg_callback(ctx, mempool_id);
+    }
+    (void)util_mutex_unlock(exp_pool->expansion_pool_mutex);
+    ops->unregister_seg_callback(ctx, UMQ_QBUF_DEFAULT_MEMPOOL_ID);
+    return ret;
 }
 
-int umq_qbuf_unregister_seg(uint8_t *ctx, unregister_seg_callback_t unregister_seg_func)
+void umq_qbuf_unregister_seg(uint8_t *ctx, mempool_segment_ops_t *ops)
 {
-    return unregister_seg_func(ctx, UMQ_QBUF_DEFAULT_MEMPOOL_ID);
+    ops->unregister_seg_callback(ctx, UMQ_QBUF_DEFAULT_MEMPOOL_ID);
+    qbuf_expansion_pool_t *exp_pool = &g_qbuf_pool.exp_pool_with_date;
+    (void)util_mutex_lock(exp_pool->expansion_pool_mutex);
+    for (uint32_t i = 0; i < exp_pool->exp_pool_slot_list_capacity; i++) {
+        qbuf_expansion_pool_slot_t *slot = exp_pool->exp_slot_list[i];
+        if (slot == NULL) {
+            continue;
+        }
+
+        uint16_t mempool_id = (uint16_t)(slot->slot_id + exp_pool->expansion_pool_id_min);
+        ops->unregister_seg_callback(ctx, mempool_id);
+    }
+    (void)util_mutex_unlock(exp_pool->expansion_pool_mutex);
+}
+
+typedef struct non_pool_mem_list {
+    struct urpc_hmap map_with_data;
+    struct urpc_hmap map_without_data;
+    util_external_rwlock lock;
+} non_pool_mem_list_t;
+
+non_pool_mem_list_t g_non_pool_mem_list;
+#define NON_POOL_MEM_HMAP_SIZE 1024
+
+static int non_pool_mem_init()
+{
+    g_non_pool_mem_list.lock = util_rwlock_create();
+    if (g_non_pool_mem_list.lock == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "shrink task list mutex create failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    if (urpc_hmap_init(&g_non_pool_mem_list.map_with_data, NON_POOL_MEM_HMAP_SIZE) != UMQ_SUCCESS) {
+        util_rwlock_destroy(g_non_pool_mem_list.lock);
+        UMQ_VLOG_ERR(VLOG_UMQ, "hmap init failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+    return UMQ_SUCCESS;
+}
+
+static uint32_t mem_info_hash_get(umq_buf_t *qbuf)
+{
+    return urpc_hash_uint64_base((uint64_t)(uintptr_t)qbuf, 0);
+}
+
+static void umq_add_non_mem_pool(non_pool_mem_info_t *mem_info)
+{
+    uint32_t hash = mem_info_hash_get(mem_info->qbuf);
+    (void)util_rwlock_wrlock(g_non_pool_mem_list.lock);
+    urpc_hmap_insert(g_non_pool_mem_list.map_with_data, &mem_info->node, hash);
+    (void)util_rwlock_unlock(g_non_pool_mem_list.lock);
+}
+
+non_pool_mem_info_t *umq_non_pool_mem_info_get(umq_buf_t *qbuf)
+{
+    uint32_t hash = mem_info_hash_get(qbuf);
+    non_pool_mem_info_t *mem_info;
+    if (g_non_pool_mem_list.lock == NILL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "")
+        return NULL;
+    }
+    (void)util_rwlock_rdlock(g_non_pool_mem_list.lock);
+    URPC_HMAP_FOR_EACH_WITH_HASH(mem_info, node, hash, &g_non_pool_mem_list.map_with_data) {
+        if (mem_info->qbuf == qbuf) {
+            return mem_info;
+        }
+    }
+    (void)util_rwlock_unlock(g_non_pool_mem_list.lock);
+    return NULL;
+}
+
+void umq_non_pool_mem_list_unlock(void)
+{
+    (void)util_rwlock_unlock(g_non_pool_mem_list.lock);
+}
+
+non_pool_mem_info_t *umq_non_pool_mem_info_get_and_remove(umq_buf_t *qbuf)
+{
+    non_pool_mem_info_t *mem_info = umq_non_pool_mem_info_get(qbuf)
+    if (mem_info == NULL) {
+        return NULL;
+    }
+    urpc_hmap_remove(&g_non_pool_mem_list.map_with_data, &mem_info->node);
+    umq_non_pool_mem_list_unlock()
+
+    return mem_info;
+}
+
+static int non_pool_mem_alloc_one_with_data(umq_buf_t **qbuf)
+{
+    uint64_t blk_size = umq_buf_size_small();
+    non_pool_mem_info_t *mem_info = (non_pool_mem_info_t *)calloc(1, sizeof(non_pool_mem_info_t));
+    if (mem_info == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "failed to alloc non pool mem info memory\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+    char *data_buffer;
+    umq_buf_t *buf;
+    if (g_qbuf_pool.mode == UMQ_BUF_SPLIT) {
+        char *data_buffer = (char *)memalign(blk_size, blk_size);
+        if (data_buffer == NULL) {
+            free(mem_info);
+            UMQ_VLOG_ERR(VLOG_UMQ, "failed to alloc non pool data buffer memory\n");
+            return -UMQ_ERR_ENOMEM;
+        }
+
+        buf = (umq_buf_t *)calloc(1, sizeof(umq_buf_t));
+        if (buf == NULL) {
+            free(data_buffer);
+            free(mem_info);
+            UMQ_VLOG_ERR(VLOG_UMQ, "failed to alloc non pool qbuf memory\n");
+            return -UMQ_ERR_ENOMEM;
+        }
+        buf->buf_size = blk_size + (uint32_t)sizeof(umq_buf_t);
+        buf->data_size = blk_size;
+    } else {
+        umq_buf_t *buf = (umq_buf_t *)memalign(blk_size, total_size);
+        if (buf == NULL) {
+            free(mem_info);
+            UMQ_VLOG_ERR(VLOG_UMQ, "failed to alloc non pool buffer memory\n");
+            return -UMQ_ERR_ENOMEM;
+        }
+        data_buffer = buf->data_size
+        buf->buf_size = blk_size;
+        buf->data_size = blk_size - (uint32_t)sizeof(umq_buf_t);
+    }
+
+    buf->umqh = UMQ_INVALID_HANDLE;
+    buf->total_data_size = buf->data_size;
+    buf->headroom_size = 0;
+    buf->buf_data = data_buffer;
+    buf->mempool_without_data = 0;
+    buf->mempool_id = 0
+    buf->mem_src = 1;
+    buf->alloc_state = QBUF_ALLOC_STATE_FREE;
+    (void)memset(buf->qbuf_ext, 0, sizeof(buf->qbuf_ext));
+
+    mem_info->buf_data = data_buffer;
+    mem_info->buffer_size = blk_size;
+    mem_info->qbuf = buf;
+    umq_add_non_mem_pool(mem_info);
+
+    *qbuf = buf;
+    return UMQ_SUCCESS;
+}
+
+static int non_pool_mem_alloc_one_without_data(umq_buf_t **qbuf)
+{
+    non_pool_mem_info_t *mem_info = (non_pool_mem_info_t *)calloc(1, sizeof(non_pool_mem_info_t));
+    if (mem_info == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "failed to alloc non pool mem info memory\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    umq_buf_t *buf = (umq_buf_t *)calloc(1, sizeof(umq_buf_t));
+    if (buf == NULL) {
+        free(mem_info);
+        UMQ_VLOG_ERR(VLOG_UMQ, "failed to alloc non pool qbuf memory\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    buf->umqh = UMQ_INVALID_HANDLE;
+    buf->buf_size = (uint32_t)sizeof(umq_buf_t);
+    buf->data_size = 0;
+    buf->total_data_size = 0;
+    buf->headroom_size = 0;
+    buf->buf_data = NULL;
+    buf->mempool_without_data = 1;
+    buf->mem_src = 1;
+    buf->alloc_state = QBUF_ALLOC_STATE_FREE;
+    (void)memset(buf->qbuf_ext, 0, sizeof(buf->qbuf_ext));
+
+    mem_info->buf_data = NULL;
+    mem_info->buffer_size = 0;
+    mem_info->qbuf = buf;
+    umq_add_non_mem_pool(mem_info);
+
+    *qbuf = buf;
+    return UMQ_SUCCESS;
+}
+
+static void non_pool_mem_free_one(non_pool_mem_info_t *mem_info)
+{
+    if (mem_info->non_pool_mem_unregister != NULL) {
+        mem_info->non_pool_mem_unregister(mem_info->non_pool_mem_arg);
+    }
+
+    if (g_qbuf_pool.mode == UMQ_BUF_SPLIT) {
+        if (mem_info->qbuf != NULL) {
+            free(mem_info->qbuf);
+        }
+        
+        if (mem_info->data_buffer != NULL) {
+            free(mem_info->data_buffer);
+        }
+    } else {
+        if (mem_info->qbuf != NULL) {
+            free(mem_info->qbuf);
+        }
+    }
+    free(mem_info);
+}
+
+static int non_pool_mem_alloc_with_data_split(uint32_t request_size, qbuf_alloc_param_t *param, umq_buf_list_t *list)
+{
+    uint32_t cnt = 0;
+    umq_buf_t *cur_node;
+    uint32_t headroom_size_temp = param->headroom_size;
+    uint32_t total_data_size = request_size;
+    uint32_t remaining_size = request_size;
+    uint32_t max_data_capacity = umq_buf_size_small() - headroom_size_temp;
+    bool first_fragment = true;
+    int ret = 0;
+    umq_buf_t *head = NULL;
+    while (++cnt < param->actual_buf_count) {
+        ret = non_pool_mem_alloc_one_with_data(&cur_node)
+        if (ret != UMQ_SUCCESS) {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "alloc non pool memory failed, ret %u\n", ret);
+            goto ROLLBACK;
+        }
+        cur_node->buf_data = cur_node->buf_data + headroom_size_temp;
+        cur_node->buf_size = umq_buf_size_small() + (uint32_t)sizeof(umq_buf_t);
+        cur_node->headroom_size = headroom_size_temp;
+        cur_node->total_data_size = total_data_size;
+        cur_node->first_fragment = first_fragment;
+        cur_node->data_size = remaining_size >= max_data_capacity ? max_data_capacity : remaining_size;
+        cur_node->alloc_state = QBUF_ALLOC_STATE_ALLOCATED;
+
+        remaining_size -= cur_node->data_size;
+        if (remaining_size == 0) {
+            headroom_size_temp = param->headroom_size;
+            total_data_size = request_size;
+            remaining_size = request_size;
+            first_fragment = true;
+            max_data_capacity = umq_buf_size_small() - param->headroom_size;
+        } else {
+            headroom_size_temp = 0;
+            total_data_size = 0;
+            first_fragment = false;
+            max_data_capacity = umq_buf_size_small();
+        }
+
+        if (head == NULL) {
+            head = cur_node;
+        } else {
+            QBUF_LIST_NEXT(cur_node) = QBUF_LIST_NEXT(head);
+            QBUF_LIST_NEXT(head) = cur_node;
+        }
+    }
+
+    QBUF_LIST_NEXT(cur_node) = QBUF_LIST_FIRST(list);
+    QBUF_LIST_FIRST(list) = head;
+    return UMQ_SUCCESS;
+
+ROLLBACK:
+    while (--cnt > 0) {
+        cur_node = head;
+        head = QBUF_LIST_NEXT(head)
+        non_pool_mem_info_t *mem_info = umq_non_pool_mem_info_get_and_remove(head);
+        if (mem_info == NULL) {
+            continue;
+        }
+        non_pool_mem_free_one(mem_info);
+    }
+    return ret;
+}
+
+static int non_pool_mem_alloc_with_data_combine(uint32_t request_size, qbuf_alloc_param_t *param, umq_buf_list_t *list)
+{
+    uint32_t cnt = 0;
+    umq_buf_t *cur_node = NULL;
+    uint32_t headroom_size_temp = param->headroom_size;
+    uint32_t total_data_size = request_size;
+    uint32_t remaining_size = request_size;
+    uint32_t max_data_size = umq_buf_size_small() - sizeof(umq_buf_t);
+    uint32_t max_data_capacity = max_data_size - headroom_size_temp;
+    bool first_fragment = true;
+    int ret = 0;
+    umq_buf_t *head = NULL;
+    while (++cnt < param->actual_buf_count) {
+        ret = non_pool_mem_alloc_one_with_data(&cur_node)
+        if (ret != UMQ_SUCCESS) {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "alloc non pool memory with data failed, ret %u\n", ret);
+            goto ROLLBACK;
+        }
+        cur_node->buf_data = cur_node->data + headroom_size_temp;
+        cur_node->buf_size = umq_buf_size_small();
+        cur_node->headroom_size = headroom_size_temp;
+        cur_node->total_data_size = total_data_size;
+        cur_node->first_fragment = first_fragment;
+        cur_node->data_size = remaining_size >= max_data_capacity ? max_data_capacity : remaining_size;
+        cur_node->alloc_state = QBUF_ALLOC_STATE_ALLOCATED;
+
+        remaining_size -= cur_node->data_size;
+        if (remaining_size == 0) {
+            headroom_size_temp = param->headroom_size;
+            total_data_size = request_size;
+            remaining_size = request_size;
+            max_data_capacity = max_data_size - param->headroom_size;
+            first_fragment = true;
+        } else {
+            headroom_size_temp = 0;
+            total_data_size = 0;
+            first_fragment = false;
+            max_data_capacity = max_data_size;
+        }
+
+        if (head == NULL) {
+            head = cur_node;
+        } else {
+            QBUF_LIST_NEXT(cur_node) = QBUF_LIST_NEXT(head);
+            QBUF_LIST_NEXT(head) = cur_node;
+        }
+    }
+
+    QBUF_LIST_NEXT(cur_node) = QBUF_LIST_FIRST(list);
+    QBUF_LIST_FIRST(list) = head;
+
+    return UMQ_SUCCESS;
+
+ROLLBACK:
+    while (--cnt > 0) {
+        cur_node = head;
+        head = QBUF_LIST_NEXT(head)
+        non_pool_mem_info_t *mem_info = umq_non_pool_mem_info_get_and_remove(head);
+        if (mem_info == NULL) {
+            continue;
+        }
+        non_pool_mem_free_one(mem_info);
+    }
+    return ret;
+}
+
+static int non_pool_mem_alloc_nodata(uint32_t num, umq_buf_list_t *list)
+{
+    uint32_t cnt = 0;
+    umq_buf_t *cur_node = NULL;
+    int ret = 0;
+    umq_buf_t *head = NULL;
+    while (++cnt < num) {
+        ret = non_pool_mem_alloc_one_with_data(&cur_node)
+        if (ret != UMQ_SUCCESS) {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "alloc non pool memory without data failed, ret %u\n", ret);
+            goto ROLLBACK;
+        }
+
+        cur_node->alloc_state = QBUF_ALLOC_STATE_ALLOCATED;
+
+        if (head == NULL) {
+            head = cur_node;
+        } else {
+            QBUF_LIST_NEXT(cur_node) = QBUF_LIST_NEXT(head);
+            QBUF_LIST_NEXT(head) = cur_node;
+        }
+    }
+
+    QBUF_LIST_NEXT(cur_node) = QBUF_LIST_FIRST(list);
+    QBUF_LIST_FIRST(list) = head;
+
+    return UMQ_SUCCESS;
+
+ROLLBACK:
+    while (--cnt > 0) {
+        cur_node = head;
+        head = QBUF_LIST_NEXT(head);
+        non_pool_mem_info_t *mem_info = umq_non_pool_mem_info_get_and_remove(head);
+        if (mem_info == NULL) {
+            continue;
+        }
+        non_pool_mem_free_one(mem_info);
+    }
+    return ret;
+}
+
+static void non_pool_mem_release_batch(umq_buf_list_t *list)
+{
+    umq_buf_t *cur_node;
+    QBUF_LIST_FOR_EACH(cur_node, list) {
+       non_pool_mem_info_t *mem_info = umq_non_pool_mem_info_get_and_remove(cur_node);
+       if (mem_info == NULL) {
+            continue;
+       }
+       non_pool_mem_free_one(mem_info);
+    }
 }

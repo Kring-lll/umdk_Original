@@ -106,6 +106,7 @@ void print_config(struct urpc_example_config *cfg);
 } while (0)
 
 void log_get_current_time(char *buffer, uint32_t len);
+umq_buf_t *test_mem_buf(uint64_t umqh);
 
 #ifdef __cplusplus
 }
