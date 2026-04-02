@@ -1022,9 +1022,7 @@ int urma_cmd_delete_jfr(urma_jfr_t *jfr)
         }
         (void)pthread_mutex_unlock(&jfr->event_mutex);   
     }
-
-    // wait_async_event_ack(&jfr->event_mutex, &jfr->event_cond, &jfr->async_events_acked, arg.out.async_events_reported);
-
+    
     return ret;
 }
 
