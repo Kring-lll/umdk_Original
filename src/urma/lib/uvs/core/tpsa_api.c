@@ -18,10 +18,19 @@
 #include "uvs_ubagg_ioctl.h"
 
 #define UVS_MAX_TOPO_NUM 16
+#define EID_FMT          "%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x"
+#define EID_RAW_ARGS(eid)                                                                                              \
+    eid[0], eid[1], eid[2], eid[3], eid[4], eid[5], eid[6], eid[7], eid[8], eid[9], eid[10], eid[11], eid[12],         \
+        eid[13], eid[14], eid[15]
+#define EID_ARGS(eid)             EID_RAW_ARGS((eid).raw)
+#define UVS_MAX_TOPO_NUM 16
 
 int uvs_create_agg_dev(uvs_eid_t *agg_eid, const char *dev_name)
 {
     int ret = 0;
+    // 打印日志
+    TPSA_LOG_INFO("start uvs_create_agg_dev: bonding_eid = "EID_FMT", dev_name = %s.\n", EID_ARGS(eid), dev_name);
+
     size_t dev_name_len;
 
     if (agg_eid == NULL || dev_name == NULL) {
