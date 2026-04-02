@@ -712,9 +712,10 @@ typedef struct urma_tp {
 
 typedef union urma_jetty_flag {
     struct {
-        uint32_t share_jfr : 1; /* 0: URMA_NO_SHARE_JFR.
-                                   1: URMA_SHARE_JFR. */
-        uint32_t reserved  : 31;
+        uint32_t share_jfr    : 1; /* 0: URMA_NO_SHARE_JFR.
+                                      1: URMA_SHARE_JFR. */
+        uint32_t non_blocking : 1;
+        uint32_t reserved     : 30;
     } bs;
     uint32_t value;
 } urma_jetty_flag_t;
