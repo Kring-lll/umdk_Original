@@ -66,13 +66,25 @@ uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bin
     init_cfg->feature = cfg->feature;
     init_cfg->cna = cfg->cna;
     init_cfg->ubmm_eid = cfg->deid;
+    init_cfg->trans_info[0].mem_cfg.total_size =  200 * 1024 * 1024;
+    init_cfg->buf_pool_cfg.expansion_block_count = 2000;
+    // init_cfg->buf_pool_cfg.tls_qbuf_pool_depth = 8000;
+    init_cfg->buf_mode = UMQ_BUF_SPLIT;
 
     if (parse_trans_info(cfg, init_cfg) != 0) {
         goto FREE_CFG;
     }
 
+    init_cfg->trans_info[0].dev_info.assign_mode = UMQ_DEV_ASSIGN_MODE_DUMMY;
     if (umq_init(init_cfg) != UMQ_SUCCESS) {
         LOG_PRINT_ERR("umq_init failed\n");
+        goto FREE_CFG;
+    }
+
+    test_mem_buf(0);
+    init_cfg->trans_info[0].dev_info.assign_mode = UMQ_DEV_ASSIGN_MODE_DEV;
+    if (umq_dev_add(&init_cfg->trans_info[0]) != 0) {
+        LOG_PRINT_ERR("umq_dev_add failed\n");
         goto FREE_CFG;
     }
 

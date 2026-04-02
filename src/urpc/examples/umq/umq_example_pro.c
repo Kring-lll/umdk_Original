@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <pthread.h>
 
 #include "umq_example_common.h"
 #include "umq_example_pro.h"
@@ -16,6 +17,55 @@
 static const uint32_t EXAMPLE_MAX_DEPTH = 64;
 static const char *EXAMPLE_CLIENT_POST_DATA = "hello, this is umq pro client";
 static const char *EXAMPLE_SERVER_POST_DATA = "hello, this is umq pro server";
+
+void *test_mem_buf(void *arg)
+{   
+    uint64_t umqh = (uint64_t)arg;
+    uint32_t req_block[] = {1, 16, 32, 64, 125}; // 
+    int test_id = 0;
+    umq_buf_t *buf_list[1000];
+    uint32_t request_sizes[] = {0, 8192};
+    while (test_id < 1000) {
+        buf_list[0] = NULL;
+        for (int i = 0; i < test_id; i++) {
+            buf_list[i] = umq_buf_alloc(request_sizes[test_id % 2], req_block[i % (sizeof(req_block)/sizeof(uint32_t))], umqh, NULL);
+            if (buf_list[i] == NULL) {
+                LOG_PRINT_ERR("umq alloc buf failed\n");
+                return NULL;
+            }
+        }
+        umq_buf_t *tmp_buf;
+        for (int i = 0; i < test_id - 1; i++) {
+            tmp_buf = buf_list[i];
+            LOG_PRINT_ERR("tmp_buf mempool_id %u, %u\n", tmp_buf->mempool_id, tmp_buf->mempool_id - 257);
+            while (tmp_buf->qbuf_next != NULL) {
+                tmp_buf = tmp_buf->qbuf_next;
+            }
+            tmp_buf->qbuf_next = buf_list[i + 1];
+        }
+        if (test_id != 0) {
+            LOG_PRINT_ERR("tmp_buf mempool_id %u, %u, request_size %u\n",
+                buf_list[test_id - 1]->mempool_id, buf_list[test_id - 1]->mempool_id - 257, request_sizes[test_id % 2]);
+        }
+        umq_buf_free(buf_list[0]);
+        test_id += 57;
+    }
+    return buf_list[0];
+}
+
+void test_mem_buf_mutil_thread(uint64_t umqh, uint32_t thread_num)
+{
+    pthread_t t[thread_num];
+    for (uint32_t i = 0; i < thread_num; i++) {
+        if (pthread_create(&t[i], NULL, test_mem_buf, (void *)umqh) != 0) {
+            return;
+        }
+    }
+
+    for (uint32_t i = 0; i < thread_num; i++) {
+        pthread_join(t[i], NULL);
+    }
+}
 
 int run_umq_example_pro_server(struct urpc_example_config *cfg)
 {
@@ -27,6 +77,9 @@ int run_umq_example_pro_server(struct urpc_example_config *cfg)
         LOG_PRINT_ERR("init and create umq failed\n");
         return -1;
     }
+
+    // test_mem_buf(umqh);
+    test_mem_buf_mutil_thread(umqh, 10);
 
     uint32_t remote_bind_info_size = UMQ_MAX_BIND_INFO_SIZE;
     uint8_t remote_bind_info[UMQ_MAX_BIND_INFO_SIZE] = {0};
