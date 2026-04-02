@@ -323,6 +323,7 @@ static int create_jfc(perftest_context_t *ctx, perftest_config_t *cfg)
         .flag = {
             .bs.lock_free = cfg->lock_free ? 1 : 0,
             .bs.jfc_inline = cfg->jfc_inline ? 1 : 0,
+            .bs.non_blocking = 1,
         },
         .jfce = NULL,
         .user_ctx = (uint64_t)NULL,
