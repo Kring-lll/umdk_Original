@@ -1,0 +1,66 @@
+@startuml urma_register_seg_flow
+!theme plain
+title urma_register_seg 调用流程
+
+|用户态 API|
+start
+:参数校验;
+note right: ctx, seg_cfg 非空?\nva 有效?\n配置合法?
+
+if (参数合法?) then (否)
+  :返回 NULL;
+  stop
+else (是)
+endif
+
+:自动分配 Token ID;
+note right: 用户没提供 Token ID?
+
+if (需要分配?) then (是)
+  :调用 urma_alloc_token_id();
+  if (分配成功?) then (否)
+    :返回 NULL;
+    stop
+  else (是)
+  endif
+endif
+
+:调用 ops->register_seg;
+note right: 通过函数指针调用底层实现
+
+|Provider 层|
+:创建组件;
+note right: bondp_create_comp
+:遍历所有物理网卡;
+while (还有未处理网卡?) is (有)
+  :在每个网卡上注册 segment;
+  :调用 urma_cmd_register_seg;
+endwhile (无)
+
+:返回虚拟 segment;
+
+|内核接口层|
+:构造 ioctl 参数;
+note right: urma_cmd_register_seg_t
+:va: 用户虚拟地址\nlen: 内存长度\ntoken_id: Token ID\ntoken: Token 值\nflag: 标志;
+
+:调用 urma_ioctl_register_seg;
+
+|TLV ioctl 层|
+:构造 TLV 属性数组;
+note right: Type-Length-Value 格式
+:调用 urma_tlv_ioctl;
+
+|内核驱动|
+:ioctl 系统调用;
+note right: 进入内核
+:get_user_pages;
+note right: 获取用户页面
+:pin_user_pages;
+note right: 锁定物理页
+:dma_map_page;
+note right: 建立 DMA 映射
+:返回 handle 和 token_id;
+stop
+
+@enduml
