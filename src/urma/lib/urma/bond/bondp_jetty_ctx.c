@@ -57,6 +57,9 @@ static void destroy_bjetty_wr_bufs(bjetty_ctx_t *bjetty_ctx)
 
 static int create_bjetty_segments(urma_context_t *ctx, bjetty_ctx_t *bjetty_ctx, size_t hdr_buf_size)
 {
+    if (is_single_dev_mode(ctx)) {
+ 	    return 0;
+ 	}
     urma_seg_cfg_t seg_cfg = {
         .va = 0,
         .len = hdr_buf_size,
