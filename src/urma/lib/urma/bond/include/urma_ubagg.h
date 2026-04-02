@@ -31,6 +31,9 @@ typedef enum urma_bond_user_ctl_opcode {
     URMA_USER_CTL_BOND_ADD_REMOTE_SEG_INFO,
     URMA_USER_CTL_BOND_SET_AGGR_MODE,
     URMA_USER_CTL_BOND_ENABLE_SEG_CACHE,
+    URMA_USER_CTL_BOND_CONFIG_JFR_PORT,
+    URMA_USER_CTL_BOND_CONFIG_JFS_PORT,
+    URMA_USER_CTL_BOND_CONFIG_JETTY_PORT
 } urma_bond_user_ctl_opcode_t;
 
 typedef struct urma_bond_id_info_in {
@@ -65,6 +68,35 @@ typedef struct urma_bond_seg_info_out {
 } urma_bond_seg_info_out_t;
 
 typedef urma_bond_seg_info_out_t urma_bond_add_remote_seg_info_in_t;
+
+typedef union bondp_port_id {
+    struct {
+        uint8_t chip_id;
+        uint8_t die_id;
+        uint8_t port_idx;
+        uint8_t reserved;
+    };
+    uint32_t value;
+} bondp_port_id_t;
+
+typedef struct bondp_user_ctl_config_jfr_port_in {
+    urma_jfr_t vjfr;
+    bondp_port_id_t used_ports[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t used_ports_num;
+} bondp_user_ctl_config_jfr_port_in_t;
+
+typedef struct bondp_user_ctl_config_jfs_port_in {
+    urma_jfs_t vjfs;
+    bondp_port_id_t used_ports[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t used_ports_num;
+} bondp_user_ctl_config_jfs_port_in_t;
+
+typedef struct bondp_user_ctl_config_jetty_port_in {
+    urma_jetty_t vjetty;
+    bondp_port_id_t used_ports[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t used_ports_num;
+} bondp_user_ctl_config_jetty_port_in_t;
+
 #ifdef __cplusplus
 }
 #endif

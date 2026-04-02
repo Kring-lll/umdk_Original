@@ -148,6 +148,8 @@ typedef struct bondp_comp {
         urma_jetty_t v_jetty;
         urma_target_seg_t v_tseg;
     };
+    uint32_t used_ports_idx[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t used_ports_idx_num;
     union {
         void *members[URMA_UBAGG_DEV_MAX_NUM];
         urma_jfce_t *p_jfce[URMA_UBAGG_DEV_MAX_NUM];
