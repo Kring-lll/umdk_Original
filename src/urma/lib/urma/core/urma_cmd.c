@@ -1161,6 +1161,7 @@ int urma_cmd_delete_jfc(urma_jfc_t *jfc)
     bool need_acked = jfc->comp_events_acked != arg.out.comp_events_reported ||
         jfc->async_events_acked != arg.out.async_events_reported;
     if (jfc->jfc_cfg.flag.bs.non_blocking) {
+        (void)printf("non_blocking\n");
         return need_acked ? URMA_EAGAIN : URMA_SUCCESS;
     }
     (void)pthread_mutex_lock(&jfc->event_mutex);
