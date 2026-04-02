@@ -2110,96 +2110,117 @@ static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int
 
 int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
 {
+    static thread_local urma_cr_t pcr_buf[URMA_UBAGG_MAX_CR_CNT_PER_DEV];
+
+    bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(jfc->urma_ctx, bondp_context_t, v_ctx);
+    bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(jfc, bondp_jfc_t, v_jfc);
+
+    int ret;
     if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
         uint64_t start = get_cycles();
-        bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(jfc->urma_ctx, bondp_context_t, v_ctx);
-        bondp_comp_t *bdp_jfc = CONTAINER_OF_FIELD(jfc, bondp_comp_t, v_jfc);
+        int cr_cnt_remaining = cr_cnt;
 
-        if (!is_valid_bondp_comp(bdp_jfc)) {
-            uint64_t end = get_cycles();
-            double mhz = get_cpu_mhz(false);
-            uint64_t elapsed_us = (end - start) / mhz;
-            urma_step_perf(BOND_POLL_JFC, elapsed_us);
-            return -EINVAL;
-        }
+        /* Start polling from the next device index to avoid starvation. */
+        int start_idx = bdp_jfc->lasted_polled_jfc_idx + 1;
 
-        memset(g_bondp_cqe_cnt, 0, sizeof(g_bondp_cqe_cnt));
+        for (int i = 0; i < bdp_jfc->dev_num && cr_cnt_remaining > 0; i++) {
+            int idx = ((start_idx + i) % bdp_jfc->dev_num);
 
-        /* Get all CR from pjfc and check device status */
-        int total_cqe_cnt = bondp_poll_pjfc(bdp_ctx, bdp_jfc, cr_cnt, g_bondp_cqe_cnt, g_bondp_cr_buf);
-        if (total_cqe_cnt <= 0) {
-            uint64_t end = get_cycles();
-            double mhz = get_cpu_mhz(false);
-            uint64_t elapsed_us = (end - start) / mhz;
-            urma_step_perf(BOND_POLL_JFC, elapsed_us);
-            return total_cqe_cnt;
-        }
-        /* Handle each CR */
-        int total_cnt = 0;
-        for (int dev_id = 0; dev_id < bdp_jfc->dev_num; ++dev_id) {
-            if (bdp_jfc->p_jfc[dev_id] == NULL) {
+            if (bdp_jfc->p_jfc[idx] == NULL) {
                 continue;
             }
-            for (int cr_id = 0; cr_id < g_bondp_cqe_cnt[dev_id]; ++cr_id) {
-                int ret = 0;
+
+            int pcr_cnt_max = cr_cnt_remaining > URMA_UBAGG_MAX_CR_CNT_PER_DEV
+                                  ? URMA_UBAGG_MAX_CR_CNT_PER_DEV
+                                  : cr_cnt_remaining;
+            int pcr_cnt = urma_poll_jfc(bdp_jfc->p_jfc[idx], pcr_cnt_max, pcr_buf);
+            if (pcr_cnt < 0) {
+                uint64_t end = get_cycles();
+                double mhz = get_cpu_mhz(false);
+                uint64_t elapsed_us = (end - start) / mhz;
+                urma_step_perf(BOND_POLL_JFC, elapsed_us);
+                return pcr_cnt;
+            }
+            if (pcr_cnt == 0) {
+                continue;
+            }
+
+            for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
+                urma_cr_t *pcr = &pcr_buf[cr_id];
+                cr_convert_ret_t conv_ret;
+
                 if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
-                    ret = bondp_handle_cr_no_store(bdp_ctx, dev_id, &g_bondp_cr_buf[dev_id][cr_id],
-                        cr, &total_cnt);
+                    conv_ret = bondp_handle_cr_no_store(bdp_ctx, idx, pcr);
                 } else {
-                    ret = bondp_handle_cr_with_store(bdp_ctx, dev_id, total_cqe_cnt, cr_cnt,
-                        &g_bondp_cr_buf[dev_id][cr_id], cr, &total_cnt);
+                    conv_ret = bondp_handle_cr_with_store(bdp_ctx, idx, pcr);
                 }
-                if (ret < 0) {
+                if (conv_ret == CONVERT_FAIL) {
                     uint64_t end = get_cycles();
                     double mhz = get_cpu_mhz(false);
                     uint64_t elapsed_us = (end - start) / mhz;
                     urma_step_perf(BOND_POLL_JFC, elapsed_us);
-                    return ret;
+                    return -1;
+                }
+                if (conv_ret == CONVERT_SUCCESS) {
+                    cr[cr_cnt - cr_cnt_remaining] = *pcr;
+                    cr_cnt_remaining--;
                 }
             }
+
+            bdp_jfc->lasted_polled_jfc_idx = idx;
         }
+        ret = cr_cnt - cr_cnt_remaining;
         uint64_t end = get_cycles();
         double mhz = get_cpu_mhz(false);
         uint64_t elapsed_us = (end - start) / mhz;
         urma_step_perf(BOND_POLL_JFC, elapsed_us);
-        return total_cnt;
     } else {
-        bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(jfc->urma_ctx, bondp_context_t, v_ctx);
-        bondp_comp_t *bdp_jfc = CONTAINER_OF_FIELD(jfc, bondp_comp_t, v_jfc);
+        int cr_cnt_remaining = cr_cnt;
 
-        if (!is_valid_bondp_comp(bdp_jfc)) {
-            return -EINVAL;
-        }
+        /* Start polling from the next device index to avoid starvation. */
+        int start_idx = bdp_jfc->lasted_polled_jfc_idx + 1;
 
-        memset(g_bondp_cqe_cnt, 0, sizeof(g_bondp_cqe_cnt));
+        for (int i = 0; i < bdp_jfc->dev_num && cr_cnt_remaining > 0; i++) {
+            int idx = ((start_idx + i) % bdp_jfc->dev_num);
 
-        /* Get all CR from pjfc and check device status */
-        int total_cqe_cnt = bondp_poll_pjfc(bdp_ctx, bdp_jfc, cr_cnt, g_bondp_cqe_cnt, g_bondp_cr_buf);
-        if (total_cqe_cnt <= 0) {
-            return total_cqe_cnt;
-        }
-        /* Handle each CR */
-        int total_cnt = 0;
-        for (int dev_id = 0; dev_id < bdp_jfc->dev_num; ++dev_id) {
-            if (bdp_jfc->p_jfc[dev_id] == NULL) {
+            if (bdp_jfc->p_jfc[idx] == NULL) {
                 continue;
             }
-            for (int cr_id = 0; cr_id < g_bondp_cqe_cnt[dev_id]; ++cr_id) {
-                int ret = 0;
+
+            int pcr_cnt_max = cr_cnt_remaining > URMA_UBAGG_MAX_CR_CNT_PER_DEV
+                                  ? URMA_UBAGG_MAX_CR_CNT_PER_DEV
+                                  : cr_cnt_remaining;
+            int pcr_cnt = urma_poll_jfc(bdp_jfc->p_jfc[idx], pcr_cnt_max, pcr_buf);
+            if (pcr_cnt < 0) {
+                return pcr_cnt;
+            }
+            if (pcr_cnt == 0) {
+                continue;
+            }
+
+            for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
+                urma_cr_t *pcr = &pcr_buf[cr_id];
+                cr_convert_ret_t conv_ret;
+
                 if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
-                    ret = bondp_handle_cr_no_store(bdp_ctx, dev_id, &g_bondp_cr_buf[dev_id][cr_id],
-                        cr, &total_cnt);
+                    conv_ret = bondp_handle_cr_no_store(bdp_ctx, idx, pcr);
                 } else {
-                    ret = bondp_handle_cr_with_store(bdp_ctx, dev_id, total_cqe_cnt, cr_cnt,
-                        &g_bondp_cr_buf[dev_id][cr_id], cr, &total_cnt);
+                    conv_ret = bondp_handle_cr_with_store(bdp_ctx, idx, pcr);
                 }
-                if (ret < 0) {
-                    return ret;
+                if (conv_ret == CONVERT_FAIL) {
+                    return -1;
+                }
+                if (conv_ret == CONVERT_SUCCESS) {
+                    cr[cr_cnt - cr_cnt_remaining] = *pcr;
+                    cr_cnt_remaining--;
                 }
             }
+
+            bdp_jfc->lasted_polled_jfc_idx = idx;
         }
-        return total_cnt;
+        ret = cr_cnt - cr_cnt_remaining;
     }
+    return ret;
 }
 
 urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
