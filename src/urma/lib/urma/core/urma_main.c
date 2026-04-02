@@ -270,13 +270,8 @@ urma_status_t urma_uninit(void)
             ret = URMA_FAIL;
         }
     }
-    /* Move dev_list to local under the lock, then free outside the lock */
-    struct ub_list local_dev_list = UB_LIST_INITIALIZER(&local_dev_list);
-    (void)pthread_spin_lock(&g_dev_list_lock);
-    ub_list_move(&g_dev_list, &local_dev_list);
-    (void)pthread_spin_unlock(&g_dev_list_lock);
+    urma_free_devices(&g_dev_list);
     (void)pthread_spin_destroy(&g_dev_list_lock);
-    urma_free_devices(&local_dev_list);
     /* unload urma so */
     urma_so_t *so, *next;
     UB_LIST_FOR_EACH_SAFE (so, next, node, &g_so_list) {
