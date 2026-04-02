@@ -826,7 +826,8 @@ void umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
     }
     uint64_t diff = timestamp - queue->checker->last_send;
     uint16_t remote_credit = fc->ops.remote_rx_window_load(fc);
-    if (diff < queue->flow_control.timeout_us || remote_credit <= fc->min_reserved_credit) {
+    uint16_t return_threshold = umq_ub_fc_threashold_modify((uint16_t)fc->min_reserved_credit, fc->peer_ratio);
+    if (diff < queue->flow_control.timeout_us || remote_credit < return_threshold) {
         return;
     }
     if (!umq_ub_permission_acquire(fc)) {
@@ -844,8 +845,8 @@ void umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
     if (return_credit == 0) {
         return_credit = 1;
     }
-    if (remote_credit - return_credit <= fc->min_reserved_credit) {
-        return_credit = remote_credit - fc->min_reserved_credit;
+    if (remote_credit - return_credit <= return_threshold) {
+        return_credit = remote_credit - return_threshold;
     }
     urma_jetty_t *jetty  = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
