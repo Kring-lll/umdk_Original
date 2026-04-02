@@ -20,6 +20,7 @@
 #include "bondp_jetty_ctx.h"
 #include "bondp_context_table.h"
 #include "bondp_provider_ops.h"
+#include "bondp_hash_table.h"
 #include "bondp_segment.h"
 #include "ubagg_ioctl.h"
 #include "urma_provider.h"
@@ -80,7 +81,7 @@ static int bondp_create_vjfce(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfce)
     }
     bdp_jfce->v_jfce.fd = epoll_fd;
 
-    bdp_jfce->comp_ctx = (void *)calloc(1, sizeof(bondp_hash_table_t));
+    bdp_jfce->comp_ctx = (void *)calloc(1, sizeof(bondp_jfce_ctx_t));
     if (bdp_jfce->comp_ctx == NULL) {
         goto CLOSE_FD;
     }
@@ -1516,6 +1517,70 @@ UNBIND:
     return URMA_FAIL;
 }
 
+static urma_jfc_t *get_valid_jfc_r(urma_jetty_t *jetty)
+{
+    if (jetty->jetty_cfg.flag.bs.share_jfr == 1) {
+        return jetty->jetty_cfg.shared.jfr->jfr_cfg.jfc;
+    } else {
+        return jetty->jetty_cfg.jfr_cfg->jfc;
+    }
+}
+
+static int opt_vjfce_fd_impl(urma_jfc_t *vjfc, bondp_comp_t *bdp_jetty, int local_direct_port, int rxtx)
+{
+    urma_jfce_t *vjfce = vjfc->jfc_cfg.jfce;
+    if (!vjfce) {
+        return 0;
+    }
+    // if event mode
+    urma_jfc_t *pjfc = NULL;
+    if (rxtx == 2) {
+        pjfc = bdp_jetty->p_jetty[local_direct_port]->jetty_cfg.jfs_cfg.jfc;
+    } else if (rxtx == 1) {
+        pjfc = get_valid_jfc_r(bdp_jetty->p_jetty[local_direct_port]);
+    }
+    if (!vjfce) {
+        URMA_LOG_WARN("Invalid parameter, failed to find direct jfce, vjfc = %p, vjfce = %p.\n", vjfc, vjfce);
+        return -EINVAL;
+    }
+
+    urma_jfce_t *pjfce = pjfc->jfc_cfg.jfce;
+    URMA_LOG_DEBUG("new vjfce->fd = %d, old vjfce->fd = %d.\n", pjfce->fd, vjfce->fd);
+    vjfce->fd = pjfce->fd;
+    bondp_comp_t *bdp_jfce = CONTAINER_OF_FIELD(vjfce, bondp_comp_t, v_jfce);
+    bondp_jfce_ctx_t *bdp_jfce_ctx = bdp_jfce->comp_ctx;
+    bdp_jfce_ctx->local_direct_jfce = pjfce;
+    bdp_jfce_ctx->rxtx = rxtx;
+    URMA_LOG_DEBUG("fill bdp_jfce_ctx = %p with local_direct_jfce(pjfce) = %p, vjfce = %p.\n",
+        bdp_jfce_ctx, bdp_jfce_ctx->local_direct_jfce, vjfce);
+    return 0;
+}
+
+static int opt_vjfce_fd(bjetty_ctx_t *bjetty_ctx, bondp_comp_t *bdp_jetty)
+{
+    int local_port = bjetty_ctx->direct_local_port;
+    int target_port = bjetty_ctx->direct_target_port;
+    urma_eid_t leid = bjetty_ctx->pjettys[local_port]->jetty_id.eid;
+    urma_eid_t teid = bjetty_ctx->pjettys[target_port]->jetty_id.eid;
+    URMA_LOG_DEBUG("bind jetty single_path eid = " EID_FMT ", target_eid = " EID_FMT ".\n",
+        EID_ARGS(leid), EID_ARGS(teid));
+
+    urma_jfc_t *vjfc_s = bdp_jetty->v_jetty.jetty_cfg.jfs_cfg.jfc;
+    urma_jfc_t *vjfc_r = get_valid_jfc_r(&bdp_jetty->v_jetty);
+    if (!vjfc_s || !vjfc_r) {
+        URMA_LOG_WARN("Invalid parameter, vjfc_s = %p, vjfc_r = %p, backoff to old implementation.\n", vjfc_s, vjfc_r);
+        // opt failed but can fallback to old implementation.
+        return URMA_SUCCESS;
+    }
+    if (opt_vjfce_fd_impl(vjfc_r, bdp_jetty, local_port, 1) != URMA_SUCCESS) {
+        URMA_LOG_WARN("failed to opt out vjfc_r, backoff to old implementation.\n");
+        return URMA_SUCCESS;
+    }
+    opt_vjfce_fd_impl(vjfc_s, bdp_jetty, local_port, 2);
+    URMA_LOG_DEBUG("optimize out epoll_create based vjfce->fd with direct pjfce->fd.\n");
+    return URMA_SUCCESS;
+}
+
 static urma_status_t bind_jetty_single_path(bondp_comp_t *bdp_jetty, bondp_target_jetty_t *bdp_tjetty)
 {
     int ret = 0;
@@ -1549,7 +1614,7 @@ static urma_status_t bind_jetty_single_path(bondp_comp_t *bdp_jetty, bondp_targe
     bjetty_ctx_t *bjetty_ctx = (bjetty_ctx_t *)(bdp_jetty->comp_ctx); /* Not NULL guaranteed by bondp_create_jetty */
     bjetty_ctx->direct_local_port = local_port;
     bjetty_ctx->direct_target_port = target_port;
-    return URMA_SUCCESS;
+    return opt_vjfce_fd(bjetty_ctx, bdp_jetty);
 }
 
 urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
@@ -1818,6 +1883,15 @@ urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
 int bondp_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t *jfc[])
 {
     bondp_comp_t *bdp_jfce = CONTAINER_OF_FIELD(jfce, bondp_comp_t, v_jfce);
+    bondp_jfce_ctx_t *bdp_jfce_ctx = (bondp_jfce_ctx_t*)bdp_jfce->comp_ctx;
+    URMA_LOG_DEBUG("wait_jfc with comp = %p, direct_local_jfce = %p, rxtx(rx=1,tx=2) = %d.\n",
+        bdp_jfce, bdp_jfce_ctx->local_direct_jfce, bdp_jfce_ctx->rxtx);
+    // RC+RTP single_path
+    if (bdp_jfce_ctx->local_direct_jfce)
+    {
+        return urma_wait_jfc(bdp_jfce_ctx->local_direct_jfce, jfc_cnt, time_out, jfc);
+    }
+    // default
     bondp_hash_table_t *v_jfce_table = bdp_jfce->comp_ctx;
     bdp_vjfce_info_t *node = NULL;
 
