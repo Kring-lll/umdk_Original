@@ -39,6 +39,22 @@ static struct ub_list g_dev_list = UB_LIST_INITIALIZER(&g_dev_list);
 static uint32_t g_uasid;
 static pthread_spinlock_t g_dev_list_lock;
 static atomic_uint g_init_flag;
+static atomic_uint g_bonding_retrans_cnt;
+
+void urma_bonding_retrans_init(void)
+{
+    atomic_init(&g_bonding_retrans_cnt, 0);
+}
+
+void urma_bonding_retrans_inc(void)
+{
+    (void)atomic_fetch_add(&g_bonding_retrans_cnt, 1);
+}
+
+uint32_t urma_bonding_retrans_get(void)
+{
+    return atomic_load(&g_bonding_retrans_cnt);
+}
 
 typedef struct urma_so {
     char path[URMA_MAX_LIB_PATH];
