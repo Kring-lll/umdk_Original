@@ -30,6 +30,11 @@ typedef struct bondp_create_vjetty_udata {
     int dev_num;
     bool is_multipath;
 } bondp_create_vjetty_udata_t;
+typedef struct bondp_config_ports_udata {
+    uint32_t used_ports_idx[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t used_ports_idx_num;
+    urma_jetty_id_t jetty_id;
+} bondp_config_ports_udata_t;
 
 typedef bondp_create_vjetty_udata_t bondp_create_vjfr_udata_t;
 
@@ -1184,6 +1189,102 @@ urma_status_t bondp_modify_jetty(urma_jetty_t *jetty, urma_jetty_attr_t *attr)
     return final_ret;
 }
 
+static int bondp_config_jfr_port(bondp_user_ctl_config_jfr_port_in_t jfr_port_config)
+{
+    urma_jfr_t *vjfr = &jfr_port_config.vjfr;
+    bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(vjfr, bondp_comp_t, v_jfr);
+
+    memset(bdp_jfr->used_ports_idx, 0xFF, sizeof(bdp_jfr->used_ports_idx));
+    for (int i = 0; i < jfr_port_config.used_ports_num; i++) {
+        int states_index = jfr_port_config.used_ports[i].port_idx == UINT8_MAX ? jfr_port_config.used_ports[i].chip_id
+        : jfr_port_config.used_ports[i].port_idx + jfr_port_config.used_ports[i].chip_id * PORT_EID_MAX_NUM_PER_DEV
+        + PRIMARY_EID_NUM;
+
+        bdp_jfr->used_ports_idx[states_index] = jfr_port_config.used_ports[i].value;
+    }
+    bdp_jfr->used_ports_idx_num = jfr_port_config.used_ports_num;
+
+    urma_user_ctl_in_t in = {
+        .opcode = CONFIG_JFR_PORTS_STATES
+    };
+    urma_user_ctl_out_t out = {0};
+
+    bondp_config_ports_udata_t jfr_port_udata = {
+        .used_ports_idx = {0},
+        .used_ports_idx_num = bdp_jfr->used_ports_idx_num,
+        .jetty_id = vjfr->jfr_id
+    };
+
+    memcpy(jfr_port_udata.used_ports_idx, bdp_jfr->used_ports_idx, sizeof(bdp_jfr->used_ports_idx));
+
+    urma_udrv_t data = {
+        .in_addr = (uint64_t)&jfr_port_udata,
+        .in_len = sizeof(jfr_port_udata)
+    };
+    if (urma_cmd_user_ctl(&(bdp_jfr->bondp_ctx->v_ctx), &in, &out, &data)) {
+        URMA_LOG_ERR("Failed to config jfr ports states\n");
+        return -1;
+    }
+    return 0;
+}
+
+static int bondp_config_jfs_port(bondp_user_ctl_config_jfs_port_in_t jfs_port_config)
+{
+    urma_jfs_t *vjfs = &jfs_port_config.vjfs;
+    bondp_comp_t *bdp_jfs = CONTAINER_OF_FIELD(vjfs, bondp_comp_t, v_jfs);
+
+    memset(bdp_jfs->used_ports_idx, 0xFF, sizeof(bdp_jfs->used_ports_idx));
+    for (int i = 0; i < jfs_port_config.used_ports_num; i++) {
+        int states_index = jfs_port_config.used_ports[i].port_idx == UINT8_MAX ? jfs_port_config.used_ports[i].chip_id
+        : jfs_port_config.used_ports[i].port_idx + jfs_port_config.used_ports[i].chip_id * PORT_EID_MAX_NUM_PER_DEV
+        + PRIMARY_EID_NUM;
+
+        bdp_jfs->used_ports_idx[states_index] = jfs_port_config.used_ports[i].value;
+    }
+    bdp_jfs->used_ports_idx_num = jfs_port_config.used_ports_num;
+    return 0;
+}
+
+static int bondp_config_jetty_port(bondp_user_ctl_config_jetty_port_in_t jetty_port_config)
+{
+    urma_jetty_t *vjetty = &jetty_port_config.vjetty;
+    bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(&vjetty, bondp_comp_t, v_jetty);
+
+    memset(bdp_jetty->used_ports_idx, 0xFF, sizeof(bdp_jetty->used_ports_idx));
+    for (int i = 0; i < jetty_port_config.used_ports_num; i++) {
+        int states_index = jetty_port_config.used_ports[i].port_idx == UINT8_MAX ?
+        jetty_port_config.used_ports[i].chip_id
+        : jetty_port_config.used_ports[i].port_idx + jetty_port_config.used_ports[i].chip_id * PORT_EID_MAX_NUM_PER_DEV
+        + PRIMARY_EID_NUM;
+
+        bdp_jetty->used_ports_idx[states_index] = jetty_port_config.used_ports[i].value;
+    }
+    bdp_jetty->used_ports_idx_num = jetty_port_config.used_ports_num;
+
+    urma_user_ctl_in_t in = {
+        .opcode = CONFIG_JETTY_PORTS_STATES
+    };
+    urma_user_ctl_out_t out = {0};
+
+    bondp_config_ports_udata_t jetty_port_udata = {
+        .used_ports_idx = {0},
+        .used_ports_idx_num = bdp_jetty->used_ports_idx_num,
+        .jetty_id = vjetty->jetty_id
+    };
+
+    memcpy(jetty_port_udata.used_ports_idx, bdp_jetty->used_ports_idx, sizeof(bdp_jetty->used_ports_idx));
+
+    urma_udrv_t data = {
+        .in_addr = (uint64_t)&jetty_port_udata,
+        .in_len = sizeof(jetty_port_udata)
+    };
+    if (urma_cmd_user_ctl(&(bdp_jetty->bondp_ctx->v_ctx), &in, &out, &data)) {
+        URMA_LOG_ERR("Failed to config jetty ports states\n");
+        return -1;
+    }
+    return 0;
+}
+
 int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_out_t *out)
 {
     switch (in->opcode) {
@@ -1202,6 +1303,24 @@ int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_ou
         case URMA_USER_CTL_BOND_ENABLE_SEG_CACHE:
             bondp_toggle_seg_cache(true);
             return 0;
+        case URMA_USER_CTL_BOND_CONFIG_JFR_PORT:
+            if (in->len != sizeof(bondp_user_ctl_config_jfr_port_in_t)) {
+                URMA_LOG_ERR("Invalid len");
+                return -EINVAL;
+            }
+            return bondp_config_jfr_port(*(bondp_user_ctl_config_jfr_port_in_t *)in->addr);
+        case URMA_USER_CTL_BOND_CONFIG_JFS_PORT:
+            if (in->len != sizeof(bondp_user_ctl_config_jfs_port_in_t)) {
+                URMA_LOG_ERR("Invalid len");
+                return -EINVAL;
+            }
+            return bondp_config_jfs_port(*(bondp_user_ctl_config_jfs_port_in_t *)in->addr);
+        case URMA_USER_CTL_BOND_CONFIG_JETTY_PORT:
+            if (in->len != sizeof(bondp_user_ctl_config_jetty_port_in_t)) {
+                URMA_LOG_ERR("Invalid len");
+                return -EINVAL;
+            }
+            return bondp_config_jetty_port(*(bondp_user_ctl_config_jetty_port_in_t *)in->addr);
         default: {
             URMA_LOG_ERR("Unsupported opcode, opcode:%d\n", in->opcode);
             return -EINVAL;

@@ -27,6 +27,8 @@ struct ubagg_set_topo_info {
 typedef enum ubagg_userctl_opcode {
     GET_SLAVE_DEVICE = 1,
     GET_TOPO_INFO    = 2,
+    CONFIG_JFR_PORTS_STATES = 7,
+    CONFIG_JETTY_PORTS_STATES = 8
 } ubagg_userctl_opcode_t;
 
 struct ubagg_slave_device {
