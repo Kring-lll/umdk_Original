@@ -1158,13 +1158,13 @@ int urma_cmd_delete_jfc(urma_jfc_t *jfc)
         return ret;
     }
 
-    bool is_acked = jfc->comp_events_acked != arg.out.comp_events_reported ||
+    bool need_acked = jfc->comp_events_acked != arg.out.comp_events_reported ||
         jfc->async_events_acked != arg.out.async_events_reported;
-    if (jfc->jfc_cfg.flag.bs.non_blocking == 1) {
-        return is_acked ? URMA_EAGAIN : URMA_SUCCESS;
+    if (jfc->jfc_cfg.flag.bs.non_blocking) {
+        return need_acked ? URMA_EAGAIN : URMA_SUCCESS;
     }
     (void)pthread_mutex_lock(&jfc->event_mutex);
-    while (is_acked) {
+    while (need_acked) {
         URMA_LOG_ERR("There is jfc event and it must be acked, jfc_comp:%u, comp:%u, jfc_async:%u, async:%u\n",
             jfc->comp_events_acked, arg.out.comp_events_reported, jfc->async_events_acked,
             arg.out.async_events_reported);
