@@ -820,7 +820,8 @@ void umq_ub_shared_credit_resp_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
             new_request = fc->max_credits_request;
         }
     }
-    fc->credits_per_request = umq_ub_fc_threashold_modify((uint16_t)new_request, fc->peer_ratio);
+    // 防止当前申请的credit=2, 翻倍后数量*空闲比例后再取整等于2，导致数量永远等于2，需要加1处理
+    fc->credits_per_request = umq_ub_fc_threashold_modify((uint16_t)new_request, fc->peer_ratio) + 1;
     umq_ub_window_inc(fc, reply_credits);
     return;
 }
@@ -837,7 +838,8 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
     }
     uint64_t diff = timestamp - queue->checker->last_send;
     uint16_t remote_credit = fc->ops.remote_rx_window_load(fc);
-    if (diff < queue->flow_control.timeout_us || remote_credit <= fc->min_reserved_credit) {
+    uint16_t return_threshold = umq_ub_fc_threashold_modify((uint16_t)fc->min_reserved_credit, fc->peer_ratio);
+    if (diff < queue->flow_control.timeout_us || remote_credit <= return_threshold) {
         return UMQ_SUCCESS;
     }
     if (!umq_ub_permission_acquire(fc)) {
@@ -859,8 +861,8 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
     if (return_credit == 0) {
         return_credit = 1;
     }
-    if (remote_credit - return_credit <= fc->min_reserved_credit) {
-        return_credit = remote_credit - fc->min_reserved_credit;
+    if (remote_credit - return_credit <= return_threshold) {
+        return_credit = remote_credit - return_threshold;
     }
     urma_jetty_t *jetty  = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
