@@ -622,6 +622,17 @@ int urma_cmd_delete_jfs(urma_jfs_t *jfs)
         return ret;
     }
 
+    bool non_blocking = jfs->jfs_cfg.flag.bs.non_blocking;
+    if (non_blocking) {
+        (void)pthread_mutex_lock(&jfs->event_mutex);
+        if (jfs->async_events_acked != arg.out.async_events_reported) {
+            (void)pthread_mutex_unlock(&jfs->event_mutex);
+            return URMA_EAGAIN;
+        }
+        (void)pthread_mutex_unlock(&jfs->event_mutex);
+        return 0;
+    }
+
     wait_async_event_ack(&jfs->event_mutex, &jfs->event_cond, &jfs->async_events_acked, arg.out.async_events_reported);
 
     return 0;
