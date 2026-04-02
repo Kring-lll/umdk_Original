@@ -656,23 +656,6 @@ uint32_t urma_merge_sysfs_devices(struct ub_list *dev_list, struct ub_list *cand
     return cnt;
 }
 
-void urma_free_sysfs_dev_list(struct ub_list *dev_list)
-{
-    urma_sysfs_dev_t *sysfs_dev, *next;
-
-    UB_LIST_FOR_EACH_SAFE (sysfs_dev, next, node, dev_list) {
-        if (sysfs_dev == NULL) {
-            continue;
-        }
-        ub_list_remove(&sysfs_dev->node);
-        if (sysfs_dev->urma_device != NULL) {
-            free(sysfs_dev->urma_device);
-            sysfs_dev->urma_device = NULL;
-        }
-        free(sysfs_dev);
-    }
-}
-
 urma_device_t *urma_find_dev_by_name(struct ub_list *dev_list, const char *dev_name)
 {
     urma_sysfs_dev_t *sysfs_dev;
