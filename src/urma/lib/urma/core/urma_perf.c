@@ -252,7 +252,7 @@ urma_status_t urma_stop_perf(void)
 
 void urma_step_perf(urma_perf_record_type_t type, uint64_t latency)
 {
-    //if (g_perf_ctx == NULL || !g_perf_ctx->is_running) return;
+    if (g_perf_ctx == NULL || !g_perf_ctx->is_running) return;
     if (type >= URMA_PERF_RECORD_TYPE_MAX) return;
     
     hdr_record_value(g_perf_ctx->histograms[type], latency);
