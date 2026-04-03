@@ -219,7 +219,7 @@ urma_status_t urma_start_perf(void)
         return URMA_ERROR;
     }
     
-    //g_perf_ctx = (UrmaPerfContext*)calloc(1, sizeof(UrmaPerfContext));
+    g_perf_ctx = (UrmaPerfContext*)calloc(1, sizeof(UrmaPerfContext));
     if (g_perf_ctx == NULL) {
         printf("g_perf_ctx == NULL");
         return URMA_ERROR;
