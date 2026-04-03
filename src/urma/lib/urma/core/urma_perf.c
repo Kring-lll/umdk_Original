@@ -4,6 +4,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <threads.h>
+#include <unistd.h>
+#include <sys/syscall.h>
 #include "urma_api.h"
 
 #define URMA_PERF_MIN_VALUE 1
@@ -67,7 +70,7 @@ typedef struct {
     int32_t is_running;
 } UrmaPerfContext;
 
-__thread UrmaPerfContext* g_perf_ctx = NULL;
+thread_local UrmaPerfContext* g_perf_ctx = NULL;
 
 static const char* perf_type_names[] = {
     "UB_JETTY_POST_SEND",
@@ -212,11 +215,13 @@ static void update_stats(UrmaPerfContext* ctx, urma_perf_record_type_t type)
 urma_status_t urma_start_perf(void)
 {
     if (g_perf_ctx != NULL) {
+        printf("g_perf_ctx != NULL");
         return URMA_ERROR;
     }
     
-    g_perf_ctx = (UrmaPerfContext*)calloc(1, sizeof(UrmaPerfContext));
+    //g_perf_ctx = (UrmaPerfContext*)calloc(1, sizeof(UrmaPerfContext));
     if (g_perf_ctx == NULL) {
+        printf("g_perf_ctx == NULL");
         return URMA_ERROR;
     }
     
@@ -226,6 +231,8 @@ urma_status_t urma_start_perf(void)
     }
     
     g_perf_ctx->is_running = 1;
+    printf("id: %ld\n", (long)syscall(__NR_gettid));
+    printf("start: g_perf_ctx->is_running: %d\n", g_perf_ctx->is_running);
     return URMA_SUCCESS;
 }
 
@@ -245,7 +252,7 @@ urma_status_t urma_stop_perf(void)
 
 void urma_step_perf(urma_perf_record_type_t type, uint64_t latency)
 {
-    if (g_perf_ctx == NULL || !g_perf_ctx->is_running) return;
+    //if (g_perf_ctx == NULL || !g_perf_ctx->is_running) return;
     if (type >= URMA_PERF_RECORD_TYPE_MAX) return;
     
     hdr_record_value(g_perf_ctx->histograms[type], latency);

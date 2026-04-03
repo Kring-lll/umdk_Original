@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <threads.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,12 +34,12 @@ typedef struct UrmaPerfContext {
     int32_t is_running;
 } UrmaPerfContext;
 
-extern __thread UrmaPerfContext* g_perf_ctx;
+extern thread_local UrmaPerfContext* g_perf_ctx;
 
-int32_t urma_start_perf(void);
-int32_t urma_stop_perf(void);
+urma_status_t urma_start_perf(void);
+urma_status_t urma_stop_perf(void);
 void urma_step_perf(urma_perf_record_type_t type, uint64_t latency);
-int32_t urma_get_perf_info(char *perf_buf, uint32_t *length);
+urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length);
 void urma_perf_cleanup(void);
 
 #ifdef __cplusplus
