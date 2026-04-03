@@ -15,8 +15,11 @@
 #include <signal.h>
 #include <math.h>
 #include <stddef.h>
+#include <unistd.h>
+#include <sys/syscall.h>
 
 #include "urma_api.h"
+#include "urma_perf.h"
 
 #include "perftest_parameters.h"
 #include "perftest_resources.h"
@@ -1191,6 +1194,11 @@ static void *run_read_lat_duplex(void *arg)
         update_duration_state(ctx, cfg);
     }
 
+    printf("------------run_test-----------\n");
+    int status;
+    status = urma_start_perf();
+    printf("start status: %d\n", status);
+
     while (scnt < cfg->iters || (cfg->time_type.bs.duration == 1 && run_ctx->state != END_STATE)) {
         if (cfg->time_type.bs.iterations == 1) {
             run_ctx->tposted[id * cfg->iters + scnt] = get_cycles();
@@ -1200,6 +1208,8 @@ static void *run_read_lat_duplex(void *arg)
         for (uint32_t i = 0; i < cfg->jfs_post_list; i++) {
             wr[i].user_ctx = (uintptr_t)++rid;
         }
+        printf("g_perf_ctx->is_running: %d\n", g_perf_ctx->is_running);
+        printf("id: %ld\n", (long)syscall(__NR_gettid));
         urma_status_t status = urma_post_jetty_send_wr(ctx->jetty[id], wr, &bad_wr);
         if (status != URMA_SUCCESS) {
             (void)fprintf(stderr, "Failed to post jfs wr, id:%u, status:%d, scnt:%lu\n", id, (int)status, scnt);
@@ -1219,6 +1229,13 @@ static void *run_read_lat_duplex(void *arg)
             run_ctx->scnt[id] += 1;
         }
     }
+
+    urma_stop_perf();
+    char *perf_buf = malloc(4096);
+    uint32_t length = 4096;
+    urma_get_perf_info(perf_buf, &length);
+    printf("%s\n", perf_buf);
+    free(perf_buf);
 
     free(cr);
     return NULL;
