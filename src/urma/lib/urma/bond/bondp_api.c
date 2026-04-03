@@ -82,13 +82,34 @@ static int bondp_create_vjfce(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfce)
     }
     bdp_jfce->v_jfce.fd = epoll_fd;
 
+    bdp_jfce->comp_ctx = (void *)calloc(1, sizeof(bondp_hash_table_t));
+    if (bdp_jfce->comp_ctx == NULL) {
+        goto CLOSE_FD;
+    }
+
+    if (bdp_vjfce_info_table_create((bondp_hash_table_t *)bdp_jfce->comp_ctx, BOND_EPOLL_NUM) != 0) {
+        URMA_LOG_ERR("Fail to create jfce hash table.\n");
+        goto FREE_COMP;
+    }
     bdp_jfce->v_jfce.ref.atomic_cnt = 0;
     return 0;
+
+FREE_COMP:
+    free(bdp_jfce->comp_ctx);
+    bdp_jfce->comp_ctx = NULL;
+CLOSE_FD:
+    close(epoll_fd);
+    bdp_jfce->v_jfce.fd = -1;
+    return -1;
 }
 
 static int bondp_delete_vjfce(bondp_comp_t *bdp_jfce)
 {
     bdp_vjfce_info_table_close_fd(bdp_jfce);
+    bdp_vjfce_info_table_destroy((bondp_hash_table_t *)bdp_jfce->comp_ctx);
+    free(bdp_jfce->comp_ctx);
+    bdp_jfce->comp_ctx = NULL;
+
     return 0;
 }
 
@@ -1845,6 +1866,8 @@ urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
 int bondp_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t *jfc[])
 {
     bondp_comp_t *bdp_jfce = CONTAINER_OF_FIELD(jfce, bondp_comp_t, v_jfce);
+    bondp_hash_table_t *v_jfce_table = bdp_jfce->comp_ctx;
+    bdp_vjfce_info_t *node = NULL;
 
     if (!is_valid_bondp_comp(bdp_jfce)) {
         URMA_LOG_ERR("Invalid param");
