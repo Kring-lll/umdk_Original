@@ -1844,16 +1844,18 @@ urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
 
 int bondp_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t *jfc[])
 {
-    bondp_comp_t *bdp_jfce = CONTAINER_OF_FIELD(jfce, bondp_comp_t, v_jfce);
-
-    if (!is_valid_bondp_comp(bdp_jfce)) {
-        URMA_LOG_ERR("Invalid param");
-        return URMA_EINVAL;
-    }
-
     int ret;
     if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
         uint64_t start = get_cycles();
+        bondp_comp_t *bdp_jfce = CONTAINER_OF_FIELD(jfce, bondp_comp_t, v_jfce);
+        if (!is_valid_bondp_comp(bdp_jfce)) {
+            URMA_LOG_ERR("Invalid param");
+            uint64_t end = get_cycles();
+            double mhz = get_cpu_mhz(false);
+            uint64_t elapsed_us = (end - start) / mhz;
+            urma_step_perf(BOND_WAIT_JFC, elapsed_us);
+            return URMA_EINVAL;
+        }
         struct epoll_event events[BOND_EPOLL_NUM] = {0};
         int epoll_event_limit = jfc_cnt < BOND_EPOLL_NUM ? jfc_cnt : BOND_EPOLL_NUM;
         int num = epoll_wait(bdp_jfce->v_jfce.fd, events, epoll_event_limit, time_out);
@@ -1904,12 +1906,17 @@ int bondp_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t
             jfc[actual_num++] = v_jfc;
             URMA_LOG_DEBUG("p_jfc:%p, add v_jfc:%p", p_jfc, v_jfc);
         }
-        ret = actual_num;
         uint64_t end = get_cycles();
         double mhz = get_cpu_mhz(false);
         uint64_t elapsed_us = (end - start) / mhz;
         urma_step_perf(BOND_WAIT_JFC, elapsed_us);
+        ret = actual_num;
     } else {
+        bondp_comp_t *bdp_jfce = CONTAINER_OF_FIELD(jfce, bondp_comp_t, v_jfce);
+        if (!is_valid_bondp_comp(bdp_jfce)) {
+            URMA_LOG_ERR("Invalid param");
+            return URMA_EINVAL;
+        }
         struct epoll_event events[BOND_EPOLL_NUM] = {0};
         int epoll_event_limit = jfc_cnt < BOND_EPOLL_NUM ? jfc_cnt : BOND_EPOLL_NUM;
         int num = epoll_wait(bdp_jfce->v_jfce.fd, events, epoll_event_limit, time_out);
@@ -1921,17 +1928,22 @@ int bondp_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t
         }
 
         int actual_num = 0;
-        (void)pthread_rwlock_rdlock(&v_jfce_table->lock);
         for (int i = 0; i < num; i++) {
             int fd = events[i].data.fd;
-            node = bdp_vjfce_info_table_lookup(v_jfce_table, fd);
-            if (node == NULL) {
-                URMA_LOG_WARN("Fail to find fd:%d from table.\n", fd);
+            urma_jfce_t *p_jfce = NULL;
+            for (int j = 0; j < bdp_jfce->dev_num; j++) {
+                if (bdp_jfce->p_jfce[j] != NULL && bdp_jfce->p_jfce[j]->fd == fd) {
+                    p_jfce = bdp_jfce->p_jfce[j];
+                    break;
+                }
+            }
+            if (p_jfce == NULL) {
+                URMA_LOG_WARN("Fail to find fd:%d from p_jfce array.\n", fd);
                 continue;
             }
 
             urma_jfc_t *p_jfc = NULL;
-            int p_num = urma_wait_jfc(node->p_jfce, 1, 0, &p_jfc);
+            int p_num = urma_wait_jfc(p_jfce, 1, 0, &p_jfc);
             if (p_num <= 0) {
                 continue;
             }
@@ -1947,7 +1959,6 @@ int bondp_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t
             jfc[actual_num++] = v_jfc;
             URMA_LOG_DEBUG("p_jfc:%p, add v_jfc:%p", p_jfc, v_jfc);
         }
-        (void)pthread_rwlock_unlock(&v_jfce_table->lock);
         ret = actual_num;
     }
     return ret;
