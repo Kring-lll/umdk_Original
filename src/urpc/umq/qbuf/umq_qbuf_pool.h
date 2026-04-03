@@ -19,6 +19,7 @@
 #include "umq_vlog.h"
 #include "urpc_util.h"
 #include "util_lock.h"
+#include "urpc_id_generator.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,12 +39,23 @@ extern "C" {
 #define QBUF_ALLOC_STATE_FREE      0            // define qbuf free state
 #define QBUF_ALLOC_STATE_ALLOCATED 1            // define qbuf allocated state
 
+typedef struct mempool_segment_ops {
+    int (*register_seg_callback)(uint8_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
+    void (*unregister_seg_callback)(uint8_t *ctx, uint16_t mempool_id);
+} mempool_segment_ops_t;
+
 typedef struct qbuf_pool_cfg {
     void *buf_addr;             // buffer addr
     uint64_t total_size;        // total buffer size
     uint32_t data_size;         // size of one data slab
     uint32_t headroom_size;     // reserve head room size
     umq_buf_mode_t mode;
+
+    uint64_t expansion_mem_size_max; // default 2G
+    uint32_t expansion_pool_id_min;
+    uint32_t expansion_pool_cnt_max;
+    uint32_t expansion_block_count;  // number of blocks per expansion
+    mempool_segment_ops_t seg_ops;
 } qbuf_pool_cfg_t;
 
 typedef struct qbuf_alloc_param {
@@ -118,7 +130,7 @@ typedef struct local_block_pool {
 } local_block_pool_t;
 
 typedef struct global_block_pool {
-    util_external_mutex_lock *global_mutex;
+    pthread_spinlock_t global_mutex;
     umq_buf_list_t head_with_data;
     uint64_t buf_cnt_with_data;
     umq_buf_list_t head_without_data;
@@ -207,7 +219,9 @@ static ALWAYS_INLINE uint32_t release_batch(umq_buf_list_t *input, umq_buf_list_
     return cnt;
 }
 
-// fetch list nodes from to global to local cache
+void return_list_to_pools(umq_buf_t *local_head, uint64_t *local_buf_cnt,
+    umq_buf_list_t *global_head, uint64_t *global_buf_cnt, bool with_data);
+
 static ALWAYS_INLINE int32_t fetch_from_global(
         global_block_pool_t *global_pool, local_block_pool_t *cache_pool, bool with_data, uint32_t batch_count)
 {
@@ -216,7 +230,7 @@ static ALWAYS_INLINE int32_t fetch_from_global(
     umq_buf_list_t *global_head;
     uint64_t *local_buf_cnt;
     umq_buf_list_t *local_head;
-    (void)util_mutex_lock(global_pool->global_mutex);
+    (void)pthread_spin_lock(&global_pool->global_mutex);
     if (with_data) {
         global_buf_cnt = &global_pool->buf_cnt_with_data;
         global_head = &global_pool->head_with_data;
@@ -231,67 +245,56 @@ static ALWAYS_INLINE int32_t fetch_from_global(
         local_head = &cache_pool->head_without_data;
     }
 
-    if (*global_buf_cnt < batch_count) {
-        (void)util_mutex_unlock(global_pool->global_mutex);
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "%s not enough, rest count: %u\n", with_data ? "buf with data" :
-            "buf with no data", *global_buf_cnt);
-        return -UMQ_ERR_ENOMEM;
+    if (*global_buf_cnt >= batch_count) {
+        count = allocate_batch(global_head, batch_count, local_head);
+        *global_buf_cnt -= count;
+        *local_buf_cnt += count;
+        // todo: try async expand;
+        (void)pthread_spin_unlock(&global_pool->global_mutex);
+        return count;
     }
-
-    count = allocate_batch(global_head, batch_count, local_head);
-    *global_buf_cnt -= count;
-    *local_buf_cnt += count;
-
-    (void)util_mutex_unlock(global_pool->global_mutex);
-    return count;
+    (void)pthread_spin_unlock(&global_pool->global_mutex);
+    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "%s not enough, rest count: %u\n", with_data ? "buf with data" :
+            "buf with no data", *global_buf_cnt);
+    return -UMQ_ERR_ENOMEM;
 }
 
-// flush list nodes from local cache to global
+// flush list from local to global, threshold means the local pool size that needs to be returned
 static ALWAYS_INLINE void return_to_global(
         global_block_pool_t *global_pool, local_block_pool_t *cache, bool with_data, uint32_t threshold)
 {
-    uint32_t cnt = 0;
-    uint32_t remove_cnt = 0;
-    umq_buf_t *cur_node = NULL;
-    umq_buf_t *switch_node = NULL;
-    umq_buf_t *last_node = NULL;
     uint64_t *global_buf_cnt;
     umq_buf_list_t *global_head;
     uint64_t *local_buf_cnt;
     umq_buf_list_t *local_head;
-    (void)util_mutex_lock(global_pool->global_mutex);
+    (void)pthread_spin_lock(&global_pool->global_mutex);
     if (with_data) {
-        global_buf_cnt = &global_pool->buf_cnt_with_data;
         global_head = &global_pool->head_with_data;
-
+        global_buf_cnt = &global_pool->buf_cnt_with_data;
         local_buf_cnt = &cache->buf_cnt_with_data;
         local_head = &cache->head_with_data;
     } else {
-        global_buf_cnt = &global_pool->buf_cnt_without_data;
         global_head = &global_pool->head_without_data;
-
-        local_buf_cnt =  &cache->buf_cnt_without_data;
+        global_buf_cnt = &global_pool->buf_cnt_without_data;
+        local_buf_cnt = &cache->buf_cnt_without_data;
         local_head = &cache->head_without_data;
     }
 
-    QBUF_LIST_FOR_EACH(cur_node, local_head) {
-        if (++cnt <= threshold) {
-            switch_node = cur_node;
-        } else {
-            remove_cnt++;
-            last_node = cur_node;
+    umq_buf_t *switch_node = NULL;
+    uint32_t cnt = 0;
+    QBUF_LIST_FOR_EACH(switch_node, local_head) {
+        if (++cnt == threshold) {
+            break;
         }
     }
 
-    // switch head node
-    umq_buf_t *head = QBUF_LIST_FIRST(global_head); // record original head node
-    QBUF_LIST_FIRST(global_head) = QBUF_LIST_NEXT(switch_node); // switch head node
-    QBUF_LIST_NEXT(last_node) = head; // append head node to last node
-    QBUF_LIST_NEXT(switch_node) = NULL; // break chain between switch_node and next of switch_node
-    *global_buf_cnt += remove_cnt;
-    *local_buf_cnt -= remove_cnt;
+    if (switch_node != NULL && QBUF_LIST_NEXT(switch_node) != NULL) {
+        umq_buf_t *head = QBUF_LIST_NEXT(switch_node);
+        QBUF_LIST_NEXT(switch_node) = NULL;
+        return_list_to_pools(head, local_buf_cnt, global_head, global_buf_cnt, with_data);
+    }
 
-    (void)util_mutex_unlock(global_pool->global_mutex);
+    (void)pthread_spin_unlock(&global_pool->global_mutex);
 }
 
 // flush polled buf to global
@@ -304,7 +307,7 @@ static ALWAYS_INLINE void return_qbuf_to_global(global_block_pool_t *global_pool
     uint64_t *global_buf_cnt;
     umq_buf_list_t *global_head;
 
-    (void)util_mutex_lock(global_pool->global_mutex);
+    (void)pthread_spin_lock(&global_pool->global_mutex);
     if (with_data) {
         global_buf_cnt = &global_pool->buf_cnt_with_data;
         global_head = &global_pool->head_with_data;
@@ -325,7 +328,7 @@ static ALWAYS_INLINE void return_qbuf_to_global(global_block_pool_t *global_pool
     QBUF_LIST_NEXT(last_node) = head; // append head node to last node
     *global_buf_cnt += cnt;
 
-    (void)util_mutex_unlock(global_pool->global_mutex);
+    (void)pthread_spin_unlock(&global_pool->global_mutex);
 }
 
 static ALWAYS_INLINE umq_buf_t *id_to_buf_with_data_split(char *addr, uint64_t id)
@@ -571,28 +574,20 @@ static ALWAYS_INLINE int umq_qbuf_block_pool_init(global_block_pool_t *block_poo
     QBUF_LIST_INIT(&block_pool->head_without_data);
     block_pool->buf_cnt_with_data = 0;
     block_pool->buf_cnt_without_data = 0;
-    block_pool->global_mutex = util_mutex_lock_create(UTIL_MUTEX_ATTR_EXCLUSIVE);
-    if (block_pool->global_mutex == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "umq qbuf block pool global mutex create failed\n");
-        return -UMQ_ERR_ENOMEM;
-    }
+    (void)pthread_spin_init(&block_pool->global_mutex, PTHREAD_PROCESS_PRIVATE);
     return UMQ_SUCCESS;
 }
 
 static ALWAYS_INLINE void umq_qbuf_block_pool_uninit(global_block_pool_t *block_pool)
 {
-    (void)util_mutex_lock_destroy(block_pool->global_mutex);
-    block_pool->global_mutex = NULL;
+    (void)pthread_spin_destroy(&block_pool->global_mutex);
 }
 
 uint32_t umq_qbuf_headroom_get(void);
 umq_buf_mode_t umq_qbuf_mode_get(void);
 
-typedef int (*register_seg_callback_t)(uint8_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
-typedef int (*unregister_seg_callback_t)(uint8_t *ctx, uint16_t mempool_id);
-
-int umq_qbuf_register_seg(uint8_t *ctx, register_seg_callback_t register_seg_func);
-int umq_qbuf_unregister_seg(uint8_t *ctx, unregister_seg_callback_t unregister_seg_func);
+int umq_qbuf_register_seg(uint8_t *ctx, mempool_segment_ops_t *sps);
+void umq_qbuf_unregister_seg(uint8_t *ctx, mempool_segment_ops_t *sps);
 
 #ifdef __cplusplus
 }
