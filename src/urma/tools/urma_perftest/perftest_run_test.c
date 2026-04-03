@@ -1195,9 +1195,10 @@ static void *run_read_lat_duplex(void *arg)
     }
 
     printf("------------run_test-----------\n");
-    int status;
-    status = urma_start_perf();
-    printf("start status: %d\n", status);
+    if (urma_start_perf() != URMA_SUCCESS) {
+        (void)fprintf(stderr, "Failed to start perf.\n");
+        goto free_cr;
+    }
 
     while (scnt < cfg->iters || (cfg->time_type.bs.duration == 1 && run_ctx->state != END_STATE)) {
         if (cfg->time_type.bs.iterations == 1) {
@@ -1208,8 +1209,6 @@ static void *run_read_lat_duplex(void *arg)
         for (uint32_t i = 0; i < cfg->jfs_post_list; i++) {
             wr[i].user_ctx = (uintptr_t)++rid;
         }
-        printf("g_perf_ctx->is_running: %d\n", g_perf_ctx->is_running);
-        printf("id: %ld\n", (long)syscall(__NR_gettid));
         urma_status_t status = urma_post_jetty_send_wr(ctx->jetty[id], wr, &bad_wr);
         if (status != URMA_SUCCESS) {
             (void)fprintf(stderr, "Failed to post jfs wr, id:%u, status:%d, scnt:%lu\n", id, (int)status, scnt);

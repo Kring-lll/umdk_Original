@@ -28,9 +28,37 @@ typedef enum urma_perf_type {
     URMA_PERF_RECORD_TYPE_MAX,
 } urma_perf_record_type_t;
 
-typedef struct UrmaPerfContext {
-    void* histograms[URMA_PERF_RECORD_TYPE_MAX];
-    void* stats;
+typedef struct urma_perf_stats {
+    struct {
+        urma_perf_record_type_t type;
+        uint64_t sample_num;
+        uint64_t average;
+        uint64_t mininum;
+        uint64_t maxinum;
+        uint64_t p90;
+        uint64_t p99;
+    } type_record[URMA_PERF_RECORD_TYPE_MAX];
+} urma_perf_stats_t;
+
+typedef struct {
+    int64_t lowest_trackable_value;
+    int64_t highest_trackable_value;
+    int32_t significant_figures;
+    int32_t unit_magnitude;
+    int32_t sub_bucket_half_count_magnitude;
+    int32_t sub_bucket_half_count;
+    int32_t sub_bucket_mask;
+    int32_t sub_bucket_count;
+    int32_t bucket_count;
+    int64_t total_count;
+    int64_t min_value;
+    int64_t max_value;
+    int64_t *counts;
+} HdrHistogramData;
+
+typedef struct {
+    HdrHistogramData* histograms[URMA_PERF_RECORD_TYPE_MAX];
+    urma_perf_stats_t stats;
     int32_t is_running;
 } UrmaPerfContext;
 
