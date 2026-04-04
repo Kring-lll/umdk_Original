@@ -38,7 +38,7 @@ extern "C" {
 
 #define UMQ_MAX_ID_NUM (1 << 16)
 #define UMQ_CONTINUE_FLAG 1
-#define UMQ_MAX_TSEG_NUM (1 + (64 * HUGE_QBUF_POOL_SIZE_TYPE_MAX))
+#define UMQ_MAX_TSEG_NUM (1024)
 #define UMQ_UB_RW_SEGMENT_LEN 64 // ub_queue read/write buf splited 64B for each module, such as mem import/flow control
 #define HUGE_QBUF_BUFFER_INC_BATCH 64
 #define UMQ_QBUF_ALIGN_SIZE 4096
@@ -519,8 +519,8 @@ int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_
                         urma_sge_t *sges, uint32_t remain_tx);
 
 int umq_ub_fill_fc_rx_buf(ub_queue_t *queue);
-uint32_t umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count);
-int umq_ub_poll_fc_tx(ub_queue_t *queue);
+int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count);
+int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count);
 
 int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[]);
 int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[]);

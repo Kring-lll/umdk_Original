@@ -20,6 +20,8 @@
 #include "bondp_connection.h"
 #include "bondp_context_table.h"
 #include "bondp_datapath.h"
+#include "urma_perf.h"
+#include "ub_get_clock.h"
 
 #define PJETTY_ID_ENCODE_OFFSET (32)
 #define VJETTY_ID_ENCODE_OFFSET (48)
@@ -494,16 +496,6 @@ static urma_status_t set_write_wr_ptseg_ptjetty(urma_jfs_wr_t *send_wr, urma_tar
             URMA_LOG_ERR("Failed to set ptseg, vtseg is NULL\n");
             return URMA_EINVAL;
         }
-        // There is no longer self constructed seg, can be deleted
-        if ((void *)vtseg->handle == NULL) {
-            URMA_LOG_ERR("Write sge.dst->handle is NULL.\n");
-            vtseg = bondp_find_vtseg_by_va(send_wr->rw.src.sge[i].tseg->seg.token_id);
-            if (vtseg == NULL) {
-                URMA_LOG_ERR("bondp_find_vtseg_by_va fail.");
-                return URMA_FAIL;
-            }
-        }
-        vtseg = (urma_target_seg_t *)vtseg->handle;
         send_wr->rw.src.sge[i].tseg = get_p_tseg(vtseg, send_idx, target_idx);
     }
     for (int i = 0; i < send_wr->rw.dst.num_sge; ++i) {
@@ -515,16 +507,6 @@ static urma_status_t set_write_wr_ptseg_ptjetty(urma_jfs_wr_t *send_wr, urma_tar
             URMA_LOG_ERR("Failed to set ptseg, vtseg is NULL\n");
             return URMA_EINVAL;
         }
-        // There is no longer self constructed seg, can be deleted
-        if ((void *)vtseg->handle == NULL) {
-            URMA_LOG_ERR("Write sge.dst->handle is NULL.\n");
-            vtseg = bondp_find_vtseg_by_va(send_wr->rw.dst.sge[i].tseg->seg.token_id);
-            if (vtseg == NULL) {
-                URMA_LOG_ERR("bondp_find_vtseg_by_va fail.");
-                return URMA_FAIL;
-            }
-        }
-        vtseg = (urma_target_seg_t *)vtseg->handle;
         send_wr->rw.dst.sge[i].tseg = get_p_tseg(vtseg, send_idx, target_idx);
     }
     send_wr->tjetty = get_p_tjetty(vtjetty, send_idx, target_idx);
@@ -853,7 +835,7 @@ static bdp_v_conn_t *get_v_conn_on_send(bjetty_ctx_t *bjetty_ctx, bondp_target_j
     bdp_v_conn_t *v_conn = bdp_v_conn_table_lookup(&bjetty_ctx->v_conn_table, vtjetty_id);
     if (!v_conn) {
         int ret = bdp_v_conn_table_add_on_send(&bjetty_ctx->v_conn_table, vtjetty_id,
-            bdp_tjetty, bdp_tjetty->target_dev_num, &v_conn);
+            bdp_tjetty, bdp_tjetty->target_dev_num, &v_conn, bjetty_ctx->bond_ctx->v_ctx.aggr_mode);
         if (ret != 0) {
             URMA_LOG_ERR("Failed to create v_conn for vjetty, ret: %d, "
                 "[" URMA_JETTY_ID_FMT " -> " URMA_JETTY_ID_FMT "]\n",
@@ -1031,18 +1013,44 @@ EXIT:
 
 urma_status_t bondp_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
 {
-    bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
-    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
-    urma_status_t ret = post_send_check_valid(bdp_jetty, bdp_tjetty, wr);
-    if (ret != URMA_SUCCESS) {
-        return ret;
-    }
-    bjetty_ctx_t *bjetty_ctx = bdp_jetty->comp_ctx;
-    if (is_single_dev_mode(jetty->urma_ctx)) {
-        return bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
+    urma_status_t ret;
+    if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
+        uint64_t start = get_cycles();
+        bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
+        bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
+        ret = post_send_check_valid(bdp_jetty, bdp_tjetty, wr);
+        if (ret != URMA_SUCCESS) {
+            uint64_t end = get_cycles();
+            double mhz = get_cpu_mhz(false);
+            uint64_t elapsed_us = (end - start) / mhz;
+            urma_step_perf(BOND_JETTY_POST_SEND, elapsed_us);
+            return ret;
+        }
+        bjetty_ctx_t *bjetty_ctx = bdp_jetty->comp_ctx;
+        if (is_single_dev_mode(jetty->urma_ctx)) {
+            ret = bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
+        } else {
+            ret = bondp_post_send_wr_and_store(bjetty_ctx, wr, bad_wr);
+        }
+        uint64_t end = get_cycles();
+        double mhz = get_cpu_mhz(false);
+        uint64_t elapsed_us = (end - start) / mhz;
+        urma_step_perf(BOND_JETTY_POST_SEND, elapsed_us);
     } else {
-        return bondp_post_send_wr_and_store(bjetty_ctx, wr, bad_wr);
+        bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
+        bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
+        ret = post_send_check_valid(bdp_jetty, bdp_tjetty, wr);
+        if (ret != URMA_SUCCESS) {
+            return ret;
+        }
+        bjetty_ctx_t *bjetty_ctx = bdp_jetty->comp_ctx;
+        if (is_single_dev_mode(jetty->urma_ctx)) {
+            ret = bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
+        } else {
+            ret = bondp_post_send_wr_and_store(bjetty_ctx, wr, bad_wr);
+        }
     }
+    return ret;
 }
 
 /** Select recv pjetty in post_jetty_recv_wr */
@@ -1273,19 +1281,44 @@ static urma_status_t post_recv_check_valid(bondp_comp_t *bdp_recv_comp, const ur
 
 urma_status_t bondp_post_jetty_recv_wr(urma_jetty_t *jetty, urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr)
 {
-    bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
-    urma_status_t ret = URMA_SUCCESS;
-    ret = post_recv_check_valid(bdp_jetty, wr);
-    if (ret != URMA_SUCCESS) {
-        return ret;
-    }
-    /* non-null bjetty_ctx value because post_recv_check_valid performed validation. */
-    bjetty_ctx_t *bjetty_ctx = bdp_jetty->comp_ctx;
-    if (is_single_dev_mode(jetty->urma_ctx)) {
-        return bondp_post_recv_wr_no_store(bjetty_ctx, wr, bad_wr);
+    urma_status_t ret;
+    if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
+        uint64_t start = get_cycles();
+        bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
+        ret = post_recv_check_valid(bdp_jetty, wr);
+        if (ret != URMA_SUCCESS) {
+            uint64_t end = get_cycles();
+            double mhz = get_cpu_mhz(false);
+            uint64_t elapsed_us = (end - start) / mhz;
+            urma_step_perf(BOND_JETTY_POST_RECV, elapsed_us);
+            return ret;
+        }
+        /* non-null bjetty_ctx value because post_recv_check_valid performed validation. */
+        bjetty_ctx_t *bjetty_ctx = bdp_jetty->comp_ctx;
+        if (is_single_dev_mode(jetty->urma_ctx)) {
+            ret = bondp_post_recv_wr_no_store(bjetty_ctx, wr, bad_wr);
+        } else {
+            ret = bondp_post_recv_wr_and_store(bjetty_ctx, wr, bad_wr);
+        }
+        uint64_t end = get_cycles();
+        double mhz = get_cpu_mhz(false);
+        uint64_t elapsed_us = (end - start) / mhz;
+        urma_step_perf(BOND_JETTY_POST_RECV, elapsed_us);
     } else {
-        return bondp_post_recv_wr_and_store(bjetty_ctx, wr, bad_wr);
+        bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
+        ret = post_recv_check_valid(bdp_jetty, wr);
+        if (ret != URMA_SUCCESS) {
+            return ret;
+        }
+        /* non-null bjetty_ctx value because post_recv_check_valid performed validation. */
+        bjetty_ctx_t *bjetty_ctx = bdp_jetty->comp_ctx;
+        if (is_single_dev_mode(jetty->urma_ctx)) {
+            ret = bondp_post_recv_wr_no_store(bjetty_ctx, wr, bad_wr);
+        } else {
+            ret = bondp_post_recv_wr_and_store(bjetty_ctx, wr, bad_wr);
+        }
     }
+    return ret;
 }
 
 static inline bool is_device_error(urma_cr_status_t status)
@@ -1360,37 +1393,6 @@ static int resend_error_device(bjetty_ctx_t *bjetty_ctx, uint32_t err_idx,
     };
     wr_buf_traverse_and_remove(bjetty_ctx->jfs_bufs[err_idx], resend_wr_in_error_device_buf, &args);
     return args.ret;
-}
-
-static urma_status_t send_so_from_snd_queue(bjetty_ctx_t *bjetty_ctx, bdp_v_conn_t *v_conn)
-{
-    so_queue_data_t *so_data = NULL;
-    so_queue_data_t tmp_data;
-    bdp_slide_wnd_t *snd_wnd = &v_conn->send_wnd;
-    urma_status_t ret = URMA_SUCCESS;
-    urma_jfs_wr_t *bad_wr = NULL;
-
-    while (!bdp_queue_is_empty(&v_conn->send_strong_order_queue)) {
-        if (v_conn->target_vjetty == NULL) {
-            URMA_LOG_ERR("v_conn has NULL target_vjetty in sending SO\n");
-            return URMA_FAIL;
-        }
-        (void)bdp_queue_front(&v_conn->send_strong_order_queue, (void **)&so_data);
-        if (snd_wnd->head == so_data->send_wr_id) {
-            /* do send SO */
-            /* get_comp_urma_jetty_id(bjetty_ctx->bdp_comp) always returns non-null value. */
-            /* Because stored bjetty_ctx pointer which has been validated in post_send_check_valid */
-            ret = send_and_store_jfs_wr(bjetty_ctx, get_comp_urma_jetty_id(bjetty_ctx->bdp_comp)->id, so_data->send_wr,
-                so_data->send_wr_id, &so_data->ex_value, &bad_wr);
-            if (ret != URMA_SUCCESS) {
-                return ret;
-            }
-            (void)bdp_v_conn_pop_send_so(v_conn, &tmp_data);
-        } else {
-            return URMA_SUCCESS;
-        }
-    }
-    return URMA_SUCCESS;
 }
 
 static urma_status_t resend_wr_from_node(bjetty_ctx_t *bjetty_ctx, wr_buf_node_t *node,
@@ -1546,8 +1548,6 @@ static bondp_cr_handler_ret_t handle_send(bjetty_ctx_t *bjetty_ctx, urma_cr_t *c
     }
     /* Sender use send_wr_id to indicate the order of send, node->key is send_wr_id */
     (void)bdp_slide_wnd_add(&v_conn->send_wnd, send_wr_id);
-    /* Send SO from queue */
-    (void)send_so_from_snd_queue(bjetty_ctx, v_conn);
     /* If this jfs wr doesn't ask for cqe, we simply remove it from buffer */
     if (node->value.flag.bs.complete_enable == 0) {
         (void)jfs_wr_buf_remove_wr(bjetty_ctx->jfs_bufs[send_idx], send_wr_id);
@@ -1724,7 +1724,8 @@ static bondp_cr_handler_ret_t handle_recv(bjetty_ctx_t *bjetty_ctx, urma_cr_t *c
     }
     v_conn = bdp_v_conn_table_lookup(&bjetty_ctx->v_conn_table, &target_jetty_id);
     if (!v_conn) {
-        ret = bdp_v_conn_table_add_on_recv(&bjetty_ctx->v_conn_table, &target_jetty_id, &v_conn);
+        ret = bdp_v_conn_table_add_on_recv(&bjetty_ctx->v_conn_table, &target_jetty_id, &v_conn,
+            bjetty_ctx->bond_ctx->v_ctx.aggr_mode);
         if (ret != 0) {
             /* get_comp_urma_jetty_id will return a non-null value,
                because we check bjetty_ctx->bdp_comp type at the entrance of this function. */
@@ -1745,19 +1746,6 @@ static bondp_cr_handler_ret_t handle_recv(bjetty_ctx_t *bjetty_ctx, urma_cr_t *c
             bdp_slide_wnd_has(&v_conn->recv_wnd, msn));
         return CR_HANDLER_SUCCESS_AND_SKIP;
     }
-    if (is_so && v_conn->recv_wnd.head != msn) {
-        /* cache so cr */
-        so_cr_queue_data_t cr_data = {
-            .msn = msn,
-            .cr = *cr,
-        };
-        cr_data.cr.user_ctx = original_user_ctx;
-        bdp_v_conn_push_recv_so_cr(v_conn, &cr_data);
-        (void)jfr_wr_buf_remove_wr(bjetty_ctx->jfr_bufs[recv_idx], recv_wr_id);
-        *v_conn_out = v_conn;
-        URMA_LOG_DEBUG("Store jfr SO CR with recv_wr_id %u, msn %u\n", recv_wr_id, msn);
-        return CR_HANDLER_SUCCESS_AND_SKIP;
-    }
     (void)bdp_slide_wnd_add(&v_conn->recv_wnd, msn);
     /*
     We assure this entry exists by using jfs_wr_buf_get_user_ctx
@@ -1767,35 +1755,6 @@ static bondp_cr_handler_ret_t handle_recv(bjetty_ctx_t *bjetty_ctx, urma_cr_t *c
     restore_user_cr(cr, original_user_ctx);
     *v_conn_out = v_conn;
     return CR_HANDLER_SUCCESS_AND_COPY;
-}
-/**
- * After handle_recv, continuously check the SO queue and report all SOs that can be reported.
- * @param cr_output: The cr array used for output, i.e., the `cr` parameter of `bondp_poll_jfc`.
- * @param so_cnt_limit: The maximum length of the array queue for SO.
- * Please note that SO and bondp_poll_pjfc share the cr_output array,
- * so this value should not exceed the `cr_cnt` parameter of `bondp_poll_jfc`.
- * @param total_cnt_limit: The maximum length of `cr_output`, is generally input by the user.
- * @param total_cnt(in/out): The length of the current cr queue, which will increase if an SO is dequeued.
- */
-void handle_recv_so(bdp_v_conn_t *v_conn, urma_cr_t *cr_output, int so_cnt_limit, int total_cnt_limit,
-    int *total_cnt)
-{
-    if (v_conn == NULL) {
-        return;
-    }
-    so_cr_queue_data_t *cr_data;
-    int so_cnt = 0;
-    while (!bdp_queue_is_empty(&v_conn->recv_strong_order_cr_queue) &&
-        so_cnt < so_cnt_limit &&
-        *total_cnt < total_cnt_limit) {
-        (void)bdp_queue_front(&v_conn->recv_strong_order_cr_queue, (void **)&cr_data);
-        if (v_conn->recv_wnd.head != cr_data->msn) {
-            break;
-        }
-        (void)bdp_slide_wnd_add(&v_conn->recv_wnd, cr_data->msn);
-        so_cnt++;
-        cr_output[(*total_cnt)++] = cr_data->cr;
-    }
 }
 
 static inline bdp_p_vjetty_type_t get_p_vjetty_type_by_cr(const urma_cr_t *cr)
@@ -1859,36 +1818,6 @@ static inline void put_bjetty_ctx(const bjetty_ctx_t *bjetty_ctx)
 static inline bool is_cr_user_ctx_valid(const urma_cr_t *cr)
 {
     return !(cr->status == URMA_CR_WR_SUSPEND_DONE || cr->status == URMA_CR_WR_FLUSH_ERR_DONE);
-}
-/**
- * Based on the cr read from the device with the index dev_id,
- * determine whether the device is experiencing an issue at this time.
- * When calling this function, it must be ensured that the user_ctx in this CR is valid.
- * That is to say, this interface cannot be called during URMA_CR_WR_SUSPEND_DONE and URMA_CR_WR_FLUSH_ERR_DONE.
- */
-static urma_status_t update_device_valid_state(bondp_context_t *bdp_ctx, int dev_id, int cqe_cnt, urma_cr_t *cr_buf)
-{
-    if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
-        return URMA_SUCCESS;
-    }
-    for (int cr_id = 0; cr_id < cqe_cnt; ++cr_id) {
-        if (!is_cr_user_ctx_valid(&cr_buf[cr_id])) {
-            continue;
-        }
-        bjetty_ctx_t *bjetty_ctx = get_bjetty_ctx_by_cr(bdp_ctx, dev_id, &cr_buf[cr_id]);
-        if (bjetty_ctx == NULL) {
-            return URMA_FAIL;
-        }
-        if (bjetty_ctx->pjettys_valid[dev_id] && is_device_error(cr_buf[cr_id].status)) {
-            bjetty_ctx->pjettys_valid[dev_id] = false;
-            put_bjetty_ctx(bjetty_ctx);
-            /* If a problem arises, then the equipment must already have an issue,
-               and there is no need to continue with subsequent CR checks. */
-            return URMA_SUCCESS;
-        }
-        put_bjetty_ctx(bjetty_ctx);
-    }
-    return URMA_SUCCESS;
 }
 
 /**
@@ -2045,6 +1974,11 @@ static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int
     if (bjetty_ctx == NULL) {
         return CONVERT_FAIL;
     }
+
+    if (bjetty_ctx->pjettys_valid[idx] && is_device_error(cr->status)) {
+        bjetty_ctx->pjettys_valid[idx] = false;
+    }
+
     uint32_t wr_id = 0;
     uint16_t _bjetty_id = 0;
     uint16_t pjetty_id = 0;
@@ -2087,93 +2021,204 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(jfc->urma_ctx, bondp_context_t, v_ctx);
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(jfc, bondp_jfc_t, v_jfc);
 
-    int cr_cnt_remaining = cr_cnt;
+    int ret;
+    if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
+        uint64_t start = get_cycles();
+        int cr_cnt_remaining = cr_cnt;
 
-    /* Start polling from the next device index to avoid starvation. */
-    int start_idx = bdp_jfc->lasted_polled_jfc_idx + 1;
+        /* Start polling from the next device index to avoid starvation. */
+        int start_idx = bdp_jfc->lasted_polled_jfc_idx + 1;
 
-    for (int i = 0; i < bdp_jfc->dev_num && cr_cnt_remaining > 0; i++) {
-        int idx = ((start_idx + i) % bdp_jfc->dev_num);
+        for (int i = 0; i < bdp_jfc->dev_num && cr_cnt_remaining > 0; i++) {
+            int idx = ((start_idx + i) % bdp_jfc->dev_num);
 
-        if (bdp_jfc->p_jfc[idx] == NULL) {
-            continue;
-        }
-
-        int pcr_cnt_max = cr_cnt_remaining > URMA_UBAGG_MAX_CR_CNT_PER_DEV
-                              ? URMA_UBAGG_MAX_CR_CNT_PER_DEV
-                              : cr_cnt_remaining;
-        int pcr_cnt = urma_poll_jfc(bdp_jfc->p_jfc[idx], pcr_cnt_max, pcr_buf);
-        if (pcr_cnt < 0) {
-            return pcr_cnt;
-        }
-        if (pcr_cnt == 0) {
-            continue;
-        }
-
-        for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
-            urma_cr_t *pcr = &pcr_buf[cr_id];
-            cr_convert_ret_t conv_ret;
-
-            if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
-                conv_ret = bondp_handle_cr_no_store(bdp_ctx, idx, pcr);
-            } else {
-                conv_ret = bondp_handle_cr_with_store(bdp_ctx, idx, pcr);
+            if (bdp_jfc->p_jfc[idx] == NULL) {
+                continue;
             }
-            if (conv_ret == CONVERT_FAIL) {
-                return -1;
-            }
-            if (conv_ret == CONVERT_SUCCESS) {
-                cr[cr_cnt - cr_cnt_remaining] = *pcr;
-                cr_cnt_remaining--;
-            }
-        }
 
-        bdp_jfc->lasted_polled_jfc_idx = idx;
-        /* update device state based on the PCRs we consumed */
-        urma_status_t uret = update_device_valid_state(bdp_ctx, idx, pcr_cnt, pcr_buf);
-        if (uret != 0) {
-            return -uret;
+            int pcr_cnt_max = cr_cnt_remaining > URMA_UBAGG_MAX_CR_CNT_PER_DEV
+                                  ? URMA_UBAGG_MAX_CR_CNT_PER_DEV
+                                  : cr_cnt_remaining;
+            int pcr_cnt = urma_poll_jfc(bdp_jfc->p_jfc[idx], pcr_cnt_max, pcr_buf);
+            if (pcr_cnt < 0) {
+                uint64_t end = get_cycles();
+                double mhz = get_cpu_mhz(false);
+                uint64_t elapsed_us = (end - start) / mhz;
+                urma_step_perf(BOND_POLL_JFC, elapsed_us);
+                return pcr_cnt;
+            }
+            if (pcr_cnt == 0) {
+                continue;
+            }
+
+            for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
+                urma_cr_t *pcr = &pcr_buf[cr_id];
+                cr_convert_ret_t conv_ret;
+
+                if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
+                    conv_ret = bondp_handle_cr_no_store(bdp_ctx, idx, pcr);
+                } else {
+                    conv_ret = bondp_handle_cr_with_store(bdp_ctx, idx, pcr);
+                }
+                if (conv_ret == CONVERT_FAIL) {
+                    uint64_t end = get_cycles();
+                    double mhz = get_cpu_mhz(false);
+                    uint64_t elapsed_us = (end - start) / mhz;
+                    urma_step_perf(BOND_POLL_JFC, elapsed_us);
+                    return -1;
+                }
+                if (conv_ret == CONVERT_SUCCESS) {
+                    cr[cr_cnt - cr_cnt_remaining] = *pcr;
+                    cr_cnt_remaining--;
+                }
+            }
+
+            bdp_jfc->lasted_polled_jfc_idx = idx;
         }
+        ret = cr_cnt - cr_cnt_remaining;
+        uint64_t end = get_cycles();
+        double mhz = get_cpu_mhz(false);
+        uint64_t elapsed_us = (end - start) / mhz;
+        urma_step_perf(BOND_POLL_JFC, elapsed_us);
+    } else {
+        int cr_cnt_remaining = cr_cnt;
+
+        /* Start polling from the next device index to avoid starvation. */
+        int start_idx = bdp_jfc->lasted_polled_jfc_idx + 1;
+
+        for (int i = 0; i < bdp_jfc->dev_num && cr_cnt_remaining > 0; i++) {
+            int idx = ((start_idx + i) % bdp_jfc->dev_num);
+
+            if (bdp_jfc->p_jfc[idx] == NULL) {
+                continue;
+            }
+
+            int pcr_cnt_max = cr_cnt_remaining > URMA_UBAGG_MAX_CR_CNT_PER_DEV
+                                  ? URMA_UBAGG_MAX_CR_CNT_PER_DEV
+                                  : cr_cnt_remaining;
+            int pcr_cnt = urma_poll_jfc(bdp_jfc->p_jfc[idx], pcr_cnt_max, pcr_buf);
+            if (pcr_cnt < 0) {
+                return pcr_cnt;
+            }
+            if (pcr_cnt == 0) {
+                continue;
+            }
+
+            for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
+                urma_cr_t *pcr = &pcr_buf[cr_id];
+                cr_convert_ret_t conv_ret;
+
+                if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
+                    conv_ret = bondp_handle_cr_no_store(bdp_ctx, idx, pcr);
+                } else {
+                    conv_ret = bondp_handle_cr_with_store(bdp_ctx, idx, pcr);
+                }
+                if (conv_ret == CONVERT_FAIL) {
+                    return -1;
+                }
+                if (conv_ret == CONVERT_SUCCESS) {
+                    cr[cr_cnt - cr_cnt_remaining] = *pcr;
+                    cr_cnt_remaining--;
+                }
+            }
+
+            bdp_jfc->lasted_polled_jfc_idx = idx;
+        }
+        ret = cr_cnt - cr_cnt_remaining;
     }
-
-    return cr_cnt - cr_cnt_remaining;
+    return ret;
 }
 
 urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
 {
-    bondp_comp_t *bdp_jfs = CONTAINER_OF_FIELD(jfs, bondp_comp_t, v_jfs);
-    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
-    bjetty_ctx_t *bjetty_ctx = bdp_jfs->comp_ctx;
-    urma_status_t ret = URMA_SUCCESS;
+    urma_status_t ret;
+    if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
+        uint64_t start = get_cycles();
+        bondp_comp_t *bdp_jfs = CONTAINER_OF_FIELD(jfs, bondp_comp_t, v_jfs);
+        bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
+        bjetty_ctx_t *bjetty_ctx = bdp_jfs->comp_ctx;
 
-    ret = post_send_check_valid(bdp_jfs, bdp_tjetty, wr);
-    if (ret != URMA_SUCCESS) {
-        return ret;
-    }
-    if (is_single_dev_mode(jfs->urma_ctx)) {
-        return bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
+        ret = post_send_check_valid(bdp_jfs, bdp_tjetty, wr);
+        if (ret != URMA_SUCCESS) {
+            uint64_t end = get_cycles();
+            double mhz = get_cpu_mhz(false);
+            uint64_t elapsed_us = (end - start) / mhz;
+            urma_step_perf(BOND_JFS_POST_SEND, elapsed_us);
+            return ret;
+        }
+        if (is_single_dev_mode(jfs->urma_ctx)) {
+            ret = bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
+        } else {
+            ret = bondp_post_send_wr_and_store(bjetty_ctx, wr, bad_wr);
+        }
+        uint64_t end = get_cycles();
+        double mhz = get_cpu_mhz(false);
+        uint64_t elapsed_us = (end - start) / mhz;
+        urma_step_perf(BOND_JFS_POST_SEND, elapsed_us);
     } else {
-        return bondp_post_send_wr_and_store(bjetty_ctx, wr, bad_wr);
+        bondp_comp_t *bdp_jfs = CONTAINER_OF_FIELD(jfs, bondp_comp_t, v_jfs);
+        bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
+        bjetty_ctx_t *bjetty_ctx = bdp_jfs->comp_ctx;
+
+        ret = post_send_check_valid(bdp_jfs, bdp_tjetty, wr);
+        if (ret != URMA_SUCCESS) {
+            return ret;
+        }
+        if (is_single_dev_mode(jfs->urma_ctx)) {
+            ret = bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
+        } else {
+            ret = bondp_post_send_wr_and_store(bjetty_ctx, wr, bad_wr);
+        }
     }
+    return ret;
 }
 
 urma_status_t bondp_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr)
 {
-    bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jfr, bondp_comp_t, v_jfr);
-    urma_status_t ret = URMA_SUCCESS;
-    ret = post_recv_check_valid(bdp_jfr, wr);
-    if (ret != URMA_SUCCESS) {
-        return ret;
-    }
-    /* non-null bjetty_ctx value because post_recv_check_valid performed validation. */
-    bjetty_ctx_t *bjetty_ctx = bdp_jfr->comp_ctx;
-    // workaround, at this point, jfr only support multipath
-    bdp_jfr->is_multipath = true;
-    if (is_single_dev_mode(jfr->urma_ctx)) {
-        return bondp_post_recv_wr_no_store(bjetty_ctx, wr, bad_wr);
+    urma_status_t ret;
+    if (g_perf_ctx != NULL && g_perf_ctx->is_running == 1) {
+        uint64_t start = get_cycles();
+        bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jfr, bondp_comp_t, v_jfr);
+
+        ret = post_recv_check_valid(bdp_jfr, wr);
+        if (ret != URMA_SUCCESS) {
+            uint64_t end = get_cycles();
+            double mhz = get_cpu_mhz(false);
+            uint64_t elapsed_us = (end - start) / mhz;
+            urma_step_perf(BOND_POST_JFR_RECV, elapsed_us);
+            return ret;
+        }
+        /* non-null bjetty_ctx value because post_recv_check_valid performed validation. */
+        bjetty_ctx_t *bjetty_ctx = bdp_jfr->comp_ctx;
+        // workaround, at this point, jfr only support multipath
+        bdp_jfr->is_multipath = true;
+        if (is_single_dev_mode(jfr->urma_ctx)) {
+            ret = bondp_post_recv_wr_no_store(bjetty_ctx, wr, bad_wr);
+        } else {
+            ret = bondp_post_recv_wr_and_store(bjetty_ctx, wr, bad_wr);
+        }
+        uint64_t end = get_cycles();
+        double mhz = get_cpu_mhz(false);
+        uint64_t elapsed_us = (end - start) / mhz;
+        urma_step_perf(BOND_POST_JFR_RECV, elapsed_us);
     } else {
-        return bondp_post_recv_wr_and_store(bjetty_ctx, wr, bad_wr);
+        bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jfr, bondp_comp_t, v_jfr);
+
+        ret = post_recv_check_valid(bdp_jfr, wr);
+        if (ret != URMA_SUCCESS) {
+            return ret;
+        }
+        /* non-null bjetty_ctx value because post_recv_check_valid performed validation. */
+        bjetty_ctx_t *bjetty_ctx = bdp_jfr->comp_ctx;
+        // workaround, at this point, jfr only support multipath
+        bdp_jfr->is_multipath = true;
+        if (is_single_dev_mode(jfr->urma_ctx)) {
+            ret = bondp_post_recv_wr_no_store(bjetty_ctx, wr, bad_wr);
+        } else {
+            ret = bondp_post_recv_wr_and_store(bjetty_ctx, wr, bad_wr);
+        }
     }
+    return ret;
 }
 
 int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)

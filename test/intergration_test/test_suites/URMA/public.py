@@ -25,14 +25,14 @@ class UBUSFeature(BaseTest):
 
     def urma_perftest_one_perf_single_dev(self, server, client, timeout=60, cmd_syntax=None, **kwargs):
         """
-        不指定则随机打流
-        :param server: urma_perftest server端
-        :param client: urma_perftest client端
+        Random traffic if not specified
+        :param server: urma_perftest server side
+        :param client: urma_perftest client side
         :param cmd_syntax: "read_bw", "write_bw", "send_bw"
         :param mode: "RM", "RC", "UM"
-        :param opt: server、client都配置的额外参数
-        :param s_opt: server配置的额外参数
-        :param c_opt: client配置的额外参数
+        :param opt: additional parameters configured for both server and client
+        :param s_opt: additional parameters configured for the server
+        :param c_opt: additional parameters configured for the client
         """
         
         opt = kwargs.get("opt", "")
@@ -79,24 +79,24 @@ class UBUSFeature(BaseTest):
         p2 = client.exec_cmd(c_cmd, background=True)
         p1.wait(timeout)
         p2.wait(timeout)
-        log.info("校验urma_perftest打流结果")
+        log.info("Verifying urma_perftest traffic results")
         perf_ret = 0
         if p1.ret != 0 or p2.ret != 0:
                 perf_ret = -1
         if not expect_failed:
-            self.assertEqual(perf_ret, 0, "ERROR: 打流异常!")
+            self.assertEqual(perf_ret, 0, "ERROR: Traffic performance anomaly detected!")
         return perf_ret
 
     def urma_perftest_one_perf_ubagg(self, server, client, timeout=60, cmd_syntax=None, **kwargs):
         """
-        不指定则随机打流
-        :param server: urma_perftest server端
-        :param client: urma_perftest client端
+        Random traffic if not specified
+        :param server: urma_perftest server side
+        :param client: urma_perftest client side
         :param cmd_syntax: "read_bw", "write_bw", "send_bw"
         :param mode: "RM", "RC", "UM"
-        :param opt: server、client都配置的额外参数
-        :param s_opt: server配置的额外参数
-        :param c_opt: client配置的额外参数
+        :param opt: additional parameters configured for both server and client
+        :param s_opt: additional parameters configured for server
+        :param c_opt: additional parameters configured for client
         """
         
         opt = kwargs.get("opt", "")
@@ -140,10 +140,10 @@ class UBUSFeature(BaseTest):
         p2 = client.exec_cmd(c_cmd, background=True)
         p1.wait(timeout)
         p2.wait(timeout)
-        log.info("校验urma_perftest打流结果")
+        log.info("Verifying urma_perftest traffic results")
         perf_ret = 0
         if p1.ret != 0 or p2.ret != 0:
             perf_ret = -1
         if not expect_failed:
-            self.assertEqual(perf_ret, 0, "ERROR: 打流异常!")
+            self.assertEqual(perf_ret, 0, "ERROR: Traffic performance anomaly detected!")
         return perf_ret
