@@ -1995,11 +1995,7 @@ static int init_elment_vjetty(urma_async_event_t *v_event, urma_async_event_t *p
                 p_event->element.jfs->jfs_cfg.user_ctx, &ret);
             break;
         case URMA_EVENT_JFR_ERR:
-        case URMA_EVENT_JFR_LIMIT:
             v_event->element.jfr = (urma_jfr_t *)get_jetty_and_ret(
-                p_event->element.jfr->jfr_cfg.user_ctx, &ret);
-            break;
-        case URMA_EVENT_JETTY_ERR:
         case URMA_EVENT_JETTY_LIMIT:
             v_event->element.jetty = (urma_jetty_t *)get_jetty_and_ret(
                 p_event->element.jetty->jetty_cfg.user_ctx, &ret);

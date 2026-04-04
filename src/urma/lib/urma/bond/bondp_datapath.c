@@ -2050,29 +2050,6 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
             if (pcr_cnt == 0) {
                 continue;
             }
-
-            for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
-                urma_cr_t *pcr = &pcr_buf[cr_id];
-                cr_convert_ret_t conv_ret;
-
-                if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
-                    conv_ret = bondp_handle_cr_no_store(bdp_ctx, idx, pcr);
-                } else {
-                    conv_ret = bondp_handle_cr_with_store(bdp_ctx, idx, pcr);
-                }
-                if (conv_ret == CONVERT_FAIL) {
-                    uint64_t end = get_cycles();
-                    double mhz = get_cpu_mhz(false);
-                    uint64_t elapsed_us = (end - start) / mhz;
-                    urma_step_perf(BOND_POLL_JFC, elapsed_us);
-                    return -1;
-                }
-                if (conv_ret == CONVERT_SUCCESS) {
-                    cr[cr_cnt - cr_cnt_remaining] = *pcr;
-                    cr_cnt_remaining--;
-                }
-            }
-
             bdp_jfc->lasted_polled_jfc_idx = idx;
         }
         ret = cr_cnt - cr_cnt_remaining;
@@ -2103,28 +2080,7 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
             if (pcr_cnt == 0) {
                 continue;
             }
-
-            for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
-                urma_cr_t *pcr = &pcr_buf[cr_id];
-                cr_convert_ret_t conv_ret;
-
-                if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
-                    conv_ret = bondp_handle_cr_no_store(bdp_ctx, idx, pcr);
-                } else {
-                    conv_ret = bondp_handle_cr_with_store(bdp_ctx, idx, pcr);
-                }
-                if (conv_ret == CONVERT_FAIL) {
-                    return -1;
-                }
-                if (conv_ret == CONVERT_SUCCESS) {
-                    cr[cr_cnt - cr_cnt_remaining] = *pcr;
-                    cr_cnt_remaining--;
-                }
-            }
-
             bdp_jfc->lasted_polled_jfc_idx = idx;
-        }
-        ret = cr_cnt - cr_cnt_remaining;
     }
     return ret;
 }
