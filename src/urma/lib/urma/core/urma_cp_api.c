@@ -1210,36 +1210,9 @@ static void urma_fill_get_tp_cfg(urma_get_tp_cfg_t *get_tp_cfg, urma_transport_m
 static urma_target_jetty_t *urma_import_jfr_compat(urma_context_t *ctx, urma_rjfr_t *rjfr, urma_token_t *token_value)
 {
     urma_ops_t *ops = ctx->ops;
-    urma_transport_mode_t trans_mode = rjfr->trans_mode;
     urma_active_tp_cfg_t active_tp_cfg = {0};
 
-    URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, get_tp_list);
     URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, import_jfr_ex);
-
-    if (trans_mode == URMA_TM_RM || trans_mode == URMA_TM_UM) {
-        urma_get_tp_cfg_t get_tp_cfg = {0};
-        urma_fill_get_tp_cfg(&get_tp_cfg, trans_mode, rjfr->tp_type, &ctx->eid, &rjfr->jfr_id.eid);
-        uint32_t tp_cnt = 1;
-        urma_tp_info_t tp_info = {0};
-        urma_status_t status = ops->get_tp_list(ctx, &get_tp_cfg, &tp_cnt, &tp_info);
-        if (status != URMA_SUCCESS || tp_cnt != 1) {
-            errno = EIO;
-            return NULL;
-        }
-
-        active_tp_cfg.tp_handle = tp_info.tp_handle;
-        active_tp_cfg.tp_attr.tx_psn = rand();
-
-        /* Only exchange tp info for RM TP */
-        if (trans_mode == URMA_TM_RM && rjfr->tp_type == URMA_RTP) {
-            int ret = urma_cmd_exchange_tp_info(ctx, &get_tp_cfg, active_tp_cfg.tp_handle, active_tp_cfg.tp_attr.tx_psn,
-                                                &active_tp_cfg.peer_tp_handle, &active_tp_cfg.tp_attr.rx_psn);
-            if (ret != 0) {
-                errno = EIO;
-                return NULL;
-            }
-        }
-    }
 
     atomic_fetch_add(&ctx->ref.atomic_cnt, 1);
     urma_target_jetty_t *tjetty = ops->import_jfr_ex(ctx, rjfr, token_value, &active_tp_cfg);
@@ -1928,38 +1901,9 @@ static urma_target_jetty_t *urma_import_jetty_compat(urma_context_t *ctx, urma_r
     urma_token_t *token_value)
 {
     urma_ops_t *ops = ctx->ops;
-    urma_transport_mode_t trans_mode = rjetty->trans_mode;
     urma_active_tp_cfg_t active_tp_cfg = {0};
 
-    URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, get_tp_list);
     URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, import_jetty_ex);
-
-    if (trans_mode == URMA_TM_RM || trans_mode == URMA_TM_UM) {
-        urma_get_tp_cfg_t get_tp_cfg = {0};
-        urma_fill_get_tp_cfg(&get_tp_cfg, trans_mode, rjetty->tp_type, &ctx->eid, &rjetty->jetty_id.eid);
-        uint32_t tp_cnt = 1;
-        urma_tp_info_t tp_info = {0};
-        urma_status_t status = ops->get_tp_list(ctx, &get_tp_cfg, &tp_cnt, &tp_info);
-        if (status != URMA_SUCCESS || tp_cnt != 1) {
-            errno = EIO;
-            return NULL;
-        }
-        URMA_LOG_INFO("Get tp list, leid: "EID_FMT", deid: "EID_FMT".\n", EID_ARGS(get_tp_cfg.local_eid),
-            EID_ARGS(get_tp_cfg.peer_eid));
-
-        active_tp_cfg.tp_handle = tp_info.tp_handle;
-        active_tp_cfg.tp_attr.tx_psn = rand();
-
-        /* Only exchange tp info for RM TP */
-        if (trans_mode == URMA_TM_RM && rjetty->tp_type == URMA_RTP) {
-            int ret = urma_cmd_exchange_tp_info(ctx, &get_tp_cfg, active_tp_cfg.tp_handle, active_tp_cfg.tp_attr.tx_psn,
-                                                &active_tp_cfg.peer_tp_handle, &active_tp_cfg.tp_attr.rx_psn);
-            if (ret != 0) {
-                errno = EIO;
-                return NULL;
-            }
-        }
-    }
 
     atomic_fetch_add(&ctx->ref.atomic_cnt, 1);
     urma_target_jetty_t *tjetty = ops->import_jetty_ex(ctx, rjetty, token_value, &active_tp_cfg);
