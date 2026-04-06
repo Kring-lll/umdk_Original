@@ -676,7 +676,9 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
             .unregister_seg_callback = umq_ub_unregister_seg_callback,
         },
         .expansion_pool_id_min = HUGE_QBUF_POOL_MEMPOOL_ID_MAX,
-        .expansion_pool_cnt_max = UMQ_MAX_TSEG_NUM - HUGE_QBUF_POOL_MEMPOOL_ID_MAX
+        .expansion_pool_cnt_max = UMQ_MAX_TSEG_NUM - HUGE_QBUF_POOL_MEMPOOL_ID_MAX,
+        .tls_qbuf_pool_depth = cfg->buf_pool_cfg.tls_qbuf_pool_depth,
+        .tls_expand_qbuf_pool_depth = cfg->buf_pool_cfg.tls_expand_qbuf_pool_depth,
     };
     ret = umq_qbuf_pool_init(&qbuf_cfg);
     if (ret != UMQ_SUCCESS && ret != -UMQ_ERR_EEXIST) {
