@@ -24,6 +24,8 @@
 #include "ubagg_ioctl.h"
 #include "urma_provider.h"
 #include "bondp_api.h"
+#include "urma_perf.h"
+#include "ub_get_clock.h"
 
 typedef struct bondp_create_vjetty_udata {
     urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
@@ -1776,8 +1778,10 @@ urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(jfc, bondp_jfc_t, v_jfc);
     bool success_once = false;
 
+    PERF_PROFILING_START(BOND_REARM_JFC);
     if (bdp_jfc->v_jfc.jfc_cfg.jfce == NULL) {
         URMA_LOG_ERR("Failed to rearm jfc: JFCE is NULL\n");
+        PERF_PROFILING_END(BOND_REARM_JFC);
         return URMA_EINVAL;
     }
 
@@ -1791,7 +1795,7 @@ urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
         }
         success_once = true;
     }
-
+    PERF_PROFILING_END(BOND_REARM_JFC);
     return success_once ? URMA_SUCCESS : URMA_FAIL;
 }
 
@@ -1799,8 +1803,10 @@ int bondp_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t
 {
     bondp_comp_t *bdp_jfce = CONTAINER_OF_FIELD(jfce, bondp_comp_t, v_jfce);
 
+    PERF_PROFILING_START(BOND_WAIT_JFC);
     if (!is_valid_bondp_comp(bdp_jfce)) {
         URMA_LOG_ERR("Invalid param");
+        PERF_PROFILING_END(BOND_WAIT_JFC);
         return URMA_EINVAL;
     }
     struct epoll_event events[BOND_EPOLL_NUM] = {0};
@@ -1808,8 +1814,10 @@ int bondp_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t
     int num = epoll_wait(bdp_jfce->v_jfce.fd, events, epoll_event_limit, time_out);
     if (num < 0 || num > epoll_event_limit) {
         URMA_LOG_ERR("Epoll wait err, ret:%d.\n", num);
+        PERF_PROFILING_END(BOND_WAIT_JFC);
         return -1;
     } else if (num == 0) {
+        PERF_PROFILING_END(BOND_WAIT_JFC);
         return 0;
     }
 
@@ -1845,6 +1853,7 @@ int bondp_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t
         jfc[actual_num++] = v_jfc;
         URMA_LOG_DEBUG("p_jfc:%p, add v_jfc:%p", p_jfc, v_jfc);
     }
+    PERF_PROFILING_END(BOND_WAIT_JFC);
     return actual_num;
 }
 
