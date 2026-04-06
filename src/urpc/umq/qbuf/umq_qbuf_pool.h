@@ -38,6 +38,7 @@ extern "C" {
 #define UMQ_QBUF_SIZE_MULTIPLE_INTERVAL (4)
 #define QBUF_ALLOC_STATE_FREE      0            // define qbuf free state
 #define QBUF_ALLOC_STATE_ALLOCATED 1            // define qbuf allocated state
+#define QBUF_POOL_GLOBAL_LOW_WATERMARK    (10)      // global available < this percentage triggers global shrink
 
 typedef struct mempool_segment_ops {
     int (*register_seg_callback)(uint8_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
@@ -51,11 +52,16 @@ typedef struct qbuf_pool_cfg {
     uint32_t headroom_size;     // reserve head room size
     umq_buf_mode_t mode;
 
+    // gloab expansion pool
     uint64_t expansion_mem_size_max; // default 2G
     uint32_t expansion_pool_id_min;
     uint32_t expansion_pool_cnt_max;
     uint32_t expansion_block_count;  // number of blocks per expansion
     mempool_segment_ops_t seg_ops;
+
+    // tls
+    uint64_t tls_qbuf_pool_depth;
+    uint64_t tls_expand_qbuf_pool_depth;
 } qbuf_pool_cfg_t;
 
 typedef struct qbuf_alloc_param {
@@ -123,10 +129,17 @@ uint64_t umq_buf_to_id(char *buf, bool shm, bool with_data);
 void umq_qbuf_config_get(qbuf_pool_cfg_t *cfg);
 
 typedef struct local_block_pool {
+    pthread_spinlock_t pool_lock;        // spinlock for local pool & cross-thread shrink concurrency
+
     umq_buf_list_t head_with_data;
     uint64_t buf_cnt_with_data;
+    uint64_t capacity_with_data;
+    uint64_t last_used_with_data;
+
     umq_buf_list_t head_without_data;
     uint64_t buf_cnt_without_data;
+    uint64_t capacity_without_data;
+    uint64_t last_used_without_data;
 } local_block_pool_t;
 
 typedef struct global_block_pool {
@@ -225,6 +238,7 @@ void async_expand_global_pool(bool with_data, uint64_t g_buf_cnt);
 uint32_t fetch_from_expansion_pools(bool with_data, uint32_t need, umq_buf_list_t *local_head, uint64_t *local_buf_cnt);
 void return_list_to_pools(umq_buf_t *local_head, uint64_t *local_buf_cnt,
     umq_buf_list_t *global_head, uint64_t *global_buf_cnt, bool with_data);
+void check_global_buf_cnt(bool with_data, uint64_t *g_buf_cnt);
 
 static ALWAYS_INLINE int32_t fetch_from_global(
         global_block_pool_t *global_pool, local_block_pool_t *cache_pool, bool with_data, uint32_t batch_count)
@@ -260,7 +274,7 @@ static ALWAYS_INLINE int32_t fetch_from_global(
         *global_buf_cnt -= count;
         *local_buf_cnt += count;
         (void)pthread_spin_unlock(&global_pool->global_mutex);
-        async_expand_global_pool(with_data, *global_buf_cnt);
+        check_global_buf_cnt(with_data, global_buf_cnt);
         return count;
     }
 
@@ -284,7 +298,7 @@ static ALWAYS_INLINE int32_t fetch_from_global(
 
         count += fetch_from_expansion_pools(with_data, batch_count - count, local_head, local_buf_cnt);
     }
-    async_expand_global_pool(with_data, *global_buf_cnt);
+    check_global_buf_cnt(with_data, global_buf_cnt);
     return count;
 
 ROLLBACK:
@@ -302,7 +316,7 @@ ROLLBACK:
     return -UMQ_ERR_ENOMEM;
 }
 
-// flush list from local to global, threshold means the local pool size that needs to be returned
+// flush list nodes from local cache to global
 static ALWAYS_INLINE void return_to_global(
         global_block_pool_t *global_pool, local_block_pool_t *cache, bool with_data, uint32_t threshold)
 {
@@ -321,6 +335,14 @@ static ALWAYS_INLINE void return_to_global(
         global_buf_cnt = &global_pool->buf_cnt_without_data;
         local_buf_cnt = &cache->buf_cnt_without_data;
         local_head = &cache->head_without_data;
+    }
+
+    if (threshold == 0) {
+        umq_buf_t *head = QBUF_LIST_FIRST(local_head);
+        QBUF_LIST_FIRST(local_head) = NULL;
+        return_list_to_pools(head, local_buf_cnt, global_head, global_buf_cnt, with_data);
+        (void)pthread_spin_unlock(&global_pool->global_mutex);
+        return;
     }
 
     umq_buf_t *switch_node = NULL;
