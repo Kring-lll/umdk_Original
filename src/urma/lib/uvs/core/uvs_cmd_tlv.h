@@ -55,6 +55,16 @@ typedef enum uvs_cmd_get_route_list_type {
     GET_ROUTE_LIST_OUT_NUM
 } uvs_cmd_get_route_list_type_t;
 
+typedef enum uvs_cmd_set_path_set_type {
+    SET_PATH_SET_IN_SRC_BONDING_EID,
+    SET_PATH_SET_IN_DST_BONDING_EID,
+    SET_PATH_SET_IN_TP_TYPE,
+    SET_PATH_SET_IN_MULTI_PATH,
+    SET_PATH_SET_IN_NUM,
+    SET_PATH_LIST_OUT_PATH_SET = UVS_CMD_OUT_TYPE_INIT,
+    SET_PATH_SET_OUT_NUM
+} uvs_cmd_set_path_set_type_t;
+
 #ifdef __cplusplus
 }
 #endif
