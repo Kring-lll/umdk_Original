@@ -17,12 +17,13 @@ void bondp_stop_health_check_thread(void);
 
 int bondp_create_health_check_ctx(bondp_context_t *bond_ctx);
 void bondp_destroy_health_check_ctx(bondp_context_t *bond_ctx);
-int bondp_fill_vjetty_health_info(
-	bondp_context_t *bond_ctx, bondp_comp_t *bdp_jetty,
+int bondp_fill_vjetty_health_info(bondp_context_t *bond_ctx, bondp_comp_t *bdp_jetty,
 	urma_bond_seg_info_out_t *health_check_seg, bool *is_health_check_enable);
-int bondp_import_health_check_tseg(
-	bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
+int bondp_import_health_check_tseg(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
 	urma_bond_id_info_out_t *rvjetty_info);
 int bondp_unimport_health_check_tseg(bondp_target_jetty_t *bdp_tjetty);
+int bondp_register_health_check_task(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty);
+void bondp_unregister_health_check_task(bondp_target_jetty_t *bdp_tjetty);
+bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, urma_cr_t *cr);
 
 #endif // BONDP_HEALTH_CHECK_H
