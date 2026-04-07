@@ -45,6 +45,7 @@ typedef enum uvs_global_cmd {
     UVS_CMD_SET_TOPO = 1,
     UVS_CMD_GET_TOPO_EID = 2,
     UVS_CMD_GET_TOPO = 3,
+    UVS_CMD_GET_TOPO_PATH_EID = 4,
     UVS_CMD_GLOBAL_LAST
 } uvs_global_cmd_t;
 
@@ -66,10 +67,21 @@ typedef struct uvs_cmd_get_route_list {
     uvs_route_list_t out;
 } uvs_cmd_get_route_list_t;
 
+typedef struct uvs_cmd_get_path_set {
+    struct {
+        uvs_eid_t src_bonding_eid;
+        uvs_eid_t dst_bonding_eid;
+        uvs_tp_type_t tp_type;
+        bool multi_path;
+    } in;
+    uvs_path_set_t out;
+} uvs_cmd_get_path_set_t;
+
 int uvs_ioctl_in_global(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_global_cmd_t cmd, void *arg, uint32_t arg_len);
 int uvs_ioctl_set_topo(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_set_topo_t *arg);
 int uvs_ioctl_get_topo(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_get_topo_t *arg);
 int uvs_ioctl_get_route_list(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_cmd_get_route_list_t *arg);
+int uvs_ioctl_get_path_set(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_cmd_get_path_set_t *arg);
 
 #ifdef __cplusplus
 }
