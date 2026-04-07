@@ -24,6 +24,8 @@
 #include "ubagg_ioctl.h"
 #include "urma_provider.h"
 #include "bondp_api.h"
+#include "urma_perf.h"
+#include "ub_get_clock.h"
 
 typedef struct bondp_create_vjetty_udata {
     urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
@@ -471,6 +473,9 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     } else {
         bdp_jfs->dev_num = bdp_ctx->dev_num;
     }
+    bdp_jfs->is_multipath = cfg->flag.bs.multi_path;
+    bdp_jfs->send_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
+    bdp_jfs->recv_jfc = NULL;
 
     if (bondp_create_pjfs(bdp_ctx, bdp_jfs, cfg) != 0) {
         URMA_LOG_ERR("Failed to create pjfs\n");
@@ -491,9 +496,7 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
         URMA_LOG_ERR("Failed to create jfs datapath ctx");
         goto DEL_P_VJFS_ID;
     }
-
     bdp_jfs->comp_ctx = jfs_datapath_ctx;
-    bdp_jfs->is_multipath = cfg->flag.bs.multi_path;
 
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
     atomic_fetch_add(&bdp_jfc->use_cnt.atomic_cnt, 1);
@@ -706,6 +709,8 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
     bdp_jfr->comp_type = BONDP_COMP_JFR;
     bdp_jfr->dev_num = bdp_ctx->dev_num;
     atomic_init(&bdp_jfr->use_cnt.atomic_cnt, 0);
+    bdp_jfr->send_jfc = NULL;
+    bdp_jfr->recv_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
 
     if (bondp_create_pjfr(bdp_ctx, bdp_jfr, cfg)) {
         URMA_LOG_ERR("Failed to create pjfr\n");
@@ -911,6 +916,7 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
             URMA_LOG_ERR("Failed to create pjetty %d.\n", i);
             return -1;
         }
+        jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
         bdp_jetty->p_jetty[i] = jetty;
     }
     return 0;
@@ -1046,6 +1052,9 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     } else {
         bdp_jetty->dev_num = bdp_ctx->dev_num;
     }
+    bdp_jetty->is_multipath = jetty_cfg->jfs_cfg.flag.bs.multi_path;
+    bdp_jetty->send_jfc = CONTAINER_OF_FIELD(jetty_cfg->jfs_cfg.jfc, bondp_jfc_t, v_jfc);
+    bdp_jetty->recv_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr->jfr_cfg.jfc, bondp_jfc_t, v_jfc);
 
     if (bondp_create_pjetty(bdp_ctx, bdp_jetty, jetty_cfg) != 0) {
         URMA_LOG_ERR("Failed to create pjetty\n");
@@ -1061,12 +1070,6 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         URMA_LOG_ERR("Failed to add jetty id to p_vjetty_id table\n");
         goto DELETE_VJETTY;
     }
-    for (int i = 0; i < bdp_jetty->dev_num; ++i) {
-        if (!bdp_jetty->p_jetty[i]) {
-            continue;
-        }
-        bdp_jetty->p_jetty[i]->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
-    }
 
     bjetty_ctx_t *bjetty_ctx = create_bjetty_ctx(ctx, bdp_jetty, URMA_UBAGG_WR_BUF_SIZE);
     if (bjetty_ctx == NULL) {
@@ -1074,7 +1077,7 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         goto DEL_P_VJETTY_ID;
     }
     bdp_jetty->comp_ctx = bjetty_ctx;
-    bdp_jetty->is_multipath = jetty_cfg->jfs_cfg.flag.bs.multi_path;
+
     /* Validate bdp_jfr below at the function entry point to ensure they are not empty. */
     bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr, bondp_comp_t, v_jfr);
     atomic_fetch_add(&bdp_jfr->use_cnt.atomic_cnt, 1);
@@ -1775,8 +1778,10 @@ urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(jfc, bondp_jfc_t, v_jfc);
     bool success_once = false;
 
+    PERF_PROFILING_START(BOND_REARM_JFC);
     if (bdp_jfc->v_jfc.jfc_cfg.jfce == NULL) {
         URMA_LOG_ERR("Failed to rearm jfc: JFCE is NULL\n");
+        PERF_PROFILING_END(BOND_REARM_JFC);
         return URMA_EINVAL;
     }
 
@@ -1790,7 +1795,7 @@ urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
         }
         success_once = true;
     }
-
+    PERF_PROFILING_END(BOND_REARM_JFC);
     return success_once ? URMA_SUCCESS : URMA_FAIL;
 }
 
@@ -1798,8 +1803,10 @@ int bondp_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t
 {
     bondp_comp_t *bdp_jfce = CONTAINER_OF_FIELD(jfce, bondp_comp_t, v_jfce);
 
+    PERF_PROFILING_START(BOND_WAIT_JFC);
     if (!is_valid_bondp_comp(bdp_jfce)) {
         URMA_LOG_ERR("Invalid param");
+        PERF_PROFILING_END(BOND_WAIT_JFC);
         return URMA_EINVAL;
     }
     struct epoll_event events[BOND_EPOLL_NUM] = {0};
@@ -1807,8 +1814,10 @@ int bondp_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t
     int num = epoll_wait(bdp_jfce->v_jfce.fd, events, epoll_event_limit, time_out);
     if (num < 0 || num > epoll_event_limit) {
         URMA_LOG_ERR("Epoll wait err, ret:%d.\n", num);
+        PERF_PROFILING_END(BOND_WAIT_JFC);
         return -1;
     } else if (num == 0) {
+        PERF_PROFILING_END(BOND_WAIT_JFC);
         return 0;
     }
 
@@ -1844,6 +1853,7 @@ int bondp_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t
         jfc[actual_num++] = v_jfc;
         URMA_LOG_DEBUG("p_jfc:%p, add v_jfc:%p", p_jfc, v_jfc);
     }
+    PERF_PROFILING_END(BOND_WAIT_JFC);
     return actual_num;
 }
 
