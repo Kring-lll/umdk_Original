@@ -74,3 +74,17 @@ int uvs_ioctl_get_route_list(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_cmd_get_route_list
 
     return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_GET_TOPO_EID, (void *)attrs, sizeof(attrs));
 }
+
+int uvs_ioctl_get_path_set(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_cmd_get_path_set_t *arg)
+{
+    uvs_cmd_attr_t attrs[SET_PATH_SET_IN_NUM + SET_PATH_SET_OUT_NUM - UVS_CMD_OUT_TYPE_INIT] = {0};
+    uvs_cmd_attr_t *a = attrs;
+
+    ATTR(a++, SET_PATH_SET_IN_SRC_BONDING_EID, arg->in.src_bonding_eid);
+    ATTR(a++, SET_PATH_SET_IN_DST_BONDING_EID, arg->in.dst_bonding_eid);
+    ATTR(a++, SET_PATH_SET_IN_TP_TYPE, arg->in.tp_type);
+    ATTR(a++, SET_PATH_SET_IN_MULTI_PATH, arg->in.multi_path);
+    ATTR(a++, SET_PATH_LIST_OUT_PATH_SET, arg->out);
+
+    return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_GET_TOPO_PATH_EID, (void *)attrs, sizeof(attrs));
+}
