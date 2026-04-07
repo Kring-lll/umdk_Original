@@ -1444,6 +1444,11 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     }
     pthread_rwlock_unlock(&bdp_ctx->remote_p2v_jetty_id_table.lock);
 
+    if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty) != 0) {
+        URMA_LOG_ERR("Failed to register health check task\n");
+        goto unimport_tseg;
+    }
+
     URMA_LOG_INFO("Successfully imported target jetty: " URMA_JETTY_ID_FMT,
                    URMA_JETTY_ID_ARGS(&rjetty->jetty_id));
 
@@ -1470,6 +1475,8 @@ urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
         URMA_LOG_ERR("Invalid bdp tjetty\n");
         return URMA_EINVAL;
     }
+
+    bondp_unregister_health_check_task(bdp_tjetty);
 
     pthread_rwlock_wrlock(&bdp_ctx->remote_p2v_jetty_id_table.lock);
     if (remove_remote_jetty_id_info(bdp_ctx, bdp_tjetty) != 0) {
