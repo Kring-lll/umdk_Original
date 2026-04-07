@@ -134,6 +134,15 @@ typedef struct bondp_jfc {
     urma_ref_t use_cnt; /* Initialize to 0 */
 } bondp_jfc_t;
 
+typedef struct bondp_jfce {
+    urma_jfce_t v_jfce;
+    urma_jfce_t *p_jfce[URMA_UBAGG_DEV_MAX_NUM];
+    int dev_num;
+    bondp_context_t *bondp_ctx;
+    bondp_comp_type_t comp_type;
+    urma_ref_t use_cnt; /* Initialize to 0 */
+} bondp_jfce_t;
+
 typedef enum bondp_comp_type {
     BONDP_COMP_JFCE,
     BONDP_COMP_JFS,

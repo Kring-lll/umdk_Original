@@ -14,7 +14,7 @@
 #include "bondp_comp.h"
 
 
-void bdp_vjfce_info_table_close_fd(bondp_comp_t *bdp_comp)
+void bdp_vjfce_info_table_close_fd(bondp_jfce_t *bdp_comp)
 {
     int ret = URMA_SUCCESS;
     struct epoll_event ev = {0};
