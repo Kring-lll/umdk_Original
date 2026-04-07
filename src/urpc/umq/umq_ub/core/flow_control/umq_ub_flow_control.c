@@ -71,18 +71,20 @@ static ALWAYS_INLINE uint64_t umq_ub_rx_consumed_load(bool lock_free, volatile u
     }
 }
 
-static ALWAYS_INLINE uint16_t counter_inc_atomic_u16(ub_credit_pool_t *pool, uint16_t count, ub_credit_stat_u16_t type)
+static ALWAYS_INLINE uint16_t counter_inc_atomic_u16(ub_credit_pool_t *pool, uint16_t count, ub_credit_stat_u16_t type,
+    bool *is_inc)
 {
     volatile uint16_t *counter = &pool->stats_u16[type];
     uint16_t after, before = __atomic_load_n(counter, __ATOMIC_RELAXED);
     uint16_t ret = before;
     uint32_t sum;
-
+    *is_inc = true;
     do {
         sum = before + count;
         if (URPC_UNLIKELY(sum > UINT16_MAX)) {
             UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "counter type %d exceed UINT16_MAX, current %d, new add %d, capacity %d\n",
                                 type, before, count, pool->capacity);
+            *is_inc = false;
             ret = before;
             break;
         }
@@ -439,9 +441,9 @@ static ALWAYS_INLINE void flow_control_packet_stats_atomic(
 
 static ALWAYS_INLINE uint16_t available_credit_inc_atomic(ub_credit_pool_t *pool, uint16_t count)
 {
-    uint16_t before = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
-    uint16_t ret = counter_inc_atomic_u16(pool, count, CREDIT_POOL_IDLE);
-    if (URPC_UNLIKELY(ret == before)) {
+    bool is_inc = true;
+    uint16_t ret = counter_inc_atomic_u16(pool, count, CREDIT_POOL_IDLE, &is_inc);
+    if (URPC_UNLIKELY(is_inc == false)) {
         (void)__atomic_add_fetch(&pool->stats_u64[CREDIT_POOL_ERR_TOTAL], count, __ATOMIC_RELAXED);
     } else {
         (void)__atomic_add_fetch(&pool->stats_u64[CREDIT_POOL_IDLE_TOTAL], count, __ATOMIC_RELAXED);
@@ -451,14 +453,16 @@ static ALWAYS_INLINE uint16_t available_credit_inc_atomic(ub_credit_pool_t *pool
 
 static ALWAYS_INLINE uint16_t available_credit_return_atomic(ub_credit_pool_t *pool, uint16_t count)
 {
+    bool is_inc = true;
     (void)counter_dec_atomic_u16(pool, count, CREDIT_POOL_ALLOCATED);
-    return counter_inc_atomic_u16(pool, count, CREDIT_POOL_IDLE);
+    return counter_inc_atomic_u16(pool, count, CREDIT_POOL_IDLE, &is_inc);
 }
 
 static ALWAYS_INLINE uint16_t available_credit_dec_atomic(ub_credit_pool_t *pool, uint16_t count)
 {
+    bool is_inc = true;
     uint16_t actual_count = counter_dec_atomic_u16(pool, count, CREDIT_POOL_IDLE);
-    (void)counter_inc_atomic_u16(pool, actual_count, CREDIT_POOL_ALLOCATED);
+    (void)counter_inc_atomic_u16(pool, actual_count, CREDIT_POOL_ALLOCATED, &is_inc);
     (void)__atomic_add_fetch(&pool->stats_u64[CREDIT_POOL_ALLOCATED_TOTAL], actual_count, __ATOMIC_RELAXED);
     return actual_count;
 }
