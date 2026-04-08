@@ -1,3 +1,13 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2021-2025. All rights reserved.
+ * Description: Performance monitoring and profiling for URMA
+ * Author: Tang Zhedong
+ * Create: 2026-04-08
+ * Note:
+ * History: 2026-04-08 create file
+ */
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <math.h>
@@ -7,14 +17,15 @@
 #include <threads.h>
 #include <unistd.h>
 #include <sys/syscall.h>
+
 #include "urma_api.h"
 #include "urma_perf.h"
+#include "urma_types.h"
 
 #define URMA_PERF_MIN_VALUE 32
 #define URMA_PERF_MAX_VALUE 1000000000L
 #define URMA_PERF_SIGNIFICANT_FIGURES 5
 
-typedef int32_t urma_status_t;
 #define URMA_SUCCESS 0
 #define URMA_ERROR -1
 
@@ -35,10 +46,13 @@ static const char* perf_type_names[] = {
     "UB_REARM_JFC",
     "BOND_REARM_JFC"
 };
+
 thread_local urma_perf_context* g_perf_ctx;
+
 static int32_t get_bucket_index(int64_t value, int32_t unit_magnitude)
 {
     int32_t leading_zero_count = __builtin_clzll(value);
+    // Count the number of leading zeros. 64 is the upper limit for the int64_t type.
     int32_t pow2_ceiling = 64 - leading_zero_count;
     return pow2_ceiling - unit_magnitude - 1;
 }
@@ -49,9 +63,13 @@ static int32_t get_sub_bucket_index(int64_t value, int32_t bucket_index, int32_t
     int64_t sub_bucket_size = bucket_base / sub_bucket_count;
     int64_t offset = value - bucket_base;
     int32_t sub_bucket_index = (int32_t)(offset / sub_bucket_size);
-    
-    if (sub_bucket_index < 0) sub_bucket_index = 0;
-    if (sub_bucket_index >= sub_bucket_count) sub_bucket_index = sub_bucket_count - 1;
+
+    if (sub_bucket_index < 0) {
+        sub_bucket_index = 0;
+    }
+    if (sub_bucket_index >= sub_bucket_count) {
+        sub_bucket_index = sub_bucket_count - 1;
+    }
     return sub_bucket_index;
 }
 
@@ -59,25 +77,30 @@ static int32_t counts_index(int32_t bucket_index, int32_t sub_bucket_index, int3
 {
     return bucket_index * sub_bucket_count + sub_bucket_index;
 }
-static HdrHistogramData* hdr_init(int64_t lowest_trackable_value, int64_t highest_trackable_value, int32_t significant_figures)
+
+static hdr_histogram_data* hdr_init(int64_t lowest_trackable_value, int64_t highest_trackable_value, int32_t significant_figures)
 {
     int32_t unit_magnitude = (int32_t)floor(log(lowest_trackable_value) / log(2));
-    int32_t sub_bucket_half_count_magnitude = (int32_t)ceil(log(significant_figures * 2.0) / log(2));
-    int32_t sub_bucket_half_count = 1 << sub_bucket_half_count_magnitude;
+    int32_t sub_bucket_magnitude = (int32_t)ceil(log(significant_figures * 2.0) / log(2));
+    int32_t sub_bucket_half_count = 1 << sub_bucket_magnitude;
     int32_t sub_bucket_count = sub_bucket_half_count * 2;
     int32_t sub_bucket_mask = sub_bucket_count - 1;
     
     int32_t bucket_count = get_bucket_index(highest_trackable_value, unit_magnitude) + 1;
     
     size_t counts_len = (bucket_count + 1) * sub_bucket_count;
-    size_t size = sizeof(HdrHistogramData) + sizeof(int64_t) * counts_len;
+    size_t size = sizeof(hdr_histogram_data) + sizeof(int64_t) * counts_len;
     
-    HdrHistogramData* data = (HdrHistogramData*)calloc(1, size);
+    hdr_histogram_data* data = (hdr_histogram_data*)calloc(1, size);
+    if (data == NULL) {
+        printf("Failed to allocate memory for hdr_histogram_data\n");
+        return NULL;
+    }
     data->lowest_trackable_value = lowest_trackable_value;
     data->highest_trackable_value = highest_trackable_value;
     data->significant_figures = significant_figures;
     data->unit_magnitude = unit_magnitude;
-    data->sub_bucket_half_count_magnitude = sub_bucket_half_count_magnitude;
+    data->sub_bucket_magnitude = sub_bucket_magnitude;
     data->sub_bucket_half_count = sub_bucket_half_count;
     data->sub_bucket_mask = sub_bucket_mask;
     data->sub_bucket_count = sub_bucket_count;
@@ -89,26 +112,41 @@ static HdrHistogramData* hdr_init(int64_t lowest_trackable_value, int64_t highes
     return data;
 }
 
-static void hdr_record_value(HdrHistogramData* data, int64_t value)
+static void hdr_record_value(hdr_histogram_data* data, int64_t value)
 {
-    if (value < data->lowest_trackable_value) value = data->lowest_trackable_value;
-    if (value > data->highest_trackable_value) value = data->highest_trackable_value;
-    
+    if (value < data->lowest_trackable_value) {
+        value = data->lowest_trackable_value;
+    }
+    if (value > data->highest_trackable_value) {
+        value = data->highest_trackable_value;
+    }
+
     int32_t bucket_index = get_bucket_index(value, data->unit_magnitude);
     int32_t sub_bucket_index = get_sub_bucket_index(value, bucket_index, data->unit_magnitude, data->sub_bucket_count);
     int32_t index = counts_index(bucket_index, sub_bucket_index, data->sub_bucket_count);
-    
+
+    if (index < 0 || index >= (data->bucket_count + 1) * data->sub_bucket_count) {
+        printf("Index out of bounds: %d\n", index);
+        return;
+    }
+
     data->counts[index]++;
     data->total_count++;
-    
-    if (value < data->min_value) data->min_value = value;
-    if (value > data->max_value) data->max_value = value;
+
+    if (value < data->min_value) {
+        data->min_value = value;
+    }
+    if (value > data->max_value) {
+        data->max_value = value;
+    }
 }
 
-static int64_t hdr_get_value_at_percentile(HdrHistogramData* data, double percentile)
+static int64_t hdr_get_value_at_percentile(hdr_histogram_data* data, double percentile)
 {
-    if (data->total_count == 0) return 0;
-    
+    if (data->total_count == 0) {
+        return 0;
+    }
+
     int64_t threshold = (int64_t)ceil(percentile * data->total_count / 100.0);
     int64_t count_to_prev = 0;
     
@@ -130,10 +168,12 @@ static int64_t hdr_get_value_at_percentile(HdrHistogramData* data, double percen
     return data->max_value;
 }
 
-static int64_t hdr_get_mean(HdrHistogramData* data)
+static int64_t hdr_get_mean(hdr_histogram_data* data)
 {
-    if (data->total_count == 0) return 0;
-    
+    if (data->total_count == 0) {
+        return 0;
+    }
+
     int64_t total = 0;
     for (int32_t i = 0; i < data->bucket_count; i++) {
         int64_t bucket_base = (int64_t)1 << (i + data->unit_magnitude);
@@ -150,14 +190,14 @@ static int64_t hdr_get_mean(HdrHistogramData* data)
     return total / data->total_count;
 }
 
-static void hdr_free(HdrHistogramData* data)
+static void hdr_free(hdr_histogram_data* data)
 {
     free(data);
 }
 
 static void update_stats(urma_perf_context* ctx, urma_perf_record_type_t type)
 {
-    HdrHistogramData* hist = ctx->histograms[type];
+    hdr_histogram_data* hist = ctx->histograms[type];
     ctx->stats.type_record[type].sample_num = hist->total_count;
     ctx->stats.type_record[type].average = hdr_get_mean(hist);
     ctx->stats.type_record[type].mininum = hist->total_count > 0 ? hist->min_value : 0;
@@ -181,6 +221,10 @@ urma_status_t urma_start_perf(void)
     
     for (int i = 0; i < URMA_PERF_RECORD_TYPE_MAX; i++) {
         g_perf_ctx->histograms[i] = hdr_init(URMA_PERF_MIN_VALUE, URMA_PERF_MAX_VALUE, URMA_PERF_SIGNIFICANT_FIGURES);
+        if (g_perf_ctx->histograms[i] == NULL) {
+            printf("Failed to initialize histogram for type %d\n", i);
+            return URMA_ERROR;
+        }
         g_perf_ctx->stats.type_record[i].type = (urma_perf_record_type_t)i;
     }
     

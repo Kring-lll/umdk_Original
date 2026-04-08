@@ -1,3 +1,13 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2021-2025. All rights reserved.
+ * Description: Performance monitoring and profiling for URMA
+ * Author: Tang Zhedong
+ * Create: 2026-04-08
+ * Note:
+ * History: 2026-04-08 create file
+ */
+
 #ifndef URMA_PERF_H
 #define URMA_PERF_H
 
@@ -46,7 +56,7 @@ typedef struct {
     int64_t highest_trackable_value;
     int32_t significant_figures;
     int32_t unit_magnitude;
-    int32_t sub_bucket_half_count_magnitude;
+    int32_t sub_bucket_magnitude;
     int32_t sub_bucket_half_count;
     int32_t sub_bucket_mask;
     int32_t sub_bucket_count;
@@ -55,10 +65,10 @@ typedef struct {
     int64_t min_value;
     int64_t max_value;
     int64_t *counts;
-} HdrHistogramData;
+} hdr_histogram_data;
 
 typedef struct {
-    HdrHistogramData* histograms[URMA_PERF_RECORD_TYPE_MAX];
+    hdr_histogram_data* histograms[URMA_PERF_RECORD_TYPE_MAX];
     urma_perf_stats_t stats;
     int32_t is_running;
 } urma_perf_context;
