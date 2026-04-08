@@ -341,6 +341,175 @@ urma_status_t bondp_delete_jfc(urma_jfc_t *jfc)
     return ret;
 }
 
+static void add_first_available_index(bondp_context_t *bdp_ctx, int start, int end,
+                                      uint32_t *active_indices, uint32_t *active_count)
+{
+    for (int i = start; i < end; ++i) {
+        if (bdp_ctx->p_ctxs[i] == NULL) {
+            continue;
+        }
+        active_indices[*active_count] = (uint32_t)i;
+        *active_count += 1;
+        return;
+    }
+}
+
+static void get_default_multipath_active_indices_single_dev(bondp_context_t *bdp_ctx,
+                                                            uint32_t *active_indices, uint32_t *active_count)
+{
+    add_first_available_index(bdp_ctx, 0, 1, active_indices, active_count);
+}
+
+static void get_default_multipath_active_indices_multi_dev(bondp_context_t *bdp_ctx,
+                                                           uint32_t *active_indices, uint32_t *active_count)
+{
+    add_first_available_index(bdp_ctx, 0, 1, active_indices, active_count);
+    add_first_available_index(bdp_ctx, 1, 2, active_indices, active_count);
+}
+
+static void get_default_clos_active_indices_single_dev(bondp_context_t *bdp_ctx,
+                                                       uint32_t *active_indices, uint32_t *active_count)
+{
+    add_first_available_index(bdp_ctx, IODIE_NUM, IODIE_NUM + PORT_NUM, active_indices, active_count);
+}
+
+static void get_default_clos_active_indices_multi_dev(bondp_context_t *bdp_ctx,
+                                                      uint32_t *active_indices, uint32_t *active_count)
+{
+    add_first_available_index(bdp_ctx, IODIE_NUM, IODIE_NUM + PORT_NUM, active_indices, active_count);
+    add_first_available_index(bdp_ctx, IODIE_NUM + PORT_NUM, IODIE_NUM + 2 * PORT_NUM,
+                              active_indices, active_count);
+}
+
+static void get_default_active_indices(bondp_context_t *bdp_ctx, bool multi_path,
+                                       uint32_t *active_indices, uint32_t *active_count)
+{
+    bool is_clos = false;
+
+    *active_count = 0;
+    if (multi_path) {
+        if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
+            get_default_multipath_active_indices_single_dev(bdp_ctx, active_indices, active_count);
+        } else {
+            get_default_multipath_active_indices_multi_dev(bdp_ctx, active_indices, active_count);
+        }
+        return;
+    }
+
+    if (is_clos) {
+        if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
+            get_default_clos_active_indices_single_dev(bdp_ctx, active_indices, active_count);
+        } else {
+            get_default_clos_active_indices_multi_dev(bdp_ctx, active_indices, active_count);
+        }
+        return;
+    }
+}
+
+static int convert_bond_port_id_to_active_index(const bondp_context_t *bdp_ctx, bondp_port_id_t port_id,
+                                                uint32_t *active_index)
+{
+    if (port_id.port_idx == UINT8_MAX) {
+        if (port_id.chip_id >= PRIMARY_EID_NUM) {
+            URMA_LOG_ERR("Invalid primary chip_id: %u.\n", port_id.chip_id);
+            return -1;
+        }
+        *active_index = port_id.chip_id;
+        return 0;
+    }
+
+    if (port_id.port_idx >= PORT_NUM || port_id.chip_id >= PRIMARY_EID_NUM) {
+        URMA_LOG_ERR("Invalid port id, chip_id: %u, port_idx: %u.\n", port_id.chip_id, port_id.port_idx);
+        return -1;
+    }
+
+    *active_index = (uint32_t)get_matrix_port_p_idx(port_id.chip_id, port_id.port_idx);
+    if (*active_index >= (uint32_t)bdp_ctx->dev_num) {
+        URMA_LOG_ERR("Invalid converted active index: %u.\n", *active_index);
+        return -1;
+    }
+    return 0;
+}
+
+static int init_active_indices(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_comp, bool multi_path,
+                               const bondp_port_id_t *active_port_ids, uint32_t active_port_count)
+{
+    if (active_port_ids == NULL || active_port_count == 0) {
+        get_default_active_indices(bdp_ctx, multi_path, bdp_comp->active_indices, &bdp_comp->active_count);
+        return 0;
+    }
+
+    if (active_port_count > URMA_UBAGG_DEV_MAX_NUM) {
+        URMA_LOG_ERR("Invalid active_port_count: %u.\n", active_port_count);
+        return -1;
+    }
+
+    bdp_comp->active_count = 0;
+    for (uint32_t n = 0; n < active_port_count; ++n) {
+        uint32_t active_index = 0;
+        if (convert_bond_port_id_to_active_index(bdp_ctx, active_port_ids[n], &active_index) != 0) {
+            URMA_LOG_ERR("Invalid active port id, value: 0x%lx.\n", active_port_ids[n].value);
+            return -1;
+        }
+
+        bool is_duplicate = false;
+        for (uint32_t i = 0; i < bdp_comp->active_count; ++i) {
+            if (bdp_comp->active_indices[i] == active_index) {
+                is_duplicate = true;
+                break;
+            }
+        }
+        if (is_duplicate) {
+            continue;
+        }
+        bdp_comp->active_indices[bdp_comp->active_count] = active_index;
+        bdp_comp->active_count += 1;
+    }
+    return 0;
+}
+
+static int init_target_active_indices(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
+                                      urma_bond_id_info_out_t *rvjetty_info)
+{
+    bool is_clos = false;
+
+    if (rvjetty_info->is_multipath) {
+        if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
+            get_default_multipath_active_indices_single_dev(bdp_ctx, bdp_tjetty->active_indices, &bdp_tjetty->active_count);
+        } else {
+            get_default_multipath_active_indices_multi_dev(bdp_ctx, bdp_tjetty->active_indices, &bdp_tjetty->active_count);
+        }
+        return 0;
+    }
+
+    if (is_clos) {
+        return 0;
+    }
+
+    for (int i = 0; i < IODIE_NUM; i++) {
+        for (int j = 0; j < PORT_NUM; j++) {
+            int local_port = IODIE_NUM + PORT_NUM * i + j;
+            int target_port = IODIE_NUM + PORT_NUM * i + rvjetty_info->ports[i][j];
+
+            if (local_port >= bdp_ctx->dev_num ||
+                bdp_ctx->p_ctxs[local_port] == NULL ||
+                target_port >= rvjetty_info->dev_num ||
+                is_empty_eid(&rvjetty_info->slave_id[target_port].eid)) {
+                URMA_LOG_DEBUG("BONDP skip route (%d %d)\n", local_port, target_port);
+                continue;
+            }
+
+            bdp_tjetty->active_indices[bdp_tjetty->active_count] = target_port;
+            bdp_tjetty->active_indices_local[bdp_tjetty->active_count] = local_port;
+            bdp_tjetty->active_count += 1;
+        }
+    }
+    if (bdp_tjetty->active_count == 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static int bondp_create_vjfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg, bondp_comp_t *bdp_jfs)
 {
     urma_cmd_udrv_priv_t udata = {0};
@@ -356,9 +525,29 @@ static int bondp_create_pjfs(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfs, ur
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
     urma_jfs_cfg_t p_cfg = *cfg;
 
-    for (int i = 0; i < bdp_jfs->dev_num; ++i) {
+    if (bdp_jfs->active_count == 0) {
+        for (int i = 0; i < bdp_jfs->dev_num; ++i) {
+            if (bdp_ctx->p_ctxs[i] == NULL) {
+                continue;
+            }
+            p_cfg.jfc = bdp_jfc->p_jfc[i];
+            urma_jfs_t *jfs = urma_create_jfs(bdp_ctx->p_ctxs[i], &p_cfg);
+            if (jfs == NULL) {
+                URMA_LOG_ERR("Failed to create pjfs %d.\n", i);
+                return -1;
+            }
+            bdp_jfs->p_jfs[i] = jfs;
+            bdp_jfs->p_jfs[i]->jfs_cfg.user_ctx = (uint64_t)bdp_jfs;
+            bdp_jfs->valid[i] = true;
+        }
+        return 0;
+    }
+
+    for (uint32_t n = 0; n < bdp_jfs->active_count; ++n) {
+        uint32_t i = bdp_jfs->active_indices[n];
         if (bdp_ctx->p_ctxs[i] == NULL) {
-            continue;
+            URMA_LOG_ERR("Invalid p_ctx for device %d.\n", i);
+            return -1;
         }
         p_cfg.jfc = bdp_jfc->p_jfc[i];
         urma_jfs_t *jfs = urma_create_jfs(bdp_ctx->p_ctxs[i], &p_cfg);
@@ -368,6 +557,7 @@ static int bondp_create_pjfs(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfs, ur
         }
         bdp_jfs->p_jfs[i] = jfs;
         bdp_jfs->p_jfs[i]->jfs_cfg.user_ctx = (uint64_t)bdp_jfs;
+        bdp_jfs->valid[i] = true;
     }
 
     return 0;
@@ -455,6 +645,14 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
 
+    const bondp_port_id_t *cfg_active_port_ids = NULL;
+    uint32_t cfg_active_port_count = 0;
+    if (cfg->flag.bs.has_drv_ext) {
+        const bondp_jfs_cfg_t *bdp_cfg = (const bondp_jfs_cfg_t *)cfg;
+        cfg_active_port_count = bdp_cfg->active_port_count;
+        cfg_active_port_ids = bdp_cfg->active_port_ids;
+    }
+
     if (cfg->flag.bs.multi_path == false) {
         URMA_LOG_ERR("In matrix server, JFS don't support single-path mode.\n");
         return NULL;
@@ -483,6 +681,12 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     bdp_jfs->send_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
     bdp_jfs->recv_jfc = NULL;
 
+    if (init_active_indices(bdp_ctx, bdp_jfs, cfg->flag.bs.multi_path,
+                            cfg_active_port_ids, cfg_active_port_count) != 0) {
+        URMA_LOG_ERR("Failed to init active indices\n");
+        goto FREE_JFS;
+    }
+
     if (bondp_create_pjfs(bdp_ctx, bdp_jfs, cfg) != 0) {
         URMA_LOG_ERR("Failed to create pjfs\n");
         goto DELETE_PJFS;
@@ -506,12 +710,14 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     atomic_fetch_add(&bdp_jfc->use_cnt.atomic_cnt, 1);
 
     return &bdp_jfs->v_jfs;
+
 DEL_P_VJFS_ID:
     bondp_del_jfs_p_vjetty_info(bdp_jfs);
 DELETE_VJFS:
     (void)bondp_delete_vjfs(bdp_jfs);
 DELETE_PJFS:
     bondp_delete_pjfs(bdp_jfs);
+FREE_JFS:
     free(bdp_jfs);
     return NULL;
 }
@@ -704,6 +910,12 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
 
+    bool cfg_multi_path = true;
+    if (cfg->flag.bs.has_drv_ext) {
+        const bondp_jfr_cfg_t *bdp_cfg = (const bondp_jfr_cfg_t *)cfg;
+        cfg_multi_path = bdp_cfg->multi_path;
+    }
+
     bondp_comp_t *bdp_jfr = (bondp_comp_t *)calloc(1, sizeof(bondp_comp_t));
     if (bdp_jfr == NULL) {
         return NULL;
@@ -714,6 +926,23 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
     atomic_init(&bdp_jfr->use_cnt.atomic_cnt, 0);
     bdp_jfr->send_jfc = NULL;
     bdp_jfr->recv_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
+    bdp_jfr->is_multipath = cfg_multi_path;
+
+    if (cfg_multi_path) {
+        for (int i = 0; i < IODIE_NUM; i++) {
+            if (bdp_ctx->p_ctxs[i] != NULL) {
+                bdp_jfr->active_indices[bdp_jfr->active_count] = i;
+                bdp_jfr->active_count++;
+            }
+        }
+    } else {
+        for (int i = IODIE_NUM; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
+            if (bdp_ctx->p_ctxs[i] != NULL) {
+                bdp_jfr->active_indices[bdp_jfr->active_count] = i;
+                bdp_jfr->active_count++;
+            }
+        }
+    }
 
     if (bondp_create_pjfr(bdp_ctx, bdp_jfr, cfg)) {
         URMA_LOG_ERR("Failed to create pjfr\n");
@@ -908,11 +1137,35 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
     bondp_jfc_t *bdp_jfs_jfc = CONTAINER_OF_FIELD(jetty_cfg->jfs_cfg.jfc, bondp_jfc_t, v_jfc);
     bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr, bondp_comp_t, base);
     bondp_jfc_t *bdp_rplc_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfc, bondp_jfc_t, v_jfc);
-
     urma_jetty_cfg_t p_cfg = *jetty_cfg;
-    for (int i = 0; i < bdp_jetty->dev_num; ++i) {
+
+    if (bdp_jetty->active_count == 0) {
+        for (int i = 0; i < bdp_jetty->dev_num; ++i) {
+            if (!bdp_ctx->p_ctxs[i]) {
+                continue;
+            }
+            p_cfg.jfs_cfg.jfc = bdp_jfs_jfc->p_jfc[i];
+            p_cfg.shared.jfr = bdp_jfr->p_jfr[i];
+            if (bdp_rplc_jfc) {
+                p_cfg.shared.jfc = bdp_rplc_jfc->p_jfc[i];
+            }
+            urma_jetty_t *jetty = urma_create_jetty(bdp_ctx->p_ctxs[i], &p_cfg);
+            if (jetty == NULL) {
+                URMA_LOG_ERR("Failed to create pjetty %d.\n", i);
+                return -1;
+            }
+            jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+            bdp_jetty->p_jetty[i] = jetty;
+            bdp_jetty->valid[i] = true;
+        }
+        return 0;
+    }
+
+    for (uint32_t n = 0; n < bdp_jetty->active_count; ++n) {
+        uint32_t i = bdp_jetty->active_indices[n];
         if (!bdp_ctx->p_ctxs[i]) {
-            continue;
+            URMA_LOG_ERR("Invalid p_ctx for device %d.\n", i);
+            return -1;
         }
         p_cfg.jfs_cfg.jfc = bdp_jfs_jfc->p_jfc[i];
         p_cfg.shared.jfr = bdp_jfr->p_jfr[i];
@@ -926,6 +1179,7 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
         }
         jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
         bdp_jetty->p_jetty[i] = jetty;
+        bdp_jetty->valid[i] = true;
     }
     return 0;
 }
@@ -1014,6 +1268,14 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
 
+    const bondp_port_id_t *cfg_active_port_ids = NULL;
+    uint32_t cfg_active_port_count = 0;
+    if (jetty_cfg->flag.bs.has_drv_ext) {
+        const bondp_jetty_cfg_t *bdp_cfg = (const bondp_jetty_cfg_t *)jetty_cfg;
+        cfg_active_port_count = bdp_cfg->active_port_count;
+        cfg_active_port_ids = bdp_cfg->active_port_ids;
+    }
+
     if (jetty_cfg->flag.bs.share_jfr != true || jetty_cfg->shared.jfr == NULL) {
         URMA_LOG_ERR("UB device must use shared jfr when create jetty.\n");
         errno = EINVAL;
@@ -1062,6 +1324,12 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     bdp_jetty->send_jfc = CONTAINER_OF_FIELD(jetty_cfg->jfs_cfg.jfc, bondp_jfc_t, v_jfc);
     bdp_jetty->recv_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr->jfr_cfg.jfc, bondp_jfc_t, v_jfc);
 
+    if (init_active_indices(bdp_ctx, bdp_jetty, jetty_cfg->jfs_cfg.flag.bs.multi_path,
+                            cfg_active_port_ids, cfg_active_port_count) != 0) {
+        URMA_LOG_ERR("Failed to init active indices\n");
+        goto FREE_JETTY;
+    }
+
     if (bondp_create_pjetty(bdp_ctx, bdp_jetty, jetty_cfg) != 0) {
         URMA_LOG_ERR("Failed to create pjetty\n");
         goto DELETE_PJETTY;
@@ -1098,6 +1366,7 @@ DELETE_VJETTY:
     bondp_delete_vjetty(bdp_jetty);
 DELETE_PJETTY:
     bondp_delete_pjetty(bdp_jetty);
+FREE_JETTY:
     free(bdp_jetty);
     return NULL;
 }
@@ -1196,73 +1465,6 @@ int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_ou
     return 0;
 }
 
-static int import_pjetty_for_primary_eid(
-    bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
-    urma_bond_id_info_out_t *rvjetty_info, urma_rjetty_t *rjetty,
-    urma_token_t *rjetty_token)
-{
-    urma_rjetty_t p_rjetty = *rjetty;
-
-    for (int i = 0; i < bdp_tjetty->local_dev_num; ++i) {
-        if (bdp_ctx->p_ctxs[i] == NULL) {
-            URMA_LOG_ERR("Primary dev has NULL ctx\n");
-            return -1;
-        }
-        if (is_empty_eid(&rvjetty_info->slave_id[i].eid)) {
-            URMA_LOG_ERR("Primary dev has NULL rjetty eid\n");
-            return -1;
-        }
-        bdp_tjetty->local_valid[i] = true;
-        bdp_tjetty->target_valid[i] = true;
-        p_rjetty.jetty_id = rvjetty_info->slave_id[i];
-        bdp_tjetty->p_tjetty[i][i] = urma_import_jetty(bdp_ctx->p_ctxs[i], &p_rjetty, rjetty_token);
-        if (bdp_tjetty->p_tjetty[i][i] == NULL) {
-            URMA_LOG_ERR("Failed to import primary tjetty %d %d\n", i, i);
-            return -1;
-        }
-    }
-    return 0;
-}
-
-static int import_pjetty_for_port_eid(
-    bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
-    urma_bond_id_info_out_t *rvjetty_info, urma_rjetty_t *rjetty,
-    urma_token_t *rjetty_token)
-{
-    bool has_valid_route = false;
-
-    urma_rjetty_t p_rjetty = *rjetty;
-    for (int i = 0; i < IODIE_NUM; i++) {
-        for (int j = 0; j < PORT_NUM; j++) {
-            int local_port = IODIE_NUM + PORT_NUM * i + j;
-            int target_port = IODIE_NUM + PORT_NUM * i + rvjetty_info->ports[i][j];
-
-            if (local_port >= bdp_ctx->dev_num ||
-                bdp_ctx->p_ctxs[local_port] == NULL ||
-                target_port >= rvjetty_info->dev_num ||
-                is_empty_eid(&rvjetty_info->slave_id[target_port].eid)) {
-                URMA_LOG_DEBUG("BONDP skip route (%d %d)\n", local_port, target_port);
-                continue;
-            }
-            p_rjetty.jetty_id = rvjetty_info->slave_id[target_port];
-            bdp_tjetty->p_tjetty[local_port][target_port] =
-                urma_import_jetty(bdp_ctx->p_ctxs[local_port], &p_rjetty, rjetty_token);
-            if (bdp_tjetty->p_tjetty[local_port][target_port] == NULL) {
-                URMA_LOG_ERR("Failed to import direct tjetty %d %d\n", local_port, target_port);
-                return -1;
-            }
-            bdp_tjetty->local_valid[local_port] = true;
-            bdp_tjetty->target_valid[target_port] = true;
-            has_valid_route = true;
-        }
-    }
-    if (!has_valid_route) {
-        URMA_LOG_ERR("No valid direct route\n");
-        return -1;
-    }
-    return 0;
-}
-
 static int bondp_import_vjetty(
     urma_context_t *ctx, urma_rjetty_t *rjetty, urma_token_t *rjetty_token,
     bondp_target_jetty_t *bdp_tjetty, urma_bond_id_info_out_t *udata_out)
@@ -1290,18 +1492,19 @@ static int bondp_import_pjetty(
     urma_rjetty_t *rjetty, urma_token_t *rjetty_token,
     urma_bond_id_info_out_t *rvjetty_info)
 {
-    int ret = 0;
-    if (bdp_tjetty->is_multipath) {
-        int iodie_num = is_single_dev_mode(&bdp_ctx->v_ctx) ? SINGLE_DIE_IODIE_NUM : IODIE_NUM;
-        bdp_tjetty->local_dev_num = iodie_num;
-        bdp_tjetty->target_dev_num = iodie_num;
-        ret = import_pjetty_for_primary_eid(bdp_ctx, bdp_tjetty, rvjetty_info, rjetty, rjetty_token);
-    } else {
-        bdp_tjetty->local_dev_num = bdp_ctx->dev_num;
-        bdp_tjetty->target_dev_num = rvjetty_info->dev_num;
-        ret = import_pjetty_for_port_eid(bdp_ctx, bdp_tjetty, rvjetty_info, rjetty, rjetty_token);
+    urma_rjetty_t p_rjetty = *rjetty;
+
+    for (uint32_t n = 0; n < bdp_tjetty->active_count; ++n) {
+        uint32_t i = bdp_tjetty->active_indices[n];
+        p_rjetty.jetty_id = rvjetty_info->slave_id[i];
+        bdp_tjetty->p_tjetty[i][i] = urma_import_jetty(bdp_ctx->p_ctxs[i], &p_rjetty, rjetty_token);
+        if (bdp_tjetty->p_tjetty[i][i] == NULL) {
+            URMA_LOG_ERR("Failed to import tjetty %u %u\n", i, i);
+            return -1;
+        }
+        bdp_tjetty->valid[i] = true;
     }
-    return ret;
+    return 0;
 }
 
 static int bondp_unimport_vjetty(bondp_target_jetty_t *bdp_tjetty)
@@ -1317,8 +1520,7 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
         ret = URMA_FAIL;
     }
 
-    memset(bdp_tjetty->local_valid, 0, sizeof(bdp_tjetty->local_valid));
-    memset(bdp_tjetty->target_valid, 0, sizeof(bdp_tjetty->target_valid));
+    memset(bdp_tjetty->valid, 0, sizeof(bdp_tjetty->valid));
 
     for (int i = 0; i < bdp_tjetty->local_dev_num; ++i) {
         for (int j = 0; j < bdp_tjetty->target_dev_num; ++j) {
@@ -1421,6 +1623,11 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         }
     }
 
+    if (init_target_active_indices(bdp_ctx, bdp_tjetty, &rvjetty_info) != 0) {
+        URMA_LOG_ERR("Failed to init target active indices\n");
+        goto unimport_vjetty;
+    }
+
     if (bondp_import_pjetty(bdp_ctx, bdp_tjetty, rjetty, token_value, &rvjetty_info) != 0) {
         URMA_LOG_ERR("Failed to import pjetty\n");
         goto unimport_pjetty;
@@ -1483,70 +1690,6 @@ urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
     return ret;
 }
 
-/**
- * Only bind jetty p_jetty[i], p_tjetty[i][i].
- * Set vjetty and tjetty's remote_jetty.
- */
-static urma_status_t bind_jetty_default(bondp_comp_t *bdp_jetty, bondp_target_jetty_t *bdp_tjetty)
-{
-    int i = 0;
-    int ret = 0;
-    for (i = 0; i < bdp_tjetty->local_dev_num && i < bdp_tjetty->target_dev_num; ++i) {
-        if (bdp_jetty->p_jetty[i] == NULL || bdp_tjetty->p_tjetty[i][i] == NULL) {
-            continue;
-        }
-        ret = urma_bind_jetty(bdp_jetty->p_jetty[i], bdp_tjetty->p_tjetty[i][i]);
-        if (ret) {
-            goto UNBIND;
-        }
-        bdp_jetty->p_jetty[i]->remote_jetty = bdp_tjetty->p_tjetty[i][i];
-    }
-    bdp_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
-    return URMA_SUCCESS;
-UNBIND:
-    for (int p = 0; p < i; ++p) {
-        if (bdp_tjetty->p_tjetty[p][p] != NULL) {
-            urma_unbind_jetty(bdp_jetty->p_jetty[p]);
-        }
-    }
-    return URMA_FAIL;
-}
-
-static urma_status_t bind_jetty_single_path(bondp_comp_t *bdp_jetty, bondp_target_jetty_t *bdp_tjetty)
-{
-    int ret = 0;
-    int local_port = 0;
-    int target_port = 0;
-    bool has_valid_route = false;
-
-    for (int i = 0; i < bdp_tjetty->local_dev_num; ++i) {
-        for (int j = 0; j < bdp_tjetty->target_dev_num; ++j) {
-            if (bdp_jetty->p_jetty[i] == NULL || bdp_tjetty->p_tjetty[i][j] == NULL) {
-                continue;
-            }
-            ret = urma_bind_jetty(bdp_jetty->p_jetty[i], bdp_tjetty->p_tjetty[i][j]);
-            if (ret != 0) {
-                return URMA_FAIL;
-            }
-            local_port = i;
-            target_port = j;
-            has_valid_route = true;
-            break;
-        }
-        if (has_valid_route) {
-            break;
-        }
-    }
-    if (!has_valid_route) {
-        URMA_LOG_ERR("No valid direct route\n");
-        return URMA_FAIL;
-    }
-    bdp_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
-    bdp_jetty->bjetty_ctx.direct_local_port = local_port;
-    bdp_jetty->bjetty_ctx.direct_target_port = target_port;
-    return URMA_SUCCESS;
-}
-
 urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
 {
     bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
@@ -1557,13 +1700,37 @@ urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
         return URMA_EINVAL;
     }
 
-    urma_status_t ret;
-    if (bdp_jetty->is_multipath) {
-        ret = bind_jetty_default(bdp_jetty, bdp_tjetty);
-    } else {
-        ret = bind_jetty_single_path(bdp_jetty, bdp_tjetty);
+    uint32_t min_active_count = MIN(bdp_jetty->active_count, bdp_tjetty->active_count);
+    if (min_active_count == 0) {
+        URMA_LOG_ERR("No valid active slice to bind\n");
+        return URMA_FAIL;
     }
-    return ret;
+
+    for (uint32_t n = 0; n < min_active_count; ++n) {
+        uint32_t local_idx = bdp_jetty->active_indices[n];
+        uint32_t target_idx = bdp_tjetty->active_indices[n];
+
+        urma_jetty_t *pjetty = bdp_jetty->p_jetty[local_idx];
+        urma_target_jetty_t *ptjetty = bdp_tjetty->p_tjetty[target_idx][target_idx];
+
+        if (urma_bind_jetty(pjetty, ptjetty) != 0) {
+            goto UNBIND;
+        }
+    }
+
+    bdp_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
+    return URMA_SUCCESS;
+
+UNBIND:
+    for (uint32_t p = 0; p < URMA_UBAGG_DEV_MAX_NUM; ++p) {
+        uint32_t local_idx = bdp_jetty->active_indices[p];
+        if (bdp_jetty->p_jetty[local_idx] != NULL &&
+            bdp_jetty->p_jetty[local_idx]->remote_jetty != NULL) {
+            urma_unbind_jetty(bdp_jetty->p_jetty[local_idx]);
+            bdp_jetty->p_jetty[local_idx]->remote_jetty = NULL;
+        }
+    }
+    return URMA_FAIL;
 }
 
 urma_status_t bondp_unbind_jetty(urma_jetty_t *jetty)
@@ -1573,49 +1740,19 @@ urma_status_t bondp_unbind_jetty(urma_jetty_t *jetty)
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(tjetty, bondp_target_jetty_t, v_tjetty);
     urma_status_t ret = URMA_SUCCESS;
 
-    for (int i = 0; i < bdp_tjetty->local_dev_num && bdp_tjetty->target_dev_num; ++i) {
-        if (bdp_jetty->p_jetty[i] == NULL) {
-            continue;
+    for (uint32_t p = 0; p < URMA_UBAGG_DEV_MAX_NUM; ++p) {
+        uint32_t local_idx = bdp_jetty->active_indices[p];
+        if (bdp_jetty->p_jetty[local_idx] != NULL &&
+            bdp_jetty->p_jetty[local_idx]->remote_jetty != NULL) {
+            if (urma_unbind_jetty(bdp_jetty->p_jetty[local_idx]) != URMA_SUCCESS) {
+                URMA_LOG_ERR("Failed to unbind tjetty [%u](%d, %d)\n", bdp_tjetty->v_tjetty.id.id, local_idx, local_idx);
+                ret = URMA_FAIL;
+            }
+            bdp_jetty->p_jetty[local_idx]->remote_jetty = NULL;
         }
-        if (bdp_jetty->p_jetty[i]->remote_jetty == NULL) {
-            URMA_LOG_INFO("BONDP no remote jetty for pjetty[%d]\n", i);
-            continue;
-        }
-        if (urma_unbind_jetty(bdp_jetty->p_jetty[i]) != URMA_SUCCESS) {
-            URMA_LOG_ERR("Failed to unbind tjetty [%u](%d, %d)\n", bdp_tjetty->v_tjetty.id.id, i, i);
-            ret = URMA_FAIL;
-        }
-        bdp_jetty->p_jetty[i]->remote_jetty = NULL;
     }
     bdp_jetty->v_jetty.remote_jetty = NULL;
-    bdp_jetty->bjetty_ctx.direct_local_port = -1;
-    bdp_jetty->bjetty_ctx.direct_target_port = -1;
     return ret;
-}
-
-static int import_primary_ports_jfr(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
-                                    urma_bond_id_info_out_t *ex_info, urma_rjfr_t *rjfr, urma_token_t *rjfr_token)
-{
-    urma_rjfr_t p_rjfr = *rjfr;
-    p_rjfr.tp_type = URMA_CTP;
-
-    for (int i = 0; i < bdp_tjetty->local_dev_num; ++i) {
-        if (bdp_ctx->p_ctxs[i] == NULL) {
-            URMA_LOG_WARN("Primary dev has NULL ctx\n");
-            continue;
-        }
-        if (is_empty_eid(&ex_info->slave_id[i].eid)) {
-            URMA_LOG_WARN("Primary dev has NULL rjetty eid\n");
-            continue;
-        }
-        bdp_tjetty->target_valid[i] = true;
-        p_rjfr.jfr_id = ex_info->slave_id[i];
-        bdp_tjetty->p_tjetty[i][i] = urma_import_jfr(bdp_ctx->p_ctxs[i], &p_rjfr, rjfr_token);
-        if (bdp_tjetty->p_tjetty[i][i] == NULL) {
-            return -1;
-        }
-    }
-    return 0;
 }
 
 static int bondp_import_vjfr(urma_context_t *ctx, urma_rjfr_t *rjfr, urma_token_t *token_value,
@@ -1640,20 +1777,19 @@ static int bondp_import_vjfr(urma_context_t *ctx, urma_rjfr_t *rjfr, urma_token_
 static int bondp_import_pjfr(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
                              urma_rjfr_t *rjfr, urma_token_t *token_value, urma_bond_id_info_out_t *udata_out)
 {
-    int ret = 0;
+    urma_rjfr_t p_rjfr = *rjfr;
 
-    bdp_tjetty->is_multipath = true; /* JFR currently only support multipath mode */
-
-    if (bdp_tjetty->is_multipath) {
-        int iodie_num = is_single_dev_mode(&bdp_ctx->v_ctx) ? SINGLE_DIE_IODIE_NUM : IODIE_NUM;
-        bdp_tjetty->local_dev_num = iodie_num;
-        bdp_tjetty->target_dev_num = iodie_num;
-        ret = import_primary_ports_jfr(bdp_ctx, bdp_tjetty, udata_out, rjfr, token_value);
-    } else {
-        URMA_LOG_ERR("Currently, jfr does not support single-path mode.\n");
-        return -1;
+    for (uint32_t n = 0; n < bdp_tjetty->active_count; ++n) {
+        uint32_t i = bdp_tjetty->active_indices[n];
+        p_rjfr.jfr_id = udata_out->slave_id[i];
+        bdp_tjetty->p_tjetty[i][i] = urma_import_jfr(bdp_ctx->p_ctxs[i], &p_rjfr, token_value);
+        if (bdp_tjetty->p_tjetty[i][i] == NULL) {
+            URMA_LOG_ERR("Failed to import tjfr %u %u\n", i, i);
+            return -1;
+        }
+        bdp_tjetty->valid[i] = true;
     }
-    return ret;
+    return 0;
 }
 
 static int bondp_unimport_vjfr(bondp_target_jetty_t *bdp_tjetty)
@@ -1700,6 +1836,11 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
         goto free_bondp_tjetty;
     }
 
+    if (init_target_active_indices(bdp_ctx, bdp_tjetty, &udata_out) != 0) {
+        URMA_LOG_ERR("Failed to init target active indices\n");
+        goto unimport_vjfr;
+    }
+
     if (bondp_import_pjfr(bdp_ctx, bdp_tjetty, rjfr, token_value, &udata_out) != 0) {
         goto unimport_pjfr;
     }
@@ -1708,6 +1849,7 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
 
 unimport_pjfr:
     bondp_unimport_pjfr(bdp_tjetty);
+unimport_vjfr:
     bondp_unimport_vjfr(bdp_tjetty);
 free_bondp_tjetty:
     free(bdp_tjetty);
