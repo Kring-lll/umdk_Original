@@ -94,10 +94,32 @@ extern thread_local urma_perf_context* g_perf_ctx;
         } \
     } while (0)
 
+/**
+ * Start performance monitoring for urma devices.
+ * Return: 0 on success, other value on error
+ */
 urma_status_t urma_start_perf(void);
+
+/**
+ * Stop performance monitoring for urma devices.
+ * Return: 0 on success, other value on error
+ */
 urma_status_t urma_stop_perf(void);
+
 void urma_step_perf(urma_perf_record_type_t type, uint64_t latency);
+
+/**
+ * Get performance statistics information.
+ * @param[in] perf_buf: Buffer to store performance information, user needs to allocate the memory;
+ * @param[in] length: Pointer to buffer length, input as buffer size, output as actual data length;
+ * Return: 0 on success, other value on error
+ */
 urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length);
+
+/**
+ * Cleanup performance monitoring resources.
+ * Return: 0 on success, other value on error
+ */
 void urma_perf_cleanup(void);
 
 #ifdef __cplusplus
