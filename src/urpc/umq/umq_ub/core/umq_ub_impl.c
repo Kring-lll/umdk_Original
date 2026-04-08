@@ -1899,7 +1899,7 @@ static int umq_ub_get_local_rtp_route_list(umq_route_list_t *route_list)
         }
 
         // skip bonding dev
-        if (strstr(dev_info[i].dev_name, "bonding") != NULL) {
+        if (is_umq_ub_bonding_dev(dev_info[i].dev_name)) {
             continue;
         }
 

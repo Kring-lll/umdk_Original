@@ -379,6 +379,16 @@ static uint16_t umq_ub_post_rx_failed_num(urma_jfr_wr_t *recv_wr, uint16_t num, 
     return 0;
 }
 
+static inline void umq_ub_rqe_posted_cnt_inc(ub_queue_t *queue, uint16_t posted_cnt)
+{
+    if (queue->bind_ctx == NULL) {
+        umq_ub_initial_rqe_posted(queue, posted_cnt);
+        return;
+    }
+
+    umq_ub_shared_credit_recharge(queue, posted_cnt);
+}
+
 int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
 {
     uint32_t max_sge_num = queue->max_rx_sge;
@@ -471,12 +481,12 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
             *bad_qbuf = qbuf;
             bad_wr = recv_wr;
         }
-        umq_ub_shared_credit_recharge(queue, wr_index - umq_ub_post_rx_failed_num(recv_wr, wr_index, *bad_qbuf));
+        umq_ub_rqe_posted_cnt_inc(queue, wr_index - umq_ub_post_rx_failed_num(recv_wr, wr_index, *bad_qbuf));
         // if fails, add chain of qbuf back for rx
         process_bad_wr(queue, bad_wr, NULL);
         return -UMQ_ERR_EAGAIN;
     }
-    umq_ub_shared_credit_recharge(queue, wr_index);
+    umq_ub_rqe_posted_cnt_inc(queue, wr_index);
     umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_POST_RECV, start_timestamp);
     return UMQ_SUCCESS;
 

@@ -292,6 +292,7 @@ typedef struct ub_credit_pool_ops {
     // return unused credit
     uint16_t (*available_credit_return)(struct ub_credit_pool *shared_credit, uint16_t count);
     uint16_t (*allocated_credit_dec)(struct ub_credit_pool *shared_credit, uint16_t count);
+    uint16_t (*initial_credit_posted)(struct ub_credit_pool *shared_credit, uint16_t count);
     void (*stats_query)(struct ub_credit_pool *fc, umq_credit_pool_stats_t *out);
 } ub_credit_pool_ops_t;
 
@@ -305,6 +306,7 @@ typedef enum ub_credit_stat_u64 {
 typedef enum ub_credit_stat_u16 {
     CREDIT_POOL_IDLE = 0,           // the number of credits available in the current credit pool
     CREDIT_POOL_ALLOCATED,          // the number of credit currently be allocated form the credit pool
+    CREDIT_POOL_INITIAL_POST,       // initial rqe posted, initial credit = initial_rqe_posted / rqe_post_factor
     CREDIT_COUNTER_MAX_U16
 } ub_credit_stat_u16_t;
 
@@ -386,6 +388,8 @@ typedef struct ub_queue {
     uint8_t err_timeout;        // jetty timeout before report error
     uint8_t rnr_retry;          // number of times that jfs will resend packets before report error, when remote (RNR)
     uint8_t min_rnr_timer;      // minimum RNR NACK timer
+    uint8_t rqe_post_factor;    // 1 by default, and multiple times when use port_ids
+    uint8_t port_num;
     bool tx_flush_done;         // tx recv flush err done
     bool rx_flush_done;         // rx buf ctx all report
     umq_queue_mode_t mode;      // mode of queue, QUEUE_MODE_POLLING for default
@@ -394,6 +398,7 @@ typedef struct ub_queue {
     uint64_t umqh;
     uint64_t share_rq_umqh;
     ub_queue_idle_check_t *checker;
+    umq_port_id_t *port;
 } ub_queue_t;
 
 typedef struct user_ctx {
@@ -430,6 +435,11 @@ typedef struct umq_ub_raw_dev {
 static inline uint64_t umq_ub_notify_buf_addr_get(ub_queue_t *queue, umq_ub_rw_segment_offset_t offset)
 {
     return (uint64_t)((uintptr_t)queue->notify_buf->buf_data + offset * UMQ_UB_RW_SEGMENT_LEN);
+}
+
+static inline bool is_umq_ub_bonding_dev(char *name)
+{
+    return strstr(name, "bonding") != NULL;
 }
 
 int rx_buf_ctx_list_init(rx_buf_ctx_list_t *rx_buf_ctx_list, uint32_t ctx_num);

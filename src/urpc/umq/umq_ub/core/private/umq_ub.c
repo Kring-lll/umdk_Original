@@ -1020,6 +1020,37 @@ static int umq_default_priority_get(umq_ub_ctx_t *dev_ctx, umq_tp_type_t actual_
    return UMQ_FAIL;
 }
 
+// main queue supply share rq to sub queue
+int umq_main_queue_param_check(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_queue_t *queue)
+{
+    queue->rqe_post_factor = 1;
+    if (option->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ == 0) {
+        return UMQ_SUCCESS;
+    }
+
+    // todo query from route path
+#define CLOS true
+#define PORT_NUM 14
+    if (option->create_flag & UMQ_CREATE_FLAG_USED_PORTS) {
+        if (!is_umq_ub_bonding_dev(dev_ctx->urma_ctx->dev->name)) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "ub device[%s] not support ports configuration\n", dev_ctx->urma_ctx->dev->name);
+            return -UMQ_ERR_EINVAL;
+        }
+
+        if (option->used_ports.num > PORT_NUM) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "ub device[%s] ports num %d exceed max %d\n", option->used_ports.num, PORT_NUM);
+            return -UMQ_ERR_EINVAL;
+        }
+
+        queue->rqe_post_factor = CLOS ? 4 : 14;
+        return UMQ_SUCCESS;
+    }
+
+
+
+    return UMQ_SUCCESS;
+}
+
 int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_queue_t *queue)
 {
     if (option->create_flag & UMQ_CREATE_FLAG_RX_BUF_SIZE) {
