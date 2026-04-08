@@ -21,6 +21,7 @@
 #include "topo_info.h"
 #include "urma_types.h"
 #include "urma_ubagg.h"
+#include "ub_list.h"
 #include <stdbool.h>
 
 #define BONDP_MAX_NUM_JFRS            (10240)
@@ -45,6 +46,9 @@ typedef struct bondp_heath_check_ctx {
     void *check_buf;
     uint64_t check_buf_len;
     int health_check_fd;
+    void *epoll_data;
+    pthread_spinlock_t event_lock;
+    struct ub_list event_list;
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
 } bondp_heath_check_ctx_t;
 
