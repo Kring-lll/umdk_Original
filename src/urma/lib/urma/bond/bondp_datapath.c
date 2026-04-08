@@ -355,7 +355,7 @@ urma_status_t bondp_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, u
     if (is_single_dev_mode(jetty->urma_ctx)) {
         ret = bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
     } else {
-        ret = bondp_post_send_wr_and_store(bjetty_ctx, wr, bad_wr);
+        ret = bondp_post_send_wr_and_store(bjetty_ctx, bdp_jetty->send_jfc, bad_wr);
     }
     PERF_PROFILING_END(BOND_JETTY_POST_SEND);
     return ret;
@@ -519,7 +519,7 @@ urma_status_t bondp_post_jetty_recv_wr(urma_jetty_t *jetty, urma_jfr_wr_t *wr, u
     if (is_single_dev_mode(jetty->urma_ctx)) {
         ret = bondp_post_recv_wr_no_store(bjetty_ctx, wr, bad_wr);
     } else {
-        ret = bondp_post_recv_wr_and_store(bjetty_ctx, wr, bad_wr);
+        ret = bondp_post_recv_wr_and_store(bjetty_ctx, bdp_jetty->send_jfc, bad_wr);
     }
     PERF_PROFILING_END(BOND_JETTY_POST_RECV);
     
