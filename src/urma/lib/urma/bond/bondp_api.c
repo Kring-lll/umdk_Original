@@ -1577,8 +1577,6 @@ urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
     }
 
     bdp_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
-    bdp_jetty->bjetty_ctx.direct_local_port = bdp_jetty->active_indices[0];
-    bdp_jetty->bjetty_ctx.direct_target_port = bdp_tjetty->active_indices[0];
     return URMA_SUCCESS;
 
 UNBIND:
