@@ -35,7 +35,12 @@ TensorVector FusedDeepMoeImplNpu(
     const at::TensorList &gmm2Weight, \
     const at::TensorList &gmm2WeightScale, \
     const at::Tensor &expertScales, \
+    const c10::optional<at::Tensor> &shareGmm1PermutedWeightOptional, \
+    const c10::optional<at::Tensor> &shareGmm1PermutedWeightScaleOptional, \
+    const c10::optional<at::Tensor> &shareGmm2WeightOptional, \
+    const c10::optional<at::Tensor> &shareGmm2WeightScaleOptional, \
     const c10::optional<at::Tensor> &expertSmoothScales, \
+    const c10::optional<at::Tensor> &shareSmoothScales, \
     const c10::optional<at::Tensor> &xActiveMask, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
@@ -56,6 +61,7 @@ TensorVector FusedDeepMoeImplNpu(
     int topk = expertIdsShape[1];
     
     at::Tensor output = at::empty({bs, h}, x.options());
+    at::Tensor shareOutput = at::empty({bs, h}, x.options());
     
     bool isShareExpert = (epRankId < sharedExpertRankNum);
     int64_t localExpertNum = 0;
@@ -75,12 +81,15 @@ TensorVector FusedDeepMoeImplNpu(
     EXEC_NPU_CMD(aclnnFusedDeepMoe,
         // input
         x, expertIds, gmm1PermutedWeight, gmm1PermutedWeightScale, gmm2Weight, gmm2WeightScale, \
-        expertScales, expertSmoothScales, xActiveMask, \
+        expertScales, \
+        shareGmm1PermutedWeightOptional, shareGmm1PermutedWeightScaleOptional, \
+        shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
+        expertSmoothScales, shareSmoothScales, xActiveMask, \
         // attr
         groupEpPtr, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs, \
         // output
-        output, expertTokenNums);
-    return {output, expertTokenNums};
+        output, shareOutput, expertTokenNums);
+    return {output, shareOutput, expertTokenNums};
 }
 
 TensorVector FusedDeepMoeBackwardImplNpu(const at::Tensor &self)
@@ -97,7 +106,12 @@ TensorVector FusedDeepMoeImplMeta(
     const at::TensorList &gmm2Weight, \
     const at::TensorList &gmm2WeightScale, \
     const at::Tensor &expertScales, \
+    const c10::optional<at::Tensor> &shareGmm1PermutedWeightOptional, \
+    const c10::optional<at::Tensor> &shareGmm1PermutedWeightScaleOptional, \
+    const c10::optional<at::Tensor> &shareGmm2WeightOptional, \
+    const c10::optional<at::Tensor> &shareGmm2WeightScaleOptional, \
     const c10::optional<at::Tensor> &expertSmoothScales, \
+    const c10::optional<at::Tensor> &shareSmoothScales, \
     const c10::optional<at::Tensor> &xActiveMask, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
@@ -112,6 +126,7 @@ TensorVector FusedDeepMoeImplMeta(
     int h = xShape[1];
     int bs = xShape[0];
     at::Tensor output = at::empty({bs, h}, x.options().device(at::kMeta));
+    at::Tensor shareOutput = at::empty({bs, h}, x.options().device(at::kMeta));
 
     bool isShareExpert = (epRankId < sharedExpertRankNum);
     int64_t localExpertNum = 0;
@@ -123,7 +138,7 @@ TensorVector FusedDeepMoeImplMeta(
     auto opts = expertIds.options().dtype(at::kLong);
     at::Tensor expertTokenNums = at::empty({localExpertNum}, opts.device(at::kMeta));
     
-    return {output, expertTokenNums};
+    return {output, shareOutput, expertTokenNums};
 }
 
 TensorVector FusedDeepMoeImpl(
@@ -134,7 +149,12 @@ TensorVector FusedDeepMoeImpl(
     const at::TensorList &gmm2Weight, \
     const at::TensorList &gmm2WeightScale, \
     const at::Tensor &expertScales, \
+    const c10::optional<at::Tensor> &shareGmm1PermutedWeightOptional, \
+    const c10::optional<at::Tensor> &shareGmm1PermutedWeightScaleOptional, \
+    const c10::optional<at::Tensor> &shareGmm2WeightOptional, \
+    const c10::optional<at::Tensor> &shareGmm2WeightScaleOptional, \
     const c10::optional<at::Tensor> &expertSmoothScales, \
+    const c10::optional<at::Tensor> &shareSmoothScales, \
     const c10::optional<at::Tensor> &xActiveMask, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
@@ -149,7 +169,10 @@ TensorVector FusedDeepMoeImpl(
                         .findSchemaOrThrow("umdk_cam_op_lib::fused_deep_moe", "")
                         .typed<decltype(FusedDeepMoeImpl)>();
     return op.call(x, expertIds, gmm1PermutedWeight, gmm1PermutedWeightScale, gmm2Weight, gmm2WeightScale, \
-        expertScales, expertSmoothScales, xActiveMask, \
+        expertScales, \
+        shareGmm1PermutedWeightOptional, shareGmm1PermutedWeightScaleOptional, \
+        shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
+        expertSmoothScales, shareSmoothScales, xActiveMask, \
         groupEp, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs);
 }
 
@@ -164,7 +187,12 @@ public:
                             const at::TensorList &gmm2Weight, \
                             const at::TensorList &gmm2WeightScale, \
                             const at::Tensor &expertScales, \
+                            const c10::optional<at::Tensor> &shareGmm1PermutedWeightOptional, \
+                            const c10::optional<at::Tensor> &shareGmm1PermutedWeightScaleOptional, \
+                            const c10::optional<at::Tensor> &shareGmm2WeightOptional, \
+                            const c10::optional<at::Tensor> &shareGmm2WeightScaleOptional, \
                             const c10::optional<at::Tensor> &expertSmoothScales, \
+                            const c10::optional<at::Tensor> &shareSmoothScales, \
                             const c10::optional<at::Tensor> &xActiveMask, \
                             c10::string_view groupEp, \
                             int64_t epRankSize, \
@@ -177,7 +205,10 @@ public:
     {
         at::AutoDispatchBelowADInplaceOrView guard;
         auto result = FusedDeepMoeImpl(x, expertIds, gmm1PermutedWeight, gmm1PermutedWeightScale, gmm2Weight, \
-            gmm2WeightScale, expertScales, expertSmoothScales, xActiveMask, \
+            gmm2WeightScale, expertScales, \
+            shareGmm1PermutedWeightOptional, shareGmm1PermutedWeightScaleOptional, \
+            shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
+            expertSmoothScales, shareSmoothScales, xActiveMask, \
             groupEp, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs);
         return result;
     }
@@ -185,6 +216,12 @@ public:
     static TensorVector backward(AutogradContext *ctx, TensorVector grad_outputs)
     {
         return {at::Tensor(),
+                at::Tensor(),
+                at::Tensor(),
+                at::Tensor(),
+                at::Tensor(),
+                at::Tensor(),
+                at::Tensor(),
                 at::Tensor(),
                 at::Tensor(),
                 at::Tensor(),
@@ -205,7 +242,12 @@ TensorVector FusedDeepMoeImplAutograd(
     const at::TensorList &gmm2Weight, \
     const at::TensorList &gmm2WeightScale, \
     const at::Tensor &expertScales, \
+    const c10::optional<at::Tensor> &shareGmm1PermutedWeightOptional, \
+    const c10::optional<at::Tensor> &shareGmm1PermutedWeightScaleOptional, \
+    const c10::optional<at::Tensor> &shareGmm2WeightOptional, \
+    const c10::optional<at::Tensor> &shareGmm2WeightScaleOptional, \
     const c10::optional<at::Tensor> &expertSmoothScales, \
+    const c10::optional<at::Tensor> &shareSmoothScales, \
     const c10::optional<at::Tensor> &xActiveMask, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
@@ -217,7 +259,10 @@ TensorVector FusedDeepMoeImplAutograd(
     int64_t globalBs)
 {
     auto result = FusedDeepMoe::apply(x, expertIds, gmm1PermutedWeight, gmm1PermutedWeightScale, gmm2Weight, \
-            gmm2WeightScale, expertScales, expertSmoothScales, xActiveMask, \
+            gmm2WeightScale, expertScales, \
+            shareGmm1PermutedWeightOptional, shareGmm1PermutedWeightScaleOptional, \
+            shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
+            expertSmoothScales, shareSmoothScales, xActiveMask, \
             groupEp, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs);
         return result;
 }
