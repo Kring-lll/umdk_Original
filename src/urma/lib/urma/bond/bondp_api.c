@@ -373,19 +373,20 @@ static int init_active_indices(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_comp,
                                const bondp_port_id_t *port_ids, uint32_t port_count)
 {
     if (port_ids == NULL || port_count == 0) {
+        int start, end;
         if (bdp_comp->is_multipath) {
-            for (int i = 0; i < IODIE_NUM; i++) {
-                if (bdp_ctx->p_ctxs[i] != NULL) {
-                    bdp_comp->enabled_indices[bdp_comp->enabled_count] = i;
-                    bdp_comp->enabled_count++;
-                }
-            }
+            start = 0;
+            end = IODIE_NUM;
         } else {
-            for (int i = IODIE_NUM; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
-                if (bdp_ctx->p_ctxs[i] != NULL) {
-                    bdp_comp->enabled_indices[bdp_comp->enabled_count] = i;
-                    bdp_comp->enabled_count++;
-                }
+            start = IODIE_NUM;
+            end = URMA_UBAGG_DEV_MAX_NUM;
+        }
+        for (int i = start; i < end; i++) {
+            if (bdp_ctx->p_ctxs[i] != NULL) {
+                bdp_comp->enabled_indices[bdp_comp->enabled_count] = i;
+                bdp_comp->enabled_count += 1;
+                bdp_comp->active_indices[bdp_comp->active_count] = i;
+                bdp_comp->active_count += 1;
             }
         }
         return 0;
@@ -416,6 +417,8 @@ static int init_active_indices(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_comp,
         }
         bdp_comp->enabled_indices[bdp_comp->enabled_count] = active_index;
         bdp_comp->enabled_count += 1;
+        bdp_comp->active_indices[bdp_comp->active_count] = active_index;
+        bdp_comp->active_count += 1;
     }
     return 0;
 }
@@ -1598,8 +1601,6 @@ urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
     }
 
     bdp_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
-    bdp_jetty->bjetty_ctx.direct_local_port = bdp_jetty->active_indices[0];
-    bdp_jetty->bjetty_ctx.direct_target_port = bdp_tjetty->active_indices[0];
     return URMA_SUCCESS;
 
 UNBIND:
