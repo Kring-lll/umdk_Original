@@ -24,11 +24,14 @@
 #include "ubagg_ioctl.h"
 #include "urma_provider.h"
 #include "bondp_api.h"
+#include "bondp_health_check.h"
 
 typedef struct bondp_create_vjetty_udata {
     urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
     int dev_num;
     bool is_multipath;
+    bool is_health_check_enable;
+    urma_bond_seg_info_out_t health_check_seg;
 } bondp_create_vjetty_udata_t;
 
 typedef bondp_create_vjetty_udata_t bondp_create_vjfr_udata_t;
@@ -881,6 +884,13 @@ static int bondp_create_vjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
         .dev_num = bdp_jetty->dev_num,
         .is_multipath = jetty_cfg->jfs_cfg.flag.bs.multi_path,
     };
+
+    if (bondp_fill_vjetty_health_info(bdp_ctx, bdp_jetty,
+        &jetty_info.health_check_seg, &jetty_info.is_health_check_enable) != 0) {
+        URMA_LOG_ERR("Failed to fill health check seg info for vjetty\n");
+        return -1;
+    }
+
     for (int i = 0; i < bdp_ctx->dev_num; ++i) {
         if (bdp_jetty->p_jetty[i] == NULL) {
             continue;
@@ -1314,6 +1324,10 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
 {
     int ret = URMA_SUCCESS;
 
+    if (bondp_unimport_health_check_tseg(bdp_tjetty) != URMA_SUCCESS) {
+        ret = URMA_FAIL;
+    }
+
     memset(bdp_tjetty->local_valid, 0, sizeof(bdp_tjetty->local_valid));
     memset(bdp_tjetty->target_valid, 0, sizeof(bdp_tjetty->target_valid));
 
@@ -1424,20 +1438,32 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         goto unimport_pjetty;
     }
 
+    if (bondp_import_health_check_tseg(bdp_ctx, bdp_tjetty, &rvjetty_info) != 0) {
+        URMA_LOG_ERR("Failed to import health check seg for jetty\n");
+        goto unimport_tseg;
+    }
+
     pthread_rwlock_wrlock(&bdp_ctx->remote_p2v_jetty_id_table.lock);
     if (add_remote_jetty_id_info(bdp_ctx, bdp_tjetty) != 0) {
         URMA_LOG_ERR("Failed to add remote jetty id info\n");
         remove_remote_jetty_id_info(bdp_ctx, bdp_tjetty);
         pthread_rwlock_unlock(&bdp_ctx->remote_p2v_jetty_id_table.lock);
-        goto unimport_pjetty;
+        goto unimport_tseg;
     }
     pthread_rwlock_unlock(&bdp_ctx->remote_p2v_jetty_id_table.lock);
+
+    if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty) != 0) {
+        URMA_LOG_ERR("Failed to register health check task\n");
+        goto unimport_tseg;
+    }
 
     URMA_LOG_INFO("Successfully imported target jetty: " URMA_JETTY_ID_FMT,
                    URMA_JETTY_ID_ARGS(&rjetty->jetty_id));
 
     return &bdp_tjetty->v_tjetty;
 
+unimport_tseg:
+    bondp_unimport_health_check_tseg(bdp_tjetty);
 unimport_pjetty:
     bondp_unimport_pjetty(bdp_tjetty);
 unimport_vjetty:
@@ -1457,6 +1483,8 @@ urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
         URMA_LOG_ERR("Invalid bdp tjetty\n");
         return URMA_EINVAL;
     }
+
+    bondp_unregister_health_check_task(bdp_tjetty);
 
     pthread_rwlock_wrlock(&bdp_ctx->remote_p2v_jetty_id_table.lock);
     if (remove_remote_jetty_id_info(bdp_ctx, bdp_tjetty) != 0) {
