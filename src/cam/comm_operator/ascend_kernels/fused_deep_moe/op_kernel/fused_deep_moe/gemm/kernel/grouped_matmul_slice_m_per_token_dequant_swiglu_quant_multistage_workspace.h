@@ -924,8 +924,10 @@ public:
 
         AscendC::Cast(xFp32TmpTensor, xInTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
         AscendC::PipeBarrier<PIPE_V>();
-        AscendC::Mul(xFp32TmpTensor, xFp32TmpTensor, smoothScaleTensor, tokenLength);
-        AscendC::PipeBarrier<PIPE_V>();
+        if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
+            AscendC::Mul(xFp32TmpTensor, xFp32TmpTensor, smoothScaleTensor, tokenLength);
+            AscendC::PipeBarrier<PIPE_V>();
+        }
         AscendC::Abs(xFp32AbsTensor, xFp32TmpTensor, tokenLength);
         AscendC::PipeBarrier<PIPE_V>();
         AscendC::ReduceMax(xRowMaxTensor, xFp32AbsTensor, xFp32AbsTensor, tokenLength, false);
@@ -979,7 +981,6 @@ public:
         AscendC::GlobalTensor<XType> srcWinGMTensor;
         srcWinGMTensor.SetGlobalBuffer((__gm__ XType *)gmX);
         AscendC::GlobalTensor<float> moeSmoothScaleGMTensor;
-        moeSmoothScaleGMTensor.SetGlobalBuffer((__gm__ float*) gmMoeSmoothScales);
 
         xInTensor[0] = resource.ubBuf.template GetBufferByByte<XType>(ubOffset);
         ubOffset += CEIL_UP(tokenLength * sizeof(XType));
@@ -989,10 +990,13 @@ public:
         ubOffset += CEIL_UP(axisHCommu * sizeof(int8_t));
         yInt8Tensor[1] = resource.ubBuf.template GetBufferByByte<int8_t>(ubOffset);
         ubOffset += CEIL_UP(axisHCommu * sizeof(int8_t));
-        moeSmoothScaleTensor[0] = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
-        ubOffset += CEIL_UP(tokenLength * sizeof(float));
-        moeSmoothScaleTensor[1] = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
-        ubOffset += CEIL_UP(tokenLength * sizeof(float));
+        if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
+            moeSmoothScaleGMTensor.SetGlobalBuffer((__gm__ float*) gmMoeSmoothScales);
+            moeSmoothScaleTensor[0] = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
+            ubOffset += CEIL_UP(tokenLength * sizeof(float));
+            moeSmoothScaleTensor[1] = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
+            ubOffset += CEIL_UP(tokenLength * sizeof(float));
+        }
         AscendC::GlobalTensor<int8_t> dstWinGMTensor;
         AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
         AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(1);
@@ -1025,8 +1029,10 @@ public:
                 AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventId);
                 AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(eventId);
                 AscendC::DataCopy(xInTensor[index], srcWinGMTensor[tokenIndex / axisK * tokenLength], tokenLength);
-                AscendC::PipeBarrier<PIPE_MTE2>();
-                AscendC::DataCopy(moeSmoothScaleTensor[index], moeSmoothScaleGMTensor[dstExpertId * tokenLength], tokenLength);
+                if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
+                    AscendC::PipeBarrier<PIPE_MTE2>();
+                    AscendC::DataCopy(moeSmoothScaleTensor[index], moeSmoothScaleGMTensor[dstExpertId * tokenLength], tokenLength);
+                }
                 AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventId);
                 AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventId);
                 QuantToken(xInTensor[index], moeSmoothScaleTensor[index], yInt8Tensor[index], ubOffset);
@@ -1127,11 +1133,12 @@ public:
         yFp32Tensor[1] = yInt8Tensor[1].template ReinterpretCast<float>();
         subUbOffset += CEIL_UP(axisHCommu * sizeof(int8_t));
         AscendC::LocalTensor shareSmoothScaleTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
-        subUbOffset += CEIL_UP(tokenLength * sizeof(float));
-        AscendC::DataCopy(shareSmoothScaleTensor, shareSmoothScaleGMTensor, tokenLength);
-        AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(2);
-        AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(2);
-
+        if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
+            subUbOffset += CEIL_UP(tokenLength * sizeof(float));
+            AscendC::DataCopy(shareSmoothScaleTensor, shareSmoothScaleGMTensor, tokenLength);
+            AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(2);
+            AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(2);
+        }
         // 输入输出开double buffer
         AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0); // MTE2等MTE3
         AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(1); // MTE2等MTE3

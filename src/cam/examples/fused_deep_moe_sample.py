@@ -193,7 +193,8 @@ class SmallOps(DecodeMoeOps):
         self.tp_hcomm_info = ""
 
     def share_compute(self, x, share_smooth_scales):
-        x1_int8, x1_scale = torch_npu.npu_dynamic_quant(x, smooth_scales=share_smooth_scales)
+        smooth_scales = share_smooth_scales.to(x.dtype) if share_smooth_scales is not None else None
+        x1_int8, x1_scale = torch_npu.npu_dynamic_quant(x, smooth_scales=smooth_scales)
         gmm1_result = torch_npu.npu_quant_matmul(x1_int8, self.share_gmm1_weight, self.share_gmm1_weight_scale, pertoken_scale=x1_scale, output_dtype=x.dtype)
         swiglu_out = torch_npu.npu_swiglu(gmm1_result)
         x2_int8, x2_scale = torch_npu.npu_dynamic_quant(swiglu_out)
@@ -244,7 +245,7 @@ class SmallOps(DecodeMoeOps):
             quant_scale=None,
             quant_offset=None,
             group_index=expert_token_nums,
-            activate_left=True,
+            activate_left=False,
             quant_mode=1,
         )
         y2 = torch_npu.npu_grouped_matmul(x=[y1],

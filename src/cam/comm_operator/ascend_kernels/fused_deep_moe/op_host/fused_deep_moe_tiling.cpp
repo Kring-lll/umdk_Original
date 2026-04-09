@@ -45,6 +45,7 @@ constexpr uint32_t INPUT_SHARE_GMM1_WEIGHT_SCALE_INDEX = 8;
 constexpr uint32_t INPUT_SHARE_GMM2_WEIGHT_INDEX = 9;
 constexpr uint32_t INPUT_SHARE_GMM2_WEIGHT_SCALE_INDEX = 10;
 constexpr uint32_t INPUT_SMOOTH_SCALE_INDEX = 11;
+constexpr uint32_t INPUT_SHARE_SMOOTH_SCALE_INDEX = 12;
 constexpr uint32_t INPUT_SHARE_X_ACTIVE_MASK_INDEX = 13;
 
 constexpr uint32_t ATTR_GROUP_EP_INDEX = 0;
@@ -89,6 +90,13 @@ static uint32_t CountTensorListLen(const gert::TilingContext &context, int descI
         count++;
     }
     return count;
+}
+
+static bool CheckOptionalInputExist(const gert::TilingContext &context, int descIndex)
+{
+    const gert::StorageShape* tensorStorageShape = context.GetOptionalInputShape(descIndex);
+    bool tensorExist = (tensorStorageShape != nullptr);
+    return tensorExist;
 }
 
 static ge::graphStatus CheckGmm1Shape(gert::TilingContext &context, FusedDeepMoeTilingData &tilingData)
@@ -401,25 +409,66 @@ static ge::graphStatus CheckWeightTensorList(gert::TilingContext &context,
 ge::graphStatus CheckXActiveMaskShape(const gert::TilingContext &context, const char *nodeName,
                                       const FusedDeepMoeTilingData &tilingData)
 {
-    uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
-    uint32_t moeExpertNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum;
-    uint32_t moeExpertNumPerRank = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     uint32_t batchSize = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.bs;
-    uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
-    uint64_t gmm1WeightDim2 = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
-    uint32_t localExpertNum = moeExpertNumPerRank;
     const gert::StorageShape* xActiveMaskStorageShape = context.GetOptionalInputShape(
-        INPUT_SHARE_X_ACTIVE_MASK_INDEX);
-    if (xActiveMaskStorageShape != nullptr) {
-        OPS_ERR_IF(xActiveMaskStorageShape->GetStorageShape().GetDimNum() != ONE_DIMS,
-                    OPS_LOG_E(nodeName, " xActiveMask scale shape dims must be 1, but current dim num is %lu.",
-                            xActiveMaskStorageShape->GetStorageShape().GetDimNum()),
+    INPUT_SHARE_X_ACTIVE_MASK_INDEX);
+    OPS_ERR_IF(xActiveMaskStorageShape->GetStorageShape().GetDimNum() != ONE_DIMS,
+                OPS_LOG_E(nodeName, " xActiveMask scale shape dims must be 1, but current dim num is %lu.",
+                        xActiveMaskStorageShape->GetStorageShape().GetDimNum()),
+                return ge::GRAPH_FAILED);
+    const int64_t xActiveMaskDim0 = xActiveMaskStorageShape->GetStorageShape().GetDim(0);
+    OPS_ERR_IF(xActiveMaskDim0 != batchSize, OPS_LOG_E(nodeName,
+                "xActiveMask Dim0 must be batchSize(%u), but current dim is %ld.", batchSize, xActiveMaskDim0),
+                return ge::GRAPH_FAILED);
+    return ge::GRAPH_SUCCESS;
+}
+
+ge::graphStatus CheckSmoothScales(const gert::TilingContext &context, const char *nodeName,
+                                      const FusedDeepMoeTilingData &tilingData, bool calShareExpert)
+{
+    uint32_t moeExpertNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum;
+    uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
+    auto expertSmoothScalesDesc = context.GetInputDesc(INPUT_SMOOTH_SCALE_INDEX);
+    const gert::StorageShape* expertSmoothScalesStorageShape = context.GetOptionalInputShape(
+        INPUT_SMOOTH_SCALE_INDEX);
+    auto expertSmoothScalesOriginShape = expertSmoothScalesStorageShape->GetOriginShape();
+    OPS_ERR_IF((expertSmoothScalesDesc->GetDataType() != ge::DT_FLOAT),
+                    OPS_LOG_E(nodeName, "expertSmoothScales datatype is invalid, datatype should be float32, but is %d.",
+                            static_cast<ge::DataType>(expertSmoothScalesDesc->GetDataType())),
                     return ge::GRAPH_FAILED);
-        const int64_t xActiveMaskDim0 = xActiveMaskStorageShape->GetStorageShape().GetDim(0);
-        OPS_ERR_IF(xActiveMaskDim0 != batchSize, OPS_LOG_E(nodeName,
-                    "xActiveMask Dim0 must be batchSize(%u), but current dim is %ld.", batchSize, xActiveMaskDim0),
+    OPS_ERR_IF(expertSmoothScalesStorageShape->GetStorageShape().GetDimNum() != TWO_DIMS,
+                    OPS_LOG_E(nodeName, "expertSmoothScales shape dims must be 2, but current dim num is %lu.",
+                            expertSmoothScalesStorageShape->GetStorageShape().GetDimNum()),
                     return ge::GRAPH_FAILED);
+    OPS_ERR_IF(expertSmoothScalesOriginShape.GetDim(0) != moeExpertNum,
+        OPS_LOG_E(nodeName, "expertSmoothScales dim-0 must be equal moeExpertNum."),
+        return ge::GRAPH_FAILED);
+    OPS_ERR_IF(expertSmoothScalesOriginShape.GetDim(1) != h,
+        OPS_LOG_E(nodeName, "expertSmoothScales dim-1 must be equal to token hidden size."),
+        return ge::GRAPH_FAILED);
+
+    if (calShareExpert) {
+        bool shareSmoothScalesExist = CheckOptionalInputExist(context, INPUT_SHARE_SMOOTH_SCALE_INDEX);
+        OPS_ERR_IF(!shareSmoothScalesExist, OPS_LOG_E(nodeName,
+                    "When routed expert smooth scales exist, shared expert smooth scales must exist, too."),
+                    return ge::GRAPH_FAILED);
+        auto shareSmoothScalesDesc = context.GetInputDesc(INPUT_SHARE_SMOOTH_SCALE_INDEX);
+        const gert::StorageShape* shareSmoothScalesStorageShape = context.GetOptionalInputShape(
+            INPUT_SHARE_SMOOTH_SCALE_INDEX);
+        auto shareSmoothScalesOriginShape = shareSmoothScalesStorageShape->GetOriginShape();
+        OPS_ERR_IF((shareSmoothScalesDesc->GetDataType() != ge::DT_FLOAT),
+                OPS_LOG_E(nodeName, "shareSmoothScales datatype is invalid, datatype should be float32, but is %d.",
+                        static_cast<ge::DataType>(shareSmoothScalesDesc->GetDataType())),
+                return ge::GRAPH_FAILED);
+        OPS_ERR_IF(shareSmoothScalesStorageShape->GetStorageShape().GetDimNum() != ONE_DIMS,
+                        OPS_LOG_E(nodeName, "shareSmoothScales shape dims must be 1, but current dim num is %lu.",
+                                shareSmoothScalesStorageShape->GetStorageShape().GetDimNum()),
+                        return ge::GRAPH_FAILED);
+        OPS_ERR_IF(shareSmoothScalesOriginShape.GetDim(0) != h,
+            OPS_LOG_E(nodeName, "shareSmoothScales dim-0 must be equal to token hidden size."),
+            return ge::GRAPH_FAILED);
     }
+
     return ge::GRAPH_SUCCESS;
 }
 
@@ -630,20 +679,27 @@ static ge::graphStatus FusedDeepMoeTilingFuncImpl(gert::TilingContext &context)
     tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.aivNum = aivNum;
     OPS_ERR_IF(CheckData(nodeName, *tilingData) != ge::GRAPH_SUCCESS, OPS_LOG_E(nodeName, "CheckData failed."),
                     return ge::GRAPH_FAILED);
-    OPS_ERR_IF(CheckXActiveMaskShape(context, nodeName, *tilingData) != ge::GRAPH_SUCCESS,
-            OPS_LOG_E(nodeName, "CheckXActiveMaskShape failed."), return ge::GRAPH_FAILED);
+    const gert::StorageShape* xActiveMaskStorageShape = context.GetOptionalInputShape(
+        INPUT_SHARE_X_ACTIVE_MASK_INDEX);
+    bool xActiveMaskEnable = (xActiveMaskStorageShape != nullptr);
+    if (xActiveMaskEnable) {
+        OPS_ERR_IF(CheckXActiveMaskShape(context, nodeName, *tilingData) != ge::GRAPH_SUCCESS,
+                OPS_LOG_E(nodeName, "CheckXActiveMaskShape failed."), return ge::GRAPH_FAILED);
+    }
     const gert::StorageShape* shareGmm1WeightStorageShape = context.GetOptionalInputShape(INPUT_SHARE_GMM1_WEIGHT_INDEX);
     bool calShareExpert = (shareGmm1WeightStorageShape != nullptr);
     if (calShareExpert) {
         OPS_ERR_IF(CheckShareExpertShapes(context, *tilingData) != ge::GRAPH_SUCCESS,
                 OPS_LOG_E(nodeName, "CheckShareExpertShapes failed."), return ge::GRAPH_FAILED);
     }
+    bool expertSmoothScalesExist = CheckOptionalInputExist(context, INPUT_SMOOTH_SCALE_INDEX);
+    if (expertSmoothScalesExist) {
+        OPS_ERR_IF(CheckSmoothScales(context, nodeName, *tilingData, calShareExpert) != ge::GRAPH_SUCCESS,
+                OPS_LOG_E(nodeName, "CheckSmoothScales failed."), return ge::GRAPH_FAILED);
+    }
     OPS_ERR_IF(SetWorkSpace(context, nodeName, *tilingData, calShareExpert) != ge::GRAPH_SUCCESS,
                     OPS_LOG_E(nodeName, "Tiling set workspace failed."), return ge::GRAPH_FAILED);
     SetHcommCfg(context, *tilingData, groupEp);
-    const gert::StorageShape* xActiveMaskStorageShape = context.GetOptionalInputShape(
-        INPUT_SHARE_X_ACTIVE_MASK_INDEX);
-    bool xActiveMaskEnable = (xActiveMaskStorageShape != nullptr);
     uint64_t tilingKey = 0;
     if (xActiveMaskEnable) {
         tilingKey |= EXEC_FLAG_X_ACTIVE_MASK;
@@ -656,6 +712,9 @@ static ge::graphStatus FusedDeepMoeTilingFuncImpl(gert::TilingContext &context)
     }
     if (tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.isTensorList) {
         tilingKey |= EXEC_FLAG_TENSOR_LIST;
+    }
+    if (expertSmoothScalesExist) {
+        tilingKey |= EXEC_FLAG_SMOOTH_QUANT;
     }
     std::printf("[FusedDeepMoeTiling] Date: %s Time: %s | calShareExpert: %d, tilingKey: %lu\n",
                 __DATE__, __TIME__, static_cast<int>(calShareExpert), tilingKey);
