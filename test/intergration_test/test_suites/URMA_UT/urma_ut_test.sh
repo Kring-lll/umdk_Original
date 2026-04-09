@@ -20,11 +20,24 @@ function prepare_and_run() {
     if [ -d "./build" ]; then
         rm -rf build
     fi
-
+    #rpm -ivh /root/rpmbuild/RPMS/aarch64/umdk-urma-kmod-*.rpm
     cmake .. -D BUILD_ALL=disable -D BUILD_URMA=enable
     make install -j
     echo "URMA package installed successfully."
-
+    
+    systemctl stop ubse
+    rmmod ubagg
+    rmmod uburma
+    rmmod ipourma
+    rmmod udma
+    rmmod ubcore
+    modprobe ubcore
+    modprobe uburma
+    modprobe ubagg
+    modprobe ipourma tx_ring_size=16 rx_ring_size-32 page_level=16 ctp_sl=6
+    modprobe udma
+    systemctl start ubse
+    echo "URMA drivers update installed successfully."
     echo "Configuring test environment YAML..."
     if [ ! -d "$TARGET_YAML_DIR" ]; then
         mkdir -p "$TARGET_YAML_DIR"
