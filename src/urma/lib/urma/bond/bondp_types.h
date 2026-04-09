@@ -41,11 +41,30 @@
 #define URMA_JETTY_ID_ARGS(jetty_id)  URMA_JETTY_ID_UNPACK(EID_ARGS((jetty_id)->eid), \
                                                            (jetty_id)->uasid, (jetty_id)->id)
 
+struct bondp_target_jetty;
+
+typedef struct bondp_health_sub_task {
+    int local_idx;
+    int target_idx;
+    bool valid;
+    bool link_ok;
+    uint64_t user_ctx;
+} bondp_health_sub_task_t;
+
+typedef struct bondp_health_task {
+    struct bondp_target_jetty *bdp_tjetty;
+    uint64_t next_probe_ts_us;
+    bondp_health_sub_task_t sub_tasks[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
+    struct bondp_health_task *next;
+} bondp_health_task_t;
+
 typedef struct bondp_heath_check_ctx {
     void *check_buf;
     uint64_t check_buf_len;
     int health_check_fd;
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
+    pthread_rwlock_t task_lock;
+    bondp_health_task_t *task_list;
 } bondp_heath_check_ctx_t;
 
 typedef struct bondp_health_thread_ctx {
