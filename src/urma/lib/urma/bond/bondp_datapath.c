@@ -590,6 +590,13 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, urma_cr_
     uint32_t send_idx = wr_entry->send_idx;
     if (bjetty_ctx->pjettys_valid[send_idx] && is_device_error(cr->status)) {
         bjetty_ctx->pjettys_valid[send_idx] = false;
+        if (bjetty_ctx->bdp_comp != NULL &&
+            bjetty_ctx->bdp_comp->comp_type == BONDP_COMP_JETTY &&
+            send_idx == URMA_BOND_PRIMARY_PJETTY_IDX) {
+            pthread_mutex_lock(&bjetty_ctx->switchback_lock);
+            bjetty_ctx->switchback_pending = true;
+            pthread_mutex_unlock(&bjetty_ctx->switchback_lock);
+        }
     }
 
     /* Do migration */

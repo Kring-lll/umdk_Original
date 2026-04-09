@@ -38,6 +38,15 @@ typedef bondp_create_vjetty_udata_t bondp_create_vjfr_udata_t;
 
 #define BOND_EPOLL_NUM (32)
 
+static int bondp_prepare_switchback_req(urma_context_t *ctx,
+                                        const urma_bond_prepare_switchback_req_in_t *in,
+                                        urma_bond_switchback_msg_t *out_msg);
+static int bondp_handle_switchback_req(urma_context_t *ctx,
+                                       const urma_bond_handle_switchback_req_in_t *in,
+                                       urma_bond_switchback_msg_t *out_msg);
+static int bondp_handle_switchback_resp(urma_context_t *ctx,
+                                        const urma_bond_handle_switchback_resp_in_t *in);
+
 static int bondp_create_pjfce(bondp_context_t *bdp_ctx, bondp_jfce_t *bdp_jfce)
 {
     for (int i = 0; i < bdp_jfce->dev_num; i++) {
@@ -1188,6 +1197,31 @@ int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_ou
         case URMA_USER_CTL_BOND_ENABLE_SEG_CACHE:
             bondp_toggle_seg_cache(true);
             return 0;
+        case URMA_USER_CTL_BOND_PREPARE_SWITCHBACK_REQ:
+            if (in->len != sizeof(urma_bond_prepare_switchback_req_in_t) ||
+                out == NULL || out->addr == 0 || out->len < sizeof(urma_bond_switchback_msg_t)) {
+                URMA_LOG_ERR("Invalid switchback prepare input/output.\n");
+                return -EINVAL;
+            }
+            return bondp_prepare_switchback_req(
+                ctx, (const urma_bond_prepare_switchback_req_in_t *)(uintptr_t)in->addr,
+                (urma_bond_switchback_msg_t *)(uintptr_t)out->addr);
+        case URMA_USER_CTL_BOND_HANDLE_SWITCHBACK_REQ:
+            if (in->len != sizeof(urma_bond_handle_switchback_req_in_t) ||
+                out == NULL || out->addr == 0 || out->len < sizeof(urma_bond_switchback_msg_t)) {
+                URMA_LOG_ERR("Invalid switchback req input/output.\n");
+                return -EINVAL;
+            }
+            return bondp_handle_switchback_req(
+                ctx, (const urma_bond_handle_switchback_req_in_t *)(uintptr_t)in->addr,
+                (urma_bond_switchback_msg_t *)(uintptr_t)out->addr);
+        case URMA_USER_CTL_BOND_HANDLE_SWITCHBACK_RESP:
+            if (in->len != sizeof(urma_bond_handle_switchback_resp_in_t)) {
+                URMA_LOG_ERR("Invalid switchback resp input.\n");
+                return -EINVAL;
+            }
+            return bondp_handle_switchback_resp(
+                ctx, (const urma_bond_handle_switchback_resp_in_t *)(uintptr_t)in->addr);
         default: {
             URMA_LOG_ERR("Unsupported opcode, opcode:%d\n", in->opcode);
             return -EINVAL;
@@ -1385,6 +1419,11 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         return NULL;
     }
     bdp_tjetty->is_in_matrix_server = is_in_matrix_server(bdp_ctx);
+    bdp_tjetty->remote_rjetty = *rjetty;
+    bdp_tjetty->has_remote_token = (token_value != NULL);
+    if (token_value != NULL) {
+        bdp_tjetty->remote_token = *token_value;
+    }
 
     urma_bond_id_info_out_t rvjetty_info = {0};
     if (bondp_import_vjetty(ctx, rjetty, token_value, bdp_tjetty, &rvjetty_info) != 0) {
@@ -1471,6 +1510,300 @@ urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
     }
     free(bdp_tjetty);
     return ret;
+}
+
+static inline bool bondp_is_same_jetty_id(const urma_jetty_id_t *a, const urma_jetty_id_t *b)
+{
+    if (a == NULL || b == NULL) {
+        return false;
+    }
+    return a->id == b->id &&
+           a->uasid == b->uasid &&
+           memcmp(&a->eid, &b->eid, sizeof(a->eid)) == 0;
+}
+
+static bondp_comp_t *bondp_get_bdp_jetty_from_vjetty(const urma_jetty_t *jetty)
+{
+    if (jetty == NULL) {
+        return NULL;
+    }
+    bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
+    if (bdp_jetty->comp_type != BONDP_COMP_JETTY || bdp_jetty->comp_ctx == NULL) {
+        return NULL;
+    }
+    return bdp_jetty;
+}
+
+static bondp_target_jetty_t *bondp_get_bound_target_jetty(const bondp_comp_t *bdp_jetty)
+{
+    if (bdp_jetty == NULL || bdp_jetty->v_jetty.remote_jetty == NULL) {
+        return NULL;
+    }
+    return CONTAINER_OF_FIELD(bdp_jetty->v_jetty.remote_jetty, bondp_target_jetty_t, v_tjetty);
+}
+
+static int bondp_get_current_peer_primary_id(const bondp_target_jetty_t *bdp_tjetty,
+                                             uint32_t primary_idx, urma_jetty_id_t *peer_id)
+{
+    if (bdp_tjetty == NULL || peer_id == NULL ||
+        primary_idx >= (uint32_t)bdp_tjetty->local_dev_num ||
+        primary_idx >= (uint32_t)bdp_tjetty->target_dev_num) {
+        return -1;
+    }
+    urma_target_jetty_t *p_tjetty = bdp_tjetty->p_tjetty[primary_idx][primary_idx];
+    if (p_tjetty == NULL) {
+        return -1;
+    }
+    *peer_id = p_tjetty->id;
+    return 0;
+}
+
+static int bondp_refresh_local_primary_pjetty(bondp_comp_t *bdp_jetty, uint32_t primary_idx)
+{
+    bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
+    if (primary_idx >= (uint32_t)bdp_jetty->dev_num || bdp_ctx->p_ctxs[primary_idx] == NULL) {
+        URMA_LOG_ERR("Invalid primary idx %u when rebuilding local pjetty.\n", primary_idx);
+        return -1;
+    }
+
+    urma_jetty_cfg_t p_cfg = bdp_jetty->v_jetty.jetty_cfg;
+    bondp_jfc_t *bdp_jfs_jfc = CONTAINER_OF_FIELD(p_cfg.jfs_cfg.jfc, bondp_jfc_t, v_jfc);
+    bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(p_cfg.shared.jfr, bondp_comp_t, base);
+    bondp_jfc_t *bdp_rplc_jfc = NULL;
+    if (p_cfg.shared.jfc != NULL) {
+        bdp_rplc_jfc = CONTAINER_OF_FIELD(p_cfg.shared.jfc, bondp_jfc_t, v_jfc);
+    }
+
+    p_cfg.jfs_cfg.jfc = bdp_jfs_jfc->p_jfc[primary_idx];
+    p_cfg.shared.jfr = bdp_jfr->p_jfr[primary_idx];
+    if (bdp_rplc_jfc != NULL) {
+        p_cfg.shared.jfc = bdp_rplc_jfc->p_jfc[primary_idx];
+    }
+
+    urma_jetty_t *old_pjetty = bdp_jetty->p_jetty[primary_idx];
+    if (old_pjetty != NULL) {
+        pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
+        (void)bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, old_pjetty->jetty_id, JETTY);
+        pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+        (void)urma_unbind_jetty(old_pjetty);
+        (void)urma_delete_jetty(old_pjetty);
+        bdp_jetty->p_jetty[primary_idx] = NULL;
+    }
+
+    urma_jetty_t *new_pjetty = urma_create_jetty(bdp_ctx->p_ctxs[primary_idx], &p_cfg);
+    if (new_pjetty == NULL) {
+        URMA_LOG_ERR("Failed to recreate local primary pjetty, idx %u.\n", primary_idx);
+        return -1;
+    }
+    new_pjetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+    bdp_jetty->p_jetty[primary_idx] = new_pjetty;
+
+    pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
+    int map_ret = bdp_p_vjetty_id_table_add_without_lock(&bdp_ctx->p_vjetty_id_table,
+                                                          new_pjetty->jetty_id,
+                                                          JETTY,
+                                                          bdp_jetty->v_jetty.jetty_id.id,
+                                                          bdp_jetty);
+    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+    if (map_ret != 0) {
+        URMA_LOG_ERR("Failed to add recreated pjetty into map, idx %u, ret %d.\n", primary_idx, map_ret);
+        return -1;
+    }
+    return 0;
+}
+
+static int bondp_reimport_remote_primary_pjetty(bondp_comp_t *bdp_jetty, bondp_target_jetty_t *bdp_tjetty,
+                                                uint32_t primary_idx, const urma_jetty_id_t *remote_primary_id)
+{
+    bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
+    if (!bdp_tjetty->has_remote_token) {
+        URMA_LOG_ERR("No cached remote token, cannot re-import primary tjetty.\n");
+        return -1;
+    }
+    if (primary_idx >= (uint32_t)bdp_tjetty->local_dev_num ||
+        primary_idx >= (uint32_t)bdp_tjetty->target_dev_num ||
+        bdp_ctx->p_ctxs[primary_idx] == NULL) {
+        URMA_LOG_ERR("Invalid primary idx %u when re-importing remote primary.\n", primary_idx);
+        return -1;
+    }
+
+    if (bdp_jetty->p_jetty[primary_idx] != NULL) {
+        (void)urma_unbind_jetty(bdp_jetty->p_jetty[primary_idx]);
+    }
+
+    urma_target_jetty_t *old_tjetty = bdp_tjetty->p_tjetty[primary_idx][primary_idx];
+    if (old_tjetty != NULL) {
+        pthread_rwlock_wrlock(&bdp_ctx->remote_p2v_jetty_id_table.lock);
+        (void)bdp_r_p2v_jetty_id_table_del_without_lock(&bdp_ctx->remote_p2v_jetty_id_table, &old_tjetty->id,
+                                                        REMOTE_JETTY);
+        pthread_rwlock_unlock(&bdp_ctx->remote_p2v_jetty_id_table.lock);
+        (void)urma_unimport_jetty(old_tjetty);
+        bdp_tjetty->p_tjetty[primary_idx][primary_idx] = NULL;
+    }
+
+    urma_rjetty_t p_rjetty = bdp_tjetty->remote_rjetty;
+    p_rjetty.jetty_id = *remote_primary_id;
+    urma_target_jetty_t *new_tjetty =
+        urma_import_jetty(bdp_ctx->p_ctxs[primary_idx], &p_rjetty, &bdp_tjetty->remote_token);
+    if (new_tjetty == NULL) {
+        URMA_LOG_ERR("Failed to import new remote primary pjetty, idx %u.\n", primary_idx);
+        return -1;
+    }
+    bdp_tjetty->p_tjetty[primary_idx][primary_idx] = new_tjetty;
+    bdp_tjetty->local_valid[primary_idx] = true;
+    bdp_tjetty->target_valid[primary_idx] = true;
+
+    pthread_rwlock_wrlock(&bdp_ctx->remote_p2v_jetty_id_table.lock);
+    int map_ret = bdp_r_p2v_jetty_id_table_add_without_lock(&bdp_ctx->remote_p2v_jetty_id_table, &new_tjetty->id,
+                                                             REMOTE_JETTY, &bdp_tjetty->v_tjetty.id);
+    pthread_rwlock_unlock(&bdp_ctx->remote_p2v_jetty_id_table.lock);
+    if (map_ret != 0) {
+        URMA_LOG_ERR("Failed to update remote p2v map after re-import, idx %u, ret %d.\n", primary_idx, map_ret);
+        return -1;
+    }
+
+    if (bdp_jetty->p_jetty[primary_idx] != NULL) {
+        if (urma_bind_jetty(bdp_jetty->p_jetty[primary_idx], new_tjetty) != URMA_SUCCESS) {
+            URMA_LOG_ERR("Failed to bind local primary pjetty to re-imported tjetty, idx %u.\n", primary_idx);
+            return -1;
+        }
+        bdp_jetty->p_jetty[primary_idx]->remote_jetty = new_tjetty;
+    }
+    bdp_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
+    return 0;
+}
+
+static int bondp_prepare_switchback_req(urma_context_t *ctx,
+                                        const urma_bond_prepare_switchback_req_in_t *in,
+                                        urma_bond_switchback_msg_t *out_msg)
+{
+    if (ctx == NULL || in == NULL || out_msg == NULL || in->jetty == NULL) {
+        return -EINVAL;
+    }
+    bondp_comp_t *bdp_jetty = bondp_get_bdp_jetty_from_vjetty(in->jetty);
+    if (bdp_jetty == NULL || bdp_jetty->bondp_ctx != CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx)) {
+        return -EINVAL;
+    }
+    bjetty_ctx_t *bjetty_ctx = (bjetty_ctx_t *)bdp_jetty->comp_ctx;
+    uint32_t primary_idx = in->primary_idx;
+    if (primary_idx >= (uint32_t)bdp_jetty->dev_num || bdp_jetty->p_jetty[primary_idx] == NULL) {
+        return -EINVAL;
+    }
+
+    pthread_mutex_lock(&bjetty_ctx->switchback_lock);
+    if (!in->force && !bjetty_ctx->switchback_pending) {
+        pthread_mutex_unlock(&bjetty_ctx->switchback_lock);
+        return -EAGAIN;
+    }
+    bjetty_ctx->switchback_pending = false;
+    bjetty_ctx->switchback_running = true;
+    bjetty_ctx->switchback_epoch++;
+    uint64_t epoch = bjetty_ctx->switchback_epoch;
+    pthread_mutex_unlock(&bjetty_ctx->switchback_lock);
+
+    memset(out_msg, 0, sizeof(*out_msg));
+    out_msg->version = URMA_BOND_SWITCHBACK_MSG_VERSION;
+    out_msg->type = URMA_BOND_SWITCHBACK_REQ;
+    out_msg->epoch = epoch;
+    out_msg->peer_epoch = 0;
+    out_msg->primary_idx = primary_idx;
+    out_msg->sender_primary_id = bdp_jetty->p_jetty[primary_idx]->jetty_id;
+
+    bondp_target_jetty_t *bdp_tjetty = bondp_get_bound_target_jetty(bdp_jetty);
+    if (bdp_tjetty != NULL) {
+        (void)bondp_get_current_peer_primary_id(bdp_tjetty, primary_idx, &out_msg->sender_peer_primary_id);
+    }
+    return 0;
+}
+
+static int bondp_handle_switchback_req(urma_context_t *ctx,
+                                       const urma_bond_handle_switchback_req_in_t *in,
+                                       urma_bond_switchback_msg_t *out_msg)
+{
+    if (ctx == NULL || in == NULL || out_msg == NULL || in->jetty == NULL) {
+        return -EINVAL;
+    }
+    if (in->req.version != URMA_BOND_SWITCHBACK_MSG_VERSION || in->req.type != URMA_BOND_SWITCHBACK_REQ) {
+        return -EINVAL;
+    }
+    bondp_comp_t *bdp_jetty = bondp_get_bdp_jetty_from_vjetty(in->jetty);
+    if (bdp_jetty == NULL || bdp_jetty->bondp_ctx != CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx)) {
+        return -EINVAL;
+    }
+
+    uint32_t primary_idx = in->req.primary_idx;
+    if (primary_idx >= (uint32_t)bdp_jetty->dev_num || bdp_jetty->p_jetty[primary_idx] == NULL) {
+        return -EINVAL;
+    }
+
+    if (!bondp_is_same_jetty_id(&in->req.sender_peer_primary_id, &bdp_jetty->p_jetty[primary_idx]->jetty_id)) {
+        if (bondp_refresh_local_primary_pjetty(bdp_jetty, primary_idx) != 0) {
+            return -EIO;
+        }
+    }
+
+    bjetty_ctx_t *bjetty_ctx = (bjetty_ctx_t *)bdp_jetty->comp_ctx;
+    pthread_mutex_lock(&bjetty_ctx->switchback_lock);
+    bjetty_ctx->switchback_running = true;
+    pthread_mutex_unlock(&bjetty_ctx->switchback_lock);
+
+    memset(out_msg, 0, sizeof(*out_msg));
+    out_msg->version = URMA_BOND_SWITCHBACK_MSG_VERSION;
+    out_msg->type = URMA_BOND_SWITCHBACK_RESP;
+    out_msg->epoch = bjetty_ctx->switchback_epoch;
+    out_msg->peer_epoch = in->req.epoch;
+    out_msg->primary_idx = primary_idx;
+    out_msg->sender_primary_id = bdp_jetty->p_jetty[primary_idx]->jetty_id;
+    out_msg->sender_peer_primary_id = in->req.sender_primary_id;
+    return 0;
+}
+
+static int bondp_handle_switchback_resp(urma_context_t *ctx,
+                                        const urma_bond_handle_switchback_resp_in_t *in)
+{
+    if (ctx == NULL || in == NULL || in->jetty == NULL) {
+        return -EINVAL;
+    }
+    if (in->resp.version != URMA_BOND_SWITCHBACK_MSG_VERSION || in->resp.type != URMA_BOND_SWITCHBACK_RESP) {
+        return -EINVAL;
+    }
+    bondp_comp_t *bdp_jetty = bondp_get_bdp_jetty_from_vjetty(in->jetty);
+    if (bdp_jetty == NULL || bdp_jetty->bondp_ctx != CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx)) {
+        return -EINVAL;
+    }
+
+    bjetty_ctx_t *bjetty_ctx = (bjetty_ctx_t *)bdp_jetty->comp_ctx;
+    uint32_t primary_idx = in->resp.primary_idx;
+    if (primary_idx >= (uint32_t)bdp_jetty->dev_num) {
+        return -EINVAL;
+    }
+
+    pthread_mutex_lock(&bjetty_ctx->switchback_lock);
+    uint64_t local_epoch = bjetty_ctx->switchback_epoch;
+    bool already_done = (bjetty_ctx->switchback_import_done_epoch == in->resp.peer_epoch);
+    pthread_mutex_unlock(&bjetty_ctx->switchback_lock);
+    if (already_done) {
+        return 0;
+    }
+    if (local_epoch == 0 || in->resp.peer_epoch != local_epoch) {
+        return -EAGAIN;
+    }
+
+    bondp_target_jetty_t *bdp_tjetty = bondp_get_bound_target_jetty(bdp_jetty);
+    if (bdp_tjetty == NULL) {
+        return -ENOENT;
+    }
+    if (bondp_reimport_remote_primary_pjetty(bdp_jetty, bdp_tjetty, primary_idx, &in->resp.sender_primary_id) != 0) {
+        return -EIO;
+    }
+
+    pthread_mutex_lock(&bjetty_ctx->switchback_lock);
+    bjetty_ctx->switchback_import_done_epoch = in->resp.peer_epoch;
+    bjetty_ctx->switchback_running = false;
+    bjetty_ctx->switchback_pending = false;
+    bjetty_ctx->pjettys_valid[primary_idx] = true;
+    pthread_mutex_unlock(&bjetty_ctx->switchback_lock);
+    return 0;
 }
 
 /**

@@ -41,6 +41,12 @@ typedef struct bondp_jetty_ctx {
     // single path
     int direct_local_port;
     int direct_target_port;
+    /* switchback state for active/standby mode */
+    pthread_mutex_t switchback_lock;
+    bool switchback_pending;
+    bool switchback_running;
+    uint64_t switchback_epoch;
+    uint64_t switchback_import_done_epoch;
 } bjetty_ctx_t;
 // Caller check param
 bjetty_ctx_t *create_bjetty_ctx(urma_context_t *ctx, bondp_comp_t *bdp_jetty, size_t wr_buf_size);

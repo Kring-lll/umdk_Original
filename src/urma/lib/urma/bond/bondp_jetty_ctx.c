@@ -44,6 +44,11 @@ bjetty_ctx_t *create_bjetty_ctx(urma_context_t *ctx, bondp_comp_t *bdp_comp,
 
     bjetty_ctx->direct_local_port = -1;
     bjetty_ctx->direct_target_port = -1;
+    (void)pthread_mutex_init(&bjetty_ctx->switchback_lock, NULL);
+    bjetty_ctx->switchback_pending = false;
+    bjetty_ctx->switchback_running = false;
+    bjetty_ctx->switchback_epoch = 0;
+    bjetty_ctx->switchback_import_done_epoch = 0;
 
     return bjetty_ctx;
 
@@ -58,5 +63,6 @@ void destroy_bjetty_ctx(bjetty_ctx_t *bjetty_ctx)
         return;
     }
     bondp_hash_table_destroy(&bjetty_ctx->v_conn_table);
+    (void)pthread_mutex_destroy(&bjetty_ctx->switchback_lock);
     free(bjetty_ctx);
 }

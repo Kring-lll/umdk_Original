@@ -193,6 +193,9 @@ typedef struct bondp_target_jetty {
     bool is_multipath;
     bool local_valid[URMA_UBAGG_DEV_MAX_NUM];
     bool target_valid[URMA_UBAGG_DEV_MAX_NUM];
+    urma_rjetty_t remote_rjetty;
+    urma_token_t remote_token;
+    bool has_remote_token;
 } bondp_target_jetty_t;
 
 typedef struct bondp_import_target_seg {
