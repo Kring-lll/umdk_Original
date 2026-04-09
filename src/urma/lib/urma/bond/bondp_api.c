@@ -15,7 +15,6 @@
 #include "urma_log.h"
 #include "urma_api.h"
 #include "bondp_types.h"
-#include "bondp_comp.h"
 #include "urma_ubagg.h"
 #include "bondp_jetty_ctx.h"
 #include "bondp_context_table.h"

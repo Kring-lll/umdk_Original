@@ -351,7 +351,7 @@ urma_status_t bondp_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, u
         return ret;
     }
 
-    bdp_tjetty = &bdp_jetty->bjetty_ctx;
+    bjetty_ctx_t *bjetty_ctx = &bdp_jetty->bjetty_ctx;
     if (is_single_dev_mode(jetty->urma_ctx)) {
         ret = bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
     } else {
