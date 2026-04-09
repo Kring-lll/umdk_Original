@@ -368,8 +368,10 @@ urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_
     bjetty_ctx_t *bjetty_ctx = bdp_jfs->comp_ctx;
     urma_status_t ret = URMA_SUCCESS;
 
+    PERF_PROFILING_START(BOND_JFS_POST_SEND);
     ret = post_send_check_valid(bdp_jfs, bdp_tjetty, wr);
     if (ret != URMA_SUCCESS) {
+        PERF_PROFILING_END(BOND_JFS_POST_SEND);
         return ret;
     }
     if (is_single_dev_mode(jfs->urma_ctx)) {
@@ -377,6 +379,9 @@ urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_
     } else {
         return bondp_post_send_wr_and_store(bjetty_ctx, bdp_jfs->send_jfc, wr, bad_wr);
     }
+    PERF_PROFILING_END(BOND_JFS_POST_SEND);
+
+    return ret;
 }
 
 static urma_status_t bondp_post_recv_wr_no_store(bjetty_ctx_t *bjetty_ctx,
@@ -917,29 +922,6 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
     PERF_PROFILING_END(BOND_POLL_JFC);
    
     return cr_cnt - cr_cnt_remaining;
-}
-
-urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
-{
-    urma_status_t ret;    
-    bondp_comp_t *bdp_jfs = CONTAINER_OF_FIELD(jfs, bondp_comp_t, v_jfs);
-    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
-    bjetty_ctx_t *bjetty_ctx = bdp_jfs->comp_ctx;
-
-    PERF_PROFILING_START(BOND_JFS_POST_SEND);
-    ret = post_send_check_valid(bdp_jfs, bdp_tjetty, wr);
-    if (ret != URMA_SUCCESS) {
-        PERF_PROFILING_END(BOND_JFS_POST_SEND);
-        return ret;
-    }
-    if (is_single_dev_mode(jfs->urma_ctx)) {
-        ret = bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
-    } else {
-        ret = bondp_post_send_wr_and_store(bjetty_ctx, bdp_jfs->send_jfc, wr, bad_wr);
-    }
-    PERF_PROFILING_END(BOND_JFS_POST_SEND);
-    
-    return ret;
 }
 
 urma_status_t bondp_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr)
