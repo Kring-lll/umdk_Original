@@ -355,7 +355,7 @@ urma_status_t bondp_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, u
     if (is_single_dev_mode(jetty->urma_ctx)) {
         ret = bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
     } else {
-        ret = bondp_post_send_wr_and_store(bjetty_ctx, bdp_jetty->send_jfc, bad_wr);
+        ret = bondp_post_send_wr_and_store(bjetty_ctx, bdp_jetty->send_jfc, wr, bad_wr);
     }
     PERF_PROFILING_END(BOND_JETTY_POST_SEND);
     return ret;
@@ -519,7 +519,7 @@ urma_status_t bondp_post_jetty_recv_wr(urma_jetty_t *jetty, urma_jfr_wr_t *wr, u
     if (is_single_dev_mode(jetty->urma_ctx)) {
         ret = bondp_post_recv_wr_no_store(bjetty_ctx, wr, bad_wr);
     } else {
-        ret = bondp_post_recv_wr_and_store(bjetty_ctx, bdp_jetty->send_jfc, bad_wr);
+        ret = bondp_post_recv_wr_and_store(bjetty_ctx, bdp_jetty->send_jfc, wr, bad_wr);
     }
     PERF_PROFILING_END(BOND_JETTY_POST_RECV);
     
@@ -935,7 +935,7 @@ urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_
     if (is_single_dev_mode(jfs->urma_ctx)) {
         ret = bondp_post_send_wr_no_store(bjetty_ctx, wr, bad_wr);
     } else {
-        ret = bondp_post_send_wr_and_store(bjetty_ctx, wr, bad_wr);
+        ret = bondp_post_send_wr_and_store(bjetty_ctx, bdp_jfs->send_jfc, wr, bad_wr);
     }
     PERF_PROFILING_END(BOND_JFS_POST_SEND);
     
@@ -960,7 +960,7 @@ urma_status_t bondp_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_
     if (is_single_dev_mode(jfr->urma_ctx)) {
         ret = bondp_post_recv_wr_no_store(bjetty_ctx, wr, bad_wr);
     } else {
-        ret = bondp_post_recv_wr_and_store(bjetty_ctx, wr, bad_wr);
+        ret = bondp_post_recv_wr_and_store(bjetty_ctx, bdp_jfr->recv_jfc, wr, bad_wr);
     }
     PERF_PROFILING_END(BOND_POST_JFR_RECV);
 
