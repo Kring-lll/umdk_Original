@@ -16,31 +16,30 @@
 #else
 #include <atomic>
 #endif
-#include <stdbool.h>
+#include "bondp_hash_table.h"
+#include "bondp_wr_buf.h"
+#include "topo_info.h"
 #include "urma_types.h"
 #include "urma_ubagg.h"
-#include "bondp_hash_table.h"
-#include "topo_info.h"
-#include "bondp_wr_buf.h"
+#include <stdbool.h>
 
-#define BONDP_MAX_NUM_JFRS (10240)
-#define BONDP_MAX_NUM_JETTYS (10240)
-#define BONDP_MAX_NUM_SEGS (10240)
-#define BONDP_MAX_NUM_RSEGS (10240)
-#define BONDP_MAX_WR_LIST_NUM (300)
-#define BONDP_MAX_SGE_NUM (32)
-#define PRIMARY_EID_NUM (2)
-#define PORT_EID_MAX_NUM_PER_DEV (9)
-#define PORT_EID_MAX_NUM (PORT_EID_MAX_NUM_PER_DEV * PRIMARY_EID_NUM)
-#define BONDP_MAX_WELL_KNOWN_JETTY_ID    (1024)
+#define BONDP_MAX_NUM_JFRS            (10240)
+#define BONDP_MAX_NUM_JETTYS          (10240)
+#define BONDP_MAX_NUM_SEGS            (10240)
+#define BONDP_MAX_NUM_RSEGS           (10240)
+#define BONDP_MAX_WR_LIST_NUM         (300)
+#define BONDP_MAX_SGE_NUM             (32)
+#define PRIMARY_EID_NUM               (2)
+#define PORT_EID_MAX_NUM_PER_DEV      (9)
+#define PORT_EID_MAX_NUM              (PORT_EID_MAX_NUM_PER_DEV * PRIMARY_EID_NUM)
+#define BONDP_MAX_WELL_KNOWN_JETTY_ID (1024)
 /* Use single die primary eid and port eid to create urma_context */
-#define SINGLE_DIE_DEVNUM (11)
-#define SINGLE_DIE_IODIE_NUM (1)
-#define URMA_JETTY_ID_FMT "("EID_FMT", uasid: %u, id: %u)"
-#define URMA_JETTY_ID_UNPACK(...) __VA_ARGS__
-#define URMA_JETTY_ID_ARGS(jetty_id) URMA_JETTY_ID_UNPACK(EID_ARGS((jetty_id)->eid), \
-    (jetty_id)->uasid, (jetty_id)->id)
-
+#define SINGLE_DIE_DEVNUM             (11)
+#define SINGLE_DIE_IODIE_NUM          (1)
+#define URMA_JETTY_ID_FMT             "(" EID_FMT ", uasid: %u, id: %u)"
+#define URMA_JETTY_ID_UNPACK(...)     __VA_ARGS__
+#define URMA_JETTY_ID_ARGS(jetty_id)  URMA_JETTY_ID_UNPACK(EID_ARGS((jetty_id)->eid), \
+                                                           (jetty_id)->uasid, (jetty_id)->id)
 
 typedef struct bondp_heath_check_ctx {
     void *check_buf;
@@ -96,7 +95,7 @@ typedef struct bondp_context {
         /* The following struct is valid only when the node is in matrix server */
         struct {
             urma_context_t *primary_ctxs[PRIMARY_EID_NUM];
-            urma_context_t *port_ctxs[PORT_EID_MAX_NUM];   /* primary[0]->port[0:9], primary[1]->port[9:18] */
+            urma_context_t *port_ctxs[PORT_EID_MAX_NUM]; /* primary[0]->port[0:9], primary[1]->port[9:18] */
         };
     };
     /* This variable represents the maximum number of times all available devices need to be traversed. */
@@ -114,11 +113,11 @@ typedef struct bondp_context {
     int real_async_fd; /* vcontex async_fd */
     bondp_heath_check_ctx_t bondp_heath_check_ctx;
     bondp_hash_table_t remote_v2p_token_id_table;
-    #ifndef __cplusplus
+#ifndef __cplusplus
     atomic_ulong token_id_cnt;
-    #else
+#else
     std::atomic_ulong token_id_cnt;
-    #endif
+#endif
 } bondp_context_t;
 
 typedef struct bondp_jfc {
@@ -130,6 +129,16 @@ typedef struct bondp_jfc {
     wr_buf_t wr_buf;
 } bondp_jfc_t;
 
+typedef struct bondp_tseg {
+    urma_target_seg_t v_tseg;
+    urma_target_seg_t *p_tseg[URMA_UBAGG_DEV_MAX_NUM];
+    int dev_num;
+    bondp_context_t *bondp_ctx;
+    urma_ref_t use_cnt; /* Initialize to 0 */
+    uint64_t p_orig_handle[URMA_UBAGG_DEV_MAX_NUM];
+    uint64_t v_orig_handle;
+} bondp_tseg_t;
+
 typedef struct bondp_jfce {
     urma_jfce_t v_jfce;
     urma_jfce_t *p_jfce[URMA_UBAGG_DEV_MAX_NUM];
@@ -139,13 +148,34 @@ typedef struct bondp_jfce {
 } bondp_jfce_t;
 
 typedef enum bondp_comp_type {
-    BONDP_COMP_JFCE,
     BONDP_COMP_JFS,
     BONDP_COMP_JFR,
     BONDP_COMP_JETTY,
     BONDP_COMP_SEGMENT, /* register segment */
     BONDP_COMP_TYPE_MAX
 } bondp_comp_type_t;
+
+struct bondp_comp;
+
+typedef struct bondp_jetty_ctx {
+    bondp_context_t *bond_ctx;
+    struct bondp_comp *bdp_comp;
+    int dev_num;
+    urma_jetty_t **pjettys; // store the pointer array of bdp_comp->members, which could be jfs*/jfr*/jetty*.
+    bool pjettys_valid[URMA_UBAGG_DEV_MAX_NUM];
+    uint8_t pjettys_error_done[URMA_UBAGG_DEV_MAX_NUM];
+    int send_idx;
+    int post_recv_idx;
+    // -- wr buf --
+    // caching WRs
+    uint32_t inflight_cnt[URMA_UBAGG_DEV_MAX_NUM];
+    // slide window and other status for de-duplication
+    bondp_hash_table_t v_conn_table;
+    // single path
+    int direct_local_port;
+    int direct_target_port;
+} bjetty_ctx_t;
+
 /** A struct to mimic Polymorphism in creating/deleting some components of urma.
  * This will introduce extra memory cost due to union size taking the largest size.
  */
@@ -166,7 +196,7 @@ typedef struct bondp_comp {
     };
     int dev_num;
     bondp_context_t *bondp_ctx;
-    void *comp_ctx;
+    bjetty_ctx_t bjetty_ctx;
     bool is_multipath;
     bondp_comp_type_t comp_type;
     urma_ref_t use_cnt; /* Initialize to 0 */
