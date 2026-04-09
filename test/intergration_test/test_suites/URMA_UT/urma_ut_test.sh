@@ -20,22 +20,34 @@ function prepare_and_run() {
     if [ -d "./build" ]; then
         rm -rf build
     fi
-
+    #rpm -ivh /root/rpmbuild/RPMS/aarch64/umdk-urma-kmod-*.rpm
     cmake .. -D BUILD_ALL=disable -D BUILD_URMA=enable
     make install -j
     echo "URMA package installed successfully."
-
+    
+    systemctl stop ubse
+    sleep 1
+    rmmod ubagg
+    rmmod uburma
+    rmmod ipourma
+    rmmod udma
+    rmmod ubcore
+    modprobe ubcore
+    modprobe uburma
+    modprobe ubagg
+    modprobe ipourma tx_ring_size=16 rx_ring_size-32 page_level=16 ctp_sl=6
+    modprobe udma
+    systemctl start ubse
+    echo "URMA drivers update installed successfully."
     echo "Configuring test environment YAML..."
     if [ ! -d "$TARGET_YAML_DIR" ]; then
         mkdir -p "$TARGET_YAML_DIR"
     fi
 
-    if [ -f "$LOCAL_YAML" ]; then
-        cp -f "$LOCAL_YAML" "$TARGET_YAML_PATH"
-        echo "Copied $LOCAL_YAML to $TARGET_YAML_PATH"
+    if [ -f "$TARGET_YAML_PATH" ]; then
+        echo "yam already exists"
     else
-        echo "Error: Source YAML file not found at $LOCAL_YAML"
-        exit 1
+        cp -f "$LOCAL_YAML" "$TARGET_YAML_PATH"
     fi
 
     echo "Starting Pytest execution..."
