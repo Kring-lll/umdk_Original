@@ -46,8 +46,6 @@ TensorVector FusedDeepMoeImplNpu(
     int64_t epRankSize, \
     int64_t epRankId, \
     int64_t moeExpertNum, \
-    int64_t sharedExpertNum, \
-    int64_t sharedExpertRankNum, \
     int64_t quantMode, \
     int64_t globalBs
 )
@@ -62,14 +60,8 @@ TensorVector FusedDeepMoeImplNpu(
     
     at::Tensor output = at::empty({bs, h}, x.options());
     at::Tensor shareOutput = at::empty({bs, h}, x.options());
-    
-    bool isShareExpert = (epRankId < sharedExpertRankNum);
-    int64_t localExpertNum = 0;
-    if (isShareExpert) {
-        localExpertNum = 1;
-    } else {
-        localExpertNum = moeExpertNum / (epRankSize - sharedExpertRankNum);
-    }
+
+    int64_t localExpertNum = moeExpertNum / epRankSize;
     auto opts = expertIds.options().dtype(at::kLong);
     at::Tensor expertTokenNums = at::empty({localExpertNum}, opts);
     
@@ -86,7 +78,7 @@ TensorVector FusedDeepMoeImplNpu(
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
         expertSmoothScales, shareSmoothScales, xActiveMask, \
         // attr
-        groupEpPtr, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs, \
+        groupEpPtr, epRankSize, epRankId, moeExpertNum, quantMode, globalBs, \
         // output
         output, shareOutput, expertTokenNums);
     return {output, shareOutput, expertTokenNums};
@@ -117,8 +109,6 @@ TensorVector FusedDeepMoeImplMeta(
     int64_t epRankSize, \
     int64_t epRankId, \
     int64_t moeExpertNum, \
-    int64_t sharedExpertNum, \
-    int64_t sharedExpertRankNum, \
     int64_t quantMode, \
     int64_t globalBs)
 {
@@ -128,13 +118,7 @@ TensorVector FusedDeepMoeImplMeta(
     at::Tensor output = at::empty({bs, h}, x.options().device(at::kMeta));
     at::Tensor shareOutput = at::empty({bs, h}, x.options().device(at::kMeta));
 
-    bool isShareExpert = (epRankId < sharedExpertRankNum);
-    int64_t localExpertNum = 0;
-    if (isShareExpert) {
-        localExpertNum = 1;
-    } else {
-        localExpertNum = moeExpertNum / (epRankSize - sharedExpertRankNum);
-    }
+    int64_t localExpertNum = moeExpertNum / epRankSize;
     auto opts = expertIds.options().dtype(at::kLong);
     at::Tensor expertTokenNums = at::empty({localExpertNum}, opts.device(at::kMeta));
     
@@ -160,8 +144,6 @@ TensorVector FusedDeepMoeImpl(
     int64_t epRankSize, \
     int64_t epRankId, \
     int64_t moeExpertNum, \
-    int64_t sharedExpertNum, \
-    int64_t sharedExpertRankNum, \
     int64_t quantMode, \
     int64_t globalBs)
 {
@@ -173,7 +155,7 @@ TensorVector FusedDeepMoeImpl(
         shareGmm1PermutedWeightOptional, shareGmm1PermutedWeightScaleOptional, \
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
         expertSmoothScales, shareSmoothScales, xActiveMask, \
-        groupEp, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs);
+        groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs);
 }
 
 // 通过继承torch::autograd::Function类实现前反向绑定
@@ -198,8 +180,6 @@ public:
                             int64_t epRankSize, \
                             int64_t epRankId, \
                             int64_t moeExpertNum, \
-                            int64_t sharedExpertNum, \
-                            int64_t sharedExpertRankNum, \
                             int64_t quantMode, \
                             int64_t globalBs)
     {
@@ -209,7 +189,7 @@ public:
             shareGmm1PermutedWeightOptional, shareGmm1PermutedWeightScaleOptional, \
             shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
             expertSmoothScales, shareSmoothScales, xActiveMask, \
-            groupEp, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs);
+            groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs);
         return result;
     }
 
@@ -253,8 +233,6 @@ TensorVector FusedDeepMoeImplAutograd(
     int64_t epRankSize, \
     int64_t epRankId, \
     int64_t moeExpertNum, \
-    int64_t sharedExpertNum, \
-    int64_t sharedExpertRankNum, \
     int64_t quantMode, \
     int64_t globalBs)
 {
@@ -263,7 +241,7 @@ TensorVector FusedDeepMoeImplAutograd(
             shareGmm1PermutedWeightOptional, shareGmm1PermutedWeightScaleOptional, \
             shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
             expertSmoothScales, shareSmoothScales, xActiveMask, \
-            groupEp, epRankSize, epRankId, moeExpertNum, sharedExpertNum, sharedExpertRankNum, quantMode, globalBs);
+            groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs);
         return result;
 }
 

@@ -102,8 +102,6 @@ public:
         this->Attr("ep_rank_size").Int();
         this->Attr("ep_rank_id").Int();
         this->Attr("moe_expert_num").Int();
-        this->Attr("share_expert_num").Int();
-        this->Attr("share_expert_rank_num").Int();
         this->Attr("quant_mode").Int();
         this->Attr("global_bs").Int();
 

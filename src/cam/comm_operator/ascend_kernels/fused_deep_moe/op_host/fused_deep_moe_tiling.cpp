@@ -51,10 +51,8 @@ constexpr uint32_t ATTR_GROUP_EP_INDEX = 0;
 constexpr uint32_t ATTR_EP_RANK_SIZE_INDEX = 1;
 constexpr uint32_t ATTR_EP_RANK_ID_INDEX = 2;
 constexpr uint32_t ATTR_MOE_EXPERT_NUM_INDEX = 3;
-constexpr uint32_t ATTR_SHARE_EXPERT_NUM_INDEX = 4;
-constexpr uint32_t ATTR_SHARE_EXPERT_RANK_NUM_INDEX = 5;
-constexpr uint32_t ATTR_QUANT_MODE_INDEX = 6;
-constexpr uint32_t ATTR_GLOBAL_BS_INDEX = 7;
+constexpr uint32_t ATTR_QUANT_MODE_INDEX = 4;
+constexpr uint32_t ATTR_GLOBAL_BS_INDEX = 5;
 
 constexpr uint32_t MIN_BATCH_SIZE = 0;
 constexpr uint32_t MAX_BATCH_SIZE = 256;
@@ -105,8 +103,7 @@ static ge::graphStatus CheckGmm1Shape(gert::TilingContext &context, FusedDeepMoe
     auto gmm1FirstTensorElementShape = gmm1FirstTensorElement->GetOriginShape();
     uint32_t elementDims = gmm1FirstTensorElementShape.GetDimNum();
     uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
-    uint32_t sharedExpertRankNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
-    uint32_t localExpertNum = epRankId < sharedExpertRankNum ? 1 : moeExpertNumPerRank;
+    uint32_t localExpertNum = moeExpertNumPerRank;
 
     OPS_ERR_IF(elementDims != TWO_DIMS && elementDims != THREE_DIMS,
                     OPS_LOG_E(nodeName, "gmm1Weight shape is invalid."),
@@ -267,8 +264,7 @@ static ge::graphStatus CheckGmm1ScaleShape(gert::TilingContext &context,
     uint32_t moeExpertNumPerRank = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     uint32_t n = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
     uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
-    uint32_t sharedExpertRankNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
-    uint32_t localExpertNum = epRankId < sharedExpertRankNum ? 1 : moeExpertNumPerRank;
+    uint32_t localExpertNum = moeExpertNumPerRank;
     bool listFlag = false;
 
     uint32_t gmm1ScaleListLen = CountTensorListLen(context, INPUT_GMM1_WEIGHT_SCALE_INDEX);
@@ -309,8 +305,7 @@ static ge::graphStatus CheckGmm2Shape(const gert::TilingContext &context, const 
     uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
     uint32_t n = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
     uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
-    uint32_t sharedExpertRankNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
-    uint32_t localExpertNum = epRankId < sharedExpertRankNum ? 1 : moeExpertNumPerRank;
+    uint32_t localExpertNum = moeExpertNumPerRank;
     bool listFlag = false;
 
     uint32_t gmm2ListLen = CountTensorListLen(context, INPUT_GMM2_WEIGHT_INDEX);
@@ -357,8 +352,7 @@ static ge::graphStatus CheckGmm2ScaleShape(gert::TilingContext &context,
     uint32_t moeExpertNumPerRank = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
     uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
-    uint32_t sharedExpertRankNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
-    uint32_t localExpertNum = epRankId < sharedExpertRankNum ? 1 : moeExpertNumPerRank;
+    uint32_t localExpertNum = moeExpertNumPerRank;
     bool listFlag = false;
 
     uint32_t gmm2ScaleListLen = CountTensorListLen(context, INPUT_GMM2_WEIGHT_SCALE_INDEX);
@@ -409,12 +403,11 @@ ge::graphStatus CheckXActiveMaskShape(const gert::TilingContext &context, const 
 {
     uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
     uint32_t moeExpertNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum;
-    uint32_t sharedExpertRankNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
     uint32_t moeExpertNumPerRank = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     uint32_t batchSize = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.bs;
     uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
     uint64_t gmm1WeightDim2 = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
-    uint32_t localExpertNum = epRankId < sharedExpertRankNum ? 1 : moeExpertNumPerRank;
+    uint32_t localExpertNum = moeExpertNumPerRank;
     const gert::StorageShape* xActiveMaskStorageShape = context.GetOptionalInputShape(
         INPUT_SHARE_X_ACTIVE_MASK_INDEX);
     if (xActiveMaskStorageShape != nullptr) {
@@ -484,21 +477,15 @@ static ge::graphStatus GetAttrAndSetTilingData(const gert::TilingContext &contex
     auto epRankSizePtr = attrs->GetAttrPointer<int64_t>(ATTR_EP_RANK_SIZE_INDEX);
     auto epRankIdPtr = attrs->GetAttrPointer<int64_t>(ATTR_EP_RANK_ID_INDEX);
     auto moeExpertNumPtr = attrs->GetAttrPointer<int64_t>(ATTR_MOE_EXPERT_NUM_INDEX);
-    auto sharedExpertNumPtr = attrs->GetAttrPointer<int64_t>(ATTR_SHARE_EXPERT_NUM_INDEX);
-    auto sharedExpertRankNumPtr = attrs->GetAttrPointer<int64_t>(ATTR_SHARE_EXPERT_RANK_NUM_INDEX);
     auto quantModePtr = attrs->GetAttrPointer<int64_t>(ATTR_QUANT_MODE_INDEX);
     auto globalBsPtr = attrs->GetAttrPointer<int64_t>(ATTR_GLOBAL_BS_INDEX);
 
     uint32_t epRankSize = static_cast<uint32_t>(*epRankSizePtr);
     uint32_t epRankId = static_cast<uint32_t>(*epRankIdPtr);
     uint32_t moeExpertNum = static_cast<uint32_t>(*moeExpertNumPtr);
-    uint32_t sharedExpertNum = static_cast<uint32_t>(*sharedExpertNumPtr);
-    uint32_t sharedExpertRankNum = static_cast<uint32_t>(*sharedExpertRankNumPtr);
-    uint32_t moeExpertNumPerRank = moeExpertNum / (epRankSize - sharedExpertRankNum);
+    uint32_t moeExpertNumPerRank = moeExpertNum / epRankSize;
 
     OPS_ERR_IF(epRankSize <= 0, OPS_LOG_E(nodeName, "epRankSize must > 0."), return ge::GRAPH_FAILED);
-    OPS_ERR_IF(sharedExpertRankNum >= epRankSize, OPS_LOG_E(nodeName, "sharedExpertRankNum must < epRankSize."),
-                    return ge::GRAPH_FAILED);
     OPS_ERR_IF(epRankId < 0, OPS_LOG_E(nodeName, "epRankId must >= 0."), return ge::GRAPH_FAILED);
     OPS_ERR_IF(epRankId >= epRankSize, OPS_LOG_E(nodeName, "epRankId must < epRankSize."), return ge::GRAPH_FAILED);
     OPS_ERR_IF(moeExpertNum > MAX_MOE_EXERT_NUM, OPS_LOG_E(nodeName, "moeExpertNum must <= %u.", MAX_MOE_EXERT_NUM),
@@ -507,17 +494,14 @@ static ge::graphStatus GetAttrAndSetTilingData(const gert::TilingContext &contex
                     OPS_LOG_E(nodeName, "moeExpertNumPerRank * epRankSize must <= %u.", MAX_MOE_EXERT_NUM),
                     return ge::GRAPH_FAILED);
     OPS_ERR_IF(moeExpertNum <= 0, OPS_LOG_E(nodeName, "moeExpertNum must > 0."), return ge::GRAPH_FAILED);
-    OPS_ERR_IF(sharedExpertNum != 1, OPS_LOG_E(nodeName, "sharedExpertNum must be 1."), return ge::GRAPH_FAILED);
-    OPS_ERR_IF(moeExpertNum % (epRankSize - sharedExpertRankNum) != 0,
-                    OPS_LOG_E(nodeName, "moeExpertNum must be divisible by (epRankSize - sharedExpertRankNum)."),
+    OPS_ERR_IF((moeExpertNum % epRankSize) != 0,
+                    OPS_LOG_E(nodeName, "moeExpertNum must be divisible by epRankSize."),
                     return ge::GRAPH_FAILED);
 
     groupEp = std::string(groupEpPtr);
     tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize = epRankSize;
     tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId = epRankId;
     tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum = moeExpertNum;
-    tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertNum = sharedExpertNum;
-    tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum = sharedExpertRankNum;
     tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.quantMode = static_cast<uint32_t>(*quantModePtr);
     tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.globalBs = static_cast<uint32_t>(*globalBsPtr);
     tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank = moeExpertNumPerRank;
@@ -564,7 +548,6 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
     size_t maxHandleTokenNum;
     uint32_t epRankSize = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize;
     uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
-    uint32_t sharedExpertRankNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
     uint32_t batchSize = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.bs;
     uint32_t globalBs = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.globalBs;
     uint32_t maxBatchSize = globalBs / epRankSize;
@@ -577,11 +560,7 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
     uint64_t shareGmm2HLen = shareGmm1HLen / 2;
     uint64_t gmm1HLen = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
     uint64_t gmm2HLen = gmm1HLen / 2;
-    if (epRankId < sharedExpertRankNum) {
-        maxTokenNum = maxBatchSize * epRankSize / sharedExpertRankNum;
-    } else {
-        maxTokenNum = maxBatchSize * epRankSize * std::min(topK, moeExpertNumPerRank);
-    }
+    maxTokenNum = maxBatchSize * epRankSize * std::min(topK, moeExpertNumPerRank);
     maxHandleTokenNum = shareExpertTokenNum + maxTokenNum;
 
     size_t x1TokenSize = maxHandleTokenNum * h * sizeof(int8_t);

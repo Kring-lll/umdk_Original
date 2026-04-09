@@ -19,8 +19,6 @@ struct FusedDeepMoeInfo {
     uint32_t epRankId;             // epRankId
     uint32_t moeExpertNum;         // moe expert number
     uint32_t moeExpertNumPerRank;  // moe expert number per rank
-    uint32_t sharedExpertNum;      // shared expert number
-    uint32_t sharedExpertRankNum;  // shared expert rank number
     uint32_t quantMode;            // quant mode
     uint32_t globalBs;             // globalBs = BS * worldSize
     uint32_t bs;                   // bs

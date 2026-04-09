@@ -328,7 +328,6 @@ private:
     uint32_t epRankSize_{0};
     uint32_t epRankId_{0};
     uint32_t moeExpertNumPerRank_{0};
-    uint32_t sharedExpertRankNum_{0};
     uint32_t globalBs_{0};
     uint32_t bs_{0};
     uint32_t maxBs_{0};
@@ -376,7 +375,6 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     epRankSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize;
     epRankId_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
     moeExpertNumPerRank_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
-    sharedExpertRankNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
     globalBs_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.globalBs;
     bs_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.bs;
     topK_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.k;

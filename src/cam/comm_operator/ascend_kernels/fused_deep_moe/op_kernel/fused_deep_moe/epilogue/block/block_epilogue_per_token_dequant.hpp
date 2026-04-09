@@ -167,7 +167,7 @@ public:
             AlignUbOffset();
             AscendC::GlobalTensor<int32_t> epSendCountGM;
             epSendCountGM.SetGlobalBuffer((__gm__ int32_t *)calcInfo.epSendCount_);
-            uint32_t epSendCountSize = calcInfo.isShardExpert_ ? calcInfo.epWorldSize_ : calcInfo.moeSendNum_;
+            uint32_t epSendCountSize = calcInfo.moeSendNum_;
             AscendC::DataCopyExtParams epSendCntParams = {1U, static_cast<uint32_t>(epSendCountSize * sizeof(uint32_t)),
                                                           0U, 0U, 0U};
             AscendC::DataCopyPadExtParams<int32_t> copyPadParams{false, 0U, 0U, 0U};
@@ -205,13 +205,8 @@ public:
 
     CATLASS_DEVICE void SetCombineSendEpRank(uint32_t epRank, uint32_t &remoteEpRank, uint32_t &localEpRank)
     {
-        if ((calcInfo.isShardExpert_) && (epRank < calcInfo.sharedExpertRankNum_)) {
-            remoteEpRank = calcInfo.epRankId_;
-            localEpRank = epRank;
-        } else {
-            remoteEpRank = epRank;
-            localEpRank = calcInfo.epRankId_;
-        }
+        remoteEpRank = epRank;
+        localEpRank = calcInfo.epRankId_;
     }
 
     CATLASS_DEVICE void DoCombineSend(AscendC::LocalTensor<ElementD> &ubD, layout::RowMajor &layoutGmTileD,

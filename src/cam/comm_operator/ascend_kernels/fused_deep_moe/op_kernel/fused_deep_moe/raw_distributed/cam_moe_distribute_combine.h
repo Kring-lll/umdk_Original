@@ -47,16 +47,10 @@ struct CombineCalcInfo {
     uint32_t epRankId_;
     uint32_t epWorldSize_;
     uint32_t moeExpertPerRankNum_;
-    uint32_t sharedExpertRankNum_;
     uint32_t axisH_;
     uint32_t moeSendNum_;
-    bool isShardExpert_;
     GM_ADDR epSendCount_;
-#if ENABLE_CAM_COMM
-    AscendC::GlobalTensor<GM_ADDR> epWinContext_;
-#else
     __gm__ HcclOpResParam *epWinContext_;
-#endif
     uint64_t winDataSizeOffset_;
 };
 
@@ -184,7 +178,7 @@ private:
     uint32_t epRankId_{0};
     uint32_t tpRankId_{0};
     uint32_t coreIdx_{0};  // aiv id
-    uint32_t sharedExpertRankNum_{0};
+    uint32_t RankNum_{0};
     uint32_t moeExpertNum_{0};
     uint32_t moeExpertPerRankNum_{0};
     uint32_t moeSendNum_{0};  // moeExpertPerRankNum_ * epWorldSize_
@@ -236,7 +230,6 @@ private:
     TBuf<> xActMaskSumTBuf_;
     float sumTarget_{0.0};
     int32_t epStateValue_;
-    bool isShardExpert_{false};
 };
 
 template <TemplateMC2TypeClass>
@@ -286,7 +279,6 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
         aivNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.aivNum;
     }
     ubSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.totalUbSize;
-    sharedExpertRankNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum;
     moeExpertNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum;
     moeExpertPerRankNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     epWorldSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize;
@@ -304,7 +296,6 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     epStatusSpaceGlobalTensor_.SetGlobalBuffer((__gm__ float *)epStatusSpaceGm_);
     epDataOffsetOnWin_ = epRankId_ * moeExpertPerRankNum_ * static_cast<uint32_t>(expertPerSizeOnWin_);
     epStateOffsetOnWin_ = epRankId_ * stateOffset_;
-    isShardExpert_ = false;
     axisHFloatSize_ = axisH_ * sizeof(float);
     axisHExpandXTypeSize_ = axisH_ * sizeof(ExpandXType);
     bsKNum_ = axisBS_ * axisK_;
@@ -331,10 +322,8 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     calcInfo_.epWorldSize_ = epWorldSize_;
     calcInfo_.expertPerSizeOnWin_ = expertPerSizeOnWin_;
     calcInfo_.moeExpertPerRankNum_ = moeExpertPerRankNum_;
-    calcInfo_.sharedExpertRankNum_ = sharedExpertRankNum_;
     calcInfo_.axisH_ = axisH_;
     calcInfo_.moeSendNum_ = moeSendNum_;
-    calcInfo_.isShardExpert_ = isShardExpert_;
     calcInfo_.epSendCount_ = epSendCount;
     calcInfo_.epWinContext_ = epWinContext_;
     calcInfo_.winDataSizeOffset_ = winDataSizeOffset_;

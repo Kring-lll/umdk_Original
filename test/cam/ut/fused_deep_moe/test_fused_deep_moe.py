@@ -46,7 +46,6 @@ class CustomOps(torch.nn.Module):
                  ep_world_size,
                  moe_expert_num,
                  global_rank_id,
-                 shared_expert_rank_num=0,
                  dynamic_eplb=False):
         super().__init__()
         self.ep_hcomm_info = ep_hcomm_info
@@ -56,10 +55,9 @@ class CustomOps(torch.nn.Module):
         self.ep_world_size = ep_world_size
         self.moe_expert_num = moe_expert_num
         self.global_rank_id = global_rank_id
-        self.shared_expert_rank_num = shared_expert_rank_num
-        is_shared_expert = global_rank_id < shared_expert_rank_num
-        moe_expert_num_per_rank = moe_expert_num // (ep_world_size - shared_expert_rank_num)
-        self.local_expert_num = 1 if is_shared_expert else moe_expert_num_per_rank
+        self.shared_expert_rank_num = 0
+        moe_expert_num_per_rank = moe_expert_num // ep_world_size
+        self.local_expert_num = moe_expert_num_per_rank
         self.ep_recv_count_size = self.local_expert_num * ep_world_size
         self.dynamic_eplb = dynamic_eplb
         self.gmm1_weight = torch.empty([
@@ -114,13 +112,12 @@ class SmallOps(CustomOps):
                  ep_world_size,
                  moe_expert_num,
                  global_rank_id,
-                 shared_expert_rank_num,
                  dynamic_eplb=False):
         super().__init__(gmm1_weight, gmm1_weight_scale, gmm2_weight,
                          gmm2_weight_scale, ep_hcomm_info, batch_size,
                          token_hidden_size, moe_intermediate_size,
                          ep_world_size, moe_expert_num, global_rank_id,
-                         shared_expert_rank_num, dynamic_eplb)
+                         dynamic_eplb)
         self.tp_hcomm_info = ""
        
     def _apply_ops(self, x, expert_ids, smooth_scales, expert_scales, x_active_mask):
@@ -209,13 +206,12 @@ class FusionOp(CustomOps):
                  ep_world_size,
                  moe_expert_num,
                  global_rank_id,
-                 shared_expert_rank_num=0,
                  dynamic_eplb=False):
         super().__init__(gmm1_weight, gmm1_weight_scale, gmm2_weight,
                          gmm2_weight_scale, ep_hcomm_info, batch_size,
                          token_hidden_size, moe_intermediate_size,
                          ep_world_size, moe_expert_num, global_rank_id,
-                         shared_expert_rank_num, dynamic_eplb)
+                         dynamic_eplb)
 
     def _apply_ops(self, x, expert_ids, smooth_scales, expert_scales, x_active_mask):
         output, expert_token_nums = torch.ops.umdk_cam_op_lib.fused_deep_moe(
@@ -232,8 +228,6 @@ class FusionOp(CustomOps):
             ep_rank_size=self.ep_world_size,
             ep_rank_id=self.global_rank_id,
             moe_expert_num=self.moe_expert_num,
-            shared_expert_num=1,
-            shared_expert_rank_num=self.shared_expert_rank_num,
             quant_mode=0,
             global_bs=self.batch_size * self.ep_world_size)
         return (output, expert_token_nums)
@@ -272,17 +266,15 @@ def generate_datas(batch_size,
                    ep_world_size,
                    moe_expert_num,
                    global_rank_id,
-                   shared_expert_rank_num=0,
                    top_k=8,
                    test_bfloat16=True,
                    enable_dynamic_bs=False,
                    with_mc2_mask=False):
-    is_shared_expert = global_rank_id < shared_expert_rank_num
-    moe_expert_num_per_rank = moe_expert_num // (ep_world_size - shared_expert_rank_num)
+    moe_expert_num_per_rank = moe_expert_num // ep_world_size
     actual_bs = int(
         np.random.randint(2 if with_mc2_mask else 1, batch_size)
         if enable_dynamic_bs else batch_size)
-    local_expert_num = 1 if is_shared_expert else moe_expert_num_per_rank
+    local_expert_num = moe_expert_num_per_rank
     gmm1_input_dim = token_hidden_size
     gmm1_output_dim = moe_intermediate_size * 2
     gmm2_input_dim = moe_intermediate_size
@@ -293,30 +285,16 @@ def generate_datas(batch_size,
         global_rank_id * batch_size * top_k + actual_bs * top_k,
         dtype=np.int32).reshape(actual_bs, top_k)
     expert_ids = expert_ids % moe_expert_num
-    if is_shared_expert:
-        gmm1_weight = np.full([
-            local_expert_num, gmm1_input_dim, gmm1_output_dim
-        ], 4, dtype=np.int8)
-        gmm2_weight = np.full([
-            local_expert_num, gmm2_input_dim, gmm2_output_dim
-        ], 4, dtype=np.int8)
-        gmm1_weight[:, :, ::2] = -gmm1_weight[:, :, ::2]
-        gmm2_weight[:, :, ::2] = -gmm2_weight[:, :, ::2]
-        gmm1_weight_scale = np.ones([local_expert_num, gmm1_output_dim],
-                                    dtype=np.float32) * 0.0015
-        gmm2_weight_scale = np.ones([local_expert_num, gmm2_output_dim],
-                                    dtype=np.float32) * 0.0015
-    else:
-        gmm1_weight = np.random.randint(
-            -16, 16,
-            [local_expert_num, gmm1_input_dim, gmm1_output_dim]).astype(np.int8)
-        gmm2_weight = np.random.randint(
-            -16, 16,
-            [local_expert_num, gmm2_input_dim, gmm2_output_dim]).astype(np.int8)
-        gmm1_weight_scale = (np.random.rand(local_expert_num, gmm1_output_dim
-                                            ).astype(np.float32) * 0.003 + 0.0015)
-        gmm2_weight_scale = (np.random.rand(local_expert_num, gmm2_output_dim
-                                            ).astype(np.float32) * 0.003 + 0.0015)
+    gmm1_weight = np.random.randint(
+        -16, 16,
+        [local_expert_num, gmm1_input_dim, gmm1_output_dim]).astype(np.int8)
+    gmm2_weight = np.random.randint(
+        -16, 16,
+        [local_expert_num, gmm2_input_dim, gmm2_output_dim]).astype(np.int8)
+    gmm1_weight_scale = (np.random.rand(local_expert_num, gmm1_output_dim
+                                        ).astype(np.float32) * 0.003 + 0.0015)
+    gmm2_weight_scale = (np.random.rand(local_expert_num, gmm2_output_dim
+                                        ).astype(np.float32) * 0.003 + 0.0015)
     expert_scales = np.random.rand(actual_bs, top_k).astype(np.float32)
     smooth_sales = None
     x_active_mask = None
@@ -332,7 +310,6 @@ def generate_datas(batch_size,
 
 CASE_4RANK = {
     "totalExpertNum": 16,
-    "sharedExpertNum": 0,
     "topk": 8,
     "batchSize": 16,
     "hiddenSize": 7168,
@@ -343,7 +320,6 @@ CASE_4RANK = {
 
 CASE_8RANK = {
     "totalExpertNum": 16,
-    "sharedExpertNum": 0,
     "topk": 8,
     "batchSize": 32,
     "hiddenSize": 7168,
@@ -365,7 +341,6 @@ def test_base_test(mode):
     worldSize = tool.get_world_size()
     case = CASE_4RANK
     totalExpertNum = case["totalExpertNum"]
-    sharedExpertNum = case["sharedExpertNum"]
     topk = case["topk"]
     hiddenSize = case["hiddenSize"]
     intermediateHiddenSize = case["intermediateHiddenSize"]
@@ -388,7 +363,7 @@ def test_base_test(mode):
     # 构造输入数据
     dynamicBS = False
     parameter = (batchSize, hiddenSize, intermediateHiddenSize,
-                 worldSize, totalExpertNum, rank, sharedExpertNum)
+                 worldSize, totalExpertNum, rank)
     input_datas, weight_datas, actual_bs, valid_token_num = generate_datas(
         *parameter, topk, test_bfloat16, dynamicBS, with_mc2_mask)
 

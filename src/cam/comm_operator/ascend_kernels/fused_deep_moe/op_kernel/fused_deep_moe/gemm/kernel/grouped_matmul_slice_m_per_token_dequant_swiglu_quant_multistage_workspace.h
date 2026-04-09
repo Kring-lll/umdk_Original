@@ -465,8 +465,6 @@ public:
         uint32_t epRankId;
         uint32_t moeExpertNum;
         uint32_t moeExpertNumPerRank;
-        uint32_t sharedExpertNum;
-        uint32_t sharedExpertRankNum;
         uint32_t quantMode;
         uint32_t globalBs;
         uint32_t bs;
@@ -527,8 +525,6 @@ public:
               epRankId(disGmmDeqSwigluQuantGmmDeqComInfo.epRankId),
               moeExpertNum(disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum),
               moeExpertNumPerRank(disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank),
-              sharedExpertNum(disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertNum),
-              sharedExpertRankNum(disGmmDeqSwigluQuantGmmDeqComInfo.sharedExpertRankNum),
               quantMode(disGmmDeqSwigluQuantGmmDeqComInfo.quantMode),
               globalBs(disGmmDeqSwigluQuantGmmDeqComInfo.globalBs),
               bs(disGmmDeqSwigluQuantGmmDeqComInfo.bs),
@@ -1581,9 +1577,6 @@ public:
         epRankSize = params.epRankSize;
         epRankId = params.epRankId;
         expertCntUp = epRankSize * moeExpertNumPerRank;
-        sharedExpertRankNum = params.sharedExpertRankNum;
-        hasShareExpert = false;
-        isShareExpert = false;
         localExpertNum = moeExpertNumPerRank;
         moeExpertNum = params.moeExpertNum;
         tokenLength = params.tokenLen;
@@ -1905,11 +1898,8 @@ private:
     // rank and expert info
     uint32_t epRankSize{0};
     uint32_t epRankId{0};
-    bool hasShareExpert{false};
-    bool isShareExpert{false};
     uint32_t expertCntUp{0};
     uint32_t localExpertNum{0};
-    uint32_t sharedExpertRankNum{0};
     uint32_t moeExpertNumPerRank{0};
     uint32_t moeExpertNum{0};
 

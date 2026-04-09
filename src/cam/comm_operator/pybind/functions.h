@@ -35,8 +35,6 @@ std::vector<at::Tensor> FusedDeepMoeImplAutograd(
     int64_t epRankSize, \
     int64_t epRankId, \
     int64_t moeExpertNum, \
-    int64_t sharedExpertNum, \
-    int64_t sharedExpertRankNum, \
     int64_t quantMode, \
     int64_t globalBs);
 
