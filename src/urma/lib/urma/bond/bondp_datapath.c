@@ -19,8 +19,8 @@
 #include "bondp_context_table.h"
 #include "bondp_datapath_convert.h"
 #include "bondp_datapath_schedule.h"
-
 #include "bondp_datapath.h"
+#include "bondp_health_check.h"
 
 #define PJETTY_ID_ENCODE_OFFSET (32)
 #define VJETTY_ID_ENCODE_OFFSET (48)
@@ -868,6 +868,10 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
         for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
             urma_cr_t *pcr = &pcr_buf[cr_id];
             cr_convert_ret_t conv_ret;
+
+            if (bondp_try_handle_health_check_cr(bdp_ctx, idx, pcr)) {
+                continue;
+            }
 
             if (is_single_dev_mode(&bdp_ctx->v_ctx)) {
                 conv_ret = bondp_handle_cr_no_store(bdp_ctx, idx, pcr);
