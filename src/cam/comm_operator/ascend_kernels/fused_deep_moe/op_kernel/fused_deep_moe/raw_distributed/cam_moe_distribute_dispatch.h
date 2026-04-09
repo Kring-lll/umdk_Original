@@ -53,7 +53,7 @@ template <TemplateDispatchTypeClass>
 class CamMoeDistributeDispatch {
 public:
     __aicore__ inline CamMoeDistributeDispatch(){};
-    __aicore__ inline void Init(GM_ADDR x, GM_ADDR expertIds, GM_ADDR scales, GM_ADDR shareX1Token, GM_ADDR xActiveMask,
+    __aicore__ inline void Init(GM_ADDR x, GM_ADDR expertIds, GM_ADDR scales, GM_ADDR shareScales, GM_ADDR shareX1Token, GM_ADDR xActiveMask,
                                 GM_ADDR expandXOut, GM_ADDR shareX1Scale, GM_ADDR dynamicScalesOut, GM_ADDR expandIdxOut,
                                 GM_ADDR expertTokenNumsOut, GM_ADDR sendCountsOut, GM_ADDR expertTokenNums,
                                 GM_ADDR tpSendCountsOut, GM_ADDR workspaceGM, TPipe *pipe,
@@ -66,14 +66,14 @@ private:
     __aicore__ inline void FillExpertCountByRowRange(uint32_t startTokenRow, uint32_t endTokenRow);
     __aicore__ inline void CountAndPrepareStatusWithAivOpt(uint32_t expertIdsCnt);
     __aicore__ inline void LocalWindowCopy();
-    __aicore__ inline void QuantProcess(uint32_t expertIndex);
+    __aicore__ inline void QuantProcess(uint32_t expertIndex, const GlobalTensor<float> &scalesGMTensor);
     __aicore__ inline void SetStatus();
     __aicore__ inline void WaitDispatch();
     __aicore__ inline void GetCumSum(LocalTensor<int32_t> &inLocal, LocalTensor<int32_t> &outLocal, int32_t totalCount);
     __aicore__ inline void CreateZeroTensor(LocalTensor<uint32_t> &outTensor);
     __aicore__ inline void AllGatherSetStatusAndWait();
     __aicore__ inline void ResetStatus();
-    __aicore__ inline void QuantInit(GM_ADDR scales);
+    __aicore__ inline void QuantInit(GM_ADDR scales, GM_ADDR shareScales);
     __aicore__ inline void QuantForShareExpert();
     __aicore__ inline void TokenActiveMaskCal();
     __aicore__ inline void AllgatherProcessOut();
@@ -108,6 +108,7 @@ private:
     GlobalTensor<XType> xGMTensor_;
     GlobalTensor<int32_t> expertIdsGMTensor_;
     GlobalTensor<float> scalesGMTensor_;
+    GlobalTensor<float> shareScalesGMTensor_;
     GlobalTensor<bool> xActiveMaskGMTensor_;
     GlobalTensor<ExpandXOutType> expandXOutGMTensor_;
     GlobalTensor<float> dynamicScalesOutGMTensor_;
@@ -220,7 +221,7 @@ private:
 
 template <TemplateDispatchTypeClass>
 __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
-    GM_ADDR x, GM_ADDR expertIds, GM_ADDR scales, GM_ADDR xActiveMask, GM_ADDR shareX1Token, GM_ADDR expandXOut,
+    GM_ADDR x, GM_ADDR expertIds, GM_ADDR scales, GM_ADDR shareScales, GM_ADDR xActiveMask, GM_ADDR shareX1Token, GM_ADDR expandXOut,
     GM_ADDR shareX1Scale, GM_ADDR dynamicScalesOut, GM_ADDR expandIdxOut, GM_ADDR expertTokenNumsOut,
     GM_ADDR sendCountsOut, GM_ADDR expertTokenNums, GM_ADDR tpSendCountsOut, GM_ADDR workspaceGM, TPipe *pipe,
     const FusedDeepMoeTilingData *tilingData)
@@ -325,7 +326,7 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
         selfStatusTensor[aivId_ * UB_ALIGN]);
     tpipe_->InitBuffer(xQueue_, BUFFER_NUM, hCommuSize_);
     if (isQuant_) {
-        QuantInit(scales);
+        QuantInit(scales, shareScales);
     }
     uint32_t expertIdsCnt = axisBS_ * axisK_;
     uint32_t expertIdsSize = Ceil(expertIdsCnt * sizeof(int32_t), UB_ALIGN) * UB_ALIGN;
@@ -368,11 +369,12 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
 }
 
 template <TemplateDispatchTypeClass>
-__aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::QuantInit(GM_ADDR scales)
+__aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::QuantInit(GM_ADDR scales, GM_ADDR shareScales)
 {
     tpipe_->InitBuffer(xInQueue_, BUFFER_NUM, hSize_);
     tpipe_->InitBuffer(xOutQueue_, BUFFER_NUM, hCommuSize_);
     scalesGMTensor_.SetGlobalBuffer((__gm__ float *)scales);
+    shareScalesGMTensor_.SetGlobalBuffer((__gm__ float *)shareScales);
     uint32_t hFp32Size = axisH_ * sizeof(float);
     if constexpr (DynamicQuant) {
         tpipe_->InitBuffer(rowMaxBuf_, UB_ALIGN);
@@ -407,7 +409,7 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Quant
         xInQueue_.EnQue(xInTensor_);
         xInTensor_ = xInQueue_.DeQue<XType>();
         xOutTensor_ = xOutQueue_.AllocTensor<ExpandXOutType>();
-        QuantProcess(0);
+        QuantProcess(0, shareScalesGMTensor_);
         xOutQueue_.EnQue(xOutTensor_);
         xOutTensor_ = xOutQueue_.DeQue<ExpandXOutType>();
         LocalTensor<float> xOutFp32Tensor_ = xOutTensor_[axisH_].template ReinterpretCast<float>();
@@ -475,7 +477,7 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::SendT
             xInTensor_ = xInQueue_.DeQue<XType>();
             xOutTensor_ = xOutQueue_.AllocTensor<ExpandXOutType>();
             uint32_t expertIndex = dstExpertId;
-            QuantProcess(expertIndex);
+            QuantProcess(expertIndex, scalesGMTensor_);
             xOutQueue_.EnQue(xOutTensor_);
 
             xOutTensor_ = xOutQueue_.DeQue<ExpandXOutType>();
@@ -650,7 +652,7 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::SetSt
 }
 
 template <TemplateDispatchTypeClass>
-__aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::QuantProcess(uint32_t expertIndex)
+__aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::QuantProcess(uint32_t expertIndex, const GlobalTensor<float> &scalesGMTensor)
 {
     float dynamicScale = 0.0;
     LocalTensor<float> floatLocalTemp;
@@ -662,7 +664,7 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Quant
         if constexpr (DynamicQuant) {
             SyncFunc<AscendC::HardEvent::V_MTE2>();
         }
-        DataCopy(smoothScalesTensor_, scalesGMTensor_[expertIndex * axisH_], axisH_);
+        DataCopy(smoothScalesTensor_, scalesGMTensor[expertIndex * axisH_], axisH_);
         SyncFunc<AscendC::HardEvent::MTE2_V>();
         Mul(floatLocalTemp, floatLocalTemp, smoothScalesTensor_, axisH_);
         pipe_barrier(PIPE_V);
