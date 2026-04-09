@@ -22,6 +22,67 @@
 #define BONDP_HEALTH_CHECK_BUF_LEN (4096)
 #define BONDP_HEALTH_CHECK_4K_ALIGN (4096)
 #define BONDP_HEALTH_CHECK_EPOLL_TIMEOUT_MS (100)
+#define BONDP_HEALTH_CHECK_INTERVAL_US (20000000ULL)
+
+typedef struct bondp_health_ctx_node {
+    bondp_context_t *bdp_ctx;
+    struct ub_list node;
+} bondp_health_ctx_node_t;
+
+static uint64_t bondp_get_monotonic_us(void)
+{
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        return 0;
+    }
+    return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)ts.tv_nsec / 1000ULL;
+}
+
+static void bondp_free_health_task(bondp_health_task_t *task)
+{
+    if (task == NULL) {
+        return;
+    }
+    free(task);
+}
+
+static void bondp_register_health_ctx_global(bondp_context_t *bond_ctx)
+{
+    bondp_health_thread_ctx_t *thread_ctx = &g_bondp_global_ctx->health_thread_ctx;
+
+    pthread_rwlock_wrlock(&thread_ctx->health_ctx_lock);
+    bondp_health_ctx_node_t *node = NULL;
+    UB_LIST_FOR_EACH(node, node, &thread_ctx->health_ctx_list) {
+        if (node->bdp_ctx == bond_ctx) {
+            pthread_rwlock_unlock(&thread_ctx->health_ctx_lock);
+            return;
+        }
+    }
+
+    bondp_health_ctx_node_t *new_node = calloc(1, sizeof(bondp_health_ctx_node_t));
+    if (new_node != NULL) {
+        new_node->bdp_ctx = bond_ctx;
+        ub_list_push_front(&thread_ctx->health_ctx_list, &new_node->node);
+    }
+    pthread_rwlock_unlock(&thread_ctx->health_ctx_lock);
+}
+
+static void bondp_unregister_health_ctx_global(bondp_context_t *bond_ctx)
+{
+    bondp_health_thread_ctx_t *thread_ctx = &g_bondp_global_ctx->health_thread_ctx;
+
+    pthread_rwlock_wrlock(&thread_ctx->health_ctx_lock);
+    bondp_health_ctx_node_t *node = NULL;
+    bondp_health_ctx_node_t *next = NULL;
+    UB_LIST_FOR_EACH_SAFE(node, next, node, &thread_ctx->health_ctx_list) {
+        if (node->bdp_ctx == bond_ctx) {
+            ub_list_remove(&node->node);
+            free(node);
+            break;
+        }
+    }
+    pthread_rwlock_unlock(&thread_ctx->health_ctx_lock);
+}
 
 static bool bondp_read_health_check_enable(void)
 {
@@ -38,6 +99,8 @@ void bondp_health_check_global_ctx_init(bondp_global_context_t *ctx)
 {
     ctx->health_thread_ctx.health_epoll_fd = -1;
     ctx->health_thread_ctx.health_check_enable = bondp_read_health_check_enable();
+    pthread_rwlock_init(&ctx->health_thread_ctx.health_ctx_lock, NULL);
+    ub_list_init(&ctx->health_thread_ctx.health_ctx_list);
     atomic_init(&ctx->health_thread_ctx.health_thread_stop, false);
 }
 
@@ -277,8 +340,115 @@ static void *bondp_health_check_thread(void *arg)
             (void)usleep(BONDP_HEALTH_CHECK_EPOLL_TIMEOUT_MS * 1000);
             continue;
         }
+
+        uint64_t now_us = bondp_get_monotonic_us();
+        pthread_rwlock_rdlock(&global_ctx->health_thread_ctx.health_ctx_lock);
+        bondp_health_ctx_node_t *ctx_node = NULL;
+        UB_LIST_FOR_EACH(ctx_node, node, &global_ctx->health_thread_ctx.health_ctx_list) {
+            bondp_heath_check_ctx_t *health = &ctx_node->bdp_ctx->bondp_heath_check_ctx;
+            pthread_rwlock_rdlock(&health->task_lock);
+            bondp_health_task_t *task = NULL;
+            UB_LIST_FOR_EACH(task, node, &health->task_list) {
+                if (now_us < task->next_probe_ts_us) {
+                    continue;
+                }
+                for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+                    for (int j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
+                        bondp_health_sub_task_t *sub = &task->sub_tasks[i][j];
+                        if (!sub->valid) {
+                            continue;
+                        }
+                        URMA_LOG_INFO("Health check task trigger, lidx:%d tidx:%d\n", sub->local_idx, sub->target_idx);
+                    }
+                }
+                task->next_probe_ts_us = now_us + BONDP_HEALTH_CHECK_INTERVAL_US;
+            }
+            pthread_rwlock_unlock(&health->task_lock);
+        }
+        pthread_rwlock_unlock(&global_ctx->health_thread_ctx.health_ctx_lock);
     }
     return NULL;
+}
+
+int bondp_register_health_check_task(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty)
+{
+    if (!bondp_health_check_enabled()) {
+        return 0;
+    }
+
+    bondp_heath_check_ctx_t *health = &bdp_ctx->bondp_heath_check_ctx;
+    bondp_health_task_t *task = calloc(1, sizeof(bondp_health_task_t));
+    if (task == NULL) {
+        return -1;
+    }
+    task->bdp_tjetty = bdp_tjetty;
+    task->next_probe_ts_us = bondp_get_monotonic_us() + BONDP_HEALTH_CHECK_INTERVAL_US;
+
+    int sub_task_cnt = 0;
+    for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+        for (int j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
+            task->sub_tasks[i][j].valid = false;
+        }
+    }
+
+    for (int i = 0; i < bdp_tjetty->local_dev_num; ++i) {
+        for (int j = 0; j < bdp_tjetty->target_dev_num; ++j) {
+            if (bdp_tjetty->p_tjetty[i][j] == NULL || bdp_tjetty->p_check_tseg[i][j] == NULL) {
+                continue;
+            }
+
+            bondp_health_sub_task_t *sub = &task->sub_tasks[i][j];
+            (void)memset(sub, 0, sizeof(*sub));
+            sub->local_idx = i;
+            sub->target_idx = j;
+            sub->valid = true;
+            atomic_store(&sub->link_ok, true);
+            sub->user_ctx = 0;
+            sub_task_cnt++;
+        }
+    }
+    if (sub_task_cnt == 0) {
+        free(task);
+        URMA_LOG_ERR("Failed to register health task: no valid route\n");
+        return -1;
+    }
+    pthread_rwlock_wrlock(&health->task_lock);
+    ub_list_push_front(&health->task_list, &task->node);
+    pthread_rwlock_unlock(&health->task_lock);
+
+    return 0;
+}
+
+void bondp_unregister_health_check_task(bondp_target_jetty_t *bdp_tjetty)
+{
+    if (!bondp_health_check_enabled()) {
+        return;
+    }
+
+    bondp_health_thread_ctx_t *thread_ctx = &g_bondp_global_ctx->health_thread_ctx;
+    pthread_rwlock_rdlock(&thread_ctx->health_ctx_lock);
+    bondp_health_ctx_node_t *ctx_node = NULL;
+    UB_LIST_FOR_EACH(ctx_node, node, &thread_ctx->health_ctx_list) {
+        bondp_heath_check_ctx_t *health = &ctx_node->bdp_ctx->bondp_heath_check_ctx;
+        bool removed = false;
+        pthread_rwlock_wrlock(&health->task_lock);
+        bondp_health_task_t *task = NULL;
+        bondp_health_task_t *next = NULL;
+        UB_LIST_FOR_EACH_SAFE(task, next, node, &health->task_list) {
+            if (task->bdp_tjetty == bdp_tjetty) {
+                ub_list_remove(&task->node);
+                bondp_free_health_task(task);
+                removed = true;
+                break;
+            }
+        }
+        pthread_rwlock_unlock(&health->task_lock);
+        if (removed) {
+            URMA_LOG_INFO("Health check task unregistered, tjetty:%p\n", (void *)bdp_tjetty);
+            break;
+        }
+    }
+    pthread_rwlock_unlock(&thread_ctx->health_ctx_lock);
 }
 
 void bondp_stop_health_check_thread(void)
@@ -300,6 +470,16 @@ void bondp_stop_health_check_thread(void)
         (void)close(global_ctx->health_thread_ctx.health_epoll_fd);
         global_ctx->health_thread_ctx.health_epoll_fd = -1;
     }
+
+    pthread_rwlock_wrlock(&global_ctx->health_thread_ctx.health_ctx_lock);
+    bondp_health_ctx_node_t *ctx_node = NULL;
+    bondp_health_ctx_node_t *next = NULL;
+    UB_LIST_FOR_EACH_SAFE(ctx_node, next, node, &global_ctx->health_thread_ctx.health_ctx_list) {
+        ub_list_remove(&ctx_node->node);
+        free(ctx_node);
+    }
+    pthread_rwlock_unlock(&global_ctx->health_thread_ctx.health_ctx_lock);
+
     URMA_LOG_INFO("Health check thread stopped.\n");
 }
 
@@ -340,6 +520,16 @@ void bondp_destroy_health_check_ctx(bondp_context_t *bond_ctx)
     }
 
     health = &bond_ctx->bondp_heath_check_ctx;
+    pthread_rwlock_wrlock(&health->task_lock);
+    bondp_health_task_t *task = NULL;
+    bondp_health_task_t *next = NULL;
+    UB_LIST_FOR_EACH_SAFE(task, next, node, &health->task_list) {
+        ub_list_remove(&task->node);
+        bondp_free_health_task(task);
+    }
+    pthread_rwlock_unlock(&health->task_lock);
+    bondp_unregister_health_ctx_global(bond_ctx);
+
     if (global_ctx->health_thread_ctx.health_epoll_fd >= 0 && health->health_check_fd >= 0) {
         (void)epoll_ctl(global_ctx->health_thread_ctx.health_epoll_fd,
             EPOLL_CTL_DEL, health->health_check_fd, NULL);
@@ -362,6 +552,9 @@ int bondp_create_health_check_ctx(bondp_context_t *bond_ctx)
     if (!bondp_health_check_enabled()) {
         return 0;
     }
+
+    pthread_rwlock_init(&health->task_lock, NULL);
+    ub_list_init(&health->task_list);
 
     if (global_ctx->health_thread_ctx.health_epoll_fd < 0) {
         URMA_LOG_ERR("Health check thread is not created\n");
@@ -398,6 +591,8 @@ int bondp_create_health_check_ctx(bondp_context_t *bond_ctx)
 
     URMA_LOG_INFO("Health check ctx enabled, dev_name: %s, eid_idx: %u, fd: %d.\n",
         bond_ctx->v_ctx.dev->name, bond_ctx->v_ctx.eid_index, health->health_check_fd);
+
+    bondp_register_health_ctx_global(bond_ctx);
 
     return 0;
 }
