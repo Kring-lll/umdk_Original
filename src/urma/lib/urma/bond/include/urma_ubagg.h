@@ -49,6 +49,7 @@ typedef struct urma_bond_id_info_out {
     urma_bond_seg_info_out_t health_check_seg;
     uint32_t ports[IODIE_NUM][PORT_NUM];
 } urma_bond_id_info_out_t;
+
 typedef union bondp_port_id {
     struct {
         uint8_t chip_id;
@@ -75,6 +76,14 @@ typedef struct bondp_jetty_cfg {
     const bondp_port_id_t *active_port_ids;
     uint32_t active_port_count;
 } bondp_jetty_cfg_t;
+
+typedef struct bondp_rjetty {
+    urma_rjetty_t base;
+    union {
+        urma_jfs_t *jfs;
+        urma_jetty_t *jetty;
+    };
+} bondp_rjetty_t;
 
 #ifdef __cplusplus
 }
