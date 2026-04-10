@@ -2291,7 +2291,7 @@ public:
                 LayoutD layoutD = layout::RowMajor{currentM, params.shareN};
                 
                 EpilogueParams epilogueParams{
-                    reinterpret_cast<__gm__ float*>(params.ptrShareScale), params.layoutShareScale,
+                    params.ptrShareScale, params.layoutShareScale,
                     reinterpret_cast<__gm__ float*>(params.gmShareX1Scale), layoutPerTokenScale,
                     reinterpret_cast<__gm__ float*>(params.gmShareSwigluOut), layoutD
                 };
