@@ -1939,6 +1939,8 @@ static urma_target_jetty_t *urma_import_jetty_compat(urma_context_t *ctx, urma_r
         urma_tp_info_t tp_info = {0};
         urma_status_t status = ops->get_tp_list(ctx, &get_tp_cfg, &tp_cnt, &tp_info);
         if (status != URMA_SUCCESS || tp_cnt != 1) {
+            URMA_LOG_ERR("Failed to get tp list, status: %d, tp_cnt: %u, leid: "EID_FMT", deid: "EID_FMT".\n",
+                         status, tp_cnt, EID_ARGS(get_tp_cfg.local_eid), EID_ARGS(get_tp_cfg.peer_eid));
             return NULL;
         }
         URMA_LOG_INFO("Get tp list, leid: "EID_FMT", deid: "EID_FMT".\n", EID_ARGS(get_tp_cfg.local_eid),
@@ -1960,6 +1962,7 @@ static urma_target_jetty_t *urma_import_jetty_compat(urma_context_t *ctx, urma_r
     atomic_fetch_add(&ctx->ref.atomic_cnt, 1);
     urma_target_jetty_t *tjetty = ops->import_jetty_ex(ctx, rjetty, token_value, &active_tp_cfg);
     if (tjetty == NULL) {
+        URMA_LOG_ERR("Failed to import jetty, ctx or import_jetty_ex returned NULL.\n");
         atomic_fetch_sub(&ctx->ref.atomic_cnt, 1);
     }
     return tjetty;
