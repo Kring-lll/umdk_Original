@@ -628,6 +628,10 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
             goto ROLLBACK_UB_CTX;
         }
 
+        g_ub_ctx[g_ub_ctx_count].io_lock_free = cfg->io_lock_free;
+        g_ub_ctx[g_ub_ctx_count].feature = cfg->feature;
+        g_ub_ctx[g_ub_ctx_count].flow_control = cfg->flow_control;
+
         ret = umq_find_ub_device(info, &g_ub_ctx[g_ub_ctx_count]);
         if (ret != UMQ_SUCCESS) {
             UMQ_VLOG_ERR(VLOG_UMQ, "find ub device failed, status: %d\n", ret);
@@ -653,9 +657,6 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
             goto ROLLBACK_UB_CTX;
         }
 
-        g_ub_ctx[g_ub_ctx_count].io_lock_free = cfg->io_lock_free;
-        g_ub_ctx[g_ub_ctx_count].feature = cfg->feature;
-        g_ub_ctx[g_ub_ctx_count].flow_control = cfg->flow_control;
         g_ub_ctx[g_ub_ctx_count].ref_cnt = 1;
         ++g_ub_ctx_count;
     }
@@ -1014,6 +1015,9 @@ UNINIT_FLOW_CONTROL:
 DESTROY_JFR_CTX:
     umq_ub_jfr_ctx_put(queue);
 FREE_QUEUE:
+    if (queue->used_port != NULL) {
+        free(queue->used_port);
+    }
     free(queue);
 DEC_REF:
     umq_dec_ref(dev_ctx->io_lock_free, &dev_ctx->ref_cnt, 1);
@@ -1114,6 +1118,9 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
         (void)util_mutex_lock(queue->checker->lock);
         queue->checker->umq = NULL;
         (void)util_mutex_unlock(queue->checker->lock);
+    }
+    if (queue->used_port != NULL) {
+        free(queue->used_port);
     }
     free(queue);
     return UMQ_SUCCESS;
@@ -1783,6 +1790,10 @@ int umq_ub_dev_add_impl(umq_trans_info_t *info, umq_init_cfg_t *cfg)
         return -UMQ_ERR_ENOMEM;
     }
 
+    g_ub_ctx[g_ub_ctx_count].io_lock_free = cfg->io_lock_free;
+    g_ub_ctx[g_ub_ctx_count].feature = cfg->feature;
+    g_ub_ctx[g_ub_ctx_count].flow_control = cfg->flow_control;
+
     int ret = umq_find_ub_device(info, &g_ub_ctx[g_ub_ctx_count]);
     if (ret != UMQ_SUCCESS) {
         goto DELETE_IMPORT_INFO;
@@ -1801,9 +1812,6 @@ int umq_ub_dev_add_impl(umq_trans_info_t *info, umq_init_cfg_t *cfg)
         ret = -UMQ_ERR_ENOMEM;
         goto FREE_UMQ_CTX_TBL;
     }
-    g_ub_ctx[g_ub_ctx_count].io_lock_free = cfg->io_lock_free;
-    g_ub_ctx[g_ub_ctx_count].feature = cfg->feature;
-    g_ub_ctx[g_ub_ctx_count].flow_control = cfg->flow_control;
 
     mempool_segment_ops_t sge_ops = {
         .register_seg_callback = umq_ub_register_seg_callback,

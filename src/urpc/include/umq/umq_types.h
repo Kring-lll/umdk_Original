@@ -200,6 +200,7 @@ typedef struct umq_trans_info {
 #define UMQ_FEATURE_ENABLE_STATS            (1 << 2)    // enable stats collection
 #define UMQ_FEATURE_ENABLE_PERF             (1 << 3)    // enable performance collection
 #define UMQ_FEATURE_ENABLE_FLOW_CONTROL     (1 << 4)    // enable flow control
+#define UMQ_FEATURE_DISABLE_ACTIVE_BACKUP   (1 << 5)    // dsiable bonding device active/backup (enabled by default)
 
 typedef struct umq_flow_control_cfg {
     // initial available credit for each umq
