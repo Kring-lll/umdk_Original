@@ -513,6 +513,22 @@ static int init_target_active_indices(bondp_context_t *bdp_ctx, bondp_target_jet
     return 0;
 }
 
+static bondp_comp_t *get_local_comp_from_vjetty(const urma_jetty_t *vjetty)
+{
+    if (vjetty == NULL) {
+        return NULL;
+    }
+    return CONTAINER_OF_FIELD(vjetty, bondp_comp_t, v_jetty);
+}
+
+static bondp_comp_t *get_local_comp_from_vjfs(const urma_jfs_t *vjfs)
+{
+    if (vjfs == NULL) {
+        return NULL;
+    }
+    return CONTAINER_OF_FIELD(vjfs, bondp_comp_t, v_jfs);
+}
+
 static int bondp_create_vjfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg, bondp_comp_t *bdp_jfs)
 {
     urma_cmd_udrv_priv_t udata = {0};
@@ -1510,6 +1526,16 @@ static int bondp_import_pjetty(
     return 0;
 }
 
+static bondp_comp_t *bondp_get_import_vjetty_comp(bondp_context_t *bdp_ctx, const urma_rjetty_t *rjetty)
+{
+    const bondp_rjetty_drv_ext_t *drv_ext = (const bondp_rjetty_drv_ext_t *)rjetty->drv_ext;
+
+    if (drv_ext == NULL || drv_ext->vjetty == NULL || drv_ext->vjetty->urma_ctx != &bdp_ctx->v_ctx) {
+        return NULL;
+    }
+    return get_local_comp_from_vjetty(drv_ext->vjetty);
+}
+
 static int bondp_unimport_vjetty(bondp_target_jetty_t *bdp_tjetty)
 {
     return urma_cmd_unimport_jetty(&bdp_tjetty->v_tjetty);
@@ -1591,6 +1617,16 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     if (bdp_tjetty == NULL) {
         URMA_LOG_ERR("Failed to alloc target jetty\n");
         errno = ENOMEM;
+        return NULL;
+    }
+
+    bondp_comp_t *cfg_jetty = NULL;
+    if (rjetty->flag.bs.has_drv_ext) {
+        const bondp_rjetty_t *bdp_rjetty = (const bondp_rjetty_t *)rjetty;
+        cfg_jetty = bdp_rjetty->jetty;
+    }
+    if (rjetty->trans_mode == URMA_TM_RM && cfg_jetty == NULL) {
+        URMA_LOG_ERR("RM jetty import requires drv_ext.vjetty.\n");
         return NULL;
     }
 
@@ -1795,6 +1831,16 @@ static int bondp_import_pjfr(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
     return 0;
 }
 
+static bondp_comp_t *bondp_get_import_vjfs_comp(bondp_context_t *bdp_ctx, const urma_rjfr_t *rjfr)
+{
+    const bondp_rjfr_drv_ext_t *drv_ext = (const bondp_rjfr_drv_ext_t *)rjfr->drv_ext;
+
+    if (drv_ext == NULL || drv_ext->vjfs == NULL || drv_ext->vjfs->urma_ctx != &bdp_ctx->v_ctx) {
+        return NULL;
+    }
+    return get_local_comp_from_vjfs(drv_ext->vjfs);
+}
+
 static int bondp_unimport_vjfr(bondp_target_jetty_t *bdp_tjetty)
 {
     return urma_cmd_unimport_jfr(&bdp_tjetty->v_tjetty);
@@ -1821,6 +1867,7 @@ static int bondp_unimport_pjfr(bondp_target_jetty_t *bdp_tjetty)
 urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, urma_token_t *token_value)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
+    bondp_comp_t *local_vjfs = bondp_get_import_vjfs_comp(bdp_ctx, rjfr);
     if (!is_valid_ctx(bdp_ctx)) {
         URMA_LOG_ERR("Invalid param ctx\n");
         return NULL;
@@ -1839,7 +1886,15 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
         goto free_bondp_tjetty;
     }
 
-    if (init_target_active_indices(bdp_ctx, bdp_tjetty, &udata_out) != 0) {
+    if (rjfr->trans_mode == URMA_TM_RM && local_vjfs == NULL) {
+        URMA_LOG_ERR("RM jfr import requires drv_ext.vjfs.\n");
+        errno = EINVAL;
+        goto unimport_vjfr;
+    }
+
+    if (rjfr->trans_mode == URMA_TM_RM ?
+        init_target_active_indices_by_local_comp(bdp_ctx, bdp_tjetty, local_vjfs, &udata_out) != 0 :
+        init_target_active_indices(bdp_ctx, bdp_tjetty, &udata_out) != 0) {
         URMA_LOG_ERR("Failed to init target active indices\n");
         goto unimport_vjfr;
     }
