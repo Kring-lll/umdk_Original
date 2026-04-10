@@ -480,6 +480,11 @@ static ALWAYS_INLINE uint16_t allocated_credit_dec_atomic(ub_credit_pool_t *pool
     return counter_dec_atomic_u16(pool, count, CREDIT_POOL_ALLOCATED);
 }
 
+static initial_credit_posted_atomic(ub_credit_pool_t *pool, uint16_t count)
+{
+    return counter_inc_atomic_u16_ignore_fail(pool, count, CREDIT_POOL_INITIAL_POST);
+}
+
 static ALWAYS_INLINE uint16_t available_credit_inc_non_atomic(ub_credit_pool_t *pool, uint16_t count)
 {
     uint16_t before = pool->stats_u16[CREDIT_POOL_IDLE];
@@ -511,6 +516,11 @@ static ALWAYS_INLINE uint16_t allocated_credit_dec_non_atomic(ub_credit_pool_t *
     return counter_dec_non_atomic_u16(pool, count, CREDIT_POOL_ALLOCATED);
 }
 
+static initial_credit_posted_non_atomic(ub_credit_pool_t *pool, uint16_t count)
+{
+    return counter_inc_non_atomic_u16(pool, count, CREDIT_POOL_INITIAL_POST);
+}
+
 static void umq_ub_credit_pool_init(ub_queue_t *queue, uint32_t feature, umq_flow_control_cfg_t *cfg)
 {
     ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
@@ -521,12 +531,14 @@ static void umq_ub_credit_pool_init(ub_queue_t *queue, uint32_t feature, umq_flo
         pool->ops.available_credit_dec = available_credit_dec_atomic;
         pool->ops.available_credit_return = available_credit_return_atomic;
         pool->ops.allocated_credit_dec = allocated_credit_dec_atomic;
+        pool->ops.initial_credit_posted = initial_credit_posted_atomic;
         pool->ops.stats_query = credit_pool_stats_query_atomic;
     } else {
         pool->ops.available_credit_inc = available_credit_inc_non_atomic;
         pool->ops.available_credit_dec = available_credit_dec_non_atomic;
-        pool->ops.allocated_credit_dec = allocated_credit_dec_non_atomic;
         pool->ops.available_credit_return = available_credit_return_non_atomic;
+        pool->ops.allocated_credit_dec = allocated_credit_dec_non_atomic;
+        pool->ops.initial_credit_posted = initial_credit_posted_non_atomic;
         pool->ops.stats_query = credit_pool_stats_query_non_atomic;
     }
 }
@@ -690,6 +702,20 @@ void umq_ub_shared_credit_recharge(ub_queue_t *queue, uint16_t recharge_count)
 
     ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
     credit->ops.available_credit_inc(credit, recharge_count);
+}
+
+void umq_ub_initial_rqe_posted(ub_queue_t *queue)
+{
+    ub_flow_control_t *fc = &queue->flow_control;
+    if (!fc->enabled) {
+        return;
+    }
+
+    ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    uint16_t rqes = credit->ops.initial_credit_posted(credit, 1);
+    if (rqes % queue->rqe_post_factor == 0) {
+        credit->ops.available_credit_inc(credit, 1);
+    }
 }
 
 void umq_ub_fc_depth_exchange(ub_queue_t *queue, ub_flow_control_t *fc)
