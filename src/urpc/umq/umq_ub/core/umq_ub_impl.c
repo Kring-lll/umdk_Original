@@ -853,6 +853,15 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, umq_create_opt
         goto DELETE_FC_JETTY;
     }
 
+    if (queue->flow_control.enabled) {
+        for (uint32_t i = 0; i < UMQ_UB_FLOW_CONTORL_JETTY_DEPTH; i++) {
+            int ret = umq_ub_fill_fc_rx_buf(queue);
+            if (ret != UMQ_SUCCESS) {
+                goto DELETE_FC_JETTY;
+            }
+        }
+    }
+
     dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id] =
         (uint64_t)(uintptr_t)queue;
 
@@ -1755,7 +1764,7 @@ static void umq_ub_unregister_seg_callback(uint8_t *ctx, uint16_t mempool_id)
         umq_ub_unregister_seg((umq_ub_ctx_t *)(uintptr_t)ctx, 1, mempool_id);
         return;
     }
-    
+
     if (g_ub_ctx == NULL || g_ub_ctx_count == 0) {
         UMQ_VLOG_INFO(VLOG_UMQ, "no device need unregister memory\n");
         return;

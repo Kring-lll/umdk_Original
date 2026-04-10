@@ -392,7 +392,7 @@ static int umq_ub_remote_tseg_info_get(ub_queue_t *queue, umq_ub_bind_info_t *in
         ret = -UMQ_ERR_ENOMEM;
         goto UNLOCK_EID_TABLE;
     }
-    
+
     ctx->tseg_table = &eid_node->tseg;
     ctx->tseg_imported = eid_node->tseg_imported;
 
@@ -544,16 +544,10 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
     uint32_t max_msg_size = queue->dev_ctx->dev_attr.dev_cap.max_msg_size;
     queue->remote_rx_buf_size =
         (max_msg_size > info->queue_info->rx_buf_size) ? info->queue_info->rx_buf_size : max_msg_size;
-    if (queue->flow_control.enabled) {
-        for (uint32_t i = 0; i < UMQ_UB_FLOW_CONTORL_JETTY_DEPTH; i++) {
-            ret = umq_ub_fill_fc_rx_buf(queue);
-            if (ret != UMQ_SUCCESS) {
-                goto PUT_EID_ID;
-            }
-        }
-        umq_ub_fc_depth_exchange(queue, &queue->flow_control);
+    if (umq_ub_shared_credit_req_send(queue) != UMQ_SUCCESS) {
+        goto PUT_EID_ID;
     }
-
+    queue->state = QUEUE_STATE_READY;
     UMQ_VLOG_INFO(VLOG_UMQ, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
                   "remote jetty_id: %u, remote pid: %u, remote namespace: %s, bind jetty success\n",
                   EID_ARGS(*eid), id, EID_ARGS(ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid),
