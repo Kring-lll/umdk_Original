@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include "urma_api.h"
+#include "urma_ubagg.h"
 #include "umq_inner.h"
 #include "urpc_hash.h"
 #include "urpc_hmap.h"
@@ -292,6 +293,7 @@ typedef struct ub_credit_pool_ops {
     // return unused credit
     uint16_t (*available_credit_return)(struct ub_credit_pool *shared_credit, uint16_t count);
     uint16_t (*allocated_credit_dec)(struct ub_credit_pool *shared_credit, uint16_t count);
+    uint16_t (*initial_credit_posted)(struct ub_credit_pool *shared_credit, uint16_t count);
     void (*stats_query)(struct ub_credit_pool *fc, umq_credit_pool_stats_t *out);
 } ub_credit_pool_ops_t;
 
@@ -305,6 +307,7 @@ typedef enum ub_credit_stat_u64 {
 typedef enum ub_credit_stat_u16 {
     CREDIT_POOL_IDLE = 0,           // the number of credits available in the current credit pool
     CREDIT_POOL_ALLOCATED,          // the number of credit currently be allocated form the credit pool
+    CREDIT_POOL_INITIAL_POST,       // initial rqe posted before bind, initial credit = initial_rqe_posted / factor
     CREDIT_COUNTER_MAX_U16
 } ub_credit_stat_u16_t;
 
@@ -386,6 +389,8 @@ typedef struct ub_queue {
     uint8_t err_timeout;        // jetty timeout before report error
     uint8_t rnr_retry;          // number of times that jfs will resend packets before report error, when remote (RNR)
     uint8_t min_rnr_timer;      // minimum RNR NACK timer
+    uint8_t rqe_post_factor;    // 1 by default, and multiple times when use port_ids
+    uint8_t used_port_num;
     bool tx_flush_done;         // tx recv flush err done
     bool rx_flush_done;         // rx buf ctx all report
     umq_queue_mode_t mode;      // mode of queue, QUEUE_MODE_POLLING for default
@@ -394,6 +399,7 @@ typedef struct ub_queue {
     uint64_t umqh;
     uint64_t share_rq_umqh;
     ub_queue_idle_check_t *checker;
+    bondp_port_id_t *used_port;
 } ub_queue_t;
 
 typedef struct user_ctx {
