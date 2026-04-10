@@ -24,6 +24,8 @@ typedef void (*urma_free_eid_list_t)(urma_eid_info_t *eid_list);
 typedef urma_status_t (*urma_query_device_t)(urma_device_t *dev, urma_device_attr_t *dev_attr);
 typedef urma_context_t* (*urma_create_context_t)(urma_device_t *dev, uint32_t eid_index);
 typedef urma_status_t (*urma_delete_context_t)(urma_context_t *ctx);
+typedef urma_status_t (*urma_set_context_opt_t)(urma_context_t *ctx, urma_opt_name_t opt_name, const void *opt_value,
+                                                size_t opt_len);
 
 // === URMA function pointer types - JFC ===
 typedef urma_jfc_t* (*urma_create_jfc_t)(urma_context_t *ctx, urma_jfc_cfg_t *jfc_cfg);
@@ -56,6 +58,7 @@ typedef urma_status_t (*urma_post_jetty_send_wr_t)(urma_jetty_t *jetty,
     urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr);
 typedef urma_status_t (*urma_post_jetty_recv_wr_t)(urma_jetty_t *jetty,
     urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr);
+typedef urma_status_t (*urma_post_jfr_wr_t)(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr);
 
 // === URMA function pointer types - Segment ===
 typedef urma_target_seg_t* (*urma_register_seg_t)(urma_context_t *ctx, urma_seg_cfg_t *seg_cfg);
@@ -72,6 +75,9 @@ typedef void (*urma_ack_async_event_t)(urma_async_event_t *event);
 typedef urma_status_t (*urma_log_set_level_t)(urma_vlog_level_t level);
 typedef urma_status_t (*urma_register_log_func_t)(urma_log_cb_t func);
 typedef urma_status_t (*urma_unregister_log_func_t)(void);
+
+// === URMA function pointer types - UserCtl ===
+typedef urma_status_t (*urma_user_ctl_t)(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_out_t *out);
 
 // === URMA function pointer types - Utility ===
 typedef int (*urma_str_to_eid_t)(const char *buf, urma_eid_t *eid);
@@ -97,6 +103,7 @@ typedef struct umq_symbol_urma {
     urma_query_device_t urma_query_device;
     urma_create_context_t urma_create_context;
     urma_delete_context_t urma_delete_context;
+    urma_set_context_opt_t urma_set_context_opt;
 
     // JFC
     urma_create_jfc_t urma_create_jfc;
@@ -126,6 +133,7 @@ typedef struct umq_symbol_urma {
     urma_flush_jetty_t urma_flush_jetty;
     urma_post_jetty_send_wr_t urma_post_jetty_send_wr;
     urma_post_jetty_recv_wr_t urma_post_jetty_recv_wr;
+    urma_post_jfr_wr_t urma_post_jfr_wr;
 
     // Segment
     urma_register_seg_t urma_register_seg;
@@ -141,6 +149,9 @@ typedef struct umq_symbol_urma {
     urma_log_set_level_t urma_log_set_level;
     urma_register_log_func_t urma_register_log_func;
     urma_unregister_log_func_t urma_unregister_log_func;
+
+    // UserCtl
+    urma_user_ctl_t urma_user_ctl;
 
     // Utility
     urma_str_to_eid_t urma_str_to_eid;
