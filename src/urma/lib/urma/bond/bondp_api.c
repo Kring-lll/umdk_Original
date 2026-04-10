@@ -28,9 +28,8 @@
 
 #include "bondp_api.h"
 #include "bondp_health_check.h"
-#include "urma_perf.h"
 #include "ub_get_clock.h"
-
+#include "urma_perf.h"
 
 typedef struct bondp_create_vjetty_udata {
     urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
@@ -344,6 +343,82 @@ urma_status_t bondp_delete_jfc(urma_jfc_t *jfc)
     return ret;
 }
 
+static int convert_bond_port_id_to_active_index(const bondp_context_t *bdp_ctx, bondp_port_id_t port_id,
+                                                uint32_t *active_index)
+{
+    if (port_id.port_idx == UINT8_MAX) {
+        if (port_id.chip_id >= PRIMARY_EID_NUM) {
+            URMA_LOG_ERR("Invalid primary chip_id: %u.\n", port_id.chip_id);
+            return -1;
+        }
+        *active_index = port_id.chip_id;
+        return 0;
+    }
+
+    if (port_id.port_idx >= PORT_NUM || port_id.chip_id >= PRIMARY_EID_NUM) {
+        URMA_LOG_ERR("Invalid port id, chip_id: %u, port_idx: %u.\n", port_id.chip_id, port_id.port_idx);
+        return -1;
+    }
+
+    *active_index = (uint32_t)get_matrix_port_p_idx(port_id.chip_id, port_id.port_idx);
+    if (*active_index >= (uint32_t)bdp_ctx->dev_num) {
+        URMA_LOG_ERR("Invalid converted active index: %u.\n", *active_index);
+        return -1;
+    }
+    return 0;
+}
+
+static int init_active_indices(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_comp,
+                               const bondp_port_id_t *active_port_ids, uint32_t active_port_count)
+{
+    if (active_port_ids == NULL || active_port_count == 0) {
+        if (bdp_comp->is_multipath) {
+            for (int i = 0; i < IODIE_NUM; i++) {
+                if (bdp_ctx->p_ctxs[i] != NULL) {
+                    bdp_comp->active_indices[bdp_comp->active_count] = i;
+                    bdp_comp->active_count++;
+                }
+            }
+        } else {
+            for (int i = IODIE_NUM; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
+                if (bdp_ctx->p_ctxs[i] != NULL) {
+                    bdp_comp->active_indices[bdp_comp->active_count] = i;
+                    bdp_comp->active_count++;
+                }
+            }
+        }
+        return 0;
+    }
+
+    if (active_port_count > URMA_UBAGG_DEV_MAX_NUM) {
+        URMA_LOG_ERR("Invalid active_port_count: %u.\n", active_port_count);
+        return -1;
+    }
+
+    bdp_comp->active_count = 0;
+    for (uint32_t n = 0; n < active_port_count; ++n) {
+        uint32_t active_index = 0;
+        if (convert_bond_port_id_to_active_index(bdp_ctx, active_port_ids[n], &active_index) != 0) {
+            URMA_LOG_ERR("Invalid active port id, value: 0x%lx.\n", active_port_ids[n].value);
+            return -1;
+        }
+
+        bool is_duplicate = false;
+        for (uint32_t i = 0; i < bdp_comp->active_count; ++i) {
+            if (bdp_comp->active_indices[i] == active_index) {
+                is_duplicate = true;
+                break;
+            }
+        }
+        if (is_duplicate) {
+            continue;
+        }
+        bdp_comp->active_indices[bdp_comp->active_count] = active_index;
+        bdp_comp->active_count += 1;
+    }
+    return 0;
+}
+
 static int bondp_create_vjfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg, bondp_comp_t *bdp_jfs)
 {
     urma_cmd_udrv_priv_t udata = {0};
@@ -359,9 +434,11 @@ static int bondp_create_pjfs(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfs, ur
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
     urma_jfs_cfg_t p_cfg = *cfg;
 
-    for (int i = 0; i < bdp_jfs->dev_num; ++i) {
+    for (uint32_t n = 0; n < bdp_jfs->active_count; ++n) {
+        uint32_t i = bdp_jfs->active_indices[n];
         if (bdp_ctx->p_ctxs[i] == NULL) {
-            continue;
+            URMA_LOG_ERR("Invalid p_ctx for device %d.\n", i);
+            return -1;
         }
         p_cfg.jfc = bdp_jfc->p_jfc[i];
         urma_jfs_t *jfs = urma_create_jfs(bdp_ctx->p_ctxs[i], &p_cfg);
@@ -371,6 +448,7 @@ static int bondp_create_pjfs(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfs, ur
         }
         bdp_jfs->p_jfs[i] = jfs;
         bdp_jfs->p_jfs[i]->jfs_cfg.user_ctx = (uint64_t)bdp_jfs;
+        bdp_jfs->valid[i] = true;
     }
 
     return 0;
@@ -486,6 +564,19 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     bdp_jfs->send_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
     bdp_jfs->recv_jfc = NULL;
 
+    const bondp_port_id_t *cfg_active_port_ids = NULL;
+    uint32_t cfg_active_port_count = 0;
+    if (cfg->flag.bs.has_drv_ext) {
+        const bondp_jfs_cfg_t *bdp_cfg = (const bondp_jfs_cfg_t *)cfg;
+        cfg_active_port_count = bdp_cfg->active_port_count;
+        cfg_active_port_ids = bdp_cfg->active_port_ids;
+    }
+
+    if (init_active_indices(bdp_ctx, bdp_jfs, cfg_active_port_ids, cfg_active_port_count) != 0) {
+        URMA_LOG_ERR("Failed to init active indices\n");
+        goto FREE_JFS;
+    }
+
     if (bondp_create_pjfs(bdp_ctx, bdp_jfs, cfg) != 0) {
         URMA_LOG_ERR("Failed to create pjfs\n");
         goto DELETE_PJFS;
@@ -509,12 +600,14 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     atomic_fetch_add(&bdp_jfc->use_cnt.atomic_cnt, 1);
 
     return &bdp_jfs->v_jfs;
+
 DEL_P_VJFS_ID:
     bondp_del_jfs_p_vjetty_info(bdp_jfs);
 DELETE_VJFS:
     (void)bondp_delete_vjfs(bdp_jfs);
 DELETE_PJFS:
     bondp_delete_pjfs(bdp_jfs);
+FREE_JFS:
     free(bdp_jfs);
     return NULL;
 }
@@ -610,11 +703,13 @@ static int bondp_create_vjfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg, bondp_com
 static int bondp_create_pjfr(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfr, urma_jfr_cfg_t *cfg)
 {
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
-
     urma_jfr_cfg_t p_cfg = *cfg;
-    for (int i = 0; i < bdp_jfr->dev_num; ++i) {
-        if (!bdp_ctx->p_ctxs[i]) {
-            continue;
+
+    for (uint32_t n = 0; n < bdp_jfr->active_count; ++n) {
+        uint32_t i = bdp_jfr->active_indices[n];
+        if (bdp_ctx->p_ctxs[i] == NULL) {
+            URMA_LOG_ERR("Invalid p_ctx for device %d.\n", i);
+            return -1;
         }
         p_cfg.jfc = bdp_jfc->p_jfc[i];
         urma_jfr_t *jfr = urma_create_jfr(bdp_ctx->p_ctxs[i], &p_cfg);
@@ -622,8 +717,9 @@ static int bondp_create_pjfr(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfr, ur
             URMA_LOG_ERR("Failed to create pjfr %d.\n", i);
             return -1;
         }
+        jfr->jfr_cfg.user_ctx = (uint64_t)bdp_jfr;
         bdp_jfr->p_jfr[i] = jfr;
-        bdp_jfr->p_jfr[i]->jfr_cfg.user_ctx = (uint64_t)bdp_jfr;
+        bdp_jfr->valid[i] = true;
     }
     return 0;
 }
@@ -717,6 +813,20 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
     atomic_init(&bdp_jfr->use_cnt.atomic_cnt, 0);
     bdp_jfr->send_jfc = NULL;
     bdp_jfr->recv_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
+    bdp_jfr->is_multipath = true;
+
+    if (cfg->flag.bs.has_drv_ext) {
+        const bondp_jfr_cfg_t *bdp_cfg = (const bondp_jfr_cfg_t *)cfg;
+        bdp_jfr->is_multipath = bdp_cfg->multi_path;
+    }
+
+    const bondp_port_id_t *cfg_active_port_ids = NULL;
+    uint32_t cfg_active_port_count = 0;
+
+    if (init_active_indices(bdp_ctx, bdp_jfr, cfg_active_port_ids, cfg_active_port_count) != 0) {
+        URMA_LOG_ERR("Failed to init active indices\n");
+        goto FREE_JFR;
+    }
 
     if (bondp_create_pjfr(bdp_ctx, bdp_jfr, cfg)) {
         URMA_LOG_ERR("Failed to create pjfr\n");
@@ -748,6 +858,7 @@ DELETE_VJFR:
     (void)bondp_delete_vjfr(bdp_jfr);
 DELETE_PJFR:
     bondp_delete_pjfr(bdp_jfr);
+FREE_JFR:
     free(bdp_jfr);
     return NULL;
 }
@@ -882,7 +993,8 @@ static int bondp_create_vjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
     };
 
     if (bondp_fill_vjetty_health_info(bdp_ctx, bdp_jetty,
-        &jetty_info.health_check_seg, &jetty_info.is_health_check_enable) != 0) {
+                                      &jetty_info.health_check_seg,
+                                      &jetty_info.is_health_check_enable) != 0) {
         URMA_LOG_ERR("Failed to fill health check seg info for vjetty\n");
         return -1;
     }
@@ -911,11 +1023,13 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
     bondp_jfc_t *bdp_jfs_jfc = CONTAINER_OF_FIELD(jetty_cfg->jfs_cfg.jfc, bondp_jfc_t, v_jfc);
     bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr, bondp_comp_t, base);
     bondp_jfc_t *bdp_rplc_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfc, bondp_jfc_t, v_jfc);
-
     urma_jetty_cfg_t p_cfg = *jetty_cfg;
-    for (int i = 0; i < bdp_jetty->dev_num; ++i) {
+
+    for (uint32_t n = 0; n < bdp_jetty->active_count; ++n) {
+        uint32_t i = bdp_jetty->active_indices[n];
         if (!bdp_ctx->p_ctxs[i]) {
-            continue;
+            URMA_LOG_ERR("Invalid p_ctx for device %d.\n", i);
+            return -1;
         }
         p_cfg.jfs_cfg.jfc = bdp_jfs_jfc->p_jfc[i];
         p_cfg.shared.jfr = bdp_jfr->p_jfr[i];
@@ -929,6 +1043,7 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
         }
         jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
         bdp_jetty->p_jetty[i] = jetty;
+        bdp_jetty->valid[i] = true;
     }
     return 0;
 }
@@ -1065,6 +1180,19 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     bdp_jetty->send_jfc = CONTAINER_OF_FIELD(jetty_cfg->jfs_cfg.jfc, bondp_jfc_t, v_jfc);
     bdp_jetty->recv_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr->jfr_cfg.jfc, bondp_jfc_t, v_jfc);
 
+    const bondp_port_id_t *cfg_active_port_ids = NULL;
+    uint32_t cfg_active_port_count = 0;
+    if (jetty_cfg->flag.bs.has_drv_ext) {
+        const bondp_jetty_cfg_t *bdp_cfg = (const bondp_jetty_cfg_t *)jetty_cfg;
+        cfg_active_port_count = bdp_cfg->active_port_count;
+        cfg_active_port_ids = bdp_cfg->active_port_ids;
+    }
+
+    if (init_active_indices(bdp_ctx, bdp_jetty, cfg_active_port_ids, cfg_active_port_count) != 0) {
+        URMA_LOG_ERR("Failed to init active indices\n");
+        goto FREE_JETTY;
+    }
+
     if (bondp_create_pjetty(bdp_ctx, bdp_jetty, jetty_cfg) != 0) {
         URMA_LOG_ERR("Failed to create pjetty\n");
         goto DELETE_PJETTY;
@@ -1101,6 +1229,7 @@ DELETE_VJETTY:
     bondp_delete_vjetty(bdp_jetty);
 DELETE_PJETTY:
     bondp_delete_pjetty(bdp_jetty);
+FREE_JETTY:
     free(bdp_jetty);
     return NULL;
 }
