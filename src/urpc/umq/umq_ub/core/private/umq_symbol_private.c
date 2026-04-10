@@ -63,6 +63,7 @@ int umq_symbol_urma_load(umq_symbol_urma_t *sym)
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_query_device_t, urma_query_device);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_create_context_t, urma_create_context);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_delete_context_t, urma_delete_context);
+    LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_set_context_opt_t, urma_set_context_opt);
 
     // JFC functions
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_create_jfc_t, urma_create_jfc);
@@ -92,6 +93,7 @@ int umq_symbol_urma_load(umq_symbol_urma_t *sym)
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_flush_jetty_t, urma_flush_jetty);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_post_jetty_send_wr_t, urma_post_jetty_send_wr);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_post_jetty_recv_wr_t, urma_post_jetty_recv_wr);
+    LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_post_jfr_wr_t, urma_post_jfr_wr);
 
     // Segment functions
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_register_seg_t, urma_register_seg);
