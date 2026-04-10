@@ -692,21 +692,6 @@ void umq_ub_shared_credit_recharge(ub_queue_t *queue, uint16_t recharge_count)
     credit->ops.available_credit_inc(credit, recharge_count);
 }
 
-void umq_ub_fc_depth_exchange(ub_queue_t *queue, ub_flow_control_t *fc)
-{
-    if (!fc->local_set) {
-        umq_ub_fc_info_t *local_data =
-            (umq_ub_fc_info_t *)(uintptr_t)umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL);
-        local_data->fc.local_window = 0;
-        local_data->fc.local_rx_depth = UMQ_UB_FLOW_CONTORL_JETTY_DEPTH;
-        fc->local_set = true;
-        if (!fc->remote_get) {
-            umq_ub_window_read(fc, queue);
-        }
-        return;
-    }
-}
-
 int umq_ub_shared_credit_req_send(ub_queue_t *queue)
 {
     ub_flow_control_t *fc = &queue->flow_control;
