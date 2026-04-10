@@ -215,8 +215,9 @@ static int init_device(perftest_context_t *ctx, perftest_config_t *cfg)
         }
     }
 
-    if (cfg->enable_user_tp == true) {
-        (void)fprintf(stderr, "The UB device does not support user_tp!\n");
+    if (cfg->enable_user_tp == true &&
+        (ctx->dev_attr.dev_cap.sub_trans_mode_cap & URMA_RC_USER_TP) == 0) {
+        (void)fprintf(stderr, "The UB device does not support!\n");
         goto uninit;
     }
 
