@@ -648,8 +648,8 @@ void umq_ub_window_read(ub_flow_control_t *fc, ub_queue_t *queue)
     }
     // post read remote window
     urma_jfs_wr_t *bad_wr = NULL;
-    urma_sge_t src_sge = {
-        .addr = fc->remote_win_buf_addr, .len = sizeof(uint32_t), .tseg = queue->imported_tseg_list[0]};
+    urma_sge_t src_sge = {.addr = fc->remote_win_buf_addr, .len = sizeof(uint32_t),
+                          .tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, 0)};
     urma_sge_t dst_sge = {.addr = umq_ub_notify_buf_addr_get(queue, OFFSET_FLOW_CONTROL) + sizeof(uint32_t),
                           .len = sizeof(uint32_t),
                           .tseg = queue->dev_ctx->tseg_list[0]};
