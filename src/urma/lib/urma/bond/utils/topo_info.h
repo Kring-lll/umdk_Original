@@ -11,6 +11,8 @@
 #ifndef TOPO_INFO_H
 #define TOPO_INFO_H
 
+#include "bondp_hash_table.h"
+#include "urma_types.h"
 #include <stdbool.h>
 #include <stdint.h>
 
