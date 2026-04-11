@@ -193,6 +193,8 @@ typedef struct bondp_comp {
     int dev_num;
     uint32_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t enabled_count;
+    uint32_t active_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t active_count;
     bondp_context_t *bondp_ctx;
     bjetty_ctx_t bjetty_ctx;
     bool is_multipath;
@@ -212,8 +214,9 @@ typedef struct bondp_target_jetty {
     int local_dev_num;
     int target_dev_num;
     bool is_multipath;
-    bool local_valid[URMA_UBAGG_DEV_MAX_NUM];
-    bool target_valid[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t active_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t active_count;
+    bool valid[URMA_UBAGG_DEV_MAX_NUM];
 } bondp_target_jetty_t;
 
 typedef struct bondp_import_target_seg {

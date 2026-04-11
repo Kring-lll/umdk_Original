@@ -47,7 +47,9 @@ typedef struct urma_bond_id_info_out {
     bool is_multipath;
     bool is_health_check_enable;
     urma_bond_seg_info_out_t health_check_seg;
-    uint32_t ports[IODIE_NUM][PORT_NUM];
+    uint32_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t enabled_count;
+    bool connected[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM]; // i: remote active indice
 } urma_bond_id_info_out_t;
 
 typedef union bondp_port_id {
@@ -76,6 +78,14 @@ typedef struct bondp_jetty_cfg {
     const bondp_port_id_t *port_ids;
     uint32_t port_count;
 } bondp_jetty_cfg_t;
+
+typedef struct bondp_rjetty {
+    urma_rjetty_t base;
+    union {
+        urma_jfs_t *jfs;
+        urma_jetty_t *jetty;
+    };
+} bondp_rjetty_t;
 
 #ifdef __cplusplus
 }
