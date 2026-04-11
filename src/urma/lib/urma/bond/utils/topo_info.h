@@ -10,18 +10,18 @@
 #ifndef TOPO_INFO_H
 #define TOPO_INFO_H
 
+#include "bondp_hash_table.h"
+#include "urma_types.h"
 #include <stdbool.h>
 #include <stdint.h>
-#include "urma_types.h"
-#include "bondp_hash_table.h"
 
-#define CNA_LEN (3)
-#define EID_LEN (16)
-#define PORT_NUM (9)
+#define CNA_LEN          (3)
+#define EID_LEN          (16)
+#define PORT_NUM         (9)
 #define MAX_ALL_PORT_NUM (18)
-#define MAX_NODE_NUM (16)
-#define IODIE_NUM (2)
-#define DEV_NUM (128)
+#define MAX_NODE_NUM     (16)
+#define IODIE_NUM        (2)
+#define DEV_NUM          (128)
 
 #ifdef __cplusplus
 extern "C" {
@@ -71,14 +71,14 @@ typedef struct {
 
 typedef struct eid_mapping_entry {
     hmap_node_t hmap_node;
-    urma_eid_t  key_eid;
-    urma_eid_t  bonding_eid;
+    urma_eid_t key_eid;
+    urma_eid_t bonding_eid;
 } eid_mapping_entry_t;
 
 typedef struct topo_map {
     bondp_topo_node_t topo_infos[MAX_NODE_NUM];
     uint32_t node_num;
-    bondp_hash_table_t eid_mapping_hash_table; 
+    bondp_hash_table_t eid_mapping_hash_table;
 } topo_map_t;
 
 /* The following functions needs the caller to check the validity of the parameters */
@@ -101,4 +101,3 @@ bondp_topo_agg_dev_t *get_topo_dev_info_by_agg_eid(topo_map_t *topo_map, urma_ei
 }
 #endif
 #endif // TOPO_INFO_H
-
