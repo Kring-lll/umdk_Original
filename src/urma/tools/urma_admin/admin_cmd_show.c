@@ -1211,7 +1211,7 @@ free_topo:
 }
 
 int admin_cmd_get_topo_bonding_dev_by_eid(const urma_eid_t *agg_eid,
-    admin_urma_topo_bonding_dev_t *out)
+                                          admin_urma_topo_bonding_dev_t *out)
 {
     int ret;
     admin_core_cmd_topo_bonding_dev_t *arg = NULL;
