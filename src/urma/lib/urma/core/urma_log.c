@@ -17,6 +17,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <syslog.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/syscall.h>
 
@@ -31,6 +32,9 @@ urma_vlog_level_t g_urma_log_level = URMA_VLOG_LEVEL_INFO;
 #define MAX_THREAD_TAG_LEN             64
 #define URMA_LOG_TAG                   "URMA"
 #define LIBURMA_LOG                    "liburma"
+#define NSEC_PER_MSEC                  1000000L
+#define SEC_PER_HOUR                   3600L
+#define SEC_PER_MIN                    60L
 #define URMA_LOG_ENV_STR               "URMA_LOG_LEVEL"
 #define URMA_LOG_LEVEL_ENV_MAX_BUF_LEN 32
 
@@ -180,10 +184,22 @@ static int urma_vlog(const char *function, int line, urma_vlog_level_t level, co
     int ret;
     char newformat[MAX_LOG_LEN + 1] = {0};
     char logmsg[MAX_LOG_LEN + 1] = {0};
+    char timestamp[64] = {0};
+    struct timespec ts;
+    struct tm tm_info;
 
-    /* add log head info, "URMA|liburma|thread_id|thread_tag|function[line]|format" */
-    ret = snprintf(newformat, MAX_LOG_LEN, "%s|%s|%ld|%s|%s[%d]|%s",
-        URMA_LOG_TAG, LIBURMA_LOG, (long)syscall(__NR_gettid), g_thread_tag, function, line, format);
+    (void)clock_gettime(CLOCK_REALTIME, &ts);
+    (void)localtime_r(&ts.tv_sec, &tm_info);
+    int ts_len = (int)strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S.", &tm_info);
+    if (ts_len > 0 && ts_len < (int)sizeof(timestamp)) {
+        (void)snprintf(timestamp + ts_len, sizeof(timestamp) - ts_len, "%03ld%+03ld:%02ld",
+            ts.tv_nsec / NSEC_PER_MSEC, (long)tm_info.tm_gmtoff / SEC_PER_HOUR,
+            (long)(labs(tm_info.tm_gmtoff) % SEC_PER_HOUR) / SEC_PER_MIN);
+    }
+
+    /* add log head info, "[timestamp][URMA][liburma][thread_id=tid][thread_tag][function[Line=line]][format]" */
+    ret = snprintf(newformat, MAX_LOG_LEN, "[%s][%s][%s][thread_id=%ld][%s][%s[Line=%d]][%s]",
+        timestamp, URMA_LOG_TAG, LIBURMA_LOG, (long)syscall(__NR_gettid), g_thread_tag, function, line, format);
     if (ret <= 0 || ret >= sizeof(newformat)) {
         return ret;
     }
