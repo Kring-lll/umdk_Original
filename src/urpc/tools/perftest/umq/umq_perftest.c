@@ -241,6 +241,44 @@ static int umq_perftest_create_umqh(umq_perftest_config_t *cfg)
         return -1;
     }
 
+    umq_port_id_t port[2];
+    if (strstr(cfg->config.dev_name, "bond") != NULL) {
+        umq_route_key_t route_key = {0};
+        umq_route_list_t route_list = {0};
+        if (cfg->config.src_eid != NULL && cfg->config.src_eid != NULL) {
+            if (inet_pton(AF_INET6, cfg->config.src_eid, &route_key.src_bonding_eid) <= 0) {
+                LOG_PRINT("format src eid %s failed\n", cfg->config.src_eid);
+                return -1;
+            }
+            if (inet_pton(AF_INET6, cfg->config.dst_eid, &route_key.dst_bonding_eid) <= 0) {
+                LOG_PRINT("format dst eid %s failed\n", cfg->config.dst_eid);
+                return -1;
+            }
+        }
+        route_key.tp_type = UMQ_TP_TYPE_RTP;
+        if (umq_get_route_list(&route_key, UMQ_TRANS_MODE_UB, &route_list) != UMQ_SUCCESS) {
+            LOG_PRINT("umq_get_route_list [%s] [%s] failed\n", cfg->config.src_eid, cfg->config.dst_eid);
+            return -1;
+        }
+
+        if (route_list.route_num == 0) {
+            LOG_PRINT("umq_get_route_list [%s] [%s] failed, route num %u\n", cfg->config.src_eid, cfg->config.dst_eid, route_list.route_num);
+            return -1;
+        }
+
+        port[0].bs.chip_id = route_list.routes[0].src_port.bs.chip_id;
+        port[0].bs.die_id = route_list.routes[0].src_port.bs.die_id;
+        port[0].bs.port_idx = route_list.routes[0].src_port.bs.port_idx;
+
+        port[1].bs.chip_id = route_list.routes[1].src_port.bs.chip_id;
+        port[1].bs.die_id = route_list.routes[1].src_port.bs.die_id;
+        port[1].bs.port_idx = route_list.routes[1].src_port.bs.port_idx;
+
+        option.create_flag |= UMQ_CREATE_FLAG_MAIN_UMQ | UMQ_CREATE_FLAG_USED_PORTS;
+        option.used_ports.port = port;
+        option.used_ports.num = 2;
+    }
+
     uint64_t umqh = umq_create(&option);
     if (umqh == UMQ_INVALID_HANDLE) {
         LOG_PRINT("umq_create failed\n");
@@ -260,8 +298,14 @@ static int umq_perftest_post_rx(umq_perftest_config_t *cfg)
         goto WAIT_UMQ_READY;
     }
 
+    umq_cfg_get_t cfg_get;
+    if (umq_cfg_get(g_umq_perftest_ctx.umqh, &cfg_get) != 0) {
+        LOG_PRINT("umq_cfg_get failed\n");
+        return -1;
+    }
+
     // pro mode，need alloc rx buf
-    uint32_t require_rx_count = cfg->config.rx_depth;
+    uint32_t require_rx_count = cfg->config.rx_depth * cfg_get.rqe_post_factor;
     uint32_t cur_batch_count = 0;
     umq_buf_t *bad_buf = NULL;
     do {

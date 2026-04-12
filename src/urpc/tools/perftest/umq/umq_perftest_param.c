@@ -24,6 +24,8 @@ static struct option g_long_options[] = {
     {"feature", required_argument, NULL, 'f'},
     {"help", no_argument, NULL, 'h'},
     /* Long options only */
+    {"src_eid", required_argument, NULL, 'x'},
+    {"dst_eid", required_argument, NULL, 'y'},
     {"server", no_argument, NULL, 'S'},
     {"client", no_argument, NULL, 'C'},
     {"trans-mode", required_argument, NULL, 'T'},
@@ -110,12 +112,18 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
     init_cfg(cfg);
     int start_idx = 0;
     while (1) {
-        int c = getopt_long(argc, argv, "c:d:f:l:r:p:u:s:hN:D:E:n:L:", g_long_options, NULL);
+        int c = getopt_long(argc, argv, "c:d:f:l:r:p:u:s:hN:D:E:n:L:x:y:", g_long_options, NULL);
         if (c == -1) {
             break;
         }
 
         switch (c) {
+            case 'x':
+                cfg->config.src_eid = strdup(optarg);
+                break;
+            case 'y':
+                cfg->config.dst_eid = strdup(optarg);
+                break;
             case 'd':
                 memcpy(cfg->config.dev_name, optarg, strlen(optarg));
                 break;

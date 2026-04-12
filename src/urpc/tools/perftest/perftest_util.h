@@ -54,6 +54,8 @@ typedef enum perftest_case_type {
 } perftest_case_type_t;
 
 typedef struct perftest_config {
+    char *src_eid;
+    char *dst_eid;
     char dev_name[PERFTEST_DEV_NAME_SIZE];          // device name
     char local_ip[INET6_ADDRSTRLEN];                // local host IP addr
     char remote_ip[INET6_ADDRSTRLEN];               // remote host IP addr

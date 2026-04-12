@@ -696,7 +696,7 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
     urma_jfs_wr_t *bad_wr = NULL;
     urma_status_t status = umq_symbol_urma()->urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
     if (status == URMA_SUCCESS) {
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "[=====fc req sended====]\n");
+        //UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "[=====fc req sended====]\n");
         umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND);
         return UMQ_SUCCESS;
     }
@@ -742,7 +742,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
     urma_jfs_wr_t *bad_wr = NULL;
     urma_status_t status = umq_symbol_urma()->urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
     if (status == URMA_SUCCESS) {
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "[=====fc rsp sended====]\n");
+        // UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "[=====fc rsp sended====]\n");
         umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND);
         return UMQ_SUCCESS;
     }
