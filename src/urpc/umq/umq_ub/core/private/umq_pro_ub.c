@@ -405,7 +405,9 @@ static void umq_ub_rqe_posted_cnt_inc(ub_queue_t *queue, uint16_t count)
     if (total_prefill >= queue->rqe_post_factor * queue->rx_depth) {
         umq_ub_shared_credit_recharge(queue, queue->rx_depth);
         queue->prefill_done = true;
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "prefill done, factor %d, rx depth %u\n", queue->rqe_post_factor, queue->rx_depth);
     }
+    UMQ_VLOG_WARN(VLOG_UMQ, "prefill %u, factor %d, rx depth %u\n", total_prefill, queue->rqe_post_factor, queue->rx_depth);
 }
 
 int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
@@ -732,6 +734,7 @@ static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm, umq_b
     uint32_t ret = 0;
     switch (imm.bs.type) {
         case IMM_TYPE_FC_CREDIT_REQ: {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "[=====fc req recived====]\n");
             if (umq_ub_shared_credit_req_handle(queue, &imm) != UMQ_SUCCESS) {
                 ret = umq_ub_fill_fc_buf(buf, UMQ_FAKE_BUF_FC_ERR);
             }
