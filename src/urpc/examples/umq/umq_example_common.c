@@ -7,15 +7,14 @@
  * History: 2025-8-16
  */
 
-
-#include <stdlib.h>
-#include <stdio.h>
-#include <time.h>
-#include <sys/time.h>
 #include <arpa/inet.h>
-#include <string.h>
-#include <unistd.h>
 #include <getopt.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/time.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "umq_example_common.h"
 
@@ -23,7 +22,7 @@ static const uint32_t EXAMPLE_MAX_POLL_BATCH = 64;
 static const uint32_t EXAMPLE_REQUEST_SIZE = 8192;
 static const uint32_t SOCKET_SEND_RECV_TIMEOUT = 5;
 static const uint32_t EXAMPLE_BUFFER_SIZE = 8192;
-static const uint32_t EXAMPLE_DEPTH = 128;
+static const uint32_t EXAMPLE_DEPTH = 64;
 
 typedef struct exchange_info {
     uint32_t msg_len;
@@ -53,8 +52,49 @@ static struct option g_long_options[] = {
     {"threadpool_size",    required_argument, NULL, 's'},
     {"m_dev_name",         required_argument, NULL, 'n'},
     {"m_eid_idx",          required_argument, NULL, 'x'},
+    {"src_eid",            required_argument, NULL, 'y'},
+    {"dst_eid",            required_argument, NULL, 'z'},
     {NULL,                 0,                 NULL,  0 }
 };
+
+#ifndef EID_FMT
+#define EID_FMT "%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x"
+#endif
+
+#ifndef EID_RAW_ARGS
+#define EID_RAW_ARGS(eid) eid[0], eid[1], eid[2], eid[3], eid[4], eid[5], eid[6], eid[7], eid[8], eid[9], \
+                          eid[10], eid[11], eid[12], eid[13], eid[14], eid[15]
+#endif
+
+#ifndef EID_ARGS
+#define EID_ARGS(eid) EID_RAW_ARGS((eid).raw)
+#endif
+
+static void print_route_list(const umq_route_key_t *route_key, umq_route_list_t *route_list, umq_port_id_t *port)
+{
+    int ret = umq_get_route_list(route_key, UMQ_TRANS_MODE_UB, route_list);
+    if (ret != 0) {
+        LOG_PRINT_ERR("umq_get_route_list failed\n");
+        return;
+    }
+
+    LOG_PRINT("[topo %d | src node %u %u | dst node %u %u | num %u %u %u\n", route_list->topo_type,
+              route_list->src_node.super_node_id, route_list->src_node.node_id,
+              route_list->dst_node.super_node_id, route_list->dst_node.node_id, route_list->chip_num,
+              route_list->die_num, route_list->route_num);
+
+    for (uint8_t i = 0; i < route_list->route_num; i++) {
+        port[i].bs.chip_id = route_list->routes[i].src_port.bs.chip_id;
+        port[i].bs.die_id = route_list->routes[i].src_port.bs.die_id;
+        port[i].bs.port_idx = route_list->routes[i].src_port.bs.port_idx;
+        LOG_PRINT("[%d] | src chip %d die %d port %d | dst chip %d die %d port %d | src eid " EID_FMT " |"
+                  "dst eid " EID_FMT " \n",
+                  i, route_list->routes[i].src_port.bs.chip_id, route_list->routes[i].src_port.bs.die_id,
+                  route_list->routes[i].src_port.bs.port_idx, EID_ARGS(route_list->routes[i].src_eid),
+                  route_list->routes[i].dst_port.bs.chip_id, route_list->routes[i].dst_port.bs.die_id,
+                  route_list->routes[i].dst_port.bs.port_idx, EID_ARGS(route_list->routes[i].dst_eid));
+    }
+}
 
 uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bind_info, uint32_t *bind_info_size)
 {
@@ -76,6 +116,33 @@ uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bin
         goto FREE_CFG;
     }
 
+    umq_route_key_t route_key = {0};
+    umq_route_list_t route_list = {0};
+    if (cfg->src_eid != NULL && cfg->dst_eid != NULL) {
+        if (inet_pton(AF_INET6, cfg->src_eid, &route_key.src_bonding_eid) <= 0) {
+                LOG_PRINT_ERR("format src eid %s failed\n", cfg->src_eid);
+                goto FREE_CFG;
+            }
+        if (inet_pton(AF_INET6, cfg->dst_eid, &route_key.dst_bonding_eid) <= 0) {
+            LOG_PRINT_ERR("format dst eid %s failed\n", cfg->dst_eid);
+            goto FREE_CFG;
+        }
+    }
+    route_key.tp_type = UMQ_TP_TYPE_RTP;
+
+    umq_port_id_t port[UMQ_MAX_ROUTES];
+    print_route_list(&route_key, &route_list, port);
+
+    /*
+    chip 0 port 1
+    chip 1 port 1
+    */
+
+    port[0].bs.chip_id = 0;
+    port[0].bs.port_idx = 1;
+    port[1].bs.chip_id = 1;
+    port[1].bs.port_idx = 1;
+
     umq_create_option_t option = {
         .trans_mode = init_cfg->trans_info[0].trans_mode,
         .create_flag = UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_TX_BUF_SIZE | UMQ_CREATE_FLAG_RX_DEPTH |
@@ -89,6 +156,14 @@ uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bin
         .tp_mode = cfg->tp_mode,
         .tp_type = cfg->tp_type,
     };
+
+    if (strstr(cfg->dev_name, "bond") != NULL) {
+        // option.create_flag |= (UMQ_CREATE_FLAG_USED_PORTS);
+        option.create_flag |= (UMQ_CREATE_FLAG_MAIN_UMQ | UMQ_CREATE_FLAG_USED_PORTS);
+        option.used_ports.num = 2;
+        option.used_ports.port = port;
+    }
+
     if (cfg->instance_mode == SERVER) {
         if (sprintf(option.name, "%s", "server") <= 0) {
             LOG_PRINT_ERR("set name failed\n");
@@ -106,6 +181,13 @@ uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bin
         LOG_PRINT_ERR("umq_create failed\n");
         goto UNINIT;
     }
+
+    umq_cfg_get_t cfg_get;
+    if (umq_cfg_get(umqh, &cfg_get) != 0) {
+        LOG_PRINT_ERR("umq_cfg_get failed\n");
+        goto UNINIT;
+    }
+    LOG_PRINT_ERR("===[rqe post factor is %d]===\n", cfg_get.rqe_post_factor);
 
     *bind_info_size = umq_bind_info_get(umqh, local_bind_info, *bind_info_size);
     if (*bind_info_size == 0) {
@@ -365,7 +447,7 @@ int example_post_rx(uint64_t umqh, uint32_t depth)
 
 int example_poll_rx(uint64_t umqh, const char *check_data, uint32_t data_size, bool with_imm_data)
 {
-    umq_buf_t **buf = (umq_buf_t **)calloc(EXAMPLE_MAX_POLL_BATCH, sizeof(umq_buf_t *));
+    umq_buf_t **buf = (umq_buf_t **)calloc(1, sizeof(umq_buf_t *));
     if (buf == NULL) {
         return -1;
     }
@@ -373,12 +455,15 @@ int example_poll_rx(uint64_t umqh, const char *check_data, uint32_t data_size, b
 
     uint64_t start = get_timestamp_ms();
     while (ret == 0 && get_timestamp_ms() - start < EXAMPLE_MAX_WAIT_TIME_MS) {
-        ret = umq_poll(umqh, UMQ_IO_RX, buf, EXAMPLE_MAX_POLL_BATCH);
+        ret = umq_poll(umqh, UMQ_IO_RX, buf, 1);
+        if (ret > 0 && buf[0]->status == UMQ_FAKE_BUF_FC_UPDATE) {
+            ret = 0;
+        }
         usleep(EXAMPLE_SLEEP_TIME_US);
     }
 
     if (ret == 0 || buf[0] == NULL) {
-        LOG_PRINT_ERR("umq_poll return nothing after timeout\n");
+        LOG_PRINT_ERR("umq_poll return nothing after timeout %d\n", ret);
         free(buf);
         return -1;
     }
@@ -426,9 +511,19 @@ int example_post_tx(uint64_t umqh, const char *data, uint32_t data_size)
     pro->flag.bs.complete_enable = 1;
     pro->opcode = UMQ_OPC_SEND_IMM;
     umq_buf_t *bad_buf = NULL;
-    if (umq_post(umqh, buf, UMQ_IO_TX, &bad_buf) != UMQ_SUCCESS) {
+    int cnt = 0;
+    int ret;
+    umq_buf_t *recv_buf[10];
+    do {
+        umq_poll(umqh, UMQ_IO_RX, recv_buf, 10);
+        ret = umq_post(umqh, buf, UMQ_IO_TX, &bad_buf);
+        cnt++;
+        usleep(10);
+    } while (ret == -UMQ_ERR_EAGAIN && cnt < 1000);
+    
+    if (ret != UMQ_SUCCESS) {
         umq_buf_free(bad_buf);
-        LOG_PRINT_ERR("post tx failed\n");
+        LOG_PRINT_ERR("post tx failed %d\n", ret);
         return -1;
     }
 
@@ -676,6 +771,12 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
                 if (cfg_get_eid_idx(cfg, optarg) != 0) {
                     return -1;
                 }
+                break;
+            case 'y':
+                cfg->src_eid = strdup(optarg);
+                break;
+            case 'z':
+                cfg->dst_eid = strdup(optarg);
                 break;
             default:
                 return -1;

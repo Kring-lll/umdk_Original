@@ -9,11 +9,12 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <time.h>
+#include <sys/time.h>
 
 #include "umq_example_common.h"
 #include "umq_example_pro.h"
 
-static const uint32_t EXAMPLE_MAX_DEPTH = 64;
 static const char *EXAMPLE_CLIENT_POST_DATA = "hello, this is umq pro client";
 static const char *EXAMPLE_SERVER_POST_DATA = "hello, this is umq pro server";
 
@@ -44,9 +45,13 @@ int run_umq_example_pro_server(struct urpc_example_config *cfg)
     }
     LOG_PRINT("server bind success\n");
 
-    if (example_post_rx(umqh, EXAMPLE_MAX_DEPTH) != 0) {
-        LOG_PRINT_ERR("server post rx failed\n");
-        goto UNBIND;
+    umq_cfg_get_t cfg_get;
+    (void)umq_cfg_get(umqh, &cfg_get);
+    for (uint8_t i = 0; i < cfg_get.rqe_post_factor; i++) {
+        if (example_post_rx(umqh, cfg_get.rx_depth) != 0) {
+            LOG_PRINT_ERR("server post rx failed\n");
+            goto UNBIND;
+        }
     }
     LOG_PRINT("server post rx succeeded\n");
 
@@ -146,9 +151,13 @@ int run_umq_example_pro_client(struct urpc_example_config *cfg)
         goto UNBIND;
     }
 
-    if (example_post_rx(umqh, EXAMPLE_MAX_DEPTH) != 0) {
-        LOG_PRINT_ERR("client post rx failed\n");
-        goto UNBIND;
+    umq_cfg_get_t cfg_get;
+    (void)umq_cfg_get(umqh, &cfg_get);
+    for (uint8_t i = 0; i < cfg_get.rqe_post_factor; i++) {
+        if (example_post_rx(umqh, cfg_get.rx_depth) != 0) {
+            LOG_PRINT_ERR("client post rx failed\n");
+            goto UNBIND;
+        }
     }
     LOG_PRINT("client post rx succeeded\n");
 
@@ -199,8 +208,30 @@ DESTROY:
     return ret;
 }
 
+static const char *g_log_level_to_str[UMQ_LOG_LEVEL_MAX] = {"EMERG", "ALERT", "CRIT", "ERROR", "WARNING",
+                                                            "NOTICE", "INFO", "DEBUG"};
+
+static void default_output(int level, char *log_msg)
+{
+    struct timeval tval;
+    struct tm time;
+    (void)gettimeofday(&tval, NULL);
+    (void)localtime_r(&tval.tv_sec, &time);
+    (void)fprintf(stdout, "%02d%02d %02d:%02d:%02d.%06ld|%s|%s", time.tm_mon + 1, time.tm_mday, time.tm_hour,
+                  time.tm_min, time.tm_sec, (long)tval.tv_usec, g_log_level_to_str[level], log_msg);
+}
+
 int run_umq_example_pro(struct urpc_example_config *cfg)
 {
+    umq_log_config_t log_cfg = {
+        .log_flag = UMQ_LOG_FLAG_FUNC | UMQ_LOG_FLAG_LEVEL,
+        .func = default_output,
+        .level = UMQ_LOG_LEVEL_DEBUG};
+
+    if (umq_log_config_set(&log_cfg) != UMQ_SUCCESS) {
+        LOG_PRINT_ERR("umq_log_config_set failed\n");
+    }
+
     if (cfg->instance_mode == CLIENT) {
         return run_umq_example_pro_client(cfg);
     } else if (cfg->instance_mode == SERVER) {
