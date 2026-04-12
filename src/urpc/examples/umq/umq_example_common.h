@@ -46,6 +46,8 @@ typedef enum example_case_type {
 struct urpc_example_config {
     char *dev_name;                                 /* device name */
     char *server_ip;                                /* server host IP addr */
+    char *src_eid;
+    char *dst_eid;
     uint16_t tcp_port;                              /* server TCP port */
     int case_type;                                  /* case type */
     bool is_ipv6;                                   /* ipv6 case */

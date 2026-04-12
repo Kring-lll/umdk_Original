@@ -11,7 +11,7 @@ if(NOT "${BUILD_ALL}" STREQUAL "disable" OR "${BUILD_URMA}" STREQUAL "enable")
 endif()
 
 if(NOT "${BUILD_ALL}" STREQUAL "disable" OR "${BUILD_DLOCK}" STREQUAL "enable")
-    add_subdirectory(ulock)
+#    add_subdirectory(ulock)
 endif()
 
 if(NOT "${BUILD_ALL}" STREQUAL "disable" OR "${BUILD_URPC}" STREQUAL "enable")
@@ -19,5 +19,5 @@ if(NOT "${BUILD_ALL}" STREQUAL "disable" OR "${BUILD_URPC}" STREQUAL "enable")
 endif()
 
 if(NOT "${BUILD_ALL}" STREQUAL "disable" OR "${BUILD_UMS}" STREQUAL "enable")
-    add_subdirectory(usock)
+#    add_subdirectory(usock)
 endif()

@@ -138,6 +138,16 @@ DESTROY:
 
 int run_umq_example(struct urpc_example_config *cfg)
 {
+
+    umq_log_config_t log_cfg = {
+        .log_flag = UMQ_LOG_FLAG_FUNC | UMQ_LOG_FLAG_LEVEL,
+        .func = default_output,
+        .level = UMQ_LOG_LEVEL_DEBUG};
+
+    if (umq_log_config_set(&log_cfg) != UMQ_SUCCESS) {
+        LOG_PRINT_ERR("umq_log_config_set failed\n");
+    }
+
     if (cfg->instance_mode == CLIENT) {
         return run_umq_example_client(cfg);
     } else if (cfg->instance_mode == SERVER) {

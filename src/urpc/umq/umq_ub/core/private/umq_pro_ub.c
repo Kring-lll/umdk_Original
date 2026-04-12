@@ -405,7 +405,9 @@ static void umq_ub_rqe_posted_cnt_inc(ub_queue_t *queue, uint16_t count)
     if (total_prefill >= queue->rqe_post_factor * queue->rx_depth) {
         umq_ub_shared_credit_recharge(queue, queue->rx_depth);
         queue->prefill_done = true;
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "prefill done, factor %d, rx depth %u\n", queue->rqe_post_factor, queue->rx_depth);
     }
+    UMQ_VLOG_WARN(VLOG_UMQ, "prefill %u, factor %d, rx depth %u\n", total_prefill, queue->rqe_post_factor, queue->rx_depth);
 }
 
 int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
@@ -732,6 +734,7 @@ static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm, umq_b
     uint32_t ret = 0;
     switch (imm.bs.type) {
         case IMM_TYPE_FC_CREDIT_REQ: {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "[=====fc req recived====]\n");
             if (umq_ub_shared_credit_req_handle(queue, &imm) != UMQ_SUCCESS) {
                 ret = umq_ub_fill_fc_buf(buf, UMQ_FAKE_BUF_FC_ERR);
             }
@@ -1132,7 +1135,11 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
         }
         if ((queue->mode == UMQ_MODE_POLLING || queue->interrupt_ctx.tx_fc_interrupt)) {
             /* buf is not NULL here, so umq_ub_poll_fc_tx returns qbuf_cnt >= 0 */
-            qbuf_cnt += (int32_t)umq_ub_poll_fc_tx(queue, buf, buf_count);
+            int ret = umq_ub_poll_fc_tx(queue, buf, buf_count);
+            if (ret < 0) {
+                return ret;
+            }
+            qbuf_cnt += ret;
         }
     }
 

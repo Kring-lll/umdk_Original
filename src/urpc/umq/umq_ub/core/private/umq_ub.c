@@ -469,6 +469,7 @@ int umq_ub_remote_tseg_info_release(remote_imported_tseg_info_t *remote_imported
 
 static urma_target_jetty_t *umq_ub_connect_jetty(ub_queue_t *queue, umq_ub_bind_info_t *info, ub_queue_jetty_index_t i)
 {
+    bool has_drv_ext = ((queue->create_flag & UMQ_CREATE_FLAG_USED_PORTS) != 0) && (queue->tp_mode == URMA_TM_RM);
     bondp_rjetty_t bondp_rjetty = {
         .base = {
             .jetty_id = i == UB_QUEUE_JETTY_IO ? info->queue_info->jetty_id : info->fc_info->jetty_id,
@@ -478,7 +479,7 @@ static urma_target_jetty_t *umq_ub_connect_jetty(ub_queue_t *queue, umq_ub_bind_
                 token_policy_get((queue->dev_ctx->feature & UMQ_FEATURE_ENABLE_TOKEN_POLICY) != 0),
             .flag.bs.order_type = info->queue_info->order_type,
             .flag.bs.share_tp = 1,
-            .flag.bs.has_drv_ext = ((queue->create_flag & UMQ_CREATE_FLAG_USED_PORTS) != 0),
+            .flag.bs.has_drv_ext = has_drv_ext,
             .tp_type = info->queue_info->tp_type},
         .jetty = queue->jetty[i],
     };
@@ -520,7 +521,9 @@ UNIMPORT_JETTY:
 
 static void umq_ub_disconnect_jetty(ub_queue_t *queue, ub_bind_ctx_t *ctx, ub_queue_jetty_index_t i)
 {
-    umq_symbol_urma()->urma_unbind_jetty(queue->jetty[i]);
+    if (queue->tp_mode == URMA_TM_RC) {
+        umq_symbol_urma()->urma_unbind_jetty(queue->jetty[i]);
+    }
     umq_symbol_urma()->urma_unimport_jetty(ctx->tjetty[i]);
     ctx->tjetty[i] = NULL;
 }
