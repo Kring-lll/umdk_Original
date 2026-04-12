@@ -1431,7 +1431,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         goto unimport_pjetty;
     }
 
-    if (bondp_import_health_check_tseg(bdp_ctx, bdp_tjetty, &rvjetty_info) != 0) {
+    if (bondp_import_health_check_tseg(bdp_ctx, bdp_tjetty, &rvjetty_info, rjetty, cfg_jetty) != 0) {
         URMA_LOG_ERR("Failed to import health check seg for jetty\n");
         goto unimport_tseg;
     }
@@ -1444,6 +1444,10 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         goto unimport_tseg;
     }
     pthread_rwlock_unlock(&bdp_ctx->remote_p2v_jetty_id_table.lock);
+
+    if (rjetty->flag.bs.has_drv_ext && !is_fake_jetty) {
+        cfg_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
+    }
 
     URMA_LOG_INFO("Successfully imported target jetty: " URMA_JETTY_ID_FMT,
                   URMA_JETTY_ID_ARGS(&rjetty->jetty_id));
