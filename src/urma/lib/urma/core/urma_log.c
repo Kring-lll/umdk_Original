@@ -17,6 +17,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <syslog.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/syscall.h>
 
@@ -33,12 +34,16 @@ urma_vlog_level_t g_urma_log_level = URMA_VLOG_LEVEL_INFO;
 #define LIBURMA_LOG                    "liburma"
 #define URMA_LOG_ENV_STR               "URMA_LOG_LEVEL"
 #define URMA_LOG_LEVEL_ENV_MAX_BUF_LEN 32
+#define NSEC_PER_MSEC                  1000000L
+#define SEC_PER_HOUR                   3600L
+#define SEC_PER_MIN                    60L
 
 __thread char g_thread_tag[MAX_THREAD_TAG_LEN] = "-";
 
 static void urma_default_log_func(int level, char *message)
 {
-    syslog(level, "%s", message);
+    (void)level;
+    (void)fprintf(stderr, "%s\n", message);
 }
 
 static urma_log_cb_t g_urma_log_func = urma_default_log_func;
@@ -65,9 +70,7 @@ urma_status_t urma_unregister_log_func(void)
 
 int urma_log_init(void)
 {
-    openlog(NULL, LOG_PID | LOG_CONS | LOG_NDELAY, LOG_USER);
-    return setlogmask(LOG_MASK(LOG_CRIT) | LOG_MASK(LOG_ERR) | LOG_MASK(LOG_WARNING) | LOG_MASK(LOG_INFO) |
-                      LOG_MASK(LOG_DEBUG));
+    return 0;
 }
 
 urma_vlog_level_t urma_log_get_level(void)
@@ -180,16 +183,28 @@ static int urma_vlog(const char *function, int line, urma_vlog_level_t level, co
     int ret;
     char newformat[MAX_LOG_LEN + 1] = {0};
     char logmsg[MAX_LOG_LEN + 1] = {0};
+    char timestamp[MAX_LOG_LEN + 1] = {0};
+    struct timespec ts;
+    struct tm tm_info;
 
-    /* add log head info, "URMA|liburma|thread_id|thread_tag|function[line]|format" */
-    ret = snprintf(newformat, MAX_LOG_LEN, "%s|%s|%ld|%s|%s[%d]|%s",
-        URMA_LOG_TAG, LIBURMA_LOG, (long)syscall(__NR_gettid), g_thread_tag, function, line, format);
+    (void)clock_gettime(CLOCK_REALTIME, &ts);
+    (void)localtime_r(&ts.tv_sec, &tm_info);
+    int timestamp_len = (int)strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S.", &tm_info);
+    if (timestamp_len > 0 && timestamp_len < (int)sizeof(timestamp)) {
+        (void)snprintf(timestamp + timestamp_len, sizeof(timestamp) - timestamp_len, "%03ld%+03ld%02ld",
+            ts.tv_nsec / NSEC_PER_MSEC, (long)tm_info.tm_gmtoff / SEC_PER_HOUR,
+            (long)(labs(tm_info.tm_gmtoff) % SEC_PER_HOUR) / SEC_PER_MIN);
+    }
+
+    /* add log head info, "[timestamp][URMA][liburma][thread_id][thread_tag][function[line]][format]" */
+    ret = snprintf(newformat, MAX_LOG_LEN, "[%s][%s][%s][thread_id=%ld][%s][%s[Line=%d]][%s]",
+        timestamp, URMA_LOG_TAG, LIBURMA_LOG, (long)syscall(__NR_gettid), g_thread_tag, function, line, format);
     if (ret <= 0 || ret >= sizeof(newformat)) {
         return ret;
     }
     ret = vsnprintf(logmsg, MAX_LOG_LEN, newformat, va);
     if (ret == -1) {
-        (void)printf("logmsg size exceeds MAX_LOG_LEN size :%d.\n", MAX_LOG_LEN);
+        (void)printf("logmsg size exceeds MAX_LOG_LEN size=%d.\n", MAX_LOG_LEN);
         return ret;
     }
     (*g_urma_log_func)((int)level, logmsg);

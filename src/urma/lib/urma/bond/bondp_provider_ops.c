@@ -409,7 +409,7 @@ static int init_slave_context_fd(bondp_context_t *bond_ctx)
             ev.data.fd = fd;
             ev.data.ptr = (void *)bond_ctx->p_ctxs[i];
             if (epoll_ctl(bond_ctx->v_ctx.async_fd, EPOLL_CTL_ADD, fd, &ev) != 0) {
-                URMA_LOG_ERR("failed to add fd: %u, errno: %d.\n", fd, errno);
+                URMA_LOG_ERR("failed to add fd=%u, errno=%d.\n", fd, errno);
                 goto roll_back;
             }
         }
@@ -606,7 +606,7 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
         goto CMD_DELETE_CONTEXT;
     }
 
-    URMA_LOG_INFO("Finish to create ctx, dev_name: %s, eid_idx: %u.\n",
+    URMA_LOG_INFO("Finish to create ctx, dev_name=%s, eid_idx=%u.\n",
         dev->name, eid_index);
 
     return &bond_ctx->v_ctx;
@@ -650,7 +650,7 @@ urma_status_t bondp_delete_context(urma_context_t *ctx)
     bondp_uninit_v_ctx(bond_ctx);
     bondp_delete_ctx(bond_ctx);
 
-    URMA_LOG_INFO("Finish to delete ctx, dev_name: %s, eid_idx: %u.\n",
+    URMA_LOG_INFO("Finish to delete ctx, dev_name=%s, eid_idx=%u.\n",
         dev_name, eid_index);
 
     return ret;

@@ -94,14 +94,14 @@ static int tpsa_find_process_name(void)
 
     ssize_t lenth = readlink(TPSA_PROCESS_PATH, g_tpsa_process_path, MAX_PROCESS_NAME_LEN);
     if (lenth <= 0 || lenth >= MAX_PROCESS_NAME_LEN) {
-        (void)printf("/proc/self/exe invalid, errno:%d.\n", errno);
+        (void)printf("/proc/self/exe invalid, errno=%d.\n", errno);
         return -1;
     }
 
     g_tpsa_process_path[lenth] = '\0';
     tpsa_process_name = strrchr(g_tpsa_process_path, '/');
     if (tpsa_process_name == NULL) {
-        (void)printf("tpsa_process_name strrchr failed, errno: %d.\n", errno);
+        (void)printf("tpsa_process_name strrchr failed, errno=%d.\n", errno);
         return -1;
     }
 
@@ -169,13 +169,13 @@ static int tpsa_vlog(const char *function, int line, unsigned int level, const c
 
     int woker_idx = uvs_get_worker_idx();
     if (woker_idx != -1) {
-        /* add log head info, "URMA|libuvs|thread_id|*tpsaprocessname*|worker_idx|function|[line]|format" */
-        ret = snprintf(newformat, sizeof(newformat), "%s|%s|%ld|*%s*|work_%d|%s[%d]|%s",
+        /* add log head info, "[URMA][libuvs][thread_id][*tpsaprocessname*][worker_idx][function[line]][format]" */
+        ret = snprintf(newformat, sizeof(newformat), "[%s][%s][%ld][*%s*][work_%d][%s[%d]][%s]",
             URMA_LOG_TAG, LIBUVS_LOG, (long)syscall(__NR_gettid), g_tpsa_process_name,
             woker_idx, function, line, format);
     } else {
-        /* add log head info, "URMA|libuvs|thread_id|*tpsaprocessname*|-|function|[line]|format" */
-        ret = snprintf(newformat, sizeof(newformat), "%s|%s|%ld|*%s*|-|%s[%d]|%s",
+        /* add log head info, "[URMA][libuvs][thread_id][*tpsaprocessname*]-[function[line]][format]" */
+        ret = snprintf(newformat, sizeof(newformat), "[%s][%s][%ld][*%s*]-[%s[%d]][%s]",
             URMA_LOG_TAG, LIBUVS_LOG, (long)syscall(__NR_gettid), g_tpsa_process_name, function, line, format);
     }
 
@@ -185,7 +185,7 @@ static int tpsa_vlog(const char *function, int line, unsigned int level, const c
 
     ret = vsnprintf(logmsg, sizeof(logmsg), newformat, va);
     if (ret < 0) {
-        TPSA_LOG_ERR("logmsg size exceeds MAX_LOG_LEN size : %d\n", MAX_LOG_LEN);
+        TPSA_LOG_ERR("logmsg size exceeds MAX_LOG_LEN size=%d\n", MAX_LOG_LEN);
         return ret;
     }
     syslog(level, "%s", logmsg);

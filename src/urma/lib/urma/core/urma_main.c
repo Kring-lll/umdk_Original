@@ -94,7 +94,7 @@ static int urma_open_provider(const char file[URMA_MAX_LIB_PATH])
         return -1;
     }
 
-    URMA_LOG_INFO("%s open succeed.\n", canonicalized_path);
+    URMA_LOG_INFO("%s open succeeded.\n", canonicalized_path);
     free(canonicalized_path);
     ub_list_push_back(&g_so_list, &so->node);
     return 0;
@@ -113,7 +113,7 @@ int urma_register_provider_ops(urma_provider_ops_t *provider_ops)
     }
     driver->ops = provider_ops;
     ub_list_push_back(&g_driver_list, &driver->node);
-    URMA_LOG_INFO("%s ops register succeed.\n", provider_ops->name);
+    URMA_LOG_INFO("%s ops register succeeded.\n", provider_ops->name);
     return 0;
 }
 
@@ -161,11 +161,11 @@ static int urma_open_drivers(void)
     Dl_info info;
     int ret = dladdr((void *)&urma_open_drivers, &info);
     if (ret == 0) {
-        URMA_LOG_ERR("Failed to get dl addr: %s\n", dlerror());
+        URMA_LOG_ERR("Failed to get dl addr=%s\n", dlerror());
         return -1;
     }
     if (info.dli_fname != NULL) {
-        URMA_LOG_INFO("dl_addr: %s\n", info.dli_fname);
+        URMA_LOG_INFO("dl_addr=%s\n", info.dli_fname);
     }
 
     char dl_dir[URMA_MAX_LIB_PATH] = {0};
@@ -175,7 +175,7 @@ static int urma_open_drivers(void)
     }
     char *last_char = strrchr(dl_dir, '/');
     if (last_char == NULL) {
-        URMA_LOG_ERR("strrchr %s failed, errno: %d\n", dl_dir, errno);
+        URMA_LOG_ERR("strrchr %s failed, errno=%d\n", dl_dir, errno);
         return -1;
     }
     *last_char = 0;
@@ -426,7 +426,7 @@ urma_device_t *urma_get_device_by_name(char *dev_name)
     int device_num = 0;
     urma_device_t **device_list = urma_get_device_list(&device_num);
     if (device_list == NULL || device_num == 0) {
-        URMA_LOG_ERR("urma get device list failed, device_num: %d.\n", device_num);
+        URMA_LOG_ERR("urma get device list failed, device_num=%d.\n", device_num);
         return NULL;
     }
 
@@ -438,7 +438,7 @@ urma_device_t *urma_get_device_by_name(char *dev_name)
         }
     }
     for (int i = 0; urma_dev == NULL && i < device_num; i++) {
-        URMA_LOG_ERR("device list name:%s does not match dev_name: %s.\n", device_list[i]->name, dev_name);
+        URMA_LOG_ERR("device list name:%s does not match dev_name=%s.\n", device_list[i]->name, dev_name);
         if (i == device_num - 1) {
             errno = ENODEV;
         }
@@ -487,7 +487,7 @@ int urma_open_cdev(char *path)
 
     file_path = realpath(path, NULL);
     if (file_path == NULL) {
-        URMA_LOG_ERR("file_path:%s is not standardize.\n", path);
+        URMA_LOG_ERR("file_path=%s is not standardized.\n", path);
         return -1;
     }
     fd = open(file_path, O_RDWR);
@@ -557,7 +557,7 @@ urma_status_t urma_delete_context(urma_context_t *ctx)
     uint32_t eid_index = ctx->eid_index;
     uint64_t atomic_cnt = (uint64_t)atomic_load(&ctx->ref.atomic_cnt);
     if (atomic_cnt > 1) {
-        URMA_LOG_WARN("already in use, atomic_cnt: %lu, dev_name: %s, eid_idx: %u.\n",
+        URMA_LOG_WARN("already in use, atomic_cnt=%lu, dev_name=%s, eid_idx=%u.\n",
             atomic_cnt, dev_name, eid_index);
         return URMA_EAGAIN;
     }
@@ -567,7 +567,7 @@ urma_status_t urma_delete_context(urma_context_t *ctx)
     if (ret == URMA_SUCCESS && dev_fd >= 0) {
         (void)close(dev_fd);
     } else {
-        URMA_LOG_WARN("[DRV_ERR]Delete ctx error, fd: %d, ret: %d, dev_name: %s, eid_idx: %u.\n",
+        URMA_LOG_WARN("[DRV_ERR]Delete ctx error, fd=%d, ret=%d, dev_name=%s, eid_idx=%u.\n",
             dev_fd, ret, dev_name, eid_index);
     }
 

@@ -39,14 +39,14 @@ static int open_file(const char *dir, const char *file, int flag)
 
     real_path = realpath(path, NULL);
     if (real_path == NULL) {
-        (void)printf("file_path:%s is not standardize, errno: %d.\n", path, errno);
+        (void)printf("file_path:%s is not standardized, errno=%d.\n", path, errno);
         free(path);
         return -1;
     }
 
     fd = open(real_path, flag);
     if (fd < 0) {
-        (void)printf("Failed open file: %s, errno: %d.\n", real_path, errno);
+        (void)printf("Failed open file=%s, errno=%d.\n", real_path, errno);
         free(real_path);
         free(path);
         return -1;
@@ -71,13 +71,13 @@ static int read_file(const char *dir, const char *file, char *buf, uint32_t size
 
     fd = open_file(dir, file, O_RDONLY);
     if (fd < 0) {
-        (void)printf("Failed open file: %s/%s, errno: %d.\n", dir, file, errno);
+        (void)printf("Failed open file=%s/%s, errno=%d.\n", dir, file, errno);
         return -1;
     }
 
     ret = read(fd, buf, (size_t)size);
     if (ret < 0 || (uint32_t)ret >= size) {
-        (void)printf("Failed read file: %s/%s, ret:%ld, errno:%d.\n", dir, file, ret, errno);
+        (void)printf("Failed read file=%s/%s, ret=%ld, errno=%d.\n", dir, file, ret, errno);
         close_file(fd);
         return -1;
     }
@@ -103,13 +103,13 @@ static int write_file(const char *dir, const char *file, const char *buf, uint32
 
     fd = open_file(dir, file, O_WRONLY);
     if (fd < 0) {
-        (void)printf("Failed open file: %s/%s, errno: %d.\n", dir, file, errno);
+        (void)printf("Failed open file=%s/%s, errno=%d.\n", dir, file, errno);
         return -1;
     }
 
     ret = write(fd, buf, (size_t)size);
     if ((uint32_t)ret != size) {
-        (void)printf("Failed write file: %s/%s, ret: %ld, errno: %d.\n", dir, file, ret, errno);
+        (void)printf("Failed write file=%s/%s, ret=%ld, errno=%d.\n", dir, file, ret, errno);
         close_file(fd);
         return -1;
     }
@@ -122,7 +122,7 @@ int admin_merge_sysfs_path(char *sysfs_path, const char *path, const char *dir)
 {
     struct stat stat_buf;
     if (snprintf(sysfs_path, DEV_PATH_MAX - 1, "%s/%s", path, dir) <= 0) {
-        (void)printf("String splicing filed, path:%s, dir:%s.\n", path, dir);
+        (void)printf("String splicing filed, path=%s, dir=%s.\n", path, dir);
         return -1;
     }
 
@@ -183,7 +183,7 @@ uint32_t admin_read_dev_file_value_u32(const char *dev_name, const char *file)
     free(sysfs_path);
     ret = admin_str_to_u32(tmp_value, &value);
     if (ret != 0) {
-        (void)printf("file %s: str %s to u64 failed, ret:%d.\n", file, tmp_value, ret);
+        (void)printf("file %s=str %s to u64 failed, ret=%d.\n", file, tmp_value, ret);
         return 0;
     }
     return value;
@@ -276,7 +276,7 @@ void admin_parse_reserved_jetty(const char *file_path, char *file, uint32_t *min
     if (sscanf(tmp_value, "%u-%u", min, max) != ADMIN_RESERVED_JETTY_PARAM_NUM) {
         *min = UINT32_MAX;
         *max = UINT32_MAX;
-        (void)printf("Parse reserved jetty range failed value:%s\n", tmp_value);
+        (void)printf("Parse reserved jetty range failed value=%s\n", tmp_value);
         return;
     }
 
@@ -289,7 +289,7 @@ void admin_read_eid_list(const char *sysfs_path, urma_eid_info_t *eid_list, uint
     char tmp_value[VALUE_LEN_MAX];
     for (uint32_t i = 0; i < max_eid_cnt; i++) {
         if (snprintf(tmp_eid, VALUE_LEN_MAX, "eids/eid%u", i) <= 0) {
-            (void)printf("snprintf failed, eid idx: %u.\n", i);
+            (void)printf("snprintf failed, eid idx=%u.\n", i);
         }
         eid_list[i].eid_index = i;
         if (admin_parse_file_str(sysfs_path, tmp_eid, tmp_value, VALUE_LEN_MAX) <= 0 ||
@@ -307,7 +307,7 @@ bool admin_is_eid_idx_valid(const char *dev_name, uint32_t eid_index)
     urma_eid_info_t eid_info = {0};
     
     if (snprintf(tmp_eid, VALUE_LEN_MAX, "eids/eid%u", eid_index) <= 0) {
-        (void)printf("snprintf failed, eid idx: %u.\n", eid_index);
+        (void)printf("snprintf failed, eid idx=%u.\n", eid_index);
         return false;
     }
 

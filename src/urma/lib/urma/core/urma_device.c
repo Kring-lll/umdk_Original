@@ -51,7 +51,7 @@ ssize_t urma_read_sysfs_file(const char *dir, const char *file, char *buf, size_
     }
     file_path = realpath(path, NULL);
     if (file_path == NULL) {
-        URMA_LOG_WARN("file_path:%s is not standardize.\n", path);
+        URMA_LOG_WARN("file_path:%s is not standardized.\n", path);
         return -1;
     }
     fd = open(file_path, O_RDONLY | O_CLOEXEC);

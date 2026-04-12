@@ -94,14 +94,14 @@ static int uvs_set_topo_info_inner(void *topo, uint32_t topo_num)
         TPSA_LOG_ERR("failed to set topo info in ubagg, ret = %d.\n", ret);
         return ret;
     } else {
-        TPSA_LOG_INFO("success to set topo info in ubagg\n");
+        TPSA_LOG_INFO("successfully to set topo info in ubagg\n");
     }
 
     ret = uvs_ubcore_ioctl_set_topo(topo, (int)topo_num);
     if (ret != 0) {
         TPSA_LOG_ERR("failed to set topo info in ubcore, ret = %d.\n", ret);
     } else {
-        TPSA_LOG_INFO("success to set topo info in ubcore\n");
+        TPSA_LOG_INFO("successfully to set topo info in ubcore\n");
     }
 
     return ret;
