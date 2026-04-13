@@ -35,13 +35,12 @@ function prepare_and_run() {
     modprobe ubcore g_ubcore_log_level=6
     modprobe uburma g_uburma_log_level=6
     modprobe ubagg
-    modprobe ipourma tx_ring_size=16 rx_ring_size-32 page_level=16 ctp_sl=6
+    modprobe ipourma tx_ring_size=16 rx_ring_size=32 page_level=16 ctp_sl=6
     modprobe udma debug_switch=1 jfc_arm_mode=2 well_know_jetty_pgsz_check=0
     systemctl start ubse
     sleep 1
     echo "URMA drivers update installed successfully."
     echo "Configuring test environment YAML..."
-    exit 0
     if [ ! -d "$TARGET_YAML_DIR" ]; then
         mkdir -p "$TARGET_YAML_DIR"
     fi
