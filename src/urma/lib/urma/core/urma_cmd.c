@@ -1549,6 +1549,10 @@ int urma_cmd_import_jfr_ex(urma_context_t *ctx, urma_target_jetty_t *tjfr, urma_
     arg.in.tag = ex_cfg->tag;
     arg.in.tx_psn = ex_cfg->tp_attr.tx_psn;
     arg.in.rx_psn = ex_cfg->tp_attr.rx_psn;
+    /* without udma */
+    arg.in.stag = 0;
+    arg.in.dtag = 0;
+
     urma_cmd_set_udrv_priv(&arg.udata, udata);
 
     ret = urma_ioctl_import_jfr_ex(ctx->dev_fd, &arg);
@@ -2231,6 +2235,9 @@ int urma_cmd_import_jetty_ex(urma_context_t *ctx, urma_target_jetty_t *tjetty, u
     arg.in.tag = ex_cfg->tag;
     arg.in.tx_psn = ex_cfg->tp_attr.tx_psn;
     arg.in.rx_psn = ex_cfg->tp_attr.rx_psn;
+    /* without udma */
+    arg.in.stag = 0;
+    arg.in.dtag = 0;
 
     urma_cmd_set_udrv_priv(&arg.udata, udata);
     int ret = urma_ioctl_import_jetty_ex(ctx->dev_fd, &arg);
