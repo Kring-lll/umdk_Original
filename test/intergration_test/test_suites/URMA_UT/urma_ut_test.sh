@@ -41,7 +41,6 @@ function prepare_and_run() {
     sleep 1
     echo "URMA drivers update installed successfully."
     echo "Configuring test environment YAML..."
-    exit 0
     if [ ! -d "$TARGET_YAML_DIR" ]; then
         mkdir -p "$TARGET_YAML_DIR"
     fi
