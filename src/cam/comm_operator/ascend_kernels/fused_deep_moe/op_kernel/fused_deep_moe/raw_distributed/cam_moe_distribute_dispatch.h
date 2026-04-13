@@ -340,21 +340,14 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
                        epWorldSize_ * moeExpertNumPerRank_ * sizeof(int32_t));
     tpipe_->InitBuffer(scalarBuf_, UB_ALIGN * 2);
     uint32_t hFp32Size = axisH_ * sizeof(float);
-    uint32_t xActivateMaskSize = axisBS_ * (Ceil(axisK_ * sizeof(bool), UB_ALIGN) * UB_ALIGN) * sizeof(half);
-    uint32_t bsAlign256 = Ceil(axisBS_ * sizeof(half), ALIGNED_LEN_256) * ALIGNED_LEN_256 / sizeof(half);
     uint32_t bsKAlign256 = Ceil(expertIdsCnt * sizeof(half), ALIGNED_LEN_256) * ALIGNED_LEN_256 / sizeof(half);
     expertIdsSize = Ceil(expertIdsSize, UB_ALIGN) * UB_ALIGN;
     maxSize_ = hFp32Size > expertIdsSize ? hFp32Size : expertIdsSize;
-    maxSize_ = maxSize_ > xActivateMaskSize ? maxSize_ : xActivateMaskSize;
     maxSize_ = maxSize_ > bsKAlign256 ? maxSize_ : bsKAlign256;
-    tpipe_->InitBuffer(gatherMaskTBuf_, maxSize_);
-    if constexpr (DynamicQuant || StaticQuant) {
-        dstExpBuf_ = receiveDataCastFloatBuf_;  // 内存复用
-        subExpBuf_ = smoothScalesBuf_;          // 内存复用
-    } else {
-        tpipe_->InitBuffer(dstExpBuf_, maxSize_);             // BS * K * 4 = 32K
-        tpipe_->InitBuffer(subExpBuf_, maxSize_);             // BS * K * 4 = 32K
-    }
+    uint32_t xActivateMaskSize = Ceil(axisBS_ * sizeof(half), UB_ALIGN) * UB_ALIGN;
+    tpipe_->InitBuffer(gatherMaskTBuf_, xActivateMaskSize);
+    tpipe_->InitBuffer(dstExpBuf_, xActivateMaskSize);
+    tpipe_->InitBuffer(subExpBuf_, xActivateMaskSize);
     moeExpertRankNumAligned_ = Ceil(moeExpertNum_, TABLE_ELEM_COUNT_PER_BLOCK) * TABLE_ELEM_COUNT_PER_BLOCK;
     if (axisBS_ <= LOOP_OPT_MAX_BS && moeExpertRankNumAligned_ <= LOOP_OPT_MAX_MOE_RANK &&
         axisK_ % TOPK_ELEM_COUNT_PER_BLOCK == 0) {

@@ -245,7 +245,7 @@ class SmallOps(DecodeMoeOps):
             quant_scale=None,
             quant_offset=None,
             group_index=expert_token_nums,
-            activate_left=False,
+            activate_left=True,
             quant_mode=1,
         )
         y2 = torch_npu.npu_grouped_matmul(x=[y1],
