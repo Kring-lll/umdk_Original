@@ -131,12 +131,10 @@ typedef struct local_block_pool {
     umq_buf_list_t head_with_data;
     uint64_t buf_cnt_with_data;
     uint64_t capacity_with_data;
-    uint64_t last_used_with_data;
 
     umq_buf_list_t head_without_data;
     uint64_t buf_cnt_without_data;
     uint64_t capacity_without_data;
-    uint64_t last_used_without_data;
 } local_block_pool_t;
 
 typedef struct global_block_pool {
@@ -240,6 +238,7 @@ static ALWAYS_INLINE int32_t fetch_from_global(
         global_block_pool_t *global_pool, local_block_pool_t *cache_pool, bool with_data, uint32_t batch_count)
 {
     uint32_t count = 0;
+    uint32_t exp_fetch = 0;
     uint64_t *global_buf_cnt;
     umq_buf_list_t *global_head;
     uint64_t *local_buf_cnt;
@@ -282,7 +281,6 @@ static ALWAYS_INLINE int32_t fetch_from_global(
     }
     (void)pthread_spin_unlock(&global_pool->global_mutex);
 
-    count += fetch_from_expansion_pools(with_data, batch_count - count, local_head, local_buf_cnt);
     while (count < batch_count) {
         int ret = expand_global_pool(with_data);
         if (ret != UMQ_SUCCESS) {
@@ -292,7 +290,8 @@ static ALWAYS_INLINE int32_t fetch_from_global(
             goto ROLLBACK;
         }
 
-        count += fetch_from_expansion_pools(with_data, batch_count - count, local_head, local_buf_cnt);
+        exp_fetch = fetch_from_expansion_pools(with_data, batch_count - count, local_head, local_buf_cnt);
+        count += exp_fetch;
     }
     async_expand_global_pool(with_data, *global_buf_cnt);
     return count;
@@ -313,6 +312,7 @@ ROLLBACK:
 }
 
 // flush list from local to global, threshold means the local pool size that needs to be returned
+// returns number of bufs returned to global pool (not expansion pool)
 static ALWAYS_INLINE void return_to_global(
         global_block_pool_t *global_pool, local_block_pool_t *cache, bool with_data, uint32_t threshold)
 {
