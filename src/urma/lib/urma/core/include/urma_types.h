@@ -694,11 +694,17 @@ typedef enum urma_tp_type {
     URMA_UTP
 } urma_tp_type_t;
 
+typedef struct urma_stp_tag {
+    uint64_t stag;
+    uint64_t dtag;
+} urma_stp_tag_t;
+
 typedef struct urma_rjfr {
     urma_jfr_id_t jfr_id; /* see urma_jetty_id */
     urma_transport_mode_t trans_mode;
     urma_import_jetty_flag_t flag;
     urma_tp_type_t tp_type;
+    urma_stp_tag_t tag;
 } urma_rjfr_t;
 
 typedef struct urma_tp {
@@ -755,6 +761,7 @@ typedef struct urma_rjetty {
     urma_target_type_t type;
     urma_import_jetty_flag_t flag;
     urma_tp_type_t tp_type;
+    urma_stp_tag_t tag;
 } urma_rjetty_t;
 
 typedef struct urma_target_jetty {
