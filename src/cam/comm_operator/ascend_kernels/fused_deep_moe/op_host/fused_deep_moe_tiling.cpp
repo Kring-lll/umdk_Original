@@ -265,6 +265,28 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
     return ge::GRAPH_SUCCESS;
 }
 
+static ge::graphStatus CheckShareExpertDtypes(gert::TilingContext &context, FusedDeepMoeTilingData &tilingData)
+{
+    const char *nodeName = context.GetNodeName();
+    auto gmm1ScaleDesc = context.GetInputDesc(INPUT_GMM1_WEIGHT_SCALE_INDEX);
+    auto gmm2ScaleDesc = context.GetInputDesc(INPUT_GMM2_WEIGHT_SCALE_INDEX);
+    auto shareGmm1ScaleDesc = context.GetInputDesc(INPUT_SHARE_GMM1_WEIGHT_SCALE_INDEX);
+    auto shareGmm2ScaleDesc = context.GetInputDesc(INPUT_SHARE_GMM2_WEIGHT_SCALE_INDEX);
+    OPS_ERR_IF((shareGmm1ScaleDesc->GetDataType() != gmm1ScaleDesc->GetDataType()),
+            OPS_LOG_E(nodeName, "share expert weight1 scale datatype (%d) must be same with routed experts'(%d).",
+                    static_cast<ge::DataType>(shareGmm1ScaleDesc->GetDataType()),
+                    static_cast<ge::DataType>(gmm1ScaleDesc->GetDataType())
+                ),
+            return ge::GRAPH_FAILED);
+    OPS_ERR_IF((shareGmm2ScaleDesc->GetDataType() != gmm2ScaleDesc->GetDataType()),
+            OPS_LOG_E(nodeName, "share expert weight2 scale datatype (%d) must be same with routed experts'(%d).",
+                    static_cast<ge::DataType>(shareGmm2ScaleDesc->GetDataType()),
+                    static_cast<ge::DataType>(gmm2ScaleDesc->GetDataType())
+                ),
+            return ge::GRAPH_FAILED);
+    return ge::GRAPH_SUCCESS;
+}
+
 static ge::graphStatus CheckGmm1ScaleShape(gert::TilingContext &context,
                                            const FusedDeepMoeTilingData &tilingData)
 {
@@ -689,6 +711,8 @@ static ge::graphStatus FusedDeepMoeTilingFuncImpl(gert::TilingContext &context)
     const gert::StorageShape* shareGmm1WeightStorageShape = context.GetOptionalInputShape(INPUT_SHARE_GMM1_WEIGHT_INDEX);
     bool calShareExpert = (shareGmm1WeightStorageShape != nullptr);
     if (calShareExpert) {
+        OPS_ERR_IF(CheckShareExpertDtypes(context, *tilingData) != ge::GRAPH_SUCCESS,
+                OPS_LOG_E(nodeName, "CheckShareExpertDtypes failed."), return ge::GRAPH_FAILED);
         OPS_ERR_IF(CheckShareExpertShapes(context, *tilingData) != ge::GRAPH_SUCCESS,
                 OPS_LOG_E(nodeName, "CheckShareExpertShapes failed."), return ge::GRAPH_FAILED);
     }
