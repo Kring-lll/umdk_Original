@@ -22,7 +22,8 @@ extern "C" {
 #define UMQ_STATS_QBUF_POOL_TYPE_MAX (16u)
 #define UMQ_PERF_QUANTILE_MAX_NUM (8u)
 #define UMQ_PERF_REC_MAX_NUM (64u)
-#define UMQ_DFX_TO_STRING_DEFAULT_LEN (8192)
+#define UMQ_DFX_TO_STRING_DEFAULT_LEN (16384)
+#define UMQ_LOCAL_QBUF_POOL_MAX_NUM (64)
 
 typedef struct umq_packet_stats {
     uint64_t send_cnt;              // number of packets sent
@@ -74,21 +75,56 @@ typedef struct umq_flow_control_stats {
     umq_packet_stats_t packet_stats; // flow control sacket statistics
 } umq_flow_control_stats_t;
 
+
+// 扩容内存池统计（新增）
+typedef struct umq_expansion_pool_stats {
+    uint32_t expansion_count;            // 已扩容次数
+    uint32_t slot_count;               // 当前活跃 slot 数
+    uint32_t slot_cnt_max;            // 最大 slot 数
+    uint64_t exp_total_block_num;     // expansion pool 总块数
+    uint64_t exp_total_free_block_num; // expansion pool 空闲块数
+    uint64_t exp_total_mem_size;      // expansion pool 总内存
+    uint64_t exp_used_mem_size;       // expansion pool 已用内存
+    uint64_t total_expansion_count;       // 累计分配次数
+    uint64_t total_shrink_count;        // 累计释放次数
+} umq_expansion_pool_stats_t;
+// 每线程本地池统计（新增）
+typedef struct umq_local_qbuf_pool_stats {
+    uint64_t tid;                              // 线程 ID
+    uint64_t capacity_with_data;               // with_data 容量
+    uint64_t buf_cnt_with_data;                // with_data 当前持有数
+    uint64_t capacity_without_data;            // without_data 容量
+    uint64_t buf_cnt_without_data;             // without_data 当前持有数
+    uint64_t tls_fetch_count_with_data;                  // 该线程从全局池获取 buf 的累计次数(with_data)
+    uint64_t tls_fetch_buf_cnt_with_data;                // 该线程从全局池获取的累计 buf 数量(with_data)
+    uint64_t tls_fetch_count_without_data;              // 该线程从全局池获取 buf 的累计次数(without_data)
+    uint64_t tls_fetch_buf_cnt_without_data;            // 该线程从全局池获取的累计 buf 数量(without_data)
+    uint64_t tls_return_count_with_data;                 // 该线程向全局池归还的累计次数(with_data)
+    uint64_t tls_return_buf_cnt_with_data;               // 该线程向全局池归还的累计 buf 数量(with_data)
+    uint64_t tls_return_count_without_data;             // 该线程向全局池归还的累计次数(without_data)
+    uint64_t tls_return_buf_cnt_without_data;           // 该线程向全局池归还的累计 buf 数量(without_data)
+    uint64_t alloc_count_with_data;                      // 该线程累计申请 buf 次数(with_data)
+    uint64_t alloc_count_without_data;                   // 该线程累计申请 buf 次数(without_data)
+    uint64_t free_count_with_data;                       // 该线程累计释放 buf 次数(with_data)
+    uint64_t free_count_without_data;                    // 该线程累计释放 buf 次数(without_data)
+} umq_local_qbuf_pool_stats_t;
+// 扩展后的 umq_qbuf_pool_info_t
 typedef struct umq_qbuf_pool_info {
-    umq_buf_mode_t mode;                      // split or combine
-    uint64_t total_size;                      // qbuf pool total size
-    uint64_t total_block_num;                 // total number of blocks
-    uint32_t block_size;                      // the size of each block in the memory pool
-    uint32_t headroom_size;                   // header size of umq buffer
-    uint32_t data_size;                       // combine: block_size - umq_buf_t_size, split: block_size
-    uint32_t buf_size;                        // combine: block_size, split: block_size + umq_buf_t_size
-    uint32_t umq_buf_t_size;                  // size of umq_buf_t
+    // === 原有字段 ===
+    umq_buf_mode_t mode;
+    uint64_t total_size;
+    uint64_t total_block_num;
+    uint32_t block_size;
+    uint32_t headroom_size;
+    uint32_t data_size;
+    uint32_t buf_size;
+    uint32_t umq_buf_t_size;
     union {
         struct {
-            uint64_t block_num_with_data;     // number of available buf in data area
-            uint64_t size_with_data;          // available buf size in data area
-            uint64_t block_num_without_data;  // number of available buf in non-data area
-            uint64_t size_without_data;       // available buf size in non-data area
+            uint64_t block_num_with_data;
+            uint64_t size_with_data;
+            uint64_t block_num_without_data;
+            uint64_t size_without_data;
         } split;
         struct {
             uint64_t block_num_with_data;
@@ -100,6 +136,28 @@ typedef struct umq_qbuf_pool_info {
 typedef struct umq_qbuf_pool_stats {
     umq_qbuf_pool_info_t qbuf_pool_info[UMQ_STATS_QBUF_POOL_TYPE_MAX]; // statistical information list for qbuf pool
     uint32_t num; // number of valid qbuf pool info structures
+
+    umq_local_qbuf_pool_stats_t local_qbuf_pool_stats[UMQ_LOCAL_QBUF_POOL_MAX_NUM]; // 本地池统计
+    uint32_t local_qbuf_pool_num; // 本地池数量
+    // === 全局汇总字段（仅第一个 info 有效） ===
+    umq_expansion_pool_stats_t exp_pool_with_data;  // with_data 扩容池
+    umq_expansion_pool_stats_t exp_pool_without_data; // without_data 扩容池
+    uint64_t total_tls_capacity_with_data;          // 所有线程 capacity_with_data 之和(with_data)
+    uint64_t total_tls_buf_cnt_with_data;           // 所有线程 buf_cnt_with_data 之和(with_data)
+    uint64_t total_tls_capacity_without_data;       // 所有线程 capacity_without_data 之和(with_data)
+    uint64_t total_tls_buf_cnt_without_data;        // 所有线程 buf_cnt_without_data 之和(with_data)
+    uint64_t total_tls_fetch_count_with_data;     // 所有线程 tls_fetch_count 之和(with_data)
+    uint64_t total_tls_fetch_buf_cnt_with_data;   // 所有线程 tls_fetch_buf_cnt 之和(with_data)
+    uint64_t total_tls_fetch_count_without_data;  // 所有线程 tls_fetch_count 之和(without_data)
+    uint64_t total_tls_fetch_buf_cnt_without_data;// 所有线程 tls_fetch_buf_cnt 之和(without_data)
+    uint64_t total_tls_return_count_with_data;    // 所有线程 tls_return_count 之和(with_data)
+    uint64_t total_tls_return_buf_cnt_with_data; // 所有线程 tls_return_buf_cnt 之和(with_data)
+    uint64_t total_tls_return_count_without_data; // 所有线程 tls_return_count 之和(without_data)
+    uint64_t total_tls_return_buf_cnt_without_data;// 所有线程 tls_return_buf_cnt 之和(without_data)
+    uint64_t total_alloc_count_with_data;          // 所有线程 alloc_count 之和(with_data)
+    uint64_t total_alloc_count_without_data;       // 所有线程 alloc_count 之和(without_data)
+    uint64_t total_free_count_with_data;           // 所有线程 free_count 之和(with_data)
+    uint64_t total_free_count_without_data;        // 所有线程 free_count 之和(without_data)
 } umq_qbuf_pool_stats_t;
 
 typedef struct umq_info {
