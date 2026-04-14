@@ -174,7 +174,7 @@ static int bondp_create_vseg(bondp_context_t *bdp_ctx, bondp_tseg_t *bdp_seg, ur
     bdp_seg->v_tseg.seg.token_id = t_seg.seg.token_id;
     bdp_seg->v_orig_handle = t_seg.handle;
     bdp_seg->v_tseg.handle = (uint64_t)&bdp_seg->v_tseg;
-    URMA_LOG_INFO("Success register seg, handle:%lu.\n", t_seg.handle);
+    URMA_LOG_DEBUG("Success register seg, handle:%lu.\n", t_seg.handle);
 
     return 0;
 }
