@@ -19,6 +19,7 @@
 #include "bondp_hash_table.h"
 #include "bondp_wr_buf.h"
 #include "topo_info.h"
+#include "ub_list.h"
 #include "urma_types.h"
 #include "urma_ubagg.h"
 #include <stdbool.h>
@@ -41,17 +42,64 @@
 #define URMA_JETTY_ID_ARGS(jetty_id)  URMA_JETTY_ID_UNPACK(EID_ARGS((jetty_id)->eid), \
                                                            (jetty_id)->uasid, (jetty_id)->id)
 
+struct bondp_target_jetty;
+
+typedef struct bondp_health_check_cfg {
+    bool primary_backup_switch;
+    bool auto_fallback_primary;
+    uint64_t health_check_start_ms;
+    uint64_t health_check_interval_ms;
+    uint64_t primary_check_start_ms;
+    uint64_t primary_check_interval_ms;
+    uint32_t primary_check_max_backoff_cnt;
+} bondp_health_check_cfg_t;
+
+typedef enum bondp_health_mode {
+    HEALTH_MODE_BACKUP_CHECK,
+    HEALTH_MODE_PRIMARY_CHECK,
+} bondp_health_mode_t;
+
+typedef struct bondp_health_sub_task {
+    int local_idx;
+    int target_idx;
+    bool valid;
+    bool probe_pending;
+#ifndef __cplusplus
+    atomic_bool link_ok;
+#else
+    std::atomic_bool link_ok;
+#endif
+    uint64_t user_ctx;
+} bondp_health_sub_task_t;
+
+typedef struct bondp_health_task {
+    struct bondp_target_jetty *bdp_tjetty;
+    struct bondp_comp *bondp_jetty;
+    uint64_t next_probe_ts_us;
+    int primary_local_idx;
+    int active_local_idx;
+    bondp_health_mode_t mode;
+    uint32_t backoff_cnt;
+    bondp_health_sub_task_t sub_tasks[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
+    struct ub_list node;
+} bondp_health_task_t;
+
 typedef struct bondp_heath_check_ctx {
     void *check_buf;
     uint64_t check_buf_len;
     int health_check_fd;
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
+    pthread_rwlock_t task_lock;
+    struct ub_list task_list;
 } bondp_heath_check_ctx_t;
 
 typedef struct bondp_health_thread_ctx {
     bool health_check_enable;
+    bondp_health_check_cfg_t cfg;
     int health_epoll_fd;
     pthread_t health_thread;
+    pthread_rwlock_t health_ctx_lock;
+    struct ub_list health_ctx_list;
 #ifndef __cplusplus
     atomic_bool health_thread_stop;
 #else
