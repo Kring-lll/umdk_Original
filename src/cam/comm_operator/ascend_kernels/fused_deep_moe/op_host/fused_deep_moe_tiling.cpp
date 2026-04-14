@@ -176,7 +176,6 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
         shareGmm1HLen = static_cast<uint64_t>(shareGmm1OriginShape.GetDim(2));
     }
     tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.shareGmm1HLen = shareGmm1HLen;
-    printf("shareGmm1HLen= %lu\n", tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.shareGmm1HLen);
 
     // Check share_gmm1_permuted_weight_scale: [shareGmm1HLen] (1D) or [1, shareGmm1HLen] (2D)
     const gert::StorageShape* shareGmm1ScaleStorageShape = context.GetOptionalInputShape(INPUT_SHARE_GMM1_WEIGHT_SCALE_INDEX);
@@ -740,8 +739,6 @@ static ge::graphStatus FusedDeepMoeTilingFuncImpl(gert::TilingContext &context)
     if (expertSmoothScalesExist) {
         tilingKey |= EXEC_FLAG_SMOOTH_QUANT;
     }
-    std::printf("[FusedDeepMoeTiling] Date: %s Time: %s | calShareExpert: %d, tilingKey: %lu\n",
-                __DATE__, __TIME__, static_cast<int>(calShareExpert), tilingKey);
     context.SetTilingKey(tilingKey);
     context.SetBlockDim(aicNum);
     return ge::GRAPH_SUCCESS;
