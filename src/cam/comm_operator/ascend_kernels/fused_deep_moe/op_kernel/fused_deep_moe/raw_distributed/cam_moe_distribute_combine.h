@@ -510,7 +510,7 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::ExpertAllto
     uint32_t curRankExpertNum = 0;
     DataCopyExtParams epSendCntParams;
     curRankExpertNum = moeExpertPerRankNum_;
- 	epSendCntParams = {1U, static_cast<uint32_t>(moeSendNum_ * sizeof(uint32_t)), 0U, 0U, 0U};
+    epSendCntParams = {1U, static_cast<uint32_t>(moeSendNum_ * sizeof(uint32_t)), 0U, 0U, 0U};
     DataCopyPadExtParams<int32_t> copyPadParams{false, 0U, 0U, 0U};
     DataCopyPad(epSendCountLocal_, epSendCountGM_, epSendCntParams, copyPadParams);
     SyncFunc<AscendC::HardEvent::MTE2_S>();
