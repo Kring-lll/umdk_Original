@@ -1227,7 +1227,7 @@ int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicated, umq_interrupt_option_t *
     }
 
     if (queue->flow_control.enabled) {
-        uint64_t start_timestamp = umq_perf_get_start_timestamp();
+        start_timestamp = umq_perf_get_start_timestamp();
         if (option->direction == UMQ_IO_RX) {
             status = umq_symbol_urma()->urma_rearm_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfc, solicated);
             umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_REARM_RX, start_timestamp);
