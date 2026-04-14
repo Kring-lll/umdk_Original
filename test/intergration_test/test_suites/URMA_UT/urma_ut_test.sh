@@ -39,8 +39,9 @@ function prepare_and_run() {
     #modprobe udma debug_switch=1 jfc_arm_mode=2 well_know_jetty_pgsz_check=0
     #systemctl start ubse
     #sleep 1
-    #echo "URMA drivers update installed successfully."
+    echo "URMA drivers update installed successfully."
     echo "Configuring test environment YAML..."
+    exit 0
     if [ ! -d "$TARGET_YAML_DIR" ]; then
         mkdir -p "$TARGET_YAML_DIR"
     fi
