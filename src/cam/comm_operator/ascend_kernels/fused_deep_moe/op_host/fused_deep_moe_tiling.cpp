@@ -151,7 +151,7 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
 {
     const char *nodeName = context.GetNodeName();
     uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
-    
+
     // Check share_gmm1_permuted_weight: [h, shareGmm1HLen] (2D) or [1, h, shareGmm1HLen] (3D)
     const gert::StorageShape* shareGmm1WeightStorageShape = context.GetOptionalInputShape(INPUT_SHARE_GMM1_WEIGHT_INDEX);
     auto shareGmm1OriginShape = shareGmm1WeightStorageShape->GetOriginShape();
@@ -159,7 +159,7 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
     OPS_ERR_IF(gmm1WeightDims != TWO_DIMS && gmm1WeightDims != THREE_DIMS,
                     OPS_LOG_E(nodeName, "shareGmm1Weight shape is invalid."),
                     return ge::GRAPH_FAILED);
-    
+
     uint64_t shareGmm1HLen = 0;
     if (gmm1WeightDims == TWO_DIMS) {  // [h, shareGmm1HLen] format
         OPS_ERR_IF(h != shareGmm1OriginShape.GetDim(0),
@@ -202,7 +202,7 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
                                 shareGmm1HLen, shareGmm1ScaleOriginShape.GetDim(1)),
                         return ge::GRAPH_FAILED);
     }
-    
+
     // Check share_gmm2_weight: [shareGmm1HLen/2, h] (2D) or [1, shareGmm1HLen/2, h] (3D)
     const gert::StorageShape* shareGmm2WeightStorageShape = context.GetOptionalInputShape(INPUT_SHARE_GMM2_WEIGHT_INDEX);
     OPS_ERR_IF(shareGmm2WeightStorageShape == nullptr,
@@ -212,7 +212,7 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
     OPS_ERR_IF(gmm2WeightDims != TWO_DIMS && gmm2WeightDims != THREE_DIMS,
                     OPS_LOG_E(nodeName, "shareGmm2Weight shape is invalid."),
                     return ge::GRAPH_FAILED);
-    
+
     uint64_t shareGmm2InputDim = shareGmm1HLen / 2;
     if (gmm2WeightDims == TWO_DIMS) {  // [shareGmm1HLen/2, h] format
         OPS_ERR_IF(static_cast<uint64_t>(shareGmm2OriginShape.GetDim(0)) != shareGmm2InputDim,
@@ -234,7 +234,7 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
             OPS_LOG_E(nodeName, "shareGmm2Weight dim2 should be h(%u), but got %ld.", h, shareGmm2OriginShape.GetDim(2)),
             return ge::GRAPH_FAILED);
     }
-    
+
     // Check share_gmm2_weight_scale: [h] (1D) or [1, h] (2D)
     const gert::StorageShape* shareGmm2ScaleStorageShape = context.GetOptionalInputShape(INPUT_SHARE_GMM2_WEIGHT_SCALE_INDEX);
     OPS_ERR_IF(shareGmm2ScaleStorageShape == nullptr,
@@ -260,7 +260,7 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
                                 h, shareGmm2ScaleOriginShape.GetDim(1)),
                         return ge::GRAPH_FAILED);
     }
-    
+
     return ge::GRAPH_SUCCESS;
 }
 
