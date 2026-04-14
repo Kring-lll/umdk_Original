@@ -19,6 +19,11 @@ target_link_libraries(urma_perftest
         urma pthread m
 )
 
+target_include_directories(urma_perftest
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/urma/lib/urma/bond/include
+)
+
 install(TARGETS urma_perftest
     DESTINATION /usr/bin
 )

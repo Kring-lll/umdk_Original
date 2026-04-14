@@ -22,6 +22,7 @@
 #include "urma_api.h"
 
 #include "perftest_resources.h"
+#include "urma_ubagg.h"
 
 #define PERFTEST_DEF_ACCESS (URMA_ACCESS_READ | URMA_ACCESS_WRITE | URMA_ACCESS_ATOMIC)
 
@@ -1493,6 +1494,7 @@ static int connect_jetty_default(perftest_context_t *ctx, perftest_config_t *cfg
         rjetty.trans_mode = cfg->trans_mode;
         rjetty.type = URMA_JETTY;
         rjetty.flag.bs.order_type = cfg->order_type;
+        rjetty.flag.bs.has_drv_ext = 1;
         if (cfg->use_ctp) {
             rjetty.tp_type = URMA_CTP;
         } else if (rjetty.trans_mode == URMA_TM_UM) {
@@ -1505,7 +1507,11 @@ static int connect_jetty_default(perftest_context_t *ctx, perftest_config_t *cfg
             rjetty.flag.bs.share_tp = 1;
         }
 
-        ctx->import_tjetty[i] = urma_import_jetty(ctx->urma_ctx, &rjetty, &g_perftest_token);
+        bondp_rjetty_t brjetty = {0};
+        brjetty.base = rjetty;
+        brjetty.jetty = ctx->jetty[i];
+
+        ctx->import_tjetty[i] = urma_import_jetty(ctx->urma_ctx, &brjetty.base, &g_perftest_token);
         if (ctx->import_tjetty[i] == NULL) {
             (void)fprintf(stderr, "Failed to import jetty: %u!\n", i);
             goto disconnect_jetty;
