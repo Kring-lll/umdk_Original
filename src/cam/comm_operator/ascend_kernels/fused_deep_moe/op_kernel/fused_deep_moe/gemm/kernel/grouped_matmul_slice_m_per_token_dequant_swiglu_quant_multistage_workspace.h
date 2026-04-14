@@ -588,7 +588,7 @@ public:
         // when localExpertNum=1, all cores send token and recv token in sequence
         recvCoreNum = aivNum;
         // when localExpertNum>1, half of cores send token and another half recv token in parallel
-        recvCoreNum = (localExpertNum > 1) ? aivNum - SEND_CORE_NUM : recvCoreNum;
+        recvCoreNum = (localExpertNum > 1) ? aiCoreGroupNum : recvCoreNum;
         uint32_t coreNumPerGroup = recvCoreNum;
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             shareQuantCoreNum = recvCoreNum;
