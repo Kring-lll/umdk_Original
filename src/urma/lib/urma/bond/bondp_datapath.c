@@ -577,11 +577,11 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, urma_cr_
 
     bjetty_ctx_t *bjetty_ctx = wr_entry->bjetty_ctx;
     uint32_t send_idx = wr_entry->send_idx;
-    bjetty_ctx->bdp_comp->valid[send_idx] = false;
     bjetty_ctx->bdp_comp->sqe_cnt[send_idx] -= 1;
 
     /* Do migration */
     if (cr->status == URMA_CR_ACK_TIMEOUT_ERR) {
+        bjetty_ctx->bdp_comp->valid[send_idx] = false;
         int new_send_idx = -1, new_target_idx = -1;
         if (schedule_send(&wr_entry->wr, bjetty_ctx->bdp_comp, &new_send_idx, &new_target_idx) != 0) {
             URMA_LOG_ERR("Failed to schedule send for migration\n");
