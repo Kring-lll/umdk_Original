@@ -303,7 +303,8 @@ __aicore__ inline static void EncreaseSyncFlag(__gm__ uint8_t *flagAddr, uint8_t
     AscendC::PipeBarrier<PIPE_ALL>();
     AscendC::GlobalTensor<uint8_t> global;
     if constexpr (g_coreType == AscendC::AIV) {
-        global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE + AscendC::GetSubBlockIdx() * (SOFT_SYNC_SPACE_SIZE / SUB_AIV_NUM));
+        global.SetGlobalBuffer(flagAddr +
+            idx * SOFT_SYNC_SPACE_SIZE + AscendC::GetSubBlockIdx() * (SOFT_SYNC_SPACE_SIZE / SUB_AIV_NUM));
     } else {
         global.SetGlobalBuffer(flagAddr + idx * SOFT_SYNC_SPACE_SIZE);
     }
@@ -477,14 +478,16 @@ public:
 
         CATLASS_DEVICE
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_,
-               LayoutA const &layoutA_, GM_ADDR ptrShareB_, LayoutB const &layoutShareB_, GM_ADDR ptrB_, LayoutB const &layoutB_, GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_, GM_ADDR ptrScale_,
-               LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
+               LayoutA const &layoutA_, GM_ADDR ptrShareB_, LayoutB const &layoutShareB_, GM_ADDR ptrB_,
+               LayoutB const &layoutB_, GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_,
+               GM_ADDR ptrScale_, LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale const &layoutPerTokenScale_, GM_ADDR ptrOutput_, LayoutOutput const &layoutOutput_,
                GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_,
-               GM_ADDR gmX_, GM_ADDR gmMoeSmoothScales_, GM_ADDR gmShareSmoothScales_, GM_ADDR gmexpertIds_, GM_ADDR gmExpandIdx_, GM_ADDR gmEpSendCount_,
-               GM_ADDR gmXActiveMask_, GM_ADDR gmResvered_, GM_ADDR gmExpertTokenNums_,
-               GM_ADDR gmShareX1_, GM_ADDR gmShareX1Scale_, GM_ADDR gmShareSwigluOut_, GM_ADDR gmShareX2_, LayoutOutput const &layoutShareOutput_, GM_ADDR gmShareX2Scale_, GM_ADDR gmSwigluOut_,
-               const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
+               GM_ADDR gmX_, GM_ADDR gmMoeSmoothScales_, GM_ADDR gmShareSmoothScales_, GM_ADDR gmexpertIds_,
+               GM_ADDR gmExpandIdx_, GM_ADDR gmEpSendCount_, GM_ADDR gmXActiveMask_, GM_ADDR gmResvered_,
+               GM_ADDR gmExpertTokenNums_, GM_ADDR gmShareX1_, GM_ADDR gmShareX1Scale_, GM_ADDR gmShareSwigluOut_,
+               GM_ADDR gmShareX2_, LayoutOutput const &layoutShareOutput_, GM_ADDR gmShareX2Scale_,
+               GM_ADDR gmSwigluOut_, const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
             : problemShape(problemShape_),
               problemCount(problemCount_),
               ptrGroupList(reinterpret_cast<__gm__ ElementGroupList *>(ptrGroupList_)),
@@ -629,7 +632,6 @@ public:
         AscendC::GlobalTensor<ElementGroupList> groupList;
         groupList.SetGlobalBuffer(params.ptrGroupList);
 
-
         AscendC::GlobalTensor<ElementC> gmC;
         gmC.SetGlobalBuffer(reinterpret_cast<__gm__ ElementC *>(params.ptrWorkspace));
         auto layoutC = layout::RowMajor{L1TileShape::M * aicNum * WORKSPACE_STAGES, L1TileShape::N};
@@ -654,7 +656,8 @@ public:
             // wait AIV quantize needed tokens
             AscendC::GlobalTensor<int32_t> shareQuantTokenStateTensor;
             uint32_t waitFlagCount = params.bs < shareQuantCoreNum ? params.bs : shareQuantCoreNum;
-            shareQuantTokenStateTensor.SetGlobalBuffer((__gm__ int32_t*)(statusDataSpaceGm + SHARE_QUANT_SOFT_SYNC_OFFSET));
+            shareQuantTokenStateTensor.SetGlobalBuffer((__gm__ int32_t*)(
+                statusDataSpaceGm + SHARE_QUANT_SOFT_SYNC_OFFSET));
             uint32_t expected = waitFlagCount * vToCFlag;
             WaitGroupTokenNumReady(shareQuantTokenStateTensor, expected);
             // Loop through the matmul of each groupIdx
@@ -684,8 +687,8 @@ public:
 
                 // Compute block-scoped matrix multiply-add
                 if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
-                    blockMmad(gmA[gmOffsetA], layoutA, gmB[gmOffsetB], layoutB,
-                                gmC[gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
+                    blockMmad(gmA[gmOffsetA], layoutA, gmB[gmOffsetB], layoutB, gmC[gmOffsetC],
+                        layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
                 } else {
                     callbackBeforeFixpipe();
                     blockMmad(gmA[gmOffsetA], layoutA, gmB[gmOffsetB], layoutB,
@@ -897,10 +900,10 @@ public:
         for (uint32_t rankIndex = startExpertId; rankIndex < endExpertId; ++rankIndex) {
             uint32_t dstRankId = rankIndex;
             if (moeExpertNumPerRank > 1) {
- 	            dstRankId = ((rankIndex) / moeExpertNumPerRank);
- 	            offset =
- 	                (epRankId + (rankIndex) % moeExpertNumPerRank * epRankSize) * stateOffset;
- 	        }
+                dstRankId = ((rankIndex) / moeExpertNumPerRank);
+                offset =
+                    (epRankId + (rankIndex) % moeExpertNumPerRank * epRankSize) * stateOffset;
+            }
             GM_ADDR rankGM = (__gm__ uint8_t *)(GetWindStateAddrByRankId(dstRankId) + offset);
             rankGMTensor.SetGlobalBuffer((__gm__ int32_t *)rankGM);
             AscendC::DataCopy<int32_t>(rankGMTensor, statusTensor_[rankIndex * INT32_COUNT_PER_BLOCK], 8UL);
@@ -908,7 +911,8 @@ public:
     }
 
     CATLASS_DEVICE
-    void QuantToken(AscendC::LocalTensor<XType> &xInTensor, AscendC::LocalTensor<float> &smoothScaleTensor, AscendC::LocalTensor<int8_t> &yInt8Tensor, int64_t ubOffset)
+    void QuantToken(AscendC::LocalTensor<XType> &xInTensor, AscendC::LocalTensor<float> &smoothScaleTensor,
+        AscendC::LocalTensor<int8_t> &yInt8Tensor, int64_t ubOffset)
     {
         int64_t subUbOffset = ubOffset;
         AscendC::LocalTensor<float> xFp32TmpTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
@@ -1031,7 +1035,8 @@ public:
                 AscendC::DataCopy(xInTensor[index], srcWinGMTensor[tokenIndex / axisK * tokenLength], tokenLength);
                 if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
                     AscendC::PipeBarrier<PIPE_MTE2>();
-                    AscendC::DataCopy(moeSmoothScaleTensor[index], moeSmoothScaleGMTensor[dstExpertId * tokenLength], tokenLength);
+                    AscendC::DataCopy(
+                        moeSmoothScaleTensor[index], moeSmoothScaleGMTensor[dstExpertId * tokenLength], tokenLength);
                 }
                 AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventId);
                 AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventId);
@@ -1055,8 +1060,8 @@ public:
 
         AscendC::GlobalTensor<int32_t> expandIdxGMTensor;
         expandIdxGMTensor.SetGlobalBuffer((__gm__ int32_t *)gmExpandIdx + startTokenId);
-        AscendC::DataCopyExtParams expertIdsCntParams = {1U, static_cast<uint32_t>(sendTokenNum * sizeof(uint32_t)), 0U,
-                                                         0U, 0U};
+        AscendC::DataCopyExtParams expertIdsCntParams = {1U, static_cast<uint32_t>(sendTokenNum * sizeof(uint32_t)),
+                                                         0U, 0U, 0U};
         AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
         AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
         AscendC::DataCopyPad(expandIdxGMTensor, expertCountTensor, expertIdsCntParams);
@@ -1096,10 +1101,10 @@ public:
     void shareQuantCoreFunc(GM_ADDR gmX, GM_ADDR gmShareSmoothScales, GM_ADDR gmShareX1Token, GM_ADDR gmShareX1Scale)
     {
         int64_t subUbOffset = 0;
-        uint32_t quantTokenPerCore = axisBS / shareQuantCoreNum; 
-        uint32_t remainTokenNum = axisBS % shareQuantCoreNum; 
-        uint32_t startTokenId = quantTokenPerCore * shareQuantCoreIdx; 
-        if (shareQuantCoreIdx < remainTokenNum) { 
+        uint32_t quantTokenPerCore = axisBS / shareQuantCoreNum;
+        uint32_t remainTokenNum = axisBS % shareQuantCoreNum;
+        uint32_t startTokenId = quantTokenPerCore * shareQuantCoreIdx;
+        if (shareQuantCoreIdx < remainTokenNum) {
             quantTokenPerCore += 1;
             startTokenId += shareQuantCoreIdx;
         } else {
@@ -1118,7 +1123,7 @@ public:
         dstXScaleGMTensor.SetGlobalBuffer((__gm__ float*)gmShareX1Scale);
         AscendC::GlobalTensor<float> shareSmoothScaleGMTensor;
         shareSmoothScaleGMTensor.SetGlobalBuffer((__gm__ float*)gmShareSmoothScales);
-    
+
         AscendC::LocalTensor<XType> xInTensor[BUFFER_NUM];
         AscendC::LocalTensor<int8_t> yInt8Tensor[BUFFER_NUM];
         AscendC::LocalTensor<float> yFp32Tensor[BUFFER_NUM];
@@ -1136,8 +1141,8 @@ public:
         if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
             subUbOffset += CEIL_UP(tokenLength * sizeof(float));
             AscendC::DataCopy(shareSmoothScaleTensor, shareSmoothScaleGMTensor, tokenLength);
-            AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(2);
-            AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(2);
+            AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID2);
+            AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID2);
         }
         // 输入输出开double buffer
         AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0); // MTE2等MTE3
@@ -1150,7 +1155,7 @@ public:
             int32_t eventId = (tokenIndex & 1) ? 0 : 1;
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventId);
             AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(eventId);
-            AscendC::DataCopy(xInTensor[index], srcXGMTensor[tokenIndex * tokenLength], tokenLength);                                            
+            AscendC::DataCopy(xInTensor[index], srcXGMTensor[tokenIndex * tokenLength], tokenLength);
             AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventId);
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventId);
             QuantToken(xInTensor[index], shareSmoothScaleTensor, yInt8Tensor[index], subUbOffset);
@@ -1158,7 +1163,8 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventId);
             AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength], yInt8Tensor[index], tokenLength);
-            AscendC::DataCopyPad(dstXScaleGMTensor[tokenIndex], yFp32Tensor[index][tokenLength / sizeof(float)], dataCopyParamsFloat);
+            AscendC::DataCopyPad(
+                dstXScaleGMTensor[tokenIndex], yFp32Tensor[index][tokenLength / sizeof(float)], dataCopyParamsFloat);
             AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(eventId);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventId);
         }
@@ -1166,7 +1172,6 @@ public:
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(1); // MTE2等MTE3
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(0);
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(1);
-
 
         // 量化完成，通过写GM告知C核
         AscendC::PipeBarrier<PIPE_ALL>();
@@ -1176,7 +1181,8 @@ public:
         AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
 
         AscendC::GlobalTensor<int32_t> shareQuantTokenStateTensor;
-        shareQuantTokenStateTensor.SetGlobalBuffer((__gm__ int32_t*)(statusDataSpaceGm + SHARE_QUANT_SOFT_SYNC_OFFSET));
+        shareQuantTokenStateTensor.SetGlobalBuffer(
+            (__gm__ int32_t*)(statusDataSpaceGm + SHARE_QUANT_SOFT_SYNC_OFFSET));
         AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
         AscendC::SetAtomicAdd<int32_t>();
         // 用原子加，写入vToCFlag
@@ -1184,7 +1190,7 @@ public:
         AscendC::SetAtomicNone();
         AscendC::PipeBarrier<PIPE_ALL>();
     }
- 
+
     CATLASS_DEVICE
     void RecvCount(int64_t ubOffset)
     {
@@ -1324,7 +1330,8 @@ public:
                 for (uint32_t j = curTokenIdx[i]; j < countPerRank[i]; j++) {
                     tokGlobal.SetGlobalBuffer((__gm__ int8_t *)(wAddr + j * hCommuSize));
                     tokGlobalInt32.SetGlobalBuffer((__gm__ int32_t *)(wAddr + j * hCommuSize + hOutSize));
-                    expandXOutGlobal.SetGlobalBuffer((__gm__ int8_t *)(gmX1) + (beginIdx + j) * tokenLength, tokenLength);
+                    expandXOutGlobal.SetGlobalBuffer(
+                        (__gm__ int8_t *)(gmX1) + (beginIdx + j) * tokenLength, tokenLength);
 
                     AscendC::DataCopy(tmpLocalTensor, tokGlobalInt32, INT32_COUNT_PER_BLOCK);
                     AscendC::SetFlag<AscendC::HardEvent::MTE2_S>(0);
@@ -1348,7 +1355,7 @@ public:
                     AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE3>(0);
                     AscendC::WaitFlag<AscendC::HardEvent::MTE2_MTE3>(0);
                     AscendC::DataCopyPad(dynamicScalesOutGMTensor_[beginIdx + j],
-                                        xOutFp32Tensor_[tokenLength / sizeof(float)], dataCopyParamsFloat);
+                        xOutFp32Tensor_[tokenLength / sizeof(float)], dataCopyParamsFloat);
                     AscendC::DataCopy(expandXOutGlobal, xTmpTensor_, tokenLength);
                     AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
                 }
@@ -1387,7 +1394,8 @@ public:
             startRankIdInGroup += remainderRankNum;
         }
         uint32_t endRankIdInGroup = startRankIdInGroup + recvRankNumPerCore;
-        uint32_t subUbOffset = CEIL_UP(expertCntUp * UB_BLOCK_SIZE) + CEIL_UP(UB_BLOCK_SIZE) + CEIL_UP(expertCntUp * sizeof(float));
+        uint32_t subUbOffset = CEIL_UP(expertCntUp * UB_BLOCK_SIZE) + CEIL_UP(UB_BLOCK_SIZE) +
+                                CEIL_UP(expertCntUp * sizeof(float));
         for (uint32_t groupId = 0; groupId < localExpertNum; ++groupId) {
             uint32_t startRankId = epRankSize * groupId + startRankIdInGroup;
             uint32_t endRankId = epRankSize * groupId + endRankIdInGroup;
@@ -1403,7 +1411,8 @@ public:
 
             // recv finish, inform AIC
             AscendC::PipeBarrier<PIPE_ALL>();
-            AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(subUbOffset);
+            AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(
+                                                                                                        subUbOffset);
             tmpLocalTensor.SetValue(CV_FLAG_INDEX, vToCFlag);
             tmpLocalTensor.SetValue(GROUP_ID_INDEX, groupId);
             tmpLocalTensor.SetValue(SELF_COUNT_INDEX, coreTokenCount);
@@ -1413,16 +1422,18 @@ public:
             groupTokenNumStateTensor.SetGlobalBuffer((__gm__ int32_t *)(statusDataSpaceGm + GROUP_TOKEN_NUM_OFFSET));
             AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
             AscendC::SetAtomicAdd<int32_t>();
-            AscendC::DataCopy(groupTokenNumStateTensor[groupId * GROUP_INFO_SIZE], tmpLocalTensor, INT32_COUNT_PER_BLOCK);
+            AscendC::DataCopy(
+                groupTokenNumStateTensor[groupId * GROUP_INFO_SIZE], tmpLocalTensor, INT32_COUNT_PER_BLOCK);
             AscendC::SetAtomicNone();
             AscendC::PipeBarrier<PIPE_ALL>();
         }
     }
 
     CATLASS_DEVICE
-    void CompCoreFunc(GM_ADDR gmCVSwapBuff, __gm__ ElementScale *gmShareMm1Scale, __gm__ ElementScale *gmScale/*gmMoeGmm1Scale*/, 
-                __gm__ ElementPerTokenScale *gmShareTokenScale, __gm__ ElementPerTokenScale *gmTokenScale/*gmMoeGmm1TokenScale*/,
-                __gm__ float *gmShareSwigluOutput, __gm__ float *gmSwigluOutput, uint32_t shareN, uint32_t n, uint32_t k, LayoutScale layoutShareScale, LayoutScale layoutScale,
+    void CompCoreFunc(GM_ADDR gmCVSwapBuff, __gm__ ElementScale *gmShareMm1Scale, __gm__ ElementScale *gmScale,
+                __gm__ ElementPerTokenScale *gmShareTokenScale, __gm__ ElementPerTokenScale *gmTokenScale,
+                __gm__ float *gmShareSwigluOutput, __gm__ float *gmSwigluOutput, uint32_t shareN, uint32_t n,
+                uint32_t k, LayoutScale layoutShareScale, LayoutScale layoutScale,
                 LayoutPerTokenScale wholeLayoutPerTokenScale)
     {
         uint32_t coreNumPerGroup = recvCoreNum;
@@ -1446,7 +1457,7 @@ public:
                 // 前面不需要等待，C核已经等待过了
                 uint32_t currentM = axisBS;
                 GemmCoord inGroupProblemShape{currentM, shareN, k};
-                LayoutPerTokenScale layoutPerTokenScale = 
+                LayoutPerTokenScale layoutPerTokenScale =
                     wholeLayoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
                 LayoutD layoutD = layout::RowMajor{currentM, shareN};
 
@@ -1462,7 +1473,7 @@ public:
 
                 GemmCoord blockShapeMNK = L1TileShape::ToCoord();
                 uint32_t startLoopIdx = ((compCoreIdx < startCoreIdx) ? (compCoreIdx + aiCoreGroupNum) : compCoreIdx)
-                                            - startCoreIdx; 
+                                            - startCoreIdx;
                 for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
                     GemmCoord blockCoordMNK = blockScheduler.GetBlockCoord(loopIdx);
                     GemmCoord actualBlockShapeMNK = blockScheduler.GetActualBlockShape(blockCoordMNK);
@@ -1704,9 +1715,9 @@ public:
                 AscendC::DataCopy(softSyncTensor[(compCoreIdx + compCoreNum)
                                 * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)], tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
             } else {
-                AscendC::DataCopy(softSyncTensor[compCoreIdx
-                                * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t) + (SOFT_SYNC_SPACE_SIZE / SUB_AIV_NUM / sizeof(int32_t))],
-                                tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
+                AscendC::DataCopy(softSyncTensor[compCoreIdx * SOFT_SYNC_SPACE_SIZE / sizeof(int32_t) +
+                                    (SOFT_SYNC_SPACE_SIZE / SUB_AIV_NUM / sizeof(int32_t))],
+                                    tmpZeroLocalTensor, INT32_COUNT_PER_BLOCK);
             }
         }
         if (aivIdx == aiCoreGroupNum * subBlockNum - 1) {
@@ -1720,7 +1731,8 @@ public:
             AscendC::DataCopy(groupTokenNumStateTensor, tmpZeroLocalTensor, GROUP_INFO_SIZE * localExpertNum);
             if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
                 AscendC::GlobalTensor<int32_t> shareQuantTokenStateTensor;
-                shareQuantTokenStateTensor.SetGlobalBuffer((__gm__ int32_t*)(statusDataSpaceGm + SHARE_QUANT_SOFT_SYNC_OFFSET));
+                shareQuantTokenStateTensor.SetGlobalBuffer(
+                    (__gm__ int32_t*)(statusDataSpaceGm + SHARE_QUANT_SOFT_SYNC_OFFSET));
                 AscendC::DataCopy(shareQuantTokenStateTensor, tmpZeroLocalTensor, 8);
             }
         }
@@ -1746,7 +1758,7 @@ public:
                 uint32_t nonCumSumTokenNum = tokenNum - tmpTokenNum;
                 nonCumSumExpertTokenNumsTensor.SetValue(localMoeIndex, nonCumSumTokenNum);
                 tmpTokenNum = tokenNum;
-                
+
                 __asm__ __volatile__("");
                 AscendC::DataCacheCleanAndInvalid<int64_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
                                                 AscendC::DcciDst::CACHELINE_OUT>(
@@ -1768,12 +1780,14 @@ public:
         AivInitState();
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             if (isShareQuantCore) {
-                shareQuantCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmShareSmoothScales, (GM_ADDR)params.gmShareX1, (GM_ADDR)params.gmShareX1Scale);
+                shareQuantCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmShareSmoothScales,
+                                    (GM_ADDR)params.gmShareX1, (GM_ADDR)params.gmShareX1Scale);
             }
         }
         if (isSendCore) {
-            SendCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmexpertIds, (GM_ADDR)params.gmMoeSmoothScales, (GM_ADDR)params.ptrA,
-                        (GM_ADDR)params.ptrPerTokenScale, (GM_ADDR)params.gmExpandIdx, (GM_ADDR)params.gmXActiveMask);
+            SendCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmexpertIds, (GM_ADDR)params.gmMoeSmoothScales,
+                        (GM_ADDR)params.ptrA, (GM_ADDR)params.ptrPerTokenScale, (GM_ADDR)params.gmExpandIdx,
+                        (GM_ADDR)params.gmXActiveMask);
         }
         if (isRecvCore) {
             RecvCoreFunc((GM_ADDR)params.ptrA, (GM_ADDR)params.ptrPerTokenScale, (GM_ADDR)params.gmEpSendCount);
@@ -1783,10 +1797,9 @@ public:
         auto gmShareSwigluOutput = reinterpret_cast<__gm__ float *>(params.gmShareSwigluOut);
         if (isCompCore) {
             CompCoreFunc(params.ptrWorkspace, params.ptrShareScale,  params.ptrScale,
-                (__gm__ float*)params.gmShareX1Scale, (__gm__ float*)params.ptrPerTokenScale, 
-                gmShareSwigluOutput, gmSwigluOutput,
-                params.shareN, params.problemShape.n(), params.problemShape.k(), params.layoutShareScale, params.layoutScale,
-                params.layoutPerTokenScale);
+                (__gm__ float*)params.gmShareX1Scale, (__gm__ float*)params.ptrPerTokenScale,
+                gmShareSwigluOutput, gmSwigluOutput, params.shareN, params.problemShape.n(), params.problemShape.k(),
+                params.layoutShareScale, params.layoutScale, params.layoutPerTokenScale);
         }
 
         icache_preload(8);
@@ -1815,7 +1828,7 @@ public:
             MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
             Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
             uint32_t coreLoops = quantSwizzle.GetLoops();
-            uint32_t startLoopIdx =	 
+            uint32_t startLoopIdx =
                         ((sendCoreIdx < startCoreIdx) ? (sendCoreIdx + aiCoreGroupNum) : sendCoreIdx) - startCoreIdx;
             for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
                 auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
@@ -1848,8 +1861,8 @@ public:
             MatrixCoord quantShape(totalTokenCount, nOut);
             MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
             Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
-            uint32_t coreLoops = quantSwizzle.GetLoops();	 
-            uint32_t startLoopIdx =	 
+            uint32_t coreLoops = quantSwizzle.GetLoops();
+            uint32_t startLoopIdx =
                     ((sendCoreIdx < startCoreIdx) ? (sendCoreIdx + aiCoreGroupNum) : sendCoreIdx) - startCoreIdx;
             for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
                 auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
@@ -1969,8 +1982,8 @@ private:
 
 namespace Catlass::Gemm::Kernel {
 
-template <TemplateMC2TypeClass, class BlockMmad_, class BlockEpilogue_, class BlockScheduler_, uint32_t WORKSPACE_STAGES_,
-          class ElementGroupList_>
+template <TemplateMC2TypeClass, class BlockMmad_, class BlockEpilogue_, class BlockScheduler_,
+            uint32_t WORKSPACE_STAGES_, class ElementGroupList_>
 class GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspaceWithShallowDispatch {
 public:
     using BlockMmad = BlockMmad_;
@@ -2041,11 +2054,13 @@ public:
 
         CATLASS_DEVICE
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_,
-               LayoutA const &layoutA_, GM_ADDR ptrShareB_, LayoutB const &layoutShareB_, GM_ADDR ptrB_, LayoutB const &layoutB_, GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_, GM_ADDR ptrScale_,
-               LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
+               LayoutA const &layoutA_, GM_ADDR ptrShareB_, LayoutB const &layoutShareB_, GM_ADDR ptrB_,
+               LayoutB const &layoutB_, GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_,
+               GM_ADDR ptrScale_, LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale const &layoutPerTokenScale_, GM_ADDR ptrOutput_, LayoutOutput const &layoutOutput_,
                GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_,
-               GM_ADDR gmShareX1_, GM_ADDR gmShareX1Scale_, GM_ADDR gmShareSwigluOut_, GM_ADDR gmShareX2_, LayoutOutput const &layoutShareOutput_, GM_ADDR gmShareX2Scale_, GM_ADDR gmSwigluOut_,
+               GM_ADDR gmShareX1_, GM_ADDR gmShareX1Scale_, GM_ADDR gmShareSwigluOut_, GM_ADDR gmShareX2_,
+               LayoutOutput const &layoutShareOutput_, GM_ADDR gmShareX2Scale_, GM_ADDR gmSwigluOut_,
                const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
             : problemShape(problemShape_),
               problemCount(problemCount_),
@@ -2123,13 +2138,13 @@ public:
         uint32_t stageId = 0;
         uint32_t stageUsed = 0;
         uint32_t startCoreIdx = 0;
-        
+
         // Process shared expert first if enabled
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             gmA.SetGlobalBuffer((__gm__ ElementA*)params.gmShareX1);
             gmB.SetGlobalBuffer((__gm__ ElementB*)params.ptrShareB);
             gmB.SetL2CacheHint(AscendC::CacheMode::CACHE_MODE_DISABLE);
-            
+
             uint32_t currentM = params.bs;
             GemmCoord inGroupProblemShape{currentM, params.shareN, params.problemShape.k()};
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
@@ -2171,7 +2186,7 @@ public:
             }
             startCoreIdx = (startCoreIdx + coreLoops) % coreNum;
         }
-        
+
         // Process routing experts
         gmA.SetGlobalBuffer(params.ptrA);
         if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
@@ -2281,45 +2296,45 @@ public:
             uint32_t startCoreIdx = 0;
             AscendC::ListTensorDesc gmScaleListTensor;
             AscendC::GlobalTensor<int32_t> groupTokenNumStateTensor;
-            
+
             // Process shared expert first if enabled
             if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
                 uint32_t currentM = params.bs;
                 GemmCoord inGroupProblemShape{currentM, params.shareN, params.problemShape.k()};
-                LayoutPerTokenScale layoutPerTokenScale = 
+                LayoutPerTokenScale layoutPerTokenScale =
                     params.layoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
                 LayoutD layoutD = layout::RowMajor{currentM, params.shareN};
-                
+
                 EpilogueParams epilogueParams{
                     params.ptrShareScale, params.layoutShareScale,
                     reinterpret_cast<__gm__ float*>(params.gmShareX1Scale), layoutPerTokenScale,
                     reinterpret_cast<__gm__ float*>(params.gmShareSwigluOut), layoutD
                 };
-                
+
                 blockScheduler.Update(inGroupProblemShape, L1TileShape::ToCoordMN());
                 blockEpilogue.UpdateParams(epilogueParams);
                 uint32_t coreLoops = blockScheduler.GetCoreLoops();
-                
+
                 GemmCoord blockShapeMNK = L1TileShape::ToCoord();
                 uint32_t startLoopIdx = ((coreIdx < startCoreIdx) ? (coreIdx + coreNum) : coreIdx) - startCoreIdx;
                 for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += coreNum) {
                     GemmCoord blockCoordMNK = blockScheduler.GetBlockCoord(loopIdx);
                     GemmCoord actualBlockShapeMNK = blockScheduler.GetActualBlockShape(blockCoordMNK);
-                    
+
                     MatrixCoord offsetC{(stageId * coreNum + coreIdx) * L1TileShape::M, 0};
                     int64_t gmOffsetC = layoutC.GetOffset(offsetC);
                     auto gmBlockC = gmC[gmOffsetC];
                     auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
-                    
+
                     Arch::CrossCoreWaitFlag(flagAicFinishStoreList[stageId]);
                     blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
                     Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(flagAivFinishComputeList[stageId]);
-                    
+
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
                 }
                 startCoreIdx = (startCoreIdx + coreLoops) % coreNum;
             }
-            
+
             gmScaleListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(params.ptrScale));
             __gm__ ElementScale* gmScalePtr;
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
@@ -2327,7 +2342,7 @@ public:
             }
             for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
                 uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
-                                                    : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
+                                                : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
                 GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
 
                 LayoutScale layoutScale = params.layoutScale;
