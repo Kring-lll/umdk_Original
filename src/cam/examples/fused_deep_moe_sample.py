@@ -80,7 +80,7 @@ class DecodeMoeOps(torch.nn.Module):
         self.with_share = None
         self.with_smooth = None
         self._checkout_datas(weight_datas, share_weight_datas)
-        self._process_weights_after_loading(share_weight_datas)
+        self._process_share_weights_after_loading(share_weight_datas)
         self._process_weights_after_loading(weight_datas)
 
     def _checkout_datas(self, weight_datas, share_weight_datas):
@@ -433,8 +433,8 @@ def run_once(local_rank_id,
         data.npu() if data is not None else None for data in share_weight_datas
     ] if with_share else (None, None, None, None)
     
-    small_ops = SmallOps(ep_hcomm_info_small, meta_info, *weight_datas, *share_weight_datas).npu()  # type: ignore
-    fused_ops = FusionOp(ep_hcomm_info_fused, meta_info, *weight_datas, *share_weight_datas).npu()  # type: ignore
+    small_ops = SmallOps(ep_hcomm_info_small, meta_info, weight_datas, share_weight_datas).npu()  # type: ignore
+    fused_ops = FusionOp(ep_hcomm_info_fused, meta_info, weight_datas, share_weight_datas).npu()  # type: ignore
     if test_graph:
         config = torchair.CompilerConfig()
         config.mode = "reduce-overhead"
