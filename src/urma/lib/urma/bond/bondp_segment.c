@@ -128,12 +128,12 @@ static int bondp_delete_vseg(bondp_tseg_t *bdp_seg)
     target_seg->handle = bdp_seg->v_orig_handle;
 
     if (urma_cmd_unregister_seg(target_seg) != 0) {
-        URMA_LOG_ERR("Failed to unregister segment, token_id:%u, handle:%lu.\n",
+        URMA_LOG_ERR("Failed to unregister segment, token_id=%u, handle=%lu.\n",
                      target_seg->seg.token_id, target_seg->handle);
         return URMA_FAIL;
     }
 
-    URMA_LOG_INFO("Success unregister seg, handle:%lu.\n", target_seg->handle);
+    URMA_LOG_INFO("Successfully unregistered seg, handle=%lu.\n", target_seg->handle);
     return URMA_SUCCESS;
 }
 
@@ -167,14 +167,14 @@ static int bondp_create_vseg(bondp_context_t *bdp_ctx, bondp_tseg_t *bdp_seg, ur
 
     int ret = urma_cmd_register_seg(&bdp_ctx->v_ctx, &t_seg, seg_cfg, &udata);
     if (ret != 0) {
-        URMA_LOG_ERR("Fail to register vseg, ret:%d.\n", ret);
+        URMA_LOG_ERR("Fail to register vseg, ret=%d.\n", ret);
         return ret;
     }
 
     bdp_seg->v_tseg.seg.token_id = t_seg.seg.token_id;
     bdp_seg->v_orig_handle = t_seg.handle;
     bdp_seg->v_tseg.handle = (uint64_t)&bdp_seg->v_tseg;
-    URMA_LOG_INFO("Success register seg, handle:%lu.\n", t_seg.handle);
+    URMA_LOG_INFO("Successfully registered seg, handle=%lu.\n", t_seg.handle);
 
     return 0;
 }
@@ -223,13 +223,13 @@ urma_status_t bondp_unregister_seg(urma_target_seg_t *target_seg)
     bondp_tseg_t *bdp_seg = CONTAINER_OF_FIELD(target_seg, bondp_tseg_t, v_tseg);
 
     if (bondp_delete_vseg(bdp_seg) != 0) {
-        URMA_LOG_ERR("Failed to delete vseg, token_id:%u, handle:%lu.\n",
+        URMA_LOG_ERR("Failed to delete vseg, token_id=%u, handle=%lu.\n",
                      target_seg->seg.token_id, target_seg->handle);
         ret = URMA_FAIL;
     }
 
     if (bondp_delete_pseg(bdp_seg) != 0) {
-        URMA_LOG_ERR("Failed to delete pseg for vseg, token_id:%u, handle:%lu.\n",
+        URMA_LOG_ERR("Failed to delete pseg for vseg, token_id=%u, handle=%lu.\n",
                      target_seg->seg.token_id, target_seg->handle);
         ret = URMA_FAIL;
     }
