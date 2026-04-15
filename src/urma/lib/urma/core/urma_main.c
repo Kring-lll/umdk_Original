@@ -438,7 +438,7 @@ urma_device_t *urma_get_device_by_name(char *dev_name)
         }
     }
     for (int i = 0; urma_dev == NULL && i < device_num; i++) {
-        URMA_LOG_ERR("device list name:%s does not match dev_name: %s.\n", device_list[i]->name, dev_name);
+        URMA_LOG_ERR("device list name=%s does not match dev_name=%s.\n", device_list[i]->name, dev_name);
         if (i == device_num - 1) {
             errno = ENODEV;
         }
@@ -487,7 +487,7 @@ int urma_open_cdev(char *path)
 
     file_path = realpath(path, NULL);
     if (file_path == NULL) {
-        URMA_LOG_ERR("file_path:%s is not standardize.\n", path);
+        URMA_LOG_ERR("file_path=%s is not standardized.\n", path);
         return -1;
     }
     fd = open(file_path, O_RDWR);
