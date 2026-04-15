@@ -1595,7 +1595,7 @@ urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
         return URMA_EINVAL;
     }
 
-    bondp_unregister_health_check_task(bdp_tjetty);
+    bondp_unregister_health_check_task(bdp_ctx, bdp_tjetty);
 
     pthread_rwlock_wrlock(&bdp_ctx->remote_p2v_jetty_id_table.lock);
     if (remove_remote_jetty_id_info(bdp_ctx, bdp_tjetty) != 0) {
