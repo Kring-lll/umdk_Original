@@ -374,7 +374,7 @@ static int init_active_indices(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_comp,
 {
     if (port_ids == NULL || port_count == 0) {
         int start, end;
-        if (bdp_comp->is_multipath) {
+        if (bdp_ctx->bonding_level == BONDP_BONDING_LEVEL_IODIE) {
             start = 0;
             end = IODIE_NUM;
         } else {
