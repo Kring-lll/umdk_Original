@@ -283,9 +283,9 @@ public:
     __aicore__ inline FusedDeepMoe(){};
     __aicore__ inline void Init(
         // input
-        GM_ADDR x, GM_ADDR expert_ids, GM_ADDR gmm1_permuted_weight, GM_ADDR gmm1_permuted_weight_scale,
+        GM_ADDR x, GM_ADDR expert_ids, GM_ADDR gmm1_weight, GM_ADDR gmm1_weight_scale,
         GM_ADDR gmm2_weight, GM_ADDR gmm2_weight_scale, GM_ADDR expert_scales,
-        GM_ADDR share_gmm1_permuted_weight, GM_ADDR share_gmm1_permuted_weight_scale,
+        GM_ADDR share_gmm1_weight, GM_ADDR share_gmm1_weight_scale,
         GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
         GM_ADDR expert_smooth_scales, GM_ADDR share_smooth_scales, GM_ADDR x_active_mask,
         // output
@@ -297,8 +297,8 @@ public:
 private:
     GM_ADDR gmX_;
     GM_ADDR gmexpertIds_;
-    GM_ADDR gmPermuteWeight1_;
-    GM_ADDR gmPermuteScale1_;
+    GM_ADDR gmWeight1_;
+    GM_ADDR gmScale1_;
     GM_ADDR gmWeight2_;
     GM_ADDR gmScale2_;
     GM_ADDR gmOutput_;
@@ -341,9 +341,9 @@ private:
 template <TemplateMC2TypeClass>
 __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     // input
-    GM_ADDR x, GM_ADDR expert_ids, GM_ADDR gmm1_permuted_weight, GM_ADDR gmm1_permuted_weight_scale,
+    GM_ADDR x, GM_ADDR expert_ids, GM_ADDR gmm1_weight, GM_ADDR gmm1_weight_scale,
     GM_ADDR gmm2_weight, GM_ADDR gmm2_weight_scale, GM_ADDR expert_scales,
-    GM_ADDR share_gmm1_permuted_weight, GM_ADDR share_gmm1_permuted_weight_scale,
+    GM_ADDR share_gmm1_weight, GM_ADDR share_gmm1_weight_scale,
     GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
     GM_ADDR expert_smooth_scales, GM_ADDR share_smooth_scales, GM_ADDR x_active_mask,
     // output
@@ -358,13 +358,13 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     gmShareSmoothScales_ = share_smooth_scales;
     gmX_ = x;                                // input token
     gmexpertIds_ = expert_ids;
-    gmPermuteWeight1_ = gmm1_permuted_weight;
-    gmPermuteScale1_ = gmm1_permuted_weight_scale;
+    gmWeight1_ = gmm1_weight;
+    gmScale1_ = gmm1_weight_scale;
     gmWeight2_ = gmm2_weight;
     gmScale2_ = gmm2_weight_scale;
     gmOutput_ = output;
-    gmShareWeight1_ = share_gmm1_permuted_weight;
-    gmShareWeight1Scale_ = share_gmm1_permuted_weight_scale;
+    gmShareWeight1_ = share_gmm1_weight;
+    gmShareWeight1Scale_ = share_gmm1_weight_scale;
     gmShareWeight2_ = share_gmm2_weight;
     gmShareWeight2Scale_ = share_gmm2_weight_scale;
     gmShareOutput_ = share_output;
@@ -494,7 +494,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     GmmDeqSwigluQuant<TemplateMC2TypeFunc, Gmm1L1TileShape, Gmm1L0TileShape, Gmm1EpilogueTileShape,
                       Gmm1BlockScheduler>(
         gmm1ProblemShape, groupCount_, gmGroupList, gmX1, layoutX1, gmShareWeight1_, layoutShareWeight1,
-        gmPermuteWeight1_, layoutWeight1, gmShareWeight1Scale_, layoutShareW1Scale, gmPermuteScale1_, layoutW1Scale,
+        gmWeight1_, layoutWeight1, gmShareWeight1Scale_, layoutShareW1Scale, gmScale1_, layoutW1Scale,
         gmX1Scale, layoutX1Scale, gmX2, layoutX2, gmX2Scale, layoutX2Scale, gmShareX1, gmShareX1Scale,
         gmShareSwigluOut, gmShareX2, layoutShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmX_, gmSmoothScales_,
         gmShareSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount, xActiveMask_, gmResvered, gmExpertTokenNums_,
