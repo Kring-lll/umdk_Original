@@ -267,20 +267,20 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
 static ge::graphStatus CheckShareExpertDtypes(gert::TilingContext &context, FusedDeepMoeTilingData &tilingData)
 {
     const char *nodeName = context.GetNodeName();
-    auto gmm1ScaleDesc = context.GetInputDesc(INPUT_GMM1_WEIGHT_SCALE_INDEX);
-    auto gmm2ScaleDesc = context.GetInputDesc(INPUT_GMM2_WEIGHT_SCALE_INDEX);
-    auto shareGmm1ScaleDesc = context.GetInputDesc(INPUT_SHARE_GMM1_WEIGHT_SCALE_INDEX);
-    auto shareGmm2ScaleDesc = context.GetInputDesc(INPUT_SHARE_GMM2_WEIGHT_SCALE_INDEX);
-    OPS_ERR_IF((shareGmm1ScaleDesc->GetDataType() != gmm1ScaleDesc->GetDataType()),
+    auto gmm1ScaleTensor = context.GetDynamicInputTensor(INPUT_GMM1_WEIGHT_SCALE_INDEX, 0);
+    auto gmm2ScaleTensor = context.GetDynamicInputTensor(INPUT_GMM2_WEIGHT_SCALE_INDEX, 0);
+    auto shareGmm1ScaleTensor = context.GetOptionalInputTensor(INPUT_SHARE_GMM1_WEIGHT_SCALE_INDEX);
+    auto shareGmm2ScaleTensor = context.GetOptionalInputTensor(INPUT_SHARE_GMM2_WEIGHT_SCALE_INDEX);
+    OPS_ERR_IF((shareGmm1ScaleTensor->GetDataType() != gmm1ScaleTensor->GetDataType()),
             OPS_LOG_E(nodeName, "share expert weight1 scale datatype (%d) must be same with routed experts'(%d).",
-                    static_cast<ge::DataType>(shareGmm1ScaleDesc->GetDataType()),
-                    static_cast<ge::DataType>(gmm1ScaleDesc->GetDataType())
+                    static_cast<ge::DataType>(shareGmm1ScaleTensor->GetDataType()),
+                    static_cast<ge::DataType>(gmm1ScaleTensor->GetDataType())
                 ),
             return ge::GRAPH_FAILED);
-    OPS_ERR_IF((shareGmm2ScaleDesc->GetDataType() != gmm2ScaleDesc->GetDataType()),
+    OPS_ERR_IF((shareGmm2ScaleTensor->GetDataType() != gmm2ScaleTensor->GetDataType()),
             OPS_LOG_E(nodeName, "share expert weight2 scale datatype (%d) must be same with routed experts'(%d).",
-                    static_cast<ge::DataType>(shareGmm2ScaleDesc->GetDataType()),
-                    static_cast<ge::DataType>(gmm2ScaleDesc->GetDataType())
+                    static_cast<ge::DataType>(shareGmm2ScaleTensor->GetDataType()),
+                    static_cast<ge::DataType>(gmm2ScaleTensor->GetDataType())
                 ),
             return ge::GRAPH_FAILED);
     return ge::GRAPH_SUCCESS;
@@ -449,13 +449,13 @@ ge::graphStatus CheckSmoothScales(const gert::TilingContext &context, const char
 {
     uint32_t moeExpertNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum;
     uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
-    auto expertSmoothScalesDesc = context.GetInputDesc(INPUT_SMOOTH_SCALE_INDEX);
+    auto expertSmoothScalesTensor = context.GetOptionalInputTensor(INPUT_SMOOTH_SCALE_INDEX);
     const gert::StorageShape* expertSmoothScalesStorageShape = context.GetOptionalInputShape(
         INPUT_SMOOTH_SCALE_INDEX);
     auto expertSmoothScalesOriginShape = expertSmoothScalesStorageShape->GetOriginShape();
-    OPS_ERR_IF((expertSmoothScalesDesc->GetDataType() != ge::DT_FLOAT),
+    OPS_ERR_IF((expertSmoothScalesTensor->GetDataType() != ge::DT_FLOAT),
                     OPS_LOG_E(nodeName, "expertSmoothScales datatype is invalid, datatype should be float32, but is %d.",
-                            static_cast<ge::DataType>(expertSmoothScalesDesc->GetDataType())),
+                            static_cast<ge::DataType>(expertSmoothScalesTensor->GetDataType())),
                     return ge::GRAPH_FAILED);
     OPS_ERR_IF(expertSmoothScalesStorageShape->GetStorageShape().GetDimNum() != TWO_DIMS,
                     OPS_LOG_E(nodeName, "expertSmoothScales shape dims must be 2, but current dim num is %lu.",
@@ -473,13 +473,13 @@ ge::graphStatus CheckSmoothScales(const gert::TilingContext &context, const char
         OPS_ERR_IF(!shareSmoothScalesExist, OPS_LOG_E(nodeName,
                     "When routed expert smooth scales exist, shared expert smooth scales must exist, too."),
                     return ge::GRAPH_FAILED);
-        auto shareSmoothScalesDesc = context.GetInputDesc(INPUT_SHARE_SMOOTH_SCALE_INDEX);
+        auto shareSmoothScalesTensor = context.GetOptionalInputTensor(INPUT_SHARE_SMOOTH_SCALE_INDEX);
         const gert::StorageShape* shareSmoothScalesStorageShape = context.GetOptionalInputShape(
             INPUT_SHARE_SMOOTH_SCALE_INDEX);
         auto shareSmoothScalesOriginShape = shareSmoothScalesStorageShape->GetOriginShape();
-        OPS_ERR_IF((shareSmoothScalesDesc->GetDataType() != ge::DT_FLOAT),
+        OPS_ERR_IF((shareSmoothScalesTensor->GetDataType() != ge::DT_FLOAT),
                 OPS_LOG_E(nodeName, "shareSmoothScales datatype is invalid, datatype should be float32, but is %d.",
-                        static_cast<ge::DataType>(shareSmoothScalesDesc->GetDataType())),
+                        static_cast<ge::DataType>(shareSmoothScalesTensor->GetDataType())),
                 return ge::GRAPH_FAILED);
         OPS_ERR_IF(shareSmoothScalesStorageShape->GetStorageShape().GetDimNum() != ONE_DIMS,
                         OPS_LOG_E(nodeName, "shareSmoothScales shape dims must be 1, but current dim num is %lu.",
