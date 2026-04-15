@@ -37,7 +37,7 @@ int bondp_import_health_check_tseg(bondp_context_t *bdp_ctx, bondp_target_jetty_
 	urma_bond_id_info_out_t *rvjetty_info, urma_rjetty_t *rjetty);
 int bondp_unimport_health_check_tseg(bondp_target_jetty_t *bdp_tjetty);
 int bondp_register_health_check_task(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty, bondp_comp_t *cfg_jetty);
-void bondp_unregister_health_check_task(bondp_target_jetty_t *bdp_tjetty);
+void bondp_unregister_health_check_task(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty);
 void bondp_health_update_active_idx(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
 	int new_active_idx);
 bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, urma_cr_t *cr);

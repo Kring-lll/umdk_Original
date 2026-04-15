@@ -71,8 +71,9 @@ typedef struct bondp_health_task {
     int active_local_idx;
     bondp_health_mode_t mode;
     uint32_t backoff_cnt;
+    uint32_t vjetty_id;
     bondp_health_sub_task_t sub_tasks[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
-    struct ub_list node;
+    hmap_node_t hmap_node;
 } bondp_health_task_t;
 
 typedef struct bondp_heath_check_ctx {
@@ -80,8 +81,7 @@ typedef struct bondp_heath_check_ctx {
     uint64_t check_buf_len;
     int health_check_fd;
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
-    pthread_rwlock_t task_lock;
-    struct ub_list task_list;
+    bondp_hash_table_t task_table;
     pthread_spinlock_t event_lock;
     struct ub_list event_list;
 } bondp_heath_check_ctx_t;

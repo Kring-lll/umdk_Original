@@ -13,6 +13,7 @@
 #include <sys/prctl.h>
 #include <sys/eventfd.h>
 
+#include "ub_hash.h"
 #include "urma_log.h"
 #include "urma_api.h"
 #include "bondp_health_check.h"
@@ -24,8 +25,12 @@
 
 #define BONDP_HEALTH_CHECK_MAGIC            0xFF12000000000000ULL
 #define BONDP_HEALTH_CHECK_MAGIC_MASK       0xFFFF000000000000ULL
+#define BONDP_HEALTH_VJETTY_ID_SHIFT        32
 #define BONDP_HEALTH_LOCAL_IDX_SHIFT        16
 #define BONDP_HEALTH_IDX_MASK               0xFFFF
+
+#define BONDP_HEALTH_TASK_TABLE_SIZE        64
+#define BONDP_HEALTH_TASK_HASH_BASIS        0x983571U
 
 #define BONDP_HEALTH_CHECK_ENV                        "BondHealthCheck"
 #define BONDP_HEALTH_CHECK_PRIMARY_BACKUP_SWITCH      "PrimaryBackupSwitch"
@@ -77,6 +82,28 @@ static void bondp_free_health_task(bondp_health_task_t *task)
         return;
     }
     free(task);
+}
+
+static bool bondp_health_task_comp_f(hmap_node_t *node, void *key)
+{
+    bondp_health_task_t *task = CONTAINER_OF_FIELD(node, bondp_health_task_t, hmap_node);
+    return task->vjetty_id == *(uint32_t *)key;
+}
+
+static void bondp_health_task_free_f(hmap_node_t *node)
+{
+    bondp_health_task_t *task = CONTAINER_OF_FIELD(node, bondp_health_task_t, hmap_node);
+    free(task);
+}
+
+static uint32_t bondp_health_task_hash_f(void *key)
+{
+    return ub_hash_bytes(key, sizeof(uint32_t), BONDP_HEALTH_TASK_HASH_BASIS);
+}
+
+static uint32_t bondp_health_task_hash(uint32_t vjetty_id)
+{
+    return bondp_health_task_hash_f(&vjetty_id);
 }
 
 static int bondp_register_health_ctx_global(bondp_context_t *bond_ctx)
@@ -552,22 +579,25 @@ int bondp_import_health_check_tseg(bondp_context_t *bdp_ctx, bondp_target_jetty_
     return import_check_tseg_by_import_result(bdp_ctx, bdp_tjetty, rvjetty_info);
 }
 
-static uint64_t bondp_build_health_user_ctx(uint32_t local_idx, uint32_t target_idx)
+static uint64_t bondp_build_health_user_ctx(uint32_t vjetty_id, uint32_t local_idx, uint32_t target_idx)
 {
     return BONDP_HEALTH_CHECK_MAGIC |
-        ((uint64_t)(local_idx & BONDP_HEALTH_IDX_MASK) << BONDP_HEALTH_LOCAL_IDX_SHIFT) |
+    ((uint64_t)(vjetty_id & BONDP_HEALTH_IDX_MASK) << BONDP_HEALTH_VJETTY_ID_SHIFT) |
+    ((uint64_t)(local_idx & BONDP_HEALTH_IDX_MASK) << BONDP_HEALTH_LOCAL_IDX_SHIFT) |
         (uint64_t)(target_idx & BONDP_HEALTH_IDX_MASK);
 }
 
-static void bondp_parse_health_user_ctx(uint64_t user_ctx, uint32_t *local_idx, uint32_t *target_idx)
+static void bondp_parse_health_user_ctx(uint64_t user_ctx, uint32_t *vjetty_id,
+    uint32_t *local_idx, uint32_t *target_idx)
 {
+    *vjetty_id = (uint32_t)((user_ctx >> BONDP_HEALTH_VJETTY_ID_SHIFT) & BONDP_HEALTH_IDX_MASK);
     *local_idx = (uint32_t)((user_ctx >> BONDP_HEALTH_LOCAL_IDX_SHIFT) & BONDP_HEALTH_IDX_MASK);
     *target_idx = (uint32_t)(user_ctx & BONDP_HEALTH_IDX_MASK);
 }
 
 static urma_status_t bondp_send_health_probe(bondp_context_t *bdp_ctx,
     bondp_target_jetty_t *bdp_tjetty, bondp_comp_t *bdp_jetty,
-    bondp_health_sub_task_t *sub)
+    bondp_health_sub_task_t *sub, uint32_t vjetty_id)
 {
     int local_idx = sub->local_idx;
     int target_idx = sub->target_idx;
@@ -581,7 +611,7 @@ static urma_status_t bondp_send_health_probe(bondp_context_t *bdp_ctx,
         return URMA_FAIL;
     }
 
-    uint64_t user_ctx = bondp_build_health_user_ctx((uint32_t)local_idx, (uint32_t)target_idx);
+    uint64_t user_ctx = bondp_build_health_user_ctx(vjetty_id, (uint32_t)local_idx, (uint32_t)target_idx);
     sub->user_ctx = user_ctx;
 
     urma_sge_t src_sge = {
@@ -648,7 +678,7 @@ static void bondp_health_probe_sub(bondp_context_t *bdp_ctx, bondp_health_task_t
         URMA_LOG_INFO("Health probe skipped (pending), lidx:%d tidx:%d\n", sub->local_idx, sub->target_idx);
         return;
     }
-    if (bondp_send_health_probe(bdp_ctx, task->bdp_tjetty, task->bondp_jetty, sub) != URMA_SUCCESS) {
+    if (bondp_send_health_probe(bdp_ctx, task->bdp_tjetty, task->bondp_jetty, sub, task->vjetty_id) != URMA_SUCCESS) {
         if (atomic_load(&sub->link_ok)) {
             URMA_LOG_WARN("Health probe send failed, lidx:%d tidx:%d\n", sub->local_idx, sub->target_idx);
         }
@@ -717,9 +747,9 @@ static void *bondp_health_check_thread(void *arg)
         bondp_health_ctx_node_t *ctx_node = NULL;
         UB_LIST_FOR_EACH(ctx_node, node, &global_ctx->health_thread_ctx.health_ctx_list) {
             bondp_heath_check_ctx_t *health = &ctx_node->bdp_ctx->bondp_heath_check_ctx;
-            pthread_rwlock_rdlock(&health->task_lock);
+            pthread_rwlock_rdlock(&health->task_table.lock);
             bondp_health_task_t *task = NULL;
-            UB_LIST_FOR_EACH(task, node, &health->task_list) {
+            HMAP_FOR_EACH(task, hmap_node, &health->task_table.hmap) {
                 bondp_health_task_check_mode(task, cfg, now_us);
                 if (now_us < task->next_probe_ts_us) {
                     continue;
@@ -738,7 +768,7 @@ static void *bondp_health_check_thread(void *arg)
                     }
                 }
             }
-            pthread_rwlock_unlock(&health->task_lock);
+            pthread_rwlock_unlock(&health->task_table.lock);
         }
         pthread_rwlock_unlock(&global_ctx->health_thread_ctx.health_ctx_lock);
     }
@@ -762,6 +792,7 @@ int bondp_register_health_check_task(bondp_context_t *bdp_ctx, bondp_target_jett
     task->next_probe_ts_us = bondp_get_monotonic_us() + cfg->health_check_start_ms * 1000ULL;
     task->primary_local_idx = -1;
     task->active_local_idx = -1;
+    task->vjetty_id = cfg_jetty->v_jetty.jetty_id.id;
     task->mode = HEALTH_MODE_BACKUP_CHECK;
     task->backoff_cnt = 0;
 
@@ -796,45 +827,35 @@ int bondp_register_health_check_task(bondp_context_t *bdp_ctx, bondp_target_jett
         URMA_LOG_ERR("Failed to register health task: no valid route\n");
         return 0;
     }
-    pthread_rwlock_wrlock(&health->task_lock);
-    ub_list_push_front(&health->task_list, &task->node);
-    pthread_rwlock_unlock(&health->task_lock);
+    uint32_t hash = bondp_health_task_hash(task->vjetty_id);
+    pthread_rwlock_wrlock(&health->task_table.lock);
+    bondp_hash_table_add_with_hash_without_lock(&health->task_table, &task->hmap_node, hash);
+    pthread_rwlock_unlock(&health->task_table.lock);
 
     URMA_LOG_INFO("Health task registered, sub_cnt:%d primary_idx:%d active_idx:%d start_ms:%lu\n",
         sub_task_cnt, task->primary_local_idx, task->active_local_idx, (unsigned long)cfg->health_check_start_ms);
     return 0;
 }
 
-void bondp_unregister_health_check_task(bondp_target_jetty_t *bdp_tjetty)
+void bondp_unregister_health_check_task(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty)
 {
     if (!bondp_health_check_enabled()) {
         return;
     }
 
-    bondp_health_thread_ctx_t *thread_ctx = &g_bondp_global_ctx->health_thread_ctx;
-    pthread_rwlock_rdlock(&thread_ctx->health_ctx_lock);
-    bondp_health_ctx_node_t *ctx_node = NULL;
-    UB_LIST_FOR_EACH(ctx_node, node, &thread_ctx->health_ctx_list) {
-        bondp_heath_check_ctx_t *health = &ctx_node->bdp_ctx->bondp_heath_check_ctx;
-        bool removed = false;
-        pthread_rwlock_wrlock(&health->task_lock);
-        bondp_health_task_t *task = NULL;
-        bondp_health_task_t *next = NULL;
-        UB_LIST_FOR_EACH_SAFE(task, next, node, &health->task_list) {
-            if (task->bdp_tjetty == bdp_tjetty) {
-                ub_list_remove(&task->node);
-                bondp_free_health_task(task);
-                removed = true;
-                break;
-            }
-        }
-        pthread_rwlock_unlock(&health->task_lock);
-        if (removed) {
-            URMA_LOG_INFO("Health check task unregistered\n");
+    bondp_heath_check_ctx_t *health = &bdp_ctx->bondp_heath_check_ctx;
+    pthread_rwlock_wrlock(&health->task_table.lock);
+    bondp_health_task_t *task = NULL;
+    bondp_health_task_t *next = NULL;
+    HMAP_FOR_EACH_SAFE(task, next, hmap_node, &health->task_table.hmap) {
+        if (task->bdp_tjetty == bdp_tjetty) {
+            ub_hmap_remove(&health->task_table.hmap, &task->hmap_node);
+            bondp_free_health_task(task);
+            URMA_LOG_INFO("Health check task unregistered, tjetty:%p\n", (void *)bdp_tjetty);
             break;
         }
     }
-    pthread_rwlock_unlock(&thread_ctx->health_ctx_lock);
+    pthread_rwlock_unlock(&health->task_table.lock);
 }
 
 void bondp_health_update_active_idx(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
@@ -845,9 +866,9 @@ void bondp_health_update_active_idx(bondp_context_t *bdp_ctx, bondp_target_jetty
     }
 
     bondp_heath_check_ctx_t *health = &bdp_ctx->bondp_heath_check_ctx;
-    pthread_rwlock_wrlock(&health->task_lock);
+    pthread_rwlock_wrlock(&health->task_table.lock);
     bondp_health_task_t *task = NULL;
-    UB_LIST_FOR_EACH(task, node, &health->task_list) {
+    HMAP_FOR_EACH(task, hmap_node, &health->task_table.hmap) {
         if (task->bdp_tjetty != bdp_tjetty) {
             continue;
         }
@@ -857,7 +878,7 @@ void bondp_health_update_active_idx(bondp_context_t *bdp_ctx, bondp_target_jetty
             bdp_tjetty->v_tjetty.id.id, old, new_active_idx);
         break;
     }
-    pthread_rwlock_unlock(&health->task_lock);
+    pthread_rwlock_unlock(&health->task_table.lock);
 }
 
 bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, urma_cr_t *cr)
@@ -872,7 +893,8 @@ bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, u
 
     uint32_t cr_local_idx = 0;
     uint32_t target_idx = 0;
-    bondp_parse_health_user_ctx(cr->user_ctx, &cr_local_idx, &target_idx);
+    uint32_t vjetty_id = 0;
+    bondp_parse_health_user_ctx(cr->user_ctx, &vjetty_id, &cr_local_idx, &target_idx);
     if (cr_local_idx >= URMA_UBAGG_DEV_MAX_NUM || target_idx >= URMA_UBAGG_DEV_MAX_NUM ||
         (uint32_t)local_idx != cr_local_idx) {
         URMA_LOG_WARN("Health CR decode mismatch, user_ctx:0x%lx local_idx:%d parsed_local:%u parsed_target:%u\n",
@@ -882,30 +904,29 @@ bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, u
 
     bondp_heath_check_ctx_t *health = &bdp_ctx->bondp_heath_check_ctx;
     bool consumed = false;
-    pthread_rwlock_rdlock(&health->task_lock);
-    bondp_health_task_t *task = NULL;
-    UB_LIST_FOR_EACH(task, node, &health->task_list) {
+    pthread_rwlock_rdlock(&health->task_table.lock);
+    uint32_t hash = bondp_health_task_hash(vjetty_id);
+    hmap_node_t *node_ptr = bondp_hash_table_lookup_without_lock(&health->task_table, &vjetty_id, hash);
+    if (node_ptr != NULL) {
+        bondp_health_task_t *task = CONTAINER_OF_FIELD(node_ptr, bondp_health_task_t, hmap_node);
         bondp_health_sub_task_t *sub = &task->sub_tasks[cr_local_idx][target_idx];
-        if (!sub->valid || sub->user_ctx != cr->user_ctx || sub->local_idx != local_idx) {
-            continue;
+        if (sub->valid && sub->user_ctx == cr->user_ctx && sub->local_idx == local_idx) {
+            sub->probe_pending = false;
+            bool old_ok = atomic_load(&sub->link_ok);
+            bool ok = (cr->status == URMA_CR_SUCCESS);
+            atomic_store(&sub->link_ok, ok);
+            task->bondp_jetty->valid[sub->local_idx] = ok;
+            if (old_ok != ok) {
+                URMA_LOG_INFO("Health link state changed, tjetty_id:%u lidx:%d tidx:%d user_ctx:0x%lx old:%d new:%d cr_status:%u\n",
+                    task->bdp_tjetty->v_tjetty.id.id, local_idx, (int)target_idx, cr->user_ctx, old_ok, ok, cr->status);
+            } else {
+                URMA_LOG_INFO("Health CR handled, tjetty_id:%u lidx:%d tidx:%d user_ctx:0x%lx status:%u\n",
+                    task->bdp_tjetty->v_tjetty.id.id, local_idx, (int)target_idx, cr->user_ctx, cr->status);
+            }
+            consumed = true;
         }
-
-        sub->probe_pending = false;
-        bool old_ok = atomic_load(&sub->link_ok);
-        bool ok = (cr->status == URMA_CR_SUCCESS);
-        atomic_store(&sub->link_ok, ok);
-        task->bondp_jetty->valid[sub->local_idx] = ok;
-        if (old_ok != ok) {
-            URMA_LOG_INFO("Health link state changed, tjetty_id:%u lidx:%d tidx:%d user_ctx:0x%lx old:%d new:%d cr_status:%u\n",
-                task->bdp_tjetty->v_tjetty.id.id, local_idx, (int)target_idx, cr->user_ctx, old_ok, ok, cr->status);
-        } else {
-            URMA_LOG_INFO("Health CR handled, tjetty_id:%u lidx:%d tidx:%d user_ctx:0x%lx status:%u\n",
-                task->bdp_tjetty->v_tjetty.id.id, local_idx, (int)target_idx, cr->user_ctx, cr->status);
-        }
-        consumed = true;
-        break;
     }
-    pthread_rwlock_unlock(&health->task_lock);
+    pthread_rwlock_unlock(&health->task_table.lock);
     if (!consumed) {
         URMA_LOG_WARN("Health CR not matched to subtask, local_idx:%d user_ctx:0x%lx\n", local_idx, cr->user_ctx);
     }
@@ -973,21 +994,13 @@ void bondp_destroy_health_check_ctx(bondp_context_t *bond_ctx)
 {
     bondp_global_context_t *global_ctx = g_bondp_global_ctx;
     bondp_heath_check_ctx_t *health = NULL;
-    bondp_health_task_t *task = NULL;
-    bondp_health_task_t *next = NULL;
 
     if (!bondp_health_check_enabled()) {
         return;
     }
 
     health = &bond_ctx->bondp_heath_check_ctx;
-    pthread_rwlock_wrlock(&health->task_lock);
-    UB_LIST_FOR_EACH_SAFE(task, next, node, &health->task_list) {
-        ub_list_remove(&task->node);
-        bondp_free_health_task(task);
-    }
-    pthread_rwlock_unlock(&health->task_lock);
-    pthread_rwlock_destroy(&health->task_lock);
+    bondp_hash_table_destroy(&health->task_table);
     bondp_unregister_health_ctx_global(bond_ctx);
 
     if (global_ctx->health_thread_ctx.health_epoll_fd >= 0 && health->health_check_fd >= 0) {
@@ -1020,16 +1033,14 @@ int bondp_create_health_check_ctx(bondp_context_t *bond_ctx)
         goto ERR;
     }
 
-    if (global_ctx->health_thread_ctx.health_epoll_fd < 0) {
-        URMA_LOG_ERR("Health check thread is not created\n");
+    if (bondp_hash_table_create(&health->task_table, BONDP_HEALTH_TASK_TABLE_SIZE,
+        bondp_health_task_comp_f, bondp_health_task_free_f, bondp_health_task_hash_f) != 0) {
+        URMA_LOG_ERR("Failed to create health task table\n");
         goto ERR_EVENT_LOCK;
     }
 
-    pthread_rwlock_init(&health->task_lock, NULL);
-    ub_list_init(&health->task_list);
-
     if (bondp_register_health_check_seg(bond_ctx) != 0) {
-        goto DEL_LOCK;
+        goto DEL_TASK_TABLE;
     }
 
     health->health_check_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
@@ -1063,8 +1074,8 @@ ERR_EPOLL_ADD:
     health->health_check_fd = -1;
 UNREGISTER_SEG:
     bondp_unregister_health_check_seg(bond_ctx);
-DEL_LOCK:
-    pthread_rwlock_destroy(&health->task_lock);
+DEL_TASK_TABLE:
+    bondp_hash_table_destroy(&health->task_table);
 ERR_EVENT_LOCK:
     pthread_spin_destroy(&health->event_lock);
 ERR:
