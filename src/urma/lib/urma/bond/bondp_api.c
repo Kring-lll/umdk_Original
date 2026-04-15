@@ -578,7 +578,6 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     bdp_jfs->bondp_ctx = bdp_ctx;
     bdp_jfs->comp_type = BONDP_COMP_JFS;
     atomic_init(&bdp_jfs->use_cnt.atomic_cnt, 0);
-    bdp_jfs->is_multipath = cfg->flag.bs.multi_path;
     bdp_jfs->send_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
     bdp_jfs->recv_jfc = NULL;
 
@@ -696,7 +695,7 @@ urma_status_t bondp_modify_jfs(urma_jfs_t *jfs, urma_jfs_attr_t *attr)
 static int bondp_create_vjfr(bondp_context_t *bdp_ctx, urma_jfr_cfg_t *cfg, bondp_comp_t *bdp_jfr)
 {
     bondp_create_vjfr_udata_t jfr_info = {
-        .is_multipath = bdp_jfr->is_multipath,
+        .is_multipath = bdp_ctx->bonding_level,
     };
 
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
@@ -830,12 +829,6 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
     atomic_init(&bdp_jfr->use_cnt.atomic_cnt, 0);
     bdp_jfr->send_jfc = NULL;
     bdp_jfr->recv_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
-    bdp_jfr->is_multipath = true;
-
-    if (cfg->flag.bs.has_drv_ext) {
-        const bondp_jfr_cfg_t *bdp_cfg = (const bondp_jfr_cfg_t *)cfg;
-        bdp_jfr->is_multipath = bdp_cfg->multi_path;
-    }
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
     uint32_t cfg_active_port_count = 0;
@@ -1164,7 +1157,6 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     bdp_jetty->bondp_ctx = bdp_ctx;
     bdp_jetty->comp_type = BONDP_COMP_JETTY;
     atomic_init(&bdp_jetty->use_cnt.atomic_cnt, 0);
-    bdp_jetty->is_multipath = jetty_cfg->jfs_cfg.flag.bs.multi_path;
     bdp_jetty->send_jfc = CONTAINER_OF_FIELD(jetty_cfg->jfs_cfg.jfc, bondp_jfc_t, v_jfc);
     bdp_jetty->recv_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr->jfr_cfg.jfc, bondp_jfc_t, v_jfc);
 
@@ -1513,31 +1505,16 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
                      EID_ARGS(rjetty->jetty_id.eid), rjetty->jetty_id.id);
         goto FREE_TJETTY;
     }
-    bdp_tjetty->is_multipath = rvjetty_info.is_multipath;
-
-    if (rvjetty_info.is_multipath) {
-        if (rjetty->tp_type != URMA_CTP) {
-            URMA_LOG_ERR("Multi-path jetty only support CTP, tp_type:%d\n", rjetty->tp_type);
-            errno = EINVAL;
-            goto UNIMPORT_VJETTY;
-        }
-        if (rjetty->trans_mode != URMA_TM_RM && rjetty->trans_mode != URMA_TM_RC) {
-            URMA_LOG_ERR("Multi-path jetty only support RM or RC, trans_mode:%d\n", rjetty->trans_mode);
-            errno = EINVAL;
-            goto UNIMPORT_VJETTY;
-        }
-    }
 
     bondp_comp_t fake_jetty = {0};
     bool is_fake_jetty = false;
     if (cfg_jetty == NULL) {
-        if (rjetty->trans_mode == URMA_TM_RM && !bdp_tjetty->is_multipath) {
+        if (rjetty->trans_mode == URMA_TM_RM && bdp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP) {
             URMA_LOG_ERR("RM jetty import requires drv_ext.vjetty.\n");
             return NULL;
         }
         is_fake_jetty = true;
         cfg_jetty = &fake_jetty;
-        fake_jetty.is_multipath = bdp_tjetty->is_multipath;
         if (init_active_indices(bdp_ctx, &fake_jetty, NULL, 0) != 0) {
             URMA_LOG_ERR("Failed to init active indices\n");
             return NULL;
@@ -1570,7 +1547,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     if (rjetty->trans_mode == URMA_TM_RM && rjetty->flag.bs.has_drv_ext && !is_fake_jetty) {
         cfg_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
     }
-	
+
     if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty, cfg_jetty) != 0) {
         URMA_LOG_ERR("Failed to register health check task\n");
         goto UNIMPORT_TSEG;
@@ -1776,12 +1753,11 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
 
     bondp_comp_t fake_jfs = {0};
     if (cfg_jfs == NULL) {
-        if (rjfr->trans_mode == URMA_TM_RM && !bdp_tjetty->is_multipath) {
+        if (rjfr->trans_mode == URMA_TM_RM && bdp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP) {
             URMA_LOG_ERR("RM jfr import requires drv_ext.vjfs\n");
             return NULL;
         }
         cfg_jfs = &fake_jfs;
-        fake_jfs.is_multipath = bdp_tjetty->is_multipath;
         if (init_active_indices(bdp_ctx, &fake_jfs, NULL, 0) != 0) {
             URMA_LOG_ERR("Failed to init active indices\n");
             return NULL;
