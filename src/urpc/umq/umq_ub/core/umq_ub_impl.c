@@ -853,6 +853,15 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, umq_create_opt
         goto DELETE_FC_JETTY;
     }
 
+    // NOTICE: fc jetty don't use share jfr
+    uint8_t rqe_post_factor = queue->used_port_num == 0 ? 1 : queue->used_port_num;
+    for (uint32_t i = 0; i < UMQ_UB_FLOW_CONTORL_JETTY_DEPTH * rqe_post_factor; i++) {
+        int ret = umq_ub_fill_fc_rx_buf(queue);
+        if (ret != UMQ_SUCCESS) {
+            goto DELETE_FC_JETTY;
+        }
+    }
+
     dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id] =
         (uint64_t)(uintptr_t)queue;
 
