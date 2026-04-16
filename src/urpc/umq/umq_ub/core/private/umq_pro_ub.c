@@ -845,7 +845,7 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
-    if (queue->flow_control.enabled) {
+    if (queue->flow_control.enabled && (queue->mode == UMQ_MODE_POLLING || queue->interrupt_ctx.rx_fc_interrupt)) {
         /* buf is not NULL here, so umq_ub_poll_fc_rx returns qbuf_cnt >= 0 */
         qbuf_cnt += (uint32_t)umq_ub_poll_fc_rx(queue, buf, max_batch);
     }
@@ -868,6 +868,10 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
         goto OUT;
     }
 
+    if ((queue->mode != UMQ_MODE_POLLING && queue->interrupt_ctx.rx_io_interrupt == false)) {
+        goto OUT;
+    }
+
     uint64_t start_timestmap = umq_perf_get_start_timestamp();
     int rx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfc, max_batch, cr);
     umq_perf_record_write_poll(UMQ_PERF_RECORD_TRANSPORT_POLL_RX, start_timestmap, rx_cr_cnt);
@@ -882,7 +886,9 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
     if (queue->flow_control.enabled && rx_cr_cnt != 0) {
         (void)credit->ops.allocated_credit_dec(credit, rx_cr_cnt);
     }
-
+    if (rx_cr_cnt > 0) {
+        queue->interrupt_ctx.rx_io_interrupt = false;
+    }
     uint32_t success_cnt = 0;
     for (int i = 0; i < rx_cr_cnt; i++) {
         buf[qbuf_cnt] = umq_get_buf_by_user_ctx(queue, cr[i].user_ctx, UB_QUEUE_JETTY_IO);
