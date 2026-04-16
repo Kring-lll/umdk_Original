@@ -136,7 +136,7 @@ static int bondp_global_ctx_uninit(bondp_global_context_t *bondp_global_ctx)
 urma_status_t bondp_init(urma_init_attr_t *conf)
 {
     if (g_bondp_global_ctx != NULL) {
-        URMA_LOG_ERR("Initialized already\n");
+        URMA_LOG_WARN("Initialized already\n");
         return URMA_FAIL;
     }
     int ret = bondp_global_ctx_init(&g_bondp_global_ctx);
@@ -395,7 +395,13 @@ static int bondp_create_pctx(bondp_context_t *bond_ctx, bondp_bonding_mode_t bon
                 break;
             }
         }
-    } else {
+    }
+
+    // For compatibility reasons, we create contexts for both the primary EID
+    // and the port EID in standalone mode.
+    if (bonding_level == BONDP_BONDING_LEVEL_PORT ||
+        bonding_mode == BONDP_BONDING_MODE_STANDALONE) {
+
         for (int i = 0; i < IODIE_NUM; i++) {
 
             bondp_physical_device_t *pdev = &dev_info.physical_devs[i];
@@ -578,6 +584,9 @@ int bondp_set_bonding_mode(urma_context_t *ctx, bondp_bonding_mode_t bonding_mod
         bond_ctx->bonding_level == bonding_level) {
         goto EXIT;
     }
+
+    bond_ctx->bonding_mode = bonding_mode;
+    bond_ctx->bonding_level = bonding_level;
 
     ret = bondp_delete_pctx(bond_ctx);
     if (ret != 0) {

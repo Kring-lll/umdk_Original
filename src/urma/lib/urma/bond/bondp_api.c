@@ -374,7 +374,7 @@ static int init_active_indices(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_comp,
 {
     if (port_ids == NULL || port_count == 0) {
         int start, end;
-        if (bdp_comp->is_multipath) {
+        if (bdp_ctx->bonding_level == BONDP_BONDING_LEVEL_IODIE) {
             start = 0;
             end = IODIE_NUM;
         } else {
@@ -437,9 +437,14 @@ static int init_target_active_indices(bondp_context_t *bdp_ctx, bondp_target_jet
                 bdp_tjetty->active_indices[active_count] = target_indice;
                 bdp_tjetty->local_active_indices[active_count] = local_indice;
                 active_count += 1;
+                if (bdp_ctx->bonding_mode == BONDP_BONDING_MODE_STANDALONE) {
+                    goto FIND_FINISH;
+                }
             }
         }
     }
+
+FIND_FINISH:
     if (active_count == 0) {
         URMA_LOG_ERR("Failed to find connected port\n")
         return -1;
@@ -1744,8 +1749,8 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
 
     bondp_comp_t *cfg_jfs = NULL;
     if (rjfr->flag.bs.has_drv_ext) {
-        const bondp_rjetty_t *bdp_rjetty = (const bondp_rjetty_t *)rjfr;
-        cfg_jfs = CONTAINER_OF_FIELD(bdp_rjetty->jfs, bondp_comp_t, v_jfs);
+        const bondp_rjfr_t *bdp_rjfr = (const bondp_rjfr_t *)rjfr;
+        cfg_jfs = CONTAINER_OF_FIELD(bdp_rjfr->jfs, bondp_comp_t, v_jfs);
     }
 
     bondp_target_jetty_t *bdp_tjetty = calloc(1, sizeof(bondp_target_jetty_t));

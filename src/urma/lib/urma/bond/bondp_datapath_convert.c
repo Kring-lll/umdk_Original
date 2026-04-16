@@ -46,17 +46,17 @@ static int copy_sg_list(const urma_sg_t *src, urma_sg_t *dst, urma_sge_t *preall
     dst->num_sge = src->num_sge;
     dst->sge = NULL;
 
-    if (prealloc_sge != NULL) {
-        dst->sge = prealloc_sge;
-    } else if (dst->num_sge > 0) {
-        dst->sge = (urma_sge_t *)malloc(dst->num_sge * sizeof(urma_sge_t));
+    if (dst->num_sge > 0) {
+        if (prealloc_sge != NULL) {
+            dst->sge = prealloc_sge;
+        } else {
+            dst->sge = (urma_sge_t *)malloc(dst->num_sge * sizeof(urma_sge_t));
+            if (dst->sge == NULL) {
+                return -1;
+            }
+        }
+        (void)memcpy(dst->sge, src->sge, src->num_sge * sizeof(urma_sge_t));
     }
-
-    if (dst->sge == NULL) {
-        return -1;
-    }
-
-    (void)memcpy(dst->sge, src->sge, src->num_sge * sizeof(urma_sge_t));
     return 0;
 }
 
@@ -176,10 +176,12 @@ static inline urma_target_seg_t *get_p_tseg(urma_target_seg_t *tseg, int local_i
 static urma_status_t set_send_wr_ptseg_ptjetty(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty,
                                                int send_idx, int target_idx)
 {
-    for (int i = 0; i < send_wr->send.src.num_sge; ++i) {
-        urma_target_seg_t *vtseg = send_wr->send.src.sge[i].tseg;
-        vtseg = (urma_target_seg_t *)vtseg->handle;
-        send_wr->send.src.sge[i].tseg = get_p_tseg(vtseg, send_idx, target_idx);
+    if (send_wr->send.src.num_sge > 0 && send_wr->send.src.sge != NULL) {
+        for (int i = 0; i < send_wr->send.src.num_sge; ++i) {
+            urma_target_seg_t *vtseg = send_wr->send.src.sge[i].tseg;
+            vtseg = (urma_target_seg_t *)vtseg->handle;
+            send_wr->send.src.sge[i].tseg = get_p_tseg(vtseg, send_idx, target_idx);
+        }
     }
     send_wr->tjetty = get_p_tjetty(vtjetty, send_idx, target_idx);
     return URMA_SUCCESS;
@@ -260,7 +262,7 @@ static urma_status_t set_fadd_wr_ptseg_pjetty(urma_jfs_wr_t *send_wr, urma_targe
 }
 
 int convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target_idx,
-                           bjetty_ctx_t *bjetty_ctx, bdp_v_conn_t *v_conn)
+                           bondp_comp_t *bdp_comp, bdp_v_conn_t *v_conn)
 {
     uint64_t opcode_tag = 0;
 
@@ -279,7 +281,7 @@ int convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target_idx,
             wr->send.imm_data = encode_imm_data(
                 opcode_tag,
                 v_conn->msn,
-                bjetty_ctx->bdp_comp->v_jetty.jetty_id.id,
+                bdp_comp->v_jetty.jetty_id.id,
                 wr->send.imm_data);
             v_conn->msn = (v_conn->msn + 1) % BONDP_MAX_BITMAP_SIZE;
 
@@ -292,7 +294,7 @@ int convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target_idx,
                 wr->rw.notify_data = encode_imm_data(
                     opcode_tag,
                     v_conn->msn,
-                    bjetty_ctx->bdp_comp->v_jetty.jetty_id.id,
+                    bdp_comp->v_jetty.jetty_id.id,
                     wr->rw.notify_data);
                 v_conn->msn = (v_conn->msn + 1) % BONDP_MAX_BITMAP_SIZE;
             }

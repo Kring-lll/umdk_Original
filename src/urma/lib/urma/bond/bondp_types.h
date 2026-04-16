@@ -63,6 +63,17 @@ typedef struct bondp_health_sub_task {
     uint64_t user_ctx;
 } bondp_health_sub_task_t;
 
+typedef struct bondp_fallback_task {
+    bool pending;
+    bool local_rebuilt;
+    bool req_sent;
+    bool resp_received;
+    bool relink_done;
+    uint8_t req_seq;
+    uint32_t remote_primary_pjetty_id;
+    uint32_t primary_target_idx;
+} bondp_fallback_task_t;
+
 typedef struct bondp_health_task {
     struct bondp_target_jetty *bdp_tjetty;
     struct bondp_comp *bondp_jetty;
@@ -71,6 +82,7 @@ typedef struct bondp_health_task {
     int active_local_idx;
     bondp_health_mode_t mode;
     uint32_t backoff_cnt;
+    bondp_fallback_task_t fallback_task;
     bondp_health_sub_task_t sub_tasks[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
     struct ub_list node;
 } bondp_health_task_t;
@@ -82,6 +94,8 @@ typedef struct bondp_heath_check_ctx {
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
     pthread_rwlock_t task_lock;
     struct ub_list task_list;
+    pthread_spinlock_t event_lock;
+    struct ub_list event_list;
 } bondp_heath_check_ctx_t;
 
 typedef struct bondp_health_check_cfg {
@@ -309,16 +323,6 @@ static inline int get_matrix_port_p_idx(int primary_idx, int port_idx)
 static inline bool is_empty_eid(urma_eid_t *eid)
 {
     return eid->in6.interface_id == 0 && eid->in6.subnet_prefix == 0;
-}
-
-static inline bool is_multipath_jetty(urma_jetty_t *jetty)
-{
-    return jetty->jetty_cfg.jfs_cfg.flag.bs.multi_path;
-}
-
-static inline bool is_multipath_comp(bondp_comp_t *bdp_comp)
-{
-    return bdp_comp->is_multipath;
 }
 
 static inline bool is_single_dev_mode(urma_context_t *ctx)

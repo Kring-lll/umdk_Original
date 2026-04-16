@@ -8,6 +8,23 @@
 
 #include "bondp_types.h"
 
+typedef enum bondp_health_event {
+    BONDP_HEALTH_EVENT_TA_TIMEOUT  = 0,
+    BONDP_HEALTH_EVENT_ACTIVE_IDX_UPDATE,
+    BONDP_HEALTH_EVENT_FALLBACK_TASK_KICK,
+    BONDP_HEALTH_EVENT_MAX,
+} bondp_health_event_t;
+
+typedef struct bondp_health_event_info {
+    int local_idx;
+	int target_idx;
+	uint64_t user_ctx;
+	uint32_t cr_status;
+	int new_active_idx;
+	bondp_comp_t *bdp_jetty;
+	bondp_target_jetty_t *bdp_tjetty;
+} bondp_health_event_info_t;
+
 void bondp_health_check_global_ctx_init(bondp_global_context_t *ctx);
 void bondp_health_check_global_ctx_uninit(bondp_global_context_t *ctx);
 void bondp_health_check_ctx_init(bondp_context_t *bond_ctx);
@@ -28,5 +45,9 @@ void bondp_unregister_health_check_task(bondp_target_jetty_t *bdp_tjetty);
 void bondp_health_update_active_idx(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
 	int new_active_idx);
 bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, urma_cr_t *cr);
+void bondp_health_kick_fallback_task(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty);
+bool bondp_try_handle_fallback_cr(bondp_context_t *bdp_ctx, int local_idx, urma_cr_t *cr);
+void bondp_notify_health_event(bondp_context_t *bdp_ctx, bondp_health_event_t event,
+	const bondp_health_event_info_t *info);
 
 #endif // BONDP_HEALTH_CHECK_H
