@@ -328,7 +328,7 @@ class UBUSHost(BaseObject):
                                         warn=True, pty=True, env=env)
                 res.ret = res.return_code
                 if silence == 0:
-                    log.info(f" [ {self.manage_ip}  exec_cmd end ] {cmd_args} ret={res.ret} stdout=\n{res.stdout}")
+                    log.info(f" [ {self.manage_ip}  exec_cmd end ] {cmd_args}")
                 if log_path is not None:
                     log_path.close()
             except Exception as reason:

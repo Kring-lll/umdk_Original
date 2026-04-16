@@ -122,7 +122,7 @@ class BaseTest(BaseObject):
                 for port in host.exec_cmd(_cmd, silence=True).stdout.split("\r\n"):
                     if port.isdigit():
                         self.used_ports.add(int(port))
-            log.info(f"self.used_ports = {self.used_ports}")
+            # log.info(f"self.used_ports = {self.used_ports}")
 
         for port in range(self.free_port, 65535):
             if port not in self.used_ports:
