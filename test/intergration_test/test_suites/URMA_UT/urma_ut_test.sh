@@ -24,8 +24,9 @@ function run_test() {
         log_args="--log-cli-level=ERROR"
     fi
 
+    echo "------------------------------------------------"
     echo "Running pytest for: $test_file (Log Switch: $LOG_SWITCH)"
-    pytest $log_args "$test_file"
+    pytest "${log_args[@]}" "$test_file"
 }
 
 function prepare_and_run() {
