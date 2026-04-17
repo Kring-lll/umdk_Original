@@ -1765,6 +1765,7 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
                      EID_ARGS(rjfr->jfr_id.eid), rjfr->jfr_id.id);
         goto FREE_TJFR;
     }
+    bdp_tjetty->is_multipath = udata_out.is_multipath;
 
     bondp_comp_t fake_jfs = {0};
     if (cfg_jfs == NULL) {
