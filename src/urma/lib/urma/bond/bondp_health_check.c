@@ -786,7 +786,7 @@ static void bondp_drain_primary_jetty_wr(urma_jetty_t *old_jetty, int local_idx)
     } while (flushed > 0);
 }
 
-static int bondp_rebuild_primary_pjetty(bondp_health_task_t *task)
+static int bondp_rebuild_pjetty_by_local_idx(bondp_health_task_t *task, int local_idx)
 {
     if (task == NULL || task->bondp_jetty == NULL) {
         return -1;
@@ -794,17 +794,16 @@ static int bondp_rebuild_primary_pjetty(bondp_health_task_t *task)
 
     bondp_comp_t *bdp_jetty = task->bondp_jetty;
     bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
-    int local_idx = task->primary_local_idx;
     if (local_idx < 0 || local_idx >= URMA_UBAGG_DEV_MAX_NUM || bdp_jetty->p_jetty[local_idx] == NULL) {
         return -1;
     }
     int target_idx = -1;
-    bondp_health_sub_task_t *primary_sub_task = NULL;
+    bondp_health_sub_task_t *rebuild_sub_task = NULL;
     if (bondp_get_target_idx_by_local_idx(task, local_idx, &target_idx) == 0 &&
         target_idx >= 0 && target_idx < URMA_UBAGG_DEV_MAX_NUM) {
-        primary_sub_task = &task->sub_tasks[local_idx][target_idx];
-        primary_sub_task->valid = false;
-        primary_sub_task->probe_pending = false;
+        rebuild_sub_task = &task->sub_tasks[local_idx][target_idx];
+        rebuild_sub_task->valid = false;
+        rebuild_sub_task->probe_pending = false;
     }
 
     urma_jetty_t *old_jetty = bdp_jetty->p_jetty[local_idx];
@@ -825,13 +824,13 @@ static int bondp_rebuild_primary_pjetty(bondp_health_task_t *task)
 
     urma_jetty_id_t old_id = old_jetty->jetty_id;
     if (urma_delete_jetty(old_jetty) != URMA_SUCCESS) {
-        URMA_LOG_ERR("Failed to delete primary pjetty at idx:%d\n", local_idx);
+        URMA_LOG_ERR("Failed to delete pjetty at idx:%d\n", local_idx);
         return -1;
     }
 
     urma_jetty_t *new_jetty = urma_create_jetty(bdp_ctx->p_ctxs[local_idx], &p_cfg);
     if (new_jetty == NULL) {
-        URMA_LOG_ERR("Failed to recreate primary pjetty at idx:%d\n", local_idx);
+        URMA_LOG_ERR("Failed to recreate pjetty at idx:%d\n", local_idx);
         return -1;
     }
     /* Recreated primary pjetty should not keep stale peer binding. */
@@ -844,13 +843,21 @@ static int bondp_rebuild_primary_pjetty(bondp_health_task_t *task)
         return -1;
     }
 
-    if (primary_sub_task != NULL) {
-        primary_sub_task->valid = true;
-        primary_sub_task->probe_pending = false;
+    if (rebuild_sub_task != NULL) {
+        rebuild_sub_task->valid = true;
+        rebuild_sub_task->probe_pending = false;
     }
-    URMA_LOG_INFO("Primary pjetty rebuilt, idx:%d old:" URMA_JETTY_ID_FMT " new:" URMA_JETTY_ID_FMT "\n",
+    URMA_LOG_INFO("Pjetty rebuilt, idx:%d old:" URMA_JETTY_ID_FMT " new:" URMA_JETTY_ID_FMT "\n",
         local_idx, URMA_JETTY_ID_ARGS(&old_id), URMA_JETTY_ID_ARGS(&new_jetty->jetty_id));
     return 0;
+}
+
+static int bondp_rebuild_primary_pjetty(bondp_health_task_t *task)
+{
+    if (task == NULL) {
+        return -1;
+    }
+    return bondp_rebuild_pjetty_by_local_idx(task, task->primary_local_idx);
 }
 
 static int bondp_send_fallback_ctrl_msg(
@@ -1459,7 +1466,7 @@ static void bondp_health_handle_ta_timeout_event(bondp_context_t *bdp_ctx, const
 
     bondp_heath_check_ctx_t *health = &bdp_ctx->bondp_heath_check_ctx;
     bool consumed = false;
-    pthread_rwlock_rdlock(&health->task_table.lock);
+    pthread_rwlock_wrlock(&health->task_table.lock);
     uint32_t hash = bondp_health_task_hash(vjetty_id);
     hmap_node_t *node_ptr = bondp_hash_table_lookup_without_lock(&health->task_table, &vjetty_id, hash);
     if (node_ptr != NULL) {
@@ -1472,6 +1479,15 @@ static void bondp_health_handle_ta_timeout_event(bondp_context_t *bdp_ctx, const
             bool ok = (info->cr_status == URMA_CR_SUCCESS);
             atomic_store(&sub->link_ok, ok);
             task->bondp_jetty->valid[sub->local_idx] = ok;
+            if (old_ok && !ok && info->local_idx != task->primary_local_idx) {
+                if (bondp_rebuild_pjetty_by_local_idx(task, info->local_idx) == 0) {
+                    URMA_LOG_INFO("Backup link health failed, trigger pjetty rebuild, tjetty:%u lidx:%d tidx:%d\n",
+                        task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx);
+                } else {
+                    URMA_LOG_WARN("Backup link health failed, rebuild pjetty failed, tjetty:%u lidx:%d tidx:%d\n",
+                        task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx);
+                }
+            }
             if (old_ok != ok) {
                 URMA_LOG_WARN("Health link state changed, tjetty:%u lidx:%d tidx:%d user_ctx:0x%lx old:%d new:%d cr_status:%u\n",
                     task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx, info->user_ctx, old_ok, ok,
