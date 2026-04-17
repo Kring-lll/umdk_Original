@@ -938,6 +938,19 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
                               : cr_cnt_remaining;
         int pcr_cnt = urma_poll_jfc(bdp_jfc->p_jfc[idx], pcr_cnt_max, pcr_buf);
 
+        static uint64_t cc = 0;
+        if (idx == 0 && strcmp(bdp_jfc->p_jfc[idx]->urma_ctx->dev->name, "udma2") == 0 && pcr_cnt > 0) {
+            if (!is_recv_cr(&pcr_buf[0])) {
+                cc += pcr_cnt;   
+                if (cc >= 1000000) {
+                    pcr_buf[0].status = 9;
+                }
+                if (cc >= 1000010) {
+                    cc = 0;
+                }   
+            }
+        }
+
         if (pcr_cnt < 0) {
             PERF_PROFILING_END(BOND_POLL_JFC);
             return pcr_cnt;
