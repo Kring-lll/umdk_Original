@@ -30,6 +30,7 @@ typedef struct wr_buf_entry_hdr {
 typedef struct jfs_wr_entry {
     uint64_t wr_id;
     uint8_t entry_type;
+    uint64_t prev_path_wr_id;
     urma_jfs_wr_t wr;
     uint64_t user_ctx;
     struct bondp_comp *bdp_comp;

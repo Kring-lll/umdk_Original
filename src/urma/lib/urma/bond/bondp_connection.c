@@ -7,6 +7,8 @@
  * Note:
  * History: 2025-03-06  Create file
  */
+#include <string.h>
+
 #include "bondp_connection.h"
 #include "bondp_types.h"
 #include "ub_hash.h"
@@ -21,13 +23,16 @@ void init_v_conn_on_send(bdp_v_conn_t *v_conn, void *target_vjetty, int target_d
         URMA_LOG_ERR("Invalid param\n");
         return;
     }
+    (void)target_dev_num;
     bondp_target_jetty_t *bdp_tjetty = target_vjetty;
     v_conn->target_vjetty = bdp_tjetty;
+    (void)memset(v_conn->last_path_wr_id, 0, sizeof(v_conn->last_path_wr_id));
 }
 
 int bdp_v_conn_init(bdp_v_conn_t *v_conn)
 {
     v_conn->target_vjetty = NULL;
+    (void)memset(v_conn->last_path_wr_id, 0, sizeof(v_conn->last_path_wr_id));
     v_conn->msn = 0;
     if (bdp_slide_wnd_init(&v_conn->recv_wnd, BONDP_MAX_BITMAP_SIZE, BONDP_RECV_WND_SIZE, 0)) {
         URMA_LOG_ERR("Failed to init slide window in bdp_v_conn_table_add\n");

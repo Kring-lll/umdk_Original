@@ -8,6 +8,7 @@
  * History: 2025-02-19   Create File
  */
 
+#include <stdlib.h>
 #include <threads.h>
 
 #include "bondp_connection.h"
@@ -303,6 +304,7 @@ static urma_status_t bondp_post_send_wr_and_store(bondp_comp_t *bdp_comp, urma_j
     wr_entry->v_conn = v_conn;
     wr_entry->send_idx = send_idx;
     wr_entry->target_idx = target_idx;
+    wr_entry->prev_path_wr_id = 0;
 
     urma_jfs_wr_t *pwr = &wr_entry->wr;
     ret = copy_jfs_wr(wr, pwr, NULL, NULL);
@@ -322,6 +324,10 @@ static urma_status_t bondp_post_send_wr_and_store(bondp_comp_t *bdp_comp, urma_j
     if (ret != URMA_SUCCESS) {
         URMA_LOG_ERR("Failed to post send wr\n");
         goto FREE_PWR;
+    }
+    if (send_idx < URMA_UBAGG_DEV_MAX_NUM && target_idx < URMA_UBAGG_DEV_MAX_NUM) {
+        wr_entry->prev_path_wr_id = v_conn->last_path_wr_id[send_idx][target_idx];
+        v_conn->last_path_wr_id[send_idx][target_idx] = wr_entry->wr_id;
     }
 
     return URMA_SUCCESS;
@@ -646,6 +652,43 @@ static int resend_jfs_wr(jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
     return 0;
 }
 
+static int collect_resend_jfs_wr_entries_on_path(
+    wr_buf_t *wr_buf, const jfs_wr_entry_t *trigger_wr_entry, jfs_wr_entry_t **entries, uint32_t *entry_cnt)
+{
+    if (wr_buf == NULL || trigger_wr_entry == NULL || entries == NULL || entry_cnt == NULL) {
+        return -1;
+    }
+
+    if (trigger_wr_entry->v_conn == NULL ||
+        trigger_wr_entry->send_idx >= URMA_UBAGG_DEV_MAX_NUM ||
+        trigger_wr_entry->target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return -1;
+    }
+
+    uint64_t backtrack_wr_id =
+        trigger_wr_entry->v_conn->last_path_wr_id[trigger_wr_entry->send_idx][trigger_wr_entry->target_idx];
+    while (backtrack_wr_id != 0) {
+        if (*entry_cnt >= wr_buf->max_wr_num) {
+            return -1;
+        }
+        jfs_wr_entry_t *cur = jfs_wr_buf_get(wr_buf, backtrack_wr_id);
+        if (cur == NULL || cur->entry_type != WR_BUF_ENTRY_JFS ||
+            cur->bdp_comp != trigger_wr_entry->bdp_comp ||
+            cur->v_conn != trigger_wr_entry->v_conn ||
+            cur->send_idx != trigger_wr_entry->send_idx ||
+            cur->target_idx != trigger_wr_entry->target_idx) {
+            return -1;
+        }
+        entries[*entry_cnt] = cur;
+        *entry_cnt += 1;
+        if (cur->wr_id == trigger_wr_entry->wr_id) {
+            return 0;
+        }
+        backtrack_wr_id = cur->prev_path_wr_id;
+    }
+    return -1;
+}
+
 static bondp_comp_t *get_comp_by_cr(bondp_context_t *bdp_ctx, int dev_idx, urma_cr_t *cr)
 {
     urma_jetty_id_t pjetty_id = {
@@ -757,19 +800,31 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
 
             URMA_LOG_DEBUG("Resend from %d to %d\n", send_idx, new_send_idx);
 
-            for (int i = 0; i < bdp_jfc->wr_buf.max_wr_num; i++) {
-                const uint64_t wr_id = (wr_entry->wr_id + i) % bdp_jfc->wr_buf.max_wr_num + 1;
-                jfs_wr_entry_t *resend_wr_entry = jfs_wr_buf_get(&bdp_jfc->wr_buf, wr_id);
-                if (resend_wr_entry == NULL ||
-                    resend_wr_entry->send_idx != send_idx ||
-                    resend_wr_entry->target_idx != target_idx) {
-                    continue;
-                }
+            jfs_wr_entry_t **resend_entries = calloc(bdp_jfc->wr_buf.max_wr_num, sizeof(*resend_entries));
+            if (resend_entries == NULL) {
+                URMA_LOG_ERR("Failed to allocate resend entry array\n");
+                return CONVERT_FAIL;
+            }
+            uint32_t resend_entry_cnt = 0;
+            if (collect_resend_jfs_wr_entries_on_path(&bdp_jfc->wr_buf, wr_entry, resend_entries, &resend_entry_cnt) != 0) {
+                free(resend_entries);
+                URMA_LOG_ERR("Failed to collect resend entries\n");
+                return CONVERT_FAIL;
+            }
+            wr_entry->v_conn->last_path_wr_id[send_idx][target_idx] = 0;
+
+            for (uint32_t i = resend_entry_cnt; i > 0; i--) {
+                jfs_wr_entry_t *resend_wr_entry = resend_entries[i - 1];
+                resend_wr_entry->prev_path_wr_id =
+                    wr_entry->v_conn->last_path_wr_id[new_send_idx][new_target_idx];
                 bdp_comp->sqe_cnt[send_idx] -= 1;
                 if (resend_jfs_wr(resend_wr_entry, new_send_idx, new_target_idx) != 0) {
-                    URMA_LOG_ERR("Failed to resend jfs wr, wr_id: %lu\n", wr_id);
+                    URMA_LOG_ERR("Failed to resend jfs wr, wr_id: %lu\n", resend_wr_entry->wr_id);
+                    continue;
                 }
+                wr_entry->v_conn->last_path_wr_id[new_send_idx][new_target_idx] = resend_wr_entry->wr_id;
             }
+            free(resend_entries);
 
             /* Update active link after failover is finished. */
             bondp_health_update_active_idx(bdp_comp->bondp_ctx, wr_entry->v_conn->target_vjetty, new_send_idx);
@@ -799,6 +854,11 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
     convert_pcr_to_vcr(cr, bdp_comp->bondp_ctx, &msn);
     cr->local_id = get_comp_urma_jetty_id(bdp_comp)->id;
     cr->user_ctx = wr_entry->user_ctx;
+
+    if (wr_entry->v_conn != NULL && send_idx < URMA_UBAGG_DEV_MAX_NUM && target_idx < URMA_UBAGG_DEV_MAX_NUM &&
+        wr_entry->v_conn->last_path_wr_id[send_idx][target_idx] == wr_entry->wr_id) {
+        wr_entry->v_conn->last_path_wr_id[send_idx][target_idx] = wr_entry->prev_path_wr_id;
+    }
 
     free_jfs_wr(&wr_entry->wr);
     jfs_wr_buf_release(wr_entry);
