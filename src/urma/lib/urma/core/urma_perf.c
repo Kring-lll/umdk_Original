@@ -10,25 +10,33 @@
 
 #include <stdint.h>
 #include <stdlib.h>
-#include <math.h>
 #include <string.h>
 #include <stdio.h>
 #include <pthread.h>
-#include <threads.h>
-#include <unistd.h>
-#include <sys/syscall.h>
 
-#include "urma_api.h"
+#include "urma_log.h"
+#include "ub_get_clock.h"
 #include "urma_perf.h"
-#include "urma_types.h"
 #include "urma_private.h"
 
-#define URMA_PERF_MIN_VALUE 32
-#define URMA_PERF_MAX_VALUE 1000000000L
-#define URMA_PERF_SIGNIFICANT_FIGURES 5
+typedef struct urma_perf_record {
+    struct {
+        uint64_t accumulation;
+        uint64_t min;
+        uint64_t max;
+        uint64_t cnt;
+        uint64_t bucket[URMA_PERF_BUCKET_MAX_NUM + 1];
+    } type_record[URMA_PERF_RECORD_TYPE_MAX];
+    bool is_used;
+} urma_perf_record_t;
 
-#define URMA_SUCCESS 0
-#define URMA_ERROR -1
+typedef struct urma_perf_record_ctx {
+    urma_perf_record_t record_table[URMA_PERF_THREAD_MAX_NUM];
+    pthread_once_t *thread_run_once[URMA_PERF_THREAD_MAX_NUM];
+    uint64_t thresh_cycle[URMA_PERF_BUCKET_MAX_NUM];
+    uint64_t thresh_ns[URMA_PERF_BUCKET_MAX_NUM];
+    uint32_t thresh_num;
+} urma_perf_record_ctx_t;
 
 static const char* perf_type_names[] = {
     "UB_JETTY_POST_SEND",
@@ -48,291 +56,371 @@ static const char* perf_type_names[] = {
     "BOND_REARM_JFC"
 };
 
-thread_local urma_perf_context* g_perf_ctx;
+static uint64_t g_cpu_hz = 0;
+static __thread uint32_t g_perf_record_index = (uint32_t)-1;
+static __thread pthread_once_t g_thread_run_once = PTHREAD_ONCE_INIT;
+static pthread_spinlock_t g_urma_perf_record_lock;
+bool g_urma_perf_record_enable = false;
+static urma_perf_record_ctx_t *g_urma_perf_record_ctx = NULL;
 
-static int32_t get_bucket_index(int64_t value, int32_t unit_magnitude)
+static inline uint64_t get_cpu_hz_cached(void)
 {
-    int32_t leading_zero_count = __builtin_clzll(value);
-    // Count the number of leading zeros. 64 is the upper limit for the int64_t type.
-    int32_t pow2_ceiling = 64 - leading_zero_count;
-    return pow2_ceiling - unit_magnitude - 1;
+    if (g_cpu_hz == 0) {
+        g_cpu_hz = get_cpu_mhz(false) * 1000000UL;
+    }
+    return g_cpu_hz;
 }
 
-static int32_t get_sub_bucket_index(int64_t value, int32_t bucket_index, int32_t unit_magnitude, int32_t sub_bucket_count)
+static inline uint64_t ns_to_cycles(uint64_t ns)
 {
-    int64_t bucket_base = (int64_t)1 << (bucket_index + unit_magnitude);
-    int64_t sub_bucket_size = bucket_base / sub_bucket_count;
-    int64_t offset = value - bucket_base;
-    int32_t sub_bucket_index = (int32_t)(offset / sub_bucket_size);
-
-    if (sub_bucket_index < 0) {
-        sub_bucket_index = 0;
-    }
-    if (sub_bucket_index >= sub_bucket_count) {
-        sub_bucket_index = sub_bucket_count - 1;
-    }
-    return sub_bucket_index;
+    return ns * get_cpu_hz_cached() / 1000000000UL;
 }
 
-static int32_t counts_index(int32_t bucket_index, int32_t sub_bucket_index, int32_t sub_bucket_count)
+static inline uint64_t cycles_to_ns(uint64_t cycles)
 {
-    return bucket_index * sub_bucket_count + sub_bucket_index;
+    if (cycles != 0 && UINT64_MAX / cycles <= 1000000000UL) {
+        return cycles / get_cpu_hz_cached() * 1000000000UL;
+    } else {
+        return cycles * 1000000000UL / get_cpu_hz_cached();
+    }
 }
 
-static hdr_histogram_data* hdr_init(int64_t lowest_trackable_value, int64_t highest_trackable_value, int32_t significant_figures)
+static int urma_perf_init(void)
 {
-    int32_t unit_magnitude = (int32_t)floor(log(lowest_trackable_value) / log(2));
-    int32_t sub_bucket_magnitude = (int32_t)ceil(log(significant_figures * 2.0) / log(2));
-    int32_t sub_bucket_half_count = 1 << sub_bucket_magnitude;
-    int32_t sub_bucket_count = sub_bucket_half_count * 2;
-    int32_t sub_bucket_mask = sub_bucket_count - 1;
-    
-    int32_t bucket_count = get_bucket_index(highest_trackable_value, unit_magnitude) + 1;
-    
-    size_t counts_len = (bucket_count + 1) * sub_bucket_count;
-    size_t size = sizeof(hdr_histogram_data) + sizeof(int64_t) * counts_len;
-    
-    hdr_histogram_data* data = (hdr_histogram_data*)calloc(1, size);
-    if (data == NULL) {
-        printf("Failed to allocate memory for hdr_histogram_data\n");
-        return NULL;
+    if (g_urma_perf_record_ctx != NULL) {
+        return 0;
     }
-    data->lowest_trackable_value = lowest_trackable_value;
-    data->highest_trackable_value = highest_trackable_value;
-    data->significant_figures = significant_figures;
-    data->unit_magnitude = unit_magnitude;
-    data->sub_bucket_magnitude = sub_bucket_magnitude;
-    data->sub_bucket_half_count = sub_bucket_half_count;
-    data->sub_bucket_mask = sub_bucket_mask;
-    data->sub_bucket_count = sub_bucket_count;
-    data->bucket_count = bucket_count;
-    data->min_value = INT64_MAX;
-    data->max_value = 0;
-    data->counts = (int64_t*)(data + 1);
-    
-    return data;
+    g_urma_perf_record_ctx = (urma_perf_record_ctx_t *)calloc(1, sizeof(urma_perf_record_ctx_t));
+    if (g_urma_perf_record_ctx == NULL) {
+        URMA_LOG_ERR("Failed to allocate performance record context");
+        return -1;
+    }
+    (void)pthread_spin_init(&g_urma_perf_record_lock, PTHREAD_PROCESS_PRIVATE);
+    return 0;
 }
 
-static void hdr_record_value(hdr_histogram_data* data, int64_t value)
+static void urma_perf_uninit(void)
 {
-    if (value < data->lowest_trackable_value) {
-        value = data->lowest_trackable_value;
-    }
-    if (value > data->highest_trackable_value) {
-        value = data->highest_trackable_value;
-    }
-
-    int32_t bucket_index = get_bucket_index(value, data->unit_magnitude);
-    int32_t sub_bucket_index = get_sub_bucket_index(value, bucket_index, data->unit_magnitude, data->sub_bucket_count);
-    int32_t index = counts_index(bucket_index, sub_bucket_index, data->sub_bucket_count);
-
-    if (index < 0 || index >= (data->bucket_count + 1) * data->sub_bucket_count) {
-        printf("Index out of bounds: %d\n", index);
+    if (g_urma_perf_record_ctx == NULL) {
         return;
     }
 
-    data->counts[index]++;
-    data->total_count++;
-
-    if (value < data->min_value) {
-        data->min_value = value;
-    }
-    if (value > data->max_value) {
-        data->max_value = value;
-    }
-}
-
-static int64_t hdr_get_value_at_percentile(hdr_histogram_data* data, double percentile)
-{
-    if (data->total_count == 0) {
-        return 0;
-    }
-
-    int64_t threshold = (int64_t)ceil(percentile * data->total_count / 100.0);
-    int64_t count_to_prev = 0;
-    
-    for (int32_t i = 0; i < data->bucket_count; i++) {
-        int64_t bucket_base = (int64_t)1 << (i + data->unit_magnitude);
-        int64_t sub_bucket_size = bucket_base / data->sub_bucket_count;
-        for (int32_t j = 0; j < data->sub_bucket_count; j++) {
-            int32_t index = counts_index(i, j, data->sub_bucket_count);
-            int64_t count_at_index = data->counts[index];
-            
-            if (count_at_index > 0) {
-                count_to_prev += count_at_index;
-                if (count_to_prev >= threshold) {
-                    return bucket_base + j * sub_bucket_size;
-                }
-            }
+    (void)pthread_spin_lock(&g_urma_perf_record_lock);
+    for (uint32_t i = 0; i < URMA_PERF_THREAD_MAX_NUM; i++) {
+        if (g_urma_perf_record_ctx->thread_run_once[i] != NULL) {
+            *g_urma_perf_record_ctx->thread_run_once[i] = PTHREAD_ONCE_INIT;
         }
     }
-    return data->max_value;
+    g_urma_perf_record_enable = false;
+    free(g_urma_perf_record_ctx);
+    g_urma_perf_record_ctx = NULL;
+    (void)pthread_spin_unlock(&g_urma_perf_record_lock);
+    (void)pthread_spin_destroy(&g_urma_perf_record_lock);
 }
 
-static int64_t hdr_get_mean(hdr_histogram_data* data)
+static void urma_init_perf_record_item(uint32_t record_idx) {
+    uint64_t context_threshold[URMA_PERF_BUCKET_MAX_NUM] = {
+        20, 30, 40, 50, 60, 70, 80, 90, 100,
+        150, 200, 250, 300, 350, 400, 450, 500, 600, 650, 700, 750, 800, 850, 900, 950, 1000,
+        2000, 3000, 4000, 8000, 16000, 32000};
+
+    g_perf_record_index = record_idx;
+    g_urma_perf_record_ctx->record_table[record_idx].is_used = true;
+    g_urma_perf_record_ctx->thread_run_once[record_idx] = &g_thread_run_once;
+    g_urma_perf_record_ctx->thresh_num = URMA_PERF_BUCKET_MAX_NUM;
+    for (int i = 0; i < URMA_PERF_BUCKET_MAX_NUM; ++i) {
+        g_urma_perf_record_ctx->thresh_ns[i] = context_threshold[i];
+        g_urma_perf_record_ctx->thresh_cycle[i] = ns_to_cycles(context_threshold[i]);
+    }
+}
+static void urma_clear_perf_record_item(uint32_t record_idx)
 {
-    if (data->total_count == 0) {
-        return 0;
+    urma_perf_record_t *cur_record = &g_urma_perf_record_ctx->record_table[record_idx];
+    for (int type = 0; type < URMA_PERF_RECORD_TYPE_MAX; ++type) {
+        cur_record->type_record[type].accumulation = 0;
+        cur_record->type_record[type].min = UINT64_MAX;
+        cur_record->type_record[type].max = 0;
+        cur_record->type_record[type].cnt = 0;
+        (void)memset(cur_record->type_record[type].bucket, 0, sizeof(cur_record->type_record[type].bucket));
+    }
+}
+
+static void urma_init_perf_record(void)
+{
+    uint32_t idx;
+    (void)pthread_spin_lock(&g_urma_perf_record_lock);
+    if (g_urma_perf_record_ctx == NULL) {
+        (void)pthread_spin_unlock(&g_urma_perf_record_lock);
+        return;
     }
 
-    int64_t total = 0;
-    for (int32_t i = 0; i < data->bucket_count; i++) {
-        int64_t bucket_base = (int64_t)1 << (i + data->unit_magnitude);
-        int64_t sub_bucket_size = bucket_base / data->sub_bucket_count;
-        for (int32_t j = 0; j < data->sub_bucket_count; j++) {
-            int32_t index = counts_index(i, j, data->sub_bucket_count);
-            int64_t count = data->counts[index];
-            if (count > 0) {
-                int64_t value = bucket_base + j * sub_bucket_size + sub_bucket_size / 2;
-                total += value * count;
-            }
+    for (idx = 0; idx < URMA_PERF_THREAD_MAX_NUM; ++idx) {
+        if (!g_urma_perf_record_ctx->record_table[idx].is_used) {
+            break;
         }
     }
-    return total / data->total_count;
+    if (idx == URMA_PERF_THREAD_MAX_NUM) {
+        (void)pthread_spin_unlock(&g_urma_perf_record_lock);
+        return;
+    }
+
+    urma_clear_perf_record_item(idx);
+    urma_init_perf_record_item(idx);
+    (void)pthread_spin_unlock(&g_urma_perf_record_lock);
 }
 
-static void hdr_free(hdr_histogram_data* data)
+static void urma_thread_run_once_func(void)
 {
-    free(data);
+    urma_init_perf_record();
 }
 
-static void update_stats(urma_perf_context* ctx, urma_perf_record_type_t type)
+static inline void urma_perf_fill_perf_record(urma_perf_record_type_t type, uint64_t delta)
 {
-    hdr_histogram_data* hist = ctx->histograms[type];
-    ctx->stats.type_record[type].sample_num = hist->total_count;
-    ctx->stats.type_record[type].average = hdr_get_mean(hist);
-    ctx->stats.type_record[type].mininum = hist->total_count > 0 ? hist->min_value : 0;
-    ctx->stats.type_record[type].maxinum = hist->max_value;
-    ctx->stats.type_record[type].p50 = hdr_get_value_at_percentile(hist, 50.0);
-    ctx->stats.type_record[type].p90 = hdr_get_value_at_percentile(hist, 90.0);
-    ctx->stats.type_record[type].p99 = hdr_get_value_at_percentile(hist, 99.0);
+    uint32_t bucket_idx;
+    urma_perf_record_t *cur_record = &g_urma_perf_record_ctx->record_table[g_perf_record_index];
+
+    if (delta < g_urma_perf_record_ctx->thresh_cycle[0]) {
+        URMA_LOG_WARN("Urma perf type %d delta is %lu, less than threshold %lu. \n", 
+            type, delta, g_urma_perf_record_ctx->thresh_cycle[0]);
+        return;
+    }
+
+    for (bucket_idx = 0; bucket_idx < URMA_PERF_BUCKET_MAX_NUM; ++bucket_idx) {
+        if (delta <= g_urma_perf_record_ctx->thresh_cycle[bucket_idx]) {
+            break;
+        }
+    }
+    cur_record->type_record[type].bucket[bucket_idx]++;
+    cur_record->type_record[type].cnt++;
+    cur_record->type_record[type].accumulation += delta;
+    (delta < cur_record->type_record[type].min) ? cur_record->type_record[type].min = delta : 0;
+    (delta > cur_record->type_record[type].max) ? cur_record->type_record[type].max = delta : 0;
+}
+
+static uint64_t urma_perf_cal_quantile(urma_perf_record_t *record, urma_perf_record_type_t type,
+    uint64_t quantile_count)
+{
+    uint32_t bucket_idx = 0;
+    uint64_t base;
+    uint64_t cur_count = quantile_count;
+    uint64_t *thresh_arr = g_urma_perf_record_ctx->thresh_ns;
+    uint32_t thresh_num = g_urma_perf_record_ctx->thresh_num;
+
+
+    for (bucket_idx = 0; bucket_idx < thresh_num; ++bucket_idx) {
+        if (record->type_record[type].bucket[bucket_idx] >= cur_count) {
+            break;
+        }
+        cur_count -= record->type_record[type].bucket[bucket_idx];
+    }
+    // outlier handling
+    if (bucket_idx >= thresh_num) {
+        return thresh_arr[thresh_num - 1];
+    }
+    base = (bucket_idx == 0) ? 0 : thresh_arr[bucket_idx - 1];
+    return ((double)cur_count / record->type_record[type].bucket[bucket_idx]) * (thresh_arr[bucket_idx] - base) + base;
+}
+
+static void urma_perf_record_merge(urma_perf_record_t *total_perf_record, urma_perf_record_t *perf_record)
+{
+    for (uint32_t i = 0; i < URMA_PERF_RECORD_TYPE_MAX; i++) {
+        if (perf_record->type_record[i].cnt == 0) {
+            continue;
+        }
+        total_perf_record->type_record[i].accumulation += perf_record->type_record[i].accumulation;
+        total_perf_record->type_record[i].min =
+            (total_perf_record->type_record[i].min != 0 &&
+            total_perf_record->type_record[i].min < perf_record->type_record[i].min) ?
+            total_perf_record->type_record[i].min : perf_record->type_record[i].min;
+        total_perf_record->type_record[i].max =
+            total_perf_record->type_record[i].max > perf_record->type_record[i].max ?
+            total_perf_record->type_record[i].max : perf_record->type_record[i].max;
+        total_perf_record->type_record[i].cnt += perf_record->type_record[i].cnt;
+        for (uint32_t j = 0; j <= URMA_PERF_BUCKET_MAX_NUM; j++) {
+            total_perf_record->type_record[i].bucket[j] += perf_record->type_record[i].bucket[j];
+        }
+    }
+}
+
+static void urma_perf_convert_cycles_to_ns(urma_perf_record_t *perf_record)
+{
+    for (uint32_t i = 0; i < URMA_PERF_RECORD_TYPE_MAX; i++) {
+        perf_record->type_record[i].accumulation = cycles_to_ns(perf_record->type_record[i].accumulation);
+        perf_record->type_record[i].min =
+            perf_record->type_record[i].min == UINT64_MAX ? 0 : cycles_to_ns(perf_record->type_record[i].min);
+        perf_record->type_record[i].max = cycles_to_ns(perf_record->type_record[i].max);
+    }
+}
+static int urma_perf_info_get_internal(urma_perf_stats_t *perf_info)
+{
+    urma_perf_record_t total_perf_record = {0};
+
+    for (uint32_t i = 0; i < URMA_PERF_THREAD_MAX_NUM; ++i) {
+        if (!g_urma_perf_record_ctx->record_table[i].is_used) {
+            continue;
+        }
+        urma_perf_record_merge(&total_perf_record, &g_urma_perf_record_ctx->record_table[i]);
+    }
+    urma_perf_convert_cycles_to_ns(&total_perf_record);
+
+    for (uint32_t i = 0; i < URMA_PERF_RECORD_TYPE_MAX; i++) {
+        perf_info->type_record[i].type = (urma_perf_record_type_t)i;
+        perf_info->type_record[i].sample_num = total_perf_record.type_record[i].cnt;
+        perf_info->type_record[i].average = total_perf_record.type_record[i].cnt != 0 ?
+            (total_perf_record.type_record[i].accumulation / total_perf_record.type_record[i].cnt) : 0;
+        perf_info->type_record[i].maxinum = total_perf_record.type_record[i].max;
+        perf_info->type_record[i].mininum = total_perf_record.type_record[i].min;
+        perf_info->type_record[i].p50 = urma_perf_cal_quantile(&total_perf_record, i,
+            (uint64_t)(0.5 * total_perf_record.type_record[i].cnt));
+        perf_info->type_record[i].p90 = urma_perf_cal_quantile(&total_perf_record, i,
+            (uint64_t)(0.9 * total_perf_record.type_record[i].cnt));
+        perf_info->type_record[i].p99 = urma_perf_cal_quantile(&total_perf_record, i,
+            (uint64_t)(0.99 * total_perf_record.type_record[i].cnt));
+    }
+    perf_info->retry_count = urma_ubagg_switch_get();
+
+    return 0;
+}
+
+bool urma_perf_is_enabled()
+{
+    return g_urma_perf_record_enable;
 }
 
 urma_status_t urma_start_perf(void)
 {
-    if (g_perf_ctx != NULL) {
-        printf("g_perf_ctx != NULL");
-        return URMA_ERROR;
+    int ret = 0;
+    if (urma_perf_is_enabled()) {
+        URMA_LOG_ERR("Urma perf start failed. perf record ctx is not NULL. \n");
+        return 0;
     }
-    
-    g_perf_ctx = (urma_perf_context*)calloc(1, sizeof(urma_perf_context));
-    if (g_perf_ctx == NULL) {
-        printf("g_perf_ctx == NULL");
-        return URMA_ERROR;
+
+    ret = urma_perf_init();
+    if (ret != 0) {
+        return ret;
     }
-    
-    g_perf_ctx->stats.retry_count = 0;
-    
-    for (int i = 0; i < URMA_PERF_RECORD_TYPE_MAX; i++) {
-        g_perf_ctx->histograms[i] = hdr_init(URMA_PERF_MIN_VALUE, URMA_PERF_MAX_VALUE, URMA_PERF_SIGNIFICANT_FIGURES);
-        if (g_perf_ctx->histograms[i] == NULL) {
-            printf("Failed to initialize histogram for type %d\n", i);
-            return URMA_ERROR;
-        }
-        g_perf_ctx->stats.type_record[i].type = (urma_perf_record_type_t)i;
-    }
-    
-    g_perf_ctx->is_running = 1;
-    return URMA_SUCCESS;
+    g_urma_perf_record_enable = true;
+    return 0;
 }
 
 urma_status_t urma_stop_perf(void)
 {
-    if (g_perf_ctx == NULL) {
-        return URMA_ERROR;
+    if (!urma_perf_is_enabled()) {
+        URMA_LOG_ERR("Urma perf stop failed. perf record ctx is NULL. \n");
+        return -1;
     }
-    
-    if (!g_perf_ctx->is_running) {
-        return URMA_ERROR;
-    }
-    
-    g_perf_ctx->is_running = 0;
-    return URMA_SUCCESS;
+
+    urma_perf_uninit();
+    g_urma_perf_record_enable = false;
+    return 0;
 }
 
-void urma_step_perf(urma_perf_record_type_t type, uint64_t latency)
+urma_status_t urma_config_perf_attr(urma_perf_attr_t *perf_attr)
 {
-    if (g_perf_ctx == NULL || !g_perf_ctx->is_running) return;
-    if (type >= URMA_PERF_RECORD_TYPE_MAX) return;
+    uint32_t thresh_num;
+    uint64_t *thresh_array;
+    uint32_t bucket_idx = 0;
 
-    uint32_t current_retry = urma_ubagg_switch_get();
-    if (current_retry > g_perf_ctx->stats.retry_count) {
-        g_perf_ctx->stats.retry_count = current_retry;
+    if (!urma_perf_is_enabled()) {
+        URMA_LOG_ERR("Urma perf config failed. perf record ctx is NULL. \n");
+        return -1;
     }
-    hdr_record_value(g_perf_ctx->histograms[type], latency);
+    if ((perf_attr == NULL) || perf_attr->thresh_num > URMA_PERF_BUCKET_MAX_NUM) {
+        URMA_LOG_ERR("Urma perf config failed. perf_attr is invalid. \n");
+        return -1;
+    }
+    thresh_num = perf_attr->thresh_num;
+    thresh_array = perf_attr->thresh_array;
+
+    (void)pthread_spin_lock(&g_urma_perf_record_lock);
+    for (uint32_t i = 0; i < URMA_PERF_THREAD_MAX_NUM; ++i) {
+        urma_clear_perf_record_item(i);
+    }
+    for (uint32_t i = 0; i < thresh_num; ++i) {
+        if (thresh_array[i] > URMA_PERF_MAX_THRESH_NS || thresh_array[i] == 0) {
+            URMA_LOG_WARN("Urma perf config failed. thresh: %lu is invalid. \n", thresh_array[i]);
+            continue;
+        }
+        if (bucket_idx == 0 || thresh_array[i] > g_urma_perf_record_ctx->thresh_ns[bucket_idx - 1]) {
+            g_urma_perf_record_ctx->thresh_ns[bucket_idx] = thresh_array[i];
+            g_urma_perf_record_ctx->thresh_cycle[bucket_idx] = ns_to_cycles(thresh_array[i]);
+            bucket_idx++;
+        }
+    }
+    g_urma_perf_record_ctx->thresh_num = bucket_idx;
+    (void)pthread_spin_unlock(&g_urma_perf_record_lock);
+    return 0;
 }
 
-void urma_perf_cleanup(void)
+uint64_t urma_get_perf_timestamp(void)
 {
-    if (g_perf_ctx == NULL) return;
-    
-    for (int i = 0; i < URMA_PERF_RECORD_TYPE_MAX; i++) {
-        hdr_free(g_perf_ctx->histograms[i]);
+    if (!urma_perf_is_enabled()) {
+        URMA_LOG_ERR("Urma perf get timestamp failed. perf record is not enabled. \n");
+        return 0;
     }
-    free(g_perf_ctx);
-    g_perf_ctx = NULL;
+    pthread_once(&g_thread_run_once, urma_thread_run_once_func);
+    return get_cycles();
+}
+void urma_step_perf(urma_perf_record_type_t type, uint64_t delta)
+{
+    urma_perf_fill_perf_record(type, delta);
 }
 
 urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length)
 {
-    if (g_perf_ctx == NULL || perf_buf == NULL || length == NULL) {
-        return URMA_ERROR;
+    urma_perf_stats_t perf_info;
+
+    if (perf_buf == NULL || length == NULL || *length < sizeof(urma_perf_stats_t)) {
+        URMA_LOG_ERR("Urma perf info get failed, perf_buf or length is invalid\n");
+        return -1;
     }
 
-    for (int i = 0; i < URMA_PERF_RECORD_TYPE_MAX; i++) {
-        update_stats(g_perf_ctx, i);
+    (void)pthread_spin_lock(&g_urma_perf_record_lock);
+    int ret = urma_perf_info_get_internal(&perf_info);
+    if (ret != 0) {
+        (void)pthread_spin_unlock(&g_urma_perf_record_lock);
+        return ret;
     }
-    
-    char* ptr = perf_buf;
-    uint32_t remaining = *length;
-    int written;
-    
-    written = snprintf(ptr, remaining, "retry_count: %lu\n", g_perf_ctx->stats.retry_count);
-    if (written < 0 || written >= remaining) {
-        return URMA_ERROR;
+    (void)memcpy(perf_buf, &perf_info, sizeof(urma_perf_stats_t));
+    (void)pthread_spin_unlock(&g_urma_perf_record_lock);
+    return 0;
+}
+
+urma_status_t urma_get_perf_info_to_string(void)
+{
+    urma_perf_stats_t perf_info;
+
+    if (!urma_perf_is_enabled()) {
+        URMA_LOG_ERR("Urma perf info get failed. perf record is not enabled. \n");
+        return -1;
     }
-    ptr += written;
-    remaining -= written;
-    
-    written = snprintf(ptr, remaining, 
-        "+----------------------+----------+----------+----------+----------+----------+----------+----------+\n"
-        "| Type                 | samples  | avg      | min      | max      | p50      | p90      | p99      |\n"
-        "+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
-    if (written < 0 || written >= remaining) {
-        return URMA_ERROR;
+
+    (void)pthread_spin_lock(&g_urma_perf_record_lock);
+    int ret = urma_perf_info_get_internal(&perf_info);
+    if (ret != 0) {
+        URMA_LOG_ERR("Urma perf get info failed. ret: %d\n", ret);
+        (void)pthread_spin_unlock(&g_urma_perf_record_lock);
+        return ret;
     }
-    ptr += written;
-    remaining -= written;
-    
-    for (int i = 0; i < URMA_PERF_RECORD_TYPE_MAX; i++) {
-        written = snprintf(ptr, remaining, 
-            "| %-20s | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu |\n",
-            perf_type_names[i],
-            g_perf_ctx->stats.type_record[i].sample_num,
-            g_perf_ctx->stats.type_record[i].average,
-            g_perf_ctx->stats.type_record[i].mininum,
-            g_perf_ctx->stats.type_record[i].maxinum,
-            g_perf_ctx->stats.type_record[i].p50,
-            g_perf_ctx->stats.type_record[i].p90,
-            g_perf_ctx->stats.type_record[i].p99);
-        
-        if (written < 0 || written >= remaining) {
-            return URMA_ERROR;
+    printf("retry_count: %lu\n", perf_info.retry_count);
+    printf("+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
+    printf("| Type                 | samples  | avg      | min      | max      | p50      | p90      | p99      |\n");
+    printf("+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
+    for (uint32_t i = 0; i < URMA_PERF_RECORD_TYPE_MAX; i++) {
+        if (perf_info.type_record[i].sample_num == 0) {
+            continue;
         }
-        
-        ptr += written;
-        remaining -= written;
+        printf("| %-20s | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu |\n",
+            perf_type_names[i],
+            perf_info.type_record[i].sample_num,
+            perf_info.type_record[i].average,
+            perf_info.type_record[i].mininum,
+            perf_info.type_record[i].maxinum,
+            perf_info.type_record[i].p50,
+            perf_info.type_record[i].p90,
+            perf_info.type_record[i].p99);
     }
-    
-    written = snprintf(ptr, remaining, 
-        "+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
-    if (written < 0 || written >= remaining) {
-        return URMA_ERROR;
-    }
-    ptr += written;
-    remaining -= written;
-    
-    *length = ptr - perf_buf;
-    urma_perf_cleanup();
-    return URMA_SUCCESS;
+    printf("+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
+    (void)pthread_spin_unlock(&g_urma_perf_record_lock);
+    return 0;
 }
