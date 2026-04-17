@@ -23,6 +23,7 @@
 typedef struct bondp_v_connection {
     /* only valid on sender side */
     bondp_target_jetty_t *target_vjetty;
+    uint64_t last_path_wr_id[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
     /* de-duplication */
     uint32_t msn;
     bdp_slide_wnd_t recv_wnd;
