@@ -175,6 +175,12 @@ int uvs_get_path_set(const uvs_eid_t *src_bondind_eid,
                      uvs_path_set_t *uvs_path_set)
 {
     int ret = 0;
+
+    if (src_bondind_eid == NULL || dst_bonding_eid == NULL) {
+        TPSA_LOG_ERR("Invalid parameter.\n");
+        return -EINVAL;
+    }
+
     if (!uvs_eid_is_valid(src_bondind_eid) ||
         !uvs_eid_is_valid(dst_bonding_eid) ||
         uvs_path_set == NULL) {
@@ -185,6 +191,11 @@ int uvs_get_path_set(const uvs_eid_t *src_bondind_eid,
                                         dst_bonding_eid, tp_type, multi_path, uvs_path_set);
     if (ret != 0) {
         TPSA_LOG_ERR("Failed to get path set, ret = %d.\n", ret);
+    }
+    if (uvs_path_set->topo_type < UVS_TOPO_TYPE_FULLMESH_1D ||
+        uvs_path_set->topo_type > UVS_TOPO_TYPE_CLOS) {
+        TPSA_LOG_ERR("Invalid topo_type.\n");
+        return -EINVAL;
     }
     return ret;
 }
