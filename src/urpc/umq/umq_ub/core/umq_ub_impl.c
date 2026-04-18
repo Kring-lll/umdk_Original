@@ -826,7 +826,7 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, umq_create_opt
         .jfce = queue->jfs_jfce};
     umq_ub_ctx_t *dev_ctx = queue->dev_ctx;
     // fc jetty
-    umq_ub_rx_consumed_exchange(dev_ctx->io_lock_free,
+    umq_ub_rx_consumed_exchange(!queue->dev_ctx->flow_control.use_atomic_window,
                                 &dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id], 0);
     queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL] = umq_ub_jfr_ctx_create(queue, dev_ctx, UB_QUEUE_JETTY_FLOW_CONTROL);
     if (queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL] == NULL) {
@@ -867,7 +867,7 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, umq_create_opt
         (uint64_t)(uintptr_t)queue;
 
     umq_ub_rx_consumed_exchange(
-        dev_ctx->io_lock_free,
+        !queue->dev_ctx->flow_control.use_atomic_window,
         &dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id], 0);
 
     /* if step A after umq_ub_idle_checker_init, step A fails,

@@ -346,6 +346,17 @@ WAIT_UMQ_READY:
         return -1;
     }
 
+    // 查询流控统计信息
+    umq_flow_control_stats_t stats;
+    if (umq_stats_flow_control_get(g_umq_perftest_ctx.umqh, &stats) != 0) {
+        LOG_PRINT("umq_stats_flow_control_get failed\n");
+        return -1;
+    }
+
+    char str_buf[2048];
+    umq_flow_control_stats_to_str(&stats, str_buf, 2048);
+    LOG_PRINT("[rx depth is %u, factor %d] %s\n", cfg->config.rx_depth, cfg_get.rqe_post_factor, str_buf);
+
     return 0;
 }
 
@@ -510,6 +521,17 @@ CLOSE_SOC:
     // destroy socket
     (void)close(g_umq_perftest_ctx.fd);
 
+    // 查询流控统计信息
+    umq_flow_control_stats_t stats;
+    if (umq_stats_flow_control_get(g_umq_perftest_ctx.umqh, &stats) != 0) {
+        LOG_PRINT("umq_stats_flow_control_get failed\n");
+        return -1;
+    }
+
+    char str_buf[2048];
+    umq_flow_control_stats_to_str(&stats, str_buf, 2048);
+    LOG_PRINT("%s\n", str_buf);
+
 DESTROY:
     // destroy umqh
     (void)umq_destroy(g_umq_perftest_ctx.umqh);
@@ -624,6 +646,17 @@ CLOSE_ACCEPT_FD:
     (void)close(g_umq_perftest_ctx.accept_fd);
 CLOSE_FD:
     (void)close(g_umq_perftest_ctx.fd);
+
+    // 查询流控统计信息
+    umq_flow_control_stats_t stats;
+    if (umq_stats_flow_control_get(g_umq_perftest_ctx.umqh, &stats) != 0) {
+        LOG_PRINT("umq_stats_flow_control_get failed\n");
+        return -1;
+    }
+
+    char str_buf[2048];
+    umq_flow_control_stats_to_str(&stats, str_buf, 2048);
+    LOG_PRINT("%s\n", str_buf);
 
 DESTROY:
     // destroy umqh
