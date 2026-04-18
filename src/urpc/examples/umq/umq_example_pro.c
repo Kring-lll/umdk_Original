@@ -12,6 +12,7 @@
 #include <time.h>
 #include <sys/time.h>
 
+#include "umq_dfx_api.h"
 #include "umq_example_common.h"
 #include "umq_example_pro.h"
 
@@ -159,6 +160,19 @@ int run_umq_example_pro_client(struct urpc_example_config *cfg)
             goto UNBIND;
         }
     }
+
+    // 查询流控统计信息
+    umq_flow_control_stats_t stats;
+    if (umq_stats_flow_control_get(umqh, &stats) != 0) {
+        LOG_PRINT("umq_stats_flow_control_get failed\n");
+        return -1;
+    }
+
+    char str_buf[2048];
+    umq_flow_control_stats_to_str(&stats, str_buf, 2048);
+    LOG_PRINT("[rx depth is %u, factor %d]\n", cfg_get.rx_depth, cfg_get.rqe_post_factor);
+    LOG_PRINT("%s\n", str_buf);
+
     LOG_PRINT("client post rx succeeded\n");
 
     if (example_post_tx(umqh, EXAMPLE_CLIENT_POST_DATA, strlen(EXAMPLE_CLIENT_POST_DATA)) != 0) {

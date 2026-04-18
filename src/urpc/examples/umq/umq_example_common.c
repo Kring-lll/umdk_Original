@@ -133,15 +133,18 @@ uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bin
     umq_port_id_t port[UMQ_MAX_ROUTES];
     print_route_list(&route_key, &route_list, port);
 
-    /*
-    chip 0 port 1
-    chip 1 port 1
-    */
+    if (route_list.route_num == 0) {
+        LOG_PRINT("umq_get_route_list [%s] [%s] failed, route num %u\n", cfg->src_eid, cfg->dst_eid, route_list.route_num);
+        return -1;
+    }
 
-    port[0].bs.chip_id = 0;
-    port[0].bs.port_idx = 1;
-    port[1].bs.chip_id = 1;
-    port[1].bs.port_idx = 1;
+    port[0].bs.chip_id = route_list.routes[0].src_port.bs.chip_id;
+    port[0].bs.die_id = route_list.routes[0].src_port.bs.die_id;
+    port[0].bs.port_idx = route_list.routes[0].src_port.bs.port_idx;
+
+    port[1].bs.chip_id = route_list.routes[1].src_port.bs.chip_id;
+    port[1].bs.die_id = route_list.routes[1].src_port.bs.die_id;
+    port[1].bs.port_idx = route_list.routes[1].src_port.bs.port_idx;
 
     umq_create_option_t option = {
         .trans_mode = init_cfg->trans_info[0].trans_mode,
