@@ -973,8 +973,8 @@ void umq_ub_credit_clean_up(ub_queue_t *queue)
     uint64_t unconsumed = allocated_credit - consumed_credit;
     if (unconsumed > UINT16_MAX) {
         UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, unconsumed credit exceed UINT16_MAX, "
-            "unconsumed credit %llu, capacity %d\n", queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid,
-            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, unconsumed, credit->capacity);
+            "unconsumed credit %llu, capacity %d\n", queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid,
+            queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, unconsumed, credit->capacity);
         return;
     }
     (void)credit->ops.available_credit_return(credit, actual_return_credit + unconsumed);
