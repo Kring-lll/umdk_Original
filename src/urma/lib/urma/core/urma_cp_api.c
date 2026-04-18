@@ -1196,6 +1196,7 @@ static urma_target_jetty_t *urma_import_jfr_compat(urma_context_t *ctx, urma_rjf
     URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, import_jfr_ex);
 
     atomic_fetch_add(&ctx->ref.atomic_cnt, 1);
+    rjfr->flag.bs.share_tp = 0;
     urma_target_jetty_t *tjetty = ops->import_jfr_ex(ctx, rjfr, token_value, &active_tp_cfg);
     if (tjetty == NULL) {
         atomic_fetch_sub(&ctx->ref.atomic_cnt, 1);
@@ -1887,6 +1888,7 @@ static urma_target_jetty_t *urma_import_jetty_compat(urma_context_t *ctx, urma_r
     URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, import_jetty_ex);
 
     atomic_fetch_add(&ctx->ref.atomic_cnt, 1);
+    rjetty->flag.bs.share_tp = 0;
     urma_target_jetty_t *tjetty = ops->import_jetty_ex(ctx, rjetty, token_value, &active_tp_cfg);
     if (tjetty == NULL) {
         atomic_fetch_sub(&ctx->ref.atomic_cnt, 1);
