@@ -281,6 +281,7 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
     bdp_jfc->dev_num = bdp_ctx->dev_num;
     bdp_jfc->lasted_polled_jfc_idx = 0;
     atomic_init(&bdp_jfc->use_cnt.atomic_cnt, 0);
+    (void)pthread_spin_init(&bdp_jfc->send_lock, PTHREAD_PROCESS_PRIVATE);
 
     if (bondp_create_pjfc(bdp_ctx, bdp_jfc, cfg) != 0) {
         URMA_LOG_ERR("Failed to create pjfc\n");
@@ -318,6 +319,7 @@ DELETE_VJFC:
     bondp_delete_vjfc(bdp_jfc);
 DELETE_PJFC:
     bondp_delete_pjfc(bdp_jfc);
+    (void)pthread_spin_destroy(&bdp_jfc->send_lock);
     free(bdp_jfc);
     return NULL;
 }
@@ -367,6 +369,7 @@ urma_status_t bondp_delete_jfc(urma_jfc_t *jfc)
         URMA_LOG_ERR("Failed to delete pjfc\n");
         ret = URMA_FAIL;
     }
+    (void)pthread_spin_destroy(&bdp_jfc->send_lock);
 
     free(bdp_jfc);
 
