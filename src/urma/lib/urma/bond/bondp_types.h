@@ -172,6 +172,7 @@ typedef struct bondp_jfc {
     int lasted_polled_jfc_idx;
     urma_ref_t use_cnt; /* Initialize to 0 */
     wr_buf_t wr_buf;
+    pthread_spinlock_t send_lock;
 } bondp_jfc_t;
 
 typedef struct bondp_tseg {
