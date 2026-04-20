@@ -660,11 +660,6 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
         return UMQ_SUCCESS;
     }
 
-    int ret = umq_ub_poll_fc_tx(queue, NULL, 0);
-    if (ret != UMQ_SUCCESS) {
-        return ret;
-    }
-
     if (!umq_ub_permission_acquire(fc)) {
         return UMQ_SUCCESS;
     }
@@ -678,17 +673,9 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_REQ,
             .window = credits_per_request}
-        };
-
-    umq_ub_fc_user_ctx_t obj = {
-        .bs = {
-            .type = IMM_TYPE_FC_CREDIT_REQ,
-            .notify = credits_per_request,
-            .rsvd0 = 0,
-            .rsvd1 = 0
-        }
     };
-    urma_jfs_wr_t urma_wr = {.user_ctx = obj.value,
+
+    urma_jfs_wr_t urma_wr = {.user_ctx = imm.value,
         .send = {.imm_data = imm.value},
         .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
         .tjetty = tjetty,
@@ -711,10 +698,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
     if (queue->bind_ctx == NULL) {
         return -UMQ_ERR_EINVAL;
     }
-    int ret = umq_ub_poll_fc_tx(queue, NULL, 0);
-    if (ret != UMQ_SUCCESS) {
-        return ret;
-    }
+
     urma_jetty_t *jetty  = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
@@ -723,17 +707,9 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_REP,
             .window = notify,
-            .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
-        }};
-    umq_ub_fc_user_ctx_t obj = {
-        .bs = {
-            .type = IMM_TYPE_FC_CREDIT_REP,
-            .notify = notify,
-            .rsvd0 = 0,
-            .rsvd1 = 0
-        }
+            .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth)}
     };
-    urma_jfs_wr_t urma_wr = {.user_ctx = obj.value,
+    urma_jfs_wr_t urma_wr = {.user_ctx = imm.value,
         .send = {.imm_data = imm.value},
         .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
         .tjetty = tjetty,
@@ -811,11 +787,7 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
     if (!umq_ub_permission_acquire(fc)) {
         return UMQ_SUCCESS;
     }
-    int ret = umq_ub_poll_fc_tx(queue, NULL, 0);
-    if (ret != UMQ_SUCCESS) {
-        umq_ub_permission_release(fc);
-        return ret;
-    }
+
     uint16_t return_credit;
     uint16_t new_request;
     new_request = (uint16_t)(fc->credits_per_request / fc->credit_multiple);
@@ -840,18 +812,9 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
             .window = return_credit}
-        };
-
-    umq_ub_fc_user_ctx_t obj = {
-        .bs = {
-            .type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
-            .notify = return_credit,
-            .rsvd0 = 0,
-            .rsvd1 = 0
-        }
     };
 
-    urma_jfs_wr_t urma_wr = {.user_ctx = obj.value,
+    urma_jfs_wr_t urma_wr = {.user_ctx = imm.value,
         .send = {.imm_data = imm.value},
         .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
         .tjetty = tjetty,
@@ -876,27 +839,16 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
     if (!fc->enabled || queue->bind_ctx == NULL) {
         return UMQ_SUCCESS;
     }
-    int ret = umq_ub_poll_fc_tx(queue, NULL, 0);
-    if (ret != UMQ_SUCCESS) {
-        return ret;
-    }
+
     urma_jetty_t *jetty  = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     umq_ub_imm_t imm = {
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
             .window = return_credit}
-        };
-
-    umq_ub_fc_user_ctx_t obj = {
-        .bs = {
-            .type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
-            .notify = return_credit,
-            .rsvd0 = 0,
-            .rsvd1 = 0
-        }
     };
-    urma_jfs_wr_t urma_wr = {.user_ctx = obj.value,
+
+    urma_jfs_wr_t urma_wr = {.user_ctx = imm.value,
         .send = {.imm_data = imm.value},
         .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
         .tjetty = tjetty,
