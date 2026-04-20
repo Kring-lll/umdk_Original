@@ -37,6 +37,9 @@ constexpr int A2_TOPK_MAX = 8;
 std::tuple<at::Tensor, at::Tensor> GetDispatchLayoutA2ImplNpu(const at::Tensor &topkIdx, int64_t numExperts,
     int64_t numRanks)
 {
+    // topkIdx dtype must be int or long
+    TORCH_BIND_ASSERT(topkIdx.scalar_type() == at::kInt || topkIdx.scalar_type() == at::kLong);
+
     // Convert topk_idx to int64 if necessary
     at::Tensor topkIdxInt64 = topkIdx.scalar_type() == at::kLong ? topkIdx : topkIdx.to(at::kLong);
 
