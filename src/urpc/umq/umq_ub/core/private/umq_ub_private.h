@@ -370,6 +370,8 @@ typedef struct ub_queue {
     // queue param
     urma_jetty_t *jetty[UB_QUEUE_JETTY_NUM];
     jfr_ctx_t *jfr_ctx[UB_QUEUE_JETTY_NUM];
+    rma_jfc_t *jfr_jfc;
+    urma_jfce_t *jfr_jfce; 
     urma_jfc_t *jfs_jfc;
     urma_jfce_t *jfs_jfce; // io and flow control jetty share same jfce
     ub_queue_interrupt_ctx_t interrupt_ctx;

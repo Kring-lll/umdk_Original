@@ -1502,10 +1502,19 @@ jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_qu
         }
     }
     // create jfr_jfc
-    urma_jfc_cfg_t jfr_jfc_cfg = {
-        .depth = jetty_idx == UB_QUEUE_JETTY_IO ? queue->rx_depth : UMQ_UB_FLOW_CONTORL_JETTY_DEPTH,
-        .jfce = jfr_ctx->jfr_jfce
-    };
+
+    if (jetty_idx == UB_QUEUE_JETTY_IO) {
+        urma_jfc_cfg_t jfr_jfc_cfg = {
+            .depth = jetty_idx == UB_QUEUE_JETTY_IO ? queue->rx_depth : UMQ_UB_FLOW_CONTORL_JETTY_DEPTH,
+            .jfce = jfr_ctx->jfr_jfce
+        };
+
+        if (!queue->flow_control.enabled) {
+            jfr_jfc_cfg.depth += UMQ_UB_FLOW_CONTORL_JETTY_DEPTH;
+        }
+    }
+    
+
     jfr_ctx->jfr_jfc = umq_symbol_urma()->urma_create_jfc(dev_ctx->urma_ctx, &jfr_jfc_cfg);
     if (jfr_ctx->jfr_jfc == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_create_jfc failed, errno: %d\n", errno);
