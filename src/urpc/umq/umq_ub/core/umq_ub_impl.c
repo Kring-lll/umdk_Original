@@ -823,9 +823,7 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, umq_create_opt
     if (!queue->flow_control.enabled) {
         return UMQ_SUCCESS;
     }
-    urma_jfc_cfg_t jfc_cfg = {
-        .depth = UMQ_UB_FLOW_CONTORL_JETTY_DEPTH, // jfs_jfce is shared between fc jfs_jfc and io jfs_jfc
-        .jfce = queue->jfs_jfce};
+
     umq_ub_ctx_t *dev_ctx = queue->dev_ctx;
     // fc jetty
     umq_ub_rx_consumed_exchange(dev_ctx->io_lock_free,
@@ -836,15 +834,9 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, umq_create_opt
         return UMQ_FAIL;
     }
 
-    queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL] = umq_symbol_urma()->urma_create_jfc(dev_ctx->urma_ctx, &jfc_cfg);
-    if (queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL] == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_create_jfc for flowcontrol jfs_jfc failed, errno: %d\n", errno);
-        goto DESTROY_FC_JFR_CTX;
-    }
-
     queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL] = umq_create_jetty(queue, dev_ctx, UB_QUEUE_JETTY_FLOW_CONTROL);
     if (queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL] == NULL) {
-        goto DELETE_FC_JFS_JFC;
+        goto DESTROY_FC_JFR_CTX;
     }
 
     if (queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id >=
@@ -888,9 +880,6 @@ CLEAR_TABLE:
 
 DELETE_FC_JETTY:
     (void)umq_symbol_urma()->urma_delete_jetty(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]);
-
-DELETE_FC_JFS_JFC:
-    (void)umq_symbol_urma()->urma_delete_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL]);
 
 DESTROY_FC_JFR_CTX:
     umq_ub_jfr_ctx_destroy(queue, UB_QUEUE_JETTY_FLOW_CONTROL);
@@ -956,8 +945,13 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
         .depth = queue->tx_depth + 1, // flush done consumes one cqe
         .jfce = queue->jfs_jfce
     };
-    queue->jfs_jfc[UB_QUEUE_JETTY_IO] = umq_symbol_urma()->urma_create_jfc(dev_ctx->urma_ctx, &jfc_cfg);
-    if (queue->jfs_jfc[UB_QUEUE_JETTY_IO] == NULL) {
+
+    if (queue->flow_control.enabled) {
+        jfc_cfg.depth += UMQ_UB_FLOW_CONTORL_JETTY_DEPTH;
+    }
+
+    queue->jfs_jfc = umq_symbol_urma()->urma_create_jfc(dev_ctx->urma_ctx, &jfc_cfg);
+    if (queue->jfs_jfc == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_create_jfc for jfs_jfc failed, errno: %d\n", errno);
         goto DELETE_JFCE;
     }
@@ -1017,7 +1011,7 @@ CLEAR_TABLE:
 DELETE_JETTY:
     (void)umq_symbol_urma()->urma_delete_jetty(queue->jetty[UB_QUEUE_JETTY_IO]);
 DELETE_JFS_JFC:
-    (void)umq_symbol_urma()->urma_delete_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_IO]);
+    (void)umq_symbol_urma()->urma_delete_jfc(queue->jfs_jfc);
 DELETE_JFCE:
     if (queue->mode == UMQ_MODE_INTERRUPT) {
         (void)umq_symbol_urma()->urma_delete_jfce(queue->jfs_jfce);
@@ -1082,12 +1076,6 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
                 "failed, status: %d\n", EID_ARGS(*fc_eid), fc_id, ret);
         }
 
-        ret = umq_symbol_urma()->urma_delete_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL]);
-        if (ret != URMA_SUCCESS) {
-            UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_delete_jfc for flowcontrol jfs_jfc "
-                "failed, status: %d\n", EID_ARGS(*fc_eid), fc_id, ret);
-        }
-
         umq_ub_jfr_ctx_destroy(queue, UB_QUEUE_JETTY_FLOW_CONTROL);
     }
 
@@ -1104,7 +1092,7 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
         UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_delete_jetty failed, status: %d\n",
             EID_ARGS(*io_eid), io_id, ret);
     }
-    ret = umq_symbol_urma()->urma_delete_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_IO]);
+    ret = umq_symbol_urma()->urma_delete_jfc(queue->jfs_jfc);
     if (ret != URMA_SUCCESS) {
         UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_delete_jfc failed, status: %d\n",
             EID_ARGS(*io_eid), io_id, ret);
@@ -1230,36 +1218,41 @@ int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicated, umq_interrupt_option_t *
     }
 
     urma_status_t status = URMA_SUCCESS;
-    uint64_t start_timestamp = umq_perf_get_start_timestamp();
-    if (option->direction == UMQ_IO_TX) {
-        status = umq_symbol_urma()->urma_rearm_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_IO], solicated);
-        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_REARM_TX, start_timestamp);
-    } else if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0) {
-        status = umq_symbol_urma()->urma_rearm_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfc, solicated);
-        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_REARM_RX, start_timestamp);
-    }
-    if (status != URMA_SUCCESS) {
-        UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_rearm_jfc for io jfc failed, "
-            "status: %d\n", EID_ARGS(*eid), id, (int)status);
-        return umq_status_convert(status);
-    }
 
-    if (queue->flow_control.enabled) {
+    if (option->direction == UMQ_IO_TX) {
         uint64_t start_timestamp = umq_perf_get_start_timestamp();
-        if (option->direction == UMQ_IO_RX) {
-            status = umq_symbol_urma()->urma_rearm_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfc, solicated);
-            umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_REARM_RX, start_timestamp);
-        } else {
-            status = umq_symbol_urma()->urma_rearm_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL], solicated);
-            umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_REARM_TX, start_timestamp);
-        }
+        status = umq_symbol_urma()->urma_rearm_jfc(queue->jfs_jfc, solicated);
+        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_REARM_TX, start_timestamp);
         if (status != URMA_SUCCESS) {
-            UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_rearm_jfc for flowcontrol jfc failed"
-                ", status: %d\n", EID_ARGS(*eid), id, (int)status);
+            UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_rearm_jfc for jfs jfc failed, "
+            "status: %d\n", EID_ARGS(*eid), id, (int)status);
             return umq_status_convert(status);
         }
-    }
+    } else {
+        if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0) {
+            uint64_t start_timestamp = umq_perf_get_start_timestamp();
+            status = umq_symbol_urma()->urma_rearm_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfc, solicated);
+            umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_REARM_RX, start_timestamp);
+        }
 
+        if (status != URMA_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_rearm_jfc for io jfr jfc failed, "
+            "status: %d\n", EID_ARGS(*eid), id, (int)status);
+            return umq_status_convert(status);
+        }
+
+        if (queue->flow_control.enabled) {
+            uint64_t start_timestamp = umq_perf_get_start_timestamp();
+            status = umq_symbol_urma()->urma_rearm_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfc, solicated);
+            umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_REARM_RX, start_timestamp);
+            if (status != URMA_SUCCESS) {
+                UMQ_VLOG_ERR(VLOG_UMQ_URMA_API,
+                    "eid: " EID_FMT ", jetty_id: %u, urma_rearm_jfc for flowcontrol jfr jfc failed, status: %d\n",
+                    EID_ARGS(*eid), id, (int)status);
+                return umq_status_convert(status);
+            }
+        }
+    }
     return UMQ_SUCCESS;
 }
 
