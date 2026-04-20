@@ -13,6 +13,7 @@
 #include "uoip_u_log.h"
 #include "uoip_u_jfs.h"
 #include "uoip_u_jfr.h"
+#include "uoip_u_net.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -99,6 +100,7 @@ urma_target_jetty_t *uoip_u_import_jetty(urma_context_t *ctx,
                                            urma_rjetty_t *rjetty,
                                            urma_token_t *token)
 {
+    (void)token;  /* UOIP does not use tokens */
     if (!ctx || !rjetty)
         return NULL;
 

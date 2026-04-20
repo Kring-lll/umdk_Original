@@ -11,6 +11,8 @@
  *    then posts CQEs to the JFC.
  */
 
+#define _GNU_SOURCE
+
 #include "uoip_u_jfr.h"
 #include "uoip_u.h"
 #include "uoip_u_log.h"
@@ -276,6 +278,7 @@ urma_target_jetty_t *uoip_u_import_jfr(urma_context_t *ctx,
                                          urma_rjfr_t *rjfr,
                                          urma_token_t *token)
 {
+    (void)token;  /* UOIP does not use tokens */
     if (!ctx || !rjfr)
         return NULL;
 

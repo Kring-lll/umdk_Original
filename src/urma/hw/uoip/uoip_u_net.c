@@ -6,6 +6,7 @@
 
 #include "uoip_u_net.h"
 #include "uoip_u_log.h"
+#include "uoip_u.h"
 
 #include <arpa/inet.h>
 #include <errno.h>

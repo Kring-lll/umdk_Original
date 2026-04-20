@@ -86,7 +86,8 @@ int uoip_jfc_post_cqe(struct uoip_jfc *ujfc, const urma_cr_t *cr)
     urma_jfce_t *jfce = ujfc->jfc.jfc_cfg.jfce;
     if (jfce && jfce->fd >= 0) {
         uint64_t one = 1;
-        (void)write(jfce->fd, &one, sizeof(one));
+        ssize_t ret = write(jfce->fd, &one, sizeof(one));
+        (void)ret;  /* Suppress unused result warning */
     }
     return 0;
 }
@@ -201,7 +202,8 @@ int uoip_u_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt,
 
     /* Drain one token from the semaphore-mode eventfd */
     uint64_t val;
-    (void)read(jfce->fd, &val, sizeof(val));
+    ssize_t ret = read(jfce->fd, &val, sizeof(val));
+    (void)ret;  /* Suppress unused result warning */
 
     /* Count JFCs that have CQEs */
     int ready = 0;

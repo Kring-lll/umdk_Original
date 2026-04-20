@@ -31,6 +31,7 @@
 
 #include "urma_types.h"
 #include "urma_provider.h"
+#include "urma_private.h"
 
 /* ------------------------------------------------------------------ */
 /*  Wire-protocol constants                                            */
