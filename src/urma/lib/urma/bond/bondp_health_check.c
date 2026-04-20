@@ -1041,6 +1041,7 @@ static bool bondp_process_fallback_task(bondp_context_t *bdp_ctx, bondp_health_t
             sub->probe_pending = false;
         }
         task->next_probe_ts_us = bondp_get_monotonic_us();
+        urma_ubagg_switch_inc();
         URMA_LOG_INFO("Fallback relink finished, health subtasks resumed, waiting health probe to validate primary idx:%d\n",
             task->primary_local_idx);
         return true;
@@ -1421,6 +1422,7 @@ bool bondp_try_handle_fallback_cr(bondp_context_t *bdp_ctx, int local_idx, urma_
                 resp_local_idx, req_seq);
         }
         pthread_rwlock_unlock(&health->task_table.lock);
+        urma_ubagg_switch_inc();
         return true;
     }
 
