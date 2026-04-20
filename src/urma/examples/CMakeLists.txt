@@ -5,14 +5,28 @@ add_executable(urma_sample
     urma_sample.c
 )
 
+add_executable(uoip_example
+    uoip_example.c
+)
+
 set_target_properties(urma_sample
     PROPERTIES
         C_STANDARD 99
 )
 
+set_target_properties(uoip_example
+    PROPERTIES
+        C_STANDARD 99
+)
+
 target_link_libraries(urma_sample urma pthread)
+target_link_libraries(uoip_example urma pthread)
 
 install(TARGETS urma_sample
+    DESTINATION /usr/bin
+)
+
+install(TARGETS uoip_example
     DESTINATION /usr/bin
 )
 install(FILES
