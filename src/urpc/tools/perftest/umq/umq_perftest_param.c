@@ -29,6 +29,9 @@ static struct option g_long_options[] = {
     {"trans-mode", required_argument, NULL, 'T'},
     {"rx-depth", required_argument, NULL, 'R'},
     {"tx-depth", required_argument, NULL, 'U'},
+    {"tp-mode", required_argument, NULL, 'M'},
+    {"src_eid", required_argument, NULL, 'x'},
+    {"dst_eid", required_argument, NULL, 'y'},
 
     {"buf-mode", required_argument, NULL, 'b'},
     {"interrupt", no_argument, NULL, 'I'},
@@ -176,6 +179,12 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
             case 'B':
                 cfg->config.buf_multiplex = true;
                 break;
+            case 'M':
+                cfg->tp_mode = (umq_tp_mode_t)strtoul(optarg, NULL, 0);
+                if (cfg->tp_mode >= UMQ_TM_MAX) {
+                    return -1;
+                }
+                break;
             case 'N':
                 cfg->cna = (uint16_t)strtoul(optarg, NULL, 0);
                 break;
@@ -200,6 +209,12 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
                 break;
             case 'L':
                 cfg->blk_mode = (uint32_t)strtoul(optarg, NULL, 0);
+                break;
+            case 'x':
+                strncpy(cfg->src_eid, optarg, INET6_ADDRSTRLEN - 1);
+                break;
+            case 'y':
+                strncpy(cfg->dst_eid, optarg, INET6_ADDRSTRLEN - 1);
                 break;
             default:
                 usage();

@@ -226,19 +226,53 @@ static int umq_perftest_create_umqh(umq_perftest_config_t *cfg)
 {
     umq_create_option_t option = {
         .trans_mode = (umq_trans_mode_t)cfg->trans_mode,
-        .create_flag = UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_TX_BUF_SIZE |
-            UMQ_CREATE_FLAG_RX_DEPTH | UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE,
+        .create_flag = UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_TX_BUF_SIZE | UMQ_CREATE_FLAG_TP_MODE |
+                       UMQ_CREATE_FLAG_RX_DEPTH | UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE,
         .rx_buf_size = cfg->config.size,
         .tx_buf_size = cfg->config.size,
         .rx_depth = cfg->config.rx_depth,
         .tx_depth = cfg->config.tx_depth,
         .mode = cfg->config.interrupt ? UMQ_MODE_INTERRUPT : UMQ_MODE_POLLING,
+        .tp_mode = cfg->tp_mode,
     };
     char *name = cfg->config.instance_mode == PERF_INSTANCE_SERVER ? "umq_perftest_server" : "umq_perftest_client";
     (void)sprintf(option.name, "%s", name);
     if (fill_dev_info(&option.dev_info, cfg) != 0) {
         LOG_PRINT("dev info copy failed\n");
         return -1;
+    }
+
+    umq_port_id_t port;
+    if (strstr(cfg->config.dev_name, "bond") != NULL) {
+        umq_route_key_t route_key = {0};
+        umq_route_list_t route_list = {0};
+        if (inet_pton(AF_INET6, cfg->src_eid, &route_key.src_bonding_eid) <= 0) {
+            LOG_PRINT("format src eid %s failed\n", cfg->src_eid);
+            return -1;
+        }
+        if (inet_pton(AF_INET6, cfg->dst_eid, &route_key.dst_bonding_eid) <= 0) {
+            LOG_PRINT("format dst eid %s failed\n", cfg->dst_eid);
+            return -1;
+        }
+        route_key.tp_type = UMQ_TP_TYPE_RTP;
+        if (umq_get_route_list(&route_key, UMQ_TRANS_MODE_UB, &route_list) != UMQ_SUCCESS) {
+            LOG_PRINT("umq_get_route_list src_eid: %s, dst_eid: %s failed\n", cfg->src_eid, cfg->dst_eid);
+            return -1;
+        }
+
+        if (route_list.route_num == 0) {
+            LOG_PRINT("umq_get_route_list src_eid: %s, dst_eid: %s failed, route num is 0\n",
+                      cfg->src_eid, cfg->dst_eid);
+            return -1;
+        }
+
+        port.bs.chip_id = route_list.routes[0].src_port.bs.chip_id;
+        port.bs.die_id = route_list.routes[0].src_port.bs.die_id;
+        port.bs.port_idx = route_list.routes[0].src_port.bs.port_idx;
+
+        option.create_flag |= UMQ_CREATE_FLAG_USED_PORTS;
+        option.used_ports.port = &port;
+        option.used_ports.num = 1;
     }
 
     uint64_t umqh = umq_create(&option);

@@ -42,5 +42,13 @@ EXIT:
         free(cfg.server_ip);
     }
 
+    if (cfg->src_eid != NULL) {
+        free(cfg->src_eid);
+    }
+
+    if (cfg->dst_eid != NULL) {
+        free(cfg->dst_eid);
+    }
+
     return ret;
 }

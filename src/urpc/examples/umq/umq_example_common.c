@@ -53,6 +53,8 @@ static struct option g_long_options[] = {
     {"threadpool_size",    required_argument, NULL, 's'},
     {"m_dev_name",         required_argument, NULL, 'n'},
     {"m_eid_idx",          required_argument, NULL, 'x'},
+    {"src_eid",            required_argument, NULL, 'y'},
+    {"dst_eid",            required_argument, NULL, 'z'},
     {NULL,                 0,                 NULL,  0 }
 };
 
@@ -676,6 +678,14 @@ int parse_arguments(int argc, char **argv, struct urpc_example_config *cfg)
                 if (cfg_get_eid_idx(cfg, optarg) != 0) {
                     return -1;
                 }
+                break;
+            case 'y':
+                /* need to free when exiting */
+                cfg->src_eid = strdup(optarg);
+                break;
+            case 'z':
+                /* need to free when exiting */
+                cfg->dst_eid = strdup(optarg);
                 break;
             default:
                 return -1;
