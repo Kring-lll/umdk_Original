@@ -25,6 +25,7 @@ using namespace std;
 
 constexpr int MAX_BATCH_SIZE = 4096;
 constexpr int X_DIM = 2;
+constexpr int A2_LAYERED_RANK_NUM = 16;
 
 #define MOE_COMBINE_PREFILL_A2_DEF \
     const at::Tensor& x, \
@@ -72,6 +73,10 @@ at::Tensor MoeCombinePrefillA2ImplNpu(MOE_COMBINE_PREFILL_A2_DEF)
 
     const int numTokens = topkIdxP.size(0);
     const int numTopk = topkIdxP.size(1);
+
+    // numRanks must equal A2_LAYERED_RANK_NUM (16) for layered communication
+    TORCH_BIND_ASSERT(numRanks == A2_LAYERED_RANK_NUM);
+
     at::Tensor expertScales = at::empty({1}, at::dtype(at::kFloat).device(x.device()));
 
     int64_t hidden = static_cast<int>(recvX.size(1));

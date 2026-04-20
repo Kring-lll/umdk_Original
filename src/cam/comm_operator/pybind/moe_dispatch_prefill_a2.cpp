@@ -80,6 +80,9 @@ tensorList MoeDispatchPrefillA2ImplNpu(
     // Top-k checks
     int numTopk = static_cast<int>(topkIdx.size(1));
 
+    // topkWeights dtype must be float (not bf16)
+    TORCH_BIND_ASSERT(topkWeights.scalar_type() == at::kFloat);
+
     auto device = x.device();
     at::Tensor newTopkWeights;
 
