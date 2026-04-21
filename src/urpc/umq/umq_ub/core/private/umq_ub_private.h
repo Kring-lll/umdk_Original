@@ -539,6 +539,8 @@ int umq_ub_write_imm(uint64_t umqh_tp, uint64_t target_addr, uint32_t len, uint6
 int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm);
 int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_wr_ptr,
                         urma_sge_t *sges, uint32_t remain_tx);
+int umq_ub_rqe_post_factor_query(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, urma_jetty_t *jetty);
+uint32_t umq_ub_pjfr_depth(ub_queue_t *queue);
 
 int umq_ub_fill_fc_rx_buf(ub_queue_t *queue);
 int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count);

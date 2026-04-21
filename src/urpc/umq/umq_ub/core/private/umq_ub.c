@@ -61,8 +61,7 @@ static inline bool is_umq_ub_bonding_dev(const char *name)
 {
     return strstr(name, "bonding") != NULL;
 }
-
-static inline uint32_t umq_ub_pjfr_depth(ub_queue_t *queue)
+uint32_t umq_ub_pjfr_depth(ub_queue_t *queue)
 {
     return queue->rqe_post_factor * queue->rx_depth;
 }
@@ -1110,6 +1109,10 @@ urma_jetty_t *umq_create_jetty(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_queu
     bondp_jetty_cfg.base.flag.bs.share_jfr = true;
     bondp_jetty_cfg.base.flag.bs.has_drv_ext = ((queue->create_flag & UMQ_CREATE_FLAG_USED_PORTS) != 0);
     bondp_jetty_cfg.base.shared.jfr = queue->jfr_ctx[jetty_idx]->jfr;
+    if (!is_umq_ub_main_queue(queue->create_flag)) {
+        bondp_jetty_cfg.port_ids = queue->used_port;
+        bondp_jetty_cfg.port_count = queue->used_port_num;
+    }
 
     umq_jetty_port_info(port_str, UMQ_PORT_STR_SIZE, queue);
     urma_jetty_t *jetty = umq_symbol_urma()->urma_create_jetty(dev_ctx->urma_ctx, &bondp_jetty_cfg.base);
@@ -1421,7 +1424,9 @@ void umq_ub_jfr_ctx_destroy(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_delete_jfce failed, status: %d\n", (int)status);
         }
     }
-    rx_buf_ctx_list_uninit(&queue->jfr_ctx[jetty_idx]->rx_buf_ctx_list);
+    if (jetty_idx == UB_QUEUE_JETTY_IO) {
+        rx_buf_ctx_list_uninit(&queue->jfr_ctx[jetty_idx]->rx_buf_ctx_list);
+    }
     free(queue->jfr_ctx[jetty_idx]);
     queue->jfr_ctx[jetty_idx] = NULL;
 }
@@ -1436,7 +1441,7 @@ void umq_ub_jfr_ctx_put(ub_queue_t *queue)
     umq_ub_jfr_ctx_destroy(queue, UB_QUEUE_JETTY_IO);
 }
 
-static int umq_ub_rqe_post_factor_query(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, urma_jfr_t *jfr)
+int umq_ub_rqe_post_factor_query(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, urma_jetty_t *jetty)
 {
     if ((queue->create_flag & UMQ_CREATE_FLAG_USED_PORTS) == 0) {
         queue->rqe_post_factor = 1;
@@ -1448,7 +1453,7 @@ static int umq_ub_rqe_post_factor_query(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx
         return UMQ_SUCCESS;
     }
 
-    bondp_query_port_in_t bond_in = {.jfr = jfr};
+    bondp_query_port_in_t bond_in = {.jetty = jetty};
     bondp_query_port_out_t bond_out;
     urma_user_ctl_in_t in = {
         .addr = (uint64_t)&bond_in,
@@ -1533,24 +1538,21 @@ jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_qu
         goto DELETE_JFR_JFC;
     }
 
-    if (umq_ub_rqe_post_factor_query(queue, dev_ctx, jfr_ctx->jfr) != UMQ_SUCCESS) {
-        goto DELETE_JFR_JFC;
-    }
+    // if (umq_ub_rqe_post_factor_query(queue, dev_ctx, jfr_ctx->jfr) != UMQ_SUCCESS) {
+    //     goto DELETE_JFR_JFC;
+    // }
 
     // fc not use rx buf list
-    if (jetty_idx == UB_QUEUE_JETTY_IO &&
-        rx_buf_ctx_list_init(&jfr_ctx->rx_buf_ctx_list, umq_ub_pjfr_depth(queue)) != UMQ_SUCCESS) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "rx buf ctx list init failed\n");
-        goto DELETE_JFR;
-    }
+    // if (jetty_idx == UB_QUEUE_JETTY_IO &&
+    //     rx_buf_ctx_list_init(&jfr_ctx->rx_buf_ctx_list, umq_ub_pjfr_depth(queue)) != UMQ_SUCCESS) {
+    //     UMQ_VLOG_ERR(VLOG_UMQ, "rx buf ctx list init failed\n");
+    //     goto DELETE_JFR;
+    // }
 
     jfr_ctx->ref_cnt = 1;
     UMQ_VLOG_INFO(VLOG_UMQ, "create jfr_ctx success, eid: " EID_FMT ", jfr_id: %u\n",
                   EID_ARGS(jfr_ctx->jfr->jfr_id.eid), jfr_ctx->jfr->jfr_id.id);
     return jfr_ctx;
-
-DELETE_JFR:
-    (void)umq_symbol_urma()->urma_delete_jfr(jfr_ctx->jfr);
 
 DELETE_JFR_JFC:
     (void)umq_symbol_urma()->urma_delete_jfc(jfr_ctx->jfr_jfc);
