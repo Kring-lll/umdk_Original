@@ -235,6 +235,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
         (queue->remote_rx_buf_size > queue->tx_buf_size) ? queue->tx_buf_size : queue->remote_rx_buf_size;
 
     *bad_qbuf = NULL;
+    umq_buf_t *real_buf = NULL;
     while (buffer) {
         umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buffer->qbuf_ext;
         umq_opcode_t opcode = buf_pro->opcode;
@@ -261,9 +262,25 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
             sges_ptr->addr = (uint64_t)(uintptr_t)buffer->buf_data;
             sges_ptr->len = buffer->data_size;
             sges_ptr->user_tseg = NULL;
-            sges_ptr->tseg = tseg_list[buffer->mempool_id];
+            if (buffer->mempool_without_data == 1) {
+                real_buf = umq_data_to_head(buffer->buf_data);
+                if (real_buf == NULL) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, get real buf failed\n",
+                        EID_ARGS(*eid), id);
+                    ret = -UMQ_ERR_EINVAL;
+                    goto ERROR;
+                }
+                sges_ptr->tseg = tseg_list[real_buf->mempool_id];
+            } else {
+                sges_ptr->tseg = tseg_list[buffer->mempool_id];
+            }
+            if (sges_ptr->tseg == NULL) {
+                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, mempool %u tseg not exist\n",
+                    EID_ARGS(*eid), id, real_buf->mempool_id);
+                ret = -UMQ_ERR_EINVAL;
+                goto ERROR;
+            }
             sges_ptr++;
-
             if (rest_size < buffer->data_size) { // if cannot add up to total_size, return fail
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, cannot put together tx buffer, rest size"
                     " is negative\n", EID_ARGS(*eid), id);
@@ -425,6 +442,7 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
     umq_buf_t *wr_last_buf = NULL;  // record last qbuf of current wr
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
+    umq_buf_t *real_buf = NULL;
     while (buffer) {
         uint32_t rest_size = buffer->total_data_size;
         if (rest_size == 0) {
@@ -452,7 +470,22 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
             sges_ptr->addr = (uint64_t)(uintptr_t)buffer->buf_data;
             sges_ptr->len = buffer->data_size;
             sges_ptr->user_tseg = NULL;
-            sges_ptr->tseg = tseg_list[buffer->mempool_id];
+            if (buffer->mempool_without_data == 1) {
+                real_buf = umq_data_to_head(buffer->buf_data);
+                if (real_buf == NULL) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, get real buf failed\n",
+                        EID_ARGS(*eid), id);
+                    goto PUT_CUR_RX_CTX;
+                }
+                sges_ptr->tseg = tseg_list[real_buf->mempool_id];
+            } else {
+                sges_ptr->tseg = tseg_list[buffer->mempool_id];
+            }
+            if (sges_ptr->tseg == NULL) {
+                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, mempool %u tseg not exist\n",
+                    EID_ARGS(*eid), id, real_buf->mempool_id);
+                goto PUT_CUR_RX_CTX;
+            }
             sges_ptr++;
 
             if (rest_size < buffer->data_size) { // if cannot add up to total_size, return fail
