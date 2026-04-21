@@ -1331,6 +1331,13 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
         return -UMQ_ERR_EINVAL;
     }
 
+    if (((option->create_flag & UMQ_CREATE_FLAG_SHARE_FC_JFR) != 0) &&
+        ((option->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0) &&
+        ((option->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) == 0)) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "enable shared flow control JFR must be either a main queue or a sub queue\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
     queue->max_rx_sge = dev_ctx->dev_attr.dev_cap.max_jfr_sge < UMQ_MAX_SGE_NUM ?
                         dev_ctx->dev_attr.dev_cap.max_jfr_sge : UMQ_MAX_SGE_NUM;
     queue->max_tx_sge = dev_ctx->dev_attr.dev_cap.max_jfs_sge < UMQ_MAX_SGE_NUM ?
@@ -1393,6 +1400,13 @@ int share_rq_param_check(ub_queue_t *queue, ub_queue_t *share_rq)
     } else {
         queue->mode = share_rq->mode;
     }
+
+    if ((queue->create_flag & UMQ_CREATE_FLAG_SHARE_FC_JFR) != 0 &&
+        (share_rq->create_flag & UMQ_CREATE_FLAG_SHARE_FC_JFR) == 0) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "creating_queue share flow control jfr, but share_rq not support\n")
+        goto ERR;
+    }
+
     queue->rqe_post_factor = share_rq->rqe_post_factor;
     return UMQ_SUCCESS;
 ERR:
@@ -1426,14 +1440,14 @@ void umq_ub_jfr_ctx_destroy(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
     queue->jfr_ctx[jetty_idx] = NULL;
 }
 
-void umq_ub_jfr_ctx_put(ub_queue_t *queue)
+void umq_ub_jfr_ctx_put(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
 {
-    uint32_t new_value = __atomic_sub_fetch(&queue->jfr_ctx[UB_QUEUE_JETTY_IO]->ref_cnt, 1, __ATOMIC_RELAXED);
+    uint32_t new_value = __atomic_sub_fetch(&queue->jfr_ctx[jetty_idx]->ref_cnt, 1, __ATOMIC_RELAXED);
     UMQ_VLOG_DEBUG(VLOG_UMQ, "jfr_ctx ref_cnt %u\n", new_value);
     if (new_value > 0) {
         return;
     }
-    umq_ub_jfr_ctx_destroy(queue, UB_QUEUE_JETTY_IO);
+    umq_ub_jfr_ctx_destroy(queue, jetty_idx);
 }
 
 static int umq_ub_rqe_post_factor_query(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, urma_jfr_t *jfr)
@@ -1503,10 +1517,17 @@ jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_qu
         }
     }
     // create jfr_jfc
+    uint32_t jfr_depth = jetty_idx == UB_QUEUE_JETTY_IO ? queue->rx_depth : UMQ_UB_FLOW_CONTORL_JETTY_DEPTH;
+    if (jetty_idx == UB_QUEUE_JETTY_FLOW_CONTROL && (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 &&
+        (queue->create_flag & UMQ_CREATE_FLAG_SHARE_FC_JFR) != 0) {
+        jfr_depth = UMQ_UB_FLOW_CONTORL_SHARE_JFR_DEPTH;
+    }
+
     urma_jfc_cfg_t jfr_jfc_cfg = {
-        .depth = jetty_idx == UB_QUEUE_JETTY_IO ? queue->rx_depth : UMQ_UB_FLOW_CONTORL_JETTY_DEPTH,
+        .depth = jfr_depth,
         .jfce = jfr_ctx->jfr_jfce
     };
+
     jfr_ctx->jfr_jfc = umq_symbol_urma()->urma_create_jfc(dev_ctx->urma_ctx, &jfr_jfc_cfg);
     if (jfr_ctx->jfr_jfc == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_create_jfc failed, errno: %d\n", errno);
@@ -1517,7 +1538,7 @@ jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_qu
         .base = {
             .flag.bs.token_policy = token_policy_get(enable_token),
             .trans_mode = queue->tp_mode,
-            .depth = jetty_idx == UB_QUEUE_JETTY_IO ? queue->rx_depth : UMQ_UB_FLOW_CONTORL_JETTY_DEPTH,
+            .depth = jfr_depth,
             .max_sge = queue->max_rx_sge,
             .min_rnr_timer = queue->min_rnr_timer,
             .jfc = jfr_ctx->jfr_jfc,
@@ -1567,16 +1588,17 @@ FREE_JFR_CTX:
 }
 
 int umq_ub_jfr_ctx_get(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, umq_create_option_t *option,
-                       ub_queue_t *share_queue)
+                       ub_queue_t *share_queue, ub_queue_jetty_index_t jetty_idx)
 {
-    if ((option->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0) {
-        queue->jfr_ctx[UB_QUEUE_JETTY_IO] = share_queue->jfr_ctx[UB_QUEUE_JETTY_IO];
-        (void)__atomic_add_fetch(&queue->jfr_ctx[UB_QUEUE_JETTY_IO]->ref_cnt, 1, __ATOMIC_RELEASE);
+    if ((option->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0 && (jetty_idx == UB_QUEUE_JETTY_IO ||
+        (option->create_flag & UMQ_CREATE_FLAG_SHARE_FC_JFR) != 0)) {
+        queue->jfr_ctx[jetty_idx] = share_queue->jfr_ctx[jetty_idx];
+        (void)__atomic_add_fetch(&queue->jfr_ctx[jetty_idx]->ref_cnt, 1, __ATOMIC_RELEASE);
         return UMQ_SUCCESS;
     }
 
-    queue->jfr_ctx[UB_QUEUE_JETTY_IO] = umq_ub_jfr_ctx_create(queue, dev_ctx, UB_QUEUE_JETTY_IO);
-    if (queue->jfr_ctx[UB_QUEUE_JETTY_IO] == NULL) {
+    queue->jfr_ctx[jetty_idx] = umq_ub_jfr_ctx_create(queue, dev_ctx, jetty_idx);
+    if (queue->jfr_ctx[jetty_idx] == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "umq create jfr ctx failed\n");
         return UMQ_FAIL;
     }
