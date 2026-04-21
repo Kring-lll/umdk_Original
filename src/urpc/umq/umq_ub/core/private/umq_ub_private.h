@@ -51,11 +51,14 @@ extern "C" {
 #define MEMPOOL_UBVA_SIZE 28
 #define UMQ_IMM_VERSION 0
 #define UMQ_UB_FLOW_CONTORL_JETTY_DEPTH 2
+#define UMQ_UB_FLOW_CONTORL_SHARE_JFR_DEPTH 32768
 #define UMQ_UB_FLOW_CONTORL_BIT_SHIFIT 16 // use (ack | notify) as flow control tx ctx
 
 #define UMQ_UB_DEV_STR_LENGTH 64
 #define UMQ_UB_NAMESPACE_SIZE 256
 #define UMQ_UB_NAMESPACE_PATH "/proc/self/ns/net"
+
+#define UMQ_UB_ENABLE_SHARE_FC_JFR 1
 
 typedef enum umq_size_interval {
     UMQ_SIZE_0K_SMALL_INTERVAL,     // (0K, umq_buf_size_small()] size
@@ -219,7 +222,7 @@ typedef struct umq_ub_ctx {
     urma_target_jetty_t *tjetty;
     umq_trans_info_t trans_info;
     uint64_t remote_notify_addr;
-    uint64_t *umq_ctx_jetty_table;
+    volatile uint64_t *umq_ctx_jetty_table;
     volatile uint64_t *rx_consumed_jetty_table;
 } umq_ub_ctx_t;
 
@@ -485,9 +488,9 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
 int umq_ub_register_seg(umq_ub_ctx_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
 void umq_ub_unregister_seg(umq_ub_ctx_t *ctx_list, uint32_t ctx_cnt, uint16_t mempool_id);
 int share_rq_param_check(ub_queue_t *queue, ub_queue_t *share_rq);
-void umq_ub_jfr_ctx_put(ub_queue_t *queue);
+void umq_ub_jfr_ctx_put(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx);
 int umq_ub_jfr_ctx_get(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, umq_create_option_t *option,
-                       ub_queue_t *share_queue);
+                       ub_queue_t *share_queue, ub_queue_jetty_index_t jetty_idx);
 jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_queue_jetty_index_t jetty_idx);
 void umq_ub_jfr_ctx_destroy(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx);
 int umq_status_convert(urma_status_t urma_status);
@@ -587,6 +590,11 @@ urma_target_seg_t *umq_ub_tseg_lookup(import_tseg_table_t *tseg, uint32_t mempoo
 static ALWAYS_INLINE bool umq_ub_enable_import_remote_mem(uint32_t feature)
 {
     return (feature & UMQ_FEATURE_ENABLE_REMOTE_MEM_ACCESS) != 0;
+}
+
+static ALWAYS_INLINE bool is_enable_share_fc_jfr(void)
+{
+    return UMQ_UB_ENABLE_SHARE_FC_JFR == 1;
 }
 
 #ifdef __cplusplus
