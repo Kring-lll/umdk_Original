@@ -61,6 +61,7 @@ typedef enum umq_buf_status {
 
     // fake buf
     UMQ_FAKE_BUF_FC_UPDATE = 192,       /* Umq fake flow control window is updated, this is not error case */
+    UMQ_FAKE_BUF_FC_MSG,                /* Umq fake flow control received request, this is not error case */
     UMQ_FAKE_BUF_FC_ERR,                /* Umq fake flow control error, CR status is abnormal */
     UMQ_FAKE_BUF_MAX = 256,
 } umq_buf_status_t;
