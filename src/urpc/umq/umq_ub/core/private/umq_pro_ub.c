@@ -736,7 +736,7 @@ static inline void umq_perf_record_write_poll(umq_perf_record_type_t type, uint6
     }
 }
 
-static uint32_t umq_ub_fill_fc_buf(umq_buf_t **buf, umq_buf_status_t status)
+static uint32_t umq_ub_fill_fc_buf(ub_queue_t *queue, umq_buf_t **buf, umq_buf_status_t status)
 {
     uint32_t request = (umq_qbuf_mode_get() == UMQ_BUF_SPLIT) ? 0 : UMQ_UB_FC_UNDATE_FAKE_BUF_SIZE;
     umq_buf_t *fc_buf = umq_buf_alloc(request, 1, UMQ_INVALID_HANDLE, NULL);
@@ -746,6 +746,8 @@ static uint32_t umq_ub_fill_fc_buf(umq_buf_t **buf, umq_buf_status_t status)
 
     fc_buf->io_direction = UMQ_IO_RX;
     fc_buf->status = status;
+    umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)fc_buf->qbuf_ext;
+    buf_pro->umq_ctx = ((queue == NULL) ? 0 : queue->umq_ctx);
     *buf = fc_buf;
     return 1;
 }
@@ -756,18 +758,18 @@ static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm, umq_b
     switch (imm.bs.type) {
         case IMM_TYPE_FC_CREDIT_REQ: {
             if (umq_ub_shared_credit_req_handle(queue, &imm) != UMQ_SUCCESS) {
-                ret = umq_ub_fill_fc_buf(buf, UMQ_FAKE_BUF_FC_ERR);
+                ret = umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_ERR);
             }
             break;
         }
         case IMM_TYPE_FC_CREDIT_REP:
-            ret = umq_ub_fill_fc_buf(buf, UMQ_FAKE_BUF_FC_UPDATE);
+            ret = umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_UPDATE);
             umq_ub_shared_credit_resp_handle(queue, &imm);
 
             break;
         case IMM_TYPE_FC_CREDIT_RETURN_REQ: {
             if (umq_ub_shared_credit_return_req_handle(queue, &imm) != UMQ_SUCCESS) {
-                ret = umq_ub_fill_fc_buf(buf, UMQ_FAKE_BUF_FC_ERR);
+                ret = umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_ERR);
             }
             break;
         }
@@ -818,6 +820,7 @@ int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count)
     int ret = UMQ_SUCCESS;
     int32_t qbuf_cnt = 0;
     for (int i = 0; i < rx_cr_cnt; i++) {
+        ub_queue_t *real_queue = umq_ub_get_real_queue_by_cr(queue, &cr[i]);
         if (cr[i].status != URMA_CR_SUCCESS) {
             (void)umq_ub_fill_fc_rx_buf(queue);
             umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_RECV_ERROR);
@@ -826,14 +829,21 @@ int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count)
                 EID_ARGS(cr[i].remote_id.eid), cr[i].remote_id.id, i, (int)cr[i].status);
             ret = -UMQ_ERR_EFLOWCTL;
             if (buf != NULL) {
-                qbuf_cnt += umq_ub_fill_fc_buf(&buf[qbuf_cnt], UMQ_FAKE_BUF_FC_ERR);
+                qbuf_cnt += umq_ub_fill_fc_buf(real_queue, &buf[qbuf_cnt], UMQ_FAKE_BUF_FC_ERR);
             }
             continue;
         }
+
+        if (real_queue == NULL) {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, sub queue has been destroy\n",
+                EID_ARGS(*eid), id);
+            continue;
+        }
+
         umq_ub_imm_t imm = {.value = cr[i].imm_data};
-        qbuf_cnt += umq_ub_process_fc_msg(queue, imm, &buf[qbuf_cnt]);
-        (void)umq_ub_fill_fc_rx_buf(queue);
-        (void)umq_ub_fill_rx_buff_post_process(queue, imm);
+        qbuf_cnt += umq_ub_process_fc_msg(real_queue, imm, &buf[qbuf_cnt]);
+        (void)umq_ub_fill_fc_rx_buf(real_queue);
+        (void)umq_ub_fill_rx_buff_post_process(real_queue, imm);
     }
     /* If buf is not NULL, return qbuf_cnt (0 if no error, >0 if has error);
      * If buf is NULL, return ret (0 if no error, error code if has error) */
@@ -868,7 +878,8 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
-    if (queue->flow_control.enabled) {
+    if (queue->flow_control.enabled && ((queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 ||
+        !is_enable_share_fc_jfr())) {
         /* buf is not NULL here, so umq_ub_poll_fc_rx returns qbuf_cnt >= 0 */
         qbuf_cnt += (uint32_t)umq_ub_poll_fc_rx(queue, buf, max_batch);
     }
@@ -1086,7 +1097,7 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count)
             ret = -UMQ_ERR_EFLOWCTL;
             umq_ub_fc_process_tx_error(queue, &obj);
             if (buf != NULL) {
-                qbuf_cnt += umq_ub_fill_fc_buf(&buf[qbuf_cnt], UMQ_FAKE_BUF_FC_ERR);
+                qbuf_cnt += umq_ub_fill_fc_buf(queue, &buf[qbuf_cnt], UMQ_FAKE_BUF_FC_ERR);
             }
             continue;
         }
