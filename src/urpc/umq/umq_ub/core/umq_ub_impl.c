@@ -818,7 +818,7 @@ FREE_CHECKER:
     return ret;
 }
 
-static int umq_ub_create_flow_control_resource(ub_queue_t *queue, umq_create_option_t *option)
+static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *share_queue, umq_create_option_t *option)
 {
     if (!queue->flow_control.enabled) {
         return UMQ_SUCCESS;
@@ -830,9 +830,8 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, umq_create_opt
     // fc jetty
     umq_ub_rx_consumed_exchange(dev_ctx->io_lock_free,
                                 &dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id], 0);
-    queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL] = umq_ub_jfr_ctx_create(queue, dev_ctx, UB_QUEUE_JETTY_FLOW_CONTROL);
-    if (queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL] == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "create flow control jfr ctx failed\n");
+    if (umq_ub_jfr_ctx_get(queue, dev_ctx, option, share_queue, UB_QUEUE_JETTY_FLOW_CONTROL) != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "get flow control jfr ctx failed\n");
         return UMQ_FAIL;
     }
 
@@ -855,10 +854,14 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, umq_create_opt
         goto DELETE_FC_JETTY;
     }
 
-
-    // NOTICE: fc jetty don't use share jfr
     uint8_t rqe_post_factor = queue->used_port_num == 0 ? 1 : queue->used_port_num;
-    for (uint32_t i = 0; i < UMQ_UB_FLOW_CONTORL_JETTY_DEPTH * rqe_post_factor; i++) {
+    uint32_t post_fc_rx_cnt = UMQ_UB_FLOW_CONTORL_JETTY_DEPTH * rqe_post_factor;
+    if ((option->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0 && is_enable_share_fc_jfr()) {
+        post_fc_rx_cnt = 0;
+    } else if ((option->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 && is_enable_share_fc_jfr()) {
+        post_fc_rx_cnt = UMQ_UB_FLOW_CONTORL_SHARE_JFR_DEPTH * rqe_post_factor;
+    }
+    for (uint32_t i = 0; i < post_fc_rx_cnt; i++) {
         int ret = umq_ub_fill_fc_rx_buf(queue);
         if (ret != UMQ_SUCCESS) {
             goto DELETE_FC_JETTY;
@@ -936,7 +939,7 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
         queue->share_rq_umqh = option->share_rq_umqh;
     }
 
-    if (umq_ub_jfr_ctx_get(queue, dev_ctx, option, share_rq) != UMQ_SUCCESS) {
+    if (umq_ub_jfr_ctx_get(queue, dev_ctx, option, share_rq, UB_QUEUE_JETTY_IO) != UMQ_SUCCESS) {
         goto FREE_QUEUE;
     }
 
@@ -992,7 +995,7 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
         goto FREE_NOTIFY_BUF;
     }
 
-    if (umq_ub_create_flow_control_resource(queue, option) != UMQ_SUCCESS) {
+    if (umq_ub_create_flow_control_resource(queue, share_rq, option) != UMQ_SUCCESS) {
         goto LOCK_DESTROY;
     }
 
@@ -1025,7 +1028,7 @@ DELETE_JFCE:
 UNINIT_FLOW_CONTROL:
     umq_ub_flow_control_uninit(&queue->flow_control);
 DESTROY_JFR_CTX:
-    umq_ub_jfr_ctx_put(queue);
+    umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_IO);
 FREE_QUEUE:
     if (queue->used_port != NULL) {
         free(queue->used_port);
@@ -1087,8 +1090,7 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_delete_jfc for flowcontrol jfs_jfc "
                 "failed, status: %d\n", EID_ARGS(*fc_eid), fc_id, ret);
         }
-
-        umq_ub_jfr_ctx_destroy(queue, UB_QUEUE_JETTY_FLOW_CONTROL);
+        umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_FLOW_CONTROL);
     }
 
     umq_buf_free(queue->notify_buf);
@@ -1123,7 +1125,7 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
     (void)util_rwlock_destroy(queue->wait_ack_import.lock);
     queue->wait_ack_import.lock = NULL;
 
-    umq_ub_jfr_ctx_put(queue);
+    umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_IO);
     umq_ub_queue_ctx_list_remove(&queue->qctx_node);
     umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->dev_ctx->ref_cnt, 1);
     if (queue->checker != NULL) {
@@ -1207,7 +1209,7 @@ int umq_ub_interrupt_fd_get_impl(uint64_t umqh_tp, umq_interrupt_option_t *optio
         return queue->jfs_jfce->fd;
     } else if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0) {
         return queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfce->fd;
-    } else if (queue->flow_control.enabled) {
+    } else if (queue->flow_control.enabled && !is_enable_share_fc_jfr()) {
         return queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfce->fd;
     }
     return -1;
