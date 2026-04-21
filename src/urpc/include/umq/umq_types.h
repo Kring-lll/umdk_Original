@@ -290,6 +290,8 @@ typedef struct umq_used_ports {
 #define UMQ_CREATE_FLAG_MAIN_UMQ            (1 << 11)       // indicate that the umq creates shared jfr
 #define UMQ_CREATE_FLAG_SUB_UMQ             (1 << 12)       // indicate that the umq uses shared jfr from main queue,
                                                             // associated with UMQ_CREATE_FLAG_SHARE_RQ
+#define UMQ_CREATE_FLAG_SHARE_FC_JFR        (1 << 13)       // indicate that the umq creates shared fc jfr for main queue,
+                                                            // indicate that the umq uses shared fc jfr for sub queue
 
 typedef struct umq_create_option {
     /*************Required paramenters start*****************/
