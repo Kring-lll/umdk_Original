@@ -159,6 +159,12 @@ int umq_stats_tp_perf_stop(umq_trans_mode_t trans_mode);
  */
 int umq_stats_tp_perf_info_get(umq_trans_mode_t trans_mode, char *perf_buf, uint32_t *length);
 
+/**
+ * Register umq_io_perf_callback.
+ * @param[in] func: umq_io_perf_callback_t to process perf data
+ */
+void umq_io_perf_callback_register(umq_io_perf_callback_t func);
+
 #ifdef __cplusplus
 }
 #endif
