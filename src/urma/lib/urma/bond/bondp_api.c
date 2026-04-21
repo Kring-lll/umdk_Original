@@ -31,6 +31,8 @@
 #include "ub_get_clock.h"
 #include "urma_perf.h"
 
+#define PARIMARY_DEV_NUM (2)
+
 typedef struct bondp_create_vjetty_udata {
     urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
     bool is_multipath; // deprecated
@@ -1968,4 +1970,26 @@ void bondp_ack_async_event(urma_async_event_t *event)
     urma_ack_async_event(p_event);
     event->priv = NULL;
     free(p_event);
+}
+
+static int bondp_get_jfce_cnt(urma_context_t *ctx, int threshold, int *cnt_array)
+{
+    bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
+    int ret = 0;
+
+    for (int i = 0; i < IODIE_NUM; i++) {
+        if (!bdp_ctx->p_ctxs[i]) {
+            URMA_LOG_ERR("primary dev ctx is NULL.\n");
+            continue;
+        }
+        int jfce_cnt = 0;
+        ret = urma_cmd_get_jfce_cnt(bdp_ctx->p_ctxs[i], threshold, &jfce_cnt);
+        if (ret != 0) {
+            URMA_LOG_ERR("exec urma_cmd_get_jfce_cnt failed.\n");
+            cnt_array[i] = -1;
+            continue;
+        }
+        cnt_array[i] = jfce_cnt;
+    }
+    return 0;
 }
