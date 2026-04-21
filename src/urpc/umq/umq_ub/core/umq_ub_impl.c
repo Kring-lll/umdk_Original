@@ -967,10 +967,21 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
         goto DELETE_JFS_JFC;
     }
 
+    if (umq_ub_rqe_post_factor_query(queue, dev_ctx, queue->jetty[UB_QUEUE_JETTY_IO]) != UMQ_SUCCESS) {
+        goto DELETE_JETTY;
+    }
+
+    // fc not use rx buf list
+    if (rx_buf_ctx_list_init(&queue->jfr_ctx[UB_QUEUE_JETTY_IO]->rx_buf_ctx_list, umq_ub_pjfr_depth(queue)) !=
+        UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "rx buf ctx list init failed\n");
+        goto DELETE_JETTY;
+    }
+
     if (queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id >= UMQ_ALIGN_64K(queue->dev_ctx->dev_attr.dev_cap.max_jetty)) {
         UMQ_VLOG_ERR(VLOG_UMQ, "jetty id %u exceed max jetty %u\n",
             queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, UMQ_ALIGN_64K(queue->dev_ctx->dev_attr.dev_cap.max_jetty));
-        goto DELETE_JETTY;
+        goto RX_BUF_CTX_UNINIT;
     }
 
     if ((option->create_flag & UMQ_CREATE_FLAG_UMQ_CTX) != 0) {
@@ -1013,6 +1024,9 @@ FREE_NOTIFY_BUF:
 
 CLEAR_TABLE:
     dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id] = 0;
+
+RX_BUF_CTX_UNINIT:
+    rx_buf_ctx_list_uninit(&queue->jfr_ctx[UB_QUEUE_JETTY_IO]->rx_buf_ctx_list);
 
 DELETE_JETTY:
     (void)umq_symbol_urma()->urma_delete_jetty(queue->jetty[UB_QUEUE_JETTY_IO]);
