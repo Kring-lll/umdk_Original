@@ -1098,7 +1098,7 @@ urma_jetty_t *umq_create_jetty(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_queu
                 .priority = queue->priority,
                 .max_sge = queue->max_tx_sge,
                 .max_inline_data = dev_ctx->dev_attr.dev_cap.max_jfs_inline_len,
-                .jfc = queue->jfs_jfc[jetty_idx],
+                .jfc = queue->jfs_jfc,
                 .rnr_retry = queue->rnr_retry,
                 .err_timeout = queue->err_timeout,
             },
@@ -1667,8 +1667,7 @@ void handle_async_event_jfc_err(urma_async_event_t *urma_event, umq_async_event_
 
     (void)util_rwlock_rdlock(g_umq_ub_queue_ctx_list.lock);
     URPC_LIST_FOR_EACH(local, qctx_node, &g_umq_ub_queue_ctx_list.queue_list) {
-        if (local->jfs_jfc[UB_QUEUE_JETTY_IO] == urma_event->element.jfc || (local->flow_control.enabled &&
-            local->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL] == urma_event->element.jfc)) {
+        if (local->jfs_jfc == urma_event->element.jfc) {
             find = true;
             umq_event->event_type = UMQ_EVENT_QH_SQ_CQ_ERR;
             umq_event->element.umqh = local->umqh;
@@ -2303,7 +2302,7 @@ int umq_ub_dequeue_plus_with_poll_tx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t
     umq_buf_t *tx_buf[UMQ_POST_POLL_BATCH];
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
-    int tx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_IO], UMQ_POST_POLL_BATCH, cr);
+    int tx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfs_jfc, UMQ_POST_POLL_BATCH, cr);
     if (tx_cr_cnt < 0) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx_cr_cnt[%d]\n",
             EID_ARGS(*eid), id, tx_cr_cnt);
@@ -2853,7 +2852,7 @@ void umq_ub_enqueue_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
     urma_cr_t cr[UMQ_POST_POLL_BATCH];
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
-    int tx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_IO], UMQ_POST_POLL_BATCH, cr);
+    int tx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfs_jfc, UMQ_POST_POLL_BATCH, cr);
     if (tx_cr_cnt < 0) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx_cr_cnt[%d]\n",
             EID_ARGS(*eid), id, tx_cr_cnt);
@@ -2900,7 +2899,7 @@ void umq_ub_enqueue_plus_with_poll_tx(ub_queue_t *queue, umq_buf_t **buf)
     urma_cr_t cr[UMQ_POST_POLL_BATCH];
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
-    int tx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_IO], UMQ_POST_POLL_BATCH, cr);
+    int tx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfs_jfc, UMQ_POST_POLL_BATCH, cr);
     if (tx_cr_cnt < 0) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx_cr_cnt[%d]\n",
             EID_ARGS(*eid), id, tx_cr_cnt);
@@ -3252,11 +3251,6 @@ int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
     for (int i = 0; i < p_num; i++) {
         nevents[i] = 1;
         jfc[i] = temp_jfc[i];
-        if (temp_jfc[i] == queue->jfs_jfc[UB_QUEUE_JETTY_IO]) {
-            queue->interrupt_ctx.tx_io_interrupt = true;
-        } else if (queue->flow_control.enabled && temp_jfc[i] == queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL]) {
-            queue->interrupt_ctx.tx_fc_interrupt = true;
-        }
     }
     start_timestamp = umq_perf_get_start_timestamp();
     umq_symbol_urma()->urma_ack_jfc(temp_jfc, nevents, p_num);
