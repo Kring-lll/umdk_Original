@@ -16,6 +16,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "umq_dfx_api.h"
 #include "umq_example_common.h"
 
 static const uint32_t EXAMPLE_MAX_POLL_BATCH = 64;
@@ -96,6 +97,12 @@ static void print_route_list(const umq_route_key_t *route_key, umq_route_list_t 
     }
 }
 
+static void umq_io_perf_callback(umq_perf_record_type_t record_type, umq_buf_t *qbuf)
+{
+    umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)qbuf->qbuf_ext;
+    LOG_PRINT_ERR("======record type %d, qbuf imm %d\n", record_type, buf_pro->imm.user_data);
+}
+
 uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bind_info, uint32_t *bind_info_size)
 {
     umq_init_cfg_t *init_cfg = (umq_init_cfg_t *)calloc(1, sizeof(*init_cfg));
@@ -115,6 +122,8 @@ uint64_t init_and_create_umq(struct urpc_example_config *cfg, uint8_t *local_bin
         LOG_PRINT_ERR("umq_init failed\n");
         goto FREE_CFG;
     }
+
+    umq_io_perf_callback_register(umq_io_perf_callback);
 
     umq_route_key_t route_key = {0};
     umq_route_list_t route_list = {0};
