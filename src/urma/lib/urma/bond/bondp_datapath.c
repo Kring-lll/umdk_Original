@@ -774,7 +774,9 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
             if (schedule_send(&wr_entry->v_conn->target_vjetty->v_tjetty, bdp_comp,
                               &new_send_idx, &new_target_idx, NULL) != 0) {
                 URMA_LOG_ERR("Failed to schedule send for migration\n");
-                return CONVERT_FAIL;
+                cr->user_ctx = wr_entry->user_ctx;
+                cr->local_id = get_comp_urma_jetty_id(bdp_comp)->id;
+                return CONVERT_SUCCESS;
             }
 
             URMA_LOG_DEBUG("Resend from %d to %d\n", send_idx, new_send_idx);
