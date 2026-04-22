@@ -647,6 +647,12 @@ CLOSE_ACCEPT_FD:
 CLOSE_FD:
     (void)close(g_umq_perftest_ctx.fd);
 
+    char str_buf[2048];
+    umq_packet_stats_t packet_stats;
+    umq_stats_io_get(g_umq_perftest_ctx.umqh, &packet_stats);
+    umq_io_stats_to_str(&packet_stats, str_buf, 2048);
+    LOG_PRINT("%s\n", str_buf);
+
     // 查询流控统计信息
     umq_flow_control_stats_t stats;
     if (umq_stats_flow_control_get(g_umq_perftest_ctx.umqh, &stats) != 0) {
@@ -654,7 +660,6 @@ CLOSE_FD:
         return -1;
     }
 
-    char str_buf[2048];
     umq_flow_control_stats_to_str(&stats, str_buf, 2048);
     LOG_PRINT("%s\n", str_buf);
 
