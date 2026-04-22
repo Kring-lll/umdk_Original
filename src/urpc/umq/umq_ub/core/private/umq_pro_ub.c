@@ -203,6 +203,13 @@ static ALWAYS_INLINE urma_opcode_t transform_op_code(umq_opcode_t opcode)
     return URMA_OPC_SEND;
 }
 
+static void umq_ub_tx_eagain_cnt(int ret, ub_queue_t *queue, uint16_t eagain_wr_cnt)
+{
+    if (ret == -UMQ_ERR_EAGAIN) {
+        umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND_EAGAIN, eagain_wr_cnt, queue->dev_ctx->io_lock_free);
+    }
+}
+
 int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
 {
     int ret = UMQ_SUCCESS;
@@ -336,6 +343,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
         *bad_qbuf = qbuf;
         ret = umq_ub_shared_credit_req_send(queue);
         ret = (ret != UMQ_SUCCESS) ? ret : -UMQ_ERR_EAGAIN;
+        umq_ub_tx_eagain_cnt(ret, queue, wr_index);
         goto ERROR;
     } else if (max_tx < wr_index) {
         urma_wr[max_tx - 1].next = NULL;
@@ -365,7 +373,9 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
     if (max_tx < wr_index) {
         *bad_qbuf = (umq_buf_t *)(uintptr_t)urma_wr[max_tx].user_ctx;
         ret = umq_ub_shared_credit_req_send(queue);
-        return (ret != UMQ_SUCCESS) ? ret : -UMQ_ERR_EAGAIN;
+        ret = (ret != UMQ_SUCCESS) ? ret : -UMQ_ERR_EAGAIN;
+        umq_ub_tx_eagain_cnt(ret, queue, wr_index - max_tx);
+        return ret;
     }
 
     return UMQ_SUCCESS;
