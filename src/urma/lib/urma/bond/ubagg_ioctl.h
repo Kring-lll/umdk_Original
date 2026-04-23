@@ -27,7 +27,30 @@ struct ubagg_set_topo_info {
 typedef enum ubagg_userctl_opcode {
     GET_SLAVE_DEVICE = 1,
     GET_TOPO_INFO    = 2,
+    SEND_SWITCHBACK_REQ = 9,
 } ubagg_userctl_opcode_t;
+
+typedef struct ubagg_switchback_req {
+    struct {
+        uint32_t vjetty_id;
+        uint32_t local_idx;
+        uint32_t target_idx;
+        uint8_t ctrl_type;
+        uint8_t req_seq;
+        uint16_t reserved;
+        uint32_t payload;
+    } in;
+} ubagg_switchback_req_t;
+
+typedef struct ubagg_switchback_msg {
+    struct {
+        uint32_t recv_local_id;
+        uint8_t ctrl_type;
+        uint8_t req_seq;
+        uint16_t reserved;
+        uint32_t payload;
+    } in;
+} ubagg_switchback_msg_t;
 
 typedef struct bondp_physical_device {
 	char dev_name[UBAGG_MAX_DEV_NAME_LEN];
