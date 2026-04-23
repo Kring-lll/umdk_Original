@@ -839,7 +839,9 @@ static int bondp_rebuild_primary_pjetty(bondp_health_task_t *task)
     new_jetty->remote_jetty = NULL;
     new_jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
     bdp_jetty->p_jetty[local_idx] = new_jetty;
+    (void)pthread_spin_lock(&bdp_jetty->valid_lock);
     bdp_jetty->valid[local_idx] = false;
+    (void)pthread_spin_unlock(&bdp_jetty->valid_lock);
 
     if (bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty) != 0) {
         return -1;
@@ -950,7 +952,9 @@ static int bondp_relink_primary_import(bondp_health_task_t *task)
         return -1;
     }
     task->bdp_tjetty->p_tjetty[local_idx][target_idx] = new_tjetty;
+    (void)pthread_spin_lock(&task->bondp_jetty->valid_lock);
     task->bondp_jetty->valid[local_idx] = false;
+    (void)pthread_spin_unlock(&task->bondp_jetty->valid_lock);
     return 0;
 }
 
@@ -1053,7 +1057,10 @@ static bool bondp_process_fallback_task(bondp_context_t *bdp_ctx, bondp_health_t
 static void bondp_health_task_check_mode(bondp_health_task_t *task,
     const bondp_health_check_cfg_t *cfg, uint64_t now_us)
 {
-    bool primary_valid = task->bondp_jetty->valid[task->primary_local_idx];
+    bool primary_valid;
+    (void)pthread_spin_lock(&task->bondp_jetty->valid_lock);
+    primary_valid = task->bondp_jetty->valid[task->primary_local_idx];
+    (void)pthread_spin_unlock(&task->bondp_jetty->valid_lock);
 
     if (task->mode == HEALTH_MODE_BACKUP_CHECK && !primary_valid) {
         /* Primary link went down, switch to primary check mode */
@@ -1087,7 +1094,9 @@ static void bondp_health_probe_sub(bondp_context_t *bdp_ctx, bondp_health_task_t
             URMA_LOG_WARN("Health probe send failed, lidx:%d tidx:%d\n", sub->local_idx, sub->target_idx);
         }
         atomic_store(&sub->link_ok, false);
+        (void)pthread_spin_lock(&task->bondp_jetty->valid_lock);
         task->bondp_jetty->valid[sub->local_idx] = false;
+        (void)pthread_spin_unlock(&task->bondp_jetty->valid_lock);
         return;
     }
 }
@@ -1474,7 +1483,9 @@ static void bondp_health_handle_ta_timeout_event(bondp_context_t *bdp_ctx, const
             bool old_ok = atomic_load(&sub->link_ok);
             bool ok = (info->cr_status == URMA_CR_SUCCESS);
             atomic_store(&sub->link_ok, ok);
+            (void)pthread_spin_lock(&task->bondp_jetty->valid_lock);
             task->bondp_jetty->valid[sub->local_idx] = ok;
+            (void)pthread_spin_unlock(&task->bondp_jetty->valid_lock);
             if (old_ok != ok) {
                 URMA_LOG_WARN("Health link state changed, tjetty:%u lidx:%d tidx:%d user_ctx:0x%lx old:%d new:%d cr_status:%u\n",
                     task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx, info->user_ctx, old_ok, ok,
@@ -1526,7 +1537,9 @@ bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, u
             bool old_ok = atomic_load(&sub->link_ok);
             bool ok = (cr->status == URMA_CR_SUCCESS);
             atomic_store(&sub->link_ok, ok);
+            (void)pthread_spin_lock(&task->bondp_jetty->valid_lock);
             task->bondp_jetty->valid[sub->local_idx] = ok;
+            (void)pthread_spin_unlock(&task->bondp_jetty->valid_lock);
             if (ok && local_idx == task->primary_local_idx && task->active_local_idx != task->primary_local_idx) {
                 bondp_health_event_info_t active_info = {
                     .local_idx = -1,

@@ -524,6 +524,7 @@ static int bondp_create_pjfs(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfs, ur
 
 static int bondp_delete_vjfs(bondp_comp_t *bdp_jfs)
 {
+    pthread_spin_destroy(&bdp_jfs->valid_lock);
     return urma_cmd_delete_jfs(&bdp_jfs->v_jfs);
 }
 
@@ -617,6 +618,10 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     bdp_jfs->recv_jfc = NULL;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
         atomic_init(&bdp_jfs->sqe_cnt[i], 0);
+    }
+    if (pthread_spin_init(&bdp_jfs->valid_lock, PTHREAD_PROCESS_PRIVATE) != 0) {
+        URMA_LOG_ERR("Failed to init valid_lock for jfs\n");
+        goto FREE_JFS;
     }
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
@@ -779,6 +784,7 @@ static int bondp_create_pjfr(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfr, ur
 
 static int bondp_delete_vjfr(bondp_comp_t *bdp_jfr)
 {
+    pthread_spin_destroy(&bdp_jfr->valid_lock);
     return urma_cmd_delete_jfr(&bdp_jfr->v_jfr);
 }
 
@@ -865,6 +871,10 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
     atomic_init(&bdp_jfr->use_cnt.atomic_cnt, 0);
     bdp_jfr->send_jfc = NULL;
     bdp_jfr->recv_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
+    if (pthread_spin_init(&bdp_jfr->valid_lock, PTHREAD_PROCESS_PRIVATE) != 0) {
+        URMA_LOG_ERR("Failed to init valid_lock for jfr\n");
+        goto FREE_JFR;
+    }
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
     uint32_t cfg_active_port_count = 0;
@@ -1091,6 +1101,7 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
 
 static int bondp_delete_vjetty(bondp_comp_t *bdp_jetty)
 {
+    pthread_spin_destroy(&bdp_jetty->valid_lock);
     return urma_cmd_delete_jetty(&bdp_jetty->v_jetty);
 }
 
@@ -1193,6 +1204,10 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     atomic_init(&bdp_jetty->use_cnt.atomic_cnt, 0);
     bdp_jetty->send_jfc = CONTAINER_OF_FIELD(jetty_cfg->jfs_cfg.jfc, bondp_jfc_t, v_jfc);
     bdp_jetty->recv_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr->jfr_cfg.jfc, bondp_jfc_t, v_jfc);
+    if (pthread_spin_init(&bdp_jetty->valid_lock, PTHREAD_PROCESS_PRIVATE) != 0) {
+        URMA_LOG_ERR("Failed to init valid_lock for jetty\n");
+        goto FREE_JETTY;
+    }
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
     uint32_t cfg_active_port_count = 0;
