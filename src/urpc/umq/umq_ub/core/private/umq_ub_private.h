@@ -362,6 +362,7 @@ typedef struct ub_queue_idle_check {
     volatile uint64_t last_send;
     volatile uint64_t target_slot_id;
     volatile bool need_return_credit;
+    volatile uint64_t timeout_cnt;
     int event_fd;
     util_external_mutex_lock *lock;
 } ub_queue_idle_check_t;
