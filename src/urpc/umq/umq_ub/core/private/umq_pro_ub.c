@@ -106,7 +106,13 @@ static uint16_t umq_ub_tx_failed_num(urma_jfs_wr_t *urma_wr, uint16_t wr_index, 
 int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_ptr, urma_sge_t *sges_ptr,
     uint32_t sge_num, urma_sge_t *src_sge, urma_sge_t *dst_sge)
 {
+    static volatile uint16_t g_wr_index = 0;
+    if (g_wr_index >= 4096) {
+        g_wr_index = 0;
+    }
     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buffer->qbuf_ext;
+    buf_pro->imm.user_data = g_wr_index;
+    buf_pro->opcode = UMQ_OPC_SEND_IMM;
     uint16_t mempool_id = buf_pro->remote_sge.mempool_id;
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
@@ -216,6 +222,39 @@ static ALWAYS_INLINE void umq_ub_tx_eagain_cnt(int ret, bool user_send_imm, ub_q
     }
 }
 
+static uint32_t print_sges(urma_jfs_wr_t *wr, char *buf, int size)
+{
+    uint32_t total_len = 0;
+    int ret, offset = 0, remain = size;
+    for (uint32_t i = 0; i < wr->send.src.num_sge; i++) {
+        total_len += wr->send.src.sge[i].len;
+        ret = snprintf(buf + offset, remain, "%u: %u ", i, wr->send.src.sge[i].len);
+        if (ret < 0 || ret >= remain) {
+            buf[0] = 0;
+            UMQ_VLOG_ERR(VLOG_UMQ, "format sge num failed %d\n", ret);
+            return 0;
+        }
+
+        offset += ret;
+        remain -= ret;
+    }
+    return total_len;
+}
+
+static void show_wr(urma_jfs_wr_t *urma_wr)
+{
+    char msg[512];
+    urma_jfs_wr_t *wr = urma_wr;
+    umq_ub_imm_t imm;
+    uint32_t total = 0;
+    while (wr != NULL) {
+        imm.value = wr->send.imm_data;
+        total = print_sges(wr, msg, 512);
+        UMQ_VLOG_WARN(VLOG_UMQ, "send wr id %d, sge num %u, len %u, [ %s]\n", imm.bs.rsvd1, wr->send.src.num_sge, total, msg);
+        wr = wr->next;
+    }
+}
+
 int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
 {
     int ret = UMQ_SUCCESS;
@@ -253,6 +292,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
     umq_buf_t *real_buf = NULL;
     while (buffer) {
         umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buffer->qbuf_ext;
+        buf_pro->opcode = UMQ_OPC_SEND_IMM;
         umq_opcode_t opcode = buf_pro->opcode;
         uint32_t rest_size = buffer->total_data_size;
         if (rest_size > max_send_size && (opcode == UMQ_OPC_SEND || opcode == UMQ_OPC_SEND_IMM)) {
@@ -360,6 +400,8 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
     if (user_send_imm) {
         umq_io_perf_process(UMQ_PERF_RECORD_TRANSPORT_POST_SEND, qbuf);
     }
+
+    show_wr(urma_wr);
     urma_status_t status = umq_symbol_urma()->urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_IO], urma_wr, &bad_wr);
     umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_POST_SEND, start_timestamp);
     if (status != URMA_SUCCESS) {
@@ -617,6 +659,7 @@ static int umq_ub_on_rx_done(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t *rx_buf
     if (imm.bs.type == IMM_TYPE_USER) {
         buf_pro->imm_data = imm.value;
         umq_io_perf_process(UMQ_PERF_RECORD_TRANSPORT_POLL_RX, rx_buf);
+        UMQ_VLOG_WARN(VLOG_UMQ, "recv wr id %d, recv size %u\n", imm.bs.rsvd1, cr->completion_len);
         goto OUT;
     }
 
@@ -712,6 +755,7 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_
         }
         case URMA_CR_OPC_SEND: {
             umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
+            UMQ_VLOG_WARN(VLOG_UMQ, "recv wr id %d, recv size %u\n", -1, cr->completion_len);
             ub_queue_t *real_queue = umq_ub_get_real_queue_by_cr(queue, cr);
             if (real_queue != NULL) {
                 buf_pro->umq_ctx = real_queue->umq_ctx;
