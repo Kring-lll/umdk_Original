@@ -808,7 +808,8 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
     uint64_t diff = timestamp - queue->checker->last_send;
     uint16_t remote_credit = fc->ops.remote_rx_window_load(fc);
     uint16_t return_threshold = 0;
-    if (fc->peer_ratio == 0) {
+    uint64_t timeout_cnt = __atomic_load_n(&queue->checker->timeout_cnt, __ATOMIC_RELAXED);
+    if (fc->peer_ratio == 0 || timeout_cnt >= UMQ_CONTINOUS_IDLE_COUNT) {
         return_threshold = 0;
     } else {
         return_threshold = umq_ub_fc_threashold_modify((uint16_t)fc->min_reserved_credit, fc->peer_ratio);

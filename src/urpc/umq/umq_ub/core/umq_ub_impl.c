@@ -432,28 +432,30 @@ void umq_ub_idle_queue_check(void *args)
             umq_ub_idle_checker_uninit(cur_node);
             continue;
         }
-        ub_flow_control_t *fc = &queue->flow_control;
-        uint16_t remote_credit = fc->ops.remote_rx_window_load(fc);
-        uint16_t return_threshold = 0;
-        if (fc->peer_ratio == 0) {
-            return_threshold = 0;
-        } else {
-            return_threshold = umq_ub_fc_threashold_modify((uint16_t)fc->min_reserved_credit, fc->peer_ratio);
-        }
-        if (remote_credit <= return_threshold) {
-            (void)util_mutex_unlock(cur_node->lock);
-            continue;
-        }
         uint64_t last_send = __atomic_load_n(&cur_node->last_send, __ATOMIC_RELAXED);
         if (current_timestamp >= last_send) {
             uint64_t diff = (current_timestamp - last_send);
             if (diff >= timeout_us) {
+                uint64_t timeout_cnt = __atomic_add_fetch(&cur_node->timeout_cnt, 1, __ATOMIC_RELAXED);
+                ub_flow_control_t *fc = &queue->flow_control;
+                uint16_t remote_credit = fc->ops.remote_rx_window_load(fc);
+                uint16_t return_threshold = 0;
+                if (fc->peer_ratio == 0 || timeout_cnt >= UMQ_CONTINOUS_IDLE_COUNT) {
+                    return_threshold = 0;
+                } else {
+                    return_threshold = umq_ub_fc_threashold_modify((uint16_t)fc->min_reserved_credit, fc->peer_ratio);
+                }
+                if (remote_credit <= return_threshold) {
+                    (void)util_mutex_unlock(cur_node->lock);
+                    continue;
+                }
                 __atomic_store_n(&cur_node->need_return_credit, true, __ATOMIC_RELAXED);
                 if (eventfd_write(cur_node->event_fd, value) == -1) {
                     UMQ_VLOG_ERR(VLOG_UMQ, "umq write event failed, err: %s\n", strerror(errno));
                 }
             }
         }
+
         uint64_t expire_time = last_send + timeout_us;
         uint32_t target_slot_id = target_slot_id_calcuate(expire_time, current_timestamp, current_slot_id);
         if (target_slot_id != current_slot_id) {
