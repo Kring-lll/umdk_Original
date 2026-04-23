@@ -23,6 +23,7 @@
 #include "bondp_segment.h"
 #include "bondp_types.h"
 #include "ubagg_ioctl.h"
+#include "bondp_netlink.h"
 #include "urma_device.h"
 #include "urma_log.h"
 #include "urma_provider.h"
@@ -34,6 +35,30 @@
 
 /* manager of global table in bonding device */
 bondp_global_context_t *g_bondp_global_ctx = NULL;
+
+static int bondp_fallback_ctrl_send_default(bondp_context_t *bdp_ctx, uint32_t vjetty_id,
+    int local_idx, int target_idx, uint8_t ctrl_type, uint8_t req_seq, uint32_t payload)
+{
+    if (bdp_ctx == NULL || local_idx < 0 || target_idx < 0) {
+        return -EINVAL;
+    }
+
+    bondp_switchback_req_t req = {0};
+    req.in.vjetty_id = vjetty_id;
+    req.in.local_idx = (uint32_t)local_idx;
+    req.in.target_idx = (uint32_t)target_idx;
+    req.in.ctrl_type = ctrl_type;
+    req.in.req_seq = req_seq;
+    req.in.payload = payload;
+
+    int ret = bondp_nl_send_switchback_req(&req);
+    if (ret != 0) {
+        URMA_LOG_WARN("Failed to send switchback ctrl by netlink, ret:%d vjetty:%u lidx:%d tidx:%d type:%u seq:%u payload:%u\n",
+            ret, vjetty_id, local_idx, target_idx, ctrl_type, req_seq, payload);
+        return ret;
+    }
+    return 0;
+}
 
 static urma_ops_t g_bond_ops = {
     /* OPs name */
@@ -138,8 +163,19 @@ urma_status_t bondp_init(urma_init_attr_t *conf)
         return URMA_FAIL;
     }
 
+    if (bondp_nl_init() != 0) {
+        URMA_LOG_ERR("Failed to init bondp netlink context.\n");
+        (void)bondp_global_ctx_uninit(g_bondp_global_ctx);
+        g_bondp_global_ctx = NULL;
+        return URMA_FAIL;
+    }
+
+    bondp_health_set_fallback_ctrl_send_cb(bondp_fallback_ctrl_send_default);
+
     if (bondp_start_health_check_thread() != 0) {
         URMA_LOG_ERR("Failed to start health check thread.\n");
+        bondp_health_set_fallback_ctrl_send_cb(NULL);
+        bondp_nl_uninit();
         (void)bondp_global_ctx_uninit(g_bondp_global_ctx);
         g_bondp_global_ctx = NULL;
         return URMA_FAIL;
@@ -154,7 +190,9 @@ urma_status_t bondp_uninit(void)
         return URMA_SUCCESS; /* Keep the same logic as urma_uninit */
     }
 
+    bondp_health_set_fallback_ctrl_send_cb(NULL);
     bondp_stop_health_check_thread();
+    bondp_nl_uninit();
 
     int ret = bondp_global_ctx_uninit(g_bondp_global_ctx);
     if (ret != 0) {
