@@ -14,7 +14,7 @@
 
 #include "bondp_datapath_schedule.h"
 
-static int schedule_send_standalone(const bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
+static int schedule_send_standalone(bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
                                     int *send_idx, int *target_idx)
 {
     *send_idx = (int)bdp_comp->active_indices[0];
@@ -22,14 +22,18 @@ static int schedule_send_standalone(const bondp_comp_t *bdp_comp, const bondp_ta
     return 0;
 }
 
-static int schedule_send_active_backup(const bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
+static int schedule_send_active_backup(bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
                                        int *send_idx, int *target_idx)
 {
     uint32_t min_active_count = MIN(bdp_comp->active_count, bdp_tjetty->active_count);
 
     for (uint32_t i = 0; i < min_active_count; i++) {
         uint32_t active_idx = bdp_comp->active_indices[i];
-        if (!bdp_comp->valid[active_idx]) {
+        bool valid;
+        (void)pthread_spin_lock(&bdp_comp->valid_lock);
+        valid = bdp_comp->valid[active_idx];
+        (void)pthread_spin_unlock(&bdp_comp->valid_lock);
+        if (!valid) {
             continue;
         }
 
@@ -48,7 +52,7 @@ static int schedule_send_balance_iodie(const bondp_comp_t *bdp_comp, const bondp
     return EINVAL;
 }
 
-static int schedule_send_balance_port(const bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
+static int schedule_send_balance_port(bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
                                       int *send_idx, int *target_idx, bondp_chip_id_info_t *info)
 {
     uint32_t min_active_count = MIN(bdp_comp->active_count, bdp_tjetty->active_count);
@@ -74,7 +78,11 @@ static int schedule_send_balance_port(const bondp_comp_t *bdp_comp, const bondp_
 
     for (uint32_t i = 0; i < min_active_count; i++) {
         uint32_t active_idx = bdp_comp->active_indices[i];
-        if (!bdp_comp->valid[active_idx] || active_idx < min || active_idx > max) {
+        bool valid;
+        (void)pthread_spin_lock(&bdp_comp->valid_lock);
+        valid = bdp_comp->valid[active_idx];
+        (void)pthread_spin_unlock(&bdp_comp->valid_lock);
+        if (!valid || active_idx < min || active_idx > max) {
             continue;
         }
 
@@ -94,7 +102,7 @@ static int schedule_send_balance_port(const bondp_comp_t *bdp_comp, const bondp_
     return 0;
 }
 
-static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
+static int schedule_send_balance(bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
                                  int *send_idx, int *target_idx, bondp_chip_id_info_t *info)
 {
     if (bdp_comp->bondp_ctx->bonding_level == BONDP_BONDING_LEVEL_PORT) {
