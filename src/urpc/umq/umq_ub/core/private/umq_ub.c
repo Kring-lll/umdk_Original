@@ -267,7 +267,8 @@ urma_target_seg_t *umq_ub_tseg_lookup(import_tseg_table_t *tseg_table, uint32_t 
     return NULL;
 }
 
-static imported_tseg_node_t *umq_ub_tseg_node_create(ub_queue_t *queue, urma_target_seg_t *remote_tseg)
+static imported_tseg_node_t *umq_ub_tseg_node_create(
+    ub_queue_t *queue, urma_target_seg_t *remote_tseg, uint32_t mempool_id)
 {
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
@@ -293,6 +294,7 @@ static imported_tseg_node_t *umq_ub_tseg_node_create(ub_queue_t *queue, urma_tar
         free(tseg_node);
         return NULL;
     }
+    tseg_node->mempool_id = mempool_id;
     return tseg_node;
 }
 
@@ -300,6 +302,11 @@ static void umq_tseg_node_destory(imported_tseg_node_t *tseg_node)
 {
     umq_symbol_urma()->urma_unimport_seg(tseg_node->tseg);
     free(tseg_node);
+}
+
+static ALWAYS_INLINE bool umq_ub_import_default_mem_switch(umq_trans_mode_t trans_mode)
+{
+    return (trans_mode == UMQ_TRANS_MODE_UB_PLUS) || (trans_mode == UMQ_TRANS_MODE_UBMM_PLUS);
 }
 
 static remote_eid_hmap_node_t *umq_ub_eid_node_create(ub_queue_t *queue, umq_ub_bind_info_t *info)
@@ -331,24 +338,25 @@ static remote_eid_hmap_node_t *umq_ub_eid_node_create(ub_queue_t *queue, umq_ub_
         goto UNINIT_HAMP;
     }
 
-    imported_tseg_node_t *tseg_node = umq_ub_tseg_node_create(queue, &info->dev_info->tseg);
-    if (tseg_node == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "local eid: " EID_FMT ", local jetty_id: %u, remote eid " EID_FMT ", remote jetty_id: "
-            "%u, create tseg node failed\n", EID_ARGS(*eid), id, EID_ARGS(info->queue_info->jetty_id.eid),
-            info->queue_info->jetty_id.id);
-        goto DESTORY_LOCK;
+    if (umq_ub_import_default_mem_switch(info->dev_info->umq_trans_mode)) {
+        imported_tseg_node_t *tseg_node = umq_ub_tseg_node_create(queue, &info->dev_info->tseg, UMQ_QBUF_DEFAULT_MEMPOOL_ID);
+        if (tseg_node == NULL) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "local eid: " EID_FMT ", local jetty_id: %u, remote eid " EID_FMT ", remote jetty_id: "
+                "%u, create tseg node failed\n", EID_ARGS(*eid), id, EID_ARGS(info->queue_info->jetty_id.eid),
+                info->queue_info->jetty_id.id);
+            goto DESTORY_LOCK;
+        }
+
+        (void)util_rwlock_wrlock(import_tseg_table->tseg_hmap_lock);
+        urpc_hmap_insert(&import_tseg_table->tseg_hmap, &tseg_node->node, umq_ub_tseg_hash_get(UMQ_QBUF_DEFAULT_MEMPOOL_ID));
+        (void)util_rwlock_unlock(import_tseg_table->tseg_hmap_lock);
     }
-    tseg_node->mempool_id = UMQ_QBUF_DEFAULT_MEMPOOL_ID;
 
     eid_node->pid = info->dev_info->pid;
     eid_node->ref_cnt = 1;
     strcpy(eid_node->remote_namespace, info->dev_info->bind_namespace);
     (void)memcpy(&eid_node->eid, remote_eid, sizeof(urma_eid_t));
     urpc_bitmap_set1(eid_node->tseg_imported, UMQ_QBUF_DEFAULT_MEMPOOL_ID);
-
-    (void)util_rwlock_wrlock(import_tseg_table->tseg_hmap_lock);
-    urpc_hmap_insert(&import_tseg_table->tseg_hmap, &tseg_node->node, umq_ub_tseg_hash_get(UMQ_QBUF_DEFAULT_MEMPOOL_ID));
-    (void)util_rwlock_unlock(import_tseg_table->tseg_hmap_lock);
 
     return eid_node;
 
