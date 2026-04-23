@@ -709,7 +709,7 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
     return -UMQ_ERR_EFLOWCTL;
 }
 
-static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
+static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify, uint8_t ratio)
 {
     if (queue->bind_ctx == NULL) {
         return -UMQ_ERR_EINVAL;
@@ -720,13 +720,11 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
     }
     urma_jetty_t *jetty  = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
-    ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
-    uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
     umq_ub_imm_t imm = {
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_REP,
             .window = notify,
-            .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
+            .ratio = ratio,
         }};
     umq_ub_fc_user_ctx_t obj = {
         .bs = {
@@ -759,9 +757,15 @@ int umq_ub_shared_credit_req_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
     ub_flow_control_t *fc = &queue->flow_control;
     ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
     uint16_t credits_per_request = imm->flow_control.window;
-    uint16_t allocated_count = credit->ops.available_credit_dec(credit, credits_per_request);
+    ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
+    uint8_t ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth);
+    uint16_t actural_credits_request = umq_ub_fc_threashold_modify(credits_per_request, ratio);
+
+    uint16_t allocated_count = credit->ops.available_credit_dec(credit, actural_credits_request);
+
     (void)fc->ops.local_rx_allocated_inc(fc, allocated_count);
-    int ret = umq_ub_shared_credit_resp_send(queue, allocated_count);
+    int ret = umq_ub_shared_credit_resp_send(queue, allocated_count, ratio);
     if (ret != UMQ_SUCCESS) {
         (void)credit->ops.available_credit_return(credit, allocated_count);
         (void)fc->ops.local_rx_allocated_dec(fc, allocated_count);
@@ -774,10 +778,12 @@ void umq_ub_shared_credit_resp_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
 {
     ub_flow_control_t *fc = &queue->flow_control;
     uint16_t reply_credits = imm->flow_control.window;
-    uint16_t credits_per_request = fc->credits_per_request;
     fc->peer_ratio = imm->flow_control.ratio;
+    uint16_t credits_per_request = fc->credits_per_request;
+    uint16_t execpted_reply_credits = umq_ub_fc_threashold_modify(credits_per_request, fc->peer_ratio);
+
     uint32_t new_request;
-    if (reply_credits < credits_per_request) {
+    if (reply_credits < execpted_reply_credits) {
         new_request = (uint32_t)(credits_per_request / fc->credit_multiple);
     } else {
         new_request = (uint32_t)(credits_per_request * fc->credit_multiple);
@@ -785,12 +791,7 @@ void umq_ub_shared_credit_resp_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
             new_request = fc->max_credits_request;
         }
     }
-    /*
-    * Prevent the current credit from being 2. If after doubling and multiplying by the idle ratio,
-    * the rounded result is still 2, the credit count will remain permanently at 2.
-    * Therefore, an increment of 1 is required.
-    */
-    fc->credits_per_request = umq_ub_fc_threashold_modify((uint16_t)new_request, fc->peer_ratio) + 1;
+    fc->credits_per_request = new_request;
     umq_ub_window_inc(fc, reply_credits);
     return;
 }
