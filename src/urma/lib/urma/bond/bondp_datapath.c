@@ -366,7 +366,9 @@ urma_status_t bondp_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, u
     } else {
         urma_jfs_wr_t *cur = wr;
         while (cur != NULL) {
+            (void)pthread_spin_lock(&bdp_jetty->send_lock);
             ret = bondp_post_send_wr_and_store(bdp_jetty, cur, bad_wr);
+            (void)pthread_spin_unlock(&bdp_jetty->send_lock);
             if (ret != URMA_SUCCESS) {
                 PERF_PROFILING_END(BOND_JETTY_POST_SEND);
                 return ret;
@@ -396,7 +398,9 @@ urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_
         urma_jfs_wr_t *cur = wr;
 
         while (cur != NULL) {
+            (void)pthread_spin_lock(&bdp_jfs->send_lock);
             ret = bondp_post_send_wr_and_store(bdp_jfs, cur, bad_wr);
+            (void)pthread_spin_unlock(&bdp_jfs->send_lock);
             if (ret != URMA_SUCCESS) {
                 PERF_PROFILING_END(BOND_JFS_POST_SEND);
                 return ret;
@@ -767,6 +771,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
     }
 
     if (cr->status != 0) {
+        (void)pthread_spin_lock(&bdp_comp->send_lock);
         if (bdp_comp->valid[send_idx] == true) {
             bdp_comp->valid[send_idx] = false;
 
@@ -774,6 +779,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
             if (schedule_send(&wr_entry->v_conn->target_vjetty->v_tjetty, bdp_comp,
                               &new_send_idx, &new_target_idx, NULL) != 0) {
                 URMA_LOG_ERR("Failed to schedule send for migration\n");
+                (void)pthread_spin_unlock(&bdp_comp->send_lock);
                 return CONVERT_FAIL;
             }
 
@@ -812,6 +818,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
                 bondp_notify_health_event(bdp_comp->bondp_ctx, BONDP_HEALTH_EVENT_FALLBACK_TASK_KICK, &event_info);
             }
         }
+        (void)pthread_spin_unlock(&bdp_comp->send_lock);
         return CONVERT_SKIP;
     }
 
