@@ -42,6 +42,12 @@ static urma_jetty_id_t *get_comp_urma_jetty_id(bondp_comp_t *bdp_comp)
 static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, urma_jfs_wr_t *send_wr, urma_jfs_wr_t **bad_wr)
 {
     urma_status_t ret;
+
+    if (send_wr->tjetty == NULL) {
+        URMA_LOG_ERR("send_wr->tjetty is NULL\n");
+        return URMA_EINVAL;
+    }
+
     if (comp->comp_type == BONDP_COMP_JETTY) {
         ret = urma_post_jetty_send_wr(comp->p_jetty[send_idx], send_wr, bad_wr);
     } else if (comp->comp_type == BONDP_COMP_JFS) {
@@ -770,12 +776,16 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
         return CONVERT_SKIP;
     }
 
+    if (bdp_comp->bdp_tjetty == NULL) {
+        return CONVERT_SUCCESS;
+    }
+
     if (cr->status != 0) {
         if (bdp_comp->valid[send_idx] == true) {
             bdp_comp->valid[send_idx] = false;
 
             int new_send_idx = -1, new_target_idx = -1;
-            if (schedule_send(&wr_entry->v_conn->target_vjetty->v_tjetty, bdp_comp,
+            if (schedule_send(&bdp_comp->bdp_tjetty->v_tjetty, bdp_comp,
                 &new_send_idx, &new_target_idx, NULL) != 0) {
                 URMA_LOG_ERR("Failed to schedule send for migration\n");
                 return CONVERT_FAIL;
@@ -798,7 +808,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
             }
 
             /* Update active link after failover is finished. */
-            bondp_health_update_active_idx(bdp_comp->bondp_ctx, wr_entry->v_conn->target_vjetty, new_send_idx);
+            bondp_health_update_active_idx(bdp_comp->bondp_ctx, bdp_comp->bdp_tjetty, new_send_idx);
 
             bool is_primary_failover = (bdp_comp->active_count > 0 &&
                                         send_idx == (uint32_t)bdp_comp->active_indices[0] &&
@@ -811,7 +821,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
                     .cr_status = 0,
                     .new_active_idx = -1,
                     .bdp_jetty = NULL,
-                    .bdp_tjetty = wr_entry->v_conn->target_vjetty,
+                    .bdp_tjetty = bdp_comp->bdp_tjetty,
                 };
                 bondp_notify_health_event(bdp_comp->bondp_ctx, BONDP_HEALTH_EVENT_FALLBACK_TASK_KICK, &event_info);
             }

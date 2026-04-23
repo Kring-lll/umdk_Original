@@ -1537,6 +1537,11 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         cfg_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
     }
 
+    if (!is_fake_jetty) {
+        bdp_tjetty->bdp_comp = cfg_jetty;
+        cfg_jetty->bdp_tjetty = bdp_tjetty;
+    }
+
     if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty, cfg_jetty) != 0) {
         URMA_LOG_ERR("Failed to register health check task\n");
         goto UNIMPORT_TSEG;
@@ -1570,6 +1575,11 @@ urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
     }
 
     bondp_unregister_health_check_task(bdp_ctx, bdp_tjetty);
+
+    if (bdp_tjetty->bdp_comp != NULL) {
+        bdp_tjetty->bdp_comp->bdp_tjetty = NULL;
+        bdp_tjetty->bdp_comp = NULL;
+    }
 
     if (bondp_unimport_pjetty(bdp_tjetty) != URMA_SUCCESS) {
         ret = URMA_FAIL;
