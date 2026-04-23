@@ -241,6 +241,9 @@ typedef struct umq_buf_pool_cfg {
     // local qbuf pool cfg
     uint64_t tls_qbuf_pool_depth; // the sum of the capacities of all thread-local qbuf pools
     uint64_t tls_expand_qbuf_pool_depth; // The maximum capacity of a single thread-local qbuf pool
+
+    // eacape
+    bool disable_malloc_eacape; // disable the escape mechanism
 } umq_buf_pool_cfg_t;
 
 typedef struct umq_init_cfg {
