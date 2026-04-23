@@ -262,7 +262,7 @@ static urma_status_t set_fadd_wr_ptseg_pjetty(urma_jfs_wr_t *send_wr, urma_targe
 }
 
 urma_status_t convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target_idx,
-    bondp_comp_t *bdp_comp, bdp_v_conn_t *v_conn)
+    bondp_comp_t *bdp_comp)
 {
     uint64_t opcode_tag = 0;
 
@@ -280,10 +280,10 @@ urma_status_t convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target
             wr->opcode = URMA_OPC_SEND_IMM;
             wr->send.imm_data = encode_imm_data(
                 opcode_tag,
-                v_conn->msn,
+                bdp_comp->msn,
                 bdp_comp->v_jetty.jetty_id.id,
                 wr->send.imm_data);
-            v_conn->msn = (v_conn->msn + 1) % BONDP_MAX_BITMAP_SIZE;
+            bdp_comp->msn = (bdp_comp->msn + 1) % BONDP_MAX_BITMAP_SIZE;
 
             return set_send_wr_ptseg_ptjetty(wr, wr->tjetty, send_idx, target_idx);
         case URMA_OPC_WRITE_IMM:
@@ -293,10 +293,10 @@ urma_status_t convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target
                 opcode_tag = URMA_CR_OPC_WRITE_WITH_IMM;
                 wr->rw.notify_data = encode_imm_data(
                     opcode_tag,
-                    v_conn->msn,
+                    bdp_comp->msn,
                     bdp_comp->v_jetty.jetty_id.id,
                     wr->rw.notify_data);
-                v_conn->msn = (v_conn->msn + 1) % BONDP_MAX_BITMAP_SIZE;
+                bdp_comp->msn = (bdp_comp->msn + 1) % BONDP_MAX_BITMAP_SIZE;
             }
             return set_write_wr_ptseg_ptjetty(wr, wr->tjetty, send_idx, target_idx);
         case URMA_OPC_CAS:

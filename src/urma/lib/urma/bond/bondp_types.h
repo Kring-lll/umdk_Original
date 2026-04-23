@@ -203,6 +203,8 @@ typedef enum pjetty_error_done_type {
     PJETTY_FLUSH_ERROR_DONE = 2
 } pjetty_error_done_type_t;
 
+struct bondp_target_jetty;
+
 /** A struct to mimic Polymorphism in creating/deleting some components of urma.
  * This will introduce extra memory cost due to union size taking the largest size.
  */
@@ -232,8 +234,10 @@ typedef struct bondp_comp {
     // send
     bondp_jfc_t *send_jfc;
     pthread_spinlock_t send_lock;
+    struct bondp_target_jetty *target_vjetty;
     bool valid[URMA_UBAGG_DEV_MAX_NUM];
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t msn;
 #ifndef __cplusplus
     atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
 #else

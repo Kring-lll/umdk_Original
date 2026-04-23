@@ -33,7 +33,6 @@ typedef struct jfs_wr_entry {
     urma_jfs_wr_t wr;
     uint64_t user_ctx;
     struct bondp_comp *bdp_comp;
-    struct bondp_v_connection *v_conn;
     uint32_t send_idx;
     uint32_t target_idx;
 } jfs_wr_entry_t;
