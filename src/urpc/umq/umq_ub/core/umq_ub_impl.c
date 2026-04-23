@@ -2003,6 +2003,12 @@ int umq_ub_mempool_state_get_impl(uint64_t umqh_tp, uint32_t mempool_id, umq_mem
 
 int umq_ub_mempool_state_refresh_impl(uint64_t umqh_tp, uint32_t mempool_id)
 {
+    ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
+    if (umq_ub_enable_import_remote_mem(queue->dev_ctx->feature)) {
+        UMQ_VLOG_INFO(VLOG_UMQ, "UMQ_FEATURE_ENABLE_IMPORT_MEM is not enabled, unilateral access is not supported\n");
+        return -UMQ_ERR_EPERM;
+    }
+
     umq_mempool_state_t mempool_state;
     int ret = umq_ub_mempool_state_get_impl(umqh_tp, mempool_id, &mempool_state);
     if (ret != UMQ_SUCCESS) {
@@ -2015,7 +2021,6 @@ int umq_ub_mempool_state_refresh_impl(uint64_t umqh_tp, uint32_t mempool_id)
         return UMQ_SUCCESS;
     }
 
-    ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
     urma_target_seg_t *tseg = queue->dev_ctx->tseg_list[mempool_id];
