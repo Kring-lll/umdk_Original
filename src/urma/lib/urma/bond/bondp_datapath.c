@@ -42,6 +42,12 @@ static urma_jetty_id_t *get_comp_urma_jetty_id(bondp_comp_t *bdp_comp)
 static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, urma_jfs_wr_t *send_wr, urma_jfs_wr_t **bad_wr)
 {
     urma_status_t ret;
+
+    if (send_wr->tjetty == NULL) {
+        URMA_LOG_ERR("send_wr->tjetty is NULL\n");
+        return URMA_EINVAL;
+    }
+
     if (comp->comp_type == BONDP_COMP_JETTY) {
         ret = urma_post_jetty_send_wr(comp->p_jetty[send_idx], send_wr, bad_wr);
     } else if (comp->comp_type == BONDP_COMP_JFS) {
