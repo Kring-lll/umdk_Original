@@ -38,6 +38,7 @@ extern "C" {
 #define UMQ_QBUF_SIZE_MULTIPLE_INTERVAL (4)
 #define QBUF_ALLOC_STATE_FREE      0            // define qbuf free state
 #define QBUF_ALLOC_STATE_ALLOCATED 1            // define qbuf allocated state
+#define QBUF_POOL_MEMPOOL_ID_MAX (1023)         // escape mempool id: 1023, other memopool id must not exceed 1023
 
 typedef struct mempool_segment_ops {
     int (*register_seg_callback)(uint8_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
@@ -63,6 +64,9 @@ typedef struct qbuf_pool_cfg {
     // thread local qbuf pool
     uint64_t tls_qbuf_pool_depth;
     uint64_t tls_expand_qbuf_pool_depth;
+
+    // escape
+    bool disable_malloc_escape;
 } qbuf_pool_cfg_t;
 
 typedef struct qbuf_alloc_param {
