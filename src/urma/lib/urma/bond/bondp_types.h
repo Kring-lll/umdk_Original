@@ -232,6 +232,7 @@ typedef struct bondp_comp {
     // send
     bondp_jfc_t *send_jfc;
     bool valid[URMA_UBAGG_DEV_MAX_NUM];
+    pthread_spinlock_t valid_lock; /* Protects valid[] array */
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
 #ifndef __cplusplus
     atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
