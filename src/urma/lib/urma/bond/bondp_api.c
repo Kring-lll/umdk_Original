@@ -1569,9 +1569,11 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         cfg_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
     }
 
-    if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty, cfg_jetty) != 0) {
-        URMA_LOG_ERR("Failed to register health check task\n");
-        goto UNIMPORT_TSEG;
+    if (!is_fake_jetty) {
+        if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty, cfg_jetty) != 0) {
+            URMA_LOG_ERR("Failed to register health check task\n");
+            goto UNIMPORT_TSEG;
+        }
     }
 
     URMA_LOG_INFO("Successfully imported target jetty: " URMA_JETTY_ID_FMT "\n",
