@@ -1404,6 +1404,7 @@ static void bondp_health_handle_datapath_link_fail_event(bondp_context_t *bdp_ct
     }
 
     bondp_heath_check_ctx_t *health = &bdp_ctx->bondp_heath_check_ctx;
+    const bondp_health_check_cfg_t *cfg = &g_bondp_global_ctx->health_thread_ctx.cfg;
     pthread_rwlock_wrlock(&health->task_table.lock);
     bondp_health_task_t *task = bondp_find_health_task_by_tjetty_nolock(health, info->bdp_tjetty);
     if (task != NULL && task->bondp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE) {
@@ -1420,7 +1421,7 @@ static void bondp_health_handle_datapath_link_fail_event(bondp_context_t *bdp_ct
                 URMA_LOG_INFO("Balance link recovered, start health check, tjetty:%u lidx:%d tidx:%d\n",
                     task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx);
             }
-            task->next_probe_ts_us = bondp_get_monotonic_us();
+            task->next_probe_ts_us = bondp_get_monotonic_us() + cfg->primary_check_start_ms * 1000ULL;
         }
     }
     pthread_rwlock_unlock(&health->task_table.lock);
