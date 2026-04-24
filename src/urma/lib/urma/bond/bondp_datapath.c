@@ -770,7 +770,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
         return CONVERT_SKIP;
     }
 
-    if (cr->status != 0) {
+    if (cr->status == URMA_CR_LOC_LEN_ERR || cr->status == URMA_CR_LOC_ACCESS_ERR || cr->status == URMA_CR_ACK_TIMEOUT_ERR) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         bdp_comp->valid[send_idx] = false;
 
