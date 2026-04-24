@@ -773,6 +773,8 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
     if (cr->status != 0) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         bdp_comp->valid[send_idx] = false;
+        bondp_health_notify_datapath_link_fail(bdp_comp->bondp_ctx, wr_entry->v_conn->target_vjetty,
+            (int)send_idx, (int)target_idx);
 
         int new_send_idx = -1, new_target_idx = -1;
         if (schedule_send(&wr_entry->v_conn->target_vjetty->v_tjetty, bdp_comp,
