@@ -16,6 +16,7 @@
 #include "perftest_communication.h"
 #include "perftest_resources.h"
 #include "perftest_run_test.h"
+#include "urma_private.h"
 
 typedef struct context_cfg {
     perftest_context_t *ctx;
@@ -161,6 +162,7 @@ int main(int argc, char *argv[])
     perftest_config_t cfg = {0}; /* cfg.server_ip shoule be initialized as NULL to avoid core dump */
     perftest_context_t ctx;
     context_cfg_t args;
+    urma_start_perf();
 
     args.cfg = &cfg;
     args.ctx = &ctx;
@@ -206,6 +208,12 @@ int main(int argc, char *argv[])
     if (ret != 0) {
         goto destroy_ctx;
     }
+
+    urma_stop_perf();
+    char buf[8192];
+    uint32_t len = sizeof(buf);
+    urma_get_perf_info(buf, &len);
+    (void)fprintf(stdout, "%s", buf);
 
 destroy_ctx:
     destroy_ctx(&ctx, &cfg);
