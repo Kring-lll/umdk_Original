@@ -290,6 +290,8 @@ static urma_status_t bondp_post_send_wr_and_store(bondp_comp_t *bdp_comp, urma_j
         URMA_LOG_ERR("WR->tjetty is NULL\n");
         return URMA_EINVAL;
     }
+    bdp_comp->bdp_tjetty = bdp_tjetty;
+    bdp_tjetty->bdp_comp = bdp_comp;
 
     bdp_v_conn_t *v_conn = get_v_conn_on_send(bdp_comp, bdp_tjetty);
     if (v_conn == NULL) {
@@ -317,7 +319,6 @@ static urma_status_t bondp_post_send_wr_and_store(bondp_comp_t *bdp_comp, urma_j
     }
     wr_entry->user_ctx = wr->user_ctx;
     wr_entry->bdp_comp = bdp_comp;
-    wr_entry->v_conn = v_conn;
     wr_entry->send_idx = send_idx;
     wr_entry->target_idx = target_idx;
 
@@ -654,7 +655,7 @@ static int resend_jfs_wr(jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
     wr_entry->send_idx = send_idx;
     wr_entry->target_idx = target_idx;
     urma_jfs_wr_t *wr = &wr_entry->wr;
-    urma_target_jetty_t *vtjetty = (urma_target_jetty_t *)(wr_entry->v_conn->target_vjetty);
+    urma_target_jetty_t *vtjetty = (urma_target_jetty_t *)(wr_entry->bdp_comp->bdp_tjetty);
     ret = convert_jfs_pwr_to_another_path(wr, vtjetty, send_idx, target_idx);
     if (ret != 0) {
         URMA_LOG_ERR("Failed to convert when resend\n");
@@ -770,12 +771,12 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
         return CONVERT_SKIP;
     }
 
-    if (is_failover_cr(cr)) {
+    if (is_failover_cr(cr) && bdp_comp->bdp_tjetty != NULL) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         bdp_comp->valid[send_idx] = false;
 
         int new_send_idx = -1, new_target_idx = -1;
-        if (schedule_send(&wr_entry->v_conn->target_vjetty->v_tjetty, bdp_comp,
+        if (schedule_send(&bdp_comp->bdp_tjetty->v_tjetty, bdp_comp,
                           &new_send_idx, &new_target_idx, NULL) != 0) {
             /*
              * When all ports are invalid and no port is available to resend the wr,
@@ -801,10 +802,10 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
                 URMA_LOG_ERR("Failed to resend jfs wr, wr_id: %lu\n", wr_id);
             }
         }
-        bondp_health_notify_datapath_link_fail(bdp_comp->bondp_ctx, wr_entry->v_conn->target_vjetty,
+        bondp_health_notify_datapath_link_fail(bdp_comp->bondp_ctx, bdp_comp->bdp_tjetty,
             (int)send_idx, (int)target_idx);
         /* Update active link after failover is finished. */
-        bondp_health_update_active_idx(bdp_comp->bondp_ctx, wr_entry->v_conn->target_vjetty, new_send_idx);
+        bondp_health_update_active_idx(bdp_comp->bondp_ctx, bdp_comp->bdp_tjetty, new_send_idx);
 
         bool is_primary_failover = (bdp_comp->active_count > 0 &&
                                     send_idx == (uint32_t)bdp_comp->active_indices[0] &&
@@ -817,7 +818,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
                 .cr_status = 0,
                 .new_active_idx = -1,
                 .bdp_jetty = NULL,
-                .bdp_tjetty = wr_entry->v_conn->target_vjetty,
+                .bdp_tjetty = bdp_comp->bdp_tjetty,
             };
             bondp_notify_health_event(bdp_comp->bondp_ctx, BONDP_HEALTH_EVENT_FALLBACK_TASK_KICK, &event_info);
         }
