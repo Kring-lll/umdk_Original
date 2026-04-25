@@ -651,9 +651,14 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
         goto DELETE_PJFS;
     }
 
+    if (bondp_register_health_check_seg_for_jetty(bdp_ctx, bdp_jfs) != 0) {
+        URMA_LOG_ERR("Failed to register health check seg for jfs creation\n");
+        goto DELETE_PJFS;
+    }
+
     if (bondp_create_vjfs(ctx, cfg, bdp_jfs)) {
         URMA_LOG_ERR("Failed to create vjfs\n");
-        goto DELETE_PJFS;
+        goto UNREGISTER_HEALTH_SEG;
     }
     if (bondp_add_jfs_p_vjetty_id_info(bdp_ctx, bdp_jfs, bdp_jfs->v_jfs.jfs_id.id)) {
         URMA_LOG_ERR("Failed to add jfs p_vjetty_id info\n");
@@ -674,6 +679,8 @@ DEL_P_VJFS_ID:
     bondp_del_jfs_p_vjetty_info(bdp_jfs);
 DELETE_VJFS:
     (void)bondp_delete_vjfs(bdp_jfs);
+UNREGISTER_HEALTH_SEG:
+    bondp_unregister_health_check_seg_for_jetty(bdp_jfs);
 DELETE_PJFS:
     bondp_delete_pjfs(bdp_jfs);
 FREE_JFS:
@@ -709,6 +716,7 @@ urma_status_t bondp_delete_jfs(urma_jfs_t *jfs)
     */
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
 
+    bondp_unregister_health_check_seg_for_jetty(bdp_jfs);
     bondp_uninit_connection_table(bdp_jfs);
 
     if (bondp_delete_vjfs(bdp_jfs) != URMA_SUCCESS) {
@@ -1560,7 +1568,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         goto UNIMPORT_PJETTY;
     }
 
-    if (bondp_import_health_check_tseg(bdp_ctx, bdp_tjetty, &rvjetty_info, rjetty) != 0) {
+    if (bondp_import_health_check_tseg(bdp_ctx, bdp_tjetty, &rvjetty_info) != 0) {
         URMA_LOG_ERR("Failed to import health check seg for jetty\n");
         goto UNIMPORT_TSEG;
     }
@@ -1739,6 +1747,10 @@ static int bondp_unimport_pjfr(bondp_target_jetty_t *bdp_tjetty)
 {
     int ret = URMA_SUCCESS;
 
+    if (bondp_unimport_health_check_tseg(bdp_tjetty) != URMA_SUCCESS) {
+        ret = URMA_FAIL;
+    }
+
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
         for (int j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
             if (!bdp_tjetty->p_tjetty[i][j]) {
@@ -1777,15 +1789,17 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
     }
 
     bondp_comp_t fake_jfs = {0};
+    bool is_fake_jfs = false;
     if (cfg_jfs == NULL) {
         if (rjfr->trans_mode == URMA_TM_RM && bdp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP) {
             URMA_LOG_ERR("RM jfr import requires drv_ext.vjfs\n");
-            return NULL;
+            goto UNIMPORT_VJFR;
         }
+        is_fake_jfs = true;
         cfg_jfs = &fake_jfs;
         if (init_active_indices(bdp_ctx, &fake_jfs, NULL, 0) != 0) {
             URMA_LOG_ERR("Failed to init active indices\n");
-            return NULL;
+            goto UNIMPORT_VJFR;
         }
     }
     if (init_target_active_indices(bdp_ctx, bdp_tjetty, &udata_out, cfg_jfs) != 0) {
@@ -1797,8 +1811,22 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
         goto UNIMPORT_PJFR;
     }
 
+    if (bondp_import_health_check_tseg(bdp_ctx, bdp_tjetty, &udata_out) != 0) {
+        URMA_LOG_ERR("Failed to import health check seg for jfr\n");
+        goto UNIMPORT_TSEG;
+    }
+
+    if (!is_fake_jfs) {
+        if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty, cfg_jfs) != 0) {
+            URMA_LOG_ERR("Failed to register health check task for jfr\n");
+            goto UNIMPORT_TSEG;
+        }
+    }
+
     return &bdp_tjetty->v_tjetty;
 
+UNIMPORT_TSEG:
+    bondp_unimport_health_check_tseg(bdp_tjetty);
 UNIMPORT_PJFR:
     bondp_unimport_pjfr(bdp_tjetty);
 UNIMPORT_VJFR:
@@ -1811,7 +1839,10 @@ FREE_TJFR:
 urma_status_t bondp_unimport_jfr(urma_target_jetty_t *target_jfr)
 {
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jfr, bondp_target_jetty_t, v_tjetty);
+    bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(target_jfr->urma_ctx, bondp_context_t, v_ctx);
     urma_status_t ret = URMA_SUCCESS;
+
+    bondp_unregister_health_check_task(bdp_ctx, bdp_tjetty);
 
     if (bondp_unimport_pjfr(bdp_tjetty) != URMA_SUCCESS) {
         ret = URMA_FAIL;
