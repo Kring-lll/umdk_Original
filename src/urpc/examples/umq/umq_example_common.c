@@ -474,9 +474,13 @@ int example_post_tx(uint64_t umqh, const char *data, uint32_t data_size)
     pro->flag.bs.complete_enable = 1;
     pro->opcode = UMQ_OPC_SEND_IMM;
     umq_buf_t *bad_buf = NULL;
-    if (umq_post(umqh, buf, UMQ_IO_TX, &bad_buf) != UMQ_SUCCESS) {
+
+    buf->mempool_id = 1023;
+
+    int ret = umq_post(umqh, buf, UMQ_IO_TX, &bad_buf);
+    if (ret != UMQ_SUCCESS) {
         umq_buf_free(bad_buf);
-        LOG_PRINT_ERR("post tx failed\n");
+        LOG_PRINT_ERR("post tx failed, ret %d\n", ret);
         return -1;
     }
 
