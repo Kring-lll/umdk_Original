@@ -29,9 +29,10 @@ extern "C" {
 #define UMQ_ERR_EINVAL                             (EINVAL)
 #define UMQ_ERR_ENODEV                             (ENODEV)
 #define UMQ_ERR_ENOSR                              (ENOSR)  /* Out of streams resources, like Jetty/TP */
+#define UMQ_ERR_EFAULT                             (EFAULT)
 #define UMQ_ERR_ETIMEOUT                           (ETIMEDOUT)
 #define UMQ_ERR_EINPROGRESS                        (EINPROGRESS)
-#define UMQ_ERR_ETOOMANYREFS                       (ETOOMANYREFS)
+#define UMQ_ERR_ETOOMANYREFS                       (ETOOMANYREFS)   
 #define UMQ_ERR_ETSEG_NON_IMPORTED                 (0x0201)
 #define UMQ_ERR_EFLOWCTL                           (0x0202)  /* Umq flow control error */
 
