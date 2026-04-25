@@ -307,6 +307,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
             if (real_buf->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, ub only supports using pooled memory\n",
                     EID_ARGS(*eid), id);
+                ret = -UMQ_ERR_EPERM;
                 goto ERROR;
             }
 
@@ -486,6 +487,7 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
     umq_buf_t *wr_last_buf = NULL;  // record last qbuf of current wr
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
+    int err_code = UMQ_FAIL;
     while (buffer) {
         uint32_t rest_size = buffer->total_data_size;
         if (rest_size == 0) {
@@ -517,6 +519,7 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
             if (buffer->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, ub only supports using pooled memory\n",
                     EID_ARGS(*eid), id);
+                err_code = -UMQ_ERR_EPERM;
                 goto PUT_CUR_RX_CTX;
             }
 
@@ -608,7 +611,7 @@ PUT_ALL_RX_CTX:
     } else {
         *bad_qbuf = qbuf;
     }
-    return UMQ_FAIL;
+    return err_code;
 }
 
 int umq_ub_post_rx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
