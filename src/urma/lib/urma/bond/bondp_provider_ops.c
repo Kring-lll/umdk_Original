@@ -505,6 +505,13 @@ int bondp_set_bonding_mode(urma_context_t *ctx, bondp_bonding_mode_t bonding_mod
         return -EINVAL;
     }
 
+    uint64_t atomic_cnt = (uint64_t)atomic_load(&ctx->ref.atomic_cnt);
+    if (atomic_cnt > 1) {
+        URMA_LOG_WARN("already in use, atomic_cnt: %lu, dev_name: %s.\n",
+            atomic_cnt, ctx->dev->name);
+        return URMA_EAGAIN;
+    }
+
     if (bonding_mode < 0 || bonding_mode >= BONDP_BONDING_MODE_MAX) {
         URMA_LOG_ERR("Invalid bonding mode: %d\n", bonding_mode);
         return -EINVAL;
