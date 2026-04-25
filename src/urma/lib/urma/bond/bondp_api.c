@@ -1574,6 +1574,8 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
             URMA_LOG_ERR("Failed to register health check task\n");
             goto UNIMPORT_TSEG;
         }
+        bdp_tjetty->bdp_comp = cfg_jetty;
+        cfg_jetty->bdp_tjetty = bdp_tjetty;
     }
 
     URMA_LOG_INFO("Successfully imported target jetty: " URMA_JETTY_ID_FMT "\n",
@@ -1600,6 +1602,11 @@ urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
 
     bondp_unregister_health_check_task(bdp_ctx, bdp_tjetty);
 
+    if (bdp_tjetty->bdp_comp != NULL) {
+        bdp_tjetty->bdp_comp->bdp_tjetty = NULL;
+        bdp_tjetty->bdp_comp = NULL;
+    }
+
     if (bondp_unimport_pjetty(bdp_tjetty) != URMA_SUCCESS) {
         ret = URMA_FAIL;
     }
@@ -1623,6 +1630,7 @@ urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
     memcpy(bdp_jetty->active_indices, bdp_tjetty->local_active_indices,
            sizeof(bdp_jetty->active_indices));
     bdp_jetty->active_count = bdp_tjetty->active_count;
+    bdp_jetty->bdp_tjetty = bdp_tjetty;
 
     uint32_t min_active_count = MIN(bdp_jetty->active_count, bdp_tjetty->active_count);
     if (min_active_count == 0) {
