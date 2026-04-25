@@ -427,6 +427,7 @@ static void *async_shrink_global_pool_callback(void *arg)
         qbuf_expansion_pool_slot_t *slot = exp_pool->exp_slot_list[shrink_param->slot_id];
         if (slot == NULL) {
             (void)pthread_spin_unlock(&exp_pool->expansion_pool_lock);
+            free(shrink_param);
             UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "exp slot not exist, slot id %u\n", shrink_param->slot_id);
             continue;
         }
@@ -434,6 +435,7 @@ static void *async_shrink_global_pool_callback(void *arg)
         // if the expansion pool is used again, do not release it
         if (slot->free_block_cnt != slot->total_block_cnt) {
             (void)pthread_spin_unlock(&exp_pool->expansion_pool_lock);
+            free(shrink_param);
             continue;
         }
         exp_pool->exp_slot_list[shrink_param->slot_id] = NULL;
