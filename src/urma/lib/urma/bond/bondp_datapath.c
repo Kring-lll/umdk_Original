@@ -930,15 +930,12 @@ static cr_convert_ret_t bondp_handle_cr_no_store(bondp_context_t *bdp_ctx, int i
     return CONVERT_SUCCESS;
 }
 
-static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, bondp_jfc_t *bdp_jfc, int idx, urma_cr_t *cr, bool is_flush)
+static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, bondp_jfc_t *bdp_jfc, int idx, urma_cr_t *cr)
 {
     if (is_ctrl_cr(cr)) {
         (void)bondp_try_handle_health_check_cr(bdp_ctx, idx, cr);
         return CONVERT_SKIP;
     } else if (is_fake_cr(cr)) {
-        if (!is_flush) {
-            return CONVERT_SKIP;
-        }
         return handle_fake_cr_with_store(bdp_ctx, bdp_jfc, idx, cr);
     } else if (is_recv_cr(cr)) {
         return handle_recv_cr_with_store(bdp_ctx, bdp_jfc, idx, cr);
@@ -988,7 +985,7 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
             if (is_single_dev_mode(bdp_ctx)) {
                 conv_ret = bondp_handle_cr_no_store(bdp_ctx, idx, pcr);
             } else {
-                conv_ret = bondp_handle_cr_with_store(bdp_ctx, bdp_jfc, idx, pcr, false);
+                conv_ret = bondp_handle_cr_with_store(bdp_ctx, bdp_jfc, idx, pcr);
             }
             if (conv_ret == CONVERT_FAIL) {
                 return -1;
@@ -1040,7 +1037,7 @@ int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
             if (is_single_dev_mode(bdp_ctx)) {
                 conv_ret = bondp_handle_cr_no_store(bdp_ctx, i, pcr);
             } else {
-                conv_ret = bondp_handle_cr_with_store(bdp_ctx, bdp_jetty->send_jfc, i, pcr, true);
+                conv_ret = bondp_handle_cr_with_store(bdp_ctx, bdp_jetty->send_jfc, i, pcr);
             }
             if (conv_ret == CONVERT_FAIL) {
                 return -1;
