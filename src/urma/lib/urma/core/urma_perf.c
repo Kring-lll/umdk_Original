@@ -368,17 +368,12 @@ urma_status_t urma_step_perf(urma_perf_record_type_t type, uint64_t delta)
     urma_perf_record_t *cur_record = &g_urma_perf_record_ctx.record_table[g_perf_record_index];
 
     if (!urma_perf_is_enabled()){
-        URMA_LOG_ERR("Urma perf step failed. perf record is not started or thread %d is not using.\n",
-            g_perf_record_index);
         return URMA_ENOPERM;
     }
     if (type >= URMA_PERF_RECORD_TYPE_MAX) {
-        URMA_LOG_ERR("Urma perf type %d is invalid. \n", type);
         return URMA_EINVAL;
     }
     if (delta < g_urma_perf_record_ctx.thresh_cycle[0]) {
-        URMA_LOG_WARN("Urma perf type %d delta is %lu, less than threshold %lu.\n",
-            type, delta, g_urma_perf_record_ctx.thresh_cycle[0]);
         return URMA_EINVAL;
     }
 
