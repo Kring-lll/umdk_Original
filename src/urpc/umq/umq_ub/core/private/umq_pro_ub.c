@@ -307,6 +307,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
             if (real_buf->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, ub only supports using pooled memory\n",
                     EID_ARGS(*eid), id);
+                ret = -UMQ_ERR_EPERM;
                 goto ERROR;
             }
 
