@@ -314,7 +314,6 @@ urma_status_t urma_stop_perf(void)
 uint64_t urma_get_perf_timestamp(void)
 {
     if (!urma_perf_is_enabled()) {
-        URMA_LOG_ERR("Urma perf get timestamp failed. perf record is not started. \n");
         return URMA_ENOPERM;
     }
     pthread_once(&g_thread_run_once, urma_perf_thread_context_init);
