@@ -31,12 +31,25 @@ typedef enum uvs_global_cmd {
     UVS_CMD_GLOBAL_LAST
 } uvs_global_cmd_t;
 
-typedef struct uvs_set_topo {
-    struct {
-        void *topo_info;
-        uint32_t topo_num;
-    } in;
-} uvs_set_topo_t;
+typedef struct uvs_cmd_attr {
+    uint8_t type;
+    uint8_t flag;
+    uint16_t field_size;
+    union {
+        struct {
+            uint32_t el_num : 20;
+            uint32_t el_size : 12;
+        } bs;
+        uint32_t value;
+    } attr_data;
+    uint64_t data;
+} uvs_cmd_attr_t;
+
+typedef enum uvs_cmd_set_topo_type {
+    SET_TOPO_IN_TOPO_INFO,
+    SET_TOPO_IN_TOPO_NUM,
+    SET_TOPO_IN_NUM
+} uvs_cmd_set_topo_type_t;
 
 #define TPSA_CMD _IOWR(TPSA_CMD_MAGIC, 1, struct tpsa_cmd_hdr)
 
@@ -614,16 +627,27 @@ static int ioctl_set_topo_ubcore(const char *dev_path, struct urma_topo_node *no
 {
     int fd;
     int ret;
+    uvs_cmd_attr_t attrs[SET_TOPO_IN_NUM];
+    struct tpsa_cmd_hdr hdr;
 
-    uvs_set_topo_t arg = {
-        .in.topo_info = nodes,
-        .in.topo_num = topo_num,
-    };
-    struct tpsa_cmd_hdr hdr = {
-        .command = UVS_CMD_SET_TOPO,
-        .args_len = (uint32_t)sizeof(arg),
-        .args_addr = (uint64_t)(uintptr_t)&arg,
-    };
+    memset(attrs, 0, sizeof(attrs));
+    memset(&hdr, 0, sizeof(hdr));
+
+    attrs[0].type = SET_TOPO_IN_TOPO_INFO;
+    attrs[0].field_size = (uint16_t)sizeof(nodes);
+    attrs[0].attr_data.bs.el_num = 1;
+    attrs[0].attr_data.bs.el_size = 0;
+    attrs[0].data = (uint64_t)(uintptr_t)&nodes;
+
+    attrs[1].type = SET_TOPO_IN_TOPO_NUM;
+    attrs[1].field_size = (uint16_t)sizeof(topo_num);
+    attrs[1].attr_data.bs.el_num = 1;
+    attrs[1].attr_data.bs.el_size = 0;
+    attrs[1].data = (uint64_t)(uintptr_t)&topo_num;
+
+    hdr.command = UVS_CMD_SET_TOPO;
+    hdr.args_len = (uint32_t)sizeof(attrs);
+    hdr.args_addr = (uint64_t)(uintptr_t)attrs;
 
     fd = open(dev_path, O_RDWR);
     if (fd < 0) {

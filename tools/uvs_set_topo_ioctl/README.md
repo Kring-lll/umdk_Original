@@ -77,6 +77,7 @@ make
 ## 说明
 
 - `ubcore` 设备路径固定为 `/dev/ubcore/ubcore`
+- 实际下发时会按 `uvs_cmd_tlv` 机制把 `topo_info` 和 `topo_num` 封装成 TLV 数组，再通过 `TPSA_CMD` 调用 `UVS_CMD_SET_TOPO`
 - 当前 `agg_eid` 生成规则是固定的 16 字节编码：前 4 字节是 `UAGG`，第 5-8 字节保留为 `0`，再接着 4 字节是 `device_code`，最后 4 字节保留为 `0`
 - 这要求同一次下发里 `device_code` 本身是全局唯一的，否则生成出的 `agg_eid` 会冲突
 - 工具不会从配置文件读取链路信息，所有 `links` 都按默认 invalid 值下发
