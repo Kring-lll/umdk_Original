@@ -1477,6 +1477,9 @@ static void bondp_health_handle_ta_timeout_event(bondp_context_t *bdp_ctx, const
             bool ok = (info->cr_status == URMA_CR_SUCCESS);
             atomic_store(&sub->link_ok, ok);
             task->bondp_jetty->valid[sub->local_idx] = ok;
+            if (ok) {
+                task->bondp_jetty->pjettys_error_done[sub->local_idx] = 0;
+            }
             if (old_ok != ok) {
                 URMA_LOG_WARN("Health link state changed, tjetty:%u lidx:%d tidx:%d user_ctx:0x%lx old:%d new:%d cr_status:%u\n",
                     task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx, info->user_ctx, old_ok, ok,
@@ -1539,6 +1542,9 @@ bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, u
             bool is_balance = (task->bondp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE);
             atomic_store(&sub->link_ok, ok);
             task->bondp_jetty->valid[sub->local_idx] = ok;
+            if (ok) {
+                task->bondp_jetty->pjettys_error_done[sub->local_idx] = 0;
+            }
             sub->need_check = is_balance ? (!ok) : sub->need_check;
             if (ok && task->mode == HEALTH_MODE_PRIMARY_CHECK &&
                 local_idx == task->primary_local_idx && task->active_local_idx != task->primary_local_idx) {
