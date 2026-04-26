@@ -1593,7 +1593,7 @@ FREE_TJETTY:
     return NULL;
 }
 
-urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
+static urma_status_t bondp_unimport_jetty_inner(urma_target_jetty_t *target_jetty)
 {
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jetty, bondp_target_jetty_t, v_tjetty);
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(target_jetty->urma_ctx, bondp_context_t, v_ctx);
@@ -1609,6 +1609,20 @@ urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
     }
     free(bdp_tjetty);
     return ret;
+}
+
+static void bondp_put_remote_jetty(urma_target_jetty_t *target_jetty)
+{
+    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jetty, bondp_target_jetty_t, v_tjetty);
+    if (atomic_fetch_sub(&bdp_tjetty->use_cnt.atomic_cnt, 1) == 1) {
+        bondp_unimport_jetty_inner(target_jetty);
+    }
+}
+
+urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
+{
+    bondp_put_remote_jetty(target_jetty);
+    return URMA_SUCCESS;
 }
 
 urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
@@ -1810,7 +1824,7 @@ FREE_TJFR:
     return NULL;
 }
 
-urma_status_t bondp_unimport_jfr(urma_target_jetty_t *target_jfr)
+static urma_status_t bondp_unimport_jfr_inner(urma_target_jetty_t *target_jfr)
 {
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jfr, bondp_target_jetty_t, v_tjetty);
     urma_status_t ret = URMA_SUCCESS;
@@ -1823,6 +1837,35 @@ urma_status_t bondp_unimport_jfr(urma_target_jetty_t *target_jfr)
     }
     free(bdp_tjetty);
     return ret;
+}
+
+static void bondp_put_remote_jfr(urma_target_jetty_t *target_jfr)
+{
+    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jfr, bondp_target_jetty_t, v_tjetty);
+    if (atomic_fetch_sub(&bdp_tjetty->use_cnt.atomic_cnt, 1) == 1) {
+        bondp_unimport_jfr_inner(target_jfr);
+    }
+}
+
+urma_status_t bondp_unimport_jfr(urma_target_jetty_t *target_jfr)
+{
+    bondp_put_remote_jfr(target_jfr);
+    return URMA_SUCCESS;
+}
+
+void bondp_tjetty_get(urma_target_jetty_t *target_jetty)
+{
+    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jetty, bondp_target_jetty_t, v_tjetty);
+    atomic_fetch_add(&bdp_tjetty->use_cnt.atomic_cnt, 1);
+}
+
+void bondp_tjetty_put(urma_target_jetty_t *target_jetty)
+{
+    if (target_jetty->type == URMA_JFR) {
+        bondp_put_remote_jfr(target_jetty);
+    } else {
+        bondp_put_remote_jetty(target_jetty);
+    }
 }
 
 urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)

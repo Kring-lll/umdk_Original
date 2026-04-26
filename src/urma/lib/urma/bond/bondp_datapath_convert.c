@@ -8,6 +8,7 @@
  * History: 2026-04-02   Create File
  */
 
+#include "bondp_api.h"
 #include "bondp_segment.h"
 #include "bondp_types.h"
 #include "topo_info.h"
@@ -328,6 +329,10 @@ void convert_jfs_vwr_to_pwr_for_resend(urma_jfs_wr_t *wr, int send_idx, int targ
 
 void add_vwr_use_cnt(urma_jfs_wr_t *wr)
 {
+    if (wr->tjetty != NULL) {
+        bondp_tjetty_get(wr->tjetty);
+    }
+
     switch (wr->opcode) {
         case URMA_OPC_SEND:
         case URMA_OPC_SEND_IMM:
@@ -356,6 +361,10 @@ void add_vwr_use_cnt(urma_jfs_wr_t *wr)
 
 void release_vwr_use_cnt(urma_jfs_wr_t *wr)
 {
+    if (wr->tjetty != NULL) {
+        bondp_tjetty_put(wr->tjetty);
+    }
+
     switch (wr->opcode) {
         case URMA_OPC_SEND:
         case URMA_OPC_SEND_IMM:
