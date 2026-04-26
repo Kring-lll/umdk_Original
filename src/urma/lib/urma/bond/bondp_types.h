@@ -54,6 +54,7 @@ typedef struct bondp_health_sub_task {
     bool valid;
     bool probe_pending;
     bool need_check;
+    uint8_t recover_backoff_cnt;
 #ifndef __cplusplus
     atomic_bool link_ok;
 #else

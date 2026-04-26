@@ -60,6 +60,7 @@
 #define BONDP_HEALTH_CHECK_TIME_MS_MAX_1H             3600000
 #define BONDP_HEALTH_CHECK_CHECK_MIN_BACKOFF          1
 #define BONDP_HEALTH_CHECK_CHECK_MAX_BACKOFF          100
+#define BONDP_HEALTH_RECOVER_MAX_BACKOFF_MS           64000
 #define BONDP_FALLBACK_CTRL_REQ                        1
 #define BONDP_FALLBACK_CTRL_RESP                       2
 #define BONDP_FALLBACK_PRIMARY_INVALID_ID              UINT32_MAX
@@ -167,6 +168,9 @@ static void bondp_health_handle_datapath_link_fail_event(bondp_context_t *bdp_ct
     const bondp_health_event_info_t *info);
 static bool bondp_health_handle_fallback_ctrl_rx_impl(bondp_context_t *bdp_ctx, uint32_t recv_local_id,
     uint8_t ctrl_type, uint8_t req_seq, uint32_t payload, bool silent_unmatched);
+static uint64_t bondp_health_calc_recover_interval_us(const bondp_health_check_cfg_t *cfg, uint8_t backoff_cnt);
+static int bondp_health_recover_target_route(bondp_health_task_t *task, int local_idx, int target_idx);
+static int bondp_health_rebind_local_route(bondp_health_task_t *task, int local_idx, int target_idx);
 
 static int bondp_get_target_idx_by_local_idx(const bondp_health_task_t *task, int local_idx, int *target_idx)
 {
@@ -505,6 +509,7 @@ static int import_check_tseg_by_import_result(bondp_context_t *bdp_ctx, bondp_ta
     urma_bond_id_info_out_t *rvjetty_info)
 {
     bool has_valid_route = false;
+    uint32_t fail_cnt = 0;
     urma_import_seg_flag_t flag = {
         .bs.cacheable = URMA_NON_CACHEABLE,
         .bs.mapping = URMA_SEG_NOMAP,
@@ -533,8 +538,10 @@ static int import_check_tseg_by_import_result(bondp_context_t *bdp_ctx, bondp_ta
         bdp_tjetty->p_check_tseg[local_idx][target_idx] =
             urma_import_seg(bdp_ctx->p_ctxs[local_idx], check_seg, NULL, 0, flag);
         if (bdp_tjetty->p_check_tseg[local_idx][target_idx] == NULL) {
-            URMA_LOG_ERR("Failed to import health check seg (%u, %u)\n", local_idx, target_idx);
-            return -1;
+            URMA_LOG_WARN("Failed to import health check seg (%u, %u), continue for health recovery\n",
+                local_idx, target_idx);
+            fail_cnt++;
+            continue;
         }
 
         URMA_LOG_INFO("Import health check seg [%u]("EID_FMT")<-[%u]("EID_FMT")\n", local_idx,
@@ -546,6 +553,9 @@ static int import_check_tseg_by_import_result(bondp_context_t *bdp_ctx, bondp_ta
     if (!has_valid_route) {
         URMA_LOG_ERR("No valid imported route for health check seg\n");
         return -1;
+    }
+    if (fail_cnt > 0) {
+        URMA_LOG_WARN("Partial import health check segs, fail_cnt:%u\n", fail_cnt);
     }
 
     URMA_LOG_INFO("Succeed to import health check segs\n");
@@ -946,6 +956,7 @@ static bool bondp_process_fallback_task(bondp_context_t *bdp_ctx, bondp_health_t
             sub->target_idx = (int)target_idx;
             sub->valid = true;
             sub->probe_pending = false;
+            sub->recover_backoff_cnt = 0;
             atomic_store(&sub->link_ok, true);
         }
         task->next_probe_ts_us = bondp_get_monotonic_us();
@@ -964,13 +975,28 @@ static void bondp_health_task_check_mode(bondp_health_task_t *task,
 
     if (task->mode == HEALTH_MODE_BACKUP_CHECK && !primary_valid) {
         /* Primary link went down, switch to primary check mode */
+        uint64_t recover_interval_us = cfg->primary_check_start_ms * 1000ULL;
+        int primary_target_idx = -1;
+        if (bondp_get_target_idx_by_local_idx(task, task->primary_local_idx, &primary_target_idx) == 0 &&
+            primary_target_idx >= 0 && primary_target_idx < URMA_UBAGG_DEV_MAX_NUM) {
+            bondp_health_sub_task_t *sub = &task->sub_tasks[task->primary_local_idx][primary_target_idx];
+            recover_interval_us = bondp_health_calc_recover_interval_us(cfg, sub->recover_backoff_cnt);
+            if (sub->recover_backoff_cnt < UINT8_MAX) {
+                sub->recover_backoff_cnt++;
+            }
+        }
         task->mode = HEALTH_MODE_PRIMARY_CHECK;
         task->backoff_cnt = 0;
-        task->next_probe_ts_us = now_us + cfg->primary_check_start_ms * 1000ULL;
+        task->next_probe_ts_us = now_us + recover_interval_us;
         URMA_LOG_INFO("Primary link (lidx:%d) down, switch to PRIMARY_CHECK mode, start after %lums\n",
-            task->primary_local_idx, (unsigned long)cfg->primary_check_start_ms);
+            task->primary_local_idx, (unsigned long)(recover_interval_us / 1000ULL));
     } else if (task->mode == HEALTH_MODE_PRIMARY_CHECK && primary_valid) {
         /* Primary link recovered (user switched back), resume backup check */
+        int primary_target_idx = -1;
+        if (bondp_get_target_idx_by_local_idx(task, task->primary_local_idx, &primary_target_idx) == 0 &&
+            primary_target_idx >= 0 && primary_target_idx < URMA_UBAGG_DEV_MAX_NUM) {
+            task->sub_tasks[task->primary_local_idx][primary_target_idx].recover_backoff_cnt = 0;
+        }
         task->mode = HEALTH_MODE_BACKUP_CHECK;
         task->backoff_cnt = 0;
         task->next_probe_ts_us = now_us + cfg->health_check_interval_ms * 1000ULL;
@@ -982,7 +1008,6 @@ static void bondp_health_task_check_mode(bondp_health_task_t *task,
 static void bondp_health_probe_sub(bondp_context_t *bdp_ctx, bondp_health_task_t *task,
     bondp_health_sub_task_t *sub)
 {
-    bool is_balance = (task->bondp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE);
     if (sub->probe_pending) {
         URMA_LOG_INFO("Health probe skipped (pending), lidx:%d tidx:%d\n", sub->local_idx, sub->target_idx);
         return;
@@ -997,9 +1022,7 @@ static void bondp_health_probe_sub(bondp_context_t *bdp_ctx, bondp_health_task_t
         atomic_store(&sub->link_ok, false);
         sub->need_check = true;
         task->bondp_jetty->valid[sub->local_idx] = false;
-        if (is_balance) {
-            bondp_health_notify_datapath_link_fail(bdp_ctx, task->bdp_tjetty, sub->local_idx, sub->target_idx);
-        }
+        bondp_health_notify_datapath_link_fail(bdp_ctx, task->bdp_tjetty, sub->local_idx, sub->target_idx);
         return;
     }
 }
@@ -1048,6 +1071,124 @@ static uint64_t bondp_health_calc_primary_interval_us(const bondp_health_check_c
         backoff_cnt : cfg->primary_check_max_backoff_cnt;
     interval_ms <<= shift;
     return interval_ms * 1000ULL;
+}
+
+static uint64_t bondp_health_calc_recover_interval_us(const bondp_health_check_cfg_t *cfg, uint8_t backoff_cnt)
+{
+    uint64_t interval_ms = cfg->primary_check_start_ms;
+    for (uint8_t i = 0; i < backoff_cnt && interval_ms < BONDP_HEALTH_RECOVER_MAX_BACKOFF_MS; ++i) {
+        if (interval_ms > BONDP_HEALTH_RECOVER_MAX_BACKOFF_MS / 2) {
+            interval_ms = BONDP_HEALTH_RECOVER_MAX_BACKOFF_MS;
+            break;
+        }
+        interval_ms <<= 1;
+    }
+    return interval_ms * 1000ULL;
+}
+
+static int bondp_health_recover_target_route(bondp_health_task_t *task, int local_idx, int target_idx)
+{
+    if (task == NULL || task->bdp_tjetty == NULL || task->bondp_jetty == NULL ||
+        local_idx < 0 || target_idx < 0 ||
+        local_idx >= URMA_UBAGG_DEV_MAX_NUM || target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return -1;
+    }
+
+    bondp_target_jetty_t *bdp_tjetty = task->bdp_tjetty;
+    if (!bdp_tjetty->import_info_valid) {
+        URMA_LOG_WARN("Recover target route skipped due to missing import cache, vjetty:%u lidx:%d tidx:%d\n",
+            task->vjetty_id, local_idx, target_idx);
+        return -1;
+    }
+
+    bondp_context_t *bdp_ctx = task->bondp_jetty->bondp_ctx;
+    if (bdp_ctx->p_ctxs[local_idx] == NULL) {
+        return -1;
+    }
+
+    urma_token_t *import_token = bdp_tjetty->import_token_valid ? &bdp_tjetty->import_token_value : NULL;
+    if (bdp_tjetty->p_tjetty[local_idx][target_idx] == NULL) {
+        urma_target_jetty_t *new_tjetty = NULL;
+        if (task->bondp_jetty->comp_type == BONDP_COMP_JETTY) {
+            urma_rjetty_t rjetty = {
+                .jetty_id = bdp_tjetty->v_tjetty.id,
+                .trans_mode = bdp_tjetty->v_tjetty.trans_mode,
+                .policy = bdp_tjetty->v_tjetty.policy,
+                .type = bdp_tjetty->v_tjetty.type,
+                .flag = bdp_tjetty->v_tjetty.flag,
+                .tp_type = bdp_tjetty->v_tjetty.tp_type,
+            };
+            rjetty.jetty_id = bdp_tjetty->import_info.slave_id[target_idx];
+            new_tjetty = urma_import_jetty(bdp_ctx->p_ctxs[local_idx], &rjetty, import_token);
+        } else if (task->bondp_jetty->comp_type == BONDP_COMP_JFS) {
+            urma_rjfr_t rjfr = {
+                .jfr_id = bdp_tjetty->v_tjetty.id,
+                .trans_mode = bdp_tjetty->v_tjetty.trans_mode,
+                .flag = bdp_tjetty->v_tjetty.flag,
+                .tp_type = bdp_tjetty->v_tjetty.tp_type,
+            };
+            rjfr.jfr_id = bdp_tjetty->import_info.slave_id[target_idx];
+            new_tjetty = urma_import_jfr(bdp_ctx->p_ctxs[local_idx], &rjfr, import_token);
+        } else {
+            return -1;
+        }
+        if (new_tjetty == NULL) {
+            URMA_LOG_WARN("Recover target route import failed, vjetty:%u lidx:%d tidx:%d\n",
+                task->vjetty_id, local_idx, target_idx);
+            return -1;
+        }
+        bdp_tjetty->p_tjetty[local_idx][target_idx] = new_tjetty;
+        bdp_tjetty->valid[target_idx] = true;
+    }
+
+    if (bdp_tjetty->import_info.is_health_check_enable &&
+        bdp_tjetty->p_check_tseg[local_idx][target_idx] == NULL) {
+        urma_import_seg_flag_t flag = {
+            .bs.cacheable = URMA_NON_CACHEABLE,
+            .bs.mapping = URMA_SEG_NOMAP,
+            .bs.reserved = 0,
+            .bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE,
+        };
+        urma_seg_t *check_seg = &bdp_tjetty->import_info.health_check_seg.slaves[target_idx];
+        bdp_tjetty->p_check_tseg[local_idx][target_idx] =
+            urma_import_seg(bdp_ctx->p_ctxs[local_idx], check_seg, NULL, 0, flag);
+        if (bdp_tjetty->p_check_tseg[local_idx][target_idx] == NULL) {
+            URMA_LOG_WARN("Recover target route health seg import failed, vjetty:%u lidx:%d tidx:%d\n",
+                task->vjetty_id, local_idx, target_idx);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int bondp_health_rebind_local_route(bondp_health_task_t *task, int local_idx, int target_idx)
+{
+    if (task == NULL || task->bondp_jetty == NULL || task->bdp_tjetty == NULL ||
+        task->bondp_jetty->comp_type != BONDP_COMP_JETTY ||
+        local_idx < 0 || target_idx < 0 ||
+        local_idx >= URMA_UBAGG_DEV_MAX_NUM || target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return -1;
+    }
+
+    urma_jetty_t *pjetty = task->bondp_jetty->p_jetty[local_idx];
+    urma_target_jetty_t *ptjetty = task->bdp_tjetty->p_tjetty[local_idx][target_idx];
+    if (pjetty == NULL || ptjetty == NULL) {
+        return -1;
+    }
+
+    if (pjetty->remote_jetty != NULL && pjetty->remote_jetty != ptjetty) {
+        (void)urma_unbind_jetty(pjetty);
+        pjetty->remote_jetty = NULL;
+    }
+    if (pjetty->remote_jetty == ptjetty) {
+        return 0;
+    }
+    if (urma_bind_jetty(pjetty, ptjetty) != URMA_SUCCESS) {
+        URMA_LOG_WARN("Recover route rebind failed, vjetty:%u lidx:%d tidx:%d\n",
+            task->vjetty_id, local_idx, target_idx);
+        return -1;
+    }
+    return 0;
 }
 
 static void *bondp_health_check_thread(void *arg)
@@ -1176,22 +1317,26 @@ int bondp_register_health_check_task(bondp_context_t *bdp_ctx, bondp_target_jett
     for (uint32_t n = 0; n < bdp_tjetty->active_count; ++n) {
         uint32_t local_idx = bdp_tjetty->local_active_indices[n];
         uint32_t target_idx = bdp_tjetty->active_indices[n];
-        if (bdp_tjetty->p_tjetty[local_idx][target_idx] == NULL ||
-            bdp_tjetty->p_check_tseg[local_idx][target_idx] == NULL) {
-            continue;
-        }
-        if (cfg_jetty->p_jetty[local_idx] == NULL) {
+        if (bondp_comp_get_local_member(cfg_jetty, (int)local_idx) == NULL) {
             continue;
         }
 
+        bool route_ready = (bdp_tjetty->p_tjetty[local_idx][target_idx] != NULL &&
+            bdp_tjetty->p_check_tseg[local_idx][target_idx] != NULL);
         bondp_health_sub_task_t *sub = &task->sub_tasks[local_idx][target_idx];
         sub->local_idx = (int)local_idx;
         sub->target_idx = (int)target_idx;
         sub->valid = true;
         sub->probe_pending = false;
-        sub->need_check = (cfg_jetty->bondp_ctx->bonding_mode != BONDP_BONDING_MODE_BALANCE);
-        atomic_store(&sub->link_ok, true);
+        sub->need_check = (cfg_jetty->bondp_ctx->bonding_mode != BONDP_BONDING_MODE_BALANCE) || !route_ready;
+        sub->recover_backoff_cnt = 0;
+        atomic_store(&sub->link_ok, route_ready);
         sub->user_ctx = 0;
+        if (!route_ready) {
+            cfg_jetty->valid[local_idx] = false;
+            URMA_LOG_WARN("Health subtask registered with incomplete route, lidx:%d tidx:%d\n",
+                (int)local_idx, (int)target_idx);
+        }
         if (task->primary_local_idx < 0) {
             task->primary_local_idx = (int)local_idx;
             task->active_local_idx = (int)local_idx;
@@ -1407,21 +1552,37 @@ static void bondp_health_handle_datapath_link_fail_event(bondp_context_t *bdp_ct
     const bondp_health_check_cfg_t *cfg = &g_bondp_global_ctx->health_thread_ctx.cfg;
     pthread_rwlock_wrlock(&health->task_table.lock);
     bondp_health_task_t *task = bondp_find_health_task_by_tjetty_nolock(health, info->bdp_tjetty);
-    if (task != NULL && task->bondp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE) {
+    if (task != NULL) {
         bondp_health_sub_task_t *sub = &task->sub_tasks[info->local_idx][info->target_idx];
         if (sub->valid) {
+            uint64_t recover_interval_us = bondp_health_calc_recover_interval_us(cfg, sub->recover_backoff_cnt);
             sub->probe_pending = false;
             sub->need_check = true;
             atomic_store(&sub->link_ok, false);
             task->bondp_jetty->valid[sub->local_idx] = false;
-            if (bondp_rebuild_local_pjetty(task, info->local_idx) != 0) {
-                URMA_LOG_WARN("Balance link recover failed, tjetty:%u lidx:%d tidx:%d\n",
-                    task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx);
-            } else {
-                URMA_LOG_INFO("Balance link recovered, start health check, tjetty:%u lidx:%d tidx:%d\n",
+            if (bondp_health_recover_target_route(task, info->local_idx, info->target_idx) != 0) {
+                URMA_LOG_WARN("Recover target route failed, tjetty:%u lidx:%d tidx:%d\n",
                     task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx);
             }
-            task->next_probe_ts_us = bondp_get_monotonic_us() + cfg->primary_check_start_ms * 1000ULL;
+            if (bondp_rebuild_local_pjetty(task, info->local_idx) != 0) {
+                URMA_LOG_WARN("Link recover rebuild failed, tjetty:%u lidx:%d tidx:%d\n",
+                    task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx);
+            } else {
+                URMA_LOG_INFO("Link recovered by health thread, start health check, tjetty:%u lidx:%d tidx:%d\n",
+                    task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx);
+            }
+            if (bondp_health_rebind_local_route(task, info->local_idx, info->target_idx) != 0 &&
+                task->bondp_jetty->comp_type == BONDP_COMP_JETTY) {
+                URMA_LOG_WARN("Recover route rebind skipped/failed, tjetty:%u lidx:%d tidx:%d\n",
+                    task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx);
+            }
+            if (sub->recover_backoff_cnt < UINT8_MAX) {
+                sub->recover_backoff_cnt++;
+            }
+            task->next_probe_ts_us = bondp_get_monotonic_us() + recover_interval_us;
+            URMA_LOG_INFO("Recover backoff scheduled, tjetty:%u lidx:%d tidx:%d wait:%lums\n",
+                task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx,
+                (unsigned long)(recover_interval_us / 1000ULL));
         }
     }
     pthread_rwlock_unlock(&health->task_table.lock);
@@ -1477,6 +1638,9 @@ static void bondp_health_handle_ta_timeout_event(bondp_context_t *bdp_ctx, const
             bool ok = (info->cr_status == URMA_CR_SUCCESS);
             atomic_store(&sub->link_ok, ok);
             task->bondp_jetty->valid[sub->local_idx] = ok;
+            if (ok) {
+                sub->recover_backoff_cnt = 0;
+            }
             if (old_ok != ok) {
                 URMA_LOG_WARN("Health link state changed, tjetty:%u lidx:%d tidx:%d user_ctx:0x%lx old:%d new:%d cr_status:%u\n",
                     task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx, info->user_ctx, old_ok, ok,
@@ -1539,6 +1703,9 @@ bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, u
             bool is_balance = (task->bondp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE);
             atomic_store(&sub->link_ok, ok);
             task->bondp_jetty->valid[sub->local_idx] = ok;
+            if (ok) {
+                sub->recover_backoff_cnt = 0;
+            }
             sub->need_check = is_balance ? (!ok) : sub->need_check;
             if (ok && task->mode == HEALTH_MODE_PRIMARY_CHECK &&
                 local_idx == task->primary_local_idx && task->active_local_idx != task->primary_local_idx) {
