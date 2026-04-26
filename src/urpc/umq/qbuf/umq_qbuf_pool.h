@@ -280,7 +280,7 @@ static ALWAYS_INLINE int32_t fetch_from_global(
     }
 
     if (umq_disable_scale_cap()) {
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "%s not enough suggestion: increase total_size\n",
+        UMQ_LIMIT_VLOG_DEBUG(VLOG_UMQ, "%s not enough suggestion: increase total_size\n",
             with_data ? "buf with data" : "buf with no data");
         (void)pthread_spin_unlock(&global_pool->global_mutex);
         return -UMQ_ERR_ENOMEM;
