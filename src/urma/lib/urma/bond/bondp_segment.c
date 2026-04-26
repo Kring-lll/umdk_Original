@@ -200,7 +200,8 @@ urma_target_seg_t *bondp_register_seg(urma_context_t *ctx, urma_seg_cfg_t *seg_c
 
     bdp_seg->bondp_ctx = bdp_ctx;
     bdp_seg->dev_num = bdp_ctx->dev_num;
-    atomic_init(&bdp_seg->use_cnt.atomic_cnt, 0);
+    atomic_init(&bdp_seg->use_cnt.atomic_cnt, 1);
+    bdp_seg->is_deleting = false;
 
     if (bondp_create_pseg(bdp_ctx, bdp_seg, seg_cfg) != 0) {
         URMA_LOG_ERR("Failed to create pseg\n");
@@ -225,6 +226,7 @@ urma_status_t bondp_unregister_seg(urma_target_seg_t *target_seg)
 {
     int ret = URMA_SUCCESS;
     bondp_tseg_t *bdp_seg = CONTAINER_OF_FIELD(target_seg, bondp_tseg_t, v_tseg);
+    bdp_seg->is_deleting = true;
 
     if (bondp_delete_vseg(bdp_seg) != 0) {
         URMA_LOG_ERR("Failed to delete vseg, token_id:%u, handle:%lu.\n",
@@ -238,7 +240,9 @@ urma_status_t bondp_unregister_seg(urma_target_seg_t *target_seg)
         ret = URMA_FAIL;
     }
 
-    free(bdp_seg);
+    if (atomic_fetch_sub(&bdp_seg->use_cnt.atomic_cnt, 1) == 1) {
+        free(bdp_seg);
+    }
     return ret;
 }
 
@@ -420,6 +424,8 @@ urma_target_seg_t *bondp_import_seg(urma_context_t *ctx, urma_seg_t *seg,
     bdp_tseg->local_dev_num = bdp_ctx->dev_num;
     bdp_tseg->target_dev_num = URMA_UBAGG_DEV_MAX_NUM;
     bdp_tseg->is_reused = false;
+    atomic_init(&bdp_tseg->use_cnt.atomic_cnt, 1);
+    bdp_tseg->is_deleting = false;
 
     bondp_udata_import_seg_t udata_out = {0};
     if (g_seg_cache_enable) {
@@ -483,6 +489,7 @@ urma_status_t bondp_unimport_seg(urma_target_seg_t *target_seg)
 {
     bondp_import_tseg_t *bdp_tseg = CONTAINER_OF_FIELD(target_seg, bondp_import_tseg_t, v_tseg);
     urma_status_t ret = URMA_SUCCESS;
+    bdp_tseg->is_deleting = true;
 
     if (bondp_unimport_pseg(bdp_tseg) != URMA_SUCCESS) {
         ret = URMA_FAIL;
@@ -492,6 +499,8 @@ urma_status_t bondp_unimport_seg(urma_target_seg_t *target_seg)
             ret = URMA_FAIL;
         }
     }
-    free(bdp_tseg);
+    if (atomic_fetch_sub(&bdp_tseg->use_cnt.atomic_cnt, 1) == 1) {
+        free(bdp_tseg);
+    }
     return ret;
 }
