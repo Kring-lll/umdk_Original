@@ -54,6 +54,7 @@ typedef struct bondp_health_sub_task {
     bool valid;
     bool probe_pending;
     bool need_check;
+    uint8_t recover_backoff_cnt;
 #ifndef __cplusplus
     atomic_bool link_ok;
 #else
@@ -249,6 +250,8 @@ typedef struct bondp_target_jetty {
     urma_target_jetty_t v_tjetty;
     urma_token_t import_token_value;
     bool import_token_valid;
+    bool import_info_valid;
+    urma_bond_id_info_out_t import_info;
     urma_target_jetty_t *p_tjetty[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
     urma_target_seg_t *p_check_tseg[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
     int local_dev_num;

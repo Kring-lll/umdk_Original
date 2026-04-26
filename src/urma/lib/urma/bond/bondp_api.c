@@ -1463,18 +1463,35 @@ static int bondp_import_pjetty(
     urma_bond_id_info_out_t *rvjetty_info, bondp_comp_t *bdp_jetty)
 {
     urma_rjetty_t p_rjetty = *rjetty;
+    bool has_valid_route = false;
+    uint32_t fail_cnt = 0;
 
     for (uint32_t n = 0; n < bdp_tjetty->active_count; ++n) {
         uint32_t local_idx = bdp_jetty->active_indices[n];
         uint32_t target_idx = bdp_tjetty->active_indices[n];
+        if (bdp_ctx->p_ctxs[local_idx] == NULL) {
+            fail_cnt++;
+            URMA_LOG_WARN("Skip import pjetty due to invalid local ctx, lidx:%u tidx:%u\n",
+                local_idx, target_idx);
+            continue;
+        }
         p_rjetty.jetty_id = rvjetty_info->slave_id[target_idx];
         urma_target_jetty_t *tjetty = urma_import_jetty(bdp_ctx->p_ctxs[local_idx], &p_rjetty, rjetty_token);
         if (tjetty == NULL) {
-            URMA_LOG_ERR("Failed to import tjetty %u %u\n", local_idx, target_idx);
-            return -1;
+            fail_cnt++;
+            URMA_LOG_WARN("Failed to import tjetty %u %u, continue for health recovery\n", local_idx, target_idx);
+            continue;
         }
         bdp_tjetty->p_tjetty[local_idx][target_idx] = tjetty;
         bdp_tjetty->valid[target_idx] = true;
+        has_valid_route = true;
+    }
+    if (!has_valid_route) {
+        URMA_LOG_ERR("No valid imported pjetty route\n");
+        return -1;
+    }
+    if (fail_cnt > 0) {
+        URMA_LOG_WARN("Partial import pjetty routes, fail_cnt:%u\n", fail_cnt);
     }
     return 0;
 }
@@ -1535,6 +1552,8 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
                      EID_ARGS(rjetty->jetty_id.eid), rjetty->jetty_id.id);
         goto FREE_TJETTY;
     }
+    bdp_tjetty->import_info = rvjetty_info;
+    bdp_tjetty->import_info_valid = true;
 
     bondp_comp_t fake_jetty = {0};
     bool is_fake_jetty = false;
@@ -1614,6 +1633,7 @@ urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
 {
     bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(tjetty, bondp_target_jetty_t, v_tjetty);
+    bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
 
     if (jetty->remote_jetty) {
         URMA_LOG_ERR("Jetty already has a binded target jetty\n");
@@ -1630,6 +1650,8 @@ urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
         return URMA_FAIL;
     }
 
+    uint32_t bind_ok_cnt = 0;
+    uint32_t bind_fail_cnt = 0;
     for (uint32_t n = 0; n < min_active_count; ++n) {
         uint32_t local_idx = bdp_jetty->active_indices[n];
         uint32_t target_idx = bdp_tjetty->active_indices[n];
@@ -1637,24 +1659,35 @@ urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
         urma_jetty_t *pjetty = bdp_jetty->p_jetty[local_idx];
         urma_target_jetty_t *ptjetty = bdp_tjetty->p_tjetty[local_idx][target_idx];
 
-        if (urma_bind_jetty(pjetty, ptjetty) != 0) {
-            goto UNBIND;
+        if (pjetty == NULL || ptjetty == NULL) {
+            bind_fail_cnt++;
+            bdp_jetty->valid[local_idx] = false;
+            URMA_LOG_WARN("Skip bind due to incomplete route, tjetty:%u lidx:%u tidx:%u\n",
+                bdp_tjetty->v_tjetty.id.id, local_idx, target_idx);
+            bondp_health_notify_datapath_link_fail(bdp_ctx, bdp_tjetty, (int)local_idx, (int)target_idx);
+            continue;
         }
+
+        if (urma_bind_jetty(pjetty, ptjetty) != 0) {
+            bind_fail_cnt++;
+            bdp_jetty->valid[local_idx] = false;
+            URMA_LOG_WARN("Failed to bind route, tjetty:%u lidx:%u tidx:%u\n",
+                bdp_tjetty->v_tjetty.id.id, local_idx, target_idx);
+            bondp_health_notify_datapath_link_fail(bdp_ctx, bdp_tjetty, (int)local_idx, (int)target_idx);
+            continue;
+        }
+        bind_ok_cnt++;
     }
 
+    if (bind_ok_cnt == 0) {
+        URMA_LOG_ERR("No valid active route to bind, tjetty:%u\n", bdp_tjetty->v_tjetty.id.id);
+        return URMA_FAIL;
+    }
+    if (bind_fail_cnt > 0) {
+        URMA_LOG_WARN("Partial bind failed, tjetty:%u fail_cnt:%u\n", bdp_tjetty->v_tjetty.id.id, bind_fail_cnt);
+    }
     bdp_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
     return URMA_SUCCESS;
-
-UNBIND:
-    for (uint32_t p = 0; p < URMA_UBAGG_DEV_MAX_NUM; ++p) {
-        uint32_t local_idx = bdp_jetty->active_indices[p];
-        if (bdp_jetty->p_jetty[local_idx] != NULL &&
-            bdp_jetty->p_jetty[local_idx]->remote_jetty != NULL) {
-            urma_unbind_jetty(bdp_jetty->p_jetty[local_idx]);
-            bdp_jetty->p_jetty[local_idx]->remote_jetty = NULL;
-        }
-    }
-    return URMA_FAIL;
 }
 
 urma_status_t bondp_unbind_jetty(urma_jetty_t *jetty)
