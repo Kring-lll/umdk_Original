@@ -345,6 +345,7 @@ static urma_status_t bondp_post_send_wr_and_store(bondp_comp_t *bdp_comp, urma_j
     return URMA_SUCCESS;
 
 FREE_PWR:
+    release_jfs_vwr_use_cnt(pwr);
     free_jfs_wr(pwr);
     jfs_wr_buf_release(wr_entry);
     return ret;
@@ -840,6 +841,7 @@ CONVERT_CR:
     cr->local_id = get_comp_urma_jetty_id(bdp_comp)->id;
     cr->user_ctx = wr_entry->user_ctx;
 
+    release_jfs_vwr_use_cnt(&wr_entry->wr);
     free_jfs_wr(&wr_entry->wr);
     jfs_wr_buf_release(wr_entry);
     return CONVERT_SUCCESS;

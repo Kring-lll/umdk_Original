@@ -71,7 +71,7 @@ static int copy_sg_list(const urma_sg_t *src, urma_sg_t *dst, urma_sge_t *preall
  *   URMA_OPC_SEND, URMA_OPC_SEND_IMM, URMA_OPC_SEND_INVALIDATE
  */
 urma_status_t copy_jfs_wr(const urma_jfs_wr_t *src, urma_jfs_wr_t *dst,
-            urma_sge_t *prealloc_src_sge, urma_sge_t *prealloc_dst_sge)
+                          urma_sge_t *prealloc_src_sge, urma_sge_t *prealloc_dst_sge)
 {
     *dst = *src;
     dst->next = NULL;
@@ -95,7 +95,7 @@ urma_status_t copy_jfs_wr(const urma_jfs_wr_t *src, urma_jfs_wr_t *dst,
  * Performs a deep copy of a JFR work request.
  */
 urma_status_t copy_jfr_wr(const urma_jfr_wr_t *src, urma_jfr_wr_t *dst,
-    urma_sge_t *prealloc_src_sge)
+                          urma_sge_t *prealloc_src_sge)
 {
     *dst = *src;
     dst->next = NULL;
@@ -175,7 +175,16 @@ static inline urma_target_seg_t *get_p_tseg(urma_target_seg_t *tseg, int local_i
 
 static inline urma_target_seg_t *get_v_tseg(urma_target_seg_t *tseg)
 {
-    return (urma_target_seg_t *)(uintptr_t)tseg->handle;
+    urma_target_seg_t *vtseg = (urma_target_seg_t *)(uintptr_t)tseg->handle;
+
+    if (vtseg->token_id != NULL) {
+        bondp_tseg_t *bdp_tseg = CONTAINER_OF_FIELD(vtseg, bondp_tseg_t, v_tseg);
+        atomic_fetch_add(&bdp_tseg->use_cnt.atomic_cnt, 1);
+    } else {
+        bondp_import_tseg_t *bdp_tseg = CONTAINER_OF_FIELD(vtseg, bondp_import_tseg_t, v_tseg);
+        atomic_fetch_add(&bdp_tseg->use_cnt.atomic_cnt, 1);
+    }
+    return vtseg;
 }
 
 static void map_send_vwr_to_path(urma_jfs_wr_t *send_wr, int send_idx, int target_idx)
@@ -235,7 +244,7 @@ static void map_fadd_vwr_to_path(urma_jfs_wr_t *send_wr, int send_idx, int targe
 }
 
 urma_status_t convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target_idx,
-    bondp_comp_t *bdp_comp, bdp_v_conn_t *v_conn)
+                                     bondp_comp_t *bdp_comp, bdp_v_conn_t *v_conn)
 {
     uint64_t opcode_tag = 0;
 
@@ -355,5 +364,46 @@ void convert_pcr_to_vcr(urma_cr_t *cr, bondp_context_t *bdp_ctx, uint32_t *msn)
          * This unexpected behavior is intentionally used to convert SEND CR.
          */
         decode_imm_data(cr->imm_data, &cr->opcode, msn, &cr->remote_id.id, &cr->imm_data);
+    }
+}
+
+static void put_v_tseg(urma_target_seg_t *tseg)
+{
+    if (tseg == NULL || tseg->handle != (uint64_t)(uintptr_t)tseg) {
+        return;
+    }
+
+    if (tseg->token_id != NULL) {
+        bondp_tseg_t *bdp_tseg = CONTAINER_OF_FIELD(tseg, bondp_tseg_t, v_tseg);
+        if (atomic_fetch_sub(&bdp_tseg->use_cnt.atomic_cnt, 1) == 1 && bdp_tseg->is_deleting) {
+            free(bdp_tseg);
+        }
+    } else {
+        bondp_import_tseg_t *bdp_tseg = CONTAINER_OF_FIELD(tseg, bondp_import_tseg_t, v_tseg);
+        if (atomic_fetch_sub(&bdp_tseg->use_cnt.atomic_cnt, 1) == 1 && bdp_tseg->is_deleting) {
+            free(bdp_tseg);
+        }
+    }
+}
+
+void release_jfs_vwr_use_cnt(urma_jfs_wr_t *wr)
+{
+    if (is_rw_wr(wr)) {
+        if (wr->rw.src.sge != NULL) {
+            for (int i = 0; i < wr->rw.src.num_sge; ++i) {
+                put_v_tseg(wr->rw.src.sge[i].tseg);
+            }
+        }
+        if (wr->rw.dst.sge != NULL) {
+            for (int i = 0; i < wr->rw.dst.num_sge; ++i) {
+                put_v_tseg(wr->rw.dst.sge[i].tseg);
+            }
+        }
+    } else if (is_send_wr(wr)) {
+        if (wr->send.src.sge != NULL) {
+            for (int i = 0; i < wr->send.src.num_sge; ++i) {
+                put_v_tseg(wr->send.src.sge[i].tseg);
+            }
+        }
     }
 }
