@@ -41,12 +41,13 @@ static int schedule_send_active_backup(const bondp_comp_t *bdp_comp, const bondp
     return -1;
 }
 
-static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
+static int schedule_send_balance(bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
                                  int *send_idx, int *target_idx, bondp_chip_id_info_t *info)
 {
     uint32_t min_active_count = MIN(bdp_comp->active_count, bdp_tjetty->active_count);
     int least_load_pos = -1;
     uint32_t least_load = UINT32_MAX;
+    uint32_t start_pos;
     int min, max;
 
     if (min_active_count == 0) {
@@ -73,7 +74,9 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
         return EINVAL;
     }
 
-    for (uint32_t i = 0; i < min_active_count; i++) {
+    start_pos = (atomic_load(&bdp_comp->last_send_active_pos) + 1) % min_active_count;
+    for (uint32_t offset = 0; offset < min_active_count; offset++) {
+        uint32_t i = (start_pos + offset) % min_active_count;
         uint32_t active_idx = bdp_comp->active_indices[i];
         if (!bdp_comp->valid[active_idx] || active_idx < min || active_idx > max) {
             continue;
@@ -92,6 +95,7 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
 
     *send_idx = (int)bdp_comp->active_indices[least_load_pos];
     *target_idx = (int)bdp_tjetty->active_indices[least_load_pos];
+    atomic_store(&bdp_comp->last_send_active_pos, (uint32_t)least_load_pos);
     return 0;
 }
 

@@ -237,8 +237,10 @@ typedef struct bondp_comp {
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
 #ifndef __cplusplus
     atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
+    atomic_uint last_send_active_pos;
 #else
     std::atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
+    std::atomic_uint last_send_active_pos;
 #endif
     // recv
     bondp_jfc_t *recv_jfc;
