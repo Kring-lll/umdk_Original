@@ -648,6 +648,8 @@ typedef enum cr_convert_ret {
     CONVERT_SUCCESS = 0,
     // CR is consumed internally and should not be returned to the caller.
     CONVERT_SKIP = 1,
+    // Polling should stop immediately and return the currently converted CRs.
+    CONVERT_STOP_POLL = 2,
 } cr_convert_ret_t;
 
 static int resend_jfs_wr(jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
@@ -711,6 +713,35 @@ static inline void put_comp(bondp_comp_t *bdp_comp)
     atomic_fetch_sub(&bdp_comp->use_cnt.atomic_cnt, 1);
 }
 
+static bool mark_recover_pending_and_move_jetty_to_error(bondp_comp_t *bdp_comp, int local_idx, int target_idx,
+                                                          bondp_target_jetty_t *bdp_tjetty)
+{
+    if (bdp_comp == NULL || local_idx < 0 || local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return false;
+    }
+    if (bdp_comp->comp_type != BONDP_COMP_JETTY || bdp_comp->p_jetty[local_idx] == NULL) {
+        return false;
+    }
+
+    (void)pthread_spin_lock(&bdp_comp->send_lock);
+    bdp_comp->dp_recover_pending[local_idx] = true;
+    bdp_comp->dp_recover_target_idx[local_idx] = target_idx;
+    bdp_comp->dp_recover_tjetty[local_idx] = bdp_tjetty;
+
+    urma_jetty_attr_t attr = {
+        .mask = JETTY_STATE,
+        .state = URMA_JETTY_STATE_ERROR,
+    };
+    urma_status_t ret = urma_modify_jetty(bdp_comp->p_jetty[local_idx], &attr);
+    (void)pthread_spin_unlock(&bdp_comp->send_lock);
+    if (ret != URMA_SUCCESS) {
+        URMA_LOG_WARN("Failed to modify pjetty to error after resend, local_idx:%d ret:%d\n", local_idx, ret);
+    } else {
+        URMA_LOG_INFO("Move pjetty to error after resend, local_idx:%d target_idx:%d\n", local_idx, target_idx);
+    }
+    return true;
+}
+
 static cr_convert_ret_t handle_fake_cr_with_store(bondp_context_t *bdp_ctx, int idx, urma_cr_t *cr)
 {
     bondp_comp_t *comp = get_comp_by_cr(bdp_ctx, idx, cr);
@@ -731,6 +762,27 @@ static cr_convert_ret_t handle_fake_cr_with_store(bondp_context_t *bdp_ctx, int 
         return CONVERT_FAIL;
     }
     comp->pjettys_error_done[idx] |= target_state_bit;
+    if (cr->status == URMA_CR_WR_FLUSH_ERR_DONE && comp->comp_type == BONDP_COMP_JETTY) {
+        bondp_target_jetty_t *bdp_tjetty = NULL;
+        int target_idx = -1;
+        bool need_recover_notify = false;
+        (void)pthread_spin_lock(&comp->send_lock);
+        if (idx >= 0 && idx < URMA_UBAGG_DEV_MAX_NUM && comp->dp_recover_pending[idx]) {
+            need_recover_notify = true;
+            target_idx = comp->dp_recover_target_idx[idx];
+            bdp_tjetty = comp->dp_recover_tjetty[idx];
+            comp->dp_recover_pending[idx] = false;
+            comp->dp_recover_target_idx[idx] = -1;
+            comp->dp_recover_tjetty[idx] = NULL;
+        }
+        (void)pthread_spin_unlock(&comp->send_lock);
+        if (need_recover_notify && bdp_tjetty != NULL && target_idx >= 0 && target_idx < URMA_UBAGG_DEV_MAX_NUM) {
+            bondp_health_notify_datapath_link_fail(bdp_ctx, bdp_tjetty, idx, target_idx);
+        } else if (need_recover_notify) {
+            URMA_LOG_WARN("Drop delayed recover notify due to invalid route, local_idx:%d target_idx:%d\n",
+                          idx, target_idx);
+        }
+    }
     bool all_reported = true;
     // pjetty_idx
     for (int idx = 0; idx < URMA_UBAGG_DEV_MAX_NUM; idx++) {
@@ -806,8 +858,6 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
                 URMA_LOG_ERR("Failed to resend jfs wr, wr_id: %lu\n", wr_id);
             }
         }
-        bondp_health_notify_datapath_link_fail(bdp_comp->bondp_ctx, wr_entry->v_conn->target_vjetty,
-                                               (int)send_idx, (int)target_idx);
         /* Update active link after failover is finished. */
         bondp_health_update_active_idx(bdp_comp->bondp_ctx, wr_entry->v_conn->target_vjetty, new_send_idx);
 
@@ -827,6 +877,12 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
             bondp_notify_health_event(bdp_comp->bondp_ctx, BONDP_HEALTH_EVENT_FALLBACK_TASK_KICK, &event_info);
         }
         (void)pthread_spin_unlock(&bdp_comp->send_lock);
+        if (mark_recover_pending_and_move_jetty_to_error(
+                bdp_comp, (int)send_idx, (int)target_idx, wr_entry->v_conn->target_vjetty)) {
+            return CONVERT_STOP_POLL;
+        }
+        bondp_health_notify_datapath_link_fail(bdp_comp->bondp_ctx, wr_entry->v_conn->target_vjetty,
+                                               (int)send_idx, (int)target_idx);
         return CONVERT_SKIP;
     }
 
@@ -994,6 +1050,11 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
             }
             if (conv_ret == CONVERT_FAIL) {
                 return -1;
+            }
+            if (conv_ret == CONVERT_STOP_POLL) {
+                bdp_jfc->lasted_polled_jfc_idx = idx;
+                PERF_PROFILING_END(BOND_POLL_JFC);
+                return cr_cnt - cr_cnt_remaining;
             }
             if (conv_ret == CONVERT_SUCCESS) {
                 cr[cr_cnt - cr_cnt_remaining] = *pcr;
