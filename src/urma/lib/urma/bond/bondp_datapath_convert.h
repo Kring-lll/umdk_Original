@@ -39,7 +39,11 @@ urma_status_t convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target
 
 void convert_jfs_pwr_to_vwr_resend(urma_jfs_wr_t *wr, urma_target_jetty_t *vtjetty);
 
-urma_status_t convert_jfs_vwr_to_pwr_for_resend(urma_jfs_wr_t *wr, int send_idx, int target_idx);
+void convert_jfs_vwr_to_pwr_for_resend(urma_jfs_wr_t *wr, int send_idx, int target_idx);
+
+void add_vwr_use_cnt(urma_jfs_wr_t *wr);
+
+void release_vwr_use_cnt(urma_jfs_wr_t *wr);
 
 urma_status_t convert_jfr_vwr_to_pwr(urma_jfr_wr_t *wr, int recv_idx);
 
