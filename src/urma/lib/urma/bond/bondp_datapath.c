@@ -340,6 +340,7 @@ static urma_status_t bondp_post_send_wr_and_store(bondp_comp_t *bdp_comp, urma_j
         URMA_LOG_ERR("Failed to post send wr\n");
         goto FREE_PWR;
     }
+    convert_jfs_pwr_to_vwr_resend(pwr, &wr_entry->v_conn->target_vjetty->v_tjetty);
 
     return URMA_SUCCESS;
 
@@ -657,8 +658,8 @@ static int resend_jfs_wr(jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
     wr_entry->send_idx = send_idx;
     wr_entry->target_idx = target_idx;
     urma_jfs_wr_t *wr = &wr_entry->wr;
-    urma_target_jetty_t *vtjetty = (urma_target_jetty_t *)(wr_entry->v_conn->target_vjetty);
-    ret = convert_jfs_pwr_to_another_path(wr, vtjetty, send_idx, target_idx);
+    urma_target_jetty_t *vtjetty = &wr_entry->v_conn->target_vjetty->v_tjetty;
+    ret = convert_jfs_vwr_to_pwr_for_resend(wr, send_idx, target_idx);
     if (ret != 0) {
         URMA_LOG_ERR("Failed to convert when resend\n");
         return -1;
@@ -670,6 +671,7 @@ static int resend_jfs_wr(jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
         URMA_LOG_ERR("Failed to resend wr\n");
         return -1;
     }
+    convert_jfs_pwr_to_vwr_resend(wr, vtjetty);
 
     return 0;
 }
