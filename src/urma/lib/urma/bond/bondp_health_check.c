@@ -595,6 +595,21 @@ int bondp_import_health_check_tseg(bondp_context_t *bdp_ctx, bondp_target_jetty_
     return import_check_tseg_by_import_result(bdp_ctx, bdp_tjetty, rvjetty_info);
 }
 
+int bondp_import_health_check_tseg_jfr(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
+    urma_bond_id_info_out_t *udata_out, urma_rjfr_t *rjfr)
+{
+    if (!udata_out->is_health_check_enable || !bondp_health_check_enabled()) {
+        return 0;
+    }
+
+    if (!rjfr->flag.bs.has_drv_ext) {
+        URMA_LOG_ERR("Invalid rjfr for health check seg import, health check disabled\n");
+        return 0;
+    }
+
+    return import_check_tseg_by_import_result(bdp_ctx, bdp_tjetty, udata_out);
+}
+
 static void bondp_handle_health_event(bondp_context_t *bond_ctx, bondp_health_event_t event,
     const bondp_health_event_info_t *info)
 {
@@ -741,12 +756,12 @@ static urma_status_t bondp_send_health_probe(bondp_context_t *bdp_ctx,
     int local_idx = sub->local_idx;
     int target_idx = sub->target_idx;
 
-    urma_jetty_t *jetty = bdp_jetty->p_jetty[local_idx];
     urma_target_jetty_t *tjetty = bdp_tjetty->p_tjetty[local_idx][target_idx];
     urma_target_seg_t *tseg = bdp_tjetty->p_check_tseg[local_idx][target_idx];
     urma_target_seg_t *local_tseg = bdp_jetty->check_tseg[local_idx];
 
-    if (jetty == NULL || tjetty == NULL || tseg == NULL || local_tseg == NULL) {
+    /* members[], p_jfs[], p_jetty[] are in a union; NULL check is type-independent. */
+    if (bdp_jetty->members[local_idx] == NULL || tjetty == NULL || tseg == NULL || local_tseg == NULL) {
         return URMA_FAIL;
     }
 
@@ -778,7 +793,12 @@ static urma_status_t bondp_send_health_probe(bondp_context_t *bdp_ctx,
     };
 
     urma_jfs_wr_t *bad_wr = NULL;
-    urma_status_t ret = urma_post_jetty_send_wr(jetty, &wr, &bad_wr);
+    urma_status_t ret;
+    if (bdp_jetty->comp_type == BONDP_COMP_JFS) {
+        ret = urma_post_jfs_wr(bdp_jetty->p_jfs[local_idx], &wr, &bad_wr);
+    } else {
+        ret = urma_post_jetty_send_wr(bdp_jetty->p_jetty[local_idx], &wr, &bad_wr);
+    }
     if (ret != URMA_SUCCESS) {
         URMA_LOG_WARN("Health probe write failed, lidx:%d tidx:%d ret:%d\n", local_idx, target_idx, ret);
     } else {
@@ -1129,11 +1149,14 @@ static bondp_health_task_t *bondp_find_health_task_by_cr_local_id_nolock(
     bondp_health_task_t *task = NULL;
     HMAP_FOR_EACH(task, hmap_node, &health->task_table.hmap) {
         for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-            urma_jetty_t *pjetty = task->bondp_jetty->p_jetty[i];
-            if (pjetty == NULL) {
+            /* members[], p_jfs[], p_jetty[] share the same storage via union. */
+            if (task->bondp_jetty->members[i] == NULL) {
                 continue;
             }
-            if (pjetty->jetty_id.id == cr_local_id) {
+            uint32_t local_id = (task->bondp_jetty->comp_type == BONDP_COMP_JFS) ?
+                task->bondp_jetty->p_jfs[i]->jfs_id.id :
+                task->bondp_jetty->p_jetty[i]->jetty_id.id;
+            if (local_id == cr_local_id) {
                 *parsed_local_idx = i;
                 return task;
             }
@@ -1160,7 +1183,8 @@ int bondp_register_health_check_task(bondp_context_t *bdp_ctx, bondp_target_jett
         UINT64_MAX : (bondp_get_monotonic_us() + cfg->health_check_start_ms * 1000ULL);
     task->primary_local_idx = -1;
     task->active_local_idx = -1;
-    task->vjetty_id = cfg_jetty->v_jetty.jetty_id.id;
+    task->vjetty_id = (cfg_jetty->comp_type == BONDP_COMP_JFS) ?
+        cfg_jetty->v_jfs.jfs_id.id : cfg_jetty->v_jetty.jetty_id.id;
     task->mode = HEALTH_MODE_BACKUP_CHECK;
     task->backoff_cnt = 0;
     task->fallback_task.pending = false;
@@ -1323,6 +1347,13 @@ static bool bondp_health_handle_fallback_ctrl_rx_impl(bondp_context_t *bdp_ctx, 
         return false;
     }
 
+    if (task->bondp_jetty->comp_type == BONDP_COMP_JFS) {
+        /* JFS-based health check does not support the fallback ctrl protocol. */
+        pthread_rwlock_unlock(&health->task_table.lock);
+        URMA_LOG_DEBUG("Skip fallback ctrl for JFS-based health task, local_id:%u\n", recv_local_id);
+        return false;
+    }
+
     if (ctrl_type == BONDP_FALLBACK_CTRL_REQ) {
         uint32_t req_expected_primary_id = payload;
         uint32_t local_primary_id = BONDP_FALLBACK_PRIMARY_INVALID_ID;
@@ -1407,7 +1438,8 @@ static void bondp_health_handle_datapath_link_fail_event(bondp_context_t *bdp_ct
     const bondp_health_check_cfg_t *cfg = &g_bondp_global_ctx->health_thread_ctx.cfg;
     pthread_rwlock_wrlock(&health->task_table.lock);
     bondp_health_task_t *task = bondp_find_health_task_by_tjetty_nolock(health, info->bdp_tjetty);
-    if (task != NULL && task->bondp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE) {
+    if (task != NULL && task->bondp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE &&
+        task->bondp_jetty->comp_type != BONDP_COMP_JFS) {
         bondp_health_sub_task_t *sub = &task->sub_tasks[info->local_idx][info->target_idx];
         if (sub->valid) {
             sub->probe_pending = false;
@@ -1485,7 +1517,8 @@ static void bondp_health_handle_ta_timeout_event(bondp_context_t *bdp_ctx, const
                 URMA_LOG_DEBUG("Health CR handled, tjetty:%u lidx:%d tidx:%d user_ctx:0x%lx status:%u\n",
                     task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx, info->user_ctx, info->cr_status);
             }
-            if (!ok && info->local_idx != task->primary_local_idx) {
+            if (!ok && info->local_idx != task->primary_local_idx &&
+                task->bondp_jetty->comp_type != BONDP_COMP_JFS) {
                 if (bondp_rebuild_local_pjetty(task, info->local_idx) != 0) {
                     URMA_LOG_WARN("Failed to rebuild backup link by health event, tjetty:%u lidx:%d tidx:%d\n",
                         task->bdp_tjetty->v_tjetty.id.id, info->local_idx, info->target_idx);
