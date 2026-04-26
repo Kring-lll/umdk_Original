@@ -1463,18 +1463,35 @@ static int bondp_import_pjetty(
     urma_bond_id_info_out_t *rvjetty_info, bondp_comp_t *bdp_jetty)
 {
     urma_rjetty_t p_rjetty = *rjetty;
+    bool has_valid_route = false;
+    uint32_t fail_cnt = 0;
 
     for (uint32_t n = 0; n < bdp_tjetty->active_count; ++n) {
         uint32_t local_idx = bdp_jetty->active_indices[n];
         uint32_t target_idx = bdp_tjetty->active_indices[n];
+        if (bdp_ctx->p_ctxs[local_idx] == NULL) {
+            fail_cnt++;
+            URMA_LOG_WARN("Skip import pjetty due to invalid local ctx, lidx:%u tidx:%u\n",
+                local_idx, target_idx);
+            continue;
+        }
         p_rjetty.jetty_id = rvjetty_info->slave_id[target_idx];
         urma_target_jetty_t *tjetty = urma_import_jetty(bdp_ctx->p_ctxs[local_idx], &p_rjetty, rjetty_token);
         if (tjetty == NULL) {
-            URMA_LOG_ERR("Failed to import tjetty %u %u\n", local_idx, target_idx);
-            return -1;
+            fail_cnt++;
+            URMA_LOG_WARN("Failed to import tjetty %u %u, continue for health recovery\n", local_idx, target_idx);
+            continue;
         }
         bdp_tjetty->p_tjetty[local_idx][target_idx] = tjetty;
         bdp_tjetty->valid[target_idx] = true;
+        has_valid_route = true;
+    }
+    if (!has_valid_route) {
+        URMA_LOG_ERR("No valid imported pjetty route\n");
+        return -1;
+    }
+    if (fail_cnt > 0) {
+        URMA_LOG_WARN("Partial import pjetty routes, fail_cnt:%u\n", fail_cnt);
     }
     return 0;
 }
@@ -1535,6 +1552,8 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
                      EID_ARGS(rjetty->jetty_id.eid), rjetty->jetty_id.id);
         goto FREE_TJETTY;
     }
+    bdp_tjetty->import_info = rvjetty_info;
+    bdp_tjetty->import_info_valid = true;
 
     bondp_comp_t fake_jetty = {0};
     bool is_fake_jetty = false;
