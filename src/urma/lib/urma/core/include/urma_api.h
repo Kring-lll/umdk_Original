@@ -1018,6 +1018,18 @@ const char *urma_log_get_thread_tag(void);
 void urma_log_set_thread_tag(const char *tag);
 
 /**
+ * set log delimiter.
+ * @param[in] deli: log delimiter for urma, default as |;
+ */
+void urma_log_set_delimiter(const char *deli);
+
+/**
+ * get log delimiter.
+ * Return: const char *
+ */
+const char *urma_log_get_delimiter(void);
+
+/**
  * User tp only.
  * Get tpn of tp created when creating jetty.
  * @param[in] jetty: the created jetty pointer;

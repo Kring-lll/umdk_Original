@@ -29,12 +29,14 @@ pthread_mutex_t g_urma_log_lock = PTHREAD_MUTEX_INITIALIZER;
 urma_vlog_level_t g_urma_log_level = URMA_VLOG_LEVEL_INFO;
 #define MAX_LOG_LEN                    512
 #define MAX_THREAD_TAG_LEN             64
+#define MAX_DELIMITER_LEN              16
 #define URMA_LOG_TAG                   "URMA"
 #define LIBURMA_LOG                    "liburma"
 #define URMA_LOG_ENV_STR               "URMA_LOG_LEVEL"
 #define URMA_LOG_LEVEL_ENV_MAX_BUF_LEN 32
 
 __thread char g_thread_tag[MAX_THREAD_TAG_LEN] = "-";
+char urma_delimiter[MAX_DELIMITER_LEN] = "|";
 
 static void urma_default_log_func(int level, char *message)
 {
@@ -56,8 +58,10 @@ urma_status_t urma_register_log_func(urma_log_cb_t func)
 urma_status_t urma_unregister_log_func(void)
 {
     char logmsg[MAX_LOG_LEN + 1] = {0};
-    (void)snprintf(logmsg, MAX_LOG_LEN, "%s|%s|%ld|%s|%s[%d]|unregister log succeed.\n",
-        URMA_LOG_TAG, LIBURMA_LOG, (long)syscall(__NR_gettid), g_thread_tag, __func__, __LINE__);
+    (void)snprintf(logmsg, MAX_LOG_LEN, "%s %s %s %s %ld %s %s %s %s[%d] %s unregister log succeed.\n",
+        URMA_LOG_TAG, urma_delimiter, LIBURMA_LOG, urma_delimiter,
+        (long)syscall(__NR_gettid), urma_delimiter, g_thread_tag, urma_delimiter,
+        __func__, __LINE__, urma_delimiter);
     (*g_urma_log_func)((int)URMA_VLOG_LEVEL_INFO, logmsg);
     g_urma_log_func = urma_default_log_func;
     return URMA_SUCCESS;
@@ -103,6 +107,20 @@ void urma_log_set_thread_tag(const char *tag)
         return;
     }
     (void)snprintf(g_thread_tag, sizeof(g_thread_tag), "%s", tag);
+}
+
+void urma_log_set_delimiter(const char *deli)
+{
+    if (deli == NULL || strnlen(deli, MAX_DELIMITER_LEN) >= MAX_DELIMITER_LEN) {
+        URMA_LOG_ERR("Invalid parameter.\n");
+        return;
+    }
+    (void)snprintf(urma_delimiter, sizeof(urma_delimiter), "%s", deli);
+}
+
+const char *urma_log_get_delimiter(void)
+{
+    return urma_delimiter;
 }
 
 inline bool urma_log_drop(urma_vlog_level_t level)
@@ -182,8 +200,9 @@ static int urma_vlog(const char *function, int line, urma_vlog_level_t level, co
     char logmsg[MAX_LOG_LEN + 1] = {0};
 
     /* add log head info, "URMA|liburma|thread_id|thread_tag|function[line]|format" */
-    ret = snprintf(newformat, MAX_LOG_LEN, "%s|%s|%ld|%s|%s[%d]|%s",
-        URMA_LOG_TAG, LIBURMA_LOG, (long)syscall(__NR_gettid), g_thread_tag, function, line, format);
+    ret = snprintf(newformat, MAX_LOG_LEN, "%s %s %s %s %ld %s %s %s %s[%d] %s %s",
+        URMA_LOG_TAG, urma_delimiter, LIBURMA_LOG, urma_delimiter, (long)syscall(__NR_gettid),
+        urma_delimiter, g_thread_tag, urma_delimiter, function, line, urma_delimiter, format);
     if (ret <= 0 || ret >= sizeof(newformat)) {
         return ret;
     }
