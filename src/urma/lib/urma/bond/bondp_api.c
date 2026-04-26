@@ -1528,6 +1528,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         bdp_tjetty->import_token_value = *token_value;
         bdp_tjetty->import_token_valid = true;
     }
+    atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
 
     urma_bond_id_info_out_t rvjetty_info = {0};
     if (bondp_import_vjetty(ctx, rjetty, token_value, bdp_tjetty, &rvjetty_info) != 0) {
@@ -1768,6 +1769,7 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
         URMA_LOG_ERR("Failed to alloc target jetty\n");
         return NULL;
     }
+    atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
 
     urma_bond_id_info_out_t udata_out = {0};
     if (bondp_import_vjfr(ctx, rjfr, token_value, bdp_tjetty, &udata_out) != 0) {
