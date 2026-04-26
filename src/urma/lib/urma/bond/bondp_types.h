@@ -54,6 +54,7 @@ typedef struct bondp_health_sub_task {
     bool valid;
     bool probe_pending;
     bool need_check;
+    uint8_t recover_backoff_cnt;
 #ifndef __cplusplus
     atomic_bool link_ok;
 #else
@@ -245,20 +246,6 @@ typedef struct bondp_comp {
     uint32_t rqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
 } bondp_comp_t;
 
-typedef struct bondp_target_jetty {
-    urma_target_jetty_t v_tjetty;
-    urma_token_t import_token_value;
-    bool import_token_valid;
-    urma_target_jetty_t *p_tjetty[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
-    urma_target_seg_t *p_check_tseg[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
-    int local_dev_num;
-    int target_dev_num;
-    uint32_t local_active_indices[URMA_UBAGG_DEV_MAX_NUM];
-    uint32_t active_indices[URMA_UBAGG_DEV_MAX_NUM];
-    uint32_t active_count;
-    bool valid[URMA_UBAGG_DEV_MAX_NUM];
-} bondp_target_jetty_t;
-
 typedef struct bondp_import_target_seg {
     urma_target_seg_t v_tseg;
     urma_target_seg_t *p_tseg[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
@@ -284,6 +271,22 @@ typedef struct urma_bond_id_info_out {
     urma_bond_seg_info_out_t health_check_seg;
     bool connected[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
 } urma_bond_id_info_out_t;
+
+typedef struct bondp_target_jetty {
+    urma_target_jetty_t v_tjetty;
+    urma_token_t import_token_value;
+    bool import_token_valid;
+    bool import_info_valid;
+    urma_bond_id_info_out_t import_info;
+    urma_target_jetty_t *p_tjetty[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
+    urma_target_seg_t *p_check_tseg[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
+    int local_dev_num;
+    int target_dev_num;
+    uint32_t local_active_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t active_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t active_count;
+    bool valid[URMA_UBAGG_DEV_MAX_NUM];
+} bondp_target_jetty_t;
 
 static inline bool is_empty_eid(urma_eid_t *eid)
 {
