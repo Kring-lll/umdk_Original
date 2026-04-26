@@ -173,8 +173,19 @@ static inline urma_target_seg_t *get_p_tseg(urma_target_seg_t *tseg, int local_i
     }
 }
 
-static urma_status_t set_send_wr_ptseg_ptjetty(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty,
-                                               int send_idx, int target_idx)
+static void map_send_vwr_to_path(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty,
+                                 int send_idx, int target_idx)
+{
+    if (send_wr->send.src.num_sge > 0 && send_wr->send.src.sge != NULL) {
+        for (int i = 0; i < send_wr->send.src.num_sge; ++i) {
+            send_wr->send.src.sge[i].tseg = get_p_tseg(send_wr->send.src.sge[i].tseg, send_idx, target_idx);
+        }
+    }
+    send_wr->tjetty = get_p_tjetty(vtjetty, send_idx, target_idx);
+}
+
+static void reroute_send_pwr_to_path(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty,
+                                     int send_idx, int target_idx)
 {
     if (send_wr->send.src.num_sge > 0 && send_wr->send.src.sge != NULL) {
         for (int i = 0; i < send_wr->send.src.num_sge; ++i) {
@@ -184,11 +195,22 @@ static urma_status_t set_send_wr_ptseg_ptjetty(urma_jfs_wr_t *send_wr, urma_targ
         }
     }
     send_wr->tjetty = get_p_tjetty(vtjetty, send_idx, target_idx);
-    return URMA_SUCCESS;
 }
 
-static urma_status_t set_write_wr_ptseg_ptjetty(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty,
-                                                int send_idx, int target_idx)
+static void map_write_vwr_to_path(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty,
+                                  int send_idx, int target_idx)
+{
+    for (int i = 0; i < send_wr->rw.src.num_sge; ++i) {
+        send_wr->rw.src.sge[i].tseg = get_p_tseg(send_wr->rw.src.sge[i].tseg, send_idx, target_idx);
+    }
+    for (int i = 0; i < send_wr->rw.dst.num_sge; ++i) {
+        send_wr->rw.dst.sge[i].tseg = get_p_tseg(send_wr->rw.dst.sge[i].tseg, send_idx, target_idx);
+    }
+    send_wr->tjetty = get_p_tjetty(vtjetty, send_idx, target_idx);
+}
+
+static void reroute_write_pwr_to_path(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty,
+                                      int send_idx, int target_idx)
 {
     urma_target_seg_t *vtseg = NULL;
     for (int i = 0; i < send_wr->rw.src.num_sge; ++i) {
@@ -202,63 +224,22 @@ static urma_status_t set_write_wr_ptseg_ptjetty(urma_jfs_wr_t *send_wr, urma_tar
         send_wr->rw.dst.sge[i].tseg = get_p_tseg(vtseg, send_idx, target_idx);
     }
     send_wr->tjetty = get_p_tjetty(vtjetty, send_idx, target_idx);
-    return URMA_SUCCESS;
 }
 
-static urma_status_t set_cas_wr_ptseg_pjetty(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty,
-                                             int send_idx, int target_idx)
+static void map_cas_vwr_to_path(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty,
+                                int send_idx, int target_idx)
 {
-    if (send_wr->cas.src == NULL || send_wr->cas.dst == NULL) {
-        URMA_LOG_ERR("when set cas_wr, one of src or dst is NULL.\n");
-        return URMA_EINVAL;
-    }
-    urma_target_seg_t *vtseg = NULL;
-    vtseg = (urma_target_seg_t *)send_wr->cas.src->tseg;
-    if (vtseg == NULL) {
-        URMA_LOG_ERR("Failed to set ptseg, vtseg is NULL\n");
-        return URMA_EINVAL;
-    }
-
-    vtseg = (urma_target_seg_t *)vtseg->handle;
-    send_wr->cas.src->tseg = get_p_tseg(vtseg, send_idx, target_idx);
-    vtseg = (urma_target_seg_t *)send_wr->cas.dst->tseg;
-    if (vtseg == NULL) {
-        URMA_LOG_ERR("Failed to set ptseg, vtseg is NULL\n");
-        return URMA_EINVAL;
-    }
-    send_wr->cas.dst->tseg = get_p_tseg(vtseg, send_idx, target_idx);
-
+    send_wr->cas.src->tseg = get_p_tseg(send_wr->cas.src->tseg, send_idx, target_idx);
+    send_wr->cas.dst->tseg = get_p_tseg(send_wr->cas.dst->tseg, send_idx, target_idx);
     send_wr->tjetty = get_p_tjetty(vtjetty, send_idx, target_idx);
-    return URMA_SUCCESS;
 }
 
-static urma_status_t set_fadd_wr_ptseg_pjetty(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty,
-                                              int send_idx, int target_idx)
+static void map_fadd_vwr_to_path(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty,
+                                 int send_idx, int target_idx)
 {
-    if (send_wr->faa.src == NULL || send_wr->faa.dst == NULL) {
-        URMA_LOG_ERR("when set faa_wr, one of src or dst is NULL.\n");
-        return URMA_EINVAL;
-    }
-    urma_target_seg_t *vtseg = NULL;
-    vtseg = (urma_target_seg_t *)send_wr->faa.src->tseg;
-    if (vtseg == NULL) {
-        URMA_LOG_ERR("Failed to set ptseg, vtseg is NULL\n");
-        return URMA_EINVAL;
-    }
-
-    vtseg = (urma_target_seg_t *)vtseg->handle;
-    send_wr->faa.src->tseg = get_p_tseg(vtseg, send_idx, target_idx);
-
-    vtseg = (urma_target_seg_t *)send_wr->faa.dst->tseg;
-    if (vtseg == NULL) {
-        URMA_LOG_ERR("Failed to set ptseg, vtseg is NULL\n");
-        return URMA_EINVAL;
-    }
-
-    vtseg = (urma_target_seg_t *)send_wr->faa.dst->tseg->handle;
-    send_wr->faa.dst->tseg = get_p_tseg(vtseg, send_idx, target_idx);
+    send_wr->faa.src->tseg = get_p_tseg(send_wr->faa.src->tseg, send_idx, target_idx);
+    send_wr->faa.dst->tseg = get_p_tseg(send_wr->faa.dst->tseg, send_idx, target_idx);
     send_wr->tjetty = get_p_tjetty(vtjetty, send_idx, target_idx);
-    return URMA_SUCCESS;
 }
 
 urma_status_t convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target_idx,
@@ -285,7 +266,8 @@ urma_status_t convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target
                 wr->send.imm_data);
             v_conn->msn = (v_conn->msn + 1) % BONDP_MAX_BITMAP_SIZE;
 
-            return set_send_wr_ptseg_ptjetty(wr, wr->tjetty, send_idx, target_idx);
+            map_send_vwr_to_path(wr, wr->tjetty, send_idx, target_idx);
+            return URMA_SUCCESS;
         case URMA_OPC_WRITE_IMM:
         case URMA_OPC_WRITE:
         case URMA_OPC_READ:
@@ -298,11 +280,14 @@ urma_status_t convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target
                     wr->rw.notify_data);
                 v_conn->msn = (v_conn->msn + 1) % BONDP_MAX_BITMAP_SIZE;
             }
-            return set_write_wr_ptseg_ptjetty(wr, wr->tjetty, send_idx, target_idx);
+            map_write_vwr_to_path(wr, wr->tjetty, send_idx, target_idx);
+            return URMA_SUCCESS;
         case URMA_OPC_CAS:
-            return set_cas_wr_ptseg_pjetty(wr, wr->tjetty, send_idx, target_idx);
+            map_cas_vwr_to_path(wr, wr->tjetty, send_idx, target_idx);
+            return URMA_SUCCESS;
         case URMA_OPC_FADD:
-            return set_fadd_wr_ptseg_pjetty(wr, wr->tjetty, send_idx, target_idx);
+            map_fadd_vwr_to_path(wr, wr->tjetty, send_idx, target_idx);
+            return URMA_SUCCESS;
         default:
             URMA_LOG_ERR("Unsupported send opcode\n");
             return URMA_EINVAL;
@@ -318,18 +303,21 @@ urma_status_t convert_jfr_vwr_to_pwr(urma_jfr_wr_t *wr, int recv_idx)
     return URMA_SUCCESS;
 }
 
-int convert_jfs_pwr_to_another_path(urma_jfs_wr_t *wr, urma_target_jetty_t *vtjetty, int send_idx, int target_idx)
+urma_status_t convert_jfs_pwr_to_another_path(urma_jfs_wr_t *wr, urma_target_jetty_t *vtjetty,
+    int send_idx, int target_idx)
 {
     switch (wr->opcode) {
         case URMA_OPC_SEND:
         case URMA_OPC_SEND_IMM:
         case URMA_OPC_SEND_INVALIDATE:
-            return set_send_wr_ptseg_ptjetty(wr, vtjetty, send_idx, target_idx);
+            reroute_send_pwr_to_path(wr, vtjetty, send_idx, target_idx);
+            return URMA_SUCCESS;
         case URMA_OPC_WRITE:
         case URMA_OPC_WRITE_IMM:
         case URMA_OPC_WRITE_NOTIFY:
         case URMA_OPC_READ:
-            return set_write_wr_ptseg_ptjetty(wr, vtjetty, send_idx, target_idx);
+            reroute_write_pwr_to_path(wr, vtjetty, send_idx, target_idx);
+            return URMA_SUCCESS;
         default:
             URMA_LOG_ERR("Unsupported send opcode\n");
             return URMA_EINVAL;
