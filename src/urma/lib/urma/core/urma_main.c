@@ -213,6 +213,7 @@ urma_status_t urma_init(urma_init_attr_t *conf)
 {
     urma_log_init();
     urma_getenv_log_level();
+    urma_getenv_log_separator();
 
     /* g_init_flag is initialized as 0 */
     if (atomic_load(&g_init_flag) > 0) {
