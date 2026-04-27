@@ -8,6 +8,9 @@
  * History: 2026-04-06   Create File
  */
 
+#include <stdlib.h>
+#include <time.h>
+
 #include "bondp_types.h"
 #include "urma_log.h"
 #include "bondp_health_check.h"
@@ -48,6 +51,8 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
     int least_load_pos = -1;
     uint32_t least_load = UINT32_MAX;
     int min, max;
+    static uint32_t last_start_idx = 0;
+    static bool rand_initialized = false;
 
     if (min_active_count == 0) {
         URMA_LOG_ERR("Invalid min_active_count.\n");
@@ -73,8 +78,16 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
         return EINVAL;
     }
 
+    // 初始化
+    if (!rand_initialized) {
+        srand((unsigned int)time(NULL));
+        rand_initialized = true;
+        last_start_idx = (uint32_t)rand() % min_active_count;
+    }
+
     for (uint32_t i = 0; i < min_active_count; i++) {
-        uint32_t active_idx = bdp_comp->active_indices[i];
+        uint32_t idx = (last_start_idx + i) % min_active_count;
+        uint32_t active_idx = bdp_comp->active_indices[idx];
         if (!bdp_comp->valid[active_idx] || active_idx < min || active_idx > max) {
             continue;
         }
@@ -82,7 +95,7 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
         uint32_t sqe_cnt = atomic_load(&bdp_comp->sqe_cnt[active_idx]);
         if (sqe_cnt < least_load) {
             least_load = sqe_cnt;
-            least_load_pos = (int)i;
+            least_load_pos = (int)idx;
         }
     }
 
@@ -90,8 +103,12 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
         return -1;
     }
 
+    // 更新 last_start_idx
+    last_start_idx = (uint32_t)least_load_pos;
     *send_idx = (int)bdp_comp->active_indices[least_load_pos];
     *target_idx = (int)bdp_tjetty->active_indices[least_load_pos];
+    URMA_LOG_ERR("--cyc: schedule_send_balance selected port: idx=%d, send_idx=%d, target_idx=%d\n",
+        least_load_pos, *send_idx, *target_idx);
     return 0;
 }
 
