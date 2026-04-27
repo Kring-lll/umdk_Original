@@ -41,6 +41,33 @@ static urma_jetty_id_t *get_comp_urma_jetty_id(bondp_comp_t *bdp_comp)
 
 static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, urma_jfs_wr_t *send_wr, urma_jfs_wr_t **bad_wr)
 {
+    if (send_wr->tjetty == NULL) {
+        URMA_LOG_ERR("Invalid parameter with tjetty null_ptr.\n");
+        return URMA_EINVAL;
+    }
+    switch (send_wr->opcode) {
+    case URMA_OPC_WRITE:
+    case URMA_OPC_WRITE_IMM:
+    case URMA_OPC_WRITE_NOTIFY:
+    case URMA_OPC_READ:
+        for (uint32_t i = 0; i < send_wr->rw.src.num_sge; i++) {
+            if (send_wr->rw.src.sge[i].tseg == NULL) {
+                URMA_LOG_ERR("Invalid parameter with src tseg null_ptr, i: %u.\n", i);
+                return URMA_EINVAL;
+            }
+        }
+        for (uint32_t i = 0; i < send_wr->rw.dst.num_sge; i++) {
+            if (send_wr->rw.dst.sge[i].tseg == NULL) {
+                URMA_LOG_ERR("Invalid parameter with dst tseg null_ptr, i: %u.\n", i);
+                return URMA_EINVAL;
+            }
+        }
+        break;
+    // cas and faa tseg should also be checked
+    default:
+        break;
+    }
+    
     urma_status_t ret;
     if (comp->comp_type == BONDP_COMP_JETTY) {
         ret = urma_post_jetty_send_wr(comp->p_jetty[send_idx], send_wr, bad_wr);
