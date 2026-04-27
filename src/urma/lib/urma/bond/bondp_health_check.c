@@ -842,11 +842,11 @@ static int bondp_relink_primary_import(bondp_health_task_t *task)
     };
     rjetty.jetty_id.id = task->fallback_task.remote_primary_pjetty_id;
 
+    task->bdp_tjetty->p_tjetty[local_idx][target_idx] = NULL;
     if (urma_unimport_jetty(old_tjetty) != URMA_SUCCESS) {
         URMA_LOG_ERR("Failed to unimport old primary ptjetty, lidx:%d tidx:%d\n", local_idx, target_idx);
         return -1;
     }
-    task->bdp_tjetty->p_tjetty[local_idx][target_idx] = NULL;
 
     urma_token_t *import_token = task->bdp_tjetty->import_token_valid ? &task->bdp_tjetty->import_token_value : NULL;
     urma_target_jetty_t *new_tjetty = urma_import_jetty(bdp_ctx->p_ctxs[local_idx], &rjetty, import_token);

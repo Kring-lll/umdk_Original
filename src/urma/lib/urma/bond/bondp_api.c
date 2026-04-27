@@ -1499,12 +1499,15 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
             if (!bdp_tjetty->p_tjetty[i][j]) {
                 continue;
             }
-            if (urma_unimport_jetty(bdp_tjetty->p_tjetty[i][j]) != URMA_SUCCESS) {
+            urma_target_jetty_t *p_tjetty = bdp_tjetty->p_tjetty[i][j];
+            bdp_tjetty->p_tjetty[i][j] = NULL;
+            if (urma_unimport_jetty(p_tjetty) != URMA_SUCCESS) {
                 ret = URMA_FAIL;
             }
-            bdp_tjetty->p_tjetty[i][j] = NULL;
         }
     }
+
+    URMA_LOG_INFO("Finish to unimport pjetty.\n");
     return ret;
 }
 
@@ -1759,12 +1762,15 @@ static int bondp_unimport_pjfr(bondp_target_jetty_t *bdp_tjetty)
             if (!bdp_tjetty->p_tjetty[i][j]) {
                 continue;
             }
-            if (urma_unimport_jfr(bdp_tjetty->p_tjetty[i][j]) != URMA_SUCCESS) {
+            urma_target_jetty_t *p_tjetty = bdp_tjetty->p_tjetty[i][j];
+            bdp_tjetty->p_tjetty[i][j] = NULL;
+            if (urma_unimport_jfr(p_tjetty) != URMA_SUCCESS) {
                 ret = URMA_FAIL;
             }
-            bdp_tjetty->p_tjetty[i][j] = NULL;
         }
     }
+
+    URMA_LOG_INFO("Finish to unimport pjfr.\n");
     return ret;
 }
 
