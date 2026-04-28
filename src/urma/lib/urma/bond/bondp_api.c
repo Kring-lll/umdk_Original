@@ -39,6 +39,10 @@ typedef struct bondp_create_vjetty_udata {
     urma_bond_seg_info_out_t health_check_seg;
 } bondp_create_vjetty_udata_t;
 
+typedef struct bondp_import_vobj_udata_in {
+    uint32_t ue_idx;
+} bondp_import_vobj_udata_in_t;
+
 static int bondp_init_connection_table(bondp_comp_t *bdp_comp)
 {
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
@@ -1431,14 +1435,26 @@ static int bondp_import_vjetty(
         .policy = rjetty->policy,
         .type = rjetty->type,
     };
-    urma_cmd_udrv_priv_t udata = {
-        .in_addr = 0,
-        .in_len = 0,
-        .out_addr = (uint64_t)udata_out,
-        .out_len = sizeof(*udata_out),
-    };
+    int ret = -1;
 
-    return urma_cmd_import_jetty(ctx, &bdp_tjetty->v_tjetty, &cfg, &udata);
+    for (uint32_t ue_idx = 0; ue_idx < IODIE_NUM; ++ue_idx) {
+        bondp_import_vobj_udata_in_t udata_in = {
+            .ue_idx = ue_idx,
+        };
+        urma_cmd_udrv_priv_t udata = {
+            .in_addr = (uint64_t)&udata_in,
+            .in_len = sizeof(udata_in),
+            .out_addr = (uint64_t)udata_out,
+            .out_len = sizeof(*udata_out),
+        };
+
+        ret = urma_cmd_import_jetty(ctx, &bdp_tjetty->v_tjetty, &cfg, &udata);
+        if (ret == 0) {
+            return 0;
+        }
+    }
+
+    return ret;
 }
 
 static int bondp_import_pjetty(
@@ -1489,6 +1505,8 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
             bdp_tjetty->p_tjetty[i][j] = NULL;
         }
     }
+
+    URMA_LOG_INFO("Finish to unimport pjetty.\n");
     return ret;
 }
 
@@ -1512,6 +1530,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         bdp_tjetty->import_token_value = *token_value;
         bdp_tjetty->import_token_valid = true;
     }
+    atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
 
     urma_bond_id_info_out_t rvjetty_info = {0};
     if (bondp_import_vjetty(ctx, rjetty, token_value, bdp_tjetty, &rvjetty_info) != 0) {
@@ -1553,9 +1572,11 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         cfg_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
     }
 
-    if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty, cfg_jetty) != 0) {
-        URMA_LOG_ERR("Failed to register health check task\n");
-        goto UNIMPORT_TSEG;
+    if (!is_fake_jetty) {
+        if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty, cfg_jetty) != 0) {
+            URMA_LOG_ERR("Failed to register health check task\n");
+            goto UNIMPORT_TSEG;
+        }
     }
 
     URMA_LOG_INFO("Successfully imported target jetty: " URMA_JETTY_ID_FMT "\n",
@@ -1574,7 +1595,7 @@ FREE_TJETTY:
     return NULL;
 }
 
-urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
+static urma_status_t bondp_unimport_jetty_inner(urma_target_jetty_t *target_jetty)
 {
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jetty, bondp_target_jetty_t, v_tjetty);
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(target_jetty->urma_ctx, bondp_context_t, v_ctx);
@@ -1590,6 +1611,20 @@ urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
     }
     free(bdp_tjetty);
     return ret;
+}
+
+static void bondp_put_remote_jetty(urma_target_jetty_t *target_jetty)
+{
+    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jetty, bondp_target_jetty_t, v_tjetty);
+    if (atomic_fetch_sub(&bdp_tjetty->use_cnt.atomic_cnt, 1) == 1) {
+        bondp_unimport_jetty_inner(target_jetty);
+    }
+}
+
+urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
+{
+    bondp_put_remote_jetty(target_jetty);
+    return URMA_SUCCESS;
 }
 
 urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
@@ -1670,14 +1705,27 @@ static int bondp_import_vjfr(urma_context_t *ctx, urma_rjfr_t *rjfr, urma_token_
         .token = token_value,
         .trans_mode = rjfr->trans_mode,
     };
-    urma_cmd_udrv_priv_t udata = {
-        .in_addr = 0,
-        .in_len = 0,
-        .out_addr = (uint64_t)udata_out,
-        .out_len = sizeof(*udata_out),
-    };
 
-    return urma_cmd_import_jfr(ctx, &bdp_tjetty->v_tjetty, &cfg, &udata);
+    int ret = -1;
+
+    for (uint32_t ue_idx = 0; ue_idx < IODIE_NUM; ++ue_idx) {
+        bondp_import_vobj_udata_in_t udata_in = {
+            .ue_idx = ue_idx,
+        };
+        urma_cmd_udrv_priv_t udata = {
+            .in_addr = (uint64_t)&udata_in,
+            .in_len = sizeof(udata_in),
+            .out_addr = (uint64_t)udata_out,
+            .out_len = sizeof(*udata_out),
+        };
+
+        ret = urma_cmd_import_jfr(ctx, &bdp_tjetty->v_tjetty, &cfg, &udata);
+        if (ret == 0) {
+            return 0;
+        }
+    }
+
+    return ret;
 }
 
 static int bondp_import_pjfr(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
@@ -1719,6 +1767,8 @@ static int bondp_unimport_pjfr(bondp_target_jetty_t *bdp_tjetty)
             bdp_tjetty->p_tjetty[i][j] = NULL;
         }
     }
+
+    URMA_LOG_INFO("Finish to unimport pjfr.\n");
     return ret;
 }
 
@@ -1737,6 +1787,7 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
         URMA_LOG_ERR("Failed to alloc target jetty\n");
         return NULL;
     }
+    atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
 
     urma_bond_id_info_out_t udata_out = {0};
     if (bondp_import_vjfr(ctx, rjfr, token_value, bdp_tjetty, &udata_out) != 0) {
@@ -1777,7 +1828,7 @@ FREE_TJFR:
     return NULL;
 }
 
-urma_status_t bondp_unimport_jfr(urma_target_jetty_t *target_jfr)
+static urma_status_t bondp_unimport_jfr_inner(urma_target_jetty_t *target_jfr)
 {
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jfr, bondp_target_jetty_t, v_tjetty);
     urma_status_t ret = URMA_SUCCESS;
@@ -1790,6 +1841,35 @@ urma_status_t bondp_unimport_jfr(urma_target_jetty_t *target_jfr)
     }
     free(bdp_tjetty);
     return ret;
+}
+
+static void bondp_put_remote_jfr(urma_target_jetty_t *target_jfr)
+{
+    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jfr, bondp_target_jetty_t, v_tjetty);
+    if (atomic_fetch_sub(&bdp_tjetty->use_cnt.atomic_cnt, 1) == 1) {
+        bondp_unimport_jfr_inner(target_jfr);
+    }
+}
+
+urma_status_t bondp_unimport_jfr(urma_target_jetty_t *target_jfr)
+{
+    bondp_put_remote_jfr(target_jfr);
+    return URMA_SUCCESS;
+}
+
+void bondp_tjetty_get(urma_target_jetty_t *target_jetty)
+{
+    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jetty, bondp_target_jetty_t, v_tjetty);
+    atomic_fetch_add(&bdp_tjetty->use_cnt.atomic_cnt, 1);
+}
+
+void bondp_tjetty_put(urma_target_jetty_t *target_jetty)
+{
+    if (target_jetty->type == URMA_JFR) {
+        bondp_put_remote_jfr(target_jetty);
+    } else {
+        bondp_put_remote_jetty(target_jetty);
+    }
 }
 
 urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)

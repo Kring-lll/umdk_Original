@@ -305,6 +305,7 @@ static urma_status_t bondp_post_send_wr_and_store(bondp_comp_t *bdp_comp, urma_j
         ret = schedule_send(wr->tjetty, bdp_comp, &send_idx, &target_idx, &info);
     }
     if (ret != 0) {
+        URMA_LOG_WARN("Failed to schedule send.\n");
         return URMA_FAIL;
     }
 
@@ -328,21 +329,24 @@ static urma_status_t bondp_post_send_wr_and_store(bondp_comp_t *bdp_comp, urma_j
         goto FREE_PWR;
     }
 
+    add_vwr_use_cnt(pwr);
     ret = convert_jfs_vwr_to_pwr(pwr, send_idx, target_idx, bdp_comp, v_conn);
     if (ret != 0) {
         URMA_LOG_ERR("Failed to convert jfs wr\n");
-        goto FREE_PWR;
+        goto RELEASE_WR;
     }
 
     pwr->user_ctx = wr_entry->wr_id;
     ret = comp_post_send(bdp_comp, send_idx, pwr, bad_wr);
     if (ret != URMA_SUCCESS) {
         URMA_LOG_ERR("Failed to post send wr\n");
-        goto FREE_PWR;
+        goto RELEASE_WR;
     }
-
     return URMA_SUCCESS;
 
+RELEASE_WR:
+    convert_jfs_pwr_to_vwr_resend(pwr, &wr_entry->v_conn->target_vjetty->v_tjetty);
+    release_vwr_use_cnt(pwr);
 FREE_PWR:
     free_jfs_wr(pwr);
     jfs_wr_buf_release(wr_entry);
@@ -642,33 +646,34 @@ urma_status_t bondp_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_
 }
 
 typedef enum cr_convert_ret {
+    // CR conversion failed and the caller should abort the polling flow.
     CONVERT_FAIL = -1,
+    // CR is converted successfully and should be returned to the caller, regardless of cr's own status.
     CONVERT_SUCCESS = 0,
+    // CR is consumed internally and should not be returned to the caller.
     CONVERT_SKIP = 1,
 } cr_convert_ret_t;
 
 static int resend_jfs_wr(jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
 {
-    int ret;
-
     wr_entry->send_idx = send_idx;
     wr_entry->target_idx = target_idx;
     urma_jfs_wr_t *wr = &wr_entry->wr;
-    urma_target_jetty_t *vtjetty = (urma_target_jetty_t *)(wr_entry->v_conn->target_vjetty);
-    ret = convert_jfs_pwr_to_another_path(wr, vtjetty, send_idx, target_idx);
-    if (ret != 0) {
-        URMA_LOG_ERR("Failed to convert when resend\n");
-        return -1;
-    }
+    urma_target_jetty_t *vtjetty = &wr_entry->v_conn->target_vjetty->v_tjetty;
+    convert_jfs_pwr_to_vwr_resend(wr, vtjetty);
+    convert_jfs_vwr_to_pwr_for_resend(wr, send_idx, target_idx);
 
     urma_jfs_wr_t *bad_wr = NULL;
-    ret = comp_post_send(wr_entry->bdp_comp, send_idx, wr, &bad_wr);
+    int ret = comp_post_send(wr_entry->bdp_comp, send_idx, wr, &bad_wr);
+
     if (ret != URMA_SUCCESS) {
-        URMA_LOG_ERR("Failed to resend wr\n");
-        return -1;
+        convert_jfs_pwr_to_vwr_resend(wr, vtjetty);
+        release_vwr_use_cnt(wr);
+        free_jfs_wr(wr);
+        jfs_wr_buf_release(wr_entry);
     }
 
-    return 0;
+    return ret;
 }
 
 static bondp_comp_t *get_comp_by_cr(bondp_context_t *bdp_ctx, int dev_idx, urma_cr_t *cr)
@@ -708,11 +713,13 @@ static inline void put_comp(bondp_comp_t *bdp_comp)
     atomic_fetch_sub(&bdp_comp->use_cnt.atomic_cnt, 1);
 }
 
-static cr_convert_ret_t handle_fake_cr_with_store(bondp_context_t *bdp_ctx, bondp_jfc_t *bdp_jfc, int idx, urma_cr_t *cr)
+static cr_convert_ret_t handle_fake_cr_with_store(bondp_context_t *bdp_ctx, int idx, urma_cr_t *cr)
 {
     bondp_comp_t *comp = get_comp_by_cr(bdp_ctx, idx, cr);
     if (comp == NULL) {
-        return CONVERT_FAIL;
+        URMA_LOG_ERR("Skip fake cr because vjetty is not found, idx:%d, local_id:%u\n",
+                     idx, cr->local_id);
+        return CONVERT_SKIP;
     }
 
     uint8_t target_state_bit = 0;
@@ -770,7 +777,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
         return CONVERT_SKIP;
     }
 
-    if (cr->status != 0) {
+    if (is_failover_cr(cr)) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         bdp_comp->valid[send_idx] = false;
 
@@ -782,8 +789,16 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
              * this error CQE is returned directly to the upper layer.
              */
             URMA_LOG_ERR("Failed to find valid port for retransmission.\n");
+            /* Port down can be recovered, currently for simplex mode */
+            if (cr->status == URMA_CR_LOC_ACCESS_ERR && bdp_comp->comp_type == BONDP_COMP_JFS) {
+                bdp_comp->valid[send_idx] = true;
+            }
             (void)pthread_spin_unlock(&bdp_comp->send_lock);
             goto CONVERT_CR;
+        }
+        /* Port down can be recovered, currently for simplex mode */
+        if (cr->status == URMA_CR_LOC_ACCESS_ERR && bdp_comp->comp_type == BONDP_COMP_JFS) {
+            bdp_comp->valid[send_idx] = true;
         }
 
         URMA_LOG_DEBUG("Resend from %d to %d\n", send_idx, new_send_idx);
@@ -801,7 +816,8 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
                 URMA_LOG_ERR("Failed to resend jfs wr, wr_id: %lu\n", wr_id);
             }
         }
-
+        bondp_health_notify_datapath_link_fail(bdp_comp->bondp_ctx, wr_entry->v_conn->target_vjetty,
+                                               (int)send_idx, (int)target_idx);
         /* Update active link after failover is finished. */
         bondp_health_update_active_idx(bdp_comp->bondp_ctx, wr_entry->v_conn->target_vjetty, new_send_idx);
 
@@ -832,6 +848,8 @@ CONVERT_CR:
     cr->local_id = get_comp_urma_jetty_id(bdp_comp)->id;
     cr->user_ctx = wr_entry->user_ctx;
 
+    convert_jfs_pwr_to_vwr_resend(&wr_entry->wr, &wr_entry->v_conn->target_vjetty->v_tjetty);
+    release_vwr_use_cnt(&wr_entry->wr);
     free_jfs_wr(&wr_entry->wr);
     jfs_wr_buf_release(wr_entry);
     return CONVERT_SUCCESS;
@@ -935,7 +953,7 @@ static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, bon
         (void)bondp_try_handle_health_check_cr(bdp_ctx, idx, cr);
         return CONVERT_SKIP;
     } else if (is_fake_cr(cr)) {
-        return handle_fake_cr_with_store(bdp_ctx, bdp_jfc, idx, cr);
+        return handle_fake_cr_with_store(bdp_ctx, idx, cr);
     } else if (is_recv_cr(cr)) {
         return handle_recv_cr_with_store(bdp_ctx, bdp_jfc, idx, cr);
     } else {

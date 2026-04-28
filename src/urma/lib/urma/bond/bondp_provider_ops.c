@@ -369,6 +369,7 @@ static int bondp_create_pcontext(bondp_context_t *bdp_ctx, bondp_bonding_mode_t 
                          m->dev->name, m->eid_index);
             return -1;
         }
+        bdp_ctx->p_ctxs[i] = ctx;
 
         int fd = ctx->async_fd;
         if (set_fd_noblock(fd) != 0) {
@@ -383,8 +384,6 @@ static int bondp_create_pcontext(bondp_context_t *bdp_ctx, bondp_bonding_mode_t 
             URMA_LOG_ERR("failed to add fd: %u, errno: %d.\n", fd, errno);
             return -1;
         }
-
-        bdp_ctx->p_ctxs[i] = ctx;
 
         if (bdp_ctx->bonding_mode == BONDP_BONDING_MODE_STANDALONE) {
             break;
@@ -504,6 +503,13 @@ int bondp_set_bonding_mode(urma_context_t *ctx, bondp_bonding_mode_t bonding_mod
     if (ctx == NULL) {
         URMA_LOG_ERR("Invalid context.\n");
         return -EINVAL;
+    }
+
+    uint64_t cnt = (uint64_t)atomic_load(&ctx->ref.atomic_cnt);
+    if (cnt > 1) {
+        URMA_LOG_WARN("already in use, atomic_cnt: %lu, dev_name: %s.\n",
+            cnt, ctx->dev->name);
+        return URMA_EAGAIN;
     }
 
     if (bonding_mode < 0 || bonding_mode >= BONDP_BONDING_MODE_MAX) {
