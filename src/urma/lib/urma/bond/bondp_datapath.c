@@ -349,7 +349,9 @@ RELEASE_WR:
     release_vwr_use_cnt(pwr);
 FREE_PWR:
     free_jfs_wr(pwr);
+    (void)pthread_spin_lock(&bdp_comp->send_jfc->wr_lock);
     jfs_wr_buf_release(wr_entry);
+    (void)pthread_spin_unlock(&bdp_comp->send_jfc->wr_lock);
     return ret;
 }
 
@@ -654,7 +656,7 @@ typedef enum cr_convert_ret {
     CONVERT_SKIP = 1,
 } cr_convert_ret_t;
 
-static int resend_jfs_wr(jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
+static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
 {
     wr_entry->send_idx = send_idx;
     wr_entry->target_idx = target_idx;
@@ -670,7 +672,9 @@ static int resend_jfs_wr(jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
         convert_jfs_pwr_to_vwr_resend(wr, vtjetty);
         release_vwr_use_cnt(wr);
         free_jfs_wr(wr);
+        (void)pthread_spin_lock(&bdp_comp->send_jfc->wr_lock);
         jfs_wr_buf_release(wr_entry);
+        (void)pthread_spin_unlock(&bdp_comp->send_jfc->wr_lock);
     }
 
     return ret;
@@ -754,7 +758,7 @@ static cr_convert_ret_t handle_fake_cr_with_store(bondp_context_t *bdp_ctx, int 
     return CONVERT_SKIP;
 }
 
-static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx, urma_cr_t *cr)
+static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, bondp_jfc_t *bdp_jfc, int idx, urma_cr_t *cr)
 {
     const uint64_t wr_id = cr->user_ctx;
     jfs_wr_entry_t *wr_entry = jfs_wr_buf_get(&bdp_jfc->wr_buf, wr_id);
@@ -769,15 +773,26 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
         return CONVERT_SKIP;
     }
 
-    bondp_comp_t *bdp_comp = wr_entry->bdp_comp;
+    bondp_comp_t *bdp_comp = get_comp_by_cr(bdp_ctx, idx, cr);
+    if (bdp_comp == NULL) {
+        URMA_LOG_ERR("Failed find jetty when handle send cr, cr.local_id:%u.\n", cr->local_id);
+        return CONVERT_SKIP;
+    }
+    if (wr_entry->bdp_comp != bdp_comp) {
+        URMA_LOG_ERR("Corrupted wr entry, bdp_comp not match, in_entry:%p, found:%p.\n", wr_entry->bdp_comp, bdp_comp);
+        put_comp(bdp_comp);
+        return CONVERT_SKIP;
+    }
+
     uint32_t send_idx = wr_entry->send_idx;
     uint32_t target_idx = wr_entry->target_idx;
 
     if (bdp_comp->valid[idx] == false || idx != send_idx) {
+        put_comp(bdp_comp);
         return CONVERT_SKIP;
     }
 
-    if (is_failover_cr(cr)) {
+    if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         bdp_comp->valid[send_idx] = false;
 
@@ -807,12 +822,14 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
             const uint64_t wr_id = (wr_entry->wr_id + i - 1) % bdp_jfc->wr_buf.max_wr_num + 1;
             jfs_wr_entry_t *resend_wr_entry = jfs_wr_buf_get(&bdp_jfc->wr_buf, wr_id);
             if (resend_wr_entry == NULL ||
+                resend_wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
+                resend_wr_entry->bdp_comp != bdp_comp ||
                 resend_wr_entry->send_idx != send_idx ||
                 resend_wr_entry->target_idx != target_idx) {
                 continue;
             }
             atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx], 1);
-            if (resend_jfs_wr(resend_wr_entry, new_send_idx, new_target_idx) != 0) {
+            if (resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
                 URMA_LOG_ERR("Failed to resend jfs wr, wr_id: %lu\n", wr_id);
             }
         }
@@ -837,6 +854,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
             bondp_notify_health_event(bdp_comp->bondp_ctx, BONDP_HEALTH_EVENT_FALLBACK_TASK_KICK, &event_info);
         }
         (void)pthread_spin_unlock(&bdp_comp->send_lock);
+        put_comp(bdp_comp);
         return CONVERT_SKIP;
     }
 
@@ -851,7 +869,10 @@ CONVERT_CR:
     convert_jfs_pwr_to_vwr_resend(&wr_entry->wr, &wr_entry->v_conn->target_vjetty->v_tjetty);
     release_vwr_use_cnt(&wr_entry->wr);
     free_jfs_wr(&wr_entry->wr);
+    (void)pthread_spin_lock(&bdp_comp->send_jfc->wr_lock);
     jfs_wr_buf_release(wr_entry);
+    (void)pthread_spin_unlock(&bdp_comp->send_jfc->wr_lock);
+    put_comp(bdp_comp);
     return CONVERT_SUCCESS;
 }
 
@@ -957,7 +978,7 @@ static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, bon
     } else if (is_recv_cr(cr)) {
         return handle_recv_cr_with_store(bdp_ctx, bdp_jfc, idx, cr);
     } else {
-        return handle_send_cr_with_store(bdp_jfc, idx, cr);
+        return handle_send_cr_with_store(bdp_ctx, bdp_jfc, idx, cr);
     }
 }
 

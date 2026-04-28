@@ -50,7 +50,7 @@
 %define kernel_requires_version %(echo %{kernel_version} | awk -F"." 'OFS="."{$NF="";print}' | sed 's/\.$//g')
 
 %if %{undefined rpm_release}
-    %define rpm_release 0
+    %define rpm_release 0428T04
 %endif
 
 Name          : umdk
@@ -227,10 +227,6 @@ kmod file of ums
 Summary:        tools of ums
 %description ums-tools
 tools of ums, contains ums_run
-%endif
-
-%if "%{build_all}" == "0"
-    %global debug_package %{nil}
 %endif
 
 %prep
