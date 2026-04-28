@@ -349,7 +349,9 @@ RELEASE_WR:
     release_vwr_use_cnt(pwr);
 FREE_PWR:
     free_jfs_wr(pwr);
+    (void)pthread_spin_lock(&bdp_comp->send_jfc->wr_lock);
     jfs_wr_buf_release(wr_entry);
+    (void)pthread_spin_unlock(&bdp_comp->send_jfc->wr_lock);
     return ret;
 }
 
@@ -654,7 +656,7 @@ typedef enum cr_convert_ret {
     CONVERT_SKIP = 1,
 } cr_convert_ret_t;
 
-static int resend_jfs_wr(jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
+static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
 {
     wr_entry->send_idx = send_idx;
     wr_entry->target_idx = target_idx;
@@ -670,7 +672,9 @@ static int resend_jfs_wr(jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
         convert_jfs_pwr_to_vwr_resend(wr, vtjetty);
         release_vwr_use_cnt(wr);
         free_jfs_wr(wr);
+        (void)pthread_spin_lock(&bdp_comp->send_jfc->wr_lock);
         jfs_wr_buf_release(wr_entry);
+        (void)pthread_spin_unlock(&bdp_comp->send_jfc->wr_lock);
     }
 
     return ret;
@@ -812,7 +816,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_jfc_t *bdp_jfc, int idx,
                 continue;
             }
             atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx], 1);
-            if (resend_jfs_wr(resend_wr_entry, new_send_idx, new_target_idx) != 0) {
+            if (resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
                 URMA_LOG_ERR("Failed to resend jfs wr, wr_id: %lu\n", wr_id);
             }
         }
@@ -851,7 +855,9 @@ CONVERT_CR:
     convert_jfs_pwr_to_vwr_resend(&wr_entry->wr, &wr_entry->v_conn->target_vjetty->v_tjetty);
     release_vwr_use_cnt(&wr_entry->wr);
     free_jfs_wr(&wr_entry->wr);
+    (void)pthread_spin_lock(&bdp_comp->send_jfc->wr_lock);
     jfs_wr_buf_release(wr_entry);
+    (void)pthread_spin_unlock(&bdp_comp->send_jfc->wr_lock);
     return CONVERT_SUCCESS;
 }
 
