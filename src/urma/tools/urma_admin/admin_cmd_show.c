@@ -975,11 +975,13 @@ static void urma_eid_to_ipv6_str(const urma_eid_t *eid, char *out, size_t out_le
     char *ptr = out;
     size_t left = out_len;
     bool printed = false;
+    bool just_compressed_at_start = false;
     for (i = 0; i < ipv6_addr_hex_count;) {
         int n = 0;
         if (i == max_zero_start) {
             if (!printed) {
                 n = snprintf(ptr, left, "::");
+                just_compressed_at_start = true;
             } else {
                 n = snprintf(ptr, left, ":");
             }
@@ -993,12 +995,16 @@ static void urma_eid_to_ipv6_str(const urma_eid_t *eid, char *out, size_t out_le
             continue;
         }
         if (printed) {
-            n = snprintf(ptr, left, ":");
-            if (n <= 0) {
-                printf("Failed convert eid to ipv6.\n");
+            // 如果刚刚在开头压缩了0，此处不再需要打印冒号
+            if (!just_compressed_at_start) {
+                n = snprintf(ptr, left, ":");
+                if (n <= 0) {
+                    printf("Failed convert eid to ipv6.\n");
+                }
+                ptr += n;
+                left -= n;
             }
-            ptr += n;
-            left -= n;
+            just_compressed_at_start = false; 
         }
         n = snprintf(ptr, left, "%x", words[i]);
         if (n <= 0) {
