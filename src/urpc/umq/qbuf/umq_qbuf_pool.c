@@ -1472,6 +1472,11 @@ umq_buf_t *umq_qbuf_data_to_head(void *data)
             uint64_t id =
                 ((uint64_t)(uintptr_t)data - (uint64_t)(uintptr_t)g_qbuf_pool.data_buffer) / g_qbuf_pool.block_size;
             return (umq_buf_t *)(g_qbuf_pool.header_buffer + id * sizeof(umq_buf_t));
+        } else {
+            uint64_t buffer_head = (uint64_t)(uintptr_t)data & g_qbuf_pool.exp_pool_with_date.qbuf_data_to_head_mask;
+            uint64_t id = ((uint64_t)(uintptr_t)data - buffer_head) / umq_buf_size_small();
+            return (umq_buf_t *)(buffer_head +
+                g_qbuf_pool.exp_pool_with_date.expansion_block_count * umq_buf_size_small() + id * sizeof(umq_buf_t));
         }
 
         if (__atomic_load_n(&g_total_escape_buf_cnt, __ATOMIC_RELAXED) > 0) {

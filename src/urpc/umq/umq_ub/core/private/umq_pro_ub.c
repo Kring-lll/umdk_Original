@@ -562,6 +562,10 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
     }
     (recv_wr_ptr - 1)->next = NULL;
     uint64_t start_timestamp = umq_perf_get_start_timestamp();
+<<<<<<< Updated upstream
+=======
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
     urma_status_t status;
     // bondp with shared_jfr should use urma_post_jfr_wr
     bool post_jfr = ((queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 && queue->used_port_num > 0);
@@ -570,6 +574,13 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
     } else {
         status = umq_symbol_urma()->urma_post_jetty_recv_wr(queue->jetty[UB_QUEUE_JETTY_IO], recv_wr, &bad_wr);
     }
+<<<<<<< Updated upstream
+=======
+=======
+    urma_status_t status = umq_symbol_urma()->urma_post_jetty_recv_wr(queue->jetty[UB_QUEUE_JETTY_IO], recv_wr,
+        &bad_wr);
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
     if (status != URMA_SUCCESS) {
         umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_POST_RECV, start_timestamp);
         if (post_jfr) {
@@ -632,7 +643,10 @@ static int umq_ub_on_rx_done(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t *rx_buf
     }
 
     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)rx_buf->qbuf_ext;
+<<<<<<< Updated upstream
     buf_pro->opcode = UMQ_OPC_SEND_IMM;
+=======
+>>>>>>> Stashed changes
     ub_queue_t *real_queue = umq_ub_get_real_queue_by_cr(queue, cr);
     if (real_queue != NULL) {
         umq_inc_ref(real_queue->dev_ctx->io_lock_free, &real_queue->ref_cnt, 1);
@@ -706,7 +720,10 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_
                     }
 
                     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
+<<<<<<< Updated upstream
                     buf_pro->opcode = UMQ_OPC_WRITE_IMM;
+=======
+>>>>>>> Stashed changes
                     ub_queue_t *real_queue = umq_ub_get_real_queue_by_cr(queue, cr);
                     if (real_queue == NULL) {
                         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, sub queue has been destroy\n",
@@ -741,7 +758,10 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_
         }
         case URMA_CR_OPC_SEND: {
             umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
+<<<<<<< Updated upstream
             buf_pro->opcode = UMQ_OPC_SEND;
+=======
+>>>>>>> Stashed changes
             ub_queue_t *real_queue = umq_ub_get_real_queue_by_cr(queue, cr);
             if (real_queue != NULL) {
                 buf_pro->umq_ctx = real_queue->umq_ctx;
@@ -798,10 +818,16 @@ static uint32_t umq_ub_fill_fc_buf(umq_buf_t **buf, umq_buf_status_t status)
     if (fc_buf == NULL) {
         return 0;
     }
+<<<<<<< Updated upstream
     fc_buf->io_direction = UMQ_IO_RX;
     fc_buf->status = status;
     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)fc_buf->qbuf_ext;
     buf_pro->opcode = UMQ_OPC_SEND;
+=======
+
+    fc_buf->io_direction = UMQ_IO_RX;
+    fc_buf->status = status;
+>>>>>>> Stashed changes
     *buf = fc_buf;
     return 1;
 }
@@ -825,10 +851,13 @@ static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm, umq_b
             if (umq_ub_shared_credit_return_req_handle(queue, &imm) != UMQ_SUCCESS) {
                 ret = umq_ub_fill_fc_buf(buf, UMQ_FAKE_BUF_FC_ERR);
             }
+<<<<<<< Updated upstream
             break;
         }
         case IMM_TYPE_FC_CREDIT_RETURN_ACK: {
             queue->flow_control.peer_ratio = imm.flow_control.ratio;
+=======
+>>>>>>> Stashed changes
             break;
         }
         default:
@@ -857,11 +886,22 @@ int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count)
 {
     urma_cr_t cr[UMQ_UB_FLOW_CONTORL_JETTY_DEPTH];
     uint64_t start_timestmap = umq_perf_get_start_timestamp();
+<<<<<<< Updated upstream
+=======
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
     /* If buf is NULL, poll max depth; otherwise poll min(buf_count, max_depth) */
     uint32_t poll_count = (buf == NULL || buf_count >= UMQ_UB_FLOW_CONTORL_JETTY_DEPTH) ?
         UMQ_UB_FLOW_CONTORL_JETTY_DEPTH : buf_count;
     int rx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfc,
                                                      poll_count, cr);
+<<<<<<< Updated upstream
+=======
+=======
+    int rx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfc,
+        UMQ_UB_FLOW_CONTORL_JETTY_DEPTH, cr);
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id;
     umq_perf_record_write_poll(UMQ_PERF_RECORD_TRANSPORT_POLL_RX, start_timestmap, rx_cr_cnt);

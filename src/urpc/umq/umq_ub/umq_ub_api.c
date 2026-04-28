@@ -12,8 +12,19 @@
 #include "umq_errno.h"
 #include "umq_ub_impl.h"
 #include "umq_qbuf_pool.h"
+#include "umq_symbol_private.h"
 #include "umq_ub_api.h"
 #include "umq_symbol_private.h"
+
+static int umq_tp_ub_symbol_load(void)
+{
+    umq_symbol_urma_t *sym = umq_symbol_urma();
+    if (umq_symbol_urma_load(sym) != 0) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "Failed to load urma/uvs symbols\n");
+        return -1;
+    }
+    return 0;
+}
 
 static int umq_tp_ub_symbol_load(void)
 {

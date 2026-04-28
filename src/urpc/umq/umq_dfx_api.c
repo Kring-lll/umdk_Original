@@ -21,6 +21,10 @@
 #define UMQ_DFX_PERF_REC_NAME_MAX_LEN 20
 #define UMQ_DFX_QBUF_POOL_TYPE_NAME_MAX_LEN 20
 
+<<<<<<< Updated upstream
+=======
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
 #define UMQ_DFX_SNPRINTF_BUF(__buf, __max_buf_len, __offset, __format, ...)            \
     do {                                                                                            \
         int __ret;                                                                                  \
@@ -32,6 +36,21 @@
         }                                                                                           \
         (__offset) += __ret;                                                                        \
     } while (0)                                                                                     \
+<<<<<<< Updated upstream
+=======
+=======
+#define UMQ_DFX_SNPRINTF_BUF(__buf, __max_buf_len, __offset, __err_label, __format, ...)                      \
+    do {                                                                                                      \
+        int __ret = snprintf((__buf) + (__offset), (__max_buf_len) - (__offset), __format, ##__VA_ARGS__);    \
+        if (__ret < 0 || __ret >= ((__max_buf_len) - (__offset))) {                                           \
+            UMQ_VLOG_ERR(VLOG_UMQ, "format output failed, ret: %d, errno %d, str size %d, max buf len %d\n",  \
+                __ret, errno, (__offset), (__max_buf_len));                                                   \
+            goto __err_label;                                                                                 \
+        }                                                                                                     \
+        (__offset) += __ret;                                                                                  \
+    } while (0)                                                                                               \
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 
 int umq_stats_flow_control_get(uint64_t umqh, umq_flow_control_stats_t *flow_control_stats)
 {
@@ -324,8 +343,12 @@ int umq_qbuf_pool_stats_to_str(const umq_qbuf_pool_stats_t *qbuf_pool_stats, cha
             s->tls_return_cnt_without_data, s->tls_return_buf_cnt_without_data,
             s->alloc_cnt_without_data, s->free_cnt_without_data);
     }
+<<<<<<< Updated upstream
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_EQUALS_120);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-16s %-13lu", "escape_buf_cnt", qbuf_pool_stats->escape_buf_cnt);
+=======
+
+>>>>>>> Stashed changes
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_EQUALS_120);
 
     return str_size;
@@ -427,6 +450,10 @@ int umq_io_stats_to_str(const umq_packet_stats_t *packet_stats, char *buf, int m
     (void)memset(buf, 0, max_buf_len);
 
     // Format IO Packet Statistics
+<<<<<<< Updated upstream
+=======
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_EQUALS);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "                              IO Packet Statistics\n");
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_EQUALS);
@@ -434,12 +461,29 @@ int umq_io_stats_to_str(const umq_packet_stats_t *packet_stats, char *buf, int m
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-40s %-40lu\n", "send_cnt", packet_stats->send_cnt);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-40s %-40lu\n",
+<<<<<<< Updated upstream
         "send_success", packet_stats->send_success);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-40s %-40lu\n", "recv_cnt", packet_stats->recv_cnt);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-40s %-40lu\n",
                          "send_eagain_cnt", packet_stats->send_eagain_cnt);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-40s %-40lu\n",
         "send_error_cnt", packet_stats->send_error_cnt);
+=======
+=======
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%s\n", UMQ_DFX_EQUALS);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "                             IO Packet Statistics\n");
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%s\n", UMQ_DFX_EQUALS);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%-40s %-40s\n", "Type", "Value");
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%s\n", UMQ_DFX_UNDERLINE);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%-40s %-40lu\n", "send_cnt", packet_stats->send_cnt);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, FORMAT_ERR, "%-40s %-40lu\n",
+>>>>>>> Stashed changes
+        "send_success", packet_stats->send_success);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-40s %-40lu\n", "recv_cnt", packet_stats->recv_cnt);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-40s %-40lu\n",
+        "send_error_cnt", packet_stats->send_error_cnt);
+
+>>>>>>> Stashed changes
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-40s %-40lu\n",
         "recv_error_cnt", packet_stats->recv_error_cnt);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE);
@@ -475,7 +519,11 @@ int umq_stats_perf_to_str(umq_perf_stats_t *umq_perf_stats, char *buf, int max_b
         return -UMQ_ERR_EINVAL;
     }
     static char perf_record_type_name[UMQ_PERF_RECORD_TYPE_MAX][UMQ_DFX_PERF_REC_NAME_MAX_LEN] = {
+<<<<<<< Updated upstream
         "umq_enqueue", "umq_dequeue", "umq_dequeue_empty", "umq_post_all","umq_post_tx", "umq_post_rx",
+=======
+        "umq_enqueue", "umq_dequeue", "umq_dequeue_empty", "umq_post_all", "umq_post_tx", "umq_post_rx",
+>>>>>>> Stashed changes
         "umq_poll_all", "umq_poll_tx", "umq_poll_rx", "umq_poll_all_empty", "umq_poll_tx_empty", "umq_poll_rx_empty",
         "umq_rearm_tx", "umq_rearm_rx", "umq_wait_tx", "umq_wait_rx", "umq_ack_tx", "umq_ack_rx", "umq_notify",
         "tp_post_send", "tp_post_recv", "tp_poll_tx", "tp_poll_rx", "tp_poll_tx_empty", "tp_poll_rx_empty",

@@ -244,11 +244,8 @@ typedef struct umq_buf_pool_cfg {
 
     bool disable_scale_cap; // expansion and shrink switch
     // escape
-    bool disable_malloc_escape; // disable the escape mechanism
 } umq_buf_pool_cfg_t;
 
-typedef struct umq_init_cfg {
-    umq_buf_mode_t buf_mode;
     uint32_t feature;               // feature flags
     uint16_t headroom_size;         // header size of umq buffer, [0, UMQ_HEADROOM_SIZE_LIMIT]
     bool io_lock_free;              // true: user should ensure thread safety when call io function

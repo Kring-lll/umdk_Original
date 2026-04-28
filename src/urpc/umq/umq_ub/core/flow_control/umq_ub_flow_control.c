@@ -10,6 +10,7 @@
 #include "umq_types.h"
 #include "umq_pro_types.h"
 #include "umq_ub_imm_data.h"
+#include "umq_symbol_private.h"
 #include "umq_ub_flow_control.h"
 #include "umq_symbol_private.h"
 

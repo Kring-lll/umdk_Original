@@ -45,6 +45,11 @@ typedef struct mempool_segment_ops {
     void (*unregister_seg_callback)(uint8_t *ctx, uint16_t mempool_id);
 } mempool_segment_ops_t;
 
+typedef struct mempool_segment_ops {
+    int (*register_seg_callback)(uint8_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
+    void (*unregister_seg_callback)(uint8_t *ctx, uint16_t mempool_id);
+} mempool_segment_ops_t;
+
 typedef struct qbuf_pool_cfg {
     void *buf_addr;             // buffer addr
     uint64_t total_size;        // total buffer size
