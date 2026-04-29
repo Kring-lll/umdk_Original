@@ -806,8 +806,10 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, bond
             (void)pthread_spin_unlock(&bdp_comp->send_lock);
             goto CONVERT_CR;
         }
-
-        URMA_LOG_DEBUG("Resend from %d to %d\n", send_idx, new_send_idx);
+        if (bdp_comp->p_jetty[new_send_idx] != NULL && bdp_comp->p_jetty[send_idx] != NULL) {
+            URMA_LOG_DEBUG("bondp change jetty_id from %u to %u\n",
+                bdp_comp->p_jetty[send_idx]->jetty_id.id, bdp_comp->p_jetty[new_send_idx]->jetty_id.id);
+        }
 
         for (int i = 0; i < bdp_jfc->wr_buf.max_wr_num; i++) {
             const uint64_t wr_id = (wr_entry->wr_id + i - 1) % bdp_jfc->wr_buf.max_wr_num + 1;

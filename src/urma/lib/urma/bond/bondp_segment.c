@@ -70,11 +70,17 @@ urma_status_t bondp_free_token_id(urma_token_id_t *token_id)
 static int bondp_delete_pseg(bondp_tseg_t *bdp_seg)
 {
     int ret = URMA_SUCCESS;
+    urma_context_t *urma_ctx = NULL;
+    unsigned long ref_cnt;
 
     for (int i = 0; i < bdp_seg->dev_num; ++i) {
         if (bdp_seg->p_tseg[i] == NULL) {
             continue;
         }
+        urma_ctx = bdp_seg->p_tseg[i]->urma_ctx;
+        ref_cnt = atomic_load(&(urma_ctx->ref.atomic_cnt));
+        URMA_LOG_INFO("bondp delete_pseg token_id is %u, use_cnt is %lu.\n",
+            bdp_seg->p_tseg[i]->seg.token_id, ref_cnt);
         bdp_seg->p_tseg[i]->handle = bdp_seg->p_orig_handle[i];
         if (urma_unregister_seg(bdp_seg->p_tseg[i]) != URMA_SUCCESS) {
             URMA_LOG_ERR("Failed to unregister pseg %d\n", i);
@@ -124,12 +130,18 @@ DELETE_PSEG:
 
 static int bondp_delete_vseg(bondp_tseg_t *bdp_seg)
 {
+    urma_context_t *urma_ctx = bdp_seg->v_tseg.urma_ctx;
+    unsigned long ref_cnt;
+
+    ref_cnt = atomic_load(&(urma_ctx->ref.atomic_cnt));
     if (bdp_seg == NULL) {
         URMA_LOG_ERR("invalid param.\n");
         return URMA_FAIL;
     }
     urma_target_seg_t *target_seg = &bdp_seg->v_tseg;
     target_seg->handle = bdp_seg->v_orig_handle;
+    URMA_LOG_INFO("bondp delete_vseg, token_id is %u, use_cnt is %lu.\n",
+            bdp_seg->v_tseg.seg.token_id, ref_cnt);
 
     if (urma_cmd_unregister_seg(target_seg) != 0) {
         URMA_LOG_ERR("Failed to unregister segment, token_id:%u, handle:%lu.\n",
