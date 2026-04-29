@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/epoll.h>
+#include <stdatomic.h>
 
 #include "ub_util.h"
 #include "ubagg_ioctl.h"
@@ -1111,16 +1112,29 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
 
 static int bondp_delete_vjetty(bondp_comp_t *bdp_jetty)
 {
+    urma_context_t *urma_ctx = bdp_jetty->v_jetty.urma_ctx;
+    unsigned long ref_cnt;
+
+    ref_cnt = atomic_load(&(urma_ctx->ref.atomic_cnt));
+
+    URMA_LOG_INFO("bondp delete, v_jetty id is %u, modify_to err is %d, use_cnt is %lu.\n",
+        bdp_jetty->v_jetty.jetty_id.id, bdp_jetty->modify_to_error, ref_cnt);
     return urma_cmd_delete_jetty(&bdp_jetty->v_jetty);
 }
 
 static int bondp_delete_pjetty(bondp_comp_t *bdp_jetty)
 {
+     urma_context_t *urma_ctx = NULL;
+    unsigned long ref_cnt;
     int ret = 0;
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
         if (bdp_jetty->p_jetty[i] == NULL) {
             continue;
         }
+        urma_ctx = bdp_jetty->p_jetty[i]->urma_ctx;
+        ref_cnt = atomic_load(&(urma_ctx->ref.atomic_cnt));
+        URMA_LOG_INFO("bondp delete, p_jetty id is %u, use_cnt is %lu.\n", 
+            bdp_jetty->p_jetty[i]->jetty_id.id, ref_cnt);
         int p_ret = urma_delete_jetty(bdp_jetty->p_jetty[i]);
         if (p_ret) {
             URMA_LOG_ERR("Failed to delete pjetty %d, ret: %d.\n", i, ret);
@@ -1489,12 +1503,20 @@ static int bondp_import_pjetty(
 
 static int bondp_unimport_vjetty(bondp_target_jetty_t *bdp_tjetty)
 {
+    urma_context_t *urma_ctx = bdp_tjetty->v_tjetty.urma_ctx;
+    unsigned long ref_cnt;
+
+    ref_cnt = atomic_load(&(urma_ctx->ref.atomic_cnt));
+    URMA_LOG_INFO("bondp vjetty id is %u, use_cnt before import is %lu.\n",
+        bdp_tjetty->v_tjetty.id.id, ref_cnt);
     return urma_cmd_unimport_jetty(&bdp_tjetty->v_tjetty);
 }
 
 static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
 {
     int ret = URMA_SUCCESS;
+    unsigned long ref_cnt;
+    urma_context_t *urma_ctx = NULL;
 
     if (bondp_unimport_health_check_tseg(bdp_tjetty) != URMA_SUCCESS) {
         ret = URMA_FAIL;
@@ -1507,9 +1529,13 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
             if (!bdp_tjetty->p_tjetty[i][j]) {
                 continue;
             }
+            urma_ctx = bdp_tjetty->p_tjetty[i][j]->urma_ctx;
+            ref_cnt = atomic_load(&(urma_ctx->ref.atomic_cnt));
             if (urma_unimport_jetty(bdp_tjetty->p_tjetty[i][j]) != URMA_SUCCESS) {
                 ret = URMA_FAIL;
             }
+            URMA_LOG_INFO("bondp unimport pjetty is done, jetty id is %u, use_cnt before imp is %lu.\n",
+                bdp_tjetty->p_tjetty[i][j]->id.id, ref_cnt);
             bdp_tjetty->p_tjetty[i][j] = NULL;
         }
     }
