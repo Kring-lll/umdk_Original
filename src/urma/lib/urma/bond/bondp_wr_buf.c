@@ -12,10 +12,6 @@
 #include <string.h>
 
 #include "bondp_datapath_convert.h"
-#include "bondp_segment.h"
-#include "bondp_types.h"
-#include "ub_hash.h"
-#include "ub_hmap.h"
 
 #include "bondp_wr_buf.h"
 

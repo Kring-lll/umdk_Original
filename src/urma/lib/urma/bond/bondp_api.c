@@ -65,6 +65,27 @@ static void bondp_uninit_connection_table(bondp_comp_t *bdp_comp)
     bondp_hash_table_destroy(&bdp_comp->v_conn_table);
 }
 
+static int bondp_init_wr_buf(const bondp_context_t *bdp_ctx, wr_buf_t *wr_buf, uint32_t depth)
+{
+    uint32_t multiple = 1;
+
+    if (bdp_ctx->bonding_mode == BONDP_BONDING_MODE_STANDALONE) {
+        return 0;
+    }
+    if (bdp_ctx->bonding_level == BONDP_BONDING_LEVEL_IODIE) {
+        multiple = IODIE_NUM;
+    } else if (bdp_ctx->bonding_level == BONDP_BONDING_LEVEL_PORT) {
+        multiple = PORT_NUM * IODIE_NUM;
+    }
+
+    return wr_buf_init(wr_buf, depth * multiple);
+}
+
+static void bondp_uninit_wr_buf(wr_buf_t *wr_buf)
+{
+    wr_buf_uninit(wr_buf);
+}
+
 typedef bondp_create_vjetty_udata_t bondp_create_vjfr_udata_t;
 
 #define BOND_EPOLL_NUM (32)
@@ -280,7 +301,6 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
     bdp_jfc->dev_num = bdp_ctx->dev_num;
     bdp_jfc->lasted_polled_jfc_idx = 0;
     atomic_init(&bdp_jfc->use_cnt.atomic_cnt, 0);
-    (void)pthread_spin_init(&bdp_jfc->wr_lock, PTHREAD_PROCESS_PRIVATE);
 
     if (bondp_create_pjfc(bdp_ctx, bdp_jfc, cfg) != 0) {
         URMA_LOG_ERR("Failed to create pjfc\n");
@@ -293,20 +313,6 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
         goto DELETE_PJFC;
     }
 
-    if (bdp_ctx->bonding_mode != BONDP_BONDING_MODE_STANDALONE) {
-        uint32_t wr_buf_multiple = 1;
-        if (bdp_ctx->bonding_level == BONDP_BONDING_LEVEL_IODIE) {
-            wr_buf_multiple = IODIE_NUM;
-        } else if (bdp_ctx->bonding_level == BONDP_BONDING_LEVEL_PORT) {
-            wr_buf_multiple = PORT_NUM * 2;
-        }
-        if (wr_buf_init(&bdp_jfc->wr_buf, cfg->depth * wr_buf_multiple) != 0) {
-            URMA_LOG_ERR("Failed to init jfc wr buf, dev_name: %s, eid_idx: %u.\n",
-                         ctx->dev->name, ctx->eid_index);
-            goto DELETE_VJFC;
-        }
-    }
-
     if (cfg->jfce != NULL) {
         bondp_jfce_t *bdp_jfce = CONTAINER_OF_FIELD(cfg->jfce, bondp_jfce_t, v_jfce);
         atomic_fetch_add(&bdp_jfce->use_cnt.atomic_cnt, 1);
@@ -314,11 +320,8 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
 
     return &bdp_jfc->v_jfc;
 
-DELETE_VJFC:
-    bondp_delete_vjfc(bdp_jfc);
 DELETE_PJFC:
     bondp_delete_pjfc(bdp_jfc);
-    (void)pthread_spin_destroy(&bdp_jfc->wr_lock);
     free(bdp_jfc);
     return NULL;
 }
@@ -357,8 +360,6 @@ urma_status_t bondp_delete_jfc(urma_jfc_t *jfc)
         return URMA_EAGAIN;
     }
 
-    wr_buf_uninit(&bdp_jfc->wr_buf);
-
     if (bondp_delete_vjfc(bdp_jfc) != URMA_SUCCESS) {
         URMA_LOG_ERR("Failed to delete vjfc\n");
         ret = URMA_FAIL;
@@ -368,7 +369,6 @@ urma_status_t bondp_delete_jfc(urma_jfc_t *jfc)
         URMA_LOG_ERR("Failed to delete pjfc\n");
         ret = URMA_FAIL;
     }
-    (void)pthread_spin_destroy(&bdp_jfc->wr_lock);
 
     free(bdp_jfc);
 
@@ -627,8 +627,7 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     bdp_jfs->comp_type = BONDP_COMP_JFS;
     atomic_init(&bdp_jfs->use_cnt.atomic_cnt, 0);
     (void)pthread_spin_init(&bdp_jfs->send_lock, PTHREAD_PROCESS_PRIVATE);
-    bdp_jfs->send_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
-    bdp_jfs->recv_jfc = NULL;
+    (void)pthread_spin_init(&bdp_jfs->send_wr_lock, PTHREAD_PROCESS_PRIVATE);
     bdp_jfs->modify_to_error = false;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
         atomic_init(&bdp_jfs->sqe_cnt[i], 0);
@@ -666,11 +665,18 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
         goto DEL_P_VJFS_ID;
     }
 
+    if (bondp_init_wr_buf(bdp_ctx, &bdp_jfs->send_wr_buf, cfg->depth) != 0) {
+        URMA_LOG_ERR("Failed to init jfs wr buf\n");
+        goto UNINIT_CONNECTION_TABLE;
+    }
+
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
     atomic_fetch_add(&bdp_jfc->use_cnt.atomic_cnt, 1);
 
     return &bdp_jfs->v_jfs;
 
+UNINIT_CONNECTION_TABLE:
+    bondp_uninit_connection_table(bdp_jfs);
 DEL_P_VJFS_ID:
     bondp_del_jfs_p_vjetty_info(bdp_jfs);
 DELETE_VJFS:
@@ -678,6 +684,8 @@ DELETE_VJFS:
 DELETE_PJFS:
     bondp_delete_pjfs(bdp_jfs);
 FREE_JFS:
+    bondp_uninit_wr_buf(&bdp_jfs->send_wr_buf);
+    (void)pthread_spin_destroy(&bdp_jfs->send_wr_lock);
     (void)pthread_spin_destroy(&bdp_jfs->send_lock);
     free(bdp_jfs);
     return NULL;
@@ -711,6 +719,7 @@ urma_status_t bondp_delete_jfs(urma_jfs_t *jfs)
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
 
     bondp_uninit_connection_table(bdp_jfs);
+    bondp_uninit_wr_buf(&bdp_jfs->send_wr_buf);
 
     if (bondp_delete_vjfs(bdp_jfs) != URMA_SUCCESS) {
         URMA_LOG_ERR("Failed to delete vjfs\n");
@@ -722,6 +731,7 @@ urma_status_t bondp_delete_jfs(urma_jfs_t *jfs)
         ret = URMA_FAIL;
     }
 
+    (void)pthread_spin_destroy(&bdp_jfs->send_wr_lock);
     (void)pthread_spin_destroy(&bdp_jfs->send_lock);
     free(bdp_jfs);
 
@@ -883,8 +893,7 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
     bdp_jfr->bondp_ctx = bdp_ctx;
     bdp_jfr->comp_type = BONDP_COMP_JFR;
     atomic_init(&bdp_jfr->use_cnt.atomic_cnt, 0);
-    bdp_jfr->send_jfc = NULL;
-    bdp_jfr->recv_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
+    (void)pthread_spin_init(&bdp_jfr->recv_wr_lock, PTHREAD_PROCESS_PRIVATE);
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
     uint32_t cfg_active_port_count = 0;
@@ -913,11 +922,18 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
         goto DEL_P_VJFR_ID;
     }
 
+    if (bondp_init_wr_buf(bdp_ctx, &bdp_jfr->recv_wr_buf, cfg->depth) != 0) {
+        URMA_LOG_ERR("Failed to init jfr wr buf\n");
+        goto UNINIT_JFR_CONNECTION_TABLE;
+    }
+
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
     atomic_fetch_add(&bdp_jfc->use_cnt.atomic_cnt, 1);
 
     return &bdp_jfr->v_jfr;
 
+UNINIT_JFR_CONNECTION_TABLE:
+    bondp_uninit_connection_table(bdp_jfr);
 DEL_P_VJFR_ID:
     bondp_del_jfr_p_vjetty_info(bdp_jfr);
 DELETE_VJFR:
@@ -925,6 +941,8 @@ DELETE_VJFR:
 DELETE_PJFR:
     bondp_delete_pjfr(bdp_jfr);
 FREE_JFR:
+    bondp_uninit_wr_buf(&bdp_jfr->recv_wr_buf);
+    (void)pthread_spin_destroy(&bdp_jfr->recv_wr_lock);
     free(bdp_jfr);
     return NULL;
 }
@@ -956,6 +974,7 @@ urma_status_t bondp_delete_jfr(urma_jfr_t *jfr)
     */
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
     bondp_uninit_connection_table(bdp_jfr);
+    bondp_uninit_wr_buf(&bdp_jfr->recv_wr_buf);
 
     if (bondp_delete_vjfr(bdp_jfr) != URMA_SUCCESS) {
         URMA_LOG_ERR("Failed to delete_vjfr\n");
@@ -965,6 +984,7 @@ urma_status_t bondp_delete_jfr(urma_jfr_t *jfr)
         URMA_LOG_ERR("Failed to delete pjfr\n");
         ret = URMA_FAIL;
     }
+    (void)pthread_spin_destroy(&bdp_jfr->recv_wr_lock);
     free(bdp_jfr);
 
     atomic_fetch_sub(&bdp_jfc->use_cnt.atomic_cnt, 1);
@@ -1212,8 +1232,8 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     bdp_jetty->comp_type = BONDP_COMP_JETTY;
     atomic_init(&bdp_jetty->use_cnt.atomic_cnt, 0);
     (void)pthread_spin_init(&bdp_jetty->send_lock, PTHREAD_PROCESS_PRIVATE);
-    bdp_jetty->send_jfc = CONTAINER_OF_FIELD(jetty_cfg->jfs_cfg.jfc, bondp_jfc_t, v_jfc);
-    bdp_jetty->recv_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr->jfr_cfg.jfc, bondp_jfc_t, v_jfc);
+    (void)pthread_spin_init(&bdp_jetty->send_wr_lock, PTHREAD_PROCESS_PRIVATE);
+    (void)pthread_spin_init(&bdp_jetty->recv_wr_lock, PTHREAD_PROCESS_PRIVATE);
     bdp_jetty->modify_to_error = false;
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
@@ -1254,6 +1274,15 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         goto DEL_P_VJETTY_ID;
     }
 
+    if (bondp_init_wr_buf(bdp_ctx, &bdp_jetty->send_wr_buf, jetty_cfg->jfs_cfg.depth) != 0) {
+        URMA_LOG_ERR("Failed to init jetty send wr buf\n");
+        goto UNINIT_JETTY_CONNECTION_TABLE;
+    }
+    if (bondp_init_wr_buf(bdp_ctx, &bdp_jetty->recv_wr_buf, jetty_cfg->shared.jfr->jfr_cfg.depth) != 0) {
+        URMA_LOG_ERR("Failed to init jetty recv wr buf\n");
+        goto UNINIT_JETTY_SEND_WR_BUF;
+    }
+
     /* Validate bdp_jfr below at the function entry point to ensure they are not empty. */
     bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr, bondp_comp_t, v_jfr);
     atomic_fetch_add(&bdp_jfr->use_cnt.atomic_cnt, 1);
@@ -1264,6 +1293,10 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
 
     return &bdp_jetty->v_jetty;
 
+UNINIT_JETTY_SEND_WR_BUF:
+    bondp_uninit_wr_buf(&bdp_jetty->send_wr_buf);
+UNINIT_JETTY_CONNECTION_TABLE:
+    bondp_uninit_connection_table(bdp_jetty);
 DEL_P_VJETTY_ID:
     bondp_del_jetty_p_vjetty_info(bdp_jetty);
 DELETE_VJETTY:
@@ -1273,6 +1306,10 @@ UNREGISTER_HEALTH_SEG:
 DELETE_PJETTY:
     bondp_delete_pjetty(bdp_jetty);
 FREE_JETTY:
+    bondp_uninit_wr_buf(&bdp_jetty->recv_wr_buf);
+    bondp_uninit_wr_buf(&bdp_jetty->send_wr_buf);
+    (void)pthread_spin_destroy(&bdp_jetty->recv_wr_lock);
+    (void)pthread_spin_destroy(&bdp_jetty->send_wr_lock);
     (void)pthread_spin_destroy(&bdp_jetty->send_lock);
     free(bdp_jetty);
     return NULL;
@@ -1311,6 +1348,8 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
     bondp_unregister_health_check_seg_for_jetty(bdp_jetty);
     bondp_uninit_connection_table(bdp_jetty);
+    bondp_uninit_wr_buf(&bdp_jetty->recv_wr_buf);
+    bondp_uninit_wr_buf(&bdp_jetty->send_wr_buf);
     if (bondp_delete_vjetty(bdp_jetty) != URMA_SUCCESS) {
         URMA_LOG_ERR("Failed to delete vjetty\n");
         ret = URMA_FAIL;
@@ -1319,6 +1358,8 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
         URMA_LOG_ERR("Failed to delete pjetty\n");
         ret = URMA_FAIL;
     }
+    (void)pthread_spin_destroy(&bdp_jetty->recv_wr_lock);
+    (void)pthread_spin_destroy(&bdp_jetty->send_wr_lock);
     (void)pthread_spin_destroy(&bdp_jetty->send_lock);
     free(bdp_jetty);
 
