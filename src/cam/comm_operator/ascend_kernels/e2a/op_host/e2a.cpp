@@ -32,6 +32,12 @@ constexpr int ATTR_AIV_NUM = 7;
 constexpr int MAX_TOPK = 8;
 constexpr int TWO_DIMS = 2;
 constexpr uint32_t OP_TYPE_ALL_TO_ALL = 8; // numeric representation of AlltoAll
+constexpr int MAX_BATCH_SIZE = 1024;
+constexpr int MIN_HIDDEN_SIZE = 1024;
+constexpr int MAX_HIDDEN_SIZE = 7168;
+constexpr int HIDDEN_SIZE_ALIGN = 256;
+constexpr int AIV_ALG_NUM_MIN = 4;
+constexpr int AIV_ALG_NUM_MAX = 48;
 } // namespace
 
 namespace optiling {
@@ -67,6 +73,36 @@ namespace optiling {
         if (rank < 0 || rank >= expertRankSize + attentionRankSize) {
             printf("[ERROR] CAM E2A PARAMETER INVALID: rank must >= 0 and < expertRankSize + attentionRankSize, "
                     "but rank = %d, expertRankSize = %d, attentionRankSize = %d\n", rank, expertRankSize, attentionRankSize);
+            return ge::GRAPH_FAILED;
+        }
+
+        if (batchSize <= 0 || batchSize > MAX_BATCH_SIZE) {
+            printf("[ERROR] CAM A2E PARAMETER INVALID: batchSize must >= 0 and <= 1024, "
+                    "but batchSize = %d\n", batchSize);
+            return ge::GRAPH_FAILED;
+        }
+
+        if (hiddenSize < MIN_HIDDEN_SIZE || hiddenSize > MAX_HIDDEN_SIZE || hiddenSize % HIDDEN_SIZE_ALIGN != 0) {
+            printf("[ERROR] CAM A2E PARAMETER INVALID: hiddenSize must >= 1024 and <= 7168 and be divisible by 256, "
+                    "but hiddenSize = %d\n", hiddenSize);
+            return ge::GRAPH_FAILED;
+        }
+
+        if (topk <= 0 || topk > MAX_TOPK) {
+            printf("[ERROR] CAM A2E PARAMETER INVALID: topk must >= 1 and <= 8, "
+                    "but topk = %d\n", topk);
+            return ge::GRAPH_FAILED;
+        }
+
+        if (expertRankSize <= 0 || expertRankSize > attentionRankSize) {
+            printf("[ERROR] CAM A2E PARAMETER INVALID: expertRankSize must > 0 and <= attentionRankSize, "
+                    "but expertRankSize = %d, attentionRankSize = %d\n", expertRankSize, attentionRankSize);
+            return ge::GRAPH_FAILED;
+        }
+
+        if (aivAlgNum < AIV_ALG_NUM_MIN || aivAlgNum > AIV_ALG_NUM_MAX) {
+            printf("[ERROR] CAM A2E PARAMETER INVALID: aivAlgNum must >= 4 and <= 48, "
+                    "but aivAlgNum = %d, aivNum = %d\n", aivAlgNum, aivNum);
             return ge::GRAPH_FAILED;
         }
 
