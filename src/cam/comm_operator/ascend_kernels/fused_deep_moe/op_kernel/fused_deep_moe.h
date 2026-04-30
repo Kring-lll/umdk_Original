@@ -66,7 +66,8 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
                                   GM_ADDR gmWorkspace, GM_ADDR gmX, GM_ADDR gmMoeSmoothScales,
                                   GM_ADDR gmShareSmoothScales, GM_ADDR gmexpertIds, GM_ADDR gmExpandIdx,
                                   GM_ADDR gmEpSendCount, GM_ADDR xActiveMask, GM_ADDR gmResvered,
-                                  GM_ADDR gmExpertTokenNums, const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
+                                  GM_ADDR gmExpertTokenNums, GM_ADDR gmAllExpertTokenNums, GM_ADDR metaInfoGm_,
+                                  const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
 {
     using ArchTag = Arch::AtlasA2;
     using DispatchPolicy = DispatchPolicy_;
@@ -152,6 +153,8 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
                                            layoutShareD,
                                            gmShareX2Scale,
                                            gmSwigluOut,
+                                           metaInfoGm_,
+                                           gmAllExpertTokenNums,
                                            disGmmDeqSwigluQuantGmmDeqComInfo};
         // call a kernel
         GemmKernel gemm;
@@ -310,6 +313,7 @@ private:
     GM_ADDR gmShareOutput_;
     GM_ADDR gmExpertTokenNums_;
     GM_ADDR workspaceGM_;
+    GM_ADDR metaInfoGm_;
     GM_ADDR gmSmoothScales_;
     GM_ADDR gmShareSmoothScales_;
     GM_ADDR gmexpertScales_;
@@ -369,7 +373,12 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     gmShareWeight2Scale_ = share_gmm2_weight_scale;
     gmShareOutput_ = share_output;
     gmExpertTokenNums_ = expertTokenNums;
-    workspaceGM_ = workspaceGM;
+    if constexpr (EXEC_FLAG & EXEC_FLAG_SHMEM_DISPATCH) {
+        workspaceGM_ = (GM_ADDR)(tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.shmemWorkspacePtr);
+    } else {
+        workspaceGM_ = workspaceGM;
+    }
+    metaInfoGm_ = (GM_ADDR)(tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.metaInfoPtr);
     gmexpertScales_ = expert_scales;
     xActiveMask_ = x_active_mask;
     tilingData_ = tilingData;
@@ -468,6 +477,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(epRankSize_) * groupCount_ * sizeof(int32_t));
     GM_ADDR gmResvered = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(resveredWorkSpaceSize);
+    GM_ADDR gmAllExpertTokenNums = workspaceGM_ + workspaceOffset;
+    workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(epRankSize_) * groupCount_ * sizeof(int64_t));
 
     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
         if constexpr (g_coreType == AscendC::AIV) {
@@ -498,7 +509,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
         gmX1Scale, layoutX1Scale, gmX2, layoutX2, gmX2Scale, layoutX2Scale, gmShareX1, gmShareX1Scale,
         gmShareSwigluOut, gmShareX2, layoutShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmX_, gmSmoothScales_,
         gmShareSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount, xActiveMask_, gmResvered, gmExpertTokenNums_,
-        tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo);
+        gmAllExpertTokenNums, metaInfoGm_, tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo);
     AscendC::PipeBarrier<PIPE_ALL>();
     Arch::CrossCoreFlag gmm1AivFinished{0};
     if constexpr (g_coreType == AscendC::AIV) {

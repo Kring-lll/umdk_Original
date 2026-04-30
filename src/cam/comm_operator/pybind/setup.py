@@ -25,8 +25,10 @@ env_version = os.getenv("CAM_WHL_VERSION", "208.1.0.B001")
 torch_path = os.path.dirname(torch.__file__)
 torch_npu_spec = importlib.util.find_spec("torch_npu")
 torch_npu_path = os.path.dirname(torch_npu_spec.origin)
+shmem_home_path = os.environ["SHMEM_HOME_PATH"]
 print(f"torch_path: {torch_path}")
 print(f"torch_npu_path: {torch_npu_path}")
+print(f"shmem_home_path: {shmem_home_path}")
 PYTORCH_NPU_INSTALL_PATH = os.path.dirname(os.path.abspath(torch_npu_spec.origin))
 architecture = str(platform.machine())
 if architecture.startswith("x86"):
@@ -63,19 +65,22 @@ ext1 = NpuExtension(
         os.path.join(os.environ["ASCEND_HOME_PATH"], f"{arch}-linux", "include", "experiment", "runtime"),
         os.path.join(os.environ["ASCEND_HOME_PATH"], f"{arch}-linux", "include", "experiment", "msprof"),
         os.path.join(torch_path, "include"),
-        os.path.join(os.path.dirname(__file__), "./", "pytorch_extension")],
+        os.path.join(os.path.dirname(__file__), "./", "pytorch_extension"),
+        os.path.join(os.environ["SHMEM_HOME_PATH"], 'shmem', 'include')],
 
     library_dirs=[
         os.path.join(torch_path, "lib"),
         os.path.join(torch_npu_path, "lib"),
-        os.path.join(os.environ["ASCEND_HOME_PATH"], f"{arch}-linux", "lib64")],
+        os.path.join(os.environ["ASCEND_HOME_PATH"], f"{arch}-linux", "lib64"),
+        os.path.join(os.environ["SHMEM_HOME_PATH"], 'shmem', 'lib')],
     libraries=[
         "torch_npu",
         "gcov",
         "runtime",
         "torch",
         "ascendcl",
-        "profapi"],
+        "profapi",
+        "shmem"],
     sources=["./fused_deep_moe.cpp",
              "./get_dispatch_layout.cpp",
              "./get_dispatch_layout_a2.cpp",
@@ -88,6 +93,7 @@ ext1 = NpuExtension(
              "./pybind.cpp",
              "./pytorch_extension/NPUBridge.cpp",
              "./pytorch_extension/NPUStorageImpl.cpp",
+             "./buffer.cpp"
             ],
     
     extra_compile_args = compile_args,

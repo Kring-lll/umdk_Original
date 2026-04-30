@@ -9,6 +9,7 @@
 
 #include "functions.h"
 #include <torch/extension.h>
+#include "buffer.hpp"
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
@@ -21,6 +22,33 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     m.def("get_dispatch_layout_a2", &GetDispatchLayoutA2ImplAutograd, "get_dispatch_layout_a2");
     m.def("moe_dispatch_prefill_a2", &MoeDispatchPrefillA2ImplAutograd, "moe_dispatch_prefill_a2");
     m.def("moe_combine_prefill_a2", &MoeCombinePrefillA2ImplAutograd, "moe_combine_prefill_a2");
+
+    pybind11::class_<fused_deep_moe::Buffer>(m, "FusedDeepMoeBuffer")
+        .def(pybind11::init<>())
+        .def("init", &fused_deep_moe::Buffer::init,
+             pybind11::arg("rank"), pybind11::arg("num_ranks"),
+             pybind11::arg("memsize"), pybind11::arg("ip_port"))
+        .def("zb_fused_deep_moe", &fused_deep_moe::Buffer::zb_fused_deep_moe,
+             pybind11::arg("x"), pybind11::arg("expert_ids"),
+             pybind11::arg("gmm1_weight"), pybind11::arg("gmm1_weight_scale"),
+             pybind11::arg("gmm2_weight"), pybind11::arg("gmm2_weight_scale"),
+             pybind11::arg("expert_scales"),
+             pybind11::arg("share_gmm1_weight") = pybind11::none(),
+             pybind11::arg("share_gmm1_weight_scale") = pybind11::none(),
+             pybind11::arg("share_gmm2_weight") = pybind11::none(),
+             pybind11::arg("share_gmm2_weight_scale") = pybind11::none(),
+             pybind11::arg("expert_smooth_scales") = pybind11::none(),
+             pybind11::arg("share_smooth_scales") = pybind11::none(),
+             pybind11::arg("x_active_mask") = pybind11::none(),
+             pybind11::arg("group_ep") = "",
+             pybind11::arg("ep_rank_size") = 0,
+             pybind11::arg("ep_rank_id") = 0,
+             pybind11::arg("moe_expert_num") = 0,
+             pybind11::arg("quant_mode") = 0,
+             pybind11::arg("global_bs") = 0)
+        .def("is_initialized", &fused_deep_moe::Buffer::is_initialized)
+        .def("get_ext_info", &fused_deep_moe::Buffer::get_ext_info)
+        .def("get_shmem_workspace", &fused_deep_moe::Buffer::get_shmem_workspace);
 }
 
 TORCH_LIBRARY(umdk_cam_op_lib, m)
