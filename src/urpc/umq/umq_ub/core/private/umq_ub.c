@@ -352,7 +352,7 @@ static remote_eid_hmap_node_t *umq_ub_eid_node_create(ub_queue_t *queue, umq_ub_
 
     eid_node->pid = info->dev_info->pid;
     eid_node->ref_cnt = 1;
-    strcpy(eid_node->remote_namespace, info->dev_info->bind_namespace);
+    memcpy(eid_node->remote_namespace, info->dev_info->bind_namespace, info->dev_info->namespace_len);
     (void)memcpy(&eid_node->eid, remote_eid, sizeof(urma_eid_t));
     urpc_bitmap_set1(eid_node->tseg_imported, UMQ_QBUF_DEFAULT_MEMPOOL_ID);
 
