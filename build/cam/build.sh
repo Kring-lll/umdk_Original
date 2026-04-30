@@ -79,14 +79,9 @@ function prepare_cam_third_party() {
         return 0
     fi
 
-    branch="catlass-v1-stable"
-    echo "Clone catlass branch ${branch}..."
-    if git clone --branch ${branch} --depth 1 https://gitcode.com/cann/catlass.git ${catlass_dir}; then
-        return 0
-    else
-        echo "Clone catlass failed! You can manually download it and place it in ${third_party}"
-        return 1
-    fi
+    echo "catlass is missing: ${catlass_dir}"
+    echo "Please place a verified local catlass checkout under ${catlass_dir} before building CAM"
+    return 1
 }
 
 if is_module_name $@; then
