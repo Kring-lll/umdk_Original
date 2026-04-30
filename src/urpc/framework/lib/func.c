@@ -413,7 +413,7 @@ int urpc_func_info_get(void **addr, uint32_t *len)
     urpc_func_entry_t *entry = NULL;
     URPC_HMAP_FOR_EACH(entry, id_node, &g_urpc_func_id_table) {
         info->name_map[index].id = entry->func_id;
-        strcpy(info->name_map[index].name, entry->info.name);
+        (void)strncpy(info->name_map[index].name, entry->info.name, FUNCTION_NAME_LEN);
         index++;
     }
     pthread_rwlock_unlock(&g_urpc_func_table_rwlock);
@@ -482,7 +482,7 @@ int urpc_func_info_set(struct urpc_hmap *table, uint64_t addr, uint32_t len)
             ret = URPC_FAIL;
             break;
         }
-        strcpy(base_entry->info.name, info->name_map[i].name);
+        (void)strncpy(base_entry->info.name, info->name_map[i].name, FUNCTION_NAME_LEN);
         if (urpc_client_func_entry_get_by_name(&func_tbl, info->name_map[i].name) != NULL) {
             urpc_dbuf_free(base_entry);
             URPC_LIB_LOG_ERR("function already exists in hash table\n");

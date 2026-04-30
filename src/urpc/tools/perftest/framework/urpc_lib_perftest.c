@@ -359,12 +359,12 @@ static int urpc_perftest_server_client_start(perftest_framework_config_t *cfg)
         LOG_PRINT("urpc_perftest_server_client_start in ipv4 %s\n", cfg->local_ip);
         cp_cfg.server.server_type = SERVER_TYPE_IPV4;
         cp_cfg.server.ipv4.port = cfg->instance_mode == SERVER ? cfg->tcp_port : cfg->tcp_port - 1;
-        (void)strcpy(cp_cfg.server.ipv4.ip_addr, cfg->local_ip);
+        (void)strncpy(cp_cfg.server.ipv4.ip_addr, cfg->local_ip, URPC_IPV4_SIZE);
     } else {
         LOG_PRINT("urpc_perftest_server_client_start in ipv6 %s\n", cfg->local_ip);
         cp_cfg.server.server_type = SERVER_TYPE_IPV6;
         cp_cfg.server.ipv6.port = cfg->instance_mode == SERVER ? cfg->tcp_port : cfg->tcp_port - 1;
-        (void)strcpy(cp_cfg.server.ipv6.ip_addr, cfg->local_ip);
+        (void)strncpy(cp_cfg.server.ipv6.ip_addr, cfg->local_ip, URPC_IPV6_SIZE);
     }
     uint64_t *qh_list;
     uint32_t qh_cnt = urpc_get_local_qh(&qh_list);
@@ -425,12 +425,12 @@ static int urpc_perftest_server_client_channel_attach(perftest_framework_config_
         LOG_PRINT("urpc_perftest_server_client_channel_attach in ipv4 %s\n", cfg->remote_ip);
         server_info.server_type = SERVER_TYPE_IPV4;
         server_info.ipv4.port = cfg->instance_mode == SERVER ? cfg->tcp_port - 1 : cfg->tcp_port;
-        (void)strcpy(server_info.ipv4.ip_addr, cfg->remote_ip);
+        (void)strncpy(server_info.ipv4.ip_addr, cfg->remote_ip, URPC_IPV4_SIZE);
     } else {
         LOG_PRINT("urpc_perftest_server_client_channel_attach in ipv6 %s\n", cfg->remote_ip);
         server_info.server_type = SERVER_TYPE_IPV6;
         server_info.ipv6.port = cfg->instance_mode == SERVER ? cfg->tcp_port - 1 : cfg->tcp_port;
-        (void)strcpy(server_info.ipv6.ip_addr, cfg->remote_ip);
+        (void)strncpy(server_info.ipv6.ip_addr, cfg->remote_ip, URPC_IPV6_SIZE);
     }
 
     urpc_host_info_t local_host;

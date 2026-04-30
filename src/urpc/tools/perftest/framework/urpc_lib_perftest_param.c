@@ -145,7 +145,7 @@ int urpc_perftest_parse_arguments(int argc, char **argv, perftest_framework_conf
 
         switch (c) {
             case 'd':
-                strcpy(cfg->dev_name, optarg);
+                (void)strncpy(cfg->dev_name, optarg, URPC_PERFTEST_DEV_NAME_SIZE);
                 break;
             case 'c':
                 cfg->case_type = (uint32_t)strtoul(optarg, NULL, 0);
@@ -155,16 +155,16 @@ int urpc_perftest_parse_arguments(int argc, char **argv, perftest_framework_conf
                 }
                 break;
             case 'f':
-                strcpy(cfg->path, optarg);
+                (void)strncpy(cfg->path, optarg, PATH_MAX + 1);
                 break;
             case 'p':
                 cfg->tcp_port = (uint16_t)strtoul(optarg, NULL, 0);
                 break;
             case 'l':
-                strcpy(cfg->local_ip, optarg);
+                (void)strncpy(cfg->local_ip, optarg, INET6_ADDRSTRLEN);
                 break;
             case 'r':
-                strcpy(cfg->remote_ip, optarg);
+                (void)strncpy(cfg->remote_ip, optarg, INET6_ADDRSTRLEN);
                 break;
             case 's':
                 cfg->size_len = cfg_size_get(cfg->size, &cfg->size_total, optarg);
@@ -219,7 +219,7 @@ int urpc_perftest_parse_arguments(int argc, char **argv, perftest_framework_conf
                 cfg->data_trans_mode = (data_trans_mode_t)strtoul(optarg, NULL, 0);
                 break;
             case 'e':
-                strcpy(cfg->eid, optarg);
+                (void)strncpy(cfg->eid, optarg, EID_LENGTH);
                 break;
             default:
                 usage();

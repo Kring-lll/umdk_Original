@@ -352,7 +352,7 @@ static remote_eid_hmap_node_t *umq_ub_eid_node_create(ub_queue_t *queue, umq_ub_
 
     eid_node->pid = info->dev_info->pid;
     eid_node->ref_cnt = 1;
-    strcpy(eid_node->remote_namespace, info->dev_info->bind_namespace);
+    (void)strncpy(eid_node->remote_namespace, info->dev_info->bind_namespace, info->dev_info->namespace_len);
     (void)memcpy(&eid_node->eid, remote_eid, sizeof(urma_eid_t));
     urpc_bitmap_set1(eid_node->tseg_imported, UMQ_QBUF_DEFAULT_MEMPOOL_ID);
 
@@ -572,7 +572,7 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
             info->dev_info->namespace_len, UMQ_UB_NAMESPACE_SIZE);
         goto RESET_BIND_CTX;
     }
-    memcpy(ctx->remote_namespace, info->dev_info->bind_namespace, info->dev_info->namespace_len);
+    (void)strncpy(ctx->remote_namespace, info->dev_info->bind_namespace, info->dev_info->namespace_len);
     queue->bind_ctx = ctx;
 
     ret = umq_ub_remote_tseg_info_get(queue, info, ctx);

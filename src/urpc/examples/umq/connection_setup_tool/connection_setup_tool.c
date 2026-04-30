@@ -88,7 +88,7 @@ static int parse_m_trans_info(struct urpc_example_config *cfg, umq_init_cfg_t *i
         init_cfg->trans_info[idx].trans_mode = (umq_trans_mode_t)cfg->trans_mode;
         if (cfg->dev_name != NULL) {
             init_cfg->trans_info[idx].dev_info.assign_mode = UMQ_DEV_ASSIGN_MODE_DEV;
-            strcpy(init_cfg->trans_info[idx].dev_info.dev.dev_name, cfg->m_dev_name[idx]);
+            (void)strncpy(init_cfg->trans_info[idx].dev_info.dev.dev_name, cfg->m_dev_name[idx], UMQ_DEV_NAME_SIZE);
             init_cfg->trans_info[idx].dev_info.dev.eid_idx = cfg->m_eid_idx[idx];
         } else {
             break;
@@ -211,10 +211,10 @@ static umq_info_t *create_one_umq(struct urpc_example_config *cfg, bool is_main_
 
     option.dev_info.assign_mode = UMQ_DEV_ASSIGN_MODE_DEV;
     if (cfg->instance_mode == SERVER) {
-        strcpy(option.dev_info.dev.dev_name, dev_name);
+        (void)strncpy(option.dev_info.dev.dev_name, dev_name, UMQ_DEV_NAME_SIZE);
         option.dev_info.dev.eid_idx = eid_idx;
     } else {
-        strcpy(option.dev_info.dev.dev_name, cfg->dev_name);
+        (void)strncpy(option.dev_info.dev.dev_name, cfg->dev_name, UMQ_DEV_NAME_SIZE);
         option.dev_info.dev.eid_idx = cfg->eid_idx;
     }
     uint64_t umqh = umq_create(&option);
@@ -408,7 +408,7 @@ static int client_bind_umq(uint64_t umqh, ip_info_t *ip_info)
 
     uint8_t send_data[UMQ_MAX_BIND_INFO_SIZE + sizeof(connection_bind_info_t)];
     connection_bind_info_t *conn_bind_info = (connection_bind_info_t *)send_data;
-    strcpy(conn_bind_info->dev_name, g_cfg->dev_name);
+    (void)strncpy(conn_bind_info->dev_name, g_cfg->dev_name, UMQ_DEV_NAME_SIZE);
     conn_bind_info->eid_idx = g_cfg->eid_idx;
     uint32_t bind_info_size = umq_bind_info_get(umqh, conn_bind_info->umq_bind_info, UMQ_MAX_BIND_INFO_SIZE);
     if (bind_info_size == 0) {
