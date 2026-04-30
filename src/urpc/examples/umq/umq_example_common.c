@@ -379,11 +379,11 @@ int parse_trans_info(struct urpc_example_config *cfg, umq_init_cfg_t *init_cfg)
 
     if (cfg->dev_name != NULL) {
         init_cfg->trans_info[0].dev_info.assign_mode = UMQ_DEV_ASSIGN_MODE_DEV;
-        strcpy(init_cfg->trans_info[0].dev_info.dev.dev_name, cfg->dev_name);
+        (void)strncpy(init_cfg->trans_info[0].dev_info.dev.dev_name, cfg->dev_name, UMQ_DEV_NAME_SIZE);
         init_cfg->trans_info[0].dev_info.dev.eid_idx = cfg->eid_idx;
     } else if (cfg->server_ip != NULL) {
         init_cfg->trans_info[0].dev_info.assign_mode = UMQ_DEV_ASSIGN_MODE_IPV4;
-        strcpy(init_cfg->trans_info[0].dev_info.ipv4.ip_addr, cfg->server_ip);
+        (void)strncpy(init_cfg->trans_info[0].dev_info.ipv4.ip_addr, cfg->server_ip, UMQ_IPV4_SIZE);
     } else {
         LOG_PRINT_ERR("trans info not valid\n");
         return -1;
@@ -585,7 +585,7 @@ static int cfg_get_dev_name(struct urpc_example_config *cfg, char *data)
     char *new_data = strtok_r(data, ",", &save);
     uint32_t i = 0;
     while (i < EXAMPLE_MAX_DEV_NUM && (new_data != NULL)) {
-        (void)strcpy(cfg->m_dev_name[i], new_data);
+        (void)strncpy(cfg->m_dev_name[i], new_data, EXAMPLE_DEV_NAME_LEN);
         new_data = strtok_r(NULL, ",", &save);
         i++;
     }
