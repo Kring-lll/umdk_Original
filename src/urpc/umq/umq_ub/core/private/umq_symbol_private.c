@@ -59,6 +59,7 @@ int umq_symbol_urma_load(umq_symbol_urma_t *sym)
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_get_device_list_t, urma_get_device_list);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_free_device_list_t, urma_free_device_list);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_get_eid_list_t, urma_get_eid_list);
+
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_free_eid_list_t, urma_free_eid_list);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_query_device_t, urma_query_device);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_create_context_t, urma_create_context);
