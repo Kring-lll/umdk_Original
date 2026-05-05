@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
+#
+# Imported from `%workspace%/.bazelrc`.
+#
+# Propagate kernel headers paths into CMake (matches optional spec defines):
+#   pass -DKERNEL_RELEASE / -DKERNEL_PATH via `umdk_cmake` extra cache_entries, or:
+build --action_env=KERNEL_RELEASE
+build --action_env=KERNEL_PATH
+build --action_env=BUILD_DATE_OVERRIDE

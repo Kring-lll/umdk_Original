@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: Huawei Technologies Co., Ltd. 2026-2026
+#
+# Minimal package root label so `//src:CMakeLists.txt` resolves for the Bazel CMake driver.
+
+exports_files(["CMakeLists.txt"])

@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
+#
+# Default: configure + build only (no `cmake --install`). Output: `bazel-bin/bazel/umdk_install.tar.gz`.
+#   bazel build //bazel:umdk_install
+#
+# Optional DESTDIR-style tree (like `make install DESTDIR=...`):
+#   bazel build //bazel:umdk_install_destdir
+#
+# Presets (same CMake flags as common `rpmbuild --with …` / subset builds):
+#   bazel build //bazel:umdk_with_asan
+#   bazel build //bazel:umdk_with_tsan
+#   bazel build //bazel:umdk_with_gcov
+#   bazel build //bazel:umdk_with_test
+#   bazel build //bazel:umdk_with_release_enable
+#   bazel build //bazel:umdk_only_urma
+#   bazel build //bazel:umdk_only_urpc
+#   bazel build //bazel:umdk_only_ums
+#   bazel build //bazel:umdk_only_dlock
+#   bazel build //bazel:umdk_without_udma
+#   bazel build //bazel:umdk_without_udma_st64b
+#
+# Custom combinations: use `cache_entries_for_spec(...)` from `spec_cmake_defaults.bzl` in a new
+# `umdk_cmake` target with a unique `install_dir_name`.
+
+load("//bazel:spec_cmake_defaults.bzl", "cache_entries", "cache_entries_for_spec")
+load("//bazel:umdk_build.bzl", "umdk_cmake")
+
+umdk_cmake(
+    name = "umdk_install",
+    cmake_lists = "//src:CMakeLists.txt",
+    cache_entries = cache_entries(),
+)
+
+# Full FHS install layout under usr/ (toggle `run_install` for your own targets the same way).
+umdk_cmake(
+    name = "umdk_install_destdir",
+    cmake_lists = "//src:CMakeLists.txt",
+    cache_entries = cache_entries(),
+    install_dir_name = "umdk_destdir",
+    run_install = True,
+)
+
+umdk_cmake(
+    name = "umdk_with_asan",
+    cmake_lists = "//src:CMakeLists.txt",
+    cache_entries = cache_entries_for_spec(with_asan = True),
+    install_dir_name = "umdk_install_asan",
+)
+
+umdk_cmake(
+    name = "umdk_with_tsan",
+    cmake_lists = "//src:CMakeLists.txt",
+    cache_entries = cache_entries_for_spec(with_tsan = True),
+    install_dir_name = "umdk_install_tsan",
+)
+
+umdk_cmake(
+    name = "umdk_with_gcov",
+    cmake_lists = "//src:CMakeLists.txt",
+    cache_entries = cache_entries_for_spec(with_gcov = True),
+    install_dir_name = "umdk_install_gcov",
+)
+
+umdk_cmake(
+    name = "umdk_with_test",
+    cmake_lists = "//src:CMakeLists.txt",
+    cache_entries = cache_entries_for_spec(with_test = True),
+    install_dir_name = "umdk_install_test",
+)
+
+umdk_cmake(
+    name = "umdk_with_release_enable",
+    cmake_lists = "//src:CMakeLists.txt",
+    cache_entries = cache_entries_for_spec(with_release_enable = True),
+    install_dir_name = "umdk_install_release_enable",
+)
+
+umdk_cmake(
+    name = "umdk_only_urma",
+    cmake_lists = "//src:CMakeLists.txt",
+    cache_entries = cache_entries_for_spec(with_urma = True),
+    install_dir_name = "umdk_install_only_urma",
+)
+
+umdk_cmake(
+    name = "umdk_only_urpc",
+    cmake_lists = "//src:CMakeLists.txt",
+    cache_entries = cache_entries_for_spec(with_urpc = True),
+    install_dir_name = "umdk_install_only_urpc",
+)
+
+umdk_cmake(
+    name = "umdk_only_ums",
+    cmake_lists = "//src:CMakeLists.txt",
+    cache_entries = cache_entries_for_spec(with_ums = True),
+    install_dir_name = "umdk_install_only_ums",
+)
+
+umdk_cmake(
+    name = "umdk_only_dlock",
+    cmake_lists = "//src:CMakeLists.txt",
+    cache_entries = cache_entries_for_spec(with_dlock = True),
+    install_dir_name = "umdk_install_only_dlock",
+)
+
+umdk_cmake(
+    name = "umdk_without_udma",
+    cmake_lists = "//src:CMakeLists.txt",
+    cache_entries = cache_entries_for_spec(without_udma = True),
+    install_dir_name = "umdk_install_without_udma",
+)
+
+umdk_cmake(
+    name = "umdk_without_udma_st64b",
+    cmake_lists = "//src:CMakeLists.txt",
+    cache_entries = cache_entries_for_spec(enable_udma_st64b = False),
+    install_dir_name = "umdk_install_without_udma_st64b",
+)
