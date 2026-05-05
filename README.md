@@ -55,6 +55,25 @@ It offers two types of interfaces: one is the northbound application programming
   $ --define 'rpm_release  0'                option, specify release version
 ```
 
+- Build URMA with Bazel (workspace under `src/urma`, same pattern as `src/urpc`):
+
+```bash
+  # Install build dependencies first (libnl3-devel is required by urma_ubagg/uvs)
+  yum install -y bazel libnl3-devel openssl-devel zlib-devel
+
+  cd src/urma
+  bazel build //...
+
+  # Optional build configs
+  bazel build --config=release --config=arm64 //...
+  bazel build --config=debug --config=asan //...
+  bazel build --config=tsan --define=perf_cycle=true //:urma_common
+  bazel build --define=build_udma=true //:hw
+```
+
+- URMA Bazel entry is `src/urma/WORKSPACE`; run Bazel from that directory (or pass `--workspace_dir=src/urma`).
+- `src/urpc` retains its own `WORKSPACE` and is unaffected.
+
 3. Install Instructions
 - Runtime Dependencies: Ensure that prerequisite drivers are loaded. If not, please load them manually
 ```bash
