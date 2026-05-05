@@ -3087,6 +3087,9 @@ int run_write_bw(perftest_context_t *ctx, perftest_config_t *cfg)
     }
     /* WRITE BW test run in both sides */
     (void)printf("%s\n", RESULT_BW_FMT);
+    uint32_t len = 8 * 1024 * 1024;
+    char *buf = (char *)calloc(1, len);
+    urma_start_perf();
     if (cfg->all == true) {
         for (uint32_t i = 1; i <= cfg->order; i++) {
             cfg->size = (1U << i);
@@ -3099,6 +3102,10 @@ int run_write_bw(perftest_context_t *ctx, perftest_config_t *cfg)
             return -1;
         }
     }
+    urma_stop_perf();
+    urma_get_perf_info(buf, &len);
+    printf("-----------------test perf------------\n");
+    printf("%s\n", buf);
     return 0;
 }
 
