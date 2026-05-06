@@ -179,7 +179,7 @@ default: disable.\n");
     (void)printf("  --bind_ip <ip>          The ip for bind.\n");
     (void)printf("  --stdout                    Print logs to console.\n");
     (void)printf("  --aggr_mode                 Set bond device aggregation mode, support: standalone, \
- active_backup, balance, default: disable\n");
+ active_backup, balance, balance_queue_idle, default: disable\n");
 }
 
 static perftest_cmd_type_t parse_command(const char *argv1)
@@ -896,8 +896,10 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                     cfg->aggr_mode = BONDP_BONDING_MODE_ACTIVE_BACKUP;
                 } else if (strcmp("balance", optarg) == 0) {
                     cfg->aggr_mode = BONDP_BONDING_MODE_BALANCE;
+                } else if (strcmp("balance_queue_idle", optarg) == 0) {
+                    cfg->aggr_mode = BONDP_BONDING_MODE_BALANCE_QUEUE_IDLE;
                 } else {
-                    (void)fprintf(stderr, "Aggr mode only support standalone, active_backup and balance.\n");
+                    (void)fprintf(stderr, "Aggr mode only support standalone, active_backup, balance and balance_queue_idle.\n");
                     return -1;
                 }
                 break;

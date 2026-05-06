@@ -16,6 +16,7 @@
 
 #include "bondp_health_check.h"
 #include "bondp_types.h"
+#include "urma_api.h"
 #include "urma_log.h"
 
 #include "bondp_datapath_schedule.h"
@@ -23,6 +24,71 @@
 static __thread struct random_data g_schedule_rand_data;
 static __thread char g_schedule_rand_state[32];
 static __thread bool g_schedule_rand_inited;
+static bool g_balance_queue_idle_switch_inited;
+static bool g_balance_queue_idle_switch;
+
+#define BONDP_BALANCE_QUEUE_IDLE_ENV "BONDP_BALANCE_QUEUE_IDLE_ENABLE"
+
+static bool schedule_send_balance_queue_idle_enabled(void)
+{
+    if (g_balance_queue_idle_switch_inited) {
+        return g_balance_queue_idle_switch;
+    }
+
+    const char *env = getenv(BONDP_BALANCE_QUEUE_IDLE_ENV);
+    if (env != NULL && (strcmp(env, "1") == 0 || strcmp(env, "true") == 0 || strcmp(env, "TRUE") == 0)) {
+        g_balance_queue_idle_switch = true;
+    } else {
+        g_balance_queue_idle_switch = false;
+    }
+    g_balance_queue_idle_switch_inited = true;
+    return g_balance_queue_idle_switch;
+}
+
+static void schedule_send_init_rand(void)
+{
+    if (!g_schedule_rand_inited) {
+        unsigned int seed = (unsigned int)time(NULL) ^ (unsigned int)getpid() ^
+                            (unsigned int)(uintptr_t)pthread_self();
+        (void)memset(&g_schedule_rand_data, 0, sizeof(g_schedule_rand_data));
+        (void)initstate_r((unsigned int)seed, g_schedule_rand_state, sizeof(g_schedule_rand_state),
+                          &g_schedule_rand_data);
+        g_schedule_rand_inited = true;
+    }
+}
+
+static uint32_t schedule_send_pick_idx(const uint32_t *candidate_pos, uint32_t candidate_cnt)
+{
+    int32_t rand_val;
+
+    schedule_send_init_rand();
+    (void)random_r(&g_schedule_rand_data, &rand_val);
+    return candidate_pos[(uint32_t)rand_val % candidate_cnt];
+}
+
+static int schedule_send_get_idx_range(const bondp_comp_t *bdp_comp, bondp_chip_id_info_t *info, int *min, int *max)
+{
+    if (bdp_comp->bondp_ctx->bonding_level == BONDP_BONDING_LEVEL_IODIE) {
+        *min = 0;
+        *max = IODIE_NUM - 1;
+    } else if (bdp_comp->bondp_ctx->bonding_level == BONDP_BONDING_LEVEL_PORT) {
+        if (info == NULL) {
+            *min = IODIE_NUM;
+            *max = URMA_UBAGG_DEV_MAX_NUM - 1;
+        } else if (info->src_chip_id == BONDP_CHIP_ID_MIN) {
+            *min = BONDP_CHIP_ID_MIN_START_PORT;
+            *max = BONDP_CHIP_ID_MIN_END_PORT;
+        } else {
+            *min = BONDP_CHIP_ID_MAX_START_PORT;
+            *max = BONDP_CHIP_ID_MAX_END_PORT;
+        }
+    } else {
+        URMA_LOG_ERR("Unsupported bonding level: %d.\n", bdp_comp->bondp_ctx->bonding_level);
+        return EINVAL;
+    }
+
+    return 0;
+}
 
 static int schedule_send_standalone(const bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
                                     int *send_idx, int *target_idx)
@@ -59,7 +125,6 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
     uint32_t least_load_pos[URMA_UBAGG_DEV_MAX_NUM] = {0};
     uint32_t least_load_cnt = 0;
     uint32_t selected_pos;
-    int32_t rand_val;
     int min, max;
 
     if (min_active_count == 0) {
@@ -67,22 +132,7 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
         return EINVAL;
     }
 
-    if (bdp_comp->bondp_ctx->bonding_level == BONDP_BONDING_LEVEL_IODIE) {
-        min = 0;
-        max = IODIE_NUM - 1;
-    } else if (bdp_comp->bondp_ctx->bonding_level == BONDP_BONDING_LEVEL_PORT) {
-        if (info == NULL) {
-            min = IODIE_NUM;
-            max = URMA_UBAGG_DEV_MAX_NUM - 1;
-        } else if (info->src_chip_id == BONDP_CHIP_ID_MIN) {
-            min = BONDP_CHIP_ID_MIN_START_PORT;
-            max = BONDP_CHIP_ID_MIN_END_PORT;
-        } else {
-            min = BONDP_CHIP_ID_MAX_START_PORT;
-            max = BONDP_CHIP_ID_MAX_END_PORT;
-        }
-    } else {
-        URMA_LOG_ERR("Unsupported bonding level: %d.\n", bdp_comp->bondp_ctx->bonding_level);
+    if (schedule_send_get_idx_range(bdp_comp, info, &min, &max) != 0) {
         return EINVAL;
     }
 
@@ -106,17 +156,87 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
         return -1;
     }
 
-    if (!g_schedule_rand_inited) {
-        unsigned int seed = (unsigned int)time(NULL) ^ (unsigned int)getpid() ^
-                            (unsigned int)(uintptr_t)pthread_self();
-        (void)memset(&g_schedule_rand_data, 0, sizeof(g_schedule_rand_data));
-        (void)initstate_r((unsigned int)seed, g_schedule_rand_state, sizeof(g_schedule_rand_state),
-                          &g_schedule_rand_data);
-        g_schedule_rand_inited = true;
+    selected_pos = schedule_send_pick_idx(least_load_pos, least_load_cnt);
+    *send_idx = (int)bdp_comp->active_indices[selected_pos];
+    *target_idx = (int)bdp_tjetty->active_indices[selected_pos];
+    return 0;
+}
+
+static int schedule_send_get_jfs_ci(const bondp_comp_t *bdp_comp, uint32_t idx, uint16_t *ci)
+{
+    urma_status_t ret;
+    if (ci == NULL) {
+        return EINVAL;
     }
 
-    (void)random_r(&g_schedule_rand_data, &rand_val);
-    selected_pos = least_load_pos[(uint32_t)rand_val % least_load_cnt];
+    if (bdp_comp->comp_type == BONDP_COMP_JETTY) {
+        if (bdp_comp->p_jetty[idx] == NULL) {
+            return -1;
+        }
+        ret = urma_get_jetty_opt(bdp_comp->p_jetty[idx], URMA_JFS_CI, ci, (uint32_t)sizeof(*ci));
+    } else if (bdp_comp->comp_type == BONDP_COMP_JFS) {
+        if (bdp_comp->p_jfs[idx] == NULL) {
+            return -1;
+        }
+        ret = urma_get_jfs_opt(bdp_comp->p_jfs[idx], URMA_JFS_CI, ci, (uint32_t)sizeof(*ci));
+    } else {
+        return -1;
+    }
+
+    if (ret != URMA_SUCCESS) {
+        return -1;
+    }
+    return 0;
+}
+
+static int schedule_send_balance_queue_idle(const bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
+                                            int *send_idx, int *target_idx, bondp_chip_id_info_t *info)
+{
+    uint32_t min_active_count = MIN(bdp_comp->active_count, bdp_tjetty->active_count);
+    uint32_t least_load = UINT32_MAX;
+    uint32_t least_load_pos[URMA_UBAGG_DEV_MAX_NUM] = {0};
+    uint32_t least_load_cnt = 0;
+    uint32_t selected_pos;
+    int min, max;
+
+    if (min_active_count == 0) {
+        URMA_LOG_ERR("Invalid min_active_count.\n");
+        return EINVAL;
+    }
+
+    if (schedule_send_get_idx_range(bdp_comp, info, &min, &max) != 0) {
+        return EINVAL;
+    }
+
+    for (uint32_t i = 0; i < min_active_count; i++) {
+        uint32_t active_idx = bdp_comp->active_indices[i];
+        if (!bdp_comp->valid[active_idx] || active_idx < min || active_idx > max) {
+            continue;
+        }
+
+        uint16_t pi = atomic_load(&bdp_comp->jfs_pi[active_idx]);
+        uint16_t ci = 0;
+        uint32_t queue_load;
+        if (schedule_send_get_jfs_ci(bdp_comp, active_idx, &ci) == 0) {
+            queue_load = (uint16_t)(pi - ci);
+        } else {
+            queue_load = atomic_load(&bdp_comp->sqe_cnt[active_idx]);
+        }
+
+        if (queue_load < least_load) {
+            least_load = queue_load;
+            least_load_pos[0] = i;
+            least_load_cnt = 1;
+        } else if (queue_load == least_load) {
+            least_load_pos[least_load_cnt++] = i;
+        }
+    }
+
+    if (least_load_cnt == 0) {
+        return -1;
+    }
+
+    selected_pos = schedule_send_pick_idx(least_load_pos, least_load_cnt);
     *send_idx = (int)bdp_comp->active_indices[selected_pos];
     *target_idx = (int)bdp_tjetty->active_indices[selected_pos];
     return 0;
@@ -170,7 +290,12 @@ int schedule_send(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp, int *send
         case BONDP_BONDING_MODE_ACTIVE_BACKUP:
             return schedule_send_active_backup(bdp_comp, bdp_tjetty, send_idx, target_idx);
         case BONDP_BONDING_MODE_BALANCE:
+            if (schedule_send_balance_queue_idle_enabled()) {
+                return schedule_send_balance_queue_idle(bdp_comp, bdp_tjetty, send_idx, target_idx, info);
+            }
             return schedule_send_balance(bdp_comp, bdp_tjetty, send_idx, target_idx, info);
+        case BONDP_BONDING_MODE_BALANCE_QUEUE_IDLE:
+            return schedule_send_balance_queue_idle(bdp_comp, bdp_tjetty, send_idx, target_idx, info);
         default:
             return -1;
     }
@@ -188,6 +313,7 @@ int schedule_recv(bondp_comp_t *bdp_comp, int *recv_idx)
             return schedule_recv_standalone(bdp_comp, recv_idx);
         case BONDP_BONDING_MODE_ACTIVE_BACKUP:
         case BONDP_BONDING_MODE_BALANCE:
+        case BONDP_BONDING_MODE_BALANCE_QUEUE_IDLE:
             return schedule_recv_balance(bdp_comp, recv_idx);
         default:
             return -1;

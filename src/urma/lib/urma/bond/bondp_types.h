@@ -238,8 +238,10 @@ typedef struct bondp_comp {
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
 #ifndef __cplusplus
     atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
+    atomic_ushort jfs_pi[URMA_UBAGG_DEV_MAX_NUM];
 #else
     std::atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
+    std::atomic_ushort jfs_pi[URMA_UBAGG_DEV_MAX_NUM];
 #endif
     // recv
     wr_buf_t recv_wr_buf;
@@ -297,6 +299,12 @@ static inline bool is_empty_eid(urma_eid_t *eid)
 static inline bool is_single_dev_mode(bondp_context_t *ctx)
 {
     return ctx->bonding_mode == BONDP_BONDING_MODE_STANDALONE;
+}
+
+static inline bool is_balance_mode(const bondp_context_t *ctx)
+{
+    return ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE ||
+           ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE_QUEUE_IDLE;
 }
 
 #endif // BONDP_TYPES_H

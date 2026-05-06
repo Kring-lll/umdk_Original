@@ -982,7 +982,7 @@ static void bondp_health_task_check_mode(bondp_health_task_t *task,
 static void bondp_health_probe_sub(bondp_context_t *bdp_ctx, bondp_health_task_t *task,
     bondp_health_sub_task_t *sub)
 {
-    bool is_balance = (task->bondp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE);
+    bool is_balance = is_balance_mode(task->bondp_jetty->bondp_ctx);
     if (sub->probe_pending) {
         URMA_LOG_INFO("Health probe skipped (pending), lidx:%d tidx:%d\n", sub->local_idx, sub->target_idx);
         return;
@@ -1022,7 +1022,7 @@ static bool bondp_health_balance_has_pending_probe(const bondp_health_task_t *ta
 
 static void bondp_health_do_check(bondp_context_t *bdp_ctx, bondp_health_task_t *task)
 {
-    bool is_balance = (task->bondp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE);
+    bool is_balance = is_balance_mode(task->bondp_jetty->bondp_ctx);
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
         for (int j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
             bondp_health_sub_task_t *sub = &task->sub_tasks[i][j];
@@ -1089,7 +1089,7 @@ static void *bondp_health_check_thread(void *arg)
             pthread_rwlock_rdlock(&health->task_table.lock);
             bondp_health_task_t *task = NULL;
             HMAP_FOR_EACH(task, hmap_node, &health->task_table.hmap) {
-                bool is_balance = (task->bondp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE);
+                bool is_balance = is_balance_mode(task->bondp_jetty->bondp_ctx);
                 if (!is_balance) {
                     bondp_health_task_check_mode(task, cfg, now_us);
                 }
@@ -1156,7 +1156,7 @@ int bondp_register_health_check_task(bondp_context_t *bdp_ctx, bondp_target_jett
     }
     task->bdp_tjetty = bdp_tjetty;
     task->bondp_jetty = cfg_jetty;
-    task->next_probe_ts_us = (cfg_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE) ?
+    task->next_probe_ts_us = is_balance_mode(cfg_jetty->bondp_ctx) ?
         UINT64_MAX : (bondp_get_monotonic_us() + cfg->health_check_start_ms * 1000ULL);
     task->primary_local_idx = -1;
     task->active_local_idx = -1;
@@ -1189,7 +1189,7 @@ int bondp_register_health_check_task(bondp_context_t *bdp_ctx, bondp_target_jett
         sub->target_idx = (int)target_idx;
         sub->valid = true;
         sub->probe_pending = false;
-        sub->need_check = (cfg_jetty->bondp_ctx->bonding_mode != BONDP_BONDING_MODE_BALANCE);
+        sub->need_check = !is_balance_mode(cfg_jetty->bondp_ctx);
         atomic_store(&sub->link_ok, true);
         sub->user_ctx = 0;
         if (task->primary_local_idx < 0) {
@@ -1408,7 +1408,7 @@ static void bondp_health_handle_datapath_link_fail_event(bondp_context_t *bdp_ct
     const bondp_health_check_cfg_t *cfg = &g_bondp_global_ctx->health_thread_ctx.cfg;
     pthread_rwlock_wrlock(&health->task_table.lock);
     bondp_health_task_t *task = bondp_find_health_task_by_tjetty_nolock(health, info->bdp_tjetty);
-    if (task != NULL && task->bondp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE) {
+    if (task != NULL && is_balance_mode(task->bondp_jetty->bondp_ctx)) {
         bondp_health_sub_task_t *sub = &task->sub_tasks[info->local_idx][info->target_idx];
         if (sub->valid) {
             sub->probe_pending = false;
@@ -1537,7 +1537,7 @@ bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, u
             sub->probe_pending = false;
             bool old_ok = atomic_load(&sub->link_ok);
             bool ok = (cr->status == URMA_CR_SUCCESS);
-            bool is_balance = (task->bondp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE);
+            bool is_balance = is_balance_mode(task->bondp_jetty->bondp_ctx);
             atomic_store(&sub->link_ok, ok);
             task->bondp_jetty->valid[sub->local_idx] = ok;
             sub->need_check = is_balance ? (!ok) : sub->need_check;
