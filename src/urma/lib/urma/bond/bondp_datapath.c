@@ -750,7 +750,8 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         return CONVERT_SKIP;
     }
 
-    if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
+    if (g_bondp_global_ctx->failover_switch &&
+        is_failover_cr(cr) && !bdp_comp->modify_to_error) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         bdp_comp->valid[send_idx] = false;
 

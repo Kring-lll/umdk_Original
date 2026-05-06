@@ -124,7 +124,7 @@ typedef struct bondp_health_thread_ctx {
 typedef struct bondp_global_context {
     uint32_t pid;
     topo_map_t *topo_map;
-    bool skip_load_topo;
+    bool failover_switch;                   /* FailoverSwitch, default true */
     bondp_health_thread_ctx_t health_thread_ctx;
 } bondp_global_context_t;
 

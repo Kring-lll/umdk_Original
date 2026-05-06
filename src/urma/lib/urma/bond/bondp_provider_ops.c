@@ -35,6 +35,7 @@
 #define BONDP_HEALTH_CHECK_ENV                       "BondHealthCheck"
 #define BONDP_HEALTH_CHECK_PRIMARY_BACKUP_SWITCH     "PrimaryBackupSwitch"
 #define BONDP_HEALTH_CHECK_AUTO_FALLBACK_PRIMARY     "AutoFallbackPrimary"
+#define BONDP_HEALTH_CHECK_FAILOVER_SWITCH           "FailoverSwitch"
 #define BONDP_HEALTH_CHECK_HEALTH_CHECK_START        "HealthCheckStart"
 #define BONDP_HEALTH_CHECK_HEALTH_CHECK_INTERVAL     "HealthCheckInterval"
 #define BONDP_HEALTH_CHECK_PRIMARY_CHECK_START       "PrimaryCheckStart"
@@ -146,18 +147,21 @@ static uint64_t read_env_uint64(const char *env_name, uint64_t default_val)
     return (uint64_t)parsed;
 }
 
-static void bondp_read_health_check_cfg(bondp_health_thread_ctx_t *thread_ctx)
+static void bondp_read_health_check_cfg(bondp_global_context_t *ctx)
 {
     const bool default_health_check_enable = false;
     const bool default_primary_backup_switch = true;
     const bool default_auto_fallback_primary = true;
+    const bool default_failover_switch = true;
     const uint64_t default_health_check_start_ms = 2000;
     const uint64_t default_health_check_interval_ms = 32000;
     const uint64_t default_primary_check_start_ms = 2000;
     const uint64_t default_primary_check_interval_ms = 1000;
     const uint32_t default_primary_check_max_backoff = 13;
 
+    bondp_health_thread_ctx_t *thread_ctx = &ctx->health_thread_ctx;
     thread_ctx->health_check_enable = read_env_bool(BONDP_HEALTH_CHECK_ENV, default_health_check_enable);
+    ctx->failover_switch = read_env_bool(BONDP_HEALTH_CHECK_FAILOVER_SWITCH, default_failover_switch);
 
     bondp_health_check_cfg_t *cfg = &thread_ctx->cfg;
     cfg->primary_backup_switch = read_env_bool(
@@ -219,18 +223,20 @@ static void bondp_read_health_check_cfg(bondp_health_thread_ctx_t *thread_ctx)
     }
 }
 
-static void bondp_print_health_check_cfg(const bondp_health_thread_ctx_t *thread_ctx)
+static void bondp_print_health_check_cfg(const bondp_global_context_t *ctx)
 {
+    const bondp_health_thread_ctx_t *thread_ctx = &ctx->health_thread_ctx;
     const bondp_health_check_cfg_t *cfg = &thread_ctx->cfg;
 
     URMA_LOG_INFO("Health check global init, enabled:%s\n",
                   thread_ctx->health_check_enable ? "true" : "false");
-    URMA_LOG_INFO("Health check config: PrimaryBackupSwitch=%s, AutoFallbackPrimary=%s, "
+    URMA_LOG_INFO("Health check config: PrimaryBackupSwitch=%s, AutoFallbackPrimary=%s, FailoverSwitch=%s, "
                   "HealthCheckStart=%lums, HealthCheckInterval=%lums, "
                   "PrimaryCheckStart=%lums, PrimaryCheckInterval=%lums, "
                   "PrimaryCheckMaxBackoffCnt=%u\n",
                   cfg->primary_backup_switch ? "true" : "false",
                   cfg->auto_fallback_primary ? "true" : "false",
+                  ctx->failover_switch ? "true" : "false",
                   cfg->health_check_start_ms,
                   cfg->health_check_interval_ms,
                   cfg->primary_check_start_ms,
@@ -240,8 +246,8 @@ static void bondp_print_health_check_cfg(const bondp_health_thread_ctx_t *thread
 
 static void bondp_global_ctx_read_env(bondp_global_context_t *ctx)
 {
-    bondp_read_health_check_cfg(&ctx->health_thread_ctx);
-    bondp_print_health_check_cfg(&ctx->health_thread_ctx);
+    bondp_read_health_check_cfg(ctx);
+    bondp_print_health_check_cfg(ctx);
 }
 
 static int bondp_global_ctx_init(bondp_global_context_t **bondp_global_ctx)
@@ -334,7 +340,6 @@ static int get_topo_info_from_ko(bondp_context_t *bdp_ctx)
     urma_udrv_t data = {0};
     if (urma_cmd_user_ctl(&bdp_ctx->v_ctx, &in, &out, &data)) {
         URMA_LOG_ERR("Failed to get topo info, change to general mode\n");
-        g_bondp_global_ctx->skip_load_topo = true;
         return -1;
     }
     g_bondp_global_ctx->topo_map = create_topo_map(info_out.topo_info, info_out.node_num);
