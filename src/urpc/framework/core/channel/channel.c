@@ -101,7 +101,7 @@ static void client_channel_id_release(uint32_t urpc_chid)
 
 static inline bool urpc_server_info_cmp(urpc_host_info_t *server, urpc_host_info_t *target)
 {
-    if (server->host_type < HOST_TYPE_UB) {
+    if (server->host_type < HOST_TYPE_UB) {channel_alloc
         return urpc_server_info_ip_compare(server, target);
     }
 
