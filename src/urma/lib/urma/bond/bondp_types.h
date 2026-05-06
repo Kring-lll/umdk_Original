@@ -97,13 +97,13 @@ typedef struct bondp_heath_check_ctx {
 } bondp_heath_check_ctx_t;
 
 typedef struct bondp_health_check_cfg {
-    bool primary_backup_switch;             /* PrimaryBackupSwitch, default true */
-    bool auto_fallback_primary;             /* AutoFallbackPrimary, default true */
-    uint64_t health_check_start_ms;         /* HealthCheckStart, 100ms~3600000ms, default 2000ms */
-    uint64_t health_check_interval_ms;      /* HealthCheckInterval, 1000ms~3600000ms, default 32000ms */
-    uint64_t primary_check_start_ms;        /* PrimaryCheckStart, 100ms~3600000ms, default 2000ms */
-    uint64_t primary_check_interval_ms;     /* PrimaryCheckInterval, 100ms~60000ms, default 1000ms */
-    uint32_t primary_check_max_backoff_cnt; /* PrimaryCheckMaxBackoffCnt, 1~100, default 13 */
+    bool failover_enable;
+    bool failback_enable;
+    uint64_t backup_health_check_start_ms;
+    uint64_t backup_health_check_interval_ms;
+    uint64_t active_health_check_start_ms;
+    uint64_t active_health_check_interval_ms;
+    uint32_t active_health_check_max_backoff_cnt;
 } bondp_health_check_cfg_t;
 
 typedef struct bondp_health_thread_ctx {
