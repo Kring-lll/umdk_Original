@@ -565,9 +565,10 @@ urma_status_t urma_delete_context(urma_context_t *ctx)
 
     int dev_fd = ctx->dev_fd;
     urma_status_t ret = ctx->dev->ops->delete_context(ctx);
-    if (ret == URMA_SUCCESS && dev_fd >= 0) {
+    if (dev_fd >= 0) {
         (void)close(dev_fd);
-    } else {
+    }
+    if (ret != URMA_SUCCESS) {
         URMA_LOG_WARN("[DRV_ERR]Delete ctx error, fd=%d, ret=%d, dev_name=%s, eid_idx=%u.\n",
             dev_fd, ret, dev_name, eid_index);
     }
