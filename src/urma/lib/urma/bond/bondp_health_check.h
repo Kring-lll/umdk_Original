@@ -29,8 +29,8 @@ typedef struct bondp_health_event_info {
 	bondp_target_jetty_t *bdp_tjetty;
 } bondp_health_event_info_t;
 
-void bondp_health_check_global_ctx_init(bondp_global_context_t *ctx);
-void bondp_health_check_global_ctx_uninit(bondp_global_context_t *ctx);
+void bondp_health_check_global_ctx_init(const bondp_health_check_cfg_t *cfg);
+void bondp_health_check_global_ctx_uninit(void);
 void bondp_health_check_ctx_init(bondp_context_t *bond_ctx);
 bool bondp_health_check_enabled(void);
 
