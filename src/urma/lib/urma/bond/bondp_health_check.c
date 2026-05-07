@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <malloc.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/epoll.h>
 #include <sys/prctl.h>
@@ -50,6 +51,21 @@ typedef struct bondp_health_event_node {
     bondp_health_event_info_t info;
     struct ub_list node;
 } bondp_health_event_node_t;
+
+typedef struct bondp_health_thread_ctx {
+    int health_epoll_fd;
+    pthread_t health_thread;
+    bondp_health_check_cfg_t cfg;
+    pthread_rwlock_t health_ctx_lock;
+    struct ub_list health_ctx_list;
+#ifndef __cplusplus
+    atomic_bool health_thread_stop;
+#else
+    std::atomic_bool health_thread_stop;
+#endif
+} bondp_health_thread_ctx_t;
+
+static bondp_health_thread_ctx_t health_thread_ctx;
 
 static uint64_t bondp_get_monotonic_us(void)
 {
@@ -220,7 +236,7 @@ static bondp_health_task_t *bondp_find_health_task_by_tjetty_nolock(
 
 static int bondp_register_health_ctx_global(bondp_context_t *bond_ctx)
 {
-    bondp_health_thread_ctx_t *thread_ctx = &g_bondp_global_ctx->health_thread_ctx;
+    bondp_health_thread_ctx_t *thread_ctx = &health_thread_ctx;
 
     bondp_health_ctx_node_t *new_node = calloc(1, sizeof(bondp_health_ctx_node_t));
     if (new_node == NULL) {
@@ -247,7 +263,7 @@ static int bondp_register_health_ctx_global(bondp_context_t *bond_ctx)
 
 static void bondp_unregister_health_ctx_global(bondp_context_t *bond_ctx)
 {
-    bondp_health_thread_ctx_t *thread_ctx = &g_bondp_global_ctx->health_thread_ctx;
+    bondp_health_thread_ctx_t *thread_ctx = &health_thread_ctx;
 
     pthread_rwlock_wrlock(&thread_ctx->health_ctx_lock);
     bondp_health_ctx_node_t *node = NULL;
@@ -264,25 +280,29 @@ static void bondp_unregister_health_ctx_global(bondp_context_t *bond_ctx)
 
 bool bondp_health_check_enabled(void)
 {
-    return g_bondp_global_ctx->health_thread_ctx.enable_health_check;
+    return g_bondp_global_ctx != NULL && g_bondp_global_ctx->enable_health_check;
 }
 
-void bondp_health_check_global_ctx_init(bondp_global_context_t *ctx)
+void bondp_health_check_global_ctx_init(const bondp_health_check_cfg_t *cfg)
 {
-    ctx->health_thread_ctx.health_epoll_fd = -1;
-    pthread_rwlock_init(&ctx->health_thread_ctx.health_ctx_lock, NULL);
-    ub_list_init(&ctx->health_thread_ctx.health_ctx_list);
-    atomic_init(&ctx->health_thread_ctx.health_thread_stop, false);
+    memset(&health_thread_ctx, 0, sizeof(health_thread_ctx));
+    if (cfg != NULL) {
+        health_thread_ctx.cfg = *cfg;
+    }
+    health_thread_ctx.health_epoll_fd = -1;
+    pthread_rwlock_init(&health_thread_ctx.health_ctx_lock, NULL);
+    ub_list_init(&health_thread_ctx.health_ctx_list);
+    atomic_init(&health_thread_ctx.health_thread_stop, false);
 }
 
-void bondp_health_check_global_ctx_uninit(bondp_global_context_t *ctx)
+void bondp_health_check_global_ctx_uninit(void)
 {
-    if (ctx->health_thread_ctx.health_epoll_fd >= 0) {
-        (void)close(ctx->health_thread_ctx.health_epoll_fd);
-        ctx->health_thread_ctx.health_epoll_fd = -1;
+    if (health_thread_ctx.health_epoll_fd >= 0) {
+        (void)close(health_thread_ctx.health_epoll_fd);
+        health_thread_ctx.health_epoll_fd = -1;
     }
 
-    pthread_rwlock_destroy(&ctx->health_thread_ctx.health_ctx_lock);
+    pthread_rwlock_destroy(&health_thread_ctx.health_ctx_lock);
 }
 
 void bondp_health_check_ctx_init(bondp_context_t *bond_ctx)
@@ -554,13 +574,12 @@ static void bondp_handle_netlink_events(void)
         }
 
         bool consumed = false;
-        bondp_global_context_t *global_ctx = g_bondp_global_ctx;
-        if (global_ctx == NULL) {
+        if (g_bondp_global_ctx == NULL) {
             break;
         }
-        pthread_rwlock_rdlock(&global_ctx->health_thread_ctx.health_ctx_lock);
+        pthread_rwlock_rdlock(&health_thread_ctx.health_ctx_lock);
         bondp_health_ctx_node_t *ctx_node = NULL;
-        UB_LIST_FOR_EACH(ctx_node, node, &global_ctx->health_thread_ctx.health_ctx_list) {
+        UB_LIST_FOR_EACH(ctx_node, node, &health_thread_ctx.health_ctx_list) {
             if (ctx_node->bdp_ctx == NULL) {
                 continue;
             }
@@ -570,7 +589,7 @@ static void bondp_handle_netlink_events(void)
                 break;
             }
         }
-        pthread_rwlock_unlock(&global_ctx->health_thread_ctx.health_ctx_lock);
+        pthread_rwlock_unlock(&health_thread_ctx.health_ctx_lock);
         if (!consumed) {
             URMA_LOG_WARN("Drop switchback netlink msg: local_id=%u type=%u seq=%u payload=%u not matched\n",
                 msg.in.recv_local_id, msg.in.ctrl_type, msg.in.req_seq, msg.in.payload);
@@ -956,18 +975,18 @@ static uint64_t bondp_health_calc_primary_interval_us(const bondp_health_check_c
 
 static void *bondp_health_check_thread(void *arg)
 {
-    bondp_global_context_t *global_ctx = (bondp_global_context_t *)arg;
-    const bondp_health_check_cfg_t *cfg = &global_ctx->health_thread_ctx.cfg;
+    (void)arg;
+    const bondp_health_check_cfg_t *cfg = &health_thread_ctx.cfg;
     struct epoll_event events[UBAGG_MAX_EVENT];
 
     if (prctl(PR_SET_NAME, "bond_health_t", 0, 0, 0) != 0) {
         URMA_LOG_WARN("Failed to set health thread name, errno=%d\n", errno);
     }
 
-    int epoll_fd = global_ctx->health_thread_ctx.health_epoll_fd;
+    int epoll_fd = health_thread_ctx.health_epoll_fd;
 
     while (true) {
-        bool stop = atomic_load(&global_ctx->health_thread_ctx.health_thread_stop);
+        bool stop = atomic_load(&health_thread_ctx.health_thread_stop);
         if (stop) {
             break;
         }
@@ -986,9 +1005,9 @@ static void *bondp_health_check_thread(void *arg)
         }
 
         uint64_t now_us = bondp_get_monotonic_us();
-        pthread_rwlock_rdlock(&global_ctx->health_thread_ctx.health_ctx_lock);
+        pthread_rwlock_rdlock(&health_thread_ctx.health_ctx_lock);
         bondp_health_ctx_node_t *ctx_node = NULL;
-        UB_LIST_FOR_EACH(ctx_node, node, &global_ctx->health_thread_ctx.health_ctx_list) {
+        UB_LIST_FOR_EACH(ctx_node, node, &health_thread_ctx.health_ctx_list) {
             bondp_heath_check_ctx_t *health = &ctx_node->bdp_ctx->bondp_heath_check_ctx;
             pthread_rwlock_rdlock(&health->task_table.lock);
             bondp_health_task_t *task = NULL;
@@ -1022,7 +1041,7 @@ static void *bondp_health_check_thread(void *arg)
             }
             pthread_rwlock_unlock(&health->task_table.lock);
         }
-        pthread_rwlock_unlock(&global_ctx->health_thread_ctx.health_ctx_lock);
+        pthread_rwlock_unlock(&health_thread_ctx.health_ctx_lock);
     }
     return NULL;
 }
@@ -1053,7 +1072,7 @@ int bondp_register_health_check_task(bondp_context_t *bdp_ctx, bondp_target_jett
     }
 
     bondp_heath_check_ctx_t *health = &bdp_ctx->bondp_heath_check_ctx;
-    const bondp_health_check_cfg_t *cfg = &g_bondp_global_ctx->health_thread_ctx.cfg;
+    const bondp_health_check_cfg_t *cfg = &health_thread_ctx.cfg;
     bondp_health_task_t *task = calloc(1, sizeof(bondp_health_task_t));
     if (task == NULL) {
         return -1;
@@ -1311,7 +1330,7 @@ static void bondp_health_handle_datapath_link_fail_event(bondp_context_t *bdp_ct
     }
 
     bondp_heath_check_ctx_t *health = &bdp_ctx->bondp_heath_check_ctx;
-    const bondp_health_check_cfg_t *cfg = &g_bondp_global_ctx->health_thread_ctx.cfg;
+    const bondp_health_check_cfg_t *cfg = &health_thread_ctx.cfg;
     pthread_rwlock_wrlock(&health->task_table.lock);
     bondp_health_task_t *task = bondp_find_health_task_by_tjetty_nolock(health, info->bdp_tjetty);
     if (task != NULL && task->bondp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE) {
@@ -1498,34 +1517,32 @@ bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, u
 
 void bondp_stop_health_check_thread(void)
 {
-    bondp_global_context_t *global_ctx = g_bondp_global_ctx;
     if (!bondp_health_check_enabled()) {
         return;
     }
 
-    if (global_ctx->health_thread_ctx.health_epoll_fd < 0) {
+    if (health_thread_ctx.health_epoll_fd < 0) {
         return;
     }
 
-    atomic_store(&global_ctx->health_thread_ctx.health_thread_stop, true);
-    (void)pthread_join(global_ctx->health_thread_ctx.health_thread, NULL);
-    atomic_store(&global_ctx->health_thread_ctx.health_thread_stop, false);
+    atomic_store(&health_thread_ctx.health_thread_stop, true);
+    (void)pthread_join(health_thread_ctx.health_thread, NULL);
+    atomic_store(&health_thread_ctx.health_thread_stop, false);
 
-    pthread_rwlock_wrlock(&global_ctx->health_thread_ctx.health_ctx_lock);
+    pthread_rwlock_wrlock(&health_thread_ctx.health_ctx_lock);
     bondp_health_ctx_node_t *ctx_node = NULL;
     bondp_health_ctx_node_t *next = NULL;
-    UB_LIST_FOR_EACH_SAFE(ctx_node, next, node, &global_ctx->health_thread_ctx.health_ctx_list) {
+    UB_LIST_FOR_EACH_SAFE(ctx_node, next, node, &health_thread_ctx.health_ctx_list) {
         ub_list_remove(&ctx_node->node);
         free(ctx_node);
     }
-    pthread_rwlock_unlock(&global_ctx->health_thread_ctx.health_ctx_lock);
+    pthread_rwlock_unlock(&health_thread_ctx.health_ctx_lock);
 
     URMA_LOG_INFO("Health check thread stopped.\n");
 }
 
 int bondp_start_health_check_thread(void)
 {
-    bondp_global_context_t *global_ctx = g_bondp_global_ctx;
     int health_epoll_fd;
     int nl_fd;
     struct epoll_event ev = {0};
@@ -1540,7 +1557,7 @@ int bondp_start_health_check_thread(void)
         return -1;
     }
 
-    global_ctx->health_thread_ctx.health_epoll_fd = health_epoll_fd;
+    health_thread_ctx.health_epoll_fd = health_epoll_fd;
 
     nl_fd = bondp_nl_get_fd();
     if (nl_fd >= 0) {
@@ -1551,12 +1568,12 @@ int bondp_start_health_check_thread(void)
         }
     }
 
-    atomic_store(&global_ctx->health_thread_ctx.health_thread_stop, false);
-    if (pthread_create(&global_ctx->health_thread_ctx.health_thread, NULL, bondp_health_check_thread,
-        global_ctx) != 0) {
+    atomic_store(&health_thread_ctx.health_thread_stop, false);
+    if (pthread_create(&health_thread_ctx.health_thread, NULL, bondp_health_check_thread,
+        NULL) != 0) {
         URMA_LOG_ERR("Failed to create health check thread\n");
         (void)close(health_epoll_fd);
-        global_ctx->health_thread_ctx.health_epoll_fd = -1;
+        health_thread_ctx.health_epoll_fd = -1;
         return -1;
     }
     URMA_LOG_INFO("Health check thread started.\n");
@@ -1565,7 +1582,6 @@ int bondp_start_health_check_thread(void)
 
 void bondp_destroy_health_check_ctx(bondp_context_t *bond_ctx)
 {
-    bondp_global_context_t *global_ctx = g_bondp_global_ctx;
     bondp_heath_check_ctx_t *health = NULL;
 
     if (!bondp_health_check_enabled()) {
@@ -1576,8 +1592,8 @@ void bondp_destroy_health_check_ctx(bondp_context_t *bond_ctx)
     bondp_hash_table_destroy(&health->task_table);
     bondp_unregister_health_ctx_global(bond_ctx);
 
-    if (global_ctx->health_thread_ctx.health_epoll_fd >= 0 && health->health_check_fd >= 0) {
-        (void)epoll_ctl(global_ctx->health_thread_ctx.health_epoll_fd,
+    if (health_thread_ctx.health_epoll_fd >= 0 && health->health_check_fd >= 0) {
+        (void)epoll_ctl(health_thread_ctx.health_epoll_fd,
             EPOLL_CTL_DEL, health->health_check_fd, NULL);
         (void)close(health->health_check_fd);
         health->health_check_fd = -1;
@@ -1593,7 +1609,6 @@ void bondp_destroy_health_check_ctx(bondp_context_t *bond_ctx)
 
 int bondp_create_health_check_ctx(bondp_context_t *bond_ctx)
 {
-    bondp_global_context_t *global_ctx = g_bondp_global_ctx;
     bondp_heath_check_ctx_t *health = &bond_ctx->bondp_heath_check_ctx;
     struct epoll_event ev = {0};
 
@@ -1620,7 +1635,7 @@ int bondp_create_health_check_ctx(bondp_context_t *bond_ctx)
 
     ev.events = EPOLLIN;
     ev.data.ptr = (void *)bond_ctx;
-    if (epoll_ctl(global_ctx->health_thread_ctx.health_epoll_fd,
+    if (epoll_ctl(health_thread_ctx.health_epoll_fd,
         EPOLL_CTL_ADD, health->health_check_fd, &ev) != 0) {
         URMA_LOG_ERR("Failed to add ctx async fd to health epoll, errno=%d\n", errno);
         goto DEL_FD;
@@ -1636,7 +1651,7 @@ int bondp_create_health_check_ctx(bondp_context_t *bond_ctx)
     return 0;
 
 DEL_EPOLL:
-    (void)epoll_ctl(global_ctx->health_thread_ctx.health_epoll_fd,
+    (void)epoll_ctl(health_thread_ctx.health_epoll_fd,
         EPOLL_CTL_DEL, health->health_check_fd, NULL);
 DEL_FD:
     (void)close(health->health_check_fd);
