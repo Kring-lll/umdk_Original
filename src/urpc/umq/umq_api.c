@@ -490,7 +490,7 @@ static int umq_framework_init(umq_framework_t *umq_fw, umq_init_cfg_t *cfg)
     umq_fw->dlhandler = dlopen(umq_fw->dlopen_so_name, RTLD_LAZY | RTLD_GLOBAL);
     if (umq_fw->dlhandler == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "open so failed, err: %s\n", dlerror());
-        return UMQ_FAIL;
+        goto DISABLE_FW;
     }
 
     ret = load_symbol(umq_fw->dlhandler, (void **)&umq_fw->ops_get_func, umq_fw->ops_get_funcname);
@@ -598,6 +598,7 @@ CLONE_SO:
     if (umq_fw->dlhandler != NULL) {
         dlclose(umq_fw->dlhandler);
     }
+DISABLE_FW:
     umq_fw->enable = false;
     return UMQ_FAIL;
 }
@@ -1338,7 +1339,7 @@ DECREASE_TRANS_INFO_NUM:
 UNLOCK:
     (void)util_mutex_unlock(g_umq_config_mutex_lock);
 
-return ret;
+    return ret;
 }
 
 int umq_get_route_list(const umq_route_key_t *route_key, umq_trans_mode_t umq_trans_mode, umq_route_list_t *route_list)
