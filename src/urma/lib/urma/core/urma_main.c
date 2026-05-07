@@ -529,13 +529,12 @@ urma_context_t *urma_create_context(urma_device_t *dev, uint32_t eid_index)
     }
 
     urma_context_t *ctx = dev->ops->create_context(dev, eid_index, dev_fd);
-    if (ctx == NULL) {
-        URMA_LOG_ERR("[DRV_ERR]Failed to create urma context.\n");
-        if (dev_fd >= 0) {
-            (void)close(dev_fd);
-        }
-        return NULL;
-    }
+     if (ret == URMA_SUCCESS && dev_fd >= 0) {	 
+        (void)close(dev_fd);	 
+     } else {
+        URMA_LOG_WARN("[DRV_ERR]Delete ctx error, fd=%d, ret=%d, dev_name=%s, eid_idx=%u.\n",	 
+            dev_fd, ret, dev_name, eid_index);	 
+     }
     /* Save dev_fd in the context, in case that driver did not do this */
     ctx->dev_fd = dev_fd;
     ctx->eid_index = eid_index;
@@ -565,9 +564,10 @@ urma_status_t urma_delete_context(urma_context_t *ctx)
 
     int dev_fd = ctx->dev_fd;
     urma_status_t ret = ctx->dev->ops->delete_context(ctx);
-    if (ret == URMA_SUCCESS && dev_fd >= 0) {
+    if (dev_fd >= 0) {
         (void)close(dev_fd);
-    } else {
+    }
+    if (ret != URMA_SUCCESS) {
         URMA_LOG_WARN("[DRV_ERR]Delete ctx error, fd=%d, ret=%d, dev_name=%s, eid_idx=%u.\n",
             dev_fd, ret, dev_name, eid_index);
     }
