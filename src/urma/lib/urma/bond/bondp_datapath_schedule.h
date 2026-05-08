@@ -29,6 +29,8 @@ typedef struct bondp_chip_id_info {
     uint32_t dst_chip_id;
 } bondp_chip_id_info_t;
 
+extern bool g_bondp_balance_queue_idle_enable;
+
 int schedule_send(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp, int *send_idx, int *target_idx,
     bondp_chip_id_info_t *info);
 
