@@ -795,7 +795,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         return CONVERT_SKIP;
     }
 
-    if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
+    if (is_failover_cr(cr) && !bdp_comp->modify_to_error && bondp_failover_enabled()) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         bdp_comp->valid[send_idx] = false;
 
@@ -851,6 +851,11 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         (void)pthread_spin_unlock(&bdp_comp->send_lock);
         put_comp(bdp_comp);
         return CONVERT_SKIP;
+    }
+
+    if (is_failover_cr(cr) && !bdp_comp->modify_to_error && !bondp_failover_enabled()) {
+        URMA_LOG_INFO("Skip failover because BOND_ENABLE_FAILOVER is disabled, local_id=%u wr_id=%lu\n",
+            cr->local_id, wr_id);
     }
 
 CONVERT_CR:
