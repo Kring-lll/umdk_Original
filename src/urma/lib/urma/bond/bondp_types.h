@@ -284,4 +284,9 @@ static inline bool is_single_dev_mode(bondp_context_t *ctx)
     return ctx->bonding_mode == BONDP_BONDING_MODE_STANDALONE;
 }
 
+static inline bool bondp_failover_enabled(void)
+{
+    return g_bondp_global_ctx == NULL || g_bondp_global_ctx->enable_failover;
+}
+
 #endif // BONDP_TYPES_H
