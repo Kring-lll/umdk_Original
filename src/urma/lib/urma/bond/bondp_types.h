@@ -104,28 +104,13 @@ typedef struct bondp_health_check_cfg {
     uint32_t active_max_backoff;
 } bondp_health_check_cfg_t;
 
-typedef struct bondp_health_thread_ctx {
-    bool enable_health_check;
-    int health_epoll_fd;
-    pthread_t health_thread;
-    bondp_health_check_cfg_t cfg;
-    pthread_rwlock_t health_ctx_lock;
-    struct ub_list health_ctx_list;
-#ifndef __cplusplus
-    atomic_bool health_thread_stop;
-#else
-    std::atomic_bool health_thread_stop;
-#endif
-} bondp_health_thread_ctx_t;
-
 /** Process-granularity global variable */
 typedef struct bondp_global_context {
-    uint32_t pid;
     topo_map_t *topo_map;
-    bool skip_load_topo;
     bool enable_failover;
     bool enable_failback;
-    bondp_health_thread_ctx_t health_thread_ctx;
+    bool enable_health_check;
+    bondp_health_check_cfg_t health_check_cfg;
 } bondp_global_context_t;
 
 extern bondp_global_context_t *g_bondp_global_ctx;
@@ -297,6 +282,11 @@ static inline bool is_empty_eid(urma_eid_t *eid)
 static inline bool is_single_dev_mode(bondp_context_t *ctx)
 {
     return ctx->bonding_mode == BONDP_BONDING_MODE_STANDALONE;
+}
+
+static inline bool bondp_failover_enabled(void)
+{
+    return g_bondp_global_ctx == NULL || g_bondp_global_ctx->enable_failover;
 }
 
 #endif // BONDP_TYPES_H

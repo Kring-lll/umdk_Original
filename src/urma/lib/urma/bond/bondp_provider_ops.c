@@ -147,7 +147,6 @@ static uint64_t read_env_uint64(const char *env_name, uint64_t default_val)
 
 static void read_all_env(bondp_global_context_t *ctx)
 {
-    bondp_health_thread_ctx_t *thread_ctx = &ctx->health_thread_ctx;
     const bool default_enable_health_check = false;
     const bool default_enable_failback = true;
     const bool default_enable_failover = true;
@@ -157,13 +156,13 @@ static void read_all_env(bondp_global_context_t *ctx)
     const uint64_t default_health_check_active_interval_ms = 1000;
     const uint32_t default_health_check_active_max_backoff = 13;
 
-    thread_ctx->enable_health_check = read_env_bool(BONDP_ENV_ENABLE_HEALTH_CHECK, default_enable_health_check);
-
-    bondp_health_check_cfg_t *cfg = &thread_ctx->cfg;
+    ctx->enable_health_check = read_env_bool(
+        BONDP_ENV_ENABLE_HEALTH_CHECK, default_enable_health_check);
     ctx->enable_failover = read_env_bool(
         BONDP_ENV_ENABLE_FAILOVER, default_enable_failover);
     ctx->enable_failback = read_env_bool(
         BONDP_ENV_ENABLE_FAILBACK, default_enable_failback);
+    bondp_health_check_cfg_t *cfg = &ctx->health_check_cfg;
     cfg->backup_start_ms = read_env_uint64(
         BONDP_ENV_HEALTH_CHECK_BACKUP_START, default_health_check_backup_start_ms);
     cfg->backup_interval_ms = read_env_uint64(
@@ -221,26 +220,18 @@ static void read_all_env(bondp_global_context_t *ctx)
 
 static void print_all_env(const bondp_global_context_t *ctx)
 {
-    const bondp_health_thread_ctx_t *thread_ctx = &ctx->health_thread_ctx;
-    const bondp_health_check_cfg_t *cfg = &thread_ctx->cfg;
-
-    URMA_LOG_INFO("Health check config: enable_failover=%s, enable_failback=%s, enable_health_check=%s, "
+    const bondp_health_check_cfg_t *cfg = &ctx->health_check_cfg;
+    URMA_LOG_INFO("Bond config: enable_failover=%s, enable_failback=%s, enable_health_check=%s, "
                   "health_check_backup: start=%lums, interval=%lums, "
                   "health_check_active: start=%lums, interval=%lums, max_backoff=%u\n",
                   ctx->enable_failover ? "true" : "false",
                   ctx->enable_failback ? "true" : "false",
-                  thread_ctx->enable_health_check ? "true" : "false",
+                  ctx->enable_health_check ? "true" : "false",
                   cfg->backup_start_ms,
                   cfg->backup_interval_ms,
                   cfg->active_start_ms,
                   cfg->active_interval_ms,
                   cfg->active_max_backoff);
-}
-
-static void bondp_global_ctx_read_env(bondp_global_context_t *ctx)
-{
-    read_all_env(ctx);
-    print_all_env(ctx);
 }
 
 static int bondp_global_ctx_init(bondp_global_context_t **bondp_global_ctx)
@@ -251,16 +242,16 @@ static int bondp_global_ctx_init(bondp_global_context_t **bondp_global_ctx)
         return -1;
     }
 
-    ctx->pid = (uint32_t)getpid();
-    bondp_health_check_global_ctx_init(ctx);
-    bondp_global_ctx_read_env(ctx);
+    read_all_env(ctx);
+    bondp_health_check_global_ctx_init(&ctx->health_check_cfg);
+    print_all_env(ctx);
     *bondp_global_ctx = ctx;
     return 0;
 }
 
 static int bondp_global_ctx_uninit(bondp_global_context_t *bondp_global_ctx)
 {
-    bondp_health_check_global_ctx_uninit(bondp_global_ctx);
+    bondp_health_check_global_ctx_uninit();
     if (bondp_global_ctx->topo_map) {
         delete_topo_map(bondp_global_ctx->topo_map);
     }
@@ -333,7 +324,6 @@ static int get_topo_info_from_ko(bondp_context_t *bdp_ctx)
     urma_udrv_t data = {0};
     if (urma_cmd_user_ctl(&bdp_ctx->v_ctx, &in, &out, &data)) {
         URMA_LOG_ERR("Failed to get topo info, change to general mode\n");
-        g_bondp_global_ctx->skip_load_topo = true;
         return -1;
     }
     g_bondp_global_ctx->topo_map = create_topo_map(info_out.topo_info, info_out.node_num);
