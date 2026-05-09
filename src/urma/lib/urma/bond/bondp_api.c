@@ -1376,7 +1376,7 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
 
 urma_status_t bondp_modify_jetty(urma_jetty_t *jetty, urma_jetty_attr_t *attr)
 {
-    urma_status_t ret = URMA_SUCCESS, final_ret = URMA_SUCCESS;
+    urma_status_t ret = URMA_SUCCESS, final_ret = URMA_FAIL;
     bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
 
     if ((attr->mask & JETTY_STATE) && attr->state == URMA_JETTY_STATE_ERROR) {
@@ -1392,6 +1392,8 @@ urma_status_t bondp_modify_jetty(urma_jetty_t *jetty, urma_jetty_attr_t *attr)
         if (ret != URMA_SUCCESS) {
             final_ret = ret;
             URMA_LOG_ERR("modify pjetty fail, index=%d, ret=%d\n", i, final_ret);
+        } else {
+            final_ret = URMA_SUCCESS;
         }
         URMA_LOG_DEBUG("bondp modify_jetty p_jetty id is %u, new_state is %d.\n",
                        bdp_jetty->p_jetty[i]->jetty_id.id, attr->state);
