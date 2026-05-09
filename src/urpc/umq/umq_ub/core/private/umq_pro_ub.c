@@ -22,6 +22,15 @@
 
 #define UMQ_UB_FC_UNDATE_FAKE_BUF_SIZE 128 // in combind mode, buffer size more than umq_buf_t needs to be allocated
 
+/* In post_tx, SEND / SEND_IMM qbuf data is split into fixed 4K chunks, each chunk becomes one urma_wr
+ * with a single sge. UMQ_UB_TX_QBUF_SIZE (64K) is the assumed qbuf data size, which yields 16 wrs per
+ * qbuf. UMQ_UB_TX_MAX_WR caps the total number of split wrs that may be produced in a single call;
+ * it bounds the on-stack urma_wr / sges arrays, so callers must keep input qbuf count small enough
+ * that the total split wr count does not exceed it. */
+#define UMQ_UB_TX_SPLIT_SIZE  (4096U)
+#define UMQ_UB_TX_QBUF_SIZE   (65536U)
+#define UMQ_UB_TX_MAX_WR      (256U)
+
 int rx_buf_ctx_list_init(rx_buf_ctx_list_t *rx_buf_ctx_list, uint32_t ctx_num)
 {
     void *addr = calloc(ctx_num, sizeof(rx_buf_ctx_t));
@@ -246,15 +255,16 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
         return ret;
     }
     uint32_t max_sge_num = queue->max_tx_sge;
-    urma_jfs_wr_t urma_wr[UMQ_POST_POLL_BATCH];
+    urma_jfs_wr_t urma_wr[UMQ_UB_TX_MAX_WR];
     urma_jfs_wr_t *urma_wr_ptr = urma_wr;
-    urma_sge_t sges[UMQ_POST_POLL_BATCH][max_sge_num];
+    urma_sge_t sges[UMQ_UB_TX_MAX_WR][max_sge_num];
     urma_sge_t src_sge, dst_sge;
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO];
     urma_target_seg_t **tseg_list = queue->dev_ctx->tseg_list;
     urma_sge_t *sges_ptr;
     umq_buf_t *buffer = qbuf;
     uint16_t wr_index = 0;
+    uint16_t input_chain_count = 0;
     uint16_t max_tx = 0;
     bool opcode_consume_rqe = false;
     bool user_send_imm = false;
@@ -277,90 +287,205 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
         if (!user_send_imm) {
             user_send_imm = (opcode == UMQ_OPC_SEND_IMM);
         }
-        sges_ptr = sges[wr_index];
-        uint32_t sge_num = 0;
         uint64_t user_ctx = (uint64_t)(uintptr_t)buffer;
-        umq_buf_t *tmp_buf = buffer;
-        while (buffer && rest_size > 0) { // try to add up to total_size
-            if (sge_num++ >= max_sge_num) {
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, sge num exceed max sge num[%u]\n",
-                    EID_ARGS(*eid), id, max_sge_num);
-                *bad_qbuf = qbuf;
-                ret = -UMQ_ERR_EINVAL;
-                goto ERROR;
-            }
-            sges_ptr->addr = (uint64_t)(uintptr_t)buffer->buf_data;
-            sges_ptr->len = buffer->data_size;
-            sges_ptr->user_tseg = NULL;
-            if (buffer->mempool_without_data == 1) {
-                real_buf = umq_data_to_head(buffer->buf_data);
-                if (real_buf == NULL) {
-                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, get real buf failed\n",
-                        EID_ARGS(*eid), id);
+
+        if (opcode == UMQ_OPC_SEND || opcode == UMQ_OPC_SEND_IMM) {
+            /* Split path: walk the qbuf chain and split each buffer's data into UMQ_UB_TX_SPLIT_SIZE (4K)
+             * chunks. Each chunk becomes a single-sge urma_wr. To keep upper-layer (ubs) accounting
+             * intact, exactly ONE TX completion is generated per logical chain: only the LAST split wr
+             * inherits the original flag.value (complete_enable / solicited_enable) and user_ctx
+             * (pointing to the head qbuf of this chain); all earlier split wrs clear flag.value and
+             * user_ctx so they neither generate a CR nor wake the receiver. For SEND_IMM only the LAST
+             * split wr carries imm_data and is promoted to URMA_OPC_SEND_IMM. */
+            uint16_t chain_first_wr_index = wr_index;
+            while (buffer && rest_size > 0) {
+                if (rest_size < buffer->data_size) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, cannot put together tx buffer, "
+                        "rest size is negative\n", EID_ARGS(*eid), id);
+                    *bad_qbuf = qbuf;
                     ret = -UMQ_ERR_EINVAL;
                     goto ERROR;
                 }
-            } else {
-                real_buf = buffer;
+                if (buffer->mempool_without_data == 1) {
+                    real_buf = umq_data_to_head(buffer->buf_data);
+                    if (real_buf == NULL) {
+                        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, get real buf failed\n",
+                            EID_ARGS(*eid), id);
+                        ret = -UMQ_ERR_EINVAL;
+                        goto ERROR;
+                    }
+                } else {
+                    real_buf = buffer;
+                }
+                if (real_buf->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, ub only supports using pooled "
+                        "memory\n", EID_ARGS(*eid), id);
+                    ret = -UMQ_ERR_EINVAL;
+                    goto ERROR;
+                }
+                urma_target_seg_t *cur_tseg = tseg_list[real_buf->mempool_id];
+                if (cur_tseg == NULL) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, mempool %u tseg not exist\n",
+                        EID_ARGS(*eid), id, real_buf->mempool_id);
+                    ret = -UMQ_ERR_EINVAL;
+                    goto ERROR;
+                }
+
+                uint32_t buf_offset = 0;
+                uint32_t buf_remain = buffer->data_size;
+                while (buf_remain > 0) {
+                    if (wr_index >= UMQ_UB_TX_MAX_WR) {
+                        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, split wr count exceeds %u, "
+                            "not supported\n", EID_ARGS(*eid), id, UMQ_UB_TX_MAX_WR);
+                        *bad_qbuf = qbuf;
+                        ret = -UMQ_ERR_EINVAL;
+                        goto ERROR;
+                    }
+                    uint32_t chunk = (buf_remain > UMQ_UB_TX_SPLIT_SIZE) ? UMQ_UB_TX_SPLIT_SIZE : buf_remain;
+                    sges_ptr = sges[wr_index];
+                    sges_ptr->addr = (uint64_t)(uintptr_t)buffer->buf_data + buf_offset;
+                    sges_ptr->len = chunk;
+                    sges_ptr->user_tseg = NULL;
+                    sges_ptr->tseg = cur_tseg;
+
+                    urma_wr_ptr->send.src.sge = sges_ptr;
+                    urma_wr_ptr->send.src.num_sge = 1;
+                    /* Intermediate split wrs: no completion, no solicited, no user_ctx.
+                     * The last wr of the chain is fixed up after this loop. */
+                    urma_wr_ptr->user_ctx = 0;
+                    urma_wr_ptr->opcode = URMA_OPC_SEND;
+                    urma_wr_ptr->flag.value = 0;
+                    urma_wr_ptr->tjetty = tjetty;
+                    urma_wr_ptr++;
+                    (urma_wr_ptr - 1)->next = urma_wr_ptr;
+
+                    wr_index++;
+                    buf_offset += chunk;
+                    buf_remain -= chunk;
+                    rest_size -= chunk;
+                }
+                buffer = QBUF_LIST_NEXT(buffer);
             }
 
-            if (real_buf->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, ub only supports using pooled memory\n",
+            if (rest_size != 0) {
+                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, cannot put together enough tx buffer\n",
                     EID_ARGS(*eid), id);
+                *bad_qbuf = qbuf;
+                ret = -UMQ_ERR_ENOMEM;
                 goto ERROR;
             }
 
-            sges_ptr->tseg = tseg_list[real_buf->mempool_id];
-            if (sges_ptr->tseg == NULL) {
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, mempool %u tseg not exist\n",
-                    EID_ARGS(*eid), id, real_buf->mempool_id);
-                ret = -UMQ_ERR_EINVAL;
+            if (wr_index > chain_first_wr_index) {
+                urma_jfs_wr_t *last_wr = &urma_wr[wr_index - 1];
+                /* Restore original flag (complete_enable / solicited_enable, etc.) and user_ctx on
+                 * the LAST split wr so the upper layer sees exactly one TX completion per chain. */
+                last_wr->flag.value = buf_pro->flag.value;
+                last_wr->user_ctx = user_ctx;
+                if (opcode == UMQ_OPC_SEND_IMM) {
+                    buf_pro->imm.rsvd0 = 0;
+                    last_wr->opcode = URMA_OPC_SEND_IMM;
+                    last_wr->send.imm_data = buf_pro->imm_data;
+                }
+            }
+
+            opcode_consume_rqe = true;
+        } else {
+            /* Non-split path: original logic for READ / WRITE / WRITE_IMM (one wr per qbuf chain). */
+            sges_ptr = sges[wr_index];
+            uint32_t sge_num = 0;
+            umq_buf_t *tmp_buf = buffer;
+            while (buffer && rest_size > 0) { // try to add up to total_size
+                if (sge_num++ >= max_sge_num) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, sge num exceed max sge num[%u]\n",
+                        EID_ARGS(*eid), id, max_sge_num);
+                    *bad_qbuf = qbuf;
+                    ret = -UMQ_ERR_EINVAL;
+                    goto ERROR;
+                }
+                sges_ptr->addr = (uint64_t)(uintptr_t)buffer->buf_data;
+                sges_ptr->len = buffer->data_size;
+                sges_ptr->user_tseg = NULL;
+                if (buffer->mempool_without_data == 1) {
+                    real_buf = umq_data_to_head(buffer->buf_data);
+                    if (real_buf == NULL) {
+                        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, get real buf failed\n",
+                            EID_ARGS(*eid), id);
+                        ret = -UMQ_ERR_EINVAL;
+                        goto ERROR;
+                    }
+                } else {
+                    real_buf = buffer;
+                }
+
+                if (real_buf->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, ub only supports using pooled "
+                        "memory\n", EID_ARGS(*eid), id);
+                    goto ERROR;
+                }
+
+                sges_ptr->tseg = tseg_list[real_buf->mempool_id];
+                if (sges_ptr->tseg == NULL) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, mempool %u tseg not exist\n",
+                        EID_ARGS(*eid), id, real_buf->mempool_id);
+                    ret = -UMQ_ERR_EINVAL;
+                    goto ERROR;
+                }
+                sges_ptr++;
+
+                if (rest_size < buffer->data_size) { // if cannot add up to total_size, return fail
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, cannot put together tx buffer, "
+                        "rest size is negative\n", EID_ARGS(*eid), id);
+                    *bad_qbuf = qbuf;
+                    ret = -UMQ_ERR_EINVAL;
+                    goto ERROR;
+                }
+
+                rest_size -= buffer->data_size;
+                buffer = QBUF_LIST_NEXT(buffer);
+            }
+
+            if (rest_size != 0) { // if cannot add up to total_size, return fail
+                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, cannot put together enough tx buffer\n",
+                    EID_ARGS(*eid), id);
+                *bad_qbuf = qbuf;
+                ret = -UMQ_ERR_ENOMEM;
                 goto ERROR;
             }
-            sges_ptr++;
-
-            if (rest_size < buffer->data_size) { // if cannot add up to total_size, return fail
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, cannot put together tx buffer, rest size"
-                    " is negative\n", EID_ARGS(*eid), id);
+            if (wr_index >= UMQ_UB_TX_MAX_WR) {
+                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, wr count exceeds %u, not supported\n",
+                    EID_ARGS(*eid), id, UMQ_UB_TX_MAX_WR);
                 *bad_qbuf = qbuf;
                 ret = -UMQ_ERR_EINVAL;
                 goto ERROR;
             }
-
-            rest_size -= buffer->data_size;
-            buffer = QBUF_LIST_NEXT(buffer);
+            ret = umq_ub_fill_wr(queue, tmp_buf, urma_wr_ptr, sges[wr_index], sge_num, &src_sge, &dst_sge);
+            if (ret != UMQ_SUCCESS) {
+                *bad_qbuf = qbuf;
+                goto ERROR;
+            }
+            urma_wr_ptr->user_ctx = user_ctx;
+            urma_wr_ptr->opcode = transform_op_code(opcode);
+            urma_wr_ptr->flag.value = buf_pro->flag.value;
+            urma_wr_ptr->tjetty = tjetty;
+            opcode_consume_rqe = (opcode == UMQ_OPC_WRITE_IMM);
+            urma_wr_ptr++;
+            (urma_wr_ptr - 1)->next = urma_wr_ptr;
+            wr_index++;
         }
 
-        if (rest_size != 0) { // if cannot add up to total_size, return fail
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, cannot put together enough tx buffer\n",
-                EID_ARGS(*eid), id);
-            *bad_qbuf = qbuf;
-            ret = -UMQ_ERR_ENOMEM;
-            goto ERROR;
-        }
-        ret = umq_ub_fill_wr(queue, tmp_buf, urma_wr_ptr, sges[wr_index], sge_num, &src_sge, &dst_sge);
-        if (ret != UMQ_SUCCESS) {
-            *bad_qbuf = qbuf;
-            goto ERROR;
-        }
-        urma_wr_ptr->user_ctx = user_ctx;
-        urma_wr_ptr->opcode = transform_op_code(opcode);
-        urma_wr_ptr->flag.value = buf_pro->flag.value;
-        urma_wr_ptr->tjetty = tjetty;
-        opcode_consume_rqe = (opcode == UMQ_OPC_SEND || opcode == UMQ_OPC_SEND_IMM ||
-                              opcode == UMQ_OPC_WRITE_IMM);
-        urma_wr_ptr++;
-        (urma_wr_ptr - 1)->next = urma_wr_ptr;
-
-        wr_index++;
-        if (wr_index == UMQ_BATCH_SIZE && buffer != NULL) {
-            // wr count exceed UMQ_BATCH_SIZE
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, wr count exceeds %d, not supported\n",
-                EID_ARGS(*eid), id, UMQ_BATCH_SIZE);
+        input_chain_count++;
+        if (input_chain_count >= UMQ_BATCH_SIZE && buffer != NULL) {
+            // input qbuf chain count exceed UMQ_BATCH_SIZE
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, input qbuf chain count exceeds %d, "
+                "not supported\n", EID_ARGS(*eid), id, UMQ_BATCH_SIZE);
             *bad_qbuf = qbuf;
             ret = -UMQ_ERR_EINVAL;
             goto ERROR;
         }
+    }
+
+    if (wr_index == 0) {
+        return UMQ_SUCCESS;
     }
     (urma_wr_ptr - 1)->next = NULL;
     max_tx = opcode_consume_rqe ? umq_ub_window_dec(&queue->flow_control, queue, wr_index) : wr_index;
