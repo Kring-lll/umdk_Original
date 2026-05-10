@@ -7,8 +7,6 @@ pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0)
 pkg_check_modules(LIBNL3 REQUIRED IMPORTED_TARGET libnl-3.0)
 pkg_check_modules(LIBNL_GENL3 REQUIRED IMPORTED_TARGET libnl-genl-3.0)
 pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
-pkg_check_modules(OPENSSL REQUIRED IMPORTED_TARGET openssl)
-pkg_check_modules(KEYUTILS REQUIRED IMPORTED_TARGET libkeyutils)
 
 add_executable(ums_agent
     ums_agent_main.c
@@ -16,6 +14,11 @@ add_executable(ums_agent
     ums_agent_config.h
     ums_agent_log.c
     ums_agent_log.h
+    ums_agent_types.h
+    ums_agent_utils.c
+    ums_agent_utils.h
+    ums_agent_epoll.c
+    ums_agent_epoll.h
 )
 
 set_target_properties(ums_agent
@@ -35,8 +38,6 @@ target_link_libraries(ums_agent
         PkgConfig::LIBNL3
         PkgConfig::LIBNL_GENL3
         PkgConfig::SYSTEMD
-        PkgConfig::OPENSSL
-        PkgConfig::KEYUTILS
 )
 
 install(TARGETS ums_agent
