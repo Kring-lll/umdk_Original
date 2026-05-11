@@ -70,6 +70,18 @@ int uvs_ubagg_ioctl_get_dev_name_by_eid(uvs_eid_t *eid, char *buf, size_t len);
 int uvs_ubagg_ioctl_set_topo(void *topo_info, int topo_num);
 int uvs_ubcore_ioctl_get_topo(void *topo_map);
 int uvs_ubcore_ioctl_set_topo(void *topo_info, int topo_num);
+int uvs_ubcore_ioctl_set_main_primary_eid(const uvs_main_primary_eid_entry_t *entry);
+int uvs_ubcore_ioctl_del_main_primary_eid(const uvs_eid_t *prefix, uint8_t prefix_len);
+int uvs_ubcore_ioctl_lookup_main_primary_eid(const uvs_eid_t *eid,
+                                             uvs_eid_t *main_primary_eid);
+int uvs_ubcore_ioctl_dump_main_primary_eid(uvs_main_primary_eid_entry_t *entries,
+                                           uint32_t entry_num, uint32_t *copied_num,
+                                           uint32_t *total_num);
+int uvs_ubcore_ioctl_flush_main_primary_eid(uint32_t flags);
+int uvs_ubcore_ioctl_replace_main_primary_eid_batch(const uvs_main_primary_eid_entry_t *entries,
+                                                    uint32_t entry_num, uint32_t flags);
+int uvs_ubcore_ioctl_set_main_primary_eid_batch(const uvs_main_primary_eid_entry_t *entries,
+                                                uint32_t entry_num, uint32_t flags);
 int uvs_ubcore_ioctl_get_route_list(const uvs_route_t *route, uvs_route_list_t *route_list);
 int uvs_ubcore_ioctl_get_path_set(const uvs_eid_t *src_bondind_eid,
                                   const uvs_eid_t *dst_bonding_eid,
