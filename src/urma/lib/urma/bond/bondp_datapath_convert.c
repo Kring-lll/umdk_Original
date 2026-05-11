@@ -54,6 +54,7 @@ static int copy_sg_list(const urma_sg_t *src, urma_sg_t *dst, urma_sge_t *preall
         } else {
             dst->sge = (urma_sge_t *)malloc(dst->num_sge * sizeof(urma_sge_t));
             if (dst->sge == NULL) {
+                URMA_LOG_ERR("Failed to alloc sge array, num_sge=%u\n", dst->num_sge);
                 return -1;
             }
         }
@@ -81,13 +82,16 @@ urma_status_t copy_jfs_wr(const urma_jfs_wr_t *src, urma_jfs_wr_t *dst,
     if (is_rw_wr(src)) {
         if (copy_sg_list(&src->rw.src, &dst->rw.src, prealloc_src_sge) != 0 ||
             copy_sg_list(&src->rw.dst, &dst->rw.dst, prealloc_dst_sge) != 0) {
+            URMA_LOG_ERR("Failed to copy sge list for rw wr\n");
             return URMA_ENOMEM;
         }
     } else if (is_send_wr(src)) {
         if (copy_sg_list(&src->send.src, &dst->send.src, prealloc_src_sge) != 0) {
+            URMA_LOG_ERR("Failed to copy src sge list for send wr\n");
             return URMA_ENOMEM;
         }
     } else {
+        URMA_LOG_ERR("Unsupported opcode for JFS WR copy, opcode=%u\n", src->opcode);
         return URMA_EINVAL;
     }
     return 0;
@@ -103,6 +107,7 @@ urma_status_t copy_jfr_wr(const urma_jfr_wr_t *src, urma_jfr_wr_t *dst,
     dst->next = NULL;
 
     if (copy_sg_list(&src->src, &dst->src, prealloc_src_sge) != 0) {
+        URMA_LOG_ERR("Failed to copy sge list for jfr wr\n");
         return URMA_ENOMEM;
     }
     return URMA_SUCCESS;
@@ -283,7 +288,7 @@ urma_status_t convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target
             map_fadd_vwr_to_path(wr, send_idx, target_idx);
             return URMA_SUCCESS;
         default:
-            URMA_LOG_ERR("Unsupported send opcode\n");
+            URMA_LOG_ERR("Unsupported send opcode=%u\n", wr->opcode);
             return URMA_EINVAL;
     }
     return URMA_SUCCESS;
@@ -405,7 +410,10 @@ void convert_pcr_to_vcr(urma_cr_t *cr, bondp_context_t *bdp_ctx, uint32_t *msn)
         decode_imm_data(cr->imm_data, &cr->opcode, msn, &cr->remote_id.id, &cr->imm_data);
 
         urma_eid_t target_eid;
-        (void)get_bonding_eid_by_target_eid(bdp_ctx->topo_map, &cr->remote_id.eid, &target_eid);
+        int ret = get_bonding_eid_by_target_eid(bdp_ctx->topo_map, &cr->remote_id.eid, &target_eid);
+        if (ret != 0) {
+            URMA_LOG_ERR("Failed to get bonding eid by target eid, ret=%d.\n", ret);
+        }
         cr->remote_id.eid = target_eid;
     } else {
         /*

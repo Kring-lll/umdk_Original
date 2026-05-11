@@ -55,6 +55,7 @@ urma_token_id_t *bondp_alloc_token_id(urma_context_t *ctx)
 {
     urma_token_id_t *token = calloc(1, sizeof(urma_token_id_t));
     if (token == NULL) {
+        URMA_LOG_ERR("Failed to alloc urma_token_id.\n");
         return NULL;
     }
     token->urma_ctx = ctx;
@@ -78,9 +79,10 @@ static int bondp_delete_pseg(bondp_tseg_t *bdp_seg)
         URMA_LOG_INFO("bondp delete_pseg token_id is %u.\n",
             bdp_seg->p_tseg[i]->seg.token_id);
         bdp_seg->p_tseg[i]->handle = bdp_seg->p_orig_handle[i];
-        if (urma_unregister_seg(bdp_seg->p_tseg[i]) != URMA_SUCCESS) {
-            URMA_LOG_ERR("Failed to unregister pseg %d\n", i);
-            ret = URMA_FAIL;
+        urma_status_t unreg_ret = urma_unregister_seg(bdp_seg->p_tseg[i]);
+        if (unreg_ret != URMA_SUCCESS) {
+            URMA_LOG_ERR("Failed to unregister pseg %d, ret=%d.\n", i, unreg_ret);
+            ret = unreg_ret;
         }
         bdp_seg->p_tseg[i] = NULL;
     }
@@ -138,10 +140,11 @@ static int bondp_delete_vseg(bondp_tseg_t *bdp_seg)
     URMA_LOG_INFO("bondp delete_vseg, token_id is %u, bdp_seg use_cnt is %lu.\n",
             bdp_seg->v_tseg.seg.token_id, ref_cnt);
 
-    if (urma_cmd_unregister_seg(target_seg) != 0) {
-        URMA_LOG_ERR("Failed to unregister segment, token_id=%u, handle=%lu.\n",
-                     target_seg->seg.token_id, target_seg->handle);
-        return URMA_FAIL;
+    int ret = urma_cmd_unregister_seg(target_seg);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to unregister segment, token_id=%u, handle=%lu, ret=%d.\n",
+                     target_seg->seg.token_id, target_seg->handle, ret);
+        return ret;
     }
 
     URMA_LOG_INFO("Successfully unregistered seg, handle=%lu.\n", target_seg->handle);
@@ -307,6 +310,7 @@ static int bondp_add_v2p_token_id(bondp_context_t *bdp_ctx, bondp_v2p_token_id_t
         /* remove the token_id with target_idx */
         ret = bdp_r_v2p_token_id_del_idx_lockless(tbl, target_idx);
         if (ret != 0) {
+            URMA_LOG_ERR("Failed to delete old token id, target_idx=%u ret=%d.\n", target_idx, ret);
             (void)pthread_rwlock_unlock(&tbl->lock);
             return ret;
         }
@@ -315,6 +319,7 @@ static int bondp_add_v2p_token_id(bondp_context_t *bdp_ctx, bondp_v2p_token_id_t
     v2p_token_id->index = target_idx;
     ret = bdp_r_v2p_token_id_table_add_lockless(tbl, v2p_token_id);
     if (ret != 0) {
+        URMA_LOG_ERR("Failed to add new token id, target_idx=%u ret=%d.\n", target_idx, ret);
         (void)pthread_rwlock_unlock(&tbl->lock);
         return ret;
     }
@@ -375,7 +380,7 @@ static int bondp_import_vseg(urma_context_t *ctx, urma_seg_t *seg,
             return 0;
         }
     }
-
+    URMA_LOG_ERR("Failed to import vseg, ret=%d.\n", ret);
     return ret;
 }
 
@@ -396,6 +401,7 @@ static int bondp_import_pseg(bondp_context_t *bdp_ctx, urma_seg_t *seg,
             if (ret == BONDP_SKIP) {
                 continue;
             } else if (ret == BONDP_ERROR) {
+                URMA_LOG_ERR("Failed to import pseg for route (%d, %d).\n", i, j);
                 return -1;
             }
             has_valid_route = true;
@@ -424,8 +430,10 @@ static int bondp_unimport_pseg(bondp_import_tseg_t *bdp_tseg)
                 continue;
             }
             bdp_tseg->p_tseg[i][j]->handle = bdp_tseg->p_orig_handle[i][j];
-            if (urma_unimport_seg(bdp_tseg->p_tseg[i][j]) != URMA_SUCCESS) {
-                ret = URMA_FAIL;
+            urma_status_t unimport_ret = urma_unimport_seg(bdp_tseg->p_tseg[i][j]);
+            if (unimport_ret != URMA_SUCCESS) {
+                URMA_LOG_ERR("Failed to unimport seg (%d,%d), ret=%d.\n", i, j, unimport_ret);
+                ret = unimport_ret;
             }
             bdp_tseg->p_tseg[i][j] = NULL;
         }
@@ -494,6 +502,7 @@ urma_target_seg_t *bondp_import_seg(urma_context_t *ctx, urma_seg_t *seg,
         v2p_token_id.v_handle = bdp_tseg->v_tseg.handle;
         int ret = bondp_add_v2p_token_id(bdp_ctx, &v2p_token_id);
         if (ret != 0) {
+            URMA_LOG_ERR("Failed to add v2p token id, ret=%d.\n", ret);
             goto unimport_pseg;
         }
     }

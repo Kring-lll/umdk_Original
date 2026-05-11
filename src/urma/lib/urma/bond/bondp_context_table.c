@@ -39,7 +39,11 @@ static uint32_t bdp_p_vjetty_id_hash(void *key)
 
 int bdp_p_vjetty_id_table_create(bondp_hash_table_t *tbl, uint32_t size)
 {
-    return bondp_hash_table_create(tbl, size, bdp_p_vjetty_id_comp, bdp_p_vjetty_id_free, bdp_p_vjetty_id_hash);
+    int ret = bondp_hash_table_create(tbl, size, bdp_p_vjetty_id_comp, bdp_p_vjetty_id_free, bdp_p_vjetty_id_hash);
+    if (ret) {
+        URMA_LOG_ERR("Failed to create p_vjetty_id_table, ret=%d\n", ret);
+    }
+    return ret;
 }
 
 int bdp_p_vjetty_id_table_destroy(bondp_hash_table_t *tbl)
@@ -58,15 +62,20 @@ int bdp_p_vjetty_id_table_add_without_lock(bondp_hash_table_t *tbl, urma_jetty_i
         .type = type
     };
     if (comp == NULL) {
+        URMA_LOG_ERR("Invalid parameter: comp is NULL\n");
         return BONDP_HASH_MAP_INVALID_PARAM_ERROR;
     }
     uint32_t hash = bdp_p_vjetty_id_hash(&key);
     node = bondp_hash_table_lookup_without_lock(tbl, &key, hash);
     if (node) {
+        const char *type_str = (type == JETTY) ? "JETTY" : (type == JFS) ? "JFS" : "JFR";
+        URMA_LOG_DEBUG("Node already added into hash table, pjetty_id.id=%u, type=%s, hash=%u.\n",
+                       pjetty_id.id, type_str, hash);
         return BONDP_HASH_MAP_COLLIDE_ERROR;
     }
     tmp = calloc(1, sizeof(bdp_p_vjetty_id_t));
     if (!tmp) {
+        URMA_LOG_ERR("Failed to alloc bdp_p_vjetty_id\n");
         return BONDP_HASH_MAP_ALLOC_ERROR;
     }
     tmp->key = key;
@@ -87,6 +96,9 @@ int bdp_p_vjetty_id_table_del_without_lock(bondp_hash_table_t *tbl, urma_jetty_i
 
     node = bondp_hash_table_lookup_without_lock(tbl, &key, hash);
     if (!node) {
+        const char *type_str = (type == JETTY) ? "JETTY" : (type == JFS) ? "JFS" : "JFR";
+        URMA_LOG_DEBUG("Node not found in hash table for deletion, pjetty_id.id=%u, type=%s, hash=%u.\n",
+                       pjetty_id.id, type_str, hash);   
         return BONDP_HASH_MAP_NOT_FOUND_ERROR;
     }
     bondp_hash_table_remove_without_lock(tbl, node);
@@ -105,6 +117,9 @@ struct bondp_comp *bdp_p_vjetty_id_table_lookup_comp_without_lock(bondp_hash_tab
     uint32_t hash = bdp_p_vjetty_id_hash(&key);
     node = bondp_hash_table_lookup_without_lock(tbl, &key, hash);
     if (node == NULL) {
+        const char *type_str = (type == JETTY) ? "JETTY" : (type == JFS) ? "JFS" : "JFR";
+        URMA_LOG_DEBUG("Node not found in hash table, pjetty_id.id=%u, type=%s, hash=%u.\n",
+                       pjetty_id.id, type_str, hash);
         return NULL;
     }
     bdp_p_vjetty_id_t *item = CONTAINER_OF_FIELD(node, bdp_p_vjetty_id_t, hmap_node);
@@ -135,8 +150,12 @@ static uint32_t bdp_r_v2p_token_id_hash(void *key)
 
 int bdp_r_v2p_token_id_table_create(bondp_hash_table_t *tbl, uint32_t size)
 {
-    return bondp_hash_table_create(tbl, size,
+    int ret = bondp_hash_table_create(tbl, size,
         bdp_r_v2p_token_id_comp, bdp_r_v2p_token_id_free, bdp_r_v2p_token_id_hash);
+    if (ret) {
+        URMA_LOG_ERR("Failed to create bdp_r_v2p_token_id_table, ret=%d\n", ret);
+    }
+    return ret;
 }
 
 int bdp_r_v2p_token_id_table_destroy(bondp_hash_table_t *tbl)
@@ -157,6 +176,7 @@ int bdp_r_v2p_token_id_tabl_lookup(bondp_hash_table_t *tbl, uint32_t v_token_id,
     (void)pthread_rwlock_rdlock(&tbl->lock);
     node = bondp_hash_table_lookup_without_lock(tbl, &key, hash);
     if (node == NULL) {
+        URMA_LOG_DEBUG("Node not found in hash table, v_token_id=%u, hash=%u.\n", v_token_id, hash);
         (void)pthread_rwlock_unlock(&tbl->lock);
         return BONDP_HASH_MAP_NOT_FOUND_ERROR;
     }
@@ -202,6 +222,7 @@ int bdp_r_v2p_token_id_table_add_lockless(bondp_hash_table_t *tbl, bondp_v2p_tok
 
     bondp_v2p_token_id_t *new_item = calloc(1, sizeof(bondp_v2p_token_id_t));
     if (new_item == NULL) {
+        URMA_LOG_ERR("Failed to alloc bondp_v2p_token_id.\n");
         return BONDP_HASH_MAP_ALLOC_ERROR;
     }
 
