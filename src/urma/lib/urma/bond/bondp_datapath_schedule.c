@@ -90,7 +90,6 @@ static int schedule_send_active_backup(const bondp_comp_t *bdp_comp, const bondp
         *target_idx = (int)bdp_tjetty->active_indices[i];
         return 0;
     }
-
     return -1;
 }
 
@@ -118,6 +117,11 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
         }
         select_least_load_path(bdp_comp, min_active_count, min, max, least_load_pos, &least_load_cnt);
         if (least_load_cnt == 0 && !enable_info_fallback) {
+            URMA_LOG_ERR("No least load path found and info fallback is disabled, "
+                         "min_active_count=%u, bonding_level=%d, src_chip_id=%d.\n",
+                         min_active_count,
+                         bdp_comp->bondp_ctx->bonding_level,
+                         info ? info->src_chip_id : -1);
             return URMA_FAIL;
         }
     }
@@ -137,6 +141,7 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
     }
 
     if (least_load_cnt == 0) {
+        URMA_LOG_ERR("No least load path found, range=[%d,%d].\n", min, max);
         return URMA_FAIL;
     }
 
@@ -196,6 +201,7 @@ int schedule_send(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp, int *send
         case BONDP_BONDING_MODE_BALANCE:
             return schedule_send_balance(bdp_comp, bdp_tjetty, send_idx, target_idx, info);
         default:
+            URMA_LOG_ERR("Unknown bonding mode=%d.\n", bdp_comp->bondp_ctx->bonding_mode);
             return -1;
     }
 }
@@ -214,6 +220,7 @@ int schedule_recv(bondp_comp_t *bdp_comp, int *recv_idx)
         case BONDP_BONDING_MODE_BALANCE:
             return schedule_recv_balance(bdp_comp, recv_idx);
         default:
+            URMA_LOG_ERR("Unknown bonding mode=%d.\n", bdp_comp->bondp_ctx->bonding_mode);
             return -1;
     }
 }
