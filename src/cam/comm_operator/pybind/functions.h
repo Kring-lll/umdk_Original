@@ -24,6 +24,8 @@ std::vector<at::Tensor> FusedDeepMoeImplAutograd(
     const at::TensorList &gmm2Weight, \
     const at::TensorList &gmm2WeightScale, \
     const at::Tensor &expertScales, \
+    const c10::optional<at::Tensor> &gmm1BiasOptional, \
+    const c10::optional<at::Tensor> &gmm2BiasOptional, \
     const c10::optional<at::Tensor> &shareGmm1WeightOptional, \
     const c10::optional<at::Tensor> &shareGmm1WeightScaleOptional, \
     const c10::optional<at::Tensor> &shareGmm2WeightOptional, \

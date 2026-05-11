@@ -108,11 +108,13 @@ class DecodeMoeOps(torch.nn.Module):
         self.share_smooth_scales = convert_tensor_into_parameter(share_smooth_scales)
 
     def _process_weights_after_loading(self, weight_datas):
-        gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale, smooth_scales = weight_datas
+        gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale, smooth_scales, gmm1_bias, gmm2_bias = weight_datas
         self.gmm1_weight = convert_tensor_into_parameter(gmm1_weight, trans_nz=True)
         self.gmm1_weight_scale = convert_tensor_into_parameter(gmm1_weight_scale)
         self.gmm2_weight = convert_tensor_into_parameter(gmm2_weight, trans_nz=True)
         self.gmm2_weight_scale = convert_tensor_into_parameter(gmm2_weight_scale)
+        self.gmm1_bias = convert_tensor_into_parameter(gmm1_bias)
+        self.gmm2_bias = convert_tensor_into_parameter(gmm2_bias)
         self.smooth_scales = convert_tensor_into_parameter(smooth_scales)
 
     def _apply_ops(self, x, expert_ids, expert_scales, x_active_mask):
@@ -247,6 +249,8 @@ class FusionOp(DecodeMoeOps):
             gmm2_weight=self.gmm2_weight,
             gmm2_weight_scale=self.gmm2_weight_scale,
             expert_scales=expert_scales,
+            gmm1_bias=self.gmm1_bias,
+            gmm2_bias=self.gmm2_bias,
             share_gmm1_weight=self.share_gmm1_weight,
             share_gmm1_weight_scale=self.share_gmm1_weight_scale,
             share_gmm2_weight=self.share_gmm2_weight,
@@ -271,11 +275,13 @@ class FusionOp(DecodeMoeOps):
             self.share_smooth_scales_fp32 = None
 
     def _process_weights_after_loading(self, weight_datas):
-        gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale, smooth_scales = weight_datas
+        gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale, smooth_scales, gmm1_bias, gmm2_bias = weight_datas
         gmm1_weight = convert_tensor_into_parameter(gmm1_weight, trans_nz=True)
         gmm1_weight_scale = convert_tensor_into_parameter(gmm1_weight_scale)
         gmm2_weight = convert_tensor_into_parameter(gmm2_weight, trans_nz=True)
         gmm2_weight_scale = convert_tensor_into_parameter(gmm2_weight_scale)
+        self.gmm1_bias = convert_tensor_into_parameter(gmm1_bias)
+        self.gmm2_bias = convert_tensor_into_parameter(gmm2_bias)
         if self.dynamic_eplb:
             self.gmm1_weight = [
                 weight.clone() for weight in gmm1_weight.unbind(dim=0)
@@ -335,6 +341,9 @@ def generate_datas(batch_size,
     gmm2_weight_scale = torch.rand([local_expert_num, gmm2_output_dim
                                     ]) * 0.003 + 0.0015
     expert_scales = torch.rand(actual_bs, top_k)
+    # Generate bias
+    gmm1_bias = torch.zeros([1, gmm1_output_dim])
+    gmm2_bias = torch.zeros([1, gmm2_output_dim])
     # Generate shared expert weights
     share_mm1_weight = None
     share_mm1_weight_scale = None
@@ -372,7 +381,7 @@ def generate_datas(batch_size,
             (torch.ones(valid_token_num),
              torch.zeros(actual_bs - valid_token_num))).bool()
     return (x, expert_ids, expert_scales, x_active_mask), \
-            (gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale, smooth_scales), \
+            (gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale, smooth_scales, gmm1_bias, gmm2_bias), \
             (share_mm1_weight, share_mm1_weight_scale, share_mm2_weight, share_mm2_weight_scale, share_smooth_scales), \
             actual_bs, valid_token_num
 
