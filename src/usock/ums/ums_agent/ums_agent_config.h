@@ -14,8 +14,9 @@
 #include <stdint.h>
 #include <limits.h>
 
-#include "ums_agent_log.h"
 #include "ums_agent_types.h"
+
+#include "ums_agent_log.h"
 
 #define UMS_AGENT_MAX_CIPHER_LEN     256
 #define UMS_AGENT_MAX_PWD_DESC_LEN 128
