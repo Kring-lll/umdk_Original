@@ -116,19 +116,24 @@ void bondp_notify_health_event(bondp_context_t *bdp_ctx, bondp_health_event_t ev
     const bondp_health_event_info_t *info)
 {
     if (!bondp_health_check_enabled() || bdp_ctx == NULL) {
+        URMA_LOG_WARN("Health check not enabled or bdp_ctx is NULL, enabled=%d, bdp_ctx=%p.\n",
+                      bondp_health_check_enabled(), (void *)bdp_ctx);
         return;
     }
 
     bondp_heath_check_ctx_t *health = &bdp_ctx->bondp_heath_check_ctx;
     if (health->health_check_fd < 0) {
+        URMA_LOG_WARN("Health check fd is invalid.\n");
         return;
     }
 
     if (!bondp_valid_health_event(event)) {
+        URMA_LOG_WARN("Invalid health event, event=%d.\n", event);
         return;
     }
 
     if (!bondp_health_event_push(bdp_ctx, event, info)) {
+        URMA_LOG_WARN("Failed to push health event, event=%d.\n", event);
         return;
     }
 
@@ -156,12 +161,16 @@ static int bondp_get_target_idx_by_local_idx(const bondp_health_task_t *task, in
             return 0;
         }
     }
+    URMA_LOG_WARN("Failed to get target idx by local idx, local_idx=%d.\n", local_idx);
     return -1;
 }
 
 static int bondp_select_backup_local_idx(const bondp_health_task_t *task, int *backup_local_idx)
 {
     if (task == NULL || backup_local_idx == NULL || task->bondp_jetty == NULL) {
+        URMA_LOG_ERR("Invalid parameter, task=%p backup_local_idx=%p bondp_jetty=%p.\n",
+                     (void *)task, (void *)backup_local_idx,
+                     task ? (void *)task->bondp_jetty : NULL); 
         return -1;
     }
 
@@ -181,6 +190,7 @@ static int bondp_select_backup_local_idx(const bondp_health_task_t *task, int *b
         *backup_local_idx = local_idx;
         return 0;
     }
+    URMA_LOG_WARN("Failed to select backup local idx.\n");
     return -1;
 }
 
@@ -388,6 +398,7 @@ int bondp_fill_vjetty_health_info(bondp_context_t *bond_ctx, bondp_comp_t *bdp_j
 {
     *is_health_check_enable = bondp_health_check_enabled();
     if (!(*is_health_check_enable)) {
+        URMA_LOG_INFO("Health check not enabled, skip filling health info.\n");
         return 0;
     }
 
@@ -465,9 +476,10 @@ int bondp_unimport_health_check_tseg(bondp_target_jetty_t *bdp_tjetty)
                 continue;
             }
 
-            if (urma_unimport_seg(bdp_tjetty->p_check_tseg[i][j]) != URMA_SUCCESS) {
-                URMA_LOG_ERR("Failed to unimport health check seg (%d, %d)\n", i, j);
-                ret = URMA_FAIL;
+            urma_status_t unimport_ret = urma_unimport_seg(bdp_tjetty->p_check_tseg[i][j]);
+            if (unimport_ret != URMA_SUCCESS) {
+                URMA_LOG_ERR("Failed to unimport health check seg (%d, %d), ret=%d.\n", i, j, unimport_ret);
+                ret = unimport_ret; 
             }
             bdp_tjetty->p_check_tseg[i][j] = NULL;
         }
@@ -481,6 +493,7 @@ int bondp_import_health_check_tseg(bondp_context_t *bdp_ctx, bondp_target_jetty_
     urma_bond_id_info_out_t *rvjetty_info, urma_rjetty_t *rjetty)
 {
     if (!rvjetty_info->is_health_check_enable || !bondp_health_check_enabled()) {
+        URMA_LOG_INFO("Health check not enabled, skip importing health check seg.\n");
         return 0;
     }
 
@@ -508,11 +521,17 @@ static void bondp_handle_health_event(bondp_context_t *bond_ctx, bondp_health_ev
         case BONDP_HEALTH_EVENT_ACTIVE_IDX_UPDATE:
             if (info != NULL && info->bdp_tjetty != NULL) {
                 bondp_health_update_active_idx(bond_ctx, info->bdp_tjetty, info->new_active_idx);
+            }else {
+                URMA_LOG_WARN("Active idx update event missing info, event=%d dev_name=%s eid_idx=%u.\n",
+                              event, bond_ctx->v_ctx.dev->name, bond_ctx->v_ctx.eid_index);
             }
             break;
         case BONDP_HEALTH_EVENT_FALLBACK_TASK_KICK:
             if (info != NULL && info->bdp_tjetty != NULL) {
                 bondp_health_kick_fallback_task(bond_ctx, info->bdp_tjetty);
+            }else {
+                URMA_LOG_WARN("Fallback task kick event missing info, event=%d dev_name=%s eid_idx=%u.\n",
+                              event, bond_ctx->v_ctx.dev->name, bond_ctx->v_ctx.eid_index);
             }
             break;
         case BONDP_HEALTH_EVENT_DATAPATH_LINK_FAIL:
@@ -556,6 +575,7 @@ static void bondp_handle_netlink_events(void)
         bool consumed = false;
         bondp_global_context_t *global_ctx = g_bondp_global_ctx;
         if (global_ctx == NULL) {
+            URMA_LOG_WARN("Global context is NULL.\n");
             break;
         }
         pthread_rwlock_rdlock(&global_ctx->health_thread_ctx.health_ctx_lock);
@@ -581,6 +601,7 @@ static void bondp_handle_netlink_events(void)
 static void bondp_handle_epoll_event(const struct epoll_event *event)
 {
     if (event == NULL) {
+        URMA_LOG_WARN("Health epoll event is NULL.\n");
         return;
     }
 
@@ -650,6 +671,8 @@ static urma_status_t bondp_send_health_probe(bondp_context_t *bdp_ctx,
     urma_target_seg_t *local_tseg = bdp_jetty->check_tseg[local_idx];
 
     if (jetty == NULL || tjetty == NULL || tseg == NULL || local_tseg == NULL) {
+        URMA_LOG_ERR("Health probe resource missing, lidx=%d tidx=%d jetty=%p tjetty=%p tseg=%p local_tseg=%p.\n",
+                     local_idx, target_idx, (void *)jetty, (void *)tjetty, (void *)tseg, (void *)local_tseg);
         return URMA_FAIL;
     }
 
@@ -694,6 +717,7 @@ static urma_status_t bondp_send_health_probe(bondp_context_t *bdp_ctx,
 static int bondp_rebuild_primary_pjetty(bondp_health_task_t *task)
 {
     if (task == NULL) {
+        URMA_LOG_ERR("Invalid parameter, task is NULL.\n");
         return -1;
     }
     return bondp_rebuild_local_pjetty(task, task->primary_local_idx);
@@ -704,6 +728,8 @@ static int bondp_send_fallback_ctrl_msg(
     int local_idx, int target_idx, uint8_t ctrl_type, uint8_t req_seq, uint64_t payload)
 {
     if (local_idx < 0 || target_idx < 0 || payload > UINT32_MAX) {
+        URMA_LOG_ERR("Invalid parameter for fallback ctrl msg, lidx=%d tidx=%d payload=%lu.\n",
+                            local_idx, target_idx, payload);
         return -1;
     }
 
@@ -712,7 +738,7 @@ static int bondp_send_fallback_ctrl_msg(
     if (ret != 0) {
         URMA_LOG_WARN("Failed to send fallback ctrl msg by netlink, vjetty=%u lidx=%d tidx=%d type=%u seq=%u ret=%d\n",
             task->vjetty_id, local_idx, target_idx, ctrl_type, req_seq, ret);
-        return -1;
+        return ret;
     }
     URMA_LOG_INFO("Fallback ctrl sent by netlink, vjetty=%u lidx=%d tidx=%d type=%u seq=%u payload=%u\n",
         task->vjetty_id, local_idx, target_idx, ctrl_type, req_seq, (uint32_t)payload);
@@ -727,11 +753,13 @@ static int bondp_relink_primary_import(bondp_health_task_t *task)
     int target_idx = (int)task->fallback_task.primary_target_idx;
     if (local_idx < 0 || target_idx < 0 || local_idx >= URMA_UBAGG_DEV_MAX_NUM ||
         target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        URMA_LOG_ERR("Invalid index for relink primary import, lidx=%d tidx=%d.\n", local_idx, target_idx);
         return -1;
     }
 
     urma_target_jetty_t *old_tjetty = task->bdp_tjetty->p_tjetty[local_idx][target_idx];
     if (old_tjetty == NULL) {
+        URMA_LOG_ERR("Old primary ptjetty is NULL, lidx=%d tidx=%d.\n", local_idx, target_idx);
         return -1;
     }
 
@@ -778,10 +806,12 @@ static uint64_t bondp_fallback_build_req_payload(const bondp_health_task_t *task
 {
     int primary_local_idx = task->primary_local_idx;
     if (primary_local_idx < 0 || primary_local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        URMA_LOG_ERR("Invalid primary local index, idx=%d.\n", primary_local_idx);
         return BONDP_FALLBACK_PRIMARY_INVALID_ID;
     }
     urma_jetty_t *primary_pjetty = task->bondp_jetty->p_jetty[primary_local_idx];
     if (primary_pjetty == NULL || primary_pjetty->remote_jetty == NULL) {
+        URMA_LOG_ERR("Primary ptjetty or remote jetty is NULL, lidx=%d.\n", primary_local_idx);
         return BONDP_FALLBACK_PRIMARY_INVALID_ID;
     }
     return (uint64_t)primary_pjetty->remote_jetty->id.id;
@@ -791,13 +821,18 @@ static int bondp_send_fallback_req(bondp_context_t *bdp_ctx, bondp_health_task_t
 {
     int active_local_idx = task->active_local_idx;
     int active_target_idx = -1;
-    if (bondp_get_target_idx_by_local_idx(task, active_local_idx, &active_target_idx) != 0) {
-        return -1;
+    int ret = bondp_get_target_idx_by_local_idx(task, active_local_idx, &active_target_idx);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to get target idx by local idx, lidx=%d ret=%d.\n", active_local_idx, ret);
+        return ret;
     }
     uint64_t req_payload = bondp_fallback_build_req_payload(task);
-    if (bondp_send_fallback_ctrl_msg(bdp_ctx, task, active_local_idx, active_target_idx,
-        BONDP_FALLBACK_CTRL_REQ, task->fallback_task.req_seq, req_payload) != 0) {
-        return -1;
+    ret = bondp_send_fallback_ctrl_msg(bdp_ctx, task, active_local_idx, active_target_idx,
+        BONDP_FALLBACK_CTRL_REQ, task->fallback_task.req_seq, req_payload);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to send fallback ctrl msg , lidx=%d tidx=%d type=%u seq=%u ret=%d.\n",
+            active_local_idx, active_target_idx, BONDP_FALLBACK_CTRL_REQ, task->fallback_task.req_seq, ret);
+        return ret;
     }
     return 0;
 }
@@ -1056,6 +1091,7 @@ int bondp_register_health_check_task(bondp_context_t *bdp_ctx, bondp_target_jett
     const bondp_health_check_cfg_t *cfg = &g_bondp_global_ctx->health_thread_ctx.cfg;
     bondp_health_task_t *task = calloc(1, sizeof(bondp_health_task_t));
     if (task == NULL) {
+        URMA_LOG_ERR("Failed to alloc health task.\n");
         return -1;
     }
     task->bdp_tjetty = bdp_tjetty;
@@ -1197,6 +1233,10 @@ void bondp_health_kick_fallback_task(bondp_context_t *bdp_ctx, bondp_target_jett
         URMA_LOG_INFO("Fallback task armed by kick, active_idx=%d primary_idx=%d seq=%u\n",
             task->active_local_idx, task->primary_local_idx, task->fallback_task.req_seq);
         (void)bondp_process_fallback_task(bdp_ctx, task);
+    }else{
+        URMA_LOG_WARN("Fallback task not armed, tjetty=%d, reason=%s.\n",
+                      bdp_tjetty ? (int)bdp_tjetty->v_tjetty.id.id : -1,
+                      task == NULL ? "task not found" : "conditions not met");
     }
     pthread_rwlock_unlock(&health->task_table.lock);
 }
@@ -1307,6 +1347,7 @@ static void bondp_health_handle_datapath_link_fail_event(bondp_context_t *bdp_ct
     if (info == NULL || info->bdp_tjetty == NULL ||
         info->local_idx < 0 || info->target_idx < 0 ||
         info->local_idx >= URMA_UBAGG_DEV_MAX_NUM || info->target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        URMA_LOG_WARN("Invalid health event info, skip.\n");
         return;
     }
 
@@ -1337,7 +1378,15 @@ static void bondp_health_handle_datapath_link_fail_event(bondp_context_t *bdp_ct
 void bondp_health_notify_datapath_link_fail(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
     int local_idx, int target_idx)
 {
-    if (!bondp_health_check_enabled() || bdp_ctx == NULL || bdp_tjetty == NULL) {
+    if (!bondp_health_check_enabled()) {
+        return;
+    }
+    if (bdp_ctx == NULL) {
+        URMA_LOG_WARN("Datapath link fail event skipped, bdp_ctx is NULL.\n");
+        return;
+    }
+    if (bdp_tjetty == NULL) {
+        URMA_LOG_WARN("Datapath link fail event skipped, bdp_tjetty is NULL.\n");
         return;
     }
 
@@ -1357,6 +1406,7 @@ static void bondp_health_handle_ta_timeout_event(bondp_context_t *bdp_ctx, const
 {
     if (info == NULL || info->local_idx < 0 || info->target_idx < 0 ||
         info->local_idx >= URMA_UBAGG_DEV_MAX_NUM || info->target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        URMA_LOG_WARN("Invalid health event info, skip.\n");
         return;
     }
 
@@ -1467,6 +1517,8 @@ bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, u
                     task->bdp_tjetty->v_tjetty.id.id, task->active_local_idx, task->primary_local_idx);
             }
             if (is_balance && !ok) {
+                URMA_LOG_WARN("Health probe failed, notify link fail to trigger recovery, tjetty_id=%u lidx=%d tidx=%d.\n",
+                    task->bdp_tjetty->v_tjetty.id.id, (int)cr_local_idx, (int)target_idx);
                 bondp_health_notify_datapath_link_fail(bdp_ctx, task->bdp_tjetty, (int)cr_local_idx, (int)target_idx);
             } else if (old_ok != ok) {
                 URMA_LOG_WARN("Health link state changed, " \
@@ -1537,7 +1589,7 @@ int bondp_start_health_check_thread(void)
     health_epoll_fd = epoll_create(UBAGG_MAX_EVENT);
     if (health_epoll_fd == -1) {
         URMA_LOG_ERR("Failed to create health epoll %s\n", ub_strerror(errno));
-        return -1;
+        return -errno;
     }
 
     global_ctx->health_thread_ctx.health_epoll_fd = health_epoll_fd;
@@ -1552,12 +1604,12 @@ int bondp_start_health_check_thread(void)
     }
 
     atomic_store(&global_ctx->health_thread_ctx.health_thread_stop, false);
-    if (pthread_create(&global_ctx->health_thread_ctx.health_thread, NULL, bondp_health_check_thread,
-        global_ctx) != 0) {
-        URMA_LOG_ERR("Failed to create health check thread\n");
+    int ret = pthread_create(&global_ctx->health_thread_ctx.health_thread, NULL, bondp_health_check_thread, global_ctx);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to create health check thread, ret=%d.\n", ret);
         (void)close(health_epoll_fd);
         global_ctx->health_thread_ctx.health_epoll_fd = -1;
-        return -1;
+        return -ret;
     }
     URMA_LOG_INFO("Health check thread started.\n");
     return 0;
@@ -1596,24 +1648,27 @@ int bondp_create_health_check_ctx(bondp_context_t *bond_ctx)
     bondp_global_context_t *global_ctx = g_bondp_global_ctx;
     bondp_heath_check_ctx_t *health = &bond_ctx->bondp_heath_check_ctx;
     struct epoll_event ev = {0};
-
+    int ret = 0;
     if (!bondp_health_check_enabled()) {
         return 0;
     }
 
-    if (pthread_spin_init(&health->event_lock, PTHREAD_PROCESS_PRIVATE) != 0) {
-        URMA_LOG_ERR("Failed to init health event lock\n");
-        return -1;
+    ret = pthread_spin_init(&health->event_lock, PTHREAD_PROCESS_PRIVATE);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to init health event lock, ret=%d.\n", ret);
+        return -ret;
     }
 
-    if (bondp_hash_table_create(&health->task_table, BONDP_HEALTH_TASK_TABLE_SIZE,
-        bondp_health_task_comp_f, bondp_health_task_free_f, bondp_health_task_hash_f) != 0) {
-        URMA_LOG_ERR("Failed to create health task table\n");
+    ret = bondp_hash_table_create(&health->task_table, BONDP_HEALTH_TASK_TABLE_SIZE,
+        bondp_health_task_comp_f, bondp_health_task_free_f, bondp_health_task_hash_f);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to create health task table, ret=%d.\n", ret);
         goto ERR_EVENT_LOCK;
     }
 
     health->health_check_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (health->health_check_fd < 0) {
+        ret = -errno;
         URMA_LOG_ERR("Failed to create health_check_fd, errno=%d\n", errno);
         goto DEL_TASK_TABLE;
     }
@@ -1622,12 +1677,14 @@ int bondp_create_health_check_ctx(bondp_context_t *bond_ctx)
     ev.data.ptr = (void *)bond_ctx;
     if (epoll_ctl(global_ctx->health_thread_ctx.health_epoll_fd,
         EPOLL_CTL_ADD, health->health_check_fd, &ev) != 0) {
+        ret = -errno;
         URMA_LOG_ERR("Failed to add ctx async fd to health epoll, errno=%d\n", errno);
         goto DEL_FD;
     }
 
-    if (bondp_register_health_ctx_global(bond_ctx) != 0) {
-        URMA_LOG_ERR("Failed to register health ctx globally\n");
+    ret = bondp_register_health_ctx_global(bond_ctx);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to register health ctx globally, ret=%d.\n", ret);
         goto DEL_EPOLL;
     }
 
@@ -1645,5 +1702,5 @@ DEL_TASK_TABLE:
     bondp_hash_table_destroy(&health->task_table);
 ERR_EVENT_LOCK:
     pthread_spin_destroy(&health->event_lock);
-    return -1;
+    return ret;
 }

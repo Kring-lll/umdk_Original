@@ -56,6 +56,8 @@ int bondp_fallback_ctrl_send_default(bondp_context_t *bdp_ctx, uint32_t vjetty_i
     int local_idx, int target_idx, uint8_t ctrl_type, uint8_t req_seq, uint32_t payload)
 {
     if (bdp_ctx == NULL || local_idx < 0 || target_idx < 0) {
+        URMA_LOG_ERR("Invalid parameter, bdp_ctx=%p local_idx=%d target_idx=%d.\n",
+                            (void *)bdp_ctx, local_idx, target_idx);
         return -EINVAL;
     }
 
@@ -82,11 +84,13 @@ static int bondp_nl_parse_cb(struct nl_msg *nlmsg, void *arg)
     bondp_switchback_msg_t *out = (bondp_switchback_msg_t *)arg;
     struct nlmsghdr *hdr = nlmsg_hdr(nlmsg);
     if (hdr == NULL || out == NULL) {
+        URMA_LOG_WARN("Invalid nlmsg or arg, hdr=%p out=%p.\n", (void *)hdr, (void *)out);
         return NL_SKIP;
     }
 
     struct genlmsghdr *genl_hdr = (struct genlmsghdr *)nlmsg_data(hdr);
     if (genl_hdr == NULL) {
+        URMA_LOG_WARN("Invalid genl_hdr.\n");
         return NL_SKIP;
     }
 
@@ -94,16 +98,19 @@ static int bondp_nl_parse_cb(struct nl_msg *nlmsg, void *arg)
     int ret = nla_parse(attrs, UBCORE_ATTR_AFTER_LAST, genlmsg_attrdata(genl_hdr, 0),
         genlmsg_attrlen(genl_hdr, 0), NULL);
     if (ret != 0) {
+        URMA_LOG_WARN("Failed to nla parse, ret=%d.\n", ret);
         return NL_SKIP;
     }
 
     if (attrs[UBCORE_HDR_ARGS_ADDR] == NULL) {
+        URMA_LOG_WARN("UBCORE_HDR_ARGS_ADDR attribute missing, skip nlmsg.\n");
         return NL_SKIP;
     }
 
     void *payload = nla_data(attrs[UBCORE_HDR_ARGS_ADDR]);
     int payload_len = nla_len(attrs[UBCORE_HDR_ARGS_ADDR]);
     if (payload == NULL || payload_len < (int)sizeof(bondp_switchback_msg_t)) {
+        URMA_LOG_WARN("Invalid payload, skip nlmsg.\n");
         return NL_SKIP;
     }
 
@@ -121,12 +128,14 @@ int bondp_nl_init(void)
 
     struct nl_sock *sock = nl_socket_alloc();
     if (sock == NULL) {
+        URMA_LOG_ERR("Failed to allocate netlink socket.\n");
         pthread_mutex_unlock(&g_bondp_nl_ctx.lock);
         return -ENOMEM;
     }
 
     int ret = genl_connect(sock);
     if (ret < 0) {
+        URMA_LOG_ERR("Failed to connect genl socket, ret=%d.\n", ret);
         nl_socket_free(sock);
         pthread_mutex_unlock(&g_bondp_nl_ctx.lock);
         return ret;
@@ -134,6 +143,8 @@ int bondp_nl_init(void)
 
     ret = genl_ctrl_resolve(sock, UBCORE_GENL_FAMILY_NAME);
     if (ret < 0) {
+        URMA_LOG_ERR("Failed to resolve genl family '%s', ret=%d.\n",
+                     UBCORE_GENL_FAMILY_NAME, ret);
         nl_close(sock);
         nl_socket_free(sock);
         pthread_mutex_unlock(&g_bondp_nl_ctx.lock);
@@ -170,23 +181,28 @@ int bondp_nl_get_fd(void)
 int bondp_nl_send_switchback_req(const bondp_switchback_req_t *req)
 {
     if (req == NULL) {
+        URMA_LOG_ERR("Req is NULL.\n");
         return -EINVAL;
     }
 
     pthread_mutex_lock(&g_bondp_nl_ctx.lock);
     if (g_bondp_nl_ctx.sock == NULL || g_bondp_nl_ctx.genl_id < 0) {
+        URMA_LOG_ERR("Netlink not initialized, sock=%p genl_id=%d.\n",
+                     (void *)g_bondp_nl_ctx.sock, g_bondp_nl_ctx.genl_id);
         pthread_mutex_unlock(&g_bondp_nl_ctx.lock);
         return -ENOTCONN;
     }
 
     struct nl_msg *msg = nlmsg_alloc();
     if (msg == NULL) {
+        URMA_LOG_ERR("Failed to alloc netlink msg.\n");
         pthread_mutex_unlock(&g_bondp_nl_ctx.lock);
         return -ENOMEM;
     }
 
     if (genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, g_bondp_nl_ctx.genl_id, 0, 0,
         SEND_SWITCHBACK_REQ, UBCORE_GENL_FAMILY_VERSION) == NULL) {
+        URMA_LOG_ERR("Failed to put genl header.\n");
         nlmsg_free(msg);
         pthread_mutex_unlock(&g_bondp_nl_ctx.lock);
         return -ENOMEM;
@@ -195,12 +211,16 @@ int bondp_nl_send_switchback_req(const bondp_switchback_req_t *req)
     if (nla_put_u32(msg, UBCORE_HDR_COMMAND, SEND_SWITCHBACK_REQ) != 0 ||
         nla_put_u32(msg, UBCORE_HDR_ARGS_LEN, (uint32_t)sizeof(*req)) != 0 ||
         nla_put(msg, UBCORE_HDR_ARGS_ADDR, (int)sizeof(*req), req) != 0) {
+        URMA_LOG_ERR("Failed to put nla attrs.\n");
         nlmsg_free(msg);
         pthread_mutex_unlock(&g_bondp_nl_ctx.lock);
         return -ENOMEM;
     }
 
     int ret = nl_send_auto(g_bondp_nl_ctx.sock, msg);
+    if (ret < 0) {
+        URMA_LOG_ERR("Failed to nl sendauto, ret=%d.\n", ret);
+    }
     nlmsg_free(msg);
     pthread_mutex_unlock(&g_bondp_nl_ctx.lock);
     return (ret < 0) ? ret : 0;
@@ -209,12 +229,14 @@ int bondp_nl_send_switchback_req(const bondp_switchback_req_t *req)
 int bondp_nl_recv_switchback_msg(bondp_switchback_msg_t *msg)
 {
     if (msg == NULL) {
+        URMA_LOG_ERR("Msg is NULL.\n");
         return -EINVAL;
     }
 
     pthread_mutex_lock(&g_bondp_nl_ctx.lock);
     if (g_bondp_nl_ctx.sock == NULL) {
         pthread_mutex_unlock(&g_bondp_nl_ctx.lock);
+        URMA_LOG_ERR("Netlink socket is NULL, not connected.\n");
         return -ENOTCONN;
     }
 
@@ -222,6 +244,7 @@ int bondp_nl_recv_switchback_msg(bondp_switchback_msg_t *msg)
     int ret = nl_socket_modify_cb(g_bondp_nl_ctx.sock, NL_CB_MSG_IN, NL_CB_CUSTOM, bondp_nl_parse_cb, msg);
     if (ret < 0) {
         pthread_mutex_unlock(&g_bondp_nl_ctx.lock);
+        URMA_LOG_ERR("Failed to modify netlink callback, ret=%d.\n", ret);
         return ret;
     }
 
@@ -231,6 +254,9 @@ int bondp_nl_recv_switchback_msg(bondp_switchback_msg_t *msg)
 
     if (ret == -NLE_AGAIN || ret == -NLE_INTR) {
         return -EAGAIN;
+    }
+    if (ret < 0) {
+        URMA_LOG_ERR("Failed to nl recvmsgs default, ret=%d.\n", ret);
     }
     return (ret < 0) ? ret : 0;
 }
