@@ -10,9 +10,13 @@ int bondp_hash_table_create(bondp_hash_table_t *tbl, uint32_t size,
     comp_func_t comp_f, free_func_t free_f, hash_func_t hash_f)
 {
     (void)pthread_rwlock_init(&tbl->lock, NULL);
-    if (ub_hmap_init(&tbl->hmap, size) != 0) {
-        return -1;
+
+    int ret = ub_hmap_init(&tbl->hmap, size);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to init hash map, ret=%d.\n", ret);
+        return ret;
     }
+
     tbl->free_f = free_f;
     tbl->comp_f = comp_f;
     tbl->hash_f = hash_f;
