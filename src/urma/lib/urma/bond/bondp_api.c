@@ -1251,6 +1251,11 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         const bondp_jetty_cfg_t *bdp_cfg = (const bondp_jetty_cfg_t *)jetty_cfg;
         cfg_active_port_count = bdp_cfg->port_count;
         cfg_active_port_ids = bdp_cfg->port_ids;
+        if (cfg_active_port_count > 0 && cfg_active_port_ids == NULL) {
+            URMA_LOG_ERR("port_ids must not be NULL when port_count=%u\n", cfg_active_port_count);
+            errno = EINVAL;
+            goto FREE_JETTY;
+        }
     }
 
     if (init_active_indices(bdp_ctx, bdp_jetty, cfg_active_port_ids, cfg_active_port_count) != 0) {
