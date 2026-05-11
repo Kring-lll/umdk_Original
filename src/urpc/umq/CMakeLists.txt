@@ -10,6 +10,7 @@ include_directories(${CMAKE_CURRENT_LIST_DIR}/dfx)
 include_directories(${CMAKE_CURRENT_LIST_DIR})
 include(${CMAKE_SOURCE_DIR}/urpc/umq/dfx/CMakeLists.txt)
 
+add_compile_definitions(_GNU_SOURCE)
 add_subdirectory(qbuf)
 add_subdirectory(umq_ub)
 add_subdirectory(umq_ipc)

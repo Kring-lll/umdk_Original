@@ -7,7 +7,9 @@
  */
 
 #include <dlfcn.h>
+#include <limits.h>
 #include "umq_vlog.h"
+#include "umq_inner.h"
 #include "umq_symbol_private.h"
 
 // Global URMA/UVS symbol instance
@@ -37,7 +39,12 @@ int umq_symbol_urma_load(umq_symbol_urma_t *sym)
 
     // Load URMA symbols if not already loaded
     if (g_umq_urma_dlhandler == NULL) {
-        g_umq_urma_dlhandler = dlopen("liburma.so", RTLD_LAZY | RTLD_GLOBAL);
+        char so_path[PATH_MAX + 1] = {0};
+        int ret = umq_dlopen(so_path, PATH_MAX + 1, "liburma.so");
+        if (ret != UMQ_SUCCESS) {
+            return ret;
+        }
+        g_umq_urma_dlhandler = dlopen(so_path, RTLD_LAZY | RTLD_GLOBAL);
         if (g_umq_urma_dlhandler == NULL) {
             UMQ_VLOG_ERR(VLOG_UMQ, "open liburma.so failed, err: %s\n", dlerror());
             return -1;
@@ -46,7 +53,12 @@ int umq_symbol_urma_load(umq_symbol_urma_t *sym)
 
     // Load UVS symbols if not already loaded
     if (g_umq_tpsa_dlhandler == NULL) {
-        g_umq_tpsa_dlhandler = dlopen("libtpsa.so", RTLD_LAZY | RTLD_GLOBAL);
+        char so_path[PATH_MAX + 1] = {0};
+        int ret = umq_dlopen(so_path, PATH_MAX + 1, "libtpsa.so");
+        if (ret != UMQ_SUCCESS) {
+            return ret;
+        }
+        g_umq_tpsa_dlhandler = dlopen(so_path, RTLD_LAZY | RTLD_GLOBAL);
         if (g_umq_tpsa_dlhandler == NULL) {
             UMQ_VLOG_ERR(VLOG_UMQ, "open libtpsa.so failed, err: %s\n", dlerror());
             return -1;
