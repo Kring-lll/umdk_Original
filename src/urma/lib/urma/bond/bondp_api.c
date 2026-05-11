@@ -462,6 +462,17 @@ static int init_active_indices(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_comp,
     return 0;
 }
 
+static int validate_active_port_cfg(const bondp_port_id_t *port_ids, uint32_t port_count)
+{
+    if (port_count > 0 && port_ids == NULL) {
+        URMA_LOG_ERR("port_ids must not be NULL when port_count=%u.\n", port_count);
+        errno = EINVAL;
+        return -1;
+    }
+
+    return 0;
+}
+
 static int init_target_active_indices(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
                                       urma_bond_id_info_out_t *rvjetty_info, bondp_comp_t *jetty)
 {
@@ -639,6 +650,9 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
         const bondp_jfs_cfg_t *bdp_cfg = (const bondp_jfs_cfg_t *)cfg;
         cfg_active_port_count = bdp_cfg->port_count;
         cfg_active_port_ids = bdp_cfg->port_ids;
+        if (validate_active_port_cfg(cfg_active_port_ids, cfg_active_port_count) != 0) {
+            goto FREE_JFS;
+        }
     }
 
     if (init_active_indices(bdp_ctx, bdp_jfs, cfg_active_port_ids, cfg_active_port_count) != 0) {
@@ -1251,6 +1265,9 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         const bondp_jetty_cfg_t *bdp_cfg = (const bondp_jetty_cfg_t *)jetty_cfg;
         cfg_active_port_count = bdp_cfg->port_count;
         cfg_active_port_ids = bdp_cfg->port_ids;
+        if (validate_active_port_cfg(cfg_active_port_ids, cfg_active_port_count) != 0) {
+            goto FREE_JETTY;
+        }
     }
 
     if (init_active_indices(bdp_ctx, bdp_jetty, cfg_active_port_ids, cfg_active_port_count) != 0) {
