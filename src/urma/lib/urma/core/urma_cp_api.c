@@ -2794,6 +2794,7 @@ urma_target_seg_t *urma_register_seg(urma_context_t *ctx, urma_seg_cfg_t *seg_cf
         return NULL;
     }
     seg->seg.attr.bs.user_token_id = seg_cfg->flag.bs.token_id_valid;
+    seg->user_ctx = seg_cfg->user_ctx;
     atomic_fetch_add(&seg->urma_ctx->ref.atomic_cnt, 1);
 
     if (ctx->dev->type == URMA_TRANSPORT_UB && seg->token_id != NULL) {
