@@ -80,9 +80,11 @@ int bondp_conn_table_get_or_create(bondp_hash_table_t *tbl, urma_jetty_id_t *tar
     }
     new_node = calloc(1, sizeof(bondp_conn_node_t));
     if (new_node == NULL) {
+        URMA_LOG_ERR("Failed to alloc bondp_conn_node\n");
         return BONDP_HASH_MAP_ALLOC_ERROR;
     }
     if (bdp_v_conn_init(&new_node->v_conn)) {
+        URMA_LOG_ERR("Failed to init v_conn\n");
         goto FREE_VCONN_NODE;
     }
     new_node->target_id = *target_id;
