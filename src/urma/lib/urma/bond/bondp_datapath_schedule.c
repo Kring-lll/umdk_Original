@@ -16,9 +16,42 @@
 
 #include "bondp_health_check.h"
 #include "bondp_types.h"
+#include "urma_api.h"
 #include "urma_log.h"
 
 #include "bondp_datapath_schedule.h"
+
+bool g_bondp_balance_queue_idle_enable = false;
+
+static bool get_balance_pending_task(const bondp_comp_t *bdp_comp, uint32_t active_idx, uint32_t *pending_task)
+{
+    uint16_t ci = 0;
+    urma_status_t ret = URMA_SUCCESS;
+    switch (bdp_comp->comp_type) {
+        case BONDP_COMP_JETTY:
+            if (bdp_comp->p_jetty[active_idx] == NULL) {
+                return false;
+            }
+            ret = urma_get_jetty_opt(bdp_comp->p_jetty[active_idx], URMA_JFS_CI, &ci, sizeof(ci));
+            break;
+        case BONDP_COMP_JFS:
+            if (bdp_comp->p_jfs[active_idx] == NULL) {
+                return false;
+            }
+            ret = urma_get_jfs_opt(bdp_comp->p_jfs[active_idx], URMA_JFS_CI, &ci, sizeof(ci));
+            break;
+        default:
+            return false;
+    }
+
+    if (ret != URMA_SUCCESS) {
+        return false;
+    }
+
+    uint16_t pi = atomic_load(&bdp_comp->sched_pi[active_idx]);
+    *pending_task = (uint16_t)(pi - ci);
+    return true;
+}
 
 static void select_least_load_path(const bondp_comp_t *bdp_comp, uint32_t min_active_count,
                                    int min_idx, int max_idx, uint32_t *least_load_pos,
@@ -33,12 +66,18 @@ static void select_least_load_path(const bondp_comp_t *bdp_comp, uint32_t min_ac
             continue;
         }
 
-        uint32_t sqe_cnt = atomic_load(&bdp_comp->sqe_cnt[active_idx]);
-        if (sqe_cnt < least_load) {
-            least_load = sqe_cnt;
+        uint32_t load = atomic_load(&bdp_comp->sqe_cnt[active_idx]);
+        if (g_bondp_balance_queue_idle_enable) {
+            uint32_t pending_task = 0;
+            if (get_balance_pending_task(bdp_comp, active_idx, &pending_task)) {
+                load = pending_task;
+            }
+        }
+        if (load < least_load) {
+            least_load = load;
             least_load_pos[0] = i;
             *least_load_cnt = 1;
-        } else if (sqe_cnt == least_load) {
+        } else if (load == least_load) {
             least_load_pos[(*least_load_cnt)++] = i;
         }
     }

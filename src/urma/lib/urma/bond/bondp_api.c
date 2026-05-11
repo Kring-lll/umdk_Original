@@ -631,6 +631,7 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     bdp_jfs->modify_to_error = false;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
         atomic_init(&bdp_jfs->sqe_cnt[i], 0);
+        atomic_init(&bdp_jfs->sched_pi[i], 0);
     }
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
@@ -1244,6 +1245,10 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     (void)pthread_spin_init(&bdp_jetty->send_wr_lock, PTHREAD_PROCESS_PRIVATE);
     (void)pthread_spin_init(&bdp_jetty->recv_wr_lock, PTHREAD_PROCESS_PRIVATE);
     bdp_jetty->modify_to_error = false;
+    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
+        atomic_init(&bdp_jetty->sqe_cnt[i], 0);
+        atomic_init(&bdp_jetty->sched_pi[i], 0);
+    }
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
     uint32_t cfg_active_port_count = 0;

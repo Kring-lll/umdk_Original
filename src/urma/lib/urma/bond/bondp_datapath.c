@@ -52,6 +52,7 @@ static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, urma_jfs_w
     }
     if (ret == URMA_SUCCESS) {
         atomic_fetch_add(&comp->sqe_cnt[send_idx], 1);
+        (void)atomic_fetch_add(&comp->sched_pi[send_idx], 1);
     }
     return ret;
 }
