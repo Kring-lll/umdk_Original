@@ -1543,7 +1543,7 @@ jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_qu
         goto DELETE_JFR_JFC;
     }
 
-    if (umq_ub_rqe_post_factor_query(queue, dev_ctx, jfr_ctx->jfr) != UMQ_SUCCESS) {
+    if (jetty_idx == UB_QUEUE_JETTY_IO && umq_ub_rqe_post_factor_query(queue, dev_ctx, jfr_ctx->jfr) != UMQ_SUCCESS) {
         goto DELETE_JFR_JFC;
     }
 
