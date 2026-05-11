@@ -1452,6 +1452,9 @@ void umq_ub_jfr_ctx_put(ub_queue_t *queue)
 
 static int umq_ub_rqe_post_factor_query(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, urma_jfr_t *jfr)
 {
+    if (is_umq_ub_sub_queue(queue->create_flag)) {
+        return UMQ_SUCCESS;
+    }
     if ((queue->create_flag & UMQ_CREATE_FLAG_USED_PORTS) == 0) {
         queue->rqe_post_factor = 1;
         return UMQ_SUCCESS;
