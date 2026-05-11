@@ -96,6 +96,7 @@ static ALWAYS_INLINE bool is_timeout(const struct timespec *last, uint32_t timeo
 umq_dfx_ops_t *umq_get_dfx_tp_ops(umq_trans_mode_t trans_mode);
 
 void umq_io_perf_process(umq_perf_record_type_t record_type, umq_buf_t *qbuf);
+int umq_dlopen(char *so_path, int len, char *so_name);
 
 #ifdef __cplusplus
 }
