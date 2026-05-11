@@ -482,9 +482,8 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
 {
     uint32_t offset;
     if (argc == 1) {
-        (void)printf("Input invalid with argc: %d.\n", argc);
         usage(argv[0]);
-        return -1;
+        return PERFTEST_EXIT_HELP;
     }
 
     (void)memset(cfg, 0, sizeof(perftest_config_t));
@@ -655,7 +654,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                 break;
             case 'h':
                 usage(argv[0]);
-                return -1;
+                return PERFTEST_EXIT_HELP;
             case 'I':
                 if (cfg->api_type == PERFTEST_READ || cfg->api_type == PERFTEST_ATOMIC) {
                     (void)fprintf(stderr, "Warning: Inline feature not available for READ/ATOMIC.\n");
