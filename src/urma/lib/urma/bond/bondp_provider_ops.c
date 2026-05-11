@@ -331,10 +331,11 @@ static int get_topo_info_from_ko(bondp_context_t *bdp_ctx)
         .len = sizeof(info_out),
     };
     urma_udrv_t data = {0};
-    if (urma_cmd_user_ctl(&bdp_ctx->v_ctx, &in, &out, &data)) {
-        URMA_LOG_ERR("Failed to get topo info, change to general mode\n");
+    int ret = urma_cmd_user_ctl(&bdp_ctx->v_ctx, &in, &out, &data);
+    if (ret) {
+        URMA_LOG_ERR("Failed to get topo info, change to general mode, ret=%d.\n", ret);
         g_bondp_global_ctx->skip_load_topo = true;
-        return -1;
+        return ret;
     }
     g_bondp_global_ctx->topo_map = create_topo_map(info_out.topo_info, info_out.node_num);
     if (g_bondp_global_ctx->topo_map == NULL) {
@@ -348,13 +349,17 @@ static int get_topo_info_from_ko(bondp_context_t *bdp_ctx)
 
 static int bondp_create_vcontext(bondp_context_t *bdp_ctx, urma_device_t *dev, uint32_t eid_index, int dev_fd)
 {
-    if (bdp_p_vjetty_id_table_create(&bdp_ctx->p_vjetty_id_table, BONDP_MAX_NUM_JETTYS)) {
-        URMA_LOG_ERR("Failed to create p_vjetty_id_table\n");
-        return -1;
+    int ret;
+
+    ret = bdp_p_vjetty_id_table_create(&bdp_ctx->p_vjetty_id_table, BONDP_MAX_NUM_JETTYS);
+    if (ret) {
+        URMA_LOG_ERR("Failed to create p_vjetty_id_table, ret=%d.\n", ret);
+        return ret;
     }
 
-    if (bdp_r_v2p_token_id_table_create(&bdp_ctx->remote_v2p_token_id_table, BONDP_MAX_NUM_RSEGS)) {
-        URMA_LOG_ERR("Failed to create remote_v2p_token_id_table\n");
+    ret = bdp_r_v2p_token_id_table_create(&bdp_ctx->remote_v2p_token_id_table, BONDP_MAX_NUM_RSEGS);
+    if (ret) {
+        URMA_LOG_ERR("Failed to create remote_v2p_token_id_table, ret=%d.\n", ret);
         goto DESTROY_P_VJETTY_ID_TABLE;
     }
 
@@ -366,9 +371,9 @@ static int bondp_create_vcontext(bondp_context_t *bdp_ctx, urma_device_t *dev, u
         .ops = &g_bond_ops,
     };
     urma_cmd_udrv_priv_t udata = {0};
-    int ret = urma_cmd_create_context(&bdp_ctx->v_ctx, &cfg, &udata);
+    ret = urma_cmd_create_context(&bdp_ctx->v_ctx, &cfg, &udata);
     if (ret != 0) {
-        URMA_LOG_ERR("Failed to create context, ret=%d\n", ret);
+        URMA_LOG_ERR("Failed to create context, ret=%d.\n", ret);
         goto DESTROY_R_V2P_TOKEN_ID_TABLE;
     }
 
@@ -384,7 +389,7 @@ static int bondp_create_vcontext(bondp_context_t *bdp_ctx, urma_device_t *dev, u
     bdp_ctx->bonding_mode = BONDP_BONDING_MODE_STANDALONE;
     bdp_ctx->bonding_level = BONDP_BONDING_LEVEL_PORT;
     URMA_LOG_DEBUG("bondp create_vctx, eid_idx is %u, dev_num is %d.\n",
-                   bdp_ctx->v_ctx.eid_index, bdp_ctx->dev_num);
+        bdp_ctx->v_ctx.eid_index, bdp_ctx->dev_num);
     atomic_init(&bdp_ctx->token_id_cnt, 0);
     return 0;
 
@@ -394,7 +399,7 @@ DESTROY_R_V2P_TOKEN_ID_TABLE:
     bdp_r_v2p_token_id_table_destroy(&bdp_ctx->remote_v2p_token_id_table);
 DESTROY_P_VJETTY_ID_TABLE:
     bdp_p_vjetty_id_table_destroy(&bdp_ctx->p_vjetty_id_table);
-    return -1;
+    return ret;
 }
 static int bondp_delete_vcontext(bondp_context_t *bdp_ctx)
 
@@ -425,15 +430,16 @@ static int bondp_delete_vcontext(bondp_context_t *bdp_ctx)
 
 static int set_fd_noblock(int fd)
 {
-    int ret, flags;
-    flags = fcntl(fd, F_GETFL);
+    int flags = fcntl(fd, F_GETFL);
     if (flags == -1) {
-        URMA_LOG_ERR("flags=%d\n", flags);
+        int err = errno;
+        URMA_LOG_ERR("Failed to get file flags, fd=%d, errno=%d.\n", fd, err);
         return -1;
     }
-    ret = fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    int ret = fcntl(fd, F_SETFL, flags | O_NONBLOCK);
     if (ret != 0) {
-        URMA_LOG_ERR("ret=%d\n", ret);
+        int err = errno;
+        URMA_LOG_ERR("Failed to set non-block flag, fd=%d, errno=%d.\n", fd, err);
         return ret;
     }
     return 0;
@@ -458,9 +464,10 @@ static int bondp_init_member_eid_info_list(bondp_context_t *bdp_ctx,
         .len = sizeof(bondp_userctl_physical_device_out_t),
     };
     urma_udrv_t data = {0};
-    if (urma_cmd_user_ctl(&bdp_ctx->v_ctx, &in, &out, &data)) {
-        URMA_LOG_ERR("Failed to get slave device info\n");
-        return -1;
+    int ret = urma_cmd_user_ctl(&bdp_ctx->v_ctx, &in, &out, &data);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to get slave device info, ret=%d.\n", ret);
+        return ret;
     }
 
     if (dev_info.physical_dev_num <= 0 || dev_info.physical_dev_num > IODIE_NUM) {
@@ -505,9 +512,10 @@ static int bondp_create_pcontext(bondp_context_t *bdp_ctx, bondp_bonding_mode_t 
                                  bondp_bonding_level_t bonding_level)
 {
     urma_member_eid_info_t members[URMA_UBAGG_DEV_MAX_NUM] = {0};
-    if (bondp_init_member_eid_info_list(bdp_ctx, members) != 0) {
-        URMA_LOG_ERR("Failed to init port info list\n");
-        return -1;
+    int ret = bondp_init_member_eid_info_list(bdp_ctx, members);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to init port info list, ret=%d.\n", ret);
+        return ret;
     }
 
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
@@ -538,7 +546,8 @@ static int bondp_create_pcontext(bondp_context_t *bdp_ctx, bondp_bonding_mode_t 
             .data.ptr = (void *)ctx,
         };
         if (epoll_ctl(bdp_ctx->v_ctx.async_fd, EPOLL_CTL_ADD, fd, &ev) != 0) {
-            URMA_LOG_ERR("failed to add fd=%u, errno=%d.\n", fd, errno);
+            int err = errno;
+            URMA_LOG_ERR("Failed to add fd to epoll, fd=%d, errno=%d.\n", fd, err);
             return -1;
         }
     }
@@ -565,7 +574,7 @@ static int bondp_delete_pcontext(bondp_context_t *bdp_ctx)
         sub_ret = urma_delete_context(bdp_ctx->p_ctxs[i]);
         if (sub_ret != 0) {
             URMA_LOG_ERR("Failed to delete pctx, idx=%d, ret=%d\n", i, sub_ret);
-            ret = URMA_FAIL;
+            ret = sub_ret;
         }
         bdp_ctx->p_ctxs[i] = NULL;
     }
