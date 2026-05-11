@@ -565,8 +565,10 @@ static bool udma_u_update_jfr_idx(struct udma_u_context *udma_ctx,
 	jetty_id = cr->local_id;
 
 	if (is_jetty) {
+		(void)pthread_rwlock_rdlock(&udma_ctx->jetty_table_lock);
 		if (udma_ctx->jetty_table[table_id].refcnt) {
 			jetty = (struct udma_u_jetty *)udma_ctx->jetty_table[table_id].jetty_array[jetty_id & mask];
+			(void)pthread_rwlock_unlock(&udma_ctx->jetty_table_lock);
 			if (!jetty) {
 				UDMA_LOG_INFO("Failed to get jetty. JT 0x%x has been destroyed.\n", jetty_id);
 				return true;
@@ -574,18 +576,22 @@ static bool udma_u_update_jfr_idx(struct udma_u_context *udma_ctx,
 			cr->user_data = (uintptr_t)&jetty->base;
 			jfr = jetty->jfr;
 		} else {
+			(void)pthread_rwlock_unlock(&udma_ctx->jetty_table_lock);
 			UDMA_LOG_INFO("Failed to poll jfc. JT 0x%x has been destroyed.\n", jetty_id);
 			return true;
 		}
 	} else {
+		(void)pthread_rwlock_rdlock(&udma_ctx->jfr_table_lock);
 		if (udma_ctx->jfr_table[table_id].refcnt) {
 			jfr = (struct udma_u_jfr *)udma_ctx->jfr_table[table_id].jfr_array[jetty_id & mask];
+			(void)pthread_rwlock_unlock(&udma_ctx->jfr_table_lock);
 			if (!jfr) {
 				UDMA_LOG_INFO("Failed to get jetty. JT 0x%x has been destroyed.\n", jetty_id);
 				return true;
 			}
 			cr->user_data = (uintptr_t)&jfr->base;
 		} else {
+			(void)pthread_rwlock_unlock(&udma_ctx->jfr_table_lock);
 			UDMA_LOG_INFO("Failed to poll jfc. JFR 0x%x has been destroyed.\n", jetty_id);
 			return true;
 		}
