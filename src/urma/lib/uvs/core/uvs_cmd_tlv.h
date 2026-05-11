@@ -65,6 +65,52 @@ typedef enum uvs_cmd_set_path_set_type {
     GET_PATH_SET_OUT_NUM
 } uvs_cmd_set_path_set_type_t;
 
+typedef enum uvs_cmd_set_main_primary_eid_type {
+    SET_MAIN_PRIMARY_EID_IN_ENTRY,
+    SET_MAIN_PRIMARY_EID_IN_NUM
+} uvs_cmd_set_main_primary_eid_type_t;
+
+typedef enum uvs_cmd_del_main_primary_eid_type {
+    DEL_MAIN_PRIMARY_EID_IN_PREFIX,
+    DEL_MAIN_PRIMARY_EID_IN_PREFIX_LEN,
+    DEL_MAIN_PRIMARY_EID_IN_NUM
+} uvs_cmd_del_main_primary_eid_type_t;
+
+typedef enum uvs_cmd_lookup_main_primary_eid_type {
+    LOOKUP_MAIN_PRIMARY_EID_IN_EID,
+    LOOKUP_MAIN_PRIMARY_EID_IN_NUM,
+    LOOKUP_MAIN_PRIMARY_EID_OUT_MAIN_PRIMARY_EID = UVS_CMD_OUT_TYPE_INIT,
+    LOOKUP_MAIN_PRIMARY_EID_OUT_NUM
+} uvs_cmd_lookup_main_primary_eid_type_t;
+
+typedef enum uvs_cmd_dump_main_primary_eid_type {
+    DUMP_MAIN_PRIMARY_EID_IN_ENTRIES,
+    DUMP_MAIN_PRIMARY_EID_IN_ENTRY_NUM,
+    DUMP_MAIN_PRIMARY_EID_IN_NUM,
+    DUMP_MAIN_PRIMARY_EID_OUT_ENTRY_NUM = UVS_CMD_OUT_TYPE_INIT,
+    DUMP_MAIN_PRIMARY_EID_OUT_TOTAL_NUM,
+    DUMP_MAIN_PRIMARY_EID_OUT_NUM
+} uvs_cmd_dump_main_primary_eid_type_t;
+
+typedef enum uvs_cmd_flush_main_primary_eid_type {
+    FLUSH_MAIN_PRIMARY_EID_IN_FLAGS,
+    FLUSH_MAIN_PRIMARY_EID_IN_NUM
+} uvs_cmd_flush_main_primary_eid_type_t;
+
+typedef enum uvs_cmd_replace_main_primary_eid_batch_type {
+    REPLACE_MAIN_PRIMARY_EID_BATCH_IN_ENTRIES,
+    REPLACE_MAIN_PRIMARY_EID_BATCH_IN_ENTRY_NUM,
+    REPLACE_MAIN_PRIMARY_EID_BATCH_IN_FLAGS,
+    REPLACE_MAIN_PRIMARY_EID_BATCH_IN_NUM
+} uvs_cmd_replace_main_primary_eid_batch_type_t;
+
+typedef enum uvs_cmd_set_main_primary_eid_batch_type {
+    SET_MAIN_PRIMARY_EID_BATCH_IN_ENTRIES,
+    SET_MAIN_PRIMARY_EID_BATCH_IN_ENTRY_NUM,
+    SET_MAIN_PRIMARY_EID_BATCH_IN_FLAGS,
+    SET_MAIN_PRIMARY_EID_BATCH_IN_NUM
+} uvs_cmd_set_main_primary_eid_batch_type_t;
+
 #ifdef __cplusplus
 }
 #endif
