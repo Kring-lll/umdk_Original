@@ -166,6 +166,10 @@ int main(int argc, char *argv[])
     args.ctx = &ctx;
     // Parse parameters and check for conflicts
     ret = perftest_parse_args(argc, argv, &cfg);
+    if (ret == PERFTEST_EXIT_HELP) {
+        ret = 0;
+        goto clean_cfg;
+    }
     if (ret != 0) {
         goto clean_cfg;
     }
