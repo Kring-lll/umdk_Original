@@ -14,6 +14,8 @@
 #include "uvs_private_api.h"
 #include "uvs_ubagg_ioctl.h"
 #include <errno.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/syscall.h>
 
 #define UVS_MAX_TOPO_NUM 64
@@ -21,6 +23,20 @@
 static inline bool uvs_eid_is_valid(const uvs_eid_t *eid)
 {
     return !(eid->in6.interface_id == 0 && eid->in6.subnet_prefix == 0);
+}
+
+typedef struct uvs_main_primary_eid_group {
+    uint32_t node_idx;
+    uint32_t entity_id;
+    uint32_t chip_id;
+    uvs_eid_t main_primary_eid;
+} uvs_main_primary_eid_group_t;
+
+static inline bool uvs_topo_eid_is_valid(const char *eid)
+{
+    const char empty_eid[EID_LEN] = {0};
+
+    return eid != NULL && memcmp(eid, empty_eid, EID_LEN) != 0;
 }
 
 int uvs_create_agg_dev(uvs_eid_t *agg_eid, const char *dev_name)
@@ -84,6 +100,301 @@ int uvs_get_device_name_by_eid(uvs_eid_t *eid, char *buf, size_t len)
     return 0;
 }
 
+static uint32_t uvs_main_primary_eid_batch_num(uint32_t left)
+{
+    return left > UVS_MAIN_PRIMARY_EID_BATCH_MAX ? UVS_MAIN_PRIMARY_EID_BATCH_MAX : left;
+}
+
+static int uvs_set_main_primary_eid_entries_inner(const uvs_main_primary_eid_entry_t *entries,
+                                                  uint32_t entry_num, uint32_t flags)
+{
+    uint32_t offset = 0;
+    int ret;
+
+    if (entry_num != 0 && entries == NULL) {
+        TPSA_LOG_ERR("Invalid main primary eid entries.\n");
+        return -EINVAL;
+    }
+
+    while (offset < entry_num) {
+        uint32_t batch_num = uvs_main_primary_eid_batch_num(entry_num - offset);
+
+        ret = uvs_ubcore_ioctl_set_main_primary_eid_batch(&entries[offset], batch_num, flags);
+        if (ret != 0)
+            return ret;
+        offset += batch_num;
+    }
+
+    return 0;
+}
+
+static int uvs_replace_main_primary_eid_entries_inner(const uvs_main_primary_eid_entry_t *entries,
+                                                      uint32_t entry_num, uint32_t flags)
+{
+    int ret;
+
+    if (entry_num != 0 && entries == NULL) {
+        TPSA_LOG_ERR("Invalid main primary eid entries.\n");
+        return -EINVAL;
+    }
+
+    if (entry_num <= UVS_MAIN_PRIMARY_EID_BATCH_MAX)
+        return uvs_ubcore_ioctl_replace_main_primary_eid_batch(entries, entry_num, flags);
+
+    ret = uvs_ubcore_ioctl_flush_main_primary_eid(flags);
+    if (ret != 0)
+        return ret;
+
+    return uvs_set_main_primary_eid_entries_inner(entries, entry_num, flags);
+}
+
+int uvs_set_main_primary_eid_entries(const uvs_main_primary_eid_entry_t *entries,
+                                     uint32_t entry_num, uint32_t flags)
+{
+    int ret;
+
+    uvs_get_api_rdlock();
+    ret = uvs_set_main_primary_eid_entries_inner(entries, entry_num, flags);
+    put_uvs_lock();
+    return ret;
+}
+
+int uvs_replace_main_primary_eid_entries(const uvs_main_primary_eid_entry_t *entries,
+                                         uint32_t entry_num, uint32_t flags)
+{
+    int ret;
+
+    uvs_get_api_rdlock();
+    ret = uvs_replace_main_primary_eid_entries_inner(entries, entry_num, flags);
+    put_uvs_lock();
+    return ret;
+}
+
+int uvs_flush_main_primary_eid_entries(uint32_t flags)
+{
+    int ret;
+
+    uvs_get_api_rdlock();
+    ret = uvs_ubcore_ioctl_flush_main_primary_eid(flags);
+    put_uvs_lock();
+    return ret;
+}
+
+static void uvs_count_main_primary_eid_topo_items(const struct urma_topo_node *topo,
+                                                  uint32_t topo_num, uint32_t *ue_num,
+                                                  uint32_t *entry_num)
+{
+    uint32_t node_idx, dev_idx, iodie_idx, port_idx;
+
+    *ue_num = 0;
+    *entry_num = 0;
+    for (node_idx = 0; node_idx < topo_num; node_idx++) {
+        const struct urma_topo_node *node = &topo[node_idx];
+
+        for (dev_idx = 0; dev_idx < DEV_NUM; dev_idx++) {
+            const struct urma_topo_agg_dev *agg_dev = &node->agg_devs[dev_idx];
+
+            for (iodie_idx = 0; iodie_idx < IODIE_NUM; iodie_idx++) {
+                const struct urma_topo_ue *ue = &agg_dev->ues[iodie_idx];
+
+                if (!uvs_topo_eid_is_valid(ue->primary_eid))
+                    continue;
+
+                (*ue_num)++;
+                (*entry_num)++;
+                for (port_idx = 0; port_idx < PORT_NUM; port_idx++) {
+                    if (uvs_topo_eid_is_valid(ue->port_eid[port_idx]))
+                        (*entry_num)++;
+                }
+            }
+        }
+    }
+}
+
+static uvs_main_primary_eid_group_t *uvs_find_main_primary_eid_group(
+    uvs_main_primary_eid_group_t *groups, uint32_t group_num, uint32_t node_idx,
+    uint32_t entity_id, uint32_t chip_id)
+{
+    uint32_t i;
+
+    for (i = 0; i < group_num; i++) {
+        if (groups[i].node_idx == node_idx && groups[i].entity_id == entity_id &&
+            groups[i].chip_id == chip_id)
+            return &groups[i];
+    }
+
+    return NULL;
+}
+
+static int uvs_add_main_primary_eid_group(uvs_main_primary_eid_group_t *groups,
+                                          uint32_t *group_num, uint32_t group_max,
+                                          uint32_t node_idx, const struct urma_topo_ue *ue)
+{
+    uvs_main_primary_eid_group_t *group;
+
+    group = uvs_find_main_primary_eid_group(groups, *group_num, node_idx, ue->entity_id, ue->chip_id);
+    if (group != NULL) {
+        if (memcmp(group->main_primary_eid.raw, ue->primary_eid, EID_LEN) > 0)
+            (void)memcpy(group->main_primary_eid.raw, ue->primary_eid, EID_LEN);
+        return 0;
+    }
+
+    if (*group_num >= group_max)
+        return -ENOSPC;
+
+    group = &groups[*group_num];
+    group->node_idx = node_idx;
+    group->entity_id = ue->entity_id;
+    group->chip_id = ue->chip_id;
+    (void)memcpy(group->main_primary_eid.raw, ue->primary_eid, EID_LEN);
+    (*group_num)++;
+    return 0;
+}
+
+static int uvs_add_main_primary_eid_entry(uvs_main_primary_eid_entry_t *entries,
+                                          uint32_t *entry_num, uint32_t entry_max,
+                                          const char *eid, const uvs_eid_t *main_primary_eid)
+{
+    uint32_t i;
+
+    if (!uvs_topo_eid_is_valid(eid))
+        return 0;
+
+    for (i = 0; i < *entry_num; i++) {
+        if (memcmp(entries[i].prefix.raw, eid, EID_LEN) != 0)
+            continue;
+
+        if (memcmp(entries[i].main_primary_eid.raw, main_primary_eid->raw, EID_LEN) != 0) {
+            TPSA_LOG_ERR("Duplicated eid maps to different main primary eid.\n");
+            return -EEXIST;
+        }
+        return 0;
+    }
+
+    if (*entry_num >= entry_max)
+        return -ENOSPC;
+
+    (void)memcpy(entries[*entry_num].prefix.raw, eid, EID_LEN);
+    entries[*entry_num].prefix_len = UVS_MAIN_PRIMARY_EID_PREFIX_LEN;
+    entries[*entry_num].main_primary_eid = *main_primary_eid;
+    entries[*entry_num].flags = 0;
+    (*entry_num)++;
+    return 0;
+}
+
+static int uvs_build_main_primary_eid_entries_from_topo(const struct urma_topo_node *topo,
+                                                        uint32_t topo_num,
+                                                        uvs_main_primary_eid_entry_t **entries_out,
+                                                        uint32_t *entry_num_out)
+{
+    uvs_main_primary_eid_entry_t *entries = NULL;
+    uvs_main_primary_eid_group_t *groups = NULL;
+    uint32_t ue_num, entry_max, group_num = 0, entry_num = 0;
+    uint32_t node_idx, dev_idx, iodie_idx, port_idx;
+    int ret = 0;
+
+    *entries_out = NULL;
+    *entry_num_out = 0;
+
+    uvs_count_main_primary_eid_topo_items(topo, topo_num, &ue_num, &entry_max);
+    if (ue_num == 0)
+        return 0;
+
+    groups = calloc(ue_num, sizeof(*groups));
+    entries = calloc(entry_max, sizeof(*entries));
+    if (groups == NULL || entries == NULL) {
+        ret = -ENOMEM;
+        goto out;
+    }
+
+    for (node_idx = 0; node_idx < topo_num; node_idx++) {
+        const struct urma_topo_node *node = &topo[node_idx];
+
+        for (dev_idx = 0; dev_idx < DEV_NUM; dev_idx++) {
+            const struct urma_topo_agg_dev *agg_dev = &node->agg_devs[dev_idx];
+
+            for (iodie_idx = 0; iodie_idx < IODIE_NUM; iodie_idx++) {
+                const struct urma_topo_ue *ue = &agg_dev->ues[iodie_idx];
+
+                if (!uvs_topo_eid_is_valid(ue->primary_eid))
+                    continue;
+
+                ret = uvs_add_main_primary_eid_group(groups, &group_num, ue_num, node_idx, ue);
+                if (ret != 0)
+                    goto out;
+            }
+        }
+    }
+
+    for (node_idx = 0; node_idx < topo_num; node_idx++) {
+        const struct urma_topo_node *node = &topo[node_idx];
+
+        for (dev_idx = 0; dev_idx < DEV_NUM; dev_idx++) {
+            const struct urma_topo_agg_dev *agg_dev = &node->agg_devs[dev_idx];
+
+            for (iodie_idx = 0; iodie_idx < IODIE_NUM; iodie_idx++) {
+                const struct urma_topo_ue *ue = &agg_dev->ues[iodie_idx];
+                uvs_main_primary_eid_group_t *group;
+
+                if (!uvs_topo_eid_is_valid(ue->primary_eid))
+                    continue;
+
+                group = uvs_find_main_primary_eid_group(groups, group_num, node_idx,
+                                                        ue->entity_id, ue->chip_id);
+                if (group == NULL) {
+                    ret = -ENOENT;
+                    goto out;
+                }
+
+                ret = uvs_add_main_primary_eid_entry(entries, &entry_num, entry_max,
+                                                     ue->primary_eid, &group->main_primary_eid);
+                if (ret != 0)
+                    goto out;
+
+                for (port_idx = 0; port_idx < PORT_NUM; port_idx++) {
+                    ret = uvs_add_main_primary_eid_entry(entries, &entry_num, entry_max,
+                                                         ue->port_eid[port_idx],
+                                                         &group->main_primary_eid);
+                    if (ret != 0)
+                        goto out;
+                }
+            }
+        }
+    }
+
+    *entries_out = entries;
+    *entry_num_out = entry_num;
+    entries = NULL;
+
+out:
+    free(entries);
+    free(groups);
+    return ret;
+}
+
+static int uvs_config_main_primary_eid_table_by_topo(void *topo, uint32_t topo_num)
+{
+    uvs_main_primary_eid_entry_t *entries = NULL;
+    uint32_t entry_num = 0;
+    int ret;
+
+    ret = uvs_build_main_primary_eid_entries_from_topo((const struct urma_topo_node *)topo,
+                                                       topo_num, &entries, &entry_num);
+    if (ret != 0)
+        return ret;
+
+    ret = uvs_replace_main_primary_eid_entries_inner(entries, entry_num, 0);
+    if (ret != 0) {
+        TPSA_LOG_ERR("failed to set main primary eid entries, ret = %d.\n", ret);
+    } else {
+        TPSA_LOG_INFO("successfully setted main primary eid entries, entry_num = %u.\n",
+                      entry_num);
+    }
+
+    free(entries);
+    return ret;
+}
+
 static int uvs_set_topo_info_inner(void *topo, uint32_t topo_num)
 {
     int ret;
@@ -104,9 +415,14 @@ static int uvs_set_topo_info_inner(void *topo, uint32_t topo_num)
     ret = uvs_ubcore_ioctl_set_topo(topo, (int)topo_num);
     if (ret != 0) {
         TPSA_LOG_ERR("failed to set topo info in ubcore, ret = %d.\n", ret);
+        return ret;
     } else {
         TPSA_LOG_INFO("successfully setted topo info in ubcore\n");
     }
+
+    ret = uvs_config_main_primary_eid_table_by_topo(topo, topo_num);
+    if (ret != 0)
+        TPSA_LOG_ERR("failed to set main primary eid table by topo, ret = %d.\n", ret);
 
     return ret;
 }
