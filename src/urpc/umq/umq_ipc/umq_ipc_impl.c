@@ -426,6 +426,12 @@ int32_t umq_ipc_bind_impl(uint64_t umqh_tp, uint8_t *bind_info, uint32_t bind_in
         UMQ_VLOG_ERR(VLOG_UMQ, "trans mode: %d is invalid, bind failed\n", tmp_info->trans_mode);
         return -UMQ_ERR_EINVAL;
     }
+    if (tmp_info->shm_total_size == 0 ||
+        tmp_info->shm_total_size <= tmp_info->transmit_queue_buf_size) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "shm_total_size %u is invalid (transmit_queue_buf_size %u)\n",
+                     tmp_info->shm_total_size, tmp_info->transmit_queue_buf_size);
+        return -UMQ_ERR_EINVAL;
+    }
     ipc_bind_ctx_t *ctx = (ipc_bind_ctx_t *)calloc(1, sizeof(ipc_bind_ctx_t));
     if (ctx == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "bind ctx alloc failed\n");
