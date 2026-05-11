@@ -4,10 +4,14 @@
  * Description: realize func for umq api
  * Create: 2025-7-17
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <dlfcn.h>
 #include <limits.h>
+#include <libgen.h>
 
 #include "perf.h"
 #include "umq_vlog.h"
@@ -483,11 +487,39 @@ static int load_symbol(void *handle, void **func, const char *symbol)
 }
 #endif
 
+int umq_dlopen(char *so_path, int len, char *so_name)
+{
+    Dl_info info;
+    int ret = dladdr((void *)&umq_dlopen, &info);
+    if (ret == 0 || info.dli_fname == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "dl addr get failed, err: %s\n", dlerror());
+        return UMQ_FAIL;
+    }
+
+    char *file_name = strdup(info.dli_fname);
+    if (file_name == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "strdup dli_fname failed\n");
+        return UMQ_FAIL;
+    }
+    ret = snprintf(so_path, len, "%s/%s", dirname(file_name), so_name);
+    free(file_name);
+    if (ret < 0 || ret >= len) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "snprintf so_path failed, ret: %d\n", ret);
+        return UMQ_FAIL;
+    }
+    return UMQ_SUCCESS;
+}
+
 static int umq_framework_init(umq_framework_t *umq_fw, umq_init_cfg_t *cfg)
 {
     int ret = UMQ_SUCCESS;
 #ifndef UMQ_STATIC_LIB
-    umq_fw->dlhandler = dlopen(umq_fw->dlopen_so_name, RTLD_LAZY | RTLD_GLOBAL);
+    char so_path[UMQ_MAX_LIB_PATH] = {0};
+    ret = umq_dlopen(so_path, UMQ_MAX_LIB_PATH, umq_fw->dlopen_so_name);
+    if (ret != UMQ_SUCCESS) {
+        return ret;
+    }
+    umq_fw->dlhandler = dlopen(so_path, RTLD_LAZY | RTLD_GLOBAL);
     if (umq_fw->dlhandler == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "open so failed, err: %s\n", dlerror());
         return UMQ_FAIL;
