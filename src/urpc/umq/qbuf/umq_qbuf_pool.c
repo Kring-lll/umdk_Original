@@ -287,7 +287,7 @@ static int slot_with_data_init(qbuf_expansion_pool_t *exp_pool, qbuf_expansion_p
     uint64_t total_size = QBUF_MEMALIGN_SIZE * sub_slot_count;
     if (!try_inc_atomic_exp_mem_size(total_size)) {
         if (__atomic_load_n(&g_total_escape_buf_cnt, __ATOMIC_RELAXED) == 0) {
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ,
+            UMQ_LIMIT_VLOG_DEBUG(VLOG_UMQ,
                 "expand mem size max: %llu, now expand mem size: %llu, expand buf pool need: %llu, expand failed\n",
                 g_qbuf_pool.expansion_mem_size_max, g_qbuf_pool.exp_total_mem_pool_size, total_size);
         }
@@ -1051,7 +1051,7 @@ static ALWAYS_INLINE int umq_qbuf_local_pool_fetch_and_expand(
         while (fetch_count < needed) {
             int32_t ret = fetch_from_global(&g_qbuf_pool.block_pool, local_pool, with_data, QBUF_POOL_BATCH_CNT);
             if (ret <= 0) {
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "fetch from global failed, fetch count: %u\n", needed);
+                UMQ_LIMIT_VLOG_DEBUG(VLOG_UMQ, "fetch from global failed, fetch count: %u\n", needed);
                 return ret;
             }
             fetch_count += (uint32_t)ret;
@@ -1089,7 +1089,7 @@ static ALWAYS_INLINE int umq_qbuf_local_pool_fetch_and_expand(
         int32_t ret = fetch_from_global(&g_qbuf_pool.block_pool, local_pool, with_data, QBUF_POOL_BATCH_CNT);
         if (ret <= 0) {
             if (__atomic_load_n(&g_total_escape_buf_cnt, __ATOMIC_RELAXED) == 0) {
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "fetch from global failed, fetch count: %u\n", batch_cnt);
+                UMQ_LIMIT_VLOG_DEBUG(VLOG_UMQ, "fetch from global failed, fetch count: %u\n", batch_cnt);
             }
             return ret;
         }
@@ -1156,7 +1156,7 @@ int expand_global_pool(bool with_data)
     ret = with_data ? slot_with_data_init(exp_pool, slot) : slot_without_data_init(exp_pool, slot);
     if (ret != UMQ_SUCCESS) {
         if (__atomic_load_n(&g_total_escape_buf_cnt, __ATOMIC_RELAXED) == 0) {
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "init %s slot failed\n", with_data ? "with data" : "without_data\n");
+            UMQ_LIMIT_VLOG_DEBUG(VLOG_UMQ, "init %s slot failed\n", with_data ? "with data" : "without_data\n");
         }
         goto FREE_SLOT;
     }

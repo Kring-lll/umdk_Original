@@ -325,7 +325,8 @@ int umq_qbuf_pool_stats_to_str(const umq_qbuf_pool_stats_t *qbuf_pool_stats, cha
             s->alloc_cnt_without_data, s->free_cnt_without_data);
     }
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_EQUALS_120);
-    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-16s %-13lu", "escape_buf_cnt", qbuf_pool_stats->escape_buf_cnt);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-16s %-13lu\n", "escape_buf_cnt", qbuf_pool_stats->escape_buf_cnt);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_EQUALS_120);
 
     return str_size;
