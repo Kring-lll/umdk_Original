@@ -724,10 +724,10 @@ static ge::graphStatus FusedDeepMoeTilingFuncImpl(gert::TilingContext &context)
     const gert::StorageShape* shareGmm1WeightStorageShape = context.GetOptionalInputShape(INPUT_SHARE_GMM1_WEIGHT_INDEX);
     bool calShareExpert = (shareGmm1WeightStorageShape != nullptr);
     if (calShareExpert) {
-        OPS_ERR_IF(CheckShareExpertDtypes(context, *tilingData) != ge::GRAPH_SUCCESS,
-                OPS_LOG_E(nodeName, "CheckShareExpertDtypes failed."), return ge::GRAPH_FAILED);
         OPS_ERR_IF(CheckShareExpertShapes(context, *tilingData) != ge::GRAPH_SUCCESS,
                 OPS_LOG_E(nodeName, "CheckShareExpertShapes failed."), return ge::GRAPH_FAILED);
+        OPS_ERR_IF(CheckShareExpertDtypes(context, *tilingData) != ge::GRAPH_SUCCESS,
+                OPS_LOG_E(nodeName, "CheckShareExpertDtypes failed."), return ge::GRAPH_FAILED);
     }
     bool expertSmoothScalesExist = CheckOptionalInputExist(context, INPUT_SMOOTH_SCALE_INDEX);
     if (expertSmoothScalesExist) {
