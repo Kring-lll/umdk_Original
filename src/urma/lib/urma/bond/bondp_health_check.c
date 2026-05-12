@@ -1436,7 +1436,7 @@ bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, u
 
     bondp_heath_check_ctx_t *health = &bdp_ctx->bondp_heath_check_ctx;
     bool consumed = false;
-    pthread_rwlock_rdlock(&health->task_table.lock);
+    // pthread_rwlock_rdlock(&health->task_table.lock);
     uint32_t hash = bondp_health_task_hash(vjetty_id);
     hmap_node_t *node_ptr = bondp_hash_table_lookup_without_lock(&health->task_table, &vjetty_id, hash);
     if (node_ptr != NULL) {
@@ -1462,9 +1462,9 @@ bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, u
                     .bdp_tjetty = task->bdp_tjetty,
                 };
                 bondp_notify_health_event(bdp_ctx, BONDP_HEALTH_EVENT_ACTIVE_IDX_UPDATE, &active_info);
-                URMA_LOG_INFO("Primary health probe success, switch active idx back to primary, " \
-                    "tjetty_id=%u old_active=%d new_active=%d\n",
-                    task->bdp_tjetty->v_tjetty.id.id, task->active_local_idx, task->primary_local_idx);
+                // URMA_LOG_INFO("Primary health probe success, switch active idx back to primary, "
+                //     "tjetty_id=%u old_active=%d new_active=%d\n",
+                //     task->bdp_tjetty->v_tjetty.id.id, task->active_local_idx, task->primary_local_idx);
             }
             if (is_balance && !ok) {
                 bondp_health_notify_datapath_link_fail(bdp_ctx, task->bdp_tjetty, (int)cr_local_idx, (int)target_idx);
@@ -1489,7 +1489,7 @@ bool bondp_try_handle_health_check_cr(bondp_context_t *bdp_ctx, int local_idx, u
             consumed = true;
         }
     }
-    pthread_rwlock_unlock(&health->task_table.lock);
+    // pthread_rwlock_unlock(&health->task_table.lock);
     if (!consumed) {
         URMA_LOG_WARN("Health CR not matched to subtask, local_idx=%d user_ctx=0x%lx\n", local_idx, cr->user_ctx);
     }
