@@ -1378,6 +1378,7 @@ urma_status_t bondp_modify_jetty(urma_jetty_t *jetty, urma_jetty_attr_t *attr)
 {
     urma_status_t ret = URMA_SUCCESS, final_ret = URMA_SUCCESS;
     bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
+    bool valid_p_jetty_existed = false;
 
     if ((attr->mask & JETTY_STATE) && attr->state == URMA_JETTY_STATE_ERROR) {
         bdp_jetty->modify_to_error = true;
@@ -1388,6 +1389,7 @@ urma_status_t bondp_modify_jetty(urma_jetty_t *jetty, urma_jetty_attr_t *attr)
         if (bdp_jetty->p_jetty[i] == NULL) {
             continue;
         }
+        valid_p_jetty_existed = true;
         ret = urma_modify_jetty(bdp_jetty->p_jetty[i], attr);
         if (ret != URMA_SUCCESS) {
             final_ret = ret;
@@ -1396,7 +1398,7 @@ urma_status_t bondp_modify_jetty(urma_jetty_t *jetty, urma_jetty_attr_t *attr)
         URMA_LOG_DEBUG("bondp modify_jetty p_jetty id is %u, new_state is %d.\n",
                        bdp_jetty->p_jetty[i]->jetty_id.id, attr->state);
     }
-    return final_ret;
+    return valid_p_jetty_existed ? final_ret : URMA_FAIL;
 }
 
 static int bondp_user_ctl_set_bonding_mode_legacy(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_out_t *out)
