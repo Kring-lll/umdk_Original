@@ -35,6 +35,8 @@ TensorVector FusedDeepMoeImplNpu(
     const at::TensorList &gmm2Weight, \
     const at::TensorList &gmm2WeightScale, \
     const at::Tensor &expertScales, \
+    const c10::optional<at::Tensor> &gmm1BiasOptional, \
+    const c10::optional<at::Tensor> &gmm2BiasOptional, \
     const c10::optional<at::Tensor> &shareGmm1WeightOptional, \
     const c10::optional<at::Tensor> &shareGmm1WeightScaleOptional, \
     const c10::optional<at::Tensor> &shareGmm2WeightOptional, \
@@ -72,6 +74,7 @@ TensorVector FusedDeepMoeImplNpu(
         // input
         x, expertIds, gmm1Weight, gmm1WeightScale, gmm2Weight, gmm2WeightScale, \
         expertScales, \
+        gmm1BiasOptional, gmm2BiasOptional, \
         shareGmm1WeightOptional, shareGmm1WeightScaleOptional, \
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
         expertSmoothScales, shareSmoothScales, xActiveMask, \
@@ -96,6 +99,8 @@ TensorVector FusedDeepMoeImplMeta(
     const at::TensorList &gmm2Weight, \
     const at::TensorList &gmm2WeightScale, \
     const at::Tensor &expertScales, \
+    const c10::optional<at::Tensor> &gmm1BiasOptional, \
+    const c10::optional<at::Tensor> &gmm2BiasOptional, \
     const c10::optional<at::Tensor> &shareGmm1WeightOptional, \
     const c10::optional<at::Tensor> &shareGmm1WeightScaleOptional, \
     const c10::optional<at::Tensor> &shareGmm2WeightOptional, \
@@ -131,6 +136,8 @@ TensorVector FusedDeepMoeImpl(
     const at::TensorList &gmm2Weight, \
     const at::TensorList &gmm2WeightScale, \
     const at::Tensor &expertScales, \
+    const c10::optional<at::Tensor> &gmm1BiasOptional, \
+    const c10::optional<at::Tensor> &gmm2BiasOptional, \
     const c10::optional<at::Tensor> &shareGmm1WeightOptional, \
     const c10::optional<at::Tensor> &shareGmm1WeightScaleOptional, \
     const c10::optional<at::Tensor> &shareGmm2WeightOptional, \
@@ -150,6 +157,7 @@ TensorVector FusedDeepMoeImpl(
                         .typed<decltype(FusedDeepMoeImpl)>();
     return op.call(x, expertIds, gmm1Weight, gmm1WeightScale, gmm2Weight, gmm2WeightScale, \
         expertScales, \
+        gmm1BiasOptional, gmm2BiasOptional, \
         shareGmm1WeightOptional, shareGmm1WeightScaleOptional, \
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
         expertSmoothScales, shareSmoothScales, xActiveMask, \
@@ -166,6 +174,8 @@ public:
                             const at::TensorList &gmm2Weight, \
                             const at::TensorList &gmm2WeightScale, \
                             const at::Tensor &expertScales, \
+                            const c10::optional<at::Tensor> &gmm1BiasOptional, \
+                            const c10::optional<at::Tensor> &gmm2BiasOptional, \
                             const c10::optional<at::Tensor> &shareGmm1WeightOptional, \
                             const c10::optional<at::Tensor> &shareGmm1WeightScaleOptional, \
                             const c10::optional<at::Tensor> &shareGmm2WeightOptional, \
@@ -183,6 +193,7 @@ public:
         at::AutoDispatchBelowADInplaceOrView guard;
         auto result = FusedDeepMoeImpl(x, expertIds, gmm1Weight, gmm1WeightScale, gmm2Weight, \
             gmm2WeightScale, expertScales, \
+            gmm1BiasOptional, gmm2BiasOptional, \
             shareGmm1WeightOptional, shareGmm1WeightScaleOptional, \
             shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
             expertSmoothScales, shareSmoothScales, xActiveMask, \
@@ -193,6 +204,8 @@ public:
     static TensorVector backward(AutogradContext *ctx, TensorVector grad_outputs)
     {
         return {at::Tensor(),
+                at::Tensor(),
+                at::Tensor(),
                 at::Tensor(),
                 at::Tensor(),
                 at::Tensor(),
@@ -219,6 +232,8 @@ TensorVector FusedDeepMoeImplAutograd(
     const at::TensorList &gmm2Weight, \
     const at::TensorList &gmm2WeightScale, \
     const at::Tensor &expertScales, \
+    const c10::optional<at::Tensor> &gmm1BiasOptional, \
+    const c10::optional<at::Tensor> &gmm2BiasOptional, \
     const c10::optional<at::Tensor> &shareGmm1WeightOptional, \
     const c10::optional<at::Tensor> &shareGmm1WeightScaleOptional, \
     const c10::optional<at::Tensor> &shareGmm2WeightOptional, \
@@ -235,6 +250,7 @@ TensorVector FusedDeepMoeImplAutograd(
 {
     auto result = FusedDeepMoe::apply(x, expertIds, gmm1Weight, gmm1WeightScale, gmm2Weight, \
             gmm2WeightScale, expertScales, \
+            gmm1BiasOptional, gmm2BiasOptional, \
             shareGmm1WeightOptional, shareGmm1WeightScaleOptional, \
             shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
             expertSmoothScales, shareSmoothScales, xActiveMask, \

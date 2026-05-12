@@ -285,6 +285,7 @@ public:
         // input
         GM_ADDR x, GM_ADDR expert_ids, GM_ADDR gmm1_weight, GM_ADDR gmm1_weight_scale,
         GM_ADDR gmm2_weight, GM_ADDR gmm2_weight_scale, GM_ADDR expert_scales,
+        GM_ADDR gmm1_bias, GM_ADDR gmm2_bias,
         GM_ADDR share_gmm1_weight, GM_ADDR share_gmm1_weight_scale,
         GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
         GM_ADDR expert_smooth_scales, GM_ADDR share_smooth_scales, GM_ADDR x_active_mask,
@@ -301,6 +302,8 @@ private:
     GM_ADDR gmScale1_;
     GM_ADDR gmWeight2_;
     GM_ADDR gmScale2_;
+    GM_ADDR gmBias1_;
+    GM_ADDR gmBias2_;
     GM_ADDR gmOutput_;
 
     GM_ADDR gmShareWeight1_;
@@ -343,6 +346,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     // input
     GM_ADDR x, GM_ADDR expert_ids, GM_ADDR gmm1_weight, GM_ADDR gmm1_weight_scale,
     GM_ADDR gmm2_weight, GM_ADDR gmm2_weight_scale, GM_ADDR expert_scales,
+    GM_ADDR gmm1_bias, GM_ADDR gmm2_bias,
     GM_ADDR share_gmm1_weight, GM_ADDR share_gmm1_weight_scale,
     GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
     GM_ADDR expert_smooth_scales, GM_ADDR share_smooth_scales, GM_ADDR x_active_mask,
@@ -362,6 +366,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     gmScale1_ = gmm1_weight_scale;
     gmWeight2_ = gmm2_weight;
     gmScale2_ = gmm2_weight_scale;
+    gmBias1_ = gmm1_bias;
+    gmBias2_ = gmm2_bias;
     gmOutput_ = output;
     gmShareWeight1_ = share_gmm1_weight;
     gmShareWeight1Scale_ = share_gmm1_weight_scale;

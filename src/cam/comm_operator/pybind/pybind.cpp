@@ -27,6 +27,7 @@ TORCH_LIBRARY(umdk_cam_op_lib, m)
 {
     m.def("fused_deep_moe(Tensor x, Tensor expert_ids, Tensor[] gmm1_weight, Tensor[] gmm1_weight_scale, \
     Tensor[] gmm2_weight, Tensor[] gmm2_weight_scale, Tensor expert_scales, \
+    Tensor? gmm1_bias, Tensor? gmm2_bias, \
     Tensor? share_gmm1_weight, Tensor? share_gmm1_weight_scale, \
     Tensor? share_gmm2_weight, Tensor? share_gmm2_weight_scale, \
     Tensor? expert_smooth_scales, Tensor? share_smooth_scales, Tensor? x_active_mask, \

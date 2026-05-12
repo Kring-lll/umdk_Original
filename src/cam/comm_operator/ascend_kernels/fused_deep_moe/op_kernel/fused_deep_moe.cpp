@@ -13,7 +13,8 @@
 #define CALL_FUSED_DEEP_MOE \
         FusedDeepMoe<DTYPE_X, DTYPE_GMM1_WEIGHT_SCALE, DTYPE_GMM2_WEIGHT_SCALE, int32_t, false, TILING_KEY_VAR> op; \
         op.Init(x, expert_ids, gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale, \
-                expert_scales, share_gmm1_weight, share_gmm1_weight_scale, \
+                expert_scales, gmm1_bias, gmm2_bias, \
+                share_gmm1_weight, share_gmm1_weight_scale, \
                 share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, share_smooth_scales, x_active_mask, \
                 output, share_output, expertTokenNums, \
                 workspace, nullptr, &tiling_data); \
@@ -33,6 +34,7 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
     // input
     GM_ADDR x, GM_ADDR expert_ids, GM_ADDR gmm1_weight, GM_ADDR gmm1_weight_scale,
     GM_ADDR gmm2_weight, GM_ADDR gmm2_weight_scale, GM_ADDR expert_scales,
+    GM_ADDR gmm1_bias, GM_ADDR gmm2_bias,
     GM_ADDR share_gmm1_weight, GM_ADDR share_gmm1_weight_scale,
     GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
     GM_ADDR expert_smooth_scales, GM_ADDR share_smooth_scales, GM_ADDR x_active_mask,

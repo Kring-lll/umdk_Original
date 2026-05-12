@@ -24,6 +24,8 @@ __attribute__((visibility("default"))) aclnnStatus aclnnFusedDeepMoeGetWorkspace
     const aclTensorList *gmm2Weight,
     const aclTensorList *gmm2WeightScale,
     const aclTensor *expertScales,
+    const aclTensor *gmm1BiasOptional,
+    const aclTensor *gmm2BiasOptional,
     const aclTensor *shareGmm1WeightOptional,
     const aclTensor *shareGmm1WeightScaleOptional,
     const aclTensor *shareGmm2WeightOptional,

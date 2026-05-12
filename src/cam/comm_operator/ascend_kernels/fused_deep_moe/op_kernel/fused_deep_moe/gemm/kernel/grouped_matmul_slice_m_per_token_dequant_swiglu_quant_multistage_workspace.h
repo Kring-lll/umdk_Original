@@ -1293,11 +1293,11 @@ public:
         tmpBufferOffset += (hiddenSize) * sizeof(int8_t);
         // double buffer 定义结束
 
-        AscendC::LocalTensor<int4b_t> xHighI4Tensor = resource.ubBuf.template GetBufferByByte<int4b_t>(tmpBufferOffset);
+        AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(tmpBufferOffset);
         xHighI4Tensor.SetSize(hiddenSize);
         tmpBufferOffset += hiddenSize / 2;
 
-        AscendC::LocalTensor<int4b_t> xLowI4Tensor = resource.ubBuf.template GetBufferByByte<int4b_t>(tmpBufferOffset);
+        AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(tmpBufferOffset);
         xLowI4Tensor.SetSize(hiddenSize);
         tmpBufferOffset += hiddenSize / 2;
 
@@ -1321,20 +1321,20 @@ public:
 
         constexpr int32_t MASK = 128;
         AscendC::Duplicate(xLowI16Tensor, static_cast<int16_t>(0x0F0F), MASK);
-        PipeBarrier<PIPE_V>();
+        AscendC::PipeBarrier<PIPE_V>();
         const size_t LEN_VK = (hiddenSize / 2) / 128;
         const size_t LAST_LEN_VK = (hiddenSize % 256) / 2;
         const half ONE_SIXTEENTH = static_cast<half>(0.0625f);
 
         uint32_t totalM = rows;
 
-        SetFlag<HardEvent::S_MTE2>(EVENT_ID6);
-        WaitFlag<HardEvent::S_MTE2>(EVENT_ID6);
+        AscendC::SetFlag<AscendC::HardEvent::S_MTE2>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::S_MTE2>(EVENT_ID6);
 
-        SetFlag<HardEvent::V_MTE2>(EVENT_ID6);
-        SetFlag<HardEvent::V_MTE2>(EVENT_ID7);
-        SetFlag<HardEvent::MTE3_V>(EVENT_ID6);
-        SetFlag<HardEvent::MTE3_V>(EVENT_ID7);
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID6);
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID7);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
 
         constexpr size_t LEN_128 = 128;
 
@@ -1343,8 +1343,6 @@ public:
 
         int pingpongId = 0;
         for (uint32_t processIndex = 0; processIndex < rows; ++processIndex) {
-            uint64_t relStartAddr = processIndex * hiddenSize;
-            uint64_t absStartAddr = gmOffsetA + relStartAddr;
             AscendC::TEventID EVENT_ID = pingpongId == 0 ? EVENT_ID6 : EVENT_ID7;
             AscendC::LocalTensor<int8_t> buf = pingpongId == 0 ? tmpBuffer0 : tmpBuffer1;
             AscendC::LocalTensor<int8_t> xTensor = pingpongId == 0 ? xTensor0 : xTensor1;
@@ -1361,22 +1359,22 @@ public:
             // 远端 scale 拷贝到GM
             // AscendC::DataCopyPad(dstScale[processIndex], bufScale, {1, 4, 0, 0, 0});
             AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID);
-            SetFlag<HardEvent::MTE2_V>(EVENT_ID);
-            WaitFlag<HardEvent::MTE2_V>(EVENT_ID);
+            AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID);
+            AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID);
             // 高四位处理开始
             AscendC::Cast(xHighHalfTensor, xTensor, AscendC::RoundMode::CAST_NONE, hiddenSize);
-            PipeBarrier<PIPE_V>();
+            AscendC::PipeBarrier<PIPE_V>();
             AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, hiddenSize);
-            PipeBarrier<PIPE_V>();
-            WaitFlag<HardEvent::MTE3_V>(EVENT_ID7);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
             AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, hiddenSize);
-            SetFlag<HardEvent::V_MTE3>(EVENT_ID6);
-            WaitFlag<HardEvent::V_MTE3>(EVENT_ID6);
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
             AscendC::DataCopy(src[outputOffset], xHighI4Tensor.ReinterpretCast<int8_t>(), hiddenSize / 2);
             // 高四位处理结束
 
             // 低四位处理开始
-            SetFlag<HardEvent::MTE3_V>(EVENT_ID7);
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
             AscendC::And(xLowHalfTensor.ReinterpretCast<int16_t>(), xTensor.ReinterpretCast<int16_t>(), xLowI16Tensor, LEN_128,
                 LEN_VK, {1, 1, 1, 8, 8, 0});
             if (LAST_LEN_VK > 0) {
@@ -1384,30 +1382,30 @@ public:
                     xTensor[LEN_VK * LEN_128 * TWO].ReinterpretCast<int16_t>(), xLowI16Tensor, LAST_LEN_VK, 1,
                     {1, 1, 1, 8, 8, 0});
             }
-            PipeBarrier<PIPE_V>();
-            SetFlag<HardEvent::V_MTE2>(EVENT_ID);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID);
             AscendC::Cast(xLowHalfTensor2.ReinterpretCast<half>(), xLowHalfTensor.ReinterpretCast<int8_t>(),
                  AscendC::RoundMode::CAST_NONE, hiddenSize);
-            PipeBarrier<PIPE_V>();
+            AscendC::PipeBarrier<PIPE_V>();
             const half MINUS_EIGHT = static_cast<half>(-8);
             AscendC::Adds(xHighHalfTensor, xLowHalfTensor2, MINUS_EIGHT, hiddenSize);
-            PipeBarrier<PIPE_V>();
-            WaitFlag<HardEvent::MTE3_V>(EVENT_ID6);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
             AscendC::Cast(xLowI4Tensor, xHighHalfTensor.ReinterpretCast<half>(), AscendC::RoundMode::CAST_NONE, hiddenSize);
-            SetFlag<HardEvent::V_MTE3>(EVENT_ID7);
-            WaitFlag<HardEvent::V_MTE3>(EVENT_ID7);
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
             AscendC::DataCopy(src[outputOffset + hiddenSize / 2], xLowI4Tensor.ReinterpretCast<int8_t>(), hiddenSize / 2);
-            SetFlag<HardEvent::MTE3_V>(EVENT_ID6);
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
             // 低四位处理结束
             pingpongId = (pingpongId + 1) % BufferNum;
         }
 
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID6);
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID7);
-        WaitFlag<HardEvent::V_MTE2>(EVENT_ID6);
-        WaitFlag<HardEvent::V_MTE2>(EVENT_ID7);
-        WaitFlag<HardEvent::MTE3_V>(EVENT_ID6);
-        WaitFlag<HardEvent::MTE3_V>(EVENT_ID7);
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID7);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
     }
 
     CATLASS_DEVICE
