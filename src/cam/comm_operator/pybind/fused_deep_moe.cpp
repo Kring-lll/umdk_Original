@@ -42,12 +42,14 @@ TensorVector FusedDeepMoeImplNpu(
     const c10::optional<at::Tensor> &expertSmoothScales, \
     const c10::optional<at::Tensor> &shareSmoothScales, \
     const c10::optional<at::Tensor> &xActiveMask, \
+    const at::TensorList &gmm1BiasOptional, \
+    const at::TensorList &gmm2BiasOptional, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
     int64_t epRankId, \
     int64_t moeExpertNum, \
     int64_t quantMode, \
-    int64_t globalBs
+    int64_t globalBs, \
 )
 {
     TORCH_BIND_ASSERT(x.dim() == DIM_TWO);
@@ -75,6 +77,7 @@ TensorVector FusedDeepMoeImplNpu(
         shareGmm1WeightOptional, shareGmm1WeightScaleOptional, \
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
         expertSmoothScales, shareSmoothScales, xActiveMask, \
+        gmm1BiasOptional, gmm2BiasOptional, \
         // attr
         groupEpPtr, epRankSize, epRankId, moeExpertNum, quantMode, globalBs, \
         // output
@@ -103,6 +106,8 @@ TensorVector FusedDeepMoeImplMeta(
     const c10::optional<at::Tensor> &expertSmoothScales, \
     const c10::optional<at::Tensor> &shareSmoothScales, \
     const c10::optional<at::Tensor> &xActiveMask, \
+    const at::TensorList &gmm1BiasOptional, \
+    const at::TensorList &gmm2BiasOptional, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
     int64_t epRankId, \
@@ -138,6 +143,8 @@ TensorVector FusedDeepMoeImpl(
     const c10::optional<at::Tensor> &expertSmoothScales, \
     const c10::optional<at::Tensor> &shareSmoothScales, \
     const c10::optional<at::Tensor> &xActiveMask, \
+    const at::TensorList &gmm1BiasOptional, \
+    const at::TensorList &gmm2BiasOptional, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
     int64_t epRankId, \
@@ -153,6 +160,7 @@ TensorVector FusedDeepMoeImpl(
         shareGmm1WeightOptional, shareGmm1WeightScaleOptional, \
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
         expertSmoothScales, shareSmoothScales, xActiveMask, \
+        gmm1BiasOptional, gmm2BiasOptional, \
         groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs);
 }
 
@@ -173,6 +181,8 @@ public:
                             const c10::optional<at::Tensor> &expertSmoothScales, \
                             const c10::optional<at::Tensor> &shareSmoothScales, \
                             const c10::optional<at::Tensor> &xActiveMask, \
+                            const at::TensorList &gmm1BiasOptional, \
+                            const at::TensorList &gmm2BiasOptional, \
                             c10::string_view groupEp, \
                             int64_t epRankSize, \
                             int64_t epRankId, \
@@ -186,6 +196,7 @@ public:
             shareGmm1WeightOptional, shareGmm1WeightScaleOptional, \
             shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
             expertSmoothScales, shareSmoothScales, xActiveMask, \
+            gmm1BiasOptional, gmm2BiasOptional, \
             groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs);
         return result;
     }
@@ -193,6 +204,8 @@ public:
     static TensorVector backward(AutogradContext *ctx, TensorVector grad_outputs)
     {
         return {at::Tensor(),
+                at::Tensor(),
+                at::Tensor(),
                 at::Tensor(),
                 at::Tensor(),
                 at::Tensor(),
@@ -226,6 +239,8 @@ TensorVector FusedDeepMoeImplAutograd(
     const c10::optional<at::Tensor> &expertSmoothScales, \
     const c10::optional<at::Tensor> &shareSmoothScales, \
     const c10::optional<at::Tensor> &xActiveMask, \
+    const at::TensorList &gmm1BiasOptional, \
+    const at::TensorList &gmm2BiasOptional, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
     int64_t epRankId, \
@@ -238,6 +253,7 @@ TensorVector FusedDeepMoeImplAutograd(
             shareGmm1WeightOptional, shareGmm1WeightScaleOptional, \
             shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
             expertSmoothScales, shareSmoothScales, xActiveMask, \
+            gmm1BiasOptional, gmm2BiasOptional, \
             groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs);
         return result;
 }
