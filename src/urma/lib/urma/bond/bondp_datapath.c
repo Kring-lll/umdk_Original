@@ -308,9 +308,9 @@ static urma_status_t bondp_post_send_wr_and_store(bondp_comp_t *bdp_comp, urma_j
         return URMA_FAIL;
     }
 
-    (void)pthread_spin_lock(&bdp_comp->send_jfc->wr_lock);
+    // (void)pthread_spin_lock(&bdp_comp->send_jfc->wr_lock);
     jfs_wr_entry_t *wr_entry = jfs_wr_buf_alloc(&bdp_comp->send_jfc->wr_buf);
-    (void)pthread_spin_unlock(&bdp_comp->send_jfc->wr_lock);
+    // (void)pthread_spin_unlock(&bdp_comp->send_jfc->wr_lock);
     if (wr_entry == NULL) {
         URMA_LOG_ERR("Failed to allocate jfs wr entry\n");
         return URMA_EAGAIN;
@@ -328,7 +328,7 @@ static urma_status_t bondp_post_send_wr_and_store(bondp_comp_t *bdp_comp, urma_j
         goto FREE_PWR;
     }
 
-    add_vwr_use_cnt(pwr);
+    // add_vwr_use_cnt(pwr);
     ret = convert_jfs_vwr_to_pwr(pwr, send_idx, target_idx, bdp_comp, v_conn);
     if (ret != 0) {
         URMA_LOG_ERR("Failed to convert jfs wr\n");
@@ -348,9 +348,9 @@ RELEASE_WR:
     release_vwr_use_cnt(pwr);
 FREE_PWR:
     free_jfs_wr(pwr);
-    (void)pthread_spin_lock(&bdp_comp->send_jfc->wr_lock);
+    // (void)pthread_spin_lock(&bdp_comp->send_jfc->wr_lock);
     jfs_wr_buf_release(wr_entry);
-    (void)pthread_spin_unlock(&bdp_comp->send_jfc->wr_lock);
+    // (void)pthread_spin_unlock(&bdp_comp->send_jfc->wr_lock);
     return ret;
 }
 
@@ -359,10 +359,10 @@ urma_status_t bondp_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, u
     bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
     urma_status_t ret = URMA_SUCCESS;
 
-    PERF_PROFILING_START(BOND_JETTY_POST_SEND);
+    // PERF_PROFILING_START(BOND_JETTY_POST_SEND);
     ret = post_send_check_wr_list_valid(bdp_jetty, wr, bad_wr);
     if (ret != URMA_SUCCESS) {
-        PERF_PROFILING_END(BOND_JETTY_POST_SEND);
+        // PERF_PROFILING_END(BOND_JETTY_POST_SEND);
         return ret;
     }
 
@@ -371,17 +371,17 @@ urma_status_t bondp_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, u
     } else {
         urma_jfs_wr_t *cur = wr;
         while (cur != NULL) {
-            (void)pthread_spin_lock(&bdp_jetty->send_lock);
+            // (void)pthread_spin_lock(&bdp_jetty->send_lock);
             ret = bondp_post_send_wr_and_store(bdp_jetty, cur, bad_wr);
-            (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+            // (void)pthread_spin_unlock(&bdp_jetty->send_lock);
             if (ret != URMA_SUCCESS) {
-                PERF_PROFILING_END(BOND_JETTY_POST_SEND);
+                // PERF_PROFILING_END(BOND_JETTY_POST_SEND);
                 return ret;
             }
             cur = cur->next;
         }
     }
-    PERF_PROFILING_END(BOND_JETTY_POST_SEND);
+    // PERF_PROFILING_END(BOND_JETTY_POST_SEND);
 
     return ret;
 }
@@ -695,16 +695,16 @@ static bondp_comp_t *get_comp_by_cr(bondp_context_t *bdp_ctx, int dev_idx, urma_
         p_vjetty_type = JFR;
     }
 
-    pthread_rwlock_rdlock(&bdp_ctx->p_vjetty_id_table.lock);
+    // pthread_rwlock_rdlock(&bdp_ctx->p_vjetty_id_table.lock);
     bondp_comp_t *comp = bdp_p_vjetty_id_table_lookup_comp_without_lock(
         &bdp_ctx->p_vjetty_id_table, pjetty_id, p_vjetty_type);
     if (comp == NULL) {
-        pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+        // pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
         URMA_LOG_ERR("Failed to get comp, local_id: %d\n", pjetty_id.id);
         return NULL;
     }
     atomic_fetch_add(&comp->use_cnt.atomic_cnt, 1);
-    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+    // pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
     return comp;
 }
 
@@ -792,7 +792,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, bond
     }
 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
-        (void)pthread_spin_lock(&bdp_comp->send_lock);
+        // (void)pthread_spin_lock(&bdp_comp->send_lock);
         bdp_comp->valid[send_idx] = false;
 
         int new_send_idx = -1, new_target_idx = -1;
@@ -803,7 +803,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, bond
              * this error CQE is returned directly to the upper layer.
              */
             URMA_LOG_ERR("Failed to find valid port for retransmission.\n");
-            (void)pthread_spin_unlock(&bdp_comp->send_lock);
+            // (void)pthread_spin_unlock(&bdp_comp->send_lock);
             goto CONVERT_CR;
         }
 
@@ -844,7 +844,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, bond
             };
             bondp_notify_health_event(bdp_comp->bondp_ctx, BONDP_HEALTH_EVENT_FALLBACK_TASK_KICK, &event_info);
         }
-        (void)pthread_spin_unlock(&bdp_comp->send_lock);
+        // (void)pthread_spin_unlock(&bdp_comp->send_lock);
         put_comp(bdp_comp);
         return CONVERT_SKIP;
     }
@@ -858,11 +858,11 @@ CONVERT_CR:
     cr->user_ctx = wr_entry->user_ctx;
 
     convert_jfs_pwr_to_vwr_resend(&wr_entry->wr, &wr_entry->v_conn->target_vjetty->v_tjetty);
-    release_vwr_use_cnt(&wr_entry->wr);
+    // release_vwr_use_cnt(&wr_entry->wr);
     free_jfs_wr(&wr_entry->wr);
-    (void)pthread_spin_lock(&bdp_comp->send_jfc->wr_lock);
+    // (void)pthread_spin_lock(&bdp_comp->send_jfc->wr_lock);
     jfs_wr_buf_release(wr_entry);
-    (void)pthread_spin_unlock(&bdp_comp->send_jfc->wr_lock);
+    // (void)pthread_spin_unlock(&bdp_comp->send_jfc->wr_lock);
     put_comp(bdp_comp);
     return CONVERT_SUCCESS;
 }
@@ -982,7 +982,7 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
 
     int cr_cnt_remaining = cr_cnt;
 
-    PERF_PROFILING_START(BOND_POLL_JFC);
+    // PERF_PROFILING_START(BOND_POLL_JFC);
 
     /* Start polling from the next device index to avoid starvation. */
     int start_idx = bdp_jfc->lasted_polled_jfc_idx + 1;
@@ -1000,7 +1000,7 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
         int pcr_cnt = urma_poll_jfc(bdp_jfc->p_jfc[idx], pcr_cnt_max, pcr_buf);
 
         if (pcr_cnt < 0) {
-            PERF_PROFILING_END(BOND_POLL_JFC);
+            // PERF_PROFILING_END(BOND_POLL_JFC);
             return pcr_cnt;
         }
         if (pcr_cnt == 0) {
@@ -1028,7 +1028,7 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
         bdp_jfc->lasted_polled_jfc_idx = idx;
     }
 
-    PERF_PROFILING_END(BOND_POLL_JFC);
+    // PERF_PROFILING_END(BOND_POLL_JFC);
     return cr_cnt - cr_cnt_remaining;
 }
 
