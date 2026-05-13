@@ -365,6 +365,11 @@ static urma_status_t bondp_post_send_wr_with_store(bondp_comp_t *bdp_comp, urma_
         return URMA_EINVAL;
     }
 
+    bdp_v_conn_t *v_conn = get_v_conn_on_send(bdp_comp, bdp_tjetty);
+    if (v_conn == NULL) {
+        return URMA_FAIL;
+    }
+
     int send_idx = 0, target_idx = 0;
     if (!wr->flag.bs.has_drv_ext) {
         ret = schedule_send(wr->tjetty, bdp_comp, &send_idx, &target_idx, NULL);
@@ -382,14 +387,14 @@ static urma_status_t bondp_post_send_wr_with_store(bondp_comp_t *bdp_comp, urma_
     uint32_t cnt = 0;
     urma_jfs_wr_t *pwr;
     while (cur != NULL) {
-        wr_entry[cnt] = jfs_wr_buf_alloc(&bdp_comp->send_wr_buf);
+        wr_entry[cnt] = jfs_wr_buf_alloc(&bdp_comp->send_jfc->wr_buf);
         if (wr_entry[cnt] == NULL) {
             URMA_LOG_ERR("Failed to allocate jfs wr entry\n");
             return URMA_EAGAIN;
         }
         wr_entry[cnt]->user_ctx = cur->user_ctx;
         wr_entry[cnt]->bdp_comp = bdp_comp;
-        wr_entry[cnt]->target_vjetty = bdp_tjetty;
+        wr_entry[cnt]->v_conn = v_conn;
         wr_entry[cnt]->send_idx = send_idx;
         wr_entry[cnt]->target_idx = target_idx;
 
@@ -399,7 +404,7 @@ static urma_status_t bondp_post_send_wr_with_store(bondp_comp_t *bdp_comp, urma_
             URMA_LOG_ERR("Failed to copy jfs wr\n");
             goto FREE_PWR;
         }
-        ret = convert_jfs_vwr_to_pwr(pwr, send_idx, target_idx, bdp_comp);
+        ret = convert_jfs_vwr_to_pwr(pwr, send_idx, target_idx, bdp_comp, v_conn);
         if (ret != 0) {
             URMA_LOG_ERR("Failed to convert jfs wr\n");
             goto RELEASE_WR;
@@ -421,13 +426,13 @@ static urma_status_t bondp_post_send_wr_with_store(bondp_comp_t *bdp_comp, urma_
     return URMA_SUCCESS;
 
 RELEASE_WR:
-    convert_jfs_pwr_to_vwr_resend(pwr, &wr_entry[0]->target_vjetty->v_tjetty);
+    convert_jfs_pwr_to_vwr_resend(pwr, &wr_entry[0]->v_conn->target_vjetty->v_tjetty);
     release_vwr_use_cnt(pwr);
 FREE_PWR:
     free_jfs_wr(pwr);
-    (void)pthread_spin_lock(&bdp_comp->send_wr_lock);
-    jfs_wr_buf_release(wr_entry[cnt]);
-    (void)pthread_spin_unlock(&bdp_comp->send_wr_lock);
+    (void)pthread_spin_lock(&bdp_comp->send_jfc->wr_lock);
+    jfs_wr_buf_release(wr_entry[0]);
+    (void)pthread_spin_unlock(&bdp_comp->send_jfc->wr_lock);
     return ret;
     
 }
