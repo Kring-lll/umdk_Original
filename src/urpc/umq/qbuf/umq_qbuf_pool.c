@@ -1558,8 +1558,10 @@ int umq_qbuf_pool_info_get(umq_qbuf_pool_stats_t *qbuf_pool_stats)
     qbuf_pool_stats->exp_pool_with_data.total_shrink_count = exp_with_data->total_shrink_count;
     qbuf_pool_stats->exp_pool_with_data.exp_total_block_num =
         exp_with_data->expansion_count * exp_with_data->expansion_block_count;
+    uint64_t exp_with_data_block_size =
+        mode == UMQ_BUF_COMBINE ? umq_buf_size_small() : (umq_buf_size_small() + sizeof(umq_buf_t));
     qbuf_pool_stats->exp_pool_with_data.exp_total_mem_size =
-        qbuf_pool_stats->exp_pool_with_data.exp_total_block_num * (umq_buf_size_small() + sizeof(umq_buf_t));
+        qbuf_pool_stats->exp_pool_with_data.exp_total_block_num * exp_with_data_block_size;
 
     // expansion pool stats - without_data
     qbuf_expansion_pool_t *exp_without_data = &g_qbuf_pool.exp_pool_without_date;
