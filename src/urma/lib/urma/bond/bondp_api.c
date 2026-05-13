@@ -1601,6 +1601,21 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     }
     atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
 
+    bondp_comp_t fake_jetty = {0};
+    bool is_fake_jetty = false;
+    if (cfg_jetty == NULL) {
+        if (rjetty->trans_mode == URMA_TM_RM && bdp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP) {
+            URMA_LOG_ERR("RM jetty import requires drv_ext.vjetty.\n");
+            goto FREE_TJETTY;
+        }
+        is_fake_jetty = true;
+        cfg_jetty = &fake_jetty;
+        if (init_active_indices(bdp_ctx, &fake_jetty, NULL, 0) != 0) {
+            URMA_LOG_ERR("Failed to init active indices\n");
+            goto FREE_TJETTY;
+        }
+    }
+
     urma_bond_id_info_out_t rvjetty_info = {0};
     if (bondp_import_vjetty(ctx, rjetty, token_value, bdp_tjetty, &rvjetty_info) != 0) {
         URMA_LOG_ERR("Failed to import vjetty, [" EID_FMT "]=%u\n",
@@ -1608,20 +1623,6 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         goto FREE_TJETTY;
     }
 
-    bondp_comp_t fake_jetty = {0};
-    bool is_fake_jetty = false;
-    if (cfg_jetty == NULL) {
-        if (rjetty->trans_mode == URMA_TM_RM && bdp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP) {
-            URMA_LOG_ERR("RM jetty import requires drv_ext.vjetty.\n");
-            return NULL;
-        }
-        is_fake_jetty = true;
-        cfg_jetty = &fake_jetty;
-        if (init_active_indices(bdp_ctx, &fake_jetty, NULL, 0) != 0) {
-            URMA_LOG_ERR("Failed to init active indices\n");
-            return NULL;
-        }
-    }
     if (init_target_active_indices(bdp_ctx, bdp_tjetty, &rvjetty_info, cfg_jetty) != 0) {
         URMA_LOG_ERR("Failed to init target active indices\n");
         goto UNIMPORT_VJETTY;
