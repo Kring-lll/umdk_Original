@@ -169,6 +169,65 @@ int uvs_get_route_list(const uvs_route_t *route, uvs_route_list_t *route_list)
     return ret;
 }
 
+static void uvs_dedup_path_set(uvs_path_set_t *uvs_path_set)
+{
+    typedef struct {
+        union uvs_port_id port;
+        uvs_eid_t eid;
+    } port_eid_entry_t;
+
+    port_eid_entry_t src_group[UVS_MAX_ROUTES] = {0};
+    int src_cnt = 0;
+    port_eid_entry_t dst_group[UVS_MAX_ROUTES] = {0};
+    int dst_cnt = 0;
+
+    for (uint32_t i = 0; i < uvs_path_set->path_count; i++) {
+        uvs_path_t *p = &uvs_path_set->paths[i];
+        bool src_found = false;
+        for (int k = 0; k < src_cnt; k++) {
+            if (src_group[k].port.chip_id == p->src_port.chip_id &&
+                src_group[k].port.port_idx == p->src_port.port_idx) {
+                src_found = true;
+                break;
+            }
+        }
+        if (!src_found && src_cnt < UVS_MAX_ROUTES) {
+            src_group[src_cnt].port = p->src_port;
+            src_group[src_cnt].eid = p->src_eid;
+            src_cnt++;
+        }
+
+        bool dst_found = false;
+        for (int k = 0; k < dst_cnt; k++) {
+            if (dst_group[k].port.chip_id == p->dst_port.chip_id &&
+                dst_group[k].port.port_idx == p->dst_port.port_idx) {
+                dst_found = true;
+                break;
+            }
+        }
+        if (!dst_found && dst_cnt < UVS_MAX_ROUTES) {
+            dst_group[dst_cnt].port = p->dst_port;
+            dst_group[dst_cnt].eid = p->dst_eid;
+            dst_cnt++;
+        }
+    }
+
+    uint32_t new_count = 0;
+    for (int s = 0; s < src_cnt && new_count < UVS_MAX_ROUTES; s++) {
+        for (int d = 0; d < dst_cnt && new_count < UVS_MAX_ROUTES; d++) {
+            if (src_group[s].port.port_idx == dst_group[d].port.port_idx) {
+                uvs_path_t *np = &uvs_path_set->paths[new_count];
+                np->src_port = src_group[s].port;
+                np->src_eid = src_group[s].eid;
+                np->dst_port = dst_group[d].port;
+                np->dst_eid = dst_group[d].eid;
+                new_count++;
+            }
+        }
+    }
+    uvs_path_set->path_count = new_count;
+}
+
 static void uvs_filter_path_set(uvs_path_set_t *uvs_path_set, bool multi_path)
 {
     uvs_path_set_t filtered = *uvs_path_set;
@@ -223,6 +282,7 @@ int uvs_get_path_set(const uvs_eid_t *src_bondind_eid,
         TPSA_LOG_ERR("Failed to get path set, ret = %d.\n", ret);
         return ret;
     }
+    uvs_dedup_path_set(uvs_path_set);
     // Temporary fix for the issue where kernel FULLMESH_1D returns all eids
     if (uvs_path_set->topo_type == UVS_TOPO_TYPE_FULLMESH_1D) {
         uvs_filter_path_set(uvs_path_set, multi_path);

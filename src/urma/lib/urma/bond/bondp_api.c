@@ -476,19 +476,19 @@ static int init_target_active_indices(bondp_context_t *bdp_ctx, bondp_target_jet
                 continue;
             }
 
-            if (rvjetty_info->connected[local_indice][target_indice]) {
-                jetty->active_indices[active_count] = local_indice;
-                bdp_tjetty->active_indices[active_count] = target_indice;
-                bdp_tjetty->local_active_indices[active_count] = local_indice;
-                active_count += 1;
+            // if (rvjetty_info->connected[local_indice][target_indice]) {
+            jetty->active_indices[active_count] = local_indice;
+            bdp_tjetty->active_indices[active_count] = target_indice;
+            bdp_tjetty->local_active_indices[active_count] = local_indice;
+            active_count += 1;
 
-                if (bdp_ctx->bonding_mode == BONDP_BONDING_MODE_STANDALONE) {
-                    goto FIND_FINISH;
-                }
-
-                target_used[target_indice] = true;
-                break;
+            if (bdp_ctx->bonding_mode == BONDP_BONDING_MODE_STANDALONE) {
+                goto FIND_FINISH;
             }
+
+            target_used[target_indice] = true;
+            break;
+            // }
         }
     }
 
