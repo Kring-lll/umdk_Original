@@ -592,6 +592,12 @@ urma_status_t urma_set_context_opt(urma_context_t *ctx, urma_opt_name_t opt_name
                 URMA_LOG_ERR("Invalid option value len.\n");
                 return URMA_EINVAL;
             }
+            urma_context_aggr_mode_t aggr_mode = *(const urma_context_aggr_mode_t *)opt_value;
+            if (aggr_mode != URMA_AGGR_MODE_STANDALONE && aggr_mode != URMA_AGGR_MODE_ACTIVE_BACKUP &&
+                aggr_mode != URMA_AGGR_MODE_BALANCE) {
+                URMA_LOG_ERR("Invalid aggregated mode.\n");
+                return URMA_EINVAL;
+            }
             if (strcmp(ctx->dev->ops->name, "ub_agg") != 0) {
                 URMA_LOG_ERR("Cannot set aggregated mode for non-aggregated device.\n");
                 return URMA_EINVAL;
