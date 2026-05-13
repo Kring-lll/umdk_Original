@@ -43,6 +43,12 @@ msg_ring_t *msg_ring_create(char *msg_ring_name, uint32_t msg_ring_name_len, msg
     if (msg_ring_name_len > MAX_MSG_RING_NAME) {
         return NULL;
     }
+    if (opt == NULL || opt->tx_depth == 0 || opt->rx_depth == 0 ||
+        opt->tx_max_buf_size <= sizeof(shm_ring_buf_hdr_t) ||
+        opt->rx_max_buf_size <= sizeof(shm_ring_buf_hdr_t)) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "msg ring option is invalid\n");
+        return NULL;
+    }
 
     msg_ring_t *msg_ring_h = (msg_ring_t *)calloc(1, sizeof(msg_ring_t));
     if (msg_ring_h == NULL) {
