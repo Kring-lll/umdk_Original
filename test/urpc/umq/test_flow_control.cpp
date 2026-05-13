@@ -819,3 +819,576 @@ TEST_F(UmqFlowControlTest, test_umq_ub_window_operations_atomic_vs_non_atomic)
     
     umq_ub_flow_control_uninit(&queue2.flow_control);
 }
+
+TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_query_atomic)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    umq_ub_ctx_t dev_ctx = {0};
+    queue.dev_ctx = &dev_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = true;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    queue.flow_control.local_rx_posted = 10;
+    queue.flow_control.remote_rx_window = 20;
+    queue.flow_control.stats_u64[ALLOCATED_SUCCESS] = 30;
+    queue.flow_control.stats_u64[ALLOCATED_TOTAL] = 40;
+    queue.flow_control.total_local_rx_posted = 100;
+    queue.flow_control.total_remote_rx_received = 200;
+    queue.flow_control.total_remote_rx_consumed = 150;
+    queue.flow_control.total_flow_controlled_wr = 5;
+    
+    umq_flow_control_stats_t stats = {0};
+    queue.flow_control.ops.stats_query(&queue.flow_control, &queue, &stats);
+    
+    ASSERT_EQ(stats.queue_credit.queue_idle, 10);
+    ASSERT_EQ(stats.queue_credit.queue_acquired, 20);
+    ASSERT_EQ(stats.queue_credit.total_queue_idle, 100);
+    ASSERT_EQ(stats.queue_credit.total_queue_acquired, 200);
+    ASSERT_EQ(stats.queue_credit.total_queue_post_tx_success, 150);
+    ASSERT_EQ(stats.queue_credit.total_queue_post_tx_err, 5);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_query_non_atomic)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    umq_ub_ctx_t dev_ctx = {0};
+    queue.dev_ctx = &dev_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = false;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    queue.flow_control.local_rx_posted = 5;
+    queue.flow_control.remote_rx_window = 15;
+    queue.flow_control.stats_u64[ALLOCATED_SUCCESS] = 25;
+    queue.flow_control.stats_u64[ALLOCATED_TOTAL] = 35;
+    queue.flow_control.total_local_rx_posted = 50;
+    queue.flow_control.total_remote_rx_received = 100;
+    queue.flow_control.total_remote_rx_consumed = 80;
+    queue.flow_control.total_flow_controlled_wr = 3;
+    
+    umq_flow_control_stats_t stats = {0};
+    queue.flow_control.ops.stats_query(&queue.flow_control, &queue, &stats);
+    
+    ASSERT_EQ(stats.queue_credit.queue_idle, 5);
+    ASSERT_EQ(stats.queue_credit.queue_acquired, 15);
+    ASSERT_EQ(stats.queue_credit.total_queue_idle, 50);
+    ASSERT_EQ(stats.queue_credit.total_queue_acquired, 100);
+    ASSERT_EQ(stats.queue_credit.total_queue_post_tx_success, 80);
+    ASSERT_EQ(stats.queue_credit.total_queue_post_tx_err, 3);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_packet_stats)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = true;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    umq_ub_fc_packet_stats(&queue.flow_control, 5, UB_PACKET_STATS_TYPE_SEND);
+    umq_ub_fc_packet_stats(&queue.flow_control, 3, UB_PACKET_STATS_TYPE_SEND_SUCCESS);
+    umq_ub_fc_packet_stats(&queue.flow_control, 2, UB_PACKET_STATS_TYPE_RECV);
+    umq_ub_fc_packet_stats(&queue.flow_control, 1, UB_PACKET_STATS_TYPE_SEND_EAGAIN);
+    
+    ASSERT_EQ(queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_SEND], 5);
+    ASSERT_EQ(queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_SEND_SUCCESS], 3);
+    ASSERT_EQ(queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_RECV], 2);
+    ASSERT_EQ(queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_SEND_EAGAIN], 1);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_credit_pool_stats_query_atomic)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = true;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    ub_credit_pool_t *pool = &io_jfr_ctx.credit;
+    pool->stats_u16[CREDIT_POOL_IDLE] = 10;
+    pool->stats_u16[CREDIT_POOL_ALLOCATED] = 20;
+    pool->stats_u64[CREDIT_POOL_IDLE_TOTAL] = 100;
+    pool->stats_u64[CREDIT_POOL_ALLOCATED_TOTAL] = 200;
+    pool->stats_u64[CREDIT_POOL_ERR_TOTAL] = 5;
+    
+    umq_credit_pool_stats_t pool_stats = {0};
+    pool->ops.stats_query(pool, &pool_stats);
+    
+    ASSERT_EQ(pool_stats.pool_idle, 10);
+    ASSERT_EQ(pool_stats.pool_be_allocated, 20);
+    ASSERT_EQ(pool_stats.total_pool_idle, 100);
+    ASSERT_EQ(pool_stats.total_pool_be_allocated, 200);
+    ASSERT_EQ(pool_stats.total_pool_post_rx_err, 5);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_credit_pool_stats_query_non_atomic)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = false;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    ub_credit_pool_t *pool = &io_jfr_ctx.credit;
+    pool->stats_u16[CREDIT_POOL_IDLE] = 15;
+    pool->stats_u16[CREDIT_POOL_ALLOCATED] = 25;
+    pool->stats_u64[CREDIT_POOL_IDLE_TOTAL] = 150;
+    pool->stats_u64[CREDIT_POOL_ALLOCATED_TOTAL] = 250;
+    pool->stats_u64[CREDIT_POOL_ERR_TOTAL] = 10;
+    
+    umq_credit_pool_stats_t pool_stats = {0};
+    pool->ops.stats_query(pool, &pool_stats);
+    
+    ASSERT_EQ(pool_stats.pool_idle, 15);
+    ASSERT_EQ(pool_stats.pool_be_allocated, 25);
+    ASSERT_EQ(pool_stats.total_pool_idle, 150);
+    ASSERT_EQ(pool_stats.total_pool_be_allocated, 250);
+    ASSERT_EQ(pool_stats.total_pool_post_rx_err, 10);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_remote_rx_window_exchange_atomic)
+{
+    ub_flow_control_t fc = {0};
+    fc.enabled = true;
+    fc.remote_rx_window = 50;
+    fc.remote_rx_depth = TEST_QUEUE_RX_DEPTH;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = true;
+    ub_queue_t queue = {0};
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    
+    int ret = umq_ub_flow_control_init(&fc, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    fc.remote_rx_window = 50;
+    
+    uint16_t exchanged = fc.ops.remote_rx_window_exchange(&fc);
+    ASSERT_EQ(exchanged, 50);
+    ASSERT_EQ(fc.remote_rx_window, 0);
+    
+    umq_ub_flow_control_uninit(&fc);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_query_with_packet_stats)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    umq_ub_ctx_t dev_ctx = {0};
+    queue.dev_ctx = &dev_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = true;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_SEND] = 100;
+    queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_SEND_SUCCESS] = 95;
+    queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_RECV] = 80;
+    queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_SEND_EAGAIN] = 5;
+    queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_SEND_ERROR] = 2;
+    queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_RECV_ERROR] = 1;
+    
+    umq_flow_control_stats_t stats = {0};
+    queue.flow_control.ops.stats_query(&queue.flow_control, &queue, &stats);
+    
+    ASSERT_EQ(stats.packet_stats.send_cnt, 100);
+    ASSERT_EQ(stats.packet_stats.send_success, 95);
+    ASSERT_EQ(stats.packet_stats.recv_cnt, 80);
+    ASSERT_EQ(stats.packet_stats.send_eagain_cnt, 5);
+    ASSERT_EQ(stats.packet_stats.send_error_cnt, 2);
+    ASSERT_EQ(stats.packet_stats.recv_error_cnt, 1);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_combined_stats_operations)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    umq_ub_ctx_t dev_ctx = {0};
+    queue.dev_ctx = &dev_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = true;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    umq_ub_shared_credit_recharge(&queue, 10);
+    
+    queue.flow_control.remote_rx_window = 20;
+    umq_ub_fc_packet_stats(&queue.flow_control, 5, UB_PACKET_STATS_TYPE_SEND);
+    
+    umq_flow_control_stats_t fc_stats = {0};
+    queue.flow_control.ops.stats_query(&queue.flow_control, &queue, &fc_stats);
+    ASSERT_EQ(fc_stats.queue_credit.queue_acquired, 20);
+    ASSERT_EQ(fc_stats.packet_stats.send_cnt, 5);
+    
+    ub_credit_pool_t *pool = &io_jfr_ctx.credit;
+    umq_credit_pool_stats_t pool_stats = {0};
+    pool->ops.stats_query(pool, &pool_stats);
+    ASSERT_EQ(pool_stats.pool_idle, 10);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_query_zero_values)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    umq_ub_ctx_t dev_ctx = {0};
+    queue.dev_ctx = &dev_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = true;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    umq_flow_control_stats_t stats = {0};
+    queue.flow_control.ops.stats_query(&queue.flow_control, &queue, &stats);
+    
+    ASSERT_EQ(stats.queue_credit.queue_idle, 0);
+    ASSERT_EQ(stats.queue_credit.queue_be_allocated, 0);
+    ASSERT_EQ(stats.queue_credit.queue_acquired, 0);
+    ASSERT_EQ(stats.queue_credit.total_queue_idle, 0);
+    ASSERT_EQ(stats.queue_credit.total_queue_acquired, 0);
+    ASSERT_EQ(stats.queue_credit.total_queue_post_tx_success, 0);
+    ASSERT_EQ(stats.queue_credit.total_queue_post_tx_err, 0);
+    ASSERT_EQ(stats.packet_stats.send_cnt, 0);
+    ASSERT_EQ(stats.packet_stats.send_success, 0);
+    ASSERT_EQ(stats.packet_stats.recv_cnt, 0);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_packet_stats_disabled)
+{
+    ub_flow_control_t fc = {0};
+    fc.enabled = false;
+    
+    umq_ub_fc_packet_stats(&fc, 5, UB_PACKET_STATS_TYPE_SEND);
+    
+    ASSERT_EQ(fc.packet_stats[UB_PACKET_STATS_TYPE_SEND], 0);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_after_window_operations)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    umq_ub_ctx_t dev_ctx = {0};
+    queue.dev_ctx = &dev_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = false;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    umq_ub_window_inc(&queue.flow_control, 50);
+    umq_ub_window_dec(&queue.flow_control, &queue, 10);
+    
+    umq_flow_control_stats_t stats = {0};
+    queue.flow_control.ops.stats_query(&queue.flow_control, &queue, &stats);
+    
+    ASSERT_EQ(stats.queue_credit.queue_acquired, 40);
+    ASSERT_EQ(stats.queue_credit.total_queue_post_tx_success, 10);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_fc_threshold_modify_with_ratio_conversion)
+{
+    uint16_t threshold = 100;
+    
+    uint16_t modified0 = umq_ub_fc_threashold_modify(threshold, 0);
+    ASSERT_GT(modified0, 0);
+    
+    uint16_t modified1 = umq_ub_fc_threashold_modify(threshold, 1);
+    ASSERT_EQ(modified1, 10);
+    
+    uint16_t modified2 = umq_ub_fc_threashold_modify(threshold, 2);
+    ASSERT_EQ(modified2, 30);
+    
+    uint16_t modified3 = umq_ub_fc_threashold_modify(threshold, 3);
+    ASSERT_EQ(modified3, 50);
+    
+    uint16_t modified_exceed = umq_ub_fc_threashold_modify(threshold, 10);
+    ASSERT_GT(modified_exceed, 0);
+    ASSERT_LE(modified_exceed, threshold);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_packet_stats_multiple_types)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = true;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    for (int i = 0; i < 10; i++) {
+        umq_ub_fc_packet_stats(&queue.flow_control, 1, UB_PACKET_STATS_TYPE_SEND);
+        umq_ub_fc_packet_stats(&queue.flow_control, 1, UB_PACKET_STATS_TYPE_SEND_SUCCESS);
+    }
+    
+    ASSERT_EQ(queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_SEND], 10);
+    ASSERT_EQ(queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_SEND_SUCCESS], 10);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_query_with_errors)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    umq_ub_ctx_t dev_ctx = {0};
+    queue.dev_ctx = &dev_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = true;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    queue.flow_control.total_remote_rx_received_error = 5;
+    queue.flow_control.total_flow_controlled_wr = 10;
+    
+    umq_flow_control_stats_t stats = {0};
+    queue.flow_control.ops.stats_query(&queue.flow_control, &queue, &stats);
+    
+    ASSERT_EQ(stats.queue_credit.total_queue_acquired_err, 5);
+    ASSERT_EQ(stats.queue_credit.total_queue_post_tx_err, 10);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_credit_pool_stats_after_operations)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = true;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    umq_ub_shared_credit_recharge(&queue, 20);
+    umq_ub_idle_credit_flush(&queue, 5);
+    
+    ub_credit_pool_t *pool = &io_jfr_ctx.credit;
+    umq_credit_pool_stats_t pool_stats = {0};
+    pool->ops.stats_query(pool, &pool_stats);
+    
+    ASSERT_EQ(pool_stats.pool_idle, 15);
+    ASSERT_EQ(pool_stats.pool_be_allocated, 0);
+    ASSERT_GT(pool_stats.total_pool_idle, 0);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_combined_credit_operations_stats)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    umq_ub_ctx_t dev_ctx = {0};
+    queue.dev_ctx = &dev_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = true;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    umq_ub_shared_credit_recharge(&queue, 30);
+    umq_ub_window_inc(&queue.flow_control, 20);
+    umq_ub_window_dec(&queue.flow_control, &queue, 10);
+    umq_ub_idle_credit_flush(&queue, 5);
+    
+    umq_flow_control_stats_t fc_stats = {0};
+    queue.flow_control.ops.stats_query(&queue.flow_control, &queue, &fc_stats);
+    ASSERT_EQ(fc_stats.queue_credit.queue_acquired, 10);
+    ASSERT_EQ(fc_stats.queue_credit.total_queue_post_tx_success, 10);
+    
+    ub_credit_pool_t *pool = &io_jfr_ctx.credit;
+    umq_credit_pool_stats_t pool_stats = {0};
+    pool->ops.stats_query(pool, &pool_stats);
+    ASSERT_EQ(pool_stats.pool_idle, 25);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_packet_stats_cumulative)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = false;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    umq_ub_fc_packet_stats(&queue.flow_control, 100, UB_PACKET_STATS_TYPE_SEND);
+    umq_ub_fc_packet_stats(&queue.flow_control, 50, UB_PACKET_STATS_TYPE_SEND);
+    
+    ASSERT_EQ(queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_SEND], 150);
+    
+    umq_ub_fc_packet_stats(&queue.flow_control, 30, UB_PACKET_STATS_TYPE_RECV);
+    umq_ub_fc_packet_stats(&queue.flow_control, 20, UB_PACKET_STATS_TYPE_RECV);
+    
+    ASSERT_EQ(queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_RECV], 50);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_large_values)
+{
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    umq_ub_ctx_t dev_ctx = {0};
+    queue.dev_ctx = &dev_ctx;
+    
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = true;
+    
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    queue.flow_control.total_remote_rx_received = 10000;
+    queue.flow_control.total_remote_rx_consumed = 8000;
+    queue.flow_control.total_flow_controlled_wr = 500;
+    queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_SEND] = 1000;
+    queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_SEND_SUCCESS] = 950;
+    
+    umq_flow_control_stats_t stats = {0};
+    queue.flow_control.ops.stats_query(&queue.flow_control, &queue, &stats);
+    
+    ASSERT_EQ(stats.queue_credit.total_queue_acquired, 10000);
+    ASSERT_EQ(stats.queue_credit.total_queue_post_tx_success, 8000);
+    ASSERT_EQ(stats.queue_credit.total_queue_post_tx_err, 500);
+    ASSERT_EQ(stats.packet_stats.send_cnt, 1000);
+    ASSERT_EQ(stats.packet_stats.send_success, 950);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_rx_consumed_load_indirect_coverage)
+{
+    volatile uint64_t var1 = 100;
+    volatile uint64_t var2 = 0;
+    
+    umq_ub_rx_consumed_inc(true, &var2, var1);
+    ASSERT_EQ(var2, 100);
+    
+    uint64_t exchanged = umq_ub_rx_consumed_exchange(true, &var2, 0);
+    ASSERT_EQ(exchanged, 100);
+    ASSERT_EQ(var2, 0);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_fc_threshold_boundary_values)
+{
+    uint16_t threshold = UINT16_MAX;
+    uint8_t ratio = 5;
+    
+    uint16_t modified = umq_ub_fc_threashold_modify(threshold, ratio);
+    ASSERT_GT(modified, 0);
+    
+    threshold = 1;
+    modified = umq_ub_fc_threashold_modify(threshold, ratio);
+    ASSERT_EQ(modified, 2);
+}
