@@ -1613,12 +1613,14 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     if (cfg_jetty == NULL) {
         if (rjetty->trans_mode == URMA_TM_RM && bdp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP) {
             URMA_LOG_ERR("RM jetty import requires drv_ext.vjetty.\n");
+            free(bdp_tjetty);
             return NULL;
         }
         is_fake_jetty = true;
         cfg_jetty = &fake_jetty;
         if (init_active_indices(bdp_ctx, &fake_jetty, NULL, 0) != 0) {
             URMA_LOG_ERR("Failed to init active indices\n");
+            free(bdp_tjetty);
             return NULL;
         }
     }
