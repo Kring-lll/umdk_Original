@@ -1239,6 +1239,10 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
     uint32_t min_dev_tx = dev_ctx->dev_attr.dev_cap.max_jfs_depth < dev_ctx->dev_attr.dev_cap.max_jfc_depth - 1 ?
         dev_ctx->dev_attr.dev_cap.max_jfs_depth : dev_ctx->dev_attr.dev_cap.max_jfc_depth - 1;
     if (option->create_flag & UMQ_CREATE_FLAG_TX_DEPTH) {
+        if (option->tx_depth == 0) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "tx depth must be greater than 0\n");
+            return -UMQ_ERR_EINVAL;
+        }
         if (option->tx_depth > min_dev_tx) {
             UMQ_VLOG_ERR(VLOG_UMQ, "tx depth [%u] exceed max depth [%d]\n", option->tx_depth, min_dev_tx);
             return -UMQ_ERR_EINVAL;
