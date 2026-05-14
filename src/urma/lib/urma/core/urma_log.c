@@ -47,6 +47,9 @@ static void urma_default_log_func(int level, char *message)
 }
 
 static urma_log_cb_t g_urma_log_func = urma_default_log_func;
+static urma_log_cb_ex_t g_urma_log_func_ex = NULL;
+static bool g_use_extended_log = false;
+
 urma_status_t urma_register_log_func(urma_log_cb_t func)
 {
     if (func == NULL) {
@@ -55,6 +58,20 @@ urma_status_t urma_register_log_func(urma_log_cb_t func)
     }
     URMA_LOG_INFO("registered log successfully.\n");
     g_urma_log_func = func;
+    g_urma_log_func_ex = NULL;
+    g_use_extended_log = false;
+    return URMA_SUCCESS;
+}
+
+urma_status_t urma_register_log_func_ex(urma_log_cb_ex_t func)
+{
+    if (func == NULL) {
+        URMA_LOG_ERR("Invalid parameter.\n");
+        return URMA_EINVAL;
+    }
+    g_urma_log_func_ex = func;
+    g_use_extended_log = true;
+    URMA_LOG_INFO("registered extended log successfully.\n");
     return URMA_SUCCESS;
 }
 
@@ -67,6 +84,8 @@ urma_status_t urma_unregister_log_func(void)
         __func__, __LINE__, g_urma_log_separator);
     (*g_urma_log_func)((int)URMA_VLOG_LEVEL_INFO, logmsg);
     g_urma_log_func = urma_default_log_func;
+    g_urma_log_func_ex = NULL;
+    g_use_extended_log = false;
     return URMA_SUCCESS;
 }
 
@@ -228,7 +247,12 @@ static int urma_vlog(const char *function, int line, urma_vlog_level_t level, co
         (void)printf("logmsg size exceeds MAX_LOG_LEN size :%d.\n", MAX_LOG_LEN);
         return ret;
     }
-    (*g_urma_log_func)((int)level, logmsg);
+
+    if (g_use_extended_log && g_urma_log_func_ex != NULL) {
+        (*g_urma_log_func_ex)((int)level, function, line, logmsg);
+    } else {
+        (*g_urma_log_func)((int)level, logmsg);
+    }
 
     return ret;
 }
