@@ -1415,6 +1415,8 @@ typedef enum urma_vlog_level {
 
 typedef void (*urma_log_cb_t)(int level, char *message);
 
+typedef void (*urma_log_cb_ex_t)(int level, const char *file, const char *function, int line, char *message);
+
 #ifdef __cplusplus
 }
 #endif
