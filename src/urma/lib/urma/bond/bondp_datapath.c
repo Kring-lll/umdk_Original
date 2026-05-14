@@ -808,6 +808,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, bond
         }
 
         URMA_LOG_DEBUG("Resend from %d to %d\n", send_idx, new_send_idx);
+        urma_ubagg_switch_inc();
 
         for (int i = 0; i < bdp_jfc->wr_buf.max_wr_num; i++) {
             const uint64_t wr_id = (wr_entry->wr_id + i - 1) % bdp_jfc->wr_buf.max_wr_num + 1;
