@@ -57,11 +57,12 @@ TensorVector FusedDeepMoeImplNpu(
     auto xShape = x.sizes();
     auto expertIdsShape = expertIds.sizes();
     int h = xShape[1];
-    int bs = xShape[0];
+    int bs = 20000 * 2; // xShape[0] * (moeExpertNum / epRankSize) * epRankSize * 2; 搞大点
     int topk = expertIdsShape[1];
     
-    at::Tensor output = at::empty({bs, h}, x.options());
-    at::Tensor shareOutput = at::empty({bs, h}, x.options());
+    // at::Tensor output = at::empty({bs, h}, x.options());
+    at::Tensor output = at::zeros({bs, h}, x.options());
+    at::Tensor shareOutput = at::zeros({bs, h}, x.options());
 
     int64_t localExpertNum = moeExpertNum / epRankSize;
     auto opts = expertIds.options().dtype(at::kLong);
@@ -76,6 +77,7 @@ TensorVector FusedDeepMoeImplNpu(
         expertScales, \
         shareGmm1WeightOptional, shareGmm1WeightScaleOptional, \
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
+        // 或者使用shareSmoothScales，expertSmoothScales设置后才校验shareSmoothScales
         expertSmoothScales, shareSmoothScales, xActiveMask, \
         gmm1BiasOptional, gmm2BiasOptional, \
         // attr

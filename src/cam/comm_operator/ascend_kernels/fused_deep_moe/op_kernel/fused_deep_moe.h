@@ -503,7 +503,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
         gmWeight1_, layoutWeight1, gmShareWeight1Scale_, layoutShareW1Scale, gmScale1_, layoutW1Scale,
         gmX1Scale, layoutX1Scale, gmX2, layoutX2, gmX2Scale, layoutX2Scale, gmShareX1, gmShareX1Scale,
         gmShareSwigluOut, gmShareX2, layoutShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmX_, gmSmoothScales_,
-        gmShareSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount, xActiveMask_, gmResvered, gmExpertTokenNums_,
+        gmShareSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount, xActiveMask_, gmOutput_, gmExpertTokenNums_,
         tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo);
     AscendC::PipeBarrier<PIPE_ALL>();
     Arch::CrossCoreFlag gmm1AivFinished{0};
@@ -514,6 +514,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
         Arch::CrossCoreWaitFlag(gmm1AivFinished);
     }
 
+    return;
     MoeDistributeCombineImpl::CamMoeDistributeCombine<TemplateMC2TypeFunc> combiner;
     if (g_coreType == AscendC::AIV) {
         combiner.Init(gmGmm2DepOut, gmexpertIds_, gmExpandIdx, gmEpSendCount, nullptr, gmexpertScales_, xActiveMask_,

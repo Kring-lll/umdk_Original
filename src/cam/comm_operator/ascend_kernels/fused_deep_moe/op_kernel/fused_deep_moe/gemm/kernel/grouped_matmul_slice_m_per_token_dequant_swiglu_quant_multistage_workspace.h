@@ -1274,8 +1274,8 @@ public:
     }
 
     CATLASS_DEVICE
-    void FetchAndPreprocessInt8ToInt4(AscendC::GlobalTensor<int8_t> &src, int32_t rows,
-                                                     int32_t hiddenSize, int ubOffset)
+    void FetchAndPreprocessInt8ToInt4(AscendC::GlobalTensor<int8_t> &src, int32_t rows, int32_t hiddenSize, int ubOffset,
+                                      AscendC::GlobalTensor<int8_t> &int8buffer, AscendC::GlobalTensor<int8_t> &int4buffer)
     {
         uint32_t tmpBufferOffset = ubOffset;
 
@@ -1356,8 +1356,9 @@ public:
 
             AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE3>(EVENT_ID);
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_MTE3>(EVENT_ID);
-            // 远端 scale 拷贝到GM
+            // 转化前int8拷贝到GM
             // AscendC::DataCopyPad(dstScale[processIndex], bufScale, {1, 4, 0, 0, 0});
+            AscendC::DataCopy(int8buffer[inputOffset], buf, copyInNum);
             AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID);
             AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID);
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID);
@@ -1371,6 +1372,7 @@ public:
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
             AscendC::DataCopy(src[outputOffset], xHighI4Tensor.ReinterpretCast<int8_t>(), hiddenSize / 2);
+            AscendC::DataCopy(int4buffer[outputOffset], xHighI4Tensor.ReinterpretCast<int8_t>(), hiddenSize / 2);
             // 高四位处理结束
 
             // 低四位处理开始
@@ -1395,6 +1397,7 @@ public:
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
             AscendC::DataCopy(src[outputOffset + hiddenSize / 2], xLowI4Tensor.ReinterpretCast<int8_t>(), hiddenSize / 2);
+            AscendC::DataCopy(int4buffer[outputOffset + hiddenSize / 2], xLowI4Tensor.ReinterpretCast<int8_t>(), hiddenSize / 2);
             AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
             // 低四位处理结束
             pingpongId = (pingpongId + 1) % BufferNum;
@@ -1434,6 +1437,8 @@ public:
         AscendC::GlobalTensor<int32_t> tokGlobalInt32;
         AscendC::GlobalTensor<int8_t> expandXOutGlobal;
         AscendC::GlobalTensor<float> dynamicScalesOutGMTensor_;
+        AscendC::GlobalTensor<int8_t> outputInt8Buffer;
+        AscendC::GlobalTensor<int8_t> outputInt4Buffer;
         dynamicScalesOutGMTensor_.SetGlobalBuffer((__gm__ float *)(gmX1Scale));
         uint32_t beginIdx = 0;
         uint32_t targetTokenCount = 0;
@@ -1495,7 +1500,9 @@ public:
                 }
                 if (curTokenIdx[i] == countPerRank[i]) {
                     expandXOutGlobal.SetGlobalBuffer((__gm__ int8_t *)(gmX1) + beginIdx * tokenLength, tokenLength * countPerRank[i]);
-                    FetchAndPreprocessInt8ToInt4(expandXOutGlobal, countPerRank[i], tokenLength, subUbOffset);
+                    outputInt8Buffer.SetGlobalBuffer((__gm__ int8_t *)(gmOutputForShow) + beginIdx * tokenLength, tokenLength * countPerRank[i]);
+                    outputInt4Buffer.SetGlobalBuffer((__gm__ int8_t *)(gmOutputForShow) + 20000 + beginIdx * tokenLength, tokenLength * countPerRank[i]);
+                    FetchAndPreprocessInt8ToInt4(expandXOutGlobal, countPerRank[i], tokenLength, subUbOffset, outputInt8Buffer, outputInt4Buffer);
                     // 保证只执行一次int8-->int4
                     curTokenIdx[i] += 1;
                 }
@@ -1766,6 +1773,8 @@ public:
         expertPerSizeOnWin = maxAxisBs * tokenLength * sizeof(XType);
         winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
         statusDataSpaceGm = (GM_ADDR)(winContext_->localWindowsExp);
+
+        gmOutputForShow = (GM_ADDR)(params.gmResvered);
     }
 
     CATLASS_DEVICE
@@ -2111,6 +2120,9 @@ private:
     uint32_t aicStateGlobalCoreIdx{0};
     uint32_t sendToMoeAivNum{0};
     uint32_t sendToShareAivNum{0};
+
+    // output
+    GM_ADDR gmOutputForShow;
 };
 
 }  // namespace Catlass::Gemm::Kernel
