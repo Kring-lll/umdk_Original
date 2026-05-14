@@ -27,3 +27,20 @@ uint32_t urma_ubagg_switch_get(void)
 {
     return atomic_load(&g_ubagg_switch_cnt);
 }
+
+static atomic_uint g_urma_resend_cnt;
+
+void urma_resend_init(void)
+{
+    atomic_init(&g_urma_resend_cnt, 0);
+}
+
+void urma_resend_inc(void)
+{
+    (void)atomic_fetch_add(&g_urma_resend_cnt, 1);
+}
+
+uint32_t urma_resend_get(void)
+{
+    return atomic_load(&g_urma_resend_cnt);
+}
