@@ -1,0 +1,70 @@
+代码检视汇总：bondp_health_check.c / bondp_health_check.h
+综合检视意见，按功能/非功能分类整理如下。
+
+一、功能性问题（影响正确性或可能导致 Bug）
+F1. [严重] 空指针解引用 — bondp_register_health_check_seg_for_jetty()
+项目	内容
+位置	bondp_health_check.c:420-421
+代码	bondp_heath_check_ctx_t *health = &bond_ctx->bondp_heath_check_ctx; 在 bond_ctx == NULL 判空前已解引用
+风险	若调用方传入 bond_ctx == NULL，第420行直接崩溃
+修复	将 NULL 检查移到函数开头，在解引用之前
+F2. [中等] 读锁保护写操作 — bondp_try_handle_health_check_cr()
+项目	内容
+位置	bondp_health_check.c:1530
+代码	pthread_rwlock_rdlock(&health->task_table.lock); 但内部修改了 sub->probe_pending、sub->link_ok、sub->need_check、task->bondp_jetty->valid[] 等字段
+风险	若其他线程通过写锁修改同一 sub_task，存在数据竞争
+修复	确认 sub_task 字段并发保护策略，或升级为 wrlock
+F3. [中等] 持写锁执行耗时操作 — bondp_health_handle_fallback_ctrl_rx_impl()
+项目	内容
+位置	bondp_health_check.c:1315-1373（REQ 分支）
+代码	在 pthread_rwlock_wrlock 持锁期间执行 bondp_rebuild_primary_pjetty()、bondp_process_fallback_task()、bondp_send_fallback_ctrl_msg() 等耗时操作
+风险	影响健康检查线程的并发性能，可能阻塞其他 task 的检查
+修复	将耗时操作移到锁外，锁内仅做查找和状态读取
+F4. [中等] uninit 未清理线程和链表 — bondp_health_check_global_ctx_uninit()
+项目	内容
+位置	bondp_health_check.c:375-383
+代码	只关闭了 epoll fd 和销毁 rwlock，未停止健康检查线程、未清理 health_ctx_list 中的节点
+风险	若 uninit 在线程运行时调用，线程可能访问已释放资源导致 use-after-free
+修复	增加防御性检查或断言，确保调用者先调 bondp_stop_health_check_thread()
+F5. [低] stop 标志竞态 — bondp_stop_health_check_thread()
+项目	内容
+位置	bondp_health_check.c:1601
+代码	pthread_join 后立即 atomic_store(&...health_thread_stop, false)，若此时其他线程触发 start，可能产生竞态
+修复	将 stop 标志重置移到 bondp_start_health_check_thread() 中
+F6. [低] eventfd 计数忽略 — bondp_handle_epoll_event()
+项目	内容
+位置	bondp_health_check.c:706-709
+代码	eventfd_read 成功时直接 continue 丢弃计数值 cnt
+风险	当前逻辑可接受（eventfd 语义是累计通知），但若未来需精确跟踪事件数量会出问题
+修复	加注释说明故意忽略计数
+二、非功能性问题（风格、可读性、可维护性）
+NF1. [低] 结构体缩进不一致 — bondp_health_event_info_t
+项目	内容
+位置	bondp_health_check.h:23-29
+代码	local_idx 用4空格缩进，target_idx/user_ctx/cr_status/new_active_idx/bdp_jetty/bdp_tjetty 用 tab 缩进
+修复	统一为 tab 缩进
+NF2. [低] 回调类型声明位置不当 — bondp_fallback_ctrl_send_cb_t
+项目	内容
+位置	bondp_health_check.h:19-20
+代码	回调类型在 .h 中声明，但本模块实际调用的是 bondp_fallback_ctrl_send_default()（.c:807），未通过此回调
+修复	若仅内部使用，移到 .c 或 bondp_types.h
+NF3. [低] 贯穿性拼写错误 heath → health
+项目	内容
+位置	全文约 20+ 处，涉及类型名 bondp_heath_check_ctx_t 及所有引用
+影响	不影响功能，但影响代码搜索和可读性
+修复	全局替换，建议作为技术债务记录
+NF4. [低] 格式化字符串平台兼容性
+项目	内容
+位置	bondp_health_check.c:319（bondp_health_read_env_uint64）、bondp_health_check.c:346-356（bondp_print_health_check_cfg）
+代码	%lu 用于 uint64_t，在32位平台上不匹配
+修复	使用 <inttypes.h> 的 PRIu64 宏
+NF5. [建议] 环境变量配置无动态重载
+项目	内容
+位置	bondp_health_check.c:326-342（bondp_read_health_check_cfg）
+说明	所有配置通过 getenv 在启动时一次性读取，运行时无法调整参数
+建议	未来考虑支持 sysfs/procfs 动态配置
+NF6. [建议] Balance/Active-Backup 模式分支散布
+项目	内容
+位置	bondp_health_check.c:985,1000,1025,1032,1092-1103,1411,1540,1559 等多处
+说明	is_balance 判断在多处重复出现
+建议	抽象为模式策略函数，减少重复判断
