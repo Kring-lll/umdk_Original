@@ -65,6 +65,9 @@ void urma_ubagg_switch_init(void);
 void urma_ubagg_switch_inc(void);
 uint32_t urma_ubagg_switch_get(void);
 
+void urma_resend_init(void);
+void urma_resend_inc(void);
+uint32_t urma_resend_get(void);
 
 /**
  * just for urma perftest profiling
