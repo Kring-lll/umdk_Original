@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/epoll.h>
 #include <signal.h>
 #include <math.h>
 #include <stddef.h>
@@ -1696,15 +1697,19 @@ int run_atomic_lat(perftest_context_t *ctx, perftest_config_t *cfg)
     return run_read_lat(ctx, cfg);
 }
 
-static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
+static int run_once_bw_epoll(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     uint64_t tot_scnt = 0;
     uint64_t tot_ccnt = 0;
     uint32_t index;
     int cqe_cnt = 0;
-    int cr_id;    // completion_record_data
-    /* Rate limiter */
-    uint64_t gap_deadline = 0;  /* cycle */
+    int cr_id;
+    int epoll_fd = -1;
+    int ret = 0;
+    struct epoll_event ev = {0};
+    struct epoll_event events[1];
+    
+    uint64_t gap_deadline = 0;
     uint32_t burst_iter = 0;
     bool is_send_burst = false;
 
@@ -1714,6 +1719,25 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
     urma_cr_t *cr = calloc(1, sizeof(urma_cr_t) * PERFTEST_POLL_BATCH);
     if (cr == NULL) {
         return -1;
+    }
+
+    if (cfg->use_jfce == true) {
+        epoll_fd = epoll_create1(0);
+        if (epoll_fd < 0) {
+            (void)fprintf(stderr, "Failed to create epoll fd\n");
+            free(cr);
+            return -1;
+        }
+
+        ev.events = EPOLLIN | EPOLLET;
+        ev.data.fd = ctx->jfce_s[0]->fd;
+        
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ctx->jfce_s[0]->fd, &ev) != 0) {
+            (void)fprintf(stderr, "Failed to add jfce fd to epoll\n");
+            close(epoll_fd);
+            free(cr);
+            return -1;
+        }
     }
 
     if (cfg->time_type.bs.duration == 1) {
@@ -1728,7 +1752,7 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
 
     while (tot_scnt < tot_iters || tot_ccnt < tot_iters ||
         (cfg->time_type.bs.duration == 1 && run_ctx->state != END_STATE)) {
-        /* main loop to run over all the jetty and post each time n messages */
+        
         for (index = 0; index < cfg->jettys; index++) {
             if (cfg->is_rate_limit == true && is_send_burst == false) {
                 if (gap_deadline > get_cycles()) {
@@ -1738,9 +1762,11 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                 is_send_burst = true;
                 burst_iter = 0;
             }
+            
             while ((run_ctx->scnt[index] < cfg->iters || cfg->time_type.bs.duration == 1) &&
                 (run_ctx->scnt[index] - run_ctx->ccnt[index] + cfg->jfs_post_list) <= cfg->jfs_depth &&
                 !(cfg->is_rate_limit == true && is_send_burst == false)) {
+                
                 if (cfg->enable_credit == true) {
                     uint64_t swinow = (run_ctx->scnt[index] + cfg->jfs_post_list) > ctx->ctrl_buf[index][1] ?
                         (run_ctx->scnt[index] + cfg->jfs_post_list - ctx->ctrl_buf[index][1]) : 0;
@@ -1748,6 +1774,7 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                         break;
                     }
                 }
+                
                 if (cfg->jfs_post_list == 1 && (run_ctx->scnt[index] % cfg->cq_mod == 0 && cfg->cq_mod > 1) &&
                     !(run_ctx->scnt[index] == (cfg->iters - 1) && cfg->time_type.bs.iterations == 1)) {
                     run_ctx->jfs_wr[index].flag.bs.complete_enable = 0;
@@ -1760,6 +1787,7 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                 if (cfg->time_type.bs.duration == 1 && run_ctx->state == END_STATE) {
                     break;
                 }
+                
                 urma_jfs_wr_t *bad_wr = NULL;
                 if (cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX) {
                     status = urma_post_jfs_wr(ctx->jfs[index], &run_ctx->jfs_wr[index * cfg->jfs_post_list], &bad_wr);
@@ -1772,14 +1800,12 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                     (void)fprintf(stderr, "Couldn't post jfs: jetty %u scnt:%lu, tot_scnt:%lu, status:%d, \
                         ccnt:%lu, tot_ccnt:%lu.\n", index, run_ctx->scnt[index], tot_scnt, (int)status,
                         run_ctx->ccnt[index], tot_ccnt);
-                    goto free_cr;
+                    goto cleanup;
                 }
 
-                /* In the case of non wr_list, the address of each wqe is also incremented. */
                 if (cfg->jfs_post_list == 1 && cfg->size <= (ctx->page_size / PERFTEST_BUF_NUM)) {
                     uint32_t local_sge_idx = (index * cfg->jfs_post_list) * PERFTEST_SGE_NUM_PRE_WR *
                         cfg->sge_num + cfg->sge_num;
-                    // Step increased value
                     urma_sge_t *local_sge = &run_ctx->jfs_sge[local_sge_idx];
                     increase_loc_addr(local_sge, cfg->size, run_ctx->scnt[index],
                         (uint64_t)ctx->local_buf[index] + ctx->buf_size, cfg->cache_line_size, ctx->page_size);
@@ -1811,56 +1837,84 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
 
         if (tot_ccnt < tot_iters || (cfg->time_type.bs.duration == 1 && tot_ccnt < tot_scnt)) {
             if (cfg->use_jfce == true && cqe_cnt == 0) {
-                if (wait_jfc_event(ctx->jfce_s[0], cfg->wait_jfc_timeout) != 0) {
-                    (void)fprintf(stderr, "Couldn't wait jfce event\n");
-                    goto free_cr;
+                int nfds = epoll_wait(epoll_fd, events, 1, cfg->wait_jfc_timeout);
+                if (nfds < 0) {
+                    (void)fprintf(stderr, "epoll_wait failed: %d\n", nfds);
+                    goto cleanup;
+                } else if (nfds == 0) {
+                    (void)fprintf(stderr, "epoll_wait timeout\n");
+                    goto cleanup;
+                }
+                
+                urma_jfc_t *jfc = NULL;
+                if (urma_wait_jfc(ctx->jfce_s[0], 1, 0, &jfc) != 1) {
+                    (void)fprintf(stderr, "Failed to wait_jfc after epoll event\n");
+                    goto cleanup;
+                }
+                
+                uint32_t ack_cnt = 1;
+                urma_ack_jfc((urma_jfc_t **)&jfc, &ack_cnt, 1);
+                
+                if (urma_rearm_jfc(jfc, false) != URMA_SUCCESS) {
+                    (void)fprintf(stderr, "Failed to rearm jfc after epoll event\n");
+                    goto cleanup;
                 }
             }
-            cqe_cnt = urma_poll_jfc(ctx->jfc_s[0], PERFTEST_POLL_BATCH, cr);
-            if (cqe_cnt > 0) {
-                for (int i = 0; i < cqe_cnt; i++) {
-                    cr_id = (int)cr[i].user_ctx; // todo jfs_id
-                    if (cr[i].status != URMA_CR_SUCCESS) {
-                        (void)fprintf(stderr, "Failed CR status %d, tot_scnt: %lu, tot_ccnt: %lu.\n",
-                            (int)cr[i].status, tot_scnt, tot_ccnt);
-                        if (cfg->enable_err_continue == false) {
-                            goto free_cr;
-                        } else {
-                            tot_scnt = tot_scnt - (cqe_cnt - i) * cfg->cq_mod;
-                            continue;
+            
+            do {
+                cqe_cnt = urma_poll_jfc(ctx->jfc_s[0], PERFTEST_POLL_BATCH, cr);
+                if (cqe_cnt > 0) {
+                    for (int i = 0; i < cqe_cnt; i++) {
+                        cr_id = (int)cr[i].user_ctx;
+                        if (cr[i].status != URMA_CR_SUCCESS) {
+                            (void)fprintf(stderr, "Failed CR status %d, tot_scnt: %lu, tot_ccnt: %lu.\n",
+                                (int)cr[i].status, tot_scnt, tot_ccnt);
+                            if (cfg->enable_err_continue == false) {
+                                goto cleanup;
+                            } else {
+                                tot_scnt = tot_scnt - (cqe_cnt - i) * cfg->cq_mod;
+                                continue;
+                            }
+                        }
+
+                        run_ctx->ccnt[cr_id] += cfg->cq_mod;
+                        tot_ccnt += cfg->cq_mod;
+
+                        if (cfg->no_peak == false) {
+                            if (tot_ccnt > tot_iters) {
+                                run_ctx->tcompleted[cfg->iters * cfg->jettys - 1] = get_cycles();
+                            } else {
+                                run_ctx->tcompleted[tot_ccnt - 1] = get_cycles();
+                            }
+                        }
+
+                        if (cfg->time_type.bs.duration == 1 && run_ctx->state == START_STATE) {
+                            cfg->iters += cfg->cq_mod;
                         }
                     }
-
-                    run_ctx->ccnt[cr_id] += cfg->cq_mod;
-                    tot_ccnt += cfg->cq_mod;
-
-                    if (cfg->no_peak == false) {
-                        if (tot_ccnt > tot_iters) {
-                            run_ctx->tcompleted[cfg->iters * cfg->jettys - 1] = get_cycles();
-                        } else {
-                            run_ctx->tcompleted[tot_ccnt - 1] = get_cycles();
-                        }
-                    }
-
-                    if (cfg->time_type.bs.duration == 1 && run_ctx->state == START_STATE) {
-                        cfg->iters += cfg->cq_mod;
-                    }
+                } else if (cqe_cnt < 0) {
+                    (void)fprintf(stderr, "poll jfc failed %d\n", cqe_cnt);
+                    goto cleanup;
                 }
-            } else if (cqe_cnt < 0) {
-                (void)fprintf(stderr, "poll jfc failed %d\n", cqe_cnt);
-                goto free_cr;
-            }
+            } while (cqe_cnt > 0);
         }
     }
 
     if (cfg->no_peak == true && cfg->time_type.bs.iterations == 1) {
         run_ctx->tcompleted[0] = get_cycles();
     }
+
+cleanup:
+    if (epoll_fd >= 0) {
+        close(epoll_fd);
+    }
     free(cr);
-    return 0;
-free_cr:
-    free(cr);
-    return -1;
+    return ret;
+}
+
+static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
+{
+    return run_once_bw_epoll(ctx, cfg);
 }
 
 static int clean_scq_credit(int send_cnt, perftest_context_t *ctx, perftest_config_t *cfg)
@@ -1900,7 +1954,7 @@ cleaning:
     return ret;
 }
 
-static int run_once_bw_recv(perftest_context_t *ctx, perftest_config_t *cfg)
+static int run_once_bw_recv_epoll(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     run_test_ctx_t *run_ctx = &ctx->run_ctx;
     uint64_t rcnt = 0;
@@ -1912,6 +1966,9 @@ static int run_once_bw_recv(perftest_context_t *ctx, perftest_config_t *cfg)
     int ret = 0;
     int tot_scredit = 0;
     urma_status_t status;
+    int epoll_fd = -1;
+    struct epoll_event ev = {0};
+    struct epoll_event events[1];
 
     uint64_t *posted_per_jetty = calloc(1, sizeof(uint64_t) * cfg->jettys);
     if (posted_per_jetty == NULL) {
@@ -1944,6 +2001,25 @@ static int run_once_bw_recv(perftest_context_t *ctx, perftest_config_t *cfg)
         goto free_unused_recv;
     }
 
+    if (cfg->use_jfce == true) {
+        epoll_fd = epoll_create1(0);
+        if (epoll_fd < 0) {
+            (void)fprintf(stderr, "Failed to create epoll fd for recv\n");
+            ret = -1;
+            goto free_scredit;
+        }
+
+        ev.events = EPOLLIN | EPOLLET;
+        ev.data.fd = ctx->jfce_r[0]->fd;
+        
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, ctx->jfce_r[0]->fd, &ev) != 0) {
+            (void)fprintf(stderr, "Failed to add jfce_r fd to epoll\n");
+            close(epoll_fd);
+            ret = -1;
+            goto free_scredit;
+        }
+    }
+
     for (i = 0; i < cfg->jettys; i++) {
         posted_per_jetty[i] = (uint32_t)run_ctx->rposted;
     }
@@ -1951,8 +2027,29 @@ static int run_once_bw_recv(perftest_context_t *ctx, perftest_config_t *cfg)
 
     while (rcnt < tot_iters || (cfg->time_type.bs.duration == 1 && run_ctx->state != END_STATE)) {
         if (cfg->use_jfce == true) {
-            if (wait_jfc_event(ctx->jfce_r[0], cfg->wait_jfc_timeout) != 0) {
-                (void)fprintf(stderr, "Couldn't wait jfc event.\n");
+            int nfds = epoll_wait(epoll_fd, events, 1, cfg->wait_jfc_timeout);
+            if (nfds < 0) {
+                (void)fprintf(stderr, "epoll_wait failed for recv: %d\n", nfds);
+                ret = -1;
+                goto cleaning;
+            } else if (nfds == 0) {
+                (void)fprintf(stderr, "epoll_wait timeout for recv\n");
+                ret = -1;
+                goto cleaning;
+            }
+
+            urma_jfc_t *jfc = NULL;
+            if (urma_wait_jfc(ctx->jfce_r[0], 1, 0, &jfc) != 1) {
+                (void)fprintf(stderr, "Failed to wait_jfc_r after epoll event\n");
+                ret = -1;
+                goto cleaning;
+            }
+
+            uint32_t ack_cnt = 1;
+            urma_ack_jfc((urma_jfc_t **)&jfc, &ack_cnt, 1);
+
+            if (urma_rearm_jfc(jfc, false) != URMA_SUCCESS) {
+                (void)fprintf(stderr, "Failed to rearm jfc_r after epoll event\n");
                 ret = -1;
                 goto cleaning;
             }
@@ -2092,12 +2189,17 @@ static int run_once_bw_recv(perftest_context_t *ctx, perftest_config_t *cfg)
         run_ctx->tcompleted[0] = get_cycles();
     }
     ret = 0;
+
 cleaning:
+    if (epoll_fd >= 0) {
+        close(epoll_fd);
+    }
     if (cfg->enable_credit == true) {
         if (clean_scq_credit(tot_scredit, ctx, cfg)) {
             ret = -1;
         }
     }
+free_scredit:
     free(scredit_pre_jetty);
 free_unused_recv:
     free(unused_recv_pre_jetty);
@@ -2110,6 +2212,11 @@ free_recv_cr:
 free_recv_jetty:
     free(posted_per_jetty);
     return ret;
+}
+
+static int run_once_bw_recv(perftest_context_t *ctx, perftest_config_t *cfg)
+{
+    return run_once_bw_recv_epoll(ctx, cfg);
 }
 
 static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
