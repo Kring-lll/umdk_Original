@@ -1861,40 +1861,42 @@ static int run_once_bw_epoll(perftest_context_t *ctx, perftest_config_t *cfg)
                 }
             }
             
-            cqe_cnt = urma_poll_jfc(ctx->jfc_s[0], PERFTEST_POLL_BATCH, cr);
-            if (cqe_cnt > 0) {
-                for (int i = 0; i < cqe_cnt; i++) {
-                    cr_id = (int)cr[i].user_ctx;
-                    if (cr[i].status != URMA_CR_SUCCESS) {
-                        (void)fprintf(stderr, "Failed CR status %d, tot_scnt: %lu, tot_ccnt: %lu.\n",
-                            (int)cr[i].status, tot_scnt, tot_ccnt);
-                        if (cfg->enable_err_continue == false) {
-                            goto cleanup;
-                        } else {
-                            tot_scnt = tot_scnt - (cqe_cnt - i) * cfg->cq_mod;
-                            continue;
+            do {
+                cqe_cnt = urma_poll_jfc(ctx->jfc_s[0], PERFTEST_POLL_BATCH, cr);
+                if (cqe_cnt > 0) {
+                    for (int i = 0; i < cqe_cnt; i++) {
+                        cr_id = (int)cr[i].user_ctx;
+                        if (cr[i].status != URMA_CR_SUCCESS) {
+                            (void)fprintf(stderr, "Failed CR status %d, tot_scnt: %lu, tot_ccnt: %lu.\n",
+                                (int)cr[i].status, tot_scnt, tot_ccnt);
+                            if (cfg->enable_err_continue == false) {
+                                goto cleanup;
+                            } else {
+                                tot_scnt = tot_scnt - (cqe_cnt - i) * cfg->cq_mod;
+                                continue;
+                            }
+                        }
+
+                        run_ctx->ccnt[cr_id] += cfg->cq_mod;
+                        tot_ccnt += cfg->cq_mod;
+
+                        if (cfg->no_peak == false) {
+                            if (tot_ccnt > tot_iters) {
+                                run_ctx->tcompleted[cfg->iters * cfg->jettys - 1] = get_cycles();
+                            } else {
+                                run_ctx->tcompleted[tot_ccnt - 1] = get_cycles();
+                            }
+                        }
+
+                        if (cfg->time_type.bs.duration == 1 && run_ctx->state == START_STATE) {
+                            cfg->iters += cfg->cq_mod;
                         }
                     }
-
-                    run_ctx->ccnt[cr_id] += cfg->cq_mod;
-                    tot_ccnt += cfg->cq_mod;
-
-                    if (cfg->no_peak == false) {
-                        if (tot_ccnt > tot_iters) {
-                            run_ctx->tcompleted[cfg->iters * cfg->jettys - 1] = get_cycles();
-                        } else {
-                            run_ctx->tcompleted[tot_ccnt - 1] = get_cycles();
-                        }
-                    }
-
-                    if (cfg->time_type.bs.duration == 1 && run_ctx->state == START_STATE) {
-                        cfg->iters += cfg->cq_mod;
-                    }
+                } else if (cqe_cnt < 0) {
+                    (void)fprintf(stderr, "poll jfc failed %d\n", cqe_cnt);
+                    goto cleanup;
                 }
-            } else if (cqe_cnt < 0) {
-                (void)fprintf(stderr, "poll jfc failed %d\n", cqe_cnt);
-                goto cleanup;
-            }
+            } while (cqe_cnt > 0);
         }
     }
 
@@ -1908,13 +1910,6 @@ cleanup:
     }
     free(cr);
     return ret;
-
-free_cr:
-    if (epoll_fd >= 0) {
-        close(epoll_fd);
-    }
-    free(cr);
-    return -1;
 }
 
 static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
