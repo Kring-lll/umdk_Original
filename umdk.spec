@@ -64,7 +64,11 @@ Source0       : %{name}-%{version}.tar.gz
 BuildRoot     : %{_buildirootdir}/%{name}-%{version}-build
 buildArch     : x86_64 aarch64
 
-BuildRequires : rpm-build, make, cmake, gcc, gcc-c++, glibc-devel, openssl-devel, glib2-devel, libnl3-devel, kernel-devel
+BuildRequires: rpm-build, make, cmake, gcc, gcc-c++, glibc-devel, glib2-devel, libnl3-devel, kernel-devel
+%if %{build_all} || %{with dlock}
+BuildRequires: openssl-devel
+%endif
+
 Requires: glibc, glib2
 %if %{with asan}
 Requires: libasan
