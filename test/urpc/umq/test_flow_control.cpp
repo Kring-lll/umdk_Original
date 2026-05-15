@@ -302,7 +302,7 @@ TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_init_invalid_config)
     ASSERT_EQ(ret, 0);
     
     ASSERT_EQ(queue.flow_control.initial_credit, TEST_QUEUE_RX_DEPTH >> 4);
-    ASSERT_EQ(queue.flow_control.max_credits_request, 512);
+    ASSERT_EQ(queue.flow_control.max_credits_request, 128);
     
     umq_ub_flow_control_uninit(&queue.flow_control);
 }
@@ -462,17 +462,17 @@ TEST_F(UmqFlowControlTest, test_umq_ub_fc_threashold_modify_various_ratios)
 {
     uint16_t threshold = 20;
     
+    uint16_t modified0 = umq_ub_fc_threashold_modify(threshold, 0);
+    ASSERT_EQ(modified0, 2);
+    
     uint16_t modified1 = umq_ub_fc_threashold_modify(threshold, 1);
-    ASSERT_EQ(modified1, 2);
+    ASSERT_EQ(modified1, 6);
+    
+    uint16_t modified2 = umq_ub_fc_threashold_modify(threshold, 2);
+    ASSERT_EQ(modified2, 10);
     
     uint16_t modified3 = umq_ub_fc_threashold_modify(threshold, 3);
-    ASSERT_EQ(modified3, 6);
-    
-    uint16_t modified5 = umq_ub_fc_threashold_modify(threshold, 5);
-    ASSERT_EQ(modified5, 10);
-    
-    uint16_t modified7 = umq_ub_fc_threashold_modify(threshold, 7);
-    ASSERT_EQ(modified7, 14);
+    ASSERT_EQ(modified3, 14);
 }
 
 TEST_F(UmqFlowControlTest, test_umq_ub_fc_threashold_modify_large_threshold)
@@ -684,7 +684,7 @@ TEST_F(UmqFlowControlTest, test_umq_ub_window_dec_exact_amount)
 
 TEST_F(UmqFlowControlTest, test_umq_ub_fc_threashold_modify_various_thresholds)
 {
-    uint8_t ratio = 5;
+    uint8_t ratio = 2;
     
     uint16_t mod1 = umq_ub_fc_threashold_modify(1, ratio);
     ASSERT_EQ(mod1, 2);
