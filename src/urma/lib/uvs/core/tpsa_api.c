@@ -299,25 +299,6 @@ int uvs_flush_main_primary_eid_entries(void)
     return ret;
 }
 
-int uvs_bench_main_primary_eid(const uvs_eid_t *eids, uint32_t eid_num,
-                               uint32_t loop, uvs_main_primary_eid_bench_result_t *result)
-{
-    uint64_t op_num = (uint64_t)eid_num * loop;
-    int ret;
-
-    if (eids == NULL || result == NULL || eid_num == 0 || loop == 0 ||
-        eid_num > UVS_MAIN_PRIMARY_EID_BENCH_MAX ||
-        op_num > UVS_MAIN_PRIMARY_EID_BENCH_OP_MAX) {
-        TPSA_LOG_ERR("Invalid main primary eid bench param.\n");
-        return -EINVAL;
-    }
-
-    uvs_get_api_rdlock();
-    ret = uvs_ubcore_ioctl_bench_main_primary_eid(eids, eid_num, loop, result);
-    put_uvs_lock();
-    return ret;
-}
-
 static void uvs_count_main_primary_eid_ue(const struct urma_topo_ue *ue,
                                           uint32_t *ue_num, uint32_t *entry_num)
 {

@@ -31,8 +31,6 @@ extern "C" {
 #define IODIE_NUM          (2)
 #define UVS_MAIN_PRIMARY_EID_PREFIX_LEN 128
 #define UVS_MAIN_PRIMARY_EID_BATCH_MAX  4096
-#define UVS_MAIN_PRIMARY_EID_BENCH_MAX  4096
-#define UVS_MAIN_PRIMARY_EID_BENCH_OP_MAX 10000000ULL
 
 typedef enum uvs_tp_type {
     UVS_RTP,
@@ -135,15 +133,6 @@ typedef struct uvs_main_primary_eid_entry {
     uvs_eid_t main_primary_eid;
 } uvs_main_primary_eid_entry_t;
 
-typedef struct uvs_main_primary_eid_bench_result {
-    uint64_t topo_ns;
-    uint64_t table_ns;
-    uint64_t topo_success;
-    uint64_t table_success;
-    uint32_t mismatch;
-    uint32_t reserved;
-} uvs_main_primary_eid_bench_result_t;
-
 /**
  * Create an aggregation device in UVS.
  * @param[in] agg_eid  EID of the aggregation device to be created.
@@ -192,9 +181,6 @@ int uvs_insert_main_primary_eid_entries(const uvs_main_primary_eid_entry_t *entr
                                         uint32_t entry_num);
 
 int uvs_flush_main_primary_eid_entries(void);
-
-int uvs_bench_main_primary_eid(const uvs_eid_t *eids, uint32_t eid_num,
-                               uint32_t loop, uvs_main_primary_eid_bench_result_t *result);
 
 /**
  * UVS get topo info.

@@ -105,15 +105,6 @@ typedef enum uvs_cmd_insert_main_primary_eid_ue_batch_type {
     INSERT_MAIN_PRIMARY_EID_UE_BATCH_IN_NUM
 } uvs_cmd_insert_main_primary_eid_ue_batch_type_t;
 
-typedef enum uvs_cmd_bench_main_primary_eid_type {
-    BENCH_MAIN_PRIMARY_EID_IN_EIDS,
-    BENCH_MAIN_PRIMARY_EID_IN_EID_NUM,
-    BENCH_MAIN_PRIMARY_EID_IN_LOOP,
-    BENCH_MAIN_PRIMARY_EID_IN_NUM,
-    BENCH_MAIN_PRIMARY_EID_OUT_RESULT = UVS_CMD_OUT_TYPE_INIT,
-    BENCH_MAIN_PRIMARY_EID_OUT_NUM
-} uvs_cmd_bench_main_primary_eid_type_t;
-
 #ifdef __cplusplus
 }
 #endif

@@ -98,9 +98,6 @@ int uvs_ubcore_ioctl_insert_main_primary_eid_batch(const uvs_main_primary_eid_en
                                                    uint32_t entry_num);
 int uvs_ubcore_ioctl_insert_main_primary_eid_ue_batch(
     const uvs_main_primary_eid_ue_entry_t *entries, uint32_t entry_num);
-int uvs_ubcore_ioctl_bench_main_primary_eid(const uvs_eid_t *eids, uint32_t eid_num,
-                                            uint32_t loop,
-                                            uvs_main_primary_eid_bench_result_t *result);
 int uvs_ubcore_ioctl_get_route_list(const uvs_route_t *route, uvs_route_list_t *route_list);
 int uvs_ubcore_ioctl_get_path_set(const uvs_eid_t *src_bondind_eid,
                                   const uvs_eid_t *dst_bonding_eid,

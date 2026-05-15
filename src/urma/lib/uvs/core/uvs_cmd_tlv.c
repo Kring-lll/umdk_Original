@@ -175,18 +175,3 @@ int uvs_ioctl_insert_main_primary_eid_ue_batch(tpsa_ioctl_ctx_t *ioctl_ctx,
     return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_INSERT_MAIN_PRIMARY_EID_UE_BATCH,
                                (void *)attrs, sizeof(attrs));
 }
-
-int uvs_ioctl_bench_main_primary_eid(tpsa_ioctl_ctx_t *ioctl_ctx,
-                                     uvs_cmd_main_primary_eid_bench_t *arg)
-{
-    uvs_cmd_attr_t attrs[BENCH_MAIN_PRIMARY_EID_IN_NUM +
-                         BENCH_MAIN_PRIMARY_EID_OUT_NUM - UVS_CMD_OUT_TYPE_INIT] = {0};
-    uvs_cmd_attr_t *a = attrs;
-
-    ATTR_PTR(a++, BENCH_MAIN_PRIMARY_EID_IN_EIDS, arg->in.eids);
-    ATTR(a++, BENCH_MAIN_PRIMARY_EID_IN_EID_NUM, arg->in.eid_num);
-    ATTR(a++, BENCH_MAIN_PRIMARY_EID_IN_LOOP, arg->in.loop);
-    ATTR(a++, BENCH_MAIN_PRIMARY_EID_OUT_RESULT, arg->out.result);
-
-    return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_BENCH_MAIN_PRIMARY_EID, (void *)attrs, sizeof(attrs));
-}

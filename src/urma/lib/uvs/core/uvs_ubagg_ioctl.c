@@ -418,37 +418,6 @@ int uvs_ubcore_ioctl_insert_main_primary_eid_ue_batch(
     return 0;
 }
 
-int uvs_ubcore_ioctl_bench_main_primary_eid(const uvs_eid_t *eids, uint32_t eid_num,
-                                            uint32_t loop,
-                                            uvs_main_primary_eid_bench_result_t *result)
-{
-    tpsa_ioctl_ctx_t ioctl_ctx = {0};
-    uvs_cmd_main_primary_eid_bench_t arg = {0};
-    int ret = 0;
-
-    int dev_fd = open(UVS_UBCORE_DEVICE_PATH, O_RDWR);
-    if (dev_fd == -1) {
-        TPSA_LOG_ERR("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
-        return -1;
-    }
-
-    ioctl_ctx.ubcore_fd = dev_fd;
-    arg.in.eids = (void *)(uintptr_t)eids;
-    arg.in.eid_num = eid_num;
-    arg.in.loop = loop;
-
-    ret = uvs_ioctl_bench_main_primary_eid(&ioctl_ctx, &arg);
-    if (ret != 0) {
-        TPSA_LOG_ERR("uvs_ubcore_ioctl_bench_main_primary_eid fail\n");
-        close(dev_fd);
-        return ret;
-    }
-
-    *result = arg.out.result;
-    close(dev_fd);
-    return 0;
-}
-
 int uvs_ubcore_ioctl_get_route_list(const uvs_route_t *route, uvs_route_list_t *route_list)
 {
     tpsa_ioctl_ctx_t ioctl_ctx = {0};

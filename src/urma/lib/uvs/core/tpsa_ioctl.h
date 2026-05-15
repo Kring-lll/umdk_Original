@@ -51,7 +51,6 @@ typedef enum uvs_global_cmd {
     UVS_CMD_LOOKUP_MAIN_PRIMARY_EID = 7,
     UVS_CMD_FLUSH_MAIN_PRIMARY_EID = 8,
     UVS_CMD_INSERT_MAIN_PRIMARY_EID_BATCH = 9,
-    UVS_CMD_BENCH_MAIN_PRIMARY_EID = 10,
     UVS_CMD_DELETE_TOPO = 11,
     UVS_CMD_INSERT_MAIN_PRIMARY_EID_UE_BATCH = 12,
     UVS_CMD_GLOBAL_LAST
@@ -119,17 +118,6 @@ typedef struct uvs_cmd_main_primary_eid_ue_batch {
     } in;
 } uvs_cmd_main_primary_eid_ue_batch_t;
 
-typedef struct uvs_cmd_main_primary_eid_bench {
-    struct {
-        void *eids;
-        uint32_t eid_num;
-        uint32_t loop;
-    } in;
-    struct {
-        uvs_main_primary_eid_bench_result_t result;
-    } out;
-} uvs_cmd_main_primary_eid_bench_t;
-
 typedef struct uvs_cmd_get_route_list {
     uvs_route_t in;
     uvs_route_list_t out;
@@ -162,9 +150,6 @@ int uvs_ioctl_insert_main_primary_eid_batch(tpsa_ioctl_ctx_t *ioctl_ctx,
                                             uvs_cmd_main_primary_eid_batch_t *arg);
 int uvs_ioctl_insert_main_primary_eid_ue_batch(tpsa_ioctl_ctx_t *ioctl_ctx,
                                                uvs_cmd_main_primary_eid_ue_batch_t *arg);
-int uvs_ioctl_bench_main_primary_eid(tpsa_ioctl_ctx_t *ioctl_ctx,
-                                     uvs_cmd_main_primary_eid_bench_t *arg);
-
 #ifdef __cplusplus
 }
 #endif
