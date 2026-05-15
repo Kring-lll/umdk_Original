@@ -42,6 +42,11 @@ typedef enum uvs_cmd_set_topo_type {
     SET_TOPO_IN_NUM /* Only for calculating number of types */
 } uvs_cmd_set_topo_type_t;
 
+typedef enum uvs_cmd_delete_topo_type {
+    DELETE_TOPO_IN_RESERVED,
+    DELETE_TOPO_IN_NUM /* Only for calculating number of types */
+} uvs_cmd_delete_topo_type_t;
+
 typedef enum uvs_cmd_get_topo_type {
     /* In type */
     GET_TOPO_OUT_TOPO_MAP,
@@ -64,6 +69,33 @@ typedef enum uvs_cmd_set_path_set_type {
     GET_PATH_LIST_OUT_PATH_SET = UVS_CMD_OUT_TYPE_INIT,
     GET_PATH_SET_OUT_NUM
 } uvs_cmd_set_path_set_type_t;
+
+typedef enum uvs_cmd_insert_main_primary_eid_type {
+    INSERT_MAIN_PRIMARY_EID_IN_ENTRY,
+    INSERT_MAIN_PRIMARY_EID_IN_NUM
+} uvs_cmd_insert_main_primary_eid_type_t;
+
+typedef enum uvs_cmd_delete_main_primary_eid_type {
+    DELETE_MAIN_PRIMARY_EID_IN_EID,
+    DELETE_MAIN_PRIMARY_EID_IN_NUM
+} uvs_cmd_delete_main_primary_eid_type_t;
+
+typedef enum uvs_cmd_lookup_main_primary_eid_type {
+    LOOKUP_MAIN_PRIMARY_EID_IN_EID,
+    LOOKUP_MAIN_PRIMARY_EID_IN_NUM,
+    LOOKUP_MAIN_PRIMARY_EID_OUT_MAIN_PRIMARY_EID = UVS_CMD_OUT_TYPE_INIT,
+    LOOKUP_MAIN_PRIMARY_EID_OUT_NUM
+} uvs_cmd_lookup_main_primary_eid_type_t;
+
+typedef enum uvs_cmd_flush_main_primary_eid_type {
+    FLUSH_MAIN_PRIMARY_EID_IN_RESERVED,
+    FLUSH_MAIN_PRIMARY_EID_IN_NUM
+} uvs_cmd_flush_main_primary_eid_type_t;
+
+typedef enum uvs_cmd_insert_main_primary_eid_batch_type {
+    INSERT_MAIN_PRIMARY_EID_BATCH_IN_ENTRY,
+    INSERT_MAIN_PRIMARY_EID_BATCH_IN_NUM
+} uvs_cmd_insert_main_primary_eid_batch_type_t;
 
 #ifdef __cplusplus
 }
