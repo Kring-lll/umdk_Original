@@ -29,6 +29,7 @@ extern "C" {
 #define CHIP_NUM           (2)
 #define DEV_NUM            (256)
 #define IODIE_NUM          (2)
+#define UVS_MAIN_PRIMARY_EID_PREFIX_LEN 128
 
 typedef enum uvs_tp_type {
     UVS_RTP,
@@ -125,6 +126,12 @@ struct urma_topo_node {
     struct urma_topo_agg_dev agg_devs[DEV_NUM];
 };
 
+typedef struct uvs_main_primary_eid_entry {
+    uvs_eid_t prefix;
+    uint8_t prefix_len;
+    uvs_eid_t main_primary_eid;
+} uvs_main_primary_eid_entry_t;
+
 /**
  * Create an aggregation device in UVS.
  * @param[in] agg_eid  EID of the aggregation device to be created.
@@ -156,6 +163,23 @@ int uvs_get_device_name_by_eid(uvs_eid_t *eid, char *buf, size_t len);
  * Return: 0 on success, other value on error
  */
 int uvs_set_topo_info(void *topo_buf, uint32_t node_size, uint32_t node_num);
+
+/**
+ * Delete topo info from ubagg and ubcore, and clear derived main primary EID entries.
+ * Return: 0 on success, other value on error
+ */
+int uvs_delete_topo_info(void);
+
+int uvs_insert_main_primary_eid(const uvs_main_primary_eid_entry_t *entry);
+
+int uvs_delete_main_primary_eid(const uvs_eid_t *prefix, uint8_t prefix_len);
+
+int uvs_lookup_main_primary_eid(const uvs_eid_t *eid, uvs_eid_t *main_primary_eid);
+
+int uvs_insert_main_primary_eid_batch(const uvs_main_primary_eid_entry_t *entries,
+                                      uint32_t entry_num);
+
+int uvs_flush_main_primary_eid(void);
 
 /**
  * UVS get topo info.
