@@ -829,7 +829,12 @@ TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_query_atomic)
     jfr_ctx_t io_jfr_ctx = {0};
     queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
     umq_ub_ctx_t dev_ctx = {0};
+    uint64_t rx_consumed_table[16] = {0};
+    dev_ctx.rx_consumed_jetty_table = rx_consumed_table;
     queue.dev_ctx = &dev_ctx;
+    urma_jetty_t jetty = {0};
+    jetty.jetty_id.id = 0;
+    queue.jetty[UB_QUEUE_JETTY_IO] = &jetty;
     
     umq_flow_control_cfg_t cfg = {0};
     cfg.use_atomic_window = true;
@@ -868,7 +873,12 @@ TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_query_non_atomic)
     jfr_ctx_t io_jfr_ctx = {0};
     queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
     umq_ub_ctx_t dev_ctx = {0};
+    uint64_t rx_consumed_table[16] = {0};
+    dev_ctx.rx_consumed_jetty_table = rx_consumed_table;
     queue.dev_ctx = &dev_ctx;
+    urma_jetty_t jetty = {0};
+    jetty.jetty_id.id = 0;
+    queue.jetty[UB_QUEUE_JETTY_IO] = &jetty;
     
     umq_flow_control_cfg_t cfg = {0};
     cfg.use_atomic_window = false;
@@ -1005,7 +1015,12 @@ TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_query_with_packet_stat
     jfr_ctx_t io_jfr_ctx = {0};
     queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
     umq_ub_ctx_t dev_ctx = {0};
+    uint64_t rx_consumed_table[16] = {0};
+    dev_ctx.rx_consumed_jetty_table = rx_consumed_table;
     queue.dev_ctx = &dev_ctx;
+    urma_jetty_t jetty = {0};
+    jetty.jetty_id.id = 0;
+    queue.jetty[UB_QUEUE_JETTY_IO] = &jetty;
     
     umq_flow_control_cfg_t cfg = {0};
     cfg.use_atomic_window = true;
@@ -1042,7 +1057,12 @@ TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_combined_stats_operations)
     jfr_ctx_t io_jfr_ctx = {0};
     queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
     umq_ub_ctx_t dev_ctx = {0};
+    uint64_t rx_consumed_table[16] = {0};
+    dev_ctx.rx_consumed_jetty_table = rx_consumed_table;
     queue.dev_ctx = &dev_ctx;
+    urma_jetty_t jetty = {0};
+    jetty.jetty_id.id = 0;
+    queue.jetty[UB_QUEUE_JETTY_IO] = &jetty;
     
     umq_flow_control_cfg_t cfg = {0};
     cfg.use_atomic_window = true;
@@ -1077,7 +1097,12 @@ TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_query_zero_values)
     jfr_ctx_t io_jfr_ctx = {0};
     queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
     umq_ub_ctx_t dev_ctx = {0};
+    uint64_t rx_consumed_table[16] = {0};
+    dev_ctx.rx_consumed_jetty_table = rx_consumed_table;
     queue.dev_ctx = &dev_ctx;
+    urma_jetty_t jetty = {0};
+    jetty.jetty_id.id = 0;
+    queue.jetty[UB_QUEUE_JETTY_IO] = &jetty;
     
     umq_flow_control_cfg_t cfg = {0};
     cfg.use_atomic_window = true;
@@ -1121,7 +1146,12 @@ TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_after_window_operation
     jfr_ctx_t io_jfr_ctx = {0};
     queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
     umq_ub_ctx_t dev_ctx = {0};
+    uint64_t rx_consumed_table[16] = {0};
+    dev_ctx.rx_consumed_jetty_table = rx_consumed_table;
     queue.dev_ctx = &dev_ctx;
+    urma_jetty_t jetty = {0};
+    jetty.jetty_id.id = 0;
+    queue.jetty[UB_QUEUE_JETTY_IO] = &jetty;
     
     umq_flow_control_cfg_t cfg = {0};
     cfg.use_atomic_window = false;
@@ -1197,7 +1227,12 @@ TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_query_with_errors)
     jfr_ctx_t io_jfr_ctx = {0};
     queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
     umq_ub_ctx_t dev_ctx = {0};
+    uint64_t rx_consumed_table[16] = {0};
+    dev_ctx.rx_consumed_jetty_table = rx_consumed_table;
     queue.dev_ctx = &dev_ctx;
+    urma_jetty_t jetty = {0};
+    jetty.jetty_id.id = 0;
+    queue.jetty[UB_QUEUE_JETTY_IO] = &jetty;
     
     umq_flow_control_cfg_t cfg = {0};
     cfg.use_atomic_window = true;
@@ -1255,7 +1290,12 @@ TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_combined_credit_operations_s
     jfr_ctx_t io_jfr_ctx = {0};
     queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
     umq_ub_ctx_t dev_ctx = {0};
+    uint64_t rx_consumed_table[16] = {0};
+    dev_ctx.rx_consumed_jetty_table = rx_consumed_table;
     queue.dev_ctx = &dev_ctx;
+    urma_jetty_t jetty = {0};
+    jetty.jetty_id.id = 0;
+    queue.jetty[UB_QUEUE_JETTY_IO] = &jetty;
     
     umq_flow_control_cfg_t cfg = {0};
     cfg.use_atomic_window = true;
@@ -1318,7 +1358,12 @@ TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_large_values)
     jfr_ctx_t io_jfr_ctx = {0};
     queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
     umq_ub_ctx_t dev_ctx = {0};
+    uint64_t rx_consumed_table[16] = {0};
+    dev_ctx.rx_consumed_jetty_table = rx_consumed_table;
     queue.dev_ctx = &dev_ctx;
+    urma_jetty_t jetty = {0};
+    jetty.jetty_id.id = 0;
+    queue.jetty[UB_QUEUE_JETTY_IO] = &jetty;
     
     umq_flow_control_cfg_t cfg = {0};
     cfg.use_atomic_window = true;
