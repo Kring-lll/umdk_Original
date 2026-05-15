@@ -1197,16 +1197,16 @@ TEST_F(UmqFlowControlTest, test_umq_ub_fc_threshold_modify_with_ratio_conversion
     uint16_t threshold = 100;
     
     uint16_t modified0 = umq_ub_fc_threashold_modify(threshold, 0);
-    ASSERT_GT(modified0, 0);
+    ASSERT_EQ(modified0, 10);
     
     uint16_t modified1 = umq_ub_fc_threashold_modify(threshold, 1);
-    ASSERT_EQ(modified1, 10);
+    ASSERT_EQ(modified1, 30);
     
     uint16_t modified2 = umq_ub_fc_threashold_modify(threshold, 2);
-    ASSERT_EQ(modified2, 30);
+    ASSERT_EQ(modified2, 50);
     
     uint16_t modified3 = umq_ub_fc_threashold_modify(threshold, 3);
-    ASSERT_EQ(modified3, 50);
+    ASSERT_EQ(modified3, 70);
     
     uint16_t modified_exceed = umq_ub_fc_threashold_modify(threshold, 10);
     ASSERT_GT(modified_exceed, 0);
