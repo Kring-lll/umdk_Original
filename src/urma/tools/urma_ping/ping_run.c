@@ -50,7 +50,7 @@ static void log_eid_verbose(uint8_t *eid)
     LOG_VERBOSE("%s\n", print_str);
 }
 
-static void primary_eid_to_main_primary_eid(urma_eid_t *primary_eid)
+static void primary_eid_to_main_ue_eid(urma_eid_t *primary_eid)
 {
     int ret;
     urma_ping_ubcore_topo_map_t topo_map;
@@ -276,9 +276,9 @@ static int init_urma_resource(ping_cfg_t *cfg, ping_urma_resource_t *res)
         goto uninit_urma;
     }
 
-    primary_eid_to_main_primary_eid(&dest_eid);
+    primary_eid_to_main_ue_eid(&dest_eid);
 
-    LOG_VERBOSE("Successful find main dest primary eid: ");
+    LOG_VERBOSE("Successful find main dest UE eid: ");
     log_eid_verbose(dest_eid.raw);
 
     urma_eid_info_t *eid_list = urma_get_eid_list(dev, &eid_cnt);
