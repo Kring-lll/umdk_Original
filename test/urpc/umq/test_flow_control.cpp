@@ -1129,12 +1129,33 @@ TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_query_zero_values)
 
 TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_packet_stats_disabled)
 {
-    ub_flow_control_t fc = {0};
-    fc.enabled = false;
+    ub_queue_t queue = {0};
+    queue.create_flag = 0;
+    queue.rx_depth = TEST_QUEUE_RX_DEPTH;
+    queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
+    jfr_ctx_t io_jfr_ctx = {0};
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    umq_ub_ctx_t dev_ctx = {0};
+    uint64_t rx_consumed_table[16] = {0};
+    dev_ctx.rx_consumed_jetty_table = rx_consumed_table;
+    queue.dev_ctx = &dev_ctx;
+    urma_jetty_t jetty = {0};
+    jetty.jetty_id.id = 0;
+    queue.jetty[UB_QUEUE_JETTY_IO] = &jetty;
     
-    umq_ub_fc_packet_stats(&fc, 5, UB_PACKET_STATS_TYPE_SEND);
+    umq_flow_control_cfg_t cfg = {0};
+    cfg.use_atomic_window = true;
     
-    ASSERT_EQ(fc.packet_stats[UB_PACKET_STATS_TYPE_SEND], 0);
+    int ret = umq_ub_flow_control_init(&queue.flow_control, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
+    ASSERT_EQ(ret, 0);
+    
+    queue.flow_control.enabled = false;
+    
+    umq_ub_fc_packet_stats(&queue.flow_control, 5, UB_PACKET_STATS_TYPE_SEND);
+    
+    ASSERT_EQ(queue.flow_control.packet_stats[UB_PACKET_STATS_TYPE_SEND], 5);
+    
+    umq_ub_flow_control_uninit(&queue.flow_control);
 }
 
 TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_after_window_operations)
