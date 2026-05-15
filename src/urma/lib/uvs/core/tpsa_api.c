@@ -14,13 +14,56 @@
 #include "uvs_private_api.h"
 #include "uvs_ubagg_ioctl.h"
 #include <errno.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/syscall.h>
 
 #define UVS_MAX_TOPO_NUM 64
+#define UVS_MAIN_PRIMARY_EID_GROUP_INVALID_INDEX UINT32_MAX
+#define UVS_MAIN_PRIMARY_EID_GROUP_BUCKET_FACTOR 2U
+#define UVS_MAIN_PRIMARY_EID_GROUP_BUCKET_EXTRA 1U
+/* 32-bit FNV-1a constants used only for the temporary node/entity/chip table. */
+#define UVS_MAIN_PRIMARY_EID_HASH_OFFSET_BASIS 2166136261U
+#define UVS_MAIN_PRIMARY_EID_HASH_PRIME 16777619U
 
 static inline bool uvs_eid_is_valid(const uvs_eid_t *eid)
 {
     return !(eid->in6.interface_id == 0 && eid->in6.subnet_prefix == 0);
+}
+
+typedef struct uvs_main_primary_eid_group {
+    uint32_t node_idx;
+    uint32_t entity_id;
+    uint32_t chip_id;
+    uvs_eid_t main_primary_eid;
+} uvs_main_primary_eid_group_t;
+
+typedef struct uvs_main_primary_eid_group_node {
+    uvs_main_primary_eid_group_t group;
+    uint32_t next;
+} uvs_main_primary_eid_group_node_t;
+
+typedef struct uvs_main_primary_eid_group_table {
+    uint32_t *buckets;
+    uvs_main_primary_eid_group_node_t *nodes;
+    uint32_t bucket_num;
+    uint32_t node_num;
+    uint32_t node_max;
+} uvs_main_primary_eid_group_table_t;
+
+typedef struct uvs_main_primary_eid_entry_ctx {
+    uvs_main_primary_eid_entry_t *entries;
+    uint32_t *entry_num;
+    uint32_t entry_max;
+    const uvs_main_primary_eid_group_table_t *groups;
+} uvs_main_primary_eid_entry_ctx_t;
+
+static inline bool uvs_topo_eid_is_valid(const char *eid)
+{
+    const char empty_eid[EID_LEN] = {0};
+
+    return eid != NULL && memcmp(eid, empty_eid, EID_LEN) != 0;
 }
 
 int uvs_create_agg_dev(uvs_eid_t *agg_eid, const char *dev_name)
@@ -84,7 +127,686 @@ int uvs_get_device_name_by_eid(uvs_eid_t *eid, char *buf, size_t len)
     return 0;
 }
 
-static int uvs_set_topo_info_inner(void *topo, uint32_t topo_num)
+static uint32_t uvs_main_primary_eid_batch_num(uint32_t left)
+{
+    return left > UVS_MAIN_PRIMARY_EID_BATCH_MAX ? UVS_MAIN_PRIMARY_EID_BATCH_MAX : left;
+}
+
+static bool uvs_main_primary_eid_mul_overflow(size_t count, size_t item_size)
+{
+    return count != 0 && item_size > SIZE_MAX / count;
+}
+
+static int uvs_main_primary_eid_entry_cmp(const void *left, const void *right)
+{
+    const uvs_main_primary_eid_entry_t *left_entry = left;
+    const uvs_main_primary_eid_entry_t *right_entry = right;
+    int ret;
+
+    ret = memcmp(&left_entry->main_primary_eid, &right_entry->main_primary_eid,
+                 sizeof(left_entry->main_primary_eid));
+    if (ret != 0) {
+        return ret;
+    }
+
+    if (left_entry->prefix_len != right_entry->prefix_len) {
+        return (int)left_entry->prefix_len - (int)right_entry->prefix_len;
+    }
+
+    return memcmp(&left_entry->prefix, &right_entry->prefix,
+                  sizeof(left_entry->prefix));
+}
+
+static bool uvs_main_primary_eid_entry_same_group(
+    const uvs_main_primary_eid_entry_t *left,
+    const uvs_main_primary_eid_entry_t *right)
+{
+    return left->prefix_len == right->prefix_len &&
+           memcmp(&left->main_primary_eid, &right->main_primary_eid,
+                  sizeof(left->main_primary_eid)) == 0;
+}
+
+int uvs_insert_main_primary_eid(const uvs_main_primary_eid_entry_t *entry)
+{
+    int ret;
+
+    if (entry == NULL) {
+        TPSA_LOG_ERR("Invalid main primary eid entry.\n");
+        return -EINVAL;
+    }
+
+    uvs_get_api_rdlock();
+    ret = uvs_ubcore_ioctl_insert_main_primary_eid(entry);
+    put_uvs_lock();
+    return ret;
+}
+
+int uvs_delete_main_primary_eid(const uvs_eid_t *prefix, uint8_t prefix_len)
+{
+    int ret;
+
+    if (prefix == NULL) {
+        TPSA_LOG_ERR("Invalid main primary eid prefix.\n");
+        return -EINVAL;
+    }
+
+    uvs_get_api_rdlock();
+    ret = uvs_ubcore_ioctl_delete_main_primary_eid(prefix, prefix_len);
+    put_uvs_lock();
+    return ret;
+}
+
+int uvs_lookup_main_primary_eid(const uvs_eid_t *eid, uvs_eid_t *main_primary_eid)
+{
+    int ret;
+
+    if (eid == NULL || main_primary_eid == NULL) {
+        TPSA_LOG_ERR("Invalid main primary eid lookup param.\n");
+        return -EINVAL;
+    }
+
+    uvs_get_api_rdlock();
+    ret = uvs_ubcore_ioctl_lookup_main_primary_eid(eid, main_primary_eid);
+    put_uvs_lock();
+    return ret;
+}
+
+static int uvs_insert_main_primary_eid_batch_inner(const uvs_main_primary_eid_entry_t *entries,
+                                                   uint32_t entry_num)
+{
+    uint32_t offset = 0;
+    int ret;
+
+    if (entry_num != 0 && entries == NULL) {
+        TPSA_LOG_ERR("Invalid main primary eid entries.\n");
+        return -EINVAL;
+    }
+
+    while (offset < entry_num) {
+        uint32_t batch_num = uvs_main_primary_eid_batch_num(entry_num - offset);
+
+        ret = uvs_ubcore_ioctl_insert_main_primary_eid_batch(&entries[offset], batch_num);
+        if (ret != 0) {
+            return ret;
+        }
+        offset += batch_num;
+    }
+
+    return 0;
+}
+
+int uvs_insert_main_primary_eid_batch(const uvs_main_primary_eid_entry_t *entries,
+                                      uint32_t entry_num)
+{
+    int ret;
+
+    uvs_get_api_rdlock();
+    ret = uvs_insert_main_primary_eid_batch_inner(entries, entry_num);
+    put_uvs_lock();
+    return ret;
+}
+
+static int uvs_insert_main_primary_eid_group_batch_inner(
+    uvs_main_primary_eid_entry_t *entries, uint32_t entry_num)
+{
+    uint32_t offset = 0;
+    uvs_main_primary_eid_group_entry_t *groups = NULL;
+    uvs_eid_t *prefixes = NULL;
+    int ret;
+
+    if (entry_num != 0 && entries == NULL) {
+        TPSA_LOG_ERR("Invalid main primary eid entries.\n");
+        return -EINVAL;
+    }
+
+    if (entry_num == 0) {
+        return 0;
+    }
+
+    groups = malloc((size_t)UVS_MAIN_PRIMARY_EID_GROUP_BATCH_MAX * sizeof(*groups));
+    if (groups == NULL) {
+        return -ENOMEM;
+    }
+    prefixes = malloc((size_t)UVS_MAIN_PRIMARY_EID_BATCH_MAX * sizeof(*prefixes));
+    if (prefixes == NULL) {
+        free(groups);
+        return -ENOMEM;
+    }
+
+    qsort(entries, entry_num, sizeof(*entries), uvs_main_primary_eid_entry_cmp);
+
+    while (offset < entry_num) {
+        uint32_t group_num = 0;
+        uint32_t prefix_num = 0;
+
+        while (offset < entry_num && prefix_num < UVS_MAIN_PRIMARY_EID_BATCH_MAX &&
+               group_num < UVS_MAIN_PRIMARY_EID_GROUP_BATCH_MAX) {
+            uint32_t same_group_num = 1;
+            uint32_t left = UVS_MAIN_PRIMARY_EID_BATCH_MAX - prefix_num;
+            uint32_t chunk_num;
+            uint32_t i;
+
+            while (offset + same_group_num < entry_num &&
+                   same_group_num <= left &&
+                   uvs_main_primary_eid_entry_same_group(&entries[offset],
+                                                         &entries[offset + same_group_num])) {
+                same_group_num++;
+            }
+
+            if (group_num != 0 && same_group_num <= UVS_MAIN_PRIMARY_EID_BATCH_MAX &&
+                same_group_num > left) {
+                break;
+            }
+
+            chunk_num = same_group_num > left ? left : same_group_num;
+            groups[group_num].main_primary_eid = entries[offset].main_primary_eid;
+            groups[group_num].prefix_len = entries[offset].prefix_len;
+            groups[group_num].prefix_offset = prefix_num;
+            groups[group_num].prefix_num = chunk_num;
+            (void)memset(groups[group_num].reserved, 0,
+                         sizeof(groups[group_num].reserved));
+
+            for (i = 0; i < chunk_num; i++) {
+                prefixes[prefix_num + i] = entries[offset + i].prefix;
+            }
+
+            group_num++;
+            prefix_num += chunk_num;
+            offset += chunk_num;
+        }
+
+        ret = uvs_ubcore_ioctl_insert_main_primary_eid_group_batch(groups, group_num,
+                                                                   prefixes, prefix_num);
+        if (ret != 0) {
+            free(prefixes);
+            free(groups);
+            return ret;
+        }
+    }
+
+    free(prefixes);
+    free(groups);
+    return 0;
+}
+
+int uvs_flush_main_primary_eid(void)
+{
+    int ret;
+
+    uvs_get_api_rdlock();
+    ret = uvs_ubcore_ioctl_flush_main_primary_eid();
+    put_uvs_lock();
+    return ret;
+}
+
+static void uvs_count_main_primary_eid_ue(const struct urma_topo_ue *ue,
+                                          uint32_t *ue_num, uint32_t *entry_num)
+{
+    uint32_t port_idx;
+
+    if (!uvs_topo_eid_is_valid(ue->primary_eid)) {
+        return;
+    }
+
+    (*ue_num)++;
+    (*entry_num)++;
+    for (port_idx = 0; port_idx < PORT_NUM; port_idx++) {
+        if (uvs_topo_eid_is_valid(ue->port_eid[port_idx])) {
+            (*entry_num)++;
+        }
+    }
+}
+
+static void uvs_count_main_primary_eid_agg_dev(const struct urma_topo_agg_dev *agg_dev,
+                                               uint32_t *ue_num, uint32_t *entry_num)
+{
+    uint32_t iodie_idx;
+
+    for (iodie_idx = 0; iodie_idx < IODIE_NUM; iodie_idx++) {
+        uvs_count_main_primary_eid_ue(&agg_dev->ues[iodie_idx], ue_num, entry_num);
+    }
+}
+
+static void uvs_count_main_primary_eid_topo_items(const struct urma_topo_node *topo,
+                                                  uint32_t topo_num, uint32_t *ue_num,
+                                                  uint32_t *entry_num)
+{
+    uint32_t node_idx;
+    uint32_t dev_idx;
+
+    *ue_num = 0;
+    *entry_num = 0;
+    for (node_idx = 0; node_idx < topo_num; node_idx++) {
+        const struct urma_topo_node *node = &topo[node_idx];
+
+        for (dev_idx = 0; dev_idx < DEV_NUM; dev_idx++) {
+            uvs_count_main_primary_eid_agg_dev(&node->agg_devs[dev_idx], ue_num, entry_num);
+        }
+    }
+}
+
+static uint32_t uvs_main_primary_eid_hash_u32(uint32_t hash, uint32_t value)
+{
+    uint32_t hash_value = hash;
+    uint32_t byte_idx;
+
+    for (byte_idx = 0; byte_idx < sizeof(value); byte_idx++) {
+        hash_value ^= (value >> (byte_idx * CHAR_BIT)) & UINT8_MAX;
+        hash_value *= UVS_MAIN_PRIMARY_EID_HASH_PRIME;
+    }
+
+    return hash_value;
+}
+
+static uint32_t uvs_main_primary_eid_group_hash(uint32_t node_idx,
+                                                uint32_t entity_id,
+                                                uint32_t chip_id)
+{
+    uint32_t hash = UVS_MAIN_PRIMARY_EID_HASH_OFFSET_BASIS;
+
+    hash = uvs_main_primary_eid_hash_u32(hash, node_idx);
+    hash = uvs_main_primary_eid_hash_u32(hash, entity_id);
+    hash = uvs_main_primary_eid_hash_u32(hash, chip_id);
+    return hash;
+}
+
+static bool uvs_main_primary_eid_group_match(const uvs_main_primary_eid_group_t *group,
+                                             uint32_t node_idx, uint32_t entity_id,
+                                             uint32_t chip_id)
+{
+    return group->node_idx == node_idx && group->entity_id == entity_id &&
+           group->chip_id == chip_id;
+}
+
+static uint32_t uvs_main_primary_eid_group_bucket_num(uint32_t ue_num)
+{
+    if (ue_num > (UINT32_MAX - UVS_MAIN_PRIMARY_EID_GROUP_BUCKET_EXTRA) /
+        UVS_MAIN_PRIMARY_EID_GROUP_BUCKET_FACTOR) {
+        return 0;
+    }
+
+    return ue_num * UVS_MAIN_PRIMARY_EID_GROUP_BUCKET_FACTOR +
+           UVS_MAIN_PRIMARY_EID_GROUP_BUCKET_EXTRA;
+}
+
+static int uvs_main_primary_eid_group_table_init(
+    uvs_main_primary_eid_group_table_t *table, uint32_t ue_num)
+{
+    uint32_t bucket_num;
+    uint32_t bucket_idx;
+    size_t bucket_size;
+    size_t node_size;
+
+    if (table == NULL || ue_num == 0) {
+        return -EINVAL;
+    }
+
+    bucket_num = uvs_main_primary_eid_group_bucket_num(ue_num);
+    if (bucket_num == 0 ||
+        uvs_main_primary_eid_mul_overflow((size_t)bucket_num, sizeof(*table->buckets)) ||
+        uvs_main_primary_eid_mul_overflow((size_t)ue_num, sizeof(*table->nodes))) {
+        TPSA_LOG_ERR("main primary eid group table size is too large.\n");
+        return -EOVERFLOW;
+    }
+    bucket_size = (size_t)bucket_num * sizeof(*table->buckets);
+    node_size = (size_t)ue_num * sizeof(*table->nodes);
+
+    (void)memset(table, 0, sizeof(*table));
+    table->buckets = malloc(bucket_size);
+    if (table->buckets == NULL) {
+        return -ENOMEM;
+    }
+    table->nodes = malloc(node_size);
+    if (table->nodes == NULL) {
+        free(table->buckets);
+        table->buckets = NULL;
+        return -ENOMEM;
+    }
+    (void)memset(table->nodes, 0, node_size);
+
+    for (bucket_idx = 0; bucket_idx < bucket_num; bucket_idx++) {
+        table->buckets[bucket_idx] = UVS_MAIN_PRIMARY_EID_GROUP_INVALID_INDEX;
+    }
+    table->bucket_num = bucket_num;
+    table->node_max = ue_num;
+    return 0;
+}
+
+static void uvs_main_primary_eid_group_table_uninit(
+    uvs_main_primary_eid_group_table_t *table)
+{
+    if (table == NULL) {
+        return;
+    }
+
+    free(table->nodes);
+    free(table->buckets);
+    (void)memset(table, 0, sizeof(*table));
+}
+
+static uvs_main_primary_eid_group_t *uvs_find_main_primary_eid_group(
+    const uvs_main_primary_eid_group_table_t *table, uint32_t node_idx,
+    uint32_t entity_id, uint32_t chip_id)
+{
+    uint32_t bucket_idx;
+    uint32_t node_idx_in_bucket;
+
+    if (table == NULL || table->bucket_num == 0 || table->buckets == NULL ||
+        table->nodes == NULL) {
+        return NULL;
+    }
+
+    bucket_idx = uvs_main_primary_eid_group_hash(node_idx, entity_id, chip_id) %
+                 table->bucket_num;
+    node_idx_in_bucket = table->buckets[bucket_idx];
+    while (node_idx_in_bucket != UVS_MAIN_PRIMARY_EID_GROUP_INVALID_INDEX) {
+        uvs_main_primary_eid_group_node_t *node = &table->nodes[node_idx_in_bucket];
+
+        if (uvs_main_primary_eid_group_match(&node->group, node_idx, entity_id,
+                                             chip_id)) {
+            return &node->group;
+        }
+        node_idx_in_bucket = node->next;
+    }
+
+    return NULL;
+}
+
+static int uvs_add_main_primary_eid_group(uvs_main_primary_eid_group_table_t *table,
+                                          uint32_t node_idx,
+                                          const struct urma_topo_ue *ue)
+{
+    uvs_main_primary_eid_group_t *group;
+    uvs_main_primary_eid_group_node_t *node;
+    uint32_t bucket_idx;
+
+    group = uvs_find_main_primary_eid_group(table, node_idx, ue->entity_id,
+                                            ue->chip_id);
+    if (group != NULL) {
+        if (memcmp(group->main_primary_eid.raw, ue->primary_eid, EID_LEN) > 0) {
+            (void)memcpy(group->main_primary_eid.raw, ue->primary_eid, EID_LEN);
+        }
+        return 0;
+    }
+
+    if (table == NULL || table->node_num >= table->node_max) {
+        return -ENOSPC;
+    }
+
+    bucket_idx = uvs_main_primary_eid_group_hash(node_idx, ue->entity_id,
+                                                 ue->chip_id) %
+                 table->bucket_num;
+    node = &table->nodes[table->node_num];
+    node->group.node_idx = node_idx;
+    node->group.entity_id = ue->entity_id;
+    node->group.chip_id = ue->chip_id;
+    (void)memcpy(node->group.main_primary_eid.raw, ue->primary_eid, EID_LEN);
+    node->next = table->buckets[bucket_idx];
+    table->buckets[bucket_idx] = table->node_num;
+    table->node_num++;
+    return 0;
+}
+
+static int uvs_collect_main_primary_eid_groups_from_agg_dev(
+    uvs_main_primary_eid_group_table_t *groups, uint32_t node_idx,
+    const struct urma_topo_agg_dev *agg_dev);
+
+static int uvs_collect_main_primary_eid_groups(const struct urma_topo_node *topo,
+                                               uint32_t topo_num,
+                                               uvs_main_primary_eid_group_table_t *groups)
+{
+    uint32_t node_idx;
+    uint32_t dev_idx;
+    int ret;
+
+    for (node_idx = 0; node_idx < topo_num; node_idx++) {
+        const struct urma_topo_node *node = &topo[node_idx];
+
+        for (dev_idx = 0; dev_idx < DEV_NUM; dev_idx++) {
+            ret = uvs_collect_main_primary_eid_groups_from_agg_dev(
+                groups, node_idx, &node->agg_devs[dev_idx]);
+            if (ret != 0) {
+                return ret;
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int uvs_alloc_main_primary_eid_entry_buffers(uint32_t entry_num,
+                                                    uvs_main_primary_eid_entry_t **entries)
+{
+    size_t entry_size;
+
+    if (entry_num == 0) {
+        return -EINVAL;
+    }
+
+    if (uvs_main_primary_eid_mul_overflow((size_t)entry_num, sizeof(**entries))) {
+        TPSA_LOG_ERR("main primary eid entry count is too large.\n");
+        return -EOVERFLOW;
+    }
+    entry_size = (size_t)entry_num * sizeof(**entries);
+
+    *entries = malloc(entry_size);
+    if (*entries == NULL) {
+        return -ENOMEM;
+    }
+    (void)memset(*entries, 0, entry_size);
+
+    return 0;
+}
+
+static int uvs_add_main_primary_eid_entry_from_raw(
+    uvs_main_primary_eid_entry_ctx_t *ctx, const char *eid,
+    const uvs_eid_t *main_primary_eid)
+{
+    uvs_main_primary_eid_entry_t *entry;
+
+    if (*ctx->entry_num >= ctx->entry_max) {
+        return -ENOSPC;
+    }
+
+    entry = &ctx->entries[*ctx->entry_num];
+    (void)memcpy(entry->prefix.raw, eid, EID_LEN);
+    entry->prefix_len = UVS_MAIN_PRIMARY_EID_PREFIX_LEN;
+    entry->main_primary_eid = *main_primary_eid;
+    (*ctx->entry_num)++;
+    return 0;
+}
+
+static int uvs_collect_main_primary_eid_entries_from_ue(
+    uvs_main_primary_eid_entry_ctx_t *ctx, uint32_t node_idx,
+    const struct urma_topo_ue *ue)
+{
+    uvs_main_primary_eid_group_t *group;
+    uint32_t port_idx;
+    int ret;
+
+    if (!uvs_topo_eid_is_valid(ue->primary_eid)) {
+        return 0;
+    }
+
+    group = uvs_find_main_primary_eid_group(ctx->groups, node_idx, ue->entity_id,
+                                            ue->chip_id);
+    if (group == NULL) {
+        return -ENOENT;
+    }
+
+    ret = uvs_add_main_primary_eid_entry_from_raw(ctx, ue->primary_eid,
+                                                  &group->main_primary_eid);
+    if (ret != 0) {
+        return ret;
+    }
+
+    for (port_idx = 0; port_idx < PORT_NUM; port_idx++) {
+        if (!uvs_topo_eid_is_valid(ue->port_eid[port_idx])) {
+            continue;
+        }
+
+        ret = uvs_add_main_primary_eid_entry_from_raw(ctx, ue->port_eid[port_idx],
+                                                      &group->main_primary_eid);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    return 0;
+}
+
+static int uvs_collect_main_primary_eid_entries_from_agg_dev(
+    uvs_main_primary_eid_entry_ctx_t *ctx, uint32_t node_idx,
+    const struct urma_topo_agg_dev *agg_dev)
+{
+    uint32_t iodie_idx;
+    int ret;
+
+    for (iodie_idx = 0; iodie_idx < IODIE_NUM; iodie_idx++) {
+        ret = uvs_collect_main_primary_eid_entries_from_ue(
+            ctx, node_idx, &agg_dev->ues[iodie_idx]);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    return 0;
+}
+
+static int uvs_collect_main_primary_eid_entries(const struct urma_topo_node *topo,
+                                                uint32_t topo_num,
+                                                uvs_main_primary_eid_entry_ctx_t *ctx)
+{
+    uint32_t node_idx;
+    uint32_t dev_idx;
+    int ret;
+
+    for (node_idx = 0; node_idx < topo_num; node_idx++) {
+        const struct urma_topo_node *node = &topo[node_idx];
+
+        for (dev_idx = 0; dev_idx < DEV_NUM; dev_idx++) {
+            ret = uvs_collect_main_primary_eid_entries_from_agg_dev(
+                ctx, node_idx, &node->agg_devs[dev_idx]);
+            if (ret != 0) {
+                return ret;
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int uvs_collect_main_primary_eid_group_from_ue(uvs_main_primary_eid_group_table_t *groups,
+                                                      uint32_t node_idx,
+                                                      const struct urma_topo_ue *ue)
+{
+    if (!uvs_topo_eid_is_valid(ue->primary_eid)) {
+        return 0;
+    }
+
+    return uvs_add_main_primary_eid_group(groups, node_idx, ue);
+}
+
+static int uvs_collect_main_primary_eid_groups_from_agg_dev(uvs_main_primary_eid_group_table_t *groups,
+                                                            uint32_t node_idx,
+                                                            const struct urma_topo_agg_dev *agg_dev)
+{
+    uint32_t iodie_idx;
+    int ret;
+
+    for (iodie_idx = 0; iodie_idx < IODIE_NUM; iodie_idx++) {
+        ret = uvs_collect_main_primary_eid_group_from_ue(groups, node_idx,
+                                                         &agg_dev->ues[iodie_idx]);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    return 0;
+}
+
+static int uvs_build_main_primary_eid_entries_from_topo(
+    const struct urma_topo_node *topo, uint32_t topo_num,
+    uvs_main_primary_eid_entry_t **entries_out, uint32_t *entry_num_out)
+{
+    uvs_main_primary_eid_entry_t *entries = NULL;
+    uvs_main_primary_eid_group_table_t groups;
+    uvs_main_primary_eid_entry_ctx_t entry_ctx;
+    uint32_t ue_num = 0;
+    uint32_t entry_max = 0;
+    uint32_t entry_num = 0;
+    int ret;
+
+    *entries_out = NULL;
+    *entry_num_out = 0;
+
+    uvs_count_main_primary_eid_topo_items(topo, topo_num, &ue_num, &entry_max);
+    if (ue_num == 0) {
+        return 0;
+    }
+
+    (void)memset(&groups, 0, sizeof(groups));
+    ret = uvs_main_primary_eid_group_table_init(&groups, ue_num);
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = uvs_alloc_main_primary_eid_entry_buffers(entry_max, &entries);
+    if (ret != 0) {
+        uvs_main_primary_eid_group_table_uninit(&groups);
+        return ret;
+    }
+
+    ret = uvs_collect_main_primary_eid_groups(topo, topo_num, &groups);
+    if (ret != 0) {
+        free(entries);
+        uvs_main_primary_eid_group_table_uninit(&groups);
+        return ret;
+    }
+
+    entry_ctx.entries = entries;
+    entry_ctx.entry_num = &entry_num;
+    entry_ctx.entry_max = entry_max;
+    entry_ctx.groups = &groups;
+    ret = uvs_collect_main_primary_eid_entries(topo, topo_num, &entry_ctx);
+    if (ret != 0) {
+        free(entries);
+        uvs_main_primary_eid_group_table_uninit(&groups);
+        return ret;
+    }
+
+    *entries_out = entries;
+    *entry_num_out = entry_num;
+    uvs_main_primary_eid_group_table_uninit(&groups);
+    return 0;
+}
+
+static int uvs_update_main_primary_eid_table_by_topo(const struct urma_topo_node *topo,
+                                                     uint32_t topo_num)
+{
+    uvs_main_primary_eid_entry_t *entries = NULL;
+    uint32_t entry_num = 0;
+    int ret;
+
+    ret = uvs_build_main_primary_eid_entries_from_topo(topo, topo_num, &entries,
+                                                       &entry_num);
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = uvs_insert_main_primary_eid_group_batch_inner(entries, entry_num);
+    if (ret != 0) {
+        TPSA_LOG_ERR("failed to update main primary eid group entries, ret = %d.\n", ret);
+    } else {
+        TPSA_LOG_INFO("successfully updated main primary eid entries by group batch, "
+                      "entry_num = %u.\n", entry_num);
+    }
+
+    free(entries);
+    return ret;
+}
+
+static int uvs_set_topo_info_inner(struct urma_topo_node *topo, uint32_t topo_num)
 {
     int ret;
 
@@ -101,14 +823,21 @@ static int uvs_set_topo_info_inner(void *topo, uint32_t topo_num)
         TPSA_LOG_INFO("successfully setted topo info in ubagg\n");
     }
 
+    ret = uvs_update_main_primary_eid_table_by_topo(topo, topo_num);
+    if (ret != 0) {
+        TPSA_LOG_ERR("failed to update main primary eid table by topo, ret = %d.\n", ret);
+        return ret;
+    }
+
     ret = uvs_ubcore_ioctl_set_topo(topo, (int)topo_num);
     if (ret != 0) {
         TPSA_LOG_ERR("failed to set topo info in ubcore, ret = %d.\n", ret);
+        return ret;
     } else {
         TPSA_LOG_INFO("successfully setted topo info in ubcore\n");
     }
 
-    return ret;
+    return 0;
 }
 
 static int uvs_get_topo_info_inner(void *topo)
@@ -134,6 +863,7 @@ static int uvs_get_topo_info_inner(void *topo)
 int uvs_set_topo_info(void *topo_buf, uint32_t node_size, uint32_t node_num)
 {
     uint32_t size = sizeof(struct urma_topo_node);
+    int ret;
 
     if (size != node_size) {
         TPSA_LOG_ERR("node size not match, urma=%u, ubse=%u\n", size, node_size);
@@ -141,7 +871,43 @@ int uvs_set_topo_info(void *topo_buf, uint32_t node_size, uint32_t node_num)
     }
 
     uvs_get_api_rdlock();
-    int ret = uvs_set_topo_info_inner(topo_buf, node_num);
+    ret = uvs_set_topo_info_inner((struct urma_topo_node *)topo_buf, node_num);
+    put_uvs_lock();
+    return ret;
+}
+
+static int uvs_delete_topo_info_inner(void)
+{
+    int first_ret = 0;
+    int ret;
+
+    ret = uvs_ubagg_ioctl_delete_topo();
+    if (ret != 0) {
+        TPSA_LOG_ERR("failed to delete topo info in ubagg, ret = %d.\n", ret);
+        first_ret = ret;
+    } else {
+        TPSA_LOG_INFO("successfully deleted topo info in ubagg\n");
+    }
+
+    ret = uvs_ubcore_ioctl_delete_topo();
+    if (ret != 0) {
+        TPSA_LOG_ERR("failed to delete topo info in ubcore, ret = %d.\n", ret);
+        if (first_ret == 0) {
+            first_ret = ret;
+        }
+    } else {
+        TPSA_LOG_INFO("successfully deleted topo info in ubcore\n");
+    }
+
+    return first_ret;
+}
+
+int uvs_delete_topo_info(void)
+{
+    int ret;
+
+    uvs_get_api_rdlock();
+    ret = uvs_delete_topo_info_inner();
     put_uvs_lock();
     return ret;
 }
