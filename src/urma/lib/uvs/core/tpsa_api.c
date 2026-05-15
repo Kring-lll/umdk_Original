@@ -9,12 +9,13 @@
  */
 
 #include "tpsa_ioctl.h"
+#include "tpsa_topo_helper.h"
 #include "uvs_api.h"
 #include "uvs_cmd_tlv.h"
 #include "uvs_private_api.h"
 #include "uvs_ubagg_ioctl.h"
 #include <errno.h>
-#include <sys/syscall.h>
+#include <string.h>
 
 #define UVS_MAX_TOPO_NUM 64
 
@@ -84,7 +85,102 @@ int uvs_get_device_name_by_eid(uvs_eid_t *eid, char *buf, size_t len)
     return 0;
 }
 
-static int uvs_set_topo_info_inner(void *topo, uint32_t topo_num)
+static uint32_t uvs_main_primary_eid_batch_num(uint32_t left)
+{
+    return left > UVS_MAIN_PRIMARY_EID_BATCH_MAX ? UVS_MAIN_PRIMARY_EID_BATCH_MAX : left;
+}
+
+int uvs_insert_main_primary_eid(const uvs_main_primary_eid_entry_t *entry)
+{
+    int ret;
+
+    if (entry == NULL) {
+        TPSA_LOG_ERR("Invalid main primary eid entry.\n");
+        return -EINVAL;
+    }
+
+    uvs_get_api_rdlock();
+    ret = uvs_ubcore_ioctl_insert_main_primary_eid(entry);
+    put_uvs_lock();
+    return ret;
+}
+
+int uvs_delete_main_primary_eid(const uvs_eid_t *prefix, uint8_t prefix_len)
+{
+    int ret;
+
+    if (prefix == NULL) {
+        TPSA_LOG_ERR("Invalid main primary eid prefix.\n");
+        return -EINVAL;
+    }
+
+    uvs_get_api_rdlock();
+    ret = uvs_ubcore_ioctl_delete_main_primary_eid(prefix, prefix_len);
+    put_uvs_lock();
+    return ret;
+}
+
+int uvs_lookup_main_primary_eid(const uvs_eid_t *eid, uvs_eid_t *main_primary_eid)
+{
+    int ret;
+
+    if (eid == NULL || main_primary_eid == NULL) {
+        TPSA_LOG_ERR("Invalid main primary eid lookup param.\n");
+        return -EINVAL;
+    }
+
+    uvs_get_api_rdlock();
+    ret = uvs_ubcore_ioctl_lookup_main_primary_eid(eid, main_primary_eid);
+    put_uvs_lock();
+    return ret;
+}
+
+static int uvs_insert_main_primary_eid_batch_inner(const uvs_main_primary_eid_entry_t *entries,
+                                                   uint32_t entry_num)
+{
+    uint32_t offset = 0;
+    int ret;
+
+    if (entry_num != 0 && entries == NULL) {
+        TPSA_LOG_ERR("Invalid main primary eid entries.\n");
+        return -EINVAL;
+    }
+
+    while (offset < entry_num) {
+        uint32_t batch_num = uvs_main_primary_eid_batch_num(entry_num - offset);
+
+        ret = uvs_ubcore_ioctl_insert_main_primary_eid_batch(&entries[offset], batch_num);
+        if (ret != 0) {
+            return ret;
+        }
+        offset += batch_num;
+    }
+
+    return 0;
+}
+
+int uvs_insert_main_primary_eid_batch(const uvs_main_primary_eid_entry_t *entries,
+                                      uint32_t entry_num)
+{
+    int ret;
+
+    uvs_get_api_rdlock();
+    ret = uvs_insert_main_primary_eid_batch_inner(entries, entry_num);
+    put_uvs_lock();
+    return ret;
+}
+
+int uvs_flush_main_primary_eid(void)
+{
+    int ret;
+
+    uvs_get_api_rdlock();
+    ret = uvs_ubcore_ioctl_flush_main_primary_eid();
+    put_uvs_lock();
+    return ret;
+}
+
+static int uvs_set_topo_info_inner(struct urma_topo_node *topo, uint32_t topo_num)
 {
     int ret;
 
@@ -101,9 +197,16 @@ static int uvs_set_topo_info_inner(void *topo, uint32_t topo_num)
         TPSA_LOG_INFO("successfully setted topo info in ubagg\n");
     }
 
+    ret = uvs_update_main_primary_eid_table_by_topo(topo, topo_num);
+    if (ret != 0) {
+        TPSA_LOG_ERR("failed to update main primary eid table by topo, ret = %d.\n", ret);
+        return ret;
+    }
+
     ret = uvs_ubcore_ioctl_set_topo(topo, (int)topo_num);
     if (ret != 0) {
         TPSA_LOG_ERR("failed to set topo info in ubcore, ret = %d.\n", ret);
+        return ret;
     } else {
         TPSA_LOG_INFO("successfully setted topo info in ubcore\n");
     }
@@ -134,6 +237,7 @@ static int uvs_get_topo_info_inner(void *topo)
 int uvs_set_topo_info(void *topo_buf, uint32_t node_size, uint32_t node_num)
 {
     uint32_t size = sizeof(struct urma_topo_node);
+    int ret;
 
     if (size != node_size) {
         TPSA_LOG_ERR("node size not match, urma=%u, ubse=%u\n", size, node_size);
@@ -141,7 +245,43 @@ int uvs_set_topo_info(void *topo_buf, uint32_t node_size, uint32_t node_num)
     }
 
     uvs_get_api_rdlock();
-    int ret = uvs_set_topo_info_inner(topo_buf, node_num);
+    ret = uvs_set_topo_info_inner((struct urma_topo_node *)topo_buf, node_num);
+    put_uvs_lock();
+    return ret;
+}
+
+static int uvs_delete_topo_info_inner(void)
+{
+    int first_ret = 0;
+    int ret;
+
+    ret = uvs_ubagg_ioctl_delete_topo();
+    if (ret != 0) {
+        TPSA_LOG_ERR("failed to delete topo info in ubagg, ret = %d.\n", ret);
+        first_ret = ret;
+    } else {
+        TPSA_LOG_INFO("successfully deleted topo info in ubagg\n");
+    }
+
+    ret = uvs_ubcore_ioctl_delete_topo();
+    if (ret != 0) {
+        TPSA_LOG_ERR("failed to delete topo info in ubcore, ret = %d.\n", ret);
+        if (first_ret == 0) {
+            first_ret = ret;
+        }
+    } else {
+        TPSA_LOG_INFO("successfully deleted topo info in ubcore\n");
+    }
+
+    return first_ret;
+}
+
+int uvs_delete_topo_info(void)
+{
+    int ret;
+
+    uvs_get_api_rdlock();
+    ret = uvs_delete_topo_info_inner();
     put_uvs_lock();
     return ret;
 }
