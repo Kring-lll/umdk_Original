@@ -9,6 +9,7 @@
  */
 
 #include <errno.h>
+#include <netlink/errno.h>
 #include <netlink/genl/ctrl.h>
 #include <netlink/genl/genl.h>
 #include <netlink/netlink.h>
@@ -129,6 +130,39 @@ int admin_nl_send_recv_msg(struct nl_msg *msg, int (*cb)(struct nl_msg *msg, voi
 
     ret = admin_nl_recv_msg(cb, arg);
     if (ret != 0) {
+        return ret;
+    }
+
+    return 0;
+}
+
+int admin_nl_send_recv_valid_msg(struct nl_msg *msg, int (*cb)(struct nl_msg *msg, void *arg), void *arg)
+{
+    int ret;
+
+    ret = admin_nl_send_msg(msg);
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM, cb, arg);
+    if (ret < 0) {
+        printf("Failed to set netlink valid callback, ret:%d\n", ret);
+        return ret;
+    }
+
+    ret = nl_recvmsgs_default(sock);
+    if (ret == -NLE_INTR) {
+        ret = 0;
+    }
+    if (ret < 0) {
+        printf("Failed to recv netlink msg, ret:%d\n", ret);
+        return ret;
+    }
+
+    ret = nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM, NULL, arg);
+    if (ret < 0) {
+        printf("Failed to reset netlink valid callback, ret:%d\n", ret);
         return ret;
     }
 
