@@ -82,6 +82,12 @@ typedef struct bondp_jfs_cfg {
     uint32_t port_count;
 } bondp_jfs_cfg_t;
 
+typedef struct bondp_jfc_cfg {
+    urma_jfc_cfg_t base;
+    const bondp_port_id_t *port_ids;
+    uint32_t port_count;
+} bondp_jfc_cfg_t;
+
 typedef struct bondp_jfr_cfg {
     urma_jfr_cfg_t base;
     bool multi_path;
