@@ -54,6 +54,17 @@ int uvs_ioctl_set_topo(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_set_topo_t *arg)
     return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_SET_TOPO, (void *)attrs, sizeof(attrs));
 }
 
+int uvs_ioctl_delete_topo(tpsa_ioctl_ctx_t *ioctl_ctx)
+{
+    uvs_delete_topo_t arg = {0};
+    uvs_cmd_attr_t attrs[DELETE_TOPO_IN_NUM] = {0};
+    uvs_cmd_attr_t *a = attrs;
+
+    ATTR(a++, DELETE_TOPO_IN_RESERVED, arg.in.reserved);
+
+    return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_DELETE_TOPO, (void *)attrs, sizeof(attrs));
+}
+
 int uvs_ioctl_get_topo(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_get_topo_t *arg)
 {
     uvs_cmd_attr_t attrs[GET_TOPO_OUT_NUM] = {0};
@@ -87,4 +98,84 @@ int uvs_ioctl_get_path_set(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_cmd_get_path_set_t *
     ATTR(a++, GET_PATH_LIST_OUT_PATH_SET, arg->out);
 
     return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_GET_TOPO_PATH_EID, (void *)attrs, sizeof(attrs));
+}
+
+int uvs_ioctl_insert_main_primary_eid(tpsa_ioctl_ctx_t *ioctl_ctx,
+                                      uvs_cmd_main_primary_eid_entry_t *arg)
+{
+    uvs_cmd_attr_t attrs[INSERT_MAIN_PRIMARY_EID_IN_NUM] = {0};
+    uvs_cmd_attr_t *a = attrs;
+
+    ATTR(a++, INSERT_MAIN_PRIMARY_EID_IN_ENTRY, arg->in.entry);
+
+    return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_INSERT_MAIN_PRIMARY_EID,
+                               (void *)attrs, sizeof(attrs));
+}
+
+int uvs_ioctl_delete_main_primary_eid(tpsa_ioctl_ctx_t *ioctl_ctx,
+                                      uvs_cmd_main_primary_eid_delete_t *arg)
+{
+    uvs_cmd_attr_t attrs[DELETE_MAIN_PRIMARY_EID_IN_NUM] = {0};
+    uvs_cmd_attr_t *a = attrs;
+
+    ATTR(a++, DELETE_MAIN_PRIMARY_EID_IN_PREFIX, arg->in.prefix);
+    ATTR(a++, DELETE_MAIN_PRIMARY_EID_IN_PREFIX_LEN, arg->in.prefix_len);
+
+    return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_DELETE_MAIN_PRIMARY_EID,
+                               (void *)attrs, sizeof(attrs));
+}
+
+int uvs_ioctl_lookup_main_primary_eid(tpsa_ioctl_ctx_t *ioctl_ctx,
+                                      uvs_cmd_main_primary_eid_lookup_t *arg)
+{
+    uvs_cmd_attr_t attrs[LOOKUP_MAIN_PRIMARY_EID_IN_NUM +
+                         LOOKUP_MAIN_PRIMARY_EID_OUT_NUM - UVS_CMD_OUT_TYPE_INIT] = {0};
+    uvs_cmd_attr_t *a = attrs;
+
+    ATTR(a++, LOOKUP_MAIN_PRIMARY_EID_IN_EID, arg->in.eid);
+    ATTR(a++, LOOKUP_MAIN_PRIMARY_EID_OUT_MAIN_PRIMARY_EID, arg->out.main_primary_eid);
+
+    return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_LOOKUP_MAIN_PRIMARY_EID, (void *)attrs, sizeof(attrs));
+}
+
+int uvs_ioctl_flush_main_primary_eid(tpsa_ioctl_ctx_t *ioctl_ctx)
+{
+    uvs_cmd_main_primary_eid_flush_t arg = {0};
+    uvs_cmd_attr_t attrs[FLUSH_MAIN_PRIMARY_EID_IN_NUM] = {0};
+    uvs_cmd_attr_t *a = attrs;
+
+    ATTR(a++, FLUSH_MAIN_PRIMARY_EID_IN_RESERVED, arg.in.reserved);
+
+    return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_FLUSH_MAIN_PRIMARY_EID, (void *)attrs, sizeof(attrs));
+}
+
+int uvs_ioctl_insert_main_primary_eid_batch(tpsa_ioctl_ctx_t *ioctl_ctx,
+                                            uvs_cmd_main_primary_eid_batch_t *arg)
+{
+    uvs_cmd_attr_t attrs[INSERT_MAIN_PRIMARY_EID_BATCH_IN_NUM] = {0};
+    uvs_cmd_attr_t *a = attrs;
+
+    fill_attr(a++, INSERT_MAIN_PRIMARY_EID_BATCH_IN_ENTRIES, sizeof(void *),
+              1, 0, (uintptr_t)&arg->in.entries);
+    ATTR(a++, INSERT_MAIN_PRIMARY_EID_BATCH_IN_ENTRY_NUM, arg->in.entry_num);
+
+    return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_INSERT_MAIN_PRIMARY_EID_BATCH,
+                               (void *)attrs, sizeof(attrs));
+}
+
+int uvs_ioctl_insert_main_primary_eid_group_batch(tpsa_ioctl_ctx_t *ioctl_ctx,
+                                                  uvs_cmd_main_primary_eid_group_batch_t *arg)
+{
+    uvs_cmd_attr_t attrs[INSERT_MAIN_PRIMARY_EID_GROUP_BATCH_IN_NUM] = {0};
+    uvs_cmd_attr_t *a = attrs;
+
+    fill_attr(a++, INSERT_MAIN_PRIMARY_EID_GROUP_BATCH_IN_GROUPS, sizeof(void *),
+              1, 0, (uintptr_t)&arg->in.groups);
+    ATTR(a++, INSERT_MAIN_PRIMARY_EID_GROUP_BATCH_IN_GROUP_NUM, arg->in.group_num);
+    fill_attr(a++, INSERT_MAIN_PRIMARY_EID_GROUP_BATCH_IN_PREFIXES, sizeof(void *),
+              1, 0, (uintptr_t)&arg->in.prefixes);
+    ATTR(a++, INSERT_MAIN_PRIMARY_EID_GROUP_BATCH_IN_PREFIX_NUM, arg->in.prefix_num);
+
+    return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_INSERT_MAIN_PRIMARY_EID_GROUP_BATCH,
+                               (void *)attrs, sizeof(attrs));
 }
