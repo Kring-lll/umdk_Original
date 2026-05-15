@@ -1281,6 +1281,13 @@ TEST_F(UmqFlowControlTest, test_umq_ub_credit_pool_stats_after_operations)
     queue.flow_control.local_rx_depth = TEST_QUEUE_RX_DEPTH;
     jfr_ctx_t io_jfr_ctx = {0};
     queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
+    umq_ub_ctx_t dev_ctx = {0};
+    uint64_t rx_consumed_table[16] = {0};
+    dev_ctx.rx_consumed_jetty_table = rx_consumed_table;
+    queue.dev_ctx = &dev_ctx;
+    urma_jetty_t jetty = {0};
+    jetty.jetty_id.id = 0;
+    queue.jetty[UB_QUEUE_JETTY_IO] = &jetty;
     
     umq_flow_control_cfg_t cfg = {0};
     cfg.use_atomic_window = true;
