@@ -29,6 +29,7 @@ extern "C" {
 /* only for uvs ubcore device ioctl */
 #define TPSA_CMD_MAGIC 'V'
 #define TPSA_CMD       _IOWR(TPSA_CMD_MAGIC, 1, tpsa_cmd_hdr_t)
+#define UVS_MAIN_PRIMARY_EID_BATCH_MAX 4096U
 
 typedef struct tpsa_ioctl_ctx {
     int ubcore_fd;
@@ -46,6 +47,13 @@ typedef enum uvs_global_cmd {
     UVS_CMD_GET_TOPO_EID = 2,
     UVS_CMD_GET_TOPO = 3,
     UVS_CMD_GET_TOPO_PATH_EID = 4,
+    UVS_CMD_INSERT_MAIN_PRIMARY_EID = 5,
+    UVS_CMD_DELETE_MAIN_PRIMARY_EID = 6,
+    UVS_CMD_LOOKUP_MAIN_PRIMARY_EID = 7,
+    UVS_CMD_FLUSH_MAIN_PRIMARY_EID = 8,
+    UVS_CMD_INSERT_MAIN_PRIMARY_EID_BATCH = 9,
+    UVS_CMD_DELETE_TOPO = 10,
+    UVS_CMD_INSERT_MAIN_PRIMARY_EID_GROUP_BATCH = 11,
     UVS_CMD_GLOBAL_LAST
 } uvs_global_cmd_t;
 
@@ -56,11 +64,62 @@ typedef struct uvs_set_topo {
     } in;
 } uvs_set_topo_t;
 
+typedef struct uvs_delete_topo {
+    struct {
+        uint32_t reserved;
+    } in;
+} uvs_delete_topo_t;
+
 typedef struct uvs_get_topo {
     struct {
         void *topo_map;
     } out;
 } uvs_get_topo_t;
+
+typedef struct uvs_cmd_main_primary_eid_entry {
+    struct {
+        uvs_main_primary_eid_entry_t entry;
+    } in;
+} uvs_cmd_main_primary_eid_entry_t;
+
+typedef struct uvs_cmd_main_primary_eid_delete {
+    struct {
+        uvs_eid_t prefix;
+        uint8_t prefix_len;
+        uint8_t reserved[3];
+    } in;
+} uvs_cmd_main_primary_eid_delete_t;
+
+typedef struct uvs_cmd_main_primary_eid_lookup {
+    struct {
+        uvs_eid_t eid;
+    } in;
+    struct {
+        uvs_eid_t main_primary_eid;
+    } out;
+} uvs_cmd_main_primary_eid_lookup_t;
+
+typedef struct uvs_cmd_main_primary_eid_flush {
+    struct {
+        uint32_t reserved;
+    } in;
+} uvs_cmd_main_primary_eid_flush_t;
+
+typedef struct uvs_cmd_main_primary_eid_batch {
+    struct {
+        void *entries;
+        uint32_t entry_num;
+    } in;
+} uvs_cmd_main_primary_eid_batch_t;
+
+typedef struct uvs_cmd_main_primary_eid_group_batch {
+    struct {
+        void *groups;
+        uint32_t group_num;
+        void *prefixes;
+        uint32_t prefix_num;
+    } in;
+} uvs_cmd_main_primary_eid_group_batch_t;
 
 typedef struct uvs_cmd_get_route_list {
     uvs_route_t in;
@@ -79,10 +138,21 @@ typedef struct uvs_cmd_get_path_set {
 
 int uvs_ioctl_in_global(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_global_cmd_t cmd, void *arg, uint32_t arg_len);
 int uvs_ioctl_set_topo(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_set_topo_t *arg);
+int uvs_ioctl_delete_topo(tpsa_ioctl_ctx_t *ioctl_ctx);
 int uvs_ioctl_get_topo(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_get_topo_t *arg);
 int uvs_ioctl_get_route_list(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_cmd_get_route_list_t *arg);
 int uvs_ioctl_get_path_set(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_cmd_get_path_set_t *arg);
-
+int uvs_ioctl_insert_main_primary_eid(tpsa_ioctl_ctx_t *ioctl_ctx,
+                                      uvs_cmd_main_primary_eid_entry_t *arg);
+int uvs_ioctl_delete_main_primary_eid(tpsa_ioctl_ctx_t *ioctl_ctx,
+                                      uvs_cmd_main_primary_eid_delete_t *arg);
+int uvs_ioctl_lookup_main_primary_eid(tpsa_ioctl_ctx_t *ioctl_ctx,
+                                      uvs_cmd_main_primary_eid_lookup_t *arg);
+int uvs_ioctl_flush_main_primary_eid(tpsa_ioctl_ctx_t *ioctl_ctx);
+int uvs_ioctl_insert_main_primary_eid_batch(tpsa_ioctl_ctx_t *ioctl_ctx,
+                                            uvs_cmd_main_primary_eid_batch_t *arg);
+int uvs_ioctl_insert_main_primary_eid_group_batch(tpsa_ioctl_ctx_t *ioctl_ctx,
+                                                  uvs_cmd_main_primary_eid_group_batch_t *arg);
 #ifdef __cplusplus
 }
 #endif
