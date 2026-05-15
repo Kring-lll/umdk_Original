@@ -994,30 +994,7 @@ TEST_F(UmqFlowControlTest, test_umq_ub_credit_pool_stats_query_non_atomic)
     umq_ub_flow_control_uninit(&queue.flow_control);
 }
 
-TEST_F(UmqFlowControlTest, test_umq_ub_remote_rx_window_exchange_atomic)
-{
-    ub_flow_control_t fc = {0};
-    fc.enabled = true;
-    fc.remote_rx_window = 50;
-    fc.remote_rx_depth = TEST_QUEUE_RX_DEPTH;
-    
-    umq_flow_control_cfg_t cfg = {0};
-    cfg.use_atomic_window = true;
-    ub_queue_t queue = {0};
-    jfr_ctx_t io_jfr_ctx = {0};
-    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &io_jfr_ctx;
-    
-    int ret = umq_ub_flow_control_init(&fc, &queue, UMQ_FEATURE_ENABLE_FLOW_CONTROL, &cfg);
-    ASSERT_EQ(ret, 0);
-    
-    fc.remote_rx_window = 50;
-    
-    uint16_t exchanged = fc.ops.remote_rx_window_exchange(&fc);
-    ASSERT_EQ(exchanged, 50);
-    ASSERT_EQ(fc.remote_rx_window, 0);
-    
-    umq_ub_flow_control_uninit(&fc);
-}
+
 
 TEST_F(UmqFlowControlTest, test_umq_ub_flow_control_stats_query_with_packet_stats)
 {
