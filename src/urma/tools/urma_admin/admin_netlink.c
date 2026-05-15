@@ -135,6 +135,36 @@ int admin_nl_send_recv_msg(struct nl_msg *msg, int (*cb)(struct nl_msg *msg, voi
     return 0;
 }
 
+int admin_nl_send_recv_valid_msg(struct nl_msg *msg, int (*cb)(struct nl_msg *msg, void *arg), void *arg)
+{
+    int ret;
+
+    ret = admin_nl_send_msg(msg);
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM, cb, arg);
+    if (ret < 0) {
+        printf("Failed to set netlink valid callback, ret:%d\n", ret);
+        return ret;
+    }
+
+    ret = nl_recvmsgs_default(sock);
+    if (ret < 0) {
+        printf("Failed to recv netlink msg, ret:%d\n", ret);
+        return ret;
+    }
+
+    ret = nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM, NULL, arg);
+    if (ret < 0) {
+        printf("Failed to reset netlink valid callback, ret:%d\n", ret);
+        return ret;
+    }
+
+    return 0;
+}
+
 static int nl_default_cb(struct nl_msg *msg, void *arg)
 {
     (void)msg;
