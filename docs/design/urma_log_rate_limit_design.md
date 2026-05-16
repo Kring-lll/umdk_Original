@@ -143,7 +143,7 @@ bool urma_log_rl_check(urma_log_rl_state_t *rs) {
         if (m > 0) {
             /* 解锁后输出，避免死锁 */
             pthread_spin_unlock(&rs->lock);
-            urma_log(__func__, __LINE__, URMA_VLOG_LEVEL_WARNING,
+            urma_log(__func__, __LINE__, URMA_VLOG_LEVEL_INFO,
                     "rate limit: %u logs suppressed in last %ds",
                     m, URMA_LOG_RL_WINDOW_SEC);
             return false;
@@ -234,13 +234,20 @@ out:
 #### 3.6.1 时间获取优化
 ```c
 /* 使用 clock_gettime(CLOCK_MONOTONIC_COARSE) 替代 time() */
-static inline time_t urma_log_rl_get_time(void) {
+static inline time_t urma_log_rl_get_time(void)
+{
+#ifdef CLOCK_MONOTONIC_COARSE
+    /* Linux: use CLOCK_MONOTONIC_COARSE for better performance */
     struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+    (void)clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
     return ts.tv_sec;
+#else
+    /* Fallback: use time() for portability */
+    return time(NULL);
+#endif
 }
 ```
-`CLOCK_MONOTONIC_COARSE` 比 `time()` 性能更好，精度足够(毫秒级)。
+`CLOCK_MONOTONIC_COARSE` 是 Linux 特有的时钟类型，比 `time()` 性能更好，精度足够(毫秒级)。非 Linux 平台回退使用 `time()`。
 
 #### 3.6.2 与原方案性能对比
 
