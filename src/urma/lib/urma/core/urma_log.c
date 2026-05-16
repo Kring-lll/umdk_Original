@@ -17,6 +17,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <syslog.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/syscall.h>
 
@@ -240,4 +241,71 @@ void urma_log(const char *function, int line, urma_vlog_level_t level, const cha
     va_start(va, format);
     (void)urma_vlog(function, line, level, format, va);
     va_end(va);
+}
+
+static inline time_t urma_log_rl_get_time(void)
+{
+#ifdef CLOCK_MONOTONIC_COARSE
+    /* Linux: use CLOCK_MONOTONIC_COARSE for better performance */
+    struct timespec ts;
+    (void)clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+    return ts.tv_sec;
+#else
+    /* Fallback: use time() for portability */
+    return time(NULL);
+#endif
+}
+
+bool urma_log_rl_check(urma_log_rl_state_t *rs)
+{
+    time_t now = urma_log_rl_get_time();
+    bool ret = false;
+
+    /* Fast path: trylock failed, use atomic operation for quick judgment */
+    if (pthread_spin_trylock(&rs->lock) != 0) {
+        /* Lock contention, atomically check remaining quota */
+        if ((rs->flags & URMA_LOG_RL_INITIALIZED) &&
+            atomic_load(&rs->n_left) > 0 &&
+            atomic_fetch_sub(&rs->n_left, 1) >= 0) {
+            ret = true;
+        }
+        goto out;
+    }
+
+    /* Full processing after acquiring lock */
+    if (!(rs->flags & URMA_LOG_RL_INITIALIZED)) {
+        rs->begin = now;
+        rs->flags |= URMA_LOG_RL_INITIALIZED;
+        atomic_store(&rs->n_left, URMA_LOG_RL_LIMIT);
+    }
+
+    /* Check if window has expired */
+    if (now - rs->begin >= URMA_LOG_RL_WINDOW_SEC) {
+        atomic_store(&rs->n_left, URMA_LOG_RL_LIMIT);
+        rs->begin = now;
+
+        /* Output summary */
+        uint32_t m = atomic_exchange(&rs->missed, 0);
+        if (m > 0) {
+            /* Unlock before output to avoid deadlock */
+            pthread_spin_unlock(&rs->lock);
+            urma_log(__func__, __LINE__, URMA_VLOG_LEVEL_INFO,
+                    "rate limit: %u logs suppressed in last %ds",
+                    m, URMA_LOG_RL_WINDOW_SEC);
+            return false;
+        }
+    }
+
+    /* Atomically check quota */
+    if (atomic_load(&rs->n_left) > 0 && atomic_fetch_sub(&rs->n_left, 1) >= 0) {
+        ret = true;
+    }
+
+    pthread_spin_unlock(&rs->lock);
+
+out:
+    if (!ret) {
+        atomic_fetch_add(&rs->missed, 1);
+    }
+    return ret;
 }
