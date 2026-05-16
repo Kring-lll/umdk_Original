@@ -280,6 +280,7 @@ int admin_cmd_main(admin_config_t *cfg)
         {"agg", admin_cmd_agg},
         {"dev", admin_cmd_dev},
         {"eid", admin_cmd_eid},
+        {"perf", admin_cmd_perf},
         {0},
     };
     return exec_cmd(cfg, cmds);
