@@ -255,6 +255,7 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
         ret = schedule_send(wr->tjetty, bdp_comp, &send_idx, &target_idx, &info);
     }
     if (ret != 0) {
+        URMA_LOG_ERR("Failed to schedule send, ret=%d.\n", ret);
         return URMA_FAIL;
     }
 
@@ -264,10 +265,12 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
         urma_jfs_wr_t *pwr = &prealloc_wr_list[index];
         ret = copy_jfs_wr(vwr, pwr, prealloc_src_sge[index], prealloc_dst_sge[index]);
         if (ret != 0) {
+            URMA_LOG_ERR("Failed to copy jfs wr , index=%d, ret=%d.\n", index, ret);
             return ret;
         }
         ret = convert_jfs_vwr_to_pwr(pwr, send_idx, target_idx, bdp_comp);
         if (ret != 0) {
+            URMA_LOG_ERR("Failed to convert jfs wr to pwr, index=%d, ret=%d.\n", index, ret);
             return ret;
         }
         if (vwr->next != NULL) {
@@ -306,6 +309,7 @@ static urma_status_t bondp_post_send_wr_and_store(bondp_comp_t *bdp_comp, urma_j
         ret = schedule_send(wr->tjetty, bdp_comp, &send_idx, &target_idx, &info);
     }
     if (ret != 0) {
+        URMA_LOG_ERR("Failed to schedule send, ret=%d\n", ret);
         return URMA_FAIL;
     }
 
@@ -427,6 +431,7 @@ urma_status_t urma_write_affinity(urma_jfs_t *jfs, urma_target_jetty_t *target_j
 {
     /* check parameter */
     if (jfs == NULL || jfs->urma_ctx == NULL || jfs->jfs_cfg.jfc == NULL) {
+        URMA_LOG_ERR("Invalid parameter, jfs/urma_ctx/jfc is NULL.\n");
         return URMA_EINVAL;
     }
     urma_ops_t *dp_ops = jfs->urma_ctx->ops;
@@ -468,6 +473,7 @@ static urma_status_t bondp_post_recv_wr_no_store(bondp_comp_t *bdp_comp,
     int recv_idx = -1;
     ret = schedule_recv(bdp_comp, &recv_idx);
     if (ret != 0) {
+        URMA_LOG_ERR("Failed to schedule recv, ret=%d\n", ret);
         return URMA_FAIL;
     }
 
@@ -477,10 +483,12 @@ static urma_status_t bondp_post_recv_wr_no_store(bondp_comp_t *bdp_comp,
         urma_jfr_wr_t *pwr = &prealloc_wr_list[index];
         ret = copy_jfr_wr(vwr, pwr, prealloc_src_sge[index]);
         if (ret != 0) {
+            URMA_LOG_ERR("Failed to copy jfr wr, index=%d, ret=%d\n", index, ret);
             return ret;
         }
         ret = convert_jfr_vwr_to_pwr(pwr, recv_idx);
         if (ret != 0) {
+            URMA_LOG_ERR("Failed to convert jfr wr to pwr, index=%d, ret=%d\n", index, ret);
             return ret;
         }
         if (vwr->next != NULL) {
@@ -507,6 +515,7 @@ static urma_status_t bondp_post_recv_wr_and_store(bondp_comp_t *bdp_comp, urma_j
     int recv_idx = 0;
     ret = schedule_recv(bdp_comp, &recv_idx);
     if (ret != 0) {
+        URMA_LOG_ERR("Failed to schedule recv, ret=%d\n", ret);
         return URMA_FAIL;
     }
 
@@ -783,6 +792,8 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
          * but this is risky because subsequent WRs may reuse the same memory,
          * resulting in WR/CR mismatch.
          */
+        URMA_LOG_WARN("Failed to get jfs_wr_entry for wr_id=%lu, cr.local_id=%u.\n",
+                      (unsigned long)wr_id, cr->local_id);
         put_comp(bdp_comp);
         return CONVERT_SKIP;
     }
@@ -891,6 +902,8 @@ static cr_convert_ret_t handle_recv_cr_with_store(bondp_context_t *bdp_ctx, int 
     jfr_wr_entry_t *wr_entry = jfr_wr_buf_get(recv_wr_buf, wr_id);
     if (wr_entry == NULL) {
         // wr_entry could not be NULL
+        URMA_LOG_ERR("Failed to get jfr_wr_entry for wr_id=%lu, cr.local_id=%u.\n",
+                     (unsigned long)wr_id, cr->local_id);
         put_comp(recv_comp);
         return CONVERT_FAIL;
     }
@@ -910,6 +923,7 @@ static cr_convert_ret_t handle_recv_cr_with_store(bondp_context_t *bdp_ctx, int 
     bondp_conn_t *v_conn = NULL;
     ret = bondp_conn_table_get_or_create(&recv_comp->v_conn_table, &target_jetty_id, &v_conn);
     if (ret != 0) {
+        URMA_LOG_ERR("Failed to get_or_create conn table, ret=%d.\n", ret);
         free_jfr_wr(&wr_entry->wr);
         (void)pthread_spin_lock(recv_wr_lock);
         jfr_wr_buf_release(wr_entry);
@@ -1011,8 +1025,8 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
                               ? URMA_UBAGG_MAX_CR_CNT_PER_DEV
                               : cr_cnt_remaining;
         int pcr_cnt = urma_poll_jfc(bdp_jfc->p_jfc[idx], pcr_cnt_max, pcr_buf);
-
         if (pcr_cnt < 0) {
+            URMA_LOG_ERR("Failed to poll pjetty[%d], pcr_cnt=%d\n", idx, pcr_cnt);
             PERF_PROFILING_END(BOND_POLL_JFC);
             return pcr_cnt;
         }

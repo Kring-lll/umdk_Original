@@ -35,7 +35,7 @@ static int bondp_update_pjetty_id_mapping(
         pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
         URMA_LOG_ERR("Failed to delete stale pjetty id mapping: " URMA_JETTY_ID_FMT ", ret=%d\n",
             URMA_JETTY_ID_ARGS(&old_id), ret);
-        return -1;
+        return ret;
     }
     ret = bdp_p_vjetty_id_table_add_without_lock(
         &bdp_ctx->p_vjetty_id_table, new_id, JETTY, bdp_jetty->v_jetty.jetty_id.id, bdp_jetty);
@@ -43,7 +43,7 @@ static int bondp_update_pjetty_id_mapping(
     if (ret != 0) {
         URMA_LOG_ERR("Failed to add recreated pjetty id mapping: " URMA_JETTY_ID_FMT ", ret=%d\n",
             URMA_JETTY_ID_ARGS(&new_id), ret);
-        return -1;
+        return ret;
     }
     return 0;
 }
@@ -52,12 +52,15 @@ int bondp_rebuild_local_pjetty(bondp_health_task_t *task, int local_idx)
 {
     if (task == NULL || task->bondp_jetty == NULL ||
         local_idx < 0 || local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        URMA_LOG_ERR("Invalid parameter: task=%p, bondp_jetty=%p, local_idx=%d (valid range 0..%d).\n",
+            (void *)task, task ? (void *)task->bondp_jetty : NULL, local_idx, URMA_UBAGG_DEV_MAX_NUM - 1);
         return -1;
     }
 
     bondp_comp_t *bdp_jetty = task->bondp_jetty;
     bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
     if (bdp_jetty->p_jetty[local_idx] == NULL) {
+        URMA_LOG_ERR("Pjetty not found at idx=%d.\n", local_idx);
         return -1;
     }
 
@@ -88,10 +91,11 @@ int bondp_rebuild_local_pjetty(bondp_health_task_t *task, int local_idx)
     urma_jetty_id_t old_id = old_jetty->jetty_id;
     /* Clear the slot before delete so concurrent readers never observe a freed jetty. */
     bdp_jetty->p_jetty[local_idx] = NULL;
-    if (urma_delete_jetty(old_jetty) != URMA_SUCCESS) {
+    urma_status_t delete_ret = urma_delete_jetty(old_jetty);
+    if (delete_ret != URMA_SUCCESS) {
         bdp_jetty->p_jetty[local_idx] = old_jetty;
-        URMA_LOG_ERR("Failed to delete pjetty at idx=%d\n", local_idx);
-        return -1;
+        URMA_LOG_ERR("Failed to delete pjetty at idx=%d, ret=%d.\n", local_idx, delete_ret);
+        return (delete_ret < 0) ? (int)delete_ret : -(int)delete_ret;
     }
 
     urma_jetty_t *new_jetty = urma_create_jetty(bdp_ctx->p_ctxs[local_idx], &p_cfg);
@@ -106,8 +110,10 @@ int bondp_rebuild_local_pjetty(bondp_health_task_t *task, int local_idx)
     bdp_jetty->p_jetty[local_idx] = new_jetty;
     bdp_jetty->valid[local_idx] = false;
 
-    if (bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty) != 0) {
-        return -1;
+    int ret = bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to update pjetty id mapping, ret=%d.\n", ret);
+        return ret;
     }
 
     if (sub_task != NULL) {

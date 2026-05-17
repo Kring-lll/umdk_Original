@@ -202,6 +202,7 @@ int bdp_r_v2p_token_id_table_add_lockless(bondp_hash_table_t *tbl, bondp_v2p_tok
 
     bondp_v2p_token_id_t *new_item = calloc(1, sizeof(bondp_v2p_token_id_t));
     if (new_item == NULL) {
+        URMA_LOG_ERR("Failed to alloc bondp_v2p_token_id.\n");
         return BONDP_HASH_MAP_ALLOC_ERROR;
     }
 
