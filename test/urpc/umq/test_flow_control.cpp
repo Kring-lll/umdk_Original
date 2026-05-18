@@ -12,6 +12,9 @@
 #include <sys/stat.h>
 
 #include "umq_ub_flow_control.h"
+#include "umq_ub_private.h"
+#include "umq_ub_imm_data.h"
+#include "umq_errno.h"
 
 #define TEST_QUEUE_RX_DEPTH 128
 
@@ -1441,4 +1444,111 @@ TEST_F(UmqFlowControlTest, test_umq_ub_fc_threshold_boundary_values)
     threshold = 1;
     modified = umq_ub_fc_threashold_modify(threshold, ratio);
     ASSERT_EQ(modified, 2);
+}
+
+static uint16_t mock_available_credit_dec(ub_credit_pool_t *pool, uint16_t count)
+{
+    return count;
+}
+
+static uint64_t mock_local_rx_allocated_inc(ub_flow_control_t *fc, uint16_t count)
+{
+    return count;
+}
+
+static uint16_t mock_available_credit_return(ub_credit_pool_t *pool, uint16_t count)
+{
+    return count;
+}
+
+static uint16_t mock_local_rx_allocated_dec(ub_flow_control_t *fc, uint16_t count)
+{
+    return count;
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_shared_credit_req_handle_success)
+{
+    ub_queue_t queue;
+    memset(&queue, 0, sizeof(ub_queue_t));
+    
+    queue.flow_control.enabled = true;
+    queue.flow_control.ops.local_rx_allocated_inc = mock_local_rx_allocated_inc;
+    queue.flow_control.ops.local_rx_allocated_dec = mock_local_rx_allocated_dec;
+    
+    jfr_ctx_t jfr_ctx;
+    memset(&jfr_ctx, 0, sizeof(jfr_ctx_t));
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &jfr_ctx;
+    
+    ub_credit_pool_t *credit = &jfr_ctx.credit;
+    credit->stats_u16[CREDIT_POOL_IDLE] = 100;
+    credit->ops.available_credit_dec = mock_available_credit_dec;
+    credit->ops.available_credit_return = mock_available_credit_return;
+    
+    umq_ub_imm_t imm;
+    memset(&imm, 0, sizeof(umq_ub_imm_t));
+    imm.flow_control.type = IMM_TYPE_FC_CREDIT_REQ;
+    imm.flow_control.window = 50;
+    
+    MOCKER(umq_ub_shared_credit_resp_send).stubs().will(returnValue(UMQ_SUCCESS));
+    
+    int ret = umq_ub_shared_credit_req_handle(&queue, &imm);
+    ASSERT_EQ(ret, UMQ_SUCCESS);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_shared_credit_req_handle_send_failed)
+{
+    ub_queue_t queue;
+    memset(&queue, 0, sizeof(ub_queue_t));
+    
+    queue.flow_control.enabled = true;
+    queue.flow_control.ops.local_rx_allocated_inc = mock_local_rx_allocated_inc;
+    queue.flow_control.ops.local_rx_allocated_dec = mock_local_rx_allocated_dec;
+    
+    jfr_ctx_t jfr_ctx;
+    memset(&jfr_ctx, 0, sizeof(jfr_ctx_t));
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &jfr_ctx;
+    
+    ub_credit_pool_t *credit = &jfr_ctx.credit;
+    credit->stats_u16[CREDIT_POOL_IDLE] = 100;
+    credit->ops.available_credit_dec = mock_available_credit_dec;
+    credit->ops.available_credit_return = mock_available_credit_return;
+    
+    umq_ub_imm_t imm;
+    memset(&imm, 0, sizeof(umq_ub_imm_t));
+    imm.flow_control.type = IMM_TYPE_FC_CREDIT_REQ;
+    imm.flow_control.window = 50;
+    
+    MOCKER(umq_ub_shared_credit_resp_send).stubs().will(returnValue(-UMQ_ERR_EINVAL));
+    
+    int ret = umq_ub_shared_credit_req_handle(&queue, &imm);
+    ASSERT_EQ(ret, -UMQ_ERR_EINVAL);
+}
+
+TEST_F(UmqFlowControlTest, test_umq_ub_shared_credit_req_handle_zero_window)
+{
+    ub_queue_t queue;
+    memset(&queue, 0, sizeof(ub_queue_t));
+    
+    queue.flow_control.enabled = true;
+    queue.flow_control.ops.local_rx_allocated_inc = mock_local_rx_allocated_inc;
+    queue.flow_control.ops.local_rx_allocated_dec = mock_local_rx_allocated_dec;
+    
+    jfr_ctx_t jfr_ctx;
+    memset(&jfr_ctx, 0, sizeof(jfr_ctx_t));
+    queue.jfr_ctx[UB_QUEUE_JETTY_IO] = &jfr_ctx;
+    
+    ub_credit_pool_t *credit = &jfr_ctx.credit;
+    credit->stats_u16[CREDIT_POOL_IDLE] = 100;
+    credit->ops.available_credit_dec = mock_available_credit_dec;
+    credit->ops.available_credit_return = mock_available_credit_return;
+    
+    umq_ub_imm_t imm;
+    memset(&imm, 0, sizeof(umq_ub_imm_t));
+    imm.flow_control.type = IMM_TYPE_FC_CREDIT_REQ;
+    imm.flow_control.window = 0;
+    
+    MOCKER(umq_ub_shared_credit_resp_send).stubs().will(returnValue(UMQ_SUCCESS));
+    
+    int ret = umq_ub_shared_credit_req_handle(&queue, &imm);
+    ASSERT_EQ(ret, UMQ_SUCCESS);
 }
