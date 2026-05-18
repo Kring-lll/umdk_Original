@@ -317,3 +317,27 @@ TEST_F(UmqUBTest, test_umq_ub_async_event_get_invalid_dev_ctx)
     int ret = umq_ub_async_event_get(&trans_info, &event);
     ASSERT_EQ(ret, -UMQ_ERR_EINVAL);
 }
+
+TEST_F(UmqUBTest, test_umq_async_event_fd_get_null_trans_info)
+{
+    int fd = umq_async_event_fd_get(NULL);
+    ASSERT_EQ(fd, UMQ_INVALID_FD);
+}
+
+TEST_F(UmqUBTest, test_umq_async_event_fd_get_invalid_trans_mode)
+{
+    umq_trans_info_t trans_info = {0};
+    trans_info.trans_mode = UMQ_TRANS_MODE_MAX;
+    
+    int fd = umq_async_event_fd_get(&trans_info);
+    ASSERT_EQ(fd, UMQ_INVALID_FD);
+}
+
+TEST_F(UmqUBTest, test_umq_async_event_fd_get_uninitialized_framework)
+{
+    umq_trans_info_t trans_info = {0};
+    trans_info.trans_mode = UMQ_TRANS_MODE_UB;
+    
+    int fd = umq_async_event_fd_get(&trans_info);
+    ASSERT_EQ(fd, UMQ_INVALID_FD);
+}
