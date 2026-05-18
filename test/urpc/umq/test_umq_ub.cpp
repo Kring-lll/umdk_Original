@@ -294,3 +294,26 @@ TEST_F(UmqUBTest, test_umq_ub_bind_info_check)
     queue.jetty[0]->jetty_id.id++;
     ASSERT_EQ(umq_ub_bind_info_check(&queue, &info), 0);
 }
+
+TEST_F(UmqUBTest, test_umq_ub_async_event_get_null_trans_info)
+{
+    umq_async_event_t event = {0};
+    int ret = umq_ub_async_event_get(NULL, &event);
+    ASSERT_EQ(ret, -UMQ_ERR_EINVAL);
+}
+
+TEST_F(UmqUBTest, test_umq_ub_async_event_get_null_event)
+{
+    umq_trans_info_t trans_info = {0};
+    int ret = umq_ub_async_event_get(&trans_info, NULL);
+    ASSERT_EQ(ret, -UMQ_ERR_EINVAL);
+}
+
+TEST_F(UmqUBTest, test_umq_ub_async_event_get_invalid_dev_ctx)
+{
+    umq_trans_info_t trans_info = {0};
+    umq_async_event_t event = {0};
+    
+    int ret = umq_ub_async_event_get(&trans_info, &event);
+    ASSERT_EQ(ret, -UMQ_ERR_EINVAL);
+}
