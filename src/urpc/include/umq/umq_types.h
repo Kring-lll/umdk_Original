@@ -9,7 +9,6 @@
 
 #ifndef UMQ_TYPES_H
 #define UMQ_TYPES_H
-#include <stdbool.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <errno.h>
