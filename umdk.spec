@@ -474,51 +474,6 @@ fi
 %endif
 
 %if %{build_all} || %{with ums}
-%files ums
-%defattr(-,root,root)
-    %dir /lib/modules/%{kernel_version}/extra/ums/
-    /lib/modules/%{kernel_version}/extra/ums/ums.ko
-    /etc/modules-load.d/ums.conf
-
-%post ums
-if [ -d /lib/modules/$(uname -r)/kernel/net/smc ]; then
-    %{__rm} -rf /lib/modules/$(uname -r)/kernel/net/smc
-fi
-if [[ %{kernel_version} != $(uname -r) ]]; then
-    %dir /lib/modules/$(uname -r)/weak-updates/drivers/ums/
-    echo "/lib/modules/%{kernel_version}/extra/ums/ums.ko" | /sbin/weak-modules --add-module --no-initramfs --verbose
-fi
-
-echo "omit_drivers+=\" ums \"" > /etc/dracut.conf.d/ums.conf
-
-/sbin/depmod -a $(uname -r)
-
-%postun ums
-if [ $1 -eq 0 ]; then
-    if [[ %{kernel_version} != $(uname -r) ]]; then
-        if [ -d /lib/modules/$(uname -r)/weak-updates/drivers ]; then
-                %{__rm} -rf /lib/modules/$(uname -r)/weak-updates/drivers/ums/ums.ko
-                %{__rm} -rf /lib/modules/$(uname -r)/weak-updates/drivers/ums/
-            else
-                %{__rm} -rf /lib/modules/$(uname -r)/weak-updates/ums/ums.ko
-                %{__rm} -rf /lib/modules/$(uname -r)/weak-updates/ums/
-        fi
-    fi
-fi
-/sbin/depmod -a $(uname -r)
-
-%files ums-tools
-%defattr(-,root,root)
-    /usr/lib/libums-preload.so
-    /usr/bin/ums_run
-
-%post ums-tools
-
-%postun ums-tools
-if [ $1 -eq 0 ]; then
-    [ -f /usr/lib/libums-preload.so ] && %{__rm} -f /usr/lib/libums-preload.so || :
-    [ -f /usr/bin/ums_run ] && %{__rm} -f /usr/bin/ums_run || :
-fi
 
 %pre ums-agent
 getent passwd ums >/dev/null || \
