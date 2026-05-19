@@ -1513,6 +1513,8 @@ int umq_cfg_get(uint64_t umqh, umq_cfg_get_t *cfg)
     return umq->tp_ops->umq_tp_cfg_get(umq->umqh_tp, cfg);
 }
 
+typedef util_external_mutex_lock *(*util_create_func_t)(util_externel_mutex_attr_t attr);
+
 int umq_external_mutex_lock_ops_register(umq_external_mutex_lock_ops_t *ops)
 {
     if (ops == NULL || ops->create == NULL || ops->destroy == NULL || ops->lock == NULL || ops->trylock == NULL ||
@@ -1521,7 +1523,7 @@ int umq_external_mutex_lock_ops_register(umq_external_mutex_lock_ops_t *ops)
         return -UMQ_ERR_EINVAL;
     }
     util_external_mutex_lock_ops_t util_ops;
-    util_ops.create = (util_external_mutex_lock *(*)(util_externel_mutex_attr_t attr))ops->create;
+    util_ops.create = (util_create_func_t)ops->create;
     util_ops.destroy = (int (*)(util_external_mutex_lock *m))ops->destroy;
     util_ops.lock = (int (*)(util_external_mutex_lock *m))ops->lock;
     util_ops.unlock = (int (*)(util_external_mutex_lock *m))ops->unlock;
