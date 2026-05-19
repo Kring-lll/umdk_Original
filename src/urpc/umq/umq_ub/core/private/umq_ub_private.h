@@ -592,7 +592,7 @@ static ALWAYS_INLINE void umq_ub_io_packet_stats(
     }
 }
 
-urma_target_seg_t *umq_ub_tseg_lookup(import_tseg_table_t *tseg, uint32_t mempool_id);
+urma_target_seg_t *umq_ub_tseg_lookup(import_tseg_table_t *tseg_table, uint32_t mempool_id);
 
 static ALWAYS_INLINE bool umq_ub_enable_import_remote_mem(uint32_t feature)
 {
@@ -605,7 +605,7 @@ static ALWAYS_INLINE ub_queue_t *umq_ub_get_real_queue_by_jetty_id(ub_queue_t *q
     if (jetty_id >= queue->dev_ctx->dev_attr.dev_cap.max_jetty) {
         return NULL;
     }
- 
+
     return (ub_queue_t *)(uintptr_t)__atomic_exchange_n(
         &queue->dev_ctx->umq_ctx_jetty_table[jetty_id], 0, __ATOMIC_ACQUIRE);
 }

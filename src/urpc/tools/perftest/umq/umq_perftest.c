@@ -13,7 +13,6 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <stddef.h>
-#include <stdarg.h>
 
 #include "umq_api.h"
 #include "umq_pro_api.h"
@@ -181,7 +180,7 @@ static void umq_perftest_finish_perf(umq_perftest_config_t *cfg)
         int str_size = umq_stats_perf_to_str(&umq_perf_stats, perf_info_str_buf, UMQ_PERFTEST_ERTF_INFO_STR_SIZE);
         if (str_size >= UMQ_PERFTEST_ERTF_INFO_STR_SIZE) {
             perf_info_str_buf[UMQ_PERFTEST_ERTF_INFO_STR_SIZE - 1] = '\0';
-            LOG_PRINT("perf info str buf too small, str_size %u\n", str_size);
+            LOG_PRINT("perf info str buf too small, str_size %d\n", str_size);
         }
         printf("%s\n", perf_info_str_buf);
         free(perf_info_str_buf);
@@ -317,6 +316,7 @@ static inline void umq_perftest_server_qps_work_load(perftest_thread_arg_t *args
     umq_perftest_worker_arg_t *arg = (umq_perftest_worker_arg_t *)(uintptr_t)args;
     arg->qps_arg.cfg = arg->cfg;
     umq_perftest_run_qps(arg->umqh, &arg->qps_arg);
+    umq_perftest_finish_perf(arg->cfg);
 }
 
 static inline void umq_perftest_latency_work_load(perftest_thread_arg_t *args)
@@ -324,6 +324,8 @@ static inline void umq_perftest_latency_work_load(perftest_thread_arg_t *args)
     umq_perftest_worker_arg_t *arg = (umq_perftest_worker_arg_t *)(uintptr_t)args;
     arg->lat_arg.cfg = arg->cfg;
     umq_perftest_run_latency(arg->umqh, &arg->lat_arg);
+    // finish ferf and out reslut
+    umq_perftest_finish_perf(arg->cfg);
 }
 
 static int umq_perftest_start_test_threads(umq_perftest_config_t *cfg)
@@ -553,9 +555,6 @@ static int umq_perftest_run_client(umq_perftest_config_t *cfg)
     // stop test threads
     umq_perftest_stop_test_threads(&cfg->config);
 
-    // finish ferf and out reslut
-    umq_perftest_finish_perf(cfg);
-
 UNBIND:
     // unbind and flush tx and rx
     (void)umq_unbind(g_umq_perftest_ctx.umqh);
@@ -712,22 +711,19 @@ static int umq_perftest_run_server(umq_perftest_config_t *cfg)
     // stop test threads
     umq_perftest_stop_test_threads(&cfg->config);
 
-    // finish ferf and out reslut
-    umq_perftest_finish_perf(cfg);
-
 UNBIND:
     // unbind and flush rx and tx
     (void)umq_unbind(g_umq_perftest_ctx.umqh);
+
+DESTROY:
+    // destroy umqh
+    (void)umq_destroy(g_umq_perftest_ctx.umqh);
 
 CLOSE_ACCEPT_FD:
     // destroy socket
     (void)close(g_umq_perftest_ctx.accept_fd);
 CLOSE_FD:
     (void)close(g_umq_perftest_ctx.fd);
-
-DESTROY:
-    // destroy umqh
-    (void)umq_destroy(g_umq_perftest_ctx.umqh);
 
 UNINIT:
     // uninit

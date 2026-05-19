@@ -1180,16 +1180,25 @@ static int umq_default_priority_get(umq_ub_ctx_t *dev_ctx, umq_tp_type_t actual_
             return i;
         }
     }
-   return UMQ_FAIL;
+    return UMQ_FAIL;
 }
 
-static void umq_bondp_port_id_set(umq_create_option_t *option, ub_queue_t *queue)
+static int umq_bondp_port_id_set(umq_create_option_t *option, ub_queue_t *queue)
 {
     for (uint8_t i = 0; i < option->used_ports.num; i++) {
+        for (uint8_t j = i + 1; j < option->used_ports.num; j++) {
+            if (option->used_ports.port[i].bs.chip_id == option->used_ports.port[j].bs.chip_id &&
+                option->used_ports.port[i].bs.die_id == option->used_ports.port[j].bs.die_id &&
+                option->used_ports.port[i].bs.port_idx == option->used_ports.port[j].bs.port_idx) {
+                UMQ_VLOG_ERR(VLOG_UMQ, "chip_id %d, die_id %d, port_idx %d are duplicated\n");
+                return -UMQ_ERR_EINVAL;
+            }
+        }
         queue->used_port[i].chip_id = option->used_ports.port[i].bs.chip_id;
         queue->used_port[i].die_id = option->used_ports.port[i].bs.die_id;
         queue->used_port[i].port_idx = option->used_ports.port[i].bs.port_idx;
     }
+    return UMQ_SUCCESS;
 }
 
 int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_queue_t *queue)
@@ -1338,7 +1347,9 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
             return -UMQ_ERR_ENOMEM;
         }
 
-        umq_bondp_port_id_set(option, queue);
+        if (umq_bondp_port_id_set(option, queue) != UMQ_SUCCESS) {
+            return -UMQ_ERR_EINVAL;
+        }
     } else if (is_umq_ub_bonding_dev(dev_ctx->urma_ctx->dev->name)) {
         UMQ_VLOG_ERR(VLOG_UMQ, "bonding device must set UMQ_CREATE_FLAG_USED_PORTS flag\n");
         return -UMQ_ERR_EINVAL;
@@ -2151,6 +2162,7 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm)
     uint32_t buf_offset = 0;
     uint32_t src_buf_length = 0;
     umq_buf_t *real_buf = NULL;
+    int ret = UMQ_FAIL;
     for (uint32_t i = 0; i < buf_num; i++) {
         src_buf_length = ref_sge[i].length;
         if (ref_sge[i].mempool_id >= UMQ_MAX_TSEG_NUM) {
@@ -2186,6 +2198,7 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm)
         if (real_buf->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, ub only supports using pooled memory\n",
                 EID_ARGS(*eid), id);
+            ret = -UMQ_ERR_EFAULT;
             goto FREE_CTX_BUF;
         }
 
@@ -2227,7 +2240,7 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm)
 
 FREE_CTX_BUF:
     umq_ub_read_ctx_destroy(ctx_buf);
-    return UMQ_FAIL;
+    return ret;
 }
 
 static int process_send_imm(umq_buf_t *rx_buf, umq_ub_imm_t imm, uint64_t umqh)
@@ -2502,6 +2515,7 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
     if (send_buf->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, send_buf is not a pooled memory\n",
             EID_ARGS(*eid), id);
+        errno = UMQ_ERR_EFAULT;
         goto FREE_BUF;
     }
 
@@ -2662,7 +2676,7 @@ int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *
             if (real_buf->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, ub only supports using pooled memory\n",
                     EID_ARGS(*eid), id);
-                return -UMQ_ERR_EINVAL;
+                return -UMQ_ERR_EFAULT;
             }
             sges_ptr->tseg = tseg_list[buffer->mempool_id];
             if (sges_ptr->tseg == NULL) {
@@ -2798,7 +2812,8 @@ int umq_ub_dequeue_with_poll_rx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t **bu
         return umq_report_incomplete_and_merge_rx(queue, UMQ_POST_POLL_BATCH, buf, &previous_last);
     }
 
-    int rx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfc, UMQ_POST_POLL_BATCH, cr);
+    int rx_cr_cnt =
+        umq_symbol_urma()->urma_poll_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfc, UMQ_POST_POLL_BATCH, cr);
     if (rx_cr_cnt < 0) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports rx_cr_cnt[%d]\n",
             EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid), queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id,
@@ -2850,7 +2865,8 @@ int umq_ub_dequeue_plus_with_poll_rx(uint64_t umqh_tp, urma_cr_t *cr, umq_buf_t 
     int qbuf_cnt = 0;
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
-    int rx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfc, UMQ_POST_POLL_BATCH, cr);
+    int rx_cr_cnt =
+        umq_symbol_urma()->urma_poll_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfc, UMQ_POST_POLL_BATCH, cr);
     if (rx_cr_cnt < 0) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports rx_cr_cnt[%d]\n",
             EID_ARGS(*eid), id, rx_cr_cnt);
@@ -3107,7 +3123,6 @@ int umq_ub_write_imm(uint64_t umqh_tp, uint64_t target_addr, uint32_t len, uint6
         .len = len,
         .tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, UMQ_QBUF_DEFAULT_MEMPOOL_ID),
     };
-
     if (dst_sge.tseg == NULL) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, mempool id %u tseg does not exist\n",
             EID_ARGS(*eid), id, UMQ_QBUF_DEFAULT_MEMPOOL_ID);
@@ -3205,7 +3220,7 @@ int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_
             if (real_buf->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, ub only supports using pooled memory\n",
                     EID_ARGS(*eid), id);
-                return -UMQ_ERR_EINVAL;
+                return -UMQ_ERR_EFAULT;
             }
             sges_ptr->tseg = tseg_list[buffer->mempool_id];
             if (sges_ptr->tseg == NULL) {

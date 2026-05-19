@@ -252,7 +252,7 @@ static ALWAYS_INLINE int32_t fetch_from_global(
     umq_buf_t *local_head_before;
     uint64_t local_cnt_before;
 
-   (void)pthread_spin_lock(&global_pool->global_mutex);
+    (void)pthread_spin_lock(&global_pool->global_mutex);
     if (with_data) {
         global_buf_cnt = &global_pool->buf_cnt_with_data;
         global_head = &global_pool->head_with_data;
@@ -656,8 +656,8 @@ static ALWAYS_INLINE void umq_qbuf_block_pool_uninit(global_block_pool_t *block_
 uint32_t umq_qbuf_headroom_get(void);
 umq_buf_mode_t umq_qbuf_mode_get(void);
 
-int umq_qbuf_register_seg(uint8_t *ctx, mempool_segment_ops_t *sps);
-void umq_qbuf_unregister_seg(uint8_t *ctx, mempool_segment_ops_t *sps);
+int umq_qbuf_register_seg(uint8_t *ctx, mempool_segment_ops_t *ops);
+void umq_qbuf_unregister_seg(uint8_t *ctx, mempool_segment_ops_t *ops);
 
 #ifdef __cplusplus
 }
