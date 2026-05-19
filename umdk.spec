@@ -64,7 +64,7 @@ Source0       : %{name}-%{version}.tar.gz
 BuildRoot     : %{_buildirootdir}/%{name}-%{version}-build
 buildArch     : x86_64 aarch64
 
-BuildRequires : rpm-build, make, cmake, gcc, gcc-c++, glibc-devel, openssl-devel, glib2-devel, libnl3-devel, kernel-devel
+BuildRequires : rpm-build, make, cmake, gcc, gcc-c++, glibc-devel
 Requires: glibc, glib2
 %if %{with asan}
 Requires: libasan
@@ -76,6 +76,7 @@ Requires: libtsan
 %description
 A new system interconnect architecture
 
+# Module: URMA
 %if %{build_all} || %{with urma} || %{with urpc}
 %package urma-lib
 %if %{with udma}
@@ -104,7 +105,6 @@ tools of urma, contains  urma_perftest, urma_admin, urma_ping.
 
 %package urma-bin
 Summary:        binary file of urma
-BuildRequires:  gcc
 Requires:       glibc
 %description urma-bin
 binary file of urma
@@ -127,39 +127,10 @@ to develop applications based on urma_test.
 %endif
 %endif
 
-%if %{build_all} || %{with dlock}
-%package dlock-lib
-Summary:        Library files of dlock
-Requires:       umdk-urma-lib = %{version}
-
-%description dlock-lib
-This package contains the libdlock*.so files for the distributed lock feature.
-
-%package dlock-devel
-Summary:        Include development libraries and headers for dlock
-Requires:       umdk-dlock-lib = %{version}
-AutoReqProv:    on
-
-%description dlock-devel
-This package contains all necessary include files and libraries needed
-to develop applications based on dlock.
-
-%package dlock-example
-Summary:        Executable examples of dlock
-Requires:       umdk-dlock-lib = %{version}
-AutoReqProv:    on
-
-%description dlock-example
-This package contains all the executable examples of dlock.
-
-%files dlock-example
-%defattr(-,root,root)
-    %{_bindir}/dlock_primary_test
-    %{_bindir}/dlock_client_test
-    %{_bindir}/dlock_client_object_test
-%endif
-
+# Module: URPC
 %if %{build_all} || %{with urpc}
+BuildRequires:  openssl-devel
+
 %package urpc-framework
 Summary:        URPC framework shared library
 Requires:       umdk-urma-lib
@@ -215,10 +186,42 @@ AutoReqProv:    on
 This package contains umq_perftest and related UMQ tools.
 %endif
 
+# Module: DLOCK
+%if %{build_all} || %{with dlock}
+BuildRequires:  openssl-devel
+
+%package dlock-lib
+Summary:        Library files of dlock
+Requires:       umdk-urma-lib = %{version}
+
+%description dlock-lib
+This package contains the libdlock*.so files for the distributed lock feature.
+
+%package dlock-devel
+Summary:        Include development libraries and headers for dlock
+Requires:       umdk-dlock-lib = %{version}
+AutoReqProv:    on
+
+%description dlock-devel
+This package contains all necessary include files and libraries needed
+to develop applications based on dlock.
+
+%package dlock-example
+Summary:        Executable examples of dlock
+Requires:       umdk-dlock-lib = %{version}
+AutoReqProv:    on
+
+%description dlock-example
+This package contains all the executable examples of dlock.
+%endif
+
+# Module: UMS
 %if %{build_all} || %{with ums}
+BuildRequires:  openssl-devel
+
 %package ums
 Summary:        kmod file of ums
-BuildRequires:  glib2-devel, libnl3-devel
+BuildRequires:  glib2-devel, libnl3-devel, kernel-devel
 Requires:       glib2, libnl3
 %description ums
 kmod file of ums
@@ -230,7 +233,7 @@ tools of ums, contains ums_run
 
 %package ums-agent
 Summary:        UMS Agent daemon for secure token exchange
-BuildRequires:  systemd-devel, glib2-devel, libnl3-devel, openssl-devel, keyutils-libs-devel
+BuildRequires:  systemd-devel, keyutils-libs-devel
 Requires:       systemd-libs, glib2, libnl3, openssl, keyutils
 Requires(pre):  shadow-utils
 %description ums-agent
@@ -271,30 +274,36 @@ between UMS kernel modules via TLS 1.3 channel.
 %if %{with dfx_tool}
     -DDFX_TOOL="enable" \
 %endif
+
 %if %{build_all}
     -DBUILD_ALL="enable" \
 %else
     -DBUILD_ALL="disable" \
 %endif
+
 %if %{build_all} || %{with urma} || %{with urpc}
     -DBUILD_URMA="enable" \
 %else
     -DBUILD_URMA="disable" \
 %endif
+
 %if %{with ums}
     -DBUILD_UMS="enable" \
 %endif
+
 %if %{build_all} || %{with urpc}
     -DBUILD_URPC="enable" \
 %else
     -DBUILD_URPC="disable" \
 %endif
+
 %if %{with dlock}
     -DBUILD_DLOCK="enable" \
 %endif
 %if %{without udma_stb64_disable}
     -DUDMA_ST64B="enable" \
 %endif
+
 %if %{without udma}
     -DBUILD_UDMA="disable" \
 %endif
@@ -313,6 +322,7 @@ make install DESTDIR=%{buildroot}
 %clean
 %{__rm} -rf %{buildroot}
 
+# Module: URMA
 %if %{build_all} || %{with urma} || %{with urpc}
 %files urma-lib
 %defattr(-,root,root)
@@ -388,6 +398,7 @@ fi
     %{_docdir}/umdk-examples/urma_example/README.md
 %endif
 
+# Module: URPC
 %if %{build_all} || %{with urpc}
 %files urpc-framework
 %defattr(-,root,root)
@@ -452,6 +463,7 @@ fi
     %{_bindir}/umq_perftest
 %endif
 
+# Module: DLOCK
 %if %{build_all} || %{with dlock}
 %files dlock-lib
 %defattr(-,root,root)
@@ -471,8 +483,15 @@ fi
     %{_includedir}/ub/umdk/ulock/dlock/dlock_client_api.h
     %{_includedir}/ub/umdk/ulock/dlock/dlock_types.h
     %{_includedir}/ub/umdk/ulock/dlock/dlock_server_api.h
+
+%files dlock-example
+%defattr(-,root,root)
+    %{_bindir}/dlock_primary_test
+    %{_bindir}/dlock_client_test
+    %{_bindir}/dlock_client_object_test
 %endif
 
+# Module: UMS
 %if %{build_all} || %{with ums}
 %files ums
 %defattr(-,root,root)
