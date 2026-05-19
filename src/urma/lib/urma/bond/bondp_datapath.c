@@ -813,7 +813,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
 
         URMA_LOG_DEBUG("Resend from %d to %d\n", send_idx, new_send_idx);
 
-        urma_perf_counter_inc(RESEND_COUNT);
+        urma_dfx_counter_inc(RESEND_COUNT);
 
         for (int i = 0; i < bdp_comp->send_wr_buf.max_wr_num; i++) {
             const uint64_t resend_wr_id = (wr_entry->wr_id + i - 1) % bdp_comp->send_wr_buf.max_wr_num + 1;

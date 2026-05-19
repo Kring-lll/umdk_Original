@@ -388,12 +388,9 @@ urma_status_t urma_step_perf(urma_perf_record_type_t type, uint64_t delta)
     return URMA_SUCCESS;
 }
 
-urma_status_t urma_perf_counter_inc(urma_perf_record_type_t type)
+urma_status_t urma_dfx_counter_inc(urma_perf_record_type_t type)
 {
     pthread_once(&g_thread_run_once, urma_perf_thread_context_init);
-    if (!urma_perf_is_enabled()){
-        return URMA_ENOPERM;
-    }
     urma_perf_record_t *cur_record = &g_urma_perf_record_ctx.record_table[g_perf_record_index];
     g_urma_perf_record_ctx.record_table[g_perf_record_index].is_used = true;
     if (type >= URMA_PERF_RECORD_TYPE_MAX) {
