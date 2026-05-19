@@ -1,4 +1,9 @@
 /*
+ * Part of codes modified from: DIOPI
+ * Original Source: https://github.com/DeepLink-org/deeplink.framework.git
+ * Licensed under BSD-3-Clause. (the "License")
+ * Copyright (c) 2024, DeepLink.
+ * 
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: npu bridge file
