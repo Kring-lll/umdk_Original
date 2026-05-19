@@ -345,8 +345,8 @@ fi
     %{_includedir}/ub/umdk/urma/udma/udma_u_ctl.h
 %endif
 %if %{with gcov}
-    %dir /var/lib/ub/umdk/urma/gcov/%{name}
-    /var/lib/ub/umdk/urma/gcov/%{name}/
+    %dir /var/lib/umdk/gcov/%{name}
+    /var/lib/umdk/gcov/%{name}/
 %endif
 
 %pre urma-tools
@@ -485,7 +485,7 @@ if [ -d /lib/modules/$(uname -r)/kernel/net/smc ]; then
     %{__rm} -rf /lib/modules/$(uname -r)/kernel/net/smc
 fi
 if [[ %{kernel_version} != $(uname -r) ]]; then
-    %dir /lib/modules/$(uname -r)/weak-updates/drivers/ums/
+    mkdir -p /lib/modules/$(uname -r)/weak-updates/drivers/ums/
     echo "/lib/modules/%{kernel_version}/extra/ums/ums.ko" | /sbin/weak-modules --add-module --no-initramfs --verbose
 fi
 
@@ -509,14 +509,14 @@ fi
 
 %files ums-tools
 %defattr(-,root,root)
-    /usr/lib/libums-preload.so
+    %{_libdir}/libums-preload.so
     /usr/bin/ums_run
 
 %post ums-tools
 
 %postun ums-tools
 if [ $1 -eq 0 ]; then
-    [ -f /usr/lib/libums-preload.so ] && %{__rm} -f /usr/lib/libums-preload.so || :
+    [ -f %{_libdir}/libums-preload.so ] && %{__rm} -f %{_libdir}/libums-preload.so || :
     [ -f /usr/bin/ums_run ] && %{__rm} -f /usr/bin/ums_run || :
 fi
 
