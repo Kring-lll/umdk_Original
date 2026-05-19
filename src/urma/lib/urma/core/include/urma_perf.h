@@ -34,6 +34,7 @@ typedef enum urma_perf_type {
     UB_ACK_JFC,
     UB_REARM_JFC,
     BOND_REARM_JFC,
+    RESEND_COUNT,
     URMA_PERF_RECORD_TYPE_MAX,
 } urma_perf_record_type_t;
 

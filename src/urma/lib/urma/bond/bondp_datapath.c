@@ -813,8 +813,8 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
 
         URMA_LOG_DEBUG("Resend from %d to %d\n", send_idx, new_send_idx);
 
-        urma_resend_inc();
-        URMA_LOG_DEBUG("Current resend count: %d\n", urma_resend_get());
+        urma_perf_counter_inc(RESEND_COUNT);
+
         for (int i = 0; i < bdp_comp->send_wr_buf.max_wr_num; i++) {
             const uint64_t resend_wr_id = (wr_entry->wr_id + i - 1) % bdp_comp->send_wr_buf.max_wr_num + 1;
             jfs_wr_entry_t *resend_wr_entry = jfs_wr_buf_get(&bdp_comp->send_wr_buf, resend_wr_id);

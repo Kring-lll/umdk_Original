@@ -55,7 +55,8 @@ static const char* perf_type_names[] = {
     "BOND_WAIT_JFC",
     "UB_ACK_JFC",
     "UB_REARM_JFC",
-    "BOND_REARM_JFC"
+    "BOND_REARM_JFC",
+    "RESEND_COUNT"
 };
 
 #define MHZ_TO_HZ 1000000UL
@@ -387,6 +388,22 @@ urma_status_t urma_step_perf(urma_perf_record_type_t type, uint64_t delta)
     return URMA_SUCCESS;
 }
 
+urma_status_t urma_perf_counter_inc(urma_perf_record_type_t type)
+{
+    pthread_once(&g_thread_run_once, urma_perf_thread_context_init);
+    if (!urma_perf_is_enabled()){
+        return URMA_ENOPERM;
+    }
+    urma_perf_record_t *cur_record = &g_urma_perf_record_ctx.record_table[g_perf_record_index];
+    g_urma_perf_record_ctx.record_table[g_perf_record_index].is_used = true;
+    if (type >= URMA_PERF_RECORD_TYPE_MAX) {
+        URMA_LOG_ERR("Urma perf type %d is invalid. \n", type);
+        return URMA_EINVAL;
+    }
+    cur_record->type_record[type].cnt++;
+    return URMA_SUCCESS;
+}
+
 urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length)
 {
     urma_perf_stats_t perf_info = {0};
@@ -419,16 +436,24 @@ urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length)
         if (perf_info.type_record[i].sample_num == 0) {
             continue;
         }
-        buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
-            "  %-20s | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu  \n",
-            perf_type_names[i],
-            perf_info.type_record[i].sample_num,
-            perf_info.type_record[i].average,
-            perf_info.type_record[i].mininum,
-            perf_info.type_record[i].maxinum,
-            perf_info.type_record[i].p90,
-            perf_info.type_record[i].p99,
-            perf_info.type_record[i].p9999);
+        if (perf_info.type_record[i].average == 0) {
+            buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+                "  %-20s | %-8lu | %-8s | %-8s | %-8s | %-8s | %-8s | %-8s  \n",
+                perf_type_names[i],
+                perf_info.type_record[i].sample_num,
+                "-", "-", "-", "-", "-", "-");
+        }else {
+            buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+                "  %-20s | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu  \n",
+                perf_type_names[i],
+                perf_info.type_record[i].sample_num,
+                perf_info.type_record[i].average,
+                perf_info.type_record[i].mininum,
+                perf_info.type_record[i].maxinum,
+                perf_info.type_record[i].p90,
+                perf_info.type_record[i].p99,
+                perf_info.type_record[i].p9999);
+        }
     }
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
         "+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
