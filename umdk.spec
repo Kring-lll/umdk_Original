@@ -64,7 +64,13 @@ Source0       : %{name}-%{version}.tar.gz
 BuildRoot     : %{_buildirootdir}/%{name}-%{version}-build
 buildArch     : x86_64 aarch64
 
-BuildRequires : rpm-build, make, cmake, gcc, gcc-c++, glibc-devel, openssl-devel, glib2-devel, libnl3-devel, kernel-devel
+BuildRequires : rpm-build, make, cmake, gcc, gcc-c++, glibc-devel, glib2-devel, libnl3-devel, kernel-devel
+%if %{build_all} || %{with dlock}
+BuildRequires : openssl-devel
+%endif
+%if %{build_all} || %{with urpc}
+BuildRequires : openssl-devel
+%endif
 Requires: glibc, glib2
 %if %{with asan}
 Requires: libasan
@@ -231,7 +237,7 @@ tools of ums, contains ums_run
 %package ums-agent
 Summary:        UMS Agent daemon for secure token exchange
 BuildRequires:  systemd-devel, glib2-devel, libnl3-devel, openssl-devel, keyutils-libs-devel
-Requires:       systemd-libs, glib2, libnl3, openssl, keyutils
+Requires:       systemd-libs, glib2, libnl3, keyutils
 Requires(pre):  shadow-utils
 %description ums-agent
 UMS Agent is a user-space daemon for secure TokenValue exchange
