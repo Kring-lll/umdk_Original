@@ -43,8 +43,11 @@ typedef enum urma_core_cmd {
     URMA_CORE_UNEXPOSE_DEV_NS,
     URMA_CORE_SET_DEV_EID_NS,
     URMA_CORE_GET_TOPO_INFO,
-    URMA_CORE_GET_TOPO_BONDING_DEV = 33,
     URMA_CORE_SET_SL,
+    URMA_CORE_GET_TOPO_BONDING_DEV = 33,
+    URMA_CORE_PERF_START,
+    URMA_CORE_PERF_STOP,
+    URMA_CORE_PERF_SHOW,
 } urma_core_cmd_t;
 
 /* only for uburma device ioctl */
