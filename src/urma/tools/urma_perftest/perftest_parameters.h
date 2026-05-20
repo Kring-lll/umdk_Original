@@ -194,6 +194,7 @@ enum perftest_opts {
     PERFTEST_OPT_DSCP,
     PERFTEST_OPT_SL,
     PERFTEST_OPT_BIND_IP,
+    PERFTEST_OPT_ENABLE_SYNC_STREAM,
     PERFTEST_OPT_AGGR_MODE,
     PERFTEST_OPT_STDOUT,
 };
@@ -299,6 +300,7 @@ typedef struct perftest_config {
     uint8_t group_id;
 
     bool enable_async_import;
+    bool enable_sync_stream;
     bool use_bonding;
     bool single_path;
     bool tp_aware;

@@ -177,6 +177,7 @@ default: disable.\n");
     (void)printf("  --hugepage_size <size>      Page size for allocated memory. Only support \
 2MB or 1GB currently.\n");
     (void)printf("  --bind_ip <ip>          The ip for bind.\n");
+    (void)printf("  --enable_sync_stream        Enable synchronized multi-stream transmission. \n");
     (void)printf("  --stdout                    Print logs to console.\n");
     (void)printf("  --aggr_mode                 Set bond device aggregation mode, support: standalone, \
  active_backup, balance, default: disable\n");
@@ -350,6 +351,7 @@ static void init_cfg(perftest_config_t *cfg)
 
     cfg->wait_jfc_timeout = PERFTEST_DEF_WAIT_JFC_TIME;
     cfg->use_huge_page = false;
+    cfg->enable_sync_stream = false;
     cfg->enable_stdout = false;
 }
 
@@ -573,6 +575,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"vlan",          required_argument, NULL, PERFTEST_OPT_VLAN},
         {"sl",            required_argument, NULL, PERFTEST_OPT_SL},
         {"bind_ip",       required_argument, NULL, PERFTEST_OPT_BIND_IP},
+        {"enable_sync_stream",  no_argument, NULL, PERFTEST_OPT_ENABLE_SYNC_STREAM},
         {"aggr_mode",     required_argument, NULL, PERFTEST_OPT_AGGR_MODE },
         {"stdout",        no_argument,       NULL, PERFTEST_OPT_STDOUT },
         {NULL,            no_argument,       NULL, '\0'}
@@ -925,6 +928,9 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                     (void)fprintf(stderr, "failed to allocate bind ip memory.\n");
                     return -1;
                 }
+                break;
+            case PERFTEST_OPT_ENABLE_SYNC_STREAM:
+                cfg->enable_sync_stream = true;
                 break;
             case PERFTEST_OPT_STDOUT: 
                 cfg->enable_stdout = true; 
