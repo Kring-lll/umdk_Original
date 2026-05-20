@@ -2098,7 +2098,7 @@ static void destroy_notify_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
 
 static int create_notify_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
 {
-    ctx->notify_buf = (uint64_t *)calloc(1, sizeof(uint64_t) * cfg->jettys);
+    ctx->notify_buf = (uint64_t *)memalign(ctx->page_size, sizeof(uint64_t) * cfg->jettys);
     if (ctx->notify_buf == NULL) {
         return -1;
     }
@@ -2464,6 +2464,9 @@ static void destroy_simplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     for (uint32_t i = 0; i < cfg->pair_num; i++) {
         (void)sync_time(cfg->comm.sock_fd[i], "unimport_jfr");
     }
+    if (cfg->enable_notify == true) {
+        unimport_notify(ctx, ctx->jetty_num);
+    }
     if (cfg->enable_credit == true) {
         unimport_credit(ctx, ctx->jetty_num);
     }
@@ -2490,6 +2493,9 @@ static void destroy_duplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     disconnect_jetty(ctx, cfg);
     for (uint32_t i = 0; i < cfg->pair_num; i++) {
         (void)sync_time(cfg->comm.sock_fd[i], "unimport_jetty");
+    }
+    if (cfg->enable_notify == true) {
+        unimport_notify(ctx, ctx->jetty_num);
     }
     if (cfg->enable_credit == true) {
         unimport_credit(ctx, ctx->jetty_num);
