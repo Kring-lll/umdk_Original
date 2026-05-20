@@ -1823,6 +1823,14 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                         is_send_burst = false;
                     }
                 }
+
+                /* * Execution Flow with sync_stream=true:
+                 * Jetty 1 (post 1) -> Break -> Jetty 2 (post 1) -> Break -> ... -> Round back to Jetty 1
+                 * This ensures all streams progress simultaneously for BW testing
+                 */
+                if (cfg->enable_sync_stream == true) {
+                    break;
+                }
             }
         }
 
@@ -2564,6 +2572,58 @@ static void print_bw_report(perftest_context_t *ctx, perftest_config_t *cfg,
     }
 }
 
+static void print_bw_report_per_jetty(perftest_context_t *ctx, perftest_config_t *cfg,
+                                      bw_report_data_t *local_bw_report, uint64_t tposted_0, double cpu_mhz)
+{
+    double cycles_to_units;
+    run_test_ctx_t* run_ctx = &ctx->run_ctx;
+    uint32_t jettys_count = cfg->jettys;
+    uint64_t num_of_cal_iters = cfg->iters;
+    uint64_t size, inf_bi_factor;
+    double total_bw_avg = 0;
+    double total_msg_rate = 0;
+
+    cycles_to_units = cpu_mhz * PERFTEST_M;
+    if (cycles_to_units <= 0.0) return;
+
+    inf_bi_factor = (cfg->bidirection && cfg->time_type.bs.infinite == 1) ?
+                    (cfg->api_type == PERFTEST_SEND ? INF_BI_FACTOR_SEND : INF_BI_FACTOR_OTHER) : NON_INF_BI_FACTOR;
+    size = inf_bi_factor * cfg->size;
+
+    for (uint32_t index = 0; index < jettys_count; index++) {
+        // Calculate the start and end indices for this Jetty
+        uint64_t jetty_start_idx = index;
+        uint64_t jetty_end_idx = (jettys_count * num_of_cal_iters - 1) - (num_of_cal_iters - index - 1) * cfg->cq_mod;
+
+        double jetty_cycles = (double)(run_ctx->tcompleted[jetty_end_idx] - run_ctx->tposted[jetty_start_idx]);
+
+        // Calculate bandwidth and message rate for this Jetty
+        double jetty_bw = ((double)size * num_of_cal_iters * cycles_to_units) / (jetty_cycles * PERFTEST_BW_MB);
+        double jetty_msg_rate = ((double)num_of_cal_iters * cycles_to_units * inf_bi_factor) /
+                (jetty_cycles * PERFTEST_M);
+
+        total_bw_avg += jetty_bw;
+        total_msg_rate += jetty_msg_rate;
+
+        printf("Jetty %-2u: ", index);
+        printf(REPORT_BW_FMT, cfg->size, cfg->iters, 0.0, jetty_bw, jetty_msg_rate);
+        printf("\n");
+    }
+
+    printf("---------------------------------------------------------------------------------------\n");
+    printf("TOTAL   : ");
+    printf(REPORT_BW_FMT, cfg->size, cfg->iters * cfg->jettys, 0.0, total_bw_avg, total_msg_rate);
+    printf("\n");
+
+    if (local_bw_report != NULL) {
+        local_bw_report->size = cfg->size;
+        local_bw_report->iters = cfg->iters * cfg->jettys;
+        local_bw_report->bw_avg = total_bw_avg;
+        local_bw_report->msg_rate_avg = total_msg_rate;
+    }
+    (void)fflush(stdout);
+}
+
 static void print_bi_bw_report(const bw_report_data_t *local_bw_report,
     const bw_report_data_t *remote_bw_report)
 {
@@ -2997,7 +3057,14 @@ static int prepare_run_bw_once(perftest_context_t *ctx, perftest_config_t *cfg,
     if (cpu_mhz <= 0.0) {
         (void)fprintf(stderr, "Failed: couldn't acquire cpu frequency for rate limiter.\n");
     }
-    print_bw_report(ctx, cfg, local_bw_report, ctx->run_ctx.tposted[0], cpu_mhz);
+
+    if (cfg->enable_sync_stream == true && cfg->no_peak == false) {
+        // todo: add per_jetty_print flag
+        print_bw_report_per_jetty(ctx, cfg, local_bw_report, ctx->run_ctx.tposted[0], cpu_mhz);
+    } else {
+        print_bw_report(ctx, cfg, local_bw_report, ctx->run_ctx.tposted[0], cpu_mhz);
+    }
+
     if (cfg->bidirection) {
         for (i = 0; i < cfg->pair_num; i++) {
             if (sock_sync_data(cfg->comm.sock_fd[i], sizeof(bw_report_data_t), (char *)(local_bw_report),
