@@ -56,8 +56,8 @@ using Gmm2DispatchPolicy =
 template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class EpilogueTileShape_,
           class BlockScheduler_, class DispatchPolicy_ = MmadAtlasA2Custom>
 CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
-                                  layout::RowMajor layoutA, GM_ADDR gmShareB, layout::zN layoutShareB, GM_ADDR gmB,
-                                  layout::zN layoutB, GM_ADDR gmShareScale, layout::VectorLayout layoutShareScale,
+                                  layout::RowMajor layoutA, GM_ADDR gmShareB, layout::RowMajor layoutShareB, GM_ADDR gmB,
+                                  layout::RowMajor layoutB, GM_ADDR gmShareScale, layout::VectorLayout layoutShareScale,
                                   GM_ADDR gmScale, layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
                                   layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
                                   GM_ADDR gmDequantScale, layout::VectorLayout layoutDequantScale, GM_ADDR gmShareX1,
@@ -74,8 +74,8 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     using L0TileShape = L0TileShape_;
 
 
-    using AType = Gemm::GemmType<int8_t, layout::RowMajor>;
-    using BType = Gemm::GemmType<int8_t, layout::zN>;
+    using AType = Gemm::GemmType<AscendC::int4b_t, layout::RowMajor>;
+    using BType = Gemm::GemmType<AscendC::int4b_t, layout::RowMajor>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
@@ -194,13 +194,13 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
 template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class EpilogueTileShape_, class BlockScheduler_,
           class DispatchPolicy_ = MmadAtlasA2Custom>
 CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
-                       layout::RowMajor layoutA, GM_ADDR gmB, layout::zN layoutB, GM_ADDR gmScale,
+                       layout::RowMajor layoutA, GM_ADDR gmB, layout::RowMajor layoutB, GM_ADDR gmScale,
                        layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
                        layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
                        uint32_t batchSize, GemmCoord sharedGmm2ProblemShape,
                        GM_ADDR gmSharedA, GM_ADDR gmSharedB, GM_ADDR gmSharedD,
                        GM_ADDR gmSharedScale, GM_ADDR gmSharedPtrPerTokenScale,
-                       layout::RowMajor sharedLayoutA, layout::zN sharedLayoutB,
+                       layout::RowMajor sharedLayoutA, layout::RowMajor sharedLayoutB,
                        layout::VectorLayout sharedLayoutPerTokenScale, layout::RowMajor sharedLayoutD,
                        uint32_t epRankId, GM_ADDR gmWorkspace, void *combiner)
 {
@@ -210,7 +210,7 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using L0TileShape = L0TileShape_;
 
     using AType = Gemm::GemmType<int8_t, layout::RowMajor>;
-    using BType = Gemm::GemmType<int8_t, layout::zN>;
+    using BType = Gemm::GemmType<int8_t, layout::RowMajor>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
@@ -398,19 +398,19 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     GemmCoord gmm2ProblemShape{maxTokenNum_, gmm2OutputDim_, gmm2InputDim_};
 
     layout::RowMajor layoutX1{maxTokenNum_, tokenHiddenSize_};
-    layout::zN layoutShareWeight1 = layout::zN::template MakeLayout<int8_t>(tokenHiddenSize_, shareGmm1OutputDim_);
-    layout::zN layoutWeight1 = layout::zN::template MakeLayout<int8_t>(tokenHiddenSize_, gmm1OutputDim_);
+    layout::RowMajor layoutShareWeight1 = layout::RowMajor::template MakeLayout<int8_t>(tokenHiddenSize_, shareGmm1OutputDim_);
+    layout::RowMajor layoutWeight1 = layout::RowMajor::template MakeLayout<AscendC::int4b_t>(tokenHiddenSize_, gmm1OutputDim_);
     layout::VectorLayout layoutShareW1Scale{shareGmm1OutputDim_};
     layout::VectorLayout layoutW1Scale{gmm1OutputDim_};
     layout::VectorLayout layoutX1Scale{maxTokenNum_};
     layout::RowMajor layoutX2{maxTokenNum_, gmm2InputDim_};
-    layout::zN layoutWeight2 = layout::zN::template MakeLayout<int8_t>(gmm2InputDim_, gmm2OutputDim_);
+    layout::RowMajor layoutWeight2 = layout::RowMajor::template MakeLayout<int8_t>(gmm2InputDim_, gmm2OutputDim_);
     layout::VectorLayout layoutW2Scale{gmm2OutputDim_};
     layout::VectorLayout layoutX2Scale{maxTokenNum_};
     layout::RowMajor layoutOutput{maxTokenNum_, gmm2OutputDim_};
     
     layout::RowMajor layoutShareX2{bs_, shareGmm2InputDim_};
-    layout::zN layoutShareWeight2 = layout::zN::template MakeLayout<int8_t>(shareGmm2InputDim_, gmm2OutputDim_);
+    layout::RowMajor layoutShareWeight2 = layout::RowMajor::template MakeLayout<int8_t>(shareGmm2InputDim_, gmm2OutputDim_);
     GemmCoord shareGmm2ProblemShape{bs_, gmm2OutputDim_, shareGmm2InputDim_};
     layout::VectorLayout layoutShareX2Scale{bs_};
     layout::RowMajor layoutShareOutput{bs_, gmm2OutputDim_};
@@ -450,6 +450,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
 
     GM_ADDR gmWorkspace = workspaceGM_ + workspaceOffset;
     GM_ADDR gmCVSwap = workspaceGM_ + workspaceOffset;
+    gmWorkspace = (GM_ADDR)gmShareSmoothScales_;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(blockDim_) * (GMM1_L1M * GMM1_L1N) *
                                               WORKSPACE_STAGES * sizeof(int32_t));
     int64_t swigluOutSize = (maxTokenNum_ * gmm1OutputDim_ + shareExpertTokenNum * shareGmm1OutputDim_) * sizeof(float);
@@ -507,7 +508,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     } else {
         Arch::CrossCoreWaitFlag(gmm1AivFinished);
     }
-
+    return;
     MoeDistributeCombineImpl::CamMoeDistributeCombine<TemplateMC2TypeFunc> combiner;
     if (g_coreType == AscendC::AIV) {
         combiner.Init(gmGmm2DepOut, gmexpertIds_, gmExpandIdx, gmEpSendCount, nullptr, gmexpertScales_, xActiveMask_,
