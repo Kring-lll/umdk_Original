@@ -806,8 +806,11 @@ static void init_write_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, per
         (uint64_t)ctx->remote_seg[0].ubva.va + i * ctx->buf_size :
         (uint64_t)ctx->remote_seg[i].ubva.va;
 
-    uint32_t local_sge_idx = (i * cfg->jfs_post_list + j) * PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num + cfg->sge_num;
-    uint32_t remote_sge_idx = (i * cfg->jfs_post_list + j) * PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num;
+    uint32_t sge_block_idx = (i * cfg->jfs_post_list + j) * (PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num +
+         (cfg->enable_notify ? 1 : 0));
+
+    uint32_t local_sge_idx = sge_block_idx + (cfg->sge_num + (cfg->enable_notify ? 1 : 0));
+    uint32_t remote_sge_idx = sge_block_idx;
     urma_sge_t *local_sge = &run_ctx->jfs_sge[local_sge_idx];    // First sge in sge arrays
     urma_sge_t *remote_sge = &run_ctx->jfs_sge[remote_sge_idx];     // First sge in sge arrays
 
