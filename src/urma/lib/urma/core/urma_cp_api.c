@@ -264,7 +264,7 @@ urma_status_t urma_check_opt_valid(void *opt_mask_addr, const opt_map_t *table,
             return URMA_SUCCESS;
         }
     }
-    return URMA_EINVAL;
+    return URMA_SUCCESS;
 }
 
 urma_status_t urma_set_options_common(void *obj, const opt_map_t *table,
