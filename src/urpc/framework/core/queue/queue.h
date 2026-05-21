@@ -59,6 +59,7 @@ typedef struct urpc_queue_flag {
     uint8_t is_remote : 1;
     uint8_t rsvd : 3;
     uint8_t is_keepalive : 1;
+    uint8_t rsvd : 3;
 } urpc_queue_flag_t;
 
 typedef enum queue_event {
