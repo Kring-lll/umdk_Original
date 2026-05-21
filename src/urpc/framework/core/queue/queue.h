@@ -57,9 +57,9 @@ typedef struct read_cache read_cache_t;
 
 typedef struct urpc_queue_flag {
     uint8_t is_remote : 1;
-    uint8_t rsvd : 3;
     uint8_t is_keepalive : 1;
-} urpc_queue_flag_t;
+    uint8_t rsvd : 6;
+} __attribute__((packed)) urpc_queue_flag_t;
 
 typedef enum queue_event {
     TX_SEND,
