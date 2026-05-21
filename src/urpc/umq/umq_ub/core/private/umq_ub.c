@@ -968,8 +968,27 @@ int umq_ub_create_urma_ctx(urma_device_t *urma_dev, uint32_t eid_index, umq_ub_c
         }
     }
 
+    ub_ctx->fc_sge_pool = umq_ub_fc_sge_pool_create();
+    if (ub_ctx->fc_sge_pool == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "create fc sge pool failed\n");
+        goto DEL_CTX;
+    }
+
+    if (UMQ_UB_ENABLE_SHARE_FC_JFR) {
+        ub_ctx->umq_id_to_queue_size = UMQ_UB_FC_MAX_UMQ_ID + 1;
+        ub_ctx->umq_id_to_queue_table = (volatile uint64_t *)calloc(
+            ub_ctx->umq_id_to_queue_size, sizeof(uint64_t));
+        if (ub_ctx->umq_id_to_queue_table == NULL) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "alloc umq id to queue table failed\n");
+            goto DESTROY_FC_SGE_POOL;
+        }
+    }
+
     return UMQ_SUCCESS;
 
+DESTROY_FC_SGE_POOL:
+    umq_ub_fc_sge_pool_destroy(ub_ctx->fc_sge_pool);
+    ub_ctx->fc_sge_pool = NULL;
 DEL_CTX:
     umq_symbol_urma()->urma_delete_context(ub_ctx->urma_ctx);
     ub_ctx->urma_ctx = NULL;
@@ -983,6 +1002,17 @@ int umq_ub_delete_urma_ctx(umq_ub_ctx_t *ub_ctx)
         UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
         return -UMQ_ERR_EINVAL;
     }
+
+    if (ub_ctx->fc_sge_pool != NULL) {
+        umq_ub_fc_sge_pool_destroy(ub_ctx->fc_sge_pool);
+        ub_ctx->fc_sge_pool = NULL;
+    }
+
+    if (ub_ctx->umq_id_to_queue_table != NULL) {
+        free((void *)ub_ctx->umq_id_to_queue_table);
+        ub_ctx->umq_id_to_queue_table = NULL;
+    }
+    ub_ctx->umq_id_to_queue_size = 0;
 
     urma_status_t urma_status = umq_symbol_urma()->urma_delete_context(ub_ctx->urma_ctx);
     if (urma_status != URMA_SUCCESS) {
@@ -1446,6 +1476,15 @@ void umq_ub_jfr_ctx_destroy(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
         }
     }
     rx_buf_ctx_list_uninit(&queue->jfr_ctx[jetty_idx]->rx_buf_ctx_list);
+
+    jfr_ctx_t *jfr_ctx = queue->jfr_ctx[jetty_idx];
+    if (jfr_ctx->fc_rx_qbufs != NULL) {
+        umq_ub_fc_shared_jfr_rx_sge_uninit(jfr_ctx->fc_rx_qbufs, jfr_ctx->fc_rx_qbuf_count,
+            jfr_ctx->fc_rx_sge_addrs, jfr_ctx->fc_rx_sge_count);
+        jfr_ctx->fc_rx_qbufs = NULL;
+        jfr_ctx->fc_rx_sge_addrs = NULL;
+    }
+
     free(queue->jfr_ctx[jetty_idx]);
     queue->jfr_ctx[jetty_idx] = NULL;
 }
@@ -1567,6 +1606,20 @@ jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_qu
         rx_buf_ctx_list_init(&jfr_ctx->rx_buf_ctx_list, umq_ub_pjfr_depth(queue)) != UMQ_SUCCESS) {
         UMQ_VLOG_ERR(VLOG_UMQ, "rx buf ctx list init failed\n");
         goto DELETE_JFR;
+    }
+
+    if (jetty_idx == UB_QUEUE_JETTY_FLOW_CONTROL &&
+        (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 &&
+        UMQ_UB_ENABLE_SHARE_FC_JFR) {
+        uint32_t fc_depth = jfr_depth;
+        int sge_ret = umq_ub_fc_shared_jfr_rx_sge_init(dev_ctx->fc_sge_pool, fc_depth,
+            &jfr_ctx->fc_rx_qbufs, &jfr_ctx->fc_rx_qbuf_count,
+            &jfr_ctx->fc_rx_sge_addrs, &jfr_ctx->fc_rx_sge_count);
+        if (sge_ret != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "shared jfr fc rx sge init failed, ret: %d\n", sge_ret);
+            goto DELETE_JFR;
+        }
+        jfr_ctx->fc_rx_sge_depth = fc_depth;
     }
 
     jfr_ctx->ref_cnt = 1;

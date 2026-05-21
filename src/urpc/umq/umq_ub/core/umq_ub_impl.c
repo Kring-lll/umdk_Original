@@ -881,6 +881,18 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
     dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id] =
         (uint64_t)(uintptr_t)queue;
 
+    bool need_rx_sge = !UMQ_UB_ENABLE_SHARE_FC_JFR ||
+        ((option->create_flag & (UMQ_CREATE_FLAG_MAIN_UMQ | UMQ_CREATE_FLAG_SHARE_RQ)) == 0);
+    int sge_ret = umq_ub_fc_sge_ctx_init(dev_ctx->fc_sge_pool, &queue->fc_sge_ctx, need_rx_sge);
+    if (sge_ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "fc sge ctx init failed, ret: %d\n", sge_ret);
+        goto CLEAR_TABLE;
+    }
+
+    if (UMQ_UB_ENABLE_SHARE_FC_JFR) {
+        umq_ub_register_queue_by_umq_id(queue);
+    }
+
     umq_ub_rx_consumed_exchange(
         dev_ctx->io_lock_free,
         &dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id], 0);
@@ -1109,6 +1121,12 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
                 "failed, status: %d\n", EID_ARGS(*fc_eid), fc_id, ret);
         }
         umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_FLOW_CONTROL);
+    }
+
+    umq_ub_fc_sge_ctx_uninit(queue->dev_ctx->fc_sge_pool, &queue->fc_sge_ctx);
+
+    if (UMQ_UB_ENABLE_SHARE_FC_JFR) {
+        umq_ub_unregister_queue_by_umq_id(queue);
     }
 
     umq_buf_free(queue->notify_buf);

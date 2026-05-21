@@ -1006,3 +1006,280 @@ void umq_ub_idle_credit_flush(ub_queue_t *queue, uint32_t cnt)
         }
     }
 }
+
+static int umq_ub_fc_sge_send(ub_queue_t *queue, umq_ub_fc_imm_type_t type,
+    umq_ub_fc_sge_msg_t *sge_msg)
+{
+    ub_flow_control_t *fc = &queue->flow_control;
+    if (!fc->enabled || queue->bind_ctx == NULL) {
+        return UMQ_SUCCESS;
+    }
+
+    int ret = umq_ub_poll_fc_tx(queue, NULL, 0);
+    if (ret != UMQ_SUCCESS) {
+        return ret;
+    }
+
+    urma_jetty_t *jetty = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
+    urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
+
+    umq_ub_fc_imm_t fc_imm = {
+        .bs = {
+            .type = (uint32_t)type,
+            .umq_id = queue->umq_id & UMQ_UB_FC_MAX_UMQ_ID,
+            .rsvd = 0,
+        }
+    };
+
+    umq_ub_fc_sge_slot_t *tx_slot = &queue->fc_sge_ctx.tx_slot;
+    if (sge_msg != NULL && tx_slot->addr != NULL) {
+        *(umq_ub_fc_sge_msg_t *)tx_slot->addr = *sge_msg;
+    }
+
+    urma_sge_t sge = {
+        .addr = (uint64_t)(uintptr_t)tx_slot->addr,
+        .len = UMQ_UB_FC_SGE_MSG_SIZE,
+    };
+
+    umq_ub_fc_user_ctx_t obj = {
+        .bs = {
+            .type = (uint64_t)type,
+            .notify = 0,
+            .rsvd0 = 0,
+            .rsvd1 = 0,
+        }
+    };
+
+    urma_jfs_wr_t urma_wr = {
+        .user_ctx = obj.value,
+        .send = {
+            .imm_data = fc_imm.value,
+            .src.sge = &sge,
+            .src.num_sge = 1,
+        },
+        .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
+        .tjetty = tjetty,
+        .opcode = URMA_OPC_SEND_IMM,
+    };
+
+    urma_jfs_wr_t *bad_wr = NULL;
+    urma_status_t status = umq_symbol_urma()->urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
+    if (status == URMA_SUCCESS) {
+        umq_ub_fc_packet_stats(fc, 1, UB_PACKET_STATS_TYPE_SEND);
+        return UMQ_SUCCESS;
+    }
+
+    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API,
+        "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
+        "remote jetty_id: %u, fc sge send type %u failed, status: %d\n",
+        EID_ARGS(jetty->jetty_id.eid), jetty->jetty_id.id,
+        EID_ARGS(tjetty->id.eid), tjetty->id.id, (uint32_t)type, (int)status);
+    return -UMQ_ERR_EFLOWCTL;
+}
+
+int umq_ub_fc_sge_credit_req_send(ub_queue_t *queue)
+{
+    ub_flow_control_t *fc = &queue->flow_control;
+    if (!fc->enabled || queue->bind_ctx == NULL) {
+        return UMQ_SUCCESS;
+    }
+
+    if (!umq_ub_permission_acquire(fc)) {
+        return UMQ_SUCCESS;
+    }
+
+    uint16_t credits_per_request = fc->credits_per_request;
+    if (credits_per_request > UMQ_UB_FC_MAX_WINDOW) {
+        credits_per_request = UMQ_UB_FC_MAX_WINDOW;
+    }
+
+    umq_ub_fc_sge_msg_t sge_msg = {
+        .window = credits_per_request,
+        .ratio = 0,
+        .rsvd = 0,
+    };
+
+    int ret = umq_ub_fc_sge_send(queue, FC_IMM_TYPE_CREDIT_REQ, &sge_msg);
+    if (ret != UMQ_SUCCESS) {
+        umq_ub_permission_release(fc);
+    }
+    return ret;
+}
+
+static int umq_ub_fc_sge_credit_resp_send(ub_queue_t *queue, uint16_t notify)
+{
+    ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
+
+    umq_ub_fc_sge_msg_t sge_msg = {
+        .window = notify,
+        .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
+        .rsvd = 0,
+    };
+
+    return umq_ub_fc_sge_send(queue, FC_IMM_TYPE_CREDIT_REP, &sge_msg);
+}
+
+int umq_ub_fc_sge_credit_req_handle(ub_queue_t *queue, umq_ub_fc_imm_t *fc_imm, umq_ub_fc_sge_msg_t *sge_msg)
+{
+    ub_flow_control_t *fc = &queue->flow_control;
+    ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    uint16_t credits_per_request = sge_msg->window;
+    uint16_t allocated_count = credit->ops.available_credit_dec(credit, credits_per_request);
+    (void)fc->ops.local_rx_allocated_inc(fc, allocated_count);
+    int ret = umq_ub_fc_sge_credit_resp_send(queue, allocated_count);
+    if (ret != UMQ_SUCCESS) {
+        (void)credit->ops.available_credit_return(credit, allocated_count);
+        (void)fc->ops.local_rx_allocated_dec(fc, allocated_count);
+        return ret;
+    }
+    return UMQ_SUCCESS;
+}
+
+void umq_ub_fc_sge_credit_resp_handle(ub_queue_t *queue, umq_ub_fc_imm_t *fc_imm, umq_ub_fc_sge_msg_t *sge_msg)
+{
+    ub_flow_control_t *fc = &queue->flow_control;
+    uint16_t reply_credits = sge_msg->window;
+    uint16_t credits_per_request = fc->credits_per_request;
+    fc->peer_ratio = sge_msg->ratio;
+    uint32_t new_request;
+    if (reply_credits < credits_per_request) {
+        new_request = (uint32_t)(credits_per_request / fc->credit_multiple);
+    } else {
+        new_request = (uint32_t)(credits_per_request * fc->credit_multiple);
+        if (new_request > fc->max_credits_request) {
+            new_request = fc->max_credits_request;
+        }
+    }
+    fc->credits_per_request = umq_ub_fc_threashold_modify((uint16_t)new_request, fc->peer_ratio) + 1;
+    umq_ub_window_inc(fc, reply_credits);
+}
+
+int umq_ub_fc_sge_credit_return_req_send(ub_queue_t *queue)
+{
+    ub_flow_control_t *fc = &queue->flow_control;
+    if (!fc->enabled || queue->bind_ctx == NULL) {
+        return UMQ_SUCCESS;
+    }
+
+    uint64_t timestamp = get_timestamp_us();
+    if ((queue->checker == NULL) || (timestamp < queue->checker->last_send)) {
+        return UMQ_SUCCESS;
+    }
+    uint64_t diff = timestamp - queue->checker->last_send;
+    uint16_t remote_credit = fc->ops.remote_rx_window_load(fc);
+    uint16_t return_threshold = 0;
+    if (fc->peer_ratio == 0) {
+        return_threshold = 0;
+    } else {
+        return_threshold = umq_ub_fc_threashold_modify((uint16_t)fc->min_reserved_credit, fc->peer_ratio);
+    }
+    if (diff < queue->flow_control.timeout_us || remote_credit <= return_threshold) {
+        return UMQ_SUCCESS;
+    }
+
+    if (!umq_ub_permission_acquire(fc)) {
+        return UMQ_SUCCESS;
+    }
+
+    uint16_t return_credit;
+    uint16_t new_request = (uint16_t)(fc->credits_per_request / fc->credit_multiple);
+    if (new_request == 0) {
+        new_request = 1;
+    }
+    fc->credits_per_request = new_request;
+    return_credit = remote_credit / fc->return_ratio;
+    if (return_credit == 0) {
+        return_credit = 1;
+    }
+    if (remote_credit - return_credit <= return_threshold) {
+        return_credit = remote_credit - return_threshold;
+    }
+    if (return_credit > UMQ_UB_FC_MAX_WINDOW) {
+        return_credit = UMQ_UB_FC_MAX_WINDOW;
+    }
+    return_credit = fc->ops.remote_rx_window_dec(fc, return_credit, true);
+
+    umq_ub_fc_sge_msg_t sge_msg = {
+        .window = return_credit,
+        .ratio = 0,
+        .rsvd = 0,
+    };
+
+    int ret = umq_ub_fc_sge_send(queue, FC_IMM_TYPE_CREDIT_RETURN_REQ, &sge_msg);
+    if (ret != UMQ_SUCCESS) {
+        umq_ub_permission_release(fc);
+        fc->ops.remote_rx_window_inc(fc, return_credit, true);
+    }
+    return ret;
+}
+
+static int umq_ub_fc_sge_credit_return_ack(ub_queue_t *queue, uint16_t return_credit)
+{
+    ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
+
+    umq_ub_fc_sge_msg_t sge_msg = {
+        .window = return_credit,
+        .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
+        .rsvd = 0,
+    };
+
+    return umq_ub_fc_sge_send(queue, FC_IMM_TYPE_CREDIT_RETURN_ACK, &sge_msg);
+}
+
+int umq_ub_fc_sge_credit_return_req_handle(ub_queue_t *queue, umq_ub_fc_imm_t *fc_imm, umq_ub_fc_sge_msg_t *sge_msg)
+{
+    ub_flow_control_t *fc = &queue->flow_control;
+    ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    uint16_t return_credit = sge_msg->window;
+    uint64_t consumed_credit = umq_ub_rx_consumed_load(queue->dev_ctx->io_lock_free,
+        &queue->dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id]);
+    uint64_t allocated_credit = fc->ops.local_rx_allocated_load(fc);
+    if (allocated_credit < consumed_credit) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, "
+            "allocated_credit less than consumed credit\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id);
+        return umq_ub_fc_sge_credit_return_ack(queue, 0);
+    }
+    uint64_t unconsumed = allocated_credit - consumed_credit;
+    if (return_credit > unconsumed) {
+        return_credit = (uint16_t)unconsumed;
+    }
+
+    credit->ops.available_credit_return(credit, return_credit);
+    (void)fc->ops.local_rx_allocated_dec(fc, return_credit);
+    return umq_ub_fc_sge_credit_return_ack(queue, return_credit);
+}
+
+int umq_ub_process_fc_sge_msg(ub_queue_t *queue, umq_ub_fc_imm_t fc_imm,
+    umq_ub_fc_sge_msg_t *sge_msg, umq_buf_t **buf)
+{
+    umq_ub_fc_imm_type_t type = (umq_ub_fc_imm_type_t)fc_imm.bs.type;
+    switch (type) {
+        case FC_IMM_TYPE_CREDIT_REQ:
+            return umq_ub_fc_sge_credit_req_handle(queue, &fc_imm, sge_msg);
+        case FC_IMM_TYPE_CREDIT_REP:
+            umq_ub_fc_sge_credit_resp_handle(queue, &fc_imm, sge_msg);
+            return 0;
+        case FC_IMM_TYPE_CREDIT_RETURN_REQ:
+            return umq_ub_fc_sge_credit_return_req_handle(queue, &fc_imm, sge_msg);
+        case FC_IMM_TYPE_CREDIT_RETURN_ACK:
+            umq_ub_fc_sge_credit_return_ack_handle(queue, &fc_imm, sge_msg);
+            return 0;
+        default:
+            UMQ_VLOG_ERR(VLOG_UMQ, "unknown fc sge msg type: %u\n", (uint32_t)type);
+            return 0;
+    }
+}
+
+void umq_ub_fc_sge_credit_return_ack_handle(ub_queue_t *queue, umq_ub_fc_imm_t *fc_imm,
+    umq_ub_fc_sge_msg_t *sge_msg)
+{
+    ub_flow_control_t *fc = &queue->flow_control;
+    uint16_t return_credit = sge_msg->window;
+    fc->peer_ratio = sge_msg->ratio;
+    queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit.ops.available_credit_return(
+        &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit, return_credit);
+}

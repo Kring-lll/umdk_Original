@@ -34,6 +34,7 @@
 #include "umq_huge_qbuf_pool.h"
 #include "umq_ub_imm_data.h"
 #include "util_lock.h"
+#include "umq_ub_fc_sge_pool.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -231,6 +232,9 @@ typedef struct umq_ub_ctx {
     uint64_t remote_notify_addr;
     volatile uint64_t *umq_ctx_jetty_table;
     volatile uint64_t *rx_consumed_jetty_table;
+    umq_ub_fc_sge_pool_t *fc_sge_pool;
+    volatile uint64_t *umq_id_to_queue_table;
+    uint32_t umq_id_to_queue_size;
 } umq_ub_ctx_t;
 
 typedef struct rx_buf_ctx {
@@ -351,6 +355,11 @@ typedef struct jfr_ctx {
     volatile uint32_t ref_cnt;
     rx_buf_ctx_list_t rx_buf_ctx_list;
     ub_credit_pool_t credit;
+    umq_buf_t **fc_rx_qbufs;
+    uint32_t fc_rx_qbuf_count;
+    void **fc_rx_sge_addrs;
+    uint32_t fc_rx_sge_count;
+    uint32_t fc_rx_sge_depth;
 } jfr_ctx_t;
 
 typedef struct ub_queue_interrupt_ctx {
@@ -428,6 +437,8 @@ typedef struct ub_queue {
     uint64_t share_rq_umqh;
     ub_queue_idle_check_t *checker;
     bondp_port_id_t *used_port;
+    umq_ub_fc_sge_ctx_t fc_sge_ctx;
+    uint32_t umq_id;
 } ub_queue_t;
 
 typedef struct user_ctx {
@@ -614,6 +625,34 @@ static ALWAYS_INLINE void umq_ub_put_real_queue(ub_queue_t *queue, uint32_t jett
 {
     __atomic_store_n(&queue->dev_ctx->umq_ctx_jetty_table[queue->jetty[jetty_idx]->jetty_id.id],
         (uint64_t)(uintptr_t)queue, __ATOMIC_RELEASE);
+}
+
+static ALWAYS_INLINE ub_queue_t *umq_ub_get_queue_by_umq_id(ub_queue_t *queue, uint32_t umq_id)
+{
+    umq_ub_ctx_t *dev_ctx = queue->dev_ctx;
+    if (dev_ctx->umq_id_to_queue_table == NULL || umq_id >= dev_ctx->umq_id_to_queue_size) {
+        return NULL;
+    }
+    return (ub_queue_t *)(uintptr_t)__atomic_load_n(&dev_ctx->umq_id_to_queue_table[umq_id], __ATOMIC_ACQUIRE);
+}
+
+static ALWAYS_INLINE void umq_ub_register_queue_by_umq_id(ub_queue_t *queue)
+{
+    umq_ub_ctx_t *dev_ctx = queue->dev_ctx;
+    if (dev_ctx->umq_id_to_queue_table == NULL || queue->umq_id >= dev_ctx->umq_id_to_queue_size) {
+        return;
+    }
+    __atomic_store_n(&dev_ctx->umq_id_to_queue_table[queue->umq_id],
+        (uint64_t)(uintptr_t)queue, __ATOMIC_RELEASE);
+}
+
+static ALWAYS_INLINE void umq_ub_unregister_queue_by_umq_id(ub_queue_t *queue)
+{
+    umq_ub_ctx_t *dev_ctx = queue->dev_ctx;
+    if (dev_ctx->umq_id_to_queue_table == NULL || queue->umq_id >= dev_ctx->umq_id_to_queue_size) {
+        return;
+    }
+    __atomic_store_n(&dev_ctx->umq_id_to_queue_table[queue->umq_id], 0, __ATOMIC_RELEASE);
 }
 
 #ifdef __cplusplus

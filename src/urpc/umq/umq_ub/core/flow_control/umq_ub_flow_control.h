@@ -43,6 +43,14 @@ void umq_ub_credit_clean_up(ub_queue_t *queue);
 void umq_ub_shared_credit_recharge(ub_queue_t *queue, uint16_t recharge_count);
 void umq_ub_idle_credit_flush(ub_queue_t *queue, uint32_t cnt) ;
 
+int umq_ub_fc_sge_credit_req_send(ub_queue_t *queue);
+int umq_ub_fc_sge_credit_req_handle(ub_queue_t *queue, umq_ub_fc_imm_t *fc_imm, umq_ub_fc_sge_msg_t *sge_msg);
+void umq_ub_fc_sge_credit_resp_handle(ub_queue_t *queue, umq_ub_fc_imm_t *fc_imm, umq_ub_fc_sge_msg_t *sge_msg);
+int umq_ub_fc_sge_credit_return_req_send(ub_queue_t *queue);
+int umq_ub_fc_sge_credit_return_req_handle(ub_queue_t *queue, umq_ub_fc_imm_t *fc_imm, umq_ub_fc_sge_msg_t *sge_msg);
+void umq_ub_fc_sge_credit_return_ack_handle(ub_queue_t *queue, umq_ub_fc_imm_t *fc_imm, umq_ub_fc_sge_msg_t *sge_msg);
+int umq_ub_process_fc_sge_msg(ub_queue_t *queue, umq_ub_fc_imm_t fc_imm, umq_ub_fc_sge_msg_t *sge_msg, umq_buf_t **buf);
+
 static inline void umq_ub_window_inc(ub_flow_control_t *fc, uint16_t win)
 {
     if (win == 0 || !fc->enabled) {

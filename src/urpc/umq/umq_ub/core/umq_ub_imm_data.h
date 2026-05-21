@@ -62,6 +62,34 @@ typedef union umq_ub_imm {
     } notify;
 } umq_ub_imm_t;
 
+typedef enum umq_ub_fc_imm_type {
+    FC_IMM_TYPE_CREDIT_REQ = 0,
+    FC_IMM_TYPE_CREDIT_REP = 1,
+    FC_IMM_TYPE_CREDIT_RETURN_REQ = 2,
+    FC_IMM_TYPE_CREDIT_RETURN_ACK = 3,
+    FC_IMM_TYPE_MAX,
+} umq_ub_fc_imm_type_t;
+
+#define UMQ_UB_FC_UMQ_ID_BITS 18
+#define UMQ_UB_FC_MAX_UMQ_ID ((1 << UMQ_UB_FC_UMQ_ID_BITS) - 1)
+
+typedef union umq_ub_fc_imm {
+    uint32_t value;
+    struct {
+        uint32_t type : 2;
+        uint32_t umq_id : UMQ_UB_FC_UMQ_ID_BITS;
+        uint32_t rsvd : 12;
+    } bs;
+} umq_ub_fc_imm_t;
+
+typedef struct umq_ub_fc_sge_msg {
+    uint32_t window : 20;
+    uint32_t ratio : 4;
+    uint32_t rsvd : 8;
+} umq_ub_fc_sge_msg_t;
+
+#define UMQ_UB_FC_MAX_WINDOW 0xFFFFF
+
 #ifdef __cplusplus
 }
 #endif
