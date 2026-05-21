@@ -468,6 +468,7 @@ public:
         GM_ADDR metaInfoGm;
         GM_ADDR gmAllExpertTokenNums;
         GM_ADDR gmTokenFlag;
+        GM_ADDR gmCombineSend;
 
         uint32_t epRankSize;
         uint32_t epRankId;
@@ -495,7 +496,7 @@ public:
                GM_ADDR gmExpertTokenNums_, GM_ADDR gmShareX1_, GM_ADDR gmShareX1Scale_, GM_ADDR gmShareSwigluOut_,
                GM_ADDR gmShareX2_, LayoutOutput const &layoutShareOutput_, GM_ADDR gmShareX2Scale_,
                GM_ADDR gmSwigluOut_, GM_ADDR metaInfoGm_, GM_ADDR gmAllExpertTokenNums_, GM_ADDR gmTokenFlag_,
-               const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
+               const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo, GM_ADDR gmCombineSend_)
             : problemShape(problemShape_),
               problemCount(problemCount_),
               ptrGroupList(reinterpret_cast<__gm__ ElementGroupList *>(ptrGroupList_)),
@@ -535,6 +536,7 @@ public:
               metaInfoGm(metaInfoGm_),
               gmAllExpertTokenNums(gmAllExpertTokenNums_),
               gmTokenFlag(gmTokenFlag_),
+              gmCombineSend(gmCombineSend_),
               epRankSize(disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize),
               epRankId(disGmmDeqSwigluQuantGmmDeqComInfo.epRankId),
               moeExpertNum(disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum),
@@ -617,7 +619,7 @@ public:
     }
 
     CATLASS_DEVICE
-    void ShmemSetTensorAddr(GM_ADDR gmX1, GM_ADDR gmX1Scale, GM_ADDR gmSwigluOut)
+    void ShmemSetTensorAddr(GM_ADDR gmX1, GM_ADDR gmX1Scale, GM_ADDR gmSwigluOut, GM_ADDR gmCombineSend)
     {
         uint64_t tensorAddrOffset = aivNum * UB_32B_ALIGN + epRankSize * UB_32B_ALIGN +
                                     moeExpertNum * sizeof(int32_t);
@@ -654,6 +656,16 @@ public:
             AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
             AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
             AscendC::DataCopyPad(gmSwigluOutTensor, addrTensor, addrCopyParams);
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_S>(0);
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_S>(0);
+
+            AscendC::GlobalTensor<uint64_t> gmCombineSendTensor;
+            GM_ADDR gmCombineSendAddr = GetShmemAddrByRankId(metaInfoGm + tensorAddrOffset + 3 * epRankSize * sizeof(uint64_t) + epRankId * sizeof(uint64_t), targetRankId);
+            gmCombineSendTensor.SetGlobalBuffer((__gm__ uint64_t *)(gmCombineSendAddr));
+            addrTensor.SetValue(0, (uint64_t)gmCombineSend);
+            AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
+            AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
+            AscendC::DataCopyPad(gmCombineSendTensor, addrTensor, addrCopyParams);
             AscendC::SetFlag<AscendC::HardEvent::MTE3_S>(0);
             AscendC::WaitFlag<AscendC::HardEvent::MTE3_S>(0);
         }
@@ -1148,7 +1160,7 @@ public:
             moeExpertNum = params.moeExpertNum;
             uint64_t offset = aivNum * UB_32B_ALIGN + epRankSize * UB_32B_ALIGN +
                           moeExpertNum * sizeof(int32_t) +
-                          3 * epRankSize * sizeof(uint64_t);
+                          4 * epRankSize * sizeof(uint64_t);
             statusDataSpaceGm = metaInfoGm + offset;
         } else {
             winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
@@ -1623,7 +1635,8 @@ public:
 
     CATLASS_DEVICE void
     SendCoreFunc(GM_ADDR gmX, GM_ADDR gmExpertIds, GM_ADDR gmMoeSmoothScales, GM_ADDR gmX1, GM_ADDR gmX1Scale,
-                 GM_ADDR gmExpandIdx, GM_ADDR gmXActiveMask, GM_ADDR gmEpSendCount, GM_ADDR gmAllExpertTokenNums)
+                 GM_ADDR gmExpandIdx, GM_ADDR gmXActiveMask, GM_ADDR gmEpSendCount, GM_ADDR gmAllExpertTokenNums,
+                 GM_ADDR gmCombineSend)
     {
         ubOffset = 0;
 
@@ -1645,7 +1658,7 @@ public:
         AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(0);
 
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHMEM_DISPATCH) {
-            ShmemSetTensorAddr(gmX1, gmX1Scale, gmTokenFlagGm);
+            ShmemSetTensorAddr(gmX1, gmX1Scale, gmTokenFlagGm, gmCombineSend);
             ShmemLocalLayout();
             AscendC::SyncAll<true>();
             ShmemSetLayoutStatus();
@@ -2217,7 +2230,7 @@ public:
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHMEM_DISPATCH) {
             uint64_t offset = aivNum * UB_32B_ALIGN + epRankSize * UB_32B_ALIGN +
                           moeExpertNum * sizeof(int32_t) +
-                          3 * epRankSize * sizeof(uint64_t);
+                          4 * epRankSize * sizeof(uint64_t);
             statusDataSpaceGm = metaInfoGm + offset;
             gmTokenFlagGm = params.gmTokenFlag;
         } else {
@@ -2273,7 +2286,7 @@ public:
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHMEM_DISPATCH) {
             uint64_t offset = aivNum * UB_32B_ALIGN + epRankSize * UB_32B_ALIGN +
                           moeExpertNum * sizeof(int32_t) +
-                          3 * epRankSize * sizeof(uint64_t);
+                          4 * epRankSize * sizeof(uint64_t);
             statusSpaceGm_ = GetShmemStateAddrByOffset(epRankId, offset);
         } else {
             statusSpaceGm_ = GetWindStateAddrByRankId(epRankId);
@@ -2414,7 +2427,8 @@ public:
         if (isSendCore) {
             SendCoreFunc((GM_ADDR)params.gmX, (GM_ADDR)params.gmexpertIds, (GM_ADDR)params.gmMoeSmoothScales,
                         (GM_ADDR)params.ptrA, (GM_ADDR)params.ptrPerTokenScale, (GM_ADDR)params.gmExpandIdx,
-                        (GM_ADDR)params.gmXActiveMask, (GM_ADDR)params.gmEpSendCount, (GM_ADDR)params.gmAllExpertTokenNums);
+                        (GM_ADDR)params.gmXActiveMask, (GM_ADDR)params.gmEpSendCount, (GM_ADDR)params.gmAllExpertTokenNums,
+                        (GM_ADDR)params.gmCombineSend);
         }
         if (isRecvCore) {
             RecvCoreFunc((GM_ADDR)params.ptrA, (GM_ADDR)params.ptrPerTokenScale, (GM_ADDR)params.gmEpSendCount);
