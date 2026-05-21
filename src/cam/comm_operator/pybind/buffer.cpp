@@ -30,7 +30,7 @@ inline int32_t shmem_set_attr(int32_t my_pe, int32_t n_pes, uint64_t local_mem_s
                                 aclshmemx_init_attr_t *attributes)
 {
     size_t ip_len = 0;
-    if (ip_port == nullptr) {
+    if (ip_port != nullptr) {
         ip_len = std::min(strlen(ip_port), static_cast<size_t>(ACLSHMEM_MAX_IP_PORT_LEN) - 1);
         std::copy_n(ip_port, ip_len, attributes->ip_port);
         if (attributes->ip_port[0] == '\0') {
