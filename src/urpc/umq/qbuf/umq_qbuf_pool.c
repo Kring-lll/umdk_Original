@@ -618,7 +618,9 @@ int umq_buf_size_pow_small_set(umq_buf_block_size_t block_size)
         return -UMQ_ERR_EINVAL;
     }
 
-    if (block_size == BLOCK_SIZE_8K) {
+    if (block_size == BLOCK_SIZE_4K) {
+        g_umq_qbuf_size_pow_samll = UMQ_QBUF_SIZE_POW_4K;
+    } else if (block_size == BLOCK_SIZE_8K) {
         g_umq_qbuf_size_pow_samll = UMQ_QBUF_SIZE_POW_8K;
     } else if (block_size == BLOCK_SIZE_16K) {
         g_umq_qbuf_size_pow_samll = UMQ_QBUF_SIZE_POW_16K;
