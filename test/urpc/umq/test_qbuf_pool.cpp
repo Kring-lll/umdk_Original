@@ -269,7 +269,7 @@ TEST_F(QbufPoolTest, test_qbuf_alloc_zero_in_combine)
     cfg.headroom_size = 0;
     cfg.buf_addr = umq_io_buf_malloc(UMQ_BUF_COMBINE, total_size);
     cfg.disable_scale_cap = true;
-    cfg.disable_malloc_escape = true;
+    cfg.enable_malloc_escape = false;
 
     ASSERT_NE(cfg.buf_addr, nullptr);
     ASSERT_EQ(umq_qbuf_pool_init(&cfg), UMQ_SUCCESS);
