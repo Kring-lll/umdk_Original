@@ -111,8 +111,23 @@ static urma_status_t comp_post_recv(bondp_comp_t *comp, int recv_idx, urma_jfr_w
     return ret;
 }
 
+static urma_status_t check_sge_tseg_valid(const urma_sge_t *sge, uint32_t num_sge, const char *wr_type,
+                                          const char *sg_type)
+{
+    for (uint32_t i = 0; i < num_sge; ++i) {
+        if (sge[i].tseg == NULL) {
+            URMA_LOG_ERR("when set %s wr, %s sge[%u].tseg is NULL.\n", wr_type, sg_type, i);
+            return URMA_EINVAL;
+        }
+    }
+
+    return URMA_SUCCESS;
+}
+
 static urma_status_t post_send_check_jfs_wr_valid(const bondp_context_t *bdp_ctx, const urma_jfs_wr_t *wr)
 {
+    urma_status_t ret;
+
     switch (wr->opcode) {
         case URMA_OPC_SEND:
         case URMA_OPC_SEND_IMM:
@@ -120,6 +135,12 @@ static urma_status_t post_send_check_jfs_wr_valid(const bondp_context_t *bdp_ctx
             /* No need to handle cases where num_sge == 0 or sge == NULL;
                UDMA will take care of it, as SEND_WITH_IMM may allow NULL to be passed.
             */
+            if (wr->flag.bs.inline_flag == URMA_INLINE_DISABLE && wr->send.src.sge != NULL) {
+                ret = check_sge_tseg_valid(wr->send.src.sge, wr->send.src.num_sge, "send", "src");
+                if (ret != URMA_SUCCESS) {
+                    return ret;
+                }
+            }
             if (bdp_ctx->v_ctx.dev->sysfs_dev->dev_attr.dev_cap.max_jfs_sge < wr->send.src.num_sge) {
                 URMA_LOG_WARN("The number of sge %u the destination segment is greater than the maximum supported=%u"
                               "by the device.\n",
@@ -136,6 +157,16 @@ static urma_status_t post_send_check_jfs_wr_valid(const bondp_context_t *bdp_ctx
                 wr->rw.src.sge == NULL || wr->rw.dst.sge == NULL) {
                 URMA_LOG_ERR("when set write_wr, either of src/dst num_sge/sge has been set zero or NULL.\n");
                 return URMA_EINVAL;
+            }
+            if (wr->opcode == URMA_OPC_READ || wr->flag.bs.inline_flag == URMA_INLINE_DISABLE) {
+                ret = check_sge_tseg_valid(wr->rw.src.sge, wr->rw.src.num_sge, "write/read", "src");
+                if (ret != URMA_SUCCESS) {
+                    return ret;
+                }
+            }
+            ret = check_sge_tseg_valid(wr->rw.dst.sge, wr->rw.dst.num_sge, "write/read", "dst");
+            if (ret != URMA_SUCCESS) {
+                return ret;
             }
             /* The limitation of rsge is the number of *remote sge* that can be accessed,
                whether for write or read operations. */
@@ -173,11 +204,19 @@ static urma_status_t post_send_check_jfs_wr_valid(const bondp_context_t *bdp_ctx
                 URMA_LOG_ERR("when set cas_wr, either src or dst is NULL.\n");
                 return URMA_EINVAL;
             }
+            if (wr->cas.src->tseg == NULL || wr->cas.dst->tseg == NULL) {
+                URMA_LOG_ERR("when set cas_wr, either src or dst tseg is NULL.\n");
+                return URMA_EINVAL;
+            }
             break;
         case URMA_OPC_FADD:
             /* It must be verified; otherwise, udma will cause a segmentation fault. */
             if (wr->faa.src == NULL || wr->faa.dst == NULL) {
                 URMA_LOG_ERR("when set faa_wr, either src or dst is NULL.\n");
+                return URMA_EINVAL;
+            }
+            if (wr->faa.src->tseg == NULL || wr->faa.dst->tseg == NULL) {
+                URMA_LOG_ERR("when set faa_wr, either src or dst tseg is NULL.\n");
                 return URMA_EINVAL;
             }
             break;
