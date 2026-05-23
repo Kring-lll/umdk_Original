@@ -19,6 +19,9 @@ static const uint32_t EXAMPLE_MAX_DEPTH = 64;
 static const char *EXAMPLE_CLIENT_POST_DATA = "hello, this is umq pro client";
 static const char *EXAMPLE_SERVER_POST_DATA = "hello, this is umq pro server";
 
+static const char *g_log_level_to_str[UMQ_LOG_LEVEL_MAX] = {"EMERG", "ALERT", "CRIT", "ERROR", "WARNING",
+                                                            "NOTICE", "INFO", "DEBUG"};
+
 static void default_output(int level, char *log_msg)
 {
     struct timeval tval;
