@@ -1020,19 +1020,21 @@ static int admin_print_topo_map(tool_topo_map_t *topo_map, uint32_t node_id, con
         }
     }
     (void)printf("===================== show node %d topo info =======================\n", node_id);
-    for (uint32_t iodie_idx = 0; iodie_idx < IODIE_NUM; iodie_idx++) {
-        (void)printf("IODie %d:\n", iodie_idx);
-        for (uint32_t port_idx = 0; port_idx < PORT_NUM; port_idx++) {
-            if (cur_node_info->links[iodie_idx][port_idx].peer_node >= MAX_NODE_NUM) {
-                (void)printf("Port %d: Not connected\n", port_idx);
-                continue;
+    for (uint32_t idx = 0; idx < IODIE_NUM * PORT_NUM; idx++) {
+        uint32_t iodie_idx = idx / PORT_NUM;
+        uint32_t port_idx = idx % PORT_NUM;
+        bool has_connection = false;
+        for (uint32_t remote_idx = 0; remote_idx < IODIE_NUM * PORT_NUM; remote_idx++) {
+            if (cur_node_info->links[idx][remote_idx]) {
+                uint32_t remote_iodie = remote_idx / PORT_NUM;
+                uint32_t remote_port = remote_idx % PORT_NUM;
+                (void)printf("IODie %d Port %d -> IODie %d Port %d: connected\n",
+                             iodie_idx, port_idx, remote_iodie, remote_port);
+                has_connection = true;
             }
-            (void)printf("Port %d: Connected to Node %d, IODie %d, Port %d\n", port_idx,
-                         cur_node_info->links[iodie_idx][port_idx].peer_node,
-                         cur_node_info->links[iodie_idx][port_idx].peer_iodie,
-                         cur_node_info->links[iodie_idx][port_idx].peer_port);
         }
-        (void)printf("\n");
+        if (!has_connection)
+            (void)printf("IODie %d Port %d: Not connected\n", iodie_idx, port_idx);
     }
     char eid_str[INET6_ADDRSTRLEN];
     for (uint32_t agg_dev_idx = 0; agg_dev_idx < DEV_NUM; agg_dev_idx++) {

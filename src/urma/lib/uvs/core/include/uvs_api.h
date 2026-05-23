@@ -110,19 +110,15 @@ struct urma_topo_agg_dev {
     struct urma_topo_ue ues[IODIE_NUM];
 };
 
-struct urma_topo_link {
-    uint32_t peer_node;  // node id
-    uint32_t peer_iodie; // iodie idx
-    uint32_t peer_port;  // port idx, UINT32_MAX indicates no connection
-};
-
 struct urma_topo_node {
     uint32_t type; // 0:1D-fullmesh, 1: Clos topology with parallel planes
     uint32_t super_node_id;
     uint32_t node_id;
     uint32_t is_current;
-    struct urma_topo_link links[IODIE_NUM][PORT_NUM]; /*Links[i] represents the destination
-            information connected to the current node's port[i]. It is not filled in Clos topology and relies on preset information.*/
+    bool links[IODIE_NUM * PORT_NUM][IODIE_NUM * PORT_NUM]; /*links[local_idx][remote_idx] represents
+            connectivity between this node's port local_idx and node i's port remote_idx.
+            local_idx = iodie_id * PORT_NUM + port_id.
+            If this node is the current node (is_current), all entries are false.*/
     struct urma_topo_agg_dev agg_devs[DEV_NUM];
 };
 
