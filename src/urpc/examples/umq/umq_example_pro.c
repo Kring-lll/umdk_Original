@@ -5,10 +5,12 @@
  * Create: 2025-8-16
  */
 
-#include <stdlib.h>
 #include <stdio.h>
-#include <unistd.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "umq_example_common.h"
 #include "umq_example_pro.h"
@@ -16,6 +18,16 @@
 static const uint32_t EXAMPLE_MAX_DEPTH = 64;
 static const char *EXAMPLE_CLIENT_POST_DATA = "hello, this is umq pro client";
 static const char *EXAMPLE_SERVER_POST_DATA = "hello, this is umq pro server";
+
+static void default_output(int level, char *log_msg)
+{
+    struct timeval tval;
+    struct tm time;
+    (void)gettimeofday(&tval, NULL);
+    (void)localtime_r(&tval.tv_sec, &time);
+    (void)fprintf(stdout, "%02d%02d %02d:%02d:%02d.%06ld|%s|%s", time.tm_mon + 1, time.tm_mday, time.tm_hour,
+                  time.tm_min, time.tm_sec, (long)tval.tv_usec, g_log_level_to_str[level], log_msg);
+}
 
 int run_umq_example_pro_server(struct urpc_example_config *cfg)
 {
@@ -267,6 +279,16 @@ UNINIT:
 
 int run_umq_example_pro(struct urpc_example_config *cfg)
 {
+    umq_log_config_t log_cfg = {
+        .log_flag = UMQ_LOG_FLAG_FUNC | UMQ_LOG_FLAG_LEVEL,
+        .func = default_output,
+        .level = UMQ_LOG_LEVEL_INFO};
+
+    if (umq_log_config_set(&log_cfg) != UMQ_SUCCESS) {
+        LOG_PRINT_ERR("umq_log_config_set failed\n");
+        return -1;
+    }
+
     if (cfg->instance_mode == CLIENT) {
         return run_umq_example_pro_client(cfg);
     } else if (cfg->instance_mode == SERVER) {
