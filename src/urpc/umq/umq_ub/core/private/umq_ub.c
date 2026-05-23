@@ -1122,8 +1122,9 @@ urma_jetty_t *umq_create_jetty(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_queu
         return NULL;
     }
     UMQ_VLOG_INFO(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u,%s create jetty[%d] success, urma transmode %d, "
-                  "priority %d, rnr_retry %d, err_timeout %d\n", EID_ARGS(jetty->jetty_id.eid), jetty->jetty_id.id,
-                  port_str, jetty_idx, queue->tp_mode, queue->priority, queue->rnr_retry, queue->err_timeout);
+                  "tp_type %d, priority %d, rnr_retry %d, err_timeout %d\n", EID_ARGS(jetty->jetty_id.eid),
+                  jetty->jetty_id.id, port_str, jetty_idx, queue->tp_mode, queue->tp_type, queue->priority,
+                  queue->rnr_retry, queue->err_timeout);
     return jetty;
 }
 
