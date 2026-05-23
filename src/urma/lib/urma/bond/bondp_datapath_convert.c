@@ -203,10 +203,14 @@ static void restore_send_pwr_to_vwr(urma_jfs_wr_t *send_wr, urma_target_jetty_t 
 static void map_write_vwr_to_path(urma_jfs_wr_t *send_wr, int send_idx, int target_idx)
 {
     for (int i = 0; i < send_wr->rw.src.num_sge; ++i) {
-        send_wr->rw.src.sge[i].tseg = get_p_tseg(send_wr->rw.src.sge[i].tseg, send_idx, target_idx);
+        if (send_wr->rw.src.sge[i].tseg != NULL) {
+            send_wr->rw.src.sge[i].tseg = get_p_tseg(send_wr->rw.src.sge[i].tseg, send_idx, target_idx);
+        }
     }
     for (int i = 0; i < send_wr->rw.dst.num_sge; ++i) {
-        send_wr->rw.dst.sge[i].tseg = get_p_tseg(send_wr->rw.dst.sge[i].tseg, send_idx, target_idx);
+        if (send_wr->rw.dst.sge[i].tseg != NULL) {
+            send_wr->rw.dst.sge[i].tseg = get_p_tseg(send_wr->rw.dst.sge[i].tseg, send_idx, target_idx);
+        }
     }
     send_wr->tjetty = get_p_tjetty(send_wr->tjetty, send_idx, target_idx);
 }
@@ -214,10 +218,14 @@ static void map_write_vwr_to_path(urma_jfs_wr_t *send_wr, int send_idx, int targ
 static void restore_write_pwr_to_vwr(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty)
 {
     for (int i = 0; i < send_wr->rw.src.num_sge; ++i) {
-        send_wr->rw.src.sge[i].tseg = get_v_tseg(send_wr->rw.src.sge[i].tseg);
+        if (send_wr->rw.src.sge[i].tseg != NULL) {
+            send_wr->rw.src.sge[i].tseg = get_v_tseg(send_wr->rw.src.sge[i].tseg);
+        }
     }
     for (int i = 0; i < send_wr->rw.dst.num_sge; ++i) {
-        send_wr->rw.dst.sge[i].tseg = get_v_tseg(send_wr->rw.dst.sge[i].tseg);
+        if (send_wr->rw.dst.sge[i].tseg != NULL) {
+            send_wr->rw.dst.sge[i].tseg = get_v_tseg(send_wr->rw.dst.sge[i].tseg);
+        }
     }
     send_wr->tjetty = vtjetty;
 }
@@ -348,10 +356,14 @@ void add_vwr_use_cnt(urma_jfs_wr_t *wr)
         case URMA_OPC_WRITE_NOTIFY:
         case URMA_OPC_READ:
             for (int i = 0; i < wr->rw.src.num_sge; ++i) {
-                bondp_tseg_get(wr->rw.src.sge[i].tseg);
+                if (wr->rw.src.sge[i].tseg != NULL) {
+                    bondp_tseg_get(wr->rw.src.sge[i].tseg);
+                }
             }
             for (int i = 0; i < wr->rw.dst.num_sge; ++i) {
-                bondp_tseg_get(wr->rw.dst.sge[i].tseg);
+                if (wr->rw.dst.sge[i].tseg != NULL) {
+                    bondp_tseg_get(wr->rw.dst.sge[i].tseg);
+                }
             }
             return;
         default:
@@ -380,10 +392,14 @@ void release_vwr_use_cnt(urma_jfs_wr_t *wr)
         case URMA_OPC_WRITE_NOTIFY:
         case URMA_OPC_READ:
             for (int i = 0; i < wr->rw.src.num_sge; ++i) {
-                bondp_tseg_put(wr->rw.src.sge[i].tseg);
+                if (wr->rw.src.sge[i].tseg != NULL) {
+                    bondp_tseg_put(wr->rw.src.sge[i].tseg);
+                }
             }
             for (int i = 0; i < wr->rw.dst.num_sge; ++i) {
-                bondp_tseg_put(wr->rw.dst.sge[i].tseg);
+                if (wr->rw.dst.sge[i].tseg != NULL) {
+                    bondp_tseg_put(wr->rw.dst.sge[i].tseg);
+                }
             }
             return;
         default:
