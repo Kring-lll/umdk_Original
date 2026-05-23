@@ -120,6 +120,14 @@ static urma_status_t post_send_check_jfs_wr_valid(const bondp_context_t *bdp_ctx
             /* No need to handle cases where num_sge == 0 or sge == NULL;
                UDMA will take care of it, as SEND_WITH_IMM may allow NULL to be passed.
             */
+            if (wr->flag.bs.inline_flag == URMA_INLINE_DISABLE && wr->send.src.sge != NULL) {
+                for (uint32_t i = 0; i < wr->send.src.num_sge; ++i) {
+                    if (wr->send.src.sge[i].tseg == NULL) {
+                        URMA_LOG_ERR("when set send wr, src sge[%u].tseg is NULL.\n", i);
+                        return URMA_EINVAL;
+                    }
+                }
+            }
             if (bdp_ctx->v_ctx.dev->sysfs_dev->dev_attr.dev_cap.max_jfs_sge < wr->send.src.num_sge) {
                 URMA_LOG_WARN("The number of sge %u the destination segment is greater than the maximum supported=%u"
                               "by the device.\n",
@@ -136,6 +144,20 @@ static urma_status_t post_send_check_jfs_wr_valid(const bondp_context_t *bdp_ctx
                 wr->rw.src.sge == NULL || wr->rw.dst.sge == NULL) {
                 URMA_LOG_ERR("when set write_wr, either of src/dst num_sge/sge has been set zero or NULL.\n");
                 return URMA_EINVAL;
+            }
+            if (wr->opcode == URMA_OPC_READ || wr->flag.bs.inline_flag == URMA_INLINE_DISABLE) {
+                for (uint32_t i = 0; i < wr->rw.src.num_sge; ++i) {
+                    if (wr->rw.src.sge[i].tseg == NULL) {
+                        URMA_LOG_ERR("when set write/read wr, src sge[%u].tseg is NULL.\n", i);
+                        return URMA_EINVAL;
+                    }
+                }
+            }
+            for (uint32_t i = 0; i < wr->rw.dst.num_sge; ++i) {
+                if (wr->rw.dst.sge[i].tseg == NULL) {
+                    URMA_LOG_ERR("when set write/read wr, dst sge[%u].tseg is NULL.\n", i);
+                    return URMA_EINVAL;
+                }
             }
             /* The limitation of rsge is the number of *remote sge* that can be accessed,
                whether for write or read operations. */
@@ -173,11 +195,19 @@ static urma_status_t post_send_check_jfs_wr_valid(const bondp_context_t *bdp_ctx
                 URMA_LOG_ERR("when set cas_wr, either src or dst is NULL.\n");
                 return URMA_EINVAL;
             }
+            if (wr->cas.src->tseg == NULL || wr->cas.dst->tseg == NULL) {
+                URMA_LOG_ERR("when set cas_wr, either src or dst tseg is NULL.\n");
+                return URMA_EINVAL;
+            }
             break;
         case URMA_OPC_FADD:
             /* It must be verified; otherwise, udma will cause a segmentation fault. */
             if (wr->faa.src == NULL || wr->faa.dst == NULL) {
                 URMA_LOG_ERR("when set faa_wr, either src or dst is NULL.\n");
+                return URMA_EINVAL;
+            }
+            if (wr->faa.src->tseg == NULL || wr->faa.dst->tseg == NULL) {
+                URMA_LOG_ERR("when set faa_wr, either src or dst tseg is NULL.\n");
                 return URMA_EINVAL;
             }
             break;
