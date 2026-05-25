@@ -111,8 +111,23 @@ static urma_status_t comp_post_recv(bondp_comp_t *comp, int recv_idx, urma_jfr_w
     return ret;
 }
 
+static urma_status_t post_send_check_sg_tseg_valid(const urma_sg_t *sg, bool allow_null_tseg,
+                                                   bool allow_user_tseg, const char *sg_name)
+{
+    for (uint32_t i = 0; i < sg->num_sge; ++i) {
+        if (sg->sge[i].tseg == NULL && !allow_null_tseg &&
+            (!allow_user_tseg || sg->sge[i].user_tseg == NULL)) {
+            URMA_LOG_ERR("when set write_wr, %s sge[%u] tseg is NULL.\n", sg_name, i);
+            return URMA_EINVAL;
+        }
+    }
+    return URMA_SUCCESS;
+}
+
 static urma_status_t post_send_check_jfs_wr_valid(const bondp_context_t *bdp_ctx, const urma_jfs_wr_t *wr)
 {
+    urma_status_t ret;
+
     switch (wr->opcode) {
         case URMA_OPC_SEND:
         case URMA_OPC_SEND_IMM:
@@ -136,6 +151,16 @@ static urma_status_t post_send_check_jfs_wr_valid(const bondp_context_t *bdp_ctx
                 wr->rw.src.sge == NULL || wr->rw.dst.sge == NULL) {
                 URMA_LOG_ERR("when set write_wr, either of src/dst num_sge/sge has been set zero or NULL.\n");
                 return URMA_EINVAL;
+            }
+            ret = post_send_check_sg_tseg_valid(&wr->rw.src,
+                wr->opcode != URMA_OPC_READ && wr->flag.bs.inline_flag,
+                wr->opcode == URMA_OPC_READ, "src");
+            if (ret != URMA_SUCCESS) {
+                return ret;
+            }
+            ret = post_send_check_sg_tseg_valid(&wr->rw.dst, false, wr->opcode != URMA_OPC_READ, "dst");
+            if (ret != URMA_SUCCESS) {
+                return ret;
             }
             /* The limitation of rsge is the number of *remote sge* that can be accessed,
                whether for write or read operations. */
