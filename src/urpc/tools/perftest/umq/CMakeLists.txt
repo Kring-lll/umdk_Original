@@ -19,6 +19,7 @@ add_executable(umq_perftest
     ${PERFTEST_COMMON_FILES}
     umq_perftest_param.c
     umq_perftest_qps.c
+    umq_latency.c
     umq_perftest_latency.c
     umq_perftest.c)
 

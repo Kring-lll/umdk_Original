@@ -273,7 +273,7 @@ static int umq_perftest_post_rx(umq_perftest_config_t *cfg)
     do {
         cur_batch_count = require_rx_count > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : require_rx_count;
 
-        buf = umq_buf_alloc(cfg->config.size, cur_batch_count, UMQ_INVALID_HANDLE, NULL);
+        buf = umq_buf_alloc(cfg->blk_size, cur_batch_count, UMQ_INVALID_HANDLE, NULL);
         if (buf == NULL) {
             LOG_PRINT("alloc buf failed\n");
             return -1;

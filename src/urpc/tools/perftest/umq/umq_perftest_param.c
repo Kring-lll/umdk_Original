@@ -12,6 +12,32 @@
 
 #include "umq_perftest_param.h"
 
+#define PERFTEST_BLOCK_4K  (4096)
+#define PERFTEST_BLOCK_8K  (8192)
+#define PERFTEST_BLOCK_16K (16384)
+#define PERFTEST_BLOCK_32K (32768)
+#define PERFTEST_BLOCK_64K (65536)
+
+static uint32_t umq_perftest_block_size(uint32_t blk_mode)
+{
+    switch (blk_mode) {
+        case BLOCK_SIZE_4K:
+            return PERFTEST_BLOCK_4K;
+        case BLOCK_SIZE_8K:
+            return PERFTEST_BLOCK_8K;
+        case BLOCK_SIZE_16K:
+            return PERFTEST_BLOCK_16K;
+        case BLOCK_SIZE_32K:
+            return PERFTEST_BLOCK_32K;
+        case BLOCK_SIZE_64K:
+            return PERFTEST_BLOCK_64K;
+        default:
+            return PERFTEST_BLOCK_4K;
+    }
+
+    return PERFTEST_BLOCK_4K;
+}
+
 // clang-format off
 static struct option g_long_options[] = {
     {"dev", required_argument, NULL, 'd'},
@@ -42,6 +68,8 @@ static struct option g_long_options[] = {
     {"perf-thresh", required_argument, NULL, 't'},
     {"enable-perf", no_argument, NULL, 'F'},
     {"blk-size", required_argument, NULL, 'L'},
+    {"req-size", required_argument, NULL, 'G'},
+    {"rsp-size", required_argument, NULL, 'H'},
     {NULL, 0, NULL, 0}
 };
 // clang-format on
@@ -100,6 +128,8 @@ static void init_cfg(umq_perftest_config_t *cfg)
     cfg->test_round = DEFAULT_LAT_TEST_ROUND;
     cfg->thresh_num = 0;
     cfg->blk_mode = 0;
+    cfg->req_size = config->size;
+    cfg->rsp_size = config->size;
 }
 
 int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *cfg)
@@ -142,6 +172,8 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
                 break;
             case 's':
                 cfg->config.size = (uint32_t)strtoul(optarg, NULL, 0);
+                cfg->req_size = cfg->config.size;
+                cfg->rsp_size = cfg->config.size;
                 break;
             case 'h':
                 usage();
@@ -208,6 +240,13 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
                 break;
             case 'L':
                 cfg->blk_mode = (uint32_t)strtoul(optarg, NULL, 0);
+                cfg->blk_size = umq_perftest_block_size(cfg->blk_mode);
+                break;
+            case 'G':
+                cfg->req_size = (uint32_t)strtoul(optarg, NULL, 0);
+                break;
+            case 'H':
+                cfg->rsp_size = (uint32_t)strtoul(optarg, NULL, 0);
                 break;
             default:
                 usage();

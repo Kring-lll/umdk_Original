@@ -20,6 +20,9 @@ typedef struct umq_perftest_latency_arg {
 
 void umq_perftest_run_latency(uint64_t umqh, umq_perftest_latency_arg_t *lat_arg);
 
+void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t *lat_arg);
+void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t *lat_arg);
+
 #ifdef __cplusplus
 }
 #endif

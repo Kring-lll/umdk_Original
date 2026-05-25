@@ -888,15 +888,25 @@ void umq_perftest_run_latency(uint64_t umqh, umq_perftest_latency_arg_t *lat_arg
 {
     if (lat_arg->cfg->config.instance_mode == PERF_INSTANCE_SERVER) {
         if (lat_arg->cfg->feature & UMQ_FEATURE_API_PRO) {
-            umq_perftest_server_run_latency_pro(umqh, lat_arg);
+            umq_server_latency_pro_interrupt(umqh, lat_arg);
+            // umq_perftest_server_run_latency_pro(umqh, lat_arg);
         } else {
-            umq_perftest_server_run_latency_base(umqh, lat_arg);
+            if (lat_arg->cfg->config.interrupt) {
+                umq_perftest_server_run_latency_base(umqh, lat_arg);
+            } else {
+                umq_perftest_server_run_latency_pro(umqh, lat_arg);
+            }
         }
     } else {
         if (lat_arg->cfg->feature & UMQ_FEATURE_API_PRO) {
-            umq_perftest_client_run_latency_pro(umqh, lat_arg);
+            umq_client_latency_pro_interrupt(umqh, lat_arg);
+            // umq_perftest_client_run_latency_pro(umqh, lat_arg);
         } else {
-            umq_perftest_client_run_latency_base(umqh, lat_arg);
+            if (lat_arg->cfg->config.interrupt) {
+                umq_perftest_client_run_latency_base(umqh, lat_arg);
+            } else {
+                umq_perftest_client_run_latency_pro(umqh, lat_arg);
+            }
         }
     }
 }

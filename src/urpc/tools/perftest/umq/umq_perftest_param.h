@@ -40,6 +40,9 @@ typedef struct umq_perftest_config {
     uint64_t thresh_array[UMQ_PERF_QUANTILE_MAX_NUM];
     uint16_t thresh_num;
     uint32_t blk_mode;
+    uint32_t blk_size;
+    uint32_t req_size;
+    uint32_t rsp_size;
 } umq_perftest_config_t;
 
 int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *cfg);
