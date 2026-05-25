@@ -4,6 +4,13 @@
 workspace(name = "com_atomgit_openeuler_umdk_urma")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+load("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
+
+# libummu source tree (sibling of umdk checkout under urma_workspace).
+local_repository(
+    name = "libummu",
+    path = "../../../libummu",
+)
 
 # Preload repositories that Bazel 7+ pulls from `DEFAULT.WORKSPACE.SUFFIX`
 # (otherwise `rules_java_builtin` may try to fetch `rules_python` from the network).
@@ -37,6 +44,7 @@ http_archive(
     sha256 = "b8b918a85f9144c01f6cfe0f45e4f2838c7413961a8ff23bc0c6cdf8bb07a3b6",
     strip_prefix = "rules_cc-0.1.5",
     urls = [
+        "https://ghproxy.net/https://github.com/bazelbuild/rules_cc/releases/download/0.1.5/rules_cc-0.1.5.tar.gz",
         "https://github.com/bazelbuild/rules_cc/releases/download/0.1.5/rules_cc-0.1.5.tar.gz",
     ],
 )
@@ -59,6 +67,7 @@ http_archive(
     sha256 = "07271d0f6b12633777b69020c4cb1eb67b1939c0cf84bb3944dc85cc250c0c01",
     strip_prefix = "bazel_features-1.38.0",
     urls = [
+        "https://ghproxy.net/https://github.com/bazel-contrib/bazel_features/releases/download/v1.38.0/bazel_features-v1.38.0.tar.gz",
         "https://github.com/bazel-contrib/bazel_features/releases/download/v1.38.0/bazel_features-v1.38.0.tar.gz",
     ],
 )
