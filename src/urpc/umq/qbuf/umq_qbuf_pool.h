@@ -66,7 +66,7 @@ typedef struct qbuf_pool_cfg {
 
     bool disable_scale_cap; // expansion and shrink switch
     // escape
-    bool disable_malloc_escape;
+    bool enable_malloc_escape;
 } qbuf_pool_cfg_t;
 
 typedef struct qbuf_alloc_param {

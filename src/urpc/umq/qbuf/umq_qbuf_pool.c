@@ -118,7 +118,7 @@ typedef struct qbuf_pool {
 
     bool disable_scale_cap; // expansion and shrink switch
     // escape
-    bool disable_malloc_escape;
+    bool enable_malloc_escape;
 } qbuf_pool_t;
 
 static qbuf_pool_t g_qbuf_pool = {0};
@@ -903,7 +903,7 @@ int umq_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
         (cfg->tls_qbuf_pool_depth == 0) ? QBUF_POOL_TLS_QBUF_POOL_DEPTH : cfg->tls_qbuf_pool_depth;
     g_qbuf_pool.local_pool_cfg.tls_expand_qbuf_pool_depth = cfg->tls_expand_qbuf_pool_depth == 0 ?
         QBUF_POOL_EXPAND_MAX(g_qbuf_pool.local_pool_cfg.tls_qbuf_pool_depth) :  cfg->tls_expand_qbuf_pool_depth;
-    g_qbuf_pool.disable_malloc_escape = cfg->disable_malloc_escape;
+    g_qbuf_pool.enable_malloc_escape = cfg->enable_malloc_escape;
 
     ret = umq_qbuf_expansion_pool_init(cfg);
     if (ret != UMQ_SUCCESS) {
@@ -1356,7 +1356,7 @@ int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *opti
     if (buf_cnt < needed) {
         int ret = umq_qbuf_local_pool_fetch_and_expand(needed - buf_cnt, local_pool, true);
         if (ret != UMQ_SUCCESS) {
-            if (param.actual_buf_count == 1 && !g_qbuf_pool.disable_malloc_escape) {
+            if (param.actual_buf_count == 1 && g_qbuf_pool.enable_malloc_escape) {
                 return umq_qbuf_alloc_escape(list);
             }
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "umq with data qbuf local pool fetch and expand failed, "
@@ -1384,7 +1384,7 @@ void umq_qbuf_free(umq_buf_list_t *list)
         return;
     }
 
-    if (QBUF_LIST_FIRST(list)->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX && !g_qbuf_pool.disable_malloc_escape) {
+    if (QBUF_LIST_FIRST(list)->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX && g_qbuf_pool.enable_malloc_escape) {
         free(QBUF_LIST_FIRST(list)->buf_data);
         (void)__atomic_sub_fetch(&g_total_escape_buf_cnt, 1, __ATOMIC_RELAXED);
         return;

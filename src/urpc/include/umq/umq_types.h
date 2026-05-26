@@ -245,7 +245,7 @@ typedef struct umq_buf_pool_cfg {
 
     bool disable_scale_cap; // expansion and shrink switch
     // escape
-    bool disable_malloc_escape; // disable the escape mechanism
+    bool enable_malloc_escape; // enable the escape mechanism
 } umq_buf_pool_cfg_t;
 
 typedef struct umq_init_cfg {
