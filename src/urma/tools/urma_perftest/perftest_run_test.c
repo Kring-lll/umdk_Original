@@ -233,7 +233,7 @@ static void *run_read_lat_simplex(void *arg)
 
         urma_status_t status;
         if (cfg->use_flat_api) {
-            uint64_t lva = (uint64_t)(uintptr_t)ctx->local_buf[0] + ctx->buf_size; // Second half for local memory
+            uint64_t lva = (uint64_t)(uintptr_t)ctx->local_buf[0] + ctx->recv_buf_size;
             uint64_t rva = ctx->remote_seg[0].ubva.va;
             urma_jfs_wr_flag_t flag = {
                 .bs.complete_enable = URMA_COMPLETE_ENABLE,
@@ -297,7 +297,7 @@ static void *run_write_lat_simplex(void *arg)
 
     bool is_server = cfg->comm.server_ip == NULL;
 
-    volatile char *post_buf = (char *)ctx->local_buf[id] + ctx->buf_size + cfg->size - 1;
+    volatile char *post_buf = (char *)ctx->local_buf[id] + ctx->recv_buf_size + cfg->size - 1;
     volatile char *poll_buf = (char *)ctx->local_buf[id] + cfg->size - 1;
 
     if (cfg->time_type.bs.duration == 1) {
@@ -321,7 +321,7 @@ static void *run_write_lat_simplex(void *arg)
 
             urma_status_t status;
             if (cfg->use_flat_api) {
-                uint64_t lva = (uint64_t)(uintptr_t)ctx->local_buf[0] + ctx->buf_size; // Second half for local memory
+                uint64_t lva = (uint64_t)(uintptr_t)ctx->local_buf[0] + ctx->recv_buf_size;
                 uint64_t rva = ctx->remote_seg[0].ubva.va;
                 urma_jfs_wr_flag_t flag = {
                     .bs.complete_enable = 1,
@@ -514,7 +514,7 @@ static void *run_send_lat_simplex(void *arg)
 
             urma_status_t status;
             if (cfg->use_flat_api) {
-                uint64_t lva = (uint64_t)(uintptr_t)ctx->local_buf[0] + ctx->buf_size; // Second half for local memory
+                uint64_t lva = (uint64_t)(uintptr_t)ctx->local_buf[0] + ctx->recv_buf_size;
                 urma_jfs_wr_flag_t flag = {
                     .bs.inline_flag = (cfg->size <= cfg->inline_size) ? 1 : 0,
                     .bs.complete_enable = URMA_COMPLETE_ENABLE,
@@ -747,10 +747,10 @@ static void init_read_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, perf
     uint32_t sge_idx;
 
     uint64_t lva = (cfg->seg_pre_jetty == false) ?
-        (uint64_t)ctx->local_buf[0] + (cfg->jettys + i) * ctx->buf_size :
-        (uint64_t)ctx->local_buf[i] + ctx->buf_size;    // Second half for local memory
+        (uint64_t)ctx->local_buf[0] + cfg->jettys * ctx->recv_buf_size + i * ctx->send_buf_size :
+        (uint64_t)ctx->local_buf[i] + ctx->recv_buf_size;
     uint64_t rva = (cfg->seg_pre_jetty == false) ?
-        (uint64_t)ctx->remote_seg[0].ubva.va + i * ctx->buf_size :
+        (uint64_t)ctx->remote_seg[0].ubva.va + i * ctx->recv_buf_size :
         (uint64_t)ctx->remote_seg[i].ubva.va;
 
     uint32_t local_sge_idx = (i * cfg->jfs_post_list + j) * PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num + cfg->sge_num;
@@ -800,10 +800,10 @@ static void init_write_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, per
     uint32_t sge_idx;
 
     uint64_t lva = (cfg->seg_pre_jetty == false) ?
-        (uint64_t)ctx->local_buf[0] + (cfg->jettys + i) * ctx->buf_size :
-        (uint64_t)ctx->local_buf[i] + ctx->buf_size;    // Second half for local memory
+        (uint64_t)ctx->local_buf[0] + cfg->jettys * ctx->recv_buf_size + i * ctx->send_buf_size :
+        (uint64_t)ctx->local_buf[i] + ctx->recv_buf_size;
     uint64_t rva = (cfg->seg_pre_jetty == false) ?
-        (uint64_t)ctx->remote_seg[0].ubva.va + i * ctx->buf_size :
+        (uint64_t)ctx->remote_seg[0].ubva.va + i * ctx->recv_buf_size :
         (uint64_t)ctx->remote_seg[i].ubva.va;
 
     uint32_t local_sge_idx = (i * cfg->jfs_post_list + j) * PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num + cfg->sge_num;
@@ -853,8 +853,8 @@ static void init_send_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, perf
     uint32_t sge_idx;
 
     uint64_t lva = (cfg->seg_pre_jetty == false) ?
-        (uint64_t)ctx->local_buf[0] + (cfg->jettys + i) * ctx->buf_size :
-        (uint64_t)ctx->local_buf[i] + ctx->buf_size;    // Second half for local memory
+        (uint64_t)ctx->local_buf[0] + cfg->jettys * ctx->recv_buf_size + i * ctx->send_buf_size :
+        (uint64_t)ctx->local_buf[i] + ctx->recv_buf_size;
     uint32_t local_sge_idx = (i * cfg->jfs_post_list + j) * PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num + cfg->sge_num;
 
     urma_sge_t *local_sge = &run_ctx->jfs_sge[local_sge_idx];
@@ -898,10 +898,10 @@ static void init_atomic_jfs_wr(urma_jfs_wr_t *wr, perftest_context_t *ctx, perft
     uint32_t remote_sge_idx = (i * cfg->jfs_post_list + j) * PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num;
 
     uint8_t *lva = (cfg->seg_pre_jetty == false) ?
-        (uint8_t *)ctx->local_buf[0] + (cfg->jettys + i) * ctx->buf_size + remainder * align_size :
-        (uint8_t *)ctx->local_buf[i] + ctx->buf_size + remainder * align_size;
+        (uint8_t *)ctx->local_buf[0] + cfg->jettys * ctx->recv_buf_size + i * ctx->send_buf_size + remainder * align_size :
+        (uint8_t *)ctx->local_buf[i] + ctx->recv_buf_size + remainder * align_size;
     uint8_t *rva = (cfg->seg_pre_jetty == false) ?
-        (uint8_t *)ctx->remote_seg[i].ubva.va + i * ctx->buf_size + remainder * align_size :
+        (uint8_t *)ctx->remote_seg[i].ubva.va + i * ctx->recv_buf_size + remainder * align_size :
         (uint8_t *)ctx->remote_seg[i].ubva.va + remainder * align_size;
 
     urma_sge_t *local_sge = &run_ctx->jfs_sge[local_sge_idx];
@@ -1079,7 +1079,7 @@ static void init_jfr_wr(urma_jfr_wr_t *wr, perftest_context_t *ctx, perftest_con
     uint32_t sge_idx;
 
     uint64_t lva = (cfg->seg_pre_jetty == false) ?
-        (uint64_t)ctx->local_buf[0] + i * ctx->buf_size :
+        (uint64_t)ctx->local_buf[0] + i * ctx->recv_buf_size :
         (uint64_t)ctx->local_buf[i];
 
     uint32_t local_sge_idx = (i * cfg->jfr_post_list + j) * PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num + cfg->sge_num;
@@ -1371,7 +1371,7 @@ static void *run_write_lat_duplex(void *arg)
 
     bool is_server = cfg->comm.server_ip == NULL;
 
-    volatile char *post_buf = (char *)ctx->local_buf[id] + ctx->buf_size + cfg->size - 1;
+    volatile char *post_buf = (char *)ctx->local_buf[id] + ctx->recv_buf_size + cfg->size - 1;
     volatile char *poll_buf = (char *)ctx->local_buf[id] + cfg->size - 1;
 
     if (cfg->time_type.bs.duration == 1) {
@@ -1782,7 +1782,7 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                     // Step increased value
                     urma_sge_t *local_sge = &run_ctx->jfs_sge[local_sge_idx];
                     increase_loc_addr(local_sge, cfg->size, run_ctx->scnt[index],
-                        (uint64_t)ctx->local_buf[index] + ctx->buf_size, cfg->cache_line_size, ctx->page_size);
+                        (uint64_t)ctx->local_buf[index] + ctx->recv_buf_size, cfg->cache_line_size, ctx->page_size);
 
                     if (cfg->api_type != PERFTEST_SEND) {
                         urma_sge_t *remote_sge =
@@ -2219,7 +2219,7 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                     urma_sge_t *local_sge = &run_ctx->jfs_sge[(index * cfg->jfs_post_list) *
                         PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num + cfg->sge_num];
                     increase_loc_addr(local_sge, cfg->size, run_ctx->scnt[index],
-                        (uint64_t)ctx->local_buf[index] + ctx->buf_size, cfg->cache_line_size, ctx->page_size);
+                        (uint64_t)ctx->local_buf[index] + ctx->recv_buf_size, cfg->cache_line_size, ctx->page_size);
                 }
 
                 run_ctx->scnt[index] += cfg->jfs_post_list;
