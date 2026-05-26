@@ -1158,6 +1158,7 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
         uint32_t i = bdp_jetty->enabled_indices[n];
         p_cfg.jfs_cfg.jfc = bdp_jfs_jfc->p_jfc[i];
         p_cfg.shared.jfr = bdp_jfr->p_jfr[i];
+        p_cfg.id = 0;
         if (bdp_rplc_jfc) {
             p_cfg.shared.jfc = bdp_rplc_jfc->p_jfc[i];
         }
