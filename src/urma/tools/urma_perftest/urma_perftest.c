@@ -119,14 +119,14 @@ static void *write_dirty_thread(void *args)
     while (cfg->enable_write_dirty == true && cfg->write_dirty_period >= PERFTEST_DEF_INF_PERIOD_MS) {
         int rand_num = rand() % PERFTEST_CHAR_MAX_VALUE;
         if (cfg->seg_pre_jetty == false) {
-            char *str = (char *)ctx->local_buf[0] + ctx->recv_buf_size * cfg->jettys;
-            for (size_t i = 0; i < ctx->send_buf_size * cfg->jettys; i++) {
+            char *str = (char *)ctx->local_buf[0] + ctx->buf_size * cfg->jettys;
+            for (size_t i = 0; i < ctx->buf_size * cfg->jettys; i++) {
                 str[i] = rand_num;
             }
         } else {
             for (uint32_t jetty = 0; jetty < cfg->jettys; jetty++) {
-                char *str = (char *)ctx->local_buf[jetty] + ctx->recv_buf_size;
-                for (size_t i = 0; i < ctx->send_buf_size; i++) {
+                char *str = (char *)ctx->local_buf[jetty] + ctx->buf_size;
+                for (size_t i = 0; i < ctx->buf_size; i++) {
                     str[i] = rand_num;
                 }
             }

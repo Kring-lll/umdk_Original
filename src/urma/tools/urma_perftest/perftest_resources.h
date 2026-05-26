@@ -80,12 +80,11 @@ typedef struct perftest_context {
     uint32_t jetty_num;
     urma_tp_info_t *tp_info;
 
-// buf
+    // buf
     uint64_t page_size;
     void **local_buf;
-    uint64_t recv_buf_size;
-    uint64_t send_buf_size;
-    uint64_t buf_len;     // buf_len = (recv_buf_size + send_buf_size) * jettys (or 1 if seg_pre_jetty)
+    uint64_t buf_size;
+    uint64_t buf_len;     // buf_len = buf_size * PERFTEST_BUF_NUM
     urma_target_seg_t **local_tseg;
 
     // remote info
