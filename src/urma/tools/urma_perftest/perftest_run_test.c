@@ -799,12 +799,23 @@ static void init_write_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, per
     uint32_t sge_size = cfg->size / cfg->sge_num;
     uint32_t sge_idx;
 
-    uint64_t lva = (cfg->seg_pre_jetty == false) ?
-        (uint64_t)ctx->local_buf[0] + (cfg->jettys + i) * ctx->buf_size :
-        (uint64_t)ctx->local_buf[i] + ctx->buf_size;    // Second half for local memory
-    uint64_t rva = (cfg->seg_pre_jetty == false) ?
-        (uint64_t)ctx->remote_seg[0].ubva.va + i * ctx->buf_size :
-        (uint64_t)ctx->remote_seg[i].ubva.va;
+    uint64_t lva;
+    uint64_t rva;
+    if (is_bond_balance_write_bw(ctx, cfg)) {
+        lva = (cfg->seg_pre_jetty == false) ?
+            (uint64_t)ctx->local_buf[0] :
+            (uint64_t)ctx->local_buf[i];
+        rva = (cfg->seg_pre_jetty == false) ?
+            (uint64_t)ctx->remote_seg[0].ubva.va :
+            (uint64_t)ctx->remote_seg[i].ubva.va;
+    } else {
+        lva = (cfg->seg_pre_jetty == false) ?
+            (uint64_t)ctx->local_buf[0] + (cfg->jettys + i) * ctx->buf_size :
+            (uint64_t)ctx->local_buf[i] + ctx->buf_size;
+        rva = (cfg->seg_pre_jetty == false) ?
+            (uint64_t)ctx->remote_seg[0].ubva.va + i * ctx->buf_size :
+            (uint64_t)ctx->remote_seg[i].ubva.va;
+    }
 
     uint32_t local_sge_idx = (i * cfg->jfs_post_list + j) * PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num + cfg->sge_num;
     uint32_t remote_sge_idx = (i * cfg->jfs_post_list + j) * PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num;
@@ -819,11 +830,16 @@ static void init_write_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, per
     if (j > 0) {
         uint32_t l_idx = (i * cfg->jfs_post_list + j - 1) * PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num + cfg->sge_num;
         uint32_t r_idx = (i * cfg->jfs_post_list + j - 1) * PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num;
-        local_sge[0].addr = run_ctx->jfs_sge[l_idx].addr;
-        remote_sge[0].addr = run_ctx->jfs_sge[r_idx].addr;
-        if (cfg->cmd == PERFTEST_WRITE_BW && cfg->size <= (ctx->page_size / PERFTEST_BUF_NUM)) {
-            increase_loc_addr(&local_sge[0], cfg->size, j - 1, lva, cfg->cache_line_size, ctx->page_size);
-            increase_loc_addr(&remote_sge[0], cfg->size, j - 1, rva, cfg->cache_line_size, ctx->page_size);
+        if (is_bond_balance_write_bw(ctx, cfg)) {
+            local_sge[0].addr = lva + j * cfg->size;
+            remote_sge[0].addr = rva + j * cfg->size;
+        } else {
+            local_sge[0].addr = run_ctx->jfs_sge[l_idx].addr;
+            remote_sge[0].addr = run_ctx->jfs_sge[r_idx].addr;
+            if (cfg->cmd == PERFTEST_WRITE_BW && cfg->size <= (ctx->page_size / PERFTEST_BUF_NUM)) {
+                increase_loc_addr(&local_sge[0], cfg->size, j - 1, lva, cfg->cache_line_size, ctx->page_size);
+                increase_loc_addr(&remote_sge[0], cfg->size, j - 1, rva, cfg->cache_line_size, ctx->page_size);
+            }
         }
     }
 
@@ -1776,19 +1792,30 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                 }
 
                 /* In the case of non wr_list, the address of each wqe is also incremented. */
-                if (cfg->jfs_post_list == 1 && cfg->size <= (ctx->page_size / PERFTEST_BUF_NUM)) {
-                    uint32_t local_sge_idx = (index * cfg->jfs_post_list) * PERFTEST_SGE_NUM_PRE_WR *
-                        cfg->sge_num + cfg->sge_num;
-                    // Step increased value
-                    urma_sge_t *local_sge = &run_ctx->jfs_sge[local_sge_idx];
-                    increase_loc_addr(local_sge, cfg->size, run_ctx->scnt[index],
-                        (uint64_t)ctx->local_buf[index] + ctx->buf_size, cfg->cache_line_size, ctx->page_size);
+                if (cfg->jfs_post_list == 1) {
+                    if (is_bond_balance_write_bw(ctx, cfg)) {
+                        uint32_t local_sge_idx = (index * cfg->jfs_post_list) *
+                            PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num + cfg->sge_num;
+                        urma_sge_t *local_sge = &run_ctx->jfs_sge[local_sge_idx];
+                        local_sge[0].addr = (uint64_t)ctx->local_buf[index] +
+                            ((run_ctx->scnt[index] + cfg->jfs_post_list) % cfg->jfs_depth) * cfg->size;
+                        urma_sge_t *remote_sge = &run_ctx->jfs_sge[(index * cfg->jfs_post_list) *
+                            PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num];
+                        remote_sge[0].addr = (uint64_t)ctx->remote_seg[index].ubva.va +
+                            ((run_ctx->scnt[index] + cfg->jfs_post_list) % cfg->jfs_depth) * cfg->size;
+                    } else if (cfg->size <= (ctx->page_size / PERFTEST_BUF_NUM)) {
+                        uint32_t local_sge_idx = (index * cfg->jfs_post_list) *
+                            PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num + cfg->sge_num;
+                        urma_sge_t *local_sge = &run_ctx->jfs_sge[local_sge_idx];
+                        increase_loc_addr(local_sge, cfg->size, run_ctx->scnt[index],
+                            (uint64_t)ctx->local_buf[index] + ctx->buf_size, cfg->cache_line_size, ctx->page_size);
 
-                    if (cfg->api_type != PERFTEST_SEND) {
-                        urma_sge_t *remote_sge =
-                            &run_ctx->jfs_sge[(index * cfg->jfs_post_list) * PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num];
-                        increase_loc_addr(remote_sge, cfg->size, run_ctx->scnt[index],
-                            (uint64_t)ctx->remote_seg[index].ubva.va, cfg->cache_line_size, ctx->page_size);
+                        if (cfg->api_type != PERFTEST_SEND) {
+                            urma_sge_t *remote_sge =
+                                &run_ctx->jfs_sge[(index * cfg->jfs_post_list) * PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num];
+                            increase_loc_addr(remote_sge, cfg->size, run_ctx->scnt[index],
+                                (uint64_t)ctx->remote_seg[index].ubva.va, cfg->cache_line_size, ctx->page_size);
+                        }
                     }
                 }
 
@@ -2676,6 +2703,18 @@ static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
                 run_ctx->scnt[index] += cfg->jfs_post_list;
                 scnt_for_jetty[index] += cfg->jfs_post_list;
                 tot_scnt += cfg->jfs_post_list;
+
+                if (cfg->jfs_post_list == 1 && is_bond_balance_write_bw(ctx, cfg)) {
+                    uint32_t local_sge_idx = (index * cfg->jfs_post_list) *
+                        PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num + cfg->sge_num;
+                    urma_sge_t *local_sge = &run_ctx->jfs_sge[local_sge_idx];
+                    local_sge[0].addr = (uint64_t)ctx->local_buf[index] +
+                        (run_ctx->scnt[index] % cfg->jfs_depth) * cfg->size;
+                    urma_sge_t *remote_sge = &run_ctx->jfs_sge[(index * cfg->jfs_post_list) *
+                        PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num];
+                    remote_sge[0].addr = (uint64_t)ctx->remote_seg[index].ubva.va +
+                        (run_ctx->scnt[index] % cfg->jfs_depth) * cfg->size;
+                }
 
                 if (cfg->jfs_post_list == 1 && (run_ctx->scnt[index] % cfg->cq_mod == cfg->cq_mod - 1 ||
                     (cfg->time_type.bs.iterations == 1 && run_ctx->scnt[index] == cfg->iters - 1))) {

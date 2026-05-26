@@ -766,12 +766,16 @@ static int register_mem(perftest_context_t *ctx, perftest_config_t *cfg)
         }
     }
 
-    // holds the size of maximum between cfg->size and page_size, aligned to cache line.
-    uint64_t max_size = MAX(cfg->size, ctx->page_size);
-    ctx->buf_size = PERFTEST_ALIGN_CACHELINE(max_size, cfg->cache_line_size);
-    // Buff is divided into two parts, one for recv and the other for send
-    ctx->buf_len = ctx->buf_size * PERFTEST_BUF_NUM *
-        ((cfg->seg_pre_jetty == true) ? 1 : cfg->jettys);
+    if (is_bond_balance_write_bw(ctx, cfg)) {
+        ctx->buf_size = PERFTEST_ALIGN_CACHELINE(cfg->size, cfg->cache_line_size);
+        ctx->buf_len = ctx->buf_size * cfg->jfs_depth *
+            ((cfg->seg_pre_jetty == true) ? 1 : cfg->jettys);
+    } else {
+        uint64_t max_size = MAX(cfg->size, ctx->page_size);
+        ctx->buf_size = PERFTEST_ALIGN_CACHELINE(max_size, cfg->cache_line_size);
+        ctx->buf_len = ctx->buf_size * PERFTEST_BUF_NUM *
+            ((cfg->seg_pre_jetty == true) ? 1 : cfg->jettys);
+    }
 
     for (i = 0; i < cfg->jettys; i++) {
         if (cfg->use_huge_page) {

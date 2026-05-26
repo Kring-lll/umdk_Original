@@ -1056,6 +1056,12 @@ int check_local_cfg(perftest_config_t *cfg)
         return -1;
     }
 
+    if (is_bond_balance_write_bw_cfg(cfg) && cfg->jfs_depth != cfg->jfr_depth) {
+        (void)fprintf(stderr, "jfs_depth must equal jfr_depth for bond balance write_bw, "
+            "jfs_depth: %u, jfr_depth: %u.\n", cfg->jfs_depth, cfg->jfr_depth);
+        return -1;
+    }
+
     if (cfg->priority != PERFTEST_INVALID_PRIORITY && cfg->priority > URMA_MAX_PRIORITY) {
         (void)fprintf(stderr, "Invalid parameter(priority): %hhu, should be 0-15.\n", cfg->priority);
         return -1;

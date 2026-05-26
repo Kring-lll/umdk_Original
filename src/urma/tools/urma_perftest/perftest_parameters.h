@@ -16,6 +16,7 @@
 
 #include "ub_util.h"
 #include "urma_types.h"
+#include "urma_ubagg.h"
 
 #include "perftest_communication.h"
 
@@ -355,5 +356,13 @@ int check_remote_cfg(perftest_config_t *cfg);
 bool is_jfr_depth_valid(perftest_config_t *cfg);
 int establish_connection(perftest_config_t *cfg);
 void close_connection(perftest_config_t *cfg);
+
+static inline bool is_bond_balance_write_bw_cfg(const perftest_config_t *cfg)
+{
+    return cfg->enable_aggr_mode &&
+           cfg->aggr_mode == BONDP_BONDING_MODE_BALANCE &&
+           cfg->cmd == PERFTEST_WRITE_BW &&
+           strstr(cfg->dev_name, "bonding_dev") != NULL;
+}
 
 #endif
