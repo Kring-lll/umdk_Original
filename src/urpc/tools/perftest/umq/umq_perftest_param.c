@@ -21,7 +21,7 @@
 static uint32_t umq_perftest_block_size(uint32_t blk_mode)
 {
     switch (blk_mode) {
-        case BLOCK_SIZE_4K:
+        case BLOCK_SIZE_MAX:
             return PERFTEST_BLOCK_4K;
         case BLOCK_SIZE_8K:
             return PERFTEST_BLOCK_8K;
@@ -128,6 +128,7 @@ static void init_cfg(umq_perftest_config_t *cfg)
     cfg->test_round = DEFAULT_LAT_TEST_ROUND;
     cfg->thresh_num = 0;
     cfg->blk_mode = 0;
+    cfg->blk_size = umq_perftest_block_size(cfg->blk_mode);
     cfg->req_size = config->size;
     cfg->rsp_size = config->size;
 }

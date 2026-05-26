@@ -36,15 +36,6 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
         goto CLOSE_EPOLL_FD;
     }
 
-    struct epoll_event event;
-    event.events = EPOLLIN | EPOLLET;
-    event.data.fd = tx_fd;
-    ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, tx_fd, &event);
-    if (ret < 0) {
-        LOG_PRINT("epoll_ctl add tx_fd failed, errno=%d\n", errno);
-        goto CLOSE_EPOLL_FD;
-    }
-
     interrupt_option.direction = UMQ_IO_RX;
     int rx_fd = umq_interrupt_fd_get(umqh, &interrupt_option);
     if (rx_fd < 0) {
@@ -52,12 +43,24 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
         goto CLOSE_EPOLL_FD;
     }
 
+    struct epoll_event event;
+    event.events = EPOLLIN | EPOLLET;
+
     event.data.fd = rx_fd;
     ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, rx_fd, &event);
     if (ret < 0) {
         LOG_PRINT("epoll_ctl add rx_fd failed, errno=%d\n", errno);
         goto CLOSE_EPOLL_FD;
     }
+
+    event.data.fd = tx_fd;
+    ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, tx_fd, &event);
+    if (ret < 0) {
+        LOG_PRINT("epoll_ctl add tx_fd failed, errno=%d\n", errno);
+        goto CLOSE_EPOLL_FD;
+    }
+
+    LOG_PRINT("epoll_ctl add tx_fd %d, rx_fd %d\n", tx_fd, rx_fd);
 
     interrupt_option.direction = UMQ_IO_TX;
     if (umq_rearm_interrupt(umqh, false, &interrupt_option) != 0) {
@@ -71,7 +74,8 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
         goto CLOSE_EPOLL_FD;
     }
 
-    umq_buf_t *recv_qbuf, *send_qbuf, *bad_qbuf = NULL;
+    umq_buf_t *head, *recv_qbuf, *send_qbuf, *bad_qbuf = NULL;
+    umq_buf_pro_t *buf_pro;
 
     // epoll_wait
     int event_num, poll_num, cq_num;
@@ -82,10 +86,23 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
     struct epoll_event e[UMQ_EPOLL_EVENT_BATCH];
     umq_buf_t *buf[UMQ_POST_POLL_BATCH];
     bool can_send = false;
+    uint32_t send_cnt = 0, recv_cnt = 0;
 
     send_qbuf = umq_buf_alloc(lat_arg->cfg->rsp_size, 1, UMQ_INVALID_HANDLE, NULL);
     if (send_qbuf == NULL) {
         goto CLOSE_EPOLL_FD;
+    }
+
+    head = send_qbuf;
+    while (head != NULL) {
+        buf_pro = (umq_buf_pro_t *)head->qbuf_ext;
+        buf_pro->opcode = UMQ_OPC_SEND;
+        buf_pro->flag.value = 0;
+        buf_pro->user_ctx = 0;
+        buf_pro->flag.bs.solicited_enable = 1;
+        buf_pro->flag.bs.complete_enable = 1; // tx notify
+
+        head = head->qbuf_next;
     }
 
     while (get_perftest_latency_ctx()->iters < test_round && !is_perftest_force_quit()) {
@@ -95,8 +112,10 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
             goto CLOSE_EPOLL_FD;
         }
 
+        LOG_PRINT("epoll_wait event cnt %d\n", event_num);
         for (int i = 0; i < event_num; i++) {
-            if (event.data.fd == rx_fd) {
+            LOG_PRINT("epoll_wait event fd %d\n", e[i].data.fd);
+            if (e[i].data.fd == rx_fd) {
                 interrupt_option.direction = UMQ_IO_RX;
                 cq_num = umq_get_cq_event(umqh, &interrupt_option);
                 if (cq_num < 0) {
@@ -112,6 +131,8 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
                         goto CLOSE_EPOLL_FD;
                     }
 
+                    // LOG_PRINT("poll %d rx, poll_rx_num %d\n", poll_num, poll_rx_num);
+
                     for (int j = 0; j < poll_num; j++) {
                         if (buf[j]->status != UMQ_BUF_SUCCESS) {
                             if (buf[j]->status == UMQ_FAKE_BUF_FC_UPDATE) {
@@ -119,7 +140,7 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
                                 can_send = true;
                                 buf[j]->qbuf_next = NULL;
                                 umq_buf_free(buf[j]);
-                                poll_rx_num++;
+                                LOG_PRINT("umq_poll fc update\n");
                                 continue;
                             }
 
@@ -134,7 +155,9 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
 
                         if (recv_size == lat_arg->cfg->req_size) {
                             can_send = true;
+                            LOG_PRINT("recv %uth request %lu\n", recv_cnt, recv_size);
                             recv_size = 0;
+                            recv_cnt++;
                         } else if (recv_size > lat_arg->cfg->req_size) {
                             LOG_PRINT("umq_poll failed, recv_size=%lu larger than req_size=%u\n", recv_size,
                                       lat_arg->cfg->req_size);
@@ -176,6 +199,7 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
                     goto CLOSE_EPOLL_FD;
                 }
 
+                LOG_PRINT("umq_get_cq_event tx cq_num=%d\n", cq_num);
                 do {
                     poll_num = umq_poll(umqh, UMQ_IO_TX, buf, UMQ_POST_POLL_BATCH);
                     if (poll_num < 0) {
@@ -183,6 +207,7 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
                         goto CLOSE_EPOLL_FD;
                     }
 
+                    LOG_PRINT("umq_poll tx poll_num=%d\n", poll_num);
                     for (int j = 0; j < poll_num; j++) {
                         if (buf[j]->status != UMQ_BUF_SUCCESS) {
                             LOG_PRINT("umq_poll failed, tx buf status=%d\n", buf[j]->status);
@@ -203,6 +228,17 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
                             send_qbuf = umq_buf_alloc(lat_arg->cfg->rsp_size, 1, UMQ_INVALID_HANDLE, NULL);
                             if (send_qbuf == NULL) {
                                 goto CLOSE_EPOLL_FD;
+                            }
+                            head = send_qbuf;
+                            while (head != NULL) {
+                                buf_pro = (umq_buf_pro_t *)head->qbuf_ext;
+                                buf_pro->opcode = UMQ_OPC_SEND;
+                                buf_pro->flag.value = 0;
+                                buf_pro->user_ctx = 0;
+                                buf_pro->flag.bs.solicited_enable = 1;
+                                buf_pro->flag.bs.complete_enable = 1;
+
+                                head = head->qbuf_next;
                             }
 
                             send_size = 0;
@@ -229,7 +265,9 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
             bad_qbuf = NULL;
             ret = umq_post(umqh, send_qbuf, UMQ_IO_TX, &bad_qbuf);
             if (ret == 0) {
+                send_cnt++;
                 can_send = false;
+                LOG_PRINT("umq_post %u success\n", send_cnt);
                 continue;
             }
 
@@ -299,7 +337,7 @@ void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
         goto CLOSE_EPOLL_FD;
     }
 
-    umq_buf_t *recv_qbuf, *send_qbuf, *bad_qbuf = NULL;
+    umq_buf_t *head, *recv_qbuf, *send_qbuf, *bad_qbuf = NULL;
 
     // epoll_wait
     int event_num, poll_num, cq_num;
@@ -309,16 +347,30 @@ void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
     uint32_t poll_rx_num = 0;
     struct epoll_event e[UMQ_EPOLL_EVENT_BATCH];
     umq_buf_t *buf[UMQ_POST_POLL_BATCH];
+    umq_buf_pro_t *buf_pro;
     bool can_send = true;
+    uint32_t send_cnt = 0, recv_cnt = 0;
 
     send_qbuf = umq_buf_alloc(lat_arg->cfg->req_size, 1, UMQ_INVALID_HANDLE, NULL);
     if (send_qbuf == NULL) {
         goto CLOSE_EPOLL_FD;
     }
+    head = send_qbuf;
+    while (head != NULL) {
+        buf_pro = (umq_buf_pro_t *)head->qbuf_ext;
+        buf_pro->opcode = UMQ_OPC_SEND;
+        buf_pro->flag.value = 0;
+        buf_pro->user_ctx = 0;
+        buf_pro->flag.bs.solicited_enable = 1;
+        buf_pro->flag.bs.complete_enable = 1;
+
+        head = head->qbuf_next;
+    }
 
     ret = umq_post(umqh, send_qbuf, UMQ_IO_TX, &bad_qbuf);
     if (ret == 0) {
         can_send = false;
+        send_cnt++;
     } else if (ret == -UMQ_ERR_EAGAIN) {
         send_qbuf = bad_qbuf;
     } else {
@@ -333,7 +385,7 @@ void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
         }
 
         for (int i = 0; i < event_num; i++) {
-            if (event.data.fd == rx_fd) {
+            if (e[i].data.fd == rx_fd) {
                 interrupt_option.direction = UMQ_IO_RX;
                 cq_num = umq_get_cq_event(umqh, &interrupt_option);
                 if (cq_num < 0) {
@@ -349,6 +401,8 @@ void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
                         goto CLOSE_EPOLL_FD;
                     }
 
+                    // LOG_PRINT("poll %d rx, poll_rx_num %d\n", poll_num, poll_rx_num);
+
                     for (int j = 0; j < poll_num; j++) {
                         if (buf[j]->status != UMQ_BUF_SUCCESS) {
                             if (buf[j]->status == UMQ_FAKE_BUF_FC_UPDATE) {
@@ -356,7 +410,7 @@ void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
                                 can_send = true;
                                 buf[j]->qbuf_next = NULL;
                                 umq_buf_free(buf[j]);
-                                poll_rx_num++;
+                                LOG_PRINT("umq_poll fc update\n");
                                 continue;
                             }
 
@@ -371,6 +425,9 @@ void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
 
                         if (recv_size == lat_arg->cfg->rsp_size) {
                             can_send = true;
+                            recv_cnt++;
+                            LOG_PRINT("recv %uth response %lu\n", recv_cnt, recv_size);
+
                             get_perftest_latency_ctx()->iters++;
                             if (get_perftest_latency_ctx()->iters >= test_round) {
                                 goto CLOSE_EPOLL_FD;
@@ -441,6 +498,17 @@ void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
                             if (send_qbuf == NULL) {
                                 goto CLOSE_EPOLL_FD;
                             }
+                            head = send_qbuf;
+                            while (head != NULL) {
+                                buf_pro = (umq_buf_pro_t *)head->qbuf_ext;
+                                buf_pro->opcode = UMQ_OPC_SEND;
+                                buf_pro->flag.value = 0;
+                                buf_pro->user_ctx = 0;
+                                buf_pro->flag.bs.solicited_enable = 1;
+                                buf_pro->flag.bs.complete_enable = 1;
+
+                                head = head->qbuf_next;
+                            }
 
                             send_size = 0;
                         } else if (send_size > lat_arg->cfg->req_size) {
@@ -467,6 +535,8 @@ void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
             ret = umq_post(umqh, send_qbuf, UMQ_IO_TX, &bad_qbuf);
             if (ret == 0) {
                 can_send = false;
+                send_cnt++;
+                LOG_PRINT("umq_post %uth success\n", send_cnt);
                 continue;
             }
 

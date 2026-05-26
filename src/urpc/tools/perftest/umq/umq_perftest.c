@@ -187,6 +187,19 @@ static void umq_perftest_finish_perf(umq_perftest_config_t *cfg)
     }
 }
 
+static const char *g_log_level_to_str[UMQ_LOG_LEVEL_MAX] = {"EMERG", "ALERT", "CRIT", "ERROR", "WARNING",
+                                                            "NOTICE", "INFO", "DEBUG"};
+
+static void default_output(int level, char *log_msg)
+{
+    struct timeval tval;
+    struct tm time;
+    (void)gettimeofday(&tval, NULL);
+    (void)localtime_r(&tval.tv_sec, &time);
+    (void)fprintf(stdout, "%02d%02d %02d:%02d:%02d.%06ld|%s|%s", time.tm_mon + 1, time.tm_mday, time.tm_hour,
+                  time.tm_min, time.tm_sec, (long)tval.tv_usec, g_log_level_to_str[level], log_msg);
+}
+
 static int umq_perftest_init_umq(umq_perftest_config_t *cfg)
 {
     umq_init_cfg_t *umq_config = (umq_init_cfg_t *)calloc(1, sizeof(*umq_config));
@@ -206,6 +219,16 @@ static int umq_perftest_init_umq(umq_perftest_config_t *cfg)
     umq_config->block_cfg.small_block_size = cfg->blk_mode;
     if (fill_dev_info(&umq_config->trans_info[0].dev_info, cfg) != 0) {
         free(umq_config);
+        return -1;
+    }
+
+    umq_log_config_t log_cfg = {
+        .log_flag = UMQ_LOG_FLAG_FUNC | UMQ_LOG_FLAG_LEVEL,
+        .func = default_output,
+        .level = UMQ_LOG_LEVEL_DEBUG};
+
+    if (umq_log_config_set(&log_cfg) != UMQ_SUCCESS) {
+        LOG_PRINT("umq_log_config_set failed\n");
         return -1;
     }
 
