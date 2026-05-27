@@ -7,6 +7,22 @@ package(
 
 cc_library(
     name = "urma_headers",
-    hdrs = glob(["include/ub/umdk/urma/*.h"]),
-    includes = ["include/ub/umdk/urma"],
+    hdrs = glob([
+        "common/include/*.h",
+        "lib/urma/bond/**/*.h",
+        "lib/urma/core/*.h",
+        "lib/urma/core/include/*.h",
+        "lib/uvs/core/*.h",
+        "lib/uvs/core/include/*.h",
+    ]),
+    includes = [
+        "common/include",
+        "lib/urma/bond",
+        "lib/urma/bond/include",
+        "lib/urma/bond/utils",
+        "lib/urma/core",
+        "lib/urma/core/include",
+        "lib/uvs/core",
+        "lib/uvs/core/include",
+    ],
 )
