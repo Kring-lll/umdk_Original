@@ -180,31 +180,73 @@ static inline urma_target_seg_t *get_v_tseg(urma_target_seg_t *tseg)
     return (urma_target_seg_t *)(uintptr_t)tseg->handle;
 }
 
-static void map_send_vwr_to_path(urma_jfs_wr_t *send_wr, int send_idx, int target_idx)
+static void map_nullable_sge_tseg_to_path(urma_sge_t *sge, uint32_t num_sge, int send_idx, int target_idx)
 {
-    if (send_wr->send.src.num_sge > 0 && send_wr->send.src.sge != NULL) {
-        for (int i = 0; i < send_wr->send.src.num_sge; ++i) {
-            send_wr->send.src.sge[i].tseg = get_p_tseg(send_wr->send.src.sge[i].tseg, send_idx, target_idx);
+    if (sge == NULL) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < num_sge; ++i) {
+        if (sge[i].tseg != NULL) {
+            sge[i].tseg = get_p_tseg(sge[i].tseg, send_idx, target_idx);
         }
     }
+}
+
+static void restore_nullable_sge_tseg_to_vwr(urma_sge_t *sge, uint32_t num_sge)
+{
+    if (sge == NULL) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < num_sge; ++i) {
+        if (sge[i].tseg != NULL) {
+            sge[i].tseg = get_v_tseg(sge[i].tseg);
+        }
+    }
+}
+
+static void get_nullable_sge_tseg(urma_sge_t *sge, uint32_t num_sge)
+{
+    if (sge == NULL) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < num_sge; ++i) {
+        if (sge[i].tseg != NULL) {
+            bondp_tseg_get(sge[i].tseg);
+        }
+    }
+}
+
+static void put_nullable_sge_tseg(urma_sge_t *sge, uint32_t num_sge)
+{
+    if (sge == NULL) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < num_sge; ++i) {
+        if (sge[i].tseg != NULL) {
+            bondp_tseg_put(sge[i].tseg);
+        }
+    }
+}
+
+static void map_send_vwr_to_path(urma_jfs_wr_t *send_wr, int send_idx, int target_idx)
+{
+    map_nullable_sge_tseg_to_path(send_wr->send.src.sge, send_wr->send.src.num_sge, send_idx, target_idx);
     send_wr->tjetty = get_p_tjetty(send_wr->tjetty, send_idx, target_idx);
 }
 
 static void restore_send_pwr_to_vwr(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty)
 {
-    if (send_wr->send.src.num_sge > 0 && send_wr->send.src.sge != NULL) {
-        for (int i = 0; i < send_wr->send.src.num_sge; ++i) {
-            send_wr->send.src.sge[i].tseg = get_v_tseg(send_wr->send.src.sge[i].tseg);
-        }
-    }
+    restore_nullable_sge_tseg_to_vwr(send_wr->send.src.sge, send_wr->send.src.num_sge);
     send_wr->tjetty = vtjetty;
 }
 
 static void map_write_vwr_to_path(urma_jfs_wr_t *send_wr, int send_idx, int target_idx)
 {
-    for (int i = 0; i < send_wr->rw.src.num_sge; ++i) {
-        send_wr->rw.src.sge[i].tseg = get_p_tseg(send_wr->rw.src.sge[i].tseg, send_idx, target_idx);
-    }
+    map_nullable_sge_tseg_to_path(send_wr->rw.src.sge, send_wr->rw.src.num_sge, send_idx, target_idx);
     for (int i = 0; i < send_wr->rw.dst.num_sge; ++i) {
         send_wr->rw.dst.sge[i].tseg = get_p_tseg(send_wr->rw.dst.sge[i].tseg, send_idx, target_idx);
     }
@@ -213,9 +255,7 @@ static void map_write_vwr_to_path(urma_jfs_wr_t *send_wr, int send_idx, int targ
 
 static void restore_write_pwr_to_vwr(urma_jfs_wr_t *send_wr, urma_target_jetty_t *vtjetty)
 {
-    for (int i = 0; i < send_wr->rw.src.num_sge; ++i) {
-        send_wr->rw.src.sge[i].tseg = get_v_tseg(send_wr->rw.src.sge[i].tseg);
-    }
+    restore_nullable_sge_tseg_to_vwr(send_wr->rw.src.sge, send_wr->rw.src.num_sge);
     for (int i = 0; i < send_wr->rw.dst.num_sge; ++i) {
         send_wr->rw.dst.sge[i].tseg = get_v_tseg(send_wr->rw.dst.sge[i].tseg);
     }
@@ -337,19 +377,13 @@ void add_vwr_use_cnt(urma_jfs_wr_t *wr)
         case URMA_OPC_SEND:
         case URMA_OPC_SEND_IMM:
         case URMA_OPC_SEND_INVALIDATE:
-            if (wr->send.src.sge != NULL) {
-                for (int i = 0; i < wr->send.src.num_sge; ++i) {
-                    bondp_tseg_get(wr->send.src.sge[i].tseg);
-                }
-            }
+            get_nullable_sge_tseg(wr->send.src.sge, wr->send.src.num_sge);
             return;
         case URMA_OPC_WRITE:
         case URMA_OPC_WRITE_IMM:
         case URMA_OPC_WRITE_NOTIFY:
         case URMA_OPC_READ:
-            for (int i = 0; i < wr->rw.src.num_sge; ++i) {
-                bondp_tseg_get(wr->rw.src.sge[i].tseg);
-            }
+            get_nullable_sge_tseg(wr->rw.src.sge, wr->rw.src.num_sge);
             for (int i = 0; i < wr->rw.dst.num_sge; ++i) {
                 bondp_tseg_get(wr->rw.dst.sge[i].tseg);
             }
@@ -369,19 +403,13 @@ void release_vwr_use_cnt(urma_jfs_wr_t *wr)
         case URMA_OPC_SEND:
         case URMA_OPC_SEND_IMM:
         case URMA_OPC_SEND_INVALIDATE:
-            if (wr->send.src.sge != NULL) {
-                for (int i = 0; i < wr->send.src.num_sge; ++i) {
-                    bondp_tseg_put(wr->send.src.sge[i].tseg);
-                }
-            }
+            put_nullable_sge_tseg(wr->send.src.sge, wr->send.src.num_sge);
             return;
         case URMA_OPC_WRITE:
         case URMA_OPC_WRITE_IMM:
         case URMA_OPC_WRITE_NOTIFY:
         case URMA_OPC_READ:
-            for (int i = 0; i < wr->rw.src.num_sge; ++i) {
-                bondp_tseg_put(wr->rw.src.sge[i].tseg);
-            }
+            put_nullable_sge_tseg(wr->rw.src.sge, wr->rw.src.num_sge);
             for (int i = 0; i < wr->rw.dst.num_sge; ++i) {
                 bondp_tseg_put(wr->rw.dst.sge[i].tseg);
             }
