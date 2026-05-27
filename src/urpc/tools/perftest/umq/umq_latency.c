@@ -19,6 +19,18 @@
 #define UMQ_EPOLL_EVENT_BATCH 32
 #define UMQ_POST_POLL_BATCH   64
 
+static int umq_tx_qbuf_cnt(umq_buf_t *head, umq_buf_t *tail)
+{
+    int cnt = 0;
+    umq_buf_t *tmp = head;
+    while (tmp != tail) {
+        tmp = tmp->qbuf_next;
+        cnt++;
+    }
+
+    return cnt;
+}
+
 void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t *lat_arg)
 {
     int ret;
@@ -87,6 +99,7 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
     umq_buf_t *buf[UMQ_POST_POLL_BATCH];
     bool can_send = false;
     uint32_t send_cnt = 0, recv_cnt = 0;
+    uint32_t tx_depth = lat_arg->config.tx_depth;
 
     send_qbuf = umq_buf_alloc(lat_arg->cfg->rsp_size, 1, UMQ_INVALID_HANDLE, NULL);
     if (send_qbuf == NULL) {
@@ -206,7 +219,7 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
                         LOG_PRINT("umq_poll failed, ret=%d\n", poll_num);
                         goto CLOSE_EPOLL_FD;
                     }
-
+                    tx_depth += poll_num;
                     LOG_PRINT("umq_poll tx poll_num=%d\n", poll_num);
                     for (int j = 0; j < poll_num; j++) {
                         if (buf[j]->status != UMQ_BUF_SUCCESS) {
@@ -261,17 +274,20 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
         }
 
         // send tx
-        if (can_send && send_qbuf != NULL) {
+        if (can_send && tx_depth > 0 && send_qbuf != NULL) {
             bad_qbuf = NULL;
             ret = umq_post(umqh, send_qbuf, UMQ_IO_TX, &bad_qbuf);
             if (ret == 0) {
                 send_cnt++;
+
+                tx_depth -= umq_tx_qbuf_cnt(send_qbuf, NULL);
                 can_send = false;
                 LOG_PRINT("umq_post %u success\n", send_cnt);
                 continue;
             }
 
             if (ret == -UMQ_ERR_EAGAIN) {
+                tx_depth -= umq_tx_qbuf_cnt(send_qbuf, bad_qbuf);
                 send_qbuf = bad_qbuf;
                 continue;
             }
@@ -350,6 +366,7 @@ void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
     umq_buf_pro_t *buf_pro;
     bool can_send = true;
     uint32_t send_cnt = 0, recv_cnt = 0;
+    uint32_t tx_depth = lat_arg->config.tx_depth;
 
     send_qbuf = umq_buf_alloc(lat_arg->cfg->req_size, 1, UMQ_INVALID_HANDLE, NULL);
     if (send_qbuf == NULL) {
@@ -370,8 +387,10 @@ void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
     ret = umq_post(umqh, send_qbuf, UMQ_IO_TX, &bad_qbuf);
     if (ret == 0) {
         can_send = false;
+        tx_depth -= umq_tx_qbuf_cnt(send_qbuf, NULL);
         send_cnt++;
     } else if (ret == -UMQ_ERR_EAGAIN) {
+        tx_depth -= umq_tx_qbuf_cnt(send_qbuf, bad_qbuf);
         send_qbuf = bad_qbuf;
     } else {
         goto CLOSE_EPOLL_FD;
@@ -482,6 +501,8 @@ void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
                         goto CLOSE_EPOLL_FD;
                     }
 
+                    tx_depth += poll_num;
+
                     for (int j = 0; j < poll_num; j++) {
                         if (buf[j]->status != UMQ_BUF_SUCCESS) {
                             LOG_PRINT("umq_poll failed, tx buf status=%d\n", buf[j]->status);
@@ -530,17 +551,19 @@ void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
         }
 
         // send tx
-        if (can_send && send_qbuf != NULL) {
+        if (can_send && tx_depth > 0 && send_qbuf != NULL) {
             bad_qbuf = NULL;
             ret = umq_post(umqh, send_qbuf, UMQ_IO_TX, &bad_qbuf);
             if (ret == 0) {
                 can_send = false;
+                tx_depth -= umq_tx_qbuf_cnt(send_qbuf, NULL);
                 send_cnt++;
                 LOG_PRINT("umq_post %uth success\n", send_cnt);
                 continue;
             }
 
             if (ret == -UMQ_ERR_EAGAIN) {
+                tx_depth -= umq_tx_qbuf_cnt(send_qbuf, bad_qbuf);
                 send_qbuf = bad_qbuf;
                 continue;
             }
