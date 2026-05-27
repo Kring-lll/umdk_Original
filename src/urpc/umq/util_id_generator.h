@@ -22,10 +22,23 @@ typedef struct util_id_allocator {
     util_external_mutex_lock *lock;
 } util_id_allocator_t;
 
+typedef struct util_id_allocator_autoinc {
+    uint32_t max_num;
+    uint32_t start_id;
+    uint32_t cur_id;
+    uint32_t *id_bitmap;
+    util_external_mutex_lock *lock;
+} util_id_allocator_autoinc_t;
+
 int util_id_allocator_init(util_id_allocator_t *id_allocator, uint32_t max_num, uint32_t start_id);
 void util_id_allocator_uninit(util_id_allocator_t *id_allocator);
 uint32_t util_id_allocator_get(util_id_allocator_t *id_allocator);
 void util_id_allocator_release(util_id_allocator_t *id_allocator, uint32_t util_id);
+
+int util_id_allocator_autoinc_init(util_id_allocator_autoinc_t *id_allocator, uint32_t max_num, uint32_t start_id);
+void util_id_allocator_autoinc_uninit(util_id_allocator_autoinc_t *id_allocator);
+int util_id_allocator_autoinc_get(util_id_allocator_autoinc_t *id_allocator);
+void util_id_allocator_autoinc_release(util_id_allocator_autoinc_t *id_allocator, uint32_t id);
 
 #ifdef __cplusplus
 }
