@@ -71,3 +71,101 @@ void util_id_allocator_release(util_id_allocator_t *id_allocator, uint32_t util_
     (void)util_mutex_unlock(id_allocator->lock);
     return;
 }
+
+int util_id_allocator_autoinc_init(util_id_allocator_autoinc_t *id_allocator, uint32_t max_num, uint32_t start_id)
+{
+    if (id_allocator->id_bitmap != NULL) {
+        return -1;
+    }
+
+    if (max_num == 0 || start_id >= UINT32_MAX - max_num + 1) {
+        return -1;
+    }
+
+    uint32_t bitmap_size = (max_num + 31) / 32;
+    id_allocator->id_bitmap = (uint32_t *)calloc(bitmap_size, sizeof(uint32_t));
+    if (id_allocator->id_bitmap == NULL) {
+        return -ENOMEM;
+    }
+
+    id_allocator->max_num = max_num;
+    id_allocator->start_id = start_id;
+    id_allocator->cur_id = start_id;
+    id_allocator->lock = util_mutex_lock_create(UTIL_MUTEX_ATTR_EXCLUSIVE);
+    if (id_allocator->lock == NULL) {
+        free(id_allocator->id_bitmap);
+        id_allocator->id_bitmap = NULL;
+        return -ENOMEM;
+    }
+
+    return 0;
+}
+
+void util_id_allocator_autoinc_uninit(util_id_allocator_autoinc_t *id_allocator)
+{
+    if (id_allocator->id_bitmap == NULL) {
+        return;
+    }
+
+    (void)util_mutex_lock_destroy(id_allocator->lock);
+    id_allocator->lock = NULL;
+    free(id_allocator->id_bitmap);
+    id_allocator->id_bitmap = NULL;
+    id_allocator->max_num = 0;
+    id_allocator->start_id = 0;
+    id_allocator->cur_id = 0;
+}
+
+int util_id_allocator_autoinc_get(util_id_allocator_autoinc_t *id_allocator)
+{
+    int id = -1;
+    uint32_t bitmap_size = (id_allocator->max_num + 31) / 32;
+    uint32_t start = id_allocator->cur_id;
+    uint32_t end = start + id_allocator->max_num;
+
+    (void)util_mutex_lock(id_allocator->lock);
+
+    for (uint32_t i = start; i < end; i++) {
+        uint32_t real_id = i % id_allocator->max_num + id_allocator->start_id;
+        uint32_t index = (real_id - id_allocator->start_id) / 32;
+        uint32_t bit = (real_id - id_allocator->start_id) % 32;
+
+        if (index >= bitmap_size) {
+            continue;
+        }
+
+        if ((id_allocator->id_bitmap[index] & (1U << bit)) == 0) {
+            id_allocator->id_bitmap[index] |= (1U << bit);
+            id = real_id;
+            id_allocator->cur_id = real_id + 1;
+            break;
+        }
+    }
+
+    (void)util_mutex_unlock(id_allocator->lock);
+
+    return id;
+}
+
+void util_id_allocator_autoinc_release(util_id_allocator_autoinc_t *id_allocator, uint32_t id)
+{
+    if (id_allocator->id_bitmap == NULL) {
+        return;
+    }
+
+    if (id < id_allocator->start_id || id >= id_allocator->start_id + id_allocator->max_num) {
+        return;
+    }
+
+    uint32_t index = (id - id_allocator->start_id) / 32;
+    uint32_t bit = (id - id_allocator->start_id) % 32;
+    uint32_t bitmap_size = (id_allocator->max_num + 31) / 32;
+
+    if (index >= bitmap_size) {
+        return;
+    }
+
+    (void)util_mutex_lock(id_allocator->lock);
+    id_allocator->id_bitmap[index] &= ~(1U << bit);
+    (void)util_mutex_unlock(id_allocator->lock);
+}
