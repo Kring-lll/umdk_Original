@@ -874,14 +874,13 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
         // the coefficient for the number of main umq post flow control rx operations uses rqe_post_factor
         rqe_post_factor = queue->rqe_post_factor;
     }
-    uint32_t post_fc_rx_cnt = queue->fc_rx_depth * rqe_post_factor;
     if (UMQ_UB_ENABLE_SHARE_FC_JFR && (option->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0) {
         // sub umq does not need to post flow control rx
-        post_fc_rx_cnt = 0;
+        rqe_post_factor = 0;
     }
-    for (uint32_t i = 0; i < post_fc_rx_cnt; i++) {
-        int ret = umq_ub_fill_fc_rx_buf(queue);
-        if (ret != UMQ_SUCCESS) {
+
+    for (uint32_t i = 0; i < rqe_post_factor; i++) {
+        if (umq_ub_fill_fc_rx_buf_batch(queue, queue->fc_rx_depth) != UMQ_SUCCESS) {
             goto DELETE_FC_JETTY;
         }
     }
