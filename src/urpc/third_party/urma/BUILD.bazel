@@ -7,6 +7,9 @@ package(
 
 cc_library(
     name = "urma_headers",
-    hdrs = glob(["include/ub/umdk/urma/*.h"]),
-    includes = ["include/ub/umdk/urma"],
+    deps = [
+        "//src/urma:tpsa",
+        "//src/urma:urma",
+        "//src/urma:urma_ubagg",
+    ],
 )
