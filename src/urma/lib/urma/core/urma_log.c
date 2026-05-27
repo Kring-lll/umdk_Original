@@ -300,3 +300,79 @@ void urma_log_loc(const char *file, const char *function, int line, urma_vlog_le
     (void)urma_vlog_loc(file, function, line, level, format, va);
     va_end(va);
 }
+
+/* Time acquisition optimization function */
+static inline time_t urma_log_rl_get_time(void)
+{
+    struct timespec ts;
+    (void)clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+    return ts.tv_sec;
+}
+
+bool urma_log_rl_check(urma_log_rl_state_t *rs, const char *file,
+                       const char *function, int line)
+{
+    time_t now = urma_log_rl_get_time();
+    bool ret = false;
+
+    /* Fast path: use atomic operations when trylock fails */
+    if (pthread_spin_trylock(&rs->lock) != 0) {
+        /* Lock contention: atomic check of remaining quota */
+        if ((rs->flags & URMA_LOG_RL_INITIALIZED) &&
+            atomic_load(&rs->n_left) > 0 &&
+            atomic_fetch_sub(&rs->n_left, 1) >= 0) {
+            ret = true;
+        }
+        goto out;
+    }
+
+    /* Full processing after acquiring lock */
+    if (!(rs->flags & URMA_LOG_RL_INITIALIZED)) {
+        /* Initialize spinlock on first use */
+        if (pthread_spin_init(&rs->lock, PTHREAD_PROCESS_PRIVATE) != 0) {
+            /* Spinlock initialization failed, unlock and allow log output */
+            pthread_spin_unlock(&rs->lock);
+            return true;
+        }
+        rs->begin = now;
+        rs->flags |= URMA_LOG_RL_INITIALIZED;
+        atomic_store(&rs->n_left, URMA_LOG_RL_LIMIT);
+        /* Record log point location on first call */
+        rs->file = file;
+        rs->function = function;
+        rs->line = line;
+        pthread_spin_unlock(&rs->lock);
+        return true;  /* First call always allows log output */
+    }
+
+    /* Check if window has expired */
+    if (now - rs->begin >= URMA_LOG_RL_WINDOW_SEC) {
+        atomic_store(&rs->n_left, URMA_LOG_RL_LIMIT);
+        rs->begin = now;
+
+        /* Output summary */
+        unsigned long m = atomic_exchange(&rs->missed, 0);
+        if (m > 0) {
+            /* Unlock before output to avoid deadlock */
+            pthread_spin_unlock(&rs->lock);
+            /* Use recorded log point location for summary output */
+            urma_log_loc(rs->file, rs->function, rs->line, URMA_VLOG_LEVEL_INFO,
+                    "rate limit: %lu logs suppressed in last %ds",
+                    m, URMA_LOG_RL_WINDOW_SEC);
+            return false;
+        }
+    }
+
+    /* Atomic check of quota */
+    if (atomic_load(&rs->n_left) > 0 && atomic_fetch_sub(&rs->n_left, 1) >= 0) {
+        ret = true;
+    }
+
+    pthread_spin_unlock(&rs->lock);
+
+out:
+    if (!ret) {
+        atomic_fetch_add(&rs->missed, 1);
+    }
+    return ret;
+}
