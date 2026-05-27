@@ -24,7 +24,7 @@
     - [3.1 RPM包编译](#31-rpm包编译)
     - [3.2 URMA RPM安装](#32-urma-rpm安装)
 
-- [4 Quick start](#4-quick-start)
+- [4 Quick Start](#4-quick-start)
 
 - [5 URMA架构](#5-urma架构)
     - [5.1 管理面](#51-管理面)
@@ -322,7 +322,7 @@ URMA管控面负责针对可靠连接模式提供建链管理手段，此协议�
 
 （2）目的端节点连接管理模块收到拆链通知，通知协议框架、协议驱动进入拆链流程，本节点自动切换到发起端建链状态；在本节点发起拆链操作时，本节点从发起端建链状态切换到REST状态，销毁本地传输层资源；同时目的端节点的连接管理模块向发起端节点的连接管理模块发送拆链通知，如下图 DCONN_NOTIFY所示；
 
-（3）发起端节点连接管理模块收到断链通知，通知协议框架、协议驱动进入拆链流程，本节点在流程（1）切换到目的端建链状态，此后切换到拆链完成状态，销毁本地传输层资源，拆链流程结束。
+（3）发起端节点连接管理模块收到拆链通知，通知协议框架、协议驱动进入拆链流程，本节点在流程（1）切换到目的端建链状态，此后切换到拆链完成状态，销毁本地传输层资源，拆链流程结束。
 
 ![](figures/urma-arch-mgmt-dist-05.png)
 
@@ -542,8 +542,8 @@ URMA的上下文管理需要在应用运行初期执行，后续的Jetty、Segme
 typedef struct urma_context {
     struct urma_device *dev; /* [Private] point to the corresponding urma device. */
     struct urma_ops *ops; /* [Private] operation of urma device. */
-    int dev_fd; /* [Private] fd of urma device\'s sysfs file. */
-    int async_fd; /* [Private] fd of urma device\'s async event file. */
+    int dev_fd; /* [Private] fd of urma device's sysfs file. */
+    int async_fd; /* [Private] fd of urma device's async event file. */
     pthread_mutex_t mutex; /* [Private] mutex of urma context. */
     urma_eid_t eid; /* [Public] eid of urma device. */
     uint32_t eid_index;
@@ -954,7 +954,7 @@ UMDK支持立即数的写操作，见urma_post_jfs_wr接口，所写的立即数
 
 单边操作的write操作中，需要设置urma_jfs_wr_flag中的fence标志开启是否保序，单边操作最大值可以在环境上通过cat /sys/class/ubcore/udma1/max_write_size查看
 
-![](figures/urma-arch-data-unilateral-01.png)
+![](figures/urma-arch-data-one-sided-01.png)
 
 2.  应用场景
 
@@ -988,7 +988,7 @@ UMDK单边读/写的过程为：
 
 - **urma_write**：这个函数允许应用程序向远程内存写入数据，同样不需要远程进程的响应。注意，URMA的单边写操作不支持notify远端，但支持携带IMM（Immediate）数据，这是一种可以附加到消息中的小块数据，用于传递额外的信息。
 
-- ![](figures/urma-arch-data-unilateral-03.png)
+- ![](figures/urma-arch-data-one-sided-03.png)
 
 ### 5.3.2 双边操作
 
@@ -1038,7 +1038,7 @@ UMDK支持向接收端发送立即数，见urma_post_jfs_wr接口，所发送的
 
 - **urma_recv**：接收方使用这个函数从远程内存接收数据。
 
-- **urma_send**：发送方使用这个函数向远程内存发送数据，支持携带IMM数据，并且可以设置为with invalid，这意味着即使目标地址无效，操作也会继续执行。![](figures/urma-arch-data-bilateral-01.png)
+- **urma_send**：发送方使用这个函数向远程内存发送数据，支持携带IMM数据，并且可以设置为with invalid，这意味着即使目标地址无效，操作也会继续执行。![](figures/urma-arch-data-two-sided-01.png)
 
 ### 5.3.3 完成记录
 
@@ -1974,7 +1974,7 @@ the actual timeout in usec is caculated by: 4.096*(2\^err_timeout).
 -n, \--iters <iters\> Number of exchanges (at least 5, default 10000).
 -N, \--no_peak Cancel peak-bw calculation.
 -l, \--jfs_post_list <size\> Post list of send WQEs of <list size\> size.
--L, \--lock_free Jetty\'s interior is unlocked.
+-L, \--lock_free Jetty's interior is unlocked.
 -O, \--priority set the priority of JFS, ranging from [0, 15].
 -p, \--trans_mode <mode\> Transport mode: 0 for RM(default), 1 for RC, 2 for UM.
 -P, \--port <id\> Server port for bind or connect, default 21115.
