@@ -16,21 +16,25 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include "torch_npu/csrc/core/npu/NPUStream.h"
 
-std::vector<at::Tensor> fused_deep_moe_impl_autograd(
+std::vector<at::Tensor> FusedDeepMoeImplAutograd(
     const at::Tensor &x, \
     const at::Tensor &expertIds, \
-    const at::TensorList &gmm1PermutedWeight, \
-    const at::TensorList &gmm1PermutedWeightScale, \
+    const at::TensorList &gmm1Weight, \
+    const at::TensorList &gmm1WeightScale, \
     const at::TensorList &gmm2Weight, \
     const at::TensorList &gmm2WeightScale, \
-    const c10::optional<at::Tensor> &expertSmoothScalesOptional, \
-    const c10::optional<at::Tensor> &expertScalesOptional, \
+    const at::Tensor &expertScales, \
+    const c10::optional<at::Tensor> &shareGmm1WeightOptional, \
+    const c10::optional<at::Tensor> &shareGmm1WeightScaleOptional, \
+    const c10::optional<at::Tensor> &shareGmm2WeightOptional, \
+    const c10::optional<at::Tensor> &shareGmm2WeightScaleOptional, \
+    const c10::optional<at::Tensor> &expertSmoothScales, \
+    const c10::optional<at::Tensor> &shareSmoothScales, \
+    const c10::optional<at::Tensor> &xActiveMask, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
     int64_t epRankId, \
     int64_t moeExpertNum, \
-    int64_t sharedExpertNum, \
-    int64_t sharedExpertRankNum, \
     int64_t quantMode, \
     int64_t globalBs);
 
