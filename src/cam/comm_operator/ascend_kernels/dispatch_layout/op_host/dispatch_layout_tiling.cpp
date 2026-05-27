@@ -7,6 +7,7 @@
  * History: 2026-01-05 create dispatch layout tiling function file
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -55,15 +56,19 @@ constexpr uint32_t ATTR_LOCAL_RANKSIZE_INDEX = 4;
 const int64_t MAX_COMM_WORLD_SIZE = 384;
 const int64_t MAX_MOE_EXPERTS_NUM = 512;
 const int64_t MAX_LOCAL_RANKSIZE = 8;
+const int64_t MAX_MESH_SIZE = 4;
 const int64_t A2_MAX_BATCH_SIZE = 4096;
 const int64_t A3_MAX_BATCH_SIZE = 8000;
+const int64_t A5_MAX_BATCH_SIZE = 4096;
 
 constexpr uint32_t SYSTEM_NEED_WORKSPACE = 16 * 1024 * 1024;
 constexpr uint32_t KERNEL_USE_WORKSPACE = 1 * 1024 * 1024;
 constexpr uint32_t KERNEL_A2_ARG_SIZE = 1 * 1024 * 1024;
+constexpr uint32_t KERNEL_A5_ARG_SIZE = 1 * 1024 * 1024;
 
 constexpr static int TILING_KEY_INT = 23;
 constexpr static int TILING_KEY_A2_TYPE = 100;
+constexpr static int TILING_KEY_A5_TYPE = 200;
 
 constexpr uint32_t TWO_DIMS = 2;
 constexpr uint32_t K_MAX = 16;
@@ -94,6 +99,26 @@ static bool CheckIfA2MultiMachine(const gert::TilingContext &context, const char
     uint32_t localRankSize = tilingData.dispatchLayoutInfo.localRankSize;
 
     if (socVersion == "Ascend910B" && numRanks > localRankSize) {
+        return true;
+    }
+    return false;
+}
+
+static bool CheckIfA5MultiMachine(const gert::TilingContext &context, const char *nodeName,
+                                  const DispatchLayoutTilingData &tilingData)
+{
+    fe::PlatFormInfos *platformInfoPtr = context.GetPlatformInfo();
+    OPS_ERR_IF(platformInfoPtr == nullptr, OPS_LOG_E(nodeName, "platformInfoPtr is nullptr."), return false);
+    fe::PlatFormInfos &platformInfo = *platformInfoPtr;
+
+    std::string socVersion;
+    (void)platformInfo.GetPlatformResWithLock("version", "Short_SoC_version", socVersion);
+
+    uint32_t numRanks = tilingData.dispatchLayoutInfo.numRanks;
+    uint32_t localRankSize = tilingData.dispatchLayoutInfo.localRankSize;
+
+    // a5 handles multi-machine cases on 950 platform
+    if (socVersion == "950" && numRanks > localRankSize) {
         return true;
     }
     return false;
@@ -156,6 +181,22 @@ static ge::graphStatus GetAttrAndSetTilingData(const gert::TilingContext &contex
             OPS_LOG_E(nodeName, "tokenNum is invalid, only support (0, %ld], but got tokenNum=%ld.",
                     A2_MAX_BATCH_SIZE, *numTokensPtr),
             return ge::GRAPH_FAILED);
+    } else if (CheckIfA5MultiMachine(context, nodeName, tilingData)) {
+        OPS_ERR_IF(
+            (*localRankSizePtr <= 0) || (*localRankSizePtr > MAX_MESH_SIZE),
+            OPS_LOG_E(nodeName, "localRankSizePtr is invalid, only support (0, %ld], but got localRankSize=%ld.",
+                    MAX_MESH_SIZE, *localRankSizePtr),
+            return ge::GRAPH_FAILED);
+        OPS_ERR_IF(
+            (*numRanksPtr % *localRankSizePtr != 0),
+            OPS_LOG_E(nodeName,
+                    "localRankSizePtr isn't an aliquot of numRanks, numRanks=%ld, but got localRankSize=%ld.",
+                    *numRanksPtr, *localRankSizePtr),
+            return ge::GRAPH_FAILED);
+        OPS_ERR_IF((*numTokensPtr <= 0) || (*numTokensPtr > A5_MAX_BATCH_SIZE),
+            OPS_LOG_E(nodeName, "tokenNum is invalid, only support (0, %ld], but got tokenNum=%ld.",
+                    A5_MAX_BATCH_SIZE, *numTokensPtr),
+            return ge::GRAPH_FAILED);
     } else {
         OPS_ERR_IF((*numTokensPtr <= 0) || (*numTokensPtr > A3_MAX_BATCH_SIZE),
             OPS_LOG_E(nodeName, "tokenNum is invalid, only support (0, %ld], but got tokenNum=%ld.",
@@ -171,7 +212,8 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
 {
     size_t *workSpaces = context.GetWorkspaceSizes(1);
     OPS_ERR_IF(workSpaces == nullptr, OPS_LOG_E(nodeName, "workSpaces is nullptr."), return ge::GRAPH_FAILED);
-    workSpaces[0] = SYSTEM_NEED_WORKSPACE + KERNEL_USE_WORKSPACE + KERNEL_A2_ARG_SIZE;
+    workSpaces[0] = SYSTEM_NEED_WORKSPACE + KERNEL_USE_WORKSPACE +
+        std::max(KERNEL_A2_ARG_SIZE, KERNEL_A5_ARG_SIZE);
     return ge::GRAPH_SUCCESS;
 }
 
@@ -257,6 +299,8 @@ static ge::graphStatus DispatchLayoutTilingFuncImpl(gert::TilingContext &context
     int tilingKey = TILING_KEY_INT;
     if (CheckIfA2MultiMachine(context, nodeName, *tilingData)) {
         tilingKey = tilingKey + TILING_KEY_A2_TYPE;
+    } else if (CheckIfA5MultiMachine(context, nodeName, *tilingData)) {
+        tilingKey = tilingKey + TILING_KEY_A5_TYPE;
     }
     context.SetTilingKey(tilingKey);
 

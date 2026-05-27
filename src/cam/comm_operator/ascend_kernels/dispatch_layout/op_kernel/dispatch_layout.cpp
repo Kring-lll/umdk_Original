@@ -9,11 +9,13 @@
 
 #include "dispatch_layout.h"
 #include "dispatch_layout_a2.h"
+#include "dispatch_layout_a5.h"
 #include "dispatch_layout_tiling.h"
 #include "kernel_operator.h"
 
 #define TILING_KEY_INT    23
 #define TILING_KEY_A2_INT 123
+#define TILING_KEY_A5_INT 223
 
 extern "C" __global__ __aicore__ void dispatch_layout(GM_ADDR topkIdx, GM_ADDR numTokensPerRank,
                                                       GM_ADDR numTokensPerExpert, GM_ADDR isTokenInRank,
@@ -32,6 +34,11 @@ extern "C" __global__ __aicore__ void dispatch_layout(GM_ADDR topkIdx, GM_ADDR n
         op.Process();
     } else if (TILING_KEY_IS(TILING_KEY_A2_INT)) {
         MoeDispatchLayoutA2::DispatchLayoutA2<int32_t> op;
+        op.Init(topkIdx, numTokensPerRank, numTokensPerExpert, isTokenInRank, notifySendData, sendTokenIdxSmall,
+                workspace, &pipe, &tilingData);
+        op.Process();
+    } else if (TILING_KEY_IS(TILING_KEY_A5_INT)) {
+        MoeDispatchLayoutA5::DispatchLayoutA5<int32_t> op;
         op.Init(topkIdx, numTokensPerRank, numTokensPerExpert, isTokenInRank, notifySendData, sendTokenIdxSmall,
                 workspace, &pipe, &tilingData);
         op.Process();

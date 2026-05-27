@@ -139,4 +139,9 @@ at::Tensor MoeCombinePrefillA2ImplAutograd(
     c10::string_view groupEp,
     int64_t rank,
     int64_t numRanks);
+
+std::tuple<at::Tensor, at::Tensor> GetDispatchLayoutA5ImplAutograd(
+    const at::Tensor &topIdx,
+    int64_t numExperts,
+    int64_t numRanks);
 #endif // COMMON_OPS_CSRC_FUNCTIONS_H_
