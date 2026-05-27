@@ -24,7 +24,7 @@
     - [3.1 RPM包编译](#31-rpm包编译)
     - [3.2 URMA RPM安装](#32-urma-rpm安装)
 
-- [4 Quick start](#4-quick-start)
+- [4 Quick Start](#4-quick-start)
 
 - [5 URMA架构](#5-urma架构)
     - [5.1 管理面](#51-管理面)
@@ -322,7 +322,7 @@ URMA管控面负责针对可靠连接模式提供建链管理手段，此协议�
 
 （2）目的端节点连接管理模块收到拆链通知，通知协议框架、协议驱动进入拆链流程，本节点自动切换到发起端建链状态；在本节点发起拆链操作时，本节点从发起端建链状态切换到REST状态，销毁本地传输层资源；同时目的端节点的连接管理模块向发起端节点的连接管理模块发送拆链通知，如下图 DCONN_NOTIFY所示；
 
-（3）发起端节点连接管理模块收到断链通知，通知协议框架、协议驱动进入拆链流程，本节点在流程（1）切换到目的端建链状态，此后切换到拆链完成状态，销毁本地传输层资源，拆链流程结束。
+（3）发起端节点连接管理模块收到拆链通知，通知协议框架、协议驱动进入拆链流程，本节点在流程（1）切换到目的端建链状态，此后切换到拆链完成状态，销毁本地传输层资源，拆链流程结束。
 
 ![](figures/urma-arch-mgmt-dist-05.png)
 
@@ -542,7 +542,7 @@ URMA的上下文管理需要在应用运行初期执行，后续的Jetty、Segme
 typedef struct urma_context {
     struct urma_device *dev; /* [Private] point to the corresponding urma device. */
     struct urma_ops *ops; /* [Private] operation of urma device. */
-    int dev_fd; /* [Private] fd of urma device\'s sysfs file. */
+    int dev_fd; /* [Private] fd of urma device's sysfs file. */
     int async_fd; /* [Private] fd of urma device\'s async event file. */
     pthread_mutex_t mutex; /* [Private] mutex of urma context. */
     urma_eid_t eid; /* [Public] eid of urma device. */
