@@ -99,7 +99,7 @@ void umq_server_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
     umq_buf_t *buf[UMQ_POST_POLL_BATCH];
     bool can_send = false;
     uint32_t send_cnt = 0, recv_cnt = 0;
-    uint32_t tx_depth = lat_arg->config.tx_depth;
+    uint32_t tx_depth = lat_arg->cfg->config.tx_depth;
 
     send_qbuf = umq_buf_alloc(lat_arg->cfg->rsp_size, 1, UMQ_INVALID_HANDLE, NULL);
     if (send_qbuf == NULL) {
@@ -366,7 +366,7 @@ void umq_client_latency_pro_interrupt(uint64_t umqh, umq_perftest_latency_arg_t 
     umq_buf_pro_t *buf_pro;
     bool can_send = true;
     uint32_t send_cnt = 0, recv_cnt = 0;
-    uint32_t tx_depth = lat_arg->config.tx_depth;
+    uint32_t tx_depth = lat_arg->cfg->config.tx_depth;
 
     send_qbuf = umq_buf_alloc(lat_arg->cfg->req_size, 1, UMQ_INVALID_HANDLE, NULL);
     if (send_qbuf == NULL) {
