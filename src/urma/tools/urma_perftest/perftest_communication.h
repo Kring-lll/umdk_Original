@@ -11,6 +11,8 @@
 #ifndef PERFTEST_COMMUNICATION_H
 #define PERFTEST_COMMUNICATION_H
 
+#include <stdbool.h>
+
 #define PERFTEST_MAX_CONNECTIONS    (10)
 #define PERFTEST_CONNECT_COUNT      (5)
 #define ERFTEST_SLEEP_TIME (100 * 1000) /* Sleep for 100 ms */
