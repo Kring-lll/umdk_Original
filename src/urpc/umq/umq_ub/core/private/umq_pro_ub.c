@@ -1010,6 +1010,48 @@ int umq_ub_fill_fc_rx_buf(ub_queue_t *queue)
     return UMQ_SUCCESS;
 }
 
+int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint32_t batch)
+{
+    if (batch == 0) {
+        return UMQ_SUCCESS;
+    }
+
+    urma_jfr_wr_t *recv_wr = (urma_jfr_wr_t *)(uintptr_t)calloc(batch, sizeof(urma_jfr_wr_t));
+    if (recv_wr == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, calloc recv wr failed\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id);
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    for (uint32_t i = 1; i < batch; i++) {
+        recv_wr[i - 1].next = &recv_wr[i];
+    }
+
+    urma_jfr_wr_t *bad_wr = NULL;
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
+    urma_status_t status;
+    // bondp with shared_jfr should use urma_post_jfr_wr
+    bool post_jfr = ((queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 && queue->used_port_num > 0);
+    if (post_jfr) {
+        status =
+            umq_symbol_urma()->urma_post_jfr_wr(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr, recv_wr, &bad_wr);
+    } else {
+        status =
+            umq_symbol_urma()->urma_post_jetty_recv_wr(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL], recv_wr, &bad_wr);
+    }
+    if (status != URMA_SUCCESS) {
+        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_POST_RECV, start_timestamp);
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_post_jetty_recv_wr failed, "
+            "status: %d\n", EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, (int)status);
+        free(recv_wr);
+        return umq_status_convert(status);
+    }
+    free(recv_wr);
+    return UMQ_SUCCESS;
+}
+
 int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
 {
     if (buf_count == 0) {
