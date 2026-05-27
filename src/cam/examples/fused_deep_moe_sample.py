@@ -113,6 +113,17 @@ class DecodeMoeOps(torch.nn.Module):
         self.gmm1_weight_scale = convert_tensor_into_parameter(gmm1_weight_scale)
         self.gmm2_weight = convert_tensor_into_parameter(gmm2_weight, trans_nz=True)
         self.gmm2_weight_scale = convert_tensor_into_parameter(gmm2_weight_scale)
+        # Generate bias: token = [8, 8, 8, ...] @ expert_weight
+        # gmm1_bias: [expert_num, gmm1_output_dim] = token @ gmm1_weight
+        # gmm2_bias: [expert_num, gmm2_output_dim] = token @ gmm2_weight
+        gmm1_input_dim = gmm1_weight.shape[1]  # token_hidden_size
+        gmm2_input_dim = gmm2_weight.shape[1]  # moe_intermediate_size
+        token_all_8_gmm1 = torch.ones(gmm1_input_dim) * 8
+        token_all_8_gmm2 = torch.ones(gmm2_input_dim) * 8
+        gmm1_bias = torch.matmul(token_all_8_gmm1, gmm1_weight.float().cpu()).to(torch.float32)
+        gmm2_bias = torch.matmul(token_all_8_gmm2, gmm2_weight.float().cpu()).to(torch.float32)
+        self.gmm1_bias = convert_tensor_into_parameter(gmm1_bias)
+        self.gmm2_bias = convert_tensor_into_parameter(gmm2_bias)
         self.smooth_scales = convert_tensor_into_parameter(smooth_scales)
 
     def _apply_ops(self, x, expert_ids, expert_scales, x_active_mask):
@@ -247,6 +258,8 @@ class FusionOp(DecodeMoeOps):
             gmm2_weight=self.gmm2_weight,
             gmm2_weight_scale=self.gmm2_weight_scale,
             expert_scales=expert_scales,
+            gmm1_bias=self.gmm1_bias,
+            gmm2_bias=self.gmm2_bias,
             share_gmm1_weight=self.share_gmm1_weight,
             share_gmm1_weight_scale=self.share_gmm1_weight_scale,
             share_gmm2_weight=self.share_gmm2_weight,
@@ -276,6 +289,15 @@ class FusionOp(DecodeMoeOps):
         gmm1_weight_scale = convert_tensor_into_parameter(gmm1_weight_scale)
         gmm2_weight = convert_tensor_into_parameter(gmm2_weight, trans_nz=True)
         gmm2_weight_scale = convert_tensor_into_parameter(gmm2_weight_scale)
+        # Generate bias: token = [8, 8, 8, ...] @ expert_weight
+        gmm1_input_dim = gmm1_weight.shape[1]
+        gmm2_input_dim = gmm2_weight.shape[1]
+        token_all_8_gmm1 = torch.ones(gmm1_input_dim) * 8
+        token_all_8_gmm2 = torch.ones(gmm2_input_dim) * 8
+        gmm1_bias = torch.matmul(token_all_8_gmm1, gmm1_weight.float().cpu()).to(torch.float32)
+        gmm2_bias = torch.matmul(token_all_8_gmm2, gmm2_weight.float().cpu()).to(torch.float32)
+        gmm1_bias_tmp = convert_tensor_into_parameter(gmm1_bias)
+        gmm2_bias_tmp = convert_tensor_into_parameter(gmm2_bias)
         if self.dynamic_eplb:
             self.gmm1_weight = [
                 weight.clone() for weight in gmm1_weight.unbind(dim=0)
@@ -289,11 +311,19 @@ class FusionOp(DecodeMoeOps):
             self.gmm2_weight_scale = [
                 weight.clone() for weight in gmm2_weight_scale.unbind(dim=0)
             ]
+            self.gmm1_bias = [
+                weight.clone() for weight in gmm1_bias_tmp.unbind(dim=0)
+            ]
+            self.gmm2_bias = [
+                weight.clone() for weight in gmm2_bias_tmp.unbind(dim=0)
+            ]
         else:
             self.gmm1_weight = [gmm1_weight.clone()]
             self.gmm1_weight_scale = [gmm1_weight_scale.clone()]
             self.gmm2_weight = [gmm2_weight.clone()]
             self.gmm2_weight_scale = [gmm2_weight_scale.clone()]
+            self.gmm1_bias = [gmm1_bias_tmp.clone()]
+            self.gmm2_bias = [gmm2_bias_tmp.clone()]
         self.smooth_scales = convert_tensor_into_parameter(smooth_scales)
 
 def generate_datas(batch_size,

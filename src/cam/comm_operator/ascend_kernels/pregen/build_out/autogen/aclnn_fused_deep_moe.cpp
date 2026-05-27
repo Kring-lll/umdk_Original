@@ -39,6 +39,8 @@ aclnnStatus aclnnFusedDeepMoeGetWorkspaceSize(
     const aclTensor *expertSmoothScalesOptional,
     const aclTensor *shareSmoothScalesOptional,
     const aclTensor *xActiveMaskOptional,
+    const aclTensorList *gmm1BiasOptional,
+    const aclTensorList *gmm2BiasOptional,
     char *groupEp,
     int64_t epRankSize,
     int64_t epRankId,
@@ -56,6 +58,7 @@ aclnnStatus aclnnFusedDeepMoeGetWorkspaceSize(
         shareGmm1WeightOptional, shareGmm1WeightScaleOptional,
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional,
         expertSmoothScalesOptional, shareSmoothScalesOptional, xActiveMaskOptional,
+        gmm1BiasOptional, gmm2BiasOptional,
         groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs,
         output, shareOutput, expertTokenNums, workspaceSize, executor);
 }
