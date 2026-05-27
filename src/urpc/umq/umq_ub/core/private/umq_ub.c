@@ -29,6 +29,7 @@
 #define UMQ_PORT_STR_SIZE 512
 
 static util_id_allocator_t g_umq_ub_id_allocator = {0};
+static util_id_allocator_autoinc_t g_umq_ub_id_autoinc_allocator = {0};
 static ub_queue_ctx_list_t g_umq_ub_queue_ctx_list;
 static const char *g_umq_ub_tp_type_str[UMQ_TP_TYPE_MAX + 1] = {"rtp", "ctp", "utp", "unknown"};
 
@@ -1898,17 +1899,25 @@ void umq_ub_queue_ctx_list_remove(urpc_list_t *qctx_node)
 
 int umq_ub_id_allocator_init(void)
 {
-    return util_id_allocator_init(&g_umq_ub_id_allocator, UMQ_MAX_MSG_ID_NUM, 1);
+    int result = util_id_allocator_init(&g_umq_ub_id_allocator, UMQ_MAX_MSG_ID_NUM, 1) &
+                 util_id_allocator_autoinc_init(&g_umq_ub_id_autoinc_allocator, UMQ_ID_ALLOC_SIZE, 1);
+    return result;
 }
 
 void umq_ub_id_allocator_uninit(void)
 {
     util_id_allocator_uninit(&g_umq_ub_id_allocator);
+    util_id_allocator_autoinc_uninit(&g_umq_ub_id_autoinc_allocator);
 }
 
 util_id_allocator_t *umq_ub_id_allocator_get(void)
 {
     return &g_umq_ub_id_allocator;
+}
+
+util_id_allocator_autoinc *umq_ub_id_autoinc_allocator_get(void)
+{
+    return &g_umq_ub_id_autoinc_allocator;
 }
 
 static uint32_t umq_read_alloc_mem_size(umq_size_interval_t size_interval)
