@@ -943,6 +943,12 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
         goto FREE_QUEUE;
     }
 
+    queue->umq_id = util_id_allocator_autoinc_get(umq_ub_id_autoinc_allocator_get());
+    if (queue->umq_id == -1) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "umq create failed, umq id allocator failed\n");
+        goto FREE_QUEUE;
+    }
+
     ub_queue_t *share_rq = NULL;
     if ((option->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0) {
         if (option->share_rq_umqh == UMQ_INVALID_HANDLE) {
@@ -1058,6 +1064,8 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
     urma_eid_t *io_eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t io_id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
     int ret = UMQ_SUCCESS;
+
+    util_id_allocator_autoinc_release(umq_ub_id_autoinc_allocator_get(), queue->umq_id);
     if (queue->umq_trans_mode != UMQ_TRANS_MODE_UB && queue->umq_trans_mode != UMQ_TRANS_MODE_UB_PLUS &&
         queue->umq_trans_mode != UMQ_TRANS_MODE_UBMM && queue->umq_trans_mode != UMQ_TRANS_MODE_UBMM_PLUS) {
         UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, destroy umq failed, trans mode %d is not UB\n",

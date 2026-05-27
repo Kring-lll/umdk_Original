@@ -40,6 +40,8 @@ extern "C" {
 #endif
 
 #define UMQ_MAX_MSG_ID_NUM (1 << 5)
+#define UMQ_ID_ALLOC_SIZE (256 * 1024)
+
 #define UMQ_CONTINUE_FLAG 1
 #define UMQ_MAX_TSEG_NUM (1024)
 #define UMQ_UB_RW_SEGMENT_LEN 64 // ub_queue read/write buf splited 64B for each module, such as mem import/flow control
@@ -284,6 +286,7 @@ typedef struct umq_ub_bind_queue_info {
     uint32_t tx_depth;
     uint32_t rx_buf_size;
     umq_state_t state;
+    int32_t umq_id;
 } umq_ub_bind_queue_info_t;
 
 typedef struct umq_ub_bind_fc_info {
@@ -423,6 +426,7 @@ typedef struct ub_queue {
     uint64_t share_rq_umqh;
     ub_queue_idle_check_t *checker;
     bondp_port_id_t *used_port;
+    int32_t umq_id;            // umq id for share transport mode
 } ub_queue_t;
 
 typedef struct user_ctx {
@@ -507,6 +511,7 @@ void umq_ub_queue_ctx_list_remove(urpc_list_t *qctx_node);
 int umq_ub_id_allocator_init(void);
 void umq_ub_id_allocator_uninit(void);
 util_id_allocator_t *umq_ub_id_allocator_get(void);
+util_id_allocator_autoinc_t *umq_ub_id_autoinc_allocator_get(void);
 
 umq_buf_t *umq_ub_read_ctx_create(ub_queue_t *queue, umq_imm_head_t *umq_imm_head, uint16_t buf_num, uint16_t msg_id);
 
