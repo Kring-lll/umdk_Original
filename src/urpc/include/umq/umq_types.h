@@ -296,6 +296,8 @@ typedef struct umq_used_ports {
 #define UMQ_CREATE_FLAG_SUB_UMQ             (1 << 12)       // indicate that the umq uses shared jfr from main queue,
                                                             // associated with UMQ_CREATE_FLAG_SHARE_RQ
 
+#define UMQ_ID_ALLOC_SIZE                   (256 * 1024)
+
 typedef struct umq_create_option {
     /*************Required paramenters start*****************/
     umq_trans_mode_t trans_mode;

@@ -284,6 +284,7 @@ typedef struct umq_ub_bind_queue_info {
     uint32_t tx_depth;
     uint32_t rx_buf_size;
     umq_state_t state;
+    uint32_t umq_id;
 } umq_ub_bind_queue_info_t;
 
 typedef struct umq_ub_bind_fc_info {
@@ -423,6 +424,7 @@ typedef struct ub_queue {
     uint64_t share_rq_umqh;
     ub_queue_idle_check_t *checker;
     bondp_port_id_t *used_port;
+    uint32_t umq_id;            // umq id for share transport mode
 } ub_queue_t;
 
 typedef struct user_ctx {
