@@ -30,6 +30,7 @@ static struct option g_long_options[] = {
     {"rx-depth", required_argument, NULL, 'R'},
     {"tx-depth", required_argument, NULL, 'U'},
     {"tp-mode", required_argument, NULL, 'M'},
+    {"tp-type", required_argument, NULL, 'P'},
 
     {"buf-mode", required_argument, NULL, 'b'},
     {"interrupt", no_argument, NULL, 'I'},
@@ -100,6 +101,7 @@ static void init_cfg(umq_perftest_config_t *cfg)
     cfg->test_round = DEFAULT_LAT_TEST_ROUND;
     cfg->thresh_num = 0;
     cfg->blk_mode = 0;
+    cfg->tp_type = UMQ_TP_TYPE_CTP;
 }
 
 int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *cfg)
@@ -181,6 +183,12 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
             case 'M':
                 cfg->tp_mode = (umq_tp_mode_t)strtoul(optarg, NULL, 0);
                 if (cfg->tp_mode >= UMQ_TM_MAX) {
+                    return -1;
+                }
+                break;
+            case 'P':
+                cfg->tp_type = (umq_tp_type_t)strtoul(optarg, NULL, 0);
+                if (cfg->tp_type >= UMQ_TP_TYPE_MAX) {
                     return -1;
                 }
                 break;
