@@ -302,15 +302,29 @@ int umq_log_config_set(umq_log_config_t *config)
         return -UMQ_ERR_EINVAL;
     }
 
+    if ((config->log_flag & UMQ_LOG_FLAG_FUNC) && (config->log_flag & UMQ_LOG_FLAG_EXT_FUNC)) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "cannot set the flags for func and ext_func at the same time\n");
+        return -UMQ_ERR_EINVAL;
+    }
     umq_vlog_config_t *log_config = umq_get_log_config();
-    if (config->log_flag & UMQ_LOG_FLAG_FUNC) {
-        if (config->func == NULL) {
-            log_config->ctx.vlog_output_func = default_vlog_output;
-            UMQ_VLOG_INFO(VLOG_UMQ, "set log configuration success, log output function: default\n");
-        } else {
-            log_config->ctx.vlog_output_func = config->func;
-            UMQ_VLOG_INFO(VLOG_UMQ, "set log configuration success, log output function: user defined\n");
-        }
+    if ((config->log_flag & UMQ_LOG_FLAG_FUNC) && config->func != NULL &&
+        log_config->ctx.vlog_output_ext_func != NULL) {
+        UMQ_VLOG_INFO(VLOG_UMQ, "ext_func has been registered, registering func is not working\n");
+        return UMQ_SUCCESS;
+    }
+
+    if (((config->log_flag & UMQ_LOG_FLAG_FUNC) && config->func == NULL) || 
+        ((config->log_flag & UMQ_LOG_FLAG_EXT_FUNC) && config->ext_func == NULL)) {
+        log_config->ctx.vlog_output_func = default_vlog_output;
+        log_config->ctx.vlog_output_ext_func = NULL;
+        UMQ_VLOG_INFO(VLOG_UMQ, "set log configuration success, log output function: default\n");
+    } else if (config->log_flag & UMQ_LOG_FLAG_EXT_FUNC) {
+        log_config->ctx.vlog_output_ext_func = config->ext_func;
+        log_config->ctx.vlog_output_func = NULL;
+        UMQ_VLOG_INFO(VLOG_UMQ, "set log configuration success, log output function: user defined\n");
+    } else if ((config->log_flag & UMQ_LOG_FLAG_FUNC)) {
+        log_config->ctx.vlog_output_func = config->func;
+        UMQ_VLOG_INFO(VLOG_UMQ, "set log configuration success, log output function: user defined\n");
     }
 
     if (config->log_flag & UMQ_LOG_FLAG_LEVEL) {
