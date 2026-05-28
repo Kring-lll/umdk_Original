@@ -86,7 +86,7 @@ public:
         LayoutOutput layoutOutput;
         uint32_t tileRow;
         uint32_t tileColumn;
-
+        
         CATLASS_DEVICE
         Params() {};
 
@@ -115,7 +115,7 @@ public:
         tileCount = tileRow * tileColumn;
         halfTileColumn = tileColumn >> 1U;
         halfTileCount = tileRow * halfTileColumn;
-
+        
         ubInput = resource.ubBuf.template GetBufferByByte<ElementInput>(ubOffset);
         ubOffset += tileCount * sizeof(ElementInput);
         ubDequantScale = resource.ubBuf.template GetBufferByByte<ElementDequantScale>(ubOffset);
@@ -131,6 +131,20 @@ public:
         ubOffset += CEIL_UP(tileRow * sizeof(float));
         ubQuantScale = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
         ubOffset += CEIL_UP(tileRow * sizeof(float));
+
+        //int 8 -> int 4 
+        xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(ubOffset);
+        ubOffset += CEIL_UP(tileColumn / 2);
+        xLowI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(ubOffset);
+        ubOffset += CEIL_UP(tileColumn / 2);
+        xLowHalfTensor = resource.ubBuf.template GetBufferByByte<half>(ubOffset);
+        ubOffset += CEIL_UP(tileColumn * sizeof(half));
+        xLowHalfTensor2 = resource.ubBuf.template GetBufferByByte<half>(ubOffset);
+        ubOffset += CEIL_UP(tileColumn * sizeof(half));
+        xLowI16Tensor = resource.ubBuf.template GetBufferByByte<int16_t>(ubOffset);
+        ubOffset += CEIL_UP(128 * sizeof(int16_t));
+
+
         ubInputTmp = ubAbs;
         ubInputRightHalf = ubAbs;
         ubQuantF32 = ubAbs;
@@ -139,7 +153,9 @@ public:
 
         AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(0);
         AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(0);
-        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(1);
+        // AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(1);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
     }
 
     CATLASS_DEVICE
@@ -147,7 +163,9 @@ public:
     {
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(0);
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(0);
-        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(1);
+        // AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(1);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
     }
 
     CATLASS_DEVICE
@@ -254,18 +272,73 @@ public:
             AscendC::Cast(ubQuantF16, ubQuantS32, AscendC::RoundMode::CAST_RINT, tileCount);
             AscendC::PipeBarrier<PIPE_V>();
 
-            AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(1);
+            // AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(1);
             AscendC::Cast(ubOutput, ubQuantF16, AscendC::RoundMode::CAST_RINT, tileCount);
-            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(1);
+            // AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(1);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(0);
+
             auto gmTileOutput = gmOutput[params.layoutOutput.GetOffset(tileOffset)];
-            auto layoutGmTileOutput = params.layoutOutput.GetTileLayout(actualTileShape);
+           
+            
+            AscendC::PipeBarrier<PIPE_V>();
+            //取出低四位所需要的额外tensor
+            constexpr int32_t MASK = 128;
+            AscendC::Duplicate(xLowI16Tensor, static_cast<int16_t>(0x0F0F), MASK);
+            AscendC::PipeBarrier<PIPE_V>();
+            const size_t LEN_VK = (tileColumn / 2) / 128;
+            const size_t LAST_LEN_VK = (tileColumn % 256) / 2;
+            constexpr size_t LEN_128 = 128;
+            const half ONE_SIXTEENTH = static_cast<half>(0.0625f);
+            // AscendC::SetFlag<AscendC::HardEvent::S_MTE2>(EVENT_ID7);
+            // AscendC::WaitFlag<AscendC::HardEvent::S_MTE2>(EVENT_ID7);
+    
+            // AscendC::SetFlag<AscendC::HardEvent::S_MTE2>(EVENT_ID6);
+            // AscendC::WaitFlag<AscendC::HardEvent::S_MTE2>(EVENT_ID6);
+            for (uint32_t rowIdx = 0; rowIdx < tileRow; ++rowIdx) { 
+                auto inputOffset = rowIdx * tileColumn;
+                auto outputOffset = inputOffset;
+                // int8 -> int4
+               // High 4-bit processing start
+                AscendC::Muls(ubQuantF16[inputOffset], ubQuantF16[inputOffset], ONE_SIXTEENTH, tileColumn);
+                AscendC::PipeBarrier<PIPE_V>();
+                AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);  // Event ID needs adjustment
+                AscendC::Cast(xHighI4Tensor, ubQuantF16[inputOffset], AscendC::RoundMode::CAST_FLOOR, tileColumn);
+                AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
+                AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
+                AscendC::DataCopy(gmTileOutput[outputOffset], xHighI4Tensor.template ReinterpretCast<int8_t>(), tileColumn / 2);
+                AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+                // High 4-bit processing end
 
-            LayoutOutput layoutUbOutput{actualTileShape, ubTileStride};
-
-            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(1);
-            copyUbToGmOutput(gmTileOutput, ubOutput, layoutGmTileOutput, layoutUbOutput);
-            AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(1);
+                // Low 4-bit processing start
+                AscendC::And(xLowHalfTensor.template ReinterpretCast<int16_t>(), ubOutput[inputOffset].template ReinterpretCast<int16_t>(),
+                    xLowI16Tensor, LEN_128, LEN_VK, {1, 1, 1, 8, 8, 0});
+                if (LAST_LEN_VK > 0) {
+                    AscendC::And(xLowHalfTensor[LEN_VK * LEN_128].template ReinterpretCast<int16_t>(),
+                        ubOutput[inputOffset + LEN_VK * LEN_128 * 2].template ReinterpretCast<int16_t>(), xLowI16Tensor, LAST_LEN_VK, 1,
+                        {1, 1, 1, 8, 8, 0});
+                }
+                AscendC::PipeBarrier<PIPE_V>();
+                AscendC::Cast(xLowHalfTensor2.template ReinterpretCast<half>(), xLowHalfTensor.template ReinterpretCast<int8_t>(),
+                    AscendC::RoundMode::CAST_NONE, tileColumn);
+                AscendC::PipeBarrier<PIPE_V>();
+                const half MINUS_EIGHT = static_cast<half>(-8);
+                AscendC::Adds(ubQuantF16[inputOffset], xLowHalfTensor2, MINUS_EIGHT, tileColumn);
+                AscendC::PipeBarrier<PIPE_V>();
+                AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+                AscendC::Cast(xLowI4Tensor, ubQuantF16[inputOffset].template ReinterpretCast<half>(), AscendC::RoundMode::CAST_NONE,
+                    tileColumn);
+                AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
+                AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
+                AscendC::DataCopy(gmTileOutput[outputOffset + tileColumn / 2 ], xLowI4Tensor.template ReinterpretCast<int8_t>(), tileColumn / 2);
+                AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+                // AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(1);     
+                // auto layoutGmTileOutput = params.layoutOutput.GetTileLayout(actualTileShape);
+                // LayoutOutput layoutUbOutput{actualTileShape, ubTileStride};
+                // AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(1);
+                // copyUbToGmOutput(gmTileOutput, ubOutput, layoutGmTileOutput, layoutUbOutput);
+                // AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(1);
+                //FetchAndPreprocessInt8ToInt4(gmTileOutput, tileRow, tileColumn, 0);   
+            }
         }
     }
 
@@ -291,7 +364,13 @@ private:
     AscendC::LocalTensor<float> ubQuantF32;
     AscendC::LocalTensor<int32_t> ubQuantS32;
     AscendC::LocalTensor<half> ubQuantF16;
-
+    //后处理int8 -> int 4 
+    AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor;
+    AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor;
+    AscendC::LocalTensor<half> xLowHalfTensor;
+    AscendC::LocalTensor<half> xLowHalfTensor2;
+    AscendC::LocalTensor<int16_t> xLowI16Tensor;
+    
     Epilogue::Tile::CopyGm2Ub<ArchTag, InputType> copyGmToUbInput;
     Epilogue::Tile::CopyUb2Gm<ArchTag, DequantScaleType> copyUbToGmDequantScale;
     Epilogue::Tile::CopyUb2Gm<ArchTag, OutputType> copyUbToGmOutput;
@@ -433,6 +512,7 @@ public:
         LayoutB layoutShareB;
         __gm__ ElementB *ptrB;
         LayoutB layoutB;
+        __gm__ float *gmWeightAux;
         __gm__ ElementScale *ptrShareScale;
         LayoutScale layoutShareScale;
         __gm__ ElementScale *ptrScale;
@@ -479,7 +559,9 @@ public:
         CATLASS_DEVICE
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_,
                LayoutA const &layoutA_, GM_ADDR ptrShareB_, LayoutB const &layoutShareB_, GM_ADDR ptrB_,
-               LayoutB const &layoutB_, GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_,
+               LayoutB const &layoutB_,
+               GM_ADDR gmWeightAux_, //补偿矩阵
+               GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_,
                GM_ADDR ptrScale_, LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale const &layoutPerTokenScale_, GM_ADDR ptrOutput_, LayoutOutput const &layoutOutput_,
                GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_,
@@ -497,6 +579,7 @@ public:
               layoutShareB(layoutShareB_),
               ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
               layoutB(layoutB_),
+              gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)), //补偿矩阵
               ptrShareScale(reinterpret_cast<__gm__ ElementScale *>(ptrShareScale_)),
               layoutShareScale(layoutShareScale_),
               ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
@@ -620,6 +703,8 @@ public:
         // Represent the full gm
         AscendC::GlobalTensor<ElementA> gmA;
         AscendC::GlobalTensor<ElementB> gmB;
+        //int4 左矩阵和之前gmA指向同一个位置
+        AscendC::GlobalTensor<AscendC::int4b_t> gmA_Int4;
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             gmA.SetGlobalBuffer((__gm__ ElementA*)params.gmShareX1);
             gmB.SetGlobalBuffer((__gm__ ElementB*)params.ptrShareB);
@@ -700,6 +785,8 @@ public:
         }
 
         gmA.SetGlobalBuffer(params.ptrA);
+        //int 4 左矩阵
+        gmA_Int4.SetGlobalBuffer(params.ptrA);
         if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
             gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(gmBlistTensorDesc.GetDataPtr<int32_t>(0)));
         }
@@ -714,8 +801,11 @@ public:
                                                      groupIdx * GROUP_INFO_SIZE);
             // wait AIV recv needed tokens
             uint32_t expected = coreNumPerGroup * vToCFlag;
+    
+
             WaitGroupTokenNumReady(groupTokenNumStateTensor, expected);
-            uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT);
+            //每次输入2倍行数，高四位与低四位一起矩阵乘
+            uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT) * 2;
             GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
 
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
@@ -753,18 +843,19 @@ public:
 
                 // Compute block-scoped matrix multiply-add
                 if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
-                    blockMmad(gmA[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
+                    //改成gmA_int4
+                    blockMmad(gmA_Int4[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
                               gmC[gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
                 } else {
                     callbackBeforeFixpipe();
-                    blockMmad(gmA[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
+                    blockMmad(gmA_Int4[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
                               gmC[gmOffsetC], layoutC, actualBlockShape);
                     callbackAfterFixpipe();
                 }
-
+                
                 stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
             }
-
+           
             gmGroupOffsetA += inGroupProblemShape.m() * inGroupProblemShape.k();
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                 gmGroupOffsetB += inGroupProblemShape.k() * inGroupProblemShape.n();
@@ -908,7 +999,7 @@ public:
             AscendC::DataCopy<int32_t>(rankGMTensor, statusTensor_[rankIndex * INT32_COUNT_PER_BLOCK], 8UL);
         }
     }
-
+    
     CATLASS_DEVICE
     void QuantToken(AscendC::LocalTensor<XType> &xInTensor, AscendC::LocalTensor<float> &smoothScaleTensor,
         AscendC::LocalTensor<int8_t> &yInt8Tensor, int64_t ubOffset)
@@ -1136,6 +1227,31 @@ public:
         yInt8Tensor[1] = resource.ubBuf.template GetBufferByByte<int8_t>(subUbOffset);
         yFp32Tensor[1] = yInt8Tensor[1].template ReinterpretCast<float>();
         subUbOffset += CEIL_UP(axisHCommu * sizeof(int8_t));
+
+
+        //共享专家int8 -> int4
+        AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
+        xHighI4Tensor.SetSize(tokenLength);
+        subUbOffset += tokenLength / 2;
+
+        AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
+        xLowI4Tensor.SetSize(tokenLength);
+        subUbOffset += tokenLength / 2;
+
+        AscendC::LocalTensor<half> xHighHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
+        xHighHalfTensor.SetSize(tokenLength * sizeof(half));
+        subUbOffset += tokenLength * sizeof(half);
+
+        AscendC::LocalTensor<half> xLowHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
+        xLowHalfTensor.SetSize(tokenLength * sizeof(half));
+        subUbOffset += tokenLength * sizeof(half);
+
+        AscendC::LocalTensor<half> xLowHalfTensor2 = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
+        xLowHalfTensor2.SetSize(tokenLength * sizeof(half));
+        subUbOffset += tokenLength * sizeof(half);
+
+        AscendC::LocalTensor<int16_t> xLowI16Tensor = resource.ubBuf.template GetBufferByByte<int16_t>(subUbOffset);
+        xLowI16Tensor.SetSize(128 * sizeof(int16_t));
         AscendC::LocalTensor shareSmoothScaleTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
         if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
             subUbOffset += CEIL_UP(tokenLength * sizeof(float));
@@ -1143,6 +1259,21 @@ public:
             AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID2);
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID2);
         }
+
+        //int 8 - > int4 
+        constexpr int32_t MASK = 128;
+        AscendC::Duplicate(xLowI16Tensor, static_cast<int16_t>(0x0F0F), MASK);
+        AscendC::PipeBarrier<PIPE_V>();
+        const size_t LEN_VK = (tokenLength / 2) / 128;
+        const size_t LAST_LEN_VK = (tokenLength % 256) / 2;
+        const half ONE_SIXTEENTH = static_cast<half>(0.0625f);
+
+        AscendC::SetFlag<AscendC::HardEvent::S_MTE2>(0);
+        AscendC::WaitFlag<AscendC::HardEvent::S_MTE2>(0);
+
+        constexpr size_t LEN_128 = 128;
+        constexpr int32_t BufferNum = 2;
+       
         // double buffer
         AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
         AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(1);
@@ -1152,6 +1283,11 @@ public:
         for (uint32_t tokenIndex = startTokenId; tokenIndex < endTokenId; ++tokenIndex) {
             uint32_t index = (tokenIndex & 1) ? 0 : 1;
             int32_t eventId = (tokenIndex & 1) ? 0 : 1;
+
+
+            auto inputOffset = tokenIndex * tokenLength;
+            auto outputOffset = inputOffset;
+
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventId);
             AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(eventId);
             AscendC::DataCopy(xInTensor[index], srcXGMTensor[tokenIndex * tokenLength], tokenLength);
@@ -1161,16 +1297,56 @@ public:
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventId);
             AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventId);
-            AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength], yInt8Tensor[index], tokenLength);
+            //AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength], yInt8Tensor[index], tokenLength);
             AscendC::DataCopyPad(
                 dstXScaleGMTensor[tokenIndex], yFp32Tensor[index][tokenLength / sizeof(float)], dataCopyParamsFloat);
             AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(eventId);
+            //共享专家int8 -> int4
+            // 高四位处理开始
+            AscendC::Cast(xHighHalfTensor, yInt8Tensor[index], AscendC::RoundMode::CAST_NONE, tokenLength);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, tokenLength);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(1);
+            AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(0);
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(0);
+            AscendC::DataCopy(src[outputOffset], xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
+            // 高四位处理结束
+
+            // 低四位处理开始
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(1);
+            AscendC::And(xLowHalfTensor.ReinterpretCast<int16_t>(), yInt8Tensor[index].ReinterpretCast<int16_t>(), xLowI16Tensor, LEN_128,
+                LEN_VK, {1, 1, 1, 8, 8, 0});
+            if (LAST_LEN_VK > 0) {
+                AscendC::And(xLowHalfTensor[LEN_VK * LEN_128].ReinterpretCast<int16_t>(),
+                    yInt8Tensor[index][LEN_VK * LEN_128 * TWO].ReinterpretCast<int16_t>(), xLowI16Tensor, LAST_LEN_VK, 1,
+                    {1, 1, 1, 8, 8, 0});
+            }
+            AscendC::PipeBarrier<PIPE_V>();
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventId);
+            AscendC::Cast(xLowHalfTensor2.ReinterpretCast<half>(), xLowHalfTensor.ReinterpretCast<int8_t>(),
+                    AscendC::RoundMode::CAST_NONE, tokenLength);
+            AscendC::PipeBarrier<PIPE_V>();
+            const half MINUS_EIGHT = static_cast<half>(-8);
+            AscendC::Adds(xHighHalfTensor, xLowHalfTensor2, MINUS_EIGHT, tokenLength);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(0);
+            AscendC::Cast(xLowI4Tensor, xHighHalfTensor.ReinterpretCast<half>(), AscendC::RoundMode::CAST_NONE, tokenLength);
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(1);
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(1);
+            AscendC::DataCopy(src[outputOffset + tokenLength / 2], xLowI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(0);
+
+
         }
+        //int 8 to int4
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(1);
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(0);
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(1);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(0);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(1);
 
         // Set GM to info AIC
         AscendC::PipeBarrier<PIPE_ALL>();
@@ -1272,6 +1448,140 @@ public:
         AscendC::SetFlag<AscendC::HardEvent::V_S>(0);
         AscendC::WaitFlag<AscendC::HardEvent::V_S>(0);
     }
+    CATLASS_DEVICE
+    void FetchAndPreprocessInt8ToInt4(AscendC::GlobalTensor<int8_t> &src, int32_t rows,
+                                                        int32_t hiddenSize, int ubOffset)
+    {
+        uint32_t tmpBufferOffset = ubOffset;
+
+        // double buffer 定义： tmpBuffer 包含int8_t token + float scale, xTensor 只包含int8_t token
+        AscendC::LocalTensor<int8_t> xTensor0 = resource.ubBuf.template GetBufferByByte<int8_t>(tmpBufferOffset);
+        AscendC::LocalTensor<int8_t> tmpBuffer0 = resource.ubBuf.template GetBufferByByte<int8_t>(tmpBufferOffset);
+        xTensor0.SetSize(hiddenSize);
+        tmpBuffer0.SetSize(hiddenSize);
+        tmpBufferOffset += (hiddenSize) * sizeof(int8_t);
+
+        AscendC::LocalTensor<int8_t> xTensor1 = resource.ubBuf.template GetBufferByByte<int8_t>(tmpBufferOffset);
+        AscendC::LocalTensor<int8_t> tmpBuffer1 = resource.ubBuf.template GetBufferByByte<int8_t>(tmpBufferOffset);
+        xTensor1.SetSize(hiddenSize);
+        tmpBuffer1.SetSize(hiddenSize);
+        tmpBufferOffset += (hiddenSize) * sizeof(int8_t);
+        // double buffer 定义结束
+
+        AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(tmpBufferOffset);
+        xHighI4Tensor.SetSize(hiddenSize);
+        tmpBufferOffset += hiddenSize / 2;
+
+        AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(tmpBufferOffset);
+        xLowI4Tensor.SetSize(hiddenSize);
+        tmpBufferOffset += hiddenSize / 2;
+
+        AscendC::LocalTensor<half> xHighHalfTensor = resource.ubBuf.template GetBufferByByte<half>(tmpBufferOffset);
+        xHighHalfTensor.SetSize(hiddenSize * sizeof(half));
+        tmpBufferOffset += hiddenSize * sizeof(half);
+
+        AscendC::LocalTensor<half> xLowHalfTensor = resource.ubBuf.template GetBufferByByte<half>(tmpBufferOffset);
+        xLowHalfTensor.SetSize(hiddenSize * sizeof(half));
+        tmpBufferOffset += hiddenSize * sizeof(half);
+
+        AscendC::LocalTensor<half> xLowHalfTensor2 = resource.ubBuf.template GetBufferByByte<half>(tmpBufferOffset);
+        xLowHalfTensor2.SetSize(hiddenSize * sizeof(half));
+        tmpBufferOffset += hiddenSize * sizeof(half);
+
+        AscendC::LocalTensor<int16_t> xLowI16Tensor = resource.ubBuf.template GetBufferByByte<int16_t>(tmpBufferOffset);
+        xLowI16Tensor.SetSize(128 * sizeof(int16_t));
+
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID6);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID7);
+
+        constexpr int32_t MASK = 128;
+        AscendC::Duplicate(xLowI16Tensor, static_cast<int16_t>(0x0F0F), MASK);
+        AscendC::PipeBarrier<PIPE_V>();
+        const size_t LEN_VK = (hiddenSize / 2) / 128;
+        const size_t LAST_LEN_VK = (hiddenSize % 256) / 2;
+        const half ONE_SIXTEENTH = static_cast<half>(0.0625f);
+
+        uint32_t totalM = rows;
+
+        AscendC::SetFlag<AscendC::HardEvent::S_MTE2>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::S_MTE2>(EVENT_ID6);
+
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID6);
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID7);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+
+        constexpr size_t LEN_128 = 128;
+
+        constexpr int32_t BufferNum = 2;
+        uint32_t copyInNum = hiddenSize;
+
+        int pingpongId = 0;
+        for (uint32_t processIndex = 0; processIndex < rows; ++processIndex) {
+            AscendC::TEventID EVENT_ID = pingpongId == 0 ? EVENT_ID6 : EVENT_ID7;
+            AscendC::LocalTensor<int8_t> buf = pingpongId == 0 ? tmpBuffer0 : tmpBuffer1;
+            AscendC::LocalTensor<int8_t> xTensor = pingpongId == 0 ? xTensor0 : xTensor1;
+            AscendC::LocalTensor<float> bufScale = buf[hiddenSize].template ReinterpretCast<float>();
+            auto inputOffset = processIndex * copyInNum;
+            auto outputOffset = inputOffset;
+
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID);
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID);
+            AscendC::DataCopy(buf, src[inputOffset], copyInNum);
+
+            AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE3>(EVENT_ID);
+            AscendC::WaitFlag<AscendC::HardEvent::MTE2_MTE3>(EVENT_ID);
+            // 远端 scale 拷贝到GM
+            // AscendC::DataCopyPad(dstScale[processIndex], bufScale, {1, 4, 0, 0, 0});
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID);
+            AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID);
+            AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID);
+            // 高四位处理开始
+            AscendC::Cast(xHighHalfTensor, xTensor, AscendC::RoundMode::CAST_NONE, hiddenSize);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, hiddenSize);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+            AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, hiddenSize);
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
+            AscendC::DataCopy(src[outputOffset], xHighI4Tensor.ReinterpretCast<int8_t>(), hiddenSize / 2);
+            // 高四位处理结束
+
+            // 低四位处理开始
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+            AscendC::And(xLowHalfTensor.ReinterpretCast<int16_t>(), xTensor.ReinterpretCast<int16_t>(), xLowI16Tensor, LEN_128,
+                LEN_VK, {1, 1, 1, 8, 8, 0});
+            if (LAST_LEN_VK > 0) {
+                AscendC::And(xLowHalfTensor[LEN_VK * LEN_128].ReinterpretCast<int16_t>(),
+                    xTensor[LEN_VK * LEN_128 * TWO].ReinterpretCast<int16_t>(), xLowI16Tensor, LAST_LEN_VK, 1,
+                    {1, 1, 1, 8, 8, 0});
+            }
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID);
+            AscendC::Cast(xLowHalfTensor2.ReinterpretCast<half>(), xLowHalfTensor.ReinterpretCast<int8_t>(),
+                    AscendC::RoundMode::CAST_NONE, hiddenSize);
+            AscendC::PipeBarrier<PIPE_V>();
+            const half MINUS_EIGHT = static_cast<half>(-8);
+            AscendC::Adds(xHighHalfTensor, xLowHalfTensor2, MINUS_EIGHT, hiddenSize);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+            AscendC::Cast(xLowI4Tensor, xHighHalfTensor.ReinterpretCast<half>(), AscendC::RoundMode::CAST_NONE, hiddenSize);
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
+            AscendC::DataCopy(src[outputOffset + hiddenSize / 2], xLowI4Tensor.ReinterpretCast<int8_t>(), hiddenSize / 2);
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+            // 低四位处理结束
+            pingpongId = (pingpongId + 1) % BufferNum;
+        }
+
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID7);
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID7);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+    }
 
     CATLASS_DEVICE
     void RecvToken(GM_ADDR gmX1, GM_ADDR gmX1Scale, GM_ADDR gmEpSendCount, uint32_t &coreTokenCount,
@@ -1358,6 +1668,12 @@ public:
                     AscendC::DataCopy(expandXOutGlobal, xTmpTensor_, tokenLength);
                     AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
                 }
+                if (curTokenIdx[i] == countPerRank[i]) {
+                    expandXOutGlobal.SetGlobalBuffer((__gm__ int8_t *)(gmX1) + beginIdx * tokenLength, tokenLength * countPerRank[i]);
+                    FetchAndPreprocessInt8ToInt4(expandXOutGlobal, countPerRank[i], tokenLength, subUbOffset);
+                    // 保证只执行一次int8-->int4
+                    curTokenIdx[i] += 1;
+                }
             }
         }
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
@@ -1430,6 +1746,7 @@ public:
 
     CATLASS_DEVICE
     void CompCoreFunc(GM_ADDR gmCVSwapBuff, __gm__ ElementScale *gmShareMm1Scale, __gm__ ElementScale *gmScale,
+                 __gm__ float *gmWeightAux,
                 __gm__ ElementPerTokenScale *gmShareTokenScale, __gm__ ElementPerTokenScale *gmTokenScale,
                 __gm__ float *gmShareSwigluOutput, __gm__ float *gmSwigluOutput, uint32_t shareN, uint32_t n,
                 uint32_t k, LayoutScale layoutShareScale, LayoutScale layoutScale,
@@ -1451,16 +1768,21 @@ public:
             uint32_t target = 1;
             uint32_t startCoreIdx = 0;
             AscendC::ListTensorDesc gmScaleListTensor;
+            AscendC::ListTensorDesc gmWeightAuxListTensor;
             AscendC::GlobalTensor<int32_t> groupTokenNumStateTensor;
+            //            
+            gmWeightAuxListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(gmWeightAux));
+            __gm__ float* gmWeightAuxPtr;
             if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
                 uint32_t currentM = axisBS;
                 GemmCoord inGroupProblemShape{currentM, shareN, k};
                 LayoutPerTokenScale layoutPerTokenScale =
                     wholeLayoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
                 LayoutD layoutD = layout::RowMajor{currentM, shareN};
-
+                //通过编译，共享专家模式随机给gmWeightAuxPtr
                 EpilogueParams epilogueParams{
                     gmShareMm1Scale, layoutShareScale,
+                    gmWeightAuxPtr,
                     gmShareTokenScale, layoutPerTokenScale,
                     gmShareSwigluOutput, layoutD
                 };
@@ -1478,7 +1800,9 @@ public:
 
                     MatrixCoord offsetC{(stageId * aiCoreGroupNum + aiCoreGroupIdx) * L1TileShape::M, 0};
                     int64_t gmOffsetC = layoutC.GetOffset(offsetC);
+                    
                     auto gmBlockC = gmC[gmOffsetC];
+            
                     auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
                     CheckSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET,
                         static_cast<uint8_t>(compCoreNum + compCoreIdx), target);
@@ -1493,6 +1817,7 @@ public:
             __gm__ ElementScale* gmScalePtr;
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                 gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(gmScaleListTensor.GetDataPtr<int32_t>(0));
+                gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(gmWeightAuxListTensor.GetDataPtr<int32_t>(0));
             }
             for (uint32_t groupIdx = 0; groupIdx < localExpertNum; ++groupIdx) {
                 // just like AIC
@@ -1509,22 +1834,30 @@ public:
                     }
                     SPIN_WAIT_CYCLES();
                 }
-                uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT);
-                GemmCoord inGroupProblemShape{currentM, n, k};
+                uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT) ;
+                
+                //现在C矩阵由高低四位拼成，行数*2
+                GemmCoord inGroupProblemShape{currentM * 2, n, k};
+                GemmCoord newinGroupProblemShape{currentM , n, k};
                 LayoutPerTokenScale layoutPerTokenScale =
-                    wholeLayoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
+                    wholeLayoutPerTokenScale.GetTileLayout(newinGroupProblemShape.template GetCoordByAxis<0>());
                 LayoutD layoutD = layout::RowMajor{currentM, n};
                 EpilogueParams epilogueParams;
                 if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                     gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(
                                     gmScaleListTensor.GetDataPtr<int32_t>(groupIdx));
+                    gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(
+                                    gmWeightAuxListTensor.GetDataPtr<int32_t>(groupIdx));
+                    
                     epilogueParams = EpilogueParams {
                                                 gmScalePtr, layoutScale,
+                                                gmWeightAuxPtr,//补偿矩阵
                                                 gmTokenScale + gmGroupOffsetPerTokenScale, layoutPerTokenScale,
                                                 gmSwigluOutput + gmGroupOffsetD, layoutD};
                 } else {
                     epilogueParams = EpilogueParams{gmScalePtr + gmGroupOffsetScale,
                                                 layoutScale,
+                                                gmWeightAuxPtr + gmGroupOffsetScale,
                                                 gmTokenScale + gmGroupOffsetPerTokenScale,
                                                 layoutPerTokenScale,
                                                 gmSwigluOutput + gmGroupOffsetD,
@@ -1554,10 +1887,10 @@ public:
                 }
 
                 if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
-                    gmGroupOffsetScale += inGroupProblemShape.n();
+                    gmGroupOffsetScale += inGroupProblemShape.n() ;
                 }
-                gmGroupOffsetPerTokenScale += inGroupProblemShape.m();
-                gmGroupOffsetD += currentM * n;
+                gmGroupOffsetPerTokenScale += inGroupProblemShape.m() / 2;
+                gmGroupOffsetD += currentM * n ;
 
                 startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
             }
@@ -1790,7 +2123,7 @@ public:
         auto gmSwigluOutput = reinterpret_cast<__gm__ float *>(params.gmSwigluOut);
         auto gmShareSwigluOutput = reinterpret_cast<__gm__ float *>(params.gmShareSwigluOut);
         if (isCompCore) {
-            CompCoreFunc(params.ptrWorkspace, params.ptrShareScale,  params.ptrScale,
+            CompCoreFunc(params.ptrWorkspace, params.ptrShareScale,  params.ptrScale, params.gmWeightAux,
                 (__gm__ float*)params.gmShareX1Scale, (__gm__ float*)params.ptrPerTokenScale,
                 gmShareSwigluOutput, gmSwigluOutput, params.shareN, params.problemShape.n(), params.problemShape.k(),
                 params.layoutShareScale, params.layoutScale, params.layoutPerTokenScale);
@@ -2127,7 +2460,7 @@ public:
 
         AscendC::GlobalTensor<ElementC> gmC;
         gmC.SetGlobalBuffer(reinterpret_cast<__gm__ ElementC *>(params.ptrWorkspace));
-        auto layoutC = layout::RowMajor{L1TileShape::M * coreNum * WORKSPACE_STAGES, L1TileShape::N};
+        auto layoutC = layout::RowMajor{L1TileShape::M * coreNum * WORKSPACE_STAGES * 2 , L1TileShape::N};
 
         uint32_t stageId = 0;
         uint32_t stageUsed = 0;
@@ -2140,7 +2473,7 @@ public:
             gmB.SetL2CacheHint(AscendC::CacheMode::CACHE_MODE_DISABLE);
 
             uint32_t currentM = params.bs;
-            GemmCoord inGroupProblemShape{currentM, params.shareN, params.problemShape.k()};
+            GemmCoord inGroupProblemShape{currentM * 2, params.shareN, params.problemShape.k()};
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
             LayoutB layoutB = params.layoutShareB;
             blockScheduler.Update(inGroupProblemShape, MakeCoord(L1TileShape::M, L1TileShape::N));
@@ -2294,13 +2627,14 @@ public:
             // Process shared expert first if enabled
             if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
                 uint32_t currentM = params.bs;
-                GemmCoord inGroupProblemShape{currentM, params.shareN, params.problemShape.k()};
+                GemmCoord inGroupProblemShape{currentM * 2, params.shareN, params.problemShape.k()};
                 LayoutPerTokenScale layoutPerTokenScale =
                     params.layoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
                 LayoutD layoutD = layout::RowMajor{currentM, params.shareN};
-
+                __gm__ float* gmWeightAuxPtr;
                 EpilogueParams epilogueParams{
                     params.ptrShareScale, params.layoutShareScale,
+                    gmWeightAuxPtr,
                     reinterpret_cast<__gm__ float*>(params.gmShareX1Scale), layoutPerTokenScale,
                     reinterpret_cast<__gm__ float*>(params.gmShareSwigluOut), layoutD
                 };
@@ -2344,17 +2678,22 @@ public:
                     params.layoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
                 LayoutD layoutD = layout::RowMajor{currentM, n};
                 EpilogueParams epilogueParams;
+                //传入参数解决编译问题
+                __gm__ float* gmWeightAuxPtr;
                 if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                     gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(
                                     gmScaleListTensor.GetDataPtr<int32_t>(groupIdx));
+                    
                     epilogueParams = EpilogueParams {
                                                 gmScalePtr, layoutScale,
+                                                gmWeightAuxPtr,
                                                 params.ptrPerTokenScale + gmGroupOffsetPerTokenScale,
                                                 layoutPerTokenScale,
                                                 ptrD + gmGroupOffsetD, layoutD};
                 } else {
                     epilogueParams = EpilogueParams{gmScalePtr + gmGroupOffsetScale,
                                                 layoutScale,
+                                                gmWeightAuxPtr,
                                                 params.ptrPerTokenScale + gmGroupOffsetPerTokenScale,
                                                 layoutPerTokenScale,
                                                 ptrD + gmGroupOffsetD,
@@ -2375,7 +2714,6 @@ public:
                     int64_t gmOffsetC = layoutC.GetOffset(offsetC);
                     auto gmBlockC = gmC[gmOffsetC];
                     auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
-
                     Arch::CrossCoreWaitFlag(flagAicFinishStoreList[stageId]);
                     blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
                     Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(flagAivFinishComputeList[stageId]);
