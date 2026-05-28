@@ -23,6 +23,7 @@ static struct option g_long_options[] = {
     {"cpu_core", required_argument, NULL, 'u'},
     {"feature", required_argument, NULL, 'f'},
     {"help", no_argument, NULL, 'h'},
+    {"tp-type", required_argument, NULL, 'P'},
     /* Long options only */
     {"server", no_argument, NULL, 'S'},
     {"client", no_argument, NULL, 'C'},
@@ -100,6 +101,7 @@ static void init_cfg(umq_perftest_config_t *cfg)
     cfg->test_round = DEFAULT_LAT_TEST_ROUND;
     cfg->thresh_num = 0;
     cfg->blk_mode = 0;
+    cfg->tp_type = UMQ_TP_TYPE_CTP;
 }
 
 int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *cfg)
@@ -112,7 +114,7 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
     init_cfg(cfg);
     int start_idx = 0;
     while (1) {
-        int c = getopt_long(argc, argv, "c:d:f:l:r:p:u:s:hN:D:E:n:L:", g_long_options, NULL);
+        int c = getopt_long(argc, argv, "c:d:f:l:r:p:u:s:hN:D:E:n:L:P:", g_long_options, NULL);
         if (c == -1) {
             break;
         }
@@ -181,6 +183,12 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
             case 'M':
                 cfg->tp_mode = (umq_tp_mode_t)strtoul(optarg, NULL, 0);
                 if (cfg->tp_mode >= UMQ_TM_MAX) {
+                    return -1;
+                }
+                break;
+            case 'P':
+                cfg->tp_type = (umq_tp_type_t)strtoul(optarg, NULL, 0);
+                if (cfg->tp_type >= UMQ_TP_TYPE_MAX) {
                     return -1;
                 }
                 break;
