@@ -297,6 +297,7 @@ typedef struct umq_used_ports {
 #define UMQ_CREATE_FLAG_PRIORITY            (1 << 10)       // enable arg priority when create umq
 #define UMQ_CREATE_FLAG_MAIN_UMQ            (1 << 11)       // indicate that the umq creates shared jfr
 #define UMQ_CREATE_FLAG_SUB_UMQ             (1 << 12)       // indicate that the umq uses shared jfr from main queue,
+#define UMQ_CREATE_FLAG_SHARE_TRANSPORT     (1 << 13)       // indicate that the umq uses shared send jetty
                                                             // associated with UMQ_CREATE_FLAG_SHARE_RQ
 
 typedef struct umq_create_option {
