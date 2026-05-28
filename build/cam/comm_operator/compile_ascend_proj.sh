@@ -7,10 +7,11 @@
 # History: 2025-07-20 create cam building script
 
 # 定义全局屏蔽列表
-exclude_list=()
+# cam_feature的shmem dispatch/combine未适配最新shmem，暂不启用
+exclude_list=("moe_combine_shmem" "moe_dispatch_shmem")
 if [ -z "${SHMEM_HOME_PATH}" ]; then
     echo "Skipping shmem (SHMEM_HOME_PATH not set)"
-    exclude_list+=("moe_combine_shmem" "moe_dispatch_shmem")
+    exclude_list+=("fused_deep_moe")
 fi
 
 CopyOps() {
@@ -79,6 +80,9 @@ BuildAscendProj() {
     # if need to compile shmem opts: replace msopgen camke files with pregen {.ascend_kernels/pregen/cmake}
     if [ -n "${SHMEM_HOME_PATH}" ]; then
         cp -rf ./ascend_kernels/pregen/cmake ./${proj_name}
+        # cam_feature的shmem dispatch/combine未适配最新shmem，暂不启用
+        rm -f ./${proj_name}/pregen/build_out/autogen/*dispatch_shmem*
+        rm -f ./${proj_name}/pregen/build_out/autogen/*combine_shmem*
     else
         rm -f ./${proj_name}/pregen/build_out/autogen/*shmem*
     fi
