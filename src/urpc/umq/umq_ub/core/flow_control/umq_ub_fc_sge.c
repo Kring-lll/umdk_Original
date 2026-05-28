@@ -86,6 +86,7 @@ int umq_ub_fc_sge_alloc(umq_ub_fc_sge_mgr_t *mgr, umq_ub_fc_sge_slot_t *slot)
     if (mgr->qbuf_array[qbuf_idx] == NULL) {
         umq_alloc_option_t option = { .headroom_size = 0 };
         umq_buf_list_t head;
+        QBUF_LIST_FIRST(&head) = NULL;
         int ret = umq_qbuf_alloc(UMQ_UB_FC_SGE_QBUF_SIZE, 1, &option, &head);
         if (ret != UMQ_SUCCESS) {
             (void)util_mutex_unlock(mgr->lock);
@@ -141,6 +142,7 @@ int umq_ub_fc_share_recv_init(umq_ub_fc_share_recv_t *recv, uint32_t qbuf_cnt)
     for (uint32_t i = 0; i < qbuf_cnt; i++) {
         umq_alloc_option_t option = { .headroom_size = 0 };
         umq_buf_list_t head;
+        QBUF_LIST_FIRST(&head) = NULL;
         int ret = umq_qbuf_alloc(UMQ_UB_FC_SGE_QBUF_SIZE, 1, &option, &head);
         if (ret != UMQ_SUCCESS) {
             UMQ_VLOG_ERR(VLOG_UMQ, "fc share recv qbuf[%u] alloc failed, ret: %d\n", i, ret);
