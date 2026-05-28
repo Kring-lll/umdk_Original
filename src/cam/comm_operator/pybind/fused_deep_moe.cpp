@@ -44,6 +44,8 @@ TensorVector FusedDeepMoeImplNpu(
     const c10::optional<at::Tensor> &xActiveMask, \
     const at::TensorList &gmm1BiasOptional, \
     const at::TensorList &gmm2BiasOptional, \
+    const c10::optional<at::Tensor> &shareGmm1BiasOptional, \
+    const c10::optional<at::Tensor> &shareGmm2BiasOptional, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
     int64_t epRankId, \
@@ -59,14 +61,14 @@ TensorVector FusedDeepMoeImplNpu(
     int h = xShape[1];
     int bs = xShape[0];
     int topk = expertIdsShape[1];
-    
+
     at::Tensor output = at::empty({bs, h}, x.options());
     at::Tensor shareOutput = at::empty({bs, h}, x.options());
 
     int64_t localExpertNum = moeExpertNum / epRankSize;
     auto opts = expertIds.options().dtype(at::kLong);
     at::Tensor expertTokenNums = at::empty({localExpertNum}, opts);
-    
+
     const std::string groupEpStr(groupEp.data(), groupEp.size());
     const char* groupEpPtr = groupEpStr.c_str();
 
@@ -78,6 +80,7 @@ TensorVector FusedDeepMoeImplNpu(
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
         expertSmoothScales, shareSmoothScales, xActiveMask, \
         gmm1BiasOptional, gmm2BiasOptional, \
+        shareGmm1BiasOptional, shareGmm2BiasOptional, \
         // attr
         groupEpPtr, epRankSize, epRankId, moeExpertNum, quantMode, globalBs, \
         // output
@@ -108,6 +111,8 @@ TensorVector FusedDeepMoeImplMeta(
     const c10::optional<at::Tensor> &xActiveMask, \
     const at::TensorList &gmm1BiasOptional, \
     const at::TensorList &gmm2BiasOptional, \
+    const c10::optional<at::Tensor> &shareGmm1BiasOptional, \
+    const c10::optional<at::Tensor> &shareGmm2BiasOptional, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
     int64_t epRankId, \
@@ -145,6 +150,8 @@ TensorVector FusedDeepMoeImpl(
     const c10::optional<at::Tensor> &xActiveMask, \
     const at::TensorList &gmm1BiasOptional, \
     const at::TensorList &gmm2BiasOptional, \
+    const c10::optional<at::Tensor> &shareGmm1BiasOptional, \
+    const c10::optional<at::Tensor> &shareGmm2BiasOptional, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
     int64_t epRankId, \
@@ -161,6 +168,7 @@ TensorVector FusedDeepMoeImpl(
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
         expertSmoothScales, shareSmoothScales, xActiveMask, \
         gmm1BiasOptional, gmm2BiasOptional, \
+        shareGmm1BiasOptional, shareGmm2BiasOptional, \
         groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs);
 }
 
@@ -183,6 +191,8 @@ public:
                             const c10::optional<at::Tensor> &xActiveMask, \
                             const at::TensorList &gmm1BiasOptional, \
                             const at::TensorList &gmm2BiasOptional, \
+                            const c10::optional<at::Tensor> &shareGmm1BiasOptional, \
+                            const c10::optional<at::Tensor> &shareGmm2BiasOptional, \
                             c10::string_view groupEp, \
                             int64_t epRankSize, \
                             int64_t epRankId, \
@@ -197,6 +207,7 @@ public:
             shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
             expertSmoothScales, shareSmoothScales, xActiveMask, \
             gmm1BiasOptional, gmm2BiasOptional, \
+            shareGmm1BiasOptional, shareGmm2BiasOptional, \
             groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs);
         return result;
     }
@@ -204,6 +215,8 @@ public:
     static TensorVector backward(AutogradContext *ctx, TensorVector grad_outputs)
     {
         return {at::Tensor(),
+                at::Tensor(),
+                at::Tensor(),
                 at::Tensor(),
                 at::Tensor(),
                 at::Tensor(),
@@ -241,6 +254,8 @@ TensorVector FusedDeepMoeImplAutograd(
     const c10::optional<at::Tensor> &xActiveMask, \
     const at::TensorList &gmm1BiasOptional, \
     const at::TensorList &gmm2BiasOptional, \
+    const c10::optional<at::Tensor> &shareGmm1BiasOptional, \
+    const c10::optional<at::Tensor> &shareGmm2BiasOptional, \
     c10::string_view groupEp, \
     int64_t epRankSize, \
     int64_t epRankId, \
@@ -254,6 +269,7 @@ TensorVector FusedDeepMoeImplAutograd(
             shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
             expertSmoothScales, shareSmoothScales, xActiveMask, \
             gmm1BiasOptional, gmm2BiasOptional, \
+            shareGmm1BiasOptional, shareGmm2BiasOptional, \
             groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs);
         return result;
 }

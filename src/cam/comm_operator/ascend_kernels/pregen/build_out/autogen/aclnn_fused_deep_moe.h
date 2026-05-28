@@ -33,6 +33,8 @@ __attribute__((visibility("default"))) aclnnStatus aclnnFusedDeepMoeGetWorkspace
     const aclTensor *xActiveMaskOptional,
     const aclTensorList *gmm1BiasOptional,
     const aclTensorList *gmm2BiasOptional,
+    const aclTensor *shareGmm1BiasOptional,
+    const aclTensor *shareGmm2BiasOptional,
     char *groupEp,
     int64_t epRankSize,
     int64_t epRankId,

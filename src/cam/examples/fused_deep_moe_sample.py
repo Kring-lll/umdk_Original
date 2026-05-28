@@ -264,6 +264,8 @@ class FusionOp(DecodeMoeOps):
             share_gmm1_weight_scale=self.share_gmm1_weight_scale,
             share_gmm2_weight=self.share_gmm2_weight,
             share_gmm2_weight_scale=self.share_gmm2_weight_scale,
+            share_gmm1_bias=self.share_gmm1_bias,
+            share_gmm2_bias=self.share_gmm2_bias,
             expert_smooth_scales=self.smooth_scales,
             share_smooth_scales=self.share_smooth_scales_fp32,
             x_active_mask=x_active_mask,
@@ -277,7 +279,19 @@ class FusionOp(DecodeMoeOps):
 
     def _process_share_weights_after_loading(self, share_weight_datas):
         super()._process_share_weights_after_loading(share_weight_datas)
-        _, _, _, _, share_smooth_scales = share_weight_datas
+        share_gmm1_weight_raw, _, share_gmm2_weight_raw, _, share_smooth_scales = share_weight_datas
+        if self.with_share:
+            share_gmm1_input_dim = share_gmm1_weight_raw.shape[1]
+            share_gmm2_input_dim = share_gmm2_weight_raw.shape[1]
+            token_all_8_gmm1 = torch.ones(share_gmm1_input_dim) * 8
+            token_all_8_gmm2 = torch.ones(share_gmm2_input_dim) * 8
+            share_gmm1_bias = torch.matmul(token_all_8_gmm1, share_gmm1_weight_raw.float().cpu()).to(torch.float32)
+            share_gmm2_bias = torch.matmul(token_all_8_gmm2, share_gmm2_weight_raw.float().cpu()).to(torch.float32)
+            self.share_gmm1_bias = convert_tensor_into_parameter(share_gmm1_bias)
+            self.share_gmm2_bias = convert_tensor_into_parameter(share_gmm2_bias)
+        else:
+            self.share_gmm1_bias = None
+            self.share_gmm2_bias = None
         if self.with_share and self.with_smooth:
             self.share_smooth_scales_fp32 = convert_tensor_into_parameter(share_smooth_scales.float())
         else:
