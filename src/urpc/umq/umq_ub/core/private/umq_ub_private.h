@@ -427,6 +427,7 @@ typedef struct ub_queue {
     ub_queue_idle_check_t *checker;
     bondp_port_id_t *used_port;
     uint32_t umq_id;            // umq id for share transport mode
+    uint32_t remote_umq_id;     // remote umq id for share transport mode
 } ub_queue_t;
 
 typedef struct user_ctx {
