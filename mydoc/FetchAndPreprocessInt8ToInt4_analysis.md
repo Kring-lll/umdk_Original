@@ -264,24 +264,45 @@ buffer1 保护:  MTE3释放→MTE2 = EVENT_ID7.MTE3_MTE2
 
 ### 7.5 跨迭代保护 vs 迭代内保护
 
-**跨迭代保护**：针对会被"下一轮覆写、上一轮还在用"的物理 buffer：
+**核心问题**：代码中哪类事件是防止"跨迭代写覆盖"的，哪类只是本轮内部的流水线握手？
+
+**答**：要跨迭代保护的核心是 `xHighI4Tensor` 和 `xLowI4Tensor` 这两个单缓冲——Iter N 的 MTE3 还在读它们往 GM 搬，Iter N+1 的 V 就不能提前覆写。其余 `MTE2_V`、`V_MTE3`、`MTE2_MTE3` 属于同一轮内 MTE2→V→MTE3 的前后依赖握手。此外双缓冲 `buffer0`/`buffer1` 的 `MTE3_MTE2` 和 `V_MTE2` 也是跨迭代的（隔轮复用），但因为隔了一轮，实际通常不卡。
+
+---
+
+**跨迭代保护**：针对会被"下一轮覆写、上一轮还在用"的物理 buffer。
+
+单缓冲输出 buffer（**核心跨迭代保护**）：
+
+| 保护目标 | 事件 | 设信号（谁、何时） | 等信号（谁、何时） |
+|---|---|---|---|
+| `xHighI4Tensor` | `MTE3_V(EVENT_ID7)` | Iter N 的 MTE3，排在高4位 DataCopy 之后（行 1377） | Iter N+1 的 V，在写 xHighI4Tensor 之前（行 1369） |
+| `xLowI4Tensor` | `MTE3_V(EVENT_ID6)` | Iter N 的 MTE3，排在低4位 DataCopy 之后（行 1398） | Iter N+1 的 V，在写 xLowI4Tensor 之前（行 1393） |
+
+> **为什么说这两个是核心？** 因为它们是仅有的两份物理空间，每轮都被覆写。如果 Iter N+1 的 V 不等 Iter N 的 MTE3 搬完就写，GM 输出的就是错数据。
+
+双缓冲输入 buffer（跨迭代，但隔轮复用，实际通常不卡）：
 
 | 保护目标 | 事件 | 设信号 | 等信号 |
 |---|---|---|---|
-| `xHighI4Tensor` | `MTE3_V(EVENT_ID7)` | Iter N 低4位 MTE3 (行 1377) | Iter N+1 高4位 V (行 1369) |
-| `xLowI4Tensor` | `MTE3_V(EVENT_ID6)` | Iter N 低4位 MTE3 (行 1398) | Iter N+1 低4位 V (行 1393) |
-| `buffer0` | `MTE3_MTE2(EVENT_ID6)` | Iter N MTE3 (行 1361) | Iter N+2 MTE2 (行 1353) |
-| `buffer0` | `V_MTE2(EVENT_ID6)` | Iter N V (行 1386) | Iter N+2 MTE2 (行 1354) |
-| `buffer1` | `MTE3_MTE2(EVENT_ID7)` | Iter N+1 MTE3 (行 1361) | Iter N+3 MTE2 (行 1353) |
-| `buffer1` | `V_MTE2(EVENT_ID7)` | Iter N+1 V (行 1386) | Iter N+3 MTE2 (行 1354) |
+| `buffer0` | `MTE3_MTE2(EVENT_ID6)` | Iter N MTE3（行 1361） | Iter N+2 MTE2（行 1353） |
+| `buffer0` | `V_MTE2(EVENT_ID6)` | Iter N V（行 1386） | Iter N+2 MTE2（行 1354） |
+| `buffer1` | `MTE3_MTE2(EVENT_ID7)` | Iter N+1 MTE3（行 1361） | Iter N+3 MTE2（行 1353） |
+| `buffer1` | `V_MTE2(EVENT_ID7)` | Iter N+1 V（行 1386） | Iter N+3 MTE2（行 1354） |
 
-**迭代内前后依赖**：同一轮内 MTE2 → V → MTE3 流水级握手：
+---
 
-| 依赖 | 事件 | 跨度 |
+**迭代内前后依赖**：同一轮内 MTE2 → V → MTE3 流水级之间的握手，不跨迭代：
+
+| 依赖 | 事件 | 含义 |
 |---|---|---|
-| MTE2 搬完 → V 开始算 | `MTE2_V` | 迭代内 |
-| MTE2 搬完 → MTE3 感知 | `MTE2_MTE3` | 迭代内 |
-| V 算完 → MTE3 开始搬 | `V_MTE3` | 迭代内 |
+| MTE2 搬完 → V 开始算 | `MTE2_V` | V 必须等 MTE2 把数据搬入 xTensor 后才能读 |
+| MTE2 搬完 → MTE3 感知 | `MTE2_MTE3` | MTE3 需要知道输入 buffer 已就绪 |
+| V 算完 → MTE3 开始搬 | `V_MTE3` | MTE3 必须等 V 把结果写入 xHighI4Tensor/xLowI4Tensor 后才能搬出 |
+
+---
+
+**直观理解**：把流水线想象成三个阶段——MTE2 搬入、V 计算、MTE3 搬出。`MTE2_V`、`V_MTE3` 是**同一轮内**前后阶段的握手信号。`MTE3_V` 才是**跨轮**的握手：上一轮的 MTE3 对下一轮的 V 说"单缓冲我已经用完，你可以写了"。
 
 ### 7.6 xHighHalfTensor 复用安全性
 
@@ -317,3 +338,157 @@ Iter 2 (ID6, buffer0):              ← ★ 与 Iter1 的 V/MTE3 重叠 ★
 重叠发生在两个维度：
 1. **输入维度**：Iter N+1 的 MTE2 用 buffer1，Iter N 的 V 用 buffer0，不冲突
 2. **输出维度**：Iter N+1 的 V 通过 `WaitFlag<MTE3_V>` 等 Iter N 的 MTE3 释放单缓冲
+
+### 7.8 推论：如果输出 buffer 也是双份会怎样
+
+**问**：如果 `xHighI4Tensor` / `xLowI4Tensor` 也是双份（out0/out1），两轮迭代是否可以完全并行？
+
+**答**：可以减少 `MTE3_V` 的等待，但不会带来吞吐翻倍。
+
+输出双份后，依赖关系从 N→N+1 变成 N→N+2：
+
+```
+单缓冲（当前）:
+  out: Iter N → Iter N+1   ← 相邻迭代抢同一块空间，N+1 等 N 的 MTE3
+
+双缓冲（假设）:
+  out0: Iter 0 → Iter 2    ← 隔轮复用，跟输入 buffer 一样的模式
+  out1: Iter 1 → Iter 3
+```
+
+1369/1377/1393/1398 这四行跨迭代 `MTE3_V` 可以直接消失，流水线更干净。但真正的瓶颈是**硬件流水线本身**：
+
+| 资源 | 共享 | 限制 |
+|---|---|---|
+| V 流水线 | 共享 | 只有一个 Vector ALU，两轮的 V 指令本质上串行 |
+| MTE3 流水线 | 共享 | 只有一个 MTE3 引擎，两轮的 DataCopy 排队执行 |
+| UB 空间 | 共享 | 多一份输出 buffer = 多 H bytes |
+
+即使 buffer 全双份，实际流水线：
+
+```
+Iter 0:  MTE2[CopyIN→buf0]  V[高4][低4]  MTE3[写out0]
+Iter 1:     MTE2[CopyIN→buf1]  V[ 高4 ][ 低4 ]  MTE3[ 写out1 ]
+                                  ↑              ↑
+                            V串行，等Iter0 V算完   MTE3串行，等Iter0 MTE3搬完
+```
+
+V 还是得等 V，MTE3 还是得等 MTE3。硬件才是真正的串行点。
+
+当前设计用**空间换时间**：省下 H bytes UB，而 `MTE3_V` 等待的大部分开销被 V 自身的计算延迟掩盖，实际损失很小。交叉耦合设计本质上是用两个 EVENT_ID 模拟了两份输出 buffer 的信号，只不过高 4 位和低 4 位分的是"事件通道"而非物理空间。
+
+---
+
+### 7.9 为什么必须用两个 EVENT_ID
+
+**问**：是否可以全都用 `EVENT_ID`，不显式区分 EVENT_ID6/EVENT_ID7？
+
+**答**：不能。每个 EVENT_ID 内部每种事件类型（如 `MTE3_V`）只有一个状态位，跨迭代使用时会被错误消费，导致死锁。
+
+**反证推演**（假设只用 EVENT_ID）：
+
+```
+Iter 0 的 MTE3:
+  1377: SetFlag<MTE3_V>(EVENT_ID)   → 标志 = 1  (释放 xHighI4Tensor)
+  1398: SetFlag<MTE3_V>(EVENT_ID)   → 标志 = 1  (释放 xLowI4Tensor, 是同一个位!)
+
+Iter 1 的 V:
+  1369: WaitFlag<MTE3_V>(EVENT_ID)  → 消费, 标志 = 0  ✓ 安全写 xHighI4Tensor
+  1393: WaitFlag<MTE3_V>(EVENT_ID)  → 标志 = 0, 等不到 → 死锁!
+         ↑ 这里需要的"xLowI4Tensor 已释放"信号在 Iter 0 行 1398 设过，
+         但被行 1369 先消费掉了
+```
+
+**死锁原因**：跨迭代场景中，两个消费者（高 4 位 V 和低 4 位 V）不是同时到达 Wait，前一个消费掉标志后，后一个永远等不到——而下一次 SetFlag 来自 Iter 1 自己的 MTE3，V 还卡在 MTE3 之前。
+
+**两个 EVENT_ID 如何解决**：给高 4 位和低 4 位各分配独立的 `MTE3_V` 通道：
+
+```
+高4位 MTE3→V:  EVENT_ID7.MTE3_V  → Iter N MTE3(行1377)设, Iter N+1 V(行1369)等
+低4位 MTE3→V:  EVENT_ID6.MTE3_V  → Iter N MTE3(行1398)设, Iter N+1 V(行1393)等
+```
+
+两条通道的标志位互相独立，不会交叉消费。
+
+同样，输入双缓冲的 `MTE3_MTE2` 和 `V_MTE2` 也需要两个 ID——buffer0 和 buffer1 的生命周期独立，必须用不同的标志位。
+
+**核心判断标准**：
+
+```
+能共用同一个 EVENT_ID:  Set 和 Wait 在同一迭代内成对闭环，Wait 消费后标志归 0
+必须用不同 EVENT_ID:    Set 在一轮迭代，Wait 在下一轮迭代，中间有另一个 Set/Wait 会污染
+```
+
+---
+
+### 7.10 V_MTE3 两对是否可以互换 EVENT_ID
+
+**问**：1371/1372 成对（高 4 位 V→MTE3），1395/1396 成对（低 4 位 V→MTE3），使用的 EVENT_ID 是否可以互换？
+
+```
+当前:  1371 SetFlag<V_MTE3>(EVENT_ID6)    1395 SetFlag<V_MTE3>(EVENT_ID7)
+       1372 WaitFlag<V_MTE3>(EVENT_ID6)    1396 WaitFlag<V_MTE3>(EVENT_ID7)
+互换:  1371 SetFlag<V_MTE3>(EVENT_ID7)    1395 SetFlag<V_MTE3>(EVENT_ID6)
+       1372 WaitFlag<V_MTE3>(EVENT_ID7)    1396 WaitFlag<V_MTE3>(EVENT_ID6)
+```
+
+**答**：可以互换，功能仍然正确。
+
+V_MTE3 是**迭代内握手**（V 算完 → 通知 MTE3 搬出），不跨迭代。同一 EVENT_ID 内的 `V_MTE3` 和 `MTE3_V` 是两种不同的事件类型，各有独立的标志位，互不干扰。
+
+互换后，每个 EVENT_ID "专管"一个 buffer 的完整生命周期：
+
+```
+互换后:
+  EVENT_ID6:  MTE3_V(低4位 MTE3→V)  +  V_MTE3(低4位 V→MTE3)  ← 全管低4位
+  EVENT_ID7:  MTE3_V(高4位 MTE3→V)  +  V_MTE3(高4位 V→MTE3)  ← 全管高4位
+```
+
+以 EVENT_ID7 专管高 4 位为例，时序分析：
+
+```
+Iter N:
+  V:   1369 WaitFlag<MTE3_V>(ID7)     ← 等Iter N-1 MTE3释放
+       1370 Cast→xHighI4Tensor        ← 写
+       1371 SetFlag<V_MTE3>(ID7)      ← "V写完了"
+  MTE3:1372 WaitFlag<V_MTE3>(ID7)     ← 等V写完 → 消费V_MTE3标志
+       1373 DataCopy(xHighI4Tensor)    ← MTE3读
+       1377 SetFlag<MTE3_V>(ID7)      ← "MTE3读完了，释放"
+
+Iter N+1:
+  V:   1369 WaitFlag<MTE3_V>(ID7)     ← 等Iter N MTE3释放 → 消费MTE3_V标志
+```
+
+序列严格交替：V_MTE3 消费 → MTE3_V 设置 →（下一轮）MTE3_V 消费 → V_MTE3 设置 → ...，没有冲突窗口。每条 V_MTE3 的 Set/Wait 都在同一个迭代内闭环，不存在跨迭代残留。
+
+原本用交叉耦合可能只是演化路径自然形成，而非设计约束。各管各的（互换后）反而更直观——读代码时一眼就能看出 ID7 负责高 4 位的完整生命周期。
+
+---
+
+### 7.11 V_MTE3 两对使用同一个 EVENT_ID 是否正确
+
+**问**：不互换，V_MTE3 两对都用同一个 EVENT_ID（如都用 EVENT_ID6），是否正确？
+
+**答**：可以，完全正确。
+
+V_MTE3 是迭代内握手，Set 和 Wait 在同一 Iter 内成对闭环：
+
+```
+同一 Iter N 内:
+  V:    1371 SetFlag<V_MTE3>(EVENT_ID)   → 标志 = 1
+  MTE3: 1372 WaitFlag<V_MTE3>(EVENT_ID)  → 消费, 标志 = 0  ← 消费掉了
+         ...
+  V:    1395 SetFlag<V_MTE3>(EVENT_ID)   → 标志 = 1
+  MTE3: 1396 WaitFlag<V_MTE3>(EVENT_ID)  → 消费, 标志 = 0  ← 再消费掉
+```
+
+1372 消费掉 1371 的标志后标志归 0，然后 1395 再 Set，1396 再消费。两对 Set-Wait 严格交替，不存在残留和错误消费。
+
+**对比 MTE3_V**：MTE3_V 是跨迭代的（Iter N 的 MTE3 Set，Iter N+1 的 V Wait），中间隔了高 4 位 V 计算和低 4 位 V 计算，如果用同一个 ID 会死锁（见 7.9 节）。
+
+**结论**：判断能否共用 EVENT_ID 的唯一标准——Set 和 Wait 是否在同一迭代内成对闭环：
+
+```
+能共用:   迭代内握手 (V_MTE3, MTE2_V, MTE2_MTE3)
+不能共用: 跨迭代保护 (MTE3_V, MTE3_MTE2, V_MTE2)
+```
