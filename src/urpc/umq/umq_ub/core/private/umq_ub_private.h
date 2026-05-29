@@ -178,7 +178,6 @@ typedef struct ub_flow_control {
     bool remote_get;
     bool enabled;
     volatile bool is_credit_applying;
-    volatile uint16_t imm[UB_QUEUE_FC_MSG_TYPE_MAX];
 } ub_flow_control_t;
 
 typedef struct imported_tseg_node {
@@ -398,6 +397,8 @@ typedef struct ub_queue {
     urma_transport_mode_t tp_mode;
     urma_tp_type_t tp_type;
     ub_flow_control_t flow_control;
+    volatile uint64_t fc_imm[UB_QUEUE_FC_MSG_TYPE_MAX];
+    umq_ub_fc_sge_data_t fc_sge_data[UB_QUEUE_FC_MSG_TYPE_MAX];
     char name[UMQ_NAME_MAX_LEN];
     uint32_t rx_buf_size;
     uint32_t tx_buf_size;
