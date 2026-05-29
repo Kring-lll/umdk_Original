@@ -1524,7 +1524,7 @@ static int urma_create_jetty_check_dev_cap(urma_context_t *ctx, urma_jetty_cfg_t
 
     if (jetty_cfg->jetty_grp != NULL) {
         (void)pthread_mutex_lock(&jetty_cfg->jetty_grp->list_mutex);
-        if (jetty_cfg->jetty_grp->jetty_cnt >= cap->max_jetty_in_jetty_grp) {
+        if (jetty_cfg->jetty_grp->jetty_cnt > cap->max_jetty_in_jetty_grp) {
             (void)pthread_mutex_unlock(&jetty_cfg->jetty_grp->list_mutex);
             URMA_LOG_ERR("jetty_grp jetty cnt=%u, max_jetty in grp=%u.\n", jetty_cfg->jetty_grp->jetty_cnt,
                 cap->max_jetty_in_jetty_grp);
