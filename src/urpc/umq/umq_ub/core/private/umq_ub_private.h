@@ -398,6 +398,7 @@ typedef struct ub_queue {
     urma_transport_mode_t tp_mode;
     urma_tp_type_t tp_type;
     ub_flow_control_t flow_control;
+    umq_ub_fc_sge_data_t fc_recv_sge_data[UB_QUEUE_FC_MSG_TYPE_MAX];
     char name[UMQ_NAME_MAX_LEN];
     uint32_t rx_buf_size;
     uint32_t tx_buf_size;
