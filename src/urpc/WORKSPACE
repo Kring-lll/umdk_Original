@@ -103,7 +103,7 @@ git_repository(
 git_repository(
     name = "urma",
     build_file = "//third_party/urma:BUILD.bazel",
-    commit = "19b0cfe670700c4f88388f97effce6c476753046",
+    commit = "a9bba3fbd5cff1cd4798d58c0463b90765212f13",
     remote = "https://gitcode.com/openeuler/umdk.git",
     strip_prefix = "src/urma",
 )
