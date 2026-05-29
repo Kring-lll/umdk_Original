@@ -264,6 +264,11 @@ typedef struct bondp_target_jetty {
     uint32_t active_count;
     bool valid[URMA_UBAGG_DEV_MAX_NUM];
     urma_ref_t use_cnt;
+#ifndef __cplusplus
+    atomic_bool is_unimporting;
+#else
+    std::atomic_bool is_unimporting;
+#endif
 } bondp_target_jetty_t;
 
 typedef struct bondp_import_target_seg {
