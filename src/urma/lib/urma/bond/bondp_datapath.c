@@ -297,6 +297,11 @@ static urma_status_t bondp_post_send_wr_and_store(bondp_comp_t *bdp_comp, urma_j
         return URMA_EINVAL;
     }
 
+    if (atomic_load(&bdp_tjetty->is_unimporting)) {
+        URMA_LOG_ERR("Target jetty is being unimported\n");
+        return URMA_EAGAIN;
+    }
+
     int send_idx = 0, target_idx = 0;
     if (!wr->flag.bs.has_drv_ext) {
         ret = schedule_send(wr->tjetty, bdp_comp, &send_idx, &target_idx, NULL);

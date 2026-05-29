@@ -1733,6 +1733,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         bdp_tjetty->import_token_valid = true;
     }
     atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
+    atomic_init(&bdp_tjetty->is_unimporting, false);
 
     urma_bond_id_info_out_t rvjetty_info = {0};
     if (bondp_import_vjetty(ctx, rjetty, token_value, bdp_tjetty, &rvjetty_info) != 0) {
@@ -1801,6 +1802,7 @@ static urma_status_t bondp_unimport_jetty_inner(urma_target_jetty_t *target_jett
 
     bondp_unregister_health_check_task(bdp_ctx, bdp_tjetty);
 
+    atomic_store(&bdp_tjetty->is_unimporting, true);
     if (bondp_unimport_pjetty(bdp_tjetty) != URMA_SUCCESS) {
         ret = URMA_FAIL;
     }
@@ -1986,6 +1988,7 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
         return NULL;
     }
     atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
+    atomic_init(&bdp_tjetty->is_unimporting, false);
 
     urma_bond_id_info_out_t udata_out = {0};
     if (bondp_import_vjfr(ctx, rjfr, token_value, bdp_tjetty, &udata_out) != 0) {
@@ -2031,6 +2034,7 @@ static urma_status_t bondp_unimport_jfr_inner(urma_target_jetty_t *target_jfr)
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jfr, bondp_target_jetty_t, v_tjetty);
     urma_status_t ret = URMA_SUCCESS;
 
+    atomic_store(&bdp_tjetty->is_unimporting, true);
     if (bondp_unimport_pjfr(bdp_tjetty) != URMA_SUCCESS) {
         ret = URMA_FAIL;
     }
@@ -2058,6 +2062,11 @@ urma_status_t bondp_unimport_jfr(urma_target_jetty_t *target_jfr)
 void bondp_tjetty_get(urma_target_jetty_t *target_jetty)
 {
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jetty, bondp_target_jetty_t, v_tjetty);
+
+    if (atomic_load(&bdp_tjetty->is_unimporting)) {
+        URMA_LOG_WARN("tjetty is being unimported, skip get\n");
+        return;
+    }
     atomic_fetch_add(&bdp_tjetty->use_cnt.atomic_cnt, 1);
 }
 
