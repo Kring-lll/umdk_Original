@@ -1,4 +1,10 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
+# Description: snc building script
+# Create: 2026-05-29
+# Note:
+# History: 2025-05-29 create snc building script
 
 # SNC 项目构建脚本
 # 用于构建 Java 库项目并生成 JAR 包
