@@ -157,7 +157,10 @@ public:
 
     // Methods
     CATLASS_DEVICE
-    GroupedMatmulSliceMPerTokenDequantMultiStageWorkspace(uint32_t epRankId = 0)
+    GroupedMatmulSliceMPerTokenDequantMultiStageWorkspace(
+        uint32_t epRankId = 0,
+        GM_ADDR metaInfoGm = nullptr,
+        uint64_t statusDataSpaceOffset = 0)
     {
         Arch::FlagID flagId = 0;
         for (uint32_t stageId = 0; stageId < WORKSPACE_STAGES; ++stageId) {
@@ -166,10 +169,16 @@ public:
             aicWaitFuncList[stageId] = {this, stageId};
             aicSetFuncList[stageId] = {this, stageId};
         }
-        winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
-        syncGmAddr = (GM_ADDR)((winContext_)->localWindowsExp) + GMM2::SOFT_SYNC_OFFSET +
-                        (AscendC::GetBlockIdx() / AscendC::GetSubBlockNum() * GMM2::CORE_NUM_PER_GROUP) *
-                        WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+        if constexpr (EXEC_FLAG & EXEC_FLAG_SHMEM_DISPATCH) {
+            syncGmAddr = metaInfoGm + statusDataSpaceOffset + GMM2::SOFT_SYNC_OFFSET +
+                         (AscendC::GetBlockIdx() / AscendC::GetSubBlockNum() * GMM2::CORE_NUM_PER_GROUP) *
+                         WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+        } else {
+            winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
+            syncGmAddr = (GM_ADDR)((winContext_)->localWindowsExp) + GMM2::SOFT_SYNC_OFFSET +
+                         (AscendC::GetBlockIdx() / AscendC::GetSubBlockNum() * GMM2::CORE_NUM_PER_GROUP) *
+                         WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+        }
     }
 
     template <int32_t CORE_TYPE = g_coreType>
