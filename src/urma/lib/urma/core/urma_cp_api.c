@@ -1908,6 +1908,12 @@ urma_target_jetty_t *urma_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjett
         return NULL;
     }
 
+    if (rjetty->jetty_id.eid.in4.addr == 0) {
+        URMA_LOG_ERR("Invalid parameter.\n");
+        errno = EINVAL;
+        return NULL;
+    }
+
     if (urma_check_order_type(rjetty->trans_mode, rjetty->flag.bs.order_type) != 0) {
         URMA_LOG_ERR("Invalid parameter.\n");
         return NULL;
