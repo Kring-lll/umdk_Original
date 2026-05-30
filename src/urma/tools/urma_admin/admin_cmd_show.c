@@ -32,6 +32,7 @@ static int cmd_show_usage(admin_config_t *cfg)
            "  urma_admin show [--dev <dev>] [--brief|--all] [--whole]  Show URMA devices information\n"
            "  urma_admin show topo [-d <dev>]          Show topology of current node\n"
            "  urma_admin show topo <node_id> [-d <dev>] Show topology of specified node\n"
+           "  urma_admin show system                   Show system features\n"
            "\n"
            "Options:\n"
            "  <dev>      Device name (e.g., udma1)\n"
