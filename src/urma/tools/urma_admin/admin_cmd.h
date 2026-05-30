@@ -115,6 +115,12 @@ typedef struct admin_core_cmd_sl_info {
     } in;
 } admin_core_cmd_sl_info_t;
 
+typedef struct admin_core_cmd_show_system {
+    struct {
+        urma_system_feature_t feature;
+    } out;
+} admin_core_cmd_show_system_t;
+
 #define UBCORE_GENL_FAMILY_NAME    "UBCORE_GENL"
 #define UBAGG_GENL_FAMILY_NAME     "UBAGG_GENL"
 #define GENL_FAMILY_VERSION  1
@@ -130,7 +136,7 @@ enum {
     UBCORE_HDR_COMMAND,
     UBCORE_HDR_ARGS_LEN,
     UBCORE_HDR_ARGS_ADDR,
-    UBCORE_ATTR_NS_MODE,
+    UBCORE_ATTR_DEV_NS_MODE,
     UBCORE_ATTR_DEV_NAME,
     UBCORE_ATTR_NS_FD,
     UBCORE_ATTR_EID_IDX,
@@ -139,6 +145,7 @@ enum {
     UBCORE_ATTR_EID_NUM,
     UBCORE_ATTR_EID_LIST,
     UBCORE_ATTR_STATUS,
+    UBCORE_ATTR_EID_NS_MODE,
     UBCORE_ATTR_AFTER_LAST
 };
 
