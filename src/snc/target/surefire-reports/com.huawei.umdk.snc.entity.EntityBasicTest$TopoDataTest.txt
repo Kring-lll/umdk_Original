@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: com.huawei.umdk.snc.entity.EntityBasicTest$TopoDataTest
+-------------------------------------------------------------------------------
+Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.007 s -- in com.huawei.umdk.snc.entity.EntityBasicTest$TopoDataTest

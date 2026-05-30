@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: com.huawei.umdk.snc.service.PathServiceTest$FullFlowTest
+-------------------------------------------------------------------------------
+Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.002 s -- in com.huawei.umdk.snc.service.PathServiceTest$FullFlowTest
