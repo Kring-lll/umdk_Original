@@ -1,0 +1,150 @@
+{
+    "_copyright": "SPDX-License-Identifier: MIT | Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved. | Description: snc topo data test fixture | Create: 2026-05-29 | History: 2026-05-29 create snc topo data test fixture",
+    "name": "A5-superPod-1",
+    "version": "1.0",
+    "devices": {
+        "rack1#os0#npu1": {
+            "deviceId": "rack1#os0#npu1",
+            "deviceType": "NPU",
+            "ip": "172.168.0.1",
+            "rack": "rack1",
+            "osZone": 0,
+            "moduleidx": 0,
+            "index": 1,
+            "ports": [
+                {
+                    "name": "400GE 0/0/1",
+                    "id": 0,
+                    "connectedDevice": "rack1#la0",
+                    "connectedPort": "400GE 1/0/1",
+                    "cna": "0xAAAA11",
+                    "eid": "AAAAAA11000000000000000000000001",
+                    "instance": 0
+                }
+            ],
+            "logicPorts": [],
+            "routerTables": [
+                {
+                    "instance": 0,
+                    "routes": {
+                        "0xDDDDDD44": {
+                            "prefix": "0xDDDDDD44",
+                            "outPortInfos": [
+                                {
+                                    "outInterface": "400GE 0/0/1",
+                                    "maskLength": 32,
+                                    "nextHop": "",
+                                    "preference": 60,
+                                    "tag": 0,
+                                    "protocol": "static"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        "rack1#la0": {
+            "deviceId": "rack1#la0",
+            "deviceType": "LA",
+            "ip": "172.168.1.0",
+            "rack": "rack1",
+            "index": 0,
+            "ports": [
+                {
+                    "name": "400GE 1/0/1",
+                    "id": 0,
+                    "connectedDevice": "rack1#os0#npu1",
+                    "connectedPort": "400GE 0/0/1",
+                    "cna": "0xBBBB22",
+                    "eid": "AAAAAA11000000000000000000000102",
+                    "instance": 0
+                },
+                {
+                    "name": "400GE 1/0/2",
+                    "id": 1,
+                    "connectedDevice": "rack1#os0#npu2",
+                    "connectedPort": "400GE 0/1/1",
+                    "cna": "0xCCCC33",
+                    "eid": "DDDDDD44000000000000000000000304",
+                    "instance": 0
+                }
+            ],
+            "logicPorts": [],
+            "routerTables": [
+                {
+                    "instance": 0,
+                    "routes": {
+                        "0xAAAAAA11": {
+                            "prefix": "0xAAAAAA11",
+                            "outPortInfos": [
+                                {
+                                    "outInterface": "400GE 1/0/1",
+                                    "maskLength": 32,
+                                    "nextHop": "",
+                                    "preference": 60,
+                                    "tag": 0,
+                                    "protocol": "static"
+                                }
+                            ]
+                        },
+                        "0xDDDDDD44": {
+                            "prefix": "0xDDDDDD44",
+                            "outPortInfos": [
+                                {
+                                    "outInterface": "400GE 1/0/2",
+                                    "maskLength": 32,
+                                    "nextHop": "",
+                                    "preference": 60,
+                                    "tag": 0,
+                                    "protocol": "static"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        "rack1#os0#npu2": {
+            "deviceId": "rack1#os0#npu2",
+            "deviceType": "NPU",
+            "ip": "172.168.0.2",
+            "rack": "rack1",
+            "osZone": 0,
+            "moduleidx": 0,
+            "index": 2,
+            "ports": [
+                {
+                    "name": "400GE 0/1/1",
+                    "id": 0,
+                    "connectedDevice": "rack1#la0",
+                    "connectedPort": "400GE 1/0/2",
+                    "cna": "0xDDDD44",
+                    "eid": "DDDDDD44000000000000000000000004",
+                    "instance": 0
+                }
+            ],
+            "logicPorts": [],
+            "routerTables": [
+                {
+                    "instance": 0,
+                    "routes": {
+                        "0xAAAAAA11": {
+                            "prefix": "0xAAAAAA11",
+                            "outPortInfos": [
+                                {
+                                    "outInterface": "400GE 0/1/1",
+                                    "maskLength": 32,
+                                    "nextHop": "",
+                                    "preference": 60,
+                                    "tag": 0,
+                                    "protocol": "static"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        }
+    }
+}
