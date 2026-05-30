@@ -295,6 +295,15 @@ typedef struct urma_device_cap {
     struct urma_sl_info priority_info[URMA_MAX_PRIORITY_CNT];
 } urma_device_cap_t;
 
+typedef union urma_system_feature {
+    struct {
+        uint32_t dev_ns_mode           : 1; /* [Public] 0 for exclusive, 1 for shared */
+        uint32_t eid_ns_mode           : 1; /* [Public] 0 for exclusive, 1 for shared */
+        uint32_t reserved              : 30;
+    } bs;
+    uint32_t value;
+} urma_system_feature_t;
+
 typedef struct urma_guid {
     uint8_t raw[URMA_GUID_SIZE];
 } urma_guid_t;
