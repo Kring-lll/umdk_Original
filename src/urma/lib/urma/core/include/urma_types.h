@@ -251,6 +251,15 @@ typedef union urma_tp_feature {
     uint32_t value;
 } urma_tp_feature_t;
 
+typedef union urma_system_feature {
+    struct {
+        uint32_t dev_ns_mode           : 1; /* [Public] 0 for exclusive, 1 for shared */
+        uint32_t eid_ns_mode           : 1; /* [Public] 0 for exclusive, 1 for shared */
+        uint32_t reserved              : 30;
+    } bs;
+    uint32_t value;
+} urma_system_feature_t;
+
 typedef struct urma_device_cap {
     urma_device_feature_t feature;   /* [Public] support feature of device, such as OOO, LS etc. */
     uint32_t max_jfc;                /* [Public] max number of jfc supported by the device. */

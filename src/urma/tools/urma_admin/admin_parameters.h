@@ -253,6 +253,11 @@ typedef struct tool_topo_map {
     uint32_t node_num;
 } tool_topo_map_t;
 
+typedef struct tool_system_cfg {
+    uint8_t dev_ns_mode;
+    uint8_t eid_ns_mode;
+} tool_system_cfg_t;
+
 /* refer to struct ubcore_res_dev_val */
 typedef struct tool_res_dev_val {
     uint32_t seg_cnt;
@@ -296,7 +301,9 @@ typedef struct admin_config {
     char ns[URMA_ADMIN_MAX_NS_PATH]; /* /proc/$pid/ns/net */
     /* eid end */
     tool_query_key_t key;
-    uint8_t ns_mode; /* 0: exclusive, 1: shared */
+    bool sharing_on;
+    uint8_t dev_ns_mode;
+    uint8_t eid_ns_mode;
     uint8_t priority;
     uint8_t SL;
 } admin_config_t;

@@ -37,7 +37,7 @@ typedef enum urma_core_cmd {
     URMA_CORE_CMD_ADD_EID,
     URMA_CORE_CMD_DEL_EID,
     URMA_CORE_CMD_SET_EID_MODE,
-    URMA_CORE_SET_NS_MODE,
+    URMA_CORE_SET_DEV_NS_MODE,
     URMA_CORE_SET_DEV_NS,
     URMA_CORE_EXPOSE_DEV_NS,
     URMA_CORE_UNEXPOSE_DEV_NS,
@@ -45,6 +45,8 @@ typedef enum urma_core_cmd {
     URMA_CORE_GET_TOPO_INFO,
     URMA_CORE_GET_TOPO_BONDING_DEV = 33,
     URMA_CORE_SET_SL,
+    URMA_CORE_SET_EID_NS_MODE,
+    URMA_CORE_SHOW_SYSTEM
 } urma_core_cmd_t;
 
 /* only for uburma device ioctl */
