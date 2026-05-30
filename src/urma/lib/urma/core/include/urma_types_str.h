@@ -240,4 +240,19 @@ static inline const char *urma_jfr_state_to_string(uint8_t bit)
     return g_urma_jfr_state[bit];
 }
 
+#define URMA_SYSTEM_FEAT_NUM 2
+
+static const char *const g_urma_system_feat_str[URMA_SYSTEM_FEAT_NUM] = {
+    "DEV_NS",      //
+    "EID_NS",      //
+};
+
+static inline const char *urma_system_feat_to_string(uint8_t bit)
+{
+    if (bit >= URMA_SYSTEM_FEAT_NUM) {
+        return "Invalid Value";
+    }
+    return g_urma_system_feat_str[bit];
+}
+
 #endif

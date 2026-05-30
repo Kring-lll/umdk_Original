@@ -32,6 +32,7 @@ static int cmd_show_usage(admin_config_t *cfg)
            "  urma_admin show [--dev <dev>] [--brief|--all] [--whole]  Show URMA devices information\n"
            "  urma_admin show topo [-d <dev>]          Show topology of current node\n"
            "  urma_admin show topo <node_id> [-d <dev>] Show topology of specified node\n"
+           "  urma_admin show system                   Show system features\n"
            "\n"
            "Options:\n"
            "  <dev>      Device name (e.g., udma1)\n"
@@ -1212,6 +1213,18 @@ static int cmd_show_topo(admin_config_t *cfg)
 free_topo:
     free(topo_map);
     return ret;
+}
+
+static inline void print_system_feat_str(urma_system_feature_t feat)
+{
+    uint8_t i;
+
+    (void)printf("system                    : 0x%x [", feat.value);
+    for (i = 0; i < URMA_SYSTEM_FEAT_NUM; i++) {
+        (void)printf("%s_%s ", urma_system_feat_to_string(i),
+            (feat.value & (1 << i)) != 0 ? "SHARED" : "EXCLUSIVE");
+    }
+    (void)printf("]\n");
 }
 
 int admin_cmd_show(admin_config_t *cfg)
