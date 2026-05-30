@@ -1,0 +1,21 @@
+{
+    "aclId": "acl-001",
+    "tpAcls": {
+        "AAAAAA11000000000000000000000001|DDDDDD44000000000000000000000004|RTP": {
+            "sourceEid": "AAAAAA11000000000000000000000001",
+            "destEid": "DDDDDD44000000000000000000000004",
+            "transportType": "RTP",
+            "sourceCna": "0xAAAA11",
+            "destCna": "0xDDDD44",
+            "templateId": 1
+        },
+        "DDDDDD44000000000000000000000004|AAAAAA11000000000000000000000001|RTP": {
+            "sourceEid": "DDDDDD44000000000000000000000004",
+            "destEid": "AAAAAA11000000000000000000000001",
+            "transportType": "RTP",
+            "sourceCna": "0xDDDD44",
+            "destCna": "0xAAAA11",
+            "templateId": 1
+        }
+    }
+}
