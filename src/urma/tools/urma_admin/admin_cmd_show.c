@@ -32,6 +32,7 @@ static int cmd_show_usage(admin_config_t *cfg)
            "  urma_admin show [--dev <dev>] [--brief|--all] [--whole]  Show URMA devices information\n"
            "  urma_admin show topo [-d <dev>]          Show topology of current node\n"
            "  urma_admin show topo <node_id> [-d <dev>] Show topology of specified node\n"
+           "  urma_admin show system                   Show system features\n"
            "\n"
            "Options:\n"
            "  <dev>      Device name (e.g., udma1)\n"
@@ -1214,6 +1215,50 @@ free_topo:
     return ret;
 }
 
+static inline void print_system_feat_str(urma_system_feature_t feat)
+{
+    uint8_t i;
+
+    (void)printf("system                    : 0x%x [", feat.value);
+    for (i = 0; i < URMA_SYSTEM_FEAT_NUM; i++) {
+        (void)printf("%s_%s ", urma_system_feat_to_string(i),
+            (feat.value & (1 << i)) != 0 ? "SHARED" : "EXCLUSIVE");
+    }
+    (void)printf("]\n");
+}
+
+static int cmd_show_system(admin_config_t *cfg)
+{
+    (void)cfg;
+    int ret;
+    admin_core_cmd_show_system_t *arg = NULL;
+    urma_system_feature_t feature;
+
+    arg = calloc(1, sizeof(admin_core_cmd_show_system_t));
+    if (arg == NULL) {
+        return -ENOMEM;
+    }
+
+    struct nl_msg *msg = admin_nl_alloc_msg(URMA_CORE_SHOW_SYSTEM, 0, UBCORE_GENL);
+    if (msg == NULL) {
+        free(arg);
+        return -ENOMEM;
+    }
+
+    admin_nl_put_u32(msg, UBCORE_HDR_ARGS_LEN, (uint32_t)sizeof(admin_core_cmd_show_system_t));
+    admin_nl_put_u64(msg, UBCORE_HDR_ARGS_ADDR, (uint64_t)(uintptr_t)arg);
+    ret = admin_nl_send_recv_msg_default(msg, UBCORE_GENL);
+    if (ret == 0) {
+        feature = arg->out.feature;
+        print_system_feat_str(feature);
+    } else {
+        (void)printf("Failed to get system information, ret: %d.\n", ret);
+    }
+    admin_nl_free_msg(msg);
+    free(arg);
+    return ret;
+}
+
 int admin_cmd_show(admin_config_t *cfg)
 {
     if (cfg->help) {
@@ -1222,6 +1267,7 @@ int admin_cmd_show(admin_config_t *cfg)
     static const admin_cmd_t cmds[] = {
         {NULL, cmd_show_default}, //
         {"topo", cmd_show_topo},  //
+        {"system", cmd_show_system},  //
         {0},                      //
     };
     return exec_cmd(cfg, cmds);
