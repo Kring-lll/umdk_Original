@@ -82,6 +82,11 @@ typedef enum uvs_cmd_lookup_main_ue_eid_type {
     LOOKUP_MAIN_UE_EID_OUT_NUM
 } uvs_cmd_lookup_main_ue_eid_type_t;
 
+typedef enum uvs_cmd_flush_main_ue_eid_type {
+    FLUSH_MAIN_UE_EID_IN_RESERVED,
+    FLUSH_MAIN_UE_EID_IN_NUM
+} uvs_cmd_flush_main_ue_eid_type_t;
+
 typedef enum uvs_cmd_insert_main_ue_eid_batch_type {
     INSERT_MAIN_UE_EID_BATCH_IN_ENTRY,
     INSERT_MAIN_UE_EID_BATCH_IN_NUM
