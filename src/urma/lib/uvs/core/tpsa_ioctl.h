@@ -88,6 +88,12 @@ typedef struct uvs_cmd_main_ue_eid_lookup {
     } out;
 } uvs_cmd_main_ue_eid_lookup_t;
 
+typedef struct uvs_cmd_main_ue_eid_flush {
+    struct {
+        uint32_t reserved;
+    } in;
+} uvs_cmd_main_ue_eid_flush_t;
+
 typedef struct uvs_cmd_main_ue_eid_batch {
     struct {
         uvs_main_ue_eid_batch_entry_t entry;
