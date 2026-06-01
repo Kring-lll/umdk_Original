@@ -667,6 +667,18 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
         g_ub_ctx[g_ub_ctx_count].flow_control = cfg->flow_control;
         g_ub_ctx[g_ub_ctx_count].ref_cnt = 1;
         (void)pthread_spin_init(&g_ub_ctx[g_ub_ctx_count].tseg_list_lock, PTHREAD_PROCESS_PRIVATE);
+        ret = umq_ub_flow_control_sge_mgr_init(&g_ub_ctx[g_ub_ctx_count].fc_sge_mgr);
+        if (ret != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "flow control sge mgr init failed\n");
+            (void)pthread_spin_destroy(&g_ub_ctx[g_ub_ctx_count].tseg_list_lock);
+            umq_ub_delete_urma_ctx(&g_ub_ctx[g_ub_ctx_count]);
+            umq_ub_ctx_imported_info_destroy(&g_ub_ctx[g_ub_ctx_count]);
+            free((void *)g_ub_ctx[g_ub_ctx_count].umq_ctx_jetty_table);
+            free((void *)g_ub_ctx[g_ub_ctx_count].rx_consumed_jetty_table);
+            g_ub_ctx[g_ub_ctx_count].umq_ctx_jetty_table = NULL;
+            g_ub_ctx[g_ub_ctx_count].rx_consumed_jetty_table = NULL;
+            goto ROLLBACK_UB_CTX;
+        }
         ++g_ub_ctx_count;
     }
 
@@ -723,6 +735,7 @@ IO_BUF_FREE:
 
 ROLLBACK_UB_CTX:
     for (uint32_t i = 0; i < g_ub_ctx_count; i++) {
+        umq_ub_flow_control_sge_mgr_uninit(&g_ub_ctx[i].fc_sge_mgr);
         umq_ub_ctx_imported_info_destroy(&g_ub_ctx[i]);
         umq_ub_delete_urma_ctx(&g_ub_ctx[i]);
         free((void*)g_ub_ctx[i].umq_ctx_jetty_table);
@@ -766,6 +779,7 @@ void umq_ub_ctx_uninit_impl(uint8_t *ctx)
     }
 
     for (uint32_t i = 0; i < g_ub_ctx_count; ++i) {
+        umq_ub_flow_control_sge_mgr_uninit(&context[i].fc_sge_mgr);
         umq_ub_ctx_imported_info_destroy(&context[i]);
         umq_dec_ref(context[i].io_lock_free, &context[i].ref_cnt, 1);
         umq_symbol_urma()->urma_delete_context(context[i].urma_ctx);
@@ -873,6 +887,26 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
         goto DELETE_FC_JETTY;
     }
 
+    if (!(UMQ_UB_ENABLE_SHARE_FC_JFR && (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0) &&
+        !(UMQ_UB_ENABLE_SHARE_FC_JFR && (queue->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0)) {
+        if (umq_ub_flow_control_sge_alloc(&dev_ctx->fc_sge_mgr, &queue->fc_recv_req_sge) != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "flow control recv req sge alloc failed\n");
+            goto DELETE_FC_JETTY;
+        }
+        if (umq_ub_flow_control_sge_alloc(&dev_ctx->fc_sge_mgr, &queue->fc_recv_resp_sge) != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "flow control recv resp sge alloc failed\n");
+            goto FREE_FC_RECV_REQ_SGE;
+        }
+    }
+
+    if (UMQ_UB_ENABLE_SHARE_FC_JFR && (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0) {
+        if (umq_ub_flow_control_share_recv_init(&queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->fc_share_recv,
+            UMQ_UB_FC_SGE_SHARED_RECV_QBUF_MAX) != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "flow control share recv init failed\n");
+            goto FREE_FC_RECV_RESP_SGE;
+        }
+    }
+
     uint8_t rqe_post_factor = queue->used_port_num == 0 ? 1 : queue->used_port_num;
     if (UMQ_UB_ENABLE_SHARE_FC_JFR && (option->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0) {
         // the coefficient for the number of main umq post flow control rx operations uses rqe_post_factor
@@ -885,7 +919,7 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
     }
 
     if (umq_ub_fill_fc_rx_buf_batch(queue, post_fc_rx_cnt) != UMQ_SUCCESS) {
-        goto DELETE_FC_JETTY;
+        goto FREE_FC_SHARE_RECV;
     }
 
     dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id] =
@@ -908,6 +942,15 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
 
 CLEAR_TABLE:
     dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id] = 0;
+
+FREE_FC_SHARE_RECV:
+    umq_ub_flow_control_share_recv_uninit(&queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->fc_share_recv);
+
+FREE_FC_RECV_RESP_SGE:
+    umq_ub_flow_control_sge_free(&dev_ctx->fc_sge_mgr, &queue->fc_recv_resp_sge);
+
+FREE_FC_RECV_REQ_SGE:
+    umq_ub_flow_control_sge_free(&dev_ctx->fc_sge_mgr, &queue->fc_recv_req_sge);
 
 DELETE_FC_JETTY:
     (void)umq_symbol_urma()->urma_delete_jetty(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]);
@@ -1098,6 +1141,11 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
         urma_eid_t *fc_eid = &queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid;
         uint32_t fc_id = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id;
         umq_ub_credit_clean_up(queue);
+
+        umq_ub_flow_control_share_recv_uninit(&queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->fc_share_recv);
+        umq_ub_flow_control_sge_free(&queue->dev_ctx->fc_sge_mgr, &queue->fc_recv_resp_sge);
+        umq_ub_flow_control_sge_free(&queue->dev_ctx->fc_sge_mgr, &queue->fc_recv_req_sge);
+
         UMQ_VLOG_INFO(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, delete flowcontrol jetty\n",
             EID_ARGS(*fc_eid), fc_id);
         queue->dev_ctx->umq_ctx_jetty_table[fc_id] = 0;
@@ -1874,10 +1922,19 @@ int umq_ub_dev_add_impl(umq_trans_info_t *info, umq_init_cfg_t *cfg)
     }
     g_ub_ctx[g_ub_ctx_count].ref_cnt = 1;
     (void)pthread_spin_init(&g_ub_ctx[g_ub_ctx_count].tseg_list_lock, PTHREAD_PROCESS_PRIVATE);
+    ret = umq_ub_flow_control_sge_mgr_init(&g_ub_ctx[g_ub_ctx_count].fc_sge_mgr);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "flow control sge mgr init failed\n");
+        (void)pthread_spin_destroy(&g_ub_ctx[g_ub_ctx_count].tseg_list_lock);
+        goto UNREGISTER_HUGE_MEM;
+    }
 
     g_ub_ctx_count++;
 
     return UMQ_SUCCESS;
+
+UNREGISTER_HUGE_MEM:
+    umq_huge_qbuf_unregister_seg((uint8_t *)&g_ub_ctx[g_ub_ctx_count], &sge_ops);
 
 UNREGISTER_MEM:
     umq_qbuf_unregister_seg((uint8_t *)&g_ub_ctx[g_ub_ctx_count], &sge_ops);
