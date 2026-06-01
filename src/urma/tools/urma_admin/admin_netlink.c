@@ -9,6 +9,7 @@
  */
 
 #include <errno.h>
+#include <netlink/errno.h>
 #include <netlink/genl/ctrl.h>
 #include <netlink/genl/genl.h>
 #include <netlink/netlink.h>
@@ -174,6 +175,55 @@ int admin_nl_send_recv_msg(struct nl_msg *msg, int (*cb)(struct nl_msg *msg, voi
 
     ret = admin_nl_recv_msg(cb, arg, family);
     if (ret != 0) {
+        return ret;
+    }
+
+    return 0;
+}
+
+int admin_nl_send_recv_valid_msg(struct nl_msg *msg, int (*cb)(struct nl_msg *msg, void *arg),
+    void *arg, genl_family_t family)
+{
+    struct nl_sock *target_sock;
+    int ret;
+
+    ret = init_sock_and_genl_id(family);
+    if (ret != 0) {
+        return ret;
+    }
+
+    target_sock = get_nl_sock_by_family(family);
+    if (target_sock == NULL) {
+        printf("Invalid sock\n");
+        return -EINVAL;
+    }
+
+    nl_socket_disable_auto_ack(target_sock);
+    ret = nl_send_auto(target_sock, msg);
+    nl_socket_enable_auto_ack(target_sock);
+    if (ret < 0) {
+        printf("Failed to send netlink msg, ret:%d\n", ret);
+        return ret;
+    }
+
+    ret = nl_socket_modify_cb(target_sock, NL_CB_VALID, NL_CB_CUSTOM, cb, arg);
+    if (ret < 0) {
+        printf("Failed to set netlink valid callback, ret:%d\n", ret);
+        return ret;
+    }
+
+    ret = nl_recvmsgs_default(target_sock);
+    if (ret == -NLE_INTR) {
+        ret = 0;
+    }
+    if (ret < 0) {
+        printf("Failed to recv netlink msg, ret:%d\n", ret);
+        return ret;
+    }
+
+    ret = nl_socket_modify_cb(target_sock, NL_CB_VALID, NL_CB_CUSTOM, NULL, NULL);
+    if (ret < 0) {
+        printf("Failed to reset netlink valid callback, ret:%d\n", ret);
         return ret;
     }
 
