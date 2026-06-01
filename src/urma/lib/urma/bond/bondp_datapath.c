@@ -318,27 +318,25 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
         return URMA_EINVAL;
     }
 
-    if (!wr->flag.bs.has_drv_ext) {
-        ret = schedule_send(wr->tjetty, bdp_comp, &send_idx, &target_idx, NULL);
-    } else {
-        bondp_jfs_wr_t *bwr = CONTAINER_OF_FIELD(wr, bondp_jfs_wr_t, base);
-        chip_info.src_chip_id = bwr->src_chip_id;
-        chip_info.dst_chip_id = bwr->dst_chip_id;
-        ret = schedule_send(wr->tjetty, bdp_comp, &send_idx, &target_idx, &chip_info);
-    }
-    if (ret != 0) {
-        return URMA_FAIL;
-    }
-
-    (void)pthread_spin_lock(&bdp_comp->send_wr_lock);  // 内存预分配
+    (void)pthread_spin_lock(&bdp_comp->send_wr_lock);
     while (cur != NULL) {
         wr_entries[wr_count] = jfs_wr_buf_alloc(&bdp_comp->send_wr_buf);
         if (wr_entries[wr_count] == NULL) {
-            for (int j = 0; j < wr_count; j++) {
-                jfs_wr_buf_release(wr_entries[j]);
-            }
             (void)pthread_spin_unlock(&bdp_comp->send_wr_lock);
-            return URMA_EAGAIN;
+            goto RELEASEBUF;
+        }
+        if (!cur->flag.bs.has_drv_ext) {
+            ret = schedule_send(cur->tjetty, bdp_comp, &send_idx, &target_idx, NULL);
+        } else {
+            bondp_jfs_wr_t *bwr = CONTAINER_OF_FIELD(cur, bondp_jfs_wr_t, base);
+            chip_info.src_chip_id = bwr->src_chip_id;
+            chip_info.dst_chip_id = bwr->dst_chip_id;
+            ret = schedule_send(cur->tjetty, bdp_comp, &send_idx, &target_idx, &chip_info);
+        }
+        if (ret != 0) {
+            jfs_wr_buf_release(wr_entries[wr_count]);  // release this entry
+            (void)pthread_spin_unlock(&bdp_comp->send_wr_lock);
+            goto RELEASEBUF;
         }
         wr_entries[wr_count]->user_ctx = cur->user_ctx;
         wr_entries[wr_count]->target_vjetty = bdp_tjetty;
@@ -350,7 +348,6 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
     }
     (void)pthread_spin_unlock(&bdp_comp->send_wr_lock);
 
-    (void)pthread_spin_lock(&bdp_comp->send_lock);
     cur = wr;
     for (int i = 0; i < wr_count; i++, cur = cur->next) {
         jfs_wr_entry_t *wr_entry = wr_entries[i];
@@ -386,23 +383,20 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
         URMA_LOG_ERR("Failed to post send wr batch\n");
         goto CLEANUP;
     }
-
-    (void)pthread_spin_unlock(&bdp_comp->send_lock);
     return URMA_SUCCESS;
 
 CLEANUP:
-    // 1. 清理wr_entries. 2. 释放全部的预分配内存
     for (int j = 0; j < processed; j++) {
         convert_jfs_pwr_to_vwr_resend(&wr_entries[j]->wr, &wr_entries[j]->target_vjetty->v_tjetty);
         release_vwr_use_cnt(&wr_entries[j]->wr);
         free_jfs_wr(&wr_entries[j]->wr);
     }
+RELEASEBUF:
     (void)pthread_spin_lock(&bdp_comp->send_wr_lock);
     for (int j = 0; j < wr_count; j++) {
         jfs_wr_buf_release(wr_entries[j]);
     }
     (void)pthread_spin_unlock(&bdp_comp->send_wr_lock);
-    (void)pthread_spin_unlock(&bdp_comp->send_lock);
     return ret;
 }
 
@@ -421,7 +415,9 @@ urma_status_t bondp_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, u
     if (is_single_dev_mode(bdp_jetty->bondp_ctx)) {
         ret = bondp_post_send_wr_no_store(bdp_jetty, wr, bad_wr);
     } else {
+        (void)pthread_spin_lock(&bdp_jetty->send_lock);
         ret = bondp_post_send_wr_list_and_store(bdp_jetty, wr, bad_wr);
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
     }
     PERF_PROFILING_END(BOND_JETTY_POST_SEND);
 
@@ -442,7 +438,9 @@ urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_
     if (is_single_dev_mode(bdp_jfs->bondp_ctx)) {
         ret = bondp_post_send_wr_no_store(bdp_jfs, wr, bad_wr);
     } else {
+        (void)pthread_spin_lock(&bdp_jetty->send_lock);
         ret = bondp_post_send_wr_list_and_store(bdp_jfs, wr, bad_wr);
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
     }
     PERF_PROFILING_END(BOND_JFS_POST_SEND);
 
