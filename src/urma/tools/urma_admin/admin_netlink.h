@@ -11,11 +11,16 @@
 #ifndef ADMIN_NETLINK
 #define ADMIN_NETLINK
 
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
 #include <netlink/msg.h>
 
 int admin_nl_send_msg(struct nl_msg *msg);
 int admin_nl_recv_msg(int (*cb)(struct nl_msg *msg, void *arg), void *arg);
 int admin_nl_send_recv_msg(struct nl_msg *msg, int (*cb)(struct nl_msg *msg, void *arg), void *arg);
+int admin_nl_send_recv_valid_msg(struct nl_msg *msg, int (*cb)(struct nl_msg *msg, void *arg), void *arg);
 int admin_nl_send_recv_msg_default(struct nl_msg *msg);
 int admin_nl_send_recv_msg_default_silent_errno(struct nl_msg *msg, int silent_errno);
 int admin_nl_send_recv_msg_default_silent_notfound(struct nl_msg *msg);
@@ -64,6 +69,15 @@ static inline int admin_nl_put_u64(struct nl_msg *msg, int attr, uint64_t value)
     int ret = nla_put_u64(msg, attr, value);
     if (ret != 0) {
         printf("Failed to put u64 attribute %d, ret: %d\n", attr, ret);
+    }
+    return ret;
+}
+
+static inline int admin_nl_put_binary(struct nl_msg *msg, int attr, const void *data, size_t len)
+{
+    int ret = nla_put(msg, attr, (int)len, data);
+    if (ret != 0) {
+        printf("Failed to put binary attribute %d, ret: %d\n", attr, ret);
     }
     return ret;
 }
