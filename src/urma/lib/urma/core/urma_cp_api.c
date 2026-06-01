@@ -1222,6 +1222,12 @@ urma_target_jetty_t *urma_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, urm
         return NULL;
     }
 
+    if (rjfr->jfr_id.eid.in4.addr == 0) {
+        URMA_LOG_ERR("Invalid parameter.\n");
+        errno = EINVAL;
+        return NULL;
+    }
+
     urma_ops_t *ops = ctx->ops;
     if (urma_check_ctrlplane_compat(ops->import_jfr)) {
         return urma_import_jfr_compat(ctx, rjfr, token_value);
@@ -1914,6 +1920,12 @@ urma_target_jetty_t *urma_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjett
 
     if (urma_check_trans_mode_valid(rjetty->trans_mode) != true) {
         URMA_LOG_ERR("Invalid parameter, trans_mode=%d.\n", (int)rjetty->trans_mode);
+        errno = EINVAL;
+        return NULL;
+    }
+
+    if (rjetty->jetty_id.eid.in4.addr == 0) {
+        URMA_LOG_ERR("Invalid parameter.\n");
         errno = EINVAL;
         return NULL;
     }
