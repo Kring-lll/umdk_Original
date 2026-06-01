@@ -6,15 +6,17 @@
 
 #include "bondp_link_recovery.h"
 
+#include "bondp_failback.h"
 #include "bondp_context_table.h"
 #include "urma_log.h"
 #include "urma_api.h"
+#include "bondp_netlink.h"
 
-static int bondp_get_target_idx_by_local_idx(const bondp_health_task_t *task, int local_idx, int *target_idx)
+static int bondp_get_target_idx_by_local_idx(const bondp_failover_ctx_t *task, int local_idx, int *target_idx)
 {
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
         for (int j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
-            const bondp_health_sub_task_t *sub = &task->sub_tasks[i][j];
+            const bondp_failover_sub_task_t *sub = &task->sub_tasks[i][j];
             if (!sub->valid || sub->local_idx != local_idx) {
                 continue;
             }
@@ -48,8 +50,10 @@ static int bondp_update_pjetty_id_mapping(
     return 0;
 }
 
-int bondp_rebuild_local_pjetty(bondp_health_task_t *task, int local_idx)
+//保留rebuild部分逻辑
+int bondp_rebuild_local_pjetty(bondp_failover_ctx_t *task)
 {
+    int local_idx = task->primary_local_idx;
     if (task == NULL || task->bondp_jetty == NULL ||
         local_idx < 0 || local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
         return -1;
@@ -62,7 +66,7 @@ int bondp_rebuild_local_pjetty(bondp_health_task_t *task, int local_idx)
     }
 
     int target_idx = -1;
-    bondp_health_sub_task_t *sub_task = NULL;
+    bondp_failover_sub_task_t *sub_task = NULL;
     if (bondp_get_target_idx_by_local_idx(task, local_idx, &target_idx) == 0 &&
         target_idx >= 0 && target_idx < URMA_UBAGG_DEV_MAX_NUM) {
         sub_task = &task->sub_tasks[local_idx][target_idx];
@@ -115,7 +119,61 @@ int bondp_rebuild_local_pjetty(bondp_health_task_t *task, int local_idx)
         sub_task->probe_pending = false;
         atomic_store(&sub_task->link_ok, true);
     }
-    URMA_LOG_INFO("Health link pjetty rebuilt, idx=%d old=" URMA_JETTY_ID_FMT " new=" URMA_JETTY_ID_FMT "\n",
+    URMA_LOG_INFO("link pjetty rebuilt, idx=%d old=" URMA_JETTY_ID_FMT " new=" URMA_JETTY_ID_FMT "\n",
         local_idx, URMA_JETTY_ID_ARGS(&old_id), URMA_JETTY_ID_ARGS(&new_jetty->jetty_id));
+    return 0;
+}
+
+//搬移send_back 部分逻辑
+#define BONDP_FALLBACK_CTRL_REQ                        1
+#define BONDP_FALLBACK_CTRL_RESP                       2
+#define BONDP_FALLBACK_PRIMARY_INVALID_ID              UINT32_MAX
+
+static uint64_t bondp_fallback_build_req_payload(const bondp_failover_ctx_t *task)
+{
+    int primary_local_idx = task->primary_local_idx;
+    if (primary_local_idx < 0 || primary_local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return BONDP_FALLBACK_PRIMARY_INVALID_ID;
+    }
+    urma_jetty_t *primary_pjetty = task->bondp_jetty->p_jetty[primary_local_idx];
+    if (primary_pjetty == NULL || primary_pjetty->remote_jetty == NULL) {
+        return BONDP_FALLBACK_PRIMARY_INVALID_ID;
+    }
+    return (uint64_t)primary_pjetty->remote_jetty->id.id;
+}
+
+static int bondp_send_fallback_ctrl_msg(
+    bondp_context_t *bdp_ctx, bondp_failover_ctx_t *task,
+    int local_idx, int target_idx, uint8_t ctrl_type, uint8_t req_seq, uint64_t payload)
+{
+    if (local_idx < 0 || target_idx < 0 || payload > UINT32_MAX) {
+        return -1;
+    }
+
+    int ret = bondp_fallback_ctrl_send_default(bdp_ctx, task->vjetty_id, local_idx, target_idx,
+        ctrl_type, req_seq, (uint32_t)payload);
+    if (ret != 0) {
+        URMA_LOG_WARN("Failed to send fallback ctrl msg by netlink, vjetty=%u lidx=%d tidx=%d type=%u seq=%u ret=%d\n",
+            task->vjetty_id, local_idx, target_idx, ctrl_type, req_seq, ret);
+        return -1;
+    }
+    URMA_LOG_INFO("Fallback ctrl sent by netlink, vjetty=%u lidx=%d tidx=%d type=%u seq=%u payload=%u\n",
+        task->vjetty_id, local_idx, target_idx, ctrl_type, req_seq, (uint32_t)payload);
+    return 0;
+}
+
+static int bondp_send_failover_req(bondp_failover_ctx_t *task)
+{
+    bondp_context_t *bdp_ctx = task->bdp_ctx;
+    int active_local_idx = task->active_local_idx;
+    int active_target_idx = -1;
+    if (bondp_get_target_idx_by_local_idx(task, active_local_idx, &active_target_idx) != 0) {
+        return -1;
+    }
+    uint64_t req_payload = bondp_fallback_build_req_payload(task);
+    if (bondp_send_fallback_ctrl_msg(bdp_ctx, task, active_local_idx, active_target_idx,
+        BONDP_FALLBACK_CTRL_REQ, task->req_seq, req_payload) != 0) {
+        return -1;
+    }
     return 0;
 }

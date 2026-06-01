@@ -118,6 +118,57 @@ typedef struct bondp_health_thread_ctx {
 #endif
 } bondp_health_thread_ctx_t;
 
+typedef struct bondp_failover_sub_task {
+    int local_idx;
+    int target_idx;
+    bool valid;
+    bool probe_pending;
+    bool need_check;
+#ifndef __cplusplus
+    atomic_bool link_ok;
+#else
+    std::atomic_bool link_ok;
+#endif
+    uint64_t user_ctx;
+} bondp_failover_sub_task_t;
+
+typedef enum bondp_failover_state {
+    BONDP_FO_STATE_IDLE = 0,
+    BONDP_FO_STATE_WAIT_REBUILD_START,
+    BONDP_FO_STATE_REBUILDING,
+    BONDP_FO_SENDING_REQ,
+    BONDP_FO_STATE_WAIT_RSP,
+    BONDP_FO_STATE_DONE,
+    BONDP_FO_STATE_CLOSED,
+} bondp_failover_state_t;
+
+typedef struct bondp_failover_ctx {
+    int fd;
+    bondp_failover_state_t state;
+    uint64_t timer_id;
+    //依赖这个保证failover的单一状态
+    //出现持续CQE时，保证始终只有一个重建流程
+    bool timer_valid;
+    uint32_t retry_ms;
+    uint64_t req_seq;
+    bool closed;
+
+    struct bondp_target_jetty *bdp_tjetty;
+    struct bondp_comp *bondp_jetty;
+    uint64_t next_probe_ts_us;
+    int primary_local_idx;
+    int active_local_idx;
+    bondp_health_mode_t mode;
+    uint32_t backoff_cnt;
+    bondp_fallback_task_t fallback_task;
+    uint32_t vjetty_id;
+    bondp_failover_sub_task_t sub_tasks[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
+    hmap_node_t hmap_node;
+
+    bondp_context_t *bdp_ctx;
+
+} bondp_failover_ctx_t;
+
 /** Process-granularity global variable */
 typedef struct bondp_global_context {
     uint32_t pid;

@@ -9,6 +9,7 @@
 
 #include "bondp_types.h"
 
-int bondp_rebuild_local_pjetty(bondp_health_task_t *task, int local_idx);
+static int bondp_rebuild_local_pjetty(bondp_failover_ctx_t *task);
+static int bondp_send_failover_req(bondp_failover_ctx_t *task);
 
 #endif // BONDP_LINK_RECOVERY_H
