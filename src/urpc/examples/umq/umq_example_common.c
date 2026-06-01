@@ -23,6 +23,7 @@ static const uint32_t EXAMPLE_MAX_POLL_BATCH = 64;
 static const uint32_t EXAMPLE_REQUEST_SIZE = 8192;
 static const uint32_t SOCKET_SEND_RECV_TIMEOUT = 5;
 static const uint32_t EXAMPLE_BUFFER_SIZE = 8192;
+static const uint32_t CTP_BUFFER_SIZE = 4096;
 static const uint32_t EXAMPLE_DEPTH = 128;
 
 typedef struct exchange_info {
@@ -101,14 +102,14 @@ uint64_t example_create_umq(struct urpc_example_config *cfg, uint8_t *local_bind
         .create_flag = UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_TX_BUF_SIZE | UMQ_CREATE_FLAG_RX_DEPTH |
                        UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE | UMQ_CREATE_FLAG_TP_MODE |
                        UMQ_CREATE_FLAG_TP_TYPE,
-        .rx_buf_size = EXAMPLE_BUFFER_SIZE,
-        .tx_buf_size = EXAMPLE_BUFFER_SIZE,
         .rx_depth = EXAMPLE_DEPTH,
         .tx_depth = EXAMPLE_DEPTH,
         .mode = cfg->poll_mode,
         .tp_mode = cfg->tp_mode,
         .tp_type = cfg->tp_type,
     };
+    option.rx_buf_size = cfg->tp_type == UMQ_TP_TYPE_CTP ? CTP_BUFFER_SIZE : EXAMPLE_BUFFER_SIZE;
+    option.tx_buf_size = option.rx_buf_size;
     if (cfg->instance_mode == SERVER) {
         if (sprintf(option.name, "%s", "server") <= 0) {
             LOG_PRINT_ERR("set name failed\n");
