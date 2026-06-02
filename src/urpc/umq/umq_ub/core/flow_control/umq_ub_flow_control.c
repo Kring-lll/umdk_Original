@@ -606,6 +606,12 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
         fc->ops.packet_stats = flow_control_packet_stats_non_atomic;
     }
     fc->timeout_us = umq_ub_timer_timeout_get();
+
+    /* Initialize REQ sequence for deduplication*/
+    fc->fc_remote_req_first = false;
+    fc->fc_local_req_seq = 1;
+    fc->fc_remote_req_seq = 0;
+
     return UMQ_SUCCESS;
 }
 
@@ -659,6 +665,7 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
     if (!umq_ub_permission_acquire(fc)) {
         return UMQ_SUCCESS;
     }
+
     urma_jetty_t *jetty  = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     uint16_t credits_per_request = fc->credits_per_request;
@@ -668,7 +675,8 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
     umq_ub_imm_t imm = {
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_REQ,
-            .window = credits_per_request}
+            .window = credits_per_request,
+            .seq = fc->fc_local_req_seq}
         };
 
     umq_ub_fc_user_ctx_t obj = {
@@ -715,6 +723,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
             .type = IMM_TYPE_FC_CREDIT_REP,
             .window = notify,
             .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
+            .seq = queue->flow_control.fc_remote_req_seq,
         }};
     umq_ub_fc_user_ctx_t obj = {
         .bs = {
@@ -835,7 +844,8 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
     umq_ub_imm_t imm = {
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
-            .window = return_credit}
+            .window = return_credit,
+            .seq = fc->fc_local_req_seq}
         };
 
     umq_ub_fc_user_ctx_t obj = {
@@ -884,7 +894,8 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
             .window = return_credit,
-            .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth)
+            .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
+            .seq = queue->flow_control.fc_remote_req_seq
             }
         };
 
