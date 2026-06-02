@@ -18,7 +18,7 @@
 #include <string.h>
 #include <sys/syscall.h>
 
-#define UVS_MAX_TOPO_NUM 64
+#define UVS_MAX_TOPO_NUM 1024
 
 static inline bool uvs_eid_is_valid(const uvs_eid_t *eid)
 {
