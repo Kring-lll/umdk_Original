@@ -812,29 +812,29 @@ static uint32_t umq_ub_fill_fc_buf(ub_queue_t *queue, umq_buf_t **buf, umq_buf_s
     return 1;
 }
 
-static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm, umq_buf_t **buf)
+static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_fc_sge_data_t *sge_data, umq_buf_t **buf)
 {
     uint32_t ret = 0;
-    switch (imm.bs.type) {
+    switch (sge_data->bs.fc_type) {
         case IMM_TYPE_FC_CREDIT_REQ: {
-            if (umq_ub_shared_credit_req_handle(queue, &imm) != UMQ_SUCCESS) {
+            if (umq_ub_shared_credit_req_handle(queue, sge_data) != UMQ_SUCCESS) {
                 ret = umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_ERR);
             }
             break;
         }
         case IMM_TYPE_FC_CREDIT_REP:
             ret = umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_UPDATE);
-            umq_ub_shared_credit_resp_handle(queue, &imm);
+            umq_ub_shared_credit_resp_handle(queue, sge_data);
 
             break;
         case IMM_TYPE_FC_CREDIT_RETURN_REQ: {
-            if (umq_ub_shared_credit_return_req_handle(queue, &imm) != UMQ_SUCCESS) {
+            if (umq_ub_shared_credit_return_req_handle(queue, sge_data) != UMQ_SUCCESS) {
                 ret = umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_ERR);
             }
             break;
         }
         case IMM_TYPE_FC_CREDIT_RETURN_ACK: {
-            queue->flow_control.peer_ratio = imm.flow_control.ratio;
+            queue->flow_control.peer_ratio = sge_data->bs.ratio;
             break;
         }
         default:
@@ -843,10 +843,10 @@ static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm, umq_b
     return ret;
 }
 
-static void umq_ub_fill_rx_buff_post_process(ub_queue_t *queue, umq_ub_imm_t imm)
+static void umq_ub_fill_rx_buff_post_process(ub_queue_t *queue, umq_ub_fc_sge_data_t *sge_data)
 {
     ub_flow_control_t *fc = &queue->flow_control;
-    switch (imm.bs.type) {
+    switch (sge_data->bs.fc_type) {
         case IMM_TYPE_FC_CREDIT_REP:
             umq_ub_permission_release(fc);
             break;
@@ -901,26 +901,33 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
             continue;
         }
 
+        umq_ub_fc_sge_data_t sge_data =
+            *(umq_ub_fc_sge_data_t *)(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->
+                                       fc_share_recv.qbuf_array[0]->buf_data);
         umq_ub_imm_t imm = {.value = cr[i].imm_data};
 
         // Flow control messages sent to the main umq are processed directly.
         if (real_queue == queue) {
-            qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, imm, &buf[qbuf_cnt]);
+            qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, &sge_data, &buf[qbuf_cnt]);
             (void)umq_ub_fill_fc_rx_buf(queue);
-            umq_ub_fill_rx_buff_post_process(queue, imm);
+            umq_ub_fill_rx_buff_post_process(queue, &sge_data);
             umq_ub_put_real_queue(real_queue, UB_QUEUE_JETTY_FLOW_CONTROL);
             continue;
         }
 
         // Record the imm of the flow control message, and process the flow control message when sub umq poll rx.
-        switch (imm.bs.type) {
+        switch (sge_data.bs.fc_type) {
             case IMM_TYPE_FC_CREDIT_REQ:
             case IMM_TYPE_FC_CREDIT_RETURN_REQ:
-                __atomic_store_n(&real_queue->flow_control.imm[UB_QUEUE_FC_MSG_TYPE_REQ], imm.value, __ATOMIC_RELEASE);
+                __atomic_store_n(&real_queue->fc_sge_data[UB_QUEUE_FC_MSG_TYPE_REQ].value,
+                    sge_data.value, __ATOMIC_RELEASE);
+                __atomic_store_n(&real_queue->fc_imm[UB_QUEUE_FC_MSG_TYPE_REQ], imm.value, __ATOMIC_RELEASE);
                 break;
             case IMM_TYPE_FC_CREDIT_REP:
             case IMM_TYPE_FC_CREDIT_RETURN_ACK:
-                __atomic_store_n(&real_queue->flow_control.imm[UB_QUEUE_FC_MSG_TYPE_RSP], imm.value, __ATOMIC_RELEASE);
+                __atomic_store_n(&real_queue->fc_sge_data[UB_QUEUE_FC_MSG_TYPE_RSP].value,
+                    sge_data.value, __ATOMIC_RELEASE);
+                __atomic_store_n(&real_queue->fc_imm[UB_QUEUE_FC_MSG_TYPE_RSP], imm.value, __ATOMIC_RELEASE);
                 break;
             default:
                 break;
@@ -936,13 +943,16 @@ static int sub_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t bu
     uint32_t qbuf_cnt = 0;
     for (uint16_t i = 0; i < UB_QUEUE_FC_MSG_TYPE_MAX && qbuf_cnt < buf_count; i++) {
         umq_ub_imm_t imm = {
-            .value = __atomic_exchange_n(&queue->flow_control.imm[i], 0, __ATOMIC_ACQUIRE)
+            .value = __atomic_exchange_n(&queue->fc_imm[i], 0, __ATOMIC_ACQUIRE)
         };
         if (imm.value == 0) {
             continue;
         }
-        qbuf_cnt += umq_ub_process_fc_msg(queue, imm, &buf[qbuf_cnt]);
-        umq_ub_fill_rx_buff_post_process(queue, imm);
+        umq_ub_fc_sge_data_t sge_data = {
+            .value = __atomic_exchange_n(&queue->fc_sge_data[i].value, 0, __ATOMIC_ACQUIRE)
+        };
+        qbuf_cnt += umq_ub_process_fc_msg(queue, &sge_data, &buf[qbuf_cnt]);
+        umq_ub_fill_rx_buff_post_process(queue, &sge_data);
     }
     return (int)qbuf_cnt;
 }
@@ -985,10 +995,10 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
             }
             continue;
         }
-        umq_ub_imm_t imm = {.value = cr[i].imm_data};
-        qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, imm, &buf[qbuf_cnt]);
+        umq_ub_fc_sge_data_t sge_data = *(umq_ub_fc_sge_data_t *)(queue->fc_recv_req_sge.addr);
+        qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, &sge_data, &buf[qbuf_cnt]);
         (void)umq_ub_fill_fc_rx_buf(queue);
-        umq_ub_fill_rx_buff_post_process(queue, imm);
+        umq_ub_fill_rx_buff_post_process(queue, &sge_data);
     }
     /* If buf is not NULL, return qbuf_cnt (0 if no error, >0 if has error);
      * If buf is NULL, return ret (0 if no error, error code if has error) */
@@ -997,16 +1007,20 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
 
 int umq_ub_fill_fc_rx_buf(ub_queue_t *queue)
 {
-    urma_jfr_wr_t recv_wr = {0};
+    urma_sge_t fc_sge = {.len = sizeof(umq_ub_fc_sge_data_t), .tseg = NULL, .user_tseg = NULL};
+    urma_jfr_wr_t recv_wr = {.src = {.sge = &fc_sge, .num_sge = 1}};
     urma_jfr_wr_t *bad_wr = NULL;
     uint64_t start_timestamp = umq_perf_get_start_timestamp();
     urma_status_t status;
     // bondp with shared_jfr should use urma_post_jfr_wr
     bool post_jfr = ((queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 && queue->used_port_num > 0);
     if (post_jfr) {
+        fc_sge.addr = (uint64_t)(uintptr_t)queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->
+            fc_share_recv.qbuf_array[0]->buf_data;
         status =
             umq_symbol_urma()->urma_post_jfr_wr(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr, &recv_wr, &bad_wr);
     } else {
+        fc_sge.addr = (uint64_t)(uintptr_t)queue->fc_recv_req_sge.addr;
         status =
             umq_symbol_urma()->urma_post_jetty_recv_wr(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL], &recv_wr, &bad_wr);
     }
