@@ -19,6 +19,7 @@
 #include "urma_log.h"
 #include "urma_private.h"
 
+#include "bondp_health_check_v2.h"
 #include "bondp_connection.h"
 #include "bondp_context_table.h"
 #include "bondp_hash_table.h"
@@ -1771,6 +1772,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     }
 
     if (!is_fake_jetty) {
+        (void)bondp_hc_v2_register_node(bdp_ctx, cfg_jetty, bdp_tjetty);
         if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty, cfg_jetty) != 0) {
             URMA_LOG_ERR("Failed to register health check task\n");
             goto UNIMPORT_TSEG;
@@ -1799,6 +1801,7 @@ static urma_status_t bondp_unimport_jetty_inner(urma_target_jetty_t *target_jett
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(target_jetty->urma_ctx, bondp_context_t, v_ctx);
     urma_status_t ret = URMA_SUCCESS;
 
+    bondp_hc_v2_unregister_node(bdp_ctx, bdp_tjetty);
     bondp_unregister_health_check_task(bdp_ctx, bdp_tjetty);
 
     if (bondp_unimport_pjetty(bdp_tjetty) != URMA_SUCCESS) {
