@@ -112,6 +112,8 @@ typedef enum ub_packet_stats_type {
     UB_PACKET_STATS_TYPE_SEND_EAGAIN,
     UB_PACKET_STATS_TYPE_SEND_ERROR,
     UB_PACKET_STATS_TYPE_RECV_ERROR,
+    UB_PACKET_STATS_TYPE_RECV_DUP_REQ,
+    UB_PACKET_STATS_TYPE_RECV_DUP_REP,
     UB_PACKET_STATS_TYPE_MAX,
 } ub_packet_stats_type_t;
 
@@ -179,6 +181,9 @@ typedef struct ub_flow_control {
     bool enabled;
     volatile bool is_credit_applying;
     volatile uint16_t imm[UB_QUEUE_FC_MSG_TYPE_MAX];
+    bool fc_remote_req_first;    /* local REQ sequence number, start from 1, increment after RSP received */
+    uint8_t fc_local_req_seq;    /* expected remote REQ sequence number, for deduplication */
+    uint8_t fc_remote_req_seq;   /* whether fc_remote_req_seq is initialized */
 } ub_flow_control_t;
 
 typedef struct imported_tseg_node {
