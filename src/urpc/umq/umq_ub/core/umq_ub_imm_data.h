@@ -34,6 +34,23 @@ typedef enum umq_ub_imm_type {
     IMM_TYPE_MAX,                   // max type should not exceed 16, for type is 4 bit
 } umq_ub_imm_type_t;
 
+typedef enum umq_ub_fc_imm_type {
+    UMQ_UB_FC_IMM_TYPE_USER,
+    UMQ_UB_FC_IMM_TYPE_FC,
+    UMQ_UB_FC_IMM_TYPE_IO,
+    UMQ_UB_FC_IMM_TYPE_MAX,
+} umq_ub_fc_imm_type_t;
+
+typedef union umq_ub_fc_sge_data {
+    uint32_t value;
+    struct {
+        uint32_t fc_type : 4;
+        uint32_t window : 10;
+        uint32_t ratio : 2;
+        uint32_t rsvd : 16;
+    } bs;
+} umq_ub_fc_sge_data_t;
+
 typedef union umq_ub_imm {
     uint64_t value;
     struct {
@@ -47,10 +64,9 @@ typedef union umq_ub_imm {
         uint64_t rsvd1 : 50;
     } ub_plus;
     struct {
-        uint64_t type : 4;
-        uint64_t window : 10;
-        uint64_t ratio : 2;     // 0: 10%, 1: 30%, 2: 50%, 3: 70%, min reserved credit: modify to 70%
-        uint64_t rsvd1 : 48;
+        uint64_t umq_id : 18;
+        uint64_t type : 2;
+        uint64_t rsvd1 : 44;
     } flow_control;
     struct {
         uint64_t type : 4;
