@@ -60,6 +60,15 @@ extern "C" {
 
 #define UMQ_UB_ENABLE_SHARE_FC_JFR (true)
 
+#define UMQ_UB_FC_SGE_BITMAP_SIZE (64 * 1024)
+#define UMQ_UB_FC_SGE_BYTES_PER_SLOT 4
+#define UMQ_UB_FC_SGE_QBUF_SIZE (4096)
+#define UMQ_UB_FC_SGE_QBUF_COUNT (UMQ_UB_FC_SGE_BITMAP_SIZE * UMQ_UB_FC_SGE_BYTES_PER_SLOT /UMQ_UB_FC_SGE_QBUF_SIZE)
+#define UMQ_UB_FC_SGE_SLOTS_PER_QBUF (UMQ_UB_FC_SGE_QBUF_SIZE / UMQ_UB_FC_SGE_BYTES_PER_SLOT)
+#define UMQ_UB_FC_SGE_SHARED_RECV_QBUF_MAX  32
+#define UMQ_UB_FC_SGE_SHARED_RECV_BYTES_PER_SLOT 4
+#define UMQ_UB_FC_SGE_SHARED_RECV_SLOTS_PER_QBUF (UMQ_UB_FC_SGE_QBUF_SIZE / UMQ_UB_FC_SGE_SHARED_RECV_BYTES_PER_SLOT)
+
 typedef enum umq_size_interval {
     UMQ_SIZE_0K_SMALL_INTERVAL,     // (0K, umq_buf_size_small()] size
     UMQ_SIZE_SMALL_MID_INTERVAL,    // (umq_buf_size_small(), umq_buf_size_middle()] size
@@ -178,8 +187,24 @@ typedef struct ub_flow_control {
     bool remote_get;
     bool enabled;
     volatile bool is_credit_applying;
-    volatile uint16_t imm[UB_QUEUE_FC_MSG_TYPE_MAX];
 } ub_flow_control_t;
+
+typedef struct umq_ub_fc_sge_slot {
+    umq_buf_t *qbuf;
+    void *addr;
+    uint32_t bitmap_idx;
+} umq_ub_fc_sge_slot_t;
+
+typedef struct umq_ub_fc_sge_mgr {
+    umq_buf_t *qbuf_array[UMQ_UB_FC_SGE_QBUF_COUNT];
+    util_external_mutex_lock *lock;
+    urpc_bitmap_t bitmap;
+} umq_ub_fc_sge_mgr_t;
+
+typedef struct umq_ub_fc_share_recv {
+    umq_buf_t *qbuf_array[UMQ_UB_FC_SGE_SHARED_RECV_QBUF_MAX];
+    uint32_t qbuf_cnt;
+} umq_ub_fc_share_recv_t;
 
 typedef struct imported_tseg_node {
     struct urpc_hmap_node node;
@@ -228,6 +253,7 @@ typedef struct umq_ub_ctx {
     umq_trans_info_t trans_info;
     volatile uint64_t *umq_ctx_jetty_table;
     volatile uint64_t *rx_consumed_jetty_table;
+    umq_ub_fc_sge_mgr_t fc_sge_mgr;
 } umq_ub_ctx_t;
 
 typedef struct rx_buf_ctx {
@@ -347,6 +373,7 @@ typedef struct jfr_ctx {
     volatile uint32_t ref_cnt;
     rx_buf_ctx_list_t rx_buf_ctx_list;
     ub_credit_pool_t credit;
+    umq_ub_fc_share_recv_t fc_share_recv;
 } jfr_ctx_t;
 
 typedef struct ub_queue_interrupt_ctx {
@@ -398,6 +425,10 @@ typedef struct ub_queue {
     urma_transport_mode_t tp_mode;
     urma_tp_type_t tp_type;
     ub_flow_control_t flow_control;
+    volatile uint64_t fc_imm[UB_QUEUE_FC_MSG_TYPE_MAX];
+    umq_ub_fc_sge_data_t fc_sge_data[UB_QUEUE_FC_MSG_TYPE_MAX];
+    umq_ub_fc_sge_slot_t fc_recv_req_sge;
+    umq_ub_fc_sge_slot_t fc_recv_resp_sge;
     char name[UMQ_NAME_MAX_LEN];
     uint32_t rx_buf_size;
     uint32_t tx_buf_size;
@@ -602,6 +633,13 @@ static ALWAYS_INLINE void umq_ub_put_real_queue(ub_queue_t *queue, uint32_t jett
     __atomic_store_n(&queue->dev_ctx->umq_ctx_jetty_table[queue->jetty[jetty_idx]->jetty_id.id],
         (uint64_t)(uintptr_t)queue, __ATOMIC_RELEASE);
 }
+
+int umq_ub_flow_control_sge_mgr_init(umq_ub_fc_sge_mgr_t *mgr);
+void umq_ub_flow_control_sge_mgr_uninit(umq_ub_fc_sge_mgr_t *mgr);
+int umq_ub_flow_control_sge_alloc(umq_ub_fc_sge_mgr_t *mgr, umq_ub_fc_sge_slot_t *slot);
+void umq_ub_flow_control_sge_free(umq_ub_fc_sge_mgr_t *mgr, umq_ub_fc_sge_slot_t *slot);
+int umq_ub_flow_control_share_recv_init(umq_ub_fc_share_recv_t *recv, uint32_t qbuf_cnt);
+void umq_ub_flow_control_share_recv_uninit(umq_ub_fc_share_recv_t *recv);
 
 #ifdef __cplusplus
 }
