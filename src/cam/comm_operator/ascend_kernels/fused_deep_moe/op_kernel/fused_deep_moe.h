@@ -74,8 +74,8 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     using L0TileShape = L0TileShape_;
 
 
-    using AType = Gemm::GemmType<int8_t, layout::RowMajor>;
-    using BType = Gemm::GemmType<int8_t, layout::zN>;
+    using AType = Gemm::GemmType<AscendC::int4b_t, layout::RowMajor>;
+    using BType = Gemm::GemmType<AscendC::int4b_t, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
@@ -399,7 +399,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
 
     layout::RowMajor layoutX1{maxTokenNum_, tokenHiddenSize_};
     layout::zN layoutShareWeight1 = layout::zN::template MakeLayout<int8_t>(tokenHiddenSize_, shareGmm1OutputDim_);
-    layout::zN layoutWeight1 = layout::zN::template MakeLayout<int8_t>(tokenHiddenSize_, gmm1OutputDim_);
+    layout::zN layoutWeight1 = layout::zN::template MakeLayout<AscendC::int4b_t>(tokenHiddenSize_, gmm1OutputDim_);
     layout::VectorLayout layoutShareW1Scale{shareGmm1OutputDim_};
     layout::VectorLayout layoutW1Scale{gmm1OutputDim_};
     layout::VectorLayout layoutX1Scale{maxTokenNum_};
@@ -450,6 +450,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
 
     GM_ADDR gmWorkspace = workspaceGM_ + workspaceOffset;
     GM_ADDR gmCVSwap = workspaceGM_ + workspaceOffset;
+    gmWorkspace = (GM_ADDR)gmShareSmoothScales_;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(blockDim_) * (GMM1_L1M * GMM1_L1N) *
                                               WORKSPACE_STAGES * sizeof(int32_t));
     int64_t swigluOutSize = (maxTokenNum_ * gmm1OutputDim_ + shareExpertTokenNum * shareGmm1OutputDim_) * sizeof(float);
@@ -507,7 +508,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     } else {
         Arch::CrossCoreWaitFlag(gmm1AivFinished);
     }
-
+    return;
     MoeDistributeCombineImpl::CamMoeDistributeCombine<TemplateMC2TypeFunc> combiner;
     if (g_coreType == AscendC::AIV) {
         combiner.Init(gmGmm2DepOut, gmexpertIds_, gmExpandIdx, gmEpSendCount, nullptr, gmexpertScales_, xActiveMask_,

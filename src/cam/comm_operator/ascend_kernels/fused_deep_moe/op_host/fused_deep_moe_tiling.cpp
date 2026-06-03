@@ -124,7 +124,7 @@ static ge::graphStatus CheckGmm1Shape(gert::TilingContext &context, FusedDeepMoe
                 OPS_LOG_E(nodeName, "gmm1Weight input length does not equals to token hidden size."),
                 return ge::GRAPH_FAILED);
         tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen =
-                                    static_cast<uint64_t>(gmm1FirstTensorElementShape.GetDim(TENSOR_HIDDEN_INDEX));
+                                    static_cast<uint64_t>(gmm1FirstTensorElementShape.GetDim(TENSOR_HIDDEN_INDEX)) * 8;
         tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.isTensorList = true;
     } else { // Single
         if (elementDims == TWO_DIMS) {  // one localExpert perRank
@@ -132,7 +132,7 @@ static ge::graphStatus CheckGmm1Shape(gert::TilingContext &context, FusedDeepMoe
                 OPS_LOG_E(nodeName, "gmm1Weight input length does not equals to token hidden size."),
                 return ge::GRAPH_FAILED);
             tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen =
-                                    static_cast<uint64_t>(gmm1FirstTensorElementShape.GetDim(SINGLE_HIDDEN_INDEX - 1));
+                                    static_cast<uint64_t>(gmm1FirstTensorElementShape.GetDim(SINGLE_HIDDEN_INDEX - 1)) * 8;
         } else {    // multi localExperts perRank
             OPS_ERR_IF(localExpertNum != gmm1FirstTensorElementShape.GetDim(0),
                 OPS_LOG_E(nodeName, "gmm1Weight does not match local expert number per rank."),
@@ -141,7 +141,7 @@ static ge::graphStatus CheckGmm1Shape(gert::TilingContext &context, FusedDeepMoe
                 OPS_LOG_E(nodeName, "gmm1Weight input length does not equals to token hidden size."),
                 return ge::GRAPH_FAILED);
             tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen =
-                                    static_cast<uint64_t>(gmm1FirstTensorElementShape.GetDim(SINGLE_HIDDEN_INDEX));
+                                    static_cast<uint64_t>(gmm1FirstTensorElementShape.GetDim(SINGLE_HIDDEN_INDEX)) * 8;
         }
         tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.isTensorList = false;
     }
@@ -360,21 +360,21 @@ static ge::graphStatus CheckGmm2Shape(const gert::TilingContext &context, const 
                 OPS_LOG_E(nodeName, "gmm2 does not match local expert number perRank."), return ge::GRAPH_FAILED);
         OPS_ERR_IF(n / 2 != gmm2FirstTensorElementShape.GetDim(0),
                 OPS_LOG_E(nodeName, "gmm2 does not match half of gmm1 hidden size."), return ge::GRAPH_FAILED);
-        OPS_ERR_IF(h != gmm2FirstTensorElementShape.GetDim(1),
+        OPS_ERR_IF(h != gmm2FirstTensorElementShape.GetDim(1) * 8,
                 OPS_LOG_E(nodeName, "gmm2 does not match token hidden size."), return ge::GRAPH_FAILED);
         listFlag = true;
     } else { // Single
         if (elementDims == TWO_DIMS) { // one localExpert perRank
             OPS_ERR_IF(n / 2 != gmm2FirstTensorElementShape.GetDim(0),
                 OPS_LOG_E(nodeName, "gmm2 does not match half of gmm1 hidden size."), return ge::GRAPH_FAILED);
-            OPS_ERR_IF(h != gmm2FirstTensorElementShape.GetDim(1),
+            OPS_ERR_IF(h != gmm2FirstTensorElementShape.GetDim(1) * 8,
                 OPS_LOG_E(nodeName, "gmm2 does not match token hidden size."), return ge::GRAPH_FAILED);
         } else { // multi localExperts perRank
             OPS_ERR_IF(localExpertNum != gmm2FirstTensorElementShape.GetDim(0),
                 OPS_LOG_E(nodeName, "gmm2 does not match local expert num perRank."), return ge::GRAPH_FAILED);
             OPS_ERR_IF(n / 2 != gmm2FirstTensorElementShape.GetDim(1),
                 OPS_LOG_E(nodeName, "gmm2 does not match half of gmm1 hidden size."), return ge::GRAPH_FAILED);
-            OPS_ERR_IF(h != gmm2FirstTensorElementShape.GetDim(2),
+            OPS_ERR_IF(h != gmm2FirstTensorElementShape.GetDim(2) * 8,
                 OPS_LOG_E(nodeName, "gmm2 does not match token hidden size."), return ge::GRAPH_FAILED);
         }
     }
