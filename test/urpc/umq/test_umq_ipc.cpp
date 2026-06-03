@@ -27,6 +27,11 @@ static int test_umq_ipc_init(void)
 
     cfg.trans_info_num = 1;
     cfg.trans_info[0].trans_mode = UMQ_TRANS_MODE_IPC;
+    // memset leaves block_cfg.small_block_size = 0 = BLOCK_SIZE_4K (1<<12 = 4K).
+    // Some tests assume 8K blocks (e.g. headroom_reset doesn't need to grow the
+    // block count when 4096 data + 512 headroom fits in one 8K block). Pin the
+    // size to 8K so block_size stays consistent with prior behavior.
+    cfg.block_cfg.small_block_size = BLOCK_SIZE_8K;
 
     return umq_init(&cfg);
 }
