@@ -42,6 +42,7 @@
                                                            (jetty_id)->uasid, (jetty_id)->id)
 
 struct bondp_target_jetty;
+struct bondp_hcv2_ctx;
 
 typedef enum bondp_health_mode {
     HEALTH_MODE_BACKUP_CHECK,
@@ -156,6 +157,7 @@ typedef struct bondp_context {
     /* used to restore the local_id in CR. */
     bondp_hash_table_t p_vjetty_id_table;
     int real_async_fd; /* vcontex async_fd */
+    struct bondp_hcv2_ctx *hc_v2;
     bondp_heath_check_ctx_t bondp_heath_check_ctx;
     bondp_hash_table_t remote_v2p_token_id_table;
     bool msn_enable;

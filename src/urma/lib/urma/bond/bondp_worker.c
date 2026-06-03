@@ -63,7 +63,7 @@ static bondp_worker_event_handler_t *bondp_worker_lookup_event_handler(bondp_wor
     return NULL;
 }
 
-static void bondp_worker_free_event_handler(bondp_worker_t *worker, bondp_worker_event_handler_t *entry)
+static void __attribute__((unused)) bondp_worker_free_event_handler(bondp_worker_t *worker, bondp_worker_event_handler_t *entry)
 {
     ub_hmap_remove(&worker->handler_map, &entry->hmap_node);
     free(entry);
