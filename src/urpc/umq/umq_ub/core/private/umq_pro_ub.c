@@ -897,6 +897,42 @@ static bool umq_ub_fc_msg_dedup_check_and_store(ub_queue_t *real_queue, umq_ub_i
     }
 }
 
+static bool umq_ub_fc_msg_dedup_check(ub_queue_t *queue, umq_ub_imm_t imm)
+{
+    uint16_t recv_seq = imm.flow_control.seq;
+    ub_flow_control_t *fc = &queue->flow_control;
+
+    switch (imm.bs.type) {
+        case IMM_TYPE_FC_CREDIT_REQ:
+        case IMM_TYPE_FC_CREDIT_RETURN_REQ:
+            /* REQ deduplication: check if this REQ is already processed */
+            if (fc->fc_remote_req_first) {
+                if (recv_seq == fc->fc_remote_req_seq) {
+                    /* Duplicate REQ, discard */
+                    umq_ub_fc_packet_stats(fc, 1, UB_PACKET_STATS_TYPE_RECV_DUP_REQ);
+                    return true;
+                }
+            }
+            /* First REQ or new sequence: update expected sequence */
+            fc->fc_remote_req_seq = recv_seq;
+            fc->fc_remote_req_first = true;
+            return false;
+
+        case IMM_TYPE_FC_CREDIT_REP:
+        case IMM_TYPE_FC_CREDIT_RETURN_ACK:
+            /* REP deduplication: check if this RSP matches expected sequence */
+            if (recv_seq != fc->fc_local_req_seq) {
+                /* seq does not match current request seq, duplicate response */
+                umq_ub_fc_packet_stats(fc, 1, UB_PACKET_STATS_TYPE_RECV_DUP_REP);
+                return true;
+            }
+            return false;
+
+        default:
+            return false;
+    }
+}
+
 static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count)
 {
     urma_cr_t cr[UMQ_UB_FC_POLL_COUNT_MAX];
@@ -1027,36 +1063,9 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
             continue;
         }
         umq_ub_imm_t imm = {.value = cr[i].imm_data};
-        uint16_t recv_seq = imm.flow_control.seq;
         /* FC message deduplication */
-        switch (imm.bs.type) {
-            case IMM_TYPE_FC_CREDIT_REQ:
-            case IMM_TYPE_FC_CREDIT_RETURN_REQ: {
-                /* REQ deduplication: check if this REQ is already processed */
-                if (fc->fc_remote_req_first) {
-                    if (recv_seq == fc->fc_remote_req_seq) {
-                        /* Duplicate REQ, discard */
-                        umq_ub_fc_packet_stats(fc, 1, UB_PACKET_STATS_TYPE_RECV_DUP_REQ);
-                        continue;
-                    }
-                }
-                /* First REQ or new sequence: update expected sequence and process */
-                fc->fc_remote_req_seq = recv_seq;
-                fc->fc_remote_req_first = true;
-                break;
-            }
-            case IMM_TYPE_FC_CREDIT_REP:
-            case IMM_TYPE_FC_CREDIT_RETURN_ACK: {
-                /* REP deduplication: check if this RSP matches expected sequence */
-                if (recv_seq != fc->fc_local_req_seq) {
-                    // seq does not match current request seq, duplicate response
-                    umq_ub_fc_packet_stats(fc, 1, UB_PACKET_STATS_TYPE_RECV_DUP_REP);
-                    continue;
-                }
-                break;
-            }
-            default:
-                break;
+        if (umq_ub_fc_msg_dedup_check(queue, imm)) {
+            continue;
         }
         qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, imm, &buf[qbuf_cnt]);
         if (imm.bs.type == IMM_TYPE_FC_CREDIT_REP || imm.bs.type == IMM_TYPE_FC_CREDIT_RETURN_ACK) {
