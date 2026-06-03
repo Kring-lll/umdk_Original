@@ -157,6 +157,8 @@ typedef struct bondp_context {
     int real_async_fd; /* vcontex async_fd */
     bondp_heath_check_ctx_t bondp_heath_check_ctx;
     bondp_hash_table_t remote_v2p_token_id_table;
+    bool msn_enable;
+    bool seg_cache_enable;
 #ifndef __cplusplus
     atomic_ulong token_id_cnt;
 #else
@@ -169,6 +171,10 @@ typedef struct bondp_jfc {
     urma_jfc_t *p_jfc[URMA_UBAGG_DEV_MAX_NUM];
     int dev_num;
     int lasted_polled_jfc_idx;
+    uint32_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t enabled_count;
+    uint32_t active_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t active_count;
     urma_ref_t use_cnt; /* Initialize to 0 */
 } bondp_jfc_t;
 

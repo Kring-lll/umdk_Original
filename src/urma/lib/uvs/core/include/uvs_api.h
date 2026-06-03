@@ -29,6 +29,7 @@ extern "C" {
 #define CHIP_NUM           (2)
 #define DEV_NUM            (256)
 #define IODIE_NUM          (2)
+#define UVS_MAIN_UE_EID_BATCH_EID_MAX 128U
 
 typedef enum uvs_tp_type {
     UVS_RTP,
@@ -109,21 +110,26 @@ struct urma_topo_agg_dev {
     struct urma_topo_ue ues[IODIE_NUM];
 };
 
-struct urma_topo_link {
-    uint32_t peer_node;  // node id
-    uint32_t peer_iodie; // iodie idx
-    uint32_t peer_port;  // port idx, UINT32_MAX indicates no connection
-};
-
 struct urma_topo_node {
     uint32_t type; // 0:1D-fullmesh, 1: Clos topology with parallel planes
     uint32_t super_node_id;
     uint32_t node_id;
     uint32_t is_current;
-    struct urma_topo_link links[IODIE_NUM][PORT_NUM]; /*Links[i] represents the destination
-            information connected to the current node's port[i]. It is not filled in Clos topology and relies on preset information.*/
+    bool links[IODIE_NUM * PORT_NUM][IODIE_NUM * PORT_NUM]; /* links[local_idx][remote_idx] represents
+            connectivity between this node's port local_idx and node i's port remote_idx. */
     struct urma_topo_agg_dev agg_devs[DEV_NUM];
 };
+
+typedef struct uvs_main_ue_eid_entry {
+    uvs_eid_t eid;
+    uvs_eid_t main_ue_eid;
+} uvs_main_ue_eid_entry_t;
+
+typedef struct uvs_main_ue_eid_batch_entry {
+    uvs_eid_t main_ue_eid;
+    uint32_t eid_num;
+    uvs_eid_t eids[UVS_MAIN_UE_EID_BATCH_EID_MAX];
+} uvs_main_ue_eid_batch_entry_t;
 
 /**
  * Create an aggregation device in UVS.
@@ -157,6 +163,16 @@ int uvs_get_device_name_by_eid(uvs_eid_t *eid, char *buf, size_t len);
  */
 int uvs_set_topo_info(void *topo_buf, uint32_t node_size, uint32_t node_num);
 
+int uvs_insert_main_ue_eid(const uvs_main_ue_eid_entry_t *entry);
+
+int uvs_insert_main_ue_eid_batch(const uvs_main_ue_eid_batch_entry_t *entry);
+
+int uvs_delete_main_ue_eid(const uvs_eid_t *eid);
+
+int uvs_lookup_main_ue_eid(const uvs_eid_t *eid, uvs_eid_t *main_ue_eid);
+
+int uvs_flush_main_ue_eid(void);
+
 /**
  * UVS get topo info.
  * @param[out] topo: topo map
@@ -174,9 +190,18 @@ int uvs_get_topo_info(void *topo);
  */
 int uvs_get_route_list(const uvs_route_t *route, uvs_route_list_t *route_list);
 
+/**
+ * UVS get path set between two bonding devices.
+ * @param[in] src_bondind_eid: eid of the source bonding device.
+ * @param[in] dst_bonding_eid: eid of the destination bonding device.
+ * @param[in] tp_type: transport path type, refers to enum uvs_tp_type.
+ * @param[in] iodie_level: true for iodie-level paths, false for port-level paths.
+ * @param[out] uvs_path_set: a buffer containing the returned path set.
+ * Return: 0 on success, other value on error
+ */
 int uvs_get_path_set(const uvs_eid_t *src_bondind_eid,
                      const uvs_eid_t *dst_bonding_eid,
-                     enum uvs_tp_type tp_type, bool multi_path,
+                     enum uvs_tp_type tp_type, bool iodie_level,
                      uvs_path_set_t *uvs_path_set);
 
 #ifdef __cplusplus

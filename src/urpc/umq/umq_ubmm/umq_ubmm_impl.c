@@ -251,7 +251,7 @@ uint64_t umq_ubmm_create_impl(uint64_t umqh, uint8_t *ubmm_ctx, umq_create_optio
     if (option->create_flag & UMQ_CREATE_FLAG_TX_DEPTH) {
         if (option->tx_depth == 0) {
             UMQ_VLOG_ERR(VLOG_UMQ, "tx_depth must be greater than 0\n");
-            return -UMQ_ERR_EINVAL;
+            goto DESTROY_UB;
         }
         tp->local_ring.tx_depth = option->tx_depth;
     } else {
@@ -615,12 +615,16 @@ int umq_ubmm_log_config_set_impl(umq_log_config_t *config)
         urma_log_set_level((urma_vlog_level_t)config->level);
     }
 
+    if (((config->log_flag & UMQ_LOG_FLAG_FUNC) && config->func == NULL) ||
+        ((config->log_flag & UMQ_LOG_FLAG_EXT_FUNC) && config->ext_func == NULL)) {
+        return urma_unregister_log_func();
+    }
+
+    if (config->log_flag & UMQ_LOG_FLAG_EXT_FUNC) {
+        return urma_register_loc_log_func(config->ext_func);
+    }
     if (config->log_flag & UMQ_LOG_FLAG_FUNC) {
-        if (config->func == NULL) {
-            return urma_unregister_log_func();
-        } else {
-            return urma_register_log_func(config->func);
-        }
+        return urma_register_log_func(config->func);
     }
     return UMQ_SUCCESS;
 }
@@ -676,8 +680,8 @@ int umq_tp_ubmm_buf_headroom_reset_impl(umq_buf_t *qbuf, uint16_t headroom_size)
 static ALWAYS_INLINE int enqueue_data(uint64_t umqh_tp, uint64_t *offset, uint32_t num)
 {
     umq_ubmm_info_t *tp = (umq_ubmm_info_t *)(uintptr_t)umqh_tp;
-    if (num > UMQ_POST_POLL_BATCH) {
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "enqueue data num %u exceeds max_post_size %d\n", num, UMQ_POST_POLL_BATCH);
+    if (num > UMQ_BATCH_SIZE) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "enqueue data num %u exceeds max_post_size %d\n", num, UMQ_BATCH_SIZE);
         return -UMQ_ERR_EINVAL;
     }
 

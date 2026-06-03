@@ -21,6 +21,7 @@ extern "C" {
 #define UMQ_LOG_FLAG_FUNC              (1U)
 #define UMQ_LOG_FLAG_LEVEL             (1U << 1)
 #define UMQ_LOG_FLAG_RATE_LIMITED      (1U << 2)
+#define UMQ_LOG_FLAG_EXT_FUNC          (1U << 3)
 
 typedef enum umq_external_mutex_attr {
     MUTEX_ATTR_EXCLUSIVE = 0,
@@ -62,10 +63,12 @@ typedef enum umq_log_level {
 } umq_log_level_t;
 
 typedef void (*umq_log_func_t)(int level, char *log_msg);
+typedef void (*umq_log_ext_func_t)(int level, const char *file, const char *function, int line, char *log_msg);
 
 typedef struct umq_log_config {
     uint32_t log_flag;
     umq_log_func_t func;
+    umq_log_ext_func_t ext_func;
     umq_log_level_t level;
     struct {
         uint32_t interval_ms;    // rate-limited log output interval. If the value is 0, rate is not limited.
@@ -135,7 +138,7 @@ typedef enum umq_dev_assign_mode {
 #define UMQ_IPV4_SIZE                (16)
 #define UMQ_IPV6_SIZE                (46)
 #define UMQ_DEV_NAME_SIZE            (64)
-#define UMQ_BATCH_SIZE               (64)
+#define UMQ_BATCH_SIZE               (256)
 #define UMQ_MAX_BUF_REQUEST_SIZE     (10485760) // 10M
 
 #define UMQ_INTERRUPT_FLAG_IO_DIRECTION         (1)         // enable arg direction
@@ -220,6 +223,7 @@ typedef struct umq_flow_control_cfg {
 } umq_flow_control_cfg_t;
 
 typedef enum umq_buf_block_size {
+    BLOCK_SIZE_4K,
     BLOCK_SIZE_8K,
     BLOCK_SIZE_16K,
     BLOCK_SIZE_32K,

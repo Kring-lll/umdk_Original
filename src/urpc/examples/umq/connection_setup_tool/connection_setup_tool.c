@@ -28,7 +28,7 @@
 #include "connection_setup_tool.h"
 
 #define TOOL_SOCKET_SEND_RECV_TIMEOUT   10
-#define TOOL_EXAMPLE_BUFFER_SIZE        8192
+#define TOOL_EXAMPLE_BUFFER_SIZE        4096
 #define TOOL_EXAMPLE_DEPTH              128
 #define TOOL_SERVER_RX_EXAMPLE_DEPTH    (2048 * 4)
 #define TOOL_MAX_POLL_BATCH             64
@@ -792,7 +792,7 @@ static int wait_work(void)
                     process_rx_interrupt(fd_ctx);
                     break;
                 default:
-                    LOG_PRINT_ERR("unknow type\n");
+                    LOG_PRINT_ERR("unknown type\n");
                     break;
             }
         }

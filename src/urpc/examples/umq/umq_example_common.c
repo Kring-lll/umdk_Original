@@ -20,9 +20,8 @@
 #include "umq_example_common.h"
 
 static const uint32_t EXAMPLE_MAX_POLL_BATCH = 64;
-static const uint32_t EXAMPLE_REQUEST_SIZE = 8192;
 static const uint32_t SOCKET_SEND_RECV_TIMEOUT = 5;
-static const uint32_t EXAMPLE_BUFFER_SIZE = 8192;
+static const uint32_t EXAMPLE_BUFFER_SIZE = 4096;
 static const uint32_t EXAMPLE_DEPTH = 128;
 
 typedef struct exchange_info {
@@ -112,12 +111,12 @@ uint64_t example_create_umq(struct urpc_example_config *cfg, uint8_t *local_bind
     if (cfg->instance_mode == SERVER) {
         if (sprintf(option.name, "%s", "server") <= 0) {
             LOG_PRINT_ERR("set name failed\n");
-            return -1;
+            return UMQ_INVALID_HANDLE;
         }
     } else {
         if (sprintf(option.name, "%s", "client") <= 0) {
             LOG_PRINT_ERR("set name failed\n");
-            return -1;
+            return UMQ_INVALID_HANDLE;
         }
     }
 
@@ -131,7 +130,7 @@ uint64_t example_create_umq(struct urpc_example_config *cfg, uint8_t *local_bind
     uint64_t umqh = umq_create(&option);
     if (umqh == UMQ_INVALID_HANDLE) {
         LOG_PRINT_ERR("umq_create failed\n");
-        return -1;
+        return UMQ_INVALID_HANDLE;
     }
 
     *bind_info_size = umq_bind_info_get(umqh, local_bind_info, *bind_info_size);
@@ -258,7 +257,7 @@ int client_connect(const char *ip, uint16_t port)
         LOG_PRINT_ERR("ip[%s] not valid\n", ip);
         goto CLOSE_SOC;
     }
-    if (connect(client_fd, (struct sockaddr*)&server, sizeof(server)) != 0) {
+    if (connect(client_fd, (struct sockaddr*)(uintptr_t)&server, sizeof(server)) != 0) {
         LOG_PRINT_ERR("ip[%s] port[%u] connect failed\n", ip, port);
         goto CLOSE_SOC;
     }
@@ -327,7 +326,7 @@ int server_accept(const char *ip, uint16_t port)
         goto CLOSE_SVR;
     }
 
-    if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
+    if (bind(server_fd, (struct sockaddr*)(uintptr_t)&addr, sizeof(addr)) != 0) {
         LOG_PRINT_ERR("ip[%s] port[%u] bind failed\n", ip, port);
         goto CLOSE_SVR;
     }
@@ -394,7 +393,7 @@ int parse_trans_info(struct urpc_example_config *cfg, umq_init_cfg_t *init_cfg)
 
 int example_post_rx(uint64_t umqh, uint32_t depth)
 {
-    uint32_t request_size = EXAMPLE_REQUEST_SIZE;
+    uint32_t request_size = EXAMPLE_BUFFER_SIZE;
     umq_buf_t *buf = umq_buf_alloc(request_size, depth, umqh, NULL);
     if (buf == NULL) {
         LOG_PRINT_ERR("alloc buf failed\n");

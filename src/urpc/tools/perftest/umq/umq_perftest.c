@@ -13,7 +13,6 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <stddef.h>
-#include <stdarg.h>
 
 #include "umq_api.h"
 #include "umq_pro_api.h"
@@ -181,7 +180,7 @@ static void umq_perftest_finish_perf(umq_perftest_config_t *cfg)
         int str_size = umq_stats_perf_to_str(&umq_perf_stats, perf_info_str_buf, UMQ_PERFTEST_ERTF_INFO_STR_SIZE);
         if (str_size >= UMQ_PERFTEST_ERTF_INFO_STR_SIZE) {
             perf_info_str_buf[UMQ_PERFTEST_ERTF_INFO_STR_SIZE - 1] = '\0';
-            LOG_PRINT("perf info str buf too small, str_size %u\n", str_size);
+            LOG_PRINT("perf info str buf too small, str_size %d\n", str_size);
         }
         printf("%s\n", perf_info_str_buf);
         free(perf_info_str_buf);
@@ -227,13 +226,14 @@ static int umq_perftest_create_umqh(umq_perftest_config_t *cfg)
     umq_create_option_t option = {
         .trans_mode = (umq_trans_mode_t)cfg->trans_mode,
         .create_flag = UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_TX_BUF_SIZE | UMQ_CREATE_FLAG_TP_MODE |
-                       UMQ_CREATE_FLAG_RX_DEPTH | UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE,
+            UMQ_CREATE_FLAG_RX_DEPTH | UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE | UMQ_CREATE_FLAG_TP_TYPE,
         .rx_buf_size = cfg->config.size,
         .tx_buf_size = cfg->config.size,
         .rx_depth = cfg->config.rx_depth,
         .tx_depth = cfg->config.tx_depth,
         .mode = cfg->config.interrupt ? UMQ_MODE_INTERRUPT : UMQ_MODE_POLLING,
         .tp_mode = cfg->tp_mode,
+        .tp_type = cfg->tp_type,
     };
     char *name = cfg->config.instance_mode == PERF_INSTANCE_SERVER ? "umq_perftest_server" : "umq_perftest_client";
     (void)sprintf(option.name, "%s", name);
@@ -475,7 +475,7 @@ static int umq_perftest_client_exchange_port(umq_perftest_config_t *cfg)
         }
     }
 
-    send_info.msg_len = sizeof(umq_port_id_t);
+    send_info.msg_len = (uint32_t)sizeof(umq_port_id_t);
     umq_port_id_t *port = (umq_port_id_t *)send_info.data;
     // chose 1st port
     cfg->port_id = route_list.routes[0].src_port;

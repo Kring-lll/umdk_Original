@@ -806,6 +806,26 @@ int dlock_server::check_control_msg_client_id(const struct dlock_control_hdr msg
     return 0;
 }
 
+bool dlock_server::check_conn_type_valid(dlock_connection *p_conn) const
+{
+    dlock_conn_peer_info_t peer_info;
+
+    p_conn->get_peer_info(peer_info);
+    /* 1. An attack can create a new conn which peer_type is set to DLOCK_CONN_PEER_DEFAULT by default,
+    *  and will pass the check_control_msg_client_id check. For occasions like client reinit at recovery
+    *  phase, attacks of client_reinit_done reqs will lead to decrease m_recovery_num to 0 before clients
+    *  really got reinited.
+    *  2. As only "peer_info.peer_type == DLOCK_CONN_PEER_DEFAULT" case can pass check_control_msg_client_id
+    *  check at process_control_msg func. Occasions that "peer_info.peer_id != msg_hdr.client_id" has been
+    *  intercepted at check_control_msg_client_id func, in that there is no need to recheck that again.
+    */
+    if (peer_info.peer_type == DLOCK_CONN_PEER_DEFAULT) {
+        return false;
+    }
+
+    return true;
+}
+
 void dlock_server::fake_client_msg_process(dlock_connection *p_conn)
 {
     dlock_conn_peer_info_t peer_info;
@@ -2213,8 +2233,14 @@ int dlock_server::find_available_object_id(int object_id)
 int dlock_server::get_lock_do(dlock_connection * /* p_conn */, struct dlock_control_hdr *msg_hdr, uint8_t *msg_body)
 {
     struct get_lock_body *get_msg = reinterpret_cast<struct get_lock_body *>(msg_body);
-    uint16_t expected_msg_body_len = DLOCK_GET_LOCK_BODY_LEN + static_cast<uint16_t>(get_msg->desc_len);
+    uint16_t expected_msg_body_len;
 
+     /* To avoid invalid access of get_msg->desc_len and ensure msg_body is non NULL */
+    if ((msg_hdr->total_len - msg_hdr->hdr_len) <= DLOCK_GET_LOCK_BODY_LEN) {
+        DLOCK_LOG_ERR("get lock body msg error, with incomplete msg");
+        return -1;
+    }
+    expected_msg_body_len = DLOCK_GET_LOCK_BODY_LEN + static_cast<uint16_t>(get_msg->desc_len);
     if (check_msg_body_len_invalid(msg_hdr, expected_msg_body_len)) {
         DLOCK_LOG_ERR("message body length error, hdr_len: %u, total_len: %u, desc_len: %u, expected_msg_body_len: %u",
             msg_hdr->hdr_len, msg_hdr->total_len, get_msg->desc_len, expected_msg_body_len);
@@ -2416,6 +2442,11 @@ lock_entry_s *dlock_server::get_lock_by_msg(struct get_lock_body *get_msg)
 int dlock_server::batch_get_lock_do(dlock_connection * /* p_conn */,
     struct dlock_control_hdr *msg_hdr, uint8_t *msg_body)
 {
+    /* To avoid invalid access of msg_batch_get_lock_body->get_lock_entry and ensure msg_body is non NULL */
+    if ((msg_hdr->total_len - msg_hdr->hdr_len) < DLOCK_BATCH_GET_LOCK_BODY_LEN) {
+        DLOCK_LOG_ERR("batch get object body msg with incomplete batch get lock body header");
+        return -1;
+    }
     struct batch_get_lock_body *msg_batch_get_lock_body =
         reinterpret_cast<struct batch_get_lock_body *>(msg_body);
     struct get_lock_body *msg_get_lock_body = msg_batch_get_lock_body->get_lock_entry;
@@ -2431,7 +2462,16 @@ int dlock_server::batch_get_lock_do(dlock_connection * /* p_conn */,
     uint32_t lock_num = msg_batch_get_lock_body->lock_num;
     lock_entry_s *lock_entry = nullptr;
     uint32_t i;
+    if (lock_num > MAX_LOCK_BATCH_SIZE) {
+        DLOCK_LOG_ERR("batch get %u locks exceeds max lock batch size limit %u", lock_num, MAX_LOCK_BATCH_SIZE);
+        return -1;
+    }
     for (i = 0; i < lock_num; i++) {
+         /* To ensure the access of msg_get_lock_body->desc_len is valid */
+        if ((offset + DLOCK_GET_LOCK_BODY_LEN) >= msg_body_len) {
+            DLOCK_LOG_ERR("batch get lock body msg error, with incomplete msg");
+            return -1;
+        }
         msg_get_lock_body = reinterpret_cast<struct get_lock_body *>(msg_body + offset);
         offset += DLOCK_GET_LOCK_BODY_LEN + msg_get_lock_body->desc_len;
         if (offset > msg_body_len) {
@@ -2519,7 +2559,6 @@ int dlock_server::batch_release_lock_do(dlock_connection *p_conn,
     uint8_t *buff = nullptr;
     struct batch_release_lock_body *batch_release_msg =
         reinterpret_cast<struct batch_release_lock_body *>(msg_body);
-    struct release_lock_body *release_msg = batch_release_msg->release_lock_entry;
     int ret;
 
     if (msg_hdr->total_len - msg_hdr->hdr_len < DLOCK_BATCH_RELEASE_LOCK_BODY_LEN) {
@@ -2527,7 +2566,7 @@ int dlock_server::batch_release_lock_do(dlock_connection *p_conn,
             "hdr_len: %u, total_len: %u", msg_hdr->hdr_len, msg_hdr->total_len);
         return -1;
     }
-
+    struct release_lock_body *release_msg = batch_release_msg->release_lock_entry;
     uint32_t lock_num = batch_release_msg->lock_num;
     uint16_t expected_msg_body_len = static_cast<uint16_t>(DLOCK_BATCH_RELEASE_LOCK_BODY_LEN +
         (lock_num * DLOCK_RELEASE_LOCK_BODY_LEN));
@@ -2578,6 +2617,10 @@ int dlock_server::reinit_client_done(dlock_connection * p_conn,
 {
     if (!m_is_primary) {
         DLOCK_LOG_WARN("replica got reinit done msg");
+        return -1;
+    }
+    if (!check_conn_type_valid(p_conn)) {
+        DLOCK_LOG_ERR("reinit client done req from invalid connection");
         return -1;
     }
 
@@ -2699,6 +2742,15 @@ int dlock_server::batch_update_locks_do(dlock_connection *p_conn, struct dlock_c
         DLOCK_LOG_WARN("replica got batch update locks msg");
         return -1;
     }
+    if (!check_conn_type_valid(p_conn)) {
+        DLOCK_LOG_ERR("update locks req from invalid connection");
+        return -1;
+    }
+    /* To avoid invalid access of msg_batch_update_lock_body pointer and ensure msg_body is non NULL */
+    if ((msg_hdr->total_len - msg_hdr->hdr_len) < DLOCK_BATCH_UPDATE_LOCK_BODY_LEN) {
+        DLOCK_LOG_ERR("batch update locks body msg with incomplete batch update lock body header");
+        return -1;
+    }
     struct batch_update_lock_body *msg_batch_update_lock_body =
         reinterpret_cast<struct batch_update_lock_body *>(msg_body);
     struct update_lock_body *p_msg_update = msg_batch_update_lock_body->update_lock_entry;
@@ -2718,7 +2770,16 @@ int dlock_server::batch_update_locks_do(dlock_connection *p_conn, struct dlock_c
     uint32_t lock_num = msg_batch_update_lock_body->lock_num;
     lock_entry_s *lock_entry = nullptr;
     uint32_t i;
+    if (lock_num > MAX_LOCK_BATCH_SIZE) {
+        DLOCK_LOG_ERR("batch update %u locks exceeds max lock batch size limit %u", lock_num, MAX_LOCK_BATCH_SIZE);
+        return -1;
+    }
     for (i = 0; i < lock_num; i++) {
+        /* To ensure the access of p_msg_update->desc_len is valid */
+        if ((offset + DLOCK_UPDATE_LOCK_BODY_LEN) >= msg_body_len) {
+            DLOCK_LOG_ERR("batch update locks body msg error, with incomplete msg");
+            return -1;
+        }
         p_msg_update = reinterpret_cast<struct update_lock_body *>(msg_body + offset);
         offset += DLOCK_UPDATE_LOCK_BODY_LEN + p_msg_update->desc_len;
         if (offset > msg_body_len) {
@@ -2873,8 +2934,14 @@ int dlock_server::create_object_do(dlock_connection * /* p_conn */, struct dlock
     uint8_t *msg_body)
 {
     struct object_create_body *body = reinterpret_cast<struct object_create_body *>(msg_body);
-    uint16_t expected_msg_body_len = DLOCK_OBJECT_CREATE_BODY_LEN + static_cast<uint16_t>(body->desc_len);
+    uint16_t expected_msg_body_len;
 
+    /* To avoid invalid access of body->desc_len and ensure msg_body is non NULL */
+    if ((msg_hdr->total_len - msg_hdr->hdr_len) <= DLOCK_OBJECT_CREATE_BODY_LEN) {
+        DLOCK_LOG_ERR("create object body msg error, with incomplete msg");
+        return static_cast<int>(DLOCK_EINVAL);
+    }
+    expected_msg_body_len = DLOCK_OBJECT_CREATE_BODY_LEN + static_cast<uint16_t>(body->desc_len);
     if (check_msg_body_len_invalid(msg_hdr, expected_msg_body_len)) {
         DLOCK_LOG_ERR("message body length error, hdr_len: %u, total_len: %u, desc_len: %u, expected_msg_body_len: %u",
             msg_hdr->hdr_len, msg_hdr->total_len, body->desc_len, expected_msg_body_len);
@@ -3035,8 +3102,14 @@ int dlock_server::get_object_do(dlock_connection * /* p_conn */, struct dlock_co
     uint8_t *msg_body)
 {
     struct object_get_body *body = reinterpret_cast<struct object_get_body *>(msg_body);
-    uint16_t expected_msg_body_len = DLOCK_OBJECT_GET_BODY_LEN + static_cast<uint16_t>(body->desc_len);
+    uint16_t expected_msg_body_len;
 
+    /* To avoid invalid access of body->desc_len and ensure msg_body is non NULL */
+    if ((msg_hdr->total_len - msg_hdr->hdr_len) <= DLOCK_OBJECT_GET_BODY_LEN) {
+        DLOCK_LOG_ERR("get object body msg error, with incomplete msg");
+        return static_cast<int>(DLOCK_EINVAL);
+    }
+    expected_msg_body_len = DLOCK_OBJECT_GET_BODY_LEN + static_cast<uint16_t>(body->desc_len);
     if (check_msg_body_len_invalid(msg_hdr, expected_msg_body_len)) {
         DLOCK_LOG_ERR("message body length error, hdr_len: %u, total_len: %u, desc_len: %u, expected_msg_body_len: %u",
             msg_hdr->hdr_len, msg_hdr->total_len, body->desc_len, expected_msg_body_len);

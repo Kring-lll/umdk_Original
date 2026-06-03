@@ -606,9 +606,6 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
         fc->ops.packet_stats = flow_control_packet_stats_non_atomic;
     }
     fc->timeout_us = umq_ub_timer_timeout_get();
-    UMQ_VLOG_INFO(VLOG_UMQ, "umq flow control init success, use %s window\n",
-        cfg->use_atomic_window ? "atomic" : "non-atomic");
-
     return UMQ_SUCCESS;
 }
 
@@ -627,16 +624,7 @@ int umq_ub_window_init(ub_flow_control_t *fc, umq_ub_bind_info_t *bind_info)
         return UMQ_SUCCESS;
     }
 
-    umq_ub_bind_fc_info_t *fc_info = (umq_ub_bind_fc_info_t *)(uintptr_t)bind_info->fc_info;
     umq_ub_bind_queue_info_t *queue_info = (umq_ub_bind_queue_info_t *)(uintptr_t)bind_info->queue_info;
-    if (fc_info->win_buf_addr == 0 || fc_info->win_buf_len < sizeof(uint16_t)) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "remote eid: " EID_FMT ", remote jetty_id: %u, umq window init failed, remote flow "
-            "control qbuf is empty\n", EID_ARGS(fc_info->jetty_id.eid), fc_info->jetty_id.id);
-        return UMQ_FAIL;
-    }
-
-    fc->remote_win_buf_addr = fc_info->win_buf_addr;
-    fc->remote_win_buf_len = fc_info->win_buf_len;
     fc->remote_rx_depth = queue_info->rx_depth;
     fc->remote_tx_depth = queue_info->tx_depth;
     fc->remote_rx_window = 0; // remote window need to be updated after remote rx_posted

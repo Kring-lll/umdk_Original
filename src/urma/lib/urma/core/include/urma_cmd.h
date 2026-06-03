@@ -43,9 +43,20 @@ typedef enum urma_core_cmd {
     URMA_CORE_UNEXPOSE_DEV_NS,
     URMA_CORE_SET_DEV_EID_NS,
     URMA_CORE_GET_TOPO_INFO,
-    URMA_CORE_GET_TOPO_BONDING_DEV = 33,
     URMA_CORE_SET_SL,
+    URMA_CORE_ADMIN_INSERT_MAIN_UE_EID = 35,
+    URMA_CORE_ADMIN_DELETE_MAIN_UE_EID,
+    URMA_CORE_ADMIN_LOOKUP_MAIN_UE_EID,
+    URMA_CORE_ADMIN_FLUSH_MAIN_UE_EID,
+    URMA_CORE_ADMIN_INSERT_MAIN_UE_EID_BATCH,
+    URMA_CORE_PERF_START,
+    URMA_CORE_PERF_STOP,
+    URMA_CORE_PERF_SHOW
 } urma_core_cmd_t;
+
+typedef enum uram_ubagg_cmd {
+    UBAGG_NL_GET_PHYSICAL_DEVICE = 4,
+} uram_ubagg_cmd_t;
 
 /* only for uburma device ioctl */
 #define URMA_CMD_MAGIC 'U'
@@ -556,7 +567,7 @@ typedef struct urma_cmd_create_jfc {
         uint32_t flag;
         int jfce_fd;
         uint64_t urma_jfc; /* urma jfc pointer */
-        uint32_t ceqn;     /* [Optional] event queue id, no greater than urma_device_cap_t->ceq_cnt
+        uint32_t ceqn;     /* [Optional] event queue id, less than urma_device_cap_t->ceq_cnt
                             * set to 0 by default */
     } in;
     struct {
@@ -605,7 +616,7 @@ typedef struct urma_cmd_alloc_jfc {
         uint32_t flag;
         int jfce_fd;
         uint64_t urma_jfc; /* urma jfc pointer */
-        uint32_t ceqn;     /* [Optional] event queue id, no greater than urma_device_cap_t->ceq_cnt
+        uint32_t ceqn;     /* [Optional] event queue id, less than urma_device_cap_t->ceq_cnt
                             * set to 0 by default */
     } in;
     struct {

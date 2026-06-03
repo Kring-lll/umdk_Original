@@ -414,7 +414,8 @@ typedef union urma_jfc_flag {
         uint32_t lock_free  : 1;
         uint32_t jfc_inline : 1;
         uint32_t non_blocking : 1;
-        uint32_t reserved   : 29;
+        uint32_t has_drv_ext : 1;
+        uint32_t reserved   : 28;
     } bs;
     uint32_t value;
 } urma_jfc_flag_t;
@@ -422,7 +423,7 @@ typedef union urma_jfc_flag {
 typedef struct urma_jfc_cfg {
     uint32_t depth;       /* [Required] the depth of jfc, no greater than urma_device_cap_t->jfc_depth */
     urma_jfc_flag_t flag; /* [Optional] see urma_jfc_flag_t, set flag.value to be 0 by default */
-    uint32_t ceqn;        /* [Optional] event queue id, no greater than urma_device_cap_t->ceq_cnt
+    uint32_t ceqn;        /* [Optional] event queue id, less than urma_device_cap_t->ceq_cnt
                               set to 0 by default */
     urma_jfce_t *jfce;    /* [Required] the event of jfc */
     uint64_t user_ctx;    /* [Optional] private data of jfc, set to NULL by default */
@@ -601,9 +602,8 @@ typedef union urma_jfr_flag {
                                    /* (0x2): OI, initiator ordering */
                                    /* (0x3): OL, low layer ordering */
                                    /* (0x4): UNO, unreliable non ordering */
-        uint32_t non_blocking : 1;
         uint32_t has_drv_ext  : 1;
-        uint32_t reserved     : 17;
+        uint32_t reserved     : 18;
     } bs;
     uint32_t value;
 } urma_jfr_flag_t;
@@ -1414,6 +1414,9 @@ typedef enum urma_vlog_level {
 } urma_vlog_level_t;
 
 typedef void (*urma_log_cb_t)(int level, char *message);
+
+/* location log callback function definition */
+typedef void (*urma_loc_log_cb)(int level, const char *file, const char *function, int line, char *message);
 
 #ifdef __cplusplus
 }
