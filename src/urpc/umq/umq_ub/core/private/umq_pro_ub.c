@@ -863,7 +863,7 @@ static bool umq_ub_fc_msg_dedup_check_and_store(ub_queue_t *real_queue, umq_ub_i
 {
     uint16_t recv_seq = imm.flow_control.seq;
     ub_flow_control_t *fc = &real_queue->flow_control;
-    
+
     switch (imm.bs.type) {
         case IMM_TYPE_FC_CREDIT_REQ:
         case IMM_TYPE_FC_CREDIT_RETURN_REQ:
@@ -880,7 +880,7 @@ static bool umq_ub_fc_msg_dedup_check_and_store(ub_queue_t *real_queue, umq_ub_i
             fc->fc_remote_req_first = true;
             __atomic_store_n(&real_queue->flow_control.imm[UB_QUEUE_FC_MSG_TYPE_REQ], imm.value, __ATOMIC_RELEASE);
             return false;
-            
+
         case IMM_TYPE_FC_CREDIT_REP:
         case IMM_TYPE_FC_CREDIT_RETURN_ACK:
             /* REP deduplication: check if this RSP matches expected sequence */
@@ -891,7 +891,7 @@ static bool umq_ub_fc_msg_dedup_check_and_store(ub_queue_t *real_queue, umq_ub_i
             }
             __atomic_store_n(&real_queue->flow_control.imm[UB_QUEUE_FC_MSG_TYPE_RSP], imm.value, __ATOMIC_RELEASE);
             return false;
-            
+
         default:
             return false;
     }
@@ -944,19 +944,18 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
         // Flow control messages sent to the main umq are processed directly.
         if (real_queue == queue) {
             qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, imm, &buf[qbuf_cnt]);
-            (void)umq_ub_fill_fc_rx_buf(queue);
             umq_ub_fill_rx_buff_post_process(queue, imm);
             umq_ub_put_real_queue(real_queue, UB_QUEUE_JETTY_FLOW_CONTROL);
             continue;
         }
-        
+
         // Deduplication check and store imm for sub umq processing
         if (umq_ub_fc_msg_dedup_check_and_store(real_queue, imm)) {
             // Duplicate packet, discard
             umq_ub_put_real_queue(real_queue, UB_QUEUE_JETTY_FLOW_CONTROL);
             continue;
         }
-        
+
         qbuf_cnt += (int32_t)umq_ub_fill_fc_buf(real_queue, &buf[qbuf_cnt], UMQ_FAKE_BUF_FC_MSG);
         umq_ub_put_real_queue(real_queue, UB_QUEUE_JETTY_FLOW_CONTROL);
     }
@@ -1014,8 +1013,8 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
     ub_flow_control_t *fc = &queue->flow_control;
 
     for (int i = 0; i < rx_cr_cnt; i++) {
+        (void)umq_ub_fill_fc_rx_buf(queue);
         if (cr[i].status != URMA_CR_SUCCESS) {
-            (void)umq_ub_fill_fc_rx_buf(queue);
             umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_RECV_ERROR);
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_CQE,
                 "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
@@ -1066,7 +1065,6 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
                 fc->fc_local_req_seq = 1;  // 255 overflow back to 1
             }
         }
-        (void)umq_ub_fill_fc_rx_buf(queue);
         umq_ub_fill_rx_buff_post_process(queue, imm);
     }
     /* If buf is not NULL, return qbuf_cnt (0 if no error, >0 if has error);
