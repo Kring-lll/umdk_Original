@@ -7,7 +7,7 @@
 #ifndef BONDP_LINK_RECOVERY_H
 #define BONDP_LINK_RECOVERY_H
 
-#include "bondp_types.h"
+#include "bondp_failback.h"
 
 static int bondp_failback_rebuild_local_pjetty(bondp_failback_ctx_t *task);
 static int bondp_failback_send_req(bondp_failback_ctx_t *task);

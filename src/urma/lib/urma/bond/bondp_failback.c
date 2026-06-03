@@ -255,27 +255,26 @@ static bool bondp_handle_message(bondp_context_t *bdp_ctx, uint32_t recv_local_i
         //     req_expected_primary_id != local_primary_id);
 
         bool need_rebuild;
-        int valid = 0;//rebuild 成功则为0
-        //TODO:之前healthcheck皆为0表示行为的成功失败，要不要改成常数等
+        int ret = BONDP_FB_OK;
         if (need_rebuild) {
-            valid = bondp_failback_rebuild_local_pjetty(ctx);
+            ret = bondp_failback_rebuild_local_pjetty(ctx);
         }
-        if (valid == 0) {
-            valid = bondp_failback_relink(ctx);
+        if (ret == BONDP_FB_OK) {
+            ret = bondp_failback_relink(ctx);
         }
-        if (valid == 0) {
+        if (ret == BONDP_FB_OK) {
             ctx->state = BONDP_FAILBACK_STATE_DONE;
         }
     }
 
     if (ctrl_type == BONDP_FAILBACK_CTRL_RESP) {
-        int valid = -1;
+        int ret = BONDP_FB_ERR;
         if (ctx->req_seq == req_seq) {
             ctx->remote_primary_pjetty_id = payload;
             URMA_LOG_INFO("Fallback RESP accepted, seq=%u remote_primary_id=%u\n",
                 req_seq, ctx->remote_primary_pjetty_id);
-            valid = bondp_failback_relink(ctx);
-            if (valid ==0) {
+            ret = bondp_failback_relink(ctx);
+            if (ret == BONDP_FB_OK) {
                 bondp_failback_cancel_timer(ctx);
             }
         } else {
