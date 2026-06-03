@@ -29,13 +29,10 @@ static int cmd_show_usage(admin_config_t *cfg)
 {
     (void)cfg;
     printf("Usage:"
-           "  urma_admin show [--dev <dev>] [--brief|--all] [--whole]  Show URMA devices information\n"
-           "  urma_admin show topo [-d <dev>]          Show topology of current node\n"
-           "  urma_admin show topo <node_id> [-d <dev>] Show topology of specified node\n"
+           "  urma_admin show [--dev <DEV>] [--brief|--all] [--whole]  Show URMA devices information\n"
+           "  urma_admin show topo [NODE_ID]           Show topology of specified node, default is current node\n"
            "\n"
            "Options:\n"
-           "  <dev>      Device name (e.g., udma1)\n"
-           "  <node_id>  Node ID (e.g., 1)\n"
            "  --brief    Default behavior. If bonding devices exist, show bonding devices only;\n"
            "             otherwise show all udma devices.\n"
            "  --all      Show all devices\n"
@@ -956,69 +953,15 @@ static tool_topo_info_t *admin_find_topo_node(tool_topo_map_t *topo_map, uint32_
     return NULL;
 }
 
-static int admin_collect_related_agg_dev_idxs(const tool_topo_info_t *node_info, const char *dev_name, bool *matched,
-                                              uint32_t *matched_cnt, admin_urma_topo_bonding_dev_t *bonding_cache,
-                                              bool *cache_valid)
-{
-    if (node_info == NULL || dev_name == NULL || matched == NULL || matched_cnt == NULL || bonding_cache == NULL ||
-        cache_valid == NULL) {
-        return -EINVAL;
-    }
-    *matched_cnt = 0;
-    for (uint32_t i = 0; i < DEV_NUM; i++) {
-        matched[i] = false;
-        cache_valid[i] = false;
-    }
-
-    for (uint32_t i = 0; i < DEV_NUM; i++) {
-        const tool_topo_agg_dev_t *agg_dev = &node_info->agg_devs[i];
-        if (!admin_is_eid_valid(agg_dev->agg_eid)) {
-            continue;
-        }
-
-        if (admin_cmd_get_topo_bonding_dev_by_eid((const urma_eid_t *)agg_dev->agg_eid, &bonding_cache[i]) != 0) {
-            continue;
-        }
-        cache_valid[i] = true;
-
-        if (strcmp(dev_name, bonding_cache[i].dev_name) == 0) {
-            matched[i] = true;
-            (*matched_cnt)++;
-            continue;
-        }
-
-        for (uint32_t iodie_idx = 0; iodie_idx < IODIE_NUM; iodie_idx++) {
-            if (strcmp(dev_name, bonding_cache[i].physical_devs[iodie_idx].dev_name) == 0) {
-                matched[i] = true;
-                (*matched_cnt)++;
-                break;
-            }
-        }
-    }
-    return *matched_cnt == 0 ? -ENODEV : 0;
-}
-
-static int admin_print_topo_map(tool_topo_map_t *topo_map, uint32_t node_id, const admin_config_t *cfg)
+static int admin_print_topo_map(tool_topo_map_t *topo_map, uint32_t node_id)
 {
     (void)printf("========================== topo map start =============================\n");
-    bool matched_agg_devs[DEV_NUM] = {0};
-    bool bonding_cache_valid[DEV_NUM] = {0};
-    admin_urma_topo_bonding_dev_t bonding_cache[DEV_NUM] = {0};
-    uint32_t matched_cnt = 0;
     tool_topo_info_t *cur_node_info = admin_find_topo_node(topo_map, node_id);
     if (cur_node_info == NULL) {
         (void)printf("Node %d topo info not found.\n", node_id);
         return -ENODEV;
     }
 
-    if (cfg != NULL && cfg->specify_device) {
-        int ret = admin_collect_related_agg_dev_idxs(cur_node_info, cfg->dev_name, matched_agg_devs, &matched_cnt,
-                                                     bonding_cache, bonding_cache_valid);
-        if (ret != 0) {
-            (void)printf("Device %s has no related aggregation device.\n", cfg->dev_name);
-            return ret;
-        }
-    }
     (void)printf("===================== show node %d topo info =======================\n", node_id);
     for (uint32_t iodie_idx = 0; iodie_idx < IODIE_NUM; iodie_idx++) {
         (void)printf("IODie %d:\n", iodie_idx);
@@ -1049,9 +992,6 @@ static int admin_print_topo_map(tool_topo_map_t *topo_map, uint32_t node_id, con
     }
     char eid_str[INET6_ADDRSTRLEN];
     for (uint32_t agg_dev_idx = 0; agg_dev_idx < DEV_NUM; agg_dev_idx++) {
-        if (cfg != NULL && cfg->specify_device && matched_agg_devs[agg_dev_idx] == false) {
-            continue;
-        }
         admin_urma_topo_bonding_dev_t bonding_dev = {0};
         bool has_bonding_name = false;
         tool_topo_agg_dev_t *agg_dev = &cur_node_info->agg_devs[agg_dev_idx];
@@ -1059,11 +999,8 @@ static int admin_print_topo_map(tool_topo_map_t *topo_map, uint32_t node_id, con
             continue;
         }
         urma_eid_to_ipv6_str((urma_eid_t *)agg_dev->agg_eid, eid_str, sizeof(eid_str));
-        if (bonding_cache_valid[agg_dev_idx]) {
-            bonding_dev = bonding_cache[agg_dev_idx];
-            has_bonding_name = bonding_dev.dev_name[0] != '\0';
-        } else if (admin_cmd_get_topo_bonding_dev_by_eid((urma_eid_t *)agg_dev->agg_eid, &bonding_dev) == 0 &&
-                   bonding_dev.dev_name[0] != '\0') {
+        if (admin_cmd_get_topo_bonding_dev_by_eid((urma_eid_t *)agg_dev->agg_eid, &bonding_dev) == 0 &&
+            bonding_dev.dev_name[0] != '\0') {
             has_bonding_name = true;
         }
         if (has_bonding_name) {
@@ -1156,7 +1093,7 @@ free_topo:
 }
 
 int admin_cmd_get_topo_bonding_dev_by_eid(const urma_eid_t *agg_eid,
-    admin_urma_topo_bonding_dev_t *out)
+                                          admin_urma_topo_bonding_dev_t *out)
 {
     int ret;
     admin_core_cmd_topo_bonding_dev_t *arg = NULL;
@@ -1205,7 +1142,7 @@ static int cmd_show_topo(admin_config_t *cfg)
     } else {
         node_id = get_cur_node_id(topo_map);
     }
-    ret = admin_print_topo_map(topo_map, node_id, cfg);
+    ret = admin_print_topo_map(topo_map, node_id);
     free(topo_map);
     return ret;
 
