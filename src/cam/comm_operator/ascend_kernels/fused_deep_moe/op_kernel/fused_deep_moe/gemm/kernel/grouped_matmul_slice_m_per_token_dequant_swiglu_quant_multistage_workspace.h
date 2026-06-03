@@ -620,6 +620,9 @@ public:
         // Represent the full gm
         AscendC::GlobalTensor<ElementA> gmA;
         AscendC::GlobalTensor<ElementB> gmB;
+        //int 4 左矩阵
+        AscendC::GlobalTensor<AscendC::int4b_t> gmA_Int4;
+        gmA_Int4.SetGlobalBuffer(params.ptrA);
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             gmA.SetGlobalBuffer((__gm__ ElementA*)params.gmShareX1);
             gmB.SetGlobalBuffer((__gm__ ElementB*)params.ptrShareB);
@@ -631,7 +634,7 @@ public:
         groupList.SetGlobalBuffer(params.ptrGroupList);
 
         AscendC::GlobalTensor<ElementC> gmC;
-        gmC.SetGlobalBuffer(reinterpret_cast<__gm__ ElementC *>(params.ptrWorkspace));
+        gmC.SetGlobalBuffer(reinterpret_cast<__gm__ ElementC *>(params.ptrWorkspace) + 10000000);
         auto layoutC = layout::RowMajor{L1TileShape::M * aicNum * WORKSPACE_STAGES, L1TileShape::N};
 
         uint32_t stageId = 0;
@@ -641,63 +644,7 @@ public:
         aicSetFunc1 = {statusDataSpaceGm + SOFT_SYNC_OFFSET,
                        static_cast<uint8_t>(aicNum + AscendC::GetBlockIdx())};  // AIV wait for flags in latter part
         uint32_t target = 1;
-        if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
-            uint32_t currentM = params.bs;
-            GemmCoord inGroupProblemShape{currentM, params.shareN, params.problemShape.k()};
-            LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
-            LayoutB layoutB = params.layoutShareB;
-            blockScheduler.Update(inGroupProblemShape, MakeCoord(L1TileShape::M, L1TileShape::N));
-            uint32_t coreLoops = blockScheduler.GetCoreLoops();
 
-            // Determine the starting loopIdx of the current core under the current groupIdx
-            uint32_t startLoopIdx = ((aicIdx < startCoreIdx) ? (aicIdx + aicNum) : aicIdx) - startCoreIdx;
-            // wait AIV quantize needed tokens
-            AscendC::GlobalTensor<int32_t> shareQuantTokenStateTensor;
-            uint32_t waitFlagCount = params.bs < shareQuantCoreNum ? params.bs : shareQuantCoreNum;
-            shareQuantTokenStateTensor.SetGlobalBuffer((__gm__ int32_t*)(
-                statusDataSpaceGm + SHARE_QUANT_SOFT_SYNC_OFFSET));
-            uint32_t expected = waitFlagCount * vToCFlag;
-            WaitGroupTokenNumReady(shareQuantTokenStateTensor, expected);
-            // Loop through the matmul of each groupIdx
-            for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aicNum) {
-                // Compute block location
-                GemmCoord blockCoord = blockScheduler.GetBlockCoord(loopIdx);
-                GemmCoord actualBlockShape = blockScheduler.GetActualBlockShape(blockCoord);
-
-                Callback callbackBeforeFixpipe{};
-                if (stageUsed == WORKSPACE_STAGES) {
-                    aicWaitFunc1 = {statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(AscendC::GetBlockIdx()),
-                                    target};  // AIC wait for flags in former part
-                    target += 1;
-                    callbackBeforeFixpipe = MakeCallback(&aicWaitFunc1);
-                } else {
-                    ++stageUsed;
-                }
-                Callback callbackAfterFixpipe = MakeCallback(&aicSetFunc1);
-
-                // Compute initial location in logical coordinates
-                MatrixCoord offsetA{blockCoord.m() * L1TileShape::M, blockCoord.k() * L1TileShape::K};
-                MatrixCoord offsetB{blockCoord.k() * L1TileShape::K, blockCoord.n() * L1TileShape::N};
-                MatrixCoord offsetC{(stageId * aicNum + aicIdx) * L1TileShape::M, 0};
-                int64_t gmOffsetA = layoutA.GetOffset(offsetA);
-                int64_t gmOffsetB = layoutB.GetOffset(offsetB);
-                int64_t gmOffsetC = layoutC.GetOffset(offsetC);
-
-                // Compute block-scoped matrix multiply-add
-                if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
-                    blockMmad(gmA[gmOffsetA], layoutA, gmB[gmOffsetB], layoutB, gmC[gmOffsetC],
-                        layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
-                } else {
-                    callbackBeforeFixpipe();
-                    blockMmad(gmA[gmOffsetA], layoutA, gmB[gmOffsetB], layoutB,
-                                gmC[gmOffsetC], layoutC, actualBlockShape);
-                    callbackAfterFixpipe();
-                }
-
-                stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
-            }
-            startCoreIdx = (startCoreIdx + coreLoops) % aicNum;
-        }
 
         gmA.SetGlobalBuffer(params.ptrA);
         if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
@@ -705,7 +652,7 @@ public:
         }
         int64_t gmGroupOffsetA = 0;
         int64_t gmGroupOffsetB = 0;
-        for (uint32_t groupIdx = 0; groupIdx < localExpertNum; ++groupIdx) {
+        for (uint32_t groupIdx = 0; groupIdx < 3; ++groupIdx) {
             if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                 gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(
                         gmBlistTensorDesc.GetDataPtr<int32_t>(groupIdx)));
@@ -715,7 +662,8 @@ public:
             // wait AIV recv needed tokens
             uint32_t expected = coreNumPerGroup * vToCFlag;
             WaitGroupTokenNumReady(groupTokenNumStateTensor, expected);
-            uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT);
+             //每次输入2倍行数，高四位与低四位一起矩阵乘
+            uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT) * 2;
             GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
 
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
@@ -753,11 +701,11 @@ public:
 
                 // Compute block-scoped matrix multiply-add
                 if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
-                    blockMmad(gmA[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
+                    blockMmad(gmA_Int4[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
                               gmC[gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
                 } else {
                     callbackBeforeFixpipe();
-                    blockMmad(gmA[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
+                    blockMmad(gmA_Int4[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
                               gmC[gmOffsetC], layoutC, actualBlockShape);
                     callbackAfterFixpipe();
                 }
@@ -1274,6 +1222,143 @@ public:
     }
 
     CATLASS_DEVICE
+    void FetchAndPreprocessInt8ToInt4(AscendC::GlobalTensor<int8_t> &src, int32_t rows,
+                                                     int32_t hiddenSize, int ubOffset, AscendC::GlobalTensor<int8_t> &int4buffer)
+    {
+        uint32_t tmpBufferOffset = ubOffset;
+
+        // double buffer 定义： tmpBuffer 包含int8_t token + float scale, xTensor 只包含int8_t token
+        AscendC::LocalTensor<int8_t> xTensor0 = resource.ubBuf.template GetBufferByByte<int8_t>(tmpBufferOffset);
+        AscendC::LocalTensor<int8_t> tmpBuffer0 = resource.ubBuf.template GetBufferByByte<int8_t>(tmpBufferOffset);
+        xTensor0.SetSize(hiddenSize);
+        tmpBuffer0.SetSize(hiddenSize);
+        tmpBufferOffset += (hiddenSize) * sizeof(int8_t);
+
+        AscendC::LocalTensor<int8_t> xTensor1 = resource.ubBuf.template GetBufferByByte<int8_t>(tmpBufferOffset);
+        AscendC::LocalTensor<int8_t> tmpBuffer1 = resource.ubBuf.template GetBufferByByte<int8_t>(tmpBufferOffset);
+        xTensor1.SetSize(hiddenSize);
+        tmpBuffer1.SetSize(hiddenSize);
+        tmpBufferOffset += (hiddenSize) * sizeof(int8_t);
+        // double buffer 定义结束
+
+        AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(tmpBufferOffset);
+        xHighI4Tensor.SetSize(hiddenSize);
+        tmpBufferOffset += hiddenSize / 2;
+
+        AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(tmpBufferOffset);
+        xLowI4Tensor.SetSize(hiddenSize);
+        tmpBufferOffset += hiddenSize / 2;
+
+        AscendC::LocalTensor<half> xHighHalfTensor = resource.ubBuf.template GetBufferByByte<half>(tmpBufferOffset);
+        xHighHalfTensor.SetSize(hiddenSize * sizeof(half));
+        tmpBufferOffset += hiddenSize * sizeof(half);
+
+        AscendC::LocalTensor<half> xLowHalfTensor = resource.ubBuf.template GetBufferByByte<half>(tmpBufferOffset);
+        xLowHalfTensor.SetSize(hiddenSize * sizeof(half));
+        tmpBufferOffset += hiddenSize * sizeof(half);
+
+        AscendC::LocalTensor<half> xLowHalfTensor2 = resource.ubBuf.template GetBufferByByte<half>(tmpBufferOffset);
+        xLowHalfTensor2.SetSize(hiddenSize * sizeof(half));
+        tmpBufferOffset += hiddenSize * sizeof(half);
+
+        AscendC::LocalTensor<int16_t> xLowI16Tensor = resource.ubBuf.template GetBufferByByte<int16_t>(tmpBufferOffset);
+        xLowI16Tensor.SetSize(128 * sizeof(int16_t));
+
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID6);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID7);
+
+        constexpr int32_t MASK = 128;
+        AscendC::Duplicate(xLowI16Tensor, static_cast<int16_t>(0x0F0F), MASK);
+        AscendC::PipeBarrier<PIPE_V>();
+        const size_t LEN_VK = (hiddenSize / 2) / 128;
+        const size_t LAST_LEN_VK = (hiddenSize % 256) / 2;
+        const half ONE_SIXTEENTH = static_cast<half>(0.0625f);
+
+        uint32_t totalM = rows;
+
+        AscendC::SetFlag<AscendC::HardEvent::S_MTE2>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::S_MTE2>(EVENT_ID6);
+
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID6);
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID7);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+
+        constexpr size_t LEN_128 = 128;
+
+        constexpr int32_t BufferNum = 2;
+        uint32_t copyInNum = hiddenSize;
+
+        int pingpongId = 0;
+        for (uint32_t processIndex = 0; processIndex < rows; ++processIndex) {
+            AscendC::TEventID EVENT_ID = pingpongId == 0 ? EVENT_ID6 : EVENT_ID7;
+            AscendC::LocalTensor<int8_t> buf = pingpongId == 0 ? tmpBuffer0 : tmpBuffer1;
+            AscendC::LocalTensor<int8_t> xTensor = pingpongId == 0 ? xTensor0 : xTensor1;
+            AscendC::LocalTensor<float> bufScale = buf[hiddenSize].template ReinterpretCast<float>();
+            auto inputOffset = processIndex * copyInNum;
+            auto outputOffset = inputOffset;
+
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID);
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID);
+            AscendC::DataCopy(buf, src[inputOffset], copyInNum);
+
+            AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE3>(EVENT_ID);
+            AscendC::WaitFlag<AscendC::HardEvent::MTE2_MTE3>(EVENT_ID);
+            // 远端 scale 拷贝到GM
+            // AscendC::DataCopyPad(dstScale[processIndex], bufScale, {1, 4, 0, 0, 0});
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID);
+            AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID);
+            AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID);
+            // 高四位处理开始
+            AscendC::Cast(xHighHalfTensor, xTensor, AscendC::RoundMode::CAST_NONE, hiddenSize);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, hiddenSize);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+            AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, hiddenSize);
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
+            AscendC::DataCopy(src[outputOffset], xHighI4Tensor.ReinterpretCast<int8_t>(), hiddenSize / 2);
+             AscendC::DataCopy(int4buffer[outputOffset], xHighI4Tensor.ReinterpretCast<int8_t>(), hiddenSize / 2);
+            // 高四位处理结束
+
+            // 低四位处理开始
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+            AscendC::And(xLowHalfTensor.ReinterpretCast<int16_t>(), xTensor.ReinterpretCast<int16_t>(), xLowI16Tensor, LEN_128,
+                LEN_VK, {1, 1, 1, 8, 8, 0});
+            if (LAST_LEN_VK > 0) {
+                AscendC::And(xLowHalfTensor[LEN_VK * LEN_128].ReinterpretCast<int16_t>(),
+                    xTensor[LEN_VK * LEN_128 * TWO].ReinterpretCast<int16_t>(), xLowI16Tensor, LAST_LEN_VK, 1,
+                    {1, 1, 1, 8, 8, 0});
+            }
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID);
+            AscendC::Cast(xLowHalfTensor2.ReinterpretCast<half>(), xLowHalfTensor.ReinterpretCast<int8_t>(),
+                 AscendC::RoundMode::CAST_NONE, hiddenSize);
+            AscendC::PipeBarrier<PIPE_V>();
+            const half MINUS_EIGHT = static_cast<half>(-8);
+            AscendC::Adds(xHighHalfTensor, xLowHalfTensor2, MINUS_EIGHT, hiddenSize);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+            AscendC::Cast(xLowI4Tensor, xHighHalfTensor.ReinterpretCast<half>(), AscendC::RoundMode::CAST_NONE, hiddenSize);
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
+            AscendC::DataCopy(src[outputOffset + hiddenSize / 2], xLowI4Tensor.ReinterpretCast<int8_t>(), hiddenSize / 2);
+            AscendC::DataCopy(int4buffer[outputOffset + hiddenSize / 2], xLowI4Tensor.ReinterpretCast<int8_t>(), hiddenSize / 2);
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+            // 低四位处理结束
+            pingpongId = (pingpongId + 1) % BufferNum;
+        }
+
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(EVENT_ID7);
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(EVENT_ID7);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+    }
+
+    CATLASS_DEVICE
     void RecvToken(GM_ADDR gmX1, GM_ADDR gmX1Scale, GM_ADDR gmEpSendCount, uint32_t &coreTokenCount,
                    uint32_t startRankId, uint32_t endRankId, uint32_t recvRankNumPerCore, int64_t ubOffset)
     {
@@ -1357,6 +1442,14 @@ public:
                         xOutFp32Tensor_[tokenLength / sizeof(float)], dataCopyParamsFloat);
                     AscendC::DataCopy(expandXOutGlobal, xTmpTensor_, tokenLength);
                     AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
+                }
+                if (curTokenIdx[i] == countPerRank[i]) {
+                    AscendC::GlobalTensor<int8_t> outputInt4Buffer;
+                    outputInt4Buffer.SetGlobalBuffer((__gm__ int8_t *)(gmForOutput) + beginIdx * tokenLength, tokenLength * countPerRank[i]);
+                    expandXOutGlobal.SetGlobalBuffer((__gm__ int8_t *)(gmX1) + beginIdx * tokenLength, tokenLength * countPerRank[i]);
+                    FetchAndPreprocessInt8ToInt4(expandXOutGlobal, countPerRank[i], tokenLength, subUbOffset, outputInt4Buffer);
+                    // 保证只执行一次int8-->int4
+                    curTokenIdx[i] += 1;
                 }
             }
         }
@@ -1494,7 +1587,7 @@ public:
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                 gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(gmScaleListTensor.GetDataPtr<int32_t>(0));
             }
-            for (uint32_t groupIdx = 0; groupIdx < localExpertNum; ++groupIdx) {
+            for (uint32_t groupIdx = 0; groupIdx < 3; ++groupIdx) {
                 // just like AIC
                 groupTokenNumStateTensor.SetGlobalBuffer((__gm__ int32_t *)
                                                          (statusDataSpaceGm + GROUP_TOKEN_NUM_OFFSET) +
@@ -1625,6 +1718,7 @@ public:
         expertPerSizeOnWin = maxAxisBs * tokenLength * sizeof(XType);
         winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
         statusDataSpaceGm = (GM_ADDR)(winContext_->localWindowsExp);
+        gmForOutput = (GM_ADDR)(params.ptrWorkspace);
     }
 
     CATLASS_DEVICE
@@ -1940,6 +2034,7 @@ private:
     // memory info
     __gm__ HcclOpResParam *winContext_;
     GM_ADDR statusDataSpaceGm;
+    GM_ADDR gmForOutput;
     uint32_t stateOffset{0};
     uint64_t expertPerSizeOnWin{0};
     uint64_t winDataSizeOffset{0};
@@ -2113,6 +2208,7 @@ public:
         // Represent the full gm
         AscendC::GlobalTensor<ElementA> gmA;
         AscendC::GlobalTensor<ElementB> gmB;
+        
         AscendC::ListTensorDesc gmBlistTensorDesc(reinterpret_cast<__gm__ void *>(params.ptrB));
         if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
             gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(gmBlistTensorDesc.GetDataPtr<int32_t>(0)));
