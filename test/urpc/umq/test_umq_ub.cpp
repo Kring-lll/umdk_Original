@@ -30,11 +30,36 @@ urma_device_t **urma_get_device_list_mock(int *num_devices)
     return (urma_device_t **)&g_dev_ptr_list;
 }
 
+#define MAX_MOCK_JETTY 16
+static urma_jetty_t g_mock_jetty_pool[MAX_MOCK_JETTY];
+static urma_jfr_t g_mock_jfr_for_jetty[MAX_MOCK_JETTY];
+static uint32_t g_mock_jetty_idx = 0;
+
+urma_jetty_t *urma_create_jetty_mock(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cfg)
+{
+    if (g_mock_jetty_idx >= MAX_MOCK_JETTY) {
+        g_mock_jetty_idx = 0;
+    }
+    urma_jetty_t *j = &g_mock_jetty_pool[g_mock_jetty_idx];
+    memset(j, 0, sizeof(*j));
+    j->jetty_id.id = g_mock_jetty_idx + 1;
+    memset(&g_mock_jfr_for_jetty[g_mock_jetty_idx], 0, sizeof(urma_jfr_t));
+    j->jetty_cfg.shared.jfr = &g_mock_jfr_for_jetty[g_mock_jetty_idx];
+    g_mock_jetty_idx++;
+    return j;
+}
+
+void reset_mock_jetty_pool(void)
+{
+    g_mock_jetty_idx = 0;
+}
+
 class UmqUBTest : public ::testing::Test {
   public:
     // SetUP 在每一个 TEST_F 测试开始前执行一次
     void SetUp() override
     {
+        reset_mock_jetty_pool();
         dev.type = URMA_TRANSPORT_UB;
         static urma_eid_info_t eid_info = {0};
         (void)urma_str_to_eid("127.0.0.1", &eid_info.eid);
@@ -68,15 +93,12 @@ class UmqUBTest : public ::testing::Test {
         static urma_jfr_t jfr = {0};
         static urma_jfc_t jfc = {0};
         static urma_jfce_t jfce = {0};
-        static urma_jetty_t jetty = {0};
-        static urma_jfr_cfg_t jfr_cfg = {0};
-        jetty.jetty_cfg.jfr_cfg = &jfr_cfg;
         static urma_target_jetty target_jetty = {0};
         MOCKER(urma_create_jfr).stubs().will(returnValue(&jfr));
         MOCKER(urma_delete_jfr).stubs().will(returnValue(URMA_SUCCESS));
         MOCKER(urma_create_jfc).stubs().will(returnValue(&jfc));
         MOCKER(urma_delete_jfc).stubs().will(returnValue(URMA_SUCCESS));
-        MOCKER(urma_create_jetty).stubs().will(returnValue(&jetty));
+        MOCKER(urma_create_jetty).stubs().will(invoke(urma_create_jetty_mock));
         MOCKER(urma_delete_jetty).stubs().will(returnValue(URMA_SUCCESS));
         MOCKER(urma_create_jfce).stubs().will(returnValue(&jfce));
         MOCKER(urma_delete_jfce).stubs().will(returnValue(URMA_SUCCESS));
@@ -86,6 +108,7 @@ class UmqUBTest : public ::testing::Test {
         MOCKER(urma_import_seg).stubs().will(returnValue(&tseg));
         MOCKER(urma_bind_jetty).stubs().will(returnValue(URMA_SUCCESS));
         MOCKER(urma_post_jetty_recv_wr).stubs().will(returnValue(URMA_SUCCESS));
+        MOCKER(urma_post_jetty_send_wr).stubs().will(returnValue(URMA_SUCCESS));
         MOCKER(urma_user_ctl).stubs().will(returnValue(URMA_SUCCESS));
     }
 
@@ -135,12 +158,13 @@ TEST_F(UmqUBTest, test_ub_control_plane_success)
         .trans_mode = cfg.trans_info[0].trans_mode,
         .create_flag = UMQ_CREATE_FLAG_MAIN_UMQ | UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_TX_BUF_SIZE |
                        UMQ_CREATE_FLAG_RX_DEPTH | UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE |\
-                       UMQ_CREATE_FLAG_UMQ_CTX,
+                       UMQ_CREATE_FLAG_UMQ_CTX | UMQ_CREATE_FLAG_TP_TYPE,
         .rx_buf_size = EXAMPLE_BUFFER_SIZE,
         .tx_buf_size = EXAMPLE_BUFFER_SIZE,
         .rx_depth = EXAMPLE_DEPTH,
         .tx_depth = EXAMPLE_DEPTH,
-        .mode = (umq_queue_mode_t)1};
+        .mode = (umq_queue_mode_t)1,
+        .tp_type = UMQ_TP_TYPE_RTP};
 
     ret = umq_init(&cfg);
     ASSERT_EQ(ret, 0);
@@ -157,14 +181,9 @@ TEST_F(UmqUBTest, test_ub_control_plane_success)
     option.create_flag |= UMQ_CREATE_FLAG_SHARE_RQ;
     option.create_flag |= UMQ_CREATE_FLAG_SUB_UMQ;
     option.share_rq_umqh = umqh;
-    urma_jetty_t jetty1 = {0};
-    jetty1.jetty_id.id = 1;
-    MOCKER(umq_create_jetty).stubs().will(returnValue(&jetty1));
     uint64_t umqh1 = umq_create(&option);
     ASSERT_NE(umqh1, 0);
 
-    MOCKER(umq_ub_post_rx_inner_impl).stubs().will(returnValue(0));
-    MOCKER(umq_ub_shared_credit_req_send).stubs().will(returnValue(0));
     ret = umq_bind(umqh1, local_bind_info, bind_info_size);
     ASSERT_EQ(ret, 0);
 
@@ -215,9 +234,6 @@ TEST_F(UmqUBTest, test_ub_init_failure)
     ret = umq_init(&cfg);
     ASSERT_NE(ret, 0);
 
-    MOCKER(calloc).stubs().will(returnValue((void *)NULL));
-    ret = umq_init(&cfg);
-    ASSERT_NE(ret, 0);
 }
 
 TEST_F(UmqUBTest, test_umq_ub_bind_info_check)

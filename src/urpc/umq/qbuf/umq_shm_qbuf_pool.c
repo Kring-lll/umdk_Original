@@ -137,6 +137,9 @@ static uint32_t release_thread_cache(local_qbuf_pool_t *tls_mgmt_pool)
 // release all thread cache to global pool. should be called when thread exits
 static ALWAYS_INLINE void release_thread_cache_array()
 {
+    if (g_register_rwlock == NULL) {
+        return;
+    }
     (void)util_rwlock_wrlock(g_register_rwlock);
     LIST_REMOVE(&g_register_list_node, node);
 
