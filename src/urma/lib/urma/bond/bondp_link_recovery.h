@@ -9,7 +9,11 @@
 
 #include "bondp_types.h"
 
-static int bondp_rebuild_local_pjetty(bondp_failover_ctx_t *task);
-static int bondp_send_failover_req(bondp_failover_ctx_t *task);
+static int bondp_failback_rebuild_local_pjetty(bondp_failback_ctx_t *task);
+static int bondp_failback_send_req(bondp_failback_ctx_t *task);
+//static int bondp_failback_responder_rebuild(bondp_failover_ctx_t *task);
+static int bondp_failback_send_resp(bondp_failback_ctx_t *task);
+static int bondp_failback_reimport(bondp_failback_ctx_t *task);
+static int bondp_failback_relink(bondp_failback_ctx_t *task);
 
 #endif // BONDP_LINK_RECOVERY_H

@@ -132,43 +132,50 @@ typedef struct bondp_failover_sub_task {
     uint64_t user_ctx;
 } bondp_failover_sub_task_t;
 
-typedef enum bondp_failover_state {
-    BONDP_FO_STATE_IDLE = 0,
-    BONDP_FO_STATE_WAIT_REBUILD_START,
-    BONDP_FO_STATE_REBUILDING,
-    BONDP_FO_SENDING_REQ,
-    BONDP_FO_STATE_WAIT_RSP,
-    BONDP_FO_STATE_DONE,
-    BONDP_FO_STATE_CLOSED,
-} bondp_failover_state_t;
+typedef enum bondp_failback_state {
+    BONDP_FAILBACK_STATE_IDLE = 0,
+    BONDP_FAILBACK_STATE_WAIT_REBUILD_START,
+    BONDP_FAILBACK_STATE_REBUILDING,
+    BONDP_FAILBACK_SENDING_REQ,
+    BONDP_FAILBACK_STATE_WAIT_RSP,
+    //上述4状态为FO的本端设计
+    BONDP_FAILBACK_STATE_DONE,
+    BONDP_FAILBACK_STATE_CLOSED,
+} bondp_failback_state_t;
 
-typedef struct bondp_failover_ctx {
-    int fd;
-    bondp_failover_state_t state;
+typedef struct bondp_failback_ctx {
     uint64_t timer_id;
+
+    bondp_failback_state_t state;
+    uint64_t req_seq;
+    uint32_t remote_primary_pjetty_id;
+    uint32_t primary_target_idx;
+    //上述部分取代了之前的idx
+
     //依赖这个保证failover的单一状态
     //出现持续CQE时，保证始终只有一个重建流程
     bool timer_valid;
     uint32_t retry_ms;
-    uint64_t req_seq;
-    bool closed;
 
     struct bondp_target_jetty *bdp_tjetty;
     struct bondp_comp *bondp_jetty;
-    uint64_t next_probe_ts_us;
+
+    //uint64_t next_probe_ts_us;
     int primary_local_idx;
+    //TODO:一对一/多对多需要调整数据结构
     int active_local_idx;
     bondp_health_mode_t mode;
     uint32_t backoff_cnt;
     bondp_fallback_task_t fallback_task;
     uint32_t vjetty_id;
     bondp_failover_sub_task_t sub_tasks[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
+    //疑似是连接表格，每个元素维护
+
     hmap_node_t hmap_node;
 
     bondp_context_t *bdp_ctx;
 
-} bondp_failover_ctx_t;
-
+} bondp_failback_ctx_t;
 /** Process-granularity global variable */
 typedef struct bondp_global_context {
     uint32_t pid;
