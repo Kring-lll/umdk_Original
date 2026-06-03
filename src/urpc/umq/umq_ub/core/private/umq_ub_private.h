@@ -33,6 +33,7 @@
 #include "umq_qbuf_pool.h"
 #include "umq_huge_qbuf_pool.h"
 #include "umq_ub_imm_data.h"
+#include "umq_ub_flow_control_sge.h"
 #include "util_lock.h"
 
 #ifdef __cplusplus
@@ -181,7 +182,24 @@ typedef struct ub_flow_control {
     bool enabled;
     volatile bool is_credit_applying;
     volatile uint16_t imm[UB_QUEUE_FC_MSG_TYPE_MAX];
+    umq_ub_flow_control_sge_slot_t fc_recv_sge[UB_QUEUE_FC_MSG_TYPE_MAX];
 } ub_flow_control_t;
+
+typedef struct umq_ub_flow_control_sge_slot {
+    void *addr;
+    uint32_t bitmap_idx;
+} umq_ub_flow_control_sge_slot_t;
+
+typedef struct umq_ub_flow_control_sge_mgr {
+    umq_buf_t *qbuf_array[UMQ_UB_FLOW_CONTROL_SGE_QBUF_COUNT];
+    util_external_mutex_lock *lock;
+    urpc_bitmap_t bitmap;
+} umq_ub_flow_control_sge_mgr_t;
+
+typedef struct umq_ub_flow_control_share_recv {
+    umq_buf_t *qbuf_array[UMQ_UB_FLOW_CONTROL_SGE_SHARED_RECV_QBUF_MAX];
+    uint32_t qbuf_cnt;
+} umq_ub_flow_control_share_recv_t;
 
 typedef struct imported_tseg_node {
     struct urpc_hmap_node node;
@@ -230,6 +248,7 @@ typedef struct umq_ub_ctx {
     umq_trans_info_t trans_info;
     volatile uint64_t *umq_ctx_jetty_table;
     volatile uint64_t *rx_consumed_jetty_table;
+    umq_ub_flow_control_sge_mgr_t fc_sge_mgr;
 } umq_ub_ctx_t;
 
 typedef struct rx_buf_ctx {
@@ -350,6 +369,7 @@ typedef struct jfr_ctx {
     volatile uint32_t ref_cnt;
     rx_buf_ctx_list_t rx_buf_ctx_list;
     ub_credit_pool_t credit;
+    umq_ub_flow_control_share_recv_t fc_share_recv;
 } jfr_ctx_t;
 
 typedef struct ub_queue_interrupt_ctx {
