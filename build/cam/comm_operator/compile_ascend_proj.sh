@@ -81,7 +81,7 @@ BuildAscendProj() {
     if [ -n "${SHMEM_HOME_PATH}" ]; then
         cp -rf ./ascend_kernels/pregen/cmake ./${proj_name}
     else
-        rm -f ./${proj_name}/pregen/build_out/autogen/*shmem*
+        rm -f ./${proj_name}/pregen/build_out/autogen/*fused_deep_moe*
     fi
 
     source $ASCEND_HOME_PATH/bin/setenv.bash
