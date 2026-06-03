@@ -59,11 +59,38 @@ typedef enum uvs_cmd_set_path_set_type {
     GET_PATH_SET_IN_SRC_BONDING_EID,
     GET_PATH_SET_IN_DST_BONDING_EID,
     GET_PATH_SET_IN_TP_TYPE,
-    GET_PATH_SET_IN_MULTI_PATH,
+    GET_PATH_SET_IN_IODIE_LEVEL,
     GET_PATH_SET_IN_NUM,
     GET_PATH_LIST_OUT_PATH_SET = UVS_CMD_OUT_TYPE_INIT,
     GET_PATH_SET_OUT_NUM
 } uvs_cmd_set_path_set_type_t;
+
+typedef enum uvs_cmd_insert_main_ue_eid_type {
+    INSERT_MAIN_UE_EID_IN_ENTRY,
+    INSERT_MAIN_UE_EID_IN_NUM
+} uvs_cmd_insert_main_ue_eid_type_t;
+
+typedef enum uvs_cmd_delete_main_ue_eid_type {
+    DELETE_MAIN_UE_EID_IN_EID,
+    DELETE_MAIN_UE_EID_IN_NUM
+} uvs_cmd_delete_main_ue_eid_type_t;
+
+typedef enum uvs_cmd_lookup_main_ue_eid_type {
+    LOOKUP_MAIN_UE_EID_IN_EID,
+    LOOKUP_MAIN_UE_EID_IN_NUM,
+    LOOKUP_MAIN_UE_EID_OUT_MAIN_UE_EID = UVS_CMD_OUT_TYPE_INIT,
+    LOOKUP_MAIN_UE_EID_OUT_NUM
+} uvs_cmd_lookup_main_ue_eid_type_t;
+
+typedef enum uvs_cmd_flush_main_ue_eid_type {
+    FLUSH_MAIN_UE_EID_OUT_STATUS = UVS_CMD_OUT_TYPE_INIT,
+    FLUSH_MAIN_UE_EID_OUT_NUM
+} uvs_cmd_flush_main_ue_eid_type_t;
+
+typedef enum uvs_cmd_insert_main_ue_eid_batch_type {
+    INSERT_MAIN_UE_EID_BATCH_IN_ENTRY,
+    INSERT_MAIN_UE_EID_BATCH_IN_NUM
+} uvs_cmd_insert_main_ue_eid_batch_type_t;
 
 #ifdef __cplusplus
 }

@@ -1023,14 +1023,27 @@ static int admin_print_topo_map(tool_topo_map_t *topo_map, uint32_t node_id, con
     for (uint32_t iodie_idx = 0; iodie_idx < IODIE_NUM; iodie_idx++) {
         (void)printf("IODie %d:\n", iodie_idx);
         for (uint32_t port_idx = 0; port_idx < PORT_NUM; port_idx++) {
-            if (cur_node_info->links[iodie_idx][port_idx].peer_node >= MAX_NODE_NUM) {
-                (void)printf("Port %d: Not connected\n", port_idx);
-                continue;
+            uint32_t idx = iodie_idx * PORT_NUM + port_idx;
+            bool has_connection = false;
+            bool first_line = true;
+            for (uint32_t remote_idx = 0; remote_idx < IODIE_NUM * PORT_NUM; remote_idx++) {
+                if (cur_node_info->links[idx][remote_idx]) {
+                    uint32_t remote_iodie = remote_idx / PORT_NUM;
+                    uint32_t remote_port = remote_idx % PORT_NUM;
+                    if (first_line) {
+                        (void)printf("Port %d: Connected to IODie %d, Port %d\n",
+                                     port_idx, remote_iodie, remote_port);
+                        first_line = false;
+                    } else {
+                        (void)printf("        Connected to IODie %d, Port %d\n",
+                                     remote_iodie, remote_port);
+                    }
+                    has_connection = true;
+                }
             }
-            (void)printf("Port %d: Connected to Node %d, IODie %d, Port %d\n", port_idx,
-                         cur_node_info->links[iodie_idx][port_idx].peer_node,
-                         cur_node_info->links[iodie_idx][port_idx].peer_iodie,
-                         cur_node_info->links[iodie_idx][port_idx].peer_port);
+            if (!has_connection) {
+                (void)printf("Port %d: Not connected\n", port_idx);
+            }
         }
         (void)printf("\n");
     }
@@ -1117,7 +1130,7 @@ int admin_cmd_get_topo_info(tool_topo_map_t *topo_map)
         }
         arg->in.node_idx = i;
 
-        struct nl_msg *msg = admin_nl_alloc_msg(URMA_CORE_GET_TOPO_INFO, 0);
+        struct nl_msg *msg = admin_nl_alloc_msg(URMA_CORE_GET_TOPO_INFO, 0, UBCORE_GENL);
         if (msg == NULL) {
             ret = -ENOMEM;
             goto free_topo;
@@ -1125,7 +1138,7 @@ int admin_cmd_get_topo_info(tool_topo_map_t *topo_map)
 
         admin_nl_put_u32(msg, UBCORE_HDR_ARGS_LEN, (uint32_t)sizeof(admin_core_cmd_topo_info_t));
         admin_nl_put_u64(msg, UBCORE_HDR_ARGS_ADDR, (uint64_t)(uintptr_t)arg);
-        ret = admin_nl_send_recv_msg_default(msg);
+        ret = admin_nl_send_recv_msg_default(msg, UBCORE_GENL);
         admin_nl_free_msg(msg);
         if (ret < 0) {
             goto free_topo;
@@ -1158,13 +1171,13 @@ int admin_cmd_get_topo_bonding_dev_by_eid(const urma_eid_t *agg_eid,
     }
     arg->in.agg_eid = *agg_eid;
 
-    struct nl_msg *msg = admin_nl_alloc_msg(URMA_CORE_GET_TOPO_BONDING_DEV, 0);
+    struct nl_msg *msg = admin_nl_alloc_msg(UBAGG_NL_GET_PHYSICAL_DEVICE, 0, UBAGG_GENL);
     if (msg == NULL) {
         free(arg);
         return -ENOMEM;
     }
-    admin_nl_put_u64(msg, UBCORE_HDR_ARGS_ADDR, (uint64_t)(uintptr_t)arg);
-    ret = admin_nl_send_recv_msg_default_silent_errno(msg, -NLE_OBJ_NOTFOUND);
+    admin_nl_put_u64(msg, UBAGG_HDR_ARGS_ADDR, (uint64_t)(uintptr_t)arg);
+    ret = admin_nl_send_recv_msg_default_silent_errno(msg, -NLE_OBJ_NOTFOUND, UBAGG_GENL);
     if (ret == 0) {
         memcpy(out, &arg->out.bonding_dev, sizeof(admin_urma_topo_bonding_dev_t));
     }

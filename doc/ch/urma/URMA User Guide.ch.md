@@ -1,133 +1,86 @@
-# 目 录 {#目-录 .Contents}
-
-[1 修订记录 [1](#修订记录)](#修订记录)
-
-[2 UMDK综述 [2](#umdk综述)](#umdk综述)
-
-[3 URMA简介 [3](#urma简介)](#urma简介)
-
-[3.1 基础概念 [4](#基础概念)](#基础概念)
-
-[3.1.1 UB [4](#ub)](#ub)
-
-[3.1.2 UBVA地址模型 [4](#ubva地址模型)](#ubva地址模型)
-
-[3.1.3 Segment [4](#segment)](#segment)
-
-[3.1.4 Jetty [4](#jetty)](#jetty)
-
-[3.1.5 UBoE [4](#uboe)](#uboe)
-
-[4 Quick start [6](#quick-start)](#quick-start)
-
-[5 URMA架构 [8](#urma架构)](#urma架构)
-
-[5.1 管理面 [8](#管理面)](#管理面)
-
-[5.1.1 分布式管控 [10](#分布式管控)](#分布式管控)
-
-[5.1.1.1 可靠建链协议 [10](#可靠建链协议)](#可靠建链协议)
-
-[5.1.1.2 共享传输层 [10](#共享传输层)](#共享传输层)
-
-[5.1.1.3 前后端分离建链 [13](#前后端分离建链)](#前后端分离建链)
-
-[5.1.1.4 建链状态机管理 [14](#建链状态机管理)](#建链状态机管理)
-
-[5.1.2 集中式管控 [16](#集中式管控)](#集中式管控)
-
-[5.1.2.1 端侧-管理面建链 [16](#端侧-管理面建链)](#端侧-管理面建链)
-
-[5.1.2.2 感知传输层的建链 [16](#感知传输层的建链)](#感知传输层的建链)
-
-[5.1.2.3 不感知传输层的建链 [18](#不感知传输层的建链)](#不感知传输层的建链)
-
-[5.2 控制面 [19](#控制面)](#控制面)
-
-[5.2.1 上下文管理 [19](#上下文管理)](#上下文管理)
-
-[5.2.2 Jetty管理 [21](#jetty管理)](#jetty管理)
-
-[5.2.3 Segment管理 [23](#segment管理)](#segment管理)
-
-[5.2.4 异常事件 [27](#异常事件)](#异常事件)
-
-[5.2.4.1 flush jetty [28](#flush-jetty)](#flush-jetty)
-
-[5.2.5 设备属性 [30](#设备属性)](#设备属性)
-
-[5.2.6 token安全传输 [33](#token安全传输)](#token安全传输)
-
-[5.3 数据面 [33](#数据面)](#数据面)
-
-[5.3.1 单边操作 [35](#单边操作)](#单边操作)
-
-[5.3.2 双边操作 [37](#双边操作)](#双边操作)
-
-[5.3.3 完成记录 [39](#完成记录)](#完成记录)
-
-[6 关键特性介绍 [43](#关键特性介绍)](#关键特性介绍)
-
-[6.1 特性树 [43](#特性树)](#特性树)
-
-[6.2 设备聚合 [62](#设备聚合)](#设备聚合)
-
-[6.2.1 聚合设备基本概念 [62](#聚合设备基本概念)](#聚合设备基本概念)
-
-[6.2.2 聚合设备基本使用流程 [67](#聚合设备基本使用流程)](#聚合设备基本使用流程)
-
-[6.2.3 聚合设备特性列表和约束 [70](#聚合设备特性列表和约束)](#聚合设备特性列表和约束)
-
-[6.3 虚拟化 [71](#虚拟化)](#虚拟化)
-
-[6.3.1 容器 [71](#容器)](#容器)
-
-[6.3.2 虚拟机 [73](#虚拟机)](#虚拟机)
-
-[6.4 工具手册 [73](#工具手册)](#工具手册)
-
-[6.4.1 urma_perftest [73](#urma_perftest)](#urma_perftest)
-
-[6.4.2 urma_admin [88](#urma_admin)](#urma_admin)
-
-[6.5 DFX维测 [93](#dfx维测)](#dfx维测)
-
-[6.5.1 URMA日志 [93](#urma日志)](#urma日志)
-
-[7 生态兼容 [95](#生态兼容)](#生态兼容)
-
-[7.1 RoUB [95](#roub)](#roub)
-
-[7.2 IPoURMA [98](#ipourma)](#ipourma)
-
-[7.3 UMS [101](#ums)](#ums)
-
-[8 性能规格 [106](#性能规格)](#性能规格)
-
-[9 网络安全 [108](#网络安全)](#网络安全)
-
-[9.1 UB访问控制 [108](#ub访问控制)](#ub访问控制)
-
-[9.1.1 应用场景 [108](#应用场景)](#应用场景)
-
-[9.1.2 功能原理 [109](#功能原理)](#功能原理)
-
-[9.1.3 权限分配流程 [109](#权限分配流程)](#权限分配流程)
-
-[9.1.4 权限无效化流程 [111](#权限无效化流程)](#权限无效化流程)
-
-[9.2 内存访问控制 [111](#内存访问控制)](#内存访问控制)
-
 # 修订记录
 
-  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
-  修订时间    修订章节   修订内容简介   修复问题单连接或问题背景   修订人员
-  ----------- ---------- -------------- -------------------------- ----------------------------------------------------------------------------------------------------
-  2026.2.12   ALL        文档基线                                  \@qianguoxin、@lairuilang、@wanghang73、@eingesch、@chenjingwei0113、@duelu、@autoreconf、@wdmmsyf
+| 修订时间 | 修订章节 | 修订内容简介 | 修复问题单连接或问题背景 | 修订人员 |
+| --- | --- | --- | --- | --- |
+| 2026.2.12 | ALL | 文档基线 | | @qianguoxin、@lairuilang、@wanghang73、@eingesch、@chenjingwei0113、@duelu、@autoreconf、@wdmmsyf |
 
-  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+---
 
-# UMDK综述
+# 目 录
+
+- [修订记录](#修订记录)
+
+- [1 UMDK综述](#1-umdk综述)
+
+- [2 URMA简介](#2-urma简介)
+    - [2.1 基础概念](#21-基础概念)
+        - [2.1.1 UB](#211-ub)
+        - [2.1.2 UBVA地址模型](#212-ubva地址模型)
+        - [2.1.3 Segment](#213-segment)
+        - [2.1.4 Jetty](#214-jetty)
+        - [2.1.5 UBoE](#215-uboe)
+
+- [3 编译安装](#3-编译安装)
+    - [3.1 RPM包编译](#31-rpm包编译)
+    - [3.2 URMA RPM安装](#32-urma-rpm安装)
+
+- [4 Quick Start](#4-quick-start)
+
+- [5 URMA架构](#5-urma架构)
+    - [5.1 管理面](#51-管理面)
+        - [5.1.1 分布式管控](#511-分布式管控)
+            - [5.1.1.1 可靠建链协议](#5111-可靠建链协议)
+            - [5.1.1.2 共享传输层](#5112-共享传输层)
+            - [5.1.1.3 前后端分离建链](#5113-前后端分离建链)
+            - [5.1.1.4 建链状态机管理](#5114-建链状态机管理)
+        - [5.1.2 集中式管控](#512-集中式管控)
+            - [5.1.2.1 端侧-管理面建链](#5121-端侧-管理面建链)
+            - [5.1.2.2 感知传输层的建链](#5122-感知传输层的建链)
+            - [5.1.2.3 不感知传输层的建链](#5123-不感知传输层的建链)
+    - [5.2 控制面](#52-控制面)
+        - [5.2.1 上下文管理](#521-上下文管理)
+        - [5.2.2 Jetty管理](#522-jetty管理)
+        - [5.2.3 Segment管理](#523-segment管理)
+        - [5.2.4 异常事件](#524-异常事件)
+            - [5.2.4.1 flush jetty](#5241-flush-jetty)
+        - [5.2.5 设备属性](#525-设备属性)
+        - [5.2.6 token安全传输](#526-token安全传输)
+    - [5.3 数据面](#53-数据面)
+        - [5.3.1 单边操作](#531-单边操作)
+        - [5.3.2 双边操作](#532-双边操作)
+        - [5.3.3 完成记录](#533-完成记录)
+
+- [6 关键特性介绍](#6-关键特性介绍)
+    - [6.1 特性树](#61-特性树)
+    - [6.2 设备聚合](#62-设备聚合)
+        - [6.2.1 聚合设备基本概念](#621-聚合设备基本概念)
+        - [6.2.2 聚合设备基本使用流程](#622-聚合设备基本使用流程)
+        - [6.2.3 聚合设备特性列表和约束](#623-聚合设备特性列表和约束)
+    - [6.3 虚拟化](#63-虚拟化)
+        - [6.3.1 容器](#631-容器)
+        - [6.3.2 虚拟机](#632-虚拟机)
+    - [6.4 工具手册](#64-工具手册)
+        - [6.4.1 urma_perftest](#641-urma_perftest)
+        - [6.4.2 urma_admin](#642-urma_admin)
+    - [6.5 DFX维测](#65-dfx维测)
+        - [6.5.1 URMA日志](#651-urma日志)
+
+- [7 生态兼容](#7-生态兼容)
+    - [7.1 RoUB](#71-roub)
+    - [7.2 IPoURMA](#72-ipourma)
+    - [7.3 UMS](#73-ums)
+
+- [8 性能规格](#8-性能规格)
+
+- [9 网络安全](#9-网络安全)
+    - [9.1 UB访问控制](#91-ub访问控制)
+        - [9.1.1 应用场景](#911-应用场景)
+        - [9.1.2 功能原理](#912-功能原理)
+        - [9.1.3 权限分配流程](#913-权限分配流程)
+        - [9.1.4 权限无效化流程](#914-权限无效化流程)
+    - [9.2 内存访问控制](#92-内存访问控制)
+
+# 1 UMDK综述
 
 1.  
 
@@ -143,7 +96,8 @@
 
 4.  USOCK（Unified Socket）：灵衢通信生态构建，兼容标准Socket编程接口，使能TCP应用零修改提升网络通信性能。
 
-# URMA简介
+---
+# 2 URMA简介
 
 URMA（Unified Remote Memory Access，统一远程内存访问）是UMDK的核心基础通信库，其设计理念是通过统一的内存访问语义，实现高效、灵活的分布式内存操作。URMA为上层应用提供了统一的编程接口，支持单边操作、双边消息、原子操作等多种访问远端内存的方式，屏蔽了底层不同硬件的驱动差异。
 
@@ -163,23 +117,21 @@ URMA及其周边组件架构如下图所示：
 
 - liburma.so（USER API）：用户态应用接口层，向上为用户程序提供接口，向下支持用户态驱动注册。
 
-[3.1 基础概念](#基础概念)
+## 2.1 基础概念
 
-## 基础概念
-
-### UB
+### 2.1.1 UB
 
 Unified Bus，灵衢统一总线，包含终端、交换机和软件。
 
-### UBVA地址模型
+### 2.1.2 UBVA地址模型
 
 UBVA，Unified Bus Virtual Address，是UBUS总线上的分级的虚拟地址，支持对总线的多个节点共享内存进行统一编址，打破了各个节点地址边界，允许应用通过VA进行跨节点寻址和数据访问。由EID和VA地址两个部分组成。
 
-### Segment
+### 2.1.3 Segment
 
 Segment是一段连续的VA地址空间，同时分配物理内存来对应到一个segment。由segment home节点创建。User侧的APP把segment映射到进程虚拟地址空间，通过被映射地址直接访问远端内存。segment的VA地址和user进程映射的VA可以相同，也可以不同。VA地址相同的场景，即DSVA场景。
 
-### Jetty
+### 2.1.4 Jetty
 
 Jetty 是事务层的统一操作接口，可视为事务执行的"港口"，用于管理提交的IO任务或接收的消息的队列。Jetty 主要分为以下几类：
 
@@ -191,7 +143,7 @@ Jetty 是事务层的统一操作接口，可视为事务执行的"港口"，用
 
 4.  Jetty：具有JFS、JFR两者的功能，同时支持提交发送和接收任务。
 
-### UBoE
+### 2.1.5 UBoE
 
 UB over Ethernet, UBoE是指UB事务层和传输层语义承载在Ethernet/IP上的报文格式。如下图所示，ETH头之后可选的，可以使用OPtag携带增强的负载均衡、拥塞控制和网络隔离特性字段。Optag格式定义在ETH网链路层协议族维护，此处仅为参考。
 
@@ -199,9 +151,10 @@ UB over Ethernet, UBoE是指UB事务层和传输层语义承载在Ethernet/IP上
 
 ![](figures/urma-intro-03.png)
 
-# 编译安装
+---
+# 3 编译安装
 
-## RPM包编译
+## 3.1 RPM包编译
 
 **方法一：独立编译URMA RPM包**
 
@@ -237,7 +190,7 @@ cmake .. -D BUILD_ALL=disable -D BUILD_URMA=enable
 make install -j
 ```
 
-## URMA RPM安装
+## 3.2 URMA RPM安装
 
 说明：URMA需要调用URMA组件的能力，需要提前安装好URMA软件。
 
@@ -245,7 +198,8 @@ make install -j
 rpm -ivh /root/rpmbuild/RPMS/aarch64/umdk-urma-*.rpm
 ```
 
-# Quick start
+---
+# 4 Quick start
 
 本章介绍了URMA通信的基本流程。为使读者在深入细节前建立整体认识，本章以客户端-服务器模型为例，展示URMA通信的四个核心阶段：资源准备、连接建立、数据传输和资源释放。
 
@@ -279,19 +233,14 @@ URMA通信流程可分为四个主要阶段：
 
 URMA用户态编程示例
 
-# URMA架构
+---
+# 5 URMA架构
 
 URMA架构主要包括：管理面、控制面和数据面三部分。
 
 URMA的控制面和数据面类比于RDMA，是基于UB事务层概念的功能平面，其中控制面（Control Plane）用于管理UB的jetty、segment等事务层对象，数据面（Data Plane）负责基于UB事务层的数据面传输，是URMA高性能的核心。管理面（Management Plane）是管理事务层与传输层对应管理和传输层管理的平面，具备灵活的部署形态，是管理URMA建链的核心平面。
 
-[5.1 管理面](#管理面)
-
-[5.2 控制面](#控制面)
-
-[5.3 数据面](#数据面)
-
-## 管理面
+## 5.1 管理面
 
 URMA管理面是基于UB事务层Jetty事务对象，提供传输层连接管理服务的软件模块。管理面在UB协议栈的层级关系如下所示：
 
@@ -313,7 +262,7 @@ URMA协议栈根据底层硬件差异分别支持分布式管控和集中式管�
 
 集中式管控
 
-### 分布式管控
+### 5.1.1 分布式管控
 
 URMA协议的事务层主要通过URMA API呈现，传输层通常不对外暴露，用户在建链过程中会创建或复用传输层，因此需要有一个控制平面负责维护传输层的创建、状态机等生命周期的维护，因此需要创建了管控面的概念。
 
@@ -321,7 +270,7 @@ URMA协议的事务层主要通过URMA API呈现，传输层通常不对外暴�
 
 分布式管控的核心在于基于事务层与传输层分离的软件架构进行建链管理。
 
-#### 可靠建链协议
+#### 5.1.1.1 可靠建链协议
 
 URMA管控面负责针对可靠连接模式提供建链管理手段，此协议行为称为可靠建链协议。
 
@@ -335,7 +284,7 @@ URMA管控面负责针对可靠连接模式提供建链管理手段，此协议�
 
 ![](figures/urma-arch-mgmt-dist-01.png)
 
-#### 共享传输层
+#### 5.1.1.2 共享传输层
 
 两端同时发起建链的场景，为了节省传输层资源，创建共享传输层协议。
 
@@ -373,11 +322,11 @@ URMA管控面负责针对可靠连接模式提供建链管理手段，此协议�
 
 （2）目的端节点连接管理模块收到拆链通知，通知协议框架、协议驱动进入拆链流程，本节点自动切换到发起端建链状态；在本节点发起拆链操作时，本节点从发起端建链状态切换到REST状态，销毁本地传输层资源；同时目的端节点的连接管理模块向发起端节点的连接管理模块发送拆链通知，如下图 DCONN_NOTIFY所示；
 
-（3）发起端节点连接管理模块收到断链通知，通知协议框架、协议驱动进入拆链流程，本节点在流程（1）切换到目的端建链状态，此后切换到拆链完成状态，销毁本地传输层资源，拆链流程结束。
+（3）发起端节点连接管理模块收到拆链通知，通知协议框架、协议驱动进入拆链流程，本节点在流程（1）切换到目的端建链状态，此后切换到拆链完成状态，销毁本地传输层资源，拆链流程结束。
 
 ![](figures/urma-arch-mgmt-dist-05.png)
 
-#### 前后端分离建链
+#### 5.1.1.3 前后端分离建链
 
 为了保证安全隔离，URMA协议栈设置了前后端分离的部署方式，前端负责对接用户管理事务层资源，后端管控面负责传输层生命周期的维护。
 
@@ -403,7 +352,7 @@ URMA管控面负责针对可靠连接模式提供建链管理手段，此协议�
 
 ![](figures/urma-arch-mgmt-dist-07.png)
 
-#### 建链状态机管理
+#### 5.1.1.4 建链状态机管理
 
 下图为建链状态机管理的示例，建链状态机管理流程如下：
 
@@ -467,15 +416,15 @@ URMA管控面负责针对可靠连接模式提供建链管理手段，此协议�
 
 ![](figures/urma-arch-mgmt-dist-08.png)
 
-### 集中式管控
+### 5.1.2 集中式管控
 
 集中式管控是指管理面与事务层和传输层的协议软件采用分离的方式部署，其中管理面部署在管控节点，协议软件部署在端侧节点，这种形态称为带外部署。在集中式管控形态中，也具有与带外形态不同的部署方式，即类似于分布式管控，管理面与协议软件均部署在端侧节点，无额外的管控节点，这种形态称为带内部署。当前KunPeng CPU、NPU等硬件形态支持集中式管控。
 
-#### 端侧-管理面建链
+#### 5.1.2.1 端侧-管理面建链
 
 集中式管控的主要流程是端侧用户通过URMA协议栈向管理面申请分配传输层资源，完成传输层信息交换之后，端侧触发传输层的状态切换，切换为激活态，则UB协议栈具备通信能力；拆链流程中，端侧触发传输层的状态切换，切换为去激活态，则连接断开，不具备通信能力。
 
-#### 感知传输层的建链
+#### 5.1.2.2 感知传输层的建链
 
 基于建链元语，用户可选择使用感知传输层的建链。建链流程大致如下：
 
@@ -491,48 +440,48 @@ URMA管控面负责针对可靠连接模式提供建链管理手段，此协议�
 
 相关的URMA API（用户态为例）
 
-/\*\*\
-\* get available tp list from control plane.\
-\* \@param\[in\] \[Required\] ctx: the created urma context pointer;\
-\* \@param\[in\] \[Required\] tp_cfg: tp configuration to get;\
-\* \@param\[in && out\] \[Required\] tp_cnt: tp_cnt is the length of tp_list buffer as in parameter;\
-\* tp_cnt is the number of tp as out parameter;\
-\* \@param\[out\] \[Required\] tp_list: tp list to get, the buffer is allocated by user;\
-\* Return: 0 on success, other value on error\
-\*/\
-urma_status_t urma_get_tp_list(urma_context_t \*ctx, urma_get_tp_cfg_t \*cfg, uint32_t \*tp_cnt,\
-urma_tp_info_t \*tp_list);
-
-/\*\*\
-\* Import a remote jetty by control plane.\
-\* Note: trans_mode from rjetty should be the same as the trans_mode of get_tp_list,\
-\* users should obey this rule in case of unexpected errors.\
-\* \@param\[in\] \[Required\] ctx: the urma context created before;\
-\* \@param\[in\] \[Required\] rjetty: information of remote jetty to import, including jetty id and trans_mode,\
-\* trans_mode same to create_jetty trans_mode;\
-\* \@param\[in\] \[Required\] token_value: token to put into output jetty protection table;\
-\* \@param\[in\] \[Required\] cfg: tp active configuration to exchange with target;\
-\* Return: the address of target jetty, not NULL on success, NULL on error\
-\*/\
-urma_target_jetty_t \*urma_import_jetty_ex(urma_context_t \*ctx, urma_rjetty_t \*rjetty,\
-urma_token_t \*token_value, urma_import_jetty_ex_cfg_t \*cfg);
-
-/\*\*\
-\* Bind jetty: construct the transport channel between local jetty and remote jetty by control plane.\
-\* Note: trans_mode from tjetty should be the same as the trans_mode of get_tp_list,\
-\* users should obey this rule in case of unexpected errors.\
-\* \@param\[in\] \[Required\] jetty: local jetty to construct the transport channel;\
-\* \@param\[in\] \[Required\] tjetty: target jetty imported before;\
-\* Return: 0 on success, URMA_EEXIST if the jetty has been binded, other value on error;\
-\* \@param\[in\] \[Required\] cfg: tp active configuration to exchange with target;\
-\* Note: A local jetty can be binded with only one remote jetty. Only supported by jetty under URMA_TM_RC.\
-\*/\
-urma_status_t urma_bind_jetty_ex(urma_jetty_t \*jetty, urma_target_jetty_t \*tjetty,\
-urma_bind_jetty_ex_cfg_t \*cfg);
+```c
+/**
+* get available tp list from control plane.
+* @param[in] [Required] ctx: the created urma context pointer;
+* @param[in] [Required] tp_cfg: tp configuration to get;
+* @param[in && out] [Required] tp_cnt: tp_cnt is the length of tp_list buffer as in parameter;
+* tp_cnt is the number of tp as out parameter;
+* @param[out] [Required] tp_list: tp list to get, the buffer is allocated by user;
+* Return: 0 on success, other value on error
+*/
+urma_status_t urma_get_tp_list(urma_context_t *ctx, urma_get_tp_cfg_t *cfg, uint32_t *tp_cnt,
+urma_tp_info_t *tp_list);
+/**
+* Import a remote jetty by control plane.
+* Note: trans_mode from rjetty should be the same as the trans_mode of get_tp_list,
+* users should obey this rule in case of unexpected errors.
+* @param[in] [Required] ctx: the urma context created before;
+* @param[in] [Required] rjetty: information of remote jetty to import, including jetty id and trans_mode,
+* trans_mode same to create_jetty trans_mode;
+* @param[in] [Required] token_value: token to put into output jetty protection table;
+* @param[in] [Required] cfg: tp active configuration to exchange with target;
+* Return: the address of target jetty, not NULL on success, NULL on error
+*/
+urma_target_jetty_t *urma_import_jetty_ex(urma_context_t *ctx, urma_rjetty_t *rjetty,
+urma_token_t *token_value, urma_import_jetty_ex_cfg_t *cfg);
+/**
+* Bind jetty: construct the transport channel between local jetty and remote jetty by control plane.
+* Note: trans_mode from tjetty should be the same as the trans_mode of get_tp_list,
+* users should obey this rule in case of unexpected errors.
+* @param[in] [Required] jetty: local jetty to construct the transport channel;
+* @param[in] [Required] tjetty: target jetty imported before;
+* Return: 0 on success, URMA_EEXIST if the jetty has been binded, other value on error;
+* @param[in] [Required] cfg: tp active configuration to exchange with target;
+* Note: A local jetty can be binded with only one remote jetty. Only supported by jetty under URMA_TM_RC.
+*/
+urma_status_t urma_bind_jetty_ex(urma_jetty_t *jetty, urma_target_jetty_t *tjetty,
+urma_bind_jetty_ex_cfg_t *cfg);
+```
 
 用户关注基于感知传输层的urma API使用流程。
 
-#### 不感知传输层的建链
+#### 5.1.2.3 不感知传输层的建链
 
 在集中式管控建链方案中，URMA还提供了不感知传输层的建链方案，即用户无需进行传输层相关的API操作，创建事务层jetty等资源后，通过不感知传输层API触发建链流程，URMA内部适配层基于感知传输层的流程封装，具体流程如下：
 
@@ -540,31 +489,32 @@ urma_bind_jetty_ex_cfg_t \*cfg);
 
 相关的URMA API
 
-/\*\*\
-\* Import a remote jetty.\
-\* \@param\[in\] \[Required\] ctx: the urma context created before;\
-\* \@param\[in\] \[Required\] rjetty: information of remote jetty to import, including jetty id and trans_mode,\
-\* trans_mode same to create_jetty trans_mode;\
-\* \@param\[in\] \[Required\] token_value: token to put into output jetty protection table;\
-\* Return: the address of target jetty, not NULL on success, NULL on error\
-\*/\
-urma_target_jetty_t \*urma_import_jetty(urma_context_t \*ctx, urma_rjetty_t \*rjetty,\
-urma_token_t \*token_value);
-
-/\*\*\
-\* Bind jetty: construct the transport channel between local jetty and remote jetty.\
-\* \@param\[in\] \[Required\] jetty: local jetty to construct the transport channel;\
-\* \@param\[in\] \[Required\] tjetty: target jetty imported before;\
-\* Return: 0 on success, URMA_EEXIST if the jetty has been binded, other value on error\
-\* Note: A local jetty can be binded with only one remote jetty. Only supported by jetty under URMA_TM_RC.\
-\*/\
-urma_status_t urma_bind_jetty(urma_jetty_t \*jetty, urma_target_jetty_t \*tjetty);
+```c
+/**
+* Import a remote jetty.
+* @param[in] [Required] ctx: the urma context created before;
+* @param[in] [Required] rjetty: information of remote jetty to import, including jetty id and trans_mode,
+* trans_mode same to create_jetty trans_mode;
+* @param[in] [Required] token_value: token to put into output jetty protection table;
+* Return: the address of target jetty, not NULL on success, NULL on error
+*/
+urma_target_jetty_t *urma_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjetty,
+urma_token_t *token_value);
+/**
+* Bind jetty: construct the transport channel between local jetty and remote jetty.
+* @param[in] [Required] jetty: local jetty to construct the transport channel;
+* @param[in] [Required] tjetty: target jetty imported before;
+* Return: 0 on success, URMA_EEXIST if the jetty has been binded, other value on error
+* Note: A local jetty can be binded with only one remote jetty. Only supported by jetty under URMA_TM_RC.
+*/
+urma_status_t urma_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty);
+```
 
 用户关注基于不感知传输层的URMA API使用流程。
 
-## 控制面
+## 5.2 控制面
 
-### 上下文管理
+### 5.2.1 上下文管理
 
 1.  概述
 
@@ -588,21 +538,23 @@ URMA的上下文管理需要在应用运行初期执行，后续的Jetty、Segme
 
 ![](figures/urma-arch-ctrl-ctx-01.png)
 
-typedef struct urma_context {\
-struct urma_device \*dev; /\* \[Private\] point to the corresponding urma device. \*/\
-struct urma_ops \*ops; /\* \[Private\] operation of urma device. \*/\
-int dev_fd; /\* \[Private\] fd of urma device\'s sysfs file. \*/\
-int async_fd; /\* \[Private\] fd of urma device\'s async event file. \*/\
-pthread_mutex_t mutex; /\* \[Private\] mutex of urma context. \*/\
-urma_eid_t eid; /\* \[Public\] eid of urma device. \*/\
-uint32_t eid_index;\
-uint32_t uasid; /\* \[Public\] uasid of current process. \*/\
-struct urma_ref ref; /\* \[Private\] reference count of urma context. \*/\
+```c
+typedef struct urma_context {
+    struct urma_device *dev; /* [Private] point to the corresponding urma device. */
+    struct urma_ops *ops; /* [Private] operation of urma device. */
+    int dev_fd; /* [Private] fd of urma device's sysfs file. */
+    int async_fd; /* [Private] fd of urma device's async event file. */
+    pthread_mutex_t mutex; /* [Private] mutex of urma context. */
+    urma_eid_t eid; /* [Public] eid of urma device. */
+    uint32_t eid_index;
+    uint32_t uasid; /* [Public] uasid of current process. */
+    struct urma_ref ref; /* [Private] reference count of urma context. */
 } urma_context_t;
+```
 
-1.  struct urma_device \*dev: 这是一个指向 urma_device 结构体的指针，它包含了与特定 URMA 设备相关的信息，如设备的属性、操作函数等。
+1.  struct urma_device *dev: 这是一个指向 urma_device 结构体的指针，它包含了与特定 URMA 设备相关的信息，如设备的属性、操作函数等。
 
-2.  struct urma_ops \*ops: 这也是一个指针，指向 urma_ops 结构体，它定义了与 URMA 设备交互的操作集合，如打开、关闭、读写等。
+2.  struct urma_ops *ops: 这也是一个指针，指向 urma_ops 结构体，它定义了与 URMA 设备交互的操作集合，如打开、关闭、读写等。
 
 3.  int dev_fd: 这是一个整型变量，表示到 URMA 设备 sysfs 文件的文件描述符。sysfs 是 Linux 内核提供的一种接口，允许用户空间程序通过文件系统接口访问内核数据结构，如设备的状态信息。
 
@@ -618,7 +570,7 @@ struct urma_ref ref; /\* \[Private\] reference count of urma context. \*/\
 
 9.  struct urma_ref ref: 这是一个 urma_ref 结构体的实例，用于跟踪 urma_context_t 的引用计数。
 
-### Jetty管理
+### 5.2.2 Jetty管理
 
 1.  概述
 
@@ -656,7 +608,7 @@ URMA执行资源管理通过Jetty进行管理。Jetty为URMA软件操作对象�
 
 ![](figures/urma-arch-ctrl-jetty-03.png)
 
-### Segment管理
+### 5.2.3 Segment管理
 
 1.  概述
 
@@ -702,21 +654,22 @@ urma语义的内存管理
 
 \(4\) 释放远端内存：unimport_segment注销segment。
 
-typedef struct urma_seg {\
-urma_ubva_t ubva; /\* \[Public\] ubva of segment. \*/\
-uint64_t len; /\* \[Public\] length of segment. \*/\
-urma_seg_attr_t attr; /\* \[Public\] include: access flag, token policy, cacheability. \*/\
-uint32_t token_id; /\* \[Private\] match token \*/\
+```c
+typedef struct urma_seg {
+    urma_ubva_t ubva; /* [Public] ubva of segment. */
+    uint64_t len; /* [Public] length of segment. */
+    urma_seg_attr_t attr; /* [Public] include: access flag, token policy, cacheability. */
+    uint32_t token_id; /* [Private] match token */
 } urma_seg_t;
-
-typedef struct urma_target_seg {\
-urma_seg_t seg; /\* \[Private\] see urma_seg_t. \*/\
-uint64_t user_ctx; /\* \[Private\] private data of segment \*/\
-uint64_t mva; /\* \[Public\] mapping addr when import remote seg. \*/\
-urma_context_t \*urma_ctx; /\* \[Private\] point to urma context. \*/\
-urma_token_id_t \*token_id; /\* When registering seg, it is a valid address; when importing seg, it is NULL \*/\
-uint64_t handle;\
+typedef struct urma_target_seg {
+    urma_seg_t seg; /* [Private] see urma_seg_t. */
+    uint64_t user_ctx; /* [Private] private data of segment */
+    uint64_t mva; /* [Public] mapping addr when import remote seg. */
+    urma_context_t *urma_ctx; /* [Private] point to urma context. */
+    urma_token_id_t *token_id; /* When registering seg, it is a valid address; when importing seg, it is NULL */
+    uint64_t handle;
 } urma_target_seg_t;
+```
 
 register与import出的对象为urma_target_seg_t
 
@@ -766,7 +719,7 @@ register与import出的对象为urma_target_seg_t
 
 - 用户端的TP接收到TAACK后，将其封装成报文并发送给用户
 
-### 异常事件
+### 5.2.4 异常事件
 
 1.  概述
 
@@ -774,22 +727,25 @@ register与import出的对象为urma_target_seg_t
 
 应用获取发生的异常类型、具体的异常的对象：异常的上下文、端口、JFS、JFC、JFR等。异常事件处理是通过urma_get_async_event和urma_ack_async_event两个接口来实现的。这两个接口主要用于在用户态处理来自内核态的异步事件通知。
 
-![](figures/urma-arch-ctrl-event-01.png)
+![](figures/urma_info.png)
 
-/\* softub currently only report URMA_EVENT_JFC_ERR and URMA_EVENT_JETTY_ERR; other events are not handled in softub;\*/\
-URMA_EVENT_JFC_ERR,\
-URMA_EVENT_JFS_ERR,\
-URMA_EVENT_JFR_ERR,\
-URMA_EVENT_JFR_LIMIT, /\* Jfr Flow Record,over flow \*/\
-URMA_EVENT_JETTY_ERR,\
-URMA_EVENT_JETTY_LIMIT, /\* Jetty Flow Record,over flow \*/\
-URMA_EVENT_JETTY_GRP_ERR, /\* Jetty Asynchronous Error Event Reporting \*/\
-URMA_EVENT_PORT_ACTIVE, /\* The port status is currently active \*/\
-URMA_EVENT_PORT_DOWN, /\* The port status is currently down \*/\
-URMA_EVENT_DEV_FATAL,\
-URMA_EVENT_EID_CHANGE, /\* eid change, HNM and other management roles will be modified \*/\
-URMA_EVENT_ELR_ERR, /\* ELR Reset,Entity level error \*/\
-URMA_EVENT_ELR_DONE /\* Entity flush done \*/
+```c
+/* softub currently only report URMA_EVENT_JFC_ERR and URMA_EVENT_JETTY_ERR; other events are not handled in softub;*/
+URMA_EVENT_JFC_ERR,
+URMA_EVENT_JFS_ERR,
+URMA_EVENT_JFR_ERR,
+URMA_EVENT_JFR_LIMIT, /* Jfr Flow Record,over flow */
+URMA_EVENT_JETTY_ERR,
+URMA_EVENT_JETTY_LIMIT, /* Jetty Flow Record,over flow */
+URMA_EVENT_JETTY_GRP_ERR, /* Jetty Asynchronous Error Event Reporting */
+URMA_EVENT_PORT_ACTIVE, /* The port status is currently active */
+URMA_EVENT_PORT_DOWN, /* The port status is currently down */
+URMA_EVENT_DEV_FATAL,
+URMA_EVENT_EID_CHANGE, /* eid change, HNM and other management roles will be modified */
+URMA_EVENT_ELR_ERR, /* ELR Reset,Entity level error */
+```
+
+URMA_EVENT_ELR_DONE /* Entity flush done */
 
 2.  应用场景
 
@@ -809,19 +765,19 @@ urma异常场景
 
 1.  **urma_get_async_event:**
 
-\* 功能：这个接口用于从URMA的异步事件队列中获取事件。当内核检测到与URMA资源（如Jetty、JFC、JFS等）相关的异常或状态变化时，它会将这些事件记录到异步事件队列中。用户态的驱动程序通过调用urma_get_async_event来轮询这个队列，获取最新的异常事件。
+* 功能：这个接口用于从URMA的异步事件队列中获取事件。当内核检测到与URMA资源（如Jetty、JFC、JFS等）相关的异常或状态变化时，它会将这些事件记录到异步事件队列中。用户态的驱动程序通过调用urma_get_async_event来轮询这个队列，获取最新的异常事件。
 
-\* 参数：通常需要一个urma_context_t类型的上下文指针，这个指针是在urma_create_context时创建的，用于与内核进行通信。
+* 参数：通常需要一个urma_context_t类型的上下文指针，这个指针是在urma_create_context时创建的，用于与内核进行通信。
 
-\* 返回值：urma_get_async_event会返回urma_status_t告知用户函数的完成情况，调用成功返回0，其他值表示接口调用失败，参数中的event的指针指向获取的事件。
+* 返回值：urma_get_async_event会返回urma_status_t告知用户函数的完成情况，调用成功返回0，其他值表示接口调用失败，参数中的event的指针指向获取的事件。
 
 2.  **urma_ack_async_event:**
 
-\* 功能：urma_ack_async_event用于向内核确认已经处理了某个异常事件。当用户态驱动程序通过urma_get_async_event获取到一个事件后，处理完相关逻辑，通常需要调用urma_ack_async_event来告诉内核这个事件已经被处理，可以被清理或进一步处理
+* 功能：urma_ack_async_event用于向内核确认已经处理了某个异常事件。当用户态驱动程序通过urma_get_async_event获取到一个事件后，处理完相关逻辑，通常需要调用urma_ack_async_event来告诉内核这个事件已经被处理，可以被清理或进一步处理
 
-\* 参数：通常需要提供之前从urma_get_async_event获取的urma_async_event_t结构体，这样内核可以知道哪个事件已经被确认
+* 参数：通常需要提供之前从urma_get_async_event获取的urma_async_event_t结构体，这样内核可以知道哪个事件已经被确认
 
-#### flush jetty
+#### 5.2.4.1 flush jetty
 
 URMA支持对jetty队列里面的wr进行flush，具体使用分成以下4种场景：
 
@@ -863,7 +819,7 @@ URMA支持对jetty队列里面的wr进行flush，具体使用分成以下4种场
 
 （2）硬件主动将jetty置错，但是没有outstanding wr。
 
-### 设备属性
+### 5.2.5 设备属性
 
 UB设备属性包含大致分为三类：只读且不变的设备资源规格、可读可写的设备配置信息、只读且可变的设备端口状态。目前URMA框架通过sysfs文件系统统一呈现，路径如下，这些文件可以直接通过cat、echo等命令进行操作：
 
@@ -871,61 +827,40 @@ UB设备属性包含大致分为三类：只读且不变的设备资源规格、
 
 设备属性的详细情况如下：
 
-![](figures/urma-arch-ctrl-event-01.png)
+![](figures/urma_info.png)
 
 UB传输层的设备属性依赖于UB驱动的实现。
 
 1.  URMA设备属性
 
-  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-  属性                 可读   可写   可变   备注                                                                                                                 UB   IB   IP
-  -------------------- ------ ------ ------ -------------------------------------------------------------------------------------------------------------------- ---- ---- ----
-  eid                  √      √      √      设备eid                                                                                                              √    √    √
-
-  guid                 √      x      x      设备guid                                                                                                             √    x    x
-
-  feature              √      x      x      设备支持的feature，包含OOO(out_of_order)、jfc_per_wr、stride_op、load_store_op、non_pin、pmem（persistence_mem）等   √    √    √
-
-  max_jfc              √      x      x      设备支持创建jfc的最大个数                                                                                            √    √    √
-
-  max_jfs              √      x      x      设备支持创建jfs的最大个数                                                                                            √    √    √
-
-  max_jfr              √      x      x      设备支持创建jfr的最大个数                                                                                            √    √    √
-
-  max_jfc_depth        √      x      x      jfc支持配置队列深度的最大值                                                                                          √    √    √
-
-  max_jfs_depth        √      x      x      jfs支持配置队列深度的最大值                                                                                          √    √    √
-
-  max_jfr_depth        √      x      x      jfr支持配置队列深度的最大值                                                                                          √    √    √
-
-  max_jfs_inline_len   √      x      x      jfs支持消息inline的最大值，单位byte                                                                                  √    √    x
-
-  max_jfs_sge          √      x      x      jfs支持单个wr里面包含sge的最大个数                                                                                   √    √    √
-
-  max_jfr_sge          √      x      x      jfr支持单个wr里面包含sge的最大个数                                                                                   √    √    √
-
-  max_msg_size         √      x      x      设备支持传输消息的最大值，单位byte                                                                                   √    √    x
-
-  tp_mode              √      x      x      设备传输层模式，枚举值：SRM（shared reliable message）、RC（reliable connection）、UM（unreliable message）          √    √    √
-
-  port_count           √      x      x      设备拥有的port数                                                                                                     √    √    √
-
-  max_mtu              √      x      x      端口可配置的最大MTU值，枚举值：MTU_256, MTU_512, MTU_1024等                                                          √    √    √
-
-  state                √      x      √      端口状态，枚举值：PORT_DOWN, PORT_INIT, PORT_ARMED，PORT_ACTIVE，PORT_ACTIVE_DEFER                                   √    √    √
-
-  active_width         √      x      √      端口活跃的链路带宽，枚举值：WIDTH_X1，WIDTH_X2，WIDTH_X4                                                             √    √    x
-
-  active_speed         √      x      √      端口活跃的速率，枚举值：SP_10M， SP_100M，SP_1G，SP_10G，SP_25G，SP_40G，SP_100G等                                   √    √    x
-
-  active_mtu           √      x      √      网卡设备端口活跃的MTU值, 枚举值：MTU_256, MTU_512, MTU_1024等                                                        √    √    √
-  -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+| 属性 | 可读 | 可写 | 可变 | 备注 | UB | IB | IP |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| eid | √ | √ | √ | 设备eid | √ | √ | √ |
+| guid | √ | x | x | 设备guid | √ | x | x |
+| feature | √ | x | x | 设备支持的feature，包含OOO(out_of_order)、jfc_per_wr、stride_op、load_store_op、non_pin、pmem（persistence_mem）等 | √ | √ | √ |
+| max_jfc | √ | x | x | 设备支持创建jfc的最大个数 | √ | √ | √ |
+| max_jfs | √ | x | x | 设备支持创建jfs的最大个数 | √ | √ | √ |
+| max_jfr | √ | x | x | 设备支持创建jfr的最大个数 | √ | √ | √ |
+| max_jfc_depth | √ | x | x | jfc支持配置队列深度的最大值 | √ | √ | √ |
+| max_jfs_depth | √ | x | x | jfs支持配置队列深度的最大值 | √ | √ | √ |
+| max_jfr_depth | √ | x | x | jfr支持配置队列深度的最大值 | √ | √ | √ |
+| max_jfs_inline_len | √ | x | x | jfs支持消息inline的最大值，单位byte | √ | √ | x |
+| max_jfs_sge | √ | x | x | jfs支持单个wr里面包含sge的最大个数 | √ | √ | √ |
+| max_jfr_sge | √ | x | x | jfr支持单个wr里面包含sge的最大个数 | √ | √ | √ |
+| max_msg_size | √ | x | x | 设备支持传输消息的最大值，单位byte | √ | √ | x |
+| tp_mode | √ | x | x | 设备传输层模式，枚举值：SRM（shared reliable message）、RC（reliable connection）、UM（unreliable message） | √ | √ | √ |
+| port_count | √ | x | x | 设备拥有的port数 | √ | √ | √ |
+| max_mtu | √ | x | x | 端口可配置的最大MTU值，枚举值：MTU_256, MTU_512, MTU_1024等 | √ | √ | √ |
+| state | √ | x | √ | 端口状态，枚举值：PORT_DOWN, PORT_INIT, PORT_ARMED，PORT_ACTIVE，PORT_ACTIVE_DEFER | √ | √ | √ |
+| active_width | √ | x | √ | 端口活跃的链路带宽，枚举值：WIDTH_X1，WIDTH_X2，WIDTH_X4 | √ | √ | x |
+| active_speed | √ | x | √ | 端口活跃的速率，枚举值：SP_10M， SP_100M，SP_1G，SP_10G，SP_25G，SP_40G，SP_100G等 | √ | √ | x |
+| active_mtu | √ | x | √ | 网卡设备端口活跃的MTU值, 枚举值：MTU_256, MTU_512, MTU_1024等 | √ | √ | √ |
 
 URMA设备属性可以通过urma_admin工具查询和配置，具体使用方式见工具演示章节
 
-### token安全传输
+### 5.2.6 token安全传输
 
-## 数据面
+## 5.3 数据面
 
 **传输模式-RM、RC、UM**
 
@@ -1001,11 +936,11 @@ URMA设备属性可以通过urma_admin工具查询和配置，具体使用方式
 
 ![](figures/urma-arch-data-02.png)
 
-![](figures/urma-arch-ctrl-event-01.png)
+![](figures/urma_info.png)
 
 URMA over IP 发送报文最大支持1G，即1个WR里面所有sge长度相加之和最大不超过1G。
 
-### 单边操作
+### 5.3.1 单边操作
 
 1.  概述
 
@@ -1019,7 +954,7 @@ UMDK支持立即数的写操作，见urma_post_jfs_wr接口，所写的立即数
 
 单边操作的write操作中，需要设置urma_jfs_wr_flag中的fence标志开启是否保序，单边操作最大值可以在环境上通过cat /sys/class/ubcore/udma1/max_write_size查看
 
-![](figures/urma-arch-data-unilateral-01.png)
+![](figures/urma-arch-data-one-sided-01.png)
 
 2.  应用场景
 
@@ -1035,7 +970,7 @@ UMDK单边操作不需要对端的CPU参与，不同于双边操作send/recv一�
 
 （4）上述单边、双边和原子操作都是非阻塞的，操作返回成功仅表示命令已经添加到发送或者接受队列，并不意味着已经全部完成。UMDK支持以轮询或中断方式获知单边、双边或原子操作是否已经完成。完成记录（completion record）用来描述操作完成信息。操作完成后，硬件会将完成记录写到JFC完成队列中。当用户轮询JFC时，UMDK读取完成队列的完成记录返回给用户。单边、双边、原子等操作的完成记录将默认写入JFS或JFR所关联的JFC中。UB设备支持在JFS command（即WQE）中指定完成记录待写入的JFC id。
 
-![](figures/urma-arch-data-unilateral-02.png)
+![](figures/urma_caution.png)
 
 URMA的单边语义报文参考业界RDMA通用实现，存在与RDMA类似的安全风险，受限于数据中心信任网络内使用。
 
@@ -1053,9 +988,9 @@ UMDK单边读/写的过程为：
 
 - **urma_write**：这个函数允许应用程序向远程内存写入数据，同样不需要远程进程的响应。注意，URMA的单边写操作不支持notify远端，但支持携带IMM（Immediate）数据，这是一种可以附加到消息中的小块数据，用于传递额外的信息。
 
-- ![](figures/urma-arch-data-unilateral-03.png)
+- ![](figures/urma-arch-data-one-sided-03.png)
 
-### 双边操作
+### 5.3.2 双边操作
 
 1.  概述
 
@@ -1103,9 +1038,9 @@ UMDK支持向接收端发送立即数，见urma_post_jfs_wr接口，所发送的
 
 - **urma_recv**：接收方使用这个函数从远程内存接收数据。
 
-- **urma_send**：发送方使用这个函数向远程内存发送数据，支持携带IMM数据，并且可以设置为with invalid，这意味着即使目标地址无效，操作也会继续执行。![](figures/urma-arch-data-bilateral-01.png)
+- **urma_send**：发送方使用这个函数向远程内存发送数据，支持携带IMM数据，并且可以设置为with invalid，这意味着即使目标地址无效，操作也会继续执行。![](figures/urma-arch-data-two-sided-01.png)
 
-### 完成记录
+### 5.3.3 完成记录
 
 1.  概述
 
@@ -1179,606 +1114,313 @@ UMDK支持向接收端发送立即数，见urma_post_jfs_wr接口，所发送的
 
 4、Jetty/JFS 成功切换至 ERROR 状态
 
-# 关键特性介绍
+---
+# 6 关键特性介绍
 
+## 6.1 特性树
 
-[6.1 特性树](#特性树)
+#### 管理面接口
 
-[6.2 设备聚合](#设备聚合)
+| Feature L1 | Feature L2 | Feature L3 | Feature L4 | Feature L5 | Feature Description | KP950 | Ascend910D |
+|---|---|---|---|---|---|---|---|
+| 管理面接口 | URMA初始化 | init/uninit | 基本能力 | — | 初始化/反初始化URMA运行环境 | √ | √ |
+| 管理面接口 | URMA初始化 | init/uninit | token | — | 指定安全token | × | × |
+| 管理面接口 | URMA初始化 | init/uninit | uasid | — | 指定进程的uasid | × | × |
+| 管理面接口 | URMA设备及上下文管理 | get/free_device_list | — | — | 获取/释放设备列表 | √ | √ |
+| 管理面接口 | URMA设备及上下文管理 | get_device_by_name | — | — | 通过设备名称获取设备 | √ | √ |
+| 管理面接口 | URMA设备及上下文管理 | get_device_by_eid | — | — | 通过EID获取设备 | √ | √ |
+| 管理面接口 | URMA设备及上下文管理 | query_device | — | — | 查询设备属性 | √ | √ |
+| 管理面接口 | URMA设备及上下文管理 | create/delete_context | — | — | 创建/删除设备上下文 | √ | √ |
+| 管理面接口 | JFC基础能力管理 | create/delete_jfc | 基本能力 | — | 创建/删除JFC | √ | √ |
+| 管理面接口 | JFC基础能力管理 | create/delete_jfc | cfg.flag.jfc_inline | — | 支持inline配置 | √ | √ |
+| 管理面接口 | JFC基础能力管理 | delete_jfc_batch | — | — | 批量删除JFC | × | × |
+| 管理面接口 | JFC基础能力管理 | modify_jfc | moderate_count/moderate_period | — | 修改JFC中断抑制参数 | × | × |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | 基本能力 | — | 创建/删除JFS | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | lock_free | — | 免锁模式 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | error_suspend | — | 数据面异常置错 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | outorder_comp | — | 乱序上报完成事件 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | order_type | OT | target ordering 目的端保序 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | order_type | OI | initiator ordering 源端保序 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | order_type | OL | low layer ordering 通道保序 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | order_type | UNO | unreliable non ordering 无序 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | multi_path | — | 设备多路径能力 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | ctp_rc_mul_path_mode | — | RC模式CTP多路径能力 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | trans_mode | RM | 无连接可靠传输模式 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | trans_mode | RC | 连接可靠传输模式 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | trans_mode | UM | 无连接不可靠传输模式 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | priority | — | 配置优先级 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | max_inline_data | — | 配置inline大小 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | rnr_retry | — | 配置rnr重试次数 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | create/delete_jfs | err_timeout | — | 配置错误超时时间 | √ | √ |
+| 管理面接口 | JFS基础能力管理 | delete_jfs_batch | — | — | 批量删除JFS | √ | √ |
+| 管理面接口 | JFS基础能力管理 | modify_jfs | state | — | 修改JFS的状态机 | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | 基本能力 | — | 创建/删除JFR | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | 指定jfr_id | — | 指定JFR ID | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | token_policy | NONE | 不携带TokenValue | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | token_policy | PLAIN_TEXT | 传输TokenValue明文 | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | token_policy | SIGNED | 加密TokenValue，明文传输PLD | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | token_policy | ALL_ENCRYPTED | 加密TokenValue和PLD | × | × |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | lock_free | — | 免锁模式 | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | order_type | OT | target ordering 目的端保序 | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | order_type | OI | initiator ordering 源端保序 | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | order_type | OL | low layer ordering 通道保序 | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | order_type | UNO | unreliable non ordering 无序 | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | trans_mode | RM | 无连接可靠传输模式 | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | trans_mode | RC | 连接可靠传输模式 | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | trans_mode | UM | 无连接不可靠传输模式 | √ | √ |
+| 管理面接口 | JFR基础能力管理 | create/delete_jfr | min_rnr_timer | — | 配置rnr最小重试时间 | √ | √ |
+| 管理面接口 | JFR基础能力管理 | delete_jfr_batch | — | — | 批量删除JFR | √ | √ |
+| 管理面接口 | JFR基础能力管理 | modify_jfr | rx_threshold | — | 修改RX WQ的最低水位 | √ | √ |
+| 管理面接口 | JFR基础能力管理 | modify_jfr | state | — | 修改JFR的状态机 | √ | √ |
+| 管理面接口 | JFR基础能力管理 | import/unimport_jfr | — | — | 导入/反导入远端JFR | √ | √ |
+| 管理面接口 | JFR基础能力管理 | import_jfr_async | — | — | 异步导入源端JFR | √ | √ |
+| 管理面接口 | jetty基础能力管理 | create/delete_jetty | 基本能力 | — | 创建/删除Jetty | √ | √ |
+| 管理面接口 | jetty基础能力管理 | create/delete_jetty | jetty_cfg | — | 配置特性与JFS&JFR一致 | √ | √ |
+| 管理面接口 | jetty基础能力管理 | create/delete_jetty | jetty_id | — | 指定jetty id | √ | √ |
+| 管理面接口 | jetty基础能力管理 | create/delete_jetty | share_jfr | — | 配置共享JFR | √ | √ |
+| 管理面接口 | jetty基础能力管理 | create/delete_jetty | jetty_grp | — | 配置Jetty Group | × | × |
+| 管理面接口 | jetty基础能力管理 | delete_jetty_batch | — | — | 批量删除Jetty | √ | √ |
+| 管理面接口 | jetty基础能力管理 | modify_jetty | state | — | 修改Jetty状态 | √ | √ |
+| 管理面接口 | jetty基础能力管理 | modify_jetty | rx_threshold | — | 修改RX WQ的最低水位 | × | × |
+| 管理面接口 | jetty基础能力管理 | import/unimport_jetty | 基本能力 | — | 导入/反导入远端jetty | √ | √ |
+| 管理面接口 | jetty基础能力管理 | import/unimport_jetty | tp_type | RTP | 可靠传输模式 | √ | √ |
+| 管理面接口 | jetty基础能力管理 | import/unimport_jetty | tp_type | CTP | 轻量级传输模式 | √ | √ |
+| 管理面接口 | jetty基础能力管理 | import/unimport_jetty | tp_type | UTP | 不可靠传输模式 | √ | √ |
+| 管理面接口 | jetty基础能力管理 | bind/unbind_jetty | — | — | bind/unbind远端jetty | √ | √ |
+| 管理面接口 | jetty基础能力管理 | import_jetty_async | — | — | 异步导入远端Jetty | × | × |
+| 管理面接口 | jetty基础能力管理 | bind_jetty_async | — | — | 异步bind源端Jetty | × | × |
+| 管理面接口 | JFCE基础能力管理 | create/delete_jfce | — | — | 创建/删除JFCE | √ | √ |
+| 管理面接口 | 异步事件上报 | get_async_event | 查询jetty异常 | — | 查询jetty异步异常 | √ | √ |
+| 管理面接口 | 异步事件上报 | get_async_event | port异常 | — | 端口异步异常 | √ | √ |
+| 管理面接口 | 异步事件上报 | get_async_event | 设备异常 | — | 设备异步异常 | √ | √ |
+| 管理面接口 | 异步事件上报 | get_async_event | Entity异常 | — | Entity异步异常 | √ | √ |
+| 管理面接口 | 异步事件上报 | ack_async_event | — | — | 用户响应异步事件 | √ | √ |
+| 管理面接口 | segment管理 | register/unregister_seg | 基本功能 | — | 注册/反注册内存 | √ | √ |
+| 管理面接口 | segment管理 | register/unregister_seg | token_policy | — | 指定key验证策略 | √ | √ |
+| 管理面接口 | segment管理 | register/unregister_seg | cacheable | — | 是否使能缓存 | √ | √ |
+| 管理面接口 | segment管理 | register/unregister_seg | access | LOCAL_ONLY | 仅本地访问 | √ | √ |
+| 管理面接口 | segment管理 | register/unregister_seg | access | ACCESS_READ | 远程读访问 | √ | √ |
+| 管理面接口 | segment管理 | register/unregister_seg | access | ACCESS_WRITE | 远程写访问 | √ | √ |
+| 管理面接口 | segment管理 | register/unregister_seg | access | ACCESS_ATOMIC | 远程原子访问 | √ | √ |
+| 管理面接口 | segment管理 | register/unregister_seg | non_pin | — | 是否支持no_pin住内存 | × | × |
+| 管理面接口 | segment管理 | register/unregister_seg | user_iova | — | 是否使用iova | × | × |
+| 管理面接口 | segment管理 | register/unregister_seg | token_id_valid | — | 是否指定token_id | √ | √ |
+| 管理面接口 | segment管理 | import/unimport_seg | 基本功能 | — | 导入/导出远端内存 | √ | √ |
+| 管理面接口 | segment管理 | import/unimport_seg | cacheable | — | 是否使能缓存 | √ | √ |
+| 管理面接口 | segment管理 | import/unimport_seg | mapping | — | 是否映射到本地地址 | √ | √ |
+| 管理面接口 | JFC拓展能力管理 | alloc/free_jfc | — | — | 申请/释放JFC内存 | √ | √ |
+| 管理面接口 | JFC拓展能力管理 | active/deactive_jfc | — | — | 硬件使能/失效JFC | √ | √ |
+| 管理面接口 | JFC拓展能力管理 | set/get_jfc_opt | 基本能力 | — | 设置/获取JFC属性 | √ | √ |
+| 管理面接口 | JFC拓展能力管理 | set/get_jfc_opt | 基本属性 | — | 创建JFC的基本属性 | √ | √ |
+| 管理面接口 | JFC拓展能力管理 | set/get_jfc_opt | CQE_BASE_ADDR | — | CQE的地址 | √ | √ |
+| 管理面接口 | JFC拓展能力管理 | set/get_jfc_opt | JFC_ID | — | JFC的ID | √ | √ |
+| 管理面接口 | JFC拓展能力管理 | set/get_jfc_opt | JFC_DB_ADDR | — | CQ队列Doorbell地址 | √ | √ |
+| 管理面接口 | JFC拓展能力管理 | set/get_jfc_opt | JFC_DB_STATUS | — | JFC Doorbell的状态 | × | × |
+| 管理面接口 | JFC拓展能力管理 | set/get_jfc_opt | JFC_PI | — | JFC任务队列的PI值 | √ | √ |
+| 管理面接口 | JFC拓展能力管理 | set/get_jfc_opt | JFC_PI_TYPE | — | JFC队列PI类型 | √ | √ |
+| 管理面接口 | JFC拓展能力管理 | set/get_jfc_opt | JFC_CI | — | JFC任务队列的CI值 | √ | √ |
+| 管理面接口 | JFS拓展能力管理 | alloc/free_jfs | — | — | 申请/释放JFS内存 | √ | √ |
+| 管理面接口 | JFS拓展能力管理 | active/deactive_jfs | — | — | 硬件使能/失效JFS | √ | √ |
+| 管理面接口 | JFS拓展能力管理 | set/get_jfs_opt | 基本能力 | — | 设置/获取JFS属性 | √ | √ |
+| 管理面接口 | JFR拓展能力管理 | alloc/free_jfr | — | — | 申请/释放JFR内存 | √ | √ |
+| 管理面接口 | JFR拓展能力管理 | active/deactive_jfr | — | — | 硬件使能/失效JFR | √ | √ |
+| 管理面接口 | JFR拓展能力管理 | set/get_jfr_opt | 基本能力 | — | 设置/获取JFR属性 | √ | √ |
+| 管理面接口 | Jetty拓展能力管理 | alloc/free_jetty | — | — | 申请/释放JETTY内存 | √ | √ |
+| 管理面接口 | Jetty拓展能力管理 | active/deactive_jetty | — | — | 硬件使能/失效JETTY | √ | √ |
+| 管理面接口 | Jetty拓展能力管理 | set/get_jetty_opt | 基本能力 | — | 设置/获取JETTY属性 | √ | √ |
+| 管理面接口 | 感知TP建链 | get_tp_list | — | — | 静态查询可用TP | √ | √ |
+| 管理面接口 | 感知TP建链 | get/set_tp_attr | — | — | 获取/设置TP属性 | √ | √ |
+| 管理面接口 | 感知TP建链 | import_jetty_ex | — | — | 指定TP建链 | √ | √ |
+| 管理面接口 | 设备聚合管理 | 基础能力 | — | — | 使用聚合设备创建上下文 | √ | √ |
+| 管理面接口 | 设备聚合管理 | 配置拓扑信息 | — | — | 配置设备聚合拓扑信息 | √ | √ |
+| 管理面接口 | IP over URMA | 基础能力 | — | — | 呈现TCP/IP协议栈设备，对接URMA | √ | √ |
+| 管理面接口 | Verbs over URMA | 基础能力 | — | — | 呈现RDMA协议栈设备，对接URMA | √ | √ |
 
-[6.3 虚拟化](#虚拟化)
+#### 数据面接口
 
-[6.4 工具手册](#工具手册)
+| Feature L1 | Feature L2 | Feature L3 | Feature L4 | Feature L5 | Feature Description | KP950 | Ascend910D |
+|---|---|---|---|---|---|---|---|
+| 数据面接口 | post操作 | post_jfs_wr | — | — | 提交JFS工作请求 | √ | √ |
+| 数据面接口 | post操作 | post_jfr_wr | — | — | 提交JFR工作请求 | √ | √ |
+| 数据面接口 | post操作 | post_jetty_send_wr | — | — | 提交Jetty发送工作请求 | √ | √ |
+| 数据面接口 | post操作 | post_jetty_recv_wr | — | — | 提交Jetty接收工作请求 | √ | √ |
+| 数据面接口 | 发送配置 | 执行序 | none | — | 无序 | √ | √ |
+| 数据面接口 | 发送配置 | 执行序 | RO | — | 弱保序 | √ | √ |
+| 数据面接口 | 发送配置 | 执行序 | SO | — | 强保序 | √ | √ |
+| 数据面接口 | 发送配置 | 完成序 | — | — | 是否保序 | √ | √ |
+| 数据面接口 | 发送配置 | fence操作 | — | — | Fence操作 | √ | √ |
+| 数据面接口 | 发送配置 | solicited使能 | — | — | Solicited使能 | √ | √ |
+| 数据面接口 | 发送配置 | 配置完成事件产生 | — | — | 配置完成事件产生 | √ | √ |
+| 数据面接口 | 发送配置 | 配置是否inline | — | — | 配置是否inline | √ | √ |
+| 数据面接口 | 发送配置 | 支持免import seg | — | — | 支持免import seg | todo | todo |
+| 数据面接口 | 内存连续 | sgl配置 | 远端send/recv支持不连续，本端read/write/send/recv支持不连续 | — | SGL支持 | √ | √ |
+| 数据面接口 | 内存连续 | wr_list配置 | — | — | WR列表配置 | √ | √ |
+| 数据面接口 | 单边操作 | read | 仅支持1个src sge | — | Read操作 | √ | √ |
+| 数据面接口 | 单边操作 | write | 仅支持1个dst sge | — | Write操作 | √ | √ |
+| 数据面接口 | 单边操作 | write | 支持notify远端 | — | 支持notify远端 | √ | √ |
+| 数据面接口 | 单边操作 | write | 支持携带IMM数据 | — | 支持携带IMM数据 | √ | √ |
+| 数据面接口 | 单边操作 | write | 支持write_with_atomic_add | — | Write with atomic add | √ | √ |
+| 数据面接口 | 双边操作 | send | — | — | Send操作 | √ | √ |
+| 数据面接口 | 双边操作 | send | 支持携带IMM数据 | — | 支持携带IMM数据 | √ | √ |
+| 数据面接口 | 双边操作 | send | with invalid | — | Send with invalid | √ | √ |
+| 数据面接口 | 双边操作 | recv | — | — | Receive操作 | √ | √ |
+| 数据面接口 | 原子操作 | cas | — | — | Compare and swap | × | × |
+| 数据面接口 | 原子操作 | cas | 支持mask | — | CAS with mask | × | × |
+| 数据面接口 | 原子操作 | faa | — | — | Fetch and add | × | × |
+| 数据面接口 | 原子操作 | faa | 支持mask | — | FAA with mask | × | × |
+| 数据面接口 | 完成操作 | poll_jfc | 支持产生多个CR | — | Poll JFC获取完成记录 | √ | √ |
+| 数据面接口 | 完成操作 | poll_jfc | CR解析 | status | 携带完成状态 | √ | √ |
+| 数据面接口 | 完成操作 | poll_jfc | CR解析 | flag.s_r | 携带是接收还是发送完成 | √ | √ |
+| 数据面接口 | 完成操作 | poll_jfc | CR解析 | opcode | 接收端CR携带发送端操作类型 | √ | √ |
+| 数据面接口 | 完成操作 | poll_jfc | CR解析 | user_ctx | 携带user_ctx私有数据 | √ | √ |
+| 数据面接口 | 完成操作 | poll_jfc | CR解析 | completion_len | 携带完成长度 | √ | √ |
+| 数据面接口 | 完成操作 | poll_jfc | CR解析 | local_id | 携带本端jetty_id | √ | √ |
+| 数据面接口 | 完成操作 | poll_jfc | CR解析 | remote_id | 接收端携带远端jetty信息 | √ | √ |
+| 数据面接口 | 完成操作 | poll_jfc | CR解析 | imm_data | 携带IMM数据 | √ | √ |
+| 数据面接口 | 完成操作 | rearm_jfc | — | — | Rearm JFC | √ | √ |
+| 数据面接口 | 完成操作 | rearm_jfc | solicited_only | — | 仅对solicited报文产生事件 | √ | √ |
+| 数据面接口 | 完成操作 | wait_jfc | — | — | 等待JFCE的多个JFC产生事件 | √ | √ |
+| 数据面接口 | 完成操作 | ack_jfc | — | — | 确认事件处理完毕 | √ | √ |
 
-[6.5 DFX维测](#dfx维测)
+#### DFX接口
 
-## 特性树
+| Feature L1 | Feature L2 | Feature L3 | Feature L4 | Feature L5 | Feature Description | KP950 | Ascend910D |
+|---|---|---|---|---|---|---|---|
+| DFX接口 | urma_admin配置 | eid | — | — | 配置EID | × | × |
+| DFX接口 | urma_admin配置 | upi | PF配置 | — | PF UPI配置 | × | × |
+| DFX接口 | urma_admin配置 | upi | VF配置 | — | VF UPI配置 | × | × |
+| DFX接口 | urma_admin查询 | 设备列表 | — | — | 查询所有设备基本信息 | — | — |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | feature | 硬件特性 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_jfc | 硬件支持创建jfc个数上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_jfs | 硬件支持创建jfs个数上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_jfr | 硬件支持创建jfr数上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_jetty | 硬件支持创建jetty个数上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_jetty_in_jetty_grp | 硬件支持创建jetty group个数上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | jfc_depth | 硬件支持创建jfc最大深度 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | jfs_depth | 硬件支持创建jfs最大深度 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | jfr_depth | 硬件支持创建jfr最大深度 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_jfs_inline_size | 硬件支持最大发送inline大小 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_jfs_sge | 硬件支持jfs中最大seg个数 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_jfs_rsge | 硬件支持jfs中最大rseg个数 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_jfr_sge | 硬件支持jfr中最大seg个数 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_msg_size | 硬件支持最大messages大小 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_read_size | 硬件支持read语义内容上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_write_size | 硬件支持write语义内容上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_cas_size | 硬件支持cas语义内容上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_swap_size | 硬件支持swap语义内容上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_fetch_and_add_size | 硬件支持fetch_and_add语义内容上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_fetch_and_sub_size | 硬件支持fetch_and_sub语义内容上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_fetch_and_and_size | 硬件支持fetch_and_and语义内容上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_fetch_and_or_size | 硬件支持fetch_and_or语义内容上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_fetch_and_xor_size | 硬件支持fetch_and_xor语义内容上限 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | atomic_feat | 原子操作能力 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | trans_mode | 传输模式 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | congestion_ctrl_alg | 拥塞控制算法 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | ceq_cnt | CEQ数量 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_tp_in_tpg | TP组最大TP数 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_eid_cnt | 最大EID数量 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | page_size_cap | 页大小能力 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_oor_cnt | 最大乱序窗口大小 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | mn | 制造商名称 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | max_netaddr_cnt | 最大网络地址数量 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | rm_order_cap | RM保序能力 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | rc_order_cap | RC保序能力 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | rm_tp_cap | RM TP能力 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | rc_tp_cap | RC TP能力 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | um_tp_cap | UM TP能力 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | tp_feature | TP特性 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | device_cap | priority_info | 优先级信息 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | port_cnt | — | 端口数量 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | port_attr | max_mtu | 最大MTU | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | port_attr | state | 端口状态 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | port_attr | active_width | 活跃链路宽度 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | port_attr | active_speed | 活跃速率 | √ | √ |
+| DFX接口 | urma_admin查询 | 设备属性 | port_attr | active_mtu | 活跃MTU | √ | √ |
+| DFX接口 | urma_admin查询 | upi | — | — | UPI查询 | — | — |
+| DFX接口 | urma_perftest | perftest测试类型配置 | send_lat | — | 发送时延测试 | √ | √ |
+| DFX接口 | urma_perftest | perftest测试类型配置 | read_lat | — | 读时延测试 | √ | √ |
+| DFX接口 | urma_perftest | perftest测试类型配置 | write_lat | — | 写时延测试 | √ | √ |
+| DFX接口 | urma_perftest | perftest测试类型配置 | atomic_lat | — | 原子操作时延测试 | √ | √ |
+| DFX接口 | urma_perftest | perftest测试类型配置 | send_bw | — | 发送带宽测试 | √ | √ |
+| DFX接口 | urma_perftest | perftest测试类型配置 | read_bw | — | 读带宽测试 | √ | √ |
+| DFX接口 | urma_perftest | perftest测试类型配置 | write_bw | — | 写带宽测试 | √ | √ |
+| DFX接口 | urma_perftest | perftest测试类型配置 | atomic_bw | — | 原子操作带宽测试 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | all | — | 运行2~2^15范围内2整数次幂递增长度 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | atomic_type | — | 选择原子操作类型：cas/faa | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | simplex_mode | — | 选择单工模式jfs/jfr运行 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | bidirectional | — | 选择双向模式运行 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | jfc_depth | — | 配置jfc深度 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | dev | — | 指定设备名称 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | duration | — | 指定运行时长 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | use_jfce | — | 选择中断通知方式 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | eid_idx | — | 指定EID index | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | err_timeout | — | 指定异常上报时间 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | user_flat_api | — | 使用flat类型API运行 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | cpu_freq_f | — | CPU频率差异告警 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | help | — | 帮助模式 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | inline_size | — | 配置inline值 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | share_jfr | — | 创建jetty时指定共享jfr | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | jettys | — | 配置jetty/jfs/jfr数量 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | token_policy | — | 配置token传输策略 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | iters | — | 配置运行循环次数 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | no_peak | — | 不输出峰值 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | jfs_post_list | — | 发送端wr链表串联数量 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | lock_free | — | jetty免锁模式 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | priority | — | jetty调度优先级 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | trans_mode | — | 传输模式：RC/RM/UM | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | port | — | 指定端口号 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | cq_num | — | 发送端指定数量wr产生一个cr | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | jfs_post_list | — | 接收端wr链表串联数量 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | jfr_depth | — | 配置jfr深度 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | size | — | 配置传输字节长度 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | server | — | server端IP地址 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | jfs_depth | — | 配置jfs深度 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | warm_up | — | 预热模式 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | infinite | — | 无限测试模式 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | single_path | — | 单路径模式 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | inf_period_ms | — | ms级统计打印 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | rate_limit | — | 速率上限 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | rate_units | — | 速率单位 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | burst_size | — | 单循环发包大小上限 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | enable_ipv6 | — | 使能ipv6监听 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | enable_credit | — | 使能发包限制 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | credit_threshold | — | 发包限速水线 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | credit_notify_cnt | — | 接收指定数量后通知发送者 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | jettys_pre_jfr | — | JFR共享次数 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | seg_pre_jetty | — | jetty的sge个数 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | enable_imm | — | 使能immediate语义 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | enable_err_continue | — | 异常继续特性 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | notify_data | — | write_with_notify | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | sge_num | — | wr内sge个数 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | enable_write_dirty | — | 写脏功能 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | pair_num | — | 多路径连接个数 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | async_import | — | 异步建链 | × | × |
+| DFX接口 | urma_perftest | perftest运行参数配置 | tp_aware | — | 感知tp建链 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | tp_reuse | — | tp复用模式 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | ctp | — | ctp传输层 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | jetty_id | — | 指定jetty id | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | wait_jfc_timeout | — | 中断模式等待时间 | √ | √ |
 
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-| 特性Level 1 | 特性Level 2          | 特性Level 3             | 特性Level 4                                                 | 特性Level 5            | 特性描述                                              | 鲲鹏950 | 昇腾910D |
-+:============+:=====================+:========================+:============================================================+:=======================+:======================================================+:========+:=========+
-| 管理面接口  | URMA初始化           | init/unint              | 基本能力                                                    |                        | 初始化/反初始化URMA运行环境                           | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | token                                                       |                        | 指定安全token                                         | ×       | ×        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | uasid                                                       |                        | 指定进程的uasid                                       | ×       | ×        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | URMA设备及上下文管理 | get/free_device_list    |                                                             |                        | 获取/释放设备列表                                     | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | get_device_by_name      |                                                             |                        | 通过设备名称获取设备                                  | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | get_device_by_eid       |                                                             |                        | 通过EID获取设备                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | query_device            |                                                             |                        | 查询设备属性                                          | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | create/delete_context   |                                                             |                        | 创建/删除设备上下文                                   | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | JFC基础能力管理      | create/delete_jfc       | 基本能力                                                    |                        | 创建/删除JFC                                          | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | cfg.flag.jfc_inline                                         |                        | 支持inline配置                                        | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | delete_jfc_batch        |                                                             |                        | 批量删除JFC                                           | ×       | ×        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | modify_jfc              | moderate_count/moderate_period                              |                        | 修改JFC中断抑制参数                                   | ×       | ×        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | JFS基础能力管理      | create/delete_jfs       | 基本能力                                                    |                        | 创建/删除JFS                                          | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | lock_free                                                   |                        | 免锁模式，驱动内并发操作不加锁，由业务保证线程安全    | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | error_suspend                                               |                        | 数据面异常置错                                        | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | outorder_comp                                               |                        | 乱序上报完成事件                                      | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | order_type                                                  | OT                     | target ordering 目的端保序                            | √       | √        |
-|             |                      |                         |                                                             |                        |                                                       |         |          |
-|             |                      |                         | （保序模式）                                                |                        |                                                       |         |          |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | OI                     | initiator ordering 源端保序                           | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | OL                     | low layer ordering 通道（硬件）保序                   | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | UNO                    | unreliable non ordering 无序                          | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | multi_path                                                  |                        | 设备多路径能力                                        | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | ctp_rc_mul_path_mode                                        |                        | 针对RC模式CTP通信的多路径能力                         | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | trans_mode                                                  | RM                     | 无连接可靠传输模式                                    | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | RC                     | 连接可靠传输模式                                      | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | UM                     | 无连接不可靠传输模式                                  | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | priority                                                    |                        | 配置优先级                                            | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | max_inline_data                                             |                        | 支持配置inline大小                                    | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | rnr_retry                                                   |                        | 支持配置rnr等重试次数                                 | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | err_timeout                                                 |                        | 支持配置错误超时时间                                  | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | delete_jfs_batch        |                                                             |                        | 批量删除JFS                                           | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | modify_jfs              | state                                                       |                        | 修改JFS的状态机                                       | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | JFR基础能力管理      | create/delete_jfr       | 基本能力                                                    |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | 指定jfr_id                                                  |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | token_policy                                                | NONE                   | 不携带TokenValue                                      | √       | √        |
-|             |                      |                         |                                                             |                        |                                                       |         |          |
-|             |                      |                         | 安全策略                                                    |                        |                                                       |         |          |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | PLAIN_TEXT             | 传输TokenValue明文                                    | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | SIGNED                 | 加密传输TokenValue，明文传输PLD                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | ALL_ENCRYPTED          | 加密传输TokenValue和PLD                               | ×       | ×        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | lock_free                                                   |                        | 免锁模式                                              | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | order_type                                                  | OT                     | target ordering 目的端保序                            | √       | √        |
-|             |                      |                         |                                                             |                        |                                                       |         |          |
-|             |                      |                         | （保序模式）                                                |                        |                                                       |         |          |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | OI                     | initiator ordering 源端保序                           | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | OL                     | low layer ordering 通道（硬件）保序                   | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | UNO                    | unreliable non ordering 无序                          | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | trans_mode                                                  | RM                     | 无连接可靠传输模式                                    | √       | √        |
-|             |                      |                         |                                                             |                        |                                                       |         |          |
-|             |                      |                         | 配置传输层类型                                              |                        |                                                       |         |          |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | RC                     | 连接可靠传输模式                                      | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | UM                     | 无连接不可靠传输模式                                  | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | min_rnr_timer                                               |                        | 配置rnr最小重试时间                                   | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | delete_jfr_batch        |                                                             |                        | 批量删除JFR                                           | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | modify_jfr              | rx_threshold                                                |                        | 修改RX WQ的最低水位                                   | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | state                                                       |                        | 修改JFR的状态机                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | import/unimport_jfr     |                                                             |                        | 导入/反导入远端JFR                                    | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | import_jfr_async        |                                                             |                        | 异步导入源端JFR                                       | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | jetty基础能力管理    | create/delete_jetty     | 基本能力                                                    |                        | 创建/删除Jetty                                        | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | jetty_cfg                                                   |                        | 配置特性与JFS&JFR一致                                 | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | jetty_id                                                    |                        | 指定jetty id                                          | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | share_jfr                                                   |                        | 配置共享JFR                                           | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | jetty_grp                                                   |                        | 配置Jetty Group                                       | ×       | ×        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | delete_jetty_batch      |                                                             |                        | 批量删除Jetty                                         | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | modify_jetty            | state                                                       |                        | 修改Jetty状态                                         | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | rx_threshold                                                |                        | 修改RX WQ的最低水位                                   | ×       | ×        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | import/unimport_jetty   | 基本能力                                                    |                        | 导入/反导入远端jetty                                  | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | tp_type                                                     | RTP                    | 可靠传输模式                                          | √       | √        |
-|             |                      |                         |                                                             |                        |                                                       |         |          |
-|             |                      |                         | 选择使用的TP类型                                            |                        |                                                       |         |          |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | CTP                    | 轻量级传输模式                                        | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | UTP                    | 不可靠传输模式                                        | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | bind/unbind_jetty       |                                                             |                        | bind/unbind远端jetty                                  | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | import_jetty_async      |                                                             |                        | 异步导入远端Jetty                                     | ×       | ×        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | bind_jetty_async        |                                                             |                        | 异步bind源端Jetty                                     | ×       | ×        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | JFCE基础能力管理     | create/delete_jfce      |                                                             |                        | 创建/删除JFCE                                         | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | 异步事件上报         | get_async_event         | 查询jetty异常                                               |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | port异常                                                    |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | 设备异常                                                    |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | Entity异常                                                  |                        |                                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | ack_async_event         |                                                             |                        | 用户响应异步事件                                      | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | segment管理          | register/unregister_seg | 基本功能                                                    |                        | 注册/反注册内存                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | token_policy                                                |                        | 指定key验证策略                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | cacheable                                                   |                        | 是否使能缓存                                          | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | access                                                      | LOCAL_ONLY             |                                                       | √       | √        |
-|             |                      |                         |                                                             |                        |                                                       |         |          |
-|             |                      |                         | 访问控制权限                                                |                        |                                                       |         |          |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | ACCESS_READ            |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | ACCESS_WRITE           |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | ACCESS_ATOMIC          |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | non_pin                                                     |                        | 是否支持no_pin住内存                                  | ×       | ×        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | user_iova                                                   |                        | 是否使用iova                                          | ×       | ×        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | token_id_valid                                              |                        | 是否指定token_id                                      | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | import/unimport_seg     | 基本功能                                                    |                        | 导入/导出远端内存                                     | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | cacheable                                                   |                        | 是否使能缓存                                          | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | mapping                                                     |                        | 是否映射到本地地址                                    | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | JFC拓展能力管理      | alloc/free_jfc          |                                                             |                        | 申请/释放JFC内存                                      | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | active/deactive_jfc     |                                                             |                        | 硬件使能/失效JFC                                      | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | set/get_jfc_opt         | 基本能力                                                    |                        | 设置/获取JFC属性                                      | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | 基本属性                                                    |                        | 创建JFC的基本属性                                     | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | CQE_BASE_ADDR                                               |                        | CQE的地址                                             | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | JFC_ID                                                      |                        | JFC的ID                                               | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | JFC_DB_ADDR                                                 |                        | CQ队列Doorbell地址                                    | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | JFC_DB_STATUS                                               |                        | JFC Doorbell的状态                                    | ×       | ×        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | JFC_PI                                                      |                        | JFC任务队列的PI值                                     | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | JFC_PI_TYPE                                                 |                        | JFC任务队列PI指代的类型（绝对值/相对值）              | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | JFC_CI                                                      |                        | JFC任务队列的CI值                                     | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | JFS拓展能力管理      | alloc/free_jfs          |                                                             |                        | 申请/释放JFS内存                                      | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | active/deactive_jfs     |                                                             |                        | 硬件使能/失效JFS                                      | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | set/get_jfs_opt         | 基本能力                                                    |                        | 设置/获取JFS属性                                      | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | JFR拓展能力管理      | alloc/free_jfr          |                                                             |                        | 申请/释放JFR内存                                      | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | active/deactive_jfr     |                                                             |                        | 硬件使能/失效JFR                                      | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | set/get_jfr_opt         | 基本能力                                                    |                        | 设置/获取JFR属性                                      | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | Jetty拓展能力管理    | alloc/free_jetty        |                                                             |                        | 申请/释放JETTY内存                                    | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | active/deactive_jetty   |                                                             |                        | 硬件使能/失效JETTY                                    | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | set/get_jetty_opt       | 基本能力                                                    |                        | 设置/获取JETTY属性                                    | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | 感知TP建链           | get_tp_list             |                                                             |                        | 静态查询可用TP                                        | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | get/set_tp_attr         |                                                             |                        | 获取/设置TP属性                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | import_jetty_ex         |                                                             |                        | 指定TP建链                                            | √       | √        |
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | 设备聚合管理         | 基础能力                |                                                             |                        | 使用聚合设备创建上下文                                | √       | √        |
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | 配置拓扑信息            |                                                             |                        | 配置设备聚合拓扑信息                                  | √       | √        |
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | IP over URMA         | 基础能力                |                                                             |                        | 呈现TCP/IP协议栈设备，对下对接URMA                    | √       | √        |
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | Verbs over URMA      | 基础能力                |                                                             |                        | 呈现RDMA协议栈设备，对下对接URMA                      | √       | √        |
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             |                        |                                                       |         |          |
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|                                                                                                                                                                                                                                  |
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-| 数据面接口  | post操作             | post_jfs_wr             |                                                             |                        |                                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | post_jfr_wr             |                                                             |                        |                                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | post_jetty_send_wr      |                                                             |                        |                                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | post_jetty_recv_wr      |                                                             |                        |                                                       | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | 发送配置             | 执行序                  | none                                                        |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | RO                                                          |                        | 弱保序                                                | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | SO                                                          |                        | 强保序                                                | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | 完成序                  |                                                             |                        | 是否保序                                              | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | fence操作               |                                                             |                        |                                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | solicited使能           |                                                             |                        |                                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | 配置完成事件产生        |                                                             |                        |                                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | 配置是否inline          |                                                             |                        |                                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | 支持免import seg        |                                                             |                        |                                                       | todo    | todo     |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | 内存连续             | sgl配置                 | 远端send/recv支持不连续，本端read/write/send/recv支持不连续 |                        |                                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | wr_list配置             |                                                             |                        |                                                       | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | 单边操作             | read                    | 仅支持1个src sge                                            |                        |                                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | write                   | 仅支持1个dst sge                                            |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | 支持notify远端                                              |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | 支持携带IMM数据                                             |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | 支持write_with_atomic_add                                   |                        |                                                       | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | 双边操作             | send                    |                                                             |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | 支持携带IMM数据                                             |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | with invalid                                                |                        |                                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | recv                    |                                                             |                        |                                                       | √       | √        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | 原子操作             | cas                     |                                                             |                        |                                                       | ×       | ×        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | 支持mask                                                    |                        |                                                       | ×       | ×        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | faa                     |                                                             |                        |                                                       | ×       | ×        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | 支持mask                                                    |                        |                                                       | ×       | ×        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | 完成操作             | poll_jfc                | 支持产生多个CR                                              |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | CR解析                                                      | status                 | 携带完成状态                                          | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | flag.s_r               | 携带是接收还是发送完成                                | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | opcode                 | 接收端CR携带发送端操作类型                            | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | user_ctx               | 携带user_ctx私有数据                                  | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | completion_len         | 携带完成长度                                          | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | local_id               | 携带本端jetty_id                                      | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | remote_id              | 接收端携带远端jetty信息                               | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | imm_data               | 携带IMM数据                                           | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | rearm_jfc               |                                                             |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | solicited_only                                              |                        | 配置是否只针对带solicited标记的报文产生事件           | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | wait_jfc                |                                                             |                        | 等待某个jfce的多个JFC产生事件                         | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | ack_jfc                 |                                                             |                        | 确认多个JFC产生的事件被处理完毕                       | √       | √        |
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|                                                                                                                                                                                                                                  |
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-| DFX接口     | urma_admin配置       | eid                     |                                                             |                        |                                                       | ×       | ×        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | upi                     | PF配置                                                      |                        |                                                       | ×       | ×        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | VF配置                                                      |                        |                                                       | ×       | ×        |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | urma_admin查询       | 设备列表                |                                                             |                        | 查询所有设备的基本信息，包含trans_mode、eid、status等 |         |          |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | 设备属性                | device_cap                                                  | feature                | 硬件特性                                              | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_jfc                | 硬件支持创建jfc个数上限                               | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_jfs                | 硬件支持创建jfs个数上限                               | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_jfr                | 硬件支持创建jfr数上限                                 | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_jetty              | 硬件支持创建jetty个数上限                             | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_jetty_in_jetty_grp | 硬件支持创建jetty group个数上限                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | jfc_depth              | 硬件支持创建jfc最大深度                               | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | jfs_depth              | 硬件支持创建jfs最大深度                               | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | jfr_depth              | 硬件支持创建jfr最大深度                               | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_jfs_inline_size    | 硬件支持最大发送inline大小                            | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_jfs_sge            | 硬件支持jfs中最大seg个数                              | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_jfs_rsge           | 硬件支持jfs中最大rseg个数                             | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_jfr_sge            | 硬件支持jfr中最大seg个数                              | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_msg_size           | 硬件支持最大messages大小                              | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_read_size          | 硬件支持read语义内容上限                              | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_write_size         | 硬件支持write语义内容上限                             | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_cas_size           | 硬件支持cas语义内容上限                               | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_swap_size          | 硬件支持swap语义内容上限                              | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_fetch_and_add_size | 硬件支持fetch_and_add语义内容上限                     | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_fetch_and_sub_size | 硬件支持fetch_and_sub语义内容上限                     | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_fetch_and_and_size | 硬件支持fetch_and_and语义内容上限                     | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_fetch_and_or_size  | 硬件支持fetch_and_or语义内容上限                      | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_fetch_and_xor_size | 硬件支持fetch_and_xor语义内容上限                     | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | atomic_feat            |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | trans_mode             |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | congestion_ctrl_alg    |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | ceq_cnt                |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_tp_in_tpg          |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_eid_cnt            |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | page_size_cap          |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_oor_cnt            |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | mn                     |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | max_netaddr_cnt        |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | rm_order_cap           |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | rc_order_cap           |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | rm_tp_cap              |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | rc_tp_cap              |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | um_tp_cap              |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | tp_feature             |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | priority_info          |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | port_cnt                                                    |                        |                                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | port_attr                                                   | max_mtu                |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | state                  |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | active_width           |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | active_speed           |                                                       | √       | √        |
-|             |                      |                         |                                                             +------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             | active_mtu             |                                                       | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | upi                     |                                                             |                        |                                                       |         |          |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | urma_perftest        | perftest测试类型配置    | send_lat                                                    |                        | 发送时延测试                                          | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | read_lat                                                    |                        | 读时延测试                                            | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | write_lat                                                   |                        | 写时延测试                                            | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | atomic_lat                                                  |                        | 原子操作时延测试                                      | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | send_bw                                                     |                        | 发送带宽测试                                          | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | read_bw                                                     |                        | 读带宽测试                                            | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | write_bw                                                    |                        | 写带宽测试                                            | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | atomic_bw                                                   |                        | 原子操作带宽测试                                      | √       | √        |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | perftest运行参数配置    | all                                                         |                        | 运行2\~2\^15范围内，2整数次幂递增长度                 | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | atomic_type                                                 |                        | 选择原子操作类型：cas/faa                             | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | simplex_mode                                                |                        | 选择单工模式jfs/jfr运行                               | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | bidirectional                                               |                        | 选择双向模式运行，仅用于带宽测试                      | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | jfc_depth                                                   |                        | 配置jfc深度                                           | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | dev                                                         |                        | 指定设备名称                                          | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | duration                                                    |                        | 指定运行时长，单位s                                   | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | use_jfce                                                    |                        | 选择中断通知方式                                      | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | eid_idx                                                     |                        | 指定EID index                                         | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | err_timeout                                                 |                        | 指定异常上报时间                                      | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | user_flat_api                                               |                        | 使用urma_send/urma_recv等flat类型API运行              | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | cpu_freq_f                                                  |                        | 获取CPU频率两种途径差异超过门限，产生告警打印         | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | help                                                        |                        | 帮助模式                                              | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | inline_size                                                 |                        | 配置inline值                                          | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | share_jfr                                                   |                        | 支持创建jetty时指定jfr                                | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | jettys                                                      |                        | 配置jetty/jfs/jfr数量                                 | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | token_policy                                                |                        | 配置token传输策略                                     | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | iters                                                       |                        | 配置运行循环次数                                      | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | no_peak                                                     |                        | 指定不输出峰值，仅用于带宽测试                        | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | jfs_post_list                                               |                        | 指定发送端wr链表串联数量                              | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | lock_free                                                   |                        | 配置jetty免锁模式                                     | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | priority                                                    |                        | 配置jetty调度优先级                                   | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | trans_mode                                                  |                        | 选择传输模式：RC/RM/UM                                | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | port                                                        |                        | 指定端口号                                            | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | cq_num                                                      |                        | 发送端在指定数量个wr中，产生一个cr                    | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | jfs_post_list                                               |                        | 指定接收端wr链表串联数量                              | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | jfr_depth                                                   |                        | 配置jfr深度                                           | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | size                                                        |                        | 配置传输字节长度，单位Byte                            | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | server                                                      |                        | 配置server端IP地址，格式xx.xx.xx.xx                   | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | jfs_depth                                                   |                        | 配置jfs深度                                           | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | warm_up                                                     |                        | 选择预热模式运行                                      | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | infinite                                                    |                        | 配置无限测试模式，仅支持BW测试，默认2s打印一次数据    | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | single_path                                                 |                        | 配置聚合设备性能测试使用但路径模式                    | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | inf_period_ms                                               |                        | 配置以ms为统计单位打印性能数据                        | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | rate_limit                                                  |                        | 配置速率上限（默认单位：Gbps）                        | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | rate_units                                                  |                        | 配置速率单位                                          | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | burst_size                                                  |                        | 在配置限速时，配置单个循环里发包大小上限              | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | enable_ipv6                                                 |                        | 配置使能ipv6作为监听IP                                | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | enable_credit                                               |                        | 使能发包限制任务个数                                  | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | credit_threshold                                            |                        | 配置发包限速的水线                                    | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | credit_notify_cnt                                           |                        | 配置在接收者收到指定数量后通知发送者                  | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | jettys_pre_jfr                                              |                        | 配置每个JFR共享的次数                                 | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | seg_pre_jetty                                               |                        | 配置每个jetty的sge个数                                | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | enable_imm                                                  |                        | 配置使能immediate语义                                 | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | enable_err_continue                                         |                        | 配置使能异常继续特性                                  | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | notify_data                                                 |                        | 启用 write_with_notify，其值由硬件保证                | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | sge_num                                                     |                        | 配置wr内sge个数                                       | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | enable_write_dirty                                          |                        | 启用写脏功能并设置写脏周期                            | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | pair_num                                                    |                        | 启用多路径模式，并配置连接个数                        | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | async_import                                                |                        | 启用异步建链                                          | ×       | ×        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | tp_aware                                                    |                        | 启用感知tp的建链方式                                  | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | tp_reuse                                                    |                        | 启用tp复用模式                                        | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | ctp                                                         |                        | 启用ctp作为传输层资源                                 | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | jetty_id                                                    |                        | 指定jetty td                                          | √       | √        |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | wait_jfc_timeout                                            |                        | 配置中断模式中等待时间                                | √       | √        |
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|                                                                                                                                                                                                                                  |
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-| 运行环境    | OS                   | EulerOS                 | V2R8                                                        |                        |                                                       |         |          |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | V2R9                                                        |                        |                                                       |         |          |
-|             |                      |                         +-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | V2R10                                                       |                        |                                                       |         |          |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | openEuler               | 22.03                                                       |                        |                                                       |         |          |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | HCE                     | 2.0 2403                                                    |                        |                                                       |         |          |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         | 3.0.2506                                                    |                        |                                                       |         |          |
-|             +----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             | 平台                 | 物理机                  |                                                             |                        |                                                       |         |          |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | 虚拟机                  |                                                             |                        |                                                       |         |          |
-|             |                      +-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      | 容器                    |                                                             |                        |                                                       |         |          |
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
-|             |                      |                         |                                                             |                        |                                                       |         |          |
-+-------------+----------------------+-------------------------+-------------------------------------------------------------+------------------------+-------------------------------------------------------+---------+----------+
+#### 运行环境
 
-## 设备聚合
+| Feature L1 | Feature L2 | Feature L3 | Feature L4 | Feature L5 | Feature Description | KP950 | Ascend910D |
+|---|---|---|---|---|---|---|---|
+| 运行环境 | OS | EulerOS | V2R8 | — | EulerOS V2R8 支持 | — | — |
+| 运行环境 | OS | EulerOS | V2R9 | — | EulerOS V2R9 支持 | — | — |
+| 运行环境 | OS | EulerOS | V2R10 | — | EulerOS V2R10 支持 | — | — |
+| 运行环境 | OS | openEuler | 22.03 | — | openEuler 22.03 支持 | — | — |
+| 运行环境 | OS | HCE | 2.0 2403 | — | HCE 2.0 2403 支持 | — | — |
+| 运行环境 | OS | HCE | 3.0.2506 | — | HCE 3.0.2506 支持 | — | — |
+| 运行环境 | 平台 | 物理机 | — | — | 物理机支持 | — | — |
+| 运行环境 | 平台 | 虚拟机 | — | — | 虚拟机支持 | — | — |
+| 运行环境 | 平台 | 容器 | — | — | 容器支持 | — | — |
+## 6.2 设备聚合
 
 urma提供了基于多设备聚合能力，达成带宽倍增、故障切换和负载均衡效果。另外，聚合设备能够屏蔽复杂的组网拓扑，简化用法，提供用户友好的UB基础通信能力。
 
-### 聚合设备基本概念
+### 6.2.1 聚合设备基本概念
 
-通算业务中，用户通常使用2平面\*8节点的1D Full-Mesh组网、2平面\*16节点的2D Full-mesh组网两种部署形态。
+通算业务中，用户通常使用2平面*8节点的1D Full-Mesh组网、2平面*16节点的2D Full-mesh组网两种部署形态。
 
 ![](figures/urma-feat-aggr-concept-01.png) ![](figures/urma-feat-aggr-concept-07.png)
 
@@ -1836,7 +1478,7 @@ IODIE1：
 
 - :::40:10:00:dfdf:8c5和:::40:10:00:dfdf:845连通
 
-### 聚合设备基本使用流程
+### 6.2.2 聚合设备基本使用流程
 
 - 自举建链场景
 
@@ -1866,7 +1508,7 @@ RC模式下的bind操作可以绑定双端jetty
 
 bonding设备不感知TP。
 
-### 聚合设备特性列表和约束
+### 6.2.3 聚合设备特性列表和约束
 
 - 使用约束
 
@@ -1882,59 +1524,38 @@ bonding设备不感知TP。
 
   1.  聚合设备的特性列表
 
-+---------------+---------+---------------+-------------+---------------+----------+------------------+--------------------+-------------------+
-| 设备名        | EID个数 | 模式          | 使用RTP/CTP | 传输模式      | 环回传输 | 最大send报文大小 | 可靠性保障         | 可联通EID         |
-+:==============+:========+:==============+:============+:==============+:=========+:=================+:===================+:==================+
-| bonding_dev_0 | 1       | jetty多路径   | CTP         | RM（ROI保序） | 否       | 4kB              | 有TA ACK           | 任意节点的agg EID |
-|               |         |               |             |               |          |                  |                    |                   |
-|               |         |               |             |               |          |                  | 无重传             |                   |
-|               |         |               |             +---------------+----------+                  +--------------------+                   |
-|               |         |               |             | RC（ROL保序） | 否       |                  | 无可靠保障机制     |                   |
-|               |         +---------------+-------------+---------------+----------+------------------+--------------------+                   |
-|               |         | jetty单路径   | RTP         | RC（ROL保序） | 是       | 64kB             | 与单设备RC模式一致 |                   |
-|               |         +---------------+-------------+---------------+----------+------------------+--------------------+                   |
-|               |         | jfs/jfr多路径 | CTP         | RM（ROI保序） | 否       | 4kB              | 有TA ACK           |                   |
-|               |         |               |             |               |          |                  |                    |                   |
-|               |         |               |             |               |          |                  | 无重传             |                   |
-+---------------+---------+---------------+-------------+---------------+----------+------------------+--------------------+-------------------+
-
+| Device Name | EID Count | Mode | RTP/CTP | Transport Mode | Loopback | Max Send Pkt Size | Reliability | Reachable EID |
+|---|---|---|---|---|---|---|---|---|
+| bonding_dev_0 | 1 | jetty多路径 | CTP | RM（ROI保序） | 否 | 4kB | 有TA ACK | 任意节点的agg EID |
+| bonding_dev_0 | 1 | jetty多路径 | CTP | RM（ROI保序） | 否 | 4kB | 无重传 | 任意节点的agg EID |
+| bonding_dev_0 | 1 | jetty多路径 | CTP | RC（ROL保序） | 否 | 4kB | 无可靠保障机制 | 任意节点的agg EID |
+| bonding_dev_0 | 1 | jetty单路径 | RTP | RC（ROL保序） | 是 | 64kB | 与单设备RC模式一致 | 任意节点的agg EID |
+| bonding_dev_0 | 1 | jfs/jfr多路径 | CTP | RM（ROI保序） | 否 | 4kB | 有TA ACK | 任意节点的agg EID |
+| bonding_dev_0 | 1 | jfs/jfr多路径 | CTP | RM（ROI保序） | 否 | 4kB | 无重传 | 任意节点的agg EID |
 - 聚合设备支持urma特性API梳理
 
 聚合设备已经支持大部分URMA API，现列举不支持的URMA API及其影响：
 
 1.  聚合设备不支持urma特性API
 
-+---------------------------------------------+----------------------------------------------------------------------------------+
-| 聚合设备不支持的URMA API列表                | 功能和影响                                                                       |
-+:============================================+:=================================================================================+
-| urma_query_jfs                              | 用于查询jfs的状态，主要为DFX功能，非必要功能接口                                 |
-+---------------------------------------------+----------------------------------------------------------------------------------+
-| urma_flush_jfs                              | 清空jfs软件队列，功能接口，应用不要求所有下发的sqe必须上报，则不依赖此功能       |
-+---------------------------------------------+----------------------------------------------------------------------------------+
-| urma_advise_jfr/urma_unadvise_jfr           | 非UB功能API                                                                      |
-+---------------------------------------------+----------------------------------------------------------------------------------+
-| urma_query_jetty                            | 用于查询jetty的状态和接收端配置水线，主要为DFX功能，非必要功能接口               |
-|                                             |                                                                                  |
-|                                             | \*说明：jetty作为接收端的配置水线功能，鲲鹏950硬件当前不支持                     |
-+---------------------------------------------+----------------------------------------------------------------------------------+
-| urma_flush_jetty                            | 清空jetty发送软件队列，功能接口，应用不要求所有下发的sqe必须上报，则不依赖此功能 |
-+---------------------------------------------+----------------------------------------------------------------------------------+
-| urma_advise_jetty_async                     | 非UB功能API                                                                      |
-+---------------------------------------------+----------------------------------------------------------------------------------+
-| urma_create_jetty_grp/urma_delete_jetty_grp | 创建和删除jetty grp，功能接口                                                    |
-|                                             |                                                                                  |
-| urma_get_tpn                                | 当前管控面不支持此能力                                                           |
-|                                             |                                                                                  |
-| urma_modify_tp                              | 当前管控面不支持此能力                                                           |
-+---------------------------------------------+----------------------------------------------------------------------------------+
-
-## 虚拟化
+| Unsupported URMA API | Function and Impact |
+|---|---|
+| urma_query_jfs | 用于查询jfs的状态，主要为DFX功能，非必要功能接口 |
+| urma_flush_jfs | 清空jfs软件队列，功能接口，应用不要求所有下发的sqe必须上报，则不依赖此功能 |
+| urma_advise_jfr/urma_unadvise_jfr | 非UB功能API |
+| urma_query_jetty | 用于查询jetty的状态和接收端配置水线，主要为DFX功能，非必要功能接口。说明：jetty作为接收端的配置水线功能，鲲鹏950硬件当前不支持 |
+| urma_flush_jetty | 清空jetty发送软件队列，功能接口，应用不要求所有下发的sqe必须上报，则不依赖此功能 |
+| urma_advise_jetty_async | 非UB功能API |
+| urma_create_jetty_grp/urma_delete_jetty_grp | 创建和删除jetty grp，功能接口 |
+| urma_get_tpn | 当前管控面不支持此能力 |
+| urma_modify_tp | 当前管控面不支持此能力 |
+## 6.3 虚拟化
 
 一个UB物理设备可以包含一份或多份设备资源（UE，UB Entity），同时也可以拥有一个或多个物理端口（Port）。在Host访问设备资源时，访问请求可以从任意一个端口进入并访问到相应的设备资源，这意味着这些端口是由多份设备资源共享的。当系统将多份设备资源分配给不同用户使用时，这些资源之间需要具备一定的隔离性。
 
 UB设备支持实现多个Port，不同UB设备之间可以通过这些端口进行通信。UE是UB设备中一份具备隔离性的设备资源集合，它不仅是一个可寻址的实体，还提供了特定功能，并描述了该实体所占用的设备资源。通过设备间的Port互联，软件可以访问到UE所对应的设备资源。UE作为UB设备对自身资源进行划分的基本单元，为用户提供了管理设备资源的方式。UB设备允许用户对资源进行更细粒度的划分，因此在实际使用中可能出现多个UE同时依赖某一类资源配置来提供服务的情况。
 
-### 容器
+### 6.3.1 容器
 
 在容器环境中，为实现URMA物理设备的灵活管理，URMA引入了逻辑设备机制。每个物理设备仅属于一个命名空间，但可以在不同的命名空间中创建逻辑设备，每个逻辑设备同样只属于一个命名空间。逻辑设备作为独立的访问接口，仅在所属命名空间内可见，且名称与物理设备相同。此外，URMA设备上的EID可配置命名空间属性，并绑定到对应命名空间的逻辑设备上，EID同样仅在其所属的命名空间中可见。删除逻辑设备时，其上的EID会自动迁移回原物理设备。
 
@@ -1950,318 +1571,227 @@ URMA提供了一组命令来配置设备和EID。
 
 创建、删除逻辑设备：
 
-urma_admin dev create_logic_dev \<dev_name\> \<netns\>
+urma_admin dev create_logic_dev <dev_name\> <netns\>
 
-urma_admin dev delete_logic_dev \<dev_name\> \<netns\>
+urma_admin dev delete_logic_dev <dev_name\> <netns\>
 
 设置EID的命名空间：
 
-urma_admin dev set_logic_dev_eid \<dev_name\> \<netns\> \<eid_idx\>
+urma_admin dev set_logic_dev_eid <dev_name\> <netns\> <eid_idx\>
 
 设置逻辑设备模式：手动模式、自动模式
 
-urma_admin dev set_logic_dev_mode \<dev_name\> \<ns_mode\>
+urma_admin dev set_logic_dev_mode <dev_name\> <ns_mode\>
 
 设置物理设备的命名空间
 
-urma_admin dev set_ns \<dev_name\> \<netns\>
+urma_admin dev set_ns <dev_name\> <netns\>
 
-### 虚拟机
+### 6.3.2 虚拟机
 
 UB网卡的UE直通到虚机中，虚机和裸机中的URMA使用没有区别
 
 ![](figures/urma-feat-virt-vm-01.png)
 
-## 工具手册
+## 6.4 工具手册
 
-![](figures/urma-tool-01.png)
+![](figures/urma_notice.png)
 
-命令行参数分为必选和可选两类，必选项采用\<\>描述，可选项采用\[\]描述。
+命令行参数分为必选和可选两类，必选项采用<\>描述，可选项采用[]描述。
 
-### urma_perftest
+### 6.4.1 urma_perftest
 
 用于urma时延和带宽测试的性能工具。涵盖收发、读、写、原子操作等四类语义，每种语义支持时延和带宽测试。区分server端和client端分别起urma_perftest进程开展测试并输出测试结果。
 
 1.  命令格式
 
-Usage: urma_perftest command \[command options\]\
-urma_perftest URMA perftest tool\
-Command syntax:\
-read_lat Test for read latency.\
-write_lat Test for write latency.\
-send_lat Test for send latency.\
-atomic_lat Test for atomic latency.\
-read_bw Test for read bandwidth.\
-write_bw Test for write bandwidth.\
-send_bw Test for send bandwidth.\
+```
+Usage: urma_perftest command [command options]
+urma_perftest URMA perftest tool
+Command syntax:
+read_lat Test for read latency.
+write_lat Test for write latency.
+send_lat Test for send latency.
+atomic_lat Test for atomic latency.
+read_bw Test for read bandwidth.
+write_bw Test for write bandwidth.
+send_bw Test for send bandwidth.
 atomic_bw Test for atomic bandwidth.
+```
 
 2.  功能描述
 
-收发时延测试server端：urma_perftest send_lat -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\]\
-收发时延测试client端：urma_perftest send_lat -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\] -S \<SERVER_IP\>\
-\
-读时延测试server端：urma_perftest read_lat -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\]\
-读时延测试client端：urma_perftest read_lat -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\] -S \<SERVER_IP\>\
-\
-写时延测试server端：urma_perftest write_lat -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\]\
-写时延测试client端：urma_perftest write_lat -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\] -S \<SERVER_IP\>\
-\
-原子操作时延测试server端：urma_perftest atomic_lat -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\] -A cas\
-原子操作时延测试client端：urma_perftest atomic_lat -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\] -S \<SERVER_IP\> -A cas\
-\
-收发带宽测试server端：urma_perftest send_bw -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\]\
-收发带宽测试client端：urma_perftest send_bw -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\] -S \<SERVER_IP\>\
-\
-读带宽测试server端：urma_perftest read_bw -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\]\
-读带宽测试client端：urma_perftest read_bw -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\] -S \<SERVER_IP\>\
-\
-写带宽测试server端：urma_perftest write_bw -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\]\
-写带宽测试client端：urma_perftest write_bw -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\] -S \<SERVER_IP\>\
-\
-原子操作带宽测试server端：urma_perftest atomic_bw -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\] -A cas\
-原子操作带宽测试client端：urma_perftest atomic_bw -d \<DEV_NAME\> -s \[SIZE\] -n \[ITERATIONS\] -S \<SERVER_IP\> -A cas
+```
+收发时延测试server端：urma_perftest send_lat -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS]
+收发时延测试client端：urma_perftest send_lat -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS] -S <SERVER_IP\>
+读时延测试server端：urma_perftest read_lat -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS]
+读时延测试client端：urma_perftest read_lat -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS] -S <SERVER_IP\>
+写时延测试server端：urma_perftest write_lat -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS]
+写时延测试client端：urma_perftest write_lat -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS] -S <SERVER_IP\>
+原子操作时延测试server端：urma_perftest atomic_lat -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS] -A cas
+原子操作时延测试client端：urma_perftest atomic_lat -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS] -S <SERVER_IP\> -A cas
+收发带宽测试server端：urma_perftest send_bw -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS]
+收发带宽测试client端：urma_perftest send_bw -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS] -S <SERVER_IP\>
+读带宽测试server端：urma_perftest read_bw -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS]
+读带宽测试client端：urma_perftest read_bw -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS] -S <SERVER_IP\>
+写带宽测试server端：urma_perftest write_bw -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS]
+写带宽测试client端：urma_perftest write_bw -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS] -S <SERVER_IP\>
+原子操作带宽测试server端：urma_perftest atomic_bw -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS] -A cas
+原子操作带宽测试client端：urma_perftest atomic_bw -d <DEV_NAME\> -s [SIZE] -n [ITERATIONS] -S <SERVER_IP\> -A cas
+```
 
 3.  参数说明
 
 urma_perftest参数
 
-Options:\
--a, \--all\[order\] Run sizes from 2 till 2\^23 (default 2\^16), order: exponent of 2.\
--A, \--atomic_type \<type\> Specify atomic type, {cas\|faa}.\
--b, \--simplex_mode Run with simplex mode(jfs/jfr), duplex jetty mode for reserved.\
--B, \--bidirection Measure bidirectional bandwidth (default unidirectional).\
--c, \--jfc_inline Enable jfc_inline to upgrade latency performance.\
--C, \--jfc_depth \<dep\> Size of jfc depth (default 4096 for bw, 1024 for ip bw, 1 for lat).\
--d, \--dev \<dev_name\> The name of ubep device.\
--D, \--duration \<second\> Run test for a customized period of seconds, this cfg covers iters.\
--e, \--use_jfce use jfc event.\
-\--eid_idx Specified eid index of device.\
--E, \--err_timeout \<time\> the timeout before report error, ranging from \[0, 31\],\
-the actual timeout in usec is caculated by: 4.096\*(2\^err_timeout).\
--f, \--use_flat_api Choose to use flat API, only works in SIMPLEX mode.\
--F, \--cpu_freq_f To report warnings when CPU frequency drifts, default as NOT.\
--h, \--help Show help info.\
--I, \--inline_size \<size\> Max size of message to be sent in inline.\
--j, \--share_jfr \<true/false\> share jfr on create jetty.\
--J, \--jettys \<num of jetty\> Num of jettys(default 1).\
--K, \--token_policy \<policy\> default 0: NONE, 1: PLAIN_TEXT, 2: SIGNED, 3: ALL_ENCRYPTED.\
--n, \--iters \<iters\> Number of exchanges (at least 5, default 10000).\
--N, \--no_peak Cancel peak-bw calculation.\
--l, \--jfs_post_list \<size\> Post list of send WQEs of \<list size\> size.\
--L, \--lock_free Jetty\'s interior is unlocked.\
--O, \--priority set the priority of JFS, ranging from \[0, 15\].\
--p, \--trans_mode \<mode\> Transport mode: 0 for RM(default), 1 for RC, 2 for UM.\
--P, \--port \<id\> Server port for bind or connect, default 21115.\
--Q, \--cq_mod \<num\> Generate Cqe only after \<\--cq-mod\> completion.\
--r, \--jfr_post_list \<size\> Post list of receive WQEs of \<list size\> size.\
--R, \--jfr_depth \<dep\> Size of jfr depth (default 512 for BW, 1 for LAT).\
--s, \--size \<size\> Size of message to exchange (default 2).\
--S, \--server \<ip\> Server ip for bind or connect, default: 127.0.0.1 .\
--T, \--jfs_depth \<dep\> Size of jfs depth (default 128 for BW, 1 for LAT).\
--w, \--warm_up Choose to use warm_up function, only for read/write/atomic bw test.\
--y, \--infinite\[second\] Run perftest infinitely, only available for BW test.\
-Print period for infinite mode, default 2 seconds.\
-\--single_path, Bonding device works in single path mode.\
-\--inf_period_ms Print period (ms) for infinite mode. Must be a multiple of 50. if set, value of infinite will be overwrite.\
-\--rate_limit \<rate\> Set the maximum rate of sent packages. default unit is \[Gbps\].\
-\--rate_units \<units\> Set the units for rate, MBps (M), Gbps (G)(default) or Kpps (P).\
-\--burst_size \<size\> Set the amount of pkts to send in a burst when using rate limiter.\
-\--sub_trans_mode \<sub_mode\> Sub transport mode: 0 for non ordering(default), 1 for TA dest ordering (only valid for trans_mode RC).\
-\--enable_ipv6 enable ipv6 for server ip. default disable.\
-\--enable_credit enable send credit, default: disable.\
-\--credit_threshold \<num\> Exceed the threshold and do not send, default: jfr_depth \* 3 / 4.\
-\--credit_notify_cnt \<num\> Notify the send side after recv packets, default: jfr_depth / 4.\
-\--jettys_pre_jfr \<num\> How many jettys share a jfr.\
-\--seg_pre_jetty enable a segment for each Jetty, default: disable.\
-\--enable_imm enable immediate data for write or send, default: disable.\
-\--enable_err_continue Enable continue running when cr errors, default: disable.\
-\--notify_data \<value\> enable write_with_notify, value is ensured by hardware.\
-\--enable_user_tp Enable user tp for UB device, if enable,UVS is not required. default: disable.\
-\--oor_en Enable out of order for user_tp, default: disable.\
-\--spray_en Enable multipathing for user_tp, default: disable.\
-\--cc_en Enable congestion control for user_tp, default: disable.\
-\--cc_alg \<num\> Set congestion Control Algorithm for user_tp, \[0, 7\], default: 0.\
-\--retry_num \<num\> Set retry num for user_tp, default: 7.\
-\--ack_timeout \<num\> Set ack timeout for user_tp, default: 15.\
-\--sge_num \<num\> Set sge_num for wr, default: 1.\
-\--enable_write_dirty \<time\> Enable write dirty and set the period of write dirty, default: disable.\
-\--pair_num \<num\> Enable multiplayer model and set the number of connection, default: disable.\
-\--async_import Enable asynchronous connection establishment\
-\--tp_aware Enable tp aware connect, default: disable.\
-\--tp_reuse Reuse tp in RM mode if enable tp aware, default: disable.\
-\--ctp Use ctp, default: disable.\
-\--jetty_id Set the jetty_id, default: 0.\
-\--wait_jfc_timeout Set timeout parameter for urma_wait_jfc (in milliseconds),\
-timeout = 0: return immediately even if no events are ready,\
-timeout = -1: an infinite timeout,\
-default: 1000(1s).
+```
+Options:
+  -a, --all[order]            Run sizes from 2 till 2^23 (default 2^16), order: exponent of 2.
+  -A, --atomic_type <type>    Specify atomic type, {cas|faa}.
+  -b, --simplex_mode          Run with simplex mode(jfs/jfr), duplex jetty mode for reserved.
+  -B, --bidirection           Measure bidirectional bandwidth (default unidirectional).
+  -c, --jfc_inline            Enable jfc_inline to upgrade latency performance.
+  -C, --jfc_depth <dep>       Size of jfc depth (default 4096 for bw, 1024 for ip bw, 1 for lat).
+  -d, --dev <dev_name>        The name of ubep device.
+  -D, --duration <second>     Run test for a customized period of seconds, this cfg covers iters.
+  -e, --use_jfce              use jfc event.
+  --eid_idx                   Specified eid index of device.
+  -E, --err_timeout <time>    the timeout before report error, ranging from [0, 31],
+                              the actual timeout in usec is caculated by: 4.096*(2^err_timeout).
+  -f, --use_flat_api          Choose to use flat API, only works in SIMPLEX mode.
+  -F, --cpu_freq_f            To report warnings when CPU frequency drifts, default as NOT.
+  -h, --help                  Show help info.
+  -I, --inline_size <size>    Max size of message to be sent in inline.
+  -j, --share_jfr <true/false> share jfr on create jetty.
+  -J, --jettys <num of jetty> Num of jettys(default 1).
+  -K, --token_policy <policy> default 0: NONE, 1: PLAIN_TEXT, 2: SIGNED, 3: ALL_ENCRYPTED.
+  -n, --iters <iters>         Number of exchanges (at least 5, default 10000).
+  -N, --no_peak               Cancel peak-bw calculation.
+  -l, --jfs_post_list <size>  Post list of send WQEs of <list size> size.
+  -L, --lock_free             Jetty's interior is unlocked.
+  -O, --priority              set the priority of JFS, ranging from [0, 15].
+  -p, --trans_mode <mode>     Transport mode: 0 for RM(default), 1 for RC, 2 for UM.
+  -P, --port <id>             Server port for bind or connect, default 21115.
+  -Q, --cq_mod <num>          Generate Cqe only after <--cq-mod> completion.
+  -r, --jfr_post_list <size>  Post list of receive WQEs of <list size> size.
+  -R, --jfr_depth <dep>       Size of jfr depth (default 512 for BW, 1 for LAT).
+  -s, --size <size>           Size of message to exchange (default 2).
+  -S, --server <ip>           Server ip for bind or connect, default: 127.0.0.1 .
+  -T, --jfs_depth <dep>       Size of jfs depth (default 128 for BW, 1 for LAT).
+  -w, --warm_up               Choose to use warm_up function, only for read/write/atomic bw test.
+  -y, --infinite[second]      Run perftest infinitely, only available for BW test.
+                              Print period for infinite mode, default 2 seconds.
+  --single_path               Bonding device works in single path mode.
+  --inf_period_ms             Print period (ms) for infinite mode. Must be a multiple of 50.
+                              if set, value of infinite will be overwrite.
+  --rate_limit <rate>         Set the maximum rate of sent packages. default unit is [Gbps].
+  --rate_units <units>        Set the units for rate, MBps (M), Gbps (G)(default) or Kpps (P).
+  --burst_size <size>         Set the amount of pkts to send in a burst when using rate limiter.
+  --sub_trans_mode <sub_mode> Sub transport mode: 0 for non ordering(default),
+                              1 for TA dest ordering (only valid for trans_mode RC).
+  --enable_ipv6               enable ipv6 for server ip. default disable.
+  --enable_credit             enable send credit, default: disable.
+  --credit_threshold <num>    Exceed the threshold and do not send, default: jfr_depth * 3 / 4.
+  --credit_notify_cnt <num>   Notify the send side after recv packets, default: jfr_depth / 4.
+  --jettys_pre_jfr <num>      How many jettys share a jfr.
+  --seg_pre_jetty             enable a segment for each Jetty, default: disable.
+  --enable_imm                enable immediate data for write or send, default: disable.
+  --enable_err_continue       Enable continue running when cr errors, default: disable.
+  --notify_data <value>       enable write_with_notify, value is ensured by hardware.
+  --enable_user_tp            Enable user tp for UB device, if enable, UVS is not required.
+                              default: disable.
+  --oor_en                    Enable out of order for user_tp, default: disable.
+  --spray_en                  Enable multipathing for user_tp, default: disable.
+  --cc_en                     Enable congestion control for user_tp, default: disable.
+  --cc_alg <num>              Set congestion Control Algorithm for user_tp, [0, 7], default: 0.
+  --retry_num <num>           Set retry num for user_tp, default: 7.
+  --ack_timeout <num>         Set ack timeout for user_tp, default: 15.
+  --sge_num <num>             Set sge_num for wr, default: 1.
+  --enable_write_dirty <time> Enable write dirty and set the period of write dirty, default: disable.
+  --pair_num <num>            Enable multiplayer model and set the number of connection,
+                              default: disable.
+  --async_import              Enable asynchronous connection establishment
+  --tp_aware                  Enable tp aware connect, default: disable.
+  --tp_reuse                  Reuse tp in RM mode if enable tp aware, default: disable.
+  --ctp                       Use ctp, default: disable.
+  --jetty_id                  Set the jetty_id, default: 0.
+  --wait_jfc_timeout          Set timeout parameter for urma_wait_jfc (in milliseconds),
+                              timeout = 0: return immediately even if no events are ready,
+                              timeout = -1: an infinite timeout,
+                              default: 1000(1s).
+```
 
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+
+| 符号 | 参数名称 | 参数类型 | 说明 | 是否输入参数 | 取值范围 | 默认取值 |
+|---|---|---|---|---|---|---|
 | 符号          | 参数名称            | 参数类型 | 说明                                                                                                                                                                                                                                                       | 是否输入参数 | 取值范围                             | 默认取值                       |
-+:==============+:====================+:=========+:===========================================================================================================================================================================================================================================================+:=============+:=====================================+:===============================+
-| -a            | all                 | uint32_t | 是否自动测试并输出包长从2到2\^23结果，注意该参数与-s冲突；                                                                                                                                                                                                 | 可选         | 1\~23                                | 16                             |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          | 可选参数指定order(即2次幂数)                                                                                                                                                                                                                               |              |                                      |                                |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+| -a            | all                 | uint32_t | 是否自动测试并输出包长从2到2^23结果，注意该参数与-s冲突；可选参数指定order(即2次幂数)                                                                                                                                                                                                                               | 可选         | 1\~23                                | 16                             |
 | -A            | atomic_type         | enum     | 原子操作类型                                                                                                                                                                                                                                               | 是           | cas或faa                             | cas                            |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -b            | simplex_mode        | bool     | 是否开启simplex_mode也就是单工模式。在 simplex 模式下，数据传输只在一个方向上进行，例如 JFS (Just a Flash Storage) 或 JFR (Just a Flash RAM)。                                                                                                             | 否           | \-                                   | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -B            | bidirection         | bool     | 这个选项的作用是在进行带宽测试时，测量数据在两个方向上的传输速率，即从发送方到接收方，以及从接收方返回到发送方的速率。在默认情况下，如果没有使用 -B 选项，测试工具会默认执行单向带宽测试，仅测量数据从发送方到接收方的传输速率。                           | 否           | \-                                   | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -c            | jfc_inline          | bool     | 是否启用jfc_inline，启动时，它允许将小数据包（通常小于8字节或16字节）直接写入到CQE（Completion Queue Entry，完成队列项）中                                                                                                                                 | 否           | \-                                   | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-| -C            | jfc_depth           | uint32_t | jfc深度，对于带宽测试（bw），默认的JFC深度是 4096；对于IP带宽测试（ip bw），默认的JFC深度是 1024；对于延迟测试（lat），默认的JFC深度是1                                                                                                                    | 是           | 0 \~ U32_MAX                         | 时延测试：1                    |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      | 带宽测试4096                   |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-| -d            | dev                 | char \*  | 设备名称                                                                                                                                                                                                                                                   | 是           | \-                                   | \-                             |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+| -C            | jfc_depth           | uint32_t | jfc深度，对于带宽测试（bw），默认的JFC深度是 4096；对于IP带宽测试（ip bw），默认的JFC深度是 1024；对于延迟测试（lat），默认的JFC深度是1                                                                                                                    | 是           | 0 \~ U32_MAX                         | 时延测试：1 / 带宽测试4096                   |
+| -d            | dev                 | char *  | 设备名称                                                                                                                                                                                                                                                   | 是           | \-                                   | \-                             |
 | -D            | duration            | uint32_t | 指定用例运行时长，单位s，注意该配置与-n冲突，该设置会覆盖掉iter                                                                                                                                                                                            | 是           | 4 \~ U32_MAX                         | 5                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -e            | use_jfce            | bool     | 是否采用事件通知机制                                                                                                                                                                                                                                       | 否           | \-                                   | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | \--eid idx    | eid index           | uint32_t | EID（Entity ID）是网络通信中设备的唯一标识符，它在URMA的上下文中用于定义和管理网络通信的端点。                                                                                                                                                             |              |                                      |                                |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-| -E            | err_timeout         | uint8_t  | 创建jfs或jetty时，指定作为发送端的错误超时参数，超时时间为4.096\*(2\^err_timeout)                                                                                                                                                                          | 是           | 0\~31                                | 17                             |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+| -E            | err_timeout         | uint8_t  | 创建jfs或jetty时，指定作为发送端的错误超时参数，超时时间为4.096*(2^err_timeout)                                                                                                                                                                          | 是           | 0\~31                                | 17                             |
 | -f            | use_flat_api        | bool     | 指定采用urma_send/urma_recv/urma_read/urma_write等四种数据面接口，必须搭配jfs/jfr使用,flat API 是相对于更底层的接口,仅在 simplex mode 下有效                                                                                                               | 否           | \-                                   | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -F            | cpu_freq_f          | bool     | 采用不同算法获取CPU负载差异较大时，是否上报异常告警                                                                                                                                                                                                        | 否           | \-                                   | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -h            | help                | \-       | 打印使用说明                                                                                                                                                                                                                                               | 否           | \-                                   | \-                             |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -I(ASCII 73)  | inline_size         | uint32_t | 内联值                                                                                                                                                                                                                                                     | 是           | 0\~912                               | 时延测试默认220，带宽测试默认0 |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -j            | share_jfr           | bool     | 是否采用共享jfr                                                                                                                                                                                                                                            | 是           | true/false                           | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-| -J            | jettys              | uint32_t | jetty的数量                                                                                                                                                                                                                                                | 是           | 1\~NA\*                              | 1                              |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          | \*说明：jetty数量理论上限取决于/sys/class/ubcore/udmaxx/max_jetty规格，与芯片能力有关，因此不设置人为上限；管控面多jetty场景，会针对每对jetty消耗tp资源，因此用例能否执行，也取决于管控面配置的tp上限，这一上限不在端侧urma_perftest工具说明，取决于管控面 |              | NA\*参见jetty数量的说明              |                                |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          |                                                                                                                                                                                                                                                            |              | 取65535与芯片真实jetty数量上限的小值 |                                |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+| -J            | jettys              | uint32_t | jetty的数量。*说明：jetty数量理论上限取决于/sys/class/ubcore/udmaxx/max_jetty规格，与芯片能力有关，因此不设置人为上限；管控面多jetty场景，会针对每对jetty消耗tp资源，因此用例能否执行，也取决于管控面配置的tp上限，这一上限不在端侧urma_perftest工具说明，取决于管控面 | 是           | 1\~NA*（NA*参见jetty数量的说明）     | 1（取65535与芯片真实jetty数量上限的小值）                              |
 | -K            | token_policy        | uint32_t | 配置token_policy策略                                                                                                                                                                                                                                       | 是           | 0\~3                                 | 0                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-| -n            | iters               | uint64_t | 迭代次数，注意该参数与-D冲突                                                                                                                                                                                                                               | 是           | 最小值为5 ，默认值为1000             | 带宽测试：50000                |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      | 时延测试：10000                |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+| -n            | iters               | uint64_t | 迭代次数，注意该参数与-D冲突                                                                                                                                                                                                                               | 是           | 最小值为5 ，默认值为1000             | 带宽测试：50000 / 时延测试：10000                |
 | -N            | no_peak             | bool     | 取消带宽的峰值计算，注意该参数仅用于带宽测试                                                                                                                                                                                                               | 否           | \-                                   | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -l(ASCII 108) | jfs_post_list       | uint32_t | 发送端WQE的数量                                                                                                                                                                                                                                            | 是           | 与其他参数相关                       | 1                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -L            | lock_free           | bool     | 命令中使用-L, \--lock_free选项时，Jetty内部的数据结构将被配置为无锁的。                                                                                                                                                                                    | 否           | \-                                   | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -O            | priority            | uint8_t  | 配置jfs的权限                                                                                                                                                                                                                                              | 是           | 0\~15                                | 15                             |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -p            | trans_mode          | uint32_t | 配置urma的传输模式，0是RM模式，1是RC模式，2是UM模式                                                                                                                                                                                                        | 是           | 0\~2                                 | 0                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -P            | port                | uint16_t | socket连接使用的端口号                                                                                                                                                                                                                                     | 是           | 无限定                               | 21115                          |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -Q            | cq_mod              | uint32_t | 发送端每隔多少次产生一次cq                                                                                                                                                                                                                                 | 是           | 1\~1024                              | 100                            |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 | -r            | jfr_post_list       | uint32_t | 接收端WQE的数量                                                                                                                                                                                                                                            | 是           | 无限定，具体参见说明                 | 1                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-| -R            | jfr_depth           | uint32_t | 接收端jetty的深度                                                                                                                                                                                                                                          | 是           | 1\~32768                             | 收发时延/收发带宽测试：512     |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          | 实际上是32768与真实芯片最大jfr深度的最大值，两者取小值作为上限                                                                                                                                                                                             |              |                                      | 其他测试：1                    |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-| -s            | size                | uint32_t | 传送单包的大小，注意该参数与-a冲突，两个参数不要同时使用                                                                                                                                                                                                   | 是           | 无限定                               | 原子操作测试：固定为8          |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      | 带宽测试：65536                |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      | 时延测试：2                    |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-| -S            | server              | char \*  | server端的ip，格式为X.X.X.X，是client端的必填项，默认值是127.0.0.1                                                                                                                                                                                         | 是           | 无限定                               | 127.0.0.1                      |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-| -T            | jfs_depth           | uint32_t | 发送端jetty的深度                                                                                                                                                                                                                                          | 是           | 1\~15000                             | 带宽测试：128                  |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      | 时延测试：1                    |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+| -R            | jfr_depth           | uint32_t | 接收端jetty的深度。实际上是32768与真实芯片最大jfr深度的最大值，两者取小值作为上限                                                                                                                                                                          | 是           | 1\~32768                             | 收发时延/收发带宽测试：512 / 其他测试：1     |
+| -s            | size                | uint32_t | 传送单包的大小，注意该参数与-a冲突，两个参数不要同时使用                                                                                                                                                                                                   | 是           | 无限定                               | 原子操作测试：固定为8 / 带宽测试：65536 / 时延测试：2          |
+| -S            | server              | char *  | server端的ip，格式为X.X.X.X，是client端的必填项，默认值是127.0.0.1                                                                                                                                                                                         | 是           | 无限定                               | 127.0.0.1                      |
+| -T            | jfs_depth           | uint32_t | 发送端jetty的深度                                                                                                                                                                                                                                          | 是           | 1\~15000                             | 带宽测试：128 / 时延测试：1                    |
 | -w            | warm_up             | bool     | 指定运行perftest之前开启预热模式,仅在读/写/原子操作的带宽测试中可生效                                                                                                                                                                                      | 否           | \-                                   | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-| -y            | infinite            | uint32_t | 带宽测试下指定无限模式；                                                                                                                                                                                                                                   | 可选         | \-                                   | 2                              |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          | 可选参数指定间隔打印数据的时间，单位秒，默认为2秒                                                                                                                                                                                                          |              |                                      |                                |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+| -y            | infinite            | uint32_t | 带宽测试下指定无限模式；可选参数指定间隔打印数据的时间，单位秒，默认为2秒                                                                                                                                                                                                                                   | 可选         | \-                                   | 2                              |
 | \--           | single_path         | bool     | 聚合设备工作模式选项，开启意味着所有网络流量都将通过聚合设备中的一个选定的物理接口传输                                                                                                                                                                     | 可选         |                                      | false                          |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-|               | inf_period_ms       | uint32_t | 配置ms级打印带宽信息。infinite mode为持续进行的带宽（BW）测试                                                                                                                                                                                              | 可选         | 50的倍数                             | 0                              |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          | 最小粒度50ms，并且必须是50ms的倍数，同时需要配置-y的时候生效。当既配置-y时间，又配置\--inf_period_ms参数，会已\--inf_period_ms为主。注意：会存在2ms内的误差                                                                                                |              |                                      |                                |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+|               | inf_period_ms       | uint32_t | 配置ms级打印带宽信息。infinite mode为持续进行的带宽（BW）测试。最小粒度50ms，并且必须是50ms的倍数，同时需要配置-y的时候生效。当既配置-y时间，又配置\--inf_period_ms参数，会已\--inf_period_ms为主。注意：会存在2ms内的误差                                                                                                | 可选         | 50的倍数                             | 0                              |
 | \-            | rate_limit          | uint32_t | 设置限速值，默认单位是Gbps                                                                                                                                                                                                                                 | 可选         | 无限定                               | 0                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-| \-            | rate_units          | char     | 限速值的单位，MBps (M), Gbps (G)(default) or Kpps (P)                                                                                                                                                                                                      | 可选         | \[MGP\]                              | G                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+| \-            | rate_units          | char     | 限速值的单位，MBps (M), Gbps (G)(default) or Kpps (P)                                                                                                                                                                                                      | 可选         | [MGP]                              | G                              |
 | \-            | burst_size          | uint32_t | 每次连续发送多少个报文，用于均衡流量,这个选项允许你指定在使用流量限制器（rate limiter）时，每次发送数据包（packets）的批量大小                                                                                                                             | 可选         | 无限定，配置过大会导致限速不准确     | jfs_depth配置值                |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | sub_trans_mode      | uint32_t | 指定sub_transport_mode，只在RC模式下配置，用于RS性能测试。0 表示非排序（Non-Ordering）模式，这是默认设置。1 表示目标地址排序（TA Dest Ordering）模式，这个选项只在 trans_mode 设置为 RC（Reliable Connection）时有效。                                     | 可选         | 0\~2                                 | 0                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | enable_ipv6         | bool     | server_ip使能IPv6，-S配置IPv6地址时必须配置该参数                                                                                                                                                                                                          | 可选         |                                      | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | enable_credit       | bool     | 在send测试时，是否开启credit流控，开启会导致流量下降                                                                                                                                                                                                       | 否           |                                      | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-|               | credit_threshold    | uint32_t | 指定发送端判断收包来不及处理的阈值。配置过大可能丢包。具体需要根据实际情况配置                                                                                                                                                                             | 是           | 不限定                               | jfr_depth \* 3 / 4             |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-|               | credit_notify_cnt   | uint32_t | 这个参数用于配置在接收方接收到一定数量的包后，向发送方发送通知的机制。这里的 \<num\> 是一个可配置的数值，用于设置接收方在多少个包之后发送一次通知给发送方。                                                                                                | 是           | 不限定                               | jfr_depth / 4                  |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+|               | credit_threshold    | uint32_t | 指定发送端判断收包来不及处理的阈值。配置过大可能丢包。具体需要根据实际情况配置                                                                                                                                                                             | 是           | 不限定                               | jfr_depth * 3 / 4             |
+|               | credit_notify_cnt   | uint32_t | 这个参数用于配置在接收方接收到一定数量的包后，向发送方发送通知的机制。这里的 <num\> 是一个可配置的数值，用于设置接收方在多少个包之后发送一次通知给发送方。                                                                                                | 是           | 不限定                               | jfr_depth / 4                  |
 |               | jettys_pre_jfr      | uint32_t | 指定多少个jetty共享一个jfr                                                                                                                                                                                                                                 | 可选         | 不限定                               | jettys                         |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | seg_pre_jetty       | bool     | 使能每个jetty都配置一个seg用于测试                                                                                                                                                                                                                         | 可选         |                                      | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | enable_imm          | bool     | 使能imm测试                                                                                                                                                                                                                                                | 可选         |                                      | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | enable_err_continue | bool     | 当发生cr错误时，使能继续发包                                                                                                                                                                                                                               | 可选         |                                      | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | notify_data         | uint64_t | 使能 write_notify操作，地址必须与硬件相适配，否者会有异常                                                                                                                                                                                                  | 可选         | 无限定                               | 0                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | enable_user_tp      | bool     | 使能用户态建链，当这个选项被启用时，用户 TP 可以用于数据传输，而无需使用通用虚拟交换机（UVS）                                                                                                                                                              | 可选         |                                      | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | oor_en              | bool     | 用户态建链开启乱序选择                                                                                                                                                                                                                                     | 可选         |                                      | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | spray_en            | bool     | 用户态建链开启多路径                                                                                                                                                                                                                                       | 可选         |                                      | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | cc_en               | bool     | 用户态建链开启拥塞控制算法                                                                                                                                                                                                                                 | 可选         |                                      | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-|               | cc_alg              | uint32_t | 用户态建链配置拥塞控制算法                                                                                                                                                                                                                                 | 可选         | \[0, 7\]                             | 0                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+|               | cc_alg              | uint32_t | 用户态建链配置拥塞控制算法                                                                                                                                                                                                                                 | 可选         | [0, 7]                             | 0                              |
 |               | retry_num           | uint32_t | 用户态建链配置重试次数                                                                                                                                                                                                                                     | 可选         |                                      | 7                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | ack_timeout         | uint32_t | 用户态建链配置ack超时时间                                                                                                                                                                                                                                  | 可选         |                                      | 15                             |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | sge_num             | uint32_t | 配置单wr多sge测试                                                                                                                                                                                                                                          | 可选         |                                      | 默认关闭                       |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | enable_write_dirty  | bool     | 使能写入脏数据的功能                                                                                                                                                                                                                                       | 可选         |                                      | false                          |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | pair_num            | uint32_t | server端应设置为client个数；client端应设置为server个数；设置后，会自动修改jetty数目保持一致                                                                                                                                                                | 可选         |                                      | 1                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | async_import        | \-       | 启用异步建链                                                                                                                                                                                                                                               | 可选         |                                      |                                |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | tp_aware            | bool     | 用于启用传输路径（Transport Path，TP）感知的连接                                                                                                                                                                                                           | 可选         |                                      | false                          |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
 |               | tp_reuse            | bool     | 允许在 RM 模式下复用传输路径（TP）                                                                                                                                                                                                                         |              |                                      | false                          |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-|               | ctp                 | uint32_t | CTP是一个简化版的传输层，它不进行连接管理（无连接                                                                                                                                                                                                          | 可选         | /\* 0: default, tp; 1: ctp \*/       | 0                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+|               | ctp                 | uint32_t | CTP是一个简化版的传输层，它不进行连接管理（无连接                                                                                                                                                                                                          | 可选         | /* 0: default, tp; 1: ctp */       | 0                              |
 |               | jetty_id            | uint32_t | 可以自主设定jetty_id值，必须唯一                                                                                                                                                                                                                           | 可选         |                                      | 0                              |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
-|               | wait_jfc_timeout    | int32_t  | 为urma_wait_jfc接口增加超时参数设置（单位：毫秒）；                                                                                                                                                                                                        | 可选         |                                      | 1000                           |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          | 超时时长=0：立即返回即使没有完成事件                                                                                                                                                                                                                       |              |                                      |                                |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          | 超时时长=-1：无限等待                                                                                                                                                                                                                                      |              |                                      |                                |
-|               |                     |          |                                                                                                                                                                                                                                                            |              |                                      |                                |
-|               |                     |          | 超时时长默认设置为1000毫秒（1秒）。                                                                                                                                                                                                                        |              |                                      |                                |
-+---------------+---------------------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------+--------------------------------------+--------------------------------+
+|               | wait_jfc_timeout    | int32_t  | 为urma_wait_jfc接口增加超时参数设置（单位：毫秒）。超时时长=0：立即返回即使没有完成事件，超时时长=-1：无限等待，超时时长默认设置为1000毫秒（1秒）                                                                                                                                                                                                        | 可选         |                                      | 1000                           |
 
-![](figures/urma-tool-perftest-01.png)
 
-urma_perftest的参数值一般不做校验，用户需要按推荐范围配置；配置超过范围的配置，不保证正常运行。
-
-![](figures/urma-arch-ctrl-event-01.png)
+![](figures/urma_info.png)
 
 **urma_perftest参数隐含关系**
 
@@ -2323,13 +1853,13 @@ urma_perftest的参数值一般不做校验，用户需要按推荐范围配置�
 
   8.  多sge测试依赖芯片支持，部分芯片（例如1822 roce）无法正常运行。
 
-  9.  试用共享jfr时，cfg-\>jfr_depth \* (cfg-\>jettys / cfg-\>jettys_pre_jfr)) 必须大于等于 (cfg-\>jettys \* cfg-\>jfr_post_list) 。
+  9.  试用共享jfr时，cfg-\>jfr_depth * (cfg-\>jettys / cfg-\>jettys_pre_jfr)) 必须大于等于 (cfg-\>jettys * cfg-\>jfr_post_list) 。
 
   10. 如果要启用安全认证建链，需要同时配置ca_path、cert_path、prkey_path这三个选项，且保证使用的是IB、IP设备。
 
   11. jfs_post_list、jfr_post_list、jfr_depth参数会影响限流的门限值，use_jfce参数会影响-B双向函数流程 暂不支持加入
 
-![](figures/urma-arch-data-unilateral-02.png)
+![](figures/urma_caution.png)
 
 - 只有带宽测试才支持配置限速；atomic和双向send测试不支持配置限速模式。
 
@@ -2367,236 +1897,211 @@ urma_perftest write_lat -d hrn0_0 -S 10.151.151.77 -n 100000 -a -I 128
 
 5.  配置限速
 
-urma_perftest write_bw -d hrn0_0 -a \--rate_limit 0.1 \--rate_units G \--burst_size 1\
+```c
+urma_perftest write_bw -d hrn0_0 -a \--rate_limit 0.1 \--rate_units G \--burst_size 1
+```
+
 urma_perftest write_bw -d hrn0_0 -a -S 10.151.151.77 \--rate_limit 0.1 \--rate_units G \--burst_size 1
 
 ![](figures/urma-tool-perftest-06.png)
 
 \-\-\--结束
 
-### urma_admin
+### 6.4.2 urma_admin
 
 urma框架通过sysfs呈现设备不同粒度资源的属性，包含jetty资源的各种属性、端口的状态等。urma_admin工具可以通过命令行直接查询设备属性和状态，并可以配置部分属性，例如 更新eid、切换eid更新模式、查询设备属性等。
 
 1.  命令格式
 
-Usage: urma_admin command \[command options\]\
-urma_admin URMA configuration tool, chips do not support some values, which might be invalid.\
-Command syntax:\
-show \[\--dev\] \[\--whole\] show all UB devices info.\
-show topo \[node_id\] show topo_info of the specified node.\
-when node_id is empty, will show the current node.\
-add_eid \<\--dev\> \<\--idx\> \[\--ns /proc/\$pid/ns/net\] add eid of UB device, only for uvs,\
-control plane not support.\
-del_eid \<\--dev\> \<\--idx\> del eid of UB device, only for uvs,\
-control plane not support.\
-set_eid_mode \<\--dev\> \[\--eid_mode\] change eid mode of MUE device, only for\
-uvs, control plane not support.\
-set_reserved_jetty \<\--dev\> \<\--min_id\> \<\--max_id\> set reserved jetty id range.\
-show_stats \<\--dev\> \<\--resource_type\> \<\--key\> show run stats of UB device,\
-control plane not support.\
-show_res \<\--dev\> \<\--resource_type\> \<\--key\> \[\--key_ext\]\
-\<\--key_cnt\> show resources of UB device.\
-list_res \<\--dev\> \<\--resource_type\> \[\--key\] \[\--key_ext\]\
-\[\--key_cnt\] list resources of UB device.\
-set_ns_mode \<\--ns_mode (exclusive: 0) \| (shared: 1) \> set ns mode for UB devices.\
-set_dev_ns \<\--dev\> \<\--ns /proc/\$pid/ns/net\> set net namespace of UB device.\
-Options:\
--h, \--help show help info.\
--d, \--dev \<dev_name\> the name of UB device.\
--e, \--eid \<eid\> the eid of UB device.\
--m, \--eid_mode \<eid_mode\> the eid mode of UB device,/\
-(change to dynamic_mode: cmd with -m,\
-change to static_mode: cmd without -m).\
--v, \--ue_idx \<ue_idx\> the ue_idx of ubep device.\
-\" when ue_idx == 0xffff or empty, it refers to MUE.\
--i, \--idx \<idx\> idx defaults to 0.\
--w, \--whole show whole information.\
--R, \--resource_type \<type\> config stats type with 1(tp_id/vtp, not support)/\
-2(tp, not support)/3(tpg, not support)/4(jfs)/\
-5(jfr)/6(jetty)/\
-7(jetty group, not support)/8(dev).\
-config res type with 1(tp_id/vtp, not support)/\
-2(tp, not support)/3(tpg, not support)/\
-4(utp, not support)/5(jfs)/6(jfr)/7(jetty)/\
-8(jetty group)/9(jfc)/10(rc)/11(seg)/\
-12(dev ta, not support)/13(dev tp, not support).\
--k, \--key \<key\> config stats/res key, config stats key with: .\
-1(tp_id/vtpn, not support)/2(tpn, not support)/\
-3(tpgn, not support)/4(jfs_id)/5(jfr_id)/\
-6(jetty_id)/7(jetty group id, not support)/\
-8(dev, no key)\
-config res key with:\
-1(tp_id/vtpn, not support)/2(tpn, not support)/\
-3(tpgn, not support)/4(utpn, not support)/\
-5(jfs_id)/6(jfr_id)/7(jetty_id)/\
-8(jetty group id)/9(jfc_id)/\
-10(rc_id, not support)/11(token_id)/\
-12(eid, not support)/13(eid, not support).\
--K, \--key_ext \<key_ext\> config key_ext for tp_id/vtp res.\
--C, \--key_cnt \<key\> config key_cnt for rc res.\
--n, \--ns \</proc/\$pid/ns/net\> ns path.\
--M, \--ns_mode \<0 or 1\> ns_mode with (exclusive: 0) \| (shared: 1).\
--l, \--min_id \<0 - U32_MAX\> min reserved jetty id, U32_MAX means invalid.\
--u, \--max_id \<0 - U32_MAX\> max reserved jetty id, U32_MAX means invalid.
+```
+Usage: urma_admin command [command options]
+ urma_admin URMA configuration tool, chips do not support some values, which might be invalid.
+Command syntax:
+  show [--dev] [--whole]                                  show all UB devices info.
+  show topo [node_id]                                     show topo_info of the specified node.
+                                                          when node_id is empty, will show the current node.
+  add_eid <--dev> <--idx> [--ns /proc/$pid/ns/net]      add eid of UB device, only for uvs,
+                                                          control plane not support.
+  del_eid <--dev> <--idx>                                 del eid of UB device, only for uvs,
+                                                          control plane not support.
+  set_eid_mode <--dev> [--eid_mode]                       change eid mode of MUE device, only for
+                                                          uvs, control plane not support.
+  set_reserved_jetty <--dev> <--min_id> <--max_id>       set reserved jetty id range.
+  show_stats <--dev> <--resource_type> <--key>            show run stats of UB device,
+                                                          control plane not support.
+  show_res <--dev> <--resource_type> <--key> [--key_ext]
+           <--key_cnt>                                    show resources of UB device.
+  list_res <--dev> <--resource_type> [--key] [--key_ext]
+           [--key_cnt]                                    list resources of UB device.
+  set_ns_mode <--ns_mode (exclusive: 0) | (shared: 1)>   set ns mode for UB devices.
+  set_dev_ns <--dev> <--ns /proc/$pid/ns/net>             set net namespace of UB device.
+Options:
+  -h, --help                                  show help info.
+  -d, --dev <dev_name>                        the name of UB device.
+  -e, --eid <eid>                             the eid of UB device.
+  -m, --eid_mode <eid_mode>                   the eid mode of UB device,/
+                                              (change to dynamic_mode: cmd with -m,
+                                              change to static_mode: cmd without -m).
+  -v, --ue_idx <ue_idx>                       the ue_idx of ubep device.
+                                              when ue_idx == 0xffff or empty, it refers to MUE.
+  -i, --idx <idx>                             idx defaults to 0.
+  -w, --whole                                 show whole information.
+  -R, --resource_type <type>                  config stats type with 1(tp_id/vtp, not support)/
+                                                2(tp, not support)/3(tpg, not support)/4(jfs)/
+                                                5(jfr)/6(jetty)/
+                                                7(jetty group, not support)/8(dev).
+                                              config res type with 1(tp_id/vtp, not support)/
+                                                2(tp, not support)/3(tpg, not support)/
+                                                4(utp, not support)/5(jfs)/6(jfr)/7(jetty)/
+                                                8(jetty group)/9(jfc)/10(rc)/11(seg)/
+                                                12(dev ta, not support)/13(dev tp, not support).
+  -k, --key <key>                             config stats/res key, config stats key with:
+                                                1(tp_id/vtpn, not support)/2(tpn, not support)/
+                                                3(tpgn, not support)/4(jfs_id)/5(jfr_id)/
+                                                6(jetty_id)/7(jetty group id, not support)/
+                                                8(dev, no key)
+                                              config res key with:
+                                                1(tp_id/vtpn, not support)/2(tpn, not support)/
+                                                3(tpgn, not support)/4(utpn, not support)/
+                                                5(jfs_id)/6(jfr_id)/7(jetty_id)/
+                                                8(jetty group id)/9(jfc_id)/
+                                                10(rc_id, not support)/11(token_id)/
+                                                12(eid, not support)/13(eid, not support).
+  -K, --key_ext <key_ext>                     config key_ext for tp_id/vtp res.
+  -C, --key_cnt <key>                         config key_cnt for rc res.
+  -n, --ns </proc/$pid/ns/net>                ns path.
+  -M, --ns_mode <0 or 1>                      ns_mode with (exclusive: 0) | (shared: 1).
+  -l, --min_id <0 - U32_MAX>                  min reserved jetty id, U32_MAX means invalid.
+  -u, --max_id <0 - U32_MAX>                  max reserved jetty id, U32_MAX means invalid.
+```
 
 2.  功能描述
 
-urma_admin show \--dev \<DEV_NAME\> \--whole 用于查询设备属性信息\
-urma_admin add_eid \--dev \<DEV_NAME\> \--idx \[NUM\] \--ns \[进程net路径\]，用于给设备设置静态eid, idx 来源于uvs ueid表项序号， \--ns 是可选项，用于容器场景设置eid。\
-urma_admin del_eid \--dev \<DEV_NAME\> \--idx \[NUM\] , 用于删除设备的静态eid, idx 也来源于uvs ueid表项序号。\
-urma_admin set_eid_mode \--dev \<DEV_NAME\> -m/\--eid_mode，带-m参数切换eid动态模式，不带参数切换eid静态模式。\
-urma_admin set_reserved_jetty \--dev \<DEV_NAME\> -l/\--min_id \<MIN_ID\> -u/\--max_id \<MAX_ID\>，设置保留的jetty id范围（MIN_ID、MAX_ID：\[0,U32_MAX)）。\
-urma_admin show_stats \--dev \<DEV_NAME\> \--resource_type \[TYPE\] \--key \[KEY\] 用于查询 jfs/jfr/jetty/jetty_group 类型的 tx rx pktx、bytes、pkt_err的数目\
-urma_admin show_topo ，显示bonding设备的拓扑信息。\
-urma_admin show_res \--dev \<DEV_NAME\> \--resource_type \<TYPE\> \--key \<KEY\> \--key_ext \[KEY_EXT\] \--key_cnt \[KEY_CNT\] 用户查询jfs/jfr/jetty/jetty_grp/jfc/rc/seg/dev_ta_ctx 属性信息。\
-urma_admin list_res \--dev \<DEV_NAME\> \--resource_type \<TYPE\> \--key \<KEY\> \--key_ext \[KEY_EXT\] \--key_cnt \[KEY_CNT\] 用户查询jfs/jfr/jetty/jetty_grp/jfc/rc/seg 列表信息。\
-urma_admin set_ns_mode \--ns_mode \<NS_MODE\>，用于设置namespace的模式。\
-urma_admin set_dev_ns \--dev \<DEV_NAME\> \--ns \<NS\>，用于设置设备的namespace。
+```
+urma_admin show --dev <DEV_NAME> --whole                         查询设备属性信息
+urma_admin add_eid --dev <DEV_NAME> --idx [NUM] --ns [进程net路径] 给设备设置静态eid
+urma_admin del_eid --dev <DEV_NAME> --idx [NUM]                   删除设备的静态eid
+urma_admin set_eid_mode --dev <DEV_NAME> -m/--eid_mode           切换eid模式（带-m为动态，不带为静态）
+urma_admin set_reserved_jetty --dev <DEV_NAME> -l/--min_id <MIN_ID> -u/--max_id <MAX_ID>  设置保留jetty id范围
+urma_admin show_stats --dev <DEV_NAME> --resource_type [TYPE] --key [KEY]  查询jfs/jfr/jetty/jetty_group的tx/rx统计
+urma_admin show_topo                                               显示bonding设备拓扑信息
+urma_admin show_res --dev <DEV_NAME> --resource_type <TYPE> --key <KEY> --key_ext [KEY_EXT] --key_cnt [KEY_CNT]  查询资源属性
+urma_admin list_res --dev <DEV_NAME> --resource_type <TYPE> --key <KEY> --key_ext [KEY_EXT] --key_cnt [KEY_CNT]  查询资源列表
+urma_admin set_ns_mode --ns_mode <NS_MODE>                        设置namespace模式
+urma_admin set_dev_ns --dev <DEV_NAME> --ns <NS>                  设置设备namespace
+```
 
 3.  参数说明
 
-    1.  
+| 参数 | 参数全称 | 描述 | 是否输入参数 | 取值范围 | 默认取值 |
+|---|---|---|---|---|---|
+| -h | --help | 查询帮助信息 | 非必选 | 无限度 | 无 |
+| -d | --dev | 指定某个dev名称 | 必选 | 不超过63字节的字符串 | 无 |
+| -e | --eid | 指定某个eid值 | 必选 | 4-16 | 无 |
+| -m | --eid_mode | 指定eid动态模式切换，配置表示使用动态eid模式 | 不输入 | NA | 无 |
+| -v | --ue_idx | 指UB定设备idx，urma开源fe演进为ue | 必选 | 0~65535 | 无 |
+| -i | --idx | 指定某个idx值 | 必选 | 0~65535 | 无 |
+| -w | --whole | 指定查询设备整个信息 | 不输入 | NA | 无 |
+| -R | --resource_type | 指定资源的类型。show_stats type [4-8]: jfs/jfr/jetty/jetty group(not support)/dev。show_res type [5-12]: jfs/jfr/jetty/jetty_grp/jfc/rc/seg/dev_ta_ctx属性 | 必选 | show_stats【4-8】; show_res【5-12】 | 无 |
+| -k | --key | 指定key的数值。show_stats key: 1-8。show_res key: 1-13。详见show_stats/show_res类型定义 | 必选 | 详见描述部分 | 无 |
+| -K | --key_ext | 指定配置key的扩展信息 | 必选 | 0~UINT_MAX | 无 |
+| -C | --key_cnt | 指定key的数量 | show_res场景必选；list_res场景可选 | 0~UINT_MAX（理论值，实际上限取决于resource_type和对应芯片规格） | 无 |
+| -n | --ns | 指定eid的namespace，格式：/proc/$pid/ns/net | 必选 | 长度小于128的字符串 | 无 |
+| -M | --ns_mode | 制定ns的模式 | 必选 | exclusive: 0 \| shared: 1 | 无 |
+| -l | --min_id | jetty_id在min_id~max_id之间的jetty是公知jetty，配置min_id | 必选 | 0 - U32_MAX | 无 |
+| -u | --max_id | jetty_id在min_id~max_id之间的jetty是公知jetty，配置max_id | 必选 | 0 - U32_MAX | 无 |
+![](figures/urma_info.png)
 
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| 参数 | 参数全称         | 描述                                                                                                                                                                                                                                             | 是否输入参数                       | 取值范围                                                           | 默认取值 |
-+:=====+:=================+:=================================================================================================================================================================================================================================================+:===================================+:===================================================================+:=========+
-| -h   | \--help          | 查询帮助信息                                                                                                                                                                                                                                     | 非必选                             | 无限度                                                             | 无       |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -d   | \--dev           | 指定某个dev名称                                                                                                                                                                                                                                  | 必选                               | 不超过63字节的字符串                                               | 无       |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -e   | \--eid           | 指定某个eid值                                                                                                                                                                                                                                    | 必选                               | 4-16                                                               | 无       |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -m   | \--eid_mode      | 指定eid动态模式切换，配置表示使用动态eid模式                                                                                                                                                                                                     | 不输入                             | NA                                                                 | 无       |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -v   | \--ue_idx        | 指UB定设备idx，urma开源fe演进为ue                                                                                                                                                                                                                | 必选                               | 0\~65535                                                           | 无       |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -i   | \--idx           | 指定某个idx值                                                                                                                                                                                                                                    | 必选                               | 0\~65535                                                           | 无       |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -w   | \--whole         | 指定查询设备整个信息                                                                                                                                                                                                                             | 不输入                             | NA                                                                 | 无       |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -R   | \--resource_type | 指定资源的类型， 例如：                                                                                                                                                                                                                          | 必选                               | show_stats【4-8】                                                  | 无       |
-|      |                  |                                                                                                                                                                                                                                                  |                                    |                                                                    |          |
-|      |                  | show_stats type 【4-8】jfs/jfr/jetty/jetty group\[**not support**\]/dev                                                                                                                                                                          |                                    | show_res 【5-12】                                                  |          |
-|      |                  |                                                                                                                                                                                                                                                  |                                    |                                                                    |          |
-|      |                  | show_res type 【5-12】jfs/jfr/jetty/jetty_grp/jfc/rc/seg/dev_ta_ctx属性                                                                                                                                                                          |                                    |                                                                    |          |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -k   | \--key           | 指定key的数值                                                                                                                                                                                                                                    | 必选                               | 详见描述部分                                                       | 无       |
-|      |                  |                                                                                                                                                                                                                                                  |                                    |                                                                    |          |
-|      |                  | show_stats type 1(tp_id/vtpn, not support)/2(tpn, not support)/3(tpgn, not support)/4(jfs_id)/5(jfr_id)/6(jetty_id)/7(jetty group id, not support)/8(dev, no key)                                                                                |                                    |                                                                    |          |
-|      |                  |                                                                                                                                                                                                                                                  |                                    |                                                                    |          |
-|      |                  | show_res type 1(tp_id/vtpn, not support)/2(tpn, not support)/3(tpgn, not support)/4(utpn, not support)/5(jfs_id)/6(jfr_id)/7(jetty_id)/8(jetty group id)/9(jfc_id)/10(rc_id, not support)/11(token_id)/12(eid, not support)/13(eid, not support) |                                    |                                                                    |          |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -K   | \--key_ext       | 指定配置key的扩展信息                                                                                                                                                                                                                            | 必选                               | 0\~UINT_MAX                                                        | 无       |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -C   | \--key_cnt       | 指定key的数量                                                                                                                                                                                                                                    | show_res场景必选；list_res场景可选 | 0\~UINT_MAX（理论值，实际上限取决于resource_type和对应的芯片规格） | 无       |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -n   | \--ns            | 指定eid 的namespace                                                                                                                                                                                                                              | 必选                               | 长度小于128的字符串                                                | 无       |
-|      |                  |                                                                                                                                                                                                                                                  |                                    |                                                                    |          |
-|      |                  |                                                                                                                                                                                                                                                  |                                    | 格式：/proc/\$pid/ns/net                                           |          |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -M   | \--ns_mode       | 制定ns的模式                                                                                                                                                                                                                                     | 必选                               | exclusive: 0 \|shared : 1                                          | 无       |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -l   | \--min_id        | jetty_id在min_id\~max_id之间的jetty是公知jetty，这里配置min_id的值                                                                                                                                                                               | 必选                               | 0 - U32_MAX                                                        | 无       |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-| -u   | \--max_id        | jetty_id在min_id\~max_id之间的jetty是公知jetty，这里配置max_id的值                                                                                                                                                                               | 必选                               | 0 - U32_MAX                                                        | 无       |
-+------+------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------------------------+--------------------------------------------------------------------+----------+
-
-![](figures/urma-arch-ctrl-event-01.png)
-
-\[\]为可选参数，\<\>为必选参数。
+[]为可选参数，<\>为必选参数。
 
 urma_admin show -w参数说明：
 
 1.  atomic_feature：按照比特位组合取值，具体如下：
 
-compare_and_swap，取值为1；
+    compare_and_swap，取值为1；
 
-swap，取值为2；
+    swap，取值为2；
 
-fetch_and_add，取值为4；
+    fetch_and_add，取值为4；
 
-fetch_and_sub，取值为8；
+    fetch_and_sub，取值为8；
 
-fetch_and_or，取值为16；
+    fetch_and_or，取值为16；
 
-fetch_and_xor，取值为32；
+    fetch_and_xor，取值为32；
 
-例如atomic_feature取值为0x5，表示\[compare_and_swap(1) fetch_and_add(4)\]
+    例如atomic_feature取值为0x5，表示[compare_and_swap(1) fetch_and_add(4)]
 
 2.  trans_mode：按照比特位组合取值，具体如下
 
-RM(Reliable message)，取值为1；
+    RM(Reliable message)，取值为1；
 
-RC(Reliable connection)，取值为2；
+    RC(Reliable connection)，取值为2；
 
-UM(Unreilable message)，取值为4
+    UM(Unreilable message)，取值为4
 
-例如trans_mode取值为0x7，表示\[RM(Reliable message, 1) RC(Reliable connection, 2) UM(Unreilable message, 4)\]
+    例如trans_mode取值为0x7，表示[RM(Reliable message, 1) RC(Reliable connection, 2) UM(Unreilable message, 4)]
 
 3.  congestion_ctrl_alg：按照比特位组合取值，具体如下
 
-NONE，取值为1
+    NONE，取值为1
 
-DCQCN，取值为2
+    DCQCN，取值为2
 
-DCQCN_AND_NETWORK_CC，取值为4
+    DCQCN_AND_NETWORK_CC，取值为4
 
-LDCP，取值为8
+    LDCP，取值为8
 
-LDCP_AND_CAQM，取值为16
+    LDCP_AND_CAQM，取值为16
 
-LDCP_AND_OPEN_CC，取值为32
+    LDCP_AND_OPEN_CC，取值为32
 
-HC3，取值为64
+    HC3，取值为64
 
-DIP，取值为128
+    DIP，取值为128
 
-ACC，取值为256
+    ACC，取值为256
 
-例如congestion_ctrl_alg取值为0x13，表示\[NONE(1) DCQCN(2) LDCP_AND_CAQM(16)\]
+    例如congestion_ctrl_alg取值为0x13，表示[NONE(1) DCQCN(2) LDCP_AND_CAQM(16)]
 
 示例:
 
-\# urma_admin set_upi -d ubep_beta -v 1 \--i 2 \--upi 10\
-\# urma_admin show_upi -d ubep_beta -v 1
+```
+# urma_admin set_upi -d ubep_beta -v 1 --i 2 --upi 10
+# urma_admin show_upi -d ubep_beta -v 1
+# urma_admin add_eid --dev ubep_beta --idx 1
+# urma_admin add_eid --dev ubep_beta --idx 1 --ns /proc/11962/ns/net
+# urma_admin del_eid --dev ubep_beta --idx 1
+# urma_admin set_eid_mode -d ubep_beta -m
+# urma_admin set_eid_mode -d ubep_beta
+# urma_admin show_stats -d ubep_beta --resource_type 5 --key 2
+# urma_admin show_res -d ubep_beta --resource_type 5 --key 1 -C 1
+# urma_admin list_res -d ubep_beta --resource_type 5 --key 1
+# urma_admin set_ns_mode -M 0
+# urma_admin set_reserved_jetty -d bonding_dev_0 -l 0 -u 4294967295
+```
 
-\# urma_admin add_eid \--dev ubep_beta \--idx 1\
-\# urma_admin add_eid \--dev ubep_beta \--idx 1 \--ns /proc/11962/ns/net
-
-\# urma_admin del_eid \--dev ubep_beta \--idx 1
-
-\# urma_admin set_eid_mode -d ubep_beta -m\
-\# urma_admin set_eid_mode -d ubep_beta
-
-\# urma_admin show_stats -d ubep_beta \--resource_type 5 \--key 2
-
-\# urma_admin show_res -d ubep_beta \--resource_type 5 \--key 1 -C 1\
-\# urma_admin list_res -d ubep_beta \--resource_type 5 \--key 1\
-\# urma_admin set_ns_mode -M 0\
-\# urma_admin set_reserved_jetty -d bonding_dev_0 -l 0 -u 4294967295
-
-![](figures/urma-arch-data-unilateral-02.png)
+![](figures/urma_caution.png)
 
 urma_admin 的操作会使用rsyslog进行日志记录到/var/log/umdk/urma/urma_admin.log文件中，其日志记录和切割转储能力依赖rsyslog和logrotate工具。如果短期频繁调用命令，会导致日志无法切割。
 
 -e/\--eid参数当前已无实际作用，当前仍保留，规划删除中。
 
-## DFX维测
+## 6.5 DFX维测
 
 URMA DFX能力主要包括URMA日志，此外urma_admin也具备部分维测能力，具体参考urma_admin工具手册章节。
 
-### URMA日志
+### 6.5.1 URMA日志
 
-URMA整体使用OS自带的rsyslog工具来实现日志重定向打印特性，对应配置路径为/etc/rsyslog.d/\*.conf；使用OS自带的logrotate实现日志切割和压缩转储等特性，对应配置路径为/etc/logrotate.d/\*\*。产品可以按照需要修改配置文件达到不同的需要。
+URMA整体使用OS自带的rsyslog工具来实现日志重定向打印特性，对应配置路径为/etc/rsyslog.d/*.conf；使用OS自带的logrotate实现日志切割和压缩转储等特性，对应配置路径为/etc/logrotate.d/**。产品可以按照需要修改配置文件达到不同的需要。
 
-![](figures/urma-arch-data-unilateral-02.png)
+![](figures/urma_caution.png)
 
 1.  日志文件按照阈值大小转储依赖系统esyslog工具，需要单独安装和配置。
 
 2.  日志分区空间容量不足时，自动删除老的压缩文件，也依赖esyslog工具，需要单独安装和配置。
 
-3.  日志文件的用户组和权限也可以通过配置/etc/rsyslog.d/\*.conf文件来配置，以下为示例。
+3.  日志文件的用户组和权限也可以通过配置/etc/rsyslog.d/*.conf文件来配置，以下为示例。
 
 ![](figures/urma-dfx-01.png)
 
@@ -2604,23 +2109,20 @@ URMA整体使用OS自带的rsyslog工具来实现日志重定向打印特性，�
 
 URMA支持用户态日志接管，可以通过注册函数将日志统一导到应用指定的框架中打印。
 
-typedef void(\*urma_log_cb_t)(int level, char \*message);\
-urma_status_t **urma_register_log_func**(urma_log_cb_t func);\
+```c
+typedef void(*urma_log_cb_t)(int level, char *message);
+urma_status_t **urma_register_log_func**(urma_log_cb_t func);
 urma_status_t **urma_unregister_log_func**(void);
+```
 
-# 生态兼容
+---
+# 7 生态兼容
 
-[7.1 RoUB](#roub)
-
-[7.2 IPoURMA](#ipourma)
-
-[7.3 UMS](#ums)
-
-## RoUB
+## 7.1 RoUB
 
 当前 Verbs 接口是 RDMA 编程的核心，广泛用于高性能网络。为了兼容标准 Verbs 语义，避免直接修改上层应用，我们引入了中间适配层**RoUB**(RDMA over UB)。RoUB实现了URMA能力到标准 Verbs 接口的透明映射，使现有基于libibverbs的RDMA应用无需代码改动即可使用URMA能力。
 
-![](figures/urma-arch-ctrl-event-01.png)
+![](figures/urma_info.png)
 
 RDMA over UB 会基于系统中已有的 UB 设备动态创建对应的 IB 设备，因此对这些 IB 设备的操作能力受限于底层 UB 设备的实际功能与规格。
 
@@ -2686,7 +2188,7 @@ RDMA over UB 会基于系统中已有的 UB 设备动态创建对应的 IB 设�
 
 10. 当前仅 ibv_post_recv 操作的 ibv_wc 会包含有效的 opcode 和 wc_flags 字段。
 
-## IPoURMA
+## 7.2 IPoURMA
 
 当前 Socket 接口是网络编程的核心，广泛用于高性能网络。为了兼容标准 TCP/IP 协议栈，避免直接修改上层应用，我们引入了中间适配层IPoURMA(IP over URMA)。IPoURMA实现了URMA能力到标准 Socket 接口的透明映射，使现有基于Socket的应用无需代码改动即可使用URMA能力。
 
@@ -2724,15 +2226,15 @@ RDMA over UB 会基于系统中已有的 UB 设备动态创建对应的 IB 设�
 
 3.  ipourma设备会为从协议栈收到的IP数据报加上2字节的IPoURMA报文头。
 
-4.  默认mtu为4094。允许用户修改ipourma设备的mtu，mtu有效范围为\[68,4094\]。非有效范围的mtu修改请求不会生效。
+4.  默认mtu为4094。允许用户修改ipourma设备的mtu，mtu有效范围为[68,4094]。非有效范围的mtu修改请求不会生效。
 
 5.  使用公知Jetty通信。加载模块时，从编号32开始依次为每个IP创建一个通信使用的公知jetty。如：设备有2个IP，则这2个IP分别使用公知Jetty32和公知Jetty33通信。
 
-6.  IPoURMA通过sysfs提供数据面统计功能，通过 cat query_ipourma_stats 读取当前统计结果，通过 echo \"reset all status\" \> reset_ipourma_stats 将数据面当前统计结果清零。
+6.  IPoURMA通过sysfs提供数据面统计功能，通过 cat query_ipourma_stats 读取当前统计结果，通过 echo "reset all status" \> reset_ipourma_stats 将数据面当前统计结果清零。
 
 7.  不支持使用广播报文，必须使用单播报文。
 
-## UMS
+## 7.3 UMS
 
 UB Memory based Socket (UMS) 是基于开源SMC-R协议开发的向上兼容TCP socket，向下调用URMA API的内核协议栈。上层使用TCP socket的应用无需修改即可享受UB的红利。UMS比TCP协议栈轻薄，底层基于UB传输，高带宽、低时延（但仍需一次用户态到内核态的数据拷贝），scalable（类似SRM的peer-to-peer RC连接）；高效可靠的远程环形缓冲区直接访问；能自动协议协商和安全回退TCP。
 
@@ -2802,21 +2304,17 @@ UMS支持在使用命令modprobe ums加载模块时通过模块参数对各项�
 
 1.  UMS支持的模块参数
 
-+------------------+-----------------------+----------+------------+-------------------------------------------------------------------+
-| 参数名           | 描述                  | 类型     | 取值       | 配置说明                                                          |
-+:=================+:======================+:=========+:===========+:==================================================================+
-| ub_token_disable | ub token开关,默认开启 | bool     | 0x0：false | UMS数据面UB连接默认开启ub token能力，用于Jetty和SEG访问权限校验。 |
-|                  |                       |          |            |                                                                   |
-|                  |                       |          | 0x1：true  | 该值设置为true时,关闭本端ub token能力。                           |
-+------------------+-----------------------+----------+------------+-------------------------------------------------------------------+
-
+| 参数名 | 描述 | 类型 | 取值 | 配置说明 |
+|---|---|---|---|---|
+| ub_token_disable | ub token开关,默认开启 | bool | 0x0：false | UMS数据面UB连接默认开启ub token能力，用于Jetty和SEG访问权限校验 |
+| ub_token_disable | ub token开关,默认开启 | bool | 0x1：true | 该值设置为true时,关闭本端ub token能力 |
 加载完UMS内核模块之后，应用中发送的AF_SMC类型的socket（示例：socket(AF_SMC, SOCK_STREAM, 0)）将会被UMS劫持。这种方式需要client/server端的socket同步修改，可仅修改部分需要走ub的socket；
 
-![](figures/urma-tool-01.png)
+![](figures/urma_notice.png)
 
 ① 由于UMS与内核自带的SMC协议会注册相同的协议族(AF_SMC，即protocol family 43)，故不能同时加载：
 
-1）对于手动加载UMS模块的场景（modprobe ums），需要保证当前未加载smc.ko（可通过lsmod \| grep smc查看），若已加载需要卸载（rmmod smc）
+1）对于手动加载UMS模块的场景（modprobe ums），需要保证当前未加载smc.ko（可通过lsmod | grep smc查看），若已加载需要卸载（rmmod smc）
 
 2）由于内核socket框架自带的协议族模块自动加载功能：当用户调用socket接口，指定当前未注册的AF协议族时，系统会尝试从系统路径下已建立索引的ko模块中查找对应协议族的模块尝试加载，所以在未加载UMS的场景下使用AF_SMC创建socket可能会误加载smc模块，建议期望通过此方式加载UMS的用户先将smc模块从系统索引中移除
 
@@ -2838,65 +2336,26 @@ send/recv buf在连接销毁时不会立即注销，会在link的级别上复用
 
 源目的相同的socket会共用link(32:1)，每个link上会创建1个jetty，可支持的jetty上限为64k。
 
-# 性能规格
+---
+# 8 性能规格
 
 1.  URMA 性能规格
 
-+-----------------+--------------------------------------------------------------------+----------------------------------------------------------------------------------------+------------------------------------+--------------------------------------+
-| 领域            | 性能规格项                                                         | 规格描述                                                                               | 规格值                             | 备注                                 |
-+:================+:===================================================================+:=======================================================================================+:===================================+:=====================================+
-| **URPC 云存储** | 云存储点对点时延                                                   | 收发4KB静态时延                                                                        | 20us，其中URPC软件消耗小于1us      | 不过交换机                           |
-|                 +--------------------------------------------------------------------+----------------------------------------------------------------------------------------+------------------------------------+--------------------------------------+
-|                 | 云存储点对点带宽                                                   | 基于DPU智能网卡单IODIE                                                                 | 170Gb                              | 依赖DPU智能网卡单IODIE达成           |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    | 8KB, 32条流                                                                            |                                    |                                      |
-|                 +--------------------------------------------------------------------+----------------------------------------------------------------------------------------+------------------------------------+--------------------------------------+
-|                 | 云存储计算节点SDI侧内存占用                                        | 8K个计算节点、256个index节点部署规模下SDI侧内存占用                                    | 500M，其中URPC+URMA管理内存占用70M | 该规格基于以下配置：                 |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | client配置                           |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | 包大小：16000                        |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | 头大小：256                          |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | rx队列深度：512                      |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | tx队列深度：512                      |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | queue数量：32（add 进所有的channel） |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | channel数量：4096                    |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | server配置                           |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | 包大小：16000                        |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | 头大小：256                          |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | rx队列深度：512                      |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | tx队列深度：512                      |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | queue数量：32                        |
-|                 |                                                                    |                                                                                        |                                    |                                      |
-|                 |                                                                    |                                                                                        |                                    | queue gourp数量：N/A                 |
-|                 +--------------------------------------------------------------------+----------------------------------------------------------------------------------------+------------------------------------+--------------------------------------+
-|                 | 云存储部署规模                                                     | 计算侧节点数                                                                           | 8K                                 |                                      |
-+-----------------+--------------------------------------------------------------------+----------------------------------------------------------------------------------------+------------------------------------+--------------------------------------+
-| **DLock**       | 基于Mlx网卡的锁操作时延                                            | 基于Mlx网卡提供基于URMA的分布式锁操作时延                                              | 20us                               | 业界zookeeper是1000us，redis是100us  |
-|                 +--------------------------------------------------------------------+----------------------------------------------------------------------------------------+------------------------------------+--------------------------------------+
-|                 | 基于Mlx网卡的锁操作吞吐量                                          | 基于Mlx网卡提供基于URMA的分布式锁操作吞吐量                                            | 1Mops                              |                                      |
-|                 +--------------------------------------------------------------------+----------------------------------------------------------------------------------------+------------------------------------+--------------------------------------+
-|                 | 基于Mlx网卡的分布式对象CAS/FAA操作在每秒20万次吞吐场景下端到端时延 | 基于Mlx网卡提供基于URMA单边语义的分布式对象CAS/FAA操作在每秒20万次吞吐场景下端到端时延 | 5us                                |                                      |
-+-----------------+--------------------------------------------------------------------+----------------------------------------------------------------------------------------+------------------------------------+--------------------------------------+
-| **UMS**         | 单流性能                                                           | 典型包长8KB/16KB平均延迟比TCP缩短30%                                                   |                                    |                                      |
-|                 +--------------------------------------------------------------------+----------------------------------------------------------------------------------------+------------------------------------+--------------------------------------+
-|                 | 多流性能                                                           | 10条连接，典型包长8KB/16KB平均延迟比TCP缩短30%                                         |                                    |                                      |
-+-----------------+--------------------------------------------------------------------+----------------------------------------------------------------------------------------+------------------------------------+--------------------------------------+
+| 领域 | 性能规格项 | 规格描述 | 规格值 | 备注 |
+|---|---|---|---|---|
+| URPC 云存储 | 云存储点对点时延 | 收发4KB静态时延 | 20us，其中URPC软件消耗小于1us | 不过交换机 |
+| URPC 云存储 | 云存储点对点带宽 | 基于DPU智能网卡单IODIE，8KB, 32条流 | 170Gb | 依赖DPU智能网卡单IODIE达成 |
+| URPC 云存储 | 云存储计算节点SDI侧内存占用 | 8K个计算节点、256个index节点部署规模下SDI侧内存占用 | 500M，其中URPC+URMA管理内存占用70M | 包大小：16000，头大小：256，rx/tx队列深度：512，queue数量：32，channel数量：4096 |
+| URPC 云存储 | 云存储部署规模 | 计算侧节点数 | 8K | — |
+| DLock | 基于Mlx网卡的锁操作时延 | 基于Mlx网卡提供基于URMA的分布式锁操作时延 | 20us | 业界zookeeper是1000us，redis是100us |
+| DLock | 基于Mlx网卡的锁操作吞吐量 | 基于Mlx网卡提供基于URMA的分布式锁操作吞吐量 | 1Mops | — |
+| DLock | 分布式对象CAS/FAA操作时延 | 每秒20万次吞吐场景下端到端时延 | 5us | — |
+| UMS | 单流性能 | 典型包长8KB/16KB平均延迟比TCP缩短30% | — | — |
+| UMS | 多流性能 | 10条连接，典型包长8KB/16KB平均延迟比TCP缩短30% | — | — |
+// todo 建链并发\ubagg bongding带宽
 
-// todo 建链并发\\ubagg bongding带宽
-
-# 网络安全
+---
+# 9 网络安全
 
 UB 的安全目标在于保护通过 UB 协议栈互访的数据资产安全，包括但不限于：
 
@@ -2910,27 +2369,20 @@ UB 的安全目标在于保护通过 UB 协议栈互访的数据资产安全，�
 
 ![](figures/urma-security-01.png)
 
-[9.1 UB访问控制](#ub访问控制)
+## 9.1 UB访问控制
 
-[9.2 内存访问控制](#内存访问控制)
-
-## UB访问控制
-
-### 应用场景
+### 9.1.1 应用场景
 
 UB 提供了事务层的访问控制功能，访问控制功能的应用场景见下表，包括内存访问和 Jetty 访问两个场景。内存访问场景的访问控制功能实现依赖于 UMMU 的权限控制表，UMMU 权限控制表与地址翻译表独立，内存访问时权限校验与地址翻译分别处理，当两者均操作成功则允许内存访问，否则拒绝内存访问。
 
 1.  访问控制功能应用场景
 
-  ----------------------------------------------------------------------------
-  应用场景       是否引入 TokenValue   访问凭据标识   是否引入 UMMU 协助卡控
-  -------------- --------------------- -------------- ------------------------
-  内存访问       可选                  TokenID        是
+| 应用场景 | 是否引入 TokenValue | 访问凭据标识 | 是否引入 UMMU 协助卡控 |
+| --- | --- | --- | --- |
+| 内存访问 | 可选 | TokenID | 是 |
+| Jetty访问 | 可选 | TCID | 否 |
 
-  Jetty访问      可选                  TCID           否
-  ----------------------------------------------------------------------------
-
-### 功能原理
+### 9.1.2 功能原理
 
 以内存访问为例，UB 的访问控制功能原理如下：
 
@@ -2938,7 +2390,7 @@ UB 提供了事务层的访问控制功能，访问控制功能的应用场景�
 
 2\. User 访问 Home 内存时，在数据包中携带 TokenID 和 TokenValue，Home 查表比对内存地址和 TokenValue 等，校验成功后允许访问。
 
-### 权限分配流程
+### 9.1.3 权限分配流程
 
 1.  Home在注册segment时，需要应用指定TokenValue，软件栈可以使用两种方式分配分配返回TokenID：
 
@@ -2948,8 +2400,10 @@ urma_seg_cfg_t.urma_reg_seg_flag_t.token_id_valid = 0;
 
 - 先调用urma_alloc_token_id分配TokenID，之后调用urma_register_seg时指定该TokenID
 
-urma_seg_cfg_t.token_id = token_id;\
+```c
+urma_seg_cfg_t.token_id = token_id;
 urma_seg_cfg_t.urma_reg_seg_flag_t.token_id_valid = 1;
+```
 
 2.  在注册segment时可以指定token的验证策略
 
@@ -2957,19 +2411,14 @@ urma_seg_cfg_t.urma_reg_seg_flag_t.token_policy = 0;
 
 1.  token验证策略
 
-  ---------------------------------------------------------------------------------------------------------------------------------------------------------------
-  值   URMA定义                   策略
-  ---- -------------------------- -------------------------------------------------------------------------------------------------------------------------------
-  0    URMA_TOKEN_NONE            只传输 TokenID 或 TCID，不带 TokenValue，这种方式性能最高，但是存在非授权访问风险。
+| 值 | URMA定义 | 策略 |
+| --- | --- | --- |
+| 0 | URMA_TOKEN_NONE | 只传输 TokenID 或 TCID，不带 TokenValue，这种方式性能最高，但是存在非授权访问风险。 |
+| 1 | URMA_TOKEN_PLAIN_TEXT | 传输 TokenID 或 TCID 和 TokenValue 明文，这种方式具有一定安全性，但是存在网络中间节点非法获取 TokenValue 的风险。 |
+| 2 | URMA_TOKEN_SIGNED | 传输 TokenID 或 TCID 和 TokenValue，并加密保护，而 PLD 是明文，这种方式网络中间节点无法获取 TokenValue，但是可看到 PLD 内容。 |
+| 3 | URMA_TOKEN_ALL_ENCRYPTED | 传输 TokenID 或 TCID 和 TokenValue，并加密保护，PLD 也加密，这种方式最安全，但是带来的硬件开销较大。 |
 
-  1    URMA_TOKEN_PLAIN_TEXT      传输 TokenID 或 TCID 和 TokenValue 明文，这种方式具有一定安全性，但是存在网络中间节点非法获取 TokenValue 的风险。
-
-  2    URMA_TOKEN_SIGNED          传输 TokenID 或 TCID 和 TokenValue，并加密保护，而 PLD 是明文，这种方式网络中间节点无法获取 TokenValue，但是可看到 PLD 内容。
-
-  3    URMA_TOKEN_ALL_ENCRYPTED   传输 TokenID 或 TCID 和 TokenValue，并加密保护，PLD 也加密，这种方式最安全，但是带来的硬件开销较大。
-  ---------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-![](figures/urma-tool-perftest-01.png)
+![](figures/urma_warning.png)
 
 以上验证策略能力需要硬件支持，
 
@@ -3035,7 +2484,7 @@ urma_seg_cfg_t.urma_reg_seg_flag_t.token_policy = 0;
 
         - 以存代算：Target侧为每个Initiator存储不同的Token Value，Initiator访问时携带Token Value，Target侧直接比较报文中的Token Value。
 
-### 权限无效化流程
+### 9.1.4 权限无效化流程
 
 UB 访问控制功能存在两种粒度的访问权限无效化机制：
 
@@ -3053,16 +2502,18 @@ UB 访问控制功能存在两种粒度的访问权限无效化机制：
 
 \(3\) Home 仅接受基于更新后的 TokenValue 申请内存访问，从而实现无效化未收到更新后的TokenValue 的 User 的内存访问权限。
 
-## 内存访问控制
+## 9.2 内存访问控制
 
 URMA北向接口内存权限配置与UB协议定义保持一致，采用如下定义：
 
-#define URMA_ACCESS_LOCAL_ONLY (0x1 \<\< 0)\
-#define URMA_ACCESS_READ (0x1 \<\< 1)\
-#define URMA_ACCESS_WRITE (0x1 \<\< 2)\
-#define URMA_ACCESS_ATOMIC (0x1 \<\< 3)
+```c
+#define URMA_ACCESS_LOCAL_ONLY (0x1 << 0)
+#define URMA_ACCESS_READ (0x1 << 1)
+#define URMA_ACCESS_WRITE (0x1 << 2)
+#define URMA_ACCESS_ATOMIC (0x1 << 3)
+```
 
-![](figures/urma-arch-data-unilateral-02.png)
+![](figures/urma_caution.png)
 
 1、URMA_ACCESS_LOCAL_ONLY置位1，则本地访问时具有READ、WRITE、ATOMIC所有权限，但是外部访问拒绝；
 

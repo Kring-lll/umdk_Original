@@ -901,8 +901,18 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
             continue;
         }
 
-        // Record the imm of the flow control message, and process the flow control message when sub umq poll rx.
         umq_ub_imm_t imm = {.value = cr[i].imm_data};
+
+        // Flow control messages sent to the main umq are processed directly.
+        if (real_queue == queue) {
+            qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, imm, &buf[qbuf_cnt]);
+            (void)umq_ub_fill_fc_rx_buf(queue);
+            umq_ub_fill_rx_buff_post_process(queue, imm);
+            umq_ub_put_real_queue(real_queue, UB_QUEUE_JETTY_FLOW_CONTROL);
+            continue;
+        }
+
+        // Record the imm of the flow control message, and process the flow control message when sub umq poll rx.
         switch (imm.bs.type) {
             case IMM_TYPE_FC_CREDIT_REQ:
             case IMM_TYPE_FC_CREDIT_RETURN_REQ:
@@ -932,7 +942,7 @@ static int sub_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t bu
             continue;
         }
         qbuf_cnt += umq_ub_process_fc_msg(queue, imm, &buf[qbuf_cnt]);
-        (void)umq_ub_fill_rx_buff_post_process(queue, imm);
+        umq_ub_fill_rx_buff_post_process(queue, imm);
     }
     return (int)qbuf_cnt;
 }
@@ -978,7 +988,7 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
         umq_ub_imm_t imm = {.value = cr[i].imm_data};
         qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, imm, &buf[qbuf_cnt]);
         (void)umq_ub_fill_fc_rx_buf(queue);
-        (void)umq_ub_fill_rx_buff_post_process(queue, imm);
+        umq_ub_fill_rx_buff_post_process(queue, imm);
     }
     /* If buf is not NULL, return qbuf_cnt (0 if no error, >0 if has error);
      * If buf is NULL, return ret (0 if no error, error code if has error) */
@@ -1007,6 +1017,54 @@ int umq_ub_fill_fc_rx_buf(ub_queue_t *queue)
             queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, (int)status);
         return umq_status_convert(status);
     }
+    return UMQ_SUCCESS;
+}
+
+int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint32_t batch)
+{
+    if (batch == 0) {
+        return UMQ_SUCCESS;
+    }
+
+    if (batch > queue->fc_rx_depth * URMA_UBAGG_DEV_MAX_NUM) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, "
+            "number of requested recv wr exceeds the upper limit %u\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, queue->fc_rx_depth * URMA_UBAGG_DEV_MAX_NUM);
+        return -UMQ_ERR_EINVAL;
+    }
+
+    urma_jfr_wr_t *recv_wr = (urma_jfr_wr_t *)(uintptr_t)calloc(batch, sizeof(urma_jfr_wr_t));
+    if (recv_wr == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, calloc recv wr failed\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id);
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    for (uint32_t i = 1; i < batch; i++) {
+        recv_wr[i - 1].next = &recv_wr[i];
+    }
+
+    urma_jfr_wr_t *bad_wr = NULL;
+    urma_status_t status;
+    // bondp with shared_jfr should use urma_post_jfr_wr
+    bool post_jfr = ((queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 && queue->used_port_num > 0);
+    if (post_jfr) {
+        status =
+            umq_symbol_urma()->urma_post_jfr_wr(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr, recv_wr, &bad_wr);
+    } else {
+        status =
+            umq_symbol_urma()->urma_post_jetty_recv_wr(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL], recv_wr, &bad_wr);
+    }
+    if (status != URMA_SUCCESS) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_post_jetty_recv_wr failed, "
+            "status: %d\n", EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, (int)status);
+        free(recv_wr);
+        return umq_status_convert(status);
+    }
+    free(recv_wr);
     return UMQ_SUCCESS;
 }
 

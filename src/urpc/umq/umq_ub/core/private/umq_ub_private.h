@@ -40,19 +40,18 @@ extern "C" {
 #endif
 
 #define UMQ_MAX_MSG_ID_NUM (1 << 5)
+#define UMQ_ID_ALLOC_SIZE (256 * 1024)
+
 #define UMQ_CONTINUE_FLAG 1
 #define UMQ_MAX_TSEG_NUM (1024)
-#define UMQ_UB_RW_SEGMENT_LEN 64 // ub_queue read/write buf splited 64B for each module, such as mem import/flow control
 #define HUGE_QBUF_BUFFER_INC_BATCH 64
 #define UMQ_QBUF_ALIGN_SIZE 4096
 
 #define UMQ_UB_MAX_REMOTE_EID_NUM 1024
-#define UMQ_UB_MIN_EID_ID 0
 
 #define MEMPOOL_UBVA_SIZE 28
 #define UMQ_IMM_VERSION 0
 #define UMQ_UB_FLOW_CONTORL_JETTY_DEPTH 2
-#define UMQ_UB_FLOW_CONTORL_BIT_SHIFIT 16 // use (ack | notify) as flow control tx ctx
 
 #define UMQ_UB_DEV_STR_LENGTH 64
 #define UMQ_UB_NAMESPACE_SIZE 256
@@ -279,7 +278,8 @@ typedef struct umq_ub_bind_queue_info {
     urma_transport_mode_t tp_mode;
     urma_tp_type_t tp_type;
     urma_token_t token;
-    uint64_t rsvd;
+    uint32_t umq_id;
+    uint32_t rsvd;
     uint32_t rx_depth;
     uint32_t tx_depth;
     uint32_t rx_buf_size;
@@ -423,6 +423,7 @@ typedef struct ub_queue {
     uint64_t share_rq_umqh;
     ub_queue_idle_check_t *checker;
     bondp_port_id_t *used_port;
+    uint32_t umq_id;            // umq id for share transport mode
 } ub_queue_t;
 
 typedef struct user_ctx {
@@ -476,7 +477,8 @@ int umq_ub_bind_info_deserialize(uint8_t *bind_info_buf, uint32_t bind_info_size
 int umq_modify_ubq_to_err(ub_queue_t *queue, umq_io_direction_t direction, ub_queue_jetty_index_t jetty_idx);
 remote_imported_tseg_info_t *umq_ub_ctx_imported_info_create(void);
 void umq_ub_ctx_imported_info_destroy(umq_ub_ctx_t *ub_ctx);
-urma_jetty_t *umq_create_jetty(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_queue_jetty_index_t jetty_idx);
+urma_jetty_t *umq_create_jetty(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_queue_jetty_index_t jetty_idx,
+    const char *port_str);
 int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_queue_t *queue);
 int umq_ub_register_seg(umq_ub_ctx_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
 void umq_ub_unregister_seg(umq_ub_ctx_t *ctx_list, uint32_t ctx_cnt, uint16_t mempool_id);
@@ -538,6 +540,7 @@ int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_
                         urma_sge_t *sges, uint32_t remain_tx);
 
 int umq_ub_fill_fc_rx_buf(ub_queue_t *queue);
+int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint32_t batch);
 int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count);
 
 int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[]);

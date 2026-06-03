@@ -43,9 +43,17 @@ typedef enum urma_core_cmd {
     URMA_CORE_UNEXPOSE_DEV_NS,
     URMA_CORE_SET_DEV_EID_NS,
     URMA_CORE_GET_TOPO_INFO,
-    URMA_CORE_GET_TOPO_BONDING_DEV = 33,
     URMA_CORE_SET_SL,
+    URMA_CORE_ADMIN_INSERT_MAIN_UE_EID = 35,
+    URMA_CORE_ADMIN_DELETE_MAIN_UE_EID,
+    URMA_CORE_ADMIN_LOOKUP_MAIN_UE_EID,
+    URMA_CORE_ADMIN_FLUSH_MAIN_UE_EID,
+    URMA_CORE_ADMIN_INSERT_MAIN_UE_EID_BATCH,
 } urma_core_cmd_t;
+
+typedef enum uram_ubagg_cmd {
+    UBAGG_NL_GET_PHYSICAL_DEVICE = 4,
+} uram_ubagg_cmd_t;
 
 /* only for uburma device ioctl */
 #define URMA_CMD_MAGIC 'U'

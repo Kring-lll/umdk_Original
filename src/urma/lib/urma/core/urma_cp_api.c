@@ -1195,6 +1195,11 @@ static urma_target_jetty_t *urma_import_jfr_compat(urma_context_t *ctx, urma_rjf
 
     URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, import_jfr_ex);
 
+    if (rjfr->flag.bs.share_tp != 0) {
+        URMA_LOG_ERR("Share TP is not supported.\n");
+        return NULL;
+    }
+
     atomic_fetch_add(&ctx->ref.atomic_cnt, 1);
     urma_target_jetty_t *tjetty = ops->import_jfr_ex(ctx, rjfr, token_value, &active_tp_cfg);
     if (tjetty == NULL) {
@@ -1524,7 +1529,7 @@ static int urma_create_jetty_check_dev_cap(urma_context_t *ctx, urma_jetty_cfg_t
 
     if (jetty_cfg->jetty_grp != NULL) {
         (void)pthread_mutex_lock(&jetty_cfg->jetty_grp->list_mutex);
-        if (jetty_cfg->jetty_grp->jetty_cnt >= cap->max_jetty_in_jetty_grp) {
+        if (jetty_cfg->jetty_grp->jetty_cnt > cap->max_jetty_in_jetty_grp) {
             (void)pthread_mutex_unlock(&jetty_cfg->jetty_grp->list_mutex);
             URMA_LOG_ERR("jetty_grp jetty cnt=%u, max_jetty in grp=%u.\n", jetty_cfg->jetty_grp->jetty_cnt,
                 cap->max_jetty_in_jetty_grp);
@@ -1886,6 +1891,11 @@ static urma_target_jetty_t *urma_import_jetty_compat(urma_context_t *ctx, urma_r
 
     URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, import_jetty_ex);
 
+    if (rjetty->flag.bs.share_tp != 0) {
+        URMA_LOG_ERR("Share TP is not supported.\n");
+        return NULL;
+    }
+
     atomic_fetch_add(&ctx->ref.atomic_cnt, 1);
     urma_target_jetty_t *tjetty = ops->import_jetty_ex(ctx, rjetty, token_value, &active_tp_cfg);
     if (tjetty == NULL) {
@@ -1898,6 +1908,12 @@ urma_target_jetty_t *urma_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjett
 {
     if (ctx == NULL || ctx->dev == NULL || ctx->dev->sysfs_dev == NULL || ctx->ops == NULL || rjetty == NULL) {
         URMA_LOG_ERR("Invalid parameter.\n");
+        errno = EINVAL;
+        return NULL;
+    }
+
+    if (urma_check_trans_mode_valid(rjetty->trans_mode) != true) {
+        URMA_LOG_ERR("Invalid parameter, trans_mode=%d.\n", (int)rjetty->trans_mode);
         errno = EINVAL;
         return NULL;
     }
@@ -2266,7 +2282,8 @@ urma_status_t urma_set_jetty_opt(urma_jetty_t *jetty, uint64_t opt, void *buf, u
     urma_status_t status;
     int ret;
 
-    status = urma_check_opt_valid(NULL, JETTY_OPT_TABLE, JETTY_OPT_MAP_COUNT, opt, len);
+    status = urma_check_opt_valid(&jetty->urma_jetty_opt.jfs_opt.jfs_opt_mask.value,
+                                  JETTY_OPT_TABLE, JETTY_OPT_MAP_COUNT, opt, len);
     if (status != URMA_SUCCESS) {
         URMA_LOG_ERR("invalid opt id or opt len\n");
         return status;
