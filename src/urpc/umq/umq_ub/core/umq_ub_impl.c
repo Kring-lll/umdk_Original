@@ -32,6 +32,7 @@
 #include "umq_inner.h"
 #include "umq_huge_qbuf_pool.h"
 #include "util_id_generator.h"
+#include "umq_ub_flow_control_sge.h"
 #include "umq_ub_flow_control.h"
 #include "umq_ub_imm_data.h"
 #include "umq_ub_private.h"
@@ -445,7 +446,7 @@ void umq_ub_idle_queue_check(void *args)
         if (fc->peer_ratio == 0) {
             return_threshold = 0;
         } else {
-            return_threshold = umq_ub_fc_threashold_modify((uint16_t)fc->min_reserved_credit, fc->peer_ratio);
+            return_threshold = umq_ub_flow_control_threashold_modify((uint16_t)fc->min_reserved_credit, fc->peer_ratio);
         }
         if (remote_credit <= return_threshold) {
             (void)util_mutex_unlock(cur_node->lock);
@@ -586,6 +587,66 @@ uint32_t umq_ub_timer_timeout_get(void)
 static int umq_ub_register_seg_callback(uint8_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
 static void umq_ub_unregister_seg_callback(uint8_t *ctx, uint16_t mempool_id);
 
+static int umq_ub_ctx_init_one(umq_ub_ctx_t *ctx, umq_trans_info_t *info, umq_init_cfg_t *cfg)
+{
+    ctx->remote_imported_info = umq_ub_ctx_imported_info_create();
+    if (ctx->remote_imported_info == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "imported info create failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    int ret = umq_find_ub_device(info, ctx);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "find ub device failed, status: %d\n", ret);
+        goto DESTROY_IMPORTED_INFO;
+    }
+
+    uint32_t table_size = UMQ_ALIGN_64K(ctx->dev_attr.dev_cap.max_jetty);
+    ctx->umq_ctx_jetty_table = (uint64_t *)calloc(table_size, sizeof(uint64_t));
+    if (ctx->umq_ctx_jetty_table == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "calloc umq_ctx_jetty_table failed\n");
+        ret = -UMQ_ERR_ENOMEM;
+        goto DELETE_URMA;
+    }
+
+    ctx->rx_consumed_jetty_table = (volatile uint64_t *)calloc(table_size, sizeof(uint64_t));
+    if (ctx->rx_consumed_jetty_table == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "calloc rx_consumed_jetty_table failed\n");
+        ret = -UMQ_ERR_ENOMEM;
+        goto FREE_JETTY_TABLE;
+    }
+
+    ctx->io_lock_free = cfg->io_lock_free;
+    ctx->feature = cfg->feature;
+    ctx->flow_control = cfg->flow_control;
+    ctx->ref_cnt = 1;
+    (void)pthread_spin_init(&ctx->tseg_list_lock, PTHREAD_PROCESS_PRIVATE);
+
+    ret = umq_ub_flow_control_sge_mgr_init(&ctx->fc_sge_mgr);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "fc sge mgr init failed\n");
+        goto DESTROY_SPINLOCK;
+    }
+
+    return UMQ_SUCCESS;
+
+DESTROY_SPINLOCK:
+    (void)pthread_spin_destroy(&ctx->tseg_list_lock);
+    free((void *)ctx->rx_consumed_jetty_table);
+    ctx->rx_consumed_jetty_table = NULL;
+
+FREE_JETTY_TABLE:
+    free((void *)ctx->umq_ctx_jetty_table);
+    ctx->umq_ctx_jetty_table = NULL;
+
+DELETE_URMA:
+    umq_ub_delete_urma_ctx(ctx);
+
+DESTROY_IMPORTED_INFO:
+    umq_ub_ctx_imported_info_destroy(ctx);
+    return ret;
+}
+
 uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
 {
     if (g_umq_ub_inited) {
@@ -640,42 +701,10 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
             continue;
         }
 
-        g_ub_ctx[g_ub_ctx_count].remote_imported_info = umq_ub_ctx_imported_info_create();
-        if (g_ub_ctx[g_ub_ctx_count].remote_imported_info == NULL) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "imported info create failed\n");
-            goto ROLLBACK_UB_CTX;
-        }
-
-        ret = umq_find_ub_device(info, &g_ub_ctx[g_ub_ctx_count]);
+        ret = umq_ub_ctx_init_one(&g_ub_ctx[g_ub_ctx_count], info, cfg);
         if (ret != UMQ_SUCCESS) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "find ub device failed, status: %d\n", ret);
-            umq_ub_ctx_imported_info_destroy(&g_ub_ctx[g_ub_ctx_count]);
             goto ROLLBACK_UB_CTX;
         }
-        uint32_t table_size = UMQ_ALIGN_64K(g_ub_ctx[g_ub_ctx_count].dev_attr.dev_cap.max_jetty);
-        g_ub_ctx[g_ub_ctx_count].umq_ctx_jetty_table = (uint64_t *)calloc(table_size, sizeof(uint64_t));
-        if (g_ub_ctx[g_ub_ctx_count].umq_ctx_jetty_table == NULL) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "calloc umq_ctx_jetty_table failed\n");
-            umq_ub_delete_urma_ctx(&g_ub_ctx[g_ub_ctx_count]);
-            umq_ub_ctx_imported_info_destroy(&g_ub_ctx[g_ub_ctx_count]);
-            goto ROLLBACK_UB_CTX;
-        }
-
-        g_ub_ctx[g_ub_ctx_count].rx_consumed_jetty_table = (volatile uint64_t *)calloc(table_size, sizeof(uint64_t));
-        if (g_ub_ctx[g_ub_ctx_count].rx_consumed_jetty_table == NULL) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "calloc rx_consumed_jetty_table failed\n");
-            umq_ub_delete_urma_ctx(&g_ub_ctx[g_ub_ctx_count]);
-            umq_ub_ctx_imported_info_destroy(&g_ub_ctx[g_ub_ctx_count]);
-            free((void *)g_ub_ctx[g_ub_ctx_count].umq_ctx_jetty_table);
-            g_ub_ctx[g_ub_ctx_count].umq_ctx_jetty_table = NULL;
-            goto ROLLBACK_UB_CTX;
-        }
-
-        g_ub_ctx[g_ub_ctx_count].io_lock_free = cfg->io_lock_free;
-        g_ub_ctx[g_ub_ctx_count].feature = cfg->feature;
-        g_ub_ctx[g_ub_ctx_count].flow_control = cfg->flow_control;
-        g_ub_ctx[g_ub_ctx_count].ref_cnt = 1;
-        (void)pthread_spin_init(&g_ub_ctx[g_ub_ctx_count].tseg_list_lock, PTHREAD_PROCESS_PRIVATE);
         ++g_ub_ctx_count;
     }
 
@@ -732,6 +761,7 @@ IO_BUF_FREE:
 
 ROLLBACK_UB_CTX:
     for (uint32_t i = 0; i < g_ub_ctx_count; i++) {
+        umq_ub_flow_control_sge_mgr_uninit(&g_ub_ctx[i].fc_sge_mgr);
         umq_ub_ctx_imported_info_destroy(&g_ub_ctx[i]);
         umq_ub_delete_urma_ctx(&g_ub_ctx[i]);
         free((void*)g_ub_ctx[i].umq_ctx_jetty_table);
@@ -778,6 +808,7 @@ void umq_ub_ctx_uninit_impl(uint8_t *ctx)
     }
 
     for (uint32_t i = 0; i < g_ub_ctx_count; ++i) {
+        umq_ub_flow_control_sge_mgr_uninit(&context[i].fc_sge_mgr);
         umq_ub_ctx_imported_info_destroy(&context[i]);
         umq_dec_ref(context[i].io_lock_free, &context[i].ref_cnt, 1);
         umq_symbol_urma()->urma_delete_context(context[i].urma_ctx);
@@ -887,6 +918,28 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
         goto DELETE_FC_JETTY;
     }
 
+    if (!(UMQ_UB_ENABLE_SHARE_FC_JFR && (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0) &&
+        !(UMQ_UB_ENABLE_SHARE_FC_JFR && (queue->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0)) {
+        if (umq_ub_flow_control_sge_alloc(&dev_ctx->fc_sge_mgr,
+            &queue->flow_control.recv_sge[UB_QUEUE_FC_MSG_TYPE_REQ]) != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "fc recv req sge alloc failed\n");
+            goto DELETE_FC_JETTY;
+        }
+        if (umq_ub_flow_control_sge_alloc(&dev_ctx->fc_sge_mgr,
+            &queue->flow_control.recv_sge[UB_QUEUE_FC_MSG_TYPE_RSP]) != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "fc recv resp sge alloc failed\n");
+            goto FREE_FC_RECV_REQ_SGE;
+        }
+    }
+
+    if (UMQ_UB_ENABLE_SHARE_FC_JFR && (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0) {
+        if (umq_ub_flow_control_share_rq_sge_init(&queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->fc_share_recv,
+            UMQ_UB_FLOW_CONTROL_SGE_SHARED_RECV_QBUF_MAX) != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "fc share recv init failed\n");
+            goto FREE_FC_RECV_RESP_SGE;
+        }
+    }
+
     uint8_t rqe_post_factor = queue->used_port_num == 0 ? 1 : queue->used_port_num;
     if (UMQ_UB_ENABLE_SHARE_FC_JFR && (option->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0) {
         // the coefficient for the number of main umq post flow control rx operations uses rqe_post_factor
@@ -899,7 +952,7 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
     }
 
     if (umq_ub_fill_fc_rx_buf_batch(queue, post_fc_rx_cnt) != UMQ_SUCCESS) {
-        goto DELETE_FC_JETTY;
+        goto FREE_FC_SHARE_RECV;
     }
 
     dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id] =
@@ -922,6 +975,17 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
 
 CLEAR_TABLE:
     dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id] = 0;
+
+FREE_FC_SHARE_RECV:
+    umq_ub_flow_control_share_rq_sge_uninit(&queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->fc_share_recv);
+
+FREE_FC_RECV_RESP_SGE:
+    umq_ub_flow_control_sge_free(&dev_ctx->fc_sge_mgr,
+        &queue->flow_control.recv_sge[UB_QUEUE_FC_MSG_TYPE_RSP]);
+
+FREE_FC_RECV_REQ_SGE:
+    umq_ub_flow_control_sge_free(&dev_ctx->fc_sge_mgr,
+        &queue->flow_control.recv_sge[UB_QUEUE_FC_MSG_TYPE_REQ]);
 
 DELETE_FC_JETTY:
     (void)umq_symbol_urma()->urma_delete_jetty(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]);
@@ -1159,6 +1223,13 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
         urma_eid_t *fc_eid = &queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid;
         uint32_t fc_id = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id;
         umq_ub_credit_clean_up(queue);
+
+        umq_ub_flow_control_share_rq_sge_uninit(&queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->fc_share_recv);
+        umq_ub_flow_control_sge_free(&queue->dev_ctx->fc_sge_mgr,
+            &queue->flow_control.recv_sge[UB_QUEUE_FC_MSG_TYPE_RSP]);
+        umq_ub_flow_control_sge_free(&queue->dev_ctx->fc_sge_mgr,
+            &queue->flow_control.recv_sge[UB_QUEUE_FC_MSG_TYPE_REQ]);
+
         UMQ_VLOG_INFO(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, delete flowcontrol jetty\n",
             EID_ARGS(*fc_eid), fc_id);
         queue->dev_ctx->umq_ctx_jetty_table[fc_id] = 0;
@@ -1937,10 +2008,19 @@ int umq_ub_dev_add_impl(umq_trans_info_t *info, umq_init_cfg_t *cfg)
     }
     g_ub_ctx[g_ub_ctx_count].ref_cnt = 1;
     (void)pthread_spin_init(&g_ub_ctx[g_ub_ctx_count].tseg_list_lock, PTHREAD_PROCESS_PRIVATE);
+    ret = umq_ub_flow_control_sge_mgr_init(&g_ub_ctx[g_ub_ctx_count].fc_sge_mgr);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "fc sge mgr init failed");
+        (void)pthread_spin_destroy(&g_ub_ctx[g_ub_ctx_count].tseg_list_lock);
+        goto UNREGISTER_HUGE_MEM;
+    }
 
     g_ub_ctx_count++;
 
     return UMQ_SUCCESS;
+
+UNREGISTER_HUGE_MEM:
+    umq_huge_qbuf_unregister_seg((uint8_t *)&g_ub_ctx[g_ub_ctx_count], &sge_ops);
 
 UNREGISTER_MEM:
     umq_qbuf_unregister_seg((uint8_t *)&g_ub_ctx[g_ub_ctx_count], &sge_ops);
