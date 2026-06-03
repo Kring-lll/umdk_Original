@@ -39,8 +39,17 @@ int umq_ub_dev_str_get(umq_dev_assign_t *dev_info, char *dev_str, int dev_str_le
             }
             break;
         case UMQ_DEV_ASSIGN_MODE_IPV4:
+            if (strlen(dev_info->ipv4.ip_addr) > UMQ_IPV4_SIZE - 1) {
+                UMQ_VLOG_ERR(VLOG_UMQ, "ip length exceeds max value %u\n", UMQ_IPV4_SIZE - 1);
+                return UMQ_FAIL;
+            }
         /* fall-through */
         case UMQ_DEV_ASSIGN_MODE_IPV6:
+            if ((dev_info->assign_mode == UMQ_DEV_ASSIGN_MODE_IPV6) &&
+                strlen(dev_info->ipv6.ip_addr) > UMQ_IPV6_SIZE - 1) {
+                UMQ_VLOG_ERR(VLOG_UMQ, "ip length exceeds max value %u\n", UMQ_IPV6_SIZE - 1);
+                return UMQ_FAIL;
+            }
             ip_addr =
                 dev_info->assign_mode == UMQ_DEV_ASSIGN_MODE_IPV4 ? dev_info->ipv4.ip_addr : dev_info->ipv6.ip_addr;
             ret = snprintf(dev_str, dev_str_len, "%s", ip_addr);
