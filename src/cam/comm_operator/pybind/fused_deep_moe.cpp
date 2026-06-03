@@ -7,7 +7,6 @@
  * History: 2025-12-10 fused_deep_moe file
  */
 
- 
 #include <unistd.h>
 #include <hccl/hccl.h>
 #include <torch/extension.h>
