@@ -3,11 +3,59 @@
 //
 
 #include "bondp_failback.h"
-#include "bondp_link_recovery.h"
+#include "bondp_failback_ops.h"
 
 #include "bondp_context_table.h"
-#include "urma_log.h"
 #include "urma_api.h"
+#include "urma_log.h"
+
+bondp_failback_task_t *bondp_failback_task_create(
+    bondp_context_t *bdp_ctx,
+    struct bondp_comp *bondp_jetty,
+    uint32_t node_id,
+    int failed_local_idx)
+{
+    bondp_failback_task_t *task = (bondp_failback_task_t *)calloc(1, sizeof(bondp_failback_task_t));
+    if (task == NULL) {
+        return NULL;
+    }
+    // --- worker 调度 ---
+    task->timer_id = 0;
+    task->timer_valid = false;
+    task->closed = false;
+
+    // --- 状态机 (IDLE, 等待 on_cqe 触发) ---
+    task->state = BONDP_FAILBACK_STATE_IDLE;
+    task->req_seq = 0;
+    task->retry_ms = 0;
+
+    // --- 身份标识 ---
+    task->bdp_ctx = bdp_ctx;
+    task->bondp_jetty = bondp_jetty;
+    task->vjetty_id = bondp_jetty->v_jetty.jetty_id.id;
+    task->node_id = node_id;
+
+    // --- 路径信息 ---
+    task->primary_local_idx = failed_local_idx;
+    task->active_local_idx = failed_local_idx;   // 初始时 active = primary
+    task->selected_remote_pjetty_id = 0;
+    task->selected_target_idx = -1;
+
+    // sub_tasks: calloc 已清零, 无需额外初始化
+    //TODO: hmap_node: 注册到 task_table 时由 hash_table 填入 有必要接入吗
+
+    return task;
+}
+
+void bondp_failback_task_destroy(bondp_failback_task_t *task)
+{
+    if (task == NULL) {
+        return;
+    }
+    bondp_failback_cancel_timer(task);
+    free(task);
+}
+
 
 //指数退避辅助函数
 static uint32_t bondp_failback_next_backoff(uint32_t cur, uint32_t max_ms)
@@ -46,11 +94,6 @@ static int bondp_failback_schedule(bondp_failback_task_t *ctx, uint64_t delay_ms
 }
 
 //整段的入口
-//通过多个ctx或许可以同时检测多条链路的回切等状态？
-
-//TODO:bondp_failback_task_t的构造，注册与销毁
-
-//
 
 //真正需要的入参，struct bondp_comp *bondp_jetty; 要重建的本端jetty  index也是本端
 //
@@ -59,20 +102,24 @@ static int bondp_failback_schedule(bondp_failback_task_t *ctx, uint64_t delay_ms
 //报文还要修改
 
 
-int bondp_failback_on_cqe(bondp_failback_task_t *ctx)
+int bondp_failback_on_cqe(bondp_context_t *bdp_ctx,
+    struct bondp_comp *bondp_jetty,
+    uint32_t node_id,
+    int failed_local_idx)
 {
+    bondp_failback_task_t *task = bondp_failback_task_create(bdp_ctx, bondp_jetty, node_id, failed_local_idx);
     int ret;
-    if (ctx == NULL || ctx->closed) {
-        return TW_INVALID_PARAM_ERROR;
+    if (task == NULL) {
+        return TW_NO_MEMORY_ERROR;
     }
     /*
-     * 收到新的 failover CQE，重新开始该流程。
-     * 如果之前有 timer，先取消。
+     *TODO: 多个TASK的 并发 当前不支持同时开多个CQE
      */
+
     bondp_failback_cancel_timer(ctx);
 
-    ctx->state = BONDP_FAILBACK_STATE_WAIT_REBUILD_START;
-    ctx->retry_ms = BONDP_FO_REBUILD_RETRY_INIT_MS;
+    task->state = BONDP_FAILBACK_STATE_WAIT_REBUILD_START;
+    task->retry_ms = BONDP_FAILBACK_REBUILD_RETRY_INIT_MS;
     //开始新的流程，重置回环等待时间
     ret = bondp_failback_schedule(ctx,BONDP_FAILBACK_REBUILD_START_DELAY_MS, bondp_fo_rebuild_task);
     //规划等待10s开始

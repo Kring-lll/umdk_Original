@@ -35,32 +35,35 @@ typedef enum bondp_failback_state {
     BONDP_FAILBACK_STATE_CLOSED,
 } bondp_failback_state_t;
 
-typedef struct bondp_failback_ctx {
+typedef struct bondp_failback_task {
+    // --- worker 调度 并发安全 ---
     uint64_t timer_id;
+    bool timer_valid;
+    bool closed;
 
+    // --- 状态机 ---
     bondp_failback_state_t state;
     uint64_t req_seq;
-    uint32_t remote_primary_pjetty_id;
-    uint32_t primary_target_idx;
-
-    bool timer_valid;
     uint32_t retry_ms;
 
-    struct bondp_target_jetty *bdp_tjetty;
-    struct bondp_comp *bondp_jetty;
+    // --- 身份标识 ---
+    bondp_context_t *bdp_ctx;              // 所属 bond 上下文
+    struct bondp_comp *bondp_jetty;        // 本端 vjetty (comp)
+    uint32_t vjetty_id;                    // 本端 vjetty ID
+    uint32_t node_id;                      // 对端 node ID（多对一核心）
 
-    int primary_local_idx;
-    int active_local_idx;
-    bondp_health_mode_t mode;
-    uint32_t backoff_cnt;
-    bondp_fallback_task_t fallback_task;
-    uint32_t vjetty_id;
+    // --- 路径信息 ---
+    int primary_local_idx;                 // 主路径本端 idx (rebuild 目标)
+    int active_local_idx;                  // 当前活跃本端 idx (发 REQ 通道)
+    uint32_t selected_remote_pjetty_id;    // RESP 返回: 对端选定的 pjetty ID
+    int selected_target_idx;               // RESP 返回: 对端选定的 target idx
+
+    // --- 连接状态？ 是否应该在node中维护 ---
+    //TODO: 是否改为在node中维护
     bondp_failover_sub_task_t sub_tasks[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
 
+    // --- 哈希表挂载 ---
     hmap_node_t hmap_node;
-
-    bondp_context_t *bdp_ctx;
-
 } bondp_failback_task_t;
 
 #define BONDP_FAILBACK_REBUILD_START_DELAY_MS     10000U  /* 收到CQE后，延迟10秒开始重建 */
