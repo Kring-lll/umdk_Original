@@ -1,8 +1,10 @@
 /*
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
- * Description: umq api test
+ * Description: umq flow control test
  */
+
+#define UMQ_UB_FC_DEDUP_UT
 
 #include "mockcpp/mockcpp.hpp"
 #include "gtest/gtest.h"
@@ -12,6 +14,8 @@
 #include <sys/stat.h>
 
 #include "umq_ub_flow_control.h"
+#include "umq_ub_private.h"
+#include "umq_ub_imm_data.h"
 
 #define TEST_QUEUE_RX_DEPTH 128
 
@@ -133,4 +137,269 @@ TEST_F(UmqFlowControlTest, test_umq_ub_rx_consumed_inc_non_atomic)
     volatile uint64_t var = 0;
     (void)umq_ub_rx_consumed_inc(false, &var, 1);
     ASSERT_EQ(var, 1);
+}
+
+class UmqFcDedupTest : public ::testing::Test {
+  public:
+    void SetUp() override
+    {
+        memset(&queue, 0, sizeof(ub_queue_t));
+        memset(&fc, 0, sizeof(ub_flow_control_t));
+        queue.flow_control = fc;
+    }
+
+    void TearDown() override
+    {
+        GlobalMockObject::verify();
+    }
+
+    static void SetUpTestCase()
+    {
+    }
+
+    static void TearDownTestCase()
+    {
+    }
+
+    ub_queue_t queue;
+    ub_flow_control_t fc;
+};
+
+TEST_F(UmqFcDedupTest, test_req_first_packet_not_duplicate)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_REQ;
+    imm.flow_control.seq = 1;
+
+    bool ret = umq_ub_fc_msg_dedup_check_ut(&queue, imm);
+    EXPECT_EQ(ret, false);
+    EXPECT_EQ(queue.flow_control.fc_remote_req_first, true);
+    EXPECT_EQ(queue.flow_control.fc_remote_req_seq, 1);
+}
+
+TEST_F(UmqFcDedupTest, test_req_new_sequence_not_duplicate)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_REQ;
+    imm.flow_control.seq = 1;
+    
+    queue.flow_control.fc_remote_req_first = true;
+    queue.flow_control.fc_remote_req_seq = 1;
+
+    imm.flow_control.seq = 2;
+    bool ret = umq_ub_fc_msg_dedup_check_ut(&queue, imm);
+    EXPECT_EQ(ret, false);
+    EXPECT_EQ(queue.flow_control.fc_remote_req_seq, 2);
+}
+
+TEST_F(UmqFcDedupTest, test_req_duplicate_packet)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_REQ;
+    imm.flow_control.seq = 1;
+    
+    queue.flow_control.fc_remote_req_first = true;
+    queue.flow_control.fc_remote_req_seq = 1;
+
+    bool ret = umq_ub_fc_msg_dedup_check_ut(&queue, imm);
+    EXPECT_EQ(ret, true);
+    EXPECT_EQ(queue.flow_control.fc_remote_req_seq, 1);
+}
+
+TEST_F(UmqFcDedupTest, test_req_wrap_around_not_duplicate)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_REQ;
+    
+    queue.flow_control.fc_remote_req_first = true;
+    queue.flow_control.fc_remote_req_seq = 255;
+
+    imm.flow_control.seq = 1;
+    bool ret = umq_ub_fc_msg_dedup_check_ut(&queue, imm);
+    EXPECT_EQ(ret, false);
+    EXPECT_EQ(queue.flow_control.fc_remote_req_seq, 1);
+}
+
+TEST_F(UmqFcDedupTest, test_return_req_first_packet_not_duplicate)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_RETURN_REQ;
+    imm.flow_control.seq = 1;
+
+    bool ret = umq_ub_fc_msg_dedup_check_ut(&queue, imm);
+    EXPECT_EQ(ret, false);
+    EXPECT_EQ(queue.flow_control.fc_remote_req_first, true);
+    EXPECT_EQ(queue.flow_control.fc_remote_req_seq, 1);
+}
+
+TEST_F(UmqFcDedupTest, test_return_req_duplicate_packet)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_RETURN_REQ;
+    imm.flow_control.seq = 100;
+    
+    queue.flow_control.fc_remote_req_first = true;
+    queue.flow_control.fc_remote_req_seq = 100;
+
+    bool ret = umq_ub_fc_msg_dedup_check_ut(&queue, imm);
+    EXPECT_EQ(ret, true);
+}
+
+TEST_F(UmqFcDedupTest, test_rep_normal_packet)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_REP;
+    imm.flow_control.seq = 5;
+    
+    queue.flow_control.fc_local_req_seq = 5;
+
+    bool ret = umq_ub_fc_msg_dedup_check_ut(&queue, imm);
+    EXPECT_EQ(ret, false);
+}
+
+TEST_F(UmqFcDedupTest, test_rep_duplicate_packet)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_REP;
+    imm.flow_control.seq = 3;
+    
+    queue.flow_control.fc_local_req_seq = 5;
+
+    bool ret = umq_ub_fc_msg_dedup_check_ut(&queue, imm);
+    EXPECT_EQ(ret, true);
+}
+
+TEST_F(UmqFcDedupTest, test_rep_seq_not_match)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_REP;
+    imm.flow_control.seq = 10;
+    
+    queue.flow_control.fc_local_req_seq = 20;
+
+    bool ret = umq_ub_fc_msg_dedup_check_ut(&queue, imm);
+    EXPECT_EQ(ret, true);
+}
+
+TEST_F(UmqFcDedupTest, test_return_ack_normal_packet)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_RETURN_ACK;
+    imm.flow_control.seq = 50;
+    
+    queue.flow_control.fc_local_req_seq = 50;
+
+    bool ret = umq_ub_fc_msg_dedup_check_ut(&queue, imm);
+    EXPECT_EQ(ret, false);
+}
+
+TEST_F(UmqFcDedupTest, test_return_ack_duplicate_packet)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_RETURN_ACK;
+    imm.flow_control.seq = 40;
+    
+    queue.flow_control.fc_local_req_seq = 50;
+
+    bool ret = umq_ub_fc_msg_dedup_check_ut(&queue, imm);
+    EXPECT_EQ(ret, true);
+}
+
+TEST_F(UmqFcDedupTest, test_other_type_not_dedup)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_USER;
+
+    bool ret = umq_ub_fc_msg_dedup_check_ut(&queue, imm);
+    EXPECT_EQ(ret, false);
+}
+
+TEST_F(UmqFcDedupTest, test_fc_init_type_not_dedup)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_INIT;
+
+    bool ret = umq_ub_fc_msg_dedup_check_ut(&queue, imm);
+    EXPECT_EQ(ret, false);
+}
+
+TEST_F(UmqFcDedupTest, test_check_and_store_req_first_packet)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_REQ;
+    imm.flow_control.seq = 10;
+
+    bool ret = umq_ub_fc_msg_dedup_check_and_store_ut(&queue, imm);
+    EXPECT_EQ(ret, false);
+    EXPECT_EQ(queue.flow_control.fc_remote_req_first, true);
+    EXPECT_EQ(queue.flow_control.fc_remote_req_seq, 10);
+}
+
+TEST_F(UmqFcDedupTest, test_check_and_store_req_duplicate)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_REQ;
+    imm.flow_control.seq = 10;
+    
+    queue.flow_control.fc_remote_req_first = true;
+    queue.flow_control.fc_remote_req_seq = 10;
+
+    bool ret = umq_ub_fc_msg_dedup_check_and_store_ut(&queue, imm);
+    EXPECT_EQ(ret, true);
+}
+
+TEST_F(UmqFcDedupTest, test_check_and_store_rep_normal)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_REP;
+    imm.flow_control.seq = 100;
+    
+    queue.flow_control.fc_local_req_seq = 100;
+
+    bool ret = umq_ub_fc_msg_dedup_check_and_store_ut(&queue, imm);
+    EXPECT_EQ(ret, false);
+}
+
+TEST_F(UmqFcDedupTest, test_check_and_store_rep_duplicate)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_REP;
+    imm.flow_control.seq = 50;
+    
+    queue.flow_control.fc_local_req_seq = 100;
+
+    bool ret = umq_ub_fc_msg_dedup_check_and_store_ut(&queue, imm);
+    EXPECT_EQ(ret, true);
+}
+
+TEST_F(UmqFcDedupTest, test_check_and_store_return_req)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_RETURN_REQ;
+    imm.flow_control.seq = 30;
+
+    bool ret = umq_ub_fc_msg_dedup_check_and_store_ut(&queue, imm);
+    EXPECT_EQ(ret, false);
+    EXPECT_EQ(queue.flow_control.fc_remote_req_seq, 30);
+}
+
+TEST_F(UmqFcDedupTest, test_check_and_store_return_ack_normal)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_FC_CREDIT_RETURN_ACK;
+    imm.flow_control.seq = 200;
+    
+    queue.flow_control.fc_local_req_seq = 200;
+
+    bool ret = umq_ub_fc_msg_dedup_check_and_store_ut(&queue, imm);
+    EXPECT_EQ(ret, false);
+}
+
+TEST_F(UmqFcDedupTest, test_check_and_store_other_type)
+{
+    umq_ub_imm_t imm = {0};
+    imm.bs.type = IMM_TYPE_NOTIFY;
+
+    bool ret = umq_ub_fc_msg_dedup_check_and_store_ut(&queue, imm);
+    EXPECT_EQ(ret, false);
 }
