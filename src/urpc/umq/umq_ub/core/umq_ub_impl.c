@@ -1080,12 +1080,13 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
                 queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, UMQ_ALIGN_64K(queue->dev_ctx->dev_attr.dev_cap.max_jetty));
             goto DELETE_JETTY;
         }
+
+        dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id] = (uint64_t)(uintptr_t)queue;
     }
 
     if ((option->create_flag & UMQ_CREATE_FLAG_UMQ_CTX) != 0) {
         queue->umq_ctx = option->umq_ctx;
     }
-    dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id] = (uint64_t)(uintptr_t)queue;
 
     queue->wait_ack_import.lock = util_rwlock_create();
     if (queue->wait_ack_import.lock == NULL) {
@@ -1104,20 +1105,22 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
     queue->state = queue->flow_control.enabled ? QUEUE_STATE_IDLE : QUEUE_STATE_READY;
     queue->umqh = umqh;
     umq_ub_queue_ctx_list_push(&queue->qctx_node);
+
+    ub_queue_t *real_queue = umq_ub_get_real_umq(queue);
     if (queue->flow_control.enabled) {
         UMQ_VLOG_INFO(VLOG_UMQ, "eid: " EID_FMT ", jetty_id[0]: %u, jetty_id[1]: %u,%s create UMQ(ID:%u)"
             "success, jfr_id[0]: %u, jfr_id[1]: %u, urma transmode %d, tp_type %d, priority %d, rnr_retry %d, "
-            "err_timeout %d, flowcontrol use %s window\n", EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
-            queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id,
-            port_str, queue->umq_id, queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr->jfr_id.id,
-            queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr->jfr_id.id, queue->tp_mode, queue->tp_type,
+            "err_timeout %d, flowcontrol use %s window\n", EID_ARGS(real_queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
+            real_queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, real_queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id,
+            port_str, queue->umq_id, real_queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr->jfr_id.id,
+            real_queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr->jfr_id.id, queue->tp_mode, queue->tp_type,
             queue->priority, queue->rnr_retry, queue->err_timeout,
             dev_ctx->flow_control.use_atomic_window ? "atomic" : "non-atomic");
     } else {
         UMQ_VLOG_INFO(VLOG_UMQ, "eid: " EID_FMT ", jetty_id[0]: %u,%s create UMQ(ID:%u) success, jfr_id[0]: %u, "
             "urma transmode %d, tp_type %d, priority %d, rnr_retry %d, err_timeout %d\n",
-            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid), queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id,
-            port_str, queue->umq_id, queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr->jfr_id.id, queue->tp_mode, queue->tp_type,
+            EID_ARGS(real_queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid), real_queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id,
+            port_str, queue->umq_id, real_queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr->jfr_id.id, queue->tp_mode, queue->tp_type,
             queue->priority, queue->rnr_retry, queue->err_timeout);
     }
     return (uint64_t)(uintptr_t)queue;

@@ -60,7 +60,7 @@ int run_umq_example_server(struct urpc_example_config *cfg)
 
     uint32_t local_bind_info_size = UMQ_MAX_BIND_INFO_SIZE;
     uint8_t local_bind_info[UMQ_MAX_BIND_INFO_SIZE] = {0};
-    uint64_t umqh = example_create_umq(cfg, local_bind_info, &local_bind_info_size);
+    uint64_t umqh = example_create_umq(cfg, local_bind_info, &local_bind_info_size, 0, 0);
     if (umqh == UMQ_INVALID_HANDLE) {
         LOG_PRINT_ERR("create umq failed\n");
         goto UNINIT;
@@ -159,7 +159,7 @@ int run_umq_example_client(struct urpc_example_config *cfg)
         goto DISCONNECT;
     }
 
-    uint64_t umqh = example_create_umq(cfg, local_bind_info, &local_bind_info_size);
+    uint64_t umqh = example_create_umq(cfg, local_bind_info, &local_bind_info_size, 0, 0);
     if (umqh == UMQ_INVALID_HANDLE) {
         LOG_PRINT_ERR("create umq failed\n");
         goto UNINIT;

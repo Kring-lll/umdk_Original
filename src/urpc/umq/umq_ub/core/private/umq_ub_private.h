@@ -479,6 +479,15 @@ typedef struct umq_ub_raw_dev {
     uint32_t eid_index;
 } umq_ub_raw_dev_t;
 
+static inline ub_queue_t* umq_ub_get_real_umq(ub_queue_t *queue)
+{
+    bool is_logic_umqh = (queue->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) &&
+                         (queue->create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT) &&
+                         (~queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) &&
+                         (~queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ);
+    return is_logic_umqh ? (ub_queue_t *)((umq_t*)queue->share_rq_umqh)->umqh_tp : queue;
+}
+
 int rx_buf_ctx_list_init(rx_buf_ctx_list_t *rx_buf_ctx_list, uint32_t ctx_num);
 void rx_buf_ctx_list_uninit(rx_buf_ctx_list_t *rx_buf_ctx_list);
 umq_buf_t *umq_get_buf_by_user_ctx(ub_queue_t *queue, uint64_t user_ctx, ub_queue_jetty_index_t jetty_index);

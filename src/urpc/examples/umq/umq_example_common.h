@@ -76,7 +76,8 @@ struct req_cb_arg {
 };
 
 int example_init_umq(struct urpc_example_config *cfg);
-uint64_t example_create_umq(struct urpc_example_config *cfg, uint8_t *local_bind_info, uint32_t *bind_info_size);
+uint64_t example_create_umq(struct urpc_example_config *cfg, uint8_t *local_bind_info, uint32_t *bind_info_size,
+                            int32_t type, uint64_t share_umq);
 
 int client_connect(const char *ip, uint16_t port);
 void client_dsiconnect(void);
