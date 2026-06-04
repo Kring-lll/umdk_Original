@@ -93,7 +93,8 @@ int example_init_umq(struct urpc_example_config *cfg)
     return 0;
 }
 
-uint64_t example_create_umq(struct urpc_example_config *cfg, uint8_t *local_bind_info, uint32_t *bind_info_size)
+// type =1 main_umq; =2 sub_umq; =3 loge_umq
+uint64_t example_create_umq(struct urpc_example_config *cfg, uint8_t *local_bind_info, uint32_t *bind_info_size, int type, uint64_t share_umq)
 {
     umq_create_option_t option = {
         .trans_mode = cfg->trans_mode,
@@ -108,6 +109,26 @@ uint64_t example_create_umq(struct urpc_example_config *cfg, uint8_t *local_bind
         .tp_mode = cfg->tp_mode,
         .tp_type = cfg->tp_type,
     };
+
+    switch (type)
+    {
+    case 1:
+        option.create_flag |= UMQ_CREATE_FLAG_MAIN_UMQ | UMQ_CREATE_FLAG_SHARE_TRANSPORT;
+        break;
+
+    case 2:
+        option.create_flag |= UMQ_CREATE_FLAG_SUB_UMQ | UMQ_CREATE_FLAG_SHARE_RQ | UMQ_CREATE_FLAG_SHARE_TRANSPORT;
+        option.share_rq_umqh = share_umq;
+        break;
+
+    case 3:
+        option.create_flag |= UMQ_CREATE_FLAG_SHARE_RQ | UMQ_CREATE_FLAG_SHARE_TRANSPORT;
+        option.share_rq_umqh = share_umq;
+        break;
+    
+    default:
+        break;
+    }
     if (cfg->instance_mode == SERVER) {
         if (sprintf(option.name, "%s", "server") <= 0) {
             LOG_PRINT_ERR("set name failed\n");

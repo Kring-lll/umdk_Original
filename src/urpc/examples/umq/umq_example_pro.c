@@ -34,13 +34,13 @@ int run_umq_example_pro_server(struct urpc_example_config *cfg)
     if (ret != 0) {
         goto DISCONNECT;
     }
-
+    recv_size = sizeof(umq_eid_t);
     ret = server_exchange_data((uint8_t *)&cfg->src_eid, sizeof(umq_eid_t), (uint8_t *)&cfg->dst_eid, &recv_size);
     if (ret != 0 || recv_size != sizeof(umq_eid_t)) {
         LOG_PRINT_ERR("server exchange eid failed\n");
         goto DISCONNECT;
     }
-
+    recv_size = sizeof(umq_port_id_t);
     ret = server_exchange_data((uint8_t *)&cfg->src_port_id, sizeof(umq_port_id_t), (uint8_t *)&cfg->src_port_id,
                                &recv_size);
     if (ret != 0 || recv_size != sizeof(umq_port_id_t)) {
@@ -50,7 +50,21 @@ int run_umq_example_pro_server(struct urpc_example_config *cfg)
 
     uint32_t local_bind_info_size = UMQ_MAX_BIND_INFO_SIZE;
     uint8_t local_bind_info[UMQ_MAX_BIND_INFO_SIZE] = {0};
-    uint64_t umqh = example_create_umq(cfg, local_bind_info, &local_bind_info_size);
+    uint64_t main_umqh = example_create_umq(cfg, local_bind_info, &local_bind_info_size, 1, 0);
+    if (main_umqh == UMQ_INVALID_HANDLE) {
+        LOG_PRINT_ERR("create umq failed\n");
+        goto DISCONNECT;
+    }
+
+    local_bind_info_size = UMQ_MAX_BIND_INFO_SIZE;
+    uint64_t sub_umqh = example_create_umq(cfg, local_bind_info, &local_bind_info_size, 2, main_umqh);
+    if (sub_umqh == UMQ_INVALID_HANDLE) {
+        LOG_PRINT_ERR("create umq failed\n");
+        goto DISCONNECT;
+    }
+
+    local_bind_info_size = UMQ_MAX_BIND_INFO_SIZE;
+    uint64_t umqh = example_create_umq(cfg, local_bind_info, &local_bind_info_size, 3, main_umqh);
     if (umqh == UMQ_INVALID_HANDLE) {
         LOG_PRINT_ERR("create umq failed\n");
         goto DISCONNECT;
@@ -158,7 +172,7 @@ int run_umq_example_pro_client(struct urpc_example_config *cfg)
     if (ret != 0) {
         goto DISCONNECT;
     }
-
+    recv_size = sizeof(umq_eid_t);
     ret = client_exchange_data((uint8_t *)&cfg->src_eid, sizeof(umq_eid_t), (uint8_t *)&cfg->dst_eid, &recv_size);
     if (ret != 0 || recv_size != sizeof(umq_eid_t)) {
         LOG_PRINT_ERR("client exchange eid failed\n");
@@ -169,7 +183,7 @@ int run_umq_example_pro_client(struct urpc_example_config *cfg)
     if (ret != 0) {
         goto DISCONNECT;
     }
-
+    recv_size = sizeof(umq_port_id_t);
     ret = client_exchange_data((uint8_t *)&cfg->dst_port_id, sizeof(umq_port_id_t), (uint8_t *)&cfg->dst_port_id,
                                &recv_size);
     if (ret != 0 || recv_size != sizeof(umq_port_id_t)) {
@@ -177,7 +191,21 @@ int run_umq_example_pro_client(struct urpc_example_config *cfg)
         goto DISCONNECT;
     }
 
-    uint64_t umqh = example_create_umq(cfg, local_bind_info, &local_bind_info_size);
+    uint64_t main_umqh = example_create_umq(cfg, local_bind_info, &local_bind_info_size, 1, 0);
+    if (main_umqh == UMQ_INVALID_HANDLE) {
+        LOG_PRINT_ERR("create umq failed\n");
+        goto DISCONNECT;
+    }
+
+    local_bind_info_size = UMQ_MAX_BIND_INFO_SIZE;
+    uint64_t sub_umqh = example_create_umq(cfg, local_bind_info, &local_bind_info_size, 2, main_umqh);
+    if (sub_umqh == UMQ_INVALID_HANDLE) {
+        LOG_PRINT_ERR("create umq failed\n");
+        goto DISCONNECT;
+    }
+
+    local_bind_info_size = UMQ_MAX_BIND_INFO_SIZE;
+    uint64_t umqh = example_create_umq(cfg, local_bind_info, &local_bind_info_size, 3, main_umqh);
     if (umqh == UMQ_INVALID_HANDLE) {
         LOG_PRINT_ERR("create umq failed\n");
         goto DISCONNECT;
