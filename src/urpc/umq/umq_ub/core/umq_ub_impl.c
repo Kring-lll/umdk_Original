@@ -1896,8 +1896,11 @@ int umq_ub_dev_add_impl(umq_trans_info_t *info, umq_init_cfg_t *cfg)
         UMQ_VLOG_ERR(VLOG_UMQ, "imported info create failed\n");
         return -UMQ_ERR_ENOMEM;
     }
-
-    int ret = umq_find_ub_device(info, &g_ub_ctx[g_ub_ctx_count]);
+    int ret = umq_dev_assign_validate(&info->dev_info);
+    if (ret != UMQ_SUCCESS) {
+        return -UMQ_ERR_EINVAL;
+    }
+    ret = umq_find_ub_device(info, &g_ub_ctx[g_ub_ctx_count]);
     if (ret != UMQ_SUCCESS) {
         goto DELETE_IMPORT_INFO;
     }
