@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <errno.h>
 
 #include "urma_api.h"
 #include "urma_ubagg.h"
@@ -47,11 +49,17 @@
 #define PERFTEST_IMM_DATA      (0x20230416)
 #define PERFTEST_NOTIFY_DATA   (0x20230416)
 #define PERFTEST_FLAG_USER_CTX (63)
+#define PERFTEST_EXIT_CMD      ('Q')
 
 run_test_ctx_t *g_duration_ctx;
 
 perftest_context_t *g_perftest_ctx;
 perftest_config_t *g_perftest_cfg;
+
+static volatile sig_atomic_t g_exit_flag = 0;
+static int g_exit_sock_fd = -1;
+static pthread_t g_exit_monitor_tid;
+static bool g_exit_monitor_started = false;
 
 typedef struct bi_exchange_info {
     char *before;
@@ -102,6 +110,72 @@ static void print_bw_header(const perftest_config_t *cfg)
         default:
             LOG_QUIET(RESULT_BW_UNIT_FMT, "MB", "MB");
             break;
+    }
+}
+
+static void request_exit(void)
+{
+    g_exit_flag = 1;
+}
+
+static void catch_sigint(int sig)
+{
+    (void)sig;
+    request_exit();
+}
+
+static void *exit_monitor_thread(void *arg __attribute__((unused)))
+{
+    char buf[1];
+    while (1) {
+        ssize_t ret = read(g_exit_sock_fd, buf, sizeof(buf));
+        if (ret < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            request_exit();
+            break;
+        }
+        if (ret == 0) {
+            request_exit();
+            break;
+        }
+        if (buf[0] == PERFTEST_EXIT_CMD) {
+            request_exit();
+            break;
+        }
+    }
+    return NULL;
+}
+
+static int setup_exit_sync(int sock_fd)
+{
+    g_exit_sock_fd = sock_fd;
+    g_exit_flag = 0;
+    if (pthread_create(&g_exit_monitor_tid, NULL, exit_monitor_thread, NULL) != 0) {
+        LOG_ERROR("Failed to create exit monitor thread.\n");
+        g_exit_sock_fd = -1;
+        return -1;
+    }
+    g_exit_monitor_started = true;
+    return 0;
+}
+
+static void teardown_exit_sync(void)
+{
+    if (g_exit_monitor_started) {
+        (void)pthread_cancel(g_exit_monitor_tid);
+        (void)pthread_join(g_exit_monitor_tid, NULL);
+        g_exit_monitor_started = false;
+    }
+    g_exit_sock_fd = -1;
+}
+
+static void notify_peer_exit(void)
+{
+    if (g_exit_sock_fd >= 0) {
+        char cmd = PERFTEST_EXIT_CMD;
+        ssize_t __attribute__((unused)) wr_ret = write(g_exit_sock_fd, &cmd, sizeof(cmd));
     }
 }
 
@@ -2753,6 +2827,7 @@ static void *infinite_print_thread(void *duration)
 
 static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
 {
+    void *thread_ret;
     uint64_t tot_scnt = 0;
     uint64_t tot_ccnt = 0;
     uint32_t jettys = cfg->jettys;
@@ -2796,11 +2871,8 @@ static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
     }
     run_ctx->tposted[0] = get_cycles();
 
-    while (1) {
+    while (!g_exit_flag) {
         if (cfg->time_type.bs.duration == 1 && run_ctx->state == END_STATE) {
-            g_perftest_ctx->infinite_print = false;
-            void *thread_ret;
-            (void)pthread_join(print_thread, &thread_ret);
             break;
         }
         for (index = 0; index < jettys; index++) {
@@ -2894,13 +2966,14 @@ static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
             }
         }
     }
+    g_perftest_ctx->infinite_print = false;
+    (void)pthread_join(print_thread, &thread_ret);
     free(scnt_for_jetty);
     free(cr);
     return 0;
 
 err_exit:
     g_perftest_ctx->infinite_print = false;
-    void *thread_ret;
     (void)pthread_join(print_thread, &thread_ret);
     free(scnt_for_jetty);
     free(cr);
@@ -2963,7 +3036,7 @@ static int run_once_bw_recv_infinite(perftest_context_t *ctx, perftest_config_t 
     cfg->last_iters = 0;
     run_ctx->tposted[0] = get_cycles();
 
-    while (1) {
+    while (!g_exit_flag) {
         if (cfg->time_type.bs.duration == 1 && run_ctx->state == END_STATE) {
             g_perftest_ctx->infinite_print = false;
             void *thread_ret;
@@ -3209,11 +3282,21 @@ static int run_bw_once(perftest_context_t *ctx, perftest_config_t *cfg)
     }
 
     if (cfg->time_type.bs.infinite == 1) {
+        (void)signal(SIGINT, catch_sigint);
+        if (setup_exit_sync(cfg->comm.sock_fd[0]) != 0) {
+            LOG_ERROR("Exit sync setup failed.\n");
+        }
         if (prepare_run_bw_infinite(ctx, cfg) != 0) {
             LOG_ERROR("Failed to prepare and run infinite, api_type: %d.\n",
                       (int)cfg->api_type);
+            notify_peer_exit();
+            teardown_exit_sync();
+            (void)signal(SIGINT, SIG_DFL);
             return -1;
         }
+        notify_peer_exit();
+        teardown_exit_sync();
+        (void)signal(SIGINT, SIG_DFL);
     } else {
         if (prepare_run_bw_once(ctx, cfg, &local_bw_report, &remote_bw_report) != 0) {
             LOG_ERROR("Failed to prepare and run bw, api_type: %d.\n", (int)cfg->api_type);
@@ -3373,21 +3456,28 @@ static int run_send_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
         }
     }
 
+    (void)signal(SIGINT, catch_sigint);
+    if (setup_exit_sync(cfg->comm.sock_fd[0]) != 0) {
+        LOG_ERROR("Exit sync setup failed.\n");
+    }
+
     if (cfg->comm.server_ip != NULL) {
         ret = run_once_bw_infinite(ctx, cfg);
         if (ret != 0) {
             LOG_ERROR("Failed to run run_once_bw_infinite in client, ret: %d.\n", ret);
-            return -1;
         }
     } else {
         ret = run_once_bw_recv_infinite(ctx, cfg);
         if (ret != 0) {
             LOG_ERROR("Failed to run run_once_bw_recv_infinite in server, ret: %d.\n", ret);
-            return -1;
         }
     }
 
-    return 0;
+    notify_peer_exit();
+    teardown_exit_sync();
+    (void)signal(SIGINT, SIG_DFL);
+
+    return ret;
 }
 
 static int run_send_bw_one_size(perftest_context_t *ctx, perftest_config_t *cfg)
