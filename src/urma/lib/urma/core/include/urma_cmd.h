@@ -51,10 +51,6 @@ typedef enum urma_core_cmd {
     URMA_CORE_ADMIN_INSERT_MAIN_UE_EID_BATCH,
 } urma_core_cmd_t;
 
-typedef enum uram_ubagg_cmd {
-    UBAGG_NL_GET_PHYSICAL_DEVICE = 4,
-} uram_ubagg_cmd_t;
-
 /* only for uburma device ioctl */
 #define URMA_CMD_MAGIC 'U'
 #define URMA_CMD       _IOWR(URMA_CMD_MAGIC, 1, urma_cmd_hdr_t)
