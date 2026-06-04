@@ -12,7 +12,7 @@
 #include "urma_api.h"
 #include "bondp_netlink.h"
 
-static int bondp_get_target_idx_by_local_idx(const bondp_failback_ctx_t *task, int local_idx, int *target_idx)
+static int bondp_get_target_idx_by_local_idx(const bondp_failback_task_t *task, int local_idx, int *target_idx)
 {
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
         for (int j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
@@ -51,7 +51,7 @@ static int bondp_update_pjetty_id_mapping(
 }
 
 //保留rebuild部分逻辑
-int bondp_failback_rebuild_local_pjetty(bondp_failback_ctx_t *task)
+int bondp_failback_rebuild_local_pjetty(bondp_failback_task_t *task)
 {
     int local_idx = task->primary_local_idx;
     if (task == NULL || task->bondp_jetty == NULL ||
@@ -127,7 +127,7 @@ int bondp_failback_rebuild_local_pjetty(bondp_failback_ctx_t *task)
 #define BONDP_FALLBACK_CTRL_RESP                       2
 #define BONDP_FALLBACK_PRIMARY_INVALID_ID              UINT32_MAX
 
-static uint64_t bondp_fallback_build_req_payload(const bondp_failback_ctx_t *task)
+static uint64_t bondp_fallback_build_req_payload(const bondp_failback_task_t *task)
 {
     int primary_local_idx = task->primary_local_idx;
     if (primary_local_idx < 0 || primary_local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
@@ -141,7 +141,7 @@ static uint64_t bondp_fallback_build_req_payload(const bondp_failback_ctx_t *tas
 }
 
 static int bondp_send_fallback_ctrl_msg(
-    bondp_context_t *bdp_ctx, bondp_failback_ctx_t *task,
+    bondp_context_t *bdp_ctx, bondp_failback_task_t *task,
     int local_idx, int target_idx, uint8_t ctrl_type, uint8_t req_seq, uint64_t payload)
 {
     if (local_idx < 0 || target_idx < 0 || payload > UINT32_MAX) {
@@ -160,7 +160,7 @@ static int bondp_send_fallback_ctrl_msg(
     return BONDP_FB_OK;
 }
 
-static int bondp_failback_send_req(bondp_failback_ctx_t *task)
+static int bondp_failback_send_req(bondp_failback_task_t *task)
 {
     bondp_context_t *bdp_ctx = task->bdp_ctx;
     int active_local_idx = task->active_local_idx;
@@ -177,7 +177,7 @@ static int bondp_failback_send_req(bondp_failback_ctx_t *task)
 }
 
 //重新import的部分
-static int bondp_failback_reimport(bondp_failback_ctx_t *task)
+static int bondp_failback_reimport(bondp_failback_task_t *task)
 {
     bondp_comp_t *bdp_jetty = task->bondp_jetty;
     bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
@@ -221,7 +221,7 @@ static int bondp_failback_reimport(bondp_failback_ctx_t *task)
     return BONDP_FB_OK;
 }
 
-static int bondp_failback_relink(bondp_failback_ctx_t *task)
+static int bondp_failback_relink(bondp_failback_task_t *task)
 {
     if (bondp_failback_reimport(task) != BONDP_FB_OK) {
         return BONDP_FB_ERR;

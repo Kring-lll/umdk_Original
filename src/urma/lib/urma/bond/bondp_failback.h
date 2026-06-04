@@ -61,7 +61,7 @@ typedef struct bondp_failback_ctx {
 
     bondp_context_t *bdp_ctx;
 
-} bondp_failback_ctx_t;
+} bondp_failback_task_t;
 
 #define BONDP_FAILBACK_REBUILD_START_DELAY_MS     10000U  /* 收到CQE后，延迟10秒开始重建 */
 #define BONDP_FAILBACK_REBUILD_RETRY_INIT_MS      1000U   /* 重建失败后，初始重试间隔1秒 */
@@ -74,7 +74,7 @@ typedef struct bondp_failback_ctx {
 #define BONDP_FAILBACK_CTRL_RESP                       2
 #define BONDP_FAILBACK_PRIMARY_INVALID_ID              UINT32_MAX
 
-int bondp_failback_on_cqe(bondp_failback_ctx_t *ctx);
+int bondp_failback_on_cqe(bondp_failback_task_t *ctx);
 
 int bondp_handle_netlink_events(void);
 

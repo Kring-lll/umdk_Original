@@ -21,7 +21,7 @@ static uint32_t bondp_failback_next_backoff(uint32_t cur, uint32_t max_ms)
 }
 
 //终止failback自调度
-static void bondp_failback_cancel_timer(bondp_failback_ctx_t *ctx)
+static void bondp_failback_cancel_timer(bondp_failback_task_t *ctx)
 {
     if (!ctx->timer_valid) {
         return;
@@ -30,7 +30,7 @@ static void bondp_failback_cancel_timer(bondp_failback_ctx_t *ctx)
     ctx->timer_valid = false;
 }
 
-static int bondp_failback_schedule(bondp_failback_ctx_t *ctx, uint64_t delay_ms,bondp_worker_task_fn_t fn)
+static int bondp_failback_schedule(bondp_failback_task_t *ctx, uint64_t delay_ms,bondp_worker_task_fn_t fn)
 {
     int ret;
     if (ctx == NULL || ctx->closed) {
@@ -48,7 +48,7 @@ static int bondp_failback_schedule(bondp_failback_ctx_t *ctx, uint64_t delay_ms,
 //整段的入口
 //通过多个ctx或许可以同时检测多条链路的回切等状态？
 
-//TODO:bondp_failback_ctx_t的构造，注册与销毁
+//TODO:bondp_failback_task_t的构造，注册与销毁
 
 //
 
@@ -59,7 +59,7 @@ static int bondp_failback_schedule(bondp_failback_ctx_t *ctx, uint64_t delay_ms,
 //报文还要修改
 
 
-int bondp_failback_on_cqe(bondp_failback_ctx_t *ctx)
+int bondp_failback_on_cqe(bondp_failback_task_t *ctx)
 {
     int ret;
     if (ctx == NULL || ctx->closed) {
@@ -85,7 +85,7 @@ static void bondp_failback_req_timeout_task(void *arg);
 
 static void bondp_failback_rebuild_task(void *arg)
 {
-    bondp_failback_ctx_t *ctx = arg;
+    bondp_failback_task_t *ctx = arg;
     int ret;
     if (ctx == NULL || ctx->closed) {
         return;
@@ -115,7 +115,7 @@ static void bondp_failback_rebuild_task(void *arg)
 
 static void bondp_failback_send_req_task(void *arg)
 {
-    bondp_failback_ctx_t *ctx = arg;
+    bondp_failback_task_t *ctx = arg;
     if (ctx == NULL || ctx->closed) {
         return;
     }
@@ -145,7 +145,7 @@ static void bondp_failback_send_req_task(void *arg)
 
 static void bondp_failback_req_timeout_task(void *arg)
 {
-    bondp_failback_ctx_t *ctx = arg;
+    bondp_failback_task_t *ctx = arg;
     if (ctx == NULL || ctx->closed) {
         return;
     }
@@ -224,7 +224,7 @@ static bool bondp_handle_message(bondp_context_t *bdp_ctx, uint32_t recv_local_i
     uint8_t ctrl_type, uint8_t req_seq, uint32_t payload, bool silent_unmatched)
 {
     //health_check没开，则直接退出
-    if (ctrl_type != BONDP_FO_CTRL_REQ && ctrl_type != BONDP_FO_CTRL_RESP) {
+    if (ctrl_type != BONDP_FAILBACK_CTRL_REQ && ctrl_type != BONDP_FAILBACK_CTRL_RESP) {
         if (!silent_unmatched) {
             URMA_LOG_WARN("Invalid fallback ctrl type=%u local_id=%u\n", ctrl_type, recv_local_id);
         }
@@ -232,7 +232,7 @@ static bool bondp_handle_message(bondp_context_t *bdp_ctx, uint32_t recv_local_i
     }
     //检查消息的处理，只能处理上述两种消息 BONDP_FALLBACK_CTRL_REQ就是healthcheck发出来的
     //TODO:此处本质上是要将一个外部知晓的id 转换为本地实际应当响应消息的ctx 视实际情况而定
-    bondp_failback_ctx_t *ctx;
+    bondp_failback_task_t *ctx;
     //pthread_rwlock_lock(&health->task_table.lock); 此处注意并发
 
     if (ctx == NULL) {
