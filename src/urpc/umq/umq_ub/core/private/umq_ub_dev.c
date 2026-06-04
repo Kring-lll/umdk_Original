@@ -23,8 +23,6 @@ static struct {
 int umq_ub_dev_str_get(umq_dev_assign_t *dev_info, char *dev_str, int dev_str_len)
 {
     int ret;
-    char *ip_addr;
-    size_t ip_addr_max_len;
     
     switch (dev_info->assign_mode) {
         case UMQ_DEV_ASSIGN_MODE_DEV:
@@ -46,17 +44,23 @@ int umq_ub_dev_str_get(umq_dev_assign_t *dev_info, char *dev_str, int dev_str_le
             }
             break;
         case UMQ_DEV_ASSIGN_MODE_IPV4:
-        /* fall-through */
-        case UMQ_DEV_ASSIGN_MODE_IPV6:
-            ip_addr =
-                dev_info->assign_mode == UMQ_DEV_ASSIGN_MODE_IPV4 ? dev_info->ipv4.ip_addr : dev_info->ipv6.ip_addr;
-            ip_addr_max_len = dev_info->assign_mode == UMQ_DEV_ASSIGN_MODE_IPV4 ? UMQ_IPV4_SIZE : UMQ_IPV6_SIZE;
-            if (strnlen(ip_addr, ip_addr_max_len) >= ip_addr_max_len) {
-                UMQ_VLOG_ERR(VLOG_UMQ, "ip_addr is not null-terminated\n");
+            if (strnlen(dev_info->ipv4.ip_addr, UMQ_IPV4_SIZE) >= UMQ_IPV4_SIZE) {
+                UMQ_VLOG_ERR(VLOG_UMQ, "ipv4.ip_addr is not null-terminated\n");
                 return -UMQ_ERR_EINVAL;
             }
-            ret = snprintf(dev_str, dev_str_len, "%s", ip_addr);
-            if (ret < 0 || ret >= dev_str_len) {
+            ret = snprintf(dev_str, UMQ_IPV4_SIZE, "%s", dev_info->ipv4.ip_addr);
+            if (ret < 0 || ret >= UMQ_IPV4_SIZE) {
+                UMQ_VLOG_ERR(VLOG_UMQ, "snprintf failed, ret: %d\n", ret);
+                return UMQ_FAIL;
+            }
+            break;
+        case UMQ_DEV_ASSIGN_MODE_IPV6:
+            if (strnlen(dev_info->ipv6.ip_addr, UMQ_IPV6_SIZE) >= UMQ_IPV6_SIZE) {
+                UMQ_VLOG_ERR(VLOG_UMQ, "ipv6.ip_addr is not null-terminated\n");
+                return -UMQ_ERR_EINVAL;
+            }
+            ret = snprintf(dev_str, UMQ_IPV6_SIZE, "%s", dev_info->ipv6.ip_addr);
+            if (ret < 0 || ret >= UMQ_IPV6_SIZE) {
                 UMQ_VLOG_ERR(VLOG_UMQ, "snprintf failed, ret: %d\n", ret);
                 return UMQ_FAIL;
             }
