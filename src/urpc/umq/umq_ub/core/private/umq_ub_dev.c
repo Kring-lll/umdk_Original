@@ -7,6 +7,7 @@
  * Create: 2026-2-8
  */
 
+#include <string.h>
 #include "umq_types.h"
 #include "urma_api.h"
 #include "umq_symbol_private.h"
@@ -23,8 +24,14 @@ int umq_ub_dev_str_get(umq_dev_assign_t *dev_info, char *dev_str, int dev_str_le
 {
     int ret;
     char *ip_addr;
+    size_t ip_addr_max_len;
+    
     switch (dev_info->assign_mode) {
         case UMQ_DEV_ASSIGN_MODE_DEV:
+            if (strnlen(dev_info->dev.dev_name, UMQ_DEV_NAME_SIZE) >= UMQ_DEV_NAME_SIZE) {
+                UMQ_VLOG_ERR(VLOG_UMQ, "dev_name is not null-terminated\n");
+                return -UMQ_ERR_EINVAL;
+            }
             ret = snprintf(dev_str, dev_str_len, "%s[%u]", dev_info->dev.dev_name, dev_info->dev.eid_idx);
             if (ret < 0 || ret >= dev_str_len) {
                 UMQ_VLOG_ERR(VLOG_UMQ, "snprintf failed, ret: %d\n", ret);
@@ -43,6 +50,11 @@ int umq_ub_dev_str_get(umq_dev_assign_t *dev_info, char *dev_str, int dev_str_le
         case UMQ_DEV_ASSIGN_MODE_IPV6:
             ip_addr =
                 dev_info->assign_mode == UMQ_DEV_ASSIGN_MODE_IPV4 ? dev_info->ipv4.ip_addr : dev_info->ipv6.ip_addr;
+            ip_addr_max_len = dev_info->assign_mode == UMQ_DEV_ASSIGN_MODE_IPV4 ? UMQ_IPV4_SIZE : UMQ_IPV6_SIZE;
+            if (strnlen(ip_addr, ip_addr_max_len) >= ip_addr_max_len) {
+                UMQ_VLOG_ERR(VLOG_UMQ, "ip_addr is not null-terminated\n");
+                return -UMQ_ERR_EINVAL;
+            }
             ret = snprintf(dev_str, dev_str_len, "%s", ip_addr);
             if (ret < 0 || ret >= dev_str_len) {
                 UMQ_VLOG_ERR(VLOG_UMQ, "snprintf failed, ret: %d\n", ret);

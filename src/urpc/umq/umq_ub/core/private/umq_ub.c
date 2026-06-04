@@ -8,6 +8,7 @@
  */
 
 #include <sys/epoll.h>
+#include <string.h>
 #include "perf.h"
 #include "urpc_tlv.h"
 #include "umq_qbuf_pool.h"
@@ -894,6 +895,13 @@ static int umq_find_ub_dev_by_ip_addr(umq_dev_assign_t *dev_info, umq_ub_raw_dev
 {
     const char *ip_addr =
         dev_info->assign_mode == UMQ_DEV_ASSIGN_MODE_IPV4 ? dev_info->ipv4.ip_addr : dev_info->ipv6.ip_addr;
+    size_t ip_addr_max_len = dev_info->assign_mode == UMQ_DEV_ASSIGN_MODE_IPV4 ? UMQ_IPV4_SIZE : UMQ_IPV6_SIZE;
+    
+    if (strnlen(ip_addr, ip_addr_max_len) >= ip_addr_max_len) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "ip_addr is not null-terminated\n");
+        return -UMQ_ERR_EINVAL;
+    }
+    
     umq_eid_t eid;
     int ret = umq_symbol_urma()->urma_str_to_eid(ip_addr, (urma_eid_t *)(uintptr_t)&eid);
     if (ret != UMQ_SUCCESS) {
