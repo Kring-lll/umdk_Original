@@ -173,7 +173,8 @@ typedef struct bondp_jfc {
     int lasted_polled_jfc_idx;
     uint32_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t enabled_count;
-    uint32_t active_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t loc_active_indices[URMA_UBAGG_MAX_CONNECTION];
+    uint32_t tar_active_indices[URMA_UBAGG_MAX_CONNECTION];
     uint32_t active_count;
     urma_ref_t use_cnt; /* Initialize to 0 */
 } bondp_jfc_t;
@@ -227,7 +228,8 @@ typedef struct bondp_comp {
     int dev_num;
     uint32_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t enabled_count;
-    uint32_t active_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t loc_active_idx[URMA_UBAGG_MAX_CONNECTION];
+    uint32_t tar_active_idx[URMA_UBAGG_MAX_CONNECTION];
     uint32_t active_count;
     bondp_context_t *bondp_ctx;
     uint8_t pjettys_error_done[URMA_UBAGG_DEV_MAX_NUM];
@@ -243,9 +245,9 @@ typedef struct bondp_comp {
     uint32_t msn;
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
 #ifndef __cplusplus
-    atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
+    atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
 #else
-    std::atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
+    std::atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
 #endif
     // recv
     wr_buf_t recv_wr_buf;
@@ -261,8 +263,8 @@ typedef struct bondp_target_jetty {
     urma_target_seg_t *p_check_tseg[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
     int local_dev_num;
     int target_dev_num;
-    uint32_t local_active_indices[URMA_UBAGG_DEV_MAX_NUM];
-    uint32_t active_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t local_active_indices[URMA_UBAGG_MAX_CONNECTION];
+    uint32_t active_indices[URMA_UBAGG_MAX_CONNECTION];
     uint32_t active_count;
     bool valid[URMA_UBAGG_DEV_MAX_NUM];
     urma_ref_t use_cnt;

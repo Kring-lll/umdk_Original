@@ -28,12 +28,16 @@ static void select_least_load_path(const bondp_comp_t *bdp_comp, uint32_t min_ac
 
     *least_load_cnt = 0;
     for (uint32_t i = 0; i < min_active_count; i++) {
-        uint32_t active_idx = bdp_comp->active_indices[i];
-        if (!bdp_comp->valid[active_idx] || active_idx < min_idx || active_idx >= max_idx) {
+        uint32_t loc_active_idx = bdp_comp->loc_active_idx[i];
+        uint32_t tar_active_idx = bdp_comp->tar_active_idx[i];
+
+        if (!bdp_comp->valid[loc_active_idx] ||
+            loc_active_idx < (uint32_t)min_idx ||
+            loc_active_idx > (uint32_t)max_idx) {
             continue;
         }
 
-        uint32_t sqe_cnt = atomic_load(&bdp_comp->sqe_cnt[active_idx]);
+        uint32_t sqe_cnt = atomic_load(&bdp_comp->sqe_cnt[loc_active_idx][tar_active_idx]);
         if (sqe_cnt < least_load) {
             least_load = sqe_cnt;
             least_load_pos[0] = i;
@@ -81,13 +85,15 @@ static int schedule_send_active_backup(const bondp_comp_t *bdp_comp, const bondp
     uint32_t min_active_count = MIN(bdp_comp->active_count, bdp_tjetty->active_count);
 
     for (uint32_t i = 0; i < min_active_count; i++) {
-        uint32_t active_idx = bdp_comp->active_indices[i];
-        if (!bdp_comp->valid[active_idx]) {
+        uint32_t loc_active_idx = bdp_comp->loc_active_idx[i];
+        uint32_t tar_active_idx = bdp_comp->tar_active_idx[i];
+
+        if (!bdp_comp->valid[loc_active_idx]) {
             continue;
         }
 
-        *send_idx = (int)active_idx;
-        *target_idx = (int)bdp_tjetty->active_indices[i];
+        *send_idx = (int)loc_active_idx;
+        *target_idx = (int)tar_active_idx;
         return 0;
     }
 
@@ -167,14 +173,14 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
     }
 
     uint32_t selected_pos = select_random_path(least_load_pos, least_load_cnt);
-    *send_idx = (int)bdp_comp->active_indices[selected_pos];
-    *target_idx = (int)bdp_tjetty->active_indices[selected_pos];
+    *send_idx = (int)bdp_comp->loc_active_idx[selected_pos];
+    *target_idx = (int)bdp_comp->tar_active_idx[selected_pos];
     return 0;
 }
 
 static int schedule_recv_standalone(const bondp_comp_t *bdp_comp, int *recv_idx)
 {
-    *recv_idx = (int)bdp_comp->active_indices[0];
+    *recv_idx = (int)bdp_comp->loc_active_idx[0];
     return 0;
 }
 
@@ -184,7 +190,7 @@ static int schedule_recv_balance(const bondp_comp_t *bdp_comp, int *recv_idx)
     uint32_t least_load = UINT32_MAX;
 
     for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
-        uint32_t active_idx = bdp_comp->active_indices[i];
+        uint32_t active_idx = bdp_comp->loc_active_idx[i];
         uint32_t rqe_cnt = bdp_comp->rqe_cnt[active_idx];
         if (rqe_cnt < least_load) {
             least_load = rqe_cnt;

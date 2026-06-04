@@ -167,7 +167,7 @@ static int bondp_select_backup_local_idx(const bondp_health_task_t *task, int *b
 
     const bondp_comp_t *bdp_jetty = task->bondp_jetty;
     for (uint32_t i = 0; i < bdp_jetty->active_count; ++i) {
-        int local_idx = (int)bdp_jetty->active_indices[i];
+        int local_idx = (int)bdp_jetty->loc_active_idx[i];
         if (local_idx < 0 || local_idx >= URMA_UBAGG_DEV_MAX_NUM || local_idx == task->primary_local_idx) {
             continue;
         }
