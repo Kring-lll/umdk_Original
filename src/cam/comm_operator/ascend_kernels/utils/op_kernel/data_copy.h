@@ -110,7 +110,7 @@ FORCE_INLINE_AICORE void CpGM2GMPingPong(int64_t dataSizeRemain,
     // Only when conversion is needed (U->K), UB will be divided into two parts according to the ratio of
     // sizeof(U):sizeof(K) and aligned to 32 bytes
     constexpr int32_t ubBlockSize = UB_SINGLE_PING_PONG_ADD_SIZE_MAX;
-    constexpr int32_t ubAlignNum = ubBlockSize / (sizeof(K) + sizeof(U)) / UB_ALIGN_SIZE * UB_ALIGN_SIZE;
+    constexpr int32_t ubAlignNum = ubBlockSize / (sizeof(K) + sizeof(U)) / Moe::UB_ALIGN_SIZE * Moe::UB_ALIGN_SIZE;
     constexpr int32_t inputUbBlockSize = std::is_same_v<K, U> ? ubBlockSize : ubAlignNum * sizeof(U);
     constexpr int32_t outputUbBlockSize = std::is_same_v<K, U> ? ubBlockSize : ubAlignNum * sizeof(K);
 
@@ -167,7 +167,7 @@ template<typename T>
 FORCE_INLINE_AICORE void camCpUB2GM(GlobalTensor<T> outputGt, LocalTensor<T> inputLt, uint16_t count, uint32_t size,
                                     uint32_t srcStride = 0, uint32_t dstStride = 0)
 {
-    DataCopyExtParams dataCopyParams(count, size, srcStride / UB_ALIGN_SIZE, dstStride, 0);
+    DataCopyExtParams dataCopyParams(count, size, srcStride / Moe::UB_ALIGN_SIZE, dstStride, 0);
     DataCopyPad(outputGt, inputLt, dataCopyParams);
 }
 
