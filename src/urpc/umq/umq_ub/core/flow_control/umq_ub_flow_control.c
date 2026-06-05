@@ -608,9 +608,8 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
     fc->timeout_us = umq_ub_timer_timeout_get();
 
     /* Initialize REQ sequence for deduplication */
-    fc->fc_remote_req_first = false;
     fc->fc_local_req_seq = 1;
-    fc->fc_remote_req_seq = 0;
+    fc->fc_remote_req_seq = 1;
 
     return UMQ_SUCCESS;
 }
