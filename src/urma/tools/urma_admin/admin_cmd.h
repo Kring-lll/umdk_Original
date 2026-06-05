@@ -225,6 +225,67 @@ typedef struct admin_device_info {
     char net_dev_name[URMA_ADMIN_MAX_DEV_NAME];
 } admin_device_info_t;
 
+#define UBAGG_DEV_MAX_NUM       (20)
+#define UBAGG_MAX_PORT_NUM      (9)
+
+enum admin_show_res_type {
+    ADMIN_SHOW_RES_JETTY = 0,
+    ADMIN_SHOW_RES_JFS,
+    ADMIN_SHOW_RES_JFR,
+    ADMIN_SHOW_RES_JFC,
+    ADMIN_SHOW_RES_SEG,
+};
+
+typedef struct admin_ubagg_ubva {
+    urma_eid_t eid;
+    uint32_t uasid;
+    uint64_t va;
+} __attribute__((packed)) admin_ubagg_ubva_t;
+
+typedef struct admin_ubagg_seg_info {
+    admin_ubagg_ubva_t ubva;
+    uint64_t len;
+    uint32_t seg_attr;
+    uint32_t token_id;
+} admin_ubagg_seg_info_t;
+
+typedef struct admin_ubagg_seg_exchange_info {
+    admin_ubagg_seg_info_t base;
+    admin_ubagg_seg_info_t slaves[UBAGG_DEV_MAX_NUM];
+    int dev_num;
+} admin_ubagg_seg_exchange_info_t;
+
+typedef struct admin_ubagg_jetty_id {
+    urma_eid_t eid;
+    uint32_t uasid;
+    uint32_t id;
+} admin_ubagg_jetty_id_t;
+
+typedef struct admin_ubagg_jetty_exchange_info {
+    admin_ubagg_jetty_id_t slaves[UBAGG_DEV_MAX_NUM];
+    bool is_multipath;
+    uint8_t enabled_indices[UBAGG_DEV_MAX_NUM];
+    uint32_t enabled_count;
+    bool is_health_check_enable;
+    admin_ubagg_seg_exchange_info_t health_check_seg;
+} admin_ubagg_jetty_exchange_info_t;
+
+typedef struct admin_core_cmd_show_res {
+    struct {
+        char dev_name[URMA_MAX_NAME];
+        uint32_t type;
+        uint32_t key;
+        uint32_t key_cnt;
+    } in;
+    struct {
+        uint64_t addr;
+        uint32_t len;
+        uint64_t save_ptr;
+    } out;
+} admin_core_cmd_show_res_t;
+
+#define ADMIN_V2P_RES_BUF_SIZE (64 * 1024)
+
 bool is_ubc(const char *dev_name);
 int exec_cmd(admin_config_t *cfg, const admin_cmd_t *cmds);
 int admin_nl_expose_dev_ns(const char *dev_name, int ns_fd);
@@ -255,5 +316,12 @@ int admin_cmd_dev(admin_config_t *cfg);
 int admin_cmd_eid(admin_config_t *cfg);
 int admin_cmd_main_ue_eid(admin_config_t *cfg);
 int admin_cmd_show(admin_config_t *cfg);
+int admin_cmd_show_dev_jfc(admin_config_t *cfg);
+int admin_cmd_show_dev_jfs(admin_config_t *cfg);
+int admin_cmd_show_dev_jfr(admin_config_t *cfg);
+int admin_cmd_show_dev_jetty(admin_config_t *cfg);
+int admin_cmd_show_dev_jetty_group(admin_config_t *cfg);
+int admin_cmd_show_dev_rc(admin_config_t *cfg);
+int admin_cmd_show_dev_seg(admin_config_t *cfg);
 
 #endif
