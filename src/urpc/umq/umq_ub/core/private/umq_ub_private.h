@@ -453,13 +453,22 @@ typedef struct umq_ub_raw_dev {
     uint32_t eid_index;
 } umq_ub_raw_dev_t;
 
+static inline bool is_logic_umq(ub_queue_t *queue)
+{
+    return (queue->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) &&
+           (queue->create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT) &&
+           (~queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) &&
+           (~queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ);
+}
+
 static inline ub_queue_t* umq_ub_get_real_umq(ub_queue_t *queue)
 {
-    bool is_logic_umqh = (queue->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) &&
-                         (queue->create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT) &&
-                         (~queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) &&
-                         (~queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ);
-    return is_logic_umqh ? (ub_queue_t *)((umq_t*)queue->share_rq_umqh)->umqh_tp : queue;
+    return is_logic_umq(queue) ? (ub_queue_t *)((umq_t*)queue->share_rq_umqh)->umqh_tp : queue;
+}
+
+static inline urma_jetty_t** umq_ub_get_jetty_array(ub_queue_t *queue)
+{
+    return is_logic_umq(queue) ? ((ub_queue_t *)((umq_t*)queue->share_rq_umqh)->umqh_tp)->jetty : queue->jetty;
 }
 
 int rx_buf_ctx_list_init(rx_buf_ctx_list_t *rx_buf_ctx_list, uint32_t ctx_num);
