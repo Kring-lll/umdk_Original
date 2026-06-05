@@ -665,10 +665,23 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
     if (credits_per_request > UMQ_UB_FC_MAX_IMM_DATA) {
         credits_per_request = UMQ_UB_FC_MAX_IMM_DATA;
     }
+
+    umq_ub_fc_sge_data_t sge_data = {
+        .bs = {
+            .fc_type = IMM_TYPE_FC_CREDIT_REQ,
+            .window = credits_per_request,
+            .rsvd = 0,
+        }
+    };
     umq_ub_imm_t imm = {
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_REQ,
             .window = credits_per_request}
+        };
+
+    urma_sge_t fc_sge = {
+        .addr = (uint64_t)(uintptr_t)&sge_data,
+        .len = sizeof(umq_ub_fc_sge_data_t)
         };
 
     umq_ub_fc_user_ctx_t obj = {
@@ -680,7 +693,10 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
         }
     };
     urma_jfs_wr_t urma_wr = {.user_ctx = obj.value,
-        .send = {.imm_data = imm.value},
+        .send = {
+            .src = {.sge = &fc_sge, .num_sge = 1},
+            .imm_data = imm.value
+        },
         .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
         .tjetty = tjetty,
         .opcode = URMA_OPC_SEND_IMM};
@@ -710,12 +726,26 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
     uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
+    umq_ub_fc_sge_data_t sge_data = {
+        .bs = {
+            .fc_type = IMM_TYPE_FC_CREDIT_REP,
+            .window = notify,
+            .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
+            .rsvd = 0,
+        }
+    };
     umq_ub_imm_t imm = {
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_REP,
             .window = notify,
             .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
         }};
+
+    urma_sge_t fc_sge = {
+        .addr = (uint64_t)(uintptr_t)&sge_data,
+        .len = sizeof(umq_ub_fc_sge_data_t)
+    };
+
     umq_ub_fc_user_ctx_t obj = {
         .bs = {
             .type = IMM_TYPE_FC_CREDIT_REP,
@@ -725,7 +755,10 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
         }
     };
     urma_jfs_wr_t urma_wr = {.user_ctx = obj.value,
-        .send = {.imm_data = imm.value},
+        .send = {
+            .src = {.sge = &fc_sge, .num_sge = 1},
+            .imm_data = imm.value
+        },
         .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
         .tjetty = tjetty,
         .opcode = URMA_OPC_SEND_IMM};
@@ -742,11 +775,11 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
     return -UMQ_ERR_EFLOWCTL;
 }
 
-int umq_ub_shared_credit_req_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
+int umq_ub_shared_credit_req_handle(ub_queue_t *queue, umq_ub_fc_sge_data_t *sge_data)
 {
     ub_flow_control_t *fc = &queue->flow_control;
     ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
-    uint16_t credits_per_request = imm->flow_control.window;
+    uint16_t credits_per_request = sge_data->bs.window;
     uint16_t allocated_count = credit->ops.available_credit_dec(credit, credits_per_request);
     (void)fc->ops.local_rx_allocated_inc(fc, allocated_count);
     int ret = umq_ub_shared_credit_resp_send(queue, allocated_count);
@@ -758,12 +791,12 @@ int umq_ub_shared_credit_req_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
     return UMQ_SUCCESS;
 }
 
-void umq_ub_shared_credit_resp_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
+void umq_ub_shared_credit_resp_handle(ub_queue_t *queue, umq_ub_fc_sge_data_t *sge_data)
 {
     ub_flow_control_t *fc = &queue->flow_control;
-    uint16_t reply_credits = imm->flow_control.window;
+    uint16_t reply_credits = sge_data->bs.window;
     uint16_t credits_per_request = fc->credits_per_request;
-    fc->peer_ratio = imm->flow_control.ratio;
+    fc->peer_ratio = sge_data->bs.ratio;
     uint32_t new_request;
     if (reply_credits < credits_per_request) {
         new_request = (uint32_t)(credits_per_request / fc->credit_multiple);
@@ -832,11 +865,24 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
         return_credit = UMQ_UB_FC_MAX_IMM_DATA;
     }
     return_credit = fc->ops.remote_rx_window_dec(fc, return_credit, true);
+
+    umq_ub_fc_sge_data_t sge_data = {
+        .bs = {
+            .fc_type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
+            .window = return_credit,
+            .rsvd = 0,
+        }
+    };
     umq_ub_imm_t imm = {
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
             .window = return_credit}
         };
+
+    urma_sge_t fc_sge = {
+        .addr = (uint64_t)(uintptr_t)&sge_data,
+        .len = sizeof(umq_ub_fc_sge_data_t)
+    };
 
     umq_ub_fc_user_ctx_t obj = {
         .bs = {
@@ -848,7 +894,10 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
     };
 
     urma_jfs_wr_t urma_wr = {.user_ctx = obj.value,
-        .send = {.imm_data = imm.value},
+        .send = {
+            .src = {.sge = &fc_sge, .num_sge = 1},
+            .imm_data = imm.value
+        },
         .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
         .tjetty = tjetty,
         .opcode = URMA_OPC_SEND_IMM};
@@ -880,6 +929,14 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
     uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
+    umq_ub_fc_sge_data_t sge_data = {
+        .bs = {
+            .fc_type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
+            .window = return_credit,
+            .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
+            .rsvd = 0,
+        }
+    };
     umq_ub_imm_t imm = {
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
@@ -887,6 +944,11 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
             .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth)
             }
         };
+
+    urma_sge_t fc_sge = {
+        .addr = (uint64_t)(uintptr_t)&sge_data,
+        .len = sizeof(umq_ub_fc_sge_data_t)
+    };
 
     umq_ub_fc_user_ctx_t obj = {
         .bs = {
@@ -897,7 +959,10 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
         }
     };
     urma_jfs_wr_t urma_wr = {.user_ctx = obj.value,
-        .send = {.imm_data = imm.value},
+        .send = {
+            .src = {.sge = &fc_sge, .num_sge = 1},
+            .imm_data = imm.value
+        },
         .flag = {.bs = {.complete_enable = 1, .inline_flag = 1}},
         .tjetty = tjetty,
         .opcode = URMA_OPC_SEND_IMM};
@@ -913,11 +978,11 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
     return -UMQ_ERR_EFLOWCTL;
 }
 
-int umq_ub_shared_credit_return_req_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
+int umq_ub_shared_credit_return_req_handle(ub_queue_t *queue, umq_ub_fc_sge_data_t *sge_data)
 {
     ub_flow_control_t *fc = &queue->flow_control;
     ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
-    uint16_t return_credit = imm->flow_control.window;
+    uint16_t return_credit = sge_data->bs.window;
     uint64_t consumed_credit = umq_ub_rx_consumed_load(queue->dev_ctx->io_lock_free,
         &queue->dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id]);
     uint64_t allocated_credit = fc->ops.local_rx_allocated_load(fc);
