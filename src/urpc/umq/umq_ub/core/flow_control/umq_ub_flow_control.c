@@ -704,7 +704,7 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
     return -UMQ_ERR_EFLOWCTL;
 }
 
-static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
+static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify, uint16_t seq)
 {
     if (queue->bind_ctx == NULL) {
         return -UMQ_ERR_EINVAL;
@@ -722,7 +722,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
             .type = IMM_TYPE_FC_CREDIT_REP,
             .window = notify,
             .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
-            .seq = queue->flow_control.remote_req_seq,
+            .seq = seq,
         }};
     umq_ub_fc_user_ctx_t obj = {
         .bs = {
@@ -757,7 +757,7 @@ int umq_ub_shared_credit_req_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
     uint16_t credits_per_request = imm->flow_control.window;
     uint16_t allocated_count = credit->ops.available_credit_dec(credit, credits_per_request);
     (void)fc->ops.local_rx_allocated_inc(fc, allocated_count);
-    int ret = umq_ub_shared_credit_resp_send(queue, allocated_count);
+    int ret = umq_ub_shared_credit_resp_send(queue, allocated_count, imm->flow_control.seq);
     if (ret != UMQ_SUCCESS) {
         (void)credit->ops.available_credit_return(credit, allocated_count);
         (void)fc->ops.local_rx_allocated_dec(fc, allocated_count);
@@ -875,7 +875,7 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
     return -UMQ_ERR_EFLOWCTL;
 }
 
-static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_credit)
+static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_credit, uint16_t seq)
 {
     ub_flow_control_t *fc = &queue->flow_control;
     if (!fc->enabled || queue->bind_ctx == NULL) {
@@ -894,7 +894,7 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
             .type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
             .window = return_credit,
             .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
-            .seq = queue->flow_control.remote_req_seq
+            .seq = seq
             }
         };
 
@@ -936,7 +936,7 @@ int umq_ub_shared_credit_return_req_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
             "allocated_credit less than consumed credit\n",
             EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
             queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id);
-        return umq_ub_shared_credit_return_ack(queue, 0);
+        return umq_ub_shared_credit_return_ack(queue, 0, imm->flow_control.seq);
     }
     uint64_t unconsumed = allocated_credit - consumed_credit;
     if (return_credit > unconsumed) {
@@ -949,7 +949,7 @@ int umq_ub_shared_credit_return_req_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
 
     credit->ops.available_credit_return(credit, return_credit);
     (void)fc->ops.local_rx_allocated_dec(fc, return_credit);
-    return umq_ub_shared_credit_return_ack(queue, return_credit);
+    return umq_ub_shared_credit_return_ack(queue, return_credit, imm->flow_control.seq);
 }
 
 void umq_ub_rx_consumed_inc(bool lock_free, volatile uint64_t *var, uint64_t count)
