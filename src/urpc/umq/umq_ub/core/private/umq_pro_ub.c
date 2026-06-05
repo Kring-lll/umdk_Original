@@ -815,6 +815,7 @@ static uint32_t umq_ub_fill_fc_buf(ub_queue_t *queue, umq_buf_t **buf, umq_buf_s
 static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm, umq_buf_t **buf)
 {
     uint32_t ret = 0;
+    ub_flow_control_t *fc = &queue->flow_control;
     switch (imm.bs.type) {
         case IMM_TYPE_FC_CREDIT_REQ: {
             if (umq_ub_shared_credit_req_handle(queue, &imm) != UMQ_SUCCESS) {
@@ -837,7 +838,7 @@ static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm, umq_b
             break;
         }
         case IMM_TYPE_FC_CREDIT_RETURN_ACK: {
-            queue->flow_control.peer_ratio = imm.flow_control.ratio;
+            fc->peer_ratio = imm.flow_control.ratio;
             fc->local_req_seq++;
             if (fc->local_req_seq == 0) {
                 fc->local_req_seq = 1;
