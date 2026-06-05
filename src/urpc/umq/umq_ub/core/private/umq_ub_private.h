@@ -190,7 +190,7 @@ typedef struct ub_flow_control {
     volatile uint16_t imm[UB_QUEUE_FC_MSG_TYPE_MAX];
     umq_ub_flow_control_sge_slot_t recv_sge;
     uint16_t local_req_seq;
-    uint16_t remote_req_seq; /* expected remote REQ sequence number, for deduplication */
+    uint16_t remote_expect_seq;
 } ub_flow_control_t;
 
 typedef struct umq_ub_flow_control_sge_mgr {

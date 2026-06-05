@@ -609,7 +609,7 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
 
     /* Initialize REQ sequence for deduplication */
     fc->local_req_seq = 1;
-    fc->remote_req_seq = 1;
+    fc->remote_expect_seq = 1;
 
     return UMQ_SUCCESS;
 }

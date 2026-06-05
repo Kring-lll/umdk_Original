@@ -812,6 +812,12 @@ static uint32_t umq_ub_fill_fc_buf(ub_queue_t *queue, umq_buf_t **buf, umq_buf_s
     return 1;
 }
 
+static ALWAYS_INLINE void umq_ub_fc_seq_inc(uint16_t *seq)
+{
+    uint16_t next = (*seq) + 1;
+    *seq = (next == 0) ? 1 : next;
+}
+
 static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm, umq_buf_t **buf)
 {
     uint32_t ret = 0;
@@ -826,10 +832,7 @@ static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm, umq_b
         case IMM_TYPE_FC_CREDIT_REP:
             ret = umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_UPDATE);
             umq_ub_shared_credit_resp_handle(queue, &imm);
-            fc->local_req_seq++;
-            if (fc->local_req_seq == 0) {
-                fc->local_req_seq = 1;
-            }
+            umq_ub_fc_seq_update(&fc->local_req_seq);
             break;
         case IMM_TYPE_FC_CREDIT_RETURN_REQ: {
             if (umq_ub_shared_credit_return_req_handle(queue, &imm) != UMQ_SUCCESS) {
@@ -839,10 +842,7 @@ static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm, umq_b
         }
         case IMM_TYPE_FC_CREDIT_RETURN_ACK: {
             fc->peer_ratio = imm.flow_control.ratio;
-            fc->local_req_seq++;
-            if (fc->local_req_seq == 0) {
-                fc->local_req_seq = 1;
-            }
+            umq_ub_fc_seq_update(&fc->local_req_seq);
             break;
         }
         default:
@@ -867,7 +867,7 @@ static void umq_ub_fill_rx_buff_post_process(ub_queue_t *queue, umq_ub_imm_t imm
     return;
 }
 
-static bool umq_ub_fc_msg_dedup_check_and_store(ub_queue_t *real_queue, umq_ub_imm_t imm)
+static bool is_umq_ub_flow_control_msg_duplicate(ub_queue_t *real_queue, umq_ub_imm_t imm)
 {
     uint16_t recv_seq = imm.flow_control.seq;
     ub_flow_control_t *fc = &real_queue->flow_control;
@@ -875,14 +875,11 @@ static bool umq_ub_fc_msg_dedup_check_and_store(ub_queue_t *real_queue, umq_ub_i
     switch (imm.bs.type) {
         case IMM_TYPE_FC_CREDIT_REQ:
         case IMM_TYPE_FC_CREDIT_RETURN_REQ:
-            if (recv_seq != fc->remote_req_seq) {
+            if (recv_seq != fc->remote_expect_seq) {
                 umq_ub_fc_packet_stats(fc, 1, UB_PACKET_STATS_TYPE_RECV_DUP_REQ);
                 return true;
             }
-            fc->remote_req_seq++;
-            if (fc->remote_req_seq == 0) {
-                fc->remote_req_seq = 1;
-            }
+            umq_ub_fc_seq_update(&fc->remote_expect_seq);
             __atomic_store_n(&real_queue->flow_control.imm[UB_QUEUE_FC_MSG_TYPE_REQ], imm.value, __ATOMIC_RELEASE);
             return false;
 
@@ -893,37 +890,6 @@ static bool umq_ub_fc_msg_dedup_check_and_store(ub_queue_t *real_queue, umq_ub_i
                 return true;
             }
             __atomic_store_n(&real_queue->flow_control.imm[UB_QUEUE_FC_MSG_TYPE_RSP], imm.value, __ATOMIC_RELEASE);
-            return false;
-
-        default:
-            return false;
-    }
-}
-
-static bool umq_ub_fc_msg_dedup_check(ub_queue_t *queue, umq_ub_imm_t imm)
-{
-    uint16_t recv_seq = imm.flow_control.seq;
-    ub_flow_control_t *fc = &queue->flow_control;
-
-    switch (imm.bs.type) {
-        case IMM_TYPE_FC_CREDIT_REQ:
-        case IMM_TYPE_FC_CREDIT_RETURN_REQ:
-            if (recv_seq != fc->remote_req_seq) {
-                umq_ub_fc_packet_stats(fc, 1, UB_PACKET_STATS_TYPE_RECV_DUP_REQ);
-                return true;
-            }
-            fc->remote_req_seq++;
-            if (fc->remote_req_seq == 0) {
-                fc->remote_req_seq = 1;
-            }
-            return false;
-
-        case IMM_TYPE_FC_CREDIT_REP:
-        case IMM_TYPE_FC_CREDIT_RETURN_ACK:
-            if (recv_seq != fc->local_req_seq) {
-                umq_ub_fc_packet_stats(fc, 1, UB_PACKET_STATS_TYPE_RECV_DUP_RSP);
-                return true;
-            }
             return false;
 
         default:
@@ -983,8 +949,7 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
             continue;
         }
 
-        // Deduplication check and store imm for sub umq processing
-        if (umq_ub_fc_msg_dedup_check_and_store(real_queue, imm)) {
+        if (is_umq_ub_flow_control_msg_duplicate(real_queue, imm)) {
             // Duplicate packet, discard
             umq_ub_put_real_queue(real_queue, UB_QUEUE_JETTY_FLOW_CONTROL);
             continue;
@@ -1053,7 +1018,7 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
         }
         umq_ub_imm_t imm = {.value = cr[i].imm_data};
         /* FC message deduplication */
-        if (umq_ub_fc_msg_dedup_check(queue, imm)) {
+        if (is_umq_ub_flow_control_msg_duplicate(queue, imm)) {
             continue;
         }
         qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, imm, &buf[qbuf_cnt]);
