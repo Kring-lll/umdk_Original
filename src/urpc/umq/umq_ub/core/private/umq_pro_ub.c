@@ -999,7 +999,6 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
 static int sub_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count)
 {
     uint32_t qbuf_cnt = 0;
-    ub_flow_control_t *fc = &queue->flow_control;
     for (uint16_t i = 0; i < UB_QUEUE_FC_MSG_TYPE_MAX && qbuf_cnt < buf_count; i++) {
         umq_ub_imm_t imm = {
             .value = __atomic_exchange_n(&queue->flow_control.imm[i], 0, __ATOMIC_ACQUIRE)
