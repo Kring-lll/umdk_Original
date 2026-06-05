@@ -608,8 +608,8 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
     fc->timeout_us = umq_ub_timer_timeout_get();
 
     /* Initialize REQ sequence for deduplication */
-    fc->fc_local_req_seq = 1;
-    fc->fc_remote_req_seq = 1;
+    fc->local_req_seq = 1;
+    fc->remote_req_seq = 1;
 
     return UMQ_SUCCESS;
 }
@@ -675,7 +675,7 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_REQ,
             .window = credits_per_request,
-            .seq = fc->fc_local_req_seq}
+            .seq = fc->local_req_seq}
         };
 
     umq_ub_fc_user_ctx_t obj = {
@@ -722,7 +722,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
             .type = IMM_TYPE_FC_CREDIT_REP,
             .window = notify,
             .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
-            .seq = queue->flow_control.fc_remote_req_seq,
+            .seq = queue->flow_control.remote_req_seq,
         }};
     umq_ub_fc_user_ctx_t obj = {
         .bs = {
@@ -844,7 +844,7 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
             .window = return_credit,
-            .seq = fc->fc_local_req_seq}
+            .seq = fc->local_req_seq}
         };
 
     umq_ub_fc_user_ctx_t obj = {
@@ -894,7 +894,7 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
             .type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
             .window = return_credit,
             .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
-            .seq = queue->flow_control.fc_remote_req_seq
+            .seq = queue->flow_control.remote_req_seq
             }
         };
 
