@@ -1036,7 +1036,6 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
     }
     int ret = UMQ_SUCCESS;
     int32_t qbuf_cnt = 0;
-    ub_flow_control_t *fc = &queue->flow_control;
 
     for (int i = 0; i < rx_cr_cnt; i++) {
         (void)umq_ub_fill_fc_rx_buf(queue);
