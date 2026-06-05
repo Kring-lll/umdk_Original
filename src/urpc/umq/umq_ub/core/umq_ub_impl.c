@@ -1203,7 +1203,7 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
                 "failed, status: %d\n", EID_ARGS(*fc_eid), fc_id, ret);
         }
 
-        bool post_jfr = ((queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 && queue->used_port_num > 0);
+        bool post_jfr = umq_ub_is_shared_jfr(queue);
         if (post_jfr) {
             // shared JFR mode: IO jfr_ctx ref_cnt already verified to be 1 above,
             // so FC jfr_ctx ref_cnt is also 1 (shared jfr_ctx), uninit directly.
