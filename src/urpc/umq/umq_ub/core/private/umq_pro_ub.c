@@ -881,7 +881,7 @@ static bool umq_ub_fc_msg_dedup_check_and_store(ub_queue_t *real_queue, umq_ub_i
         case IMM_TYPE_FC_CREDIT_REP:
         case IMM_TYPE_FC_CREDIT_RETURN_ACK:
             if (recv_seq != fc->fc_local_req_seq) {
-                umq_ub_fc_packet_stats(&real_queue->flow_control, 1, UB_PACKET_STATS_TYPE_RECV_DUP_REP);
+                umq_ub_fc_packet_stats(&real_queue->flow_control, 1, UB_PACKET_STATS_TYPE_RECV_DUP_RSP);
                 return true;
             }
             __atomic_store_n(&real_queue->flow_control.imm[UB_QUEUE_FC_MSG_TYPE_RSP], imm.value, __ATOMIC_RELEASE);
@@ -913,7 +913,7 @@ static bool umq_ub_fc_msg_dedup_check(ub_queue_t *queue, umq_ub_imm_t imm)
         case IMM_TYPE_FC_CREDIT_REP:
         case IMM_TYPE_FC_CREDIT_RETURN_ACK:
             if (recv_seq != fc->fc_local_req_seq) {
-                umq_ub_fc_packet_stats(fc, 1, UB_PACKET_STATS_TYPE_RECV_DUP_REP);
+                umq_ub_fc_packet_stats(fc, 1, UB_PACKET_STATS_TYPE_RECV_DUP_RSP);
                 return true;
             }
             return false;
@@ -1004,7 +1004,7 @@ static int sub_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t bu
         if (imm.bs.type == IMM_TYPE_FC_CREDIT_REP || imm.bs.type == IMM_TYPE_FC_CREDIT_RETURN_ACK) {
             fc->fc_local_req_seq++;
             if (fc->fc_local_req_seq == 0) {
-                fc->fc_local_req_seq = 1;  // 255 overflow back to 1
+                fc->fc_local_req_seq = 1;
             }
         }
         umq_ub_fill_rx_buff_post_process(queue, imm);
