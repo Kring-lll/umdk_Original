@@ -1028,8 +1028,9 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
         goto FREE_QUEUE;
     }
 
-    if ((option->create_flag & (UMQ_CREATE_FLAG_SHARE_TRANSPORT | UMQ_CREATE_FLAG_SHARE_RQ)) == (UMQ_CREATE_FLAG_SHARE_TRANSPORT | UMQ_CREATE_FLAG_SHARE_RQ) &&
-        ((option->create_flag & (UMQ_CREATE_FLAG_SUB_UMQ | UMQ_CREATE_FLAG_MAIN_UMQ)) == 0)) {
+    // if ((option->create_flag & (UMQ_CREATE_FLAG_SHARE_TRANSPORT | UMQ_CREATE_FLAG_SHARE_RQ)) == (UMQ_CREATE_FLAG_SHARE_TRANSPORT | UMQ_CREATE_FLAG_SHARE_RQ) &&
+    //     ((option->create_flag & (UMQ_CREATE_FLAG_SUB_UMQ | UMQ_CREATE_FLAG_MAIN_UMQ)) == 0)) {
+    if (0) { // 测试现当子umq使用
         // 逻辑umq不创建发送jetty
         queue->jfs_jfc[UB_QUEUE_JETTY_IO] = UMQ_INVALID_HANDLE;
         queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL] = UMQ_INVALID_HANDLE;

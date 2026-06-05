@@ -84,6 +84,12 @@ typedef union umq_ub_imm {
         uint64_t type : 4;
         uint64_t rsvd1 : 60;
     } notify;
+    struct {
+        uint64_t type : 2;
+        uint64_t umq_id : 18;
+        uint64_t rsvd1 : 20;
+        uint64_t user_data : 24;
+    } share_imm;
 } umq_ub_imm_t;
 
 #ifdef __cplusplus

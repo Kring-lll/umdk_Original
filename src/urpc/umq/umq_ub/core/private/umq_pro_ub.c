@@ -111,8 +111,20 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
 {
     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buffer->qbuf_ext;
     uint16_t mempool_id = buf_pro->remote_sge.mempool_id;
-    urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
-    uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
+
+    urma_jetty_t* io_jetty = queue->jetty[UB_QUEUE_JETTY_IO];
+    // to do 条件后续优化
+    if (queue->create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT && 
+        queue->create_flag & UMQ_CREATE_FLAG_SHARE_RQ &&
+        (queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0 &&
+        (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) == 0) {
+        // to do 这里插入jetty选择，修改前当子umq处理 -> 子umq outstanding+1
+        // 先检查是否占有jetty
+        ;
+    }
+
+    urma_eid_t *eid = &io_jetty->jetty_id.eid;
+    uint32_t id = io_jetty->jetty_id.id;
     urma_target_seg_t *tseg = NULL;
     switch (buf_pro->opcode) {
         case UMQ_OPC_READ:
@@ -190,6 +202,12 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
         case UMQ_OPC_SEND:
             urma_wr_ptr->send.src.sge = sges_ptr;
             urma_wr_ptr->send.src.num_sge = sge_num;
+            umq_ub_imm_t imm_data = {
+                .share_imm.type = 3, // UMQ_SHAREMODE_IMM_TYPE_IO
+                .share_imm.umq_id = queue->remote_umq_id,
+                .share_imm.user_data = buf_pro->imm.user_data,
+            };
+            urma_wr_ptr->send.imm_data = imm_data.value;
             break;
         default:
             break;
@@ -235,8 +253,20 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
 {
     int ret = UMQ_SUCCESS;
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
-    urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
-    uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
+
+    urma_jetty_t* io_jetty = queue->jetty[UB_QUEUE_JETTY_IO];
+    // to do 条件后续优化
+    if (queue->create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT && 
+        queue->create_flag & UMQ_CREATE_FLAG_SHARE_RQ &&
+        (queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0 &&
+        (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) == 0) {
+        // to do 这里插入jetty选择，修改前当子umq处理 -> 子umq outstanding+1
+        // 先检查是否占有jetty
+        ;
+    }
+
+    urma_eid_t *eid = &io_jetty->jetty_id.eid;
+    uint32_t id = io_jetty->jetty_id.id;
     if (queue->bind_ctx == NULL) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq has not been binded\n", EID_ARGS(*eid), id);
         *bad_qbuf = qbuf;
@@ -383,8 +413,9 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
     if (user_send_imm) {
         umq_io_perf_process(UMQ_PERF_RECORD_TRANSPORT_POST_SEND, qbuf);
     }
+
     urma_status_t status =
-        umq_symbol_urma()->urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_IO], urma_wr, &bad_wr);
+        umq_symbol_urma()->urma_post_jetty_send_wr(io_jetty, urma_wr, &bad_wr);
     umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_POST_SEND, start_timestamp);
     if (status != URMA_SUCCESS) {
         ret = umq_status_convert(status);
@@ -743,6 +774,11 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_
         }
         case URMA_CR_OPC_SEND_WITH_IMM: {
             ret = umq_ub_on_rx_done(queue, cr, buf, qbuf_status);
+            if (queue->create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT) {
+                umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
+                buf_pro->user_ctx = cr->imm_data;
+                buf_pro->imm_data = cr->imm_data;
+            }
             break;
         }
         case URMA_CR_OPC_SEND: {
@@ -753,6 +789,16 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_
                 buf_pro->umq_ctx = real_queue->umq_ctx;
             } else {
                 buf_pro->umq_ctx = 0;
+            }
+            umq_ub_imm_t imm = {.value = cr->imm_data};
+            if (imm.bs.type == IMM_TYPE_USER) {
+                buf_pro->umq_ctx = imm.share_imm.umq_id;
+            }
+
+            if (queue->create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT) {
+                umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
+                buf_pro->user_ctx = cr->imm_data;
+                buf_pro->imm_data = cr->imm_data;
             }
             break;
         }
@@ -1535,6 +1581,8 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
             umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->tx_outstanding, 1);
             continue;
         }
+
+        // to do 完成发射后发送jetty的outstanding-1，归0释放
 
         buf[qbuf_cnt] = (umq_buf_t *)(uintptr_t)cr[i].user_ctx;
         buf[qbuf_cnt]->io_direction = UMQ_IO_TX;
