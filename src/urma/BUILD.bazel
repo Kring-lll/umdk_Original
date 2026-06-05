@@ -1,6 +1,7 @@
 package(default_visibility = ["//visibility:public"])
 
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("//bazel:urma_deps.bzl", "LIBUMMU_AARCH64_RUNTIME_LINKOPTS", "LIBUMMU_ABI_VERSION", "LIBUMMU_RUNTIME_LINKOPTS")
 load("//bazel:urma_shared.bzl", "urma_dynamic_linkopts", "urma_linklib_inputs", "urma_shared_library", "urma_shared_library_static_dep")
 
 config_setting(
@@ -11,6 +12,11 @@ config_setting(
 config_setting(
     name = "build_udma_enabled",
     values = {"define": "build_udma=true"},
+)
+
+config_setting(
+    name = "cpu_aarch64",
+    values = {"cpu": "aarch64"},
 )
 
 URMA_COMMON_SRCS = glob(
@@ -39,6 +45,7 @@ urma_shared_library(
     includes = ["common/include"],
     copts = ["-std=gnu99"],
     linkopts = URMA_COMMON_LINKOPTS,
+    soname = "liburma_common.so.0",
 )
 
 cc_library(
@@ -71,6 +78,7 @@ urma_shared_library(
     compile_deps = [":urma_common_headers"],
     dynamic_lib_names = ["urma_common"],
     linkopts = ["-ldl", "-lrt"],
+    soname = "liburma.so.0",
 )
 
 urma_shared_library(
@@ -94,8 +102,9 @@ urma_shared_library(
         ":urma_common_headers",
         ":urma_headers",
     ],
-    dynamic_lib_names = ["urma"],
+    dynamic_lib_names = ["urma", "urma_common"],
     linkopts = ["-lnl-genl-3", "-lnl-3"],
+    soname = "liburma_ubagg.so.0",
 )
 
 urma_shared_library_static_dep(
@@ -123,8 +132,8 @@ urma_shared_library_static_dep(
     linkopts = [
         "-lnl-genl-3",
         "-lnl-3",
-        "-lz",
     ],
+    soname = "libtpsa.so.0",
 )
 
 cc_library(
@@ -137,7 +146,28 @@ alias(
     actual = ":tpsa",
 )
 
-_UMMU_LINKLIB_DIR = "-L$(GENDIR)/external/libummu/linklib"
+cc_binary(
+    name = "ummu",
+    linkshared = True,
+    deps = ["@libummu//:ummu_internal"],
+    linkopts = [
+        "-Wl,-z,relro,-z,now",
+        "-Wl,-soname,libummu.so." + LIBUMMU_ABI_VERSION,
+        "-Wl,--no-as-needed",
+    ] + LIBUMMU_RUNTIME_LINKOPTS + select({
+        ":cpu_aarch64": LIBUMMU_AARCH64_RUNTIME_LINKOPTS,
+        "//conditions:default": [],
+    }) + [
+        "-Wl,--as-needed",
+    ],
+)
+
+genrule(
+    name = "ummu_linklib",
+    srcs = [":ummu"],
+    outs = ["linklib/libummu.so"],
+    cmd = "mkdir -p $(@D) && cp $(location :ummu) $@",
+)
 
 cc_library(
     name = "urma_udma_internal",
@@ -179,15 +209,17 @@ cc_binary(
     deps = [":urma_udma_internal"],
     additional_linker_inputs = select({
         ":build_udma_enabled": urma_linklib_inputs(["urma", "urma_common"]) + [
-            "@libummu//:ummu_linklib",
+            ":ummu_linklib",
         ],
         "//conditions:default": [],
     }),
     linkopts = select({
         ":build_udma_enabled": urma_dynamic_linkopts(
             ["urma", "urma_common"],
-            extra_dirs = [_UMMU_LINKLIB_DIR],
-            extra_libs = ["-lummu"],
+            extra_libs = [
+                "-Wl,-soname,liburma-udma.so",
+                "-lummu",
+            ],
         ),
         "//conditions:default": [],
     }),
@@ -203,4 +235,103 @@ genrule(
 alias(
     name = "hw_udma",
     actual = ":urma-udma",
+)
+
+cc_binary(
+    name = "urma_admin",
+    srcs = glob([
+        "tools/urma_admin/*.c",
+        "tools/urma_admin/*.h",
+    ]),
+    includes = [
+        "common/include",
+        "lib/urma/core/include",
+        "tools/urma_admin",
+    ],
+    copts = [
+        "-std=gnu99",
+        "-I/usr/include/libnl3",
+    ],
+    additional_linker_inputs = urma_linklib_inputs(["urma", "urma_common"]),
+    linkopts = urma_dynamic_linkopts(
+        ["urma", "urma_common"],
+        extra_libs = [
+            "-lnl-genl-3",
+            "-lnl-3",
+        ],
+    ),
+    deps = [
+        ":urma_common_headers",
+        ":urma_headers",
+    ],
+)
+
+cc_binary(
+    name = "urma_perftest",
+    srcs = glob([
+        "tools/urma_perftest/*.c",
+        "tools/urma_perftest/*.h",
+        "lib/urma/bond/include/*.h",
+    ]),
+    includes = [
+        "common/include",
+        "lib/urma/bond/include",
+        "lib/urma/core/include",
+        "tools/urma_perftest",
+    ],
+    copts = ["-std=gnu99"],
+    additional_linker_inputs = urma_linklib_inputs(["urma", "urma_common"]),
+    linkopts = urma_dynamic_linkopts(
+        ["urma", "urma_common"],
+        extra_libs = [
+            "-lpthread",
+            "-lm",
+        ],
+    ),
+    deps = [
+        ":urma_common_headers",
+        ":urma_headers",
+    ],
+)
+
+cc_binary(
+    name = "urma_ping",
+    srcs = glob([
+        "lib/uvs/core/include/*.h",
+        "tools/urma_ping/*.c",
+        "tools/urma_ping/*.h",
+    ]),
+    includes = [
+        "common/include",
+        "lib/urma/core/include",
+        "lib/uvs/core/include",
+        "tools/urma_ping",
+    ],
+    copts = ["-std=gnu99"],
+    additional_linker_inputs = urma_linklib_inputs(["urma", "tpsa", "urma_common"]),
+    linkopts = urma_dynamic_linkopts(
+        ["urma", "tpsa", "urma_common"],
+        extra_libs = [
+            "-lm",
+            "-lnl-genl-3",
+            "-lnl-3",
+        ],
+    ),
+    deps = [
+        ":urma_common_headers",
+        ":urma_headers",
+    ],
+)
+
+cc_binary(
+    name = "urma_sample",
+    srcs = ["examples/urma_sample.c"],
+    includes = ["lib/urma/core/include"],
+    copts = ["-std=gnu99"],
+    additional_linker_inputs = urma_linklib_inputs(["urma", "urma_common"]),
+    linkopts = urma_dynamic_linkopts(
+        ["urma", "urma_common"],
+        extra_libs = ["-lpthread"],
+    ),
+    deps = [":urma_headers"],
 )
