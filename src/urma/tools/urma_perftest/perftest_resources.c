@@ -1040,21 +1040,26 @@ static int create_tp_info(perftest_context_t *ctx, perftest_comm_t *comm, perfte
     tp_cfg.flag.bs.uboe = cfg->uboe;
     tp_cfg.trans_mode = cfg->trans_mode;
 
+    // All jfs/jetty within the same urma_ctx share the same eid
+    tp_cfg.local_eid =
+        cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX
+            ? ctx->jfs[0]->jfs_id.eid
+            : ctx->jetty[0]->jetty_id.eid;
+    tp_cfg.peer_eid = ctx->remote_jetty_id[0].eid;
+    uint32_t tp_cnt = (cfg->trans_mode == URMA_TM_RM && cfg->tp_reuse) ? 1 : ctx->jetty_num;
+    uint32_t expected_tp_cnt = tp_cnt;
+    int ret = urma_get_tp_list(ctx->urma_ctx, &tp_cfg, &tp_cnt, &ctx->tp_info[0]);
+    if (ret != URMA_SUCCESS || tp_cnt != expected_tp_cnt) {
+        LOG_ERROR("Failed to get tpid list, ret:%d, tp_cnt:%u!\n", ret, tp_cnt);
+        goto free_buf;
+    }
+
     for (uint32_t i = 0; i < ctx->jetty_num; i++) {
-        if (cfg->tp_reuse && cfg->trans_mode == URMA_TM_RM && i > 0) {
-            ctx->tp_info[i] = ctx->tp_info[0];
-            continue;
-        }
-        tp_cfg.local_eid =
-            cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX
-                ? ctx->jfs[i]->jfs_id.eid
-                : ctx->jetty[i]->jetty_id.eid;
-        tp_cfg.peer_eid = ctx->remote_jetty_id[i].eid;
-        uint32_t tp_cnt = 1;
-        int ret = urma_get_tp_list(ctx->urma_ctx, &tp_cfg, &tp_cnt, &ctx->tp_info[i]);
-        if (ret != URMA_SUCCESS || tp_cnt != 1) {
-            LOG_ERROR("Failed to get tpid list, ret:%d, tp_cnt:%u!\n", ret, tp_cnt);
-            goto free_buf;
+        if (i > 0) {
+            if (cfg->trans_mode == URMA_TM_RM && cfg->tp_reuse) {
+                ctx->tp_info[i] = ctx->tp_info[0];
+                continue;
+            }
         }
         if (cfg->uboe) {
             uint32_t set_tp_attr_flag = PERFTEST_SET_ATTR_BITMAP_UBOE;
