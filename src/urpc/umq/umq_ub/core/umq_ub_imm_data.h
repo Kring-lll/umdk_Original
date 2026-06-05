@@ -37,7 +37,7 @@ typedef enum umq_ub_imm_type {
 typedef union umq_ub_fc_sge_data {
     uint32_t value;
     struct {
-        uint32_t fc_type : 4;
+        uint32_t type : 4;
         uint32_t window : 10;
         uint32_t ratio : 2;
         uint32_t rsvd : 16;

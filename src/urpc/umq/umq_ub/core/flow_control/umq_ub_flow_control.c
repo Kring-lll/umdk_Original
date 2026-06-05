@@ -668,21 +668,20 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
 
     umq_ub_fc_sge_data_t sge_data = {
         .bs = {
-            .fc_type = IMM_TYPE_FC_CREDIT_REQ,
+            .type = IMM_TYPE_FC_CREDIT_REQ,
             .window = credits_per_request,
-            .rsvd = 0,
         }
     };
     umq_ub_imm_t imm = {
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_REQ,
             .window = credits_per_request}
-        };
+    };
 
     urma_sge_t fc_sge = {
         .addr = (uint64_t)(uintptr_t)&sge_data,
         .len = sizeof(umq_ub_fc_sge_data_t)
-        };
+    };
 
     umq_ub_fc_user_ctx_t obj = {
         .bs = {
@@ -728,10 +727,9 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify)
     uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
     umq_ub_fc_sge_data_t sge_data = {
         .bs = {
-            .fc_type = IMM_TYPE_FC_CREDIT_REP,
+            .type = IMM_TYPE_FC_CREDIT_REP,
             .window = notify,
             .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
-            .rsvd = 0,
         }
     };
     umq_ub_imm_t imm = {
@@ -868,16 +866,15 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
 
     umq_ub_fc_sge_data_t sge_data = {
         .bs = {
-            .fc_type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
+            .type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
             .window = return_credit,
-            .rsvd = 0,
         }
     };
     umq_ub_imm_t imm = {
         .flow_control = {
             .type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
             .window = return_credit}
-        };
+    };
 
     urma_sge_t fc_sge = {
         .addr = (uint64_t)(uintptr_t)&sge_data,
@@ -929,12 +926,12 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
     uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
+
     umq_ub_fc_sge_data_t sge_data = {
         .bs = {
-            .fc_type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
+            .type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
             .window = return_credit,
             .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
-            .rsvd = 0,
         }
     };
     umq_ub_imm_t imm = {
@@ -942,8 +939,8 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
             .type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
             .window = return_credit,
             .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth)
-            }
-        };
+        }
+    };
 
     urma_sge_t fc_sge = {
         .addr = (uint64_t)(uintptr_t)&sge_data,
