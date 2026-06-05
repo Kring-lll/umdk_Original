@@ -943,6 +943,10 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
 
         // Flow control messages sent to the main umq are processed directly.
         if (real_queue == queue) {
+            if (is_umq_ub_flow_control_msg_duplicate(queue, imm)) {
+                umq_ub_put_real_queue(real_queue, UB_QUEUE_JETTY_FLOW_CONTROL);
+                continue;
+            }
             qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, imm, &buf[qbuf_cnt]);
             umq_ub_fill_rx_buff_post_process(queue, imm);
             umq_ub_put_real_queue(real_queue, UB_QUEUE_JETTY_FLOW_CONTROL);
@@ -1017,7 +1021,6 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
             continue;
         }
         umq_ub_imm_t imm = {.value = cr[i].imm_data};
-        /* FC message deduplication */
         if (is_umq_ub_flow_control_msg_duplicate(queue, imm)) {
             continue;
         }
