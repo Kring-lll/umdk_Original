@@ -825,7 +825,10 @@ static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm, umq_b
         case IMM_TYPE_FC_CREDIT_REP:
             ret = umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_UPDATE);
             umq_ub_shared_credit_resp_handle(queue, &imm);
-
+            fc->local_req_seq++;
+            if (fc->local_req_seq == 0) {
+                fc->local_req_seq = 1;
+            }
             break;
         case IMM_TYPE_FC_CREDIT_RETURN_REQ: {
             if (umq_ub_shared_credit_return_req_handle(queue, &imm) != UMQ_SUCCESS) {
@@ -835,6 +838,10 @@ static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_imm_t imm, umq_b
         }
         case IMM_TYPE_FC_CREDIT_RETURN_ACK: {
             queue->flow_control.peer_ratio = imm.flow_control.ratio;
+            fc->local_req_seq++;
+            if (fc->local_req_seq == 0) {
+                fc->local_req_seq = 1;
+            }
             break;
         }
         default:
@@ -1000,13 +1007,6 @@ static int sub_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t bu
             continue;
         }
         qbuf_cnt += umq_ub_process_fc_msg(queue, imm, &buf[qbuf_cnt]);
-        // Increment local request seq after response packet processed
-        if (imm.bs.type == IMM_TYPE_FC_CREDIT_REP || imm.bs.type == IMM_TYPE_FC_CREDIT_RETURN_ACK) {
-            fc->local_req_seq++;
-            if (fc->local_req_seq == 0) {
-                fc->local_req_seq = 1;
-            }
-        }
         umq_ub_fill_rx_buff_post_process(queue, imm);
     }
     return (int)qbuf_cnt;
@@ -1058,12 +1058,6 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
             continue;
         }
         qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, imm, &buf[qbuf_cnt]);
-        if (imm.bs.type == IMM_TYPE_FC_CREDIT_REP || imm.bs.type == IMM_TYPE_FC_CREDIT_RETURN_ACK) {
-            fc->local_req_seq++;
-            if (fc->local_req_seq == 0) {
-                fc->local_req_seq = 1;
-            }
-        }
         umq_ub_fill_rx_buff_post_process(queue, imm);
     }
     /* If buf is not NULL, return qbuf_cnt (0 if no error, >0 if has error);
