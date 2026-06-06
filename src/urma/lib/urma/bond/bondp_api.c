@@ -1911,6 +1911,7 @@ urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
     }
 
     bdp_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
+    bondp_tjetty_get(&bdp_tjetty->v_tjetty);
     return URMA_SUCCESS;
 
 UNBIND:
@@ -1929,9 +1930,14 @@ urma_status_t bondp_unbind_jetty(urma_jetty_t *jetty)
 {
     bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
     urma_target_jetty_t *tjetty = jetty->remote_jetty;
-    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(tjetty, bondp_target_jetty_t, v_tjetty);
     urma_status_t ret = URMA_SUCCESS;
 
+    if (tjetty == NULL) {
+        URMA_LOG_ERR("Jetty is not bound to a target jetty\n");
+        return URMA_EINVAL;
+    }
+
+    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(tjetty, bondp_target_jetty_t, v_tjetty);
     for (uint32_t p = 0; p < URMA_UBAGG_DEV_MAX_NUM; ++p) {
         uint32_t local_idx = bdp_jetty->active_indices[p];
         if (bdp_jetty->p_jetty[local_idx] != NULL &&
@@ -1944,6 +1950,7 @@ urma_status_t bondp_unbind_jetty(urma_jetty_t *jetty)
         }
     }
     bdp_jetty->v_jetty.remote_jetty = NULL;
+    bondp_tjetty_put(tjetty);
     return ret;
 }
 
