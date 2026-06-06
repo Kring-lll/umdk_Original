@@ -163,6 +163,8 @@ int uvs_get_device_name_by_eid(uvs_eid_t *eid, char *buf, size_t len);
  */
 int uvs_set_topo_info(void *topo_buf, uint32_t node_size, uint32_t node_num);
 
+int uvs_set_share_topo_info(void *topo_buf, uint32_t node_size, uint32_t node_num);
+
 int uvs_insert_main_ue_eid(const uvs_main_ue_eid_entry_t *entry);
 
 int uvs_insert_main_ue_eid_batch(const uvs_main_ue_eid_batch_entry_t *entry);
