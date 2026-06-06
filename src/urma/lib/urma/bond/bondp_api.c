@@ -2280,42 +2280,52 @@ urma_status_t bondp_get_async_event(urma_context_t *ctx, urma_async_event_t *v_e
         URMA_LOG_ERR("Invalid parameter\n");
         return URMA_EINVAL;
     }
+    bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
     struct epoll_event event;
     urma_async_event_t *p_event;
-    urma_status_t status;
+    urma_status_t status = URMA_FAIL;
 
+    (void)pthread_mutex_lock(&ctx->mutex);
     int nfds = epoll_wait(ctx->async_fd, &event, 1, 0);
     if (nfds == -1) {
         URMA_LOG_ERR("epoll_wait no event or err.\n");
-        return URMA_FAIL;
+        goto OUT;
+    }
+    if (nfds == 0) {
+        goto OUT;
     }
 
     if ((event.events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) != 0) {
         URMA_LOG_ERR("bondp get error epoll_event=0x%x.\n", event.events);
-        return URMA_FAIL;
+        goto OUT;
     }
     if (event.events & EPOLLIN) {
         urma_context_t *p_contex = (urma_context_t *)event.data.ptr;
         p_event = calloc(1, sizeof(urma_async_event_t));
         if (p_event == NULL) {
-            return URMA_ENOMEM;
+            status = URMA_ENOMEM;
+            goto OUT;
         }
         status = urma_get_async_event(p_contex, p_event);
         if (status != URMA_SUCCESS) {
             free(p_event);
-            return status;
+            goto OUT;
         }
         v_event->urma_ctx = ctx;
         if (init_elment_vjetty(v_event, p_event) != 0) {
             free(p_event);
             URMA_LOG_ERR("failed to get invalid jetty.\n");
-            return URMA_EINVAL;
+            status = URMA_EINVAL;
+            goto OUT;
         }
         v_event->event_type = p_event->event_type;
         v_event->priv = p_event;
-        return URMA_SUCCESS;
+        status = URMA_SUCCESS;
     }
-    return URMA_FAIL;
+
+OUT:
+    (void)pthread_mutex_unlock(&bdp_ctx->v_ctx.mutex);
+    return status;
 }
 
 void bondp_ack_async_event(urma_async_event_t *event)
