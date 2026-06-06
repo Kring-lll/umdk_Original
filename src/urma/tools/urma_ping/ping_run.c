@@ -264,6 +264,11 @@ static int get_src_and_dst_eid(ping_cfg_t *cfg, urma_eid_t *src_eid, urma_eid_t 
     LOG_VERBOSE("Destination EID resolved to primary EID " EID_FMT " (chip_id=%u)\n",
                 EID_ARGS(*dst_eid), chip_id);
 
+    if (cfg->has_src_eid) {
+        *src_eid = cfg->src_eid;
+        return 0;
+    }
+
     urma_device_t *dev = find_first_bonding_device();
     if (dev == NULL) {
         LOG_ERROR("Failed to find first bonding device.\n");
@@ -284,7 +289,6 @@ static int get_src_and_dst_eid(ping_cfg_t *cfg, urma_eid_t *src_eid, urma_eid_t 
 
     *src_eid = eid_list[0].eid;
     urma_free_eid_list(eid_list);
-    eid_list = NULL;
 
     if (!get_source_eid_by_bonding_eid_and_chip_id(src_eid, chip_id)) {
         LOG_ERROR("Failed to resolve the source primary EID.\n");
