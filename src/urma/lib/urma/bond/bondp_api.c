@@ -1254,6 +1254,8 @@ static int bondp_delete_pjetty(bondp_comp_t *bdp_jetty)
 
 static int bondp_add_jetty_p_vjetty_id_info(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty, uint32_t jetty_id)
 {
+    bool added[URMA_UBAGG_DEV_MAX_NUM] = {0};
+
     pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
         if (!bdp_jetty->p_jetty[i]) {
@@ -1270,13 +1272,15 @@ static int bondp_add_jetty_p_vjetty_id_info(bondp_context_t *bdp_ctx, bondp_comp
             URMA_LOG_ERR("Failed to add p_vjetty_id[%d]: ret=%d, p_jetty_id=%u, v_jetty_id=%u\n",
                          i, ret, pjetty_id.id, jetty_id);
             goto DEL_P_VJETTY_ID;
+        } else {
+            added[i] = true;
         }
     }
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
     return 0;
 DEL_P_VJETTY_ID:
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        if (!bdp_jetty->p_jetty[i]) {
+        if (!added[i] || !bdp_jetty->p_jetty[i]) {
             continue;
         }
         urma_jetty_id_t pjetty_id = bdp_jetty->p_jetty[i]->jetty_id;
@@ -1294,6 +1298,10 @@ static void bondp_del_jetty_p_vjetty_info_without_lock(bondp_comp_t *bdp_jetty)
             continue;
         }
         urma_jetty_id_t pjetty_id = bdp_jetty->p_jetty[i]->jetty_id;
+        if (bdp_p_vjetty_id_table_lookup_comp_without_lock(&bdp_ctx->p_vjetty_id_table, pjetty_id, JETTY) !=
+            bdp_jetty) {
+            continue;
+        }
         int ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, pjetty_id, JETTY);
         if (ret) {
             URMA_LOG_ERR("Failed to delete p_vjetty_id node: ret=%d pjetty_id=%u\n",
