@@ -92,6 +92,18 @@ typedef enum uvs_cmd_insert_main_ue_eid_batch_type {
     INSERT_MAIN_UE_EID_BATCH_IN_NUM
 } uvs_cmd_insert_main_ue_eid_batch_type_t;
 
+typedef enum uvs_cmd_insert_host_eid_batch_type {
+    INSERT_HOST_EID_BATCH_IN_ENTRY,
+    INSERT_HOST_EID_BATCH_IN_NUM
+} uvs_cmd_insert_host_eid_batch_type_t;
+
+typedef enum uvs_cmd_lookup_host_eid_type {
+    LOOKUP_HOST_EID_IN_EID,
+    LOOKUP_HOST_EID_IN_NUM,
+    LOOKUP_HOST_EID_OUT_HOST_EID = UVS_CMD_OUT_TYPE_INIT,
+    LOOKUP_HOST_EID_OUT_NUM
+} uvs_cmd_lookup_host_eid_type_t;
+
 #ifdef __cplusplus
 }
 #endif
