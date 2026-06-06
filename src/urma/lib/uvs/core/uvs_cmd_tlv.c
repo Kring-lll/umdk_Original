@@ -54,6 +54,17 @@ int uvs_ioctl_set_topo(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_set_topo_t *arg)
     return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_SET_TOPO, (void *)attrs, sizeof(attrs));
 }
 
+int uvs_ioctl_set_share_topo(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_set_share_topo_t *arg)
+{
+    uvs_cmd_attr_t attrs[SET_SHARE_TOPO_IN_NUM] = {0};
+    uvs_cmd_attr_t *a = attrs;
+
+    ATTR(a++, SET_SHARE_TOPO_IN_TOPO_INFO, arg->in.topo_info);
+    ATTR(a++, SET_SHARE_TOPO_IN_TOPO_NUM, arg->in.topo_num);
+
+    return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_SET_SHARE_TOPO, (void *)attrs, sizeof(attrs));
+}
+
 int uvs_ioctl_get_topo(tpsa_ioctl_ctx_t *ioctl_ctx, uvs_get_topo_t *arg)
 {
     uvs_cmd_attr_t attrs[GET_TOPO_OUT_NUM] = {0};

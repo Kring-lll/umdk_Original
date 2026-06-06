@@ -42,6 +42,13 @@ typedef enum uvs_cmd_set_topo_type {
     SET_TOPO_IN_NUM /* Only for calculating number of types */
 } uvs_cmd_set_topo_type_t;
 
+typedef enum uvs_cmd_set_share_topo_type {
+    /* In type */
+    SET_SHARE_TOPO_IN_TOPO_INFO,
+    SET_SHARE_TOPO_IN_TOPO_NUM,
+    SET_SHARE_TOPO_IN_NUM /* Only for calculating number of types */
+} uvs_cmd_set_share_topo_type_t;
+
 typedef enum uvs_cmd_get_topo_type {
     /* In type */
     GET_TOPO_OUT_TOPO_MAP,

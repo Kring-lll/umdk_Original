@@ -152,6 +152,36 @@ int uvs_ubagg_ioctl_set_topo(void *topo_info, int topo_num)
     return 0;
 }
 
+int uvs_ubagg_ioctl_set_share_topo(void *topo_info, int topo_num)
+{
+    struct uvs_ubagg_set_topo_info args = {0};
+    struct uvs_ubagg_cmd_hdr hdr = {0};
+    int ret;
+
+    args.in.topo = topo_info;
+    args.in.topo_num = (uint32_t)topo_num;
+
+    hdr.command = UVS_UBAGG_CMD_SET_SHARE_TOPO_INFO;
+    hdr.args_addr = (uint64_t)(uintptr_t)&args;
+    hdr.args_len = sizeof(args);
+
+    int dev_fd = open(UVS_UBAGG_DEVICE_PATH, O_RDWR);
+    if (dev_fd < 0) {
+        TPSA_LOG_ERR("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
+        return -1;
+    }
+
+    ret = ioctl(dev_fd, UVS_UBAGG_CMD, &hdr);
+    if (ret != 0) {
+        TPSA_LOG_ERR("Failed to set share topo info, ret: %d, errno: %d.\n", ret, errno);
+        close(dev_fd);
+        return -1;
+    }
+
+    close(dev_fd);
+    return 0;
+}
+
 int uvs_ubcore_ioctl_get_topo(void *topo_map)
 {
     tpsa_ioctl_ctx_t ioctl_ctx = {0};
@@ -197,6 +227,33 @@ int uvs_ubcore_ioctl_set_topo(void *topo_info, int topo_num)
     ret = uvs_ioctl_set_topo(&ioctl_ctx, &arg);
     if (ret != 0) {
         TPSA_LOG_ERR("uvs_ubcore_ioctl_set_topo fail\n");
+        close(dev_fd);
+        return -1;
+    }
+
+    close(dev_fd);
+    return 0;
+}
+
+int uvs_ubcore_ioctl_set_share_topo(void *topo_info, int topo_num)
+{
+    tpsa_ioctl_ctx_t ioctl_ctx = {0};
+    uvs_set_share_topo_t arg = {0};
+    int ret = 0;
+
+    int dev_fd = open(UVS_UBCORE_DEVICE_PATH, O_RDWR);
+    if (dev_fd == -1) {
+        TPSA_LOG_ERR("Failed to open dev_fd err: %s.\n", ub_strerror(errno));
+        return -1;
+    }
+
+    ioctl_ctx.ubcore_fd = dev_fd;
+    arg.in.topo_info = topo_info;
+    arg.in.topo_num = (uint32_t)topo_num;
+
+    ret = uvs_ioctl_set_share_topo(&ioctl_ctx, &arg);
+    if (ret != 0) {
+        TPSA_LOG_ERR("uvs_ubcore_ioctl_set_share_topo fail\n");
         close(dev_fd);
         return -1;
     }
