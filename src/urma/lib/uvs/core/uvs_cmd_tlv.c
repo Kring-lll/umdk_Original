@@ -157,3 +157,29 @@ int uvs_ioctl_insert_main_ue_eid_batch(tpsa_ioctl_ctx_t *ioctl_ctx,
     return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_INSERT_MAIN_UE_EID_BATCH,
                                (void *)attrs, sizeof(attrs));
 }
+
+int uvs_ioctl_insert_host_eid_batch(tpsa_ioctl_ctx_t *ioctl_ctx,
+    uvs_cmd_host_eid_batch_t *arg)
+{
+    uvs_cmd_attr_t attrs[INSERT_HOST_EID_BATCH_IN_NUM] = {0};
+    uvs_cmd_attr_t *a = attrs;
+
+    ATTR(a++, INSERT_HOST_EID_BATCH_IN_ENTRY, arg->in.entry);
+
+    return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_INSERT_HOST_EID_BATCH,
+                               (void *)attrs, sizeof(attrs));
+}
+
+int uvs_ioctl_lookup_host_eid(tpsa_ioctl_ctx_t *ioctl_ctx,
+    uvs_cmd_host_eid_lookup_t *arg)
+{
+    uvs_cmd_attr_t attrs[LOOKUP_HOST_EID_IN_NUM +
+                         LOOKUP_HOST_EID_OUT_NUM - UVS_CMD_OUT_TYPE_INIT] = {0};
+    uvs_cmd_attr_t *a = attrs;
+
+    ATTR(a++, LOOKUP_HOST_EID_IN_EID, arg->in.eid);
+    ATTR(a++, LOOKUP_HOST_EID_OUT_HOST_EID, arg->out.host_eid);
+
+    return uvs_ioctl_in_global(ioctl_ctx, UVS_CMD_LOOKUP_HOST_EID,
+                               (void *)attrs, sizeof(attrs));
+}
