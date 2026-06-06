@@ -65,7 +65,7 @@ static int ums_agent_keyring_get_password(const char *desc, char *pwd_buf, size_
     return 0;
 }
 
-static int ums_agent_tls_password_cb(char *buf, int size, int rwflag, void *userdata)
+static int ums_agent_tls_password_cb(char *buf, int size, int rwflag, const void *userdata)
 {
     (void)rwflag;
 

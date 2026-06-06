@@ -269,7 +269,7 @@ static void ums_agent_tp_deserialize_token_transfer(const struct ums_agent_token
     memcpy(out->reserved, raw->reserved, sizeof(out->reserved));
 }
 
-static bool ums_agent_tp_conn_has_pending_send(struct ums_agent_conn_ctx *ctx)
+static bool ums_agent_tp_conn_has_pending_send(const struct ums_agent_conn_ctx *ctx)
 {
     return ctx && ctx->send_len > ctx->send_offset;
 }
@@ -440,7 +440,7 @@ static void ums_agent_tp_process_pending_for_conn(struct ums_agent_tls_conn *con
 }
 
 static void ums_agent_tp_on_connect_complete(
-    struct ums_agent_tls_conn *conn, int status, void *user_data)
+    struct ums_agent_tls_conn *conn, int status, const void *user_data)
 {
     (void)user_data;
 
@@ -550,7 +550,7 @@ static int ums_agent_tp_process_recv_buf(struct ums_agent_conn_ctx *ctx,
 }
 
 static void ums_agent_tp_on_data_available(struct ums_agent_tls_conn *conn,
-    void *user_data)
+    const void *user_data)
 {
     (void)user_data;
 
@@ -628,7 +628,7 @@ static void ums_agent_tp_on_data_available(struct ums_agent_tls_conn *conn,
 }
 
 static void ums_agent_tp_on_writable(struct ums_agent_tls_conn *conn,
-    void *user_data)
+    const void *user_data)
 {
     (void)user_data;
 
@@ -669,7 +669,7 @@ static void ums_agent_tp_on_writable(struct ums_agent_tls_conn *conn,
 }
 
 static void ums_agent_tp_on_conn_close(
-    struct ums_agent_tls_conn *conn, void *user_data)
+    struct ums_agent_tls_conn *conn, const void *user_data)
 {
     (void)user_data;
 
