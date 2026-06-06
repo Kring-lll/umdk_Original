@@ -917,7 +917,7 @@ DEL_P_VJFR_ID:
         if (bdp_jfr->p_jfr[j] == NULL) {
             continue;
         }
-        urma_jfr_id_t pjfr_id = bdp_jfr->p_jfr[i]->jfr_id;
+        urma_jfr_id_t pjfr_id = bdp_jfr->p_jfr[j]->jfr_id;
         (void)bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, pjfr_id, JFR);
     }
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
