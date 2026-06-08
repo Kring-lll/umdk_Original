@@ -630,6 +630,11 @@ static ALWAYS_INLINE void umq_ub_put_real_queue(ub_queue_t *queue, uint32_t jett
         (uint64_t)(uintptr_t)queue, __ATOMIC_RELEASE);
 }
 
+static inline bool umq_ub_is_shared_jfr(ub_queue_t *queue)
+{
+    return (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 && queue->used_port_num > 0;
+}
+
 #ifdef __cplusplus
 }
 #endif
