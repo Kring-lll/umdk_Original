@@ -145,6 +145,8 @@ UNBIND:
     example_flush(umqh);
 DESTROY:
     umq_destroy(umqh);
+    umq_destroy(sub_umqh);
+    umq_destroy(main_umqh);
 DISCONNECT:
     server_dsiconnect();
 UNINIT:
@@ -286,6 +288,8 @@ UNBIND:
     example_flush(umqh);
 DESTROY:
     umq_destroy(umqh);
+    umq_destroy(sub_umqh);
+    umq_destroy(main_umqh);
 DISCONNECT:
     client_dsiconnect();
 UNINIT:

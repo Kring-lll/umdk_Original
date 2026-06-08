@@ -114,15 +114,16 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
 
     urma_jetty_t* io_jetty = queue->jetty[UB_QUEUE_JETTY_IO];
     // to do 条件后续优化
-    if (queue->create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT && 
-        queue->create_flag & UMQ_CREATE_FLAG_SHARE_RQ &&
-        (queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0 &&
-        (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) == 0) {
+    if (is_logic_umq(queue)) {
         // to do 这里插入jetty选择，修改前当子umq处理 -> 子umq outstanding+1
         // 先检查是否占有jetty
         ;
     }
 
+    umq_ub_imm_t imm_data = {
+        .share_imm.type = 3, // UMQ_SHAREMODE_IMM_TYPE_IO
+        .share_imm.user_data = 0
+    };
     urma_eid_t *eid = &io_jetty->jetty_id.eid;
     uint32_t id = io_jetty->jetty_id.id;
     urma_target_seg_t *tseg = NULL;
@@ -197,16 +198,15 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
             break;
         case UMQ_OPC_SEND_IMM:
             buf_pro->imm.rsvd0 = 0;
-            urma_wr_ptr->send.imm_data = buf_pro->imm_data;
+            //urma_wr_ptr->send.imm_data = buf_pro->imm_data;
+            imm_data.share_imm.type = 1; // UMQ_SHAREMODE_IMM_TYPE_USER
+            imm_data.share_imm.user_data = buf_pro->imm.user_data;
+
             /* fall-through */
         case UMQ_OPC_SEND:
             urma_wr_ptr->send.src.sge = sges_ptr;
             urma_wr_ptr->send.src.num_sge = sge_num;
-            umq_ub_imm_t imm_data = {
-                .share_imm.type = 3, // UMQ_SHAREMODE_IMM_TYPE_IO
-                .share_imm.umq_id = queue->remote_umq_id,
-                .share_imm.user_data = buf_pro->imm.user_data,
-            };
+            imm_data.share_imm.umq_id = queue->remote_umq_id,
             urma_wr_ptr->send.imm_data = imm_data.value;
             break;
         default:
@@ -256,10 +256,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
 
     urma_jetty_t* io_jetty = queue->jetty[UB_QUEUE_JETTY_IO];
     // to do 条件后续优化
-    if (queue->create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT && 
-        queue->create_flag & UMQ_CREATE_FLAG_SHARE_RQ &&
-        (queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0 &&
-        (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) == 0) {
+    if (is_logic_umq(queue)) {
         // to do 这里插入jetty选择，修改前当子umq处理 -> 子umq outstanding+1
         // 先检查是否占有jetty
         ;
@@ -520,8 +517,15 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
     *bad_qbuf = NULL;
     rx_buf_ctx_t *rx_buf_ctx = NULL;
     umq_buf_t *wr_last_buf = NULL;  // record last qbuf of current wr
-    urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
-    uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
+
+    urma_jetty_t *io_jetty = queue->jetty[UB_QUEUE_JETTY_IO];
+    jfr_ctx_t *io_jfr_ctx = queue->jfr_ctx[UB_QUEUE_JETTY_IO];
+    if (is_logic_umq(queue)) {
+        io_jetty = umq_ub_get_jetty_array(queue)[UB_QUEUE_JETTY_IO];
+        io_jfr_ctx = umq_ub_get_jfr_xtc_array(queue)[UB_QUEUE_JETTY_IO];
+    }
+    urma_eid_t *eid = &io_jetty->jetty_id.eid;
+    uint32_t id = io_jetty->jetty_id.id;
     int ret = UMQ_FAIL;
     while (buffer) {
         uint32_t rest_size = buffer->total_data_size;
@@ -533,7 +537,7 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
 
         uint32_t sge_num = 0;
 
-        rx_buf_ctx = queue_rx_buf_ctx_get(&queue->jfr_ctx[UB_QUEUE_JETTY_IO]->rx_buf_ctx_list);
+        rx_buf_ctx = queue_rx_buf_ctx_get(&io_jfr_ctx->rx_buf_ctx_list);
         if (rx_buf_ctx == NULL) {
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, rx buf ctx is used up\n", EID_ARGS(*eid), id);
             goto PUT_ALL_RX_CTX;
@@ -604,9 +608,9 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
 
     bool post_jfr = is_umq_ub_post_jfr(queue);
     if (post_jfr) {
-        status = umq_symbol_urma()->urma_post_jfr_wr(queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr, recv_wr, &bad_wr);
+        status = umq_symbol_urma()->urma_post_jfr_wr(io_jfr_ctx->jfr, recv_wr, &bad_wr);
     } else {
-        status = umq_symbol_urma()->urma_post_jetty_recv_wr(queue->jetty[UB_QUEUE_JETTY_IO], recv_wr, &bad_wr);
+        status = umq_symbol_urma()->urma_post_jetty_recv_wr(io_jetty, recv_wr, &bad_wr);
     }
     if (status != URMA_SUCCESS) {
         umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_POST_RECV, start_timestamp);
@@ -635,7 +639,7 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
 PUT_CUR_RX_CTX:
     buffer = rx_buf_ctx->buffer;
     // put rx buf ctx that was not added to recv wr
-    queue_rx_buf_ctx_put(&queue->jfr_ctx[UB_QUEUE_JETTY_IO]->rx_buf_ctx_list, rx_buf_ctx);
+    queue_rx_buf_ctx_put(&io_jfr_ctx->rx_buf_ctx_list, rx_buf_ctx);
 
 PUT_ALL_RX_CTX:
     // put rx buf in recv wr
@@ -776,8 +780,9 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_
             ret = umq_ub_on_rx_done(queue, cr, buf, qbuf_status);
             if (queue->create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT) {
                 umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
-                buf_pro->user_ctx = cr->imm_data;
-                buf_pro->imm_data = cr->imm_data;
+                umq_ub_imm_t imm = {.value = cr->imm_data};
+                buf_pro->user_ctx = imm.value;
+                buf_pro->imm.user_data = imm.share_imm.user_data;
             }
             break;
         }
