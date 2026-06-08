@@ -153,7 +153,6 @@ static ALWAYS_INLINE void release_thread_cache_array()
 
 static void unregister_all_thread_cache(qbuf_pool_t *pool)
 {
-    struct timespec start;
     register_list_node_t *cur = NULL;
     (void)util_rwlock_rdlock(g_register_rwlock);
     LIST_FOREACH(cur, &g_register_list_head, node) {
@@ -165,7 +164,6 @@ static void unregister_all_thread_cache(qbuf_pool_t *pool)
 
          /* if unregister operation release failed(which means that another thread is also operating
           * on this thread cache), wait until the next thread finish the release operation */
-        (void)clock_gettime(CLOCK_MONOTONIC, &start);
         uint32_t desired = ref;
         while (!__atomic_compare_exchange_n(&tls_mgmt_pool->remove_ref_cnt, &desired, 0, true, __ATOMIC_RELEASE,
                                             __ATOMIC_ACQUIRE)) {
@@ -173,13 +171,6 @@ static void unregister_all_thread_cache(qbuf_pool_t *pool)
                 UMQ_VLOG_ERR(VLOG_UMQ, "unexpected exception, actual ref: %u, desired ref: %u\n", ref, desired);
                 break;
             }
-
-            if (is_timeout(&start, RELEASE_THREAD_CACHE_TIMEOUT_MS)) {
-                UMQ_VLOG_ERR(VLOG_UMQ, "release thread cache for shared memory exceeds %d ms timeout\n",
-                    RELEASE_THREAD_CACHE_TIMEOUT_MS);
-                break;
-            }
-
             usleep(1);
             desired = ref;
         }
