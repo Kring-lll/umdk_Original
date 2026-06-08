@@ -232,7 +232,7 @@ static SSL *ums_agent_tls_conn_create_server_ssl(int fd)
     return ssl;
 }
 
-static SSL *ums_agent_tls_conn_create_client_ssl(int fd)
+static SSL *ums_agent_tls_conn_create_client_ssl(int fd, const struct ums_agent_ip_addr *peer_addr)
 {
     SSL_CTX *ctx = ums_agent_tls_get_client_ssl_ctx();
     if (!ctx) {
@@ -248,6 +248,36 @@ static SSL *ums_agent_tls_conn_create_client_ssl(int fd)
 
     if (SSL_set_fd(ssl, fd) != 1) {
         UMS_AGENT_LOG_ERR("SSL_set_fd failed for fd=%d", fd);
+        SSL_free(ssl);
+        return NULL;
+    }
+
+    X509_VERIFY_PARAM *param = SSL_get0_param(ssl);
+    if (!param) {
+        UMS_AGENT_LOG_ERR("SSL_get0_param failed");
+        SSL_free(ssl);
+        return NULL;
+    }
+
+    if (peer_addr->family == AF_INET) {
+        if (X509_VERIFY_PARAM_set1_ip(param,
+                (const unsigned char *)&peer_addr->ip.in4,
+                sizeof(peer_addr->ip.in4)) != 1) {
+            UMS_AGENT_LOG_ERR("X509_VERIFY_PARAM_set1_ip (IPv4) failed");
+            SSL_free(ssl);
+            return NULL;
+        }
+    } else if (peer_addr->family == AF_INET6) {
+        if (X509_VERIFY_PARAM_set1_ip(param,
+                (const unsigned char *)&peer_addr->ip.in6,
+                sizeof(peer_addr->ip.in6)) != 1) {
+            UMS_AGENT_LOG_ERR("X509_VERIFY_PARAM_set1_ip (IPv6) failed");
+            SSL_free(ssl);
+            return NULL;
+        }
+    } else {
+        UMS_AGENT_LOG_ERR("unknown address family=%d, cannot set peer IP verification",
+            peer_addr->family);
         SSL_free(ssl);
         return NULL;
     }
@@ -910,7 +940,7 @@ static struct ums_agent_tls_conn *ums_agent_tls_conn_create_server(int fd,
 static struct ums_agent_tls_conn *ums_agent_tls_conn_create_client(int fd,
     const struct ums_agent_ip_addr *peer_addr, uint16_t peer_port, int connect_ret)
 {
-    SSL *ssl = ums_agent_tls_conn_create_client_ssl(fd);
+    SSL *ssl = ums_agent_tls_conn_create_client_ssl(fd, peer_addr);
     if (!ssl) {
         return NULL;
     }
