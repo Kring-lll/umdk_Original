@@ -398,7 +398,7 @@ static int admin_main_ue_eid_insert_batch(const urma_eid_t *main_ue_eid,
     return ret;
 }
 
-static int cmd_main_ue_eid_usage(admin_config_t *cfg)
+static int cmd_main_ue_eid_usage(const admin_config_t *cfg)
 {
     (void)cfg;
     printf("Usage:\n"
@@ -523,7 +523,7 @@ static int cmd_main_ue_eid_lookup(admin_config_t *cfg)
     return 0;
 }
 
-static int cmd_main_ue_eid_flush(admin_config_t *cfg)
+static int cmd_main_ue_eid_flush(const admin_config_t *cfg)
 {
     int ret;
 

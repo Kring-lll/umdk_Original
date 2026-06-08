@@ -180,7 +180,7 @@ int admin_nl_send_recv_msg(struct nl_msg *msg, int (*cb)(struct nl_msg *msg, voi
     return 0;
 }
 
-static int nl_default_cb(struct nl_msg *msg, void *arg)
+static int nl_default_cb(const struct nl_msg *msg, const void *arg)
 {
     (void)msg;
     (void)arg;
