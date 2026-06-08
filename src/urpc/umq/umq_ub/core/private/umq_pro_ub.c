@@ -813,9 +813,9 @@ static uint32_t umq_ub_fill_fc_buf(ub_queue_t *queue, umq_buf_t **buf, umq_buf_s
     return 1;
 }
 
-static ALWAYS_INLINE uint16_t umq_ub_fc_seq_inc(uint16_t seq)
+static ALWAYS_INLINE uint8_t umq_ub_fc_seq_inc(uint8_t seq)
 {
-    uint16_t next = seq + 1;
+    uint8_t next = seq + 1;
     return (next == 0) ? 1 : next;
 }
 
