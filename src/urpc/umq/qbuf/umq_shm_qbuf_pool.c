@@ -173,13 +173,6 @@ static void unregister_all_thread_cache(qbuf_pool_t *pool)
                 UMQ_VLOG_ERR(VLOG_UMQ, "unexpected exception, actual ref: %u, desired ref: %u\n", ref, desired);
                 break;
             }
-
-            if (is_timeout(&start, RELEASE_THREAD_CACHE_TIMEOUT_MS)) {
-                UMQ_VLOG_ERR(VLOG_UMQ, "release thread cache for shared memory exceeds %d ms timeout\n",
-                    RELEASE_THREAD_CACHE_TIMEOUT_MS);
-                break;
-            }
-
             usleep(1);
             desired = ref;
         }
