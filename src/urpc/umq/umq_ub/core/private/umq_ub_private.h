@@ -187,7 +187,7 @@ typedef struct ub_flow_control {
     bool remote_get;
     bool enabled;
     volatile bool is_credit_applying;
-    volatile uint64_t imm[UB_QUEUE_FC_MSG_TYPE_MAX];
+    volatile umq_ub_flow_control_data_t ub_flow_control_data[UB_QUEUE_FC_MSG_TYPE_MAX];
     umq_ub_flow_control_sge_slot_t recv_sge;
     uint16_t local_req_seq;
     uint16_t remote_expect_seq;
@@ -628,6 +628,12 @@ static ALWAYS_INLINE void umq_ub_put_real_queue(ub_queue_t *queue, uint32_t jett
 {
     __atomic_store_n(&queue->dev_ctx->umq_ctx_jetty_table[queue->jetty[jetty_idx]->jetty_id.id],
         (uint64_t)(uintptr_t)queue, __ATOMIC_RELEASE);
+}
+
+static inline bool is_umq_ub_post_jfr(ub_queue_t *queue)
+{
+    // bondp with shared_jfr should use urma_post_jfr_wr
+    return (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 && queue->used_port_num > 0;
 }
 
 #ifdef __cplusplus

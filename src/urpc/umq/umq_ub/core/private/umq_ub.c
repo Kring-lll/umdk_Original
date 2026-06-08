@@ -1431,6 +1431,9 @@ void umq_ub_jfr_ctx_destroy(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
         }
     }
     rx_buf_ctx_list_uninit(&queue->jfr_ctx[jetty_idx]->rx_buf_ctx_list);
+    if (jetty_idx == UB_QUEUE_JETTY_FLOW_CONTROL) {
+        umq_ub_flow_control_share_rq_sge_uninit(&queue->jfr_ctx[jetty_idx]->share_rq_sge);
+    }
     free(queue->jfr_ctx[jetty_idx]);
     queue->jfr_ctx[jetty_idx] = NULL;
 }
