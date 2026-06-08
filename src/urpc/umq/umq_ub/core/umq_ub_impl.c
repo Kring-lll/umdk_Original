@@ -959,7 +959,10 @@ DELETE_FC_JFS_JFC:
     (void)umq_symbol_urma()->urma_delete_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL]);
 
 DESTROY_FC_JFR_CTX:
-    umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_FLOW_CONTROL);
+    uint32_t ref_cnt = umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_FLOW_CONTROL);
+    if (ref_cnt == 0) {
+        umq_ub_jfr_ctx_destroy(queue, UB_QUEUE_JETTY_FLOW_CONTROL);
+    }
 
     return UMQ_FAIL;
 }
@@ -1129,7 +1132,10 @@ DELETE_JFCE:
 UNINIT_FLOW_CONTROL:
     umq_ub_flow_control_uninit(&queue->flow_control);
 DESTROY_JFR_CTX:
-    umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_IO);
+    uint32_t ref_cnt = umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_IO);
+    if (ref_cnt == 0) {
+        umq_ub_jfr_ctx_destroy(queue, UB_QUEUE_JETTY_IO);
+    }
 FREE_QUEUE_ID:
     urpc_id_generator_free(&g_umq_id_allocator, queue->umq_id);
 FREE_QUEUE:
@@ -1202,7 +1208,18 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_delete_jfc for flowcontrol jfs_jfc "
                 "failed, status: %d\n", EID_ARGS(*fc_eid), fc_id, ret);
         }
-        umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_FLOW_CONTROL);
+
+        uint32_t fc_ref_cnt = umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_FLOW_CONTROL);
+        if (fc_ref_cnt == 0) {
+            if (is_umq_ub_post_jfr(queue)) {
+                umq_ub_flow_control_share_rq_sge_uninit(
+                    &queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->share_rq_sge);
+            } else {
+                umq_ub_flow_control_sge_free(&queue->dev_ctx->fc_sge_mgr,
+                                             &queue->flow_control.recv_sge);
+            }
+            umq_ub_jfr_ctx_destroy(queue, UB_QUEUE_JETTY_FLOW_CONTROL);
+        }
     }
 
     umq_buf_free(queue->addr_list);
@@ -1236,7 +1253,10 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
     (void)util_rwlock_destroy(queue->wait_ack_import.lock);
     queue->wait_ack_import.lock = NULL;
 
-    umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_IO);
+    uint32_t ref_cnt = umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_IO);
+    if (ref_cnt == 0) {
+        umq_ub_jfr_ctx_destroy(queue, UB_QUEUE_JETTY_IO);
+    }
     umq_ub_queue_ctx_list_remove(&queue->qctx_node);
     umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->dev_ctx->ref_cnt, 1);
     if (queue->checker != NULL) {

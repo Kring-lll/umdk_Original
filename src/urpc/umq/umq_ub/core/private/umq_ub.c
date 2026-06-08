@@ -1435,14 +1435,11 @@ void umq_ub_jfr_ctx_destroy(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
     queue->jfr_ctx[jetty_idx] = NULL;
 }
 
-void umq_ub_jfr_ctx_put(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
+uint32_t umq_ub_jfr_ctx_put(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
 {
     uint32_t new_value = __atomic_sub_fetch(&queue->jfr_ctx[jetty_idx]->ref_cnt, 1, __ATOMIC_RELAXED);
     UMQ_VLOG_DEBUG(VLOG_UMQ, "jfr_ctx ref_cnt %u\n", new_value);
-    if (new_value > 0) {
-        return;
-    }
-    umq_ub_jfr_ctx_destroy(queue, jetty_idx);
+    return new_value;
 }
 
 static int umq_ub_rqe_post_factor_query(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, urma_jfr_t *jfr)

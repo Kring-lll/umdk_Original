@@ -187,7 +187,7 @@ typedef struct ub_flow_control {
     bool remote_get;
     bool enabled;
     volatile bool is_credit_applying;
-    volatile uint64_t imm[UB_QUEUE_FC_MSG_TYPE_MAX];
+    volatile umq_ub_flow_control_data_t ub_flow_control_data[UB_QUEUE_FC_MSG_TYPE_MAX];
     umq_ub_flow_control_sge_slot_t recv_sge;
     uint16_t local_req_seq;
     uint16_t remote_expect_seq;
@@ -509,7 +509,7 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
 int umq_ub_register_seg(umq_ub_ctx_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
 void umq_ub_unregister_seg(umq_ub_ctx_t *ctx_list, uint32_t ctx_cnt, uint16_t mempool_id);
 int share_rq_param_check(ub_queue_t *queue, ub_queue_t *share_rq);
-void umq_ub_jfr_ctx_put(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx);
+uint32_t umq_ub_jfr_ctx_put(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx);
 int umq_ub_jfr_ctx_get(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, umq_create_option_t *option,
                        ub_queue_t *share_queue, ub_queue_jetty_index_t jetty_idx);
 jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_queue_jetty_index_t jetty_idx);
@@ -628,6 +628,12 @@ static ALWAYS_INLINE void umq_ub_put_real_queue(ub_queue_t *queue, uint32_t jett
 {
     __atomic_store_n(&queue->dev_ctx->umq_ctx_jetty_table[queue->jetty[jetty_idx]->jetty_id.id],
         (uint64_t)(uintptr_t)queue, __ATOMIC_RELEASE);
+}
+
+static inline bool is_umq_ub_post_jfr(ub_queue_t *queue)
+{
+    // bondp with shared_jfr should use urma_post_jfr_wr
+    return (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 && queue->used_port_num > 0;
 }
 
 #ifdef __cplusplus
