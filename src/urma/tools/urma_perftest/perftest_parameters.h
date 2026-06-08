@@ -18,7 +18,6 @@
 #include "urma_types.h"
 
 #include "perftest_communication.h"
-#include "perftest_log.h"
 
 /* Default Values of perftest parameters */
 #define PERFTEST_DEF_JFC_DEPTH_LAT   (512)
