@@ -471,6 +471,11 @@ static inline urma_jetty_t** umq_ub_get_jetty_array(ub_queue_t *queue)
     return is_logic_umq(queue) ? ((ub_queue_t *)((umq_t*)queue->share_rq_umqh)->umqh_tp)->jetty : queue->jetty;
 }
 
+static inline jfr_ctx_t** umq_ub_get_jfr_xtc_array(ub_queue_t *queue)
+{
+    return is_logic_umq(queue) ? ((ub_queue_t *)((umq_t*)queue->share_rq_umqh)->umqh_tp)->jfr_ctx : queue->jfr_ctx;
+}
+
 int rx_buf_ctx_list_init(rx_buf_ctx_list_t *rx_buf_ctx_list, uint32_t ctx_num);
 void rx_buf_ctx_list_uninit(rx_buf_ctx_list_t *rx_buf_ctx_list);
 umq_buf_t *umq_get_buf_by_user_ctx(ub_queue_t *queue, uint64_t user_ctx, ub_queue_jetty_index_t jetty_index);
