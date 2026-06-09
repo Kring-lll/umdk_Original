@@ -137,8 +137,11 @@ BuildAscendProj() {
     if [ -n "${KERNEL_COMPILE_OPTS}" ]; then
         echo "Patching kernel compile options: ${KERNEL_COMPILE_OPTS}"
         # The npu_op_* build system generates .sh scripts that call asc_opc without
-        # include paths. Patch them to add --include_path before the soc_version arg.
-        find build_out/op_kernel -name "*.sh" -path "*/bin_param/*" -exec sed -i "s|--output=\$2|--include-path=${KERNEL_COMPILE_OPTS} --output=\$2|g" {} +
+        # include paths. Patch them to add --include_path before the --output arg.
+        # Use sed with single-quote pattern to avoid escaping issues.
+        find build_out/op_kernel -name "*.sh" -path "*/bin_param/*" -print0 | while IFS= read -r -d '' f; do
+            sed -i "s|--output=\$2|--include_path=${KERNEL_COMPILE_OPTS} --output=\$2|" "$f"
+        done
     fi
 
     # 使用新的npu_op_* cmake构建系统
