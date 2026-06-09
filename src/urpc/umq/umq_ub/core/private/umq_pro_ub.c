@@ -1061,6 +1061,10 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
 int umq_ub_fill_fc_rx_buf(ub_queue_t *queue, uint64_t user_ctx)
 {
     urma_sge_t fc_sge = {.addr = user_ctx, .len = sizeof(umq_ub_fc_sge_data_t)};
+    umq_buf_t *qbuf = umq_qbuf_data_to_head((void *)(uintptr_t)user_ctx);
+    if (qbuf != NULL) {
+        fc_sge.tseg = queue->dev_ctx->tseg_list[qbuf->mempool_id];
+    }
     urma_jfr_wr_t recv_wr = {
         .src = {.sge = &fc_sge, .num_sge = 1},
         .user_ctx = user_ctx
@@ -1138,6 +1142,8 @@ static int umq_ub_fill_fc_rx_post_jfr(ub_queue_t *queue, uint32_t batch,
                                                qbuf_offset);
         fc_sges[i].addr = addr;
         fc_sges[i].len = sizeof(umq_ub_fc_sge_data_t);
+        fc_sges[i].tseg = queue->dev_ctx->tseg_list[
+            jfr_ctx->share_rq_sge.qbuf_array[qbuf_idx]->mempool_id];
         recv_wr[i].src.sge = &fc_sges[i];
         recv_wr[i].src.num_sge = 1;
         recv_wr[i].user_ctx = addr;
@@ -1157,6 +1163,10 @@ static int umq_ub_fill_fc_rx_post_jetty(ub_queue_t *queue, uint32_t batch,
                                                (i % 2) * sizeof(umq_ub_fc_sge_data_t));
         fc_sges[i].addr = addr;
         fc_sges[i].len = sizeof(umq_ub_fc_sge_data_t);
+        fc_sges[i].tseg = queue->dev_ctx->tseg_list[
+            queue->dev_ctx->fc_sge_mgr.qbuf_array[
+                queue->flow_control.recv_sge.bitmap_idx /
+                (umq_buf_size_small() / UMQ_UB_FLOW_CONTROL_SGE_BYTES_PER_SLOT)]->mempool_id];
         recv_wr[i].src.sge = &fc_sges[i];
         recv_wr[i].src.num_sge = 1;
         recv_wr[i].user_ctx = addr;
