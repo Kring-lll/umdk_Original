@@ -121,26 +121,22 @@ BuildAscendProj() {
     # Configure cmake
     cmake -S . -B build_out --preset=default -DCMAKE_BUILD_TYPE=$build_type
 
-    # Build the compile options string for kernel compilation.
-    # The npu_op_* build system's ascendc_impl_build.py generates .py files with
-    # op_compile_option = '{}' (empty). We first run the copy_kernel_srcs target
-    # to generate .py files, patch them, then run the rest of the build.
-    KERNEL_OPTS=""
+    # Patch kernel compile .make files to pass custom include paths to OPC tool.
+    # The npu_op_* build system's simple_kernel_compile doesn't read custom_compile_options.ini,
+    # so --compile-options="" is empty. We patch it here to include shmem/catlass paths.
+    KERNEL_COMPILE_OPTS=""
     if [ -n "${SHMEM_HOME_PATH}" ]; then
-        KERNEL_OPTS="-I${SHMEM_HOME_PATH}/shmem/include -I${SHMEM_HOME_PATH}/shmem/src/device"
+        KERNEL_COMPILE_OPTS="-I${SHMEM_HOME_PATH}/shmem/include -I${SHMEM_HOME_PATH}/shmem/src/device"
     fi
     if [ -n "${CATLASS_HOME_PATH}" ]; then
-        KERNEL_OPTS="${KERNEL_OPTS:+${KERNEL_OPTS} }-I${CATLASS_HOME_PATH}/include"
+        if [ -n "${KERNEL_COMPILE_OPTS}" ]; then
+            KERNEL_COMPILE_OPTS="${KERNEL_COMPILE_OPTS} "
+        fi
+        KERNEL_COMPILE_OPTS="${KERNEL_COMPILE_OPTS}-I${CATLASS_HOME_PATH}/include"
     fi
-    if [ -n "${KERNEL_OPTS}" ]; then
-        echo "Kernel compile options: ${KERNEL_OPTS}"
-        # First generate the kernel source files (.py adapters) without compiling
-        cmake --build build_out --target ascendc_kernels_copy_kernel_srcs --parallel 16
-        # Patch generated .py files to include custom compile options for OPC PRECOMPILE
-        # Replace "op_compile_option = '{}'" with actual include paths
-        find build_out/op_kernel -name "*.py" -path "*/dynamic/*" -print0 | while IFS= read -r -d '' pyf; do
-            sed -i "s|op_compile_option = '{}'|op_compile_option = {'__all__': ['${KERNEL_OPTS}']}|" "$pyf"
-        done
+    if [ -n "${KERNEL_COMPILE_OPTS}" ]; then
+        echo "Patching kernel compile options: ${KERNEL_COMPILE_OPTS}"
+        find build_out/op_kernel/CMakeFiles -name "build.make" -exec sed -i "s|--compile-options=\"\"|--compile-options=\\\"${KERNEL_COMPILE_OPTS}\\\"|g" {} +
     fi
 
     # 使用新的npu_op_* cmake构建系统
