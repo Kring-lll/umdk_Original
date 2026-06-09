@@ -13,6 +13,18 @@ exclude_list=()
 if [ -z "${SHMEM_HOME_PATH}" ]; then
     echo "Skipping shmem (SHMEM_HOME_PATH not set)"
     exclude_list+=("moe_combine_shmem" "moe_dispatch_shmem")
+    exclude_list+=(
+        "moe_combine_lowlatency_zb"
+        "moe_combine_normal_zb"
+        "moe_dispatch_lowlatency_zb"
+        "moe_dispatch_normal_zb"
+        "moe_dispatch_layout_zb"
+        "moe_notify_dispatch_zb"
+    )
+else
+    echo "Building shmem zb operators (SHMEM_HOME_PATH set)"
+    # zb dispatch_layout shares filenames with HCCL dispatch_layout; use zb version.
+    exclude_list+=("dispatch_layout")
 fi
 
 copy_ops() {
