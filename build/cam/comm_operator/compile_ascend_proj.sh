@@ -121,16 +121,26 @@ BuildAscendProj() {
     # Configure cmake
     cmake -S . -B build_out --preset=default -DCMAKE_BUILD_TYPE=$build_type
 
-    # Export CPLUS_INCLUDE_PATH for OPC tool PRECOMPILE stage.
-    # The npu_op_* build system generates .sh scripts that call asc_opc which invokes
-    # the compiler. The compiler reads CPLUS_INCLUDE_PATH for header search.
+    # Build the compile options string for kernel compilation.
+    # The npu_op_* build system's ascendc_impl_build.py generates .py files with
+    # op_compile_option = '{}' (empty). We first run the copy_kernel_srcs target
+    # to generate .py files, patch them, then run the rest of the build.
+    KERNEL_OPTS=""
     if [ -n "${SHMEM_HOME_PATH}" ]; then
-        export CPLUS_INCLUDE_PATH="${SHMEM_HOME_PATH}/shmem/include:${SHMEM_HOME_PATH}/shmem/src/device:${CPLUS_INCLUDE_PATH}"
-        echo "Exporting CPLUS_INCLUDE_PATH: shmem:${SHMEM_HOME_PATH}/shmem/include:${SHMEM_HOME_PATH}/shmem/src/device"
+        KERNEL_OPTS="-I${SHMEM_HOME_PATH}/shmem/include -I${SHMEM_HOME_PATH}/shmem/src/device"
     fi
     if [ -n "${CATLASS_HOME_PATH}" ]; then
-        export CPLUS_INCLUDE_PATH="${CATLASS_HOME_PATH}/include:${CPLUS_INCLUDE_PATH}"
-        echo "Exporting CPLUS_INCLUDE_PATH: catlass:${CATLASS_HOME_PATH}/include"
+        KERNEL_OPTS="${KERNEL_OPTS:+${KERNEL_OPTS} }-I${CATLASS_HOME_PATH}/include"
+    fi
+    if [ -n "${KERNEL_OPTS}" ]; then
+        echo "Kernel compile options: ${KERNEL_OPTS}"
+        # First generate the kernel source files (.py adapters) without compiling
+        cmake --build build_out --target ascendc_kernels_copy_kernel_srcs --parallel 16
+        # Patch generated .py files to include custom compile options for OPC PRECOMPILE
+        # Replace "op_compile_option = '{}'" with actual include paths
+        find build_out/op_kernel -name "*.py" -path "*/dynamic/*" -print0 | while IFS= read -r -d '' pyf; do
+            sed -i "s|op_compile_option = '{}'|op_compile_option = {'__all__': ['${KERNEL_OPTS}']}|" "$pyf"
+        done
     fi
 
     # 使用新的npu_op_* cmake构建系统
