@@ -77,12 +77,11 @@ function PrepareCamThirdParty() {
         return 0
     fi
 
-    branch="catlass-v1-stable"
-    echo "Clone catlass branch ${branch}..."
-    if git clone --branch ${branch} --depth 1 https://gitcode.com/cann/catlass.git ${catlass_dir}; then
+    echo "Initializing catlass submodule..."
+    if git submodule update --init --recursive src/cam/third_party/catlass; then
         return 0
     else
-        echo "Clone catlass failed! You can manually download it and place it in ${third_party}"
+        echo "Failed to initialize catlass submodule! You can manually run: git submodule update --init --recursive src/cam/third_party/catlass"
         return 1
     fi
 }
