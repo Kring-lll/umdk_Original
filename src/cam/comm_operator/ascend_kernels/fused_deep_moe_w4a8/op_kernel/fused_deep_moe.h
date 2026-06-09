@@ -1,10 +1,10 @@
-﻿/*
+/*
  * SPDX-License-Identifier: MIT
- * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+ * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: FusedDeepMoe operator kernel function header file, for a3
- * Create: 2025-07-19
+ * Create: 2026-06-09
  * Note:
- * History: 2025-07-19 create FusedDeepMoe operator kernel function header file, for a3
+ * History: 2026-06-09 create FusedDeepMoe operator kernel function header file, for a3
  */
 #ifndef FUSED_DEEP_MOE_H
 #define FUSED_DEEP_MOE_H
