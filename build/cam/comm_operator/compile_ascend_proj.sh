@@ -121,27 +121,16 @@ BuildAscendProj() {
     # Configure cmake
     cmake -S . -B build_out --preset=default -DCMAKE_BUILD_TYPE=$build_type
 
-    # Patch generated kernel compile .make files to pass custom include paths to OPC tool.
-    # The npu_op_* build system's simple_kernel_compile doesn't read custom_compile_options.ini,
-    # so --compile-options="" is empty. We patch it here to include shmem/catlass paths.
-    KERNEL_COMPILE_OPTS=""
+    # Export CPLUS_INCLUDE_PATH for OPC tool PRECOMPILE stage.
+    # The npu_op_* build system generates .sh scripts that call asc_opc which invokes
+    # the compiler. The compiler reads CPLUS_INCLUDE_PATH for header search.
     if [ -n "${SHMEM_HOME_PATH}" ]; then
-        KERNEL_COMPILE_OPTS="-I${SHMEM_HOME_PATH}/shmem/include -I${SHMEM_HOME_PATH}/shmem/src/device"
+        export CPLUS_INCLUDE_PATH="${SHMEM_HOME_PATH}/shmem/include:${SHMEM_HOME_PATH}/shmem/src/device:${CPLUS_INCLUDE_PATH}"
+        echo "Exporting CPLUS_INCLUDE_PATH: shmem:${SHMEM_HOME_PATH}/shmem/include:${SHMEM_HOME_PATH}/shmem/src/device"
     fi
     if [ -n "${CATLASS_HOME_PATH}" ]; then
-        if [ -n "${KERNEL_COMPILE_OPTS}" ]; then
-            KERNEL_COMPILE_OPTS="${KERNEL_COMPILE_OPTS} "
-        fi
-        KERNEL_COMPILE_OPTS="${KERNEL_COMPILE_OPTS}-I${CATLASS_HOME_PATH}/include"
-    fi
-    if [ -n "${KERNEL_COMPILE_OPTS}" ]; then
-        echo "Patching kernel compile options: ${KERNEL_COMPILE_OPTS}"
-        # The npu_op_* build system generates .sh scripts that call asc_opc without
-        # include paths. Patch them to add --include_path before the --output arg.
-        # Use sed with single-quote pattern to avoid escaping issues.
-        find build_out/op_kernel -name "*.sh" -path "*/bin_param/*" -print0 | while IFS= read -r -d '' f; do
-            sed -i "s|--output=\$2|--include_path=${KERNEL_COMPILE_OPTS} --output=\$2|" "$f"
-        done
+        export CPLUS_INCLUDE_PATH="${CATLASS_HOME_PATH}/include:${CPLUS_INCLUDE_PATH}"
+        echo "Exporting CPLUS_INCLUDE_PATH: catlass:${CATLASS_HOME_PATH}/include"
     fi
 
     # 使用新的npu_op_* cmake构建系统
