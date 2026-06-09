@@ -5,10 +5,10 @@
         "generator": "Unix Makefiles",
         "binaryDir": "${sourceDir}/build_out",
         "cacheVariables": {
-            "CMAKE_BUILD_TYPE": "Release",
-            "ENABLE_SOURCE_PACKAGE": "True",
-            "ENABLE_BINARY_PACKAGE": "True",
-            "vendor_name": "CAM",
+            "CMAKE_BUILD_TYPE": {"value": "Release"},
+            "ENABLE_SOURCE_PACKAGE": {"value": "True"},
+            "ENABLE_BINARY_PACKAGE": {"value": "True"},
+            "vendor_name": {"value": "CAM"},
             "ASCEND_CANN_PACKAGE_PATH": "$penv{ASCEND_CANN_PACKAGE_PATH}",
             "CMAKE_INSTALL_PREFIX": "${sourceDir}/build_out"
         }
