@@ -697,7 +697,7 @@ static ALWAYS_INLINE uint32_t umq_ub_queue_info_serialize(
 {
     urma_rjetty_t *rjetty = NULL;
     uint32_t length = 0;
-    
+
     urma_status_t status = umq_symbol_urma()->urma_get_rjetty(queue->jetty[UB_QUEUE_JETTY_IO], &rjetty, &length);
     if (status != URMA_SUCCESS) {
         UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_get_rjetty"
@@ -705,7 +705,7 @@ static ALWAYS_INLINE uint32_t umq_ub_queue_info_serialize(
             queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, (int)status);
         return 0;
     }
-    
+
     if (left_buf_size < (uint32_t)sizeof(umq_ub_bind_queue_info_t) + (uint32_t)sizeof(urpc_tlv_head_t) + length) {
         errno = UMQ_ERR_ENOMEM;
         UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, bind info size insufficient, queue info cannot "
@@ -745,7 +745,7 @@ static ALWAYS_INLINE uint32_t umq_ub_fc_info_serialize(
 {
     urma_rjetty_t *rjetty = NULL;
     uint32_t length = 0;
-    
+
     urma_status_t status = umq_symbol_urma()->urma_get_rjetty(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL],
         &rjetty, &length);
     if (status != URMA_SUCCESS) {
@@ -754,7 +754,7 @@ static ALWAYS_INLINE uint32_t umq_ub_fc_info_serialize(
             queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, (int)status);
         return 0;
     }
-    
+
     if (left_buf_size < (uint32_t)sizeof(umq_ub_bind_fc_info_t) + (uint32_t)sizeof(urpc_tlv_head_t) + length) {
         errno = UMQ_ERR_ENOMEM;
         UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, bind info size insufficient, version info cannot "
@@ -780,7 +780,7 @@ static ALWAYS_INLINE uint32_t umq_ub_fc_info_serialize(
     }
     umq_symbol_urma()->urma_put_rjetty(rjetty);
     info_tlv_head->type = UMQ_UB_BIND_INFO_TYPE_FC;
-    info_tlv_head->len = (uint64_t)sizeof(umq_ub_bind_fc_info_t);
+    info_tlv_head->len = (uint64_t)sizeof(umq_ub_bind_fc_info_t) + length;
     return urpc_tlv_get_total_len(info_tlv_head);
 }
 
