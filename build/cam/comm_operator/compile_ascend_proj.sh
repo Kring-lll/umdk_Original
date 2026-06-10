@@ -111,7 +111,7 @@ build_ascend_proj() {
         fi
     fi
 
-    # Export CATLASS_HOME_PATH for kernel compilation if CPATH contains catlass
+    # Export CATLASS_HOME_PATH for kernel compilation if CPATH contains catlass.
     if [ -z "${CATLASS_HOME_PATH}" ] && echo "${CPATH}" | grep -q "catlass"; then
         export CATLASS_HOME_PATH=$(echo "${CPATH}" | tr ':' '\n' | grep "catlass" | sed 's|/include||')
     fi
