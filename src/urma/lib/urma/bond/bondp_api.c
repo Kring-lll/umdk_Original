@@ -44,6 +44,46 @@ typedef struct bondp_import_vobj_udata_in {
     uint32_t ue_idx;
 } bondp_import_vobj_udata_in_t;
 
+
+/*
+ * Layout-compatible mirrors of kernel struct ubagg_jetty_id / ubagg_ubva /
+ * ubagg_seg_info / ubagg_seg_exchange_info / ubagg_jetty_exchange_info.
+ * Used as the raw buffer for URMA_CMD_USER_CTL GET_RJETTY / GET_SEG_CTX.
+ */
+typedef struct bondp_kern_jetty_id {
+    urma_eid_t eid;
+    uint32_t uasid;
+    uint32_t id;
+} bondp_kern_jetty_id_t;
+
+typedef struct bondp_kern_ubva {
+    urma_eid_t eid;
+    uint32_t uasid;
+    uint64_t va;
+} __attribute__((packed)) bondp_kern_ubva_t;
+
+typedef struct bondp_kern_seg_info {
+    bondp_kern_ubva_t ubva;
+    uint64_t len;
+    uint32_t attr;
+    uint32_t token_id;
+} bondp_kern_seg_info_t;
+
+typedef struct bondp_kern_seg_exchange_info {
+    bondp_kern_seg_info_t base;
+    bondp_kern_seg_info_t slaves[URMA_UBAGG_DEV_MAX_NUM];
+    int dev_num;
+} bondp_kern_seg_exchange_info_t;
+
+typedef struct bondp_kern_jetty_exchange_info {
+    bondp_kern_jetty_id_t slaves[URMA_UBAGG_DEV_MAX_NUM];
+    bool is_multipath;
+    uint8_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t enabled_count;
+    bool is_health_check_enable;
+    bondp_kern_seg_exchange_info_t health_check_seg;
+} bondp_kern_jetty_exchange_info_t;
+
 static int bondp_init_connection_table(bondp_comp_t *bdp_comp)
 {
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
@@ -1635,6 +1675,187 @@ static int bondp_toggle_msn(urma_context_t *ctx, bool enable)
     return 0;
 }
 
+static void bondp_convert_kern_jetty_id(const bondp_kern_jetty_id_t *src, urma_jetty_id_t *dst)
+{
+    dst->eid = src->eid;
+    dst->uasid = src->uasid;
+    dst->id = src->id;
+}
+
+static void bondp_convert_kern_seg_info(const bondp_kern_seg_info_t *src, urma_seg_t *dst)
+{
+    dst->ubva.eid = src->ubva.eid;
+    dst->ubva.uasid = src->ubva.uasid;
+    dst->ubva.va = src->ubva.va;
+    dst->len = src->len;
+    dst->attr.value = src->attr;
+    dst->token_id = src->token_id;
+    dst->ext.flag.value = 0;
+    dst->ext.length = 0;
+}
+
+static void bondp_convert_kern_jetty_exchange_info(const bondp_kern_jetty_exchange_info_t *src,
+                                                   urma_bond_jetty_ext_t *dst)
+{
+    dst->version = 0;
+    dst->mask = 0;
+    for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i)
+        bondp_convert_kern_jetty_id(&src->slaves[i], &dst->slave_id[i]);
+    dst->is_multipath = src->is_multipath;
+    (void)memcpy(dst->enable_indices, src->enabled_indices, sizeof(dst->enable_indices));
+    dst->enable_count = src->enabled_count;
+    dst->is_health_check_enable = src->is_health_check_enable;
+    bondp_convert_kern_seg_info(&src->health_check_seg.base, &dst->health_check_seg.base);
+    for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i)
+        bondp_convert_kern_seg_info(&src->health_check_seg.slaves[i],
+                                    &dst->health_check_seg.slaves[i]);
+    dst->health_check_seg.dev_num = src->health_check_seg.dev_num;
+}
+
+static void bondp_convert_kern_seg_exchange_info_to_seg_ext(const bondp_kern_seg_exchange_info_t *src,
+                                                            urma_bond_seg_ext_t *dst)
+{
+    dst->version = 0;
+    dst->mask = 0;
+    for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i)
+        bondp_convert_kern_seg_info(&src->slaves[i], &dst->peer_p_seg[i]);
+}
+
+static int bondp_user_ctl_get_rjetty(urma_context_t *ctx, urma_user_ctl_in_t *in,
+                                     urma_user_ctl_out_t *out)
+{
+#define GET_RJETTY 9
+    if (in == NULL || out == NULL || in->addr == 0 ||
+        in->len < sizeof(urma_jetty_id_t) || out->addr == 0 ||
+        out->len < sizeof(urma_rjetty_t *)) {
+        URMA_LOG_ERR("Invalid parameter for get rjetty.\n");
+        return -EINVAL;
+    }
+
+    urma_rjetty_t *new_rjetty = (urma_rjetty_t *)calloc(1, sizeof(urma_rjetty_t) +
+                                                        sizeof(urma_bond_jetty_ext_t));
+    if (new_rjetty == NULL) {
+        URMA_LOG_ERR("Failed to alloc rjetty.\n");
+        return -ENOMEM;
+    }
+
+    size_t kern_out_size = sizeof(bondp_kern_jetty_exchange_info_t) +
+                           sizeof(bool) * URMA_UBAGG_DEV_MAX_NUM * URMA_UBAGG_DEV_MAX_NUM;
+    bondp_kern_jetty_exchange_info_t *kern_out =
+        (bondp_kern_jetty_exchange_info_t *)calloc(1, kern_out_size);
+    if (kern_out == NULL) {
+        URMA_LOG_ERR("Failed to alloc kern jetty out.\n");
+        free(new_rjetty);
+        return -ENOMEM;
+    }
+
+    /* Kernel expects struct ubcore_jetty_id (eid + id), while userspace
+     * urma_jetty_id_t has an extra uasid field in between. Build a
+     * layout-compatible temporary input buffer. */
+    urma_jetty_id_t *src_id = (urma_jetty_id_t *)(uintptr_t)in->addr;
+    struct {
+        urma_eid_t eid;
+        uint32_t id;
+    } tmp_id = {
+        .eid = src_id->eid,
+        .id = src_id->id,
+    };
+
+    urma_user_ctl_in_t ioctl_in = {
+        .addr = (uint64_t)(uintptr_t)&tmp_id,
+        .len = sizeof(tmp_id),
+        .opcode = GET_RJETTY,
+    };
+    urma_user_ctl_out_t ioctl_out = {
+        .addr = (uint64_t)(uintptr_t)kern_out,
+        .len = kern_out_size,
+    };
+    urma_udrv_t udrv = {0};
+
+    int ret = urma_cmd_user_ctl(ctx, &ioctl_in, &ioctl_out, &udrv);
+    if (ret != 0) {
+        free(kern_out);
+        free(new_rjetty);
+        return ret;
+    }
+
+    urma_bond_jetty_ext_t *ext = (urma_bond_jetty_ext_t *)new_rjetty->ext.buf;
+    bondp_convert_kern_jetty_exchange_info(kern_out, ext);
+    (void)memcpy(ext->connected,
+                 (char *)kern_out + sizeof(bondp_kern_jetty_exchange_info_t),
+                 sizeof(ext->connected));
+
+    free(kern_out);
+
+    new_rjetty->ext.flag.bs.enable = true;
+    new_rjetty->ext.length = sizeof(urma_bond_jetty_ext_t);
+
+    urma_rjetty_t **out_rjetty = (urma_rjetty_t **)(uintptr_t)out->addr;
+    *out_rjetty = new_rjetty;
+    return 0;
+}
+
+static int bondp_user_ctl_get_seg_ctx(urma_context_t *ctx, urma_user_ctl_in_t *in,
+                                      urma_user_ctl_out_t *out)
+{
+#define GET_SEG_CTX 10
+    if (in == NULL || out == NULL || in->addr == 0 || in->len < sizeof(urma_seg_t) ||
+        out->addr == 0 || out->len < sizeof(urma_seg_t *)) {
+        URMA_LOG_ERR("Invalid parameter for get seg ctx.\n");
+        return -EINVAL;
+    }
+
+    urma_seg_t *new_seg = (urma_seg_t *)calloc(1, sizeof(urma_seg_t) +
+                                               sizeof(urma_bond_seg_ext_t));
+    if (new_seg == NULL) {
+        URMA_LOG_ERR("Failed to alloc seg.\n");
+        return -ENOMEM;
+    }
+
+    size_t kern_out_size = sizeof(bondp_kern_seg_exchange_info_t) +
+                           sizeof(bool) * URMA_UBAGG_DEV_MAX_NUM * URMA_UBAGG_DEV_MAX_NUM;
+    bondp_kern_seg_exchange_info_t *kern_out =
+        (bondp_kern_seg_exchange_info_t *)calloc(1, kern_out_size);
+    if (kern_out == NULL) {
+        URMA_LOG_ERR("Failed to alloc kern seg out.\n");
+        free(new_seg);
+        return -ENOMEM;
+    }
+
+    urma_user_ctl_in_t ioctl_in = {
+        .addr = in->addr,
+        .len = in->len,
+        .opcode = GET_SEG_CTX,
+    };
+    urma_user_ctl_out_t ioctl_out = {
+        .addr = (uint64_t)(uintptr_t)kern_out,
+        .len = kern_out_size,
+    };
+    urma_udrv_t udrv = {0};
+
+    int ret = urma_cmd_user_ctl(ctx, &ioctl_in, &ioctl_out, &udrv);
+    if (ret != 0) {
+        free(kern_out);
+        free(new_seg);
+        return ret;
+    }
+
+    urma_bond_seg_ext_t *ext = (urma_bond_seg_ext_t *)new_seg->ext.buf;
+    bondp_convert_kern_seg_exchange_info_to_seg_ext(kern_out, ext);
+    (void)memcpy(ext->connected,
+                 (char *)kern_out + sizeof(bondp_kern_seg_exchange_info_t),
+                 sizeof(ext->connected));
+
+    free(kern_out);
+
+    new_seg->ext.flag.bs.enable = true;
+    new_seg->ext.length = sizeof(urma_bond_seg_ext_t);
+
+    urma_seg_t **out_seg = (urma_seg_t **)(uintptr_t)out->addr;
+    *out_seg = new_seg;
+    return 0;
+}
+
 int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_out_t *out)
 {
     if (in == NULL) {
@@ -1655,6 +1876,10 @@ int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_ou
             return bondp_user_ctl_get_jfce_fd_list(ctx, in, out);
         case BONDP_USER_CTL_DISABLE_MSN:
             return bondp_toggle_msn(ctx, false);
+        case BONDP_USER_CTL_OPCODE_GET_RJETTY:
+            return bondp_user_ctl_get_rjetty(ctx, in, out);
+        case BONDP_USER_CTL_OPCODE_GET_SEG_CTX:
+            return bondp_user_ctl_get_seg_ctx(ctx, in, out);
         default: {
             URMA_LOG_ERR("Unsupported opcode, opcode=%d\n", in->opcode);
             return -EINVAL;
@@ -1757,6 +1982,17 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
     return ret;
 }
 
+static void bondp_fill_bond_id_info_from_ext(const urma_bond_jetty_ext_t *ext, urma_bond_id_info_out_t *info)
+{
+    (void)memcpy(info->slave_id, ext->slave_id, sizeof(info->slave_id));
+    info->is_multipath = ext->is_multipath;
+    (void)memcpy(info->enabled_indices, ext->enable_indices, sizeof(info->enabled_indices));
+    info->enabled_count = ext->enable_count;
+    info->is_health_check_enable = ext->is_health_check_enable;
+    (void)memcpy(&info->health_check_seg, &ext->health_check_seg, sizeof(info->health_check_seg));
+    (void)memcpy(info->connected, ext->connected, sizeof(info->connected));
+}
+
 urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjetty, urma_token_t *token_value)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
@@ -1780,10 +2016,16 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
 
     urma_bond_id_info_out_t rvjetty_info = {0};
-    if (bondp_import_vjetty(ctx, rjetty, token_value, bdp_tjetty, &rvjetty_info) != 0) {
-        URMA_LOG_ERR("Failed to import vjetty, [" EID_FMT "]=%u\n",
-                     EID_ARGS(rjetty->jetty_id.eid), rjetty->jetty_id.id);
-        goto FREE_TJETTY;
+    if (rjetty->ext.flag.bs.enable) {
+        const urma_bond_jetty_ext_t *bond_ext =
+            (const urma_bond_jetty_ext_t *)rjetty->ext.buf;
+        bondp_fill_bond_id_info_from_ext(bond_ext, &rvjetty_info);
+    } else {
+        if (bondp_import_vjetty(ctx, rjetty, token_value, bdp_tjetty, &rvjetty_info) != 0) {
+            URMA_LOG_ERR("Failed to import vjetty, [" EID_FMT "]=%u\n",
+                         EID_ARGS(rjetty->jetty_id.eid), rjetty->jetty_id.id);
+            goto FREE_TJETTY;
+        }
     }
 
     bondp_comp_t fake_jetty = {0};
