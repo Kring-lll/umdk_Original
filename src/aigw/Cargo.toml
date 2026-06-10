@@ -1,0 +1,10 @@
+[package]
+name = "huawei_aigw_tokenizers"
+version = "1.0.0"
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+tokenizers = {version = "0.21.2" }
