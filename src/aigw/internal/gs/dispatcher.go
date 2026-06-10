@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: dispatching schedule request.
  * Create: 2025-05-13
@@ -16,12 +15,14 @@ import (
 	"huawei.com/aigw/pkg/log"
 )
 
-type dispatchType int
+// DispatchType is the type for dispatching
+type DispatchType int
 
+// definition for DispatchType
 const (
-	dispatchRequest dispatchType = iota
-	dispatchMigration
-	dispatchKvcCopy
+	DispatchRequest DispatchType = iota
+	DispatchMigration
+	DispatchKvcCopy
 )
 
 type globalScheduleDispatcher struct {
@@ -79,19 +80,22 @@ func (d *globalScheduleDispatcher) dispatchLoop() {
 	}
 }
 
-func (d *globalScheduleDispatcher) executeDispatching(result *scheduleResult, response chan<- interface{}) {
+func (d *globalScheduleDispatcher) executeDispatching(result *ScheduleResult, response chan<- interface{}) {
 	if result == nil {
 		log.Debug().Msgf("schedule result is empty")
 		response <- &SuggestionResultMsg{
 			PrefillUrl: "",
 			DecodeUrl:  "",
+			DpRank:     nil,
 		}
 		return
 	}
 
-	log.Debug().Msgf("send result to MSG, result: prefillUrl %v, decodeUrl %v", result.prefillUrl, result.decodeUrl)
+	log.Debug().Msgf("send result to MSG, result: prefillUrl %v, decodeUrl %v, dpRank %v",
+		result.PrefillUrl, result.DecodeUrl, result.DpRank)
 	response <- &SuggestionResultMsg{
-		PrefillUrl: result.prefillUrl,
-		DecodeUrl:  result.decodeUrl,
+		PrefillUrl: result.PrefillUrl,
+		DecodeUrl:  result.DecodeUrl,
+		DpRank:     result.DpRank,
 	}
 }
