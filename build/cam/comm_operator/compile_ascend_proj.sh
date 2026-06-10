@@ -11,6 +11,18 @@ exclude_list=("fused_deep_moe_w4a8")
 if [ -z "${SHMEM_HOME_PATH}" ]; then
     echo "Skipping shmem (SHMEM_HOME_PATH not set)"
     exclude_list+=("fused_deep_moe")
+    exclude_list+=(
+        "moe_combine_lowlatency_zb"
+        "moe_combine_normal_zb"
+        "moe_dispatch_lowlatency_zb"
+        "moe_dispatch_normal_zb"
+        "moe_dispatch_layout_zb"
+        "moe_notify_dispatch_zb"
+    )
+else
+    echo "Building shmem zb operators (SHMEM_HOME_PATH set)"
+    # zb dispatch_layout shares filenames with HCCL dispatch_layout; use zb version.
+    exclude_list+=("dispatch_layout")
 fi
 
 CopyOps() {
@@ -69,8 +81,10 @@ BuildAscendProj() {
     if [ -d "./${proj_name}" ]; then
         rm -rf ${proj_name}
     fi
-    echo "msopgen gen -i ./ascend_kernels/AddCustom.json -c ai_core-${soc_version} -f pytorch -lan cpp -out ${proj_name}"
-    msopgen gen -i ./ascend_kernels/AddCustom.json -c ai_core-${soc_version} -f pytorch -lan cpp -out ${proj_name}
+    echo "msopgen gen -i ./ascend_kernels/AddCustom.json -c ai_core-${soc_version}" \
+         " -f pytorch -lan cpp -out ${proj_name}"
+    msopgen gen -i ./ascend_kernels/AddCustom.json -c ai_core-${soc_version} \
+        -f pytorch -lan cpp -out ${proj_name}
     rm -rf ./${proj_name}/op_host/add_custom*
     rm  -rf ./${proj_name}/op_kernel/add_custom*
     CopyOps "./ascend_kernels" "./${proj_name}"
@@ -81,6 +95,7 @@ BuildAscendProj() {
         cp -rf ./ascend_kernels/pregen/cmake ./${proj_name}
     else
         rm -f ./${proj_name}/pregen/build_out/autogen/*fused_deep_moe*
+        rm -f ./${proj_name}/pregen/build_out/autogen/*shmem*
     fi
 
     source $ASCEND_HOME_PATH/bin/setenv.bash
