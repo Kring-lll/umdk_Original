@@ -309,6 +309,8 @@ typedef struct umq_ub_bind_queue_info {
     uint32_t tx_depth;
     uint32_t rx_buf_size;
     umq_state_t state;
+    uint32_t rjetty_size;
+    urma_rjetty_t rjetty[0];
 } umq_ub_bind_queue_info_t;
 
 typedef struct umq_ub_bind_fc_info {
@@ -316,6 +318,8 @@ typedef struct umq_ub_bind_fc_info {
     urma_token_t token;
     uint64_t rsvd1;
     uint32_t rsvd2;
+    uint32_t rjetty_size;
+    urma_rjetty_t rjetty[0];
 } umq_ub_bind_fc_info_t;
 
 typedef struct umq_ub_bind_info {

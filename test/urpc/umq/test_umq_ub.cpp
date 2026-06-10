@@ -220,6 +220,98 @@ TEST_F(UmqUBTest, test_ub_init_failure)
     ASSERT_NE(ret, 0);
 }
 
+TEST_F(UmqUBTest, test_rjetty_variable_length_serialize_deserialize)
+{
+    ub_queue_t queue;
+    memset(&queue, 0, sizeof(queue));
+    
+    static urma_jetty_t io_jetty = {0};
+    static urma_jetty_t fc_jetty = {0};
+    static urma_jfr_t jfr = {0};
+    static urma_jfr_cfg_t jfr_cfg = {0};
+    
+    io_jetty.jetty_id.id = 100;
+    io_jetty.jetty_cfg.trans_mode = URMA_TM_UB;
+    io_jetty.jetty_cfg.shared.policy.grp_policy = URMA_JETTY_GRP_POLICY_FAIR;
+    io_jetty.tp_type = URMA_RTP;
+    io_jetty.jetty_cfg.shared.jfr = &jfr;
+    jfr.jfr_cfg.token_value.token = 0x12345678;
+    
+    fc_jetty.jetty_id.id = 101;
+    fc_jetty.jetty_cfg.trans_mode = URMA_TM_UB;
+    fc_jetty.jetty_cfg.shared.policy.grp_policy = URMA_JETTY_GRP_POLICY_FAIR;
+    fc_jetty.tp_type = URMA_RTP;
+    fc_jetty.jetty_cfg.shared.jfr = &jfr;
+    
+    queue.jetty[UB_QUEUE_JETTY_IO] = &io_jetty;
+    queue.jetty[UB_QUEUE_JETTY_FLOW_CONTROL] = &fc_jetty;
+    queue.rx_depth = 256;
+    queue.tx_depth = 256;
+    queue.rx_buf_size = 4096;
+    queue.state = QUEUE_STATE_READY;
+    queue.flow_control.enabled = true;
+    
+    umq_ub_ctx_t dev_ctx;
+    memset(&dev_ctx, 0, sizeof(dev_ctx));
+    queue.dev_ctx = &dev_ctx;
+    
+    uint8_t bind_info_buf[2048];
+    memset(bind_info_buf, 0, sizeof(bind_info_buf));
+    
+    uint32_t serialize_size = umq_ub_bind_info_serialize(&queue, bind_info_buf, sizeof(bind_info_buf));
+    ASSERT_GT(serialize_size, 0);
+    
+    UMQ_VLOG_INFO(VLOG_UMQ, "Serialize bind info success, size %u\n", serialize_size);
+    
+    umq_ub_bind_info_t bind_info;
+    memset(&bind_info, 0, sizeof(bind_info));
+    int ret = umq_ub_bind_info_deserialize(bind_info_buf, serialize_size, &bind_info);
+    ASSERT_EQ(ret, 0);
+    
+    ASSERT_NE(bind_info.queue_info, nullptr);
+    ASSERT_NE(bind_info.fc_info, nullptr);
+    
+    ASSERT_EQ(bind_info.queue_info->jetty_id.id, 100);
+    ASSERT_EQ(bind_info.queue_info->tp_type, URMA_RTP);
+    ASSERT_EQ(bind_info.queue_info->tp_mode, io_jetty.jetty_cfg.trans_mode);
+    
+    uint32_t expected_base_size = sizeof(urma_rjetty_t);
+    uint32_t expected_extra_size = 32;
+    uint32_t expected_total_size = expected_base_size + expected_extra_size;
+    
+    ASSERT_EQ(bind_info.queue_info->rjetty_size, expected_total_size);
+    ASSERT_EQ(bind_info.fc_info->rjetty_size, expected_total_size);
+    
+    urma_rjetty_t *queue_rjetty = (urma_rjetty_t *)bind_info.queue_info->rjetty;
+    ASSERT_EQ(queue_rjetty->jetty_id.id, 100);
+    ASSERT_EQ(queue_rjetty->trans_mode, URMA_TM_UB);
+    ASSERT_EQ(queue_rjetty->type, URMA_TARGET_JETTY);
+    ASSERT_EQ(queue_rjetty->tp_type, URMA_RTP);
+    
+    char *extra_data = (char *)bind_info.queue_info->rjetty + expected_base_size;
+    for (uint32_t i = 0; i < expected_extra_size; i++) {
+        char expected_value = (char)(i + io_jetty.jetty_id.id);
+        ASSERT_EQ(extra_data[i], expected_value);
+    }
+    
+    urma_rjetty_t *fc_rjetty = (urma_rjetty_t *)bind_info.fc_info->rjetty;
+    ASSERT_EQ(fc_rjetty->jetty_id.id, 101);
+    ASSERT_EQ(fc_rjetty->trans_mode, URMA_TM_UB);
+    
+    char *fc_extra_data = (char *)bind_info.fc_info->rjetty + expected_base_size;
+    for (uint32_t i = 0; i < expected_extra_size; i++) {
+        char expected_value = (char)(i + fc_jetty.jetty_id.id);
+        ASSERT_EQ(fc_extra_data[i], expected_value);
+    }
+    
+    UMQ_VLOG_INFO(VLOG_UMQ, "Rjetty variable length test passed!\n");
+    UMQ_VLOG_INFO(VLOG_UMQ, "  - Base size: %u\n", expected_base_size);
+    UMQ_VLOG_INFO(VLOG_UMQ, "  - Extra size: %u\n", expected_extra_size);
+    UMQ_VLOG_INFO(VLOG_UMQ, "  - Total size: %u\n", expected_total_size);
+    UMQ_VLOG_INFO(VLOG_UMQ, "  - Queue rjetty verified successfully\n");
+    UMQ_VLOG_INFO(VLOG_UMQ, "  - FC rjetty verified successfully\n");
+}
+
 TEST_F(UmqUBTest, test_umq_ub_bind_info_check)
 {
     ub_queue_t queue;
