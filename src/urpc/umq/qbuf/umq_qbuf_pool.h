@@ -52,6 +52,7 @@ typedef struct qbuf_pool_cfg {
     uint32_t headroom_size;     // reserve head room size
     umq_buf_mode_t mode;
     uint64_t umq_buf_pool_max_size; // default 2G
+    uint64_t reserved_pool_size;    // memory reserved by other registered buf pools, e.g. tiny pool
 
     // gloab expansion pool
     uint32_t expansion_pool_id_min;
@@ -107,6 +108,8 @@ void umq_qbuf_pool_uninit(void);
  */
 int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *option, umq_buf_list_t *list);
 
+int umq_qbuf_escape_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *option, umq_buf_list_t *list);
+
 /*
  * release memory to qbuf pool.
  * if memory fragments count in thread local pool reach threshold after release,
@@ -125,6 +128,8 @@ int umq_qbuf_headroom_reset(umq_buf_t *qbuf, uint16_t headroom_size);
  * if data is not in qbuf_pool, NULL will be returned
  */
 umq_buf_t *umq_qbuf_data_to_head(void *data);
+
+umq_buf_t *umq_qbuf_expansion_data_to_head(void *data);
 
 uint64_t umq_buf_to_id_with_header(umq_buf_list_t *header, char *buf, bool shm, bool *with_data);
 
@@ -246,6 +251,11 @@ static ALWAYS_INLINE uint32_t release_batch(umq_buf_list_t *input, umq_buf_list_
     // set output
     QBUF_LIST_NEXT(last_node) = output_head;
     return cnt;
+}
+
+static ALWAYS_INLINE uint32_t qbuf_tls_round_batch(uint32_t needed, uint32_t batch_count)
+{
+    return (needed + batch_count - 1) / batch_count * batch_count;
 }
 
 // fetch list nodes from to global to local cache
@@ -420,6 +430,66 @@ static ALWAYS_INLINE void return_to_global(global_block_pool_t *global_pool, loc
     (void)pthread_spin_unlock(&global_pool->global_mutex);
 }
 
+static ALWAYS_INLINE uint64_t qbuf_tls_capacity_grow(uint64_t local_cap, volatile uint64_t *total_cap,
+    uint64_t total_cap_limit, uint64_t local_cap_limit, uint64_t requested_grow)
+{
+    uint64_t grow = requested_grow;
+    if (local_cap + grow > local_cap_limit) {
+        grow = local_cap >= local_cap_limit ? 0 : local_cap_limit - local_cap;
+    }
+    uint64_t current_total_cap = __atomic_load_n(total_cap, __ATOMIC_RELAXED);
+    if (current_total_cap + grow > total_cap_limit) {
+        grow = current_total_cap >= total_cap_limit ? 0 : total_cap_limit - current_total_cap;
+    }
+    return grow;
+}
+
+static ALWAYS_INLINE void qbuf_tls_capacity_add(uint64_t *local_cap, volatile uint64_t *total_cap, uint64_t grow)
+{
+    if (grow == 0) {
+        return;
+    }
+    *local_cap += grow;
+    __atomic_fetch_add(total_cap, grow, __ATOMIC_RELAXED);
+}
+
+static ALWAYS_INLINE void qbuf_tls_capacity_sub(uint64_t *local_cap, volatile uint64_t *total_cap, uint64_t shrink)
+{
+    if (shrink == 0) {
+        return;
+    }
+    if (shrink > *local_cap) {
+        shrink = *local_cap;
+    }
+    *local_cap -= shrink;
+    __atomic_fetch_sub(total_cap, shrink, __ATOMIC_RELAXED);
+}
+
+static ALWAYS_INLINE void qbuf_tls_capacity_self_shrink(global_block_pool_t *global_pool,
+    local_block_pool_t *local_pool, local_qbuf_pool_stats_t *stats, bool with_data, volatile uint64_t *total_cap,
+    uint32_t shrink_ratio, uint32_t shrink_threshold)
+{
+    uint64_t remaining = with_data ? local_pool->buf_cnt_with_data : local_pool->buf_cnt_without_data;
+    uint64_t *cap_ptr = with_data ? &local_pool->capacity_with_data : &local_pool->capacity_without_data;
+    uint64_t shrink = remaining / shrink_ratio;
+    if (shrink < shrink_threshold || *cap_ptr == 0) {
+        return;
+    }
+
+    qbuf_tls_capacity_sub(cap_ptr, total_cap, shrink);
+    if (*cap_ptr >= remaining) {
+        return;
+    }
+
+    uint32_t threshold = (uint32_t)*cap_ptr;
+    return_to_global(global_pool, local_pool, stats, with_data, threshold);
+    if (with_data) {
+        stats->tls_return_cnt_with_data++;
+    } else {
+        stats->tls_return_cnt_without_data++;
+    }
+}
+
 // flush polled buf to global
 static ALWAYS_INLINE void return_qbuf_to_global(global_block_pool_t *global_pool, umq_buf_t *buf, bool with_data)
 {
@@ -512,19 +582,19 @@ static ALWAYS_INLINE void umq_qbuf_alloc_nodata(local_block_pool_t *local_pool, 
 }
 
 static ALWAYS_INLINE void umq_qbuf_alloc_data_with_split(local_block_pool_t *local_pool, uint32_t request_size,
-    qbuf_alloc_param_t *param, umq_buf_list_t *list)
+    qbuf_alloc_param_t *param, umq_buf_list_t *list, uint32_t block_size)
 {
     uint32_t cnt = 0;
     umq_buf_t *cur_node;
     uint32_t headroom_size_temp = param->headroom_size;
     uint32_t total_data_size = request_size;
     uint32_t remaining_size = request_size;
-    uint32_t max_data_capacity = umq_buf_size_small() - headroom_size_temp;
+    uint32_t max_data_capacity = block_size - headroom_size_temp;
     bool first_fragment = true;
 
     QBUF_LIST_FOR_EACH(cur_node, &local_pool->head_with_data) {
-        cur_node->buf_data = (char *)floor_to_align(cur_node->buf_data, umq_buf_size_small()) + headroom_size_temp;
-        cur_node->buf_size = umq_buf_size_small() + (uint32_t)sizeof(umq_buf_t);
+        cur_node->buf_data = (char *)floor_to_align(cur_node->buf_data, block_size) + headroom_size_temp;
+        cur_node->buf_size = block_size + (uint32_t)sizeof(umq_buf_t);
         cur_node->headroom_size = headroom_size_temp;
         cur_node->total_data_size = total_data_size;
         cur_node->first_fragment = first_fragment;
@@ -541,12 +611,12 @@ static ALWAYS_INLINE void umq_qbuf_alloc_data_with_split(local_block_pool_t *loc
             total_data_size = request_size;
             remaining_size = request_size;
             first_fragment = true;
-            max_data_capacity = umq_buf_size_small() - param->headroom_size;
+            max_data_capacity = block_size - param->headroom_size;
         } else {
             headroom_size_temp = 0;
             total_data_size = 0;
             first_fragment = false;
-            max_data_capacity = umq_buf_size_small();
+            max_data_capacity = block_size;
         }
         if (++cnt == param->actual_buf_count) {
             break;
@@ -564,20 +634,20 @@ static ALWAYS_INLINE void umq_qbuf_alloc_data_with_split(local_block_pool_t *loc
 }
 
 static ALWAYS_INLINE void umq_qbuf_alloc_data_with_combine(local_block_pool_t *local_pool, uint32_t request_size,
-    qbuf_alloc_param_t *param, umq_buf_list_t *list)
+    qbuf_alloc_param_t *param, umq_buf_list_t *list, uint32_t block_size)
 {
     uint32_t cnt = 0;
     umq_buf_t *cur_node;
     uint32_t headroom_size_temp = param->headroom_size;
     uint32_t total_data_size = request_size;
     uint32_t remaining_size = request_size;
-    uint32_t max_data_size = umq_buf_size_small() - sizeof(umq_buf_t);
+    uint32_t max_data_size = block_size - sizeof(umq_buf_t);
     uint32_t max_data_capacity = max_data_size - headroom_size_temp;
     bool first_fragment = true;
 
     QBUF_LIST_FOR_EACH(cur_node, &local_pool->head_with_data) {
         cur_node->buf_data = cur_node->data + headroom_size_temp;
-        cur_node->buf_size = umq_buf_size_small();
+        cur_node->buf_size = block_size;
         cur_node->headroom_size = headroom_size_temp;
         cur_node->total_data_size = total_data_size;
         cur_node->first_fragment = first_fragment;
