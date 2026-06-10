@@ -15,33 +15,33 @@
 static urma_status_t stub_urma_get_rjetty(urma_jetty_t *jetty, urma_rjetty_t **rjetty, uint32_t *length)
 {
     if (jetty == NULL || rjetty == NULL || length == NULL) {
-        return URMA_ERRNO_INVAL;
+        return URMA_EINVAL;
     }
-    
+
     uint32_t extra_data_size = 32;
     uint32_t total_size = sizeof(urma_rjetty_t) + extra_data_size;
-    
+
     urma_rjetty_t *stub_rjetty = (urma_rjetty_t *)malloc(total_size);
     if (stub_rjetty == NULL) {
-        return URMA_ERRNO_NOMEM;
+        return URMA_ENOMEM;
     }
-    
+
     memset(stub_rjetty, 0, total_size);
     stub_rjetty->jetty_id = jetty->jetty_id;
-    stub_rjetty->trans_mode = jetty->jetty_cfg.trans_mode;
-    stub_rjetty->policy = jetty->jetty_cfg.shared.policy;
-    stub_rjetty->type = URMA_TARGET_JETTY;
+    stub_rjetty->trans_mode = URMA_TM_RM;
+    stub_rjetty->policy = URMA_JETTY_GRP_POLICY_RR;
+    stub_rjetty->type = URMA_JETTY;
     stub_rjetty->flag.value = 0;
-    stub_rjetty->tp_type = jetty->tp_type;
-    
+    stub_rjetty->tp_type = URMA_CTP;
+
     char *extra_data = (char *)stub_rjetty + sizeof(urma_rjetty_t);
     for (uint32_t i = 0; i < extra_data_size; i++) {
         extra_data[i] = (char)(i + jetty->jetty_id.id);
     }
-    
+
     *rjetty = stub_rjetty;
     *length = total_size;
-    
+
     UMQ_VLOG_INFO(VLOG_UMQ, "stub: get rjetty for jetty_id %u, base_size %u, extra_size %u, total_length %u\n",
         jetty->jetty_id.id, (uint32_t)sizeof(urma_rjetty_t), extra_data_size, *length);
     return URMA_SUCCESS;
