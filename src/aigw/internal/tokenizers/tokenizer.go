@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: define the interfaces of tokenizer
  * Create: 2025-06-14
@@ -18,6 +17,9 @@ type tokenizerType int
 const (
 	huggingFaceTokenizerType tokenizerType = iota
 )
+
+// DefaultTokenizationRatio is the default tokenizationRatio, use to convert rune length to token length
+const DefaultTokenizationRatio = 0.35
 
 // todo: define model name as const variable
 var modelToTokenizeTypeMap = map[string]tokenizerType{

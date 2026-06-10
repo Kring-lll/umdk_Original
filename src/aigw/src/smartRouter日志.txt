@@ -1,0 +1,673 @@
+2026-04-23T19:43:37.061+08:00  INFO 12 --- [main] c.h.smartrouter.SmartRouterApplication   : Starting SmartRouterApplication using Java 21.0.8 with PID 12 (/opt/huawei/app/service/libs/smart-router-1.0.1.101.20260423192555.jar started by mep in /home/mep)
+2026-04-23T19:43:37.063+08:00 DEBUG 12 --- [main] c.h.smartrouter.SmartRouterApplication   : Running with Spring Boot v3.5.12, Spring v6.2.17
+2026-04-23T19:43:37.063+08:00  INFO 12 --- [main] c.h.smartrouter.SmartRouterApplication   : No active profile set, falling back to 1 default profile: "default"
+2026-04-23T19:43:37.863+08:00  INFO 12 --- [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 9090 (http)
+2026-04-23T19:43:37.876+08:00  INFO 12 --- [main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-04-23T19:43:37.876+08:00  INFO 12 --- [main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.52]
+2026-04-23T19:43:37.925+08:00  INFO 12 --- [main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-04-23T19:43:37.926+08:00  INFO 12 --- [main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 822 ms
+2026-04-23T19:43:38.001+08:00  INFO 12 --- [main] c.h.smartrouter.jni.AigwNativeLoader     : Successfully loaded aigw from system library path
+2026-04-23T19:43:38.003+08:00  INFO 12 --- [main] c.h.smartrouter.jni.AigwNativeLoader     : Successfully loaded aigw_jni from system library path
+2026-04-23T19:43:38.003+08:00  INFO 12 --- [main] c.h.smartrouter.jni.AigwNativeLoader     : Successfully loaded aigw from system library path
+2026-04-23T19:43:38.003+08:00  INFO 12 --- [main] c.h.smartrouter.jni.AigwNativeLoader     : Successfully loaded aigw_jni from system library path
+2026-04-23T19:43:38.015+08:00 ERROR 12 --- [main] c.h.a.base.common.config.Configuration   : config file <application.properties> not exist.
+2026-04-23T19:43:38.244+08:00  INFO 12 --- [main] c.huawei.smartrouter.dcs.DcsCacheDriver  : DcsCacheDriver instance set for static callback access
+2026-04-23T19:43:38.245+08:00  INFO 12 --- [main] c.h.smartrouter.manager.AigwManager      : Initializing AIGW...
+2026-04-23T19:43:38.245+08:00  INFO 12 --- [main] c.h.smartrouter.manager.AigwManager      : Initializing STS...
+2026-04-23T19:43:38.250+08:00  WARN 12 --- [main] c.h.w.sts.sdk.config.StsProperties       : sts properties sts.properties did not exist
+2026-04-23T19:43:38.258+08:00  INFO 12 --- [main] c.h.w.sts.keyprovider.StsKeyApi          : start to init sts with initType = DEFAULT
+2026-04-23T19:43:38.258+08:00  INFO 12 --- [main] c.h.w.sts.keyprovider.StsKeyApi          : init alarm with default logger alarm.
+2026-04-23T19:43:38.259+08:00  INFO 12 --- [main] c.h.w.sts.keyprovider.StsKeyApi          : loading sts keys.
+2026-04-23T19:43:38.469+08:00  INFO 12 --- [main] c.h.w.s.k.sdk.remote.StsKeyHttpClient    : Start to init StsKeyHttpClient
+2026-04-23T19:43:38.472+08:00  INFO 12 --- [main] c.h.w.s.k.s.remote.StsServerAddrManager  : find 1 sts server addresses: 10.33.102.162:8080
+2026-04-23T19:43:38.513+08:00  INFO 12 --- [main] c.h.w.sts.sdk.cert.StsCertMonitor        : monitor certificate WiseCloudMEPModelGWService
+2026-04-23T19:43:38.514+08:00  INFO 12 --- [main] c.h.w.s.k.sdk.remote.StsKeyHttpClient    : Finish to init StsKeyHttpClient
+2026-04-23T19:43:38.514+08:00  INFO 12 --- [main] c.h.w.s.k.sdk.loader.StsKeyFileLoader    : load sts keys from file started.
+2026-04-23T19:43:38.514+08:00  INFO 12 --- [main] c.h.w.s.k.s.l.StsKeyFileLocalStorage     : start to read domain.log
+2026-04-23T19:43:38.514+08:00  INFO 12 --- [main] c.h.wisesecurity.sts.sdk.util.IoUtils    : sts file domain.log does not exists, will create new cache file
+2026-04-23T19:43:38.514+08:00  INFO 12 --- [main] c.h.w.s.k.s.l.StsKeyFileLocalStorage     : start to read kek.json
+2026-04-23T19:43:38.515+08:00  INFO 12 --- [main] c.h.wisesecurity.sts.sdk.util.IoUtils    : sts file kek.json does not exists, will create new cache file
+2026-04-23T19:43:38.515+08:00  INFO 12 --- [main] c.h.w.s.k.s.l.StsKeyFileLocalStorage     : start to read keys.json
+2026-04-23T19:43:38.515+08:00  INFO 12 --- [main] c.h.wisesecurity.sts.sdk.util.IoUtils    : sts file keys.json does not exists, will create new cache file
+2026-04-23T19:43:38.517+08:00  INFO 12 --- [main] c.h.w.s.k.s.l.StsKeyFileLocalStorage     : save data to files.
+2026-04-23T19:43:38.518+08:00  INFO 12 --- [main] c.h.w.sts.sdk.util.StsFileUtils          : Create sts cache folder
+2026-04-23T19:43:38.518+08:00  INFO 12 --- [main] c.h.w.sts.sdk.util.StsFileUtils          : Create sts cache file
+2026-04-23T19:43:38.554+08:00  INFO 12 --- [main] c.h.w.sts.sdk.util.StsFileUtils          : Create sts cache file
+2026-04-23T19:43:38.556+08:00  INFO 12 --- [main] c.h.w.sts.sdk.util.StsFileUtils          : Create sts cache file
+2026-04-23T19:43:38.559+08:00  INFO 12 --- [main] c.h.w.s.k.sdk.loader.StsKeyFileLoader    : unable to load sts keys from file, local kek is empty. will try to load from sts server
+2026-04-23T19:43:38.559+08:00  INFO 12 --- [main] c.h.w.s.k.sdk.loader.StsKeyRemoteLoader  : load sts keys from server started.
+2026-04-23T19:43:38.704+08:00  INFO 12 --- [main] c.h.w.s.k.sdk.remote.StsKeyHttpClient    : STS_INTERFACE_REQUEST|POST|/sts/v2/auth2|b62eb8c0-78d6-4258-8f21-81e97a54f8c2|WiseMLOpsMEPService|WiseCloudMEPModelGWService|1776944618704.
+2026-04-23T19:43:38.803+08:00  INFO 12 --- [main] c.h.w.s.k.sdk.remote.StsKeyHttpClient    : STS_INTERFACE_RESPONSE|POST|/sts/v2/auth2|b62eb8c0-78d6-4258-8f21-81e97a54f8c2|WiseMLOpsMEPService|WiseCloudMEPModelGWService|1776944618803.
+2026-04-23T19:43:38.891+08:00  INFO 12 --- [main] c.h.w.s.k.s.c.s.SymmetricCryptCreater    : Sts CryptorProviderFactory init success.
+2026-04-23T19:43:38.904+08:00  INFO 12 --- [main] c.h.w.s.k.s.l.StsKeyFileLocalStorage     : save data to files.
+2026-04-23T19:43:38.906+08:00  INFO 12 --- [main] c.h.w.s.k.s.l.StsKeyFileLocalStorage     : save data to files.
+2026-04-23T19:43:38.907+08:00  INFO 12 --- [main] c.h.w.s.k.sdk.loader.StsKeyRemoteLoader  : load sts keys from server success.
+2026-04-23T19:43:38.907+08:00  INFO 12 --- [main] c.h.w.sts.keyprovider.StsKeyApi          : load sts keys complete.
+2026-04-23T19:43:38.908+08:00  INFO 12 --- [main] c.h.w.sts.keyprovider.StsKeyApi          : creating sts credentials provider.
+2026-04-23T19:43:38.929+08:00  INFO 12 --- [main] c.h.w.s.k.sdk.cache.CredentialsCache     : start async fetch credentials for provider sts-consumer-credentials-provider.
+2026-04-23T19:43:38.932+08:00  INFO 12 --- [main] c.h.w.sts.keyprovider.StsKeyApi          : create sts credentials provider complete.
+2026-04-23T19:43:38.934+08:00  INFO 12 --- [main] c.h.w.sts.sdk.cert.StsCertMonitor        : start to monitor certificate validity period: monitorPeriodSeconds=86400, alarmPeriodSeconds=7776000
+2026-04-23T19:43:38.934+08:00  INFO 12 --- [main] c.h.w.sts.keyprovider.StsKeyApi          : init sts complete.
+2026-04-23T19:43:38.934+08:00  INFO 12 --- [main] c.h.smartrouter.manager.AigwManager      : STS initialized successfully
+2026-04-23T19:43:38.934+08:00  INFO 12 --- [main] c.h.smartrouter.manager.AigwManager      : Initializing Cloud Map...
+2026-04-23T19:43:39.082+08:00  INFO 12 --- [main] c.h.n.m.d.dns.CloudMapDnsResolver        : set supportDns to false.
+2026-04-23T19:43:39.086+08:00  INFO 12 --- [main] com.huawei.nuwa.map.util.SPIUtils        : Found SPI Service com.huawei.nuwa.map.discovery.filters.InstanceListFilter, count=4.
+2026-04-23T19:43:39.086+08:00  INFO 12 --- [main] com.huawei.nuwa.map.util.SPIUtils        :   0. class com.huawei.nuwa.map.discovery.filters.SpecifyTagInstanceListFilter.
+2026-04-23T19:43:39.086+08:00  INFO 12 --- [main] com.huawei.nuwa.map.util.SPIUtils        :   1. class com.huawei.nuwa.map.discovery.filters.GrayInstanceListFilter.
+2026-04-23T19:43:39.086+08:00  INFO 12 --- [main] com.huawei.nuwa.map.util.SPIUtils        :   2. class com.huawei.nuwa.map.discovery.filters.AliveInstanceListFilter.
+2026-04-23T19:43:39.086+08:00  INFO 12 --- [main] com.huawei.nuwa.map.util.SPIUtils        :   3. class com.huawei.nuwa.map.discovery.filters.ZoneAwareInstanceListFilter.
+2026-04-23T19:43:39.086+08:00  INFO 12 --- [main] com.huawei.nuwa.map.util.SPIUtils        : Found SPI Service com.huawei.nuwa.map.discovery.loadbalancer.factory.LoadBalancerFactory, count=0.
+2026-04-23T19:43:39.097+08:00  INFO 12 --- [main] c.huawei.nuwa.map.client.NuwaMapClient   : Nuwa Cloud Map SDK(1.0.19.100) Init Success With Properties: {serverAddr=http://10.41.254.39:8080, namespaceName=cn_dev_gy}
+2026-04-23T19:43:39.097+08:00  INFO 12 --- [main] c.h.smartrouter.manager.AigwManager      : Cloud Map client initialized successfully
+2026-04-23T19:43:39.098+08:00  INFO 12 --- [main] c.h.smartrouter.manager.AigwManager      : AIGW initialized successfully
+2026-04-23T19:43:39.098+08:00  INFO 12 --- [main] com.huawei.smartrouter.dcs.DcsAdapter    : Initializing DCS adapter with cluster: smart_route_dcs_gy, dc: DC
+2026-04-23T19:43:39.100+08:00  INFO 12 --- [main] com.huawei.dcs.dcsdk.core.DCSDKFacade    : Looking for IDCSDKSupportService...
+2026-04-23T19:43:39.101+08:00  INFO 12 --- [main] c.h.d.d.core.DCSDKClassLoaderFactory     : Begin to create DCSDKClassLoader.
+2026-04-23T19:43:39.101+08:00  INFO 12 --- [main] c.h.d.d.core.DCSDKClassLoaderFactory     : dcsdk support onejar lib not found, DCSDKClassLoader will use normal way to load class.
+2026-04-23T19:43:39.102+08:00  INFO 12 --- [main] c.h.d.d.s.facade.DCSDKSupportService     : Creating new DCSDKSupportService....
+2026-04-23T19:43:39.103+08:00  INFO 12 --- [main] c.h.d.d.s.facade.DCSDKSupportService     : Begin to build instance of IDCSOperationFactory..
+2026-04-23T19:43:39.104+08:00  INFO 12 --- [main] c.h.d.d.s.f.ProxyOperationFactoryBuilder : Build new ProxyOperationFactory: [com.huawei.dcs.dcsdk.support.facade.ProxyOperationFactory@4db728df]
+2026-04-23T19:43:39.105+08:00  INFO 12 --- [main] c.h.d.d.s.facade.DCSDKSupportService     : Creating  DCSDKSupportService successfully.
+2026-04-23T19:43:39.105+08:00  INFO 12 --- [main] com.huawei.dcs.dcsdk.core.DCSDKFacade    : Use IDCSDKSupportService implementation class: com.huawei.dcs.dcsdk.support.facade.DCSDKSupportService@b0d3e7. 
+2026-04-23T19:43:39.105+08:00  INFO 12 --- [main] c.h.d.d.s.framework.DefaultUConfig       : Loading dcsdk uconfig file from: dcsdk.properties
+2026-04-23T19:43:39.106+08:00  INFO 12 --- [main] c.h.d.d.s.framework.DefaultUConfig       : Initing configuration from file: dcsdk.properties
+2026-04-23T19:43:39.107+08:00  WARN 12 --- [main] c.huawei.dcs.basic.utils.DCSFileUtils    : File not found for dcsdk.properties
+2026-04-23T19:43:39.107+08:00  WARN 12 --- [main] c.h.dcs.basic.utils.DCSPropertiesUtils   : Could not load properties from file dcsdk.properties'. Because file not exist or readable
+2026-04-23T19:43:39.110+08:00  INFO 12 --- [main] com.huawei.dcs.dcsdk.commonlog           : Loading service: interface com.huawei.dcs.dcsdk.core.IExtConfigProvider ...
+2026-04-23T19:43:39.111+08:00  INFO 12 --- [main] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rwx------' for path: '***/dcsdk.workdir'
+2026-04-23T19:43:39.111+08:00  INFO 12 --- [main] c.h.d.d.s.facade.ProxyOperationFactory   : Creating IDCSOperation for DC.smart_route_dcs_gy
+2026-04-23T19:43:39.117+08:00  INFO 12 --- [main] c.h.d.d.s.framework.CloudMapClient       : Get cluster owner namespace: null
+2026-04-23T19:43:39.117+08:00  INFO 12 --- [main] c.h.d.d.s.framework.CloudMapClient       : Get cluster owner service: null
+2026-04-23T19:43:39.127+08:00  INFO 12 --- [main] c.h.w.s.k.sdk.remote.StsKeyHttpClient    : signing request.
+2026-04-23T19:43:39.135+08:00  INFO 12 --- [main] c.h.w.s.k.sdk.remote.StsKeyHttpClient    : STS_INTERFACE_REQUEST|POST|/sts/v2/token|3bdf71f9-364b-4f88-903e-9d6f8f66b276|WiseMLOpsMEPService|WiseCloudMEPModelGWService|1776944619135.
+2026-04-23T19:43:39.171+08:00  INFO 12 --- [main] c.h.w.s.k.sdk.remote.StsKeyHttpClient    : STS_INTERFACE_RESPONSE|POST|/sts/v2/token|3bdf71f9-364b-4f88-903e-9d6f8f66b276|WiseMLOpsMEPService|WiseCloudMEPModelGWService|1776944619171.
+2026-04-23T19:43:39.172+08:00  INFO 12 --- [main] c.h.w.s.k.s.l.StsKeyFileLocalStorage     : save data to files.
+2026-04-23T19:43:39.173+08:00  INFO 12 --- [main] c.h.w.s.k.s.l.StsKeyFileLocalStorage     : save data to files.
+2026-04-23T19:43:39.293+08:00  INFO 12 --- [main] c.h.d.d.s.f.WatchableClusterConfigs      : Writing server uconfigs info to file: '***/DC.smart_route_dcs_gy.scfgs'
+2026-04-23T19:43:39.300+08:00  INFO 12 --- [main] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rw-------' for path: '***/DC.smart_route_dcs_gy.scfgs'
+2026-04-23T19:43:39.301+08:00  INFO 12 --- [main] c.h.d.d.s.f.WatchableClusterConfigs      : Read cluster configs from file for: DC.smart_route_dcs_gy;
+2026-04-23T19:43:39.317+08:00  INFO 12 --- [main] c.h.nuwa.map.client.MiddlewareClient     : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy is subscribed
+2026-04-23T19:43:39.317+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy start refresh cluster info now...
+2026-04-23T19:43:39.321+08:00  INFO 12 --- [main] c.h.d.d.support.framework.CypherUtils    : Use dcsdk default cryptor to decrypt cypher.
+2026-04-23T19:43:39.321+08:00  INFO 12 --- [main] c.h.d.d.support.framework.CypherUtils    : Use dcsdk default sts cryptor to decrypt cypher.
+2026-04-23T19:43:39.324+08:00  INFO 12 --- [main] c.h.d.d.s.framework.ClusterConfigs       : Add listener: com.huawei.dcs.dcsdk.support.cache.ClientSideCache@120d6cbf for cluster: DC.smart_route_dcs_gy configs
+2026-04-23T19:43:39.346+08:00  INFO 12 --- [main] c.h.d.d.s.j.a.JedisClusterAdapterProxy   : Create JedisClusterAdapterProxy for cluster: DC.smart_route_dcs_gy, and with authPass
+2026-04-23T19:43:39.346+08:00  INFO 12 --- [main] c.h.d.d.s.j.a.JedisClusterHealthCheck    : Start health check schedule for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:43:39.347+08:00  INFO 12 --- [main] com.huawei.dcs.dcsdk.commonlog           : Loading service: interface com.huawei.dcs.dcsdk.support.framework.IBasicInvokerFilter ...
+2026-04-23T19:43:39.352+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : [ExtendedInvokerFilter] read filter
+2026-04-23T19:43:39.352+08:00  INFO 12 --- [main] c.h.d.d.s.framework.ClusterConfigs       : Add listener: com.huawei.dcs.dcsdk.support.hotkey.HotkeyCacheFilter@8aa5ab4 for cluster: DC.smart_route_dcs_gy configs
+2026-04-23T19:43:39.352+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : Successfully load com.huawei.dcs.dcsdk.support.hotkey.HotkeyCacheFilter@8aa5ab4
+2026-04-23T19:43:39.352+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : [ExtendedInvokerFilter] read filter
+2026-04-23T19:43:39.352+08:00  INFO 12 --- [main] c.h.d.d.s.framework.ClusterConfigs       : Add listener: com.huawei.dcs.dcsdk.support.hotkey.HotKeyTrackingFilter@53e4a19e for cluster: DC.smart_route_dcs_gy configs
+2026-04-23T19:43:39.377+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : Successfully load com.huawei.dcs.dcsdk.support.hotkey.HotKeyTrackingFilter@53e4a19e
+2026-04-23T19:43:39.377+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : [ExtendedInvokerFilter] read filter
+2026-04-23T19:43:39.385+08:00  INFO 12 --- [main] c.h.d.dcsdk.support.framework.BasicInfo  : Write instance id 20260423194339 to file
+2026-04-23T19:43:39.386+08:00  INFO 12 --- [main] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rw-------' for path: '***/.instid'
+2026-04-23T19:43:39.386+08:00  INFO 12 --- [main] c.h.d.dcsdk.support.framework.BasicInfo  : Create new instance ID: 20260423194339 
+2026-04-23T19:43:39.387+08:00  INFO 12 --- [main] c.h.d.dcsdk.support.framework.BasicInfo  : Get sdk service name from sts meta info: WiseMLOpsMEPService
+2026-04-23T19:43:39.387+08:00  INFO 12 --- [main] c.h.d.dcsdk.support.framework.BasicInfo  : Get sdk micro service name from sts meta info: WiseCloudMEPModelGWService
+2026-04-23T19:43:39.387+08:00  INFO 12 --- [main] c.h.d.d.s.f.OperationProxyHandler        : Successfully create operation proxy instance with cluster: DC.smart_route_dcs_gy
+2026-04-23T19:43:39.388+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : Successfully load com.huawei.dcs.dcsdk.support.metrics.MetricsFilter@3c3cd13a
+2026-04-23T19:43:39.388+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : [ExtendedInvokerFilter] read filter
+2026-04-23T19:43:39.388+08:00  INFO 12 --- [main] c.h.d.d.s.framework.ClusterConfigs       : Add listener: com.huawei.dcs.dcsdk.support.alive.KeepAliveFilter@56b751b1 for cluster: DC.smart_route_dcs_gy configs
+2026-04-23T19:43:39.388+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : Successfully load com.huawei.dcs.dcsdk.support.alive.KeepAliveFilter@56b751b1
+2026-04-23T19:43:39.388+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : [ExtendedInvokerFilter] read filter
+2026-04-23T19:43:39.388+08:00  INFO 12 --- [main] c.h.d.d.s.framework.ClusterConfigs       : Add listener: com.huawei.dcs.dcsdk.support.filter.KeyExpiredFilter@2f61de04 for cluster: DC.smart_route_dcs_gy configs
+2026-04-23T19:43:39.388+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : Successfully load com.huawei.dcs.dcsdk.support.filter.KeyExpiredFilter@2f61de04
+2026-04-23T19:43:39.388+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : [ExtendedInvokerFilter] read filter
+2026-04-23T19:43:39.388+08:00  INFO 12 --- [main] c.h.d.d.s.framework.ClusterConfigs       : Add listener: com.huawei.dcs.dcsdk.support.limit.LimitFilter@5f5a33ed for cluster: DC.smart_route_dcs_gy configs
+2026-04-23T19:43:39.389+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : Successfully load com.huawei.dcs.dcsdk.support.limit.LimitFilter@5f5a33ed
+2026-04-23T19:43:39.389+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : [ExtendedInvokerFilter] read filter
+2026-04-23T19:43:39.389+08:00  INFO 12 --- [main] c.h.d.d.s.framework.ClusterConfigs       : Add listener: com.huawei.dcs.dcsdk.support.block.BlockedFilter@5b59c3d for cluster: DC.smart_route_dcs_gy configs
+2026-04-23T19:43:39.389+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : Successfully load com.huawei.dcs.dcsdk.support.block.BlockedFilter@5b59c3d
+2026-04-23T19:43:39.389+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : [ExtendedInvokerFilter] read filter
+2026-04-23T19:43:39.389+08:00  INFO 12 --- [main] c.h.d.d.s.framework.ClusterConfigs       : Add listener: com.huawei.dcs.dcsdk.support.filter.EmptyKeyFilter@69e36fe3 for cluster: DC.smart_route_dcs_gy configs
+2026-04-23T19:43:39.389+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : Successfully load com.huawei.dcs.dcsdk.support.filter.EmptyKeyFilter@69e36fe3
+2026-04-23T19:43:39.390+08:00  INFO 12 --- [main] com.huawei.dcs.dcsdk.commonlog           : Loading service: interface com.huawei.dcs.dcsdk.support.framework.IExtInvokerFilter ...
+2026-04-23T19:43:39.394+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : [ExtendedInvokerFilter] read filter
+2026-04-23T19:43:39.394+08:00  INFO 12 --- [main] c.h.d.d.s.f.ExtendedInvokerFilter        : [ExtendedInvokerFilter] filter is off:com.huawei.dcs.dcsdk.plugin.dmqsync.DataSyncFilter@29bd2796
+2026-04-23T19:43:39.394+08:00  INFO 12 --- [main] c.h.d.d.s.framework.DoubleCloudInvoker   : 'dcg.on.off' set as 'off'. DCG watch will not enable.
+2026-04-23T19:43:39.394+08:00  INFO 12 --- [main] c.h.d.d.s.framework.ClusterConfigs       : Add listener: com.huawei.dcs.dcsdk.support.framework.DoubleCloudInvoker@174b8d0e for cluster: DC.smart_route_dcs_gy configs
+2026-04-23T19:43:39.394+08:00  INFO 12 --- [main] c.h.d.d.s.framework.ClusterConfigs       : Add listener: com.huawei.dcs.dcsdk.support.framework.ShadowFilter@7ebc5be6 for cluster: DC.smart_route_dcs_gy configs
+2026-04-23T19:43:39.395+08:00  INFO 12 --- [main] c.h.d.d.support.framework.ShadowFilter   : Full link test is closed
+2026-04-23T19:43:39.395+08:00  INFO 12 --- [main] c.h.d.d.s.framework.ClusterConfigs       : Add listener: com.huawei.dcs.dcsdk.support.facade.DbCloudInvokerFactory$$Lambda/0x00000007016e3b28@eebc0db for cluster: DC.smart_route_dcs_gy configs
+2026-04-23T19:43:39.395+08:00  INFO 12 --- [main] c.h.d.d.s.f.OperationProxyHandler        : Successfully create operation proxy instance with cluster: DC.smart_route_dcs_gy
+2026-04-23T19:43:39.397+08:00  INFO 12 --- [main] c.h.d.d.s.j.a.JedisClusterAdapterProxy   : Creating withPassAdapter. 
+2026-04-23T19:43:39.397+08:00  INFO 12 --- [main] c.h.d.d.s.framework.CloudMapClient       : Get cluster owner namespace: null
+2026-04-23T19:43:39.397+08:00  INFO 12 --- [main] c.h.d.d.s.framework.CloudMapClient       : Get cluster owner service: null
+2026-04-23T19:43:39.405+08:00  INFO 12 --- [main] c.h.d.d.s.f.ClusterNodesProviderSupport  : Writing node info: '10.41.23.12:2881' to file for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:43:39.406+08:00  INFO 12 --- [main] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rw-------' for path: '***/DC.smart_route_dcs_gy.nodes'
+2026-04-23T19:43:39.408+08:00  INFO 12 --- [main] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Building new DCS JedisCluster instance with nodes: [10.41.23.12:2881]
+2026-04-23T19:43:39.408+08:00  INFO 12 --- [main] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Init JedisCluster form node: 10.41.23.12:2881
+2026-04-23T19:43:39.457+08:00  INFO 12 --- [main] c.h.d.d.s.jedis.adapter.DCSJedisCluster  : SDK use default way to auth
+2026-04-23T19:43:39.535+08:00  INFO 12 --- [main] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Building new DCS blocked JedisCluster instance with nodes: [10.41.23.12:2881]
+2026-04-23T19:43:39.549+08:00  INFO 12 --- [main] c.h.d.d.s.jedis.adapter.DCSJedisCluster  : SDK use default way to auth
+2026-04-23T19:43:39.558+08:00  INFO 12 --- [main] c.h.d.d.s.j.a.JedisClusterAdapterProxy   : Successfully build a new JedisClusterAdapter instance by nodes: [10.41.23.12:2881].  Parameter 'withPwd' is true
+2026-04-23T19:43:40.567+08:00  INFO 12 --- [main] com.huawei.dcs.dcsdk.core.DCSDKFacade    : Successfully test connection to cache server. 
+2026-04-23T19:43:40.568+08:00  INFO 12 --- [main] com.huawei.dcs.dcsdk.core.DCSDKFacade    : Create cluster operation instance for: DC.smart_route_dcs_gy successfully 
+2026-04-23T19:43:40.568+08:00  INFO 12 --- [main] com.huawei.smartrouter.dcs.DcsAdapter    : DCS adapter initialized successfully
+2026-04-23T19:43:40.568+08:00  INFO 12 --- [main] c.h.smartrouter.manager.AigwManager      : DCS adapter initialized
+2026-04-23T19:43:40.568+08:00  INFO 12 --- [main] c.h.smartrouter.manager.AigwManager      : Cache driver registered successfully
+2026-04-23T19:43:40.568+08:00  INFO 12 --- [main] c.h.smartrouter.manager.AigwManager      : AIGW Manager initialization complete
+2026-04-23T19:43:40.854+08:00  INFO 12 --- [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 9090 (http) with context path '/'
+2026-04-23T19:43:40.861+08:00  INFO 12 --- [main] c.h.smartrouter.SmartRouterApplication   : Started SmartRouterApplication in 4.222 seconds (process running for 4.554)
+2026-04-23T19:43:43.929+08:00  INFO 12 --- [sts-consumer-credentials-provider-0] c.h.w.s.k.sdk.cache.CredentialsCache     : fetching all credentials for provider sts-consumer-credentials-provider.
+2026-04-23T19:43:43.930+08:00  INFO 12 --- [sts-consumer-credentials-provider-0] .h.w.s.k.s.c.i.CredentialsRemoteSupplier : fetching all credentials.
+2026-04-23T19:43:43.931+08:00  INFO 12 --- [sts-consumer-credentials-provider-0] c.h.w.s.k.sdk.remote.StsKeyHttpClient    : signing request.
+2026-04-23T19:43:43.931+08:00  INFO 12 --- [sts-consumer-credentials-provider-0] c.h.w.s.k.sdk.remote.StsKeyHttpClient    : STS_INTERFACE_REQUEST|GET|/sts/v2/tokens|3472c8ca-f6b7-4cf4-8781-0b292490954b|WiseMLOpsMEPService|WiseCloudMEPModelGWService|1776944623931.
+2026-04-23T19:43:43.966+08:00  INFO 12 --- [sts-consumer-credentials-provider-0] c.h.w.s.k.sdk.remote.StsKeyHttpClient    : STS_INTERFACE_RESPONSE|GET|/sts/v2/tokens|3472c8ca-f6b7-4cf4-8781-0b292490954b|WiseMLOpsMEPService|WiseCloudMEPModelGWService|1776944623966.
+2026-04-23T19:43:43.967+08:00  INFO 12 --- [sts-consumer-credentials-provider-0] .h.w.s.k.s.c.i.CredentialsRemoteSupplier : No credentials found from server.
+2026-04-23T19:43:43.968+08:00  INFO 12 --- [sts-consumer-credentials-provider-0] c.h.w.s.k.sdk.cache.CredentialsCache     : fetch all credentials for provider sts-consumer-credentials-provider finished.
+2026-04-23T19:43:45.010+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-04-23T19:43:45.010+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-04-23T19:43:45.011+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+2026-04-23T19:43:45.040+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-1] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:43:59.917+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-2] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:44:14.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-3] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:44:29.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-4] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:44:38.934+08:00  INFO 12 --- [pool-4-thread-1] c.h.w.sts.sdk.cert.StsCertMonitor        : begin to check certificates
+2026-04-23T19:44:38.934+08:00  INFO 12 --- [pool-4-thread-1] c.h.w.sts.sdk.cert.StsCertMonitor        : end to check certificates
+2026-04-23T19:44:39.315+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.support.framework.StatusLogger   : CLUSTER STATUS INFO: {"DC.smart_route_dcs_gy":{"Shadow In Use":"No","SDK Mode":"Cluster","Keep Alive Switch":"Off","Cluster Health Result":"OK","Blocked In Use":"No","Limit Size":"1024000","Cluster In Use":"Yes","Empty Key Filter":"No","Limit Type":"1","Connection Pool":"active:0,idle:1,waiter:0","Health Check Status":"RUNNING","Key Expired Switch":"No","Configs Version":"20260423112111"}}
+2026-04-23T19:44:39.322+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy start refresh cluster info now...
+2026-04-23T19:44:39.330+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy refresh cluster info finished, no changed
+2026-04-23T19:44:39.402+08:00  INFO 12 --- [dcsdk.common.executors-1] c.h.d.d.support.metrics.MetricsManager   : [MetricsIndicator]|cluster=DC.smart_route_dcs_gy|InputBigKey=0|OutputBigKey=0|latency.avg=84673|latency.count=2|latency.max=168225|latency.min=1120|latency.p50=84673.18|latency.p75=168225.70|latency.p95=168225.70|latency.p98=168225.70|latency.p99=168225.70|latency.p999=168225.70|latency.slowTimes=1|latency.stddev=118161.10
+2026-04-23T19:44:39.402+08:00  INFO 12 --- [dcsdk.common.executors-1] c.h.d.d.support.metrics.MetricsManager   : [MetricsIndicator]|cluster=DC.smart_route_dcs_gy|method=exists|OutputBigKey=0|latency.avg=1120|latency.count=1|latency.max=1120|latency.min=1120|latency.p50=1120.67|latency.p75=1120.67|latency.p95=1120.67|latency.p98=1120.67|latency.p99=1120.67|latency.p999=1120.67|latency.slowTimes=0|latency.stddev=0.00
+2026-04-23T19:44:39.403+08:00  INFO 12 --- [dcsdk.common.executors-1] c.h.d.d.support.metrics.MetricsManager   : [MetricsIndicator]|cluster=DC.smart_route_dcs_gy|method=expire|InputBigKey=0|OutputBigKey=0|latency.avg=168225|latency.count=1|latency.max=168225|latency.min=168225|latency.p50=168225.70|latency.p75=168225.70|latency.p95=168225.70|latency.p98=168225.70|latency.p99=168225.70|latency.p999=168225.70|latency.slowTimes=1|latency.stddev=0.00
+2026-04-23T19:44:39.403+08:00  INFO 12 --- [dcsdk.common.executors-1] c.h.d.d.support.metrics.MetricsManager   : [SlowKeyLog]|cluster=DC.smart_route_dcs_gy|***=168225
+2026-04-23T19:44:39.403+08:00  INFO 12 --- [dcsdk.common.executors-1] c.h.d.d.support.metrics.MetricsManager   : [SlowKeyLog]|cluster=DC.smart_route_dcs_gy|method=expire|***=168225
+2026-04-23T19:44:40.922+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-5] c.h.s.controller.ModelController         : Received model registration request: model=deepseek_v32_p_z600@1.0.0
+2026-04-23T19:44:40.922+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-5] c.h.smartrouter.service.ModelService     : Registering model: deepseek_v32_p_z600@1.0.0
+2026-04-23T19:44:40.923+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-5] c.h.smartrouter.manager.AigwManager      : Model registered successfully: deepseek_v32_p_z600@1.0.0
+2026-04-23T19:44:40.923+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-5] c.h.smartrouter.service.ModelService     : Successfully registered model: deepseek_v32_p_z600@1.0.0
+2026-04-23T19:44:40.929+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-6] c.h.s.controller.ModelController         : Received model registration request: model=Deepseek_v3_vllm_Multiple_Roles@1.0.0
+2026-04-23T19:44:40.929+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-6] c.h.smartrouter.service.ModelService     : Registering model: Deepseek_v3_vllm_Multiple_Roles@1.0.0
+2026-04-23T19:44:40.929+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-6] c.h.smartrouter.manager.AigwManager      : Model registered successfully: Deepseek_v3_vllm_Multiple_Roles@1.0.0
+2026-04-23T19:44:40.929+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-6] c.h.smartrouter.service.ModelService     : Successfully registered model: Deepseek_v3_vllm_Multiple_Roles@1.0.0
+2026-04-23T19:44:40.932+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-7] c.h.s.controller.ModelController         : Received model registration request: model=ytt_guian_prefill@1.0.0
+2026-04-23T19:44:40.932+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-7] c.h.smartrouter.service.ModelService     : Registering model: ytt_guian_prefill@1.0.0
+2026-04-23T19:44:40.933+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-7] c.h.s.service.PretrainTtftManager        : Successfully wrote TTFT file: /opt/huawei/aigw/pretrain/pretrained_ttft_ytt_guian_prefill@1.0.0.txt
+2026-04-23T19:44:40.933+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-7] c.h.smartrouter.manager.AigwManager      : Model registered successfully: ytt_guian_prefill@1.0.0
+2026-04-23T19:44:40.933+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-7] c.h.smartrouter.service.ModelService     : Successfully registered model: ytt_guian_prefill@1.0.0
+2026-04-23T19:44:44.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-8] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:44:59.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-9] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:45:14.917+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-10] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:45:29.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-1] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:45:39.315+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.support.framework.StatusLogger   : CLUSTER STATUS INFO: {"DC.smart_route_dcs_gy":{"Shadow In Use":"No","SDK Mode":"Cluster","Keep Alive Switch":"Off","Cluster Health Result":"OK","Blocked In Use":"No","Limit Size":"1024000","Cluster In Use":"Yes","Empty Key Filter":"No","Limit Type":"1","Connection Pool":"active:0,idle:2,waiter:0","Health Check Status":"RUNNING","Key Expired Switch":"No","Configs Version":"20260423112111"}}
+2026-04-23T19:45:39.330+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy start refresh cluster info now...
+2026-04-23T19:45:39.339+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy refresh cluster info finished, no changed
+2026-04-23T19:45:44.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-2] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:45:59.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-3] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:46:14.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-4] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:46:29.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-5] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:46:39.315+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.support.framework.StatusLogger   : CLUSTER STATUS INFO: {"DC.smart_route_dcs_gy":{"Shadow In Use":"No","SDK Mode":"Cluster","Keep Alive Switch":"Off","Cluster Health Result":"OK","Blocked In Use":"No","Limit Size":"1024000","Cluster In Use":"Yes","Empty Key Filter":"No","Limit Type":"1","Connection Pool":"active:0,idle:1,waiter:0","Health Check Status":"RUNNING","Key Expired Switch":"No","Configs Version":"20260423112111"}}
+2026-04-23T19:46:39.339+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy start refresh cluster info now...
+2026-04-23T19:46:39.349+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy refresh cluster info finished, no changed
+2026-04-23T19:46:44.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-6] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:46:59.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-7] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:47:14.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-8] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:47:29.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-9] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:47:39.316+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.support.framework.StatusLogger   : CLUSTER STATUS INFO: {"DC.smart_route_dcs_gy":{"Shadow In Use":"No","SDK Mode":"Cluster","Keep Alive Switch":"Off","Cluster Health Result":"OK","Blocked In Use":"No","Limit Size":"1024000","Cluster In Use":"Yes","Empty Key Filter":"No","Limit Type":"1","Connection Pool":"active:0,idle:1,waiter:0","Health Check Status":"RUNNING","Key Expired Switch":"No","Configs Version":"20260423112111"}}
+2026-04-23T19:47:39.349+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy start refresh cluster info now...
+2026-04-23T19:47:39.359+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy refresh cluster info finished, no changed
+2026-04-23T19:47:44.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-10] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:47:59.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-1] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:48:14.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-2] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:48:29.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-3] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:48:39.316+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.support.framework.StatusLogger   : CLUSTER STATUS INFO: {"DC.smart_route_dcs_gy":{"Shadow In Use":"No","SDK Mode":"Cluster","Keep Alive Switch":"Off","Cluster Health Result":"OK","Blocked In Use":"No","Limit Size":"1024000","Cluster In Use":"Yes","Empty Key Filter":"No","Limit Type":"1","Connection Pool":"active:0,idle:1,waiter:0","Health Check Status":"RUNNING","Key Expired Switch":"No","Configs Version":"20260423112111"}}
+2026-04-23T19:48:39.359+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy start refresh cluster info now...
+2026-04-23T19:48:39.364+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy refresh cluster info finished, no changed
+2026-04-23T19:48:44.917+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-4] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:48:59.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-5] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:49:14.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-6] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:49:29.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-7] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:49:39.317+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.support.framework.StatusLogger   : CLUSTER STATUS INFO: {"DC.smart_route_dcs_gy":{"Shadow In Use":"No","SDK Mode":"Cluster","Keep Alive Switch":"Off","Cluster Health Result":"OK","Blocked In Use":"No","Limit Size":"1024000","Cluster In Use":"Yes","Empty Key Filter":"No","Limit Type":"1","Connection Pool":"active:0,idle:1,waiter:0","Health Check Status":"RUNNING","Key Expired Switch":"No","Configs Version":"20260423112111"}}
+2026-04-23T19:49:39.365+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy start refresh cluster info now...
+2026-04-23T19:49:39.373+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy refresh cluster info finished, no changed
+2026-04-23T19:49:44.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-8] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:49:59.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-9] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:50:14.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-10] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:50:29.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-1] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:50:39.317+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.support.framework.StatusLogger   : CLUSTER STATUS INFO: {"DC.smart_route_dcs_gy":{"Shadow In Use":"No","SDK Mode":"Cluster","Keep Alive Switch":"Off","Cluster Health Result":"OK","Blocked In Use":"No","Limit Size":"1024000","Cluster In Use":"Yes","Empty Key Filter":"No","Limit Type":"1","Connection Pool":"active:0,idle:1,waiter:0","Health Check Status":"RUNNING","Key Expired Switch":"No","Configs Version":"20260423112111"}}
+2026-04-23T19:50:39.373+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy start refresh cluster info now...
+2026-04-23T19:50:39.378+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy refresh cluster info finished, no changed
+2026-04-23T19:50:44.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-2] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:50:59.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-3] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:51:14.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-4] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:51:29.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-5] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:51:39.317+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.support.framework.StatusLogger   : CLUSTER STATUS INFO: {"DC.smart_route_dcs_gy":{"Shadow In Use":"No","SDK Mode":"Cluster","Keep Alive Switch":"Off","Cluster Health Result":"OK","Blocked In Use":"No","Limit Size":"1024000","Cluster In Use":"Yes","Empty Key Filter":"No","Limit Type":"1","Connection Pool":"active:0,idle:1,waiter:0","Health Check Status":"RUNNING","Key Expired Switch":"No","Configs Version":"20260423112111"}}
+2026-04-23T19:51:39.379+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy start refresh cluster info now...
+2026-04-23T19:51:39.385+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy refresh cluster info finished, no changed
+2026-04-23T19:51:44.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-6] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:51:59.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-7] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:52:14.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-8] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:52:29.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-9] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:52:39.318+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.support.framework.StatusLogger   : CLUSTER STATUS INFO: {"DC.smart_route_dcs_gy":{"Shadow In Use":"No","SDK Mode":"Cluster","Keep Alive Switch":"Off","Cluster Health Result":"OK","Blocked In Use":"No","Limit Size":"1024000","Cluster In Use":"Yes","Empty Key Filter":"No","Limit Type":"1","Connection Pool":"active:0,idle:1,waiter:0","Health Check Status":"RUNNING","Key Expired Switch":"No","Configs Version":"20260423112111"}}
+2026-04-23T19:52:39.386+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy start refresh cluster info now...
+2026-04-23T19:52:39.393+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy refresh cluster info finished, no changed
+2026-04-23T19:52:44.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-10] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:52:49.769+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : [Error Code: 10.41.23.12:2881]Failed to call cluster nodes from node: 4002
+2026-04-23T19:52:49.770+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Health Check Nodes: [10.41.23.12:2881]
+2026-04-23T19:52:49.773+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : [Error Code: 4002]Failed to get result from CompletionService when call 'cluster node' command. 
+2026-04-23T19:52:49.773+08:00  WARN 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Fail to call cluster nodes command for node list [10.41.23.12:2881].
+2026-04-23T19:52:49.773+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : lastClusterNodesRet is null
+2026-04-23T19:52:49.773+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : All cluster nodes not reachable. Maybe cluster nodes not connectable. Try reload cluster nodes. DC.smart_route_dcs_gy
+2026-04-23T19:52:49.773+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : Try to rebuild JedisClusterAdapter for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:52:49.779+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.f.ClusterNodesProviderSupport  : Writing node info: '10.41.23.12:2881' to file for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:52:49.780+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rw-------' for path: '***/DC.smart_route_dcs_gy.nodes'
+2026-04-23T19:52:59.782+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : [Error Code: 10.41.23.12:2881]Failed to call cluster nodes from node: 4002
+2026-04-23T19:52:59.783+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Health Check Nodes: [10.41.23.12:2881]
+2026-04-23T19:52:59.784+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : [Error Code: 4002]Failed to get result from CompletionService when call 'cluster node' command. 
+2026-04-23T19:52:59.784+08:00  WARN 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Fail to call cluster nodes command for node list [10.41.23.12:2881].
+2026-04-23T19:52:59.784+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : lastClusterNodesRet is null
+2026-04-23T19:52:59.784+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : All cluster nodes not reachable. Maybe cluster nodes not connectable. Try reload cluster nodes. DC.smart_route_dcs_gy
+2026-04-23T19:52:59.784+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : Try to rebuild JedisClusterAdapter for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:52:59.788+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.f.ClusterNodesProviderSupport  : Writing node info: '10.41.23.12:2881' to file for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:52:59.788+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rw-------' for path: '***/DC.smart_route_dcs_gy.nodes'
+2026-04-23T19:52:59.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-1] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:53:09.790+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : [Error Code: 10.41.23.12:2881]Failed to call cluster nodes from node: 4002
+2026-04-23T19:53:09.791+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Health Check Nodes: [10.41.23.12:2881]
+2026-04-23T19:53:09.791+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : [Error Code: 4002]Failed to get result from CompletionService when call 'cluster node' command. 
+2026-04-23T19:53:09.791+08:00  WARN 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Fail to call cluster nodes command for node list [10.41.23.12:2881].
+2026-04-23T19:53:09.792+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : lastClusterNodesRet is null
+2026-04-23T19:53:09.792+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : All cluster nodes not reachable. Maybe cluster nodes not connectable. Try reload cluster nodes. DC.smart_route_dcs_gy
+2026-04-23T19:53:09.792+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : Try to rebuild JedisClusterAdapter for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:53:09.795+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.f.ClusterNodesProviderSupport  : Writing node info: '10.41.23.12:2881' to file for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:53:09.796+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rw-------' for path: '***/DC.smart_route_dcs_gy.nodes'
+2026-04-23T19:53:14.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-2] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:53:19.798+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : [Error Code: 10.41.23.12:2881]Failed to call cluster nodes from node: 4002
+2026-04-23T19:53:19.798+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Health Check Nodes: [10.41.23.12:2881]
+2026-04-23T19:53:19.799+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : [Error Code: 4002]Failed to get result from CompletionService when call 'cluster node' command. 
+2026-04-23T19:53:19.799+08:00  WARN 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Fail to call cluster nodes command for node list [10.41.23.12:2881].
+2026-04-23T19:53:19.799+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : lastClusterNodesRet is null
+2026-04-23T19:53:19.799+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : All cluster nodes not reachable. Maybe cluster nodes not connectable. Try reload cluster nodes. DC.smart_route_dcs_gy
+2026-04-23T19:53:19.799+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : Try to rebuild JedisClusterAdapter for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:53:19.803+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.f.ClusterNodesProviderSupport  : Writing node info: '10.41.23.12:2881' to file for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:53:19.804+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rw-------' for path: '***/DC.smart_route_dcs_gy.nodes'
+2026-04-23T19:53:29.806+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : [Error Code: 10.41.23.12:2881]Failed to call cluster nodes from node: 4002
+2026-04-23T19:53:29.807+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Health Check Nodes: [10.41.23.12:2881]
+2026-04-23T19:53:29.808+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : [Error Code: 4002]Failed to get result from CompletionService when call 'cluster node' command. 
+2026-04-23T19:53:29.808+08:00  WARN 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Fail to call cluster nodes command for node list [10.41.23.12:2881].
+2026-04-23T19:53:29.808+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : lastClusterNodesRet is null
+2026-04-23T19:53:29.808+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : All cluster nodes not reachable. Maybe cluster nodes not connectable. Try reload cluster nodes. DC.smart_route_dcs_gy
+2026-04-23T19:53:29.808+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : Try to rebuild JedisClusterAdapter for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:53:29.811+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.f.ClusterNodesProviderSupport  : Writing node info: '10.41.23.12:2881' to file for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:53:29.812+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rw-------' for path: '***/DC.smart_route_dcs_gy.nodes'
+2026-04-23T19:53:29.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-3] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:53:39.318+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.support.framework.StatusLogger   : CLUSTER STATUS INFO: {"DC.smart_route_dcs_gy":{"Shadow In Use":"No","SDK Mode":"Cluster","Keep Alive Switch":"Off","Cluster Health Result":"All Nodes Not Reachable, Rebuilding","Blocked In Use":"No","Limit Size":"1024000","Cluster In Use":"Yes","Empty Key Filter":"No","Limit Type":"1","Connection Pool":"active:0,idle:0,waiter:0","Health Check Status":"RUNNING","Key Expired Switch":"No","Configs Version":"20260423112111"}}
+2026-04-23T19:53:39.389+08:00 ERROR 12 --- [dcsdk.common.executors-2] c.h.d.d.s.f.OperationProxyHandler        : Failed to call OperationContext: [method=hset([class java.lang.String, class java.lang.String, class java.lang.String])] with error: [ERR_4001] DCSDK health check failed.Slot for this key: *** is not available. Maybe the redis node for this slot is down.
+        at com.huawei.dcs.dcsdk.support.framework.JedisOperationInvoker.invoke(JedisOperationInvoker.java:38)
+        at com.huawei.dcs.dcsdk.support.hotkey.HotkeyCacheFilter.doInvoke(HotkeyCacheFilter.java:116)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.hotkey.HotKeyTrackingFilter.doInvoke(HotKeyTrackingFilter.java:110)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.framework.OperationProxyHandler.invoke(OperationProxyHandler.java:87)
+        at jdk.proxy2/jdk.proxy2.$Proxy74.hset(Unknown Source)
+        at com.huawei.dcs.dcsdk.support.metrics.DCSRedisReporter.reportBasicInfo(DCSRedisReporter.java:118)
+        at com.huawei.dcs.dcsdk.support.metrics.DCSRedisReporter.report(DCSRedisReporter.java:72)
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.run(MetricsFilter.java:114)
+        at com.huawei.dcs.basic.utils.DCSThreadUtils.lambda$wrapRunnable$0(DCSThreadUtils.java:103)
+        at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(Unknown Source)
+        at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(Unknown Source)
+        at java.base/java.lang.Thread.run(Unknown Source) 
+2026-04-23T19:53:39.389+08:00  WARN 12 --- [dcsdk.common.executors-2] c.h.d.d.s.metrics.DCSRedisReporter       : Failed to report the sdk metrics to the cluster
+2026-04-23T19:53:39.393+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy start refresh cluster info now...
+2026-04-23T19:53:39.397+08:00  INFO 12 --- [nuwa-cloudmap-middleware-cluster-refresh1] c.h.nuwa.map.client.RefreshClusterTask   : cn_dev_gy@@WiseMLOpsMEPService@@MIDDLEWARE@@dcs@@smart_route_dcs_gy refresh cluster info finished, no changed
+2026-04-23T19:53:39.814+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : [Error Code: 10.41.23.12:2881]Failed to call cluster nodes from node: 4002
+2026-04-23T19:53:39.814+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Health Check Nodes: [10.41.23.12:2881]
+2026-04-23T19:53:39.815+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : [Error Code: 4002]Failed to get result from CompletionService when call 'cluster node' command. 
+2026-04-23T19:53:39.815+08:00  WARN 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Fail to call cluster nodes command for node list [10.41.23.12:2881].
+2026-04-23T19:53:39.815+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : lastClusterNodesRet is null
+2026-04-23T19:53:39.815+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : All cluster nodes not reachable. Maybe cluster nodes not connectable. Try reload cluster nodes. DC.smart_route_dcs_gy
+2026-04-23T19:53:39.815+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : Try to rebuild JedisClusterAdapter for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:53:39.818+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.f.ClusterNodesProviderSupport  : Writing node info: '10.41.23.12:2881' to file for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:53:39.819+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rw-------' for path: '***/DC.smart_route_dcs_gy.nodes'
+2026-04-23T19:53:44.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-4] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:53:49.821+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : [Error Code: 10.41.23.12:2881]Failed to call cluster nodes from node: 4002
+2026-04-23T19:53:49.822+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Health Check Nodes: [10.41.23.12:2881]
+2026-04-23T19:53:49.822+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : [Error Code: 4002]Failed to get result from CompletionService when call 'cluster node' command. 
+2026-04-23T19:53:49.823+08:00  WARN 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Fail to call cluster nodes command for node list [10.41.23.12:2881].
+2026-04-23T19:53:49.824+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : lastClusterNodesRet is null
+2026-04-23T19:53:49.824+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : All cluster nodes not reachable. Maybe cluster nodes not connectable. Try reload cluster nodes. DC.smart_route_dcs_gy
+2026-04-23T19:53:49.824+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : Try to rebuild JedisClusterAdapter for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:53:49.828+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.f.ClusterNodesProviderSupport  : Writing node info: '10.41.23.12:2881' to file for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:53:49.829+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rw-------' for path: '***/DC.smart_route_dcs_gy.nodes'
+2026-04-23T19:53:59.831+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : [Error Code: 10.41.23.12:2881]Failed to call cluster nodes from node: 4002
+2026-04-23T19:53:59.831+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Health Check Nodes: [10.41.23.12:2881]
+2026-04-23T19:53:59.832+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : [Error Code: 4002]Failed to get result from CompletionService when call 'cluster node' command. 
+2026-04-23T19:53:59.832+08:00  WARN 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Fail to call cluster nodes command for node list [10.41.23.12:2881].
+2026-04-23T19:53:59.832+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : lastClusterNodesRet is null
+2026-04-23T19:53:59.832+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : All cluster nodes not reachable. Maybe cluster nodes not connectable. Try reload cluster nodes. DC.smart_route_dcs_gy
+2026-04-23T19:53:59.832+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : Try to rebuild JedisClusterAdapter for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:53:59.836+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.f.ClusterNodesProviderSupport  : Writing node info: '10.41.23.12:2881' to file for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:53:59.836+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rw-------' for path: '***/DC.smart_route_dcs_gy.nodes'
+2026-04-23T19:53:59.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-5] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:54:09.839+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : [Error Code: 10.41.23.12:2881]Failed to call cluster nodes from node: 4002
+2026-04-23T19:54:09.839+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Health Check Nodes: [10.41.23.12:2881]
+2026-04-23T19:54:09.840+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : [Error Code: 4002]Failed to get result from CompletionService when call 'cluster node' command. 
+2026-04-23T19:54:09.840+08:00  WARN 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Fail to call cluster nodes command for node list [10.41.23.12:2881].
+2026-04-23T19:54:09.840+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : lastClusterNodesRet is null
+2026-04-23T19:54:09.840+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : All cluster nodes not reachable. Maybe cluster nodes not connectable. Try reload cluster nodes. DC.smart_route_dcs_gy
+2026-04-23T19:54:09.840+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : Try to rebuild JedisClusterAdapter for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:54:09.844+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.f.ClusterNodesProviderSupport  : Writing node info: '10.41.23.12:2881' to file for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:54:09.844+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rw-------' for path: '***/DC.smart_route_dcs_gy.nodes'
+2026-04-23T19:54:14.916+08:00 DEBUG 12 --- [http-nio-127.0.0.1-9090-exec-6] c.h.s.controller.HealthController        : Health check: status UP
+2026-04-23T19:54:19.847+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : [Error Code: 10.41.23.12:2881]Failed to call cluster nodes from node: 4002
+2026-04-23T19:54:19.847+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Health Check Nodes: [10.41.23.12:2881]
+2026-04-23T19:54:19.848+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : [Error Code: 4002]Failed to get result from CompletionService when call 'cluster node' command. 
+2026-04-23T19:54:19.848+08:00  WARN 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.jedis.adapter.SDKJedisUtils    : Fail to call cluster nodes command for node list [10.41.23.12:2881].
+2026-04-23T19:54:19.848+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : lastClusterNodesRet is null
+2026-04-23T19:54:19.848+08:00 ERROR 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : All cluster nodes not reachable. Maybe cluster nodes not connectable. Try reload cluster nodes. DC.smart_route_dcs_gy
+2026-04-23T19:54:19.848+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.j.a.JedisClusterHealthCheck    : Try to rebuild JedisClusterAdapter for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:54:19.851+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.h.d.d.s.f.ClusterNodesProviderSupport  : Writing node info: '10.41.23.12:2881' to file for cluster: DC.smart_route_dcs_gy
+2026-04-23T19:54:19.851+08:00  INFO 12 --- [dcsdk.common.scheduler-0] c.huawei.dcs.basic.utils.DCSFileUtils    : Set permissions: 'rw-------' for path: '***/DC.smart_route_dcs_gy.nodes'
+2026-04-23T19:54:20.319+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-7] c.h.s.controller.RouterController        : Received router suggestion request: uuid=44a51a5b-da84-41d2-8ac4-b4bae3ad41dd, model=ytt_guian_prefill@1.0.0
+2026-04-23T19:54:20.320+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-7] c.h.smartrouter.service.RouterService    : Getting routing suggestion for request: uuid=44a51a5b-da84-41d2-8ac4-b4bae3ad41dd, model=ytt_guian_prefill@1.0.0
+2026-04-23T19:54:20.321+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-7] c.h.smartrouter.service.RouterService    : Routing suggestion generated: prefill=10.41.80.64:18090, decode=
+2026-04-23T19:54:20.321+08:00  INFO 12 --- [http-nio-127.0.0.1-9090-exec-7] c.h.s.controller.RouterController        : Router suggestion successful: uuid=44a51a5b-da84-41d2-8ac4-b4bae3ad41dd, prefillNode=10.41.80.64:18090, decodeNode=
+2026-04-23T19:54:20.321+08:00 DEBUG 12 --- [Thread-5] c.huawei.smartrouter.dcs.DcsCacheDriver  : Cache callback: operation=2, key=model:ytt_guian_prefill@1.0.0:instance:10.41.80.64:18090:requests_info
+2026-04-23T19:54:20.321+08:00 DEBUG 12 --- [Thread-5] com.huawei.smartrouter.dcs.DcsAdapter    : DCS hashSetFields: key=model:ytt_guian_prefill@1.0.0:instance:10.41.80.64:18090:requests_info, fields=1
+2026-04-23T19:54:20.322+08:00 ERROR 12 --- [Thread-5] c.h.d.d.support.metrics.MetricsFilter    : MetricsFilter found a fail call: hmset. Error: [ERR_4001] DCSDK health check failed.Slot for this key: *** is not available. Maybe the redis node for this slot is down.
+        at com.huawei.dcs.dcsdk.support.framework.JedisOperationInvoker.invoke(JedisOperationInvoker.java:38)
+        at com.huawei.dcs.dcsdk.support.hotkey.HotkeyCacheFilter.doInvoke(HotkeyCacheFilter.java:116)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.hotkey.HotKeyTrackingFilter.doInvoke(HotKeyTrackingFilter.java:110)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:50)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.alive.KeepAliveFilter.doInvoke(KeepAliveFilter.java:143)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.filter.KeyExpiredFilter.doInvoke(KeyExpiredFilter.java:67)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.limit.LimitFilter.doInvoke(LimitFilter.java:60)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.block.BlockedFilter.doInvoke(BlockedFilter.java:65)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.filter.EmptyKeyFilter.doInvoke(EmptyKeyFilter.java:65)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77)
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44)
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77)
+        at com.huawei.dcs.dcsdk.support.framework.DoubleCloudInvoker.invoke(DoubleCloudInvoker.java:465)
+        at com.huawei.dcs.dcsdk.support.framework.ShadowFilter.invoke(ShadowFilter.java:129)
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44)
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116)
+        at com.huawei.dcs.dcsdk.support.framework.OperationProxyHandler.invoke(OperationProxyHandler.java:87)
+        at jdk.proxy2/jdk.proxy2.$Proxy74.hmset(Unknown Source)
+        at com.huawei.smartrouter.dcs.DcsAdapter.hashSetFields(DcsAdapter.java:119)
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleHashSetFields(DcsCacheDriver.java:140)
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleCacheCallback(DcsCacheDriver.java:80)
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.staticCacheCallback(DcsCacheDriver.java:222)
+2026-04-23T19:54:20.322+08:00 ERROR 12 --- [Thread-5] c.h.d.d.s.f.OperationProxyHandler        : Failed to call OperationContext: [method=hmset([class java.lang.String, interface java.util.Map])] with error: MetricsFilter found a fail call Caused by: Slot for this key: *** is not available. Maybe the redis node for this slot is down..
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:65)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.alive.KeepAliveFilter.doInvoke(KeepAliveFilter.java:143)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.filter.KeyExpiredFilter.doInvoke(KeyExpiredFilter.java:67)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.limit.LimitFilter.doInvoke(LimitFilter.java:60)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.block.BlockedFilter.doInvoke(BlockedFilter.java:65)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.filter.EmptyKeyFilter.doInvoke(EmptyKeyFilter.java:65)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77)
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44)
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77)
+        at com.huawei.dcs.dcsdk.support.framework.DoubleCloudInvoker.invoke(DoubleCloudInvoker.java:465)
+        at com.huawei.dcs.dcsdk.support.framework.ShadowFilter.invoke(ShadowFilter.java:129)
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44)
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116)
+        at com.huawei.dcs.dcsdk.support.framework.OperationProxyHandler.invoke(OperationProxyHandler.java:87)
+        at jdk.proxy2/jdk.proxy2.$Proxy74.hmset(Unknown Source)
+        at com.huawei.smartrouter.dcs.DcsAdapter.hashSetFields(DcsAdapter.java:119)
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleHashSetFields(DcsCacheDriver.java:140)
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleCacheCallback(DcsCacheDriver.java:80)
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.staticCacheCallback(DcsCacheDriver.java:222)
+ Caused by: [ERR_4001] DCSDK health check failed.Slot for this key: *** is not available. Maybe the redis node for this slot is down.
+        at com.huawei.dcs.dcsdk.support.framework.JedisOperationInvoker.invoke(JedisOperationInvoker.java:38)
+        at com.huawei.dcs.dcsdk.support.hotkey.HotkeyCacheFilter.doInvoke(HotkeyCacheFilter.java:116)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.hotkey.HotKeyTrackingFilter.doInvoke(HotKeyTrackingFilter.java:110)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:50)
+        ... 25 more 
+2026-04-23T19:54:20.322+08:00 ERROR 12 --- [Thread-5] com.huawei.smartrouter.dcs.DcsAdapter    : DCS hashSetFields failed: key=model:ytt_guian_prefill@1.0.0:instance:10.41.80.64:18090:requests_info
+
+[ERR_4002] DCSDK jedis request failedFailed to call OperationContext: [method=hmset([class java.lang.String, interface java.util.Map])] Caused by: MetricsFilter found a fail call. Caused by: Slot for this key: *** is not available. Maybe the redis node for this slot is down..
+        at com.huawei.dcs.dcsdk.support.framework.OperationProxyHandler.invoke(OperationProxyHandler.java:90) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at jdk.proxy2/jdk.proxy2.$Proxy74.hmset(Unknown Source) ~[na:na]
+        at com.huawei.smartrouter.dcs.DcsAdapter.hashSetFields(DcsAdapter.java:119) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleHashSetFields(DcsCacheDriver.java:140) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleCacheCallback(DcsCacheDriver.java:80) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.staticCacheCallback(DcsCacheDriver.java:222) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+Caused by: MetricsFilter found a fail call Caused by: Slot for this key: *** is not available. Maybe the redis node for this slot is down..
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:65) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.alive.KeepAliveFilter.doInvoke(KeepAliveFilter.java:143) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.filter.KeyExpiredFilter.doInvoke(KeyExpiredFilter.java:67) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.limit.LimitFilter.doInvoke(LimitFilter.java:60) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.block.BlockedFilter.doInvoke(BlockedFilter.java:65) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.filter.EmptyKeyFilter.doInvoke(EmptyKeyFilter.java:65) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.DoubleCloudInvoker.invoke(DoubleCloudInvoker.java:465) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.ShadowFilter.invoke(ShadowFilter.java:129) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.OperationProxyHandler.invoke(OperationProxyHandler.java:87) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        ... 5 common frames omitted
+Caused by: [ERR_4001] DCSDK health check failed.Slot for this key: *** is not available. Maybe the redis node for this slot is down.
+        at com.huawei.dcs.dcsdk.support.framework.JedisOperationInvoker.invoke(JedisOperationInvoker.java:38) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.hotkey.HotkeyCacheFilter.doInvoke(HotkeyCacheFilter.java:116) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.hotkey.HotKeyTrackingFilter.doInvoke(HotKeyTrackingFilter.java:110) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:50) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        ... 25 common frames omitted
+
+2026-04-23T19:54:20.327+08:00 ERROR 12 --- [Thread-5] c.huawei.smartrouter.dcs.DcsCacheDriver  : hash_set_fields failed for key: model:ytt_guian_prefill@1.0.0:instance:10.41.80.64:18090:requests_info
+
+com.huawei.smartrouter.exception.DcsException: Failed to set hash fields: Failed to call OperationContext: [method=hmset([class java.lang.String, interface java.util.Map])]
+        at com.huawei.smartrouter.dcs.DcsAdapter.hashSetFields(DcsAdapter.java:126) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleHashSetFields(DcsCacheDriver.java:140) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleCacheCallback(DcsCacheDriver.java:80) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.staticCacheCallback(DcsCacheDriver.java:222) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+Caused by: [ERR_4002] DCSDK jedis request failedFailed to call OperationContext: [method=hmset([class java.lang.String, interface java.util.Map])] Caused by: MetricsFilter found a fail call. Caused by: Slot for this key: *** is not available. Maybe the redis node for this slot is down..
+        at com.huawei.dcs.dcsdk.support.framework.OperationProxyHandler.invoke(OperationProxyHandler.java:90) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at jdk.proxy2/jdk.proxy2.$Proxy74.hmset(Unknown Source) ~[na:na]
+        at com.huawei.smartrouter.dcs.DcsAdapter.hashSetFields(DcsAdapter.java:119) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        ... 3 common frames omitted
+Caused by: MetricsFilter found a fail call Caused by: Slot for this key: *** is not available. Maybe the redis node for this slot is down..
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:65) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.alive.KeepAliveFilter.doInvoke(KeepAliveFilter.java:143) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.filter.KeyExpiredFilter.doInvoke(KeyExpiredFilter.java:67) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.limit.LimitFilter.doInvoke(LimitFilter.java:60) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.block.BlockedFilter.doInvoke(BlockedFilter.java:65) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.filter.EmptyKeyFilter.doInvoke(EmptyKeyFilter.java:65) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.DoubleCloudInvoker.invoke(DoubleCloudInvoker.java:465) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.ShadowFilter.invoke(ShadowFilter.java:129) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.OperationProxyHandler.invoke(OperationProxyHandler.java:87) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        ... 5 common frames omitted
+Caused by: [ERR_4001] DCSDK health check failed.Slot for this key: *** is not available. Maybe the redis node for this slot is down.
+        at com.huawei.dcs.dcsdk.support.framework.JedisOperationInvoker.invoke(JedisOperationInvoker.java:38) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.hotkey.HotkeyCacheFilter.doInvoke(HotkeyCacheFilter.java:116) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.hotkey.HotKeyTrackingFilter.doInvoke(HotKeyTrackingFilter.java:110) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:50) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        ... 25 common frames omitted
+
+2026-04-23T19:54:20.434+08:00 DEBUG 12 --- [Thread-6] c.huawei.smartrouter.dcs.DcsCacheDriver  : Cache callback: operation=4, key=null
+2026-04-23T19:54:20.434+08:00 DEBUG 12 --- [Thread-6] com.huawei.smartrouter.dcs.DcsAdapter    : DCS hashGetAllBatch: keys=1
+2026-04-23T19:54:20.434+08:00 ERROR 12 --- [Thread-6] c.h.d.d.support.metrics.MetricsFilter    : MetricsFilter found a fail call: hscan. Error: [ERR_4001] DCSDK health check failed.Slot for this key: *** is not available. Maybe the redis node for this slot is down.
+        at com.huawei.dcs.dcsdk.support.framework.JedisOperationInvoker.invoke(JedisOperationInvoker.java:38)
+        at com.huawei.dcs.dcsdk.support.hotkey.HotkeyCacheFilter.doInvoke(HotkeyCacheFilter.java:116)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.hotkey.HotKeyTrackingFilter.doInvoke(HotKeyTrackingFilter.java:110)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:50)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.alive.KeepAliveFilter.doInvoke(KeepAliveFilter.java:143)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.filter.KeyExpiredFilter.doInvoke(KeyExpiredFilter.java:67)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.limit.LimitFilter.doInvoke(LimitFilter.java:60)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.block.BlockedFilter.doInvoke(BlockedFilter.java:65)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.filter.EmptyKeyFilter.doInvoke(EmptyKeyFilter.java:65)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77)
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44)
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77)
+        at com.huawei.dcs.dcsdk.support.framework.DoubleCloudInvoker.invoke(DoubleCloudInvoker.java:465)
+        at com.huawei.dcs.dcsdk.support.framework.ShadowFilter.invoke(ShadowFilter.java:129)
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44)
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116)
+        at com.huawei.dcs.dcsdk.support.framework.OperationProxyHandler.invoke(OperationProxyHandler.java:87)
+        at jdk.proxy2/jdk.proxy2.$Proxy74.hscan(Unknown Source)
+        at com.huawei.smartrouter.dcs.DcsAdapter.hashGetAllBatch(DcsAdapter.java:180)
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleHashGetAllBatch(DcsCacheDriver.java:175)
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleCacheCallback(DcsCacheDriver.java:84)
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.staticCacheCallback(DcsCacheDriver.java:222)
+2026-04-23T19:54:20.435+08:00 ERROR 12 --- [Thread-6] c.h.d.d.s.f.OperationProxyHandler        : Failed to call OperationContext: [method=hscan([class java.lang.String, class java.lang.String])] with error: MetricsFilter found a fail call Caused by: Slot for this key: *** is not available. Maybe the redis node for this slot is down..
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:65)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.alive.KeepAliveFilter.doInvoke(KeepAliveFilter.java:143)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.filter.KeyExpiredFilter.doInvoke(KeyExpiredFilter.java:67)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.limit.LimitFilter.doInvoke(LimitFilter.java:60)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.block.BlockedFilter.doInvoke(BlockedFilter.java:65)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.filter.EmptyKeyFilter.doInvoke(EmptyKeyFilter.java:65)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77)
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44)
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77)
+        at com.huawei.dcs.dcsdk.support.framework.DoubleCloudInvoker.invoke(DoubleCloudInvoker.java:465)
+        at com.huawei.dcs.dcsdk.support.framework.ShadowFilter.invoke(ShadowFilter.java:129)
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44)
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116)
+        at com.huawei.dcs.dcsdk.support.framework.OperationProxyHandler.invoke(OperationProxyHandler.java:87)
+        at jdk.proxy2/jdk.proxy2.$Proxy74.hscan(Unknown Source)
+        at com.huawei.smartrouter.dcs.DcsAdapter.hashGetAllBatch(DcsAdapter.java:180)
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleHashGetAllBatch(DcsCacheDriver.java:175)
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleCacheCallback(DcsCacheDriver.java:84)
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.staticCacheCallback(DcsCacheDriver.java:222)
+ Caused by: [ERR_4001] DCSDK health check failed.Slot for this key: *** is not available. Maybe the redis node for this slot is down.
+        at com.huawei.dcs.dcsdk.support.framework.JedisOperationInvoker.invoke(JedisOperationInvoker.java:38)
+        at com.huawei.dcs.dcsdk.support.hotkey.HotkeyCacheFilter.doInvoke(HotkeyCacheFilter.java:116)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.hotkey.HotKeyTrackingFilter.doInvoke(HotKeyTrackingFilter.java:110)
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71)
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:50)
+        ... 25 more 
+2026-04-23T19:54:20.435+08:00 ERROR 12 --- [Thread-6] com.huawei.smartrouter.dcs.DcsAdapter    : DCS hashGetAllBatch failed: keys=[model:ytt_guian_prefill@1.0.0:instance:10.41.80.64:18090:requests_info]
+
+[ERR_4002] DCSDK jedis request failedFailed to call OperationContext: [method=hscan([class java.lang.String, class java.lang.String])] Caused by: MetricsFilter found a fail call. Caused by: Slot for this key: *** is not available. Maybe the redis node for this slot is down..
+        at com.huawei.dcs.dcsdk.support.framework.OperationProxyHandler.invoke(OperationProxyHandler.java:90) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at jdk.proxy2/jdk.proxy2.$Proxy74.hscan(Unknown Source) ~[na:na]
+        at com.huawei.smartrouter.dcs.DcsAdapter.hashGetAllBatch(DcsAdapter.java:180) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleHashGetAllBatch(DcsCacheDriver.java:175) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleCacheCallback(DcsCacheDriver.java:84) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.staticCacheCallback(DcsCacheDriver.java:222) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+Caused by: MetricsFilter found a fail call Caused by: Slot for this key: *** is not available. Maybe the redis node for this slot is down..
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:65) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.alive.KeepAliveFilter.doInvoke(KeepAliveFilter.java:143) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.filter.KeyExpiredFilter.doInvoke(KeyExpiredFilter.java:67) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.limit.LimitFilter.doInvoke(LimitFilter.java:60) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.block.BlockedFilter.doInvoke(BlockedFilter.java:65) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.filter.EmptyKeyFilter.doInvoke(EmptyKeyFilter.java:65) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.DoubleCloudInvoker.invoke(DoubleCloudInvoker.java:465) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.ShadowFilter.invoke(ShadowFilter.java:129) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.OperationProxyHandler.invoke(OperationProxyHandler.java:87) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        ... 5 common frames omitted
+Caused by: [ERR_4001] DCSDK health check failed.Slot for this key: *** is not available. Maybe the redis node for this slot is down.
+        at com.huawei.dcs.dcsdk.support.framework.JedisOperationInvoker.invoke(JedisOperationInvoker.java:38) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.hotkey.HotkeyCacheFilter.doInvoke(HotkeyCacheFilter.java:116) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.hotkey.HotKeyTrackingFilter.doInvoke(HotKeyTrackingFilter.java:110) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:50) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        ... 25 common frames omitted
+
+2026-04-23T19:54:20.435+08:00 ERROR 12 --- [Thread-6] c.huawei.smartrouter.dcs.DcsCacheDriver  : hash_get_all_batch failed for keys: [model:ytt_guian_prefill@1.0.0:instance:10.41.80.64:18090:requests_info]
+
+com.huawei.smartrouter.exception.DcsException: Failed to get hash fields batch: Failed to call OperationContext: [method=hscan([class java.lang.String, class java.lang.String])]
+        at com.huawei.smartrouter.dcs.DcsAdapter.hashGetAllBatch(DcsAdapter.java:199) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleHashGetAllBatch(DcsCacheDriver.java:175) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.handleCacheCallback(DcsCacheDriver.java:84) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        at com.huawei.smartrouter.dcs.DcsCacheDriver.staticCacheCallback(DcsCacheDriver.java:222) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+Caused by: [ERR_4002] DCSDK jedis request failedFailed to call OperationContext: [method=hscan([class java.lang.String, class java.lang.String])] Caused by: MetricsFilter found a fail call. Caused by: Slot for this key: *** is not available. Maybe the redis node for this slot is down..
+        at com.huawei.dcs.dcsdk.support.framework.OperationProxyHandler.invoke(OperationProxyHandler.java:90) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at jdk.proxy2/jdk.proxy2.$Proxy74.hscan(Unknown Source) ~[na:na]
+        at com.huawei.smartrouter.dcs.DcsAdapter.hashGetAllBatch(DcsAdapter.java:180) ~[smart-router-1.0.1.101.20260423192555.jar:na]
+        ... 3 common frames omitted
+Caused by: MetricsFilter found a fail call Caused by: Slot for this key: *** is not available. Maybe the redis node for this slot is down..
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:65) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.alive.KeepAliveFilter.doInvoke(KeepAliveFilter.java:143) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.filter.KeyExpiredFilter.doInvoke(KeyExpiredFilter.java:67) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.limit.LimitFilter.doInvoke(LimitFilter.java:60) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.block.BlockedFilter.doInvoke(BlockedFilter.java:65) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.filter.EmptyKeyFilter.doInvoke(EmptyKeyFilter.java:65) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:77) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.DoubleCloudInvoker.invoke(DoubleCloudInvoker.java:465) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.ShadowFilter.invoke(ShadowFilter.java:129) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.SafeCloseFilter.invoke(SafeCloseFilter.java:44) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.ClusterInvokerFactory$1.invoke(ClusterInvokerFactory.java:116) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.OperationProxyHandler.invoke(OperationProxyHandler.java:87) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        ... 5 common frames omitted
+Caused by: [ERR_4001] DCSDK health check failed.Slot for this key: *** is not available. Maybe the redis node for this slot is down.
+        at com.huawei.dcs.dcsdk.support.framework.JedisOperationInvoker.invoke(JedisOperationInvoker.java:38) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.hotkey.HotkeyCacheFilter.doInvoke(HotkeyCacheFilter.java:116) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.hotkey.HotKeyTrackingFilter.doInvoke(HotKeyTrackingFilter.java:110) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.framework.AbstractInvokerFilter.invoke(AbstractInvokerFilter.java:71) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        at com.huawei.dcs.dcsdk.support.metrics.MetricsFilter.doInvoke(MetricsFilter.java:50) ~[com.huawei.dcs.dcsdk.support-1.6.31.103.jar:1.6.31.103]
+        ... 25 common frames omitted
