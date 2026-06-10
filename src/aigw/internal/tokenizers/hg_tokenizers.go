@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: define the functions of sentencepiece tokenizer.
  * Create: 2025-06-14
@@ -22,10 +21,6 @@ import (
 	"unsafe"
 
 	"huawei.com/aigw/pkg/log"
-)
-
-const (
-	hgTokenizerMaxToken = 128 * 1024
 )
 
 type huggingFaceTokenizer struct {
@@ -80,10 +75,6 @@ func (h *huggingFaceTokenizer) Encode(input string) ([]uint32, error) {
 	length := int(result.len)
 	if length <= 0 {
 		return []uint32{}, fmt.Errorf("failed to Encode by huggingFaceTokenizer, Encode length is zero")
-	}
-	if length > hgTokenizerMaxToken {
-		log.Warn().Msgf("Encode output exceeds the max, output len %v, reset to %v", length, hgTokenizerMaxToken)
-		length = hgTokenizerMaxToken
 	}
 
 	slice := unsafe.Slice((*C.uint32_t)(result.ids), length)
