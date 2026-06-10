@@ -44,6 +44,12 @@ typedef struct admin_cmd_query_stats {
     } out;
 } admin_cmd_query_stats_t;
 
+typedef struct admin_stats_show_ctx {
+    admin_cmd_query_stats_t stats;
+    int ret;
+    bool received;
+} admin_stats_show_ctx_t;
+
 typedef struct admin_cmd_query_res {
     struct {
         char dev_name[URMA_MAX_NAME];
@@ -238,6 +244,14 @@ enum {
     UBCORE_ATTR_EID_LIST,
     UBCORE_ATTR_STATUS,
     UBCORE_ATTR_EID_NS_MODE,
+    UBCORE_ATTR_SL,
+    UBCORE_ATTR_PRIORITY,
+    UBCORE_ATTR_PERF_STAT,
+    UBCORE_ATTR_TOOL_QUERY_KEY,
+    UBCORE_ATTR_TOOL_QUERY_KEY_TYPE,
+    UBCORE_ATTR_TOOL_QUERY_KEY_EXT,
+    UBCORE_ATTR_TOOL_QUERY_KEY_CNT,
+    UBCORE_ATTR_STATS,
     UBCORE_ATTR_AFTER_LAST
 };
 
