@@ -473,10 +473,19 @@ urma_target_seg_t *bondp_import_seg(urma_context_t *ctx, urma_seg_t *seg,
     }
 
     if (!bdp_tseg->is_reused) {
-        ret = bondp_import_vseg(ctx, seg, token, addr, flag, bdp_tseg, &udata_out);
-        if (ret != 0) {
-            URMA_LOG_ERR("Failed to import vseg\n");
-            goto free_bdp_tseg;
+        if (seg->ext.flag.bs.enable) {
+            const urma_bond_seg_ext_t *bond_ext =
+                (const urma_bond_seg_ext_t *)seg->ext.buf;
+            (void)memcpy(&udata_out.peer_p_seg, bond_ext->peer_p_seg,
+                         sizeof(udata_out.peer_p_seg));
+            (void)memcpy(&udata_out.connected, bond_ext->connected,
+                         sizeof(udata_out.connected));
+        } else {
+            ret = bondp_import_vseg(ctx, seg, token, addr, flag, bdp_tseg, &udata_out);
+            if (ret != 0) {
+                URMA_LOG_ERR("Failed to import vseg\n");
+                goto free_bdp_tseg;
+            }
         }
     }
 
