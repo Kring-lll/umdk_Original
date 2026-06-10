@@ -7,8 +7,53 @@
  */
 
 #include <dlfcn.h>
+#include <stdlib.h>
+#include <string.h>
 #include "umq_vlog.h"
 #include "umq_symbol_private.h"
+
+static urma_status_t stub_urma_get_rjetty(urma_jetty_t *jetty, urma_rjetty_t **rjetty, uint32_t *length)
+{
+    if (jetty == NULL || rjetty == NULL || length == NULL) {
+        return URMA_EINVAL;
+    }
+
+    uint32_t extra_data_size = 32;
+    uint32_t total_size = sizeof(urma_rjetty_t) + extra_data_size;
+
+    urma_rjetty_t *stub_rjetty = (urma_rjetty_t *)malloc(total_size);
+    if (stub_rjetty == NULL) {
+        return URMA_ENOMEM;
+    }
+
+    memset(stub_rjetty, 0, total_size);
+    stub_rjetty->jetty_id = jetty->jetty_id;
+    stub_rjetty->trans_mode = URMA_TM_RM;
+    stub_rjetty->policy = URMA_JETTY_GRP_POLICY_RR;
+    stub_rjetty->type = URMA_JETTY;
+    stub_rjetty->flag.value = 0;
+    stub_rjetty->tp_type = URMA_CTP;
+
+    char *extra_data = (char *)stub_rjetty + sizeof(urma_rjetty_t);
+    for (uint32_t i = 0; i < extra_data_size; i++) {
+        extra_data[i] = (char)(i + jetty->jetty_id.id);
+    }
+
+    *rjetty = stub_rjetty;
+    *length = total_size;
+
+    UMQ_VLOG_INFO(VLOG_UMQ, "stub: get rjetty for jetty_id %u, base_size %u, extra_size %u, total_length %u\n",
+        jetty->jetty_id.id, (uint32_t)sizeof(urma_rjetty_t), extra_data_size, *length);
+    return URMA_SUCCESS;
+}
+
+static void stub_urma_put_rjetty(urma_rjetty_t *rjetty)
+{
+    if (rjetty != NULL) {
+        UMQ_VLOG_INFO(VLOG_UMQ, "stub: put rjetty\n");
+        free(rjetty);
+    }
+}
 
 // Global URMA/UVS symbol instance
 static umq_symbol_urma_t g_umq_symbol_urma = {0};
@@ -21,6 +66,15 @@ static void *g_umq_tpsa_dlhandler = NULL;
         if (sym->name == NULL) { \
             UMQ_VLOG_WARN(VLOG_UMQ, #name " not found: %s\n", dlerror()); \
             return -1; \
+        } \
+    } while (0)
+
+#define LOAD_OPTIONAL_SYMBOL_WITH_STUB(sym, handle, type, name, stub_func) \
+    do { \
+        sym->name = (type)dlsym(handle, #name); \
+        if (sym->name == NULL) { \
+            UMQ_VLOG_INFO(VLOG_UMQ, #name " not found (optional), using stub: %s\n", dlerror()); \
+            sym->name = stub_func; \
         } \
     } while (0)
 
@@ -93,6 +147,8 @@ int umq_symbol_urma_load(umq_symbol_urma_t *sym)
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_post_jetty_send_wr_t, urma_post_jetty_send_wr);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_post_jetty_recv_wr_t, urma_post_jetty_recv_wr);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_post_jfr_wr_t, urma_post_jfr_wr);
+    LOAD_OPTIONAL_SYMBOL_WITH_STUB(sym, g_umq_urma_dlhandler, urma_get_rjetty_t, urma_get_rjetty, stub_urma_get_rjetty);
+    LOAD_OPTIONAL_SYMBOL_WITH_STUB(sym, g_umq_urma_dlhandler, urma_put_rjetty_t, urma_put_rjetty, stub_urma_put_rjetty);
 
     // Segment functions
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_register_seg_t, urma_register_seg);
