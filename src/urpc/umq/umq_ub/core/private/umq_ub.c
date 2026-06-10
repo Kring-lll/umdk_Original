@@ -780,7 +780,7 @@ static ALWAYS_INLINE uint32_t umq_ub_fc_info_serialize(
     }
     umq_symbol_urma()->urma_put_rjetty(rjetty);
     info_tlv_head->type = UMQ_UB_BIND_INFO_TYPE_FC;
-    info_tlv_head->len = (uint64_t)sizeof(umq_ub_bind_fc_info_t) + length;
+    info_tlv_head->len = (uint32_t)sizeof(umq_ub_bind_fc_info_t) + length;
     return urpc_tlv_get_total_len(info_tlv_head);
 }
 
@@ -880,7 +880,7 @@ int umq_ub_bind_info_deserialize(uint8_t *bind_info_buf, uint32_t bind_info_size
                     return -UMQ_ERR_EINVAL;
                 }
                 bind_info->fc_info = (umq_ub_bind_fc_info_t *)(uintptr_t)info_tlv_head->value;
-                if (info_tlv_head->len != (sizeof(umq_ub_bind_queue_info_t) + bind_info->fc_info->rjetty_size)) {
+                if (info_tlv_head->len != (sizeof(umq_ub_bind_fc_info_t) + bind_info->fc_info->rjetty_size)) {
                     UMQ_VLOG_ERR(VLOG_UMQ, "bind flow control info rjetty_size %u insufficient\n", info_tlv_head->len);
                     return -UMQ_ERR_EINVAL;
                 }
