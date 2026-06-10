@@ -24,6 +24,7 @@
   | UMQ_FEATURE_ENABLE_STATS        | 开启报文统计     |
   | UMQ_FEATURE_ENABLE_PERF         | 开启时延统计     |
   | UMQ_FEATURE_ENABLE_FLOW_CONTROL | 开启流控         |
+  | UMQ_FEATURE_ENABLE_EXTEND_IMM   | 扩展的立即数能力   |
 - headroom_size: 配置用户数据头的大小，[0, 512]字节
 - io_lock_free: I/O线程安全时可设为true以提升性能
 - trans_info_num: 数据面传输设备信息的数量，最多支持128个

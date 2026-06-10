@@ -24,6 +24,7 @@ The Unified Message Queue (UMQ) initialization interface is responsible for load
   | UMQ_FEATURE_ENABLE_STATS            | Enables packet statistics                        |
   | UMQ_FEATURE_ENABLE_PERF             | Enables latency statistics                       |
   | UMQ_FEATURE_ENABLE_FLOW_CONTROL     | Enables flow control                             |
+  | UMQ_FEATURE_ENABLE_EXTEND_IMM       | Enables extended immediate number capability |
 - headroom_size: Configures the size of the user data header, [0, 512] bytes
 - io_lock_free: Can be set to true when I/O threads are safe to improve performance
 - trans_info_num: The number of data plane transmission device information entries, supports up to 128

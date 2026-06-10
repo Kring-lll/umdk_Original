@@ -680,9 +680,10 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
     };
     umq_ub_imm_t imm = {
         .flow_control = {
-            .type = IMM_TYPE_FC_CREDIT_REQ,
-            .window = credits_per_request,
-            .seq = fc->local_req_seq}
+            .type = 2, // IMM_TYPE_CONTROL_MSG
+            .umq_id = queue->umq_id,
+            .seq = fc->local_req_seq
+        }
     };
 
     urma_sge_t fc_sge = {

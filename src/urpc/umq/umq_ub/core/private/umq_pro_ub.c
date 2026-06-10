@@ -121,7 +121,7 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
     }
 
     umq_ub_imm_t imm_data = {
-        .share_imm.type = 3, // UMQ_SHAREMODE_IMM_TYPE_IO
+        .share_imm.type = IMM_TYPE_USER_WITHOUT_IMM,
         .share_imm.user_data = 0
     };
     urma_eid_t *eid = &io_jetty->jetty_id.eid;
@@ -199,7 +199,7 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
         case UMQ_OPC_SEND_IMM:
             buf_pro->imm.rsvd0 = 0;
             //urma_wr_ptr->send.imm_data = buf_pro->imm_data;
-            imm_data.share_imm.type = 1; // UMQ_SHAREMODE_IMM_TYPE_USER
+            imm_data.share_imm.type = IMM_TYPE_USER;
             imm_data.share_imm.user_data = buf_pro->imm.user_data;
 
             /* fall-through */
@@ -743,12 +743,32 @@ OUT:
     return UMQ_SUCCESS;
 }
 
+// static int rx_msg_share_transport(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_buf_status_t *qbuf_status)
+// {
+//     int ret = UMQ_SUCCESS;
+//     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
+//     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
+
+//     *qbuf_status = (umq_buf_status_t)cr->status;
+//     return UMQ_SUCCESS;
+// }
+
 static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_buf_status_t *qbuf_status)
 {
     int ret = UMQ_SUCCESS;
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
     *qbuf_status = (umq_buf_status_t)cr->status;
+
+    // if (queue->dev_ctx->feature & UMQ_FEATURE_ENABLE_EXTEND_IMM) {
+
+    // } else {
+    //     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
+    //     umq_ub_imm_t imm = {.value = cr->imm_data};
+    //     buf_pro->user_ctx = imm.share_imm.umq_id;
+    //     buf_pro->imm.user_data = imm.share_imm.user_data;
+    // }
+
     switch (cr->opcode) {
         case URMA_CR_OPC_WRITE_WITH_IMM: {
             if ((queue->dev_ctx->feature & UMQ_FEATURE_API_PRO) == 0) {
@@ -777,11 +797,13 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_
             break;
         }
         case URMA_CR_OPC_SEND_WITH_IMM: {
-            ret = umq_ub_on_rx_done(queue, cr, buf, qbuf_status);
-            if (queue->create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT) {
+            if (queue->dev_ctx->feature & UMQ_FEATURE_ENABLE_EXTEND_IMM) {
+                ret = umq_ub_on_rx_done(queue, cr, buf, qbuf_status);
+            } else {
                 umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
+                buf_pro->opcode = UMQ_OPC_SEND_IMM;
                 umq_ub_imm_t imm = {.value = cr->imm_data};
-                buf_pro->user_ctx = imm.value;
+                buf_pro->umq_ctx = imm.share_imm.umq_id; // 
                 buf_pro->imm.user_data = imm.share_imm.user_data;
             }
             break;
@@ -790,21 +812,19 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_
             umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
             buf_pro->opcode = UMQ_OPC_SEND;
             ub_queue_t *real_queue = umq_ub_get_real_queue_by_cr(queue, cr);
-            if (real_queue != NULL) {
-                buf_pro->umq_ctx = real_queue->umq_ctx;
+            if (queue->dev_ctx->feature & UMQ_FEATURE_ENABLE_EXTEND_IMM) {
+                if (real_queue != NULL) {
+                    buf_pro->umq_ctx = real_queue->umq_ctx;
+                } else {
+                    buf_pro->umq_ctx = 0;
+                }
             } else {
-                buf_pro->umq_ctx = 0;
-            }
-            umq_ub_imm_t imm = {.value = cr->imm_data};
-            if (imm.bs.type == IMM_TYPE_USER) {
-                buf_pro->umq_ctx = imm.share_imm.umq_id;
+                umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
+                buf_pro->opcode = UMQ_OPC_SEND_IMM;
+                umq_ub_imm_t imm = {.value = cr->imm_data};
+                buf_pro->umq_ctx = imm.share_imm.umq_id; // 
             }
 
-            if (queue->create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT) {
-                umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
-                buf_pro->user_ctx = cr->imm_data;
-                buf_pro->imm_data = cr->imm_data;
-            }
             break;
         }
         default:
@@ -812,6 +832,15 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_
     }
     return ret;
 }
+
+// static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_buf_status_t *qbuf_status)
+// {
+//     if (queue->dev_ctx->feature & UMQ_FEATURE_ENABLE_EXTEND_IMM) {
+//         return rx_msg_immediate_extend(cr, buf, queue, qbuf_status);
+//     } else {
+//         return rx_msg_share_transport(cr, buf, queue, qbuf_status);
+//     }
+// }
 
 static uint32_t umq_report_incomplete_rx(ub_queue_t *queue, uint32_t max_rx_ctx, umq_buf_t **buf)
 {

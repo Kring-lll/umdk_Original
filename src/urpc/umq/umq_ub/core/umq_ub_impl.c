@@ -601,15 +601,15 @@ static int umq_ub_ctx_init_one(umq_ub_ctx_t *ctx, umq_trans_info_t *info, umq_in
         goto DESTROY_IMPORTED_INFO;
     }
 
-    uint32_t table_size = UMQ_ALIGN_64K(ctx->dev_attr.dev_cap.max_jetty);
-    ctx->umq_ctx_jetty_table = (uint64_t *)calloc(table_size, sizeof(uint64_t));
+    // uint32_t table_size = UMQ_ALIGN_64K(ctx->dev_attr.dev_cap.max_jetty);
+    ctx->umq_ctx_jetty_table = (uint64_t *)calloc(UMQ_ID_ALLOC_SIZE, sizeof(uint64_t));
     if (ctx->umq_ctx_jetty_table == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "calloc umq_ctx_jetty_table failed\n");
         ret = -UMQ_ERR_ENOMEM;
         goto DELETE_URMA;
     }
 
-    ctx->rx_consumed_jetty_table = (volatile uint64_t *)calloc(table_size, sizeof(uint64_t));
+    ctx->rx_consumed_jetty_table = (volatile uint64_t *)calloc(UMQ_ID_ALLOC_SIZE, sizeof(uint64_t));
     if (ctx->rx_consumed_jetty_table == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "calloc rx_consumed_jetty_table failed\n");
         ret = -UMQ_ERR_ENOMEM;
