@@ -32,6 +32,7 @@
 #include "umq_inner.h"
 #include "umq_qbuf_pool.h"
 #include "umq_huge_qbuf_pool.h"
+#include "umq_ub_jetty_pool.h"
 #include "umq_ub_imm_data.h"
 #include "util_lock.h"
 
@@ -451,6 +452,8 @@ typedef struct ub_queue {
     bondp_port_id_t *used_port;
     uint32_t umq_id;
     uint32_t remote_umq_id;
+
+    jetty_pool_node_t *jetty_node;
 } ub_queue_t;
 
 typedef struct user_ctx {
