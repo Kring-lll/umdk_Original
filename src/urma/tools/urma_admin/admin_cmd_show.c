@@ -10,8 +10,13 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <netlink/attr.h>
 #include <netlink/errno.h>
+#include <netlink/genl/ctrl.h>
 #include <netlink/genl/genl.h>
+#include <netlink/handlers.h>
+#include <netlink/netlink.h>
+#include <netlink/socket.h>
 #include <stdio.h>
 
 #include "ub_list.h"
@@ -39,8 +44,12 @@ static int cmd_show_usage(admin_config_t *cfg)
            "  urma_admin show dev <DEV> jetty_group [JETTY_GROUP_ID]\n"
            "  urma_admin show dev <DEV> rc          [RC_ID]\n"
            "  urma_admin show dev <DEV> seg         [TOKEN_ID]\n"
+<<<<<<< HEAD
            "  urma_admin show dev <dev> tp [tp_id]  Show tpid_list (or single tpid state) of device\n"
            "  urma_admin show dev <dev> tpreuse     Show tpid_reuse of device\n"
+=======
+           "  urma_admin show system                   Show system features\n"
+>>>>>>> 6bd9fb7e... urma: add admin to query ns sharing mode.
            "\n"
            "Options:\n"
            "  <dev>      Device name (e.g., udma1)\n"
@@ -1835,6 +1844,199 @@ static int cmd_show_dev(admin_config_t *cfg)
     return exec_cmd(cfg, cmds);
 }
 
+typedef struct admin_show_system_ctx {
+    uint8_t dev_ns_mode;
+    uint8_t eid_ns_mode;
+    bool has_dev_ns_mode;
+    bool has_eid_ns_mode;
+    bool found;
+    int ret;
+} admin_show_system_ctx_t;
+
+static int admin_show_system_reply_cb(struct nl_msg *msg, void *arg)
+{
+    struct nlmsghdr *hdr = nlmsg_hdr(msg);
+    struct genlmsghdr *genlhdr = genlmsg_hdr(hdr);
+    struct nlattr *attrs[UBCORE_ATTR_AFTER_LAST] = {0};
+    admin_show_system_ctx_t *ctx = arg;
+    int ret;
+
+    if (ctx == NULL) {
+        return NL_OK;
+    }
+
+    ret = nla_parse(attrs, UBCORE_ATTR_AFTER_LAST - 1,
+                    genlmsg_attrdata(genlhdr, 0),
+                    genlmsg_attrlen(genlhdr, 0), NULL);
+    if (ret != 0) {
+        ctx->ret = ret;
+        return NL_STOP;
+    }
+
+    if (attrs[UBCORE_ATTR_DEV_NS_MODE]) {
+        ctx->dev_ns_mode = nla_get_u8(attrs[UBCORE_ATTR_DEV_NS_MODE]);
+        ctx->has_dev_ns_mode = true;
+    }
+
+    if (attrs[UBCORE_ATTR_EID_NS_MODE]) {
+        ctx->eid_ns_mode = nla_get_u8(attrs[UBCORE_ATTR_EID_NS_MODE]);
+        ctx->has_eid_ns_mode = true;
+    }
+
+    if (ctx->has_dev_ns_mode || ctx->has_eid_ns_mode) {
+        ctx->found = true;
+    }
+
+    return NL_STOP;
+}
+
+static int admin_show_system_open_sock(struct nl_sock **sock, int *genl_id)
+{
+    struct nl_sock *new_sock = nl_socket_alloc();
+    int ret;
+
+    if (new_sock == NULL) {
+        printf("Failed to allocate netlink socket\n");
+        return -ENOMEM;
+    }
+
+    ret = genl_connect(new_sock);
+    if (ret < 0) {
+        printf("Failed to connect netlink socket for \"%s\", ret=%d\n",
+               UBCORE_GENL_FAMILY_NAME, ret);
+        nl_socket_free(new_sock);
+        return ret;
+    }
+
+    ret = genl_ctrl_resolve(new_sock, UBCORE_GENL_FAMILY_NAME);
+    if (ret < 0) {
+        printf("Resolving of \"%s\" failed, ret=%d\n",
+               UBCORE_GENL_FAMILY_NAME, ret);
+        nl_close(new_sock);
+        nl_socket_free(new_sock);
+        return ret;
+    }
+
+    *sock = new_sock;
+    *genl_id = ret;
+    return 0;
+}
+
+static struct nl_msg *admin_show_system_alloc_genl_msg(int genl_id)
+{
+    struct nl_msg *msg = nlmsg_alloc();
+    struct genlmsghdr *msg_hdr;
+
+    if (msg == NULL) {
+        printf("Failed to allocate netlink message\n");
+        return NULL;
+    }
+
+    msg_hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, genl_id, 0, 0,
+                          URMA_CORE_SHOW_SYSTEM, GENL_FAMILY_VERSION);
+    if (msg_hdr == NULL) {
+        printf("Failed to put genl header\n");
+        nlmsg_free(msg);
+        return NULL;
+    }
+
+    return msg;
+}
+
+static int admin_show_system_recv_reply(struct nl_sock *sock,
+                                        admin_show_system_ctx_t *ctx)
+{
+    int reset_ret;
+    int ret;
+
+    ret = nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM,
+                              admin_show_system_reply_cb, ctx);
+    if (ret < 0) {
+        printf("Failed to set netlink valid callback, ret:%d\n", ret);
+        return ret;
+    }
+
+    ret = nl_recvmsgs_default(sock);
+    if (ret < 0) {
+        printf("Failed to recv netlink msg, ret:%d\n", ret);
+    }
+
+    reset_ret = nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM,
+                                    NULL, NULL);
+    if (reset_ret < 0) {
+        printf("Failed to reset netlink valid callback, ret:%d\n", reset_ret);
+        if (ret == 0) {
+            ret = reset_ret;
+        }
+    }
+
+    return ret;
+}
+
+static inline void print_system_feat_str(const admin_show_system_ctx_t *ctx)
+{
+    if (ctx->has_dev_ns_mode) {
+        printf("DEV_NS_SHARED: %s\n", ctx->dev_ns_mode ? "on" : "off");
+    } else {
+        printf("DEV_NS_SHARED: unknown\n");
+    }
+
+    if (ctx->has_eid_ns_mode) {
+        printf("EID_NS_SHARED: %s\n", ctx->eid_ns_mode ? "on" : "off");
+    } else {
+        printf("EID_NS_SHARED: unknown\n");
+    }
+}
+
+static int cmd_show_system(admin_config_t *cfg)
+{
+    struct nl_sock *sock = NULL;
+    struct nl_msg *msg;
+    int genl_id = 0;
+    int ret;
+
+    (void)cfg;
+    ret = admin_show_system_open_sock(&sock, &genl_id);
+    if (ret != 0) {
+        return ret;
+    }
+
+    msg = admin_show_system_alloc_genl_msg(genl_id);
+    if (msg == NULL) {
+        nl_close(sock);
+        nl_socket_free(sock);
+        return -ENOMEM;
+    }
+
+    admin_show_system_ctx_t ctx = {0};
+    nl_socket_disable_auto_ack(sock);
+    ret = nl_send_auto(sock, msg);
+    nl_socket_enable_auto_ack(sock);
+    if (ret < 0) {
+        printf("Failed to send netlink msg, ret:%d\n", ret);
+    } else {
+        ret = admin_show_system_recv_reply(sock, &ctx);
+    }
+
+    nlmsg_free(msg);
+    nl_close(sock);
+    nl_socket_free(sock);
+
+    if (ret != 0) {
+        return ret;
+    }
+    if (ctx.ret != 0) {
+        return ctx.ret;
+    }
+    if (!ctx.found) {
+        printf("Failed to get system info, no valid reply\n");
+        return -ENOENT;
+    }
+
+    print_system_feat_str(&ctx);
+    return 0;
+}
+
 int admin_cmd_show(admin_config_t *cfg)
 {
     if (cfg->help) {
@@ -1844,6 +2046,7 @@ int admin_cmd_show(admin_config_t *cfg)
         {NULL, cmd_show_default},  //
         {"dev", cmd_show_dev},     //
         {"topo", cmd_show_topo},   //
+        {"system", cmd_show_system}, //
         {0},                       //
     };
     return exec_cmd(cfg, cmds);
