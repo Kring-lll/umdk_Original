@@ -52,7 +52,7 @@ static bondp_nl_ctx_t g_bondp_nl_ctx = {
 };
 
 
-// 新接口: 直接发送 switchback_req, 填充新格式消息
+// 新接口: 直接发送 failback_msg, 不指定对端, 内核根据 vjetty_id 自动路由
 int bondp_failback_ctrl_send(const bondp_failback_msg_t *req)
 {
     if (req == NULL) {
@@ -63,18 +63,16 @@ int bondp_failback_ctrl_send(const bondp_failback_msg_t *req)
     if (ret != 0) {
         URMA_LOG_WARN(
             "Failed to send failback ctrl by netlink, ret=%d vjetty=%u pjetty_i_idx=%u "
-            "new_id=%u type=%u seq=%u route_lidx=%u route_tidx=%u\n",
+            "new_id=%u type=%u seq=%u\n",
             ret, req->in.vjetty_id, req->in.pjetty_i_idx, req->in.pjetty_i_new_id,
-            req->in.ctrl_type, req->in.req_seq,
-            req->in.route_local_idx, req->in.route_target_idx);
+            req->in.ctrl_type, req->in.req_seq);
         return ret;
     }
     URMA_LOG_INFO(
         "Failback ctrl sent by netlink, vjetty=%u pjetty_i_idx=%u new_id=%u "
-        "type=%u seq=%u route_lidx=%u route_tidx=%u\n",
+        "type=%u seq=%u\n",
         req->in.vjetty_id, req->in.pjetty_i_idx, req->in.pjetty_i_new_id,
-        req->in.ctrl_type, req->in.req_seq,
-        req->in.route_local_idx, req->in.route_target_idx);
+        req->in.ctrl_type, req->in.req_seq);
     return 0;
 }
 
@@ -86,14 +84,12 @@ int bondp_fallback_ctrl_send_default(bondp_context_t *bdp_ctx, uint32_t vjetty_i
         return -EINVAL;
     }
 
-    bondp_switchback_req_t req = {0};
+    bondp_failback_msg_t req = {0};
     req.in.vjetty_id = vjetty_id;
     req.in.pjetty_i_idx = (uint32_t)local_idx;
     req.in.pjetty_i_new_id = payload;
     req.in.ctrl_type = ctrl_type;
     req.in.req_seq = req_seq;
-    req.in.route_local_idx = (uint32_t)local_idx;
-    req.in.route_target_idx = (uint32_t)target_idx;
 
     int ret = bondp_nl_send_failback_msg(&req);
     if (ret != 0) {

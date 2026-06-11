@@ -33,7 +33,7 @@ int bondp_nl_get_fd(void);
 int bondp_nl_send_failback_msg(const bondp_failback_msg_t *req);
 int bondp_nl_recv_failback_msg(bondp_failback_msg_t *msg);
 
-// 新接口: 直接发送 不指定？
+// 新接口: 直接发送 不指定路径
 int bondp_failback_ctrl_send(const bondp_failback_msg_t *req);
 // 旧接口: 保留指定的方式
 int bondp_fallback_ctrl_send_default(bondp_context_t *bdp_ctx, uint32_t vjetty_id,

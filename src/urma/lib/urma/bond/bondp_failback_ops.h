@@ -8,10 +8,14 @@
 #define BONDP_LINK_RECOVERY_H
 
 #include "bondp_failback.h"
+#include "bondp_netlink.h"
 
 int bondp_failback_rebuild_local_pjetty(bondp_failback_task_t *task);
 int bondp_failback_send_req(bondp_failback_task_t *task);
 int bondp_failback_reimport(bondp_failback_task_t *task);
 int bondp_failback_relink(bondp_failback_task_t *task);
+
+// 对端处理 REQ: unimport 旧 ptjetty, 用 pjetty_i_new_id 重新 import, 发送 RESP
+int bondp_failback_handle_req(bondp_context_t *bdp_ctx, const bondp_failback_msg_t *msg);
 
 #endif // BONDP_LINK_RECOVERY_H

@@ -249,14 +249,10 @@ static bool bondp_handle_message(bondp_context_t *bdp_ctx, const bondp_failback_
     }
 
     if (ctrl_type == BONDP_FAILBACK_CTRL_REQ) {
-        // 第二步: 对端处理 REQ
-        // 通过 vjetty_id 遍历本地 bdp_tjetty, 找到匹配的 target jetty
-        // 然后通过 pjetty_i_idx (发送端故障 idx) 匹配 active_indices 定位 reimport 路径
-        // unimport 旧 ptjetty, 用 pjetty_i_new_id 重新 import, 发送 RESP
-        // TODO: 实现对端 REQ 处理逻辑
         URMA_LOG_INFO("Fallback REQ received, vjetty_id=%u pjetty_i_idx=%u pjetty_i_new_id=%u seq=%u\n",
             vjetty_id, pjetty_i_idx, pjetty_i_new_id, req_seq);
-        return true;
+        int ret = bondp_failback_handle_req(bdp_ctx, msg);
+        return (ret == BONDP_FB_OK);
     }
 
     if (ctrl_type == BONDP_FAILBACK_CTRL_RESP) {
