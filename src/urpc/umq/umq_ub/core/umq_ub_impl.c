@@ -1202,11 +1202,6 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_delete_jfc for flowcontrol jfs_jfc "
                 "failed, status: %d\n", EID_ARGS(*fc_eid), fc_id, ret);
         }
-
-        if (!is_umq_ub_post_jfr(queue)) {
-            umq_ub_flow_control_sge_free(&queue->dev_ctx->fc_sge_mgr, &queue->flow_control.recv_sge);
-        }
-
         umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_FLOW_CONTROL);
     }
 
@@ -2389,4 +2384,40 @@ int umq_ub_stats_tp_perf_stop_impl(void)
 int umq_ub_stats_tp_perf_info_get_impl(char *perf_buf, uint32_t *length)
 {
     return umq_symbol_urma()->urma_get_perf_info(perf_buf, length);
+}
+
+int umq_ub_modify_to_err_impl(uint64_t umqh_tp)
+{
+    ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
+    if (queue == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "modify UMQ to err failed, queue is NULL\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    if (is_umq_ub_logic_queue(queue->create_flag)) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "Logical UMQ(ID:%u) does not support modify err\n", queue->umq_id);
+        return -UMQ_ERR_EINVAL;
+    }
+
+    umq_io_direction_t direction = UMQ_IO_ALL;
+    if (is_umq_ub_sub_queue(queue->create_flag)) {
+        direction = UMQ_IO_TX;
+    }
+
+    int ret = umq_modify_ubq_to_err(queue, direction, UB_QUEUE_JETTY_IO);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "modify UMQ(ID:%u) IO jetty to error state failed, ret: %d\n",
+            queue->umq_id, ret);
+        return ret;
+    }
+
+    ret = umq_modify_ubq_to_err(queue, direction, UB_QUEUE_JETTY_FLOW_CONTROL);
+    if (ret != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "modify UMQ(ID:%u) FC jetty to error state failed, ret: %d\n",
+            queue->umq_id, ret);
+        return ret;
+    }
+
+    UMQ_VLOG_WARN(VLOG_UMQ, "modify UMQ(ID:%u) to error state success\n", queue->umq_id);
+    return UMQ_SUCCESS;
 }

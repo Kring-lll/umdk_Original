@@ -62,12 +62,13 @@ static inline void umq_inc_ref(bool lock_free, volatile uint32_t *ref_cnt, uint3
     }
 }
 
-static inline void umq_dec_ref(bool lock_free, volatile uint32_t *ref_cnt, uint32_t n)
+static inline uint32_t umq_dec_ref(bool lock_free, volatile uint32_t *ref_cnt, uint32_t n)
 {
     if (lock_free) {
         *ref_cnt = *ref_cnt - n;
+        return *ref_cnt;
     } else {
-        (void)__atomic_fetch_sub(ref_cnt, n, __ATOMIC_RELAXED);
+        return __atomic_sub_fetch(ref_cnt, n, __ATOMIC_ACQ_REL);
     }
 }
 
