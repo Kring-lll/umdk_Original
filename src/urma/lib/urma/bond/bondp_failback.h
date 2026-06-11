@@ -11,20 +11,6 @@
 #define BONDP_FB_OK                     (0)
 #define BONDP_FB_ERR                    (-1)
 
-typedef struct bondp_failover_sub_task {
-    int local_idx;
-    int target_idx;
-    bool valid;
-    bool probe_pending;
-    bool need_check;
-#ifndef __cplusplus
-    atomic_bool link_ok;
-#else
-    std::atomic_bool link_ok;
-#endif
-    uint64_t user_ctx;
-} bondp_failover_sub_task_t;
-
 typedef enum bondp_failback_state {
     BONDP_FAILBACK_STATE_IDLE = 0,
     BONDP_FAILBACK_STATE_WAIT_REBUILD_START,
@@ -47,20 +33,17 @@ typedef struct bondp_failback_task {
     uint32_t retry_ms;
 
     // --- 身份标识 ---
-    bondp_context_t *bdp_ctx;              // 所属 bond 上下文
-    struct bondp_comp *bondp_jetty;        // 本端 vjetty (comp)
-    uint32_t vjetty_id;                    // 本端 vjetty ID
-    uint32_t node_id;                      // 对端 node ID（多对一核心）
+    bondp_context_t *bdp_ctx;
+    struct bondp_comp *bondp_jetty;
+    uint32_t vjetty_id;
 
     // --- 路径信息 ---
-    int primary_local_idx;                 // 主路径本端 idx (rebuild 目标)
-    int active_local_idx;                  // 当前活跃本端 idx (发 REQ 通道)
-    uint32_t selected_remote_pjetty_id;    // RESP 返回: 对端选定的 pjetty ID
-    int selected_target_idx;               // RESP 返回: 对端选定的 target idx
-
-    // --- 连接状态？ 是否应该在node中维护 ---
-    //TODO: 是否改为在node中维护
-    bondp_failover_sub_task_t sub_tasks[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
+    int failed_local_idx;                 // 故障 pjetty 本端 idx
+    int target_idx;                        // 故障 pjetty 对端 idx
+    urma_jetty_t *new_pjetty;              // 新创建的 pjetty (暂存，收到 RESP 后替换)
+    uint32_t new_pjetty_id;                // 新 pjetty ID (用于 REQ payload)
+    struct bondp_target_jetty *bdp_tjetty; // 对端 target jetty (用于 reimport)
+    uint32_t remote_new_pjetty_id;         // 对端新 pjetty ID (来自 RESP)
 
     // --- 哈希表挂载 ---
     hmap_node_t hmap_node;
@@ -77,7 +60,9 @@ typedef struct bondp_failback_task {
 #define BONDP_FAILBACK_CTRL_RESP                       2
 #define BONDP_FAILBACK_PRIMARY_INVALID_ID              UINT32_MAX
 
-int bondp_failback_on_cqe(bondp_failback_task_t *ctx);
+int bondp_failback_on_cqe(bondp_context_t *bdp_ctx,
+    struct bondp_comp *bondp_jetty,
+    int failed_local_idx);
 
 int bondp_handle_netlink_events(void);
 
