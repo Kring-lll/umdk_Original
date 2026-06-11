@@ -141,9 +141,11 @@ build_ascend_proj() {
         find build_out/op_kernel/CMakeFiles -name "build.make" -exec sed -i "s|--compile-options=\"\"|--compile-options=\\\"${KERNEL_COMPILE_OPTS}\\\"|g" {} +
     fi
 
-    # 使用新的npu_op_* cmake构建系统
-    cmake --build build_out --target binary -j16
-    cmake --build build_out --target package -j16
+    # 构建并行度：可通过 CAM_BUILD_JOBS 环境变量配置，默认 8
+    # Jenkins ECS 等内存受限环境建议设置为 2~4
+    BUILD_JOBS=${CAM_BUILD_JOBS:-8}
+    cmake --build build_out --target binary -j${BUILD_JOBS}
+    cmake --build build_out --target package -j${BUILD_JOBS}
 
     # 根据is_extract判断是否抽取run包
     if [ $is_extract -eq 1 ]; then
