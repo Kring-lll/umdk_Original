@@ -11,7 +11,6 @@
 #include <dirent.h>
 #include <errno.h>
 #include <netlink/errno.h>
-#include <netlink/genl/genl.h>
 #include <stdio.h>
 
 #include "ub_list.h"
