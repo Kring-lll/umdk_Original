@@ -59,7 +59,7 @@ extern "C" {
 
 #define UMQ_UB_ENABLE_SHARE_FC_JFR (true)
 
-#define UMQ_UB_FLOW_CONTROL_SGE_QBUF_COUNT_MAX 64 // per-device flow control sge mgr qbuf array
+#define UMQ_UB_FLOW_CONTROL_SGE_QBUF_COUNT_MAX 512 // per-device flow control sge mgr qbuf array
 #define UMQ_UB_FLOW_CONTROL_SGE_SHARED_RECV_QBUF_MAX 256 // per-jetty shared recv qbuf array
 
 typedef enum umq_size_interval {
@@ -449,7 +449,8 @@ typedef struct ub_queue {
     uint64_t share_rq_umqh;
     ub_queue_idle_check_t *checker;
     bondp_port_id_t *used_port;
-    uint32_t umq_id;            // umq id for share transport mode
+    uint32_t umq_id;
+    uint32_t remote_umq_id;
 } ub_queue_t;
 
 typedef struct user_ctx {
