@@ -254,6 +254,9 @@ typedef struct bondp_comp {
     wr_buf_t recv_wr_buf;
     pthread_spinlock_t recv_wr_lock;
     uint32_t rqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
+    // failback: 每个故障路径对应一个 failback task, 按 failed_local_idx 索引
+    // 替代了原本的hash管理的healthcheck_ctx
+    struct bondp_failback_task *failback_tasks[URMA_UBAGG_DEV_MAX_NUM];
 } bondp_comp_t;
 
 typedef struct bondp_target_jetty {

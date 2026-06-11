@@ -59,8 +59,8 @@ bondp_failback_task_t *bondp_failback_task_create(
     task->bdp_tjetty = NULL;
     task->remote_new_pjetty_id = 0;
 
-    //TODO: 故障jetty 对端 可以通过find target找到
-    /*
+    //TODO: 故障jetty 对端 可以通过find target推导  是否多对多？
+
     // 从 v_jetty.remote_jetty 推导 bdp_tjetty 和 target_idx
     if (bondp_jetty->v_jetty.remote_jetty != NULL) {
         task->bdp_tjetty = CONTAINER_OF_FIELD(
@@ -68,7 +68,6 @@ bondp_failback_task_t *bondp_failback_task_create(
         (void)bondp_find_target_idx_by_local_idx(
             task->bdp_tjetty, failed_local_idx, &task->target_idx);
     }
-    */
 
     return task;
 }
@@ -83,6 +82,11 @@ void bondp_failback_task_destroy(bondp_failback_task_t *task)
         //新增重建失败，任务取消时的newjetty回收
         (void)urma_delete_jetty(task->new_pjetty);
         task->new_pjetty = NULL;
+    }
+    // 从 bondp_comp_t 的 failback_tasks 数组中移除
+    if (task->bondp_jetty != NULL && task->failed_local_idx >= 0 &&
+        task->failed_local_idx < URMA_UBAGG_DEV_MAX_NUM) {
+        task->bondp_jetty->failback_tasks[task->failed_local_idx] = NULL;
     }
     free(task);
 }
@@ -127,21 +131,25 @@ int bondp_failback_on_cqe(bondp_context_t *bdp_ctx,
     struct bondp_comp *bondp_jetty,
     int failed_local_idx)
 {
+    if (failed_local_idx < 0 || failed_local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return BONDP_FB_ERR;
+    }
+
+    // 校验: 同一 vjetty 同一 failed_local_idx 只能有一个活跃 task
+    if (bondp_jetty->failback_tasks[failed_local_idx] != NULL) {
+        URMA_LOG_WARN("Failback task already exists for vjetty=%u idx=%d, skip\n",
+            bondp_jetty->v_jetty.jetty_id.id, failed_local_idx);
+        return BONDP_FB_OK;
+    }
+
     bondp_failback_task_t *task = bondp_failback_task_create(bdp_ctx, bondp_jetty, failed_local_idx);
     if (task == NULL) {
         return TW_NO_MEMORY_ERROR;
     }
 
-    //TODO: 多个CQE的交互，同时failed_local_idx相等的 task只有一个  原版有一个task的hash表实现
-    /*
-    // 校验 bdp_tjetty 和 target_idx 必须有效才能启动 failback
-    if (task->bdp_tjetty == NULL || task->target_idx < 0) {
-        URMA_LOG_ERR("Cannot start failback, bdp_tjetty or target_idx invalid, vjetty=%u idx=%d\n",
-            task->vjetty_id, failed_local_idx);
-        bondp_failback_task_destroy(task);
-        return BONDP_FB_ERR;
-    }
-    */
+    // 注册 task 到 bondp_comp_t, 便于 RESP 到达时查找 且保证task不重复
+    bondp_jetty->failback_tasks[failed_local_idx] = task;
+
     task->state = BONDP_FAILBACK_STATE_WAIT_REBUILD_START;
     task->retry_ms = BONDP_FAILBACK_REBUILD_RETRY_INIT_MS;
     int ret = bondp_failback_schedule(task, BONDP_FAILBACK_REBUILD_START_DELAY_MS, bondp_failback_rebuild_task);
@@ -231,7 +239,19 @@ static void bondp_failback_req_timeout_task(void *arg)
     task->retry_ms = bondp_failback_next_backoff(task->retry_ms, BONDP_FAILBACK_REQ_RSP_TIMEOUT_MAX_MS);
 }
 
-
+/*
+ * 处理收到的 netlink 消息 (REQ / RESP)
+ *
+ * 使用消息格式 bondp_failback_msg_t:
+ *   vjetty_id       - 发送端 vjetty ID
+ *   pjetty_i_idx    - 发送端故障 pjetty idx
+ *   pjetty_i_new_id - REQ: 新 pjetty ID (用于 reimport); RESP: 对端 pjetty ID
+ *   ctrl_type       - BONDP_FAILBACK_CTRL_REQ / RESP
+ *   req_seq         - 序列号
+ *
+ * RESP 查找链路:
+ *   vjetty_id → p_vjetty_id_table → bondp_comp_t → failback_tasks[pjetty_i_idx]
+ */
 static bool bondp_handle_message(bondp_context_t *bdp_ctx, const bondp_failback_msg_t *msg,
     bool silent_unmatched)
 {
@@ -248,7 +268,19 @@ static bool bondp_handle_message(bondp_context_t *bdp_ctx, const bondp_failback_
         return false;
     }
 
+    if (pjetty_i_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        if (!silent_unmatched) {
+            URMA_LOG_WARN("Fallback MESG: invalid pjetty_i_idx=%u vjetty_id=%u\n", pjetty_i_idx, vjetty_id);
+        }
+        return false;
+    }
+
+
     if (ctrl_type == BONDP_FAILBACK_CTRL_REQ) {
+        // 第二步: 对端处理 REQ
+        // 通过 vjetty_id 遍历本地 bdp_tjetty, 找到匹配的 target jetty
+        // 然后通过 pjetty_i_idx (发送端故障 idx) 匹配 active_indices 定位 reimport 路径
+        // unimport 旧 ptjetty, 用 pjetty_i_new_id 重新 import, 发送 RESP
         URMA_LOG_INFO("Fallback REQ received, vjetty_id=%u pjetty_i_idx=%u pjetty_i_new_id=%u seq=%u\n",
             vjetty_id, pjetty_i_idx, pjetty_i_new_id, req_seq);
         int ret = bondp_failback_handle_req(bdp_ctx, msg);
@@ -257,29 +289,48 @@ static bool bondp_handle_message(bondp_context_t *bdp_ctx, const bondp_failback_
 
     if (ctrl_type == BONDP_FAILBACK_CTRL_RESP) {
         // 第三步: 本端处理 RESP
-        // 通过 vjetty_id 匹配本端的 failback task
-        bondp_failback_task_t *ctx = NULL;
-        // TODO: 根据 vjetty_id 查找对应的 failback task
+        // 查找链路: vjetty_id → p_vjetty_id_table → bondp_comp_t → failback_tasks[pjetty_i_idx]
+        // RESP 中的 vjetty_id 是本端 (发送端) 的 vjetty ID
+        // RESP 中的 pjetty_i_idx 是本端故障路径的 failed_local_idx
+        // 通过这两个信息可以直接定位 failback task
 
-        if (ctx == NULL) {
+        // Step 1: 通过 vjetty_id 找到本端的 bondp_comp_t
+        bondp_comp_t *bdp_jetty = bondp_find_comp_by_vjetty_id(bdp_ctx, vjetty_id);
+        if (bdp_jetty == NULL) {
             if (!silent_unmatched) {
-                URMA_LOG_WARN("Fallback RESP not matched by vjetty_id=%u\n", vjetty_id);
+                URMA_LOG_WARN("Fallback RESP: no matching comp for vjetty_id=%u\n", vjetty_id);
             }
             return false;
         }
 
-        if (ctx->req_seq == req_seq) {
+        // Step 2: 通过 pjetty_i_idx 从 failback_tasks 数组中直接索引
+        bondp_failback_task_t *task = bdp_jetty->failback_tasks[pjetty_i_idx];
+        if (task == NULL) {
+            if (!silent_unmatched) {
+                URMA_LOG_WARN("Fallback RESP: no active task for vjetty_id=%u pjetty_i_idx=%u\n",
+                    vjetty_id, pjetty_i_idx);
+            }
+            return false;
+        }
+
+        // Step 3: 校验序列号, 处理 RESP
+        if (task->req_seq == req_seq) {
             // RESP 中的 pjetty_i_new_id 是对端的 pjetty ID
-            ctx->remote_new_pjetty_id = pjetty_i_new_id;
+            task->remote_new_pjetty_id = pjetty_i_new_id;
             URMA_LOG_INFO("Fallback RESP accepted, seq=%u vjetty_id=%u remote_new_pjetty_id=%u\n",
-                req_seq, vjetty_id, ctx->remote_new_pjetty_id);
-            int ret = bondp_failback_relink(ctx);
+                req_seq, vjetty_id, task->remote_new_pjetty_id);
+            // relink: 删除旧 pjetty, 替换为 new_pjetty, reimport target jetty
+            int ret = bondp_failback_relink(task);
             if (ret == BONDP_FB_OK) {
-                bondp_failback_cancel_timer(ctx);
+                // 销毁已完成的 task, 从 failback_tasks 中移除
+                bondp_failback_task_destroy(task);
+            } else {
+                URMA_LOG_ERR("Fallback RESP: relink failed, vjetty_id=%u pjetty_i_idx=%u\n",
+                    vjetty_id, pjetty_i_idx);
             }
         } else {
-            URMA_LOG_WARN("Fallback RESP dropped due to seq mismatch, recv_seq=%u expect_seq=%u\n",
-                req_seq, (unsigned)ctx->req_seq);
+            URMA_LOG_WARN("Fallback RESP dropped due to seq mismatch, recv_seq=%u expect_seq=%u vjetty_id=%u\n",
+                req_seq, (unsigned)task->req_seq, vjetty_id);
         }
     }
 
