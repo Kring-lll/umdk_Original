@@ -9,8 +9,8 @@
 
 #include <string.h>
 #include "graph/types.h"
-#include "aclnnInner_moe_distribute_combine_a2.h"
-#include "aclnn_moe_distribute_combine_a2.h"
+#include "aclnnInner_moe_combine_normal_a2.h"
+#include "aclnn_moe_combine_normal_a2.h"
 
 namespace {
 static constexpr int32_t NNOPBASE_HCCL_SERVER_TYPE_AICPU = 0;

@@ -7,8 +7,8 @@
  * History: 2026-01-15 create combine normal A2 interface part
  */
 
-#ifndef ACLNN_MOE_DISTRIBUTE_COMBINE_A2_H_
-#define ACLNN_MOE_DISTRIBUTE_COMBINE_A2_H_
+#ifndef ACLNN_MOE_COMBINE_NORMAL_A2_H_
+#define ACLNN_MOE_COMBINE_NORMAL_A2_H_
 
 #include "aclnn/acl_meta.h"
 

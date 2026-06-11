@@ -7,8 +7,8 @@
  * History: 2026-01-15 create dispatch normal A2 interface part
  */
 
-#ifndef ACLNN_DISPATCH_NORMAL_A2_H_
-#define ACLNN_DISPATCH_NORMAL_A2_H_
+#ifndef ACLNN_MOE_DISPATCH_NORMAL_A2_H_
+#define ACLNN_MOE_DISPATCH_NORMAL_A2_H_
 
 #include "aclnn/acl_meta.h"
 
