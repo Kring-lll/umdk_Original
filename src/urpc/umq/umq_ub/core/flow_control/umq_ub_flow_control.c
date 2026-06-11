@@ -514,9 +514,8 @@ static ALWAYS_INLINE uint16_t allocated_credit_dec_non_atomic(ub_credit_pool_t *
     return counter_dec_non_atomic_u16(pool, count, CREDIT_POOL_ALLOCATED);
 }
 
-static void umq_ub_credit_pool_init(ub_queue_t *queue, uint32_t feature, umq_flow_control_cfg_t *cfg)
+static void umq_ub_credit_pool_init(ub_credit_pool_t *pool, ub_queue_t *queue, umq_flow_control_cfg_t *cfg)
 {
-    ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
     memset(pool, 0, sizeof(ub_credit_pool_t));
     pool->capacity = queue->rx_depth;
     if (cfg->use_atomic_window) {
@@ -542,8 +541,11 @@ int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t 
         return UMQ_SUCCESS;
     }
     if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0) {
-        // main queue initializes credit pool
-        umq_ub_credit_pool_init(queue, feature, cfg);
+        // non-sub umq initializes credit pool on its own fc
+        umq_ub_credit_pool_init(&fc->credit, queue, cfg);
+        queue->credit_pool = &fc->credit;
+    } else {
+        queue->credit_pool = NULL;
     }
     fc->local_rx_depth = queue->rx_depth;
     fc->local_tx_depth = queue->tx_depth;
@@ -645,7 +647,7 @@ void umq_ub_shared_credit_recharge(ub_queue_t *queue, uint16_t recharge_count)
         return;
     }
 
-    ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    ub_credit_pool_t *credit = queue->credit_pool;
     credit->ops.available_credit_inc(credit, recharge_count);
 }
 
@@ -731,7 +733,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify, ui
     }
     urma_jetty_t *jetty  = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
-    ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    ub_credit_pool_t *pool = queue->credit_pool;
     uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
     umq_ub_fc_sge_data_t sge_data = {
         .bs = {
@@ -785,7 +787,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify, ui
 int umq_ub_shared_credit_req_handle(ub_queue_t *queue, umq_ub_flow_control_data_t *flow_control_data)
 {
     ub_flow_control_t *fc = &queue->flow_control;
-    ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    ub_credit_pool_t *credit = queue->credit_pool;
     uint16_t credits_per_request = flow_control_data->bs.window;
     uint16_t allocated_count = credit->ops.available_credit_dec(credit, credits_per_request);
     (void)fc->ops.local_rx_allocated_inc(fc, allocated_count);
@@ -935,7 +937,7 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
     }
     urma_jetty_t *jetty  = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
-    ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    ub_credit_pool_t *pool = queue->credit_pool;
     uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
 
     umq_ub_fc_sge_data_t sge_data = {
@@ -990,7 +992,7 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
 int umq_ub_shared_credit_return_req_handle(ub_queue_t *queue, umq_ub_flow_control_data_t *flow_control_data)
 {
     ub_flow_control_t *fc = &queue->flow_control;
-    ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    ub_credit_pool_t *credit = queue->credit_pool;
     uint16_t return_credit = flow_control_data->bs.window;
     uint64_t consumed_credit = umq_ub_rx_consumed_load(queue->dev_ctx->io_lock_free,
         &queue->dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id]);
@@ -1039,7 +1041,7 @@ uint64_t umq_ub_rx_consumed_exchange(bool lock_free, volatile uint64_t *var, uin
 void umq_ub_credit_clean_up(ub_queue_t *queue)
 {
     ub_flow_control_t *fc = &queue->flow_control;
-    ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    ub_credit_pool_t *credit = queue->credit_pool;
     uint16_t actual_return_credit = __atomic_exchange_n(&fc->local_rx_posted, 0, __ATOMIC_RELAXED);
     uint64_t consumed_credit = umq_ub_rx_consumed_load(queue->dev_ctx->io_lock_free,
         &queue->dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id]);
@@ -1059,7 +1061,7 @@ void umq_ub_idle_credit_flush(ub_queue_t *queue, uint32_t cnt)
 {
     ub_flow_control_t *fc = &queue->flow_control;
     if (cnt != 0 && fc->enabled) {
-        ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+        ub_credit_pool_t *credit = queue->credit_pool;
         bool use_atomic_window = queue->dev_ctx->flow_control.use_atomic_window;
         if (use_atomic_window) {
             (void)counter_dec_atomic_u16(credit, cnt, CREDIT_POOL_IDLE);

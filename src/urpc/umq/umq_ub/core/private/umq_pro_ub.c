@@ -1328,7 +1328,7 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
     }
 
     umq_buf_status_t qbuf_status;
-    ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    ub_credit_pool_t *credit = queue->credit_pool;
     if (queue->flow_control.enabled && rx_cr_cnt != 0) {
         (void)credit->ops.allocated_credit_dec(credit, rx_cr_cnt);
     }
@@ -1440,7 +1440,7 @@ static void umq_ub_fc_process_tx_error(ub_queue_t *queue, umq_ub_fc_user_ctx_t *
     uint32_t type = obj->bs.type;
     ub_flow_control_t *fc = &queue->flow_control;
     uint16_t notify;
-    ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    ub_credit_pool_t *credit = queue->credit_pool;
     switch (type) {
         case IMM_TYPE_FC_CREDIT_INIT:
             fc->remote_get = false;
