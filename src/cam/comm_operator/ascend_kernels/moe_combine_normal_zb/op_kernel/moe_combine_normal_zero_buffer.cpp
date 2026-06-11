@@ -14,17 +14,18 @@ using namespace AscendC;
 using namespace MoeCombineNormalZeroBufferImpl;
 
 extern "C" __global__ __aicore__ void moe_combine_normal_zero_buffer(
-    GM_ADDR recvX, GM_ADDR epRecvCount, GM_ADDR topkWeights, GM_ADDR topkIdx, GM_ADDR sendTokenIdx, GM_ADDR XOut,
-    GM_ADDR sendCostStatsOut, GM_ADDR workspaceGM, GM_ADDR tilingGM)
+    GM_ADDR recvX, GM_ADDR epRecvCount, GM_ADDR topkWeights, GM_ADDR topkIdx, GM_ADDR sendTokenIdx,
+    GM_ADDR probGrad, GM_ADDR XOut, GM_ADDR sendCostStatsOut, GM_ADDR gradOut,
+    GM_ADDR workspaceGM, GM_ADDR tilingGM)
 {
     REGISTER_TILING_DEFAULT(MoeCombineNormalZeroBufferTilingData);
     TPipe pipe;
 
 #if (ORIG_DTYPE_RECV_X == DT_BF16 || ORIG_DTYPE_RECV_X == DT_FLOAT16)
-    GET_TILING_DATA_WITH_STRUCT(MoeCombineNormalZeroBufferTilingData, tilingData, tilingGM);
-    MoeCombineNormalZeroBuffer<DTYPE_RECV_X, DTYPE_X, int32_t> op;
-    op.Init(recvX, epRecvCount, topkWeights, topkIdx, sendTokenIdx, XOut, sendCostStatsOut, workspaceGM, &pipe,
-            &tilingData);
-    op.Process();
-#endif
+ 	     GET_TILING_DATA_WITH_STRUCT(MoeCombineNormalZeroBufferTilingData, tilingData, tilingGM);
+ 	     MoeCombineNormalZeroBuffer<DTYPE_RECV_X, DTYPE_X, int32_t> op;
+ 	     op.Init(recvX, epRecvCount, topkWeights, topkIdx, sendTokenIdx, probGrad, 
+ 	             XOut, sendCostStatsOut, gradOut, workspaceGM, &pipe, &tilingData);
+ 	     op.Process();
+ #endif
 }
