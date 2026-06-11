@@ -191,6 +191,7 @@ typedef struct ub_flow_control {
     umq_ub_flow_control_sge_slot_t recv_sge;
     uint8_t local_req_seq;
     uint8_t remote_expect_seq;
+    ub_credit_pool_t credit;
 } ub_flow_control_t;
 
 typedef struct umq_ub_flow_control_sge_mgr {
@@ -371,7 +372,6 @@ typedef struct jfr_ctx {
     urma_jfce_t *jfr_jfce; // io and flow control jetty share same jfce
     volatile uint32_t ref_cnt;
     rx_buf_ctx_list_t rx_buf_ctx_list;
-    ub_credit_pool_t credit;
     umq_ub_flow_control_share_recv_t share_rq_sge;
 } jfr_ctx_t;
 
@@ -451,6 +451,7 @@ typedef struct ub_queue {
     bondp_port_id_t *used_port;
     uint32_t umq_id;
     uint32_t remote_umq_id;
+    ub_credit_pool_t *credit_pool;
 } ub_queue_t;
 
 typedef struct user_ctx {
