@@ -142,8 +142,8 @@ build_ascend_proj() {
     fi
 
     # 使用新的npu_op_* cmake构建系统
-    cmake --build build_out --target binary -j16
-    cmake --build build_out --target package -j16
+    cmake --build build_out --target binary -j8
+    cmake --build build_out --target package -j8
 
     # 根据is_extract判断是否抽取run包
     if [ $is_extract -eq 1 ]; then
