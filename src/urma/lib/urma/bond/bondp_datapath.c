@@ -506,7 +506,6 @@ static urma_status_t bondp_post_recv_wr_no_store(bondp_comp_t *bdp_comp,
     static thread_local urma_sge_t prealloc_src_sge[BONDP_MAX_WR_LIST_NUM][BONDP_MAX_SGE_NUM];
 
     urma_status_t ret = 0;
-
     int recv_idx = -1;
     ret = schedule_recv(bdp_comp, &recv_idx);
     if (ret != 0) {
@@ -541,12 +540,13 @@ static urma_status_t bondp_post_recv_wr_no_store(bondp_comp_t *bdp_comp,
     return ret;
 }
 
-static urma_status_t bondp_post_recv_wr_list_and_store(bondp_comp_t *bdp_comp, urma_jfr_wt_t *wr,
+static urma_status_t bondp_post_recv_wr_list_and_store(bondp_comp_t *bdp_comp, urma_jfr_wr_t *wr,
                                                        urma_jfr_wr_t **bad_wr)
 {
-    urma_jfr_wt_t *cur = wr;
+    urma_jfr_wr_t *cur = wr;
     urma_status_t ret = URMA_SUCCESS;
     jfr_wr_entry_t *wr_entries[URMA_BONDP_BATCH_POST_MAX_NUM];
+    uint32_t recv_wr_cnt[URMA_UBAGG_DEV_MAX_NUM] = {0};
     int wr_count = 0;
     int process_node = 0;
     int success_node = 0;
@@ -563,13 +563,6 @@ static urma_status_t bondp_post_recv_wr_list_and_store(bondp_comp_t *bdp_comp, u
         URMA_LOG_ERR("Failed to get recv_wr_buf, comp_type:%d\n", bdp_comp->comp_type);
         return URMA_EINVAL;
     }
-    
-    // 获取发送端口，但是有一点不同 批量post recv同一批请求会压到单个接口中
-    int recv_idx = 0;
-    ret = schedule_recv(bdp_comp, &recv_idx);
-    if (ret != 0) {
-        return URMA_FAIL;
-    }
 
     // 开始分配内存
     (void)pthread_spin_lock(recv_wr_lock);
@@ -577,13 +570,12 @@ static urma_status_t bondp_post_recv_wr_list_and_store(bondp_comp_t *bdp_comp, u
         wr_entries[wr_count] = jfr_wr_buf_alloc(recv_wr_buf);
         if (wr_entries[wr_count] == NULL) {
             pthread_spin_unlock(recv_wr_lock);
-            URAM_LOG_ERR("Failed to allocate jfr wr entry\n");
+            URMA_LOG_ERR("Failed to allocate jfr wr entry\n");
             ret = URMA_EAGAIN;
             goto RELEASEBUF;
         }
         wr_entries[wr_count]->user_ctx = cur->user_ctx;
         wr_entries[wr_count]->bdp_comp = bdp_comp;
-        wr_entries[wr_count]->recv_idx = recv_idx;
         wr_count++;
         cur = cur->next;
     }
@@ -594,44 +586,68 @@ static urma_status_t bondp_post_recv_wr_list_and_store(bondp_comp_t *bdp_comp, u
         goto RELEASEBUF;
     }
 
-    cur = wr;
-    for (int i = 0; i < wr_count; i++, cur = cur->next) {
-        jfr_wr_entry_t *wr_entry = wr_entries[i];
-        urma_jfr_wr_t *pwr = &wr_entry->wr;
-
-        ret = copy_jfr_wr(cur, pwr, NULL);
-        if (ret != 0) {
-            free_jfr_wr(pwr);
-            goto CLEANUP;
-        }
-
-        ret = convert_jfr_vwr_to_pwr(pwr, recv_idx);
-        if (ret != 0) {
-            free_jfr_wr(pwr);
-            goto CLEANUP;
-        }
-        pwr->user_ctx = wr_entry->wr_id;
-        if (i > 0) {
-            wr_entries[i - 1]->wr.next = pwr;
-        }
-        pwr->next = NULL;
-        process_node++;
+    ret = schedule_recv_n(bdp_comp, (uint32_t)wr_count, recv_wr_cnt);
+    if (ret != 0) {
+        ret = URMA_FAIL;
+        goto RELEASEBUF;
     }
 
-    ret = comp_post_recv(bdp_comp, recv_idx, wr_entries[0]->wr, bad_wr, wr_count);
-    if (ret != URMA_SUCCESS) {
+    cur = wr;
+    for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
+        int recv_idx = (int)bdp_comp->active_indices[i];
+        uint32_t recv_cnt = recv_wr_cnt[recv_idx];
+
+        for (uint32_t j = 0; j < recv_cnt; j++, cur = cur->next) {
+            jfr_wr_entry_t *wr_entry = wr_entries[process_node];
+            urma_jfr_wr_t *pwr = &wr_entry->wr;
+
+            wr_entry->recv_idx = (uint32_t)recv_idx;
+            ret = copy_jfr_wr(cur, pwr, NULL);
+            if (ret != 0) {
+                free_jfr_wr(pwr);
+                goto CLEANUP;
+            }
+
+            ret = convert_jfr_vwr_to_pwr(pwr, recv_idx);
+            if (ret != 0) {
+                free_jfr_wr(pwr);
+                goto CLEANUP;
+            }
+            pwr->user_ctx = wr_entry->wr_id;
+            if (j > 0) {
+                wr_entries[process_node - 1]->wr.next = pwr;
+            }
+            pwr->next = NULL;
+            process_node++;
+        }
+    }
+
+    for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
+        int recv_idx = (int)bdp_comp->active_indices[i];
+        uint32_t recv_cnt = recv_wr_cnt[recv_idx];
+
+        if (recv_cnt == 0) {
+            continue;
+        }
+
+        ret = comp_post_recv(bdp_comp, recv_idx, &wr_entries[success_node]->wr, bad_wr, (int)recv_cnt);
+        if (ret == URMA_SUCCESS) {
+            success_node += (int)recv_cnt;
+            continue;
+        }
+
         URMA_LOG_ERR("Failed to post recv wr, ret:%d\n", ret);
-        goto ROLLBACK;
+        int posted_node = 0;
+        urma_jfr_wr_t *posted_wr = &wr_entries[success_node]->wr;
+        while (posted_wr != NULL && bad_wr != NULL && posted_wr != *bad_wr) {
+            posted_node++;
+            posted_wr = posted_wr->next;
+        }
+        bdp_comp->rqe_cnt[recv_idx] += (uint32_t)posted_node;
+        success_node += posted_node;
+        goto CLEANUP;
     }
     return URMA_SUCCESS;
-
-ROLLBACK:
-    cur = &wr_entries[0]->wr;
-    while (cur != NULL && bad_wr != NULL && cur != *bad_wr) {
-        success_node++;
-        cur = cur->next;
-    }
-    bdp_comp->rqe_cnt[recv_idx] += success_node;  // please ensure this operation is atomic or be locked
 CLEANUP:
     for (int i = success_node; i < process_node; i++) {
         free_jfr_wr(&wr_entries[i]->wr);
