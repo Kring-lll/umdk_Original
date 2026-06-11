@@ -43,21 +43,6 @@ static inline bool umq_ub_bind_feature_check(uint32_t local_feature, uint32_t re
     return ((local_feature ^ remote_feature) & (~umq_ub_bind_fature_allowlist_get())) == 0;
 }
 
-static inline bool is_umq_ub_main_queue(uint32_t create_flag)
-{
-    return (create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0;
-}
-
-static inline bool is_umq_ub_sub_queue(uint32_t create_flag)
-{
-    return (create_flag & UMQ_CREATE_FLAG_SUB_UMQ) != 0;
-}
-
-static inline bool is_umq_ub_share_rq(uint32_t create_flag)
-{
-    return (create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0;
-}
-
 static inline bool is_umq_ub_bonding_dev(const char *name)
 {
     return strstr(name, "bonding") != NULL;

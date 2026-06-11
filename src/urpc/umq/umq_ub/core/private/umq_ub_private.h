@@ -636,6 +636,34 @@ static inline bool is_umq_ub_post_jfr(ub_queue_t *queue)
     // bondp with shared_jfr should use urma_post_jfr_wr
     return (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 && queue->used_port_num > 0;
 }
+static ALWAYS_INLINE bool is_umq_ub_main_queue(uint32_t create_flag)
+{
+    return (create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0;
+}
+
+static ALWAYS_INLINE bool is_umq_ub_sub_queue(uint32_t create_flag)
+{
+    return (create_flag & UMQ_CREATE_FLAG_SUB_UMQ) != 0;
+}
+
+// Logic UMQ: SHARE_TRANSPORT + SHARE_RQ, without MAIN_UMQ and SUB_UMQ flags
+static ALWAYS_INLINE bool is_umq_ub_logic_queue(uint32_t create_flag)
+{
+    return (create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT) != 0 &&
+        (create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0 &&
+        (create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) == 0 &&
+        (create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0;
+}
+
+static ALWAYS_INLINE bool is_umq_ub_share_transport(uint32_t create_flag)
+{
+    return (create_flag & UMQ_CREATE_FLAG_SHARE_TRANSPORT) != 0;
+}
+
+static ALWAYS_INLINE bool is_umq_ub_share_rq(uint32_t create_flag)
+{
+    return (create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0;
+}
 
 #ifdef __cplusplus
 }

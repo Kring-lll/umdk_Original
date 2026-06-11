@@ -301,6 +301,19 @@ typedef struct umq_ops {
      * Return: 0 on success, other value on error
      */
     int (*umq_tp_cfg_get)(uint64_t umqh_tp, umq_cfg_get_t *cfg);
+
+    /**
+     * Get eventfd for the global transport pool. Caller can epoll on this fd to be notified
+     * Return fd >= 0 on success, < 0 on failure
+     */
+    int (*umq_tp_transport_pool_eventfd_get)(void);
+
+    /**
+     * Modify umq state to err
+     * @param[in] umqh_tp: umq tp handle.
+     * Return 0 on success, error code on failure
+     */
+    int (*umq_tp_modify_to_err)(uint64_t umqh_tp);
 } umq_ops_t;
 
 typedef umq_ops_t* (*umq_ops_get_t)(void);

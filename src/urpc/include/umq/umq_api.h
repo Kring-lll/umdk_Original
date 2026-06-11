@@ -345,6 +345,20 @@ int umq_external_mutex_lock_ops_register(umq_external_mutex_lock_ops_t *ops);
  */
 int umq_external_rwlock_ops_register(umq_external_rwlock_ops_t *ops);
 
+/**
+ * Get eventfd for the global transport pool. Caller can epoll on this fd to be notified
+ * @param[in] umqh: umq handle; used to locate the matching transport framework ops.
+ * Return fd >= 0 on success, < 0 on failure
+ */
+int umq_transport_pool_eventfd_get(uint64_t umqh);
+
+/**
+ * Modify umq state to err
+ * @param[in] umqh: umq handle.
+ * Return 0 on success, error code on failure
+ */
+int umq_modify_to_err(uint64_t umqh);
+
 #ifdef __cplusplus
 }
 #endif
