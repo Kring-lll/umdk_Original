@@ -59,6 +59,9 @@ extern "C" {
 
 #define UMQ_UB_ENABLE_SHARE_FC_JFR (true)
 
+#define UMQ_UB_FLOW_CONTROL_SGE_QBUF_COUNT_MAX 512 // per-device flow control sge mgr qbuf array
+#define UMQ_UB_FLOW_CONTROL_SGE_SHARED_RECV_QBUF_MAX 256 // per-jetty shared recv qbuf array
+
 typedef enum umq_size_interval {
     UMQ_SIZE_0K_SMALL_INTERVAL,     // (0K, umq_buf_size_small()] size
     UMQ_SIZE_SMALL_MID_INTERVAL,    // (umq_buf_size_small(), umq_buf_size_middle()] size
@@ -111,6 +114,8 @@ typedef enum ub_packet_stats_type {
     UB_PACKET_STATS_TYPE_SEND_EAGAIN,
     UB_PACKET_STATS_TYPE_SEND_ERROR,
     UB_PACKET_STATS_TYPE_RECV_ERROR,
+    UB_PACKET_STATS_TYPE_RECV_DUP_REQ,
+    UB_PACKET_STATS_TYPE_RECV_DUP_RSP,
     UB_PACKET_STATS_TYPE_MAX,
 } ub_packet_stats_type_t;
 
@@ -146,6 +151,11 @@ typedef enum ub_queue_fc_msg_type {
     UB_QUEUE_FC_MSG_TYPE_MAX = 2
 } ub_queue_fc_msg_type_t;
 
+typedef struct umq_ub_flow_control_sge_slot {
+    void *addr;
+    uint32_t bitmap_idx;
+} umq_ub_flow_control_sge_slot_t;
+
 typedef struct ub_flow_control {
     ub_flow_control_window_ops_t ops;
     volatile uint64_t total_local_rx_posted;
@@ -177,8 +187,22 @@ typedef struct ub_flow_control {
     bool remote_get;
     bool enabled;
     volatile bool is_credit_applying;
-    volatile uint16_t imm[UB_QUEUE_FC_MSG_TYPE_MAX];
+    volatile uint64_t imm[UB_QUEUE_FC_MSG_TYPE_MAX];
+    umq_ub_flow_control_sge_slot_t recv_sge;
+    uint8_t local_req_seq;
+    uint8_t remote_expect_seq;
 } ub_flow_control_t;
+
+typedef struct umq_ub_flow_control_sge_mgr {
+    umq_buf_t *qbuf_array[UMQ_UB_FLOW_CONTROL_SGE_QBUF_COUNT_MAX];
+    util_external_mutex_lock *lock;
+    urpc_bitmap_t bitmap;
+} umq_ub_flow_control_sge_mgr_t;
+
+typedef struct umq_ub_flow_control_share_recv {
+    umq_buf_t *qbuf_array[UMQ_UB_FLOW_CONTROL_SGE_SHARED_RECV_QBUF_MAX];
+    uint32_t qbuf_cnt;
+} umq_ub_flow_control_share_recv_t;
 
 typedef struct imported_tseg_node {
     struct urpc_hmap_node node;
@@ -227,6 +251,7 @@ typedef struct umq_ub_ctx {
     umq_trans_info_t trans_info;
     volatile uint64_t *umq_ctx_jetty_table;
     volatile uint64_t *rx_consumed_jetty_table;
+    umq_ub_flow_control_sge_mgr_t fc_sge_mgr;
 } umq_ub_ctx_t;
 
 typedef struct rx_buf_ctx {
@@ -347,6 +372,7 @@ typedef struct jfr_ctx {
     volatile uint32_t ref_cnt;
     rx_buf_ctx_list_t rx_buf_ctx_list;
     ub_credit_pool_t credit;
+    umq_ub_flow_control_share_recv_t share_rq_sge;
 } jfr_ctx_t;
 
 typedef struct ub_queue_interrupt_ctx {
@@ -423,7 +449,8 @@ typedef struct ub_queue {
     uint64_t share_rq_umqh;
     ub_queue_idle_check_t *checker;
     bondp_port_id_t *used_port;
-    uint32_t umq_id;            // umq id for share transport mode
+    uint32_t umq_id;
+    uint32_t remote_umq_id;
 } ub_queue_t;
 
 typedef struct user_ctx {
@@ -539,7 +566,7 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm);
 int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_wr_ptr,
                         urma_sge_t *sges, uint32_t remain_tx);
 
-int umq_ub_fill_fc_rx_buf(ub_queue_t *queue);
+int umq_ub_fill_fc_rx_buf(ub_queue_t *queue, uint64_t user_ctx);
 int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint32_t batch);
 int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count);
 
@@ -602,6 +629,12 @@ static ALWAYS_INLINE void umq_ub_put_real_queue(ub_queue_t *queue, uint32_t jett
 {
     __atomic_store_n(&queue->dev_ctx->umq_ctx_jetty_table[queue->jetty[jetty_idx]->jetty_id.id],
         (uint64_t)(uintptr_t)queue, __ATOMIC_RELEASE);
+}
+
+static inline bool is_umq_ub_post_jfr(ub_queue_t *queue)
+{
+    // bondp with shared_jfr should use urma_post_jfr_wr
+    return (queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0 && queue->used_port_num > 0;
 }
 
 #ifdef __cplusplus

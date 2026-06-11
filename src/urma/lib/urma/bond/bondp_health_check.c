@@ -247,7 +247,7 @@ static int bondp_register_health_ctx_global(bondp_context_t *bond_ctx)
     return 0;
 }
 
-static void bondp_unregister_health_ctx_global(bondp_context_t *bond_ctx)
+static void bondp_unregister_health_ctx_global(const bondp_context_t *bond_ctx)
 {
     bondp_health_thread_ctx_t *thread_ctx = &g_bondp_global_ctx->health_thread_ctx;
 
@@ -406,7 +406,7 @@ int bondp_fill_vjetty_health_info(bondp_context_t *bond_ctx, bondp_comp_t *bdp_j
     return 0;
 }
 
-static int import_check_tseg_by_import_result(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
+static int import_check_tseg_by_import_result(const bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
     urma_bond_id_info_out_t *rvjetty_info)
 {
     bool has_valid_route = false;
@@ -479,8 +479,8 @@ int bondp_unimport_health_check_tseg(bondp_target_jetty_t *bdp_tjetty)
     return ret;
 }
 
-int bondp_import_health_check_tseg(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
-    urma_bond_id_info_out_t *rvjetty_info, urma_rjetty_t *rjetty)
+int bondp_import_health_check_tseg(const bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
+    urma_bond_id_info_out_t *rvjetty_info, const urma_rjetty_t *rjetty)
 {
     if (!rvjetty_info->is_health_check_enable || !bondp_health_check_enabled()) {
         return 0;
@@ -492,7 +492,7 @@ int bondp_import_health_check_tseg(bondp_context_t *bdp_ctx, bondp_target_jetty_
         cfg_jetty = CONTAINER_OF_FIELD(bdp_rjetty->jetty, bondp_comp_t, v_jetty);
     }
 
-    if (!rjetty->flag.bs.has_drv_ext || cfg_jetty == NULL) {
+    if (rjetty->flag.bs.has_drv_ext == 0 || cfg_jetty == NULL) {
         URMA_LOG_ERR("Invalid rjetty for health check seg import, health check disabled\n");
         return 0;
     }
@@ -1571,7 +1571,6 @@ void bondp_destroy_health_check_ctx(bondp_context_t *bond_ctx)
     }
 
     health = &bond_ctx->bondp_heath_check_ctx;
-    bondp_hash_table_destroy(&health->task_table);
     bondp_unregister_health_ctx_global(bond_ctx);
 
     if (global_ctx->health_thread_ctx.health_epoll_fd >= 0 && health->health_check_fd >= 0) {
@@ -1582,6 +1581,7 @@ void bondp_destroy_health_check_ctx(bondp_context_t *bond_ctx)
     }
 
     bondp_unregister_health_check_seg(bond_ctx);
+    bondp_hash_table_destroy(&health->task_table);
     bondp_free_health_event_list(&health->event_list);
     pthread_spin_destroy(&health->event_lock);
 

@@ -41,6 +41,14 @@ typedef struct bondp_create_vjetty_udata {
     urma_bond_seg_info_out_t health_check_seg;
 } bondp_create_vjetty_udata_t;
 
+typedef struct bondp_create_vjfc_udata {
+    urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
+} bondp_create_vjfc_udata_t;
+
+typedef struct bondp_create_vjfs_udata {
+    urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
+} bondp_create_vjfs_udata_t;
+
 typedef struct bondp_import_vobj_udata_in {
     uint32_t ue_idx;
 } bondp_import_vobj_udata_in_t;
@@ -53,7 +61,7 @@ static int bondp_init_connection_table(bondp_comp_t *bdp_comp)
         }
     }
 
-    if (bondp_conn_table_create(&bdp_comp->v_conn_table, BONDP_MAX_NUM_JETTYS)) {
+    if (bondp_conn_table_create(&bdp_comp->v_conn_table, BONDP_MAX_NUM_JETTYS) != 0) {
         return -1;
     }
     return 0;
@@ -170,12 +178,12 @@ urma_jfce_t *bondp_create_jfce(urma_context_t *ctx)
     bdp_jfce->bondp_ctx = bdp_ctx;
     atomic_init(&bdp_jfce->use_cnt.atomic_cnt, 0);
 
-    if (bondp_create_vjfce(bdp_ctx, bdp_jfce)) {
+    if (bondp_create_vjfce(bdp_ctx, bdp_jfce) != 0) {
         URMA_LOG_ERR("Failed to create vjfce.\n");
         goto FREE_JFCE;
     }
 
-    if (bondp_create_pjfce(bdp_ctx, bdp_jfce)) {
+    if (bondp_create_pjfce(bdp_ctx, bdp_jfce) != 0) {
         URMA_LOG_ERR("Failed to create pjfce.\n");
         goto DELETE_PJFCE;
     }
@@ -219,7 +227,7 @@ urma_status_t bondp_delete_jfce(urma_jfce_t *jfce)
 
 static int bondp_create_vjfc(urma_context_t *ctx, bondp_jfc_t *bdp_jfc, urma_jfc_cfg_t *jfc_cfg)
 {
-    urma_cmd_udrv_priv_t udata = {0};
+    bondp_create_vjfc_udata_t jfc_info = {0};
     urma_jfc_cfg_t tmp_cfg = *jfc_cfg;
     /* We need to set jfce to NULL because the kernel-mode uobj is not created when the vjfce is created. */
     /* If a pointer to vjfce is passed here, */
@@ -228,12 +236,26 @@ static int bondp_create_vjfc(urma_context_t *ctx, bondp_jfc_t *bdp_jfc, urma_jfc
     /* then it is needed to set the fd of vjfce to the fd allocated in the kernel space. */
     /* Currently, the fd in vjfce is a brand new epoll_fd, so we need to change it to the kernel-allocated one. */
     tmp_cfg.jfce = NULL;
+    for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+        if (bdp_jfc->p_jfc[i] != NULL) {
+            jfc_info.slave_id[i] = bdp_jfc->p_jfc[i]->jfc_id;
+            URMA_LOG_ERR("PJFC ID is %u.\n", bdp_jfc->p_jfc[i]->jfc_id.id);
+        }
+    }
+
+    urma_cmd_udrv_priv_t udata = {
+        .in_addr = (uint64_t)&jfc_info,
+        .in_len = sizeof(bondp_create_vjfc_udata_t),
+    };
+
     int ret = urma_cmd_create_jfc(ctx, &bdp_jfc->v_jfc, &tmp_cfg, &udata);
     if (ret != 0) {
         return ret;
     }
     /* It is necessary to backfill jfc_cfg->jfce because rearm_jfc will use this pointer, and it must point to vjfce. */
     bdp_jfc->v_jfc.jfc_cfg.jfce = jfc_cfg->jfce;
+    URMA_LOG_DEBUG("Created vjfc successfully, jfc_id=%u, dev=%s, eid_idx=%u\n",
+                   bdp_jfc->v_jfc.jfc_id.id, ctx->dev->name, ctx->eid_index);
     return 0;
 }
 
@@ -254,6 +276,8 @@ static int bondp_create_pjfc(bondp_context_t *bdp_ctx, bondp_jfc_t *bdp_jfc, urm
             return -1;
         }
         bdp_jfc->p_jfc[i] = jfc;
+        URMA_LOG_DEBUG("Created pjfc successfully, idx=%u, jfc_id=%u, dev=%s, eid_idx=%u\n",
+                       i, jfc->jfc_id.id, bdp_ctx->p_ctxs[i]->dev->name, bdp_ctx->p_ctxs[i]->eid_index);
     }
     return 0;
 }
@@ -272,10 +296,14 @@ static int bondp_delete_pjfc(bondp_jfc_t *bdp_jfc)
             continue;
         }
 
+        uint32_t jfc_id = bdp_jfc->p_jfc[i]->jfc_id.id;
         int p_ret = urma_delete_jfc(bdp_jfc->p_jfc[i]);
         if (p_ret != URMA_SUCCESS) {
-            URMA_LOG_ERR("Failed to delete pjfc %d, ret=%d.\n", i, ret);
+            URMA_LOG_ERR("Failed to delete pjfc, idx=%d, jfc_id=%u, ret=%d\n",
+                         i, jfc_id, p_ret);
             ret = p_ret;
+        } else {
+            URMA_LOG_INFO("Deleted pjfc, idx=%d, jfc_id=%u\n", i, jfc_id);
         }
         bdp_jfc->p_jfc[i] = NULL;
     }
@@ -302,7 +330,7 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
     uint32_t cfg_active_port_count = 0;
-    if (cfg->flag.bs.has_drv_ext) {
+    if (cfg->flag.bs.has_drv_ext != 0) {
         const bondp_jfc_cfg_t *bdp_cfg = (const bondp_jfc_cfg_t *)cfg;
         if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
             URMA_LOG_ERR("Invalid active port config, port_ids is NULL or port_count is 0.\n");
@@ -335,6 +363,8 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
         atomic_fetch_add(&bdp_jfce->use_cnt.atomic_cnt, 1);
     }
 
+    URMA_LOG_DEBUG("Created jfc successfully, jfc_id=%u, dev=%s, eid_idx=%u\n",
+                   bdp_jfc->v_jfc.jfc_id.id, ctx->dev->name, ctx->eid_index);
     return &bdp_jfc->v_jfc;
 
 DELETE_PJFC:
@@ -356,7 +386,8 @@ urma_status_t bondp_modify_jfc(urma_jfc_t *jfc, urma_jfc_attr_t *attr)
         ret = urma_modify_jfc(bdp_jfc->p_jfc[i], attr);
         if (ret != URMA_SUCCESS) {
             final_ret = ret;
-            URMA_LOG_ERR("modify pjfc fail, index=%d, ret=%d\n", i, final_ret);
+            URMA_LOG_ERR("modify pjfc fail, index=%d, jfc_id=%u, ret=%d\n",
+                         i, bdp_jfc->p_jfc[i]->jfc_id.id, final_ret);
         }
     }
     return final_ret;
@@ -367,6 +398,7 @@ urma_status_t bondp_delete_jfc(urma_jfc_t *jfc)
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(jfc, bondp_jfc_t, v_jfc);
     urma_status_t ret = URMA_SUCCESS;
     bondp_jfce_t *bdp_jfce = NULL;
+    uint32_t jfc_id = jfc->jfc_id.id;
 
     if (jfc->jfc_cfg.jfce != NULL) {
         bdp_jfce = CONTAINER_OF_FIELD(jfc->jfc_cfg.jfce, bondp_jfce_t, v_jfce);
@@ -374,7 +406,7 @@ urma_status_t bondp_delete_jfc(urma_jfc_t *jfc)
 
     unsigned long use_cnt = atomic_load(&bdp_jfc->use_cnt.atomic_cnt);
     if (use_cnt > 0) {
-        URMA_LOG_ERR("Failed to delete jfc[%d], still in use. use_cnt=%lu.\n", jfc->jfc_id.id, use_cnt);
+        URMA_LOG_ERR("Failed to delete jfc[%d], still in use. use_cnt=%lu.\n", jfc_id, use_cnt);
         return URMA_EAGAIN;
     }
 
@@ -393,6 +425,7 @@ urma_status_t bondp_delete_jfc(urma_jfc_t *jfc)
     if (bdp_jfce != NULL) {
         atomic_fetch_sub(&bdp_jfce->use_cnt.atomic_cnt, 1);
     }
+    URMA_LOG_INFO("Deleted jfc, jfc_id=%u, ret=%d\n", jfc_id, ret);
     return ret;
 }
 
@@ -448,9 +481,9 @@ static int init_active_indices_ex(bondp_context_t *bdp_ctx,
         }
         for (int i = start; i < end; i++) {
             if (bdp_ctx->p_ctxs[i] != NULL) {
-                enabled_indices[*enabled_count] = i;
+                enabled_indices[*enabled_count] = (uint32_t)i;
                 *enabled_count += 1;
-                active_indices[*active_count] = i;
+                active_indices[*active_count] = (uint32_t)i;
                 *active_count += 1;
             }
         }
@@ -533,14 +566,25 @@ FIND_FINISH:
     }
     jetty->active_count = active_count;
     bdp_tjetty->active_count = active_count;
-    bdp_tjetty->local_dev_num = active_count;
-    bdp_tjetty->target_dev_num = active_count;
+    bdp_tjetty->local_dev_num = (int)active_count;
+    bdp_tjetty->target_dev_num = (int)active_count;
     return 0;
 }
 
 static int bondp_create_vjfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg, bondp_comp_t *bdp_jfs)
 {
-    urma_cmd_udrv_priv_t udata = {0};
+    bondp_create_vjfs_udata_t jfs_info = {0};
+
+    for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+        if (bdp_jfs->p_jfs[i] != NULL) {
+            jfs_info.slave_id[i] = bdp_jfs->p_jfs[i]->jfs_id;
+        }
+    }
+
+    urma_cmd_udrv_priv_t udata = {
+        .in_addr = (uint64_t)&jfs_info,
+        .in_len = sizeof(bondp_create_vjfs_udata_t),
+    };
     if (urma_cmd_create_jfs(ctx, &bdp_jfs->v_jfs, cfg, &udata) != 0) {
         URMA_LOG_ERR("ubcore create jfs failed.\n");
         return -1;
@@ -564,6 +608,8 @@ static int bondp_create_pjfs(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfs, ur
         bdp_jfs->p_jfs[i] = jfs;
         bdp_jfs->p_jfs[i]->jfs_cfg.user_ctx = (uint64_t)bdp_jfs;
         bdp_jfs->valid[i] = true;
+        URMA_LOG_DEBUG("Created pjfs successfully, idx=%u, jfs_id=%u, dev=%s, eid_idx=%u\n",
+                       i, jfs->jfs_id.id, bdp_ctx->p_ctxs[i]->dev->name, bdp_ctx->p_ctxs[i]->eid_index);
     }
 
     return 0;
@@ -583,10 +629,14 @@ static int bondp_delete_pjfs(bondp_comp_t *bdp_jfs)
             continue;
         }
 
+        uint32_t jfs_id = bdp_jfs->p_jfs[i]->jfs_id.id;
         int p_ret = urma_delete_jfs(bdp_jfs->p_jfs[i]);
         if (p_ret != 0) {
-            URMA_LOG_ERR("Failed to delete pjfs %d, ret=%d.\n", i, p_ret);
+            URMA_LOG_ERR("Failed to delete pjfs, idx=%d, jfs_id=%u, ret=%d\n",
+                         i, jfs_id, p_ret);
             ret = p_ret;
+        } else {
+            URMA_LOG_INFO("Deleted pjfs, idx=%d, jfs_id=%u\n", i, jfs_id);
         }
         bdp_jfs->p_jfs[i] = NULL;
     }
@@ -669,7 +719,7 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
     uint32_t cfg_active_port_count = 0;
-    if (cfg->flag.bs.has_drv_ext) {
+    if (cfg->flag.bs.has_drv_ext != 0) {
         const bondp_jfs_cfg_t *bdp_cfg = (const bondp_jfs_cfg_t *)cfg;
         if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
             URMA_LOG_ERR("Invalid active port config for jfs, port_ids is NULL or port_count is 0.\n");
@@ -711,6 +761,8 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
     atomic_fetch_add(&bdp_jfc->use_cnt.atomic_cnt, 1);
 
+    URMA_LOG_DEBUG("Created jfs successfully, jfs_id=%u, dev=%s, eid_idx=%u\n",
+                   bdp_jfs->v_jfs.jfs_id.id, ctx->dev->name, ctx->eid_index);
     return &bdp_jfs->v_jfs;
 
 UNINIT_CONNECTION_TABLE:
@@ -735,6 +787,7 @@ urma_status_t bondp_delete_jfs(urma_jfs_t *jfs)
     bondp_comp_t *bdp_jfs = CONTAINER_OF_FIELD(jfs, bondp_comp_t, v_jfs);
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(jfs->jfs_cfg.jfc, bondp_jfc_t, v_jfc);
     bondp_context_t *bdp_ctx = bdp_jfs->bondp_ctx;
+    uint32_t jfs_id = jfs->jfs_id.id;
     /*
     ! This locking mechanism is implemented to prevent other threads from accessing this bondp_comp through this table.
     ! Currently, the only multi-threaded access path to this bondp_comp is through this table.
@@ -745,7 +798,7 @@ urma_status_t bondp_delete_jfs(urma_jfs_t *jfs)
     unsigned long use_cnt = atomic_load(&bdp_jfs->use_cnt.atomic_cnt);
     if (use_cnt > 0) {
         pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
-        URMA_LOG_ERR("Failed to delete jfs[%u], still in use. use_cnt=%lu\n", jfs->jfs_id.id, use_cnt);
+        URMA_LOG_ERR("Failed to delete jfs[%u], still in use. use_cnt=%lu\n", jfs_id, use_cnt);
         return URMA_EAGAIN;
     }
     bondp_del_jfs_p_vjetty_info_without_lock(bdp_jfs);
@@ -774,6 +827,7 @@ urma_status_t bondp_delete_jfs(urma_jfs_t *jfs)
     free(bdp_jfs);
 
     atomic_fetch_sub(&bdp_jfc->use_cnt.atomic_cnt, 1);
+    URMA_LOG_INFO("Deleted jfs, jfs_id=%u, ret=%d\n", jfs_id, ret);
     return ret;
 }
 
@@ -782,7 +836,7 @@ urma_status_t bondp_modify_jfs(urma_jfs_t *jfs, urma_jfs_attr_t *attr)
     urma_status_t ret = URMA_SUCCESS, final_ret = URMA_SUCCESS;
     bondp_comp_t *bdp_jfs = CONTAINER_OF_FIELD(jfs, bondp_comp_t, v_jfs);
 
-    if ((attr->mask & JFS_STATE) && attr->state == URMA_JETTY_STATE_ERROR) {
+    if (((attr->mask & JFS_STATE) != 0)&& attr->state == URMA_JETTY_STATE_ERROR) {
         bdp_jfs->modify_to_error = true;
     }
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
@@ -792,7 +846,8 @@ urma_status_t bondp_modify_jfs(urma_jfs_t *jfs, urma_jfs_attr_t *attr)
         ret = urma_modify_jfs(bdp_jfs->p_jfs[i], attr);
         if (ret != URMA_SUCCESS) {
             final_ret = ret;
-            URMA_LOG_ERR("modify pjfs fail, index=%d, ret=%d\n", i, final_ret);
+            URMA_LOG_ERR("modify pjfs fail, index=%d, jfs_id=%u, ret=%d\n",
+                         i, bdp_jfs->p_jfs[i]->jfs_id.id, final_ret);
         }
     }
     return final_ret;
@@ -806,7 +861,7 @@ static int bondp_create_vjfr(bondp_context_t *bdp_ctx, urma_jfr_cfg_t *cfg, bond
         if (bdp_jfr->p_jfr[i] != NULL) {
             jfr_info.slave_id[i] = bdp_jfr->p_jfr[i]->jfr_id;
         }
-        jfr_info.enabled_indices[i] = bdp_jfr->enabled_indices[i];
+        jfr_info.enabled_indices[i] = (uint8_t)bdp_jfr->enabled_indices[i];
     }
     jfr_info.enabled_count = bdp_jfr->enabled_count;
 
@@ -839,6 +894,8 @@ static int bondp_create_pjfr(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfr, ur
         jfr->jfr_cfg.user_ctx = (uint64_t)bdp_jfr;
         bdp_jfr->p_jfr[i] = jfr;
         bdp_jfr->valid[i] = true;
+        URMA_LOG_DEBUG("Created pjfr successfully, idx=%u, jfr_id=%u, dev=%s, eid_idx=%u\n",
+                       i, jfr->jfr_id.id, bdp_ctx->p_ctxs[i]->dev->name, bdp_ctx->p_ctxs[i]->eid_index);
     }
     return 0;
 }
@@ -855,10 +912,14 @@ static int bondp_delete_pjfr(bondp_comp_t *bdp_jfr)
         if (bdp_jfr->p_jfr[i] == NULL) {
             continue;
         }
+        uint32_t jfr_id = bdp_jfr->p_jfr[i]->jfr_id.id;
         int p_ret = urma_delete_jfr(bdp_jfr->p_jfr[i]);
-        if (p_ret) {
-            URMA_LOG_ERR("Failed to delete pjfr %d, ret=%d.\n", i, ret);
+        if (p_ret != 0) {
+            URMA_LOG_ERR("Failed to delete pjfr, idx=%d, jfr_id=%u, ret=%d\n",
+                         i, jfr_id, p_ret);
             ret = p_ret;
+        } else {
+            URMA_LOG_INFO("Deleted pjfr, idx=%d, jfr_id=%u\n", i, jfr_id);
         }
         bdp_jfr->p_jfr[i] = NULL;
     }
@@ -888,7 +949,7 @@ DEL_P_VJFR_ID:
         if (bdp_jfr->p_jfr[j] == NULL) {
             continue;
         }
-        urma_jfr_id_t pjfr_id = bdp_jfr->p_jfr[i]->jfr_id;
+        urma_jfr_id_t pjfr_id = bdp_jfr->p_jfr[j]->jfr_id;
         (void)bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, pjfr_id, JFR);
     }
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
@@ -924,6 +985,8 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
 
     bondp_comp_t *bdp_jfr = (bondp_comp_t *)calloc(1, sizeof(bondp_comp_t));
     if (bdp_jfr == NULL) {
+        URMA_LOG_ERR("Failed to alloc bondp jfr, dev=%s, eid_idx=%u\n",
+                     ctx->dev->name, ctx->eid_index);
         return NULL;
     }
     bdp_jfr->bondp_ctx = bdp_ctx;
@@ -933,7 +996,7 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
     uint32_t cfg_active_port_count = 0;
-    if (cfg->flag.bs.has_drv_ext) {
+    if (cfg->flag.bs.has_drv_ext != 0) {
         const bondp_jfr_cfg_t *bdp_cfg = (const bondp_jfr_cfg_t *)cfg;
         if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
             URMA_LOG_ERR("Invalid active port config, port_ids is NULL or port_count is 0.\n");
@@ -948,12 +1011,12 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
         goto FREE_JFR;
     }
 
-    if (bondp_create_pjfr(bdp_ctx, bdp_jfr, cfg)) {
+    if (bondp_create_pjfr(bdp_ctx, bdp_jfr, cfg) != 0) {
         URMA_LOG_ERR("Failed to create pjfr\n");
         goto DELETE_PJFR;
     }
 
-    if (bondp_create_vjfr(bdp_ctx, cfg, bdp_jfr)) {
+    if (bondp_create_vjfr(bdp_ctx, cfg, bdp_jfr) != 0) {
         URMA_LOG_ERR("Failed to create vjfr\n");
         goto DELETE_PJFR;
     }
@@ -975,6 +1038,8 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(cfg->jfc, bondp_jfc_t, v_jfc);
     atomic_fetch_add(&bdp_jfc->use_cnt.atomic_cnt, 1);
 
+    URMA_LOG_DEBUG("Created jfr successfully, jfr_id=%u, dev=%s, eid_idx=%u\n",
+                   bdp_jfr->v_jfr.jfr_id.id, ctx->dev->name, ctx->eid_index);
     return &bdp_jfr->v_jfr;
 
 UNINIT_JFR_CONNECTION_TABLE:
@@ -998,6 +1063,7 @@ urma_status_t bondp_delete_jfr(urma_jfr_t *jfr)
     bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jfr, bondp_comp_t, v_jfr);
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(jfr->jfr_cfg.jfc, bondp_jfc_t, v_jfc);
     bondp_context_t *bdp_ctx = bdp_jfr->bondp_ctx;
+    uint32_t jfr_id = jfr->jfr_id.id;
     /*
     ! This locking mechanism is implemented to prevent other threads from accessing this bondp_comp through this table.
     ! Currently, the only multi-threaded access path to this bondp_comp is through this table.
@@ -1008,7 +1074,7 @@ urma_status_t bondp_delete_jfr(urma_jfr_t *jfr)
     unsigned long use_cnt = atomic_load(&bdp_jfr->use_cnt.atomic_cnt);
     if (use_cnt > 0) {
         pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
-        URMA_LOG_ERR("Failed to delete jfr[%d], still in use. use_cnt=%lu\n", jfr->jfr_id.id, use_cnt);
+        URMA_LOG_ERR("Failed to delete jfr[%u], still in use. use_cnt=%lu\n", jfr_id, use_cnt);
         return URMA_EAGAIN;
     }
     bondp_del_jfr_p_vjetty_info_without_lock(bdp_jfr);
@@ -1033,6 +1099,7 @@ urma_status_t bondp_delete_jfr(urma_jfr_t *jfr)
     free(bdp_jfr);
 
     atomic_fetch_sub(&bdp_jfc->use_cnt.atomic_cnt, 1);
+    URMA_LOG_INFO("Deleted jfr, jfr_id=%u, ret=%d\n", jfr_id, ret);
     return ret;
 }
 
@@ -1048,7 +1115,8 @@ urma_status_t bondp_modify_jfr(urma_jfr_t *jfr, urma_jfr_attr_t *attr)
         ret = urma_modify_jfr(bdp_jfr->p_jfr[i], attr);
         if (ret != URMA_SUCCESS) {
             final_ret = ret;
-            URMA_LOG_ERR("modify pjfr fail, index=%d, ret=%d\n", i, final_ret);
+            URMA_LOG_ERR("modify pjfr fail, index=%d, jfr_id=%u, ret=%d\n",
+                         i, bdp_jfr->p_jfr[i]->jfr_id.id, final_ret);
         }
     }
     return final_ret;
@@ -1098,7 +1166,8 @@ urma_status_t bondp_query_jfr(urma_jfr_t *jfr, urma_jfr_cfg_t *cfg, urma_jfr_att
         } else {
             // Query failure indicates an internal error, preventing normal response from upper layers.
             // tags: Failover scenarios require additional consideration.
-            URMA_LOG_ERR("query pjfr fail, index=%d, ret=%d\n", i, ret);
+            URMA_LOG_ERR("query pjfr fail, index=%d, jfr_id=%u, ret=%d\n",
+                         i, bdp_jfr->p_jfr[i]->jfr_id.id, ret);
             return ret;
         }
     }
@@ -1144,6 +1213,11 @@ static int bondp_create_vjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
     int ret = urma_cmd_create_jetty(&bdp_ctx->v_ctx, &bdp_jetty->v_jetty, jetty_cfg, &udata);
     if (ret == 0) {
         bdp_jetty->v_jetty.jetty_cfg.shared.jfr->jfr_cfg = jetty_cfg->shared.jfr->jfr_cfg;
+        URMA_LOG_DEBUG("Created vjetty successfully, jetty_id=%u, dev=%s, eid_idx=%u\n",
+                       bdp_jetty->v_jetty.jetty_id.id, bdp_ctx->v_ctx.dev->name, bdp_ctx->v_ctx.eid_index);
+    } else {
+        URMA_LOG_ERR("Failed to create vjetty, dev=%s, eid_idx=%u, ret=%d\n",
+                     bdp_ctx->v_ctx.dev->name, bdp_ctx->v_ctx.eid_index, ret);
     }
     return ret;
 }
@@ -1173,6 +1247,8 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
         jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
         bdp_jetty->p_jetty[i] = jetty;
         bdp_jetty->valid[i] = true;
+        URMA_LOG_DEBUG("Created pjetty successfully, idx=%u, jetty_id=%u, dev=%s, eid_idx=%u\n",
+                       i, jetty->jetty_id.id, bdp_ctx->p_ctxs[i]->dev->name, bdp_ctx->p_ctxs[i]->eid_index);
     }
     return 0;
 }
@@ -1199,7 +1275,7 @@ static int bondp_delete_pjetty(bondp_comp_t *bdp_jetty)
         URMA_LOG_INFO("bondp delete, p_jetty id is %u.\n",
                       bdp_jetty->p_jetty[i]->jetty_id.id);
         int p_ret = urma_delete_jetty(bdp_jetty->p_jetty[i]);
-        if (p_ret) {
+        if (p_ret != 0) {
             URMA_LOG_ERR("Failed to delete pjetty %d, ret=%d.\n", i, ret);
             ret = p_ret;
         }
@@ -1295,7 +1371,7 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
     uint32_t cfg_active_port_count = 0;
-    if (jetty_cfg->flag.bs.has_drv_ext) {
+    if (jetty_cfg->flag.bs.has_drv_ext != 0) {
         const bondp_jetty_cfg_t *bdp_cfg = (const bondp_jetty_cfg_t *)jetty_cfg;
         if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
             URMA_LOG_ERR("Invalid active port config for jetty, port_ids is NULL or port_count is 0\n");
@@ -1437,7 +1513,7 @@ urma_status_t bondp_modify_jetty(urma_jetty_t *jetty, urma_jetty_attr_t *attr)
     urma_status_t ret = URMA_SUCCESS, final_ret = URMA_SUCCESS;
     bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
 
-    if ((attr->mask & JETTY_STATE) && attr->state == URMA_JETTY_STATE_ERROR) {
+    if (((attr->mask & JETTY_STATE) != 0) && attr->state == URMA_JETTY_STATE_ERROR) {
         bdp_jetty->modify_to_error = true;
     }
     URMA_LOG_DEBUG("bondp modify_jetty v_jetty id is %u, old_state is %d.\n",
@@ -1718,7 +1794,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
 
     bondp_comp_t *cfg_jetty = NULL;
-    if (rjetty->flag.bs.has_drv_ext) {
+    if (rjetty->flag.bs.has_drv_ext != 0) {
         const bondp_rjetty_t *bdp_rjetty = (const bondp_rjetty_t *)rjetty;
         cfg_jetty = CONTAINER_OF_FIELD(bdp_rjetty->jetty, bondp_comp_t, v_jetty);
     }
@@ -1767,7 +1843,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         goto UNIMPORT_TSEG;
     }
 
-    if (rjetty->trans_mode == URMA_TM_RM && rjetty->flag.bs.has_drv_ext && !is_fake_jetty) {
+    if (rjetty->trans_mode == URMA_TM_RM && (rjetty->flag.bs.has_drv_ext != 0) && !is_fake_jetty) {
         cfg_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
     }
 
@@ -1861,6 +1937,7 @@ urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
     }
 
     bdp_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
+    bondp_tjetty_get(&bdp_tjetty->v_tjetty);
     return URMA_SUCCESS;
 
 UNBIND:
@@ -1889,11 +1966,15 @@ urma_status_t bondp_unbind_jetty(urma_jetty_t *jetty)
             if (urma_unbind_jetty(bdp_jetty->p_jetty[local_idx]) != URMA_SUCCESS) {
                 URMA_LOG_ERR("Failed to unbind tjetty [%u](%d, %d)\n", bdp_tjetty->v_tjetty.id.id, local_idx, local_idx);
                 ret = URMA_FAIL;
+                continue;
             }
             bdp_jetty->p_jetty[local_idx]->remote_jetty = NULL;
         }
     }
-    bdp_jetty->v_jetty.remote_jetty = NULL;
+    if (ret == URMA_SUCCESS) {
+        bdp_jetty->v_jetty.remote_jetty = NULL;
+        bondp_tjetty_put(tjetty);
+    }
     return ret;
 }
 
@@ -1939,11 +2020,14 @@ static int bondp_import_pjfr(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
         p_rjfr.jfr_id = udata_out->slave_id[i];
         urma_target_jetty_t *tjetty = urma_import_jfr(bdp_ctx->p_ctxs[i], &p_rjfr, token_value);
         if (tjetty == NULL) {
-            URMA_LOG_ERR("Failed to import tjfr %u %u\n", i, i);
+            URMA_LOG_ERR("Failed to import tjfr, idx=%u, jfr_id=%u\n",
+                         i, udata_out->slave_id[i].id);
             return -1;
         }
         bdp_tjetty->p_tjetty[i][i] = tjetty;
         bdp_tjetty->valid[i] = true;
+        URMA_LOG_DEBUG("Imported pjfr successfully, idx=%u, jfr_id=%u, dev=%s, eid_idx=%u\n",
+                       i, udata_out->slave_id[i].id, bdp_ctx->p_ctxs[i]->dev->name, bdp_ctx->p_ctxs[i]->eid_index);
     }
     return 0;
 }
@@ -1956,20 +2040,24 @@ static int bondp_unimport_vjfr(bondp_target_jetty_t *bdp_tjetty)
 static int bondp_unimport_pjfr(bondp_target_jetty_t *bdp_tjetty)
 {
     int ret = URMA_SUCCESS;
+    uint32_t tjetty_id = bdp_tjetty->v_tjetty.id.id;
 
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
         for (int j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
             if (!bdp_tjetty->p_tjetty[i][j]) {
                 continue;
             }
-            if (urma_unimport_jfr(bdp_tjetty->p_tjetty[i][j]) != URMA_SUCCESS) {
+            int p_ret = urma_unimport_jfr(bdp_tjetty->p_tjetty[i][j]);
+            if (p_ret != URMA_SUCCESS) {
+                URMA_LOG_ERR("Failed to unimport pjfr, tjetty_id=%u, idx=%d/%d, ret=%d\n",
+                             tjetty_id, i, j, p_ret);
                 ret = URMA_FAIL;
             }
             bdp_tjetty->p_tjetty[i][j] = NULL;
         }
     }
 
-    URMA_LOG_INFO("Finish to unimport pjfr.\n");
+    URMA_LOG_INFO("Unimported pjfr, tjetty_id=%u, ret=%d\n", tjetty_id, ret);
     return ret;
 }
 
@@ -1978,7 +2066,7 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
 
     bondp_comp_t *cfg_jfs = NULL;
-    if (rjfr->flag.bs.has_drv_ext) {
+    if (rjfr->flag.bs.has_drv_ext != 0) {
         const bondp_rjfr_t *bdp_rjfr = (const bondp_rjfr_t *)rjfr;
         cfg_jfs = CONTAINER_OF_FIELD(bdp_rjfr->jfs, bondp_comp_t, v_jfs);
     }
@@ -2001,12 +2089,12 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
     if (cfg_jfs == NULL) {
         if (rjfr->trans_mode == URMA_TM_RM && bdp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP) {
             URMA_LOG_ERR("RM jfr import requires drv_ext.vjfs\n");
-            return NULL;
+            goto UNIMPORT_VJFR;
         }
         cfg_jfs = &fake_jfs;
         if (init_active_indices(bdp_ctx, &fake_jfs, NULL, 0) != 0) {
             URMA_LOG_ERR("Failed to init active indices\n");
-            return NULL;
+            goto UNIMPORT_VJFR;
         }
     }
     if (init_target_active_indices(bdp_ctx, bdp_tjetty, &udata_out, cfg_jfs) != 0) {
@@ -2018,6 +2106,8 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
         goto UNIMPORT_PJFR;
     }
 
+    URMA_LOG_DEBUG("Imported jfr successfully, jfr_id=%u, dev=%s, eid_idx=%u\n",
+                   rjfr->jfr_id.id, ctx->dev->name, ctx->eid_index);
     return &bdp_tjetty->v_tjetty;
 
 UNIMPORT_PJFR:
@@ -2033,11 +2123,13 @@ static urma_status_t bondp_unimport_jfr_inner(urma_target_jetty_t *target_jfr)
 {
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(target_jfr, bondp_target_jetty_t, v_tjetty);
     urma_status_t ret = URMA_SUCCESS;
+    uint32_t tjetty_id = target_jfr->id.id;
 
     if (bondp_unimport_pjfr(bdp_tjetty) != URMA_SUCCESS) {
         ret = URMA_FAIL;
     }
     if (bondp_unimport_vjfr(bdp_tjetty) != URMA_SUCCESS) {
+        URMA_LOG_ERR("Failed to unimport vjfr, tjetty_id=%u\n", tjetty_id);
         ret = URMA_FAIL;
     }
     free(bdp_tjetty);

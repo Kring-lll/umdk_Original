@@ -23,7 +23,7 @@
 #include "urma_types.h"
 #include "urma_types_str.h"
 
-#define MAX_NODE_NUM            (64)
+#define MAX_NODE_NUM            (1024)
 #define EID_LEN                 (16)
 #define PORT_NUM                (9)
 #define CHIP_NUM                (2)
@@ -290,7 +290,9 @@ typedef struct admin_config {
     char ns[URMA_ADMIN_MAX_NS_PATH]; /* /proc/$pid/ns/net */
     /* eid end */
     tool_query_key_t key;
-    uint8_t ns_mode; /* 0: exclusive, 1: shared */
+    bool sharing_on;
+    uint8_t dev_ns_mode;
+    uint8_t eid_ns_mode;
     uint8_t priority;
     uint8_t SL;
 } admin_config_t;

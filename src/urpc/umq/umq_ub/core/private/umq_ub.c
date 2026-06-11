@@ -13,6 +13,7 @@
 #include "umq_qbuf_pool.h"
 #include "umq_huge_qbuf_pool.h"
 #include "umq_ub_flow_control.h"
+#include "umq_ub_flow_control_sge.h"
 #include "qbuf_list.h"
 #include "umq_ub_api.h"
 #include "umq_symbol_private.h"
@@ -550,6 +551,7 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
         return -UMQ_ERR_ENOMEM;
     }
 
+    queue->remote_umq_id = info->queue_info->umq_id;
     ctx->tjetty[UB_QUEUE_JETTY_IO] = umq_ub_connect_jetty(queue, info, UB_QUEUE_JETTY_IO);
     if (ctx->tjetty[UB_QUEUE_JETTY_IO] == NULL) {
         ret = UMQ_FAIL;
@@ -715,6 +717,7 @@ static ALWAYS_INLINE uint32_t umq_ub_queue_info_serialize(
     queue_info->tx_depth = queue->tx_depth;
     queue_info->rx_buf_size = queue->rx_buf_size;
     queue_info->state = queue->state;
+    queue_info->umq_id = queue->umq_id;
     info_tlv_head->type = UMQ_UB_BIND_INFO_TYPE_QUEUE;
     info_tlv_head->len = sizeof(umq_ub_bind_queue_info_t);
     return urpc_tlv_get_total_len(info_tlv_head);
@@ -1431,6 +1434,9 @@ void umq_ub_jfr_ctx_destroy(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
         }
     }
     rx_buf_ctx_list_uninit(&queue->jfr_ctx[jetty_idx]->rx_buf_ctx_list);
+    if (jetty_idx == UB_QUEUE_JETTY_FLOW_CONTROL) {
+        umq_ub_flow_control_share_rq_sge_uninit(&queue->jfr_ctx[jetty_idx]->share_rq_sge);
+    }
     free(queue->jfr_ctx[jetty_idx]);
     queue->jfr_ctx[jetty_idx] = NULL;
 }
@@ -1491,7 +1497,7 @@ static int umq_ub_rqe_post_factor_query(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx
 jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_queue_jetty_index_t jetty_idx)
 {
     bool enable_token = (dev_ctx->feature & UMQ_FEATURE_ENABLE_TOKEN_POLICY) != 0;
-    uint32_t jetty_token;
+    uint32_t jetty_token = 0;
     int ret = umq_ub_token_generate(enable_token, &jetty_token);
     if (ret != UMQ_SUCCESS) {
         UMQ_VLOG_ERR(VLOG_UMQ, "generate jetty token failed, status: %d\n", ret);
@@ -1623,7 +1629,6 @@ uint32_t token_policy_get(bool enable)
 int umq_ub_token_generate(bool enable_token, uint32_t *token)
 {
     if (!enable_token) {
-        *token = get_timestamp();
         return 0;
     }
 
@@ -1637,7 +1642,7 @@ int umq_ub_register_seg(umq_ub_ctx_t *ctx, uint16_t mempool_id, void *addr, uint
         return UMQ_SUCCESS;
     }
     bool enable_token = (ctx->feature & UMQ_FEATURE_ENABLE_TOKEN_POLICY) != 0;
-    uint32_t mem_token;
+    uint32_t mem_token = 0;
     int ret = umq_ub_token_generate(enable_token, &mem_token);
     if (ret != UMQ_SUCCESS) {
         UMQ_VLOG_ERR(VLOG_UMQ, "generate memory token failed, status: %d\n", ret);

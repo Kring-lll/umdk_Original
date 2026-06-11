@@ -4,6 +4,7 @@
  * Description: Timing wheel implementation
  */
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <sys/queue.h>
@@ -17,24 +18,14 @@
 
 #define TW_HMAP_MIN_SIZE (1024U)
 
-typedef enum tw_task_state {
-    TW_TASK_PENDING = 0,
-    TW_TASK_RUNNING,
-    TW_TASK_FIRED,
-    TW_TASK_CANCELED,
-} tw_task_state_t;
-
 typedef struct tw_task {
     tw_task_id_t task_id;
-    uint64_t expire_tick;
     uint64_t round;
     uint32_t slot_idx;
     tw_task_fn_t fn;
     void *arg;
-    tw_task_state_t state;
-    bool in_wheel;
-    TAILQ_ENTRY(tw_task) slot_entry;
-    TAILQ_ENTRY(tw_task) retire_entry;
+    TAILQ_ENTRY(tw_task)
+    slot_entry;
     struct ub_hmap_node hmap_node;
 } tw_task_t;
 
@@ -48,13 +39,10 @@ struct tw {
     pthread_mutex_t lock;
     uint32_t tick_ms;
     uint32_t slot_num;
-    uint32_t retired_limit;
     uint64_t current_tick;
     uint64_t next_task_id;
     struct ub_hmap task_map;
     tw_slot_t *slots;
-    struct tw_task_head retired_tasks;
-    uint32_t retired_num;
 };
 
 static uint32_t tw_task_hash(tw_task_id_t task_id)
@@ -67,7 +55,7 @@ static tw_task_t *tw_lookup_task(tw_t *tw, tw_task_id_t task_id)
     tw_task_t *task = NULL;
     uint32_t hash = tw_task_hash(task_id);
 
-    HMAP_FOR_EACH_WITH_HASH(task, hmap_node, hash, &tw->task_map) {
+    HMAP_FOR_EACH_WITH_HASH (task, hmap_node, hash, &tw->task_map) {
         if (task->task_id == task_id) {
             return task;
         }
@@ -75,36 +63,10 @@ static tw_task_t *tw_lookup_task(tw_t *tw, tw_task_id_t task_id)
 
     return NULL;
 }
-static void tw_free_task(tw_t *tw, tw_task_t *task)
+
+static void tw_task_free(tw_task_t *task)
 {
-    ub_hmap_remove(&tw->task_map, &task->hmap_node);
     free(task);
-}
-
-static void tw_reap_retired_locked(tw_t *tw)
-{
-    tw_task_t *task = NULL;
-
-    while (tw->retired_num > tw->retired_limit) {
-        task = TAILQ_FIRST(&tw->retired_tasks);
-        if (task == NULL) {
-            tw->retired_num = 0;
-            break;
-        }
-        TAILQ_REMOVE(&tw->retired_tasks, task, retire_entry);
-        tw->retired_num--;
-        tw_free_task(tw, task);
-    }
-}
-
-static void tw_finish_task(tw_t *tw, tw_task_t *task, tw_task_state_t state)
-{
-    (void)pthread_mutex_lock(&tw->lock);
-    task->state = state;
-    TAILQ_INSERT_TAIL(&tw->retired_tasks, task, retire_entry);
-    tw->retired_num++;
-    tw_reap_retired_locked(tw);
-    (void)pthread_mutex_unlock(&tw->lock);
 }
 
 static void tw_process_tick(tw_t *tw)
@@ -129,8 +91,7 @@ static void tw_process_tick(tw_t *tw)
         }
 
         TAILQ_REMOVE(&tw->slots[slot_idx].tasks, task, slot_entry);
-        task->in_wheel = false;
-        task->state = TW_TASK_RUNNING;
+        ub_hmap_remove(&tw->task_map, &task->hmap_node);
         TAILQ_INSERT_TAIL(&due_tasks, task, slot_entry);
         task = next;
     }
@@ -139,7 +100,7 @@ static void tw_process_tick(tw_t *tw)
     while ((task = TAILQ_FIRST(&due_tasks)) != NULL) {
         TAILQ_REMOVE(&due_tasks, task, slot_entry);
         task->fn(task->arg);
-        tw_finish_task(tw, task, TW_TASK_FIRED);
+        tw_task_free(task);
     }
 }
 
@@ -150,14 +111,14 @@ static int tw_init_slots(tw_t *tw)
     tw->slots = calloc(tw->slot_num, sizeof(*tw->slots));
     if (tw->slots == NULL) {
         URMA_LOG_ERR("Failed to alloc timing wheel slots.\n");
-        return TW_NO_MEMORY_ERROR;
+        return -ENOMEM;
     }
 
     for (i = 0; i < tw->slot_num; i++) {
         TAILQ_INIT(&tw->slots[i].tasks);
     }
 
-    return TW_OK;
+    return 0;
 }
 
 static int tw_init_task_map(tw_t *tw)
@@ -166,24 +127,32 @@ static int tw_init_task_map(tw_t *tw)
 
     if (ub_hmap_init(&tw->task_map, hmap_size) != 0) {
         URMA_LOG_ERR("Failed to init timing wheel task map.\n");
-        return TW_NO_MEMORY_ERROR;
+        return -ENOMEM;
     }
 
-    return TW_OK;
+    return 0;
 }
 
 tw_t *tw_create(const tw_cfg_t *cfg)
 {
-    tw_t *tw = calloc(1, sizeof(*tw));
-    uint32_t tick_ms = cfg == NULL || cfg->tick_ms == 0 ? TW_DEFAULT_TICK_MS : cfg->tick_ms;
-    uint32_t slot_num = cfg == NULL || cfg->slot_num == 0 ? TW_DEFAULT_SLOT_NUM : cfg->slot_num;
+    tw_t *tw = NULL;
+    uint32_t tick_ms;
+    uint32_t slot_num;
     int ret;
 
+    if (cfg == NULL) {
+        URMA_LOG_ERR("Invalid timing wheel config, cfg is NULL.\n");
+        return NULL;
+    }
+
+    tick_ms = cfg->tick_ms == 0 ? TW_DEFAULT_TICK_MS : cfg->tick_ms;
+    slot_num = cfg->slot_num == 0 ? TW_DEFAULT_SLOT_NUM : cfg->slot_num;
     if (tick_ms == 0 || slot_num == 0) {
         URMA_LOG_ERR("Invalid timing wheel config, tick_ms: %u, slot_num: %u.\n", tick_ms, slot_num);
         return NULL;
     }
 
+    tw = calloc(1, sizeof(*tw));
     if (tw == NULL) {
         URMA_LOG_ERR("Failed to alloc timing wheel.\n");
         return NULL;
@@ -191,9 +160,7 @@ tw_t *tw_create(const tw_cfg_t *cfg)
 
     tw->tick_ms = tick_ms;
     tw->slot_num = slot_num;
-    tw->retired_limit = MAX(slot_num, TW_HMAP_MIN_SIZE / 2U);
     tw->next_task_id = 1;
-    TAILQ_INIT(&tw->retired_tasks);
 
     ret = pthread_mutex_init(&tw->lock, NULL);
     if (ret != 0) {
@@ -203,12 +170,12 @@ tw_t *tw_create(const tw_cfg_t *cfg)
     }
 
     ret = tw_init_slots(tw);
-    if (ret != TW_OK) {
+    if (ret != 0) {
         goto err_mutex;
     }
 
     ret = tw_init_task_map(tw);
-    if (ret != TW_OK) {
+    if (ret != 0) {
         goto err_slots;
     }
 
@@ -230,7 +197,7 @@ void tw_destroy(tw_t *tw)
         return;
     }
 
-    HMAP_FOR_EACH_SAFE(task, next, hmap_node, &tw->task_map) {
+    HMAP_FOR_EACH_SAFE (task, next, hmap_node, &tw->task_map) {
         ub_hmap_remove(&tw->task_map, &task->hmap_node);
         free(task);
     }
@@ -249,16 +216,16 @@ int tw_schedule(tw_t *tw, uint64_t delay_ms, tw_task_fn_t fn, void *arg, tw_task
     uint64_t expire_tick;
     if (tw == NULL || fn == NULL || task_id == NULL) {
         URMA_LOG_ERR("Invalid param when scheduling timing wheel task.\n");
-        return TW_INVALID_PARAM_ERROR;
+        return -EINVAL;
     }
 
     task = calloc(1, sizeof(*task));
     if (task == NULL) {
         URMA_LOG_ERR("Failed to alloc timing wheel task.\n");
-        return TW_NO_MEMORY_ERROR;
+        return -ENOMEM;
     }
 
-    delay_tick = DIV_ROUND_UP(delay_ms, tw->tick_ms);
+    delay_tick = delay_ms == 0 ? 0 : 1 + (delay_ms - 1) / tw->tick_ms;
     if (delay_tick == 0) {
         delay_tick = 1;
     }
@@ -268,60 +235,36 @@ int tw_schedule(tw_t *tw, uint64_t delay_ms, tw_task_fn_t fn, void *arg, tw_task
     task->task_id = new_task_id;
     task->fn = fn;
     task->arg = arg;
-    task->state = TW_TASK_PENDING;
     expire_tick = tw->current_tick + delay_tick;
-    task->expire_tick = expire_tick;
     task->slot_idx = (uint32_t)(expire_tick % tw->slot_num);
     task->round = (delay_tick - 1U) / tw->slot_num;
-    task->in_wheel = true;
     ub_hmap_insert(&tw->task_map, &task->hmap_node, tw_task_hash(task->task_id));
     TAILQ_INSERT_TAIL(&tw->slots[task->slot_idx].tasks, task, slot_entry);
     *task_id = task->task_id;
     (void)pthread_mutex_unlock(&tw->lock);
-    return TW_OK;
+    return 0;
 }
 
 int tw_cancel(tw_t *tw, tw_task_id_t task_id)
 {
     tw_task_t *task = NULL;
-    int ret = TW_OK;
+    int ret = 0;
 
     if (tw == NULL || task_id == 0) {
         URMA_LOG_ERR("Invalid param when canceling timing wheel task.\n");
-        return TW_INVALID_PARAM_ERROR;
+        return -EINVAL;
     }
 
     (void)pthread_mutex_lock(&tw->lock);
     task = tw_lookup_task(tw, task_id);
     if (task == NULL) {
-        ret = TW_NOT_FOUND_ERROR;
+        ret = -ENOENT;
         goto out_unlock;
     }
 
-    switch (task->state) {
-        case TW_TASK_PENDING:
-            if (task->in_wheel) {
-                TAILQ_REMOVE(&tw->slots[task->slot_idx].tasks, task, slot_entry);
-                task->in_wheel = false;
-            }
-            task->state = TW_TASK_CANCELED;
-            TAILQ_INSERT_TAIL(&tw->retired_tasks, task, retire_entry);
-            tw->retired_num++;
-            tw_reap_retired_locked(tw);
-            break;
-        case TW_TASK_RUNNING:
-            ret = TW_ALREADY_RUNNING_ERROR;
-            break;
-        case TW_TASK_FIRED:
-            ret = TW_ALREADY_FIRED_ERROR;
-            break;
-        case TW_TASK_CANCELED:
-            ret = TW_ALREADY_CANCELED_ERROR;
-            break;
-        default:
-            ret = TW_SYS_ERROR;
-            break;
-    }
+    TAILQ_REMOVE(&tw->slots[task->slot_idx].tasks, task, slot_entry);
+    ub_hmap_remove(&tw->task_map, &task->hmap_node);
+    tw_task_free(task);
 
 out_unlock:
     (void)pthread_mutex_unlock(&tw->lock);

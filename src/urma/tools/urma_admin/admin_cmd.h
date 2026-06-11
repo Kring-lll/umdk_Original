@@ -130,7 +130,7 @@ enum {
     UBCORE_HDR_COMMAND,
     UBCORE_HDR_ARGS_LEN,
     UBCORE_HDR_ARGS_ADDR,
-    UBCORE_ATTR_NS_MODE,
+    UBCORE_ATTR_DEV_NS_MODE,
     UBCORE_ATTR_DEV_NAME,
     UBCORE_ATTR_NS_FD,
     UBCORE_ATTR_EID_IDX,
@@ -139,6 +139,7 @@ enum {
     UBCORE_ATTR_EID_NUM,
     UBCORE_ATTR_EID_LIST,
     UBCORE_ATTR_STATUS,
+    UBCORE_ATTR_EID_NS_MODE,
     UBCORE_ATTR_AFTER_LAST
 };
 
@@ -255,5 +256,13 @@ int admin_cmd_dev(admin_config_t *cfg);
 int admin_cmd_eid(admin_config_t *cfg);
 int admin_cmd_main_ue_eid(admin_config_t *cfg);
 int admin_cmd_show(admin_config_t *cfg);
+int admin_cmd_perf(admin_config_t *cfg);
+int admin_cmd_show_dev_jfc(admin_config_t *cfg);
+int admin_cmd_show_dev_jfs(admin_config_t *cfg);
+int admin_cmd_show_dev_jfr(admin_config_t *cfg);
+int admin_cmd_show_dev_jetty(admin_config_t *cfg);
+int admin_cmd_show_dev_jetty_group(admin_config_t *cfg);
+int admin_cmd_show_dev_rc(admin_config_t *cfg);
+int admin_cmd_show_dev_seg(admin_config_t *cfg);
 
 #endif
