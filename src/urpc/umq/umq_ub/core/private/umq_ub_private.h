@@ -251,6 +251,7 @@ typedef struct umq_ub_ctx {
     umq_trans_info_t trans_info;
     volatile uint64_t *umq_ctx_jetty_table;
     volatile uint64_t *rx_consumed_jetty_table;
+    volatile uint64_t *umq_ctx_table;
     umq_ub_flow_control_sge_mgr_t fc_sge_mgr;
 } umq_ub_ctx_t;
 
