@@ -99,53 +99,42 @@ int bondp_failback_rebuild_local_pjetty(bondp_failback_task_t *task)
     return BONDP_FB_OK;
 }
 
-static int bondp_send_fallback_ctrl_msg(
-    bondp_context_t *bdp_ctx, bondp_failback_task_t *task,
-    int local_idx, int target_idx, uint8_t ctrl_type, uint8_t req_seq, uint64_t payload)
-//TODO: sendmessage 具体修改
-{
-    if (local_idx < 0 || target_idx < 0 || payload > UINT32_MAX) {
-        return BONDP_FB_ERR;
-    }
-
-    int ret = bondp_fallback_ctrl_send_default(bdp_ctx, task->vjetty_id, local_idx, target_idx,
-        ctrl_type, req_seq, (uint32_t)payload);
-    if (ret != 0) {
-        URMA_LOG_WARN("Failed to send fallback ctrl msg by netlink, vjetty=%u lidx=%d tidx=%d type=%u seq=%u ret=%d\n",
-            task->vjetty_id, local_idx, target_idx, ctrl_type, req_seq, ret);
-        return BONDP_FB_ERR;
-    }
-    URMA_LOG_INFO("Fallback ctrl sent by netlink, vjetty=%u lidx=%d tidx=%d type=%u seq=%u payload=%u\n",
-        task->vjetty_id, local_idx, target_idx, ctrl_type, req_seq, (uint32_t)payload);
-    return BONDP_FB_OK;
-}
-
 int bondp_failback_send_req(bondp_failback_task_t *task)
 {
-    //TODO REQ要发给谁？
+    //TODO REQ要发给谁？ 通过什么路径发送
     //原failed jetty的 tjetty吗
     if (task == NULL || task->bdp_ctx == NULL || task->bondp_jetty == NULL || task->bdp_tjetty == NULL) {
         return BONDP_FB_ERR;
     }
 
+    // 校验 new_pjetty_id 有效性
     if (task->new_pjetty_id == 0 || task->new_pjetty_id == BONDP_FAILBACK_PRIMARY_INVALID_ID) {
         URMA_LOG_WARN("Cannot send fallback REQ, new_pjetty_id invalid, vjetty=%u\n", task->vjetty_id);
         return BONDP_FB_ERR;
     }
 
-    bondp_context_t *bdp_ctx = task->bdp_ctx;
-    int pjetty_old_idx = task->failed_local_idx;
-    if (bondp_get_target_idx_by_local_idx(task, active_local_idx, &active_target_idx) != BONDP_FB_OK) {
+    bondp_comp_t *bdp_jetty = task->bondp_jetty;
+    bondp_target_jetty_t *bdp_tjetty = task->bdp_tjetty;
+
+    // 构造 REQ 消息: (vjetty_id, pjetty_i_idx, pjetty_i_new_id)
+    bondp_failback_msg_t req = {
+        .in = {
+            .vjetty_id = task->vjetty_id,
+            .pjetty_i_idx = (uint32_t)task->failed_local_idx,
+            .pjetty_i_new_id = task->new_pjetty_id,
+            .ctrl_type = BONDP_FAILBACK_CTRL_REQ,
+            .req_seq = (uint8_t)task->req_seq,
+            .reserved = 0
+        },
+    };
+    //TODO 网络部分需要继续设计
+    int ret = bondp_failback_ctrl_send(&req);
+    if (ret != 0) {
         return BONDP_FB_ERR;
     }
 
-    if (bondp_send_fallback_ctrl_msg(bdp_ctx, task, send_local_idx, send_target_idx,
-        BONDP_FAILBACK_CTRL_REQ, (uint8_t)task->req_seq, task->new_pjetty_id) != BONDP_FB_OK) {
-        return BONDP_FB_ERR;
-    }
-
-    URMA_LOG_INFO("Fallback REQ sent, vjetty=%u failed_idx=%d new_pjetty_id=%u via lidx=%d tidx=%d\n",
-        task->vjetty_id, task->failed_local_idx, task->new_pjetty_id, send_local_idx, send_target_idx);
+    URMA_LOG_INFO("Fallback REQ sent, vjetty=%u pjetty_i_idx=%d new_pjetty_id=%u via route_lidx=%d route_tidx=%d\n",
+        task->vjetty_id, task->failed_local_idx, task->new_pjetty_id, route_local_idx, route_target_idx);
     return BONDP_FB_OK;
 }
 

@@ -52,6 +52,33 @@ static bondp_nl_ctx_t g_bondp_nl_ctx = {
 };
 
 
+// 新接口: 直接发送 switchback_req, 填充新格式消息
+int bondp_failback_ctrl_send(const bondp_failback_msg_t *req)
+{
+    if (req == NULL) {
+        return -EINVAL;
+    }
+
+    int ret = bondp_nl_send_failback_msg(req);
+    if (ret != 0) {
+        URMA_LOG_WARN(
+            "Failed to send failback ctrl by netlink, ret=%d vjetty=%u pjetty_i_idx=%u "
+            "new_id=%u type=%u seq=%u route_lidx=%u route_tidx=%u\n",
+            ret, req->in.vjetty_id, req->in.pjetty_i_idx, req->in.pjetty_i_new_id,
+            req->in.ctrl_type, req->in.req_seq,
+            req->in.route_local_idx, req->in.route_target_idx);
+        return ret;
+    }
+    URMA_LOG_INFO(
+        "Failback ctrl sent by netlink, vjetty=%u pjetty_i_idx=%u new_id=%u "
+        "type=%u seq=%u route_lidx=%u route_tidx=%u\n",
+        req->in.vjetty_id, req->in.pjetty_i_idx, req->in.pjetty_i_new_id,
+        req->in.ctrl_type, req->in.req_seq,
+        req->in.route_local_idx, req->in.route_target_idx);
+    return 0;
+}
+
+// 旧接口: 保留兼容 health_check 等旧代码, 后续可移除
 int bondp_fallback_ctrl_send_default(bondp_context_t *bdp_ctx, uint32_t vjetty_id,
     int local_idx, int target_idx, uint8_t ctrl_type, uint8_t req_seq, uint32_t payload)
 {
@@ -61,13 +88,14 @@ int bondp_fallback_ctrl_send_default(bondp_context_t *bdp_ctx, uint32_t vjetty_i
 
     bondp_switchback_req_t req = {0};
     req.in.vjetty_id = vjetty_id;
-    req.in.local_idx = (uint32_t)local_idx;
-    req.in.target_idx = (uint32_t)target_idx;
+    req.in.pjetty_i_idx = (uint32_t)local_idx;
+    req.in.pjetty_i_new_id = payload;
     req.in.ctrl_type = ctrl_type;
     req.in.req_seq = req_seq;
-    req.in.payload = payload;
+    req.in.route_local_idx = (uint32_t)local_idx;
+    req.in.route_target_idx = (uint32_t)target_idx;
 
-    int ret = bondp_nl_send_switchback_req(&req);
+    int ret = bondp_nl_send_failback_msg(&req);
     if (ret != 0) {
         URMA_LOG_WARN(
             "Failed to send switchback ctrl by netlink, ret=%d vjetty=%u lidx=%d tidx=%d type=%u seq=%u payload=%u\n",
@@ -79,7 +107,7 @@ int bondp_fallback_ctrl_send_default(bondp_context_t *bdp_ctx, uint32_t vjetty_i
 
 static int bondp_nl_parse_cb(struct nl_msg *nlmsg, void *arg)
 {
-    bondp_switchback_msg_t *out = (bondp_switchback_msg_t *)arg;
+    bondp_failback_msg_t *out = (bondp_failback_msg_t *)arg;
     struct nlmsghdr *hdr = nlmsg_hdr(nlmsg);
     if (hdr == NULL || out == NULL) {
         return NL_SKIP;
@@ -103,7 +131,7 @@ static int bondp_nl_parse_cb(struct nl_msg *nlmsg, void *arg)
 
     void *payload = nla_data(attrs[UBCORE_HDR_ARGS_ADDR]);
     int payload_len = nla_len(attrs[UBCORE_HDR_ARGS_ADDR]);
-    if (payload == NULL || payload_len < (int)sizeof(bondp_switchback_msg_t)) {
+    if (payload == NULL || payload_len < (int)sizeof(bondp_failback_msg_t)) {
         return NL_SKIP;
     }
 
@@ -173,7 +201,7 @@ int bondp_nl_get_fd(void)
     return fd;
 }
 
-int bondp_nl_send_switchback_req(const bondp_switchback_req_t *req)
+int bondp_nl_send_failback_msg(const bondp_failback_msg_t *req)
 {
     if (req == NULL) {
         return -EINVAL;
@@ -212,7 +240,7 @@ int bondp_nl_send_switchback_req(const bondp_switchback_req_t *req)
     return (ret < 0) ? ret : 0;
 }
 
-int bondp_nl_recv_switchback_msg(bondp_switchback_msg_t *msg)
+int bondp_nl_recv_failback_msg(bondp_failback_msg_t *msg)
 {
     if (msg == NULL) {
         return -EINVAL;
