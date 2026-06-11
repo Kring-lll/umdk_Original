@@ -114,6 +114,12 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
     urma_target_seg_t *tseg = NULL;
+
+    umq_ub_imm_t imm_data = {
+        .io_imm.type = IMM_TYPE_USER_WITHOUT_IMM,
+        .io_imm.umq_id = queue->remote_umq_id,
+        .io_imm.user_data = 0
+    };
     switch (buf_pro->opcode) {
         case UMQ_OPC_READ:
             if (!umq_ub_enable_import_remote_mem(queue->dev_ctx->feature)) {
@@ -185,11 +191,13 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
             break;
         case UMQ_OPC_SEND_IMM:
             buf_pro->imm.rsvd0 = 0;
-            urma_wr_ptr->send.imm_data = buf_pro->imm_data;
+            imm_data.io_imm.type = IMM_TYPE_USER;
+            imm_data.io_imm.user_data = buf_pro->imm.user_data;
             /* fall-through */
         case UMQ_OPC_SEND:
             urma_wr_ptr->send.src.sge = sges_ptr;
             urma_wr_ptr->send.src.num_sge = sge_num;
+            urma_wr_ptr->send.imm_data = imm_data.value;
             break;
         default:
             break;
@@ -742,18 +750,23 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_
             break;
         }
         case URMA_CR_OPC_SEND_WITH_IMM: {
-            ret = umq_ub_on_rx_done(queue, cr, buf, qbuf_status);
+
+            if (queue->dev_ctx->feature & UMQ_FEATURE_ENABLE_EXTEND_IMM) {
+                ret = umq_ub_on_rx_done(queue, cr, buf, qbuf_status);
+            } else {
+                umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
+                buf_pro->opcode = UMQ_OPC_SEND_IMM;
+                umq_ub_imm_t imm = {.value = cr->imm_data};
+                buf_pro->umq_ctx = queue->dev_ctx->umq_ctx_table[imm.io_imm.umq_id];
+                buf_pro->imm.user_data = imm.io_imm.user_data;
+            }
             break;
         }
         case URMA_CR_OPC_SEND: {
             umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
             buf_pro->opcode = UMQ_OPC_SEND;
-            ub_queue_t *real_queue = umq_ub_get_real_queue_by_cr(queue, cr);
-            if (real_queue != NULL) {
-                buf_pro->umq_ctx = real_queue->umq_ctx;
-            } else {
-                buf_pro->umq_ctx = 0;
-            }
+            umq_ub_imm_t imm = {.value = cr->imm_data};
+            buf_pro->umq_ctx = queue->dev_ctx->umq_ctx_table[imm.io_imm.umq_id];
             break;
         }
         default:
