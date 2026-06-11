@@ -46,6 +46,10 @@ using jetty_mgr_map_t = std::unordered_map<uint32_t, jetty_mgr*>;
 using exception_client_set_t = std::set<int32_t>;
 
 constexpr size_t MAX_OBJECT_SIZE = 102400;  /* maximum alive object number */
+/* Attack might happen, this limit can protect attacker unlimited consume of
+ * system fd.
+ */
+constexpr int MAX_FD_LIMIT_NUM = MAX_NUM_CLIENT << 2;
 
 struct jetty_mgr_invalid_info {
     jetty_mgr *p_jetty_mgr;
@@ -228,6 +232,7 @@ private:
     dlock_server_state_t m_server_state;
     int m_control_epfd;
     int m_lock_num;
+    int m_fd_num; /* To prevent attack case which consumes all the fds */
 #if defined(MEASURE_ENABLE) && (MEASURE_ENABLE != 0)
     struct timeval m_tv_start;
     uint32_t m_measure_count;

@@ -98,7 +98,7 @@ dlock_server::dlock_server(int server_id) noexcept
       m_recovery_client_num(0), m_listen_fd(-1), m_ssl_enable(false), m_is_cpu_ctrl_affnty_set(false),
       m_is_cpu_cmd_affnty_set(false), m_time_current({0}), m_num_reqs(0), m_sleep_cfg_enable(true),
       m_sleep_mode(false), m_client_num(0), m_tp_mode(SEPERATE_CONN), m_server_state(SERVER_INIT),
-      m_control_epfd(-1), m_lock_num(0), m_object_memory(nullptr), m_obj_mem_dma_tseg(nullptr),
+      m_control_epfd(-1), m_lock_num(0), m_fd_num(0), m_object_memory(nullptr), m_obj_mem_dma_tseg(nullptr),
       m_curr_object_id(1), m_curr_object_num(0)
 {
     DLOCK_LOG_DEBUG("server %d construct", server_id);
@@ -201,6 +201,11 @@ void dlock_server::clear_m_fd2conn_map(void)
         while (iter != m_fd2conn_map.end()) {
             delete iter->second;
             static_cast<void>(iter++);
+            if (m_fd_num > 0) {
+                m_fd_num--;
+            } else {
+                DLOCK_LOG_ERR("fd num count state err");
+            }
         }
         m_fd2conn_map.clear();
     }
@@ -227,6 +232,11 @@ void dlock_server::delete_sockfd(int sockfd) const
 void dlock_server::delete_dlock_connection(dlock_connection *p_conn)
 {
     static_cast<void>(m_fd2conn_map.erase(p_conn->get_fd()));
+    if (m_fd_num > 0) {
+        m_fd_num--;
+    } else {
+        DLOCK_LOG_ERR("fd num count state err");
+    }
     static_cast<void>(epoll_ctl(m_control_epfd, EPOLL_CTL_DEL, p_conn->get_fd(), nullptr));
     delete p_conn;
 }
@@ -1023,6 +1033,12 @@ int dlock_server::primary_control_func(int control_epfd, int ev_fd)
         return -1;
     }
 
+    if (m_fd_num >= MAX_FD_LIMIT_NUM) {
+        DLOCK_LOG_ERR("Connections accepted by server exceed limit");
+        (void)close(new_sock);
+        return -1;
+    }
+
     epoll_event new_ev = {0, {.ptr = nullptr}};
     new_ev.events = static_cast<uint32_t>(EPOLLIN);
     new_ev.data.fd = new_sock;
@@ -1045,6 +1061,7 @@ int dlock_server::primary_control_func(int control_epfd, int ev_fd)
         delete_sockfd(new_sock);
         return -1;
     }
+    m_fd_num++;
     m_fd2conn_map[new_sock] = p_conn;
     return 0;
 }
