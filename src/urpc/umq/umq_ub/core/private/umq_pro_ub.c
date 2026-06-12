@@ -680,13 +680,13 @@ static int umq_ub_on_rx_done(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t *rx_buf
         buf_pro->umq_ctx = 0;
     }
     umq_ub_imm_t imm = {.value = cr->imm_data};
-    if (imm.bs.type == IMM_TYPE_USER) {
+    if (imm.bs_ext.type == IMM_TYPE_USER) {
         buf_pro->imm_data = imm.value;
         umq_io_perf_process(UMQ_PERF_RECORD_TRANSPORT_POLL_RX, rx_buf);
         goto OUT;
     }
 
-    switch (imm.bs.type) {
+    switch (imm.bs_ext.type) {
         case IMM_TYPE_MEM_IMPORT:
             if (umq_ub_data_plan_import_mem((uint64_t)(uintptr_t)real_queue, rx_buf, 0, false) != UMQ_SUCCESS) {
                 *qbuf_status = UMQ_IMPORT_TSEG_FAILED;
@@ -732,7 +732,7 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_
                 ret = UMQ_CONTINUE_FLAG;
             } else {
                 umq_ub_imm_t imm = {.value = cr->imm_data};
-                if (imm.bs.type == IMM_TYPE_USER) {
+                if (imm.bs_ext.type == IMM_TYPE_USER) {
                     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
                     buf_pro->opcode = UMQ_OPC_WRITE_IMM;
                     buf_pro->imm_data = imm.value;
@@ -1061,6 +1061,23 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
 int umq_ub_fill_fc_rx_buf(ub_queue_t *queue, uint64_t user_ctx)
 {
     urma_sge_t fc_sge = {.addr = user_ctx, .len = sizeof(umq_ub_fc_sge_data_t)};
+    umq_buf_t *qbuf = umq_qbuf_data_to_head((void *)(uintptr_t)user_ctx);
+    if (qbuf == NULL || qbuf->mempool_id >= QBUF_POOL_MEMPOOL_ID_MAX) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ,
+            "eid: " EID_FMT ", jetty_id: %u, fc rx buf mempool invalid\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id);
+        return -UMQ_ERR_EFAULT;
+    }
+
+    fc_sge.tseg = queue->dev_ctx->tseg_list[qbuf->mempool_id];
+    if (fc_sge.tseg == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ,
+            "eid: " EID_FMT ", jetty_id: %u, mempool %u tseg not exist\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, qbuf->mempool_id);
+        return -UMQ_ERR_EFAULT;
+    }
     urma_jfr_wr_t recv_wr = {
         .src = {.sge = &fc_sge, .num_sge = 1},
         .user_ctx = user_ctx
@@ -1130,6 +1147,22 @@ static int umq_ub_fill_fc_rx_post_jfr(ub_queue_t *queue, uint32_t batch,
             return ret;
         }
     }
+    uint16_t mempool_id = jfr_ctx->share_rq_sge.qbuf_array[0]->mempool_id;
+    if (mempool_id >= QBUF_POOL_MEMPOOL_ID_MAX) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ,
+            "eid: " EID_FMT ", jetty_id: %u, fc rx buf mempool invalid\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id);
+        return -UMQ_ERR_EFAULT;
+    }
+    urma_target_seg_t *tseg = queue->dev_ctx->tseg_list[mempool_id];
+    if (tseg == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ,
+            "eid: " EID_FMT ", jetty_id: %u, mempool %u tseg not exist\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, mempool_id);
+        return -UMQ_ERR_EFAULT;
+    }
     for (uint32_t i = 0; i < batch; i++) {
         uint32_t byte_offset = i * sizeof(umq_ub_fc_sge_data_t);
         uint32_t qbuf_idx = byte_offset / umq_buf_size_small();
@@ -1138,6 +1171,7 @@ static int umq_ub_fill_fc_rx_post_jfr(ub_queue_t *queue, uint32_t batch,
                                                qbuf_offset);
         fc_sges[i].addr = addr;
         fc_sges[i].len = sizeof(umq_ub_fc_sge_data_t);
+        fc_sges[i].tseg = tseg;
         recv_wr[i].src.sge = &fc_sges[i];
         recv_wr[i].src.num_sge = 1;
         recv_wr[i].user_ctx = addr;
@@ -1148,15 +1182,42 @@ static int umq_ub_fill_fc_rx_post_jfr(ub_queue_t *queue, uint32_t batch,
 static int umq_ub_fill_fc_rx_post_jetty(ub_queue_t *queue, uint32_t batch,
     urma_jfr_wr_t *recv_wr, urma_sge_t *fc_sges)
 {
+    uint32_t max_entries_per_slot = UMQ_UB_FLOW_CONTROL_SGE_BYTES_PER_SLOT / sizeof(umq_ub_fc_sge_data_t);
+    if (batch > max_entries_per_slot) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API,
+            "eid: " EID_FMT ", jetty_id: %u, batch %u exceeds max entries per slot %u\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, batch, max_entries_per_slot);
+        return -UMQ_ERR_EINVAL;
+    }
     int ret = umq_ub_flow_control_sge_alloc(&queue->dev_ctx->fc_sge_mgr, &queue->flow_control.recv_sge);
     if (ret != UMQ_SUCCESS) {
         return ret;
     }
+    uint32_t qbuf_idx = queue->flow_control.recv_sge.bitmap_idx /
+                        (umq_buf_size_small() / UMQ_UB_FLOW_CONTROL_SGE_BYTES_PER_SLOT);
+    uint16_t mempool_id = queue->dev_ctx->fc_sge_mgr.qbuf_array[qbuf_idx]->mempool_id;
+    if (mempool_id >= QBUF_POOL_MEMPOOL_ID_MAX) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ,
+            "eid: " EID_FMT ", jetty_id: %u, fc rx buf mempool invalid\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id);
+        return -UMQ_ERR_EFAULT;
+    }
+    urma_target_seg_t *tseg = queue->dev_ctx->tseg_list[mempool_id];
+    if (tseg == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ,
+            "eid: " EID_FMT ", jetty_id: %u, mempool %u tseg not exist\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, mempool_id);
+        return -UMQ_ERR_EFAULT;
+    }
     for (uint32_t i = 0; i < batch; i++) {
         uint64_t addr = (uint64_t)(uintptr_t)((char *)queue->flow_control.recv_sge.addr +
-                                               (i % 2) * sizeof(umq_ub_fc_sge_data_t));
+                                               (i % max_entries_per_slot) * sizeof(umq_ub_fc_sge_data_t));
         fc_sges[i].addr = addr;
         fc_sges[i].len = sizeof(umq_ub_fc_sge_data_t);
+        fc_sges[i].tseg = tseg;
         recv_wr[i].src.sge = &fc_sges[i];
         recv_wr[i].src.num_sge = 1;
         recv_wr[i].user_ctx = addr;
@@ -1328,16 +1389,16 @@ static int process_tx_msg(umq_buf_t *buf, ub_queue_t *queue)
 {
     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf->qbuf_ext;
     umq_ub_imm_t imm = {.value = buf_pro->imm_data};
-    if (imm.bs.type == IMM_TYPE_USER) {
+    if (imm.bs_ext.type == IMM_TYPE_USER) {
         return UMQ_SUCCESS;
     }
 
     switch (buf_pro->opcode) {
         case UMQ_OPC_SEND_IMM:
-            if (imm.bs.type == IMM_TYPE_MEM_IMPORT) {
+            if (imm.bs_ext.type == IMM_TYPE_MEM_IMPORT) {
                 umq_buf_free(buf);
                 return UMQ_CONTINUE_FLAG;
-            } else if (imm.bs.type == IMM_TYPE_MEM_IMPORT_DONE) {
+            } else if (imm.bs_ext.type == IMM_TYPE_MEM_IMPORT_DONE) {
                 return UMQ_CONTINUE_FLAG;
             }
             break;

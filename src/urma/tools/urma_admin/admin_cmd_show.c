@@ -11,6 +11,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <netlink/errno.h>
+#include <netlink/genl/genl.h>
 #include <stdio.h>
 
 #include "ub_list.h"
@@ -28,14 +29,26 @@
 static int cmd_show_usage(admin_config_t *cfg)
 {
     (void)cfg;
-    printf("Usage:"
-           "  urma_admin show [--dev <dev>] [--brief|--all] [--whole]  Show URMA devices information\n"
-           "  urma_admin show topo [-d <dev>]          Show topology of current node\n"
-           "  urma_admin show topo <node_id> [-d <dev>] Show topology of specified node\n"
+    printf("Usage:\n"
+           "  urma_admin show [--dev <DEV>] [--brief|--all] [--whole]  Show URMA devices information\n"
+           "  urma_admin show topo [NODE_ID]           Show topology of specified node, default is current node\n"
+           "  urma_admin show dev <DEV> jfc         [JFC_ID]\n"
+           "  urma_admin show dev <DEV> jfs         [JFS_ID]\n"
+           "  urma_admin show dev <DEV> jfr         [JFR_ID]\n"
+           "  urma_admin show dev <DEV> jetty       [JETTY_ID]\n"
+           "  urma_admin show dev <DEV> jetty_group [JETTY_GROUP_ID]\n"
+           "  urma_admin show dev <DEV> rc          [RC_ID]\n"
+           "  urma_admin show dev <DEV> seg         [TOKEN_ID]\n"
+           "  urma_admin show dev <dev> tp [tp_id]  Show tpid_list (or single tpid state) of device\n"
+           "  urma_admin show dev <dev> tpreuse     Show tpid_reuse of device\n"
            "\n"
            "Options:\n"
            "  <dev>      Device name (e.g., udma1)\n"
            "  <node_id>  Node ID (e.g., 1)\n"
+           "  <dev_name> Device name (e.g., bonding_dev_0)\n"
+           "  <jfx>      Resource type: jfs|jfr|jetty|jfc|seg\n"
+           "  <jfx_id>   Resource ID (e.g., 0)\n"
+           "  <tp_id>    Transport point id (e.g., 1)\n"
            "  --brief    Default behavior. If bonding devices exist, show bonding devices only;\n"
            "             otherwise show all udma devices.\n"
            "  --all      Show all devices\n"
@@ -44,6 +57,66 @@ static int cmd_show_usage(admin_config_t *cfg)
 }
 
 #define UINT8_INVALID (0xff)
+
+#define UBAGG_DEV_MAX_NUM       (20)
+#define UBAGG_MAX_PORT_NUM      (9)
+#define ADMIN_V2P_RES_BUF_SIZE (64 * 1024)
+
+enum admin_show_res_type {
+    ADMIN_SHOW_RES_JETTY = 0,
+    ADMIN_SHOW_RES_JFS,
+    ADMIN_SHOW_RES_JFR,
+    ADMIN_SHOW_RES_JFC,
+    ADMIN_SHOW_RES_SEG,
+};
+
+typedef struct admin_ubagg_ubva {
+    urma_eid_t eid;
+    uint32_t uasid;
+    uint64_t va;
+} __attribute__((packed)) admin_ubagg_ubva_t;
+
+typedef struct admin_ubagg_seg_info {
+    admin_ubagg_ubva_t ubva;
+    uint64_t len;
+    uint32_t seg_attr;
+    uint32_t token_id;
+} admin_ubagg_seg_info_t;
+
+typedef struct admin_ubagg_seg_exchange_info {
+    admin_ubagg_seg_info_t base;
+    admin_ubagg_seg_info_t slaves[UBAGG_DEV_MAX_NUM];
+    int dev_num;
+} admin_ubagg_seg_exchange_info_t;
+
+typedef struct admin_ubagg_jetty_id {
+    urma_eid_t eid;
+    uint32_t uasid;
+    uint32_t id;
+} admin_ubagg_jetty_id_t;
+
+typedef struct admin_ubagg_jetty_exchange_info {
+    admin_ubagg_jetty_id_t slaves[UBAGG_DEV_MAX_NUM];
+    bool is_multipath;
+    uint8_t enabled_indices[UBAGG_DEV_MAX_NUM];
+    uint32_t enabled_count;
+    bool is_health_check_enable;
+    admin_ubagg_seg_exchange_info_t health_check_seg;
+} admin_ubagg_jetty_exchange_info_t;
+
+typedef struct admin_core_cmd_show_res {
+    struct {
+        char dev_name[URMA_MAX_NAME];
+        uint32_t type;
+        uint32_t key;
+        uint32_t key_cnt;
+    } in;
+    struct {
+        uint64_t addr;
+        uint32_t len;
+        uint64_t save_ptr;
+    } out;
+} admin_core_cmd_show_res_t;
 
 typedef struct admin_show_ubep {
     struct ub_list node;
@@ -800,6 +873,24 @@ free_list:
     return ret;
 }
 
+static int cmd_show_dev_usage(admin_config_t *cfg)
+{
+    (void)cfg;
+    printf("Usage:\n"
+           "  urma_admin show dev <DEV>\n"
+           "  urma_admin show dev <DEV> jfc   [JFC_ID]\n"
+           "  urma_admin show dev <DEV> jfs   [JFS_ID]\n"
+           "  urma_admin show dev <DEV> jfr   [JFR_ID]\n"
+           "  urma_admin show dev <DEV> jetty [JETTY_ID]\n"
+           "  urma_admin show dev <DEV> jetty_group [JETTY_GROUP_ID]\n"
+           "  urma_admin show dev <DEV> rc    [RC_ID]\n"
+           "  urma_admin show dev <DEV> seg   [TOKEN_ID]\n"
+           "  urma_admin show dev <dev> tp           Show all tpid_list of <dev>\n"
+           "  urma_admin show dev <dev> tp <tp_id>   Show state of <tp_id> on <dev>\n"
+           "  urma_admin show dev <dev> tpreuse      Show all tpid_reuse of <dev>\n");
+    return 0;
+}
+
 static bool is_eid_equal(const urma_eid_t *eid1, const urma_eid_t *eid2)
 {
     for (int i = 0; i < URMA_EID_SIZE; i++) {
@@ -1186,6 +1277,323 @@ int admin_cmd_get_topo_bonding_dev_by_eid(const urma_eid_t *agg_eid,
     return ret;
 }
 
+static const char *tpid_status_to_string(uint32_t status)
+{
+    static const char * const tpid_status_str[] = {
+        "RESET", "RTR", "RTS", "SUSPENDED", "ERR",
+    };
+    if (status >= (sizeof(tpid_status_str) / sizeof(tpid_status_str[0]))) {
+        return "UNKNOWN";
+    }
+    return tpid_status_str[status];
+}
+
+static const char *tpid_trans_mode_to_string(uint32_t trans_mode)
+{
+    switch (trans_mode) {
+        case URMA_TM_RM:
+            return "RM";
+        case URMA_TM_RC:
+            return "RC";
+        case URMA_TM_UM:
+            return "UM";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+static const char *tpid_tp_type_to_string(uint32_t tp_type)
+{
+    static const char * const tp_type_str[] = {
+        "RTP", "CTP", "UTP",
+    };
+    if (tp_type >= (sizeof(tp_type_str) / sizeof(tp_type_str[0]))) {
+        return "UNKNOWN";
+    }
+    return tp_type_str[tp_type];
+}
+
+static const char *tpid_share_mode_to_string(uint32_t share_mode)
+{
+    static const char * const share_mode_str[] = {
+        "NONE", "NODE", "CONTAINER", "JETTY", "CUSTOM",
+    };
+    if (share_mode >= (sizeof(share_mode_str) / sizeof(share_mode_str[0]))) {
+        return "UNKNOWN";
+    }
+    return share_mode_str[share_mode];
+}
+
+static const char *tpid_link_type_to_string(uint32_t link_type)
+{
+    switch (link_type) {
+        case 0:
+            return "ETHERNET";
+        case 1:
+            return "UBOE";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+static const char *tpid_owner_type_to_string(uint32_t owner_type)
+{
+    static const char * const owner_type_str[] = {
+        "NONE", "USER_AWARE", "USER_UNAWARE",
+    };
+    if (owner_type >= (sizeof(owner_type_str) / sizeof(owner_type_str[0]))) {
+        return "UNKNOWN";
+    }
+    return owner_type_str[owner_type];
+}
+
+static void print_tpid_list_hdr(const admin_show_tpid_list_hdr_t *hdr, uint32_t index)
+{
+    char local_eid_str[INET6_ADDRSTRLEN] = {0};
+    char peer_eid_str[INET6_ADDRSTRLEN] = {0};
+
+    urma_eid_to_ipv6_str(&hdr->local_eid, local_eid_str, sizeof(local_eid_str));
+    urma_eid_to_ipv6_str(&hdr->peer_eid, peer_eid_str, sizeof(peer_eid_str));
+
+    (void)printf("==================== tpid_list[%u] ====================\n", index);
+    (void)printf("local_eid     : %s\n", local_eid_str);
+    (void)printf("peer_eid      : %s\n", peer_eid_str);
+    (void)printf("trans_mode    : %u [%s]\n", hdr->trans_mode, tpid_trans_mode_to_string(hdr->trans_mode));
+    (void)printf("share_mode    : %u [%s]\n", hdr->share_mode, tpid_share_mode_to_string(hdr->share_mode));
+    (void)printf("tp_type       : %u [%s]\n", hdr->tp_type, tpid_tp_type_to_string(hdr->tp_type));
+    (void)printf("link_type     : %u [%s]\n", hdr->link_type, tpid_link_type_to_string(hdr->link_type));
+    (void)printf("acnt          : %u\n", hdr->acnt);
+    (void)printf("ucnt          : %u\n", hdr->ucnt);
+    (void)printf("capacity      : %u\n", hdr->capacity);
+    (void)printf("ref_cnt       : %u\n", hdr->ref_cnt);
+    (void)printf("aware_list    : %u node(s)\n", hdr->aware_node_cnt);
+    (void)printf("unaware_list  : %u node(s)\n", hdr->unaware_node_cnt);
+}
+
+static void print_tpid_node(const admin_show_tpid_node_t *node, const char *kind)
+{
+    admin_tp_handle_t h;
+
+    h.value = node->tp_handle;
+    (void)printf("  [%-7s] tp_handle=0x%-16llx tpid=%-10llu\n", kind,
+                 (unsigned long long)node->tp_handle, (unsigned long long)h.bs.tpid);
+    (void)printf("            tpn_start=%-10llu tp_cnt=%-5llu trans_mode=%llu [%s]\n",
+                 (unsigned long long)h.bs.tpn_start, (unsigned long long)h.bs.tp_cnt,
+                 (unsigned long long)h.bs.trans_mode,
+                 tpid_trans_mode_to_string((uint32_t)h.bs.trans_mode));
+    (void)printf("            ctp=%llu rtp=%llu utp=%llu uboe=%llu pre_defined=%llu dynamic_defined=%llu\n",
+                 (unsigned long long)h.bs.ctp, (unsigned long long)h.bs.rtp,
+                 (unsigned long long)h.bs.utp, (unsigned long long)h.bs.uboe,
+                 (unsigned long long)h.bs.pre_defined, (unsigned long long)h.bs.dynamic_defined);
+}
+
+static const char *tpid_reuse_state_to_string(uint32_t state)
+{
+    static const char * const reuse_state_str[] = {
+        "RESET", "READY", "ERROR",
+    };
+    if (state >= (sizeof(reuse_state_str) / sizeof(reuse_state_str[0]))) {
+        return "UNKNOWN";
+    }
+    return reuse_state_str[state];
+}
+
+static void print_tpid_reuse_one(const admin_show_tpid_reuse_entry_t *entry, uint32_t index)
+{
+    char local_eid_str[INET6_ADDRSTRLEN] = {0};
+    char peer_eid_str[INET6_ADDRSTRLEN] = {0};
+
+    urma_eid_to_ipv6_str(&entry->local_eid, local_eid_str, sizeof(local_eid_str));
+    urma_eid_to_ipv6_str(&entry->peer_eid, peer_eid_str, sizeof(peer_eid_str));
+
+    (void)printf("==================== tpid_reuse[%u] ====================\n", index);
+    (void)printf("local_eid     : %s\n", local_eid_str);
+    (void)printf("peer_eid      : %s\n", peer_eid_str);
+    (void)printf("trans_mode    : %u [%s]\n", entry->trans_mode, tpid_trans_mode_to_string(entry->trans_mode));
+    (void)printf("share_mode    : %u [%s]\n", entry->share_mode, tpid_share_mode_to_string(entry->share_mode));
+    (void)printf("tp_type       : %u [%s]\n", entry->tp_type, tpid_tp_type_to_string(entry->tp_type));
+    (void)printf("link_type     : %u [%s]\n", entry->link_type, tpid_link_type_to_string(entry->link_type));
+    (void)printf("stag          : 0x%llx\n", (unsigned long long)entry->stag);
+    (void)printf("dtag          : 0x%llx\n", (unsigned long long)entry->dtag);
+    (void)printf("tp_handle     : 0x%llx\n", (unsigned long long)entry->tp_handle);
+    (void)printf("reuse_state   : %u [%s]\n", entry->reuse_state, tpid_reuse_state_to_string(entry->reuse_state));
+    (void)printf("ref_cnt       : %u\n", entry->ref_cnt);
+    (void)printf("use_cnt       : %d\n", entry->use_cnt);
+}
+
+typedef struct tpid_show_print_ctx {
+    const char *dev_name;
+    uint64_t tpid;
+    uint32_t list_idx;
+    uint32_t reuse_idx;
+    bool any;
+} tpid_show_print_ctx_t;
+
+/* Parse one streamed dumpit record and print it. Called per netlink message. */
+static int tpid_show_msg_cb(struct nl_msg *msg, void *arg)
+{
+    tpid_show_print_ctx_t *ctx = (tpid_show_print_ctx_t *)arg;
+    struct nlmsghdr *nlh = nlmsg_hdr(msg);
+    struct nlattr *attrs[ADMIN_TPID_SHOW_ATTR_MAX + 1];
+    uint32_t rec_type;
+    uint32_t dlen;
+    void *data;
+
+    if (nlh->nlmsg_type == NLMSG_DONE || nlh->nlmsg_type == NLMSG_ERROR) {
+        return NL_OK;
+    }
+    if (genlmsg_parse(nlh, 0, attrs, ADMIN_TPID_SHOW_ATTR_MAX, NULL) < 0) {
+        return NL_OK;
+    }
+    if (attrs[ADMIN_TPID_SHOW_ATTR_REC_TYPE] == NULL || attrs[ADMIN_TPID_SHOW_ATTR_REC_DATA] == NULL) {
+        return NL_OK;
+    }
+    rec_type = nla_get_u32(attrs[ADMIN_TPID_SHOW_ATTR_REC_TYPE]);
+    data = nla_data(attrs[ADMIN_TPID_SHOW_ATTR_REC_DATA]);
+    dlen = (uint32_t)nla_len(attrs[ADMIN_TPID_SHOW_ATTR_REC_DATA]);
+    ctx->any = true;
+
+    switch (rec_type) {
+        case ADMIN_TPID_SHOW_REC_LIST_HDR: {
+            admin_show_tpid_list_hdr_t hdr = {0};
+            if (dlen < sizeof(hdr)) {
+                break;
+            }
+            (void)memcpy(&hdr, data, sizeof(hdr));
+            print_tpid_list_hdr(&hdr, ctx->list_idx++);
+            break;
+        }
+        case ADMIN_TPID_SHOW_REC_AWARE_NODE:
+        case ADMIN_TPID_SHOW_REC_UNAWARE_NODE: {
+            admin_show_tpid_node_t node = {0};
+            if (dlen < sizeof(node)) {
+                break;
+            }
+            (void)memcpy(&node, data, sizeof(node));
+            print_tpid_node(&node, rec_type == ADMIN_TPID_SHOW_REC_AWARE_NODE ? "aware" : "unaware");
+            break;
+        }
+        case ADMIN_TPID_SHOW_REC_TPID_STATE: {
+            admin_show_tpid_state_t st = {0};
+            if (dlen < sizeof(st)) {
+                break;
+            }
+            (void)memcpy(&st, data, sizeof(st));
+            if (st.found == 0) {
+                (void)printf("TP_ID %llu not found on dev %s.\n", (unsigned long long)ctx->tpid, ctx->dev_name);
+            } else {
+                (void)printf("status        : %u [%s]\n", st.status, tpid_status_to_string(st.status));
+                (void)printf("owner_type    : %u [%s]\n", st.owner_type,
+                             tpid_owner_type_to_string(st.owner_type));
+                (void)printf("alloced       : %u\n", st.alloced);
+                (void)printf("ref_cnt       : %u\n", st.ref_cnt);
+            }
+            break;
+        }
+        case ADMIN_TPID_SHOW_REC_REUSE_ENTRY: {
+            admin_show_tpid_reuse_entry_t entry = {0};
+            if (dlen < sizeof(entry)) {
+                break;
+            }
+            (void)memcpy(&entry, data, sizeof(entry));
+            print_tpid_reuse_one(&entry, ctx->reuse_idx++);
+            break;
+        }
+        default:
+            break;
+    }
+    return NL_OK;
+}
+
+static int admin_cmd_show_tpid_list(admin_config_t *cfg, bool query_tpid, uint64_t tpid)
+{
+    admin_core_cmd_show_tpid_list_t arg = {0};
+    tpid_show_print_ctx_t ctx = {0};
+    struct nl_msg *msg;
+    int ret;
+
+    (void)snprintf(arg.in.dev_name, URMA_MAX_NAME, "%s", cfg->dev_name);
+    arg.in.query_tpid = query_tpid ? 1 : 0;
+    arg.in.tpid = tpid;
+
+    msg = admin_nl_alloc_msg(URMA_CORE_SHOW_TPID_LIST, NLM_F_DUMP, UBCORE_GENL);
+    if (msg == NULL) {
+        return -ENOMEM;
+    }
+    admin_nl_put_u32(msg, UBCORE_HDR_ARGS_LEN, (uint32_t)sizeof(arg));
+    admin_nl_put_u64(msg, UBCORE_HDR_ARGS_ADDR, (uint64_t)(uintptr_t)&arg);
+
+    ctx.dev_name = cfg->dev_name;
+    ctx.tpid = tpid;
+    if (!query_tpid) {
+        (void)printf("dev_name      : %s\n", cfg->dev_name);
+    }
+    ret = admin_nl_send_recv_msg(msg, tpid_show_msg_cb, &ctx, UBCORE_GENL);
+    admin_nl_free_msg(msg);
+    if (ret != 0) {
+        (void)printf("Failed to query tpid list of dev %s, ret=%d.\n", cfg->dev_name, ret);
+        return ret;
+    }
+    if (!query_tpid && !ctx.any) {
+        (void)printf("No tpid_list found.\n");
+    }
+    return 0;
+}
+
+static int cmd_show_dev_tp(admin_config_t *cfg)
+{
+    int ret;
+    bool query_tpid = false;
+    uint64_t tpid = 0;
+
+    char *arg_tpid = pop_arg(cfg);
+    if (arg_tpid != NULL) {
+        ret = admin_str_to_u64(arg_tpid, &tpid);
+        if (ret != 0) {
+            (void)printf("Invalid TP_ID: %s.\n", arg_tpid);
+            return -EINVAL;
+        }
+        query_tpid = true;
+    }
+
+    return admin_cmd_show_tpid_list(cfg, query_tpid, tpid);
+}
+
+static int admin_cmd_show_tpid_reuse(admin_config_t *cfg)
+{
+    admin_core_cmd_show_tpid_reuse_t arg = {0};
+    tpid_show_print_ctx_t ctx = {0};
+    struct nl_msg *msg;
+    int ret;
+
+    (void)snprintf(arg.in.dev_name, URMA_MAX_NAME, "%s", cfg->dev_name);
+
+    msg = admin_nl_alloc_msg(URMA_CORE_SHOW_TPID_REUSE, NLM_F_DUMP, UBCORE_GENL);
+    if (msg == NULL) {
+        return -ENOMEM;
+    }
+    admin_nl_put_u32(msg, UBCORE_HDR_ARGS_LEN, (uint32_t)sizeof(arg));
+    admin_nl_put_u64(msg, UBCORE_HDR_ARGS_ADDR, (uint64_t)(uintptr_t)&arg);
+
+    ctx.dev_name = cfg->dev_name;
+    (void)printf("dev_name        : %s\n", cfg->dev_name);
+    ret = admin_nl_send_recv_msg(msg, tpid_show_msg_cb, &ctx, UBCORE_GENL);
+    admin_nl_free_msg(msg);
+    if (ret != 0) {
+        (void)printf("Failed to query tpid reuse of dev %s, ret=%d.\n", cfg->dev_name, ret);
+        return ret;
+    }
+    if (!ctx.any) {
+        (void)printf("No tpid_reuse found.\n");
+    }
+    return 0;
+}
+
+static int cmd_show_dev_tpreuse(admin_config_t *cfg)
+{
+    return admin_cmd_show_tpid_reuse(cfg);
+}
+
 static int cmd_show_topo(admin_config_t *cfg)
 {
     uint32_t node_id;
@@ -1214,15 +1622,229 @@ free_topo:
     return ret;
 }
 
+static int parse_jfx_type(const char *arg, uint32_t *type)
+{
+    if (arg == NULL || type == NULL) {
+        return -EINVAL;
+    }
+    if (strcmp(arg, "jfs") == 0) {
+        *type = ADMIN_SHOW_RES_JFS;
+    } else if (strcmp(arg, "jfr") == 0) {
+        *type = ADMIN_SHOW_RES_JFR;
+    } else if (strcmp(arg, "jetty") == 0) {
+        *type = ADMIN_SHOW_RES_JETTY;
+    } else if (strcmp(arg, "jfc") == 0) {
+        *type = ADMIN_SHOW_RES_JFC;
+    } else if (strcmp(arg, "seg") == 0) {
+        *type = ADMIN_SHOW_RES_SEG;
+    } else {
+        (void)printf("Invalid res type: %s, supported: jfs|jfr|jetty|jfc|seg\n", arg);
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static void print_v2p_list_res(const uint8_t *buf, uint32_t len, uint32_t type)
+{
+    uint32_t id_count = len / sizeof(uint32_t);
+    const uint32_t *ids = (const uint32_t *)buf;
+    const char *type_name = (type == ADMIN_SHOW_RES_JETTY) ? "jetty" :
+                            (type == ADMIN_SHOW_RES_JFS) ? "jfs" :
+                            (type == ADMIN_SHOW_RES_JFR) ? "jfr" :
+                            (type == ADMIN_SHOW_RES_JFC) ? "jfc" :
+                            (type == ADMIN_SHOW_RES_SEG) ? "seg" : "unknown";
+
+    (void)printf("---------- %s list ----------\n", type_name);
+    (void)printf("count: %u\n", id_count);
+    for (uint32_t i = 0; i < id_count; i++) {
+        (void)printf("%s_id[%u] = %u\n", type_name, i, ids[i]);
+    }
+}
+
+static void print_v2p_jetty_detail(const admin_ubagg_jetty_exchange_info_t *info)
+{
+    (void)printf("enabled_count      : %u\n", info->enabled_count);
+    (void)printf("is_health_check    : %s\n", info->is_health_check_enable ? "true" : "false");
+    (void)printf("slaves:\n");
+    for (uint32_t i = 0; i < UBAGG_DEV_MAX_NUM; i++) {
+        if (info->slaves[i].id == 0) {
+            continue;
+        }
+        (void)printf("  slave[%u]: eid=" EID_FMT " uasid=%u id=%u\n",
+                     i, EID_ARGS(info->slaves[i].eid),
+                     info->slaves[i].uasid, info->slaves[i].id);
+    }
+}
+
+static void print_v2p_jfc_jfs_detail(const uint8_t *buf, uint32_t len)
+{
+    uint32_t slave_count = len / sizeof(admin_ubagg_jetty_id_t);
+    const admin_ubagg_jetty_id_t *slaves = (const admin_ubagg_jetty_id_t *)buf;
+    (void)printf("slaves:\n");
+    for (uint32_t i = 0; i < slave_count; i++) {
+        if (slaves[i].id == 0) {
+            continue;
+        }
+        (void)printf("  slave[%u]: eid=" EID_FMT " uasid=%u id=%u\n",
+                     i, EID_ARGS(slaves[i].eid),
+                     slaves[i].uasid, slaves[i].id);
+    }
+}
+
+static void print_v2p_seg_detail(const admin_ubagg_seg_exchange_info_t *info)
+{
+    (void)printf("base: eid=" EID_FMT " uasid=%u va=0x%lx len=%lu token_id=%u\n",
+                 EID_ARGS(info->base.ubva.eid), info->base.ubva.uasid,
+                 info->base.ubva.va, info->base.len, info->base.token_id);
+    (void)printf("slaves:\n");
+    for (uint32_t i = 0; i < UBAGG_DEV_MAX_NUM; i++) {
+        if (info->slaves[i].len == 0) {
+            continue;
+        }
+        (void)printf("  slave[%u]: eid=" EID_FMT " uasid=%u va=0x%lx len=%lu token_id=%u\n",
+                     i, EID_ARGS(info->slaves[i].ubva.eid), info->slaves[i].ubva.uasid,
+                     info->slaves[i].ubva.va, info->slaves[i].len, info->slaves[i].token_id);
+    }
+}
+
+static void print_v2p_show_res(const uint8_t *buf, uint32_t len, uint32_t type)
+{
+    switch (type) {
+        case ADMIN_SHOW_RES_JETTY:
+        case ADMIN_SHOW_RES_JFR:
+            print_v2p_jetty_detail((const admin_ubagg_jetty_exchange_info_t *)buf);
+            break;
+        case ADMIN_SHOW_RES_JFS:
+        case ADMIN_SHOW_RES_JFC:
+            print_v2p_jfc_jfs_detail(buf, len);
+            break;
+        case ADMIN_SHOW_RES_SEG:
+            print_v2p_seg_detail((const admin_ubagg_seg_exchange_info_t *)buf);
+            break;
+        default:
+            (void)printf("Unsupported res type: %u\n", type);
+            break;
+    }
+}
+
+static int admin_cmd_show_dev_res(const char *dev_name, uint32_t type,
+    uint32_t key, uint32_t key_cnt)
+{
+    int ret;
+    uint8_t *out_buf = NULL;
+    admin_core_cmd_show_res_t arg = {0};
+
+    out_buf = calloc(1, ADMIN_V2P_RES_BUF_SIZE);
+    if (out_buf == NULL) {
+        return -ENOMEM;
+    }
+
+    (void)strncpy(arg.in.dev_name, dev_name, URMA_MAX_NAME - 1);
+    arg.in.type = type;
+    arg.in.key = key;
+    arg.in.key_cnt = key_cnt;
+    arg.out.addr = (uint64_t)(uintptr_t)out_buf;
+    arg.out.len = ADMIN_V2P_RES_BUF_SIZE;
+
+    struct nl_msg *msg = admin_nl_alloc_msg(URMA_CORE_GET_V2P_RES, 0, UBCORE_GENL);
+    if (msg == NULL) {
+        free(out_buf);
+        return -ENOMEM;
+    }
+
+    admin_nl_put_u32(msg, UBCORE_HDR_ARGS_LEN, (uint32_t)sizeof(admin_core_cmd_show_res_t));
+    admin_nl_put_u64(msg, UBCORE_HDR_ARGS_ADDR, (uint64_t)(uintptr_t)&arg);
+
+    ret = admin_nl_send_recv_msg_default(msg, UBCORE_GENL);
+    admin_nl_free_msg(msg);
+    if (ret != 0) {
+        (void)printf("Failed to query v2p res, ret=%d.\n", ret);
+        free(out_buf);
+        return ret;
+    }
+
+    if (key_cnt == 0) {
+        print_v2p_list_res(out_buf, arg.out.len, type);
+    } else {
+        print_v2p_show_res(out_buf, arg.out.len, type);
+    }
+
+    free(out_buf);
+    return 0;
+}
+
+static int cmd_show_dev_bonding(admin_config_t *cfg)
+{
+    int ret;
+    char *arg;
+
+    uint32_t type;
+    arg = pop_arg(cfg);
+    if (arg == NULL) {
+        (void)printf("No res type specified.\n");
+        return -EINVAL;
+    }
+    ret = parse_jfx_type(arg, &type);
+    if (ret != 0) {
+        return ret;
+    }
+
+    arg = pop_arg(cfg);
+    if (arg != NULL) {
+        uint32_t jfx_id;
+        ret = admin_str_to_u32(arg, &jfx_id);
+        if (ret != 0) {
+            (void)printf("Invalid jfx_id: %s\n", arg);
+            return -EINVAL;
+        }
+        return admin_cmd_show_dev_res(cfg->dev_name, type, jfx_id, 1);
+    }
+
+    return admin_cmd_show_dev_res(cfg->dev_name, type, 0, 0);
+}
+
+static int cmd_show_dev(admin_config_t *cfg)
+{
+    int ret;
+
+    if ((ret = pop_arg_dev(cfg)) != 0) {
+        return ret;
+    }
+
+    if (cfg->argc == 0) {
+        return cmd_show_default(cfg);
+    }
+
+    if (strncmp(cfg->dev_name, "bonding_dev", strlen("bonding_dev")) == 0) {
+        return cmd_show_dev_bonding(cfg);
+    }
+
+    static const admin_cmd_t cmds[] = {
+        {NULL, cmd_show_dev_usage},
+        {"jfc", admin_cmd_show_dev_jfc},
+        {"jfs", admin_cmd_show_dev_jfs},
+        {"jfr", admin_cmd_show_dev_jfr},
+        {"jetty", admin_cmd_show_dev_jetty},
+        {"jetty_group", admin_cmd_show_dev_jetty_group},
+        {"rc", admin_cmd_show_dev_rc},
+        {"seg", admin_cmd_show_dev_seg},
+        {"tp", cmd_show_dev_tp},
+        {"tpreuse", cmd_show_dev_tpreuse},
+        {0},
+    };
+    return exec_cmd(cfg, cmds);
+}
+
 int admin_cmd_show(admin_config_t *cfg)
 {
     if (cfg->help) {
         return cmd_show_usage(cfg);
     }
     static const admin_cmd_t cmds[] = {
-        {NULL, cmd_show_default}, //
-        {"topo", cmd_show_topo},  //
-        {0},                      //
+        {NULL, cmd_show_default},  //
+        {"dev", cmd_show_dev},     //
+        {"topo", cmd_show_topo},   //
+        {0},                       //
     };
     return exec_cmd(cfg, cmds);
 }

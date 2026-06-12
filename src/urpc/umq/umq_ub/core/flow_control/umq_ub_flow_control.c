@@ -680,14 +680,15 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
     };
     umq_ub_imm_t imm = {
         .flow_control = {
-            .type = IMM_TYPE_FC_CREDIT_REQ,
-            .window = credits_per_request,
+            .type = IMM_TYPE_CONTROL_MSG,
+            .umq_id = queue->remote_umq_id,
             .seq = fc->local_req_seq}
     };
 
     urma_sge_t fc_sge = {
         .addr = (uint64_t)(uintptr_t)&sge_data,
-        .len = sizeof(umq_ub_fc_sge_data_t)
+        .len = sizeof(umq_ub_fc_sge_data_t),
+        .tseg = queue->dev_ctx->tseg_list[UMQ_QBUF_DEFAULT_MEMPOOL_ID]
     };
 
     umq_ub_fc_user_ctx_t obj = {
@@ -741,15 +742,15 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify, ui
     };
     umq_ub_imm_t imm = {
         .flow_control = {
-            .type = IMM_TYPE_FC_CREDIT_REP,
-            .window = notify,
-            .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
+            .type = IMM_TYPE_CONTROL_MSG,
+            .umq_id = queue->remote_umq_id,
             .seq = seq,
         }};
 
     urma_sge_t fc_sge = {
         .addr = (uint64_t)(uintptr_t)&sge_data,
-        .len = sizeof(umq_ub_fc_sge_data_t)
+        .len = sizeof(umq_ub_fc_sge_data_t),
+        .tseg = queue->dev_ctx->tseg_list[UMQ_QBUF_DEFAULT_MEMPOOL_ID]
     };
 
     umq_ub_fc_user_ctx_t obj = {
@@ -880,14 +881,15 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
     };
     umq_ub_imm_t imm = {
         .flow_control = {
-            .type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
-            .window = return_credit,
+            .type = IMM_TYPE_CONTROL_MSG,
+            .umq_id = queue->remote_umq_id,
             .seq = fc->local_req_seq}
     };
 
     urma_sge_t fc_sge = {
         .addr = (uint64_t)(uintptr_t)&sge_data,
-        .len = sizeof(umq_ub_fc_sge_data_t)
+        .len = sizeof(umq_ub_fc_sge_data_t),
+        .tseg = queue->dev_ctx->tseg_list[UMQ_QBUF_DEFAULT_MEMPOOL_ID]
     };
 
     umq_ub_fc_user_ctx_t obj = {
@@ -945,16 +947,16 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
     };
     umq_ub_imm_t imm = {
         .flow_control = {
-            .type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
-            .window = return_credit,
-            .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
+            .type = IMM_TYPE_CONTROL_MSG,
+            .umq_id = queue->remote_umq_id,
             .seq = seq
         }
     };
 
     urma_sge_t fc_sge = {
         .addr = (uint64_t)(uintptr_t)&sge_data,
-        .len = sizeof(umq_ub_fc_sge_data_t)
+        .len = sizeof(umq_ub_fc_sge_data_t),
+        .tseg = queue->dev_ctx->tseg_list[UMQ_QBUF_DEFAULT_MEMPOOL_ID]
     };
 
     umq_ub_fc_user_ctx_t obj = {
