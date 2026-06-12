@@ -602,18 +602,11 @@ static int umq_ub_ctx_init_one(umq_ub_ctx_t *ctx, umq_trans_info_t *info, umq_in
     }
 
     uint32_t table_size = UMQ_ALIGN_64K(ctx->dev_attr.dev_cap.max_jetty);
-    ctx->umq_ctx_jetty_table = (uint64_t *)calloc(table_size, sizeof(uint64_t));
-    if (ctx->umq_ctx_jetty_table == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "calloc umq_ctx_jetty_table failed\n");
-        ret = -UMQ_ERR_ENOMEM;
-        goto DELETE_URMA;
-    }
-
     ctx->rx_consumed_jetty_table = (volatile uint64_t *)calloc(table_size, sizeof(uint64_t));
     if (ctx->rx_consumed_jetty_table == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "calloc rx_consumed_jetty_table failed\n");
         ret = -UMQ_ERR_ENOMEM;
-        goto FREE_JETTY_TABLE;
+        goto DELETE_URMA;
     }
 
     ctx->umq_ctx_table = (volatile uint64_t *)calloc(UMQ_ID_ALLOC_SIZE, sizeof(uint64_t));
@@ -643,10 +636,6 @@ FREE_CTX_TABLE:
 FREE_RX_CONSUMED_TABLE:
     free((void *)ctx->rx_consumed_jetty_table);
     ctx->rx_consumed_jetty_table = NULL;
-
-FREE_JETTY_TABLE:
-    free((void *)ctx->umq_ctx_jetty_table);
-    ctx->umq_ctx_jetty_table = NULL;
 
 DELETE_URMA:
     umq_ub_delete_urma_ctx(ctx);
@@ -773,8 +762,6 @@ ROLLBACK_UB_CTX:
         umq_ub_flow_control_sge_mgr_uninit(&g_ub_ctx[i].fc_sge_mgr);
         umq_ub_ctx_imported_info_destroy(&g_ub_ctx[i]);
         umq_ub_delete_urma_ctx(&g_ub_ctx[i]);
-        free((void*)g_ub_ctx[i].umq_ctx_jetty_table);
-        g_ub_ctx[i].umq_ctx_jetty_table = NULL;
         free((void*)g_ub_ctx[i].rx_consumed_jetty_table);
         g_ub_ctx[i].rx_consumed_jetty_table = NULL;
         free((void*)g_ub_ctx[i].umq_ctx_table);
@@ -823,8 +810,6 @@ void umq_ub_ctx_uninit_impl(uint8_t *ctx)
         umq_ub_ctx_imported_info_destroy(&context[i]);
         umq_dec_ref(context[i].io_lock_free, &context[i].ref_cnt, 1);
         umq_symbol_urma()->urma_delete_context(context[i].urma_ctx);
-        free((void*)context[i].umq_ctx_jetty_table);
-        context[i].umq_ctx_jetty_table = NULL;
         free((void*)context[i].rx_consumed_jetty_table);
         context[i].rx_consumed_jetty_table = NULL;
         free((void*)context[i].umq_ctx_table);
@@ -946,9 +931,6 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
         goto DELETE_FC_JETTY;
     }
 
-    dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id] =
-        (uint64_t)(uintptr_t)queue;
-
     umq_ub_rx_consumed_exchange(
         dev_ctx->io_lock_free,
         &dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id], 0);
@@ -958,14 +940,11 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
      * umq_ub_idle_queue_check or umq_ub_monitor_slots_uninit free resoures */
     if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) != 0) {
         if (umq_ub_idle_checker_init(queue) != UMQ_SUCCESS) {
-            goto CLEAR_TABLE;
+            goto DELETE_FC_JETTY;
         }
     }
 
     return UMQ_SUCCESS;
-
-CLEAR_TABLE:
-    dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id] = 0;
 
 DELETE_FC_JETTY:
     (void)umq_symbol_urma()->urma_delete_jetty(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]);
@@ -1091,12 +1070,11 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
     if ((option->create_flag & UMQ_CREATE_FLAG_UMQ_CTX) != 0) {
         queue->umq_ctx = option->umq_ctx;
     }
-    dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id] = (uint64_t)(uintptr_t)queue;
 
     queue->wait_ack_import.lock = util_rwlock_create();
     if (queue->wait_ack_import.lock == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "queue wait_ack_import lock create failed\n");
-        goto CLEAR_TABLE;
+        goto DELETE_JETTY;
     }
 
     if (umq_ub_create_flow_control_resource(queue, share_rq, option, port_str) != UMQ_SUCCESS) {
@@ -1130,9 +1108,6 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
 LOCK_DESTROY:
     (void)util_rwlock_destroy(queue->wait_ack_import.lock);
     queue->wait_ack_import.lock = NULL;
-
-CLEAR_TABLE:
-    dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id] = 0;
 
 DELETE_JETTY:
     (void)umq_symbol_urma()->urma_delete_jetty(queue->jetty[UB_QUEUE_JETTY_IO]);
@@ -1194,20 +1169,11 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
     }
 
     if (queue->flow_control.enabled) {
-        ub_queue_t *real_queue = umq_ub_get_real_queue_by_jetty_id(
-            queue, queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id);
-        if (real_queue == NULL) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, queue is in use, cannot destroy\n",
-                EID_ARGS(*io_eid), io_id);
-            return -UMQ_ERR_EBUSY;
-        }
-
         urma_eid_t *fc_eid = &queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid;
         uint32_t fc_id = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id;
         umq_ub_credit_clean_up(queue);
         UMQ_VLOG_INFO(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, delete flowcontrol jetty\n",
             EID_ARGS(*fc_eid), fc_id);
-        queue->dev_ctx->umq_ctx_jetty_table[fc_id] = 0;
         ret = umq_symbol_urma()->urma_delete_jetty(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]);
         if (ret != URMA_SUCCESS) {
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_delete_jetty for flowcontrol jetty "
@@ -1231,8 +1197,6 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
 
     umq_ub_flow_control_uninit(&queue->flow_control);
     UMQ_VLOG_INFO(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, delete jetty\n", EID_ARGS(*io_eid), io_id);
-
-    queue->dev_ctx->umq_ctx_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id] = 0;
 
     ret = umq_symbol_urma()->urma_delete_jetty(queue->jetty[UB_QUEUE_JETTY_IO]);
     if (ret != URMA_SUCCESS) {
@@ -1955,17 +1919,11 @@ int umq_ub_dev_add_impl(umq_trans_info_t *info, umq_init_cfg_t *cfg)
     }
 
     uint32_t table_size = UMQ_ALIGN_64K(g_ub_ctx[g_ub_ctx_count].dev_attr.dev_cap.max_jetty);
-    g_ub_ctx[g_ub_ctx_count].umq_ctx_jetty_table = (volatile uint64_t *)calloc(table_size, sizeof(uint64_t));
-    if (g_ub_ctx[g_ub_ctx_count].umq_ctx_jetty_table == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "calloc umq_ctx_jetty_table failed\n");
-        ret = -UMQ_ERR_ENOMEM;
-        goto DELETE_URMA_CTX;
-    }
     g_ub_ctx[g_ub_ctx_count].rx_consumed_jetty_table = (volatile uint64_t *)calloc(table_size, sizeof(uint64_t));
     if (g_ub_ctx[g_ub_ctx_count].rx_consumed_jetty_table == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "calloc rx_consumed_jetty_table failed\n");
         ret = -UMQ_ERR_ENOMEM;
-        goto FREE_UMQ_CTX_TBL;
+        goto DELETE_URMA_CTX;
     }
     g_ub_ctx[g_ub_ctx_count].umq_ctx_table = (volatile uint64_t *)calloc(UMQ_ID_ALLOC_SIZE, sizeof(uint64_t));
     if (g_ub_ctx[g_ub_ctx_count].umq_ctx_table == NULL) {
@@ -2018,10 +1976,6 @@ FREE_UMQ_CTX_TABLE:
 FREE_UMQ_CTX_RX_CONSUMED_TBL:
     free((void*)g_ub_ctx[g_ub_ctx_count].rx_consumed_jetty_table);
     g_ub_ctx[g_ub_ctx_count].rx_consumed_jetty_table = NULL;
-
-FREE_UMQ_CTX_TBL:
-    free((void*)g_ub_ctx[g_ub_ctx_count].umq_ctx_jetty_table);
-    g_ub_ctx[g_ub_ctx_count].umq_ctx_jetty_table = NULL;
 
 DELETE_URMA_CTX:
     (void)umq_ub_delete_urma_ctx(&g_ub_ctx[g_ub_ctx_count]);
