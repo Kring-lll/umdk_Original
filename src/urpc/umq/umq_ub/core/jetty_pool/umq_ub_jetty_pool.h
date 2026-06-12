@@ -76,6 +76,7 @@ typedef struct jetty_pool_sub_umq_template {
 typedef struct jetty_pool {
     urpc_list_t free_q;             // Pre-allocated nodes NOT assigned to any Sub UMQ
     urpc_list_t active_q;           // Nodes assigned to Sub UMQ, available for Logic UMQ
+    urpc_list_t thread_cache_list;  // Registry of all active thread-local caches
     pthread_spinlock_t lock;        // Pool-level lock (minimal lock usage)
     int event_fd;                   // Eventfd for idle jetty notification
 
@@ -98,6 +99,7 @@ typedef struct jetty_pool {
 // Thread-local jetty cache (linked list based on user config)
 typedef struct thread_local_jetty_cache {
     urpc_list_t cache_list;     // Linked list of cached jetty nodes
+    urpc_list_t registry_node;  // Node for global thread cache registry
     uint32_t cached_count;       // Current cached jetty count
     bool inited;                 // Whether this thread cache is initialized
 } thread_local_jetty_cache_t;
