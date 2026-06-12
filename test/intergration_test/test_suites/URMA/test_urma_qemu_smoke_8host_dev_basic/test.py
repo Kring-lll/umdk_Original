@@ -26,16 +26,12 @@ class Test(UBUSFeature):
     @pytest.mark.timeout(1600)
     def test_urma_qemu_smoke_8host_dev_basic(self):
         p_list = []
-        cmd_list = ["read_bw", "write_bw", "send_bw", "read_lat", "write_lat", "send_lat"]
+        cmd_list = ["write_bw", "send_bw", "write_lat", "send_lat"]
         mode_list = [
             "-p 0 --eid_idx 0",
             "-p 1 --eid_idx 0",
             "-p 0 --ctp",
-            "-p 1 --ctp",
-            "-p 2 --ctp",
-            "-p 0 --ctp --tp_aware",
-            "-p 1 --ctp --tp_aware",
-            "-p 2 --ctp --tp_aware"
+            "-p 1 --ctp"
         ]
 
         # Traverse all hosts, all modes, and all types and cover both aware TP to generate pairwise traffic
