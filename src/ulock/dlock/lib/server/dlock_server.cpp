@@ -48,6 +48,8 @@ static const int MAX_TRY_ALLOC_CLIENT_ID_TIME = 6;
 static const int CLIENT_ID_MASK = 0x7FFFFFFF;
 static const int RANDOM_SEED_LEN = 48;
 
+constexpr int DLOCK_MAX_MSG_PER_EVENT = 16;
+
 int (dlock_server::*g_control_do[DLOCK_CONTROL_MAX])(dlock_connection *, struct dlock_control_hdr *, uint8_t *) = {
     [REPLICA_INIT_REQUEST] = nullptr,
     [REPLICA_INIT_RESPONSE] = nullptr,
@@ -98,7 +100,7 @@ dlock_server::dlock_server(int server_id) noexcept
       m_recovery_client_num(0), m_listen_fd(-1), m_ssl_enable(false), m_is_cpu_ctrl_affnty_set(false),
       m_is_cpu_cmd_affnty_set(false), m_time_current({0}), m_num_reqs(0), m_sleep_cfg_enable(true),
       m_sleep_mode(false), m_client_num(0), m_tp_mode(SEPERATE_CONN), m_server_state(SERVER_INIT),
-      m_control_epfd(-1), m_lock_num(0), m_object_memory(nullptr), m_obj_mem_dma_tseg(nullptr),
+      m_control_epfd(-1), m_lock_num(0), m_fd_num(0), m_object_memory(nullptr), m_obj_mem_dma_tseg(nullptr),
       m_curr_object_id(1), m_curr_object_num(0)
 {
     DLOCK_LOG_DEBUG("server %d construct", server_id);
@@ -203,6 +205,7 @@ void dlock_server::clear_m_fd2conn_map(void)
             static_cast<void>(iter++);
         }
         m_fd2conn_map.clear();
+        m_fd_num = 0;
     }
 }
 
@@ -227,6 +230,11 @@ void dlock_server::delete_sockfd(int sockfd) const
 void dlock_server::delete_dlock_connection(dlock_connection *p_conn)
 {
     static_cast<void>(m_fd2conn_map.erase(p_conn->get_fd()));
+    if (m_fd_num > 0) {
+        m_fd_num--;
+    } else {
+        DLOCK_LOG_ERR("fd num count state err");
+    }
     static_cast<void>(epoll_ctl(m_control_epfd, EPOLL_CTL_DEL, p_conn->get_fd(), nullptr));
     delete p_conn;
 }
@@ -249,6 +257,7 @@ void dlock_server::deinit_server_proc(void)
     clear_m_lock_map();
     clear_m_object_map();
     m_except_client_set.clear();
+    m_empty_sock_set.clear();
 
     if (m_p_urma_ctx != nullptr) {
         delete m_p_urma_ctx;
@@ -733,59 +742,26 @@ void dlock_server::conn_exception_process(dlock_connection *p_conn)
     delete_dlock_connection(p_conn);
 }
 
-int dlock_server::recv_msg_hdr(dlock_connection *p_conn, struct dlock_control_hdr *msg_hdr)
+int dlock_server::try_recv_nonblocking(dlock_connection *p_conn)
 {
-    long ret;
-    int retry_cnt = 5; // 5:retry cnt
-
-    do {
-        ret = p_conn->recv(msg_hdr, DLOCK_FIXED_CTRL_MSG_HDR_LEN, static_cast<int>(MSG_WAITALL));
-        retry_cnt--;
-    } while (ret < 0 && errno == EINTR && retry_cnt > 0);
+    if (p_conn->is_recv_buf_full()) {
+        DLOCK_LOG_ERR("receive buffer full but message incomplete");
+        return -1;
+    }
+    ssize_t ret = p_conn->recv(p_conn->get_recv_write_ptr(),
+        p_conn->get_recv_space(), static_cast<int>(MSG_DONTWAIT));
     if (ret < 0) {
-        if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
-            return -1;
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+            return 0;
         }
-        DLOCK_LOG_ERR("recv message header error (errno=%d %m)", errno);
-        return -1;
-    } else if (ret == 0) {
-        conn_exception_process(p_conn);
+        DLOCK_LOG_ERR("recv error (errno=%d %m)", errno);
         return -1;
     }
-    if (ret != static_cast<int>(DLOCK_FIXED_CTRL_MSG_HDR_LEN)) {
-        DLOCK_LOG_ERR("recv message header length error, ret: %ld", ret);
+    if (ret == 0) {
         return -1;
     }
-    DLOCK_LOG_DEBUG("recv %ld", ret);
-    return 0;
-}
-
-int dlock_server::recv_msg_ext_hdr_and_body(dlock_connection *p_conn,
-    uint8_t ext_hdr_len, uint16_t body_len, uint8_t **msg_ext_hdr, uint8_t **msg_body)
-{
-    long ret;
-    uint16_t expected_recv_len = ext_hdr_len + body_len;
-
-    uint8_t *buf = (uint8_t *)malloc(expected_recv_len);
-    if (buf == nullptr) {
-        DLOCK_LOG_ERR("malloc error (errno=%d %m)", errno);
-        return -1;
-    }
-    ret = p_conn->recv(buf, expected_recv_len, static_cast<int>(MSG_WAITALL));
-    if (ret < 0) {
-        DLOCK_LOG_ERR("recv message extend header and body error (errno=%d %m)", errno);
-        free(buf);
-        return -1;
-    }
-    if (ret != expected_recv_len) {
-        DLOCK_LOG_ERR("recv message extend header and body length error, ret: %ld", ret);
-        free(buf);
-        return -1;
-    }
-
-    *msg_ext_hdr = (ext_hdr_len == 0) ? nullptr : buf;
-    *msg_body = buf + ext_hdr_len;
-    return 0;
+    p_conn->advance_recv_offset(static_cast<size_t>(ret));
+    return 1;
 }
 
 int dlock_server::check_control_msg_client_id(const struct dlock_control_hdr msg_hdr,
@@ -829,8 +805,6 @@ bool dlock_server::check_conn_type_valid(dlock_connection *p_conn) const
 void dlock_server::fake_client_msg_process(dlock_connection *p_conn)
 {
     dlock_conn_peer_info_t peer_info;
-
-    flush_recv_buffer(p_conn);
 
     p_conn->get_peer_info(peer_info);
     mark_client_exception(peer_info.peer_id, p_conn);
@@ -895,99 +869,153 @@ int dlock_server::check_control_msg_hdr(const struct dlock_control_hdr &msg_hdr)
     return 0;
 }
 
-void dlock_server::free_msg_ext_hdr_and_body_recv_buf(uint8_t *msg_ext_hdr, uint8_t *msg_body) const
+int dlock_server::process_complete_msg(dlock_connection *p_conn, uint8_t min_type, uint8_t max_type)
 {
-    if (msg_ext_hdr != nullptr) {
-        free(msg_ext_hdr);
-        return;
-    }
-
-    if (msg_body != nullptr) {
-        free(msg_body);
-    }
-}
-
-int dlock_server::process_control_msg(dlock_connection *p_conn, uint8_t min_type, uint8_t max_type)
-{
-    struct dlock_control_hdr msg_hdr = {0};
-    uint8_t *msg_ext_hdr = nullptr;
-    uint8_t *msg_body = nullptr;
-    long ret;
+    struct dlock_control_hdr *msg_hdr = reinterpret_cast<struct dlock_control_hdr *>(p_conn->get_recv_buf());
+    uint8_t *msg_body = p_conn->get_recv_buf() + msg_hdr->hdr_len;
+    uint8_t orig_type = msg_hdr->type;
     int32_t ret_status = -1;
+    int conn_fd;
 
-    ret = recv_msg_hdr(p_conn, &msg_hdr);
-    if (ret == -1) {
-        return -1;
-    }
-
-    if (check_control_msg_hdr(msg_hdr) != 0) {
-        flush_recv_buffer(p_conn);
-        return -1;
-    }
-
-    if (check_msg_type_range(msg_hdr, min_type, max_type, &ret_status) < 0) {
+    if (check_msg_type_range(*msg_hdr, min_type, max_type, &ret_status) < 0) {
         goto err;
     }
 
-    if (check_control_msg_client_id(msg_hdr, p_conn) < 0) {
-        goto err_fake_client;
+    if (check_control_msg_client_id(*msg_hdr, p_conn) < 0) {
+        fake_client_msg_process(p_conn);
+        return -1;
     }
 
-    if (msg_hdr.total_len > DLOCK_FIXED_CTRL_MSG_HDR_LEN) {
-        ret = recv_msg_ext_hdr_and_body(p_conn, static_cast<uint8_t>(msg_hdr.hdr_len - DLOCK_FIXED_CTRL_MSG_HDR_LEN),
-            static_cast<uint16_t>(msg_hdr.total_len - msg_hdr.hdr_len), &msg_ext_hdr, &msg_body);
-        if (ret != 0) {
-            goto err;
-        }
-    }
-
-    if (g_control_do[msg_hdr.type] == nullptr) {
-        DLOCK_LOG_ERR("unsupported type of control message, %d", msg_hdr.type);
+    if (g_control_do[msg_hdr->type] == nullptr) {
+        DLOCK_LOG_ERR("unsupported type of control message, %d", msg_hdr->type);
         ret_status = -1;
         goto err;
     }
 
-    p_conn->set_next_message_id(msg_hdr.message_id);
-    ret_status = (this->*g_control_do[msg_hdr.type])(p_conn, &msg_hdr, msg_body);
+    p_conn->set_next_message_id(msg_hdr->message_id);
+    conn_fd = p_conn->get_fd();
+    ret_status = (this->*g_control_do[msg_hdr->type])(p_conn, msg_hdr, msg_body);
+    if (m_fd2conn_map.find(conn_fd) == m_fd2conn_map.end()) {
+        return -1;
+    }
     if (ret_status != 0) {
         goto err;
     }
 
-    free_msg_ext_hdr_and_body_recv_buf(msg_ext_hdr, msg_body);
     return 0;
-err_fake_client:
-    fake_client_msg_process(p_conn);
-    free_msg_ext_hdr_and_body_recv_buf(msg_ext_hdr, msg_body);
-    return -1;
+
 err:
-    process_control_msg_err(msg_hdr, p_conn, ret_status);
-    free_msg_ext_hdr_and_body_recv_buf(msg_ext_hdr, msg_body);
+    process_control_msg_err(p_conn, orig_type, ret_status);
     return -1;
 }
 
-void dlock_server::process_control_msg_err(struct dlock_control_hdr &msg_hdr,
-    dlock_connection *p_conn, int32_t ret_status)
+int dlock_server::recv_control_msg_hdr(dlock_connection *p_conn)
 {
-    flush_recv_buffer(p_conn);
+    while (p_conn->get_recv_offset() < DLOCK_FIXED_CTRL_MSG_HDR_LEN) {
+        int ret = try_recv_nonblocking(p_conn);
+        if (ret <= 0) {
+            if (ret < 0) {
+                conn_exception_process(p_conn);
+            }
+            return ret;
+        }
+    }
+    struct dlock_control_hdr *msg_hdr =
+        reinterpret_cast<struct dlock_control_hdr *>(p_conn->get_recv_buf());
+    if (check_control_msg_hdr(*msg_hdr) != 0) {
+        DLOCK_LOG_ERR("invalid control message header");
+        p_conn->discard_current_msg();
+        return -1;
+    }
+    p_conn->set_expected_total_len(msg_hdr->total_len);
+    if (msg_hdr->total_len > DLOCK_FIXED_CTRL_MSG_HDR_LEN) {
+        p_conn->set_recv_state(dlock_recv_state_t::RECV_STATE_BODY);
+    }
+    return 1;
+}
 
-    if (msg_hdr.type % 2u == 1u) {    // For received response message, no error response need to send.
+int dlock_server::recv_control_msg_body(dlock_connection *p_conn)
+{
+    while (!p_conn->is_msg_recv_complete()) {
+        int ret = try_recv_nonblocking(p_conn);
+        if (ret <= 0) {
+            if (ret < 0) {
+                conn_exception_process(p_conn);
+            }
+            return ret;
+        }
+    }
+    return 1;
+}
+
+int dlock_server::process_control_msg(dlock_connection *p_conn, uint8_t min_type, uint8_t max_type)
+{
+    int loop_count = 0;
+    int ret = 0;
+
+    while (loop_count < DLOCK_MAX_MSG_PER_EVENT) {
+        loop_count++;
+
+        switch (p_conn->get_recv_state()) {
+            case dlock_recv_state_t::RECV_STATE_IDLE:
+                p_conn->set_recv_state(dlock_recv_state_t::RECV_STATE_HDR);
+                p_conn->set_expected_total_len(DLOCK_FIXED_CTRL_MSG_HDR_LEN);
+                /* fallthrough */
+            case dlock_recv_state_t::RECV_STATE_HDR:
+                ret = recv_control_msg_hdr(p_conn);
+                if (ret <= 0) {
+                    return ret;
+                }
+                if (p_conn->get_recv_state() == dlock_recv_state_t::RECV_STATE_BODY) {
+                    continue;
+                }
+                break;
+            case dlock_recv_state_t::RECV_STATE_BODY:
+                ret = recv_control_msg_body(p_conn);
+                if (ret <= 0) {
+                    return ret;
+                }
+                break;
+            default:
+                DLOCK_LOG_ERR("invalid recv state: %u", static_cast<uint32_t>(p_conn->get_recv_state()));
+                return -1;
+        }
+
+        ret = process_complete_msg(p_conn, min_type, max_type);
+        if (ret != 0) {
+            return ret;
+        }
+        p_conn->complete_current_msg();
+    }
+
+    return ret;
+}
+
+void dlock_server::process_control_msg_err(dlock_connection *p_conn, uint8_t orig_type, int32_t ret_status)
+{
+    if (orig_type % 2u == 1u) {
+        p_conn->discard_current_msg();
         return;
     }
 
+    struct dlock_control_hdr msg_hdr;
+    memcpy(&msg_hdr, p_conn->get_recv_buf(), DLOCK_FIXED_CTRL_MSG_HDR_LEN);
     msg_hdr.hdr_len = DLOCK_FIXED_CTRL_MSG_HDR_LEN;
     msg_hdr.total_len = DLOCK_FIXED_CTRL_MSG_HDR_LEN;
-    msg_hdr.type++;
+    msg_hdr.type = orig_type + 1;
     msg_hdr.status = ret_status;
 
     static_cast<void>(p_conn->send(&msg_hdr, DLOCK_FIXED_CTRL_MSG_HDR_LEN, 0));
     if (m_is_primary &&
-        ((msg_hdr.type == static_cast<uint8_t>(CLIENT_INIT_REQUEST)) ||
-        (msg_hdr.type == static_cast<uint8_t>(CLIENT_DEINIT_REQUEST)) ||
-        (msg_hdr.type == static_cast<uint8_t>(REPLICA_INIT_REQUEST)) ||
-        (msg_hdr.type == static_cast<uint8_t>(REPLICA_DEINIT_REQUEST)))) {
+        ((orig_type == static_cast<uint8_t>(CLIENT_INIT_REQUEST)) ||
+        (orig_type == static_cast<uint8_t>(CLIENT_DEINIT_REQUEST)) ||
+        (orig_type == static_cast<uint8_t>(REPLICA_INIT_REQUEST)) ||
+        (orig_type == static_cast<uint8_t>(REPLICA_DEINIT_REQUEST)))) {
         delete_dlock_connection(p_conn);
-        p_conn = nullptr;
+        return;
     }
+
+    p_conn->discard_current_msg();
 }
 
 int dlock_server::primary_control_func(int control_epfd, int ev_fd)
@@ -1002,6 +1030,10 @@ int dlock_server::primary_control_func(int control_epfd, int ev_fd)
         if (conn_iter == m_fd2conn_map.end()) {
             DLOCK_LOG_ERR("Failed to find dlock_connection corresponding to the sockfd %d", ev_fd);
             return -1;
+        }
+        conn_sockfd_set_t::iterator empty_sock_iter = m_empty_sock_set.find(ev_fd);
+        if (empty_sock_iter != m_empty_sock_set.end()) {
+            static_cast<void>(m_empty_sock_set.erase(ev_fd));
         }
         get_process_control_msg_range(min_type, max_type);
         static_cast<void>(process_control_msg(conn_iter->second, min_type, max_type));
@@ -1021,6 +1053,13 @@ int dlock_server::primary_control_func(int control_epfd, int ev_fd)
         DLOCK_LOG_ERR("The dlock_connection corresponding to the sockfd %d already exists.", new_sock);
         (void)close(new_sock);
         return -1;
+    }
+
+    if (m_fd_num >= MAX_FD_LIMIT_NUM) {
+        ret = fd_exceed_process(new_sock);
+        if (ret < 0) {
+            return ret;
+        }
     }
 
     epoll_event new_ev = {0, {.ptr = nullptr}};
@@ -1045,6 +1084,15 @@ int dlock_server::primary_control_func(int control_epfd, int ev_fd)
         delete_sockfd(new_sock);
         return -1;
     }
+    if (p_conn->init_recv_buf() != 0) {
+        DLOCK_LOG_ERR("failed to init receive buffer");
+        static_cast<void>(epoll_ctl(control_epfd, EPOLL_CTL_DEL, new_sock, nullptr));
+        delete p_conn;
+        return -1;
+    }
+    /* Insert initial empty sock to the set, to record sockets which has not received any msg yet */
+    static_cast<void>(m_empty_sock_set.insert(new_sock));
+    m_fd_num++;
     m_fd2conn_map[new_sock] = p_conn;
     return 0;
 }
@@ -1175,16 +1223,38 @@ int dlock_server::check_cmd_msg_common_field(const struct lock_cmd_msg &msg) con
     return 0;
 }
 
+/* This processing logic can prevent from out of service */
+int dlock_server::fd_exceed_process(int new_sock)
+{
+    if (m_empty_sock_set.empty()) {
+        DLOCK_LOG_ERR("Connections accepted by server exceed limit");
+        (void)close(new_sock);
+        return -1;
+    }
+    conn_sockfd_set_t::iterator empty_sock_iter = m_empty_sock_set.begin();
+    int empty_sockfd = *empty_sock_iter;
+    connection_map_t::iterator conn_iter = m_fd2conn_map.find(empty_sockfd);
+    if (conn_iter == m_fd2conn_map.end()) {
+        /* This case should not happen */
+        DLOCK_LOG_ERR("Failed to find dlock_connection corresponding to empty sockfd");
+        (void)close(new_sock);
+        return -1;
+    }
+    delete_dlock_connection(conn_iter->second);
+    static_cast<void>(m_empty_sock_set.erase(empty_sockfd));
+    return 0;
+}
+
 int dlock_server::do_lock(struct urma_buf *p_rx_buf, uint32_t msg_len)
 {
     dlock_status_t ret;
-    uint32_t rx_data_offset = m_ssl_enable ? AES_IV_LEN : 0;
+    uint32_t rx_data_offset = m_ssl_enable ? AES_EXTRA_LEN : 0;
     struct lock_cmd_msg *msg = reinterpret_cast<struct lock_cmd_msg *>(p_rx_buf->buf + rx_data_offset);
     uint32_t cmd_num = (msg_len - rx_data_offset) / sizeof(struct lock_cmd_msg);
     int i;
     dlock_status_t cipher_ret;
 
-    p_rx_buf->p_jetty_mgr->m_dlock_cipher->m_data_offset = AES_IV_LEN;
+    p_rx_buf->p_jetty_mgr->m_dlock_cipher->m_data_offset = AES_EXTRA_LEN;
     cipher_ret = p_rx_buf->p_jetty_mgr->cmd_msg_cipher(static_cast<int>(DECRYPTION),
         p_rx_buf->buf, msg_len, m_ssl_enable);
     if (cipher_ret != DLOCK_SUCCESS) {
@@ -1327,7 +1397,7 @@ int dlock_server::check_recv_cr_status(urma_cr_t *cr, int idx, bool ssl_enable)
 {
     struct urma_buf *p_rx_buf = nullptr;
     int ret = 0;
-    uint32_t iv_len = ssl_enable ? AES_IV_LEN : 0;
+    uint32_t aes_extra_len = ssl_enable ? AES_EXTRA_LEN : 0;
 
     /*
      * If cr->status is URMA_CR_WR_SUSPEND_DONE or URMA_CR_WR_FLUSH_ERR_DONE,
@@ -1388,7 +1458,7 @@ int dlock_server::check_recv_cr_status(urma_cr_t *cr, int idx, bool ssl_enable)
     p_rx_buf->p_jetty_mgr->replenish_rx_buf();
 
     if ((cr[idx].completion_len == 0u) ||
-        ((cr[idx].completion_len - iv_len) % sizeof(struct lock_cmd_msg) != 0u)) {
+        ((cr[idx].completion_len - aes_extra_len) % sizeof(struct lock_cmd_msg) != 0u)) {
         DLOCK_LOG_ERR("invalid length %u", cr[idx].completion_len);
         p_rx_buf->p_jetty_mgr->recycle_rx_buf(p_rx_buf);
         ret = -1;
@@ -1404,13 +1474,13 @@ out:
 int dlock_server::primary_preinit_func(const urma_cr_t &cr) const
 {
     struct urma_buf *p_rx_buf = reinterpret_cast<struct urma_buf *>(cr.user_ctx);
-    uint32_t rx_data_offset = m_ssl_enable ? AES_IV_LEN : 0;
+    uint32_t rx_data_offset = m_ssl_enable ? AES_EXTRA_LEN : 0;
     struct lock_cmd_msg *p_cmd_msg = reinterpret_cast<struct lock_cmd_msg *>(p_rx_buf->buf + rx_data_offset);
     uint32_t msg_len = cr.completion_len;
     uint32_t cmd_num = (msg_len - rx_data_offset) / sizeof(struct lock_cmd_msg);
     dlock_status_t cipher_ret;
 
-    p_rx_buf->p_jetty_mgr->m_dlock_cipher->m_data_offset = AES_IV_LEN;
+    p_rx_buf->p_jetty_mgr->m_dlock_cipher->m_data_offset = AES_EXTRA_LEN;
     cipher_ret = p_rx_buf->p_jetty_mgr->cmd_msg_cipher(static_cast<int>(DECRYPTION),
         p_rx_buf->buf, msg_len, m_ssl_enable);
     if (cipher_ret != DLOCK_SUCCESS) {

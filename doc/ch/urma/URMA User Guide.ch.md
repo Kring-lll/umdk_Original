@@ -1569,23 +1569,23 @@ UB设备支持实现多个Port，不同UB设备之间可以通过这些端口进
 
 URMA提供了一组命令来配置设备和EID。
 
-创建、删除逻辑设备：
+开启或关闭设备共享：
 
-urma_admin dev create_logic_dev <dev_name\> <netns\>
+urma_admin dev set-sharing {on|off}
 
-urma_admin dev delete_logic_dev <dev_name\> <netns\>
+设置物理设备的命名空间：
+
+urma_admin dev set <dev_name\> ns <netns\>
+
+将设备暴露到指定命名空间，或从指定命名空间取消暴露：
+
+urma_admin dev expose <dev_name\> <netns\>
+
+urma_admin dev unexpose <dev_name\> <netns\>
 
 设置EID的命名空间：
 
-urma_admin dev set_logic_dev_eid <dev_name\> <netns\> <eid_idx\>
-
-设置逻辑设备模式：手动模式、自动模式
-
-urma_admin dev set_logic_dev_mode <dev_name\> <ns_mode\>
-
-设置物理设备的命名空间
-
-urma_admin dev set_ns <dev_name\> <netns\>
+urma_admin eid set <dev_name\> <eid_idx\> ns <netns\>
 
 ### 6.3.2 虚拟机
 
@@ -1646,12 +1646,13 @@ urma_perftest参数
 
 ```
 Options:
-  -a, --all[order]            Run sizes from 2 till 2^23 (default 2^16), order: exponent of 2.
+  -a, --all[order]            Run sizes from 2 till 2^23,
+                              default 2^12 for send, 2^16 for others, order: exponent of 2.
   -A, --atomic_type <type>    Specify atomic type, {cas|faa}.
   -b, --simplex_mode          Run with simplex mode(jfs/jfr), duplex jetty mode for reserved.
   -B, --bidirection           Measure bidirectional bandwidth (default unidirectional).
   -c, --jfc_inline            Enable jfc_inline to upgrade latency performance.
-  -C, --jfc_depth <dep>       Size of jfc depth (default 4096 for bw, 1024 for ip bw, 1 for lat).
+  -C, --jfc_depth <dep>       Size of jfc depth (default 4096 for bw, 1024 for ip bw, 1 for lat.
   -d, --dev <dev_name>        The name of ubep device.
   -D, --duration <second>     Run test for a customized period of seconds, this cfg covers iters.
   -e, --use_jfce              use jfc event.
@@ -1661,7 +1662,7 @@ Options:
   -f, --use_flat_api          Choose to use flat API, only works in SIMPLEX mode.
   -F, --cpu_freq_f            To report warnings when CPU frequency drifts, default as NOT.
   -h, --help                  Show help info.
-  -I, --inline_size <size>    Max size of message to be sent in inline.
+  -I, --inline_size <size>    Max size of message to be sent in inline (default 0).
   -j, --share_jfr <true/false> share jfr on create jetty.
   -J, --jettys <num of jetty> Num of jettys(default 1).
   -K, --token_policy <policy> default 0: NONE, 1: PLAIN_TEXT, 2: SIGNED, 3: ALL_ENCRYPTED.
@@ -1672,44 +1673,48 @@ Options:
   -O, --priority              set the priority of JFS, ranging from [0, 15].
   -p, --trans_mode <mode>     Transport mode: 0 for RM(default), 1 for RC, 2 for UM.
   -P, --port <id>             Server port for bind or connect, default 21115.
-  -Q, --cq_mod <num>          Generate Cqe only after <--cq-mod> completion.
+  -Q, --cq_mod <num>          Generate Cqe only after <--cq_mod> completion.
   -r, --jfr_post_list <size>  Post list of receive WQEs of <list size> size.
   -R, --jfr_depth <dep>       Size of jfr depth (default 512 for BW, 1 for LAT).
   -s, --size <size>           Size of message to exchange (default 2).
   -S, --server <ip>           Server ip for bind or connect, default: 127.0.0.1 .
   -T, --jfs_depth <dep>       Size of jfs depth (default 128 for BW, 1 for LAT).
+  -u, --uboe                  Enable uboe (default false), the parametre sip, dip are required.
+                                                                            dscp, vlan, sl are optional
   -w, --warm_up               Choose to use warm_up function, only for read/write/atomic bw test.
   -y, --infinite[second]      Run perftest infinitely, only available for BW test.
                               Print period for infinite mode, default 2 seconds.
-  --single_path               Bonding device works in single path mode.
   --inf_period_ms             Print period (ms) for infinite mode. Must be a multiple of 50.
                               if set, value of infinite will be overwrite.
   --rate_limit <rate>         Set the maximum rate of sent packages. default unit is [Gbps].
   --rate_units <units>        Set the units for rate, MBps (M), Gbps (G)(default) or Kpps (P).
   --burst_size <size>         Set the amount of pkts to send in a burst when using rate limiter.
-  --sub_trans_mode <sub_mode> Sub transport mode: 0 for non ordering(default),
-                              1 for TA dest ordering (only valid for trans_mode RC).
+  --order_type <type>         Order type: 0 for default order,
+                   1 for OT (target order), 2 for OI(init order), 3 for OL(layer order), 4 for NO(no order).
   --enable_ipv6               enable ipv6 for server ip. default disable.
   --enable_credit             enable send credit, default: disable.
   --credit_threshold <num>    Exceed the threshold and do not send, default: jfr_depth * 3 / 4.
   --credit_notify_cnt <num>   Notify the send side after recv packets, default: jfr_depth / 4.
-  --jettys_pre_jfr <num>      How many jettys share a jfr.
-  --seg_pre_jetty             enable a segment for each Jetty, default: disable.
-  --enable_imm                enable immediate data for write or send, default: disable.
-  --enable_err_continue       Enable continue running when cr errors, default: disable.
+  --jettys_pre_jfr <num>      How many jettys share a jfr, default: jettys.
+  --seg_pre_jetty             Enable a segment for each Jetty, default: disable.
+  --enable_imm                Enable immediate data for write or send, default: disable.
+  --enable_err_continue       Enable continue running when cr erros, default: disable.
   --notify_data <value>       enable write_with_notify, value is ensured by hardware.
-  --enable_user_tp            Enable user tp for UB device, if enable, UVS is not required.
-                              default: disable.
+  --enable_user_tp            Enable user tp for UB device, if enable,UVS is not required. default: disable.
   --oor_en                    Enable out of order for user_tp, default: disable.
   --spray_en                  Enable multipathing for user_tp, default: disable.
   --cc_en                     Enable congestion control for user_tp, default: disable.
   --cc_alg <num>              Set congestion Control Algorithm for user_tp, [0, 7], default: 0.
-  --retry_num <num>           Set retry num for user_tp, default: 7.
+  --retry_num  <num>          Set retry num for user_tp, default: 7.
   --ack_timeout <num>         Set ack timeout for user_tp, default: 15.
   --sge_num <num>             Set sge_num for wr, default: 1.
   --enable_write_dirty <time> Enable write dirty and set the period of write dirty, default: disable.
-  --pair_num <num>            Enable multiplayer model and set the number of connection,
-                              default: disable.
+  --pair_num <num>            Enable multiplayer model and set the number of connection, default: disable.
+  --sip <ip>                  Set source ip address.
+  --dip <ip>                  Set dest ip address.
+  --dscp <dscp>               Set dscp .
+  --vlan <vlan_id>            Set vlan_id .
+  --sl <sl>                   Set sl .
   --async_import              Enable asynchronous connection establishment
   --tp_aware                  Enable tp aware connect, default: disable.
   --tp_reuse                  Reuse tp in RM mode if enable tp aware, default: disable.
@@ -1719,6 +1724,11 @@ Options:
                               timeout = 0: return immediately even if no events are ready,
                               timeout = -1: an infinite timeout,
                               default: 1000(1s).
+  --page_size                 Set page size, default: 4096.
+  --hugepage_size <size>      Page size for allocated memory. Only support 2MB or 1GB currently.
+  --bind_ip <ip>              The ip for bind.
+  --bond_mode                 Set bonding device mode, support: standalone, active_backup, balance.
+  --bond_level                Set bonding device level, support: iodie, port.
 ```
 
 
@@ -1763,7 +1773,7 @@ Options:
 | \-            | rate_limit          | uint32_t | 设置限速值，默认单位是Gbps                                                                                                                                                                                                                                 | 可选         | 无限定                               | 0                              |
 | \-            | rate_units          | char     | 限速值的单位，MBps (M), Gbps (G)(default) or Kpps (P)                                                                                                                                                                                                      | 可选         | [MGP]                              | G                              |
 | \-            | burst_size          | uint32_t | 每次连续发送多少个报文，用于均衡流量,这个选项允许你指定在使用流量限制器（rate limiter）时，每次发送数据包（packets）的批量大小                                                                                                                             | 可选         | 无限定，配置过大会导致限速不准确     | jfs_depth配置值                |
-|               | sub_trans_mode      | uint32_t | 指定sub_transport_mode，只在RC模式下配置，用于RS性能测试。0 表示非排序（Non-Ordering）模式，这是默认设置。1 表示目标地址排序（TA Dest Ordering）模式，这个选项只在 trans_mode 设置为 RC（Reliable Connection）时有效。                                     | 可选         | 0\~2                                 | 0                              |
+|               | order_type          | uint32_t | 配置保序类型。0表示默认保序，1表示OT（target order），2表示OI（initiator order），3表示OL（layer order），4表示NO（no order）                                                                                                                               | 可选         | 0\~4                                 | 0                              |
 |               | enable_ipv6         | bool     | server_ip使能IPv6，-S配置IPv6地址时必须配置该参数                                                                                                                                                                                                          | 可选         |                                      | 默认关闭                       |
 |               | enable_credit       | bool     | 在send测试时，是否开启credit流控，开启会导致流量下降                                                                                                                                                                                                       | 否           |                                      | 默认关闭                       |
 |               | credit_threshold    | uint32_t | 指定发送端判断收包来不及处理的阈值。配置过大可能丢包。具体需要根据实际情况配置                                                                                                                                                                             | 是           | 不限定                               | jfr_depth * 3 / 4             |
@@ -1845,7 +1855,7 @@ Options:
 
   4.  infinite模式(-y)与write_imm和send测试的bidirection 模式(-B)冲突。
 
-  5.  在部分芯片上才支持用户态建链，enable_user_tp与sub_trans_mode 2 配合使用，其他建链参数配置需要与驱动配合，否者可能存在断流风险。
+  5.  在部分芯片上才支持用户态建链，其他建链参数配置需要与驱动配合，否则可能存在断流风险。
 
   6.  write_imm的测试模型跟send_recv一致。
 
@@ -1855,7 +1865,7 @@ Options:
 
   9.  试用共享jfr时，cfg-\>jfr_depth * (cfg-\>jettys / cfg-\>jettys_pre_jfr)) 必须大于等于 (cfg-\>jettys * cfg-\>jfr_post_list) 。
 
-  10. 如果要启用安全认证建链，需要同时配置ca_path、cert_path、prkey_path这三个选项，且保证使用的是IB、IP设备。
+  10. UBoE建链需要同时配置\--uboe、\--sip和\--dip，可根据需要配置\--dscp、\--vlan和\--sl。
 
   11. jfs_post_list、jfr_post_list、jfr_depth参数会影响限流的门限值，use_jfce参数会影响-B双向函数流程 暂不支持加入
 
@@ -1914,102 +1924,75 @@ urma框架通过sysfs呈现设备不同粒度资源的属性，包含jetty资源
 1.  命令格式
 
 ```
-Usage: urma_admin command [command options]
- urma_admin URMA configuration tool, chips do not support some values, which might be invalid.
-Command syntax:
-  show [--dev] [--whole]                                  show all UB devices info.
-  show topo [node_id]                                     show topo_info of the specified node.
-                                                          when node_id is empty, will show the current node.
-  add_eid <--dev> <--idx> [--ns /proc/$pid/ns/net]      add eid of UB device, only for uvs,
-                                                          control plane not support.
-  del_eid <--dev> <--idx>                                 del eid of UB device, only for uvs,
-                                                          control plane not support.
-  set_eid_mode <--dev> [--eid_mode]                       change eid mode of MUE device, only for
-                                                          uvs, control plane not support.
-  set_reserved_jetty <--dev> <--min_id> <--max_id>       set reserved jetty id range.
-  show_stats <--dev> <--resource_type> <--key>            show run stats of UB device,
-                                                          control plane not support.
-  show_res <--dev> <--resource_type> <--key> [--key_ext]
-           <--key_cnt>                                    show resources of UB device.
-  list_res <--dev> <--resource_type> [--key] [--key_ext]
-           [--key_cnt]                                    list resources of UB device.
-  set_ns_mode <--ns_mode (exclusive: 0) | (shared: 1)>   set ns mode for UB devices.
-  set_dev_ns <--dev> <--ns /proc/$pid/ns/net>             set net namespace of UB device.
+Usage: urma_admin <command> [options]
+
+Commands:
+  show          Show information
+  dev           Device management operations
+  eid           EID management operations
+  main_ue_eid   Main UE EID query table operations
+  agg           Aggregation device operations
+  perf          Control plane DFX latency tracer operations
+
 Options:
-  -h, --help                                  show help info.
-  -d, --dev <dev_name>                        the name of UB device.
-  -e, --eid <eid>                             the eid of UB device.
-  -m, --eid_mode <eid_mode>                   the eid mode of UB device,/
-                                              (change to dynamic_mode: cmd with -m,
-                                              change to static_mode: cmd without -m).
-  -v, --ue_idx <ue_idx>                       the ue_idx of ubep device.
-                                              when ue_idx == 0xffff or empty, it refers to MUE.
-  -i, --idx <idx>                             idx defaults to 0.
-  -w, --whole                                 show whole information.
-  -R, --resource_type <type>                  config stats type with 1(tp_id/vtp, not support)/
-                                                2(tp, not support)/3(tpg, not support)/4(jfs)/
-                                                5(jfr)/6(jetty)/
-                                                7(jetty group, not support)/8(dev).
-                                              config res type with 1(tp_id/vtp, not support)/
-                                                2(tp, not support)/3(tpg, not support)/
-                                                4(utp, not support)/5(jfs)/6(jfr)/7(jetty)/
-                                                8(jetty group)/9(jfc)/10(rc)/11(seg)/
-                                                12(dev ta, not support)/13(dev tp, not support).
-  -k, --key <key>                             config stats/res key, config stats key with:
-                                                1(tp_id/vtpn, not support)/2(tpn, not support)/
-                                                3(tpgn, not support)/4(jfs_id)/5(jfr_id)/
-                                                6(jetty_id)/7(jetty group id, not support)/
-                                                8(dev, no key)
-                                              config res key with:
-                                                1(tp_id/vtpn, not support)/2(tpn, not support)/
-                                                3(tpgn, not support)/4(utpn, not support)/
-                                                5(jfs_id)/6(jfr_id)/7(jetty_id)/
-                                                8(jetty group id)/9(jfc_id)/
-                                                10(rc_id, not support)/11(token_id)/
-                                                12(eid, not support)/13(eid, not support).
-  -K, --key_ext <key_ext>                     config key_ext for tp_id/vtp res.
-  -C, --key_cnt <key>                         config key_cnt for rc res.
-  -n, --ns </proc/$pid/ns/net>                ns path.
-  -M, --ns_mode <0 or 1>                      ns_mode with (exclusive: 0) | (shared: 1).
-  -l, --min_id <0 - U32_MAX>                  min reserved jetty id, U32_MAX means invalid.
-  -u, --max_id <0 - U32_MAX>                  max reserved jetty id, U32_MAX means invalid.
+  -h, --help     Show help and exit
+  -V, --version  Show version and exit
 ```
 
 2.  功能描述
 
 ```
-urma_admin show --dev <DEV_NAME> --whole                         查询设备属性信息
-urma_admin add_eid --dev <DEV_NAME> --idx [NUM] --ns [进程net路径] 给设备设置静态eid
-urma_admin del_eid --dev <DEV_NAME> --idx [NUM]                   删除设备的静态eid
-urma_admin set_eid_mode --dev <DEV_NAME> -m/--eid_mode           切换eid模式（带-m为动态，不带为静态）
-urma_admin set_reserved_jetty --dev <DEV_NAME> -l/--min_id <MIN_ID> -u/--max_id <MAX_ID>  设置保留jetty id范围
-urma_admin show_stats --dev <DEV_NAME> --resource_type [TYPE] --key [KEY]  查询jfs/jfr/jetty/jetty_group的tx/rx统计
-urma_admin show_topo                                               显示bonding设备拓扑信息
-urma_admin show_res --dev <DEV_NAME> --resource_type <TYPE> --key <KEY> --key_ext [KEY_EXT] --key_cnt [KEY_CNT]  查询资源属性
-urma_admin list_res --dev <DEV_NAME> --resource_type <TYPE> --key <KEY> --key_ext [KEY_EXT] --key_cnt [KEY_CNT]  查询资源列表
-urma_admin set_ns_mode --ns_mode <NS_MODE>                        设置namespace模式
-urma_admin set_dev_ns --dev <DEV_NAME> --ns <NS>                  设置设备namespace
+urma_admin show [--dev <dev>] [--brief|--all] [--whole]          查询URMA设备信息
+urma_admin show topo [NODE_ID]                                   查询指定节点拓扑，默认查询当前节点拓扑
+urma_admin show dev <dev> jfc [JFC_ID]                           查询JFC资源
+urma_admin show dev <dev> jfs [JFS_ID]                           查询JFS资源
+urma_admin show dev <dev> jfr [JFR_ID]                           查询JFR资源
+urma_admin show dev <dev> jetty [JETTY_ID]                       查询Jetty资源
+urma_admin show dev <dev> jetty_group [JETTY_GROUP_ID]           查询Jetty Group资源
+urma_admin show dev <dev> rc [RC_ID]                             查询RC资源
+urma_admin show dev <dev> seg [TOKEN_ID]                         查询SEG资源
+urma_admin show dev <dev> tp [TP_ID]                             查询设备TPID列表或单个TPID状态
+urma_admin show dev <dev> tpreuse                                查询设备TPID复用表项
+urma_admin dev set-sharing {on|off}                              开启或关闭UB设备共享
+urma_admin dev set <dev> ns <netns>                              设置UB设备网络命名空间
+urma_admin dev set <dev> sl --sl <sl> --priority <priority>      配置SL与priority映射
+urma_admin dev expose <dev> <netns>                              将UB设备暴露到网络命名空间
+urma_admin dev unexpose <dev> <netns>                            从网络命名空间取消暴露UB设备
+urma_admin eid set-sharing {on|off}                              开启或关闭EID共享
+urma_admin eid add <dev> <eid_idx> <eid> [--ns <netns>] [--mode <eid_mode>]  添加静态EID
+urma_admin eid del <dev> <eid_idx>                               删除静态EID
+urma_admin eid set <dev> <eid_idx> ns <netns>                    设置EID命名空间
+urma_admin eid set <dev> <eid_idx> mode {static|dynamic}         设置EID模式
+urma_admin main_ue_eid insert <eid> <main_ue_eid>                插入main UE EID映射
+urma_admin main_ue_eid insert_batch <main_ue_eid> <eid> [eid...] 批量插入main UE EID映射
+urma_admin main_ue_eid delete <eid>                              删除main UE EID映射
+urma_admin main_ue_eid lookup <eid>                              查询main UE EID映射
+urma_admin main_ue_eid flush                                     清空main UE EID表
+urma_admin agg add <eid> <dev_name>                              添加聚合设备
+urma_admin agg del <eid>                                         删除聚合设备
+urma_admin agg expose <eid> <netns>                              暴露聚合设备及相关EID
+urma_admin perf start                                            启动DFX采集
+urma_admin perf stop                                             停止DFX采集
+urma_admin perf show                                             查询DFX统计结果
 ```
 
 3.  参数说明
 
-| 参数 | 参数全称 | 描述 | 是否输入参数 | 取值范围 | 默认取值 |
-|---|---|---|---|---|---|
-| -h | --help | 查询帮助信息 | 非必选 | 无限度 | 无 |
-| -d | --dev | 指定某个dev名称 | 必选 | 不超过63字节的字符串 | 无 |
-| -e | --eid | 指定某个eid值 | 必选 | 4-16 | 无 |
-| -m | --eid_mode | 指定eid动态模式切换，配置表示使用动态eid模式 | 不输入 | NA | 无 |
-| -v | --ue_idx | 指UB定设备idx，urma开源fe演进为ue | 必选 | 0~65535 | 无 |
-| -i | --idx | 指定某个idx值 | 必选 | 0~65535 | 无 |
-| -w | --whole | 指定查询设备整个信息 | 不输入 | NA | 无 |
-| -R | --resource_type | 指定资源的类型。show_stats type [4-8]: jfs/jfr/jetty/jetty group(not support)/dev。show_res type [5-12]: jfs/jfr/jetty/jetty_grp/jfc/rc/seg/dev_ta_ctx属性 | 必选 | show_stats【4-8】; show_res【5-12】 | 无 |
-| -k | --key | 指定key的数值。show_stats key: 1-8。show_res key: 1-13。详见show_stats/show_res类型定义 | 必选 | 详见描述部分 | 无 |
-| -K | --key_ext | 指定配置key的扩展信息 | 必选 | 0~UINT_MAX | 无 |
-| -C | --key_cnt | 指定key的数量 | show_res场景必选；list_res场景可选 | 0~UINT_MAX（理论值，实际上限取决于resource_type和对应芯片规格） | 无 |
-| -n | --ns | 指定eid的namespace，格式：/proc/$pid/ns/net | 必选 | 长度小于128的字符串 | 无 |
-| -M | --ns_mode | 制定ns的模式 | 必选 | exclusive: 0 \| shared: 1 | 无 |
-| -l | --min_id | jetty_id在min_id~max_id之间的jetty是公知jetty，配置min_id | 必选 | 0 - U32_MAX | 无 |
-| -u | --max_id | jetty_id在min_id~max_id之间的jetty是公知jetty，配置max_id | 必选 | 0 - U32_MAX | 无 |
+| 命令元素 | 描述 | 是否输入参数 | 取值范围 | 默认取值 |
+|---|---|---|---|---|
+| <dev> | 设备名称，例如udma1 | 必选 | 不超过63字节的字符串 | 无 |
+| <netns> | 网络命名空间路径，例如/proc/$pid/ns/net | 必选 | 有效命名空间路径 | 无 |
+| <eid_idx> | EID索引 | 必选 | 0~65535 | 无 |
+| <eid> | EID值 | 必选 | IPv4、IPv6或映射EID字符串 | 无 |
+| <main_ue_eid> | 一个或多个EID映射到的main UE EID | 必选 | IPv4、IPv6或映射EID字符串 | 无 |
+| <node_id> | 拓扑节点ID | 可选 | uint32_t | 当前节点 |
+| --brief | show命令中优先显示bonding设备 | 可选 | \- | 默认开启 |
+| --all | show命令中显示所有设备 | 可选 | \- | 默认关闭 |
+| --whole | show命令中显示设备完整信息 | 可选 | \- | 默认关闭 |
+| --sl | dev set sl使用的服务等级 | dev set sl场景必选 | 0~255 | 无 |
+| --priority | dev set sl使用的优先级 | dev set sl场景必选 | 0~255 | 无 |
+| {on\|off} | 共享开关 | dev/eid set-sharing场景必选 | on/off | 无 |
+| {static\|dynamic} | EID模式 | eid set mode场景必选 | static/dynamic | 无 |
 ![](figures/urma_info.png)
 
 []为可选参数，<\>为必选参数。
@@ -2079,13 +2062,18 @@ urma_admin show -w参数说明：
 # urma_admin list_res -d ubep_beta --resource_type 5 --key 1
 # urma_admin set_ns_mode -M 0
 # urma_admin set_reserved_jetty -d bonding_dev_0 -l 0 -u 4294967295
+# urma_admin show dev ubep_beta tp
+# urma_admin show dev ubep_beta tp 1001
+# urma_admin show dev ubep_beta tpreuse
+# urma_admin agg add 192.168.1.100 bonding_dev_0
+# urma_admin agg expose 192.168.1.100 /proc/11962/ns/net
+# urma_admin perf start
+# urma_admin perf show
 ```
 
 ![](figures/urma_caution.png)
 
-urma_admin 的操作会使用rsyslog进行日志记录到/var/log/umdk/urma/urma_admin.log文件中，其日志记录和切割转储能力依赖rsyslog和logrotate工具。如果短期频繁调用命令，会导致日志无法切割。
-
--e/\--eid参数当前已无实际作用，当前仍保留，规划删除中。
+urma_admin的操作依赖rsyslog将日志重定向到/var/log/umdk/urma/urma_admin.log文件中。按大小切割、压缩和保留依赖logrotate工具。如果短期频繁调用命令，会导致日志无法切割。
 
 ## 6.5 DFX维测
 
@@ -2093,13 +2081,13 @@ URMA DFX能力主要包括URMA日志，此外urma_admin也具备部分维测能�
 
 ### 6.5.1 URMA日志
 
-URMA整体使用OS自带的rsyslog工具来实现日志重定向打印特性，对应配置路径为/etc/rsyslog.d/*.conf；使用OS自带的logrotate实现日志切割和压缩转储等特性，对应配置路径为/etc/logrotate.d/**。产品可以按照需要修改配置文件达到不同的需要。
+URMA整体使用OS自带的rsyslog工具来实现日志重定向打印特性，对应配置路径为/etc/rsyslog.d/*.conf；日志按大小切割、压缩和保留依赖OS自带的logrotate工具，对应配置路径为/etc/logrotate.d/**。产品可以按照需要修改配置文件达到不同的需要。
 
 ![](figures/urma_caution.png)
 
-1.  日志文件按照阈值大小转储依赖系统esyslog工具，需要单独安装和配置。
+1.  日志重定向依赖系统rsyslog工具，需要单独安装和配置。
 
-2.  日志分区空间容量不足时，自动删除老的压缩文件，也依赖esyslog工具，需要单独安装和配置。
+2.  日志按大小切割、压缩、保留，以及日志分区空间不足时自动删除老的压缩文件，依赖系统logrotate工具，需要单独安装和配置。
 
 3.  日志文件的用户组和权限也可以通过配置/etc/rsyslog.d/*.conf文件来配置，以下为示例。
 
