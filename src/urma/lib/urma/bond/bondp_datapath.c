@@ -41,44 +41,6 @@ static urma_jetty_id_t *get_comp_urma_jetty_id(bondp_comp_t *bdp_comp)
     }
 }
 
-static wr_buf_t *get_recv_wr_buf(bondp_comp_t *bdp_comp)
-{
-    if (bdp_comp == NULL) {
-        return NULL;
-    }
-    if (bdp_comp->comp_type == BONDP_COMP_JETTY) {
-        urma_jfr_t *jfr = bdp_comp->v_jetty.jetty_cfg.shared.jfr;
-        if (jfr == NULL) {
-            URMA_LOG_ERR("JETTY shared jfr is NULL\n");
-            return NULL;
-        }
-        bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jfr, bondp_comp_t, v_jfr);
-        return &bdp_jfr->recv_wr_buf;
-    } else if (bdp_comp->comp_type == BONDP_COMP_JFR) {
-        return &bdp_comp->recv_wr_buf;
-    }
-    return NULL;
-}
-
-static pthread_spinlock_t *get_recv_wr_lock(bondp_comp_t *bdp_comp)
-{
-    if (bdp_comp == NULL) {
-        return NULL;
-    }
-    if (bdp_comp->comp_type == BONDP_COMP_JETTY) {
-        urma_jfr_t *jfr = bdp_comp->v_jetty.jetty_cfg.shared.jfr;
-        if (jfr == NULL) {
-            URMA_LOG_ERR("JETTY shared jfr is NULL\n");
-            return NULL;
-        }
-        bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jfr, bondp_comp_t, v_jfr);
-        return &bdp_jfr->recv_wr_lock;
-    } else if (bdp_comp->comp_type == BONDP_COMP_JFR) {
-        return &bdp_comp->recv_wr_lock;
-    }
-    return NULL;
-}
-
 static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, urma_jfs_wr_t *send_wr, urma_jfs_wr_t **bad_wr,
     int wr_count)
 {
@@ -101,6 +63,7 @@ static urma_status_t comp_post_recv(bondp_comp_t *comp, int recv_idx, urma_jfr_w
                                     int wr_count)
 {
     urma_status_t ret;
+
     if (comp->comp_type == BONDP_COMP_JETTY) {
         ret = urma_post_jetty_recv_wr(comp->p_jetty[recv_idx], recv_wr, bad_wr);
     } else if (comp->comp_type == BONDP_COMP_JFR) {
@@ -545,120 +508,63 @@ static urma_status_t bondp_post_recv_wr_list_and_store(bondp_comp_t *bdp_comp, u
 {
     urma_jfr_wr_t *cur = wr;
     urma_status_t ret = URMA_SUCCESS;
-    jfr_wr_entry_t *wr_entries[URMA_BONDP_BATCH_POST_MAX_NUM];
     uint32_t recv_wr_cnt[URMA_UBAGG_DEV_MAX_NUM] = {0};
     int wr_count = 0;
-    int process_node = 0;
-    int success_node = 0;
 
-    // 获取锁
-    pthread_spinlock_t *recv_wr_lock = get_recv_wr_lock(bdp_comp);
-    if (recv_wr_lock == NULL) {
-        URMA_LOG_ERR("Failed to get recv_wr_lock, comp_type:%d\n", bdp_comp->comp_type);
-        return URMA_EINVAL;
-    }
-    // 获取缓冲区指针
-    wr_buf_t *recv_wr_buf = get_recv_wr_buf(bdp_comp);
-    if (recv_wr_buf == NULL) {
-        URMA_LOG_ERR("Failed to get recv_wr_buf, comp_type:%d\n", bdp_comp->comp_type);
-        return URMA_EINVAL;
-    }
-
-    // 开始分配内存
-    (void)pthread_spin_lock(recv_wr_lock);
     while (cur != NULL && wr_count < URMA_BONDP_BATCH_POST_MAX_NUM) {
-        wr_entries[wr_count] = jfr_wr_buf_alloc(recv_wr_buf);
-        if (wr_entries[wr_count] == NULL) {
-            pthread_spin_unlock(recv_wr_lock);
-            URMA_LOG_ERR("Failed to allocate jfr wr entry\n");
-            ret = URMA_EAGAIN;
-            goto RELEASEBUF;
-        }
-        wr_entries[wr_count]->user_ctx = cur->user_ctx;
-        wr_entries[wr_count]->bdp_comp = bdp_comp;
         wr_count++;
         cur = cur->next;
     }
-    (void)pthread_spin_unlock(recv_wr_lock);
-
     if (cur != NULL) {
-        ret = URMA_EINVAL;
-        goto RELEASEBUF;
+        URMA_LOG_ERR("Bondp supports at most %d wr_list.\n", URMA_BONDP_BATCH_POST_MAX_NUM);
+        return URMA_EINVAL;
     }
 
     ret = schedule_recv_n(bdp_comp, (uint32_t)wr_count, recv_wr_cnt);
     if (ret != 0) {
-        ret = URMA_FAIL;
-        goto RELEASEBUF;
+        return URMA_FAIL;
     }
 
     cur = wr;
     for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
-        int recv_idx = (int)bdp_comp->active_indices[i];
-        uint32_t recv_cnt = recv_wr_cnt[recv_idx];
-
-        for (uint32_t j = 0; j < recv_cnt; j++, cur = cur->next) {
-            jfr_wr_entry_t *wr_entry = wr_entries[process_node];
-            urma_jfr_wr_t *pwr = &wr_entry->wr;
-
-            wr_entry->recv_idx = (uint32_t)recv_idx;
-            ret = copy_jfr_wr(cur, pwr, NULL);
-            if (ret != 0) {
-                free_jfr_wr(pwr);
-                goto CLEANUP;
-            }
-
-            ret = convert_jfr_vwr_to_pwr(pwr, recv_idx);
-            if (ret != 0) {
-                free_jfr_wr(pwr);
-                goto CLEANUP;
-            }
-            pwr->user_ctx = wr_entry->wr_id;
-            if (j > 0) {
-                wr_entries[process_node - 1]->wr.next = pwr;
-            }
-            pwr->next = NULL;
-            process_node++;
+        uint32_t recv_idx_u = bdp_comp->active_indices[i];
+        if (recv_idx_u >= URMA_UBAGG_DEV_MAX_NUM) {
+            URMA_LOG_ERR("Invalid recv_idx=%u when post recv wr.\n", recv_idx_u);
+            return URMA_EINVAL;
         }
-    }
-
-    for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
-        int recv_idx = (int)bdp_comp->active_indices[i];
-        uint32_t recv_cnt = recv_wr_cnt[recv_idx];
+        int recv_idx = (int)recv_idx_u;
+        uint32_t recv_cnt = recv_wr_cnt[recv_idx_u];
 
         if (recv_cnt == 0) {
             continue;
         }
 
-        ret = comp_post_recv(bdp_comp, recv_idx, &wr_entries[success_node]->wr, bad_wr, (int)recv_cnt);
-        if (ret == URMA_SUCCESS) {
-            success_node += (int)recv_cnt;
-            continue;
+        urma_jfr_wr_t *post_wr_head = cur;
+        urma_jfr_wr_t *post_wr_tail = NULL;
+        for (uint32_t j = 0; j < recv_cnt; j++) {
+            ret = convert_jfr_vwr_to_pwr(cur, recv_idx);
+            if (ret != 0) {
+                return ret;
+            }
+            post_wr_tail = cur;
+            cur = cur->next;
         }
 
-        URMA_LOG_ERR("Failed to post recv wr, ret:%d\n", ret);
-        int posted_node = 0;
-        urma_jfr_wr_t *posted_wr = &wr_entries[success_node]->wr;
-        while (posted_wr != NULL && bad_wr != NULL && posted_wr != *bad_wr) {
-            posted_node++;
-            posted_wr = posted_wr->next;
+        post_wr_tail->next = NULL;
+        ret = comp_post_recv(bdp_comp, recv_idx, post_wr_head, bad_wr, (int)recv_cnt);
+        if (ret != URMA_SUCCESS) {
+            URMA_LOG_ERR("Failed to post recv wr, ret:%d\n", ret);
+            int posted_node = 0;
+            urma_jfr_wr_t *posted_wr = post_wr_head;
+            while (posted_wr != NULL && bad_wr != NULL && posted_wr != *bad_wr) {
+                posted_node++;
+                posted_wr = posted_wr->next;
+            }
+            bdp_comp->rqe_cnt[recv_idx_u] += (uint32_t)posted_node;
+            return ret;
         }
-        bdp_comp->rqe_cnt[recv_idx] += (uint32_t)posted_node;
-        success_node += posted_node;
-        goto CLEANUP;
     }
     return URMA_SUCCESS;
-CLEANUP:
-    for (int i = success_node; i < process_node; i++) {
-        free_jfr_wr(&wr_entries[i]->wr);
-    }
-RELEASEBUF:
-    (void)pthread_spin_lock(recv_wr_lock);
-    for (int i = success_node; i < wr_count; i++) {
-        jfr_wr_buf_release(wr_entries[i]);
-    }
-    (void)pthread_spin_unlock(recv_wr_lock);
-    return ret;
 }
 
 static urma_status_t post_recv_check_jfr_wr_valid(const bondp_context_t *bdp_ctx, const urma_jfr_wr_t *wr)
@@ -807,6 +713,36 @@ static inline void put_comp(bondp_comp_t *bdp_comp)
         return;
     }
     atomic_fetch_sub(&bdp_comp->use_cnt.atomic_cnt, 1);
+}
+
+static int get_recv_idx_by_local_id(const bondp_comp_t *comp, uint32_t local_id)
+{
+    if (comp == NULL) {
+        return -1;
+    }
+    for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
+        if (comp->comp_type == BONDP_COMP_JETTY) {
+            if (comp->p_jetty[i] != NULL && comp->p_jetty[i]->jetty_id.id == local_id) {
+                return i;
+            }
+        } else if (comp->comp_type == BONDP_COMP_JFR) {
+            if (comp->p_jfr[i] != NULL && comp->p_jfr[i]->jfr_id.id == local_id) {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
+static bondp_comp_t *get_recv_count_comp(bondp_comp_t *recv_comp)
+{
+    if (recv_comp == NULL) {
+        return NULL;
+    }
+    if (recv_comp->comp_type == BONDP_COMP_JETTY && recv_comp->v_jetty.jetty_cfg.shared.jfr != NULL) {
+        return CONTAINER_OF_FIELD(recv_comp->v_jetty.jetty_cfg.shared.jfr, bondp_comp_t, v_jfr);
+    }
+    return recv_comp;
 }
 
 static cr_convert_ret_t handle_fake_cr_with_store(bondp_context_t *bdp_ctx, int idx, urma_cr_t *cr)
@@ -964,67 +900,12 @@ static cr_convert_ret_t handle_recv_cr_with_store(bondp_context_t *bdp_ctx, int 
         URMA_LOG_ERR("Failed to find local jetty, idx=%u, id=%u\n", idx, cr->local_id);
         return CONVERT_SKIP;
     }
+    bondp_comp_t *count_comp = get_recv_count_comp(recv_comp);
 
-    const uint64_t wr_id = cr->user_ctx;
-    wr_buf_t *recv_wr_buf = get_recv_wr_buf(recv_comp);
-    pthread_spinlock_t *recv_wr_lock = get_recv_wr_lock(recv_comp);
-    if (recv_wr_buf == NULL || recv_wr_lock == NULL) {
-        URMA_LOG_ERR("Failed to get recv_wr_buf or recv_wr_lock, comp_type:%d\n", recv_comp->comp_type);
-        put_comp(recv_comp);
-        return CONVERT_FAIL;
-    }
-
-    jfr_wr_entry_t *wr_entry = jfr_wr_buf_get(recv_wr_buf, wr_id);
-    if (wr_entry == NULL) {
-        // wr_entry could not be NULL
-        put_comp(recv_comp);
-        return CONVERT_FAIL;
-    }
-
-    bondp_comp_t *post_comp = wr_entry->bdp_comp;
-    uint32_t recv_idx = wr_entry->recv_idx;
+    count_comp->rqe_cnt[idx] -= 1;
     uint32_t msn = 0;
     convert_pcr_to_vcr(cr, bdp_ctx, &msn);
     cr->local_id = recv_comp->v_jetty.jetty_id.id;
-    cr->user_ctx = wr_entry->user_ctx;
-
-    post_comp->rqe_cnt[recv_idx] -= 1;
-
-    bool msn_enable = bdp_ctx->msn_enable;
-    if (!msn_enable) {
-        goto CONVERT_SUCCESS_OUT;
-    }
-
-    /* Do de-duplicating */
-    int ret = 0;
-    urma_jetty_id_t target_jetty_id = cr->remote_id;
-    bondp_conn_t *v_conn = NULL;
-    ret = bondp_conn_table_get_or_create(&recv_comp->v_conn_table, &target_jetty_id, &v_conn);
-    if (ret != 0) {
-        free_jfr_wr(&wr_entry->wr);
-        (void)pthread_spin_lock(recv_wr_lock);
-        jfr_wr_buf_release(wr_entry);
-        (void)pthread_spin_unlock(recv_wr_lock);
-        put_comp(recv_comp);
-        return CONVERT_FAIL;
-    }
-    if (!bdp_slide_wnd_seq_in_window(&v_conn->recv_wnd, msn) || bdp_slide_wnd_has(&v_conn->recv_wnd, msn)) {
-        URMA_LOG_DEBUG("Rearm recv WR due to: outside of window=%d or duplicate %d\n",
-                       !bdp_slide_wnd_seq_in_window(&v_conn->recv_wnd, msn),
-                       bdp_slide_wnd_has(&v_conn->recv_wnd, msn));
-        urma_jfr_wr_t *bad_wr = NULL;
-        ret = comp_post_recv(post_comp, recv_idx, &wr_entry->wr, &bad_wr, 1);
-        put_comp(recv_comp);
-        return CONVERT_SKIP;
-    }
-
-    (void)bdp_slide_wnd_add(&v_conn->recv_wnd, msn);
-
-CONVERT_SUCCESS_OUT:
-    free_jfr_wr(&wr_entry->wr);
-    (void)pthread_spin_lock(recv_wr_lock);
-    jfr_wr_buf_release(wr_entry);
-    (void)pthread_spin_unlock(recv_wr_lock);
     put_comp(recv_comp);
     return CONVERT_SUCCESS;
 }
@@ -1037,6 +918,7 @@ CONVERT_SUCCESS_OUT:
  */
 static cr_convert_ret_t bondp_handle_cr_no_store(bondp_context_t *bdp_ctx, int idx, urma_cr_t *cr)
 {
+    uint32_t pjetty_id = cr->local_id;
     bondp_comp_t *comp = get_comp_by_cr(bdp_ctx, idx, cr);
     if (comp == NULL) {
         return CONVERT_SKIP;
@@ -1050,7 +932,13 @@ static cr_convert_ret_t bondp_handle_cr_no_store(bondp_context_t *bdp_ctx, int i
     }
 
     if (is_recv_cr(cr)) {
-        comp->rqe_cnt[idx] -= 1;
+        bondp_comp_t *count_comp = get_recv_count_comp(comp);
+        int recv_idx = get_recv_idx_by_local_id(count_comp, pjetty_id);
+        if (recv_idx < 0) {
+            URMA_LOG_WARN("recv cr(no_store) local_id=%u not found, fallback idx=%d\n", pjetty_id, idx);
+            recv_idx = idx;
+        }
+        count_comp->rqe_cnt[recv_idx] -= 1;
     } else {
         atomic_fetch_sub(&comp->sqe_cnt[idx], 1);
     }
