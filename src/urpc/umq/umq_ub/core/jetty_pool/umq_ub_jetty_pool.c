@@ -17,7 +17,8 @@
 #include "umq_ub_jetty_pool.h"
 
 static __thread thread_local_jetty_cache_t g_thread_jetty_cache = {0};
-static jetty_pool_t *g_jetty_pool = NULL;  // Global singleton jetty pool
+static jetty_pool_t g_jetty_pool;
+static _Atomic bool g_jetty_pool_inited = false;
 
 // Forward declarations
 static void release_thread_cache(uint64_t id);
@@ -44,9 +45,13 @@ static ALWAYS_INLINE thread_local_jetty_cache_t *get_thread_jetty_cache(void)
 {
     if (!g_thread_jetty_cache.inited) {
         urpc_list_init(&g_thread_jetty_cache.cache_list);
+        urpc_list_init(&g_thread_jetty_cache.registry_node);
         g_thread_jetty_cache.cached_count = 0;
         g_thread_jetty_cache.inited = true;
         urpc_thread_closure_register(THREAD_CLOSURE_JETTY_POOL, 0, release_thread_cache);
+        (void)pthread_spin_lock(&g_jetty_pool.lock);
+        urpc_list_push_back(&g_jetty_pool.thread_cache_list, &g_thread_jetty_cache.registry_node);
+        (void)pthread_spin_unlock(&g_jetty_pool.lock);
     }
     return &g_thread_jetty_cache;
 }
@@ -59,9 +64,7 @@ static ALWAYS_INLINE void release_thread_cache(uint64_t id)
         return;
     }
 
-    // If pool is already uninitialized, we can't return nodes to it.
-    // Free cached nodes directly to avoid leaking heap memory.
-    if (g_jetty_pool == NULL) {
+    if (!__atomic_load_n(&g_jetty_pool_inited, __ATOMIC_ACQUIRE)) {
         while (!urpc_list_is_empty(&g_thread_jetty_cache.cache_list)) {
             jetty_pool_node_t *cached = (jetty_pool_node_t *)urpc_list_pop_front(
                 &g_thread_jetty_cache.cache_list);
@@ -72,24 +75,23 @@ static ALWAYS_INLINE void release_thread_cache(uint64_t id)
         return;
     }
 
+    (void)pthread_spin_lock(&g_jetty_pool.lock);
+    urpc_list_remove(&g_thread_jetty_cache.registry_node);
     if (!urpc_list_is_empty(&g_thread_jetty_cache.cache_list)) {
-        (void)pthread_spin_lock(&g_jetty_pool->lock);
         while (!urpc_list_is_empty(&g_thread_jetty_cache.cache_list)) {
             jetty_pool_node_t *cached = (jetty_pool_node_t *)urpc_list_pop_front(
                 &g_thread_jetty_cache.cache_list);
             cached->in_global_pool = true;
             if (__atomic_load_n(&cached->state, __ATOMIC_ACQUIRE) == JETTY_POOL_NODE_ERR) {
-                // ERR node: recycle to free_q (node_count already decremented).
-                recycle_node_to_free_q(g_jetty_pool, cached);
+                recycle_node_to_free_q(&g_jetty_pool, cached);
             } else {
-                // IDLE: return to active_q (node still assigned to Sub UMQ)
-                urpc_list_push_back(&g_jetty_pool->active_q, &cached->node);
-                g_jetty_pool->active_count++;
+                urpc_list_push_back(&g_jetty_pool.active_q, &cached->node);
+                g_jetty_pool.active_count++;
             }
         }
         g_thread_jetty_cache.cached_count = 0;
-        (void)pthread_spin_unlock(&g_jetty_pool->lock);
     }
+    (void)pthread_spin_unlock(&g_jetty_pool.lock);
 
     g_thread_jetty_cache.inited = false;
 }
@@ -116,80 +118,86 @@ static int validate_jetty_pool_config(jetty_pool_config_t *config)
 
 int umq_ub_jetty_pool_init(jetty_pool_config_t *config)
 {
-    // Singleton: only one jetty pool allowed per process
-    if (g_jetty_pool != NULL) {
+    if (__atomic_load_n(&g_jetty_pool_inited, __ATOMIC_ACQUIRE)) {
         UMQ_VLOG_ERR(VLOG_UMQ, "jetty pool already exists, only one pool allowed per process\n");
         return -UMQ_ERR_EEXIST;
     }
 
-    // Validate configuration parameters before allocating resources
     int ret = validate_jetty_pool_config(config);
     if (ret != UMQ_SUCCESS) {
         return ret;
     }
 
-    jetty_pool_t *pool = calloc(1, sizeof(jetty_pool_t));
-    if (pool == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "allocate jetty_pool failed, errno: %d\n", errno);
-        return -UMQ_ERR_ENOMEM;
-    }
+    memset(&g_jetty_pool, 0, sizeof(g_jetty_pool));
 
-    urpc_list_init(&pool->free_q);
-    urpc_list_init(&pool->active_q);
+    urpc_list_init(&g_jetty_pool.free_q);
+    urpc_list_init(&g_jetty_pool.active_q);
+    urpc_list_init(&g_jetty_pool.thread_cache_list);
 
     int event_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (event_fd < 0) {
         UMQ_VLOG_ERR(VLOG_UMQ, "create jetty pool eventfd failed, errno: %d\n", errno);
-        free(pool);
         return -UMQ_ERR_EINVAL;
     }
 
-    (void)pthread_spin_init(&pool->lock, PTHREAD_PROCESS_PRIVATE);
+    (void)pthread_spin_init(&g_jetty_pool.lock, PTHREAD_PROCESS_PRIVATE);
 
-    pool->event_fd = event_fd;
-    pool->max_nodes = (config->max_nodes > 0) ? config->max_nodes : JETTY_POOL_MAX_NODES;
-    pool->batch_size = (config->batch_size > 0) ? config->batch_size : THREAD_LOCAL_JETTY_BATCH_SIZE;
-    pool->cache_size = (config->cache_size > 0) ? config->cache_size : THREAD_LOCAL_JETTY_CACHE_SIZE;
-    pool->notify_threshold = (config->notify_threshold > 0) ?
+    g_jetty_pool.event_fd = event_fd;
+    g_jetty_pool.max_nodes = (config->max_nodes > 0) ? config->max_nodes : JETTY_POOL_MAX_NODES;
+    g_jetty_pool.batch_size = (config->batch_size > 0) ? config->batch_size : THREAD_LOCAL_JETTY_BATCH_SIZE;
+    g_jetty_pool.cache_size = (config->cache_size > 0) ? config->cache_size : THREAD_LOCAL_JETTY_CACHE_SIZE;
+    g_jetty_pool.notify_threshold = (config->notify_threshold > 0) ?
         config->notify_threshold : JETTY_POOL_NOTIFY_THRESHOLD;
-    pool->return_batch_size = (config->return_batch_size > 0) ?
+    g_jetty_pool.return_batch_size = (config->return_batch_size > 0) ?
         config->return_batch_size : THREAD_LOCAL_JETTY_RETURN_BATCH_SIZE;
-    pool->borrow_limit = (config->borrow_limit > 0) ? config->borrow_limit : JETTY_POOL_BORROW_LIMIT;
+    g_jetty_pool.borrow_limit = (config->borrow_limit > 0) ? config->borrow_limit : JETTY_POOL_BORROW_LIMIT;
 
-    g_jetty_pool = pool;
+    __atomic_store_n(&g_jetty_pool_inited, true, __ATOMIC_RELEASE);
 
     UMQ_VLOG_INFO(VLOG_UMQ, "init jetty pool success, eventfd %d, cache_size %u, max_nodes %u, batch_size %u, "
         "notify_threshold %u, return_batch_size %u, borrow_limit %u\n",
-        event_fd, pool->cache_size, pool->max_nodes, pool->batch_size,
-        pool->notify_threshold, pool->return_batch_size, pool->borrow_limit);
+        event_fd, g_jetty_pool.cache_size, g_jetty_pool.max_nodes, g_jetty_pool.batch_size,
+        g_jetty_pool.notify_threshold, g_jetty_pool.return_batch_size, g_jetty_pool.borrow_limit);
     return UMQ_SUCCESS;
 }
 
 void umq_ub_jetty_pool_uninit(void)
 {
-    jetty_pool_t *pool = g_jetty_pool;
-    if (pool == NULL) {
+    if (!__atomic_load_n(&g_jetty_pool_inited, __ATOMIC_ACQUIRE)) {
         return;
     }
 
-    release_thread_cache(0);
-    // Free nodes in all pool lists
+    __atomic_store_n(&g_jetty_pool_inited, false, __ATOMIC_RELEASE);
+
+    (void)pthread_spin_lock(&g_jetty_pool.lock);
+    thread_local_jetty_cache_t *cache = NULL;
+    thread_local_jetty_cache_t *cache_tmp = NULL;
+    URPC_LIST_FOR_EACH_SAFE(cache, cache_tmp, registry_node, &g_jetty_pool.thread_cache_list) {
+        while (!urpc_list_is_empty(&cache->cache_list)) {
+            jetty_pool_node_t *cached = (jetty_pool_node_t *)urpc_list_pop_front(&cache->cache_list);
+            free(cached);
+        }
+        cache->cached_count = 0;
+        cache->inited = false;
+        urpc_list_remove(&cache->registry_node);
+    }
+
     jetty_pool_node_t *iter = NULL;
     jetty_pool_node_t *tmp = NULL;
-    URPC_LIST_FOR_EACH_SAFE(iter, tmp, node, &pool->free_q) {
+    URPC_LIST_FOR_EACH_SAFE(iter, tmp, node, &g_jetty_pool.free_q) {
         urpc_list_remove(&iter->node);
         free(iter);
     }
-    URPC_LIST_FOR_EACH_SAFE(iter, tmp, node, &pool->active_q) {
+    URPC_LIST_FOR_EACH_SAFE(iter, tmp, node, &g_jetty_pool.active_q) {
         urpc_list_remove(&iter->node);
         free(iter);
     }
+    (void)pthread_spin_unlock(&g_jetty_pool.lock);
 
-    (void)close(pool->event_fd);
-    (void)pthread_spin_destroy(&pool->lock);
+    (void)close(g_jetty_pool.event_fd);
+    (void)pthread_spin_destroy(&g_jetty_pool.lock);
 
-    g_jetty_pool = NULL;
-    free(pool);
+    memset(&g_jetty_pool, 0, sizeof(g_jetty_pool));
 }
 
 static void set_reference_config(jetty_pool_t *pool, ub_queue_t *sub_umq)
@@ -281,11 +289,12 @@ static int validate_sub_umq_config_match(jetty_pool_t *pool, ub_queue_t *sub_umq
 
 int umq_ub_jetty_pool_add(ub_queue_t *sub_umq)
 {
-    jetty_pool_t *pool = g_jetty_pool;
-    if (pool == NULL) {
+    if (!__atomic_load_n(&g_jetty_pool_inited, __ATOMIC_ACQUIRE)) {
         UMQ_VLOG_ERR(VLOG_UMQ, "jetty pool not initialized\n");
         return -UMQ_ERR_EINVAL;
     }
+
+    jetty_pool_t *pool = &g_jetty_pool;
 
     (void)pthread_spin_lock(&pool->lock);
     int ret = validate_sub_umq_config_match(pool, sub_umq);
@@ -335,8 +344,7 @@ int umq_ub_jetty_pool_add(ub_queue_t *sub_umq)
 
 int umq_ub_jetty_pool_remove(ub_queue_t *sub_umq)
 {
-    jetty_pool_t *pool = g_jetty_pool;
-    if (pool == NULL) {
+    if (!__atomic_load_n(&g_jetty_pool_inited, __ATOMIC_ACQUIRE)) {
         UMQ_VLOG_ERR(VLOG_UMQ, "jetty pool not initialized\n");
         return -UMQ_ERR_EINVAL;
     }
@@ -344,6 +352,8 @@ int umq_ub_jetty_pool_remove(ub_queue_t *sub_umq)
         UMQ_VLOG_ERR(VLOG_UMQ, "sub_umq is NULL\n");
         return -UMQ_ERR_EINVAL;
     }
+
+    jetty_pool_t *pool = &g_jetty_pool;
 
     jetty_pool_node_t *node = sub_umq->jetty_node;
     if (node == NULL) {
@@ -385,11 +395,12 @@ int umq_ub_jetty_pool_remove(ub_queue_t *sub_umq)
 
 jetty_pool_node_t *umq_ub_jetty_pool_alloc(ub_queue_t *queue)
 {
-    jetty_pool_t *pool = g_jetty_pool;
-    if (pool == NULL) {
+    if (!__atomic_load_n(&g_jetty_pool_inited, __ATOMIC_ACQUIRE)) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "jetty pool not initialized\n");
         return NULL;
     }
+
+    jetty_pool_t *pool = &g_jetty_pool;
 
     thread_local_jetty_cache_t *cache = get_thread_jetty_cache();
 
@@ -488,11 +499,12 @@ static ALWAYS_INLINE int return_node_to_cache(jetty_pool_t *pool, jetty_pool_nod
 
 int umq_ub_jetty_pool_free(ub_queue_t *queue)
 {
-    jetty_pool_t *pool = g_jetty_pool;
-    if (pool == NULL) {
+    if (!__atomic_load_n(&g_jetty_pool_inited, __ATOMIC_ACQUIRE)) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "jetty pool not initialized\n");
         return -UMQ_ERR_EINVAL;
     }
+
+    jetty_pool_t *pool = &g_jetty_pool;
 
     jetty_pool_node_t *node = queue->jetty_node;
     if (node == NULL) {
@@ -514,15 +526,14 @@ int umq_ub_jetty_pool_free(ub_queue_t *queue)
 
 int umq_ub_jetty_pool_get_eventfd(void)
 {
-    jetty_pool_t *pool = g_jetty_pool;
-    if (pool == NULL) {
+    if (!__atomic_load_n(&g_jetty_pool_inited, __ATOMIC_ACQUIRE)) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "jetty pool not initialized\n");
         return -UMQ_ERR_EINVAL;
     }
-    return pool->event_fd;
+    return g_jetty_pool.event_fd;
 }
 
 bool umq_ub_jetty_pool_is_inited(void)
 {
-    return g_jetty_pool != NULL;
+    return __atomic_load_n(&g_jetty_pool_inited, __ATOMIC_ACQUIRE);
 }
