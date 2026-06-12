@@ -3387,8 +3387,8 @@ int umq_flow_control_stats_get(uint64_t umqh_tp, umq_flow_control_stats_t *flow_
         return -UMQ_ERR_EINVAL;
     }
 
-    ub_credit_pool_t *pool = queue->credit_pool;
-    pool->ops.stats_query(pool, &flow_control_stats->pool_credit);
+    queue->credit_pool.ops->stats_query(queue->credit_pool.available,
+                                        queue->credit_pool.allocated, &flow_control_stats->pool_credit);
     queue->flow_control.ops.stats_query(&queue->flow_control, queue, flow_control_stats);
     return UMQ_SUCCESS;
 }

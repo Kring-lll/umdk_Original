@@ -156,36 +156,33 @@ typedef struct umq_ub_flow_control_sge_slot {
     uint32_t bitmap_idx;
 } umq_ub_flow_control_sge_slot_t;
 
-typedef enum ub_credit_stat_u64 {
-    CREDIT_POOL_IDLE_TOTAL = 0,     // the total number of idle credit in the statistics pool
-    CREDIT_POOL_ALLOCATED_TOTAL,    // the total number of credit allocated from the credit pool
-    CREDIT_POOL_ERR_TOTAL,          // invalid total credit count (which will cause pool_idle statistics failure)
-    CREDIT_COUNTER_MAX_U64
-} ub_credit_stat_u64_t;
+typedef struct ub_available_credit_pool {
+    volatile uint64_t idle_total;
+    volatile uint64_t err_total;
+    volatile uint16_t idle;
+    uint16_t capacity;
+} ub_available_credit_pool_t;
 
-typedef enum ub_credit_stat_u16 {
-    CREDIT_POOL_IDLE = 0,           // the number of credits available in the current credit pool
-    CREDIT_POOL_ALLOCATED,          // the number of credit currently be allocated form the credit pool
-    CREDIT_COUNTER_MAX_U16
-} ub_credit_stat_u16_t;
+typedef struct ub_allocated_credit_pool {
+    volatile uint64_t allocated_total;
+    volatile uint16_t allocated;
+} ub_allocated_credit_pool_t;
 
-struct ub_credit_pool;
 typedef struct ub_credit_pool_ops {
-    // update shared jfr rx_posted after post rx buffer
-    uint16_t (*available_credit_inc)(struct ub_credit_pool *shared_credit, uint16_t count);
-    // distribute x in batch
-    uint16_t (*available_credit_dec)(struct ub_credit_pool *shared_credit, uint16_t count);
-    // return unused credit
-    uint16_t (*available_credit_return)(struct ub_credit_pool *shared_credit, uint16_t count);
-    uint16_t (*allocated_credit_dec)(struct ub_credit_pool *shared_credit, uint16_t count);
-    void (*stats_query)(struct ub_credit_pool *fc, umq_credit_pool_stats_t *out);
+    uint16_t (*available_credit_inc)(struct ub_available_credit_pool *available, uint16_t count);
+    uint16_t (*available_credit_dec)(struct ub_available_credit_pool *available,
+                                     struct ub_allocated_credit_pool *allocated, uint16_t count);
+    uint16_t (*available_credit_return)(struct ub_available_credit_pool *available,
+                                        struct ub_allocated_credit_pool *allocated, uint16_t count);
+    uint16_t (*allocated_credit_dec)(struct ub_allocated_credit_pool *allocated, uint16_t count);
+    void (*stats_query)(struct ub_available_credit_pool *available,
+                        struct ub_allocated_credit_pool *allocated, umq_credit_pool_stats_t *out);
 } ub_credit_pool_ops_t;
 
 typedef struct ub_credit_pool {
-    ub_credit_pool_ops_t ops;
-    volatile uint64_t stats_u64[CREDIT_COUNTER_MAX_U64];
-    volatile uint16_t stats_u16[CREDIT_COUNTER_MAX_U16];
-    uint16_t capacity;
+    const ub_credit_pool_ops_t *ops;
+    ub_available_credit_pool_t *available;
+    ub_allocated_credit_pool_t *allocated;
 } ub_credit_pool_t;
 
 typedef struct ub_flow_control {
@@ -223,7 +220,7 @@ typedef struct ub_flow_control {
     umq_ub_flow_control_sge_slot_t recv_sge;
     uint8_t local_req_seq;
     uint8_t remote_expect_seq;
-    ub_credit_pool_t credit;
+    ub_available_credit_pool_t available_credit;
 } ub_flow_control_t;
 
 typedef struct umq_ub_flow_control_sge_mgr {
@@ -372,6 +369,7 @@ typedef struct jfr_ctx {
     urma_jfce_t *jfr_jfce; // io and flow control jetty share same jfce
     volatile uint32_t ref_cnt;
     rx_buf_ctx_list_t rx_buf_ctx_list;
+    ub_allocated_credit_pool_t allocated_credit;
     umq_ub_flow_control_share_recv_t share_rq_sge;
 } jfr_ctx_t;
 
@@ -451,7 +449,7 @@ typedef struct ub_queue {
     bondp_port_id_t *used_port;
     uint32_t umq_id;
     uint32_t remote_umq_id;
-    ub_credit_pool_t *credit_pool;
+    ub_credit_pool_t credit_pool;
 } ub_queue_t;
 
 typedef struct user_ctx {
