@@ -8,6 +8,7 @@
 #include "umq_errno.h"
 #include "umq_qbuf_pool.h"
 #include "umq_huge_qbuf_pool.h"
+#include "umq_tiny_qbuf_pool.h"
 #include "perf.h"
 #include "umq_inner.h"
 
@@ -139,6 +140,12 @@ int umq_stats_qbuf_pool_get(uint64_t umqh, umq_qbuf_pool_stats_t *qbuf_pool_stat
         ret = umq_huge_qbuf_pool_info_get(qbuf_pool_stats);
         if (ret != UMQ_SUCCESS) {
             UMQ_VLOG_ERR(VLOG_UMQ, "umq huge qbuf pool info get failed\n");
+            return ret;
+        }
+
+        ret = umq_tiny_qbuf_pool_info_get(qbuf_pool_stats);
+        if (ret != UMQ_SUCCESS) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "umq small qbuf pool info get failed\n");
             return ret;
         }
         return UMQ_SUCCESS;
