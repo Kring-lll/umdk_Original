@@ -103,6 +103,7 @@ struct urma_topo_ue {
     uint32_t entity_id;
     char primary_eid[EID_LEN];
     char port_eid[PORT_NUM][EID_LEN];
+    uint32_t cna[PORT_NUM];
 };
 
 struct urma_topo_agg_dev {
