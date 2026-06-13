@@ -1030,6 +1030,9 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
         UMQ_SUCCESS) {
         goto DESTROY_JFR_CTX;
     }
+    if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) != 0 && share_rq != NULL && share_rq->flow_control.enabled) {
+        queue->credit_pool = share_rq->credit_pool;
+    }
     if (queue->mode == UMQ_MODE_INTERRUPT) {
         queue->jfs_jfce = umq_symbol_urma()->urma_create_jfce(dev_ctx->urma_ctx);
         if (queue->jfs_jfce == NULL) {
