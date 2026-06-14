@@ -1126,10 +1126,11 @@ int umq_ub_fill_fc_rx_buf(ub_queue_t *queue, uint64_t user_ctx)
     return UMQ_SUCCESS;
 }
 
-static int umq_ub_post_fc_recv_wrs(ub_queue_t *queue, urma_jfr_wr_t *recv_wr, bool post_jfr)
+static int umq_ub_post_fc_recv_wrs(ub_queue_t *queue, urma_jfr_wr_t *recv_wr)
 {
     urma_jfr_wr_t *bad_wr = NULL;
     urma_status_t status;
+    bool post_jfr = is_umq_ub_post_jfr(queue);
     if (post_jfr) {
         status =
             umq_symbol_urma()->urma_post_jfr_wr(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr, recv_wr, &bad_wr);
@@ -1249,17 +1250,19 @@ static int umq_ub_fill_fc_rx_post_jetty(ub_queue_t *queue, uint32_t batch,
     return UMQ_SUCCESS;
 }
 
-int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint32_t batch)
+int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint8_t rqe_post_factor)
 {
+    int ret;
+    uint32_t batch = queue->fc_rx_depth * rqe_post_factor;
     if (batch == 0) {
         return UMQ_SUCCESS;
     }
 
-    if (batch > queue->fc_rx_depth * URMA_UBAGG_DEV_MAX_NUM) {
+    if (rqe_post_factor > URMA_UBAGG_DEV_MAX_NUM) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, "
-            "number of requested recv wr exceeds the upper limit %u\n",
+            "rqe_post_factor %d of requested recv wr exceeds the upper limit %u\n",
             EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
-            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, queue->fc_rx_depth * URMA_UBAGG_DEV_MAX_NUM);
+            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, rqe_post_factor, URMA_UBAGG_DEV_MAX_NUM);
         return -UMQ_ERR_EINVAL;
     }
 
@@ -1270,10 +1273,9 @@ int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint32_t batch)
             queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id);
         return -UMQ_ERR_ENOMEM;
     }
+
     urma_sge_t *fc_sges = (urma_sge_t *)(recv_wr + batch);
-    bool post_jfr = is_umq_ub_post_jfr(queue);
-    int ret;
-    if (post_jfr) {
+    if (is_umq_ub_post_jfr(queue)) {
         ret = umq_ub_fill_fc_rx_post_jfr(queue, batch, recv_wr, fc_sges);
     } else {
         ret = umq_ub_fill_fc_rx_post_jetty(queue, batch, recv_wr, fc_sges);
@@ -1287,7 +1289,23 @@ int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint32_t batch)
         recv_wr[i - 1].next = &recv_wr[i];
     }
 
-    ret = umq_ub_post_fc_recv_wrs(queue, recv_wr, post_jfr);
+    uint32_t post_left_num = queue->fc_rx_depth;
+    uint32_t post_round = queue->fc_rx_depth / UMQ_BATCH_SIZE;
+    if (queue->fc_rx_depth % UMQ_BATCH_SIZE != 0) {
+        post_round++;
+    }
+
+    for (uint32_t i = 0; i < post_round; i++) {
+        uint32_t post_num = post_left_num > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : post_left_num;
+        post_left_num -= post_num;
+
+        for (uint8_t j = 0; j < rqe_post_factor; j++) {
+            uint32_t offset = i * rqe_post_factor * UMQ_BATCH_SIZE + j * post_num;
+            recv_wr[offset + post_num - 1].next = NULL;
+            ret = umq_ub_post_fc_recv_wrs(queue, &recv_wr[offset]);
+        }
+    }
+
     free(recv_wr);
     return ret;
 }
