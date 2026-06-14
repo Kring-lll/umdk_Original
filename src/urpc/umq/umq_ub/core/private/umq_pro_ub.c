@@ -1249,8 +1249,9 @@ static int umq_ub_fill_fc_rx_post_jetty(ub_queue_t *queue, uint32_t batch,
     return UMQ_SUCCESS;
 }
 
-int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint32_t batch)
+int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint8_t rqe_post_factor)
 {
+    uint32_t batch = queue->fc_rx_depth * rqe_post_factor;
     if (batch == 0) {
         return UMQ_SUCCESS;
     }
@@ -1287,7 +1288,25 @@ int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint32_t batch)
         recv_wr[i - 1].next = &recv_wr[i];
     }
 
-    ret = umq_ub_post_fc_recv_wrs(queue, recv_wr, post_jfr);
+    uint32_t offset;
+    uint32_t post_num;
+    uint32_t post_left_num = queue->fc_rx_depth;
+    uint32_t post_round = queue->fc_rx_depth / UMQ_BATCH_SIZE;
+    if (queue->fc_rx_depth % UMQ_BATCH_SIZE != 0) {
+        post_round++;
+    }
+
+    for (uint32_t i = 0; i < post_round; i++) {
+        post_num = post_left_num > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : post_left_num;
+        post_left_num -= post_num;
+
+        for (uint8_t j = 0; j < rqe_post_factor; j++) {
+            offset = i * rqe_post_factor * UMQ_BATCH_SIZE + j * post_num;
+            recv_wr[offset + post_num - 1].next = NULL;
+            ret = umq_ub_post_fc_recv_wrs(queue, &recv_wr[offset], post_jfr);
+        }
+    }
+
     free(recv_wr);
     return ret;
 }
