@@ -11,8 +11,9 @@
 #define BONDP_FB_OK                     (0)
 #define BONDP_FB_ERR                    (-1)
 
-#ifndef URMA_UBAGG_NODE_MAX_NUM
-#define URMA_UBAGG_NODE_MAX_NUM         512
+//TODO: 对接一个合适的宏
+#ifndef BOUNDP_FAILBACK_NODE_MAX_NUM
+#define BOUNDP_FAILBACK_NODE_MAX_NUM         512
 #endif
 
 typedef enum bondp_failback_state {
@@ -51,8 +52,6 @@ typedef struct bondp_failback_task {
     int target_idx;                        // 故障 pjetty 对端 idx
     urma_jetty_t *new_pjetty;              // 新创建的 pjetty (暂存，收到 RESP 后替换)
     uint32_t new_pjetty_id;                // 新 pjetty ID (用于 REQ payload)
-    struct bondp_target_jetty *bdp_tjetty; // 对端 target jetty (用于 reimport)
-    uint32_t remote_new_pjetty_id;         // 对端新 pjetty ID (来自 RESP)
 
     // --- 广播通知跟踪 ---
     uint32_t node_count;                                       // 需要通知的 NODE 总数
@@ -64,7 +63,7 @@ typedef struct bondp_failback_task {
     hmap_node_t hmap_node;
 } bondp_failback_task_t;
 
-// --- 常量定义 ---
+
 #define BONDP_FAILBACK_REBUILD_START_DELAY_MS     10000U  /* 收到CQE后，延迟10秒开始重建 */
 #define BONDP_FAILBACK_REBUILD_RETRY_INIT_MS      1000U   /* 重建失败后，初始重试间隔1秒 */
 #define BONDP_FAILBACK_REBUILD_RETRY_MAX_MS       10000U  /* 重建失败后，最大重试间隔10秒 */
@@ -86,6 +85,9 @@ typedef struct bondp_failback_task {
 int bondp_failback_on_cqe(bondp_context_t *bdp_ctx,
     struct bondp_comp *bondp_jetty,
     int failed_local_idx);
+
+void bondp_failback_task_destroy (bondp_failback_task_t *task);
+void bondp_failback_cancel_timer (bondp_failback_task_t *task);
 
 int bondp_handle_netlink_events(void);
 

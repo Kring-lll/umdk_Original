@@ -12,30 +12,6 @@
 #include "urma_api.h"
 #include "urma_log.h"
 
-static int bondp_update_pjetty_id_mapping(
-    bondp_context_t *bdp_ctx, urma_jetty_id_t old_id, urma_jetty_id_t new_id, bondp_comp_t *bdp_jetty)
-{
-    int ret = BONDP_FB_OK;
-    pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
-    ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, old_id, JETTY);
-    if (ret != 0) {
-        pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
-        URMA_LOG_ERR("Failed to delete stale pjetty id mapping: " URMA_JETTY_ID_FMT ", ret=%d\n",
-            URMA_JETTY_ID_ARGS(&old_id), ret);
-        return BONDP_FB_ERR;
-    }
-    ret = bdp_p_vjetty_id_table_add_without_lock(
-        &bdp_ctx->p_vjetty_id_table, new_id, JETTY, bdp_jetty->v_jetty.jetty_id.id, bdp_jetty);
-    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
-    if (ret != 0) {
-        URMA_LOG_ERR("Failed to add recreated pjetty id mapping: " URMA_JETTY_ID_FMT ", ret=%d\n",
-            URMA_JETTY_ID_ARGS(&new_id), ret);
-        return BONDP_FB_ERR;
-    }
-    return BONDP_FB_OK;
-}
-
-//保留rebuild部分逻辑
 int bondp_failback_rebuild_local_pjetty(bondp_failback_task_t *task)
 {
     int local_idx = task->failed_local_idx;
@@ -62,16 +38,6 @@ int bondp_failback_rebuild_local_pjetty(bondp_failback_task_t *task)
     if (bdp_rplc_jfc != NULL) {
         p_cfg.shared.jfc = bdp_rplc_jfc->p_jfc[local_idx];
     }
-    //此处是原本是删除旧jetty的逻辑
-    /*
-    *urma_jetty_id_t old_id = old_jetty->jetty_id;
-    bdp_jetty->p_jetty[local_idx] = NULL;
-    if (urma_delete_jetty(old_jetty) != URMA_SUCCESS) {
-    bdp_jetty->p_jetty[local_idx] = old_jetty;
-    URMA_LOG_ERR("Failed to delete pjetty at idx=%d\n", local_idx);
-    return BONDP_FB_ERR;
-    }
-    */
     urma_jetty_t *new_jetty = urma_create_jetty(bdp_ctx->p_ctxs[local_idx], &p_cfg);
     //这部分cfg配置同healthcheck原版
 
@@ -82,14 +48,6 @@ int bondp_failback_rebuild_local_pjetty(bondp_failback_task_t *task)
 
     new_jetty->remote_jetty = NULL;
     new_jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
-    //一并移动到handleRESP
-    /*
-    bdp_jetty->p_jetty[local_idx] = new_jetty;
-    bdp_jetty->valid[local_idx] = false;
-    if (bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty) != BONDP_FB_OK) {
-    return BONDP_FB_ERR;
-    }
-    */
 
     task->new_pjetty = new_jetty;
     task->new_pjetty_id = new_jetty->jetty_id.id;
@@ -149,193 +107,7 @@ int bondp_failback_send_req_to_node(bondp_failback_task_t *task, uint32_t node_i
     return BONDP_FB_OK;
 }
 
-// reimport: 独立的 unimport + import 操作, 当前 relink 已内联此逻辑
-// 保留作为独立工具函数, 可供其他场景使用
-int bondp_failback_reimport(bondp_failback_task_t *task)
-{
-    bondp_comp_t *bdp_jetty = task->bondp_jetty;
-    bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
-    int local_idx = task->failed_local_idx;
-    int target_idx = task->target_idx;
-    if (local_idx < 0 || target_idx < 0 || local_idx >= URMA_UBAGG_DEV_MAX_NUM ||
-        target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
-        return BONDP_FB_ERR;
-    }
-
-    urma_target_jetty_t *old_tjetty = task->bdp_tjetty->p_tjetty[local_idx][target_idx];
-    if (old_tjetty == NULL) {
-        return BONDP_FB_ERR;
-    }
-
-    urma_rjetty_t rjetty = {
-        .jetty_id = old_tjetty->id,
-        .trans_mode = old_tjetty->trans_mode,
-        .policy = old_tjetty->policy,
-        .type = old_tjetty->type,
-        .flag = old_tjetty->flag,
-        .tp_type = old_tjetty->tp_type,
-    };
-    rjetty.jetty_id.id = task->remote_new_pjetty_id;
-
-    if (urma_unimport_jetty(old_tjetty) != URMA_SUCCESS) {
-        URMA_LOG_ERR("Failed to unimport old primary ptjetty, lidx=%d tidx=%d\n", local_idx, target_idx);
-        return BONDP_FB_ERR;
-    }
-    task->bdp_tjetty->p_tjetty[local_idx][target_idx] = NULL;
-
-    urma_token_t *import_token = task->bdp_tjetty->import_token_valid ? &task->bdp_tjetty->import_token_value : NULL;
-    urma_target_jetty_t *new_tjetty = urma_import_jetty(bdp_ctx->p_ctxs[local_idx], &rjetty, import_token);
-    if (new_tjetty == NULL) {
-        URMA_LOG_ERR("Failed to import recreated primary ptjetty, local_idx=%d target_idx=%d pjetty_id=%u\n",
-            local_idx, target_idx, rjetty.jetty_id.id);
-        return BONDP_FB_ERR;
-    }
-    task->bdp_tjetty->p_tjetty[local_idx][target_idx] = new_tjetty;
-    task->bondp_jetty->valid[local_idx] = false;
-    return BONDP_FB_OK;
-}
-
-int bondp_failback_relink(bondp_failback_task_t *task)
-{
-    bondp_comp_t *bdp_jetty = task->bondp_jetty;
-    bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
-    int local_idx = task->failed_local_idx;
-    int target_idx = task->target_idx;
-
-    urma_jetty_t *old_pjetty = bdp_jetty->p_jetty[local_idx];
-    urma_jetty_t *new_pjetty = task->new_pjetty;
-    if (new_pjetty == NULL) {
-        URMA_LOG_ERR("Cannot relink, new_pjetty is NULL, idx=%d\n", local_idx);
-        return BONDP_FB_ERR;
-    }
-    if (local_idx < 0 || target_idx < 0 || local_idx >= URMA_UBAGG_DEV_MAX_NUM ||
-        target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
-        URMA_LOG_ERR("Cannot relink, invalid idx local=%d target=%d\n", local_idx, target_idx);
-        return BONDP_FB_ERR;
-    }
-
-    // Step 1: unimport 旧 tjetty (旧 pjetty 对应的 target jetty)
-    urma_target_jetty_t *old_tjetty = task->bdp_tjetty->p_tjetty[local_idx][target_idx];
-    if (old_tjetty != NULL) {
-        if (urma_unimport_jetty(old_tjetty) != URMA_SUCCESS) {
-            URMA_LOG_ERR("Failed to unimport old ptjetty, lidx=%d tidx=%d\n", local_idx, target_idx);
-            return BONDP_FB_ERR;
-        }
-        task->bdp_tjetty->p_tjetty[local_idx][target_idx] = NULL;
-    }
-
-    // Step 2: 删除旧 pjetty
-    urma_jetty_id_t old_id = old_pjetty->jetty_id;
-    if (urma_delete_jetty(old_pjetty) != URMA_SUCCESS) {
-        URMA_LOG_ERR("Failed to delete old pjetty at idx=%d\n", local_idx);
-        return BONDP_FB_ERR;
-    }
-
-    // Step 3: 将 new_pjetty 放入 p_jetty[local_idx], 新 jetty 上位
-    bdp_jetty->p_jetty[local_idx] = new_pjetty;
-    bdp_jetty->valid[local_idx] = false;
-    task->new_pjetty = NULL;
-
-    // Step 4: 用 remote_new_pjetty_id import 新 tjetty, 绑定到新 pjetty
-    // 构造 rjetty: 保留旧 tjetty 的属性, 替换 jetty_id 为对端新 pjetty ID
-    urma_rjetty_t rjetty = {0};
-    if (old_tjetty != NULL) {
-        rjetty.jetty_id = old_tjetty->id;
-        rjetty.trans_mode = old_tjetty->trans_mode;
-        rjetty.policy = old_tjetty->policy;
-        rjetty.type = old_tjetty->type;
-        rjetty.flag = old_tjetty->flag;
-        rjetty.tp_type = old_tjetty->tp_type;
-    }
-    rjetty.jetty_id.id = task->remote_new_pjetty_id;
-
-    urma_token_t *import_token = task->bdp_tjetty->import_token_valid ?
-        &task->bdp_tjetty->import_token_value : NULL;
-    urma_target_jetty_t *new_tjetty = urma_import_jetty(bdp_ctx->p_ctxs[local_idx], &rjetty, import_token);
-    if (new_tjetty == NULL) {
-        URMA_LOG_ERR("Failed to import new ptjetty onto new pjetty, local_idx=%d target_idx=%u remote_id=%u\n",
-            local_idx, target_idx, task->remote_new_pjetty_id);
-        return BONDP_FB_ERR;
-    }
-    task->bdp_tjetty->p_tjetty[local_idx][target_idx] = new_tjetty;
-
-    // Step 5: 更新 pjetty ID 映射
-    if (bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_pjetty->jetty_id, bdp_jetty) != BONDP_FB_OK) {
-        URMA_LOG_WARN("Failed to update pjetty id mapping after relink, idx=%d\n", local_idx);
-    }
-
-    task->state = BONDP_FAILBACK_STATE_DONE;
-    URMA_LOG_INFO("Fallback relink finished, idx=%d old_id=%u new_id=%u remote_new_id=%u\n",
-        local_idx, old_id.id, new_pjetty->jetty_id.id, task->remote_new_pjetty_id);
-    return BONDP_FB_OK;
-}
-
 //TODO: 遍历对端所有vjetty的代码，找到存在的vjetty 是否会找到多个vjetty
-/*
- * 通过远端 vjetty_id 查找本地的 bondp_comp_t 和 bdp_tjetty
- *
- * 遍历 p_vjetty_id_table 中的所有 comp, 检查 comp->v_jetty.remote_jetty
- * 找到 bdp_tjetty->v_tjetty.id.id == remote_vjetty_id 的匹配项
- *
- * 对端收到 REQ 后, REQ.vjetty_id 是发送端的 vjetty ID,
- * 本端通过 import 持有 bdp_tjetty, 其 v_tjetty.id.id 即为远端 vjetty ID
- */
-
-
-static bondp_comp_t *bondp_find_comp_by_remote_vjetty_id(
-    bondp_context_t *bdp_ctx, uint32_t remote_vjetty_id,
-    bondp_target_jetty_t **out_bdp_tjetty)
-{
-    bondp_hash_table_t *tbl = &bdp_ctx->p_vjetty_id_table;
-    pthread_rwlock_rdlock(&tbl->lock);
-
-    bondp_comp_t *found_comp = NULL;
-    bondp_target_jetty_t *found_tjetty = NULL;
-    // 去重: 同一个 comp 可能在 table 中有多条 pjetty 记录
-    bondp_comp_t *seen_comps[URMA_UBAGG_DEV_MAX_NUM] = {NULL};
-    int seen_count = 0;
-
-    bdp_p_vjetty_id_t *entry = NULL;
-    HMAP_FOR_EACH(entry, hmap_node, &tbl->hmap) {
-        bondp_comp_t *comp = entry->comp;
-        if (comp == NULL || comp->comp_type != BONDP_COMP_JETTY) {
-            continue;
-        }
-        // 去重: 跳过已检查过的 comp
-        bool already_seen = false;
-        for (int i = 0; i < seen_count; ++i) {
-            if (seen_comps[i] == comp) {
-                already_seen = true;
-                break;
-            }
-        }
-        if (already_seen) {
-            continue;
-        }
-        if (seen_count < URMA_UBAGG_DEV_MAX_NUM) {
-            seen_comps[seen_count++] = comp;
-        }
-
-        // 检查 comp 是否绑定了 remote_jetty, 且 v_tjetty.id.id 匹配
-        if (comp->v_jetty.remote_jetty == NULL) {
-            continue;
-        }
-        bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(
-            comp->v_jetty.remote_jetty, bondp_target_jetty_t, v_tjetty);
-        if (bdp_tjetty->v_tjetty.id.id == remote_vjetty_id) {
-            found_comp = comp;
-            found_tjetty = bdp_tjetty;
-            break;
-        }
-    }
-
-    pthread_rwlock_unlock(&tbl->lock);
-
-    if (out_bdp_tjetty != NULL) {
-        *out_bdp_tjetty = found_tjetty;
-    }
-    return found_comp;
-}
 
 /*
  * 通过 vjetty_id 查找本端的 bondp_comp_t
@@ -486,5 +258,73 @@ int bondp_failback_handle_req(bondp_context_t *bdp_ctx, const bondp_failback_msg
 
     URMA_LOG_INFO("Fallback RESP sent, vjetty_id=%u pjetty_i_idx=%u my_pjetty_id=%u seq=%u\n",
         vjetty_id, pjetty_idx, my_pjetty_id, req_seq);
+    return BONDP_FB_OK;
+}
+
+/*
+ * 本端处理 RESP 消息
+ *
+ * 查找链路: vjetty_id → bondp_comp_t → failback_tasks[pjetty_idx]
+ * 流程: 校验 → 去重 → 标记计数 → 全收齐则 cancel_timer + relink + destroy
+ */
+int bondp_failback_handle_resp(bondp_context_t *bdp_ctx, const bondp_failback_msg_t *msg)
+{
+    if (bdp_ctx == NULL || msg == NULL) {
+        return BONDP_FB_ERR;
+    }
+
+    uint32_t vjetty_id = msg->in.vjetty_id;
+    uint32_t pjetty_idx = msg->in.pjetty_idx;
+    uint32_t pjetty_new_id = msg->in.pjetty_new_id;
+    uint8_t req_seq = msg->in.req_seq;
+    uint32_t node_id = msg->in.node_id;
+
+    // Step 1: 通过 vjetty_id 找到本端的 bondp_comp_t
+    bondp_comp_t *bdp_jetty = bondp_find_comp_by_vjetty_id(bdp_ctx, vjetty_id);
+    if (bdp_jetty == NULL) {
+        URMA_LOG_WARN("Fallback RESP: no matching comp for vjetty_id=%u\n", vjetty_id);
+        return BONDP_FB_ERR;
+    }
+
+    // Step 2: 通过 pjetty_idx 从 failback_tasks 数组中直接索引
+    if (pjetty_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        URMA_LOG_WARN("Fallback RESP: invalid pjetty_idx=%u vjetty_id=%u\n", pjetty_idx, vjetty_id);
+        return BONDP_FB_ERR;
+    }
+
+    bondp_failback_task_t *task = bdp_jetty->failback_tasks[pjetty_idx];
+    if (task == NULL || task->closed) {
+        URMA_LOG_WARN("Fallback RESP: no active task for vjetty_id=%u pjetty_idx=%u\n",
+            vjetty_id, pjetty_idx);
+        return BONDP_FB_ERR;
+    }
+
+    // Step 3: 校验序列号
+    if (task->req_seq != req_seq) {
+        URMA_LOG_WARN("Fallback RESP dropped due to seq mismatch, recv_seq=%u expect_seq=%u vjetty_id=%u\n",
+            req_seq, (unsigned)task->req_seq, vjetty_id);
+        return BONDP_FB_ERR;
+    }
+
+    // Step 4: 去重, 已 SATTLED 的 NODE 不重复计数
+    if (task->node_states[node_id] == BONDP_FAILBACK_NODE_SATTLED) {
+        URMA_LOG_DEBUG("Fallback RESP: node[%u] already settled, skip\n", node_id);
+        return BONDP_FB_OK;
+    }
+
+    // Step 5: 标记并计数
+    task->node_states[node_id] = BONDP_FAILBACK_NODE_SATTLED;
+    task->notified_count++;
+
+    URMA_LOG_INFO("Fallback RESP accepted, node[%u] vjetty_id=%u notified=%u/%u remote_id=%u\n",
+        node_id, vjetty_id, task->notified_count, task->node_count, pjetty_new_id);
+
+    // Step 6: 全部 NODE 已响应 → 删除旧 pjetty, cancel_timer, destroy
+    if (task->notified_count >= task->node_count) {
+        urma_jetty_t *old_jetty = task->bondp_jetty->p_jetty[pjetty_idx];
+        urma_delete_jetty(old_jetty);
+        bondp_failback_cancel_timer(task);
+        bondp_failback_task_destroy(task);
+    }
     return BONDP_FB_OK;
 }

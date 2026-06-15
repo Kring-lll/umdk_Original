@@ -10,7 +10,6 @@
 #include "urma_api.h"
 #include "urma_log.h"
 
-static void bondp_failback_cancel_timer(bondp_failback_task_t *task);
 static void bondp_failback_rebuild_task(void *arg);
 static void bondp_failback_send_next_req_task(void *arg);
 
@@ -55,17 +54,12 @@ bondp_failback_task_t *bondp_failback_task_create(
     task->target_idx = -1;
     task->new_pjetty = NULL;
     task->new_pjetty_id = 0;
-    task->bdp_tjetty = NULL;
-    task->remote_new_pjetty_id = 0;
 
     // --- 广播通知跟踪 ---
     // TODO: node_count 从 bdp_ctx 获取实际 NODE 数量
-    task->node_count = 0;
-    task->sent_count = 0;
+    task->node_count = BOUNDP_FAILBACK_NODE_MAX_NUM;
     task->notified_count = 0;
     task->next_send_idx = 0;
-    // node_states[] 已由 calloc 初始化为 BONDP_FAILBACK_NODE_PENDING (0)
-
     return task;
 }
 
@@ -74,20 +68,24 @@ void bondp_failback_task_destroy(bondp_failback_task_t *task)
     if (task == NULL) {
         return;
     }
+
     bondp_failback_cancel_timer(task);
-    if (task->new_pjetty != NULL) {
-        //新增重建失败，任务取消时的newjetty回收
+
+    // 非 DONE 状态下 new_pjetty 仍由 task 持有, 需要回收
+    if (task->state != BONDP_FAILBACK_STATE_DONE && task->new_pjetty != NULL) {
         (void)urma_delete_jetty(task->new_pjetty);
         task->new_pjetty = NULL;
     }
+
     // 从 bondp_comp_t 的 failback_tasks 数组中移除
     if (task->bondp_jetty != NULL && task->failed_local_idx >= 0 &&
         task->failed_local_idx < URMA_UBAGG_DEV_MAX_NUM) {
         task->bondp_jetty->failback_tasks[task->failed_local_idx] = NULL;
     }
+
+    task->closed = true;
     free(task);
 }
-
 
 //指数退避辅助函数
 static uint32_t bondp_failback_next_backoff(uint32_t cur, uint32_t max_ms)
@@ -100,7 +98,7 @@ static uint32_t bondp_failback_next_backoff(uint32_t cur, uint32_t max_ms)
 }
 
 //终止failback自调度
-static void bondp_failback_cancel_timer(bondp_failback_task_t *task)
+void bondp_failback_cancel_timer(bondp_failback_task_t *task)
 {
     if (!task->timer_valid) {
         return;
@@ -146,7 +144,9 @@ int bondp_failback_on_cqe(bondp_context_t *bdp_ctx,
 
     // TODO: 初始化 node_count 从 bdp_ctx 获取实际 NODE 数量/标号  标记不需要使用的nodeid
     // task->node_count = bdp_ctx->node_count;
-
+    for (int i=0; i < task->node_count; i++) {
+        task->node_states[i] = BONDP_FAILBACK_NODE_PENDING;
+    }
 
     // 注册 task 到 bondp_comp_t, 便于 RESP 到达时查找
     bondp_jetty->failback_tasks[failed_local_idx] = task;
@@ -230,7 +230,7 @@ static void bondp_failback_send_next_req_task(void *arg)
     int ret = bondp_failback_send_req_to_node(task, idx);
     //idx可以建立一个更加快速的映射表(优先级不高)
     if (ret != BONDP_FB_OK) {
-        URMA_LOG_WARN("Failback REQ send failed, node[%u] vjetty=%u pjetty_i_idx=%d new_pjetty_id=%u\n",
+        URMA_LOG_WARN("Failback REQ send failed, node[%u] vjetty=%u pjetty_idx=%d new_pjetty_id=%u\n",
             idx, task->vjetty_id, task->failed_local_idx, task->new_pjetty_id);
     }
     task->next_send_idx = idx + 1;
@@ -238,39 +238,20 @@ static void bondp_failback_send_next_req_task(void *arg)
 
 }
 
-// ========== RESP 处理 ==========
-
-/*
- * 通过 vjetty_id 查找本端的 bondp_comp_t (实现在 bondp_failback_ops.c)
- */
-extern bondp_comp_t *bondp_find_comp_by_vjetty_id(bondp_context_t *bdp_ctx, uint32_t vjetty_id);
+// ========== 消息分发 ==========
 
 /*
  * 处理收到的 netlink 消息 (REQ / RESP)
  *
- * 使用消息格式 bondp_failback_msg_t:
- *   vjetty_id       - 发送端 vjetty ID
- *   pjetty_i_idx    - 发送端故障 pjetty idx
- *   pjetty_i_new_id - REQ: 新 pjetty ID (用于 reimport); RESP: 对端 pjetty ID
- *   ctrl_type       - BONDP_FAILBACK_CTRL_REQ / RESP
- *   req_seq         - 序列号
- *
- * RESP 查找链路:
- *   vjetty_id → p_vjetty_id_table → bondp_comp_t → failback_tasks[pjetty_i_idx]
- *
- * RESP 广播收集:
- *   RESP.node_id → 更新 node_states[node_id] = NOTIFIED
- *   全部 NOTIFIED → relink → done
+ * 仅做 ctrl_type 分流, 具体业务逻辑在 bondp_failback_ops.c 中:
+ *   REQ  → bondp_failback_handle_req()
+ *   RESP → bondp_failback_handle_resp()
  */
 static bool bondp_handle_message(bondp_context_t *bdp_ctx, const bondp_failback_msg_t *msg,
     bool silent_unmatched)
 {
     uint8_t ctrl_type = msg->in.ctrl_type;
-    uint8_t req_seq = msg->in.req_seq;
     uint32_t vjetty_id = msg->in.vjetty_id;
-    uint32_t pjetty_i_idx = msg->in.pjetty_i_idx;
-    uint32_t pjetty_i_new_id = msg->in.pjetty_i_new_id;
-    uint32_t node_id = msg->in.node_id;
 
     if (ctrl_type != BONDP_FAILBACK_CTRL_REQ && ctrl_type != BONDP_FAILBACK_CTRL_RESP) {
         if (!silent_unmatched) {
@@ -280,94 +261,17 @@ static bool bondp_handle_message(bondp_context_t *bdp_ctx, const bondp_failback_
     }
 
     if (ctrl_type == BONDP_FAILBACK_CTRL_REQ) {
-        // 第二步: 对端处理 REQ
-        // 通过 vjetty_id 遍历本地 bdp_tjetty, 找到匹配的 target jetty
-        // 然后通过 pjetty_i_idx (发送端故障 idx) 匹配 active_indices 定位 reimport 路径
-        // unimport 旧 ptjetty, 用 pjetty_i_new_id 重新 import, 发送 RESP
-        URMA_LOG_INFO("Fallback REQ received, vjetty_id=%u pjetty_i_idx=%u pjetty_i_new_id=%u seq=%u\n",
-            vjetty_id, pjetty_i_idx, pjetty_i_new_id, req_seq);
+        URMA_LOG_INFO("Fallback REQ received, vjetty_id=%u pjetty_idx=%u pjetty_new_id=%u seq=%u\n",
+            msg->in.vjetty_id, msg->in.pjetty_idx, msg->in.pjetty_new_id, msg->in.req_seq);
         int ret = bondp_failback_handle_req(bdp_ctx, msg);
         return (ret == BONDP_FB_OK);
     }
 
     if (ctrl_type == BONDP_FAILBACK_CTRL_RESP) {
-        // 第三步: 本端处理 RESP (广播收集式)
-        //
-        // 查找链路: vjetty_id → bondp_comp_t → failback_tasks[pjetty_i_idx]
-
-        // Step 1: 通过 vjetty_id 找到本端的 bondp_comp_t
-        bondp_comp_t *bdp_jetty = bondp_find_comp_by_vjetty_id(bdp_ctx, vjetty_id);
-        if (bdp_jetty == NULL) {
-            if (!silent_unmatched) {
-                URMA_LOG_WARN("Fallback RESP: no matching comp for vjetty_id=%u\n", vjetty_id);
-            }
-            return false;
-        }
-
-        // Step 2: 通过 pjetty_i_idx 从 failback_tasks 数组中直接索引
-        if (pjetty_i_idx >= URMA_UBAGG_DEV_MAX_NUM) {
-            if (!silent_unmatched) {
-                URMA_LOG_WARN("Fallback RESP: invalid pjetty_i_idx=%u vjetty_id=%u\n",
-                    pjetty_i_idx, vjetty_id);
-            }
-            return false;
-        }
-
-        bondp_failback_task_t *ctx = bdp_jetty->failback_tasks[pjetty_i_idx];
-        if (ctx == NULL) {
-            if (!silent_unmatched) {
-                URMA_LOG_WARN("Fallback RESP: no active task for vjetty_id=%u pjetty_i_idx=%u\n",
-                    vjetty_id, pjetty_i_idx);
-            }
-            return false;
-        }
-
-        // Step 3: 校验序列号
-        if (ctx->req_seq != req_seq) {
-            URMA_LOG_WARN("Fallback RESP dropped due to seq mismatch, recv_seq=%u expect_seq=%u vjetty_id=%u\n",
-                req_seq, (unsigned)ctx->req_seq, vjetty_id);
-            return false;
-        }
-
-        // Step 4: 更新 node_states
-        // node_id 作为 node_states 数组的索引
-        if (node_id >= ctx->node_count) {
-            URMA_LOG_WARN("Fallback RESP: node_id=%u >= node_count=%u, ignore\n",
-                node_id, ctx->node_count);
-            return false;
-        }
-
-        // 去重: 已经 NOTIFIED 的 NODE 不重复计数
-        if (ctx->node_states[node_id] == BONDP_FAILBACK_NODE_SATTLED) {
-            URMA_LOG_DEBUG("Fallback RESP: node[%u] already notified, skip\n", node_id);
-            return true;
-        }
-
-        ctx->node_states[node_id] = BONDP_FAILBACK_NODE_SATTLED;
-        ctx->notified_count++;
-
-        // 记录对端 pjetty ID (非 0 表示需要 reimport)
-        if (pjetty_i_new_id != 0) {
-            // TODO: 多 NODE 都 reimport 时, 需要按 node_id 索引存储
-            ctx->remote_new_pjetty_id = pjetty_i_new_id;
-        }
-
-        URMA_LOG_INFO("Fallback RESP accepted, node[%u] vjetty_id=%u notified=%u/%u remote_id=%u\n",
-            node_id, vjetty_id, ctx->notified_count, ctx->node_count, pjetty_i_new_id);
-
-        // Step 5: 检查是否全部 NODE 已响应
-        if (ctx->notified_count >= ctx->node_count) {
-            // 全部 NODE 已响应, 执行 relink
-            bondp_failback_cancel_timer(ctx);
-            int ret = bondp_failback_relink(ctx);
-            if (ret == BONDP_FB_OK) {
-                bondp_failback_task_destroy(ctx);
-            } else {
-                URMA_LOG_ERR("Fallback RESP: relink failed, vjetty_id=%u pjetty_i_idx=%u\n",
-                    vjetty_id, pjetty_i_idx);
-            }
-        }
-        // 否则: 继续等待其他 NODE 的 RESP, 定时器驱动的发送流程会继续
+        URMA_LOG_INFO("Fallback RESP received, vjetty_id=%u pjetty_idx=%u pjetty_new_id=%u node_id=%u seq=%u\n",
+            msg->in.vjetty_id, msg->in.pjetty_idx, msg->in.pjetty_new_id, msg->in.node_id, msg->in.req_seq);
+        int ret = bondp_failback_handle_resp(bdp_ctx, msg);
+        return (ret == BONDP_FB_OK);
     }
 
     return true;
