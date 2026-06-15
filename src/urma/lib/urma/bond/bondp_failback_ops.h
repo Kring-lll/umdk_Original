@@ -15,7 +15,10 @@ int bondp_failback_send_req_to_node(bondp_failback_task_t *task, uint32_t node_i
 
 // 对端处理 REQ: unimport 旧 ptjetty, 用 pjetty_i_new_id 重新 import, 发送 RESP
 int bondp_failback_handle_req(bondp_context_t *bdp_ctx, const bondp_failback_msg_t *msg);
-int bondp_failback_handle_resp(bondp_context_t *bdp_ctx, const bondp_failback_msg_t *msg);
+
+bondp_failback_task_t *bondp_failback_find_task_by_resp(bondp_context_t *bdp_ctx, const bondp_failback_msg_t *msg);
+int bondp_failback_handle_node_notify(bondp_failback_task_t *task, uint32_t node_idx);
+void bondp_failback_destroy_old_jetty(bondp_failback_task_t *task);
 
 // 通过 vjetty_id 查找本端的 bondp_comp_t (用于 RESP 到达时找回 failback task)
 bondp_comp_t *bondp_find_comp_by_vjetty_id(bondp_context_t *bdp_ctx, uint32_t vjetty_id);

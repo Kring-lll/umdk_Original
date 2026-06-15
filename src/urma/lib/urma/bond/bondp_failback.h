@@ -57,7 +57,7 @@ typedef struct bondp_failback_task {
     uint32_t node_count;                                       // 需要通知的 NODE 总数
     uint32_t notified_count;                                   // 已收到 RESP 的 NODE 数
     uint32_t next_send_idx;                                    // 发送游标: 下一个待发送的 NODE 索引
-    uint8_t node_states[URMA_UBAGG_NODE_MAX_NUM]; // 按 NODE 索引, PENDING=0 / NOTIFIED=1
+    uint8_t node_states[BOUNDP_FAILBACK_NODE_MAX_NUM]; // 按 NODE 索引, PENDING=0 / NOTIFIED=1
 
     // --- 哈希表挂载 ---
     hmap_node_t hmap_node;

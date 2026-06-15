@@ -252,6 +252,7 @@ static bool bondp_handle_message(bondp_context_t *bdp_ctx, const bondp_failback_
 {
     uint8_t ctrl_type = msg->in.ctrl_type;
     uint32_t vjetty_id = msg->in.vjetty_id;
+    uint32_t node_id = msg->in.node_id;
 
     if (ctrl_type != BONDP_FAILBACK_CTRL_REQ && ctrl_type != BONDP_FAILBACK_CTRL_RESP) {
         if (!silent_unmatched) {
@@ -261,8 +262,9 @@ static bool bondp_handle_message(bondp_context_t *bdp_ctx, const bondp_failback_
     }
 
     if (ctrl_type == BONDP_FAILBACK_CTRL_REQ) {
-        URMA_LOG_INFO("Fallback REQ received, vjetty_id=%u pjetty_idx=%u pjetty_new_id=%u seq=%u\n",
-            msg->in.vjetty_id, msg->in.pjetty_idx, msg->in.pjetty_new_id, msg->in.req_seq);
+        URMA_LOG_INFO("Fallback REQ received, vjetty_id=%u pjetty_idx=%u pjetty_new_id=%u node_id=%u seq=%u\n",
+            msg->in.vjetty_id, msg->in.pjetty_idx, msg->in.pjetty_new_id, msg->in.node_id, msg->in.req_seq);
+
         int ret = bondp_failback_handle_req(bdp_ctx, msg);
         return (ret == BONDP_FB_OK);
     }
@@ -270,7 +272,17 @@ static bool bondp_handle_message(bondp_context_t *bdp_ctx, const bondp_failback_
     if (ctrl_type == BONDP_FAILBACK_CTRL_RESP) {
         URMA_LOG_INFO("Fallback RESP received, vjetty_id=%u pjetty_idx=%u pjetty_new_id=%u node_id=%u seq=%u\n",
             msg->in.vjetty_id, msg->in.pjetty_idx, msg->in.pjetty_new_id, msg->in.node_id, msg->in.req_seq);
-        int ret = bondp_failback_handle_resp(bdp_ctx, msg);
+        //找到task的
+        bondp_failback_task_t *task = bondp_failback_find_task_by_resp(bdp_ctx, msg);
+        if (task == NULL) {
+            return false;
+        }
+        int ret = bondp_failback_handle_node_notify(task, node_id);
+        //此处略有冗余，主要目的是将task的生命周期完全归于failback.c ops仅处理原子操作
+        if (task->node_count == task->notified_count) {
+            bondp_failback_destroy_old_jetty(task);
+            bondp_failback_task_destroy(task);
+        }
         return (ret == BONDP_FB_OK);
     }
 
