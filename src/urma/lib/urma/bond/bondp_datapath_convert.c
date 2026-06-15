@@ -50,6 +50,11 @@ static int copy_sg_list(const urma_sg_t *src, urma_sg_t *dst, urma_sge_t *preall
 
     if (dst->num_sge > 0) {
         if (prealloc_sge != NULL) {
+            if (dst->num_sge > BONDP_MAX_SGE_NUM) {
+                URMA_LOG_ERR("The number of SGE(%u) exceeds the limit(%u)",
+                    dst->num_sge, BONDP_MAX_SGE_NUM);
+                return -1;
+            }
             dst->sge = prealloc_sge;
         } else {
             dst->sge = (urma_sge_t *)malloc(dst->num_sge * sizeof(urma_sge_t));

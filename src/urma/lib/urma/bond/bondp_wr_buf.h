@@ -13,6 +13,8 @@
 
 #include <stdint.h>
 
+#define BONDP_MAX_SGE_NUM             (16)
+
 struct bondp_comp;
 struct bondp_target_jetty;
 
@@ -31,6 +33,8 @@ typedef struct jfs_wr_entry {
     uint64_t wr_id;
     uint8_t entry_type;
     urma_jfs_wr_t wr;
+    urma_sge_t src_sge[BONDP_MAX_SGE_NUM];
+    urma_sge_t dst_sge[BONDP_MAX_SGE_NUM];
     uint64_t user_ctx;
     struct bondp_comp *bdp_comp;
     struct bondp_target_jetty *target_vjetty;
@@ -42,6 +46,7 @@ typedef struct jfr_wr_entry {
     uint64_t wr_id;
     uint8_t entry_type;
     urma_jfr_wr_t wr;
+    urma_sge_t src_sge[BONDP_MAX_SGE_NUM];
     uint64_t user_ctx;
     struct bondp_comp *bdp_comp;
     uint32_t recv_idx;
