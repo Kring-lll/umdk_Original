@@ -22,7 +22,7 @@
 #include "bondp_segment.h"
 
 typedef struct bondp_udata_import_seg {
-    urma_seg_t peer_p_seg[URMA_UBAGG_DEV_MAX_NUM];
+    urma_seg_base_t peer_p_seg[URMA_UBAGG_DEV_MAX_NUM];
     bool connected[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
 } bondp_udata_import_seg_t;
 
@@ -162,13 +162,13 @@ static int bondp_create_vseg(bondp_context_t *bdp_ctx, bondp_tseg_t *bdp_seg, ur
     bdp_seg->v_tseg.user_ctx = seg_cfg->user_ctx;
     bdp_seg->v_tseg.token_id = seg_cfg->token_id;
 
-    in_seg_info.base = bdp_seg->v_tseg.seg;
+    bondp_seg_to_base(&bdp_seg->v_tseg.seg, &in_seg_info.base);
     in_seg_info.dev_num = bdp_seg->dev_num;
     for (int i = 0; i < bdp_seg->dev_num; ++i) {
         if (bdp_seg->p_tseg[i] == NULL) {
             continue;
         }
-        in_seg_info.slaves[i] = bdp_seg->p_tseg[i]->seg;
+        bondp_seg_to_base(&bdp_seg->p_tseg[i]->seg, &in_seg_info.slaves[i]);
     }
 
     udata.in_addr = (uint64_t)&in_seg_info;
@@ -270,13 +270,14 @@ urma_status_t bondp_unregister_seg(urma_target_seg_t *target_seg)
 static bondp_ret_t import_pseg(bondp_context_t *bdp_ctx, bondp_seg_cfg_t *seg_cfg,
                                int local_idx, int target_idx)
 {
-    urma_seg_t *peer_p_seg = &seg_cfg->udata_out->peer_p_seg[target_idx];
-    urma_eid_t eid = peer_p_seg->ubva.eid;
+    urma_seg_t peer_p_seg = {0};
+    bondp_seg_base_to_seg(&seg_cfg->udata_out->peer_p_seg[target_idx], &peer_p_seg);
+    urma_eid_t eid = peer_p_seg.ubva.eid;
     if (is_empty_eid(&eid)) {
         URMA_LOG_DEBUG("BONDP import p_seg has empty EID=%d\n", target_idx);
         return BONDP_SKIP;
     }
-    urma_target_seg_t *p_tseg = urma_import_seg(bdp_ctx->p_ctxs[local_idx], peer_p_seg, seg_cfg->token,
+    urma_target_seg_t *p_tseg = urma_import_seg(bdp_ctx->p_ctxs[local_idx], &peer_p_seg, seg_cfg->token,
                                                 seg_cfg->addr, seg_cfg->flag);
     if (p_tseg == NULL) {
         URMA_LOG_ERR("Failed to import seg (%d, %d)\n", local_idx, target_idx);
@@ -473,10 +474,21 @@ urma_target_seg_t *bondp_import_seg(urma_context_t *ctx, urma_seg_t *seg,
     }
 
     if (!bdp_tseg->is_reused) {
-        ret = bondp_import_vseg(ctx, seg, token, addr, flag, bdp_tseg, &udata_out);
-        if (ret != 0) {
-            URMA_LOG_ERR("Failed to import vseg\n");
-            goto free_bdp_tseg;
+        if (seg->ext.flag.bs.enable) {
+            const urma_bond_seg_ext_t *bond_ext =
+                (const urma_bond_seg_ext_t *)seg->ext.buf;
+            (void)memcpy(&udata_out.peer_p_seg, bond_ext->peer_p_seg,
+                         sizeof(udata_out.peer_p_seg));
+            (void)memcpy(&udata_out.connected, bond_ext->connected,
+                         sizeof(udata_out.connected));
+            bondp_fill_v_tseg(&bdp_tseg->v_tseg, seg, addr,
+                              (uint64_t)(uintptr_t)&bdp_tseg->v_tseg, ctx);
+        } else {
+            ret = bondp_import_vseg(ctx, seg, token, addr, flag, bdp_tseg, &udata_out);
+            if (ret != 0) {
+                URMA_LOG_ERR("Failed to import vseg\n");
+                goto free_bdp_tseg;
+            }
         }
     }
 
