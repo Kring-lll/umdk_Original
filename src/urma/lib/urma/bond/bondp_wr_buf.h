@@ -12,8 +12,10 @@
 #define BONDP_WR_BUF_H
 
 #include <stdint.h>
+#include <pthread.h>
 
 #define BONDP_MAX_SGE_NUM             (16)
+#define BONDP_BATCH_POST_MAX_NUM      (280)
 
 struct bondp_comp;
 struct bondp_target_jetty;
@@ -54,9 +56,12 @@ typedef struct jfr_wr_entry {
 
 typedef struct wr_buf {
     uint32_t max_wr_num;
-    uint32_t latest_used;
+    uint32_t latest_used;       /* deprecated: only used by WR_BUF_FOREACH, no longer updated */
     uint32_t wr_entry_size;
     void *entries;
+    uint32_t free_head;         /* index of first free entry, UINT32_MAX = empty */
+    uint32_t *next_free;        /* next_free[idx] = next free entry index, UINT32_MAX = end */
+    pthread_spinlock_t lock;    /* protects free_head and next_free */
 } wr_buf_t;
 
 static inline uint32_t __wr_id_to_idx(uint64_t wr_id, uint32_t max_wr_num)
@@ -70,6 +75,10 @@ static inline uint32_t __idx_to_wr_id(uint32_t idx)
 static inline void *__wr_buf_idx(wr_buf_t *buf, uint32_t idx)
 {
     return ((char *)buf->entries + idx * buf->wr_entry_size);
+}
+static inline uint32_t __wr_buf_idx_from_ptr(wr_buf_t *buf, void *ptr)
+{
+    return (uint32_t)(((char *)ptr - (char *)buf->entries) / buf->wr_entry_size);
 }
 
 #define WR_BUF_FOREACH(buf, entry_type, idx_var, entry_var)                               \
@@ -104,7 +113,20 @@ static inline jfr_wr_entry_t *jfr_wr_buf_get(wr_buf_t *buf, uint64_t wr_id)
 jfs_wr_entry_t *jfs_wr_buf_alloc(wr_buf_t *buf);
 jfr_wr_entry_t *jfr_wr_buf_alloc(wr_buf_t *buf);
 
-void jfs_wr_buf_release(jfs_wr_entry_t *entry);
-void jfr_wr_buf_release(jfr_wr_entry_t *entry);
+/**
+ * Batch allocation: pop up to @count entries in one lock/unlock.
+ * Returns the number of entries actually allocated (may be less than @count).
+ */
+uint32_t jfs_wr_buf_alloc_batch(wr_buf_t *buf, jfs_wr_entry_t **entries, uint32_t count);
+uint32_t jfr_wr_buf_alloc_batch(wr_buf_t *buf, jfr_wr_entry_t **entries, uint32_t count);
+
+void jfs_wr_buf_release(wr_buf_t *buf, jfs_wr_entry_t *entry);
+void jfr_wr_buf_release(wr_buf_t *buf, jfr_wr_entry_t *entry);
+
+/**
+ * Batch release: push multiple entries back in one lock/unlock. 
+ */
+void jfs_wr_buf_release_batch(wr_buf_t *buf, jfs_wr_entry_t **entries, uint32_t count);
+void jfr_wr_buf_release_batch(wr_buf_t *buf, jfr_wr_entry_t **entries, uint32_t count);
 
 #endif // BONDP_WR_BUF_H
