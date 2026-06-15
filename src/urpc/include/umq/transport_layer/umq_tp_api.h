@@ -301,6 +301,36 @@ typedef struct umq_ops {
      * Return: 0 on success, other value on error
      */
     int (*umq_tp_cfg_get)(uint64_t umqh_tp, umq_cfg_get_t *cfg);
+
+    /**
+     * Get eventfd for the global transport pool. Caller can epoll on this fd to be notified
+     * Return fd >= 0 on success, < 0 on failure
+     */
+    int (*umq_tp_transport_pool_eventfd_get)(void);
+
+    /**
+     * Modify share transport node state to err
+     * @param[in] umqh_tp: umq tp handle.
+     * @param[in] tp_handle_idx: tp_handle_idx
+     * Return 0 on success, error code on failure
+     */
+    int (*umq_tp_modify_to_err)(uint64_t umqh_tp, uint32_t tp_handle_idx);
+
+    /**
+     * Expand transport resources (jetty pair) for the SHARE_TRANSPORT pool.
+     * @param[in] umqh_tp: Main UMQ tp handle.
+     * @param[in] expand_cnt: Number of additional jetty nodes to create.
+     * Return number of nodes actually created on success, negative error code on failure.
+     */
+    int (*umq_tp_expand_tp_resource)(uint64_t umqh_tp, int expand_cnt);
+
+    /**
+     * Destry transport resource
+     * @param[in] umqh_tp: Main UMQ tp handle.
+     * @param[in] tp_handle_idx: transport handle index
+     * Return 0 on success, error code on failure
+     */
+    int (*umq_tp_destroy_tp_resource)(uint64_t umqh_tp, uint32_t tp_handle_idx);
 } umq_ops_t;
 
 typedef umq_ops_t* (*umq_ops_get_t)(void);

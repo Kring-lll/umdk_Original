@@ -625,7 +625,10 @@ static int send_req(umq_info_t *umq_info)
 
     umq_buf_t *bad_buf;
     umq_buf_t *poll_buf[32];
-    int poll_cnt = umq_poll(umqh, UMQ_IO_ALL, poll_buf, 32);
+    umq_poll_option_t poll_all_option = {
+        .io_direction = UMQ_IO_ALL,
+    };
+    int poll_cnt = umq_poll(umqh, &poll_all_option, poll_buf, 32);
     for (int i = 0; i < poll_cnt; i++) {
         if (poll_buf[i]->status == UMQ_FAKE_BUF_FC_UPDATE) {
             g_tatal_umq_info_list.fc_update++;
@@ -709,8 +712,11 @@ static void process_tx_interrupt(fd_ctx_t *fd_ctx)
 
     int tx_cnt = 0;
     umq_buf_t *buf;
+    umq_poll_option_t poll_tx_option = {
+        .io_direction = UMQ_IO_TX,
+    };
     do {
-        tx_cnt = umq_poll(umqh, UMQ_IO_TX, &buf, 1);
+        tx_cnt = umq_poll(umqh, &poll_tx_option, &buf, 1);
         if (tx_cnt == 1) {
             umq_buf_free(buf);
         }
@@ -735,8 +741,11 @@ static void process_rx_interrupt(fd_ctx_t *fd_ctx)
 
     int rx_cnt = 0;
     umq_buf_t *buf;
+    umq_poll_option_t poll_rx_option = {
+        .io_direction = UMQ_IO_RX,
+    };
     do {
-        rx_cnt = umq_poll(umqh, UMQ_IO_RX, &buf, 1);
+        rx_cnt = umq_poll(umqh, &poll_rx_option, &buf, 1);
         if (rx_cnt == 1) {
             if (buf->status == UMQ_FAKE_BUF_FC_UPDATE) {
                 umq_buf_free(buf);
@@ -896,6 +905,7 @@ UNINIT_UMQ:
 
 CLOSE_FD:
     close(g_epoll_fd);
+    g_epoll_fd = -1
     return ret;
 }
 
@@ -985,6 +995,7 @@ UNINIT_UMQ:
 
 CLOSE_FD:
     close(g_epoll_fd);
+    g_epoll_fd = -1
     return 0;
 }
 

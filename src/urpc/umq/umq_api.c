@@ -1624,3 +1624,45 @@ void umq_io_perf_process(umq_perf_record_type_t record_type, umq_buf_t *qbuf)
 
     func(record_type, qbuf);
 }
+
+int umq_transport_pool_eventfd_get(uint64_t umqh)
+{
+    // Transport pool (jetty pool in UMQ UB) is a global singleton; dispatch via the
+    // caller's umq_t to pick the matching framework ops.
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+    if (umq == NULL || umq->tp_ops == NULL || umq->tp_ops->umq_tp_transport_pool_eventfd_get == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "get transport pool eventfd failed\n");
+        return -UMQ_ERR_EINVAL;
+    }
+    return umq->tp_ops->umq_tp_transport_pool_eventfd_get();
+}
+
+int umq_modify_to_err(uint64_t umqh, uint32_t tp_handle_idx)
+{
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+    if (umq == NULL || umq->tp_ops == NULL || umq->tp_ops->umq_tp_modify_to_err == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "modify UMQ to err failed, transport ops not available\n");
+        return -UMQ_ERR_EINVAL;
+    }
+    return umq->tp_ops->umq_tp_modify_to_err(umq->umqh_tp, tp_handle_idx);
+}
+
+int umq_expand_tp_resource(uint64_t umqh, int expand_cnt)
+{
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+    if (umq == NULL || umq->tp_ops == NULL || umq->tp_ops->umq_tp_expand_tp_resource == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "expand transport resource failed, transport ops not available\n");
+        return -UMQ_ERR_EINVAL;
+    }
+    return umq->tp_ops->umq_tp_expand_tp_resource(umq->umqh_tp, expand_cnt);
+}
+
+int umq_destroy_tp_resource(uint64_t umqh, uint32_t tp_handle_idx)
+{
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+    if (umq == NULL || umq->tp_ops == NULL || umq->tp_ops->umq_tp_destroy_tp_resource == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "expand transport resource failed, transport ops not available\n");
+        return -UMQ_ERR_EINVAL;
+    }
+    return umq->tp_ops->umq_tp_destroy_tp_resource(umq->umqh_tp, tp_handle_idx);
+}
