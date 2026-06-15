@@ -12,10 +12,9 @@
 #include <string.h>
 #include <errno.h>
 
-#include "bondp_datapath_convert.h"
-
-#include "bondp_wr_buf.h"
 #include "urma_log.h"
+#include "bondp_datapath_convert.h"
+#include "bondp_wr_buf.h"
 
 int wr_buf_init(wr_buf_t *buf, uint32_t max_wr_num)
 {
@@ -126,10 +125,10 @@ jfr_wr_entry_t *jfr_wr_buf_alloc(wr_buf_t *buf)
 /**
  * Batch allocation: pop up to @count entries in one lock/unlock.
  * Returns the number of entries actually allocated (may be less than @count).
- * NOTE: entry_type is NOT set here 
+ * Note: entry_type is NOT set here.
  */
 static uint32_t wr_buf_alloc_batch(wr_buf_t *buf,
-    void **entries, uint32_t count)
+    char **entries, uint32_t count)
 {
     if (count == 0) {
         return 0;
@@ -144,7 +143,7 @@ static uint32_t wr_buf_alloc_batch(wr_buf_t *buf,
     }
     pthread_spin_unlock(&buf->lock);
     for (uint32_t i = 0; i < allocated; i++) {
-        void *e = __wr_buf_idx(buf, indices[i]);
+        char *e = (char *)__wr_buf_idx(buf, indices[i]);
         wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)e;
         hdr->wr_id = __idx_to_wr_id(indices[i]);
         entries[i] = e;
@@ -155,12 +154,12 @@ static uint32_t wr_buf_alloc_batch(wr_buf_t *buf,
 
 uint32_t jfs_wr_buf_alloc_batch(wr_buf_t *buf, jfs_wr_entry_t **entries, uint32_t count)
 {
-    return wr_buf_alloc_batch(buf, (void **)entries, count);
+    return wr_buf_alloc_batch(buf, (char **)entries, count);
 }
 
 uint32_t jfr_wr_buf_alloc_batch(wr_buf_t *buf, jfr_wr_entry_t **entries, uint32_t count)
 {
-    return wr_buf_alloc_batch(buf, (void **)entries, count);
+    return wr_buf_alloc_batch(buf, (char **)entries, count);
 }
 
 /**
@@ -180,13 +179,13 @@ static void wr_buf_release_entry(wr_buf_t *buf, uint32_t idx)
 
 void jfs_wr_buf_release(wr_buf_t *buf, jfs_wr_entry_t *entry)
 {
-    uint32_t idx = __wr_buf_idx_from_ptr(buf, entry);
+    uint32_t idx = wr_buf_idx_from_ptr(buf, (char *)entry);
     wr_buf_release_entry(buf, idx);
 }
 
 void jfr_wr_buf_release(wr_buf_t *buf, jfr_wr_entry_t *entry)
 {
-    uint32_t idx = __wr_buf_idx_from_ptr(buf, entry);
+    uint32_t idx = wr_buf_idx_from_ptr(buf, (char *)entry);
     wr_buf_release_entry(buf, idx);
 }
 
@@ -224,7 +223,7 @@ void jfs_wr_buf_release_batch(wr_buf_t *buf, jfs_wr_entry_t **entries, uint32_t 
         return;
     }
     for (uint32_t i = 0; i < count; i++) {
-        indices[i] = __wr_buf_idx_from_ptr(buf, entries[i]);
+        indices[i] = wr_buf_idx_from_ptr(buf, (char *)entries[i]);
     }
     wr_buf_release_batch(buf, indices, count);
 }
@@ -241,7 +240,7 @@ void jfr_wr_buf_release_batch(wr_buf_t *buf, jfr_wr_entry_t **entries, uint32_t 
         return;
     }
     for (uint32_t i = 0; i < count; i++) {
-        indices[i] = __wr_buf_idx_from_ptr(buf, entries[i]);
+        indices[i] = wr_buf_idx_from_ptr(buf, (char *)entries[i]);
     }
     wr_buf_release_batch(buf, indices, count);
 }

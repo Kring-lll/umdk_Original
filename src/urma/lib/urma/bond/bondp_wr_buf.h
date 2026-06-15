@@ -78,9 +78,9 @@ static inline void *__wr_buf_idx(wr_buf_t *buf, uint32_t idx)
 {
     return ((char *)buf->entries + idx * buf->wr_entry_size);
 }
-static inline uint32_t __wr_buf_idx_from_ptr(wr_buf_t *buf, void *ptr)
+static inline uint32_t wr_buf_idx_from_ptr(wr_buf_t *buf, char *ptr)
 {
-    return (uint32_t)(((char *)ptr - (char *)buf->entries) / buf->wr_entry_size);
+    return (uint32_t)((ptr - (char *)buf->entries) / buf->wr_entry_size);
 }
 
 #define WR_BUF_FOREACH(buf, entry_type, idx_var, entry_var)                               \
@@ -126,7 +126,7 @@ void jfs_wr_buf_release(wr_buf_t *buf, jfs_wr_entry_t *entry);
 void jfr_wr_buf_release(wr_buf_t *buf, jfr_wr_entry_t *entry);
 
 /**
- * Batch release: push multiple entries back in one lock/unlock. 
+ * Batch release: push multiple entries back in one lock/unlock.
  */
 void jfs_wr_buf_release_batch(wr_buf_t *buf, jfs_wr_entry_t **entries, uint32_t count);
 void jfr_wr_buf_release_batch(wr_buf_t *buf, jfr_wr_entry_t **entries, uint32_t count);
