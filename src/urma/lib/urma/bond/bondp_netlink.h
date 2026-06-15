@@ -19,15 +19,17 @@ typedef struct bondp_context bondp_context_t;
  *   pjetty_i_new_id  - 新创建的 pjetty ID, 对端用于 reimport
  *   ctrl_type        - BONDP_FAILBACK_CTRL_REQ / RESP
  *   req_seq          - 序列号
+ *   node_id          - 发送端 NODE ID (RESP 中标识来源, 用于更新 notified 数组)
  */
 typedef struct bondp_failback_msg {
     struct {
         uint32_t vjetty_id;        // 发送端 vjetty ID (用于匹配 bdp_tjetty)
-        uint32_t pjetty_i_idx;     // 发送端故障 pjetty idx (用于定位 reimport 路径)
-        uint32_t pjetty_i_new_id;  // 发送端新 pjetty ID (REQ: 用于 reimport; RESP: 对端 pjetty ID)
+        uint32_t pjetty_idx;     // 发送端故障 pjetty idx (用于定位 reimport 路径)
+        uint32_t pjetty_new_id;  // 发送端新 pjetty ID (REQ: 用于 reimport; RESP: 对端 pjetty ID, 0=无需reimport)
         uint8_t ctrl_type;         // BONDP_FAILBACK_CTRL_REQ / RESP
         uint8_t req_seq;           // 序列号
         uint16_t reserved;
+        uint32_t node_id;          // 发送端 NODE ID (REQ: 标识发送方; RESP: 标识响应方)
     } in;
 } bondp_failback_msg_t;
 

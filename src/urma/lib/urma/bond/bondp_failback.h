@@ -11,6 +11,10 @@
 #define BONDP_FB_OK                     (0)
 #define BONDP_FB_ERR                    (-1)
 
+#ifndef URMA_UBAGG_NODE_MAX_NUM
+#define URMA_UBAGG_NODE_MAX_NUM         512
+#endif
+
 typedef enum bondp_failback_state {
     BONDP_FAILBACK_STATE_IDLE = 0,
     BONDP_FAILBACK_STATE_WAIT_REBUILD_START,
@@ -20,6 +24,11 @@ typedef enum bondp_failback_state {
     BONDP_FAILBACK_STATE_DONE,
     BONDP_FAILBACK_STATE_CLOSED,
 } bondp_failback_state_t;
+
+// NODE 通知状态 (node_states[] 数组值)
+#define BONDP_FAILBACK_NODE_PENDING    0   // 尚未收到 RESP (包含 NOT_SENT 和已发送等待中)
+#define BONDP_FAILBACK_NODE_SATTLED   1   // 已收到 RESP
+
 
 typedef struct bondp_failback_task {
     // --- worker 调度 并发安全 ---
@@ -45,10 +54,17 @@ typedef struct bondp_failback_task {
     struct bondp_target_jetty *bdp_tjetty; // 对端 target jetty (用于 reimport)
     uint32_t remote_new_pjetty_id;         // 对端新 pjetty ID (来自 RESP)
 
+    // --- 广播通知跟踪 ---
+    uint32_t node_count;                                       // 需要通知的 NODE 总数
+    uint32_t notified_count;                                   // 已收到 RESP 的 NODE 数
+    uint32_t next_send_idx;                                    // 发送游标: 下一个待发送的 NODE 索引
+    uint8_t node_states[URMA_UBAGG_NODE_MAX_NUM]; // 按 NODE 索引, PENDING=0 / NOTIFIED=1
+
     // --- 哈希表挂载 ---
     hmap_node_t hmap_node;
 } bondp_failback_task_t;
 
+// --- 常量定义 ---
 #define BONDP_FAILBACK_REBUILD_START_DELAY_MS     10000U  /* 收到CQE后，延迟10秒开始重建 */
 #define BONDP_FAILBACK_REBUILD_RETRY_INIT_MS      1000U   /* 重建失败后，初始重试间隔1秒 */
 #define BONDP_FAILBACK_REBUILD_RETRY_MAX_MS       10000U  /* 重建失败后，最大重试间隔10秒 */
@@ -56,6 +72,13 @@ typedef struct bondp_failback_task {
 #define BONDP_FAILBACK_SEND_REQ_MAX_MS            500U    /* 发送请求失败后，最大重试间隔500毫秒 */
 #define BONDP_FAILBACK_REQ_RSP_TIMEOUT_INIT_MS    1000U   /* 等待请求响应的初始超时时间1秒 */
 #define BONDP_FAILBACK_REQ_RSP_TIMEOUT_MAX_MS     10000U  /* 等待请求响应的最大超时时间10秒 */
+
+// 广播发送节流: 两条 REQ 之间的间隔
+#define BONDP_FAILBACK_SEND_INTERVAL_MS           5U      /* 5ms 间隔, 512 NODE × 5ms ≈ 2.56s 发完一轮 */
+// 广播重试退避: 一轮发完后, 未响应 NODE 的重试间隔
+#define BONDP_FAILBACK_BROADCAST_RETRY_INIT_MS    1000U   /* 首次重试间隔1秒 */
+#define BONDP_FAILBACK_BROADCAST_RETRY_MAX_MS     60000U  /* 最大重试间隔60秒, 无限重试 */
+
 #define BONDP_FAILBACK_CTRL_REQ                        1
 #define BONDP_FAILBACK_CTRL_RESP                       2
 #define BONDP_FAILBACK_PRIMARY_INVALID_ID              UINT32_MAX

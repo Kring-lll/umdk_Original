@@ -11,7 +11,7 @@
 #include "bondp_netlink.h"
 
 int bondp_failback_rebuild_local_pjetty(bondp_failback_task_t *task);
-int bondp_failback_send_req(bondp_failback_task_t *task);
+int bondp_failback_send_req_to_node(bondp_failback_task_t *task, uint32_t node_idx);
 int bondp_failback_reimport(bondp_failback_task_t *task);
 int bondp_failback_relink(bondp_failback_task_t *task);
 

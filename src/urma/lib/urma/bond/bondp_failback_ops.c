@@ -100,31 +100,33 @@ int bondp_failback_rebuild_local_pjetty(bondp_failback_task_t *task)
 }
 
 /*
- * 发送 failback REQ 消息
+ * 向指定 NODE 发送 failback REQ 消息
  *
- * REQ 消息包含三项逻辑内容, 不指定对端:
+ * REQ 消息包含逻辑内容:
  *   vjetty_id        - 本端 vjetty ID
  *   pjetty_i_idx     - 故障 pjetty 本端 idx
  *   pjetty_i_new_id  - 新创建的 pjetty ID
+ *   node_id          - 本端 NODE ID
  *
- * 路由: 自动选择一条非故障的活跃路径发送
+ * node_idx: NODE 在 node_states 数组中的索引
  */
-int bondp_failback_send_req(bondp_failback_task_t *task)
+int bondp_failback_send_req_to_node(bondp_failback_task_t *task, uint32_t node_idx)
 {
-    if (task == NULL || task->bdp_ctx == NULL || task->bondp_jetty == NULL || task->bdp_tjetty == NULL) {
+    if (task == NULL || task->bdp_ctx == NULL || task->bondp_jetty == NULL) {
         return BONDP_FB_ERR;
     }
 
-    // 校验 new_pjetty_id 有效性
-    if (task->new_pjetty_id == 0 || task->new_pjetty_id == BONDP_FAILBACK_PRIMARY_INVALID_ID) {
+    if (task->new_pjetty_id == BONDP_FAILBACK_PRIMARY_INVALID_ID) {
         URMA_LOG_WARN("Cannot send fallback REQ, new_pjetty_id invalid, vjetty=%u\n", task->vjetty_id);
         return BONDP_FB_ERR;
     }
 
-    bondp_comp_t *bdp_jetty = task->bondp_jetty;
-    bondp_target_jetty_t *bdp_tjetty = task->bdp_tjetty;
+    if (node_idx >= task->node_count) {
+        URMA_LOG_WARN("Cannot send fallback REQ, node_idx=%u >= node_count=%u\n", node_idx, task->node_count);
+        return BONDP_FB_ERR;
+    }
 
-    // 构造 REQ 消息: (vjetty_id, pjetty_i_idx, pjetty_i_new_id)
+    // 构造 REQ 消息: (vjetty_id, pjetty_i_idx, pjetty_i_new_id, node_id)
     bondp_failback_msg_t req = {
         .in = {
             .vjetty_id = task->vjetty_id,
@@ -132,17 +134,18 @@ int bondp_failback_send_req(bondp_failback_task_t *task)
             .pjetty_i_new_id = task->new_pjetty_id,
             .ctrl_type = BONDP_FAILBACK_CTRL_REQ,
             .req_seq = (uint8_t)task->req_seq,
-            .reserved = 0
+            .reserved = 0,
+            .node_id = task->bdp_ctx->node_id,  // 本端 NODE ID
         },
     };
-    //TODO 网络部分需要继续设计
+    //TODO: 对接内核态消息发送接口
     int ret = bondp_failback_ctrl_send(&req);
     if (ret != 0) {
         return BONDP_FB_ERR;
     }
 
-    URMA_LOG_INFO("Fallback REQ sent, vjetty=%u pjetty_i_idx=%d new_pjetty_id=%u via route_lidx=%d route_tidx=%d\n",
-        task->vjetty_id, task->failed_local_idx, task->new_pjetty_id, route_local_idx, route_target_idx);
+    URMA_LOG_INFO("Fallback REQ sent to node[%u], vjetty=%u pjetty_i_idx=%d new_pjetty_id=%u\n",
+        node_idx, task->vjetty_id, task->failed_local_idx, task->new_pjetty_id);
     return BONDP_FB_OK;
 }
 
@@ -388,13 +391,12 @@ bondp_comp_t *bondp_find_comp_by_vjetty_id(bondp_context_t *bdp_ctx, uint32_t vj
 
 /*
  * 对端处理 REQ 消息
- *
- * 流程:
- *   1. vjetty_id → 遍历本地 bdp_tjetty, 匹配 v_tjetty.id.id
- *   2. pjetty_i_idx → 匹配 bdp_tjetty->active_indices[n], 得到 local_active_indices[n]
- *   3. unimport 旧 p_tjetty[my_local][my_target]
- *   4. 用 pjetty_i_new_id 重新 import
- *   5. 发送 RESP(vjetty_id, pjetty_i_idx, my_pjetty_id)
+ *   vjetty_id        - 发送端 vjetty ID, 对端用于匹配 bdp_tjetty->v_tjetty.id.id
+ *   pjetty_i_idx     - 故障 pjetty 本端 idx, 对端用于定位 reimport 路径
+ *   pjetty_i_new_id  - 新创建的 pjetty ID, 对端用于 reimport
+ *   ctrl_type        - BONDP_FAILBACK_CTRL_REQ / RESP
+ *   req_seq          - 序列号
+ *   node_id          - 发送端 NODE ID (RESP 中标识来源, 用于更新 notified 数组)
  */
 int bondp_failback_handle_req(bondp_context_t *bdp_ctx, const bondp_failback_msg_t *msg)
 {
@@ -403,12 +405,13 @@ int bondp_failback_handle_req(bondp_context_t *bdp_ctx, const bondp_failback_msg
     }
 
     uint32_t vjetty_id = msg->in.vjetty_id;
-    uint32_t pjetty_i_idx = msg->in.pjetty_i_idx;
-    uint32_t pjetty_i_new_id = msg->in.pjetty_i_new_id;
+    uint32_t pjetty_idx = msg->in.pjetty_idx;
+    uint32_t pjetty_new_id = msg->in.pjetty_new_id;
     uint8_t req_seq = msg->in.req_seq;
 
     // 通过 vjetty_id 查找本地的 bondp_comp_t 和 bdp_tjetty
     bondp_target_jetty_t *bdp_tjetty = NULL;
+    //bdp_jetty即为找到的和本端建立过链接的对端vtjetty
     bondp_comp_t *bdp_jetty = bondp_find_comp_by_remote_vjetty_id(bdp_ctx, vjetty_id, &bdp_tjetty);
     if (bdp_jetty == NULL || bdp_tjetty == NULL) {
         URMA_LOG_WARN("Fallback REQ: no matching bdp_tjetty for vjetty_id=%u\n", vjetty_id);
@@ -420,103 +423,61 @@ int bondp_failback_handle_req(bondp_context_t *bdp_ctx, const bondp_failback_msg
     // local_active_indices[n] = 本端的 local_idx
     int my_local_idx = -1;
     int my_target_idx = -1;
-    for (uint32_t n = 0; n < bdp_tjetty->active_count; ++n) {
-        if (bdp_tjetty->active_indices[n] == pjetty_i_idx) {
-            my_local_idx = (int)bdp_tjetty->local_active_indices[n];
-            my_target_idx = (int)bdp_tjetty->active_indices[n];
-            break;
-        }
-    }
-
-    if (my_local_idx < 0 || my_target_idx < 0 ||
-        my_local_idx >= URMA_UBAGG_DEV_MAX_NUM || my_target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
-        URMA_LOG_WARN("Fallback REQ: no matching path for pjetty_i_idx=%u in bdp_tjetty vjetty_id=%u\n",
-            pjetty_i_idx, vjetty_id);
-        return BONDP_FB_ERR;
-    }
-
-    // unimport 旧 ptjetty
-    urma_target_jetty_t *old_ptjetty = bdp_tjetty->p_tjetty[my_local_idx][my_target_idx];
-    if (old_ptjetty == NULL) {
-        URMA_LOG_WARN("Fallback REQ: old ptjetty is NULL at [%d][%d], vjetty_id=%u\n",
-            my_local_idx, my_target_idx, vjetty_id);
-        return BONDP_FB_ERR;
-    }
-
-    // 保存旧 ptjetty 的属性, 用于 reimport
-    urma_rjetty_t rjetty = {
-        .jetty_id = old_ptjetty->id,
-        .trans_mode = old_ptjetty->trans_mode,
-        .policy = old_ptjetty->policy,
-        .type = old_ptjetty->type,
-        .flag = old_ptjetty->flag,
-        .tp_type = old_ptjetty->tp_type,
-    };
-    // 用发送端的新 pjetty ID 替换
-    rjetty.jetty_id.id = pjetty_i_new_id;
-
-    if (urma_unimport_jetty(old_ptjetty) != URMA_SUCCESS) {
-        URMA_LOG_ERR("Fallback REQ: failed to unimport old ptjetty [%d][%d], vjetty_id=%u\n",
-            my_local_idx, my_target_idx, vjetty_id);
-        return BONDP_FB_ERR;
-    }
-    bdp_tjetty->p_tjetty[my_local_idx][my_target_idx] = NULL;
-
-    //用 pjetty_i_new_id 重新 import
-    urma_token_t *import_token = bdp_tjetty->import_token_valid ? &bdp_tjetty->import_token_value : NULL;
-    urma_target_jetty_t *new_ptjetty = urma_import_jetty(bdp_ctx->p_ctxs[my_local_idx], &rjetty, import_token);
-    if (new_ptjetty == NULL) {
-        URMA_LOG_ERR("Fallback REQ: failed to import new ptjetty [%d][%d], vjetty_id=%u new_id=%u\n",
-            my_local_idx, my_target_idx, vjetty_id, pjetty_i_new_id);
-        return BONDP_FB_ERR;
-    }
-    bdp_tjetty->p_tjetty[my_local_idx][my_target_idx] = new_ptjetty;
-    bdp_tjetty->valid[my_target_idx] = true;
-
-    URMA_LOG_INFO("Fallback REQ: reimport done, vjetty_id=%u [%d][%d] old_id=? new_id=%u\n",
-        vjetty_id, my_local_idx, my_target_idx, pjetty_i_new_id);
-
-    // 发送 RESP(vjetty_id, pjetty_i_idx, my_pjetty_id)
-    // RESP 的 pjetty_i_new_id 填本端对应路径的 pjetty ID
-    uint32_t my_pjetty_id = 0;
-    if (bdp_jetty->p_jetty[my_local_idx] != NULL) {
-        my_pjetty_id = bdp_jetty->p_jetty[my_local_idx]->jetty_id.id;
-    }
-
-    // 选择一条活跃路径发送 RESP (优先使用当前路径)
-    int resp_route_local_idx = my_local_idx;
-    int resp_route_target_idx = my_target_idx;
-    // 如果当前路径不可用, 选择任意活跃路径 模仿原healthcheck的选路
-    if (bdp_jetty->p_jetty[resp_route_local_idx] == NULL) {
-        resp_route_local_idx = -1;
-        resp_route_target_idx = -1;
-        for (uint32_t n = 0; n < bdp_tjetty->active_count; ++n) {
-            uint32_t lidx = bdp_tjetty->local_active_indices[n];
-            if (lidx >= URMA_UBAGG_DEV_MAX_NUM || bdp_jetty->p_jetty[lidx] == NULL) {
+    for (uint32_t ptjetty_idx = 0; ptjetty_idx < bdp_tjetty->active_count; ++ptjetty_idx) {
+        //TODO: 确认p_tjetty二维参数的前后关系，第一维是local_idx 这里的local是相对于什么说的
+        if (1) {
+            //是否需要一个全量链接的条件
+            urma_target_jetty_t *old_ptjetty = bdp_tjetty->p_tjetty[pjetty_idx][ptjetty_idx];
+            if (old_ptjetty == NULL) {
+                //URMA_LOG_WARN("Fallback REQ: old ptjetty is NULL at [%d][%d], vjetty_id=%u\n", my_local_idx, my_target_idx, vjetty_id);
+                //是否保持全量链接？  原实现中直接返回了-1
                 continue;
             }
-            resp_route_local_idx = (int)lidx;
-            resp_route_target_idx = (int)bdp_tjetty->active_indices[n];
-            break;
+            urma_rjetty_t rjetty = {
+                .jetty_id = old_ptjetty->id,
+                .trans_mode = old_ptjetty->trans_mode,
+                .policy = old_ptjetty->policy,
+                .type = old_ptjetty->type,
+                .flag = old_ptjetty->flag,
+                .tp_type = old_ptjetty->tp_type,
+            };
+            rjetty.jetty_id.id = pjetty_new_id;
+            //原为remote_primary_pjetty_id 应当替换为 新jetty_id  需要考虑与unimport的先后关系？
+            if (urma_unimport_jetty(old_ptjetty) != URMA_SUCCESS) {
+                URMA_LOG_ERR("Failback REQ: failed to unimport old ptjetty [%d][%d], vjetty_id=%u\n",
+                    my_local_idx, my_target_idx, vjetty_id);
+                return BONDP_FB_ERR;
+            }
+            bdp_tjetty->p_tjetty[pjetty_idx][ptjetty_idx] = NULL;
+
+            urma_token_t *import_token = bdp_tjetty->import_token_valid ? &bdp_tjetty->import_token_value : NULL;
+            urma_target_jetty_t *new_ptjetty = urma_import_jetty(bdp_ctx->p_ctxs[ptjetty_idx], &rjetty, import_token);
+            if (new_ptjetty == NULL) {
+                URMA_LOG_ERR("Failback REQ: failed to import new ptjetty [%d][%d], vjetty_id=%u new_id=%u\n",
+                    pjetty_idx, ptjetty_idx, vjetty_id, pjetty_new_id);
+                return BONDP_FB_ERR;
+            }
+            bdp_tjetty->p_tjetty[pjetty_idx][ptjetty_idx] == new_ptjetty;
+            //TODO: 参考 bondp_health_check.c:717 前后逻辑编写 正确性待校验
+            //TODO: valid处理
         }
     }
 
-    if (resp_route_local_idx < 0 || resp_route_target_idx < 0) {
-        URMA_LOG_ERR("Fallback REQ: no active path to send RESP, vjetty_id=%u\n", vjetty_id);
-        return BONDP_FB_ERR;
-    }
+    URMA_LOG_INFO("Fallback REQ: reimport done, vjetty_id=%u [%d][%d] old_id=? new_id=%u\n",
+        vjetty_id, my_local_idx, my_target_idx, pjetty_new_id);
 
     bondp_failback_msg_t resp = {
         .in = {
             .vjetty_id = vjetty_id,
-            .pjetty_i_idx = pjetty_i_idx,
+            .pjetty_i_idx = pjetty_idx,
             .pjetty_i_new_id = my_pjetty_id,
             .ctrl_type = BONDP_FAILBACK_CTRL_RESP,
             .req_seq = req_seq,
             .reserved = 0,
-        },
+            .node_id = bdp_ctx->node_id,  // 本端 NODE ID, 用于 End A 更新 notified 数组
+        }
     };
-    //TODO: RESP的发送模式
+    //TODO: RESP的发送
     int ret = bondp_failback_ctrl_send(&resp);
     if (ret != 0) {
         URMA_LOG_ERR("Fallback REQ: failed to send RESP, vjetty_id=%u ret=%d\n", vjetty_id, ret);
@@ -524,6 +485,6 @@ int bondp_failback_handle_req(bondp_context_t *bdp_ctx, const bondp_failback_msg
     }
 
     URMA_LOG_INFO("Fallback RESP sent, vjetty_id=%u pjetty_i_idx=%u my_pjetty_id=%u seq=%u\n",
-        vjetty_id, pjetty_i_idx, my_pjetty_id, req_seq);
+        vjetty_id, pjetty_idx, my_pjetty_id, req_seq);
     return BONDP_FB_OK;
 }
