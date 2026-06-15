@@ -216,10 +216,53 @@ static urma_status_t post_send_check_wr_list_valid(bondp_comp_t *bdp_send_comp, 
     return URMA_SUCCESS;
 }
 
+static urma_status_t schedule_send_wr(const urma_jfs_wr_t *wr, bondp_comp_t *bdp_comp,
+                                      int *send_idx, int *target_idx)
+{
+    if (!wr->flag.bs.has_drv_ext) {
+        return schedule_send(wr->tjetty, bdp_comp, send_idx, target_idx, NULL);
+    }
+    bondp_jfs_wr_t *bwr = CONTAINER_OF_FIELD(wr, bondp_jfs_wr_t, base);
+    bondp_chip_id_info_t info = {.src_chip_id = bwr->src_chip_id, .dst_chip_id = bwr->dst_chip_id};
+    return schedule_send(wr->tjetty, bdp_comp, send_idx, target_idx, &info);
+}
+
+static urma_status_t prealloc_copy_encode_map_wr_list(const urma_jfs_wr_t *wr, bondp_comp_t *bdp_comp,
+    uint32_t base_msn, int send_idx, int target_idx,
+    urma_jfs_wr_t prealloc_wr_list[], urma_sge_t prealloc_src_sge[][BONDP_MAX_SGE_NUM],
+    urma_sge_t prealloc_dst_sge[][BONDP_MAX_SGE_NUM], int *wr_count)
+{
+    int index = 0;
+    urma_jfs_wr_t *vwr = (urma_jfs_wr_t *)wr;
+    while (vwr != NULL) {
+        urma_jfs_wr_t *pwr = &prealloc_wr_list[index];
+        urma_status_t ret = copy_jfs_wr(vwr, pwr, prealloc_src_sge[index], prealloc_dst_sge[index]);
+        if (ret != 0) {
+            return ret;
+        }
+        uint32_t wr_msn = (base_msn + index) % BONDP_MAX_BITMAP_SIZE;
+        ret = encode_jfs_wr_msn(pwr, bdp_comp, wr_msn);
+        if (ret != 0) {
+            return ret;
+        }
+        map_jfs_vwr_to_path(pwr, send_idx, target_idx);
+        if (vwr->next != NULL) {
+            pwr->next = &prealloc_wr_list[index + 1];
+        }
+        vwr = vwr->next;
+        index++;
+        if (index >= BONDP_MAX_WR_LIST_NUM - 1) {
+            URMA_LOG_ERR("Bondp supports at most %d wr_list.\n", BONDP_MAX_WR_LIST_NUM - 1);
+            return URMA_EINVAL;
+        }
+    }
+    *wr_count = index;
+    return URMA_SUCCESS;
+}
+
 static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
                                                  const urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
 {
-    // Pre-allocated space to improve datapath performance
     static thread_local urma_jfs_wr_t prealloc_wr_list[BONDP_MAX_WR_LIST_NUM];
     static thread_local urma_sge_t prealloc_src_sge[BONDP_MAX_WR_LIST_NUM][BONDP_MAX_SGE_NUM];
     static thread_local urma_sge_t prealloc_dst_sge[BONDP_MAX_WR_LIST_NUM][BONDP_MAX_SGE_NUM];
@@ -235,42 +278,17 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
     }
     uint32_t base_msn = atomic_fetch_add(&bdp_comp->msn, wr_total) % BONDP_MAX_BITMAP_SIZE;
     for (int retry = 0; retry < BONDP_POST_SEND_MAX_RETRY; retry++) {
-        urma_status_t ret = URMA_SUCCESS;
-        int send_idx = -1, target_idx = -1;
-        if (!wr->flag.bs.has_drv_ext) {
-            ret = schedule_send(wr->tjetty, bdp_comp, &send_idx, &target_idx, NULL);
-        } else {
-            bondp_jfs_wr_t *bwr = CONTAINER_OF_FIELD(wr, bondp_jfs_wr_t, base);
-            bondp_chip_id_info_t info = {.src_chip_id = bwr->src_chip_id, .dst_chip_id = bwr->dst_chip_id};
-            ret = schedule_send(wr->tjetty, bdp_comp, &send_idx, &target_idx, &info);
-        }
+        int send_idx = -1;
+        int target_idx = -1;
+        urma_status_t ret = schedule_send_wr(wr, bdp_comp, &send_idx, &target_idx);
         if (ret != 0) {
             return URMA_FAIL;
         }
-        int index = 0;
-        urma_jfs_wr_t *vwr = (urma_jfs_wr_t *)wr;
-        while (vwr != NULL) {
-            urma_jfs_wr_t *pwr = &prealloc_wr_list[index];
-            ret = copy_jfs_wr(vwr, pwr, prealloc_src_sge[index], prealloc_dst_sge[index]);
-            if (ret != 0) {
-                return ret;
-            }
-            uint32_t wr_msn = (base_msn + index) % BONDP_MAX_BITMAP_SIZE;
-            ret = encode_jfs_wr_msn(pwr, bdp_comp, wr_msn);
-            if (ret != 0) {
-                return ret;
-            }
-            map_jfs_vwr_to_path(pwr, send_idx, target_idx);
-            if (vwr->next != NULL) {
-                pwr->next = &prealloc_wr_list[index + 1];
-            }
-
-            vwr = vwr->next;
-            index++;
-            if (index >= BONDP_MAX_WR_LIST_NUM - 1) {
-                URMA_LOG_ERR("Bondp supports at most %d wr_list.\n", BONDP_MAX_WR_LIST_NUM - 1);
-                return URMA_EINVAL;
-            }
+        int wr_count = 0;
+        ret = prealloc_copy_encode_map_wr_list(wr, bdp_comp, base_msn, send_idx, target_idx,
+            prealloc_wr_list, prealloc_src_sge, prealloc_dst_sge, &wr_count);
+        if (ret != 0) {
+            return ret;
         }
         if (!atomic_load(&bdp_comp->valid[send_idx])) {
             continue;
@@ -314,16 +332,8 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
         int wr_count = 0;
         int send_idx = 0;
         int target_idx = 0;
-        bondp_chip_id_info_t chip_info = {0};
         jfs_wr_entry_t *wr_entries[BONDP_BATCH_POST_MAX_NUM];
-        if (!wr->flag.bs.has_drv_ext) {
-            ret = schedule_send(wr->tjetty, bdp_comp, &send_idx, &target_idx, NULL);
-        } else {
-            bondp_jfs_wr_t *bwr = CONTAINER_OF_FIELD(wr, bondp_jfs_wr_t, base);
-            chip_info.src_chip_id = bwr->src_chip_id;
-            chip_info.dst_chip_id = bwr->dst_chip_id;
-            ret = schedule_send(wr->tjetty, bdp_comp, &send_idx, &target_idx, &chip_info);
-        }
+        ret = schedule_send_wr(wr, bdp_comp, &send_idx, &target_idx);
         if (ret != 0) {
             return URMA_FAIL;
         }
@@ -421,15 +431,13 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
         }
         return URMA_SUCCESS;
 ROLLBACK:
-        {
-            for (int j = success_node; j < wr_count; j++) {
-                convert_jfs_pwr_to_vwr_resend(&wr_entries[j]->wr, &wr_entries[j]->target_vjetty->v_tjetty);
-                release_vwr_use_cnt(&wr_entries[j]->wr);
-            }
-            jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, &wr_entries[success_node],
-                allocated - success_node);
-            return ret;
+        for (int j = success_node; j < wr_count; j++) {
+            convert_jfs_pwr_to_vwr_resend(&wr_entries[j]->wr, &wr_entries[j]->target_vjetty->v_tjetty);
+            release_vwr_use_cnt(&wr_entries[j]->wr);
         }
+        jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, &wr_entries[success_node],
+            allocated - success_node);
+        return ret;
 CLEANUP:
         for (int j = 0; j < wr_count; j++) {
             convert_jfs_pwr_to_vwr_resend(&wr_entries[j]->wr, &wr_entries[j]->target_vjetty->v_tjetty);
@@ -675,14 +683,14 @@ static urma_status_t bondp_post_recv_wr_list_and_store(bondp_comp_t *bdp_comp, u
     }
     uint32_t allocated = jfr_wr_buf_alloc_batch(recv_wr_buf, wr_entries, (uint32_t)wr_count);
     if (allocated != (uint32_t)wr_count) {
-        URMA_LOG_ERR("Bondp WR buffer is not enough, reqeusted %u, available %u.\n", 
+        URMA_LOG_ERR("Bondp WR buffer is not enough, reqeusted %u, available %u.\n",
             wr_count, allocated);
         jfr_wr_buf_release_batch(recv_wr_buf, wr_entries, allocated);
         return URMA_ENOMEM;
     }
     ret = schedule_recv_n(bdp_comp, (uint32_t)wr_count, recv_wr_cnt);
     if (ret != 0) {
-        URMA_LOG_ERR("Bondp schedule recv failed, ret = %d.\n", ret); 
+        URMA_LOG_ERR("Bondp schedule recv failed, ret = %d.\n", ret);
         ret = URMA_FAIL;
         goto CLEANUP;
     }
