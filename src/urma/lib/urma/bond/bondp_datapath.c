@@ -361,10 +361,9 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
         jfs_wr_entry_t *wr_entry = wr_entries[i];
         urma_jfs_wr_t *pwr = &wr_entry->wr;
 
-        ret = copy_jfs_wr(cur, pwr, NULL, NULL);
+        ret = copy_jfs_wr(cur, pwr, wr_entry->src_sge, wr_entry->dst_sge);
         if (ret != 0) {
             URMA_LOG_ERR("Failed to copy jfs wr\n");
-            free_jfs_wr(pwr);
             goto CLEANUP;
         }
 
@@ -374,7 +373,6 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             URMA_LOG_ERR("Failed to convert jfs wr\n");
             convert_jfs_pwr_to_vwr_resend(pwr, &wr_entry->target_vjetty->v_tjetty);
             release_vwr_use_cnt(pwr);
-            free_jfs_wr(pwr);
             goto CLEANUP;
         }
         pwr->user_ctx = wr_entry->wr_id;
@@ -404,7 +402,6 @@ CLEANUP:
     for (int j = success_node; j < processed; j++) {
         convert_jfs_pwr_to_vwr_resend(&wr_entries[j]->wr, &wr_entries[j]->target_vjetty->v_tjetty);
         release_vwr_use_cnt(&wr_entries[j]->wr);
-        free_jfs_wr(&wr_entries[j]->wr);
     }
 RELEASEBUF:
     (void)pthread_spin_lock(&bdp_comp->send_wr_lock);
@@ -841,7 +838,6 @@ static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int s
     if (ret != URMA_SUCCESS) {
         convert_jfs_pwr_to_vwr_resend(wr, vtjetty);
         release_vwr_use_cnt(wr);
-        free_jfs_wr(wr);
         (void)pthread_spin_lock(&bdp_comp->send_wr_lock);
         jfs_wr_buf_release(wr_entry);
         (void)pthread_spin_unlock(&bdp_comp->send_wr_lock);
@@ -1075,7 +1071,6 @@ CONVERT_CR:
 
     convert_jfs_pwr_to_vwr_resend(&wr_entry->wr, &wr_entry->target_vjetty->v_tjetty);
     release_vwr_use_cnt(&wr_entry->wr);
-    free_jfs_wr(&wr_entry->wr);
     (void)pthread_spin_lock(&bdp_comp->send_wr_lock);
     jfs_wr_buf_release(wr_entry);
     (void)pthread_spin_unlock(&bdp_comp->send_wr_lock);
