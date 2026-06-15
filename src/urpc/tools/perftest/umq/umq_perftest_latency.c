@@ -328,8 +328,11 @@ static int process_tx_eagain(uint64_t umqh)
 {
     umq_buf_t *buf;
     int ret;
+    umq_poll_option_t poll_rx_option = {
+        .io_direction = UMQ_IO_RX,
+    };
     while (!is_perftest_force_quit()) {
-        ret = umq_poll(umqh, UMQ_IO_RX, &buf, 1);
+        ret = umq_poll(umqh, &poll_rx_option, &buf, 1);
         if (ret < 0) {
             LOG_PRINT("umq poll rx failed, ret %d\n", ret);
             return -1;
@@ -364,12 +367,19 @@ static void umq_perftest_server_run_latency_pro_polling(uint64_t umqh, umq_perft
     bool buf_multiplex = lat_arg->cfg->config.buf_multiplex;
     umq_buf_t *rx_buf = NULL;
     int ret = 0;
+    umq_poll_option_t poll_rx_option = {
+        .io_direction = UMQ_IO_RX,
+    };
+
+    umq_poll_option_t poll_tx_option = {
+        .io_direction = UMQ_IO_TX,
+    };
     while (g_perftest_latency_ctx.iters < lat_arg->cfg->test_round && !is_perftest_force_quit()) {
         recv_cnt = 0;
 
         // recv req, release rx
         do {
-            ret = umq_poll(umqh, UMQ_IO_RX, &rx_buf, 1);
+            ret = umq_poll(umqh, &poll_rx_option, &rx_buf, 1);
             if (ret < 0) {
                 LOG_PRINT("umq poll rx failed, ret %d\n", ret);
                 goto FINISH;
@@ -415,7 +425,7 @@ static void umq_perftest_server_run_latency_pro_polling(uint64_t umqh, umq_perft
         // poll tx cqe. tx buffer reuse, no release
         send_cnt = 0;
         do {
-            ret = umq_poll(umqh, UMQ_IO_TX, polled_buf, 1);
+            ret = umq_poll(umqh, &poll_tx_option, polled_buf, 1);
             if (ret < 0) {
                 LOG_PRINT("umq poll tx failed, ret %d\n", ret);
                 goto FINISH;
@@ -446,6 +456,11 @@ static int process_tx_eagain_interrupt(uint64_t umqh, umq_interrupt_option_t *in
 {
     umq_buf_t *buf;
     int ret;
+
+    umq_poll_option_t poll_rx_option = {
+        .io_direction = UMQ_IO_RX,
+    };
+
     while (!is_perftest_force_quit()) {
         ret = umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, interrupt_option);
         if (ret < 0) {
@@ -459,7 +474,7 @@ static int process_tx_eagain_interrupt(uint64_t umqh, umq_interrupt_option_t *in
             LOG_PRINT("umq_rearm_interrupt failed\n");
             return -1;
         }
-        ret = umq_poll(umqh, UMQ_IO_RX, &buf, 1);
+        ret = umq_poll(umqh, &poll_rx_option, &buf, 1);
         if (ret < 0) {
             LOG_PRINT("umq poll rx failed, ret %d\n", ret);
             return -1;
@@ -516,6 +531,15 @@ static void umq_perftest_server_run_latency_pro_interrupt(uint64_t umqh, umq_per
     }
     umq_buf_t *rx_buf = NULL;
     int ret = 0;
+
+    umq_poll_option_t poll_rx_option = {
+        .io_direction = UMQ_IO_RX,
+    };
+
+    umq_poll_option_t poll_tx_option = {
+        .io_direction = UMQ_IO_TX,
+    };
+
     while (g_perftest_latency_ctx.iters < test_round && !is_perftest_force_quit()) {
         // recv req, release rx
         if (umq_wait_interrupt(umqh, INTERRUPT_MAX_WAIT_TIME_MS, &interrupt_option) != 1) {
@@ -530,7 +554,7 @@ static void umq_perftest_server_run_latency_pro_interrupt(uint64_t umqh, umq_per
 
         recv_cnt = 0;
         do {
-            ret = umq_poll(umqh, UMQ_IO_RX, &rx_buf, 1);
+            ret = umq_poll(umqh, &poll_rx_option, &rx_buf, 1);
             if (ret < 0) {
                 LOG_PRINT("umq poll rx failed, ret %d\n", ret);
                 goto FINISH;
@@ -587,7 +611,7 @@ static void umq_perftest_server_run_latency_pro_interrupt(uint64_t umqh, umq_per
         // poll tx cqe. tx buffer reuse, no release
         send_cnt = 0;
         do {
-            ret = umq_poll(umqh, UMQ_IO_TX, &polled_buf, 1);
+            ret = umq_poll(umqh, &poll_tx_option, &polled_buf, 1);
             if (ret < 0) {
                 LOG_PRINT("umq poll tx failed, ret %d\n", ret);
                 goto FINISH;
@@ -647,6 +671,15 @@ static void umq_perftest_client_run_latency_pro_polling(uint64_t umqh, umq_perft
     uint32_t recv_cnt = 0;
     bool buf_multiplex = lat_arg->cfg->config.buf_multiplex;
     umq_buf_t *rx_buf = NULL;
+
+    umq_poll_option_t poll_rx_option = {
+        .io_direction = UMQ_IO_RX,
+    };
+
+    umq_poll_option_t poll_tx_option = {
+        .io_direction = UMQ_IO_TX,
+    };
+
     while (g_perftest_latency_ctx.iters < lat_arg->cfg->test_round && !is_perftest_force_quit()) {
         send_cnt = 0;
         // send req
@@ -654,7 +687,7 @@ static void umq_perftest_client_run_latency_pro_polling(uint64_t umqh, umq_perft
         ret = umq_post(umqh, req_buf, UMQ_IO_TX, &bad_buf);
         if (ret != UMQ_SUCCESS) {
             if (ret == -UMQ_ERR_EAGAIN) {
-                ret = umq_poll(umqh, UMQ_IO_RX, polled_buf, 1);
+                ret = umq_poll(umqh, &poll_rx_option, polled_buf, 1);
                 if (ret == 0) {
                     continue;
                 } else if (ret == 1) {
@@ -673,7 +706,7 @@ static void umq_perftest_client_run_latency_pro_polling(uint64_t umqh, umq_perft
 
         // poll tx cqe. tx buffer reuse, no release
         do {
-            ret = umq_poll(umqh, UMQ_IO_TX, polled_buf, 1);
+            ret = umq_poll(umqh, &poll_tx_option, polled_buf, 1);
             if (ret < 0) {
                 LOG_PRINT("umq poll tx failed, ret %d\n", ret);
                 goto FINISH;
@@ -691,7 +724,7 @@ static void umq_perftest_client_run_latency_pro_polling(uint64_t umqh, umq_perft
         // recv return, release rx
         recv_cnt = 0;
         do {
-            ret = umq_poll(umqh, UMQ_IO_RX, &rx_buf, 1);
+            ret = umq_poll(umqh, &poll_rx_option, &rx_buf, 1);
             if (ret < 0) {
                 LOG_PRINT("umq poll rx failed, ret %d\n", ret);
                 goto FINISH;
@@ -776,6 +809,15 @@ static void umq_perftest_client_run_latency_pro_interrupt(uint64_t umqh, umq_per
         LOG_PRINT("umq_rearm_interrupt failed\n");
         goto FINISH;
     }
+
+    umq_poll_option_t poll_rx_option = {
+        .io_direction = UMQ_IO_RX,
+    };
+
+    umq_poll_option_t poll_tx_option = {
+        .io_direction = UMQ_IO_TX,
+    };
+
     int ret = 0;
     while (g_perftest_latency_ctx.iters < test_round && !is_perftest_force_quit()) {
         send_cnt = 0;
@@ -806,7 +848,7 @@ static void umq_perftest_client_run_latency_pro_interrupt(uint64_t umqh, umq_per
             goto FINISH;
         }
         do {
-            ret = umq_poll(umqh, UMQ_IO_TX, &polled_buf, 1);
+            ret = umq_poll(umqh, &poll_tx_option, &polled_buf, 1);
             if (ret < 0) {
                 LOG_PRINT("umq poll tx failed, ret %d\n", ret);
                 goto FINISH;
@@ -834,7 +876,7 @@ static void umq_perftest_client_run_latency_pro_interrupt(uint64_t umqh, umq_per
 
         recv_cnt = 0;
         do {
-            ret = umq_poll(umqh, UMQ_IO_RX, &rx_buf, 1);
+            ret = umq_poll(umqh, &poll_rx_option, &rx_buf, 1);
             if (ret < 0) {
                 LOG_PRINT("umq poll rx failed, ret %d\n", ret);
                 goto FINISH;
