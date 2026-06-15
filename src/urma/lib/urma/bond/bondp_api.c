@@ -607,7 +607,7 @@ static int bondp_create_pjfs(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfs, ur
         }
         bdp_jfs->p_jfs[i] = jfs;
         bdp_jfs->p_jfs[i]->jfs_cfg.user_ctx = (uint64_t)bdp_jfs;
-        atomic_store_explicit(&bdp_jfs->valid[i], true, memory_order_release);
+        atomic_store(&bdp_jfs->valid[i], true);
         URMA_LOG_DEBUG("Created pjfs successfully, idx=%u, jfs_id=%u, dev=%s, eid_idx=%u\n",
                        i, jfs->jfs_id.id, bdp_ctx->p_ctxs[i]->dev->name, bdp_ctx->p_ctxs[i]->eid_index);
     }
@@ -890,7 +890,7 @@ static int bondp_create_pjfr(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jfr, ur
         }
         jfr->jfr_cfg.user_ctx = (uint64_t)bdp_jfr;
         bdp_jfr->p_jfr[i] = jfr;
-        atomic_store_explicit(&bdp_jfr->valid[i], true, memory_order_release);
+        atomic_store(&bdp_jfr->valid[i], true);
         URMA_LOG_DEBUG("Created pjfr successfully, idx=%u, jfr_id=%u, dev=%s, eid_idx=%u\n",
                        i, jfr->jfr_id.id, bdp_ctx->p_ctxs[i]->dev->name, bdp_ctx->p_ctxs[i]->eid_index);
     }
@@ -1240,7 +1240,7 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
         }
         jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
         bdp_jetty->p_jetty[i] = jetty;
-        atomic_store_explicit(&bdp_jetty->valid[i], true, memory_order_release);
+        atomic_store(&bdp_jetty->valid[i], true);
         URMA_LOG_DEBUG("Created pjetty successfully, idx=%u, jetty_id=%u, dev=%s, eid_idx=%u\n",
                        i, jetty->jetty_id.id, bdp_ctx->p_ctxs[i]->dev->name, bdp_ctx->p_ctxs[i]->eid_index);
     }
@@ -1738,7 +1738,7 @@ static int bondp_import_pjetty(
         URMA_LOG_DEBUG("Imported pjetty successfully, local_idx=%u, target_idx=%u, jetty_id=%u\n",
                        local_idx, target_idx, p_rjetty.jetty_id.id);
         bdp_tjetty->p_tjetty[local_idx][target_idx] = tjetty;
-        atomic_store_explicit(&bdp_tjetty->valid[target_idx], true, memory_order_release);
+        atomic_store(&bdp_tjetty->valid[target_idx], true);
     }
     return 0;
 }
@@ -2019,7 +2019,7 @@ static int bondp_import_pjfr(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
             return -1;
         }
         bdp_tjetty->p_tjetty[i][i] = tjetty;
-        atomic_store_explicit(&bdp_tjetty->valid[i], true, memory_order_release);
+        atomic_store(&bdp_tjetty->valid[i], true);
         URMA_LOG_DEBUG("Imported pjfr successfully, idx=%u, jfr_id=%u, dev=%s, eid_idx=%u\n",
                        i, udata_out->slave_id[i].id, bdp_ctx->p_ctxs[i]->dev->name, bdp_ctx->p_ctxs[i]->eid_index);
     }

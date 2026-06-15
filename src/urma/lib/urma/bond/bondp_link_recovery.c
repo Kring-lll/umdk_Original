@@ -104,7 +104,7 @@ int bondp_rebuild_local_pjetty(bondp_health_task_t *task, int local_idx)
     new_jetty->remote_jetty = NULL;
     new_jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
     bdp_jetty->p_jetty[local_idx] = new_jetty;
-    atomic_store_explicit(&bdp_jetty->valid[local_idx], false, memory_order_release);
+    atomic_store(&bdp_jetty->valid[local_idx], false);
 
     if (bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty) != 0) {
         return -1;
