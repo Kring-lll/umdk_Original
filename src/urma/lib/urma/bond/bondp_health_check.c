@@ -398,7 +398,7 @@ int bondp_fill_vjetty_health_info(bondp_context_t *bond_ctx, bondp_comp_t *bdp_j
         if (bdp_jetty->p_jetty[i] == NULL || bdp_jetty->check_tseg[i] == NULL) {
             continue;
         }
-        health_check_seg->slaves[i] = bdp_jetty->check_tseg[i]->seg;
+        bondp_seg_to_base(&bdp_jetty->check_tseg[i]->seg, &health_check_seg->slaves[i]);
     }
 
     URMA_LOG_INFO("Successfully filled health check seg info to kernel, dev_num=%d\n", bond_ctx->dev_num);
