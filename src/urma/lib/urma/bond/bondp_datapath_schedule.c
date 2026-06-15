@@ -29,7 +29,8 @@ static void select_least_load_path(const bondp_comp_t *bdp_comp, uint32_t min_ac
     *least_load_cnt = 0;
     for (uint32_t i = 0; i < min_active_count; i++) {
         uint32_t active_idx = bdp_comp->active_indices[i];
-        if (!atomic_load(&bdp_comp->valid[active_idx]) || active_idx < (uint32_t)min_idx || active_idx > (uint32_t)max_idx) {
+        if (!atomic_load(&bdp_comp->valid[active_idx]) || active_idx < (uint32_t)min_idx ||
+            active_idx > (uint32_t)max_idx) {
             continue;
         }
 
