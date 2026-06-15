@@ -1378,11 +1378,65 @@ public:
         AscendC::LocalTensor<float> xOutFp32Tensor_ = xTmpTensor_.template ReinterpretCast<float>();
         AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(subUbOffset);
         subUbOffset += CEIL_UP(UB_BLOCK_SIZE);
+
+        // for int8 to int4: pong input buffer for double buffering (ping = xTmpTensor_)
+        AscendC::LocalTensor<int8_t> xTmpTensor1_ = resource.ubBuf.template GetBufferByByte<int8_t>(subUbOffset);
+        subUbOffset += CEIL_UP(axisHCommu * sizeof(int8_t));
+
+        // INT8-to-INT4 single-buffer compute resources (per-token sized by tokenLength)
+        AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
+        xHighI4Tensor.SetSize(tokenLength);
+        subUbOffset += tokenLength / 2;
+
+        AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
+        xLowI4Tensor.SetSize(tokenLength);
+        subUbOffset += tokenLength / 2;
+
+        AscendC::LocalTensor<half> xHighHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
+        xHighHalfTensor.SetSize(tokenLength * sizeof(half));
+        subUbOffset += tokenLength * sizeof(half);
+
+        AscendC::LocalTensor<half> xLowHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
+        xLowHalfTensor.SetSize(tokenLength * sizeof(half));
+        subUbOffset += tokenLength * sizeof(half);
+
+        AscendC::LocalTensor<half> xLowHalfTensor2 = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
+        xLowHalfTensor2.SetSize(tokenLength * sizeof(half));
+        subUbOffset += tokenLength * sizeof(half);
+
+        AscendC::LocalTensor<int16_t> xLowI16Tensor = resource.ubBuf.template GetBufferByByte<int16_t>(subUbOffset);
+        xLowI16Tensor.SetSize(128 * sizeof(int16_t));
+
+        // INT8-to-INT4 computation constants (per-token: hiddenSize = tokenLength)
+        constexpr size_t LEN_128 = 128;
+        const size_t LEN_VK = (tokenLength / 2) / 128;
+        const size_t LAST_LEN_VK = (tokenLength % 256) / 2;
+        const half ONE_SIXTEENTH = static_cast<half>(0.0625f);
+        constexpr int32_t DUP_MASK = 128;
+
+        // Initialize low-nibble mask buffer: 128 x 0x0F0F
+        AscendC::Duplicate(xLowI16Tensor, static_cast<int16_t>(0x0F0F), DUP_MASK);
+        AscendC::PipeBarrier<PIPE_V>();
+
+        // Double-buffer event IDs for input ping-pong (distinct from 0/Mte2S and 6/7 output protect)
+        constexpr int32_t DBL_ID0 = 4;
+        constexpr int32_t DBL_ID1 = 5;
+
+        // Double-buffer cold-start: pre-set all release signals
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(DBL_ID0);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(DBL_ID1);
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(DBL_ID0);
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(DBL_ID1);
+        // Output single-buffer cold-start (reuse FetchAndPreprocessInt8ToInt4's event scheme)
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+
         AscendC::LocalTensor<int32_t> gatherMaskOutCountTensor =
                                     (gatherMaskOutTensor.template ReinterpretCast<int32_t>());
         AscendC::GlobalTensor<int8_t> tokGlobal;
         AscendC::GlobalTensor<int32_t> tokGlobalInt32;
         AscendC::GlobalTensor<int8_t> expandXOutGlobal;
+        AscendC::GlobalTensor<int8_t> outputInt4Buffer;
         AscendC::GlobalTensor<float> dynamicScalesOutGMTensor_;
         dynamicScalesOutGMTensor_.SetGlobalBuffer((__gm__ float *)(gmX1Scale));
         uint32_t beginIdx = 0;
@@ -1403,7 +1457,8 @@ public:
             beginIdx += count;
             targetTokenCount += count;
         }
-        AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
+        // Ping-pong state for input double buffering
+        int dblPingpongId = 0;
         while (curRecvTokenCount < targetTokenCount) {
             for (uint32_t index = startRankId; index < endRankId; index++) {
                 uint32_t i = index - startRankId;
@@ -1412,10 +1467,14 @@ public:
                 winOffset = (index % epRankSize) * moeExpertNumPerRank + index / epRankSize;
                 GM_ADDR wAddr = (__gm__ uint8_t *)(GetWindAddrByRankId(epRankId)) + winOffset * expertPerSizeOnWin;
                 for (uint32_t j = curTokenIdx[i]; j < countPerRank[i]; j++) {
+                    int32_t dblId = dblPingpongId == 0 ? DBL_ID0 : DBL_ID1;
+                    AscendC::LocalTensor<int8_t> recvBuf = dblPingpongId == 0 ? xTmpTensor_ : xTmpTensor1_;
+
                     tokGlobal.SetGlobalBuffer((__gm__ int8_t *)(wAddr + j * hCommuSize));
                     tokGlobalInt32.SetGlobalBuffer((__gm__ int32_t *)(wAddr + j * hCommuSize + hOutSize));
                     expandXOutGlobal.SetGlobalBuffer(
                         (__gm__ int8_t *)(gmX1) + (beginIdx + j) * tokenLength, tokenLength);
+                    outputInt4Buffer.SetGlobalBuffer((__gm__ int8_t *)(gmForOutput) + (beginIdx +j) * tokenLength, tokenLength);
 
                     AscendC::DataCopy(tmpLocalTensor, tokGlobalInt32, INT32_COUNT_PER_BLOCK);
                     AscendC::SetFlag<AscendC::HardEvent::MTE2_S>(0);
@@ -1434,26 +1493,70 @@ public:
                     curTokenIdx[i] += 1;
                     AscendC::PipeBarrier<PIPE_ALL>();
 
-                    AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
-                    AscendC::DataCopy(xTmpTensor_, tokGlobal, axisHCommu);
-                    AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE3>(0);
-                    AscendC::WaitFlag<AscendC::HardEvent::MTE2_MTE3>(0);
+                    // Wait for double-buffer input slot to be released
+                    AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(dblId);
+                    AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(dblId);
+                    // Receive token data into current double buffer
+                    AscendC::DataCopy(recvBuf, tokGlobal, axisHCommu);
+                    AscendC::SetFlag<AscendC::HardEvent::MTE2_MTE3>(dblId);
+                    AscendC::WaitFlag<AscendC::HardEvent::MTE2_MTE3>(dblId);
+                    // Copy scale from received buffer to GM
                     AscendC::DataCopyPad(dynamicScalesOutGMTensor_[beginIdx + j],
-                        xOutFp32Tensor_[tokenLength / sizeof(float)], dataCopyParamsFloat);
-                    AscendC::DataCopy(expandXOutGlobal, xTmpTensor_, tokenLength);
-                    AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
-                }
-                if (curTokenIdx[i] == countPerRank[i]) {
-                    AscendC::GlobalTensor<int8_t> outputInt4Buffer;
-                    outputInt4Buffer.SetGlobalBuffer((__gm__ int8_t *)(gmForOutput) + beginIdx * tokenLength, tokenLength * countPerRank[i]);
-                    expandXOutGlobal.SetGlobalBuffer((__gm__ int8_t *)(gmX1) + beginIdx * tokenLength, tokenLength * countPerRank[i]);
-                    FetchAndPreprocessInt8ToInt4(expandXOutGlobal, countPerRank[i], tokenLength, subUbOffset, outputInt4Buffer);
-                    // 保证只执行一次int8-->int4
-                    curTokenIdx[i] += 1;
+                        recvBuf.template ReinterpretCast<float>()[tokenLength / sizeof(float)], dataCopyParamsFloat);
+                    AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(dblId);
+                    AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(dblId);
+
+                    // int8 to int4: 高四位处理开始
+                    AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(dblId);
+                    AscendC::Cast(xHighHalfTensor, recvBuf, AscendC::RoundMode::CAST_NONE, tokenLength);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, tokenLength);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+                    AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+                    AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
+                    AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
+                    AscendC::DataCopy(expandXOutGlobal[0], xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
+                    AscendC::DataCopy(outputInt4Buffer[0], xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
+                    // 高四位处理结束
+
+                    // 低四位处理开始
+                    AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+                    AscendC::And(xLowHalfTensor.ReinterpretCast<int16_t>(), recvBuf.ReinterpretCast<int16_t>(), xLowI16Tensor, LEN_128,
+                        LEN_VK, {1, 1, 1, 8, 8, 0});
+                    if (LAST_LEN_VK > 0) {
+                        AscendC::And(xLowHalfTensor[LEN_VK * LEN_128].ReinterpretCast<int16_t>(),
+                            recvBuf[LEN_VK * LEN_128 * TWO].ReinterpretCast<int16_t>(), xLowI16Tensor, LAST_LEN_VK, 1,
+                            {1, 1, 1, 8, 8, 0});
+                    }
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(dblId);
+                    AscendC::Cast(xLowHalfTensor2.ReinterpretCast<half>(), xLowHalfTensor.ReinterpretCast<int8_t>(),
+                        AscendC::RoundMode::CAST_NONE, tokenLength);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    const half MINUS_EIGHT = static_cast<half>(-8);
+                    AscendC::Adds(xHighHalfTensor, xLowHalfTensor2, MINUS_EIGHT, tokenLength);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+                    AscendC::Cast(xLowI4Tensor, xHighHalfTensor.ReinterpretCast<half>(), AscendC::RoundMode::CAST_NONE, tokenLength);
+                    AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
+                    AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
+                    AscendC::DataCopy(expandXOutGlobal[tokenLength / 2], xLowI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
+                    AscendC::DataCopy(outputInt4Buffer[tokenLength / 2], xLowI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
+                    AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+                    // 低四位处理结束
+
+                    dblPingpongId = (dblPingpongId + 1) % 2;
                 }
             }
         }
-        AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
+        // Wait for all double-buffer events to drain
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(DBL_ID0);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(DBL_ID1);
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(DBL_ID0);
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(DBL_ID1);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
         AscendC::PipeBarrier<PIPE_ALL>();
 
         AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);
