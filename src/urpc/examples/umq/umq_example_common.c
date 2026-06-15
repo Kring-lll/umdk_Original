@@ -419,8 +419,12 @@ int example_poll_rx(uint64_t umqh, const char *check_data, uint32_t data_size, b
     int ret = 0;
 
     uint64_t start = get_timestamp_ms();
+    umq_poll_option_t poll_rx_option = {
+        .io_direction = UMQ_IO_RX,
+    };
+
     while (ret == 0 && get_timestamp_ms() - start < EXAMPLE_MAX_WAIT_TIME_MS) {
-        ret = umq_poll(umqh, UMQ_IO_RX, buf, EXAMPLE_MAX_POLL_BATCH);
+        ret = umq_poll(umqh, &poll_rx_option, buf, EXAMPLE_MAX_POLL_BATCH);
         usleep(EXAMPLE_SLEEP_TIME_US);
     }
 
@@ -488,7 +492,12 @@ int example_poll_tx(uint64_t umqh)
     if (buf == NULL) {
         return -1;
     }
-    int ret = umq_poll(umqh, UMQ_IO_TX, buf, EXAMPLE_MAX_POLL_BATCH);
+
+    umq_poll_option_t poll_tx_option = {
+        .io_direction = UMQ_IO_TX,
+    };
+
+    int ret = umq_poll(umqh, &poll_tx_option, buf, EXAMPLE_MAX_POLL_BATCH);
     if (ret <= 0) {
         free(buf);
         return -1;
@@ -564,9 +573,13 @@ void example_flush(uint64_t umqh)
     umq_buf_t *buf[EXAMPLE_MAX_POLL_BATCH];
     int ret = 0;
 
+    umq_poll_option_t poll_all_option = {
+        .io_direction = UMQ_IO_ALL,
+    };
+
     uint64_t start = get_timestamp_ms();
     while (get_timestamp_ms() - start < EXAMPLE_FLUSH_TIME_MS) {
-        ret = umq_poll(umqh, UMQ_IO_ALL, buf, EXAMPLE_MAX_POLL_BATCH);
+        ret = umq_poll(umqh, &poll_all_option, buf, EXAMPLE_MAX_POLL_BATCH);
         if (ret > 0) {
             LOG_PRINT("example flush rx count: %d\n", ret);
             for (int i = 0; i < ret; i++) {
