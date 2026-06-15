@@ -1,4 +1,5 @@
 /*
+ * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: log container test
  * Create: 2025-7-26

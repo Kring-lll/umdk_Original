@@ -1,4 +1,5 @@
 /*
+ * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: implementation of unix domain socket
  * Create: 2025-8-12

@@ -1,4 +1,5 @@
 /*
+ * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: ttft prediction module
  * Create: 2025-12-18

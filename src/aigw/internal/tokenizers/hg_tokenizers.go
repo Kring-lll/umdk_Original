@@ -1,4 +1,5 @@
 /*
+ * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: define the functions of sentencepiece tokenizer.
  * Create: 2025-06-14
