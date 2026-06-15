@@ -34,12 +34,12 @@ typedef struct umq_pro_ops {
     * User should ensure thread safety if io_lock_free is true
     * Poll tx/rx buf from umq
     * @param[in] umqh_tp: umq handle
-    * @param[in] io_direction: Set poll direction : tx or rx
+    * @param[in] poll_option: Set poll direction : tx or rx. set tp handle idx (for share transport main umq)
     * @param[out] buf: buffer polled. user should assure length not less than max_buf_count
     * @param[in] buf_count: max count of buf
     * Return count of qbuf polled
     */
-    int (*umq_tp_poll)(uint64_t umqh_tp, umq_io_direction_t io_direction, umq_buf_t **buf, uint32_t max_buf_count);
+    int (*umq_tp_poll)(uint64_t umqh_tp, umq_poll_option_t *poll_option, umq_buf_t **buf, uint32_t max_buf_count);
 
     /**
     * User should ensure thread safety if io_lock_free is true
@@ -49,6 +49,23 @@ typedef struct umq_pro_ops {
     * Return fd >= 0 on success, error code < 0 on failure
     */
     int (*umq_tp_interrupt_fd_get)(uint64_t umqh_tp, umq_interrupt_option_t *option);
+
+    /**
+    * User should ensure thread safety if io_lock_free is true
+    * Query umq interrupt fd table
+    * @param[in] umqh_tp: umq handle
+    * @param[in] option: option param. user should specify UMQ_IO_TX or UMQ_IO_RX, or UMQ_FAIL will be returned
+    * @param[out] fd_table: interrupt fd table
+    * if get event fd, fd_type set UMQ_FD_EVENT, return event fd (used to notify the user to return credit)
+    * Return: 0 on success, other value on error
+    */
+    int (*umq_tp_interrupt_fd_list_get)(uint64_t umqh, umq_interrupt_option_t *option, umq_interrupt_fd_table_t *fd_table);
+
+    /**
+    * put umq interrupt fd table
+    * @param[out] fd_table: interrupt fd table
+    */
+    void (*umq_tp_interrupt_fd_list_put)(umq_interrupt_fd_table_t *fd_table);
 
     /**
     * User should ensure thread safety if io_lock_free is true

@@ -38,24 +38,24 @@ static inline void umq_perf_record_write_poll(uint64_t start, umq_io_direction_t
     umq_perf_record_write_with_direction(UMQ_PERF_RECORD_POLL_ALL, start, io_direction);
 }
 
-int umq_poll(uint64_t umqh, umq_io_direction_t io_direction, umq_buf_t **buf, uint32_t max_buf_count)
+int umq_poll(uint64_t umqh, umq_poll_option_t *poll_option, umq_buf_t **buf, uint32_t max_buf_count)
 {
     uint64_t start_timestamp = umq_perf_get_start_timestamp();
     umq_t *umq = (umq_t *)(uintptr_t)umqh;
 
-    if ((umq == NULL) || (umq->umqh_tp == UMQ_INVALID_HANDLE) || (umq->pro_tp_ops == NULL) ||
+    if (poll_option == NULL || (umq == NULL) || (umq->umqh_tp == UMQ_INVALID_HANDLE) || (umq->pro_tp_ops == NULL) ||
         (umq->pro_tp_ops->umq_tp_poll == NULL) || buf == NULL || max_buf_count == 0) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "param invalid\n");
         return -UMQ_ERR_EINVAL;
     }
 
-    if (io_direction == UMQ_IO_ALL && max_buf_count == 1) {
+    if (poll_option->io_direction == UMQ_IO_ALL && max_buf_count == 1) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "poll umq tx and rx needs at least 2 buf\n");
         return -UMQ_ERR_EINVAL;
     }
 
-    int ret = umq->pro_tp_ops->umq_tp_poll(umq->umqh_tp, io_direction, buf, max_buf_count);
-    umq_perf_record_write_poll(start_timestamp, io_direction, ret == 0);
+    int ret = umq->pro_tp_ops->umq_tp_poll(umq->umqh_tp, poll_option, buf, max_buf_count);
+    umq_perf_record_write_poll(start_timestamp, poll_option->io_direction, ret == 0);
     return ret;
 }
 

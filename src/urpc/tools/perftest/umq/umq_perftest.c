@@ -289,9 +289,13 @@ static int umq_perftest_post_rx(umq_perftest_config_t *cfg)
         require_rx_count -= cur_batch_count;
     } while (require_rx_count > 0);
 
+    umq_poll_option_t poll_rx_option = {
+        .io_direction = UMQ_IO_TX,
+    };
+
 WAIT_UMQ_READY:
     do {
-        int ret = umq_poll(g_umq_perftest_ctx.umqh, UMQ_IO_TX, &buf, 1);
+        int ret = umq_poll(g_umq_perftest_ctx.umqh, &poll_rx_option, &buf, 1);
         if (ret != 0) {
             LOG_PRINT("poll tx get unexpected result %d\n", ret);
             break;
