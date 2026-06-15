@@ -865,7 +865,6 @@ static void bondp_health_task_check_mode(bondp_health_task_t *task,
     const bondp_health_check_cfg_t *cfg, uint64_t now_us)
 {
     bool primary_valid = atomic_load(&task->bondp_jetty->valid[task->primary_local_idx]);
-
     if (task->mode == HEALTH_MODE_BACKUP_CHECK && !primary_valid) {
         /* Primary link went down, switch to primary check mode */
         task->mode = HEALTH_MODE_PRIMARY_CHECK;
