@@ -230,9 +230,11 @@ TEST_F(UmqUBTest, test_umq_ub_bind_info_check)
     memset(&version, 0, sizeof(version));
     umq_ub_bind_dev_info_t dev;
     memset(&dev, 0, sizeof(dev));
-    umq_ub_bind_queue_info_t queue_info;
-    memset(&queue_info, 0, sizeof(queue_info));
-    queue_info.tp_mode = URMA_TM_RM;
+    size_t queue_info_alloc_size = sizeof(umq_ub_bind_queue_info_t) + sizeof(urma_rjetty_t);
+    umq_ub_bind_queue_info_t *queue_info_ptr = (umq_ub_bind_queue_info_t *)calloc(1, queue_info_alloc_size);
+    queue_info_ptr->rjetty_size = sizeof(urma_rjetty_t);
+    queue_info_ptr->rjetty[0].trans_mode = URMA_TM_RM;
+    queue_info_ptr->rjetty[0].tp_type = URMA_RTP;
     umq_ub_bind_fc_info_t fc_info;
     memset(&fc_info, 0, sizeof(fc_info));
     umq_ub_ctx_t dev_ctx;
@@ -251,7 +253,7 @@ TEST_F(UmqUBTest, test_umq_ub_bind_info_check)
     ASSERT_NE(umq_ub_bind_info_check(&queue, &info), 0);
 
     queue.flow_control.enabled = true;
-    info.queue_info = &queue_info;
+    info.queue_info = queue_info_ptr;
     ASSERT_NE(umq_ub_bind_info_check(&queue, &info), 0);
 
     info.fc_info = &fc_info;
@@ -285,12 +287,13 @@ TEST_F(UmqUBTest, test_umq_ub_bind_info_check)
     ASSERT_NE(umq_ub_bind_info_check(&queue, &info), 0);
     info.dev_info->buf_pool_mode = UMQ_BUF_SPLIT;
 
-    info.queue_info->is_binded = true;
+    queue_info_ptr->is_binded = true;
     ASSERT_NE(umq_ub_bind_info_check(&queue, &info), 0);
-    info.queue_info->is_binded = false;
+    queue_info_ptr->is_binded = false;
 
     ASSERT_NE(umq_ub_bind_info_check(&queue, &info), 0);
 
     queue.jetty[0]->jetty_id.id++;
     ASSERT_EQ(umq_ub_bind_info_check(&queue, &info), 0);
+    free(queue_info_ptr);
 }
