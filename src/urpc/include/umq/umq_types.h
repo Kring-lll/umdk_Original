@@ -143,6 +143,19 @@ typedef enum umq_dev_assign_mode {
 
 #define UMQ_INTERRUPT_FLAG_IO_DIRECTION         (1)         // enable arg direction
 
+#define UMQ_INTERRUPT_FD_LIST_LEN 20
+
+typedef struct umq_interrupt_fd_list {
+    int fd[UMQ_INTERRUPT_FD_LIST_LEN];
+    uint32_t fd_num;
+    uint32_t tp_handle_idx;
+} umq_interrupt_fd_list_t;
+
+typedef struct umq_interrupt_fd_table {
+    umq_interrupt_fd_list_t *fd_list;
+    uint32_t fd_list_num;
+} umq_interrupt_fd_table_t;
+
 typedef struct umq_interrupt_option {
     uint32_t flag;                      // indicates which below property takes effect
     umq_io_direction_t direction;
@@ -299,6 +312,17 @@ typedef struct umq_used_ports {
 #define UMQ_CREATE_FLAG_MAIN_UMQ            (1 << 11)       // indicate that the umq creates shared jfr
 #define UMQ_CREATE_FLAG_SUB_UMQ             (1 << 12)       // indicate that the umq uses shared jfr from main queue,
                                                             // associated with UMQ_CREATE_FLAG_SHARE_RQ
+#define UMQ_CREATE_FLAG_SHARE_TRANSPORT     (1 << 13)      // jetty pool mode: creates shared jetty pool
+
+// Jetty pool configuration for SHARE_TRANSPORT mode (embedded in umq_create_option_t)
+typedef struct umq_jetty_pool_option {
+    uint32_t cache_size;           // Thread-local jetty cache size (0 means use default 16)
+    uint32_t max_nodes;            // Max nodes in pool (0 means use default 1024)
+    uint32_t batch_size;           // Batch size for allocating from global pool to cache (0 means use default 1)
+    uint32_t notify_threshold;     // Eventfd notify threshold (0 means use default 16)
+    uint32_t return_batch_size;    // Batch size for returning from cache to global pool (0 means use default 1)
+    uint32_t borrow_limit;         // Max WRs per borrow (0 means use default 1024)
+} umq_jetty_pool_option_t;
 
 typedef struct umq_create_option {
     /*************Required paramenters start*****************/
@@ -320,6 +344,7 @@ typedef struct umq_create_option {
     umq_tp_type_t tp_type;
     umq_used_ports_t used_ports;
     uint8_t priority;
+    umq_jetty_pool_option_t jetty_pool; // Jetty pool config for SHARE_TRANSPORT mode (0 means use defaults)
     /*************Optional paramenters end*******************/
 } umq_create_option_t;
 
@@ -620,6 +645,11 @@ typedef struct umq_cfg_get {
     umq_tp_type_t tp_type;        // tp_type of queue
     umq_tp_mode_t tp_mode;        // transport mode of queue
 } umq_cfg_get_t;
+
+typedef struct umq_poll_option {
+    umq_io_direction_t io_direction;
+    uint32_t tp_handle_idx;
+} umq_poll_option_t;
 
 #ifdef __cplusplus
 }
