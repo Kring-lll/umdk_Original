@@ -87,6 +87,7 @@ public:
     struct Params {
         __gm__ ElementRawScale *ptrScale{nullptr};
         LayoutScale layoutScale{};
+        __gm__ float *ptrWeightAux{nullptr};
         __gm__ ElementPerTokenScale *ptrPerTokenScale{nullptr};
         LayoutPerTokenScale layoutPerTokenScale{};
         __gm__ ElementD *ptrD{nullptr};
@@ -97,10 +98,12 @@ public:
 
         CATLASS_DEVICE
         Params(__gm__ ElementRawScale *ptrScale_, LayoutScale const &layoutScale_,
+               __gm__ float *ptrWeightAux_,
                __gm__ ElementPerTokenScale *ptrPerTokenScale_, LayoutPerTokenScale const &layoutPerTokenScale_,
                __gm__ ElementD *ptrD_, LayoutD const &layoutD_)
             : ptrScale(ptrScale_),
               layoutScale(layoutScale_),
+              ptrWeightAux(ptrWeightAux_),
               ptrPerTokenScale(ptrPerTokenScale_),
               layoutPerTokenScale(layoutPerTokenScale_),
               ptrD(ptrD_),
@@ -138,6 +141,10 @@ public:
             ubDList[i] = resource.ubBuf.template GetBufferByByte<ElementD>(ubOffset);
             ubOffset += TileShape::COUNT * sizeof(ElementD);
 
+            //ubweighAux局部tensor
+            ubweighAuxList[i] = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
+            ubOffset += TileShape::COLUMN * sizeof(float);
+
             eventUbCVMTE2List[i] = eventVMTE2++;
             eventUbCMTE2VList[i] = eventMTE2V++;
             eventUbScaleVMTE2List[i] = eventVMTE2++;
@@ -159,7 +166,7 @@ public:
         ubPerTokenScaleBrcb = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
         ubOffset += TileShape::ROW * BYTE_PER_BLK;
         ubPerTokenMul = ubCFp32;
-
+ 
         if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
             AlignUbOffset();
             epSendCountLocal_ = resource.ubBuf.template GetBufferByByte<int32_t>(ubOffset);
@@ -260,6 +267,11 @@ public:
         if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
             expertOffset = expertIdx * calcInfo.epWorldSize_;
         }
+        //w4A8适配 高位*16
+        constexpr float DEFAULT_MUL_SCALE = 16.0f;
+        //补偿矩阵
+        AscendC::GlobalTensor<float> weightAux;
+        weightAux.SetGlobalBuffer(params.ptrWeightAux);
 
         callback();
         // Calculate the offset of the current block
@@ -296,7 +308,6 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventUbCVMTE2List[ubListId]);
             copyGmToUbC(ubC, gmTileC, layoutUbC, layoutGmTileC);
             AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventUbCMTE2VList[ubListId]);
-
             auto scaleTileOffset = tileOffset.template GetCoordByAxis<1>();
             auto scaleTileShape = actualTileShape.template GetCoordByAxis<1>();
 
@@ -307,8 +318,15 @@ public:
             auto layoutFp32UbScale = LayoutScale::template MakeLayoutInUb<ElementFp32Scale>(scaleTileShape);
             auto &ubRawScale = ubRawScaleList[ubListId];
             auto layoutRawUbScale = LayoutScale::template MakeLayoutInUb<ElementRawScale>(scaleTileShape);
-
+            
+            //搬运weighAux矩阵
+            auto &ubweighAux = ubweighAuxList[ubListId];
+            AscendC::DataCopyExtParams copyParams{1, static_cast<uint32_t>(TileShape::COLUMN * sizeof(float)), 0, 0, 0};
+            AscendC::DataCopyPadExtParams<float> padParams{false, 0, 0, 0};
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventUbScaleVMTE2List[ubListId]);
+            //搬运weighAux矩阵
+            AscendC::DataCopyPad(ubweighAux, weightAux[params.layoutScale.GetOffset(scaleTileOffset)], copyParams, padParams);
+           
             if constexpr (!std::is_same_v<ElementRawScale, ElementFp32Scale>) {
                 copyGmToUbScale(ubRawScale, gmTileScale, layoutRawUbScale, layoutGmTileScale);
             } else {
@@ -319,12 +337,16 @@ public:
             auto perTokenScaleTileOffset = tileOffset.template GetCoordByAxis<0>();
             auto perTokenScaleTileShape = actualTileShape.template GetCoordByAxis<0>();
 
-            auto gmTilePerTokenScale = gmPerTokenScale[params.layoutPerTokenScale.GetOffset(perTokenScaleTileOffset)];
-            auto layoutGmTilePerTokenScale = params.layoutPerTokenScale.GetTileLayout(perTokenScaleTileShape);
+             //重新计算offset 
+            Catlass::Coord<1> newperTokenScaleOffset(perTokenScaleTileOffset[0] / 2);
+            Catlass::Coord<1> newperTokenScaleTileShape(perTokenScaleTileShape[0] / 2);
+
+            auto gmTilePerTokenScale = gmPerTokenScale[params.layoutPerTokenScale.GetOffset(newperTokenScaleOffset)];
+            auto layoutGmTilePerTokenScale = params.layoutPerTokenScale.GetTileLayout(newperTokenScaleTileShape);
 
             auto &ubPerTokenScale = ubPerTokenScaleList[ubListId];
             auto layoutUbPerTokenScale =
-                LayoutScale::template MakeLayoutInUb<ElementPerTokenScale>(perTokenScaleTileShape);
+                LayoutScale::template MakeLayoutInUb<ElementPerTokenScale>(newperTokenScaleTileShape);
 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventUbPerTokenScaleVMTE2List[ubListId]);
             copyGmToUbPerTokenScale(ubPerTokenScale, gmTilePerTokenScale, layoutUbPerTokenScale,
@@ -343,6 +365,47 @@ public:
             tileRowBroadcastMul(ubMul, ubCFp32, ubFp32Scale);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventUbScaleVMTE2List[ubListId]);
 
+            //W4A8改动 高低位合并
+            AscendC::PipeBarrier<PIPE_V>();
+            // 高位*8  tile中每行分四部分处理 256*sizeof(float) = 1024  1024 /256 （每个ub256字节） = 4
+            // tile 第一部分 32UB大小
+            AscendC::Muls(ubMul, ubMul, DEFAULT_MUL_SCALE, 64, 16, {1, 1, 64, 64});
+            AscendC::PipeBarrier<PIPE_V>();
+            //tile 第二部分 32UB大小
+            AscendC::Muls(ubMul[TileShape::COLUMN / 4], ubMul[TileShape::COLUMN / 4], DEFAULT_MUL_SCALE, 64, 16, {1, 1, 64, 64});
+            AscendC::PipeBarrier<PIPE_V>();
+            //tile 第三部分 32UB大小
+            AscendC::Muls(ubMul[TileShape::COLUMN  / 2], ubMul[TileShape::COLUMN  / 2], DEFAULT_MUL_SCALE, 64, 16, {1, 1, 64, 64});
+            AscendC::PipeBarrier<PIPE_V>();
+            //tile 第四部分 32UB大小
+            AscendC::Muls(ubMul[TileShape::COLUMN * 3 / 4], ubMul[TileShape::COLUMN * 3 / 4], DEFAULT_MUL_SCALE, 64, 16, {1, 1, 64, 64});
+            AscendC::PipeBarrier<PIPE_V>();
+            //高低位相加
+            //tile 第一部分 32UB大小
+            AscendC::Add(ubMul, ubMul, ubMul[TileShape::COLUMN], 64, 16, {1, 1, 1, 32, 64, 64});
+            AscendC::PipeBarrier<PIPE_V>();
+            //tile 第二部分 32UB大小
+            AscendC::Add(ubMul[TileShape::COLUMN / 4], ubMul[TileShape::COLUMN / 4] , ubMul[TileShape::COLUMN  +  TileShape::COLUMN / 4], 64, 16, {1, 1, 1, 32, 64, 64});
+            AscendC::PipeBarrier<PIPE_V>();
+            //tile 第三部分 32UB大小
+            AscendC::Add(ubMul[TileShape::COLUMN / 2], ubMul[TileShape::COLUMN / 2] , ubMul[TileShape::COLUMN  +  TileShape::COLUMN /2], 64, 16, {1, 1, 1, 32, 64, 64});
+            AscendC::PipeBarrier<PIPE_V>();
+            //tile 第四部分 32UB大小
+            AscendC::Add(ubMul[TileShape::COLUMN * 3 / 4], ubMul[TileShape::COLUMN *3 / 4] , ubMul[TileShape::COLUMN  +  TileShape::COLUMN *3 / 4], 64, 16, {1, 1, 1, 32, 64, 64});
+            AscendC::PipeBarrier<PIPE_V>();
+            //补偿矩阵相加 8 * weight
+            //tile 第一部分 32 UB大小
+            AscendC::Add(ubMul, ubMul, ubweighAux, 64, 16, {1, 1, 1,32, 32, 0});
+            AscendC::PipeBarrier<PIPE_V>();
+            //tile 第二部分 32 UB大小
+            AscendC::Add(ubMul[TileShape::COLUMN /4 ], ubMul[TileShape::COLUMN / 4], ubweighAux[TileShape::COLUMN / 4], 64, 16, {1, 1,1, 32, 32, 0});
+            AscendC::PipeBarrier<PIPE_V>();
+            //tile 第三部分 32 UB大小
+            AscendC::Add(ubMul[TileShape::COLUMN / 2], ubMul[TileShape::COLUMN  / 2], ubweighAux[TileShape::COLUMN  / 2], 64, 16, {1, 1,1, 32, 32, 0});
+            AscendC::PipeBarrier<PIPE_V>();
+            //tile 第四部分 32 UB大小
+            AscendC::Add(ubMul[TileShape::COLUMN  *3 / 4], ubMul[TileShape::COLUMN *3 / 4], ubweighAux[TileShape::COLUMN *3 / 4], 64, 16, {1, 1,1, 32, 32, 0});
+            
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventUbPerTokenScaleMTE2VList[ubListId]);
             tileBroadcastOneBlk(ubPerTokenScaleBrcb, ubPerTokenScale);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventUbPerTokenScaleVMTE2List[ubListId]);
@@ -353,26 +416,33 @@ public:
 
             auto &ubD = ubDList[ubListId];
             LayoutD layoutUbD{actualTileShape, ubTileStride};
-
+            auto newlayoutUbD = layoutUbD;                     // 拷贝
+            newlayoutUbD.shape(0) = newlayoutUbD.shape(0) / 2; 
             AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(eventUbDMTE3VList[ubListId]);
             AscendC::Cast(ubD, ubPerTokenMul, AscendC::RoundMode::CAST_RINT, TileShape::COUNT);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
 
-            auto tileOffsetD = params.layoutD.GetOffset(tileOffset);
+           // auto tileOffsetD = params.layoutD.GetOffset(tileOffset);
             auto layoutGmTileD = params.layoutD.GetTileLayout(actualTileShape);
+
+            
+            MatrixCoord newtileOffset(tileOffset.row() / 2, tileOffset.column());
+            auto tileOffsetD = params.layoutD.GetOffset(newtileOffset);
+            auto gmTileD = gmD[params.layoutD.GetOffset(newtileOffset)];
+
+            auto newlayoutGmTileD = layoutGmTileD;                     // 拷贝
+            newlayoutGmTileD.shape(0) = layoutGmTileD.shape(0) / 2; 
 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
 
             if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
                 if (expertIdx == UINT32_MAX) {
-                    auto gmTileD = gmD[tileOffsetD];
-                    copyUbToGmD(gmTileD, ubD, layoutGmTileD, layoutUbD);
+                    copyUbToGmD(gmTileD, ubD, newlayoutGmTileD,  newlayoutUbD);
                 } else {
-                    DoCombineSend(ubD, layoutGmTileD, layoutUbD, groupOffsetD, expertIdx, tileOffsetD);
+                    DoCombineSend(ubD, newlayoutGmTileD, newlayoutUbD, groupOffsetD, expertIdx, tileOffsetD);
                 }
             } else {
-                auto gmTileD = gmD[tileOffsetD];
-                copyUbToGmD(gmTileD, ubD, layoutGmTileD, layoutUbD);
+                copyUbToGmD(gmTileD, ubD, newlayoutGmTileD, newlayoutUbD);
             }
 
             AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(eventUbDMTE3VList[ubListId]);
@@ -391,6 +461,8 @@ private:
     AscendC::LocalTensor<ElementFp32Scale> ubFp32ScaleList[UB_STAGES];
     AscendC::LocalTensor<ElementPerTokenScale> ubPerTokenScaleList[UB_STAGES];
     AscendC::LocalTensor<ElementD> ubDList[UB_STAGES];
+    //补偿矩阵
+    AscendC::LocalTensor<float> ubweighAuxList[UB_STAGES];
 
     int32_t eventUbCVMTE2List[UB_STAGES];
     int32_t eventUbCMTE2VList[UB_STAGES];

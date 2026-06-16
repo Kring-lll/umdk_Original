@@ -9,6 +9,6 @@ endif()
 if (DEFINED ENV{ENABLE_COV})
     add_ops_compile_options(ALL OPTIONS --save-temp-files)
 endif()
-add_ops_compile_options(ALL OPTIONS -DASCENDC_DUMP=0 --cce-auto-sync=off)
+add_ops_compile_options(ALL OPTIONS -DASCENDC_DUMP=0 --cce-auto-sync=off -DCATLASS_ARCH=2201)
 
 add_kernels_compile()

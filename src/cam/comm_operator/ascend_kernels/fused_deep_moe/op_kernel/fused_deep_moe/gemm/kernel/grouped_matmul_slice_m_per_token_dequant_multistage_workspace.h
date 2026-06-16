@@ -93,6 +93,8 @@ public:
         LayoutA layoutA;
         __gm__ ElementB *ptrB;
         LayoutB layoutB;
+        __gm__ float *gmWeightAux;
+        __gm__ float *gmShareWeightAux;
         __gm__ ElementScale *ptrScale;
         LayoutScale layoutScale;
         __gm__ ElementPerTokenScale *ptrPerTokenScale;
@@ -119,7 +121,9 @@ public:
 
         CATLASS_DEVICE
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_, LayoutA layoutA_,
-               GM_ADDR ptrB_, LayoutB layoutB_, GM_ADDR ptrScale_, LayoutScale layoutScale_, GM_ADDR ptrPerTokenScale_,
+               GM_ADDR ptrB_, LayoutB layoutB_, 
+               GM_ADDR gmWeightAux_, GM_ADDR gmShareWeightAux_ , //gmWeightAux
+               GM_ADDR ptrScale_, LayoutScale layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale layoutPerTokenScale_, GM_ADDR ptrD_, LayoutD layoutD_, uint32_t batchSize_,
                GemmCoord sharedGmm2ProblemShape_, GM_ADDR ptrSharedA_, GM_ADDR ptrSharedB_, GM_ADDR ptrSharedD_,
                GM_ADDR ptrSharedScale_, GM_ADDR ptrSharedPtrPerTokenScale_, LayoutA sharedLayoutA_,
@@ -133,6 +137,8 @@ public:
               layoutA(layoutA_),
               ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
               layoutB(layoutB_),
+              gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)),
+              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)),//共享专家补偿矩阵
               ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
               layoutScale(layoutScale_),
               ptrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrPerTokenScale_)),
@@ -183,7 +189,10 @@ public:
 
         // Represent the full gm
         AscendC::GlobalTensor<ElementA> gmA;
+        AscendC::GlobalTensor<AscendC::int4b_t> gmA_Int4;
+        //int 4左矩阵和之前gmA指向同一个位置
         gmA.SetGlobalBuffer(params.ptrA);
+        gmA_Int4.SetGlobalBuffer(params.ptrA);
         AscendC::GlobalTensor<ElementB> gmB;
         AscendC::ListTensorDesc gmBlistTensorDesc(reinterpret_cast<__gm__ void *>(params.ptrB));
         if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
@@ -204,15 +213,16 @@ public:
         uint32_t stageId = 0;
         uint32_t stageUsed = 0;
         uint32_t startCoreIdx = 0;
+        //params.problemCount 改成3
         for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
             if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                 gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(
                         gmBlistTensorDesc.GetDataPtr<int32_t>(groupIdx)));
             }
-            uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
-                                                : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
-            GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
-
+            
+            uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx) * 2
+                                                : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1))* 2;
+            GemmCoord inGroupProblemShape{currentM  , params.problemShape.n(), params.problemShape.k()};
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
             LayoutB layoutB = params.layoutB;
 
@@ -246,11 +256,11 @@ public:
 
                 // Compute block-scoped matrix multiply-add
                 if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
-                    blockMmad(gmA[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
+                    blockMmad(gmA_Int4[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
                               gmC[gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
                 } else {
                     callbackBeforeFixpipe();
-                    blockMmad(gmA[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
+                    blockMmad(gmA_Int4[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
                               gmC[gmOffsetC], layoutC, actualBlockShape);
                     callbackAfterFixpipe();
                 }
@@ -270,8 +280,7 @@ public:
             gmA.SetGlobalBuffer(params.ptrSharedA);
             gmB.SetGlobalBuffer(params.ptrSharedB);
             uint32_t softStageUsed = 0;
-            GemmCoord inGroupProblemShape = params.sharedGmm2ProblemShape;
-
+            GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m()  * 2, params.sharedGmm2ProblemShape.n(), params.problemShape.k()};
             LayoutA layoutA = params.sharedLayoutA;
             LayoutB layoutB = params.sharedLayoutB;
 
@@ -380,29 +389,42 @@ public:
             AscendC::ListTensorDesc gmScaleListTensor;
             gmScaleListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(params.ptrScale));
             __gm__ ElementScale* gmScalePtr;
+            
+            //补偿矩阵
+            AscendC::ListTensorDesc gmWeightAuxListTensor;
+            gmWeightAuxListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(params.gmWeightAux));
+            __gm__ float* gmWeightAuxPtr;
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                 gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(gmScaleListTensor.GetDataPtr<int32_t>(0));
+                //补偿矩阵
+                gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(gmWeightAuxListTensor.GetDataPtr<int32_t>(0));
             }
-            for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
+
+            //params.problemCount 改成3
+            for (uint32_t groupIdx = 0; groupIdx < params.problemCount ; ++groupIdx) {
                 uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
                                                     : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
-                GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
-
+                GemmCoord inGroupProblemShape{currentM * 2, params.problemShape.n(), params.problemShape.k()};
+                GemmCoord pertokenGroupProblemShape{currentM , params.problemShape.n(), params.problemShape.k()};
                 LayoutScale layoutScale = params.layoutScale;
                 LayoutPerTokenScale layoutPerTokenScale =
-                    params.layoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
-                LayoutD layoutD = params.layoutD.GetTileLayout(inGroupProblemShape.GetCoordMN());
+                    params.layoutPerTokenScale.GetTileLayout(pertokenGroupProblemShape.template GetCoordByAxis<0>());
+                LayoutD layoutD = params.layoutD.GetTileLayout(pertokenGroupProblemShape.GetCoordMN());
                 EpilogueParams epilogueParams;
                 if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                     gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(
                                     gmScaleListTensor.GetDataPtr<int32_t>(groupIdx));
+                    gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(
+                                    gmWeightAuxListTensor.GetDataPtr<int32_t>(groupIdx));
                     epilogueParams = EpilogueParams {
                             gmScalePtr, layoutScale,
+                            gmWeightAuxPtr,
                             params.ptrPerTokenScale + gmGroupOffsetPerTokenScale, layoutPerTokenScale,
                             params.ptrD + gmGroupOffsetD, layoutD};
                 } else {
                     epilogueParams = EpilogueParams{gmScalePtr + gmGroupOffsetScale,
                                               layoutScale,
+                                              gmWeightAuxPtr + gmGroupOffsetScale,
                                               params.ptrPerTokenScale + gmGroupOffsetPerTokenScale,
                                               layoutPerTokenScale,
                                               params.ptrD + gmGroupOffsetD,
@@ -424,7 +446,6 @@ public:
                     auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
                     Callback callbackBeforeBlockEpilogue = MakeCallbackWithCall2(&aicWaitFuncList[stageId]);
                     Callback callbackAfterBlockEpilogue = MakeCallbackWithCall2(&aicSetFuncList[stageId]);
-
                     callbackBeforeBlockEpilogue();
                     blockEpilogue(gmGroupOffsetD, groupIdx, blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC,
                                   layoutBlockC);
@@ -436,8 +457,8 @@ public:
                 if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                     gmGroupOffsetScale += inGroupProblemShape.n();
                 }
-                gmGroupOffsetPerTokenScale += inGroupProblemShape.m();
-                gmGroupOffsetD += inGroupProblemShape.m() * inGroupProblemShape.n();
+                gmGroupOffsetPerTokenScale += pertokenGroupProblemShape.m();
+                gmGroupOffsetD += pertokenGroupProblemShape.m() * inGroupProblemShape.n();
 
                 startCoreIdx = (startCoreIdx + coreLoops) % coreNum;
             }
@@ -447,8 +468,7 @@ public:
                     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
                         AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
                     }
-                    GemmCoord inGroupProblemShape = params.sharedGmm2ProblemShape;
-
+                    GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m()  * 2, params.sharedGmm2ProblemShape.n(), params.problemShape.k()};
                     LayoutScale layoutScale = params.layoutScale;
                     LayoutPerTokenScale layoutPerTokenScale =
                         params.sharedLayoutPerTokenScale.GetTileLayout(
@@ -457,6 +477,7 @@ public:
 
                     EpilogueParams epilogueParams{
                         params.ptrSharedScale, layoutScale,
+                        params.gmShareWeightAux,
                         params.ptrSharedPtrPerTokenScale, layoutPerTokenScale,
                         params.ptrSharedD, layoutD
                     };

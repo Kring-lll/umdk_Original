@@ -15,6 +15,7 @@
         op.Init(x, expert_ids, gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale, \
                 expert_scales, share_gmm1_weight, share_gmm1_weight_scale, \
                 share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, share_smooth_scales, x_active_mask, \
+                gmm1_bias, gmm2_bias, share_gmm1_bias, share_gmm2_bias, \
                 output, share_output, expertTokenNums, \
                 workspace, nullptr, &tiling_data); \
         op.Process()
@@ -36,6 +37,8 @@ extern "C" __global__ __aicore__ void fused_deep_moe(
     GM_ADDR share_gmm1_weight, GM_ADDR share_gmm1_weight_scale,
     GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
     GM_ADDR expert_smooth_scales, GM_ADDR share_smooth_scales, GM_ADDR x_active_mask,
+    GM_ADDR gmm1_bias, GM_ADDR gmm2_bias,
+    GM_ADDR share_gmm1_bias, GM_ADDR share_gmm2_bias,
     // output
     GM_ADDR output, GM_ADDR share_output, GM_ADDR expertTokenNums,
     // system
