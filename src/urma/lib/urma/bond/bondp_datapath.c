@@ -271,7 +271,8 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
         if (ret != 0) {
             return ret;
         }
-        ret = convert_jfs_vwr_to_pwr(pwr, send_idx, target_idx, bdp_comp);
+        bool msn_enable = bdp_tjetty->is_msn_enabled;
+        ret = convert_jfs_vwr_to_pwr(pwr, send_idx, target_idx, bdp_comp, msn_enable);
         if (ret != 0) {
             return ret;
         }
@@ -369,7 +370,8 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
         }
 
         add_vwr_use_cnt(pwr);
-        ret = convert_jfs_vwr_to_pwr(pwr, wr_entry->send_idx, wr_entry->target_idx, bdp_comp);
+        bool msn_enable = bdp_tjetty->is_msn_enabled;
+        ret = convert_jfs_vwr_to_pwr(pwr, wr_entry->send_idx, wr_entry->target_idx, bdp_comp, msn_enable);
         if (ret != 0) {
             URMA_LOG_ERR("Failed to convert jfs wr\n");
             convert_jfs_pwr_to_vwr_resend(pwr, &wr_entry->target_vjetty->v_tjetty);
