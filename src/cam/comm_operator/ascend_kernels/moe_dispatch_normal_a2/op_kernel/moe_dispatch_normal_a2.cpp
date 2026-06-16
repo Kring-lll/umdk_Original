@@ -26,7 +26,7 @@ using namespace AscendC;
 using namespace MoeDistributeDispatchA2Impl;
 using namespace Cam;
 
-extern "C" __global__ __aicore__ void dispatch_normal_a2(
+extern "C" __global__ __aicore__ void moe_dispatch_normal_a2(
     GM_ADDR x, GM_ADDR expertIds, GM_ADDR scales, GM_ADDR xActiveMask, GM_ADDR expertScales, GM_ADDR tokenServerIdx,
     GM_ADDR tokenServerCnt, GM_ADDR epRankTokenCnt, GM_ADDR srcOffsetRankTokenIdx, GM_ADDR dstOffsetRankTokenIdx,
     GM_ADDR recvX, GM_ADDR dynamicScalesOut, GM_ADDR expandIdxOut, GM_ADDR expertTokenNumsOut, GM_ADDR epRecvCountOut,
