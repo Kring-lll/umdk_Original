@@ -321,7 +321,7 @@ static ge::graphStatus GetAttrAndSetTilingData(gert::TilingContext *context, con
     OP_TILING_CHECK(moeExpertNum > MAX_MOE_EXERT_NUM, OP_LOGE(nodeName, "moeExpertNum must <= %d.", MAX_MOE_EXERT_NUM),
                     return ge::GRAPH_FAILED);
     OP_TILING_CHECK(moeExpertNum <= 0, OP_LOGE(nodeName, "moeExpertNum must > 0."), return ge::GRAPH_FAILED);
-    OP_TILING_CHECK(sharedExpertNum != 1, OP_LOGE(nodeName, "sharedExpertNum must be 1."), return ge::GRAPH_FAILED);
+    OP_TILING_CHECK(sharedExpertNum != 0, OP_LOGE(nodeName, "sharedExpertNum must be 0."), return ge::GRAPH_FAILED);
     OP_TILING_CHECK(moeExpertNum % (epRankSize - sharedExpertRankNum) != 0,
                     OP_LOGE(nodeName, "moeExpertNum must be divisible by (epRankSize - sharedExpertRankNum)."),
                     return ge::GRAPH_FAILED);
