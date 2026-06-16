@@ -166,11 +166,11 @@ static ge::graphStatus GetAttrAndSetTilingData(gert::TilingContext *context,
     tilingData.moeCombineNormalInfo.tpRankId = static_cast<uint32_t>(*tpRankIdPtr);
     tilingData.moeCombineNormalInfo.moeExpertNum = static_cast<uint32_t>(moeExpertNum);
     const gert::StorageShape *probGradStorageShape = context->GetInputShape(PROB_GRAD_IDX_INDEX);
-        if (probGradStorageShape == nullptr || probGradStorageShape->GetStorageShape().GetDimNum() != TWO_DIMS) {
-            tilingData.moeCombineNormalInfo.isGetProb = false;
-        } else {
-            tilingData.moeCombineNormalInfo.isGetProb = true;
-        }
+    if (probGradStorageShape == nullptr || probGradStorageShape->GetStorageShape().GetDimNum() != TWO_DIMS) {
+        tilingData.moeCombineNormalInfo.isGetProb = false;
+    } else {
+        tilingData.moeCombineNormalInfo.isGetProb = true;
+    }
     return ge::GRAPH_SUCCESS;
 }
 
