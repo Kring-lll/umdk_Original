@@ -97,7 +97,7 @@ BuildAscendProj() {
         rm -f ./${proj_name}/pregen/build_out/autogen/aclnn_dispatch_layout.cpp
         rm -f ./${proj_name}/pregen/build_out/autogen/aclnn_dispatch_layout.h
     else
-        rm -f ./${proj_name}/pregen/build_out/autogen/*fused_deep_moe*
+        rm -f ./${proj_name}/pregen/build_out/autogen/*fused_deep_moe[!_]*
         rm -f ./${proj_name}/pregen/build_out/autogen/*zero_buffer*
     fi
 
