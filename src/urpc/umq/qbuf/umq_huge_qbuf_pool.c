@@ -507,6 +507,7 @@ int umq_huge_qbuf_pool_info_get(umq_qbuf_pool_stats_t *qbuf_pool_stats)
         qbuf_pool_info = &qbuf_pool_stats->qbuf_pool_info[qbuf_pool_stats->num];
         pool = &g_huge_pool_ctx.pool[i];
         block_size = pool->block_size;
+        qbuf_pool_info->type = UMQ_QBUF_POOL_TYPE_MEDIUM + i;
         qbuf_pool_info->mode = g_huge_pool_ctx.mode;
         qbuf_pool_info->total_size = pool->total_size;
         qbuf_pool_info->headroom_size = g_huge_pool_ctx.headroom_size;
