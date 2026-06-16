@@ -246,10 +246,9 @@ static void map_fadd_vwr_to_path(urma_jfs_wr_t *send_wr, int send_idx, int targe
 }
 
 urma_status_t convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target_idx,
-                                     bondp_comp_t *bdp_comp)
+                                     bondp_comp_t *bdp_comp, bool msn_enable)
 {
     uint64_t opcode_tag = 0;
-    bool msn_enable = bdp_comp->bondp_ctx->msn_enable;
 
     switch (wr->opcode) {
         case URMA_OPC_SEND:

@@ -1837,6 +1837,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
                      EID_ARGS(rjetty->jetty_id.eid), rjetty->jetty_id.id);
         goto FREE_TJETTY;
     }
+    bdp_tjetty->is_msn_enable = rvjetty_info.is_msn_enable;
 
     (void)init_all_indices(bdp_ctx, bdp_ctx->enabled_indices, &bdp_ctx->enabled_count, NULL, NULL);
 
