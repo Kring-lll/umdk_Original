@@ -9,9 +9,76 @@
 #include "bondp_context_table.h"
 #include "urma_api.h"
 #include "urma_log.h"
+#include "ub_hash.h"
+
+#define BONDP_FAILBACK_TASK_HASH_BASIS 0x5fb2a17c
 
 static void bondp_failback_rebuild_task(void *arg);
 static void bondp_failback_send_next_req_task(void *arg);
+static void bondp_failback_task_destroy(bondp_failback_task_t *task);
+static void bondp_failback_cancel_timer(bondp_failback_task_t *task);
+static bondp_failback_task_t *bondp_failback_task_table_lookup(bondp_context_t *bdp_ctx,
+    uint32_t vjetty_id, uint32_t pjetty_idx);
+
+// ========== failback task 哈希表 ==========
+
+static uint32_t bondp_failback_task_hash_f(void *key)
+{
+    return ub_hash_bytes(key, sizeof(bondp_failback_task_key_t), BONDP_FAILBACK_TASK_HASH_BASIS);
+}
+
+static bool bondp_failback_task_comp_f(hmap_node_t *node, void *key)
+{
+    bondp_failback_task_t *task = CONTAINER_OF_FIELD(node, bondp_failback_task_t, hmap_node);
+    bondp_failback_task_key_t *k = (bondp_failback_task_key_t *)key;
+    return task->vjetty_id == k->vjetty_id && task->pjetty_idx == k->pjetty_idx;
+}
+
+static void bondp_failback_task_free_f(hmap_node_t *node)
+{
+    bondp_failback_task_t *task = CONTAINER_OF_FIELD(node, bondp_failback_task_t, hmap_node);
+    (void)node;
+}
+
+//TODO: task的hashtable是否跟随ctx
+int bondp_failback_task_table_init(bondp_context_t *bdp_ctx)
+{
+    if (bdp_ctx == NULL) {
+        return BONDP_FB_ERR;
+    }
+    return bondp_hash_table_create(&bdp_ctx->failback_task_table,
+        BONDP_FAILBACK_TASK_TABLE_SIZE,
+        bondp_failback_task_comp_f,
+        bondp_failback_task_free_f,
+        bondp_failback_task_hash_f);
+}
+
+static bondp_failback_task_t *bondp_failback_task_table_lookup(bondp_context_t *bdp_ctx,
+    uint32_t vjetty_id, uint32_t pjetty_idx)
+{
+    if (bdp_ctx == NULL) {
+        return NULL;
+    }
+    bondp_failback_task_key_t key = { .vjetty_id = vjetty_id, .pjetty_idx = pjetty_idx };
+    uint32_t hash = bondp_failback_task_hash_f(&key);
+    hmap_node_t *node = bondp_hash_table_lookup_without_lock(&bdp_ctx->failback_task_table, &key, hash);
+    if (node == NULL) {
+        return NULL;
+    }
+    return CONTAINER_OF_FIELD(node, bondp_failback_task_t, hmap_node);
+}
+
+static int bondp_failback_task_table_add(bondp_context_t *bdp_ctx, bondp_failback_task_t *task)
+{
+    bondp_failback_task_key_t key = { .vjetty_id = task->vjetty_id, .pjetty_idx = task->pjetty_idx };
+    uint32_t hash = bondp_failback_task_hash_f(&key);
+    return bondp_hash_table_add_with_hash_without_lock(&bdp_ctx->failback_task_table, &task->hmap_node, hash);
+}
+
+static void bondp_failback_task_table_remove(bondp_context_t *bdp_ctx, bondp_failback_task_t *task)
+{
+    bondp_hash_table_remove_without_lock(&bdp_ctx->failback_task_table, &task->hmap_node);
+}
 
 static int bondp_find_target_idx_by_local_idx(
     const bondp_target_jetty_t *bdp_tjetty, int local_idx, int *target_idx)
@@ -48,9 +115,9 @@ bondp_failback_task_t *bondp_failback_task_create(
     task->bdp_ctx = bdp_ctx;
     task->bondp_jetty = bondp_jetty;
     task->vjetty_id = bondp_jetty->v_jetty.jetty_id.id;
+    task->pjetty_idx = (uint32_t)failed_local_idx;
 
     // --- 路径信息 ---
-    task->failed_local_idx = failed_local_idx;
     task->target_idx = -1;
     task->new_pjetty = NULL;
     task->new_pjetty_id = 0;
@@ -63,9 +130,13 @@ bondp_failback_task_t *bondp_failback_task_create(
     return task;
 }
 
-void bondp_failback_task_destroy(bondp_failback_task_t *task)
+static void bondp_failback_task_destroy(bondp_failback_task_t *task)
 {
     if (task == NULL) {
+        return;
+    }
+
+    if (task->closed) {
         return;
     }
 
@@ -77,10 +148,9 @@ void bondp_failback_task_destroy(bondp_failback_task_t *task)
         task->new_pjetty = NULL;
     }
 
-    // 从 bondp_comp_t 的 failback_tasks 数组中移除
-    if (task->bondp_jetty != NULL && task->failed_local_idx >= 0 &&
-        task->failed_local_idx < URMA_UBAGG_DEV_MAX_NUM) {
-        task->bondp_jetty->failback_tasks[task->failed_local_idx] = NULL;
+    // 从 failback_task_table 中移除
+    if (task->bdp_ctx != NULL) {
+        bondp_failback_task_table_remove(task->bdp_ctx, task);
     }
 
     task->closed = true;
@@ -98,7 +168,7 @@ static uint32_t bondp_failback_next_backoff(uint32_t cur, uint32_t max_ms)
 }
 
 //终止failback自调度
-void bondp_failback_cancel_timer(bondp_failback_task_t *task)
+static void bondp_failback_cancel_timer(bondp_failback_task_t *task)
 {
     if (!task->timer_valid) {
         return;
@@ -127,13 +197,15 @@ int bondp_failback_on_cqe(bondp_context_t *bdp_ctx,
     struct bondp_comp *bondp_jetty,
     int failed_local_idx)
 {
-    // 校验: 同一 vjetty 同一 failed_local_idx 只能有一个活跃 task
     if (failed_local_idx < 0 || failed_local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
         return BONDP_FB_ERR;
     }
-    if (bondp_jetty->failback_tasks[failed_local_idx] != NULL) {
+
+    uint32_t vjetty_id = bondp_jetty->v_jetty.jetty_id.id;
+    bondp_failback_task_t *existing = bondp_failback_task_table_lookup(bdp_ctx, vjetty_id, (uint32_t)failed_local_idx);
+    if (existing != NULL) {
         URMA_LOG_WARN("Failback task already exists for vjetty=%u idx=%d, skip\n",
-            bondp_jetty->v_jetty.jetty_id.id, failed_local_idx);
+            vjetty_id, failed_local_idx);
         return BONDP_FB_OK;
     }
 
@@ -142,14 +214,14 @@ int bondp_failback_on_cqe(bondp_context_t *bdp_ctx,
         return TW_NO_MEMORY_ERROR;
     }
 
-    // TODO: 初始化 node_count 从 bdp_ctx 获取实际 NODE 数量/标号  标记不需要使用的nodeid
+    // TODO: 初始化 node_count 从 bdp_ctx 获取实际 NODE 数量/标号  标记不需要使用的node_id
     // task->node_count = bdp_ctx->node_count;
-    for (int i=0; i < task->node_count; i++) {
+    for (uint32_t i = 0; i < task->node_count; i++) {
         task->node_states[i] = BONDP_FAILBACK_NODE_PENDING;
     }
 
-    // 注册 task 到 bondp_comp_t, 便于 RESP 到达时查找
-    bondp_jetty->failback_tasks[failed_local_idx] = task;
+    // 注册 task 到 failback_task_table
+    bondp_failback_task_table_add(bdp_ctx, task);
 
     task->state = BONDP_FAILBACK_STATE_WAIT_REBUILD_START;
     task->retry_ms = BONDP_FAILBACK_REBUILD_RETRY_INIT_MS;
@@ -231,7 +303,7 @@ static void bondp_failback_send_next_req_task(void *arg)
     //idx可以建立一个更加快速的映射表(优先级不高)
     if (ret != BONDP_FB_OK) {
         URMA_LOG_WARN("Failback REQ send failed, node[%u] vjetty=%u pjetty_idx=%d new_pjetty_id=%u\n",
-            idx, task->vjetty_id, task->failed_local_idx, task->new_pjetty_id);
+            idx, task->vjetty_id, task->pjetty_idx, task->new_pjetty_id);
     }
     task->next_send_idx = idx + 1;
     (void)bondp_failback_schedule(task, BONDP_FAILBACK_SEND_INTERVAL_MS, bondp_failback_send_next_req_task);
@@ -272,17 +344,21 @@ static bool bondp_handle_message(bondp_context_t *bdp_ctx, const bondp_failback_
     if (ctrl_type == BONDP_FAILBACK_CTRL_RESP) {
         URMA_LOG_INFO("Fallback RESP received, vjetty_id=%u pjetty_idx=%u pjetty_new_id=%u node_id=%u seq=%u\n",
             msg->in.vjetty_id, msg->in.pjetty_idx, msg->in.pjetty_new_id, msg->in.node_id, msg->in.req_seq);
-        //找到task的
-        bondp_failback_task_t *task = bondp_failback_find_task_by_resp(bdp_ctx, msg);
-        if (task == NULL) {
+
+        bondp_failback_task_t *task = bondp_failback_task_table_lookup(bdp_ctx, vjetty_id, msg->in.pjetty_idx);
+        if (task == NULL || task->closed) {
+            URMA_LOG_WARN("Fallback RESP: no active task for vjetty_id=%u pjetty_idx=%u\n",
+                vjetty_id, msg->in.pjetty_idx);
             return false;
         }
+
         int ret = bondp_failback_handle_node_notify(task, node_id);
         //此处略有冗余，主要目的是将task的生命周期完全归于failback.c ops仅处理原子操作
         if (task->node_count == task->notified_count) {
             bondp_failback_destroy_old_jetty(task);
             bondp_failback_task_destroy(task);
         }
+        //TODO: bondp_comp_t 存在valid数组，有待处理
         return (ret == BONDP_FB_OK);
     }
 

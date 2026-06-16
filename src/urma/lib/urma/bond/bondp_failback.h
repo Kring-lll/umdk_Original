@@ -7,6 +7,7 @@
 
 #include "bondp_worker.h"
 #include "bondp_types.h"
+#include "bondp_hash_table.h"
 
 #define BONDP_FB_OK                     (0)
 #define BONDP_FB_ERR                    (-1)
@@ -15,6 +16,8 @@
 #ifndef BOUNDP_FAILBACK_NODE_MAX_NUM
 #define BOUNDP_FAILBACK_NODE_MAX_NUM         512
 #endif
+
+#define BONDP_FAILBACK_TASK_TABLE_SIZE       64
 
 typedef enum bondp_failback_state {
     BONDP_FAILBACK_STATE_IDLE = 0,
@@ -27,9 +30,13 @@ typedef enum bondp_failback_state {
 } bondp_failback_state_t;
 
 // NODE 通知状态 (node_states[] 数组值)
-#define BONDP_FAILBACK_NODE_PENDING    0   // 尚未收到 RESP (包含 NOT_SENT 和已发送等待中)
-#define BONDP_FAILBACK_NODE_SATTLED   1   // 已收到 RESP
+#define BONDP_FAILBACK_NODE_PENDING    0
+#define BONDP_FAILBACK_NODE_SATTLED   1
 
+typedef struct bondp_failback_task_key {
+    uint32_t vjetty_id;
+    uint32_t pjetty_idx;
+} bondp_failback_task_key_t;
 
 typedef struct bondp_failback_task {
     // --- worker 调度 并发安全 ---
@@ -46,23 +53,24 @@ typedef struct bondp_failback_task {
     bondp_context_t *bdp_ctx;
     struct bondp_comp *bondp_jetty;
     uint32_t vjetty_id;
+    uint32_t pjetty_idx;
 
     // --- 路径信息 ---
-    int failed_local_idx;                 // 故障 pjetty 本端 idx
-    int target_idx;                        // 故障 pjetty 对端 idx
-    urma_jetty_t *new_pjetty;              // 新创建的 pjetty (暂存，收到 RESP 后替换)
-    uint32_t new_pjetty_id;                // 新 pjetty ID (用于 REQ payload)
+    int target_idx;
+    urma_jetty_t *new_pjetty;
+    uint32_t new_pjetty_id;
 
     // --- 广播通知跟踪 ---
-    uint32_t node_count;                                       // 需要通知的 NODE 总数
-    uint32_t notified_count;                                   // 已收到 RESP 的 NODE 数
-    uint32_t next_send_idx;                                    // 发送游标: 下一个待发送的 NODE 索引
-    uint8_t node_states[BOUNDP_FAILBACK_NODE_MAX_NUM]; // 按 NODE 索引, PENDING=0 / NOTIFIED=1
+    uint32_t node_count;
+    uint32_t notified_count;
+    uint32_t next_send_idx;
+    uint8_t node_states[BOUNDP_FAILBACK_NODE_MAX_NUM];
 
     // --- 哈希表挂载 ---
     hmap_node_t hmap_node;
 } bondp_failback_task_t;
 
+bondp_hash_table_t failback_task_table;
 
 #define BONDP_FAILBACK_REBUILD_START_DELAY_MS     10000U  /* 收到CQE后，延迟10秒开始重建 */
 #define BONDP_FAILBACK_REBUILD_RETRY_INIT_MS      1000U   /* 重建失败后，初始重试间隔1秒 */
@@ -86,8 +94,7 @@ int bondp_failback_on_cqe(bondp_context_t *bdp_ctx,
     struct bondp_comp *bondp_jetty,
     int failed_local_idx);
 
-void bondp_failback_task_destroy (bondp_failback_task_t *task);
-void bondp_failback_cancel_timer (bondp_failback_task_t *task);
+int bondp_failback_task_table_init(bondp_context_t *bdp_ctx);
 
 int bondp_handle_netlink_events(void);
 

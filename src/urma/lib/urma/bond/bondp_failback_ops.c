@@ -14,12 +14,12 @@
 
 int bondp_failback_rebuild_local_pjetty(bondp_failback_task_t *task)
 {
-    int local_idx = task->failed_local_idx;
     if (task == NULL || task->bondp_jetty == NULL ||
-        local_idx < 0 || local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        task->pjetty_idx >= URMA_UBAGG_DEV_MAX_NUM) {
         return BONDP_FB_ERR;
     }
 
+    int local_idx = (int)task->pjetty_idx;
     bondp_comp_t *bdp_jetty = task->bondp_jetty;
     bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
     if (bdp_jetty->p_jetty[local_idx] == NULL) {
@@ -88,7 +88,7 @@ int bondp_failback_send_req_to_node(bondp_failback_task_t *task, uint32_t node_i
     bondp_failback_msg_t req = {
         .in = {
             .vjetty_id = task->vjetty_id,
-            .pjetty_i_idx = (uint32_t)task->failed_local_idx,
+            .pjetty_i_idx = task->pjetty_idx,
             .pjetty_i_new_id = task->new_pjetty_id,
             .ctrl_type = BONDP_FAILBACK_CTRL_REQ,
             .req_seq = (uint8_t)task->req_seq,
@@ -103,11 +103,11 @@ int bondp_failback_send_req_to_node(bondp_failback_task_t *task, uint32_t node_i
     }
 
     URMA_LOG_INFO("Fallback REQ sent to node[%u], vjetty=%u pjetty_i_idx=%d new_pjetty_id=%u\n",
-        node_idx, task->vjetty_id, task->failed_local_idx, task->new_pjetty_id);
+        node_idx, task->vjetty_id, task->pjetty_idx, task->new_pjetty_id);
     return BONDP_FB_OK;
 }
 
-//TODO: 遍历对端所有vjetty的代码，找到存在的vjetty 是否会找到多个vjetty  是否改为
+//TODO: 遍历对端所有vtjetty的代码，是否会找到多个vtjetty  是否改为找到一个vjetty就重连一次，发一次RESP
 /*
  * 通过远端 vjetty_id 查找本地的 bondp_comp_t 和 bdp_tjetty
  *
@@ -244,7 +244,6 @@ int bondp_failback_handle_req(bondp_context_t *bdp_ctx, const bondp_failback_msg
             }
             bdp_tjetty->p_tjetty[pjetty_idx][ptjetty_idx] == new_ptjetty;
             //TODO: 参考 bondp_health_check.c:717 前后逻辑编写 正确性待校验
-            //TODO: valid处理
         }
     }
 
@@ -277,91 +276,7 @@ int bondp_failback_handle_req(bondp_context_t *bdp_ctx, const bondp_failback_msg
 
 
 /*
- * 通过 vjetty_id 查找本端的 bondp_comp_t
- *
- * 遍历 p_vjetty_id_table, 找到 comp_type == BONDP_COMP_JETTY 且
- * comp->v_jetty.jetty_id.id == vjetty_id 的 bondp_comp_t
- *
- * 用于 RESP 到达时找回对应的 failback task
- */
-bondp_comp_t *bondp_find_comp_by_vjetty_id(bondp_context_t *bdp_ctx, uint32_t vjetty_id)
-{
-    bondp_hash_table_t *tbl = &bdp_ctx->p_vjetty_id_table;
-    pthread_rwlock_rdlock(&tbl->lock);
-
-    bondp_comp_t *found_comp = NULL;
-    // 去重: 同一个 comp 可能在 table 中有多条 pjetty 记录
-    bondp_comp_t *seen_comps[URMA_UBAGG_DEV_MAX_NUM] = {NULL};
-    int seen_count = 0;
-
-    bdp_p_vjetty_id_t *entry = NULL;
-    HMAP_FOR_EACH(entry, hmap_node, &tbl->hmap) {
-        bondp_comp_t *comp = entry->comp;
-        if (comp == NULL || comp->comp_type != BONDP_COMP_JETTY) {
-            continue;
-        }
-        // 去重: 跳过已检查过的 comp
-        bool already_seen = false;
-        for (int i = 0; i < seen_count; ++i) {
-            if (seen_comps[i] == comp) {
-                already_seen = true;
-                break;
-            }
-        }
-        if (already_seen) {
-            continue;
-        }
-        if (seen_count < URMA_UBAGG_DEV_MAX_NUM) {
-            seen_comps[seen_count++] = comp;
-        }
-
-        // 匹配本端 vjetty_id
-        if (comp->v_jetty.jetty_id.id == vjetty_id) {
-            found_comp = comp;
-            break;
-        }
-    }
-
-    pthread_rwlock_unlock(&tbl->lock);
-    return found_comp;
-}
-
-
-
-/*
- * 通过 RESP 消息查找对应的 failback task
- * 查找链路: vjetty_id → bondp_comp_t → failback_tasks[pjetty_idx]
- */
-bondp_failback_task_t *bondp_failback_find_task_by_resp(
-    bondp_context_t *bdp_ctx, const bondp_failback_msg_t *msg)
-{
-    uint32_t vjetty_id = msg->in.vjetty_id;
-    uint32_t pjetty_idx = msg->in.pjetty_idx;
-
-    bondp_comp_t *bdp_jetty = bondp_find_comp_by_vjetty_id(bdp_ctx, vjetty_id);
-    if (bdp_jetty == NULL) {
-        URMA_LOG_WARN("Fallback RESP: no matching comp for vjetty_id=%u\n", vjetty_id);
-        return NULL;
-    }
-
-    if (pjetty_idx >= URMA_UBAGG_DEV_MAX_NUM) {
-        URMA_LOG_WARN("Fallback RESP: invalid pjetty_idx=%u vjetty_id=%u\n", pjetty_idx, vjetty_id);
-        return NULL;
-    }
-
-    bondp_failback_task_t *task = bdp_jetty->failback_tasks[pjetty_idx];
-    if (task == NULL || task->closed) {
-        URMA_LOG_WARN("Fallback RESP: no active task for vjetty_id=%u pjetty_idx=%u\n",
-            vjetty_id, pjetty_idx);
-        return NULL;
-    }
-
-    return task;
-}
-
-/*
  * 去重 → 标记 SATTLED → notified_count++
- * 返回 true 表示全部 NODE 已收齐
  */
 int bondp_failback_handle_node_notify(bondp_failback_task_t *task, uint32_t node_id)
 {
@@ -382,7 +297,7 @@ int bondp_failback_handle_node_notify(bondp_failback_task_t *task, uint32_t node
 
 void bondp_failback_destroy_old_jetty(bondp_failback_task_t *task)
 {
-    urma_jetty_t *old_jetty = task->bondp_jetty->p_jetty[task->failed_local_idx];
+    urma_jetty_t *old_jetty = task->bondp_jetty->p_jetty[task->pjetty_idx];
     urma_delete_jetty(old_jetty);
     return;
 }
