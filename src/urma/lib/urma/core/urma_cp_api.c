@@ -477,26 +477,16 @@ free_urma_ctx_arr:
 urma_status_t urma_alloc_jfc(urma_context_t *urma_ctx, urma_jfc_cfg_t *cfg, urma_jfc_t **jfc)
 {
     if (urma_ctx == NULL || cfg == NULL || jfc == NULL) {
-        URMA_LOG_ERR("Invalid parameter.\n");
+        URMA_LOG_ERR("Invalid parameter.");
         return URMA_EINVAL;
     }
 
     urma_ops_t *ops = NULL;
     URMA_CHECK_OP_INVALID_RETURN_STATUS(urma_ctx, ops, alloc_jfc);
 
-    urma_device_attr_t *attr = &urma_ctx->dev->sysfs_dev->dev_attr;
-    if (cfg->depth == 0 || cfg->depth > attr->dev_cap.max_jfc_depth) {
-        URMA_LOG_ERR("jfc cfg depth out of range, depth=%u, max_depth=%u.\n",
-            cfg->depth, attr->dev_cap.max_jfc_depth);
-        return URMA_EINVAL;
-    }
-
-    atomic_fetch_add(&urma_ctx->ref.atomic_cnt, 1);
-
     urma_status_t status = ops->alloc_jfc(urma_ctx, cfg, jfc);
     if (status != URMA_SUCCESS || (*jfc) == NULL) {
-        atomic_fetch_sub(&urma_ctx->ref.atomic_cnt, 1);
-        URMA_LOG_ERR("failed to exec ops->alloc_jfc\n");
+        URMA_LOG_ERR("failed to exec ops->alloc_jfc");
         return status == URMA_SUCCESS ? URMA_ENOMEM : status;
     }
 
@@ -842,30 +832,17 @@ int urma_flush_jfs(urma_jfs_t *jfs, int cr_cnt, urma_cr_t *cr)
 urma_status_t urma_alloc_jfs(urma_context_t *urma_ctx, urma_jfs_cfg_t *cfg, urma_jfs_t **jfs)
 {
     if (urma_ctx == NULL || cfg == NULL || jfs == NULL || cfg->jfc == NULL) {
-        URMA_LOG_ERR("Invalid parameter.\n");
+        URMA_LOG_ERR("Invalid parameter.");
         return URMA_EINVAL;
     }
 
     if (urma_check_trans_mode_valid(cfg->trans_mode) != true) {
-        URMA_LOG_ERR("Invalid parameter, trans_mode=%d.\n", (int)cfg->trans_mode);
+        URMA_LOG_ERR("Invalid parameter, trans_mode: %d.\n", (int)cfg->trans_mode);
         return URMA_EINVAL;
     }
 
     urma_ops_t *ops = NULL;
     URMA_CHECK_OP_INVALID_RETURN_STATUS(urma_ctx, ops, alloc_jfs);
-
-    urma_device_attr_t *attr = &urma_ctx->dev->sysfs_dev->dev_attr;
-    if ((cfg->depth == 0 || cfg->depth > attr->dev_cap.max_jfs_depth) ||
-        (cfg->max_inline_data > attr->dev_cap.max_jfs_inline_len) ||
-        (cfg->max_sge > attr->dev_cap.max_jfs_sge) || (cfg->max_rsge > attr->dev_cap.max_jfs_rsge)) {
-        URMA_LOG_ERR("jfs cfg out of range, depth=%u, max_depth=%u, inline_data=%u, max_inline_len=%u, " \
-            "sge=%hhu, max_sge=%u, rsge=%hhu, max_rsge=%u.\n",
-            cfg->depth, attr->dev_cap.max_jfs_depth,
-            cfg->max_inline_data, attr->dev_cap.max_jfs_inline_len,
-            cfg->max_sge, attr->dev_cap.max_jfs_sge,
-            cfg->max_rsge, attr->dev_cap.max_jfs_rsge);
-        return URMA_EINVAL;
-        }
 
     urma_status_t status = ops->alloc_jfs(urma_ctx, cfg, jfs);
     atomic_fetch_add(&urma_ctx->ref.atomic_cnt, 1);
@@ -1280,25 +1257,12 @@ urma_status_t urma_unimport_jfr(urma_target_jetty_t *target_jfr)
 urma_status_t urma_alloc_jfr(urma_context_t *urma_ctx, urma_jfr_cfg_t *cfg, urma_jfr_t **jfr)
 {
     if (urma_ctx == NULL || cfg == NULL || jfr == NULL || cfg->jfc == NULL) {
-        URMA_LOG_ERR("Invalid parameter.\n");
-        return URMA_EINVAL;
-    }
-
-    if (urma_check_trans_mode_valid(cfg->trans_mode) != true) {
-        URMA_LOG_ERR("Invalid parameter, trans_mode=%d.\n", (int)cfg->trans_mode);
+        URMA_LOG_ERR("Invalid parameter.");
         return URMA_EINVAL;
     }
 
     urma_ops_t *ops = NULL;
     URMA_CHECK_OP_INVALID_RETURN_STATUS(urma_ctx, ops, alloc_jfr);
-
-    urma_device_attr_t *attr = &urma_ctx->dev->sysfs_dev->dev_attr;
-    if (cfg->depth == 0 || cfg->depth > attr->dev_cap.max_jfr_depth ||
-        cfg->max_sge > attr->dev_cap.max_jfr_sge) {
-        URMA_LOG_ERR("jfr cfg out of range, depth=%u, max_depth=%u, sge=%u, max_sge=%u.\n",
-            cfg->depth, attr->dev_cap.max_jfr_depth, cfg->max_sge, attr->dev_cap.max_jfr_sge);
-        return URMA_EINVAL;
-        }
 
     urma_status_t status = ops->alloc_jfr(urma_ctx, cfg, jfr);
     atomic_fetch_add(&urma_ctx->ref.atomic_cnt, 1);
@@ -2301,29 +2265,10 @@ urma_status_t urma_alloc_jetty(urma_context_t *urma_ctx, urma_jetty_cfg_t *cfg, 
         URMA_LOG_ERR("Invalid parameter.\n");
         return URMA_EINVAL;
     }
-
-    if (urma_create_jetty_check_jfc(cfg) != 0) {
-        URMA_LOG_ERR("Invalid parameter.\n");
-        return URMA_EINVAL;
-    }
-
-    if (urma_create_jetty_check_trans_mode(urma_ctx, cfg) != 0) {
-        URMA_LOG_ERR("Invalid parameter.\n");
-        return URMA_EINVAL;
-    }
-
-    if (urma_check_jetty_cfg_with_jetty_grp(cfg) != 0) {
-        URMA_LOG_ERR("Invalid parameter.\n");
-        return URMA_EINVAL;
-    }
-
+ 
     urma_ops_t *ops = NULL;
     URMA_CHECK_OP_INVALID_RETURN_STATUS(urma_ctx, ops, alloc_jetty);
-
-    if (urma_create_jetty_check_dev_cap(urma_ctx, cfg) != 0) {
-        return URMA_EINVAL;
-    }
-
+ 
     atomic_fetch_add(&urma_ctx->ref.atomic_cnt, 1);
     urma_status_t status = ops->alloc_jetty(urma_ctx, cfg, jetty);
     if (*jetty == NULL) {
