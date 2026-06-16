@@ -29,13 +29,13 @@
 #include "register/op_def_registry.h"
 #include "tiling_args.h"
 #include "mc2_tiling_utils.h"
-#include "../op_kernel/moe_distribute_combine_a2_tiling.h"
+#include "../op_kernel/moe_combine_normal_a2_tiling.h"
 
 using namespace AscendC;
 using namespace ge;
 using namespace Moe;
 namespace {
-constexpr const char *OPS_UTILS_LOG_SUB_MOD_NAME = "MOE_DISTRIBUTE_COMBINE_A2";
+constexpr const char *OPS_UTILS_LOG_SUB_MOD_NAME = "MOE_COMBINE_NORMAL_A2";
 constexpr const char *OPS_UTILS_LOG_PACKAGE_TYPE = "CAM_OPS";
 constexpr uint32_t EXPAND_X_INDEX = 0;
 constexpr uint32_t EXPERT_IDS_INDEX = 1;
@@ -94,8 +94,8 @@ constexpr uint64_t MB_SIZE = 1024UL * 1024UL;
 }  // namespace
 
 namespace optiling {
-static ge::graphStatus MoeDistributeCombineA2CheckAttrAndSetTiling(const gert::TilingContext &context,
-                                                                   MoeDistributeCombineA2Info &info)
+static ge::graphStatus MoeCombineNormalA2CheckAttrAndSetTiling(const gert::TilingContext &context,
+                                                                   MoeCombineNormalA2Info &info)
 {
     auto attrs = context.GetAttrs();
     OPS_ERR_IF(attrs == nullptr, OPS_LOG_E(K_INNER_DEBUG, "attrs is null."), return ge::GRAPH_FAILED);
@@ -154,8 +154,8 @@ static ge::graphStatus MoeDistributeCombineA2CheckAttrAndSetTiling(const gert::T
     return ge::GRAPH_SUCCESS;
 }
 
-static ge::graphStatus MoeDistributeCombineA2CheckShapeAndSetTiling(const gert::TilingContext &context,
-                                                                    MoeDistributeCombineA2Info &info,
+static ge::graphStatus MoeCombineNormalA2CheckShapeAndSetTiling(const gert::TilingContext &context,
+                                                                    MoeCombineNormalA2Info &info,
                                                                     const bool isLayered)
 {
     const gert::StorageShape *expandXStorageShape = context.GetInputShape(EXPAND_X_INDEX);
@@ -189,8 +189,8 @@ static ge::graphStatus MoeDistributeCombineA2CheckShapeAndSetTiling(const gert::
     return ge::GRAPH_SUCCESS;
 }
 
-static ge::graphStatus MoeDistributeCombineA2GetPlatformInfoAndSetTiling(const gert::TilingContext &context,
-                                                                         MoeDistributeCombineA2Info &info)
+static ge::graphStatus MoeCombineNormalA2GetPlatformInfoAndSetTiling(const gert::TilingContext &context,
+                                                                         MoeCombineNormalA2Info &info)
 {
     auto ascendcPlatform = platform_ascendc::PlatformAscendC(context.GetPlatformInfo());
     uint32_t aivNum = ascendcPlatform.GetCoreNumAiv();
@@ -206,7 +206,7 @@ static ge::graphStatus MoeDistributeCombineA2GetPlatformInfoAndSetTiling(const g
     return ge::GRAPH_SUCCESS;
 }
 
-static bool MoeDistributeCombineA2IsLayered()
+static bool MoeCombineNormalA2IsLayered()
 {
     const char *hcclIntraPcieEnable = getenv("HCCL_INTRA_PCIE_ENABLE");
     std::string pcieEnable = (hcclIntraPcieEnable != nullptr) ? std::string(hcclIntraPcieEnable) : std::string();
@@ -225,10 +225,10 @@ static bool MoeDistributeCombineA2IsLayered()
     return false;
 }
 
-static uint64_t MoeDistributeCombineA2CalcTilingKey(const gert::TilingContext &context, const bool isLayered)
+static uint64_t MoeCombineNormalA2CalcTilingKey(const gert::TilingContext &context, const bool isLayered)
 {
     const char *nodeName = context.GetNodeName();
-    OPS_LOG_I(nodeName, "Enter MoeDistributeCombineA2 calc tiling func.");
+    OPS_LOG_I(nodeName, "Enter MoeCombineNormalA2 calc tiling func.");
 
     uint64_t tilingKey = TILING_KEY_BASE_A2;
 
@@ -241,31 +241,31 @@ static uint64_t MoeDistributeCombineA2CalcTilingKey(const gert::TilingContext &c
     return tilingKey;
 }
 
-static ge::graphStatus MoeDistributeCombineA2TilingFuncImpl(gert::TilingContext &context)
+static ge::graphStatus MoeCombineNormalA2TilingFuncImpl(gert::TilingContext &context)
 {
     const char *nodeName = context.GetNodeName();
     OPS_ERR_IF(nodeName == nullptr, OPS_LOG_E("unKnownNodeName", "nodeName is nullptr."), return ge::GRAPH_FAILED);
-    OPS_LOG_I(nodeName, "Enter MoeDistributeCombineA2 tiling func.");
+    OPS_LOG_I(nodeName, "Enter MoeCombineNormalA2 tiling func.");
 
     // tilingData
-    MoeDistributeCombineA2TilingData *tilingData = context.GetTilingData<MoeDistributeCombineA2TilingData>();
+    MoeCombineNormalA2TilingData *tilingData = context.GetTilingData<MoeCombineNormalA2TilingData>();
     OPS_ERR_IF(tilingData == nullptr, OPS_REPORT_VECTOR_INNER_ERR(nodeName, "tilingData is nullptr."),
               return ge::GRAPH_FAILED);
-    OPS_LOG_I(nodeName, "MoeDistributeCombineA2 get tilingData.");
-    MoeDistributeCombineA2Info &info = tilingData->moeDistributeCombineInfo;
+    OPS_LOG_I(nodeName, "MoeCombineNormalA2 get tilingData.");
+    MoeCombineNormalA2Info &info = tilingData->moeCombineNormalInfo;
 
-    bool isLayered = MoeDistributeCombineA2IsLayered();
+    bool isLayered = MoeCombineNormalA2IsLayered();
     OPS_ERR_IF(
-        MoeDistributeCombineA2CheckShapeAndSetTiling(context, info, isLayered) != ge::GRAPH_SUCCESS,
-        OPS_REPORT_VECTOR_INNER_ERR(context.GetNodeName(), "MoeDistributeCombineA2 CheckShapeAndSetTiling Failed"),
+        MoeCombineNormalA2CheckShapeAndSetTiling(context, info, isLayered) != ge::GRAPH_SUCCESS,
+        OPS_REPORT_VECTOR_INNER_ERR(context.GetNodeName(), "MoeCombineNormalA2 CheckShapeAndSetTiling Failed"),
         return ge::GRAPH_FAILED);
     OPS_ERR_IF(
-        MoeDistributeCombineA2CheckAttrAndSetTiling(context, info) != ge::GRAPH_SUCCESS,
-        OPS_REPORT_VECTOR_INNER_ERR(context.GetNodeName(), "MoeDistributeCombineA2 CheckAttrAndSetTiling Failed"),
+        MoeCombineNormalA2CheckAttrAndSetTiling(context, info) != ge::GRAPH_SUCCESS,
+        OPS_REPORT_VECTOR_INNER_ERR(context.GetNodeName(), "MoeCombineNormalA2 CheckAttrAndSetTiling Failed"),
         return ge::GRAPH_FAILED);
-    OPS_ERR_IF(MoeDistributeCombineA2GetPlatformInfoAndSetTiling(context, info) != ge::GRAPH_SUCCESS,
+    OPS_ERR_IF(MoeCombineNormalA2GetPlatformInfoAndSetTiling(context, info) != ge::GRAPH_SUCCESS,
               OPS_REPORT_VECTOR_INNER_ERR(context.GetNodeName(),
-                                          "MoeDistributeCombineA2 GetPlatformInfoAndSetTiling Failed"),
+                                          "MoeCombineNormalA2 GetPlatformInfoAndSetTiling Failed"),
               return ge::GRAPH_FAILED);
 
     uint32_t blockDim = 1U;
@@ -274,7 +274,7 @@ static ge::graphStatus MoeDistributeCombineA2TilingFuncImpl(gert::TilingContext 
     blockDim = ascendcPlatform.CalcTschBlockDim(aivNum, 0, aivNum);
     context.SetBlockDim(blockDim);
 
-    uint64_t tilingKey = MoeDistributeCombineA2CalcTilingKey(context, isLayered);
+    uint64_t tilingKey = MoeCombineNormalA2CalcTilingKey(context, isLayered);
     context.SetTilingKey(tilingKey);
     // 2. workspace
     size_t *workSpaces = context.GetWorkspaceSizes(1);
@@ -294,7 +294,7 @@ static ge::graphStatus MoeDistributeCombineA2TilingFuncImpl(gert::TilingContext 
     mc2CcTilingConfig.GetTiling(tilingData->mc2InitTiling);
     mc2CcTilingConfig.GetTiling(tilingData->mc2CcTiling);
 
-    OPS_LOG_I(nodeName, "Leave MoeDistributeCombineA2 tiling func.");
+    OPS_LOG_I(nodeName, "Leave MoeCombineNormalA2 tiling func.");
     return ge::GRAPH_SUCCESS;
 }
 
@@ -310,17 +310,17 @@ static ge::graphStatus MoeDistributeCombineTilingFunc(gert::TilingContext *conte
                         static_cast<ge::DataType>(expandXDesc->GetDataType())),
               return ge::GRAPH_FAILED);
 
-    return MoeDistributeCombineA2TilingFuncImpl(*context);
+    return MoeCombineNormalA2TilingFuncImpl(*context);
 }
 
 struct MoeDistributeCombineCompileInfo {};
-ge::graphStatus TilingParseForMoeDistributeCombineA2(gert::TilingParseContext *context)
+ge::graphStatus TilingParseForMoeCombineNormalA2(gert::TilingParseContext *context)
 {
     (void)context;
     return ge::GRAPH_SUCCESS;
 }
 
-IMPL_OP_OPTILING(MoeDistributeCombineA2)
+IMPL_OP_OPTILING(MoeCombineNormalA2)
     .Tiling(MoeDistributeCombineTilingFunc)
-    .TilingParse<MoeDistributeCombineCompileInfo>(TilingParseForMoeDistributeCombineA2);
+    .TilingParse<MoeDistributeCombineCompileInfo>(TilingParseForMoeCombineNormalA2);
 }  // namespace optiling

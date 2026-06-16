@@ -460,20 +460,20 @@ static ge::graphStatus MoeDistributeDispatchA2TilingFuncImpl(gert::TilingContext
     return ge::GRAPH_SUCCESS;
 }
 
-static ge::graphStatus DispatchNormalA2TilingFunc(gert::TilingContext *context)
+static ge::graphStatus MoeDispatchNormalA2TilingFunc(gert::TilingContext *context)
 {
     ge::graphStatus ret = MoeDistributeDispatchA2TilingFuncImpl(*context);
     return ret;
 }
 
-struct DispatchNormalA2CompileInfo {};
-ge::graphStatus TilingParseForDispatchNormalA2(gert::TilingParseContext *context)
+struct MoeDispatchNormalA2CompileInfo {};
+ge::graphStatus TilingParseForMoeDispatchNormalA2(gert::TilingParseContext *context)
 {
     (void)context;
     return ge::GRAPH_SUCCESS;
 }
 
-IMPL_OP_OPTILING(DispatchNormalA2)
-    .Tiling(DispatchNormalA2TilingFunc)
-    .TilingParse<DispatchNormalA2CompileInfo>(TilingParseForDispatchNormalA2);
+IMPL_OP_OPTILING(MoeDispatchNormalA2)
+    .Tiling(MoeDispatchNormalA2TilingFunc)
+    .TilingParse<MoeDispatchNormalA2CompileInfo>(TilingParseForMoeDispatchNormalA2);
 }  // namespace optiling
