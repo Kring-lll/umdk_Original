@@ -90,8 +90,7 @@ static int check_dev_cap(perftest_context_t *ctx, perftest_config_t *cfg)
         return -1;
     }
 
-    uint32_t max_rsge = cfg->sge_num + (cfg->enable_notify ? 1 : 0);
-    if (max_rsge > ctx->dev_attr.dev_cap.max_jfs_rsge) {
+    if (cfg->sge_num > ctx->dev_attr.dev_cap.max_jfs_rsge) {
         LOG_ERROR("Error: max_jfs_rsge out of range, max_jfs_rsge:%u.\n", ctx->dev_attr.dev_cap.max_jfs_rsge);
         return -1;
     }
@@ -403,8 +402,12 @@ delete_jfc:
 
 static inline void destroy_jfs(perftest_context_t *ctx, const int idx)
 {
-    for (int k = 0; k < idx; k++) {
-        (void)urma_delete_jfs(ctx->jfs[k]);
+    if (idx > 1 && ctx->jfs[0] != ctx->jfs[1]) {
+        for (int k = 0; k < idx; k++) {
+            (void)urma_delete_jfs(ctx->jfs[k]);
+        }
+    } else {
+        (void)urma_delete_jfs(ctx->jfs[0]);
     }
 
     free(ctx->jfs);
@@ -440,7 +443,11 @@ static int create_jfs(perftest_context_t *ctx, const perftest_config_t *cfg)
 
     for (uint32_t i = 0; i < cfg->jettys; i++) {
         jfs_cfg.jfc = ctx->jfc_s[i];
-        ctx->jfs[i] = urma_create_jfs(ctx->urma_ctx, &jfs_cfg);
+        if (!cfg->share_jfs || i == 0) {
+            ctx->jfs[i] = urma_create_jfs(ctx->urma_ctx, &jfs_cfg);
+        } else {
+            ctx->jfs[i] = ctx->jfs[0];
+        }
         if (ctx->jfs[i] == NULL) {
             LOG_ERROR("Failed to create jfs: %u!\n", i);
             goto delete_jfs;
@@ -548,6 +555,9 @@ static void fill_jfr_cfg(perftest_context_t *ctx, const perftest_config_t *cfg, 
 static void destroy_jetty(perftest_context_t *ctx)
 {
     for (uint32_t i = 0; i < ctx->jetty_num; i++) {
+        if (ctx->jetty_num > 1 && i > 0 && (ctx->jetty[i] == ctx->jetty[0])) {
+            break;
+        }
         if (ctx->jetty[i] != NULL) {
             (void)urma_delete_jetty(ctx->jetty[i]);
         }
@@ -602,6 +612,10 @@ static int create_jetty(perftest_context_t *ctx, const perftest_config_t *cfg)
         goto err_delete_jfr;
     }
     for (uint32_t i = 0; i < cfg->jettys; i++) {
+        if (cfg->share_jfs && i > 0) {
+            ctx->jetty[i] = ctx->jetty[0];
+             continue;
+        }
         jetty_cfg.jfs_cfg.jfc = ctx->jfc_s[i];
         if (cfg->share_jfr == false) {
             jetty_cfg.jfr_cfg->jfc = ctx->jfc_r[i];
@@ -615,8 +629,10 @@ static int create_jetty(perftest_context_t *ctx, const perftest_config_t *cfg)
             LOG_ERROR("Failed to create jetty: %d!\n", i);
             goto err_delete_jetty;
         }
-        LOG_ERROR("Set jetty id %u, actually jetty id %d\n",
-                  cfg->jetty_id, ctx->jetty[i]->jetty_id.id);
+        if (cfg->jetty_id != 0 && cfg->jetty_id != ctx->jetty[i]->jetty_id.id) {
+            LOG_ERROR("Set jetty id %u, actually jetty id %d\n",
+                      cfg->jetty_id, ctx->jetty[i]->jetty_id.id);
+        }
     }
 
     return 0;
@@ -778,6 +794,12 @@ static int register_mem(perftest_context_t *ctx, perftest_config_t *cfg)
             if (ctx->local_buf[i] == NULL) {
                 LOG_ERROR("Failed to alloc local buffer, i: %u.\n", i);
                 goto free_memory;
+            }
+        } else if (cfg->enable_va){
+            if (i < seg_num) {
+                ctx->local_buf[i] = (void *)cfg->v_address;
+            } else {
+                ctx->local_buf[i] = ctx->local_buf[0];
             }
         } else {
             if (i < seg_num) {
@@ -1010,63 +1032,6 @@ free_buf:
     return -1;
 }
 
-static void free_remote_notify(perftest_context_t *ctx)
-{
-    if (ctx->remote_notify_seg == NULL) {
-        return;
-    }
-    free(ctx->remote_notify_seg);
-    ctx->remote_notify_seg = NULL;
-}
-
-static int exchange_notify_info(perftest_context_t *ctx, perftest_comm_t *comm, perftest_config_t *cfg)
-{
-    if (!cfg->enable_notify) {
-        return 0;
-    }
-
-    urma_seg_t *local_seg_buf = calloc(ctx->jetty_num, sizeof(urma_seg_t));
-    urma_seg_t *remote_seg_buf = calloc(ctx->jetty_num, sizeof(urma_seg_t));
-    if (local_seg_buf == NULL || remote_seg_buf == NULL) {
-        goto free_buf;
-    }
-
-    for (uint32_t i = 0; i < ctx->jetty_num; i++) {
-        local_seg_buf[i] = ctx->notify_seg->seg;
-    }
-
-    if (cfg->pair_flag) {
-        for (uint32_t i = 0; i < cfg->pair_num; i++) {
-            if (sock_sync_data(comm->sock_fd[i], sizeof(urma_seg_t),
-                (char *)&local_seg_buf[i], (char *)&remote_seg_buf[i]) != 0) {
-                LOG_ERROR("Failed to exchange seg %u!\n", i);
-                goto free_buf;
-            }
-            if (sock_sync_data(comm->sock_fd[i], sizeof(uint32_t),
-                (char *)&i, (char *)&ctx->remote_jetty_idx) != 0) {
-                LOG_ERROR("Failed to exchange jetty_idx %u!\n", i);
-                goto free_buf;
-            }
-        }
-    } else {
-        if (sock_sync_data(comm->sock_fd[0], ctx->jetty_num * sizeof(urma_seg_t),
-            (char *)local_seg_buf, (char *)remote_seg_buf) != 0) {
-            LOG_ERROR("Failed to exchange seg!\n");
-            goto free_buf;
-        }
-    }
-
-    ctx->remote_notify_seg = remote_seg_buf;
-    free(local_seg_buf);
-    return 0;
-
-free_buf:
-    free(local_seg_buf);
-    free(remote_seg_buf);
-    return -1;
-}
-
-
 static void free_tp_info(perftest_context_t *ctx)
 {
     if (ctx->tp_info == NULL) {
@@ -1074,6 +1039,25 @@ static void free_tp_info(perftest_context_t *ctx)
     }
     free(ctx->tp_info);
     ctx->tp_info = NULL;
+}
+
+static void create_tp_info_get_attr_uboe(perftest_config_t *cfg, urma_tp_attr_value_t *tp_attr,
+    uint32_t *set_tp_attr_cnt, uint8_t *set_tp_attr_flag)
+{
+    memcpy(tp_attr->sip, cfg->sip.raw, URMA_IP_ADDR_BYTES);
+    memcpy(tp_attr->dip, cfg->dip.raw, URMA_IP_ADDR_BYTES);
+    memcpy(tp_attr->sma, cfg->smac, URMA_MAC_BYTES);
+    memcpy(tp_attr->dma, cfg->dmac, URMA_MAC_BYTES);
+    if (cfg->uboe_vlan) {
+        tp_attr->vlan_en = 1;
+        tp_attr->vlan_id = cfg->vlan_id;
+    }
+    if (cfg->uboe_dscp) {
+        tp_attr->dscp = cfg->dscp;
+    }
+    if (cfg->uboe_sl) {
+        tp_attr->sl = cfg->sl;
+    }
 }
 
 static int create_tp_info(perftest_context_t *ctx, perftest_comm_t *comm, perftest_config_t *cfg)
@@ -1156,27 +1140,8 @@ static int create_tp_info(perftest_context_t *ctx, perftest_comm_t *comm, perfte
         }
 
         urma_tp_attr_value_t tp_attr = {0};
-        memcpy(tp_attr.sip, cfg->sip.raw, URMA_IP_ADDR_BYTES);
-        memcpy(tp_attr.dip, cfg->dip.raw, URMA_IP_ADDR_BYTES);
-        memcpy(tp_attr.sma, cfg->smac, URMA_MAC_BYTES);
-        memcpy(tp_attr.dma, cfg->dmac, URMA_MAC_BYTES);
-        if (cfg->uboe_vlan) {
-            tp_attr.vlan_en = 1;
-            tp_attr.vlan_id = cfg->vlan_id;
-        }
-        if (cfg->uboe_dscp) {
-            tp_attr.dscp = cfg->dscp;
-        }
-        if (cfg->uboe_sl) {
-            tp_attr.sl = cfg->sl;
-            set_tp_attr_cnt++;
-            set_tp_attr_flag |= PERFTEST_SET_ATTR_BITMAP_SL_FLAG;
-        }
-        if (cfg->spray_en) {
-            tp_attr.spray_en = cfg->spray_en;
-            set_tp_attr_cnt++;
-            set_tp_attr_flag |= PERFTEST_SET_ATTR_BITMAP_SPRAY_FLAG;
-        }
+        create_tp_info_get_attr_uboe(cfg, &tp_attr, &set_tp_attr_cnt, &set_tp_attr_flag);
+
         uint32_t set_cnt = (cfg->trans_mode == URMA_TM_RM && cfg->tp_reuse) ? 1 : ctx->jetty_num;
         for (uint32_t i = 0; i < set_cnt; i++) {
             ret = urma_set_tp_attr(ctx->urma_ctx, ctx->tp_info[i].tp_handle, set_tp_attr_cnt,
@@ -1270,12 +1235,6 @@ static int exchange_connection_info(perftest_context_t *ctx, perftest_config_t *
         goto exchange_credit_fail;
     }
 
-    ret = exchange_notify_info(ctx, &cfg->comm, cfg);
-    if (ret != 0) {
-        LOG_ERROR("Failed to exchange_notify_info, ret: %d\n", ret);
-        goto exchange_notify_fail;
-    }
-
     ret = create_tp_info(ctx, &cfg->comm, cfg);
     if (ret != 0) {
         LOG_ERROR("Failed to create tp info, ret: %d\n", ret);
@@ -1291,8 +1250,6 @@ static int exchange_connection_info(perftest_context_t *ctx, perftest_config_t *
 exchange_tp_info_fail:
     free_tp_info(ctx);
 create_tp_info_fail:
-    free_remote_notify(ctx);
-exchange_notify_fail:
     free_remote_credit(ctx);
 exchange_credit_fail:
     free_remote_jetty(ctx);
@@ -1305,7 +1262,6 @@ static void destroy_connection_info(perftest_context_t *ctx)
 {
     free_remote_tp_info(ctx);
     free_tp_info(ctx);
-    free_remote_notify(ctx);
     free_remote_credit(ctx);
     free_remote_seg(ctx);
     free_remote_jetty(ctx);
@@ -1335,19 +1291,6 @@ static inline void unimport_credit(perftest_context_t *ctx, const int idx)
     ctx->import_credit_seg = NULL;
 }
 
-static inline void unimport_notify(perftest_context_t *ctx, const int idx)
-{
-    for (int k = 0; k < idx; k++) {
-        if (ctx->import_notify_seg[k] != NULL) {
-            (void)urma_unimport_seg(ctx->import_notify_seg[k]);
-        }
-    }
-    if (ctx->import_notify_seg != NULL) {
-        free(ctx->import_notify_seg);
-    }
-    ctx->import_notify_seg = NULL;
-}
-
 static int import_seg_for_simplex(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     int i;
@@ -1374,24 +1317,9 @@ static int import_seg_for_simplex(perftest_context_t *ctx, perftest_config_t *cf
         }
     }
 
-    if (cfg->enable_notify == true) {
-        ctx->import_notify_seg = calloc(1, sizeof(urma_target_seg_t *) * ctx->jetty_num);
-        if (ctx->import_notify_seg == NULL) {
-            goto free_credit;
-        }
-        for (i = 0; i < (int)ctx->jetty_num; i++) {
-            ctx->import_notify_seg[i] = urma_import_seg(ctx->urma_ctx, &ctx->remote_notify_seg[i],
-                &g_perftest_token, 0, flag);
-            if (ctx->import_notify_seg[i] == NULL) {
-                LOG_ERROR("Failed to import seg for simplex, loop: %d!\n", i);
-                goto free_notify;
-            }
-        }
-    }
-
     ctx->import_tseg = calloc(1, sizeof(urma_target_seg_t *) * ctx->jetty_num);
     if (ctx->import_tseg == NULL) {
-        goto free_notify;
+        return -1;
     }
 
     for (i = 0; i < (int)ctx->jetty_num; i++) {
@@ -1405,10 +1333,6 @@ static int import_seg_for_simplex(perftest_context_t *ctx, perftest_config_t *cf
     return 0;
 unimp_simp_seg:
     unimport_seg(ctx, i);
-free_notify:
-    if (cfg->enable_notify == true) {
-        unimport_notify(ctx, ctx->jetty_num);
-    }
 free_credit:
     if (cfg->enable_credit == true) {
         unimport_credit(ctx, ctx->jetty_num);
@@ -1442,24 +1366,9 @@ static int import_seg_for_duplex(perftest_context_t *ctx, perftest_config_t *cfg
         }
     }
 
-    if (cfg->enable_notify == true) {
-        ctx->import_notify_seg = calloc(1, sizeof(urma_target_seg_t *) * ctx->jetty_num);
-        if (ctx->import_notify_seg == NULL) {
-            goto free_credit;
-        }
-        for (i = 0; i < (int)ctx->jetty_num; i++) {
-            ctx->import_notify_seg[i] = urma_import_seg(ctx->urma_ctx, &ctx->remote_notify_seg[i],
-                &g_perftest_token, 0, flag);
-            if (ctx->import_notify_seg[i] == NULL) {
-                LOG_ERROR("Failed to import seg for simplex, loop: %d!\n", i);
-                goto free_notify;
-            }
-        }
-    }
-
     ctx->import_tseg = calloc(1, sizeof(urma_target_seg_t *) * ctx->jetty_num);
     if (ctx->import_tseg == NULL) {
-        goto free_notify;
+        goto free_credit;
     }
 
     for (i = 0; i < (int)ctx->jetty_num; i++) {
@@ -1474,10 +1383,6 @@ static int import_seg_for_duplex(perftest_context_t *ctx, perftest_config_t *cfg
 
 unimp_dup_seg:
     unimport_seg(ctx, i);
-free_notify:
-    if (cfg->enable_notify == true) {
-        unimport_notify(ctx, ctx->jetty_num);
-    }
 free_credit:
     if (cfg->enable_credit == true) {
         unimport_credit(ctx, ctx->jetty_num);
@@ -2013,7 +1918,7 @@ static void destroy_credit_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
 static int create_credit_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     int buf_size = 2 * sizeof(uint64_t);
-    uint32_t i, j = 0;
+    uint32_t i = 0;
 
     ctx->ctrl_buf = (uint64_t **)calloc(1, sizeof(uint64_t *) * cfg->jettys);
     if (ctx->ctrl_buf == NULL) {
@@ -2074,79 +1979,28 @@ static int create_credit_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     return 0;
 
 free_credit_seg:
-    for (j = 0; j < i; j++) {
-        if (ctx->credit_seg[j] != NULL) {
-            (void)urma_unregister_seg(ctx->credit_seg[j]);
+    for (i = 0; i < cfg->jettys; i++) {
+        if (ctx->credit_seg[i] != NULL) {
+            (void)urma_unregister_seg(ctx->credit_seg[i]);
         }
     }
     free(ctx->credit_seg);
-    i = cfg->jettys;
 free_token_id:
     if (ctx->urma_ctx->dev->type == URMA_TRANSPORT_UB) {
-        for (j = 0; j < i; j++) {
-            if (ctx->credit_token_id[j] != NULL) {
-                urma_free_token_id(ctx->credit_token_id[j]);
+        for (i = 0; i < cfg->jettys; i++) {
+            if (ctx->credit_token_id[i] != NULL) {
+                urma_free_token_id(ctx->credit_token_id[i]);
             }
         }
     }
     free(ctx->credit_token_id);
-    i = cfg->jettys;
 free_buf:
-    for (j = 0; j < i; j++) {
-        if (ctx->ctrl_buf[j] != NULL) {
-            free(ctx->ctrl_buf[j]);
+    for (i = 0; i < cfg->jettys; i++) {
+        if (ctx->ctrl_buf[i] != NULL) {
+            free(ctx->ctrl_buf[i]);
         }
     }
     free(ctx->ctrl_buf);
-    return -1;
-}
-
-static void destroy_notify_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
-{
-    (void)urma_unregister_seg(ctx->notify_seg);
-    urma_free_token_id(ctx->notify_token_id);
-    free(ctx->notify_buf);
-    ctx->notify_buf = NULL;
-}
-
-static int create_notify_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
-{
-    ctx->notify_buf = (uint64_t *)memalign(ctx->page_size, sizeof(uint64_t) * cfg->jettys);
-    if (ctx->notify_buf == NULL) {
-        return -1;
-    }
-
-    urma_reg_seg_flag_t flag = {
-        .bs.token_policy = cfg->token_policy,
-        .bs.cacheable = URMA_NON_CACHEABLE,
-        .bs.access = PERFTEST_DEF_ACCESS,
-        .bs.token_id_valid = URMA_TOKEN_ID_VALID,
-        .bs.reserved = 0
-    };
-    urma_seg_cfg_t seg_cfg = {
-        .va = (uintptr_t)ctx->notify_buf,
-        .len = sizeof(uint64_t) * cfg->jettys,
-        .token_value = g_perftest_token,
-        .flag = flag,
-        .user_ctx = (uintptr_t)NULL,
-        .iova = 0
-    };
-
-    ctx->notify_token_id = urma_alloc_token_id(ctx->urma_ctx);
-    if (ctx->notify_token_id == NULL) {
-        goto free_buf;
-    }
-    seg_cfg.token_id = ctx->notify_token_id;
-
-    ctx->notify_seg= urma_register_seg(ctx->urma_ctx, &seg_cfg);
-    if (ctx->notify_seg == NULL) {
-        goto free_token_id;
-    }
-    return 0;
-free_token_id:
-    urma_free_token_id(ctx->notify_token_id);
-free_buf:
-    free(ctx->notify_buf);
     return -1;
 }
 
@@ -2169,12 +2023,8 @@ static int create_simplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
         goto unregister_mem;
     }
 
-    if (cfg->enable_notify == true && create_notify_ctx(ctx, cfg) != 0) {
-        goto delete_credit_ctx;
-    }
-
     if (exchange_connection_info(ctx, cfg) != 0) {
-        goto delete_notify_ctx;
+        goto delete_credit_ctx;
     }
 
     if (import_seg_for_simplex(ctx, cfg) != 0) {
@@ -2196,10 +2046,6 @@ unimport_seg:
     unimport_seg(ctx, (int)ctx->jetty_num);
 destroy_remote_info:
     destroy_connection_info(ctx);
-delete_notify_ctx:
-    if (cfg->enable_notify == true) {
-        destroy_notify_ctx(ctx, cfg);
-    }
 delete_credit_ctx:
     if (cfg->enable_credit == true) {
         destroy_credit_ctx(ctx, cfg);
@@ -2407,12 +2253,8 @@ static int create_duplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
         goto unregister_mem;
     }
 
-    if (cfg->enable_notify == true && create_notify_ctx(ctx, cfg) != 0) {
-        goto delete_credit_ctx;
-    }
-
     if (exchange_connection_info(ctx, cfg) != 0) {
-        goto delete_notify_ctx;
+        goto delete_credit_ctx;
     }
 
     if (import_seg_for_duplex(ctx, cfg) != 0) {
@@ -2444,10 +2286,6 @@ unimport_seg:
     unimport_seg(ctx, (int)ctx->jetty_num);
 delete_remote_info:
     destroy_connection_info(ctx);
-delete_notify_ctx:
-    if (cfg->enable_notify == true) {
-        destroy_notify_ctx(ctx, cfg);
-    }
 delete_credit_ctx:
     if (cfg->enable_credit == true) {
         destroy_credit_ctx(ctx, cfg);
@@ -2477,16 +2315,10 @@ static void destroy_simplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     for (uint32_t i = 0; i < cfg->pair_num; i++) {
         (void)sync_time(cfg->comm.sock_fd[i], "unimport_jfr");
     }
-    if (cfg->enable_notify == true) {
-        unimport_notify(ctx, ctx->jetty_num);
-    }
     if (cfg->enable_credit == true) {
         unimport_credit(ctx, ctx->jetty_num);
     }
     destroy_connection_info(ctx);
-    if (cfg->enable_notify == true) {
-        destroy_notify_ctx(ctx, cfg);
-    }
     if (cfg->enable_credit == true) {
         destroy_credit_ctx(ctx, cfg);
     }
@@ -2507,17 +2339,11 @@ static void destroy_duplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     for (uint32_t i = 0; i < cfg->pair_num; i++) {
         (void)sync_time(cfg->comm.sock_fd[i], "unimport_jetty");
     }
-    if (cfg->enable_notify == true) {
-        unimport_notify(ctx, ctx->jetty_num);
-    }
     if (cfg->enable_credit == true) {
         unimport_credit(ctx, ctx->jetty_num);
     }
     unimport_seg(ctx, (int)ctx->jetty_num);
     destroy_connection_info(ctx);
-    if (cfg->enable_notify == true) {
-        destroy_notify_ctx(ctx, cfg);
-    }
     if (cfg->enable_credit == true) {
         destroy_credit_ctx(ctx, cfg);
     }
