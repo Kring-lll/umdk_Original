@@ -41,12 +41,12 @@ static void bondp_failback_task_free_f(hmap_node_t *node)
 }
 
 //TODO: task的hashtable是否跟随ctx
-int bondp_failback_task_table_init(bondp_context_t *bdp_ctx)
+void bondp_failback_task_table_init(bondp_context_t *bdp_ctx)
 {
     if (bdp_ctx == NULL) {
         return BONDP_FB_ERR;
     }
-    return bondp_hash_table_create(&bdp_ctx->failback_task_table,
+    bondp_hash_table_create(&bdp_ctx->failback_task_table,
         BONDP_FAILBACK_TASK_TABLE_SIZE,
         bondp_failback_task_comp_f,
         bondp_failback_task_free_f,
@@ -123,7 +123,7 @@ bondp_failback_task_t *bondp_failback_task_create(
     task->new_pjetty_id = 0;
 
     // --- 广播通知跟踪 ---
-    // TODO: node_count 从 bdp_ctx 获取实际 NODE 数量
+    //TODO: node_count 从 bdp_ctx 获取实际 NODE 数量
     task->node_count = BOUNDP_FAILBACK_NODE_MAX_NUM;
     task->notified_count = 0;
     task->next_send_idx = 0;
@@ -356,9 +356,11 @@ static bool bondp_handle_message(bondp_context_t *bdp_ctx, const bondp_failback_
         //此处略有冗余，主要目的是将task的生命周期完全归于failback.c ops仅处理原子操作
         if (task->node_count == task->notified_count) {
             bondp_failback_destroy_old_jetty(task);
+            task->bondp_jetty->valid[task->pjetty_idx] = true;
+            //TODO: 考虑valid数组是否应当这样修改
             bondp_failback_task_destroy(task);
         }
-        //TODO: bondp_comp_t 存在valid数组，有待处理
+
         return (ret == BONDP_FB_OK);
     }
 

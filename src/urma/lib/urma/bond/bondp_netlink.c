@@ -51,13 +51,12 @@ static bondp_nl_ctx_t g_bondp_nl_ctx = {
 };
 
 
-// 新接口: 直接发送 failback_msg, 不指定对端, 内核根据 vjetty_id 自动路由
+// 新接口: 直接发送 failback_msg
 int bondp_failback_ctrl_send(const bondp_failback_msg_t *req)
 {
     if (req == NULL) {
         return -EINVAL;
     }
-
     int ret = bondp_nl_send_failback_msg(req);
     if (ret != 0) {
         URMA_LOG_WARN(

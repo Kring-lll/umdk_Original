@@ -70,7 +70,6 @@ typedef struct bondp_failback_task {
     hmap_node_t hmap_node;
 } bondp_failback_task_t;
 
-bondp_hash_table_t failback_task_table;
 
 #define BONDP_FAILBACK_REBUILD_START_DELAY_MS     10000U  /* 收到CQE后，延迟10秒开始重建 */
 #define BONDP_FAILBACK_REBUILD_RETRY_INIT_MS      1000U   /* 重建失败后，初始重试间隔1秒 */
@@ -94,7 +93,7 @@ int bondp_failback_on_cqe(bondp_context_t *bdp_ctx,
     struct bondp_comp *bondp_jetty,
     int failed_local_idx);
 
-int bondp_failback_task_table_init(bondp_context_t *bdp_ctx);
+void bondp_failback_task_table_init(bondp_context_t *bdp_ctx);
 
 int bondp_handle_netlink_events(void);
 

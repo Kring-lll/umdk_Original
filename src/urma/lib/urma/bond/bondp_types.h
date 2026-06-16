@@ -167,6 +167,8 @@ typedef struct bondp_context {
 #else
     std::atomic_ulong token_id_cnt;
 #endif
+    bondp_hash_table_t failback_task_table;
+    //TODO: 是否应当由context持有task_table 如果不是，由什么数据结构持有
 } bondp_context_t;
 
 typedef struct bondp_jfc {
