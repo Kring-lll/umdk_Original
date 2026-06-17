@@ -143,6 +143,7 @@ static int umq_ub_jetty_node_list_init(umq_ub_jetty_node_list_t *jetty_node_list
         return -UMQ_ERR_ENOMEM;
     }
 
+    (void)pthread_spin_init(&jetty_node_list->lock, PTHREAD_PROCESS_PRIVATE);
     return UMQ_SUCCESS;
 }
 
@@ -189,6 +190,7 @@ CLOSE_FD:
 
 static void umq_ub_jetty_node_list_uninit(umq_ub_jetty_node_list_t *jetty_node_list)
 {
+    (void)pthread_spin_lock(&jetty_node_list->lock);
     if (jetty_node_list->node_list != NULL) {
         jetty_node_list->list_len = 0;
         free(jetty_node_list->node_list);
@@ -197,6 +199,8 @@ static void umq_ub_jetty_node_list_uninit(umq_ub_jetty_node_list_t *jetty_node_l
     if (jetty_node_list->bitmap != NULL) {
         urpc_bitmap_free(jetty_node_list->bitmap);
     }
+    (void)pthread_spin_unlock(&jetty_node_list->lock);
+    (void)pthread_spin_destroy(&jetty_node_list->lock);
 }
 
 void umq_ub_jetty_pool_uninit(void)
