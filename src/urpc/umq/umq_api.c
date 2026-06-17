@@ -459,10 +459,6 @@ static void umq_post_dp_end(void)
 
 static int umq_thread_init(umq_init_cfg_t *cfg)
 {
-    if ((cfg->feature & UMQ_FEATURE_ENABLE_FLOW_CONTROL) == 0) {
-        // disable flow control
-        return UMQ_SUCCESS;
-    }
     if (urpc_thread_ctx_init() != UMQ_SUCCESS) {
         return UMQ_FAIL;
     }
@@ -495,7 +491,9 @@ void umq_uninit(void)
         return;
     }
 
+    umq_ub_remain_perf_data_print();
     umq_perf_uninit();
+    umq_perf_data_uninit();
     framework_uninit();
 
     if (g_umq_config != NULL) {
