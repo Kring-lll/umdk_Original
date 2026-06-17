@@ -12,7 +12,8 @@
 #define BONDP_FB_OK                     (0)
 #define BONDP_FB_ERR                    (-1)
 
-//TODO: 对接一个合适的宏
+//对接一个合适的宏 先写死
+//NODENUMBER
 #ifndef BOUNDP_FAILBACK_NODE_MAX_NUM
 #define BOUNDP_FAILBACK_NODE_MAX_NUM         512
 #endif
@@ -54,6 +55,7 @@ typedef struct bondp_failback_task {
     struct bondp_comp *bondp_jetty;
     uint32_t vjetty_id;
     uint32_t pjetty_idx;
+    //jetty_index 和 contextindex一个东西
 
     // --- 路径信息 ---
     int target_idx;
@@ -88,6 +90,7 @@ typedef struct bondp_failback_task {
 #define BONDP_FAILBACK_CTRL_REQ                        1
 #define BONDP_FAILBACK_CTRL_RESP                       2
 #define BONDP_FAILBACK_PRIMARY_INVALID_ID              UINT32_MAX
+
 
 int bondp_failback_on_cqe(bondp_context_t *bdp_ctx,
     struct bondp_comp *bondp_jetty,

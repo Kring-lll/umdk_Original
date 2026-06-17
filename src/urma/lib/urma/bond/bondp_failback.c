@@ -13,6 +13,8 @@
 
 #define BONDP_FAILBACK_TASK_HASH_BASIS 0x5fb2a17c
 
+bondp_hash_table_t failback_task_table;
+//全局静态
 static void bondp_failback_rebuild_task(void *arg);
 static void bondp_failback_send_next_req_task(void *arg);
 static void bondp_failback_task_destroy(bondp_failback_task_t *task);
@@ -40,8 +42,7 @@ static void bondp_failback_task_free_f(hmap_node_t *node)
     (void)node;
 }
 
-//TODO: task的hashtable是否跟随ctx
-void bondp_failback_task_table_init(bondp_context_t *bdp_ctx)
+int bondp_failback_task_table_init(bondp_context_t *bdp_ctx)
 {
     if (bdp_ctx == NULL) {
         return BONDP_FB_ERR;
@@ -51,6 +52,7 @@ void bondp_failback_task_table_init(bondp_context_t *bdp_ctx)
         bondp_failback_task_comp_f,
         bondp_failback_task_free_f,
         bondp_failback_task_hash_f);
+    return BONDP_FB_OK;
 }
 
 static bondp_failback_task_t *bondp_failback_task_table_lookup(bondp_context_t *bdp_ctx,
@@ -123,7 +125,7 @@ bondp_failback_task_t *bondp_failback_task_create(
     task->new_pjetty_id = 0;
 
     // --- 广播通知跟踪 ---
-    //TODO: node_count 从 bdp_ctx 获取实际 NODE 数量
+    //node_count 从 bdp_ctx 获取实际 NODE 数量
     task->node_count = BOUNDP_FAILBACK_NODE_MAX_NUM;
     task->notified_count = 0;
     task->next_send_idx = 0;
@@ -214,7 +216,7 @@ int bondp_failback_on_cqe(bondp_context_t *bdp_ctx,
         return TW_NO_MEMORY_ERROR;
     }
 
-    // TODO: 初始化 node_count 从 bdp_ctx 获取实际 NODE 数量/标号  标记不需要使用的node_id
+    //初始化 node_count 从 bdp_ctx 获取实际 NODE 数量/标号  标记不需要使用的node_id   先写死
     // task->node_count = bdp_ctx->node_count;
     for (uint32_t i = 0; i < task->node_count; i++) {
         task->node_states[i] = BONDP_FAILBACK_NODE_PENDING;
@@ -356,8 +358,8 @@ static bool bondp_handle_message(bondp_context_t *bdp_ctx, const bondp_failback_
         //此处略有冗余，主要目的是将task的生命周期完全归于failback.c ops仅处理原子操作
         if (task->node_count == task->notified_count) {
             bondp_failback_destroy_old_jetty(task);
-            task->bondp_jetty->valid[task->pjetty_idx] = true;
-            //TODO: 考虑valid数组是否应当这样修改
+            task->bondp_jetty->failback_rebuilt[task->pjetty_idx] = true;
+            //标记重建完成
             bondp_failback_task_destroy(task);
         }
 

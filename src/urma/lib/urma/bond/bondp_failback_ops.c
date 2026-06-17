@@ -140,8 +140,10 @@ static int bondp_failback_reimport_single(bondp_context_t *bdp_ctx,
         bdp_tjetty->p_tjetty[pjetty_idx][ptjetty_idx] = NULL;
 
         urma_token_t *import_token = bdp_tjetty->import_token_valid ? &bdp_tjetty->import_token_value : NULL;
-        urma_target_jetty_t *new_ptjetty = urma_import_jetty(bdp_ctx->p_ctxs[pjetty_idx], &rjetty, import_token);
-        //TODO: 这里用到了CTX 查询一个urma_import_jetty 的参数  是否为healthcheck的残留  bondp_health_check.c:739
+        urma_target_jetty_t *new_ptjetty = urma_import_jetty(bdp_tjetty->v_tjetty->urma_ctx, &rjetty, import_token);
+        //这里用到了CTX 查询一个urma_import_jetty 的参数
+        //bondp_target_jetty_t 找  urma_target_jetty_t 找 ctx;
+
         //urma_context_t是否正确
         if (new_ptjetty == NULL) {
             URMA_LOG_ERR("Failback REQ: failed to import new ptjetty [%u][%u] new_id=%u\n",
@@ -171,10 +173,11 @@ int bondp_failback_handle_req(bondp_context_t *bdp_ctx, const bondp_failback_msg
 
 
     uint32_t node_id = msg->in.node_id;
-    //TODO: 基于node_id 查找应当处理消息的node
+    //TODO: 基于node_id，查找应当处理消息的node
 
     bondp_hash_table_t *tbl = &bdp_ctx->p_vjetty_id_table;
-    //TODO: 寻找一个合理的数据结构，遍历一个node内的所有vtjetty，在此处设置其表头
+    //TODO: 寻找一个合理的数据结构，遍历对应node内的所有vtjetty，在此处设置其表头
+    //暂时搁置
     //hcv2 提供了 bondp_hcv2_tjetty_map 但是疑似是以vtjetty做为key 而非value   需要一个更合适的数据结构
 
     pthread_rwlock_rdlock(&tbl->lock);
