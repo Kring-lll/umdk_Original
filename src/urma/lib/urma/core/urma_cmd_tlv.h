@@ -18,6 +18,10 @@
 
 #include "urma_cmd.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define URMA_CMD_OUT_TYPE_INIT 0x80
 
 typedef enum urma_event_cmd {
@@ -1414,5 +1418,9 @@ int urma_ioctl_get_eid_by_ip(int ioctl_fd, urma_cmd_get_eid_by_ip_t *arg);
 int urma_ioctl_get_ip_by_eid(int ioctl_fd, urma_cmd_get_ip_by_eid_t *arg);
 int urma_ioctl_get_smac(int ioctl_fd, urma_cmd_get_smac_t *arg);
 int urma_ioctl_get_dmac(int ioctl_fd, urma_cmd_get_dmac_t *arg);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
