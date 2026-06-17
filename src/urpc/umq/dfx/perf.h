@@ -32,6 +32,14 @@ void umq_perf_record_write_interrupt_with_direction(
     umq_perf_record_type_t type, uint64_t start, umq_io_direction_t direction);
 int umq_perf_init(void);
 void umq_perf_uninit(void);
+void umq_perf_data_uninit(void);
+int umq_perf_data_init(umq_perf_data_cfg_t cfg);
+int umq_perf_data_stop(void);
+int umq_perf_data_start(umq_perf_data_cfg_t cfg);
+void umq_perf_data_write(umq_perf_data_type_t type, umq_data_record_t data);
+void umq_ub_remain_perf_data_print(void);
+uint64_t umq_perf_data_get_start_timestamp(void);
+uint64_t umq_perf_data_get_timestamp(void);
 
 static inline uint64_t umq_perf_get_start_timestamp_with_feature(uint32_t feature)
 {

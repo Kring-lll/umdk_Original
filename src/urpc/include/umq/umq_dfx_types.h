@@ -225,6 +225,49 @@ typedef enum umq_perf_record_type {
     UMQ_PERF_RECORD_TYPE_MAX,
 } umq_perf_record_type_t;
 
+typedef enum umq_perf_data_type {
+    UMQ_PERF_DATA_TYPE_POST,
+    UMQ_PERF_DATA_TYPE_POLL,
+    UMQ_PERF_DATA_TYPE_INTERRUPT,
+    UMQ_PERF_DATA_TYPE_MAX,
+} umq_perf_data_type_t;
+
+typedef struct umq_data_record {
+    uint32_t user_data;
+    uint32_t jetty_id;
+    uint32_t local_umq_id;
+    uint32_t remote_umq_id;
+    uint32_t total_size;
+    uint64_t timestamp;
+    union {
+        struct {
+            uint64_t umq_post_start;
+            uint64_t fc_send_req;
+            uint64_t urma_post_time;
+            uint64_t urma_post_start;
+            uint64_t urma_post_end;
+        } post;
+        struct {
+            uint64_t urma_poll_time;
+            uint64_t umq_poll_end;
+        } poll;
+        struct {
+            uint64_t umq_wait_start;
+            uint64_t urma_wait_start;
+            uint64_t urma_wait_time;
+            uint64_t umq_wait_end;
+            uint64_t urma_ack_start;
+            uint64_t urma_ack_time;
+            uint64_t umq_rearm_start;
+            uint64_t urma_rearm_start;
+            uint64_t urma_rearm_time;
+            uint64_t urma_fc_rearm_start;
+            uint64_t urma_fc_rearm_time;
+            uint64_t umq_rearm_end;
+        } inter;
+    };
+} umq_data_record_t;
+
 typedef struct umq_perf_stats {
     struct {
         umq_perf_record_type_t type; // types of probe points supported by perf probe
@@ -242,6 +285,15 @@ typedef struct umq_perf_stats_cfg {
     uint64_t thresh_array[UMQ_PERF_QUANTILE_MAX_NUM]; // quantile values list
     uint32_t thresh_num; // number of valid quantiles
 } umq_perf_stats_cfg_t;
+
+#define UMQ_PERF_FLAG_RECORD_NUM              (1U)
+#define UMQ_PERF_FLAG_RECORD_LIMIT            (1U << 1)
+
+typedef struct umq_perf_data_cfg {
+    uint32_t perf_flag;
+    uint32_t data_record_num; // total number of record array
+    uint32_t data_record_limit; // log limit of data record
+} umq_perf_data_cfg_t;
 
 typedef void (*umq_io_perf_callback_t)(umq_perf_record_type_t record_type, umq_buf_t *qbuf);
 
