@@ -654,6 +654,27 @@ TEST_F(SocketInterfaceTest, boundary_listen_queue_full)
     ret = listen(tempSockFd, 1);
     EXPECT_TRUE(ret == 0);
     
+    // 创建多个客户端尝试连接，填满队列
+    const int CLIENT_NUM = 3;
+    int32_t clientFds[CLIENT_NUM];
+    struct sockaddr_in client_servaddr;
+    bzero(&client_servaddr, sizeof(client_servaddr));
+    client_servaddr.sin_family = AF_INET;
+    client_servaddr.sin_addr.s_addr = inet_addr(REMOTE_IP); 
+    client_servaddr.sin_port = htons(g_port + 1);
+    
+    for (int i = 0; i < CLIENT_NUM; i++) {
+        clientFds[i] = socket(AF_SMC, SOCK_STREAM, 0);
+        SetSocketNonBlock(clientFds[i]); // 避免阻塞
+        connect(clientFds[i], (struct sockaddr *)&client_servaddr, sizeof(client_servaddr));
+    }
+    
+    usleep(100000);
+    
+    for (int i = 0; i < CLIENT_NUM; i++) {
+        if (clientFds[i] >= 0) close(clientFds[i]);
+    }
+    
     close(tempSockFd);
 }
 
@@ -662,7 +683,24 @@ TEST_F(SocketInterfaceTest, multi_client_connection_test)
 {
     const int MAX_CLIENTS = 5;
     int32_t acceptFd[MAX_CLIENTS];
+    int32_t clientFd[MAX_CLIENTS];
     int32_t ret;
+    
+    struct sockaddr_in servaddr;
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = inet_addr(REMOTE_IP); 
+    servaddr.sin_port = htons(g_port);
+    
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        clientFd[i] = socket(AF_SMC, SOCK_STREAM, 0);
+        EXPECT_TRUE(clientFd[i] >= 0);
+        SetSocketNonBlock(clientFd[i]);
+        ret = connect(clientFd[i], (struct sockaddr *)&servaddr, sizeof(servaddr));
+        EXPECT_TRUE(ret == 0 || errno == EINPROGRESS);
+    }
+    
+    usleep(100000);
     
     // 接受多个客户端连接
     for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -672,7 +710,8 @@ TEST_F(SocketInterfaceTest, multi_client_connection_test)
     
     // 关闭所有连接
     for (int i = 0; i < MAX_CLIENTS; i++) {
-        close(acceptFd[i]);
+        if (acceptFd[i] >= 0) close(acceptFd[i]);
+        if (clientFd[i] >= 0) close(clientFd[i]);
     }
 }
 

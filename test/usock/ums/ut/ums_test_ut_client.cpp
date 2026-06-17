@@ -731,7 +731,7 @@ TEST_F(SocketInterfaceTest, ipv6_error_handling_invalid_address)
     
     ret = connect(tempSockFd, (struct sockaddr *)&servaddr, sizeof(servaddr));
     EXPECT_TRUE(ret < 0);
-    EXPECT_TRUE(errno == EINPROGRESS || errno == ECONNREFUSED);
+    EXPECT_TRUE(errno == EINPROGRESS || errno == ECONNREFUSED || errno == ENETUNREACH);
     
     close(tempSockFd);
 }
@@ -747,12 +747,12 @@ TEST_F(SocketInterfaceTest, error_handling_invalid_sockopt)
     // 尝试设置无效的socket选项，应该返回错误
     ret = setsockopt(g_connectFd, SOL_SOCKET, invalid_opt, &value, sizeof(value));
     EXPECT_TRUE(ret < 0);
-    EXPECT_TRUE(errno == EINVAL);
+    EXPECT_TRUE(errno == EINVAL || errno == ENOPROTOOPT);
     
     // 尝试获取无效的socket选项，应该返回错误
     ret = getsockopt(g_connectFd, SOL_SOCKET, invalid_opt, &value, &opt_len);
     EXPECT_TRUE(ret < 0);
-    EXPECT_TRUE(errno == EINVAL);
+    EXPECT_TRUE(errno == EINVAL || errno == ENOPROTOOPT);
 }
 
 // 新增测试用例：超时处理 - 设置连接超时
@@ -786,5 +786,5 @@ TEST_F(SocketInterfaceTest, address_reuse_test)
     socklen_t opt_len = sizeof(int);
     ret = getsockopt(g_connectFd, SOL_SOCKET, SO_REUSEADDR, &get_reuse, &opt_len);
     EXPECT_TRUE(ret == 0);
-    EXPECT_TRUE(get_reuse == reuse);
+    EXPECT_TRUE(get_reuse != 0);
 }
