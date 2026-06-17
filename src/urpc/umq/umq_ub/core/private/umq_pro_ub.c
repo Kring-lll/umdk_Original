@@ -875,6 +875,17 @@ static uint32_t umq_ub_process_fc_msg(ub_queue_t *queue, umq_ub_flow_control_dat
 {
     uint32_t ret = 0;
     ub_flow_control_t *fc = &queue->flow_control;
+
+    /* Record poll-to-process latency */
+    uint64_t proc_ts = get_timestamp_ns();
+    uint64_t poll_ts = __atomic_load_n(&fc->fc_poll_ts, __ATOMIC_RELAXED);
+    if (poll_ts != 0) {
+        umq_perf_fc_latency_record_poll_to_proc(
+            &fc->fc_latency_poll_to_proc_total, &fc->fc_latency_poll_to_proc_cnt,
+            &fc->fc_latency_poll_to_proc_max, fc->fc_latency_poll_to_proc_hist,
+            poll_ts, proc_ts);
+    }
+
     switch (flow_control_data->bs.type) {
         case IMM_TYPE_FC_CREDIT_REQ: {
             if (umq_ub_shared_credit_req_handle(queue, flow_control_data) != UMQ_SUCCESS) {
@@ -963,7 +974,8 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
     uint64_t start = get_timestamp_ns();
     int rx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfc,
                                                      poll_count, cr);
-    *poll_time += (get_timestamp_ns() - start);                                                
+    *poll_time += (get_timestamp_ns() - start);
+    uint64_t recv_ts = get_timestamp_ns(); /* timestamp when FC messages were received from hardware */
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id;
     umq_perf_record_write_poll(UMQ_PERF_RECORD_TRANSPORT_POLL_RX, start_timestmap, rx_cr_cnt);
@@ -1012,12 +1024,38 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
             continue;
         }
 
+        /* Record FC end-to-end latency: A→B (REQ/RETURN_REQ) or B→A (REP/RETURN_ACK) */
+        {
+            ub_flow_control_t *fc_lat = &real_queue->flow_control;
+            uint32_t send_ts_low = sge_data->bs.send_timestamp;
+            switch (sge_data->bs.type) {
+                case IMM_TYPE_FC_CREDIT_REQ:
+                case IMM_TYPE_FC_CREDIT_RETURN_REQ:
+                    umq_perf_fc_latency_record_send_to_recv(
+                        &fc_lat->fc_latency_a_to_b_total, &fc_lat->fc_latency_a_to_b_cnt,
+                        &fc_lat->fc_latency_a_to_b_max, fc_lat->fc_latency_a_to_b_hist,
+                        send_ts_low, recv_ts);
+                    break;
+                case IMM_TYPE_FC_CREDIT_REP:
+                case IMM_TYPE_FC_CREDIT_RETURN_ACK:
+                    umq_perf_fc_latency_record_send_to_recv(
+                        &fc_lat->fc_latency_b_to_a_total, &fc_lat->fc_latency_b_to_a_cnt,
+                        &fc_lat->fc_latency_b_to_a_max, fc_lat->fc_latency_b_to_a_hist,
+                        send_ts_low, recv_ts);
+                    break;
+                default:
+                    break;
+            }
+        }
+
         // Flow control messages sent to the main umq are processed directly.
         if (real_queue == queue) {
             if (is_umq_ub_flow_control_msg_duplicate(queue, &fc_data)) {
                 umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
                 continue;
             }
+            /* Set poll timestamp for poll-to-process latency measurement */
+            __atomic_store_n(&queue->flow_control.fc_poll_ts, recv_ts, __ATOMIC_RELAXED);
             qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, &fc_data, &buf[qbuf_cnt]);
             umq_ub_fill_rx_buff_post_process(queue, &fc_data);
             umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
@@ -1030,6 +1068,14 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
             continue;
         }
 
+        /* Store recv timestamp so sub-queue can measure poll-to-process latency */
+        {
+            uint32_t msg_type = (fc_data.bs.type == IMM_TYPE_FC_CREDIT_REQ ||
+                                 fc_data.bs.type == IMM_TYPE_FC_CREDIT_RETURN_REQ) ?
+                                UB_QUEUE_FC_MSG_TYPE_REQ : UB_QUEUE_FC_MSG_TYPE_RSP;
+            __atomic_store_n(&real_queue->flow_control.fc_msg_recv_ts[msg_type],
+                             recv_ts, __ATOMIC_RELAXED);
+        }
         qbuf_cnt += (int32_t)umq_ub_fill_fc_buf(real_queue, &buf[qbuf_cnt], UMQ_FAKE_BUF_FC_MSG);
         umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
     }
@@ -1045,6 +1091,9 @@ static int sub_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t bu
         if (fc_data.value == 0) {
             continue;
         }
+        /* Set poll timestamp from stored recv_ts for poll-to-process latency measurement */
+        uint64_t stored_recv_ts = __atomic_load_n(&queue->flow_control.fc_msg_recv_ts[i], __ATOMIC_RELAXED);
+        __atomic_store_n(&queue->flow_control.fc_poll_ts, stored_recv_ts, __ATOMIC_RELAXED);
         qbuf_cnt += umq_ub_process_fc_msg(queue, &fc_data, &buf[qbuf_cnt]);
         (void)umq_ub_fill_rx_buff_post_process(queue, &fc_data);
     }
@@ -1065,6 +1114,7 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
     int rx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfc,
                                                      poll_count, cr);
     *poll_time += (get_timestamp_ns() - start);
+    uint64_t recv_ts = get_timestamp_ns(); /* timestamp when FC messages were received from hardware */
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id;
     umq_perf_record_write_poll(UMQ_PERF_RECORD_TRANSPORT_POLL_RX, start_timestmap, rx_cr_cnt);
@@ -1111,6 +1161,34 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
             }
             continue;
         }
+
+        /* Record FC end-to-end latency: A→B (REQ/RETURN_REQ) or B→A (REP/RETURN_ACK) */
+        {
+            ub_flow_control_t *fc_lat = &queue->flow_control;
+            uint32_t send_ts_low = sge_data->bs.send_timestamp;
+            switch (sge_data->bs.type) {
+                case IMM_TYPE_FC_CREDIT_REQ:
+                case IMM_TYPE_FC_CREDIT_RETURN_REQ:
+                    umq_perf_fc_latency_record_send_to_recv(
+                        &fc_lat->fc_latency_a_to_b_total, &fc_lat->fc_latency_a_to_b_cnt,
+                        &fc_lat->fc_latency_a_to_b_max, fc_lat->fc_latency_a_to_b_hist,
+                        send_ts_low, recv_ts);
+                    break;
+                case IMM_TYPE_FC_CREDIT_REP:
+                case IMM_TYPE_FC_CREDIT_RETURN_ACK:
+                    umq_perf_fc_latency_record_send_to_recv(
+                        &fc_lat->fc_latency_b_to_a_total, &fc_lat->fc_latency_b_to_a_cnt,
+                        &fc_lat->fc_latency_b_to_a_max, fc_lat->fc_latency_b_to_a_hist,
+                        send_ts_low, recv_ts);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        /* Set poll timestamp for poll-to-process latency measurement */
+        __atomic_store_n(&queue->flow_control.fc_poll_ts, recv_ts, __ATOMIC_RELAXED);
+
         if (is_umq_ub_flow_control_msg_duplicate(queue, &fc_data)) {
             continue;
         }

@@ -189,9 +189,27 @@ typedef struct ub_flow_control {
     bool enabled;
     volatile bool is_credit_applying;
     volatile uint64_t imm[UB_QUEUE_FC_MSG_TYPE_MAX];
+    volatile uint64_t fc_msg_recv_ts[UB_QUEUE_FC_MSG_TYPE_MAX]; /* recv poll timestamp for sub-queue poll-to-process latency */
+    volatile uint64_t fc_poll_ts; /* latest poll timestamp, for poll-to-process latency measurement */
     umq_ub_flow_control_sge_slot_t recv_sge;
     uint8_t local_req_seq;
     uint8_t remote_expect_seq;
+
+    /* FC latency stats (in nanoseconds), for same-host loopback latency measurement */
+    volatile uint64_t fc_latency_a_to_b_total;
+    volatile uint64_t fc_latency_a_to_b_cnt;
+    volatile uint64_t fc_latency_a_to_b_max;
+    volatile uint64_t fc_latency_b_to_a_total;
+    volatile uint64_t fc_latency_b_to_a_cnt;
+    volatile uint64_t fc_latency_b_to_a_max;
+    volatile uint64_t fc_latency_poll_to_proc_total;
+    volatile uint64_t fc_latency_poll_to_proc_cnt;
+    volatile uint64_t fc_latency_poll_to_proc_max;
+
+    /* FC latency histograms — power-of-2 buckets, for p50/p90/p99 distribution */
+    volatile uint64_t fc_latency_a_to_b_hist[UMQ_FC_LATENCY_BUCKET_COUNT];
+    volatile uint64_t fc_latency_b_to_a_hist[UMQ_FC_LATENCY_BUCKET_COUNT];
+    volatile uint64_t fc_latency_poll_to_proc_hist[UMQ_FC_LATENCY_BUCKET_COUNT];
 } ub_flow_control_t;
 
 typedef struct umq_ub_flow_control_sge_mgr {
