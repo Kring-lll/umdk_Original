@@ -20,6 +20,7 @@ extern "C" {
 
 #define UMQ_STATS_QBUF_POOL_TYPE_MAX (16u)
 #define UMQ_PERF_QUANTILE_MAX_NUM (8u)
+#define UMQ_FC_LATENCY_BUCKET_COUNT 16    // power-of-2 buckets for FC latency histogram
 #define UMQ_PERF_REC_MAX_NUM (64u)
 #define UMQ_DFX_TO_STRING_DEFAULT_LEN (20480)
 #define UMQ_LOCAL_QBUF_POOL_MAX_NUM (64)
@@ -69,10 +70,26 @@ typedef struct umq_credit_private_stats {
     uint64_t rsvd[4];
 } umq_credit_private_stats_t;
 
+typedef struct umq_fc_latency_stats {
+    uint64_t a_to_b_total;          // cumulative A→B latency (ns)
+    uint64_t a_to_b_cnt;            // number of A→B latency samples
+    uint64_t a_to_b_max;            // max A→B latency (ns)
+    uint64_t b_to_a_total;          // cumulative B→A latency (ns)
+    uint64_t b_to_a_cnt;            // number of B→A latency samples
+    uint64_t b_to_a_max;            // max B→A latency (ns)
+    uint64_t poll_to_proc_total;    // cumulative poll-to-process latency (ns)
+    uint64_t poll_to_proc_cnt;      // number of poll-to-process latency samples
+    uint64_t poll_to_proc_max;      // max poll-to-process latency (ns)
+    uint64_t a_to_b_hist[16];           // A→B latency histogram (power-of-2 buckets from 128ns)
+    uint64_t b_to_a_hist[16];           // B→A latency histogram
+    uint64_t poll_to_proc_hist[16];     // poll→proc latency histogram
+} umq_fc_latency_stats_t;
+
 typedef struct umq_flow_control_stats {
     umq_credit_pool_stats_t pool_credit; // credit-related statistics of a main queue
     umq_credit_private_stats_t queue_credit; // credit-related statistics of a specific queue
-    umq_packet_stats_t packet_stats; // flow control sacket statistics
+    umq_packet_stats_t packet_stats; // flow control packet statistics
+    umq_fc_latency_stats_t fc_latency; // FC message latency statistics
 } umq_flow_control_stats_t;
 
 typedef struct umq_expansion_pool_stats {

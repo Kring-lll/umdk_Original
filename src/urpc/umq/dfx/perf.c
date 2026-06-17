@@ -634,3 +634,76 @@ int umq_perf_info_get(umq_perf_stats_t *perf_info)
     (void)pthread_spin_unlock(&g_umq_perf_record_lock);
     return 0;
 }
+
+/*
+ * FC latency histogram helpers — always-on accumulators gated by g_umq_perf_record_enable.
+ * Power-of-2 buckets starting at 128 ns (2^7):
+ *   bucket 0: (0,    128] ns
+ *   bucket 1: (128,  256] ns
+ *   ...
+ *   bucket 14: (1ms, 2ms] ns
+ *   bucket 15: > 2ms  (overflow)
+ */
+
+static inline uint64_t umq_perf_fc_reconstruct_send_ts(uint32_t ts_low, uint64_t now_ns)
+{
+    uint64_t ts = (now_ns & ~0xFFFFFFFFULL) | ts_low;
+    if (ts > now_ns) {
+        ts -= 0x100000000ULL;  /* wraparound: send was in previous 32-bit window */
+    }
+    return ts;
+}
+
+static inline int umq_perf_fc_latency_bucket_idx(uint64_t latency)
+{
+    if (latency <= 128) return 0;
+    int msb = 64 - __builtin_clzll(latency - 1);  /* ceil(log2(latency)) */
+    int bucket = msb - 7;  /* 2^7 = 128ns maps to bucket 0 */
+    if (bucket < 0) return 0;
+    if (bucket >= UMQ_FC_LATENCY_BUCKET_COUNT) return UMQ_FC_LATENCY_BUCKET_COUNT - 1;
+    return bucket;
+}
+
+static inline void umq_perf_fc_latency_update(
+    volatile uint64_t *total, volatile uint64_t *cnt, volatile uint64_t *max,
+    volatile uint64_t *hist, uint64_t latency)
+{
+    (void)__atomic_add_fetch(total, latency, __ATOMIC_RELAXED);
+    (void)__atomic_add_fetch(cnt, 1, __ATOMIC_RELAXED);
+
+    uint64_t old_max = __atomic_load_n(max, __ATOMIC_RELAXED);
+    while (latency > old_max) {
+        if (__atomic_compare_exchange_n(max, &old_max, latency, false,
+            __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+            break;
+        }
+    }
+
+    if (hist != NULL) {
+        int b = umq_perf_fc_latency_bucket_idx(latency);
+        (void)__atomic_add_fetch(&hist[b], 1, __ATOMIC_RELAXED);
+    }
+}
+
+void umq_perf_fc_latency_record_send_to_recv(
+    volatile uint64_t *total, volatile uint64_t *cnt, volatile uint64_t *max,
+    volatile uint64_t *hist,
+    uint32_t send_ts_low, uint64_t recv_ts)
+{
+    if (!g_umq_perf_record_enable) return;
+
+    uint64_t send_ts = umq_perf_fc_reconstruct_send_ts(send_ts_low, recv_ts);
+    uint64_t latency = recv_ts - send_ts;
+    umq_perf_fc_latency_update(total, cnt, max, hist, latency);
+}
+
+void umq_perf_fc_latency_record_poll_to_proc(
+    volatile uint64_t *total, volatile uint64_t *cnt, volatile uint64_t *max,
+    volatile uint64_t *hist,
+    uint64_t poll_ts, uint64_t proc_ts)
+{
+    if (!g_umq_perf_record_enable) return;
+
+    uint64_t latency = proc_ts - poll_ts;
+    umq_perf_fc_latency_update(total, cnt, max, hist, latency);
+}
