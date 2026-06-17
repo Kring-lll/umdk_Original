@@ -559,14 +559,12 @@ static void umq_perftest_server_run_latency_pro_interrupt(uint64_t umqh, umq_per
                 LOG_PRINT("umq poll rx failed, ret %d\n", ret);
                 goto FINISH;
             }
-
             if (ret == 1) {
                 ret = process_flow_control_buf(umqh, rx_buf);
                 if (ret < 0) {
                     goto FINISH;
                 }
             }
-
             recv_cnt += (uint32_t)ret;
         } while (recv_cnt < 1 && !is_perftest_force_quit());
 
