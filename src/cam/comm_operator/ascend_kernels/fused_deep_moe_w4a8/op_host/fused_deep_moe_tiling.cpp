@@ -244,7 +244,7 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
             OPS_LOG_E(nodeName, "shareGmm2Weight dim1 should be shareGmm1HLen/2(%lu), but got %ld.",
                     shareGmm2InputDim, shareGmm2OriginShape.GetDim(1)),
             return ge::GRAPH_FAILED);
-        OPS_ERR_IF(h != shareGmm2OriginShape.GetDim(2),
+        OPS_ERR_IF(h != shareGmm2OriginShape.GetDim(2) * 8,
             OPS_LOG_E(nodeName, "shareGmm2Weight dim2 should be h(%u), but got %ld.", h, shareGmm2OriginShape.GetDim(2)),
             return ge::GRAPH_FAILED);
     }
@@ -430,14 +430,55 @@ static ge::graphStatus CheckGmm2ScaleShape(gert::TilingContext &context,
     return ge::GRAPH_SUCCESS;
 }
 
+static ge::graphStatus CheckGmm1BiasShape(gert::TilingContext &context,
+                                          const FusedDeepMoeTilingData &tilingData)
+{
+    const char *nodeName = context.GetNodeName();
+    uint32_t moeExpertNumPerRank = tilingData.fusedDeepMoeInfo.moeExpertNumPerRank;
+    uint32_t n = tilingData.fusedDeepMoeInfo.gmm1HLen;
+    uint32_t localExpertNum = moeExpertNumPerRank;
+    bool listFlag = false;
+
+    uint32_t gmm1BiasListLen = CountTensorListLen(context, INPUT_GMM1_BIAS_INDEX);
+    auto gmm1BiasFirstTensorElement = context.GetDynamicInputTensor(INPUT_GMM1_BIAS_INDEX, 0);
+    OPS_ERR_IF(gmm1BiasFirstTensorElement == nullptr,
+        OPS_LOG_E(nodeName, "gmm1Bias is null."), return ge::GRAPH_FAILED);
+    auto gmm1BiasFirstTensorElementShape = gmm1BiasFirstTensorElement->GetOriginShape();
+    uint32_t elementDims = gmm1BiasFirstTensorElementShape.GetDimNum();
+    OPS_ERR_IF(elementDims != 1 && elementDims != 2, OPS_LOG_E(nodeName, "gmm1Bias shape is invalid."),
+            return ge::GRAPH_FAILED);
+    if (gmm1BiasListLen > 1) { // List
+        OPS_ERR_IF(gmm1BiasListLen != localExpertNum,
+                OPS_LOG_E(nodeName, "gmm1Bias listlen does not equals to localExpertNum."), return ge::GRAPH_FAILED);
+        OPS_ERR_IF(n != gmm1BiasFirstTensorElementShape.GetDim(0),
+                OPS_LOG_E(nodeName, "gmm1Bias length does not equals to gmm1 hidden size."), return ge::GRAPH_FAILED);
+        listFlag = true;
+    } else { // Single
+        if (elementDims == 1) { // one localExpert perRank
+            OPS_ERR_IF(n != gmm1BiasFirstTensorElementShape.GetDim(0),
+                OPS_LOG_E(nodeName, "gmm1Bias length does not equals to gmm1 hidden size."), return ge::GRAPH_FAILED);
+        } else { // multi localExperts perRank
+            OPS_ERR_IF(localExpertNum != gmm1BiasFirstTensorElementShape.GetDim(0),
+                OPS_LOG_E(nodeName, "gmm1Bias does not match local expert number perRank."), return ge::GRAPH_FAILED);
+            OPS_ERR_IF(n != gmm1BiasFirstTensorElementShape.GetDim(1),
+                OPS_LOG_E(nodeName, "gmm1Bias length does not equals to gmm1 hidden size."), return ge::GRAPH_FAILED);
+        }
+    }
+    OPS_ERR_IF(listFlag != tilingData.fusedDeepMoeInfo.isTensorList,
+        OPS_LOG_E(nodeName, "gmm1Bias listFlag does not match gmm1Weight listFlag."), return ge::GRAPH_FAILED);
+
+    return ge::GRAPH_SUCCESS;
+}
+
 static ge::graphStatus CheckGmm2BiasShape(gert::TilingContext &context,
-                                           const FusedDeepMoeTilingData &tilingData)
+                                          const FusedDeepMoeTilingData &tilingData)
 {
     const char *nodeName = context.GetNodeName();
     uint32_t moeExpertNumPerRank = tilingData.fusedDeepMoeInfo.moeExpertNumPerRank;
     uint32_t h = tilingData.fusedDeepMoeInfo.h;
     uint32_t localExpertNum = moeExpertNumPerRank;
     bool listFlag = false;
+
     uint32_t gmm2BiasListLen = CountTensorListLen(context, INPUT_GMM2_BIAS_INDEX);
     auto gmm2BiasFirstTensorElement = context.GetDynamicInputTensor(INPUT_GMM2_BIAS_INDEX, 0);
     OPS_ERR_IF(gmm2BiasFirstTensorElement == nullptr,
@@ -446,17 +487,17 @@ static ge::graphStatus CheckGmm2BiasShape(gert::TilingContext &context,
     uint32_t elementDims = gmm2BiasFirstTensorElementShape.GetDimNum();
     OPS_ERR_IF(elementDims != 1 && elementDims != 2, OPS_LOG_E(nodeName, "gmm2Bias shape is invalid."),
             return ge::GRAPH_FAILED);
-    if (gmm2BiasListLen > 1) {
+    if (gmm2BiasListLen > 1) { // List
         OPS_ERR_IF(gmm2BiasListLen != localExpertNum,
                 OPS_LOG_E(nodeName, "gmm2Bias listlen does not equals to localExpertNum."), return ge::GRAPH_FAILED);
         OPS_ERR_IF(h != gmm2BiasFirstTensorElementShape.GetDim(0),
                 OPS_LOG_E(nodeName, "gmm2Bias does not match token hidden size."), return ge::GRAPH_FAILED);
         listFlag = true;
-    } else {
-        if (elementDims == 1) {
+    } else { // Single
+        if (elementDims == 1) { // one localExpert perRank
             OPS_ERR_IF(h != gmm2BiasFirstTensorElementShape.GetDim(0),
                 OPS_LOG_E(nodeName, "gmm2Bias does not match token hidden size."), return ge::GRAPH_FAILED);
-        } else {
+        } else { // multi localExperts perRank
             OPS_ERR_IF(localExpertNum != gmm2BiasFirstTensorElementShape.GetDim(0),
                 OPS_LOG_E(nodeName, "gmm2Bias does not match local expert number perRank."), return ge::GRAPH_FAILED);
             OPS_ERR_IF(h != gmm2BiasFirstTensorElementShape.GetDim(1),
@@ -476,6 +517,7 @@ static ge::graphStatus CheckWeightTensorList(gert::TilingContext &context,
         CheckGmm1ScaleShape(context, tilingData) == ge::GRAPH_SUCCESS &&
         CheckGmm2Shape(context, tilingData) == ge::GRAPH_SUCCESS &&
         CheckGmm2ScaleShape(context, tilingData) == ge::GRAPH_SUCCESS &&
+        CheckGmm1BiasShape(context, tilingData) == ge::GRAPH_SUCCESS &&
         CheckGmm2BiasShape(context, tilingData) == ge::GRAPH_SUCCESS) {
         return ge::GRAPH_SUCCESS;
     }

@@ -9,7 +9,7 @@
 set -e
 
 # 定义全局屏蔽列表
-exclude_list=("fused_deep_moe_w4a8")
+exclude_list=("fused_deep_moe")
 if [ -z "${SHMEM_HOME_PATH}" ]; then
     echo "Skipping shmem (SHMEM_HOME_PATH not set)"
     exclude_list+=("fused_deep_moe")
@@ -118,7 +118,11 @@ build_ascend_proj() {
     cp -rf ./ascend_kernels/pregen ${MODULE_BUILD_PATH}/${proj_name}/
 
     # 根据屏蔽列表移除pregen中对应算子的autogen文件
+    # 注意：fused_deep_moe 的 autogen 文件为 w8a8/w4a8 共用，不可删除
     for excluded_dir in "${exclude_list[@]}"; do
+        if [ "$excluded_dir" = "fused_deep_moe" ]; then
+            continue
+        fi
         rm -f ${MODULE_BUILD_PATH}/${proj_name}/pregen/build_out/autogen/aclnn_${excluded_dir}.*
     done
 

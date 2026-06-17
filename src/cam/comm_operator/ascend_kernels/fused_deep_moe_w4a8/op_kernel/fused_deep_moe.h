@@ -56,8 +56,8 @@ using Gmm2DispatchPolicy =
 template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class EpilogueTileShape_,
           class BlockScheduler_, class DispatchPolicy_ = MmadAtlasA2Custom>
 CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
-                                  layout::RowMajor layoutA, GM_ADDR gmShareB, layout::zN layoutShareB, GM_ADDR gmB, layout::zN layoutB,
-                                  GM_ADDR gmBias, GM_ADDR gmShareBias,
+                                  layout::RowMajor layoutA, GM_ADDR gmShareB, layout::zN layoutShareB, GM_ADDR gmB,
+                                  layout::zN layoutB, GM_ADDR gmBias, GM_ADDR gmShareBias,
                                   GM_ADDR gmShareScale, layout::VectorLayout layoutShareScale,
                                   GM_ADDR gmScale, layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
                                   layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
@@ -74,6 +74,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;
 
+    // w4A8: weight is int4, stored as int32 on GM
     using AType = Gemm::GemmType<AscendC::int4b_t, layout::RowMajor>;
     using BType = Gemm::GemmType<AscendC::int4b_t, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
@@ -112,44 +113,45 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
             TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
 
     typename GemmKernel::Params params{problemShape,
-                                       groupCount,
-                                       gmGroupList,
-                                       gmA,
-                                       layoutA,
-                                       gmShareB,
-                                       layoutShareB,
-                                       gmB,
-                                       layoutB,
-                                       gmBias,
-                                       gmShareBias,
-                                       gmShareScale,
-                                       layoutShareScale,
-                                       gmScale,
-                                       layoutScale,
-                                       gmPerTokenScale,
-                                       layoutPerTokenScale,
-                                       gmD,
-                                       layoutD,
-                                       gmDequantScale,
-                                       layoutDequantScale,
-                                       gmWorkspace,
-                                       gmX,
-                                       gmMoeSmoothScales,
-                                       gmShareSmoothScales,
-                                       gmexpertIds,
-                                       gmExpandIdx,
-                                       gmEpSendCount,
-                                       xActiveMask,
-                                       gmReserved,
-                                       gmExpertTokenNums,
-                                       gmShareX1,
-                                       gmShareX1Scale,
-                                       gmShareSwigluOut,
-                                       gmShareX2,
-                                       layoutShareD,
-                                       gmShareX2Scale,
-                                       gmSwigluOut,
-                                       fusedDeepMoeInfo};
+                                        groupCount,
+                                        gmGroupList,
+                                        gmA,
+                                        layoutA,
+                                        gmShareB,
+                                        layoutShareB,
+                                        gmB,
+                                        layoutB,
+                                        gmBias,
+                                        gmShareBias,
+                                        gmShareScale,
+                                        layoutShareScale,
+                                        gmScale,
+                                        layoutScale,
+                                        gmPerTokenScale,
+                                        layoutPerTokenScale,
+                                        gmD,
+                                        layoutD,
+                                        gmDequantScale,
+                                        layoutDequantScale,
+                                        gmWorkspace,
+                                        gmX,
+                                        gmMoeSmoothScales,
+                                        gmShareSmoothScales,
+                                        gmexpertIds,
+                                        gmExpandIdx,
+                                        gmEpSendCount,
+                                        xActiveMask,
+                                        gmReserved,
+                                        gmExpertTokenNums,
+                                        gmShareX1,
+                                        gmShareX1Scale,
+                                        gmShareSwigluOut,
+                                        gmShareX2,
+                                        layoutShareD,
+                                        gmShareX2Scale,
+                                        gmSwigluOut,
+                                        fusedDeepMoeInfo};
+    // call a kernel
     GemmKernel gemm;
     gemm(params);
 }
@@ -173,6 +175,7 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;
 
+    // w4A8: weight is int4, stored as int32 on GM
     using AType = Gemm::GemmType<AscendC::int4b_t, layout::RowMajor>;
     using BType = Gemm::GemmType<AscendC::int4b_t, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
