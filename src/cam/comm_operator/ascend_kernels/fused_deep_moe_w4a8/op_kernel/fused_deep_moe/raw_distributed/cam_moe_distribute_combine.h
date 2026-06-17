@@ -239,7 +239,7 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
 {
     tpipe_ = pipe;
     coreIdx_ = GetBlockIdx();
-    epRankId_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
+    epRankId_ = tilingData->fusedDeepMoeInfo.epRankId;
     auto contextGM0 = AscendC::GetHcclContext<HCCL_GROUP_ID_0>();
     epWinContext_ = (__gm__ HcclOpResParam *)contextGM0;
     GlobalTensor<int32_t> selfDataStatusTensor;
@@ -269,24 +269,24 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     expandScalesGM_.SetGlobalBuffer((__gm__ float *)scales);
     xActiveMaskGM_.SetGlobalBuffer((__gm__ bool*)xActiveMask);
     expandOutGlobal_.SetGlobalBuffer((__gm__ ExpandXType *)XOut);
-    axisBS_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.bs;
+    axisBS_ = tilingData->fusedDeepMoeInfo.bs;
     activeMaskBsCnt_ = axisBS_;
-    axisH_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.h;
-    axisK_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.k;
+    axisH_ = tilingData->fusedDeepMoeInfo.h;
+    axisK_ = tilingData->fusedDeepMoeInfo.k;
     if constexpr (EXEC_FLAG & (EXEC_FLAG_DEEP_FUSE | EXEC_FLAG_SHARED_EXPERT)) {
-        aivNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.aicNum;
+        aivNum_ = tilingData->fusedDeepMoeInfo.aicNum;
     } else {
-        aivNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.aivNum;
+        aivNum_ = tilingData->fusedDeepMoeInfo.aivNum;
     }
-    ubSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.totalUbSize;
-    moeExpertNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum;
-    moeExpertPerRankNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
-    epWorldSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize;
-    axisMaxBs_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.globalBs / epWorldSize_;
+    ubSize_ = tilingData->fusedDeepMoeInfo.totalUbSize;
+    moeExpertNum_ = tilingData->fusedDeepMoeInfo.moeExpertNum;
+    moeExpertPerRankNum_ = tilingData->fusedDeepMoeInfo.moeExpertNumPerRank;
+    epWorldSize_ = tilingData->fusedDeepMoeInfo.epRankSize;
+    axisMaxBs_ = tilingData->fusedDeepMoeInfo.globalBs / epWorldSize_;
     moeSendNum_ = epWorldSize_ * moeExpertPerRankNum_;
     tpWorldSize_ = 1;
     tpRankId_ = 0;
-    totalWinSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.totalWinSize;
+    totalWinSize_ = tilingData->fusedDeepMoeInfo.totalWinSize;
     stateOffset_ = (moeSendNum_ > 512) ? (STATE_OFFSET / 2) : STATE_OFFSET;
     expertPerSizeOnWin_ =
         static_cast<uint64_t>(axisMaxBs_) * static_cast<uint64_t>(axisH_) * static_cast<uint64_t>(sizeof(ExpandXType));
