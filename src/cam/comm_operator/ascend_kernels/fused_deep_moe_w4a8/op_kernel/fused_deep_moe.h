@@ -56,8 +56,9 @@ using Gmm2DispatchPolicy =
 template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class EpilogueTileShape_,
           class BlockScheduler_, class DispatchPolicy_ = MmadAtlasA2Custom>
 CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
-                                  layout::RowMajor layoutA, GM_ADDR gmShareB, layout::zN layoutShareB, GM_ADDR gmB,
-                                  layout::zN layoutB, GM_ADDR gmShareScale, layout::VectorLayout layoutShareScale,
+                                  layout::RowMajor layoutA, GM_ADDR gmShareB, layout::zN layoutShareB, GM_ADDR gmB, layout::zN layoutB,
+                                  GM_ADDR gmBias, GM_ADDR gmShareBias,
+                                  GM_ADDR gmShareScale, layout::VectorLayout layoutShareScale,
                                   GM_ADDR gmScale, layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
                                   layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
                                   GM_ADDR gmDequantScale, layout::VectorLayout layoutDequantScale, GM_ADDR gmShareX1,
@@ -73,8 +74,8 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;
 
-    using AType = Gemm::GemmType<int8_t, layout::RowMajor>;
-    using BType = Gemm::GemmType<int8_t, layout::zN>;
+    using AType = Gemm::GemmType<AscendC::int4b_t, layout::RowMajor>;
+    using BType = Gemm::GemmType<AscendC::int4b_t, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
@@ -107,46 +108,48 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     // kernel level
     using ElementGroupList = int64_t;
 
-    using GemmKernel = typename Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspace<
+    using GemmKernel = Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspace<
             TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
+
     typename GemmKernel::Params params{problemShape,
-                                        groupCount,
-                                        gmGroupList,
-                                        gmA,
-                                        layoutA,
-                                        gmShareB,
-                                        layoutShareB,
-                                        gmB,
-                                        layoutB,
-                                        gmShareScale,
-                                        layoutShareScale,
-                                        gmScale,
-                                        layoutScale,
-                                        gmPerTokenScale,
-                                        layoutPerTokenScale,
-                                        gmD,
-                                        layoutD,
-                                        gmDequantScale,
-                                        layoutDequantScale,
-                                        gmWorkspace,
-                                        gmX,
-                                        gmMoeSmoothScales,
-                                        gmShareSmoothScales,
-                                        gmexpertIds,
-                                        gmExpandIdx,
-                                        gmEpSendCount,
-                                        xActiveMask,
-                                        gmReserved,
-                                        gmExpertTokenNums,
-                                        gmShareX1,
-                                        gmShareX1Scale,
-                                        gmShareSwigluOut,
-                                        gmShareX2,
-                                        layoutShareD,
-                                        gmShareX2Scale,
-                                        gmSwigluOut,
-                                        fusedDeepMoeInfo};
-    // call a kernel
+                                       groupCount,
+                                       gmGroupList,
+                                       gmA,
+                                       layoutA,
+                                       gmShareB,
+                                       layoutShareB,
+                                       gmB,
+                                       layoutB,
+                                       gmBias,
+                                       gmShareBias,
+                                       gmShareScale,
+                                       layoutShareScale,
+                                       gmScale,
+                                       layoutScale,
+                                       gmPerTokenScale,
+                                       layoutPerTokenScale,
+                                       gmD,
+                                       layoutD,
+                                       gmDequantScale,
+                                       layoutDequantScale,
+                                       gmWorkspace,
+                                       gmX,
+                                       gmMoeSmoothScales,
+                                       gmShareSmoothScales,
+                                       gmexpertIds,
+                                       gmExpandIdx,
+                                       gmEpSendCount,
+                                       xActiveMask,
+                                       gmReserved,
+                                       gmExpertTokenNums,
+                                       gmShareX1,
+                                       gmShareX1Scale,
+                                       gmShareSwigluOut,
+                                       gmShareX2,
+                                       layoutShareD,
+                                       gmShareX2Scale,
+                                       gmSwigluOut,
+                                       fusedDeepMoeInfo};
     GemmKernel gemm;
     gemm(params);
 }
@@ -154,8 +157,9 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
 template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class EpilogueTileShape_, class BlockScheduler_,
           class DispatchPolicy_ = MmadAtlasA2Custom>
 CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
-                       layout::RowMajor layoutA, GM_ADDR gmB, layout::zN layoutB, GM_ADDR gmScale,
-                       layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
+                       layout::RowMajor layoutA, GM_ADDR gmB, layout::zN layoutB,
+                       GM_ADDR gmBias, GM_ADDR gmShareBias,
+                       GM_ADDR gmScale, layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
                        layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
                        uint32_t batchSize, GemmCoord sharedGmm2ProblemShape,
                        GM_ADDR gmSharedA, GM_ADDR gmSharedB, GM_ADDR gmSharedD,
@@ -169,8 +173,8 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;
 
-    using AType = Gemm::GemmType<int8_t, layout::RowMajor>;
-    using BType = Gemm::GemmType<int8_t, layout::zN>;
+    using AType = Gemm::GemmType<AscendC::int4b_t, layout::RowMajor>;
+    using BType = Gemm::GemmType<AscendC::int4b_t, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
@@ -212,6 +216,8 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
                                        layoutA,
                                        gmB,
                                        layoutB,
+                                       gmBias,
+                                       gmShareBias,
                                        gmScale,
                                        layoutScale,
                                        gmPerTokenScale,
@@ -248,6 +254,8 @@ public:
         GM_ADDR share_gmm1_weight, GM_ADDR share_gmm1_weight_scale,
         GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
         GM_ADDR expert_smooth_scales, GM_ADDR share_smooth_scales, GM_ADDR x_active_mask,
+        GM_ADDR gmm1_bias, GM_ADDR gmm2_bias,
+        GM_ADDR share_gmm1_bias, GM_ADDR share_gmm2_bias,
         // output
         GM_ADDR output, GM_ADDR share_output, GM_ADDR expertTokenNums,
         // system
@@ -261,6 +269,10 @@ private:
     GM_ADDR gmScale1_;
     GM_ADDR gmWeight2_;
     GM_ADDR gmScale2_;
+    GM_ADDR gmBias1_;
+    GM_ADDR gmBias2_;
+    GM_ADDR gmShareBias1_;
+    GM_ADDR gmShareBias2_;
     GM_ADDR gmOutput_;
 
     GM_ADDR gmShareWeight1_;
@@ -306,6 +318,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     GM_ADDR share_gmm1_weight, GM_ADDR share_gmm1_weight_scale,
     GM_ADDR share_gmm2_weight, GM_ADDR share_gmm2_weight_scale,
     GM_ADDR expert_smooth_scales, GM_ADDR share_smooth_scales, GM_ADDR x_active_mask,
+    GM_ADDR gmm1_bias, GM_ADDR gmm2_bias,
+    GM_ADDR share_gmm1_bias, GM_ADDR share_gmm2_bias,
     // output
     GM_ADDR output, GM_ADDR share_output, GM_ADDR expertTokenNums,
     // system
@@ -314,14 +328,18 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     tpipe_ = pipe;
     blockDim_ = AscendC::GetBlockNum();
 
-    gmSmoothScales_ = expert_smooth_scales;  // not used now
+    gmSmoothScales_ = expert_smooth_scales;
     gmShareSmoothScales_ = share_smooth_scales;
-    gmX_ = x;                                // input token
+    gmX_ = x;
     gmexpertIds_ = expert_ids;
     gmWeight1_ = gmm1_weight;
     gmScale1_ = gmm1_weight_scale;
     gmWeight2_ = gmm2_weight;
     gmScale2_ = gmm2_weight_scale;
+    gmBias1_ = gmm1_bias;
+    gmBias2_ = gmm2_bias;
+    gmShareBias1_ = share_gmm1_bias;
+    gmShareBias2_ = share_gmm2_bias;
     gmOutput_ = output;
     gmShareWeight1_ = share_gmm1_weight;
     gmShareWeight1Scale_ = share_gmm1_weight_scale;
@@ -358,19 +376,19 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     GemmCoord gmm2ProblemShape{maxTokenNum_, gmm2OutputDim_, gmm2InputDim_};
 
     layout::RowMajor layoutX1{maxTokenNum_, tokenHiddenSize_};
-    layout::zN layoutShareWeight1 = layout::zN::template MakeLayout<int8_t>(tokenHiddenSize_, shareGmm1OutputDim_);
-    layout::zN layoutWeight1 = layout::zN::template MakeLayout<int8_t>(tokenHiddenSize_, gmm1OutputDim_);
+    layout::zN layoutShareWeight1 = layout::zN::template MakeLayout<AscendC::int4b_t>(tokenHiddenSize_, shareGmm1OutputDim_);
+    layout::zN layoutWeight1 = layout::zN::template MakeLayout<AscendC::int4b_t>(tokenHiddenSize_, gmm1OutputDim_);
     layout::VectorLayout layoutShareW1Scale{shareGmm1OutputDim_};
     layout::VectorLayout layoutW1Scale{gmm1OutputDim_};
     layout::VectorLayout layoutX1Scale{maxTokenNum_};
     layout::RowMajor layoutX2{maxTokenNum_, gmm2InputDim_};
-    layout::zN layoutWeight2 = layout::zN::template MakeLayout<int8_t>(gmm2InputDim_, gmm2OutputDim_);
+    layout::zN layoutWeight2 = layout::zN::template MakeLayout<AscendC::int4b_t>(gmm2InputDim_, gmm2OutputDim_);
     layout::VectorLayout layoutW2Scale{gmm2OutputDim_};
     layout::VectorLayout layoutX2Scale{maxTokenNum_};
     layout::RowMajor layoutOutput{maxTokenNum_, gmm2OutputDim_};
     
     layout::RowMajor layoutShareX2{bs_, shareGmm2InputDim_};
-    layout::zN layoutShareWeight2 = layout::zN::template MakeLayout<int8_t>(shareGmm2InputDim_, gmm2OutputDim_);
+    layout::zN layoutShareWeight2 = layout::zN::template MakeLayout<AscendC::int4b_t>(shareGmm2InputDim_, gmm2OutputDim_);
     GemmCoord shareGmm2ProblemShape{bs_, gmm2OutputDim_, shareGmm2InputDim_};
     layout::VectorLayout layoutShareX2Scale{bs_};
     layout::RowMajor layoutShareOutput{bs_, gmm2OutputDim_};
@@ -395,32 +413,12 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     GM_ADDR gmEpSendCount = workspaceGM_ + tilingData_->workSpaceOffset.epSendCountOffset;
     GM_ADDR gmReserved = workspaceGM_ + tilingData_->workSpaceOffset.reservedOffset;
 
-    if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
-        if constexpr (g_coreType == AscendC::AIV) {
-            AscendC::TPipe tpipe;
-            MoeDistributeDispatchImpl::CamMoeDistributeDispatch<ExpandXType, int8_t, false, true,
-                                static_cast<bool>(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT), false, EXEC_FLAG> dispatcher;
-            dispatcher.Init(gmX_, gmexpertIds_, gmSmoothScales_, gmShareSmoothScales_, xActiveMask_, gmShareX1, gmX1,
-                            gmShareX1Scale, gmX1Scale, gmExpandIdx, gmGroupList, gmEpSendCount, gmExpertTokenNums_,
-                            nullptr, gmWorkspace, &tpipe, tilingData_);
-            dispatcher.Process();
-            tpipe.Destroy();
-            icache_preload(8);
-        }
-
-        AscendC::PipeBarrier<PIPE_ALL>();
-        Arch::CrossCoreFlag gmm1AivFinished{0};
-        if constexpr (g_coreType == AscendC::AIV) {
-            Arch::CrossCoreBarrier<0x0, PIPE_MTE3>();
-            Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(gmm1AivFinished);
-        } else {
-            Arch::CrossCoreWaitFlag(gmm1AivFinished);
-        }
-    }
     GmmDeqSwigluQuant<TemplateMC2TypeFunc, Gmm1L1TileShape, Gmm1L0TileShape, Gmm1EpilogueTileShape,
                       Gmm1BlockScheduler>(
         gmm1ProblemShape, groupCount_, gmGroupList, gmX1, layoutX1, gmShareWeight1_, layoutShareWeight1,
-        gmWeight1_, layoutWeight1, gmShareWeight1Scale_, layoutShareW1Scale, gmScale1_, layoutW1Scale,
+        gmWeight1_, layoutWeight1,
+        gmBias1_, gmShareBias1_,
+        gmShareWeight1Scale_, layoutShareW1Scale, gmScale1_, layoutW1Scale,
         gmX1Scale, layoutX1Scale, gmX2, layoutX2, gmX2Scale, layoutX2Scale, gmShareX1, gmShareX1Scale,
         gmShareSwigluOut, gmShareX2, layoutShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmX_, gmSmoothScales_,
         gmShareSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount, xActiveMask_, gmReserved, gmExpertTokenNums_,
@@ -441,6 +439,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     }
     GmmDeq<TemplateMC2TypeFunc, Gmm2L1TileShape, Gmm2L0TileShape, Gmm2EpilogueTileShape, Gmm2BlockScheduler,
            Gmm2DispatchPolicy>(gmm2ProblemShape, groupCount_, gmGroupList, gmX2, layoutX2, gmWeight2_, layoutWeight2,
+                               gmBias2_, gmShareBias2_,
                                gmScale2_, layoutW2Scale, gmX2Scale, layoutX2Scale, gmGmm2DepOut, layoutOutput, bs_,
                                shareGmm2ProblemShape, gmShareX2, gmShareWeight2_, gmShareOutput_, gmShareWeight2Scale_,
                                gmShareX2Scale, layoutShareX2, layoutShareWeight2, layoutShareX2Scale,
