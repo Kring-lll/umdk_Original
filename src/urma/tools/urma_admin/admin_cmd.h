@@ -37,15 +37,6 @@ typedef struct admin_stats {
     uint64_t rx_pkt_err;
 } admin_stats_t;
 
-typedef struct admin_cmd_query_stats {
-    struct {
-        char dev_name[URMA_MAX_NAME];
-        uint32_t type;
-        uint32_t key;
-    } in;
-    admin_stats_t out;
-} admin_cmd_query_stats_t;
-
 typedef struct admin_stats_show_ctx {
     admin_stats_t stats;
     int ret;
@@ -106,28 +97,11 @@ typedef struct admin_urma_topo_bonding_dev {
     admin_urma_topo_physical_dev_t physical_devs[IODIE_NUM];
 } admin_urma_topo_bonding_dev_t;
 
-typedef struct admin_core_cmd_topo_bonding_dev {
-    struct {
-        urma_eid_t agg_eid;
-    } in;
-    struct {
-        admin_urma_topo_bonding_dev_t bonding_dev;
-    } out;
-} admin_core_cmd_topo_bonding_dev_t;
-
 typedef struct admin_show_physical_dev_ctx {
     admin_urma_topo_bonding_dev_t bonding_dev;
     int ret;
     bool received;
 } admin_show_physical_dev_ctx_t;
-
-typedef struct admin_core_cmd_sl_info {
-    struct {
-        char dev_name[URMA_MAX_NAME];
-        uint32_t SL;
-        uint32_t priority;
-    } in;
-} admin_core_cmd_sl_info_t;
 
 /* record types streamed back during a tpid show dumpit, mirror of kernel enum */
 enum admin_tpid_show_rec_type {
