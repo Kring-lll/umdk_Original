@@ -166,6 +166,11 @@ int umq_stats_tp_perf_info_get(umq_trans_mode_t trans_mode, char *perf_buf, uint
  */
 int umq_io_perf_callback_register(umq_io_perf_callback_t func);
 
+int umq_stats_transport_pool_get(uint64_t umqh, umq_transport_pool_stats_t *umq_transport_pool_stats);
+
+int umq_transport_pool_stats_to_str(const umq_transport_pool_stats_t *umq_transport_pool_stats,
+    char *buf, int max_buf_len);
+
 #ifdef __cplusplus
 }
 #endif
