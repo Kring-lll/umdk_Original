@@ -26,6 +26,10 @@ set_property(TARGET umq_perftest PROPERTY C_STANDARD 11)
 target_link_libraries(umq_perftest urma urma_common umq umq_buf pthread m)
 install(TARGETS umq_perftest DESTINATION /usr/bin)
 
+add_executable(umq_perftest_m2o
+    umq_perftest_param.c
+    umq_perftest_m2o.c)
+
 if(NOT TARGET uninstall)
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake_uninstall.cmake.in"
