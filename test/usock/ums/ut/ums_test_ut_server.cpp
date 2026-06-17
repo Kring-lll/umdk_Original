@@ -603,3 +603,172 @@ TEST_F(SocketInterfaceTest, test_ulp_init)
     usleep(1000000);
     close(sockfd);
 }
+
+// 新增测试用例：错误处理 - 绑定到已使用的端口
+TEST_F(SocketInterfaceTest, error_handling_bind_port_in_use)
+{
+    int32_t ret;
+    int32_t reuse = 0; // 禁用地址重用
+    int32_t tempSockFd = socket(AF_SMC, SOCK_STREAM, 0);
+    EXPECT_TRUE(tempSockFd >= 0);
+    
+    struct sockaddr_in servaddr;
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = inet_addr(LOCAL_IP);
+    servaddr.sin_port = htons(g_port); // 使用与当前测试相同的端口
+    
+    // 禁用地址重用，然后尝试绑定到已使用的端口
+    ret = setsockopt(tempSockFd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
+    EXPECT_TRUE(ret == 0);
+    
+    // 应该绑定失败，因为端口已被使用
+    ret = bind(tempSockFd, (struct sockaddr *)&servaddr, sizeof(servaddr));
+    EXPECT_TRUE(ret < 0);
+    EXPECT_TRUE(errno == EADDRINUSE);
+    
+    close(tempSockFd);
+}
+
+// 新增测试用例：边界条件 - 监听队列满测试
+TEST_F(SocketInterfaceTest, boundary_listen_queue_full)
+{
+    int32_t ret;
+    int32_t tempSockFd = socket(AF_SMC, SOCK_STREAM, 0);
+    EXPECT_TRUE(tempSockFd >= 0);
+    
+    int32_t reuse = 1;
+    ret = setsockopt(tempSockFd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
+    EXPECT_TRUE(ret == 0);
+    
+    struct sockaddr_in servaddr;
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = inet_addr(LOCAL_IP);
+    servaddr.sin_port = htons(g_port + 1); // 使用不同的端口
+    
+    ret = bind(tempSockFd, (struct sockaddr *)&servaddr, sizeof(servaddr));
+    EXPECT_TRUE(ret == 0);
+    
+    // 设置很小的监听队列大小
+    ret = listen(tempSockFd, 1);
+    EXPECT_TRUE(ret == 0);
+    
+    // 创建多个客户端尝试连接，填满队列
+    const int CLIENT_NUM = 3;
+    int32_t clientFds[CLIENT_NUM];
+    struct sockaddr_in client_servaddr;
+    bzero(&client_servaddr, sizeof(client_servaddr));
+    client_servaddr.sin_family = AF_INET;
+    client_servaddr.sin_addr.s_addr = inet_addr(REMOTE_IP); 
+    client_servaddr.sin_port = htons(g_port + 1);
+    
+    for (int i = 0; i < CLIENT_NUM; i++) {
+        clientFds[i] = socket(AF_SMC, SOCK_STREAM, 0);
+        SetSocketNonBlock(clientFds[i]); // 避免阻塞
+        connect(clientFds[i], (struct sockaddr *)&client_servaddr, sizeof(client_servaddr));
+    }
+    
+    usleep(100000);
+    
+    for (int i = 0; i < CLIENT_NUM; i++) {
+        if (clientFds[i] >= 0) close(clientFds[i]);
+    }
+    
+    close(tempSockFd);
+}
+
+// 新增测试用例：多客户端连接测试 - 同时处理多个连接
+TEST_F(SocketInterfaceTest, multi_client_connection_test)
+{
+    const int MAX_CLIENTS = 5;
+    int32_t acceptFd[MAX_CLIENTS];
+    int32_t clientFd[MAX_CLIENTS];
+    int32_t ret;
+    
+    struct sockaddr_in servaddr;
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = inet_addr(REMOTE_IP); 
+    servaddr.sin_port = htons(g_port);
+    
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        clientFd[i] = socket(AF_SMC, SOCK_STREAM, 0);
+        EXPECT_TRUE(clientFd[i] >= 0);
+        SetSocketNonBlock(clientFd[i]);
+        ret = connect(clientFd[i], (struct sockaddr *)&servaddr, sizeof(servaddr));
+        EXPECT_TRUE(ret == 0 || errno == EINPROGRESS);
+    }
+    
+    usleep(100000);
+    
+    // 接受多个客户端连接
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        acceptFd[i] = ServerAccept(g_listenFd);
+        EXPECT_TRUE(acceptFd[i] >= 0);
+    }
+    
+    // 关闭所有连接
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (acceptFd[i] >= 0) close(acceptFd[i]);
+        if (clientFd[i] >= 0) close(clientFd[i]);
+    }
+}
+
+// 新增测试用例：socket选项 - 服务器端TCP keepalive测试
+TEST_F(SocketInterfaceTest, socket_option_tcp_keepalive)
+{
+    int32_t ret;
+    int enable = 1;
+    int value = 0;
+    socklen_t opt_len = sizeof(int);
+    
+    // 设置TCP keepalive选项
+    ret = setsockopt(g_listenFd, SOL_SOCKET, SO_KEEPALIVE, &enable, sizeof(enable));
+    EXPECT_TRUE(ret == 0);
+    
+    // 验证TCP keepalive选项是否设置成功
+    ret = getsockopt(g_listenFd, SOL_SOCKET, SO_KEEPALIVE, &value, &opt_len);
+    EXPECT_TRUE(ret == 0);
+    EXPECT_TRUE(value == enable);
+    
+    // 设置keepalive参数
+    int keepidle = 30;
+    int keepintvl = 5;
+    int keepcnt = 3;
+    
+    ret = setsockopt(g_listenFd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
+    EXPECT_TRUE(ret == 0);
+    
+    ret = setsockopt(g_listenFd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl));
+    EXPECT_TRUE(ret == 0);
+    
+    ret = setsockopt(g_listenFd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
+    EXPECT_TRUE(ret == 0);
+}
+
+// 新增测试用例：IPv6边界条件 - 监听IPv6地址
+TEST_F(SocketInterfaceTest, ipv6_boundary_listen_ipv6_address)
+{
+    int32_t ret;
+    int32_t tempSockFd = socket(AF_SMC, SOCK_STREAM, 1); // AF_SMC IPv6
+    EXPECT_TRUE(tempSockFd >= 0);
+    
+    int32_t reuse = 1;
+    ret = setsockopt(tempSockFd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
+    EXPECT_TRUE(ret == 0);
+    
+    struct sockaddr_in6 servaddr;
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin6_family = AF_INET6;
+    servaddr.sin6_addr = in6addr_any; // 监听所有IPv6地址
+    servaddr.sin6_port = htons(g_port + 2); // 使用不同的端口
+    
+    ret = bind(tempSockFd, (struct sockaddr *)&servaddr, sizeof(servaddr));
+    EXPECT_TRUE(ret == 0);
+    
+    ret = listen(tempSockFd, 5);
+    EXPECT_TRUE(ret == 0);
+    
+    close(tempSockFd);
+}
