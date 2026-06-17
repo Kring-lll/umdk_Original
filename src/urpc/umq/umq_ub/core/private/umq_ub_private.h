@@ -311,7 +311,8 @@ typedef struct umq_ub_bind_queue_info {
 
 typedef struct umq_ub_bind_fc_info {
     urma_token_t token;
-    uint32_t rsvd;
+    uint16_t initial_credit;
+    uint16_t rsvd;
     uint32_t rjetty_size;
     urma_rjetty_t rjetty[0];
 } umq_ub_bind_fc_info_t;
