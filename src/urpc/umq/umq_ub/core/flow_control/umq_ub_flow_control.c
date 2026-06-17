@@ -304,6 +304,23 @@ static ALWAYS_INLINE void flow_control_stats_query_non_atomic(struct ub_flow_con
     packet_stats->send_eagain_cnt = fc->packet_stats[UB_PACKET_STATS_TYPE_SEND_EAGAIN];
     packet_stats->send_error_cnt = fc->packet_stats[UB_PACKET_STATS_TYPE_SEND_ERROR];
     packet_stats->recv_error_cnt = fc->packet_stats[UB_PACKET_STATS_TYPE_RECV_ERROR];
+
+    umq_fc_latency_stats_t *fc_lat = &out->fc_latency;
+    fc_lat->a_to_b_total = fc->fc_latency_a_to_b_total;
+    fc_lat->a_to_b_cnt = fc->fc_latency_a_to_b_cnt;
+    fc_lat->a_to_b_max = fc->fc_latency_a_to_b_max;
+    fc_lat->b_to_a_total = fc->fc_latency_b_to_a_total;
+    fc_lat->b_to_a_cnt = fc->fc_latency_b_to_a_cnt;
+    fc_lat->b_to_a_max = fc->fc_latency_b_to_a_max;
+    fc_lat->poll_to_proc_total = fc->fc_latency_poll_to_proc_total;
+    fc_lat->poll_to_proc_cnt = fc->fc_latency_poll_to_proc_cnt;
+    fc_lat->poll_to_proc_max = fc->fc_latency_poll_to_proc_max;
+
+    for (int i = 0; i < UMQ_FC_LATENCY_BUCKET_COUNT; i++) {
+        fc_lat->a_to_b_hist[i] = fc->fc_latency_a_to_b_hist[i];
+        fc_lat->b_to_a_hist[i] = fc->fc_latency_b_to_a_hist[i];
+        fc_lat->poll_to_proc_hist[i] = fc->fc_latency_poll_to_proc_hist[i];
+    }
 }
 
 static ALWAYS_INLINE void flow_control_packet_stats_non_atomic(
@@ -445,6 +462,23 @@ static ALWAYS_INLINE void flow_control_stats_query_atomic(struct ub_flow_control
         __atomic_load_n(&fc->packet_stats[UB_PACKET_STATS_TYPE_SEND_ERROR], __ATOMIC_RELAXED);
     packet_stats->recv_error_cnt =
         __atomic_load_n(&fc->packet_stats[UB_PACKET_STATS_TYPE_RECV_ERROR], __ATOMIC_RELAXED);
+
+    umq_fc_latency_stats_t *fc_lat = &out->fc_latency;
+    fc_lat->a_to_b_total = __atomic_load_n(&fc->fc_latency_a_to_b_total, __ATOMIC_RELAXED);
+    fc_lat->a_to_b_cnt = __atomic_load_n(&fc->fc_latency_a_to_b_cnt, __ATOMIC_RELAXED);
+    fc_lat->a_to_b_max = __atomic_load_n(&fc->fc_latency_a_to_b_max, __ATOMIC_RELAXED);
+    fc_lat->b_to_a_total = __atomic_load_n(&fc->fc_latency_b_to_a_total, __ATOMIC_RELAXED);
+    fc_lat->b_to_a_cnt = __atomic_load_n(&fc->fc_latency_b_to_a_cnt, __ATOMIC_RELAXED);
+    fc_lat->b_to_a_max = __atomic_load_n(&fc->fc_latency_b_to_a_max, __ATOMIC_RELAXED);
+    fc_lat->poll_to_proc_total = __atomic_load_n(&fc->fc_latency_poll_to_proc_total, __ATOMIC_RELAXED);
+    fc_lat->poll_to_proc_cnt = __atomic_load_n(&fc->fc_latency_poll_to_proc_cnt, __ATOMIC_RELAXED);
+    fc_lat->poll_to_proc_max = __atomic_load_n(&fc->fc_latency_poll_to_proc_max, __ATOMIC_RELAXED);
+
+    for (int i = 0; i < UMQ_FC_LATENCY_BUCKET_COUNT; i++) {
+        fc_lat->a_to_b_hist[i] = __atomic_load_n(&fc->fc_latency_a_to_b_hist[i], __ATOMIC_RELAXED);
+        fc_lat->b_to_a_hist[i] = __atomic_load_n(&fc->fc_latency_b_to_a_hist[i], __ATOMIC_RELAXED);
+        fc_lat->poll_to_proc_hist[i] = __atomic_load_n(&fc->fc_latency_poll_to_proc_hist[i], __ATOMIC_RELAXED);
+    }
 }
 
 static ALWAYS_INLINE void flow_control_packet_stats_atomic(
@@ -683,6 +717,7 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
         .bs = {
             .type = IMM_TYPE_FC_CREDIT_REQ,
             .window = credits_per_request,
+            .send_timestamp = (uint32_t)get_timestamp_ns(),
         }
     };
     umq_ub_imm_t imm = {
@@ -753,6 +788,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify, ui
             .type = IMM_TYPE_FC_CREDIT_REP,
             .window = notify,
             .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
+            .send_timestamp = (uint32_t)get_timestamp_ns(),
         }
     };
     umq_ub_imm_t imm = {
@@ -901,6 +937,7 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
         .bs = {
             .type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
             .window = return_credit,
+            .send_timestamp = (uint32_t)get_timestamp_ns(),
         }
     };
     umq_ub_imm_t imm = {
@@ -975,6 +1012,7 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
             .type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
             .window = return_credit,
             .ratio = umq_ub_fc_raito_to_imm(available, queue->flow_control.local_rx_depth),
+            .send_timestamp = (uint32_t)get_timestamp_ns(),
         }
     };
     umq_ub_imm_t imm = {
