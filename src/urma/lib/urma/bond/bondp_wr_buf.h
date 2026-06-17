@@ -15,6 +15,10 @@
 
 #include "urma_types.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct bondp_comp;
 struct bondp_target_jetty;
 
@@ -103,5 +107,9 @@ jfr_wr_entry_t *jfr_wr_buf_alloc(wr_buf_t *buf);
 
 void jfs_wr_buf_release(jfs_wr_entry_t *entry);
 void jfr_wr_buf_release(jfr_wr_entry_t *entry);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // BONDP_WR_BUF_H

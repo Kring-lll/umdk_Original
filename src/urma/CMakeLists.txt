@@ -41,6 +41,14 @@ if("${ASAN}" STREQUAL "enable")
     set(CMAKE_FLAGS_PUBILC "${CMAKE_FLAGS_PUBILC} ${CMAKE_FLAGS_ASAN}")
 endif()
 
+# CODE_COVERAGE ENABLE
+if("${CODE_COVERAGE}" STREQUAL "enable")
+    set(CMAKE_FLAGS_COVERAGE "--coverage -fprofile-arcs -ftest-coverage")
+    set(CMAKE_FLAGS_PUBILC "${CMAKE_FLAGS_PUBILC} ${CMAKE_FLAGS_COVERAGE}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} --coverage")
+endif()
+
 set(CMAKE_FLAGS_ARM64 " -march=armv8-a+crc -DUB_ARCH_ARM64")
 set(CMAKE_FLAGS_x86_64 " -msse4.2 -DUB_ARCH_X86_64")
 if("${X86_CROSS_COMPILATION}" STREQUAL "enable")

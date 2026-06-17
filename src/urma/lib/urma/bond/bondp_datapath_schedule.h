@@ -15,6 +15,10 @@
 
 #include "bondp_connection.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define BONDP_CHIP_ID_MIN 1
 #define BONDP_CHIP_ID_MAX 2
 
@@ -27,5 +31,9 @@ int schedule_send(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp, int *send
     bondp_chip_id_info_t *info);
 
 int schedule_recv(bondp_comp_t *bdp_comp, int *recv_idx);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // BONDP_DATAPATH_SCHEDULE_H
