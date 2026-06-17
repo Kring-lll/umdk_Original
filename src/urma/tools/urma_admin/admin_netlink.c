@@ -38,8 +38,8 @@ typedef struct genl_info {
 } genl_info_t;
 
 static const genl_info_t genl_info_table[GENL_FAMILY_COUNT] = {
-    { UBCORE_GENL, &sock,       &genl_id,       UBCORE_GENL_FAMILY_NAME },
-    { UBAGG_GENL,  &sock_ubagg, &genl_id_ubagg, UBAGG_GENL_FAMILY_NAME  },
+    {UBCORE_GENL, &sock, &genl_id, UBCORE_GENL_FAMILY_NAME},
+    {UBAGG_GENL, &sock_ubagg, &genl_id_ubagg, UBAGG_GENL_FAMILY_NAME},
 };
 
 static struct nl_sock *get_nl_sock_by_family(genl_family_t family)
@@ -61,7 +61,7 @@ static int get_genl_id_by_family(genl_family_t family)
 static int init_sock_and_genl_id(genl_family_t family);
 
 static int admin_nl_recv_msg_inner(int (*cb)(struct nl_msg *msg, void *arg),
-    void *arg, int silent_errno, genl_family_t family)
+                                   void *arg, int silent_errno, genl_family_t family)
 {
     int ret;
 
@@ -163,7 +163,7 @@ int admin_nl_recv_msg(int (*cb)(struct nl_msg *msg, void *arg), void *arg, genl_
 }
 
 int admin_nl_send_recv_msg(struct nl_msg *msg, int (*cb)(struct nl_msg *msg, void *arg),
-    void *arg, genl_family_t family)
+                           void *arg, genl_family_t family)
 {
     int ret;
 
@@ -193,7 +193,7 @@ int admin_nl_send_recv_msg_default(struct nl_msg *msg, genl_family_t family)
 }
 
 int admin_nl_send_recv_msg_default_silent_errno(struct nl_msg *msg,
-    int silent_errno, genl_family_t family)
+                                                int silent_errno, genl_family_t family)
 {
     int ret;
 
