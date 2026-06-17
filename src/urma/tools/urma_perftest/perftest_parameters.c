@@ -159,6 +159,7 @@ static void usage(const char *argv0)
         "  --enable_imm                Enable immediate data for write or send, default: disable.\n"
         "  --enable_err_continue       Enable continue running when cr erros, default: disable.\n"
         "  --notify_data <value>       enable write_with_notify, value is ensured by hardware.\n"
+        "  --enable_notify             Enable write_with_notify, default: disable.\n"
         "  --enable_user_tp            Enable user tp for UB device, if enable,UVS is not required. default: disable.\n"
         "  --oor_en                    Enable out of order for user_tp, default: disable.\n"
         "  --spray_en                  Enable multipathing for user_tp, default: disable.\n"
@@ -186,6 +187,12 @@ static void usage(const char *argv0)
         "  --page_size                 Set page size, default: 4096.\n"
         "  --hugepage_size <size>      Page size for allocated memory. Only support 2MB or 1GB currently.\n"
         "  --bind_ip <ip>              The ip for bind.\n"
+        "  --enable_sync_stream        Enable synchronized multi-stream transmission. \n"
+        "  --bw_unit <unit>            Set bandwidth display unit: KB, MB, or GB (default: MB).\n"
+        "  --va <address>              Allow user to set address for local_buf, (Both decimal and hexadecimal).\n"
+        "  --share_jfs                 Create ONLY ONE jfs in multi-play-multi mode bw test.\n"
+        "  --min_size                  Set min size in random io size, only for bw mode.\n"
+        "  --max_size                  Set max size in random io size, only for bw mode.\n"
         "  --bond_mode                 Set bonding device mode, support: standalone, active_backup, balance.\n"
         "                                                       default: standalone.\n"
         "  --bond_level                Set bonding device level, support: iodie, port, default: iodie.\n");
@@ -203,6 +210,28 @@ static perftest_cmd_type_t parse_command(const char *argv1)
     }
 
     return PERFTEST_CMD_NUM;
+}
+
+int parse_va(const char *s, uint64_t *out)
+{
+    char *endptr;
+    const int decimal_number = 10;
+    const int hexadecimal_number = 16;
+    errno = 0;
+
+    unsigned long long val;
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        val = strtoull(s, &endptr, hexadecimal_number);
+    } else {
+        val = strtoull(s, &endptr, decimal_number);
+    }
+
+    if (errno != 0 || *endptr != '\0') {
+        LOG_ERROR("Error: invalid number format '%s'\n", s);
+        return -1;
+    }
+    *out = val;
+    return 0;
 }
 
 static void init_cfg_api_type(perftest_config_t *cfg)
@@ -329,6 +358,7 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->jettys_pre_jfr = 0;
     cfg->is_rate_limit = false;
     cfg->rate_limit = 0;
+    cfg->bw_unit = PERFTEST_MB;
     cfg->burst_size = 0;
     cfg->rate_units = PERFTEST_RATE_LIMIT_GIGA_BIT;
     cfg->enable_credit = false;
@@ -340,7 +370,6 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->enable_imm = false;
     cfg->enable_err_continue = false;
     cfg->enable_notify = false;
-    cfg->notify_data = 0;
     cfg->enable_user_tp = false;
     cfg->oor_en = false;
     cfg->spray_en = false;
@@ -361,9 +390,14 @@ static void init_cfg(perftest_config_t *cfg)
 
     cfg->wait_jfc_timeout = PERFTEST_DEF_WAIT_JFC_TIME;
     cfg->use_huge_page = false;
+    cfg->enable_sync_stream = false;
     cfg->enable_bond_mode = false;
     cfg->bond_mode = BONDP_BONDING_MODE_STANDALONE;
     cfg->bond_level = BONDP_BONDING_LEVEL_IODIE;
+    cfg->share_jfs = false;
+    cfg->min_size = 0;
+    cfg->max_size = 0;
+    cfg->enable_random_size = 0;
 }
 
 void print_cfg(const perftest_config_t *cfg)
@@ -521,6 +555,7 @@ int str_to_ip(const char *str_ip, perftest_net_addr_t *ip)
 
 int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
 {
+    int ret;
     uint32_t offset;
     if (argc == 1) {
         LOG_ERROR("Input invalid with argc: %d.\n", argc);
@@ -592,7 +627,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"enable_imm",          no_argument,       NULL, PERFTEST_OPT_ENABLE_IMM},
         {"inf_period_ms",       required_argument, NULL, PERFTEST_OPT_INF_PERIOD_MS},
         {"enable_err_continue", no_argument,       NULL, PERFTEST_OPT_ENABLE_ERR_CONTINUE},
-        {"notify_data",         required_argument, NULL, PERFTEST_OPT_NOTIFY_DATA},
+        {"enable_notify",   no_argument,     NULL, PERFTEST_OPT_ENABLE_NOTIFY},
         {"enable_user_tp",      no_argument,       NULL, PERFTEST_OPT_ENABLE_USER_TP},
         {"oor_en",              no_argument,       NULL, PERFTEST_OPT_OOR_EN},
         {"spray_en",            no_argument,       NULL, PERFTEST_OPT_SPRAY_EN},
@@ -617,6 +652,12 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"vlan",                required_argument, NULL, PERFTEST_OPT_VLAN},
         {"sl",                  required_argument, NULL, PERFTEST_OPT_SL},
         {"bind_ip",             required_argument, NULL, PERFTEST_OPT_BIND_IP},
+        {"enable_sync_stream",  no_argument, NULL, PERFTEST_OPT_ENABLE_SYNC_STREAM},
+        {"bw_unit",             required_argument, NULL, PERFTEST_OPT_SET_BW_UNIT},
+        {"va",                  required_argument, NULL, PERFTEST_OPT_V_ADDRESS},
+        {"share_jfs",           no_argument,       NULL, PERFTEST_OPT_SHARE_JFS},
+        {"min_size",            required_argument, NULL, PERFTEST_OPT_SET_MIN_SIZE},
+        {"max_size",            required_argument, NULL, PERFTEST_OPT_SET_MAX_SIZE},
         {"aggr_mode",           required_argument, NULL, PERFTEST_OPT_AGGR_MODE},
         {"stdout",              no_argument,       NULL, PERFTEST_OPT_STDOUT},
         {"bond_mode",           required_argument, NULL, PERFTEST_OPT_BOND_MODE},
@@ -863,9 +904,8 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
             case PERFTEST_OPT_ENABLE_ERR_CONTINUE:
                 cfg->enable_err_continue = true;
                 break;
-            case PERFTEST_OPT_NOTIFY_DATA:
+            case PERFTEST_OPT_ENABLE_NOTIFY:
                 cfg->enable_notify = true;
-                (void)ub_str_to_u64(optarg, &cfg->notify_data);
                 break;
             case PERFTEST_OPT_ENABLE_USER_TP:
                 cfg->enable_user_tp = true;
@@ -927,7 +967,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                     } else if (strcmp("ANY", optarg) == 0) {
                         cfg->huge_page = UB_HUGE_PAGE_SIZE_ANY;
                     } else {
-                        LOG_ERROR("Huge_page only support 2MB1GB and ANY\n");
+                        LOG_ERROR("Huge_page only support 2MB, 1GB and ANY\n");
                         return -1;
                     }
                 }
@@ -980,6 +1020,43 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                     LOG_ERROR("failed to allocate bind ip memory.\n");
                     return -1;
                 }
+                break;
+            case PERFTEST_OPT_ENABLE_SYNC_STREAM:
+                cfg->enable_sync_stream = true;
+                break;
+            case PERFTEST_OPT_SET_BW_UNIT:
+                if (strcmp("KB", optarg) == 0) {
+                    cfg->bw_unit = PERFTEST_KB;
+                } else if (strcmp("GB", optarg) == 0) {
+                    cfg->bw_unit = PERFTEST_GB;
+                } else if (strcmp("MB", optarg) == 0) {
+                    cfg->bw_unit = PERFTEST_MB;
+                } else {
+                    LOG_ERROR(" Invalid BW type. Please use KB, MB or GB\n");
+                    return -1;
+                }
+                break;
+            case PERFTEST_OPT_V_ADDRESS:
+                if (optarg == NULL || *optarg == '\0') {
+                    LOG_ERROR("Invalid parameter(VA address).\n");
+                    return -1;
+                }
+                ret = parse_va(optarg, &cfg->v_address);
+                if (ret != 0) {
+                    return -1;
+                }
+                cfg->enable_va = true;
+                break;
+            case PERFTEST_OPT_SHARE_JFS:
+                cfg->share_jfs = true;
+                break;
+            case PERFTEST_OPT_SET_MIN_SIZE:
+                (void)ub_str_to_u32(optarg, &cfg->min_size);
+                cfg->enable_random_size = 1;
+                break;
+            case PERFTEST_OPT_SET_MAX_SIZE:
+                (void)ub_str_to_u32(optarg, &cfg->max_size);
+                cfg->enable_random_size = 1;
                 break;
             case PERFTEST_OPT_STDOUT:
                 verbose_set_level(VLOG_LEVEL_VVERBOSE);
@@ -1121,6 +1198,13 @@ int check_local_cfg(perftest_config_t *cfg)
         }
     }
 
+    if (cfg->share_jfs && cfg->pair_flag) {
+        cfg->jfs_depth *= cfg->pair_num;
+        if (cfg->jfs_depth > PERFTEST_JFS_DEPTH_MAX) {
+            cfg->jfs_depth = PERFTEST_JFS_DEPTH_MAX;
+        }
+    }
+
     if (cfg->jettys_pre_jfr == 0) {
         cfg->jettys_pre_jfr = cfg->jettys;
     }
@@ -1173,6 +1257,10 @@ int check_local_cfg(perftest_config_t *cfg)
 
     if (cfg->api_type == PERFTEST_ATOMIC && cfg->size != PERFTEST_DEF_ATOMIC_SIZE) {
         LOG_ERROR("Message size should not be changed for Atomic tests.\n");
+        exit(1);
+    }
+    if (cfg->size == 0 || cfg->sge_num == 0) {
+        (void)fprintf(stderr, "Invalid parameter with size: %u, sge_num: %u.\n", cfg->size, cfg->sge_num);
         exit(1);
     }
     if (cfg->jfs_post_list == 0 || cfg->jfr_post_list == 0) {
@@ -1456,6 +1544,26 @@ int check_local_cfg(perftest_config_t *cfg)
         LOG_ERROR("The cq_mod parameter must be divisible by iters and "
                   "must be less than half of the iters parameter when "
                   "bidirection and credit are enabled.\n");
+    }
+
+    if (cfg->share_jfs && cfg->trans_mode == URMA_TM_RC) {
+        LOG_ERROR("share_jfs is incompatible with RC transport mode.\n");
+        exit(1);
+    }
+    if (cfg->enable_random_size) {
+        if (cfg->type == PERFTEST_LAT) {
+            LOG_ERROR("Random IO size, only for bw.\n");
+            exit(1);
+        }
+        if (cfg->sge_num != 1) {
+            LOG_ERROR("Random IO size, sge_num must be 1.\n");
+            exit(1);
+        } else {
+            if (cfg->max_size > cfg->size || cfg->min_size > cfg->max_size) {
+                LOG_ERROR("max_size must more than min_size\n");
+                exit(1);
+            }
+        }
     }
     return 0;
 }

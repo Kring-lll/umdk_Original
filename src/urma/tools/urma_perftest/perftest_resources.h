@@ -53,6 +53,19 @@ typedef struct run_test_ctx {
     uint64_t *ccnt;
     urma_jfs_wr_t *jfs_wr;
     urma_jfr_wr_t *jfr_wr;
+
+    /*           post_list
+      +--------------+--------------+--------------+ jetty0
+      | remote_sge   | remote_sge   | remote_sge   |
+      +--------------+--------------+--------------+
+      | local_sge    | local_sge    | local_sge    |
+      +--------------+--------------+--------------+
+      +--------------+--------------+--------------+ jetty1
+      | remote_sge   | remote_sge   | remote_sge   |
+      +--------------+--------------+--------------+
+      | local_sge    | local_sge    | local_sge    |
+      +--------------+--------------+--------------+
+    */
     urma_sge_t *jfs_sge;
     urma_sge_t *jfr_sge;
     uint64_t *rx_buf_addr;
@@ -85,6 +98,7 @@ typedef struct perftest_context {
     uint64_t buf_size;
     uint64_t buf_len; // buf_len = buf_size * PERFTEST_BUF_NUM
     urma_target_seg_t **local_tseg;
+    uint64_t sum_size;
 
     // remote info
     urma_seg_t *remote_seg;
@@ -109,6 +123,14 @@ typedef struct perftest_context {
     urma_token_id_t **credit_token_id;
     urma_seg_t *remote_credit_seg;
     urma_target_seg_t **import_credit_seg;
+
+    // write notify
+    uint64_t *notify_buf;
+    urma_target_seg_t *notify_seg;
+    urma_token_id_t *notify_token_id;
+    urma_seg_t *remote_notify_seg;
+    uint32_t remote_jetty_idx;
+    urma_target_seg_t **import_notify_seg;   // be processed for different remote seg
 
     /* user tp */
     user_tp_ctx_t *user_tp;
