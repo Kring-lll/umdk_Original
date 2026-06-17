@@ -12,6 +12,7 @@
 
 #include "umq_example_common.h"
 #include "umq_example_pro.h"
+#include "umq_dfx_api.h"
 
 static const uint32_t EXAMPLE_MAX_DEPTH = 64;
 static const char *EXAMPLE_CLIENT_POST_DATA = "hello, this is umq pro client";
@@ -24,6 +25,10 @@ int run_umq_example_pro_server(struct urpc_example_config *cfg)
     if (ret != 0) {
         LOG_PRINT_ERR("init umq failed\n");
         return -1;
+    }
+    if (umq_stats_perf_start() != 0) {
+            LOG_PRINT("start dfx perf failed\n");
+            return -1;
     }
 
     if (server_accept(cfg->server_ip, cfg->tcp_port) != 0) {
@@ -147,6 +152,10 @@ int run_umq_example_pro_client(struct urpc_example_config *cfg)
     if (ret != 0) {
         LOG_PRINT_ERR("init umq failed\n");
         return -1;
+    }
+    if (umq_stats_perf_start() != 0) {
+            LOG_PRINT("start dfx perf failed\n");
+            return -1;
     }
 
     ret = client_connect(cfg->server_ip, cfg->tcp_port);

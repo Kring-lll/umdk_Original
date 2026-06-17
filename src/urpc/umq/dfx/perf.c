@@ -10,6 +10,7 @@
 
 #include "umq_errno.h"
 #include "umq_vlog.h"
+#include "urpc_timer.h"
 #include "urpc_thread_closure.h"
 #include "urpc_util.h"
 #include "perf.h"
@@ -53,6 +54,30 @@ typedef struct umq_perf_record_ctx {
 static pthread_spinlock_t g_umq_perf_record_lock;
 static umq_perf_record_ctx_t *g_umq_perf_record_ctx;
 
+#define DATA_RECORD_NUM 1000000
+#define DATA_RECORD_LIMIT 5000
+static bool g_umq_print_flag = true;
+static uint32_t g_umq_print_limit = DATA_RECORD_LIMIT;
+
+typedef struct umq_perf_data {
+    uint32_t post_cnt;
+    uint32_t pre_post_cnt;
+    uint32_t poll_cnt;
+    uint32_t pre_poll_cnt;
+    uint32_t inter_cnt;
+    uint32_t pre_inter_cnt;
+    umq_data_record_t post_data_record[DATA_RECORD_NUM];
+    umq_data_record_t poll_data_record[DATA_RECORD_NUM];
+    umq_data_record_t inter_data_record[DATA_RECORD_NUM];
+    bool is_used;
+} umq_perf_data_t;
+
+typedef struct umq_perf_data_ctx {
+    umq_perf_data_t data_table[UMQ_PERF_REC_MAX_NUM];
+} umq_perf_data_ctx_t;
+
+static umq_perf_data_ctx_t *g_umq_perf_data_ctx;
+
 int umq_perf_init(void)
 {
     if (g_umq_perf_record_ctx != NULL) {
@@ -66,6 +91,12 @@ int umq_perf_init(void)
         return -UMQ_ERR_ENOMEM;
     }
     (void)pthread_spin_init(&g_umq_perf_record_lock, PTHREAD_PROCESS_PRIVATE);
+
+    g_umq_perf_data_ctx = (umq_perf_data_ctx_t *)calloc(1, sizeof(umq_perf_data_ctx_t));
+    if (g_umq_perf_data_ctx == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "calloc for umq_perf_data failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
     return UMQ_SUCCESS;
 }
 
@@ -113,6 +144,17 @@ static void umq_perf_record_closure(uint64_t idx)
     (void)pthread_spin_unlock(&g_umq_perf_record_lock);
 }
 
+static void umq_clear_data_record(uint32_t idx)
+{
+    umq_perf_data_t *cur_record = &g_umq_perf_data_ctx->data_table[idx];
+    cur_record->post_cnt = 0;
+    cur_record->poll_cnt = 0;
+    cur_record->pre_post_cnt = 0;
+    cur_record->pre_poll_cnt = 0;
+    cur_record->inter_cnt = 0;
+    cur_record->pre_inter_cnt = 0;
+}
+
 void umq_perf_record_alloc(void)
 {
     uint32_t idx;
@@ -136,7 +178,9 @@ void umq_perf_record_alloc(void)
     }
 
     umq_clear_perf_record_item(idx);
+    umq_clear_data_record(idx);
     g_umq_perf_record_ctx->perf_record_table[idx].is_used = true;
+    g_umq_perf_data_ctx->data_table[idx].is_used = true;
     (void)pthread_spin_unlock(&g_umq_perf_record_lock);
 
     g_perf_record_index = idx;
@@ -156,6 +200,70 @@ uint64_t umq_perf_get_start_timestamp(void)
     }
     pthread_once(&g_dp_thread_run_once, umq_dp_thread_run_once);
     return urpc_get_cpu_cycles();
+}
+
+static inline void umq_perf_fill_data_record(umq_perf_data_type_t type, umq_data_record_t data)
+{
+    umq_perf_data_t *cur_rec = &g_umq_perf_data_ctx->data_table[g_perf_record_index];
+    if (type == UMQ_PERF_DATA_TYPE_POST) {
+        uint32_t post_cnt = cur_rec->post_cnt;
+        cur_rec->post_data_record[post_cnt].user_data = data.user_data;
+        cur_rec->post_data_record[post_cnt].total_size = data.total_size;
+        cur_rec->post_data_record[post_cnt].jetty_id = data.jetty_id;
+        cur_rec->post_data_record[post_cnt].local_umq_id = data.local_umq_id;
+        cur_rec->post_data_record[post_cnt].remote_umq_id = data.remote_umq_id;
+        cur_rec->post_data_record[post_cnt].timestamp = data.timestamp;
+        cur_rec->post_data_record[post_cnt].urma_post_time = data.urma_post_time;
+        cur_rec->post_data_record[post_cnt].urma_post_start = data.urma_post_start;
+        cur_rec->post_data_record[post_cnt].urma_post_end = data.urma_post_end;
+        cur_rec->post_data_record[post_cnt].fc_send_req = data.fc_send_req;
+        cur_rec->post_data_record[post_cnt].umq_post_start = data.umq_post_start;
+        cur_rec->post_cnt++;
+        if (cur_rec->post_cnt >= DATA_RECORD_NUM) {
+            cur_rec->post_cnt = 0;
+        }
+    } else if (type == UMQ_PERF_DATA_TYPE_POLL) {
+        uint32_t poll_cnt = cur_rec->poll_cnt;
+        cur_rec->poll_data_record[poll_cnt].user_data = data.user_data;
+        cur_rec->poll_data_record[poll_cnt].total_size = data.total_size;
+        cur_rec->poll_data_record[poll_cnt].jetty_id = data.jetty_id;
+        cur_rec->poll_data_record[poll_cnt].local_umq_id = data.local_umq_id;
+        cur_rec->poll_data_record[poll_cnt].remote_umq_id = data.remote_umq_id;
+        cur_rec->poll_data_record[poll_cnt].timestamp = data.timestamp;
+        cur_rec->poll_data_record[poll_cnt].urma_poll_time = data.urma_poll_time;
+        cur_rec->poll_data_record[poll_cnt].umq_poll_end = data.umq_poll_end;
+        cur_rec->poll_cnt++;
+        if (cur_rec->poll_cnt >= DATA_RECORD_NUM) {
+            cur_rec->poll_cnt = 0;
+        }
+    } else if (type == UMQ_PERF_DATA_TYPE_INTERRUPT)  {
+        uint32_t inter_cnt = cur_rec->inter_cnt;
+        cur_rec->poll_data_record[inter_cnt].jetty_id = data.jetty_id;
+        cur_rec->poll_data_record[inter_cnt].umq_wait_start = data.umq_wait_start;
+        cur_rec->poll_data_record[inter_cnt].urma_wait_start = data.urma_wait_start;
+        cur_rec->poll_data_record[inter_cnt].urma_wait_time = data.urma_wait_time;
+        cur_rec->poll_data_record[inter_cnt].umq_wait_end = data.umq_wait_end;
+        cur_rec->poll_data_record[inter_cnt].urma_ack_start = data.urma_ack_start;
+        cur_rec->poll_data_record[inter_cnt].urma_ack_time = data.urma_ack_time;
+        cur_rec->poll_data_record[inter_cnt].umq_rearm_start = data.umq_rearm_start;
+        cur_rec->poll_data_record[inter_cnt].urma_rearm_start = data.urma_rearm_start;
+        cur_rec->poll_data_record[inter_cnt].urma_rearm_time = data.urma_rearm_time;
+        cur_rec->poll_data_record[inter_cnt].urma_fc_rearm_start = data.urma_fc_rearm_start;
+        cur_rec->poll_data_record[inter_cnt].urma_fc_rearm_time = data.urma_fc_rearm_time;
+        cur_rec->poll_data_record[inter_cnt].umq_rearm_end = data.umq_rearm_end;
+        cur_rec->inter_cnt++;
+        if (cur_rec->inter_cnt >= DATA_RECORD_NUM) {
+            cur_rec->inter_cnt = 0;
+        }
+    }
+}
+
+void umq_perf_data_write(umq_perf_data_type_t type, umq_data_record_t data)
+{
+    if (!g_umq_perf_record_enable || g_perf_record_index >= UMQ_PERF_REC_MAX_NUM) {
+        return;
+    }
+    umq_perf_fill_data_record(type, data);
 }
 
 static inline uint32_t find_perf_record_bucket(uint64_t delta)
@@ -225,6 +333,125 @@ void umq_perf_record_write_interrupt_with_direction(
     umq_perf_fill_perf_record(type + perf_record_type_map[direction], start);
 }
 
+void umq_ub_close_perf_log(void)
+{
+    g_umq_print_flag = false;
+}
+
+void umq_ub_data_print(void *args)
+{
+    if (!g_umq_print_flag) {
+ 	    return;
+ 	}
+    for (uint32_t k = 0; k < UMQ_PERF_REC_MAX_NUM; ++k) {
+        if (!g_umq_perf_data_ctx->data_table[k].is_used) {
+            break;
+        }
+        umq_perf_data_t *cur_rec = &g_umq_perf_data_ctx->data_table[k];
+        uint32_t post_cnt = cur_rec->post_cnt;
+        uint32_t poll_cnt = cur_rec->poll_cnt;
+        uint32_t pre_post_cnt = cur_rec->pre_post_cnt;
+        uint32_t pre_poll_cnt = cur_rec->pre_poll_cnt;
+        uint32_t post_end = post_cnt < pre_post_cnt? (post_cnt + DATA_RECORD_NUM): post_cnt;
+        uint32_t poll_end = poll_cnt < pre_poll_cnt? (poll_cnt + DATA_RECORD_NUM): poll_cnt;
+        uint32_t inter_cnt = cur_rec->inter_cnt;
+        uint32_t pre_inter_cnt = cur_rec->pre_inter_cnt;
+        uint32_t inter_end = inter_cnt < pre_inter_cnt? (inter_cnt + DATA_RECORD_NUM): inter_cnt;
+        if (post_end - pre_post_cnt > g_umq_print_limit) {
+            uint32_t idx = 0;
+            UMQ_VLOG_INFO(VLOG_UMQ, "============thread %d post: %d--%d ===========\n", k, pre_post_cnt, post_end);
+            for (uint32_t i = pre_post_cnt; i < post_end; i++) {
+                idx = i % DATA_RECORD_NUM;
+                UMQ_VLOG_INFO(VLOG_UMQ, "user_data: %u, total_size: %u, jetty_id: %u, local_umq_id: %u, "
+                "remote_umq_id: %u, timestamp: %lu, fc_send_req: %lu, urma_post_start: %lu, urma_post_end: %lu, "
+                "urma_post_time: %lu, umq_post_start: %lu\n",
+                cur_rec->post_data_record[idx].user_data,
+                cur_rec->post_data_record[idx].total_size,
+                cur_rec->post_data_record[idx].jetty_id, 
+                cur_rec->post_data_record[idx].local_umq_id, 
+                cur_rec->post_data_record[idx].remote_umq_id,
+                cur_rec->post_data_record[idx].timestamp, 
+                cur_rec->post_data_record[idx].fc_send_req,
+                cur_rec->post_data_record[idx].urma_post_start,
+                cur_rec->post_data_record[idx].urma_post_end,
+                cur_rec->post_data_record[idx].urma_post_time,
+                cur_rec->post_data_record[idx].umq_post_start
+                );
+            }
+            cur_rec->pre_post_cnt = post_cnt;
+        }
+        if (poll_end - pre_poll_cnt > g_umq_print_limit) {
+            uint32_t idx = 0;
+            UMQ_VLOG_INFO(VLOG_UMQ, "============thread %d poll: %d--%d ===========\n", k, pre_poll_cnt, poll_end);
+            for (uint32_t i = pre_poll_cnt; i < poll_end; i++) {
+                idx = i % DATA_RECORD_NUM;
+                UMQ_VLOG_INFO(VLOG_UMQ, "user_data: %u, total_size: %u, jetty_id: %u, local_umq_id: %u, remote_umq_id: "
+                    "%u, timestamp: %lu, umq_poll_end: %lu, urma_poll_time: %lu\n",
+                    cur_rec->poll_data_record[idx].user_data,
+                    cur_rec->poll_data_record[idx].total_size,
+                    cur_rec->poll_data_record[idx].jetty_id, 
+                    cur_rec->poll_data_record[idx].local_umq_id, 
+                    cur_rec->poll_data_record[idx].remote_umq_id,
+                    cur_rec->poll_data_record[idx].timestamp, 
+                    cur_rec->poll_data_record[idx].umq_poll_end,
+                    cur_rec->poll_data_record[idx].urma_poll_time);
+            }
+            cur_rec->pre_poll_cnt = poll_cnt;
+        }
+        if (inter_end - pre_inter_cnt > g_umq_print_limit)  {
+            uint32_t idx = 0;
+            UMQ_VLOG_INFO(VLOG_UMQ, "==========thread %d interrupt: %d--%d ==========\n", k, pre_inter_cnt, inter_end);
+            for (uint32_t i = pre_inter_cnt; i < inter_end; i++) {
+                idx = i % DATA_RECORD_NUM;
+                UMQ_VLOG_INFO(VLOG_UMQ, "jetty_id: %u, umq_wait_start: %lu, urma_wait_start: %lu, urma_wait_time: %lu, "
+                    "umq_wait_end: %lu, urma_ack_start: %lu, urma_ack_time: %lu, urma_rearm_start: %lu, "
+                    "urma_rearm_time: %lu, urma_fc_rearm_start: %lu, urma_fc_rearm_time: %lu, umq_rearm_end: %lu\n",
+                    cur_rec->inter_data_record[idx].jetty_id,
+                    cur_rec->inter_data_record[idx].umq_wait_start,
+                    cur_rec->inter_data_record[idx].urma_wait_start, 
+                    cur_rec->inter_data_record[idx].urma_wait_time, 
+                    cur_rec->inter_data_record[idx].umq_wait_end,
+                    cur_rec->inter_data_record[idx].urma_ack_start, 
+                    cur_rec->inter_data_record[idx].urma_ack_time,
+                    cur_rec->inter_data_record[idx].urma_rearm_start,
+                    cur_rec->inter_data_record[idx].urma_rearm_time,
+                    cur_rec->inter_data_record[idx].urma_fc_rearm_start,
+                    cur_rec->inter_data_record[idx].urma_fc_rearm_time,
+                    cur_rec->inter_data_record[idx].umq_rearm_end);
+            }
+            cur_rec->pre_inter_cnt = inter_cnt;
+        }
+    }
+}
+
+void umq_ub_remain_data_print(void *args)
+{
+    if (!g_umq_print_flag) {
+ 	    return;
+ 	}
+    g_umq_print_limit = 0;
+    umq_ub_data_print(args);
+}
+
+static int umq_ub_data_print_timer_create(void)
+{
+    urpc_timer_t *timer = urpc_timer_create(0xFFFFFFFF, false);
+    if (URPC_UNLIKELY(timer == NULL)) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "umq timer create failed\n");
+        return UMQ_FAIL;
+    }
+    void *args = NULL;
+    int ret = urpc_timer_start(timer, 1, umq_ub_data_print, args, true);
+    if (URPC_UNLIKELY(ret != UMQ_SUCCESS)) {
+        goto TIMER_DESTROY;
+    }
+    return UMQ_SUCCESS;
+
+TIMER_DESTROY:
+    urpc_timer_destroy(timer);
+    return UMQ_FAIL;
+}
+
 int umq_perf_start(void)
 {
     // initialize perf at first start
@@ -234,6 +461,10 @@ int umq_perf_start(void)
             UMQ_VLOG_ERR(VLOG_UMQ, "umq perf init failed\n");
             return ret;
         }
+    }
+    if (umq_ub_data_print_timer_create() != UMQ_SUCCESS) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "umq print data timer create failed\n");
+        return -UMQ_ERR_EINVAL;
     }
 
     // IO perf record has been started, user must stop it first before restart
@@ -402,4 +633,77 @@ int umq_perf_info_get(umq_perf_stats_t *perf_info)
 
     (void)pthread_spin_unlock(&g_umq_perf_record_lock);
     return 0;
+}
+
+/*
+ * FC latency histogram helpers — always-on accumulators gated by g_umq_perf_record_enable.
+ * Power-of-2 buckets starting at 128 ns (2^7):
+ *   bucket 0: (0,    128] ns
+ *   bucket 1: (128,  256] ns
+ *   ...
+ *   bucket 14: (1ms, 2ms] ns
+ *   bucket 15: > 2ms  (overflow)
+ */
+
+static inline uint64_t umq_perf_fc_reconstruct_send_ts(uint32_t ts_low, uint64_t now_ns)
+{
+    uint64_t ts = (now_ns & ~0xFFFFFFFFULL) | ts_low;
+    if (ts > now_ns) {
+        ts -= 0x100000000ULL;  /* wraparound: send was in previous 32-bit window */
+    }
+    return ts;
+}
+
+static inline int umq_perf_fc_latency_bucket_idx(uint64_t latency)
+{
+    if (latency <= 128) return 0;
+    int msb = 64 - __builtin_clzll(latency - 1);  /* ceil(log2(latency)) */
+    int bucket = msb - 7;  /* 2^7 = 128ns maps to bucket 0 */
+    if (bucket < 0) return 0;
+    if (bucket >= UMQ_FC_LATENCY_BUCKET_COUNT) return UMQ_FC_LATENCY_BUCKET_COUNT - 1;
+    return bucket;
+}
+
+static inline void umq_perf_fc_latency_update(
+    volatile uint64_t *total, volatile uint64_t *cnt, volatile uint64_t *max,
+    volatile uint64_t *hist, uint64_t latency)
+{
+    (void)__atomic_add_fetch(total, latency, __ATOMIC_RELAXED);
+    (void)__atomic_add_fetch(cnt, 1, __ATOMIC_RELAXED);
+
+    uint64_t old_max = __atomic_load_n(max, __ATOMIC_RELAXED);
+    while (latency > old_max) {
+        if (__atomic_compare_exchange_n(max, &old_max, latency, false,
+            __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+            break;
+        }
+    }
+
+    if (hist != NULL) {
+        int b = umq_perf_fc_latency_bucket_idx(latency);
+        (void)__atomic_add_fetch(&hist[b], 1, __ATOMIC_RELAXED);
+    }
+}
+
+void umq_perf_fc_latency_record_send_to_recv(
+    volatile uint64_t *total, volatile uint64_t *cnt, volatile uint64_t *max,
+    volatile uint64_t *hist,
+    uint32_t send_ts_low, uint64_t recv_ts)
+{
+    if (!g_umq_perf_record_enable) return;
+
+    uint64_t send_ts = umq_perf_fc_reconstruct_send_ts(send_ts_low, recv_ts);
+    uint64_t latency = recv_ts - send_ts;
+    umq_perf_fc_latency_update(total, cnt, max, hist, latency);
+}
+
+void umq_perf_fc_latency_record_poll_to_proc(
+    volatile uint64_t *total, volatile uint64_t *cnt, volatile uint64_t *max,
+    volatile uint64_t *hist,
+    uint64_t poll_ts, uint64_t proc_ts)
+{
+    if (!g_umq_perf_record_enable) return;
+
+    uint64_t latency = proc_ts - poll_ts;
+    umq_perf_fc_latency_update(total, cnt, max, hist, latency);
 }

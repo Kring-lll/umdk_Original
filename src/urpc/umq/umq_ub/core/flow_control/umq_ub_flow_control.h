@@ -94,6 +94,12 @@ static ALWAYS_INLINE void umq_ub_fc_packet_stats(ub_flow_control_t *fc, uint32_t
     fc->ops.packet_stats(fc, cnt, type);
 }
 
+/* Embed send timestamp (lower 32 bits of get_timestamp_ns()) into sge_data */
+static ALWAYS_INLINE void umq_ub_fc_set_send_timestamp(umq_ub_fc_sge_data_t *sge_data)
+{
+    sge_data->bs.send_timestamp = (uint32_t)get_timestamp_ns();
+}
+
 #ifdef __cplusplus
 }
 #endif

@@ -49,12 +49,13 @@ typedef enum umq_ub_imm_type {
 } umq_ub_imm_type_t;
 
 typedef union umq_ub_fc_sge_data {
-    uint32_t value;
+    uint64_t value;
     struct {
-        uint32_t type : 4;
-        uint32_t window : 10;
-        uint32_t ratio : 2;
-        uint32_t rsvd : 16;
+        uint64_t type : 4;
+        uint64_t window : 10;
+        uint64_t ratio : 2;
+        uint64_t rsvd : 16;
+        uint64_t send_timestamp : 32;    /* lower 32 bits of send timestamp (ns), for FC latency measurement */
     } bs;
 } umq_ub_fc_sge_data_t;
 

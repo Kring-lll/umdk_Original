@@ -189,9 +189,27 @@ typedef struct ub_flow_control {
     bool enabled;
     volatile bool is_credit_applying;
     volatile uint64_t imm[UB_QUEUE_FC_MSG_TYPE_MAX];
+    volatile uint64_t fc_msg_recv_ts[UB_QUEUE_FC_MSG_TYPE_MAX]; /* recv poll timestamp for sub-queue poll-to-process latency */
+    volatile uint64_t fc_poll_ts; /* latest poll timestamp, for poll-to-process latency measurement */
     umq_ub_flow_control_sge_slot_t recv_sge;
     uint8_t local_req_seq;
     uint8_t remote_expect_seq;
+
+    /* FC latency stats (in nanoseconds), for same-host loopback latency measurement */
+    volatile uint64_t fc_latency_a_to_b_total;
+    volatile uint64_t fc_latency_a_to_b_cnt;
+    volatile uint64_t fc_latency_a_to_b_max;
+    volatile uint64_t fc_latency_b_to_a_total;
+    volatile uint64_t fc_latency_b_to_a_cnt;
+    volatile uint64_t fc_latency_b_to_a_max;
+    volatile uint64_t fc_latency_poll_to_proc_total;
+    volatile uint64_t fc_latency_poll_to_proc_cnt;
+    volatile uint64_t fc_latency_poll_to_proc_max;
+
+    /* FC latency histograms — power-of-2 buckets, for p50/p90/p99 distribution */
+    volatile uint64_t fc_latency_a_to_b_hist[UMQ_FC_LATENCY_BUCKET_COUNT];
+    volatile uint64_t fc_latency_b_to_a_hist[UMQ_FC_LATENCY_BUCKET_COUNT];
+    volatile uint64_t fc_latency_poll_to_proc_hist[UMQ_FC_LATENCY_BUCKET_COUNT];
 } ub_flow_control_t;
 
 typedef struct umq_ub_flow_control_sge_mgr {
@@ -591,8 +609,8 @@ int umq_ub_fill_fc_rx_buf(ub_queue_t *queue, uint64_t user_ctx);
 int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint8_t rqe_post_factor);
 int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, uint32_t tp_handle_idx);
 
-int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[]);
-int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[]);
+int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[], umq_data_record_t *data_record);
+int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[], umq_data_record_t *data_record);
 int umq_ub_wait_tp_handle_tx_interrupt(urma_jfce_t *jfs_jfce, int time_out, urma_jfc_t *jfc[], bool fc_enable);
 int umq_flow_control_stats_get(uint64_t umqh_tp, umq_flow_control_stats_t *flow_control_stats);
 uint32_t umq_ub_timer_timeout_get(void);

@@ -114,6 +114,133 @@ int umq_flow_control_stats_to_str(const umq_flow_control_stats_t *flow_control_s
         "%-40s %-40lu\n", "Send Error Cnt", flow_control_stats->packet_stats.send_error_cnt);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
         "%-40s %-40lu\n", "Recv Error Cnt", flow_control_stats->packet_stats.recv_error_cnt);
+
+    // format FC latency statistics
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "                              FC Latency Statistics\n");
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-40s %-40lu\n", "A->B Total (ns)", flow_control_stats->fc_latency.a_to_b_total);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-40s %-40lu\n", "A->B Cnt", flow_control_stats->fc_latency.a_to_b_cnt);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-40s %-40lu\n", "A->B Max (ns)", flow_control_stats->fc_latency.a_to_b_max);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-40s %-40lu\n", "B->A Total (ns)", flow_control_stats->fc_latency.b_to_a_total);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-40s %-40lu\n", "B->A Cnt", flow_control_stats->fc_latency.b_to_a_cnt);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-40s %-40lu\n", "B->A Max (ns)", flow_control_stats->fc_latency.b_to_a_max);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-40s %-40lu\n", "Poll->Proc Total (ns)", flow_control_stats->fc_latency.poll_to_proc_total);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-40s %-40lu\n", "Poll->Proc Cnt", flow_control_stats->fc_latency.poll_to_proc_cnt);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-40s %-40lu\n", "Poll->Proc Max (ns)", flow_control_stats->fc_latency.poll_to_proc_max);
+
+    // format FC latency distribution histogram
+    static const char *bucket_labels[UMQ_FC_LATENCY_BUCKET_COUNT] = {
+        "<= 128ns", "<= 256ns", "<= 512ns", "<= 1us",
+        "<= 2us",   "<= 4us",   "<= 8us",   "<= 16us",
+        "<= 32us",  "<= 64us",  "<= 128us", "<= 256us",
+        "<= 512us", "<= 1ms",   "<= 2ms",   "> 2ms",
+    };
+
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "                           FC Latency Distribution\n");
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-30s %-15s %-15s %-15s\n", "Latency Range", "A->B", "B->A", "Poll->Proc");
+
+    for (int i = 0; i < UMQ_FC_LATENCY_BUCKET_COUNT; i++) {
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-30s %-15lu %-15lu %-15lu\n",
+            bucket_labels[i],
+            flow_control_stats->fc_latency.a_to_b_hist[i],
+            flow_control_stats->fc_latency.b_to_a_hist[i],
+            flow_control_stats->fc_latency.poll_to_proc_hist[i]);
+    }
+
+    // compute estimated percentiles from histogram
+    uint64_t a_to_b_p50 = 0, a_to_b_p90 = 0, a_to_b_p99 = 0;
+    uint64_t b_to_a_p50 = 0, b_to_a_p90 = 0, b_to_a_p99 = 0;
+    uint64_t poll_to_proc_p50 = 0, poll_to_proc_p90 = 0, poll_to_proc_p99 = 0;
+
+    static const uint64_t bucket_upper[UMQ_FC_LATENCY_BUCKET_COUNT] = {
+        128, 256, 512, 1024, 2048, 4096, 8192, 16384,
+        32768, 65536, 131072, 262144, 524288, 1048576, 2097152, UINT64_MAX
+    };
+
+    // A->B percentiles
+    uint64_t total = 0;
+    for (int i = 0; i < UMQ_FC_LATENCY_BUCKET_COUNT; i++) {
+        total += flow_control_stats->fc_latency.a_to_b_hist[i];
+    }
+    if (total > 0) {
+        uint64_t cum = 0;
+        uint64_t thresh50 = total * 50 / 100;
+        uint64_t thresh90 = total * 90 / 100;
+        uint64_t thresh99 = total * 99 / 100;
+        for (int i = 0; i < UMQ_FC_LATENCY_BUCKET_COUNT; i++) {
+            cum += flow_control_stats->fc_latency.a_to_b_hist[i];
+            if (a_to_b_p50 == 0 && cum >= thresh50) a_to_b_p50 = bucket_upper[i];
+            if (a_to_b_p90 == 0 && cum >= thresh90) a_to_b_p90 = bucket_upper[i];
+            if (a_to_b_p99 == 0 && cum >= thresh99) a_to_b_p99 = bucket_upper[i];
+        }
+    }
+
+    // B->A percentiles
+    total = 0;
+    for (int i = 0; i < UMQ_FC_LATENCY_BUCKET_COUNT; i++) {
+        total += flow_control_stats->fc_latency.b_to_a_hist[i];
+    }
+    if (total > 0) {
+        uint64_t cum = 0;
+        uint64_t thresh50 = total * 50 / 100;
+        uint64_t thresh90 = total * 90 / 100;
+        uint64_t thresh99 = total * 99 / 100;
+        for (int i = 0; i < UMQ_FC_LATENCY_BUCKET_COUNT; i++) {
+            cum += flow_control_stats->fc_latency.b_to_a_hist[i];
+            if (b_to_a_p50 == 0 && cum >= thresh50) b_to_a_p50 = bucket_upper[i];
+            if (b_to_a_p90 == 0 && cum >= thresh90) b_to_a_p90 = bucket_upper[i];
+            if (b_to_a_p99 == 0 && cum >= thresh99) b_to_a_p99 = bucket_upper[i];
+        }
+    }
+
+    // Poll->Proc percentiles
+    total = 0;
+    for (int i = 0; i < UMQ_FC_LATENCY_BUCKET_COUNT; i++) {
+        total += flow_control_stats->fc_latency.poll_to_proc_hist[i];
+    }
+    if (total > 0) {
+        uint64_t cum = 0;
+        uint64_t thresh50 = total * 50 / 100;
+        uint64_t thresh90 = total * 90 / 100;
+        uint64_t thresh99 = total * 99 / 100;
+        for (int i = 0; i < UMQ_FC_LATENCY_BUCKET_COUNT; i++) {
+            cum += flow_control_stats->fc_latency.poll_to_proc_hist[i];
+            if (poll_to_proc_p50 == 0 && cum >= thresh50) poll_to_proc_p50 = bucket_upper[i];
+            if (poll_to_proc_p90 == 0 && cum >= thresh90) poll_to_proc_p90 = bucket_upper[i];
+            if (poll_to_proc_p99 == 0 && cum >= thresh99) poll_to_proc_p99 = bucket_upper[i];
+        }
+    }
+
+    // format FC latency percentiles
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "                           FC Latency Percentiles\n");
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-30s %-15s %-15s %-15s\n", "Percentile", "A->B", "B->A", "Poll->Proc");
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-30s %-15lu %-15lu %-15lu\n", "p50 (ns)", a_to_b_p50, b_to_a_p50, poll_to_proc_p50);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-30s %-15lu %-15lu %-15lu\n", "p90 (ns)", a_to_b_p90, b_to_a_p90, poll_to_proc_p90);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-30s %-15lu %-15lu %-15lu\n", "p99 (ns)", a_to_b_p99, b_to_a_p99, poll_to_proc_p99);
+
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_EQUALS);
 

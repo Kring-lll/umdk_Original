@@ -27,6 +27,9 @@ extern "C" {
 
 uint64_t umq_perf_get_start_timestamp(void);
 void umq_perf_record_write(umq_perf_record_type_t type, uint64_t start);
+void umq_perf_data_write(umq_perf_data_type_t type, umq_data_record_t data);
+void umq_ub_remain_data_print(void *args);
+void umq_ub_close_perf_log(void);
 void umq_perf_record_write_with_direction(umq_perf_record_type_t type, uint64_t start, umq_io_direction_t direction);
 void umq_perf_record_write_interrupt_with_direction(
     umq_perf_record_type_t type, uint64_t start, umq_io_direction_t direction);
@@ -54,6 +57,17 @@ int umq_perf_reset(umq_perf_stats_cfg_t *perf_stats_cfg);
 int umq_perf_stop(void);
 int umq_perf_info_get(umq_perf_stats_t *perf_info);
 int umq_perf_info_to_string(umq_perf_stats_t *perf_stats, char *umq_perf_stats_buf, int max_buf_szie);
+
+/* FC latency measurement — gated by umq_perf_start()/stop().
+ * hist[] must point to a uint64_t[UMQ_FC_LATENCY_BUCKET_COUNT] array. */
+void umq_perf_fc_latency_record_send_to_recv(
+    volatile uint64_t *total, volatile uint64_t *cnt, volatile uint64_t *max,
+    volatile uint64_t *hist,
+    uint32_t send_ts_low, uint64_t recv_ts);
+void umq_perf_fc_latency_record_poll_to_proc(
+    volatile uint64_t *total, volatile uint64_t *cnt, volatile uint64_t *max,
+    volatile uint64_t *hist,
+    uint64_t poll_ts, uint64_t proc_ts);
 
 #ifdef __cplusplus
 }
