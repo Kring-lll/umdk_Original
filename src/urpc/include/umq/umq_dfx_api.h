@@ -121,10 +121,23 @@ int umq_stats_perf_reset(umq_perf_stats_cfg_t *perf_stats_cfg);
 int umq_stats_perf_start(void);
 
 /**
+ * Start data perf statistics.
+ * @param[in] cfg: data perf cfg
+ * Return 0 on success, error code on failure
+ */
+int umq_stats_perf_data_start(umq_perf_data_cfg_t cfg);
+
+/**
  * Stop perf statistics.
  * Return 0 on success, error code on failure
  */
 int umq_stats_perf_stop(void);
+
+/**
+ * Stop perf statistics.
+ * Return 0 on success, error code on failure
+ */
+int umq_stats_perf_data_stop(void);
 
 /**
  * Thread safety function
