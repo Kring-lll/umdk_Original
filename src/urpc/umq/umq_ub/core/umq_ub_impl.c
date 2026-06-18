@@ -1503,6 +1503,7 @@ int umq_ub_get_cq_event_impl(uint64_t umqh_tp, umq_interrupt_option_t *option)
 
 int umq_ub_wait_interrupt_impl(uint64_t wait_umqh_tp, int time_out, umq_interrupt_option_t *option)
 {
+    uint64_t wait_start = umq_trace_perf_start_timestamp_get();
     if ((option->flag & UMQ_INTERRUPT_FLAG_IO_DIRECTION) == 0 || option->direction <= UMQ_IO_ALL ||
         option->direction >= UMQ_IO_MAX) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "option not valid\n");
@@ -1554,6 +1555,15 @@ int umq_ub_wait_interrupt_impl(uint64_t wait_umqh_tp, int time_out, umq_interrup
         return 0;
     } else if (cnt == 0) {
         return 0;
+    }
+
+    /* record with new trace perf APIs */
+    umq_data_record_meta_t meta;
+    meta.jetty_id = id;
+    meta.timestamp = umq_trace_perf_timestamp_get();
+    int32_t rec_id = write_umq_start_time(UMQ_PERF_DATA_TYPE_WAIT, wait_start, &meta, sizeof(meta));
+    if (rec_id >= 0) {
+        write_umq_end_time(UMQ_PERF_DATA_TYPE_WAIT, rec_id, umq_trace_perf_timestamp_get());
     }
     return 1;
 }
@@ -1706,7 +1716,8 @@ int umq_ub_interrupt_fd_list_get_impl(uint64_t umqh_tp,
 
 int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicited, umq_interrupt_option_t *option)
 {
-    uint64_t start_timestamp;
+    uint64_t rearm_start = umq_trace_perf_start_timestamp_get();
+    uint64_t start_cycles;
     if ((option->flag & UMQ_INTERRUPT_FLAG_IO_DIRECTION) == 0 || option->direction <= UMQ_IO_ALL ||
         option->direction >= UMQ_IO_MAX) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "option invalid\n");
@@ -1725,6 +1736,12 @@ int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicited, umq_interrupt_option_t *
             EID_ARGS(*eid), id);
         return -UMQ_ERR_EINVAL;
     }
+
+    /* meta + start record */
+    umq_data_record_meta_t meta;
+    meta.jetty_id = id;
+    meta.timestamp = umq_trace_perf_timestamp_get();
+    int32_t rec_id = write_umq_start_time(UMQ_PERF_DATA_TYPE_REARM, rearm_start, &meta, sizeof(meta));
 
     urma_status_t status = URMA_SUCCESS;
     if ((option->flag & UMQ_INTERRUPT_FLAG_TP_HANDLE_IDX) != 0) {
@@ -1760,13 +1777,18 @@ int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicited, umq_interrupt_option_t *
         return -UMQ_ERR_EINVAL;
     }
 
-    start_timestamp = umq_perf_get_start_timestamp();
+    /* URMA rearm — io jetty */
+    uint64_t tp_rearm_start = umq_trace_perf_timestamp_get();
+    start_cycles = umq_perf_get_start_timestamp();
     if (option->direction == UMQ_IO_TX) {
         status = umq_symbol_urma()->urma_rearm_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_IO], solicited);
-        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_REARM_TX, start_timestamp);
     } else if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0) {
         status = umq_symbol_urma()->urma_rearm_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfc, solicited);
-        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_REARM_RX, start_timestamp);
+    }
+    uint64_t rearm_delta = umq_perf_record_write_delta(UMQ_PERF_RECORD_TRANSPORT_REARM_TX, start_cycles);
+    if (rec_id >= 0) {
+        write_urma_sub_time(UMQ_PERF_DATA_TYPE_REARM, UMQ_URMA_FUNC_REARM_JFC, rec_id,
+                            tp_rearm_start, rearm_delta);
     }
     if (status != URMA_SUCCESS) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_rearm_jfc for io jfc failed, "
@@ -1774,14 +1796,19 @@ int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicited, umq_interrupt_option_t *
         return umq_status_convert(status);
     }
 
+    /* URMA rearm — fc jetty (if enabled) */
     if (queue->flow_control.enabled) {
-        start_timestamp = umq_perf_get_start_timestamp();
+        uint64_t fc_rearm_start = umq_trace_perf_timestamp_get();
+        start_cycles = umq_perf_get_start_timestamp();
         if (option->direction == UMQ_IO_TX) {
             status = umq_symbol_urma()->urma_rearm_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL], solicited);
-            umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_REARM_TX, start_timestamp);
         } else if (!UMQ_UB_ENABLE_SHARE_FC_JFR || (queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) == 0) {
             status = umq_symbol_urma()->urma_rearm_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr_jfc, solicited);
-            umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_REARM_RX, start_timestamp);
+        }
+        rearm_delta = umq_perf_record_write_delta(UMQ_PERF_RECORD_TRANSPORT_REARM_TX, start_cycles);
+        if (rec_id >= 0) {
+            write_urma_sub_time(UMQ_PERF_DATA_TYPE_REARM, UMQ_URMA_FUNC_REARM_JFC, rec_id,
+                                fc_rearm_start, rearm_delta);
         }
         if (status != URMA_SUCCESS) {
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_rearm_jfc for flowcontrol jfc"
@@ -1790,6 +1817,9 @@ int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicited, umq_interrupt_option_t *
         }
     }
 
+    if (rec_id >= 0) {
+        write_umq_end_time(UMQ_PERF_DATA_TYPE_REARM, rec_id, umq_trace_perf_timestamp_get());
+    }
     return UMQ_SUCCESS;
 }
 

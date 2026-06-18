@@ -3394,9 +3394,9 @@ int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
     }
 
     urma_jfc_t *temp_jfc[jfc_cnt];
-    uint64_t start_timestamp = umq_perf_get_start_timestamp();
+    uint64_t start_cycles = umq_perf_get_start_timestamp();
     int p_num = umq_symbol_urma()->urma_wait_jfc(jfr_jfce, jfc_cnt, time_out, temp_jfc);
-    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_WAIT_RX, start_timestamp);
+    (void)umq_perf_record_write_delta(UMQ_PERF_RECORD_TRANSPORT_WAIT_RX, start_cycles);
     if (p_num <= 0) {
         return p_num;
     }
@@ -3411,9 +3411,9 @@ int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
             queue->interrupt_ctx.rx_fc_interrupt = true;
         }
     }
-    start_timestamp = umq_perf_get_start_timestamp();
+    start_cycles = umq_perf_get_start_timestamp();
     umq_symbol_urma()->urma_ack_jfc(temp_jfc, nevents, p_num);
-    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_ACK_RX, start_timestamp);
+    (void)umq_perf_record_write_delta(UMQ_PERF_RECORD_TRANSPORT_ACK_RX, start_cycles);
     return p_num;
 }
 
@@ -3425,9 +3425,9 @@ int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
     }
 
     urma_jfc_t *temp_jfc[jfc_cnt];
-    uint64_t start_timestamp = umq_perf_get_start_timestamp();
+    uint64_t start_cycles = umq_perf_get_start_timestamp();
     int p_num = umq_symbol_urma()->urma_wait_jfc(queue->jfs_jfce, jfc_cnt, time_out, temp_jfc);
-    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_WAIT_TX, start_timestamp);
+    (void)umq_perf_record_write_delta(UMQ_PERF_RECORD_TRANSPORT_WAIT_TX, start_cycles);
     if (p_num <= 0) {
         return p_num;
     }
@@ -3441,9 +3441,9 @@ int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
             queue->interrupt_ctx.tx_fc_interrupt = true;
         }
     }
-    start_timestamp = umq_perf_get_start_timestamp();
+    start_cycles = umq_perf_get_start_timestamp();
     umq_symbol_urma()->urma_ack_jfc(temp_jfc, nevents, p_num);
-    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_ACK_TX, start_timestamp);
+    (void)umq_perf_record_write_delta(UMQ_PERF_RECORD_TRANSPORT_ACK_TX, start_cycles);
     return p_num;
 }
 
