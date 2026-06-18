@@ -34,7 +34,7 @@ void umq_ub_flow_control_uninit(ub_flow_control_t *fc);
 int umq_ub_window_init(ub_flow_control_t *fc, umq_ub_bind_info_t *bind_info);
 void umq_ub_rx_consumed_inc(bool lock_free, volatile uint64_t *var, uint64_t count);
 uint64_t umq_ub_rx_consumed_exchange(bool lock_free, volatile uint64_t *var, uint64_t count);
-int umq_ub_shared_credit_req_send(ub_queue_t *queue);
+int umq_ub_shared_credit_req_send(ub_queue_t *queue, int32_t rec_id);
 int umq_ub_shared_credit_req_handle(ub_queue_t *queue, umq_ub_flow_control_data_t *flow_control_data);
 void umq_ub_shared_credit_resp_handle(ub_queue_t *queue, umq_ub_flow_control_data_t *flow_control_data);
 int umq_ub_shared_credit_return_req_send(ub_queue_t *queue);
@@ -61,7 +61,8 @@ static inline uint16_t umq_ub_window_dec(ub_flow_control_t *fc, ub_queue_t *queu
     return fc->ops.remote_rx_window_dec(fc, win, false);
 }
 
-static ALWAYS_INLINE int umq_ub_credit_check_and_request_send(ub_flow_control_t *fc, ub_queue_t *queue)
+static ALWAYS_INLINE int umq_ub_credit_check_and_request_send(ub_flow_control_t *fc, ub_queue_t *queue,
+                                                              int32_t rec_id)
 {
     if (!fc->enabled) {
         return UMQ_SUCCESS;
@@ -71,7 +72,7 @@ static ALWAYS_INLINE int umq_ub_credit_check_and_request_send(ub_flow_control_t 
     }
     if (fc->ops.remote_rx_window_load(fc) <=
         umq_ub_flow_control_threashold_modify(fc->credit_request_threshold, fc->peer_ratio)) {
-        return umq_ub_shared_credit_req_send(queue);
+        return umq_ub_shared_credit_req_send(queue, rec_id);
     }
     return UMQ_SUCCESS;
 }

@@ -243,6 +243,8 @@ static ALWAYS_INLINE void umq_ub_tx_eagain_cnt(int ret, bool user_send_imm, ub_q
 
 int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
 {
+    uint64_t post_start = umq_trace_perf_start_timestamp_get();
+    int32_t rec_id = -1;
     int ret = UMQ_SUCCESS;
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
     uint32_t wr_cnt_limit = UMQ_BATCH_SIZE;
@@ -252,7 +254,12 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
         return -UMQ_ERR_ENODEV;
     }
     ub_flow_control_t *fc = &queue->flow_control;
-    ret = umq_ub_credit_check_and_request_send(fc, queue);
+
+    /* record start before flow control so FC URMA calls can be captured as sub_time */
+    rec_id = umq_trace_perf_start_write(UMQ_PERF_DATA_TYPE_POST, post_start,
+        queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, umq_trace_perf_timestamp_get());
+
+    ret = umq_ub_credit_check_and_request_send(fc, queue, rec_id);
     if (ret != UMQ_SUCCESS) {
         *bad_qbuf = qbuf;
         return ret;
@@ -377,7 +384,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
     max_tx = opcode_consume_rqe ? umq_ub_window_dec(&queue->flow_control, queue, wr_index) : wr_index;
     if (max_tx == 0) {
         *bad_qbuf = qbuf;
-        ret = umq_ub_shared_credit_req_send(queue);
+        ret = umq_ub_shared_credit_req_send(queue, rec_id);
         ret = (ret != UMQ_SUCCESS) ? ret : -UMQ_ERR_EAGAIN;
         umq_ub_tx_eagain_cnt(ret, user_send_imm, queue, wr_index, qbuf);
         goto ERROR;
@@ -413,13 +420,18 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
     }
 
     urma_jfs_wr_t *bad_wr = NULL;
-    uint64_t start_timestamp = umq_perf_get_start_timestamp();
+    uint64_t start_cycles = umq_perf_get_start_timestamp();
     if (user_send_imm) {
         umq_io_perf_process(UMQ_PERF_RECORD_TRANSPORT_POST_SEND, qbuf);
     }
+    uint64_t tp_start = umq_trace_perf_timestamp_get();
     urma_status_t status =
         umq_symbol_urma()->urma_post_jetty_send_wr(queue->jetty[UB_QUEUE_JETTY_IO], urma_wr, &bad_wr);
-    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_POST_SEND, start_timestamp);
+    uint64_t delta_ns = umq_perf_record_write_delta(UMQ_PERF_RECORD_TRANSPORT_POST_SEND, start_cycles);
+    if (rec_id >= 0) {
+        umq_trace_perf_sub_write(UMQ_PERF_DATA_TYPE_POST, UMQ_URMA_FUNC_POST_SEND, rec_id, tp_start, delta_ns);
+        umq_trace_perf_end_write(UMQ_PERF_DATA_TYPE_POST, rec_id, umq_trace_perf_timestamp_get());
+    }
     if (status != URMA_SUCCESS) {
         ret = umq_status_convert(status);
         if (bad_wr != NULL) {
@@ -446,7 +458,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
 
     if (max_tx < wr_index) {
         *bad_qbuf = (umq_buf_t *)(uintptr_t)urma_wr[max_tx].user_ctx;
-        ret = umq_ub_shared_credit_req_send(queue);
+        ret = umq_ub_shared_credit_req_send(queue, rec_id);
         ret = (ret != UMQ_SUCCESS) ? ret : -UMQ_ERR_EAGAIN;
         umq_ub_tx_eagain_cnt(ret, user_send_imm, queue, wr_index - max_tx, qbuf);
     }
@@ -648,7 +660,7 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
         }
         umq_ub_rqe_posted_cnt_inc(queue, wr_index - umq_ub_post_rx_failed_num(recv_wr, wr_index, *bad_qbuf));
         // if fails, add chain of qbuf back for rx
-        process_bad_wr(queue, bad_wr, NULL);
+        process_bad_wr(queue, bad_wr);
         return umq_status_convert(status);
     }
     umq_ub_rqe_posted_cnt_inc(queue, wr_index);
@@ -871,7 +883,7 @@ static inline void umq_perf_record_write_poll(umq_perf_record_type_t type, uint6
 static uint32_t umq_ub_fill_fc_buf(ub_queue_t *queue, umq_buf_t **buf, umq_buf_status_t status)
 {
     uint32_t request = (umq_qbuf_mode_get() == UMQ_BUF_SPLIT) ? 0 : UMQ_UB_FC_UNDATE_FAKE_BUF_SIZE;
-    umq_buf_t *fc_buf = umq_buf_alloc(request, 1, UMQ_INVALID_HANDLE, NULL);
+    umq_buf_t *fc_buf = umq_buf_alloc(request, 1, UMQ_INVALID_HANDLE);
     if (fc_buf == NULL) {
         return 0;
     }
@@ -1379,7 +1391,10 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
     int ret;
     uint32_t qbuf_cnt = 0;
     uint32_t max_batch = buf_count > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : buf_count;
+    int32_t rec_id = -1;
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
+    urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
+    uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
     if (queue->flow_control.enabled) {
         int fc_qbuf_cnt = 0;
         if (!UMQ_UB_ENABLE_SHARE_FC_JFR) {
@@ -1418,11 +1433,22 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
         goto OUT;
     }
 
-    urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
-    uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
+    /* one POLL record for this IO poll operation */
+    uint64_t poll_start = umq_trace_perf_start_timestamp_get();
+    rec_id = umq_trace_perf_start_write(UMQ_PERF_DATA_TYPE_POLL, poll_start,
+        id, umq_trace_perf_timestamp_get());
+
     uint64_t start_timestmap = umq_perf_get_start_timestamp();
+    uint64_t tp_poll_start = umq_trace_perf_timestamp_get();
     int rx_cr_cnt = umq_symbol_urma()->urma_poll_jfc(queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr_jfc, max_batch, cr);
+    uint64_t tp_poll_end = umq_trace_perf_timestamp_get();
+    uint64_t io_poll_time = tp_poll_end - tp_poll_start;
     umq_perf_record_write_poll(UMQ_PERF_RECORD_TRANSPORT_POLL_RX, start_timestmap, rx_cr_cnt);
+    /* record urma_poll_jfc timing as sub_time right after the URMA call */
+    if (rec_id >= 0 && io_poll_time > 0) {
+        umq_trace_perf_sub_write(UMQ_PERF_DATA_TYPE_POLL, UMQ_URMA_FUNC_POLL_RX, rec_id,
+                            tp_poll_start, io_poll_time);
+    }
     if (rx_cr_cnt < 0) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports rx_cr_cnt[%d]\n",
             EID_ARGS(*eid), id, rx_cr_cnt);
@@ -1467,6 +1493,10 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count)
 
     if (success_cnt > 0) {
         umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_RECV, success_cnt, queue->dev_ctx->io_lock_free);
+    }
+
+    if (rec_id >= 0) {
+        umq_trace_perf_end_write(UMQ_PERF_DATA_TYPE_POLL, rec_id, umq_trace_perf_timestamp_get());
     }
 
 OUT:
