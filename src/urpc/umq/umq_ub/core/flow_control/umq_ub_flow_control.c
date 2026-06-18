@@ -13,6 +13,7 @@
 #include "umq_ub_imm_data.h"
 #include "umq_ub_jetty_pool.h"
 #include "umq_ub_flow_control.h"
+#include "perf.h"
 
 #define UMQ_UB_FLOW_CONTROL_NOTIFY_THR 4
 #define UMQ_UB_FLOW_CONTROL_LEAK_CREDIT_THR 3
@@ -650,7 +651,7 @@ void umq_ub_shared_credit_recharge(ub_queue_t *queue, uint16_t recharge_count)
     credit->ops.available_credit_inc(credit, recharge_count);
 }
 
-int umq_ub_shared_credit_req_send(ub_queue_t *queue)
+int umq_ub_shared_credit_req_send(ub_queue_t *queue, int32_t rec_id)
 {
     ub_flow_control_t *fc = &queue->flow_control;
     if (!fc->enabled || queue->bind_ctx == NULL) {
@@ -715,7 +716,15 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
         .tjetty = tjetty,
         .opcode = URMA_OPC_SEND_IMM};
     urma_jfs_wr_t *bad_wr = NULL;
+    /* record FC urma_post_jetty_send_wr as sub_time when called from a traced context */
+    uint64_t tp_start = umq_trace_perf_timestamp_get();
+    uint64_t start_cycles = umq_perf_get_start_timestamp();
     urma_status_t status = umq_symbol_urma()->urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
+    uint64_t delta_ns = umq_perf_record_write_delta(UMQ_PERF_RECORD_TRANSPORT_POST_SEND, start_cycles);
+    if (rec_id >= 0) {
+        write_urma_sub_time(UMQ_PERF_DATA_TYPE_POST, UMQ_URMA_FUNC_POST_SEND, rec_id,
+                            tp_start, delta_ns);
+    }
     if (status == URMA_SUCCESS) {
         umq_ub_post_release_jetty_node(queue, 0);
         umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND);
