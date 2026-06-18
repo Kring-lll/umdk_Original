@@ -27,11 +27,27 @@ extern "C" {
 
 uint64_t umq_perf_get_start_timestamp(void);
 void umq_perf_record_write(umq_perf_record_type_t type, uint64_t start);
+uint64_t umq_perf_record_write_delta(umq_perf_record_type_t type, uint64_t start);
 void umq_perf_record_write_with_direction(umq_perf_record_type_t type, uint64_t start, umq_io_direction_t direction);
 void umq_perf_record_write_interrupt_with_direction(
     umq_perf_record_type_t type, uint64_t start, umq_io_direction_t direction);
 int umq_perf_init(void);
 void umq_perf_uninit(void);
+void umq_trace_uninit(void);
+int umq_trace_init(umq_trace_cfg_t *cfg);
+int umq_trace_stop(void);
+int umq_trace_start(umq_trace_cfg_t *cfg);
+
+void umq_trace_start_record(umq_trace_type_t type, uint64_t time,
+                            uint32_t jetty_id, uint32_t local_umq_id,
+                            uint32_t remote_umq_id);
+int32_t umq_trace_sub_record(umq_trace_type_t type, umq_urma_func_type_t func_type,
+                             uint64_t start_time, uint64_t exec_time);
+int32_t umq_trace_item_record(uint32_t msn, uint32_t size);
+void umq_trace_end_record(umq_trace_type_t type, uint64_t time);
+void umq_ub_remain_trace_print(void);
+uint64_t umq_trace_start_timestamp_get(void);
+uint64_t umq_trace_timestamp_get(void);
 
 static inline uint64_t umq_perf_get_start_timestamp_with_feature(uint32_t feature)
 {
