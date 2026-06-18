@@ -3374,7 +3374,7 @@ void umq_flush_tx(ub_queue_t *queue, uint32_t max_retry_times)
  * fc enable && is sub umq: jfc cnt = 1, use fc jfr jfce
  * fc disable && is sub umq: jfc cnt = 0, return 0
  */
-int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
+int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[], umq_data_record_t *data_record)
 {
     uint32_t jfc_cnt = 0;
     urma_jfce_t *jfr_jfce = NULL;
@@ -3395,7 +3395,9 @@ int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
 
     urma_jfc_t *temp_jfc[jfc_cnt];
     uint64_t start_timestamp = umq_perf_get_start_timestamp();
+    data_record->interrupt.tp_wait_start = umq_trace_perf_timestamp_get();
     int p_num = umq_symbol_urma()->urma_wait_jfc(jfr_jfce, jfc_cnt, time_out, temp_jfc);
+    data_record->interrupt.tp_wait_time = umq_trace_perf_timestamp_get() - data_record->interrupt.tp_wait_start;
     umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_WAIT_RX, start_timestamp);
     if (p_num <= 0) {
         return p_num;
@@ -3412,12 +3414,14 @@ int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
         }
     }
     start_timestamp = umq_perf_get_start_timestamp();
+    data_record->interrupt.tp_ack_start = umq_trace_perf_timestamp_get();
     umq_symbol_urma()->urma_ack_jfc(temp_jfc, nevents, p_num);
+    data_record->interrupt.tp_ack_time = umq_trace_perf_timestamp_get() - data_record->interrupt.tp_ack_start;
     umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_ACK_RX, start_timestamp);
     return p_num;
 }
 
-int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
+int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[], umq_data_record_t *data_record)
 {
     uint32_t jfc_cnt = 1;
     if (queue->flow_control.enabled) {
@@ -3426,7 +3430,9 @@ int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
 
     urma_jfc_t *temp_jfc[jfc_cnt];
     uint64_t start_timestamp = umq_perf_get_start_timestamp();
+    data_record->interrupt.tp_wait_start = umq_trace_perf_timestamp_get();
     int p_num = umq_symbol_urma()->urma_wait_jfc(queue->jfs_jfce, jfc_cnt, time_out, temp_jfc);
+    data_record->interrupt.tp_wait_time = umq_trace_perf_timestamp_get() - data_record->interrupt.tp_wait_start;
     umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_WAIT_TX, start_timestamp);
     if (p_num <= 0) {
         return p_num;
@@ -3442,7 +3448,9 @@ int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
         }
     }
     start_timestamp = umq_perf_get_start_timestamp();
+    data_record->interrupt.tp_ack_start = umq_trace_perf_timestamp_get();
     umq_symbol_urma()->urma_ack_jfc(temp_jfc, nevents, p_num);
+    data_record->interrupt.tp_ack_time = umq_trace_perf_timestamp_get() - data_record->interrupt.tp_ack_start;
     umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_ACK_TX, start_timestamp);
     return p_num;
 }
