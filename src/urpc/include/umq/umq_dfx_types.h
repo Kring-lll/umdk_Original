@@ -225,12 +225,12 @@ typedef enum umq_perf_record_type {
     UMQ_PERF_RECORD_TYPE_MAX,
 } umq_perf_record_type_t;
 
-typedef enum umq_perf_data_type {
+typedef enum umq_perf_trace_type {
     UMQ_PERF_DATA_TYPE_POST,
     UMQ_PERF_DATA_TYPE_POLL,
     UMQ_PERF_DATA_TYPE_INTERRUPT,
     UMQ_PERF_DATA_TYPE_MAX,
-} umq_perf_data_type_t;
+} umq_perf_trace_type_t;
 
 typedef struct umq_data_record {
     uint32_t user_data;
@@ -243,26 +243,26 @@ typedef struct umq_data_record {
         struct {
             uint64_t umq_post_start;
             uint64_t fc_send_req;
-            uint64_t urma_post_time;
-            uint64_t urma_post_start;
-            uint64_t urma_post_end;
+            uint64_t tp_post_time;
+            uint64_t tp_post_start;
+            uint64_t tp_post_end;
         } post;
         struct {
-            uint64_t urma_poll_time;
+            uint64_t tp_poll_time;
             uint64_t umq_poll_end;
         } poll;
         struct {
             uint64_t umq_wait_start;
-            uint64_t urma_wait_start;
-            uint64_t urma_wait_time;
+            uint64_t tp_wait_start;
+            uint64_t tp_wait_time;
             uint64_t umq_wait_end;
-            uint64_t urma_ack_start;
-            uint64_t urma_ack_time;
+            uint64_t tp_ack_start;
+            uint64_t tp_ack_time;
             uint64_t umq_rearm_start;
-            uint64_t urma_rearm_start;
-            uint64_t urma_rearm_time;
-            uint64_t urma_fc_rearm_start;
-            uint64_t urma_fc_rearm_time;
+            uint64_t tp_rearm_start;
+            uint64_t tp_rearm_time;
+            uint64_t tp_fc_rearm_start;
+            uint64_t tp_fc_rearm_time;
             uint64_t umq_rearm_end;
         } inter;
     };
@@ -289,11 +289,11 @@ typedef struct umq_perf_stats_cfg {
 #define UMQ_PERF_FLAG_RECORD_NUM              (1U)
 #define UMQ_PERF_FLAG_RECORD_LIMIT            (1U << 1)
 
-typedef struct umq_perf_data_cfg {
-    uint32_t perf_flag;
+typedef struct umq_perf_trace_cfg {
+    uint32_t flag;
     uint32_t data_record_num; // total number of record array
-    uint32_t data_record_limit; // log limit of data record
-} umq_perf_data_cfg_t;
+    uint32_t output_record_limit; // log limit of data record
+} umq_perf_trace_cfg_t;
 
 typedef void (*umq_io_perf_callback_t)(umq_perf_record_type_t record_type, umq_buf_t *qbuf);
 
