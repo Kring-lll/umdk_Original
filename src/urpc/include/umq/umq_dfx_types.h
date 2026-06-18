@@ -225,6 +225,60 @@ typedef enum umq_perf_record_type {
     UMQ_PERF_RECORD_TYPE_MAX,
 } umq_perf_record_type_t;
 
+/* trace type — UMQ top-level operation categories */
+typedef enum umq_trace_type {
+    UMQ_PERF_DATA_TYPE_POST,                /* umq_post / umq_enqueue (urma_post_send/recv) */
+    UMQ_PERF_DATA_TYPE_POLL,                /* umq_poll / umq_dequeue (urma_poll_tx/rx) */
+    UMQ_PERF_DATA_TYPE_WAIT,                /* umq_wait_interrupt (urma_wait_jfc → urma_ack_jfc) */
+    UMQ_PERF_DATA_TYPE_REARM,               /* umq_rearm_interrupt (urma_rearm_jfc × N) */
+    UMQ_PERF_DATA_TYPE_MAX,
+} umq_trace_type_t;
+
+/* urma function type — identifies which URMA API is being timed */
+typedef enum umq_urma_func_type {
+    UMQ_URMA_FUNC_POST_SEND,                /* urma_post_jetty_send_wr */
+    UMQ_URMA_FUNC_POST_RECV,                /* urma_post_jetty_recv_wr / urma_post_jfr_wr */
+    UMQ_URMA_FUNC_POLL_TX,                  /* urma_poll_jfc (tx) */
+    UMQ_URMA_FUNC_POLL_RX,                  /* urma_poll_jfc (rx) */
+    UMQ_URMA_FUNC_WAIT_JFC,                 /* urma_wait_jfc */
+    UMQ_URMA_FUNC_ACK_JFC,                  /* urma_ack_jfc */
+    UMQ_URMA_FUNC_REARM_JFC,                /* urma_rearm_jfc */
+    UMQ_URMA_FUNC_MAX,
+} umq_urma_func_type_t;
+
+#define UMQ_TRACE_MSN_NUM          (256u)
+#define UMQ_PERF_MAX_SUB_TIME_NUM  (16u)
+
+/* sub-branch timing — one entry per URMA call within a UMQ operation */
+typedef struct umq_sub_time {
+    uint64_t start_time;                    /* URMA call start timestamp (ns) */
+    uint64_t exec_time;                     /* URMA call execution time (delta, ns) */
+    umq_urma_func_type_t func_type;         /* which URMA API */
+} umq_sub_time_t;
+
+/* core data record — abstracted from post/poll/interrupt specifics */
+typedef struct umq_data_record {
+    /* meta — traceability fields */
+    uint32_t msn[UMQ_TRACE_MSN_NUM];         /* IMM data seq numbers for traceability */
+    uint32_t jetty_id;
+    uint32_t local_umq_id;
+    uint32_t remote_umq_id;
+    uint32_t total_size;
+    uint32_t msn_cnt;                       /* number of valid msn[] entries */
+    uint64_t timestamp;                     /* record creation timestamp (ns) */
+
+    /* timing */
+    uint64_t start_time;                    /* UMQ operation start (ns) */
+    uint64_t end_time;                      /* UMQ operation end (ns) */
+
+    /* sub-branch — URMA call timing */
+    uint32_t sub_time_cnt;
+    umq_sub_time_t sub_time[UMQ_PERF_MAX_SUB_TIME_NUM];
+
+    /* type */
+    umq_trace_type_t type;                  /* POST / POLL / WAIT / REARM */
+} umq_data_record_t;
+
 typedef struct umq_perf_stats {
     struct {
         umq_perf_record_type_t type; // types of probe points supported by perf probe
@@ -242,6 +296,15 @@ typedef struct umq_perf_stats_cfg {
     uint64_t thresh_array[UMQ_PERF_QUANTILE_MAX_NUM]; // quantile values list
     uint32_t thresh_num; // number of valid quantiles
 } umq_perf_stats_cfg_t;
+
+#define UMQ_PERF_FLAG_RECORD_NUM              (1U)
+#define UMQ_PERF_FLAG_RECORD_LIMIT            (1U << 1)
+
+typedef struct umq_trace_cfg {
+    uint32_t flag;
+    uint32_t data_record_num; // total number of record array
+    uint32_t output_record_limit; // log limit of data record
+} umq_trace_cfg_t;
 
 typedef void (*umq_io_perf_callback_t)(umq_perf_record_type_t record_type, umq_buf_t *qbuf);
 
