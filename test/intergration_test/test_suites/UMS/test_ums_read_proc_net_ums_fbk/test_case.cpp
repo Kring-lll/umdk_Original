@@ -16,8 +16,20 @@ static int run_test(test_ums_ctx_t *ctx)
     char port_str[10]={0};
     int check_num_ums;
     int check_num_fallback;
+    char setup_env0[MAX_EXEC_CMD_RET_LEN];
+    char setup_env1[MAX_EXEC_CMD_RET_LEN];
     char close_qperf[MAX_EXEC_CMD_RET_LEN];
     
+    if (ctx->app_id == PROC_1) {
+        char buf0[MAX_EXEC_CMD_RET_LEN];
+        exec_cmd(setup_env0, MAX_EXEC_CMD_RET_LEN, "rmmod ums; modprobe ums; service ums_agent restart");
+    }
+    if (ctx->app_id == PROC_2) {
+        char buf0[MAX_EXEC_CMD_RET_LEN];
+        exec_cmd(setup_env1, MAX_EXEC_CMD_RET_LEN, "rmmod ums; modprobe ums; service ums_agent restart");
+    }
+    sync_time("----------------------------0");
+
     if (ctx->app_id == PROC_1) {
         char buf0[MAX_EXEC_CMD_RET_LEN];
         exec_cmd(buf0, MAX_EXEC_CMD_RET_LEN, "nohup ums_run qperf -lp %d &", ctx->test_port);
