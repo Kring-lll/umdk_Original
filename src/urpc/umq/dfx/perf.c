@@ -27,7 +27,7 @@
 #define UMQ_PERF_INTERRUPT_DIRECTION_RX_OFFSET      (1)
 
 static __thread uint32_t g_perf_record_index = -1;
-static __thread pthread_once_t g_dp_thread_run_once = PTHREAD_ONCE_INIT;
+static __thread pthread_once_t g_umq_ub_thread_run_once = PTHREAD_ONCE_INIT;
 static bool g_umq_perf_record_enable = false;
 
 typedef struct umq_perf_record {
@@ -140,7 +140,7 @@ void umq_perf_record_alloc(void)
     (void)pthread_spin_unlock(&g_umq_perf_record_lock);
 
     g_perf_record_index = idx;
-    g_umq_perf_record_ctx->dp_thread_run_once[idx] = &g_dp_thread_run_once;
+    g_umq_perf_record_ctx->dp_thread_run_once[idx] = &g_umq_ub_thread_run_once;
     urpc_thread_closure_register(THREAD_CLOSURE_UMQ_PERF, idx, umq_perf_record_closure);
 }
 
@@ -154,7 +154,7 @@ uint64_t umq_perf_get_start_timestamp(void)
     if (!g_umq_perf_record_enable) {
         return 0;
     }
-    pthread_once(&g_dp_thread_run_once, umq_dp_thread_run_once);
+    pthread_once(&g_umq_ub_thread_run_once, umq_dp_thread_run_once);
     return urpc_get_cpu_cycles();
 }
 
@@ -173,9 +173,8 @@ static inline uint32_t find_perf_record_bucket(uint64_t delta)
     return idx;
 }
 
-static inline void umq_perf_fill_perf_record(umq_perf_record_type_t type, uint64_t start)
+static inline void umq_perf_fill_perf_record_delta(umq_perf_record_type_t type, uint64_t delta)
 {
-    uint64_t delta = urpc_get_cpu_cycles() - start;
     umq_perf_record_t *cur_rec = &g_umq_perf_record_ctx->perf_record_table[g_perf_record_index];
     cur_rec->type_record[type].accumulation += delta;
     (delta < cur_rec->type_record[type].min) ? cur_rec->type_record[type].min = delta : 0;
@@ -187,12 +186,30 @@ static inline void umq_perf_fill_perf_record(umq_perf_record_type_t type, uint64
     ++cur_rec->type_record[type].cnt;
 }
 
+static inline void umq_perf_fill_perf_record(umq_perf_record_type_t type, uint64_t start)
+{
+    uint64_t delta = urpc_get_cpu_cycles() - start;
+    umq_perf_fill_perf_record_delta(type, delta);
+}
+
+static inline uint64_t cpu_cycles_to_ns(uint64_t cycles);
+
 void umq_perf_record_write(umq_perf_record_type_t type, uint64_t start)
 {
     if (!g_umq_perf_record_enable || start == 0 || g_perf_record_index >= UMQ_PERF_REC_MAX_NUM) {
         return;
     }
     umq_perf_fill_perf_record(type, start);
+}
+
+uint64_t umq_perf_record_write_delta(umq_perf_record_type_t type, uint64_t start)
+{
+    if (!g_umq_perf_record_enable || start == 0 || g_perf_record_index >= UMQ_PERF_REC_MAX_NUM) {
+        return 0;
+    }
+    uint64_t delta_cycles = urpc_get_cpu_cycles() - start;
+    umq_perf_fill_perf_record_delta(type, delta_cycles);
+    return cpu_cycles_to_ns(delta_cycles);
 }
 
 void umq_perf_record_write_with_direction(umq_perf_record_type_t type, uint64_t start, umq_io_direction_t direction)

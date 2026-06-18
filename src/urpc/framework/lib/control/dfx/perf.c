@@ -22,12 +22,12 @@
 
 static __thread uint32_t g_perf_record_index = -1;
 static urpc_perf_recorder_t g_urpc_perf_recorder = NULL;
-static __thread pthread_once_t g_dp_thread_run_once = PTHREAD_ONCE_INIT;
+static __thread pthread_once_t g_umq_ub_thread_run_once = PTHREAD_ONCE_INIT;
 
 // collect the functions run once per data plane thread
 void urpc_dp_thread_run_once(void)
 {
-    pthread_once(&g_dp_thread_run_once, urpc_perf_record_alloc);
+    pthread_once(&g_umq_ub_thread_run_once, urpc_perf_record_alloc);
 }
 
 struct urpc_perf_record_ctx {
