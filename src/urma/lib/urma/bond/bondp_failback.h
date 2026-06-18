@@ -92,11 +92,9 @@ typedef struct bondp_failback_task {
 #define BONDP_FAILBACK_PRIMARY_INVALID_ID              UINT32_MAX
 
 
-int bondp_failback_on_cqe(bondp_context_t *bdp_ctx,
-    struct bondp_comp *bondp_jetty,
-    int failed_local_idx);
+int bondp_failback_on_cqe(struct bondp_comp *bondp_jetty, int failed_local_idx);
 
-void bondp_failback_task_table_init(bondp_context_t *bdp_ctx);
+void bondp_failback_task_table_init(void);
 
 int bondp_handle_netlink_events(void);
 

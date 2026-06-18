@@ -88,8 +88,8 @@ int bondp_failback_send_req_to_node(bondp_failback_task_t *task, uint32_t node_i
     bondp_failback_msg_t req = {
         .in = {
             .vjetty_id = task->vjetty_id,
-            .pjetty_i_idx = task->pjetty_idx,
-            .pjetty_i_new_id = task->new_pjetty_id,
+            .pjetty_idx = task->pjetty_idx,
+            .pjetty_new_id = task->new_pjetty_id,
             .ctrl_type = BONDP_FAILBACK_CTRL_REQ,
             .req_seq = (uint8_t)task->req_seq,
             .reserved = 0,
@@ -110,8 +110,7 @@ int bondp_failback_send_req_to_node(bondp_failback_task_t *task, uint32_t node_i
 /*
  * 对单个 vtjetty 执行 reimport: unimport 旧 ptjetty + import 新 ptjetty
  */
-static int bondp_failback_reimport_single(bondp_context_t *bdp_ctx,
-    bondp_target_jetty_t *bdp_tjetty, const bondp_failback_msg_t *msg)
+static int bondp_failback_reimport_single(bondp_target_jetty_t *bdp_tjetty, const bondp_failback_msg_t *msg)
 {
     uint32_t pjetty_idx = msg->in.pjetty_idx;
     uint32_t pjetty_new_id = msg->in.pjetty_new_id;
@@ -140,7 +139,7 @@ static int bondp_failback_reimport_single(bondp_context_t *bdp_ctx,
         bdp_tjetty->p_tjetty[pjetty_idx][ptjetty_idx] = NULL;
 
         urma_token_t *import_token = bdp_tjetty->import_token_valid ? &bdp_tjetty->import_token_value : NULL;
-        urma_target_jetty_t *new_ptjetty = urma_import_jetty(bdp_tjetty->v_tjetty->urma_ctx, &rjetty, import_token);
+        urma_target_jetty_t *new_ptjetty = urma_import_jetty(bdp_tjetty->v_tjetty.urma_ctx, &rjetty, import_token);
         //这里用到了CTX 查询一个urma_import_jetty 的参数
         //bondp_target_jetty_t 找  urma_target_jetty_t 找 ctx;
 
@@ -161,9 +160,9 @@ static int bondp_failback_reimport_single(bondp_context_t *bdp_ctx,
  * 遍历 p_vjetty_id_table, 找到所有匹配远端 vjetty_id 的 comp,
  * 对每个 comp 执行 reimport, 最后发送一次 RESP
  */
-int bondp_failback_handle_req(bondp_context_t *bdp_ctx, const bondp_failback_msg_t *msg)
+int bondp_failback_handle_req(const bondp_failback_msg_t *msg)
 {
-    if (bdp_ctx == NULL || msg == NULL) {
+    if (msg == NULL) {
         return BONDP_FB_ERR;
     }
 
@@ -182,8 +181,6 @@ int bondp_failback_handle_req(bondp_context_t *bdp_ctx, const bondp_failback_msg
 
     pthread_rwlock_rdlock(&tbl->lock);
 
-    bondp_comp_t *seen_comps[URMA_UBAGG_DEV_MAX_NUM] = {NULL};
-    int seen_count = 0;
     int reimport_count = 0;
 
     bdp_p_vjetty_id_t *entry = NULL;
@@ -200,7 +197,7 @@ int bondp_failback_handle_req(bondp_context_t *bdp_ctx, const bondp_failback_msg
             continue;
         }
 
-        int ret = bondp_failback_reimport_single(bdp_ctx, bdp_tjetty, msg);
+        int ret = bondp_failback_reimport_single(bdp_tjetty, msg);
         //实际reimport
 
         if (ret == BONDP_FB_OK) {
