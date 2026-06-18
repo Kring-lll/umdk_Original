@@ -496,14 +496,14 @@ int umq_stats_perf_reset(umq_perf_stats_cfg_t *perf_stats_cfg)
     return umq_perf_reset(perf_stats_cfg);
 }
 
-int umq_stats_perf_data_start(umq_perf_data_cfg_t cfg)
+int umq_stats_trace_perf_start(umq_trace_perf_cfg_t *cfg)
 {
-    return umq_perf_data_start(cfg);
+    return umq_trace_perf_start(cfg);
 }
 
-int umq_stats_perf_data_stop(void)
+int umq_stats_trace_perf_stop(void)
 {
-    return umq_perf_data_stop();
+    return umq_trace_perf_stop();
 }
 
 int umq_stats_perf_start(void)

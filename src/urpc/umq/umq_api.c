@@ -491,9 +491,9 @@ void umq_uninit(void)
         return;
     }
 
-    umq_ub_remain_perf_data_print();
+    umq_ub_remain_trace_perf_print();
     umq_perf_uninit();
-    umq_perf_data_uninit();
+    umq_trace_perf_uninit();
     framework_uninit();
 
     if (g_umq_config != NULL) {
