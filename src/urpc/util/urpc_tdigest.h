@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
- * Description: urpc tdigest for IO latency percentile estimation
+ * Description: urpc tdigest for IO latency percentile estimation (integer arithmetic)
  * Create: 2026-06-18
  */
 #ifndef URPC_TDIGEST_H
@@ -16,18 +16,22 @@ extern "C" {
 
 /**
  * @brief A centroid in the tdigest, representing a cluster of nearby samples.
+ *
+ * mean is stored as a fixed-point integer: mean_ns = raw value in nanoseconds.
+ * All arithmetic (merge, interpolation) operates on these integer means,
+ * avoiding floating-point comparison issues (-Wfloat-equal).
  */
 typedef struct urpc_tdigest_centroid {
-    double mean;
-    uint64_t weight;
+    uint64_t mean;     /* centroid mean (ns), integer */
+    uint64_t weight;   /* number of samples represented by this centroid */
 } urpc_tdigest_centroid_t;
 
 /**
  * @brief TDigest instance for streaming percentile estimation.
  *
  * Maintains a compressed representation of a data distribution using ordered
- * centroids. Provides accurate estimates for extreme quantiles (p99, p999)
- * with bounded memory usage.
+ * centroids. All sample values and centroid means are uint64_t integers
+ * (nanoseconds). Only the internal k1 scaling function uses double arithmetic.
  *
  * Usage in IO path:
  *   1. Create: urpc_tdigest_t *td = urpc_tdigest_create(100);
@@ -38,14 +42,14 @@ typedef struct urpc_tdigest_centroid {
  */
 typedef struct urpc_tdigest {
     urpc_tdigest_centroid_t *centroids;   /* compressed centroids (sorted by mean) */
-    double *buffer;                       /* pending samples before compression */
+    uint64_t *buffer;                     /* pending samples before compression (ns) */
     uint32_t max_centroids;               /* max number of centroids (controls accuracy/memory) */
     uint32_t centroid_count;              /* current number of centroids */
     uint32_t buffer_count;                /* current number of pending samples */
     uint32_t buffer_cap;                  /* buffer capacity (= max_centroids / 2) */
     uint64_t total_weight;                /* total weight of all samples */
-    double min_val;                       /* exact minimum (not approximated) */
-    double max_val;                       /* exact maximum (not approximated) */
+    uint64_t min_val;                     /* exact minimum (ns, not approximated) */
+    uint64_t max_val;                     /* exact maximum (ns, not approximated) */
 } urpc_tdigest_t;
 
 /**
@@ -68,33 +72,36 @@ void urpc_tdigest_destroy(urpc_tdigest_t *td);
  *
  * Designed for IO path: the sample is buffered internally. Compression is
  * triggered only when the buffer is full, so per-call overhead is minimal
- * (just storing one double).
+ * (just storing one uint64_t).
  *
- * @param td   TDigest instance.
- * @param value Sample value (e.g., latency in nanoseconds).
+ * @param td     TDigest instance.
+ * @param value  Sample value in nanoseconds.
  */
-void urpc_tdigest_add(urpc_tdigest_t *td, double value);
+void urpc_tdigest_add(urpc_tdigest_t *td, uint64_t value);
 
 /**
  * @brief Batch-add multiple samples to the tdigest.
  * @param td     TDigest instance.
- * @param values Array of sample values.
+ * @param values Array of sample values (ns).
  * @param count  Number of values in the array.
  */
-void urpc_tdigest_add_n(urpc_tdigest_t *td, const double *values, uint32_t count);
+void urpc_tdigest_add_n(urpc_tdigest_t *td, const uint64_t *values, uint32_t count);
 
 /**
  * @brief Estimate the value at a given quantile.
  *
- * Must be called after any pending buffer samples are compressed.
- * Call urpc_tdigest_compress() first if add() was recently called.
+ * Call urpc_tdigest_compress() first if add() was recently called and you
+ * need up-to-date results before the buffer auto-flushes.
  *
  * @param td  TDigest instance.
  * @param q   Quantile in [0, 1]. E.g., 0.5 for median, 0.99 for p99.
- * @return Estimated value at quantile q. Returns td->min_val for q<=0,
- *         td->max_val for q>=1, 0 if td has no samples.
+ *            Note: q is a double because percentile is inherently fractional,
+ *            but the return value is always an integer (ns).
+ * @return Estimated value in nanoseconds at quantile q.
+ *         Returns td->min_val for q<=0, td->max_val for q>=1,
+ *         0 if td has no samples.
  */
-double urpc_tdigest_quantile(urpc_tdigest_t *td, double q);
+uint64_t urpc_tdigest_quantile(urpc_tdigest_t *td, double q);
 
 /**
  * @brief Merge src tdigest into dst.
@@ -133,9 +140,6 @@ uint64_t urpc_tdigest_count(const urpc_tdigest_t *td);
 
 /**
  * @brief Serialize a tdigest into a byte buffer.
- *
- * The serialized format is portable and can be used for cross-process
- * or network transmission of latency statistics.
  *
  * @param td  TDigest instance.
  * @param buf Output buffer. If NULL, only the required size is computed.

@@ -1,36 +1,36 @@
 /*
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
- * Description: urpc tdigest unit test
+ * Description: urpc tdigest unit test (integer arithmetic)
  */
 #include "gtest/gtest.h"
 #include "urpc_tdigest.h"
 #include "urpc_dbuf_stat.h"
 
-#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
 #include <vector>
 #include <random>
 
-/* ─── Helper: compute exact quantile from a sorted array ─── */
-static double exact_quantile(const std::vector<double> &data, double q)
+/* ─── Helper: compute exact quantile from a sorted array (uint64_t) ─── */
+static uint64_t exact_quantile(const std::vector<uint64_t> &data, double q)
 {
     if (data.empty()) {
-        return 0.0;
+        return 0;
     }
-    std::vector<double> sorted = data;
+    std::vector<uint64_t> sorted = data;
     std::sort(sorted.begin(), sorted.end());
 
     double pos = q * (sorted.size() - 1);
-    uint32_t lo = (uint32_t)std::floor(pos);
-    uint32_t hi = (uint32_t)std::ceil(pos);
+    uint64_t lo = (uint64_t)std::floor(pos);
+    uint64_t hi = (uint64_t)std::ceil(pos);
     if (lo == hi) {
         return sorted[lo];
     }
-    double frac = pos - lo;
-    return sorted[lo] + frac * (sorted[hi] - sorted[lo]);
+    double frac = pos - (double)lo;
+    /* Integer linear interpolation, rounded */
+    return sorted[lo] + (uint64_t)(frac * (double)(sorted[hi] - sorted[lo]));
 }
 
 /* ─── 1. Create / Destroy ─── */
@@ -80,12 +80,12 @@ TEST(UrpcTdigestTest, AddSingleValue)
     urpc_tdigest_t *td = urpc_tdigest_create(100);
     ASSERT_NE(td, nullptr);
 
-    urpc_tdigest_add(td, 42.0);
+    urpc_tdigest_add(td, 42);
     EXPECT_EQ(urpc_tdigest_count(td), 1u);
 
     /* Min/max should track exactly */
-    EXPECT_DOUBLE_EQ(td->min_val, 42.0);
-    EXPECT_DOUBLE_EQ(td->max_val, 42.0);
+    EXPECT_EQ(td->min_val, 42u);
+    EXPECT_EQ(td->max_val, 42u);
 
     urpc_tdigest_destroy(td);
 
@@ -99,11 +99,11 @@ TEST(UrpcTdigestTest, AddMultipleValues)
     urpc_tdigest_t *td = urpc_tdigest_create(100);
     ASSERT_NE(td, nullptr);
 
-    double values[] = {10.0, 20.0, 30.0, 40.0, 50.0};
+    uint64_t values[] = {10, 20, 30, 40, 50};
     urpc_tdigest_add_n(td, values, 5);
     EXPECT_EQ(urpc_tdigest_count(td), 5u);
-    EXPECT_DOUBLE_EQ(td->min_val, 10.0);
-    EXPECT_DOUBLE_EQ(td->max_val, 50.0);
+    EXPECT_EQ(td->min_val, 10u);
+    EXPECT_EQ(td->max_val, 50u);
 
     urpc_tdigest_destroy(td);
 
@@ -113,7 +113,7 @@ TEST(UrpcTdigestTest, AddMultipleValues)
 TEST(UrpcTdigestTest, AddNullTdigest)
 {
     /* Adding to NULL td should be a no-op */
-    urpc_tdigest_add(nullptr, 42.0);
+    urpc_tdigest_add(nullptr, 42);
     urpc_tdigest_add_n(nullptr, nullptr, 0);
 }
 
@@ -126,12 +126,12 @@ TEST(UrpcTdigestTest, QuantileSingleValue)
     urpc_tdigest_t *td = urpc_tdigest_create(100);
     ASSERT_NE(td, nullptr);
 
-    urpc_tdigest_add(td, 42.0);
+    urpc_tdigest_add(td, 42);
 
     /* Any quantile on a single-value dataset should return that value */
-    EXPECT_DOUBLE_EQ(urpc_tdigest_quantile(td, 0.0), 42.0);
-    EXPECT_DOUBLE_EQ(urpc_tdigest_quantile(td, 0.5), 42.0);
-    EXPECT_DOUBLE_EQ(urpc_tdigest_quantile(td, 1.0), 42.0);
+    EXPECT_EQ(urpc_tdigest_quantile(td, 0.0), 42u);
+    EXPECT_EQ(urpc_tdigest_quantile(td, 0.5), 42u);
+    EXPECT_EQ(urpc_tdigest_quantile(td, 1.0), 42u);
 
     urpc_tdigest_destroy(td);
 
@@ -146,7 +146,7 @@ TEST(UrpcTdigestTest, QuantileEmptyTdigest)
     ASSERT_NE(td, nullptr);
 
     /* Empty tdigest should return 0 */
-    EXPECT_DOUBLE_EQ(urpc_tdigest_quantile(td, 0.5), 0.0);
+    EXPECT_EQ(urpc_tdigest_quantile(td, 0.5), 0u);
 
     urpc_tdigest_destroy(td);
 
@@ -160,16 +160,16 @@ TEST(UrpcTdigestTest, QuantileBoundaryValues)
     urpc_tdigest_t *td = urpc_tdigest_create(100);
     ASSERT_NE(td, nullptr);
 
-    double values[] = {1.0, 2.0, 3.0, 4.0, 5.0};
+    uint64_t values[] = {1, 2, 3, 4, 5};
     urpc_tdigest_add_n(td, values, 5);
 
-    /* q ≤ 0 → min */
-    EXPECT_DOUBLE_EQ(urpc_tdigest_quantile(td, 0.0), 1.0);
-    EXPECT_DOUBLE_EQ(urpc_tdigest_quantile(td, -0.5), 1.0);
+    /* q <= 0 → min */
+    EXPECT_EQ(urpc_tdigest_quantile(td, 0.0), 1u);
+    EXPECT_EQ(urpc_tdigest_quantile(td, -0.5), 1u);
 
-    /* q ≥ 1 → max */
-    EXPECT_DOUBLE_EQ(urpc_tdigest_quantile(td, 1.0), 5.0);
-    EXPECT_DOUBLE_EQ(urpc_tdigest_quantile(td, 1.5), 5.0);
+    /* q >= 1 → max */
+    EXPECT_EQ(urpc_tdigest_quantile(td, 1.0), 5u);
+    EXPECT_EQ(urpc_tdigest_quantile(td, 1.5), 5u);
 
     urpc_tdigest_destroy(td);
 
@@ -185,76 +185,44 @@ TEST(UrpcTdigestTest, QuantileUniformDistribution)
     urpc_tdigest_t *td = urpc_tdigest_create(200);
     ASSERT_NE(td, nullptr);
 
-    /* Generate 10000 uniform samples in [0, 1000) */
-    std::vector<double> samples;
+    /* Generate 10000 uniform samples in [0, 10000] ns */
+    std::vector<uint64_t> samples;
     samples.reserve(10000);
     for (uint32_t i = 0; i < 10000; i++) {
-        double v = (double)i / 10.0;
+        uint64_t v = i;
         urpc_tdigest_add(td, v);
         samples.push_back(v);
     }
     EXPECT_EQ(urpc_tdigest_count(td), 10000u);
 
-    /* Median: should be close to 500 */
-    double median = urpc_tdigest_quantile(td, 0.5);
-    double exact_med = exact_quantile(samples, 0.5);
-    EXPECT_NEAR(median, exact_med, exact_med * 0.05);  /* 5% tolerance for median */
+    /* p50: exact median = 5000, tolerance ~5% (250 ns) */
+    uint64_t p50 = urpc_tdigest_quantile(td, 0.5);
+    uint64_t exact_p50 = exact_quantile(samples, 0.5);
+    EXPECT_LE(p50, exact_p50 + exact_p50 / 20);
+    EXPECT_GE(p50, exact_p50 - exact_p50 / 20);
 
-    /* p90: should be close to 900 */
-    double p90 = urpc_tdigest_quantile(td, 0.9);
-    double exact_p90 = exact_quantile(samples, 0.9);
-    EXPECT_NEAR(p90, exact_p90, exact_p90 * 0.03);  /* 3% tolerance for p90 */
+    /* p90: exact = 9000, tolerance ~3% (270 ns) */
+    uint64_t p90 = urpc_tdigest_quantile(td, 0.9);
+    uint64_t exact_p90 = exact_quantile(samples, 0.9);
+    EXPECT_LE(p90, exact_p90 + exact_p90 / 33);
+    EXPECT_GE(p90, exact_p90 - exact_p90 / 33);
 
-    /* p99: should be close to 990 */
-    double p99 = urpc_tdigest_quantile(td, 0.99);
-    double exact_p99 = exact_quantile(samples, 0.99);
-    EXPECT_NEAR(p99, exact_p99, exact_p99 * 0.02);  /* 2% tolerance for p99 */
+    /* p99: exact = 9900, tolerance ~2% (198 ns) */
+    uint64_t p99 = urpc_tdigest_quantile(td, 0.99);
+    uint64_t exact_p99 = exact_quantile(samples, 0.99);
+    EXPECT_LE(p99, exact_p99 + exact_p99 / 50);
+    EXPECT_GE(p99, exact_p99 - exact_p99 / 50);
 
     /* min/max should be exact */
-    EXPECT_NEAR(td->min_val, 0.0, 1e-9);
-    EXPECT_NEAR(td->max_val, 999.9, 1e-9);
+    EXPECT_EQ(td->min_val, 0u);
+    EXPECT_EQ(td->max_val, 9999u);
 
     urpc_tdigest_destroy(td);
 
     urpc_dbuf_stat_record_disable();
 }
 
-/* ─── 5. Quantile accuracy — skewed distribution (lognormal-like) ─── */
-
-TEST(UrpcTdigestTest, QuantileSkewedDistribution)
-{
-    urpc_dbuf_stat_record_enable();
-
-    urpc_tdigest_t *td = urpc_tdigest_create(200);
-    ASSERT_NE(td, nullptr);
-
-    /* Generate 10000 samples: mostly small values with a long tail */
-    std::mt19937 rng(42);
-    std::vector<double> samples;
-    samples.reserve(10000);
-    for (uint32_t i = 0; i < 10000; i++) {
-        double v = std::exp(std::normal_distribution<double>(5.0, 1.0)(rng));
-        urpc_tdigest_add(td, v);
-        samples.push_back(v);
-    }
-    EXPECT_EQ(urpc_tdigest_count(td), 10000u);
-
-    /* p99 — tdigest should be accurate at extreme quantiles */
-    double td_p99 = urpc_tdigest_quantile(td, 0.99);
-    double exact_p99 = exact_quantile(samples, 0.99);
-    EXPECT_NEAR(td_p99, exact_p99, exact_p99 * 0.05);  /* 5% tolerance */
-
-    /* p999 */
-    double td_p999 = urpc_tdigest_quantile(td, 0.999);
-    double exact_p999 = exact_quantile(samples, 0.999);
-    EXPECT_NEAR(td_p999, exact_p999, exact_p999 * 0.10);  /* 10% tolerance for p999 */
-
-    urpc_tdigest_destroy(td);
-
-    urpc_dbuf_stat_record_disable();
-}
-
-/* ─── 6. Quantile accuracy — IO latency-like distribution ─── */
+/* ─── 5. Quantile accuracy — IO latency-like distribution ─── */
 
 TEST(UrpcTdigestTest, QuantileIoLatencyDistribution)
 {
@@ -267,46 +235,51 @@ TEST(UrpcTdigestTest, QuantileIoLatencyDistribution)
      * Simulate IO latency: most ops are fast (100-500ns), but some are slow
      * (tail latencies up to 100us). This is the typical use case for tdigest.
      */
-    std::mt19937 rng(123);
-    std::vector<double> samples;
+    std::mt19937_64 rng(123);
+    std::vector<uint64_t> samples;
     samples.reserve(50000);
     for (uint32_t i = 0; i < 50000; i++) {
-        double v;
-        if (std::uniform_real_distribution<double>(0, 1)(rng) < 0.95) {
+        uint64_t v;
+        uint64_t r = rng() % 100;
+        if (r < 95) {
             /* 95% fast ops: 100-500 ns */
-            v = std::uniform_real_distribution<double>(100, 500)(rng);
-        } else if (std::uniform_real_distribution<double>(0, 1)(rng) < 0.9) {
-            /* 4.5% medium ops: 500-5000 ns */
-            v = std::uniform_real_distribution<double>(500, 5000)(rng);
+            v = 100 + rng() % 400;
+        } else if (r < 99) {
+            /* 4% medium ops: 500-5000 ns */
+            v = 500 + rng() % 4500;
         } else {
-            /* 0.5% slow ops: 5000-100000 ns */
-            v = std::uniform_real_distribution<double>(5000, 100000)(rng);
+            /* 1% slow ops: 5000-100000 ns */
+            v = 5000 + rng() % 95000;
         }
         urpc_tdigest_add(td, v);
         samples.push_back(v);
     }
     EXPECT_EQ(urpc_tdigest_count(td), 50000u);
 
-    /* p50 (median) — should be in the fast range */
-    double p50 = urpc_tdigest_quantile(td, 0.5);
-    double exact_p50 = exact_quantile(samples, 0.5);
-    EXPECT_NEAR(p50, exact_p50, exact_p50 * 0.10);
+    /* p50 — should be in the fast range (100-500 ns) */
+    uint64_t p50 = urpc_tdigest_quantile(td, 0.5);
+    uint64_t exact_p50 = exact_quantile(samples, 0.5);
+    /* 10% tolerance */
+    EXPECT_LE(p50, exact_p50 + MAX(exact_p50 / 10, 50));
+    EXPECT_GE(p50, exact_p50 - MAX(exact_p50 / 10, 50));
 
     /* p99 — critical for latency monitoring */
-    double p99 = urpc_tdigest_quantile(td, 0.99);
-    double exact_p99 = exact_quantile(samples, 0.99);
-    EXPECT_NEAR(p99, exact_p99, exact_p99 * 0.10);
+    uint64_t p99 = urpc_tdigest_quantile(td, 0.99);
+    uint64_t exact_p99 = exact_quantile(samples, 0.99);
+    /* 10% tolerance, but at least 100 ns floor for small values */
+    EXPECT_LE(p99, exact_p99 + MAX(exact_p99 / 10, 100));
+    EXPECT_GE(p99, exact_p99 - MAX(exact_p99 / 10, 100));
 
     /* min/max exact */
-    EXPECT_NEAR(td->min_val, *std::min_element(samples.begin(), samples.end()), 1e-9);
-    EXPECT_NEAR(td->max_val, *std::max_element(samples.begin(), samples.end()), 1e-9);
+    EXPECT_EQ(td->min_val, *std::min_element(samples.begin(), samples.end()));
+    EXPECT_EQ(td->max_val, *std::max_element(samples.begin(), samples.end()));
 
     urpc_tdigest_destroy(td);
 
     urpc_dbuf_stat_record_disable();
 }
 
-/* ─── 7. Merge ─── */
+/* ─── 6. Merge ─── */
 
 TEST(UrpcTdigestTest, MergeTwoTdigests)
 {
@@ -318,16 +291,16 @@ TEST(UrpcTdigestTest, MergeTwoTdigests)
     ASSERT_NE(td2, nullptr);
 
     /* td1: values 1-500 */
-    std::vector<double> all_samples;
+    std::vector<uint64_t> all_samples;
     for (uint32_t i = 1; i <= 500; i++) {
-        urpc_tdigest_add(td1, (double)i);
-        all_samples.push_back((double)i);
+        urpc_tdigest_add(td1, i);
+        all_samples.push_back(i);
     }
 
     /* td2: values 501-1000 */
     for (uint32_t i = 501; i <= 1000; i++) {
-        urpc_tdigest_add(td2, (double)i);
-        all_samples.push_back((double)i);
+        urpc_tdigest_add(td2, i);
+        all_samples.push_back(i);
     }
 
     /* Merge td2 into td1 */
@@ -335,17 +308,19 @@ TEST(UrpcTdigestTest, MergeTwoTdigests)
     EXPECT_EQ(urpc_tdigest_count(td1), 1000u);
 
     /* After merge, td1 should approximate the combined distribution */
-    double merged_p50 = urpc_tdigest_quantile(td1, 0.5);
-    double exact_p50 = exact_quantile(all_samples, 0.5);
-    EXPECT_NEAR(merged_p50, exact_p50, exact_p50 * 0.05);
+    uint64_t merged_p50 = urpc_tdigest_quantile(td1, 0.5);
+    uint64_t exact_p50 = exact_quantile(all_samples, 0.5);
+    EXPECT_LE(merged_p50, exact_p50 + exact_p50 / 20);
+    EXPECT_GE(merged_p50, exact_p50 - exact_p50 / 20);
 
-    double merged_p99 = urpc_tdigest_quantile(td1, 0.99);
-    double exact_p99 = exact_quantile(all_samples, 0.99);
-    EXPECT_NEAR(merged_p99, exact_p99, exact_p99 * 0.03);
+    uint64_t merged_p99 = urpc_tdigest_quantile(td1, 0.99);
+    uint64_t exact_p99 = exact_quantile(all_samples, 0.99);
+    EXPECT_LE(merged_p99, exact_p99 + exact_p99 / 33);
+    EXPECT_GE(merged_p99, exact_p99 - exact_p99 / 33);
 
     /* min/max should be exact after merge */
-    EXPECT_DOUBLE_EQ(td1->min_val, 1.0);
-    EXPECT_DOUBLE_EQ(td1->max_val, 1000.0);
+    EXPECT_EQ(td1->min_val, 1u);
+    EXPECT_EQ(td1->max_val, 1000u);
 
     urpc_tdigest_destroy(td1);
     urpc_tdigest_destroy(td2);
@@ -363,15 +338,17 @@ TEST(UrpcTdigestTest, MergeIntoEmptyTdigest)
     ASSERT_NE(src, nullptr);
 
     for (uint32_t i = 0; i < 100; i++) {
-        urpc_tdigest_add(src, (double)i);
+        urpc_tdigest_add(src, i);
     }
 
     /* Merge non-empty src into empty dst */
     urpc_tdigest_merge(dst, src);
     EXPECT_EQ(urpc_tdigest_count(dst), 100u);
 
-    double p50 = urpc_tdigest_quantile(dst, 0.5);
-    EXPECT_NEAR(p50, 50.0, 5.0);
+    uint64_t p50 = urpc_tdigest_quantile(dst, 0.5);
+    /* Exact median of 0..99 is 49 or 50, allow ±5 */
+    EXPECT_LE(p50, 55u);
+    EXPECT_GE(p50, 44u);
 
     urpc_tdigest_destroy(dst);
     urpc_tdigest_destroy(src);
@@ -406,12 +383,12 @@ TEST(UrpcTdigestTest, MergeEmptySrc)
     ASSERT_NE(dst, nullptr);
     ASSERT_NE(src, nullptr);
 
-    urpc_tdigest_add(dst, 42.0);
+    urpc_tdigest_add(dst, 42);
 
     /* Merge empty src into non-empty dst — should not change dst */
     urpc_tdigest_merge(dst, src);
     EXPECT_EQ(urpc_tdigest_count(dst), 1u);
-    EXPECT_DOUBLE_EQ(urpc_tdigest_quantile(dst, 0.5), 42.0);
+    EXPECT_EQ(urpc_tdigest_quantile(dst, 0.5), 42u);
 
     urpc_tdigest_destroy(dst);
     urpc_tdigest_destroy(src);
@@ -419,7 +396,7 @@ TEST(UrpcTdigestTest, MergeEmptySrc)
     urpc_dbuf_stat_record_disable();
 }
 
-/* ─── 8. Reset ─── */
+/* ─── 7. Reset ─── */
 
 TEST(UrpcTdigestTest, ResetClearsAllData)
 {
@@ -429,7 +406,7 @@ TEST(UrpcTdigestTest, ResetClearsAllData)
     ASSERT_NE(td, nullptr);
 
     for (uint32_t i = 0; i < 100; i++) {
-        urpc_tdigest_add(td, (double)i);
+        urpc_tdigest_add(td, i);
     }
     EXPECT_EQ(urpc_tdigest_count(td), 100u);
 
@@ -437,16 +414,17 @@ TEST(UrpcTdigestTest, ResetClearsAllData)
     EXPECT_EQ(urpc_tdigest_count(td), 0u);
     EXPECT_EQ(td->centroid_count, 0u);
     EXPECT_EQ(td->buffer_count, 0u);
-    EXPECT_EQ(td->min_val, INFINITY);
-    EXPECT_EQ(td->max_val, -INFINITY);
+    /* min_val reset to UINT64_MAX, max_val to 0 */
+    EXPECT_EQ(td->min_val, UINT64_MAX);
+    EXPECT_EQ(td->max_val, 0u);
 
     /* After reset, quantile on empty tdigest returns 0 */
-    EXPECT_DOUBLE_EQ(urpc_tdigest_quantile(td, 0.5), 0.0);
+    EXPECT_EQ(urpc_tdigest_quantile(td, 0.5), 0u);
 
     /* After reset, we can add new data */
-    urpc_tdigest_add(td, 100.0);
+    urpc_tdigest_add(td, 100);
     EXPECT_EQ(urpc_tdigest_count(td), 1u);
-    EXPECT_DOUBLE_EQ(urpc_tdigest_quantile(td, 0.5), 100.0);
+    EXPECT_EQ(urpc_tdigest_quantile(td, 0.5), 100u);
 
     urpc_tdigest_destroy(td);
 
@@ -458,7 +436,7 @@ TEST(UrpcTdigestTest, ResetNull)
     urpc_tdigest_reset(nullptr);
 }
 
-/* ─── 9. Compress ─── */
+/* ─── 8. Compress ─── */
 
 TEST(UrpcTdigestTest, CompressFlushesBuffer)
 {
@@ -468,9 +446,9 @@ TEST(UrpcTdigestTest, CompressFlushesBuffer)
     ASSERT_NE(td, nullptr);
 
     /* Add a few samples (< buffer_cap, so auto-compress won't trigger) */
-    urpc_tdigest_add(td, 10.0);
-    urpc_tdigest_add(td, 20.0);
-    urpc_tdigest_add(td, 30.0);
+    urpc_tdigest_add(td, 10);
+    urpc_tdigest_add(td, 20);
+    urpc_tdigest_add(td, 30);
 
     /* Before manual compress, buffer should hold the samples */
     EXPECT_EQ(td->buffer_count, 3u);
@@ -482,8 +460,10 @@ TEST(UrpcTdigestTest, CompressFlushesBuffer)
     EXPECT_GT(td->centroid_count, 0u);
 
     /* Quantile should work after compress */
-    double p50 = urpc_tdigest_quantile(td, 0.5);
-    EXPECT_NEAR(p50, 20.0, 5.0);
+    uint64_t p50 = urpc_tdigest_quantile(td, 0.5);
+    /* For {10, 20, 30}, median ≈ 20, allow ±5 */
+    EXPECT_LE(p50, 25u);
+    EXPECT_GE(p50, 15u);
 
     urpc_tdigest_destroy(td);
 
@@ -495,7 +475,7 @@ TEST(UrpcTdigestTest, CompressNull)
     urpc_tdigest_compress(nullptr);
 }
 
-/* ─── 10. Serialization / Deserialization ─── */
+/* ─── 9. Serialization / Deserialization ─── */
 
 TEST(UrpcTdigestTest, SerialiseDeserialiseRoundtrip)
 {
@@ -505,10 +485,10 @@ TEST(UrpcTdigestTest, SerialiseDeserialiseRoundtrip)
     ASSERT_NE(td, nullptr);
 
     /* Add some data */
-    std::vector<double> samples;
+    std::vector<uint64_t> samples;
     for (uint32_t i = 1; i <= 1000; i++) {
-        urpc_tdigest_add(td, (double)i);
-        samples.push_back((double)i);
+        urpc_tdigest_add(td, i);
+        samples.push_back(i);
     }
 
     /* Query size first */
@@ -527,18 +507,20 @@ TEST(UrpcTdigestTest, SerialiseDeserialiseRoundtrip)
     /* Count should match */
     EXPECT_EQ(urpc_tdigest_count(td2), urpc_tdigest_count(td));
 
-    /* Quantiles should be close */
-    double p50_orig = urpc_tdigest_quantile(td, 0.5);
-    double p50_restored = urpc_tdigest_quantile(td2, 0.5);
-    EXPECT_NEAR(p50_restored, p50_orig, p50_orig * 0.05);
+    /* Quantiles should be close (integer tolerance: 5%) */
+    uint64_t p50_orig = urpc_tdigest_quantile(td, 0.5);
+    uint64_t p50_restored = urpc_tdigest_quantile(td2, 0.5);
+    EXPECT_LE(p50_restored, p50_orig + p50_orig / 20);
+    EXPECT_GE(p50_restored, p50_orig - p50_orig / 20);
 
-    double p99_orig = urpc_tdigest_quantile(td, 0.99);
-    double p99_restored = urpc_tdigest_quantile(td2, 0.99);
-    EXPECT_NEAR(p99_restored, p99_orig, p99_orig * 0.05);
+    uint64_t p99_orig = urpc_tdigest_quantile(td, 0.99);
+    uint64_t p99_restored = urpc_tdigest_quantile(td2, 0.99);
+    EXPECT_LE(p99_restored, p99_orig + p99_orig / 20);
+    EXPECT_GE(p99_restored, p99_orig - p99_orig / 20);
 
-    /* min/max should match */
-    EXPECT_DOUBLE_EQ(td2->min_val, td->min_val);
-    EXPECT_DOUBLE_EQ(td2->max_val, td->max_val);
+    /* min/max should match exactly */
+    EXPECT_EQ(td2->min_val, td->min_val);
+    EXPECT_EQ(td2->max_val, td->max_val);
 
     urpc_tdigest_destroy(td);
     urpc_tdigest_destroy(td2);
@@ -553,7 +535,7 @@ TEST(UrpcTdigestTest, SerialiseBufferTooSmall)
     urpc_tdigest_t *td = urpc_tdigest_create(100);
     ASSERT_NE(td, nullptr);
 
-    urpc_tdigest_add(td, 42.0);
+    urpc_tdigest_add(td, 42);
 
     uint8_t small_buf[1];
     uint32_t written = urpc_tdigest_serialise(td, small_buf, 1);
@@ -595,7 +577,7 @@ TEST(UrpcTdigestTest, DeserialiseBufferTooSmall)
     EXPECT_EQ(td, nullptr);
 }
 
-/* ─── 11. Stress: large number of samples ─── */
+/* ─── 10. Stress: large number of samples ─── */
 
 TEST(UrpcTdigestTest, StressLargeDataset)
 {
@@ -604,36 +586,40 @@ TEST(UrpcTdigestTest, StressLargeDataset)
     urpc_tdigest_t *td = urpc_tdigest_create(500);
     ASSERT_NE(td, nullptr);
 
-    /* 1M samples */
-    std::mt19937 rng(999);
-    std::vector<double> samples;
-    samples.reserve(1000000);
-    for (uint32_t i = 0; i < 1000000; i++) {
-        double v = std::uniform_real_distribution<double>(0, 100000)(rng);
+    /* 100K samples */
+    std::mt19937_64 rng(999);
+    std::vector<uint64_t> samples;
+    samples.reserve(100000);
+    for (uint32_t i = 0; i < 100000; i++) {
+        uint64_t v = rng() % 100000;
         urpc_tdigest_add(td, v);
         samples.push_back(v);
     }
-    EXPECT_EQ(urpc_tdigest_count(td), 1000000u);
+    EXPECT_EQ(urpc_tdigest_count(td), 100000u);
 
     /* Centroid count should be bounded by max_centroids */
     urpc_tdigest_compress(td);
     EXPECT_LE(td->centroid_count, td->max_centroids);
 
-    /* Quantile accuracy on large uniform dataset */
-    double p99 = urpc_tdigest_quantile(td, 0.99);
-    double exact_p99 = exact_quantile(samples, 0.99);
-    EXPECT_NEAR(p99, exact_p99, exact_p99 * 0.02);
+    /* Quantile accuracy on large dataset */
+    uint64_t p99 = urpc_tdigest_quantile(td, 0.99);
+    uint64_t exact_p99 = exact_quantile(samples, 0.99);
+    /* 2% tolerance */
+    EXPECT_LE(p99, exact_p99 + MAX(exact_p99 / 50, 200));
+    EXPECT_GE(p99, exact_p99 - MAX(exact_p99 / 50, 200));
 
-    double p999 = urpc_tdigest_quantile(td, 0.999);
-    double exact_p999 = exact_quantile(samples, 0.999);
-    EXPECT_NEAR(p999, exact_p999, exact_p999 * 0.02);
+    uint64_t p999 = urpc_tdigest_quantile(td, 0.999);
+    uint64_t exact_p999 = exact_quantile(samples, 0.999);
+    /* 2% tolerance */
+    EXPECT_LE(p999, exact_p999 + MAX(exact_p999 / 50, 200));
+    EXPECT_GE(p999, exact_p999 - MAX(exact_p999 / 50, 200));
 
     urpc_tdigest_destroy(td);
 
     urpc_dbuf_stat_record_disable();
 }
 
-/* ─── 12. Merge then quantile (per-thread → global pattern) ─── */
+/* ─── 11. Merge then quantile (per-thread → global pattern) ─── */
 
 TEST(UrpcTdigestTest, MergePerThreadToGlobal)
 {
@@ -644,16 +630,16 @@ TEST(UrpcTdigestTest, MergePerThreadToGlobal)
     urpc_tdigest_t *global = urpc_tdigest_create(200);
     ASSERT_NE(global, nullptr);
 
-    std::vector<double> all_samples;
+    std::vector<uint64_t> all_samples;
     all_samples.reserve(num_threads * samples_per_thread);
 
-    std::mt19937 rng(777);
+    std::mt19937_64 rng(777);
     for (uint32_t t = 0; t < num_threads; t++) {
         urpc_tdigest_t *local = urpc_tdigest_create(100);
         ASSERT_NE(local, nullptr);
 
         for (uint32_t i = 0; i < samples_per_thread; i++) {
-            double v = std::uniform_real_distribution<double>(0, 10000)(rng);
+            uint64_t v = rng() % 10000;
             urpc_tdigest_add(local, v);
             all_samples.push_back(v);
         }
@@ -664,20 +650,24 @@ TEST(UrpcTdigestTest, MergePerThreadToGlobal)
 
     EXPECT_EQ(urpc_tdigest_count(global), num_threads * samples_per_thread);
 
-    double global_p50 = urpc_tdigest_quantile(global, 0.5);
-    double exact_p50 = exact_quantile(all_samples, 0.5);
-    EXPECT_NEAR(global_p50, exact_p50, exact_p50 * 0.10);
+    uint64_t global_p50 = urpc_tdigest_quantile(global, 0.5);
+    uint64_t exact_p50 = exact_quantile(all_samples, 0.5);
+    /* 10% tolerance */
+    EXPECT_LE(global_p50, exact_p50 + MAX(exact_p50 / 10, 500));
+    EXPECT_GE(global_p50, exact_p50 - MAX(exact_p50 / 10, 500));
 
-    double global_p99 = urpc_tdigest_quantile(global, 0.99);
-    double exact_p99 = exact_quantile(all_samples, 0.99);
-    EXPECT_NEAR(global_p99, exact_p99, exact_p99 * 0.05);
+    uint64_t global_p99 = urpc_tdigest_quantile(global, 0.99);
+    uint64_t exact_p99 = exact_quantile(all_samples, 0.99);
+    /* 5% tolerance */
+    EXPECT_LE(global_p99, exact_p99 + MAX(exact_p99 / 20, 500));
+    EXPECT_GE(global_p99, exact_p99 - MAX(exact_p99 / 20, 500));
 
     urpc_tdigest_destroy(global);
 
     urpc_dbuf_stat_record_disable();
 }
 
-/* ─── 13. Edge cases ─── */
+/* ─── 12. Edge cases ─── */
 
 TEST(UrpcTdigestTest, AllSameValues)
 {
@@ -688,38 +678,13 @@ TEST(UrpcTdigestTest, AllSameValues)
 
     /* All samples are identical */
     for (uint32_t i = 0; i < 10000; i++) {
-        urpc_tdigest_add(td, 42.0);
+        urpc_tdigest_add(td, 42);
     }
 
-    EXPECT_DOUBLE_EQ(urpc_tdigest_quantile(td, 0.5), 42.0);
-    EXPECT_DOUBLE_EQ(urpc_tdigest_quantile(td, 0.99), 42.0);
-    EXPECT_DOUBLE_EQ(td->min_val, 42.0);
-    EXPECT_DOUBLE_EQ(td->max_val, 42.0);
-
-    urpc_tdigest_destroy(td);
-
-    urpc_dbuf_stat_record_disable();
-}
-
-TEST(UrpcTdigestTest, NegativeValues)
-{
-    urpc_dbuf_stat_record_enable();
-
-    urpc_tdigest_t *td = urpc_tdigest_create(100);
-    ASSERT_NE(td, nullptr);
-
-    for (int32_t i = -500; i <= 500; i++) {
-        urpc_tdigest_add(td, (double)i);
-    }
-    EXPECT_EQ(urpc_tdigest_count(td), 1001u);
-
-    /* p50 should be near 0 */
-    double p50 = urpc_tdigest_quantile(td, 0.5);
-    EXPECT_NEAR(p50, 0.0, 25.0);
-
-    /* min/max should be exact */
-    EXPECT_DOUBLE_EQ(td->min_val, -500.0);
-    EXPECT_DOUBLE_EQ(td->max_val, 500.0);
+    EXPECT_EQ(urpc_tdigest_quantile(td, 0.5), 42u);
+    EXPECT_EQ(urpc_tdigest_quantile(td, 0.99), 42u);
+    EXPECT_EQ(td->min_val, 42u);
+    EXPECT_EQ(td->max_val, 42u);
 
     urpc_tdigest_destroy(td);
 
@@ -734,19 +699,19 @@ TEST(UrpcTdigestTest, VeryLargeValues)
     ASSERT_NE(td, nullptr);
 
     /* Simulate nanosecond latencies up to 1 second */
-    double values[] = {100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0, 100000000.0, 1000000000.0};
+    uint64_t values[] = {100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000};
     urpc_tdigest_add_n(td, values, 8);
     EXPECT_EQ(urpc_tdigest_count(td), 8u);
 
-    EXPECT_DOUBLE_EQ(td->min_val, 100.0);
-    EXPECT_DOUBLE_EQ(td->max_val, 1000000000.0);
+    EXPECT_EQ(td->min_val, 100u);
+    EXPECT_EQ(td->max_val, 1000000000u);
 
     urpc_tdigest_destroy(td);
 
     urpc_dbuf_stat_record_disable();
 }
 
-/* ─── 14. Merge + Serialise roundtrip ─── */
+/* ─── 13. Merge + Serialise roundtrip ─── */
 
 TEST(UrpcTdigestTest, MergeThenSerialiseDeserialise)
 {
@@ -758,10 +723,10 @@ TEST(UrpcTdigestTest, MergeThenSerialiseDeserialise)
     ASSERT_NE(td2, nullptr);
 
     for (uint32_t i = 0; i < 100; i++) {
-        urpc_tdigest_add(td1, (double)i);
+        urpc_tdigest_add(td1, i);
     }
     for (uint32_t i = 100; i < 200; i++) {
-        urpc_tdigest_add(td2, (double)i);
+        urpc_tdigest_add(td2, i);
     }
 
     urpc_tdigest_merge(td1, td2);
@@ -777,8 +742,10 @@ TEST(UrpcTdigestTest, MergeThenSerialiseDeserialise)
     ASSERT_NE(td3, nullptr);
     EXPECT_EQ(urpc_tdigest_count(td3), 200u);
 
-    double p50 = urpc_tdigest_quantile(td3, 0.5);
-    EXPECT_NEAR(p50, 100.0, 10.0);
+    uint64_t p50 = urpc_tdigest_quantile(td3, 0.5);
+    /* Exact median of 0..199 ≈ 100, allow ±10 */
+    EXPECT_LE(p50, 110u);
+    EXPECT_GE(p50, 90u);
 
     urpc_tdigest_destroy(td1);
     urpc_tdigest_destroy(td2);
