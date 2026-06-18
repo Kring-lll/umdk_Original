@@ -228,7 +228,7 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
 {
     tpipe_ = pipe;
     aivId_ = GetBlockIdx();
-    epRankId_ = tilingData->fusedDeepMoeInfo.epRankId;
+    epRankId_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
     GlobalTensor<int32_t> selfDataStatusTensor;
     GM_ADDR statusDataSpaceGm;
 
@@ -249,13 +249,13 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
         selfDataStatusTensor[aivId_ * UB_ALIGN]);
     __asm__ __volatile__("");
     pipe_barrier(PIPE_ALL);
-    axisBS_ = tilingData->fusedDeepMoeInfo.bs;
-    axisH_ = tilingData->fusedDeepMoeInfo.h;
-    epWorldSize_ = tilingData->fusedDeepMoeInfo.epRankSize;
-    axisMaxBS_ = tilingData->fusedDeepMoeInfo.globalBs / epWorldSize_;
-    moeExpertNum_ = tilingData->fusedDeepMoeInfo.moeExpertNum;
+    axisBS_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.bs;
+    axisH_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.h;
+    epWorldSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize;
+    axisMaxBS_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.globalBs / epWorldSize_;
+    moeExpertNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum;
     expertTokenNumsType_ = 0;
-    totalWinSize_ = tilingData->fusedDeepMoeInfo.totalWinSize;
+    totalWinSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.totalWinSize;
     moeExpertRankNum_ = epWorldSize_;
     moeExpertNumPerRank_ = moeExpertNum_ / moeExpertRankNum_;
     expertPerSizeOnWin_ = axisMaxBS_ * axisH_ * sizeof(XType);
@@ -264,8 +264,8 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
     windowGM_ = GetWindAddrByRankId(COMM_EP_IDX, epRankId_);
     statusSpaceGm_ = GetWindStateAddrByRankId(COMM_EP_IDX, epRankId_);
     tpGatherRankId_ = tpRankId_ == 0 ? 1 : 0;
-    axisK_ = tilingData->fusedDeepMoeInfo.k;
-    aivNum_ = tilingData->fusedDeepMoeInfo.aivNum;
+    axisK_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.k;
+    aivNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.aivNum;
     tpWorldSize_ = 1;
     if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
         shareX1TokenGMTensor_.SetGlobalBuffer((__gm__ ExpandXOutType *)shareX1Token);

@@ -129,7 +129,6 @@ build_ascend_proj() {
     # 如果不需要编译shmem/fused_deep_moe/zero_buffer算子，移除相关的pregen文件
     if [ -z "${SHMEM_HOME_PATH}" ]; then
         rm -f ${MODULE_BUILD_PATH}/${proj_name}/pregen/build_out/autogen/*shmem*
-        rm -f ${MODULE_BUILD_PATH}/${proj_name}/pregen/build_out/autogen/*fused_deep_moe*
         rm -f ${MODULE_BUILD_PATH}/${proj_name}/pregen/build_out/autogen/*zero_buffer*
     fi
 

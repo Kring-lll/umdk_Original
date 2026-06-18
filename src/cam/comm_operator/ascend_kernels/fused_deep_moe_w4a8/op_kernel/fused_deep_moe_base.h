@@ -1,10 +1,10 @@
 /*
  * SPDX-License-Identifier: MIT
- * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: Definition of communication group related structures
- * Create: 2026-06-09
+ * Create: 2025-07-19
  * Note:
- * History: 2026-06-09 Create a definition file for a distribution group related structure
+ * History: 2025-07-19 Create a definition file for a distribution group related structure
  */
 #ifndef FUSED_DEEP_MOE_BASE_H
 #define FUSED_DEEP_MOE_BASE_H
