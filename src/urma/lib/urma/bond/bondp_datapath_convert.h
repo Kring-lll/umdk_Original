@@ -15,6 +15,10 @@
 
 #include "bondp_connection.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 static inline bool is_rw_wr(const urma_jfs_wr_t *wr)
 {
     return wr->opcode == URMA_OPC_WRITE || wr->opcode == URMA_OPC_WRITE_IMM ||
@@ -24,6 +28,10 @@ static inline bool is_send_wr(const urma_jfs_wr_t *wr)
 {
     return wr->opcode == URMA_OPC_SEND || wr->opcode == URMA_OPC_SEND_IMM ||
            wr->opcode == URMA_OPC_SEND_INVALIDATE;
+}
+static inline bool is_atomic_wr(const urma_jfs_wr_t *wr)
+{
+    return wr->opcode == URMA_OPC_CAS || wr->opcode == URMA_OPC_FADD;
 }
 
 urma_status_t copy_jfs_wr(const urma_jfs_wr_t *src, urma_jfs_wr_t *dst,
@@ -35,7 +43,17 @@ void free_jfr_wr(urma_jfr_wr_t *wr);
 void free_jfs_wr(urma_jfs_wr_t *wr);
 
 urma_status_t convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target_idx,
-                                     bondp_comp_t *bdp_comp);
+                                     bondp_comp_t *bdp_comp, bool msn_enable);
+
+/**
+ * Encode MSN into WR's imm_data and change opcode if needed.
+ */
+urma_status_t encode_jfs_wr_msn(urma_jfs_wr_t *wr, bondp_comp_t *bdp_comp, uint32_t msn, bool enable_msn);
+
+/**
+ * Map virtual tseg/tjetty pointers to physical ones based on send_idx/target_idx.
+ */
+void map_jfs_vwr_to_path(urma_jfs_wr_t *wr, int send_idx, int target_idx);
 
 void convert_jfs_pwr_to_vwr_resend(urma_jfs_wr_t *wr, urma_target_jetty_t *vtjetty);
 
@@ -100,5 +118,9 @@ static inline bool is_ctrl_cr(const urma_cr_t *cr)
         return (cr->user_ctx & BONDP_CTRL_USER_CTX_MASK) != 0;
     }
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // BONDP_DATAPATH_CONVERT_H

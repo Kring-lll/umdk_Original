@@ -28,7 +28,6 @@
 #define BONDP_MAX_NUM_JETTYS          (10240)
 #define BONDP_MAX_NUM_RSEGS           (10240)
 #define BONDP_MAX_WR_LIST_NUM         (300)
-#define BONDP_MAX_SGE_NUM             (32)
 #define PRIMARY_EID_NUM               (2)
 #define PORT_EID_MAX_NUM_PER_DEV      (9)
 #define PORT_EID_MAX_NUM              (PORT_EID_MAX_NUM_PER_DEV * PRIMARY_EID_NUM)
@@ -162,6 +161,8 @@ typedef struct bondp_context {
     bondp_hash_table_t remote_v2p_token_id_table;
     bool msn_enable;
     bool seg_cache_enable;
+    uint32_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t enabled_count;
 #ifndef __cplusplus
     atomic_ulong token_id_cnt;
 #else
@@ -241,19 +242,23 @@ typedef struct bondp_comp {
     bool modify_to_error;
     pthread_spinlock_t send_lock;
     wr_buf_t send_wr_buf;
-    pthread_spinlock_t send_wr_lock;
-    bool valid[URMA_UBAGG_DEV_MAX_NUM];
+#ifndef __cplusplus
+    atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
+    atomic_uint msn;
+#else
+    std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
+    std::atomic_uint msn;
+#endif
     bool failback_rebuilt[URMA_UBAGG_DEV_MAX_NUM];
-    uint32_t msn;
+    //TODO: valid被改成atom了，failback_rebuilt如何定义如何使用
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
 #ifndef __cplusplus
-    atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
+    atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
 #else
-    std::atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
+    std::atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
 #endif
     // recv
     wr_buf_t recv_wr_buf;
-    pthread_spinlock_t recv_wr_lock;
     uint32_t rqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
 } bondp_comp_t;
 
@@ -261,6 +266,7 @@ typedef struct bondp_target_jetty {
     urma_target_jetty_t v_tjetty;
     urma_token_t import_token_value;
     bool import_token_valid;
+    bool skip_import_vjetty;
     urma_target_jetty_t *p_tjetty[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
     urma_target_seg_t *p_check_tseg[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
     int local_dev_num;
@@ -268,8 +274,13 @@ typedef struct bondp_target_jetty {
     uint32_t local_active_indices[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t active_indices[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t active_count;
-    bool valid[URMA_UBAGG_DEV_MAX_NUM];
+#ifndef __cplusplus
+    atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
+#else
+    std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
+#endif
     urma_ref_t use_cnt;
+    bool is_msn_enabled;
 } bondp_target_jetty_t;
 
 typedef struct bondp_import_target_seg {
@@ -278,26 +289,43 @@ typedef struct bondp_import_target_seg {
     int local_dev_num;
     int target_dev_num;
     bool is_reused;
+    bool skip_import_vseg;
     urma_ref_t use_cnt;
     uint64_t p_orig_handle[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
     uint64_t v_orig_handle;
 } bondp_import_tseg_t;
 
 typedef struct urma_bond_seg_info_out {
-    urma_seg_t base;
-    urma_seg_t slaves[URMA_UBAGG_DEV_MAX_NUM];
-    int dev_num;
+    urma_seg_base_t slaves[URMA_UBAGG_DEV_MAX_NUM];
 } urma_bond_seg_info_out_t;
 
 typedef struct urma_bond_id_info_out {
     urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
-    bool is_multipath; // deprecated
+    bool is_msn_enabled; // deprecated
     uint8_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t enabled_count;
     bool is_health_check_enable;
     urma_bond_seg_info_out_t health_check_seg;
     bool connected[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
 } urma_bond_id_info_out_t;
+
+static inline void bondp_seg_to_base(const urma_seg_t *seg, urma_seg_base_t *base)
+{
+    base->ubva = seg->ubva;
+    base->len = seg->len;
+    base->attr.value = seg->attr.value;
+    base->token_id = seg->token_id;
+}
+
+static inline void bondp_seg_base_to_seg(const urma_seg_base_t *base, urma_seg_t *seg)
+{
+    seg->ubva = base->ubva;
+    seg->len = base->len;
+    seg->attr.value = base->attr.value;
+    seg->token_id = base->token_id;
+    seg->ext.flag.value = 0;
+    seg->ext.length = 0;
+}
 
 static inline bool is_empty_eid(urma_eid_t *eid)
 {
