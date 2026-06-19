@@ -71,7 +71,7 @@ static int run_test(test_context_t *test_ctx)
     if (ctx->app_id == PROC_2) {
         ret = test_poll_jfc_wait(ctx->l_ctx.jfc[0], WR_NUM, cr, 1);
         for (int i = 0; i < ret; i++) {
-            if (cr[i].local_id == ctx->l_ctx.jetty[j]->jetty_id.id) {
+            if (cr[i].local_id == ctx->l_ctx.jetty[0]->jetty_id.id) {
                 TEST_LOG_INFO("status                = %u\n", cr[i].status);
                 CHECK_JUMP(cr[i].status != URMA_CR_SUCCESS, EXIT, "post_jetty_wr cr.status=%d\n", cr[i].status);
                 TEST_LOG_INFO("user_ctx              = %llu\n", cr[i].user_ctx);
