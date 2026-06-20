@@ -476,6 +476,27 @@ TEST_F(PerfTest, MinValueConditionTest) {
     SUCCEED();
 }
 
+TEST_F(PerfTest, PerfRecordWriteDelta) {
+    int ret = umq_perf_start();
+    ASSERT_EQ(ret, UMQ_SUCCESS);
+
+    umq_perf_stats_cfg_t cfg = {0};
+    test_perf_cfg_set(&cfg);
+    ret = umq_perf_reset(&cfg);
+    ASSERT_EQ(ret, UMQ_SUCCESS);
+
+    g_mock_urpc_get_cpu_cycles_value = 2000;
+    uint64_t timestamp = umq_perf_get_start_timestamp();
+    EXPECT_GT(timestamp, 0);
+
+    /* umq_perf_record_write_delta should return delta in ns */
+    umq_perf_record_type_t type = static_cast<umq_perf_record_type_t>(1);
+    uint64_t start_time = 1000;
+    uint64_t delta = umq_perf_record_write_delta(type, start_time);
+    /* delta = (2000 - 1000) * NS_PER_SEC / cpu_hz = 1000 * 1e9 / 2e9 = 500 ns */
+    EXPECT_GT(delta, 0);
+}
+
 TEST(InlineFunctionsTest, GetStartTimestampWithFeature) {
     uint32_t feature_with_perf = UMQ_FEATURE_ENABLE_PERF;
     uint32_t feature_without_perf = 0;
