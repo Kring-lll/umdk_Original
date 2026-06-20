@@ -114,3 +114,13 @@ TEST_F(DfxTest, UmqStatsFlowControlGetTestWithEnableFcNonAtomic)
     EXPECT_EQ(ret, UMQ_SUCCESS);
     umq_ub_flow_control_uninit(&queue.flow_control);
 }
+
+TEST_F(DfxTest, umq_stats_perf_to_str_test)
+{
+    umq_perf_stats_t umq_perf_stats;
+    char buf[32768];
+
+    umq_stats_perf_to_str(&umq_perf_stats, buf, 32768);
+
+    printf("%s\n", buf);
+}

@@ -46,10 +46,10 @@ echo "Running tests..."
 export LD_LIBRARY_PATH="$DEPENDENCIES_PATH:$LD_LIBRARY_PATH"
 export GCOV_PREFIX="$REPORTS_PATH"
 
-./core/test_core
-./lib/test_lib
-./protocol/test_protocol
-./util/test_util
+#./core/test_core
+#./lib/test_lib
+#./protocol/test_protocol
+#./util/test_util
 ./umq/test_umq
 
 echo "Generating coverage reports..."

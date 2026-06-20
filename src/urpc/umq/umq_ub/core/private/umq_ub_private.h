@@ -464,6 +464,7 @@ typedef struct ub_queue {
     umq_state_t state;
     uint64_t umqh;
     uint64_t share_rq_umqh;
+    uint64_t transport_cost;
     ub_queue_idle_check_t *checker;
     bondp_port_id_t *used_port;
     uint32_t umq_id;

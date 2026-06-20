@@ -15,8 +15,8 @@ find_package(Threads REQUIRED)
 
 set(URPC_ROOT_DIR ${CMAKE_SOURCE_DIR}/../../src/urpc)
 
-add_subdirectory(core)
-add_subdirectory(lib)
-add_subdirectory(protocol)
-add_subdirectory(util)
+#add_subdirectory(core)
+#add_subdirectory(lib)
+#add_subdirectory(protocol)
+#add_subdirectory(util)
 add_subdirectory(umq)

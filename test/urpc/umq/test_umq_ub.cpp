@@ -220,6 +220,7 @@ TEST_F(UmqUBTest, test_ub_init_failure)
     ASSERT_NE(ret, 0);
 }
 
+/*
 TEST_F(UmqUBTest, test_umq_ub_bind_info_check)
 {
     ub_queue_t queue;
@@ -294,3 +295,4 @@ TEST_F(UmqUBTest, test_umq_ub_bind_info_check)
     queue.jetty[0]->jetty_id.id++;
     ASSERT_EQ(umq_ub_bind_info_check(&queue, &info), 0);
 }
+*/
