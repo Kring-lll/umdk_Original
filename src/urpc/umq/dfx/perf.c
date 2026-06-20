@@ -173,9 +173,8 @@ static inline uint32_t find_perf_record_bucket(uint64_t delta)
     return idx;
 }
 
-static inline void umq_perf_fill_perf_record(umq_perf_record_type_t type, uint64_t start)
+static inline void umq_perf_fill_perf_record_delta(umq_perf_record_type_t type, uint64_t delta)
 {
-    uint64_t delta = urpc_get_cpu_cycles() - start;
     umq_perf_record_t *cur_rec = &g_umq_perf_record_ctx->perf_record_table[g_perf_record_index];
     cur_rec->type_record[type].accumulation += delta;
     (delta < cur_rec->type_record[type].min) ? cur_rec->type_record[type].min = delta : 0;
@@ -187,12 +186,38 @@ static inline void umq_perf_fill_perf_record(umq_perf_record_type_t type, uint64
     ++cur_rec->type_record[type].cnt;
 }
 
+static inline void umq_perf_fill_perf_record(umq_perf_record_type_t type, uint64_t start)
+{
+    uint64_t delta = urpc_get_cpu_cycles() - start;
+    umq_perf_fill_perf_record_delta(type, delta);
+}
+
+static inline uint64_t cpu_cycles_to_ns(uint64_t cycles)
+{
+    // The CPU frequency is around X GHz, so dividing by CPU hz will solve the overflow issue.
+    if (cycles != 0 && UINT64_MAX / cycles <= NS_PER_SEC) {
+        return cycles / urpc_get_cpu_hz() * NS_PER_SEC;
+    } else {
+        return cycles * NS_PER_SEC / urpc_get_cpu_hz();
+    }
+}
+
 void umq_perf_record_write(umq_perf_record_type_t type, uint64_t start)
 {
     if (!g_umq_perf_record_enable || start == 0 || g_perf_record_index >= UMQ_PERF_REC_MAX_NUM) {
         return;
     }
     umq_perf_fill_perf_record(type, start);
+}
+
+uint64_t umq_perf_record_write_delta(umq_perf_record_type_t type, uint64_t start)
+{
+    if (!g_umq_perf_record_enable || start == 0 || g_perf_record_index >= UMQ_PERF_REC_MAX_NUM) {
+        return 0;
+    }
+    uint64_t delta_cycles = urpc_get_cpu_cycles() - start;
+    umq_perf_fill_perf_record_delta(type, delta_cycles);
+    return cpu_cycles_to_ns(delta_cycles);
 }
 
 void umq_perf_record_write_with_direction(umq_perf_record_type_t type, uint64_t start, umq_io_direction_t direction)
@@ -291,16 +316,6 @@ int umq_perf_stop(void)
 
     g_umq_perf_record_enable = false;
     return UMQ_SUCCESS;
-}
-
-static inline uint64_t cpu_cycles_to_ns(uint64_t cycles)
-{
-    // The CPU frequency is around X GHz, so dividing by CPU hz will solve the overflow issue.
-    if (cycles != 0 && UINT64_MAX / cycles <= NS_PER_SEC) {
-        return cycles / urpc_get_cpu_hz() * NS_PER_SEC;
-    } else {
-        return cycles * NS_PER_SEC / urpc_get_cpu_hz();
-    }
 }
 
 static inline void umq_perf_convert_cycles_to_ns(umq_perf_record_t *perf_rec)
