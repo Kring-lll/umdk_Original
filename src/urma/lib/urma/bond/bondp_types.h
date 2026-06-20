@@ -41,6 +41,7 @@
                                                            (jetty_id)->uasid, (jetty_id)->id)
 
 struct bondp_target_jetty;
+struct bondp_hcv2_ctx;
 
 typedef enum bondp_health_mode {
     HEALTH_MODE_BACKUP_CHECK,
@@ -117,6 +118,7 @@ typedef struct bondp_health_thread_ctx {
 #endif
 } bondp_health_thread_ctx_t;
 
+
 /** Process-granularity global variable */
 typedef struct bondp_global_context {
     uint32_t pid;
@@ -154,6 +156,7 @@ typedef struct bondp_context {
     /* used to restore the local_id in CR. */
     bondp_hash_table_t p_vjetty_id_table;
     int real_async_fd; /* vcontex async_fd */
+    struct bondp_hcv2_ctx *hc_v2;
     bondp_heath_check_ctx_t bondp_heath_check_ctx;
     bondp_hash_table_t remote_v2p_token_id_table;
     bool msn_enable;
@@ -246,6 +249,8 @@ typedef struct bondp_comp {
     std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_uint msn;
 #endif
+    bool failback_rebuilt[URMA_UBAGG_DEV_MAX_NUM];
+    //TODO: valid被改成atom了，failback_rebuilt如何定义如何使用
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
 #ifndef __cplusplus
     atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];

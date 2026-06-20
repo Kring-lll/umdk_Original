@@ -16,6 +16,7 @@
 #include <sys/epoll.h>
 #include <unistd.h>
 
+#include "bondp_health_check_v2.h"
 #include "bondp_api.h"
 #include "bondp_context_table.h"
 #include "bondp_datapath.h"
@@ -622,6 +623,11 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
         goto DELETE_PCONTEXT;
     }
 
+    /* v2 health check: create per-context probe resources */
+    if (bondp_hc_v2_setup_ctx(bdp_ctx) != 0) {
+        URMA_LOG_WARN("Failed to setup health check v2 probe resources, continuing.\n");
+        /* non-fatal: legacy hc still works */
+    }
     URMA_LOG_INFO("Finish to create ctx, dev_name=%s, eid_idx=%u.\n",
                   dev->name, eid_index);
 
@@ -644,6 +650,7 @@ urma_status_t bondp_delete_context(urma_context_t *ctx)
     uint32_t eid_index = ctx->eid_index;
 
     (void)strcpy(dev_name, ctx->dev->name);
+    bondp_hc_v2_cleanup_ctx(bdp_ctx);
     bondp_destroy_health_check_ctx(bdp_ctx);
 
     if (bondp_delete_pcontext(bdp_ctx) != 0) {
