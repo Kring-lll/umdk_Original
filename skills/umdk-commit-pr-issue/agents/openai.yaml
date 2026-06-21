@@ -1,0 +1,4 @@
+interface:
+  display_name: "UMDK Commit、Issue 和 PR"
+  short_description: "生成 UMDK commit、issue 和 PR。"
+  default_prompt: "使用 $umdk-commit-pr-issue 生成或审阅 UMDK 提交说明，起草或提交配套中文 issue，或推送指定分支并提交 GitCode PR。"
