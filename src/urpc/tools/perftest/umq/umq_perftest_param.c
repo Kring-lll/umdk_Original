@@ -12,6 +12,8 @@
 
 #include "umq_perftest_param.h"
 
+#define PERFTEST_DEFAULT_COMPRESSION 100
+
 // clang-format off
 static struct option g_long_options[] = {
     {"dev", required_argument, NULL, 'd'},
@@ -40,7 +42,7 @@ static struct option g_long_options[] = {
     {"use_atomic_window", no_argument, NULL, 'A'},
     {"buf_multiplex", no_argument, NULL, 'B'},
     {"num", required_argument, NULL, 'n'},
-    {"perf-thresh", required_argument, NULL, 't'},
+    {"perf-centroids", required_argument, NULL, 'Z'},
     {"enable-perf", no_argument, NULL, 'F'},
     {"blk-size", required_argument, NULL, 'L'},
     {NULL, 0, NULL, 0}
@@ -75,7 +77,8 @@ static void usage(void)
     (void)printf("      --eid-index                     set eid index.\n");
     (void)printf("      --use_atomic_window             use atomic window when enable flow control.\n");
     (void)printf("      --num                           set number of iterations.\n");
-    (void)printf("      --perf-thresh                   set perf thresh array, length not exceed 8.\n");
+    (void)printf("      --perf-centroids               t-digest centroid count (1-..., default %d).\n",
+        PERFTEST_DEFAULT_COMPRESSION);
     (void)printf("      --enable-perf                   enable perf.\n");
     (void)printf("      --blk-size                      set umq_buf_block_size(default:0), 0=BLOCK_SIZE_4K\n");
     (void)printf("  -h, --help                          show help info.\n\n");
@@ -100,7 +103,7 @@ static void init_cfg(umq_perftest_config_t *cfg)
     cfg->use_atomic_window = false;
     cfg->enable_perf = false;
     cfg->test_round = DEFAULT_LAT_TEST_ROUND;
-    cfg->thresh_num = 0;
+    cfg->compression = PERFTEST_DEFAULT_COMPRESSION;
     cfg->blk_mode = 0;
     cfg->tp_type = UMQ_TP_TYPE_CTP;
 }
@@ -224,15 +227,14 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
             case 'n':
                 cfg->test_round = (uint32_t)strtoul(optarg, NULL, 0);
                 break;
-            case 't':
-                start_idx = optind - 1;
-                while (start_idx < argc && *argv[start_idx] != '-' && cfg->thresh_num < UMQ_PERF_QUANTILE_MAX_NUM) {
-                    cfg->thresh_array[cfg->thresh_num++] = (uint64_t)strtoul(argv[start_idx++], NULL, 0);
-                }
-                optind = start_idx;
-                break;
             case 'F':
                 cfg->enable_perf = true;
+                break;
+            case 'Z':
+                cfg->compression = (int)strtol(optarg, NULL, 0);
+                if (cfg->compression < 1) {
+                    cfg->compression = PERFTEST_DEFAULT_COMPRESSION;
+                }
                 break;
             case 'L':
                 cfg->blk_mode = (uint32_t)strtoul(optarg, NULL, 0);
