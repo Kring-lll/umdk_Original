@@ -13,13 +13,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
+	"huawei.com/aigw/internal/apipool"
 	"huawei.com/aigw/internal/base"
 	"huawei.com/aigw/internal/core"
+	"huawei.com/aigw/internal/proxy"
 	"huawei.com/aigw/pkg/crypto"
 	"huawei.com/aigw/pkg/log"
 )
@@ -45,10 +49,13 @@ type HttpServer struct {
 
 	isReady bool
 	readyMu sync.RWMutex
+
+	// Proxy manager for request forwarding
+	proxyMgr *proxy.ProxyManager
 }
 
 // NewHttpServer creates a new httpServer manager.
-func NewHttpServer(manager *core.AigwManager, host string, port string) *HttpServer {
+func NewHttpServer(manager *core.AigwManager, host string, port string, proxyMgr *proxy.ProxyManager) *HttpServer {
 	return &HttpServer{
 		manager:    manager,
 		host:       host,
@@ -56,6 +63,7 @@ func NewHttpServer(manager *core.AigwManager, host string, port string) *HttpSer
 		serHmacMgr: crypto.NewHmacManager(nil),
 		serAesMgr:  crypto.NewAesManager(nil),
 		isReady:    false,
+		proxyMgr:   proxyMgr,
 	}
 }
 
@@ -109,6 +117,12 @@ func (s *HttpServer) Start() error {
 	mx.HandleFunc("/aigw/v1/openai/get-suggestion",
 		s.serHmacMgr.WithHMAC(s.serAesMgr.WithAesDecrypt(s.scheduleForOpenAi)))
 	mx.HandleFunc("/aigw/v1/stats", s.serHmacMgr.WithHMAC(s.stats))
+	// Forwarding endpoint for chat completions (proxy mode)
+	if s.proxyMgr != nil {
+		mx.HandleFunc("/aigw/v1/openai/chat/completions",
+			s.serHmacMgr.WithHMAC(s.serAesMgr.WithAesDecrypt(s.forwardChatCompletions)))
+		log.Info().Msg("Proxy forwarding endpoint enabled: /aigw/v1/openai/chat/completions")
+	}
 	s.server = &http.Server{
 		Addr:    net.JoinHostPort(s.host, s.port),
 		Handler: limiterMiddleware(mx),
@@ -304,6 +318,10 @@ func (s *HttpServer) scheduleForOpenAi(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Debug().Msgf("processing schedule request, UUID: %v, model: %v", req.UUID, req.Model)
+	if m, _ := s.manager.GetModelMode(req.Model); m == "provider" {
+		http.Error(w, "model is in provider mode, must use /chat/completions endpoint", http.StatusBadRequest)
+		return
+	}
 	in := &core.GetSuggestionIn{
 		UUID:   req.UUID,
 		Model:  req.Model,
@@ -326,6 +344,334 @@ func (s *HttpServer) scheduleForOpenAi(w http.ResponseWriter, r *http.Request) {
 	if _, err = w.Write(jsonData); err != nil {
 		log.Warn().Msgf("Error writing response: %v", err)
 	}
+}
+
+// forwardChatCompletions forwards chat completion requests to the target worker.
+// This is used when AIGW acts as a proxy/gateway rather than just returning scheduling suggestions.
+func (s *HttpServer) forwardChatCompletions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if r.Body == nil || r.ContentLength == 0 {
+		http.Error(w, "Request body is empty", http.StatusBadRequest)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Model    string `json:"model"`
+		Stream   bool   `json:"stream"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if req.Model == "" {
+		http.Error(w, "Model is required", http.StatusBadRequest)
+		return
+	}
+
+	mode, err := s.manager.GetModelMode(req.Model)
+	if err != nil {
+		http.Error(w, "unknown model", http.StatusNotFound)
+		return
+	}
+	switch mode {
+	case "provider":
+		s.forwardToProvider(w, r, req.Model, req.Stream, body)
+	default:
+		s.forwardToInstance(w, r, req.Model, req.Stream, body)
+	}
+}
+
+func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, model string, stream bool, body []byte) {
+	var req struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	_ = json.Unmarshal(body, &req)
+
+	log.Debug().Msgf("Forwarding chat completion request, model: %s, stream: %v", model, stream)
+
+	prompt := ""
+	for _, m := range req.Messages {
+		prompt += m.Role + ":" + m.Content + " "
+	}
+
+	in := &core.GetSuggestionIn{
+		UUID:   fmt.Sprintf("req-%d", time.Now().UnixNano()),
+		Model:  model,
+		Prompt: prompt,
+	}
+
+	suggestion, err := s.manager.GetSuggestion(in)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get scheduling suggestion: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	targetURL := suggestion.TargetPrefillUrl
+	if targetURL == "" {
+		targetURL = suggestion.TargetDecodeUrl
+	}
+	if targetURL == "" {
+		http.Error(w, "No available worker instance", http.StatusServiceUnavailable)
+		return
+	}
+	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
+		targetURL = "http://" + targetURL
+	}
+
+	log.Debug().Msgf("Forwarding request to: %s, DpRank: %v", targetURL, suggestion.DpRank)
+
+	forwardReq := &proxy.ForwardRequest{
+		Method:    "POST",
+		TargetURL: targetURL,
+		Route:     "/v1/chat/completions",
+		Headers:   r.Header,
+		Body:      body,
+		Stream:    stream,
+		DpRank:    suggestion.DpRank,
+	}
+
+	result, err := s.proxyMgr.ForwardRequest(r.Context(), forwardReq)
+	if err != nil {
+		log.Error().Msgf("Forward request failed: %v", err)
+		http.Error(w, fmt.Sprintf("Forward request failed: %v", err), http.StatusBadGateway)
+		return
+	}
+
+	if stream && result.StreamReader != nil {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+
+		for {
+			event, err := result.StreamReader.ReadEvent()
+			if err == io.EOF {
+				log.Debug().Msg("SSE stream completed")
+				return
+			}
+			if err != nil {
+				log.Error().Msgf("SSE read error: %v", err)
+				return
+			}
+			if event.Event != "" {
+				fmt.Fprintf(w, "event: %s\n", event.Event)
+			}
+			fmt.Fprintf(w, "data: %s\n\n", event.Data)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		}
+	} else {
+		for k, v := range result.Headers {
+			if k == "Transfer-Encoding" || k == "Connection" {
+				continue
+			}
+			w.Header()[k] = v
+		}
+		w.WriteHeader(result.StatusCode)
+		if _, err := w.Write(result.Body); err != nil {
+			log.Warn().Msgf("Error writing response: %v", err)
+		}
+	}
+}
+
+func (s *HttpServer) forwardToProvider(w http.ResponseWriter, r *http.Request, model string, stream bool, body []byte) {
+	pool := s.manager.GetApiPool(model)
+	if pool == nil {
+		http.Error(w, "unknown model", http.StatusNotFound)
+		return
+	}
+	pctx := &apipool.Context{Model: model, Stream: stream}
+	triedKeys := map[apipool.StateKey]bool{}
+	var lastStatus int
+
+	maxFailover := pool.MaxFailoverEndpoints()
+	log.Debug().Msgf("forwardToProvider: model=%s stream=%v maxFailover=%d", model, stream, maxFailover)
+
+	for attempt := 0; attempt < maxFailover; attempt++ {
+		if r.Context().Err() != nil {
+			return
+		}
+		dep := pool.SelectExcept(pctx, triedKeys)
+		if dep == nil {
+			log.Debug().Msgf("forwardToProvider: model=%s attempt=%d no deployment available, stopping", model, attempt)
+			break
+		}
+		triedKeys[dep.StateKey()] = true
+
+		adapter, err := pool.GetAdapter(dep.Provider)
+		if err != nil {
+			log.Debug().Msgf("forwardToProvider: model=%s attempt=%d id=%s provider=%s no adapter: %v", model, attempt, dep.ID, dep.Provider, err)
+			continue
+		}
+		headers := r.Header.Clone()
+		adapter.InjectAuth(headers, dep)
+
+		reqBody := body
+		if dep.ModelName != "" && dep.ModelName != model {
+			if rewritten, rerr := rewriteModelField(body, dep.ModelName); rerr == nil {
+				reqBody = rewritten
+				log.Debug().Msgf("forwardToProvider: model=%s attempt=%d id=%s rewrote upstream model -> %s", model, attempt, dep.ID, dep.ModelName)
+			} else {
+				log.Warn().Msgf("forwardToProvider: model=%s attempt=%d id=%s model rewrite failed, forwarding original: %v", model, attempt, dep.ID, rerr)
+			}
+		}
+
+		fullURL := adapter.BuildURL(dep, "/v1/chat/completions", stream)
+		forwardReq := &proxy.ForwardRequest{
+			Method:  "POST",
+			FullURL: fullURL,
+			Headers: headers,
+			Body:    reqBody,
+			Stream:  stream,
+		}
+		log.Debug().Msgf("forwardToProvider: model=%s attempt=%d forwarding to id=%s provider=%s url=%s", model, attempt, dep.ID, dep.Provider, fullURL)
+
+		start := time.Now()
+		result, err := s.proxyMgr.ForwardRequest(r.Context(), forwardReq)
+		if err != nil {
+			kind := pool.OnFailure(dep, 0, err)
+			log.Debug().Msgf("forwardToProvider: model=%s attempt=%d id=%s transport error kind=%v latencyMs=%d: %v", model, attempt, dep.ID, kind, time.Since(start).Milliseconds(), err)
+			if kind == apipool.ErrCanceled {
+				return
+			}
+			continue
+		}
+		if result.StatusCode >= 400 {
+			lastStatus = result.StatusCode
+			kind := pool.OnFailure(dep, result.StatusCode, nil)
+			log.Debug().Msgf("forwardToProvider: model=%s attempt=%d id=%s status=%d kind=%v latencyMs=%d", model, attempt, dep.ID, result.StatusCode, kind, time.Since(start).Milliseconds())
+			if kind == apipool.ErrClient4xx {
+				if result.StreamReader != nil {
+					_ = result.StreamReader.Close()
+				}
+				writeProviderNonStream(w, result)
+				return
+			}
+			if result.StreamReader != nil {
+				_ = result.StreamReader.Close()
+			}
+			continue
+		}
+
+		if stream && result.StreamReader != nil {
+			log.Debug().Msgf("forwardToProvider: model=%s attempt=%d id=%s streaming response started", model, attempt, dep.ID)
+			s.streamProviderResponse(w, pool, dep, result, start)
+			return
+		}
+		tokens := parseUsageTokens(result.Body)
+		latency := time.Since(start)
+		pool.OnSuccess(dep, latency, tokens)
+		log.Debug().Msgf("forwardToProvider: model=%s attempt=%d id=%s success status=%d tokens=%d latencyMs=%d", model, attempt, dep.ID, result.StatusCode, tokens, latency.Milliseconds())
+		writeProviderNonStream(w, result)
+		return
+	}
+
+	if lastStatus != 0 {
+		log.Debug().Msgf("forwardToProvider: model=%s all providers failed, last status=%d", model, lastStatus)
+		http.Error(w, "all providers failed", lastStatus)
+		return
+	}
+	log.Debug().Msgf("forwardToProvider: model=%s all providers failed, no upstream status", model)
+	http.Error(w, "all providers failed", http.StatusBadGateway)
+}
+
+func (s *HttpServer) streamProviderResponse(w http.ResponseWriter, pool *apipool.ApiPoolManager, dep *apipool.Deployment, result *proxy.ForwardResult, start time.Time) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	defer func() { _ = result.StreamReader.Close() }()
+	firstChunk := false
+	tokens := 0
+	for {
+		event, err := result.StreamReader.ReadEvent()
+		if err == io.EOF {
+			pool.OnStreamSuccess(dep, tokens)
+			log.Debug().Msgf("streamProviderResponse: id=%s stream complete tokens=%d durationMs=%d", dep.ID, tokens, time.Since(start).Milliseconds())
+			return
+		}
+		if err != nil {
+			if !firstChunk {
+				pool.OnFailure(dep, 0, err)
+				log.Debug().Msgf("streamProviderResponse: id=%s stream error before first chunk: %v", dep.ID, err)
+			}
+			return
+		}
+		if !firstChunk {
+			firstChunk = true
+			pool.OnFirstChunk(dep, time.Since(start))
+			log.Debug().Msgf("streamProviderResponse: id=%s first chunk ttftMs=%d", dep.ID, time.Since(start).Milliseconds())
+		}
+		if event.Event != "" {
+			fmt.Fprintf(w, "event: %s\n", event.Event)
+		}
+		fmt.Fprintf(w, "data: %s\n\n", event.Data)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		if t := parseUsageTokens([]byte(event.Data)); t > 0 {
+			tokens = t
+		}
+	}
+}
+
+func writeProviderNonStream(w http.ResponseWriter, result *proxy.ForwardResult) {
+	for k, v := range result.Headers {
+		if k == "Transfer-Encoding" || k == "Connection" {
+			continue
+		}
+		w.Header()[k] = v
+	}
+	w.WriteHeader(result.StatusCode)
+	_, _ = w.Write(result.Body)
+}
+
+// rewriteModelField replaces the top-level "model" field in an OpenAI-style JSON
+// request body, preserving all other fields byte-for-byte.
+func rewriteModelField(body []byte, model string) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	mv, err := json.Marshal(model)
+	if err != nil {
+		return nil, err
+	}
+	m["model"] = mv
+	return json.Marshal(m)
+}
+
+// parseUsageTokens extracts usage.total_tokens from an OpenAI-style JSON body; 0 if absent.
+func parseUsageTokens(body []byte) int {
+	var parsed struct {
+		Usage struct {
+			TotalTokens int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return 0
+	}
+	return parsed.Usage.TotalTokens
 }
 
 func (s *HttpServer) checkHealth(errChan <-chan error) error {
