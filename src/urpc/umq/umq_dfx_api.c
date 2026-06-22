@@ -539,6 +539,9 @@ int umq_stats_perf_to_str(umq_perf_stats_t *umq_perf_stats, char *buf, int max_b
         "tp_unimport_jetty", "tp_unbind_jetty",
     };
 
+    // All type records share the same quantile config; use the first one.
+    uint32_t qn = umq_perf_stats->type_record[0].quantile_num;
+
     int str_size = 0;
     (void)memset(buf, 0, max_buf_len);
 
@@ -546,20 +549,37 @@ int umq_stats_perf_to_str(umq_perf_stats_t *umq_perf_stats, char *buf, int max_b
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n",
         "                                                                    Analyse Function Execution Time Records");
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_PERF_EQUALS);
+
+    // Build header: fixed columns + dynamic quantile columns.
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
-        "%-20s %-20s %-20s %-20s %-20s %-20s %-20s %-20s\n",
-        "Type", "Sample Num", "Average (ns)", "Minimum (ns)", "Maxinum (ns)", "Median (ns)", "P90 (ns)", "P99 (ns)");
+        "%-20s %-20s %-20s %-20s %-20s",
+        "Type", "Sample Num", "Average (ns)", "Minimum (ns)", "Maxinum (ns)");
+    for (uint32_t j = 0; j < qn; j++) {
+        char col_hdr[24];
+        (void)snprintf(col_hdr, sizeof(col_hdr), "P%.1f (ns)",
+                       umq_perf_stats->type_record[0].quantile_pct[j]);
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, " %-20s", col_hdr);
+    }
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "\n");
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_PERF_UNDERLINE);
+
+    // Build data rows.
     for (uint32_t type = 0; type < UMQ_PERF_RECORD_TYPE_MAX; type++) {
         if (type == UMQ_PERF_RECORD_TRANSPORT_POST_SEND_EAGAIN) {
             continue;
         }
         UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
-            "%-20s %-20lu %-20lu %-20lu %-20lu %-20lu %-20lu %-20lu\n",
-            perf_record_type_name[type], umq_perf_stats->type_record[type].sample_num,
-            umq_perf_stats->type_record[type].average, umq_perf_stats->type_record[type].mininum,
-            umq_perf_stats->type_record[type].maxinum, umq_perf_stats->type_record[type].median,
-            umq_perf_stats->type_record[type].p90, umq_perf_stats->type_record[type].p99);
+            "%-20s %-20lu %-20lu %-20lu %-20lu",
+            perf_record_type_name[type],
+            umq_perf_stats->type_record[type].sample_num,
+            umq_perf_stats->type_record[type].average,
+            umq_perf_stats->type_record[type].mininum,
+            umq_perf_stats->type_record[type].maxinum);
+        for (uint32_t j = 0; j < qn; j++) {
+            UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+                " %-20lu", umq_perf_stats->type_record[type].quantile_val[j]);
+        }
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "\n");
     }
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_PERF_UNDERLINE);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_PERF_EQUALS);

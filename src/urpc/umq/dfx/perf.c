@@ -12,12 +12,8 @@
 #include "umq_vlog.h"
 #include "urpc_thread_closure.h"
 #include "urpc_util.h"
+#include "tdigest.h"
 #include "perf.h"
-
-#define UMQ_PERF_MAX_THRESH_NS         (100000u)
-#define MEDIAN_FACTOR                  (0.5)
-#define P90_FACTOR                     (0.9)
-#define P99_FACTOR                     (0.99)
 
 #define UMQ_PERF_IO_DIRECTION_ALL_OFFSET     (0)
 #define UMQ_PERF_IO_DIRECTION_TX_OFFSET      (1)
@@ -25,6 +21,8 @@
 
 #define UMQ_PERF_INTERRUPT_DIRECTION_TX_OFFSET      (0)
 #define UMQ_PERF_INTERRUPT_DIRECTION_RX_OFFSET      (1)
+
+#define UMQ_PERF_DEFAULT_COMPRESSION  (100)
 
 static __thread uint32_t g_perf_record_index = -1;
 static __thread pthread_once_t g_dp_thread_run_once = PTHREAD_ONCE_INIT;
@@ -37,7 +35,7 @@ typedef struct umq_perf_record {
         uint64_t min; // min latency
         uint64_t max; // max latency
         uint64_t cnt; // statistical count
-        uint64_t bucket[UMQ_PERF_QUANTILE_MAX_NUM + 1]; // sample count in each quantile bin
+        tdigest_t *td; // t-digest for quantile estimation
     } type_record[UMQ_PERF_RECORD_TYPE_MAX]; // statistical results list for each type of probe point
     bool is_used; // the statistic item valid
 } umq_perf_record_t;
@@ -45,9 +43,9 @@ typedef struct umq_perf_record {
 typedef struct umq_perf_record_ctx {
     umq_perf_record_t perf_record_table[UMQ_PERF_REC_MAX_NUM];
     pthread_once_t *dp_thread_run_once[UMQ_PERF_REC_MAX_NUM];
-    uint64_t perf_quantile_thresh[UMQ_PERF_QUANTILE_MAX_NUM];
-    uint64_t thresh_ns[UMQ_PERF_QUANTILE_MAX_NUM];
-    uint32_t thresh_num;
+    double quantile_pct[UMQ_PERF_QUANTILE_MAX_NUM]; // configured quantile percentages
+    uint32_t quantile_num;                          // how many are configured (0→use defaults)
+    int compression;                                // t-digest compression (0→use default)
 } umq_perf_record_ctx_t;
 
 static pthread_spinlock_t g_umq_perf_record_lock;
@@ -80,6 +78,13 @@ void umq_perf_uninit(void)
         if (g_umq_perf_record_ctx->dp_thread_run_once[i] != NULL) {
             *g_umq_perf_record_ctx->dp_thread_run_once[i] = PTHREAD_ONCE_INIT;
         }
+        umq_perf_record_t *rec = &g_umq_perf_record_ctx->perf_record_table[i];
+        for (int type = 0; type < UMQ_PERF_RECORD_TYPE_MAX; ++type) {
+            if (rec->type_record[type].td != NULL) {
+                tdigest_destroy(rec->type_record[type].td);
+                rec->type_record[type].td = NULL;
+            }
+        }
     }
 
     g_umq_perf_record_enable = false;
@@ -97,7 +102,9 @@ static void umq_clear_perf_record_item(uint32_t record_idx)
         cur_record->type_record[type].min = UINT64_MAX;
         cur_record->type_record[type].max = 0;
         cur_record->type_record[type].cnt = 0;
-        (void)memset(cur_record->type_record[type].bucket, 0, sizeof(cur_record->type_record[type].bucket));
+        if (cur_record->type_record[type].td != NULL) {
+            tdigest_reset(cur_record->type_record[type].td);
+        }
     }
 }
 
@@ -108,7 +115,14 @@ static void umq_perf_record_closure(uint64_t idx)
         (void)pthread_spin_unlock(&g_umq_perf_record_lock);
         return;
     }
-    g_umq_perf_record_ctx->perf_record_table[idx].is_used = false;
+    umq_perf_record_t *cur = &g_umq_perf_record_ctx->perf_record_table[idx];
+    for (int type = 0; type < UMQ_PERF_RECORD_TYPE_MAX; ++type) {
+        if (cur->type_record[type].td != NULL) {
+            tdigest_destroy(cur->type_record[type].td);
+            cur->type_record[type].td = NULL;
+        }
+    }
+    cur->is_used = false;
     g_umq_perf_record_ctx->dp_thread_run_once[idx] = NULL;
     (void)pthread_spin_unlock(&g_umq_perf_record_lock);
 }
@@ -136,6 +150,8 @@ void umq_perf_record_alloc(void)
     }
 
     umq_clear_perf_record_item(idx);
+    // t-digest instances allocated on-demand to avoid pre-allocating
+    // digests for record types this thread never uses.
     g_umq_perf_record_ctx->perf_record_table[idx].is_used = true;
     (void)pthread_spin_unlock(&g_umq_perf_record_lock);
 
@@ -158,21 +174,6 @@ uint64_t umq_perf_get_start_timestamp(void)
     return urpc_get_cpu_cycles();
 }
 
-static inline uint32_t find_perf_record_bucket(uint64_t delta)
-{
-    if (g_umq_perf_record_ctx->perf_quantile_thresh[0] == 0) {
-        // quantile thresh is not set, don't fill the bucket
-        return UINT32_MAX;
-    }
-    uint32_t idx;
-    for (idx = 0; idx < UMQ_PERF_QUANTILE_MAX_NUM; ++idx) {
-        if (delta <= g_umq_perf_record_ctx->perf_quantile_thresh[idx]) {
-            break;
-        }
-    }
-    return idx;
-}
-
 static inline void umq_perf_fill_perf_record(umq_perf_record_type_t type, uint64_t start)
 {
     uint64_t delta = urpc_get_cpu_cycles() - start;
@@ -180,9 +181,15 @@ static inline void umq_perf_fill_perf_record(umq_perf_record_type_t type, uint64
     cur_rec->type_record[type].accumulation += delta;
     (delta < cur_rec->type_record[type].min) ? cur_rec->type_record[type].min = delta : 0;
     (delta > cur_rec->type_record[type].max) ? cur_rec->type_record[type].max = delta : 0;
-    uint32_t bucket_idx = find_perf_record_bucket(delta);
-    if (bucket_idx != UINT32_MAX) {
-        ++cur_rec->type_record[type].bucket[bucket_idx];
+
+    // lazy alloc
+    tdigest_t *td = cur_rec->type_record[type].td;
+    if (td == NULL) {
+        td = tdigest_create(g_umq_perf_record_ctx->compression);
+        cur_rec->type_record[type].td = td;
+    }
+    if (td != NULL) {
+        tdigest_insert(td, (double)delta, 1);
     }
     ++cur_rec->type_record[type].cnt;
 }
@@ -248,8 +255,7 @@ int umq_perf_start(void)
 
 int umq_perf_reset(umq_perf_stats_cfg_t *perf_stats_cfg)
 {
-    // IO perf record has been started, user must stop it first before restart
-    if (g_umq_perf_record_ctx == NULL || perf_stats_cfg == NULL) {
+    if (g_umq_perf_record_ctx == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
         return -UMQ_ERR_EINVAL;
     }
@@ -258,26 +264,42 @@ int umq_perf_reset(umq_perf_stats_cfg_t *perf_stats_cfg)
         umq_clear_perf_record_item(i);
     }
 
-    uint32_t thresh_num = perf_stats_cfg->thresh_num;
-    if (thresh_num > UMQ_PERF_QUANTILE_MAX_NUM) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "configured thresh num %u exceeds the max thresh_num %u, only the minimum %d of them"
-            "are used\n", thresh_num, UMQ_PERF_QUANTILE_MAX_NUM, UMQ_PERF_QUANTILE_MAX_NUM);
-        return -UMQ_ERR_EAGAIN;
+    // parse config; fall back to defaults if none given
+    if (perf_stats_cfg != NULL && perf_stats_cfg->quantile_num > 0) {
+        uint32_t n = perf_stats_cfg->quantile_num;
+        if (n > UMQ_PERF_QUANTILE_MAX_NUM) {
+            UMQ_VLOG_WARN(VLOG_UMQ,
+                "quantile_num %u exceeds max %u, clamping\n",
+                n, UMQ_PERF_QUANTILE_MAX_NUM);
+            n = UMQ_PERF_QUANTILE_MAX_NUM;
+        }
+        for (uint32_t i = 0; i < n; i++) {
+            if (perf_stats_cfg->quantile_pct[i] <= 0.0 ||
+                perf_stats_cfg->quantile_pct[i] > 100.0) {
+                UMQ_VLOG_WARN(VLOG_UMQ,
+                    "quantile_pct[%u]=%.1f out of range (0,100], using defaults\n",
+                    i, perf_stats_cfg->quantile_pct[i]);
+                n = 0;
+                break;
+            }
+            g_umq_perf_record_ctx->quantile_pct[i] =
+                perf_stats_cfg->quantile_pct[i];
+        }
+        g_umq_perf_record_ctx->quantile_num = n;
     }
 
-    uint64_t *thresh_array = perf_stats_cfg->thresh_array;
-    // set quantile bucket
-    uint32_t idx = 0;
-    for (uint32_t i = 0; i < thresh_num; ++i) {
-        if (thresh_array[i] > UMQ_PERF_MAX_THRESH_NS || thresh_array[i] == 0) {
-            continue;
-        }
-        if (idx == 0 || thresh_array[i] > g_umq_perf_record_ctx->perf_quantile_thresh[idx - 1]) {
-            g_umq_perf_record_ctx->thresh_ns[idx] = thresh_array[i];
-            g_umq_perf_record_ctx->perf_quantile_thresh[idx++] = thresh_array[i] * urpc_get_cpu_hz() / NS_PER_SEC;
-        }
+    if (g_umq_perf_record_ctx->quantile_num == 0) {
+        // Use built-in defaults when no valid user config was provided.
+        g_umq_perf_record_ctx->quantile_pct[0] = 50.0;
+        g_umq_perf_record_ctx->quantile_pct[1] = 90.0;
+        g_umq_perf_record_ctx->quantile_pct[2] = 99.0;
+        g_umq_perf_record_ctx->quantile_num = 3;
     }
-    g_umq_perf_record_ctx->thresh_num = idx;
+
+    g_umq_perf_record_ctx->compression =
+        (perf_stats_cfg != NULL && perf_stats_cfg->compression > 0)
+        ? perf_stats_cfg->compression
+        : UMQ_PERF_DEFAULT_COMPRESSION;
 
     return UMQ_SUCCESS;
 }
@@ -314,35 +336,6 @@ static inline void umq_perf_convert_cycles_to_ns(umq_perf_record_t *perf_rec)
     }
 }
 
-static uint64_t umq_perf_cal_quantile(
-    umq_perf_record_t *record, umq_perf_record_type_t type, uint64_t count, uint64_t *thresh, uint32_t thresh_num)
-{
-    if (thresh_num == 0) {
-        return 0;
-    }
-
-    uint32_t idx;
-    uint64_t quantile_cnt = count;
-    for (idx = 0; idx < thresh_num; ++idx) {
-        if (record->type_record[type].bucket[idx] >= quantile_cnt) {
-            break;
-        }
-        quantile_cnt -= record->type_record[type].bucket[idx];
-    }
-
-    // the queried quantile cnt exceeds the maximum thresh records, return the max thresh
-    if (idx >= thresh_num) {
-        return thresh[thresh_num - 1];
-    }
-
-    if (record->type_record[type].bucket[idx] == 0) {
-        return 0;
-    }
-
-    uint64_t base = (idx == 0) ? 0 : thresh[idx - 1];
-    return ((double)quantile_cnt / record->type_record[type].bucket[idx]) * (thresh[idx] - base) + base;
-}
-
 static ALWAYS_INLINE void umq_perf_record_add(umq_perf_record_t *total_perf_record, umq_perf_record_t *perf_record)
 {
     for (uint32_t i = 0; i < UMQ_PERF_RECORD_TYPE_MAX; i++) {
@@ -358,8 +351,14 @@ static ALWAYS_INLINE void umq_perf_record_add(umq_perf_record_t *total_perf_reco
             total_perf_record->type_record[i].max > perf_record->type_record[i].max ?
             total_perf_record->type_record[i].max : perf_record->type_record[i].max;
         total_perf_record->type_record[i].cnt += perf_record->type_record[i].cnt;
-        for (uint32_t j = 0; j <= UMQ_PERF_QUANTILE_MAX_NUM ; j++) {
-            total_perf_record->type_record[i].bucket[j] += perf_record->type_record[i].bucket[j];
+        if (total_perf_record->type_record[i].td == NULL && perf_record->type_record[i].td != NULL) {
+            total_perf_record->type_record[i].td = tdigest_create(g_umq_perf_record_ctx->compression);
+            if (total_perf_record->type_record[i].td == NULL) {
+                continue;
+            }
+        }
+        if (total_perf_record->type_record[i].td != NULL && perf_record->type_record[i].td != NULL) {
+            tdigest_merge(total_perf_record->type_record[i].td, perf_record->type_record[i].td);
         }
     }
 }
@@ -383,21 +382,38 @@ int umq_perf_info_get(umq_perf_stats_t *perf_info)
     }
     umq_perf_convert_cycles_to_ns(&total_perf_record);
 
-    uint64_t *thresh = g_umq_perf_record_ctx->thresh_ns;
-    uint32_t thresh_num = g_umq_perf_record_ctx->thresh_num;
     for (uint32_t i = 0; i < UMQ_PERF_RECORD_TYPE_MAX; i++) {
+        uint64_t cnt = total_perf_record.type_record[i].cnt;
         perf_info->type_record[i].type = i;
-        perf_info->type_record[i].sample_num = total_perf_record.type_record[i].cnt;
-        perf_info->type_record[i].average = total_perf_record.type_record[i].cnt != 0 ?
-            (total_perf_record.type_record[i].accumulation / total_perf_record.type_record[i].cnt) : 0;
+        perf_info->type_record[i].sample_num = cnt;
+        perf_info->type_record[i].average = cnt != 0 ?
+            (total_perf_record.type_record[i].accumulation / cnt) : 0;
         perf_info->type_record[i].maxinum = total_perf_record.type_record[i].max;
         perf_info->type_record[i].mininum = total_perf_record.type_record[i].min;
-        perf_info->type_record[i].median = umq_perf_cal_quantile(&total_perf_record, i,
-            (uint64_t)(MEDIAN_FACTOR * total_perf_record.type_record[i].cnt), thresh, thresh_num);
-        perf_info->type_record[i].p90 = umq_perf_cal_quantile(&total_perf_record, i,
-            (uint64_t)(P90_FACTOR * total_perf_record.type_record[i].cnt), thresh, thresh_num);
-        perf_info->type_record[i].p99 = umq_perf_cal_quantile(&total_perf_record, i,
-            (uint64_t)(P99_FACTOR * total_perf_record.type_record[i].cnt), thresh, thresh_num);
+
+        // Copy the resolved quantile configuration to the output.
+        uint32_t qn = g_umq_perf_record_ctx->quantile_num;
+        for (uint32_t j = 0; j < qn; j++) {
+            perf_info->type_record[i].quantile_pct[j] =
+                g_umq_perf_record_ctx->quantile_pct[j];
+        }
+        perf_info->type_record[i].quantile_num = qn;
+
+        // 0 if no samples
+        if (cnt > 0 && total_perf_record.type_record[i].td != NULL) {
+            const tdigest_t *td = total_perf_record.type_record[i].td;
+            for (uint32_t j = 0; j < qn; j++) {
+                uint64_t val_ns = cpu_cycles_to_ns(
+                    (uint64_t)tdigest_quantile(td,
+                        perf_info->type_record[i].quantile_pct[j]));
+                perf_info->type_record[i].quantile_val[j] = val_ns;
+            }
+        }
+
+        if (total_perf_record.type_record[i].td != NULL) {
+            tdigest_destroy(total_perf_record.type_record[i].td);
+            total_perf_record.type_record[i].td = NULL;
+        }
     }
 
     (void)pthread_spin_unlock(&g_umq_perf_record_lock);
