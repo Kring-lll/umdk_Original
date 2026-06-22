@@ -16,11 +16,13 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"huawei.com/aigw/internal/alarmmonitor"
 	"huawei.com/aigw/internal/base"
 	"huawei.com/aigw/internal/core"
 	"huawei.com/aigw/internal/modelmonitor"
+	"huawei.com/aigw/internal/proxy"
 	"huawei.com/aigw/internal/zk"
 	"huawei.com/aigw/pkg/crypto"
 	"huawei.com/aigw/pkg/log"
@@ -74,6 +76,7 @@ type aigwServerHandler struct {
 	modelMgr   *modelmonitor.ModelManager
 
 	httpServer *HttpServer
+	proxyMgr   *proxy.ProxyManager
 	crypto     keyData
 }
 
@@ -389,6 +392,23 @@ func startManagers(aigwConfig *base.AigwConfig) error {
 		return err
 	}
 
+	proxyCfg := serverHandler.cfgMgr.GetAigwConfig().Proxy
+	if proxyCfg.Enable {
+		serverHandler.proxyMgr = proxy.NewProxyManager(serverHandler.aigwMgr.GetContext(), &proxy.ProxyConfig{
+			Timeout:           time.Duration(proxyCfg.Timeout) * time.Second,
+			MaxRetry:          proxyCfg.MaxRetry,
+			RetryBaseInterval: time.Duration(proxyCfg.RetryBaseInterval) * time.Millisecond,
+			RetryMaxInterval:  time.Duration(proxyCfg.RetryMaxInterval) * time.Millisecond,
+			CircuitBreaker: &proxy.CircuitBreakerConfig{
+				Enabled:          proxyCfg.CircuitBreaker.Enabled,
+				FailureThreshold: proxyCfg.CircuitBreaker.FailureThreshold,
+				SuccessThreshold: proxyCfg.CircuitBreaker.SuccessThreshold,
+				Timeout:          time.Duration(proxyCfg.CircuitBreaker.Timeout) * time.Second,
+			},
+		})
+		log.Info().Msg("Proxy manager initialized")
+	}
+
 	dsCfg := serverHandler.cfgMgr.GetDataSyncConfig()
 	dsAddress := strings.TrimSpace(dsCfg.Address)
 	if dsAddress != "" {
@@ -425,6 +445,9 @@ func startManagers(aigwConfig *base.AigwConfig) error {
 }
 
 func stopManagers() {
+	if serverHandler.proxyMgr != nil {
+		serverHandler.proxyMgr.Stop()
+	}
 	if serverHandler.zkMgr != nil {
 		serverHandler.zkMgr.Stop()
 	}
@@ -446,7 +469,8 @@ func startHttpServer(aigwConfig *base.AigwConfig) error {
 		crypto.WithHmacSchema(aigwConfig.GlobalConfig.SecuritySchema))
 	aesMgr := crypto.NewAesManager(serverHandler.crypto.apiAesKey,
 		crypto.WithAesSchema(aigwConfig.GlobalConfig.SecuritySchema))
-	httpServer := NewHttpServer(serverHandler.aigwMgr, aigwConfig.GlobalConfig.Host, aigwConfig.GlobalConfig.Port)
+	httpServer := NewHttpServer(serverHandler.aigwMgr, aigwConfig.GlobalConfig.Host, aigwConfig.GlobalConfig.Port,
+		serverHandler.proxyMgr)
 	httpServer.serHmacMgr = hmacMgr
 	httpServer.serAesMgr = aesMgr
 	if !hmacMgr.EnableHmac() {

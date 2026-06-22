@@ -185,6 +185,7 @@ type DeploymentConfig struct {
 	Provider         string   `json:"provider"`
 	APIBase          string   `json:"apiBase"`
 	APIKey           string   `json:"apiKey"`
+	Model            string   `json:"model,omitempty"` // upstream model name; the request body's "model" is rewritten to this when set
 	TPM              int      `json:"tpm,omitempty"`
 	RPM              int      `json:"rpm,omitempty"`
 	Tags             []string `json:"tags,omitempty"`
