@@ -8,8 +8,8 @@
  * See LICENSE in the root of the software repository for the full text of the License.
  */
  
-#ifndef CATLASS_GEMM_BLOCK_BLOCK_MMAD_PRELOAD_ASYNC_WITH_CALLBACK_HPP
-#define CATLASS_GEMM_BLOCK_BLOCK_MMAD_PRELOAD_ASYNC_WITH_CALLBACK_HPP
+#ifndef CATLASS_GEMM_BLOCK_BLOCK_MMAD_PRELOAD_ASYNC_WITH_CALLBACK_W4A8_HPP
+#define CATLASS_GEMM_BLOCK_BLOCK_MMAD_PRELOAD_ASYNC_WITH_CALLBACK_W4A8_HPP
 
 #include "catlass/catlass.hpp"
 #include "catlass/arch/resource.hpp"
@@ -17,6 +17,7 @@
 #include "catlass/detail/callback.hpp"
 #include "catlass/gemm_coord.hpp"
 #include "catlass/gemm/dispatch_policy.hpp"
+#include "../dispatch_policy.h"
 #include "catlass/gemm/helper.hpp"
 #include "catlass/gemm/tile/tile_copy.hpp"
 #include "catlass/gemm/tile/tile_mmad.hpp"
@@ -41,7 +42,7 @@ template <
     class TileMmad_
 >
 struct BlockMmad <
-    MmadAtlasA2PreloadAsyncWithCallback<
+    MmadAtlasA2PreloadAsyncWithCallbackW4a8<
         PRELOAD_STAGES_,
         L1_STAGES_,
         L0A_STAGES_,
@@ -61,7 +62,7 @@ struct BlockMmad <
 > {
 public:
     // Type Aliases
-    using DispatchPolicy = MmadAtlasA2PreloadAsyncWithCallback<
+    using DispatchPolicy = MmadAtlasA2PreloadAsyncWithCallbackW4a8<
         PRELOAD_STAGES_,
         L1_STAGES_,
         L0A_STAGES_,
@@ -445,4 +446,4 @@ private:
 
 }  // namespace Catlass::Gemm::Block
 
-#endif  // CATLASS_GEMM_BLOCK_BLOCK_MMAD_PRELOAD_ASYNC_WITH_CALLBACK_HPP
+#endif  // CATLASS_GEMM_BLOCK_BLOCK_MMAD_PRELOAD_ASYNC_WITH_CALLBACK_W4A8_HPP

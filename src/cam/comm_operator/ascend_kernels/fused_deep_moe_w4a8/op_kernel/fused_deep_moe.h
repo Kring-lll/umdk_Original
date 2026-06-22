@@ -19,14 +19,13 @@
 #include "catlass/epilogue/tile/tile_broadcast_one_blk.hpp"
 #include "catlass/epilogue/tile/tile_swizzle.hpp"
 #include "catlass/gemm/block/block_swizzle.hpp"
-#include "fused_deep_moe/gemm/kernel/grouped_matmul_slice_m_per_token_dequant_multistage_workspace.h"
 #include "catlass/gemm/gemm_type.hpp"
-#include "fused_deep_moe/epilogue/dispatch_policy.h"
 #include "fused_deep_moe/gemm/dispatch_policy.h"
-#include "fused_deep_moe/epilogue/block/block_epilogue.h"
 #include "fused_deep_moe/gemm/block/block_mmad.h"
+#include "fused_deep_moe/epilogue/dispatch_policy.h"
+#include "fused_deep_moe/epilogue/block/block_epilogue.h"
+#include "fused_deep_moe/gemm/kernel/grouped_matmul_slice_m_per_token_dequant_multistage_workspace.h"
 #include "fused_deep_moe/gemm/kernel/grouped_matmul_slice_m_per_token_dequant_swiglu_quant_multistage_workspace.h"
-
 #include "fused_deep_moe/raw_distributed/cam_moe_distribute_dispatch.h"
 
 #include "fused_deep_moe_tiling.h"
