@@ -62,11 +62,6 @@ target_link_options(urma_test_common INTERFACE -fsanitize=address --coverage)
 add_executable(urma_common_ut common/common_test.cpp)
 target_link_libraries(urma_common_ut PRIVATE urma_test_common ${URMA_COMMON_STATIC} GTest::gtest_main)
 
-add_executable(urma_core_ut core/core_test.cpp)
-target_link_options(urma_core_ut PRIVATE -Wl,--wrap=ioctl)
-target_link_libraries(urma_core_ut PRIVATE urma_test_common ${URMA_STATIC} ${URMA_COMMON_STATIC}
-    GTest::gtest_main dl rt pthread)
-
 add_executable(urma_cmd_tlv_ut cmd_tlv/cmd_tlv_test.cpp)
 target_link_options(urma_cmd_tlv_ut PRIVATE -Wl,--wrap=ioctl -Wl,--wrap=urma_query_eid)
 target_link_libraries(urma_cmd_tlv_ut PRIVATE urma_test_common ${URMA_STATIC} ${URMA_COMMON_STATIC}
@@ -77,7 +72,7 @@ target_link_libraries(urma_bond_ut PRIVATE urma_test_common ${URMA_UBAGG_SO} ${U
     GTest::gtest_main nl-genl-3 nl-3 dl rt pthread)
 
 enable_testing()
+add_subdirectory(core)
 add_test(NAME urma_common_ut COMMAND urma_common_ut)
-add_test(NAME urma_core_ut COMMAND urma_core_ut)
 add_test(NAME urma_cmd_tlv_ut COMMAND urma_cmd_tlv_ut)
 add_test(NAME urma_bond_ut COMMAND urma_bond_ut)
