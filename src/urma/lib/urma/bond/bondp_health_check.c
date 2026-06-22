@@ -12,14 +12,14 @@
 #include <sys/prctl.h>
 #include <sys/eventfd.h>
 
+#include "ub_hash.h"
+#include "urma_log.h"
+#include "urma_api.h"
 #include "bondp_context_table.h"
 #include "bondp_datapath_convert.h"
-#include "bondp_failback_ops.h"
 #include "bondp_health_check.h"
+#include "bondp_link_recovery.h"
 #include "bondp_netlink.h"
-#include "ub_hash.h"
-#include "urma_api.h"
-#include "urma_log.h"
 #include "urma_private.h"
 
 #define UBAGG_MAX_EVENT 1
@@ -132,7 +132,6 @@ void bondp_notify_health_event(bondp_context_t *bdp_ctx, bondp_health_event_t ev
         return;
     }
 
-    //实际的记录
     if (eventfd_write(health->health_check_fd, 1) != 0 && errno != EAGAIN) {
         URMA_LOG_WARN("Failed to notify health event, fd=%d event=%d errno=%d\n",
             health->health_check_fd, event, errno);
@@ -540,44 +539,6 @@ static void bondp_handle_health_queued_events(bondp_context_t *bond_ctx)
     bondp_free_health_event_list(&event_list);
 }
 
-static void bondp_handle_netlink_events(void)
-{
-    while (true) {
-        bondp_switchback_msg_t msg = {0};
-        int ret = bondp_nl_recv_switchback_msg(&msg);
-        if (ret == -EAGAIN) {
-            break;
-        }
-        if (ret != 0) {
-            URMA_LOG_WARN("Failed to recv switchback msg from netlink, ret=%d\n", ret);
-            break;
-        }
-
-        bool consumed = false;
-        bondp_global_context_t *global_ctx = g_bondp_global_ctx;
-        if (global_ctx == NULL) {
-            break;
-        }
-        pthread_rwlock_rdlock(&global_ctx->health_thread_ctx.health_ctx_lock);
-        bondp_health_ctx_node_t *ctx_node = NULL;
-        UB_LIST_FOR_EACH(ctx_node, node, &global_ctx->health_thread_ctx.health_ctx_list) {
-            if (ctx_node->bdp_ctx == NULL) {
-                continue;
-            }
-            if (bondp_health_handle_fallback_ctrl_rx_impl(ctx_node->bdp_ctx, msg.in.recv_local_id,
-                msg.in.ctrl_type, msg.in.req_seq, msg.in.payload, true)) {
-                consumed = true;
-                break;
-            }
-        }
-        pthread_rwlock_unlock(&global_ctx->health_thread_ctx.health_ctx_lock);
-        if (!consumed) {
-            URMA_LOG_WARN("Drop switchback netlink msg: local_id=%u type=%u seq=%u payload=%u not matched\n",
-                msg.in.recv_local_id, msg.in.ctrl_type, msg.in.req_seq, msg.in.payload);
-        }
-    }
-}
-
 static void bondp_handle_epoll_event(const struct epoll_event *event)
 {
     if (event == NULL) {
@@ -590,12 +551,6 @@ static void bondp_handle_epoll_event(const struct epoll_event *event)
     }
 
     if ((event->events & EPOLLIN) == 0) {
-        return;
-    }
-
-    int nl_fd = bondp_nl_get_fd();
-    if (nl_fd >= 0 && event->data.fd == nl_fd) {
-        bondp_handle_netlink_events();
         return;
     }
 
@@ -699,7 +654,17 @@ static int bondp_rebuild_primary_pjetty(bondp_health_task_t *task)
     return bondp_rebuild_local_pjetty(task, task->primary_local_idx);
 }
 
+static int bondp_send_fallback_ctrl_msg(
+    bondp_context_t *bdp_ctx, bondp_health_task_t *task,
+    int local_idx, int target_idx, uint8_t ctrl_type, uint8_t req_seq, uint64_t payload)
+{
+    if (local_idx < 0 || target_idx < 0 || payload > UINT32_MAX) {
+        return -1;
+    }
 
+    // Not support
+    return -1;
+}
 
 static int bondp_relink_primary_import(bondp_health_task_t *task)
 {
@@ -756,6 +721,33 @@ static void bondp_fallback_reset_for_new_round(bondp_health_task_t *task)
     task->fallback_task.remote_primary_pjetty_id = BONDP_FALLBACK_PRIMARY_INVALID_ID;
 }
 
+static uint64_t bondp_fallback_build_req_payload(const bondp_health_task_t *task)
+{
+    int primary_local_idx = task->primary_local_idx;
+    if (primary_local_idx < 0 || primary_local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return BONDP_FALLBACK_PRIMARY_INVALID_ID;
+    }
+    urma_jetty_t *primary_pjetty = task->bondp_jetty->p_jetty[primary_local_idx];
+    if (primary_pjetty == NULL || primary_pjetty->remote_jetty == NULL) {
+        return BONDP_FALLBACK_PRIMARY_INVALID_ID;
+    }
+    return (uint64_t)primary_pjetty->remote_jetty->id.id;
+}
+
+static int bondp_send_fallback_req(bondp_context_t *bdp_ctx, bondp_health_task_t *task)
+{
+    int active_local_idx = task->active_local_idx;
+    int active_target_idx = -1;
+    if (bondp_get_target_idx_by_local_idx(task, active_local_idx, &active_target_idx) != 0) {
+        return -1;
+    }
+    uint64_t req_payload = bondp_fallback_build_req_payload(task);
+    if (bondp_send_fallback_ctrl_msg(bdp_ctx, task, active_local_idx, active_target_idx,
+        BONDP_FALLBACK_CTRL_REQ, task->fallback_task.req_seq, req_payload) != 0) {
+        return -1;
+    }
+    return 0;
+}
 
 static bool bondp_process_fallback_task(bondp_context_t *bdp_ctx, bondp_health_task_t *task)
 {
@@ -763,37 +755,31 @@ static bool bondp_process_fallback_task(bondp_context_t *bdp_ctx, bondp_health_t
     if (!fallback->pending) {
         return false;
     }
-    //如果不在等待fallback直接退出
-    //健康检查会持续检查fallback
+
     if (!fallback->local_rebuilt) {
         if (bondp_rebuild_primary_pjetty(task) != 0) {
-            //这里是recreat 的 核心
             return false;
         }
         fallback->local_rebuilt = true;
     }
-    //如果需要重建，则重建
 
     if (!fallback->req_sent && bondp_send_fallback_req(bdp_ctx, task) == 0) {
         fallback->req_sent = true;
         return false;
     }
-    //如果还没发送req 尝试给对端发送fallback_req 发送成功了则记录状态
+
     if (!fallback->resp_received || fallback->relink_done ||
         fallback->remote_primary_pjetty_id == BONDP_FALLBACK_PRIMARY_INVALID_ID) {
         return false;
     }
-    //如果还没接收到对端的resp 或者 已经relink好了(不用做了) 或者 对端返回的值不可用  就继续等
 
     if (bondp_relink_primary_import(task) == 0) {
-        //如果连好了
         fallback->relink_done = true;
         fallback->pending = false;
         fallback->local_rebuilt = false;
         fallback->req_sent = false;
         fallback->resp_received = false;
         fallback->remote_primary_pjetty_id = BONDP_FALLBACK_PRIMARY_INVALID_ID;
-        //重置fallback的状态收尾
         for (uint32_t n = 0; n < task->bdp_tjetty->active_count; ++n) {
             uint32_t local_idx = task->bdp_tjetty->local_active_indices[n];
             uint32_t target_idx = task->bdp_tjetty->active_indices[n];
@@ -806,17 +792,13 @@ static bool bondp_process_fallback_task(bondp_context_t *bdp_ctx, bondp_health_t
                 continue;
             }
             bondp_health_sub_task_t *sub = &task->sub_tasks[local_idx][target_idx];
-            //标记为可用
             sub->local_idx = (int)local_idx;
             sub->target_idx = (int)target_idx;
             sub->valid = true;
             sub->probe_pending = false;
             atomic_store(&sub->link_ok, true);
-            //恢复健康状态下的task
         }
         task->next_probe_ts_us = bondp_get_monotonic_us();
-        urma_ubagg_switch_inc();
-        //走到这里是重建成功
         URMA_LOG_INFO(
             "Fallback relink finished, health subtasks resumed, waiting health probe to validate primary idx=%d\n",
             task->primary_local_idx);
@@ -1117,7 +1099,6 @@ void bondp_health_update_active_idx(bondp_context_t *bdp_ctx, bondp_target_jetty
 
     bondp_heath_check_ctx_t *health = &bdp_ctx->bondp_heath_check_ctx;
     pthread_rwlock_wrlock(&health->task_table.lock);
-    //写加锁
     bondp_health_task_t *task = NULL;
     HMAP_FOR_EACH(task, hmap_node, &health->task_table.hmap) {
         if (task->bdp_tjetty != bdp_tjetty) {
@@ -1127,7 +1108,6 @@ void bondp_health_update_active_idx(bondp_context_t *bdp_ctx, bondp_target_jetty
         task->active_local_idx = new_active_idx;
         task->bondp_jetty->pjettys_error_done[new_active_idx] &= (uint8_t)(~PJETTY_FLUSH_ERROR_DONE);
         if (new_active_idx == task->primary_local_idx) {
-            //这里是回切逻辑
             task->fallback_task.relink_done = false;
             task->fallback_task.pending = false;
             task->fallback_task.local_rebuilt = false;
@@ -1177,20 +1157,19 @@ static bool bondp_health_handle_fallback_ctrl_rx_impl(bondp_context_t *bdp_ctx, 
     if (!bondp_health_check_enabled()) {
         return false;
     }
-    //health_check没开，则直接退出
+
     if (ctrl_type != BONDP_FALLBACK_CTRL_REQ && ctrl_type != BONDP_FALLBACK_CTRL_RESP) {
         if (!silent_unmatched) {
             URMA_LOG_WARN("Invalid fallback ctrl type=%u local_id=%u\n", ctrl_type, recv_local_id);
         }
         return false;
     }
-    //检查消息的处理，只能处理上述两种消息 BONDP_FALLBACK_CTRL_REQ就是healthcheck发出来的
+
     bondp_heath_check_ctx_t *health = &bdp_ctx->bondp_heath_check_ctx;
     pthread_rwlock_wrlock(&health->task_table.lock);
     int req_recv_local_idx = -1;
     bondp_health_task_t *task = bondp_find_health_task_by_cr_local_id_nolock(
         health, recv_local_id, &req_recv_local_idx);
-    //根据接收到的recv_local_id判断是哪个jetty收到的
     if (task == NULL) {
         pthread_rwlock_unlock(&health->task_table.lock);
         if (!silent_unmatched) {
@@ -1198,7 +1177,6 @@ static bool bondp_health_handle_fallback_ctrl_rx_impl(bondp_context_t *bdp_ctx, 
         }
         return false;
     }
-    //找不到则报错
 
     if (ctrl_type == BONDP_FALLBACK_CTRL_REQ) {
         uint32_t req_expected_primary_id = payload;
@@ -1209,9 +1187,7 @@ static bool bondp_health_handle_fallback_ctrl_rx_impl(bondp_context_t *bdp_ctx, 
         }
         bool need_rebuild = (local_primary_id == BONDP_FALLBACK_PRIMARY_INVALID_ID ||
             req_expected_primary_id != local_primary_id);
-        //判断本端要不要尝试重建本地primary_pjetty  本地不存在 或者 对端期望的和本地的不一致
         if (need_rebuild && !task->fallback_task.local_rebuilt && !task->fallback_task.relink_done) {
-            //要重建 且还没重建好 且还没整体重建好
             if (bondp_rebuild_primary_pjetty(task) != 0) {
                 URMA_LOG_WARN("Fallback REQ rebuild failed, skip RESP for this round, seq=%u\n", req_seq);
                 pthread_rwlock_unlock(&health->task_table.lock);
@@ -1219,7 +1195,6 @@ static bool bondp_health_handle_fallback_ctrl_rx_impl(bondp_context_t *bdp_ctx, 
             }
             task->fallback_task.local_rebuilt = true;
             if (task->active_local_idx == task->primary_local_idx) {
-                //当前如果是主则要切到备
                 int backup_local_idx = -1;
                 if (bondp_select_backup_local_idx(task, &backup_local_idx) == 0) {
                     task->active_local_idx = backup_local_idx;
@@ -1252,7 +1227,6 @@ static bool bondp_health_handle_fallback_ctrl_rx_impl(bondp_context_t *bdp_ctx, 
                 resp_local_idx, req_seq);
         }
         pthread_rwlock_unlock(&health->task_table.lock);
-        urma_ubagg_switch_inc();
         return true;
     }
 
@@ -1325,7 +1299,6 @@ void bondp_health_notify_datapath_link_fail(bondp_context_t *bdp_ctx, bondp_targ
         .bdp_jetty = NULL,
         .bdp_tjetty = bdp_tjetty,
     };
-    //处理好信息的数据结构
     bondp_notify_health_event(bdp_ctx, BONDP_HEALTH_EVENT_DATAPATH_LINK_FAIL, &info);
 }
 
@@ -1522,8 +1495,6 @@ int bondp_start_health_check_thread(void)
 {
     bondp_global_context_t *global_ctx = g_bondp_global_ctx;
     int health_epoll_fd;
-    int nl_fd;
-    struct epoll_event ev = {0};
 
     if (!bondp_health_check_enabled()) {
         return 0;
@@ -1536,15 +1507,6 @@ int bondp_start_health_check_thread(void)
     }
 
     global_ctx->health_thread_ctx.health_epoll_fd = health_epoll_fd;
-
-    nl_fd = bondp_nl_get_fd();
-    if (nl_fd >= 0) {
-        ev.events = EPOLLIN;
-        ev.data.fd = nl_fd;
-        if (epoll_ctl(health_epoll_fd, EPOLL_CTL_ADD, nl_fd, &ev) != 0) {
-            URMA_LOG_WARN("Failed to add bondp netlink fd to health epoll, errno=%d\n", errno);
-        }
-    }
 
     atomic_store(&global_ctx->health_thread_ctx.health_thread_stop, false);
     if (pthread_create(&global_ctx->health_thread_ctx.health_thread, NULL, bondp_health_check_thread,

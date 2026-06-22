@@ -72,7 +72,7 @@ typedef struct umq_credit_private_stats {
 typedef struct umq_flow_control_stats {
     umq_credit_pool_stats_t pool_credit; // credit-related statistics of a main queue
     umq_credit_private_stats_t queue_credit; // credit-related statistics of a specific queue
-    umq_packet_stats_t packet_stats; // flow control sacket statistics
+    umq_packet_stats_t packet_stats; // flow control packet statistics
 } umq_flow_control_stats_t;
 
 typedef struct umq_expansion_pool_stats {
@@ -235,7 +235,7 @@ typedef struct umq_perf_stats {
         uint64_t median; // median latency
         uint64_t p90; // 90th percentile
         uint64_t p99; // 99th percentile
-    } type_record[UMQ_PERF_RECORD_TYPE_MAX]; // statistical results list for each type of probe poin
+    } type_record[UMQ_PERF_RECORD_TYPE_MAX]; // statistical results list for each type of probe point
 } umq_perf_stats_t;
 
 typedef struct umq_perf_stats_cfg {
@@ -244,6 +244,16 @@ typedef struct umq_perf_stats_cfg {
 } umq_perf_stats_cfg_t;
 
 typedef void (*umq_io_perf_callback_t)(umq_perf_record_type_t record_type, umq_buf_t *qbuf);
+
+typedef struct umq_transport_pool_stats {
+    uint64_t total_num;
+    uint64_t global_num;
+    uint64_t cache_num;
+    uint64_t in_use_num;
+    uint64_t error_num;
+    uint64_t acc_alloc_num;
+    uint64_t acc_free_num;
+} umq_transport_pool_stats_t;
 
 #ifdef __cplusplus
 }

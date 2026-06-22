@@ -535,7 +535,7 @@ int umq_ipc_post_impl(uint64_t umqh_tp, umq_buf_t *qbuf, umq_io_option_t *option
     return UMQ_FAIL;
 }
 
-int umq_ipc_poll_impl(uint64_t umqh_tp, umq_io_direction_t io_direction, umq_buf_t **buf, uint32_t max_buf_count)
+int umq_ipc_poll_impl(uint64_t umqh_tp, umq_io_option_t *option, umq_buf_t **buf, uint32_t max_buf_count)
 {
     return UMQ_FAIL;
 }
@@ -720,7 +720,7 @@ void umq_ipc_notify_impl(uint64_t umqh_tp)
     futex_wake(&tp->local_msg_ring->shm_tx_ring_hdr->cq_event_flag, 1);
 }
 
-int umq_ipc_rearm_interrupt_impl(uint64_t umqh_tp, bool solicated, umq_interrupt_option_t *option)
+int umq_ipc_rearm_interrupt_impl(uint64_t umqh_tp, bool solicited, umq_interrupt_option_t *option)
 {
     if ((option->flag & UMQ_INTERRUPT_FLAG_IO_DIRECTION) == 0 || option->direction <= UMQ_IO_ALL ||
         option->direction >= UMQ_IO_MAX) {
