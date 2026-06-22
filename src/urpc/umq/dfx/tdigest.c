@@ -279,6 +279,11 @@ tdigest_t *tdigest_create(int compression)
 
     size_t n1 = (size_t)comp;
     size_t n2 = (size_t)(TDIGEST_BUFFER_RATIO * comp);
+    /* comp already bounded by TDIGEST_MAX_COMPRESSION above */
+    if (n1 == 0 || n2 == 0 || n2 > (size_t)TDIGEST_MAX_COMPRESSION * TDIGEST_BUFFER_RATIO) {
+        free(td);
+        return NULL;
+    }
     td->one_arr    = (tdigest_centroid_t *)calloc(n1, sizeof(tdigest_centroid_t));
     td->two_arr    = (tdigest_centroid_t *)calloc(n1, sizeof(tdigest_centroid_t));
     td->buffer_arr = (tdigest_centroid_t *)calloc(n2, sizeof(tdigest_centroid_t));

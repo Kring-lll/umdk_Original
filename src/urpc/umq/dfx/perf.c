@@ -284,7 +284,7 @@ int umq_perf_reset(umq_perf_stats_cfg_t *perf_stats_cfg)
         }
         for (uint32_t i = 0; i < n; i++) {
             if (perf_stats_cfg->quantile_pct[i] <= 0.0 ||
-                perf_stats_cfg->quantile_pct[i] > 100.0) {
+                perf_stats_cfg->quantile_pct[i] > TDIGEST_PCT_MAX) {
                 UMQ_VLOG_WARN(VLOG_UMQ,
                     "quantile_pct[%u]=%.1f out of range (0,100], using defaults\n",
                     i, perf_stats_cfg->quantile_pct[i]);
@@ -301,7 +301,7 @@ int umq_perf_reset(umq_perf_stats_cfg_t *perf_stats_cfg)
         // Use built-in defaults when no valid user config was provided.
         g_umq_perf_record_ctx->quantile_pct[0] = UMQ_PERF_DEFAULT_P50;
         g_umq_perf_record_ctx->quantile_pct[1] = UMQ_PERF_DEFAULT_P90;
-        g_umq_perf_record_ctx->quantile_pct[2] = UMQ_PERF_DEFAULT_P99;
+        g_umq_perf_record_ctx->quantile_pct[UMQ_PERF_DEFAULT_QUANTILE_NUM - 1] = UMQ_PERF_DEFAULT_P99;
         g_umq_perf_record_ctx->quantile_num = UMQ_PERF_DEFAULT_QUANTILE_NUM;
     }
 
