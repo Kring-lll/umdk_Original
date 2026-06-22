@@ -38,8 +38,9 @@ typedef struct umq_perftest_config {
     bool buf_multiplex;
     bool use_atomic_window;
     bool enable_perf;
-    uint64_t thresh_array[UMQ_PERF_QUANTILE_MAX_NUM];
-    uint16_t thresh_num;
+    double quantile_pct[UMQ_PERF_QUANTILE_MAX_NUM]; // quantile percentages (0-100)
+    uint16_t quantile_num;
+    int compression;               // t-digest compression (default 100)
     uint32_t blk_mode;
 } umq_perftest_config_t;
 
