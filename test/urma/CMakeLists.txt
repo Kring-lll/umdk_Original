@@ -72,12 +72,8 @@ target_link_options(urma_cmd_tlv_ut PRIVATE -Wl,--wrap=ioctl -Wl,--wrap=urma_que
 target_link_libraries(urma_cmd_tlv_ut PRIVATE urma_test_common ${URMA_STATIC} ${URMA_COMMON_STATIC}
     GTest::gtest_main dl rt pthread)
 
-add_executable(urma_bond_ut bond/bond_test.cpp)
-target_link_libraries(urma_bond_ut PRIVATE urma_test_common ${URMA_UBAGG_SO} ${URMA_SO} ${URMA_COMMON_SO}
-    GTest::gtest_main nl-genl-3 nl-3 dl rt pthread)
-
 enable_testing()
+add_subdirectory(bond)
 add_test(NAME urma_common_ut COMMAND urma_common_ut)
 add_test(NAME urma_core_ut COMMAND urma_core_ut)
 add_test(NAME urma_cmd_tlv_ut COMMAND urma_cmd_tlv_ut)
-add_test(NAME urma_bond_ut COMMAND urma_bond_ut)
