@@ -232,15 +232,16 @@ typedef struct umq_perf_stats {
         uint64_t average; // average latency
         uint64_t mininum; // min latency
         uint64_t maxinum; // max latency
-        uint64_t median; // median latency
-        uint64_t p90; // 90th percentile
-        uint64_t p99; // 99th percentile
+        uint64_t quantile_val[UMQ_PERF_QUANTILE_MAX_NUM]; // quantile values in ns
+        double quantile_pct[UMQ_PERF_QUANTILE_MAX_NUM]; // corresponding percentages (0-100)
+        uint32_t quantile_num; // number of valid entries in quantile_val / quantile_pct
     } type_record[UMQ_PERF_RECORD_TYPE_MAX]; // statistical results list for each type of probe poin
 } umq_perf_stats_t;
 
 typedef struct umq_perf_stats_cfg {
-    uint64_t thresh_array[UMQ_PERF_QUANTILE_MAX_NUM]; // quantile values list
-    uint32_t thresh_num; // number of valid quantiles
+    double quantile_pct[UMQ_PERF_QUANTILE_MAX_NUM]; // quantile percentages (0-100)
+    uint32_t quantile_num; // number of valid entries (0 = use defaults)
+    int compression;       // 0 = use default 100
 } umq_perf_stats_cfg_t;
 
 typedef void (*umq_io_perf_callback_t)(umq_perf_record_type_t record_type, umq_buf_t *qbuf);
