@@ -847,10 +847,11 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
         return UMQ_SUCCESS;
     }
     uint64_t timestamp = get_timestamp_us();
-    if ((queue->checker == NULL) || (timestamp < queue->checker->last_send)) {
+    uint64_t last_send = __atomic_load_n(&queue->checker->last_send, __ATOMIC_ACQUIRE);
+    if ((queue->checker == NULL) || (timestamp < last_send)) {
         return UMQ_SUCCESS;
     }
-    uint64_t diff = timestamp - queue->checker->last_send;
+    uint64_t diff = timestamp - last_send;
     uint16_t remote_credit = fc->ops.remote_rx_window_load(fc);
     uint16_t return_threshold = 0;
     if (fc->peer_ratio == 0) {
@@ -1055,7 +1056,7 @@ void umq_ub_rx_consumed_inc(bool lock_free, volatile uint64_t *var, uint64_t cou
     if (lock_free) {
         *var = *var + count;
     } else {
-        (void)__atomic_fetch_add(var, count, __ATOMIC_RELAXED);
+        (void)__atomic_fetch_add(var, count, __ATOMIC_RELEASE);
     }
 }
 
@@ -1066,7 +1067,7 @@ uint64_t umq_ub_rx_consumed_exchange(bool lock_free, volatile uint64_t *var, uin
         *var = 0;
         return temp;
     } else {
-        return __atomic_exchange_n(var, 0, __ATOMIC_RELAXED);
+        return __atomic_exchange_n(var, 0, __ATOMIC_ACQ_REL);
     }
 }
 
@@ -1074,7 +1075,7 @@ void umq_ub_credit_clean_up(ub_queue_t *queue)
 {
     ub_flow_control_t *fc = &queue->flow_control;
     ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
-    uint16_t actual_return_credit = __atomic_exchange_n(&fc->local_rx_posted, 0, __ATOMIC_RELAXED);
+    uint16_t actual_return_credit = __atomic_exchange_n(&fc->local_rx_posted, 0, __ATOMIC_ACQ_REL);
     uint64_t consumed_credit = umq_ub_rx_consumed_load(queue->dev_ctx->io_lock_free,
         &queue->dev_ctx->rx_consumed_jetty_table[queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id]);
     uint64_t allocated_credit = fc->ops.local_rx_allocated_load(fc);
