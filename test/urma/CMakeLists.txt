@@ -37,12 +37,15 @@ set(URMA_CORE_DIR ${URMA_SRC_DIR}/lib/urma/core)
 set(URMA_CORE_INCLUDE_DIR ${URMA_CORE_DIR}/include)
 set(URMA_BOND_DIR ${URMA_SRC_DIR}/lib/urma/bond)
 set(URMA_BOND_UTILS_DIR ${URMA_BOND_DIR}/utils)
+set(URMA_UVS_CORE_DIR ${URMA_SRC_DIR}/lib/uvs/core)
+set(URMA_UVS_INCLUDE_DIR ${URMA_UVS_CORE_DIR}/include)
 
 set(URMA_COMMON_STATIC ${URMA_BUILD_DIR}/urma/common/liburma_common_static.a)
 set(URMA_COMMON_SO ${URMA_BUILD_DIR}/urma/common/liburma_common.so)
 set(URMA_STATIC ${URMA_BUILD_DIR}/urma/lib/urma/core/liburma_static.a)
 set(URMA_SO ${URMA_BUILD_DIR}/urma/lib/urma/core/liburma.so)
 set(URMA_UBAGG_SO ${URMA_BUILD_DIR}/urma/lib/urma/bond/liburma_ubagg.so)
+set(URMA_TPSA_SO ${URMA_BUILD_DIR}/urma/lib/uvs/core/libtpsa.so)
 
 add_library(urma_test_common INTERFACE)
 target_include_directories(urma_test_common INTERFACE
@@ -53,6 +56,8 @@ target_include_directories(urma_test_common INTERFACE
     ${URMA_BOND_DIR}
     ${URMA_BOND_UTILS_DIR}
     ${URMA_BOND_DIR}/include
+    ${URMA_UVS_CORE_DIR}
+    ${URMA_UVS_INCLUDE_DIR}
 )
 target_compile_options(urma_test_common INTERFACE
     -Wall -Werror -O0 -g -fsanitize=address -fno-omit-frame-pointer --coverage
@@ -77,6 +82,7 @@ target_link_libraries(urma_bond_ut PRIVATE urma_test_common ${URMA_UBAGG_SO} ${U
     GTest::gtest_main nl-genl-3 nl-3 dl rt pthread)
 
 enable_testing()
+add_subdirectory(uvs)
 add_test(NAME urma_common_ut COMMAND urma_common_ut)
 add_test(NAME urma_core_ut COMMAND urma_core_ut)
 add_test(NAME urma_cmd_tlv_ut COMMAND urma_cmd_tlv_ut)
