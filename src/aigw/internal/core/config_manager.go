@@ -9,11 +9,14 @@
 package core
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
+	"huawei.com/aigw/internal/apipool"
 	"huawei.com/aigw/internal/base"
 	"huawei.com/aigw/pkg/log"
 	"huawei.com/aigw/pkg/utils"
@@ -289,6 +292,16 @@ func validatePredictorConfig(cfg *base.PredictorConfig) error {
 func validateGlobalSchedulersConfig(gsConfigs []base.GlobalSchedulerConfig) error {
 	for _, scheduler := range gsConfigs {
 		log.Info().Msgf("checking global scheduler config, model %v", scheduler.Model)
+		if err := validateModeField(&scheduler); err != nil {
+			return err
+		}
+		if scheduler.Mode == "provider" {
+			if err := validateProviderPool(&scheduler); err != nil {
+				return err
+			}
+			log.Info().Msgf("finished to check provider pool config, model %v", scheduler.Model)
+			continue // skip instance-mode loadBalancer/blockSize validation
+		}
 		if scheduler.BlockSize <= 0 {
 			return fmt.Errorf("invalid block size value: %v, should > 0", scheduler.BlockSize)
 		}
@@ -457,9 +470,77 @@ func validateDataSyncConfig(cfg *base.DataSyncConfig) error {
 
 // PrintConfig shows the config
 func (m *AigwConfigManager) PrintConfig() {
-	configJSON, err := json.MarshalIndent(m.config, "", "  ")
+	raw, err := json.Marshal(m.config)
+	if err != nil {
+		return
+	}
+	var generic any
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return
+	}
+	redactAPIKeys(generic)
+	configJSON, err := json.MarshalIndent(generic, "", "  ")
 	if err == nil {
-		// do not print private data
+		// do not print private data: provider apiKeys are reduced to a fingerprint
 		log.Debug().Msgf("current config: %v", string(configJSON))
 	}
+}
+
+// redactAPIKeys walks a decoded JSON value and replaces any "apiKey" string with
+// its sha256[:16] fingerprint so plaintext provider keys never reach the logs.
+func redactAPIKeys(v any) {
+	switch node := v.(type) {
+	case map[string]any:
+		for k, child := range node {
+			if k == "apiKey" {
+				if key, ok := child.(string); ok && key != "" {
+					sum := sha256.Sum256([]byte(key))
+					node[k] = hex.EncodeToString(sum[:])[:16]
+				}
+				continue
+			}
+			redactAPIKeys(child)
+		}
+	case []any:
+		for _, child := range node {
+			redactAPIKeys(child)
+		}
+	}
+}
+
+// validateModeField validates the optional mode literal.
+func validateModeField(gsc *base.GlobalSchedulerConfig) error {
+	switch gsc.Mode {
+	case "", "instance", "provider":
+		return nil
+	default:
+		return fmt.Errorf("model %q: invalid mode %q (want instance|provider)", gsc.Model, gsc.Mode)
+	}
+}
+
+// validateProviderPool validates a mode=provider scheduler config.
+func validateProviderPool(gsc *base.GlobalSchedulerConfig) error {
+	pp := gsc.ProviderPool
+	if pp == nil {
+		return fmt.Errorf("model %q: mode=provider requires providerPool", gsc.Model)
+	}
+	if len(pp.Deployments) == 0 {
+		return fmt.Errorf("model %q: providerPool.deployments must not be empty", gsc.Model)
+	}
+	if _, err := apipool.CreateStrategy(pp.Strategy, apipool.NewState(&base.CooldownConfig{}), pp.StrategyOptions); err != nil {
+		return fmt.Errorf("model %q: %w", gsc.Model, err)
+	}
+	registry := apipool.NewDefaultRegistry()
+	for _, d := range pp.Deployments {
+		if _, err := registry.Get(d.Provider); err != nil {
+			return fmt.Errorf("model %q: %w", gsc.Model, err)
+		}
+		if d.Provider == "custom" && d.AuthHeaderName == "" {
+			return fmt.Errorf("model %q deployment %q: custom provider requires authHeaderName", gsc.Model, d.ID)
+		}
+		if d.APIBase == "" || d.APIKey == "" {
+			return fmt.Errorf("model %q deployment %q: apiBase and apiKey required", gsc.Model, d.ID)
+		}
+	}
+	return nil
 }

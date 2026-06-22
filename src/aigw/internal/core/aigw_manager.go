@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"huawei.com/aigw/internal/apipool"
 	"huawei.com/aigw/internal/base"
 	"huawei.com/aigw/internal/gs"
 	"huawei.com/aigw/internal/tokenizers"
@@ -45,6 +46,11 @@ type AigwManager struct {
 	config  *base.AigwConfig
 	gsTable map[string]*gs.GlobalSchedulerManager
 
+	poolTable    map[string]*apipool.ApiPoolManager
+	apiPoolState *apipool.State
+	registry     *apipool.Registry
+
+	runtimeMode    base.RuntimeMode
 	HmacMgr        *crypto.HmacManager
 	AesMgr         *crypto.AesManager
 	lightgbm       *lightgbm.Booster
@@ -58,9 +64,11 @@ func NewAigwManager(config *base.AigwConfig, opts ...AIGWManagerOption) (*AigwMa
 		return nil, fmt.Errorf("confg is nil")
 	}
 	manager := &AigwManager{
-		config:  config,
-		gsTable: make(map[string]*gs.GlobalSchedulerManager),
-		tkTable: make(map[string]tokenizers.Tokenizer),
+		config:    config,
+		gsTable:   make(map[string]*gs.GlobalSchedulerManager),
+		tkTable:   make(map[string]tokenizers.Tokenizer),
+		poolTable: make(map[string]*apipool.ApiPoolManager),
+		registry:  apipool.NewDefaultRegistry(),
 	}
 
 	manager.ctx, manager.cancel = context.WithCancel(context.Background())
@@ -91,12 +99,37 @@ func (manager *AigwManager) Init() error {
 		}
 	}
 
-	for _, config := range gsConfigs {
-		err := manager.RegisterModel(&config)
-		if err != nil {
-			log.Error().Msgf("init aigw error: %v", err)
-			manager.Uninit()
-			return err
+	// Build shared provider-pool State. Cooldown config is taken from the last
+	// provider pool encountered; all pools share one State (cross-pool quota).
+	manager.apiPoolState = apipool.NewState(defaultCooldownConfig())
+
+	for i := range gsConfigs {
+		gsc := gsConfigs[i]
+		mode := gsc.Mode
+		if mode == "" {
+			mode = "instance"
+		}
+		switch mode {
+		case "provider":
+			if manager.runtimeMode == base.SdkMode {
+				manager.Uninit()
+				return fmt.Errorf("SdkMode does not support provider mode (model %q)", gsc.Model)
+			}
+			if gsc.ProviderPool != nil && gsc.ProviderPool.Cooldown != nil {
+				manager.apiPoolState.SetCooldownConfig(gsc.ProviderPool.Cooldown)
+			}
+			pool, err := apipool.NewApiPoolManager(gsc.Model, gsc.ProviderPool, manager.apiPoolState, manager.registry)
+			if err != nil {
+				manager.Uninit()
+				return err
+			}
+			manager.poolTable[gsc.Model] = pool
+		default:
+			if err := manager.RegisterModel(&gsc); err != nil {
+				log.Error().Msgf("init aigw error: %v", err)
+				manager.Uninit()
+				return err
+			}
 		}
 	}
 
@@ -120,6 +153,37 @@ func (manager *AigwManager) Uninit() {
 	lightgbm.BoosterDestroy(manager.lightgbm)
 
 	log.Info().Msgf("AigwManager uninitialized")
+}
+
+// defaultCooldownConfig returns sane defaults used until a provider pool overrides it.
+func defaultCooldownConfig() *base.CooldownConfig {
+	return &base.CooldownConfig{FailureThreshold: 3, DurationSec: 60, RateLimitDurationSec: 90, Auth401FloorSec: 300}
+}
+
+// GetContext returns the manager's root context, used to derive child contexts
+// for components such as the proxy manager.
+func (manager *AigwManager) GetContext() context.Context {
+	return manager.ctx
+}
+
+// GetModelMode returns "instance" or "provider" for a configured model.
+func (manager *AigwManager) GetModelMode(model string) (string, error) {
+	manager.rwLock.RLock()
+	defer manager.rwLock.RUnlock()
+	if _, ok := manager.poolTable[model]; ok {
+		return "provider", nil
+	}
+	if _, ok := manager.gsTable[model]; ok {
+		return "instance", nil
+	}
+	return "", fmt.Errorf("unknown model %q", model)
+}
+
+// GetApiPool returns the provider pool for a model, or nil if not a provider model.
+func (manager *AigwManager) GetApiPool(model string) *apipool.ApiPoolManager {
+	manager.rwLock.RLock()
+	defer manager.rwLock.RUnlock()
+	return manager.poolTable[model]
 }
 
 // GetAllStats get all GlobalSchedulerMangers' stats in the AigwManger
