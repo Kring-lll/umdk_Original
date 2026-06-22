@@ -452,11 +452,11 @@ void umq_ub_idle_queue_check(void *args)
             (void)util_mutex_unlock(cur_node->lock);
             continue;
         }
-        uint64_t last_send = __atomic_load_n(&cur_node->last_send, __ATOMIC_RELAXED);
+        uint64_t last_send = __atomic_load_n(&cur_node->last_send, __ATOMIC_ACQUIRE);
         if (current_timestamp >= last_send) {
             uint64_t diff = (current_timestamp - last_send);
             if (diff >= timeout_us) {
-                __atomic_store_n(&cur_node->need_return_credit, true, __ATOMIC_RELAXED);
+                __atomic_store_n(&cur_node->need_return_credit, true, __ATOMIC_RELEASE);
                 if (eventfd_write(cur_node->event_fd, value) == -1) {
                     UMQ_VLOG_ERR(VLOG_UMQ, "umq write event failed, err: %s\n", strerror(errno));
                 }
@@ -1422,7 +1422,7 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
     }
 
     if (!is_umq_ub_logic_queue(queue->create_flag) && !is_umq_ub_sub_queue(queue->create_flag) &&
-        __atomic_load_n(&queue->jfr_ctx[UB_QUEUE_JETTY_IO]->ref_cnt, __ATOMIC_RELAXED) != 1) {
+        __atomic_load_n(&queue->jfr_ctx[UB_QUEUE_JETTY_IO]->ref_cnt, __ATOMIC_ACQUIRE) != 1) {
         UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, jfr_ctx ref_cnt not cleared, cannot destroy main "
             "queue\n", EID_ARGS(*io_eid), io_id);
         return -UMQ_ERR_EBUSY;

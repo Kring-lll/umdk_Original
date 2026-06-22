@@ -1641,7 +1641,7 @@ static ALWAYS_INLINE void umq_ub_poll_release_jetty_node(ub_queue_t *queue, uint
         umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
         jetty_pool_node_t *node = jetty_node_list->node_list[tp_handle_idx];
         if (__atomic_sub_fetch(&node->tx_outstanding, cnt, __ATOMIC_ACQ_REL) == 0 &&
-            __atomic_exchange_n(&node->umq_ref, 0, __ATOMIC_RELAXED) != 0) {
+            __atomic_exchange_n(&node->umq_ref, 0, __ATOMIC_ACQ_REL) != 0) {
             queue->jetty_node = NULL;
             umq_ub_jetty_node_free(node);
             return;
@@ -1807,13 +1807,13 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, uint32_t 
         if ((queue->create_flag & UMQ_CREATE_FLAG_SUB_UMQ) != 0) {
             uint64_t count;
             ub_queue_idle_check_t *checker = queue->checker;
-            if (__atomic_load_n(&checker->need_return_credit, __ATOMIC_RELAXED)) {
+            if (__atomic_load_n(&checker->need_return_credit, __ATOMIC_ACQUIRE)) {
                 int ret = umq_ub_shared_credit_return_req_send(queue);
                 if (ret != UMQ_SUCCESS) {
                     umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
                     return ret;
                 }
-                __atomic_store_n(&checker->need_return_credit, false, __ATOMIC_RELAXED);
+                __atomic_store_n(&checker->need_return_credit, false, __ATOMIC_RELEASE);
                 (void)eventfd_read(checker->event_fd, &count);
             }
         }
