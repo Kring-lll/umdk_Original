@@ -31,7 +31,7 @@ static int run_test(test_ums_ctx_t *ctx)
         char buf0[MAX_EXEC_CMD_RET_LEN];
         exec_cmd(buf1, MAX_EXEC_CMD_RET_LEN, "service ums_agent restart");
         strncpy(ret_buf_1, cmd);
-        if (strcmp(ret_buf_0, "Redirecting to /bin/systemctl restart ums_agent.service") != 0) {
+        if (strcmp(ret_buf_1, "Redirecting to /bin/systemctl restart ums_agent.service") != 0) {
             ret = -1;
         }
         CHKERR_JUMP(ret != TEST_SUCCESS, "para num name error", EXIT);
