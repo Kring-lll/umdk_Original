@@ -246,6 +246,8 @@ typedef struct bondp_comp {
     std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_uint msn;
 #endif
+    bool failback_rebuilt[URMA_UBAGG_DEV_MAX_NUM];
+    //TODO: valid被改成atom了，failback_rebuilt如何定义如何使用
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
 #ifndef __cplusplus
     atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
