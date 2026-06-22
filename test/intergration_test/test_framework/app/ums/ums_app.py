@@ -7,9 +7,6 @@
 import logging
 import os
 import random
-import platform
-import time
-import datetime
 
 from common.constants import const
 
@@ -40,6 +37,12 @@ def prepare_test_case(host_list, case_path, case_name="test_case"):
             log.error("gcc test_case failed!")
             raise
 
+def check_port_nouse(host_list, port):
+    cmd = f'cat /tmp/netstat.txt | grep {port} | wc -l'
+    buf1 = host_list[0].exec_cmd(cmd).stdout
+    buf2 = host_list[1].exec_cmd(cmd).stdout
+    return int(buf1[0]) + int(buf2[0])
+
 def gen_random_port(host_list, port_num=2):
     cmd = f'netstat -an > /tmp/netstat.txt'
     for host in host_list:
@@ -50,6 +53,7 @@ def gen_random_port(host_list, port_num=2):
         res = 0
         for j in range(port_num):
             up = _test_port + j
+            ret = check_port_nouse(host_list, up)
             res += ret
         if res == 0:
             break

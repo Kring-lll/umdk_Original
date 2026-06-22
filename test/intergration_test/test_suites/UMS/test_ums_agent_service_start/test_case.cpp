@@ -13,20 +13,16 @@ static int run_test(test_ums_ctx_t *ctx)
 {
     int ret = 0;
     int rc = TEST_FAILED;
-    int check_num_ums;
-    int check_num_fallback;
-    char ret_buf_0[40];
-    char ret_buf_1[40];
+    char ret_buf_0[128];
+    char ret_buf_1[128];
     char test_ip_str[10]={0};
     char close_qperf[MAX_EXEC_CMD_RET_LEN];
-
-
 
     if (ctx->app_id == PROC_1) {
         char buf0[MAX_EXEC_CMD_RET_LEN];
         exec_cmd(buf0, MAX_EXEC_CMD_RET_LEN, "service ums_agent restart");
-        strcpy(ret_buf_0, cmd);
-        if (ret_buf_0 != "Redirecting to /bin/systemctl restart ums_agent.service") {
+        strncpy(ret_buf_0, cmd);
+        if (strcmp(ret_buf_0, "Redirecting to /bin/systemctl restart ums_agent.service") != 0) {
             ret = -1;
         }
         CHKERR_JUMP(ret != TEST_SUCCESS, "para num name error", EXIT);
@@ -34,8 +30,8 @@ static int run_test(test_ums_ctx_t *ctx)
     if (ctx->app_id == PROC_2) {
         char buf0[MAX_EXEC_CMD_RET_LEN];
         exec_cmd(buf1, MAX_EXEC_CMD_RET_LEN, "service ums_agent restart");
-        strcpy(ret_buf_1, cmd);
-        if (ret_buf_1 != "Redirecting to /bin/systemctl restart ums_agent.service") {
+        strncpy(ret_buf_1, cmd);
+        if (strcmp(ret_buf_0, "Redirecting to /bin/systemctl restart ums_agent.service") != 0) {
             ret = -1;
         }
         CHKERR_JUMP(ret != TEST_SUCCESS, "para num name error", EXIT);

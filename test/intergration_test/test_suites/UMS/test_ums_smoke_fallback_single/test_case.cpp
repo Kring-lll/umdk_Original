@@ -16,19 +16,12 @@ static int run_test(test_ums_ctx_t *ctx)
     int ret = 0;
     int rc = TEST_FAILED;
     int check_num;
+     char setup_env[MAX_EXEC_CMD_RET_LEN];
     char port_str[10]={0};
-    char setup_env0[MAX_EXEC_CMD_RET_LEN];
-    char setup_env1[MAX_EXEC_CMD_RET_LEN];
     char close_qperf[MAX_EXEC_CMD_RET_LEN];
 
-    if (ctx->app_id == PROC_1) {
-        char buf0[MAX_EXEC_CMD_RET_LEN];
-        exec_cmd(setup_env0, MAX_EXEC_CMD_RET_LEN, "rmmod ums; modprobe ums; service ums_agent restart");
-    }
-    if (ctx->app_id == PROC_2) {
-        char buf0[MAX_EXEC_CMD_RET_LEN];
-        exec_cmd(setup_env1, MAX_EXEC_CMD_RET_LEN, "rmmod ums; modprobe ums; service ums_agent restart");
-    }
+    exec_cmd(setup_env, MAX_EXEC_CMD_RET_LEN, "rmmod ums; modprobe ums; service ums_agent restart");
+
     sync_time("----------------------------0");
 
     if (ctx->app_id == PROC_1) {

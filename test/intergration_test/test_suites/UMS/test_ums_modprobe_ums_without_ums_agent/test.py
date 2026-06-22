@@ -9,7 +9,6 @@
 import logging
 import os
 import sys
-import random
 
 from app.ums.ums_app import prepare_test_case, exec_test_case
 
@@ -30,6 +29,6 @@ class Test(UBUSFeature):
         log.info('--------- [ Test teardown ] ---------')
         super(Test, self).teardown()
 
-    def test_ums_read_proc_net_ums_addr(self):
+    def test_ums_modprobe_ums_without_ums_agent(self):
         log.info(f'--------- [ Test local_path = {local_path} ] ---------')
         exec_test_case(self.host_list, local_path)
