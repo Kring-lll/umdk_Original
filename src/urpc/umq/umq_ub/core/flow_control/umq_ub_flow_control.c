@@ -398,7 +398,7 @@ static ALWAYS_INLINE uint16_t remote_rx_window_dec_atomic(struct ub_flow_control
 
 static ALWAYS_INLINE uint16_t remote_rx_window_load_atomic(struct ub_flow_control *fc)
 {
-    return __atomic_load_n(&fc->remote_rx_window, __ATOMIC_RELAXED);
+    return __atomic_load_n(&fc->remote_rx_window, __ATOMIC_ACQUIRE);
 }
 
 static ALWAYS_INLINE uint64_t local_rx_allocated_inc_atomic(struct ub_flow_control *fc, uint16_t win)
@@ -747,7 +747,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify, ui
     urma_jetty_t *jetty  = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
-    uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
+    uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_ACQUIRE);
     umq_ub_fc_sge_data_t sge_data = {
         .bs = {
             .type = IMM_TYPE_FC_CREDIT_REP,
@@ -969,7 +969,7 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
     urma_jetty_t *jetty  = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
-    uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_RELAXED);
+    uint16_t available = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_ACQUIRE);
 
     umq_ub_fc_sge_data_t sge_data = {
         .bs = {
