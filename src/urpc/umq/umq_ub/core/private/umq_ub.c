@@ -1512,7 +1512,7 @@ void umq_ub_jfr_ctx_destroy(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
 
 void umq_ub_jfr_ctx_put(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
 {
-    uint32_t new_value = __atomic_sub_fetch(&queue->jfr_ctx[jetty_idx]->ref_cnt, 1, __ATOMIC_RELAXED);
+    uint32_t new_value = __atomic_sub_fetch(&queue->jfr_ctx[jetty_idx]->ref_cnt, 1, __ATOMIC_ACQ_REL);
     UMQ_VLOG_DEBUG(VLOG_UMQ, "jfr_ctx ref_cnt %u\n", new_value);
     if (new_value > 0) {
         return;
@@ -2868,7 +2868,7 @@ static int umq_report_incomplete_and_merge_rx(
 
 void umq_ub_fill_rx_buffer(ub_queue_t *queue, int rx_cnt)
 {
-    __atomic_fetch_add(&queue->require_rx_count, rx_cnt, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&queue->require_rx_count, rx_cnt, __ATOMIC_RELEASE);
     uint32_t require_rx_count = umq_get_post_rx_num(queue->rx_depth, &queue->require_rx_count);
     if (require_rx_count > 0) {
         uint32_t cur_batch_count = 0;
@@ -2879,7 +2879,7 @@ void umq_ub_fill_rx_buffer(ub_queue_t *queue, int rx_cnt)
             cur_batch_count = require_rx_count > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : require_rx_count;
             umq_buf_t *qbuf = umq_buf_alloc(queue->rx_buf_size, cur_batch_count, UMQ_INVALID_HANDLE, NULL);
             if (qbuf == NULL) {
-                __atomic_fetch_add(&queue->require_rx_count, cur_batch_count, __ATOMIC_RELAXED);
+                __atomic_fetch_add(&queue->require_rx_count, cur_batch_count, __ATOMIC_RELEASE);
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, alloc rx failed\n", EID_ARGS(*eid), id);
                 break;
             }
@@ -2895,7 +2895,7 @@ void umq_ub_fill_rx_buffer(ub_queue_t *queue, int rx_cnt)
                     tmp_buf = tmp_buf->qbuf_next;
                 }
                 umq_buf_free(bad_buf);
-                __atomic_fetch_add(&queue->require_rx_count, fail_count, __ATOMIC_RELAXED);
+                __atomic_fetch_add(&queue->require_rx_count, fail_count, __ATOMIC_RELEASE);
                 break;
             }
             require_rx_count -= cur_batch_count;
