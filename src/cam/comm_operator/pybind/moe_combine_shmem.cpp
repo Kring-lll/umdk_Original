@@ -182,7 +182,7 @@ at::Tensor MoeCombineShmemImpl(
         extInfo, outDtype, groupListType, windowSize);
 }
 
-// 通过继承torch::autograd::Function类实现前反向绑定
+// Bind forward and backward by inheriting torch::autograd::Function
 class MoeCombineShmem : public torch::autograd::Function<MoeCombineShmem> {
 public:
     static at::Tensor forward(
@@ -275,7 +275,7 @@ TORCH_LIBRARY_IMPL(umdk_cam_op_lib, AutogradPrivateUse1, m)
     m.impl("moe_combine_shmem", &MoeCombineShmemImplAutograd);
 }
 
-// 为Meta设备注册前反向实现
+// Register forward and backward implementations for Meta device
 TORCH_LIBRARY_IMPL(umdk_cam_op_lib, Meta, m)
 {
     m.impl("moe_combine_shmem", &MoeCombineShmemImplMeta);

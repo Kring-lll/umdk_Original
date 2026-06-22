@@ -49,7 +49,7 @@ class NotifyDispatchA2 {
     constexpr static int32_t FLAG_VALUE = 0xFFFFFFFF;
     constexpr static uint32_t STATUS_ENTRY_SIZE = 32;  // each status entry size, bytes
     constexpr static uint32_t U32_STATUS_ENTRY = STATUS_ENTRY_SIZE / sizeof(int32_t);
-    constexpr static uint32_t FLAG_OFFSET = 8;          // status_flag offset in statusTensor中, bytes
+    constexpr static uint32_t FLAG_OFFSET = 8;          // status_flag offset in statusTensor, bytes
     constexpr static uint32_t SOURCE_RANK_OFFSET = 16;  // sourceRankId offset in statusTensor, bytes
     constexpr static uint32_t DEST_RANK_OFFSET = 20;    // destRankId offset in statusTensor, bytes
     constexpr static uint32_t DATALEN_OFFSET = 24;      // dataLen offset in statusTensor, bytes
