@@ -1097,6 +1097,7 @@ PUT_FREE_NODE:
 
 static int umq_ub_destroy_jetty_node(ub_queue_t *queue, jetty_pool_node_t *jetty_node)
 {
+    uint64_t start_timestamp;
     urma_jetty_t *fc_jetty = jetty_node->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     urma_jetty_t *io_jetty = jetty_node->jetty[UB_QUEUE_JETTY_IO];
     urma_jfc_t *fc_jfs_jfc = jetty_node->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL];
@@ -1109,13 +1110,26 @@ static int umq_ub_destroy_jetty_node(ub_queue_t *queue, jetty_pool_node_t *jetty
     }
 
     if (queue->flow_control.enabled) {
+        start_timestamp = umq_perf_get_start_timestamp();
         (void)umq_symbol_urma()->urma_delete_jetty(fc_jetty);
+        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_DESTROY_JETTY, start_timestamp);
+        start_timestamp = umq_perf_get_start_timestamp();
         (void)umq_symbol_urma()->urma_delete_jfc(fc_jfs_jfc);
+        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_DESTROY_JFC, start_timestamp);
     }
+    
+    start_timestamp = umq_perf_get_start_timestamp();
     (void)umq_symbol_urma()->urma_delete_jetty(io_jetty);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_DESTROY_JETTY, start_timestamp);
+
+    start_timestamp = umq_perf_get_start_timestamp();
     (void)umq_symbol_urma()->urma_delete_jfc(io_jfs_jfc);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_DESTROY_JFC, start_timestamp);
+
     if (queue->mode == UMQ_MODE_INTERRUPT) {
+        start_timestamp = umq_perf_get_start_timestamp();
         (void)umq_symbol_urma()->urma_delete_jfce(jfs_jfce);
+        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_DESTROY_JFCE, start_timestamp);
     }
     return UMQ_SUCCESS;
 }
@@ -1379,6 +1393,7 @@ DEC_REF:
 
 int32_t umq_ub_destroy_impl(uint64_t umqh)
 {
+    uint64_t start_timestamp;
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
     // For Logic UMQ, use share_rq's IO jetty for logging (no own IO jetty)
     urma_eid_t *io_eid;
@@ -1432,13 +1447,18 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
         umq_ub_credit_clean_up(queue);
         UMQ_VLOG_INFO(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, delete flowcontrol jetty\n",
             EID_ARGS(*fc_eid), fc_id);
+
+        start_timestamp = umq_perf_get_start_timestamp();
         ret = umq_symbol_urma()->urma_delete_jetty(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]);
+        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_DESTROY_JETTY, start_timestamp);
         if (ret != URMA_SUCCESS) {
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_delete_jetty for flowcontrol jetty "
                 "failed, status: %d\n", EID_ARGS(*fc_eid), fc_id, ret);
         }
 
+        start_timestamp = umq_perf_get_start_timestamp();
         ret = umq_symbol_urma()->urma_delete_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL]);
+        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_DESTROY_JFC, start_timestamp);
         if (ret != URMA_SUCCESS) {
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_delete_jfc for flowcontrol jfs_jfc "
                 "failed, status: %d\n", EID_ARGS(*fc_eid), fc_id, ret);
@@ -1463,18 +1483,24 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
     umq_ub_flow_control_uninit(&queue->flow_control);
 
     if (!is_umq_ub_logic_queue(queue->create_flag)) {
+        start_timestamp = umq_perf_get_start_timestamp();
         ret = umq_symbol_urma()->urma_delete_jetty(queue->jetty[UB_QUEUE_JETTY_IO]);
+        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_DESTROY_JETTY, start_timestamp);
         if (ret != URMA_SUCCESS) {
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_delete_jetty failed, status: %d\n",
                 EID_ARGS(*io_eid), io_id, ret);
         }
+        start_timestamp = umq_perf_get_start_timestamp();
         ret = umq_symbol_urma()->urma_delete_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_IO]);
+        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_DESTROY_JFC, start_timestamp);
         if (ret != URMA_SUCCESS) {
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_delete_jfc failed, status: %d\n",
                 EID_ARGS(*io_eid), io_id, ret);
         }
         if (queue->mode == UMQ_MODE_INTERRUPT) {
+            start_timestamp = umq_perf_get_start_timestamp();
             ret = umq_symbol_urma()->urma_delete_jfce(queue->jfs_jfce);
+            umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_DESTROY_JFCE, start_timestamp);
             if (ret != URMA_SUCCESS) {
                 UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_delete_jfc failed, status: %d\n",
                     EID_ARGS(*io_eid), io_id, ret);
