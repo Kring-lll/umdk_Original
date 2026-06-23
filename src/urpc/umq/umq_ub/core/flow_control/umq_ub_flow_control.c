@@ -658,13 +658,13 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
         return UMQ_SUCCESS;
     }
 
+    if (!umq_ub_permission_acquire(fc)) {
+        return UMQ_SUCCESS;
+    }
+
     int ret = umq_ub_poll_fc_tx(queue, NULL, 0, 0);
     if (ret != UMQ_SUCCESS) {
         return ret;
-    }
-
-    if (!umq_ub_permission_acquire(fc)) {
-        return UMQ_SUCCESS;
     }
 
     ret = umq_ub_get_jetty_node(queue, 1);
