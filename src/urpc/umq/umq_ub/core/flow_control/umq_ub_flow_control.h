@@ -12,6 +12,7 @@
 
 #include "umq_ub_private.h"
 #include "util_id_generator.h"
+#include "urpc_util.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -67,7 +68,7 @@ static ALWAYS_INLINE int umq_ub_credit_check_and_request_send(ub_flow_control_t 
         return UMQ_SUCCESS;
     }
     if (queue->checker != NULL) {
-        __atomic_store_n(&queue->checker->last_send, get_timestamp_us(), __ATOMIC_RELEASE);
+        __atomic_store_n(&queue->checker->last_send, urpc_get_cpu_cycles(), __ATOMIC_RELEASE);
     }
     if (fc->ops.remote_rx_window_load(fc) <=
         umq_ub_flow_control_threashold_modify(fc->credit_request_threshold, fc->peer_ratio)) {
