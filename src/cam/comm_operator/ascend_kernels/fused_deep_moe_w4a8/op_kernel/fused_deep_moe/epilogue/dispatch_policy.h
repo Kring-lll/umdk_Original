@@ -6,7 +6,9 @@
  * Note:
  * History: 2025-07-19 create FusedDeepMoe operator kernel function implementation file
  */
-#pragma once
+#ifndef EPILOGUE_DISPATCH_POLICY_H
+#define EPILOGUE_DISPATCH_POLICY_H
+
 #include "catlass/epilogue/dispatch_policy.hpp"
 
 namespace Catlass::Epilogue {
@@ -26,3 +28,5 @@ struct EpilogueAtlasA2PerTokenDequantCombine {
 };
 
 }  // namespace Catlass::Epilogue
+
+#endif  // EPILOGUE_DISPATCH_POLICY_H

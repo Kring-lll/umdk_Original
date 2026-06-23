@@ -122,7 +122,7 @@ public:
         CATLASS_DEVICE
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_, LayoutA layoutA_,
                GM_ADDR ptrB_, LayoutB layoutB_, 
-               GM_ADDR gmWeightAux_, GM_ADDR gmShareWeightAux_ , // gmWeightAux
+               GM_ADDR gmWeightAux_, GM_ADDR gmShareWeightAux_, // gmWeightAux
                GM_ADDR ptrScale_, LayoutScale layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale layoutPerTokenScale_, GM_ADDR ptrD_, LayoutD layoutD_, uint32_t batchSize_,
                GemmCoord sharedGmm2ProblemShape_, GM_ADDR ptrSharedA_, GM_ADDR ptrSharedB_, GM_ADDR ptrSharedD_,
@@ -138,7 +138,7 @@ public:
               ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
               layoutB(layoutB_),
               gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)),
-              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)),// 共享专家补偿矩阵
+              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)), // 共享专家补偿矩阵
               ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
               layoutScale(layoutScale_),
               ptrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrPerTokenScale_)),
@@ -221,8 +221,8 @@ public:
             }
             
             uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx) * 2
-                                                : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1))* 2;
-            GemmCoord inGroupProblemShape{currentM  , params.problemShape.n(), params.problemShape.k()};
+                                                : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1)) * 2;
+            GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
             LayoutB layoutB = params.layoutB;
 
@@ -280,7 +280,9 @@ public:
             gmA.SetGlobalBuffer(params.ptrSharedA);
             gmB.SetGlobalBuffer(params.ptrSharedB);
             uint32_t softStageUsed = 0;
-            GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m()  * 2, params.sharedGmm2ProblemShape.n(), params.problemShape.k()};
+            GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m() * 2,
+                                          params.sharedGmm2ProblemShape.n(),
+                                          params.problemShape.k()};
             LayoutA layoutA = params.sharedLayoutA;
             LayoutB layoutB = params.sharedLayoutB;
 
@@ -402,10 +404,11 @@ public:
 
             // params.problemCount 改成3
             for (uint32_t groupIdx = 0; groupIdx < params.problemCount ; ++groupIdx) {
-                uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
-                                                    : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
+                uint32_t currentM = (groupIdx == 0) ?
+                    groupList.GetValue(groupIdx) :
+                    (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
                 GemmCoord inGroupProblemShape{currentM * 2, params.problemShape.n(), params.problemShape.k()};
-                GemmCoord pertokenGroupProblemShape{currentM , params.problemShape.n(), params.problemShape.k()};
+                GemmCoord pertokenGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
                 LayoutScale layoutScale = params.layoutScale;
                 LayoutPerTokenScale layoutPerTokenScale =
                     params.layoutPerTokenScale.GetTileLayout(pertokenGroupProblemShape.template GetCoordByAxis<0>());
@@ -447,8 +450,10 @@ public:
                     Callback callbackBeforeBlockEpilogue = MakeCallbackWithCall2(&aicWaitFuncList[stageId]);
                     Callback callbackAfterBlockEpilogue = MakeCallbackWithCall2(&aicSetFuncList[stageId]);
                     callbackBeforeBlockEpilogue();
-                    blockEpilogue(gmGroupOffsetD, groupIdx, blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC,
-                                  layoutBlockC);
+                    blockEpilogue(gmGroupOffsetD, groupIdx,
+                                  blockShapeMNK, blockCoordMNK,
+                                  actualBlockShapeMNK,
+                                  gmBlockC, layoutBlockC);
                     callbackAfterBlockEpilogue();
 
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
@@ -468,7 +473,9 @@ public:
                     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
                         AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
                     }
-                    GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m()  * 2, params.sharedGmm2ProblemShape.n(), params.problemShape.k()};
+                    GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m() * 2,
+                                                  params.sharedGmm2ProblemShape.n(),
+                                                  params.problemShape.k()};
                     LayoutScale layoutScale = params.layoutScale;
                     LayoutPerTokenScale layoutPerTokenScale =
                         params.sharedLayoutPerTokenScale.GetTileLayout(
