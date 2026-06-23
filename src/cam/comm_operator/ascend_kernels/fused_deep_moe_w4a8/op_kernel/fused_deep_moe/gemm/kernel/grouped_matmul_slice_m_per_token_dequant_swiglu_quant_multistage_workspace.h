@@ -132,7 +132,7 @@ public:
         ubQuantScale = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
         ubOffset += CEIL_UP(tileRow * sizeof(float));
 
-        //int 8 -> int 4 
+        // int 8 -> int 4 
         xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(ubOffset);
         ubOffset += CEIL_UP(tileColumn / 2);
         xLowI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(ubOffset);
@@ -281,7 +281,7 @@ public:
            
             
             AscendC::PipeBarrier<PIPE_V>();
-            //取出低四位所需要的额外tensor
+            // 取出低四位所需要的额外tensor
             constexpr int32_t MASK = 128;
             AscendC::Duplicate(xLowI16Tensor, static_cast<int16_t>(0x0F0F), MASK);
             AscendC::PipeBarrier<PIPE_V>();
@@ -357,7 +357,7 @@ private:
     AscendC::LocalTensor<float> ubQuantF32;
     AscendC::LocalTensor<int32_t> ubQuantS32;
     AscendC::LocalTensor<half> ubQuantF16;
-    //后处理int8 -> int 4 
+    // 后处理int8 -> int 4 
     AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor;
     AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor;
     AscendC::LocalTensor<half> xLowHalfTensor;
@@ -554,7 +554,7 @@ public:
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_,
                LayoutA const &layoutA_, GM_ADDR ptrShareB_, LayoutB const &layoutShareB_, GM_ADDR ptrB_,
                LayoutB const &layoutB_,
-               GM_ADDR gmWeightAux_, GM_ADDR gmShareWeightAux_ , //补偿矩阵
+               GM_ADDR gmWeightAux_, GM_ADDR gmShareWeightAux_ , // 补偿矩阵
                GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_,
                GM_ADDR ptrScale_, LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale const &layoutPerTokenScale_, GM_ADDR ptrOutput_, LayoutOutput const &layoutOutput_,
@@ -573,8 +573,8 @@ public:
               layoutShareB(layoutShareB_),
               ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
               layoutB(layoutB_),
-              gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)), //补偿矩阵
-              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)),//共享专家补偿矩阵
+              gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)), // 补偿矩阵
+              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)),// 共享专家补偿矩阵
               ptrShareScale(reinterpret_cast<__gm__ ElementScale *>(ptrShareScale_)),
               layoutShareScale(layoutShareScale_),
               ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
@@ -698,7 +698,7 @@ public:
         // Represent the full gm
         AscendC::GlobalTensor<ElementA> gmA;
         AscendC::GlobalTensor<ElementB> gmB;
-        //int4 左矩阵和之前gmA指向同一个位置
+        // int4 左矩阵和之前gmA指向同一个位置
         AscendC::GlobalTensor<AscendC::int4b_t> gmA_Int4;
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             gmA.SetGlobalBuffer((__gm__ ElementA*)params.gmShareX1);
@@ -780,7 +780,7 @@ public:
         }
 
         gmA.SetGlobalBuffer(params.ptrA);
-        //int 4 左矩阵
+        // int 4 左矩阵
         gmA_Int4.SetGlobalBuffer(params.ptrA);
         if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
             gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(gmBlistTensorDesc.GetDataPtr<int32_t>(0)));
@@ -799,7 +799,7 @@ public:
     
 
             WaitGroupTokenNumReady(groupTokenNumStateTensor, expected);
-            //每次输入2倍行数，高四位与低四位一起矩阵乘
+            // 每次输入2倍行数，高四位与低四位一起矩阵乘
             uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT) * 2;
             GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
 
@@ -838,7 +838,7 @@ public:
 
                 // Compute block-scoped matrix multiply-add
                 if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
-                    //改成gmA_int4
+                    // 改成gmA_int4
                     blockMmad(gmA_Int4[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
                               gmC[gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
                 } else {
@@ -1224,7 +1224,7 @@ public:
         subUbOffset += CEIL_UP(axisHCommu * sizeof(int8_t));
 
 
-        //共享专家int8 -> int4
+        // 共享专家int8 -> int4
         AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
         xHighI4Tensor.SetSize(tokenLength);
         subUbOffset += tokenLength / 2;
@@ -1256,7 +1256,7 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID2);
         }
 
-        //int 8 - > int4 
+        // int 8 - > int4 
         constexpr int32_t MASK = 128;
         AscendC::Duplicate(xLowI16Tensor, static_cast<int16_t>(0x0F0F), MASK);
         AscendC::PipeBarrier<PIPE_V>();
@@ -1292,11 +1292,11 @@ public:
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventId);
             AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventId);
-            //AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength], yInt8Tensor[index], tokenLength);
+            // AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength], yInt8Tensor[index], tokenLength);
             AscendC::DataCopyPad(
                 dstXScaleGMTensor[tokenIndex], yFp32Tensor[index][tokenLength / sizeof(float)], dataCopyParamsFloat);
             AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(eventId);
-            //共享专家int8 -> int4
+            // 共享专家int8 -> int4
             // 高四位处理开始
             AscendC::Cast(xHighHalfTensor, yInt8Tensor[index], AscendC::RoundMode::CAST_NONE, tokenLength);
             AscendC::PipeBarrier<PIPE_V>();
@@ -1320,7 +1320,7 @@ public:
             }
             AscendC::PipeBarrier<PIPE_V>();
 
-            //等待计算完再搬运xtenor
+            // 等待计算完再搬运xtenor
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventId);
             AscendC::Cast(xLowHalfTensor2.ReinterpretCast<half>(), xLowHalfTensor.ReinterpretCast<int8_t>(),
                     AscendC::RoundMode::CAST_NONE, tokenLength);
@@ -1336,7 +1336,7 @@ public:
             AscendC::DataCopy(dstXInt8GMTensor[outputOffset + tokenLength / 2], xLowI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
             AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(0);
         }
-        //int 8 to int4
+        // int 8 to int4
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(0);
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(1);
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(0);
@@ -1746,7 +1746,7 @@ CATLASS_DEVICE
                 LayoutPerTokenScale layoutPerTokenScale =
                     wholeLayoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
                 LayoutD layoutD = layout::RowMajor{currentM, shareN};
-                //通过编译，共享专家模式随机给gmWeightAuxPtr
+                // 通过编译，共享专家模式随机给gmWeightAuxPtr
                 EpilogueParams epilogueParams{
                     gmShareMm1Scale, layoutShareScale,
                     gmShareWeightAux,
@@ -1803,7 +1803,7 @@ CATLASS_DEVICE
                 }
                 uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT) ;
                 
-                //现在C矩阵由高低四位拼成，行数*2
+                // 现在C矩阵由高低四位拼成，行数*2
                 GemmCoord inGroupProblemShape{currentM * 2, n, k};
                 GemmCoord newinGroupProblemShape{currentM , n, k};
                 LayoutPerTokenScale layoutPerTokenScale =
@@ -1818,7 +1818,7 @@ CATLASS_DEVICE
                     
                     epilogueParams = EpilogueParams {
                                                 gmScalePtr, layoutScale,
-                                                gmWeightAuxPtr,//补偿矩阵
+                                                gmWeightAuxPtr,// 补偿矩阵
                                                 gmTokenScale + gmGroupOffsetPerTokenScale, layoutPerTokenScale,
                                                 gmSwigluOutput + gmGroupOffsetD, layoutD};
                 } else {
@@ -2645,7 +2645,7 @@ public:
                     params.layoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
                 LayoutD layoutD = layout::RowMajor{currentM, n};
                 EpilogueParams epilogueParams;
-                //传入参数解决编译问题
+                // 传入参数解决编译问题
                 __gm__ float* gmWeightAuxPtr;
                 if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                     gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(

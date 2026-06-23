@@ -122,7 +122,7 @@ public:
         CATLASS_DEVICE
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_, LayoutA layoutA_,
                GM_ADDR ptrB_, LayoutB layoutB_, 
-               GM_ADDR gmWeightAux_, GM_ADDR gmShareWeightAux_ , //gmWeightAux
+               GM_ADDR gmWeightAux_, GM_ADDR gmShareWeightAux_ , // gmWeightAux
                GM_ADDR ptrScale_, LayoutScale layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale layoutPerTokenScale_, GM_ADDR ptrD_, LayoutD layoutD_, uint32_t batchSize_,
                GemmCoord sharedGmm2ProblemShape_, GM_ADDR ptrSharedA_, GM_ADDR ptrSharedB_, GM_ADDR ptrSharedD_,
@@ -138,7 +138,7 @@ public:
               ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
               layoutB(layoutB_),
               gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)),
-              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)),//共享专家补偿矩阵
+              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)),// 共享专家补偿矩阵
               ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
               layoutScale(layoutScale_),
               ptrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrPerTokenScale_)),
@@ -190,7 +190,7 @@ public:
         // Represent the full gm
         AscendC::GlobalTensor<ElementA> gmA;
         AscendC::GlobalTensor<AscendC::int4b_t> gmA_Int4;
-        //int 4左矩阵和之前gmA指向同一个位置
+        // int 4左矩阵和之前gmA指向同一个位置
         gmA.SetGlobalBuffer(params.ptrA);
         gmA_Int4.SetGlobalBuffer(params.ptrA);
         AscendC::GlobalTensor<ElementB> gmB;
@@ -213,7 +213,7 @@ public:
         uint32_t stageId = 0;
         uint32_t stageUsed = 0;
         uint32_t startCoreIdx = 0;
-        //params.problemCount 改成3
+        // params.problemCount 改成3
         for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
             if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                 gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(
@@ -390,17 +390,17 @@ public:
             gmScaleListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(params.ptrScale));
             __gm__ ElementScale* gmScalePtr;
             
-            //补偿矩阵
+            // 补偿矩阵
             AscendC::ListTensorDesc gmWeightAuxListTensor;
             gmWeightAuxListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(params.gmWeightAux));
             __gm__ float* gmWeightAuxPtr;
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                 gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(gmScaleListTensor.GetDataPtr<int32_t>(0));
-                //补偿矩阵
+                // 补偿矩阵
                 gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(gmWeightAuxListTensor.GetDataPtr<int32_t>(0));
             }
 
-            //params.problemCount 改成3
+            // params.problemCount 改成3
             for (uint32_t groupIdx = 0; groupIdx < params.problemCount ; ++groupIdx) {
                 uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
                                                     : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
