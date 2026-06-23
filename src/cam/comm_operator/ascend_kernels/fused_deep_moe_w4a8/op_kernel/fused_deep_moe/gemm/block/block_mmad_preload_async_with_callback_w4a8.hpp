@@ -379,7 +379,9 @@ private:
                     uint8_t unitFlag = 0b00;
                     if constexpr (ENABLE_UNIT_FLAG) {
                         if (params.isKLoopLast &&
-                            (mPartIdx == mPartLoop - 1) && (kPartIdx == kPartLoop - 1) && (nPartIdx == nPartLoop - 1)) {
+                            (mPartIdx == mPartLoop - 1) &&
+                            (kPartIdx == kPartLoop - 1) &&
+                            (nPartIdx == nPartLoop - 1)) {
                             unitFlag = 0b11;
                         } else {
                             unitFlag = 0b10;
