@@ -114,6 +114,10 @@ int umq_flow_control_stats_to_str(const umq_flow_control_stats_t *flow_control_s
         "%-40s %-40lu\n", "Send Error Cnt", flow_control_stats->packet_stats.send_error_cnt);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
         "%-40s %-40lu\n", "Recv Error Cnt", flow_control_stats->packet_stats.recv_error_cnt);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-40s %-40lu\n", "Recv Dup Req Cnt", flow_control_stats->packet_stats.recv_dup_req_cnt);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-40s %-40lu\n", "Recv Dup Rsp Cnt", flow_control_stats->packet_stats.recv_dup_rsp_cnt);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_EQUALS);
 
@@ -442,6 +446,10 @@ int umq_io_stats_to_str(const umq_packet_stats_t *packet_stats, char *buf, int m
         "send_error_cnt", packet_stats->send_error_cnt);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-40s %-40lu\n",
         "recv_error_cnt", packet_stats->recv_error_cnt);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-40s %-40lu\n",
+        "recv_dup_req_cnt", packet_stats->recv_dup_req_cnt);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-40s %-40lu\n",
+        "recv_dup_rsp_cnt", packet_stats->recv_dup_rsp_cnt);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_EQUALS);
 
