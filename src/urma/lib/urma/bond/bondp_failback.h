@@ -1,9 +1,25 @@
-//
-// Created by w00906336 on 2026/5/30.
-//
-
+/*
+* SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
+ * Description: Bond provider failback netlink helpers.
+ */
 #ifndef BOUNDP_FAILBACK_H
 #define BOUNDP_FAILBACK_H
+
+#include <netlink/msg.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void bondp_fb_handle_notify_nl_msg(struct nlattr *attrs[]);
+void bondp_fb_handle_done_nl_msg(struct nlattr *attrs[]);
+
+int bondp_failback_init(void);
+void bondp_fb_uninit(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #include "bondp_worker.h"
 #include "bondp_types.h"
@@ -19,6 +35,7 @@
 #endif
 
 #define BONDP_FAILBACK_TASK_TABLE_SIZE       64
+#define BONDP_FAILBACK_TASK_HASH_BASIS      0x9d4f21U
 
 typedef enum bondp_failback_state {
     BONDP_FAILBACK_STATE_IDLE = 0,
@@ -35,6 +52,7 @@ typedef enum bondp_failback_state {
 #define BONDP_FAILBACK_NODE_SATTLED   1
 
 typedef struct bondp_failback_task_key {
+    urma_eid_t src_eid;
     uint32_t vjetty_id;
     uint32_t pjetty_idx;
 } bondp_failback_task_key_t;
@@ -44,18 +62,20 @@ typedef struct bondp_failback_task {
     uint64_t timer_id;
     bool timer_valid;
     bool closed;
+    urma_ref_t use_cnt;
 
     // --- 状态机 ---
     bondp_failback_state_t state;
     uint64_t req_seq;
     uint32_t retry_ms;
+    uint32_t request_id;
 
     // --- 身份标识 ---
     bondp_context_t *bdp_ctx;
     struct bondp_comp *bondp_jetty;
+    urma_eid_t src_eid;
     uint32_t vjetty_id;
     uint32_t pjetty_idx;
-    //jetty_index 和 contextindex一个东西
 
     // --- 路径信息 ---
     int target_idx;
@@ -92,7 +112,7 @@ typedef struct bondp_failback_task {
 #define BONDP_FAILBACK_PRIMARY_INVALID_ID              UINT32_MAX
 
 
-int bondp_failback_on_cqe(struct bondp_comp *bondp_jetty, int failed_local_idx);
+int bondp_failback_on_cqe(struct bondp_comp *bondp_jetty, int failed_local_idx, const urma_eid_t *src_eid);
 
 void bondp_failback_task_table_init(void);
 
