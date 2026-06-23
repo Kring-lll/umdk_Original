@@ -368,43 +368,58 @@ public:
             // W4A8改动 高低位合并
             AscendC::PipeBarrier<PIPE_V>();
             // 高位*8  tile中每行分四部分处理 256*sizeof(float) = 1024  1024 /256 （每个ub256字节） = 4
+            // 定义repeat参数，避免难以理解的字面量
+            constexpr uint32_t mulsMask = 64;
+            constexpr uint32_t mulsRepeatTimes = 16;
+            // Muls repeatParams: {dstBlkStride, src0BlkStride, src1BlkStride, src0RepStride}
+            constexpr uint32_t dstBlkStride = 1;
+            constexpr uint32_t src0BlkStride = 1;
+            constexpr uint32_t src1BlkStride = 1;
+            constexpr uint32_t src0RepStride = 64;
+            // Add repeatParams: {dstBlkStride, src0BlkStride, src1BlkStride, dstRepStride, src0RepStride, src1RepStride}
+            constexpr uint32_t addDstRepStride = 1;
+            constexpr uint32_t addSrc0RepStride = 32;
+            constexpr uint32_t addSrc1RepStride = 64;
+            // 补偿矩阵 Add repeatParams: {dstBlkStride, src0BlkStride, src1BlkStride, dstRepStride, src0RepStride, src1RepStride}
+            constexpr uint32_t addSrc0RepStrideWeightAux = 32;
+            constexpr uint32_t addSrc1RepStrideWeightAux = 0;
             // tile 第一部分 32UB大小
-            AscendC::Muls(ubMul, ubMul, DEFAULT_MUL_SCALE, 64, 16, {1, 1, 64, 64});
+            AscendC::Muls(ubMul, ubMul, DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes, {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第二部分 32UB大小
-            AscendC::Muls(ubMul[TileShape::COLUMN / 4], ubMul[TileShape::COLUMN / 4], DEFAULT_MUL_SCALE, 64, 16, {1, 1, 64, 64});
+            AscendC::Muls(ubMul[TileShape::COLUMN / 4], ubMul[TileShape::COLUMN / 4], DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes, {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第三部分 32UB大小
-            AscendC::Muls(ubMul[TileShape::COLUMN  / 2], ubMul[TileShape::COLUMN  / 2], DEFAULT_MUL_SCALE, 64, 16, {1, 1, 64, 64});
+            AscendC::Muls(ubMul[TileShape::COLUMN  / 2], ubMul[TileShape::COLUMN  / 2], DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes, {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第四部分 32UB大小
-            AscendC::Muls(ubMul[TileShape::COLUMN * 3 / 4], ubMul[TileShape::COLUMN * 3 / 4], DEFAULT_MUL_SCALE, 64, 16, {1, 1, 64, 64});
+            AscendC::Muls(ubMul[TileShape::COLUMN * 3 / 4], ubMul[TileShape::COLUMN * 3 / 4], DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes, {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // 高低位相加
             // tile 第一部分 32UB大小
-            AscendC::Add(ubMul, ubMul, ubMul[TileShape::COLUMN], 64, 16, {1, 1, 1, 32, 64, 64});
+            AscendC::Add(ubMul, ubMul, ubMul[TileShape::COLUMN], mulsMask, mulsRepeatTimes, {1, 1, addDstRepStride, addSrc0RepStride, addSrc1RepStride, addSrc1RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第二部分 32UB大小
-            AscendC::Add(ubMul[TileShape::COLUMN / 4], ubMul[TileShape::COLUMN / 4] , ubMul[TileShape::COLUMN  +  TileShape::COLUMN / 4], 64, 16, {1, 1, 1, 32, 64, 64});
+            AscendC::Add(ubMul[TileShape::COLUMN / 4], ubMul[TileShape::COLUMN / 4] , ubMul[TileShape::COLUMN  +  TileShape::COLUMN / 4], mulsMask, mulsRepeatTimes, {1, 1, addDstRepStride, addSrc0RepStride, addSrc1RepStride, addSrc1RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第三部分 32UB大小
-            AscendC::Add(ubMul[TileShape::COLUMN / 2], ubMul[TileShape::COLUMN / 2] , ubMul[TileShape::COLUMN  +  TileShape::COLUMN /2], 64, 16, {1, 1, 1, 32, 64, 64});
+            AscendC::Add(ubMul[TileShape::COLUMN / 2], ubMul[TileShape::COLUMN / 2] , ubMul[TileShape::COLUMN  +  TileShape::COLUMN /2], mulsMask, mulsRepeatTimes, {1, 1, addDstRepStride, addSrc0RepStride, addSrc1RepStride, addSrc1RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第四部分 32UB大小
-            AscendC::Add(ubMul[TileShape::COLUMN * 3 / 4], ubMul[TileShape::COLUMN *3 / 4] , ubMul[TileShape::COLUMN  +  TileShape::COLUMN *3 / 4], 64, 16, {1, 1, 1, 32, 64, 64});
+            AscendC::Add(ubMul[TileShape::COLUMN * 3 / 4], ubMul[TileShape::COLUMN *3 / 4] , ubMul[TileShape::COLUMN  +  TileShape::COLUMN *3 / 4], mulsMask, mulsRepeatTimes, {1, 1, addDstRepStride, addSrc0RepStride, addSrc1RepStride, addSrc1RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // 补偿矩阵相加 8 * weight
             // tile 第一部分 32 UB大小
-            AscendC::Add(ubMul, ubMul, ubweighAux, 64, 16, {1, 1, 1,32, 32, 0});
+            AscendC::Add(ubMul, ubMul, ubweighAux, mulsMask, mulsRepeatTimes, {1, 1, addDstRepStride, addSrc0RepStrideWeightAux, addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第二部分 32 UB大小
-            AscendC::Add(ubMul[TileShape::COLUMN /4 ], ubMul[TileShape::COLUMN / 4], ubweighAux[TileShape::COLUMN / 4], 64, 16, {1, 1,1, 32, 32, 0});
+            AscendC::Add(ubMul[TileShape::COLUMN /4 ], ubMul[TileShape::COLUMN / 4], ubweighAux[TileShape::COLUMN / 4], mulsMask, mulsRepeatTimes, {1, 1, addDstRepStride, addSrc0RepStrideWeightAux, addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第三部分 32 UB大小
-            AscendC::Add(ubMul[TileShape::COLUMN / 2], ubMul[TileShape::COLUMN  / 2], ubweighAux[TileShape::COLUMN  / 2], 64, 16, {1, 1,1, 32, 32, 0});
+            AscendC::Add(ubMul[TileShape::COLUMN / 2], ubMul[TileShape::COLUMN  / 2], ubweighAux[TileShape::COLUMN  / 2], mulsMask, mulsRepeatTimes, {1, 1, addDstRepStride, addSrc0RepStrideWeightAux, addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第四部分 32 UB大小
-            AscendC::Add(ubMul[TileShape::COLUMN  *3 / 4], ubMul[TileShape::COLUMN *3 / 4], ubweighAux[TileShape::COLUMN *3 / 4], 64, 16, {1, 1,1, 32, 32, 0});
+            AscendC::Add(ubMul[TileShape::COLUMN  *3 / 4], ubMul[TileShape::COLUMN *3 / 4], ubweighAux[TileShape::COLUMN *3 / 4], mulsMask, mulsRepeatTimes, {1, 1, addDstRepStride, addSrc0RepStrideWeightAux, addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventUbPerTokenScaleMTE2VList[ubListId]);
             tileBroadcastOneBlk(ubPerTokenScaleBrcb, ubPerTokenScale);
