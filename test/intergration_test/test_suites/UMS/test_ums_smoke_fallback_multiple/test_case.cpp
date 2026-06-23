@@ -19,7 +19,7 @@ static int run_test(test_ums_ctx_t *ctx)
     char test_ip_str[100]={0};
     char close_qperf[MAX_EXEC_CMD_RET_LEN];
 
-    exec_cmd(setup_env0, MAX_EXEC_CMD_RET_LEN, "rmmod ums; modprobe ums; service ums_agent restart");
+    exec_cmd(setup_env, MAX_EXEC_CMD_RET_LEN, "rmmod ums; modprobe ums; service ums_agent restart");
 
     sync_time("----------------------------0");
 
