@@ -39,7 +39,7 @@ moe_dispatch_shmem(
 |----------|----------|--------------|--------------|----------|
 |x|Tensor|必选|形状:(batch_size, hidden_size)|输入Token|
 |expert_ids|Tensor|必选|形状:(batch_size, top_k)|目的专家ID信息|
-|scales|Tensor|可选|非空时为float类型，存在共享专家时形状:(m+1,h), 不存在共享专家时形状(m, h),其中m为共享专家数|量化参数|
+|scales|Tensor|可选|非空时为float类型，存在共享专家时形状:(moe_expert_num+1,h), 不存在共享专家时形状(moe_expert_num, h)|量化参数|
 |x_active_mask|Tensor|可选|暂不支持，传入None|--|
 |ep_world_size|int|必选|只支持如下取值：[8, 16, 32, 64, 128, 144, 256, 288]|EP通信域内的rank数|
 |ep_rank_id|int|必选|[0, ep_world_size-1]|EP通信域内rank ID号|
@@ -47,7 +47,7 @@ moe_dispatch_shmem(
 |tp_world_size|int|必选|暂不支持，传入0|--|
 |tp_rank_id|int|必选|暂不支持，传入0|--|
 |expert_shard_type|int|必选|暂不支持，传入0|--|
-|shared_expert_num|int|必选|不支持非1的值，传入1|共享专家数量|
+|shared_expert_num|int|必选|--|共享专家数量|
 |shared_expert_rank_num|int|必选|[0, ep_world_size-1]|共享专家卡号|
 |quant_mode|int|必选|非量化传0，量化传2|量化模式|
 |global_bs|int|必选|根据实际情况传入，由实际内存大小约束|EP通信域全局BS大小|
@@ -71,16 +71,14 @@ moe_dispatch_shmem(
 3. 当前接口不支持A2环境调用。
 4. 当前接口不支持并发调用。
 5. 当前接口在GE图模式下不支持动态图， 不支持fullgraph=true的选项。
-6. 当前x入参的输入格式不支持bfloat16类型。
-7. 当前不支持共享专家功能。
-8. 用户应保证ext_info地址和window_size合法性。
-9. 除满足上述形状约束外，其他参数取值要求：
+6. 当前入参x不支持bfloat16类型（支持float16）。注意输出expand_x在非量化时为bfloat16类型。
+7. 用户应保证ext_info地址和window_size合法性。
+8. 除满足上述形状约束外，其他参数取值要求：
  - top_k当前仅支持8
  - 需要满足：(moe_expert_num + shared_expert_rank_num) ≤ CAM_MAX_EXPERT_NUM, 当前最大专家数为512
  - 需要满足: moe_expert_num % (ep_world_size - shared_expert_rank_num) == 0
  - 需要满足：moe_expert_num / (ep_world_size - shared_expert_rank_num) ≤ MAX_EXPERT_PER_RANK, 当前该值设置为32
- - 需要满足： (ep_world_size + block_num -1) / block_num ≤ MULTI_RANK_SIZE
- - 需要满足： 如果shared_expert_rank_num不为0，则ep_world_size需要为其整数倍，切ep_world_size ≠ shared_expert_rank_num
+ - 需要满足： 如果shared_expert_rank_num不为0，则ep_world_size需要为其整数倍，且ep_world_size ≠ shared_expert_rank_num
  - 需要满足：(batch_size * hidden_size * ep_world_size * expert_num_per_rank * 2)小于等于window_size
 #### 1.1.2 moe_combine_shmem ▶
 ##### 1.1.2.1 接口原型 
@@ -123,7 +121,7 @@ moe_combine_shmem(
 |expand_idx|Tensor|必选|形状:(batch_size, top_k)|在目标专家内，仅排序当前rank的token时，按照rank发出的token各自的排序ID|
 |ep_send_counts|Tensor|必选|形状:(expert_num_per_rank * ep_world_size)|每个专家从每个rank收到的token数|
 |expert_scales|Tensor|必选|形状：（batch_size, top_k）|合并token时需要的权重|
-|tp_send_count|Tensor|可选|暂不支持，传入int32类型的tensor[0]即可|--|
+|tp_send_count|Tensor|可选|暂不支持，传入占位tensor即可|--|
 |x_active_mask|Tensor|可选|暂不支持，传入None|--|
 |activation_scale|Tensor|可选|暂不支持，传入None|--|
 |weight_scale|Tensor|可选|暂不支持，传入None|--|
@@ -135,7 +133,7 @@ moe_combine_shmem(
 |tp_world_size|int|必选|暂不支持，传入1|--|
 |tp_rank_id|int|必选|暂不支持，传入0|--|
 |expert_shard_type|int|必选|暂不支持，传入0|--|
-|shared_expert_num|int|必选|不支持非1的值，传入1|共享专家数量|
+|shared_expert_num|int|必选|--|共享专家数量|
 |shared_expert_rank_num|int|必选|[0, ep_world_size-1]|共享专家卡号|
 |global_bs|int|必选|根据实际情况传入，由实际内存大小约束|EP通信域全局BS大小|
 |out_dtype|int|必选|暂不支持，传入0|--|
@@ -153,15 +151,13 @@ moe_combine_shmem(
 2. 当前接口不支持A2环境调用。
 3. 当前接口不支持并发调用。
 4. 当前接口在GE图模式下不支持动态图， 不支持fullgraph=true的选项。
-5. 当前不支持共享专家功能。
-6. 用户应保证ext_info地址和window_size合法性。
-7. 除满足上述形状约束外，其他参数取值要求：
+5. 用户应保证ext_info地址和window_size合法性。
+6. 除满足上述形状约束外，其他参数取值要求：
  - top_k当前仅支持8
  - 需要满足：(moe_expert_num + shared_expert_rank_num) ≤ CAM_MAX_EXPERT_NUM, 当前最大专家数为512
  - 需要满足: moe_expert_num % (ep_world_size - shared_expert_rank_num) == 0
  - 需要满足：moe_expert_num / (ep_world_size - shared_expert_rank_num) ≤ MAX_EXPERT_PER_RANK, 当前该值设置为32
- - 需要满足： (ep_world_size + block_num -1) / block_num ≤ MULTI_RANK_SIZE, 
- - 需要满足： 如果shared_expert_rank_num不为0，则ep_world_size需要为其整数倍，切ep_world_size ≠ shared_expert_rank_num
+ - 需要满足： 如果shared_expert_rank_num不为0，则ep_world_size需要为其整数倍，且ep_world_size ≠ shared_expert_rank_num
  - 需要满足：(batch_size * hidden_size * ep_world_size * expert_num_per_rank * 2)小于等于window_size
 
  #### 1.1.3 get_dispatch_layout ▶
@@ -183,10 +179,10 @@ A3代际Prefill阶段Dispatch使用的前置接口，用以在当前rank将Token
 |num_experts|int|必选|取值范围：(0, 512]|MOE专家数|
 |num_ranks|int|必选|取值范围：[1, 384]|EP通信域rank数|
 ##### 1.1.3.4 返回值 
-函数返回值是一个2个Tensor构成的Tuple，分别存放：number_tokens_per_expert和send_token_idx.
+函数返回值是一个2个Tensor构成的Tuple，分别存放：num_tokens_per_expert和send_token_idx.
 | **📌参数** | **🔧类型** | **📋取值说明** | **📝描述** |
 |----------|----------|--------------|----------|
-|number_tokens_per_expert|Tensor|形状：（num_experts）|当前rank上发送给每个专家的token个数|
+|num_tokens_per_expert|Tensor|形状：（num_experts）|当前rank上发送给每个专家的token个数|
 |send_token_idx|Tensor|形状：(batch_size, top_k)|当前rank上，发送给每个专家的token在以专家重排分桶后，其在桶里的第几个位置|
 ##### 1.1.3.5 约束和注意事项 ⚠️
 1. 入参形状需严格满足上述入参描述中的形状定义。
@@ -223,14 +219,14 @@ A3代际Prefill阶段Dispatch接口，将Token按照topk_idx的规则发送给�
 |x|Tensor|必选|形状:(batch_size, hidden_size), 支持bf16, float16类型|本卡发送的token|
 |topk_idx|Tensor|必选|形状:(batch_size, topk)， 数据类型为int64，取值范围：[0, num_experts)|每个token的目标专家ID信息|
 |topk_weights|Tensor|必选|形状:(batch_size, topk)， 数据类型为float32|每个token的topk个目标专家的权重信息|
-|number_tokens_per_expert|Tensor|必选|形状：（num_experts），数据类型为int|当前rank上发送给每个专家的token个数，必须为get_dispatch_layout的出参number_tokens_per_expert，不可篡改|
+|num_tokens_per_expert|Tensor|必选|形状：（num_experts），数据类型为int|当前rank上发送给每个专家的token个数，必须为get_dispatch_layout的出参num_tokens_per_expert，不可篡改|
 |send_token_idx_small|Tensor|必选|形状：(batch_size, top_k), 数据类型为int|当前rank上，发送给每个专家的token在以专家重排分桶后，其在桶里的第几个位置，必须为get_dispatch_layout的出参send_token_idx，不可篡改|
 |group_ep|str|必选|--|HCCL通信域名称|
 |rank|int|必选|[0, num_ranks)|本卡在通信域中的rankID|
 |num_ranks|int|必选|[2, 384]|EP通信域rank数|
 |use_quant|bool|必选|True: 开启量化； False: 关闭量化|Dispatch量化指示符|
 ##### 1.1.4.4 返回值 
-函数返回值是一个5个Tensor构成的Tuple，分别存放：recv_x, dynamic_scales_out, expand_idx_out, recv_count, recv_token_per_expert.
+函数返回值是一个5个Tensor构成的Tuple，分别存放：recv_x, dynamic_scales_out, expand_idx_out, recv_count, recv_tokens_per_expert.
 | **📌参数** | **🔧类型** | **📋取值说明** | **📝描述** |
 |----------|----------|--------------|----------|
 |recv_x|Tensor|形状：(recv_token_num, hidden_size), 其中recv_token_num为本卡收到的token个数。当use_quant为true时，数据类型为int8, false时数据类型与入参x一致|当前rank上收到的token信息|
@@ -249,7 +245,7 @@ A3代际Prefill阶段Dispatch接口，将Token按照topk_idx的规则发送给�
  - 需要满足: num_experts取值范围(0, 512]
  - 需要满足: topk取值范围(0, 16]
  - 需要满足: (num_experts % num_ranks) == 0
- - 需要满足: 配置全局宏HCCL_BUFFERSIZE=4096
+ - 需要满足: 配置全局宏HCCL_BUFFSIZE=4096
  - 需要满足：num_experts >= num_ranks
 
  #### 1.1.5 moe_combine_prefill ▶
@@ -275,8 +271,8 @@ A3代际Prefill阶段Combine接口，将按照topk_idx的规则发送给对应�
 |x|Tensor|必选|形状:(recv_token_num, hidden_size), 支持bf16, float16类型|本卡dispatch阶段收集到的token|
 |topk_idx|Tensor|必选|形状:(batch_size, topk)， 数据类型为int64，取值范围：[0, num_experts)|每个token的目标专家ID信息|
 |topk_weights|Tensor|必选|形状:(batch_size, topk)， 数据类型为float32|每个token的topk个目标专家的权重信息|
-|src_idx|Tensor|形状：(recv_token_num * 3), 数据类型为int|本卡收到的token信息三元组，每组三个数的含义依次为：token的源rank, token在源rank的序号（BS视角），token在源rank时topk专家扩展重排后的序号（专家视角）。必须为moe_dispatch_prefill的出参expand_idx_out，不可篡改|
-|send_head|Tensor|形状：(num_experts), 数据类型为int|当前rank上每个专家从每个rank收到的收到token的动态量化scale信息，该信息按照一维排开。必须为moe_dispatch_prefill的出参recv_count，不可篡改|
+|src_idx|Tensor|必选|形状：(recv_token_num * 3), 数据类型为int|本卡收到的token信息三元组，每组三个数的含义依次为：token的源rank, token在源rank的序号（BS视角），token在源rank时topk专家扩展重排后的序号（专家视角）。必须为moe_dispatch_prefill的出参expand_idx_out，不可篡改|
+|send_head|Tensor|必选|形状：(num_experts), 数据类型为int|当前rank上每个专家从其他rank收到的token数前缀和。必须为moe_dispatch_prefill的出参recv_count，不可篡改|
 |group_ep|str|必选|--|HCCL通信域名称|
 |rank|int|必选|[0, num_ranks)|本卡在通信域中的rankID|
 |num_ranks|int|必选|[2, 384]|EP通信域rank数|
@@ -296,7 +292,7 @@ A3代际Prefill阶段Combine接口，将按照topk_idx的规则发送给对应�
  - 需要满足: num_experts取值范围(0, 512]
  - 需要满足: topk取值范围(0, 16]
  - 需要满足: (num_experts % num_ranks) == 0
- - 需要满足: 配置全局宏HCCL_BUFFERSIZE=4096
+ - 需要满足: 配置全局宏HCCL_BUFFSIZE=4096
  - 需要满足：num_experts >= num_ranks
 6. combine_x精度校验标准
  - 非量化场景下平均相对误差为千分之五
@@ -321,10 +317,10 @@ A2代际Prefill阶段Dispatch使用的前置接口，用以在当前rank将Token
 |num_experts|int|必选|取值范围：(0, 256]|MOE专家数|
 |num_ranks|int|必选|当前仅支持16|EP通信域rank数|
 ##### 1.1.6.4 返回值 
-函数返回值是一个2个Tensor构成的Tuple，分别存放：number_tokens_per_expert和notify_send_data.
+函数返回值是一个2个Tensor构成的Tuple，分别存放：num_tokens_per_expert和notify_send_data.
 | **📌参数** | **🔧类型** | **📋取值说明** | **📝描述** |
 |----------|----------|--------------|----------|
-|number_tokens_per_expert|Tensor|形状：（num_experts）,int类型|当前rank上发送给每个专家的token个数|
+|num_tokens_per_expert|Tensor|形状：（num_experts）,int类型|当前rank上发送给每个专家的token个数|
 |notify_send_data|Tensor|形状：(num_experts * EXPERT_DATA_SIZE + server_num + max_bs * (1 + 2* server_num + num_experts)), 数据类型为int。当前EXPERT_DATA_SIZE=4097，max_bs=4096。七个部分的形状信息：<br> 1. num_tokens_per_expert, 形状：（num_experts）；<br> 2. num_token_per_server_uniq, 形状：（num_experts）；<br> 3. num_each_token_to_server, 形状：（max_bs * num_server）;<br> 4. each_token_to_num_server, 形状：（max_bs）;<br> 5. each_token_offset_to_server, 形状：（max_bs * num_server）；<br> 6. send_token_idx, 形状：（max_bs * num_experts）；<br> 7. expert_rank_token_idx, 形状：（num_experts， max_bs）；<br> |由七个部分组成的tensor,分别表示<br> 1. 每个expert从本卡收到的token数目；<br> 2. 每个server从本卡接收到的token数目（去重）；<br> 3. 本卡每个token发往每个server的个数；<br> 4. 本卡每个token发往的server个数；<br> 5. 本卡每个token发往每个server,token的顺序偏移。<br> 6. 本卡每个token按照专家维度分桶，在桶中的序号偏移。<br> 7. 每个专家收到的每个token，其对应的each_token_offset_to_server值|
 ##### 1.1.6.5 约束和注意事项 ⚠️
 1. 入参形状需严格满足上述入参描述中的形状定义。
@@ -362,7 +358,7 @@ A2代际Prefill阶段Dispatch接口，将Token按照topk_idx的规则发送给�
 |x|Tensor|必选|形状:(batch_size, hidden_size), 支持bf16, float16类型|本卡发送的token|
 |topk_idx|Tensor|必选|形状:(batch_size, topk)， 数据类型为int64或int32，取值范围[0, num_experts)|每个token的目标专家ID信息|
 |topk_weights|Tensor|必选|形状:(batch_size, topk)， 数据类型为float32|每个token的topk个目标专家的权重信息|
-|number_tokens_per_expert|Tensor|必选|形状：（num_experts），数据类型为int|当前rank上发送给每个专家的token个数，必须为get_dispatch_layout_a2的出参number_tokens_per_expert，不可篡改|
+|num_tokens_per_expert|Tensor|必选|形状：（num_experts），数据类型为int|当前rank上发送给每个专家的token个数，必须为get_dispatch_layout_a2的出参num_tokens_per_expert，不可篡改|
 |notify_send_data|Tensor|必选|形状：(num_experts * EXPERT_DATA_SIZE + server_num + max_bs * (1 + 2* server_num + num_experts)), 数据类型为int|必须为get_dispatch_layout_a2的出参notify_send_data，不可篡改|
 |group_ep|str|必选|--|HCCL通信域名称|
 |rank|int|必选|[0, num_ranks)|本卡在通信域中的rankID|
@@ -393,7 +389,7 @@ A2代际Prefill阶段Dispatch接口，将Token按照topk_idx的规则发送给�
  - 需要满足: (num_experts % num_ranks) == 0
  - 需要满足: (num_ranks % 8) == 0
  - 需要满足: hidden_size取值范围(0， 7168]且(hidden_size % 32) == 0
- - 需要满足: 配置全局宏HCCL_BUFFERSIZE=4096
+ - 需要满足: 配置全局宏HCCL_BUFFSIZE=4096
  - 需要配置：export HCCL_INTRA_PCIE_ENABLE = 1, export HCCL_INTRA_ROCE_ENABLE = 0
 
  #### 1.1.8 moe_combine_prefill_a2 ▶
@@ -428,7 +424,7 @@ A2代际Prefill阶段Combine接口，将按照topk_idx的规则发送给对应�
 |expand_scales|Tensor|必选|形状：(num_recv_tokens), 数据类型为float|必须为moe_dispatch_prefill_a2的出参expand_scales，不可篡改|
 |offset_inner|Tensor|必选|形状：(2, max_bs, num_experts), 数据类型为int|必须为moe_dispatch_prefill_a2的出参offset_inner，不可篡改|
 |offset_outer|Tensor|必选|形状：(max_bs, num_experts), 数据类型为int|必须为moe_dispatch_prefill_a2的出参offset_outer，不可篡改|
-|count_outer|Tensor|形状：(max_bs), 数据类型为int|必须为moe_dispatch_prefill_a2的出参count_outer，不可篡改|
+|count_outer|Tensor|必选|形状：(max_bs), 数据类型为int|必须为moe_dispatch_prefill_a2的出参count_outer，不可篡改|
 |group_ep|str|必选|--|HCCL通信域名称|
 |rank|int|必选|[0, num_ranks)|本卡在通信域中的rankID|
 |num_ranks|int|必选|当前只支持16|EP通信域rank数|
@@ -449,7 +445,7 @@ A2代际Prefill阶段Combine接口，将按照topk_idx的规则发送给对应�
  - 需要满足: topk取值范围[2, 8]
  - 需要满足: (num_experts % num_ranks) == 0
  - 需要满足: hidden_size取值范围(0， 7168]且(hidden_size % 32) == 0
- - 需要满足: 配置全局宏HCCL_BUFFERSIZE=4096
+ - 需要满足: 配置全局宏HCCL_BUFFSIZE=4096
  - 需要配置：export HCCL_INTRA_PCIE_ENABLE = 1, export HCCL_INTRA_ROCE_ENABLE = 0
 
  #### 1.1.9 fused_deep_moe ▶
@@ -520,11 +516,11 @@ fused_deep_moe(
 7. 除满足上述形状约束外，其他参数取值要求：
  - 需要满足：BS取值范围[0, 256]
  - 需要满足: token_length取值范围[1024， 7168]且(token_length % 256) == 0
- - 需要满足: gmm1_hiden_size取值范围[1024， 6144]且(gmm1_hiden_size % 1024) == 0
- - 需要满足: share_gmm1_hiden_size取值范围[1024， 6144]且(share_gmm1_hiden_size % 1024) == 0
+ - 需要满足: gmm1_hidden_size取值范围[1024， 6144]且(gmm1_hidden_size % 1024) == 0
+ - 需要满足: share_gmm1_hidden_size取值范围[1024， 6144]且(share_gmm1_hidden_size % 1024) == 0
  - 需要满足: topk取值范围[0, 12]且应保证小于等于专家数
  - 需要满足：global_bs ≥ 0 且保证（global_bs % ep_rank_size） == 0
  - 需要满足: gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale四个入参的模式必须统一，不能一部分耦合模式一部分分离模式
- - 需要满足: HCCL_BUFFERSIZE环境变量配置应不小于[(ep_rank_size * max_batch_size * moe_expert_num_per_rank * total_length * sizeof(x) * 2) / 1024 / 1024]向上取整
+ - 需要满足: HCCL_BUFFSIZE环境变量配置应不小于[(ep_rank_size * max_batch_size * moe_expert_num_per_rank * total_length * sizeof(x) * 2) / 1024 / 1024]向上取整
  - 需要满足: 若要进行内置共享专家计算，则共享专家所需的share_gmm1_weight、share_gmm1_weight_scale、share_gmm2_weight、share_gmm2_weight_scale需同时存在
 - 需要满足: 若要进行smooth quant，需传入expert_smooth_scales，若同时进行内置共享专家计算则share_smooth_scales也必须存在
