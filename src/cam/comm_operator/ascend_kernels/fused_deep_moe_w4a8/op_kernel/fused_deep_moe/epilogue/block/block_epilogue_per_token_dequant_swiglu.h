@@ -290,20 +290,11 @@ public:
             tileRowBroadcastMul(ubTmpMxN, ubTmpMxN, ubFp32Scale);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventUbScaleVMTE2List[ubListId]);
 
-            // W4A8改动 高低位合并
-            //
+            // W4A8改动 高低位合并，定义repeat参数避免字面量
             AscendC::PipeBarrier<PIPE_V>();
-            // 高位*8
-            // tile 左半部分 32UB大小
-            // 定义repeat参数，避免难以理解的字面量
             constexpr uint32_t mulsMask = 64;
             constexpr uint32_t mulsRepeatTimes = 32;
-            // Muls repeatParams: {dstBlkStride, src0BlkStride, src1BlkStride, src0RepStride}
-            constexpr uint32_t dstBlkStride = 1;
-            constexpr uint32_t src0BlkStride = 1;
-            constexpr uint32_t src1BlkStride = 1;
             constexpr uint32_t src0RepStride = 32;
-            // Add repeatParams: {dstBlkStride, src0BlkStride, src1BlkStride, dstRepStride, src0RepStride, src1RepStride}
             constexpr uint32_t addDstRepStride = 1;
             constexpr uint32_t addSrc0RepStrideHighLow = 16;
             constexpr uint32_t addSrc1RepStrideHighLow = 32;
@@ -327,11 +318,9 @@ public:
             AscendC::PipeBarrier<PIPE_V>();
             // tile 右半部分 32 UB大小
             AscendC::Add(ubTmpMxN[TileShape::COLUMN / 2], ubTmpMxN[TileShape::COLUMN / 2], ubweighAux[TileShape::COLUMN / 2], mulsMask, mulsRepeatTimes, {1, 1, addDstRepStride, addSrc0RepStrideWeightAux, addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
-
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventUbPerTokenScaleMTE2VList[ubListId]);
             tileBroadcastOneBlk(ubTmpMx32B, ubPerTokenScale);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventUbPerTokenScaleVMTE2List[ubListId]);
-
             auto &ubD = ubDList[ubListId];
             LayoutD layoutUbD{actualTileShape, ubTileStride};
             auto newlayoutUbD = layoutUbD;                     // 拷贝
@@ -354,14 +343,11 @@ public:
                 tileOneBlkColumnBroadcastMul(ubD, ubTmpMxN, ubTmpMx32B);
             }
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
-
             MatrixCoord newtileOffset(tileOffset.row() / 2, tileOffset.column());
             auto gmTileD = gmD[params.layoutD.GetOffset(newtileOffset)];
             auto layoutGmTileD = params.layoutD.GetTileLayout(actualTileShape);
-
             auto newlayoutGmTileD = layoutGmTileD;                     // 拷贝
             newlayoutGmTileD.shape(0) = layoutGmTileD.shape(0) / 2; 
-
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
             copyUbToGmD(gmTileD, ubD, newlayoutGmTileD, newlayoutUbD);
             AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(eventUbDMTE3VList[ubListId]);
