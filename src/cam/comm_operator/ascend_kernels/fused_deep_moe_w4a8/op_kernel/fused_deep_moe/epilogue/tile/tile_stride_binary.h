@@ -6,7 +6,9 @@
  * Note:
  * History: 2025-07-19 create FusedDeepMoe operator kernel function implementation file
  */
-#pragma once
+#ifndef EPILOGUE_TILE_TILE_STRIDE_BINARY_H
+#define EPILOGUE_TILE_TILE_STRIDE_BINARY_H
+
 #include "catlass/catlass.hpp"
 
 namespace Catlass::Epilogue::Tile {
@@ -104,3 +106,5 @@ struct TileStrideDiv
 };
 
 }  // namespace Catlass::Epilogue::Tile
+
+#endif  // EPILOGUE_TILE_TILE_STRIDE_BINARY_H

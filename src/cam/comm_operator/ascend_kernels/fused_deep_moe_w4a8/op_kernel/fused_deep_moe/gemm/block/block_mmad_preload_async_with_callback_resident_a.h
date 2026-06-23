@@ -6,7 +6,9 @@
  * Note:
  * History: 2025-07-19 create FusedDeepMoe operator kernel function implementation file
  */
-#pragma once
+#ifndef GEMM_BLOCK_BLOCK_MMAD_PRELOAD_ASYNC_WITH_CALLBACK_RESIDENT_A_H
+#define GEMM_BLOCK_BLOCK_MMAD_PRELOAD_ASYNC_WITH_CALLBACK_RESIDENT_A_H
+
 #include "catlass/catlass.hpp"
 #include "catlass/arch/resource.hpp"
 #include "catlass/coord.hpp"
@@ -417,3 +419,5 @@ private:
 };
 
 }  // namespace Catlass::Gemm::Block
+
+#endif  // GEMM_BLOCK_BLOCK_MMAD_PRELOAD_ASYNC_WITH_CALLBACK_RESIDENT_A_H

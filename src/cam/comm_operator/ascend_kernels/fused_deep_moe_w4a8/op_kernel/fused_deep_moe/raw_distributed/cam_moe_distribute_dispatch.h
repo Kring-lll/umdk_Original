@@ -69,7 +69,8 @@ private:
     __aicore__ inline void QuantProcess(uint32_t expertIndex, const GlobalTensor<float> &scalesGMTensor);
     __aicore__ inline void SetStatus();
     __aicore__ inline void WaitDispatch();
-    __aicore__ inline void GetCumSum(LocalTensor<int32_t> &inLocal, LocalTensor<int32_t> &outLocal, int32_t totalCount);
+    __aicore__ inline void GetCumSum(LocalTensor<int32_t> &inLocal, LocalTensor<int32_t> &outLocal,
+                                     int32_t totalCount);
     __aicore__ inline void CreateZeroTensor(LocalTensor<uint32_t> &outTensor);
     __aicore__ inline void AllGatherSetStatusAndWait();
     __aicore__ inline void ResetStatus();
@@ -85,7 +86,8 @@ private:
         if (curRankId == rankId) {
             return (GM_ADDR)(winContext_[ctxIdx]->localWindowsIn) + winDataSizeOffset_ + rankId * OPT_RANK_OFFSET;
         }
-        return (GM_ADDR)(((HcclRankRelationResV2 *)(winContext_[ctxIdx]->remoteRes[rankId].nextDevicePtr))->windowsIn) +
+        return (GM_ADDR)(((HcclRankRelationResV2 *)(winContext_[ctxIdx]
+                            ->remoteRes[rankId].nextDevicePtr))->windowsIn) +
                winDataSizeOffset_ + rankId * OPT_RANK_OFFSET;
     }
 
@@ -857,7 +859,8 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Local
     }
     lastCore_ = MIN(totalMoeExpert, aivNum_) - 1;
     if constexpr (IsNeedAllgater) {
-        DataCopyExtParams dataCopyOutParams = {1U, static_cast<uint32_t>(sendExpertNum_ * sizeof(int32_t)), 0U, 0U, 0U};
+        DataCopyExtParams dataCopyOutParams =
+            {1U, static_cast<uint32_t>(sendExpertNum_ * sizeof(int32_t)), 0U, 0U, 0U};
         DataCopyPad(winTpEpCntGMTensor_[startExpertId_], outCountLocal, dataCopyOutParams);
     }
     DataCopyExtParams dataCopyOutParams = {1U, static_cast<uint32_t>(sendExpertNum_ * sizeof(int32_t)), 0U, 0U, 0U};
@@ -874,7 +877,8 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::AllGa
     if (startExpertId_ >= totalExpertNum_) {
         return;
     }
-    GM_ADDR rankGM = (__gm__ uint8_t *)(GetWindStateAddrByRankId(COMM_TP_IDX, tpGatherRankId_) + stateOffset_ * aivId_);
+    GM_ADDR rankGM =
+        (__gm__ uint8_t *)(GetWindStateAddrByRankId(COMM_TP_IDX, tpGatherRankId_) + stateOffset_ * aivId_);
     GlobalTensor<float> tpwindowInstatusFp32Tensor_;
     tpwindowInstatusFp32Tensor_.SetGlobalBuffer((__gm__ float *)(rankGM));
     statusTensor_(aivId_ * INT32_NUM_PER_BLOCK + 1) = gatherCount_;

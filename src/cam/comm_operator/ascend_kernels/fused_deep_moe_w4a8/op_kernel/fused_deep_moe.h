@@ -54,8 +54,9 @@ using Gmm2DispatchPolicy =
 template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class EpilogueTileShape_,
           class BlockScheduler_, class DispatchPolicy_ = MmadAtlasA2Custom>
 CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
-                                  layout::RowMajor layoutA, GM_ADDR gmShareB, layout::zN layoutShareB, GM_ADDR gmB, layout::zN layoutB, 
-                                  GM_ADDR gmBias, GM_ADDR gmShareBias,// 添加参数gmBias
+                                  layout::RowMajor layoutA, GM_ADDR gmShareB,
+                                  layout::zN layoutShareB, GM_ADDR gmB, layout::zN layoutB,
+                                  GM_ADDR gmBias, GM_ADDR gmShareBias, // 添加参数gmBias
                                   GM_ADDR gmShareScale, layout::VectorLayout layoutShareScale,
                                   GM_ADDR gmScale, layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
                                   layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
@@ -197,7 +198,7 @@ template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class Ep
 CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
                        layout::RowMajor layoutA, GM_ADDR gmB, layout::zN layoutB, 
                        GM_ADDR gmBias, GM_ADDR gmShareBias,
-                       GM_ADDR gmScale,layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
+                       GM_ADDR gmScale, layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
                        layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
                        uint32_t batchSize, GemmCoord sharedGmm2ProblemShape,
                        GM_ADDR gmSharedA, GM_ADDR gmSharedB, GM_ADDR gmSharedD,
@@ -415,7 +416,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     GemmCoord gmm2ProblemShape{maxTokenNum_, gmm2OutputDim_, gmm2InputDim_};
 
     layout::RowMajor layoutX1{maxTokenNum_, tokenHiddenSize_};
-    layout::zN layoutShareWeight1 = layout::zN::template MakeLayout<AscendC::int4b_t>(tokenHiddenSize_, shareGmm1OutputDim_);
+    layout::zN layoutShareWeight1 =
+        layout::zN::template MakeLayout<AscendC::int4b_t>(tokenHiddenSize_, shareGmm1OutputDim_);
     layout::zN layoutWeight1 = layout::zN::template MakeLayout<AscendC::int4b_t>(tokenHiddenSize_, gmm1OutputDim_);
     layout::VectorLayout layoutShareW1Scale{shareGmm1OutputDim_};
     layout::VectorLayout layoutW1Scale{gmm1OutputDim_};
@@ -427,7 +429,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     layout::RowMajor layoutOutput{maxTokenNum_, gmm2OutputDim_};
     
     layout::RowMajor layoutShareX2{bs_, shareGmm2InputDim_};
-    layout::zN layoutShareWeight2 = layout::zN::template MakeLayout<AscendC::int4b_t>(shareGmm2InputDim_, gmm2OutputDim_);
+    layout::zN layoutShareWeight2 =
+        layout::zN::template MakeLayout<AscendC::int4b_t>(shareGmm2InputDim_, gmm2OutputDim_);
     GemmCoord shareGmm2ProblemShape{bs_, gmm2OutputDim_, shareGmm2InputDim_};
     layout::VectorLayout layoutShareX2Scale{bs_};
     layout::RowMajor layoutShareOutput{bs_, gmm2OutputDim_};
@@ -515,7 +518,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
                       Gmm1BlockScheduler>(
         gmm1ProblemShape, groupCount_, gmGroupList, gmX1, layoutX1, gmShareWeight1_, layoutShareWeight1,
         gmWeight1_, layoutWeight1, 
-        gmBias1_, gmShareBias1_,// A8w4适配
+        gmBias1_, gmShareBias1_, // A8w4适配
         gmShareWeight1Scale_, layoutShareW1Scale, gmScale1_, layoutW1Scale,
         gmX1Scale, layoutX1Scale, gmX2, layoutX2, gmX2Scale, layoutX2Scale, gmShareX1, gmShareX1Scale,
         gmShareSwigluOut, gmShareX2, layoutShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmX_, gmSmoothScales_,
@@ -538,7 +541,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     }
     GmmDeq<TemplateMC2TypeFunc, Gmm2L1TileShape, Gmm2L0TileShape, Gmm2EpilogueTileShape, Gmm2BlockScheduler,
            Gmm2DispatchPolicy>(gmm2ProblemShape, groupCount_, gmGroupList, gmX2, layoutX2, gmWeight2_, layoutWeight2,
-                               gmBias2_,gmShareBias2_,// w4补偿矩阵
+                               gmBias2_, gmShareBias2_, // w4补偿矩阵
                                gmScale2_, layoutW2Scale, gmX2Scale, layoutX2Scale, gmGmm2DepOut, layoutOutput, bs_,
                                shareGmm2ProblemShape, gmShareX2, gmShareWeight2_, gmShareOutput_, gmShareWeight2Scale_,
                                gmShareX2Scale, layoutShareX2, layoutShareWeight2, layoutShareX2Scale,
