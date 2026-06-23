@@ -403,7 +403,7 @@ static uint32_t target_slot_id_calcuate(uint64_t expire_time, uint64_t current_t
         return target_slot_id;
     }
 
-    uint64_t delay_time = expire_time - current_time;
+    uint64_t delay_time = (expire_time - current_time) * US_PER_SEC / urpc_get_cpu_hz();
     uint32_t delay_slots = (delay_time + interval_us - 1) / interval_us;
     target_slot_id = (current_slot_id + delay_slots) % slot_num;
     return target_slot_id;
@@ -428,7 +428,7 @@ void umq_ub_idle_queue_check(void *args)
     urpc_list_t temp_list;
     urpc_list_init(&temp_list);
     uint64_t value = UMQ_UB_EVENT_QUEUE_IDLE;
-    uint64_t current_timestamp = get_timestamp_us();
+    uint64_t current_timestamp = urpc_get_cpu_cycles();
     uint64_t timeout_us = g_umq_monitor_slots.timeout_us;
     (void)util_mutex_lock(current_slot_obj->lock);
     URPC_LIST_FOR_EACH_SAFE(cur_node, next_node, node, &current_slot_obj->monitored_links) {
@@ -454,15 +454,15 @@ void umq_ub_idle_queue_check(void *args)
         }
         uint64_t last_send = __atomic_load_n(&cur_node->last_send, __ATOMIC_RELAXED);
         if (current_timestamp >= last_send) {
-            uint64_t diff = (current_timestamp - last_send);
-            if (diff >= timeout_us) {
+            uint64_t diff_us = (current_timestamp - last_send) * US_PER_SEC / urpc_get_cpu_hz();
+            if (diff_us >= timeout_us) {
                 __atomic_store_n(&cur_node->need_return_credit, true, __ATOMIC_RELAXED);
                 if (eventfd_write(cur_node->event_fd, value) == -1) {
                     UMQ_VLOG_ERR(VLOG_UMQ, "umq write event failed, err: %s\n", strerror(errno));
                 }
             }
         }
-        uint64_t expire_time = last_send + timeout_us;
+        uint64_t expire_time = last_send + timeout_us * urpc_get_cpu_hz() / US_PER_SEC;
         uint32_t target_slot_id = target_slot_id_calcuate(expire_time, current_timestamp, current_slot_id);
         if (target_slot_id != current_slot_id) {
             urpc_list_remove(&cur_node->node);
@@ -863,9 +863,9 @@ static int umq_ub_idle_checker_init(ub_queue_t *queue)
         ret = UMQ_FAIL;
         goto CHECKER_LOCK_DESTROY;
     }
-    uint64_t current_time = get_timestamp_us();
+    uint64_t current_time = urpc_get_cpu_cycles();
     checker->last_send = current_time;
-    uint64_t expire_time = current_time + g_umq_monitor_slots.timeout_us;
+    uint64_t expire_time = current_time + (uint64_t)g_umq_monitor_slots.timeout_us * urpc_get_cpu_hz() / US_PER_SEC;
     uint32_t current_slot_id = __atomic_load_n(&g_umq_monitor_slots.current_slot, __ATOMIC_RELAXED);
     uint32_t target_slot_id = target_slot_id_calcuate(expire_time, current_time, current_slot_id);
     checker->target_slot_id = target_slot_id;

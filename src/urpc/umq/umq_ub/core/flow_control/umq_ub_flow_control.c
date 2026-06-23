@@ -10,6 +10,7 @@
 #include "umq_pro_types.h"
 #include "umq_symbol_private.h"
 #include "umq_types.h"
+#include "urpc_util.h"
 #include "umq_ub_imm_data.h"
 #include "umq_ub_jetty_pool.h"
 #include "perf.h"
@@ -855,11 +856,11 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
     if (!fc->enabled || queue->bind_ctx == NULL) {
         return UMQ_SUCCESS;
     }
-    uint64_t timestamp = get_timestamp_us();
+    uint64_t timestamp = urpc_get_cpu_cycles();
     if ((queue->checker == NULL) || (timestamp < queue->checker->last_send)) {
         return UMQ_SUCCESS;
     }
-    uint64_t diff = timestamp - queue->checker->last_send;
+    uint64_t diff = (timestamp - queue->checker->last_send) * US_PER_SEC / urpc_get_cpu_hz();
     uint16_t remote_credit = fc->ops.remote_rx_window_load(fc);
     uint16_t return_threshold = 0;
     if (fc->peer_ratio == 0) {
