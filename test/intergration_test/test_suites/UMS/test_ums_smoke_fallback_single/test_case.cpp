@@ -16,8 +16,13 @@ static int run_test(test_ums_ctx_t *ctx)
     int ret = 0;
     int rc = TEST_FAILED;
     int check_num;
+     char setup_env[MAX_EXEC_CMD_RET_LEN];
     char port_str[10]={0};
     char close_qperf[MAX_EXEC_CMD_RET_LEN];
+
+    exec_cmd(setup_env, MAX_EXEC_CMD_RET_LEN, "rmmod ums; modprobe ums; service ums_agent restart");
+
+    sync_time("----------------------------0");
 
     if (ctx->app_id == PROC_1) {
         char serv_cmd[MAX_EXEC_CMD_RET_LEN];
@@ -31,10 +36,12 @@ static int run_test(test_ums_ctx_t *ctx)
     sync_time("----------------------------2");
     
     // 校验流量走ums
-    sprintf(port_str, "%d", ctx->test_port);
-    check_num = query_proc_net_ums_detail_stream_num("False", port_str);
-    if (ctx->app_id == PROC_2 && check_num != 2) {
-        ret = -1;
+    if (ctx->app_id == PROC_2) {
+        sprintf(port_str, "%d", ctx->test_port);
+        check_num = query_proc_net_ums_detail_stream_num("False", port_str);
+        if (check_num != 2) {
+            ret = -1;
+        }
     }
     CHKERR_JUMP(ret != TEST_SUCCESS, "fallback single connect failed", EXIT);
 
