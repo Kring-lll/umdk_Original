@@ -366,7 +366,7 @@ int umq_transport_pool_resource_modify(uint64_t umqh, uint32_t tp_handle_idx);
  * @param[in] umqh: umq handle
  * Return tp handle index on success, UINT32_MAX on failure
  */
-uint32_t umq_transport_pool_resource_create(uint64_t umqh);
+uint32_t umq_transport_pool_resource_create(uint64_t umqh, umq_tp_resource_create_option_t *option);
 
 /**
  * Destroy transport resource.
