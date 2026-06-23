@@ -64,20 +64,14 @@ target_link_options(urma_core_ut PRIVATE -Wl,--wrap=ioctl)
 target_link_libraries(urma_core_ut PRIVATE urma_test_common ${URMA_STATIC} ${URMA_COMMON_STATIC}
     GTest::gtest_main dl rt pthread)
 
-add_executable(urma_cmd_tlv_ut cmd_tlv/cmd_tlv_test.cpp)
-target_link_options(urma_cmd_tlv_ut PRIVATE -Wl,--wrap=ioctl -Wl,--wrap=urma_query_eid)
-target_link_libraries(urma_cmd_tlv_ut PRIVATE urma_test_common ${URMA_STATIC} ${URMA_COMMON_STATIC}
-    GTest::gtest_main dl rt pthread)
-
 add_executable(urma_bond_ut bond/bond_test.cpp)
 target_link_libraries(urma_bond_ut PRIVATE urma_test_common ${URMA_UBAGG_SO} ${URMA_SO} ${URMA_COMMON_SO}
     GTest::gtest_main nl-genl-3 nl-3 dl rt pthread)
 
 enable_testing()
 add_subdirectory(common)
+add_subdirectory(cmd_tlv)
 add_test(NAME urma_core_ut COMMAND urma_core_ut)
 set_tests_properties(urma_core_ut PROPERTIES LABELS phase_core)
-add_test(NAME urma_cmd_tlv_ut COMMAND urma_cmd_tlv_ut)
-set_tests_properties(urma_cmd_tlv_ut PROPERTIES LABELS phase_cmd_tlv)
 add_test(NAME urma_bond_ut COMMAND urma_bond_ut)
 set_tests_properties(urma_bond_ut PROPERTIES LABELS phase_bond)
