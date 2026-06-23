@@ -131,12 +131,6 @@ typedef struct uvs_main_ue_eid_entry {
     uvs_eid_t main_ue_eid;
 } uvs_main_ue_eid_entry_t;
 
-typedef struct uvs_main_ue_eid_batch_entry {
-    uvs_eid_t main_ue_eid;
-    uint32_t eid_num;
-    uvs_eid_t eids[UVS_MAIN_UE_EID_BATCH_EID_MAX];
-} uvs_main_ue_eid_batch_entry_t;
-
 /**
  * Create an aggregation device in UVS.
  * @param[in] agg_eid  EID of the aggregation device to be created.
@@ -179,8 +173,6 @@ int uvs_set_topo_info(void *topo_buf, uint32_t node_size, uint32_t node_num);
 int uvs_set_share_topo_info(void *topo_buf, uint32_t node_size, uint32_t node_num);
 
 int uvs_insert_main_ue_eid(const uvs_main_ue_eid_entry_t *entry);
-
-int uvs_insert_main_ue_eid_batch(const uvs_main_ue_eid_batch_entry_t *entry);
 
 int uvs_delete_main_ue_eid(const uvs_eid_t *eid);
 

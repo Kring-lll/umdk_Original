@@ -151,6 +151,12 @@ typedef struct uvs_cmd_main_ue_eid_flush {
     } out;
 } uvs_cmd_main_ue_eid_flush_t;
 
+typedef struct uvs_main_ue_eid_batch_entry {
+    uvs_eid_t main_ue_eid;
+    uint32_t eid_num;
+    uvs_eid_t eids[UVS_MAIN_UE_EID_BATCH_EID_MAX];
+} uvs_main_ue_eid_batch_entry_t;
+
 typedef struct uvs_cmd_main_ue_eid_batch {
     struct {
         uvs_main_ue_eid_batch_entry_t entry;
