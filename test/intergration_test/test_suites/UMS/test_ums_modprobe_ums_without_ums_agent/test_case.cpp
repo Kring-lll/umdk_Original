@@ -53,7 +53,7 @@ static int run_test(test_ums_ctx_t *ctx)
         CHKERR_JUMP(ret != TEST_SUCCESS, "ums single connect failed", EXIT);
     }
     exec_cmd(close_qperf, MAX_EXEC_CMD_RET_LEN, "pkill -9 qperf");
-    exec_cmd(recover_env, MAX_EXEC_CMD_RET_LEN, "rmmod ums; modprobe ums; service ums_agent start");
+    exec_cmd(recover_env, MAX_EXEC_CMD_RET_LEN, "rmmod ums; modprobe ums; service ums_agent restart");
 
     rc = TEST_SUCCESS;
 EXIT:
