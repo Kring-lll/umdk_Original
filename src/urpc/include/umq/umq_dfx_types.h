@@ -337,15 +337,21 @@ typedef struct umq_perf_stats {
         uint64_t average; // average latency
         uint64_t mininum; // min latency
         uint64_t maxinum; // max latency
-        uint64_t median; // median latency
-        uint64_t p90; // 90th percentile
-        uint64_t p99; // 99th percentile
+        uint64_t p50;     // 50th percentile latency (ns)
+        uint64_t p90;     // 90th percentile latency (ns)
+        uint64_t p99;     // 99th percentile latency (ns)
+        uint64_t p9999;   // 99.99th percentile latency (ns)
     } type_record[UMQ_PERF_RECORD_TYPE_MAX]; // statistical results list for each type of probe point
 } umq_perf_stats_t;
 
+/*
+ * t-digest compression parameter.
+ * Controls the maximum number of centroids, trading off accuracy vs memory:
+ * compression=100  → ~100 centroids, ~6.4 KB,  ~0.1-1% error (default)
+ * Set to 0 to use the default value 100.
+ */
 typedef struct umq_perf_stats_cfg {
-    uint64_t thresh_array[UMQ_PERF_QUANTILE_MAX_NUM]; // quantile values list
-    uint32_t thresh_num; // number of valid quantiles
+    int compression;       // t-digest compression (0 = use default 100)
 } umq_perf_stats_cfg_t;
 
 #define UMQ_TRACE_FLAG_RECORD_NUM              (1U)
