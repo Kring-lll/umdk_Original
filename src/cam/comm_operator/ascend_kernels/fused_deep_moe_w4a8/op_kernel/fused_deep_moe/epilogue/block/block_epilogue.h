@@ -6,8 +6,12 @@
  * Note:
  * History: 2025-07-19 create FusedDeepMoe operator kernel function implementation file
  */
-#pragma once
+#ifndef EPILOGUE_BLOCK_BLOCK_EPILOGUE_H
+#define EPILOGUE_BLOCK_BLOCK_EPILOGUE_H
+
 #include "catlass/epilogue/block/block_epilogue.hpp"
 
 #include "block_epilogue_per_token_dequant_swiglu.h"
 #include "block_epilogue_per_token_dequant.hpp"
+
+#endif  // EPILOGUE_BLOCK_BLOCK_EPILOGUE_H
