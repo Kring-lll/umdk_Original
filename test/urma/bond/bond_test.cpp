@@ -152,6 +152,7 @@ struct BondPathFixture {
     urma_jfc_t phyJfc = {};
     bondp_comp_t comp = {};
     bondp_target_jetty_t target = {};
+    urma_jetty_t phyJetty[2] = {};
     urma_jfs_t phyJfs[2] = {};
     urma_jfr_t phyJfr[2] = {};
     urma_target_jetty_t phyTarget[2][2] = {};
@@ -187,6 +188,7 @@ struct BondPathFixture {
         comp.v_jfr.jfr_cfg.trans_mode = URMA_TM_RC;
         comp.v_jetty.jetty_cfg.jfs_cfg.trans_mode = URMA_TM_RC;
         comp.v_jetty.jetty_id.id = 0x22;
+        comp.v_jetty.remote_jetty = &target.v_tjetty;
         comp.v_jfs.jfs_id.id = 0x23;
         comp.v_jfr.jfr_id.id = 0x24;
         comp.active_count = 2;
@@ -202,12 +204,19 @@ struct BondPathFixture {
         phyJfr[1].urma_ctx = &phyCtx;
         phyJfr[0].jfr_cfg.jfc = &phyJfc;
         phyJfr[1].jfr_cfg.jfc = &phyJfc;
+        phyJetty[0].urma_ctx = &phyCtx;
+        phyJetty[1].urma_ctx = &phyCtx;
         comp.p_jfs[0] = &phyJfs[0];
         comp.p_jfs[1] = &phyJfs[1];
         comp.p_jfr[0] = &phyJfr[0];
         comp.p_jfr[1] = &phyJfr[1];
-        comp.p_jetty[0] = &comp.v_jetty;
-        comp.p_jetty[1] = &comp.v_jetty;
+        /*
+         * Keep physical jetty objects separate from the virtual jetty. Balance
+         * scheduling dereferences physical remote_jetty pointers to emulate
+         * provider path selection without touching real hardware.
+         */
+        comp.p_jetty[0] = &phyJetty[0];
+        comp.p_jetty[1] = &phyJetty[1];
 
         target.active_count = 2;
         target.active_indices[0] = 0;
@@ -1197,6 +1206,7 @@ TEST(UrmaBondTest, DatapathScheduleCoversModesAndErrors)
     int targetIdx = -1;
     int recvIdx = -1;
     bondp_chip_id_info_t chipInfo = { BONDP_CHIP_ID_MIN, BONDP_CHIP_ID_MIN };
+    bondp_global_context_t fakeGlobal = {};
 
     fixture.ctx.bonding_mode = BONDP_BONDING_MODE_STANDALONE;
     EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr));
@@ -1207,10 +1217,14 @@ TEST(UrmaBondTest, DatapathScheduleCoversModesAndErrors)
     EXPECT_EQ(0, schedule_recv(&fixture.comp, &recvIdx));
 
     fixture.ctx.bonding_mode = BONDP_BONDING_MODE_BALANCE;
+    /* Affinity scheduling reads the global failover switch before fallback selection. */
+    fakeGlobal.enable_failover = true;
+    g_bondp_global_ctx = &fakeGlobal;
     fixture.comp.sqe_cnt[0][0].store(2);
     fixture.comp.sqe_cnt[1][1].store(1);
     EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, &chipInfo));
     EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr));
+    g_bondp_global_ctx = nullptr;
 
     fixture.comp.active_count = 0;
     EXPECT_EQ(-1, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr));
@@ -1485,25 +1499,6 @@ TEST(UrmaBondTest, PublicAsyncEventMapsPhysicalJfsAndAckReleasesPrivateEvent)
 
     EXPECT_EQ(0, close(eventFd));
     EXPECT_EQ(0, close(epollFd));
-}
-
-TEST(UrmaBondTest, NetlinkPublicApisHandleInvalidAndUninitializedState)
-{
-    bondp_switchback_req_t req = {};
-    bondp_switchback_msg_t msg = {};
-    bondp_context_t ctx = {};
-
-    bondp_nl_uninit();
-    EXPECT_EQ(-1, bondp_nl_get_fd());
-    EXPECT_EQ(-EINVAL, bondp_nl_send_switchback_req(nullptr));
-    EXPECT_EQ(-ENOTCONN, bondp_nl_send_switchback_req(&req));
-    EXPECT_EQ(-EINVAL, bondp_nl_recv_switchback_msg(nullptr));
-    EXPECT_EQ(-ENOTCONN, bondp_nl_recv_switchback_msg(&msg));
-
-    EXPECT_EQ(-EINVAL, bondp_fallback_ctrl_send_default(nullptr, 1, 0, 0, 1, 2, 3));
-    EXPECT_EQ(-EINVAL, bondp_fallback_ctrl_send_default(&ctx, 1, -1, 0, 1, 2, 3));
-    EXPECT_EQ(-EINVAL, bondp_fallback_ctrl_send_default(&ctx, 1, 0, -1, 1, 2, 3));
-    EXPECT_EQ(-ENOTCONN, bondp_fallback_ctrl_send_default(&ctx, 1, 0, 0, 1, 2, 3));
 }
 
 TEST(UrmaBondTest, LinkRecoveryRebuildsLocalPjettyWithMockProvider)

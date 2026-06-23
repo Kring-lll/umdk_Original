@@ -1294,6 +1294,7 @@ The following scenarios trigger the JFC to generate a completion record:
 | DFX Interface | urma_admin Query | Device attributes | port_attr | active_width | Active link width | √ | √ |
 | DFX Interface | urma_admin Query | Device attributes | port_attr | active_speed | Active link speed | √ | √ |
 | DFX Interface | urma_admin Query | Device attributes | port_attr | active_mtu | Active MTU | √ | √ |
+| DFX Interface | urma_admin Query | Topology information | UE | cna | CNA EID of each UE port printed by `urma_admin show topo [NODE_ID]`; `Invalid EID` means the port has no valid CNA EID. | √ | √ |
 | DFX Interface | urma_admin Query | upi | — | — | UPI query | — | — |
 | DFX Interface | urma_perftest | Test type config | send_lat | — | Send latency test | √ | √ |
 | DFX Interface | urma_perftest | Test type config | read_lat | — | Read latency test | √ | √ |
@@ -1930,12 +1931,12 @@ urma_admin perf show                                             Show DFX statis
 
 | Command Element | Description | Required | Valid Range | Default |
 |---|---|---|---|---|
-| <dev> | Device name, for example udma1 | Required | String up to 63 bytes | None |
-| <netns> | Network namespace path, for example /proc/$pid/ns/net | Required | Valid namespace path | None |
-| <eid_idx> | EID index | Required | 0~65535 | None |
-| <eid> | EID value | Required | IPv4, IPv6, or mapped EID string | None |
-| <main_ue_eid> | Main UE EID mapped from one or more EIDs | Required | IPv4, IPv6, or mapped EID string | None |
-| <node_id> | Topology node ID | Optional | uint32_t | Current node |
+| `<dev>` | Device name, for example udma1 | Required | String up to 63 bytes | None |
+| `<netns>` | Network namespace path, for example /proc/$pid/ns/net | Required | Valid namespace path | None |
+| `<eid_idx>` | EID index | Required | 0~65535 | None |
+| `<eid>` | EID value | Required | IPv4, IPv6, or mapped EID string | None |
+| `<main_ue_eid>` | Main UE EID mapped from one or more EIDs | Required | IPv4, IPv6, or mapped EID string | None |
+| `<node_id>` | Topology node ID | Optional | uint32_t | Current node |
 | --brief | In show command, show bonding devices first if they exist | Optional | - | Enabled |
 | --all | In show command, show all devices | Optional | - | Disabled |
 | --whole | In show command, show complete device information | Optional | - | Disabled |

@@ -19,10 +19,12 @@
 #include "bondp_api.h"
 #include "bondp_context_table.h"
 #include "bondp_datapath.h"
+#include "bondp_failback.h"
 #include "bondp_health_check.h"
 #include "bondp_netlink.h"
 #include "bondp_segment.h"
 #include "bondp_types.h"
+#include "bondp_worker.h"
 #include "ubagg_ioctl.h"
 #include "urma_device.h"
 #include "urma_log.h"
@@ -149,7 +151,7 @@ static void read_all_env(bondp_global_context_t *ctx)
 {
     bondp_health_thread_ctx_t *thread_ctx = &ctx->health_thread_ctx;
     const bool default_enable_health_check = false;
-    const bool default_enable_failback = true;
+    const bool default_enable_failback = false;
     const bool default_enable_failover = true;
     const uint64_t default_health_check_backup_start_ms = 2000;
     const uint64_t default_health_check_backup_interval_ms = 32000;
@@ -270,32 +272,61 @@ static int bondp_global_ctx_uninit(bondp_global_context_t *bondp_global_ctx)
 
 urma_status_t bondp_init(urma_init_attr_t *conf)
 {
+    int ret;
+
     if (g_bondp_global_ctx != NULL) {
         URMA_LOG_WARN("Initialized already\n");
         return URMA_FAIL;
     }
-    int ret = bondp_global_ctx_init(&g_bondp_global_ctx);
+
+    ret = bondp_fb_init();
     if (ret != 0) {
-        URMA_LOG_ERR("Failed to create global context.\n");
+        URMA_LOG_ERR("Failed to init failback context, ret=%d.\n", ret);
         return URMA_FAIL;
     }
 
-    if (bondp_nl_init() != 0) {
-        URMA_LOG_ERR("Failed to init bondp netlink context.\n");
-        (void)bondp_global_ctx_uninit(g_bondp_global_ctx);
-        g_bondp_global_ctx = NULL;
-        return URMA_FAIL;
+    ret = bondp_nl_sock_init();
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to init bond netlink socket, ret=%d.\n", ret);
+        goto ERR_FB_UNINIT;
+    }
+
+    ret = bondp_worker_create();
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to create bond worker, ret=%d.\n", ret);
+        goto ERR_SOCK_UNINIT;
+    }
+
+    ret = bondp_nl_worker_init();
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to attach bond netlink socket to worker, ret=%d.\n", ret);
+        goto ERR_WORKER_DESTROY;
+    }
+
+    ret = bondp_global_ctx_init(&g_bondp_global_ctx);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to create global context.\n");
+        goto ERR_NL_WORKER_UNINIT;
     }
 
     if (bondp_start_health_check_thread() != 0) {
         URMA_LOG_ERR("Failed to start health check thread.\n");
-        bondp_nl_uninit();
         (void)bondp_global_ctx_uninit(g_bondp_global_ctx);
         g_bondp_global_ctx = NULL;
-        return URMA_FAIL;
+        goto ERR_NL_WORKER_UNINIT;
     }
     URMA_LOG_INFO("Bond provider initialized successfully.\n");
     return URMA_SUCCESS;
+
+ERR_NL_WORKER_UNINIT:
+    bondp_nl_worker_uninit();
+ERR_WORKER_DESTROY:
+    bondp_worker_destroy();
+ERR_SOCK_UNINIT:
+    bondp_nl_sock_uninit();
+ERR_FB_UNINIT:
+    bondp_fb_uninit();
+    return URMA_FAIL;
 }
 
 urma_status_t bondp_uninit(void)
@@ -306,7 +337,6 @@ urma_status_t bondp_uninit(void)
     }
 
     bondp_stop_health_check_thread();
-    bondp_nl_uninit();
 
     int ret = bondp_global_ctx_uninit(g_bondp_global_ctx);
     if (ret != 0) {
@@ -314,6 +344,10 @@ urma_status_t bondp_uninit(void)
         return URMA_FAIL;
     }
     g_bondp_global_ctx = NULL;
+    bondp_nl_worker_uninit();
+    bondp_worker_destroy();
+    bondp_nl_sock_uninit();
+    bondp_fb_uninit();
 
     return URMA_SUCCESS;
 }
