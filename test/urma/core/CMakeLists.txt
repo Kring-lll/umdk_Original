@@ -2,9 +2,13 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 
 add_executable(urma_core_ut
-    core_test.cpp
+    core_mock.cpp
+    cmd_wrapper_test.cpp
+    cp_api_test.cpp
+    dp_main_device_test.cpp
     options_log_perf_test.cpp
 )
+target_compile_options(urma_core_ut PRIVATE -Wno-unused-function)
 target_link_options(urma_core_ut PRIVATE -Wl,--wrap=ioctl)
 target_link_libraries(urma_core_ut PRIVATE urma_test_common ${URMA_STATIC} ${URMA_COMMON_STATIC}
     GTest::gtest_main dl rt pthread)

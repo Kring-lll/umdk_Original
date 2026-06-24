@@ -2,9 +2,14 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 
 add_executable(urma_bond_ut
-    bond_test.cpp
     wr_slide_test.cpp
+    context_worker_topo_test.cpp
+    datapath_convert_schedule_test.cpp
+    public_api_test.cpp
+    datapath_public_test.cpp
+    segment_provider_health_test.cpp
 )
+target_compile_options(urma_bond_ut PRIVATE -Wno-unused-function)
 target_link_libraries(urma_bond_ut PRIVATE urma_test_common ${URMA_UBAGG_SO} ${URMA_SO} ${URMA_COMMON_SO}
     GTest::gtest_main nl-genl-3 nl-3 dl rt pthread)
 

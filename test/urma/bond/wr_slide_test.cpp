@@ -9,7 +9,19 @@
 #include <gtest/gtest.h>
 
 #include "bondp_slide_window.h"
+#include "bondp_timewheel.h"
 #include "bondp_wr_buf.h"
+
+namespace {
+
+static void TimewheelCountCallback(void *arg)
+{
+    uint32_t *count = static_cast<uint32_t *>(arg);
+
+    (*count)++;
+}
+
+} // namespace
 
 TEST(UrmaBondTest, SlideWindowRejectsInvalidInit)
 {
@@ -113,4 +125,47 @@ TEST(UrmaBondTest, SlideWindowHasDuplicateAndWrapAround)
     EXPECT_EQ(8U, bdp_slide_wnd_has(&wnd, 0) ? 8U : wnd.total_size);
     EXPECT_EQ(0, bdp_slide_wnd_add(&wnd, 0));
     bdp_slide_wnd_uninit(&wnd);
+}
+
+TEST(UrmaBondTest, TimewheelSchedulesCancelsAndAdvancesDeterministically)
+{
+    tw_cfg_t cfg = { .tick_ms = 10, .slot_num = 2 };
+    uint32_t fired = 0;
+    tw_task_id_t firstTask = 0;
+    tw_task_id_t cancelTask = 0;
+    tw_task_id_t roundTask = 0;
+
+    EXPECT_EQ(nullptr, tw_create(nullptr));
+    EXPECT_EQ(0U, tw_get_tick_ms(nullptr));
+    EXPECT_EQ(-EINVAL, tw_schedule(nullptr, 0, TimewheelCountCallback, &fired, &firstTask));
+    EXPECT_EQ(-EINVAL, tw_cancel(nullptr, firstTask));
+    tw_advance(nullptr, 1);
+
+    tw_t *tw = tw_create(&cfg);
+    ASSERT_NE(nullptr, tw);
+    EXPECT_EQ(10U, tw_get_tick_ms(tw));
+    EXPECT_EQ(-EINVAL, tw_schedule(tw, 0, nullptr, &fired, &firstTask));
+    EXPECT_EQ(-EINVAL, tw_schedule(tw, 0, TimewheelCountCallback, &fired, nullptr));
+    EXPECT_EQ(-EINVAL, tw_cancel(tw, 0));
+    EXPECT_EQ(-ENOENT, tw_cancel(tw, 0xdead));
+    tw_advance(tw, 0);
+
+    ASSERT_EQ(0, tw_schedule(tw, 0, TimewheelCountCallback, &fired, &firstTask));
+    EXPECT_NE(0U, firstTask);
+    tw_advance(tw, 1);
+    EXPECT_EQ(1U, fired);
+    EXPECT_EQ(-ENOENT, tw_cancel(tw, firstTask));
+
+    ASSERT_EQ(0, tw_schedule(tw, 10, TimewheelCountCallback, &fired, &cancelTask));
+    EXPECT_EQ(0, tw_cancel(tw, cancelTask));
+    tw_advance(tw, 1);
+    EXPECT_EQ(1U, fired);
+
+    ASSERT_EQ(0, tw_schedule(tw, 30, TimewheelCountCallback, &fired, &roundTask));
+    tw_advance(tw, 2);
+    EXPECT_EQ(1U, fired);
+    tw_advance(tw, 1);
+    EXPECT_EQ(2U, fired);
+    tw_destroy(tw);
+    tw_destroy(nullptr);
 }
