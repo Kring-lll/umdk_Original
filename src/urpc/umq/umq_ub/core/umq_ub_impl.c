@@ -381,7 +381,7 @@ uint32_t current_get_and_next_update(void)
 {
     uint32_t old_val, new_val;
     do {
-        old_val = __atomic_load_n(&g_umq_monitor_slots.current_slot, __ATOMIC_RELAXED);
+        old_val = __atomic_load_n(&g_umq_monitor_slots.current_slot, __ATOMIC_ACQUIRE);
         // next slot id
         new_val = old_val + 1;
         if (new_val >= g_umq_monitor_slots.slot_num) {
@@ -452,11 +452,11 @@ void umq_ub_idle_queue_check(void *args)
             (void)util_mutex_unlock(cur_node->lock);
             continue;
         }
-        uint64_t last_send = __atomic_load_n(&cur_node->last_send, __ATOMIC_RELAXED);
+        uint64_t last_send = __atomic_load_n(&cur_node->last_send, __ATOMIC_ACQUIRE);
         if (current_timestamp >= last_send) {
             uint64_t diff = (current_timestamp - last_send);
             if (diff >= timeout_us) {
-                __atomic_store_n(&cur_node->need_return_credit, true, __ATOMIC_RELAXED);
+                __atomic_store_n(&cur_node->need_return_credit, true, __ATOMIC_RELEASE);
                 if (eventfd_write(cur_node->event_fd, value) == -1) {
                     UMQ_VLOG_ERR(VLOG_UMQ, "umq write event failed, err: %s\n", strerror(errno));
                 }
@@ -467,7 +467,7 @@ void umq_ub_idle_queue_check(void *args)
         if (target_slot_id != current_slot_id) {
             urpc_list_remove(&cur_node->node);
             urpc_list_push_back(&temp_list, &cur_node->node);
-            __atomic_store_n(&cur_node->target_slot_id, target_slot_id, __ATOMIC_RELAXED);
+            __atomic_store_n(&cur_node->target_slot_id, target_slot_id, __ATOMIC_RELEASE);
         }
         (void)util_mutex_unlock(cur_node->lock);
     }
@@ -922,8 +922,14 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
         goto DESTROY_FC_JFR_CTX;
     }
 
-    queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL] = umq_create_jetty(queue, dev_ctx,
-        UB_QUEUE_JETTY_FLOW_CONTROL, port_str, queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL]);
+    umq_create_jetty_config_t create_fc_jetty_config = {
+        .jetty_idx = UB_QUEUE_JETTY_FLOW_CONTROL,
+        .jfs_jfc = queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL],
+        .port_str = port_str,
+        .used_port = queue->used_port,
+        .used_port_num = queue->used_port_num,
+    };
+    queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL] = umq_create_jetty(queue, dev_ctx, &create_fc_jetty_config);
     if (queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL] == NULL) {
         goto DELETE_FC_JFS_JFC;
     }
@@ -998,10 +1004,21 @@ static void umq_jetty_port_info(char *buf, int size, ub_queue_t *queue)
     }
 }
 
-static int umq_ub_create_jetty_node(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, jetty_pool_node_t **node)
+static int umq_ub_create_jetty_node(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx,
+    umq_tp_resource_create_option_t *option, jetty_pool_node_t **node)
 {
     uint64_t start_timestamp;
     int ret = UMQ_FAIL;
+    uint8_t used_port_num = option->used_ports.num;
+    bondp_port_id_t used_port[used_port_num > 0 ? used_port_num : 1];
+    bool option_with_used_ports = ((option->create_flag & UMQ_TP_CREATE_FLAG_USED_PORTS) != 0);
+    bool queue_with_used_ports = ((queue->create_flag & UMQ_CREATE_FLAG_USED_PORTS) != 0);
+    if (option_with_used_ports != queue_with_used_ports) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "tp handle %s used port, but main umq %s used port\n",
+            option_with_used_ports ? "with" : "without", queue_with_used_ports ? "with" : "without");
+        return -UMQ_ERR_EINVAL;
+    }
+
     jetty_pool_node_t *jetty_node = umq_ub_jetty_pool_get_free_node();
     if (jetty_node == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "get free jetty node failed, errno %d\n", errno);
@@ -1018,14 +1035,21 @@ static int umq_ub_create_jetty_node(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, je
         }
     }
 
+    if ((option->create_flag & UMQ_TP_CREATE_FLAG_USED_PORTS) != 0) {
+        if (umq_bondp_port_id_set(&option->used_ports, used_port, used_port_num) != UMQ_SUCCESS) {
+            ret = -UMQ_ERR_EINVAL;
+            goto DELETE_JFCE;
+        }
+    }
+
     bondp_jfc_cfg_t bondp_jfc_cfg = {
         .base = {
             .depth = queue->tx_depth + 1, // flush done consumes one cqe
             .jfce = jetty_node->jfs_jfce,
-            .flag.bs.has_drv_ext = ((queue->create_flag & UMQ_CREATE_FLAG_USED_PORTS) != 0)
+            .flag.bs.has_drv_ext = ((option->create_flag & UMQ_TP_CREATE_FLAG_USED_PORTS) != 0)
         },
-        .port_ids = queue->used_port,
-        .port_count = queue->used_port_num,
+        .port_ids = used_port,
+        .port_count = used_port_num,
     };
     start_timestamp = umq_perf_get_start_timestamp();
     jetty_node->jfs_jfc[UB_QUEUE_JETTY_IO] = umq_symbol_urma()->urma_create_jfc(dev_ctx->urma_ctx, &bondp_jfc_cfg.base);
@@ -1037,8 +1061,15 @@ static int umq_ub_create_jetty_node(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, je
 
     char port_str[UMQ_PORT_STR_SIZE] = {0};
     umq_jetty_port_info(port_str, UMQ_PORT_STR_SIZE, queue);
-    jetty_node->jetty[UB_QUEUE_JETTY_IO] =
-        umq_create_jetty(queue, dev_ctx, UB_QUEUE_JETTY_IO, port_str, jetty_node->jfs_jfc[UB_QUEUE_JETTY_IO]);
+
+    umq_create_jetty_config_t create_io_jetty_config = {
+        .jetty_idx = UB_QUEUE_JETTY_IO,
+        .jfs_jfc = jetty_node->jfs_jfc[UB_QUEUE_JETTY_IO],
+        .port_str = port_str,
+        .used_port = used_port,
+        .used_port_num = used_port_num,
+    };
+    jetty_node->jetty[UB_QUEUE_JETTY_IO] = umq_create_jetty(queue, dev_ctx, &create_io_jetty_config);
     if (jetty_node->jetty[UB_QUEUE_JETTY_IO] == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "umq_create_jetty for io jetty failed, errno: %d\n", errno);
         goto DELETE_JFS_JFC;
@@ -1054,8 +1085,14 @@ static int umq_ub_create_jetty_node(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, je
             goto DELETE_JETTY;
         }
 
-        jetty_node->jetty[UB_QUEUE_JETTY_FLOW_CONTROL] = umq_create_jetty(queue, dev_ctx,
-            UB_QUEUE_JETTY_FLOW_CONTROL, port_str, jetty_node->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL]);
+        umq_create_jetty_config_t create_fc_jetty_config = {
+            .jetty_idx = UB_QUEUE_JETTY_FLOW_CONTROL,
+            .jfs_jfc = jetty_node->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL],
+            .port_str = port_str,
+            .used_port = used_port,
+            .used_port_num = used_port_num,
+        };
+        jetty_node->jetty[UB_QUEUE_JETTY_FLOW_CONTROL] = umq_create_jetty(queue, dev_ctx, &create_fc_jetty_config);
         if (jetty_node->jetty[UB_QUEUE_JETTY_FLOW_CONTROL] == NULL) {
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "umq_create_jetty for flow flowcontrol jetty failed, errno: %d\n", errno);
             goto DELETE_FC_JFS_JFC;
@@ -1117,7 +1154,7 @@ static int umq_ub_destroy_jetty_node(ub_queue_t *queue, jetty_pool_node_t *jetty
         (void)umq_symbol_urma()->urma_delete_jfc(fc_jfs_jfc);
         umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_DESTROY_JFC, start_timestamp);
     }
-    
+
     start_timestamp = umq_perf_get_start_timestamp();
     (void)umq_symbol_urma()->urma_delete_jetty(io_jetty);
     umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_DESTROY_JETTY, start_timestamp);
@@ -1134,7 +1171,7 @@ static int umq_ub_destroy_jetty_node(ub_queue_t *queue, jetty_pool_node_t *jetty
     return UMQ_SUCCESS;
 }
 
-uint32_t umq_ub_transport_pool_resource_create_impl(uint64_t umqh_tp)
+uint32_t umq_ub_transport_pool_resource_create_impl(uint64_t umqh_tp, umq_tp_resource_create_option_t *option)
 {
     if (umqh_tp == UMQ_INVALID_HANDLE) {
         UMQ_VLOG_ERR(VLOG_UMQ, "umqh_tp is invalid\n");
@@ -1160,7 +1197,7 @@ uint32_t umq_ub_transport_pool_resource_create_impl(uint64_t umqh_tp)
         errno = -UMQ_ERR_EINVAL;
         return UINT32_MAX;
     }
-    ret = umq_ub_create_jetty_node(queue, dev_ctx, &jetty_node_list->node_list[offset]);
+    ret = umq_ub_create_jetty_node(queue, dev_ctx, option, &jetty_node_list->node_list[offset]);
     if (ret != UMQ_SUCCESS) {
         (void)pthread_spin_unlock(&jetty_node_list->lock);
         UMQ_VLOG_ERR(VLOG_UMQ, "create jetty node failed, ret %d\n", ret);
@@ -1296,8 +1333,14 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
 
         char port_str[UMQ_PORT_STR_SIZE] = {0};
         umq_jetty_port_info(port_str, UMQ_PORT_STR_SIZE, queue);
-        queue->jetty[UB_QUEUE_JETTY_IO] =
-            umq_create_jetty(queue, dev_ctx, UB_QUEUE_JETTY_IO, port_str, queue->jfs_jfc[UB_QUEUE_JETTY_IO]);
+        umq_create_jetty_config_t create_io_jetty_config = {
+            .jetty_idx = UB_QUEUE_JETTY_IO,
+            .jfs_jfc = queue->jfs_jfc[UB_QUEUE_JETTY_IO],
+            .port_str = port_str,
+            .used_port = queue->used_port,
+            .used_port_num = queue->used_port_num,
+        };
+        queue->jetty[UB_QUEUE_JETTY_IO] = umq_create_jetty(queue, dev_ctx, &create_io_jetty_config);
         if (queue->jetty[UB_QUEUE_JETTY_IO] == NULL) {
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "umq_create_jetty for io jetty failed, errno: %d\n", errno);
             goto DELETE_JFS_JFC;
@@ -1422,7 +1465,7 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
     }
 
     if (!is_umq_ub_logic_queue(queue->create_flag) && !is_umq_ub_sub_queue(queue->create_flag) &&
-        __atomic_load_n(&queue->jfr_ctx[UB_QUEUE_JETTY_IO]->ref_cnt, __ATOMIC_RELAXED) != 1) {
+        __atomic_load_n(&queue->jfr_ctx[UB_QUEUE_JETTY_IO]->ref_cnt, __ATOMIC_ACQUIRE) != 1) {
         UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, jfr_ctx ref_cnt not cleared, cannot destroy main "
             "queue\n", EID_ARGS(*io_eid), io_id);
         return -UMQ_ERR_EBUSY;
@@ -2869,7 +2912,7 @@ int umq_ub_stats_io_reset_impl(uint64_t umqh_tp)
     }
 
     for (uint32_t i = 0; i < UB_PACKET_STATS_TYPE_MAX; i++) {
-        (void)__atomic_exchange_n(&queue->packet_stats[i], 0, __ATOMIC_RELAXED);
+        (void)__atomic_exchange_n(&queue->packet_stats[i], 0, __ATOMIC_ACQ_REL);
     }
     return UMQ_SUCCESS;
 }
