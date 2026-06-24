@@ -38,8 +38,10 @@ typedef struct umq_perftest_config {
     bool buf_multiplex;
     bool use_atomic_window;
     bool enable_perf;
-    uint64_t thresh_array[UMQ_PERF_QUANTILE_MAX_NUM];
-    uint16_t thresh_num;
+    int compression; // t-digest compression factor, which controls the number of centroids used to
+                     // approximate the latency distribution. A larger value yields higher accuracy
+                     // at the cost of increased memory usage. Precision also depends on the shape
+                     // of the latency data distribution itself. (default 100)
     uint32_t blk_mode;
 } umq_perftest_config_t;
 
