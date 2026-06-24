@@ -1949,10 +1949,10 @@ int umq_ub_poll_impl(uint64_t umqh_tp, umq_io_option_t *option, umq_buf_t **buf,
     if (option->io_direction == UMQ_IO_RX) {
         ret = umq_ub_poll_rx(umqh_tp, buf, max_buf_count);
     } else if (option->io_direction == UMQ_IO_TX) {
-        ret = umq_ub_poll_tx(umqh_tp, buf, max_buf_count, option->tp_handle_idx);
+        ret = umq_ub_poll_tx(umqh_tp, buf, max_buf_count, option);
     } else if (option->io_direction == UMQ_IO_ALL) {
         uint32_t tx_max_cnt = max_buf_count > 1 ? max_buf_count >> 1 : 1;
-        int32_t tx_cnt = umq_ub_poll_tx(umqh_tp, buf, tx_max_cnt, option->tp_handle_idx);
+        int32_t tx_cnt = umq_ub_poll_tx(umqh_tp, buf, tx_max_cnt, option);
         if (tx_cnt < 0) {
             ret = tx_cnt;
             goto OUT;
