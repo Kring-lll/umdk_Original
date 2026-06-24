@@ -388,6 +388,7 @@ struct umq_buf {
 };
 
 #define UMQ_ALLOC_FLAG_HEAD_ROOM_SIZE         (1)             // enable arg headroom_size
+#define UMQ_ALLOC_FLAG_DISABLE_TLS            (1 << 1)        // disable tls
 
 typedef struct umq_alloc_option {
     uint32_t flag;                          // indicates which below property takes effect
