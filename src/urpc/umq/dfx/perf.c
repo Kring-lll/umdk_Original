@@ -51,9 +51,9 @@ typedef struct umq_perf_record {
 } umq_perf_record_t;
 
 typedef struct umq_perf_record_ctx {
+    int compression;                                // t-digest compression (0→use default)
     umq_perf_record_t perf_record_table[UMQ_PERF_REC_MAX_NUM];
     pthread_once_t *dp_thread_run_once[UMQ_PERF_REC_MAX_NUM];
-    int compression;                                // t-digest compression (0→use default)
 } umq_perf_record_ctx_t;
 
 static pthread_spinlock_t g_umq_perf_record_lock;
@@ -201,15 +201,6 @@ static tdigest_t *umq_perf_ensure_tdigest(umq_perf_record_t *rec, umq_perf_recor
     return td;
 }
 
-static inline uint64_t *umq_perf_ensure_batch_buf(umq_perf_record_t *rec, umq_perf_record_type_t type)
-{
-    if (rec->type_record[type].batch_buf == NULL) {
-        rec->type_record[type].batch_buf =
-            (uint64_t *)calloc((uint32_t)g_umq_perf_record_ctx->compression * TDIGEST_BUFFER_RATIO, sizeof(uint64_t));
-    }
-    return rec->type_record[type].batch_buf;
-}
-
 static inline void umq_perf_fill_perf_record(umq_perf_record_type_t type, uint64_t start)
 {
     uint64_t delta = urpc_get_cpu_cycles() - start;
@@ -219,18 +210,23 @@ static inline void umq_perf_fill_perf_record(umq_perf_record_type_t type, uint64
     (delta > cur_rec->type_record[type].max) ? cur_rec->type_record[type].max = delta : 0;
     ++cur_rec->type_record[type].cnt;
 
-    uint32_t cnt = cur_rec->type_record[type].batch_cnt;
-    uint64_t *buf = umq_perf_ensure_batch_buf(cur_rec, type);
+    uint64_t *buf = cur_rec->type_record[type].batch_buf;
     if (buf == NULL) {
-        return;
+        buf = (uint64_t *)calloc(
+            (uint32_t)g_umq_perf_record_ctx->compression * TDIGEST_BUFFER_RATIO, sizeof(uint64_t));
+        if (buf == NULL) {
+            return;
+        }
+        cur_rec->type_record[type].batch_buf = buf;
     }
+
+    uint32_t cnt = cur_rec->type_record[type].batch_cnt;
     buf[cnt] = delta;
     cnt++;
-    uint32_t batch_size = (uint32_t)g_umq_perf_record_ctx->compression * TDIGEST_BUFFER_RATIO;
-    if (cnt == batch_size) {
+    if (cnt == (uint32_t)g_umq_perf_record_ctx->compression * TDIGEST_BUFFER_RATIO) {
         tdigest_t *td = umq_perf_ensure_tdigest(cur_rec, type);
         if (td != NULL) {
-            for (uint32_t i = 0; i < batch_size; i++) {
+            for (uint32_t i = 0; i < cnt; i++) {
                 tdigest_insert(td, (double)buf[i], 1);
             }
         }
