@@ -1052,7 +1052,7 @@ void umq_qbuf_pool_uninit(void)
 
 // expand local pool capacity and fetch bufs from global
 static ALWAYS_INLINE int umq_qbuf_local_pool_fetch_and_expand(
-    uint32_t needed, local_block_pool_t *local_pool, bool with_data)
+    uint32_t needed, local_block_pool_t *local_pool, bool with_data, umq_alloc_option_t *option)
 {
     int ret;
     if (g_qbuf_pool.disable_scale_cap) {
@@ -1106,8 +1106,13 @@ static ALWAYS_INLINE int umq_qbuf_local_pool_fetch_and_expand(
     }
 
     uint32_t fetch_count = 0;
+    uint32_t batch_cnt_per_round = umq_qbuf_pool_batch_cnt();
     while (fetch_count < batch_cnt) {
-        ret = fetch_from_global(&g_qbuf_pool.block_pool, local_pool, with_data, umq_qbuf_pool_batch_cnt());
+        if ((option->flag & UMQ_ALLOC_FLAG_SKIP_TLS) != 0) {
+            batch_cnt_per_round = umq_qbuf_pool_batch_cnt() < (batch_cnt - fetch_count) ?
+                umq_qbuf_pool_batch_cnt() : (batch_cnt - fetch_count);
+        }
+        ret = fetch_from_global(&g_qbuf_pool.block_pool, local_pool, with_data, batch_cnt_per_round);
         if (ret <= 0) {
             if (__atomic_load_n(&g_total_escape_buf_cnt, __ATOMIC_RELAXED) == 0) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "fetch from global failed, fetch count: %u\n", batch_cnt);
@@ -1117,7 +1122,7 @@ static ALWAYS_INLINE int umq_qbuf_local_pool_fetch_and_expand(
         fetch_count += (uint32_t)ret;
     }
 
-    if (grow > 0) {
+    if (grow > 0 && (option->flag & UMQ_ALLOC_FLAG_SKIP_TLS) == 0) {
         *cap = (*cap) + grow;
         __atomic_fetch_add(g_total, grow, __ATOMIC_RELAXED);
     }
@@ -1356,7 +1361,8 @@ int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *opti
         }
 
         if (local_pool->buf_cnt_without_data < num) {
-            int ret = umq_qbuf_local_pool_fetch_and_expand(num - local_pool->buf_cnt_without_data, local_pool, false);
+            int ret = umq_qbuf_local_pool_fetch_and_expand(num - local_pool->buf_cnt_without_data,
+                local_pool, false, option);
             if (ret != UMQ_SUCCESS) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "umq nodata qbuf local pool fetch and expand failed, "
                 "suggestion: increase total_size or expansion_mem_size_max, ret: %d\n", ret);
@@ -1375,7 +1381,7 @@ int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *opti
     uint32_t buf_cnt = (uint32_t)local_pool->buf_cnt_with_data;
 
     if (buf_cnt < needed) {
-        int ret = umq_qbuf_local_pool_fetch_and_expand(needed - buf_cnt, local_pool, true);
+        int ret = umq_qbuf_local_pool_fetch_and_expand(needed - buf_cnt, local_pool, true, option);
         if (ret != UMQ_SUCCESS) {
             if (param.actual_buf_count == 1 && !g_qbuf_pool.disable_malloc_escape) {
                 return umq_qbuf_alloc_escape(list);
