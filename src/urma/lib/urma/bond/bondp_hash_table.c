@@ -18,6 +18,7 @@ int bondp_hash_table_create(bondp_hash_table_t *tbl, uint32_t size,
     tbl->free_f = free_f;
     tbl->comp_f = comp_f;
     tbl->hash_f = hash_f;
+    atomic_init(&tbl->gen, 0);
     return 0;
 }
 
