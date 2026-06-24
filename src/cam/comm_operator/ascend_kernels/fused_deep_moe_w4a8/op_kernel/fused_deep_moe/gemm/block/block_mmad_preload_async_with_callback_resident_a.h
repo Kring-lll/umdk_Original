@@ -17,6 +17,8 @@
 #include "catlass/gemm/dispatch_policy.hpp"
 #include "catlass/gemm/helper.hpp"
 
+#define TWO 2
+
 namespace Catlass::Gemm::Block {
 
 template <uint32_t PRELOAD_STAGES_, uint32_t L1A_STAGES_, uint32_t L1B_STAGES_, uint32_t L0A_STAGES_,
@@ -24,8 +26,8 @@ template <uint32_t PRELOAD_STAGES_, uint32_t L1A_STAGES_, uint32_t L1B_STAGES_, 
         class L1TileShape_, class L0TileShape_, class AType_, class BType_, class CType_, class BiasType_,
         class TileCopy_, class TileMmad_>
 struct BlockMmad<
-        MmadAtlasA2PreloadAsyncWithCallbackResidentA<PRELOAD_STAGES_, L1A_STAGES_, L1B_STAGES_, L0A_STAGES_, L0B_STAGES_,
-        L0C_STAGES_, ENABLE_UNIT_FLAG_, ENABLE_SHUFFLE_K_>,
+        MmadAtlasA2PreloadAsyncWithCallbackResidentA<PRELOAD_STAGES_, L1A_STAGES_, L1B_STAGES_,
+        L0A_STAGES_, L0B_STAGES_, L0C_STAGES_, ENABLE_UNIT_FLAG_, ENABLE_SHUFFLE_K_>,
         L1TileShape_, L0TileShape_, AType_, BType_, CType_, BiasType_, TileCopy_, TileMmad_> {
 public:
     // Type Aliases
@@ -69,11 +71,11 @@ public:
     static constexpr bool ENABLE_SHUFFLE_K = DispatchPolicy::ENABLE_SHUFFLE_K;
 
     // L1 tile size
-    static constexpr uint32_t L1A_TILE_SIZE = L1TileShape::M * L1TileShape::K * sizeof(ElementA)/2;
-    static constexpr uint32_t L1B_TILE_SIZE = L1TileShape::N * L1TileShape::K * sizeof(ElementB)/2;
+    static constexpr uint32_t L1A_TILE_SIZE = L1TileShape::M * L1TileShape::K * sizeof(ElementA) / TWO;
+    static constexpr uint32_t L1B_TILE_SIZE = L1TileShape::N * L1TileShape::K * sizeof(ElementB) / TWO;
     // L0 tile size
-    static constexpr uint32_t L0A_TILE_SIZE = L0TileShape::M * L0TileShape::K * sizeof(ElementA)/2;
-    static constexpr uint32_t L0B_TILE_SIZE = L0TileShape::K * L0TileShape::N * sizeof(ElementB)/2;
+    static constexpr uint32_t L0A_TILE_SIZE = L0TileShape::M * L0TileShape::K * sizeof(ElementA) / TWO;
+    static constexpr uint32_t L0B_TILE_SIZE = L0TileShape::K * L0TileShape::N * sizeof(ElementB) / TWO;
     static constexpr uint32_t L0C_TILE_SIZE = L1TileShape::M * L1TileShape::N * sizeof(ElementAccumulator);
 
     // Check LayoutC

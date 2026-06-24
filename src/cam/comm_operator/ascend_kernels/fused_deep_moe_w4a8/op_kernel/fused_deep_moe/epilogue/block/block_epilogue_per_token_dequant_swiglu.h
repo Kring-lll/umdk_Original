@@ -204,6 +204,8 @@ public:
         constexpr uint32_t addSrc1RepStrideHighLow = 32;
         constexpr uint32_t addSrc0RepStrideWeightAux = 16;
         constexpr uint32_t addSrc1RepStrideWeightAux = 0;
+        constexpr uint32_t TILE_HALF_SPLIT = 2;
+        constexpr uint32_t TILE_OFFSET_FACTOR = 3;
         bool isLeft = blockOffset.column() < (params.layoutD.shape(1) >> 1);
         isLeft = act_left ? isLeft : (!isLeft);
         AscendC::GlobalTensor<ElementRawScale> gmScale;
@@ -224,7 +226,6 @@ public:
         uint32_t subblockIdx = AscendC::GetSubBlockIdx();
         uint32_t subblockNum = AscendC::GetSubBlockNum();
         for (uint32_t loopIdx = subblockIdx; loopIdx < tileLoops; loopIdx += subblockNum) {
-
             auto tileCoord = epilogueTileSwizzle.GetTileCoord(loopIdx);
             auto actualTileShape = epilogueTileSwizzle.GetActualTileShape(tileCoord);
             auto tileOffsetInBlock = tileCoord * tileShape;
@@ -273,8 +274,8 @@ public:
             auto perTokenScaleTileOffset = tileOffset.template GetCoordByAxis<0>();
             auto perTokenScaleTileShape = actualTileShape.template GetCoordByAxis<0>();
             // recalculate offset
-            Catlass::Coord<1> newperTokenScaleOffset(perTokenScaleTileOffset[0] / 2);
-            Catlass::Coord<1> newperTokenScaleTileShape(perTokenScaleTileShape[0] / 2);
+            Catlass::Coord<1> newperTokenScaleOffset(perTokenScaleTileOffset[0] / TILE_HALF_SPLIT);
+            Catlass::Coord<1> newperTokenScaleTileShape(perTokenScaleTileShape[0] / TILE_HALF_SPLIT);
 
             auto gmTilePerTokenScale = gmPerTokenScale[params.layoutPerTokenScale.GetOffset(newperTokenScaleOffset)];
             auto layoutGmTilePerTokenScale = params.layoutPerTokenScale.GetTileLayout(newperTokenScaleTileShape);
@@ -305,7 +306,7 @@ public:
                 {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile right half, 32UB size
-            AscendC::Muls(ubTmpMxN[TileShape::COLUMN / 2], ubTmpMxN[TileShape::COLUMN / 2],
+            AscendC::Muls(ubTmpMxN[TileShape::COLUMN / TILE_HALF_SPLIT], ubTmpMxN[TileShape::COLUMN / TILE_HALF_SPLIT],
                 DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
                 {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
@@ -317,8 +318,8 @@ public:
                 addSrc1RepStrideHighLow, addSrc1RepStrideHighLow});
             AscendC::PipeBarrier<PIPE_V>();
             // tile right half, 32UB size
-            AscendC::Add(ubTmpMxN[TileShape::COLUMN / 2], ubTmpMxN[TileShape::COLUMN / 2],
-                ubTmpMxN[TileShape::COLUMN * 3 / 2],
+            AscendC::Add(ubTmpMxN[TileShape::COLUMN / TILE_HALF_SPLIT], ubTmpMxN[TileShape::COLUMN / TILE_HALF_SPLIT],
+                ubTmpMxN[TileShape::COLUMN * TILE_OFFSET_FACTOR / TILE_HALF_SPLIT],
                 mulsMask, mulsRepeatTimes,
                 {1, 1, addDstRepStride, addSrc0RepStrideHighLow,
                 addSrc1RepStrideHighLow, addSrc1RepStrideHighLow});
@@ -330,8 +331,8 @@ public:
                 addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::PipeBarrier<PIPE_V>();
             // tile right half, 32 UB size
-            AscendC::Add(ubTmpMxN[TileShape::COLUMN / 2], ubTmpMxN[TileShape::COLUMN / 2],
-                ubweighAux[TileShape::COLUMN / 2],
+            AscendC::Add(ubTmpMxN[TileShape::COLUMN / TILE_HALF_SPLIT], ubTmpMxN[TileShape::COLUMN / TILE_HALF_SPLIT],
+                ubweighAux[TileShape::COLUMN / TILE_HALF_SPLIT],
                 mulsMask, mulsRepeatTimes,
                 {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
                 addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
@@ -341,7 +342,7 @@ public:
             auto &ubD = ubDList[ubListId];
             LayoutD layoutUbD{actualTileShape, ubTileStride};
             auto newlayoutUbD = layoutUbD;                     // copy
-            newlayoutUbD.shape(0) = newlayoutUbD.shape(0) / 2; 
+            newlayoutUbD.shape(0) = newlayoutUbD.shape(0) / TILE_HALF_SPLIT; 
             AscendC::PipeBarrier<PIPE_V>();
             // after dequant, the left half does x / (x + exp(-Dequant(x))), the right dose nothing
             if (isLeft) {
@@ -360,11 +361,11 @@ public:
                 tileOneBlkColumnBroadcastMul(ubD, ubTmpMxN, ubTmpMx32B);
             }
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
-            MatrixCoord newtileOffset(tileOffset.row() / 2, tileOffset.column());
+            MatrixCoord newtileOffset(tileOffset.row() / TILE_HALF_SPLIT, tileOffset.column());
             auto gmTileD = gmD[params.layoutD.GetOffset(newtileOffset)];
             auto layoutGmTileD = params.layoutD.GetTileLayout(actualTileShape);
             auto newlayoutGmTileD = layoutGmTileD;                     // copy
-            newlayoutGmTileD.shape(0) = layoutGmTileD.shape(0) / 2; 
+            newlayoutGmTileD.shape(0) = layoutGmTileD.shape(0) / TILE_HALF_SPLIT; 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
             copyUbToGmD(gmTileD, ubD, newlayoutGmTileD, newlayoutUbD);
             AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(eventUbDMTE3VList[ubListId]);
