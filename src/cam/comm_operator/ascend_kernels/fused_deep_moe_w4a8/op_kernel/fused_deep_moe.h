@@ -56,7 +56,7 @@ template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class Ep
 CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
     layout::RowMajor layoutA, GM_ADDR gmShareB,
     layout::zN layoutShareB, GM_ADDR gmB, layout::zN layoutB,
-    GM_ADDR gmBias, GM_ADDR gmShareBias, // 添加参数gmBias
+    GM_ADDR gmBias, GM_ADDR gmShareBias, // add param gmBias
     GM_ADDR gmShareScale, layout::VectorLayout layoutShareScale,
     GM_ADDR gmScale, layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
     layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
@@ -73,7 +73,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;
 
-    // w4A8适配 这里weight矩阵位int4
+    // w4A8 adaptation: weight matrix is int4
     using AType = Gemm::GemmType<AscendC::int4b_t, layout::RowMajor>;
     using BType = Gemm::GemmType<AscendC::int4b_t, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
@@ -212,7 +212,7 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;
 
-    // w4A8适配
+    // w4A8 adaptation
     using AType = Gemm::GemmType<AscendC::int4b_t, layout::RowMajor>;
     using BType = Gemm::GemmType<AscendC::int4b_t, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
@@ -518,7 +518,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
         Gmm1BlockScheduler>(
         gmm1ProblemShape, groupCount_, gmGroupList, gmX1, layoutX1, gmShareWeight1_, layoutShareWeight1,
         gmWeight1_, layoutWeight1,
-        gmBias1_, gmShareBias1_, // A8w4适配
+        gmBias1_, gmShareBias1_, // A8w4 adaptation
         gmShareWeight1Scale_, layoutShareW1Scale, gmScale1_, layoutW1Scale,
         gmX1Scale, layoutX1Scale, gmX2, layoutX2, gmX2Scale, layoutX2Scale, gmShareX1, gmShareX1Scale,
         gmShareSwigluOut, gmShareX2, layoutShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmX_, gmSmoothScales_,
@@ -541,7 +541,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     }
     GmmDeq<TemplateMC2TypeFunc, Gmm2L1TileShape, Gmm2L0TileShape, Gmm2EpilogueTileShape, Gmm2BlockScheduler,
         Gmm2DispatchPolicy>(gmm2ProblemShape, groupCount_, gmGroupList, gmX2, layoutX2, gmWeight2_, layoutWeight2,
-        gmBias2_, gmShareBias2_, // w4补偿矩阵
+        gmBias2_, gmShareBias2_, // w4 compensation matrix
         gmScale2_, layoutW2Scale, gmX2Scale, layoutX2Scale, gmGmm2DepOut, layoutOutput, bs_,
         shareGmm2ProblemShape, gmShareX2, gmShareWeight2_, gmShareOutput_, gmShareWeight2Scale_,
         gmShareX2Scale, layoutShareX2, layoutShareWeight2, layoutShareX2Scale,

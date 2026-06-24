@@ -448,7 +448,7 @@ static ge::graphStatus CheckGmm2ScaleShape(gert::TilingContext &context,
 static ge::graphStatus CheckGmm2BiasShape(gert::TilingContext &context,
     const FusedDeepMoeTilingData &tilingData)
 {
-    // gmbias校验
+    // gmbias validation
     const char *nodeName = context.GetNodeName();
     uint32_t moeExpertNumPerRank = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;

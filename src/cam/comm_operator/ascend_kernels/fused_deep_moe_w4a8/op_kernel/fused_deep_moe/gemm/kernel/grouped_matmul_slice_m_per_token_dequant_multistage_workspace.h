@@ -138,7 +138,7 @@ public:
             ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
             layoutB(layoutB_),
             gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)),
-            gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)), // 共享专家补偿矩阵
+            gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)), // shared expert compensation matrix
             ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
             layoutScale(layoutScale_),
             ptrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrPerTokenScale_)),
@@ -190,7 +190,7 @@ public:
         // Represent the full gm
         AscendC::GlobalTensor<ElementA> gmA;
         AscendC::GlobalTensor<AscendC::int4b_t> gmA_Int4;
-        // int 4左矩阵和之前gmA指向同一个位置
+        // int4 left matrix and previous gmA point to same location
         gmA.SetGlobalBuffer(params.ptrA);
         gmA_Int4.SetGlobalBuffer(params.ptrA);
         AscendC::GlobalTensor<ElementB> gmB;
@@ -213,7 +213,7 @@ public:
         uint32_t stageId = 0;
         uint32_t stageUsed = 0;
         uint32_t startCoreIdx = 0;
-        // params.problemCount 改成3
+        // params.problemCount changed to 3
         for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
             if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                 gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(
@@ -392,17 +392,17 @@ public:
             gmScaleListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(params.ptrScale));
             __gm__ ElementScale* gmScalePtr;
             
-            // 补偿矩阵
+            // compensation matrix
             AscendC::ListTensorDesc gmWeightAuxListTensor;
             gmWeightAuxListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(params.gmWeightAux));
             __gm__ float* gmWeightAuxPtr;
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                 gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(gmScaleListTensor.GetDataPtr<int32_t>(0));
-                // 补偿矩阵
+                // compensation matrix
                 gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(gmWeightAuxListTensor.GetDataPtr<int32_t>(0));
             }
 
-            // params.problemCount 改成3
+            // params.problemCount changed to 3
             for (uint32_t groupIdx = 0; groupIdx < params.problemCount ; ++groupIdx) {
                 uint32_t currentM = (groupIdx == 0) ?
                     groupList.GetValue(groupIdx) :
