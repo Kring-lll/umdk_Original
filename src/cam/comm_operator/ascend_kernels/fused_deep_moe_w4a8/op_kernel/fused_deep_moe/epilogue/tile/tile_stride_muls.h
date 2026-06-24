@@ -28,7 +28,7 @@ struct TileStrideMuls {
 
     CATLASS_DEVICE
     void operator()(AscendC::LocalTensor<ElementCompute> const &ubDst,
-                    AscendC::LocalTensor<ElementCompute> const &ubSrc, ElementCompute scalar)
+        AscendC::LocalTensor<ElementCompute> const &ubSrc, ElementCompute scalar)
     {
         constexpr uint32_t maxRepeatTimes = 255;
         constexpr uint32_t eleNumPerBlk = BYTE_PER_BLK / sizeof(ElementCompute);
@@ -50,8 +50,8 @@ struct TileStrideMuls {
                 uint32_t residueN = TileShape::COLUMN - colOffset;
                 uint64_t mask = (residueN > colNumPerCompute) ? colNumPerCompute : residueN;
                 AscendC::Muls(ubDst[rowOffset * DstTileShape::COLUMN + colOffset],
-                              ubSrc[rowOffset * SrcTileShape::COLUMN + colOffset], scalar, mask, repeatTimes,
-                              repeatParams);
+                    ubSrc[rowOffset * SrcTileShape::COLUMN + colOffset], scalar, mask, repeatTimes,
+                    repeatParams);
             }
         }
     }

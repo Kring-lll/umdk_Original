@@ -21,13 +21,13 @@
 namespace Catlass::Epilogue::Block {
 
 template <uint32_t UB_STAGES_, uint32_t EXEC_FLAG_,
-          class CType_, class ScaleType_, class LayoutScale_, class LayoutPerTokenScale_, class DType_,
-          class TileRowBroadcastMul_, class TileBroadcastOneBlk_, class TileOneBlkColumnBroadcastMul_,
-          class TileCopy_, class EpilogueTileSwizzle_>
+    class CType_, class ScaleType_, class LayoutScale_, class LayoutPerTokenScale_, class DType_,
+    class TileRowBroadcastMul_, class TileBroadcastOneBlk_, class TileOneBlkColumnBroadcastMul_,
+    class TileCopy_, class EpilogueTileSwizzle_>
 class BlockEpilogue<EpilogueAtlasA2PerTokenDequantCombine<UB_STAGES_, EXEC_FLAG_>,
-          CType_, Gemm::GemmType<ScaleType_, LayoutScale_>, Gemm::GemmType<float, LayoutPerTokenScale_>, DType_,
-          TileRowBroadcastMul_, TileBroadcastOneBlk_, TileOneBlkColumnBroadcastMul_,
-          TileCopy_, EpilogueTileSwizzle_>
+    CType_, Gemm::GemmType<ScaleType_, LayoutScale_>, Gemm::GemmType<float, LayoutPerTokenScale_>, DType_,
+    TileRowBroadcastMul_, TileBroadcastOneBlk_, TileOneBlkColumnBroadcastMul_,
+    TileCopy_, EpilogueTileSwizzle_>
 {
 public:
     using DispatchPolicy = EpilogueAtlasA2PerTokenDequantCombine<UB_STAGES_, EXEC_FLAG_>;
@@ -48,12 +48,12 @@ public:
 
     // Check data infos
     static_assert(std::is_same_v<ElementC, int32_t> &&
-                      (std::is_same_v<ElementD, half> || std::is_same_v<ElementD, bfloat16_t>),
-                  "The element type template parameters of BlockEpilogue are wrong");
+        (std::is_same_v<ElementD, half> || std::is_same_v<ElementD, bfloat16_t>),
+        "The element type template parameters of BlockEpilogue are wrong");
     static_assert(std::is_same_v<LayoutC, layout::RowMajor> && std::is_same_v<LayoutScale, layout::VectorLayout> &&
-                      std::is_same_v<LayoutPerTokenScale, layout::VectorLayout> &&
-                      std::is_same_v<LayoutD, layout::RowMajor>,
-                  "The layout template parameters of BlockEpilogue are wrong");
+        std::is_same_v<LayoutPerTokenScale, layout::VectorLayout> &&
+        std::is_same_v<LayoutD, layout::RowMajor>,
+        "The layout template parameters of BlockEpilogue are wrong");
 
     // Tile compute ops
     using TileRowBroadcastMul = TileRowBroadcastMul_;
@@ -71,17 +71,17 @@ public:
     using TileShape = typename TileRowBroadcastMul::TileShape;
 
     static_assert(TileShape::ROW == TileBroadcastOneBlk::COMPUTE_LENGTH &&
-                      std::is_same_v<TileShape, typename TileOneBlkColumnBroadcastMul::TileShape>,
-                  "TileShape must be consistent for all tile compute ops");
+        std::is_same_v<TileShape, typename TileOneBlkColumnBroadcastMul::TileShape>,
+        "TileShape must be consistent for all tile compute ops");
 
     static_assert((UB_STAGES * (TileShape::COUNT * sizeof(ElementC) +
-                  (std::is_same_v<ElementRawScale, ElementFp32Scale> ?
-                      0 : TileShape::COLUMN * sizeof(ElementRawScale)) +
-                  TileShape::COLUMN * sizeof(ElementFp32Scale) +
-                                TileShape::ROW * sizeof(ElementPerTokenScale) + TileShape::COUNT * sizeof(ElementD)) +
-                   (TileShape::COUNT + TileShape::COUNT) * sizeof(float) + TileShape::ROW * BYTE_PER_BLK) <=
-                      ArchTag::UB_SIZE,
-                  "TileShape is too large to fit in UB");
+        (std::is_same_v<ElementRawScale, ElementFp32Scale> ?
+        0 : TileShape::COLUMN * sizeof(ElementRawScale)) +
+        TileShape::COLUMN * sizeof(ElementFp32Scale) +
+        TileShape::ROW * sizeof(ElementPerTokenScale) + TileShape::COUNT * sizeof(ElementD)) +
+        (TileShape::COUNT + TileShape::COUNT) * sizeof(float) + TileShape::ROW * BYTE_PER_BLK) <=
+        ArchTag::UB_SIZE,
+        "TileShape is too large to fit in UB");
 
     struct Params {
         __gm__ ElementRawScale *ptrScale{nullptr};
@@ -97,9 +97,9 @@ public:
 
         CATLASS_DEVICE
         Params(__gm__ ElementRawScale *ptrScale_, LayoutScale const &layoutScale_,
-               __gm__ float *ptrWeightAux_,
-               __gm__ ElementPerTokenScale *ptrPerTokenScale_, LayoutPerTokenScale const &layoutPerTokenScale_,
-               __gm__ ElementD *ptrD_, LayoutD const &layoutD_)
+            __gm__ float *ptrWeightAux_,
+            __gm__ ElementPerTokenScale *ptrPerTokenScale_, LayoutPerTokenScale const &layoutPerTokenScale_,
+            __gm__ ElementD *ptrD_, LayoutD const &layoutD_)
             : ptrScale(ptrScale_),
               layoutScale(layoutScale_),
               ptrWeightAux(ptrWeightAux_),
@@ -121,7 +121,7 @@ public:
 
     CATLASS_DEVICE
     BlockEpilogue(Arch::Resource<ArchTag> &resource, MoeDistributeCombineImpl::CombineCalcInfo &calcInfo,
-                  Params const &params = Params{})
+        Params const &params = Params{})
         : resource(resource),
           calcInfo(calcInfo),
           params(params)
@@ -204,10 +204,10 @@ public:
     CATLASS_DEVICE GM_ADDR GetWinAddrByRankId(const int32_t rankId, const uint8_t expertLocalId = 0U)
     {
         return (GM_ADDR)((calcInfo.epRankId_ == rankId) ?
-                             calcInfo.epWinContext_->localWindowsIn :
-                             ((HcclRankRelationResV2 *)(calcInfo.epWinContext_->remoteRes[rankId].nextDevicePtr))
-                                 ->windowsIn) +
-               calcInfo.winDataSizeOffset_ + expertLocalId * calcInfo.expertPerSizeOnWin_ + rankId * OPT_RANK_OFFSET;
+            calcInfo.epWinContext_->localWindowsIn :
+            ((HcclRankRelationResV2 *)(calcInfo.epWinContext_->remoteRes[rankId].nextDevicePtr))
+                ->windowsIn) +
+            calcInfo.winDataSizeOffset_ + expertLocalId * calcInfo.expertPerSizeOnWin_ + rankId * OPT_RANK_OFFSET;
     }
 
     CATLASS_DEVICE void SetCombineSendEpRank(uint32_t epRank, uint32_t &remoteEpRank, uint32_t &localEpRank)
@@ -217,8 +217,8 @@ public:
     }
 
     CATLASS_DEVICE void DoCombineSend(AscendC::LocalTensor<ElementD> &ubD, layout::RowMajor &layoutGmTileD,
-                                      LayoutD &layoutUbD, int64_t groupOffsetD, uint32_t expertIdx,
-                                      uint32_t tileOffsetD)
+        LayoutD &layoutUbD, int64_t groupOffsetD, uint32_t expertIdx,
+        uint32_t tileOffsetD)
     {
         const uint32_t copyTokenLen = layoutGmTileD.shape(1) * sizeof(ElementD);
         const uint32_t copyTokenSrcStride =
@@ -239,16 +239,16 @@ public:
             if (prevSendCount <= itToken && itToken < sendCount) {
                 uint32_t copyTokenCount = (sendCount < endToken ? sendCount : endToken) - itToken;
                 AscendC::DataCopyExtParams dataCopyParams(copyTokenCount, copyTokenLen, copyTokenSrcStride,
-                                                          copyTokenDstStride, 0);
+                    copyTokenDstStride, 0);
                 uint32_t remoteEpRank;
                 uint32_t localEpRank;
                 SetCombineSendEpRank(epRank, remoteEpRank, localEpRank);
                 GM_ADDR rankGM = GetWinAddrByRankId(remoteEpRank, expertIdx) +
-                                 localEpRank * calcInfo.moeExpertPerRankNum_ * calcInfo.expertPerSizeOnWin_;
+                    localEpRank * calcInfo.moeExpertPerRankNum_ * calcInfo.expertPerSizeOnWin_;
                 AscendC::GlobalTensor<ElementD> rankWindow;
                 rankWindow.SetGlobalBuffer((__gm__ ElementD *)rankGM);
                 AscendC::DataCopyPad(rankWindow[(itToken - prevSendCount) * calcInfo.axisH_ + tokenOffset],
-                                     ubD[(itToken - startToken) * layoutUbD.stride(0)], dataCopyParams);
+                    ubD[(itToken - startToken) * layoutUbD.stride(0)], dataCopyParams);
                 itToken += copyTokenCount;
             }
         }
@@ -256,9 +256,9 @@ public:
 
     CATLASS_DEVICE
     void operator()(int64_t groupOffsetD, uint32_t expertIdx, GemmCoord const &blockShapeMNK,
-                    GemmCoord const &blockCoordMNK, GemmCoord const &actualBlockShapeMNK,
-                    AscendC::GlobalTensor<ElementC> const &gmBlockC, LayoutC const &layoutBlockC,
-                    Callback &&callback = Callback{})
+        GemmCoord const &blockCoordMNK, GemmCoord const &actualBlockShapeMNK,
+        AscendC::GlobalTensor<ElementC> const &gmBlockC, LayoutC const &layoutBlockC,
+        Callback &&callback = Callback{})
     {
         if (actualBlockShapeMNK.k() == 0) {
             return;
@@ -335,8 +335,8 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventUbScaleVMTE2List[ubListId]);
             // 搬运weighAux矩阵
             AscendC::DataCopyPad(ubweighAux,
-                                 weightAux[params.layoutScale.GetOffset(scaleTileOffset)],
-                                 copyParams, padParams);
+                weightAux[params.layoutScale.GetOffset(scaleTileOffset)],
+                copyParams, padParams);
            
             if constexpr (!std::is_same_v<ElementRawScale, ElementFp32Scale>) {
                 copyGmToUbScale(ubRawScale, gmTileScale, layoutRawUbScale, layoutGmTileScale);
@@ -361,7 +361,7 @@ public:
 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventUbPerTokenScaleVMTE2List[ubListId]);
             copyGmToUbPerTokenScale(ubPerTokenScale, gmTilePerTokenScale, layoutUbPerTokenScale,
-                                    layoutGmTilePerTokenScale);
+                layoutGmTilePerTokenScale);
             AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventUbPerTokenScaleMTE2VList[ubListId]);
 
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventUbCMTE2VList[ubListId]);
@@ -380,77 +380,77 @@ public:
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第一部分 32UB大小
             AscendC::Muls(ubMul, ubMul, DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
-                          {1, 1, src0RepStride, src0RepStride});
+                {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第二部分 32UB大小
             AscendC::Muls(ubMul[TileShape::COLUMN / 4], ubMul[TileShape::COLUMN / 4],
-                          DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
-                          {1, 1, src0RepStride, src0RepStride});
+                DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
+                {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第三部分 32UB大小
             AscendC::Muls(ubMul[TileShape::COLUMN / 2], ubMul[TileShape::COLUMN / 2],
-                          DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
-                          {1, 1, src0RepStride, src0RepStride});
+                DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
+                {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第四部分 32UB大小
             AscendC::Muls(ubMul[TileShape::COLUMN * 3 / 4], ubMul[TileShape::COLUMN * 3 / 4],
-                          DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
-                          {1, 1, src0RepStride, src0RepStride});
+                DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
+                {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // 高低位相加
             // tile 第一部分 32UB大小
             AscendC::Add(ubMul, ubMul, ubMul[TileShape::COLUMN],
-                         mulsMask, mulsRepeatTimes,
-                         {1, 1, addDstRepStride, addSrc0RepStride,
-                          addSrc1RepStride, addSrc1RepStride});
+                mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStride,
+                addSrc1RepStride, addSrc1RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第二部分 32UB大小
             AscendC::Add(ubMul[TileShape::COLUMN / 4], ubMul[TileShape::COLUMN / 4],
-                         ubMul[TileShape::COLUMN + TileShape::COLUMN / 4],
-                         mulsMask, mulsRepeatTimes,
-                         {1, 1, addDstRepStride, addSrc0RepStride,
-                          addSrc1RepStride, addSrc1RepStride});
+                ubMul[TileShape::COLUMN + TileShape::COLUMN / 4],
+                mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStride,
+                addSrc1RepStride, addSrc1RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第三部分 32UB大小
             AscendC::Add(ubMul[TileShape::COLUMN / 2], ubMul[TileShape::COLUMN / 2],
-                         ubMul[TileShape::COLUMN + TileShape::COLUMN / 2],
-                         mulsMask, mulsRepeatTimes,
-                         {1, 1, addDstRepStride, addSrc0RepStride,
-                          addSrc1RepStride, addSrc1RepStride});
+                ubMul[TileShape::COLUMN + TileShape::COLUMN / 2],
+                mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStride,
+                addSrc1RepStride, addSrc1RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第四部分 32UB大小
             AscendC::Add(ubMul[TileShape::COLUMN * 3 / 4], ubMul[TileShape::COLUMN * 3 / 4],
-                         ubMul[TileShape::COLUMN + TileShape::COLUMN * 3 / 4],
-                         mulsMask, mulsRepeatTimes,
-                         {1, 1, addDstRepStride, addSrc0RepStride,
-                          addSrc1RepStride, addSrc1RepStride});
+                ubMul[TileShape::COLUMN + TileShape::COLUMN * 3 / 4],
+                mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStride,
+                addSrc1RepStride, addSrc1RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // 补偿矩阵相加 8 * weight
             // tile 第一部分 32 UB大小
             AscendC::Add(ubMul, ubMul, ubweighAux, mulsMask, mulsRepeatTimes,
-                         {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
-                          addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
+                {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
+                addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第二部分 32 UB大小
             AscendC::Add(ubMul[TileShape::COLUMN / 4], ubMul[TileShape::COLUMN / 4],
-                         ubweighAux[TileShape::COLUMN / 4],
-                         mulsMask, mulsRepeatTimes,
-                         {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
-                          addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
+                ubweighAux[TileShape::COLUMN / 4],
+                mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
+                addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第三部分 32 UB大小
             AscendC::Add(ubMul[TileShape::COLUMN / 2], ubMul[TileShape::COLUMN / 2],
-                         ubweighAux[TileShape::COLUMN / 2],
-                         mulsMask, mulsRepeatTimes,
-                         {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
-                          addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
+                ubweighAux[TileShape::COLUMN / 2],
+                mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
+                addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 第四部分 32 UB大小
             AscendC::Add(ubMul[TileShape::COLUMN * 3 / 4], ubMul[TileShape::COLUMN * 3 / 4],
-                         ubweighAux[TileShape::COLUMN * 3 / 4],
-                         mulsMask, mulsRepeatTimes,
-                         {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
-                          addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
+                ubweighAux[TileShape::COLUMN * 3 / 4],
+                mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
+                addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventUbPerTokenScaleMTE2VList[ubListId]);
             tileBroadcastOneBlk(ubPerTokenScaleBrcb, ubPerTokenScale);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventUbPerTokenScaleVMTE2List[ubListId]);

@@ -59,8 +59,8 @@ class CamMoeDistributeCombine {
 public:
     __aicore__ inline CamMoeDistributeCombine(){};
     __aicore__ inline void Init(GM_ADDR expandX, GM_ADDR expertIds, GM_ADDR expandIdx, GM_ADDR epSendCount,
-                                GM_ADDR tpSendCount, GM_ADDR scales, GM_ADDR xActiveMask, GM_ADDR XOut,
-                                GM_ADDR workspaceGM, TPipe *pipe, const FusedDeepMoeTilingData *tilingData);
+        GM_ADDR tpSendCount, GM_ADDR scales, GM_ADDR xActiveMask, GM_ADDR XOut,
+        GM_ADDR workspaceGM, TPipe *pipe, const FusedDeepMoeTilingData *tilingData);
     __aicore__ inline void Process();
     __aicore__ inline void AllToAllSend();
     __aicore__ inline void ReducePermute();
@@ -82,9 +82,9 @@ private:
     __aicore__ inline void ReduceScatterTrans();
     __aicore__ inline void SetWaitTpStatusAndDisPatch();
     __aicore__ inline void CustomAdd(LocalTensor<ExpandXType> &dst, LocalTensor<ExpandXType> &src0,
-                                     LocalTensor<ExpandXType> &src1, uint32_t dataCnt);
+        LocalTensor<ExpandXType> &src1, uint32_t dataCnt);
     __aicore__ inline void ExpertAlltoAllDispatchInnerCopyAdd(uint32_t tokenNumLoop, uint32_t srcStartTokenIdx,
-                                                              uint32_t ep, uint32_t expertIdx);
+        uint32_t ep, uint32_t expertIdx);
     __aicore__ inline void ExpertAlltoAllDispatchCopyAdd();
     __aicore__ inline void LocalWindowCopy();
     __aicore__ inline void BuffInit();
@@ -95,16 +95,16 @@ private:
     {
         if (domain == EP_DOMAIN) {
             return (GM_ADDR)((epRankId_ == rankId)
-                                 ? epWinContext_->localWindowsIn
-                                 : ((HcclRankRelationResV2 *)(epWinContext_->remoteRes[rankId].nextDevicePtr))
-                                       ->windowsIn) +
-                   winDataSizeOffset_ + expertLocalId * expertPerSizeOnWin_ + rankId * OPT_RANK_OFFSET;
+                ? epWinContext_->localWindowsIn
+                : ((HcclRankRelationResV2 *)(epWinContext_->remoteRes[rankId].nextDevicePtr))
+                    ->windowsIn) +
+                winDataSizeOffset_ + expertLocalId * expertPerSizeOnWin_ + rankId * OPT_RANK_OFFSET;
         } else {
             return (GM_ADDR)((tpRankId_ == rankId)
-                                 ? tpWinContext_->localWindowsIn
-                                 : ((HcclRankRelationResV2 *)(tpWinContext_->remoteRes[rankId].nextDevicePtr))
-                                       ->windowsIn) +
-                   winDataSizeOffset_ + rankId * OPT_RANK_OFFSET;
+                ? tpWinContext_->localWindowsIn
+                : ((HcclRankRelationResV2 *)(tpWinContext_->remoteRes[rankId].nextDevicePtr))
+                    ->windowsIn) +
+                winDataSizeOffset_ + rankId * OPT_RANK_OFFSET;
         }
     }
 
@@ -112,16 +112,16 @@ private:
     {
         if (domain == EP_DOMAIN) {
             return (GM_ADDR)((epRankId_ == rankId)
-                                 ? epWinContext_->localWindowsExp
-                                 : ((HcclRankRelationResV2 *)(epWinContext_->remoteRes[rankId].nextDevicePtr))
-                                       ->windowsExp) +
-                   dataState_ * WIN_STATE_OFFSET;
+                ? epWinContext_->localWindowsExp
+                : ((HcclRankRelationResV2 *)(epWinContext_->remoteRes[rankId].nextDevicePtr))
+                    ->windowsExp) +
+                dataState_ * WIN_STATE_OFFSET;
         } else {
             return (GM_ADDR)((tpRankId_ == rankId)
-                                 ? tpWinContext_->localWindowsExp
-                                 : ((HcclRankRelationResV2 *)(tpWinContext_->remoteRes[rankId].nextDevicePtr))
-                                       ->windowsExp) +
-                   dataState_ * WIN_STATE_OFFSET;
+                ? tpWinContext_->localWindowsExp
+                : ((HcclRankRelationResV2 *)(tpWinContext_->remoteRes[rankId].nextDevicePtr))
+                    ->windowsExp) +
+                dataState_ * WIN_STATE_OFFSET;
         }
     }
 
@@ -439,7 +439,7 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::ReduceScatt
 {
     __asm__ __volatile__("");
     DataCacheCleanAndInvalid<int32_t, CacheLine::SINGLE_CACHE_LINE, DcciDst::CACHELINE_OUT>(
-                                tpSendCountGM_[tpRankId_]);
+        tpSendCountGM_[tpRankId_]);
     __asm__ __volatile__("");
     uint32_t offset = tpSendCountGM_.GetValue(tpRankId_) * axisH_;
     GlobalTensor<ExpandXType> dataCopyInGM = expandXGM_[offset];
@@ -581,9 +581,9 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::ExpertAllto
 
 template <TemplateMC2TypeClass>
 __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::CustomAdd(LocalTensor<ExpandXType> &dst,
-                                                                               LocalTensor<ExpandXType> &src0,
-                                                                               LocalTensor<ExpandXType> &src1,
-                                                                               uint32_t dataCnt)
+    LocalTensor<ExpandXType> &src0,
+    LocalTensor<ExpandXType> &src1,
+    uint32_t dataCnt)
 {
     if constexpr (AscendC::IsSameType<ExpandXType, bfloat16_t>::value) {
         Cast(winTpSendCountFloatTensor_, src0, RoundMode::CAST_NONE, dataCnt);
@@ -630,7 +630,7 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::WaitDispatc
         uint32_t mask = 1;  // gatherMask + sum
         uint64_t rsvdCnt = 0;
         DataCopyParams intriParams{static_cast<uint16_t>(sendRankNum_), 1,
-                                   static_cast<uint16_t>((moeSendNum_ > 512) ? 7 : 15), 0};  // srcStride is 15 blocks
+            static_cast<uint16_t>((moeSendNum_ > 512) ? 7 : 15), 0};  // srcStride is 15 blocks
         float sumOfFlag = static_cast<float>(-1.0);
         float minTarget = (sumTarget_ * sendRankNum_) - (float)0.5;
         float maxTarget = (sumTarget_ * sendRankNum_) + (float)0.5;
@@ -638,10 +638,10 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::WaitDispatc
         SyncFunc<AscendC::HardEvent::S_V>();
         while ((sumOfFlag < minTarget) || (sumOfFlag > maxTarget)) {
             DataCopy<float>(statusTensor, epStatusSpaceGlobalTensor_[startRankId_ * stateOffset_ / sizeof(float)],
-                            intriParams);
+                intriParams);
             SyncFunc<AscendC::HardEvent::MTE2_V>();
             GatherMask(gatherMaskOutTensor, statusTensor, gatherTmpTensor, true, mask,
-                       {1, (uint16_t)sendRankNum_, 1, 0}, rsvdCnt);
+                {1, (uint16_t)sendRankNum_, 1, 0}, rsvdCnt);
             PipeBarrier<PIPE_V>();
             Sum(statusSumOutTensor, gatherMaskOutTensor, sumParams);
             SyncFunc<AscendC::HardEvent::V_S>();
@@ -721,9 +721,9 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::LocalWindow
             }
             float scaleVal = expandScalesLocal.GetValue(index);
             GM_ADDR wAddr = (__gm__ uint8_t *)(epWindowGM_) +
-                            expertPerSizeOnWin_ * moeExpert +
-                            indexCountsLocal.GetValue(index) * axisHExpandXTypeSize_ +
-                            tokenOffset * sizeof(ExpandXType);
+                expertPerSizeOnWin_ * moeExpert +
+                indexCountsLocal.GetValue(index) * axisHExpandXTypeSize_ +
+                tokenOffset * sizeof(ExpandXType);
             rowTmpGlobal_.SetGlobalBuffer((__gm__ ExpandXType *)wAddr);
             ExpandXType val = rowTmpGlobal_.GetValue(0);
             LocalTensor<ExpandXType> tmpUb = moeSumQueue_.AllocTensor<ExpandXType>();

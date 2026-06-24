@@ -20,18 +20,18 @@
 namespace Catlass::Gemm::Block {
 
 template <uint32_t PRELOAD_STAGES_, uint32_t L1A_STAGES_, uint32_t L1B_STAGES_, uint32_t L0A_STAGES_,
-          uint32_t L0B_STAGES_, uint32_t L0C_STAGES_, bool ENABLE_UNIT_FLAG_, bool ENABLE_SHUFFLE_K_,
-          class L1TileShape_, class L0TileShape_, class AType_, class BType_, class CType_, class BiasType_,
-          class TileCopy_, class TileMmad_>
+        uint32_t L0B_STAGES_, uint32_t L0C_STAGES_, bool ENABLE_UNIT_FLAG_, bool ENABLE_SHUFFLE_K_,
+        class L1TileShape_, class L0TileShape_, class AType_, class BType_, class CType_, class BiasType_,
+        class TileCopy_, class TileMmad_>
 struct BlockMmad<
-    MmadAtlasA2PreloadAsyncWithCallbackResidentA<PRELOAD_STAGES_, L1A_STAGES_, L1B_STAGES_, L0A_STAGES_, L0B_STAGES_,
-                                                 L0C_STAGES_, ENABLE_UNIT_FLAG_, ENABLE_SHUFFLE_K_>,
-    L1TileShape_, L0TileShape_, AType_, BType_, CType_, BiasType_, TileCopy_, TileMmad_> {
+        MmadAtlasA2PreloadAsyncWithCallbackResidentA<PRELOAD_STAGES_, L1A_STAGES_, L1B_STAGES_, L0A_STAGES_, L0B_STAGES_,
+        L0C_STAGES_, ENABLE_UNIT_FLAG_, ENABLE_SHUFFLE_K_>,
+        L1TileShape_, L0TileShape_, AType_, BType_, CType_, BiasType_, TileCopy_, TileMmad_> {
 public:
     // Type Aliases
     using DispatchPolicy =
         MmadAtlasA2PreloadAsyncWithCallbackResidentA<PRELOAD_STAGES_, L1A_STAGES_, L1B_STAGES_, L0A_STAGES_,
-                                                     L0B_STAGES_, L0C_STAGES_, ENABLE_UNIT_FLAG_, ENABLE_SHUFFLE_K_>;
+        L0B_STAGES_, L0C_STAGES_, ENABLE_UNIT_FLAG_, ENABLE_SHUFFLE_K_>;
     using ArchTag = typename DispatchPolicy::ArchTag;
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;
@@ -81,7 +81,7 @@ public:
 
     // Check L1TileShape
     static_assert(L1A_TILE_SIZE * L1A_STAGES + L1B_TILE_SIZE * L1B_STAGES <= ArchTag::L1_SIZE,
-                  "L1TileShape exceeding the L1 space!");
+        "L1TileShape exceeding the L1 space!");
 
     // Check L0TileShape
     static_assert(L0A_TILE_SIZE * L0A_STAGES <= ArchTag::L0A_SIZE, "L0TileShape exceeding the L0A space!");
@@ -89,7 +89,7 @@ public:
     static_assert(L0C_TILE_SIZE * L0C_STAGES <= ArchTag::L0C_SIZE, "L0TileShape exceeding the L0C space!");
 
     static_assert(L1TileShape::M == L0TileShape::M && L1TileShape::N == L0TileShape::N,
-                  "The situation where the basic blocks of L1 and L0 differ on the m and n axes is not supported yet");
+        "The situation where the basic blocks of L1 and L0 differ on the m and n axes is not supported yet");
 
     static constexpr auto L1A_LAYOUT = LayoutAInL1::template MakeLayout<ElementA>(L1TileShape::M, L1TileShape::K);
     static constexpr auto L1B_LAYOUT = LayoutBInL1::template MakeLayout<ElementB>(L1TileShape::K, L1TileShape::N);
@@ -126,10 +126,10 @@ public:
 
     CATLASS_DEVICE
     void operator()(AscendC::GlobalTensor<ElementA> const &gmBlockA, LayoutA const &layoutA,
-                    AscendC::GlobalTensor<ElementB> const &gmBlockB, LayoutB const &layoutB,
-                    AscendC::GlobalTensor<ElementC> const &gmBlockC, LayoutC const &layoutC,
-                    GemmCoord const &actualShape, Callback const &callbackBeforeFixpipe,
-                    Callback const &callbackAfterFixpipe)
+        AscendC::GlobalTensor<ElementB> const &gmBlockB, LayoutB const &layoutB,
+        AscendC::GlobalTensor<ElementC> const &gmBlockC, LayoutC const &layoutC,
+        GemmCoord const &actualShape, Callback const &callbackBeforeFixpipe,
+        Callback const &callbackAfterFixpipe)
     {
         uint32_t kTileCount = CeilDiv<L1TileShape::K>(actualShape.k());
         bool useResidentA =
@@ -147,7 +147,7 @@ public:
 
         for (uint32_t kLoopIdx = 0; kLoopIdx < kTileCount; ++kLoopIdx) {
             uint32_t kTileIdx = (startTileIdx + kLoopIdx < kTileCount) ? (startTileIdx + kLoopIdx)
-                                                                       : (startTileIdx + kLoopIdx - kTileCount);
+                : (startTileIdx + kLoopIdx - kTileCount);
 
             uint32_t kActual =
                 (kTileIdx < kTileCount - 1) ? L1TileShape::K : (actualShape.k() - kTileIdx * L1TileShape::K);
@@ -177,8 +177,8 @@ public:
 
             // Store the current load status
             uint32_t preloadL1TileMmadParamsId = (l1TileMmadParamsId + preloadCount < PRELOAD_STAGES)
-                                                     ? (l1TileMmadParamsId + preloadCount)
-                                                     : (l1TileMmadParamsId + preloadCount - PRELOAD_STAGES);
+                ? (l1TileMmadParamsId + preloadCount)
+                : (l1TileMmadParamsId + preloadCount - PRELOAD_STAGES);
             auto &l1TileMmadParams = l1TileMmadParamsList[preloadL1TileMmadParamsId];
             l1TileMmadParams.l1AListId = l1AListId;
             l1TileMmadParams.l1BListId = l1BListId;

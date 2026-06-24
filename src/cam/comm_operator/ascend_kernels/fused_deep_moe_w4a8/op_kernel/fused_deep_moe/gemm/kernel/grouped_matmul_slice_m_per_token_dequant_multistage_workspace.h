@@ -56,7 +56,7 @@ namespace GMM2 {
 }
 
 template <TemplateMC2TypeClass, class BlockMmad_, class BlockEpilogue_, class BlockScheduler_,
-          uint32_t WORKSPACE_STAGES_, class ElementGroupList_>
+    uint32_t WORKSPACE_STAGES_, class ElementGroupList_>
 class GroupedMatmulSliceMPerTokenDequantMultiStageWorkspace {
 public:
     using BlockMmad = BlockMmad_;
@@ -121,43 +121,43 @@ public:
 
         CATLASS_DEVICE
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_, LayoutA layoutA_,
-               GM_ADDR ptrB_, LayoutB layoutB_, 
-               GM_ADDR gmWeightAux_, GM_ADDR gmShareWeightAux_, // gmWeightAux
-               GM_ADDR ptrScale_, LayoutScale layoutScale_, GM_ADDR ptrPerTokenScale_,
-               LayoutPerTokenScale layoutPerTokenScale_, GM_ADDR ptrD_, LayoutD layoutD_, uint32_t batchSize_,
-               GemmCoord sharedGmm2ProblemShape_, GM_ADDR ptrSharedA_, GM_ADDR ptrSharedB_, GM_ADDR ptrSharedD_,
-               GM_ADDR ptrSharedScale_, GM_ADDR ptrSharedPtrPerTokenScale_, LayoutA sharedLayoutA_,
-               LayoutB sharedLayoutB_,
-               LayoutPerTokenScale sharedLayoutPerTokenScale_, LayoutD sharedLayoutD_,
-               GM_ADDR ptrWorkspace_, void *combiner_)
+            GM_ADDR ptrB_, LayoutB layoutB_,
+            GM_ADDR gmWeightAux_, GM_ADDR gmShareWeightAux_, // gmWeightAux
+            GM_ADDR ptrScale_, LayoutScale layoutScale_, GM_ADDR ptrPerTokenScale_,
+            LayoutPerTokenScale layoutPerTokenScale_, GM_ADDR ptrD_, LayoutD layoutD_, uint32_t batchSize_,
+            GemmCoord sharedGmm2ProblemShape_, GM_ADDR ptrSharedA_, GM_ADDR ptrSharedB_, GM_ADDR ptrSharedD_,
+            GM_ADDR ptrSharedScale_, GM_ADDR ptrSharedPtrPerTokenScale_, LayoutA sharedLayoutA_,
+            LayoutB sharedLayoutB_,
+            LayoutPerTokenScale sharedLayoutPerTokenScale_, LayoutD sharedLayoutD_,
+            GM_ADDR ptrWorkspace_, void *combiner_)
             : problemShape(problemShape_),
-              problemCount(problemCount_),
-              ptrGroupList(reinterpret_cast<__gm__ ElementGroupList *>(ptrGroupList_)),
-              ptrA(reinterpret_cast<__gm__ ElementA *>(ptrA_)),
-              layoutA(layoutA_),
-              ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
-              layoutB(layoutB_),
-              gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)),
-              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)), // 共享专家补偿矩阵
-              ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
-              layoutScale(layoutScale_),
-              ptrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrPerTokenScale_)),
-              layoutPerTokenScale(layoutPerTokenScale_),
-              ptrD(reinterpret_cast<__gm__ ElementD *>(ptrD_)),
-              layoutD(layoutD_),
-              batchSize(batchSize_),
-              sharedGmm2ProblemShape(sharedGmm2ProblemShape_),
-              ptrSharedB(reinterpret_cast<__gm__ ElementB *>(ptrSharedB_)),
-              ptrSharedScale(reinterpret_cast<__gm__ ElementScale *>(ptrSharedScale_)),
-              ptrSharedD(reinterpret_cast<__gm__ ElementD *>(ptrSharedD_)),
-              ptrSharedA(reinterpret_cast<__gm__ ElementA *>(ptrSharedA_)),
-              ptrSharedPtrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrSharedPtrPerTokenScale_)),
-              sharedLayoutA(sharedLayoutA_),
-              sharedLayoutB(sharedLayoutB_),
-              sharedLayoutPerTokenScale(sharedLayoutPerTokenScale_),
-              sharedLayoutD(sharedLayoutD_),
-              ptrWorkspace(ptrWorkspace_),
-              combiner(combiner_)
+            problemCount(problemCount_),
+            ptrGroupList(reinterpret_cast<__gm__ ElementGroupList *>(ptrGroupList_)),
+            ptrA(reinterpret_cast<__gm__ ElementA *>(ptrA_)),
+            layoutA(layoutA_),
+            ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
+            layoutB(layoutB_),
+            gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)),
+            gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)), // 共享专家补偿矩阵
+            ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
+            layoutScale(layoutScale_),
+            ptrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrPerTokenScale_)),
+            layoutPerTokenScale(layoutPerTokenScale_),
+            ptrD(reinterpret_cast<__gm__ ElementD *>(ptrD_)),
+            layoutD(layoutD_),
+            batchSize(batchSize_),
+            sharedGmm2ProblemShape(sharedGmm2ProblemShape_),
+            ptrSharedB(reinterpret_cast<__gm__ ElementB *>(ptrSharedB_)),
+            ptrSharedScale(reinterpret_cast<__gm__ ElementScale *>(ptrSharedScale_)),
+            ptrSharedD(reinterpret_cast<__gm__ ElementD *>(ptrSharedD_)),
+            ptrSharedA(reinterpret_cast<__gm__ ElementA *>(ptrSharedA_)),
+            ptrSharedPtrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrSharedPtrPerTokenScale_)),
+            sharedLayoutA(sharedLayoutA_),
+            sharedLayoutB(sharedLayoutB_),
+            sharedLayoutPerTokenScale(sharedLayoutPerTokenScale_),
+            sharedLayoutD(sharedLayoutD_),
+            ptrWorkspace(ptrWorkspace_),
+            combiner(combiner_)
         {}
     };
 
@@ -174,8 +174,8 @@ public:
         }
         winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
         syncGmAddr = (GM_ADDR)((winContext_)->localWindowsExp) + GMM2::SOFT_SYNC_OFFSET +
-                        (AscendC::GetBlockIdx() / AscendC::GetSubBlockNum() * GMM2::CORE_NUM_PER_GROUP) *
-                        WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
+            (AscendC::GetBlockIdx() / AscendC::GetSubBlockNum() * GMM2::CORE_NUM_PER_GROUP) *
+            WORKSPACE_STAGES * GMM2::SOFT_SYNC_SPACE_SIZE;
     }
 
     template <int32_t CORE_TYPE = g_coreType>
@@ -217,11 +217,11 @@ public:
         for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
             if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                 gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(
-                        gmBlistTensorDesc.GetDataPtr<int32_t>(groupIdx)));
+                    gmBlistTensorDesc.GetDataPtr<int32_t>(groupIdx)));
             }
             
             uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx) * 2
-                                                : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1)) * 2;
+                : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1)) * 2;
             GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
             LayoutB layoutB = params.layoutB;
@@ -257,11 +257,11 @@ public:
                 // Compute block-scoped matrix multiply-add
                 if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
                     blockMmad(gmA_Int4[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
-                              gmC[gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
+                        gmC[gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
                 } else {
                     callbackBeforeFixpipe();
                     blockMmad(gmA_Int4[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
-                              gmC[gmOffsetC], layoutC, actualBlockShape);
+                        gmC[gmOffsetC], layoutC, actualBlockShape);
                     callbackAfterFixpipe();
                 }
 
@@ -281,8 +281,8 @@ public:
             gmB.SetGlobalBuffer(params.ptrSharedB);
             uint32_t softStageUsed = 0;
             GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m() * 2,
-                                          params.sharedGmm2ProblemShape.n(),
-                                          params.problemShape.k()};
+                params.sharedGmm2ProblemShape.n(),
+                params.problemShape.k()};
             LayoutA layoutA = params.sharedLayoutA;
             LayoutB layoutB = params.sharedLayoutB;
 
@@ -416,22 +416,22 @@ public:
                 EpilogueParams epilogueParams;
                 if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                     gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(
-                                    gmScaleListTensor.GetDataPtr<int32_t>(groupIdx));
+                        gmScaleListTensor.GetDataPtr<int32_t>(groupIdx));
                     gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(
-                                    gmWeightAuxListTensor.GetDataPtr<int32_t>(groupIdx));
+                        gmWeightAuxListTensor.GetDataPtr<int32_t>(groupIdx));
                     epilogueParams = EpilogueParams {
-                            gmScalePtr, layoutScale,
-                            gmWeightAuxPtr,
-                            params.ptrPerTokenScale + gmGroupOffsetPerTokenScale, layoutPerTokenScale,
-                            params.ptrD + gmGroupOffsetD, layoutD};
+                        gmScalePtr, layoutScale,
+                        gmWeightAuxPtr,
+                        params.ptrPerTokenScale + gmGroupOffsetPerTokenScale, layoutPerTokenScale,
+                        params.ptrD + gmGroupOffsetD, layoutD};
                 } else {
                     epilogueParams = EpilogueParams{gmScalePtr + gmGroupOffsetScale,
-                                              layoutScale,
-                                              gmWeightAuxPtr + gmGroupOffsetScale,
-                                              params.ptrPerTokenScale + gmGroupOffsetPerTokenScale,
-                                              layoutPerTokenScale,
-                                              params.ptrD + gmGroupOffsetD,
-                                              layoutD};
+                        layoutScale,
+                        gmWeightAuxPtr + gmGroupOffsetScale,
+                        params.ptrPerTokenScale + gmGroupOffsetPerTokenScale,
+                        layoutPerTokenScale,
+                        params.ptrD + gmGroupOffsetD,
+                        layoutD};
                 }
                 blockScheduler.Update(inGroupProblemShape, L1TileShape::ToCoordMN());
                 blockEpilogue.UpdateParams(epilogueParams);
@@ -451,9 +451,9 @@ public:
                     Callback callbackAfterBlockEpilogue = MakeCallbackWithCall2(&aicSetFuncList[stageId]);
                     callbackBeforeBlockEpilogue();
                     blockEpilogue(gmGroupOffsetD, groupIdx,
-                                  blockShapeMNK, blockCoordMNK,
-                                  actualBlockShapeMNK,
-                                  gmBlockC, layoutBlockC);
+                        blockShapeMNK, blockCoordMNK,
+                        actualBlockShapeMNK,
+                        gmBlockC, layoutBlockC);
                     callbackAfterBlockEpilogue();
 
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
@@ -474,8 +474,8 @@ public:
                         AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
                     }
                     GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m() * 2,
-                                                  params.sharedGmm2ProblemShape.n(),
-                                                  params.problemShape.k()};
+                        params.sharedGmm2ProblemShape.n(),
+                        params.problemShape.k()};
                     LayoutScale layoutScale = params.layoutScale;
                     LayoutPerTokenScale layoutPerTokenScale =
                         params.sharedLayoutPerTokenScale.GetTileLayout(
@@ -558,7 +558,7 @@ private:
     struct AicWaitFunc {
         using MatmulKernel =
             GroupedMatmulSliceMPerTokenDequantMultiStageWorkspace<TemplateMC2TypeFunc, BlockMmad, BlockEpilogue,
-                                                                  BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
+            BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
 
         CATLASS_DEVICE
         AicWaitFunc() = default;
@@ -575,13 +575,13 @@ private:
             while (true) {
                 __asm__ __volatile__("");
                 AscendC::DataCacheCleanAndInvalid<uint8_t,
-                            AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
+                    AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
                 __asm__ __volatile__("");
                 uint8_t value = global.GetValue(0);
                 if (value == waitValue) {
                     __asm__ __volatile__("");
                     AscendC::DataCacheCleanAndInvalid<uint8_t,
-                            AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
+                        AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
                     __asm__ __volatile__("");
                     break;
                 }
@@ -677,7 +677,7 @@ private:
     struct AicSetFunc {
         using MatmulKernel =
             GroupedMatmulSliceMPerTokenDequantMultiStageWorkspace<TemplateMC2TypeFunc, BlockMmad, BlockEpilogue,
-                                                                  BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
+            BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
 
         CATLASS_DEVICE
         AicSetFunc() = default;
@@ -692,12 +692,12 @@ private:
                 GMM2::SOFT_SYNC_SPACE_SIZE * GMM2::AIV_NUM_PER_GROUP);
             __asm__ __volatile__("");
             AscendC::DataCacheCleanAndInvalid<uint8_t,
-                            AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
+                AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
             __asm__ __volatile__("");
             global.SetValue(0, setValue);
             __asm__ __volatile__("");
             AscendC::DataCacheCleanAndInvalid<uint8_t,
-                            AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
+                AscendC::CacheLine::SINGLE_CACHE_LINE, AscendC::DcciDst::CACHELINE_OUT>(global);
             __asm__ __volatile__("");
             AscendC::PipeBarrier<PIPE_ALL>();
         }

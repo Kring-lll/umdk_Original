@@ -23,13 +23,13 @@
 namespace Catlass::Epilogue::Block {
 
 template <uint32_t UB_STAGES_, uint32_t EXEC_FLAG_,
-          class CType_, class ScaleType_, class LayoutScale_, class LayoutPerTokenScale_,
-          class DType_, class TileRowBroadcastMul_, class TileBroadcastOneBlk_, class TileOneBlkColumnBroadcastMul_,
-          class TileCopy_, class EpilogueTileSwizzle_>
+    class CType_, class ScaleType_, class LayoutScale_, class LayoutPerTokenScale_,
+    class DType_, class TileRowBroadcastMul_, class TileBroadcastOneBlk_, class TileOneBlkColumnBroadcastMul_,
+    class TileCopy_, class EpilogueTileSwizzle_>
 class BlockEpilogue<EpilogueAtlasA2PerTokenDequantSwiglu<UB_STAGES_, EXEC_FLAG_>,
-                    CType_, Gemm::GemmType<ScaleType_, LayoutScale_>, Gemm::GemmType<float, LayoutPerTokenScale_>,
-                    DType_, TileRowBroadcastMul_, TileBroadcastOneBlk_, TileOneBlkColumnBroadcastMul_,
-                    TileCopy_, EpilogueTileSwizzle_>
+    CType_, Gemm::GemmType<ScaleType_, LayoutScale_>, Gemm::GemmType<float, LayoutPerTokenScale_>,
+    DType_, TileRowBroadcastMul_, TileBroadcastOneBlk_, TileOneBlkColumnBroadcastMul_,
+    TileCopy_, EpilogueTileSwizzle_>
 {
 public:
     using DispatchPolicy = EpilogueAtlasA2PerTokenDequantSwiglu<UB_STAGES_, EXEC_FLAG_>;
@@ -49,11 +49,11 @@ public:
 
     // Check data infos
     static_assert(std::is_same_v<ElementC, int32_t> && std::is_same_v<ElementD, float>,
-                  "The element type template parameters of BlockEpilogue are wrong");
+        "The element type template parameters of BlockEpilogue are wrong");
     static_assert(std::is_same_v<LayoutC, layout::RowMajor> && std::is_same_v<LayoutScale, layout::VectorLayout> &&
-                      std::is_same_v<LayoutPerTokenScale, layout::VectorLayout> &&
-                      std::is_same_v<LayoutD, layout::RowMajor>,
-                  "The layout template parameters of BlockEpilogue are wrong");
+        std::is_same_v<LayoutPerTokenScale, layout::VectorLayout> &&
+        std::is_same_v<LayoutD, layout::RowMajor>,
+        "The layout template parameters of BlockEpilogue are wrong");
 
     // Tile compute ops
     using TileRowBroadcastMul = TileRowBroadcastMul_;
@@ -70,23 +70,23 @@ public:
 
     using TileShape = typename TileRowBroadcastMul::TileShape;
     static_assert(TileShape::ROW * sizeof(float) % BYTE_PER_BLK == 0,
-                  "The per token scale granularity for word calculation must be 32 bytes aligned.");
+        "The per token scale granularity for word calculation must be 32 bytes aligned.");
     static_assert(TileShape::COLUMN % 2 == 0, "The n-axis needs to be divided into two parts.");
 
     static_assert(TileShape::ROW == TileBroadcastOneBlk::COMPUTE_LENGTH &&
-                      std::is_same_v<TileShape, typename TileOneBlkColumnBroadcastMul::TileShape>,
-                  "TileShape must be consistent for all tile compute ops");
+        std::is_same_v<TileShape, typename TileOneBlkColumnBroadcastMul::TileShape>,
+        "TileShape must be consistent for all tile compute ops");
 
     static_assert(UB_STAGES <= 2, "UB stages too large, event id is not enough.");
 
     static_assert((UB_STAGES * (TileShape::COUNT * sizeof(ElementC) +
-                                (std::is_same_v<ElementRawScale, ElementFp32Scale> ?
-                                    0 : TileShape::COLUMN * sizeof(ElementRawScale)) +
-                                TileShape::COLUMN * sizeof(ElementFp32Scale) +
-                                TileShape::ROW * sizeof(ElementPerTokenScale) + TileShape::COUNT * sizeof(ElementD)) +
-                   (TileShape::COUNT + TileShape::COUNT) * sizeof(float) + TileShape::ROW * BYTE_PER_BLK) <=
-                      ArchTag::UB_SIZE,
-                  "TileShape is too large to fit in UB");
+        (std::is_same_v<ElementRawScale, ElementFp32Scale> ?
+        0 : TileShape::COLUMN * sizeof(ElementRawScale)) +
+        TileShape::COLUMN * sizeof(ElementFp32Scale) +
+        TileShape::ROW * sizeof(ElementPerTokenScale) + TileShape::COUNT * sizeof(ElementD)) +
+        (TileShape::COUNT + TileShape::COUNT) * sizeof(float) + TileShape::ROW * BYTE_PER_BLK) <=
+        ArchTag::UB_SIZE,
+        "TileShape is too large to fit in UB");
 
     struct Params {
         __gm__ ElementRawScale *ptrScale{nullptr};
@@ -102,9 +102,9 @@ public:
 
         CATLASS_DEVICE
         Params(__gm__ ElementRawScale *ptrScale_, LayoutScale const &layoutScale_,
-               __gm__ float *ptrWeightAux_,
-               __gm__ ElementPerTokenScale *ptrPerTokenScale_, LayoutPerTokenScale const &layoutPerTokenScale_,
-               __gm__ ElementD *ptrD_, LayoutD const &layoutD_)
+            __gm__ float *ptrWeightAux_,
+            __gm__ ElementPerTokenScale *ptrPerTokenScale_, LayoutPerTokenScale const &layoutPerTokenScale_,
+            __gm__ ElementD *ptrD_, LayoutD const &layoutD_)
             : ptrScale(ptrScale_),
               layoutScale(layoutScale_),
               ptrWeightAux(ptrWeightAux_),
@@ -181,8 +181,8 @@ public:
 
     CATLASS_DEVICE
     void operator()(GemmCoord const &blockShapeMNK, GemmCoord const &blockCoordMNK,
-                    GemmCoord const &actualBlockShapeMNK, AscendC::GlobalTensor<ElementC> const &gmBlockC,
-                    LayoutC const &layoutBlockC, bool act_left = true, Callback &&callback = Callback{})
+        GemmCoord const &actualBlockShapeMNK, AscendC::GlobalTensor<ElementC> const &gmBlockC,
+        LayoutC const &layoutBlockC, bool act_left = true, Callback &&callback = Callback{})
     {
         if (0 == actualBlockShapeMNK.k()) {
             return;
@@ -260,8 +260,8 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventUbScaleVMTE2List[ubListId]);
             // 搬运weighAux矩阵
             AscendC::DataCopyPad(ubweighAux,
-                                 gmWeightAux[params.layoutScale.GetOffset(scaleTileOffset)],
-                                 copyParams, padParams);
+                gmWeightAux[params.layoutScale.GetOffset(scaleTileOffset)],
+                copyParams, padParams);
 
             if constexpr (!std::is_same_v<ElementRawScale, ElementFp32Scale>) {
                 copyGmToUbScale(ubRawScale, gmTileScale, layoutRawUbScale, layoutGmTileScale);
@@ -285,7 +285,7 @@ public:
 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventUbPerTokenScaleVMTE2List[ubListId]);
             copyGmToUbPerTokenScale(ubPerTokenScale, gmTilePerTokenScale, layoutUbPerTokenScale,
-                                    layoutGmTilePerTokenScale);
+                layoutGmTilePerTokenScale);
             AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventUbPerTokenScaleMTE2VList[ubListId]);
 
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventUbCMTE2VList[ubListId]);
@@ -302,39 +302,39 @@ public:
             // W4A8改动 高低位合并，定义repeat参数避免字面量
             AscendC::PipeBarrier<PIPE_V>();
             AscendC::Muls(ubTmpMxN, ubTmpMxN, DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
-                          {1, 1, src0RepStride, src0RepStride});
+                {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 右半部分 32UB大小
             AscendC::Muls(ubTmpMxN[TileShape::COLUMN / 2], ubTmpMxN[TileShape::COLUMN / 2],
-                          DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
-                          {1, 1, src0RepStride, src0RepStride});
+                DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
+                {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // 高低位相加
             // tile 左半部分 32UB大小
             AscendC::Add(ubTmpMxN, ubTmpMxN, ubTmpMxN[TileShape::COLUMN],
-                         mulsMask, mulsRepeatTimes,
-                         {1, 1, addDstRepStride, addSrc0RepStrideHighLow,
-                          addSrc1RepStrideHighLow, addSrc1RepStrideHighLow});
+                mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStrideHighLow,
+                addSrc1RepStrideHighLow, addSrc1RepStrideHighLow});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 右半部分 32UB大小
             AscendC::Add(ubTmpMxN[TileShape::COLUMN / 2], ubTmpMxN[TileShape::COLUMN / 2],
-                         ubTmpMxN[TileShape::COLUMN * 3 / 2],
-                         mulsMask, mulsRepeatTimes,
-                         {1, 1, addDstRepStride, addSrc0RepStrideHighLow,
-                          addSrc1RepStrideHighLow, addSrc1RepStrideHighLow});
+                ubTmpMxN[TileShape::COLUMN * 3 / 2],
+                mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStrideHighLow,
+                addSrc1RepStrideHighLow, addSrc1RepStrideHighLow});
             // 补偿矩阵相加 8 * weight
             // tile 左半部分 32 UB大小
             AscendC::PipeBarrier<PIPE_V>();
             AscendC::Add(ubTmpMxN, ubTmpMxN, ubweighAux, mulsMask, mulsRepeatTimes,
-                         {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
-                          addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
+                {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
+                addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::PipeBarrier<PIPE_V>();
             // tile 右半部分 32 UB大小
             AscendC::Add(ubTmpMxN[TileShape::COLUMN / 2], ubTmpMxN[TileShape::COLUMN / 2],
-                         ubweighAux[TileShape::COLUMN / 2],
-                         mulsMask, mulsRepeatTimes,
-                         {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
-                          addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
+                ubweighAux[TileShape::COLUMN / 2],
+                mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
+                addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventUbPerTokenScaleMTE2VList[ubListId]);
             tileBroadcastOneBlk(ubTmpMx32B, ubPerTokenScale);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventUbPerTokenScaleVMTE2List[ubListId]);

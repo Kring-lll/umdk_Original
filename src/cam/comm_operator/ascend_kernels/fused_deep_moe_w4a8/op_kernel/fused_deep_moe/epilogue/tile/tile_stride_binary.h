@@ -14,7 +14,7 @@
 namespace Catlass::Epilogue::Tile {
 
 template <class ArchTag_, class ElementCompute_, class TileShape_, int64_t DST_STRIDE_, int64_t SRC0_STRIDE_,
-          int64_t SRC1_STRIDE_>
+    int64_t SRC1_STRIDE_>
 struct TileStrideBinary {
     using ArchTag = ArchTag_;
     using ElementCompute = ElementCompute_;
@@ -48,7 +48,7 @@ struct TileStrideBinary {
 };
 
 template <class ArchTag_, class ElementCompute_, class TileShape_, int64_t DST_STRIDE_, int64_t SRC0_STRIDE_,
-          int64_t SRC1_STRIDE_>
+    int64_t SRC1_STRIDE_>
 struct TileStrideMul
     : TileStrideBinary<ArchTag_, ElementCompute_, TileShape_, DST_STRIDE_, SRC0_STRIDE_, SRC1_STRIDE_> {
     using Base = TileStrideBinary<ArchTag_, ElementCompute_, TileShape_, DST_STRIDE_, SRC0_STRIDE_, SRC1_STRIDE_>;
@@ -58,8 +58,8 @@ struct TileStrideMul
 
     CATLASS_DEVICE
     void operator()(AscendC::LocalTensor<typename Base::ElementCompute> const &ubDst,
-                    AscendC::LocalTensor<typename Base::ElementCompute> const &ubSrc0,
-                    AscendC::LocalTensor<typename Base::ElementCompute> const &ubSrc1)
+        AscendC::LocalTensor<typename Base::ElementCompute> const &ubSrc0,
+        AscendC::LocalTensor<typename Base::ElementCompute> const &ubSrc1)
     {
         for (uint32_t rowOffset = 0; rowOffset < Base::TileShape::ROW; rowOffset += Base::ROW_NUM_PER_COMPUTE) {
             uint32_t residueM = Base::TileShape::ROW - rowOffset;
@@ -69,15 +69,15 @@ struct TileStrideMul
                 uint32_t residueN = Base::TileShape::COLUMN - colOffset;
                 uint64_t mask = (residueN > Base::COL_NUM_PER_COMPUTE) ? Base::COL_NUM_PER_COMPUTE : residueN;
                 AscendC::Mul(ubDst[rowOffset * Base::DST_STRIDE + colOffset],
-                             ubSrc0[rowOffset * Base::SRC0_STRIDE + colOffset],
-                             ubSrc1[rowOffset * Base::SRC1_STRIDE + colOffset], mask, repeatTimes, this->repeatParams);
+                    ubSrc0[rowOffset * Base::SRC0_STRIDE + colOffset],
+                    ubSrc1[rowOffset * Base::SRC1_STRIDE + colOffset], mask, repeatTimes, this->repeatParams);
             }
         }
     }
 };
 
 template <class ArchTag_, class ElementCompute_, class TileShape_, int64_t DST_STRIDE_, int64_t SRC0_STRIDE_,
-          int64_t SRC1_STRIDE_>
+    int64_t SRC1_STRIDE_>
 struct TileStrideDiv
     : TileStrideBinary<ArchTag_, ElementCompute_, TileShape_, DST_STRIDE_, SRC0_STRIDE_, SRC1_STRIDE_> {
     using Base = TileStrideBinary<ArchTag_, ElementCompute_, TileShape_, DST_STRIDE_, SRC0_STRIDE_, SRC1_STRIDE_>;
@@ -87,8 +87,8 @@ struct TileStrideDiv
 
     CATLASS_DEVICE
     void operator()(AscendC::LocalTensor<typename Base::ElementCompute> const &ubDst,
-                    AscendC::LocalTensor<typename Base::ElementCompute> const &ubSrc0,
-                    AscendC::LocalTensor<typename Base::ElementCompute> const &ubSrc1)
+        AscendC::LocalTensor<typename Base::ElementCompute> const &ubSrc0,
+        AscendC::LocalTensor<typename Base::ElementCompute> const &ubSrc1)
     {
         for (uint32_t rowOffset = 0; rowOffset < Base::TileShape::ROW; rowOffset += Base::ROW_NUM_PER_COMPUTE) {
             uint32_t residueM = Base::TileShape::ROW - rowOffset;
@@ -98,8 +98,8 @@ struct TileStrideDiv
                 uint32_t residueN = Base::TileShape::COLUMN - colOffset;
                 uint64_t mask = (residueN > Base::COL_NUM_PER_COMPUTE) ? Base::COL_NUM_PER_COMPUTE : residueN;
                 AscendC::Div(ubDst[rowOffset * Base::DST_STRIDE + colOffset],
-                             ubSrc0[rowOffset * Base::SRC0_STRIDE + colOffset],
-                             ubSrc1[rowOffset * Base::SRC1_STRIDE + colOffset], mask, repeatTimes, this->repeatParams);
+                    ubSrc0[rowOffset * Base::SRC0_STRIDE + colOffset],
+                    ubSrc1[rowOffset * Base::SRC1_STRIDE + colOffset], mask, repeatTimes, this->repeatParams);
             }
         }
     }

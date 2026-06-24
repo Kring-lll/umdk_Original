@@ -11,14 +11,14 @@
 #include "lib/matmul_intf.h"
 
 #define CALL_FUSED_DEEP_MOE \
-        FusedDeepMoe<DTYPE_X, DTYPE_GMM1_WEIGHT_SCALE, DTYPE_GMM2_WEIGHT_SCALE, int32_t, false, TILING_KEY_VAR> op; \
-        op.Init(x, expert_ids, gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale, \
-                expert_scales, share_gmm1_weight, share_gmm1_weight_scale, \
-                share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, share_smooth_scales, x_active_mask, \
-                gmm1_bias, gmm2_bias, share_gmm1_bias, share_gmm2_bias, \
-                output, share_output, expertTokenNums, \
-                workspace, nullptr, &tiling_data); \
-        op.Process()
+    FusedDeepMoe<DTYPE_X, DTYPE_GMM1_WEIGHT_SCALE, DTYPE_GMM2_WEIGHT_SCALE, int32_t, false, TILING_KEY_VAR> op; \
+    op.Init(x, expert_ids, gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale, \
+        expert_scales, share_gmm1_weight, share_gmm1_weight_scale, \
+        share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, share_smooth_scales, x_active_mask, \
+        gmm1_bias, gmm2_bias, share_gmm1_bias, share_gmm2_bias, \
+        output, share_output, expertTokenNums, \
+        workspace, nullptr, &tiling_data); \
+    op.Process()
 
 #define CALL_FUSED_DEEP_MOE_IF_TILINGKEY(tilingKey) \
     if constexpr (TILING_KEY_IS(tilingKey)) { \
