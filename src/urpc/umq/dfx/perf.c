@@ -201,7 +201,7 @@ static tdigest_t *umq_perf_ensure_tdigest(umq_perf_record_t *rec, umq_perf_recor
     return td;
 }
 
-static uint64_t *umq_perf_ensure_batch_buf(umq_perf_record_t *rec, umq_perf_record_type_t type)
+static inline uint64_t *umq_perf_ensure_batch_buf(umq_perf_record_t *rec, umq_perf_record_type_t type)
 {
     if (rec->type_record[type].batch_buf == NULL) {
         rec->type_record[type].batch_buf =
