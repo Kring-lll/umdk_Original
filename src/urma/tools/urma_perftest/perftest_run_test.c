@@ -2622,7 +2622,7 @@ static void print_bw_report(perftest_context_t *ctx, perftest_config_t *cfg,
     double msg_rate_avg = ((double)iters_sum * cycles_to_units * inf_bi_factor) / (cycles_sum * PERFTEST_M);
 
     peak_up = (cfg->no_peak == true ? 0 : 1) * size * cycles_to_units;
-    peak_down = opt_delta * PERFTEST_MBS;
+    peak_down = opt_delta * unit_ratio;
 
     if (local_bw_report != NULL) {
         local_bw_report->size = (cfg->enable_random_size != 0) ? (uint32_t)size : cfg->size;
@@ -2652,6 +2652,7 @@ static void print_bw_report_per_jetty(perftest_context_t *ctx, perftest_config_t
     uint32_t jettys_count = cfg->jettys;
     uint64_t num_of_cal_iters = cfg->iters;
     uint64_t size, inf_bi_factor;
+    uint32_t unit_ratio;
     double total_bw_avg = 0;
     double total_msg_rate = 0;
 
@@ -2666,6 +2667,18 @@ static void print_bw_report_per_jetty(perftest_context_t *ctx, perftest_config_t
     inf_bi_factor = (cfg->bidirection && cfg->time_type.bs.infinite == 1) ?
                    (cfg->api_type == PERFTEST_SEND ? INF_BI_FACTOR_SEND : INF_BI_FACTOR_OTHER) : NON_INF_BI_FACTOR;
     size = inf_bi_factor * cfg->size;
+    switch (cfg->bw_unit) {
+        case PERFTEST_KB:
+            unit_ratio = PERFTEST_BW_KB;
+            break;
+        case PERFTEST_GB:
+            unit_ratio = PERFTEST_BW_GB;
+            break;
+        case PERFTEST_MB:
+        default:
+            unit_ratio = PERFTEST_BW_MB;
+            break;
+    }
 
     uint64_t tot_iters = num_of_cal_iters * jettys_count;
     uint64_t tcompleted_last = run_ctx->tcompleted[cfg->no_peak == true ? 0 : tot_iters - 1];
@@ -2674,7 +2687,7 @@ static void print_bw_report_per_jetty(perftest_context_t *ctx, perftest_config_t
         uint64_t jetty_start_idx = index;
         double jetty_cycles = (double)(tcompleted_last - run_ctx->tposted[jetty_start_idx]);
 
-        double jetty_bw = ((double)size * num_of_cal_iters * cycles_to_units) / (jetty_cycles * PERFTEST_BW_MB);
+        double jetty_bw = ((double)size * num_of_cal_iters * cycles_to_units) / (jetty_cycles * unit_ratio);
         double jetty_msg_rate = ((double)num_of_cal_iters * cycles_to_units * inf_bi_factor) /
                 (jetty_cycles * PERFTEST_M);
 
@@ -2701,7 +2714,7 @@ static void print_bw_report_per_jetty(perftest_context_t *ctx, perftest_config_t
 }
 
 static void print_bi_bw_report(const bw_report_data_t *local_bw_report,
-                               const bw_report_data_t *remote_bw_report, perftest_config_t *cfg)
+                               const bw_report_data_t *remote_bw_report)
 {
     /* local and remote bw_report can NOT be NULL */
     uint32_t size = local_bw_report->size;
@@ -2709,23 +2722,9 @@ static void print_bi_bw_report(const bw_report_data_t *local_bw_report,
     uint64_t iters = (local_bw_report->iters > remote_bw_report->iters)
                          ? local_bw_report->iters
                          : remote_bw_report->iters;
-    double unit_ratio;
-    switch (cfg->bw_unit) {
-        case PERFTEST_KB:
-            unit_ratio = PERFTEST_BW_KB;
-            break;
-        case PERFTEST_GB:
-            unit_ratio = PERFTEST_BW_GB;
-            break;
-        case PERFTEST_MB:
-        default:
-            unit_ratio = PERFTEST_BW_MB;
-            break;
-    }
-    double bw_peak = (local_bw_report->bw_peak + remote_bw_report->bw_peak) * PERFTEST_BW_KB / unit_ratio;
-    double bw_avg = (local_bw_report->bw_avg + remote_bw_report->bw_avg) * PERFTEST_BW_KB / unit_ratio;
+    double bw_peak = local_bw_report->bw_peak + remote_bw_report->bw_peak;
+    double bw_avg = local_bw_report->bw_avg + remote_bw_report->bw_avg;
     double msg_rate_avg = local_bw_report->msg_rate_avg + remote_bw_report->msg_rate_avg;
-    // " %-7u    %-10lu       %-7.3lf            %-7.3lf         %-7.6lf"
     LOG_QUIET(REPORT_BW_FMT, size, iters, bw_peak, bw_avg, msg_rate_avg);
     LOG_QUIET("\n");
 }
@@ -3166,7 +3165,7 @@ static int prepare_run_bw_once(perftest_context_t *ctx, perftest_config_t *cfg,
                 LOG_ERROR("Failed to exchange local and remote report data.\n");
                 goto err_dest_jfs_wr;
             }
-            print_bi_bw_report(local_bw_report, remote_bw_report, cfg);
+            print_bi_bw_report(local_bw_report, remote_bw_report);
         }
     }
     destroy_jfs_wr(ctx);
@@ -3203,7 +3202,7 @@ static int run_bw_once(perftest_context_t *ctx, perftest_config_t *cfg)
             if ((cfg->enable_random_size != 0) && local_bw_report.size != remote_bw_report.size) {
                 local_bw_report.size = remote_bw_report.size;
             }
-            print_bi_bw_report(&local_bw_report, &remote_bw_report, cfg);
+            print_bi_bw_report(&local_bw_report, &remote_bw_report);
         }
         return 0;
     }
@@ -3354,7 +3353,7 @@ static int run_send_bw_once(perftest_context_t *ctx, perftest_config_t *cfg)
                 LOG_ERROR("Failed to exchange local and remote data.\n");
                 return -1;
             }
-            print_bi_bw_report(&local_bw_report, &remote_bw_report, cfg);
+            print_bi_bw_report(&local_bw_report, &remote_bw_report);
         }
     }
     return 0;
