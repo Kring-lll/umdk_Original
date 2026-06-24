@@ -1201,7 +1201,6 @@ uint32_t umq_ub_transport_pool_resource_create_impl(uint64_t umqh_tp, umq_tp_res
     if (ret != UMQ_SUCCESS) {
         (void)pthread_spin_unlock(&jetty_node_list->lock);
         UMQ_VLOG_ERR(VLOG_UMQ, "create jetty node failed, ret %d\n", ret);
-        errno = -ret;
         return UINT32_MAX;
     }
     urpc_bitmap_set1(jetty_node_list->bitmap, offset);
@@ -1949,10 +1948,10 @@ int umq_ub_poll_impl(uint64_t umqh_tp, umq_io_option_t *option, umq_buf_t **buf,
     if (option->io_direction == UMQ_IO_RX) {
         ret = umq_ub_poll_rx(umqh_tp, buf, max_buf_count);
     } else if (option->io_direction == UMQ_IO_TX) {
-        ret = umq_ub_poll_tx(umqh_tp, buf, max_buf_count, option->tp_handle_idx);
+        ret = umq_ub_poll_tx(umqh_tp, buf, max_buf_count, option);
     } else if (option->io_direction == UMQ_IO_ALL) {
         uint32_t tx_max_cnt = max_buf_count > 1 ? max_buf_count >> 1 : 1;
-        int32_t tx_cnt = umq_ub_poll_tx(umqh_tp, buf, tx_max_cnt, option->tp_handle_idx);
+        int32_t tx_cnt = umq_ub_poll_tx(umqh_tp, buf, tx_max_cnt, option);
         if (tx_cnt < 0) {
             ret = tx_cnt;
             goto OUT;
