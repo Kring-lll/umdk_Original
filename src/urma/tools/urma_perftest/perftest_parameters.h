@@ -362,6 +362,7 @@ typedef struct bw_report_data {
     double bw_peak;
     double bw_avg;
     double msg_rate_avg;
+    perftest_bw_unit_t bw_unit;
 } bw_report_data_t;
 
 static inline bool perftest_check_rs_mode(const perftest_config_t *cfg)
