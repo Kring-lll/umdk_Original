@@ -77,7 +77,7 @@ static void usage(void)
     (void)printf("      --eid-index                     set eid index.\n");
     (void)printf("      --use_atomic_window             use atomic window when enable flow control.\n");
     (void)printf("      --num                           set number of iterations.\n");
-    (void)printf("      --perf-centroids               t-digest centroid count (1-..., default %d).\n",
+    (void)printf("      --perf-centroids                t-digest centroid count (1-..., default %d).\n",
         PERFTEST_DEFAULT_COMPRESSION);
     (void)printf("      --enable-perf                   enable perf.\n");
     (void)printf("      --blk-size                      set umq_buf_block_size(default:0), 0=BLOCK_SIZE_4K\n");

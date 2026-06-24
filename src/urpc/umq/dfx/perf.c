@@ -44,6 +44,8 @@ typedef struct umq_perf_record {
         uint64_t max; // max latency
         uint64_t cnt; // statistical count
         tdigest_t *td; // t-digest for quantile estimation
+        uint64_t *batch_buf; // batch buffer to defer t-digest inserts from hot path
+        uint32_t batch_cnt; // number of samples currently buffered
     } type_record[UMQ_PERF_RECORD_TYPE_MAX]; // statistical results list for each type of probe point
     bool is_used; // the statistic item valid
 } umq_perf_record_t;
@@ -90,6 +92,10 @@ void umq_perf_uninit(void)
                 tdigest_destroy(rec->type_record[type].td);
                 rec->type_record[type].td = NULL;
             }
+            if (rec->type_record[type].batch_buf != NULL) {
+                free(rec->type_record[type].batch_buf);
+                rec->type_record[type].batch_buf = NULL;
+            }
         }
     }
 
@@ -108,6 +114,7 @@ static void umq_clear_perf_record_item(uint32_t record_idx)
         cur_record->type_record[type].min = UINT64_MAX;
         cur_record->type_record[type].max = 0;
         cur_record->type_record[type].cnt = 0;
+        cur_record->type_record[type].batch_cnt = 0;
         if (cur_record->type_record[type].td != NULL) {
             tdigest_reset(cur_record->type_record[type].td);
         }
@@ -126,6 +133,10 @@ static void umq_perf_record_closure(uint64_t idx)
         if (cur->type_record[type].td != NULL) {
             tdigest_destroy(cur->type_record[type].td);
             cur->type_record[type].td = NULL;
+        }
+        if (cur->type_record[type].batch_buf != NULL) {
+            free(cur->type_record[type].batch_buf);
+            cur->type_record[type].batch_buf = NULL;
         }
     }
     cur->is_used = false;
@@ -190,6 +201,15 @@ static tdigest_t *umq_perf_ensure_tdigest(umq_perf_record_t *rec, umq_perf_recor
     return td;
 }
 
+static uint64_t *umq_perf_ensure_batch_buf(umq_perf_record_t *rec, umq_perf_record_type_t type)
+{
+    if (rec->type_record[type].batch_buf == NULL) {
+        rec->type_record[type].batch_buf =
+            (uint64_t *)calloc((uint32_t)g_umq_perf_record_ctx->compression * TDIGEST_BUFFER_RATIO, sizeof(uint64_t));
+    }
+    return rec->type_record[type].batch_buf;
+}
+
 static inline void umq_perf_fill_perf_record(umq_perf_record_type_t type, uint64_t start)
 {
     uint64_t delta = urpc_get_cpu_cycles() - start;
@@ -197,12 +217,26 @@ static inline void umq_perf_fill_perf_record(umq_perf_record_type_t type, uint64
     cur_rec->type_record[type].accumulation += delta;
     (delta < cur_rec->type_record[type].min) ? cur_rec->type_record[type].min = delta : 0;
     (delta > cur_rec->type_record[type].max) ? cur_rec->type_record[type].max = delta : 0;
-
-    tdigest_t *td = umq_perf_ensure_tdigest(cur_rec, type);
-    if (td != NULL) {
-        tdigest_insert(td, (double)delta, 1);
-    }
     ++cur_rec->type_record[type].cnt;
+
+    uint32_t cnt = cur_rec->type_record[type].batch_cnt;
+    uint64_t *buf = umq_perf_ensure_batch_buf(cur_rec, type);
+    if (buf == NULL) {
+        return;
+    }
+    buf[cnt] = delta;
+    cnt++;
+    uint32_t batch_size = (uint32_t)g_umq_perf_record_ctx->compression * TDIGEST_BUFFER_RATIO;
+    if (cnt == batch_size) {
+        tdigest_t *td = umq_perf_ensure_tdigest(cur_rec, type);
+        if (td != NULL) {
+            for (uint32_t i = 0; i < batch_size; i++) {
+                tdigest_insert(td, (double)buf[i], 1);
+            }
+        }
+        cnt = 0;
+    }
+    cur_rec->type_record[type].batch_cnt = cnt;
 }
 
 void umq_perf_record_write(umq_perf_record_type_t type, uint64_t start)
@@ -271,14 +305,14 @@ int umq_perf_reset(umq_perf_stats_cfg_t *perf_stats_cfg)
         return -UMQ_ERR_EINVAL;
     }
 
-    for (uint32_t i = 0; i < UMQ_PERF_REC_MAX_NUM; ++i) {
-        umq_clear_perf_record_item(i);
-    }
-
     g_umq_perf_record_ctx->compression =
         (perf_stats_cfg != NULL && perf_stats_cfg->compression > 0)
         ? perf_stats_cfg->compression
         : UMQ_PERF_DEFAULT_COMPRESSION;
+
+    for (uint32_t i = 0; i < UMQ_PERF_REC_MAX_NUM; ++i) {
+        umq_clear_perf_record_item(i);
+    }
 
     return UMQ_SUCCESS;
 }
@@ -315,12 +349,30 @@ static inline void umq_perf_convert_cycles_to_ns(umq_perf_record_t *perf_rec)
     }
 }
 
+static void umq_perf_flush_batch(umq_perf_record_t *rec, uint32_t type)
+{
+    uint32_t cnt = rec->type_record[type].batch_cnt;
+    if (cnt == 0) {
+        return;
+    }
+    tdigest_t *td = umq_perf_ensure_tdigest(rec, type);
+    if (td != NULL) {
+        for (uint32_t i = 0; i < cnt; i++) {
+            tdigest_insert(td, (double)rec->type_record[type].batch_buf[i], 1);
+        }
+    }
+    rec->type_record[type].batch_cnt = 0;
+}
+
 static ALWAYS_INLINE void umq_perf_record_add(umq_perf_record_t *total_perf_record, umq_perf_record_t *perf_record)
 {
     for (uint32_t i = 0; i < UMQ_PERF_RECORD_TYPE_MAX; i++) {
         if (perf_record->type_record[i].cnt == 0) {
             continue;
         }
+
+        umq_perf_flush_batch(perf_record, i);
+
         total_perf_record->type_record[i].accumulation += perf_record->type_record[i].accumulation;
         total_perf_record->type_record[i].min =
             (total_perf_record->type_record[i].min != 0 &&
