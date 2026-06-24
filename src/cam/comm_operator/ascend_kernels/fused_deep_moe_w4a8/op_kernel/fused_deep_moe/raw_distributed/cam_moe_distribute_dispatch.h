@@ -16,6 +16,8 @@
 #include "../../fused_deep_moe_base.h"
 #include "../../fused_deep_moe_tiling.h"
 
+#define TWO 2
+
 using namespace Cam;
 namespace MoeDistributeDispatchImpl {
 constexpr uint8_t BUFFER_NUM = 2;
@@ -311,7 +313,7 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
     DataCacheCleanAndInvalid<int32_t, CacheLine::SINGLE_CACHE_LINE, DcciDst::CACHELINE_OUT>(
         selfStatusTensor[aivId_ * UB_ALIGN]);
     int32_t state = selfStatusTensor(aivId_ * UB_ALIGN);
-    stateOffset_ = (recvWinBlockNum_ > 512) ? (STATE_OFFSET / 2) : STATE_OFFSET;
+    stateOffset_ = (recvWinBlockNum_ > 512) ? (STATE_OFFSET / TWO) : STATE_OFFSET;
     tpipe_->InitBuffer(statusBuf_, recvWinBlockNum_ * UB_ALIGN);  // expertNum * 32B
     statusTensor_ = statusBuf_.Get<int32_t>();  // Record token count and flag
     Duplicate<int32_t>(statusTensor_, 0, recvWinBlockNum_ * 8);  // 8 = UB_ALIGN / sizeof(int32_t)
@@ -340,7 +342,7 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
     tpipe_->InitBuffer(gatherMaskOutBuf_, recvWinBlockNum_ * sizeof(float));
     tpipe_->InitBuffer(getTotalBuf_,
         epWorldSize_ * moeExpertNumPerRank_ * sizeof(int32_t));
-    tpipe_->InitBuffer(scalarBuf_, UB_ALIGN * 2);
+    tpipe_->InitBuffer(scalarBuf_, UB_ALIGN * TWO);
     uint32_t hFp32Size = axisH_ * sizeof(float);
     uint32_t bsKAlign256 = Ceil(expertIdsCnt * sizeof(half), ALIGNED_LEN_256) * ALIGNED_LEN_256 / sizeof(half);
     expertIdsSize = Ceil(expertIdsSize, UB_ALIGN) * UB_ALIGN;
@@ -354,7 +356,7 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Init(
     if (axisBS_ <= LOOP_OPT_MAX_BS && moeExpertRankNumAligned_ <= LOOP_OPT_MAX_MOE_RANK &&
         axisK_ % TOPK_ELEM_COUNT_PER_BLOCK == 0) {
         enableAivOpt_ = true;
-        moeExpertRankNumInt16Aligned_ = moeExpertRankNumAligned_ / 2;  // |uint8_t|uint8_t| => int16_t
+        moeExpertRankNumInt16Aligned_ = moeExpertRankNumAligned_ / TWO;  // |uint8_t|uint8_t| => int16_t
         tableElemCount_ = (axisBS_ + 1) * moeExpertRankNumAligned_;    // set the first row all zeros
 
         tpipe_->InitBuffer(sendTableIdsBuf_, tableElemCount_ * sizeof(countType));
@@ -516,7 +518,7 @@ __aicore__ inline void CamMoeDistributeDispatch<TemplateDispatchTypeFunc>::Count
     uint32_t expertIdsCnt)
 {
     LocalTensor<int16_t> tableInt16LocalTensor_ = tableLocalTensor_.template ReinterpretCast<int16_t>();
-    Duplicate(tableInt16LocalTensor_, (int16_t)0, tableElemCount_ / 2);
+    Duplicate(tableInt16LocalTensor_, (int16_t)0, tableElemCount_ / TWO);
     SyncFunc<AscendC::HardEvent::V_S>();
 
     for (int tokenIndex = 0; tokenIndex < static_cast<int>(expertIdsCnt); ++tokenIndex) {  // 0: not send; 1: send

@@ -19,6 +19,8 @@
 #include "catlass/gemm_coord.hpp"
 #include "catlass/matrix_coord.hpp"
 
+#define TWO 2
+
 using namespace Cam;
 // Use this to make a callback
 template <typename Func>
@@ -220,8 +222,8 @@ public:
                     gmBlistTensorDesc.GetDataPtr<int32_t>(groupIdx)));
             }
             
-            uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx) * 2
-                : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1)) * 2;
+            uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx) * TWO
+                : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1)) * TWO;
             GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
             LayoutB layoutB = params.layoutB;
@@ -280,7 +282,7 @@ public:
             gmA.SetGlobalBuffer(params.ptrSharedA);
             gmB.SetGlobalBuffer(params.ptrSharedB);
             uint32_t softStageUsed = 0;
-            GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m() * 2,
+            GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m() * TWO,
                 params.sharedGmm2ProblemShape.n(),
                 params.problemShape.k()};
             LayoutA layoutA = params.sharedLayoutA;
@@ -407,7 +409,7 @@ public:
                 uint32_t currentM = (groupIdx == 0) ?
                     groupList.GetValue(groupIdx) :
                     (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
-                GemmCoord inGroupProblemShape{currentM * 2, params.problemShape.n(), params.problemShape.k()};
+                GemmCoord inGroupProblemShape{currentM * TWO, params.problemShape.n(), params.problemShape.k()};
                 GemmCoord pertokenGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
                 LayoutScale layoutScale = params.layoutScale;
                 LayoutPerTokenScale layoutPerTokenScale =
@@ -473,7 +475,7 @@ public:
                     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
                         AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
                     }
-                    GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m() * 2,
+                    GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m() * TWO,
                         params.sharedGmm2ProblemShape.n(),
                         params.problemShape.k()};
                     LayoutScale layoutScale = params.layoutScale;
