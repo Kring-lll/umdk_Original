@@ -22,6 +22,8 @@
 
 #include "../../../fused_deep_moe_base.h"
 
+#define TWO 2
+
 constexpr uint32_t STATE_OFFSET = 512;
 constexpr uint64_t WIN_STATE_OFFSET = 512 * 1024;
 constexpr uint64_t STATE_WIN_OFFSET = 900 * 1024;
@@ -44,8 +46,8 @@ constexpr uint32_t QUANT_SPACE_FACTOR = 176 * 1024 / 11;  // up to 176KB for qua
 constexpr uint32_t SEND_CORE_NUM = 24;
 #define OPT_RANK_OFFSET 512
 
-#define CEIL_UP(x) ((x + UB_ALIGN - 1) / UB_ALIGN * UB_ALIGN)
-#define CEIL(x, y) (((x) + (y - 1)) / (y))
+#define CEIL_UP(x) ((((x) + (UB_ALIGN) - 1) / (UB_ALIGN)) * (UB_ALIGN))
+#define CEIL(x, y) ((((x) + (((y)) - 1)) / ((y))))
 #define UB_BLOCK_SIZE (32)
 #define TOKEN_FLAG_1 (0x55555555)
 #define TOKEN_FLAG_2 (0x33333333)
@@ -110,6 +112,7 @@ public:
     BlockQuant(Arch::Resource<ArchTag> const &resource, Params const &params_) : params(params_)
     {
         int64_t ubOffset = 0;
+        constexpr size_t LEN_128 = 128;
         tileRow = params_.tileRow;
         tileColumn = params_.tileColumn;
         tileCount = tileRow * tileColumn;
@@ -134,15 +137,15 @@ public:
 
         // int8 -> int4
         xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(ubOffset);
-        ubOffset += CEIL_UP(tileColumn / 2);
+        ubOffset += CEIL_UP(tileColumn / TWO);
         xLowI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(ubOffset);
-        ubOffset += CEIL_UP(tileColumn / 2);
+        ubOffset += CEIL_UP(tileColumn / TWO);
         xLowHalfTensor = resource.ubBuf.template GetBufferByByte<half>(ubOffset);
         ubOffset += CEIL_UP(tileColumn * sizeof(half));
         xLowHalfTensor2 = resource.ubBuf.template GetBufferByByte<half>(ubOffset);
         ubOffset += CEIL_UP(tileColumn * sizeof(half));
         xLowI16Tensor = resource.ubBuf.template GetBufferByByte<int16_t>(ubOffset);
-        ubOffset += CEIL_UP(128 * sizeof(int16_t));
+        ubOffset += CEIL_UP(LEN_128 * sizeof(int16_t));
 
         ubInputTmp = ubAbs;
         ubInputRightHalf = ubAbs;
@@ -283,9 +286,9 @@ public:
             constexpr int32_t MASK = 128;
             AscendC::Duplicate(xLowI16Tensor, static_cast<int16_t>(0x0F0F), MASK);
             AscendC::PipeBarrier<PIPE_V>();
-            const size_t LEN_VK = (tileColumn / 2) / 128;
-            const size_t LAST_LEN_VK = (tileColumn % 256) / 2;
             constexpr size_t LEN_128 = 128;
+            const size_t LEN_VK = (tileColumn / TWO) / LEN_128;
+            const size_t LAST_LEN_VK = (tileColumn % 256) / TWO;
             const half ONE_SIXTEENTH = static_cast<half>(0.0625f);
             // AscendC::SetFlag<AscendC::HardEvent::S_MTE2>(EVENT_ID7);
             // AscendC::WaitFlag<AscendC::HardEvent::S_MTE2>(EVENT_ID7);
@@ -305,7 +308,7 @@ public:
                 AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
                 AscendC::DataCopy(gmTileOutput[outputOffset],
                     xHighI4Tensor.template ReinterpretCast<int8_t>(),
-                    tileColumn / 2);
+                    tileColumn / TWO);
                 AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
                 // High 4-bit processing end
 
@@ -315,7 +318,7 @@ public:
                     xLowI16Tensor, LEN_128, LEN_VK, {1, 1, 1, 8, 8, 0});
                 if (LAST_LEN_VK > 0) {
                     AscendC::And(xLowHalfTensor[LEN_VK * LEN_128].template ReinterpretCast<int16_t>(),
-                        ubOutput[inputOffset + LEN_VK * LEN_128 * 2]
+                        ubOutput[inputOffset + LEN_VK * LEN_128 * TWO]
                         .template ReinterpretCast<int16_t>(),
                         xLowI16Tensor, LAST_LEN_VK, 1,
                         {1, 1, 1, 8, 8, 0});
@@ -335,9 +338,9 @@ public:
                     tileColumn);
                 AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
                 AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
-                AscendC::DataCopy(gmTileOutput[outputOffset + tileColumn / 2],
+                AscendC::DataCopy(gmTileOutput[outputOffset + tileColumn / TWO],
                     xLowI4Tensor.template ReinterpretCast<int8_t>(),
-                    tileColumn / 2);
+                    tileColumn / TWO);
                 AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
             }
         }
@@ -582,7 +585,8 @@ public:
               ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
               layoutB(layoutB_),
               gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)), // compensation matrix
-              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)), // shared expert compensation matrix
+              // shared expert compensation matrix
+              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)),
               ptrShareScale(reinterpret_cast<__gm__ ElementScale *>(ptrShareScale_)),
               layoutShareScale(layoutShareScale_),
               ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
@@ -731,7 +735,7 @@ public:
         uint32_t target = 1;
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             uint32_t currentM = params.bs;
-            GemmCoord inGroupProblemShape{currentM * 2, params.shareN, params.problemShape.k()};
+            GemmCoord inGroupProblemShape{currentM * TWO, params.shareN, params.problemShape.k()};
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
             LayoutB layoutB = params.layoutShareB;
             blockScheduler.Update(inGroupProblemShape, MakeCoord(L1TileShape::M, L1TileShape::N));
@@ -807,7 +811,7 @@ public:
 
             WaitGroupTokenNumReady(groupTokenNumStateTensor, expected);
             // each input has 2x rows, high 4 bits and low 4 bits matrix multiply together
-            uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT) * 2;
+            uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT) * TWO;
             GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
 
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
@@ -1234,12 +1238,12 @@ public:
         AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor =
             resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
         xHighI4Tensor.SetSize(tokenLength);
-        subUbOffset += tokenLength / 2;
+        subUbOffset += tokenLength / TWO;
 
         AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor =
             resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
         xLowI4Tensor.SetSize(tokenLength);
-        subUbOffset += tokenLength / 2;
+        subUbOffset += tokenLength / TWO;
 
         AscendC::LocalTensor<half> xHighHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
         xHighHalfTensor.SetSize(tokenLength * sizeof(half));
@@ -1253,9 +1257,10 @@ public:
         xLowHalfTensor2.SetSize(tokenLength * sizeof(half));
         subUbOffset += tokenLength * sizeof(half);
 
+        constexpr size_t LEN_128 = 128;
         AscendC::LocalTensor<int16_t> xLowI16Tensor = resource.ubBuf.template GetBufferByByte<int16_t>(subUbOffset);
-        xLowI16Tensor.SetSize(128 * sizeof(int16_t));
-        subUbOffset += CEIL_UP(128 * sizeof(int16_t));
+        xLowI16Tensor.SetSize(LEN_128 * sizeof(int16_t));
+        subUbOffset += CEIL_UP(LEN_128 * sizeof(int16_t));
         AscendC::LocalTensor shareSmoothScaleTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
         if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
             subUbOffset += CEIL_UP(tokenLength * sizeof(float));
@@ -1268,14 +1273,13 @@ public:
         constexpr int32_t MASK = 128;
         AscendC::Duplicate(xLowI16Tensor, static_cast<int16_t>(0x0F0F), MASK);
         AscendC::PipeBarrier<PIPE_V>();
-        const size_t LEN_VK = (tokenLength / 2) / 128;
-        const size_t LAST_LEN_VK = (tokenLength % 256) / 2;
+        const size_t LEN_VK = (tokenLength / TWO) / LEN_128;
+        const size_t LAST_LEN_VK = (tokenLength % 256) / TWO;
         const half ONE_SIXTEENTH = static_cast<half>(0.0625f);
 
         AscendC::SetFlag<AscendC::HardEvent::S_MTE2>(0);
         AscendC::WaitFlag<AscendC::HardEvent::S_MTE2>(0);
 
-        constexpr size_t LEN_128 = 128;
         constexpr int32_t BufferNum = 2;
 
         // double buffer
@@ -1314,7 +1318,8 @@ public:
             AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(0);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(0);
-            AscendC::DataCopy(dstXInt8GMTensor[outputOffset], xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
+            AscendC::DataCopy(dstXInt8GMTensor[outputOffset], xHighI4Tensor.ReinterpretCast<int8_t>(), 
+                tokenLength / TWO);
             // high 4 bits processing end
 
             // low 4 bits processing start
@@ -1326,7 +1331,7 @@ public:
             if (LAST_LEN_VK > 0) {
                 AscendC::And(
                     xLowHalfTensor[LEN_VK * LEN_128].ReinterpretCast<int16_t>(),
-                    yInt8Tensor[index][LEN_VK * LEN_128 * 2]
+                    yInt8Tensor[index][LEN_VK * LEN_128 * TWO]
                     .ReinterpretCast<int16_t>(),
                     xLowI16Tensor, LAST_LEN_VK, 1,
                     {1, 1, 1, 8, 8, 0});
@@ -1349,9 +1354,9 @@ public:
                 AscendC::RoundMode::CAST_NONE, tokenLength);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(1);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(1);
-            AscendC::DataCopy(dstXInt8GMTensor[outputOffset + tokenLength / 2],
+            AscendC::DataCopy(dstXInt8GMTensor[outputOffset + tokenLength / TWO],
                 xLowI4Tensor.ReinterpretCast<int8_t>(),
-                tokenLength / 2);
+                tokenLength / TWO);
             AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(0);
         }
         // int8 to int4
@@ -1491,12 +1496,12 @@ CATLASS_DEVICE
         AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor =
             resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
         xHighI4Tensor.SetSize(tokenLength);
-        subUbOffset += tokenLength / 2;
+        subUbOffset += tokenLength / TWO;
 
         AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor =
             resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
         xLowI4Tensor.SetSize(tokenLength);
-        subUbOffset += tokenLength / 2;
+        subUbOffset += tokenLength / TWO;
 
         AscendC::LocalTensor<half> xHighHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
         xHighHalfTensor.SetSize(tokenLength * sizeof(half));
@@ -1510,13 +1515,13 @@ CATLASS_DEVICE
         xLowHalfTensor2.SetSize(tokenLength * sizeof(half));
         subUbOffset += tokenLength * sizeof(half);
 
+        constexpr size_t LEN_128 = 128;
         AscendC::LocalTensor<int16_t> xLowI16Tensor = resource.ubBuf.template GetBufferByByte<int16_t>(subUbOffset);
-        xLowI16Tensor.SetSize(128 * sizeof(int16_t));
+        xLowI16Tensor.SetSize(LEN_128 * sizeof(int16_t));
 
         // INT8-to-INT4 computation constants (per-token: hiddenSize = tokenLength)
-        constexpr size_t LEN_128 = 128;
-        const size_t LEN_VK = (tokenLength / 2) / 128;
-        const size_t LAST_LEN_VK = (tokenLength % 256) / 2;
+        const size_t LEN_VK = (tokenLength / TWO) / LEN_128;
+        const size_t LAST_LEN_VK = (tokenLength % 256) / TWO;
         const half ONE_SIXTEENTH = static_cast<half>(0.0625f);
         constexpr int32_t DUP_MASK = 128;
 
@@ -1622,10 +1627,8 @@ CATLASS_DEVICE
                     AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
                     AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
                     AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
-                    AscendC::DataCopy(expandXOutGlobal[0], xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
-                    // AscendC::DataCopy(outputInt4Buffer[0], xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
+                    AscendC::DataCopy(expandXOutGlobal[0], xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / TWO);
                     // high 4 bits processing end
-
                     // low 4 bits processing start
                     AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
                     AscendC::And(xLowHalfTensor.ReinterpretCast<int16_t>(),
@@ -1656,16 +1659,16 @@ CATLASS_DEVICE
                         AscendC::RoundMode::CAST_NONE, tokenLength);
                     AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
                     AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
-                    AscendC::DataCopy(expandXOutGlobal[tokenLength / 2],
+                    AscendC::DataCopy(expandXOutGlobal[tokenLength / TWO],
                         xLowI4Tensor.ReinterpretCast<int8_t>(),
-                        tokenLength / 2);
-                    // AscendC::DataCopy(outputInt4Buffer[tokenLength / 2],
+                        tokenLength / TWO);
+                    // AscendC::DataCopy(outputInt4Buffer[tokenLength / TWO],
                     //     xLowI4Tensor.ReinterpretCast<int8_t>(),
-                    //     tokenLength / 2);
+                    //     tokenLength / TWO);
                     AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
                     // low 4 bits processing end
 
-                    dblPingpongId = (dblPingpongId + 1) % 2;
+                    dblPingpongId = (dblPingpongId + 1) % TWO;
                 }
             }
         }
@@ -1774,7 +1777,7 @@ CATLASS_DEVICE
             __gm__ float* gmWeightAuxPtr;
             if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
                 uint32_t currentM = axisBS;
-                GemmCoord inGroupProblemShape{currentM * 2, shareN, k};
+                GemmCoord inGroupProblemShape{currentM * TWO, shareN, k};
                 LayoutPerTokenScale layoutPerTokenScale =
                     wholeLayoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
                 LayoutD layoutD = layout::RowMajor{currentM, shareN};
@@ -1836,7 +1839,7 @@ CATLASS_DEVICE
                 uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT) ;
 
                 // now C matrix composed of high/low 4 bits, rows * 2
-                GemmCoord inGroupProblemShape{currentM * 2, n, k};
+                GemmCoord inGroupProblemShape{currentM * TWO, n, k};
                 GemmCoord newinGroupProblemShape{currentM, n, k};
                 LayoutPerTokenScale layoutPerTokenScale =
                     wholeLayoutPerTokenScale.GetTileLayout(newinGroupProblemShape.template GetCoordByAxis<0>());
@@ -1888,7 +1891,7 @@ CATLASS_DEVICE
                 if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                     gmGroupOffsetScale += inGroupProblemShape.n() ;
                 }
-                gmGroupOffsetPerTokenScale += inGroupProblemShape.m() / 2;
+                gmGroupOffsetPerTokenScale += inGroupProblemShape.m() / TWO;
                 gmGroupOffsetD += currentM * n ;
 
                 startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
@@ -2145,7 +2148,7 @@ CATLASS_DEVICE
             // dynamic quant
             totalTokenCount = axisBS;
             uint32_t n = params.shareN;
-            uint32_t nOut = params.shareN / 2;
+            uint32_t nOut = params.shareN / TWO;
             uint32_t quantRowOnce = 0;
             CalQuantRow(nOut, quantRowOnce);
             typename BlockQuant<ArchTag>::Params quantParams;
@@ -2181,7 +2184,7 @@ CATLASS_DEVICE
             totalTokenCount = sendCountsGlobal.GetValue(localExpertNum * epRankSize - 1);
             AscendC::PipeBarrier<PIPE_ALL>();
             uint32_t n = params.problemShape.n();
-            uint32_t nOut = params.problemShape.n() / 2;
+            uint32_t nOut = params.problemShape.n() / TWO;
             uint32_t quantRowOnce = 0;
             CalQuantRow(nOut, quantRowOnce);
             typename BlockQuant<ArchTag>::Params quantParams;
@@ -2477,7 +2480,7 @@ public:
             gmB.SetL2CacheHint(AscendC::CacheMode::CACHE_MODE_DISABLE);
 
             uint32_t currentM = params.bs;
-            GemmCoord inGroupProblemShape{currentM * 2, params.shareN, params.problemShape.k()};
+            GemmCoord inGroupProblemShape{currentM * TWO, params.shareN, params.problemShape.k()};
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
             LayoutB layoutB = params.layoutShareB;
             blockScheduler.Update(inGroupProblemShape, MakeCoord(L1TileShape::M, L1TileShape::N));
@@ -2617,7 +2620,7 @@ public:
 
         uint32_t mActual = groupList.GetValue(params.problemCount - 1);
         uint32_t n = params.problemShape.n();
-        uint32_t nOut = params.problemShape.n() / 2;
+        uint32_t nOut = params.problemShape.n() / TWO;
 
         {
             BlockScheduler blockScheduler;
@@ -2631,7 +2634,7 @@ public:
             // Process shared expert first if enabled
             if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
                 uint32_t currentM = params.bs;
-                GemmCoord inGroupProblemShape{currentM * 2, params.shareN, params.problemShape.k()};
+                GemmCoord inGroupProblemShape{currentM * TWO, params.shareN, params.problemShape.k()};
                 LayoutPerTokenScale layoutPerTokenScale =
                     params.layoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
                 LayoutD layoutD = layout::RowMajor{currentM, params.shareN};
@@ -2740,7 +2743,7 @@ public:
         // Quantize shared expert output if enabled
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             uint32_t quantRowOnce = 0;
-            uint32_t shareNOut = params.shareN / 2;
+            uint32_t shareNOut = params.shareN / TWO;
             CalQuantRow(shareNOut, quantRowOnce);
             auto swigluLayout = layout::RowMajor{params.bs, params.shareN};
             typename BlockQuant<ArchTag>::Params quantParams{

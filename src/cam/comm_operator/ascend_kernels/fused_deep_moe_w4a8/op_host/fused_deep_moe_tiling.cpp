@@ -19,6 +19,8 @@
 #include "mc2_tiling_utils.h"
 #include "../op_kernel/fused_deep_moe_tiling.h"
 
+#define TWO 2
+
 using namespace ge;
 using namespace Cam;
 using namespace Util;
@@ -187,7 +189,7 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
             "shareGmm1Weight dim1 should be h(%u), but got %ld.",
             h, shareGmm1OriginShape.GetDim(1)),
             return ge::GRAPH_FAILED);
-        shareGmm1HLen = static_cast<uint64_t>(shareGmm1OriginShape.GetDim(2)) * INT4_WEIGHT_HIDDEN_SCALE;
+        shareGmm1HLen = static_cast<uint64_t>(shareGmm1OriginShape.GetDim(TWO)) * INT4_WEIGHT_HIDDEN_SCALE;
     }
     tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.shareGmm1HLen = shareGmm1HLen;
     OPS_ERR_IF(
@@ -238,7 +240,7 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
         OPS_LOG_E(nodeName, "shareGmm2Weight shape is invalid."),
         return ge::GRAPH_FAILED);
 
-    uint64_t shareGmm2InputDim = shareGmm1HLen / 2;
+    uint64_t shareGmm2InputDim = shareGmm1HLen / TWO;
     if (gmm2WeightDims == TWO_DIMS) {  // [shareGmm1HLen/2, h] format
         OPS_ERR_IF(static_cast<uint64_t>(shareGmm2OriginShape.GetDim(0)) != shareGmm2InputDim,
             OPS_LOG_E(nodeName, "shareGmm2Weight dim0 should be shareGmm1HLen/2(%lu), but got %ld.",
@@ -380,21 +382,21 @@ static ge::graphStatus CheckGmm2Shape(const gert::TilingContext &context, const 
     if (gmm2ListLen > 1) { // List
         OPS_ERR_IF(gmm2ListLen != localExpertNum,
             OPS_LOG_E(nodeName, "gmm2 does not match local expert number perRank."), return ge::GRAPH_FAILED);
-        OPS_ERR_IF(n / 2 != gmm2FirstTensorElementShape.GetDim(0),
+        OPS_ERR_IF(n / TWO != gmm2FirstTensorElementShape.GetDim(0),
             OPS_LOG_E(nodeName, "gmm2 does not match half of gmm1 hidden size."), return ge::GRAPH_FAILED);
         OPS_ERR_IF(h != gmm2FirstTensorElementShape.GetDim(1) * INT4_WEIGHT_HIDDEN_SCALE,
             OPS_LOG_E(nodeName, "gmm2 does not match token hidden size."), return ge::GRAPH_FAILED);
         listFlag = true;
     } else { // Single
         if (elementDims == TWO_DIMS) { // one localExpert perRank
-            OPS_ERR_IF(n / 2 != gmm2FirstTensorElementShape.GetDim(0),
+            OPS_ERR_IF(n / TWO != gmm2FirstTensorElementShape.GetDim(0),
                 OPS_LOG_E(nodeName, "gmm2 does not match half of gmm1 hidden size."), return ge::GRAPH_FAILED);
             OPS_ERR_IF(h != gmm2FirstTensorElementShape.GetDim(1) * INT4_WEIGHT_HIDDEN_SCALE,
                 OPS_LOG_E(nodeName, "gmm2 does not match token hidden size."), return ge::GRAPH_FAILED);
         } else { // multi localExperts perRank
             OPS_ERR_IF(localExpertNum != gmm2FirstTensorElementShape.GetDim(0),
                 OPS_LOG_E(nodeName, "gmm2 does not match local expert num perRank."), return ge::GRAPH_FAILED);
-            OPS_ERR_IF(n / 2 != gmm2FirstTensorElementShape.GetDim(1),
+            OPS_ERR_IF(n / TWO != gmm2FirstTensorElementShape.GetDim(1),
                 OPS_LOG_E(nodeName, "gmm2 does not match half of gmm1 hidden size."), return ge::GRAPH_FAILED);
             OPS_ERR_IF(h != gmm2FirstTensorElementShape.GetDim(2) * INT4_WEIGHT_HIDDEN_SCALE,
                 OPS_LOG_E(nodeName, "gmm2 does not match token hidden size."), return ge::GRAPH_FAILED);
@@ -605,7 +607,7 @@ static ge::graphStatus CheckData(const char *nodeName, FusedDeepMoeTilingData &t
             return ge::GRAPH_FAILED);
     }
     uint32_t moeExpertNumPerRank = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
-    uint32_t recvAivNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.aivNum / 2;
+    uint32_t recvAivNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.aivNum / TWO;
     OPS_ERR_IF(
         moeExpertNumPerRank > recvAivNum,
         OPS_LOG_E(nodeName, "moeExpertNumPerRank must <= (aivNum/2)(%u), but got %u", recvAivNum, moeExpertNumPerRank),
@@ -703,9 +705,9 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
     uint32_t aicNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.aicNum;
     uint32_t shareExpertTokenNum = calShareExpert ? batchSize : 0;
     uint64_t shareGmm1HLen = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.shareGmm1HLen;
-    uint64_t shareGmm2HLen = shareGmm1HLen / 2;
+    uint64_t shareGmm2HLen = shareGmm1HLen / TWO;
     uint64_t gmm1HLen = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
-    uint64_t gmm2HLen = gmm1HLen / 2;
+    uint64_t gmm2HLen = gmm1HLen / TWO;
     maxTokenNum = maxBatchSize * epRankSize * std::min(topK, moeExpertNumPerRank);
     maxHandleTokenNum = shareExpertTokenNum + maxTokenNum;
 

@@ -30,6 +30,8 @@
 #include "fused_deep_moe_tiling.h"
 #include "fused_deep_moe_base.h"
 
+#define TWO 2
+
 using namespace Catlass;
 using namespace Cam;
 using MmadAtlasA2Custom =
@@ -193,8 +195,8 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     }
 }
 
-template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class EpilogueTileShape_, class BlockScheduler_,
-    class DispatchPolicy_ = MmadAtlasA2Custom>
+template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class EpilogueTileShape_,
+    class BlockScheduler_, class DispatchPolicy_ = MmadAtlasA2Custom>
 CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
     layout::RowMajor layoutA, GM_ADDR gmB, layout::zN layoutB,
     GM_ADDR gmBias, GM_ADDR gmShareBias,
@@ -405,8 +407,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     tokenHiddenSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.h;
     groupCount_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     gmm2OutputDim_ = tokenHiddenSize_;
-    shareGmm2InputDim_ = shareGmm1OutputDim_ / 2;
-    gmm2InputDim_ = gmm1OutputDim_ / 2;
+    shareGmm2InputDim_ = shareGmm1OutputDim_ / TWO;
+    gmm2InputDim_ = gmm1OutputDim_ / TWO;
 }
 
 template <TemplateMC2TypeClass>
@@ -473,7 +475,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(blockDim_) * (GMM1_L1M * GMM1_L1N) *
         WORKSPACE_STAGES * sizeof(int32_t) );
 
-    int64_t swigluOutSize = (maxTokenNum_ * gmm1OutputDim_ + shareExpertTokenNum * shareGmm1OutputDim_) * sizeof(float);
+    int64_t swigluOutSize = (maxTokenNum_ * gmm1OutputDim_ +
+        shareExpertTokenNum * shareGmm1OutputDim_) * sizeof(float);
 
     int64_t gmm2OutSize = maxTokenNum_ * tokenHiddenSize_ * sizeof(ExpandXType);
     int64_t maxSwigluGmm2Size = swigluOutSize < gmm2OutSize ? gmm2OutSize : swigluOutSize;
