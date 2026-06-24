@@ -277,6 +277,9 @@ public:
         constexpr uint32_t addSrc1RepStride = 64;
         constexpr uint32_t addSrc0RepStrideWeightAux = 32;
         constexpr uint32_t addSrc1RepStrideWeightAux = 0;
+        constexpr uint32_t TILE_HALF_SPLIT = 2;
+        constexpr uint32_t TILE_QUARTER_SPLIT = 4;
+        constexpr uint32_t TILE_OFFSET_FACTOR = 3;
         // compensation matrix
         AscendC::GlobalTensor<float> weightAux;
         weightAux.SetGlobalBuffer(params.ptrWeightAux);
@@ -349,8 +352,8 @@ public:
             auto perTokenScaleTileShape = actualTileShape.template GetCoordByAxis<0>();
 
              // recalculate offset
-            Catlass::Coord<1> newperTokenScaleOffset(perTokenScaleTileOffset[0] / 2);
-            Catlass::Coord<1> newperTokenScaleTileShape(perTokenScaleTileShape[0] / 2);
+            Catlass::Coord<1> newperTokenScaleOffset(perTokenScaleTileOffset[0] / TILE_HALF_SPLIT);
+            Catlass::Coord<1> newperTokenScaleTileShape(perTokenScaleTileShape[0] / TILE_HALF_SPLIT);
 
             auto gmTilePerTokenScale = gmPerTokenScale[params.layoutPerTokenScale.GetOffset(newperTokenScaleOffset)];
             auto layoutGmTilePerTokenScale = params.layoutPerTokenScale.GetTileLayout(newperTokenScaleTileShape);
@@ -383,17 +386,17 @@ public:
                 {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile part 2, 32UB size
-            AscendC::Muls(ubMul[TileShape::COLUMN / 4], ubMul[TileShape::COLUMN / 4],
+            AscendC::Muls(ubMul[TileShape::COLUMN / TILE_QUARTER_SPLIT], ubMul[TileShape::COLUMN / TILE_QUARTER_SPLIT],
                 DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
                 {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile part 3, 32UB size
-            AscendC::Muls(ubMul[TileShape::COLUMN / 2], ubMul[TileShape::COLUMN / 2],
+            AscendC::Muls(ubMul[TileShape::COLUMN / TILE_HALF_SPLIT], ubMul[TileShape::COLUMN / TILE_HALF_SPLIT],
                 DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
                 {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile part 4, 32UB size
-            AscendC::Muls(ubMul[TileShape::COLUMN * 3 / 4], ubMul[TileShape::COLUMN * 3 / 4],
+            AscendC::Muls(ubMul[TileShape::COLUMN * TILE_OFFSET_FACTOR / TILE_QUARTER_SPLIT], ubMul[TileShape::COLUMN * TILE_OFFSET_FACTOR / TILE_QUARTER_SPLIT],
                 DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
                 {1, 1, src0RepStride, src0RepStride});
             AscendC::PipeBarrier<PIPE_V>();
@@ -405,22 +408,22 @@ public:
                 addSrc1RepStride, addSrc1RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile part 2, 32UB size
-            AscendC::Add(ubMul[TileShape::COLUMN / 4], ubMul[TileShape::COLUMN / 4],
-                ubMul[TileShape::COLUMN + TileShape::COLUMN / 4],
+            AscendC::Add(ubMul[TileShape::COLUMN / TILE_QUARTER_SPLIT], ubMul[TileShape::COLUMN / TILE_QUARTER_SPLIT],
+                ubMul[TileShape::COLUMN + TileShape::COLUMN / TILE_QUARTER_SPLIT],
                 mulsMask, mulsRepeatTimes,
                 {1, 1, addDstRepStride, addSrc0RepStride,
                 addSrc1RepStride, addSrc1RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile part 3, 32UB size
-            AscendC::Add(ubMul[TileShape::COLUMN / 2], ubMul[TileShape::COLUMN / 2],
-                ubMul[TileShape::COLUMN + TileShape::COLUMN / 2],
+            AscendC::Add(ubMul[TileShape::COLUMN / TILE_HALF_SPLIT], ubMul[TileShape::COLUMN / TILE_HALF_SPLIT],
+                ubMul[TileShape::COLUMN + TileShape::COLUMN / TILE_HALF_SPLIT],
                 mulsMask, mulsRepeatTimes,
                 {1, 1, addDstRepStride, addSrc0RepStride,
                 addSrc1RepStride, addSrc1RepStride});
             AscendC::PipeBarrier<PIPE_V>();
             // tile part 4, 32UB size
-            AscendC::Add(ubMul[TileShape::COLUMN * 3 / 4], ubMul[TileShape::COLUMN * 3 / 4],
-                ubMul[TileShape::COLUMN + TileShape::COLUMN * 3 / 4],
+            AscendC::Add(ubMul[TileShape::COLUMN * TILE_OFFSET_FACTOR / TILE_QUARTER_SPLIT], ubMul[TileShape::COLUMN * TILE_OFFSET_FACTOR / TILE_QUARTER_SPLIT],
+                ubMul[TileShape::COLUMN + TileShape::COLUMN * TILE_OFFSET_FACTOR / TILE_QUARTER_SPLIT],
                 mulsMask, mulsRepeatTimes,
                 {1, 1, addDstRepStride, addSrc0RepStride,
                 addSrc1RepStride, addSrc1RepStride});
@@ -432,22 +435,22 @@ public:
                 addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::PipeBarrier<PIPE_V>();
             // tile part 2, 32 UB size
-            AscendC::Add(ubMul[TileShape::COLUMN / 4], ubMul[TileShape::COLUMN / 4],
-                ubweighAux[TileShape::COLUMN / 4],
+            AscendC::Add(ubMul[TileShape::COLUMN / TILE_QUARTER_SPLIT], ubMul[TileShape::COLUMN / TILE_QUARTER_SPLIT],
+                ubweighAux[TileShape::COLUMN / TILE_QUARTER_SPLIT],
                 mulsMask, mulsRepeatTimes,
                 {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
                 addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::PipeBarrier<PIPE_V>();
             // tile part 3, 32 UB size
-            AscendC::Add(ubMul[TileShape::COLUMN / 2], ubMul[TileShape::COLUMN / 2],
-                ubweighAux[TileShape::COLUMN / 2],
+            AscendC::Add(ubMul[TileShape::COLUMN / TILE_HALF_SPLIT], ubMul[TileShape::COLUMN / TILE_HALF_SPLIT],
+                ubweighAux[TileShape::COLUMN / TILE_HALF_SPLIT],
                 mulsMask, mulsRepeatTimes,
                 {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
                 addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::PipeBarrier<PIPE_V>();
             // tile part 4, 32 UB size
-            AscendC::Add(ubMul[TileShape::COLUMN * 3 / 4], ubMul[TileShape::COLUMN * 3 / 4],
-                ubweighAux[TileShape::COLUMN * 3 / 4],
+            AscendC::Add(ubMul[TileShape::COLUMN * TILE_OFFSET_FACTOR / TILE_QUARTER_SPLIT], ubMul[TileShape::COLUMN * TILE_OFFSET_FACTOR / TILE_QUARTER_SPLIT],
+                ubweighAux[TileShape::COLUMN * TILE_OFFSET_FACTOR / TILE_QUARTER_SPLIT],
                 mulsMask, mulsRepeatTimes,
                 {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
                 addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
@@ -462,7 +465,7 @@ public:
             auto &ubD = ubDList[ubListId];
             LayoutD layoutUbD{actualTileShape, ubTileStride};
             auto newlayoutUbD = layoutUbD;                     // copy
-            newlayoutUbD.shape(0) = newlayoutUbD.shape(0) / 2; 
+            newlayoutUbD.shape(0) = newlayoutUbD.shape(0) / TILE_HALF_SPLIT; 
             AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(eventUbDMTE3VList[ubListId]);
             AscendC::Cast(ubD, ubPerTokenMul, AscendC::RoundMode::CAST_RINT, TileShape::COUNT);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
@@ -470,12 +473,12 @@ public:
            // auto tileOffsetD = params.layoutD.GetOffset(tileOffset);
             auto layoutGmTileD = params.layoutD.GetTileLayout(actualTileShape);
 
-            MatrixCoord newtileOffset(tileOffset.row() / 2, tileOffset.column());
+            MatrixCoord newtileOffset(tileOffset.row() / TILE_HALF_SPLIT, tileOffset.column());
             auto tileOffsetD = params.layoutD.GetOffset(newtileOffset);
             auto gmTileD = gmD[params.layoutD.GetOffset(newtileOffset)];
 
             auto newlayoutGmTileD = layoutGmTileD;                     // copy
-            newlayoutGmTileD.shape(0) = layoutGmTileD.shape(0) / 2; 
+            newlayoutGmTileD.shape(0) = layoutGmTileD.shape(0) / TILE_HALF_SPLIT; 
 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
 
