@@ -40,8 +40,9 @@ static struct option g_long_options[] = {
     {"use_atomic_window", no_argument, NULL, 'A'},
     {"buf_multiplex", no_argument, NULL, 'B'},
     {"num", required_argument, NULL, 'n'},
-    {"perf-thresh", required_argument, NULL, 't'},
     {"enable-perf", no_argument, NULL, 'F'},
+    {"perf-sig-figures", required_argument, NULL, 'G'},
+    {"perf-max-ms", required_argument, NULL, 'J'},
     {"blk-size", required_argument, NULL, 'L'},
     {NULL, 0, NULL, 0}
 };
@@ -75,8 +76,9 @@ static void usage(void)
     (void)printf("      --eid-index                     set eid index.\n");
     (void)printf("      --use_atomic_window             use atomic window when enable flow control.\n");
     (void)printf("      --num                           set number of iterations.\n");
-    (void)printf("      --perf-thresh                   set perf thresh array, length not exceed 8.\n");
     (void)printf("      --enable-perf                   enable perf.\n");
+    (void)printf("      --perf-sig-figures <1-5>        HDR significant figures (default: 2, ~0.78%% error).\n");
+    (void)printf("      --perf-max-ms <ms>              HDR max trackable latency in ms (default: 1000).\n");
     (void)printf("      --blk-size                      set umq_buf_block_size(default:0), 0=BLOCK_SIZE_4K\n");
     (void)printf("  -h, --help                          show help info.\n\n");
 }
@@ -99,8 +101,9 @@ static void init_cfg(umq_perftest_config_t *cfg)
     cfg->eid_idx = 0;
     cfg->use_atomic_window = false;
     cfg->enable_perf = false;
+    cfg->perf_sig_figures = 0;     // 0 means use library default (2)
+    cfg->perf_max_value_ms = 0;    // 0 means use library default (1000)
     cfg->test_round = DEFAULT_LAT_TEST_ROUND;
-    cfg->thresh_num = 0;
     cfg->blk_mode = 0;
     cfg->tp_type = UMQ_TP_TYPE_CTP;
 }
@@ -124,9 +127,8 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
     }
 
     init_cfg(cfg);
-    int start_idx = 0;
     while (1) {
-        int c = getopt_long(argc, argv, "c:d:f:l:r:p:u:s:hN:D:E:n:L:", g_long_options, NULL);
+        int c = getopt_long(argc, argv, "c:d:f:l:r:p:u:s:hN:D:E:n:G:J:L:", g_long_options, NULL);
         if (c == -1) {
             break;
         }
@@ -224,15 +226,14 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
             case 'n':
                 cfg->test_round = (uint32_t)strtoul(optarg, NULL, 0);
                 break;
-            case 't':
-                start_idx = optind - 1;
-                while (start_idx < argc && *argv[start_idx] != '-' && cfg->thresh_num < UMQ_PERF_QUANTILE_MAX_NUM) {
-                    cfg->thresh_array[cfg->thresh_num++] = (uint64_t)strtoul(argv[start_idx++], NULL, 0);
-                }
-                optind = start_idx;
-                break;
             case 'F':
                 cfg->enable_perf = true;
+                break;
+            case 'G':
+                cfg->perf_sig_figures = (int)strtol(optarg, NULL, 0);
+                break;
+            case 'J':
+                cfg->perf_max_value_ms = (uint32_t)strtoul(optarg, NULL, 0);
                 break;
             case 'L':
                 cfg->blk_mode = (uint32_t)strtoul(optarg, NULL, 0);

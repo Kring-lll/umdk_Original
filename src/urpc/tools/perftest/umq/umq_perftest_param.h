@@ -38,8 +38,8 @@ typedef struct umq_perftest_config {
     bool buf_multiplex;
     bool use_atomic_window;
     bool enable_perf;
-    uint64_t thresh_array[UMQ_PERF_QUANTILE_MAX_NUM];
-    uint16_t thresh_num;
+    int perf_sig_figures;       // HDR significant figures (1-5), 0=default(2)
+    uint32_t perf_max_value_ms; // HDR max trackable latency in ms, 0=default(1000)
     uint32_t blk_mode;
 } umq_perftest_config_t;
 
