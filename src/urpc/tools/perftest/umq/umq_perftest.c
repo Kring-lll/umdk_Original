@@ -192,6 +192,49 @@ static void umq_perftest_finish_perf(umq_perftest_config_t *cfg)
     }
 }
 
+static void umq_perftest_show_fc_stats(umq_perftest_config_t *cfg)
+{
+    umq_flow_control_stats_t fc_stats = {0};
+    int ret = umq_stats_flow_control_get(g_umq_perftest_ctx.umqh, &fc_stats);
+    if (ret != UMQ_SUCCESS) {
+        LOG_PRINT("umq_stats_flow_control_get failed, ret %d\n", ret);
+        return;
+    }
+
+    LOG_PRINT("flow control packet stats:\n");
+    LOG_PRINT("  recv_dup_req_cnt: %lu\n", fc_stats.packet_stats.recv_dup_req_cnt);
+    LOG_PRINT("  recv_dup_rsp_cnt: %lu\n", fc_stats.packet_stats.recv_dup_rsp_cnt);
+
+    umq_packet_stats_t io_stats = {0};
+    ret = umq_stats_io_get(g_umq_perftest_ctx.umqh, &io_stats);
+    if (ret != UMQ_SUCCESS) {
+        LOG_PRINT("umq_stats_io_get failed, ret %d\n", ret);
+        return;
+    }
+
+    LOG_PRINT("io packet stats:\n");
+    LOG_PRINT("  recv_dup_req_cnt: %lu\n", io_stats.recv_dup_req_cnt);
+    LOG_PRINT("  recv_dup_rsp_cnt: %lu\n", io_stats.recv_dup_rsp_cnt);
+
+    char *fc_str_buf = (char *)malloc(UMQ_PERFTEST_ERTF_INFO_STR_SIZE);
+    if (fc_str_buf == NULL) {
+        LOG_PRINT("malloc fc stats str buf failed\n");
+        return;
+    }
+
+    int str_size = umq_flow_control_stats_to_str(&fc_stats, fc_str_buf, UMQ_PERFTEST_ERTF_INFO_STR_SIZE);
+    if (str_size > 0 && str_size < UMQ_PERFTEST_ERTF_INFO_STR_SIZE) {
+        printf("%s\n", fc_str_buf);
+    }
+
+    str_size = umq_io_stats_to_str(&io_stats, fc_str_buf, UMQ_PERFTEST_ERTF_INFO_STR_SIZE);
+    if (str_size > 0 && str_size < UMQ_PERFTEST_ERTF_INFO_STR_SIZE) {
+        printf("%s\n", fc_str_buf);
+    }
+
+    free(fc_str_buf);
+}
+
 static int umq_perftest_init_umq(umq_perftest_config_t *cfg)
 {
     umq_init_cfg_t *umq_config = (umq_init_cfg_t *)calloc(1, sizeof(*umq_config));
@@ -569,6 +612,9 @@ static int umq_perftest_run_client(umq_perftest_config_t *cfg)
     // stop test threads
     umq_perftest_stop_test_threads(&cfg->config);
 
+    // show flow control stats
+    umq_perftest_show_fc_stats(cfg);
+
 UNBIND:
     // unbind and flush tx and rx
     (void)umq_unbind(g_umq_perftest_ctx.umqh);
@@ -726,6 +772,9 @@ static int umq_perftest_run_server(umq_perftest_config_t *cfg)
 
     // stop test threads
     umq_perftest_stop_test_threads(&cfg->config);
+
+    // show flow control stats
+    umq_perftest_show_fc_stats(cfg);
 
 UNBIND:
     // unbind and flush rx and tx
