@@ -19,7 +19,7 @@ extern "C" {
 #endif
 
 #define UMQ_STATS_QBUF_POOL_TYPE_MAX (16u)
-#define UMQ_PERF_QUANTILE_MAX_NUM (8u)
+#define UMQ_PERF_QUANTILE_CNT (4u)
 #define UMQ_PERF_REC_MAX_NUM (64u)
 #define UMQ_DFX_TO_STRING_DEFAULT_LEN (20480)
 #define UMQ_LOCAL_QBUF_POOL_MAX_NUM (64)
@@ -330,6 +330,11 @@ typedef struct umq_data_record {
     umq_trace_type_t type;                  /* POST / POLL / WAIT / REARM */
 } umq_data_record_t;
 
+typedef struct umq_perf_stats_cfg {
+    int sig_figures;       // HDR significant figures (1-5), default 2 (~0.78% error)
+    uint32_t max_value_ms; // max trackable latency in ms, default 1000 (1s)
+} umq_perf_stats_cfg_t;
+
 typedef struct umq_perf_stats {
     struct {
         umq_perf_record_type_t type; // types of probe points supported by perf probe
@@ -337,16 +342,9 @@ typedef struct umq_perf_stats {
         uint64_t average; // average latency
         uint64_t mininum; // min latency
         uint64_t maxinum; // max latency
-        uint64_t median; // median latency
-        uint64_t p90; // 90th percentile
-        uint64_t p99; // 99th percentile
+        uint64_t quantile_val[UMQ_PERF_QUANTILE_CNT]; // quantile values in ns (p50/p90/p99/p9999)
     } type_record[UMQ_PERF_RECORD_TYPE_MAX]; // statistical results list for each type of probe point
 } umq_perf_stats_t;
-
-typedef struct umq_perf_stats_cfg {
-    uint64_t thresh_array[UMQ_PERF_QUANTILE_MAX_NUM]; // quantile values list
-    uint32_t thresh_num; // number of valid quantiles
-} umq_perf_stats_cfg_t;
 
 #define UMQ_TRACE_FLAG_RECORD_NUM              (1U)
 #define UMQ_TRACE_FLAG_OUTPUT_LIMIT            (1U << 1)
