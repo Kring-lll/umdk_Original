@@ -15,8 +15,8 @@ file(GLOB UDMA_API_FILE
 install(DIRECTORY DESTINATION /usr/include/ub/umdk/urma/udma)
 install(FILES ${UDMA_API_FILE} DESTINATION /usr/include/ub/umdk/urma/udma)
 
-target_include_directories(BETA_UDMA_SO PRIVATE ${CMAKE_SOURCE_DIR}/urma/lib/urma/core)
-target_include_directories(BETA_UDMA_SO PRIVATE ${CMAKE_SOURCE_DIR}/urma/lib/urma/core/include)
+target_include_directories(BETA_UDMA_SO PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../lib/urma/core)
+target_include_directories(BETA_UDMA_SO PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../lib/urma/core/include)
 target_include_directories(BETA_UDMA_SO PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/kernel_headers)
 target_include_directories(BETA_UDMA_SO PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
