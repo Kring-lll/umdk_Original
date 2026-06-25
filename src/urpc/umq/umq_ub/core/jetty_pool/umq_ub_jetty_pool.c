@@ -28,6 +28,7 @@ typedef struct jetty_pool {
     int event_fd;                   // Eventfd for idle jetty notification
 
     uint32_t free_count;            // Current count in free_q (protected by lock)
+    uint32_t active_count;           // Current IDLE count in active_ring (atomic)
     uint64_t in_use_count;          // Nodes currently borrowed by a Logic UMQ (state == IN_USE)
     uint64_t err_count;             // Nodes marked with is_jetty_err == true
     uint64_t acc_alloc_count;        // Cumulative allocs (nodes borrowed by Logic UMQ)
@@ -214,9 +215,12 @@ int umq_ub_jetty_node_add(jetty_pool_node_t *node)
     /* Lock-free enqueue into MPMC ring (replaces list push + active_count++). */
     urpc_mpmc_enqueue(&pool->active_ring, &add_node);
 
-    /* Notify eventfd consumers that at least one node is available. */
-    if (eventfd_write(pool->event_fd, (uint64_t)1) == -1) {
-        UMQ_VLOG_WARN(VLOG_UMQ, "eventfd_write failed, errno: %d\n", errno);
+    /* Notify eventfd consumers when the active count reaches every notify_threshold. */
+    uint32_t active_count = __atomic_add_fetch(&pool->active_count, 1, __ATOMIC_RELAXED);
+    if (active_count % pool->notify_threshold == 0) {
+        if (eventfd_write(pool->event_fd, (uint64_t)active_count) == -1) {
+            UMQ_VLOG_WARN(VLOG_UMQ, "eventfd_write failed, errno: %d\n", errno);
+        }
     }
 
     return UMQ_SUCCESS;
@@ -238,13 +242,15 @@ int umq_ub_jetty_node_remove(jetty_pool_node_t *node)
 
     // Try CAS IDLE→ERR to atomically claim the node.
     // If the node is still in the ring, the next alloc() will dequeue it,
-    // see ERR state, and recycle to free_q. No explicit ring removal needed.
+    // see ERR state, and recycle to free_q. No explicit ring removal needed,
+    // but active_count must reflect that this node is no longer available.
     int expected = JETTY_POOL_NODE_IDLE;
     if (!__atomic_compare_exchange_n(&node->state, &expected, JETTY_POOL_NODE_ERR,
                                      false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
         UMQ_VLOG_ERR(VLOG_UMQ, "cannot remove sub_umq, node state %d (expected IDLE)\n", expected);
         return -UMQ_ERR_EBUSY;
     }
+    (void)__atomic_sub_fetch(&pool->active_count, 1, __ATOMIC_RELAXED);
 
     (void)pthread_spin_lock(&pool->lock);
     pool->node_count--;
@@ -282,7 +288,8 @@ jetty_pool_node_t *umq_ub_jetty_node_alloc(void)
         uint32_t expected = JETTY_POOL_NODE_IDLE;
         if (!__atomic_compare_exchange_n(&node->state, &expected, JETTY_POOL_NODE_IN_USE,
                                          false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-            /* Node is ERR or already IN_USE — recycle to free_q. */
+            /* Node is ERR or already IN_USE — recycle to free_q.
+             * remove() already decremented active_count; do not decrement again. */
             if (expected == JETTY_POOL_NODE_ERR || node->is_jetty_err) {
                 (void)pthread_spin_lock(&pool->lock);
                 recycle_node_to_free_q(pool, node);
@@ -293,6 +300,7 @@ jetty_pool_node_t *umq_ub_jetty_node_alloc(void)
         }
 
         /* Successfully borrowed a healthy IDLE node. */
+        (void)__atomic_sub_fetch(&pool->active_count, 1, __ATOMIC_RELAXED);
         node->borrow_count = 0;
         node->borrow_limit = pool->borrow_limit;
         (void)__atomic_add_fetch(&pool->in_use_count, 1, __ATOMIC_RELAXED);
@@ -331,6 +339,7 @@ int umq_ub_jetty_node_free(jetty_pool_node_t *node)
     node->borrow_count = 0;
 
     urpc_mpmc_enqueue(&pool->active_ring, &node);
+    (void)__atomic_add_fetch(&pool->active_count, 1, __ATOMIC_RELAXED);
 
     return UMQ_SUCCESS;
 }
@@ -381,7 +390,7 @@ int umq_ub_jetty_pool_stats_get(umq_ub_jetty_pool_stats_t *stats)
     (void)pthread_spin_lock(&pool->lock);
     stats->total_num = pool->node_count;
     (void)pthread_spin_unlock(&pool->lock);
-    stats->global_num = urpc_mpmc_count(&pool->active_ring);
+    stats->global_num = __atomic_load_n(&pool->active_count, __ATOMIC_RELAXED);
     stats->cache_num = 0;  // Thread-local cache removed with MPMC ring
     stats->in_use_num = __atomic_load_n(&pool->in_use_count, __ATOMIC_RELAXED);
     stats->err_num = __atomic_load_n(&pool->err_count, __ATOMIC_RELAXED);
