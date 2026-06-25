@@ -140,10 +140,11 @@ static int umq_perftest_start_perf(umq_perftest_config_t *cfg)
             return -1;
         }
 
-        umq_perf_stats_cfg_t perf_stats_cfg;
-        (void)memcpy(perf_stats_cfg.thresh_array, cfg->thresh_array, sizeof(uint64_t) * cfg->thresh_num);
-        perf_stats_cfg.thresh_num = cfg->thresh_num;
-        if (umq_stats_perf_reset(&perf_stats_cfg) != 0) {
+        umq_perf_stats_cfg_t perf_cfg = {
+            .sig_figures = cfg->perf_sig_figures,
+            .max_value_ms = cfg->perf_max_value_ms
+        };
+        if (umq_stats_perf_reset(&perf_cfg) != 0) {
             LOG_PRINT("reset dfx perf failed\n");
             return -1;
         }
@@ -153,6 +154,9 @@ static int umq_perftest_start_perf(umq_perftest_config_t *cfg)
 
 static void umq_perftest_show_perf(umq_perftest_config_t *cfg)
 {
+    if (!cfg->enable_perf) {
+        return;
+    }
     // get perf record
     umq_perf_stats_t umq_perf_stats;
     if (umq_stats_perf_get(&umq_perf_stats) != 0) {
@@ -167,9 +171,6 @@ static void umq_perftest_show_perf(umq_perftest_config_t *cfg)
         return;
     }
 
-    umq_perf_stats_cfg_t perf_stats_cfg;
-    (void)memcpy(perf_stats_cfg.thresh_array, cfg->thresh_array, sizeof(uint64_t) * cfg->thresh_num);
-    perf_stats_cfg.thresh_num = cfg->thresh_num;
     int str_size = umq_stats_perf_to_str(&umq_perf_stats, perf_info_str_buf, UMQ_PERFTEST_ERTF_INFO_STR_SIZE);
     if (str_size >= UMQ_PERFTEST_ERTF_INFO_STR_SIZE) {
         perf_info_str_buf[UMQ_PERFTEST_ERTF_INFO_STR_SIZE - 1] = '\0';
