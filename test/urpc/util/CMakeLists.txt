@@ -33,3 +33,15 @@ target_link_libraries(${PROJECT_NAME}
     pthread
     ${CMAKE_THREAD_LIBS_INIT}
 )
+
+add_executable(tool_cpu_cycle_cross_thread tool_cpu_cycle_cross_thread.c)
+
+target_include_directories(tool_cpu_cycle_cross_thread PRIVATE
+    ${URPC_ROOT_DIR}/util/
+)
+
+target_link_libraries(tool_cpu_cycle_cross_thread
+    urpc_framework
+    pthread
+    ${CMAKE_THREAD_LIBS_INIT}
+)
