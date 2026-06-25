@@ -31,16 +31,5 @@ set(CMAKE_C_FLAGS "-Wall -Wextra -O2 -Wfloat-equal -fno-common -std=gnu99 -Werro
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-z,now -s -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 -ftrapv")
 set(CMAKE_LD_FLAGS "-s")
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wuninitialized -Wno-error -Wno-error=format -Wundef")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wunused -Wdate-time -Wshadow -Wvla -Wdisabled-optimization")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wempty-body -Wignored-qualifiers -Wimplicit-fallthrough=3")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wtype-limits -Wshift-negative-value -Wswitch-default")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wframe-larger-than=8192 -Wshift-overflow=2 -Wwrite-strings")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wmissing-format-attribute -Wformat-nonliteral -Wduplicated-cond")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wtrampolines -Wlogical-op -Wsuggest-attribute=format")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wduplicated-branches -Wmissing-include-dirs -Wformat-signedness")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wmissing-declarations -Wreturn-local-addr -Wredundant-decls")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wfloat-conversion -Wmissing-prototypes -Wstrict-prototypes")
-
 include(GNUInstallDirs)
 install(TARGETS BETA_UDMA_SO LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/urma OPTIONAL)

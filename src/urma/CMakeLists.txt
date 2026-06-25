@@ -79,7 +79,6 @@ if("${CODE_COVERAGE}" STREQUAL "enable")
         -fprofile-arcs
         -ftest-coverage
     )
-    list(APPEND LINK_OPTIONS_PUBLIC --coverage)
 endif()
 
 # Architecture-specific compile options
