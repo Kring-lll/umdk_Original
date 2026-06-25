@@ -890,6 +890,7 @@ umq_buf_t *umq_buf_alloc(uint32_t request_size, uint32_t request_qbuf_num, uint6
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "param invalid or umq not initialized\n");
         return NULL;
     }
+    
     uint32_t headroom_size = (option != NULL && (option->flag & UMQ_ALLOC_FLAG_HEAD_ROOM_SIZE) != 0) ?
         option->headroom_size : umq_qbuf_headroom_get();
     if (headroom_size > UMQ_HEADROOM_SIZE_LIMIT) {
@@ -923,12 +924,16 @@ umq_buf_t *umq_buf_alloc(uint32_t request_size, uint32_t request_qbuf_num, uint6
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "umqh or qbuf invalid\n");
         return NULL;
     }
+    umq_buf_t *qbuf = umq->tp_ops->umq_tp_buf_alloc(request_size, request_qbuf_num, umq->umqh_tp, option);
+    umq_trace_end_record(UMQ_TRACE_TYPE_ALLOC, umq_trace_timestamp_get());
 
-    return umq->tp_ops->umq_tp_buf_alloc(request_size, request_qbuf_num, umq->umqh_tp, option);
+    return qbuf;
 }
 
 void umq_buf_free(umq_buf_t *qbuf)
 {
+    uint64_t umq_start = umq_trace_start_timestamp_get();
+    umq_trace_start_record(UMQ_TRACE_TYPE_ALLOC, umq_start);
     if (!g_umq_inited || qbuf == NULL) {
         return;
     }
@@ -996,6 +1001,8 @@ void umq_buf_free(umq_buf_t *qbuf)
     }
 
     umq->tp_ops->umq_tp_buf_free(qbuf, umq->umqh_tp);
+
+    umq_trace_end_record(UMQ_TRACE_TYPE_FREE, umq_trace_timestamp_get());
 }
 
 umq_buf_t *umq_buf_break_and_free(umq_buf_t *qbuf)
