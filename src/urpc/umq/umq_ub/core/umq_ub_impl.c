@@ -3022,7 +3022,6 @@ int umq_ub_transport_pool_stats_get_impl(umq_transport_pool_stats_t *stats)
     }
     stats->total_num = pool_stats.total_num;
     stats->global_num = pool_stats.global_num;
-    stats->cache_num = pool_stats.cache_num;
     stats->in_use_num = pool_stats.in_use_num;
     stats->error_num = pool_stats.err_num;
     stats->acc_alloc_num = pool_stats.acc_alloc_num;

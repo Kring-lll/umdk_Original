@@ -62,7 +62,6 @@ void umq_ub_jetty_node_mark_err(jetty_pool_node_t *node);
 typedef struct umq_ub_jetty_pool_stats {
     uint64_t total_num;         // Total nodes currently tracked (node_count)
     uint64_t global_num;        // IDLE nodes in global active_ring
-    uint64_t cache_num;         // IDLE nodes in thread-local caches
     uint64_t in_use_num;        // Nodes currently borrowed by a Logic UMQ (state == IN_USE)
     uint64_t err_num;           // Nodes marked is_jetty_err == true
     uint64_t acc_alloc_num;     // Cumulative allocs (nodes borrowed by Logic UMQ)

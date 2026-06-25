@@ -380,7 +380,6 @@ typedef void (*umq_io_perf_callback_t)(umq_perf_record_type_t record_type, umq_b
 typedef struct umq_transport_pool_stats {
     uint64_t total_num;
     uint64_t global_num;
-    uint64_t cache_num;
     uint64_t in_use_num;
     uint64_t error_num;
     uint64_t acc_alloc_num;

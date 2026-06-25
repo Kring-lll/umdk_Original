@@ -391,7 +391,6 @@ int umq_ub_jetty_pool_stats_get(umq_ub_jetty_pool_stats_t *stats)
     stats->total_num = pool->node_count;
     (void)pthread_spin_unlock(&pool->lock);
     stats->global_num = __atomic_load_n(&pool->active_count, __ATOMIC_RELAXED);
-    stats->cache_num = 0;  // Thread-local cache removed with MPMC ring
     stats->in_use_num = __atomic_load_n(&pool->in_use_count, __ATOMIC_RELAXED);
     stats->err_num = __atomic_load_n(&pool->err_count, __ATOMIC_RELAXED);
     stats->acc_alloc_num = __atomic_load_n(&pool->acc_alloc_count, __ATOMIC_RELAXED);
