@@ -108,11 +108,11 @@ int umq_io_stats_to_str(const umq_packet_stats_t *packet_stats, char *buf, int m
 int umq_stats_perf_get(umq_perf_stats_t *umq_perf_stats);
 
 /**
- * Reset the perf statistical counters and config.
- * @param[out] perf_stats_cfg: perf statistical results
+ * Reset the perf statistical counters.
+ * @param[in] cfg: HDR config (sig_figures, max_value_ms), NULL for defaults
  * Return 0 on success, error code on failure
  */
-int umq_stats_perf_reset(umq_perf_stats_cfg_t *perf_stats_cfg);
+int umq_stats_perf_reset(const umq_perf_stats_cfg_t *cfg);
 
 /**
  * Start perf statistics.

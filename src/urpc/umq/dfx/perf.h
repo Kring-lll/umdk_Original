@@ -62,7 +62,7 @@ static inline void umq_perf_record_write_with_feature(umq_perf_record_type_t typ
 }
 
 int umq_perf_start(void);
-int umq_perf_reset(umq_perf_stats_cfg_t *perf_stats_cfg);
+int umq_perf_reset(const umq_perf_stats_cfg_t *cfg);
 int umq_perf_stop(void);
 int umq_perf_info_get(umq_perf_stats_t *perf_info);
 int umq_perf_info_to_string(umq_perf_stats_t *perf_stats, char *umq_perf_stats_buf, int max_buf_size);
