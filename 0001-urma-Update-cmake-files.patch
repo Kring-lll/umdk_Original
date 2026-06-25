@@ -1,0 +1,252 @@
+From d2333dbfcd53e1ca448f953d164c0cf544a77eec Mon Sep 17 00:00:00 2001
+From: ranzherui <ranzherui@huawei.com>
+Date: Thu, 25 Jun 2026 14:12:00 +0800
+Subject: [PATCH] urma: Update cmake files
+
+---
+ src/urma/CMakeLists.txt                     | 94 +++++++++++++++------
+ src/urma/examples/CMakeLists.txt            |  2 +-
+ src/urma/hw/udma/CMakeLists.txt             |  4 +-
+ src/urma/lib/urma/config/CMakeLists.txt     |  4 +-
+ src/urma/lib/uvs/core/CMakeLists.txt        |  4 +-
+ src/urma/tools/urma_admin/CMakeLists.txt    |  4 +-
+ src/urma/tools/urma_perftest/CMakeLists.txt |  6 +-
+ 7 files changed, 81 insertions(+), 37 deletions(-)
+
+diff --git a/src/urma/CMakeLists.txt b/src/urma/CMakeLists.txt
+index d78ce10c..cb469c43 100644
+--- a/src/urma/CMakeLists.txt
++++ b/src/urma/CMakeLists.txt
+@@ -4,10 +4,6 @@
+ 
+ set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+ 
+-set(CMAKE_FLAGS_PUBILC " -Wall -Werror -Wformat -Wfloat-equal -Wtrampolines -g -O2 -rdynamic \
+--Wl,-z,noexecstack,-z,relro,-z,now -fno-strict-aliasing -fstack-protector-strong \
+--D_FORTIFY_SOURCE=2 -fPIE -pie -fPIC")
+-
+ if(CROSS_COMPILE)
+     set(CMAKE_C_COMPILER "${CROSS_COMPILE}")
+     message(STATUS "CMAKE_C_COMPILER: ${CROSS_COMPILE}")
+@@ -15,58 +11,106 @@ else()
+     set(CMAKE_C_COMPILER "/usr/bin/gcc")
+ endif()
+ 
+-if(CROSS_COMPILE_LINK)
+-    set(CMAKE_FLAGS_PUBILC "${CMAKE_FLAGS_PUBILC} ${CROSS_COMPILE_LINK}")
+-    message(STATUS "CROSS_COMPILE_LINK: ${CROSS_COMPILE_LINK}")
+-endif()
+-
+ if(NOT "${BUILD_DEBUG}" STREQUAL "off")
+     add_definitions(-DUNIT_TEST)
+ endif()
+ 
++# Position independent code - enables -fPIE, -fPIC, and -pie automatically
++set(CMAKE_POSITION_INDEPENDENT_CODE ON)
++
++# Common compile options
++set(COMPILE_OPTIONS_PUBLIC
++    -Wall
++    -Werror
++    -Wformat
++    -Wfloat-equal
++    -Wtrampolines
++    -g
++    -O2
++    -fno-strict-aliasing
++    -fstack-protector-strong
++    -D_FORTIFY_SOURCE=2
++)
++
++# Link options
++set(LINK_OPTIONS_PUBLIC
++    -rdynamic
++    -Wl,-z,noexecstack,-z,relro,-z,now
++)
++
++if(CROSS_COMPILE_LINK)
++    list(APPEND LINK_OPTIONS_PUBLIC ${CROSS_COMPILE_LINK})
++    message(STATUS "CROSS_COMPILE_LINK: ${CROSS_COMPILE_LINK}")
++endif()
++
+ # GTEST ENABLE
+ if("${GTEST}" STREQUAL "enable")
+ # mockcpp can only run on -O0 mode, because it need to change assembly code,
+ # so we cannot do compiler optimization.
+-    set(CMAKE_FLAGS_PUBILC " -g -Wall -Werror -O0 -DUT -fPIC")
++    set(COMPILE_OPTIONS_PUBLIC
++        -g
++        -Wall
++        -Werror
++        -O0
++        -DUT
++        -fPIC
++    )
+ endif()
+ 
+ # PERF_CYCLE ENABLE
+ if("${PERF_CYCLE}" STREQUAL "enable")
+-    set(CMAKE_FLAGS_PUBILC "${CMAKE_FLAGS_PUBILC} -DPERF_CYCLE_FLAG")
++    list(APPEND COMPILE_OPTIONS_PUBLIC -DPERF_CYCLE_FLAG)
+ endif()
+ 
+ # ASAN ENABLE
+ if("${ASAN}" STREQUAL "enable")
+-    set(CMAKE_FLAGS_ASAN "-fsanitize=address -fsanitize-recover=address -fsanitize=leak -fno-omit-frame-pointer")
+-    set(CMAKE_FLAGS_PUBILC "${CMAKE_FLAGS_PUBILC} ${CMAKE_FLAGS_ASAN}")
++    list(APPEND COMPILE_OPTIONS_PUBLIC
++        -fsanitize=address
++        -fsanitize-recover=address
++        -fsanitize=leak
++        -fno-omit-frame-pointer
++    )
+ endif()
+ 
+ # CODE_COVERAGE ENABLE
+ if("${CODE_COVERAGE}" STREQUAL "enable")
+-    set(CMAKE_FLAGS_COVERAGE "--coverage -fprofile-arcs -ftest-coverage")
+-    set(CMAKE_FLAGS_PUBILC "${CMAKE_FLAGS_PUBILC} ${CMAKE_FLAGS_COVERAGE}")
+-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
+-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} --coverage")
++    list(APPEND COMPILE_OPTIONS_PUBLIC
++        --coverage
++        -fprofile-arcs
++        -ftest-coverage
++    )
++    list(APPEND LINK_OPTIONS_PUBLIC --coverage)
+ endif()
+ 
+-set(CMAKE_FLAGS_ARM64 " -march=armv8-a+crc -DUB_ARCH_ARM64")
+-set(CMAKE_FLAGS_x86_64 " -msse4.2 -DUB_ARCH_X86_64")
++# Architecture-specific compile options
++set(COMPILE_OPTIONS_ARM64
++    -march=armv8-a+crc
++    -DUB_ARCH_ARM64
++)
++set(COMPILE_OPTIONS_x86_64
++    -msse4.2
++    -DUB_ARCH_X86_64
++)
+ if("${X86_CROSS_COMPILATION}" STREQUAL "enable")
+-    set(CMAKE_FLAGS_x86_64 " -DUB_ARCH_X86_64")
++    set(COMPILE_OPTIONS_x86_64 -DUB_ARCH_X86_64)
+     message(STATUS "x86 cross compilation, disabling msse4.2!")
+ endif()
++
++# Apply compile and link options based on architecture
+ if("${CMAKE_HOST_SYSTEM_PROCESSOR}" STREQUAL "aarch64")
+-    set(CMAKE_C_FLAGS  "${CMAKE_FLAGS_PUBILC} ${CMAKE_FLAGS_ARM64}")
+-    set(CMAKE_CXX_FLAGS  "${CMAKE_FLAGS_PUBILC} ${CMAKE_FLAGS_ARM64} -std=c++11")
++    add_compile_options(${COMPILE_OPTIONS_PUBLIC} ${COMPILE_OPTIONS_ARM64})
+ else()
+-    set(CMAKE_C_FLAGS  "${CMAKE_FLAGS_PUBILC} ${CMAKE_FLAGS_x86_64}")
+-    set(CMAKE_CXX_FLAGS  "${CMAKE_FLAGS_PUBILC} ${CMAKE_FLAGS_x86_64} -std=c++11")
++    add_compile_options(${COMPILE_OPTIONS_PUBLIC} ${COMPILE_OPTIONS_x86_64})
+ endif()
+ 
++add_link_options(${LINK_OPTIONS_PUBLIC})
++
++# C++ standard
++set(CMAKE_CXX_STANDARD 11)
++
+ set(CMAKE_SKIP_RPATH TRUE)
+ 
+-message(STATUS "CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
++message(STATUS "Compile options: ${COMPILE_OPTIONS_PUBLIC}")
+ enable_testing()
+ 
+ add_subdirectory(common)
+diff --git a/src/urma/examples/CMakeLists.txt b/src/urma/examples/CMakeLists.txt
+index 6f80cd7f..abdf17d1 100644
+--- a/src/urma/examples/CMakeLists.txt
++++ b/src/urma/examples/CMakeLists.txt
+@@ -16,6 +16,6 @@ install(TARGETS urma_sample
+     DESTINATION /usr/bin
+ )
+ install(FILES
+-    ${CMAKE_SOURCE_DIR}/urma/examples/README.md
++    ${CMAKE_CURRENT_LIST_DIR}/README.md
+     DESTINATION /usr/share/doc/umdk-examples/urma_example
+ )
+\ No newline at end of file
+diff --git a/src/urma/hw/udma/CMakeLists.txt b/src/urma/hw/udma/CMakeLists.txt
+index 6f02772b..c3692864 100644
+--- a/src/urma/hw/udma/CMakeLists.txt
++++ b/src/urma/hw/udma/CMakeLists.txt
+@@ -15,8 +15,8 @@ file(GLOB UDMA_API_FILE
+ install(DIRECTORY DESTINATION /usr/include/ub/umdk/urma/udma)
+ install(FILES ${UDMA_API_FILE} DESTINATION /usr/include/ub/umdk/urma/udma)
+ 
+-target_include_directories(BETA_UDMA_SO PRIVATE ${CMAKE_SOURCE_DIR}/urma/lib/urma/core)
+-target_include_directories(BETA_UDMA_SO PRIVATE ${CMAKE_SOURCE_DIR}/urma/lib/urma/core/include)
++target_include_directories(BETA_UDMA_SO PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../lib/urma/core)
++target_include_directories(BETA_UDMA_SO PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../lib/urma/core/include)
+ target_include_directories(BETA_UDMA_SO PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/kernel_headers)
+ target_include_directories(BETA_UDMA_SO PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+ 
+diff --git a/src/urma/lib/urma/config/CMakeLists.txt b/src/urma/lib/urma/config/CMakeLists.txt
+index cd6aa756..25f04f17 100644
+--- a/src/urma/lib/urma/config/CMakeLists.txt
++++ b/src/urma/lib/urma/config/CMakeLists.txt
+@@ -1,9 +1,9 @@
+ # SPDX-License-Identifier: MIT
+ # Copyright (c) Huawei Technologies Co., Ltd. 2021-2025. All rights reserved.
+ 
+-install(FILES "${CMAKE_SOURCE_DIR}/urma/lib/urma/config/urma.conf"
++install(FILES "${CMAKE_CURRENT_LIST_DIR}/urma.conf"
+     DESTINATION /etc/rsyslog.d/
+     PERMISSIONS OWNER_WRITE OWNER_READ)
+-install(FILES "${CMAKE_SOURCE_DIR}/urma/lib/urma/config/urma"
++install(FILES "${CMAKE_CURRENT_LIST_DIR}/urma"
+     DESTINATION /etc/logrotate.d/
+     PERMISSIONS OWNER_WRITE OWNER_READ)
+diff --git a/src/urma/lib/uvs/core/CMakeLists.txt b/src/urma/lib/uvs/core/CMakeLists.txt
+index c2b24b8d..a013a6e0 100644
+--- a/src/urma/lib/uvs/core/CMakeLists.txt
++++ b/src/urma/lib/uvs/core/CMakeLists.txt
+@@ -22,8 +22,8 @@ target_include_directories(tpsa
+         ${CMAKE_CURRENT_SOURCE_DIR}/include
+     PRIVATE
+         ${CMAKE_CURRENT_SOURCE_DIR}
+-        ${CMAKE_SOURCE_DIR}/urma/lib/urma/core/include
+-        ${CMAKE_SOURCE_DIR}/urma/common/include
++        ${CMAKE_CURRENT_LIST_DIR}/../../lib/urma/core/include
++        ${CMAKE_CURRENT_LIST_DIR}/../../common/include
+ )
+ 
+ target_link_libraries(tpsa urma_common_static nl-genl-3 nl-3)
+diff --git a/src/urma/tools/urma_admin/CMakeLists.txt b/src/urma/tools/urma_admin/CMakeLists.txt
+index efe6a02f..161f24a4 100644
+--- a/src/urma/tools/urma_admin/CMakeLists.txt
++++ b/src/urma/tools/urma_admin/CMakeLists.txt
+@@ -27,8 +27,8 @@ set_target_properties(urma_admin
+ 
+ target_include_directories(urma_admin
+     PRIVATE
+-        ${CMAKE_SOURCE_DIR}/urma/lib/urma/core/include
+-        ${CMAKE_SOURCE_DIR}/urma/common/include
++        ${CMAKE_CURRENT_LIST_DIR}/../../lib/urma/core/include
++        ${CMAKE_CURRENT_LIST_DIR}/../../common/include
+         /usr/include/libnl3
+ )
+ 
+diff --git a/src/urma/tools/urma_perftest/CMakeLists.txt b/src/urma/tools/urma_perftest/CMakeLists.txt
+index afb7f760..1768d43c 100644
+--- a/src/urma/tools/urma_perftest/CMakeLists.txt
++++ b/src/urma/tools/urma_perftest/CMakeLists.txt
+@@ -17,9 +17,9 @@ set_target_properties(urma_perftest
+ 
+ target_include_directories(urma_perftest
+     PRIVATE
+-        ${CMAKE_SOURCE_DIR}/urma/lib/urma/core/include
+-        ${CMAKE_SOURCE_DIR}/urma/lib/urma/bond/include
+-        ${CMAKE_SOURCE_DIR}/urma/common/include
++        ${CMAKE_CURRENT_LIST_DIR}/../../lib/urma/core/include
++        ${CMAKE_CURRENT_LIST_DIR}/../../lib/urma/bond/include
++        ${CMAKE_CURRENT_LIST_DIR}/../../common/include
+ )
+ 
+ target_link_libraries(urma_perftest
+-- 
+2.54.0.windows.1
+
