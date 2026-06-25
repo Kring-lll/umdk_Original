@@ -22,8 +22,8 @@ target_include_directories(tpsa
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_LIST_DIR}/../../lib/urma/core/include
-        ${CMAKE_CURRENT_LIST_DIR}/../../common/include
+        ${CMAKE_CURRENT_LIST_DIR}/../../urma/core/include
+        ${CMAKE_CURRENT_LIST_DIR}/../../../common/include
 )
 
 target_link_libraries(tpsa urma_common_static nl-genl-3 nl-3)
