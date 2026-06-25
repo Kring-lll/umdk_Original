@@ -339,7 +339,12 @@ int umq_ub_jetty_node_free(jetty_pool_node_t *node)
     node->borrow_count = 0;
 
     urpc_mpmc_enqueue(&pool->active_ring, &node);
-    (void)__atomic_add_fetch(&pool->active_count, 1, __ATOMIC_RELAXED);
+    uint32_t active_count = __atomic_add_fetch(&pool->active_count, 1, __ATOMIC_RELAXED);
+    if (active_count % pool->notify_threshold == 0) {
+        if (eventfd_write(pool->event_fd, (uint64_t)active_count) == -1) {
+            UMQ_VLOG_WARN(VLOG_UMQ, "eventfd_write failed, errno: %d\n", errno);
+        }
+    }
 
     return UMQ_SUCCESS;
 }
