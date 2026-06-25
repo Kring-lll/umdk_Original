@@ -17,9 +17,9 @@ set_target_properties(urma_perftest
 
 target_include_directories(urma_perftest
     PRIVATE
-        ${CMAKE_SOURCE_DIR}/urma/lib/urma/core/include
-        ${CMAKE_SOURCE_DIR}/urma/lib/urma/bond/include
-        ${CMAKE_SOURCE_DIR}/urma/common/include
+        ${CMAKE_CURRENT_LIST_DIR}/../../lib/urma/core/include
+        ${CMAKE_CURRENT_LIST_DIR}/../../lib/urma/bond/include
+        ${CMAKE_CURRENT_LIST_DIR}/../../common/include
 )
 
 target_link_libraries(urma_perftest

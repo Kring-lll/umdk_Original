@@ -16,6 +16,6 @@ install(TARGETS urma_sample
     DESTINATION /usr/bin
 )
 install(FILES
-    ${CMAKE_SOURCE_DIR}/urma/examples/README.md
+    ${CMAKE_CURRENT_LIST_DIR}/README.md
     DESTINATION /usr/share/doc/umdk-examples/urma_example
 )
