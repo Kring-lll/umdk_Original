@@ -223,3 +223,134 @@ TEST(UrpcUtilTest, TestCtxPool)
     urpc_pool_thread_closure(0);
     urpc_pool_uninit(&pool);
 }
+
+typedef struct {
+    uint64_t start_cycles;
+    uint64_t start_ns;
+    uint64_t delay_us;
+    volatile bool ready;
+    volatile bool done;
+    uint64_t end_cycles;
+    uint64_t end_ns;
+} cross_thread_ctx_t;
+
+static void *cross_thread_worker(void *arg)
+{
+    cross_thread_ctx_t *ctx = (cross_thread_ctx_t *)arg;
+
+    ctx->start_cycles = urpc_get_cpu_cycles();
+    ctx->start_ns = get_timestamp_ns();
+
+    usleep(ctx->delay_us);
+
+    ctx->end_cycles = urpc_get_cpu_cycles();
+    ctx->end_ns = get_timestamp_ns();
+    ctx->done = true;
+
+    return NULL;
+}
+
+TEST(UrpcUtilTest, TestCPUCycleCrossThreadAccuracy)
+{
+    uint64_t hz = urpc_get_cpu_hz();
+    ASSERT_NE(hz, (uint64_t)0);
+
+    uint64_t delay_values_us[] = {1000, 10000, 100000, 1000000};
+
+    for (int round = 0; round < (int)(sizeof(delay_values_us) / sizeof(delay_values_us[0])); round++) {
+        cross_thread_ctx_t ctx = {0};
+        ctx.delay_us = delay_values_us[round];
+        ctx.ready = false;
+        ctx.done = false;
+
+        pthread_t tid;
+        int ret = pthread_create(&tid, NULL, cross_thread_worker, &ctx);
+        ASSERT_EQ(ret, 0);
+
+        while (!ctx.done) {
+            usleep(100);
+        }
+
+        (void)pthread_join(tid, NULL);
+
+        uint64_t cycles_diff = ctx.end_cycles - ctx.start_cycles;
+        uint64_t cycles_time_us = cycles_diff * US_PER_SEC / hz;
+        uint64_t ns_diff = ctx.end_ns - ctx.start_ns;
+        uint64_t ns_time_us = ns_diff / NS_PER_US;
+
+        uint64_t delta_us = cycles_time_us > ns_time_us
+            ? cycles_time_us - ns_time_us
+            : ns_time_us - cycles_time_us;
+
+        double error_pct = (double)delta_us * 100.0 / (double)ns_time_us;
+
+        printf("delay=%luus, cycles_time=%luus, ns_time=%luus, delta=%luus, error=%.2f%%\n",
+               ctx.delay_us, cycles_time_us, ns_time_us, delta_us, error_pct);
+
+        EXPECT_LT(error_pct, 1.0);
+    }
+}
+
+typedef struct {
+    uint64_t cycles_on_thread_a;
+    volatile bool a_written;
+} cross_thread_compare_ctx_t;
+
+static void *thread_a_func(void *arg)
+{
+    cross_thread_compare_ctx_t *ctx = (cross_thread_compare_ctx_t *)arg;
+    ctx->cycles_on_thread_a = urpc_get_cpu_cycles();
+    ctx->a_written = true;
+    usleep(500000);
+    return NULL;
+}
+
+TEST(UrpcUtilTest, TestCPUCycleCrossThreadMonotonicity)
+{
+    uint64_t hz = urpc_get_cpu_hz();
+    ASSERT_NE(hz, (uint64_t)0);
+
+    cross_thread_compare_ctx_t ctx = {0};
+    ctx.a_written = false;
+
+    pthread_t tid;
+    int ret = pthread_create(&tid, NULL, thread_a_func, &ctx);
+    ASSERT_EQ(ret, 0);
+
+    while (!ctx.a_written) {
+        usleep(10);
+    }
+
+    usleep(1000);
+
+    uint64_t cycles_on_thread_b = urpc_get_cpu_cycles();
+    uint64_t diff_cycles = cycles_on_thread_b - ctx.cycles_on_thread_a;
+    uint64_t diff_us = diff_cycles * US_PER_SEC / hz;
+
+    printf("thread_a cycles=%lu, thread_b cycles=%lu, diff=%lu cycles (~%luus)\n",
+           ctx.cycles_on_thread_a, cycles_on_thread_b, diff_cycles, diff_us);
+
+    EXPECT_GT(diff_cycles, (uint64_t)0);
+
+    uint64_t ns_a = get_timestamp_ns();
+    usleep(1000);
+    uint64_t ns_b = get_timestamp_ns();
+    uint64_t ns_diff_us = (ns_b - ns_a) / NS_PER_US;
+
+    uint64_t cycles_a = urpc_get_cpu_cycles();
+    usleep(1000);
+    uint64_t cycles_b = urpc_get_cpu_cycles();
+    uint64_t cycles_diff_us = (cycles_b - cycles_a) * US_PER_SEC / hz;
+
+    uint64_t delta = cycles_diff_us > ns_diff_us
+        ? cycles_diff_us - ns_diff_us
+        : ns_diff_us - cycles_diff_us;
+    double error_pct = (double)delta * 100.0 / (double)ns_diff_us;
+
+    printf("same-thread: ns_diff=%luus, cycles_diff=%luus, error=%.2f%%\n",
+           ns_diff_us, cycles_diff_us, error_pct);
+
+    EXPECT_LT(error_pct, 1.0);
+
+    (void)pthread_join(tid, NULL);
+}
