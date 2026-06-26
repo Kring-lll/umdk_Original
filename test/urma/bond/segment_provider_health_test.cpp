@@ -506,9 +506,12 @@ TEST(UrmaBondTest, PublicImportSegmentUsesPhysicalProviderMocks)
     urma_token_t token = {};
     urma_import_seg_flag_t flag = {};
     urma_target_seg_t *target = nullptr;
-    auto *remote = static_cast<urma_seg_t *>(std::calloc(1, sizeof(urma_seg_t) + sizeof(urma_bond_seg_ext_t)));
+    auto *remote = static_cast<urma_seg_t *>(std::calloc(1, sizeof(urma_seg_t) +
+        sizeof(urma_seg_ext_priv_t) + sizeof(urma_bond_seg_ext_t)));
     ASSERT_NE(nullptr, remote);
-    auto *ext = reinterpret_cast<urma_bond_seg_ext_t *>(remote->ext.buf);
+    urma_seg_set_priv_ext(remote, true);
+    auto *segExt = urma_seg_get_priv_ext(remote);
+    auto *ext = reinterpret_cast<urma_bond_seg_ext_t *>(segExt->data);
 
     fixture.InitSinglePhysicalMember();
     fixture.ctx.seg_cache_enable = true;
@@ -517,10 +520,9 @@ TEST(UrmaBondTest, PublicImportSegmentUsesPhysicalProviderMocks)
     remote->ubva.va = 0x100000;
     remote->len = 4096;
     remote->token_id = 0x71;
-    remote->ext.flag.bs.enable = 1;
-    remote->ext.length = sizeof(*ext) - 1;
+    segExt->len = sizeof(*ext) - 1;
     EXPECT_EQ(nullptr, bondp_import_seg(&fixture.ctx.v_ctx, remote, &token, 0x300000, flag));
-    remote->ext.length = sizeof(*ext);
+    segExt->len = sizeof(*ext);
     ext->peer_p_seg[0].ubva.eid = MakeEid(0x802);
     ext->peer_p_seg[0].ubva.va = 0x200000;
     ext->peer_p_seg[0].len = 4096;

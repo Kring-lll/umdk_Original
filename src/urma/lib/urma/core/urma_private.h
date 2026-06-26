@@ -23,6 +23,17 @@ extern "C" {
 
 #define URMA_MAX_SYSFS_PATH 256
 #define URMA_UBAGG_DEV_PREFIX "bonding_dev"
+/*
+ * Private bit in urma_seg_attr_t::reserved to indicate whether a private
+ * extension payload is appended after urma_seg_t.
+ */
+#define URMA_SEG_ATTR_PRIV_EXT_SHIFT 14
+#define URMA_SEG_ATTR_PRIV_EXT_MASK  (1U << URMA_SEG_ATTR_PRIV_EXT_SHIFT)
+
+typedef struct urma_seg_ext_priv {
+    uint32_t len;
+    char data[0];
+} urma_seg_ext_priv_t;
 
 typedef struct urma_driver {
     struct urma_provider_ops *ops;
@@ -114,6 +125,34 @@ uint32_t urma_ubagg_switch_get(void);
 bool urma_perf_is_enabled(void);
 uint64_t urma_get_perf_timestamp(void);
 urma_status_t urma_step_perf(urma_perf_record_type_t type, uint64_t delta);
+
+static inline bool urma_seg_has_priv_ext(const urma_seg_t *seg)
+{
+    return seg != NULL && ((seg->attr.value & URMA_SEG_ATTR_PRIV_EXT_MASK) != 0);
+}
+
+static inline void urma_seg_set_priv_ext(urma_seg_t *seg, bool enable)
+{
+    if (seg == NULL) {
+        return;
+    }
+
+    if (enable) {
+        seg->attr.value |= URMA_SEG_ATTR_PRIV_EXT_MASK;
+    } else {
+        seg->attr.value &= ~URMA_SEG_ATTR_PRIV_EXT_MASK;
+    }
+}
+
+static inline urma_seg_ext_priv_t *urma_seg_get_priv_ext(urma_seg_t *seg)
+{
+    return (urma_seg_ext_priv_t *)((uintptr_t)seg + sizeof(*seg));
+}
+
+static inline const urma_seg_ext_priv_t *urma_seg_get_priv_ext_const(const urma_seg_t *seg)
+{
+    return (const urma_seg_ext_priv_t *)((uintptr_t)seg + sizeof(*seg));
+}
 
 #ifdef __cplusplus
 }

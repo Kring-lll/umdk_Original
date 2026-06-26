@@ -2904,12 +2904,28 @@ urma_status_t urma_get_seg_ctx(urma_target_seg_t *tseg, urma_seg_t **seg, uint32
         return URMA_FAIL;
     }
 
+    bool has_priv_ext = urma_seg_has_priv_ext(new_seg);
+    uint32_t priv_ext_len = 0;
+    if (has_priv_ext) {
+        urma_seg_ext_priv_t *seg_ext = urma_seg_get_priv_ext(new_seg);
+        priv_ext_len = seg_ext->len;
+    }
+
     new_seg->ubva = tseg->seg.ubva;
     new_seg->len = tseg->seg.len;
     new_seg->attr = tseg->seg.attr;
     new_seg->token_id = tseg->seg.token_id;
+    if (has_priv_ext) {
+        urma_seg_set_priv_ext(new_seg, true);
+        urma_seg_ext_priv_t *seg_ext = urma_seg_get_priv_ext(new_seg);
+        seg_ext->len = priv_ext_len;
+    }
     *seg = new_seg;
-    *size = sizeof(urma_seg_t) + new_seg->ext.length;
+    *size = sizeof(urma_seg_t);
+    if (urma_seg_has_priv_ext(new_seg)) {
+        const urma_seg_ext_priv_t *seg_ext = urma_seg_get_priv_ext_const(new_seg);
+        *size += sizeof(*seg_ext) + seg_ext->len;
+    }
     return URMA_SUCCESS;
 }
 

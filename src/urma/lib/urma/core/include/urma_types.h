@@ -984,7 +984,6 @@ typedef struct urma_seg {
     uint64_t len;         /* [Public] length of segment. */
     urma_seg_attr_t attr; /* [Public] include: access flag, token policy, cacheability. */
     uint32_t token_id;    /* [Private] match token */
-    urma_ext_t ext;
 } urma_seg_t;
 
 typedef struct urma_target_seg {

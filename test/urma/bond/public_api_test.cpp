@@ -885,9 +885,10 @@ TEST(UrmaBondTest, PublicUserCtlGetRjettyAndSegCtxUseMockIoctl)
     EXPECT_EQ(0, CallBondUserCtl(&fixture.ctx.v_ctx, BONDP_USER_CTL_OPCODE_GET_SEG_CTX,
                                  &inputSeg, sizeof(inputSeg), &out));
     ASSERT_NE(nullptr, seg);
-    EXPECT_TRUE(seg->ext.flag.bs.enable);
-    EXPECT_EQ(sizeof(urma_bond_seg_ext_t), seg->ext.length);
-    auto *segExt = reinterpret_cast<urma_bond_seg_ext_t *>(seg->ext.buf);
+    EXPECT_TRUE(urma_seg_has_priv_ext(seg));
+    auto *segPrivExt = urma_seg_get_priv_ext(seg);
+    EXPECT_EQ(sizeof(urma_bond_seg_ext_t), segPrivExt->len);
+    auto *segExt = reinterpret_cast<urma_bond_seg_ext_t *>(segPrivExt->data);
     EXPECT_EQ(0x55U, segExt->peer_p_seg[0].token_id);
     EXPECT_TRUE(segExt->connected[0][0]);
     std::free(seg);

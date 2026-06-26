@@ -324,8 +324,6 @@ static inline void bondp_seg_base_to_seg(const urma_seg_base_t *base, urma_seg_t
     seg->len = base->len;
     seg->attr.value = base->attr.value;
     seg->token_id = base->token_id;
-    seg->ext.flag.value = 0;
-    seg->ext.length = 0;
 }
 
 static inline bool is_empty_eid(urma_eid_t *eid)

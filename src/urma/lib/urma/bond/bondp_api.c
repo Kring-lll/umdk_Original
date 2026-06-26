@@ -2030,17 +2030,18 @@ static int bondp_user_ctl_get_seg_ctx(urma_context_t *ctx, urma_user_ctl_in_t *i
     bondp_import_tseg_t *bdp_tseg = CONTAINER_OF_FIELD(tseg, bondp_import_tseg_t, v_tseg);
 
     urma_seg_t *new_seg = (urma_seg_t *)calloc(1, sizeof(urma_seg_t) +
+                                               sizeof(urma_seg_ext_priv_t) +
                                                sizeof(urma_bond_seg_ext_t));
     if (new_seg == NULL) {
         URMA_LOG_ERR("Failed to alloc seg.\n");
         return -ENOMEM;
     }
 
-    urma_bond_seg_ext_t *ext = (urma_bond_seg_ext_t *)new_seg->ext.buf;
+    urma_seg_set_priv_ext(new_seg, true);
+    urma_seg_ext_priv_t *seg_ext = urma_seg_get_priv_ext(new_seg);
+    seg_ext->len = sizeof(urma_bond_seg_ext_t);
+    urma_bond_seg_ext_t *ext = (urma_bond_seg_ext_t *)seg_ext->data;
     bondp_fill_seg_ext_from_import_tseg(bdp_tseg, ext);
-
-    new_seg->ext.flag.bs.enable = true;
-    new_seg->ext.length = sizeof(urma_bond_seg_ext_t);
 
     urma_seg_t **out_seg = (urma_seg_t **)(uintptr_t)out->addr;
     *out_seg = new_seg;
