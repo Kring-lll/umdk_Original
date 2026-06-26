@@ -200,6 +200,120 @@ extern "C" {
 
 #define URPC_MPMC_CAPACITY(_ring) ((_ring)->capacity)
 
+/* --------------------------------------------------------------------------
+ * Debug inline functions
+ *
+ * When URPC_MPMC_RING_DEBUG is defined, the macros dispatch to debuggable
+ * static inline functions so GDB can step into every phase: CAS, memcpy,
+ * and WAIT_TAIL.  Compile with: -DURPC_MPMC_RING_DEBUG
+ * -------------------------------------------------------------------------- */
+
+#ifdef URPC_MPMC_RING_DEBUG
+
+/* Base ring layout without the element array.  buf starts at offset
+ * 5 × URPC_MPMC_CACHE_LINE = 320 bytes from the struct base. */
+typedef struct {
+    volatile uint64_t prod_head;
+    uint8_t _rsvd0[URPC_MPMC_CACHE_LINE - sizeof(uint64_t)];
+    volatile uint64_t prod_tail;
+    uint8_t _rsvd1[URPC_MPMC_CACHE_LINE - sizeof(uint64_t)];
+    volatile uint64_t cons_head;
+    uint8_t _rsvd2[URPC_MPMC_CACHE_LINE - sizeof(uint64_t)];
+    volatile uint64_t cons_tail;
+    uint8_t _rsvd3[URPC_MPMC_CACHE_LINE - sizeof(uint64_t)];
+    uint32_t capacity;
+    uint32_t mask;
+    uint8_t _rsvd4[URPC_MPMC_CACHE_LINE - 2 * sizeof(uint32_t)];
+} urpc_mpmc_ring_base_t;
+
+static inline void *ring_buf_ptr(urpc_mpmc_ring_base_t *r)
+{
+    return (uint8_t *)r + sizeof(urpc_mpmc_ring_base_t);
+}
+
+static inline void ring_wait_tail(volatile uint64_t *tail, uint64_t head)
+{
+    while (__atomic_load_n(tail, __ATOMIC_ACQUIRE) != head) {
+        URPC_MPMC_PAUSE();
+    }
+}
+
+static inline bool ring_try_enqueue_dbg(urpc_mpmc_ring_base_t *r,
+                                        size_t elem_size, const void *elem)
+{
+    uint64_t head = __atomic_load_n(&r->prod_head, __ATOMIC_RELAXED);
+    uint64_t tail_snap;
+    bool ok = false;
+
+    do {
+        tail_snap = __atomic_load_n(&r->cons_tail, __ATOMIC_ACQUIRE);
+        if (head - tail_snap >= r->capacity)
+            goto out;
+    } while (!__atomic_compare_exchange_n(&r->prod_head, &head, head + 1,
+                                          false, __ATOMIC_ACQ_REL,
+                                          __ATOMIC_RELAXED));
+
+    if (head - tail_snap < r->capacity) {
+        void *slot = (uint8_t *)ring_buf_ptr(r) +
+                     (head & r->mask) * elem_size;
+        memcpy(slot, elem, elem_size);
+        ring_wait_tail(&r->prod_tail, head);
+        __atomic_store_n(&r->prod_tail, head + 1, __ATOMIC_RELEASE);
+        ok = true;
+    }
+out:
+    return ok;
+}
+
+static inline bool ring_try_dequeue_dbg(urpc_mpmc_ring_base_t *r,
+                                        size_t elem_size, void *out)
+{
+    uint64_t head = __atomic_load_n(&r->cons_head, __ATOMIC_RELAXED);
+    bool ok = false;
+
+    do {
+        if (head >= __atomic_load_n(&r->prod_tail, __ATOMIC_ACQUIRE))
+            goto out;
+    } while (!__atomic_compare_exchange_n(&r->cons_head, &head, head + 1,
+                                          false, __ATOMIC_ACQ_REL,
+                                          __ATOMIC_RELAXED));
+
+    if (head < __atomic_load_n(&r->prod_tail, __ATOMIC_ACQUIRE)) {
+        void *slot = (uint8_t *)ring_buf_ptr(r) +
+                     (head & r->mask) * elem_size;
+        memcpy(out, slot, elem_size);
+        ring_wait_tail(&r->cons_tail, head);
+        __atomic_store_n(&r->cons_tail, head + 1, __ATOMIC_RELEASE);
+        ok = true;
+    }
+out:
+    return ok;
+}
+
+static inline void ring_enqueue_dbg(urpc_mpmc_ring_base_t *r,
+                                    size_t elem_size, const void *elem)
+{
+    while (!ring_try_enqueue_dbg(r, elem_size, elem))
+        ;
+}
+
+#undef  URPC_MPMC_TRY_ENQUEUE
+#define URPC_MPMC_TRY_ENQUEUE(_ring, _elem_ptr)                        \
+    ring_try_enqueue_dbg((urpc_mpmc_ring_base_t *)(_ring),             \
+                         sizeof(*(_elem_ptr)), (const void *)(_elem_ptr))
+
+#undef  URPC_MPMC_TRY_DEQUEUE
+#define URPC_MPMC_TRY_DEQUEUE(_ring, _out_ptr)                         \
+    ring_try_dequeue_dbg((urpc_mpmc_ring_base_t *)(_ring),             \
+                         sizeof(*(_out_ptr)), (void *)(_out_ptr))
+
+#undef  URPC_MPMC_ENQUEUE
+#define URPC_MPMC_ENQUEUE(_ring, _elem_ptr)                            \
+    ring_enqueue_dbg((urpc_mpmc_ring_base_t *)(_ring),                  \
+                     sizeof(*(_elem_ptr)), (const void *)(_elem_ptr))
+
+#endif /* URPC_MPMC_RING_DEBUG */
+
 #ifdef __cplusplus
 }
 #endif
