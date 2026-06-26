@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <sched.h>
 
 #if defined(__x86_64__)
 #include <x86intrin.h>
@@ -35,6 +36,10 @@ extern "C" {
 #define URPC_MPMC_CACHE_LINE 64
 #endif
 
+#ifndef URPC_MPMC_SPIN_THRESHOLD
+#define URPC_MPMC_SPIN_THRESHOLD 1024
+#endif
+
 /* --------------------------------------------------------------------------
  * Structure declaration macro
  * -------------------------------------------------------------------------- */
@@ -46,7 +51,7 @@ extern "C" {
  *   URPC_MPMC_RING_DECLARE(my_ring, my_elem_t, 64);
  *
  *   my_ring_t ring;
- *   urpc_mpmc_ring_init(&ring);
+ *   URPC_MPMC_RING_INIT(&ring);
  *
  * NOTES:
  *   - capacity MUST be a power of 2.
@@ -80,7 +85,7 @@ extern "C" {
  * Init / Reset
  * -------------------------------------------------------------------------- */
 
-#define urpc_mpmc_ring_init(_ring) do {                                    \
+#define URPC_MPMC_RING_INIT(_ring) do {                                    \
     (_ring)->prod_head = 0;                                                \
     (_ring)->prod_tail = 0;                                                \
     (_ring)->cons_head = 0;                                                \
@@ -89,8 +94,8 @@ extern "C" {
     (_ring)->mask = (_ring)->capacity - 1;                                 \
 } while (0)
 
-#define urpc_mpmc_ring_reset(_ring) do {                                   \
-    urpc_mpmc_ring_init(_ring);                                            \
+#define URPC_MPMC_RING_RESET(_ring) do {                                   \
+    URPC_MPMC_RING_INIT(_ring);                                            \
     memset((_ring)->buf, 0, sizeof((_ring)->buf));                         \
 } while (0)
 
@@ -99,7 +104,12 @@ extern "C" {
  * -------------------------------------------------------------------------- */
 
 #define URPC_MPMC_WAIT_TAIL(_tail, _head) do {                             \
+    uint32_t _spin = 0;                                                    \
     while (__atomic_load_n((_tail), __ATOMIC_ACQUIRE) != (_head)) {        \
+        if (++_spin > URPC_MPMC_SPIN_THRESHOLD) {                          \
+            sched_yield();                                                 \
+            _spin = 0;                                                     \
+        }                                                                  \
         URPC_MPMC_PAUSE();                                                 \
     }                                                                      \
 } while (0)
@@ -112,7 +122,7 @@ extern "C" {
  * Try enqueue — returns false if full.
  * elem_ptr: pointer to the element to copy into the ring.
  */
-#define urpc_mpmc_try_enqueue(_ring, _elem_ptr) ({                         \
+#define URPC_MPMC_TRY_ENQUEUE(_ring, _elem_ptr) ({                         \
     typeof(_ring) _r = (_ring);                                            \
     typeof(_elem_ptr) _e = (_elem_ptr);                                    \
     bool _ok = false;                                                      \
@@ -139,8 +149,8 @@ extern "C" {
 /*
  * Blocking enqueue — spins until a slot is available.
  */
-#define urpc_mpmc_enqueue(_ring, _elem_ptr) do {                           \
-    while (!urpc_mpmc_try_enqueue((_ring), (_elem_ptr)))                   \
+#define URPC_MPMC_ENQUEUE(_ring, _elem_ptr) do {                           \
+    while (!URPC_MPMC_TRY_ENQUEUE((_ring), (_elem_ptr)))                   \
         ;                                                                  \
 } while (0)
 
@@ -152,7 +162,7 @@ extern "C" {
  * Try dequeue — returns false if empty.
  * out_ptr: pointer to the output buffer.
  */
-#define urpc_mpmc_try_dequeue(_ring, _out_ptr) ({                          \
+#define URPC_MPMC_TRY_DEQUEUE(_ring, _out_ptr) ({                          \
     typeof(_ring) _r = (_ring);                                            \
     typeof(_out_ptr) _o = (_out_ptr);                                      \
     bool _ok = false;                                                      \
@@ -178,27 +188,27 @@ extern "C" {
  * Query (approximate under concurrency)
  * -------------------------------------------------------------------------- */
 
-#define urpc_mpmc_is_empty(_ring) ({                                       \
+#define URPC_MPMC_IS_EMPTY(_ring) ({                                       \
     typeof(_ring) _r = (_ring);                                            \
     __atomic_load_n(&(_r)->cons_tail, __ATOMIC_ACQUIRE) >=                 \
     __atomic_load_n(&(_r)->prod_tail, __ATOMIC_ACQUIRE);                   \
 })
 
-#define urpc_mpmc_is_full(_ring) ({                                        \
+#define URPC_MPMC_IS_FULL(_ring) ({                                        \
     typeof(_ring) _r = (_ring);                                            \
     __atomic_load_n(&(_r)->prod_head, __ATOMIC_ACQUIRE) -                  \
     __atomic_load_n(&(_r)->cons_tail, __ATOMIC_ACQUIRE) >=                 \
     (_r)->capacity;                                                         \
 })
 
-#define urpc_mpmc_count(_ring) ({                                          \
+#define URPC_MPMC_COUNT(_ring) ({                                          \
     typeof(_ring) _r = (_ring);                                            \
     uint64_t _pt = __atomic_load_n(&(_r)->prod_tail, __ATOMIC_ACQUIRE);    \
     uint64_t _ct = __atomic_load_n(&(_r)->cons_tail, __ATOMIC_ACQUIRE);    \
     (uint32_t)(_pt >= _ct ? _pt - _ct : 0);                                \
 })
 
-#define urpc_mpmc_capacity(_ring) ((_ring)->capacity)
+#define URPC_MPMC_CAPACITY(_ring) ((_ring)->capacity)
 
 #ifdef __cplusplus
 }
