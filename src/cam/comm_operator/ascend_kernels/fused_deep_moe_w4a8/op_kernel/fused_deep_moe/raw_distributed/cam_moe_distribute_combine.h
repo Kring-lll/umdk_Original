@@ -2,9 +2,9 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: add combine kernel implement
- * Create: 2025-07-21
+ * Create: 2026-06-27
  * Note:
- * History: 2025-07-21 add combine kernel implement
+ * History: 2026-06-27 add combine kernel implement
  */
 #ifndef CAM_MOE_DISTRIBUTE_COMBINE_H
 #define CAM_MOE_DISTRIBUTE_COMBINE_H
