@@ -45,3 +45,25 @@ target_link_libraries(tool_cpu_cycle_cross_thread
     pthread
     ${CMAKE_THREAD_LIBS_INIT}
 )
+
+add_executable(tool_credit_return_idle_check tool_credit_return_idle_check.c)
+
+target_include_directories(tool_credit_return_idle_check PRIVATE
+    ${URPC_ROOT_DIR}/util/
+    ${URPC_ROOT_DIR}/include/framework
+    /usr/include/ub/umdk/urma
+    /usr/include/ub/umdk/umq
+)
+
+target_link_libraries(tool_credit_return_idle_check
+    umq
+    umq_buf
+    urma
+    urma_common
+    urpc_framework
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    pthread
+    m
+    ${CMAKE_THREAD_LIBS_INIT}
+)
