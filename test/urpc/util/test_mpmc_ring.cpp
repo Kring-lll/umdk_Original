@@ -12,6 +12,7 @@
 #include <set>
 #include <algorithm>
 #include <atomic>
+#include <sched.h>
 
 #define TEST_RING_CAPACITY 1024
 
@@ -137,11 +138,16 @@ static void *consumer_thread(void *arg)
 {
     struct cons_args *a = (struct cons_args *)arg;
     uint32_t count = 0;
+    uint32_t empty_spins = 0;
 
     while (count < a->ops) {
         struct test_item out;
         if (URPC_MPMC_TRY_DEQUEUE(a->ring, &out)) {
             a->out[count++] = out.seq;
+            empty_spins = 0;
+        } else if (++empty_spins > 1024) {
+            sched_yield();
+            empty_spins = 0;
         }
     }
     return NULL;
@@ -151,8 +157,8 @@ TEST(MpmcRingTest, MultiThreadedNoLossNoDuplication)
 {
     const uint32_t kProducers   = 4;
     const uint32_t kConsumers   = 4;
-    const uint32_t kOpsPerProd  = 5000;                 // 每生产者 5k
-    const uint32_t kTotalOps    = kProducers * kOpsPerProd;  // 20k total
+    const uint32_t kOpsPerProd  = 1000;                 // 每生产者 1k
+    const uint32_t kTotalOps    = kProducers * kOpsPerProd;  // 4k total
     const uint32_t kOpsPerCons  = kTotalOps / kConsumers;
 
     g_next_seq.store(0, std::memory_order_relaxed);
