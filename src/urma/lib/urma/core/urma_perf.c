@@ -352,10 +352,37 @@ urma_status_t urma_step_perf(urma_perf_record_type_t type, uint64_t delta)
     return URMA_SUCCESS;
 }
 
+static int urma_perf_append_jfce_cnt(char *buf, int buf_size, int offset)
+{
+    urma_jfce_cnt_info_t jfce_info[URMA_JFCE_CNT_MAX_DEV_NUM] = {0};
+    uint32_t jfce_cnt = 0;
+    urma_status_t jfce_ret = urma_get_jfce_cnt_info(jfce_info, &jfce_cnt);
+    if (jfce_ret != URMA_SUCCESS || jfce_cnt == 0) {
+        return offset;
+    }
+
+    offset += snprintf(buf + offset, buf_size - offset,
+        "+----------------------+----------+----------+\n");
+    offset += snprintf(buf + offset, buf_size - offset,
+        "  Device               | total_cnt| thresh_cnt\n");
+    offset += snprintf(buf + offset, buf_size - offset,
+        "+----------------------+----------+----------+\n");
+    for (uint32_t i = 0; i < jfce_cnt; i++) {
+        offset += snprintf(buf + offset, buf_size - offset,
+            "  %-20s | %-8lu | %-8lu  \n",
+            jfce_info[i].dev_name,
+            jfce_info[i].jfce_total_cnt,
+            jfce_info[i].jfce_thresh_cnt);
+    }
+    offset += snprintf(buf + offset, buf_size - offset,
+        "+----------------------+----------+----------+\n");
+    return offset;
+}
+
 urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length)
 {
     urma_perf_stats_t perf_info = {0};
-    char temp_buf[8192] = {0};
+    char temp_buf[16384] = {0};
     int buffer_used = 0;
 
     if (perf_buf == NULL || length == NULL) {
@@ -392,6 +419,7 @@ urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length)
     }
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
         "+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
+    buffer_used = urma_perf_append_jfce_cnt(temp_buf, sizeof(temp_buf), buffer_used);
     if (*length < (uint32_t)buffer_used + 1) {
         URMA_LOG_ERR("Urma perf get info failed, need %d bytes buffer, but only %u provided\n",
             buffer_used + 1, *length);
