@@ -1359,3 +1359,27 @@ void umq_qbuf_unregister_seg(uint8_t *ctx, mempool_segment_ops_t *ops)
     }
     (void)pthread_spin_unlock(&exp_pool->expansion_pool_lock);
 }
+
+bool qbuf_wait_expansion_pool(bool with_data, uint64_t *global_buf_cnt, bool disable_scale_cap)
+{
+    qbuf_expansion_pool_t *exp_pool = with_data ? &g_qbuf_pool.exp_pool_with_date : &g_qbuf_pool.exp_pool_without_date;
+    if (__atomic_load_n(&exp_pool->is_async_expanding, __ATOMIC_ACQUIRE) == 1) {
+        // asynchronous expansion in progress
+        return true;
+    }
+
+    uint64_t total_size;
+    if (with_data) {
+        total_size = QBUF_MEMALIGN_SIZE * exp_pool->sub_slot_count;
+    } else {
+        total_size = exp_pool->expansion_block_count * (uint32_t)sizeof(umq_buf_t);
+    }
+
+    if (__atomic_load_n(&g_qbuf_pool.exp_total_mem_pool_size, __ATOMIC_ACQUIRE) + total_size >
+        g_qbuf_pool.expansion_mem_size_max && *global_buf_cnt == 0) {
+        // exceeds the expansion upper limit
+        return false;
+    }
+    async_expand_global_pool(with_data, *global_buf_cnt, disable_scale_cap);
+    return true;
+}
