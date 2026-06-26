@@ -2142,9 +2142,9 @@ urma_status_t urma_get_rjetty(urma_jetty_t *jetty, urma_rjetty_t **rjetty, uint3
         jetty->jetty_cfg.jetty_grp->cfg.policy : URMA_JETTY_GRP_POLICY_RR;
     new_rjetty->type = URMA_JETTY;
     new_rjetty->flag.bs.order_type = jetty->jetty_cfg.jfs_cfg.flag.bs.order_type;
-    
+
     *rjetty = new_rjetty;
-    *length = sizeof(urma_rjetty_t) + new_rjetty->ext.length;
+    *length = sizeof(urma_rjetty_t);
     return URMA_SUCCESS;
 }
 
@@ -2909,7 +2909,7 @@ urma_status_t urma_get_seg_ctx(urma_target_seg_t *tseg, urma_seg_t **seg, uint32
     new_seg->attr = tseg->seg.attr;
     new_seg->token_id = tseg->seg.token_id;
     *seg = new_seg;
-    *size = sizeof(urma_seg_t) + new_seg->ext.length;
+    *size = sizeof(urma_seg_t);
     return URMA_SUCCESS;
 }
 
