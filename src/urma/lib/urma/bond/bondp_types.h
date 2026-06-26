@@ -39,6 +39,78 @@
 #define URMA_JETTY_ID_UNPACK(...)     __VA_ARGS__
 #define URMA_JETTY_ID_ARGS(jetty_id)  URMA_JETTY_ID_UNPACK(EID_ARGS((jetty_id)->eid), \
                                                            (jetty_id)->uasid, (jetty_id)->id)
+#define BONDP_PRIV_EXT_USER_INFO         1U
+typedef enum bondp_priv_ext_type {
+    BONDP_PRIV_EXT_TYPE_INVALID = 0,
+    BONDP_PRIV_EXT_TYPE_SEG = 1,
+    BONDP_PRIV_EXT_TYPE_RJETTY = 2,
+} bondp_priv_ext_type_t;
+
+typedef struct bondp_priv_ext_hdr {
+    uint8_t user_info;
+    uint8_t type;
+    uint16_t reserved;
+    uint32_t len;
+    char data[0];
+} bondp_priv_ext_hdr_t;
+
+typedef bondp_priv_ext_hdr_t bondp_seg_ext_priv_t;
+typedef bondp_priv_ext_hdr_t bondp_rjetty_ext_priv_t;
+
+static inline bool bondp_seg_has_user_info(const urma_seg_t *seg)
+{
+    if (seg == NULL || seg->attr.bs.has_user_info == 0) {
+        return false;
+    }
+
+    const bondp_seg_ext_priv_t *seg_ext = (const bondp_seg_ext_priv_t *)((uintptr_t)seg + sizeof(*seg));
+    return seg_ext->user_info == BONDP_PRIV_EXT_USER_INFO;
+}
+
+static inline void bondp_seg_set_user_info(urma_seg_t *seg, bool enable)
+{
+    if (seg == NULL) {
+        return;
+    }
+
+    if (enable) {
+        seg->attr.bs.has_user_info = 1;
+        bondp_seg_ext_priv_t *seg_ext = (bondp_seg_ext_priv_t *)((uintptr_t)seg + sizeof(*seg));
+        seg_ext->user_info = BONDP_PRIV_EXT_USER_INFO;
+    } else {
+        seg->attr.bs.has_user_info = 0;
+    }
+}
+
+static inline bondp_seg_ext_priv_t *bondp_seg_get_priv_ext(urma_seg_t *seg)
+{
+    return (bondp_seg_ext_priv_t *)((uintptr_t)seg + sizeof(*seg));
+}
+
+static inline const bondp_seg_ext_priv_t *bondp_seg_get_priv_ext_const(const urma_seg_t *seg)
+{
+    return (const bondp_seg_ext_priv_t *)((uintptr_t)seg + sizeof(*seg));
+}
+
+static inline bondp_rjetty_ext_priv_t *bondp_rjetty_get_priv_ext(urma_rjetty_t *rjetty)
+{
+    return (bondp_rjetty_ext_priv_t *)((uintptr_t)rjetty + sizeof(*rjetty));
+}
+
+static inline const bondp_rjetty_ext_priv_t *bondp_rjetty_get_priv_ext_const(const urma_rjetty_t *rjetty)
+{
+    return (const bondp_rjetty_ext_priv_t *)((uintptr_t)rjetty + sizeof(*rjetty));
+}
+
+static inline bool bondp_rjetty_has_user_info(const urma_rjetty_t *rjetty)
+{
+    if (rjetty == NULL || rjetty->flag.bs.has_user_info == 0) {
+        return false;
+    }
+
+    const bondp_rjetty_ext_priv_t *ext_hdr = bondp_rjetty_get_priv_ext_const(rjetty);
+    return ext_hdr->user_info == BONDP_PRIV_EXT_USER_INFO;
+}
 
 struct bondp_target_jetty;
 
@@ -324,8 +396,6 @@ static inline void bondp_seg_base_to_seg(const urma_seg_base_t *base, urma_seg_t
     seg->len = base->len;
     seg->attr.value = base->attr.value;
     seg->token_id = base->token_id;
-    seg->ext.flag.value = 0;
-    seg->ext.length = 0;
 }
 
 static inline bool is_empty_eid(urma_eid_t *eid)
