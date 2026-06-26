@@ -58,6 +58,42 @@ static ALWAYS_INLINE void recycle_node_to_relay_q(jetty_pool_t *pool, jetty_pool
     urpc_list_push_back(&pool->relay_q, &node->node);
 }
 
+/* Drain the entire ring, recycling all ERR nodes to free_q and re-enqueuing
+ * valid nodes.  Called when enqueue fails due to a full ring — ERR nodes
+ * marked by remove() may be blocking valid slots. */
+static void compact_active_ring(jetty_pool_t *pool)
+{
+    urpc_list_t valid_list;
+    urpc_list_init(&valid_list);
+
+    jetty_pool_node_t *node;
+    uint32_t freed = 0;
+
+    (void)pthread_spin_lock(&pool->lock);
+    while (URPC_MPMC_TRY_DEQUEUE(&pool->active_ring, &node)) {
+        if (node->state == JETTY_POOL_NODE_ERR || node->is_jetty_err) {
+            /* remove() already decremented active_count; just physically
+             * evict the node from the ring and move it to free_q. */
+            recycle_node_to_free_q(pool, node);
+            freed++;
+        } else {
+            urpc_list_push_back(&valid_list, &node->node);
+        }
+    }
+    (void)pthread_spin_unlock(&pool->lock);
+
+    if (freed > 0) {
+        UMQ_VLOG_INFO(VLOG_UMQ, "compact: freed %u ERR nodes from full ring\n", freed);
+    }
+
+    /* Re-enqueue valid nodes.  These are outside the lock because the
+     * MPMC ring is lock-free and no pool state is touched. */
+    while (!urpc_list_is_empty(&valid_list)) {
+        node = (jetty_pool_node_t *)urpc_list_pop_front(&valid_list);
+        URPC_MPMC_ENQUEUE(&pool->active_ring, &node);
+    }
+}
+
 static int umq_ub_jetty_node_list_init(umq_ub_jetty_node_list_t *jetty_node_list, uint32_t node_cnt)
 {
     if (node_cnt == 0 || node_cnt > JETTY_POOL_MAX_NODES) {
@@ -91,7 +127,7 @@ int umq_ub_jetty_pool_init(jetty_pool_config_t *config)
     }
 
     urpc_list_init(&g_jetty_pool.free_q);
-    urpc_mpmc_ring_init(&g_jetty_pool.active_ring);
+    URPC_MPMC_RING_INIT(&g_jetty_pool.active_ring);
     urpc_list_init(&g_jetty_pool.relay_q);
 
     int event_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
@@ -150,7 +186,7 @@ void umq_ub_jetty_pool_uninit(void)
         free(iter);
     }
     /* Drain MPMC ring: each remaining node is still IDLE and must be freed. */
-    while (urpc_mpmc_try_dequeue(&g_jetty_pool.active_ring, &iter)) {
+    while (URPC_MPMC_TRY_DEQUEUE(&g_jetty_pool.active_ring, &iter)) {
         free(iter);
     }
     URPC_LIST_FOR_EACH_SAFE(iter, tmp, node, &g_jetty_pool.relay_q) {
@@ -212,8 +248,12 @@ int umq_ub_jetty_node_add(jetty_pool_node_t *node)
     pool->node_count++;
     (void)pthread_spin_unlock(&pool->lock);
 
-    /* Lock-free enqueue into MPMC ring (replaces list push + active_count++). */
-    urpc_mpmc_enqueue(&pool->active_ring, &add_node);
+    /* Try non-blocking enqueue.  If the ring is full, compact away ERR
+     * nodes that may be occupying slots they no longer belong in. */
+    if (!URPC_MPMC_TRY_ENQUEUE(&pool->active_ring, &add_node)) {
+        compact_active_ring(pool);
+        URPC_MPMC_ENQUEUE(&pool->active_ring, &add_node);
+    }
 
     /* Notify eventfd consumers when the active count reaches every notify_threshold. */
     uint32_t active_count = __atomic_add_fetch(&pool->active_count, 1, __ATOMIC_RELAXED);
@@ -240,10 +280,9 @@ int umq_ub_jetty_node_remove(jetty_pool_node_t *node)
 
     jetty_pool_t *pool = &g_jetty_pool;
 
-    // Try CAS IDLE→ERR to atomically claim the node.
-    // If the node is still in the ring, the next alloc() will dequeue it,
-    // see ERR state, and recycle to free_q. No explicit ring removal needed,
-    // but active_count must reflect that this node is no longer available.
+    /* CAS IDLE→ERR: atomically claim the node and remove it from the
+     * active pool. The node is still physically in the ring, so drain
+     * all consecutive ERR nodes from the head to prevent accumulation. */
     int expected = JETTY_POOL_NODE_IDLE;
     if (!__atomic_compare_exchange_n(&node->state, &expected, JETTY_POOL_NODE_ERR,
                                      false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
@@ -252,7 +291,23 @@ int umq_ub_jetty_node_remove(jetty_pool_node_t *node)
     }
     (void)__atomic_sub_fetch(&pool->active_count, 1, __ATOMIC_RELAXED);
 
+    /* Drain all ERR nodes from the ring head.  ERR nodes pile up when
+     * remove() is called without a corresponding alloc() to drain the
+     * ring — each marked node stays in the ring occupying a slot.  By
+     * draining now we physically free the slots.  Valid nodes encountered
+     * during drain are re-enqueued so they remain available. */
+    jetty_pool_node_t *drained = NULL;
     (void)pthread_spin_lock(&pool->lock);
+    while (URPC_MPMC_TRY_DEQUEUE(&pool->active_ring, &drained)) {
+        if (drained->state == JETTY_POOL_NODE_ERR || drained->is_jetty_err) {
+            recycle_node_to_free_q(pool, drained);
+            /* active_count already decremented (by this or prior remove) */
+        } else {
+            /* Valid node behind the ERR ones — put it back and stop. */
+            URPC_MPMC_ENQUEUE(&pool->active_ring, &drained);
+            break;
+        }
+    }
     pool->node_count--;
     (void)pthread_spin_unlock(&pool->lock);
 
@@ -275,21 +330,20 @@ jetty_pool_node_t *umq_ub_jetty_node_alloc(void)
         jetty_pool_node_t *node = NULL;
 
         /* Lock-free dequeue from MPMC ring. */
-        if (!urpc_mpmc_try_dequeue(&pool->active_ring, &node)) {
+        if (!URPC_MPMC_TRY_DEQUEUE(&pool->active_ring, &node)) {
             /* Ring is empty — no nodes available. */
             break;
         }
 
-        /* CAS IDLE→IN_USE: atomically claim ownership.
-         * A node in the ring is guaranteed to be IDLE (add sets it,
-         * free restores it before enqueue). ERR nodes are recycled
-         * by remove() via CAS — if we see ERR here, the node was
-         * marked bad but still sits in the ring. */
+        /* CAS IDLE→IN_USE: atomically claim ownership.  remove()'s drain
+         * loop normally cleans up ERR nodes, but a stale ERR node may
+         * still be encountered during a race — recycle it defensively.
+         * remove() already decremented active_count for the ERR node;
+         * do NOT decrement again here. */
         uint32_t expected = JETTY_POOL_NODE_IDLE;
         if (!__atomic_compare_exchange_n(&node->state, &expected, JETTY_POOL_NODE_IN_USE,
                                          false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-            /* Node is ERR or already IN_USE — recycle to free_q.
-             * remove() already decremented active_count; do not decrement again. */
+            /* Stale ERR node — recycle to free_q. */
             if (expected == JETTY_POOL_NODE_ERR || node->is_jetty_err) {
                 (void)pthread_spin_lock(&pool->lock);
                 recycle_node_to_free_q(pool, node);
@@ -338,7 +392,7 @@ int umq_ub_jetty_node_free(jetty_pool_node_t *node)
     __atomic_store_n(&node->state, JETTY_POOL_NODE_IDLE, __ATOMIC_RELEASE);
     node->borrow_count = 0;
 
-    urpc_mpmc_enqueue(&pool->active_ring, &node);
+    URPC_MPMC_ENQUEUE(&pool->active_ring, &node);
     uint32_t active_count = __atomic_add_fetch(&pool->active_count, 1, __ATOMIC_RELAXED);
     if (active_count % pool->notify_threshold == 0) {
         if (eventfd_write(pool->event_fd, (uint64_t)active_count) == -1) {
