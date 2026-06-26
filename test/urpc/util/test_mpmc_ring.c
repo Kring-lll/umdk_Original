@@ -19,6 +19,17 @@
 #define TEST_SUCCESS   "\x1b[32mPASSED\x1b[0m"
 #define TEST_FAIL      "\x1b[31mFAILED\x1b[0m"
 
+/* test parameters */
+#define TEST_SEQ_SINGLE        42
+#define TEST_MIXED_ENQUEUE    500
+#define TEST_MIXED_DEQUEUE    300
+#define TEST_RESET_COUNT      100
+#define TEST_MP_THREADS         4
+#define TEST_MP_OPS_PER_PROD 1000
+#define TEST_MP_OPS_PER_CONS  (TEST_MP_THREADS * TEST_MP_OPS_PER_PROD / TEST_MP_THREADS)
+#define TEST_MP_TOTAL_OPS     (TEST_MP_THREADS * TEST_MP_OPS_PER_PROD)
+#define TEST_CONSUMER_SPIN_MAX 1024
+
 struct test_item {
     uint64_t seq;
     uint64_t prod_id;
@@ -61,13 +72,13 @@ static void test_single_enqueue_dequeue(void)
 {
     test_ring_t ring;
     URPC_MPMC_RING_INIT(&ring);
-    struct test_item in = { .seq = 42, .prod_id = 0 };
+    struct test_item in = { .seq = TEST_SEQ_SINGLE, .prod_id = 0 };
     struct test_item out;
     memset(&out, 0, sizeof(out));
     ASSERT_TRUE(URPC_MPMC_TRY_ENQUEUE(&ring, &in));
     ASSERT_EQ(URPC_MPMC_COUNT(&ring), (uint32_t)1);
     ASSERT_TRUE(URPC_MPMC_TRY_DEQUEUE(&ring, &out));
-    ASSERT_EQ(out.seq, (uint64_t)42);
+    ASSERT_EQ(out.seq, (uint64_t)TEST_SEQ_SINGLE);
     ASSERT_TRUE(URPC_MPMC_IS_EMPTY(&ring));
 }
 
@@ -81,7 +92,7 @@ static void test_fill_and_drain(void)
         ASSERT_TRUE(URPC_MPMC_TRY_ENQUEUE(&ring, &in));
     }
     ASSERT_TRUE(URPC_MPMC_IS_FULL(&ring));
-    struct test_item overflow = { .seq = 999 };
+    struct test_item overflow = { .seq = TEST_CAPACITY + 1 };
     ASSERT_FALSE(URPC_MPMC_TRY_ENQUEUE(&ring, &overflow));
     uint32_t count = 0;
     struct test_item out;
@@ -116,12 +127,12 @@ static void test_mixed_enqueue_dequeue(void)
     URPC_MPMC_RING_INIT(&ring);
     struct test_item out;
     uint32_t enqueued = 0, dequeued = 0, i;
-    for (i = 0; i < 500; i++) {
+    for (i = 0; i < TEST_MIXED_ENQUEUE; i++) {
         struct test_item in = { .seq = (uint64_t)i };
         ASSERT_TRUE(URPC_MPMC_TRY_ENQUEUE(&ring, &in));
         enqueued++;
     }
-    for (i = 0; i < 300; i++) {
+    for (i = 0; i < TEST_MIXED_DEQUEUE; i++) {
         ASSERT_TRUE(URPC_MPMC_TRY_DEQUEUE(&ring, &out));
         dequeued++;
     }
@@ -133,7 +144,7 @@ static void test_reset(void)
     test_ring_t ring;
     URPC_MPMC_RING_INIT(&ring);
     uint32_t i;
-    for (i = 0; i < 100; i++) {
+    for (i = 0; i < TEST_RESET_COUNT; i++) {
         struct test_item in = { .seq = i };
         URPC_MPMC_ENQUEUE(&ring, &in);
     }
@@ -172,7 +183,7 @@ static void *consumer_main(void *arg)
         if (URPC_MPMC_TRY_DEQUEUE(a->ring, &out)) {
             a->out[count++] = out.seq;
             empty_spins = 0;
-        } else if (++empty_spins > 1024) {
+        } else if (++empty_spins > TEST_CONSUMER_SPIN_MAX) {
             sched_yield();
             empty_spins = 0;
         }
@@ -189,8 +200,8 @@ static int cmp_uint64(const void *a, const void *b)
 
 static void test_multithreaded(void)
 {
-    const uint32_t kP = 4, kC = 4;
-    const uint32_t kOpsPerP = 1000;
+    const uint32_t kP = TEST_MP_THREADS, kC = TEST_MP_THREADS;
+    const uint32_t kOpsPerP = TEST_MP_OPS_PER_PROD;
     const uint32_t kTotal = kP * kOpsPerP;
     const uint32_t kOpsPerC = kTotal / kC;
 
@@ -199,10 +210,10 @@ static void test_multithreaded(void)
     assert(ring != NULL);
     URPC_MPMC_RING_INIT(ring);
 
-    pthread_t pt[4], ct[4];
-    struct prod_arg pa[4];
-    struct cons_arg ca[4];
-    uint64_t *results[4] = { NULL };
+    pthread_t pt[TEST_MP_THREADS], ct[TEST_MP_THREADS];
+    struct prod_arg pa[TEST_MP_THREADS];
+    struct cons_arg ca[TEST_MP_THREADS];
+    uint64_t *results[TEST_MP_THREADS] = { NULL };
 
     uint32_t i;
     for (i = 0; i < kP; i++) {
