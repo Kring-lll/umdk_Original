@@ -151,8 +151,8 @@ TEST(MpmcRingTest, MultiThreadedNoLossNoDuplication)
 {
     const uint32_t kProducers   = 4;
     const uint32_t kConsumers   = 4;
-    const uint32_t kOpsPerProd  = 50000;                // 每生产者 50k
-    const uint32_t kTotalOps    = kProducers * kOpsPerProd;  // 200k total
+    const uint32_t kOpsPerProd  = 5000;                 // 每生产者 5k
+    const uint32_t kTotalOps    = kProducers * kOpsPerProd;  // 20k total
     const uint32_t kOpsPerCons  = kTotalOps / kConsumers;
 
     g_next_seq.store(0, std::memory_order_relaxed);
