@@ -1929,15 +1929,25 @@ static int bondp_fill_bond_id_info_from_compact_ext(const urma_bond_jetty_ext_v0
 
 static int bondp_fill_bond_id_info_from_rjetty_ext(const urma_rjetty_t *rjetty, urma_bond_id_info_out_t *info)
 {
-    if (rjetty->ext.length < sizeof(urma_bond_jetty_ext_v0_t)) {
-        URMA_LOG_ERR("Invalid rjetty ext length=%u.\n", rjetty->ext.length);
+    if (!bondp_rjetty_has_priv_ext(rjetty)) {
+        URMA_LOG_ERR("rjetty private ext is not enabled.\n");
         return -EINVAL;
     }
-    const urma_bond_jetty_ext_v0_t *compact_ext = (const urma_bond_jetty_ext_v0_t *)rjetty->ext.buf;
+    const bondp_rjetty_ext_priv_t *ext_hdr = bondp_rjetty_get_priv_ext_const(rjetty);
+    if (ext_hdr->magic != BONDP_PRIV_EXT_MAGIC || ext_hdr->type != BONDP_PRIV_EXT_TYPE_RJETTY) {
+        URMA_LOG_ERR("Invalid rjetty ext header: magic=0x%x, type=%u.\n",
+                     ext_hdr->magic, ext_hdr->type);
+        return -EINVAL;
+    }
+    if (ext_hdr->len < sizeof(urma_bond_jetty_ext_v0_t)) {
+        URMA_LOG_ERR("Invalid rjetty ext length=%u.\n", ext_hdr->len);
+        return -EINVAL;
+    }
+    const urma_bond_jetty_ext_v0_t *compact_ext = (const urma_bond_jetty_ext_v0_t *)ext_hdr->data;
     if (compact_ext->version != BONDP_RJETTY_EXT_VERSION_V0) {
         URMA_LOG_DEBUG("rjetty ext version=%u, parse by mask only.\n", compact_ext->version);
     }
-    return bondp_fill_bond_id_info_from_compact_ext(compact_ext, rjetty->ext.length, info);
+    return bondp_fill_bond_id_info_from_compact_ext(compact_ext, ext_hdr->len, info);
 }
 
 static void bondp_fill_seg_ext_from_import_tseg(const bondp_import_tseg_t *bdp_tseg, urma_bond_seg_ext_t *ext)
@@ -1991,21 +2001,24 @@ static int bondp_user_ctl_get_rjetty(urma_context_t *ctx, urma_user_ctl_in_t *in
     uint32_t target_ctx_cnt = bdp_jetty->enabled_count;
     size_t ext_len = bondp_calc_rjetty_ext_len(local_ctx_cnt, target_ctx_cnt);
 
-    urma_rjetty_t *new_rjetty = (urma_rjetty_t *)calloc(1, sizeof(urma_rjetty_t) + ext_len);
+    urma_rjetty_t *new_rjetty = (urma_rjetty_t *)calloc(1, sizeof(urma_rjetty_t) +
+                                                         sizeof(bondp_rjetty_ext_priv_t) + ext_len);
     if (new_rjetty == NULL) {
         URMA_LOG_ERR("Failed to alloc rjetty.\n");
         return -ENOMEM;
     }
 
-    urma_bond_jetty_ext_v0_t *ext = (urma_bond_jetty_ext_v0_t *)new_rjetty->ext.buf;
+    bondp_rjetty_set_priv_ext(new_rjetty, true);
+    bondp_rjetty_ext_priv_t *ext_hdr = bondp_rjetty_get_priv_ext(new_rjetty);
+    ext_hdr->magic = BONDP_PRIV_EXT_MAGIC;
+    ext_hdr->type = BONDP_PRIV_EXT_TYPE_RJETTY;
+    ext_hdr->len = (uint32_t)ext_len;
+    urma_bond_jetty_ext_v0_t *ext = (urma_bond_jetty_ext_v0_t *)ext_hdr->data;
     int ret = bondp_fill_compact_rjetty_ext(bdp_ctx, bdp_jetty, ext, ext_len);
     if (ret != 0) {
         free(new_rjetty);
         return ret;
     }
-
-    new_rjetty->ext.flag.bs.enable = true;
-    new_rjetty->ext.length = (uint32_t)ext_len;
 
     urma_rjetty_t **out_rjetty = (urma_rjetty_t **)(uintptr_t)out->addr;
     *out_rjetty = new_rjetty;
@@ -2030,17 +2043,20 @@ static int bondp_user_ctl_get_seg_ctx(urma_context_t *ctx, urma_user_ctl_in_t *i
     bondp_import_tseg_t *bdp_tseg = CONTAINER_OF_FIELD(tseg, bondp_import_tseg_t, v_tseg);
 
     urma_seg_t *new_seg = (urma_seg_t *)calloc(1, sizeof(urma_seg_t) +
+                                               sizeof(bondp_seg_ext_priv_t) +
                                                sizeof(urma_bond_seg_ext_t));
     if (new_seg == NULL) {
         URMA_LOG_ERR("Failed to alloc seg.\n");
         return -ENOMEM;
     }
 
-    urma_bond_seg_ext_t *ext = (urma_bond_seg_ext_t *)new_seg->ext.buf;
+    bondp_seg_set_priv_ext(new_seg, true);
+    bondp_seg_ext_priv_t *seg_ext = bondp_seg_get_priv_ext(new_seg);
+    seg_ext->magic = BONDP_PRIV_EXT_MAGIC;
+    seg_ext->type = BONDP_PRIV_EXT_TYPE_SEG;
+    seg_ext->len = sizeof(urma_bond_seg_ext_t);
+    urma_bond_seg_ext_t *ext = (urma_bond_seg_ext_t *)seg_ext->data;
     bondp_fill_seg_ext_from_import_tseg(bdp_tseg, ext);
-
-    new_seg->ext.flag.bs.enable = true;
-    new_seg->ext.length = sizeof(urma_bond_seg_ext_t);
 
     urma_seg_t **out_seg = (urma_seg_t **)(uintptr_t)out->addr;
     *out_seg = new_seg;
@@ -2121,6 +2137,7 @@ static int bondp_import_pjetty(
     urma_bond_id_info_out_t *rvjetty_info)
 {
     urma_rjetty_t p_rjetty = *rjetty;
+    bondp_rjetty_set_priv_ext(&p_rjetty, false);
 
     for (uint32_t m = 0; m < rvjetty_info->enabled_count; ++m) {
             uint32_t target_idx = rvjetty_info->enabled_indices[m];
@@ -2203,10 +2220,11 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
 
     urma_bond_id_info_out_t rvjetty_info = {0};
-    if (rjetty->ext.flag.bs.enable) {
+    if (bondp_rjetty_has_priv_ext(rjetty)) {
         bdp_tjetty->skip_import_vjetty = true;
         if (bondp_fill_bond_id_info_from_rjetty_ext(rjetty, &rvjetty_info) != 0) {
-            URMA_LOG_ERR("Invalid rjetty ext, length=%u.\n", rjetty->ext.length);
+            const bondp_rjetty_ext_priv_t *ext_hdr = bondp_rjetty_get_priv_ext_const(rjetty);
+            URMA_LOG_ERR("Invalid rjetty ext, length=%u.\n", ext_hdr->len);
             goto FREE_TJETTY;
         }
         if (bondp_rebuild_connected_by_topo(bdp_ctx, &rjetty->jetty_id.eid, &rvjetty_info) != 0) {

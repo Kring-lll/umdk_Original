@@ -777,7 +777,6 @@ typedef struct urma_rjetty {
     urma_target_type_t type;
     urma_import_jetty_flag_t flag;
     urma_tp_type_t tp_type;
-    urma_ext_t ext;
 } urma_rjetty_t;
 
 typedef struct urma_target_jetty {
@@ -984,7 +983,6 @@ typedef struct urma_seg {
     uint64_t len;         /* [Public] length of segment. */
     urma_seg_attr_t attr; /* [Public] include: access flag, token policy, cacheability. */
     uint32_t token_id;    /* [Private] match token */
-    urma_ext_t ext;
 } urma_seg_t;
 
 typedef struct urma_target_seg {
