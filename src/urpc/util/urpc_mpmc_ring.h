@@ -113,8 +113,8 @@ extern "C" {
  * elem_ptr: pointer to the element to copy into the ring.
  */
 #define URPC_MPMC_TRY_ENQUEUE(_ring, _elem_ptr) ({                         \
-    typeof(_ring) _r = (_ring);                                            \
-    typeof(_elem_ptr) _e = (_elem_ptr);                                    \
+    __typeof__(_ring) _r = (_ring);                                            \
+    __typeof__(_elem_ptr) _e = (_elem_ptr);                                    \
     bool _ok = false;                                                      \
     uint64_t _head;                                                        \
     uint64_t _tail_snap;                                                   \
@@ -153,8 +153,8 @@ extern "C" {
  * out_ptr: pointer to the output buffer.
  */
 #define URPC_MPMC_TRY_DEQUEUE(_ring, _out_ptr) ({                          \
-    typeof(_ring) _r = (_ring);                                            \
-    typeof(_out_ptr) _o = (_out_ptr);                                      \
+    __typeof__(_ring) _r = (_ring);                                            \
+    __typeof__(_out_ptr) _o = (_out_ptr);                                      \
     bool _ok = false;                                                      \
     uint64_t _head;                                                        \
     _head = __atomic_load_n(&(_r)->cons_head, __ATOMIC_RELAXED);           \
@@ -179,20 +179,20 @@ extern "C" {
  * -------------------------------------------------------------------------- */
 
 #define URPC_MPMC_IS_EMPTY(_ring) ({                                       \
-    typeof(_ring) _r = (_ring);                                            \
+    __typeof__(_ring) _r = (_ring);                                            \
     __atomic_load_n(&(_r)->cons_tail, __ATOMIC_ACQUIRE) >=                 \
     __atomic_load_n(&(_r)->prod_tail, __ATOMIC_ACQUIRE);                   \
 })
 
 #define URPC_MPMC_IS_FULL(_ring) ({                                        \
-    typeof(_ring) _r = (_ring);                                            \
+    __typeof__(_ring) _r = (_ring);                                            \
     __atomic_load_n(&(_r)->prod_head, __ATOMIC_ACQUIRE) -                  \
     __atomic_load_n(&(_r)->cons_tail, __ATOMIC_ACQUIRE) >=                 \
     (_r)->capacity;                                                         \
 })
 
 #define URPC_MPMC_COUNT(_ring) ({                                          \
-    typeof(_ring) _r = (_ring);                                            \
+    __typeof__(_ring) _r = (_ring);                                            \
     uint64_t _pt = __atomic_load_n(&(_r)->prod_tail, __ATOMIC_ACQUIRE);    \
     uint64_t _ct = __atomic_load_n(&(_r)->cons_tail, __ATOMIC_ACQUIRE);    \
     (uint32_t)(_pt >= _ct ? _pt - _ct : 0);                                \
