@@ -95,123 +95,13 @@ extern "C" {
 } while (0)
 
 /* --------------------------------------------------------------------------
- * Spin-wait helper (internal)
- * -------------------------------------------------------------------------- */
-
-#define URPC_MPMC_WAIT_TAIL(_tail, _head) do {                             \
-    while (__atomic_load_n((_tail), __ATOMIC_ACQUIRE) != (_head)) {        \
-        URPC_MPMC_PAUSE();                                                 \
-    }                                                                      \
-} while (0)
-
-/* --------------------------------------------------------------------------
- * Enqueue
- * -------------------------------------------------------------------------- */
-
-/*
- * Try enqueue — returns false if full.
- * elem_ptr: pointer to the element to copy into the ring.
- */
-#define URPC_MPMC_TRY_ENQUEUE(_ring, _elem_ptr) ({                         \
-    __typeof__(_ring) _r = (_ring);                                            \
-    __typeof__(_elem_ptr) _e = (_elem_ptr);                                    \
-    bool _ok = false;                                                      \
-    uint64_t _head;                                                        \
-    uint64_t _tail_snap;                                                   \
-    _head = __atomic_load_n(&(_r)->prod_head, __ATOMIC_RELAXED);           \
-    do {                                                                    \
-        _tail_snap = __atomic_load_n(&(_r)->cons_tail, __ATOMIC_ACQUIRE);  \
-        if (_head - _tail_snap >= (_r)->capacity) {                         \
-            break;  /* full */                                              \
-        }                                                                   \
-    } while (!__atomic_compare_exchange_n(                                  \
-        &(_r)->prod_head, &_head, _head + 1,                               \
-        false, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED));                       \
-    if (_head - _tail_snap < (_r)->capacity) {                              \
-        memcpy(&(_r)->buf[_head & (_r)->mask], _e, sizeof(*_e));            \
-        URPC_MPMC_WAIT_TAIL(&(_r)->prod_tail, _head);                      \
-        __atomic_store_n(&(_r)->prod_tail, _head + 1, __ATOMIC_RELEASE);   \
-        _ok = true;                                                         \
-    }                                                                       \
-    _ok;                                                                    \
-})
-
-/*
- * Blocking enqueue — spins until a slot is available.
- */
-#define URPC_MPMC_ENQUEUE(_ring, _elem_ptr) do {                           \
-    while (!URPC_MPMC_TRY_ENQUEUE((_ring), (_elem_ptr)))                   \
-        ;                                                                  \
-} while (0)
-
-/* --------------------------------------------------------------------------
- * Dequeue
- * -------------------------------------------------------------------------- */
-
-/*
- * Try dequeue — returns false if empty.
- * out_ptr: pointer to the output buffer.
- */
-#define URPC_MPMC_TRY_DEQUEUE(_ring, _out_ptr) ({                          \
-    __typeof__(_ring) _r = (_ring);                                            \
-    __typeof__(_out_ptr) _o = (_out_ptr);                                      \
-    bool _ok = false;                                                      \
-    uint64_t _head;                                                        \
-    _head = __atomic_load_n(&(_r)->cons_head, __ATOMIC_RELAXED);           \
-    do {                                                                    \
-        if (_head >= __atomic_load_n(&(_r)->prod_tail, __ATOMIC_ACQUIRE)) { \
-            break;  /* empty */                                             \
-        }                                                                   \
-    } while (!__atomic_compare_exchange_n(                                  \
-        &(_r)->cons_head, &_head, _head + 1,                               \
-        false, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED));                       \
-    if (_head < __atomic_load_n(&(_r)->prod_tail, __ATOMIC_ACQUIRE)) {      \
-        memcpy(_o, &(_r)->buf[_head & (_r)->mask], sizeof(*_o));            \
-        URPC_MPMC_WAIT_TAIL(&(_r)->cons_tail, _head);                      \
-        __atomic_store_n(&(_r)->cons_tail, _head + 1, __ATOMIC_RELEASE);   \
-        _ok = true;                                                         \
-    }                                                                       \
-    _ok;                                                                    \
-})
-
-/* --------------------------------------------------------------------------
- * Query (approximate under concurrency)
- * -------------------------------------------------------------------------- */
-
-#define URPC_MPMC_IS_EMPTY(_ring) ({                                       \
-    __typeof__(_ring) _r = (_ring);                                            \
-    __atomic_load_n(&(_r)->cons_tail, __ATOMIC_ACQUIRE) >=                 \
-    __atomic_load_n(&(_r)->prod_tail, __ATOMIC_ACQUIRE);                   \
-})
-
-#define URPC_MPMC_IS_FULL(_ring) ({                                        \
-    __typeof__(_ring) _r = (_ring);                                            \
-    __atomic_load_n(&(_r)->prod_head, __ATOMIC_ACQUIRE) -                  \
-    __atomic_load_n(&(_r)->cons_tail, __ATOMIC_ACQUIRE) >=                 \
-    (_r)->capacity;                                                         \
-})
-
-#define URPC_MPMC_COUNT(_ring) ({                                          \
-    __typeof__(_ring) _r = (_ring);                                            \
-    uint64_t _pt = __atomic_load_n(&(_r)->prod_tail, __ATOMIC_ACQUIRE);    \
-    uint64_t _ct = __atomic_load_n(&(_r)->cons_tail, __ATOMIC_ACQUIRE);    \
-    (uint32_t)(_pt >= _ct ? _pt - _ct : 0);                                \
-})
-
-#define URPC_MPMC_CAPACITY(_ring) ((_ring)->capacity)
-
-/* --------------------------------------------------------------------------
- * Debug inline functions
+ * Base type
  *
- * When URPC_MPMC_RING_DEBUG is defined, the macros dispatch to debuggable
- * static inline functions so GDB can step into every phase: CAS, memcpy,
- * and WAIT_TAIL.  Compile with: -DURPC_MPMC_RING_DEBUG
+ * Every ring generated by URPC_MPMC_RING_DECLARE has this layout at the
+ * head of the struct.  Inline functions operate on this base type and
+ * compute buf[] as (base + 1).  sizeof(urpc_mpmc_ring_t) == 5 cache lines.
  * -------------------------------------------------------------------------- */
 
-#ifdef URPC_MPMC_RING_DEBUG
-
-/* Base ring layout without the element array.  buf starts at offset
- * 5 × URPC_MPMC_CACHE_LINE = 320 bytes from the struct base. */
 typedef struct {
     volatile uint64_t prod_head;
     uint8_t _rsvd0[URPC_MPMC_CACHE_LINE - sizeof(uint64_t)];
@@ -224,22 +114,30 @@ typedef struct {
     uint32_t capacity;
     uint32_t mask;
     uint8_t _rsvd4[URPC_MPMC_CACHE_LINE - 2 * sizeof(uint32_t)];
-} urpc_mpmc_ring_base_t;
+} urpc_mpmc_ring_t;
 
-static inline void *ring_buf_ptr(urpc_mpmc_ring_base_t *r)
+/* buf lives right after urpc_mpmc_ring_t in RING_DECLARE structs */
+static inline void *urpc_mpmc_buf(urpc_mpmc_ring_t *r)
 {
-    return (uint8_t *)r + sizeof(urpc_mpmc_ring_base_t);
+    return (uint8_t *)r + sizeof(urpc_mpmc_ring_t);
 }
 
-static inline void ring_wait_tail(volatile uint64_t *tail, uint64_t head)
+/* --------------------------------------------------------------------------
+ * Spin-wait — internal helper, exposed for GDB breakpoints
+ * -------------------------------------------------------------------------- */
+
+static inline void urpc_mpmc_wait_tail(volatile uint64_t *tail, uint64_t head)
 {
-    while (__atomic_load_n(tail, __ATOMIC_ACQUIRE) != head) {
+    while (__atomic_load_n(tail, __ATOMIC_ACQUIRE) != head)
         URPC_MPMC_PAUSE();
-    }
 }
 
-static inline bool ring_try_enqueue_dbg(urpc_mpmc_ring_base_t *r,
-                                        size_t elem_size, const void *elem)
+/* --------------------------------------------------------------------------
+ * Enqueue
+ * -------------------------------------------------------------------------- */
+
+static inline bool urpc_mpmc_try_enqueue(urpc_mpmc_ring_t *r,
+                                         size_t elem_size, const void *elem)
 {
     uint64_t head = __atomic_load_n(&r->prod_head, __ATOMIC_RELAXED);
     uint64_t tail_snap;
@@ -254,10 +152,10 @@ static inline bool ring_try_enqueue_dbg(urpc_mpmc_ring_base_t *r,
                                           __ATOMIC_RELAXED));
 
     if (head - tail_snap < r->capacity) {
-        void *slot = (uint8_t *)ring_buf_ptr(r) +
+        void *slot = (uint8_t *)urpc_mpmc_buf(r) +
                      (head & r->mask) * elem_size;
         memcpy(slot, elem, elem_size);
-        ring_wait_tail(&r->prod_tail, head);
+        urpc_mpmc_wait_tail(&r->prod_tail, head);
         __atomic_store_n(&r->prod_tail, head + 1, __ATOMIC_RELEASE);
         ok = true;
     }
@@ -265,8 +163,19 @@ out:
     return ok;
 }
 
-static inline bool ring_try_dequeue_dbg(urpc_mpmc_ring_base_t *r,
-                                        size_t elem_size, void *out)
+static inline void urpc_mpmc_enqueue(urpc_mpmc_ring_t *r,
+                                     size_t elem_size, const void *elem)
+{
+    while (!urpc_mpmc_try_enqueue(r, elem_size, elem))
+        ;
+}
+
+/* --------------------------------------------------------------------------
+ * Dequeue
+ * -------------------------------------------------------------------------- */
+
+static inline bool urpc_mpmc_try_dequeue(urpc_mpmc_ring_t *r,
+                                         size_t elem_size, void *out)
 {
     uint64_t head = __atomic_load_n(&r->cons_head, __ATOMIC_RELAXED);
     bool ok = false;
@@ -279,10 +188,10 @@ static inline bool ring_try_dequeue_dbg(urpc_mpmc_ring_base_t *r,
                                           __ATOMIC_RELAXED));
 
     if (head < __atomic_load_n(&r->prod_tail, __ATOMIC_ACQUIRE)) {
-        void *slot = (uint8_t *)ring_buf_ptr(r) +
+        void *slot = (uint8_t *)urpc_mpmc_buf(r) +
                      (head & r->mask) * elem_size;
         memcpy(out, slot, elem_size);
-        ring_wait_tail(&r->cons_tail, head);
+        urpc_mpmc_wait_tail(&r->cons_tail, head);
         __atomic_store_n(&r->cons_tail, head + 1, __ATOMIC_RELEASE);
         ok = true;
     }
@@ -290,29 +199,52 @@ out:
     return ok;
 }
 
-static inline void ring_enqueue_dbg(urpc_mpmc_ring_base_t *r,
-                                    size_t elem_size, const void *elem)
-{
-    while (!ring_try_enqueue_dbg(r, elem_size, elem))
-        ;
-}
+/* --------------------------------------------------------------------------
+ * Compat macros — upper-case wrappers around the inline functions.
+ * Existing callers (jetty pool, tests) use these names unchanged.
+ * GDB can step into the urpc_mpmc_* functions above.
+ * -------------------------------------------------------------------------- */
 
-#undef  URPC_MPMC_TRY_ENQUEUE
-#define URPC_MPMC_TRY_ENQUEUE(_ring, _elem_ptr)                        \
-    ring_try_enqueue_dbg((urpc_mpmc_ring_base_t *)(_ring),             \
-                         sizeof(*(_elem_ptr)), (const void *)(_elem_ptr))
+#define URPC_MPMC_TRY_ENQUEUE(_ring, _elem_ptr)           \
+    urpc_mpmc_try_enqueue((urpc_mpmc_ring_t *)(_ring),    \
+                          sizeof(*(_elem_ptr)),            \
+                          (const void *)(_elem_ptr))
 
-#undef  URPC_MPMC_TRY_DEQUEUE
-#define URPC_MPMC_TRY_DEQUEUE(_ring, _out_ptr)                         \
-    ring_try_dequeue_dbg((urpc_mpmc_ring_base_t *)(_ring),             \
-                         sizeof(*(_out_ptr)), (void *)(_out_ptr))
+#define URPC_MPMC_ENQUEUE(_ring, _elem_ptr)               \
+    urpc_mpmc_enqueue((urpc_mpmc_ring_t *)(_ring),         \
+                      sizeof(*(_elem_ptr)),                \
+                      (const void *)(_elem_ptr))
 
-#undef  URPC_MPMC_ENQUEUE
-#define URPC_MPMC_ENQUEUE(_ring, _elem_ptr)                            \
-    ring_enqueue_dbg((urpc_mpmc_ring_base_t *)(_ring),                  \
-                     sizeof(*(_elem_ptr)), (const void *)(_elem_ptr))
+#define URPC_MPMC_TRY_DEQUEUE(_ring, _out_ptr)            \
+    urpc_mpmc_try_dequeue((urpc_mpmc_ring_t *)(_ring),    \
+                          sizeof(*(_out_ptr)),             \
+                          (void *)(_out_ptr))
 
-#endif /* URPC_MPMC_RING_DEBUG */
+/* --------------------------------------------------------------------------
+ * Query (approximate under concurrency) — simple enough to stay as macros
+ * -------------------------------------------------------------------------- */
+
+#define URPC_MPMC_IS_EMPTY(_ring) ({                                        \
+    urpc_mpmc_ring_t *_r = (urpc_mpmc_ring_t *)(_ring);                     \
+    __atomic_load_n(&_r->cons_tail, __ATOMIC_ACQUIRE) >=                    \
+    __atomic_load_n(&_r->prod_tail, __ATOMIC_ACQUIRE);                      \
+})
+
+#define URPC_MPMC_IS_FULL(_ring) ({                                         \
+    urpc_mpmc_ring_t *_r = (urpc_mpmc_ring_t *)(_ring);                     \
+    __atomic_load_n(&_r->prod_head, __ATOMIC_ACQUIRE) -                     \
+    __atomic_load_n(&_r->cons_tail, __ATOMIC_ACQUIRE) >=                    \
+    _r->capacity;                                                            \
+})
+
+#define URPC_MPMC_COUNT(_ring) ({                                           \
+    urpc_mpmc_ring_t *_r = (urpc_mpmc_ring_t *)(_ring);                     \
+    uint64_t _pt = __atomic_load_n(&_r->prod_tail, __ATOMIC_ACQUIRE);       \
+    uint64_t _ct = __atomic_load_n(&_r->cons_tail, __ATOMIC_ACQUIRE);       \
+    (uint32_t)(_pt >= _ct ? _pt - _ct : 0);                                 \
+})
+
+#define URPC_MPMC_CAPACITY(_ring) (((urpc_mpmc_ring_t *)(_ring))->capacity)
 
 #ifdef __cplusplus
 }
