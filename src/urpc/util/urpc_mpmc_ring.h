@@ -13,7 +13,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <sched.h>
 
 #if defined(__x86_64__)
 #include <x86intrin.h>
@@ -34,10 +33,6 @@ extern "C" {
 
 #ifndef URPC_MPMC_CACHE_LINE
 #define URPC_MPMC_CACHE_LINE 64
-#endif
-
-#ifndef URPC_MPMC_SPIN_THRESHOLD
-#define URPC_MPMC_SPIN_THRESHOLD 1024
 #endif
 
 /* --------------------------------------------------------------------------
@@ -104,12 +99,7 @@ extern "C" {
  * -------------------------------------------------------------------------- */
 
 #define URPC_MPMC_WAIT_TAIL(_tail, _head) do {                             \
-    uint32_t _spin = 0;                                                    \
     while (__atomic_load_n((_tail), __ATOMIC_ACQUIRE) != (_head)) {        \
-        if (++_spin > URPC_MPMC_SPIN_THRESHOLD) {                          \
-            sched_yield();                                                 \
-            _spin = 0;                                                     \
-        }                                                                  \
         URPC_MPMC_PAUSE();                                                 \
     }                                                                      \
 } while (0)
