@@ -378,7 +378,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             }
 
             map_jfs_vwr_to_path(pwr, send_idx, target_idx);
-            pwr->user_ctx = wr_entry->wr_id;
+            pwr->user_ctx = (i == wr_total - 1) ? wr_entries[0]->wr_id : wr_entry->wr_id;
             /* Link WRs into a chain */
             if (i > 0) {
                 wr_entries[i - 1]->wr.next = pwr;
@@ -422,7 +422,9 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
                 success_node++;
                 pcur = pcur->next;
             }
-            atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], success_node);
+            if (success_node > 0) {
+                atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+            }
             for (int j = success_node; j < wr_total; j++) {
                 wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)wr_entries[j];
                 hdr->entry_type = 0;
@@ -1128,16 +1130,33 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
     }
 
 CONVERT_CR:
-    atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+    uint32_t released = 0;
+    jfs_wr_entry_t *cur_entry = wr_entry;
+    uint64_t last_user_ctx = cur_entry->user_ctx;
 
     uint32_t msn = 0;
     convert_pcr_to_vcr(cr, bdp_comp->bondp_ctx, &msn);
     cr->local_id = get_comp_urma_jetty_id(bdp_comp)->id;
-    cr->user_ctx = wr_entry->user_ctx;
 
-    convert_jfs_pwr_to_vwr_resend(&wr_entry->wr, &wr_entry->target_vjetty->v_tjetty);
-    release_vwr_use_cnt(&wr_entry->wr);
-    jfs_wr_buf_release(&bdp_comp->send_wr_buf, wr_entry);
+    while (cur_entry != NULL) {
+        urma_jfs_wr_t *next_wr = cur_entry->wr.next;
+        jfs_wr_entry_t *next_entry = NULL;
+
+        if (next_wr != NULL) {
+            next_entry = CONTAINER_OF_FIELD(next_wr, jfs_wr_entry_t, wr);
+        }
+
+        convert_jfs_pwr_to_vwr_resend(&cur_entry->wr, &cur_entry->target_vjetty->v_tjetty);
+        release_vwr_use_cnt(&cur_entry->wr);
+        last_user_ctx = cur_entry->user_ctx;
+        jfs_wr_buf_release(&bdp_comp->send_wr_buf, cur_entry);
+
+        cur_entry = next_entry;
+        released++;
+    }
+    cr->user_ctx = last_user_ctx;
+
+    atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], released);
     put_comp(bdp_comp);
     return CONVERT_SUCCESS;
 }
