@@ -25,6 +25,15 @@
 
 #include "perftest_communication.h"
 
+static int get_sock_fd(const perftest_config_t *cfg, uint32_t index)
+{
+    if (cfg == NULL || cfg->comm.sock_fd == NULL || index >= cfg->pair_num) {
+        errno = EINVAL;
+        return -1;
+    }
+    return cfg->comm.sock_fd[index];
+}
+
 static int ip_set_sockopts(int sockfd)
 {
     int ret;
@@ -306,11 +315,16 @@ void close_connection(perftest_config_t *cfg)
     }
 }
 
-int sock_sync_data(int sock_fd, int size, char *local_data, char *remote_data)
+int sock_sync_data(const perftest_config_t *cfg, uint32_t index, int size, char *local_data, char *remote_data)
 {
+    int sock_fd = get_sock_fd(cfg, index);
     int rc;
     int read_bytes = 0;
     int total_read_bytes = 0;
+
+    if (sock_fd < 0) {
+        return -1;
+    }
 
     rc = write(sock_fd, local_data, (size_t)size);
     if (rc < size) {
@@ -337,7 +351,7 @@ int sock_sync_data(int sock_fd, int size, char *local_data, char *remote_data)
     return -1;
 }
 
-int sync_time(int sock_fd, char *a)
+int sync_time(const perftest_config_t *cfg, uint32_t index, const char *a)
 {
     if (a == NULL) {
         LOG_ERROR("Invalid parameter with a nullptr.\n");
@@ -349,7 +363,7 @@ int sync_time(int sock_fd, char *a)
     if (b == NULL) {
         return -ENOMEM;
     }
-    ret = sock_sync_data(sock_fd, len, a, b);
+    ret = sock_sync_data(cfg, index, len, (char *)a, b);
     if (ret != 0) {
         LOG_ERROR("sync time error, %s, ret: %d.\n", a, ret);
         goto sync_ret;
@@ -360,23 +374,40 @@ int sync_time(int sock_fd, char *a)
         LOG_ERROR("sync time error, %s != %s.\n", a, b);
         goto sync_ret;
     }
+
 sync_ret:
     free(b);
     return ret;
 }
 
-ssize_t sock_write(int sock_fd, const void *buf, size_t size)
+ssize_t comm_write(const perftest_config_t *cfg, uint32_t index, const void *buf, size_t size)
 {
+    int sock_fd = get_sock_fd(cfg, index);
+
+    if (sock_fd < 0) {
+        return -1;
+    }
     return write(sock_fd, buf, size);
 }
 
-ssize_t sock_read(int sock_fd, void *buf, size_t size)
+ssize_t comm_read(const perftest_config_t *cfg, uint32_t index, void *buf, size_t size)
 {
+    int sock_fd = get_sock_fd(cfg, index);
+
+    if (sock_fd < 0) {
+        return -1;
+    }
     return read(sock_fd, buf, size);
 }
 
-int sock_poll(int sock_fd, int timeout_ms)
+int comm_poll(const perftest_config_t *cfg, uint32_t index, int timeout_ms)
 {
+    int sock_fd = get_sock_fd(cfg, index);
+
+    if (sock_fd < 0) {
+        return -1;
+    }
+
     struct pollfd pfd = {
         .fd = sock_fd,
         .events = POLLIN,
