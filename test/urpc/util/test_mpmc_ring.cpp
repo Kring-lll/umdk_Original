@@ -68,7 +68,8 @@ TEST(MpmcRingTest, FillAndDrain)
         ASSERT_TRUE(URPC_MPMC_TRY_ENQUEUE(&ring, &in));
     }
     ASSERT_TRUE(URPC_MPMC_IS_FULL(&ring));
-    ASSERT_FALSE(URPC_MPMC_TRY_ENQUEUE(&ring, &(struct test_item){ .seq = 999 }));
+    struct test_item overflow = { .seq = 999 };
+    ASSERT_FALSE(URPC_MPMC_TRY_ENQUEUE(&ring, &overflow));
 
     // 全部读出
     uint32_t count = 0;
