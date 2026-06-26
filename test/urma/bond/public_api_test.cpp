@@ -8,6 +8,89 @@
 
 using namespace urma_test_bond;
 
+static urma_jfce_t *g_emptyEventJfce = nullptr;
+static urma_jfc_t *g_readyEventJfc = nullptr;
+static int g_readyEventFd = -1;
+static int g_waitJfcCallCount = 0;
+
+class ScopedFd {
+public:
+    explicit ScopedFd(int fd = -1) : fd_(fd)
+    {
+    }
+
+    ~ScopedFd()
+    {
+        Reset();
+    }
+
+    ScopedFd(const ScopedFd &) = delete;
+    ScopedFd &operator=(const ScopedFd &) = delete;
+
+    int Get() const
+    {
+        return fd_;
+    }
+
+    void Reset(int fd = -1)
+    {
+        if (fd_ >= 0) {
+            (void)close(fd_);
+        }
+        fd_ = fd;
+    }
+
+private:
+    int fd_;
+};
+
+class MockWaitJfcStateGuard {
+public:
+    ~MockWaitJfcStateGuard()
+    {
+        g_emptyEventJfce = nullptr;
+        g_readyEventJfc = nullptr;
+        g_readyEventFd = -1;
+        g_waitJfcCallCount = 0;
+    }
+};
+
+static int MockWaitEmptyThenReadyPhysicalJfc(urma_jfce_t *jfce, uint32_t, int, urma_jfc_t *jfc[])
+{
+    eventfd_t value = 0;
+    g_waitJfcCallCount++;
+    (void)eventfd_read(jfce->fd, &value);
+    if (jfce == g_emptyEventJfce) {
+        if (g_readyEventFd >= 0) {
+            (void)eventfd_write(g_readyEventFd, 1);
+        }
+        return 0;
+    }
+    jfc[0] = g_readyEventJfc;
+    return 1;
+}
+
+static int MockWaitPersistentEmptyThenReadyPhysicalJfc(urma_jfce_t *jfce, uint32_t, int, urma_jfc_t *jfc[])
+{
+    eventfd_t value = 0;
+    g_waitJfcCallCount++;
+    if (jfce == g_emptyEventJfce) {
+        if (g_readyEventFd >= 0) {
+            (void)eventfd_write(g_readyEventFd, 1);
+        }
+        return 0;
+    }
+    (void)eventfd_read(jfce->fd, &value);
+    jfc[0] = g_readyEventJfc;
+    return 1;
+}
+
+static int MockWaitReadablePhysicalJfcWithoutCompletion(urma_jfce_t *, uint32_t, int, urma_jfc_t *[])
+{
+    g_waitJfcCallCount++;
+    return 0;
+}
+
 TEST(UrmaBondTest, PublicApiDeletePathsRejectObjectsStillInUse)
 {
     BondPublicApiFixture fixture;
@@ -347,6 +430,191 @@ TEST(UrmaBondTest, PublicJfcEventApisDispatchToPhysicalMembers)
 
     EXPECT_EQ(0, close(eventFd));
     EXPECT_EQ(0, close(epollFd));
+}
+
+TEST(UrmaBondTest, PublicWaitJfcContinuesAfterEmptyPhysicalEvent)
+{
+    MockWaitJfcStateGuard stateGuard;
+    BondPublicApiFixture fixture;
+    urma_jfc_t *readyJfc[1] = {};
+    urma_jfc_t readyPhysicalJfc = {};
+    ScopedFd epollFd;
+    ScopedFd staleEventFd;
+    ScopedFd readyEventFd;
+    epoll_event ev = {};
+
+    fixture.InitSinglePhysicalMember();
+    fixture.ctx.dev_num = 2;
+    fixture.jfc.dev_num = 2;
+    fixture.jfce.dev_num = 2;
+    fixture.phyOps.wait_jfc = MockWaitEmptyThenReadyPhysicalJfc;
+    fixture.phyOps.ack_jfc = MockAckPhysicalJfc;
+
+    epollFd.Reset(epoll_create1(EPOLL_CLOEXEC));
+    ASSERT_GE(epollFd.Get(), 0);
+    staleEventFd.Reset(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
+    ASSERT_GE(staleEventFd.Get(), 0);
+    readyEventFd.Reset(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
+    ASSERT_GE(readyEventFd.Get(), 0);
+
+    fixture.jfce.v_jfce.fd = epollFd.Get();
+    fixture.phyJfce[0].fd = staleEventFd.Get();
+    fixture.phyJfce[0].urma_ctx = &fixture.phyCtx;
+    fixture.phyJfce[1].fd = readyEventFd.Get();
+    fixture.phyJfce[1].urma_ctx = &fixture.phyCtx;
+    fixture.jfce.p_jfce[0] = &fixture.phyJfce[0];
+    fixture.jfce.p_jfce[1] = &fixture.phyJfce[1];
+    readyPhysicalJfc.jfc_cfg.user_ctx = reinterpret_cast<uint64_t>(&fixture.jfc.v_jfc);
+    g_emptyEventJfce = &fixture.phyJfce[0];
+    g_readyEventJfc = &readyPhysicalJfc;
+    g_readyEventFd = readyEventFd.Get();
+    g_waitJfcCallCount = 0;
+
+    ev.events = EPOLLIN;
+    ev.data.fd = staleEventFd.Get();
+    ASSERT_EQ(0, epoll_ctl(epollFd.Get(), EPOLL_CTL_ADD, staleEventFd.Get(), &ev));
+    ev.data.fd = readyEventFd.Get();
+    ASSERT_EQ(0, epoll_ctl(epollFd.Get(), EPOLL_CTL_ADD, readyEventFd.Get(), &ev));
+    ASSERT_EQ(0, eventfd_write(staleEventFd.Get(), 1));
+
+    EXPECT_EQ(1, bondp_wait_jfc(&fixture.jfce.v_jfce, 1, 100, readyJfc));
+    EXPECT_EQ(&fixture.jfc.v_jfc, readyJfc[0]);
+    EXPECT_GT(g_waitJfcCallCount, 1);
+}
+
+TEST(UrmaBondTest, PublicWaitJfcScansBackupWhenStalePrimaryRemainsReadable)
+{
+    MockWaitJfcStateGuard stateGuard;
+    BondPublicApiFixture fixture;
+    urma_jfc_t *readyJfc[1] = {};
+    urma_jfc_t readyPhysicalJfc = {};
+    ScopedFd epollFd;
+    ScopedFd staleEventFd;
+    ScopedFd readyEventFd;
+    epoll_event ev = {};
+
+    fixture.InitSinglePhysicalMember();
+    fixture.ctx.dev_num = 2;
+    fixture.jfc.dev_num = 2;
+    fixture.jfce.dev_num = 2;
+    fixture.phyOps.wait_jfc = MockWaitPersistentEmptyThenReadyPhysicalJfc;
+    fixture.phyOps.ack_jfc = MockAckPhysicalJfc;
+
+    epollFd.Reset(epoll_create1(EPOLL_CLOEXEC));
+    ASSERT_GE(epollFd.Get(), 0);
+    staleEventFd.Reset(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
+    ASSERT_GE(staleEventFd.Get(), 0);
+    readyEventFd.Reset(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
+    ASSERT_GE(readyEventFd.Get(), 0);
+
+    fixture.jfce.v_jfce.fd = epollFd.Get();
+    fixture.phyJfce[0].fd = staleEventFd.Get();
+    fixture.phyJfce[0].urma_ctx = &fixture.phyCtx;
+    fixture.phyJfce[1].fd = readyEventFd.Get();
+    fixture.phyJfce[1].urma_ctx = &fixture.phyCtx;
+    fixture.jfce.p_jfce[0] = &fixture.phyJfce[0];
+    fixture.jfce.p_jfce[1] = &fixture.phyJfce[1];
+    readyPhysicalJfc.jfc_cfg.user_ctx = reinterpret_cast<uint64_t>(&fixture.jfc.v_jfc);
+    g_emptyEventJfce = &fixture.phyJfce[0];
+    g_readyEventJfc = &readyPhysicalJfc;
+    g_readyEventFd = readyEventFd.Get();
+    g_waitJfcCallCount = 0;
+
+    ev.events = EPOLLIN;
+    ev.data.fd = staleEventFd.Get();
+    ASSERT_EQ(0, epoll_ctl(epollFd.Get(), EPOLL_CTL_ADD, staleEventFd.Get(), &ev));
+    ev.data.fd = readyEventFd.Get();
+    ASSERT_EQ(0, epoll_ctl(epollFd.Get(), EPOLL_CTL_ADD, readyEventFd.Get(), &ev));
+    ASSERT_EQ(0, eventfd_write(staleEventFd.Get(), 1));
+
+    EXPECT_EQ(1, bondp_wait_jfc(&fixture.jfce.v_jfce, 1, 100, readyJfc));
+    EXPECT_EQ(&fixture.jfc.v_jfc, readyJfc[0]);
+    EXPECT_GT(g_waitJfcCallCount, 1);
+}
+
+TEST(UrmaBondTest, PublicWaitJfcContinuesAfterEmptyPhysicalEventWithInfiniteTimeout)
+{
+    MockWaitJfcStateGuard stateGuard;
+    BondPublicApiFixture fixture;
+    urma_jfc_t *readyJfc[1] = {};
+    urma_jfc_t readyPhysicalJfc = {};
+    ScopedFd epollFd;
+    ScopedFd staleEventFd;
+    ScopedFd readyEventFd;
+    epoll_event ev = {};
+
+    fixture.InitSinglePhysicalMember();
+    fixture.ctx.dev_num = 2;
+    fixture.jfc.dev_num = 2;
+    fixture.jfce.dev_num = 2;
+    fixture.phyOps.wait_jfc = MockWaitPersistentEmptyThenReadyPhysicalJfc;
+    fixture.phyOps.ack_jfc = MockAckPhysicalJfc;
+
+    epollFd.Reset(epoll_create1(EPOLL_CLOEXEC));
+    ASSERT_GE(epollFd.Get(), 0);
+    staleEventFd.Reset(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
+    ASSERT_GE(staleEventFd.Get(), 0);
+    readyEventFd.Reset(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
+    ASSERT_GE(readyEventFd.Get(), 0);
+
+    fixture.jfce.v_jfce.fd = epollFd.Get();
+    fixture.phyJfce[0].fd = staleEventFd.Get();
+    fixture.phyJfce[0].urma_ctx = &fixture.phyCtx;
+    fixture.phyJfce[1].fd = readyEventFd.Get();
+    fixture.phyJfce[1].urma_ctx = &fixture.phyCtx;
+    fixture.jfce.p_jfce[0] = &fixture.phyJfce[0];
+    fixture.jfce.p_jfce[1] = &fixture.phyJfce[1];
+    readyPhysicalJfc.jfc_cfg.user_ctx = reinterpret_cast<uint64_t>(&fixture.jfc.v_jfc);
+    g_emptyEventJfce = &fixture.phyJfce[0];
+    g_readyEventJfc = &readyPhysicalJfc;
+    g_readyEventFd = readyEventFd.Get();
+    g_waitJfcCallCount = 0;
+
+    ev.events = EPOLLIN;
+    ev.data.fd = staleEventFd.Get();
+    ASSERT_EQ(0, epoll_ctl(epollFd.Get(), EPOLL_CTL_ADD, staleEventFd.Get(), &ev));
+    ev.data.fd = readyEventFd.Get();
+    ASSERT_EQ(0, epoll_ctl(epollFd.Get(), EPOLL_CTL_ADD, readyEventFd.Get(), &ev));
+    ASSERT_EQ(0, eventfd_write(staleEventFd.Get(), 1));
+
+    EXPECT_EQ(1, bondp_wait_jfc(&fixture.jfce.v_jfce, 1, -1, readyJfc));
+    EXPECT_EQ(&fixture.jfc.v_jfc, readyJfc[0]);
+    EXPECT_GT(g_waitJfcCallCount, 1);
+}
+
+TEST(UrmaBondTest, PublicWaitJfcRetriesReadablePhysicalEventUntilTimeout)
+{
+    MockWaitJfcStateGuard stateGuard;
+    BondPublicApiFixture fixture;
+    urma_jfc_t *readyJfc[1] = {};
+    ScopedFd epollFd;
+    ScopedFd eventFd;
+    epoll_event ev = {};
+
+    fixture.InitSinglePhysicalMember();
+    fixture.jfc.dev_num = 1;
+    fixture.jfce.dev_num = 1;
+    fixture.phyOps.wait_jfc = MockWaitReadablePhysicalJfcWithoutCompletion;
+
+    epollFd.Reset(epoll_create1(EPOLL_CLOEXEC));
+    ASSERT_GE(epollFd.Get(), 0);
+    eventFd.Reset(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
+    ASSERT_GE(eventFd.Get(), 0);
+
+    fixture.jfce.v_jfce.fd = epollFd.Get();
+    fixture.phyJfce[0].fd = eventFd.Get();
+    fixture.phyJfce[0].urma_ctx = &fixture.phyCtx;
+    fixture.jfce.p_jfce[0] = &fixture.phyJfce[0];
+    g_waitJfcCallCount = 0;
+
+    ev.events = EPOLLIN;
+    ev.data.fd = eventFd.Get();
+    ASSERT_EQ(0, epoll_ctl(epollFd.Get(), EPOLL_CTL_ADD, eventFd.Get(), &ev));
+    ASSERT_EQ(0, eventfd_write(eventFd.Get(), 1));
+
+    EXPECT_EQ(0, bondp_wait_jfc(&fixture.jfce.v_jfce, 1, 10, readyJfc));
+    EXPECT_EQ(nullptr, readyJfc[0]);
+    EXPECT_GT(g_waitJfcCallCount, 1);
 }
 
 TEST(UrmaBondTest, PublicEventApisCoverProviderFailureContracts)
