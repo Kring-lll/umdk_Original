@@ -489,12 +489,11 @@ void umq_uninit(void)
     }
 
     umq_trace_remain_output();
+    umq_thread_uninit(g_umq_config);
     umq_perf_uninit();
     umq_trace_uninit();
     framework_uninit();
-
     if (g_umq_config != NULL) {
-        umq_thread_uninit(g_umq_config);
         free(g_umq_config);
         g_umq_config = NULL;
     }
