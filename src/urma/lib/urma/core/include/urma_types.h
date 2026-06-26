@@ -609,7 +609,8 @@ typedef union urma_jfr_flag {
                                    /* (0x2): OI, initiator ordering */
                                    /* (0x3): OL, low layer ordering */
                                    /* (0x4): UNO, unreliable non ordering */
-        uint32_t has_drv_ext  : 1;
+        uint32_t has_drv_ext  : 1; /* 0: no extension data.
+                                      1: extension data is appended after urma_rjetty_t. */
         uint32_t non_blocking : 1;
         uint32_t reserved     : 17;
     } bs;
@@ -777,7 +778,6 @@ typedef struct urma_rjetty {
     urma_target_type_t type;
     urma_import_jetty_flag_t flag;
     urma_tp_type_t tp_type;
-    urma_ext_t ext;
 } urma_rjetty_t;
 
 typedef struct urma_target_jetty {
@@ -932,7 +932,9 @@ typedef union urma_seg_attr {
                                        1: segment with user iova addr. */
         uint32_t user_token_id : 1; /* 0: token_id is allocated and should be freed by urma.
                                        1: token_id is allocated by user in urma_seg_cfg. */
-        uint32_t reserved      : 18;
+        uint32_t has_drv_ext   : 1; /* 0: no extension data.
+                                       1: extension data appended after urma_seg_t. */
+        uint32_t reserved      : 17;
     } bs;
     uint32_t value;
 } urma_seg_attr_t;
@@ -984,7 +986,6 @@ typedef struct urma_seg {
     uint64_t len;         /* [Public] length of segment. */
     urma_seg_attr_t attr; /* [Public] include: access flag, token policy, cacheability. */
     uint32_t token_id;    /* [Private] match token */
-    urma_ext_t ext;
 } urma_seg_t;
 
 typedef struct urma_target_seg {
