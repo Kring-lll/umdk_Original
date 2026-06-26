@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/epoll.h>
+#include <time.h>
 
 #include "ub_util.h"
 #include "ubagg_ioctl.h"
@@ -30,6 +31,9 @@
 #include "bondp_api.h"
 #include "bondp_health_check.h"
 #include "ub_get_clock.h"
+
+#define BONDP_NS_PER_MS 1000000ULL
+#define BONDP_EMPTY_JFC_BACKOFF_NS 100000L
 
 typedef struct bondp_create_vjetty_udata {
     urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
@@ -2613,56 +2617,144 @@ urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
     return success_once ? URMA_SUCCESS : URMA_FAIL;
 }
 
+static int bondp_get_monotonic_ms(uint64_t *now_ms)
+{
+    struct timespec ts;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        return -1;
+    }
+    *now_ms = (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / BONDP_NS_PER_MS;
+    return 0;
+}
+
+static int bondp_get_wait_timeout(uint64_t deadline_ms)
+{
+    uint64_t now_ms = 0;
+    if (bondp_get_monotonic_ms(&now_ms) != 0) {
+        return 0;
+    }
+    if (now_ms >= deadline_ms) {
+        return 0;
+    }
+    return (int)(deadline_ms - now_ms);
+}
+
+static void bondp_backoff_empty_jfc_event(void)
+{
+    struct timespec req = {
+        .tv_sec = 0,
+        .tv_nsec = BONDP_EMPTY_JFC_BACKOFF_NS,
+    };
+
+    (void)nanosleep(&req, NULL);
+}
+
+static void bondp_record_jfc_event_source(urma_jfc_t *v_jfc, int dev_idx)
+{
+    if (v_jfc == NULL || dev_idx < 0 || dev_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return;
+    }
+
+    bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(v_jfc, bondp_jfc_t, v_jfc);
+    bdp_jfc->polled_mask |= (1U << (uint32_t)dev_idx);
+}
+
 int bondp_wait_jfc(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t *jfc[])
 {
     bondp_jfce_t *bdp_jfce = CONTAINER_OF_FIELD(jfce, bondp_jfce_t, v_jfce);
 
     PERF_PROFILING_START(BOND_WAIT_JFC);
     struct epoll_event events[BOND_EPOLL_NUM] = {0};
-    int epoll_event_limit = jfc_cnt < BOND_EPOLL_NUM ? jfc_cnt : BOND_EPOLL_NUM;
-    int num = epoll_wait(bdp_jfce->v_jfce.fd, events, epoll_event_limit, time_out);
-    if (num < 0 || num > epoll_event_limit) {
-        URMA_LOG_ERR("Epoll wait err, ret=%d.\n", num);
-        PERF_PROFILING_END(BOND_WAIT_JFC);
-        return -1;
-    } else if (num == 0) {
+    int epoll_event_limit = bdp_jfce->dev_num < BOND_EPOLL_NUM ? bdp_jfce->dev_num : BOND_EPOLL_NUM;
+    uint64_t deadline_ms = 0;
+    int wait_timeout = time_out;
+
+    if (jfc_cnt == 0) {
         PERF_PROFILING_END(BOND_WAIT_JFC);
         return 0;
     }
+    if (epoll_event_limit <= 0) {
+        epoll_event_limit = jfc_cnt < BOND_EPOLL_NUM ? jfc_cnt : BOND_EPOLL_NUM;
+    }
+    if (time_out > 0) {
+        if (bondp_get_monotonic_ms(&deadline_ms) != 0) {
+            URMA_LOG_ERR("Failed to get monotonic time.\n");
+            PERF_PROFILING_END(BOND_WAIT_JFC);
+            return -1;
+        }
+        deadline_ms += (uint64_t)time_out;
+    }
 
-    int actual_num = 0;
-    for (int i = 0; i < num; i++) {
-        int fd = events[i].data.fd;
-        urma_jfce_t *p_jfce = NULL;
-        for (int j = 0; j < bdp_jfce->dev_num; j++) {
-            if (bdp_jfce->p_jfce[j] != NULL && bdp_jfce->p_jfce[j]->fd == fd) {
-                p_jfce = bdp_jfce->p_jfce[j];
+    do {
+        int num = epoll_wait(bdp_jfce->v_jfce.fd, events, epoll_event_limit, wait_timeout);
+        if (num < 0 || num > epoll_event_limit) {
+            URMA_LOG_ERR("Epoll wait err, ret=%d.\n", num);
+            PERF_PROFILING_END(BOND_WAIT_JFC);
+            return -1;
+        } else if (num == 0) {
+            PERF_PROFILING_END(BOND_WAIT_JFC);
+            return 0;
+        }
+
+        int actual_num = 0;
+        for (int i = 0; i < num; i++) {
+            if ((uint32_t)actual_num >= jfc_cnt) {
+                break;
+            }
+            int fd = events[i].data.fd;
+            urma_jfce_t *p_jfce = NULL;
+            int p_jfce_idx = -1;
+            for (int j = 0; j < bdp_jfce->dev_num; j++) {
+                if (bdp_jfce->p_jfce[j] != NULL && bdp_jfce->p_jfce[j]->fd == fd) {
+                    p_jfce = bdp_jfce->p_jfce[j];
+                    p_jfce_idx = j;
+                    break;
+                }
+            }
+            if (p_jfce == NULL) {
+                URMA_LOG_WARN("Failed to find fd=%d from p_jfce array.\n", fd);
+                continue;
+            }
+
+            urma_jfc_t *p_jfc = NULL;
+            int p_num = urma_wait_jfc(p_jfce, 1, 0, &p_jfc);
+            if (p_num <= 0) {
+                continue;
+            }
+
+            uint32_t nevents = 1;
+            urma_ack_jfc(&p_jfc, &nevents, 1);
+
+            urma_jfc_t *v_jfc = (urma_jfc_t *)p_jfc->jfc_cfg.user_ctx;
+            if (v_jfc == NULL) {
+                URMA_LOG_WARN("v_jfc is NULL, pjfc_id=%u.\n", p_jfc->jfc_id.id);
+                continue;
+            }
+            bondp_record_jfc_event_source(v_jfc, p_jfce_idx);
+            jfc[actual_num++] = v_jfc;
+        }
+        if (actual_num > 0 || time_out == 0) {
+            PERF_PROFILING_END(BOND_WAIT_JFC);
+            return actual_num;
+        }
+
+        if (time_out > 0) {
+            wait_timeout = bondp_get_wait_timeout(deadline_ms);
+            if (wait_timeout == 0) {
                 break;
             }
         }
-        if (p_jfce == NULL) {
-            URMA_LOG_WARN("Failed to find fd=%d from p_jfce array.\n", fd);
+        bondp_backoff_empty_jfc_event();
+        if (time_out < 0) {
+            wait_timeout = time_out;
             continue;
         }
+        wait_timeout = bondp_get_wait_timeout(deadline_ms);
+    } while (wait_timeout != 0);
 
-        urma_jfc_t *p_jfc = NULL;
-        int p_num = urma_wait_jfc(p_jfce, 1, 0, &p_jfc);
-        if (p_num <= 0) {
-            continue;
-        }
-
-        uint32_t nevents = 1;
-        urma_ack_jfc(&p_jfc, &nevents, 1);
-
-        urma_jfc_t *v_jfc = (urma_jfc_t *)p_jfc->jfc_cfg.user_ctx;
-        if (v_jfc == NULL) {
-            URMA_LOG_WARN("v_jfc is NULL, pjfc_id=%u.\n", p_jfc->jfc_id.id);
-            continue;
-        }
-        jfc[actual_num++] = v_jfc;
-    }
     PERF_PROFILING_END(BOND_WAIT_JFC);
-    return actual_num;
+    return 0;
 }
 
 void bondp_ack_jfc(urma_jfc_t *jfc[], uint32_t nevents[], uint32_t jfc_cnt)
