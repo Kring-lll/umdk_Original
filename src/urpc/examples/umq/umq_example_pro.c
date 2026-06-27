@@ -35,12 +35,14 @@ int run_umq_example_pro_server(struct urpc_example_config *cfg)
         goto DISCONNECT;
     }
 
+    recv_size = sizeof(umq_eid_t);
     ret = server_exchange_data((uint8_t *)&cfg->src_eid, sizeof(umq_eid_t), (uint8_t *)&cfg->dst_eid, &recv_size);
     if (ret != 0 || recv_size != sizeof(umq_eid_t)) {
         LOG_PRINT_ERR("server exchange eid failed\n");
         goto DISCONNECT;
     }
 
+    recv_size = sizeof(umq_port_id_t);
     ret = server_exchange_data((uint8_t *)&cfg->src_port_id, sizeof(umq_port_id_t), (uint8_t *)&cfg->src_port_id,
                                &recv_size);
     if (ret != 0 || recv_size != sizeof(umq_port_id_t)) {

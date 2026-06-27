@@ -23,7 +23,7 @@ extern "C" {
 #define PORT_MAX                  65535
 #define DEFAULT_PORT              19875
 #define TIME_SIZE                 35
-#define UMQ_MAX_BIND_INFO_SIZE    512
+#define UMQ_MAX_BIND_INFO_SIZE    8192
 #define EXAMPLE_MAX_DEV_NUM       10
 #define EXAMPLE_DEV_NAME_LEN      15
 #define EXAMPLE_SLEEP_TIME_US     100

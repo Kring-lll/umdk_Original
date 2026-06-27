@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <getopt.h>
 
+#include "umq_dfx_api.h"
 #include "umq_example_common.h"
 
 static const uint32_t EXAMPLE_MAX_POLL_BATCH = 64;
