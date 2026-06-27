@@ -39,28 +39,46 @@ aclnnStatus aclnnFusedDeepMoeGetWorkspaceSize(
     const aclTensor *expertSmoothScalesOptional,
     const aclTensor *shareSmoothScalesOptional,
     const aclTensor *xActiveMaskOptional,
+    const aclTensorList *gmm1BiasOptional,
+    const aclTensorList *gmm2BiasOptional,
+    const aclTensor *shareGmm1BiasOptional,
+    const aclTensor *shareGmm2BiasOptional,
     char *groupEp,
     int64_t epRankSize,
     int64_t epRankId,
     int64_t moeExpertNum,
     int64_t quantMode,
     int64_t globalBs,
-    int64_t extInfo,
-    int64_t shmemWorkspace,
+    // int64_t extInfo,
+    // int64_t shmemWorkspace,
     const aclTensor *output,
     const aclTensor *shareOutput,
     const aclTensor *expertTokenNums,
     uint64_t *workspaceSize,
     aclOpExecutor **executor)
 {
+#if 1
     return aclnnInnerFusedDeepMoeGetWorkspaceSize(x, expertIds, gmm1Weight, gmm1WeightScale,
         gmm2Weight, gmm2WeightScale, expertScales,
         shareGmm1WeightOptional, shareGmm1WeightScaleOptional,
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional,
         expertSmoothScalesOptional, shareSmoothScalesOptional, xActiveMaskOptional,
+        gmm1BiasOptional, gmm2BiasOptional,
+        shareGmm1BiasOptional, shareGmm2BiasOptional,
         groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs,
-        extInfo, shmemWorkspace,
         output, shareOutput, expertTokenNums, workspaceSize, executor);
+#else
+    return aclnnInnerFusedDeepMoeGetWorkspaceSize(x, expertIds, gmm1Weight, gmm1WeightScale,
+        gmm2Weight, gmm2WeightScale, expertScales,
+        shareGmm1WeightOptional, shareGmm1WeightScaleOptional,
+        shareGmm2WeightOptional, shareGmm2WeightScaleOptional,
+        expertSmoothScalesOptional, shareSmoothScalesOptional, xActiveMaskOptional,
+        gmm1BiasOptional, gmm2BiasOptional,
+        shareGmm1BiasOptional, shareGmm2BiasOptional,
+        groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs,
+        // extInfo, shmemWorkspace,
+        output, shareOutput, expertTokenNums, workspaceSize, executor);
+#endif
 }
 
 aclnnStatus aclnnFusedDeepMoe(
