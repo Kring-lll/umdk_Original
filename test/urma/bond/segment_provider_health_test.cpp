@@ -1041,7 +1041,6 @@ TEST(UrmaBondTest, HealthCheckPublicApisHonorDisabledContract)
     bondp_global_context_t fakeGlobal = {};
     urma_bond_seg_info_out_t segOut = {};
     urma_bond_id_info_out_t idOut = {};
-    urma_rjetty_t rjetty = {};
     urma_cr_t cr = {};
     bool enabled = true;
 
@@ -1065,7 +1064,7 @@ TEST(UrmaBondTest, HealthCheckPublicApisHonorDisabledContract)
     EXPECT_FALSE(enabled);
 
     idOut.is_health_check_enable = true;
-    EXPECT_EQ(0, bondp_import_health_check_tseg(&fixture.ctx, &fixture.targetJetty, &idOut, &rjetty));
+    EXPECT_EQ(0, bondp_import_health_check_tseg(&fixture.ctx, &fixture.targetJetty, &idOut));
     EXPECT_EQ(URMA_SUCCESS, bondp_unimport_health_check_tseg(&fixture.targetJetty));
     EXPECT_EQ(0, bondp_register_health_check_task(&fixture.ctx, &fixture.targetJetty, &fixture.jetty));
 
@@ -1087,14 +1086,11 @@ TEST(UrmaBondTest, HealthCheckImportTsegUsesMockProviderRoutes)
 {
     BondPublicApiFixture fixture;
     bondp_global_context_t fakeGlobal = {};
-    bondp_rjetty_t rjetty = {};
     urma_bond_id_info_out_t idOut = {};
     urma_target_jetty_t physicalTarget = {};
 
     fixture.InitSinglePhysicalMember();
     fixture.jetty.v_jetty.urma_ctx = &fixture.ctx.v_ctx;
-    rjetty.base.flag.bs.has_user_info = 1;
-    rjetty.jetty = &fixture.jetty.v_jetty;
     physicalTarget.urma_ctx = &fixture.phyCtx;
     fixture.targetJetty.active_count = 1;
     fixture.targetJetty.local_active_indices[0] = 0;
@@ -1111,18 +1107,18 @@ TEST(UrmaBondTest, HealthCheckImportTsegUsesMockProviderRoutes)
     bondp_health_check_global_ctx_init(&fakeGlobal);
     fakeGlobal.health_thread_ctx.enable_health_check = true;
 
-    EXPECT_EQ(0, bondp_import_health_check_tseg(&fixture.ctx, &fixture.targetJetty, &idOut, &rjetty.base));
+    EXPECT_EQ(0, bondp_import_health_check_tseg(&fixture.ctx, &fixture.targetJetty, &idOut));
     ASSERT_NE(nullptr, fixture.targetJetty.p_check_tseg[0][0]);
     EXPECT_EQ(1, urma_test::GetHwMockState().importSegCount);
     EXPECT_EQ(idOut.health_check_seg.slaves[0].token_id, fixture.targetJetty.p_check_tseg[0][0]->seg.token_id);
 
-    EXPECT_EQ(0, bondp_import_health_check_tseg(&fixture.ctx, &fixture.targetJetty, &idOut, &rjetty.base));
+    EXPECT_EQ(0, bondp_import_health_check_tseg(&fixture.ctx, &fixture.targetJetty, &idOut));
     EXPECT_EQ(1, urma_test::GetHwMockState().importSegCount);
     EXPECT_EQ(URMA_SUCCESS, bondp_unimport_health_check_tseg(&fixture.targetJetty));
     EXPECT_EQ(nullptr, fixture.targetJetty.p_check_tseg[0][0]);
 
     urma_test::SetHwMockStatus(URMA_FAIL);
-    EXPECT_EQ(-1, bondp_import_health_check_tseg(&fixture.ctx, &fixture.targetJetty, &idOut, &rjetty.base));
+    EXPECT_EQ(-1, bondp_import_health_check_tseg(&fixture.ctx, &fixture.targetJetty, &idOut));
     EXPECT_EQ(2, urma_test::GetHwMockState().importSegCount);
     EXPECT_EQ(nullptr, fixture.targetJetty.p_check_tseg[0][0]);
 

@@ -2204,7 +2204,6 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
 urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjetty, urma_token_t *token_value)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
-    // disable cfg jetty
     bondp_comp_t *cfg_jetty = NULL;
     bondp_target_jetty_t *bdp_tjetty = calloc(1, sizeof(bondp_target_jetty_t));
     if (bdp_tjetty == NULL) {
@@ -2219,12 +2218,6 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
 
     urma_bond_id_info_out_t rvjetty_info = {0};
-    if (rjetty != NULL && bondp_rjetty_has_user_info(rjetty)) {
-        const bondp_rjetty_t *bdp_rjetty = (const bondp_rjetty_t *)rjetty;
-        if (bdp_rjetty->jetty != NULL) {
-            cfg_jetty = CONTAINER_OF_FIELD(bdp_rjetty->jetty, bondp_comp_t, v_jetty);
-        }
-    }
     if (rjetty != NULL && bondp_rjetty_has_user_info(rjetty)) {
         bdp_tjetty->skip_import_vjetty = true;
         if (bondp_fill_bond_id_info_from_rjetty_ext(rjetty, &rvjetty_info) != 0) {
@@ -2264,7 +2257,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         goto UNIMPORT_PJETTY;
     }
 
-    if (bondp_import_health_check_tseg(bdp_ctx, bdp_tjetty, &rvjetty_info, rjetty) != 0) {
+    if (bondp_import_health_check_tseg(bdp_ctx, bdp_tjetty, &rvjetty_info) != 0) {
         URMA_LOG_ERR("Failed to import health check seg for jetty\n");
         goto UNIMPORT_TSEG;
     }
