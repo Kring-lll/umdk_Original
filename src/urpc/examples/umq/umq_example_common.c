@@ -65,6 +65,12 @@ static struct option g_long_options[] = {
     {NULL,                 0,                 NULL,  0 }
 };
 
+static void umq_io_perf_callback(umq_perf_record_type_t record_type, umq_buf_t *qbuf)
+{
+    umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)qbuf->qbuf_ext;
+    printf("io perf callback: type=%d, qbuf_imm=%d\n", record_type, buf_pro->imm.user_data);
+}
+
 int example_init_umq(struct urpc_example_config *cfg)
 {
     umq_init_cfg_t *init_cfg = (umq_init_cfg_t *)calloc(1, sizeof(*init_cfg));
@@ -88,6 +94,8 @@ int example_init_umq(struct urpc_example_config *cfg)
         free(init_cfg);
         return -1;
     }
+
+    umq_io_perf_callback_register(umq_io_perf_callback);
 
     free(init_cfg);
     return 0;
