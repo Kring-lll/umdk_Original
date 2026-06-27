@@ -119,7 +119,10 @@ static inline void *urpc_mpmc_buf(urpc_mpmc_ring_t *r)
 
 static inline void urpc_mpmc_wait_tail(volatile uint64_t *tail, uint64_t head)
 {
-    while (__atomic_load_n(tail, __ATOMIC_ACQUIRE) != head)
+    /* Wait for all preceding threads to complete.  < is safer than !=
+     * because tail advances monotonically: once tail >= head, everyone
+     * before us has published. */
+    while (__atomic_load_n(tail, __ATOMIC_ACQUIRE) < head)
         URPC_MPMC_PAUSE();
 }
 
