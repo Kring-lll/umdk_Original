@@ -1610,7 +1610,7 @@ int umq_ub_wait_interrupt_impl(uint64_t wait_umqh_tp, int time_out, umq_interrup
     }
 
     /* record start before URMA calls so sub_time can be captured */
-    umq_trace_start_record(UMQ_TRACE_TYPE_WAIT, wait_start);
+    umq_trace_start_record(UMQ_TRACE_TYPE_WAIT, wait_start, option->timestamp);
     umq_trace_item_record(0, 0, queue->umq_id);
 
     int cnt = 0;
@@ -1821,7 +1821,7 @@ int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicited, umq_interrupt_option_t *
     }
 
     /* record start */
-    umq_trace_start_record(UMQ_TRACE_TYPE_REARM, rearm_start);
+    umq_trace_start_record(UMQ_TRACE_TYPE_REARM, rearm_start, option->timestamp);
     umq_trace_item_record(0, 0, queue->umq_id);
 
     urma_status_t status = URMA_SUCCESS;

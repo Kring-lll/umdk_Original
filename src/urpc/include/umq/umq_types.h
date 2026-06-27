@@ -156,6 +156,7 @@ typedef struct umq_interrupt_option {
     umq_io_direction_t direction;
     umq_fd_type_t fd_type;
     uint32_t tp_handle_idx;
+    uint64_t timestamp;
 } umq_interrupt_option_t;
 
 typedef union umq_eid {
