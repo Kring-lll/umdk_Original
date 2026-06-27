@@ -91,6 +91,18 @@ static void bondp_uninit_wr_buf(wr_buf_t *wr_buf)
     wr_buf_uninit(wr_buf);
 }
 
+static void bondp_ref_put_no_underflow(urma_ref_t *ref, const char *name)
+{
+    unsigned long cnt = atomic_load(&ref->atomic_cnt);
+
+    while (cnt != 0) {
+        if (atomic_compare_exchange_weak(&ref->atomic_cnt, &cnt, cnt - 1)) {
+            return;
+        }
+    }
+    URMA_LOG_ERR("Skip put %s ref, use_cnt is already 0.\n", name);
+}
+
 typedef bondp_create_vjetty_udata_t bondp_create_vjfr_udata_t;
 
 #define BOND_EPOLL_NUM (32)
@@ -426,7 +438,7 @@ urma_status_t bondp_delete_jfc(urma_jfc_t *jfc)
     free(bdp_jfc);
 
     if (bdp_jfce != NULL) {
-        atomic_fetch_sub(&bdp_jfce->use_cnt.atomic_cnt, 1);
+        bondp_ref_put_no_underflow(&bdp_jfce->use_cnt, "jfce");
     }
     URMA_LOG_INFO("Deleted jfc, jfc_id=%u, ret=%d\n", jfc_id, ret);
     return ret;
@@ -839,7 +851,7 @@ urma_status_t bondp_delete_jfs(urma_jfs_t *jfs)
     (void)pthread_spin_destroy(&bdp_jfs->send_lock);
     free(bdp_jfs);
 
-    atomic_fetch_sub(&bdp_jfc->use_cnt.atomic_cnt, 1);
+    bondp_ref_put_no_underflow(&bdp_jfc->use_cnt, "jfc");
     URMA_LOG_INFO("Deleted jfs, jfs_id=%u, ret=%d\n", jfs_id, ret);
     return ret;
 }
@@ -1108,7 +1120,7 @@ urma_status_t bondp_delete_jfr(urma_jfr_t *jfr)
     }
     free(bdp_jfr);
 
-    atomic_fetch_sub(&bdp_jfc->use_cnt.atomic_cnt, 1);
+    bondp_ref_put_no_underflow(&bdp_jfc->use_cnt, "jfc");
     URMA_LOG_INFO("Deleted jfr, jfr_id=%u, ret=%d\n", jfr_id, ret);
     return ret;
 }
@@ -1432,8 +1444,8 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     /* Validate bdp_jfr below at the function entry point to ensure they are not empty. */
     bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr, bondp_comp_t, v_jfr);
     atomic_fetch_add(&bdp_jfr->use_cnt.atomic_cnt, 1);
-    if (jetty_cfg->shared.jfc != NULL) {
-        bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfc, bondp_jfc_t, v_jfc);
+    if (bdp_jetty->v_jetty.jetty_cfg.shared.jfc != NULL) {
+        bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(bdp_jetty->v_jetty.jetty_cfg.shared.jfc, bondp_jfc_t, v_jfc);
         atomic_fetch_add(&bdp_jfc->use_cnt.atomic_cnt, 1);
     }
 
@@ -1505,9 +1517,9 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
     (void)pthread_spin_destroy(&bdp_jetty->send_lock);
     free(bdp_jetty);
 
-    atomic_fetch_sub(&bdp_jfr->use_cnt.atomic_cnt, 1);
+    bondp_ref_put_no_underflow(&bdp_jfr->use_cnt, "jfr");
     if (bdp_jfc != NULL) {
-        atomic_fetch_sub(&bdp_jfc->use_cnt.atomic_cnt, 1);
+        bondp_ref_put_no_underflow(&bdp_jfc->use_cnt, "jfc");
     }
 
     return ret;
