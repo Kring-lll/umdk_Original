@@ -300,6 +300,7 @@ public:
                 auto outputOffset = inputOffset;
                 // int8 -> int4
                // High 4-bit processing start
+                AscendC::PipeBarrier<PIPE_ALL>();
                 AscendC::Muls(ubQuantF16[inputOffset], ubQuantF16[inputOffset], ONE_SIXTEENTH, tileColumn);
                 AscendC::PipeBarrier<PIPE_V>();
                 AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);  // Event ID needs adjustment
