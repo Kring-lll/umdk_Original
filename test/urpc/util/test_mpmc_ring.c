@@ -246,15 +246,20 @@ static void test_multithreaded(void)
 
 int main(void)
 {
-    printf("MPMC Ring test (pure C)\n");
-    RUN_TEST(init_capacity);
-    RUN_TEST(single_enqueue_dequeue);
-    RUN_TEST(fill_and_drain);
-    RUN_TEST(empty_dequeue);
-    RUN_TEST(blocking_enqueue);
-    RUN_TEST(mixed_enqueue_dequeue);
-    RUN_TEST(reset);
-    RUN_TEST(multithreaded);
-    printf("\n%d failures\n", g_failures);
+    
+    for (uint32_t i = 0; i < 10000; i++) {
+        printf("MPMC Ring test (pure C) test cnt%u\n", i);
+        RUN_TEST(init_capacity);
+        RUN_TEST(single_enqueue_dequeue);
+        RUN_TEST(fill_and_drain);
+        RUN_TEST(empty_dequeue);
+        RUN_TEST(blocking_enqueue);
+        RUN_TEST(mixed_enqueue_dequeue);
+        RUN_TEST(reset);
+        RUN_TEST(multithreaded);
+        printf("\n%d failures\n", g_failures);
+    }
+    
+    
     return g_failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }
