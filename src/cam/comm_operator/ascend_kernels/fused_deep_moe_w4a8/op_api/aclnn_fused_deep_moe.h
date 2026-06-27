@@ -4,11 +4,11 @@
  * Description: add fused deep moe w4a8 interface header file.
  * Create: 2026-06-27
  * Note:
- * History: 2026-06-27 add fused deep moe w4a8 interface header file.
+ * History: 2026-06-27 add fused deep moe w4a8 interface cpp file.
  */
 
-#ifndef FUSED_DEEP_MOE_W4A8
-#define FUSED_DEEP_MOE_W4A8
+#ifndef FUSED_DEEP_MOE
+#define FUSED_DEEP_MOE
 
 #include "aclnn/acl_meta.h"
 
@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-__attribute__((visibility("default"))) aclnnStatus aclnnFusedDeepMoeW4a8GetWorkspaceSize(
+__attribute__((visibility("default"))) aclnnStatus aclnnFusedDeepMoeGetWorkspaceSize(
     const aclTensor *x,
     const aclTensor *expertIds,
     const aclTensorList *gmm1Weight,
@@ -47,7 +47,7 @@ __attribute__((visibility("default"))) aclnnStatus aclnnFusedDeepMoeW4a8GetWorks
     uint64_t *workspaceSize,
     aclOpExecutor **executor);
 
-__attribute__((visibility("default"))) aclnnStatus aclnnFusedDeepMoeW4a8(
+__attribute__((visibility("default"))) aclnnStatus aclnnFusedDeepMoe(
     void *workspace,
     uint64_t workspaceSize,
     aclOpExecutor *executor,
