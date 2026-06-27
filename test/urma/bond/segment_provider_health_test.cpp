@@ -556,6 +556,7 @@ TEST(UrmaBondTest, PublicImportSegmentUsesPhysicalProviderMocks)
 
     target = bondp_import_seg(&fixture.ctx.v_ctx, remote, &token, 0x300000, flag);
     ASSERT_NE(nullptr, target);
+    EXPECT_EQ(nullptr, target->token_id);
     EXPECT_EQ(&fixture.ctx.v_ctx, target->urma_ctx);
     EXPECT_EQ(0x300000U, target->mva);
     bondp_tseg_get(target);
@@ -564,6 +565,7 @@ TEST(UrmaBondTest, PublicImportSegmentUsesPhysicalProviderMocks)
 
     target = bondp_import_seg(&fixture.ctx.v_ctx, remote, &token, 0x300000, flag);
     ASSERT_NE(nullptr, target);
+    EXPECT_EQ(nullptr, target->token_id);
     EXPECT_EQ(URMA_SUCCESS, bondp_unimport_seg(target));
 
     urma_test::SetHwMockStatus(URMA_FAIL);

@@ -334,6 +334,7 @@ static void bondp_fill_v_tseg(urma_target_seg_t *tseg, urma_seg_t *seg, uint64_t
     tseg->mva = addr;
     tseg->handle = handle;
     tseg->urma_ctx = ctx;
+    tseg->token_id = NULL;
 }
 
 static int bondp_import_vseg(urma_context_t *ctx, urma_seg_t *seg,
