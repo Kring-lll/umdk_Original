@@ -305,6 +305,8 @@ static ALWAYS_INLINE void flow_control_stats_query_non_atomic(struct ub_flow_con
     packet_stats->send_eagain_cnt = fc->packet_stats[UB_PACKET_STATS_TYPE_SEND_EAGAIN];
     packet_stats->send_error_cnt = fc->packet_stats[UB_PACKET_STATS_TYPE_SEND_ERROR];
     packet_stats->recv_error_cnt = fc->packet_stats[UB_PACKET_STATS_TYPE_RECV_ERROR];
+    packet_stats->recv_duplicate_req_cnt = fc->packet_stats[UB_PACKET_STATS_TYPE_RECV_DUPLICATE_REQ];
+    packet_stats->recv_duplicate_rsp_cnt = fc->packet_stats[UB_PACKET_STATS_TYPE_RECV_DUPLICATE_RSP];
 }
 
 static ALWAYS_INLINE void flow_control_packet_stats_non_atomic(
@@ -446,6 +448,10 @@ static ALWAYS_INLINE void flow_control_stats_query_atomic(struct ub_flow_control
         __atomic_load_n(&fc->packet_stats[UB_PACKET_STATS_TYPE_SEND_ERROR], __ATOMIC_RELAXED);
     packet_stats->recv_error_cnt =
         __atomic_load_n(&fc->packet_stats[UB_PACKET_STATS_TYPE_RECV_ERROR], __ATOMIC_RELAXED);
+    packet_stats->recv_duplicate_req_cnt =
+        __atomic_load_n(&fc->packet_stats[UB_PACKET_STATS_TYPE_RECV_DUPLICATE_REQ], __ATOMIC_RELAXED);
+    packet_stats->recv_duplicate_rsp_cnt =
+        __atomic_load_n(&fc->packet_stats[UB_PACKET_STATS_TYPE_RECV_DUPLICATE_RSP], __ATOMIC_RELAXED);
 }
 
 static ALWAYS_INLINE void flow_control_packet_stats_atomic(
@@ -944,7 +950,10 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
         .tjetty = tjetty,
         .opcode = URMA_OPC_SEND_IMM};
     urma_jfs_wr_t *bad_wr = NULL;
+    uint64_t tp_start = umq_trace_timestamp_get();
     urma_status_t status = umq_symbol_urma()->urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
+    uint64_t delta_ns = umq_trace_write_delta(tp_start);
+    umq_trace_sub_record(UMQ_TRACE_TYPE_POLL, UMQ_URMA_FUNC_FC_POST_TX, tp_start, delta_ns);
     if (status == URMA_SUCCESS) {
         umq_ub_post_release_jetty_node(queue, 0);
         umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND);

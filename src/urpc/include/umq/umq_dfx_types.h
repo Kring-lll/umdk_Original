@@ -19,7 +19,11 @@ extern "C" {
 #endif
 
 #define UMQ_STATS_QBUF_POOL_TYPE_MAX (16u)
-#define UMQ_PERF_QUANTILE_MAX_NUM (8u)
+#define UMQ_PERF_QUANTILE_CNT (4u)
+#define UMQ_PERF_QUANTILE_P50   (0u)
+#define UMQ_PERF_QUANTILE_P90   (1u)
+#define UMQ_PERF_QUANTILE_P99   (2u)
+#define UMQ_PERF_QUANTILE_P9999 (3u)
 #define UMQ_PERF_REC_MAX_NUM (64u)
 #define UMQ_DFX_TO_STRING_DEFAULT_LEN (20480)
 #define UMQ_LOCAL_QBUF_POOL_MAX_NUM (64)
@@ -31,6 +35,8 @@ typedef struct umq_packet_stats {
     uint64_t send_eagain_cnt;       // number of packets failed to send due to flowcontrol eagain
     uint64_t send_error_cnt;        // number of packets failed to send
     uint64_t recv_error_cnt;        // number of packets failed to receive
+    uint64_t recv_duplicate_req_cnt;      // number of duplicate flow control request packets received
+    uint64_t recv_duplicate_rsp_cnt;      // number of duplicate flow control response packets received
 } umq_packet_stats_t;
 
 typedef struct umq_credit_pool_stats {
@@ -85,7 +91,18 @@ typedef struct umq_expansion_pool_stats {
     uint64_t total_shrink_count;            // cumulative number of contractions
 } umq_expansion_pool_stats_t;
 
+typedef enum umq_qbuf_pool_type {
+    UMQ_QBUF_POOL_TYPE_SMALL,
+    UMQ_QBUF_POOL_TYPE_MEDIUM,
+    UMQ_QBUF_POOL_TYPE_BIG,
+    UMQ_QBUF_POOL_TYPE_HUGE,
+    UMQ_QBUF_POOL_TYPE_GIGANTIC,
+    UMQ_QBUF_POOL_TYPE_TINY,
+    UMQ_QBUF_POOL_TYPE_MAX,
+} umq_qbuf_pool_type_t;
+
 typedef struct umq_local_qbuf_pool_stats {
+    umq_qbuf_pool_type_t type;                 // qbuf pool type
     uint64_t tid;                              // thread ID
     uint64_t capacity_with_data;               // capacity of with-data buffer in the local memory pool
     uint64_t buf_cnt_with_data;                // number of with-data buffer in the local memory pool
@@ -106,6 +123,7 @@ typedef struct umq_local_qbuf_pool_stats {
 } umq_local_qbuf_pool_stats_t;
 
 typedef struct umq_qbuf_pool_info {
+    umq_qbuf_pool_type_t type;                 // qbuf pool type
     umq_buf_mode_t mode;                      // split or combine
     uint64_t total_size;                      // qbuf pool total size
     uint64_t total_block_num;                 // total number of blocks
@@ -285,11 +303,14 @@ typedef enum umq_urma_func_type {
     UMQ_URMA_FUNC_POST_RX,                  /* urma_post_jetty_recv_wr/urma_post_jfr_wr */
     UMQ_URMA_FUNC_POLL_TX,                  /* urma_poll_jfc (tx) */
     UMQ_URMA_FUNC_POLL_RX,                  /* urma_poll_jfc (rx) */
-    UMQ_URMA_FUNC_WAIT_JFC,                 /* urma_wait_jfc */
-    UMQ_URMA_FUNC_ACK_JFC,                  /* urma_ack_jfc */
+    UMQ_URMA_FUNC_WAIT_TX_JFC,              /* urma_wait_jfc (tx) */
+    UMQ_URMA_FUNC_WAIT_RX_JFC,              /* urma_wait_jfc (rx) */
+    UMQ_URMA_FUNC_ACK_TX_JFC,               /* urma_ack_jfc (tx) */
+    UMQ_URMA_FUNC_ACK_RX_JFC,               /* urma_ack_jfc (rx) */
     UMQ_URMA_FUNC_REARM_JFC,                /* urma_rearm_jfc */
     UMQ_URMA_FUNC_FC_REARM_JFC,             /* urma_rearm_jfc (fc) */
     UMQ_URMA_FUNC_FC_POST_TX,               /* urma_post_jetty_send_wr (fc) */
+    UMQ_URMA_FUNC_FC_POLL_TX,               /* urma_poll_jfc (fc tx) */
     UMQ_URMA_FUNC_FC_POST_RX,               /* urma_post_jetty_recv_wr/urma_post_jfr_wr (fc) */
     UMQ_URMA_FUNC_FC_POLL_RX,               /* urma_poll_jfc (fc rx) */
     UMQ_URMA_FUNC_MAX,
@@ -317,6 +338,7 @@ typedef struct umq_data_record {
     umq_trace_item_t items[UMQ_BATCH_SIZE]; /* per-buffer/per-completion data */
     uint32_t item_cnt;                      /* number of valid items[] entries */
     uint64_t timestamp;                     /* record creation timestamp (ns) */
+    uint64_t interrupt_timestamp;           /* interrupt record timestamp (ns) */
 
     /* timing */
     uint64_t start_time;                    /* UMQ operation start (ns) */
@@ -337,15 +359,11 @@ typedef struct umq_perf_stats {
         uint64_t average; // average latency
         uint64_t mininum; // min latency
         uint64_t maxinum; // max latency
-        uint64_t median; // median latency
-        uint64_t p90; // 90th percentile
-        uint64_t p99; // 99th percentile
+        uint64_t quantile[UMQ_PERF_QUANTILE_CNT]; // quantile values in ns (p50/p90/p99/p9999)
     } type_record[UMQ_PERF_RECORD_TYPE_MAX]; // statistical results list for each type of probe point
 } umq_perf_stats_t;
 
 typedef struct umq_perf_stats_cfg {
-    uint64_t thresh_array[UMQ_PERF_QUANTILE_MAX_NUM]; // quantile values list
-    uint32_t thresh_num; // number of valid quantiles
 } umq_perf_stats_cfg_t;
 
 #define UMQ_TRACE_FLAG_RECORD_NUM              (1U)
