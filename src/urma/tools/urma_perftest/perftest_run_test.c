@@ -1795,6 +1795,10 @@ int run_send_lat(perftest_context_t *ctx, perftest_config_t *cfg)
     if (cfg->all == true) {
         for (uint32_t i = 1; i <= cfg->order; i++) {
             cfg->size = (1U << i);
+            if (i > 1 && recreate_jetty_for_lat(ctx, cfg) != 0) {
+                LOG_ERROR("Failed to recreate jetty, size: %u.\n", cfg->size);
+                return -1;
+            }
             if (run_send_lat_once(ctx, cfg) != 0) {
                 LOG_ERROR("Failed to run once, size: %u.\n", cfg->size);
                 return -1;
@@ -3565,6 +3569,10 @@ int run_send_bw(perftest_context_t *ctx, perftest_config_t *cfg)
     if (cfg->all == true) {
         for (uint32_t i = 1; i <= cfg->order; i++) {
             cfg->size = (1U << i);
+            if (i > 1 && recreate_jetty_for_lat(ctx, cfg) != 0) {
+                LOG_ERROR("Failed to recreate jetty, size: %u.\n", cfg->size);
+                return -1;
+            }
             if (run_send_bw_one_size(ctx, cfg) != 0) {
                 return -1;
             }
