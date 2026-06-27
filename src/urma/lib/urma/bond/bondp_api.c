@@ -1237,8 +1237,12 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
 {
     bondp_jfc_t *bdp_jfs_jfc = CONTAINER_OF_FIELD(jetty_cfg->jfs_cfg.jfc, bondp_jfc_t, v_jfc);
     bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr, bondp_comp_t, base);
-    bondp_jfc_t *bdp_rplc_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfc, bondp_jfc_t, v_jfc);
+    bondp_jfc_t *bdp_rplc_jfc = NULL;
     urma_jetty_cfg_t p_cfg = *jetty_cfg;
+
+    if (jetty_cfg->shared.jfc != NULL) {
+        bdp_rplc_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfc, bondp_jfc_t, v_jfc);
+    }
 
     for (uint32_t n = 0; n < bdp_jetty->enabled_count; ++n) {
         uint32_t i = bdp_jetty->enabled_indices[n];
@@ -1429,11 +1433,12 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         goto UNINIT_JETTY_SEND_WR_BUF;
     }
 
-    /* Validate bdp_jfr below at the function entry point to ensure they are not empty. */
-    bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr, bondp_comp_t, v_jfr);
+    urma_jetty_cfg_t *saved_cfg = &bdp_jetty->v_jetty.jetty_cfg;
+    /* Use the saved config because urma_cmd_create_jetty may inherit shared.jfc from shared.jfr. */
+    bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(saved_cfg->shared.jfr, bondp_comp_t, v_jfr);
     atomic_fetch_add(&bdp_jfr->use_cnt.atomic_cnt, 1);
-    if (jetty_cfg->shared.jfc != NULL) {
-        bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfc, bondp_jfc_t, v_jfc);
+    if (saved_cfg->shared.jfc != NULL) {
+        bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(saved_cfg->shared.jfc, bondp_jfc_t, v_jfc);
         atomic_fetch_add(&bdp_jfc->use_cnt.atomic_cnt, 1);
     }
 
