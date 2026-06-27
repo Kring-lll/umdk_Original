@@ -238,7 +238,7 @@ uint64_t umq_trace_write_delta(uint64_t start)
     return get_timestamp_ns() - start;
 }
 
-void umq_trace_start_record(umq_trace_type_t type, uint64_t time)
+void umq_trace_start_record(umq_trace_type_t type, uint64_t time, uint64_t interrupt_timestamp)
 {
     if (!g_umq_trace_enable) {
         return;
@@ -253,6 +253,7 @@ void umq_trace_start_record(umq_trace_type_t type, uint64_t time)
     umq_data_record_t *rec = &cur_rec->data_record[idx];
 
     rec->timestamp = get_timestamp_ns();
+    rec->interrupt_timestamp = interrupt_timestamp;
     rec->type = type;
     rec->start_time = time;
     rec->end_time = 0;
