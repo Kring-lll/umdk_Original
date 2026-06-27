@@ -2204,7 +2204,6 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
 urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjetty, urma_token_t *token_value)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
-    bondp_comp_t *cfg_jetty = NULL;
     bondp_target_jetty_t *bdp_tjetty = calloc(1, sizeof(bondp_target_jetty_t));
     if (bdp_tjetty == NULL) {
         URMA_LOG_ERR("Failed to alloc target jetty\n");
@@ -2259,15 +2258,6 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
 
     if (bondp_import_health_check_tseg(bdp_ctx, bdp_tjetty, &rvjetty_info) != 0) {
         URMA_LOG_ERR("Failed to import health check seg for jetty\n");
-        goto UNIMPORT_TSEG;
-    }
-
-    if (rjetty->trans_mode == URMA_TM_RM && bondp_rjetty_has_user_info(rjetty) && cfg_jetty != NULL) {
-        cfg_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
-    }
-
-    if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty, cfg_jetty) != 0) {
-        URMA_LOG_ERR("Failed to register health check task\n");
         goto UNIMPORT_TSEG;
     }
 
