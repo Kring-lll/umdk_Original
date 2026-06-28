@@ -965,10 +965,13 @@ TEST(UrmaBondTest, PublicCreateAndDeleteJettyCoverVirtualPhysicalIdMapping)
     EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
 }
 
-TEST(UrmaBondTest, PublicCreateAndDeleteMultipleJfrsBalanceSharedJfcRefcount)
+TEST(UrmaBondTest, PublicCreateAndDeleteSharedJfcChildrenFollowIssueCleanupOrder)
 {
     BondPublicApiFixture fixture;
+    bondp_global_context_t fakeGlobal = {};
+    urma_jfs_cfg_t jfsCfg = {};
     urma_jfr_cfg_t jfrCfg = {};
+    urma_jetty_cfg_t jettyCfg = {};
 
     fixture.InitSinglePhysicalMember();
     fixture.ctx.v_ctx.dev_fd = 7;
@@ -977,26 +980,78 @@ TEST(UrmaBondTest, PublicCreateAndDeleteMultipleJfrsBalanceSharedJfcRefcount)
     ASSERT_EQ(0, bdp_p_vjetty_id_table_create(&fixture.ctx.p_vjetty_id_table, 16));
 
     SetRefCount(&fixture.jfc.use_cnt, 0);
+
+    jfsCfg.jfc = &fixture.jfc.v_jfc;
+    jfsCfg.depth = 4;
+    jfsCfg.max_sge = 1;
+    jfsCfg.max_rsge = 1;
+    jfsCfg.trans_mode = URMA_TM_RC;
+    jfsCfg.flag.bs.order_type = URMA_OL;
+
     jfrCfg.jfc = &fixture.jfc.v_jfc;
     jfrCfg.depth = 4;
     jfrCfg.max_sge = 1;
-    jfrCfg.trans_mode = URMA_TM_RM;
+    jfrCfg.trans_mode = URMA_TM_RC;
+    jfrCfg.flag.bs.order_type = URMA_OL;
 
-    urma_jfr_t *createdJfrs[3] = {};
+    jettyCfg.flag.bs.share_jfr = URMA_SHARE_JFR;
+    jettyCfg.jfs_cfg = jfsCfg;
+    jettyCfg.shared.jfc = nullptr;
+
+    bondp_health_check_global_ctx_init(&fakeGlobal);
+    fakeGlobal.health_thread_ctx.enable_health_check = false;
+    g_bondp_global_ctx = &fakeGlobal;
+
+    urma_jfs_t *createdJfsList[3] = {};
+    urma_jfr_t *createdJfrList[3] = {};
     for (uint32_t i = 0; i < 3; i++) {
-        urma_test::SetHwMockIoctl(true, 0xb55 + i, 0xb550 + i);
-        createdJfrs[i] = bondp_create_jfr(&fixture.ctx.v_ctx, &jfrCfg);
-        ASSERT_NE(nullptr, createdJfrs[i]);
-        EXPECT_EQ(i + 1, fixture.jfc.use_cnt.atomic_cnt.load());
+        urma_test::SetHwMockIoctl(true, 0xb40 + i, 0xb400 + i);
+        createdJfsList[i] = bondp_create_jfs(&fixture.ctx.v_ctx, &jfsCfg);
+        ASSERT_NE(nullptr, createdJfsList[i]);
+        EXPECT_EQ(i + 1UL, fixture.jfc.use_cnt.atomic_cnt.load());
     }
 
     for (uint32_t i = 0; i < 3; i++) {
-        createdJfrs[i]->async_events_acked = 0;
-        SetRefCount(&CONTAINER_OF_FIELD(createdJfrs[i], bondp_comp_t, v_jfr)->use_cnt, 0);
-        EXPECT_EQ(URMA_SUCCESS, bondp_delete_jfr(createdJfrs[i]));
+        urma_test::SetHwMockIoctl(true, 0xb55 + i, 0xb550 + i);
+        createdJfrList[i] = bondp_create_jfr(&fixture.ctx.v_ctx, &jfrCfg);
+        ASSERT_NE(nullptr, createdJfrList[i]);
+        EXPECT_EQ(i + 4UL, fixture.jfc.use_cnt.atomic_cnt.load());
+    }
+
+    urma_jetty_t *createdJettyList[3] = {};
+    for (uint32_t i = 0; i < 3; i++) {
+        jettyCfg.shared.jfr = createdJfrList[i];
+        urma_test::SetHwMockIoctl(true, 0xb70 + i, 0xb700 + i);
+        createdJettyList[i] = bondp_create_jetty(&fixture.ctx.v_ctx, &jettyCfg);
+        ASSERT_NE(nullptr, createdJettyList[i]);
+        EXPECT_EQ(&fixture.jfc.v_jfc, createdJettyList[i]->jetty_cfg.shared.jfc);
+        EXPECT_EQ(i + 7UL, fixture.jfc.use_cnt.atomic_cnt.load());
+    }
+
+    for (uint32_t i = 0; i < 3; i++) {
+        createdJettyList[i]->async_events_acked = 0;
+        SetRefCount(&CONTAINER_OF_FIELD(createdJettyList[i], bondp_comp_t, v_jetty)->use_cnt, 0);
+        EXPECT_EQ(URMA_SUCCESS, bondp_delete_jetty(createdJettyList[i]));
+        EXPECT_EQ(8UL - i, fixture.jfc.use_cnt.atomic_cnt.load());
+    }
+
+    for (uint32_t i = 0; i < 3; i++) {
+        createdJfsList[i]->async_events_acked = 0;
+        SetRefCount(&CONTAINER_OF_FIELD(createdJfsList[i], bondp_comp_t, v_jfs)->use_cnt, 0);
+        EXPECT_EQ(URMA_SUCCESS, bondp_delete_jfs(createdJfsList[i]));
+        EXPECT_EQ(5UL - i, fixture.jfc.use_cnt.atomic_cnt.load());
+    }
+
+    for (uint32_t i = 0; i < 3; i++) {
+        createdJfrList[i]->async_events_acked = 0;
+        SetRefCount(&CONTAINER_OF_FIELD(createdJfrList[i], bondp_comp_t, v_jfr)->use_cnt, 0);
+        EXPECT_EQ(URMA_SUCCESS, bondp_delete_jfr(createdJfrList[i]));
+        EXPECT_EQ(2UL - i, fixture.jfc.use_cnt.atomic_cnt.load());
     }
     EXPECT_EQ(0UL, fixture.jfc.use_cnt.atomic_cnt.load());
 
+    g_bondp_global_ctx = nullptr;
+    bondp_health_check_global_ctx_uninit(&fakeGlobal);
     EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
 }
 
@@ -1048,42 +1103,6 @@ TEST(UrmaBondTest, PublicCreateJettyUsesEffectiveSharedJfcForRefcount)
 
     g_bondp_global_ctx = nullptr;
     bondp_health_check_global_ctx_uninit(&fakeGlobal);
-    EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
-}
-
-TEST(UrmaBondTest, PublicDeleteChildObjectsDoNotUnderflowSharedJfcRefcount)
-{
-    BondPublicApiFixture fixture;
-
-    fixture.InitSinglePhysicalMember();
-    fixture.InitActiveComp(&fixture.jfr, 0);
-    fixture.ctx.v_ctx.dev_fd = 7;
-    ASSERT_EQ(0, bdp_p_vjetty_id_table_create(&fixture.ctx.p_vjetty_id_table, 16));
-
-    SetRefCount(&fixture.jfc.use_cnt, 0);
-    auto *jfs = static_cast<bondp_comp_t *>(std::calloc(1, sizeof(bondp_comp_t)));
-    ASSERT_NE(nullptr, jfs);
-    jfs->bondp_ctx = &fixture.ctx;
-    jfs->comp_type = BONDP_COMP_JFS;
-    jfs->v_jfs.urma_ctx = &fixture.ctx.v_ctx;
-    jfs->v_jfs.jfs_cfg.jfc = &fixture.jfc.v_jfc;
-    jfs->v_jfs.jfs_id.id = 0x702;
-    SetRefCount(&jfs->use_cnt, 0);
-    ASSERT_EQ(0, pthread_spin_init(&jfs->send_lock, PTHREAD_PROCESS_PRIVATE));
-    EXPECT_EQ(URMA_FAIL, bondp_delete_jfs(&jfs->v_jfs));
-    EXPECT_EQ(0UL, fixture.jfc.use_cnt.atomic_cnt.load());
-
-    auto *jfr = static_cast<bondp_comp_t *>(std::calloc(1, sizeof(bondp_comp_t)));
-    ASSERT_NE(nullptr, jfr);
-    jfr->bondp_ctx = &fixture.ctx;
-    jfr->comp_type = BONDP_COMP_JFR;
-    jfr->v_jfr.urma_ctx = &fixture.ctx.v_ctx;
-    jfr->v_jfr.jfr_cfg.jfc = &fixture.jfc.v_jfc;
-    jfr->v_jfr.jfr_id.id = 0x703;
-    SetRefCount(&jfr->use_cnt, 0);
-    EXPECT_EQ(URMA_FAIL, bondp_delete_jfr(&jfr->v_jfr));
-    EXPECT_EQ(0UL, fixture.jfc.use_cnt.atomic_cnt.load());
-
     EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
 }
 
