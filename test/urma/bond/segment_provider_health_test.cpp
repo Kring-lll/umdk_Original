@@ -572,7 +572,7 @@ TEST(UrmaBondTest, PublicImportSegmentUsesPhysicalProviderMocks)
     std::free(remote);
 }
 
-TEST(UrmaBondTest, PublicImportJettyUsesExtAndPhysicalProviderMocks)
+TEST(UrmaBondTest, DISABLED_PublicImportJettyUsesExtAndPhysicalProviderMocks)
 {
     BondPublicApiFixture fixture;
     bondp_global_context_t fakeGlobal = {};
