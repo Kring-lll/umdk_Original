@@ -36,14 +36,6 @@ typedef struct jetty_pool_config {
     uint32_t borrow_limit;         // Max WRs per borrow (0 means use default 1024)
 } jetty_pool_config_t;
 
-// Thread-local jetty cache (linked list based on user config)
-typedef struct thread_local_jetty_cache {
-    urpc_list_t cache_list;     // Linked list of cached jetty nodes
-    urpc_list_t registry_node;  // Node for global thread cache registry
-    uint32_t cached_count;       // Current cached jetty count
-    bool inited;                 // Whether this thread cache is initialized
-} thread_local_jetty_cache_t;
-
 int umq_ub_jetty_pool_init(jetty_pool_config_t *config);
 void umq_ub_jetty_pool_uninit(void);
 jetty_pool_node_t *umq_ub_jetty_pool_get_free_node(void);
@@ -61,7 +53,6 @@ void umq_ub_jetty_node_mark_err(jetty_pool_node_t *node);
 typedef struct umq_ub_jetty_pool_stats {
     uint64_t total_num;         // Total nodes currently tracked (node_count)
     uint64_t global_num;        // IDLE nodes in global active_q
-    uint64_t cache_num;         // IDLE nodes in thread-local caches
     uint64_t in_use_num;        // Nodes currently borrowed by a Logic UMQ (state == IN_USE)
     uint64_t err_num;           // Nodes marked is_jetty_err == true
     uint64_t acc_alloc_num;     // Cumulative allocs (nodes borrowed by Logic UMQ)
