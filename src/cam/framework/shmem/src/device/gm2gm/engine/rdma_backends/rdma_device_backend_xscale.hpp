@@ -10,14 +10,16 @@
 #ifndef ACLSHMEM_RDMA_DEVICE_BACKEND_XSCALE_HPP
 #define ACLSHMEM_RDMA_DEVICE_BACKEND_XSCALE_HPP
 
-#include "rdma_device_backend_base.h"
 #include <type_traits>
+#include "rdma_device_backend_base.h"
 
 constexpr int ACLSHMEMI_XSCALE_API_VERSION_VAR = 2;
+constexpr int ACLSHMEMI_XSCALE_API_VERSION_V1 = 1;
+constexpr int ACLSHMEMI_XSCALE_API_VERSION_V2 = 2;
 
-static_assert(
-    ACLSHMEMI_XSCALE_API_VERSION_VAR == 1 || ACLSHMEMI_XSCALE_API_VERSION_VAR == 2,
-    "ACLSHMEMI_XSCALE_API_VERSION must be 1 or 2");
+static_assert(ACLSHMEMI_XSCALE_API_VERSION_VAR == ACLSHMEMI_XSCALE_API_VERSION_V1 ||
+                  ACLSHMEMI_XSCALE_API_VERSION_VAR == ACLSHMEMI_XSCALE_API_VERSION_V2,
+              "ACLSHMEMI_XSCALE_API_VERSION must be 1 or 2");
 
 struct aclshmemi_xscdv_wqe_ctrl_seg_v1 {
     uint8_t msg_opcode;
@@ -59,8 +61,9 @@ struct aclshmemi_xscdv_wqe_ctrl_seg_v2 {
     /**** 16 bytes ****/
 };
 
-using aclshmemi_xscdv_wqe_ctrl_seg_t = std::conditional_t<
-    ACLSHMEMI_XSCALE_API_VERSION_VAR == 1, aclshmemi_xscdv_wqe_ctrl_seg_v1, aclshmemi_xscdv_wqe_ctrl_seg_v2>;
+using aclshmemi_xscdv_wqe_ctrl_seg_t =
+    std::conditional_t<ACLSHMEMI_XSCALE_API_VERSION_VAR == 1, aclshmemi_xscdv_wqe_ctrl_seg_v1,
+                       aclshmemi_xscdv_wqe_ctrl_seg_v2>;
 
 struct aclshmemi_xscdv_wqe_data_seg_t {
     union {
@@ -134,8 +137,8 @@ struct aclshmemi_xscdv_diamond_cqe_v2 {
     /**** 24 bytes ****/
     union {
         struct {
-            uint32_t msg_opcode : 8;  // [0:7] msg_opcode of corresponding finished wqe, check aclshmemi_xscdv_msg_type_t
-            uint32_t rsv1       : 4;  // [8:11]
+            uint32_t msg_opcode : 8; // [0:7] msg_opcode of corresponding finished wqe, check aclshmemi_xscdv_msg_type_t
+            uint32_t rsv1       : 4; // [8:11]
             uint32_t wqe_id     : 20; // [12:31] Corresponds to wqe_id << 3 in the WQE
         };
         uint32_t wqe_id_rsv_opcode;
@@ -152,8 +155,9 @@ struct aclshmemi_xscdv_diamond_cqe_v2 {
     /**** 32 bytes ****/
 };
 
-using aclshmemi_xscdv_diamond_cqe_t = std::conditional_t<
-    ACLSHMEMI_XSCALE_API_VERSION_VAR == 1, aclshmemi_xscdv_diamond_cqe_v1, aclshmemi_xscdv_diamond_cqe_v2>;
+using aclshmemi_xscdv_diamond_cqe_t =
+    std::conditional_t<ACLSHMEMI_XSCALE_API_VERSION_VAR == 1, aclshmemi_xscdv_diamond_cqe_v1,
+                       aclshmemi_xscdv_diamond_cqe_v2>;
 
 struct aclshmemi_xscdv_cqe64_t {
     aclshmemi_xscdv_diamond_cqe_t cqe;
@@ -203,9 +207,9 @@ union aclshmemi_xscdv_diamond_send_doorbell_v2 {
     uint64_t raw;
 };
 
-using aclshmemi_xscdv_diamond_send_doorbell_t = std::conditional_t<
-    ACLSHMEMI_XSCALE_API_VERSION_VAR == 1, aclshmemi_xscdv_diamond_send_doorbell_v1,
-    aclshmemi_xscdv_diamond_send_doorbell_v2>;
+using aclshmemi_xscdv_diamond_send_doorbell_t =
+    std::conditional_t<ACLSHMEMI_XSCALE_API_VERSION_VAR == 1, aclshmemi_xscdv_diamond_send_doorbell_v1,
+                       aclshmemi_xscdv_diamond_send_doorbell_v2>;
 
 struct aclshmemi_xscdv_diamond_data_seg_t {
     uint32_t length;
@@ -297,21 +301,21 @@ constexpr uint32_t BYTES_32 = sizeof(uint32_t);
 constexpr uint32_t BYTES_64 = sizeof(uint64_t);
 
 constexpr uint64_t ACLSHMEMI_HOST_BYTE_7_SHIFT = 0;
-constexpr uint64_t ACLSHMEMI_HOST_BYTE_6_SHIFT = ACLSHMEMI_BYTE_WIDTH * 1;
-constexpr uint64_t ACLSHMEMI_HOST_BYTE_5_SHIFT = ACLSHMEMI_BYTE_WIDTH * 2;
-constexpr uint64_t ACLSHMEMI_HOST_BYTE_4_SHIFT = ACLSHMEMI_BYTE_WIDTH * 3;
-constexpr uint64_t ACLSHMEMI_HOST_BYTE_3_SHIFT = ACLSHMEMI_BYTE_WIDTH * 4;
-constexpr uint64_t ACLSHMEMI_HOST_BYTE_2_SHIFT = ACLSHMEMI_BYTE_WIDTH * 5;
-constexpr uint64_t ACLSHMEMI_HOST_BYTE_1_SHIFT = ACLSHMEMI_BYTE_WIDTH * 6;
-constexpr uint64_t ACLSHMEMI_HOST_BYTE_0_SHIFT = ACLSHMEMI_BYTE_WIDTH * 7;
+constexpr uint64_t ACLSHMEMI_HOST_BYTE_6_SHIFT = ACLSHMEMI_BYTE_WIDTH * 1; // 8
+constexpr uint64_t ACLSHMEMI_HOST_BYTE_5_SHIFT = ACLSHMEMI_BYTE_WIDTH * 2; // 16
+constexpr uint64_t ACLSHMEMI_HOST_BYTE_4_SHIFT = ACLSHMEMI_BYTE_WIDTH * 3; // 24
+constexpr uint64_t ACLSHMEMI_HOST_BYTE_3_SHIFT = ACLSHMEMI_BYTE_WIDTH * 4; // 32
+constexpr uint64_t ACLSHMEMI_HOST_BYTE_2_SHIFT = ACLSHMEMI_BYTE_WIDTH * 5; // 40
+constexpr uint64_t ACLSHMEMI_HOST_BYTE_1_SHIFT = ACLSHMEMI_BYTE_WIDTH * 6; // 48
+constexpr uint64_t ACLSHMEMI_HOST_BYTE_0_SHIFT = ACLSHMEMI_BYTE_WIDTH * 7; // 56
 
-constexpr uint64_t ACLSHMEMI_BE_BYTE_0_SHIFT = ACLSHMEMI_BYTE_WIDTH * 7;
-constexpr uint64_t ACLSHMEMI_BE_BYTE_1_SHIFT = ACLSHMEMI_BYTE_WIDTH * 6;
-constexpr uint64_t ACLSHMEMI_BE_BYTE_2_SHIFT = ACLSHMEMI_BYTE_WIDTH * 5;
-constexpr uint64_t ACLSHMEMI_BE_BYTE_3_SHIFT = ACLSHMEMI_BYTE_WIDTH * 4;
-constexpr uint64_t ACLSHMEMI_BE_BYTE_4_SHIFT = ACLSHMEMI_BYTE_WIDTH * 3;
-constexpr uint64_t ACLSHMEMI_BE_BYTE_5_SHIFT = ACLSHMEMI_BYTE_WIDTH * 2;
-constexpr uint64_t ACLSHMEMI_BE_BYTE_6_SHIFT = ACLSHMEMI_BYTE_WIDTH * 1;
+constexpr uint64_t ACLSHMEMI_BE_BYTE_0_SHIFT = ACLSHMEMI_BYTE_WIDTH * 7; // 56
+constexpr uint64_t ACLSHMEMI_BE_BYTE_1_SHIFT = ACLSHMEMI_BYTE_WIDTH * 6; // 48
+constexpr uint64_t ACLSHMEMI_BE_BYTE_2_SHIFT = ACLSHMEMI_BYTE_WIDTH * 5; // 40
+constexpr uint64_t ACLSHMEMI_BE_BYTE_3_SHIFT = ACLSHMEMI_BYTE_WIDTH * 4; // 32
+constexpr uint64_t ACLSHMEMI_BE_BYTE_4_SHIFT = ACLSHMEMI_BYTE_WIDTH * 3; // 24
+constexpr uint64_t ACLSHMEMI_BE_BYTE_5_SHIFT = ACLSHMEMI_BYTE_WIDTH * 2; // 16
+constexpr uint64_t ACLSHMEMI_BE_BYTE_6_SHIFT = ACLSHMEMI_BYTE_WIDTH * 1; // 8
 constexpr uint64_t ACLSHMEMI_BE_BYTE_7_SHIFT = 0;
 
 #if defined(__DAV_C220_VEC__) || defined(__DAV_C220_CUBE__)
@@ -340,8 +344,10 @@ ACLSHMEM_DEVICE uint64_t aclshmemi_htobe64(uint64_t host_val)
 
 ACLSHMEM_DEVICE uint32_t aclshmemi_htobe32(uint32_t host_val)
 {
-    return ((host_val >> 24) & 0xFF) | ((host_val >> 8) & 0xFF00) | ((host_val << 8) & 0xFF0000) |
-           ((host_val << 24) & 0xFF000000);
+    return ((host_val >> ACLSHMEMI_HOST_BYTE_4_SHIFT) & ACLSHMEMI_BYTE_MASK) << ACLSHMEMI_BE_BYTE_7_SHIFT |
+           ((host_val >> ACLSHMEMI_HOST_BYTE_5_SHIFT) & ACLSHMEMI_BYTE_MASK) << ACLSHMEMI_BE_BYTE_6_SHIFT |
+           ((host_val >> ACLSHMEMI_HOST_BYTE_6_SHIFT) & ACLSHMEMI_BYTE_MASK) << ACLSHMEMI_BE_BYTE_5_SHIFT |
+           ((host_val >> ACLSHMEMI_HOST_BYTE_7_SHIFT) & ACLSHMEMI_BYTE_MASK) << ACLSHMEMI_BE_BYTE_4_SHIFT;
 }
 
 /**
@@ -366,8 +372,8 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_htobe32(uint32_t host_val)
  *       (e.g., CQ tail pointer, SQ head pointer, doorbell registers) with strict synchronization.
  */
 template <typename T>
-ACLSHMEM_DEVICE void aclshmemi_roce_write_ub_to_gm_with_sync(
-    uint64_t addr, AscendC::LocalTensor<T> &ub_local, uint32_t size, uint32_t sync_id)
+ACLSHMEM_DEVICE void aclshmemi_roce_write_ub_to_gm_with_sync(uint64_t addr, AscendC::LocalTensor<T> &ub_local,
+                                                             uint32_t size, uint32_t sync_id)
 {
     AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(sync_id);
     AscendC::GlobalTensor<T> tmp_global_tensor;
