@@ -2041,6 +2041,10 @@ int umq_ub_unbind_impl(uint64_t umqh)
 
     free(queue->bind_ctx);
     queue->bind_ctx = NULL;
+    if (queue->flow_control.enabled) {
+        ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+        umq_ub_credit_pending_req_remove_by_queue(&credit->pending_queue, queue);
+    }
     /* The `flush tx` and `flush rx` directives should be placed after `bind_ctx` is set to null,
      * preventing requests from being sent under flow control. */
     if ((queue->dev_ctx->feature & UMQ_FEATURE_API_PRO) == 0) {

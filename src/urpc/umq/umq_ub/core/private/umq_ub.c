@@ -1528,6 +1528,9 @@ void umq_ub_jfr_ctx_destroy(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
     if (jetty_idx == UB_QUEUE_JETTY_FLOW_CONTROL) {
         umq_ub_flow_control_share_rq_sge_uninit(&queue->jfr_ctx[jetty_idx]->share_rq_sge);
     }
+    if (jetty_idx == UB_QUEUE_JETTY_IO) {
+        umq_ub_credit_pending_queue_uninit(&queue->jfr_ctx[jetty_idx]->credit.pending_queue);
+    }
     free(queue->jfr_ctx[jetty_idx]);
     queue->jfr_ctx[jetty_idx] = NULL;
 }

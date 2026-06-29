@@ -43,6 +43,13 @@ void umq_ub_credit_clean_up(ub_queue_t *queue);
 void umq_ub_shared_credit_recharge(ub_queue_t *queue, uint16_t recharge_count);
 void umq_ub_idle_credit_flush(ub_queue_t *queue, uint32_t cnt) ;
 
+int umq_ub_credit_pending_queue_init(ub_credit_pending_queue_t *pq, uint16_t threshold);
+void umq_ub_credit_pending_queue_uninit(ub_credit_pending_queue_t *pq);
+int umq_ub_credit_pending_req_enqueue(ub_credit_pending_queue_t *pq, ub_queue_t *queue,
+    uint16_t requested, uint8_t seq);
+void umq_ub_credit_pending_queue_process(ub_queue_t *main_queue, ub_credit_pool_t *pool);
+void umq_ub_credit_pending_req_remove_by_queue(ub_credit_pending_queue_t *pq, ub_queue_t *queue);
+
 static inline void umq_ub_window_inc(ub_flow_control_t *fc, uint16_t win)
 {
     if (win == 0 || !fc->enabled) {

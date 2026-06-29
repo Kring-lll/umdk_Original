@@ -540,6 +540,15 @@ static void umq_ub_credit_pool_init(ub_queue_t *queue, uint32_t feature, umq_flo
         pool->ops.allocated_credit_dec = allocated_credit_dec_non_atomic;
         pool->ops.stats_query = credit_pool_stats_query_non_atomic;
     }
+
+    uint16_t threshold = cfg->pending_credit_threshold;
+    if (threshold > queue->rx_depth) {
+        threshold = queue->rx_depth / 4;
+        if (threshold == 0) {
+            threshold = 1;
+        }
+    }
+    (void)umq_ub_credit_pending_queue_init(&pool->pending_queue, threshold);
 }
 
 int umq_ub_flow_control_init(ub_flow_control_t *fc, ub_queue_t *queue, uint32_t feature, umq_flow_control_cfg_t *cfg)
@@ -662,6 +671,10 @@ void umq_ub_shared_credit_recharge(ub_queue_t *queue, uint16_t recharge_count)
 
     ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
     credit->ops.available_credit_inc(credit, recharge_count);
+    __atomic_add_fetch(&credit->pending_queue.replenish_accumulated, recharge_count, __ATOMIC_RELAXED);
+    if (credit->pending_queue.pending_count > 0 && credit->pending_queue.pending_credit_threshold > 0) {
+        umq_ub_credit_pending_queue_process(queue, credit);
+    }
 }
 
 int umq_ub_shared_credit_req_send(ub_queue_t *queue)
@@ -804,6 +817,13 @@ int umq_ub_shared_credit_req_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
     uint16_t credits_per_request = imm->flow_control.window;
     uint16_t allocated_count = credit->ops.available_credit_dec(credit, credits_per_request);
     (void)fc->ops.local_rx_allocated_inc(fc, allocated_count);
+
+    if (allocated_count < credits_per_request && credit->pending_queue.pending_credit_threshold > 0) {
+        uint16_t remaining = credits_per_request - allocated_count;
+        (void)umq_ub_credit_pending_req_enqueue(&credit->pending_queue, queue, remaining,
+            (uint8_t)imm->flow_control.seq);
+    }
+
     int ret = umq_ub_shared_credit_resp_send(queue, allocated_count, (uint16_t)imm->flow_control.seq);
     if (ret != UMQ_SUCCESS) {
         (void)credit->ops.available_credit_return(credit, allocated_count);
@@ -1022,6 +1042,10 @@ int umq_ub_shared_credit_return_req_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
 
     credit->ops.available_credit_return(credit, return_credit);
     (void)fc->ops.local_rx_allocated_dec(fc, return_credit);
+    __atomic_add_fetch(&credit->pending_queue.replenish_accumulated, return_credit, __ATOMIC_RELAXED);
+    if (credit->pending_queue.pending_count > 0 && credit->pending_queue.pending_credit_threshold > 0) {
+        umq_ub_credit_pending_queue_process(queue, credit);
+    }
     return umq_ub_shared_credit_return_ack(queue, return_credit, (uint16_t)imm->flow_control.seq);
 }
 
@@ -1049,6 +1073,7 @@ void umq_ub_credit_clean_up(ub_queue_t *queue)
 {
     ub_flow_control_t *fc = &queue->flow_control;
     ub_credit_pool_t *credit = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    umq_ub_credit_pending_req_remove_by_queue(&credit->pending_queue, queue);
     uint16_t actual_return_credit = __atomic_exchange_n(&fc->local_rx_posted, 0, __ATOMIC_ACQ_REL);
     uint64_t consumed_credit = umq_ub_rx_consumed_load(queue->dev_ctx->io_lock_free,
         &queue->dev_ctx->rx_consumed_jetty_table[queue->umq_id]);
@@ -1075,4 +1100,145 @@ void umq_ub_idle_credit_flush(ub_queue_t *queue, uint32_t cnt)
             (void)counter_dec_non_atomic_u16(credit, cnt, CREDIT_POOL_IDLE);
         }
     }
+}
+
+#define UMQ_UB_PENDING_QUEUE_MAX_DEFAULT 128
+
+int umq_ub_credit_pending_queue_init(ub_credit_pending_queue_t *pq, uint16_t threshold)
+{
+    urpc_list_init(&pq->pending_list);
+    pq->pending_count = 0;
+    pq->max_pending = UMQ_UB_PENDING_QUEUE_MAX_DEFAULT;
+    pq->pending_credit_threshold = threshold;
+    pq->replenish_accumulated = 0;
+    pq->lock = util_mutex_lock_create(UTIL_MUTEX_ATTR_EXCLUSIVE);
+    if (pq->lock == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "create pending queue mutex failed\n");
+        return UMQ_FAIL;
+    }
+    return UMQ_SUCCESS;
+}
+
+void umq_ub_credit_pending_queue_uninit(ub_credit_pending_queue_t *pq)
+{
+    if (pq->lock == NULL) {
+        return;
+    }
+    ub_pending_credit_req_t *node, *next;
+    URPC_LIST_FOR_EACH_SAFE(node, next, node, &pq->pending_list) {
+        umq_dec_ref(node->queue->dev_ctx->io_lock_free, &node->queue->ref_cnt, 1);
+        free(node);
+    }
+    pq->pending_count = 0;
+    urpc_list_init(&pq->pending_list);
+    (void)util_mutex_lock_destroy(pq->lock);
+    pq->lock = NULL;
+}
+
+int umq_ub_credit_pending_req_enqueue(ub_credit_pending_queue_t *pq, ub_queue_t *queue,
+    uint16_t requested, uint8_t seq)
+{
+    if (pq->lock == NULL || pq->pending_credit_threshold == 0) {
+        return -UMQ_ERR_EINVAL;
+    }
+    if (pq->pending_count >= pq->max_pending) {
+        UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "pending credit queue is full, pending_count %u, max_pending %u\n",
+            pq->pending_count, pq->max_pending);
+        return -UMQ_ERR_ENOBUFS;
+    }
+
+    ub_pending_credit_req_t *node = (ub_pending_credit_req_t *)malloc(sizeof(ub_pending_credit_req_t));
+    if (node == NULL) {
+        UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "malloc pending credit req node failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+    node->queue = queue;
+    node->requested = requested;
+    node->seq = seq;
+
+    umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
+
+    (void)util_mutex_lock(pq->lock);
+    urpc_list_push_back(&pq->pending_list, &node->node);
+    pq->pending_count++;
+    (void)util_mutex_unlock(pq->lock);
+
+    return UMQ_SUCCESS;
+}
+
+void umq_ub_credit_pending_queue_process(ub_queue_t *main_queue, ub_credit_pool_t *pool)
+{
+    ub_credit_pending_queue_t *pq = &pool->pending_queue;
+    if (pq->lock == NULL || pq->pending_credit_threshold == 0) {
+        return;
+    }
+
+    uint16_t accumulated = __atomic_exchange_n(&pq->replenish_accumulated, 0, __ATOMIC_ACQ_REL);
+    if (accumulated < pq->pending_credit_threshold) {
+        __atomic_add_fetch(&pq->replenish_accumulated, accumulated, __ATOMIC_RELAXED);
+        return;
+    }
+
+    ub_pending_credit_req_t *collected[UMQ_BATCH_SIZE];
+    uint32_t collected_count = 0;
+
+    (void)util_mutex_lock(pq->lock);
+    while (pq->pending_count > 0 && collected_count < UMQ_BATCH_SIZE) {
+        uint16_t idle = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_ACQUIRE);
+        if (idle == 0) {
+            break;
+        }
+        urpc_list_t *list_node = urpc_list_pop_front(&pq->pending_list);
+        ub_pending_credit_req_t *head = OBJ_CONTAINING(list_node, (ub_pending_credit_req_t *)NULL, node);
+        pq->pending_count--;
+        collected[collected_count++] = head;
+    }
+    (void)util_mutex_unlock(pq->lock);
+
+    for (uint32_t i = 0; i < collected_count; i++) {
+        ub_pending_credit_req_t *req = collected[i];
+        ub_queue_t *req_queue = req->queue;
+        ub_flow_control_t *req_fc = &req_queue->flow_control;
+
+        uint16_t idle = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_ACQUIRE);
+        uint16_t actual = (idle >= req->requested) ? req->requested : idle;
+        uint16_t allocated = pool->ops.available_credit_dec(pool, actual);
+        (void)req_fc->ops.local_rx_allocated_inc(req_fc, allocated);
+
+        if (req_queue->bind_ctx == NULL) {
+            pool->ops.available_credit_return(pool, allocated);
+            (void)req_fc->ops.local_rx_allocated_dec(req_fc, allocated);
+            umq_dec_ref(req_queue->dev_ctx->io_lock_free, &req_queue->ref_cnt, 1);
+            free(req);
+            continue;
+        }
+
+        int ret = umq_ub_shared_credit_resp_send(req_queue, allocated, req->seq);
+        if (ret != UMQ_SUCCESS) {
+            pool->ops.available_credit_return(pool, allocated);
+            (void)req_fc->ops.local_rx_allocated_dec(req_fc, allocated);
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "pending queue process send credit resp failed, ret %d\n", ret);
+        }
+
+        umq_dec_ref(req_queue->dev_ctx->io_lock_free, &req_queue->ref_cnt, 1);
+        free(req);
+    }
+}
+
+void umq_ub_credit_pending_req_remove_by_queue(ub_credit_pending_queue_t *pq, ub_queue_t *queue)
+{
+    if (pq->lock == NULL) {
+        return;
+    }
+    (void)util_mutex_lock(pq->lock);
+    ub_pending_credit_req_t *node, *next;
+    URPC_LIST_FOR_EACH_SAFE(node, next, node, &pq->pending_list) {
+        if (node->queue == queue) {
+            urpc_list_remove(&node->node);
+            pq->pending_count--;
+            umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
+            free(node);
+        }
+    }
+    (void)util_mutex_unlock(pq->lock);
 }

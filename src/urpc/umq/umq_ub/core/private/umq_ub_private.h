@@ -357,11 +357,28 @@ typedef enum ub_credit_stat_u16 {
     CREDIT_COUNTER_MAX_U16
 } ub_credit_stat_u16_t;
 
+typedef struct ub_pending_credit_req {
+    urpc_list_t node;
+    ub_queue_t *queue;
+    uint16_t requested;
+    uint8_t seq;
+} ub_pending_credit_req_t;
+
+typedef struct ub_credit_pending_queue {
+    urpc_list_t pending_list;
+    uint32_t pending_count;
+    uint32_t max_pending;
+    uint16_t pending_credit_threshold;
+    volatile uint16_t replenish_accumulated;
+    util_external_mutex_lock *lock;
+} ub_credit_pending_queue_t;
+
 typedef struct ub_credit_pool {
     ub_credit_pool_ops_t ops;
     volatile uint64_t stats_u64[CREDIT_COUNTER_MAX_U64];
     volatile uint16_t stats_u16[CREDIT_COUNTER_MAX_U16];
     uint16_t capacity;
+    ub_credit_pending_queue_t pending_queue;
 } ub_credit_pool_t;
 
 typedef struct jfr_ctx {

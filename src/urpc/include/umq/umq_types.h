@@ -223,6 +223,8 @@ typedef struct umq_flow_control_cfg {
     uint32_t timeout_ms;
     // use atomic variables as flow control window
     bool use_atomic_window;
+    // accumulated replenish credit threshold to trigger pending queue processing, 0 means disabled
+    uint16_t pending_credit_threshold;
 } umq_flow_control_cfg_t;
 
 typedef enum umq_buf_block_size {
