@@ -256,6 +256,60 @@ umq_dfx_ops_t *umq_get_dfx_tp_ops(umq_trans_mode_t trans_mode)
     return umq_fw->dfx_tp_ops;
 }
 
+typedef void (*umq_thread_closure_func)(uint64_t id);
+
+typedef struct thread_closure_callback_args {
+    umq_trans_mode_t trans_mode;
+    umq_thread_closure_func func;
+    uint64_t id;
+    void *dlhandler;
+} thread_closure_callback_args_t;
+
+static void umq_thread_closure_callback(uint64_t id)
+{
+    thread_closure_callback_args_t *args = (thread_closure_callback_args_t *)id;
+    if (args->trans_mode < UMQ_TRANS_MODE_MAX && args->func != NULL && args->dlhandler != NULL) {
+        args->func(args->id);
+    }
+
+    if (args->dlhandler != NULL) {
+        dlclose(args->dlhandler);
+    }
+    free(args);
+}
+
+int umq_thread_closure_register(umq_trans_mode_t trans_mode,
+    urpc_thread_closure_type_t type, uint64_t id, void (*closure)(uint64_t id))
+{
+    thread_closure_callback_args_t *args =
+        (thread_closure_callback_args_t *)calloc(1, sizeof(thread_closure_callback_args_t));
+    if (args == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "thread closure callback args calloc failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    args->func = closure;
+    args->id = id;
+    args->trans_mode = trans_mode;
+
+    if (trans_mode >= UMQ_TRANS_MODE_MAX) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "trans mode invalid\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+#ifndef UMQ_STATIC_LIB
+    // when dlopen is called multiple times on a .so, the reference count prevents it from being released prematurely
+    args->dlhandler = dlopen(g_umq_fws[trans_mode].dlopen_so_name, RTLD_LAZY | RTLD_GLOBAL);
+    if (args->dlhandler == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "open so failed, err: %s\n", dlerror());
+        return UMQ_FAIL;
+    }
+#endif
+
+    urpc_thread_closure_register(type, (uint64_t)(uintptr_t)args, umq_thread_closure_callback);
+    return UMQ_SUCCESS;
+}
+
 static int umq_dev_assign_validate(umq_dev_assign_t *dev_info)
 {
     switch (dev_info->assign_mode) {
