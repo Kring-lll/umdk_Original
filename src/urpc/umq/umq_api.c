@@ -256,6 +256,66 @@ umq_dfx_ops_t *umq_get_dfx_tp_ops(umq_trans_mode_t trans_mode)
     return umq_fw->dfx_tp_ops;
 }
 
+typedef void (*umq_thread_closure_func)(uint64_t id);
+
+typedef struct thread_closure_callback_args {
+    umq_trans_mode_t trans_mode;
+    umq_thread_closure_func func;
+    uint64_t id;
+} thread_closure_callback_args_t;
+
+static void umq_thread_closure_callback(uint64_t id)
+{
+    thread_closure_callback_args_t *args = (thread_closure_callback_args_t *)id;
+
+    // twin_transmode loads the same .so file as the original transmode
+    umq_trans_mode_t twin_transmode;
+    switch (args->trans_mode) {
+        case UMQ_TRANS_MODE_UB:
+            twin_transmode = UMQ_TRANS_MODE_UB_PLUS;
+            break;
+        case UMQ_TRANS_MODE_IB:
+            twin_transmode = UMQ_TRANS_MODE_IB_PLUS;
+            break;
+        case UMQ_TRANS_MODE_UBMM:
+            twin_transmode = UMQ_TRANS_MODE_UBMM_PLUS;
+            break;
+        case UMQ_TRANS_MODE_UB_PLUS:
+            twin_transmode = UMQ_TRANS_MODE_UB;
+            break;
+        case UMQ_TRANS_MODE_IB_PLUS:
+            twin_transmode = UMQ_TRANS_MODE_IB;
+            break;
+        case UMQ_TRANS_MODE_UBMM_PLUS:
+            twin_transmode = UMQ_TRANS_MODE_UBMM;
+            break;
+        default:
+            twin_transmode = args->trans_mode;
+    }
+    if (args->trans_mode < UMQ_TRANS_MODE_MAX && args->func != NULL &&
+        (g_umq_fws[args->trans_mode].enable || g_umq_fws[twin_transmode].enable)) {
+        args->func(args->id);
+    }
+    free(args);
+}
+
+int umq_thread_closure_register(umq_trans_mode_t trans_mode,
+    urpc_thread_closure_type_t type, uint64_t id, void (*closure)(uint64_t id))
+{
+    thread_closure_callback_args_t *args =
+        (thread_closure_callback_args_t *)calloc(1, sizeof(thread_closure_callback_args_t));
+    if (args == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "thread closure callback args calloc failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    args->func = closure;
+    args->id = id;
+    args->trans_mode = trans_mode;
+    urpc_thread_closure_register(type, (uint64_t)(uintptr_t)args, umq_thread_closure_callback);
+    return UMQ_SUCCESS;
+}
+
 static int umq_dev_assign_validate(umq_dev_assign_t *dev_info)
 {
     switch (dev_info->assign_mode) {
