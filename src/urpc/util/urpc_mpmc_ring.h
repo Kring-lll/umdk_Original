@@ -82,9 +82,9 @@ typedef struct {
  *     cost of 56 bytes per counter (280 bytes total) — negligible for
  *     a ~500 KB ring.
  */
-#define URPC_MPMC_RING_DECLARE(_name, _type, _capacity)           \
+#define URPC_MPMC_RING_DECLARE(_name, _type, _capacity)             \
     typedef struct _name {                                          \
-        urpc_mpmc_ring_t mpmc_ring;                                  \
+        urpc_mpmc_ring_t mpmc_ring;                                 \
         _type buf[(_capacity)];                                     \
     } _name##_t
 
@@ -119,10 +119,12 @@ static inline void *urpc_mpmc_buf(urpc_mpmc_ring_t *r)
 
 static inline void urpc_mpmc_wait_tail(volatile uint64_t *tail, uint64_t head)
 {
-    /* Wait for all preceding threads to complete.  < is safer than !=
-     * because tail advances monotonically: once tail >= head, everyone
-     * before us has published. */
-    while (__atomic_load_n(tail, __ATOMIC_ACQUIRE) < head)
+    /* Wait for all preceding threads to complete.  tail advances
+     * monotonically one slot at a time — no thread can push tail
+     * past this thread's head, so != is safe and acts as a canary:
+     * if tail ever exceeds head, memory corruption is detected
+     * via infinite spin rather than silent pass-through. */
+    while (__atomic_load_n(tail, __ATOMIC_ACQUIRE) != head)
         URPC_MPMC_PAUSE();
 }
 
