@@ -14,13 +14,22 @@
 #include <pthread.h>
 #include "urpc_list.h"
 #include "urpc_bitmap.h"
+#include "urpc_mpmc_ring.h"
 #include "urma_api.h"
+
+/* Jetty pool ring capacity — must be a power of 2.
+ * The ring replaces active_q for lock-free alloc/free of jetty nodes. */
+#define JETTY_POOL_RING_CAPACITY 65536
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct jetty_pool_node jetty_pool_node_t;
+
+// MPMC ring declaration for the active node pool.
+// Stores jetty_pool_node_t pointers (8 bytes each).
+URPC_MPMC_RING_DECLARE(jetty_active_ring, jetty_pool_node_t *, JETTY_POOL_RING_CAPACITY);
 
 typedef struct umq_ub_jetty_node_list {
     jetty_pool_node_t **node_list;
@@ -52,7 +61,7 @@ void umq_ub_jetty_node_mark_err(jetty_pool_node_t *node);
 // DFX statistics
 typedef struct umq_ub_jetty_pool_stats {
     uint64_t total_num;         // Total nodes currently tracked (node_count)
-    uint64_t global_num;        // IDLE nodes in global active_q
+    uint64_t global_num;        // IDLE nodes in global active_ring
     uint64_t in_use_num;        // Nodes currently borrowed by a Logic UMQ (state == IN_USE)
     uint64_t err_num;           // Nodes marked is_jetty_err == true
     uint64_t acc_alloc_num;     // Cumulative allocs (nodes borrowed by Logic UMQ)
