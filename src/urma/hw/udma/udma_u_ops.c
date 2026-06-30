@@ -367,7 +367,7 @@ static urma_status_t udma_u_delete_context(urma_context_t *ctx)
 	return ret;
 }
 
-const urma_provider_ops_t g_udma_provider_ops = {
+urma_provider_ops_t g_udma_provider_ops = {
 	.name = "udma",
 	.attr = {
 		.version = 1,
