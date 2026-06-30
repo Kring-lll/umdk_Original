@@ -1402,6 +1402,7 @@ UMDK支持向接收端发送立即数，见urma_post_jfs_wr接口，所发送的
 | DFX接口 | urma_perftest | perftest运行参数配置 | ctp | — | ctp传输层 | √ | √ |
 | DFX接口 | urma_perftest | perftest运行参数配置 | jetty_id | — | 指定jetty id | √ | √ |
 | DFX接口 | urma_perftest | perftest运行参数配置 | wait_jfc_timeout | — | 中断模式等待时间 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | chip_id | — | 指定 bonding 设备 IODIE affinity，取值 0/1/2 | √ | √ |
 
 #### 运行环境
 
@@ -1733,6 +1734,7 @@ Options:
   --bind_ip <ip>              The ip for bind.
   --bond_mode                 Set bonding device mode, support: standalone, active_backup, balance.
   --bond_level                Set bonding device level, support: iodie, port.
+  --chip_id <id>              Set bonding-device IODIE affinity: 1=iodie_1, 2=iodie_2, 0=disabled.
 ```
 
 

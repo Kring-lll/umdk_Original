@@ -300,12 +300,12 @@ static void *run_read_lat_simplex(void *arg)
             status = urma_read(ctx->jfs[0], ctx->import_tjfr[0], ctx->local_tseg[0], ctx->import_tseg[0], lva,
                                rva, cfg->size, flag, (uintptr_t)++rid);
         } else {
-            urma_jfs_wr_t *wr = &run_ctx->jfs_wr[id * cfg->jfs_post_list];
+            bondp_jfs_wr_t *wr = &run_ctx->jfs_wr[id * cfg->jfs_post_list];
             urma_jfs_wr_t *bad_wr = NULL;
             for (uint32_t i = 0; i < cfg->jfs_post_list; i++) {
-                wr[i].user_ctx = (uintptr_t)++rid;
+                wr[i].base.user_ctx = (uintptr_t)++rid;
             }
-            status = urma_post_jfs_wr(ctx->jfs[id], wr, &bad_wr);
+            status = urma_post_jfs_wr(ctx->jfs[id], &wr->base, &bad_wr);
         }
 
         if (status != URMA_SUCCESS) {
@@ -390,12 +390,12 @@ static void *run_write_lat_simplex(void *arg)
                 status = urma_write(ctx->jfs[0], ctx->import_tjfr[0], ctx->import_tseg[0], ctx->local_tseg[0],
                                     rva, lva, cfg->size, flag, (uintptr_t)++rid);
             } else {
-                urma_jfs_wr_t *wr = &run_ctx->jfs_wr[id * cfg->jfs_post_list];
+                bondp_jfs_wr_t *wr = &run_ctx->jfs_wr[id * cfg->jfs_post_list];
                 urma_jfs_wr_t *bad_wr = NULL;
                 for (uint32_t i = 0; i < cfg->jfs_post_list; i++) {
-                    wr[i].user_ctx = (uintptr_t)++rid;
+                    wr[i].base.user_ctx = (uintptr_t)++rid;
                 }
-                status = urma_post_jfs_wr(ctx->jfs[id], wr, &bad_wr);
+                status = urma_post_jfs_wr(ctx->jfs[id], &wr->base, &bad_wr);
             }
             if (status != URMA_SUCCESS) {
                 LOG_ERROR("Failed to post jfs wr, id:%u, status:%d, scnt:%lu, rcnt:%lu\n",
@@ -586,19 +586,19 @@ static void *run_send_lat_simplex(void *arg)
                 status = urma_send(ctx->jfs[0], ctx->import_tjfr[0], ctx->local_tseg[0], lva, cfg->size,
                                    flag, (uintptr_t)++rid);
             } else {
-                urma_jfs_wr_t *wr = &run_ctx->jfs_wr[id * cfg->jfs_post_list];
+                bondp_jfs_wr_t *wr = &run_ctx->jfs_wr[id * cfg->jfs_post_list];
                 urma_jfs_wr_t *bad_wr = NULL;
                 for (uint32_t i = 0; i < cfg->jfs_post_list; i++) {
-                    wr[i].user_ctx = (uintptr_t)++rid;
+                    wr[i].base.user_ctx = (uintptr_t)++rid;
                 }
                 if (cfg->jfs_post_list == 1) {
                     if (scnt % cfg->cq_mod == 0) {
-                        wr[0].flag.bs.complete_enable = URMA_COMPLETE_ENABLE;
+                        wr[0].base.flag.bs.complete_enable = URMA_COMPLETE_ENABLE;
                     } else {
-                        wr[0].flag.bs.complete_enable = URMA_COMPLETE_DISABLE;
+                        wr[0].base.flag.bs.complete_enable = URMA_COMPLETE_DISABLE;
                     }
                 }
-                status = urma_post_jfs_wr(ctx->jfs[id], wr, &bad_wr);
+                status = urma_post_jfs_wr(ctx->jfs[id], &wr->base, &bad_wr);
             }
             if (status != URMA_SUCCESS) {
                 LOG_ERROR("Failed to post jfs wr, id:%u, status:%d, scnt:%lu, rcnt:%lu\n",
@@ -779,29 +779,35 @@ static void init_jfs_wr_opcode(urma_jfs_wr_t *wr, const perftest_config_t *cfg)
     }
 }
 
-static void init_jfs_wr_base(urma_jfs_wr_t *wr, perftest_context_t *ctx,
+static void init_jfs_wr_base(bondp_jfs_wr_t *wr, perftest_context_t *ctx,
                              const perftest_config_t *cfg, uint32_t jetty_index, uint32_t jfs_wr_index)
 {
-    init_jfs_wr_opcode(wr, cfg);
-    wr->flag.bs.complete_enable = ((jfs_wr_index + 1) % cfg->cq_mod == 0) ? 1 : 0;
-    wr->flag.bs.solicited_enable = 0;
+    urma_jfs_wr_t *base = &wr->base;
+    init_jfs_wr_opcode(base, cfg);
+    base->flag.bs.complete_enable = ((jfs_wr_index + 1) % cfg->cq_mod == 0) ? 1 : 0;
+    base->flag.bs.solicited_enable = 0;
     // set inline, inline_flag only filled in WRITE and SEND operation
     if (cfg->api_type == PERFTEST_WRITE || cfg->api_type == PERFTEST_SEND) {
-        wr->flag.bs.inline_flag = (cfg->size <= cfg->inline_size) ? 1 : 0;
+        base->flag.bs.inline_flag = (cfg->size <= cfg->inline_size) ? 1 : 0;
     } else {
-        wr->flag.bs.inline_flag = 0;
+        base->flag.bs.inline_flag = 0;
     }
     if (cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX) {
-        wr->tjetty = ctx->import_tjfr[jetty_index];
+        base->tjetty = ctx->import_tjfr[jetty_index];
     } else {
-        wr->tjetty = ctx->import_tjetty[jetty_index];
+        base->tjetty = ctx->import_tjetty[jetty_index];
     }
-    wr->user_ctx = (uintptr_t)jetty_index; // CQ gets this value to distinguish which jetty.
+    base->user_ctx = (uintptr_t)jetty_index; // CQ gets this value to distinguish which jetty.
+    if (cfg->chip_id > 0) {
+        base->flag.bs.has_drv_ext = 1;
+        wr->src_chip_id = cfg->chip_id;
+        wr->dst_chip_id = cfg->chip_id;
+    }
     run_test_ctx_t *run_ctx = &ctx->run_ctx;
-    wr->next = (jfs_wr_index == cfg->jfs_post_list - 1)
+    base->next = (jfs_wr_index == cfg->jfs_post_list - 1)
                    ? NULL
-                   : &run_ctx->jfs_wr[jetty_index * cfg->jfs_post_list + jfs_wr_index + 1];
-    wr->user_ctx = (uintptr_t)jetty_index;
+                   : &run_ctx->jfs_wr[jetty_index * cfg->jfs_post_list + jfs_wr_index + 1].base;
+    base->user_ctx = (uintptr_t)jetty_index;
 }
 
 static uint64_t get_expected_send_cqes(const urma_jfs_wr_t *wr)
@@ -1092,18 +1098,23 @@ static void init_credit_wr(perftest_context_t *ctx, perftest_config_t *cfg)
         run_ctx->remote_credit_sge[i].len = sizeof(uint64_t);
         run_ctx->remote_credit_sge[i].tseg = ctx->import_credit_seg[i];
 
-        run_ctx->credit_wr[i].opcode = URMA_OPC_WRITE;
-        run_ctx->credit_wr[i].flag.bs.complete_enable = 1;
-        run_ctx->credit_wr[i].tjetty = (cfg->jetty_mode == PERFTEST_JETTY_DUPLEX)
+        run_ctx->credit_wr[i].base.opcode = URMA_OPC_WRITE;
+        run_ctx->credit_wr[i].base.flag.bs.complete_enable = 1;
+        run_ctx->credit_wr[i].base.tjetty = (cfg->jetty_mode == PERFTEST_JETTY_DUPLEX)
                                            ? ctx->import_tjetty[i]
                                            : ctx->import_tjfr[i];
-        run_ctx->credit_wr[i].user_ctx = i;
-        run_ctx->credit_wr[i].user_ctx |= (1ULL << PERFTEST_FLAG_USER_CTX);
-        run_ctx->credit_wr[i].rw.src.sge = &run_ctx->credit_sge[i];
-        run_ctx->credit_wr[i].rw.src.num_sge = 1;
-        run_ctx->credit_wr[i].rw.dst.sge = &run_ctx->remote_credit_sge[i];
-        run_ctx->credit_wr[i].rw.dst.num_sge = 1;
-        run_ctx->credit_wr[i].next = NULL;
+        run_ctx->credit_wr[i].base.user_ctx = i;
+        run_ctx->credit_wr[i].base.user_ctx |= (1ULL << PERFTEST_FLAG_USER_CTX);
+        run_ctx->credit_wr[i].base.rw.src.sge = &run_ctx->credit_sge[i];
+        run_ctx->credit_wr[i].base.rw.src.num_sge = 1;
+        run_ctx->credit_wr[i].base.rw.dst.sge = &run_ctx->remote_credit_sge[i];
+        run_ctx->credit_wr[i].base.rw.dst.num_sge = 1;
+        run_ctx->credit_wr[i].base.next = NULL;
+        if (cfg->chip_id > 0) {
+            run_ctx->credit_wr[i].base.flag.bs.has_drv_ext = 1;
+            run_ctx->credit_wr[i].src_chip_id = cfg->chip_id;
+            run_ctx->credit_wr[i].dst_chip_id = cfg->chip_id;
+        }
     }
 }
 
@@ -1158,9 +1169,9 @@ static int prepare_jfs_wr(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     uint32_t i, j;
     run_test_ctx_t *run_ctx = &ctx->run_ctx;
-    urma_jfs_wr_t *wr;
+    bondp_jfs_wr_t *wr;
 
-    run_ctx->jfs_wr = calloc(1, sizeof(urma_jfs_wr_t) * cfg->jettys * cfg->jfs_post_list);
+    run_ctx->jfs_wr = calloc(1, sizeof(bondp_jfs_wr_t) * cfg->jettys * cfg->jfs_post_list);
     if (run_ctx->jfs_wr == NULL) {
         return -1;
     }
@@ -1178,7 +1189,7 @@ static int prepare_jfs_wr(perftest_context_t *ctx, perftest_config_t *cfg)
         for (j = 0; j < cfg->jfs_post_list; j++) {
             wr = &run_ctx->jfs_wr[i * cfg->jfs_post_list + j];
             init_jfs_wr_base(wr, ctx, cfg, i, j);
-            init_jfs_wr_sg(wr, ctx, cfg, i, j);
+            init_jfs_wr_sg(&wr->base, ctx, cfg, i, j);
         }
     }
     return 0;
@@ -1394,12 +1405,12 @@ static void *run_read_lat_duplex(void *arg)
         if (cfg->time_type.bs.iterations == 1) {
             run_ctx->tposted[id * cfg->iters + scnt] = get_cycles();
         }
-        urma_jfs_wr_t *wr = &run_ctx->jfs_wr[id * cfg->jfs_post_list];
+        bondp_jfs_wr_t *wr = &run_ctx->jfs_wr[id * cfg->jfs_post_list];
         urma_jfs_wr_t *bad_wr = NULL;
         for (uint32_t i = 0; i < cfg->jfs_post_list; i++) {
-            wr[i].user_ctx = (uintptr_t)++rid;
+            wr[i].base.user_ctx = (uintptr_t)++rid;
         }
-        urma_status_t status = urma_post_jetty_send_wr(ctx->jetty[id], wr, &bad_wr);
+        urma_status_t status = urma_post_jetty_send_wr(ctx->jetty[id], &wr->base, &bad_wr);
         if (status != URMA_SUCCESS) {
             LOG_ERROR("Failed to post jfs wr, id:%u, status:%d, scnt:%lu\n", id, (int)status, scnt);
             goto free_cr;
@@ -1518,12 +1529,12 @@ static void *run_write_lat_duplex(void *arg)
             scnt += cfg->jfs_post_list;
             *post_buf = (char)(scnt / cfg->jfs_post_list);
 
-            urma_jfs_wr_t *wr = &run_ctx->jfs_wr[id * cfg->jfs_post_list];
+            bondp_jfs_wr_t *wr = &run_ctx->jfs_wr[id * cfg->jfs_post_list];
             urma_jfs_wr_t *bad_wr = NULL;
             for (uint32_t i = 0; i < cfg->jfs_post_list; i++) {
-                wr[i].user_ctx = (uintptr_t)++rid;
+                wr[i].base.user_ctx = (uintptr_t)++rid;
             }
-            urma_status_t status = urma_post_jetty_send_wr(ctx->jetty[id], wr, &bad_wr);
+            urma_status_t status = urma_post_jetty_send_wr(ctx->jetty[id], &wr->base, &bad_wr);
             if (status != URMA_SUCCESS) {
                 LOG_ERROR("Failed to post jfs wr, id:%u, status:%d, scnt:%lu, rcnt:%lu\n",
                           id, (int)status, scnt, rcnt);
@@ -1737,19 +1748,19 @@ static void *run_send_lat_duplex(void *arg)
                 break;
             }
 
-            urma_jfs_wr_t *wr = &run_ctx->jfs_wr[id * cfg->jfs_post_list];
+            bondp_jfs_wr_t *wr = &run_ctx->jfs_wr[id * cfg->jfs_post_list];
             urma_jfs_wr_t *bad_wr = NULL;
             for (uint32_t i = 0; i < cfg->jfs_post_list; i++) {
-                wr[i].user_ctx = (uintptr_t)++rid;
+                wr[i].base.user_ctx = (uintptr_t)++rid;
             }
             if (cfg->jfs_post_list == 1) {
                 if (scnt % cfg->cq_mod == 0) {
-                    wr[0].flag.bs.complete_enable = URMA_COMPLETE_ENABLE;
+                    wr[0].base.flag.bs.complete_enable = URMA_COMPLETE_ENABLE;
                 } else {
-                    wr[0].flag.bs.complete_enable = URMA_COMPLETE_DISABLE;
+                    wr[0].base.flag.bs.complete_enable = URMA_COMPLETE_DISABLE;
                 }
             }
-            urma_status_t status = urma_post_jetty_send_wr(ctx->jetty[id], wr, &bad_wr);
+            urma_status_t status = urma_post_jetty_send_wr(ctx->jetty[id], &wr->base, &bad_wr);
             if (status != URMA_SUCCESS) {
                 LOG_ERROR("Failed to post jetty send wr, id:%u, status:%d, scnt:%lu, rcnt:%lu\n",
                           id, (int)status, scnt, rcnt);
@@ -1882,7 +1893,7 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                 }
                 if (cfg->jfs_post_list == 1 && (run_ctx->scnt[index] % cfg->cq_mod == 0 && cfg->cq_mod > 1) &&
                     !(run_ctx->scnt[index] == (cfg->iters - 1) && cfg->time_type.bs.iterations == 1)) {
-                    run_ctx->jfs_wr[index].flag.bs.complete_enable = 0;
+                    run_ctx->jfs_wr[index].base.flag.bs.complete_enable = 0;
                 }
 
                 if (cfg->no_peak == false) {
@@ -1892,16 +1903,16 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                 if (cfg->time_type.bs.duration == 1 && run_ctx->state == END_STATE) {
                     break;
                 }
-                urma_jfs_wr_t *wr = &run_ctx->jfs_wr[index * cfg->jfs_post_list];
+                bondp_jfs_wr_t *wr = &run_ctx->jfs_wr[index * cfg->jfs_post_list];
                 uint64_t expected_send_cqes = 0;
                 if (cfg->use_jfce == true) {
-                    expected_send_cqes = get_expected_send_cqes(wr);
+                    expected_send_cqes = get_expected_send_cqes(&wr->base);
                 }
                 urma_jfs_wr_t *bad_wr = NULL;
                 if (cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX) {
-                    status = urma_post_jfs_wr(ctx->jfs[index], wr, &bad_wr);
+                    status = urma_post_jfs_wr(ctx->jfs[index], &wr->base, &bad_wr);
                 } else {
-                    status = urma_post_jetty_send_wr(ctx->jetty[index], wr, &bad_wr);
+                    status = urma_post_jetty_send_wr(ctx->jetty[index], &wr->base, &bad_wr);
                 }
 
                 if (status != URMA_SUCCESS) {
@@ -1941,7 +1952,7 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                 if (cfg->jfs_post_list == 1 && (run_ctx->scnt[index] % cfg->cq_mod == cfg->cq_mod - 1 ||
                                                 (cfg->time_type.bs.iterations == 1 &&
                                                  run_ctx->scnt[index] == cfg->iters - 1))) {
-                    run_ctx->jfs_wr[index].flag.bs.complete_enable = 1;
+                    run_ctx->jfs_wr[index].base.flag.bs.complete_enable = 1;
                 }
 
                 if (cfg->is_rate_limit == true) {
@@ -2222,10 +2233,10 @@ static int run_once_bw_recv(perftest_context_t *ctx, perftest_config_t *cfg)
                                 }
                             }
                             if (cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX) {
-                                status = urma_post_jfs_wr(ctx->jfs[cr_id], &run_ctx->credit_wr[cr_id],
+                                status = urma_post_jfs_wr(ctx->jfs[cr_id], &run_ctx->credit_wr[cr_id].base,
                                                           &bad_send_wr);
                             } else {
-                                status = urma_post_jetty_send_wr(ctx->jetty[cr_id], &run_ctx->credit_wr[cr_id],
+                                status = urma_post_jetty_send_wr(ctx->jetty[cr_id], &run_ctx->credit_wr[cr_id].base,
                                                                  &bad_send_wr);
                             }
                             if (status != URMA_SUCCESS) {
@@ -2354,7 +2365,7 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                 }
                 if (cfg->jfs_post_list == 1 && (run_ctx->scnt[index] % cfg->cq_mod == 0 && cfg->cq_mod > 1) &&
                     !(run_ctx->scnt[index] == (cfg->iters - 1) && cfg->time_type.bs.iterations == 1)) {
-                    run_ctx->jfs_wr[index].flag.bs.complete_enable = 0;
+                    run_ctx->jfs_wr[index].base.flag.bs.complete_enable = 0;
                 }
                 if (!cfg->no_peak) {
                     run_ctx->tposted[tot_scnt] = get_cycles();
@@ -2362,15 +2373,15 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                 if (cfg->time_type.bs.duration == 1 && run_ctx->state == END_STATE) {
                     break;
                 }
-                urma_jfs_wr_t *wr = &run_ctx->jfs_wr[index * cfg->jfs_post_list];
+                bondp_jfs_wr_t *wr = &run_ctx->jfs_wr[index * cfg->jfs_post_list];
                 uint64_t expected_send_cqes = 0;
                 if (cfg->use_jfce == true) {
-                    expected_send_cqes = get_expected_send_cqes(wr);
+                    expected_send_cqes = get_expected_send_cqes(&wr->base);
                 }
                 if (cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX) {
-                    status = urma_post_jfs_wr(ctx->jfs[index], wr, &bad_jfs_wr);
+                    status = urma_post_jfs_wr(ctx->jfs[index], &wr->base, &bad_jfs_wr);
                 } else {
-                    status = urma_post_jetty_send_wr(ctx->jetty[index], wr, &bad_jfs_wr);
+                    status = urma_post_jetty_send_wr(ctx->jetty[index], &wr->base, &bad_jfs_wr);
                 }
                 if (status != URMA_SUCCESS) {
                     LOG_ERROR("Failed to post jfs: jetty %u, scnt=%lu, tot_scnt:%lu, ccnt:%lu, \
@@ -2399,7 +2410,7 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                 if (cfg->jfs_post_list == 1 && (run_ctx->scnt[index] % cfg->cq_mod == cfg->cq_mod - 1 ||
                                                 (cfg->time_type.bs.iterations == 1 &&
                                                  run_ctx->scnt[index] == cfg->iters - 1))) {
-                    run_ctx->jfs_wr[index].flag.bs.complete_enable = 1;
+                    run_ctx->jfs_wr[index].base.flag.bs.complete_enable = 1;
                 }
             }
         }
@@ -2544,10 +2555,10 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                             }
                         }
                         if (cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX) {
-                            status = urma_post_jfs_wr(ctx->jfs[cr_id], &run_ctx->credit_wr[cr_id],
+                            status = urma_post_jfs_wr(ctx->jfs[cr_id], &run_ctx->credit_wr[cr_id].base,
                                                       &bad_send_wr);
                         } else {
-                            status = urma_post_jetty_send_wr(ctx->jetty[cr_id], &run_ctx->credit_wr[cr_id],
+                            status = urma_post_jetty_send_wr(ctx->jetty[cr_id], &run_ctx->credit_wr[cr_id].base,
                                                              &bad_send_wr);
                         }
                         if (status != URMA_SUCCESS) {
@@ -2930,21 +2941,21 @@ static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
                     }
                 }
                 if (cfg->jfs_post_list == 1 && (run_ctx->scnt[index] % cfg->cq_mod == 0 && cfg->cq_mod > 1)) {
-                    run_ctx->jfs_wr[index].flag.bs.complete_enable = 0;
+                    run_ctx->jfs_wr[index].base.flag.bs.complete_enable = 0;
                 }
                 if (cfg->time_type.bs.duration == 1 && run_ctx->state == END_STATE) {
                     break;
                 }
-                urma_jfs_wr_t *wr = &run_ctx->jfs_wr[index * cfg->jfs_post_list];
+                bondp_jfs_wr_t *wr = &run_ctx->jfs_wr[index * cfg->jfs_post_list];
                 uint64_t expected_send_cqes = 0;
                 if (cfg->use_jfce == true) {
-                    expected_send_cqes = get_expected_send_cqes(wr);
+                    expected_send_cqes = get_expected_send_cqes(&wr->base);
                 }
                 urma_jfs_wr_t *bad_wr = NULL;
                 if (cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX) {
-                    status = urma_post_jfs_wr(ctx->jfs[index], wr, &bad_wr);
+                    status = urma_post_jfs_wr(ctx->jfs[index], &wr->base, &bad_wr);
                 } else {
-                    status = urma_post_jetty_send_wr(ctx->jetty[index], wr, &bad_wr);
+                    status = urma_post_jetty_send_wr(ctx->jetty[index], &wr->base, &bad_wr);
                 }
                 if (status != URMA_SUCCESS) {
                     LOG_ERROR("Failed to post send, status: %d, scnt: %lu, tot_scnt: %lu, ccnt: %lu, \
@@ -2962,7 +2973,7 @@ static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
                 if (cfg->jfs_post_list == 1 && (run_ctx->scnt[index] % cfg->cq_mod == cfg->cq_mod - 1 ||
                                                 (cfg->time_type.bs.iterations == 1 &&
                                                  run_ctx->scnt[index] == cfg->iters - 1))) {
-                    run_ctx->jfs_wr[index].flag.bs.complete_enable = 1;
+                    run_ctx->jfs_wr[index].base.flag.bs.complete_enable = 1;
                 }
 
                 if (cfg->is_rate_limit == true) {
@@ -3172,10 +3183,10 @@ static int run_once_bw_recv_infinite(perftest_context_t *ctx, perftest_config_t 
                             }
                         }
                         if (cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX) {
-                            status = urma_post_jfs_wr(ctx->jfs[cr_id], &run_ctx->credit_wr[cr_id],
+                            status = urma_post_jfs_wr(ctx->jfs[cr_id], &run_ctx->credit_wr[cr_id].base,
                                                       &bad_send_wr);
                         } else {
-                            status = urma_post_jetty_send_wr(ctx->jetty[cr_id], &run_ctx->credit_wr[cr_id],
+                            status = urma_post_jetty_send_wr(ctx->jetty[cr_id], &run_ctx->credit_wr[cr_id].base,
                                                              &bad_send_wr);
                         }
                         if (status != URMA_SUCCESS) {

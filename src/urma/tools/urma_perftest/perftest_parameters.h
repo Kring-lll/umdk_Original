@@ -205,7 +205,8 @@ enum perftest_opts {
     PERFTEST_OPT_V_ADDRESS,
     PERFTEST_OPT_SHARE_JFS,
     PERFTEST_OPT_SET_MIN_SIZE,
-    PERFTEST_OPT_SET_MAX_SIZE
+    PERFTEST_OPT_SET_MAX_SIZE,
+    PERFTEST_OPT_CHIP_ID
 };
 
 typedef enum perftest_rate_limiter_units {
@@ -331,6 +332,7 @@ typedef struct perftest_config {
     bool enable_bond_mode;
     uint32_t bond_mode;
     uint32_t bond_level;
+    uint32_t chip_id; /* 0=none, 1=iodie_1, 2=iodie_2 */
     bool uboe;
     perftest_net_addr_t sip;
     bool uboe_sip;
