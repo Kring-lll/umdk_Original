@@ -1025,6 +1025,9 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                     return -1;
                 }
                 break;
+            case PERFTEST_OPT_CHIP_ID:
+                (void)ub_str_to_u32(optarg, &cfg->chip_id);
+                break;
             case PERFTEST_OPT_SIP:
                 (void)str_to_ip(optarg, &cfg->sip);
                 cfg->uboe_sip = true;
