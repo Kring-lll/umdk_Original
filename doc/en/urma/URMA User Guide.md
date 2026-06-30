@@ -1360,6 +1360,7 @@ The following scenarios trigger the JFC to generate a completion record:
 | DFX Interface | urma_perftest | Run param config | ctp | — | CTP transport layer | √ | √ |
 | DFX Interface | urma_perftest | Run param config | jetty_id | — | Specify jetty id | √ | √ |
 | DFX Interface | urma_perftest | Run param config | wait_jfc_timeout | — | Interrupt mode wait timeout | √ | √ |
+| DFX Interface | urma_perftest | Run param config | chip_id | — | Bonding-device IODIE affinity, values 0/1/2 | √ | √ |
 
 #### Runtime Environment
 
@@ -1686,6 +1687,7 @@ Options:
   --bind_ip <ip>              The ip for bind.
   --bond_mode                 Set bonding device mode, support: standalone, active_backup, balance.
   --bond_level                Set bonding device level, support: iodie, port.
+  --chip_id <id>              Set bonding-device IODIE affinity: 1=iodie_1, 2=iodie_2, 0=disabled.
 ```
 
 
