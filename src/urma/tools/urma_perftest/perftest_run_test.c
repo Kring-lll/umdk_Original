@@ -793,6 +793,11 @@ static void init_jfs_wr_base(urma_jfs_wr_t *wr, perftest_context_t *ctx,
         wr->tjetty = ctx->import_tjetty[jetty_index];
     }
     wr->user_ctx = (uintptr_t)jetty_index; // CQ gets this value to distinguish which jetty.
+    if (cfg->chip_id > 0) {
+        bondp_jfs_wr_t *bondp_wr = (bondp_jfs_wr_t *)wr;
+        bondp_wr->src_chip_id = cfg->chip_id;
+        bondp_wr->dst_chip_id = cfg->chip_id;
+    }
     run_test_ctx_t *run_ctx = &ctx->run_ctx;
     wr->next = (jfs_wr_index == cfg->jfs_post_list - 1)
                    ? NULL
@@ -1100,6 +1105,11 @@ static void init_credit_wr(perftest_context_t *ctx, perftest_config_t *cfg)
         run_ctx->credit_wr[i].rw.dst.sge = &run_ctx->remote_credit_sge[i];
         run_ctx->credit_wr[i].rw.dst.num_sge = 1;
         run_ctx->credit_wr[i].next = NULL;
+        if (cfg->chip_id > 0) {
+            bondp_jfs_wr_t *bondp_wr = (bondp_jfs_wr_t *)&run_ctx->credit_wr[i];
+            bondp_wr->src_chip_id = cfg->chip_id;
+            bondp_wr->dst_chip_id = cfg->chip_id;
+        }
     }
 }
 
@@ -1156,7 +1166,7 @@ static int prepare_jfs_wr(perftest_context_t *ctx, perftest_config_t *cfg)
     run_test_ctx_t *run_ctx = &ctx->run_ctx;
     urma_jfs_wr_t *wr;
 
-    run_ctx->jfs_wr = calloc(1, sizeof(urma_jfs_wr_t) * cfg->jettys * cfg->jfs_post_list);
+    run_ctx->jfs_wr = calloc(1, sizeof(bondp_jfs_wr_t) * cfg->jettys * cfg->jfs_post_list);
     if (run_ctx->jfs_wr == NULL) {
         return -1;
     }

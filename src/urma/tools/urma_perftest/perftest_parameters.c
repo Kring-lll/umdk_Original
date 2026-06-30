@@ -197,7 +197,8 @@ static void usage(const char *argv0)
         "  --max_size                  Set max size in random io size, only for bw mode.\n"
         "  --bond_mode                 Set bonding device mode, support: standalone, active_backup, balance.\n"
         "                                                       default: standalone.\n"
-        "  --bond_level                Set bonding device level, support: iodie, port, default: iodie.\n");
+        "  --bond_level                Set bonding device level, support: iodie, port, default: iodie.\n"
+        "  --chip_id <id>              Set chip affinity: 1=iodie_1, 2=iodie_2. Requires bonding device.\n");
 }
 
 static perftest_cmd_type_t parse_command(const char *argv1)
@@ -397,6 +398,7 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->bond_mode = BONDP_BONDING_MODE_STANDALONE;
     cfg->bond_level = BONDP_BONDING_LEVEL_IODIE;
     cfg->share_jfs = false;
+    cfg->chip_id = 0;
     cfg->min_size = 0;
     cfg->max_size = 0;
     cfg->enable_random_size = 0;
@@ -455,6 +457,9 @@ void print_cfg(const perftest_config_t *cfg)
 
     if (cfg->api_type != PERFTEST_READ && cfg->api_type != PERFTEST_ATOMIC) {
         LOG_QUIET(" Max inline size     : %u[B]\n", cfg->inline_size);
+    }
+    if (cfg->chip_id > 0) {
+        LOG_QUIET(" Chip ID             : %u\n", cfg->chip_id);
     }
     LOG_QUIET(PERFTEST_RESULT_LINE);
 }
@@ -690,6 +695,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"stdout",              no_argument,       NULL, PERFTEST_OPT_STDOUT},
         {"bond_mode",           required_argument, NULL, PERFTEST_OPT_BOND_MODE},
         {"bond_level",          required_argument, NULL, PERFTEST_OPT_BOND_LEVEL},
+        {"chip_id",             required_argument, NULL, PERFTEST_OPT_CHIP_ID},
         {NULL,                  no_argument,       NULL, '\0'},
     };
     /* clang-format on */
@@ -1204,6 +1210,16 @@ int check_local_cfg(perftest_config_t *cfg)
         }
     }
 
+    if (cfg->chip_id > 2) {
+        LOG_ERROR("Invalid chip_id: %u, supported: 0, 1, 2.\n", cfg->chip_id);
+        return -1;
+    }
+
+    if (cfg->chip_id > 0 && strstr(cfg->dev_name, "bonding_dev") == NULL) {
+        LOG_ERROR("chip_id requires RM mode.\n");
+        return -1;
+    }
+    
     if (cfg->priority != PERFTEST_INVALID_PRIORITY && cfg->priority > URMA_MAX_PRIORITY) {
         LOG_ERROR("Invalid parameter(priority): %hhu, should be 0-15.\n", cfg->priority);
         return -1;
