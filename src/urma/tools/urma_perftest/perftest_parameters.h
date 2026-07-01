@@ -375,8 +375,6 @@ void destroy_cfg(perftest_config_t *cfg);
 int check_local_cfg(perftest_config_t *cfg);
 int check_remote_cfg(perftest_config_t *cfg);
 bool is_jfr_depth_valid(perftest_config_t *cfg);
-int establish_connection(perftest_config_t *cfg);
-void close_connection(perftest_config_t *cfg);
 int parse_va(const char *s, uint64_t *out);
 
 #endif

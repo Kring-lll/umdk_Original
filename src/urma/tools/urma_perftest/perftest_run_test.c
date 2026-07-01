@@ -3278,7 +3278,7 @@ static int prepare_run_bw_once(perftest_context_t *ctx, perftest_config_t *cfg,
     }
     if (cfg->bidirection) {
         for (i = 0; i < cfg->pair_num; i++) {
-            if (sock_sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(local_bw_report),
+            if (sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(local_bw_report),
                                (char *)(remote_bw_report)) != 0) {
                 LOG_ERROR("Failed to exchange local and remote report data.\n");
                 goto err_dest_jfs_wr;
@@ -3312,7 +3312,7 @@ static int run_bw_once(perftest_context_t *ctx, perftest_config_t *cfg)
             /* Size and iterations of local READ/WRITE/ATOMIC bw test should be filled before sync data */
             local_bw_report.size = cfg->size;
             local_bw_report.iters = cfg->iters;
-            if (sock_sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(&local_bw_report),
+            if (sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(&local_bw_report),
                                (char *)(&remote_bw_report)) != 0) {
                 LOG_ERROR("Failed to exchange local and remote data in server.\n");
                 return -1;
@@ -3352,7 +3352,7 @@ static int run_bw_once(perftest_context_t *ctx, perftest_config_t *cfg)
                 LOG_ERROR("Failed to sync time in bw test in client.\n");
                 return -1;
             }
-            if (sock_sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(&local_bw_report),
+            if (sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(&local_bw_report),
                                (char *)(&remote_bw_report)) != 0) {
                 LOG_ERROR("Failed to exchange local and remote data in client.\n");
                 return -1;
@@ -3413,7 +3413,7 @@ static int exchange_sum_len(perftest_context_t *ctx, perftest_config_t *cfg)
     int len = (int)sizeof(ctx->sum_size);
     uint64_t b;
     int ret = 0;
-    ret = sock_sync_data(cfg, 0, len, (char *)&a, (char *)&b);
+    ret = sync_data(cfg, 0, len, (char *)&a, (char *)&b);
     if (b != 0) {
         ctx->sum_size = b;
     }
@@ -3472,7 +3472,7 @@ static int run_send_bw_once(perftest_context_t *ctx, perftest_config_t *cfg)
 
     if (cfg->bidirection && cfg->time_type.bs.duration == 0) {
         for (i = 0; i < cfg->pair_num; i++) {
-            if (sock_sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(&local_bw_report),
+            if (sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(&local_bw_report),
                                (char *)(&remote_bw_report)) != 0) {
                 LOG_ERROR("Failed to exchange local and remote data.\n");
                 return -1;
