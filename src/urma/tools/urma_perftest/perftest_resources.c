@@ -907,14 +907,14 @@ static int exchange_seg_info(perftest_context_t *ctx, perftest_comm_t *comm, per
 
     if (cfg->pair_flag) {
         for (uint32_t i = 0; i < cfg->pair_num; i++) {
-            if (sock_sync_data(comm->sock_fd[i], sizeof(urma_seg_t),
+            if (sock_sync_data(cfg, i, sizeof(urma_seg_t),
                                (char *)&local_seg_buf[i], (char *)&remote_seg_buf[i]) != 0) {
                 LOG_ERROR("Failed to exchange seg %u!\n", i);
                 goto free_buf;
             }
         }
     } else {
-        if (sock_sync_data(comm->sock_fd[0], ctx->jetty_num * sizeof(urma_seg_t),
+        if (sock_sync_data(cfg, 0, ctx->jetty_num * sizeof(urma_seg_t),
                            (char *)local_seg_buf, (char *)remote_seg_buf) != 0) {
             LOG_ERROR("Failed to exchange seg!\n");
             goto free_buf;
@@ -954,14 +954,14 @@ static int exchange_jetty_id(perftest_context_t *ctx, perftest_comm_t *comm, per
 
     if (cfg->pair_flag) {
         for (uint32_t i = 0; i < cfg->pair_num; i++) {
-            if (sock_sync_data(comm->sock_fd[i], sizeof(urma_jetty_id_t),
+            if (sock_sync_data(cfg, i, sizeof(urma_jetty_id_t),
                                (char *)&local_jetty_id_buf[i], (char *)&remote_jetty_id_buf[i]) != 0) {
                 LOG_ERROR("Failed to exchange jetty %u!\n", i);
                 goto free_buf;
             }
         }
     } else {
-        if (sock_sync_data(comm->sock_fd[0], ctx->jetty_num * sizeof(urma_jetty_id_t),
+        if (sock_sync_data(cfg, 0, ctx->jetty_num * sizeof(urma_jetty_id_t),
                            (char *)local_jetty_id_buf, (char *)remote_jetty_id_buf) != 0) {
             LOG_ERROR("Failed to exchange jetty id!\n");
             goto free_buf;
@@ -1005,14 +1005,14 @@ static int exchange_credit_info(perftest_context_t *ctx, perftest_comm_t *comm, 
 
     if (cfg->pair_flag) {
         for (uint32_t i = 0; i < cfg->pair_num; i++) {
-            if (sock_sync_data(comm->sock_fd[i], sizeof(urma_seg_t),
+            if (sock_sync_data(cfg, i, sizeof(urma_seg_t),
                                (char *)&local_seg_buf[i], (char *)&remote_seg_buf[i]) != 0) {
                 LOG_ERROR("Failed to exchange seg %u!\n", i);
                 goto free_buf;
             }
         }
     } else {
-        if (sock_sync_data(comm->sock_fd[0], ctx->jetty_num * sizeof(urma_seg_t),
+        if (sock_sync_data(cfg, 0, ctx->jetty_num * sizeof(urma_seg_t),
                            (char *)local_seg_buf, (char *)remote_seg_buf) != 0) {
             LOG_ERROR("Failed to exchange seg!\n");
             goto free_buf;
@@ -1056,19 +1056,19 @@ static int exchange_notify_info(perftest_context_t *ctx, perftest_comm_t *comm, 
 
     if (cfg->pair_flag) {
         for (uint32_t i = 0; i < cfg->pair_num; i++) {
-            if (sock_sync_data(comm->sock_fd[i], sizeof(urma_seg_t),
+            if (sock_sync_data(cfg, i, sizeof(urma_seg_t),
                 (char *)&local_seg_buf[i], (char *)&remote_seg_buf[i]) != 0) {
                 LOG_ERROR("Failed to exchange seg %u!\n", i);
                 goto free_buf;
             }
-            if (sock_sync_data(comm->sock_fd[i], sizeof(uint32_t),
+            if (sock_sync_data(cfg, i, sizeof(uint32_t),
                 (char *)&i, (char *)&ctx->remote_jetty_idx) != 0) {
                 LOG_ERROR("Failed to exchange jetty_idx %u!\n", i);
                 goto free_buf;
             }
         }
     } else {
-        if (sock_sync_data(comm->sock_fd[0], ctx->jetty_num * sizeof(urma_seg_t),
+        if (sock_sync_data(cfg, 0, ctx->jetty_num * sizeof(urma_seg_t),
             (char *)local_seg_buf, (char *)remote_seg_buf) != 0) {
             LOG_ERROR("Failed to exchange seg!\n");
             goto free_buf;
@@ -1143,72 +1143,51 @@ static int create_tp_info(perftest_context_t *ctx, perftest_comm_t *comm, perfte
     tp_cfg.flag.bs.uboe = cfg->uboe;
     tp_cfg.trans_mode = cfg->trans_mode;
 
-    // All jfs/jetty within the same urma_ctx share the same eid
-    tp_cfg.local_eid =
-        cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX
-            ? ctx->jfs[0]->jfs_id.eid
-            : ctx->jetty[0]->jetty_id.eid;
-
-    tp_cfg.peer_eid = ctx->remote_jetty_id[0].eid;
-
-    // Step 1: Get TP list
-    if (cfg->trans_mode == URMA_TM_RM && cfg->tp_reuse) {
+    for (uint32_t i = 0; i < ctx->jetty_num; i++) {
+        if (cfg->tp_reuse && cfg->trans_mode == URMA_TM_RM && i > 0) {
+            ctx->tp_info[i] = ctx->tp_info[0];
+            continue;
+        }
+        tp_cfg.local_eid =
+            cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX
+                ? ctx->jfs[i]->jfs_id.eid
+                : ctx->jetty[i]->jetty_id.eid;
+        tp_cfg.peer_eid = ctx->remote_jetty_id[i].eid;
         uint32_t tp_cnt = 1;
-        int ret = urma_get_tp_list(ctx->urma_ctx, &tp_cfg, &tp_cnt, &ctx->tp_info[0]);
+        int ret = urma_get_tp_list(ctx->urma_ctx, &tp_cfg, &tp_cnt, &ctx->tp_info[i]);
         if (ret != URMA_SUCCESS || tp_cnt != 1) {
             LOG_ERROR("Failed to get tpid list, ret:%d, tp_cnt:%u!\n", ret, tp_cnt);
             goto free_buf;
         }
-    } else {
-        uint32_t tp_cnt = ctx->jetty_num;
-        int ret = urma_get_tp_list(ctx->urma_ctx, &tp_cfg, &tp_cnt, &ctx->tp_info[0]);
-        if (ret != URMA_SUCCESS || tp_cnt != ctx->jetty_num) {
-            LOG_ERROR("Failed to get tpid list, ret:%d, tp_cnt:%u!\n", ret, tp_cnt);
-            goto free_buf;
-        }
-    }
-
-    // Step 2: Assign tp_info for tp_reuse and set tp attributes
-    if (cfg->trans_mode == URMA_TM_RM && cfg->tp_reuse) {
-        for (uint32_t i = 1; i < ctx->jetty_num; i++) {
-            ctx->tp_info[i] = ctx->tp_info[0];
-        }
-    }
-
-    if (cfg->uboe) {
-        uint32_t set_tp_attr_flag = PERFTEST_SET_ATTR_BITMAP_UBOE;
-        uint8_t set_tp_attr_cnt = PERFTEST_SET_ATTR_CNT_UBOE;
-        if (cfg->use_ctp) {
-            LOG_ERROR("ctp is not supported by uboe!\n");
-            goto free_buf;
-        }
-        if (!cfg->uboe_dip || !cfg->uboe_sip) {
-            LOG_ERROR("uboe module need parametres: sip, dip, optional parametres: dscp, vlan, sl\n");
-            goto free_buf;
-        }
-        int ret = urma_get_smac(ctx->urma_ctx, cfg->smac);
-        if (ret != URMA_SUCCESS) {
-            LOG_ERROR("Failed to get smac, ret:%d\n", ret);
-            goto free_buf;
-        }
-        urma_net_addr_t net_addr;
-        net_addr.sin_family = AF_INET;
-        net_addr.in4.s_addr = cfg->dip.in4.addr;
-        if (memcmp(cfg->sip.raw, cfg->dip.raw, URMA_IP_ADDR_BYTES) == 0) {
-            (void)memcpy(cfg->dmac, cfg->smac, URMA_MAC_BYTES);
-        } else {
-            ret = urma_get_dmac(ctx->urma_ctx, &net_addr, cfg->dmac);
+        if (cfg->uboe) {
+            uint32_t set_tp_attr_flag = PERFTEST_SET_ATTR_BITMAP_UBOE;
+            uint8_t set_tp_attr_cnt = PERFTEST_SET_ATTR_CNT_UBOE;
+            if (cfg->use_ctp) {
+                LOG_ERROR("ctp is not supported by uboe!\n");
+                goto free_buf;
+            }
+            if (!cfg->uboe_dip || !cfg->uboe_sip) {
+                LOG_ERROR("uboe module need parametres: sip, dip, optional parametres: dscp, vlan, sl\n");
+                goto free_buf;
+            }
+            ret = urma_get_smac(ctx->urma_ctx, cfg->smac);
             if (ret != URMA_SUCCESS) {
+                LOG_ERROR("Failed to get smac, ret:%d\n", ret);
+                goto free_buf;
+            }
+            urma_net_addr_t net_addr;
+            net_addr.sin_family = AF_INET;
+            net_addr.in4.s_addr = cfg->dip.in4.addr;
+            if (memcmp(cfg->sip.raw, cfg->dip.raw, URMA_IP_ADDR_BYTES) == 0) {
+                (void)memcpy(cfg->dmac, cfg->smac, URMA_MAC_BYTES);
+            } else if (urma_get_dmac(ctx->urma_ctx, &net_addr, cfg->dmac) != URMA_SUCCESS) {
                 LOG_ERROR("Failed to get dmac by dip, ret:%d\n", ret);
                 goto free_buf;
             }
-        }
 
-        urma_tp_attr_value_t tp_attr = {0};
-        create_tp_info_get_attr_uboe(cfg, &tp_attr, &set_tp_attr_cnt, &set_tp_attr_flag);
+            urma_tp_attr_value_t tp_attr = {0};
+            create_tp_info_get_attr_uboe(cfg, &tp_attr, &set_tp_attr_cnt, &set_tp_attr_flag);
 
-        uint32_t set_cnt = (cfg->trans_mode == URMA_TM_RM && cfg->tp_reuse) ? 1 : ctx->jetty_num;
-        for (uint32_t i = 0; i < set_cnt; i++) {
             ret = urma_set_tp_attr(ctx->urma_ctx, ctx->tp_info[i].tp_handle, set_tp_attr_cnt,
                                    set_tp_attr_flag, &tp_attr);
             if (ret != URMA_SUCCESS) {
@@ -1254,14 +1233,14 @@ static int exchange_tp_info(perftest_context_t *ctx, perftest_comm_t *comm, perf
 
     if (cfg->pair_flag) {
         for (uint32_t i = 0; i < cfg->pair_num; i++) {
-            if (sock_sync_data(comm->sock_fd[i], sizeof(perftest_tp_info_t),
+            if (sock_sync_data(cfg, i, sizeof(perftest_tp_info_t),
                                (char *)&local_tp_info_buf[i], (char *)&remote_tp_info_buf[i]) != 0) {
                 LOG_ERROR("Failed to exchange tp info %u!\n", i);
                 goto free_buf;
             }
         }
     } else {
-        if (sock_sync_data(comm->sock_fd[0], ctx->jetty_num * sizeof(perftest_tp_info_t),
+        if (sock_sync_data(cfg, 0, ctx->jetty_num * sizeof(perftest_tp_info_t),
                            (char *)local_tp_info_buf, (char *)remote_tp_info_buf) != 0) {
             LOG_ERROR("Failed to exchange tp info!\n");
             goto free_buf;
@@ -1612,7 +1591,7 @@ static int connect_jfr_tp_aware(perftest_context_t *ctx, const perftest_config_t
         }
     }
 
-    if (sync_time(cfg->comm.sock_fd[0], "tp aware connect finished") != 0) {
+    if (sync_time(cfg, 0, "tp aware connect finished") != 0) {
         goto disconnect_jfr;
     }
     return 0;
@@ -1786,7 +1765,7 @@ static int connect_jetty_tp_aware(perftest_context_t *ctx, perftest_config_t *cf
         }
     }
 
-    if (sync_time(cfg->comm.sock_fd[0], "tp aware connect finished") != 0) {
+    if (sync_time(cfg, 0, "tp aware connect finished") != 0) {
         goto disconnect_jetty;
     }
 
@@ -2326,7 +2305,7 @@ static int fill_user_tp_info(perftest_context_t *ctx, perftest_config_t *cfg)
     }
 
     for (uint32_t i = 0; i < cfg->jettys; i++) {
-        if (sock_sync_data(cfg->comm.sock_fd[i], sizeof(user_tp_ctx_t) * cfg->jettys, (char *)&ctx->user_tp[i],
+        if (sock_sync_data(cfg, i, sizeof(user_tp_ctx_t) * cfg->jettys, (char *)&ctx->user_tp[i],
                            (char *)&ctx->remote_user_tp[i]) != 0) {
             LOG_ERROR("Failed to sync user tp info.\n");
             goto free_net_addr_list;
@@ -2341,7 +2320,7 @@ static int fill_user_tp_info(perftest_context_t *ctx, perftest_config_t *cfg)
         if (ctx->remote_user_tp[i].net_addr_list == NULL) {
             goto free_net_addr_list;
         }
-        if (sock_sync_data(cfg->comm.sock_fd[i], sizeof(urma_net_addr_info_t) * net_addr_cnt,
+        if (sock_sync_data(cfg, i, sizeof(urma_net_addr_info_t) * net_addr_cnt,
                            (char *)ctx->user_tp[i].net_addr_list, (char *)ctx->remote_user_tp[i].net_addr_list) != 0) {
             LOG_ERROR("Failed to sync user tp info.\n");
             goto free_remote_net_addr_list;
@@ -2509,7 +2488,7 @@ static void destroy_simplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     disconnect_jfr(ctx, cfg);
     unimport_seg(ctx, (int)ctx->jetty_num);
     for (uint32_t i = 0; i < cfg->pair_num; i++) {
-        (void)sync_time(cfg->comm.sock_fd[i], "unimport_jfr");
+        (void)sync_time(cfg, i, "unimport_jfr");
     }
     if (cfg->enable_notify == true) {
         unimport_notify(ctx, ctx->jetty_num);
@@ -2539,7 +2518,7 @@ static void destroy_duplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     }
     disconnect_jetty(ctx, cfg);
     for (uint32_t i = 0; i < cfg->pair_num; i++) {
-        (void)sync_time(cfg->comm.sock_fd[i], "unimport_jetty");
+        (void)sync_time(cfg, i, "unimport_jetty");
     }
     if (cfg->enable_notify == true) {
         unimport_notify(ctx, ctx->jetty_num);

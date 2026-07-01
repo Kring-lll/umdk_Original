@@ -133,46 +133,6 @@ static umq_framework_t g_umq_fws[UMQ_TRANS_MODE_MAX] = {
         .dfx_ops_get_func = NULL,
         .dfx_tp_ops = NULL,
     },
-    [UMQ_TRANS_MODE_IPC] = {
-        .mode = UMQ_TRANS_MODE_IPC,
-        .enable = false,
-
-        .dlopen_so_name = "libumq_ipc.so",
-        .dlhandler = NULL,
-
-        .ops_get_funcname = "umq_ipc_ops_get",
-        .ops_get_func = NULL,
-        .tp_ops = NULL,
-        .ctx = NULL,
-
-        .pro_ops_get_funcname = "umq_pro_ipc_ops_get",
-        .pro_ops_get_func = NULL,
-        .pro_tp_ops = NULL,
-
-        .dfx_ops_get_funcname = "umq_ipc_dfx_ops_get",
-        .dfx_ops_get_func = NULL,
-        .dfx_tp_ops = NULL,
-    },
-    [UMQ_TRANS_MODE_UBMM] = {
-        .mode = UMQ_TRANS_MODE_UBMM,
-        .enable = false,
-
-        .dlopen_so_name = "libumq_ubmm.so",
-        .dlhandler = NULL,
-
-        .ops_get_funcname = "umq_ubmm_ops_get",
-        .ops_get_func = NULL,
-        .tp_ops = NULL,
-        .ctx = NULL,
-
-        .pro_ops_get_funcname = "umq_pro_ubmm_ops_get",
-        .pro_ops_get_func = NULL,
-        .pro_tp_ops = NULL,
-
-        .dfx_ops_get_funcname = "umq_ubmm_dfx_ops_get",
-        .dfx_ops_get_func = NULL,
-        .dfx_tp_ops = NULL,
-    },
     [UMQ_TRANS_MODE_UB_PLUS] = {
         .mode = UMQ_TRANS_MODE_UB_PLUS,
         .enable = false,
@@ -225,26 +185,23 @@ static umq_framework_t g_umq_fws[UMQ_TRANS_MODE_MAX] = {
         .dfx_ops_get_func = NULL,
         .dfx_tp_ops = NULL,
     },
-    [UMQ_TRANS_MODE_UBMM_PLUS] = {
-        .mode = UMQ_TRANS_MODE_UBMM_PLUS,
-        .enable = false,
-
-        .dlopen_so_name = "libumq_ubmm.so",
-        .dlhandler = NULL,
-
-        .ops_get_funcname = "umq_ubmm_plus_ops_get",
-        .ops_get_func = NULL,
-        .tp_ops = NULL,
-        .ctx = NULL,
-
-        .pro_ops_get_funcname = "umq_pro_ubmm_plus_ops_get",
-        .pro_ops_get_func = NULL,
-        .pro_tp_ops = NULL,
-        .dfx_ops_get_funcname = "umq_ubmm_plus_dfx_ops_get",
-        .dfx_ops_get_func = NULL,
-        .dfx_tp_ops = NULL,
-    },
 };
+
+typedef void (*umq_thread_closure_func)(uint64_t id);
+
+typedef struct thread_closure_callback_args {
+    umq_trans_mode_t trans_mode;
+    umq_thread_closure_func func;
+    uint64_t id;
+    void *dlhandler;
+} thread_closure_callback_args_t;
+
+typedef struct umq_thread_closure {
+    void *dlhandler;
+    volatile uint32_t dlhandler_ref_cnt;
+} umq_thread_closure_t;
+
+static umq_thread_closure_t g_umq_thread_closure[UMQ_TRANS_MODE_MAX];
 
 umq_dfx_ops_t *umq_get_dfx_tp_ops(umq_trans_mode_t trans_mode)
 {
@@ -254,6 +211,56 @@ umq_dfx_ops_t *umq_get_dfx_tp_ops(umq_trans_mode_t trans_mode)
         return NULL;
     }
     return umq_fw->dfx_tp_ops;
+}
+
+static void umq_thread_closure_callback(uint64_t id)
+{
+    thread_closure_callback_args_t *args = (thread_closure_callback_args_t *)id;
+    if (args->func != NULL && args->dlhandler != NULL) {
+        args->func(args->id);
+    }
+
+    if (args->trans_mode < UMQ_TRANS_MODE_MAX && args->dlhandler != NULL &&
+        __atomic_sub_fetch(&g_umq_thread_closure[args->trans_mode].dlhandler_ref_cnt, 1, __ATOMIC_ACQ_REL) == 0) {
+        dlclose(args->dlhandler);
+    }
+    free(args);
+}
+
+int umq_thread_closure_register(umq_trans_mode_t trans_mode,
+    urpc_thread_closure_type_t type, uint64_t id, void (*closure)(uint64_t id))
+{
+    thread_closure_callback_args_t *args =
+        (thread_closure_callback_args_t *)calloc(1, sizeof(thread_closure_callback_args_t));
+    if (args == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "thread closure callback args calloc failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    args->func = closure;
+    args->id = id;
+    args->trans_mode = trans_mode;
+
+    if (trans_mode >= UMQ_TRANS_MODE_MAX) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "trans mode invalid\n");
+        free(args);
+        return -UMQ_ERR_EINVAL;
+    }
+
+#ifndef UMQ_STATIC_LIB
+    if (__atomic_fetch_add(&g_umq_thread_closure[trans_mode].dlhandler_ref_cnt, 1, __ATOMIC_ACQ_REL) == 0) {
+        g_umq_thread_closure[trans_mode].dlhandler =
+            dlopen(g_umq_fws[trans_mode].dlopen_so_name, RTLD_LAZY | RTLD_GLOBAL);
+        if (g_umq_thread_closure[trans_mode].dlhandler == NULL) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "open so failed, err: %s\n", dlerror());
+            free(args);
+            return UMQ_FAIL;
+        }
+    }
+#endif
+
+    urpc_thread_closure_register(type, (uint64_t)(uintptr_t)args, umq_thread_closure_callback);
+    return UMQ_SUCCESS;
 }
 
 static int umq_dev_assign_validate(umq_dev_assign_t *dev_info)
@@ -888,6 +895,8 @@ int umq_unbind(uint64_t umqh)
 
 umq_buf_t *umq_buf_alloc(uint32_t request_size, uint32_t request_qbuf_num, uint64_t umqh, umq_alloc_option_t *option)
 {
+    umq_buf_t *qbuf = NULL;
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
     if (!g_umq_inited || request_qbuf_num == 0 || request_size > UMQ_MAX_BUF_REQUEST_SIZE) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "param invalid or umq not initialized\n");
         return NULL;
@@ -905,6 +914,7 @@ umq_buf_t *umq_buf_alloc(uint32_t request_size, uint32_t request_qbuf_num, uint6
             return NULL;
         }
 
+        umq_perf_record_write(UMQ_PERF_RECORD_BUF_ALLOC, start_timestamp);
         return QBUF_LIST_FIRST(&head);
     }
 
@@ -915,11 +925,14 @@ umq_buf_t *umq_buf_alloc(uint32_t request_size, uint32_t request_qbuf_num, uint6
         return NULL;
     }
 
-    return umq->tp_ops->umq_tp_buf_alloc(request_size, request_qbuf_num, umq->umqh_tp, option);
+    qbuf = umq->tp_ops->umq_tp_buf_alloc(request_size, request_qbuf_num, umq->umqh_tp, option);
+    umq_perf_record_write(UMQ_PERF_RECORD_BUF_ALLOC, start_timestamp);
+    return qbuf;
 }
 
 void umq_buf_free(umq_buf_t *qbuf)
 {
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
     if (!g_umq_inited || qbuf == NULL) {
         return;
     }
@@ -929,6 +942,8 @@ void umq_buf_free(umq_buf_t *qbuf)
     if (qbuf->umqh == UMQ_INVALID_HANDLE) {
         if (QBUF_LIST_NEXT(qbuf) == NULL) {
             umq_invalid_handle_buf_free(&head, umq_pool_type_get(qbuf->mempool_id));
+
+            umq_perf_record_write(UMQ_PERF_RECORD_BUF_FREE, start_timestamp);
             return;
         }
 
@@ -962,6 +977,8 @@ void umq_buf_free(umq_buf_t *qbuf)
 
         QBUF_LIST_FIRST(&free_head) = free_node;
         umq_invalid_handle_buf_free(&free_head, type);
+
+        umq_perf_record_write(UMQ_PERF_RECORD_BUF_FREE, start_timestamp);
         return;
     }
 
@@ -973,6 +990,7 @@ void umq_buf_free(umq_buf_t *qbuf)
     }
 
     umq->tp_ops->umq_tp_buf_free(qbuf, umq->umqh_tp);
+    umq_perf_record_write(UMQ_PERF_RECORD_BUF_FREE, start_timestamp);
 }
 
 umq_buf_t *umq_buf_break_and_free(umq_buf_t *qbuf)
@@ -1064,21 +1082,27 @@ int umq_buf_reset(umq_buf_t *qbuf)
 
 umq_buf_t *umq_data_to_head(void *data)
 {
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
     if (!g_umq_inited || data == NULL) {
         return NULL;
     }
 
     umq_buf_t *buf = umq_qbuf_data_to_head(data);
     if (buf != NULL) {
+        umq_perf_record_write(UMQ_PERF_RECORD_BUF_DATA_TO_HEAD, start_timestamp);
         return buf;
     }
 
     buf = umq_tiny_qbuf_data_to_head(data);
     if (buf != NULL) {
+        umq_perf_record_write(UMQ_PERF_RECORD_BUF_DATA_TO_HEAD, start_timestamp);
         return buf;
     }
 
-    return umq_qbuf_expansion_data_to_head(data);
+    buf = umq_qbuf_expansion_data_to_head(data);
+
+    umq_perf_record_write(UMQ_PERF_RECORD_BUF_DATA_TO_HEAD, start_timestamp);
+    return buf;
 }
 
 int umq_enqueue(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)

@@ -13,7 +13,6 @@
 #include "umq_qbuf_pool.h"
 #include "umq_huge_qbuf_pool.h"
 #include "umq_ub_flow_control.h"
-#include "umq_ub_flow_control_sge.h"
 #include "qbuf_list.h"
 #include "umq_ub_api.h"
 #include "umq_symbol_private.h"
@@ -99,8 +98,7 @@ int umq_ub_bind_info_check(ub_queue_t *queue, umq_ub_bind_info_t *info)
         return -UMQ_ERR_EINVAL;
     }
 
-    if (dev_info->umq_trans_mode != UMQ_TRANS_MODE_UB && dev_info->umq_trans_mode != UMQ_TRANS_MODE_UB_PLUS &&
-        dev_info->umq_trans_mode != UMQ_TRANS_MODE_UBMM && dev_info->umq_trans_mode != UMQ_TRANS_MODE_UBMM_PLUS) {
+    if (dev_info->umq_trans_mode != UMQ_TRANS_MODE_UB && dev_info->umq_trans_mode != UMQ_TRANS_MODE_UB_PLUS) {
         UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), trans mode %d is not UB\n", queue->umq_id, dev_info->umq_trans_mode);
         return -UMQ_ERR_EINVAL;
     }
@@ -1519,9 +1517,6 @@ void umq_ub_jfr_ctx_destroy(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
         }
     }
     rx_buf_ctx_list_uninit(&queue->jfr_ctx[jetty_idx]->rx_buf_ctx_list);
-    if (jetty_idx == UB_QUEUE_JETTY_FLOW_CONTROL) {
-        umq_ub_flow_control_share_rq_sge_uninit(&queue->jfr_ctx[jetty_idx]->share_rq_sge);
-    }
     free(queue->jfr_ctx[jetty_idx]);
     queue->jfr_ctx[jetty_idx] = NULL;
 }
