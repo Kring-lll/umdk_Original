@@ -379,11 +379,8 @@ int umq_info_to_str(const umq_info_t *umq_info, char *buf, int max_buf_len)
         [UMQ_TRANS_MODE_UB]        = "UB",
         [UMQ_TRANS_MODE_IB]        = "IB",
         [UMQ_TRANS_MODE_UCP]       = "UCP",
-        [UMQ_TRANS_MODE_IPC]       = "IPC",
-        [UMQ_TRANS_MODE_UBMM]      = "UBMM",
         [UMQ_TRANS_MODE_UB_PLUS]   = "UB_PLUS",
         [UMQ_TRANS_MODE_IB_PLUS]   = "IB_PLUS",
-        [UMQ_TRANS_MODE_UBMM_PLUS] = "UB_PLUS",
     };
 
     // Format UMQ Info

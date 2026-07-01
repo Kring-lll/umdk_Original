@@ -103,11 +103,8 @@ typedef enum umq_trans_mode {
     UMQ_TRANS_MODE_UB = 0,              // ub, max io size 64K
     UMQ_TRANS_MODE_IB,                  // ib, max io size 64K
     UMQ_TRANS_MODE_UCP,                 // ub offload, max io size 64K
-    UMQ_TRANS_MODE_IPC,                 // local ipc, max io size 10M
-    UMQ_TRANS_MODE_UBMM,                // ub share memory, max io size 8K
     UMQ_TRANS_MODE_UB_PLUS,             // ub, max io size 10M
     UMQ_TRANS_MODE_IB_PLUS,             // ib, max io size 10M
-    UMQ_TRANS_MODE_UBMM_PLUS,           // ub share memory, max io size 10M
     UMQ_TRANS_MODE_MAX,
 } umq_trans_mode_t;
 
@@ -257,7 +254,7 @@ typedef struct umq_buf_pool_cfg {
     // set block_size for umq_buf_size_small(), umq_buf_size_middle() and umq_buf_size_big() will be automatically
     // adjusted
     umq_buf_block_size_t small_block_size;
-    // Total initial size of normal and tiny pools. Set to 1024MB if 0 in UB/UB_PLUS/UBMM/UBMM_PLUS mode.
+    // Total initial size of normal and tiny pools. Set to 1024MB if 0 in UB/UB_PLUS mode.
     uint64_t umq_mem_pool_init_size;
     // Minimum initial normal-pool block count. 0 means no validation.
     uint32_t normal_pool_block_count;
@@ -290,8 +287,6 @@ typedef struct umq_init_cfg {
     bool io_lock_free;              // true: user should ensure thread safety when call io function
     uint8_t trans_info_num;
     umq_flow_control_cfg_t flow_control; // used when UMQ_FEATURE_ENABLE_FLOW_CONTROL is set
-    uint16_t cna;
-    uint32_t ubmm_eid;
     umq_trans_info_t trans_info[MAX_UMQ_TRANS_INFO_NUM];
     umq_buf_pool_cfg_t buf_pool_cfg;
     umq_tp_pool_cfg_t tp_pool_cfg;

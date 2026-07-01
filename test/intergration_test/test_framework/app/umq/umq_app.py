@@ -23,9 +23,7 @@ local_path = os.path.dirname(os.path.abspath(__file__))
 UMQ_TRANS_MODE_IP = 0
 UMQ_TRANS_MODE_UB = 1
 UMQ_TRANS_MODE_IB = 2
-UMQ_TRANS_MODE_IPC = 3
 UMQ_TRANS_MODE_UB_PLUS = 5
-UMQ_TRANS_MODE_UBMM_PLUS = 7
 
 UMQ_TM_RC = 0
 UMQ_TM_RM = 1
@@ -85,10 +83,6 @@ def get_trans_mode(mode):
         trans_mode = UMQ_TRANS_MODE_IB
     if mode == 'UB_PLUS':
         trans_mode = UMQ_TRANS_MODE_UB_PLUS
-    if mode == 'UBMM_PLUS':
-        trans_mode = UMQ_TRANS_MODE_UBMM_PLUS
-    if mode == 'UB_IPC':
-        trans_mode = UMQ_TRANS_MODE_IPC
     return trans_mode
 
 

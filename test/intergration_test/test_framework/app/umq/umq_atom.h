@@ -62,9 +62,7 @@ typedef enum {
     TEST_TRANS_MODE_IP = 0,
     TEST_TRANS_MODE_UB,
     TEST_TRANS_MODE_IB,
-    TEST_TRANS_MODE_IPC = 3,
     TEST_TRANS_MODE_UB_PLUS = 5,
-    TEST_TRANS_MODE_UBMM_PLUS = 7,
 } test_trans_mode_t;
 
 typedef enum {
@@ -198,8 +196,6 @@ static inline uint64_t get_timestamp_s(void)
 }
 
 int test_umq_str_to_eid(const char *buf, umq_eid_t *eid);
-void test_get_ubmm_cna(test_umq_ctx_t *ctx);
-void test_get_ubmm_eid(test_umq_ctx_t *ctx);
 test_umq_ctx_t *test_umq_ctx_init(int argc, char *argv[], int thread_num = 1);
 int test_umq_ctx_uninit(test_umq_ctx_t *ctx);
 int set_trans_dev_info(test_umq_ctx_t *ctx, umq_dev_assign_t *dev_info, umq_dev_assign_mode_t assign_mode);

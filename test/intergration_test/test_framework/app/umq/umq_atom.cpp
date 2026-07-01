@@ -86,22 +86,6 @@ static uint16_t hexStringToUint16(const char *hexString)
     return (uint16_t)result;
 }
 
-void test_get_ubmm_cna(test_umq_ctx_t *ctx)
-{
-    char cmd_cna[MAX_LINE_LENGTH];
-    exec_cmd(cmd_cna, MAX_LINE_LENGTH, "cat /sys/bus/ub/devices/00001/primary_cna");
-    ctx->cna = static_cast<uint32_t>(hexStringToUint16(cmd_cna));
-    TEST_LOG_INFO("this host cna=%u\n", ctx->cna);
-}
-
-void test_get_ubmm_eid(test_umq_ctx_t *ctx)
-{
-    char cmd_eid[MAX_LINE_LENGTH];
-    exec_cmd(cmd_eid, MAX_LINE_LENGTH, "cat /sys/bus/ub/devices/00001/eid");
-    ctx->eid = static_cast<uint32_t>(atoi(cmd_eid));
-    TEST_LOG_INFO("this host eid=%u\n", ctx->eid);
-}
-
 test_umq_ctx_t *test_umq_ctx_init(int argc, char * argv[], int thread_num)
 {
     (void)memset(&g_test_umq_ctx, 0, sizeof(test_umq_ctx_t));
@@ -130,9 +114,7 @@ test_umq_ctx_t *test_umq_ctx_init(int argc, char * argv[], int thread_num)
         TEST_LOG_INFO("test case trans_mode=%d is IB\n", ctx->mode);
         g_test_umq_ctx.trans_mode = UMQ_TRANS_MODE_IB;
         break;
-        case TEST_TRANS_MODE_IPC:
         case TEST_TRANS_MODE_UB_PLUS:
-        case TEST_TRANS_MODE_UBMM_PLUS:
             TEST_LOG_INFO("test case trans_mode=%d is PLUS\n", ctx->mode);
             g_test_umq_ctx.trans_mode = static_cast<umq_trans_mode_t>(ctx->mode);
     }
@@ -217,12 +199,6 @@ int set_umq_init_cfg(test_umq_ctx_t *ctx, umq_dev_assign_mode_t assign_mode, umq
     ctx->cfg.trans_info_num = 1;
     ctx->cfg.trans_info[0].trans_mode = trans_mode;
 
-    if (trans_mode == UMQ_TRANS_MODE_UBMM_PLUS) {
-        test_get_ubmm_cna(ctx);
-        ctx->cfg.cna = ctx->cna;
-        test_get_ubmm_eid(ctx);
-        ctx->cfg.ubmm_eid = ctx->eid;
-    }
     return set_trans_dev_info(ctx, &ctx->cfg.trans_info[0].dev_info, assign_mode);
 }
 
@@ -459,10 +435,6 @@ int set_umq_creat_option(test_umq_ctx_t *ctx, bool all_interrupt)
                 ctx->umqh_ops[i].option.mode = UMQ_MODE_INTERRUPT;
             } else {
                 ctx->umqh_ops[i].option.mode = UMQ_MODE_POLLING;
-            }
-
-            if (ctx->trans_mode == UMQ_TRANS_MODE_UBMM_PLUS) {
-
             }
     }
     return rc;
@@ -860,31 +832,14 @@ EXIT:
     return ret;
 }
 
-uint64_t get_buf_alloc_umqh(umqh_ops_t *umqh_ops, uint32_t data_size)
-{
-    uint64_t umqh = 0;
-    if (g_test_umq_ctx.trans_mode == UMQ_TRANS_MODE_UBMM_PLUS) {
-        if (data_size <= UMQ_QBUF_BLOCK_SIZE) {
-            umqh = umqh_ops->qh;
-        } else {
-            umqh = 0;
-        }
-    } else if (g_test_umq_ctx.trans_mode == UMQ_TRANS_MODE_IPC) {
-        umqh = umqh_ops->qh;
-    } else {
-        umqh = 0;
-    }
-    return umqh;
-}
 
 umq_buf_t *test_umq_buf_alloc(umqh_ops_t *umqh_ops, umq_alloc_option_t *option, const char *data, uint32_t data_size)
 {
     uint32_t request_qbuf_num = data_size % UMQ_QBUF_BLOCK_SIZE == 0 ? data_size / UMQ_QBUF_BLOCK_SIZE : data_size / UMQ_QBUF_BLOCK_SIZE + 1;
     uint32_t request_size = data_size > UMQ_QBUF_BLOCK_SIZE ? UMQ_QBUF_BLOCK_SIZE : data_size;
     TEST_LOG_INFO("umq_buf_alloc request_size=%u request_qbuf_num=%u\n", data_size, request_qbuf_num);
-    uint64_t umqh = get_buf_alloc_umqh(umqh_ops, data_size);
 
-    umq_buf_t *buf = umq_buf_alloc(request_size, request_qbuf_num, umqh, option);
+    umq_buf_t *buf = umq_buf_alloc(request_size, request_qbuf_num, 0, option);
     if (buf == nullptr) {
         TEST_LOG_ERROR("umq_buf_alloc buf is null\n");
         return nullptr;
