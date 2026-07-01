@@ -1219,7 +1219,12 @@ int umq_ub_transport_pool_resource_destroy_impl(uint64_t umqh_tp, uint32_t tp_ha
         return -UMQ_ERR_EINVAL;
     }
 
-    umq_ub_jetty_node_list_t *jetty_node_list = umq_ub_jetty_pool_get_jetty_node_list();
+    if (queue->jetty_node_list == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "share jetty main UMQ(ID:%u) whitout jetty node list\n", queue->umq_id);
+        return -UMQ_ERR_EINVAL;
+    }
+
+    umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
     if (tp_handle_idx >= jetty_node_list->list_len) {
         UMQ_VLOG_ERR(VLOG_UMQ, "invalid jetty node index %u, jetty node list len %u\n",
             tp_handle_idx, jetty_node_list->list_len);
@@ -2951,7 +2956,13 @@ int umq_ub_transport_pool_resource_modify_impl(uint64_t umqh_tp, uint32_t tp_han
         UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u) is not share transport main umq\n", queue->umq_id);
         return -UMQ_ERR_EINVAL;
     }
-    umq_ub_jetty_node_list_t *jetty_node_list = umq_ub_jetty_pool_get_jetty_node_list();
+
+    if (queue->jetty_node_list == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "share jetty main UMQ(ID:%u) whitout jetty node list\n", queue->umq_id);
+        return -UMQ_ERR_EINVAL;
+    }
+
+    umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
     if (!urpc_bitmap_is_set(jetty_node_list->bitmap, tp_handle_idx)) {
         UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u) tp_handle_idx %u tp handle not exist\n", queue->umq_id, tp_handle_idx);
         return -UMQ_ERR_EINVAL;
