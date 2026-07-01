@@ -10,8 +10,12 @@
 
 #include <dirent.h>
 #include <errno.h>
-#include <netlink/errno.h>
+#include <netlink/attr.h>
+#include <netlink/genl/ctrl.h>
 #include <netlink/genl/genl.h>
+#include <netlink/handlers.h>
+#include <netlink/netlink.h>
+#include <netlink/socket.h>
 #include <stdio.h>
 
 #include "ub_list.h"
@@ -1153,8 +1157,25 @@ static int admin_print_topo_map(tool_topo_map_t *topo_map, uint32_t node_id, con
             has_bonding_name = bonding_dev.dev_name[0] != '\0';
         } else if (admin_cmd_get_topo_bonding_dev_by_eid((urma_eid_t *)agg_dev->agg_eid, &bonding_dev) == 0 &&
                    bonding_dev.dev_name[0] != '\0') {
+            // (void)printf("[test_topo] bonding_cache_valid[%u] = false\n", agg_dev_idx);
             has_bonding_name = true;
         }
+        // (void)printf("[test_topo] agg_dev_idx=%u, agg_eid=%s, bonding_dev_name=%s, bonding_eid_idx=%u\n",
+        //              agg_dev_idx, eid_str,
+        //              has_bonding_name ? bonding_dev.dev_name : "(none)",
+        //              bonding_dev.bonding_eid_idx);
+        // for (uint32_t p_idx = 0; p_idx < IODIE_NUM; p_idx++) {
+        //     if (bonding_dev.physical_devs[p_idx].dev_name[0] != '\0') {
+        //         (void)printf("[test_topo]   physical_devs[%u]: dev_name=%s, chip_id=%u, primary_eid_idx=%u\n",
+        //                      p_idx, bonding_dev.physical_devs[p_idx].dev_name,
+        //                      bonding_dev.physical_devs[p_idx].chip_id,
+        //                      bonding_dev.physical_devs[p_idx].primary_eid_idx);
+        //         for (uint32_t k = 0; k < PORT_NUM; k++) {
+        //             (void)printf("[test_topo]     port_eid_idx[%u]=%u\n",
+        //                          k, bonding_dev.physical_devs[p_idx].port_eid_idx[k]);
+        //         }
+        //     }
+        // }
         if (has_bonding_name) {
             (void)printf("Dev %d (%s): %s\n", agg_dev_idx, bonding_dev.dev_name, eid_str);
         } else {
@@ -1265,10 +1286,14 @@ static int cmd_show_physical_dev_cb(struct nl_msg *msg, void *arg)
     struct genlmsghdr *genlhdr = genlmsg_hdr(hdr);
     struct nlattr *attrs[UBCORE_ATTR_AFTER_LAST] = {0};
     admin_show_physical_dev_ctx_t *ctx = (admin_show_physical_dev_ctx_t *)arg;
+
+    // (void)printf("[test_topo] cmd_show_physical_dev_cb: nlmsg_type=%u, nlmsg_flags=0x%x, nlmsg_seq=%u\n",
+    //              hdr->nlmsg_type, hdr->nlmsg_flags, hdr->nlmsg_seq);
+
     struct nlattr *attr;
     int ret;
- 
-    ret = nla_parse(attrs, UBCORE_ATTR_AFTER_LAST - 1,
+
+    ret = nla_parse(attrs, UBAGG_ATTR_AFTER_LAST - 1,
                     genlmsg_attrdata(genlhdr, 0),
                     genlmsg_attrlen(genlhdr, 0), NULL);
     if (ret != 0) {
@@ -1277,47 +1302,117 @@ static int cmd_show_physical_dev_cb(struct nl_msg *msg, void *arg)
     }
 
     attr = attrs[UBAGG_ATTR_BONDING_PHYSICAL_DEVICE];
-    if (attr == NULL || nla_len(attr) != sizeof(ctx->bonding_dev)) {
+    if (attr == NULL) {
+        // (void)printf("[test_topo] cmd_show_physical_dev_cb: attr is NULL\n");
+        ctx->ret = -EINVAL;
+        return NL_STOP;
+    }
+    if (nla_len(attr) != sizeof(ctx->bonding_dev)) {
+        // (void)printf("[test_topo] cmd_show_physical_dev_cb: nla_len=%u != sizeof=%zu\n",
+        //              nla_len(attr), sizeof(ctx->bonding_dev));
         ctx->ret = -EINVAL;
         return NL_STOP;
     }
     (void)memcpy(&ctx->bonding_dev, nla_data(attr), sizeof(ctx->bonding_dev));
     ctx->received = true;
- 
+
     return NL_STOP;
 }
 
 int admin_cmd_get_topo_bonding_dev_by_eid(const urma_eid_t *agg_eid,
     admin_urma_topo_bonding_dev_t *out)
 {
-    int ret;
+    struct nl_sock *sock = NULL;
+    struct nl_msg *msg = NULL;
+    int genl_id = 0;
+    int ret = 0;
+    // char eid_str[INET6_ADDRSTRLEN];
 
     if (agg_eid == NULL || out == NULL) {
         return -EINVAL;
     }
 
+    // urma_eid_to_ipv6_str(agg_eid, eid_str, sizeof(eid_str));
+    // (void)printf("[test_topo] admin_cmd_get_topo_bonding_dev_by_eid: querying eid=%s\n", eid_str);
+
     admin_show_physical_dev_ctx_t ctx = {0};
-    struct nl_msg *msg = admin_nl_alloc_msg(UBAGG_NL_GET_PHYSICAL_DEVICE, 0, UBAGG_GENL);
-    if (msg == NULL) {
+
+    sock = nl_socket_alloc();
+    if (sock == NULL) {
         return -ENOMEM;
     }
 
+    ret = genl_connect(sock);
+    if (ret < 0) {
+        printf("Failed to connect netlink socket for UBAGG, ret=%d\n", ret);
+        nl_socket_free(sock);
+        return ret;
+    }
+
+    genl_id = genl_ctrl_resolve(sock, UBAGG_GENL_FAMILY_NAME);
+    if (genl_id < 0) {
+        printf("Resolving of UBAGG failed, ret=%d\n", genl_id);
+        nl_close(sock);
+        nl_socket_free(sock);
+        return genl_id;
+    }
+
+    msg = nlmsg_alloc();
+    if (msg == NULL) {
+        nl_close(sock);
+        nl_socket_free(sock);
+        return -ENOMEM;
+    }
+
+    if (genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, genl_id, 0, 0,
+                     UBAGG_NL_GET_PHYSICAL_DEVICE, GENL_FAMILY_VERSION) == NULL) {
+        printf("Failed to put genl header\n");
+        nlmsg_free(msg);
+        nl_close(sock);
+        nl_socket_free(sock);
+        return -EINVAL;
+    }
+
     ret = nla_put(msg, UBAGG_ATTR_EID, sizeof(urma_eid_t), agg_eid);
-    if (ret != 0) {
-        admin_nl_free_msg(msg);
-        return ret;
+    if (ret == 0) {
+        nl_socket_modify_cb(sock, NL_CB_MSG_IN, NL_CB_CUSTOM,
+                            cmd_show_physical_dev_cb, &ctx);
+        nl_socket_disable_auto_ack(sock);
+        ret = nl_send_auto(sock, msg);
+        nl_socket_enable_auto_ack(sock);
+        if (ret < 0) {
+            printf("Failed to send netlink msg, ret:%d\n", ret);
+        } else {
+            ret = nl_recvmsgs_default(sock);
+            if (ret < 0) {
+                printf("Failed to recv netlink msg, ret:%d\n", ret);
+            }
+            nl_socket_modify_cb(sock, NL_CB_MSG_IN, NL_CB_CUSTOM, NULL, &ctx);
+        }
     }
 
-    ret = admin_nl_send_recv_msg(msg, cmd_show_physical_dev_cb, &ctx, UBAGG_GENL);
-    admin_nl_free_msg(msg);
+    nlmsg_free(msg);
+    nl_close(sock);
+    nl_socket_free(sock);
 
-    if (ret != 0 || ctx.ret != 0 || !ctx.received) {
-        ret = (ret != 0) ? ret : (ctx.ret != 0 ? ctx.ret : -ENODATA);
-        return ret;
+    if (ctx.received) {
+        memcpy(out, &ctx.bonding_dev, sizeof(admin_urma_topo_bonding_dev_t));
+        // (void)printf("[test_topo] admin_cmd_get_topo_bonding_dev_by_eid: got dev_name=%s, bonding_eid_idx=%u\n",
+        //              out->dev_name, out->bonding_eid_idx);
+        // for (uint32_t i = 0; i < IODIE_NUM; i++) {
+        //     if (out->physical_devs[i].dev_name[0] != '\0') {
+        //         (void)printf("[test_topo]   physical_devs[%u]: dev_name=%s, chip_id=%u, primary_eid_idx=%u\n",
+        //                      i, out->physical_devs[i].dev_name,
+        //                      out->physical_devs[i].chip_id,
+        //                      out->physical_devs[i].primary_eid_idx);
+        //     }
+        // }
+        return 0;
     }
 
-    memcpy(out, &ctx.bonding_dev, sizeof(admin_urma_topo_bonding_dev_t));
-    return ret;
+    // (void)printf("[test_topo] admin_cmd_get_topo_bonding_dev_by_eid: failed, ret=%d, ctx.ret=%d, received=%d\n",
+    //              ret, ctx.ret, ctx.received);
+    return (ret != 0) ? ret : (ctx.ret != 0 ? ctx.ret : -ENODATA);
 }
 
 static const char *tpid_status_to_string(uint32_t status)
