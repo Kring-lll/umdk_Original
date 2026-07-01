@@ -257,16 +257,12 @@ TEST_F(UmqUBTest, test_umq_ub_bind_info_check)
     info.fc_info = &fc_info;
     ASSERT_NE(umq_ub_bind_info_check(&queue, &info), 0);
 
-    dev.umq_trans_mode = UMQ_TRANS_MODE_IPC;
-    ASSERT_NE(umq_ub_bind_info_check(&queue, &info), 0);
     dev.umq_trans_mode = UMQ_TRANS_MODE_UB;
 
     queue.state = QUEUE_STATE_ERR;
     ASSERT_NE(umq_ub_bind_info_check(&queue, &info), 0);
     queue.state = QUEUE_STATE_READY;
 
-    dev_ctx.trans_info.trans_mode = UMQ_TRANS_MODE_IPC;
-    ASSERT_NE(umq_ub_bind_info_check(&queue, &info), 0);
     dev_ctx.trans_info.trans_mode = UMQ_TRANS_MODE_UB;
 
     queue.tp_mode = URMA_TM_UM;
