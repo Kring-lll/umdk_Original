@@ -1966,9 +1966,14 @@ static int bondp_fill_bond_id_info_from_rjetty_ext(const urma_rjetty_t *rjetty, 
     return bondp_fill_bond_id_info_from_compact_ext(compact_ext, ext_hdr->len, info);
 }
 
-static void bondp_fill_seg_ext_from_import_tseg(const bondp_import_tseg_t *bdp_tseg, urma_bond_seg_ext_t *ext)
+static int bondp_fill_seg_ext_from_tseg(const bondp_tseg_t *bdp_tseg, urma_bond_seg_ext_t *ext)
 {
-    bool target_filled[URMA_UBAGG_DEV_MAX_NUM] = {0};
+    uint32_t local_indices[URMA_UBAGG_DEV_MAX_NUM] = {0};
+    uint32_t target_indices[URMA_UBAGG_DEV_MAX_NUM] = {0};
+    uint32_t local_count = 0;
+    uint32_t target_count = 0;
+    uint8_t topo_bitmap[BONDP_RJETTY_CONNECTED_BYTES] = {0};
+    const urma_eid_t *dst_eid = NULL;
 
     ext->version = 0;
     ext->mask = 0;
@@ -1976,18 +1981,39 @@ static void bondp_fill_seg_ext_from_import_tseg(const bondp_import_tseg_t *bdp_t
     (void)memset(ext->connected, 0, sizeof(ext->connected));
 
     for (uint32_t local_idx = 0; local_idx < URMA_UBAGG_DEV_MAX_NUM; ++local_idx) {
-        for (uint32_t target_idx = 0; target_idx < URMA_UBAGG_DEV_MAX_NUM; ++target_idx) {
-            urma_target_seg_t *p_tseg = bdp_tseg->p_tseg[local_idx][target_idx];
-            if (p_tseg == NULL) {
-                continue;
-            }
-            ext->connected[local_idx][target_idx] = true;
-            if (!target_filled[target_idx]) {
-                bondp_seg_to_base(&p_tseg->seg, &ext->peer_p_seg[target_idx]);
-                target_filled[target_idx] = true;
-            }
+        urma_target_seg_t *p_tseg = bdp_tseg->p_tseg[local_idx];
+        if (p_tseg == NULL) {
+            continue;
+        }
+        bondp_seg_to_base(&p_tseg->seg, &ext->peer_p_seg[local_idx]);
+        local_indices[local_count++] = local_idx;
+        target_indices[target_count++] = local_idx;
+        if (dst_eid == NULL) {
+            dst_eid = &p_tseg->seg.ubva.eid;
         }
     }
+
+    if (dst_eid == NULL || local_count == 0 || target_count == 0) {
+        URMA_LOG_ERR("Failed to build seg ext connected: no valid p_tseg.\n");
+        return -EINVAL;
+    }
+
+    bondp_connected_bitmap_build_cfg_t build_cfg = {
+        .bdp_ctx = bdp_tseg->bondp_ctx,
+        .dst_eid = dst_eid,
+        .local_indices = local_indices,
+        .local_count = local_count,
+        .target_indices = target_indices,
+        .target_count = target_count,
+        .bitmap = topo_bitmap,
+    };
+    if (bondp_build_connected_bitmap_by_topo(&build_cfg) != 0) {
+        URMA_LOG_ERR("Failed to build seg ext connected bitmap by topo.\n");
+        return -EINVAL;
+    }
+
+    bondp_fill_connected_from_bitmap(topo_bitmap, ext->connected);
+    return 0;
 }
 
 static int bondp_user_ctl_get_rjetty(urma_context_t *ctx, urma_user_ctl_in_t *in,
@@ -2054,7 +2080,7 @@ static int bondp_user_ctl_get_seg_ctx(urma_context_t *ctx, urma_user_ctl_in_t *i
         return -EINVAL;
     }
 
-    bondp_import_tseg_t *bdp_tseg = CONTAINER_OF_FIELD(tseg, bondp_import_tseg_t, v_tseg);
+    bondp_tseg_t *bdp_tseg = CONTAINER_OF_FIELD(tseg, bondp_tseg_t, v_tseg);
 
     urma_seg_t *new_seg = (urma_seg_t *)calloc(1, sizeof(urma_seg_t) +
                                                sizeof(bondp_seg_ext_priv_t) +
@@ -2068,7 +2094,11 @@ static int bondp_user_ctl_get_seg_ctx(urma_context_t *ctx, urma_user_ctl_in_t *i
     bondp_seg_ext_priv_t *seg_ext = bondp_seg_get_priv_ext(new_seg);
     seg_ext->len = sizeof(urma_bond_seg_ext_t);
     urma_bond_seg_ext_t *ext = (urma_bond_seg_ext_t *)seg_ext->data;
-    bondp_fill_seg_ext_from_import_tseg(bdp_tseg, ext);
+    int ret = bondp_fill_seg_ext_from_tseg(bdp_tseg, ext);
+    if (ret != 0) {
+        free(new_seg);
+        return ret;
+    }
 
     urma_seg_t **out_seg = (urma_seg_t **)(uintptr_t)out->addr;
     *out_seg = new_seg;
