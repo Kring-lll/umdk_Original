@@ -2111,6 +2111,10 @@ static int bondp_import_vjetty(
     urma_context_t *ctx, urma_rjetty_t *rjetty, urma_token_t *rjetty_token,
     bondp_target_jetty_t *bdp_tjetty, urma_bond_id_info_out_t *udata_out)
 {
+    if (!rjetty) {
+        return -EINVAL;
+    }
+
     urma_tjetty_cfg_t cfg = {
         .jetty_id = rjetty->jetty_id,
         .flag = rjetty->flag,
