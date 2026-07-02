@@ -686,4 +686,75 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_xscale_fill_wqe_atomic(
     }
 }
 
+template <typename T, bool IS_MASKED, aclshmemi_rdma_atomic_op_t ATOMIC_OP_CODE>
+ACLSHMEM_DEVICE void aclshmemi_rdma_xscdv_post_send_atomic(
+    aclshmemi_rdma_send_wr &wr, uint32_t pe, uint32_t qp_idx, AscendC::LocalTensor<uint64_t> &ub_local64,
+    AscendC::LocalTensor<uint32_t> &ub_local32, uint32_t sync_id)
+{
+    constexpr int XSCALE_POLL_CQ_THRESHOLD = 16;
+    __gm__ aclshmemi_rdma_info *rdma_info = aclshmemi_qp_info_fetch();
+
+    uint32_t qp_num = rdma_info->qp_num;
+    __gm__ aclshmemi_rdma_sq_ctx *sq_context =
+        (__gm__ aclshmemi_rdma_sq_ctx *)(rdma_info->sq_ptr +
+                                         ((uint64_t)pe * qp_num + qp_idx) * sizeof(aclshmemi_rdma_sq_ctx));
+    auto mem_info_table = rdma_info->mem_ptr;
+    auto sq_base_addr = sq_context->buf_addr;
+    auto wqe_size = sq_context->wqe_size;
+    auto sq_pi_addr = sq_context->head_addr;
+    dcci_cachelines((__gm__ uint8_t *)sq_pi_addr, 8);
+    uint32_t cur_head = *(__gm__ uint32_t *)(sq_pi_addr);
+    auto sq_ci_addr = sq_context->tail_addr;
+    auto depth = sq_context->depth;
+    uint32_t ret = 0;
+
+    dcci_cachelines((__gm__ uint8_t *)sq_ci_addr, 8);
+    uint32_t cur_tail = (*(__gm__ uint32_t *)(sq_ci_addr));
+    // If the send queue (SQ) is about to be full, need to wait for CQE to arrive before continuing to send
+    // Call the poll_cq function to wait for CQE arrival until cur_tail catches up with cur_head
+    // Note: The poll_cq function will block the current thread until the condition is met or timeout occurs
+    // Note: cq_context->depth needs to be greater than or equal to sq_context->depth
+    if ((cur_head + XSCALE_POLL_CQ_THRESHOLD) % depth == (depth + cur_tail) % depth) {
+        ret = aclshmemi_roce_poll_cq<aclshmemi_rdma_backend_t::XSCALE>(
+            pe, qp_idx, cur_head, ub_local64, ub_local32, sync_id);
+        if (ret) {
+            ACLSHMEM_DEBUG_FUNC(
+                aclshmemi_kernel_printf,
+                "Poll CQE error in aclshmemi_xscale_post_send_read_write: pe=%u, qp_idx=%u, cur_tail=%u, "
+                "cur_head=%u\n",
+                pe, qp_idx, cur_tail, cur_head);
+            return;
+        }
+    }
+
+    __gm__ uint8_t *wqe_addr = (__gm__ uint8_t *)(sq_base_addr + (uint64_t)wqe_size * (cur_head % depth));
+
+    uint32_t wqe_total_size =
+        aclshmemi_roce_xscale_fill_wqe_atomic<T, IS_MASKED, ATOMIC_OP_CODE>(wr, sq_context, wqe_addr, cur_head);
+
+    dcci_cachelines(wqe_addr, wqe_total_size);
+    cur_head++;
+
+    aclshmemi_roce_ring_sq_doorbell<aclshmemi_rdma_backend_t::XSCALE>(
+        sq_context, cur_head, ub_local64, ub_local32, sync_id);
+}
+
+template <>
+ACLSHMEM_DEVICE void aclshmemi_roce_post_send<aclshmemi_rdma_backend_t::XSCALE, aclshmemi_rdma_opcode_t::OP_RDMA_WRITE>(
+    aclshmemi_rdma_send_wr &wr, uint32_t pe, uint32_t qp_idx, AscendC::LocalTensor<uint64_t> &ub_local64,
+    AscendC::LocalTensor<uint32_t> &ub_local32, uint32_t sync_id)
+{
+    aclshmemi_xscale_post_send_read_write<aclshmemi_rdma_opcode_t::OP_RDMA_WRITE>(
+        wr, pe, qp_idx, ub_local64, ub_local32, sync_id);
+}
+
+template <>
+ACLSHMEM_DEVICE void aclshmemi_roce_post_send<aclshmemi_rdma_backend_t::XSCALE, aclshmemi_rdma_opcode_t::OP_RDMA_READ>(
+    aclshmemi_rdma_send_wr &wr, uint32_t pe, uint32_t qp_idx, AscendC::LocalTensor<uint64_t> &ub_local64,
+    AscendC::LocalTensor<uint32_t> &ub_local32, uint32_t sync_id)
+{
+    aclshmemi_xscale_post_send_read_write<aclshmemi_rdma_opcode_t::OP_RDMA_READ>(
+        wr, pe, qp_idx, ub_local64, ub_local32, sync_id);
+}
+
 #endif // ACLSHMEM_RDMA_DEVICE_BACKEND_XSCALE_HPP
