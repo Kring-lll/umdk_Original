@@ -632,6 +632,53 @@ TEST(UrmaBondTest, PublicImportJettyUsesExtAndPhysicalProviderMocks)
     std::free(bondRemote);
 }
 
+TEST(UrmaBondTest, PublicImportJettyAcceptsCompactUserInfoWithoutLocalJettyPointer)
+{
+    BondPublicApiFixture fixture;
+    bondp_global_context_t fakeGlobal = {};
+    bondp_topo_node_t topo[2] = {};
+    urma_token_t token = {};
+    urma_target_jetty_t *target = nullptr;
+    const size_t extSize = sizeof(urma_bond_jetty_ext_v0_t) + 1 + sizeof(bondp_rjetty_target_ctx_t);
+    const size_t remoteSize = sizeof(urma_rjetty_t) + sizeof(bondp_rjetty_ext_priv_t) + extSize;
+    auto *remote = static_cast<urma_rjetty_t *>(std::calloc(1, remoteSize));
+    ASSERT_NE(nullptr, remote);
+
+    fixture.InitSinglePhysicalMember();
+    fixture.ctx.enabled_count = 1;
+    fixture.ctx.enabled_indices[0] = 0;
+    topo[0].is_current = true;
+    CopyEidToTopo(topo[0].agg_devs[0].agg_eid, MakeEid(0x840));
+    CopyEidToTopo(topo[0].agg_devs[0].ues[0].primary_eid, MakeEid(0x850));
+    CopyEidToTopo(topo[0].agg_devs[0].ues[0].port_eid[0], MakeEid(0x851));
+    CopyEidToTopo(topo[1].agg_devs[0].agg_eid, MakeEid(0x841));
+    topo[1].links[0][0] = true;
+    fixture.ctx.topo_map = create_topo_map(topo, 2);
+    ASSERT_NE(nullptr, fixture.ctx.topo_map);
+    g_bondp_global_ctx = &fakeGlobal;
+    bondp_health_check_global_ctx_init(&fakeGlobal);
+    fakeGlobal.health_thread_ctx.enable_health_check = false;
+
+    remote->jetty_id = MakeJettyId(0x841);
+    remote->jetty_id.eid = MakeEid(0x841);
+    remote->trans_mode = URMA_TM_RM;
+    remote->type = URMA_JETTY;
+    remote->flag.bs.order_type = URMA_OL;
+    FillSingleConnectedRjettyExt(remote, 0, 0, MakeJettyId(0x842));
+
+    target = bondp_import_jetty(&fixture.ctx.v_ctx, remote, &token);
+    EXPECT_EQ(1, urma_test::GetHwMockState().importJettyCount);
+    ASSERT_NE(nullptr, target);
+    EXPECT_EQ(remote->jetty_id.id, target->id.id);
+    EXPECT_EQ(URMA_SUCCESS, bondp_unimport_jetty(target));
+
+    bondp_health_check_global_ctx_uninit(&fakeGlobal);
+    g_bondp_global_ctx = nullptr;
+    delete_topo_map(fixture.ctx.topo_map);
+    fixture.ctx.topo_map = nullptr;
+    std::free(remote);
+}
+
 TEST(UrmaBondTest, PublicImportJettyUsesMockIoctlAndPhysicalProvider)
 {
     BondPublicApiFixture fixture;
@@ -1093,6 +1140,7 @@ TEST(UrmaBondTest, HealthCheckImportTsegUsesMockProviderRoutes)
     fixture.InitSinglePhysicalMember();
     fixture.jetty.v_jetty.urma_ctx = &fixture.ctx.v_ctx;
     rjetty.base.flag.bs.has_user_info = 1;
+    rjetty.base.flag.bs.has_drv_ext = 1;
     rjetty.jetty = &fixture.jetty.v_jetty;
     physicalTarget.urma_ctx = &fixture.phyCtx;
     fixture.targetJetty.active_count = 1;
@@ -1127,6 +1175,36 @@ TEST(UrmaBondTest, HealthCheckImportTsegUsesMockProviderRoutes)
 
     bondp_health_check_global_ctx_uninit(&fakeGlobal);
     g_bondp_global_ctx = nullptr;
+}
+
+TEST(UrmaBondTest, HealthCheckImportTsegIgnoresCompactUserInfoWithoutLocalJettyPointer)
+{
+    BondPublicApiFixture fixture;
+    bondp_global_context_t fakeGlobal = {};
+    urma_bond_id_info_out_t idOut = {};
+    const size_t extSize = sizeof(urma_bond_jetty_ext_v0_t) + 1 + sizeof(bondp_rjetty_target_ctx_t);
+    const size_t remoteSize = sizeof(urma_rjetty_t) + sizeof(bondp_rjetty_ext_priv_t) + extSize;
+    auto *remote = static_cast<urma_rjetty_t *>(std::calloc(1, remoteSize));
+    ASSERT_NE(nullptr, remote);
+
+    fixture.InitSinglePhysicalMember();
+    fixture.targetJetty.active_count = 1;
+    fixture.targetJetty.local_active_indices[0] = 0;
+    fixture.targetJetty.active_indices[0] = 0;
+    FillSingleConnectedRjettyExt(remote, 0, 0, MakeJettyId(0x878));
+    idOut.is_health_check_enable = true;
+
+    g_bondp_global_ctx = &fakeGlobal;
+    bondp_health_check_global_ctx_init(&fakeGlobal);
+    fakeGlobal.health_thread_ctx.enable_health_check = true;
+
+    EXPECT_EQ(0, bondp_import_health_check_tseg(&fixture.ctx, &fixture.targetJetty, &idOut, remote));
+    EXPECT_EQ(0, urma_test::GetHwMockState().importSegCount);
+    EXPECT_EQ(nullptr, fixture.targetJetty.p_check_tseg[0][0]);
+
+    bondp_health_check_global_ctx_uninit(&fakeGlobal);
+    g_bondp_global_ctx = nullptr;
+    std::free(remote);
 }
 
 TEST(UrmaBondTest, HealthCheckLocalSegRegisterFillAndUnregisterUseProviderMocks)
