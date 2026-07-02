@@ -751,7 +751,6 @@ int umq_init(umq_init_cfg_t *cfg)
     (void)memcpy(g_umq_config, cfg, sizeof(umq_init_cfg_t));
 
     umq_init_cfg_dummy_dev_filter(g_umq_config);
-
     g_umq_inited = true;
     return UMQ_SUCCESS;
 
