@@ -86,6 +86,11 @@ static inline bool bondp_rjetty_has_user_info(const urma_rjetty_t *rjetty)
     return rjetty != NULL && rjetty->flag.bs.has_user_info != 0;
 }
 
+static inline bool bondp_rjetty_has_local_jetty(const urma_rjetty_t *rjetty)
+{
+    return bondp_rjetty_has_user_info(rjetty) && rjetty->flag.bs.has_drv_ext != 0;
+}
+
 struct bondp_target_jetty;
 
 typedef enum bondp_health_mode {

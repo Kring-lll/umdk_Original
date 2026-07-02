@@ -483,7 +483,7 @@ int bondp_import_health_check_tseg(const bondp_context_t *bdp_ctx, bondp_target_
     }
 
     bondp_comp_t *cfg_jetty = NULL;
-    if (bondp_rjetty_has_user_info(rjetty)) {
+    if (bondp_rjetty_has_local_jetty(rjetty)) {
         const bondp_rjetty_t *bdp_rjetty = (const bondp_rjetty_t *)rjetty;
         cfg_jetty = CONTAINER_OF_FIELD(bdp_rjetty->jetty, bondp_comp_t, v_jetty);
     }
