@@ -135,18 +135,22 @@ static int umq_ub_jetty_node_list_init(umq_ub_jetty_node_list_t *jetty_node_list
     jetty_node_list->list_len = node_cnt;
     jetty_node_list->bitmap = urpc_bitmap_alloc(node_cnt);
     if (jetty_node_list->bitmap == NULL) {
-        UMQ_VLOG_INFO(VLOG_UMQ, "alloc bitmap failed\n");
+        UMQ_VLOG_ERR(VLOG_UMQ, "alloc bitmap failed\n");
         return -UMQ_ERR_ENOMEM;
     }
 
     jetty_node_list->node_list = (jetty_pool_node_t **)calloc(node_cnt, sizeof(jetty_pool_node_t *));
     if (jetty_node_list->node_list == NULL) {
         urpc_bitmap_free(jetty_node_list->bitmap);
-        UMQ_VLOG_INFO(VLOG_UMQ, "calloc node list failed\n");
+        UMQ_VLOG_ERR(VLOG_UMQ, "calloc node list failed\n");
         return -UMQ_ERR_ENOMEM;
     }
 
-    (void)pthread_spin_init(&jetty_node_list->lock, PTHREAD_PROCESS_PRIVATE);
+    jetty_node_list->lock = util_mutex_lock_create(UTIL_MUTEX_ATTR_EXCLUSIVE);
+    if (jetty_node_list->lock == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "jetty node list mutex create failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
     return UMQ_SUCCESS;
 }
 
@@ -200,7 +204,7 @@ static void umq_ub_jetty_node_list_uninit(umq_ub_jetty_node_list_t *jetty_node_l
     if (jetty_node_list->bitmap != NULL) {
         urpc_bitmap_free(jetty_node_list->bitmap);
     }
-    (void)pthread_spin_destroy(&jetty_node_list->lock);
+    util_mutex_lock_destroy(jetty_node_list->lock);
 }
 
 void umq_ub_jetty_pool_uninit(void)
