@@ -9,6 +9,7 @@
 #ifndef FUSED_DEEP_MOE_H
 #define FUSED_DEEP_MOE_H
 
+#include <type_traits>
 #include "lib/matmul_intf.h"
 #include <kernel_operator.h>
 
@@ -33,27 +34,46 @@
 
 using namespace Catlass;
 using namespace Cam;
-using MmadAtlasA2Custom =
+
+// W4A8 dispatch policy (INT4 weights)
+using MmadAtlasA2CustomW4a8 =
     Gemm::MmadAtlasA2PreloadAsyncWithCallbackW4a8<CUSTOM_PRELOAD_STAGES, CUSTOM_L1_STAGES, CUSTOM_L0A_STAGES,
         CUSTOM_L0B_STAGES, CUSTOM_L0C_STAGES, CUSTOM_ENABLE_UNIT_FLAG,
         CUSTOM_ENABLE_SHUFFLE_K>;
 
-using Gmm1L1TileShape = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L1K>;
-using Gmm1L0TileShape = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L0K>;
-using Gmm1EpilogueTileShape = MatrixShape<GMM1_EPIM, Gmm1L1TileShape::N>;
+// W8A8 dispatch policy (INT8 weights)
+using MmadAtlasA2CustomW8a8 =
+    Gemm::MmadAtlasA2PreloadAsyncWithCallback<CUSTOM_PRELOAD_STAGES, CUSTOM_L1_STAGES, CUSTOM_L0A_STAGES,
+        CUSTOM_L0B_STAGES, CUSTOM_L0C_STAGES, CUSTOM_ENABLE_UNIT_FLAG,
+        CUSTOM_ENABLE_SHUFFLE_K>;
+
+// W4A8 tile shapes (K=1024/256, INT4 2 elements/byte)
+using Gmm1L1TileShapeW4a8 = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L1K>;
+using Gmm1L0TileShapeW4a8 = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L0K>;
+using Gmm1EpilogueTileShape = MatrixShape<GMM1_EPIM, Gmm1L1TileShapeW4a8::N>;
 using Gmm1BlockScheduler = typename Gemm::Block::GemmIdentityBlockSwizzle<GMM1_SWIZZLE_OFFSET, GMM1_SWIZZLE_DIRECTION>;
 
-using Gmm2L1TileShape = GemmShape<GMM2_L1M, GMM2_L1N, GMM2_L1K>;
-using Gmm2L0TileShape = GemmShape<Gmm2L1TileShape::M, Gmm2L1TileShape::N, GMM2_L0K>;
-using Gmm2EpilogueTileShape = MatrixShape<GMM2_EPIM, Gmm2L1TileShape::N>;
+// W8A8 tile shapes (K=512/128)
+using Gmm1L1TileShapeW8a8 = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L1K_W8A8>;
+using Gmm1L0TileShapeW8a8 = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L0K_W8A8>;
+
+// W4A8 GMM2 tile shapes
+using Gmm2L1TileShapeW4a8 = GemmShape<GMM2_L1M, GMM2_L1N, GMM2_L1K>;
+using Gmm2L0TileShapeW4a8 = GemmShape<GMM2_L1M, GMM2_L1N, GMM2_L0K>;
+using Gmm2EpilogueTileShape = MatrixShape<GMM2_EPIM, Gmm2L1TileShapeW4a8::N>;
 using Gmm2BlockScheduler = typename Gemm::Block::GemmIdentityBlockSwizzle<GMM2_SWIZZLE_OFFSET, GMM2_SWIZZLE_DIRECTION>;
+
+// W8A8 GMM2 tile shapes
+using Gmm2L1TileShapeW8a8 = GemmShape<GMM2_L1M, GMM2_L1N, GMM2_L1K_W8A8>;
+using Gmm2L0TileShapeW8a8 = GemmShape<GMM2_L1M, GMM2_L1N, GMM2_L0K_W8A8>;
+
 using Gmm2DispatchPolicy =
     Gemm::MmadAtlasA2PreloadAsyncWithCallbackResidentA<CUSTOM_PRELOAD_STAGES, GMM2_L1A_STAGES, GMM2_L1B_STAGES,
         GMM2_L0A_STAGES, GMM2_L0B_STAGES, CUSTOM_L0C_STAGES,
         CUSTOM_ENABLE_UNIT_FLAG, CUSTOM_ENABLE_SHUFFLE_K>;
 
 template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class EpilogueTileShape_,
-    class BlockScheduler_, class DispatchPolicy_ = MmadAtlasA2Custom>
+    class BlockScheduler_, class DispatchPolicy_>
 CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
     layout::RowMajor layoutA, GM_ADDR gmShareB,
     layout::zN layoutShareB, GM_ADDR gmB, layout::zN layoutB,
@@ -66,7 +86,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     layout::RowMajor layoutShareD, GM_ADDR gmShareX2Scale, GM_ADDR gmSwigluOut,
     GM_ADDR gmWorkspace, GM_ADDR gmX, GM_ADDR gmMoeSmoothScales,
     GM_ADDR gmShareSmoothScales, GM_ADDR gmexpertIds, GM_ADDR gmExpandIdx,
-    GM_ADDR gmEpSendCount, GM_ADDR xActiveMask, GM_ADDR gmResvered,
+    GM_ADDR gmEpSendCount, GM_ADDR xActiveMask, GM_ADDR gmReserved,
     GM_ADDR gmExpertTokenNums, const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
 {
     using ArchTag = Arch::AtlasA2;
@@ -75,8 +95,8 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     using L0TileShape = L0TileShape_;
 
     // w4A8 adaptation: weight matrix is int4
-    using AType = Gemm::GemmType<AscendC::int4b_t, layout::RowMajor>;
-    using BType = Gemm::GemmType<AscendC::int4b_t, layout::zN>;
+    using AType = Gemm::GemmType<WeightType, layout::RowMajor>;
+    using BType = Gemm::GemmType<WeightType, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
@@ -146,7 +166,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
             gmExpandIdx,
             gmEpSendCount,
             xActiveMask,
-            gmResvered,
+            gmReserved,
             gmExpertTokenNums,
             gmShareX1,
             gmShareX1Scale,
@@ -195,7 +215,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
 }
 
 template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class EpilogueTileShape_,
-    class BlockScheduler_, class DispatchPolicy_ = MmadAtlasA2Custom>
+    class BlockScheduler_, class DispatchPolicy_>
 CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
     layout::RowMajor layoutA, GM_ADDR gmB, layout::zN layoutB,
     GM_ADDR gmBias, GM_ADDR gmShareBias,
@@ -214,8 +234,8 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using L0TileShape = L0TileShape_;
 
     // w4A8 adaptation
-    using AType = Gemm::GemmType<AscendC::int4b_t, layout::RowMajor>;
-    using BType = Gemm::GemmType<AscendC::int4b_t, layout::zN>;
+    using AType = Gemm::GemmType<WeightType, layout::RowMajor>;
+    using BType = Gemm::GemmType<WeightType, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
@@ -413,25 +433,33 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
 template <TemplateMC2TypeClass>
 __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
 {
+    constexpr bool isW4A8 = std::is_same_v<WeightType, AscendC::int4b_t>;
+
+    using Gmm1L1TileShape = std::conditional_t<isW4A8, Gmm1L1TileShapeW4a8, Gmm1L1TileShapeW8a8>;
+    using Gmm1L0TileShape = std::conditional_t<isW4A8, Gmm1L0TileShapeW4a8, Gmm1L0TileShapeW8a8>;
+    using Gmm2L1TileShape = std::conditional_t<isW4A8, Gmm2L1TileShapeW4a8, Gmm2L1TileShapeW8a8>;
+    using Gmm2L0TileShape = std::conditional_t<isW4A8, Gmm2L0TileShapeW4a8, Gmm2L0TileShapeW8a8>;
+    using Gmm1DispatchPolicy = std::conditional_t<isW4A8, MmadAtlasA2CustomW4a8, MmadAtlasA2CustomW8a8>;
+
     GemmCoord gmm1ProblemShape{maxTokenNum_, gmm1OutputDim_, tokenHiddenSize_};
     GemmCoord gmm2ProblemShape{maxTokenNum_, gmm2OutputDim_, gmm2InputDim_};
 
     layout::RowMajor layoutX1{maxTokenNum_, tokenHiddenSize_};
     layout::zN layoutShareWeight1 =
-        layout::zN::template MakeLayout<AscendC::int4b_t>(tokenHiddenSize_, shareGmm1OutputDim_);
-    layout::zN layoutWeight1 = layout::zN::template MakeLayout<AscendC::int4b_t>(tokenHiddenSize_, gmm1OutputDim_);
+        layout::zN::template MakeLayout<WeightType>(tokenHiddenSize_, shareGmm1OutputDim_);
+    layout::zN layoutWeight1 = layout::zN::template MakeLayout<WeightType>(tokenHiddenSize_, gmm1OutputDim_);
     layout::VectorLayout layoutShareW1Scale{shareGmm1OutputDim_};
     layout::VectorLayout layoutW1Scale{gmm1OutputDim_};
     layout::VectorLayout layoutX1Scale{maxTokenNum_};
     layout::RowMajor layoutX2{maxTokenNum_, gmm2InputDim_};
-    layout::zN layoutWeight2 = layout::zN::template MakeLayout<AscendC::int4b_t>(gmm2InputDim_, gmm2OutputDim_);
+    layout::zN layoutWeight2 = layout::zN::template MakeLayout<WeightType>(gmm2InputDim_, gmm2OutputDim_);
     layout::VectorLayout layoutW2Scale{gmm2OutputDim_};
     layout::VectorLayout layoutX2Scale{maxTokenNum_};
     layout::RowMajor layoutOutput{maxTokenNum_, gmm2OutputDim_};
     
     layout::RowMajor layoutShareX2{bs_, shareGmm2InputDim_};
     layout::zN layoutShareWeight2 =
-        layout::zN::template MakeLayout<AscendC::int4b_t>(shareGmm2InputDim_, gmm2OutputDim_);
+        layout::zN::template MakeLayout<WeightType>(shareGmm2InputDim_, gmm2OutputDim_);
     GemmCoord shareGmm2ProblemShape{bs_, gmm2OutputDim_, shareGmm2InputDim_};
     layout::VectorLayout layoutShareX2Scale{bs_};
     layout::RowMajor layoutShareOutput{bs_, gmm2OutputDim_};
@@ -491,7 +519,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(bs_) * topK_ * sizeof(int32_t));
     GM_ADDR gmEpSendCount = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(epRankSize_) * groupCount_ * sizeof(int32_t));
-    GM_ADDR gmResvered = workspaceGM_ + workspaceOffset;
+    GM_ADDR gmReserved = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(resveredWorkSpaceSize);
 
     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
@@ -517,14 +545,14 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
         }
     }
     GmmDeqSwigluQuant<TemplateMC2TypeFunc, Gmm1L1TileShape, Gmm1L0TileShape, Gmm1EpilogueTileShape,
-        Gmm1BlockScheduler>(
+        Gmm1BlockScheduler, Gmm1DispatchPolicy>(
         gmm1ProblemShape, groupCount_, gmGroupList, gmX1, layoutX1, gmShareWeight1_, layoutShareWeight1,
         gmWeight1_, layoutWeight1,
         gmBias1_, gmShareBias1_, // A8w4 adaptation
         gmShareWeight1Scale_, layoutShareW1Scale, gmScale1_, layoutW1Scale,
         gmX1Scale, layoutX1Scale, gmX2, layoutX2, gmX2Scale, layoutX2Scale, gmShareX1, gmShareX1Scale,
         gmShareSwigluOut, gmShareX2, layoutShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmX_, gmSmoothScales_,
-        gmShareSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount, xActiveMask_, gmResvered, gmExpertTokenNums_,
+        gmShareSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount, xActiveMask_, gmReserved, gmExpertTokenNums_,
         tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo);
     AscendC::PipeBarrier<PIPE_ALL>();
     Arch::CrossCoreFlag gmm1AivFinished{0};
