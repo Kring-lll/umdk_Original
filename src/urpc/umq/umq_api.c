@@ -752,6 +752,12 @@ int umq_init(umq_init_cfg_t *cfg)
 
     umq_init_cfg_dummy_dev_filter(g_umq_config);
 
+    // move expansion overhead from data plane to control plane
+    umq_buf_t *buf = umq_buf_alloc(0, 1, 0, NULL);
+    if (buf != NULL) {
+        umq_buf_free(buf);
+        buf = NULL;
+    }
     g_umq_inited = true;
     return UMQ_SUCCESS;
 
