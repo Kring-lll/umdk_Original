@@ -46,6 +46,10 @@ typedef struct jfs_wr_entry {
     uint64_t user_ctx;
     struct bondp_comp *bdp_comp;
     struct bondp_target_jetty *target_vjetty;
+    struct jfs_wr_entry *next;
+    uint8_t is_ring_head;
+    uint8_t is_ring_tail;
+    uint8_t batch_failed;
     uint32_t send_idx;
     uint32_t target_idx;
 } jfs_wr_entry_t;
