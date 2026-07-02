@@ -9,6 +9,7 @@
  */
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "ub_hash.h"
 #include "urma_api.h"
@@ -336,6 +337,29 @@ static void bondp_fill_v_tseg(urma_target_seg_t *tseg, urma_seg_t *seg, uint64_t
     tseg->urma_ctx = ctx;
 }
 
+static int bondp_rebuild_seg_connected_by_topo(const bondp_context_t *bdp_ctx, const urma_eid_t *dst_eid,
+                                               bondp_udata_import_seg_t *udata_out)
+{
+    bool connected[TOPO_CONNECTED_MAX_NUM][TOPO_CONNECTED_MAX_NUM] = {0};
+    if (bdp_ctx == NULL || dst_eid == NULL || udata_out == NULL || bdp_ctx->topo_map == NULL) {
+        return -1;
+    }
+    if (bondp_find_linked_port_by_topo(bdp_ctx->topo_map, dst_eid, connected) != 0) {
+        return -1;
+    }
+
+    (void)memset(udata_out->connected, 0, sizeof(udata_out->connected));
+    for (uint32_t local_idx = 0; local_idx < URMA_UBAGG_DEV_MAX_NUM; ++local_idx) {
+        for (uint32_t target_idx = 0; target_idx < URMA_UBAGG_DEV_MAX_NUM; ++target_idx) {
+            if (local_idx < TOPO_CONNECTED_MAX_NUM && target_idx < TOPO_CONNECTED_MAX_NUM &&
+                connected[local_idx][target_idx]) {
+                udata_out->connected[local_idx][target_idx] = true;
+            }
+        }
+    }
+    return 0;
+}
+
 static int bondp_import_vseg(urma_context_t *ctx, urma_seg_t *seg,
                              urma_token_t *token, uint64_t addr, urma_import_seg_flag_t flag,
                              bondp_import_tseg_t *bdp_tseg, bondp_udata_import_seg_t *udata_out)
@@ -500,8 +524,10 @@ urma_target_seg_t *bondp_import_seg(urma_context_t *ctx, urma_seg_t *seg,
                 (const urma_bond_seg_ext_t *)seg_ext->data;
             (void)memcpy(&udata_out.peer_p_seg, bond_ext->peer_p_seg,
                          sizeof(udata_out.peer_p_seg));
-            (void)memcpy(&udata_out.connected, bond_ext->connected,
-                         sizeof(udata_out.connected));
+            if (bondp_rebuild_seg_connected_by_topo(bdp_ctx, &seg->ubva.eid, &udata_out) != 0) {
+                URMA_LOG_ERR("Failed to rebuild connected matrix by topo.\n");
+                goto free_bdp_tseg;
+            }
             bondp_fill_v_tseg(&bdp_tseg->v_tseg, seg, addr,
                               0, ctx);
         } else {
