@@ -1065,6 +1065,9 @@ static int validate_input_params(struct argument *args, bool tp_type_input_flag,
     }
 
     // Determine whether it is a bonding device based on the name
+    if (!args->dev_name) {
+        fprintf(stderr, "missing device name (-d, --dev-name <dev>)\n");
+    }
     if (strncmp(args->dev_name, "bonding", strlen("bonding")) == 0) {
         if (tp_type_input_flag) {
             fprintf(stderr, "Warning: TP type should not be set for bonding device.\n");
