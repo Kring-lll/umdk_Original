@@ -248,7 +248,7 @@ int umq_thread_closure_register(umq_trans_mode_t trans_mode,
     }
 
 #ifndef UMQ_STATIC_LIB
-    if (__atomic_fetch_add(&g_umq_thread_closure[trans_mode].dlhandler_ref_cnt, 1, __ATOMIC_ACQ_REL) == 0) {
+    if (__atomic_fetch_add(&g_umq_thread_closure[trans_mode].dlhandler_ref_cnt, 1, __ATOMIC_RELAXED) == 0) {
         g_umq_thread_closure[trans_mode].dlhandler =
             dlopen(g_umq_fws[trans_mode].dlopen_so_name, RTLD_LAZY | RTLD_GLOBAL);
         if (g_umq_thread_closure[trans_mode].dlhandler == NULL) {
