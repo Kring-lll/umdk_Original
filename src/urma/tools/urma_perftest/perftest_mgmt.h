@@ -15,6 +15,12 @@
 
 typedef struct perftest_config perftest_config_t;
 
+typedef enum perftest_mgmt_type {
+    PERFTEST_MGMT_TCP = 0,
+    PERFTEST_MGMT_UB,
+    PERFTEST_MGMT_TYPE_NUM
+} perftest_mgmt_type_t;
+
 int establish_connection(const perftest_config_t *cfg);
 void close_connection(perftest_config_t *cfg);
 

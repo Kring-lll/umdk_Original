@@ -33,4 +33,20 @@ ssize_t tcp_comm_send(uint32_t index, const void *buf, size_t size);
 ssize_t tcp_comm_recv(uint32_t index, void *buf, size_t size);
 int tcp_comm_poll(uint32_t index, int timeout_ms);
 
+
+typedef struct comm_ub_cfg {
+    char *src_eid;
+    char *dst_eid;
+    uint16_t dst_jetty_id;
+    uint32_t endpoint_num;
+} comm_ub_cfg_t;
+
+int ub_establish_connection(const comm_ub_cfg_t *cfg);
+void ub_close_connection(void);
+
+int ub_sync_data(uint32_t index, int size, char *local_data, char *remote_data);
+int ub_sync_time(uint32_t index, const char *a);
+ssize_t ub_comm_send(uint32_t index, const void *buf, size_t size);
+ssize_t ub_comm_recv(uint32_t index, void *buf, size_t size);
+int ub_comm_poll(uint32_t index, int timeout_ms);
 #endif
