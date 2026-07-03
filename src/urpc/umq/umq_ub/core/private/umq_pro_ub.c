@@ -1802,6 +1802,12 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
         return 0;
     }
 
+    if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
+        (option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) == 0) {
+        umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
+        return qbuf_cnt;
+    }
+
     urma_cr_t cr[max_batch];
     urma_jfc_t *jfs_jfc = queue->jfs_jfc[UB_QUEUE_JETTY_IO];
     if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag)) {
