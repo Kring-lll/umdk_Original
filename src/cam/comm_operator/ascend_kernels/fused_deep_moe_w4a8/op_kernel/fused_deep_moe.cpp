@@ -10,6 +10,8 @@
 #include <kernel_operator.h>
 #include "lib/matmul_intf.h"
 
+using AscendC::int4b_t;
+
 #define CALL_FUSED_DEEP_MOE \
     FusedDeepMoe<DTYPE_X, DTYPE_GMM1_WEIGHT, DTYPE_GMM1_WEIGHT_SCALE, DTYPE_GMM2_WEIGHT_SCALE, int32_t, false, TILING_KEY_VAR> op; \
     op.Init(x, expert_ids, gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale, \
