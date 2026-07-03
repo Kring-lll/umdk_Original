@@ -17,8 +17,8 @@
 #include "ub_util.h"
 #include "urma_types.h"
 
-#include "perftest_mgmt.h"
 #include "perftest_log.h"
+#include "perftest_mgmt.h"
 
 /* Default Values of perftest parameters */
 #define PERFTEST_DEF_JFC_DEPTH_LAT   (512)
@@ -285,9 +285,9 @@ typedef struct perftest_config {
     char *server_ip;
     char *bind_ip;
     bool enable_ipv6;
-    uint16_t port; /* Server port for bind or connect, default 21115. */
-    int reserved_listen_fd;   /* Unused, kept only for forward compatibility. */
-    int *reserved_sock_fd;    /* Unused, kept only for forward compatibility. */
+    uint16_t port;          /* Server port for bind or connect, default 21115. */
+    int reserved_listen_fd; /* Unused, kept only for forward compatibility. */
+    int *reserved_sock_fd;  /* Unused, kept only for forward compatibility. */
 
     /* Rate Limiter */
     bool is_rate_limit;
