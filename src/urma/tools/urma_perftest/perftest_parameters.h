@@ -281,7 +281,13 @@ typedef struct perftest_config {
     uint8_t priority;
     bool share_jfr;
     uint32_t jettys_pre_jfr; /* How many jettys share a jfr. */
-    perftest_comm_t comm;
+
+    char *server_ip;
+    char *bind_ip;
+    bool enable_ipv6;
+    uint16_t port; /* Server port for bind or connect, default 21115. */
+    int reserved_listen_fd;   /* Unused, kept only for forward compatibility. */
+    int *reserved_sock_fd;    /* Unused, kept only for forward compatibility. */
 
     /* Rate Limiter */
     bool is_rate_limit;
