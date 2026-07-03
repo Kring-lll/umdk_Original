@@ -58,7 +58,7 @@ typedef struct urma_log_rl_state {
         std::atomic_ulong missed;
     #endif
     time_t             begin;        /* Window start time */
-    uint32_t           flags;        /* State flags */
+    atomic_uint        flags;        /* State flags (atomic) */
     const char        *file;         /* Log point file name for summary output */
     const char        *function;     /* Log point function name for summary output */
     int                line;         /* Log point line number for summary output */
