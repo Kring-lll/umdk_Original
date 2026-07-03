@@ -11,7 +11,6 @@
 #include <vector>
 #include "graph/types.h"
 #include "aclnn/opdev/platform.h"
-#include "aclnn/opdev/make_op_executor.h"
 #include "aclnnInner_fused_deep_moe.h"
 #include "aclnn_fused_deep_moe.h"
 
@@ -97,11 +96,6 @@ aclnnStatus aclnnFusedDeepMoeGetWorkspaceSize(
     uint64_t *workspaceSize,
     aclOpExecutor **executor)
 {
-    if (*executor == nullptr) {
-        auto uniqueExec = CREATE_EXECUTOR();
-        uniqueExec.ReleaseTo(executor);
-    }
-
     if (gmm1Weight != nullptr && gmm1Weight->Size() > 0 &&
         (*gmm1Weight)[0]->GetDataType() == DataType::DT_INT32) {
         gmm1Weight = ConvertTensorListToInt4(gmm1Weight, *executor);
