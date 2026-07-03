@@ -1762,9 +1762,10 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
     if (buf_count == 0) {
         return 0;
     }
+    ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
+
     int32_t qbuf_cnt = 0;
     uint32_t max_batch = buf_count > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : buf_count;
-    ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
 
     /* one POLL record for the entire poll operation (FC + IO) */
     uint64_t poll_start = umq_trace_start_timestamp_get();
@@ -1800,6 +1801,14 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
     if (!umq_ub_poll_get_jetty_node(queue)) {
         umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
         return 0;
+    }
+
+    // SHARE_TRANSPORT main_queue requires TP_HANDLE_IDX for IO TX poll, skip IO poll to avoid
+    // consuming completions from the main queue's own jfs_jfc
+    if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
+        (option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) == 0) {
+        umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
+        return qbuf_cnt;
     }
 
     urma_cr_t cr[max_batch];
