@@ -252,6 +252,7 @@ int umq_thread_closure_register(umq_trans_mode_t trans_mode,
         g_umq_thread_closure[trans_mode].dlhandler =
             dlopen(g_umq_fws[trans_mode].dlopen_so_name, RTLD_LAZY | RTLD_GLOBAL);
         if (g_umq_thread_closure[trans_mode].dlhandler == NULL) {
+            (void)__atomic_sub_fetch(&g_umq_thread_closure[args->trans_mode].dlhandler_ref_cnt, 1, __ATOMIC_ACQ_REL);
             UMQ_VLOG_ERR(VLOG_UMQ, "open so failed, err: %s\n", dlerror());
             free(args);
             return UMQ_FAIL;
