@@ -130,7 +130,7 @@ typedef struct perftest_context {
     urma_token_id_t *notify_token_id;
     urma_seg_t *remote_notify_seg;
     uint32_t remote_jetty_idx;
-    urma_target_seg_t **import_notify_seg;   // be processed for different remote seg
+    urma_target_seg_t **import_notify_seg; // be processed for different remote seg
 
     /* user tp */
     user_tp_ctx_t *user_tp;
@@ -160,6 +160,8 @@ static inline void increase_loc_addr(urma_sge_t *sge, uint32_t size, uint64_t rc
 
 int create_ctx(perftest_context_t *ctx, perftest_config_t *cfg);
 void destroy_ctx(perftest_context_t *ctx, perftest_config_t *cfg);
+int recreate_jetty(perftest_context_t *ctx, perftest_config_t *cfg);
+int rearm_jfc(perftest_context_t *ctx, const perftest_config_t *cfg);
 
 /* Warm_up function is only available for READ/WRITE/ATOMIC bw test. */
 int perform_warm_up(perftest_context_t *ctx, perftest_config_t *cfg);

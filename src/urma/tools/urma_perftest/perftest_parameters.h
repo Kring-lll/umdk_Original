@@ -17,8 +17,8 @@
 #include "ub_util.h"
 #include "urma_types.h"
 
-#include "perftest_communication.h"
 #include "perftest_log.h"
+#include "perftest_mgmt.h"
 
 /* Default Values of perftest parameters */
 #define PERFTEST_DEF_JFC_DEPTH_LAT   (512)
@@ -101,12 +101,12 @@
 #define PERFTEST_BW_GB     0x40000000 // 2^30
 #define PERFTEST_BYTE_SIZE 8
 
-#define PERFTEST_WRITE_DIRTY_PERIOD      (50)
-#define PERFTEST_CHAR_MAX_VALUE          (256)
-#define PERFTEST_SET_ATTR_BITMAP_UBOE    0x1FC
-#define PERFTEST_SET_ATTR_BITMAP_SL_FLAG 0x400
+#define PERFTEST_WRITE_DIRTY_PERIOD         (50)
+#define PERFTEST_CHAR_MAX_VALUE             (256)
+#define PERFTEST_SET_ATTR_BITMAP_UBOE       0x1FC
+#define PERFTEST_SET_ATTR_BITMAP_SL_FLAG    0x400
 #define PERFTEST_SET_ATTR_BITMAP_SPRAY_FLAG (1 << 15)
-#define PERFTEST_SET_ATTR_CNT_UBOE       (7)
+#define PERFTEST_SET_ATTR_CNT_UBOE          (7)
 
 #define PERFTEST_RESULT_LINE      "---------------------------------------------------------------------------------------\n"
 #define PERFTEST_INVALID_PRIORITY (255)
@@ -281,7 +281,15 @@ typedef struct perftest_config {
     uint8_t priority;
     bool share_jfr;
     uint32_t jettys_pre_jfr; /* How many jettys share a jfr. */
-    perftest_comm_t comm;
+
+    struct {
+        char *server_ip;
+        char *bind_ip;
+        bool enable_ipv6;
+        uint16_t port;          /* Server port for bind or connect, default 21115. */
+        int reserved_listen_fd; /* Unused, kept only for forward compatibility. */
+        int *reserved_sock_fd;  /* Unused, kept only for forward compatibility. */
+    };
 
     /* Rate Limiter */
     bool is_rate_limit;
@@ -375,8 +383,6 @@ void destroy_cfg(perftest_config_t *cfg);
 int check_local_cfg(perftest_config_t *cfg);
 int check_remote_cfg(perftest_config_t *cfg);
 bool is_jfr_depth_valid(perftest_config_t *cfg);
-int establish_connection(perftest_config_t *cfg);
-void close_connection(perftest_config_t *cfg);
 int parse_va(const char *s, uint64_t *out);
 
 #endif

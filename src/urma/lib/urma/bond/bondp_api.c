@@ -1966,9 +1966,17 @@ static int bondp_fill_bond_id_info_from_rjetty_ext(const urma_rjetty_t *rjetty, 
     return bondp_fill_bond_id_info_from_compact_ext(compact_ext, ext_hdr->len, info);
 }
 
-static void bondp_fill_seg_ext_from_import_tseg(const bondp_import_tseg_t *bdp_tseg, urma_bond_seg_ext_t *ext)
+static int bondp_fill_seg_ext_from_tseg(const bondp_tseg_t *bdp_tseg, urma_bond_seg_ext_t *ext)
 {
-    bool target_filled[URMA_UBAGG_DEV_MAX_NUM] = {0};
+    bool connected[TOPO_CONNECTED_MAX_NUM][TOPO_CONNECTED_MAX_NUM] = {0};
+    if (bdp_tseg == NULL || bdp_tseg->bondp_ctx == NULL || bdp_tseg->bondp_ctx->topo_map == NULL) {
+        return -EINVAL;
+    }
+
+    urma_eid_t dst_eid = bdp_tseg->v_tseg.seg.ubva.eid;
+    if (bondp_find_linked_port_by_topo(bdp_tseg->bondp_ctx->topo_map, &dst_eid, connected) != 0) {
+        return -EINVAL;
+    }
 
     ext->version = 0;
     ext->mask = 0;
@@ -1976,18 +1984,18 @@ static void bondp_fill_seg_ext_from_import_tseg(const bondp_import_tseg_t *bdp_t
     (void)memset(ext->connected, 0, sizeof(ext->connected));
 
     for (uint32_t local_idx = 0; local_idx < URMA_UBAGG_DEV_MAX_NUM; ++local_idx) {
+        urma_target_seg_t *p_tseg = bdp_tseg->p_tseg[local_idx];
+        if (p_tseg == NULL) {
+            continue;
+        }
         for (uint32_t target_idx = 0; target_idx < URMA_UBAGG_DEV_MAX_NUM; ++target_idx) {
-            urma_target_seg_t *p_tseg = bdp_tseg->p_tseg[local_idx][target_idx];
-            if (p_tseg == NULL) {
-                continue;
-            }
-            ext->connected[local_idx][target_idx] = true;
-            if (!target_filled[target_idx]) {
-                bondp_seg_to_base(&p_tseg->seg, &ext->peer_p_seg[target_idx]);
-                target_filled[target_idx] = true;
+            if (local_idx < TOPO_CONNECTED_MAX_NUM && target_idx < TOPO_CONNECTED_MAX_NUM) {
+                ext->connected[local_idx][target_idx] = connected[local_idx][target_idx];
             }
         }
+        bondp_seg_to_base(&p_tseg->seg, &ext->peer_p_seg[local_idx]);
     }
+    return 0;
 }
 
 static int bondp_user_ctl_get_rjetty(urma_context_t *ctx, urma_user_ctl_in_t *in,
@@ -2054,7 +2062,7 @@ static int bondp_user_ctl_get_seg_ctx(urma_context_t *ctx, urma_user_ctl_in_t *i
         return -EINVAL;
     }
 
-    bondp_import_tseg_t *bdp_tseg = CONTAINER_OF_FIELD(tseg, bondp_import_tseg_t, v_tseg);
+    bondp_tseg_t *bdp_tseg = CONTAINER_OF_FIELD(tseg, bondp_tseg_t, v_tseg);
 
     urma_seg_t *new_seg = (urma_seg_t *)calloc(1, sizeof(urma_seg_t) +
                                                sizeof(bondp_seg_ext_priv_t) +
@@ -2068,7 +2076,11 @@ static int bondp_user_ctl_get_seg_ctx(urma_context_t *ctx, urma_user_ctl_in_t *i
     bondp_seg_ext_priv_t *seg_ext = bondp_seg_get_priv_ext(new_seg);
     seg_ext->len = sizeof(urma_bond_seg_ext_t);
     urma_bond_seg_ext_t *ext = (urma_bond_seg_ext_t *)seg_ext->data;
-    bondp_fill_seg_ext_from_import_tseg(bdp_tseg, ext);
+    int ret = bondp_fill_seg_ext_from_tseg(bdp_tseg, ext);
+    if (ret != 0) {
+        free(new_seg);
+        return ret;
+    }
 
     urma_seg_t **out_seg = (urma_seg_t **)(uintptr_t)out->addr;
     *out_seg = new_seg;
@@ -2232,7 +2244,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
 
     urma_bond_id_info_out_t rvjetty_info = {0};
-    if (rjetty != NULL && bondp_rjetty_has_user_info(rjetty)) {
+    if (rjetty != NULL && rjetty->flag.bs.has_drv_ext) {
         const bondp_rjetty_t *bdp_rjetty = (const bondp_rjetty_t *)rjetty;
         if (bdp_rjetty->jetty != NULL) {
             cfg_jetty = CONTAINER_OF_FIELD(bdp_rjetty->jetty, bondp_comp_t, v_jetty);
@@ -2282,7 +2294,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         goto UNIMPORT_TSEG;
     }
 
-    if (rjetty->trans_mode == URMA_TM_RM && bondp_rjetty_has_user_info(rjetty) && cfg_jetty != NULL) {
+    if (rjetty->trans_mode == URMA_TM_RM && rjetty->flag.bs.has_drv_ext && cfg_jetty != NULL) {
         cfg_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
     }
 

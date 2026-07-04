@@ -638,6 +638,8 @@
 
 4、不支持带任何URMA资源的fork操作。在使用不带URMA资源的fork时，如果有循环的场景，需要等待URMA和系统的资源被释放后，再次fork。
 
+5、不允许对jfc/jfs/jfr进行大量非法的状态切换操作，此类操作会引发不可预期的异常，用户须保证状态切换的合法性与合理性。
+
 ![](figures/urma_info.png)
 
 urma框架的API不支持任意并发调用，如使用jetty对象与销毁jetty对应并发等会导致不可预期的异常，需要用户保证调用逻辑正确。
@@ -5739,6 +5741,12 @@ typedef union urma_get_tp_cfg_flag {
     uint32_t value;
 } urma_get_tp_cfg_flag_t;
 ```
+
+![](figures/urma_info.png)
+
+若使能 `uboe`，需要同时使能 `ctp`、`rtp`、`utp` 中的某一个，以显式指定 TP 类型。当前支持的组合类型如下：
+1. 使能 `uboe` 和 `rtp`
+2. 使能 `uboe` 和 `utp`
 
 ##### 2.3.3.3.3 urma_tp_info_t
 

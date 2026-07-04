@@ -8,16 +8,16 @@
  * History: 2022-04-03   create file
  */
 
+#include <errno.h>
 #include <math.h>
+#include <poll.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <pthread.h>
-#include <errno.h>
-#include <poll.h>
 
 #include "urma_api.h"
 #include "urma_ubagg.h"
@@ -353,7 +353,7 @@ static void *run_write_lat_simplex(void *arg)
         return NULL;
     }
 
-    bool is_server = cfg->comm.server_ip == NULL;
+    bool is_server = cfg->server_ip == NULL;
 
     volatile char *post_buf = (char *)ctx->local_buf[id] + ctx->buf_size + cfg->size - 1;
     volatile char *poll_buf = (char *)ctx->local_buf[id] + cfg->size - 1;
@@ -480,7 +480,7 @@ static void *run_send_lat_simplex(void *arg)
         return NULL;
     }
 
-    bool is_server = cfg->comm.server_ip == NULL;
+    bool is_server = cfg->server_ip == NULL;
 
     uint32_t rqe_multiple = get_rqe_prefill_multiple_simplex(cfg, ctx->urma_ctx, ctx->jfr[id]);
     if (rqe_multiple == 0) {
@@ -903,7 +903,7 @@ static void init_write_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, per
                        : (uint64_t)ctx->remote_seg[i].ubva.va;
 
     uint32_t sge_block_idx = (i * cfg->jfs_post_list + j) * (PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num +
-         (cfg->enable_notify ? 1 : 0));
+                                                             (cfg->enable_notify ? 1 : 0));
 
     uint32_t local_sge_idx = sge_block_idx + (cfg->sge_num + (cfg->enable_notify ? 1 : 0));
     uint32_t remote_sge_idx = sge_block_idx;
@@ -917,7 +917,7 @@ static void init_write_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, per
     // the following remote_sge addr judgement is the same.
     if (j > 0) {
         uint32_t idx = (i * cfg->jfs_post_list + j - 1) * (PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num +
-             (cfg->enable_notify ? 1 : 0));
+                                                           (cfg->enable_notify ? 1 : 0));
         uint32_t l_idx = idx + cfg->sge_num + (cfg->enable_notify ? 1 : 0);
         uint32_t r_idx = idx;
         local_sge[0].addr = run_ctx->jfs_sge[l_idx].addr;
@@ -949,11 +949,11 @@ static void init_write_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, per
     wr->rw.dst.num_sge = cfg->sge_num;
 
     if (cfg->enable_notify) {
-        remote_sge[cfg->sge_num].addr = ctx->import_notify_seg[i]->seg.ubva.va
-            + sizeof(uint64_t) * ctx->remote_jetty_idx;
+        remote_sge[cfg->sge_num].addr = ctx->import_notify_seg[i]->seg.ubva.va +
+                                        sizeof(uint64_t) * ctx->remote_jetty_idx;
         remote_sge[cfg->sge_num].len = sizeof(uint64_t);
         remote_sge[cfg->sge_num].tseg = ctx->import_notify_seg[i];
-        wr->rw.dst.num_sge ++;
+        wr->rw.dst.num_sge++;
     }
     wr->rw.notify_data = 0;
 }
@@ -1110,7 +1110,7 @@ static int prepare_credit_wr(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     run_test_ctx_t *run_ctx = &ctx->run_ctx;
     /* Handle half bidirectional test */
-    if (!cfg->bidirection && cfg->type == PERFTEST_BW && cfg->comm.server_ip == NULL && cfg->enable_credit == false &&
+    if (!cfg->bidirection && cfg->type == PERFTEST_BW && cfg->server_ip == NULL && cfg->enable_credit == false &&
         perftest_check_rs_mode(cfg) == false && !cfg->tp_aware) {
         return 0;
     }
@@ -1164,8 +1164,8 @@ static int prepare_jfs_wr(perftest_context_t *ctx, perftest_config_t *cfg)
         return -1;
     }
     uint32_t sge_num = cfg->jettys * cfg->jfs_post_list * cfg->sge_num *
-         PERFTEST_SGE_NUM_PRE_WR +                   // local + remote
-         (cfg->enable_notify ? cfg->jettys * cfg->jfs_post_list : 0);
+                           PERFTEST_SGE_NUM_PRE_WR + // local + remote
+                       (cfg->enable_notify ? cfg->jettys * cfg->jfs_post_list : 0);
     run_ctx->jfs_sge = calloc(1, sizeof(urma_sge_t) * sge_num);
     if (run_ctx->jfs_sge == NULL) {
         goto free_wr;
@@ -1449,7 +1449,7 @@ static int run_read_lat_once(perftest_context_t *ctx, perftest_config_t *cfg)
 int run_read_lat(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     /* Only Client read test. */
-    if (cfg->comm.server_ip == NULL) {
+    if (cfg->server_ip == NULL) {
         return 0;
     }
 
@@ -1492,7 +1492,7 @@ static void *run_write_lat_duplex(void *arg)
         return NULL;
     }
 
-    bool is_server = cfg->comm.server_ip == NULL;
+    bool is_server = cfg->server_ip == NULL;
 
     volatile char *post_buf = (char *)ctx->local_buf[id] + ctx->buf_size + cfg->size - 1;
     volatile char *poll_buf = (char *)ctx->local_buf[id] + cfg->size - 1;
@@ -1641,7 +1641,7 @@ static void *run_send_lat_duplex(void *arg)
         return NULL;
     }
 
-    bool is_server = cfg->comm.server_ip == NULL;
+    bool is_server = cfg->server_ip == NULL;
 
     uint32_t rqe_multiple = get_rqe_prefill_multiple_duplex(cfg, ctx->urma_ctx, ctx->jetty[id]);
     if (rqe_multiple == 0) {
@@ -1803,6 +1803,10 @@ int run_send_lat(perftest_context_t *ctx, perftest_config_t *cfg)
     if (cfg->all == true) {
         for (uint32_t i = 1; i <= cfg->order; i++) {
             cfg->size = (1U << i);
+            if (i > 1 && recreate_jetty(ctx, cfg) != 0) {
+                LOG_ERROR("Failed to recreate jetty, size: %u.\n", cfg->size);
+                return -1;
+            }
             if (run_send_lat_once(ctx, cfg) != 0) {
                 LOG_ERROR("Failed to run once, size: %u.\n", cfg->size);
                 return -1;
@@ -1869,8 +1873,8 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
             uint64_t outstanding_cnt =
                 cfg->share_jfs ? tot_scnt - tot_ccnt : run_ctx->scnt[index] - run_ctx->ccnt[index];
             while ((run_ctx->scnt[index] < cfg->iters || cfg->time_type.bs.duration == 1) &&
-                (outstanding_cnt + cfg->jfs_post_list) <= cfg->jfs_depth &&
-                !(cfg->is_rate_limit == true && is_send_burst == false)) {
+                   (outstanding_cnt + cfg->jfs_post_list) <= cfg->jfs_depth &&
+                   !(cfg->is_rate_limit == true && is_send_burst == false)) {
                 if (cfg->enable_credit == true) {
                     uint64_t swinow = (run_ctx->scnt[index] + cfg->jfs_post_list) > ctx->ctrl_buf[index][1]
                                           ? (run_ctx->scnt[index] + cfg->jfs_post_list - ctx->ctrl_buf[index][1])
@@ -2327,7 +2331,7 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
         run_ctx->tposted[0] = get_cycles();
     }
 
-    if (cfg->comm.server_ip != NULL) {
+    if (cfg->server_ip != NULL) {
         before_first_recv = false;
         if (cfg->time_type.bs.duration == 1) {
             update_duration_state(ctx, cfg);
@@ -2421,7 +2425,7 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
 
         recv_cqe_cnt = urma_poll_jfc(ctx->jfc_r[0], (int)cfg->jfr_depth, cr_recv);
         if (recv_cqe_cnt > 0) {
-            if (cfg->comm.server_ip == NULL && before_first_recv) {
+            if (cfg->server_ip == NULL && before_first_recv) {
                 before_first_recv = false;
                 if (cfg->time_type.bs.duration == 1) {
                     update_duration_state(ctx, cfg);
@@ -2732,7 +2736,7 @@ static void print_bw_report(perftest_context_t *ctx, perftest_config_t *cfg,
         // " %-7u    %-10lu       %-7.3lf            %-7.3lf         %-7.6lf"
         print_size = ctx->sum_size == 0 ? cfg->size : (uint32_t)size;
         LOG_QUIET(REPORT_BW_FMT, print_size, iters_sum, (double)peak_up / peak_down, bw_avg,
-            msg_rate_avg);
+                  msg_rate_avg);
         LOG_QUIET("\n");
     }
 }
@@ -2741,7 +2745,7 @@ static void print_bw_report_per_jetty(perftest_context_t *ctx, perftest_config_t
                                       bw_report_data_t *local_bw_report, uint64_t tposted_0, double cpu_mhz)
 {
     double cycles_to_units;
-    run_test_ctx_t* run_ctx = &ctx->run_ctx;
+    run_test_ctx_t *run_ctx = &ctx->run_ctx;
     uint32_t jettys_count = cfg->jettys;
     uint64_t num_of_cal_iters = cfg->iters;
     uint64_t size, inf_bi_factor;
@@ -2755,10 +2759,13 @@ static void print_bw_report_per_jetty(perftest_context_t *ctx, perftest_config_t
     }
 
     cycles_to_units = cpu_mhz * PERFTEST_M;
-    if (cycles_to_units <= 0.0) return;
+    if (cycles_to_units <= 0.0) {
+        return;
+    }
 
-    inf_bi_factor = (cfg->bidirection && cfg->time_type.bs.infinite == 1) ?
-                   (cfg->api_type == PERFTEST_SEND ? INF_BI_FACTOR_SEND : INF_BI_FACTOR_OTHER) : NON_INF_BI_FACTOR;
+    inf_bi_factor = (cfg->bidirection && cfg->time_type.bs.infinite == 1)
+                        ? (cfg->api_type == PERFTEST_SEND ? INF_BI_FACTOR_SEND : INF_BI_FACTOR_OTHER)
+                        : NON_INF_BI_FACTOR;
     size = inf_bi_factor * cfg->size;
     unit_ratio = get_bw_unit_ratio(cfg->bw_unit);
 
@@ -2771,7 +2778,7 @@ static void print_bw_report_per_jetty(perftest_context_t *ctx, perftest_config_t
 
         double jetty_bw = ((double)size * num_of_cal_iters * cycles_to_units) / (jetty_cycles * unit_ratio);
         double jetty_msg_rate = ((double)num_of_cal_iters * cycles_to_units * inf_bi_factor) /
-                (jetty_cycles * PERFTEST_M);
+                                (jetty_cycles * PERFTEST_M);
 
         total_bw_avg += jetty_bw;
         total_msg_rate += jetty_msg_rate;
@@ -3278,8 +3285,8 @@ static int prepare_run_bw_once(perftest_context_t *ctx, perftest_config_t *cfg,
     }
     if (cfg->bidirection) {
         for (i = 0; i < cfg->pair_num; i++) {
-            if (sock_sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(local_bw_report),
-                               (char *)(remote_bw_report)) != 0) {
+            if (sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(local_bw_report),
+                          (char *)(remote_bw_report)) != 0) {
                 LOG_ERROR("Failed to exchange local and remote report data.\n");
                 goto err_dest_jfs_wr;
             }
@@ -3302,7 +3309,7 @@ static int run_bw_once(perftest_context_t *ctx, perftest_config_t *cfg)
     bw_report_data_t remote_bw_report = {0};
     uint32_t i = 0;
     /* Handle half bidirectional test */
-    if (cfg->comm.server_ip == NULL && !cfg->bidirection) {
+    if (cfg->server_ip == NULL && !cfg->bidirection) {
         for (i = 0; i < cfg->pair_num; i++) {
             if (sync_time(cfg, i, g_bi_exchange_info[cfg->api_type].before) != 0 ||
                 sync_time(cfg, i, g_bi_exchange_info[cfg->api_type].after) != 0) {
@@ -3312,8 +3319,8 @@ static int run_bw_once(perftest_context_t *ctx, perftest_config_t *cfg)
             /* Size and iterations of local READ/WRITE/ATOMIC bw test should be filled before sync data */
             local_bw_report.size = cfg->size;
             local_bw_report.iters = cfg->iters;
-            if (sock_sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(&local_bw_report),
-                               (char *)(&remote_bw_report)) != 0) {
+            if (sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(&local_bw_report),
+                          (char *)(&remote_bw_report)) != 0) {
                 LOG_ERROR("Failed to exchange local and remote data in server.\n");
                 return -1;
             }
@@ -3345,15 +3352,15 @@ static int run_bw_once(perftest_context_t *ctx, perftest_config_t *cfg)
     }
 
     /* Handle half bidirectional test */
-    if (cfg->comm.server_ip != NULL && !cfg->bidirection) {
+    if (cfg->server_ip != NULL && !cfg->bidirection) {
         for (i = 0; i < cfg->pair_num; i++) {
             if (sync_time(cfg, i, g_bi_exchange_info[cfg->api_type].before) != 0 ||
                 sync_time(cfg, i, g_bi_exchange_info[cfg->api_type].after) != 0) {
                 LOG_ERROR("Failed to sync time in bw test in client.\n");
                 return -1;
             }
-            if (sock_sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(&local_bw_report),
-                               (char *)(&remote_bw_report)) != 0) {
+            if (sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(&local_bw_report),
+                          (char *)(&remote_bw_report)) != 0) {
                 LOG_ERROR("Failed to exchange local and remote data in client.\n");
                 return -1;
             }
@@ -3413,7 +3420,7 @@ static int exchange_sum_len(perftest_context_t *ctx, perftest_config_t *cfg)
     int len = (int)sizeof(ctx->sum_size);
     uint64_t b;
     int ret = 0;
-    ret = sock_sync_data(cfg, 0, len, (char *)&a, (char *)&b);
+    ret = sync_data(cfg, 0, len, (char *)&a, (char *)&b);
     if (b != 0) {
         ctx->sum_size = b;
     }
@@ -3443,7 +3450,7 @@ static int run_send_bw_once(perftest_context_t *ctx, perftest_config_t *cfg)
             LOG_ERROR("Failed to run once bi bw, size: %u.\n", cfg->size);
             return -1;
         }
-    } else if (cfg->comm.server_ip != NULL) {
+    } else if (cfg->server_ip != NULL) {
         if (cfg->enable_random_size != 0) {
             exchange_sum_len(ctx, cfg);
         }
@@ -3472,8 +3479,8 @@ static int run_send_bw_once(perftest_context_t *ctx, perftest_config_t *cfg)
 
     if (cfg->bidirection && cfg->time_type.bs.duration == 0) {
         for (i = 0; i < cfg->pair_num; i++) {
-            if (sock_sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(&local_bw_report),
-                               (char *)(&remote_bw_report)) != 0) {
+            if (sync_data(cfg, i, sizeof(bw_report_data_t), (char *)(&local_bw_report),
+                          (char *)(&remote_bw_report)) != 0) {
                 LOG_ERROR("Failed to exchange local and remote data.\n");
                 return -1;
             }
@@ -3499,7 +3506,7 @@ static int run_send_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
     g_exit_flag = 0;
     (void)signal(SIGINT, catch_sigint);
 
-    if (cfg->comm.server_ip != NULL) {
+    if (cfg->server_ip != NULL) {
         ret = run_once_bw_infinite(ctx, cfg);
         if (ret != 0) {
             LOG_ERROR("Failed to run run_once_bw_infinite in client, ret: %d.\n", ret);
@@ -3520,13 +3527,13 @@ static int run_send_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
 static int run_send_bw_one_size(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     int ret = 0;
-    if (cfg->comm.server_ip != NULL || cfg->bidirection) {
+    if (cfg->server_ip != NULL || cfg->bidirection) {
         ret = prepare_jfs_wr(ctx, cfg);
         if (ret != 0) {
             return -1;
         }
     }
-    if (cfg->comm.server_ip == NULL || cfg->bidirection) {
+    if (cfg->server_ip == NULL || cfg->bidirection) {
         ret = prepare_jfr_wr(ctx, cfg);
         if (ret != 0) {
             goto err_destroy_jfs_wr;
@@ -3554,11 +3561,11 @@ err_destroy_credit_wr:
         destroy_credit_wr(ctx);
     }
 err_destroy_jfr_wr:
-    if (cfg->bidirection || cfg->comm.server_ip == NULL) {
+    if (cfg->bidirection || cfg->server_ip == NULL) {
         destroy_jfr_wr(ctx);
     }
 err_destroy_jfs_wr:
-    if (cfg->bidirection || cfg->comm.server_ip != NULL) {
+    if (cfg->bidirection || cfg->server_ip != NULL) {
         destroy_jfs_wr(ctx);
     }
     return ret;
@@ -3571,6 +3578,10 @@ int run_send_bw(perftest_context_t *ctx, perftest_config_t *cfg)
     if (cfg->all == true) {
         for (uint32_t i = 1; i <= cfg->order; i++) {
             cfg->size = (1U << i);
+            if (i > 1 && recreate_jetty(ctx, cfg) != 0) {
+                LOG_ERROR("Failed to recreate jetty, size: %u.\n", cfg->size);
+                return -1;
+            }
             if (run_send_bw_one_size(ctx, cfg) != 0) {
                 return -1;
             }

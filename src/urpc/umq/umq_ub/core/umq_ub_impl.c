@@ -599,6 +599,7 @@ static int umq_ub_ctx_init_one(umq_ub_ctx_t *ctx, umq_trans_info_t *info, umq_in
     }
 
     ctx->io_lock_free = cfg->io_lock_free;
+    ctx->rq_lock_free = cfg->rq_lock_free;
     ctx->feature = cfg->feature;
     ctx->flow_control = cfg->flow_control;
     ctx->ref_cnt = 1;
@@ -1184,22 +1185,22 @@ uint32_t umq_ub_transport_pool_resource_create_impl(uint64_t umqh_tp, umq_tp_res
     umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
     umq_ub_ctx_t *dev_ctx = queue->dev_ctx;
     int ret = 0;
-    (void)pthread_spin_lock(&jetty_node_list->lock);
+    (void)util_mutex_lock(jetty_node_list->lock);
     unsigned long offset = urpc_bitmap_find_next_zero_bit(jetty_node_list->bitmap, jetty_node_list->list_len, 0);
     if (offset >= jetty_node_list->list_len) {
-        (void)pthread_spin_unlock(&jetty_node_list->lock);
+        (void)util_mutex_unlock(jetty_node_list->lock);
         UMQ_VLOG_ERR(VLOG_UMQ, "node list is full, no more jetty nodes can be added\n");
         errno = -UMQ_ERR_EINVAL;
         return UINT32_MAX;
     }
     ret = umq_ub_create_jetty_node(queue, dev_ctx, option, &jetty_node_list->node_list[offset]);
     if (ret != UMQ_SUCCESS) {
-        (void)pthread_spin_unlock(&jetty_node_list->lock);
+        (void)util_mutex_unlock(jetty_node_list->lock);
         UMQ_VLOG_ERR(VLOG_UMQ, "create jetty node failed, ret %d\n", ret);
         return UINT32_MAX;
     }
     urpc_bitmap_set1(jetty_node_list->bitmap, offset);
-    (void)pthread_spin_unlock(&jetty_node_list->lock);
+    (void)util_mutex_unlock(jetty_node_list->lock);
 
     return (uint32_t)offset;
 }
@@ -1218,29 +1219,29 @@ int umq_ub_transport_pool_resource_destroy_impl(uint64_t umqh_tp, uint32_t tp_ha
         return -UMQ_ERR_EINVAL;
     }
 
-    umq_ub_jetty_node_list_t *jetty_node_list = umq_ub_jetty_pool_get_jetty_node_list();
+    umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
     if (tp_handle_idx >= jetty_node_list->list_len) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "invalid jetty node index %u, jetty node list len %u\n",
-            tp_handle_idx, jetty_node_list->list_len);
+        UMQ_VLOG_ERR(VLOG_UMQ, "tp handle idx %u exceeds the jetty node list len %u\n",
+                     tp_handle_idx, jetty_node_list->list_len);
         return -UMQ_ERR_EINVAL;
     }
 
-    (void)pthread_spin_lock(&jetty_node_list->lock);
+    (void)util_mutex_lock(jetty_node_list->lock);
     if (!urpc_bitmap_is_set(jetty_node_list->bitmap, tp_handle_idx)) {
-        (void)pthread_spin_unlock(&jetty_node_list->lock);
+        (void)util_mutex_unlock(jetty_node_list->lock);
         UMQ_VLOG_ERR(VLOG_UMQ, "jetty node index %u has already been destroyed\n", tp_handle_idx);
         return -UMQ_ERR_EINVAL;
     }
 
     int ret = umq_ub_destroy_jetty_node(queue, jetty_node_list->node_list[tp_handle_idx]);
     if (ret != UMQ_SUCCESS) {
-        (void)pthread_spin_unlock(&jetty_node_list->lock);
+        (void)util_mutex_unlock(jetty_node_list->lock);
         UMQ_VLOG_ERR(VLOG_UMQ, "destroy jetty node failed, index %u\n", tp_handle_idx);
         return ret;
     }
 
     urpc_bitmap_set0(jetty_node_list->bitmap, tp_handle_idx);
-    (void)pthread_spin_unlock(&jetty_node_list->lock);
+    (void)util_mutex_unlock(jetty_node_list->lock);
     return UMQ_SUCCESS;
 }
 
@@ -1612,14 +1613,20 @@ int umq_ub_wait_interrupt_impl(uint64_t wait_umqh_tp, int time_out, umq_interrup
     if ((option->flag & UMQ_INTERRUPT_FLAG_TP_HANDLE_IDX) != 0) {
         if (!(is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
             (option->flag & UMQ_INTERRUPT_FLAG_IO_DIRECTION) != 0 && option->direction == UMQ_IO_TX)) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "enable tp handle idx only obtaining the tx fd of tp resources\n");
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "enable tp handle idx only obtaining the tx fd of tp resources\n");
             umq_trace_end_record(UMQ_TRACE_TYPE_WAIT, umq_trace_timestamp_get());
             return -UMQ_ERR_EINVAL;
         }
 
         umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
+        if (option->tp_handle_idx >= jetty_node_list->list_len) {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "tp handle idx %u exceeds the jetty node list len %u\n",
+                               option->tp_handle_idx, jetty_node_list->list_len);
+            umq_trace_end_record(UMQ_TRACE_TYPE_WAIT, umq_trace_timestamp_get());
+            return -UMQ_ERR_EINVAL;
+        }
         if (!urpc_bitmap_is_set(jetty_node_list->bitmap, option->tp_handle_idx)) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "tx_handel_idx %u not exist\n", option->tp_handle_idx);
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "tx_handel_idx %u not exist\n", option->tp_handle_idx);
             umq_trace_end_record(UMQ_TRACE_TYPE_WAIT, umq_trace_timestamp_get());
             return -UMQ_ERR_EINVAL;
         }
@@ -1669,12 +1676,18 @@ int umq_ub_interrupt_fd_get_impl(uint64_t umqh_tp, umq_interrupt_option_t *optio
     if ((option->flag & UMQ_INTERRUPT_FLAG_TP_HANDLE_IDX) != 0) {
         if (!(is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
             (option->flag & UMQ_INTERRUPT_FLAG_IO_DIRECTION) != 0 && option->direction == UMQ_IO_TX)) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "enable tp handle idx only obtaining the tx fd of tp resources\n");
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "enable tp handle idx only obtaining the tx fd of tp resources\n");
             return UMQ_INVALID_FD;
         }
         umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
+        if (option->tp_handle_idx >= jetty_node_list->list_len) {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "tp handle idx %u exceeds the jetty node list len %u\n",
+                               option->tp_handle_idx, jetty_node_list->list_len);
+            return -UMQ_ERR_EINVAL;
+        }
+
         if (!urpc_bitmap_is_set(jetty_node_list->bitmap, option->tp_handle_idx)) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "tx_handel_idx %u not exist\n", option->tp_handle_idx);
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "tx_handel_idx %u not exist\n", option->tp_handle_idx);
             return UMQ_INVALID_FD;
         }
         return jetty_node_list->node_list[option->tp_handle_idx]->jfs_jfce->fd;
@@ -1748,6 +1761,11 @@ int umq_ub_interrupt_fd_list_get_impl(uint64_t umqh_tp,
         return UMQ_SUCCESS;
     }
 
+    if (is_umq_ub_logic_queue(queue->create_flag)) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), logic umq not have io interrupt fd\n", queue->umq_id);
+        return -UMQ_ERR_EINVAL;
+    }
+
     if ((option->flag & UMQ_INTERRUPT_FLAG_IO_DIRECTION) == 0 || option->direction <= UMQ_IO_ALL ||
         option->direction >= UMQ_IO_MAX) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "option invalid\n");
@@ -1757,12 +1775,18 @@ int umq_ub_interrupt_fd_list_get_impl(uint64_t umqh_tp,
     if ((option->flag & UMQ_INTERRUPT_FLAG_TP_HANDLE_IDX) != 0) {
         if (!(is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
             (option->flag & UMQ_INTERRUPT_FLAG_IO_DIRECTION) != 0 && option->direction == UMQ_IO_TX)) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "enable tp handle idx only obtaining the tx fd of tp resources\n");
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "enable tp handle idx only obtaining the tx fd of tp resources\n");
             return UMQ_INVALID_FD;
         }
         umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
+        if (option->tp_handle_idx >= jetty_node_list->list_len) {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "tp handle idx %u exceeds the jetty node list len %u\n",
+                               option->tp_handle_idx, jetty_node_list->list_len);
+            return -UMQ_ERR_EINVAL;
+        }
+
         if (!urpc_bitmap_is_set(jetty_node_list->bitmap, option->tp_handle_idx)) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "tx_handel_idx %u not exist\n", option->tp_handle_idx);
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "tx_handel_idx %u not exist\n", option->tp_handle_idx);
             return UMQ_INVALID_FD;
         }
         return umq_ub_get_fd_list(queue->dev_ctx,
@@ -1824,8 +1848,15 @@ int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicited, umq_interrupt_option_t *
         if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
             (option->flag & UMQ_INTERRUPT_FLAG_IO_DIRECTION) != 0 && option->direction == UMQ_IO_TX) {
             umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
+            if (option->tp_handle_idx >= jetty_node_list->list_len) {
+                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "tp handle idx %u exceeds the jetty node list len %u\n",
+                                   option->tp_handle_idx, jetty_node_list->list_len);
+                umq_trace_end_record(UMQ_TRACE_TYPE_REARM, umq_trace_timestamp_get());
+                return -UMQ_ERR_EINVAL;
+            }
+
             if (!urpc_bitmap_is_set(jetty_node_list->bitmap, option->tp_handle_idx)) {
-                UMQ_VLOG_ERR(VLOG_UMQ, "tx_handel_idx %u not exist\n", option->tp_handle_idx);
+                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "tx_handel_idx %u not exist\n", option->tp_handle_idx);
                 umq_trace_end_record(UMQ_TRACE_TYPE_REARM, umq_trace_timestamp_get());
                 return -UMQ_ERR_EINVAL;
             }
@@ -2454,6 +2485,7 @@ int umq_ub_dev_add_impl(umq_trans_info_t *info, umq_init_cfg_t *cfg)
     }
 
     g_ub_ctx[g_ub_ctx_count].io_lock_free = cfg->io_lock_free;
+    g_ub_ctx[g_ub_ctx_count].rq_lock_free = cfg->rq_lock_free;
     g_ub_ctx[g_ub_ctx_count].feature = cfg->feature;
     g_ub_ctx[g_ub_ctx_count].flow_control = cfg->flow_control;
 
@@ -2875,7 +2907,14 @@ int umq_ub_transport_pool_resource_modify_impl(uint64_t umqh_tp, uint32_t tp_han
         UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u) is not share transport main umq\n", queue->umq_id);
         return -UMQ_ERR_EINVAL;
     }
-    umq_ub_jetty_node_list_t *jetty_node_list = umq_ub_jetty_pool_get_jetty_node_list();
+
+    umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
+    if (tp_handle_idx >= jetty_node_list->list_len) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "tp handle idx %u exceeds the jetty node list len %u\n",
+                     tp_handle_idx, jetty_node_list->list_len);
+        return -UMQ_ERR_EINVAL;
+    }
+
     if (!urpc_bitmap_is_set(jetty_node_list->bitmap, tp_handle_idx)) {
         UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u) tp_handle_idx %u tp handle not exist\n", queue->umq_id, tp_handle_idx);
         return -UMQ_ERR_EINVAL;

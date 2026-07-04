@@ -637,6 +637,8 @@
 
 4. Fork operations with any URMA resources are not supported. When using fork without URMA resources, if there are cyclic scenarios, it is necessary to wait for the URMA and system resources to be released before forking again.
 
+5. Massive illegal state transitions on jfc/jfs/jfr are not allowed. Such operations may lead to unpredictable exceptions. Users must ensure that state transitions are valid and reasonable.
+
 ![](figures/urma_info.png)
 
 The URMA framework APIs do not support arbitrary concurrent calls. For example, concurrent use of a jetty object with its destruction will lead to unpredictable exceptions. Users must ensure the correctness of the calling logic.
@@ -5652,6 +5654,12 @@ typedef union urma_get_tp_cfg_flag {
     uint32_t value;
 } urma_get_tp_cfg_flag_t;
 ```
+
+![](figures/urma_info.png)
+
+If `uboe` is enabled, one of `ctp`, `rtp`, or `utp` must also be enabled to explicitly specify the TP type. The currently supported combinations are:
+1. Enable `uboe` and `rtp`
+2. Enable `uboe` and `utp`
 
 ##### 2.3.3.3.3 urma_tp_info_t
 

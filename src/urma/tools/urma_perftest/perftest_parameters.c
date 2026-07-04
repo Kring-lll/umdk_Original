@@ -23,8 +23,6 @@
 #include "urma_types_str.h"
 #include "urma_ubagg.h"
 
-#include "perftest_communication.h"
-
 #include "perftest_parameters.h"
 
 #define PERFTEST_CACHE_LINE_FILE_SIZE (10)
@@ -327,12 +325,10 @@ static void init_cfg(perftest_config_t *cfg)
 
     init_cfg_size(cfg);
 
-    cfg->comm.enable_ipv6 = false;
-    cfg->comm.server_ip = NULL;
-    cfg->comm.bind_ip = NULL;
-    cfg->comm.port = PERFTEST_DEF_PORT;
-    cfg->comm.listen_fd = -1;
-    cfg->comm.sock_fd = NULL;
+    cfg->enable_ipv6 = false;
+    cfg->server_ip = NULL;
+    cfg->bind_ip = NULL;
+    cfg->port = PERFTEST_DEF_PORT;
     cfg->jfs_depth = (cfg->type == PERFTEST_BW) ? PERFTEST_DEF_JFS_DEPTH_BW : PERFTEST_DEF_JFS_DEPTH_LAT;
     cfg->trans_mode = URMA_TM_RM;
 
@@ -437,7 +433,7 @@ void print_cfg(const perftest_config_t *cfg)
     LOG_QUIET(" JFC depth           : %-10u\t\t Device name      : %s\n", cfg->jfc_depth, cfg->dev_name);
     LOG_QUIET(" Trans mode          : %-10s\t\t JETTY mode       : %s\n", g_trans_mode_str[cfg->trans_mode],
               g_jetty_mode_str[cfg->jetty_mode]);
-    if (cfg->comm.server_ip != NULL || cfg->bidirection) {
+    if (cfg->server_ip != NULL || cfg->bidirection) {
         LOG_QUIET(" JFS depth           : %u\n", cfg->jfs_depth);
     }
     if (cfg->jfs_post_list > 1) {
@@ -446,7 +442,7 @@ void print_cfg(const perftest_config_t *cfg)
     if (cfg->jfr_post_list > 1) {
         LOG_QUIET(" JFR post list       : %u\n", cfg->jfr_post_list);
     }
-    if (cfg->api_type == PERFTEST_SEND && (cfg->comm.server_ip == NULL || cfg->bidirection)) {
+    if (cfg->api_type == PERFTEST_SEND && (cfg->server_ip == NULL || cfg->bidirection)) {
         LOG_QUIET(" JFR depth           : %u\n", cfg->jfr_depth);
     }
 
@@ -569,13 +565,12 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
 
     (void)memset(cfg, 0, sizeof(perftest_config_t));
     static const struct option first_options[] = {
-        {"help",          no_argument, NULL, 'h'},
-        {"version",       no_argument, NULL, 'V'},
-        {NULL,            no_argument, NULL, '\0'},
+        {"help", no_argument, NULL, 'h'},
+        {"version", no_argument, NULL, 'V'},
+        {NULL, no_argument, NULL, '\0'},
     };
     while (1) {
-        int c = getopt_long(argc, argv, "+hV",
-            first_options, NULL);
+        int c = getopt_long(argc, argv, "+hV", first_options, NULL);
         if (c == -1) {
             break;
         }
@@ -584,11 +579,11 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                 usage(argv[0]);
                 return -1;
             case 'V':
-                #ifdef PERFTEST_VERSION
+#ifdef PERFTEST_VERSION
                 (void)printf("perftest_version: Version: A5-%s\n", PERFTEST_VERSION);
-                #else
+#else
                 (void)printf("The version remains undefined.\n");
-                #endif
+#endif
                 return -1;
             default:
                 break;
@@ -824,7 +819,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                 }
                 break;
             case 'P':
-                (void)ub_str_to_u16(optarg, &cfg->comm.port);
+                (void)ub_str_to_u16(optarg, &cfg->port);
                 break;
             case 'Q':
                 (void)ub_str_to_u32(optarg, &cfg->cq_mod);
@@ -845,8 +840,8 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                 (void)ub_str_to_u32(optarg, &cfg->size);
                 break;
             case 'S':
-                cfg->comm.server_ip = strdup(optarg);
-                if (cfg->comm.server_ip == NULL) {
+                cfg->server_ip = strdup(optarg);
+                if (cfg->server_ip == NULL) {
                     LOG_ERROR("failed to allocate server ip memory.\n");
                     return -1;
                 }
@@ -904,7 +899,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                 (void)ub_str_to_u32(optarg, &cfg->order_type);
                 break;
             case PERFTEST_OPT_ENABLE_IPV6:
-                cfg->comm.enable_ipv6 = true;
+                cfg->enable_ipv6 = true;
                 break;
             case PERFTEST_OPT_ENABLE_CREDIT:
                 cfg->enable_credit = true;
@@ -1041,8 +1036,8 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                 (void)ub_str_to_u8(optarg, &cfg->sl);
                 break;
             case PERFTEST_OPT_BIND_IP:
-                cfg->comm.bind_ip = strdup(optarg);
-                if (cfg->comm.bind_ip == NULL) {
+                cfg->bind_ip = strdup(optarg);
+                if (cfg->bind_ip == NULL) {
                     LOG_ERROR("failed to allocate bind ip memory.\n");
                     return -1;
                 }
@@ -1114,13 +1109,13 @@ void destroy_cfg(perftest_config_t *cfg)
     if (cfg == NULL) {
         return;
     }
-    if (cfg->comm.server_ip != NULL) {
-        free(cfg->comm.server_ip);
-        cfg->comm.server_ip = NULL;
+    if (cfg->server_ip != NULL) {
+        free(cfg->server_ip);
+        cfg->server_ip = NULL;
     }
-    if (cfg->comm.bind_ip != NULL) {
-        free(cfg->comm.bind_ip);
-        cfg->comm.bind_ip = NULL;
+    if (cfg->bind_ip != NULL) {
+        free(cfg->bind_ip);
+        cfg->bind_ip = NULL;
     }
     return;
 }
@@ -1364,7 +1359,7 @@ int check_local_cfg(perftest_config_t *cfg)
     }
 
     if ((cfg->api_type == PERFTEST_SEND || cfg->enable_imm == true) &&
-        cfg->type == PERFTEST_BW && cfg->comm.server_ip == NULL) {
+        cfg->type == PERFTEST_BW && cfg->server_ip == NULL) {
         cfg->no_peak = true;
     }
 
@@ -1677,7 +1672,7 @@ static int check_both_side_cfg(const perftest_config_t *local_cfg, const perftes
                   local_cfg->order, remote_cfg->order);
         return -1;
     }
-    if (local_cfg->comm.enable_ipv6 != remote_cfg->comm.enable_ipv6) {
+    if (local_cfg->enable_ipv6 != remote_cfg->enable_ipv6) {
         LOG_ERROR("Config inconsistent[enable_ipv6].\n");
         return -1;
     }
@@ -1724,7 +1719,7 @@ int check_remote_cfg(perftest_config_t *cfg)
 {
     perftest_config_t remote_cfg;
     for (uint32_t i = 0; i < cfg->pair_num; i++) {
-        int ret = sock_sync_data(cfg, i, OFF_SET, (char *)cfg, (char *)&remote_cfg);
+        int ret = sync_data(cfg, i, OFF_SET, (char *)cfg, (char *)&remote_cfg);
         if (ret != 0) {
             LOG_ERROR("Failed to sync remote configuration, pair_num:%u, errno:%s.\n", i, strerror(errno));
             return ret;
