@@ -837,6 +837,7 @@ void umq_ub_ctx_uninit_impl(uint8_t *ctx)
     g_ub_ctx_count = 0;
     g_umq_ub_inited = false;
     umq_symbol_urma()->urma_uninit();
+    umq_symbol_urma()->urma_unregister_log_func();
     urpc_id_generator_uninit(&g_umq_id_allocator);
 }
 
