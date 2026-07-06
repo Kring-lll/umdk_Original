@@ -11,7 +11,9 @@
 #include <vector>
 #include "graph/types.h"
 #include "aclnn/opdev/platform.h"
-#include "aclnn/opdev/make_op_executor.h"
+#include "opdev/common_types.h"
+#include "opdev/make_op_executor.h"
+#include "opdev/op_executor.h"
 #include "aclnnInner_fused_deep_moe.h"
 #include "aclnn_fused_deep_moe.h"
 
