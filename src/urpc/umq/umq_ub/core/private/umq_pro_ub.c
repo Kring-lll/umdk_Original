@@ -1094,9 +1094,10 @@ static int sub_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t bu
         ret = umq_ub_process_fc_msg(queue, &imm, &buf[qbuf_cnt]);
         if (ret > 0 && (buf[qbuf_cnt]->status == UMQ_FAKE_BUF_FC_EMLINK)) {
             __atomic_store_n((uint64_t *)&queue->flow_control.imm[i], imm.value, __ATOMIC_RELEASE);
+        } else {
+            (void)umq_ub_fill_rx_buff_post_process(queue, &imm);
         }
         qbuf_cnt += ret;
-        (void)umq_ub_fill_rx_buff_post_process(queue, &imm);
     }
     return (int)qbuf_cnt;
 }
