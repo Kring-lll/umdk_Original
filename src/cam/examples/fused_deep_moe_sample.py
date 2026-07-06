@@ -251,23 +251,31 @@ class FusionOp(DecodeMoeOps):
                          shared_expert_rank_num, dynamic_eplb)
 
     def _apply_ops(self, x, expert_ids, smooth_scales, expert_scales):
-        output, expert_token_nums = torch.ops.umdk_cam_op_lib.fused_deep_moe(
+        output, share_output, expert_token_nums = torch.ops.umdk_cam_op_lib.fused_deep_moe(
             x=x,
-            expertIds=expert_ids,
-            gmm1PermutedWeight=self.gmm1_weight,
-            gmm1PermutedWeightScale=self.gmm1_weight_scale_fp32,
-            gmm2Weight=self.gmm2_weight,
-            gmm2WeightScale=self.gmm2_weight_scale_fp32,
-            expertSmoothScalesOptional=smooth_scales,
-            expertScalesOptional=expert_scales,
-            groupEp=self.ep_hcomm_info,
-            epRankSize=self.ep_world_size,
-            epRankId=self.global_rank_id,
-            moeExpertNum=self.moe_expert_num,
-            sharedExpertNum=1,
-            sharedExpertRankNum=self.shared_expert_rank_num,
-            quantMode=0,
-            globalBs=self.batch_size * self.ep_world_size)
+            expert_ids=expert_ids,
+            gmm1_weight=self.gmm1_weight,
+            gmm1_weight_scale=self.gmm1_weight_scale_fp32,
+            gmm2_weight=self.gmm2_weight,
+            gmm2_weight_scale=self.gmm2_weight_scale_fp32,
+            expert_scales=expert_scales,
+            share_gmm1_weight=None,
+            share_gmm1_weight_scale=None,
+            share_gmm2_weight=None,
+            share_gmm2_weight_scale=None,
+            expert_smooth_scales=smooth_scales,
+            share_smooth_scales=None,
+            x_active_mask=None,
+            gmm1_bias=None,
+            gmm2_bias=None,
+            share_gmm1_bias=None,
+            share_gmm2_bias=None,
+            group_ep=self.ep_hcomm_info,
+            ep_rank_size=self.ep_world_size,
+            ep_rank_id=self.global_rank_id,
+            moe_expert_num=self.moe_expert_num,
+            quant_mode=0,
+            global_bs=self.batch_size * self.ep_world_size)
         return (output, expert_token_nums)
 
     def _process_weights_after_loading(self, gmm1_weight, gmm1_weight_scale,
@@ -424,7 +432,7 @@ def run_once(local_rank_id,
     fused_ops = FusionOp(*weight_datas, ep_hcomm_info_fused,
                          *parameter, dynamic_eplb).npu()  # type: ignore
     small_op_token_output, small_op_count_output = small_ops(*input_datas)
-    fused_op_token_output, fused_op_count_output = fused_ops(*input_datas)
+    fused_op_token_output, _, fused_op_count_output = fused_ops(*input_datas)
     torch_npu.npu.synchronize(device_id)
 
     # 处理资源销毁
