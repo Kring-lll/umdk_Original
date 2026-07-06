@@ -68,7 +68,29 @@ TEST_F(UrmaUvsTest, TopoHelpersBuildHostEidMappingsWithMockedDevices)
     FillTopoUe(&shareNode->agg_devs[0].ues[0], 7, 2, 1, 21, 21, 24);
 
     EXPECT_EQ(0, uvs_update_host_eid_table_by_share_topo(shareNode, 1));
-    EXPECT_GE(g_uvsIoctl.callCount, 2U);
+    EXPECT_GE(g_uvsIoctl.netlinkCallCount, 1U);
+    EXPECT_GE(g_uvsIoctl.callCount, 1U);
+
+    std::free(shareNode);
+}
+
+TEST_F(UrmaUvsTest, TopoHelpersReadActualNetlinkTopoCount)
+{
+    auto *shareNode = static_cast<urma_topo_node *>(std::calloc(1, sizeof(urma_topo_node)));
+    ASSERT_NE(nullptr, shareNode);
+
+    g_uvsIoctl.mockDeviceOpen = true;
+    g_uvsIoctl.ubaggTopoNum = 2;
+    g_uvsIoctl.topoNodes.resize(2);
+    g_uvsIoctl.topoNodes[0].node_id = 0x71;
+    g_uvsIoctl.topoNodes[1].node_id = 0x72;
+    FillTopoUe(&g_uvsIoctl.topoNodes[1].agg_devs[0].ues[0], 8, 2, 1, 81, 82, 83);
+    shareNode->node_id = 0x72;
+    FillTopoUe(&shareNode->agg_devs[0].ues[0], 8, 2, 1, 84, 84, 85);
+
+    EXPECT_EQ(0, uvs_update_host_eid_table_by_share_topo(shareNode, 1));
+    EXPECT_EQ(2U, g_uvsIoctl.netlinkCallCount);
+    EXPECT_GE(g_uvsIoctl.callCount, 1U);
 
     std::free(shareNode);
 }
@@ -95,6 +117,46 @@ TEST_F(UrmaUvsTest, TopoHelpersRejectInvalidOrUnmatchedShareTopo)
     shareNode->node_id = 0x92;
     FillTopoUe(&shareNode->agg_devs[0].ues[0], 2, 1, 1, 64, 65, 66);
     EXPECT_EQ(-ENOENT, uvs_update_host_eid_table_by_share_topo(shareNode, 1));
+
+    std::free(shareNode);
+}
+
+TEST_F(UrmaUvsTest, TopoHelpersRejectInvalidNetlinkTopoCount)
+{
+    auto *shareNode = static_cast<urma_topo_node *>(std::calloc(1, sizeof(urma_topo_node)));
+    ASSERT_NE(nullptr, shareNode);
+
+    g_uvsIoctl.mockDeviceOpen = true;
+    g_uvsIoctl.ubaggTopoNum = MAX_NODE_NUM + 1;
+    EXPECT_EQ(-EINVAL, uvs_update_host_eid_table_by_share_topo(shareNode, 1));
+
+    std::free(shareNode);
+}
+
+TEST_F(UrmaUvsTest, TopoHelpersRejectChangedNetlinkTopoCount)
+{
+    auto *shareNode = static_cast<urma_topo_node *>(std::calloc(1, sizeof(urma_topo_node)));
+    ASSERT_NE(nullptr, shareNode);
+
+    g_uvsIoctl.mockDeviceOpen = true;
+    g_uvsIoctl.ubaggTopoNum = 2;
+    g_uvsIoctl.changeTopoNumAfterFirst = true;
+    g_uvsIoctl.topoNodes.resize(2);
+    g_uvsIoctl.topoNodes[0].node_id = 0x73;
+    g_uvsIoctl.topoNodes[1].node_id = 0x74;
+    EXPECT_EQ(-EAGAIN, uvs_update_host_eid_table_by_share_topo(shareNode, 1));
+
+    std::free(shareNode);
+}
+
+TEST_F(UrmaUvsTest, TopoHelpersPropagateNetlinkFailure)
+{
+    auto *shareNode = static_cast<urma_topo_node *>(std::calloc(1, sizeof(urma_topo_node)));
+    ASSERT_NE(nullptr, shareNode);
+
+    g_uvsIoctl.netlinkSucceed = false;
+    g_uvsIoctl.netlinkRet = -EACCES;
+    EXPECT_EQ(-EACCES, uvs_update_host_eid_table_by_share_topo(shareNode, 1));
 
     std::free(shareNode);
 }

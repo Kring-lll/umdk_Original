@@ -17,16 +17,21 @@ set_target_properties(tpsa
         SOVERSION ${PROJECT_VERSION_MAJOR}
 )
 
-target_include_directories(tpsa 
+target_include_directories(tpsa
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/urma/lib/urma/core/include
         ${CMAKE_SOURCE_DIR}/urma/common/include
+        /usr/include/libnl3
 )
 
-target_link_libraries(tpsa urma_common_static nl-genl-3 nl-3)
+target_link_libraries(tpsa
+    PRIVATE
+        urma_common_static
+        nl-genl-3 nl-3
+)
 
 install(TARGETS tpsa
     DESTINATION /usr/lib64

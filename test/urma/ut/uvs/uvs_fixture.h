@@ -33,16 +33,32 @@ extern "C" {
 
 namespace urma_test_uvs {
 
+struct UvsNetlinkTopoArg {
+    struct {
+        int node_idx;
+    } in;
+    struct {
+        uint32_t node_num;
+        urma_topo_node topo_info;
+    } out;
+};
+
 struct UvsIoctlCapture {
     bool succeed = true;
+    bool netlinkSucceed = true;
+    bool changeTopoNumAfterFirst = false;
     bool mockDeviceOpen = false;
     int errnoValue = EINVAL;
+    int netlinkRet = -ENOMEM;
     uint32_t command = 0;
     uint32_t argsLen = 0;
     uint32_t callCount = 0;
+    uint32_t netlinkCallCount = 0;
     uint32_t ubaggTopoNum = 1;
+    UvsNetlinkTopoArg *lastNetlinkArg = nullptr;
     std::vector<uint8_t> attrTypes;
     std::vector<uint16_t> fieldSizes;
+    std::vector<urma_topo_node> topoNodes;
     urma_topo_node topoNode = {};
 };
 
