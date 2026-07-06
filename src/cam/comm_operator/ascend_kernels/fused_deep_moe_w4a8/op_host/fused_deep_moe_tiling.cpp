@@ -382,21 +382,21 @@ static ge::graphStatus CheckGmm2Shape(const gert::TilingContext &context, const 
     if (gmm2ListLen > 1) { // List
         OPS_ERR_IF(gmm2ListLen != localExpertNum,
             OPS_LOG_E(nodeName, "gmm2 does not match local expert number perRank."), return ge::GRAPH_FAILED);
-        OPS_ERR_IF(n / CONSTANT_TWO != gmm2FirstTensorElementShape.GetDim(0) * weightScale,
+        OPS_ERR_IF(n / CONSTANT_TWO != gmm2FirstTensorElementShape.GetDim(0),
             OPS_LOG_E(nodeName, "gmm2 does not match half of gmm1 hidden size."), return ge::GRAPH_FAILED);
         OPS_ERR_IF(h != gmm2FirstTensorElementShape.GetDim(1) * weightScale,
             OPS_LOG_E(nodeName, "gmm2 does not match token hidden size."), return ge::GRAPH_FAILED);
         listFlag = true;
     } else { // Single
         if (elementDims == TWO_DIMS) { // one localExpert perRank
-            OPS_ERR_IF(n / CONSTANT_TWO != gmm2FirstTensorElementShape.GetDim(0) * weightScale,
+            OPS_ERR_IF(n / CONSTANT_TWO != gmm2FirstTensorElementShape.GetDim(0),
                 OPS_LOG_E(nodeName, "gmm2 does not match half of gmm1 hidden size."), return ge::GRAPH_FAILED);
             OPS_ERR_IF(h != gmm2FirstTensorElementShape.GetDim(1) * weightScale,
                 OPS_LOG_E(nodeName, "gmm2 does not match token hidden size."), return ge::GRAPH_FAILED);
         } else { // multi localExperts perRank
             OPS_ERR_IF(localExpertNum != gmm2FirstTensorElementShape.GetDim(0),
                 OPS_LOG_E(nodeName, "gmm2 does not match local expert num perRank."), return ge::GRAPH_FAILED);
-            OPS_ERR_IF(n / CONSTANT_TWO != gmm2FirstTensorElementShape.GetDim(1) * weightScale,
+            OPS_ERR_IF(n / CONSTANT_TWO != gmm2FirstTensorElementShape.GetDim(1),
                 OPS_LOG_E(nodeName, "gmm2 does not match half of gmm1 hidden size."), return ge::GRAPH_FAILED);
             OPS_ERR_IF(h != gmm2FirstTensorElementShape.GetDim(2) * weightScale,
                 OPS_LOG_E(nodeName, "gmm2 does not match token hidden size."), return ge::GRAPH_FAILED);
