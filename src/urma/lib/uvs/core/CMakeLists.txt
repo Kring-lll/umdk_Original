@@ -3,6 +3,10 @@
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} TPSA_SO_DIR_SRCS)
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBNL3 REQUIRED IMPORTED_TARGET libnl-3.0)
+pkg_check_modules(LIBNL_GENL3 REQUIRED IMPORTED_TARGET libnl-genl-3.0)
+
 add_library(tpsa SHARED
     ${TPSA_SO_DIR_SRCS}
 )
@@ -26,7 +30,7 @@ target_include_directories(tpsa
         ${CMAKE_SOURCE_DIR}/urma/common/include
 )
 
-target_link_libraries(tpsa urma_common_static nl-genl-3 nl-3)
+target_link_libraries(tpsa urma_common_static PkgConfig::LIBNL_GENL3 PkgConfig::LIBNL3)
 
 install(TARGETS tpsa
     DESTINATION /usr/lib64

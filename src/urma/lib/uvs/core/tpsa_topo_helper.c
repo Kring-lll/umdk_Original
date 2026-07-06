@@ -11,6 +11,7 @@
 #include <string.h>
 #include "tpsa_log.h"
 #include "uvs_ubagg_ioctl.h"
+#include "uvs_ubagg_netlink.h"
 #include "tpsa_topo_helper.h"
 
 #define UVS_MAIN_UE_EID_INVALID_INDEX UINT32_MAX
@@ -706,14 +707,13 @@ static int uvs_add_host_eid_batch_count(uint32_t *total_batch_num,
 }
 
 static int uvs_update_host_eid_table_by_share_node(
-    const uvs_ubagg_topo_info_out_t *topo_info,
+    const struct urma_topo_node *topo, uint32_t topo_num,
     const struct urma_topo_node *share_node, uint32_t *total_batch_num,
     uint32_t *total_eid_num)
 {
     uvs_host_eid_batch_table_t table = {0};
     const struct urma_topo_node *topo_node =
-        uvs_find_topo_node(topo_info->topo_info, topo_info->node_num,
-                           share_node->node_id);
+        uvs_find_topo_node(topo, topo_num, share_node->node_id);
     int ret;
 
     if (topo_node == NULL) {
@@ -743,7 +743,8 @@ static int uvs_update_host_eid_table_by_share_node(
 int uvs_update_host_eid_table_by_share_topo(
     const struct urma_topo_node *share_topo, uint32_t share_topo_num)
 {
-    uvs_ubagg_topo_info_out_t *topo_info;
+    struct urma_topo_node *topo = NULL;
+    uint32_t topo_num = 0;
     uint32_t total_batch_num = 0;
     uint32_t total_eid_num = 0;
     uint32_t node_idx;
@@ -754,32 +755,26 @@ int uvs_update_host_eid_table_by_share_topo(
         return -EINVAL;
     }
 
-    topo_info = calloc(1, sizeof(*topo_info));
-    if (topo_info == NULL) {
-        return -ENOMEM;
-    }
-
-    ret = uvs_ubagg_ioctl_get_topo_info(topo_info);
+    ret = uvs_ubagg_nl_get_topo_info(&topo, &topo_num);
     if (ret != 0) {
-        free(topo_info);
         return ret;
     }
-    if (topo_info->node_num == 0 || topo_info->node_num > MAX_NODE_NUM) {
-        free(topo_info);
+    if (topo == NULL || topo_num == 0 || topo_num > MAX_NODE_NUM) {
+        free(topo);
         return -EINVAL;
     }
 
     for (node_idx = 0; node_idx < share_topo_num; node_idx++) {
         const struct urma_topo_node *share_node = &share_topo[node_idx];
 
-        ret = uvs_update_host_eid_table_by_share_node(topo_info, share_node,
-            &total_batch_num, &total_eid_num);
+        ret = uvs_update_host_eid_table_by_share_node(topo, topo_num,
+            share_node, &total_batch_num, &total_eid_num);
         if (ret != 0) {
             break;
         }
     }
 
-    free(topo_info);
+    free(topo);
     if (ret == 0) {
         TPSA_LOG_INFO("successfully updated host eid entries by batch, "
                       "batch_num = %u, eid_num = %u.\n",
