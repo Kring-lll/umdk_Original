@@ -87,7 +87,6 @@ file(GLOB aclnn_src ${ASCEND_AUTOGEN_PATH}/aclnn*.cpp)
 npu_op_library(cust_opapi ACLNN
     ${aclnn_src}
 )
-target_include_directories(cust_opapi PRIVATE ${CANN_ROOT}/include/aclnn)
 target_compile_options(cust_opapi PRIVATE
     -fvisibility=hidden
 )
