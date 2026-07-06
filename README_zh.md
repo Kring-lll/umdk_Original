@@ -17,6 +17,8 @@
 
 5. USOCK：UB通信生态构建，兼容标准Socket编程接口，使能TCP应用零修改提升网络通信性能。
 
+6. SNC：超节点网络控制器，面向主流昇腾超节点硬件和组网，提供路由计算、路由主被动收敛功能、租户隔离和pingmesh规划等能力，为超节点提供安全高效的网络互联支撑。
+
 #### 三、编译运行
 1. 编译环境要求
 - 编译环境：kernel 6.6
@@ -32,17 +34,15 @@
   yum install -y openssl-devel
   yum install -y glib2-devel
   yum install -y libnl3-devel
-  yum install -y libummu-devel
   yum install -y kernel-devel  # ubcore is necessary from openEuler kernel
 ```
 
 2. 编译指导
 - 您可以通过以下方式构建和安装umdk rpm包：
-- 下面的命令需要在源码根目录执行：
 
 ```bash
   mkdir -p /root/rpmbuild/SOURCES/
-  tar -czf /root/rpmbuild/SOURCES/umdk-26.06.0.tar.gz --exclude=.git `ls -A`
+  tar -czf /root/rpmbuild/SOURCES/umdk-25.12.0.tar.gz --exclude=.git `ls -A`
   rpmbuild -ba umdk.spec
 ```
 
@@ -57,6 +57,22 @@
   $ --define 'kernel_version 6.6.92'         option, specify kernel version
   $ --define 'rpm_release  0'                option, specify release version
 ```
+
+- SNC (Java) 独立构建
+SNC 为 Java 项目，使用 Maven 构建，不依赖 rpmbuild。构建环境要求：
+  - JDK 21 或以上
+  - Maven 3.6 或以上
+```bash
+  # 完整构建（包含测试）
+  bash build/snc/build.sh
+
+  # 跳过测试构建
+  bash build/snc/build.sh -s
+
+  # 清理构建产物
+  bash build/snc/build.sh -c
+```
+构建产物为 `build/snc/output/snc-*.jar`。
 
 3. 部署指导
 - 运行时依赖请检查前置驱动已加载，如未加载请手动加载
@@ -90,61 +106,6 @@ modprobe ums # 如果需要使能ums
 chmod -R 777 /usr/lib64/urma
 chmod 777 /dev/ummu/tid
 chmod 755 /usr/lib64/liburma*
-```
-
-4. 使用 Bazel 脚本编译、打包、安装和卸载 URMA（工作区根目录：`src/urma`）
-
-在 UMDK 仓库根目录下，进入 `src/urma` 运行脚本。脚本会在编译前检查编译依赖，并在安装前检查运行依赖；已满足的依赖不会处理，缺失的依赖会通过 `yum install -y` 安装。因此请确认 yum 源可用，并在存在缺失依赖时使用具备安装权限的用户执行。
-
-```bash
-cd src/urma
-# 典型 AArch64 Release 包构建，包含 UDMA 和 libummu。
-./urma_bazel.sh compile --config=release --config=arm64 --define=build_udma=true
-```
-
-`compile` 命令会通过 Bazel 构建固定的 URMA 打包产物，生成与 RPM 安装效果对齐的 rootfs，写入 `metadata/urma_version`，并在 `src/urma` 下生成 `urma-bazel-<timestamp>.tar.gz`。打包完成后，脚本会清理中间产物，包括 `urma_version`、`bazel-urma-package` 和 Bazel 便捷软链接。
-
-该流程不需要手动安装或链接系统中的 `libummu`。脚本会从 `src/urma/WORKSPACE` 或 `src/urma/bazel/urma_deps.bzl` 读取 `LIBUMMU_REMOTE`、`LIBUMMU_COMMIT`、`LIBUMMU_VERSION` 和 `LIBUMMU_ABI_VERSION`，将指定 commit 拉取到 `src/urma/third_party/libummu`，通过 Bazel 编译，并随 URMA 一起打入 tar 包。
-
-如果环境上已经存在 `libummu`，当前逻辑如下：
-
-- `compile` 不使用系统已安装的 `libummu`，始终使用 `src/urma/third_party/libummu` 中配置 commit 对应的源码。
-- `install` 会安装 tar 包内置的 `libummu` 文件；如果 `/usr/lib64/libummu.so*` 等同路径文件或软链接已存在，会被包内产物替换。
-- `remove` 不会卸载通过 yum 安装的三方依赖，也不会删除随包安装的 `libummu` 内容。
-
-`compile` 后面的参数会继续传给 `bazel build`，因此仍可按需选择架构和诊断配置：
-
-```bash
-cd src/urma
-
-# x86_64 Release 包构建。
-./urma_bazel.sh compile --config=release --config=x86_64 --define=build_udma=true
-
-# Debug + AddressSanitizer / LeakSanitizer。
-./urma_bazel.sh compile --config=debug --config=asan --define=build_udma=true
-
-# 开启 ThreadSanitizer，并启用周期性能统计。
-./urma_bazel.sh compile --config=tsan --define=perf_cycle=true --define=build_udma=true
-```
-
-将生成的 tar 包复制到目标环境后，解压并使用包内脚本安装。`install` 和 `remove` 需要使用 **root** 或 **sudo** 执行；脚本会按 `metadata/install_manifest` 安装文件，刷新 `ldconfig`，在存在 `restorecon` 时恢复 SELinux 上下文，并在可用时重启 rsyslog。`remove` 命令只卸载 manifest 中的 URMA/UDMA/TPSA 自有安装内容，不会卸载通过 yum 安装的三方库，也会保留随包安装的 libummu 内容。
-
-```bash
-# 在目标环境执行。
-mkdir -p /tmp/urma-bazel
-tar -xzf urma-bazel-<timestamp>.tar.gz -C /tmp/urma-bazel
-/tmp/urma-bazel/urma_bazel.sh install
-
-# 后续卸载 URMA/UDMA/TPSA 打包安装内容。
-/tmp/urma-bazel/urma_bazel.sh remove
-```
-
-也可以直接从归档文件执行安装或卸载：
-
-```bash
-cd src/urma
-./urma_bazel.sh install urma-bazel-<timestamp>.tar.gz
-./urma_bazel.sh remove urma-bazel-<timestamp>.tar.gz
 ```
 
 #### 四、参与贡献
