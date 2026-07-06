@@ -19,6 +19,7 @@
 #include <sys/time.h>
 #include <openssl/md5.h>
 #include <openssl/evp.h>
+#include <ctype.h>
 
 #include "../common/common.h"
 
@@ -40,7 +41,7 @@
 #define UMQ_DEFAULT_RX_BUF_SIZE (4096)
 #define UMQ_QBUF_BLOCK_SIZE (8192)
 #define UMQ_MAX_WR_COUNT (64)
-#define TEST_UMQ_MAX_BIND_INFO_SIZE (512)
+#define TEST_UMQ_MAX_BIND_INFO_SIZE (4608)
 
 #define DEQUEUE_SLEEP_TIME_US (100)
 #define DEQUEUE_TIMEOUT_MS (30000)
@@ -52,6 +53,10 @@
 
 #define CQ_EVENT_FLAG_DISABLE 0
 #define CQ_EVENT_FLAG_ENABLE 1
+
+#define PRIORITY_BUF_LEN 8192
+#define MAX_PRIORITY_NUM 16
+#define TP_TYPE_LEN 4
 
 typedef enum {
     TEST_TRANS_MODE_IP = 0,
@@ -75,6 +80,7 @@ typedef struct {
     umq_create_option_t option;
     int tx_fd;
     int rx_fd;
+    int event_fd;
     uint32_t src_app_id;
     uint32_t dst_app_id;
     uint32_t r_qidx;
@@ -82,6 +88,8 @@ typedef struct {
     uint32_t r_binfo_len;
     uint8_t l_binfo[TEST_UMQ_MAX_BIND_INFO_SIZE];
     uint8_t r_binfo[TEST_UMQ_MAX_BIND_INFO_SIZE];
+    umq_port_id_t used_ports[UMQ_MAX_ROUTES];
+    uint8_t used_ports_num;
     bool not_check_data;
     umq_opcode_t opcode;
 } umqh_ops_t;
@@ -127,9 +135,20 @@ typedef struct {
     umq_trans_mode_t trans_mode;
     umq_init_cfg_t cfg;
     uint32_t umqh_num;
+    uint32_t umqh_sub_num;
     umqh_ops_t *umqh_ops;
+    umqh_ops_t *umqh_sub_ops;
     umqh_async_ops_t async_ops;
     uint32_t ctx_flag;
+    umq_log_config_t log_cfg;
+    bool is_self_log;
+    bool is_share_jfr;
+    umq_tp_mode_t tp_mode;
+    umq_tp_type_t tp_type;
+    bool is_lock_free;
+    bool is_bonding;
+    uint8_t priority;
+
 } test_umq_ctx_t;
 
 typedef struct {
@@ -142,14 +161,20 @@ typedef struct {
 } test_data_args_t;
 
 extern test_umq_ctx_t g_test_umq_ctx;
-extern const char *ENQUEUE_DATA_DEFAUT;
+extern const char *ENQUEUE_DATA_DEFAULT;
 extern size_t enqueue_data_len;
-extern const char * POST_DATA_DEFAUT;
+extern const char * POST_DATA_DEFAULT;
 extern size_t post_data_len;
 
 #define NS_PER_SEC 1000000000UL
 #define MS_PER_SEC 1000
 #define NS_PER_MS 1000000
+
+#define EID_FMT          "%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x:%2.2x%2.2x"
+#define EID_RAW_ARGS(eid)                                                                                              \
+    eid[0], eid[1], eid[2], eid[3], eid[4], eid[5], eid[6], eid[7], eid[8], eid[9], eid[10], eid[11], eid[12],         \
+        eid[13], eid[14], eid[15]
+#define EID_ARGS(eid)             EID_RAW_ARGS((eid).raw)
 
 static inline uint64_t get_timestamp_ns(void)
 {
@@ -173,8 +198,6 @@ static inline uint64_t get_timestamp_s(void)
 }
 
 int test_umq_str_to_eid(const char *buf, umq_eid_t *eid);
-void test_get_ubmm_cna(test_umq_ctx_t *ctx);
-void test_get_ubmm_eid(test_umq_ctx_t *ctx);
 test_umq_ctx_t *test_umq_ctx_init(int argc, char *argv[], int thread_num = 1);
 int test_umq_ctx_uninit(test_umq_ctx_t *ctx);
 int set_trans_dev_info(test_umq_ctx_t *ctx, umq_dev_assign_t *dev_info, umq_dev_assign_mode_t assign_mode);
@@ -206,12 +229,15 @@ void test_data_args_fill(test_data_args_t *data_args);
 
 int test_umq_post_rx_buf(umqh_ops_t *umqh_ops, uint32_t depth = 0, uint32_t size = 0, uint64_t *status = NULL);
 int test_umq_post_rx(test_umq_ctx_t *ctx, uint32_t depth = 0, umqh_ops_t *umqh_ops = nullptr, uint64_t *status = NULL);
-int test_umq_post_tx_buf(umqh_ops_t *umqh_ops, const char *data = POST_DATA_DEFAUT, uint32_t data_size = post_data_len, uint64_t *status = NULL);
-int test_umq_poll(uint64_t umqh, umq_io_direction_t direction, umq_buf_t **buf, uint32_t buf_count = TEST_MAX_POLL_BATCH, uint64_t timeout  = DEQUEUE_TIMEOUT_MS);
+int test_umq_post_tx_buf(umqh_ops_t *umqh_ops, const char *data = POST_DATA_DEFAULT, uint32_t data_size = post_data_len, uint64_t *status = NULL);
+int test_umq_poll(uint64_t umqh, umq_io_option_t *option, umq_buf_t **buf, uint32_t buf_count = TEST_MAX_POLL_BATCH, uint64_t timeout  = DEQUEUE_TIMEOUT_MS);
 int test_umq_poll_tx_buf(umqh_ops_t *umqh_ops, uint64_t timeout = DEQUEUE_TIMEOUT_MS, uint64_t *status = NULL);
-int test_umq_poll_rx_buf(umqh_ops_t *umqh_ops, const char *data = POST_DATA_DEFAUT, uint32_t data_size = post_data_len, uint64_t timeout = DEQUEUE_TIMEOUT_MS, uint64_t *status = NULL);
+int test_umq_poll_rx_buf(umqh_ops_t *umqh_ops, const char *data = POST_DATA_DEFAULT, uint32_t data_size = post_data_len, uint64_t timeout = DEQUEUE_TIMEOUT_MS, uint64_t *status = NULL);
 void test_umq_flush(umqh_ops_t *umqh_ops, umq_io_direction_t direction = UMQ_IO_ALL, uint64_t timeout = DEFAULT_FLUSH_TIME_MS);
 int test_umq_pro_func_req(test_data_args_t *data_args);
 int test_umq_pro_func_rsp(test_data_args_t *data_args);
+int get_used_ports(test_umq_ctx_t *ctx, umqh_ops_t *umqh_ops);
+void parse_priority_sl_tp_type_map(const char *input_str, char priority_list[MAX_PRIORITY_NUM][TP_TYPE_LEN]);
+uint8_t test_get_umq_normal_priority(test_umq_ctx_t *ctx);
 
 #endif

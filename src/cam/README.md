@@ -5,18 +5,17 @@
 # Roadmap
 
 - [x]  **EP Communication: Dispatch & Combine** 
-  - [x] Support A2
+  - [ ] Support A2
   - [x] Support A3
   - [ ] Support low latency mode
   - [x] Support high throughput mode
-  - [ ] Support BF16/FP16 input
-  - [x] Support SHMEM
+  - [x] Support BF16/FP16 input
 - [x]  **FusedDeepMoE: Dispatch + GEMM + Combine** 
   - [ ] Support A2
   - [x] Support A3
   - [x] Support low latency mode
   - [ ] Support high throughput mode
-  - [ ] Support BF16/FP16 input
+  - [x] Support BF16/FP16 input
   - [x] Support W8A8 for GEMM
   - [ ] Support W4A8 for GEMM
 - [ ]  **KVCache Transfer** 
@@ -38,9 +37,10 @@ UMDK/
 |    |--- en/  
 |    |    |--- cam/                 # cam doc in English
 |--- src/
-|    |--- cam/  
+|    |--- cam/
 |    |    |--- comm_operator/       # code of communication operator
 |    |    |    |--- ascend_kernels/ # code of ascend kernels
+|    |    |    |    |--- operator_registry.json  # operator -> SOC mapping + build metadata
 |    |    |    |--- pybind/         # code of python interface bindings
 |    |    |--- examples/            # examples for different kernels
 |    |    |--- third_party/         # third party dependencies (git submodules)
@@ -53,49 +53,80 @@ UMDK/
 ## 1. Basic Environment Requirements
 |Requirements|Type|Version|Description|
 |---|---|---|---|
-|Ascend Chip|Required|A2/A3|You can run CAM now only in an Ascend A2 or A3 SuperPod.|
-|CANN|Required|8.3/8.5|Before using CAM, you need to install CANN 8.3 or 8.5 to offer basic toolkit functions. Please refer to “[Huawei Ascend-CANN](https://www.hiascend.com/cann)” and install CANN first.|
+|Ascend Chip|Required|A3|You can run CAM now only in an Ascend A3 SuperPod.|
+|CANN|Required|8.5/9.0|Before using CAM, you need to install CANN 8.5 or 9.0 to offer basic toolkit functions. Please refer to “[Huawei Ascend-CANN](https://www.hiascend.com/cann)” and install CANN first.|
 |Torch|Required|2.8.0|To compile Pybind whl packet in CAM, you need to install Torch first.|
-|Torch-Npu|Required|2.8.0-7.2.0|Torch-Npu supports torch framework in Ascend Platform.|
+|Torch-Npu|Required|2.8.0 post1~post4|Torch-Npu version depends on CANN version. See `docker/cam/Dockerfile` for the matched wheel of each CANN preset.|
 |gtest|Required|1.16.0|gtest is used for UT.|
 |OpenMPI|Required|5.0.7|MPI interfaces are used for multi-thread tests.|
-|Ascend-SHMEM|Optional|1.3.0|If you want to compile and run SHMEM kernels, you need to install Ascend-SHMEM first. Please refer to "[Huawei Ascend-SHMEM](https://gitee.com/ascend/shmem)".
 
-For quickly start, we support a docker compose file sample in "umdk/docker/cam" folder. In ubuntu system with aarch64 architecture, you can change COMPOSE_PROJECT_NAME, IMAGE_NAME and CONTAINER_NAME by yourself in ".env" file first and run
+For quickly start, we support a docker compose file sample in "umdk/docker/cam" folder. In ubuntu system with aarch64 architecture, you can build the image first:
 ```bash
-docker-compose up -d
+cd umdk
+docker build --build-arg BUILD_ARG=a3_9.0_open -t cam-dev:a3_9.0_open -f docker/cam/Dockerfile .
 ```
-to create a runnable docker image quickly. Other system configurations may need to modify some commands to fit.
+Supported `BUILD_ARG` values: `a3_8.5_open`, `a3_9.0_open`. The `BUILD_ARG` must match `IMAGE_NAME` in `.env`.
+
+Then change `COMPOSE_PROJECT_NAME`, `IMAGE_NAME` and `CONTAINER_NAME` in `docker/cam/.env` if needed, and run:
+```bash
+cd docker/cam
+docker compose up -d
+```
+to create a runnable docker container quickly. Other system configurations may need to modify some commands to fit.
 
 ## 2. Compile and Install
 ### · Compile
-CAM offers a basic ".run" packet for kernels and a ".whl" packet for python interface. You can easily compile these two packets with the command below:
+CAM offers a basic ".run" packet for kernels and a ".whl" packet for python interface.
+
+**Basic usage:**
 ```bash
 # enter UMDK folder
 cd UMDK/
 # initialize git submodules (catlass, etc.)
 git submodule update --init --recursive
-# build
+# build: all registered SOC generations, full operator set
 ./build/cam/build.sh
 ```
-To enable debug mode, use the following command instead:
+
+**Options:**
+|Option|Description|
+|---|---|
+|`-c <soc>`|Target SOC generation. Supported: `ascend910_93`. Omit to build all registered generations.|
+|`-a <ops>`|Semicolon-separated operator list to compile (requires `-c`). Names must match the SOC support list in `operator_registry.json`. Omit to compile the full set.|
+|`-q`|Select the `fused_deep_moe_w4a8` (quantization) variant instead of `fused_deep_moe`. Note: master has no w4a8 variant yet; `-q` takes effect once it is added.|
+|`-d`|Enable debug build.|
+|`-x`|Extract the run package instead of packing it.|
+|`-t`|Build unit tests only.|
+|`-p`|Build pybind whl only.|
+
+**Examples:**
 ```bash
-./build/cam/build.sh -d
+./build/cam/build.sh -c ascend910_93                                # full set for ascend910_93
+./build/cam/build.sh -c ascend910_93 -a "moe_dispatch_normal;moe_combine_normal"   # only these two
+./build/cam/build.sh -d                                             # debug, all SOCs
 ```
-If we get final output like `Build packet successful!`, then we can find the two packets in:
+
+**Rules:**
+- `-a` requires `-c` (specify a SOC generation first); `-a` cannot be used with the default all-SOC build.
+- `-c` must be a registered SOC (`ascend910_93`). Unregistered values (e.g. `ascend910b4`) exit with an error.
+- Each `-a` entry must be in the SOC's support list; unknown names exit with an error.
+- `fused_deep_moe` and `fused_deep_moe_w4a8` are mutually exclusive (they share source filenames); `-q` switches to the w4a8 variant. `fused_deep_moe_fwk` is an independent operator and can always coexist with either. (master currently has only the base variant.)
+- Operators that require SHMEM are automatically skipped when `SHMEM_HOME_PATH` is unset.
+
+If the build succeeds, the two packets are placed under:
 ```bash
-# whl packet, XXX depends on the compile environment.
+# whl packet, version/arch depend on the compile environment.
 output/cam/comm_operator/dist/umdk_cam_op_lib_XXX.whl
-# run packet, XXX depends on the compile environment.
-output/cam/comm_operator/run/cam_ascend910XXX.run
+# run packet, <soc>_<os>_<arch> depend on the compile environment.
+output/cam/comm_operator/run/CAM_<soc>_<os>_<arch>.run
 ```
 ### · Install
 To install these two packets, you may follow the commands below:
 ```bash
 # Step 1: install run packet. The recommended install path is the opp folder in your environment.
-./output/cam/comm_operator/run/cam_ascend910XXX.run --install-path=/usr/local/Ascend/ascend-toolkit/latest/opp
-# Step 2: enable environment variables. The path is provided from the output that you install run packet. 
-source /usr/local/Ascend/ascend-toolkit/lateset/opp/vendors/CAM/bin/set_env.bash
+./output/cam/comm_operator/run/CAM_<soc>_<os>_<arch>.run --install-path=/usr/local/Ascend/ascend-toolkit/latest/opp
+# Step 2: enable environment variables. The path is provided from the output that install run packet.
+source /usr/local/Ascend/ascend-toolkit/latest/opp/vendors/CAM/bin/set_env.bash
 # Step 3: install whl packet.
 pip install --force-reinstall ./output/cam/comm_operator/dist/umdk_cam_op_lib_XXX.whl
 ```

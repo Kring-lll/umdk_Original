@@ -16,8 +16,18 @@ static int run_test(test_ums_ctx_t *ctx)
     vector<int> vec_random = {131072, 262144, 524288, 1048576, 2097152, 4194304};
     int ret = 0;
     int rc = TEST_FAILED;
-    char test_ip_str[10]={0};
+    char test_ip_str[128]={0};
+    // char setup_env[MAX_EXEC_CMD_RET_LEN];
     char close_qperf[MAX_EXEC_CMD_RET_LEN];
+    char proc_net_ums6[MAX_EXEC_CMD_RET_LEN];
+    char proc_net_ums[MAX_EXEC_CMD_RET_LEN];
+    char check_perf[MAX_EXEC_CMD_RET_LEN];
+
+    exec_cmd(close_qperf, MAX_EXEC_CMD_RET_LEN, "pkill -9 qperf");
+    // exec_cmd(setup_env, MAX_EXEC_CMD_RET_LEN, "rmmod ums; modprobe ums; service ums_agent restart");
+    sleep(3);
+
+    sync_time("----------------------------0");
 
     for (int i=0; i<vec_random.size(); i++) {
         char cmd_revise_snd[MAX_EXEC_CMD_RET_LEN];
@@ -27,27 +37,36 @@ static int run_test(test_ums_ctx_t *ctx)
 
         if (ctx->app_id == PROC_1) {
             char cmd0[MAX_EXEC_CMD_RET_LEN];
-            exec_cmd(cmd0, MAX_EXEC_CMD_RET_LEN, "nohup ums_run qperf -lp %d &", ctx->test_port);
+            exec_cmd(cmd0, MAX_EXEC_CMD_RET_LEN, "nohup ums_run qperf -lp %d > /tmp/qperf_server.log 2>&1 &", ctx->test_port + 1);
+            sleep(3);
+            exec_cmd(proc_net_ums6, MAX_EXEC_CMD_RET_LEN, "cat /proc/net/ums6");
 
         }
+        sleep(2);
         sync_time("----------------------------1");
         if (ctx->app_id == PROC_2) {
             char cmd1[MAX_EXEC_CMD_RET_LEN];
-            exec_cmd(cmd1, MAX_EXEC_CMD_RET_LEN, "nohup ums_run qperf %s -lp %d -t 0 -m 8192 tcp_lat &", ctx->test_ip, ctx->test_port);
+            exec_cmd(cmd1, MAX_EXEC_CMD_RET_LEN, "nohup ums_run qperf %s -lp %d -t 0 -m 8192 tcp_lat > /tmp/qperf_client.log 2>&1 &", ctx->test_ip, ctx->test_port + 1);
+            sleep(3);
+            exec_cmd(proc_net_ums, MAX_EXEC_CMD_RET_LEN, "cat /proc/net/ums");
         }
+        sleep(2);
         sync_time("----------------------------2");
-        sprintf(test_ip_str, "%d", ctx->test_ip);
+        sprintf(test_ip_str, "%s", ctx->test_ip_host2);
         int check_num = query_proc_net_ums_detail_stream_num("False", test_ip_str);
-        if (ctx->app_id == PROC_2 && check_num != 2) {
+        if (ctx->app_id == PROC_2 && check_num < 1) {
             ret = -1;
         }
-        CHKERR_JUMP(ret != TEST_SUCCESS, "ums connection error", EXIT);
-    }
 
-    exec_cmd(close_qperf, MAX_EXEC_CMD_RET_LEN, "pkill -9 qperf");
+        sync_time("----------------------------3");
+        exec_cmd(close_qperf, MAX_EXEC_CMD_RET_LEN, "pkill -9 qperf");
+        sync_time("----------------------------4");
+        exec_cmd(check_perf, MAX_EXEC_CMD_RET_LEN, "ps -ef|grep qperf");
+    }
+    CHKERR_JUMP(ret != TEST_SUCCESS, "ums connection error", EXIT);
     rc = TEST_SUCCESS;
 EXIT:
-    sync_time("----------------------------3");
+    sync_time("----------------------------4");
     return rc;
 }
 

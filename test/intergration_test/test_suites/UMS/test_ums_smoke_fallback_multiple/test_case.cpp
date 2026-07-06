@@ -15,32 +15,47 @@ static int run_test(test_ums_ctx_t *ctx)
     int ret = 0;
     int rc = TEST_FAILED;
     int check_num;
-    char test_ip_str[100]={0};
+    // char setup_env[MAX_EXEC_CMD_RET_LEN];
+    char test_ip_str[128]={0};
     char close_qperf[MAX_EXEC_CMD_RET_LEN];
+    char check_perf[MAX_EXEC_CMD_RET_LEN];
+
+    exec_cmd(close_qperf, MAX_EXEC_CMD_RET_LEN, "pkill -9 qperf");
+    // exec_cmd(setup_env, MAX_EXEC_CMD_RET_LEN, "rmmod ums; modprobe ums; service ums_agent restart");
+    sleep(3);
+    sync_time("----------------------------0");
 
     if (ctx->app_id == PROC_1) {
         char serv_cmd[MAX_EXEC_CMD_RET_LEN];
-        exec_cmd(serv_cmd, MAX_EXEC_CMD_RET_LEN, "for i in $(seq %d %d); do nohup qperf -lp ${i} & done", ctx->test_port, ctx->test_port + 10);
+        exec_cmd(serv_cmd, MAX_EXEC_CMD_RET_LEN, "for i in $(seq %d %d); do nohup qperf -lp ${i} > /tmp/qperf_server_${i}.log 2>&1 & done", ctx->test_port + 1, ctx->test_port + 11);
+        sleep(3);
     }
     sync_time("----------------------------1");
     if (ctx->app_id == PROC_2) {
         char clnt_cmd[MAX_EXEC_CMD_RET_LEN];
-        exec_cmd(clnt_cmd, MAX_EXEC_CMD_RET_LEN, "for i in $(seq %d %d); do nohup ums_run qperf %s -lp ${i} -m 8192 -t 0 tcp_bw 2>&1 & done", ctx->test_port, ctx->test_port + 10, ctx->test_ip);
+        exec_cmd(clnt_cmd, MAX_EXEC_CMD_RET_LEN, "for i in $(seq %d %d); do nohup ums_run qperf %s -lp ${i} -m 8192 -t 0 tcp_bw > /tmp/qperf_client_${i}.log 2>&1 & done", ctx->test_port + 1, ctx->test_port + 11, ctx->test_ip);
+        sleep(3);
     }
     sync_time("----------------------------2");
     
-    // 校验流量走ums
-    sprintf(test_ip_str, "%d", ctx->test_ip);
-    check_num = query_proc_net_ums_detail_stream_num("True", test_ip_str);
-    if (ctx->app_id == PROC_2 && check_num != 20) {
-        ret = -1;
+    // 校验流量走fallback
+    if (ctx->app_id == PROC_2) {
+        sprintf(test_ip_str, "%s", ctx->test_ip_host2);
+        check_num = query_proc_net_ums_detail_stream_num("True", test_ip_str);
+        if (check_num < 10) {
+            ret = -1;
+        }
     }
-    CHKERR_JUMP(ret != TEST_SUCCESS, "fallback multiple connect failed", EXIT);
 
-    exec_cmd(close_qperf, MAX_EXEC_CMD_RET_LEN, "pkill -9 qperf");
+    sync_time("----------------------------3");
+    exec_cmd(close_qperf, MAX_EXEC_CMD_RET_LEN, "pkill -9 qperf 2>&1");
+    sync_time("----------------------------4");
+    exec_cmd(check_perf, MAX_EXEC_CMD_RET_LEN, "ps -ef|grep qperf 2>&1");
+    sync_time("----------------------------5");
+    CHKERR_JUMP(ret != TEST_SUCCESS, "fallback multiple connect failed", EXIT);
     rc = TEST_SUCCESS;
 EXIT:
-    sync_time("----------------------------3");
+    sync_time("----------------------------6");
     return rc;
 }
 

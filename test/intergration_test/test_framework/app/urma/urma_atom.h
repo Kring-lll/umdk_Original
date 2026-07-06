@@ -36,9 +36,9 @@
 
 #define TEST_DEFAULT_JFCE_NUM 1
 #define TEST_DEFAULT_JFC_NUM 1
-#define TEST_DEFAULT_JFR_NUM 3
-#define TEST_DEFAULT_JFS_NUM 3
-#define TEST_DEFAULT_JETTY_NUM 3
+#define TEST_DEFAULT_JFR_NUM 1
+#define TEST_DEFAULT_JFS_NUM 1
+#define TEST_DEFAULT_JETTY_NUM 1
 #define TEST_DEFAULT_SEG_NUM 4
 
 #ifndef URMA_TYPICAL_RETRY_CNT
@@ -48,20 +48,20 @@
 typedef struct test_jfc_cfg {
     uint32_t depth;       /* [Required] the depth of jfc, no greater than urma_device_cap_t->jfc_depth */
     urma_jfc_flag_t flag; /* [Optional] see urma_jfc_flag_t, set flag.value to be 0 by default */
-    uint32_t ceqn;        /* [Optional] event queue id, no greater than urma_device_cap_t->ceq_cnt
+    uint32_t ceqn;        /* [Optional] event queue id, less than urma_device_cap_t->ceq_cnt
                               set to 0 by default */
     uint32_t jfce_id;     /* [Required] the event of jfc */
     uint64_t user_ctx;    /* [Optional] private data of jfc, set to NULL by default */
 } test_jfc_cfg_t;
 
 typedef struct test_jfs_cfg {
-    uint32_t depth;           /* [Required] the depth of jfs, defaut urma_device_cap_t->jfs_depth */
+    uint32_t depth;           /* [Required] the depth of jfs, default urma_device_cap_t->jfs_depth */
     urma_jfs_flag_t flag;     /* [Optional] see urma_jfs_flag_t definition */
     urma_transport_mode_t trans_mode; /* [Required] transport mode, must be supported by the device */
     uint8_t priority;         /* [Optional] set the priority of JFS, ranging from [0, 15]
                                  Services with low delay need to set high priority. */
-    uint8_t max_sge;          /* [Optional] max sge count in one wr, defaut urma_device_cap_t->max_jfs_sge */
-    uint8_t max_rsge;         /* [Optional] max remote sge count in one wr, defaut urma_device_cap_t->max_jfs_sge */
+    uint8_t max_sge;          /* [Optional] max sge count in one wr, default urma_device_cap_t->max_jfs_sge */
+    uint8_t max_rsge;         /* [Optional] max remote sge count in one wr, default urma_device_cap_t->max_jfs_sge */
     uint32_t max_inline_data; /* [Optional] the max inline data size of JFS. if the parameter is 0,
                                  the system will assign device's max inline data length. */
     uint8_t rnr_retry;        /* [Optional] number of times that jfs will resend packets before report error,
@@ -77,10 +77,10 @@ typedef struct test_jfs_cfg {
 typedef struct test_jfr_cfg {
     uint32_t id;           /* [Optional] specify jfr id. If the parameter is 0,
                               the system will randomly assign a non-0 value. */
-    uint32_t depth;        /* [Required] total depth, include berth, defaut urma_device_cap_t->jfr_depth. */
+    uint32_t depth;        /* [Required] total depth, include berth, default urma_device_cap_t->jfr_depth. */
     urma_jfr_flag_t flag;  /* [Optional] whether is in TAG_matching, whether is in DC/IDC mode. */
     urma_transport_mode_t trans_mode; /* [Required] transport mode, must be supported by the device */
-    uint8_t max_sge;       /* [Optional] max sge count in one wr, defaut urma_device_cap_t->max_jfr_sge. */
+    uint8_t max_sge;       /* [Optional] max sge count in one wr, default urma_device_cap_t->max_jfr_sge. */
     uint8_t min_rnr_timer; /* [Optional] the minimum RNR NACK timer, ranging from [0, 31], i.e.
                               the time before jfr sends NACK to the sender for the reason of "ready to receive" */
     uint32_t jfc_id;       /* [Required] need to specify jfc. */

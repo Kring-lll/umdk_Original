@@ -19,8 +19,8 @@ from setuptools import setup, find_packages
 from torch.utils.cpp_extension import BuildExtension
 from torch_npu.utils.cpp_extension import NpuExtension
 
-# 格式: V版本.R版本.C版本.B版本
-env_version = os.getenv("CAM_WHL_VERSION", "208.1.0.B001")
+# Format: V_version.R_version.C_version.B_version
+env_version = os.getenv("CAM_WHL_VERSION", "209.0.0.B001")
 
 torch_path = os.path.dirname(torch.__file__)
 torch_npu_spec = importlib.util.find_spec("torch_npu")
@@ -78,13 +78,8 @@ ext1 = NpuExtension(
         "profapi"],
     sources=["./fused_deep_moe.cpp",
              "./get_dispatch_layout.cpp",
-             "./get_dispatch_layout_a2.cpp",
              "./moe_dispatch_prefill.cpp",
              "./moe_combine_prefill.cpp",
-             "./moe_dispatch_prefill_a2.cpp",
-             "./moe_combine_prefill_a2.cpp",
-             "./moe_dispatch_shmem.cpp",
-             "./moe_combine_shmem.cpp",
              "./pybind.cpp",
              "./pytorch_extension/NPUBridge.cpp",
              "./pytorch_extension/NPUStorageImpl.cpp",

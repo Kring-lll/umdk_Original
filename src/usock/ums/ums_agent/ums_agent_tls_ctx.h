@@ -12,7 +12,6 @@
 #define UMS_AGENT_TLS_CTX_H
 
 #include <stdbool.h>
-#include <stddef.h>
 
 #include <openssl/ssl.h>
 
@@ -26,6 +25,5 @@ SSL_CTX *ums_agent_tls_get_client_ssl_ctx(void);
 
 int ums_agent_tls_check_certs_expiry(const char *server_cert_path,
     const char *client_cert_path, bool force);
-void ums_agent_secure_zero(void *ptr, size_t len);
 
 #endif /* UMS_AGENT_TLS_CTX_H */

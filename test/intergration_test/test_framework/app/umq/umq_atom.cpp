@@ -7,10 +7,10 @@
 
 test_umq_ctx_t g_test_umq_ctx;
 
-const char *ENQUEUE_DATA_DEFAUT = "hello, this is umq enqueue";
-size_t enqueue_data_len = strlen(ENQUEUE_DATA_DEFAUT);
-const char *POST_DATA_DEFAUT = "hello, this is umq post";
-size_t post_data_len = strlen(POST_DATA_DEFAUT);
+const char *ENQUEUE_DATA_DEFAULT = "hello, this is umq enqueue";
+size_t enqueue_data_len = strlen(ENQUEUE_DATA_DEFAULT);
+const char *POST_DATA_DEFAULT = "hello, this is umq post";
+size_t post_data_len = strlen(POST_DATA_DEFAULT);
 
 int test_str_to_u32(const char *buf, uint32_t *u32)
 {
@@ -86,22 +86,6 @@ static uint16_t hexStringToUint16(const char *hexString)
     return (uint16_t)result;
 }
 
-void test_get_ubmm_cna(test_umq_ctx_t *ctx)
-{
-    char cmd_cna[MAX_LINE_LENGTH];
-    exec_cmd(cmd_cna, MAX_LINE_LENGTH, "cat /sys/bus/ub/devices/00001/primary_cna");
-    ctx->cna = static_cast<uint32_t>(hexStringToUint16(cmd_cna));
-    TEST_LOG_INFO("this host cna=%u\n", ctx->cna);
-}
-
-void test_get_ubmm_eid(test_umq_ctx_t *ctx)
-{
-    char cmd_eid[MAX_LINE_LENGTH];
-    exec_cmd(cmd_eid, MAX_LINE_LENGTH, "cat /sys/bus/ub/devices/00001/eid");
-    ctx->eid = static_cast<uint32_t>(atoi(cmd_eid));
-    TEST_LOG_INFO("this host eid=%u\n", ctx->eid);
-}
-
 test_umq_ctx_t *test_umq_ctx_init(int argc, char * argv[], int thread_num)
 {
     (void)memset(&g_test_umq_ctx, 0, sizeof(test_umq_ctx_t));
@@ -137,7 +121,32 @@ test_umq_ctx_t *test_umq_ctx_init(int argc, char * argv[], int thread_num)
             g_test_umq_ctx.trans_mode = static_cast<umq_trans_mode_t>(ctx->mode);
     }
 
+    g_test_umq_ctx.tp_mode = (ctx->tp_mode) ? static_cast<umq_tp_mode_t>(ctx->tp_mode) : UMQ_TM_RC;
+    if (g_test_umq_ctx.tp_mode == UMQ_TM_RC) {
+        TEST_LOG_INFO("tp_mode=%d is UMQ_TM_RC\n", g_test_umq_ctx.tp_mode);
+    } else if (g_test_umq_ctx.tp_mode == UMQ_TM_RM) {
+        TEST_LOG_INFO("tp_mode=%d is UMQ_TM_RM\n", g_test_umq_ctx.tp_mode);
+    } else {
+        TEST_LOG_INFO("tp_mode=%d not support\n", g_test_umq_ctx.tp_mode);
+    }
+
+    g_test_umq_ctx.tp_type = (ctx->tp_kind) ? static_cast<umq_tp_type_t>(ctx->tp_kind) : UMQ_TP_TYPE_RTP;
+    if (g_test_umq_ctx.tp_type == UMQ_TP_TYPE_RTP) {
+        TEST_LOG_INFO("tp_type=%d is UMQ_TP_TYPE_RTP\n", g_test_umq_ctx.tp_type);
+    } else if (g_test_umq_ctx.tp_type == UMQ_TP_TYPE_CTP) {
+        TEST_LOG_INFO("tp_type=%d is UMQ_TP_TYPE_CTP\n", g_test_umq_ctx.tp_type);
+    } else {
+        TEST_LOG_INFO("tp_type=%d not support\n", g_test_umq_ctx.tp_type);
+    }
+
     g_test_umq_ctx.umqh_num = 1;
+    if (strncmp(ctx->device_name, "bonding_dev", 11) == 0) {
+        g_test_umq_ctx.is_bonding = true;
+    }
+
+    g_test_umq_ctx.priority = test_get_umq_normal_priority(&g_test_umq_ctx);
+    TEST_LOG_INFO("g_test_umq_ctx.priority:%d\n", g_test_umq_ctx.priority);
+
     return &g_test_umq_ctx;
 }
 
@@ -192,12 +201,6 @@ int set_umq_init_cfg(test_umq_ctx_t *ctx, umq_dev_assign_mode_t assign_mode, umq
     ctx->cfg.trans_info_num = 1;
     ctx->cfg.trans_info[0].trans_mode = trans_mode;
 
-    if (trans_mode == UMQ_TRANS_MODE_UBMM_PLUS) {
-        test_get_ubmm_cna(ctx);
-        ctx->cfg.cna = ctx->cna;
-        test_get_ubmm_eid(ctx);
-        ctx->cfg.ubmm_eid = ctx->eid;
-    }
     return set_trans_dev_info(ctx, &ctx->cfg.trans_info[0].dev_info, assign_mode);
 }
 
@@ -232,6 +235,161 @@ void test_umq_uninit(test_umq_ctx_t *ctx)
     ctx->ctx_flag &= ~CTX_FLAG_UMQ_INIT;
 }
 
+void parse_priority_sl_tp_type_map(const char *input_str, char priority_list[MAX_PRIORITY_NUM][TP_TYPE_LEN])
+{
+    memset(priority_list, 0, sizeof(priority_list));
+    const char *tp_type_start = strstr(input_str, "tp_type");
+    if (tp_type_start == NULL) {
+        TEST_LOG_ERROR("错误：未找到tp_type行\n");
+        return;
+    }
+
+    while (*tp_type_start != '\0' && !(*tp_type_start == 'R' || *tp_type_start == 'C')) {
+        tp_type_start++;
+    }
+
+    char buffer[TP_TYPE_LEN];
+    int idx = 0;
+    while (*tp_type_start != '\0' && idx < MAX_PRIORITY_NUM) {
+        while (*tp_type_start != '\0' && isspace((unsigned char)*tp_type_start)) {
+            tp_type_start++;
+        }
+        if (*tp_type_start == '\0')
+            break;
+        strncpy(buffer, tp_type_start, 3);
+        buffer[3] = '\0';
+
+        if (strcmp(buffer, "RTP") == 0 || strcmp(buffer, "CTP") == 0) {
+            strcpy(priority_list[idx], buffer);
+            idx++;
+        }
+        tp_type_start += 3;
+    }
+
+    for (int i = idx; i < MAX_PRIORITY_NUM; i++) {
+        strcpy(priority_list[i], "");
+    }
+
+}
+
+uint8_t test_get_umq_normal_priority(test_umq_ctx_t *ctx)
+{
+    char buf[PRIORITY_BUF_LEN];
+    char priority_list[MAX_PRIORITY_NUM][TP_TYPE_LEN] = {0};
+    exec_cmd(buf, PRIORITY_BUF_LEN, "urma_admin show --whole -d %s", ctx->ctx->device_name);
+    parse_priority_sl_tp_type_map(buf, priority_list);
+    for (uint8_t i = 0; i < MAX_PRIORITY_NUM; i++) {
+        if (ctx->tp_type == UMQ_TP_TYPE_RTP) {
+            if (strncmp(priority_list[i], "RTP", 3) == 0) {
+                return i;
+            }
+        } else if (ctx->tp_type == UMQ_TP_TYPE_CTP) {
+            if (strncmp(priority_list[i], "CTP", 3) == 0) {
+                return i;
+            }
+        }
+    }
+    return 0;
+
+}
+
+int print_route_list(umqh_ops_t *umqh_ops, const umq_route_key_t *route_key, umq_route_list_t *route_list)
+{
+    int ret = umq_get_route_list(route_key, umqh_ops->option.trans_mode, route_list);
+    if (ret != 0) {
+        TEST_LOG_ERROR("umq_get_route_list failed\n");
+        return TEST_FAILED;
+    }
+
+    TEST_LOG_DEBUG("[topo %d | src node %u %u | dst node %u %u | num %u %u %u]\n", route_list->topo_type,
+        route_list->src_node.super_node_id, route_list->src_node.node_id,
+        route_list->dst_node.super_node_id, route_list->dst_node.node_id, route_list->chip_num,
+        route_list->die_num, route_list->route_num);
+    umqh_ops->used_ports_num = route_list->route_num;
+    for (uint8_t i = 0; i < route_list->route_num; i++) {
+        umqh_ops->used_ports[i].bs.chip_id = route_list->routes[i].src_port.bs.chip_id;
+        umqh_ops->used_ports[i].bs.die_id = route_list->routes[i].src_port.bs.die_id;
+        umqh_ops->used_ports[i].bs.port_idx = route_list->routes[i].src_port.bs.port_idx;
+        TEST_LOG_DEBUG("[%d] | src chip %d die %d port %d | dst chip %d die %d port %d | src eid " EID_FMT " |"
+            "dst eid " EID_FMT " \n",
+            i, route_list->routes[i].src_port.bs.chip_id, route_list->routes[i].src_port.bs.die_id,
+            route_list->routes[i].src_port.bs.port_idx,
+            route_list->routes[i].dst_port.bs.chip_id, route_list->routes[i].dst_port.bs.die_id,
+            route_list->routes[i].dst_port.bs.port_idx, EID_ARGS(route_list->routes[i].src_eid), EID_ARGS(route_list->routes[i].dst_eid));
+    }
+    return TEST_SUCCESS;
+
+}
+
+int get_used_ports(test_umq_ctx_t *ctx, umqh_ops_t *umqh_ops)
+{
+    int ret = 0;
+    int dev_num = 0;
+    umq_route_list_t route_list = {};
+    umq_route_key_t route_key = {};
+    umq_eid_t bond_eid_list[1] = {0};
+    umq_eid_t dst_bond_eid_list[1] = {0};
+    umq_eid_t dst_bond_eid_list1[1] = {0};
+    umq_eid_t dst_bond_eid_list2[1] = {0};
+    umq_eid_t eid = {0};
+    umq_dev_info_t *umq_dev_info = nullptr;
+    umq_dev_info = umq_dev_info_list_get(umqh_ops->option.trans_mode, &dev_num);
+    if (umq_dev_info == nullptr) {
+        TEST_LOG_ERROR("umq_dev_info_list_get failed\n");
+        return TEST_FAILED;
+    }
+    int idx = 0;
+    for (int i = 0; i < dev_num; i++) {
+        for (int j = 0; j < umq_dev_info[i].ub.eid_cnt; j++) {
+            if (strstr(umq_dev_info[i].dev_name, "bond") != NULL) {
+                idx++;
+            }
+        }
+    }
+    for (int i = 0; i < dev_num; i++) {
+        for (int j = 0; j < umq_dev_info[i].ub.eid_cnt; j++) {
+            if (strstr(umq_dev_info[i].dev_name, "bond") != NULL) {
+                if (idx == 1) {
+                    (void)memcpy(&bond_eid_list[0], &umq_dev_info[i].ub.eid_list[j].eid, sizeof(eid));
+                } else {
+                    if (strncmp(umq_dev_info[i].dev_name, "bonding_dev_0", 13) == 0) {
+                        (void)memcpy(&bond_eid_list[0], &umq_dev_info[i].ub.eid_list[j].eid, sizeof(eid));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if (ctx->app_id == PROC_2) {
+        (void)memcpy(dst_bond_eid_list1, bond_eid_list, sizeof(eid));
+    }
+    sync_data(PROC_2, (char *)dst_bond_eid_list1, sizeof(eid));
+
+    if (ctx->app_id == PROC_1) {
+        (void)memcpy(dst_bond_eid_list2, bond_eid_list, sizeof(eid));
+    }
+    sync_data(PROC_1, (char *)dst_bond_eid_list2, sizeof(eid));
+
+    if (ctx->app_id == PROC_1) {
+        (void)memcpy(dst_bond_eid_list, dst_bond_eid_list1, sizeof(eid));
+    } else {
+        (void)memcpy(dst_bond_eid_list, dst_bond_eid_list2, sizeof(eid));
+    }
+
+    (void)memcpy(&route_key.src_bonding_eid, &bond_eid_list[0], sizeof(eid));
+    (void)memcpy(&route_key.dst_bonding_eid, &dst_bond_eid_list[0], sizeof(eid));
+    route_key.tp_type = UMQ_TP_TYPE_RTP;
+
+    ret = print_route_list(umqh_ops, &route_key, &route_list);
+    if (ret != TEST_SUCCESS) {
+        TEST_LOG_ERROR("route list failed:%d\n", ret);
+        free(umq_dev_info);
+        return TEST_FAILED;
+    }
+    free(umq_dev_info);
+    return TEST_SUCCESS;
+}
+
 int set_umq_creat_option(test_umq_ctx_t *ctx, bool all_interrupt)
 {
     int rc = 0, ret;
@@ -248,18 +406,32 @@ int set_umq_creat_option(test_umq_ctx_t *ctx, bool all_interrupt)
         struct tm log_time;
         (void)gettimeofday(&tval, NULL);
         (void)localtime_r(&tval.tv_sec, &log_time);
-        ret = sprintf(ctx->umqh_ops[i].option.name, "%u-%u-%4d%02d%02d%02d%02d%02d", ctx->app_id, i, log_time.tm_year + 1900, 
+        ret = sprintf(ctx->umqh_ops[i].option.name, "%u-%u-%4d%02d%02d%02d%02d%02d", ctx->app_id, i, log_time.tm_year + 1900,
             log_time.tm_mon + 1, log_time.tm_mday, log_time.tm_hour, log_time.tm_min, log_time.tm_sec);
             if (ret <= 0) {
                 TEST_LOG_ERROR("ctx->umqh_ops[%u] set create option name failed\n", i);
                 rc++;
             }
             ctx->umqh_ops[i].option.create_flag = UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_RX_DEPTH | UMQ_CREATE_FLAG_TX_BUF_SIZE |
-                UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_QUEUE_MODE;
+                UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_QUEUE_MODE | UMQ_CREATE_FLAG_TP_MODE | UMQ_CREATE_FLAG_TP_TYPE | UMQ_CREATE_FLAG_PRIORITY;
             ctx->umqh_ops[i].option.tx_depth = UMQ_DEFAULT_TX_DEPTH;
             ctx->umqh_ops[i].option.rx_depth = UMQ_DEFAULT_RX_DEPTH;
             ctx->umqh_ops[i].option.tx_buf_size = UMQ_DEFAULT_TX_BUF_SIZE;
             ctx->umqh_ops[i].option.rx_buf_size = UMQ_DEFAULT_RX_BUF_SIZE;
+            ctx->umqh_ops[i].option.tp_mode = ctx->tp_mode ? ctx->tp_mode : UMQ_TM_RC;
+            ctx->umqh_ops[i].option.tp_type = ctx->tp_type ? ctx->tp_type : UMQ_TP_TYPE_RTP;
+            ctx->umqh_ops[i].option.priority = ctx->priority;
+
+            if (ctx->is_bonding) {
+                ret = get_used_ports(ctx, &ctx->umqh_ops[i]);
+                if (ret != TEST_SUCCESS) {
+                    return TEST_FAILED;
+                }
+
+                ctx->umqh_ops[i].option.create_flag |= UMQ_CREATE_FLAG_USED_PORTS;
+                ctx->umqh_ops[i].option.used_ports.num = ctx->umqh_ops[i].used_ports_num;
+                ctx->umqh_ops[i].option.used_ports.port = ctx->umqh_ops[i].used_ports;
+            }
 
             if (all_interrupt) {
                 ctx->umqh_ops[i].option.mode = UMQ_MODE_INTERRUPT;
@@ -501,12 +673,12 @@ int test_umq_prepare(test_umq_ctx_t *ctx)
     CHKERR_JUMP(ret != TEST_SUCCESS, "test_umq_create", EXIT);
     ret = test_umq_bind_info_get(ctx);
     CHKERR_JUMP(ret != TEST_SUCCESS, "test_umq_bind_info_get", EXIT);
-    
+
     test_umq_bind_info_exchange(ctx);
 
     ret = test_umq_bind(ctx);
     CHKERR_JUMP(ret != TEST_SUCCESS, "test_umq_bind", EXIT);
-    
+
     if ((ctx->cfg.feature & UMQ_FEATURE_API_PRO) != 0) {
         ret = test_umq_post_rx(ctx);
         CHKERR_JUMP(ret != TEST_SUCCESS, "test_umq_post_rx", EXIT);
@@ -532,7 +704,7 @@ static void md5_hash(const char *str, uint8_t digest[MD5_DIGEST_LENGTH])
     const EVP_MD *md = EVP_md5();
     if (ctx == NULL || md == NULL) {
         TEST_LOG_ERROR("Error initializing MD5 context\n");
-        if (ctx) 
+        if (ctx)
             EVP_MD_CTX_free(ctx);
         return;
     }
@@ -614,7 +786,7 @@ int test_umq_buf_fill(umqh_ops_t *umqh_ops, umq_buf_t *buf, const char *data, ui
     if (data != nullptr) {
         md5_hash(data, header->digest);
     }
-    
+
 
     buf->buf_data += TEST_DATA_HEADER_SIZE;
     buf->headroom_size = TEST_DATA_HEADER_SIZE;
@@ -669,17 +841,7 @@ EXIT:
 uint64_t get_buf_alloc_umqh(umqh_ops_t *umqh_ops, uint32_t data_size)
 {
     uint64_t umqh = 0;
-    if (g_test_umq_ctx.trans_mode == UMQ_TRANS_MODE_UBMM_PLUS) {
-        if (data_size <= UMQ_QBUF_BLOCK_SIZE) {
-            umqh = umqh_ops->qh;
-        } else {
-            umqh = 0;
-        }
-    } else if (g_test_umq_ctx.trans_mode == UMQ_TRANS_MODE_IPC) {
-        umqh = umqh_ops->qh;
-    } else {
-        umqh = 0;
-    }
+    umqh = 0;
     return umqh;
 }
 
@@ -779,24 +941,34 @@ void test_data_args_fill(test_data_args_t *data_args)
 
 int test_umq_post_rx_buf(umqh_ops_t *umqh_ops, uint32_t depth, uint32_t size, uint64_t *status)
 {
-    uint32_t rx_depth = (depth == 0) ? UMQ_MAX_WR_COUNT : depth;
-    uint32_t buf_size = (size == 0) ? umqh_ops->option.rx_buf_size : size;
-    umq_buf_t *buf = umq_buf_alloc(buf_size, rx_depth, 0, nullptr);
-    if (buf == nullptr) {
-        TEST_LOG_ERROR("umq_buf_alloc failed\n");
-        return TEST_FAILED;
+    umq_cfg_get_t cfg;
+    umq_io_option_t io_option = {0};
+    io_option.flag = UMQ_IO_OPTION_FLAG_DIRECTION;
+    umq_cfg_get(umqh_ops->qh, &cfg);
+    uint32_t rx_depth = (depth == 0) ? cfg.rx_depth * cfg.rqe_post_factor : depth;
+    uint32_t buf_size = (size == 0) ? cfg.rx_buf_size : size;
+
+    for (int i = 0; i <rx_depth; i++) {
+        umq_buf_t *buf = umq_buf_alloc(buf_size, 1, 0, nullptr);
+        if (buf == nullptr) {
+            TEST_LOG_ERROR("umq_buf_alloc failed\n");
+            return TEST_FAILED;
+        }
+
+        umq_buf_t *bad_buf = nullptr;
+        io_option.io_direction = UMQ_IO_RX;
+        if (umq_post(umqh_ops->qh, buf, &io_option, &bad_buf) != TEST_SUCCESS) {
+            TEST_LOG_ERROR("umq_post rx failed\n");
+            umq_buf_free(bad_buf);
+            return TEST_FAILED;
+        }
+        if (status) {
+            usleep(STATUS_SLEEP_TIME_US);
+            *status += buf->status;
+        }
     }
 
-    umq_buf_t *bad_buf = nullptr;
-    if (umq_post(umqh_ops->qh, buf, UMQ_IO_RX, &bad_buf) != TEST_SUCCESS) {
-        TEST_LOG_ERROR("umq_post rx failed\n");
-        umq_buf_free(bad_buf);
-        return TEST_FAILED;
-    }
-    if (status) {
-        usleep(STATUS_SLEEP_TIME_US);
-        *status += buf->status;
-    }
+
     return TEST_SUCCESS;
 }
 
@@ -819,13 +991,15 @@ int test_umq_post_rx(test_umq_ctx_t *ctx, uint32_t depth, umqh_ops_t *umqh_ops, 
             return TEST_FAILED;
         }
     }
-    
+
     return TEST_SUCCESS;
 }
 
 int test_umq_post_tx_buf(umqh_ops_t *umqh_ops, const char *data, uint32_t data_size, uint64_t *status)
 {
     umq_buf_t *buf = nullptr;
+    umq_io_option_t io_option = {0};
+    io_option.flag = UMQ_IO_OPTION_FLAG_DIRECTION;
     if (g_test_umq_ctx.cfg.headroom_size == 0) {
         buf = test_umq_buf_alloc(umqh_ops, nullptr, data, data_size);
     } else {
@@ -850,10 +1024,11 @@ int test_umq_post_tx_buf(umqh_ops_t *umqh_ops, const char *data, uint32_t data_s
         pro->opcode = UMQ_OPC_SEND;
         TEST_LOG_INFO("UMQ_OPC_SEND:%d\n", pro->opcode);
     }
-    
+
 
     umq_buf_t *bad_buf = nullptr;
-    if (umq_post(umqh_ops->qh, buf, UMQ_IO_TX, &bad_buf) != TEST_SUCCESS) {
+    io_option.io_direction = UMQ_IO_TX;
+    if (umq_post(umqh_ops->qh, buf, &io_option, &bad_buf) != TEST_SUCCESS) {
         TEST_LOG_ERROR("umq_post failed\n");
         umq_buf_free(bad_buf);
         return TEST_FAILED;
@@ -866,12 +1041,12 @@ int test_umq_post_tx_buf(umqh_ops_t *umqh_ops, const char *data, uint32_t data_s
     return TEST_SUCCESS;
 }
 
-int test_umq_poll(uint64_t umqh, umq_io_direction_t direction, umq_buf_t **buf, uint32_t buf_count, uint64_t timeout)
+int test_umq_poll(uint64_t umqh, umq_io_option_t *option, umq_buf_t **buf, uint32_t buf_count, uint64_t timeout)
 {
     int ret = 0;
     uint64_t start = get_timestamp_ms();
     while (ret == 0 && get_timestamp_ms() - start < timeout) {
-        ret = umq_poll(umqh, direction, buf, TEST_MAX_POLL_BATCH);
+        ret = umq_poll(umqh, option, buf, TEST_MAX_POLL_BATCH);
         usleep(DEQUEUE_SLEEP_TIME_US);
     }
     if (ret <= 0 || buf[0] == nullptr) {
@@ -885,7 +1060,10 @@ int test_umq_poll(uint64_t umqh, umq_io_direction_t direction, umq_buf_t **buf, 
 int test_umq_poll_tx_buf(umqh_ops_t *umqh_ops, uint64_t timeout, uint64_t *status)
 {
     umq_buf_t **buf = (umq_buf_t **)calloc(TEST_MAX_POLL_BATCH, sizeof(umq_buf_t *));
-    int ret = test_umq_poll(umqh_ops->qh, UMQ_IO_TX, buf, {}, timeout);
+    umq_io_option_t io_option = {0};
+    io_option.flag = UMQ_IO_OPTION_FLAG_DIRECTION;
+    io_option.io_direction = UMQ_IO_TX;
+    int ret = test_umq_poll(umqh_ops->qh, &io_option, buf, {}, timeout);
     if (ret == TEST_FAILED) {
         return TEST_FAILED;
     }
@@ -914,7 +1092,10 @@ int test_umq_poll_tx_buf(umqh_ops_t *umqh_ops, uint64_t timeout, uint64_t *statu
 int test_umq_poll_rx_buf(umqh_ops_t *umqh_ops, const char *data, uint32_t data_size, uint64_t timeout, uint64_t *status)
 {
     umq_buf_t **buf = (umq_buf_t **)calloc(TEST_MAX_POLL_BATCH, sizeof(umq_buf_t *));
-    int ret = test_umq_poll(umqh_ops->qh, UMQ_IO_RX, buf, {}, timeout);
+    umq_io_option_t io_option = {0};
+    io_option.flag = UMQ_IO_OPTION_FLAG_DIRECTION;
+    io_option.io_direction = UMQ_IO_RX;
+    int ret = test_umq_poll(umqh_ops->qh, &io_option, buf, {}, timeout);
     if (ret == TEST_FAILED) {
         return TEST_FAILED;
     }
@@ -944,10 +1125,13 @@ int test_umq_poll_rx_buf(umqh_ops_t *umqh_ops, const char *data, uint32_t data_s
 void test_umq_flush(umqh_ops_t *umqh_ops, umq_io_direction_t direction, uint64_t timeout)
 {
     int ret = 0;
+    umq_io_option_t io_option = {0};
+    io_option.flag = UMQ_IO_OPTION_FLAG_DIRECTION;
     umq_buf_t *buf[TEST_MAX_POLL_BATCH];
     uint64_t start = get_timestamp_ms();
     while (get_timestamp_ms() - start < DEFAULT_FLUSH_TIME_MS) {
-        ret = umq_poll(umqh_ops->qh, direction, buf, TEST_MAX_POLL_BATCH);
+        io_option.io_direction = direction;
+        ret = umq_poll(umqh_ops->qh, &io_option, buf, TEST_MAX_POLL_BATCH);
         if (ret > 0) {
             for (int i = 0; i < ret; ++i) {
                 umq_buf_t *tmp_buf = buf[i];

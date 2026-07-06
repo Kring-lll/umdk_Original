@@ -11,7 +11,7 @@ set(DRIVER_FILE ums.ko)
 
 # Generate the Kbuild file through cmake.
 FILE(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/Kbuild "obj-m := ums.o\n")
-FILE(APPEND ${CMAKE_CURRENT_SOURCE_DIR}/Kbuild "ums-objs := cm/ums_clc.o cm/ums_core.o cm/ums_llc.o cm/ums_process_link.o\n")
+FILE(APPEND ${CMAKE_CURRENT_SOURCE_DIR}/Kbuild "ums-objs := cm/ums_clc.o cm/ums_nl.o cm/ums_core.o cm/ums_llc.o cm/ums_process_link.o\n")
 FILE(APPEND ${CMAKE_CURRENT_SOURCE_DIR}/Kbuild "ums-objs += dev/ums_pnet.o dev/ums_ubcore.o dev/ums_wr.o\n")
 FILE(APPEND ${CMAKE_CURRENT_SOURCE_DIR}/Kbuild "ums-objs += dfx/ums_dfx.o\n")
 FILE(APPEND ${CMAKE_CURRENT_SOURCE_DIR}/Kbuild "ums-objs += utils/ums_common.o utils/ums_ns.o\n")
@@ -44,8 +44,13 @@ if ("${CONFIG_SMC}" STREQUAL "m")
     FILE(APPEND ${CMAKE_CURRENT_SOURCE_DIR}/Kbuild "ccflags-y += -DCONFIG_SMC\n")
 endif()
 
-set(KBUILD_CMD $(MAKE) -C ${KERNELHEADERS_DIR} modules M=${CMAKE_CURRENT_BINARY_DIR} src=${CMAKE_CURRENT_SOURCE_DIR}
-    KBUILD_MODPOST_WARN=1)
+if("${BUILD_EXTRA_UBCORE_SYMBOLS}" STREQUAL "enable")
+    set(KBUILD_CMD $(MAKE) -C ${KERNELHEADERS_DIR} modules M=${CMAKE_CURRENT_BINARY_DIR} src=${CMAKE_CURRENT_SOURCE_DIR}
+        KBUILD_MODPOST_WARN=1 KBUILD_EXTRA_SYMBOLS=${EXTRA_UBCORE_MOD_SYMVERS})
+else()
+    set(KBUILD_CMD $(MAKE) -C ${KERNELHEADERS_DIR} modules M=${CMAKE_CURRENT_BINARY_DIR} src=${CMAKE_CURRENT_SOURCE_DIR}
+        KBUILD_MODPOST_WARN=1)
+endif()
 
 get_property(dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
 

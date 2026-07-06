@@ -17,8 +17,10 @@
 
 #include "ums_clc.h"
 #include "ums_close.h"
+#include "ums_core.h"
 #include "ums_llc.h"
 #include "ums_log.h"
+#include "ums_nl.h"
 #include "ums_pnet.h"
 #include "ums_rx.h"
 #include "ums_tx.h"
@@ -238,6 +240,7 @@ connect_abort:
 static int ums_client_bind_server(struct ums_sock *ums, struct ums_clc_msg_accept_confirm *aclc,
 	const struct ums_init_info *ini, struct ums_link *link)
 {
+	struct ums_ip_addr peer_addr;
 	int reason_code = 0;
 
 	/* create send buffer and rmb */
@@ -250,6 +253,21 @@ static int ums_client_bind_server(struct ums_sock *ums, struct ums_clc_msg_accep
 	if (reason_code != 0)
 		return reason_code;
 
+	if (ums_sock_get_peer_addr(ums->clcsock, &peer_addr) != 0)
+		return UMS_CLC_DECL_INTERR;
+
+	ums->conn.token_ctx.jetty_token = link->jetty_token_value;
+	ums->conn.token_ctx.seg_token = ums->conn.rmb_desc->seg_token_value;
+	if (ums_nl_submit_tokens(&ums->conn.token_ctx, &peer_addr,
+		ini->first_contact_local != 0) != 0) {
+		return UMS_CLC_DECL_ERR_TOKEN_SUBMIT;
+	}
+
+	if (ums_wait_token_xchg(&ums->conn.token_ctx) != 0) {
+		reason_code = UMS_CLC_DECL_ERR_TOKEN_XCHG;
+		return reason_code;
+	}
+
 	if (ums_rmb_import_seg(&ums->conn, aclc) != 0) {
 		reason_code = UMS_CLC_DECL_ERR_SEG;
 		return reason_code;
@@ -259,6 +277,7 @@ static int ums_client_bind_server(struct ums_sock *ums, struct ums_clc_msg_accep
 	ums_rx_init(ums);
 
 	if (ini->first_contact_local != 0) {
+		ums_link_update_peer_jetty_token(link, &ums->conn.token_ctx);
 		if (ums_ubcore_ready_link(link) != 0) {
 			reason_code = UMS_CLC_DECL_ERR_RDYLNK;
 			return reason_code;
@@ -270,7 +289,7 @@ static int ums_client_bind_server(struct ums_sock *ums, struct ums_clc_msg_accep
 		}
 	}
 
-	return 0;
+	return reason_code;
 }
 
 /* setup for connection of client */
@@ -331,6 +350,14 @@ static int ums_connect_check_aclc(struct ums_init_info *ini,
 {
 	if ((aclc->hdr.typev1 != UMS_TYPE_R) || (!ums_indicated(ini->ums_type_v1)))
 		return UMS_CLC_DECL_MODEUNSUPP;
+
+	if (!ums_token_mode_valid(aclc->r0.ub_token_mode) ||
+		!ums_token_mode_match(g_ums_sys_tuning_config.ub_token_mode,
+			(enum ums_token_mode)aclc->r0.ub_token_mode)) {
+		UMS_LOGE("token mode mismatch or invalid, peer=%u, local=%u",
+			aclc->r0.ub_token_mode, g_ums_sys_tuning_config.ub_token_mode);
+		return UMS_CLC_DECL_TOKMDMIS;
+	}
 
 	return 0;
 }
@@ -404,10 +431,19 @@ static int ums_connect_inner(struct ums_sock *ums)
 	if (rc != 0)
 		goto fallback;
 
+	ums_token_xchg_ctx_init(&ums->conn.token_ctx,
+		ums_clc_session_id_generate(), g_local_systemid);
+
+	rc = ums_nl_register_clc_session(&ums->conn.token_ctx);
+	if (rc != 0) {
+		rc = UMS_CLC_DECL_ERR_SESS_SEG;
+		goto fallback;
+	}
+
 	buf = kzalloc(UMS_CLC_MAX_ACCEPT_LEN, GFP_KERNEL);
 	if (!buf) {
 		rc = UMS_CLC_DECL_MEM;
-		goto fallback;
+		goto unregister_clc_session;
 	}
 	aclc2 = (struct ums_clc_msg_accept_confirm_v2 *)buf;
 	aclc = (struct ums_clc_msg_accept_confirm *)aclc2;
@@ -427,12 +463,16 @@ static int ums_connect_inner(struct ums_sock *ums)
 
 	ums_copy_conn_jetty_info(ums);
 
+	ums_clc_clear_msg_token_values(aclc);
 	kfree(buf);
 	kfree(ini);
 	return 0;
 
 vlan_cleanup:
+	ums_clc_clear_msg_token_values(aclc);
 	kfree(buf);
+unregister_clc_session:
+	ums_nl_unregister_clc_session(&ums->conn.token_ctx);
 fallback:
 	kfree(ini);
 	return ums_connect_decline_fallback(ums, rc);

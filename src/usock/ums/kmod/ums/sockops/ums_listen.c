@@ -24,6 +24,7 @@
 #include "ums_clc.h"
 #include "ums_llc.h"
 #include "ums_log.h"
+#include "ums_nl.h"
 #include "ums_close.h"
 #include "ums_rx.h"
 #include "ums_tx.h"
@@ -57,8 +58,19 @@ static void ums_listen_out(struct ums_sock *new_ums)
 
 	if (lums->sk.sk_state == (unsigned char)UMS_LISTEN) {
 		lock_sock_nested(&lums->sk, SINGLE_DEPTH_NESTING);
-		ums_accept_enqueue(&lums->sk, newumssk);
-		release_sock(&lums->sk);
+		/*
+		 * Re-check state after acquiring lock; listen socket may have been
+		 * closed while we were blocked on lock_sock_nested. Without this
+		 * check, the new socket would be enqueued as an orphan and leak
+		 * (never unhashed, module refcount leaked).
+		 */
+		if (lums->sk.sk_state == (unsigned char)UMS_LISTEN) {
+			ums_accept_enqueue(&lums->sk, newumssk);
+			release_sock(&lums->sk);
+		} else {
+			release_sock(&lums->sk);
+			ums_close_non_accepted(newumssk);
+		}
 	} else { /* no longer listening */
 		ums_close_non_accepted(newumssk);
 	}
@@ -275,6 +287,7 @@ static int ums_listen_ub_finish(struct ums_sock *new_ums, struct ums_clc_msg_acc
 		return UMS_CLC_DECL_ERR_RTOK;
 
 	if (local_first) {
+		ums_link_update_peer_jetty_token(link, &new_ums->conn.token_ctx);
 		if (ums_ubcore_ready_link(link) != 0)
 			return UMS_CLC_DECL_ERR_RDYLNK;
 		/* QP confirmation over UB fabric */
@@ -293,6 +306,7 @@ void ums_listen_work(struct work_struct *work)
 	struct ums_clc_msg_proposal_area *buf;
 	struct ums_clc_msg_proposal *pclc;
 	struct ums_init_info *ini = NULL;
+	struct ums_ip_addr peer_addr;
 	int rc = 0;
 
 	if (new_ums->listen_ums->sk.sk_state != (unsigned char)UMS_LISTEN) {
@@ -332,6 +346,9 @@ void ums_listen_work(struct work_struct *work)
 
 	ini->ums_type_v1 = pclc->hdr.typev1;
 
+	ums_token_xchg_ctx_init(&new_ums->conn.token_ctx,
+		ntohl(pclc->lcl.clc_session_id), pclc->lcl.id_for_peer);
+
 	ums_lgr_pending_lock(ini, &g_ums_server_lgr_pending);
 	ums_close_init(new_ums);
 	ums_rx_init(new_ums);
@@ -344,11 +361,32 @@ void ums_listen_work(struct work_struct *work)
 		goto out_unlock;
 	}
 
+	rc = ums_sock_get_peer_addr(new_ums->clcsock, &peer_addr);
+	if (rc != 0) {
+		rc = UMS_CLC_DECL_INTERR;
+		goto out_unlock;
+	}
+
+	rc = ums_nl_register_clc_session(&new_ums->conn.token_ctx);
+	if (rc != 0) {
+		rc = UMS_CLC_DECL_ERR_SESS_SEG;
+		goto out_unlock;
+	}
+
+	new_ums->conn.token_ctx.jetty_token = new_ums->conn.lnk->jetty_token_value;
+	new_ums->conn.token_ctx.seg_token = new_ums->conn.rmb_desc->seg_token_value;
+	rc = ums_nl_submit_tokens(&new_ums->conn.token_ctx,
+		&peer_addr, ini->first_contact_local != 0);
+	if (rc != 0) {
+		rc = UMS_CLC_DECL_ERR_TOKEN_SUBMIT;
+		goto out_unregister_clc_session;
+	}
+
 	/* send UMS Accept CLC message */
 	rc = ums_clc_send_accept(new_ums, ini->first_contact_local, ini->negotiated_eid, ini);
 	if (rc != 0) {
 		UMS_LOGE("send accept failed, ret: %d", rc);
-		goto out_unlock;
+		goto out_unregister_clc_session;
 	}
 
 	/* receive UMS Confirm CLC message */
@@ -357,13 +395,28 @@ void ums_listen_work(struct work_struct *work)
 	rc = ums_clc_wait_msg(new_ums, cclc, sizeof(*buf), UMS_CLC_CONFIRM, CLC_WAIT_TIME);
 	if (rc != 0) {
 		UMS_LOGE("wait msg failed, ret %d, conn %u", rc, new_ums->conn.conn_id);
-		goto out_unlock;
+		goto out_unregister_clc_session;
+	}
+
+	if (!ums_token_mode_valid(cclc->r0.ub_token_mode) ||
+		!ums_token_mode_match(g_ums_sys_tuning_config.ub_token_mode,
+			(enum ums_token_mode)cclc->r0.ub_token_mode)) {
+		UMS_LOGE("token mode mismatch or invalid, peer=%u, local=%u",
+			cclc->r0.ub_token_mode, g_ums_sys_tuning_config.ub_token_mode);
+		rc = UMS_CLC_DECL_TOKMDMIS;
+		goto out_unregister_clc_session;
+	}
+
+	rc = ums_wait_token_xchg(&new_ums->conn.token_ctx);
+	if (rc != 0) {
+		rc = UMS_CLC_DECL_ERR_TOKEN_XCHG;
+		goto out_unregister_clc_session;
 	}
 
 	/* finish worker */
 	rc = ums_listen_ub_finish(new_ums, cclc, ini->first_contact_local, ini);
 	if (rc != 0)
-		goto out_unlock;
+		goto out_unregister_clc_session;
 	ums_lgr_pending_unlock(ini, &g_ums_server_lgr_pending);
 
 	ums_conn_save_peer_info(new_ums, cclc);
@@ -371,12 +424,16 @@ void ums_listen_work(struct work_struct *work)
 	ums_listen_out_connected(new_ums);
 	goto out_free;
 
+out_unregister_clc_session:
+	ums_nl_unregister_clc_session(&new_ums->conn.token_ctx);
 out_unlock:
 	ums_lgr_pending_unlock(ini, &g_ums_server_lgr_pending);
 out_decl:
 	ums_listen_decline(new_ums, rc, ini ? ini->first_contact_local : 0);
 out_free:
 	kfree(ini);
+	if (buf)
+		ums_clc_clear_msg_token_values((struct ums_clc_msg_accept_confirm *)buf);
 	kfree(buf);
 }
 

@@ -177,7 +177,7 @@ int bdp_r_v2p_token_id_del_idx_lockless(bondp_hash_table_t *tbl, uint32_t index)
         item = CONTAINER_OF_FIELD(node, bondp_v2p_token_id_t, hmap_node);
         next = ub_hmap_next(&tbl->hmap, node);
         if (item->index == index) {
-            ub_hmap_remove(&tbl->hmap, node);
+            bondp_hash_table_remove_without_lock(tbl, node);
             if (tbl->free_f != NULL) {
                 tbl->free_f(node);
             }
@@ -206,6 +206,7 @@ int bdp_r_v2p_token_id_table_add_lockless(bondp_hash_table_t *tbl, bondp_v2p_tok
     }
 
     (void)memcpy(new_item->peer_p_seg, item->peer_p_seg, URMA_UBAGG_DEV_MAX_NUM * sizeof(item->peer_p_seg[0]));
+    (void)memcpy(new_item->connected, item->connected, sizeof(item->connected));
     new_item->v_handle = item->v_handle;
     new_item->key = key;
     new_item->index = item->index;

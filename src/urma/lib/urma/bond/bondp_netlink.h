@@ -1,40 +1,44 @@
 /*
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
- * Description: Bond provider support netlink.
+ * Description: bond provider support netlink.
  */
 #ifndef BONDP_NETLINK_H
 #define BONDP_NETLINK_H
 
-#define SEND_SWITCHBACK_REQ 0
+#include <stdint.h>
 
-typedef struct bondp_switchback_req {
-    struct {
-        uint32_t vjetty_id;
-        uint32_t local_idx;
-        uint32_t target_idx;
-        uint8_t ctrl_type;
-        uint8_t req_seq;
-        uint16_t reserved;
-        uint32_t payload;
-    } in;
-} bondp_switchback_req_t;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-typedef struct bondp_switchback_msg {
-    struct {
-        uint32_t recv_local_id;
-        uint8_t ctrl_type;
-        uint8_t req_seq;
-        uint16_t reserved;
-        uint32_t payload;
-    } in;
-} bondp_switchback_msg_t;
+typedef enum bondp_nl_attr {
+    BONDP_NL_ATTR_UNSPEC = 0,
+    BONDP_NL_ATTR_EID = 5,
+    BONDP_NL_ATTR_BONDING_PHYSICAL_DEVICE = 6,
+    BONDP_NL_ATTR_PAYLOAD = 7,
+    BONDP_NL_ATTR_MAX = 8,
+} bondp_nl_attr_t;
 
-int bondp_nl_init(void);
-void bondp_nl_uninit(void);
-int bondp_nl_get_fd(void);
-int bondp_nl_send_switchback_req(const bondp_switchback_req_t *req);
-int bondp_nl_recv_switchback_msg(bondp_switchback_msg_t *msg);
-int bondp_fallback_ctrl_send_default(bondp_context_t *bdp_ctx, uint32_t vjetty_id,
-    int local_idx, int target_idx, uint8_t ctrl_type, uint8_t req_seq, uint32_t payload);
+typedef enum bondp_nl_cmd {
+    BONDP_NL_CMD_UNSPEC = 0,
+    BONDP_NL_CMD_GET_TOPO = 1,
+    BONDP_NL_CMD_GET_SLAVE_EID = 2,
+    BONDP_NL_CMD_GET_PHYSICAL_DEVICE = 4,
+    BONDP_NL_CMD_GET_V2P_RES = 5,
+    BONDP_NL_CMD_FAILBACK_NOTIFY = 6,
+    BONDP_NL_CMD_FAILBACK_DONE = 7,
+    BONDP_NL_CMD_MAX,
+} bondp_nl_cmd_t;
+
+int bondp_nl_sock_init(void);
+void bondp_nl_sock_uninit(void);
+
+int bondp_nl_worker_init(void);
+void bondp_nl_worker_uninit(void);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif // BONDP_NETLINK_H
