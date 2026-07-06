@@ -29,6 +29,8 @@ constexpr const char *OPS_UTILS_LOG_PACKAGE_TYPE = "CAM_OPS";
 constexpr uint32_t OP_TYPE_ALL_TO_ALL = 8;
 constexpr uint32_t SYSTEM_NEED_WORKSPACE = 16 * 1024 * 1024;
 constexpr uint32_t GM_ALIGN_SIZE = 512;
+constexpr uint32_t L1_TILE_BYTE_SIZE = 32 * 1024;
+constexpr uint32_t CUBE_WORKSPACE_STAGE = 4;
 constexpr uint64_t INT4_WEIGHT_HIDDEN_SCALE = 8;
 constexpr uint32_t TOKEN_DTYPE_BYTE_SIZE = 2;
 constexpr uint32_t RESERVED_WORKSPACE_SIZE = 256 * 1024;
@@ -692,80 +694,42 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
 {
     size_t *workSpaces = context.GetWorkspaceSizes(1);
     OPS_ERR_IF(workSpaces == nullptr, OPS_LOG_E(nodeName, "workSpaces is nullptr."), return ge::GRAPH_FAILED);
+    size_t maxTokenNum;
+    size_t maxHandleTokenNum;
     uint32_t epRankSize = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize;
     uint32_t batchSize = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.bs;
     uint32_t globalBs = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.globalBs;
+    uint32_t maxBatchSize = globalBs / epRankSize;
     uint32_t topK = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.k;
     uint32_t moeExpertNumPerRank = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
+    uint32_t aicNum = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.aicNum;
     uint32_t shareExpertTokenNum = calShareExpert ? batchSize : 0;
     uint64_t shareGmm1HLen = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.shareGmm1HLen;
     uint64_t shareGmm2HLen = shareGmm1HLen / CONSTANT_TWO;
     uint64_t gmm1HLen = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
     uint64_t gmm2HLen = gmm1HLen / CONSTANT_TWO;
-    size_t maxTokenNum = globalBs * std::min(topK, moeExpertNumPerRank);
+    maxTokenNum = maxBatchSize * epRankSize * std::min(topK, moeExpertNumPerRank);
+    maxHandleTokenNum = shareExpertTokenNum + maxTokenNum;
 
-    size_t x1TokenSize = (shareExpertTokenNum * h + maxTokenNum * h) * sizeof(int8_t);
-    size_t x2TokenSize = (shareExpertTokenNum * shareGmm2HLen + maxTokenNum * gmm2HLen) * sizeof(int8_t);
-    size_t maxTokenSize = CeilUp(x1TokenSize < x2TokenSize ? x2TokenSize : x1TokenSize, GM_ALIGN_SIZE);
-    size_t tokenScaleSize = CeilUp((shareExpertTokenNum + maxTokenNum) * sizeof(float), GM_ALIGN_SIZE);
-    size_t swap1Size = (maxTokenNum * gmm1HLen + shareExpertTokenNum * shareGmm1HLen) * sizeof(int32_t);
+    size_t x1TokenSize = maxHandleTokenNum * h * sizeof(int8_t);
+    size_t x2TokenSize = (maxTokenNum * gmm2HLen + shareExpertTokenNum * shareGmm2HLen) * sizeof(int8_t);
+    size_t maxTokenSize = x1TokenSize < x2TokenSize ? x2TokenSize : x1TokenSize;
+    maxTokenSize = CeilUp(maxTokenSize, GM_ALIGN_SIZE);
+    size_t tokenScaleSize = CeilUp(maxHandleTokenNum * sizeof(float), GM_ALIGN_SIZE);
+    size_t CVSwapBufferSize =
+        CeilUp(aicNum * L1_TILE_BYTE_SIZE * CUBE_WORKSPACE_STAGE * sizeof(int32_t), GM_ALIGN_SIZE);
     size_t swigluOutSize = (maxTokenNum * gmm1HLen + shareExpertTokenNum * shareGmm1HLen) * sizeof(float);
-    size_t swap2Size = (maxTokenNum * h + shareExpertTokenNum * h) * sizeof(int32_t);
-    size_t maxSwapSwigluSize = CeilUp(swap1Size < swap2Size ? swap2Size : swap1Size, GM_ALIGN_SIZE);
-    size_t gmm2DepOutSize = CeilUp(moeExpertNumPerRank > 1 ?
-        0 : maxTokenNum * h * TOKEN_DTYPE_BYTE_SIZE, GM_ALIGN_SIZE);
+    size_t gmm2DepOutSize = maxTokenNum * h * TOKEN_DTYPE_BYTE_SIZE;
+    size_t maxSwigluGmm2Size = swigluOutSize < gmm2DepOutSize ? gmm2DepOutSize : swigluOutSize;
+    maxSwigluGmm2Size = CeilUp(maxSwigluGmm2Size, GM_ALIGN_SIZE);
     size_t groupListSize = CeilUp(moeExpertNumPerRank * sizeof(int64_t), GM_ALIGN_SIZE);
     size_t expandIdxSize = CeilUp(batchSize * topK * sizeof(int32_t), GM_ALIGN_SIZE);
     size_t epSendCountSize = CeilUp(epRankSize * moeExpertNumPerRank * sizeof(int32_t), GM_ALIGN_SIZE);
     size_t reservedSize = CeilUp(RESERVED_WORKSPACE_SIZE, GM_ALIGN_SIZE);
-    size_t offset = 0;
-#ifdef ENABLE_REUSE_MEMORY
-    tilingData.workSpaceOffset.shareX1TokenOffset = offset;
-    tilingData.workSpaceOffset.shareX2TokenOffset = offset;
-    tilingData.workSpaceOffset.x1TokenOffset = offset + shareExpertTokenNum * h * sizeof(int8_t);
-    tilingData.workSpaceOffset.x2TokenOffset = offset + shareExpertTokenNum * shareGmm2HLen * sizeof(int8_t);
-    offset += maxTokenSize;
-    tilingData.workSpaceOffset.shareX1ScaleOffset = offset;
-    tilingData.workSpaceOffset.shareX2ScaleOffset = offset;
-    tilingData.workSpaceOffset.x1ScaleOffset = offset + shareExpertTokenNum * sizeof(float);
-    tilingData.workSpaceOffset.x2ScaleOffset = offset + shareExpertTokenNum * sizeof(float);
-    offset += tokenScaleSize;
-    tilingData.workSpaceOffset.swapSpaceOffset = offset;
-    tilingData.workSpaceOffset.shareSwigluOffset = offset;
-    tilingData.workSpaceOffset.swigluOffset = offset + shareExpertTokenNum * shareGmm1HLen * sizeof(float);
-    offset += maxSwapSwigluSize;
-    tilingData.workSpaceOffset.y2TokenOffset = offset;
-#else
-    tilingData.workSpaceOffset.shareX1TokenOffset = offset;
-    offset += CeilUp(shareExpertTokenNum * h * sizeof(int8_t), GM_ALIGN_SIZE);
-    tilingData.workSpaceOffset.shareX2TokenOffset = offset;
-    offset += CeilUp(shareExpertTokenNum * shareGmm2HLen * sizeof(int8_t), GM_ALIGN_SIZE);
-    tilingData.workSpaceOffset.x1TokenOffset = offset;
-    offset += CeilUp(maxTokenNum * h * sizeof(int8_t), GM_ALIGN_SIZE);
-    tilingData.workSpaceOffset.x2TokenOffset = offset;
-    offset += CeilUp(maxTokenNum * gmm2HLen * sizeof(int8_t), GM_ALIGN_SIZE);
-    tilingData.workSpaceOffset.shareX1ScaleOffset = offset;
-    offset += CeilUp(shareExpertTokenNum * sizeof(float), GM_ALIGN_SIZE);
-    tilingData.workSpaceOffset.shareX2ScaleOffset = offset;
-    offset += CeilUp(shareExpertTokenNum * sizeof(float), GM_ALIGN_SIZE);
-    tilingData.workSpaceOffset.x1ScaleOffset = offset;
-    offset += CeilUp(maxTokenNum * sizeof(float), GM_ALIGN_SIZE);
-    tilingData.workSpaceOffset.x2ScaleOffset = offset;
-    offset += CeilUp(maxTokenNum * sizeof(float), GM_ALIGN_SIZE);
-    tilingData.workSpaceOffset.swapSpaceOffset = offset;
-    offset += maxSwapSwigluSize;
-    tilingData.workSpaceOffset.shareSwigluOffset = offset;
-    offset += CeilUp(shareExpertTokenNum * shareGmm1HLen * sizeof(float), GM_ALIGN_SIZE);
-    tilingData.workSpaceOffset.swigluOffset = offset;
-    offset += CeilUp(swigluOutSize, GM_ALIGN_SIZE);
-    tilingData.workSpaceOffset.y2TokenOffset = offset;
-#endif
-    tilingData.workSpaceOffset.groupListOffset = tilingData.workSpaceOffset.y2TokenOffset + gmm2DepOutSize;
-    tilingData.workSpaceOffset.expandIdxOffset = tilingData.workSpaceOffset.groupListOffset + groupListSize;
-    tilingData.workSpaceOffset.epSendCountOffset = tilingData.workSpaceOffset.expandIdxOffset + expandIdxSize;
-    tilingData.workSpaceOffset.reservedOffset = tilingData.workSpaceOffset.epSendCountOffset + epSendCountSize;
-    size_t usrSize = tilingData.workSpaceOffset.reservedOffset + reservedSize;
+    size_t usrSize = maxTokenSize + tokenScaleSize + CVSwapBufferSize + maxSwigluGmm2Size + groupListSize +
+        expandIdxSize + epSendCountSize + reservedSize;
+
     workSpaces[0] = SYSTEM_NEED_WORKSPACE + usrSize;
     return ge::GRAPH_SUCCESS;
 }
