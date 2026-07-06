@@ -433,7 +433,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
 template <TemplateMC2TypeClass>
 __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
 {
-    constexpr bool isW4A8 = std::is_same_v<WeightType, AscendC::int4b_t>;
+    constexpr bool isW4A8 = std::is_same_v<WeightType, AscendC::int4b_t> ||
+                             std::is_same_v<WeightType, int32_t>;
 
     using Gmm1L1TileShape = std::conditional_t<isW4A8, Gmm1L1TileShapeW4a8, Gmm1L1TileShapeW8a8>;
     using Gmm1L0TileShape = std::conditional_t<isW4A8, Gmm1L0TileShapeW4a8, Gmm1L0TileShapeW8a8>;
