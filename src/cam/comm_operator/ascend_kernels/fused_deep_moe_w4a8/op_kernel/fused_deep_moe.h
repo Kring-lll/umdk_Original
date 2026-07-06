@@ -94,9 +94,10 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;
 
-    // w4A8 adaptation: weight matrix is int4
-    using AType = Gemm::GemmType<WeightType, layout::RowMajor>;
-    using BType = Gemm::GemmType<WeightType, layout::zN>;
+    // Map int32_t (DT_INT32 packed INT4 storage) back to int4b_t for GEMM element type
+    using ActualWeightType = std::conditional_t<std::is_same_v<WeightType, int32_t>, AscendC::int4b_t, WeightType>;
+    using AType = Gemm::GemmType<ActualWeightType, layout::RowMajor>;
+    using BType = Gemm::GemmType<ActualWeightType, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
@@ -233,9 +234,9 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;
 
-    // w4A8 adaptation
-    using AType = Gemm::GemmType<WeightType, layout::RowMajor>;
-    using BType = Gemm::GemmType<WeightType, layout::zN>;
+    using ActualWeightType = std::conditional_t<std::is_same_v<WeightType, int32_t>, AscendC::int4b_t, WeightType>;
+    using AType = Gemm::GemmType<ActualWeightType, layout::RowMajor>;
+    using BType = Gemm::GemmType<ActualWeightType, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
@@ -435,6 +436,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
 {
     constexpr bool isW4A8 = std::is_same_v<WeightType, AscendC::int4b_t> ||
                              std::is_same_v<WeightType, int32_t>;
+    using ActualWeightType = std::conditional_t<isW4A8, AscendC::int4b_t, WeightType>;
 
     using Gmm1L1TileShape = std::conditional_t<isW4A8, Gmm1L1TileShapeW4a8, Gmm1L1TileShapeW8a8>;
     using Gmm1L0TileShape = std::conditional_t<isW4A8, Gmm1L0TileShapeW4a8, Gmm1L0TileShapeW8a8>;
@@ -447,20 +449,20 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
 
     layout::RowMajor layoutX1{maxTokenNum_, tokenHiddenSize_};
     layout::zN layoutShareWeight1 =
-        layout::zN::template MakeLayout<WeightType>(tokenHiddenSize_, shareGmm1OutputDim_);
-    layout::zN layoutWeight1 = layout::zN::template MakeLayout<WeightType>(tokenHiddenSize_, gmm1OutputDim_);
+        layout::zN::template MakeLayout<ActualWeightType>(tokenHiddenSize_, shareGmm1OutputDim_);
+    layout::zN layoutWeight1 = layout::zN::template MakeLayout<ActualWeightType>(tokenHiddenSize_, gmm1OutputDim_);
     layout::VectorLayout layoutShareW1Scale{shareGmm1OutputDim_};
     layout::VectorLayout layoutW1Scale{gmm1OutputDim_};
     layout::VectorLayout layoutX1Scale{maxTokenNum_};
     layout::RowMajor layoutX2{maxTokenNum_, gmm2InputDim_};
-    layout::zN layoutWeight2 = layout::zN::template MakeLayout<WeightType>(gmm2InputDim_, gmm2OutputDim_);
+    layout::zN layoutWeight2 = layout::zN::template MakeLayout<ActualWeightType>(gmm2InputDim_, gmm2OutputDim_);
     layout::VectorLayout layoutW2Scale{gmm2OutputDim_};
     layout::VectorLayout layoutX2Scale{maxTokenNum_};
     layout::RowMajor layoutOutput{maxTokenNum_, gmm2OutputDim_};
     
     layout::RowMajor layoutShareX2{bs_, shareGmm2InputDim_};
     layout::zN layoutShareWeight2 =
-        layout::zN::template MakeLayout<WeightType>(shareGmm2InputDim_, gmm2OutputDim_);
+        layout::zN::template MakeLayout<ActualWeightType>(shareGmm2InputDim_, gmm2OutputDim_);
     GemmCoord shareGmm2ProblemShape{bs_, gmm2OutputDim_, shareGmm2InputDim_};
     layout::VectorLayout layoutShareX2Scale{bs_};
     layout::RowMajor layoutShareOutput{bs_, gmm2OutputDim_};
