@@ -24,6 +24,7 @@ target_include_directories(tpsa
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/urma/lib/urma/core/include
         ${CMAKE_SOURCE_DIR}/urma/common/include
+        /usr/include/libnl3
 )
 
 target_link_libraries(tpsa urma_common_static nl-genl-3 nl-3)
