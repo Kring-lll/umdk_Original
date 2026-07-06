@@ -12,6 +12,115 @@ UvsIoctlCapture g_uvsIoctl;
 
 using namespace urma_test_uvs;
 
+struct nl_sock;
+struct nl_msg;
+
+extern "C" nl_sock *nl_socket_alloc(void)
+{
+    return reinterpret_cast<nl_sock *>(0x101);
+}
+
+extern "C" void nl_socket_free(nl_sock *)
+{
+}
+
+extern "C" void nl_close(nl_sock *)
+{
+}
+
+extern "C" int genl_connect(nl_sock *)
+{
+    if (!g_uvsIoctl.netlinkSucceed) {
+        return g_uvsIoctl.netlinkRet;
+    }
+    return 0;
+}
+
+extern "C" int genl_ctrl_resolve(nl_sock *, const char *name)
+{
+    if (!g_uvsIoctl.netlinkSucceed) {
+        return g_uvsIoctl.netlinkRet;
+    }
+    if (name == nullptr || std::strcmp(name, "UBAGG_GENL") != 0) {
+        return -EINVAL;
+    }
+    return 88;
+}
+
+extern "C" nl_msg *nlmsg_alloc(void)
+{
+    return reinterpret_cast<nl_msg *>(0x102);
+}
+
+extern "C" void nlmsg_free(nl_msg *)
+{
+}
+
+extern "C" void *genlmsg_put(nl_msg *msg, uint32_t, uint32_t, int, int, int,
+    uint8_t, uint8_t)
+{
+    return msg;
+}
+
+extern "C" int nla_put_u64(nl_msg *, int attrtype, uint64_t value)
+{
+    constexpr int bondpNlHdrArgsAddr = 4;
+
+    if (!g_uvsIoctl.netlinkSucceed) {
+        return g_uvsIoctl.netlinkRet;
+    }
+    if (attrtype != bondpNlHdrArgsAddr || value == 0) {
+        return -EINVAL;
+    }
+
+    g_uvsIoctl.lastNetlinkArg =
+        reinterpret_cast<UvsNetlinkTopoArg *>(static_cast<uintptr_t>(value));
+    return 0;
+}
+
+extern "C" int nl_send_auto(nl_sock *, nl_msg *)
+{
+    if (!g_uvsIoctl.netlinkSucceed) {
+        return g_uvsIoctl.netlinkRet;
+    }
+    return 1;
+}
+
+extern "C" int nl_recvmsgs_default(nl_sock *)
+{
+    UvsNetlinkTopoArg *arg = g_uvsIoctl.lastNetlinkArg;
+    uint32_t nodeNum;
+    uint32_t nodeIdx;
+
+    if (!g_uvsIoctl.netlinkSucceed) {
+        return g_uvsIoctl.netlinkRet;
+    }
+    if (arg == nullptr || arg->in.node_idx < 0) {
+        return -EINVAL;
+    }
+
+    nodeIdx = static_cast<uint32_t>(arg->in.node_idx);
+    nodeNum = g_uvsIoctl.ubaggTopoNum;
+    if (g_uvsIoctl.changeTopoNumAfterFirst && g_uvsIoctl.netlinkCallCount > 0) {
+        nodeNum++;
+    }
+    if (nodeNum != 0 && nodeIdx >= nodeNum) {
+        return -EINVAL;
+    }
+
+    g_uvsIoctl.netlinkCallCount++;
+    arg->out.node_num = nodeNum;
+    if (nodeNum == 0 || nodeNum > MAX_NODE_NUM) {
+        return 0;
+    }
+    if (nodeIdx < g_uvsIoctl.topoNodes.size()) {
+        arg->out.topo_info = g_uvsIoctl.topoNodes[nodeIdx];
+    } else {
+        arg->out.topo_info = g_uvsIoctl.topoNode;
+    }
+    return 0;
+}
+
 extern "C" int ioctl(int, unsigned long request, ...)
 {
     va_list ap;

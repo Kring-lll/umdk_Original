@@ -57,6 +57,10 @@ TEST_F(UrmaUvsTest, PublicApisPropagateMissingDeviceFailure)
     EXPECT_EQ(-1, uvs_delete_agg_dev(&eid));
     EXPECT_EQ(-1, uvs_get_device_name_by_eid(&eid, devName, sizeof(devName)));
     EXPECT_EQ(-1, uvs_set_topo_info(node, sizeof(*node), 1));
+    g_uvsIoctl.topoNode.node_id = 0x61;
+    FillTopoUe(&g_uvsIoctl.topoNode.agg_devs[0].ues[0], 6, 1, 0, 41, 42, 43);
+    node->node_id = 0x61;
+    FillTopoUe(&node->agg_devs[0].ues[0], 6, 1, 0, 44, 44, 45);
     EXPECT_EQ(-1, uvs_set_share_topo_info(node, sizeof(*node), 1));
     EXPECT_EQ(-1, uvs_get_topo_info(topo));
     EXPECT_EQ(-1, uvs_insert_main_ue_eid(&entry));
