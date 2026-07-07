@@ -1106,7 +1106,8 @@ void umq_ub_credit_pending_queue_uninit(ub_credit_pending_queue_t *pq)
         return;
     }
 
-    ub_pending_credit_req_t *cur_node, *next_node;
+    ub_pending_credit_req_t *cur_node;
+    ub_pending_credit_req_t *next_node;
     URPC_LIST_FOR_EACH_SAFE(cur_node, next_node, req_node, &pq->pending_list) {
         umq_dec_ref(cur_node->queue->dev_ctx->io_lock_free, &cur_node->queue->ref_cnt, 1);
         urpc_list_remove(&cur_node->req_node);
