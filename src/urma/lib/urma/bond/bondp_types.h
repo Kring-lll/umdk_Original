@@ -292,13 +292,22 @@ typedef struct bondp_comp {
     bool modify_to_error;
     pthread_spinlock_t send_lock;
     wr_buf_t send_wr_buf;
+    /* Backup pjetty objects, one per slot; pre-created at jetty creation time for send pjetties.
+     * A backup pjetty is a second urma_jetty on the same p_ctxs[i], used as a hot standby so that
+     * on failure the active role switches primary->backup within the same slot (send_idx unchanged)
+     * while the failed primary is rebuilt asynchronously. */
+    urma_jetty_t *p_jetty_backup[URMA_UBAGG_DEV_MAX_NUM];
+    /* Per-slot backup validity: false = primary pjetty in use, true = backup pjetty in use.
+     * Switched under send_lock on failover (primary->backup) and on failback (backup->primary). */
 #ifndef __cplusplus
     atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
     atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
+    atomic_bool backup_valid[URMA_UBAGG_DEV_MAX_NUM];
     atomic_uint msn;
 #else
     std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
+    std::atomic_bool backup_valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_uint msn;
 #endif
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
