@@ -291,7 +291,7 @@ class FusionOp(DecodeMoeOps):
         gmm1_weight = torch_npu.npu_format_cast(gmm1_weight,
                                                 torch_npu.Format.FRACTAL_NZ)
         gmm1_weight_scale = permute_weight(gmm1_weight_scale, 128)
-        gmm2_weight = torch_npu.npu_format_cast(gmm2_weight.transpose(1, 2).contiguous(),
+        gmm2_weight = torch_npu.npu_format_cast(gmm2_weight.contiguous(),
                                                 torch_npu.Format.FRACTAL_NZ)
         gmm1_weight_scale = gmm1_weight_scale.float()
         gmm2_weight_scale = gmm2_weight_scale.float()
