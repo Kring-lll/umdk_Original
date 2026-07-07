@@ -76,10 +76,10 @@ struct bondp_fb_ctx {
 #define BONDP_FB_TASK_HASH_BASIS 0x9d4f21U
 #define BONDP_FB_TASK_TABLE_SIZE 1024U
 /* Delay (ms) before rebuilding a failed-back pjetty on the bond worker. */
-#define BONDP_FB_REBUILD_DELAY_MS 2000U
+#define BONDP_FB_REBUILD_DELAY_MS 0U
 /* Delay (ms) before publishing the rebuild_done flag after a rebuild; the
  * worker enforces a minimum of one tick. */
-#define BONDP_FB_MARK_DONE_DELAY_MS 0U
+#define BONDP_FB_MARK_DONE_DELAY_MS 2000U
 
 static uint32_t next_request_id(bondp_fb_ctx_t *fb_ctx)
 {
@@ -229,20 +229,16 @@ static int fb_task_del(bondp_fb_ctx_t *fb_ctx, const bondp_fb_task_key_t *key)
     return -ENOENT;
 }
 
-static int bondp_update_pjetty_id_mapping(
-    bondp_context_t *bdp_ctx, urma_jetty_id_t old_id,
-    urma_jetty_id_t new_id, bondp_comp_t *bdp_jetty)
+/* Forward declaration: bondp_fb_rebuild_backup_async (scheduled reclamation) runs before this
+ * helper is defined, but needs to look up the owning comp. */
+static bondp_comp_t *bondp_find_jetty_by_vjetty_id(bondp_context_t *bond_ctx, uint32_t vjetty_id);
+
+static int bondp_add_pjetty_id_mapping(
+    bondp_context_t *bdp_ctx, urma_jetty_id_t new_id, bondp_comp_t *bdp_jetty)
 {
     int ret = 0;
 
     pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
-    ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, old_id, JETTY);
-    if (ret != 0) {
-        pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
-        URMA_LOG_ERR("Failed to delete stale pjetty id mapping: " URMA_JETTY_ID_FMT ", ret=%d\n",
-                     URMA_JETTY_ID_ARGS(&old_id), ret);
-        return -1;
-    }
     ret = bdp_p_vjetty_id_table_add_without_lock(
         &bdp_ctx->p_vjetty_id_table, new_id, JETTY, bdp_jetty->v_jetty.jetty_id.id, bdp_jetty);
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
@@ -252,6 +248,151 @@ static int bondp_update_pjetty_id_mapping(
         return -1;
     }
     return 0;
+}
+
+static void bondp_del_pjetty_id_mapping(bondp_context_t *bdp_ctx, urma_jetty_id_t old_id)
+{
+    pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
+    int ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, old_id, JETTY);
+    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+    if (ret != 0) {
+        URMA_LOG_WARN("Failed to delete stale pjetty id mapping: " URMA_JETTY_ID_FMT ", ret=%d\n",
+                      URMA_JETTY_ID_ARGS(&old_id), ret);
+    }
+}
+
+typedef struct bondp_fb_dead_pjetty_arg {
+    bondp_context_t *bond_ctx;
+    urma_jetty_t *dead_jetty;
+} bondp_fb_dead_pjetty_arg_t;
+
+/* Reclaim a detached, failed backup pjetty on the bond worker. The id mapping is removed first
+ * (so any stale flush CRs still in flight cannot resolve to the comp), then the jetty is deleted.
+ * This must run off the datapath path because urma_delete_jetty may block/flush. */
+static void bondp_fb_delete_dead_pjetty_async(void *arg)
+{
+    bondp_fb_dead_pjetty_arg_t *d = (bondp_fb_dead_pjetty_arg_t *)arg;
+    if (d == NULL) {
+        return;
+    }
+    if (d->dead_jetty != NULL) {
+        bondp_del_pjetty_id_mapping(d->bond_ctx, d->dead_jetty->jetty_id);
+        (void)urma_delete_jetty(d->dead_jetty);
+    }
+    free(d);
+}
+
+int bondp_fb_schedule_delete_pjetty(bondp_context_t *bond_ctx, urma_jetty_t *dead_jetty)
+{
+    if (bond_ctx == NULL || dead_jetty == NULL) {
+        return -EINVAL;
+    }
+
+    bondp_fb_dead_pjetty_arg_t *d = calloc(1, sizeof(*d));
+    if (d == NULL) {
+        return -ENOMEM;
+    }
+    d->bond_ctx = bond_ctx;
+    d->dead_jetty = dead_jetty;
+
+    bondp_worker_task_id_t task_id = 0;
+    int ret = bondp_worker_schedule(0, bondp_fb_delete_dead_pjetty_async, d, &task_id);
+    if (ret != 0) {
+        free(d);
+        URMA_LOG_ERR("Failed to schedule dead pjetty reclaim, jetty_id=%u ret=%d\n",
+                     dead_jetty->jetty_id.id, ret);
+    }
+    return ret;
+}
+
+typedef struct bondp_fb_rebuild_backup_arg {
+    bondp_context_t *bond_ctx;
+    uint32_t vjetty_id;
+    uint32_t pjetty_idx;
+} bondp_fb_rebuild_backup_arg_t;
+
+/* Re-create a backup pjetty on a slot whose backup was detached after a double fault, restoring the
+ * hot-standby capability. Runs on the bond worker because urma_create_jetty may block. The primary
+ * pjetty of the slot is the source of the (already per-slot adjusted) jetty_cfg. */
+static void bondp_fb_rebuild_backup_async(void *arg)
+{
+    bondp_fb_rebuild_backup_arg_t *a = (bondp_fb_rebuild_backup_arg_t *)arg;
+    if (a == NULL) {
+        return;
+    }
+
+    bondp_comp_t *bdp_jetty = bondp_find_jetty_by_vjetty_id(a->bond_ctx, a->vjetty_id);
+    if (bdp_jetty == NULL) {
+        URMA_LOG_ERR("Failed to rebuild backup pjetty, vjetty_id=%u not found.\n", a->vjetty_id);
+        free(a);
+        return;
+    }
+
+    int ret = -1;
+    if (a->pjetty_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        URMA_LOG_ERR("Failed to rebuild backup pjetty, invalid idx=%u.\n", a->pjetty_idx);
+        goto out;
+    }
+
+    /* Only recreate if the slot still lacks a backup (avoid clobbering one that a concurrent path
+     * may have restored, or that is still being torn down). */
+    if (bdp_jetty->p_jetty_backup[a->pjetty_idx] != NULL) {
+        URMA_LOG_INFO("Skip rebuild backup pjetty, idx=%u already present.\n", a->pjetty_idx);
+        goto out;
+    }
+
+    urma_jetty_t *primary = bdp_jetty->p_jetty[a->pjetty_idx];
+    if (primary == NULL) {
+        URMA_LOG_ERR("Failed to rebuild backup pjetty, primary idx=%u is NULL.\n", a->pjetty_idx);
+        goto out;
+    }
+
+    urma_jetty_cfg_t p_cfg = primary->jetty_cfg;
+    urma_jetty_t *backup = urma_create_jetty(bdp_jetty->bondp_ctx->p_ctxs[a->pjetty_idx], &p_cfg);
+    if (backup == NULL) {
+        URMA_LOG_ERR("Failed to recreate backup pjetty at idx=%u\n", a->pjetty_idx);
+        goto out;
+    }
+    backup->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+    backup->remote_jetty = NULL;
+
+    ret = bondp_add_pjetty_id_mapping(bdp_jetty->bondp_ctx, backup->jetty_id, bdp_jetty);
+    if (ret != 0) {
+        (void)urma_delete_jetty(backup);
+        goto out;
+    }
+    bdp_jetty->p_jetty_backup[a->pjetty_idx] = backup;
+    atomic_store(&bdp_jetty->backup_valid[a->pjetty_idx], false);
+    URMA_LOG_INFO("Backup pjetty rebuilt, idx=%u jetty_id=%u\n",
+                  a->pjetty_idx, backup->jetty_id.id);
+
+out:
+    atomic_fetch_sub(&bdp_jetty->use_cnt.atomic_cnt, 1);
+    free(a);
+}
+
+int bondp_fb_schedule_rebuild_backup(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx)
+{
+    if (bond_ctx == NULL) {
+        return -EINVAL;
+    }
+
+    bondp_fb_rebuild_backup_arg_t *a = calloc(1, sizeof(*a));
+    if (a == NULL) {
+        return -ENOMEM;
+    }
+    a->bond_ctx = bond_ctx;
+    a->vjetty_id = vjetty_id;
+    a->pjetty_idx = pjetty_idx;
+
+    bondp_worker_task_id_t task_id = 0;
+    int ret = bondp_worker_schedule(0, bondp_fb_rebuild_backup_async, a, &task_id);
+    if (ret != 0) {
+        free(a);
+        URMA_LOG_ERR("Failed to schedule backup rebuild, vjetty_id=%u idx=%u ret=%d\n",
+                     vjetty_id, pjetty_idx, ret);
+    }
+    return ret;
 }
 
 static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
@@ -283,12 +424,19 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
     new_jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
     bdp_jetty->p_jetty[local_idx] = new_jetty;
 
-    ret = bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty);
+    /* Install the new id mapping first so the rebuilt primary is reachable, then remove the
+     * old id mapping BEFORE tearing down the old pjetty. Removing the old mapping first ensures
+     * that flush/error CRs generated by urma_delete_jetty(old) cannot resolve local_id to the
+     * comp (get_comp_by_cr returns NULL -> CONVERT_SKIP); otherwise they would set stale
+     * pjettys_error_done bits and could let a later modify_to_error complete prematurely. */
+    ret = bondp_add_pjetty_id_mapping(bdp_ctx, new_jetty->jetty_id, bdp_jetty);
     if (ret != 0) {
         bdp_jetty->p_jetty[local_idx] = old_jetty;
         (void)urma_delete_jetty(new_jetty);
         return -1;
     }
+
+    bondp_del_pjetty_id_mapping(bdp_ctx, old_id);
 
     ret = urma_delete_jetty(old_jetty);
     if (ret != URMA_SUCCESS) {
@@ -317,6 +465,12 @@ static bondp_comp_t *bondp_find_jetty_by_vjetty_id(bondp_context_t *bond_ctx, ui
         bdp_jetty = item->comp;
         break;
     }
+    /* Take a reference while still holding the table read lock so that a concurrent
+     * bondp_delete_jetty (which checks use_cnt==0 under the write lock) cannot free the
+     * comp between the lookup and the caller using the pointer. Callers must drop it. */
+    if (bdp_jetty != NULL) {
+        atomic_fetch_add(&bdp_jetty->use_cnt.atomic_cnt, 1);
+    }
     pthread_rwlock_unlock(&bond_ctx->p_vjetty_id_table.lock);
     return bdp_jetty;
 }
@@ -328,7 +482,6 @@ typedef struct bondp_fb_async_arg {
 
 typedef struct bondp_fb_mark_done_arg {
     bondp_fb_task_t *fb_task;
-    bondp_comp_t *bdp_jetty;
     uint32_t pjetty_idx;
 } bondp_fb_mark_done_arg_t;
 
@@ -338,12 +491,18 @@ static void bondp_mark_rebuild_done_async(bondp_fb_mark_done_arg_t *arg)
         return;
     }
 
-    if (arg->bdp_jetty != NULL && arg->pjetty_idx < URMA_UBAGG_DEV_MAX_NUM) {
-        atomic_store(&arg->bdp_jetty->rebuild_done[arg->pjetty_idx], true);
-    }
-
-    if (arg->fb_task != NULL) {
-        fb_task_put(arg->fb_task);
+    bondp_fb_task_t *fb_task = arg->fb_task;
+    if (fb_task != NULL) {
+        /* Re-lookup the jetty instead of trusting a pointer captured up to
+         * BONDP_FB_MARK_DONE_DELAY_MS ago: the jetty may have been deleted in the meantime.
+         * bondp_find_jetty_by_vjetty_id takes a reference so the comp cannot be freed while
+         * we touch rebuild_done; drop it once the flag is set. */
+        bondp_comp_t *bdp_jetty = bondp_find_jetty_by_vjetty_id(fb_task->bond_ctx, fb_task->vjetty_id);
+        if (bdp_jetty != NULL && arg->pjetty_idx < URMA_UBAGG_DEV_MAX_NUM) {
+            atomic_store(&bdp_jetty->rebuild_done[arg->pjetty_idx], true);
+            atomic_fetch_sub(&bdp_jetty->use_cnt.atomic_cnt, 1);
+        }
+        fb_task_put(fb_task);
     }
     free(arg);
 }
@@ -373,6 +532,11 @@ static void bondp_rebuild_pjetty_async(void *arg)
     }
 
     int ret = bondp_rebuild_pjetty(bdp_jetty, (int)fb_task->pjetty_idx);
+    /* Drop the reference taken by bondp_find_jetty_by_vjetty_id above. The mark-done callback
+     * re-looks up the jetty on its own; we must not carry this reference across the
+     * BONDP_FB_MARK_DONE_DELAY_MS window, otherwise jetty deletion would be blocked for that
+     * whole delay and the comp could still be touched via a dangling reference. */
+    atomic_fetch_sub(&bdp_jetty->use_cnt.atomic_cnt, 1);
     if (ret != 0) {
         URMA_LOG_ERR("Failed to rebuild failback pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
                      fb_task->vjetty_id, fb_task->pjetty_idx);
@@ -386,7 +550,6 @@ static void bondp_rebuild_pjetty_async(void *arg)
         goto put_task;
     }
     mark_arg->fb_task = fb_task;
-    mark_arg->bdp_jetty = bdp_jetty;
     mark_arg->pjetty_idx = fb_task->pjetty_idx;
 
     uint64_t mark_done_task_id = 0;
