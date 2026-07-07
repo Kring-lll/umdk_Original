@@ -977,6 +977,30 @@ static void umq_ub_fill_rx_buff_post_process(ub_queue_t *queue, umq_ub_imm_t *im
     return;
 }
 
+static bool is_umq_ub_req_enqueue(ub_queue_t *real_queue, umq_ub_imm_t *imm)
+{
+    if (imm->flow_control.extend_type != IMM_TYPE_FC_CREDIT_REQ) {
+        return false;
+    }
+
+    uint16_t credits_per_request = imm->flow_control.window;
+    ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    // 这里要由于主queue接收流控消息和子queue真正处理流控，
+    // 这里有个窗口期， 子queue 处理流控请求前，idle的值还未减少，可能导致,有些本该入队的没有入队
+    uint16_t idle = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_ACQUIRE);
+    uint16_t actual = (idle >= credits_per_request) ? credits_per_request : idle;
+    if (actual > 0) {
+        return false;
+    }
+
+    int ret = umq_ub_credit_pending_req_enqueue(&pool->pending_queue, queue, credits_per_request,
+        (uint8_t)imm->flow_control.seq);
+    if (ret != UMQ_SUCCESS) {
+        return false;
+    }
+    return true;
+}
+
 static bool is_umq_ub_flow_control_msg_duplicate(ub_queue_t *real_queue, umq_ub_imm_t *imm)
 {
     ub_flow_control_t *fc = &real_queue->flow_control;
@@ -1063,6 +1087,9 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
                 umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
                 continue;
             }
+            if (is_umq_ub_req_enqueue(real_queue, &imm)) {
+                continue;
+            }
             qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, &imm, &buf[qbuf_cnt]);
             umq_ub_fill_rx_buff_post_process(queue, &imm);
             umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
@@ -1074,7 +1101,10 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
             umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
             continue;
         }
-
+        if (is_umq_ub_req_enqueue(real_queue, &imm)) {
+            umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
+            continue;
+        }
         qbuf_cnt += (int32_t)umq_ub_fill_fc_buf(real_queue, &buf[qbuf_cnt], UMQ_FAKE_BUF_FC_MSG);
         umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
     }
@@ -1150,9 +1180,6 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
             if (buf != NULL) {
                 qbuf_cnt += (int32_t)umq_ub_fill_fc_buf(queue, &buf[qbuf_cnt], UMQ_FAKE_BUF_FC_ERR);
             }
-            continue;
-        }
-        if (is_umq_ub_flow_control_msg_duplicate(queue, &imm)) {
             continue;
         }
         qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, &imm, &buf[qbuf_cnt]);
