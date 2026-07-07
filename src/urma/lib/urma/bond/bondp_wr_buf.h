@@ -48,6 +48,11 @@ typedef struct jfs_wr_entry {
     struct bondp_target_jetty *target_vjetty;
     uint32_t send_idx;
     uint32_t target_idx;
+    /* True after this WR was resent to the backup pjetty during a same-slot failover. Such WRs
+     * are still in flight on the backup; on failback they must NOT be resent to the rebuilt
+     * primary (that would duplicate delivery and underflow sqe_cnt). They drain normally via the
+     * backup's own completion CR. Cleared when a fresh WR is posted. */
+    bool resent_to_backup;
 } jfs_wr_entry_t;
 
 typedef struct jfr_wr_entry {
