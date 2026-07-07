@@ -177,6 +177,7 @@ typedef struct ub_flow_control {
     uint16_t remote_tx_depth;
     uint16_t remote_rx_depth;
     uint32_t timeout_us;
+    ub_pending_credit_req_t pending_req;
     bool local_set;
     bool remote_get;
     bool enabled;
@@ -343,7 +344,23 @@ typedef struct ub_credit_pool {
     volatile uint64_t stats_u64[CREDIT_COUNTER_MAX_U64];
     volatile uint16_t stats_u16[CREDIT_COUNTER_MAX_U16];
     uint16_t capacity;
+    ub_credit_pending_queue_t pending_queue;
 } ub_credit_pool_t;
+
+typedef struct ub_pending_credit_req {
+    urpc_list_t req_node;
+    ub_queue_t *queue;
+    uint16_t requested;
+    uint8_t seq;
+} ub_pending_credit_req_t;
+
+typedef struct ub_credit_pending_queue {
+    urpc_list_t pending_list;
+    uint32_t pending_count;
+    uint32_t max_pending;
+    uint16_t pending_credit_threshold;
+    util_external_mutex_lock *lock;
+} ub_credit_pending_queue_t;
 
 typedef struct jfr_ctx {
     urma_jfr_t *jfr;
@@ -405,6 +422,7 @@ typedef struct jetty_pool_node {
 
 typedef struct ub_queue {
     urpc_list_t qctx_node;
+    urpc_list_t fc_req_node;
     // queue param
     urma_jetty_t *jetty[UB_QUEUE_JETTY_NUM];
     jfr_ctx_t *jfr_ctx[UB_QUEUE_JETTY_NUM];
