@@ -34,9 +34,7 @@
 
 using namespace Catlass;
 using namespace Cam;
-
-// W4A8 dispatch policy (INT4 weights, divides L1 by CONSTANT_INT4_PACKING_RATIO=2)
-using MmadAtlasA2CustomW4a8 =
+using MmadAtlasA2Custom =
     Gemm::MmadAtlasA2PreloadAsyncWithCallbackW4a8<CUSTOM_PRELOAD_STAGES, CUSTOM_L1_STAGES, CUSTOM_L0A_STAGES,
         CUSTOM_L0B_STAGES, CUSTOM_L0C_STAGES, CUSTOM_ENABLE_UNIT_FLAG,
         CUSTOM_ENABLE_SHUFFLE_K>;
@@ -47,16 +45,15 @@ using MmadAtlasA2CustomW8a8 =
         CUSTOM_L0B_STAGES, CUSTOM_L0C_STAGES, CUSTOM_ENABLE_UNIT_FLAG,
         CUSTOM_ENABLE_SHUFFLE_K>;
 
-// W4A8 tile shapes (K=1024/256, INT4 2 elements/byte → L1/2 fits)
-using Gmm1L1TileShapeW4a8 = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L1K>;
-using Gmm1L0TileShapeW4a8 = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L0K>;
-// W8A8 tile shapes (K=512/128, INT8 1 element/byte → standard L1)
+// W8A8 tile shapes (K=512/128)
 using Gmm1L1TileShapeW8a8 = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L1K_W8A8>;
 using Gmm1L0TileShapeW8a8 = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L0K_W8A8>;
-using Gmm1EpilogueTileShape = MatrixShape<GMM1_EPIM, Gmm1L1TileShapeW4a8::N>;
+
+using Gmm1L1TileShape = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L1K>;
+using Gmm1L0TileShape = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L0K>;
+using Gmm1EpilogueTileShape = MatrixShape<GMM1_EPIM, Gmm1L1TileShape::N>;
 using Gmm1BlockScheduler = typename Gemm::Block::GemmIdentityBlockSwizzle<GMM1_SWIZZLE_OFFSET, GMM1_SWIZZLE_DIRECTION>;
 
-// GMM2 uses ResidentA for both modes (same K for both)
 using Gmm2L1TileShape = GemmShape<GMM2_L1M, GMM2_L1N, GMM2_L1K>;
 using Gmm2L0TileShape = GemmShape<Gmm2L1TileShape::M, Gmm2L1TileShape::N, GMM2_L0K>;
 using Gmm2EpilogueTileShape = MatrixShape<GMM2_EPIM, Gmm2L1TileShape::N>;
@@ -67,10 +64,11 @@ using Gmm2DispatchPolicy =
         CUSTOM_ENABLE_UNIT_FLAG, CUSTOM_ENABLE_SHUFFLE_K>;
 
 template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class EpilogueTileShape_,
-    class BlockScheduler_, class DispatchPolicy_ = MmadAtlasA2CustomW4a8>
+    class BlockScheduler_, class DispatchPolicy_ = MmadAtlasA2Custom>
 CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
     layout::RowMajor layoutA, GM_ADDR gmShareB,
     layout::zN layoutShareB, GM_ADDR gmB, layout::zN layoutB,
+    GM_ADDR gmBias, GM_ADDR gmShareBias, // add param gmBias
     GM_ADDR gmShareScale, layout::VectorLayout layoutShareScale,
     GM_ADDR gmScale, layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
     layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
@@ -79,7 +77,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     layout::RowMajor layoutShareD, GM_ADDR gmShareX2Scale, GM_ADDR gmSwigluOut,
     GM_ADDR gmWorkspace, GM_ADDR gmX, GM_ADDR gmMoeSmoothScales,
     GM_ADDR gmShareSmoothScales, GM_ADDR gmexpertIds, GM_ADDR gmExpandIdx,
-    GM_ADDR gmEpSendCount, GM_ADDR xActiveMask, GM_ADDR gmReserved,
+    GM_ADDR gmEpSendCount, GM_ADDR xActiveMask, GM_ADDR gmResvered,
     GM_ADDR gmExpertTokenNums, const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo)
 {
     using ArchTag = Arch::AtlasA2;
@@ -95,9 +93,9 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
 
     // Select dispatch policy and tile shape based on weight type
     constexpr bool isW4A8 = std::is_same_v<ActualWeightType, AscendC::int4b_t>;
-    using Gmm1DispatchPolicy = std::conditional_t<isW4A8, MmadAtlasA2CustomW4a8, MmadAtlasA2CustomW8a8>;
-    using Gmm1L1TileShapeActual = std::conditional_t<isW4A8, Gmm1L1TileShapeW4a8, Gmm1L1TileShapeW8a8>;
-    using Gmm1L0TileShapeActual = std::conditional_t<isW4A8, Gmm1L0TileShapeW4a8, Gmm1L0TileShapeW8a8>;
+    using Gmm1DispatchPolicy = std::conditional_t<isW4A8, MmadAtlasA2Custom, MmadAtlasA2CustomW8a8>;
+    using Gmm1L1TileShapeActual = std::conditional_t<isW4A8, L1TileShape, Gmm1L1TileShapeW8a8>;
+    using Gmm1L0TileShapeActual = std::conditional_t<isW4A8, L0TileShape, Gmm1L0TileShapeW8a8>;
 
     using BlockMmad = Gemm::Block::BlockMmad<Gmm1DispatchPolicy, Gmm1L1TileShapeActual, Gmm1L0TileShapeActual, AType, BType, CType>;
 
@@ -129,54 +127,96 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     // kernel level
     using ElementGroupList = int64_t;
 
-    using GemmKernel = Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspace<
-        TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
+    using GemmKernel = typename std::conditional<
+        (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE),
+        Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspace<
+            TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>,
+        Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspaceWithShallowDispatch<
+            TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>>::type;
 
-    typename GemmKernel::Params params{problemShape,
-        groupCount,
-        gmGroupList,
-        gmA,
-        layoutA,
-        gmShareB,
-        layoutShareB,
-        gmB,
-        layoutB,
-        gmShareScale,
-        layoutShareScale,
-        gmScale,
-        layoutScale,
-        gmPerTokenScale,
-        layoutPerTokenScale,
-        gmD,
-        layoutD,
-        gmDequantScale,
-        layoutDequantScale,
-        gmWorkspace,
-        gmX,
-        gmMoeSmoothScales,
-        gmShareSmoothScales,
-        gmexpertIds,
-        gmExpandIdx,
-        gmEpSendCount,
-        xActiveMask,
-        gmReserved,
-        gmExpertTokenNums,
-        gmShareX1,
-        gmShareX1Scale,
-        gmShareSwigluOut,
-        gmShareX2,
-        layoutShareD,
-        gmShareX2Scale,
-        gmSwigluOut,
-        disGmmDeqSwigluQuantGmmDeqComInfo};
-    GemmKernel gemm;
-    gemm(params);
+    if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
+        typename GemmKernel::Params params{problemShape,
+            groupCount,
+            gmGroupList,
+            gmA,
+            layoutA,
+            gmShareB,
+            layoutShareB,
+            gmB,
+            layoutB,
+            gmBias,
+            gmShareBias,
+            gmShareScale,
+            layoutShareScale,
+            gmScale,
+            layoutScale,
+            gmPerTokenScale,
+            layoutPerTokenScale,
+            gmD,
+            layoutD,
+            gmDequantScale,
+            layoutDequantScale,
+            gmWorkspace,
+            gmX,
+            gmMoeSmoothScales,
+            gmShareSmoothScales,
+            gmexpertIds,
+            gmExpandIdx,
+            gmEpSendCount,
+            xActiveMask,
+            gmResvered,
+            gmExpertTokenNums,
+            gmShareX1,
+            gmShareX1Scale,
+            gmShareSwigluOut,
+            gmShareX2,
+            layoutShareD,
+            gmShareX2Scale,
+            gmSwigluOut,
+            disGmmDeqSwigluQuantGmmDeqComInfo};
+        // call a kernel
+        GemmKernel gemm;
+        gemm(params);
+    } else {
+        typename GemmKernel::Params params{problemShape,
+            groupCount,
+            gmGroupList,
+            gmA,
+            layoutA,
+            gmShareB,
+            layoutShareB,
+            gmB,
+            layoutB,
+            gmShareScale,
+            layoutShareScale,
+            gmScale,
+            layoutScale,
+            gmPerTokenScale,
+            layoutPerTokenScale,
+            gmD,
+            layoutD,
+            gmDequantScale,
+            layoutDequantScale,
+            gmWorkspace,
+            gmShareX1,
+            gmShareX1Scale,
+            gmShareSwigluOut,
+            gmShareX2,
+            layoutShareD,
+            gmShareX2Scale,
+            gmSwigluOut,
+            disGmmDeqSwigluQuantGmmDeqComInfo};
+        // call a kernel
+        GemmKernel gemm;
+        gemm(params);
+    }
 }
 
 template <TemplateMC2TypeClass, class L1TileShape_, class L0TileShape_, class EpilogueTileShape_,
-    class BlockScheduler_, class DispatchPolicy_ = MmadAtlasA2CustomW4a8>
+    class BlockScheduler_, class DispatchPolicy_ = MmadAtlasA2Custom>
 CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR gmGroupList, GM_ADDR gmA,
     layout::RowMajor layoutA, GM_ADDR gmB, layout::zN layoutB,
+    GM_ADDR gmBias, GM_ADDR gmShareBias,
     GM_ADDR gmScale, layout::VectorLayout layoutScale, GM_ADDR gmPerTokenScale,
     layout::VectorLayout layoutPerTokenScale, GM_ADDR gmD, layout::RowMajor layoutD,
     uint32_t batchSize, GemmCoord sharedGmm2ProblemShape,
@@ -191,12 +231,11 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;
 
-    using ActualWeightType = std::conditional_t<std::is_same_v<WeightType, int32_t>, AscendC::int4b_t, WeightType>;
+    // w4A8 adaptation
     using AType = Gemm::GemmType<ActualWeightType, layout::RowMajor>;
     using BType = Gemm::GemmType<ActualWeightType, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
-    // GMM2 uses ResidentA BlockMmad for both modes (same tile shape)
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
 
     constexpr uint32_t ubStages = 1;
@@ -236,6 +275,8 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
         layoutA,
         gmB,
         layoutB,
+        gmBias,
+        gmShareBias,
         gmScale,
         layoutScale,
         gmPerTokenScale,
@@ -390,8 +431,6 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
 template <TemplateMC2TypeClass>
 __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
 {
-    using ActualWeightType = std::conditional_t<std::is_same_v<WeightType, int32_t>, AscendC::int4b_t, WeightType>;
-
     GemmCoord gmm1ProblemShape{maxTokenNum_, gmm1OutputDim_, tokenHiddenSize_};
     GemmCoord gmm2ProblemShape{maxTokenNum_, gmm2OutputDim_, gmm2InputDim_};
 
@@ -432,7 +471,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     }
     size_t maxHandleTokenNum = maxTokenNum_ + shareExpertTokenNum;
     size_t workspaceOffset = 0;
-    constexpr int32_t reservedWorkSpaceSize = 256 * 1024;
+    constexpr int32_t resveredWorkSpaceSize = 256 * 1024;
     int64_t x1TokenSize = maxHandleTokenNum * tokenHiddenSize_ * sizeof(int8_t);
     int64_t x2TokenSize = (maxTokenNum_ * gmm2InputDim_ + shareExpertTokenNum * shareGmm2InputDim_) * sizeof(int8_t);
     int64_t maxTokenSize = x1TokenSize < x2TokenSize ? x2TokenSize : x1TokenSize;
@@ -447,17 +486,20 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     gmX1Scale = gmShareX1Scale + (static_cast<size_t>(shareExpertTokenNum) * sizeof(float));
     gmX2Scale = gmShareX2Scale + (static_cast<size_t>(shareExpertTokenNum) * sizeof(float));
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(tokenScaleSize);
-
+    
     GM_ADDR gmWorkspace = workspaceGM_ + workspaceOffset;
+    GM_ADDR gmCVSwap = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(blockDim_) * (GMM1_L1M * GMM1_L1N) *
         WORKSPACE_STAGES * sizeof(int32_t) );
 
     int64_t swigluOutSize = (maxTokenNum_ * gmm1OutputDim_ +
         shareExpertTokenNum * shareGmm1OutputDim_) * sizeof(float);
+
     int64_t gmm2OutSize = maxTokenNum_ * tokenHiddenSize_ * sizeof(ExpandXType);
     int64_t maxSwigluGmm2Size = swigluOutSize < gmm2OutSize ? gmm2OutSize : swigluOutSize;
     gmShareSwigluOut = workspaceGM_ + workspaceOffset;
     gmSwigluOut = gmShareSwigluOut + (static_cast<size_t>(shareExpertTokenNum) * shareGmm1OutputDim_ * sizeof(float));
+   
     GM_ADDR gmGmm2DepOut = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(maxSwigluGmm2Size);
 
@@ -467,8 +509,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(bs_) * topK_ * sizeof(int32_t));
     GM_ADDR gmEpSendCount = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(epRankSize_) * groupCount_ * sizeof(int32_t));
-    GM_ADDR gmReserved = workspaceGM_ + workspaceOffset;
-    workspaceOffset += RoundUp<GM_ALIGN_BYTE>(reservedWorkSpaceSize);
+    GM_ADDR gmResvered = workspaceGM_ + workspaceOffset;
+    workspaceOffset += RoundUp<GM_ALIGN_BYTE>(resveredWorkSpaceSize);
 
     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
         if constexpr (g_coreType == AscendC::AIV) {
@@ -492,14 +534,15 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
             Arch::CrossCoreWaitFlag(gmm1AivFinished);
         }
     }
-    GmmDeqSwigluQuant<TemplateMC2TypeFunc, Gmm1L1TileShapeW4a8, Gmm1L0TileShapeW4a8, Gmm1EpilogueTileShape,
-        Gmm1BlockScheduler, MmadAtlasA2CustomW4a8>(
+    GmmDeqSwigluQuant<TemplateMC2TypeFunc, Gmm1L1TileShape, Gmm1L0TileShape, Gmm1EpilogueTileShape,
+        Gmm1BlockScheduler>(
         gmm1ProblemShape, groupCount_, gmGroupList, gmX1, layoutX1, gmShareWeight1_, layoutShareWeight1,
         gmWeight1_, layoutWeight1,
+        gmBias1_, gmShareBias1_, // A8w4 adaptation
         gmShareWeight1Scale_, layoutShareW1Scale, gmScale1_, layoutW1Scale,
         gmX1Scale, layoutX1Scale, gmX2, layoutX2, gmX2Scale, layoutX2Scale, gmShareX1, gmShareX1Scale,
         gmShareSwigluOut, gmShareX2, layoutShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmX_, gmSmoothScales_,
-        gmShareSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount, xActiveMask_, gmReserved, gmExpertTokenNums_,
+        gmShareSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount, xActiveMask_, gmResvered, gmExpertTokenNums_,
         tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo);
     AscendC::PipeBarrier<PIPE_ALL>();
     Arch::CrossCoreFlag gmm1AivFinished{0};
@@ -518,6 +561,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     }
     GmmDeq<TemplateMC2TypeFunc, Gmm2L1TileShape, Gmm2L0TileShape, Gmm2EpilogueTileShape, Gmm2BlockScheduler,
         Gmm2DispatchPolicy>(gmm2ProblemShape, groupCount_, gmGroupList, gmX2, layoutX2, gmWeight2_, layoutWeight2,
+        gmBias2_, gmShareBias2_, // w4 compensation matrix
         gmScale2_, layoutW2Scale, gmX2Scale, layoutX2Scale, gmGmm2DepOut, layoutOutput, bs_,
         shareGmm2ProblemShape, gmShareX2, gmShareWeight2_, gmShareOutput_, gmShareWeight2Scale_,
         gmShareX2Scale, layoutShareX2, layoutShareWeight2, layoutShareX2Scale,
