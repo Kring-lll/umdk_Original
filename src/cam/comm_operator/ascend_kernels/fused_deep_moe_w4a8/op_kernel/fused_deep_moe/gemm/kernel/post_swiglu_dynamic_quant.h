@@ -255,9 +255,12 @@ public:
                     AscendC::PipeBarrier<PIPE_V>();
                     AscendC::DataCopy(gmTileOutput[rowIdx * tileColumn],
                                      ubOutput.ReinterpretCast<int8_t>(), tileColumn / 2);
-                    // Low nibble: And(0x0F)→Cast→Adds(-8)→int4b_t
-                    AscendC::And(ubQuantF16, ubOutput.ReinterpretCast<half>(),
-                                 ubQuantS32.ReinterpretCast<half>(), tileCount);
+                    // Low nibble: And(0x0F)→Cast(int8→half)→Adds(-8)→int4b_t
+                    AscendC::And(ubQuantS32, ubOutput.ReinterpretCast<int32_t>(),
+                                 int32_t(0x0F0F0F0F), tileCount);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Cast(ubQuantF16, ubQuantS32.ReinterpretCast<int8_t>(),
+                                  AscendC::RoundMode::CAST_NONE, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
                     AscendC::Adds(ubQuantF16, ubQuantF16, MINUS_EIGHT, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
