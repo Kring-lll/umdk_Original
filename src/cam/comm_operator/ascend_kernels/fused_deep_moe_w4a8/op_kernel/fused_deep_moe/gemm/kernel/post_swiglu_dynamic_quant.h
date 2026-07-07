@@ -241,35 +241,39 @@ public:
                 // W4A8: split int8 into high/low int4 nibbles, write two halves to GM
                 constexpr float ONE_SIXTEENTH = 0.0625f;
                 constexpr float MINUS_EIGHT = -8.0f;
-                AscendC::LocalTensor<float> ubHighF32 = ubAbs;
-                AscendC::LocalTensor<AscendC::int4b_t> ubHighI4 = ubOutput.ReinterpretCast<AscendC::int4b_t>();
-                AscendC::LocalTensor<int16_t> ubLowMask = ubQuantS32.ReinterpretCast<int16_t>();
-                AscendC::LocalTensor<float> ubLowF32 = ubQuantScale;
-                AscendC::LocalTensor<AscendC::int4b_t> ubLowI4 = ubOutput.ReinterpretCast<AscendC::int4b_t>();
 
-                AscendC::Duplicate(ubLowMask, int16_t(0x0F0F), tileCount);
+                AscendC::Duplicate(ubQuantS32, int32_t(0x0F0F0F0F), tileCount);
                 for (uint32_t rowIdx = 0; rowIdx < tileRow; ++rowIdx) {
-                    AscendC::Cast(ubHighF32[rowIdx * tileColumn], ubOutput[rowIdx * tileColumn],
+                    // High nibble: int8 → float → Muls(1/16) → half → int4b_t
+                    AscendC::Cast(ubQuantF32[rowIdx * tileColumn], ubOutput[rowIdx * tileColumn],
                                   AscendC::RoundMode::CAST_NONE, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
-                    AscendC::Muls(ubHighF32[rowIdx * tileColumn], ubHighF32[rowIdx * tileColumn],
+                    AscendC::Muls(ubQuantF32[rowIdx * tileColumn], ubQuantF32[rowIdx * tileColumn],
                                   ONE_SIXTEENTH, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
-                    AscendC::Cast(ubHighI4, ubHighF32, AscendC::RoundMode::CAST_FLOOR, tileColumn);
+                    AscendC::Cast(ubQuantF16, ubQuantF32[rowIdx * tileColumn],
+                                  AscendC::RoundMode::CAST_FLOOR, tileColumn);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Cast(ubOutput.ReinterpretCast<AscendC::int4b_t>(), ubQuantF16,
+                                  AscendC::RoundMode::CAST_FLOOR, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
                     AscendC::DataCopy(gmTileOutput[rowIdx * tileColumn],
-                                     ubHighI4.ReinterpretCast<int8_t>(), tileColumn / 2);
-                    AscendC::And(ubLowF32, ubOutput.ReinterpretCast<float>(),
-                                 ubLowMask.ReinterpretCast<float>(), tileCount);
+                                     ubOutput.ReinterpretCast<int8_t>(), tileColumn / 2);
+                    // Low nibble: And(0x0F) → float → Adds(-8) → half → int4b_t
+                    AscendC::And(ubQuantF32, ubOutput.ReinterpretCast<float>(),
+                                 ubQuantS32.ReinterpretCast<float>(), tileCount);
                     AscendC::PipeBarrier<PIPE_V>();
-                    AscendC::Cast(ubLowF32, ubLowF32, AscendC::RoundMode::CAST_NONE, tileColumn);
+                    AscendC::Cast(ubQuantF32, ubQuantF32, AscendC::RoundMode::CAST_NONE, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
-                    AscendC::Adds(ubLowF32, ubLowF32, MINUS_EIGHT, tileColumn);
+                    AscendC::Adds(ubQuantF32, ubQuantF32, MINUS_EIGHT, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
-                    AscendC::Cast(ubLowI4, ubLowF32, AscendC::RoundMode::CAST_NONE, tileColumn);
+                    AscendC::Cast(ubQuantF16, ubQuantF32, AscendC::RoundMode::CAST_FLOOR, tileColumn);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Cast(ubOutput.ReinterpretCast<AscendC::int4b_t>(), ubQuantF16,
+                                  AscendC::RoundMode::CAST_NONE, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
                     AscendC::DataCopy(gmTileOutput[rowIdx * tileColumn + tileColumn / 2],
-                                     ubLowI4.ReinterpretCast<int8_t>(), tileColumn / 2);
+                                     ubOutput.ReinterpretCast<int8_t>(), tileColumn / 2);
                 }
             } else {
                 // W8A8: directly copy int8 to GM

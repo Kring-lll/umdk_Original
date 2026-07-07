@@ -853,18 +853,24 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventId);
             if constexpr (IS_W4A8) {
                 // W4A8: split int8 into high/low int4 nibbles
+                // float for Muls/Adds, then cast float→half→int4b_t
                 constexpr float ONE_SIXTEENTH = 0.0625f;
                 constexpr float MINUS_EIGHT = -8.0f;
+                AscendC::LocalTensor<half> xTmpHalf = xHighI4Tensor.ReinterpretCast<half>();
+                // High nibble: int8→float→Muls(1/16)→half→int4b_t
                 AscendC::Cast(xHighHalfTensor, yInt8Tensor[index], AscendC::RoundMode::CAST_NONE, tokenLength);
                 AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, tokenLength);
-                AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+                AscendC::Cast(xTmpHalf, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+                AscendC::Cast(xHighI4Tensor, xTmpHalf, AscendC::RoundMode::CAST_FLOOR, tokenLength);
                 AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength],
                                  xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
+                // Low nibble: And(0x0F)→float→Adds(-8)→half→int4b_t
                 AscendC::And(xLowHalfTensor, yInt8Tensor[index].ReinterpretCast<float>(),
                              xLowI16Tensor.ReinterpretCast<float>(), tokenLength);
                 AscendC::Cast(xLowHalfTensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
                 AscendC::Adds(xLowHalfTensor, xLowHalfTensor, MINUS_EIGHT, tokenLength);
-                AscendC::Cast(xLowI4Tensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
+                AscendC::Cast(xTmpHalf, xLowHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+                AscendC::Cast(xLowI4Tensor, xTmpHalf, AscendC::RoundMode::CAST_NONE, tokenLength);
                 AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength + tokenLength / 2],
                                  xLowI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
             } else {
@@ -1079,19 +1085,23 @@ public:
                         xOutFp32Tensor_[tokenLength / sizeof(float)], dataCopyParamsFloat);
                     if constexpr (IS_W4A8) {
                         // W4A8: split int8 into high/low int4 nibbles
+                        // float for Muls/Adds, then cast float→half→int4b_t
                         constexpr float ONE_SIXTEENTH = 0.0625f;
                         constexpr float MINUS_EIGHT = -8.0f;
+                        AscendC::LocalTensor<half> xTmpHalf = xHighI4Tensor.ReinterpretCast<half>();
                         AscendC::Cast(xHighHalfTensor, xTmpTensor_,
                                      AscendC::RoundMode::CAST_NONE, tokenLength);
                         AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, tokenLength);
-                        AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+                        AscendC::Cast(xTmpHalf, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+                        AscendC::Cast(xHighI4Tensor, xTmpHalf, AscendC::RoundMode::CAST_FLOOR, tokenLength);
                         AscendC::DataCopy(expandXOutGlobal,
                                          xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
                         AscendC::And(xLowHalfTensor, xTmpTensor_.ReinterpretCast<float>(),
                                      xLowI16Tensor.ReinterpretCast<float>(), tokenLength);
                         AscendC::Cast(xLowHalfTensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
                         AscendC::Adds(xLowHalfTensor, xLowHalfTensor, MINUS_EIGHT, tokenLength);
-                        AscendC::Cast(xLowI4Tensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
+                        AscendC::Cast(xTmpHalf, xLowHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+                        AscendC::Cast(xLowI4Tensor, xTmpHalf, AscendC::RoundMode::CAST_NONE, tokenLength);
                         AscendC::DataCopy(expandXOutGlobal[tokenLength / 2],
                                          xLowI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
                     } else {
