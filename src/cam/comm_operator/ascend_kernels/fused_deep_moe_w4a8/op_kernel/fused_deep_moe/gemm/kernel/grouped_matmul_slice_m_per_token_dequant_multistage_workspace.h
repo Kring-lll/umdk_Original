@@ -45,6 +45,10 @@ public:
     using LayoutC = typename BlockMmad::LayoutC;
     using ElementAccumulator = typename BlockMmad::ElementAccumulator;
 
+    // Detect W4A8 mode from ElementA type
+    static constexpr bool IS_W4A8 = std::is_same_v<ElementA, AscendC::int4b_t>;
+    static constexpr uint32_t M_FACTOR = IS_W4A8 ? 2 : 1;
+
     using BlockEpilogue = BlockEpilogue_;
     using ElementScale = typename BlockEpilogue::ElementRawScale;
     using LayoutScale = typename BlockEpilogue::LayoutScale;
@@ -179,11 +183,11 @@ public:
             }
             uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
                                                 : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
-            GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
+            GemmCoord inGroupProblemShape{currentM * M_FACTOR, params.problemShape.n(), params.problemShape.k()};
 
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
             LayoutB layoutB = params.layoutB;
-            layout::RowMajor layoutC = layout::RowMajor{currentM, params.problemShape.n()};
+            layout::RowMajor layoutC = layout::RowMajor{currentM * M_FACTOR, params.problemShape.n()};
 
             blockScheduler.Update(inGroupProblemShape, MakeCoord(L1TileShape::M, L1TileShape::N));
             uint32_t coreLoops = blockScheduler.GetCoreLoops();
@@ -324,9 +328,9 @@ public:
             for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
                 uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
                                                     : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
-                GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
+                GemmCoord inGroupProblemShape{currentM * M_FACTOR, params.problemShape.n(), params.problemShape.k()};
 
-                auto layoutC = layout::RowMajor{currentM, params.problemShape.n()};
+                auto layoutC = layout::RowMajor{currentM * M_FACTOR, params.problemShape.n()};
                 LayoutScale layoutScale = params.layoutScale;
                 LayoutPerTokenScale layoutPerTokenScale =
                     params.layoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
@@ -364,11 +368,11 @@ public:
                     blockEpilogue(gmGroupOffsetD, groupIdx, blockShapeMNK, blockCoordMNK, actualBlockShapeMNK);
                 }
 
-                gmGroupOffsetC += currentM * params.problemShape.n();
+                gmGroupOffsetC += currentM * M_FACTOR * params.problemShape.n();
                 if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                     gmGroupOffsetScale += inGroupProblemShape.n();
                 }
-                gmGroupOffsetPerTokenScale += inGroupProblemShape.m();
+                gmGroupOffsetPerTokenScale += currentM;  // per-token scale not doubled for W4A8
                 gmGroupOffsetD += inGroupProblemShape.m() * inGroupProblemShape.n();
 
                 startCoreIdx = (startCoreIdx + coreLoops) % coreNum;

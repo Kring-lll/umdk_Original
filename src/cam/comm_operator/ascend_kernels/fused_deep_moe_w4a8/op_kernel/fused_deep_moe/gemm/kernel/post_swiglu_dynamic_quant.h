@@ -33,7 +33,7 @@ __aicore__ inline void CalQuantRow(const uint32_t column, uint32_t &row)
     row = row < QuantSpaceInfo::MAX_QUANT_ROW_ONCE ? row : QuantSpaceInfo::MAX_QUANT_ROW_ONCE;
 }
 
-template <class ArchTag>
+template <class ArchTag, bool IS_W4A8 = false>
 class BlockQuant {
 public:
     using ElementInput = float;
@@ -237,7 +237,41 @@ public:
             LayoutOutput layoutUbOutput{actualTileShape, ubTileStride};
 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(1);
-            copyUbToGmOutput(gmTileOutput, ubOutput, layoutGmTileOutput, layoutUbOutput);
+            if constexpr (IS_W4A8) {
+                // W4A8: split int8 into high/low int4 nibbles, write two halves to GM
+                constexpr float ONE_SIXTEENTH = 0.0625f;
+                constexpr float MINUS_EIGHT = -8.0f;
+                AscendC::LocalTensor<half> ubHighHalf = ubQuantF16;
+                AscendC::LocalTensor<AscendC::int4b_t> ubHighI4 = ubOutput.ReinterpretCast<AscendC::int4b_t>();
+                AscendC::LocalTensor<int16_t> ubLowMask = ubQuantS32.ReinterpretCast<int16_t>();
+                AscendC::LocalTensor<half> ubLowHalf = ubQuantF16;
+                AscendC::LocalTensor<AscendC::int4b_t> ubLowI4 = ubOutput.ReinterpretCast<AscendC::int4b_t>();
+
+                AscendC::Duplicate(ubLowMask, int16_t(0x0F0F), tileCount);
+                for (uint32_t rowIdx = 0; rowIdx < tileRow; ++rowIdx) {
+                    AscendC::Muls(ubHighHalf[rowIdx * tileColumn], ubQuantF16[rowIdx * tileColumn],
+                                  ONE_SIXTEENTH, tileColumn);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Cast(ubHighI4, ubHighHalf, AscendC::RoundMode::CAST_FLOOR, tileColumn);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::DataCopy(gmTileOutput[rowIdx * tileColumn],
+                                     ubHighI4.ReinterpretCast<int8_t>(), tileColumn / 2);
+                    AscendC::And(ubLowHalf, ubOutput.ReinterpretCast<half>(),
+                                 ubLowMask.ReinterpretCast<half>(), tileColumn);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Cast(ubLowHalf, ubLowHalf, AscendC::RoundMode::CAST_NONE, tileColumn);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Adds(ubLowHalf, ubLowHalf, MINUS_EIGHT, tileColumn);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Cast(ubLowI4, ubLowHalf, AscendC::RoundMode::CAST_NONE, tileColumn);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::DataCopy(gmTileOutput[rowIdx * tileColumn + tileColumn / 2],
+                                     ubLowI4.ReinterpretCast<int8_t>(), tileColumn / 2);
+                }
+            } else {
+                // W8A8: directly copy int8 to GM
+                copyUbToGmOutput(gmTileOutput, ubOutput, layoutGmTileOutput, layoutUbOutput);
+            }
             AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(1);
         }
     }

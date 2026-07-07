@@ -87,10 +87,10 @@ public:
     using LayoutD = typename BlockEpilogue::LayoutD;
     using EpilogueParams = typename BlockEpilogue::Params;
 
-    using ElementDequantScale = typename BlockQuant<ArchTag>::ElementDequantScale;
-    using LayoutDequantScale = typename BlockQuant<ArchTag>::LayoutDequantScale;
-    using ElementOutput = typename BlockQuant<ArchTag>::ElementOutput;
-    using LayoutOutput = typename BlockQuant<ArchTag>::LayoutOutput;
+    using ElementDequantScale = typename BlockQuant<ArchTag, IS_W4A8>::ElementDequantScale;
+    using LayoutDequantScale = typename BlockQuant<ArchTag, IS_W4A8>::LayoutDequantScale;
+    using ElementOutput = typename BlockQuant<ArchTag, IS_W4A8>::ElementOutput;
+    using LayoutOutput = typename BlockQuant<ArchTag, IS_W4A8>::LayoutOutput;
 
     using BlockScheduler = BlockScheduler_;
     using ElementGroupList = ElementGroupList_;
@@ -808,6 +808,25 @@ public:
         yFp32Tensor[1] = yInt8Tensor[1].template ReinterpretCast<float>();
         subUbOffset += CEIL_UP(axisHCommu * sizeof(int8_t));
         AscendC::LocalTensor shareSmoothScaleTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
+        AscendC::LocalTensor<half> xHighHalfTensor;
+        AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor;
+        AscendC::LocalTensor<int16_t> xLowI16Tensor;
+        AscendC::LocalTensor<half> xLowHalfTensor;
+        AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor;
+        if constexpr (IS_W4A8) {
+            subUbOffset += CEIL_UP(tokenLength * sizeof(float));
+            xHighHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
+            subUbOffset += CEIL_UP(tokenLength * sizeof(half));
+            xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
+            subUbOffset += CEIL_UP(tokenLength / 2);
+            xLowI16Tensor = resource.ubBuf.template GetBufferByByte<int16_t>(subUbOffset);
+            subUbOffset += CEIL_UP(tokenLength * sizeof(int16_t));
+            xLowHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
+            subUbOffset += CEIL_UP(tokenLength * sizeof(half));
+            xLowI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
+            subUbOffset += CEIL_UP(tokenLength / 2);
+            AscendC::Duplicate(xLowI16Tensor, int16_t(0x0F0F), tokenLength);
+        }
         if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
             subUbOffset += CEIL_UP(tokenLength * sizeof(float));
             AscendC::DataCopy(shareSmoothScaleTensor, shareSmoothScaleGMTensor, tokenLength);
@@ -832,7 +851,25 @@ public:
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventId);
             AscendC::WaitFlag<AscendC::HardEvent::S_MTE3>(0);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventId);
-            AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength], yInt8Tensor[index], tokenLength);
+            if constexpr (IS_W4A8) {
+                // W4A8: split int8 into high/low int4 nibbles
+                constexpr float ONE_SIXTEENTH = 0.0625f;
+                constexpr float MINUS_EIGHT = -8.0f;
+                AscendC::Cast(xHighHalfTensor, yInt8Tensor[index], AscendC::RoundMode::CAST_NONE, tokenLength);
+                AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, tokenLength);
+                AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+                AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength],
+                                 xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
+                AscendC::And(xLowHalfTensor, yInt8Tensor[index].ReinterpretCast<half>(),
+                             xLowI16Tensor.ReinterpretCast<half>(), tokenLength);
+                AscendC::Cast(xLowHalfTensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
+                AscendC::Adds(xLowHalfTensor, xLowHalfTensor, MINUS_EIGHT, tokenLength);
+                AscendC::Cast(xLowI4Tensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
+                AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength + tokenLength / 2],
+                                 xLowI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
+            } else {
+                AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength], yInt8Tensor[index], tokenLength);
+            }
             AscendC::DataCopyPad(
                 dstXScaleGMTensor[tokenIndex], yFp32Tensor[index][tokenLength / sizeof(float)], dataCopyParamsFloat);
             AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(eventId);
@@ -966,6 +1003,24 @@ public:
         subUbOffset += CEIL_UP(UB_BLOCK_SIZE);
         AscendC::LocalTensor<int32_t> gatherMaskOutCountTensor =
                                     (gatherMaskOutTensor.template ReinterpretCast<int32_t>());
+        AscendC::LocalTensor<half> xHighHalfTensor;
+        AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor;
+        AscendC::LocalTensor<int16_t> xLowI16Tensor;
+        AscendC::LocalTensor<half> xLowHalfTensor;
+        AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor;
+        if constexpr (IS_W4A8) {
+            xHighHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
+            subUbOffset += CEIL_UP(axisHCommu * sizeof(half));
+            xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
+            subUbOffset += CEIL_UP(axisHCommu / 2);
+            xLowI16Tensor = resource.ubBuf.template GetBufferByByte<int16_t>(subUbOffset);
+            subUbOffset += CEIL_UP(axisHCommu * sizeof(int16_t));
+            xLowHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
+            subUbOffset += CEIL_UP(axisHCommu * sizeof(half));
+            xLowI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
+            subUbOffset += CEIL_UP(axisHCommu / 2);
+            AscendC::Duplicate(xLowI16Tensor, int16_t(0x0F0F), axisHCommu);
+        }
         AscendC::GlobalTensor<int8_t> tokGlobal;
         AscendC::GlobalTensor<int32_t> tokGlobalInt32;
         AscendC::GlobalTensor<int8_t> expandXOutGlobal;
@@ -1022,7 +1077,26 @@ public:
                     AscendC::WaitFlag<AscendC::HardEvent::MTE2_MTE3>(0);
                     AscendC::DataCopyPad(dynamicScalesOutGMTensor_[beginIdx + j],
                         xOutFp32Tensor_[tokenLength / sizeof(float)], dataCopyParamsFloat);
-                    AscendC::DataCopy(expandXOutGlobal, xTmpTensor_, tokenLength);
+                    if constexpr (IS_W4A8) {
+                        // W4A8: split int8 into high/low int4 nibbles
+                        constexpr float ONE_SIXTEENTH = 0.0625f;
+                        constexpr float MINUS_EIGHT = -8.0f;
+                        AscendC::Cast(xHighHalfTensor, xTmpTensor_.ReinterpretCast<half>(),
+                                     AscendC::RoundMode::CAST_NONE, tokenLength);
+                        AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, tokenLength);
+                        AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+                        AscendC::DataCopy(expandXOutGlobal,
+                                         xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
+                        AscendC::And(xLowHalfTensor, xTmpTensor_.ReinterpretCast<half>(),
+                                     xLowI16Tensor.ReinterpretCast<half>(), tokenLength);
+                        AscendC::Cast(xLowHalfTensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
+                        AscendC::Adds(xLowHalfTensor, xLowHalfTensor, MINUS_EIGHT, tokenLength);
+                        AscendC::Cast(xLowI4Tensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
+                        AscendC::DataCopy(expandXOutGlobal[tokenLength / 2],
+                                         xLowI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
+                    } else {
+                        AscendC::DataCopy(expandXOutGlobal, xTmpTensor_, tokenLength);
+                    }
                     AscendC::SetFlag<AscendC::HardEvent::MTE3_MTE2>(0);
                 }
             }
@@ -1362,14 +1436,14 @@ public:
             uint32_t nOut = params.shareN / 2;
             uint32_t quantRowOnce = 0;
             CalQuantRow(nOut, quantRowOnce);
-            typename BlockQuant<ArchTag>::Params quantParams;
+            typename BlockQuant<ArchTag, IS_W4A8>::Params quantParams;
             auto swigluLayout = layout::RowMajor{totalTokenCount, n};
-            quantParams = typename BlockQuant<ArchTag>::Params {
+            quantParams = typename BlockQuant<ArchTag, IS_W4A8>::Params {
                 (__gm__ float*)params.gmShareSwigluOut, swigluLayout,  // input: swiglu output
                 (__gm__ float*)params.gmShareX2Scale, params.layoutDequantScale,  // output: quant token scale
                 (__gm__ int8_t*)params.gmShareX2, params.layoutShareOutput, // output: x2
                 quantRowOnce,           nOut};
-            BlockQuant<ArchTag> blockQuant(resource, quantParams);
+            BlockQuant<ArchTag, IS_W4A8> blockQuant(resource, quantParams);
             MatrixCoord quantShape(totalTokenCount, nOut);
             MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
             Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
@@ -1394,12 +1468,12 @@ public:
             uint32_t nOut = params.problemShape.n() / 2;
             uint32_t quantRowOnce = 0;
             CalQuantRow(nOut, quantRowOnce);
-            typename BlockQuant<ArchTag>::Params quantParams;
+            typename BlockQuant<ArchTag, IS_W4A8>::Params quantParams;
             auto swigluLayout = layout::RowMajor{totalTokenCount, n};
-            quantParams = typename BlockQuant<ArchTag>::Params {
+            quantParams = typename BlockQuant<ArchTag, IS_W4A8>::Params {
                 gmSwigluOutput,   swigluLayout,        params.ptrDequantScale, params.layoutDequantScale,
                 params.ptrOutput, params.layoutOutput, quantRowOnce,           nOut};
-            BlockQuant<ArchTag> blockQuant(resource, quantParams);
+            BlockQuant<ArchTag, IS_W4A8> blockQuant(resource, quantParams);
             MatrixCoord quantShape(totalTokenCount, nOut);
             MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
             Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
