@@ -35,16 +35,28 @@
 using namespace Catlass;
 using namespace Cam;
 
-using MmadAtlasA2Custom =
+// W4A8 dispatch policy (INT4 weights, divides L1 by CONSTANT_INT4_PACKING_RATIO=2)
+using MmadAtlasA2CustomW4a8 =
     Gemm::MmadAtlasA2PreloadAsyncWithCallbackW4a8<CUSTOM_PRELOAD_STAGES, CUSTOM_L1_STAGES, CUSTOM_L0A_STAGES,
         CUSTOM_L0B_STAGES, CUSTOM_L0C_STAGES, CUSTOM_ENABLE_UNIT_FLAG,
         CUSTOM_ENABLE_SHUFFLE_K>;
 
-using Gmm1L1TileShape = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L1K>;
-using Gmm1L0TileShape = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L0K>;
-using Gmm1EpilogueTileShape = MatrixShape<GMM1_EPIM, Gmm1L1TileShape::N>;
+// W8A8 dispatch policy (INT8 weights, standard L1 calculation)
+using MmadAtlasA2CustomW8a8 =
+    Gemm::MmadAtlasA2PreloadAsyncWithCallback<CUSTOM_PRELOAD_STAGES, CUSTOM_L1_STAGES, CUSTOM_L0A_STAGES,
+        CUSTOM_L0B_STAGES, CUSTOM_L0C_STAGES, CUSTOM_ENABLE_UNIT_FLAG,
+        CUSTOM_ENABLE_SHUFFLE_K>;
+
+// W4A8 tile shapes (K=1024/256, INT4 2 elements/byte → L1/2 fits)
+using Gmm1L1TileShapeW4a8 = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L1K>;
+using Gmm1L0TileShapeW4a8 = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L0K>;
+// W8A8 tile shapes (K=512/128, INT8 1 element/byte → standard L1)
+using Gmm1L1TileShapeW8a8 = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L1K_W8A8>;
+using Gmm1L0TileShapeW8a8 = GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L0K_W8A8>;
+using Gmm1EpilogueTileShape = MatrixShape<GMM1_EPIM, Gmm1L1TileShapeW4a8::N>;
 using Gmm1BlockScheduler = typename Gemm::Block::GemmIdentityBlockSwizzle<GMM1_SWIZZLE_OFFSET, GMM1_SWIZZLE_DIRECTION>;
 
+// GMM2 uses ResidentA for both modes (same K for both)
 using Gmm2L1TileShape = GemmShape<GMM2_L1M, GMM2_L1N, GMM2_L1K>;
 using Gmm2L0TileShape = GemmShape<Gmm2L1TileShape::M, Gmm2L1TileShape::N, GMM2_L0K>;
 using Gmm2EpilogueTileShape = MatrixShape<GMM2_EPIM, Gmm2L1TileShape::N>;
@@ -82,7 +94,13 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     using BType = Gemm::GemmType<ActualWeightType, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
-    using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
+    // Select dispatch policy and tile shape based on weight type
+    constexpr bool isW4A8 = std::is_same_v<ActualWeightType, AscendC::int4b_t>;
+    using Gmm1DispatchPolicy = std::conditional_t<isW4A8, MmadAtlasA2CustomW4a8, MmadAtlasA2CustomW8a8>;
+    using Gmm1L1TileShapeActual = std::conditional_t<isW4A8, Gmm1L1TileShapeW4a8, Gmm1L1TileShapeW8a8>;
+    using Gmm1L0TileShapeActual = std::conditional_t<isW4A8, Gmm1L0TileShapeW4a8, Gmm1L0TileShapeW8a8>;
+
+    using BlockMmad = Gemm::Block::BlockMmad<Gmm1DispatchPolicy, Gmm1L1TileShapeActual, Gmm1L0TileShapeActual, AType, BType, CType>;
 
     constexpr uint32_t ubStages = 1;
     using EpilogueDispatchPolicy = Epilogue::EpilogueAtlasA2PerTokenDequantSwiglu<ubStages, 0>;
@@ -221,6 +239,7 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using BType = Gemm::GemmType<ActualWeightType, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
+    // GMM2 uses ResidentA BlockMmad for both modes (same tile shape)
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
 
     constexpr uint32_t ubStages = 1;
@@ -518,8 +537,8 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
             Arch::CrossCoreWaitFlag(gmm1AivFinished);
         }
     }
-    GmmDeqSwigluQuant<TemplateMC2TypeFunc, Gmm1L1TileShape, Gmm1L0TileShape, Gmm1EpilogueTileShape,
-        Gmm1BlockScheduler, MmadAtlasA2Custom>(
+    GmmDeqSwigluQuant<TemplateMC2TypeFunc, Gmm1L1TileShapeW4a8, Gmm1L0TileShapeW4a8, Gmm1EpilogueTileShape,
+        Gmm1BlockScheduler, MmadAtlasA2CustomW4a8>(
         gmm1ProblemShape, groupCount_, gmGroupList, gmX1, layoutX1, gmShareWeight1_, layoutShareWeight1,
         gmWeight1_, layoutWeight1,
         gmBias1_, gmShareBias1_, // A8w4 adaptation
