@@ -853,23 +853,32 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventId);
             if constexpr (IS_W4A8) {
                 // W4A8: split int8 into high/low int4 nibbles
-                // float for Muls/Adds, then cast float→half→int4b_t
+                // int8→half→float→Muls→half→int4b_t (Cast(int8→float) not supported)
                 constexpr float ONE_SIXTEENTH = 0.0625f;
                 constexpr float MINUS_EIGHT = -8.0f;
                 AscendC::LocalTensor<half> xTmpHalf = xHighI4Tensor.ReinterpretCast<half>();
-                // High nibble: int8→float→Muls(1/16)→half→int4b_t
-                AscendC::Cast(xHighHalfTensor, yInt8Tensor[index], AscendC::RoundMode::CAST_NONE, tokenLength);
+                // High nibble: int8→half→float→Muls(1/16)→half→int4b_t
+                AscendC::Cast(xTmpHalf, yInt8Tensor[index], AscendC::RoundMode::CAST_NONE, tokenLength);
+                AscendC::PipeBarrier<PIPE_V>();
+                AscendC::Cast(xHighHalfTensor, xTmpHalf, AscendC::RoundMode::CAST_NONE, tokenLength);
+                AscendC::PipeBarrier<PIPE_V>();
                 AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, tokenLength);
+                AscendC::PipeBarrier<PIPE_V>();
                 AscendC::Cast(xTmpHalf, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+                AscendC::PipeBarrier<PIPE_V>();
                 AscendC::Cast(xHighI4Tensor, xTmpHalf, AscendC::RoundMode::CAST_FLOOR, tokenLength);
                 AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength],
                                  xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
-                // Low nibble: And(0x0F)→float→Adds(-8)→half→int4b_t
-                AscendC::And(xLowHalfTensor, yInt8Tensor[index].ReinterpretCast<float>(),
-                             xLowI16Tensor.ReinterpretCast<float>(), tokenLength);
-                AscendC::Cast(xLowHalfTensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
+                // Low nibble: And(0x0F)→half→float→Adds(-8)→half→int4b_t
+                AscendC::And(xTmpHalf, yInt8Tensor[index].ReinterpretCast<half>(),
+                             xLowI16Tensor.ReinterpretCast<half>(), tokenLength);
+                AscendC::PipeBarrier<PIPE_V>();
+                AscendC::Cast(xLowHalfTensor, xTmpHalf, AscendC::RoundMode::CAST_NONE, tokenLength);
+                AscendC::PipeBarrier<PIPE_V>();
                 AscendC::Adds(xLowHalfTensor, xLowHalfTensor, MINUS_EIGHT, tokenLength);
+                AscendC::PipeBarrier<PIPE_V>();
                 AscendC::Cast(xTmpHalf, xLowHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+                AscendC::PipeBarrier<PIPE_V>();
                 AscendC::Cast(xLowI4Tensor, xTmpHalf, AscendC::RoundMode::CAST_NONE, tokenLength);
                 AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength + tokenLength / 2],
                                  xLowI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
@@ -1085,22 +1094,32 @@ public:
                         xOutFp32Tensor_[tokenLength / sizeof(float)], dataCopyParamsFloat);
                     if constexpr (IS_W4A8) {
                         // W4A8: split int8 into high/low int4 nibbles
-                        // float for Muls/Adds, then cast float→half→int4b_t
+                        // int8→half→float→Muls→half→int4b_t (Cast(int8→float) not supported)
                         constexpr float ONE_SIXTEENTH = 0.0625f;
                         constexpr float MINUS_EIGHT = -8.0f;
                         AscendC::LocalTensor<half> xTmpHalf = xHighI4Tensor.ReinterpretCast<half>();
-                        AscendC::Cast(xHighHalfTensor, xTmpTensor_,
-                                     AscendC::RoundMode::CAST_NONE, tokenLength);
+                        // High nibble
+                        AscendC::Cast(xTmpHalf, xTmpTensor_, AscendC::RoundMode::CAST_NONE, tokenLength);
+                        AscendC::PipeBarrier<PIPE_V>();
+                        AscendC::Cast(xHighHalfTensor, xTmpHalf, AscendC::RoundMode::CAST_NONE, tokenLength);
+                        AscendC::PipeBarrier<PIPE_V>();
                         AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, tokenLength);
+                        AscendC::PipeBarrier<PIPE_V>();
                         AscendC::Cast(xTmpHalf, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+                        AscendC::PipeBarrier<PIPE_V>();
                         AscendC::Cast(xHighI4Tensor, xTmpHalf, AscendC::RoundMode::CAST_FLOOR, tokenLength);
                         AscendC::DataCopy(expandXOutGlobal,
                                          xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
-                        AscendC::And(xLowHalfTensor, xTmpTensor_.ReinterpretCast<float>(),
-                                     xLowI16Tensor.ReinterpretCast<float>(), tokenLength);
-                        AscendC::Cast(xLowHalfTensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
+                        // Low nibble
+                        AscendC::And(xTmpHalf, xTmpTensor_.ReinterpretCast<half>(),
+                                     xLowI16Tensor.ReinterpretCast<half>(), tokenLength);
+                        AscendC::PipeBarrier<PIPE_V>();
+                        AscendC::Cast(xLowHalfTensor, xTmpHalf, AscendC::RoundMode::CAST_NONE, tokenLength);
+                        AscendC::PipeBarrier<PIPE_V>();
                         AscendC::Adds(xLowHalfTensor, xLowHalfTensor, MINUS_EIGHT, tokenLength);
+                        AscendC::PipeBarrier<PIPE_V>();
                         AscendC::Cast(xTmpHalf, xLowHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
+                        AscendC::PipeBarrier<PIPE_V>();
                         AscendC::Cast(xLowI4Tensor, xTmpHalf, AscendC::RoundMode::CAST_NONE, tokenLength);
                         AscendC::DataCopy(expandXOutGlobal[tokenLength / 2],
                                          xLowI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);

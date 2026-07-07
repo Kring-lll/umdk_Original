@@ -238,32 +238,33 @@ public:
 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(1);
             if constexpr (IS_W4A8) {
-                // W4A8: split int8 into high/low int4 nibbles, write two halves to GM
+                // W4A8: split int8 into high/low int4 nibbles
+                // int8→half→float→Muls→half→int4b_t (Cast(int8→float) not supported)
                 constexpr float ONE_SIXTEENTH = 0.0625f;
                 constexpr float MINUS_EIGHT = -8.0f;
 
                 AscendC::Duplicate(ubQuantS32, int32_t(0x0F0F0F0F), tileCount);
                 for (uint32_t rowIdx = 0; rowIdx < tileRow; ++rowIdx) {
-                    // High nibble: int8 → float → Muls(1/16) → half → int4b_t
-                    AscendC::Cast(ubQuantF32[rowIdx * tileColumn], ubOutput[rowIdx * tileColumn],
+                    // High nibble: int8→half→float→Muls(1/16)→half→int4b_t
+                    AscendC::Cast(ubQuantF16, ubOutput[rowIdx * tileColumn],
                                   AscendC::RoundMode::CAST_NONE, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
-                    AscendC::Muls(ubQuantF32[rowIdx * tileColumn], ubQuantF32[rowIdx * tileColumn],
-                                  ONE_SIXTEENTH, tileColumn);
+                    AscendC::Cast(ubQuantF32, ubQuantF16, AscendC::RoundMode::CAST_NONE, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
-                    AscendC::Cast(ubQuantF16, ubQuantF32[rowIdx * tileColumn],
-                                  AscendC::RoundMode::CAST_FLOOR, tileColumn);
+                    AscendC::Muls(ubQuantF32, ubQuantF32, ONE_SIXTEENTH, tileColumn);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Cast(ubQuantF16, ubQuantF32, AscendC::RoundMode::CAST_FLOOR, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
                     AscendC::Cast(ubOutput.ReinterpretCast<AscendC::int4b_t>(), ubQuantF16,
                                   AscendC::RoundMode::CAST_FLOOR, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
                     AscendC::DataCopy(gmTileOutput[rowIdx * tileColumn],
                                      ubOutput.ReinterpretCast<int8_t>(), tileColumn / 2);
-                    // Low nibble: And(0x0F) → float → Adds(-8) → half → int4b_t
-                    AscendC::And(ubQuantF32, ubOutput.ReinterpretCast<float>(),
-                                 ubQuantS32.ReinterpretCast<float>(), tileCount);
+                    // Low nibble: And(0x0F)→half→float→Adds(-8)→half→int4b_t
+                    AscendC::And(ubQuantF16, ubOutput.ReinterpretCast<half>(),
+                                 ubQuantS32.ReinterpretCast<half>(), tileCount);
                     AscendC::PipeBarrier<PIPE_V>();
-                    AscendC::Cast(ubQuantF32, ubQuantF32, AscendC::RoundMode::CAST_NONE, tileColumn);
+                    AscendC::Cast(ubQuantF32, ubQuantF16, AscendC::RoundMode::CAST_NONE, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
                     AscendC::Adds(ubQuantF32, ubQuantF32, MINUS_EIGHT, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
