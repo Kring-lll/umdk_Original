@@ -114,9 +114,7 @@ static ge::graphStatus CheckGmm1Shape(gert::TilingContext &context, FusedDeepMoe
     OPS_ERR_IF(gmm1FirstTensorElement == nullptr,
         OPS_LOG_E(nodeName, "gmm1Weight is null."), return ge::GRAPH_FAILED);
     auto w1DataType = gmm1FirstTensorElement->GetDataType();
-    tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.isW4A8 =
-        (w1DataType == ge::DT_INT4 || w1DataType == ge::DT_INT32) ? 1U : 0U;
-    uint64_t weightScale = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.isW4A8 ? INT4_WEIGHT_HIDDEN_SCALE : 1ULL;
+    constexpr uint64_t weightScale = INT4_WEIGHT_HIDDEN_SCALE;
     auto gmm1FirstTensorElementShape = gmm1FirstTensorElement->GetOriginShape();
     uint32_t elementDims = gmm1FirstTensorElementShape.GetDimNum();
     uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
@@ -160,7 +158,7 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
 {
     const char *nodeName = context.GetNodeName();
     uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
-    uint64_t weightScale = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.isW4A8 ? INT4_WEIGHT_HIDDEN_SCALE : 1ULL;
+    constexpr uint64_t weightScale = INT4_WEIGHT_HIDDEN_SCALE;
 
     // Check share_gmm1_weight: [h, shareGmm1HLen] (2D) or [1, h, shareGmm1HLen] (3D)
     const gert::StorageShape* shareGmm1WeightStorageShape =
@@ -370,7 +368,7 @@ static ge::graphStatus CheckGmm2Shape(const gert::TilingContext &context, const 
     uint32_t n = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
     uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
     uint32_t localExpertNum = moeExpertNumPerRank;
-    uint64_t weightScale = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.isW4A8 ? INT4_WEIGHT_HIDDEN_SCALE : 1ULL;
+    constexpr uint64_t weightScale = INT4_WEIGHT_HIDDEN_SCALE;
     bool listFlag = false;
 
     uint32_t gmm2ListLen = CountTensorListLen(context, INPUT_GMM2_WEIGHT_INDEX);
