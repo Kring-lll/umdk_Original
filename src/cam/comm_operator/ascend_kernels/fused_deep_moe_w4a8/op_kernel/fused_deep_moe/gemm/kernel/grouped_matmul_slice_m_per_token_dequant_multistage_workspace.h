@@ -71,6 +71,10 @@ public:
     using LayoutC = typename BlockMmad::LayoutC;
     using ElementAccumulator = typename BlockMmad::ElementAccumulator;
 
+    // Detect W4A8 mode from ElementB type
+    static constexpr bool IS_W4A8 = std::is_same_v<ElementB, AscendC::int4b_t>;
+    static constexpr uint32_t M_FACTOR = IS_W4A8 ? 2 : 1;
+
     using BlockEpilogue = BlockEpilogue_;
     using ElementScale = typename BlockEpilogue::ElementRawScale;
     using LayoutScale = typename BlockEpilogue::LayoutScale;
@@ -221,8 +225,8 @@ public:
                     gmBlistTensorDesc.GetDataPtr<int32_t>(groupIdx)));
             }
             
-            uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx) * CONSTANT_TWO
-                : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1)) * CONSTANT_TWO;
+            uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx) * M_FACTOR
+                : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1)) * M_FACTOR;
             GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
             LayoutB layoutB = params.layoutB;
@@ -281,7 +285,7 @@ public:
             gmA.SetGlobalBuffer(params.ptrSharedA);
             gmB.SetGlobalBuffer(params.ptrSharedB);
             uint32_t softStageUsed = 0;
-            GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m() * CONSTANT_TWO,
+            GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m() * M_FACTOR,
                 params.sharedGmm2ProblemShape.n(),
                 params.problemShape.k()};
             LayoutA layoutA = params.sharedLayoutA;
@@ -409,7 +413,7 @@ public:
                     groupList.GetValue(groupIdx) :
                     (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
                 GemmCoord inGroupProblemShape{
-                    currentM * CONSTANT_TWO, params.problemShape.n(), params.problemShape.k()};
+                    currentM * M_FACTOR, params.problemShape.n(), params.problemShape.k()};
                 GemmCoord pertokenGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
                 LayoutScale layoutScale = params.layoutScale;
                 LayoutPerTokenScale layoutPerTokenScale =
@@ -475,7 +479,7 @@ public:
                     if constexpr ((EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) == 0) {
                         AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
                     }
-                    GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m() * CONSTANT_TWO,
+                    GemmCoord inGroupProblemShape{params.sharedGmm2ProblemShape.m() * M_FACTOR,
                         params.sharedGmm2ProblemShape.n(),
                         params.problemShape.k()};
                     LayoutScale layoutScale = params.layoutScale;
