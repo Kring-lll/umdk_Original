@@ -808,21 +808,21 @@ public:
         yFp32Tensor[1] = yInt8Tensor[1].template ReinterpretCast<float>();
         subUbOffset += CEIL_UP(axisHCommu * sizeof(int8_t));
         AscendC::LocalTensor shareSmoothScaleTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
-        AscendC::LocalTensor<half> xHighHalfTensor;
+        AscendC::LocalTensor<float> xHighHalfTensor;
         AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor;
         AscendC::LocalTensor<int16_t> xLowI16Tensor;
-        AscendC::LocalTensor<half> xLowHalfTensor;
+        AscendC::LocalTensor<float> xLowHalfTensor;
         AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor;
         if constexpr (IS_W4A8) {
             subUbOffset += CEIL_UP(tokenLength * sizeof(float));
-            xHighHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
-            subUbOffset += CEIL_UP(tokenLength * sizeof(half));
+            xHighHalfTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
+            subUbOffset += CEIL_UP(tokenLength * sizeof(float));
             xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
             subUbOffset += CEIL_UP(tokenLength / 2);
             xLowI16Tensor = resource.ubBuf.template GetBufferByByte<int16_t>(subUbOffset);
             subUbOffset += CEIL_UP(tokenLength * sizeof(int16_t));
-            xLowHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
-            subUbOffset += CEIL_UP(tokenLength * sizeof(half));
+            xLowHalfTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
+            subUbOffset += CEIL_UP(tokenLength * sizeof(float));
             xLowI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
             subUbOffset += CEIL_UP(tokenLength / 2);
             AscendC::Duplicate(xLowI16Tensor, int16_t(0x0F0F), tokenLength);
@@ -853,15 +853,15 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventId);
             if constexpr (IS_W4A8) {
                 // W4A8: split int8 into high/low int4 nibbles
-                constexpr half ONE_SIXTEENTH = half(0.0625);
-                constexpr half MINUS_EIGHT = half(-8.0);
+                constexpr float ONE_SIXTEENTH = 0.0625f;
+                constexpr float MINUS_EIGHT = -8.0f;
                 AscendC::Cast(xHighHalfTensor, yInt8Tensor[index], AscendC::RoundMode::CAST_NONE, tokenLength);
                 AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, tokenLength);
                 AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
                 AscendC::DataCopy(dstXInt8GMTensor[tokenIndex * tokenLength],
                                  xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
-                AscendC::And(xLowHalfTensor, yInt8Tensor[index].ReinterpretCast<half>(),
-                             xLowI16Tensor.ReinterpretCast<half>(), tokenLength);
+                AscendC::And(xLowHalfTensor, yInt8Tensor[index].ReinterpretCast<float>(),
+                             xLowI16Tensor.ReinterpretCast<float>(), tokenLength);
                 AscendC::Cast(xLowHalfTensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
                 AscendC::Adds(xLowHalfTensor, xLowHalfTensor, MINUS_EIGHT, tokenLength);
                 AscendC::Cast(xLowI4Tensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
@@ -1003,20 +1003,20 @@ public:
         subUbOffset += CEIL_UP(UB_BLOCK_SIZE);
         AscendC::LocalTensor<int32_t> gatherMaskOutCountTensor =
                                     (gatherMaskOutTensor.template ReinterpretCast<int32_t>());
-        AscendC::LocalTensor<half> xHighHalfTensor;
+        AscendC::LocalTensor<float> xHighHalfTensor;
         AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor;
         AscendC::LocalTensor<int16_t> xLowI16Tensor;
-        AscendC::LocalTensor<half> xLowHalfTensor;
+        AscendC::LocalTensor<float> xLowHalfTensor;
         AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor;
         if constexpr (IS_W4A8) {
-            xHighHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
-            subUbOffset += CEIL_UP(axisHCommu * sizeof(half));
+            xHighHalfTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
+            subUbOffset += CEIL_UP(axisHCommu * sizeof(float));
             xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
             subUbOffset += CEIL_UP(axisHCommu / 2);
             xLowI16Tensor = resource.ubBuf.template GetBufferByByte<int16_t>(subUbOffset);
             subUbOffset += CEIL_UP(axisHCommu * sizeof(int16_t));
-            xLowHalfTensor = resource.ubBuf.template GetBufferByByte<half>(subUbOffset);
-            subUbOffset += CEIL_UP(axisHCommu * sizeof(half));
+            xLowHalfTensor = resource.ubBuf.template GetBufferByByte<float>(subUbOffset);
+            subUbOffset += CEIL_UP(axisHCommu * sizeof(float));
             xLowI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(subUbOffset);
             subUbOffset += CEIL_UP(axisHCommu / 2);
             AscendC::Duplicate(xLowI16Tensor, int16_t(0x0F0F), axisHCommu);
@@ -1081,14 +1081,14 @@ public:
                         // W4A8: split int8 into high/low int4 nibbles
                         constexpr float ONE_SIXTEENTH = 0.0625f;
                         constexpr float MINUS_EIGHT = -8.0f;
-                        AscendC::Cast(xHighHalfTensor, xTmpTensor_.ReinterpretCast<half>(),
+                        AscendC::Cast(xHighHalfTensor, xTmpTensor_,
                                      AscendC::RoundMode::CAST_NONE, tokenLength);
                         AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, tokenLength);
                         AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);
                         AscendC::DataCopy(expandXOutGlobal,
                                          xHighI4Tensor.ReinterpretCast<int8_t>(), tokenLength / 2);
-                        AscendC::And(xLowHalfTensor, xTmpTensor_.ReinterpretCast<half>(),
-                                     xLowI16Tensor.ReinterpretCast<half>(), tokenLength);
+                        AscendC::And(xLowHalfTensor, xTmpTensor_.ReinterpretCast<float>(),
+                                     xLowI16Tensor.ReinterpretCast<float>(), tokenLength);
                         AscendC::Cast(xLowHalfTensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
                         AscendC::Adds(xLowHalfTensor, xLowHalfTensor, MINUS_EIGHT, tokenLength);
                         AscendC::Cast(xLowI4Tensor, xLowHalfTensor, AscendC::RoundMode::CAST_NONE, tokenLength);

@@ -239,31 +239,34 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(1);
             if constexpr (IS_W4A8) {
                 // W4A8: split int8 into high/low int4 nibbles, write two halves to GM
-                constexpr half ONE_SIXTEENTH = half(0.0625);
-                constexpr half MINUS_EIGHT = half(-8.0);
-                AscendC::LocalTensor<half> ubHighHalf = ubQuantF16;
+                constexpr float ONE_SIXTEENTH = 0.0625f;
+                constexpr float MINUS_EIGHT = -8.0f;
+                AscendC::LocalTensor<float> ubHighF32 = ubAbs;
                 AscendC::LocalTensor<AscendC::int4b_t> ubHighI4 = ubOutput.ReinterpretCast<AscendC::int4b_t>();
                 AscendC::LocalTensor<int16_t> ubLowMask = ubQuantS32.ReinterpretCast<int16_t>();
-                AscendC::LocalTensor<half> ubLowHalf = ubQuantF16;
+                AscendC::LocalTensor<float> ubLowF32 = ubQuantScale;
                 AscendC::LocalTensor<AscendC::int4b_t> ubLowI4 = ubOutput.ReinterpretCast<AscendC::int4b_t>();
 
                 AscendC::Duplicate(ubLowMask, int16_t(0x0F0F), tileCount);
                 for (uint32_t rowIdx = 0; rowIdx < tileRow; ++rowIdx) {
-                    AscendC::Muls(ubHighHalf[rowIdx * tileColumn], ubQuantF16[rowIdx * tileColumn],
+                    AscendC::Cast(ubHighF32[rowIdx * tileColumn], ubOutput[rowIdx * tileColumn],
+                                  AscendC::RoundMode::CAST_NONE, tileColumn);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Muls(ubHighF32[rowIdx * tileColumn], ubHighF32[rowIdx * tileColumn],
                                   ONE_SIXTEENTH, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
-                    AscendC::Cast(ubHighI4, ubHighHalf, AscendC::RoundMode::CAST_FLOOR, tileColumn);
+                    AscendC::Cast(ubHighI4, ubHighF32, AscendC::RoundMode::CAST_FLOOR, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
                     AscendC::DataCopy(gmTileOutput[rowIdx * tileColumn],
                                      ubHighI4.ReinterpretCast<int8_t>(), tileColumn / 2);
-                    AscendC::And(ubLowHalf, ubOutput.ReinterpretCast<half>(),
-                                 ubLowMask.ReinterpretCast<half>(), tileColumn);
+                    AscendC::And(ubLowF32, ubOutput.ReinterpretCast<float>(),
+                                 ubLowMask.ReinterpretCast<float>(), tileCount);
                     AscendC::PipeBarrier<PIPE_V>();
-                    AscendC::Cast(ubLowHalf, ubLowHalf, AscendC::RoundMode::CAST_NONE, tileColumn);
+                    AscendC::Cast(ubLowF32, ubLowF32, AscendC::RoundMode::CAST_NONE, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
-                    AscendC::Adds(ubLowHalf, ubLowHalf, MINUS_EIGHT, tileColumn);
+                    AscendC::Adds(ubLowF32, ubLowF32, MINUS_EIGHT, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
-                    AscendC::Cast(ubLowI4, ubLowHalf, AscendC::RoundMode::CAST_NONE, tileColumn);
+                    AscendC::Cast(ubLowI4, ubLowF32, AscendC::RoundMode::CAST_NONE, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
                     AscendC::DataCopy(gmTileOutput[rowIdx * tileColumn + tileColumn / 2],
                                      ubLowI4.ReinterpretCast<int8_t>(), tileColumn / 2);
