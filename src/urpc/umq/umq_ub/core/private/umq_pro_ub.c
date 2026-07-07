@@ -551,10 +551,11 @@ static void umq_ub_rqe_posted_cnt_inc(ub_queue_t *queue, uint16_t count)
     }
 }
 
-int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
+int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, uint64_t timestamp)
 {
     uint64_t post_start = umq_trace_start_timestamp_get();
-    umq_trace_start_record(UMQ_TRACE_TYPE_POST, post_start, 0);
+    umq_trace_start_record(UMQ_TRACE_TYPE_POST, post_start, timestamp);
+    umq_trace_item_record(0, 0, queue->umq_id);
     uint32_t max_sge_num = queue->max_rx_sge;
     urma_jfr_wr_t recv_wr[UMQ_BATCH_SIZE] = {0};
     urma_jfr_wr_t *recv_wr_ptr = recv_wr;
@@ -703,10 +704,10 @@ PUT_ALL_RX_CTX:
     return ret;
 }
 
-int umq_ub_post_rx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
+int umq_ub_post_rx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, uint64_t timestamp)
 {
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
-    return umq_ub_post_rx_inner_impl(queue, qbuf, bad_qbuf);
+    return umq_ub_post_rx_inner_impl(queue, qbuf, bad_qbuf, timestamp);
 }
 
 static ALWAYS_INLINE ub_queue_t *umq_ub_get_real_queue_by_cr(ub_queue_t *queue, const urma_cr_t *cr)
@@ -825,7 +826,7 @@ static int process_rx_msg(urma_cr_t *cr, umq_buf_t *buf, ub_queue_t *queue, umq_
                  */
                 umq_buf_t *write_qbuf = umq_get_buf_by_user_ctx(queue, cr->user_ctx, UB_QUEUE_JETTY_IO);
                 umq_buf_t *bad_qbuf = NULL;
-                ret = umq_ub_post_rx_inner_impl(queue, write_qbuf, &bad_qbuf);
+                ret = umq_ub_post_rx_inner_impl(queue, write_qbuf, &bad_qbuf, 0);
                 if (ret != UMQ_SUCCESS) {
                     UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, ub post rx failed, status: %d\n",
                     EID_ARGS(*eid), id, ret);
@@ -1734,6 +1735,7 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
     /* one POLL record for the entire poll operation (FC + IO) */
     uint64_t poll_start = umq_trace_start_timestamp_get();
     umq_trace_start_record(UMQ_TRACE_TYPE_POLL, poll_start, 0);
+    umq_trace_item_record(0, 0, queue->umq_id);
     uint32_t tp_handle_idx = option->tp_handle_idx;
 
     if (queue->flow_control.enabled) {
