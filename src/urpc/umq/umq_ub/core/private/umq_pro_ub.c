@@ -977,6 +977,26 @@ static void umq_ub_fill_rx_buff_post_process(ub_queue_t *queue, umq_ub_imm_t *im
     return;
 }
 
+static uint32_t umq_ub_credit_req_retry_when_recv_zero(ub_queue_t *queue, umq_ub_imm_t *imm, umq_buf_t **buf)
+{
+    uint32_t buf_cnt = 0;
+    int ret = 0;
+
+    if (imm->flow_control.extend_type != IMM_TYPE_FC_CREDIT_REP || imm->flow_control.window != 0) {
+        return 0;
+    }
+
+    // when recv 0 credit response, try again
+    ret = umq_ub_shared_credit_req_send(queue);
+    if (ret == -UMQ_ERR_EMLINK) {
+        buf_cnt = umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_EMLINK);
+    } else if (ret != UMQ_SUCCESS) {
+        buf_cnt = umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_ERR);
+    }
+
+    return buf_cnt;
+}
+
 static bool is_umq_ub_flow_control_msg_duplicate(ub_queue_t *real_queue, umq_ub_imm_t *imm)
 {
     ub_flow_control_t *fc = &real_queue->flow_control;
@@ -1066,6 +1086,8 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
             qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, &imm, &buf[qbuf_cnt]);
             umq_ub_fill_rx_buff_post_process(queue, &imm);
             umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
+
+            qbuf_cnt += (int32_t)umq_ub_credit_req_retry_when_recv_zero(queue, &imm, &buf[qbuf_cnt]);
             continue;
         }
 
@@ -1097,6 +1119,12 @@ static int sub_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t bu
         }
         qbuf_cnt += ret;
         (void)umq_ub_fill_rx_buff_post_process(queue, &imm);
+
+        ret = (int32_t)umq_ub_credit_req_retry_when_recv_zero(queue, &imm, &buf[qbuf_cnt]);
+        if (ret > 0 && (buf[qbuf_cnt]->status == UMQ_FAKE_BUF_FC_EMLINK)) {
+            __atomic_store_n((uint64_t *)&queue->flow_control.imm[i], imm.value, __ATOMIC_RELEASE);
+        }
+        qbuf_cnt += ret;
     }
     return (int)qbuf_cnt;
 }
@@ -1157,6 +1185,7 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
         }
         qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, &imm, &buf[qbuf_cnt]);
         umq_ub_fill_rx_buff_post_process(queue, &imm);
+        qbuf_cnt += (int32_t)umq_ub_credit_req_retry_when_recv_zero(queue, &imm, &buf[qbuf_cnt]);
     }
     /* If buf is not NULL, return qbuf_cnt (0 if no error, >0 if has error);
      * If buf is NULL, return ret (0 if no error, error code if has error) */
