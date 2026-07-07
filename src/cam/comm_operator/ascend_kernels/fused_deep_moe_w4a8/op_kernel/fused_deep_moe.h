@@ -129,12 +129,8 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     // kernel level
     using ElementGroupList = int64_t;
 
-    using GemmKernel = typename std::conditional<
-        (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE),
-        Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspace<
-            TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>,
-        Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspaceWithShallowDispatch<
-            TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>>::type;
+    using GemmKernel = Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspace<
+        TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
 
     if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
         typename GemmKernel::Params params{problemShape,
@@ -275,8 +271,6 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
         layoutA,
         gmB,
         layoutB,
-        gmBias,
-        gmShareBias,
         gmScale,
         layoutScale,
         gmPerTokenScale,
