@@ -863,8 +863,6 @@ public:
                 AscendC::And(xTmpHalf, yInt8Tensor[index].ReinterpretCast<half>(),
                              xLowI16Tensor.ReinterpretCast<half>(), tokenLength);
                 AscendC::PipeBarrier<PIPE_V>();
-                AscendC::Cast(xTmpHalf, xTmpHalf, AscendC::RoundMode::CAST_NONE, tokenLength);
-                AscendC::PipeBarrier<PIPE_V>();
                 AscendC::Adds(xTmpHalf, xTmpHalf, MINUS_EIGHT, tokenLength);
                 AscendC::PipeBarrier<PIPE_V>();
                 AscendC::Cast(xLowI4Tensor, xTmpHalf, AscendC::RoundMode::CAST_NONE, tokenLength);
@@ -1093,8 +1091,6 @@ public:
                         // Low nibble: And(0x0F)→Cast→Adds(-8)→int4b_t
                         AscendC::And(xTmpHalf, xTmpTensor_.ReinterpretCast<half>(),
                                      xLowI16Tensor.ReinterpretCast<half>(), tokenLength);
-                        AscendC::PipeBarrier<PIPE_V>();
-                        AscendC::Cast(xTmpHalf, xTmpHalf, AscendC::RoundMode::CAST_NONE, tokenLength);
                         AscendC::PipeBarrier<PIPE_V>();
                         AscendC::Adds(xTmpHalf, xTmpHalf, MINUS_EIGHT, tokenLength);
                         AscendC::PipeBarrier<PIPE_V>();

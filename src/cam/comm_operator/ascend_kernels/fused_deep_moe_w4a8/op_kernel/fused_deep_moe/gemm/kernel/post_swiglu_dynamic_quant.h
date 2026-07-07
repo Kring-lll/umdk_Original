@@ -259,8 +259,6 @@ public:
                     AscendC::And(ubQuantF16, ubOutput.ReinterpretCast<half>(),
                                  ubQuantS32.ReinterpretCast<half>(), tileCount);
                     AscendC::PipeBarrier<PIPE_V>();
-                    AscendC::Cast(ubQuantF16, ubQuantF16, AscendC::RoundMode::CAST_NONE, tileColumn);
-                    AscendC::PipeBarrier<PIPE_V>();
                     AscendC::Adds(ubQuantF16, ubQuantF16, MINUS_EIGHT, tileColumn);
                     AscendC::PipeBarrier<PIPE_V>();
                     AscendC::Cast(ubOutput.ReinterpretCast<AscendC::int4b_t>(), ubQuantF16,
