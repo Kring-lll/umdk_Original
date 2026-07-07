@@ -29,21 +29,23 @@ static int bondp_update_pjetty_id_mapping(
     bondp_context_t *bdp_ctx, urma_jetty_id_t old_id, urma_jetty_id_t new_id, bondp_comp_t *bdp_jetty)
 {
     int ret = 0;
+    /* Add the new id mapping first, then delete the old one. Keeping the old mapping alive until
+     * after the new one is installed lets flush/error CRs produced by tearing down the old pjetty
+     * still resolve local_id to the vjetty (they are harmlessly CONVERT_SKIP'd). */
     pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
-    ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, old_id, JETTY);
-    if (ret != 0) {
-        pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
-        URMA_LOG_ERR("Failed to delete stale pjetty id mapping: " URMA_JETTY_ID_FMT ", ret=%d\n",
-            URMA_JETTY_ID_ARGS(&old_id), ret);
-        return -1;
-    }
     ret = bdp_p_vjetty_id_table_add_without_lock(
         &bdp_ctx->p_vjetty_id_table, new_id, JETTY, bdp_jetty->v_jetty.jetty_id.id, bdp_jetty);
-    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
-    if (ret != 0) {
+    if (ret != 0 && ret != BONDP_HASH_MAP_COLLIDE_ERROR) {
+        pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
         URMA_LOG_ERR("Failed to add recreated pjetty id mapping: " URMA_JETTY_ID_FMT ", ret=%d\n",
             URMA_JETTY_ID_ARGS(&new_id), ret);
         return -1;
+    }
+    int del_ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, old_id, JETTY);
+    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+    if (del_ret != 0) {
+        URMA_LOG_WARN("Failed to delete stale pjetty id mapping: " URMA_JETTY_ID_FMT ", ret=%d\n",
+            URMA_JETTY_ID_ARGS(&old_id), del_ret);
     }
     return 0;
 }
