@@ -853,8 +853,8 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventId);
             if constexpr (IS_W4A8) {
                 // W4A8: split int8 into high/low int4 nibbles
-                constexpr float ONE_SIXTEENTH = 0.0625f;
-                constexpr float MINUS_EIGHT = -8.0f;
+                constexpr half ONE_SIXTEENTH = half(0.0625);
+                constexpr half MINUS_EIGHT = half(-8.0);
                 AscendC::Cast(xHighHalfTensor, yInt8Tensor[index], AscendC::RoundMode::CAST_NONE, tokenLength);
                 AscendC::Muls(xHighHalfTensor, xHighHalfTensor, ONE_SIXTEENTH, tokenLength);
                 AscendC::Cast(xHighI4Tensor, xHighHalfTensor, AscendC::RoundMode::CAST_FLOOR, tokenLength);

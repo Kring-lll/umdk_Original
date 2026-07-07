@@ -239,8 +239,8 @@ public:
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(1);
             if constexpr (IS_W4A8) {
                 // W4A8: split int8 into high/low int4 nibbles, write two halves to GM
-                constexpr float ONE_SIXTEENTH = 0.0625f;
-                constexpr float MINUS_EIGHT = -8.0f;
+                constexpr half ONE_SIXTEENTH = half(0.0625);
+                constexpr half MINUS_EIGHT = half(-8.0);
                 AscendC::LocalTensor<half> ubHighHalf = ubQuantF16;
                 AscendC::LocalTensor<AscendC::int4b_t> ubHighI4 = ubOutput.ReinterpretCast<AscendC::int4b_t>();
                 AscendC::LocalTensor<int16_t> ubLowMask = ubQuantS32.ReinterpretCast<int16_t>();
