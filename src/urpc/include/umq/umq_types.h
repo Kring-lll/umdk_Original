@@ -157,7 +157,7 @@ typedef struct umq_interrupt_option {
     umq_io_direction_t direction;
     umq_fd_type_t fd_type;
     uint32_t tp_handle_idx;
-    uint64_t timestamp;
+    uint64_t tag_timestamp;
 } umq_interrupt_option_t;
 
 typedef union umq_eid {
@@ -653,15 +653,18 @@ typedef struct umq_cfg_get {
     umq_state_t state;            // queue state
     umq_tp_type_t tp_type;        // tp_type of queue
     umq_tp_mode_t tp_mode;        // transport mode of queue
+    uint32_t umq_id;              // queue id
 } umq_cfg_get_t;
 
 #define UMQ_IO_OPTION_FLAG_DIRECTION        (1)         // enable io_direction
 #define UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX    (1 << 1)    // enable tp_handle_idx
+#define UMQ_IO_OPTION_FLAG_TIMESTAMP        (1 << 2)    // enable arg timestamp
 
 typedef struct umq_io_option {
     uint32_t flag;                      // indicates which below property takes effect
     umq_io_direction_t io_direction;
     uint32_t tp_handle_idx;
+    uint64_t tag_timestamp;
 } umq_io_option_t;
 
 #define UMQ_TP_CREATE_FLAG_USED_PORTS          (1)        // enable arg used ports when create transport pool resource
