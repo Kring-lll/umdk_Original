@@ -1,12 +1,14 @@
 /*
  * SPDX-License-Identifier: MIT
- * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+ * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: FusedDeepMoe operator kernel function implementation file
- * Create: 2025-07-19
+ * Create: 2026-06-29
  * Note:
- * History: 2025-07-19 create FusedDeepMoe operator kernel function implementation file
+ * History: 2026-06-29 create FusedDeepMoe operator kernel function implementation file
  */
-#pragma once
+#ifndef EPILOGUE_BLOCK_BLOCK_EPILOGUE_PER_TOKEN_DEQUANT_SWIGLU_H
+#define EPILOGUE_BLOCK_BLOCK_EPILOGUE_PER_TOKEN_DEQUANT_SWIGLU_H
+
 #include "catlass/catlass.hpp"
 #include "catlass/arch/resource.hpp"
 #include "catlass/epilogue/dispatch_policy.hpp"
@@ -21,13 +23,13 @@
 namespace Catlass::Epilogue::Block {
 
 template <uint32_t UB_STAGES_, uint32_t EXEC_FLAG_,
-          class CType_, class ScaleType_, class LayoutScale_, class LayoutPerTokenScale_,
-          class DType_, class TileRowBroadcastMul_, class TileBroadcastOneBlk_, class TileOneBlkColumnBroadcastMul_,
-          class TileCopy_, class EpilogueTileSwizzle_>
+    class CType_, class ScaleType_, class LayoutScale_, class LayoutPerTokenScale_,
+    class DType_, class TileRowBroadcastMul_, class TileBroadcastOneBlk_, class TileOneBlkColumnBroadcastMul_,
+    class TileCopy_, class EpilogueTileSwizzle_>
 class BlockEpilogue<EpilogueAtlasA2PerTokenDequantSwiglu<UB_STAGES_, EXEC_FLAG_>,
-                    CType_, Gemm::GemmType<ScaleType_, LayoutScale_>, Gemm::GemmType<float, LayoutPerTokenScale_>,
-                    DType_, TileRowBroadcastMul_, TileBroadcastOneBlk_, TileOneBlkColumnBroadcastMul_,
-                    TileCopy_, EpilogueTileSwizzle_>
+    CType_, Gemm::GemmType<ScaleType_, LayoutScale_>, Gemm::GemmType<float, LayoutPerTokenScale_>,
+    DType_, TileRowBroadcastMul_, TileBroadcastOneBlk_, TileOneBlkColumnBroadcastMul_,
+    TileCopy_, EpilogueTileSwizzle_>
 {
 public:
     using DispatchPolicy = EpilogueAtlasA2PerTokenDequantSwiglu<UB_STAGES_, EXEC_FLAG_>;
@@ -47,11 +49,11 @@ public:
 
     // Check data infos
     static_assert(std::is_same_v<ElementC, int32_t> && std::is_same_v<ElementD, float>,
-                  "The element type template parameters of BlockEpilogue are wrong");
+        "The element type template parameters of BlockEpilogue are wrong");
     static_assert(std::is_same_v<LayoutC, layout::RowMajor> && std::is_same_v<LayoutScale, layout::VectorLayout> &&
-                      std::is_same_v<LayoutPerTokenScale, layout::VectorLayout> &&
-                      std::is_same_v<LayoutD, layout::RowMajor>,
-                  "The layout template parameters of BlockEpilogue are wrong");
+        std::is_same_v<LayoutPerTokenScale, layout::VectorLayout> &&
+        std::is_same_v<LayoutD, layout::RowMajor>,
+        "The layout template parameters of BlockEpilogue are wrong");
 
     // Tile compute ops
     using TileRowBroadcastMul = TileRowBroadcastMul_;
@@ -68,28 +70,28 @@ public:
 
     using TileShape = typename TileRowBroadcastMul::TileShape;
     static_assert(TileShape::ROW * sizeof(float) % BYTE_PER_BLK == 0,
-                  "The per token scale granularity for word calculation must be 32 bytes aligned.");
+        "The per token scale granularity for word calculation must be 32 bytes aligned.");
     static_assert(TileShape::COLUMN % 2 == 0, "The n-axis needs to be divided into two parts.");
 
     static_assert(TileShape::ROW == TileBroadcastOneBlk::COMPUTE_LENGTH &&
-                      std::is_same_v<TileShape, typename TileOneBlkColumnBroadcastMul::TileShape>,
-                  "TileShape must be consistent for all tile compute ops");
+        std::is_same_v<TileShape, typename TileOneBlkColumnBroadcastMul::TileShape>,
+        "TileShape must be consistent for all tile compute ops");
 
     static_assert(UB_STAGES <= 2, "UB stages too large, event id is not enough.");
 
     static_assert((UB_STAGES * (TileShape::COUNT * sizeof(ElementC) +
-                                (std::is_same_v<ElementRawScale, ElementFp32Scale> ?
-                                    0 : TileShape::COLUMN * sizeof(ElementRawScale)) +
-                                TileShape::COLUMN * sizeof(ElementFp32Scale) +
-                                TileShape::ROW * sizeof(ElementPerTokenScale) + TileShape::COUNT * sizeof(ElementD)) +
-                   (TileShape::COUNT + TileShape::COUNT) * sizeof(float) + TileShape::ROW * BYTE_PER_BLK) <=
-                      ArchTag::UB_SIZE,
-                  "TileShape is too large to fit in UB");
+        (std::is_same_v<ElementRawScale, ElementFp32Scale> ?
+        0 : TileShape::COLUMN * sizeof(ElementRawScale)) +
+        TileShape::COLUMN * sizeof(ElementFp32Scale) +
+        TileShape::ROW * sizeof(ElementPerTokenScale) + TileShape::COUNT * sizeof(ElementD)) +
+        (TileShape::COUNT + TileShape::COUNT) * sizeof(float) + TileShape::ROW * BYTE_PER_BLK) <=
+        ArchTag::UB_SIZE,
+        "TileShape is too large to fit in UB");
 
     struct Params {
-        __gm__ ElementC *ptrC{nullptr}; // layoutC = layoutD
         __gm__ ElementRawScale *ptrScale{nullptr};
         LayoutScale layoutScale{};
+        __gm__ float *ptrWeightAux{nullptr};
         __gm__ ElementPerTokenScale *ptrPerTokenScale{nullptr};
         LayoutPerTokenScale layoutPerTokenScale{};
         __gm__ ElementD *ptrD{nullptr};
@@ -99,12 +101,13 @@ public:
         Params() {};
 
         CATLASS_DEVICE
-        Params(__gm__ ElementC *ptrC_, __gm__ ElementRawScale *ptrScale_, LayoutScale const &layoutScale_,
-               __gm__ ElementPerTokenScale *ptrPerTokenScale_, LayoutPerTokenScale const &layoutPerTokenScale_,
-               __gm__ ElementD *ptrD_, LayoutD const &layoutD_)
-            : ptrC(ptrC_),
-              ptrScale(ptrScale_),
+        Params(__gm__ ElementRawScale *ptrScale_, LayoutScale const &layoutScale_,
+            __gm__ float *ptrWeightAux_,
+            __gm__ ElementPerTokenScale *ptrPerTokenScale_, LayoutPerTokenScale const &layoutPerTokenScale_,
+            __gm__ ElementD *ptrD_, LayoutD const &layoutD_)
+            : ptrScale(ptrScale_),
               layoutScale(layoutScale_),
+              ptrWeightAux(ptrWeightAux_),
               ptrPerTokenScale(ptrPerTokenScale_),
               layoutPerTokenScale(layoutPerTokenScale_),
               ptrD(ptrD_),
@@ -133,6 +136,10 @@ public:
             ubOffset += TileShape::ROW * sizeof(ElementPerTokenScale);
             ubDList[i] = resource.ubBuf.template GetBufferByByte<ElementD>(ubOffset);
             ubOffset += TileShape::COUNT * sizeof(ElementD);
+
+            // ubweighAux local tensor
+            ubweighAuxList[i] = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
+            ubOffset += TileShape::COLUMN * sizeof(float);
 
             eventUbCVMTE2List[i] = eventVMTE2++;
             eventUbCMTE2VList[i] = eventMTE2V++;
@@ -174,23 +181,39 @@ public:
 
     CATLASS_DEVICE
     void operator()(GemmCoord const &blockShapeMNK, GemmCoord const &blockCoordMNK,
-                    GemmCoord const &actualBlockShapeMNK, bool act_left = true, Callback &&callback = Callback{})
+        GemmCoord const &actualBlockShapeMNK, AscendC::GlobalTensor<ElementC> const &gmBlockC,
+        LayoutC const &layoutBlockC, bool act_left = true, Callback &&callback = Callback{})
     {
         if (0 == actualBlockShapeMNK.k()) {
             return;
         }
+       
         callback();
         // Calculate the offset of the current block
         MatrixCoord blockShape = blockShapeMNK.GetCoordMN();
         MatrixCoord blockCoord = blockCoordMNK.GetCoordMN();
         MatrixCoord actualBlockShape = actualBlockShapeMNK.GetCoordMN();
         MatrixCoord blockOffset = blockCoord * blockShape;
+        // w4A8 adaptation: high bits * 16
+        constexpr float DEFAULT_MUL_SCALE = 16.0f;
+        constexpr uint32_t mulsMask = 64;
+        constexpr uint32_t mulsRepeatTimes = 32;
+        constexpr uint32_t src0RepStride = 32;
+        constexpr uint32_t addDstRepStride = 1;
+        constexpr uint32_t addSrc0RepStrideHighLow = 16;
+        constexpr uint32_t addSrc1RepStrideHighLow = 32;
+        constexpr uint32_t addSrc0RepStrideWeightAux = 16;
+        constexpr uint32_t addSrc1RepStrideWeightAux = 0;
+        constexpr uint32_t TILE_HALF_SPLIT = 2;
+        constexpr uint32_t TILE_OFFSET_FACTOR = 3;
         bool isLeft = blockOffset.column() < (params.layoutD.shape(1) >> 1);
         isLeft = act_left ? isLeft : (!isLeft);
-        AscendC::GlobalTensor<ElementC> gmC;
-        gmC.SetGlobalBuffer(params.ptrC);
         AscendC::GlobalTensor<ElementRawScale> gmScale;
         gmScale.SetGlobalBuffer(params.ptrScale);
+        // compensation matrix
+        AscendC::GlobalTensor<float> gmWeightAux;
+        gmWeightAux.SetGlobalBuffer(params.ptrWeightAux);
+
         AscendC::GlobalTensor<ElementPerTokenScale> gmPerTokenScale;
         gmPerTokenScale.SetGlobalBuffer(params.ptrPerTokenScale);
         AscendC::GlobalTensor<ElementD> gmD;
@@ -208,8 +231,8 @@ public:
             auto tileOffsetInBlock = tileCoord * tileShape;
             auto tileOffset = blockOffset + tileOffsetInBlock;
 
-            auto gmTileC = gmC[params.layoutD.GetOffset(tileOffset)];
-            auto layoutGmTileC = params.layoutD.GetTileLayout(actualTileShape);
+            auto gmTileC = gmBlockC[layoutBlockC.GetOffset(tileOffsetInBlock)];
+            auto layoutGmTileC = layoutBlockC.GetTileLayout(actualTileShape);
 
             auto &ubC = ubCList[ubListId];
             LayoutC layoutUbC{actualTileShape, ubTileStride};
@@ -228,8 +251,19 @@ public:
             auto layoutFp32UbScale = LayoutScale::template MakeLayoutInUb<ElementFp32Scale>(scaleTileShape);
             auto &ubRawScale = ubRawScaleList[ubListId];
             auto layoutRawUbScale = LayoutScale::template MakeLayoutInUb<ElementRawScale>(scaleTileShape);
+            
+            // load weighAux matrix
+            auto &ubweighAux = ubweighAuxList[ubListId];
+            AscendC::DataCopyExtParams copyParams{
+                1, static_cast<uint32_t>(TileShape::COLUMN * sizeof(float)), 0, 0, 0};
+            AscendC::DataCopyPadExtParams<float> padParams{false, 0, 0, 0};
 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventUbScaleVMTE2List[ubListId]);
+            // load weighAux matrix
+            AscendC::DataCopyPad(ubweighAux,
+                gmWeightAux[params.layoutScale.GetOffset(scaleTileOffset)],
+                copyParams, padParams);
+
             if constexpr (!std::is_same_v<ElementRawScale, ElementFp32Scale>) {
                 copyGmToUbScale(ubRawScale, gmTileScale, layoutRawUbScale, layoutGmTileScale);
             } else {
@@ -239,17 +273,20 @@ public:
 
             auto perTokenScaleTileOffset = tileOffset.template GetCoordByAxis<0>();
             auto perTokenScaleTileShape = actualTileShape.template GetCoordByAxis<0>();
+            // recalculate offset
+            Catlass::Coord<1> newperTokenScaleOffset(perTokenScaleTileOffset[0] / TILE_HALF_SPLIT);
+            Catlass::Coord<1> newperTokenScaleTileShape(perTokenScaleTileShape[0] / TILE_HALF_SPLIT);
 
-            auto gmTilePerTokenScale = gmPerTokenScale[params.layoutPerTokenScale.GetOffset(perTokenScaleTileOffset)];
-            auto layoutGmTilePerTokenScale = params.layoutPerTokenScale.GetTileLayout(perTokenScaleTileShape);
+            auto gmTilePerTokenScale = gmPerTokenScale[params.layoutPerTokenScale.GetOffset(newperTokenScaleOffset)];
+            auto layoutGmTilePerTokenScale = params.layoutPerTokenScale.GetTileLayout(newperTokenScaleTileShape);
 
             auto &ubPerTokenScale = ubPerTokenScaleList[ubListId];
             auto layoutUbPerTokenScale =
-                LayoutScale::template MakeLayoutInUb<ElementPerTokenScale>(perTokenScaleTileShape);
+                LayoutScale::template MakeLayoutInUb<ElementPerTokenScale>(newperTokenScaleTileShape);
 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventUbPerTokenScaleVMTE2List[ubListId]);
             copyGmToUbPerTokenScale(ubPerTokenScale, gmTilePerTokenScale, layoutUbPerTokenScale,
-                                    layoutGmTilePerTokenScale);
+                layoutGmTilePerTokenScale);
             AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(eventUbPerTokenScaleMTE2VList[ubListId]);
 
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventUbCMTE2VList[ubListId]);
@@ -262,12 +299,50 @@ public:
             }
             tileRowBroadcastMul(ubTmpMxN, ubTmpMxN, ubFp32Scale);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventUbScaleVMTE2List[ubListId]);
+
+            // W4A8 change: merge high/low bits, define repeat params to avoid literals
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::Muls(ubTmpMxN, ubTmpMxN, DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
+                {1, 1, src0RepStride, src0RepStride});
+            AscendC::PipeBarrier<PIPE_V>();
+            // tile right half, 32UB size
+            AscendC::Muls(ubTmpMxN[TileShape::COLUMN / TILE_HALF_SPLIT], ubTmpMxN[TileShape::COLUMN / TILE_HALF_SPLIT],
+                DEFAULT_MUL_SCALE, mulsMask, mulsRepeatTimes,
+                {1, 1, src0RepStride, src0RepStride});
+            AscendC::PipeBarrier<PIPE_V>();
+            // add high and low bits
+            // tile left half, 32UB size
+            AscendC::Add(ubTmpMxN, ubTmpMxN, ubTmpMxN[TileShape::COLUMN],
+                mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStrideHighLow,
+                addSrc1RepStrideHighLow, addSrc1RepStrideHighLow});
+            AscendC::PipeBarrier<PIPE_V>();
+            // tile right half, 32UB size
+            AscendC::Add(ubTmpMxN[TileShape::COLUMN / TILE_HALF_SPLIT], ubTmpMxN[TileShape::COLUMN / TILE_HALF_SPLIT],
+                ubTmpMxN[TileShape::COLUMN * TILE_OFFSET_FACTOR / TILE_HALF_SPLIT],
+                mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStrideHighLow,
+                addSrc1RepStrideHighLow, addSrc1RepStrideHighLow});
+            // compensation matrix add 8 * weight
+            // tile left half, 32 UB size
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::Add(ubTmpMxN, ubTmpMxN, ubweighAux, mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
+                addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
+            AscendC::PipeBarrier<PIPE_V>();
+            // tile right half, 32 UB size
+            AscendC::Add(ubTmpMxN[TileShape::COLUMN / TILE_HALF_SPLIT], ubTmpMxN[TileShape::COLUMN / TILE_HALF_SPLIT],
+                ubweighAux[TileShape::COLUMN / TILE_HALF_SPLIT],
+                mulsMask, mulsRepeatTimes,
+                {1, 1, addDstRepStride, addSrc0RepStrideWeightAux,
+                addSrc0RepStrideWeightAux, addSrc1RepStrideWeightAux});
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventUbPerTokenScaleMTE2VList[ubListId]);
             tileBroadcastOneBlk(ubTmpMx32B, ubPerTokenScale);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventUbPerTokenScaleVMTE2List[ubListId]);
-
             auto &ubD = ubDList[ubListId];
             LayoutD layoutUbD{actualTileShape, ubTileStride};
+            auto newlayoutUbD = layoutUbD;                     // copy
+            newlayoutUbD.shape(0) = newlayoutUbD.shape(0) / TILE_HALF_SPLIT; 
             AscendC::PipeBarrier<PIPE_V>();
             // after dequant, the left half does x / (x + exp(-Dequant(x))), the right dose nothing
             if (isLeft) {
@@ -286,12 +361,13 @@ public:
                 tileOneBlkColumnBroadcastMul(ubD, ubTmpMxN, ubTmpMx32B);
             }
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
-
-            auto gmTileD = gmD[params.layoutD.GetOffset(tileOffset)];
+            MatrixCoord newtileOffset(tileOffset.row() / TILE_HALF_SPLIT, tileOffset.column());
+            auto gmTileD = gmD[params.layoutD.GetOffset(newtileOffset)];
             auto layoutGmTileD = params.layoutD.GetTileLayout(actualTileShape);
-
+            auto newlayoutGmTileD = layoutGmTileD;                     // copy
+            newlayoutGmTileD.shape(0) = layoutGmTileD.shape(0) / TILE_HALF_SPLIT; 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
-            copyUbToGmD(gmTileD, ubD, layoutGmTileD, layoutUbD);
+            copyUbToGmD(gmTileD, ubD, newlayoutGmTileD, newlayoutUbD);
             AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(eventUbDMTE3VList[ubListId]);
             ubListId = (ubListId + 1 < UB_STAGES) ? (ubListId + 1) : 0;
         }
@@ -305,6 +381,8 @@ private:
     AscendC::LocalTensor<ElementFp32Scale> ubFp32ScaleList[UB_STAGES];
     AscendC::LocalTensor<ElementPerTokenScale> ubPerTokenScaleList[UB_STAGES];
     AscendC::LocalTensor<ElementD> ubDList[UB_STAGES];
+    // compensation matrix
+    AscendC::LocalTensor<float> ubweighAuxList[UB_STAGES];
 
     int32_t eventUbCVMTE2List[UB_STAGES];
     int32_t eventUbCMTE2VList[UB_STAGES];
@@ -332,3 +410,5 @@ private:
 };
 
 }  // namespace Catlass::Epilogue::Block
+
+#endif  // EPILOGUE_BLOCK_BLOCK_EPILOGUE_PER_TOKEN_DEQUANT_SWIGLU_H
