@@ -114,7 +114,7 @@ static ge::graphStatus CheckGmm1Shape(gert::TilingContext &context, FusedDeepMoe
     OPS_ERR_IF(gmm1FirstTensorElement == nullptr,
         OPS_LOG_E(nodeName, "gmm1Weight is null."), return ge::GRAPH_FAILED);
     auto w1DataType = gmm1FirstTensorElement->GetDataType();
-    constexpr uint64_t weightScale = INT4_WEIGHT_HIDDEN_SCALE;
+    uint64_t weightScale = (w1DataType == ge::DT_INT32 || w1DataType == ge::DT_INT4) ? INT4_WEIGHT_HIDDEN_SCALE : 1ULL;
     auto gmm1FirstTensorElementShape = gmm1FirstTensorElement->GetOriginShape();
     uint32_t elementDims = gmm1FirstTensorElementShape.GetDimNum();
     uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
@@ -158,7 +158,9 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
 {
     const char *nodeName = context.GetNodeName();
     uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
-    constexpr uint64_t weightScale = INT4_WEIGHT_HIDDEN_SCALE;
+    auto shareGmm1WeightTensor = context.GetOptionalInputTensor(INPUT_SHARE_GMM1_WEIGHT_INDEX);
+    auto shareW1DataType = (shareGmm1WeightTensor != nullptr) ? shareGmm1WeightTensor->GetDataType() : ge::DT_INT32;
+    uint64_t weightScale = (shareW1DataType == ge::DT_INT32 || shareW1DataType == ge::DT_INT4) ? INT4_WEIGHT_HIDDEN_SCALE : 1ULL;
 
     // Check share_gmm1_weight: [h, shareGmm1HLen] (2D) or [1, h, shareGmm1HLen] (3D)
     const gert::StorageShape* shareGmm1WeightStorageShape =
@@ -368,7 +370,9 @@ static ge::graphStatus CheckGmm2Shape(const gert::TilingContext &context, const 
     uint32_t n = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.gmm1HLen;
     uint32_t epRankId = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankId;
     uint32_t localExpertNum = moeExpertNumPerRank;
-    constexpr uint64_t weightScale = INT4_WEIGHT_HIDDEN_SCALE;
+    auto gmm2WeightTensor = context.GetDynamicInputTensor(INPUT_GMM2_WEIGHT_INDEX, 0);
+    auto w2DataType = (gmm2WeightTensor != nullptr) ? gmm2WeightTensor->GetDataType() : ge::DT_INT32;
+    uint64_t weightScale = (w2DataType == ge::DT_INT32 || w2DataType == ge::DT_INT4) ? INT4_WEIGHT_HIDDEN_SCALE : 1ULL;
     bool listFlag = false;
 
     uint32_t gmm2ListLen = CountTensorListLen(context, INPUT_GMM2_WEIGHT_INDEX);
