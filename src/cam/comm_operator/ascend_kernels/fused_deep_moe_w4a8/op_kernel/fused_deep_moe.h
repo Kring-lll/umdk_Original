@@ -36,13 +36,13 @@ using namespace Catlass;
 using namespace Cam;
 
 // W4A8 dispatch policy (INT4 weights, divides L1 by CONSTANT_INT4_PACKING_RATIO=2)
-using MmadAtlasA2CustomW4a8W4a8 =
+using MmadAtlasA2CustomW4a8 =
     Gemm::MmadAtlasA2PreloadAsyncWithCallbackW4a8<CUSTOM_PRELOAD_STAGES, CUSTOM_L1_STAGES, CUSTOM_L0A_STAGES,
         CUSTOM_L0B_STAGES, CUSTOM_L0C_STAGES, CUSTOM_ENABLE_UNIT_FLAG,
         CUSTOM_ENABLE_SHUFFLE_K>;
 
 // W8A8 dispatch policy (INT8 weights, standard L1 calculation)
-using MmadAtlasA2CustomW4a8W8a8 =
+using MmadAtlasA2CustomW8a8 =
     Gemm::MmadAtlasA2PreloadAsyncWithCallback<CUSTOM_PRELOAD_STAGES, CUSTOM_L1_STAGES, CUSTOM_L0A_STAGES,
         CUSTOM_L0B_STAGES, CUSTOM_L0C_STAGES, CUSTOM_ENABLE_UNIT_FLAG,
         CUSTOM_ENABLE_SHUFFLE_K>;
@@ -96,7 +96,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
 
     // Select dispatch policy and tile shape based on weight type
     constexpr bool isW4A8 = std::is_same_v<ActualWeightType, AscendC::int4b_t>;
-    using Gmm1DispatchPolicy = std::conditional_t<isW4A8, MmadAtlasA2CustomW4a8W4a8, MmadAtlasA2CustomW4a8W8a8>;
+    using Gmm1DispatchPolicy = std::conditional_t<isW4A8, MmadAtlasA2CustomW4a8, MmadAtlasA2CustomW8a8>;
     using Gmm1L1TileShapeActual = std::conditional_t<isW4A8, Gmm1L1TileShapeW4a8, Gmm1L1TileShapeW8a8>;
     using Gmm1L0TileShapeActual = std::conditional_t<isW4A8, Gmm1L0TileShapeW4a8, Gmm1L0TileShapeW8a8>;
 
@@ -538,7 +538,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
         }
     }
     GmmDeqSwigluQuant<TemplateMC2TypeFunc, Gmm1L1TileShapeW4a8, Gmm1L0TileShapeW4a8, Gmm1EpilogueTileShape,
-        Gmm1BlockScheduler, MmadAtlasA2CustomW4a8W4a8>(
+        Gmm1BlockScheduler, MmadAtlasA2CustomW4a8>(
         gmm1ProblemShape, groupCount_, gmGroupList, gmX1, layoutX1, gmShareWeight1_, layoutShareWeight1,
         gmWeight1_, layoutWeight1,
         gmBias1_, gmShareBias1_, // A8w4 adaptation
