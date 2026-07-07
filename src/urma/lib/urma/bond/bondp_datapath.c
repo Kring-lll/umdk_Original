@@ -77,12 +77,29 @@ static bondp_comp_t *get_recv_count_comp(bondp_comp_t *recv_comp)
     return recv_comp;
 }
 
+/* Select the active pjetty for a slot: the backup pjetty when backup_valid is set
+ * (failover switched the role), otherwise the primary pjetty. */
+static inline urma_jetty_t *bondp_active_pjetty(bondp_comp_t *comp, int idx)
+{
+    if (idx >= 0 && idx < URMA_UBAGG_DEV_MAX_NUM &&
+        atomic_load(&comp->backup_valid[idx]) && comp->p_jetty_backup[idx] != NULL) {
+        return comp->p_jetty_backup[idx];
+    }
+    return comp->p_jetty[idx];
+}
+
+static inline bool bondp_pjetty_needs_rc_bind(const bondp_comp_t *bdp_comp)
+{
+    return bdp_comp != NULL && bdp_comp->comp_type == BONDP_COMP_JETTY &&
+           bdp_comp->v_jetty.jetty_cfg.jfs_cfg.trans_mode == URMA_TM_RC;
+}
+
 static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, int target_idx,
                                     urma_jfs_wr_t *send_wr, urma_jfs_wr_t **bad_wr, int wr_count)
 {
     urma_status_t ret;
     if (comp->comp_type == BONDP_COMP_JETTY) {
-        ret = urma_post_jetty_send_wr(comp->p_jetty[send_idx], send_wr, bad_wr);
+        ret = urma_post_jetty_send_wr(bondp_active_pjetty(comp, send_idx), send_wr, bad_wr);
     } else if (comp->comp_type == BONDP_COMP_JFS) {
         ret = urma_post_jfs_wr(comp->p_jfs[send_idx], send_wr, bad_wr);
     } else {
@@ -252,31 +269,80 @@ static urma_status_t schedule_send_wr(const urma_jfs_wr_t *wr, bondp_comp_t *bdp
     return schedule_send(wr->tjetty, bdp_comp, send_idx, target_idx, &info);
 }
 
-static void try_failback(bondp_comp_t *bdp_comp)
+/* Rebind the rebuilt primary pjetty of slot @i in RC mode to one of its active target jetty entries.
+ * Returns true if the primary is bound (or already bound) and ready to take over the slot. */
+static bool failback_rebind_primary(bondp_comp_t *bdp_comp, uint32_t i)
 {
-    if (!g_bondp_global_ctx->enable_failback) {
-        return;
+    urma_jetty_t *primary = bdp_comp->p_jetty[i];
+    if (primary == NULL) {
+        return false;
     }
 
-    pthread_spin_lock(&bdp_comp->send_lock);
+    if (!bondp_pjetty_needs_rc_bind(bdp_comp) || primary->remote_jetty != NULL) {
+        return true;
+    }
+    bondp_target_jetty_t *bdp_tjetty =
+        CONTAINER_OF_FIELD(bdp_comp->v_jetty.remote_jetty, bondp_target_jetty_t, v_tjetty);
+    for (uint32_t t = 0; t < bdp_tjetty->active_count; ++t) {
+        uint32_t target_idx = bdp_tjetty->active_indices[t];
+        urma_target_jetty_t *ptjetty = bdp_tjetty->p_tjetty[i][target_idx];
+        if (ptjetty != NULL && urma_bind_jetty(primary, ptjetty) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
-    uint32_t rebuilt_cnt = 0;
-    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        if (!atomic_exchange(&bdp_comp->rebuild_done[i], false)) {
+/* Resend in-flight WRs on slot @i routes so they now go through the (re)bound primary pjetty.
+ * WRs that were resent to the backup during the same-slot failover (resent_to_backup set) are
+ * skipped: they are still in flight on the backup and drain via the backup's own completion CRs.
+ * Resending them to the primary would duplicate delivery and underflow sqe_cnt. */
+static void failback_resend_to_primary(bondp_comp_t *bdp_comp, uint32_t i)
+{
+    for (uint32_t k = 0; k < bdp_comp->send_wr_buf.max_wr_num; ++k) {
+        const uint64_t resend_wr_id = (uint64_t)k + 1;
+        jfs_wr_entry_t *resend_wr_entry = jfs_wr_buf_get(&bdp_comp->send_wr_buf, resend_wr_id);
+        if (resend_wr_entry == NULL ||
+            resend_wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
+            resend_wr_entry->bdp_comp != bdp_comp ||
+            resend_wr_entry->send_idx != i) {
             continue;
         }
-        rebuilt_cnt++;
-        atomic_store(&bdp_comp->valid[i], true);
+        if (resend_wr_entry->resent_to_backup) {
+            continue;
+        }
+        atomic_fetch_sub(&bdp_comp->sqe_cnt[i][resend_wr_entry->target_idx], 1);
+        if (resend_jfs_wr(bdp_comp, resend_wr_entry, (int)i, (int)resend_wr_entry->target_idx) != 0) {
+            URMA_LOG_ERR("Failed failback resend to primary, wr_id=%lu send_idx=%u\n",
+                         resend_wr_id, i);
+        }
     }
+}
 
-    if (rebuilt_cnt == 0) {
-        pthread_spin_unlock(&bdp_comp->send_lock);
-        return;
+/* On a rebuilt slot, flip the active role back to the primary pjetty and resend its in-flight WRs.
+ * Returns 0 if the slot was switched to the primary, 1 if no backup switch was needed (slot already
+ * on primary), or -1 if the primary could not be bound yet (caller should signal another rebuild). */
+static int failback_switch_slot_to_primary(bondp_comp_t *bdp_comp, uint32_t i)
+{
+    /* If this slot was running on its backup pjetty, the rebuilt primary can take over again.
+     * Rebind the primary in RC mode, then flip the active role back to primary and resend any
+     * in-flight WRs on this slot's routes to the primary. */
+    if (!atomic_load(&bdp_comp->backup_valid[i])) {
+        return 1;
     }
+    if (!failback_rebind_primary(bdp_comp, i)) {
+        return -1;
+    }
+    atomic_store(&bdp_comp->backup_valid[i], false);
+    URMA_LOG_INFO("Failback switched to primary pjetty, vjetty_id=%u send_idx=%u\n",
+                  bdp_comp->v_jetty.jetty_id.id, i);
+    failback_resend_to_primary(bdp_comp, i);
+    return 0;
+}
 
-    URMA_LOG_INFO("Failback triggered on post, vjetty_id=%u rebuilt_cnt=%u\n",
-                  bdp_comp->v_jetty.jetty_id.id, rebuilt_cnt);
-
+/* After a rebuild, reschedule any in-flight WRs whose slot is no longer the best route. */
+static void failback_reschedule_on_post(bondp_comp_t *bdp_comp)
+{
     for (uint32_t i = 0; i < bdp_comp->send_wr_buf.max_wr_num; ++i) {
         const uint64_t resend_wr_id = (uint64_t)i + 1;
         jfs_wr_entry_t *resend_wr_entry = jfs_wr_buf_get(&bdp_comp->send_wr_buf, resend_wr_id);
@@ -307,6 +373,43 @@ static void try_failback(bondp_comp_t *bdp_comp)
                          resend_wr_id, new_send_idx, new_target_idx);
             continue;
         }
+    }
+}
+
+static void try_failback(bondp_comp_t *bdp_comp)
+{
+    if (!g_bondp_global_ctx->enable_failback) {
+        return;
+    }
+
+    pthread_spin_lock(&bdp_comp->send_lock);
+
+    uint32_t rebuilt_cnt = 0;
+    bool switched_to_primary = false;
+    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+        if (!atomic_exchange(&bdp_comp->rebuild_done[i], false)) {
+            continue;
+        }
+        rebuilt_cnt++;
+        atomic_store(&bdp_comp->valid[i], true);
+        int switch_ret = failback_switch_slot_to_primary(bdp_comp, i);
+        if (switch_ret == 0) {
+            switched_to_primary = true;
+        } else if (switch_ret < 0) {
+            /* Could not bind the primary yet; retry on the next rebuild signal. */
+            atomic_store(&bdp_comp->rebuild_done[i], true);
+        }
+    }
+
+    if (rebuilt_cnt == 0) {
+        pthread_spin_unlock(&bdp_comp->send_lock);
+        return;
+    }
+
+    URMA_LOG_INFO("Failback triggered on post, vjetty_id=%u rebuilt_cnt=%u\n",
+                  bdp_comp->v_jetty.jetty_id.id, rebuilt_cnt);
+    if (!switched_to_primary) {
+        failback_reschedule_on_post(bdp_comp);
     }
     pthread_spin_unlock(&bdp_comp->send_lock);
 }
@@ -446,6 +549,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             wr_entry->user_ctx = cur->user_ctx;
             wr_entry->target_vjetty = bdp_tjetty;
             wr_entry->bdp_comp = bdp_comp;
+            wr_entry->resent_to_backup = false;
 
             urma_jfs_wr_t *pwr = &wr_entry->wr;
             ret = copy_jfs_wr(cur, pwr, wr_entry->src_sge, wr_entry->dst_sge);
@@ -1160,6 +1264,92 @@ static cr_convert_ret_t handle_fake_cr_with_store(bondp_context_t *bdp_ctx, int 
     return CONVERT_SKIP;
 }
 
+/* On a failover CR, resend in-flight WRs sharing the [send_idx, target_idx] route to @new_send_idx /
+ * @new_target_idx. The send_lock is already held by the caller. */
+static void failover_resend_route(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry,
+                                  uint32_t send_idx, uint32_t target_idx,
+                                  int new_send_idx, int new_target_idx)
+{
+    /* When the failover keeps the WR on the same slot (new_send_idx == send_idx), the resend
+     * targets the backup pjetty of that slot. Mark such entries so that a later failback to the
+     * rebuilt primary does not resend them again (they are still in flight on the backup). */
+    bool same_slot_failover = (new_send_idx == (int)send_idx);
+    for (int i = 0; i < bdp_comp->send_wr_buf.max_wr_num; i++) {
+        const uint64_t resend_wr_id =
+            (wr_entry->wr_id + i - 1) % bdp_comp->send_wr_buf.max_wr_num + 1;
+        jfs_wr_entry_t *resend_wr_entry = jfs_wr_buf_get(&bdp_comp->send_wr_buf, resend_wr_id);
+        if (resend_wr_entry == NULL ||
+            resend_wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
+            resend_wr_entry->bdp_comp != bdp_comp ||
+            resend_wr_entry->send_idx != send_idx ||
+            resend_wr_entry->target_idx != target_idx) {
+            continue;
+        }
+        atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+        if (resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
+            URMA_LOG_ERR("Failed to resend jfs wr, wr_id=%lu\n", resend_wr_id);
+        } else if (same_slot_failover) {
+            resend_wr_entry->resent_to_backup = true;
+        }
+    }
+}
+
+/* Switch the failed slot to its pre-created backup pjetty and resend its in-flight WRs on the same
+ * route. The send_lock is already held by the caller. Returns true if the backup took over the slot;
+ * false if no backup is available (or already on backup) and the caller must fall back to cross-slot
+ * scheduling. */
+static bool try_failover_to_backup(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry,
+                                   uint32_t send_idx, uint32_t target_idx)
+{
+    /* Prefer switching to the pre-created backup pjetty within the same slot: the slot index
+     * (send_idx) and target_idx stay unchanged, only the active role flips to the backup so
+     * comp_post_send posts to p_jetty_backup[send_idx]. The failed primary is rebuilt
+     * asynchronously and switched back via try_failback. */
+    if (!g_bondp_global_ctx->enable_failover ||
+        bdp_comp->p_jetty_backup[send_idx] == NULL ||
+        atomic_load(&bdp_comp->backup_valid[send_idx])) {
+        return false;
+    }
+    urma_jetty_t *backup = bdp_comp->p_jetty_backup[send_idx];
+    if (bondp_pjetty_needs_rc_bind(bdp_comp)) {
+        urma_target_jetty_t *ptjetty = wr_entry->target_vjetty->p_tjetty[send_idx][target_idx];
+        if (ptjetty == NULL) {
+            URMA_LOG_ERR("No target jetty for backup bind, send_idx=%u\n", send_idx);
+            return false;
+        }
+        if (backup->remote_jetty != ptjetty) {
+            if (backup->remote_jetty != NULL) {
+                (void)urma_unbind_jetty(backup);
+                backup->remote_jetty = NULL;
+            }
+            if (urma_bind_jetty(backup, ptjetty) != 0) {
+                URMA_LOG_ERR("Failed to bind backup pjetty, send_idx=%u\n", send_idx);
+                return false;
+            }
+        }
+    }
+    atomic_store(&bdp_comp->backup_valid[send_idx], true);
+    /* Keep valid[send_idx] true: the backup takes over the slot. */
+    URMA_LOG_INFO("Failover to backup pjetty, vjetty_id=%u send_idx=%u\n",
+                  bdp_comp->v_jetty.jetty_id.id, send_idx);
+    urma_ubagg_switch_inc();
+
+    /* Resend in-flight WRs on the same [send_idx, target_idx] route; the pjetty object is
+     * now the backup, selected by comp_post_send via backup_valid. */
+    failover_resend_route(bdp_comp, wr_entry, send_idx, target_idx, (int)send_idx, (int)target_idx);
+
+    /* Directly schedule an async rebuild of the failed primary pjetty at this slot via the
+     * failback worker (keyed by vjetty_id + send_idx). This path intentionally does NOT call
+     * bondp_health_notify_datapath_link_fail: in balance mode that handler would synchronously
+     * rebuild the same primary via bondp_rebuild_local_pjetty, racing with this async rebuild. */
+    int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);
+    if (ret != 0 && ret != -EEXIST) {
+        URMA_LOG_WARN("Failed to add failback task, vjetty_id=%u pjetty_idx=%u ret=%d\n",
+                      wr_entry->target_vjetty->v_tjetty.id.id, send_idx, ret);
+    }
+    return true;
+}
+
 static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int idx, urma_cr_t *cr)
 {
     const uint64_t wr_id = cr->user_ctx;
@@ -1192,6 +1382,38 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
+        if (atomic_load(&bdp_comp->backup_valid[send_idx])) {
+            urma_jetty_t *backup = bdp_comp->p_jetty_backup[send_idx];
+            if (backup == NULL || cr->local_id != backup->jetty_id.id) {
+                (void)pthread_spin_unlock(&bdp_comp->send_lock);
+                put_comp(bdp_comp);
+                return CONVERT_SKIP;
+            }
+            bdp_comp->p_jetty_backup[send_idx] = NULL;
+            atomic_store(&bdp_comp->backup_valid[send_idx], false);
+            atomic_store(&bdp_comp->valid[send_idx], false);
+            (void)bondp_fb_schedule_delete_pjetty(bdp_comp->bondp_ctx, backup);
+            /* The backup is gone; recreate one asynchronously so the slot regains its hot
+             * standby for subsequent failovers instead of being permanently downgraded. */
+            (void)bondp_fb_schedule_rebuild_backup(bdp_comp->bondp_ctx,
+                                                   bdp_comp->v_jetty.jetty_id.id, send_idx);
+        } else {
+            /* backup_valid is false: the slot is running on its primary (either never failed over,
+             * or already failed back). */
+            urma_jetty_t *primary = bdp_comp->p_jetty[send_idx];
+            urma_jetty_t *backup = bdp_comp->p_jetty_backup[send_idx];
+            if (primary == NULL || cr->local_id != primary->jetty_id.id) {
+                (void)pthread_spin_unlock(&bdp_comp->send_lock);
+                goto CONVERT_CR;
+            }
+        }
+        if (try_failover_to_backup(bdp_comp, wr_entry, send_idx, target_idx)) {
+            (void)pthread_spin_unlock(&bdp_comp->send_lock);
+            put_comp(bdp_comp);
+            return CONVERT_SKIP;
+        }
+
+        /* No backup available (or backup just detached): fall back to cross-slot scheduling. */
         atomic_store(&bdp_comp->valid[send_idx], false);
         /* choose the failover route(0 or 1) through send_idx */
         int new_send_idx = send_idx;
@@ -1212,21 +1434,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                       new_send_idx, new_target_idx);
         urma_ubagg_switch_inc();
 
-        for (int i = 0; i < bdp_comp->send_wr_buf.max_wr_num; i++) {
-            const uint64_t resend_wr_id = (wr_entry->wr_id + i - 1) % bdp_comp->send_wr_buf.max_wr_num + 1;
-            jfs_wr_entry_t *resend_wr_entry = jfs_wr_buf_get(&bdp_comp->send_wr_buf, resend_wr_id);
-            if (resend_wr_entry == NULL ||
-                resend_wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
-                resend_wr_entry->bdp_comp != bdp_comp ||
-                resend_wr_entry->send_idx != send_idx ||
-                resend_wr_entry->target_idx != target_idx) {
-                continue;
-            }
-            atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
-            if (resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
-                URMA_LOG_ERR("Failed to resend jfs wr, wr_id=%lu\n", resend_wr_id);
-            }
-        }
+        failover_resend_route(bdp_comp, wr_entry, send_idx, target_idx, new_send_idx, new_target_idx);
         bondp_health_notify_datapath_link_fail(bdp_comp->bondp_ctx, wr_entry->target_vjetty,
                                                (int)send_idx, (int)target_idx);
         /* Update active link after failover is finished. */
@@ -1494,14 +1702,18 @@ int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
     int cr_cnt_remaining = cr_cnt;
 
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM && cr_cnt_remaining > 0; i++) {
-        if (bdp_jetty->p_jetty[i] == NULL) {
+        /* Flush the currently active pjetty of the slot: when the slot runs on its backup
+         * (backup_valid set), the backup holds the in-flight WRs that must be drained to error;
+         * otherwise flush the primary. Only one of the two is active at a time. */
+        urma_jetty_t *active_pjetty = bondp_active_pjetty(bdp_jetty, i);
+        if (active_pjetty == NULL) {
             continue;
         }
 
         int pcr_cnt_max = cr_cnt_remaining > URMA_UBAGG_MAX_CR_CNT_PER_DEV
-                              ? URMA_UBAGG_MAX_CR_CNT_PER_DEV
-                              : cr_cnt_remaining;
-        int pcr_cnt = urma_flush_jetty(bdp_jetty->p_jetty[i], pcr_cnt_max, pcr_buf);
+                                ? URMA_UBAGG_MAX_CR_CNT_PER_DEV
+                                : cr_cnt_remaining;
+        int pcr_cnt = urma_flush_jetty(active_pjetty, pcr_cnt_max, pcr_buf);
         if (pcr_cnt < 0) {
             URMA_LOG_ERR("Failed to flush pjetty[%d], pcr_cnt=%d\n", i, pcr_cnt);
             return pcr_cnt;
