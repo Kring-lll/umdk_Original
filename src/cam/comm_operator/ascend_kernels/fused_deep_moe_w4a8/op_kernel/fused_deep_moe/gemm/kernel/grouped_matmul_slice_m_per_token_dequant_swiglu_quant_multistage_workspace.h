@@ -486,6 +486,7 @@ public:
     using ElementOutput = typename BlockQuant<ArchTag, IS_W4A8>::ElementOutput;
     using LayoutOutput = typename BlockQuant<ArchTag, IS_W4A8>::LayoutOutput;
 
+    using BlockEpilogue = BlockEpilogue_;
     using BlockScheduler = BlockScheduler_;
     static constexpr uint32_t WORKSPACE_STAGES = WORKSPACE_STAGES_;
     using ElementGroupList = ElementGroupList_;
@@ -2307,6 +2308,7 @@ public:
     using ElementOutput = typename BlockQuant<ArchTag, IS_W4A8>::ElementOutput;
     using LayoutOutput = typename BlockQuant<ArchTag, IS_W4A8>::LayoutOutput;
 
+    using BlockEpilogue = BlockEpilogue_;
     using BlockScheduler = BlockScheduler_;
     static constexpr uint32_t WORKSPACE_STAGES = WORKSPACE_STAGES_;
     using ElementGroupList = ElementGroupList_;

@@ -231,11 +231,13 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using L1TileShape = L1TileShape_;
     using L0TileShape = L0TileShape_;
 
-    // w4A8 adaptation
+    // Map int32_t (DT_INT32 packed INT4 storage) back to int4b_t for GEMM element type
+    using ActualWeightType = std::conditional_t<std::is_same_v<WeightType, int32_t>, AscendC::int4b_t, WeightType>;
     using AType = Gemm::GemmType<ActualWeightType, layout::RowMajor>;
     using BType = Gemm::GemmType<ActualWeightType, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
+    // GMM2 uses ResidentA BlockMmad for both modes (same tile shape)
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
 
     constexpr uint32_t ubStages = 1;
