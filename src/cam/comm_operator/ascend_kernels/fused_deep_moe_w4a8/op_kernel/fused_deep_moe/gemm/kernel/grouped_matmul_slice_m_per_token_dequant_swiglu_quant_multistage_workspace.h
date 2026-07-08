@@ -62,7 +62,7 @@ constexpr uint32_t SEND_CORE_NUM = 24;
 
 using namespace Cam;
 namespace Catlass::Gemm::Kernel {
-template <class ArchTag>
+template <class ArchTag, bool IS_W4A8 = true>
 class BlockQuant {
 public:
     using ElementInput = float;
@@ -473,18 +473,18 @@ public:
     // Detect W4A8 mode from ElementB type (int4b_t → W4A8, int8_t → W8A8)
     static constexpr bool IS_W4A8 = std::is_same_v<ElementB, AscendC::int4b_t>;
     static constexpr uint32_t M_FACTOR = IS_W4A8 ? 2 : 1;
-    using ElementScale = typename BlockEpilogue::ElementRawScale;
-    using LayoutScale = typename BlockEpilogue::LayoutScale;
-    using ElementPerTokenScale = typename BlockEpilogue::ElementPerTokenScale;
-    using LayoutPerTokenScale = typename BlockEpilogue::LayoutPerTokenScale;
-    using ElementD = typename BlockEpilogue::ElementD;
-    using LayoutD = typename BlockEpilogue::LayoutD;
-    using EpilogueParams = typename BlockEpilogue::Params;
+    using ElementScale = typename BlockEpilogue_::ElementRawScale;
+    using LayoutScale = typename BlockEpilogue_::LayoutScale;
+    using ElementPerTokenScale = typename BlockEpilogue_::ElementPerTokenScale;
+    using LayoutPerTokenScale = typename BlockEpilogue_::LayoutPerTokenScale;
+    using ElementD = typename BlockEpilogue_::ElementD;
+    using LayoutD = typename BlockEpilogue_::LayoutD;
+    using EpilogueParams = typename BlockEpilogue_::Params;
 
-    using ElementDequantScale = typename BlockQuant<ArchTag>::ElementDequantScale;
-    using LayoutDequantScale = typename BlockQuant<ArchTag>::LayoutDequantScale;
-    using ElementOutput = typename BlockQuant<ArchTag>::ElementOutput;
-    using LayoutOutput = typename BlockQuant<ArchTag>::LayoutOutput;
+    using ElementDequantScale = typename BlockQuant<ArchTag, IS_W4A8>::ElementDequantScale;
+    using LayoutDequantScale = typename BlockQuant<ArchTag, IS_W4A8>::LayoutDequantScale;
+    using ElementOutput = typename BlockQuant<ArchTag, IS_W4A8>::ElementOutput;
+    using LayoutOutput = typename BlockQuant<ArchTag, IS_W4A8>::LayoutOutput;
 
     using BlockScheduler = BlockScheduler_;
     static constexpr uint32_t WORKSPACE_STAGES = WORKSPACE_STAGES_;
@@ -2111,14 +2111,14 @@ CATLASS_DEVICE
             uint32_t nOut = IS_W4A8 ? (params.shareN / CONSTANT_TWO) : params.shareN;
             uint32_t quantRowOnce = 0;
             CalQuantRow(nOut, quantRowOnce);
-            typename BlockQuant<ArchTag>::Params quantParams;
+            typename BlockQuant<ArchTag, IS_W4A8>::Params quantParams;
             auto swigluLayout = layout::RowMajor{totalTokenCount, n};
-            quantParams = typename BlockQuant<ArchTag>::Params {
+            quantParams = typename BlockQuant<ArchTag, IS_W4A8>::Params {
                 (__gm__ float*)params.gmShareSwigluOut, swigluLayout,  // input: swiglu output
                 (__gm__ float*)params.gmShareX2Scale, params.layoutDequantScale,  // output: quant token scale
                 (__gm__ int8_t*)params.gmShareX2, params.layoutShareOutput, // output: x2
                 quantRowOnce,           nOut};
-            BlockQuant<ArchTag> blockQuant(resource, quantParams);
+            BlockQuant<ArchTag, IS_W4A8> blockQuant(resource, quantParams);
             MatrixCoord quantShape(totalTokenCount, nOut);
             MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
             Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
@@ -2147,12 +2147,12 @@ CATLASS_DEVICE
             uint32_t nOut = IS_W4A8 ? (params.problemShape.n() / CONSTANT_TWO) : params.problemShape.n();
             uint32_t quantRowOnce = 0;
             CalQuantRow(nOut, quantRowOnce);
-            typename BlockQuant<ArchTag>::Params quantParams;
+            typename BlockQuant<ArchTag, IS_W4A8>::Params quantParams;
             auto swigluLayout = layout::RowMajor{totalTokenCount, n};
-            quantParams = typename BlockQuant<ArchTag>::Params {
+            quantParams = typename BlockQuant<ArchTag, IS_W4A8>::Params {
                 gmSwigluOutput,   swigluLayout,        params.ptrDequantScale, params.layoutDequantScale,
                 params.ptrOutput, params.layoutOutput, quantRowOnce,           nOut};
-            BlockQuant<ArchTag> blockQuant(resource, quantParams);
+            BlockQuant<ArchTag, IS_W4A8> blockQuant(resource, quantParams);
             MatrixCoord quantShape(totalTokenCount, nOut);
             MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
             Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
@@ -2294,18 +2294,18 @@ public:
     // Detect W4A8 mode from ElementB type (int4b_t → W4A8, int8_t → W8A8)
     static constexpr bool IS_W4A8 = std::is_same_v<ElementB, AscendC::int4b_t>;
     static constexpr uint32_t M_FACTOR = IS_W4A8 ? 2 : 1;
-    using ElementScale = typename BlockEpilogue::ElementRawScale;
-    using LayoutScale = typename BlockEpilogue::LayoutScale;
-    using ElementPerTokenScale = typename BlockEpilogue::ElementPerTokenScale;
-    using LayoutPerTokenScale = typename BlockEpilogue::LayoutPerTokenScale;
-    using ElementD = typename BlockEpilogue::ElementD;
-    using LayoutD = typename BlockEpilogue::LayoutD;
-    using EpilogueParams = typename BlockEpilogue::Params;
+    using ElementScale = typename BlockEpilogue_::ElementRawScale;
+    using LayoutScale = typename BlockEpilogue_::LayoutScale;
+    using ElementPerTokenScale = typename BlockEpilogue_::ElementPerTokenScale;
+    using LayoutPerTokenScale = typename BlockEpilogue_::LayoutPerTokenScale;
+    using ElementD = typename BlockEpilogue_::ElementD;
+    using LayoutD = typename BlockEpilogue_::LayoutD;
+    using EpilogueParams = typename BlockEpilogue_::Params;
 
-    using ElementDequantScale = typename BlockQuant<ArchTag>::ElementDequantScale;
-    using LayoutDequantScale = typename BlockQuant<ArchTag>::LayoutDequantScale;
-    using ElementOutput = typename BlockQuant<ArchTag>::ElementOutput;
-    using LayoutOutput = typename BlockQuant<ArchTag>::LayoutOutput;
+    using ElementDequantScale = typename BlockQuant<ArchTag, IS_W4A8>::ElementDequantScale;
+    using LayoutDequantScale = typename BlockQuant<ArchTag, IS_W4A8>::LayoutDequantScale;
+    using ElementOutput = typename BlockQuant<ArchTag, IS_W4A8>::ElementOutput;
+    using LayoutOutput = typename BlockQuant<ArchTag, IS_W4A8>::LayoutOutput;
 
     using BlockScheduler = BlockScheduler_;
     static constexpr uint32_t WORKSPACE_STAGES = WORKSPACE_STAGES_;
@@ -2708,7 +2708,7 @@ public:
             uint32_t shareNOut = IS_W4A8 ? (params.shareN / CONSTANT_TWO) : params.shareN;
             CalQuantRow(shareNOut, quantRowOnce);
             auto swigluLayout = layout::RowMajor{params.bs, params.shareN};
-            typename BlockQuant<ArchTag>::Params quantParams{
+            typename BlockQuant<ArchTag, IS_W4A8>::Params quantParams{
                 reinterpret_cast<__gm__ float*>(params.gmShareSwigluOut),
                 swigluLayout,
                 reinterpret_cast<__gm__ float*>(params.gmShareX2Scale),
@@ -2719,7 +2719,7 @@ public:
                 shareNOut
             };
 
-            BlockQuant<ArchTag> blockQuant(resource, quantParams);
+            BlockQuant<ArchTag, IS_W4A8> blockQuant(resource, quantParams);
             MatrixCoord quantShape(params.bs, shareNOut);
             MatrixCoord quantBlockShape((uint16_t)(AscendC::GetSubBlockNum() * quantRowOnce), shareNOut);
             Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
@@ -2735,7 +2735,7 @@ public:
             uint32_t quantRowOnce = 0;
             CalQuantRow(nOut, quantRowOnce);
             auto swigluLayout = layout::RowMajor{mActual, n};
-            typename BlockQuant<ArchTag>::Params quantParams{ptrD,
+            typename BlockQuant<ArchTag, IS_W4A8>::Params quantParams{ptrD,
                 swigluLayout,
                 params.ptrDequantScale,
                 params.layoutDequantScale,
@@ -2744,7 +2744,7 @@ public:
                 quantRowOnce,
                 nOut};
 
-            BlockQuant<ArchTag> blockQuant(resource, quantParams);
+            BlockQuant<ArchTag, IS_W4A8> blockQuant(resource, quantParams);
             MatrixCoord quantShape(mActual, nOut);
             MatrixCoord quantBlockShape((uint16_t)(AscendC::GetSubBlockNum() * quantRowOnce), nOut);
             Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
