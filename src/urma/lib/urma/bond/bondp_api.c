@@ -479,53 +479,19 @@ static int convert_bond_port_id_to_active_index(const bondp_context_t *bdp_ctx, 
     return 0;
 }
 
-static int init_all_indices(bondp_context_t *bdp_ctx,
-                            uint32_t enabled_indices[], uint32_t *enabled_count,
-                            uint32_t active_indices[], uint32_t *active_count)
-{
-    int start = 0;
-    int end = 0;
-    if (enabled_count != NULL) {
-        *enabled_count = 0;
-    }
-
-    if (active_count != NULL) {
-        *active_count = 0;
-    }
-
-    if (bdp_ctx->bonding_level == BONDP_BONDING_LEVEL_IODIE) {
-        start = 0;
-        end = IODIE_NUM;
-    } else {
-        start = IODIE_NUM;
-        end = URMA_UBAGG_DEV_MAX_NUM;
-    }
-
-    for (int i = start; i < end; i++) {
-        if (bdp_ctx->p_ctxs[i] == NULL) {
-            continue;
-        }
-        if (enabled_indices != NULL) {
-            enabled_indices[*enabled_count] = (uint32_t)i;
-            *enabled_count += 1;
-        }
-        if (active_indices != NULL) {
-            active_indices[*active_count] = (uint32_t)i;
-            *active_count += 1;
-        }
-    }
-    return 0;
-}
-
 static int init_active_indices_ex(bondp_context_t *bdp_ctx,
                                   uint32_t enabled_indices[], uint32_t *enabled_count,
                                   uint32_t active_indices[], uint32_t *active_count,
                                   const bondp_port_id_t *port_ids, uint32_t port_count)
 {
     if (port_ids == NULL || port_count == 0) {
-        return init_all_indices(bdp_ctx,
-                                enabled_indices, enabled_count,
-                                active_indices, active_count);
+        *enabled_count = bdp_ctx->enabled_count;
+        *active_count = bdp_ctx->enabled_count;
+        for (uint32_t i = 0; i < bdp_ctx->enabled_count; i++) {
+            enabled_indices[i] = bdp_ctx->enabled_indices[i];
+            active_indices[i] = bdp_ctx->enabled_indices[i];
+        }
+        return 0;
     }
 
     if (port_count > URMA_UBAGG_DEV_MAX_NUM) {
@@ -1053,7 +1019,7 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
         goto DEL_P_VJFR_ID;
     }
 
-    if (bondp_init_wr_buf(bdp_jfr, &bdp_jfr->recv_wr_buf, cfg->depth) != 0) {
+    if (bdp_ctx->msn_enable && bondp_init_wr_buf(bdp_jfr, &bdp_jfr->recv_wr_buf, cfg->depth) != 0) {
         URMA_LOG_ERR("Failed to init jfr wr buf\n");
         goto UNINIT_JFR_CONNECTION_TABLE;
     }
@@ -1074,7 +1040,9 @@ DELETE_VJFR:
 DELETE_PJFR:
     bondp_delete_pjfr(bdp_jfr);
 FREE_JFR:
-    bondp_uninit_wr_buf(&bdp_jfr->recv_wr_buf);
+    if (bdp_ctx->msn_enable) {
+        bondp_uninit_wr_buf(&bdp_jfr->recv_wr_buf);
+    }
     free(bdp_jfr);
     return NULL;
 }
@@ -1107,7 +1075,9 @@ urma_status_t bondp_delete_jfr(urma_jfr_t *jfr)
     */
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
     bondp_uninit_connection_table(bdp_jfr);
-    bondp_uninit_wr_buf(&bdp_jfr->recv_wr_buf);
+    if (bdp_ctx->msn_enable) {
+        bondp_uninit_wr_buf(&bdp_jfr->recv_wr_buf);
+    }
 
     if (bondp_delete_vjfr(bdp_jfr) != URMA_SUCCESS) {
         URMA_LOG_ERR("Failed to delete_vjfr\n");
@@ -1439,10 +1409,6 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         URMA_LOG_ERR("Failed to init jetty send wr buf\n");
         goto UNINIT_JETTY_CONNECTION_TABLE;
     }
-    if (bondp_init_wr_buf(bdp_jetty, &bdp_jetty->recv_wr_buf, jetty_cfg->shared.jfr->jfr_cfg.depth) != 0) {
-        URMA_LOG_ERR("Failed to init jetty recv wr buf\n");
-        goto UNINIT_JETTY_SEND_WR_BUF;
-    }
 
     /* Validate bdp_jfr below at the function entry point to ensure they are not empty. */
     bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jetty_cfg->shared.jfr, bondp_comp_t, v_jfr);
@@ -1456,8 +1422,6 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
 
     return &bdp_jetty->v_jetty;
 
-UNINIT_JETTY_SEND_WR_BUF:
-    bondp_uninit_wr_buf(&bdp_jetty->send_wr_buf);
 UNINIT_JETTY_CONNECTION_TABLE:
     bondp_uninit_connection_table(bdp_jetty);
 DEL_P_VJETTY_ID:
@@ -1469,7 +1433,6 @@ UNREGISTER_HEALTH_SEG:
 DELETE_PJETTY:
     bondp_delete_pjetty(bdp_jetty);
 FREE_JETTY:
-    bondp_uninit_wr_buf(&bdp_jetty->recv_wr_buf);
     bondp_uninit_wr_buf(&bdp_jetty->send_wr_buf);
     (void)pthread_spin_destroy(&bdp_jetty->send_lock);
     free(bdp_jetty);
@@ -1510,7 +1473,6 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
     bondp_unregister_health_check_seg_for_jetty(bdp_jetty);
     bondp_uninit_connection_table(bdp_jetty);
-    bondp_uninit_wr_buf(&bdp_jetty->recv_wr_buf);
     bondp_uninit_wr_buf(&bdp_jetty->send_wr_buf);
     if (bondp_delete_vjetty(bdp_jetty) != URMA_SUCCESS) {
         URMA_LOG_ERR("Failed to delete vjetty\n");
@@ -2277,8 +2239,6 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     }
     bdp_tjetty->is_msn_enabled = rvjetty_info.is_msn_enabled;
 
-    (void)init_all_indices(bdp_ctx, bdp_ctx->enabled_indices, &bdp_ctx->enabled_count, NULL, NULL);
-
     if (init_target_active_indices(bdp_ctx, bdp_tjetty, &rvjetty_info) != 0) {
         URMA_LOG_ERR("Failed to init target active indices\n");
         goto UNIMPORT_VJETTY;
@@ -2557,8 +2517,6 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
                      EID_ARGS(rjfr->jfr_id.eid), rjfr->jfr_id.id);
         goto FREE_TJFR;
     }
-
-    (void)init_all_indices(bdp_ctx, bdp_ctx->enabled_indices, &bdp_ctx->enabled_count, NULL, NULL);
 
     if (init_target_active_indices(bdp_ctx, bdp_tjetty, &udata_out) != 0) {
         URMA_LOG_ERR("Failed to init target active indices\n");

@@ -26,6 +26,7 @@
 #define UMQ_LEN_ALIGNMENT_4 4
 #define TSEG_MAP_NUM 256
 #define UMQ_CTP_MAX_BUF_SIZE 4096
+#define UMQ_INITIAL_CREDIT 2
 
 static util_id_allocator_t g_umq_ub_id_allocator = {0};
 static ub_queue_ctx_list_t g_umq_ub_queue_ctx_list;
@@ -183,7 +184,7 @@ static int umq_ub_prefill_rx_buf(ub_queue_t *queue)
         }
 
         umq_buf_t *bad_buf = NULL;
-        ret = umq_ub_post_rx_inner_impl(queue, qbuf, &bad_buf);
+        ret = umq_ub_post_rx_inner_impl(queue, qbuf, &bad_buf, NULL);
         if (ret != UMQ_SUCCESS) {
             umq_buf_free(bad_buf);
             goto DEC_REF;
@@ -778,6 +779,7 @@ static ALWAYS_INLINE uint32_t umq_ub_fc_info_serialize(
     urpc_tlv_head_t *info_tlv_head = (urpc_tlv_head_t *)(uintptr_t)bind_info_buf;
     umq_ub_bind_fc_info_t *fc_info = (umq_ub_bind_fc_info_t *)(uintptr_t)info_tlv_head->value;
     fc_info->rsvd = 0;
+    fc_info->initial_credit = 0;
     if (queue->flow_control.enabled) {
         fc_info->token = jetty->jetty_cfg.shared.jfr->jfr_cfg.token_value;
         fc_info->rjetty_size = umq_ub_rjetty_get(fc_info->rjetty, UB_QUEUE_JETTY_FLOW_CONTROL,
@@ -785,6 +787,11 @@ static ALWAYS_INLINE uint32_t umq_ub_fc_info_serialize(
         if (fc_info->rjetty_size == 0) {
             return 0;
         }
+        ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+        uint16_t allocated = pool->ops.available_credit_dec(pool, UMQ_INITIAL_CREDIT);
+        fc_info->initial_credit = allocated;
+        (void)queue->flow_control.ops.local_rx_allocated_inc(&queue->flow_control, allocated);
+
     } else {
         fc_info->rjetty_size = 0;
         fc_info->token.token = 0;
@@ -2897,7 +2904,7 @@ void umq_ub_fill_rx_buffer(ub_queue_t *queue, int rx_cnt)
                 break;
             }
             umq_buf_t *bad_buf = NULL;
-            ret = umq_ub_post_rx_inner_impl(queue, qbuf, &bad_buf);
+            ret = umq_ub_post_rx_inner_impl(queue, qbuf, &bad_buf, NULL);
             if (ret != UMQ_SUCCESS) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, post rx failed, status: %d\n",
                     EID_ARGS(*eid), id, ret);
@@ -3389,7 +3396,7 @@ void umq_flush_rx(ub_queue_t *queue, uint32_t max_retry_times)
     umq_buf_t *buf[UMQ_BATCH_SIZE];
     uint32_t remain = umq_ub_pjfr_depth(queue) - __atomic_load_n(&queue->require_rx_count, __ATOMIC_ACQUIRE);
     while (remain > 0 && retry_times < max_retry_times) {
-        rx_cnt = umq_ub_poll_rx((uint64_t)(uintptr_t)queue, buf, UMQ_BATCH_SIZE);
+        rx_cnt = umq_ub_poll_rx((uint64_t)(uintptr_t)queue, buf, UMQ_BATCH_SIZE, NULL);
         if (rx_cnt < 0) {
             return;
         }

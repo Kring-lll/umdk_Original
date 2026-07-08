@@ -211,11 +211,17 @@ static inline void decode_imm_data(uint64_t imm_data, uint32_t *cr_opcode, uint3
 
 static inline urma_target_jetty_t *get_p_tjetty(urma_target_jetty_t *tjetty, int send_idx, int target_idx)
 {
+    if (tjetty == NULL) {
+        return NULL;
+    }
     return CONTAINER_OF_FIELD(tjetty, bondp_target_jetty_t, v_tjetty)->p_tjetty[send_idx][target_idx];
 }
 
 static inline urma_target_seg_t *get_p_tseg(urma_target_seg_t *tseg, int local_idx, int remote_idx)
 {
+    if (tseg == NULL) {
+        return NULL;
+    }
     /* Use token_id to distinguish local register seg and imported seg
        This is useful for write ops */
     if (tseg->token_id != NULL) {
@@ -228,6 +234,83 @@ static inline urma_target_seg_t *get_p_tseg(urma_target_seg_t *tseg, int local_i
 static inline urma_target_seg_t *get_v_tseg(urma_target_seg_t *tseg)
 {
     return (urma_target_seg_t *)(uintptr_t)tseg->handle;
+}
+
+static int check_tseg_path(urma_target_seg_t *tseg, int send_idx, int target_idx)
+{
+    if (get_p_tseg(tseg, send_idx, target_idx) == NULL) {
+        URMA_LOG_ERR("Failed to bind WR to path, pseg is NULL, send_idx=%d, target_idx=%d.\n",
+                     send_idx, target_idx);
+        return -1;
+    }
+    return 0;
+}
+
+static int check_sg_path(const urma_sg_t *sg, int send_idx, int target_idx)
+{
+    for (int i = 0; i < sg->num_sge; ++i) {
+        if (check_tseg_path(sg->sge[i].tseg, send_idx, target_idx) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int check_send_wr_path(urma_jfs_wr_t *send_wr, int send_idx, int target_idx)
+{
+    if (send_wr->send.src.num_sge > 0 && send_wr->send.src.sge != NULL &&
+        check_sg_path(&send_wr->send.src, send_idx, target_idx) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int check_write_wr_path(urma_jfs_wr_t *send_wr, int send_idx, int target_idx)
+{
+    if (check_sg_path(&send_wr->rw.src, send_idx, target_idx) != 0 ||
+        check_sg_path(&send_wr->rw.dst, send_idx, target_idx) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int check_atomic_wr_path(const urma_sge_t *src, const urma_sge_t *dst, int send_idx, int target_idx)
+{
+    if (src == NULL || dst == NULL ||
+        check_tseg_path(src->tseg, send_idx, target_idx) != 0 ||
+        check_tseg_path(dst->tseg, send_idx, target_idx) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+urma_status_t check_jfs_wr_path(urma_jfs_wr_t *wr, int send_idx, int target_idx)
+{
+    if (get_p_tjetty(wr->tjetty, send_idx, target_idx) == NULL) {
+        URMA_LOG_ERR("Failed to bind WR to path, pjetty is NULL, send_idx=%d, target_idx=%d.\n",
+                     send_idx, target_idx);
+        return URMA_EINVAL;
+    }
+
+    switch (wr->opcode) {
+        case URMA_OPC_SEND:
+        case URMA_OPC_SEND_IMM:
+        case URMA_OPC_SEND_INVALIDATE:
+            return (check_send_wr_path(wr, send_idx, target_idx) == 0) ? URMA_SUCCESS : URMA_EINVAL;
+        case URMA_OPC_WRITE:
+        case URMA_OPC_WRITE_IMM:
+        case URMA_OPC_WRITE_NOTIFY:
+        case URMA_OPC_READ:
+            return (check_write_wr_path(wr, send_idx, target_idx) == 0) ? URMA_SUCCESS : URMA_EINVAL;
+        case URMA_OPC_CAS:
+            return (check_atomic_wr_path(wr->cas.src, wr->cas.dst, send_idx, target_idx) == 0) ?
+                URMA_SUCCESS : URMA_EINVAL;
+        case URMA_OPC_FADD:
+            return (check_atomic_wr_path(wr->faa.src, wr->faa.dst, send_idx, target_idx) == 0) ?
+                URMA_SUCCESS : URMA_EINVAL;
+        default:
+            return URMA_SUCCESS;
+    }
 }
 
 static void map_send_vwr_to_path(urma_jfs_wr_t *send_wr, int send_idx, int target_idx)
@@ -308,7 +391,7 @@ static void map_fadd_vwr_to_path(urma_jfs_wr_t *send_wr, int send_idx, int targe
     send_wr->tjetty = get_p_tjetty(send_wr->tjetty, send_idx, target_idx);
 }
 
-urma_status_t encode_jfs_wr_msn(urma_jfs_wr_t *wr, bondp_comp_t *bdp_comp, uint32_t msn, bool msn_enable)
+void encode_jfs_wr_msn(urma_jfs_wr_t *wr, bondp_comp_t *bdp_comp, uint32_t msn, bool msn_enable)
 {
     uint64_t opcode_tag = 0;
 
@@ -330,7 +413,7 @@ urma_status_t encode_jfs_wr_msn(urma_jfs_wr_t *wr, bondp_comp_t *bdp_comp, uint3
                 bdp_comp->v_jetty.jetty_id.id,
                 wr->send.imm_data,
                 msn_enable);
-            return URMA_SUCCESS;
+            return;
         case URMA_OPC_WRITE_IMM:
             opcode_tag = URMA_CR_OPC_WRITE_WITH_IMM;
             wr->rw.notify_data = encode_imm_data(
@@ -339,22 +422,21 @@ urma_status_t encode_jfs_wr_msn(urma_jfs_wr_t *wr, bondp_comp_t *bdp_comp, uint3
                 bdp_comp->v_jetty.jetty_id.id,
                 wr->rw.notify_data,
                 msn_enable);
-            return URMA_SUCCESS;
+            return;
         case URMA_OPC_WRITE:
         case URMA_OPC_WRITE_NOTIFY:
         case URMA_OPC_READ:
         case URMA_OPC_CAS:
         case URMA_OPC_FADD:
             /* No MSN encoding needed for these opcodes */
-            return URMA_SUCCESS;
+            return;
         default:
             URMA_LOG_ERR("Unsupported send opcode\n");
-            return URMA_EINVAL;
+            return;
     }
-    return URMA_SUCCESS;
 }
 
-void map_jfs_vwr_to_path(urma_jfs_wr_t *wr, int send_idx, int target_idx)
+void convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target_idx)
 {
     switch (wr->opcode) {
         case URMA_OPC_SEND:
@@ -379,19 +461,7 @@ void map_jfs_vwr_to_path(urma_jfs_wr_t *wr, int send_idx, int target_idx)
     }
 }
 
-urma_status_t convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target_idx,
-                                     bondp_comp_t *bdp_comp, bool msn_enable)
-{
-    uint32_t msn = atomic_fetch_add(&bdp_comp->msn, 1) % BONDP_MAX_BITMAP_SIZE;
-    urma_status_t ret = encode_jfs_wr_msn(wr, bdp_comp, msn, msn_enable);
-    if (ret != URMA_SUCCESS) {
-        return ret;
-    }
-    map_jfs_vwr_to_path(wr, send_idx, target_idx);
-    return URMA_SUCCESS;
-}
-
-void convert_jfs_pwr_to_vwr_resend(urma_jfs_wr_t *wr, urma_target_jetty_t *vtjetty)
+void convert_jfs_pwr_to_vwr(urma_jfs_wr_t *wr, urma_target_jetty_t *vtjetty)
 {
     switch (wr->opcode) {
         case URMA_OPC_SEND:
@@ -416,32 +486,7 @@ void convert_jfs_pwr_to_vwr_resend(urma_jfs_wr_t *wr, urma_target_jetty_t *vtjet
     }
 }
 
-void convert_jfs_vwr_to_pwr_for_resend(urma_jfs_wr_t *wr, int send_idx, int target_idx)
-{
-    switch (wr->opcode) {
-        case URMA_OPC_SEND:
-        case URMA_OPC_SEND_IMM:
-        case URMA_OPC_SEND_INVALIDATE:
-            map_send_vwr_to_path(wr, send_idx, target_idx);
-            return;
-        case URMA_OPC_WRITE:
-        case URMA_OPC_WRITE_IMM:
-        case URMA_OPC_WRITE_NOTIFY:
-        case URMA_OPC_READ:
-            map_write_vwr_to_path(wr, send_idx, target_idx);
-            return;
-        case URMA_OPC_CAS:
-            map_cas_vwr_to_path(wr, send_idx, target_idx);
-            return;
-        case URMA_OPC_FADD:
-            map_fadd_vwr_to_path(wr, send_idx, target_idx);
-            return;
-        default:
-            return;
-    }
-}
-
-void add_vwr_use_cnt(urma_jfs_wr_t *wr)
+void get_jfs_vwr_refs(urma_jfs_wr_t *wr)
 {
     if (wr->tjetty != NULL) {
         bondp_tjetty_get(wr->tjetty);
@@ -482,7 +527,7 @@ void add_vwr_use_cnt(urma_jfs_wr_t *wr)
     }
 }
 
-void release_vwr_use_cnt(urma_jfs_wr_t *wr)
+void put_jfs_vwr_refs(urma_jfs_wr_t *wr)
 {
     if (wr->tjetty != NULL) {
         bondp_tjetty_put(wr->tjetty);
@@ -523,12 +568,11 @@ void release_vwr_use_cnt(urma_jfs_wr_t *wr)
     }
 }
 
-urma_status_t convert_jfr_vwr_to_pwr(urma_jfr_wr_t *wr, int recv_idx)
+void convert_jfr_vwr_to_pwr(urma_jfr_wr_t *wr, int recv_idx)
 {
     for (int i = 0; i < wr->src.num_sge; ++i) {
         wr->src.sge[i].tseg = get_p_tseg(wr->src.sge[i].tseg, recv_idx, 0);
     }
-    return URMA_SUCCESS;
 }
 
 /* Thread-local cache for EID mapping lookup in convert_pcr_to_vcr */

@@ -42,29 +42,17 @@ urma_status_t copy_jfr_wr(const urma_jfr_wr_t *src, urma_jfr_wr_t *dst,
 void free_jfr_wr(urma_jfr_wr_t *wr);
 void free_jfs_wr(urma_jfs_wr_t *wr);
 
-urma_status_t convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target_idx,
-                                     bondp_comp_t *bdp_comp, bool msn_enable);
+void encode_jfs_wr_msn(urma_jfs_wr_t *wr, bondp_comp_t *bdp_comp, uint32_t msn, bool enable_msn);
 
-/**
- * Encode MSN into WR's imm_data and change opcode if needed.
- */
-urma_status_t encode_jfs_wr_msn(urma_jfs_wr_t *wr, bondp_comp_t *bdp_comp, uint32_t msn, bool enable_msn);
+urma_status_t check_jfs_wr_path(urma_jfs_wr_t *wr, int send_idx, int target_idx);
 
-/**
- * Map virtual tseg/tjetty pointers to physical ones based on send_idx/target_idx.
- */
-void map_jfs_vwr_to_path(urma_jfs_wr_t *wr, int send_idx, int target_idx);
+void convert_jfs_vwr_to_pwr(urma_jfs_wr_t *wr, int send_idx, int target_idx);
+void convert_jfs_pwr_to_vwr(urma_jfs_wr_t *wr, urma_target_jetty_t *vtjetty);
 
-void convert_jfs_pwr_to_vwr_resend(urma_jfs_wr_t *wr, urma_target_jetty_t *vtjetty);
+void get_jfs_vwr_refs(urma_jfs_wr_t *wr);
+void put_jfs_vwr_refs(urma_jfs_wr_t *wr);
 
-void convert_jfs_vwr_to_pwr_for_resend(urma_jfs_wr_t *wr, int send_idx, int target_idx);
-
-void add_vwr_use_cnt(urma_jfs_wr_t *wr);
-
-void release_vwr_use_cnt(urma_jfs_wr_t *wr);
-
-urma_status_t convert_jfr_vwr_to_pwr(urma_jfr_wr_t *wr, int recv_idx);
-
+void convert_jfr_vwr_to_pwr(urma_jfr_wr_t *wr, int recv_idx);
 void convert_pcr_to_vcr(urma_cr_t *cr, bondp_context_t *bdp_ctx, uint32_t *msn);
 
 static inline bool is_recv_cr(const urma_cr_t *cr)
