@@ -2237,7 +2237,10 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
             goto FREE_TJETTY;
         }
     }
-    bdp_tjetty->is_msn_enabled = rvjetty_info.is_msn_enabled;
+    bdp_tjetty->is_msn_enabled = rvjetty_info.is_msn_enabled ? rvjetty_info.is_msn_enabled : bdp_ctx->msn_enable;
+    URMA_LOG_INFO("import_jetty: tjetty_ptr=%p, tjetty_id=%u, final is_msn_enabled=%d, rvjetty_info.is_msn_enabled=%d\n",
+                 (void *)bdp_tjetty, bdp_tjetty->v_tjetty.id.id,
+                 bdp_tjetty->is_msn_enabled, rvjetty_info.is_msn_enabled);
 
     if (init_target_active_indices(bdp_ctx, bdp_tjetty, &rvjetty_info) != 0) {
         URMA_LOG_ERR("Failed to init target active indices\n");
@@ -2517,6 +2520,12 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
                      EID_ARGS(rjfr->jfr_id.eid), rjfr->jfr_id.id);
         goto FREE_TJFR;
     }
+    /* udata_out.is_msn_enabled is deprecated and not filled by kernel for JFR import.
+     * Fall back to local msn_enable to ensure MSN encoding matches receiver's dedup. */
+    bdp_tjetty->is_msn_enabled = udata_out.is_msn_enabled ? udata_out.is_msn_enabled : bdp_ctx->msn_enable;
+    URMA_LOG_INFO("import_jfr: tjetty_ptr=%p, tjetty_id=%u, is_msn_enabled=%d, udata_out.is_msn_enabled=%d, local msn_enable=%d\n",
+                 (void *)bdp_tjetty, bdp_tjetty->v_tjetty.id.id,
+                 bdp_tjetty->is_msn_enabled, udata_out.is_msn_enabled, bdp_ctx->msn_enable);
 
     if (init_target_active_indices(bdp_ctx, bdp_tjetty, &udata_out) != 0) {
         URMA_LOG_ERR("Failed to init target active indices\n");
