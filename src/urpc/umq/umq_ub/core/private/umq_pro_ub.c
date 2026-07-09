@@ -1682,6 +1682,10 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
     uint32_t failed_cnt = 0;
     for (int i = 0; i < tx_cr_cnt; i++) {
         umq_ub_fc_user_ctx_t obj = {.value = cr[i].user_ctx};
+        ub_queue_t *real_queue = (ub_queue_t *)(uintptr_t)queue->dev_ctx->umq_ctx_table[obj.bs.umq_id];
+        if (real_queue != NULL) {
+            (void)__atomic_sub_fetch(&real_queue->flow_control.tx_outstanding, 1, __ATOMIC_ACQ_REL);
+        }
         if (cr[i].status != URMA_CR_SUCCESS) {
             if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag)) {
                 umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
