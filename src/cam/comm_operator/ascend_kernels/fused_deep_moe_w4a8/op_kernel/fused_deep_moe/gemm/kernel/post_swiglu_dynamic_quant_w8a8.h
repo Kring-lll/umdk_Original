@@ -79,7 +79,7 @@ public:
     };
 
     CATLASS_DEVICE
-    BlockQuant(Arch::Resource<ArchTag> const &resource, Params const &params_) : params(params_)
+    BlockQuantW8a8(Arch::Resource<ArchTag> const &resource, Params const &params_) : params(params_)
     {
         int64_t ubOffset = 0;
         tileRow = params_.tileRow;
@@ -116,7 +116,7 @@ public:
     }
 
     CATLASS_DEVICE
-    ~BlockQuant()
+    ~BlockQuantW8a8()
     {
         AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(0);
         AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(0);
