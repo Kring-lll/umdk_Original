@@ -19,17 +19,14 @@
 #include "catlass/matrix_coord.hpp"
 
 
-namespace Catlass::Epilogue::Block {
+namespace Catlass::Epilogue::BlockW8a8 {
 
+// W8A8 BlockEpilogue: standalone class (not partial specialization)
 template <uint32_t UB_STAGES_, uint32_t EXEC_FLAG_,
-          class CType_, class ScaleType_, class LayoutScale_, class LayoutPerTokenScale_, class DType_,
-          class TileRowBroadcastMul_, class TileBroadcastOneBlk_, class TileOneBlkColumnBroadcastMul_,
+          class CType_, class ScaleType_, class LayoutScale_, class LayoutPerTokenScale_,
+          class DType_, class TileRowBroadcastMul_, class TileBroadcastOneBlk_, class TileOneBlkColumnBroadcastMul_,
           class TileCopy_, class EpilogueTileSwizzle_>
-class BlockEpilogueW8a8<EpilogueAtlasA2PerTokenDequantCombine<UB_STAGES_, EXEC_FLAG_>,
-          CType_, Gemm::GemmType<ScaleType_, LayoutScale_>, Gemm::GemmType<float, LayoutPerTokenScale_>, DType_,
-          TileRowBroadcastMul_, TileBroadcastOneBlk_, TileOneBlkColumnBroadcastMul_,
-          TileCopy_, EpilogueTileSwizzle_>
-{
+class BlockEpilogue {
 public:
     using DispatchPolicy = EpilogueAtlasA2PerTokenDequantCombine<UB_STAGES_, EXEC_FLAG_>;
     using ArchTag = typename DispatchPolicy::ArchTag;
@@ -120,7 +117,7 @@ public:
     }
 
     CATLASS_DEVICE
-    BlockEpilogueW8a8(Arch::Resource<ArchTag> &resource, MoeDistributeCombineImpl::CombineCalcInfo &calcInfo,
+    BlockEpilogue(Arch::Resource<ArchTag> &resource, MoeDistributeCombineImpl::CombineCalcInfo &calcInfo,
                   Params const &params = Params{})
         : resource(resource),
           calcInfo(calcInfo),
@@ -180,7 +177,7 @@ public:
     }
 
     CATLASS_DEVICE
-    ~BlockEpilogueW8a8()
+    ~BlockEpilogue()
     {
         for (uint32_t i = 0; i < UB_STAGES; ++i) {
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventUbCVMTE2List[i]);
@@ -433,6 +430,6 @@ private:
     CopyUbToGmD copyUbToGmD;
 };
 
-}  // namespace Catlass::Epilogue::Block
+}  // namespace Catlass::Epilogue::BlockW8a8
 
 #endif  // ACT_EPILOGUE_BLOCK_EPILOGUE_PER_TOKEN_DEQUANT_HPP
