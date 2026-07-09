@@ -160,7 +160,7 @@ typedef struct ub_flow_control {
     volatile uint64_t total_remote_rx_received_error;
     volatile uint64_t total_flow_controlled_wr;
     volatile uint64_t packet_stats[UB_PACKET_STATS_TYPE_MAX];
-    volatile uint64_t stats_u64[FC_COUNTER_MAX_U64];
+    volatile uint64_t stats_u64[FC_OUNTER_MAX_U64];
     volatile uint16_t local_rx_posted;
     volatile uint16_t remote_rx_window;
     volatile uint16_t stats_u16[FC_COUNTER_MAX_U16];
@@ -176,6 +176,7 @@ typedef struct ub_flow_control {
     uint16_t local_rx_depth;
     uint16_t remote_tx_depth;
     uint16_t remote_rx_depth;
+    volatile uint32_t tx_outstanding;
     uint32_t timeout_us;
     bool local_set;
     bool remote_get;
@@ -436,7 +437,7 @@ typedef struct ub_queue {
     uint32_t tx_depth;
     uint32_t remote_rx_buf_size;
     uint32_t fc_rx_depth;
-
+    uint32_t fc_tx_depth;
     uint8_t priority;           // priority of the queue
     uint8_t max_rx_sge;         // max sge number of receive array
     uint8_t max_tx_sge;         // max sge number of send array

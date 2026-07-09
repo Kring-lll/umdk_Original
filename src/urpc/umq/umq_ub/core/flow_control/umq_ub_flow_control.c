@@ -28,6 +28,7 @@
 
 static uint8_t g_umq_ub_credit_ratio[] = {1, 3, 5, 7};
 #define UMQ_UB_CREDIT_RATIO_SIZE (sizeof(g_umq_ub_credit_ratio) / sizeof(uint8_t))
+#define UMQ_UB_TX_READY_TIMEOUT_1 1
 
 static uint8_t umq_ub_fc_raito_to_imm(uint16_t available, uint16_t total)
 {
@@ -660,6 +661,30 @@ void umq_ub_shared_credit_recharge(ub_queue_t *queue, uint16_t recharge_count)
     credit->ops.available_credit_inc(credit, recharge_count);
 }
 
+bool is_umq_ub_fc_tx_ready(ub_queue_t *queue)
+{
+    int ret;
+    uint32_t outstanding = __atomic_add_fetch(&queue->flow_control.tx_outstanding, 1, __ATOMIC_ACQ_REL);
+    if (outstanding <= queue->fc_tx_depth) {
+        return true;
+    }
+
+    uint64_t flush_begin = urpc_get_cpu_cycles();
+    while ((urpc_get_cpu_cycles() - flush_begin) < urpc_get_cpu_hz() * UMQ_UB_TX_READY_TIMEOUT_1) {
+        outstanding = __atomic_load_n(&queue->flow_control.tx_outstanding, __ATOMIC_ACQUIRE);
+        if (outstanding <= queue->fc_tx_depth) {
+            return true;
+        }
+        ret = umq_ub_poll_fc_tx(queue, NULL, 0, 0);
+        if (ret < 0) {
+            __atomic_sub_fetch(&queue->flow_control.tx_outstanding, 1, __ATOMIC_ACQ_REL);
+            return false;
+        }
+    }
+    __atomic_sub_fetch(&queue->flow_control.tx_outstanding, 1, __ATOMIC_ACQ_REL);
+    return false;
+}
+
 int umq_ub_shared_credit_req_send(ub_queue_t *queue)
 {
     ub_flow_control_t *fc = &queue->flow_control;
@@ -706,7 +731,7 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
             .type = IMM_TYPE_FC_CREDIT_REQ,
             .notify = credits_per_request,
             .rsvd0 = 0,
-            .rsvd1 = 0
+            .umq_id = queue->umq_id
         }
     };
     urma_jfs_wr_t urma_wr = {.user_ctx = obj.value,
@@ -717,6 +742,13 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
     urma_jfs_wr_t *bad_wr = NULL;
     /* record FC urma_post_jetty_send_wr as sub_time when called from a traced context */
     uint64_t tp_start = umq_trace_timestamp_get();
+    if (!is_umq_ub_fc_tx_ready(queue)) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
+            "remote jetty_id: %u, tx not ready\n", EID_ARGS(jetty->jetty_id.eid),
+            jetty->jetty_id.id, EID_ARGS(tjetty->id.eid), tjetty->id.id);
+        return -UMQ_ERR_EFLOWCTL;
+    }
+
     urma_status_t status = umq_symbol_urma()->urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
     uint64_t delta_ns = umq_trace_write_delta(tp_start);
     umq_trace_sub_record(UMQ_TRACE_TYPE_POST, UMQ_URMA_FUNC_FC_POST_TX, tp_start, delta_ns);
@@ -725,6 +757,7 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
         umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND);
         return UMQ_SUCCESS;
     }
+    (void)__atomic_sub_fetch(&fc->tx_outstanding, 1, __ATOMIC_ACQ_REL);
     umq_ub_post_release_jetty_node(queue, 1);
     umq_ub_permission_release(fc);
     UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
@@ -767,7 +800,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify, ui
             .type = IMM_TYPE_FC_CREDIT_REP,
             .notify = notify,
             .rsvd0 = 0,
-            .rsvd1 = 0
+            .umq_id = queue->umq_id
         }
     };
     urma_jfs_wr_t urma_wr = {.user_ctx = obj.value,
@@ -777,6 +810,13 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify, ui
         .opcode = URMA_OPC_SEND_IMM};
     urma_jfs_wr_t *bad_wr = NULL;
     uint64_t tp_start = umq_trace_timestamp_get();
+
+    if (!is_umq_ub_fc_tx_ready(queue)) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
+            "remote jetty_id: %u, tx not ready\n", EID_ARGS(jetty->jetty_id.eid),
+            jetty->jetty_id.id, EID_ARGS(tjetty->id.eid), tjetty->id.id);
+        return -UMQ_ERR_EFLOWCTL;
+    }
     urma_status_t status = umq_symbol_urma()->urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
     uint64_t delta_ns = umq_trace_write_delta(tp_start);
     umq_trace_sub_record(UMQ_TRACE_TYPE_POLL, UMQ_URMA_FUNC_FC_POST_TX, tp_start, delta_ns);
@@ -785,7 +825,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify, ui
         umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND);
         return UMQ_SUCCESS;
     }
-
+    (void)__atomic_sub_fetch(&queue->flow_control.tx_outstanding, 1, __ATOMIC_ACQ_REL);
     umq_ub_post_release_jetty_node(queue, 1);
     UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
         "remote jetty_id: %u, urma_post_jetty_send_wr for send credit req failed, status: %d\n",
@@ -907,7 +947,7 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
             .type = IMM_TYPE_FC_CREDIT_RETURN_REQ,
             .notify = return_credit,
             .rsvd0 = 0,
-            .rsvd1 = 0
+            .umq_id = queue->umq_id
         }
     };
 
@@ -918,6 +958,12 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
         .opcode = URMA_OPC_SEND_IMM};
     urma_jfs_wr_t *bad_wr = NULL;
     uint64_t tp_start = umq_trace_timestamp_get();
+    if (!is_umq_ub_fc_tx_ready(queue)) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
+            "remote jetty_id: %u, tx not ready\n", EID_ARGS(jetty->jetty_id.eid),
+            jetty->jetty_id.id, EID_ARGS(tjetty->id.eid), tjetty->id.id);
+        return -UMQ_ERR_EFLOWCTL;
+    }
     urma_status_t status = umq_symbol_urma()->urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
     uint64_t delta_ns = umq_trace_write_delta(tp_start);
     umq_trace_sub_record(UMQ_TRACE_TYPE_POLL, UMQ_URMA_FUNC_FC_POST_TX, tp_start, delta_ns);
@@ -926,6 +972,7 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
         umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND);
         return UMQ_SUCCESS;
     }
+    (void)__atomic_sub_fetch(&queue->flow_control.tx_outstanding, 1, __ATOMIC_ACQ_REL);
     umq_ub_post_release_jetty_node(queue, 1);
     umq_ub_permission_release(fc);
     UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
@@ -972,7 +1019,7 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
             .type = IMM_TYPE_FC_CREDIT_RETURN_ACK,
             .notify = return_credit,
             .rsvd0 = 0,
-            .rsvd1 = 0
+            .umq_id = queue->umq_id
         }
     };
     urma_jfs_wr_t urma_wr = {.user_ctx = obj.value,
@@ -982,6 +1029,12 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
         .opcode = URMA_OPC_SEND_IMM};
     urma_jfs_wr_t *bad_wr = NULL;
     uint64_t tp_start = umq_trace_timestamp_get();
+    if (!is_umq_ub_fc_tx_ready(queue)) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
+            "remote jetty_id: %u, tx not ready\n", EID_ARGS(jetty->jetty_id.eid),
+            jetty->jetty_id.id, EID_ARGS(tjetty->id.eid), tjetty->id.id);
+        return -UMQ_ERR_EFLOWCTL;
+    }
     urma_status_t status = umq_symbol_urma()->urma_post_jetty_send_wr(jetty, &urma_wr, &bad_wr);
     uint64_t delta_ns = umq_trace_write_delta(tp_start);
     umq_trace_sub_record(UMQ_TRACE_TYPE_POLL, UMQ_URMA_FUNC_FC_POST_TX, tp_start, delta_ns);
@@ -990,6 +1043,7 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
         umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND);
         return UMQ_SUCCESS;
     }
+    (void)__atomic_sub_fetch(&queue->flow_control.tx_outstanding, 1, __ATOMIC_ACQ_REL);
     umq_ub_post_release_jetty_node(queue, 1);
     UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
         "remote jetty_id: %u, urma_post_jetty_send_wr for send return ack failed, status: %d\n",
