@@ -27,6 +27,9 @@
 #include "fused_deep_moe/epilogue/block/block_epilogue.h"
 #include "fused_deep_moe/gemm/kernel/grouped_matmul_slice_m_per_token_dequant_multistage_workspace.h"
 #include "fused_deep_moe/gemm/kernel/grouped_matmul_slice_m_per_token_dequant_swiglu_quant_multistage_workspace.h"
+// W8A8 kernel files (separate from W4A8, no code sharing)
+#include "fused_deep_moe/gemm/kernel/grouped_matmul_slice_m_per_token_dequant_multistage_workspace_w8a8.h"
+#include "fused_deep_moe/gemm/kernel/grouped_matmul_slice_m_per_token_dequant_swiglu_quant_multistage_workspace_w8a8.h"
 #include "fused_deep_moe/raw_distributed/cam_moe_distribute_dispatch.h"
 #include "fused_deep_moe_tiling.h"
 #include "fused_deep_moe_base.h"
@@ -127,86 +130,51 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     // kernel level
     using ElementGroupList = int64_t;
 
-    using GemmKernel = typename std::conditional<
-        (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE),
-        Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspace<
-            TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>,
-        Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspaceWithShallowDispatch<
-            TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>>::type;
+    if constexpr (isW4A8) {
+        // W4A8: use W4A8 kernel (with bias/compensation matrix support)
+        using GemmKernel = typename std::conditional<
+            (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE),
+            Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspace<
+                TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>,
+            Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspaceWithShallowDispatch<
+                TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>>::type;
 
     if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
         typename GemmKernel::Params params{problemShape,
-            groupCount,
-            gmGroupList,
-            gmA,
-            layoutA,
-            gmShareB,
-            layoutShareB,
-            gmB,
-            layoutB,
-            gmBias,
-            gmShareBias,
-            gmShareScale,
-            layoutShareScale,
-            gmScale,
-            layoutScale,
-            gmPerTokenScale,
-            layoutPerTokenScale,
-            gmD,
-            layoutD,
-            gmDequantScale,
-            layoutDequantScale,
-            gmWorkspace,
-            gmX,
-            gmMoeSmoothScales,
-            gmShareSmoothScales,
-            gmexpertIds,
-            gmExpandIdx,
-            gmEpSendCount,
-            xActiveMask,
-            gmResvered,
-            gmExpertTokenNums,
-            gmShareX1,
-            gmShareX1Scale,
-            gmShareSwigluOut,
-            gmShareX2,
-            layoutShareD,
-            gmShareX2Scale,
-            gmSwigluOut,
-            disGmmDeqSwigluQuantGmmDeqComInfo};
-        // call a kernel
+            groupCount, gmGroupList, gmA, layoutA, gmShareB, layoutShareB, gmB, layoutB,
+            gmBias, gmShareBias,
+            gmShareScale, layoutShareScale, gmScale, layoutScale, gmPerTokenScale, layoutPerTokenScale,
+            gmD, layoutD, gmDequantScale, layoutDequantScale, gmWorkspace,
+            gmX, gmMoeSmoothScales, gmShareSmoothScales, gmexpertIds, gmExpandIdx,
+            gmEpSendCount, xActiveMask, gmResvered, gmExpertTokenNums,
+            gmShareX1, gmShareX1Scale, gmShareSwigluOut, gmShareX2, layoutShareD, gmShareX2Scale,
+            gmSwigluOut, disGmmDeqSwigluQuantGmmDeqComInfo};
         GemmKernel gemm;
         gemm(params);
     } else {
         typename GemmKernel::Params params{problemShape,
-            groupCount,
-            gmGroupList,
-            gmA,
-            layoutA,
-            gmShareB,
-            layoutShareB,
-            gmB,
-            layoutB,
-            gmShareScale,
-            layoutShareScale,
-            gmScale,
-            layoutScale,
-            gmPerTokenScale,
-            layoutPerTokenScale,
-            gmD,
-            layoutD,
-            gmDequantScale,
-            layoutDequantScale,
-            gmWorkspace,
-            gmShareX1,
-            gmShareX1Scale,
-            gmShareSwigluOut,
-            gmShareX2,
-            layoutShareD,
-            gmShareX2Scale,
-            gmSwigluOut,
-            disGmmDeqSwigluQuantGmmDeqComInfo};
-        // call a kernel
+            groupCount, gmGroupList, gmA, layoutA, gmShareB, layoutShareB, gmB, layoutB,
+            gmBias, gmShareBias,
+            gmShareScale, layoutShareScale, gmScale, layoutScale, gmPerTokenScale, layoutPerTokenScale,
+            gmD, layoutD, gmDequantScale, layoutDequantScale, gmWorkspace,
+            gmShareX1, gmShareX1Scale, gmShareSwigluOut, gmShareX2, layoutShareD, gmShareX2Scale,
+            gmSwigluOut, disGmmDeqSwigluQuantGmmDeqComInfo};
+        GemmKernel gemm;
+        gemm(params);
+    }
+    } else {
+        // W8A8: use W8A8 kernel (no bias, standard BlockMmad)
+        using GemmKernel = Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantSwigluQuantMultiStageWorkspaceW8a8<
+            TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
+
+        typename GemmKernel::Params params{problemShape,
+            groupCount, gmGroupList, gmA, layoutA, gmShareB, layoutShareB, gmB, layoutB,
+            gmShareScale, layoutShareScale, gmScale, layoutScale, gmPerTokenScale, layoutPerTokenScale,
+            gmD, layoutD, gmDequantScale, layoutDequantScale, gmWorkspace,
+            gmX, gmMoeSmoothScales, gmShareSmoothScales, gmexpertIds, gmExpandIdx,
+            gmEpSendCount, xActiveMask, gmResvered, gmExpertTokenNums,
+            gmShareX1, gmShareX1Scale, gmShareSwigluOut, gmShareX2, layoutShareD, gmShareX2Scale,
+            gmSwigluOut, disGmmDeqSwigluQuantGmmDeqComInfo};
         GemmKernel gemm;
         gemm(params);
     }
@@ -267,41 +235,37 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
 
     // kernel level
     using ElementGroupList = int64_t;
-    using GemmKernel = Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantMultiStageWorkspace<
-        TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
 
-    typename GemmKernel::Params params{problemShape,
-        groupCount,
-        gmGroupList,
-        gmA,
-        layoutA,
-        gmB,
-        layoutB,
-        gmBias,
-        gmShareBias,
-        gmScale,
-        layoutScale,
-        gmPerTokenScale,
-        layoutPerTokenScale,
-        gmD,
-        layoutD,
-        batchSize,
-        sharedGmm2ProblemShape,
-        gmSharedA,
-        gmSharedB,
-        gmSharedD,
-        gmSharedScale,
-        gmSharedPtrPerTokenScale,
-        sharedLayoutA,
-        sharedLayoutB,
-        sharedLayoutPerTokenScale,
-        sharedLayoutD,
-        gmWorkspace,
-        combiner};
+    if constexpr (isW4A8) {
+        // W4A8: use W4A8 GMM2 kernel (with bias)
+        using GemmKernel = Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantMultiStageWorkspace<
+            TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
 
-    // call a kernel
-    GemmKernel gemm{epRankId};
-    gemm(params);
+        typename GemmKernel::Params params{problemShape,
+            groupCount, gmGroupList, gmA, layoutA, gmB, layoutB,
+            gmBias, gmShareBias,
+            gmScale, layoutScale, gmPerTokenScale, layoutPerTokenScale,
+            gmD, layoutD, batchSize, sharedGmm2ProblemShape,
+            gmSharedA, gmSharedB, gmSharedD, gmSharedScale, gmSharedPtrPerTokenScale,
+            sharedLayoutA, sharedLayoutB, sharedLayoutPerTokenScale, sharedLayoutD,
+            gmWorkspace, combiner};
+        GemmKernel gemm{epRankId};
+        gemm(params);
+    } else {
+        // W8A8: use W8A8 GMM2 kernel (no bias)
+        using GemmKernel = Gemm::Kernel::GroupedMatmulSliceMPerTokenDequantMultiStageWorkspaceW8a8<
+            TemplateMC2TypeFunc, BlockMmad, BlockEpilogue, BlockScheduler, WORKSPACE_STAGES, ElementGroupList>;
+
+        typename GemmKernel::Params params{problemShape,
+            groupCount, gmGroupList, gmA, layoutA, gmB, layoutB,
+            gmScale, layoutScale, gmPerTokenScale, layoutPerTokenScale,
+            gmD, layoutD, batchSize, sharedGmm2ProblemShape,
+            gmSharedA, gmSharedB, gmSharedD, gmSharedScale, gmSharedPtrPerTokenScale,
+            sharedLayoutA, sharedLayoutB, sharedLayoutPerTokenScale, sharedLayoutD,
+            gmWorkspace, combiner};
+        GemmKernel gemm{epRankId};
+        gemm(params);
+    }
 }
 
 template <TemplateMC2TypeClass>
