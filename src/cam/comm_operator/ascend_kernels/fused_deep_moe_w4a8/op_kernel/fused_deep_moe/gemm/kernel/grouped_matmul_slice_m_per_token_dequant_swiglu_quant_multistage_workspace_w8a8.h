@@ -1357,7 +1357,7 @@ public:
             uint32_t n = params.shareN;
             uint32_t nOut = params.shareN / 2;
             uint32_t quantRowOnce = 0;
-            CalQuantRow(nOut, quantRowOnce);
+            CalQuantRowW8a8(nOut, quantRowOnce);
             typename BlockQuantW8a8W8a8<ArchTag>::Params quantParams;
             auto swigluLayout = layout::RowMajor{totalTokenCount, n};
             quantParams = typename BlockQuantW8a8W8a8<ArchTag>::Params {
@@ -1389,7 +1389,7 @@ public:
             uint32_t n = params.problemShape.n();
             uint32_t nOut = params.problemShape.n() / 2;
             uint32_t quantRowOnce = 0;
-            CalQuantRow(nOut, quantRowOnce);
+            CalQuantRowW8a8(nOut, quantRowOnce);
             typename BlockQuantW8a8W8a8<ArchTag>::Params quantParams;
             auto swigluLayout = layout::RowMajor{totalTokenCount, n};
             quantParams = typename BlockQuantW8a8W8a8<ArchTag>::Params {

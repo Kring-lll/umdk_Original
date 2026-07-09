@@ -6,8 +6,8 @@
  * Note:
  * History: 2026-05-12 create FusedDeepMoe operator kernel utils function header file, for a3
  */
-#ifndef POST_SWIGLU_DYNMAIC_QUANT_H
-#define POST_SWIGLU_DYNMAIC_QUANT_H
+#ifndef POST_SWIGLU_DYNMAIC_QUANT_W8A8_H
+#define POST_SWIGLU_DYNMAIC_QUANT_W8A8_H
 #include "catlass/catlass.hpp"
 #include "catlass/arch/cross_core_sync.hpp"
 #include "catlass/arch/resource.hpp"
@@ -21,16 +21,16 @@
 
 namespace Catlass::Gemm::Kernel {
 
-namespace QuantSpaceInfo {
+namespace QuantSpaceInfoW8a8 {
     constexpr uint32_t UB_SIZE = 32;
     constexpr uint32_t MAX_QUANT_ROW_ONCE = 8;
     constexpr uint32_t QUANT_SPACE_FACTOR = 176 * 1024 / 11;  // up to 176KB for quant
 }
 
-__aicore__ inline void CalQuantRow(const uint32_t column, uint32_t &row)
+__aicore__ inline void CalQuantRowW8a8(const uint32_t column, uint32_t &row)
 {
-    row = QuantSpaceInfo::QUANT_SPACE_FACTOR / column;
-    row = row < QuantSpaceInfo::MAX_QUANT_ROW_ONCE ? row : QuantSpaceInfo::MAX_QUANT_ROW_ONCE;
+    row = QuantSpaceInfoW8a8::QUANT_SPACE_FACTOR / column;
+    row = row < QuantSpaceInfoW8a8::MAX_QUANT_ROW_ONCE ? row : QuantSpaceInfoW8a8::MAX_QUANT_ROW_ONCE;
 }
 
 template <class ArchTag>
@@ -91,8 +91,8 @@ public:
         ubInput = resource.ubBuf.template GetBufferByByte<ElementInput>(ubOffset);
         ubOffset += tileCount * sizeof(ElementInput);
         ubDequantScale = resource.ubBuf.template GetBufferByByte<ElementDequantScale>(ubOffset);
-        ubOffset += AscendC::Ceil(tileRow * sizeof(ElementDequantScale), QuantSpaceInfo::UB_SIZE) *
-                        QuantSpaceInfo::UB_SIZE;
+        ubOffset += AscendC::Ceil(tileRow * sizeof(ElementDequantScale), QuantSpaceInfoW8a8::UB_SIZE) *
+                        QuantSpaceInfoW8a8::UB_SIZE;
         ubOutput = resource.ubBuf.template GetBufferByByte<ElementOutput>(ubOffset);
         ubOffset += tileCount * sizeof(ElementOutput);
 
@@ -101,9 +101,9 @@ public:
         ubMax = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
         ubOffset += halfTileCount * sizeof(float);
         ubReduceMax = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
-        ubOffset += AscendC::Ceil(tileRow * sizeof(float), QuantSpaceInfo::UB_SIZE) * QuantSpaceInfo::UB_SIZE;
+        ubOffset += AscendC::Ceil(tileRow * sizeof(float), QuantSpaceInfoW8a8::UB_SIZE) * QuantSpaceInfoW8a8::UB_SIZE;
         ubQuantScale = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
-        ubOffset += AscendC::Ceil(tileRow * sizeof(float), QuantSpaceInfo::UB_SIZE) * QuantSpaceInfo::UB_SIZE;
+        ubOffset += AscendC::Ceil(tileRow * sizeof(float), QuantSpaceInfoW8a8::UB_SIZE) * QuantSpaceInfoW8a8::UB_SIZE;
         ubInputTmp = ubAbs;
         ubInputRightHalf = ubAbs;
         ubQuantF32 = ubAbs;
