@@ -9,5 +9,5 @@
 #pragma once
 #include "catlass/epilogue/block/block_epilogue.hpp"
 
-#include "block_epilogue_per_token_dequant_swiglu.h"
-#include "block_epilogue_per_token_dequant.hpp"
+#include "block_epilogue_per_token_dequant_swiglu_w8a8.h"
+#include "block_epilogue_per_token_dequant_w8a8.hpp"

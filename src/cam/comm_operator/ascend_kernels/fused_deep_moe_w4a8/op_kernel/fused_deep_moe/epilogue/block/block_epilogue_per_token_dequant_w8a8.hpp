@@ -25,7 +25,7 @@ template <uint32_t UB_STAGES_, uint32_t EXEC_FLAG_,
           class CType_, class ScaleType_, class LayoutScale_, class LayoutPerTokenScale_, class DType_,
           class TileRowBroadcastMul_, class TileBroadcastOneBlk_, class TileOneBlkColumnBroadcastMul_,
           class TileCopy_, class EpilogueTileSwizzle_>
-class BlockEpilogue<EpilogueAtlasA2PerTokenDequantCombine<UB_STAGES_, EXEC_FLAG_>,
+class BlockEpilogueW8a8<EpilogueAtlasA2PerTokenDequantCombine<UB_STAGES_, EXEC_FLAG_>,
           CType_, Gemm::GemmType<ScaleType_, LayoutScale_>, Gemm::GemmType<float, LayoutPerTokenScale_>, DType_,
           TileRowBroadcastMul_, TileBroadcastOneBlk_, TileOneBlkColumnBroadcastMul_,
           TileCopy_, EpilogueTileSwizzle_>
@@ -120,7 +120,7 @@ public:
     }
 
     CATLASS_DEVICE
-    BlockEpilogue(Arch::Resource<ArchTag> &resource, MoeDistributeCombineImpl::CombineCalcInfo &calcInfo,
+    BlockEpilogueW8a8(Arch::Resource<ArchTag> &resource, MoeDistributeCombineImpl::CombineCalcInfo &calcInfo,
                   Params const &params = Params{})
         : resource(resource),
           calcInfo(calcInfo),
@@ -180,7 +180,7 @@ public:
     }
 
     CATLASS_DEVICE
-    ~BlockEpilogue()
+    ~BlockEpilogueW8a8()
     {
         for (uint32_t i = 0; i < UB_STAGES; ++i) {
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventUbCVMTE2List[i]);

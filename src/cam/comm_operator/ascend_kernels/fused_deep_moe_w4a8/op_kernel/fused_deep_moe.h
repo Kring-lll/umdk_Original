@@ -122,10 +122,14 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     using TileCopy = Epilogue::Tile::TileCopy<ArchTag, CType, ScaleType, PerTokenScaleType, DType>;
     using TileScheduler = Epilogue::Tile::EpilogueHorizontalTileSwizzle;
 
-    // W4A8 and W8A8 use same BlockEpilogue template (different files, same interface)
-    using BlockEpilogue = Epilogue::Block::BlockEpilogue<EpilogueDispatchPolicy, CType, ScaleType, PerTokenScaleType,
-        DType, TileRowBroadcastMul, TileBroadcastOneBlk,
-        TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>;
+    // Select epilogue based on weight type (W4A8 has ptrWeightAux, W8A8 has ptrC)
+    using BlockEpilogue = std::conditional_t<isW4A8,
+        Epilogue::Block::BlockEpilogue<EpilogueDispatchPolicy, CType, ScaleType, PerTokenScaleType,
+            DType, TileRowBroadcastMul, TileBroadcastOneBlk,
+            TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>,
+        Epilogue::Block::BlockEpilogueW8a8<EpilogueDispatchPolicy, CType, ScaleType, PerTokenScaleType,
+            DType, TileRowBroadcastMul, TileBroadcastOneBlk,
+            TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>>;
 
     using BlockScheduler = BlockScheduler_;
 
@@ -229,9 +233,14 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using TileCopy = Epilogue::Tile::TileCopy<ArchTag, CType, ScaleType, PerTokenScaleType, DType>;
     using TileScheduler = Epilogue::Tile::EpilogueHorizontalTileSwizzle;
 
-    using BlockEpilogue = Epilogue::Block::BlockEpilogue<EpilogueDispatchPolicy, CType, ScaleType, PerTokenScaleType,
-        DType, TileRowBroadcastMul, TileBroadcastOneBlk,
-        TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>;
+    // Select epilogue based on weight type
+    using BlockEpilogue = std::conditional_t<isW4A8,
+        Epilogue::Block::BlockEpilogue<EpilogueDispatchPolicy, CType, ScaleType, PerTokenScaleType,
+            DType, TileRowBroadcastMul, TileBroadcastOneBlk,
+            TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>,
+        Epilogue::Block::BlockEpilogueW8a8<EpilogueDispatchPolicy, CType, ScaleType, PerTokenScaleType,
+            DType, TileRowBroadcastMul, TileBroadcastOneBlk,
+            TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>>;
 
     // Detect W4A8 mode from ActualWeightType
     constexpr bool isW4A8 = std::is_same_v<ActualWeightType, AscendC::int4b_t>;
