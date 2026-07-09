@@ -211,6 +211,9 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using BType = Gemm::GemmType<ActualWeightType, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
+    // Detect W4A8 mode
+    constexpr bool isW4A8 = std::is_same_v<ActualWeightType, AscendC::int4b_t>;
+
     // GMM2 uses ResidentA BlockMmad for both modes (same tile shape)
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
 
