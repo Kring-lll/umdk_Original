@@ -127,8 +127,8 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
         Epilogue::Block::BlockEpilogue<EpilogueDispatchPolicy, CType, ScaleType, PerTokenScaleType,
             DType, TileRowBroadcastMul, TileBroadcastOneBlk,
             TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>,
-        Epilogue::BlockW8a8::BlockEpilogue<EpilogueDispatchPolicy, CType, ScaleType, PerTokenScaleType,
-            DType, TileRowBroadcastMul, TileBroadcastOneBlk,
+        Epilogue::BlockW8a8::BlockEpilogue<ubStages, 0, CType, W1ScaleType, layout::VectorLayout,
+            layout::VectorLayout, DType, TileRowBroadcastMul, TileBroadcastOneBlk,
             TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>>;
 
     using BlockScheduler = BlockScheduler_;
@@ -211,9 +211,6 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
     using BType = Gemm::GemmType<ActualWeightType, layout::zN>;
     using CType = Gemm::GemmType<int32_t, layout::RowMajor>;
 
-    // Detect W4A8 mode
-    constexpr bool isW4A8 = std::is_same_v<ActualWeightType, AscendC::int4b_t>;
-
     // GMM2 uses ResidentA BlockMmad for both modes (same tile shape)
     using BlockMmad = Gemm::Block::BlockMmad<DispatchPolicy, L1TileShape, L0TileShape, AType, BType, CType>;
 
@@ -241,12 +238,9 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
         Epilogue::Block::BlockEpilogue<EpilogueDispatchPolicy, CType, ScaleType, PerTokenScaleType,
             DType, TileRowBroadcastMul, TileBroadcastOneBlk,
             TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>,
-        Epilogue::BlockW8a8::BlockEpilogue<EpilogueDispatchPolicy, CType, ScaleType, PerTokenScaleType,
-            DType, TileRowBroadcastMul, TileBroadcastOneBlk,
+        Epilogue::BlockW8a8::BlockEpilogue<ubStages, EXEC_FLAG, CType, W2ScaleType, layout::VectorLayout,
+            layout::VectorLayout, DType, TileRowBroadcastMul, TileBroadcastOneBlk,
             TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>>;
-
-    // Detect W4A8 mode from ActualWeightType
-    constexpr bool isW4A8 = std::is_same_v<ActualWeightType, AscendC::int4b_t>;
 
     using BlockScheduler = BlockScheduler_;
 
