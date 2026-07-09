@@ -23,7 +23,7 @@
 using namespace Cam;
 
 namespace Catlass::Gemm::Kernel {
-namespace GMM2 {
+namespace GMM2W8a8 {
     constexpr uint64_t SOFT_SYNC_OFFSET = 976 * 1024;
     constexpr int64_t AIV_NUM_PER_GROUP = 2;
     constexpr int64_t CORE_NUM_PER_GROUP = 3;
@@ -171,7 +171,7 @@ public:
         }
 
         uint32_t startCoreIdx = 0;
-        aicSetFunc = {syncGmAddr + GMM2::SOFT_SYNC_OFFSET, static_cast<uint8_t>(AscendC::GetBlockIdx())};
+        aicSetFunc = {syncGmAddr + GMM2W8a8::SOFT_SYNC_OFFSET, static_cast<uint8_t>(AscendC::GetBlockIdx())};
         for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
             if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                 gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(
@@ -359,7 +359,7 @@ public:
                 for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += coreNum) {
                     GemmCoord blockCoordMNK = blockScheduler.GetBlockCoord(loopIdx);
                     GemmCoord actualBlockShapeMNK = blockScheduler.GetActualBlockShape(blockCoordMNK);
-                    CheckSyncFlag(syncGmAddr + GMM2::SOFT_SYNC_OFFSET, static_cast<uint8_t>(coreIdx), target);
+                    CheckSyncFlag(syncGmAddr + GMM2W8a8::SOFT_SYNC_OFFSET, static_cast<uint8_t>(coreIdx), target);
                     target += 1;
                     blockEpilogue(gmGroupOffsetD, groupIdx, blockShapeMNK, blockCoordMNK, actualBlockShapeMNK);
                 }
@@ -405,7 +405,7 @@ public:
                     for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += coreNum) {
                         GemmCoord blockCoordMNK = blockScheduler.GetBlockCoord(loopIdx);
                         GemmCoord actualBlockShapeMNK = blockScheduler.GetActualBlockShape(blockCoordMNK);
-                        CheckSyncFlag(syncGmAddr + GMM2::SOFT_SYNC_OFFSET, static_cast<uint8_t>(coreIdx), target);
+                        CheckSyncFlag(syncGmAddr + GMM2W8a8::SOFT_SYNC_OFFSET, static_cast<uint8_t>(coreIdx), target);
                         target += 1;
                         blockEpilogue(0, UINT32_MAX, blockShapeMNK, blockCoordMNK, actualBlockShapeMNK);
                     }
@@ -447,13 +447,13 @@ public:
         }
         if (AscendC::GetSubBlockIdx() == 0) {
             AscendC::GlobalTensor<int32_t> softSyncTensor;
-            softSyncTensor.SetGlobalBuffer((__gm__ int32_t*)(syncGmAddr + GMM2::SOFT_SYNC_OFFSET));
+            softSyncTensor.SetGlobalBuffer((__gm__ int32_t*)(syncGmAddr + GMM2W8a8::SOFT_SYNC_OFFSET));
             AscendC::LocalTensor<int32_t> tmpZeroLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(0);
-            AscendC::Duplicate(tmpZeroLocalTensor, (int32_t)0, GMM2::INT32_COUNT_PER_BLOCK);
+            AscendC::Duplicate(tmpZeroLocalTensor, (int32_t)0, GMM2W8a8::INT32_COUNT_PER_BLOCK);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(0);
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(0);
             AscendC::DataCopy(softSyncTensor[coreIdx * CVSoftSync::SOFT_SYNC_SPACE_SIZE / sizeof(int32_t)],
-                                                tmpZeroLocalTensor, GMM2::INT32_COUNT_PER_BLOCK);
+                                                tmpZeroLocalTensor, GMM2W8a8::INT32_COUNT_PER_BLOCK);
         }
     }
 
