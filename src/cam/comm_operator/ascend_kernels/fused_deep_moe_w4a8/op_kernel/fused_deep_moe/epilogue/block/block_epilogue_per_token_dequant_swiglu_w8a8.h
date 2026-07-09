@@ -27,6 +27,7 @@ template <uint32_t UB_STAGES_, uint32_t EXEC_FLAG_,
           class DType_, class TileRowBroadcastMul_, class TileBroadcastOneBlk_, class TileOneBlkColumnBroadcastMul_,
           class TileCopy_, class EpilogueTileSwizzle_>
 class BlockEpilogue {
+public:
     using DispatchPolicy = EpilogueAtlasA2PerTokenDequantSwiglu<UB_STAGES_, EXEC_FLAG_>;
     using ArchTag = typename DispatchPolicy::ArchTag;
     static constexpr uint32_t UB_STAGES = UB_STAGES_;
