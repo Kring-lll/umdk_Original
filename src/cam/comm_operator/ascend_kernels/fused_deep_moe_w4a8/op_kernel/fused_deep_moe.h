@@ -231,6 +231,9 @@ CATLASS_DEVICE void GmmDeq(GemmCoord problemShape, uint32_t groupCount, GM_ADDR 
         DType, TileRowBroadcastMul, TileBroadcastOneBlk,
         TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>;
 
+    // Detect W4A8 mode from ActualWeightType
+    constexpr bool isW4A8 = std::is_same_v<ActualWeightType, AscendC::int4b_t>;
+
     using BlockScheduler = BlockScheduler_;
 
     // kernel level

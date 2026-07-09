@@ -51,10 +51,10 @@ public:
     using LayoutD = typename BlockEpilogue::LayoutD;
     using EpilogueParams = typename BlockEpilogue::Params;
 
-    using ElementDequantScale = typename BlockQuantW8a8W8a8<ArchTag>::ElementDequantScale;
-    using LayoutDequantScale = typename BlockQuantW8a8W8a8<ArchTag>::LayoutDequantScale;
-    using ElementOutput = typename BlockQuantW8a8W8a8<ArchTag>::ElementOutput;
-    using LayoutOutput = typename BlockQuantW8a8W8a8<ArchTag>::LayoutOutput;
+    using ElementDequantScale = typename BlockQuantW8a8<ArchTag>::ElementDequantScale;
+    using LayoutDequantScale = typename BlockQuantW8a8<ArchTag>::LayoutDequantScale;
+    using ElementOutput = typename BlockQuantW8a8<ArchTag>::ElementOutput;
+    using LayoutOutput = typename BlockQuantW8a8<ArchTag>::LayoutOutput;
 
     using BlockScheduler = BlockScheduler_;
     using ElementGroupList = ElementGroupList_;
@@ -1326,9 +1326,9 @@ public:
             uint32_t nOut = params.shareN / 2;
             uint32_t quantRowOnce = 0;
             CalQuantRowW8a8(nOut, quantRowOnce);
-            typename BlockQuantW8a8W8a8<ArchTag>::Params quantParams;
+            typename BlockQuantW8a8<ArchTag>::Params quantParams;
             auto swigluLayout = layout::RowMajor{totalTokenCount, n};
-            quantParams = typename BlockQuantW8a8W8a8<ArchTag>::Params {
+            quantParams = typename BlockQuantW8a8<ArchTag>::Params {
                 (__gm__ float*)params.gmShareSwigluOut, swigluLayout,  // input: swiglu output
                 (__gm__ float*)params.gmShareX2Scale, params.layoutDequantScale,  // output: quant token scale
                 (__gm__ int8_t*)params.gmShareX2, params.layoutShareOutput, // output: x2
@@ -1358,9 +1358,9 @@ public:
             uint32_t nOut = params.problemShape.n() / 2;
             uint32_t quantRowOnce = 0;
             CalQuantRowW8a8(nOut, quantRowOnce);
-            typename BlockQuantW8a8W8a8<ArchTag>::Params quantParams;
+            typename BlockQuantW8a8<ArchTag>::Params quantParams;
             auto swigluLayout = layout::RowMajor{totalTokenCount, n};
-            quantParams = typename BlockQuantW8a8W8a8<ArchTag>::Params {
+            quantParams = typename BlockQuantW8a8<ArchTag>::Params {
                 gmSwigluOutput,   swigluLayout,        params.ptrDequantScale, params.layoutDequantScale,
                 params.ptrOutput, params.layoutOutput, quantRowOnce,           nOut};
             BlockQuantW8a8<ArchTag> blockQuant(resource, quantParams);
