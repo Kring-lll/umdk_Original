@@ -1307,7 +1307,7 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
     } else {
         queue->fc_rx_depth = UMQ_UB_FLOW_CONTORL_JETTY_DEPTH;
     }
-
+    queue->fc_tx_depth = UMQ_UB_FLOW_CONTORL_JETTY_DEPTH;
     // tx flush_done consumes one tx_cqe
     uint32_t min_dev_tx = dev_ctx->dev_attr.dev_cap.max_jfs_depth < dev_ctx->dev_attr.dev_cap.max_jfc_depth - 1 ?
         dev_ctx->dev_attr.dev_cap.max_jfs_depth : dev_ctx->dev_attr.dev_cap.max_jfc_depth - 1;
