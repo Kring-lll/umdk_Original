@@ -25,6 +25,7 @@
 #include "fused_deep_moe/gemm/block/block_mmad.h"
 #include "fused_deep_moe/epilogue/dispatch_policy.h"
 #include "fused_deep_moe/epilogue/block/block_epilogue.h"
+#include "fused_deep_moe/epilogue/block/block_epilogue_w8a8.h"
 #include "fused_deep_moe/gemm/kernel/grouped_matmul_slice_m_per_token_dequant_multistage_workspace.h"
 #include "fused_deep_moe/gemm/kernel/grouped_matmul_slice_m_per_token_dequant_swiglu_quant_multistage_workspace.h"
 // W8A8 kernel files (separate from W4A8, no code sharing)
@@ -121,6 +122,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     using TileCopy = Epilogue::Tile::TileCopy<ArchTag, CType, ScaleType, PerTokenScaleType, DType>;
     using TileScheduler = Epilogue::Tile::EpilogueHorizontalTileSwizzle;
 
+    // W4A8 and W8A8 use same BlockEpilogue template (different files, same interface)
     using BlockEpilogue = Epilogue::Block::BlockEpilogue<EpilogueDispatchPolicy, CType, ScaleType, PerTokenScaleType,
         DType, TileRowBroadcastMul, TileBroadcastOneBlk,
         TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>;
