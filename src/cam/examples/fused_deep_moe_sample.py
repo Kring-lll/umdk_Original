@@ -7,7 +7,7 @@
 # using small operator combination (dispatch + gmm1 + swiglu + gmm2 + combine).
 # Create: 2025-12-11
 # Note:
-# History: 2025-12-11 create example file
+# History: 2025-12-11 create example file.
 #
 
 import gc
