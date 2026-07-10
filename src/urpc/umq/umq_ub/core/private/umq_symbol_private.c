@@ -71,6 +71,7 @@ int umq_symbol_urma_load(umq_symbol_urma_t *sym)
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_poll_jfc_t, urma_poll_jfc);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_wait_jfc_t, urma_wait_jfc);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_ack_jfc_t, urma_ack_jfc);
+    LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_modify_jfc_t, urma_modify_jfc);
 
     // JFCE functions
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_create_jfce_t, urma_create_jfce);
