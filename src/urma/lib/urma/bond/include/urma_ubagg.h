@@ -40,6 +40,7 @@ typedef enum bondp_user_ctl_opcode {
     BONDP_USER_CTL_OPCODE_GET_RJETTY,
     BONDP_USER_CTL_OPCODE_GET_SEG_CTX,
     BONDP_USER_CTL_DISABLE_MSN,
+    BONDP_USER_CTL_OPCODE_GET_RJFR,
 } bondp_user_ctl_opcode_t;
 
 // URMA_USER_CTL_BOND_SET_BONDING_MODE,
