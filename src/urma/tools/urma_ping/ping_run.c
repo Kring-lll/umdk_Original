@@ -663,6 +663,15 @@ static int recv_ping_msg(ping_cfg_t *cfg, ping_urma_resource_t *res, ping_per_se
 
 static void signal_handler(int signum)
 {
+    static volatile int in_progress = 0;
+    int expected = 0;
+    int desired = 1;
+
+    if (!__atomic_compare_exchange_n(&in_progress, &expected, desired,
+                                     0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+        return;
+    }
+
     LOG_VERBOSE("Received signal %d\n", signum);
     print_stat();
     exit(0);
@@ -692,7 +701,9 @@ int start_ping(ping_cfg_t *cfg)
     LOG_VERBOSE("Timeout(s)  : %u\n", cfg->timeout);
 
     init_stat();
-    (void)signal(SIGINT, signal_handler);
+    struct sigaction sa = {0};
+    sa.sa_handler = signal_handler;
+    (void)sigaction(SIGINT, &sa, NULL);
 
     double ping_start_time = get_time_in_ms();
 
