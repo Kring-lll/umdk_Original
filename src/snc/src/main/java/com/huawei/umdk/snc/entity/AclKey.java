@@ -14,7 +14,7 @@ import lombok.ToString;
 @EqualsAndHashCode
 @ToString
 public class AclKey {
-    private String sourceEid;
-    private String destEid;
+    private String srcEid;
+    private String dstEid;
     private TransportType transportType;
 }
