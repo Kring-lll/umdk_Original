@@ -6,8 +6,8 @@
  * Note:
  * History: 2025-07-19 create FusedDeepMoe operator kernel function implementation file
  */
-#ifndef ACT_EPILOGUE_BLOCK_EPILOGUE_PER_TOKEN_DEQUANT_HPP
-#define ACT_EPILOGUE_BLOCK_EPILOGUE_PER_TOKEN_DEQUANT_HPP
+#ifndef ACT_EPILOGUE_BLOCK_EPILOGUE_PER_TOKEN_DEQUANT_W8A8_HPP
+#define ACT_EPILOGUE_BLOCK_EPILOGUE_PER_TOKEN_DEQUANT_W8A8_HPP
 
 #include "../../raw_distributed/cam_moe_distribute_combine.h"
 #include "catlass/catlass.hpp"
@@ -432,4 +432,4 @@ private:
 
 }  // namespace Catlass::Epilogue::BlockW8a8
 
-#endif  // ACT_EPILOGUE_BLOCK_EPILOGUE_PER_TOKEN_DEQUANT_HPP
+#endif  // ACT_EPILOGUE_BLOCK_EPILOGUE_PER_TOKEN_DEQUANT_W8A8_HPP
