@@ -16,7 +16,6 @@
 namespace {
 static constexpr int32_t NNOPBASE_HCCL_SERVER_TYPE_AICPU = 0;
 static constexpr int32_t NNOPBASE_HCCL_SERVER_TYPE_MTE = 1;
-static constexpr int32_t NNOPBASE_HCCL_SERVER_TYPE_END = 2;
 } // namespace
 extern "C" void __attribute__((weak)) NnopbaseSetHcclServerType(void *executor, int32_t sType);
 
