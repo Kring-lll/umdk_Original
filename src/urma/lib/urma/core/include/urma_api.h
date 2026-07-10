@@ -379,6 +379,21 @@ urma_target_jetty_t *urma_import_jfr_ex(urma_context_t *ctx, urma_rjfr_t *rjfr, 
 urma_status_t urma_unimport_jfr(urma_target_jetty_t *target_jfr);
 
 /**
+ * Get remote jfr information for proxy transmission.
+ * @param[in] [Required] jfr: the local jfr to get remote info from;
+ * @param[out] [Required] rjfr: pointer to receive the remote jfr info;
+ * @param[out] [Required] length: total length of the returned data;
+ * Return: 0 on success, other value on error
+ */
+urma_status_t urma_get_rjfr(urma_jfr_t *jfr, urma_rjfr_t **rjfr, uint32_t *length);
+
+/**
+ * Free the remote jfr information allocated by urma_get_rjfr.
+ * @param[in] [Required] rjfr: the remote jfr information to free;
+ */
+void urma_put_rjfr(urma_rjfr_t *rjfr);
+
+/**
  *  Advise jfr: construct the transport channel for jfs and remote jfr.
  * @param[in] [Required] jfs: jfs to use to construct the transport channel;
  * @param[in] [Required] tjfr: target jfr information including full qualified jfr id;

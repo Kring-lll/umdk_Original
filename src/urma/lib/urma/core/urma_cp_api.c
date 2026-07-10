@@ -22,6 +22,7 @@
 
 #define BONDP_USER_CTL_GET_RJETTY  9
 #define BONDP_USER_CTL_GET_SEG_CTX 10
+#define BONDP_USER_CTL_GET_RJFR    11
 
 #define URMA_CHECK_CTX_INVALID_RETURN_STATUS(urma_ctx)                                                                 \
     do {                                                                                                               \
@@ -2191,6 +2192,60 @@ void urma_put_rjetty(urma_rjetty_t *rjetty)
     }
 
     free(rjetty);
+}
+
+urma_status_t urma_get_rjfr(urma_jfr_t *jfr, urma_rjfr_t **rjfr, uint32_t *length)
+{
+    if (jfr == NULL || rjfr == NULL || length == NULL) {
+        URMA_LOG_ERR("Invalid parameter.\n");
+        return URMA_EINVAL;
+    }
+
+    urma_context_t *urma_ctx = jfr->urma_ctx;
+    urma_status_t status = urma_validate_ctx_for_remote_query(urma_ctx);
+    if (status != URMA_SUCCESS) {
+        return status;
+    }
+
+    urma_rjfr_t *new_rjfr = NULL;
+    if (urma_is_bonding_dev(urma_ctx->dev->name)) {
+        status = urma_fetch_bond_user_info(urma_ctx, BONDP_USER_CTL_GET_RJFR,
+                                           (uint64_t)(uintptr_t)jfr, sizeof(urma_jfr_t),
+                                           (uint64_t)(uintptr_t)&new_rjfr);
+        if (status != URMA_SUCCESS) {
+            return URMA_FAIL;
+        }
+    } else {
+        new_rjfr = (urma_rjfr_t *)calloc(1, sizeof(urma_rjfr_t));
+        if (new_rjfr == NULL) {
+            URMA_LOG_ERR("Failed to alloc rjfr.\n");
+            return URMA_ENOMEM;
+        }
+    }
+
+    if (new_rjfr == NULL) {
+        URMA_LOG_ERR("Failed to get rjfr.\n");
+        return URMA_FAIL;
+    }
+
+    new_rjfr->jfr_id = jfr->jfr_id;
+    new_rjfr->trans_mode = jfr->jfr_cfg.trans_mode;
+    new_rjfr->flag.bs.order_type = jfr->jfr_cfg.flag.bs.order_type;
+    new_rjfr->flag.bs.token_policy = jfr->jfr_cfg.flag.bs.token_policy;
+
+    *rjfr = new_rjfr;
+    *length = urma_calc_user_info_total_len(new_rjfr, sizeof(urma_rjfr_t),
+                                            new_rjfr->flag.bs.has_user_info != 0);
+    return URMA_SUCCESS;
+}
+
+void urma_put_rjfr(urma_rjfr_t *rjfr)
+{
+    if (rjfr == NULL) {
+        return;
+    }
+
+    free(rjfr);
 }
 
 static urma_status_t urma_bind_jetty_compat(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)

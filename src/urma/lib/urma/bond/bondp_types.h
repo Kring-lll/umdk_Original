@@ -86,6 +86,21 @@ static inline bool bondp_rjetty_has_user_info(const urma_rjetty_t *rjetty)
     return rjetty != NULL && rjetty->flag.bs.has_user_info != 0;
 }
 
+static inline bondp_rjetty_ext_priv_t *bondp_rjfr_get_priv_ext(urma_rjfr_t *rjfr)
+{
+    return (bondp_rjetty_ext_priv_t *)((uintptr_t)rjfr + sizeof(urma_rjfr_t));
+}
+
+static inline const bondp_rjetty_ext_priv_t *bondp_rjfr_get_priv_ext_const(const urma_rjfr_t *rjfr)
+{
+    return (const bondp_rjetty_ext_priv_t *)((uintptr_t)rjfr + sizeof(urma_rjfr_t));
+}
+
+static inline bool bondp_rjfr_has_user_info(const urma_rjfr_t *rjfr)
+{
+    return rjfr != NULL && rjfr->flag.bs.has_user_info != 0;
+}
+
 struct bondp_target_jetty;
 
 typedef enum bondp_health_mode {

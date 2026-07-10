@@ -1928,6 +1928,24 @@ static int bondp_fill_bond_id_info_from_rjetty_ext(const urma_rjetty_t *rjetty, 
     return bondp_fill_bond_id_info_from_compact_ext(compact_ext, ext_hdr->len, info);
 }
 
+static int bondp_fill_bond_id_info_from_rjfr_ext(const urma_rjfr_t *rjfr, urma_bond_id_info_out_t *info)
+{
+    if (!bondp_rjfr_has_user_info(rjfr)) {
+        URMA_LOG_ERR("rjfr user_info ext is not enabled.\n");
+        return -EINVAL;
+    }
+    const bondp_rjetty_ext_priv_t *ext_hdr = bondp_rjfr_get_priv_ext_const(rjfr);
+    if (ext_hdr->len < sizeof(urma_bond_jetty_ext_v0_t)) {
+        URMA_LOG_ERR("Invalid rjfr ext length=%u.\n", ext_hdr->len);
+        return -EINVAL;
+    }
+    const urma_bond_jetty_ext_v0_t *compact_ext = (const urma_bond_jetty_ext_v0_t *)ext_hdr->data;
+    if (compact_ext->version != BONDP_RJETTY_EXT_VERSION_V0) {
+        URMA_LOG_DEBUG("rjfr ext version=%u, parse by mask only.\n", compact_ext->version);
+    }
+    return bondp_fill_bond_id_info_from_compact_ext(compact_ext, ext_hdr->len, info);
+}
+
 static int bondp_fill_seg_ext_from_tseg(const bondp_tseg_t *bdp_tseg, urma_bond_seg_ext_t *ext)
 {
     bool connected[TOPO_CONNECTED_MAX_NUM][TOPO_CONNECTED_MAX_NUM] = {0};
@@ -2049,6 +2067,45 @@ static int bondp_user_ctl_get_seg_ctx(urma_context_t *ctx, urma_user_ctl_in_t *i
     return 0;
 }
 
+static int bondp_user_ctl_get_rjfr(urma_context_t *ctx, urma_user_ctl_in_t *in,
+                                    urma_user_ctl_out_t *out)
+{
+    if (in == NULL || out == NULL || in->addr == 0 ||
+        in->len < sizeof(urma_jfr_t) || out->addr == 0 ||
+        out->len < sizeof(urma_rjfr_t *)) {
+        URMA_LOG_ERR("Invalid parameter for get rjfr.\n");
+        return -EINVAL;
+    }
+
+    bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
+    urma_jfr_t *jfr = (urma_jfr_t *)(uintptr_t)in->addr;
+    if (jfr == NULL || jfr->urma_ctx != ctx) {
+        URMA_LOG_ERR("Invalid jfr context for get rjfr.\n");
+        return -EINVAL;
+    }
+
+    bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jfr, bondp_comp_t, v_jfr);
+    if (bdp_jfr->bondp_ctx != bdp_ctx) {
+        URMA_LOG_ERR("Jfr does not belong to current context.\n");
+        return -EINVAL;
+    }
+
+    urma_rjfr_t *new_rjfr = (urma_rjfr_t *)calloc(1, sizeof(urma_rjfr_t));
+    if (new_rjfr == NULL) {
+        URMA_LOG_ERR("Failed to alloc rjfr.\n");
+        return -ENOMEM;
+    }
+
+    new_rjfr->jfr_id = jfr->jfr_id;
+    new_rjfr->trans_mode = jfr->jfr_cfg.trans_mode;
+    new_rjfr->flag.bs.order_type = jfr->jfr_cfg.flag.bs.order_type;
+    new_rjfr->flag.bs.token_policy = jfr->jfr_cfg.flag.bs.token_policy;
+
+    urma_rjfr_t **out_rjfr = (urma_rjfr_t **)(uintptr_t)out->addr;
+    *out_rjfr = new_rjfr;
+    return 0;
+}
+
 int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_out_t *out)
 {
     if (in == NULL) {
@@ -2073,6 +2130,8 @@ int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_ou
             return bondp_user_ctl_get_rjetty(ctx, in, out);
         case BONDP_USER_CTL_OPCODE_GET_SEG_CTX:
             return bondp_user_ctl_get_seg_ctx(ctx, in, out);
+        case BONDP_USER_CTL_OPCODE_GET_RJFR:
+            return bondp_user_ctl_get_rjfr(ctx, in, out);
         default: {
             URMA_LOG_ERR("Unsupported opcode, opcode=%d\n", in->opcode);
             return -EINVAL;
@@ -2503,20 +2562,53 @@ static int bondp_unimport_pjfr(bondp_target_jetty_t *bdp_tjetty)
 urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, urma_token_t *token_value)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
-
+    // disable cfg jetty
+    bondp_comp_t *cfg_jetty = NULL;
     bondp_target_jetty_t *bdp_tjetty = calloc(1, sizeof(bondp_target_jetty_t));
     if (bdp_tjetty == NULL) {
         URMA_LOG_ERR("Failed to alloc target jetty\n");
         return NULL;
     }
+
+    if (token_value != NULL) {
+        bdp_tjetty->import_token_value = *token_value;
+        bdp_tjetty->import_token_valid = true;
+    }
     atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
 
     urma_bond_id_info_out_t udata_out = {0};
-    if (bondp_import_vjfr(ctx, rjfr, token_value, bdp_tjetty, &udata_out) != 0) {
-        URMA_LOG_ERR("Failed to import vjetty, [" EID_FMT "]=%u\n",
-                     EID_ARGS(rjfr->jfr_id.eid), rjfr->jfr_id.id);
-        goto FREE_TJFR;
+    if (rjfr != NULL && rjfr->flag.bs.has_drv_ext) {
+        const bondp_rjfr_t *bdp_rjfr = (const bondp_rjfr_t *)rjfr;
+        if (bdp_rjfr->jetty != NULL) {
+            cfg_jetty = CONTAINER_OF_FIELD(bdp_rjfr->jetty, bondp_comp_t, v_jetty);
+        }
     }
+    if (rjfr != NULL && bondp_rjfr_has_user_info(rjfr)) {
+        bdp_tjetty->skip_import_vjetty = true;
+        if (bondp_fill_bond_id_info_from_rjfr_ext(rjfr, &udata_out) != 0) {
+            const bondp_rjetty_ext_priv_t *ext_hdr =
+                bondp_rjfr_get_priv_ext_const(rjfr);
+            URMA_LOG_ERR("Invalid rjfr ext, length=%u.\n", ext_hdr->len);
+            goto FREE_TJFR;
+        }
+        if (bondp_rebuild_connected_by_topo(bdp_ctx, &rjfr->jfr_id.eid, &udata_out) != 0) {
+            URMA_LOG_ERR("Failed to rebuild connected matrix by topo.\n");
+            goto FREE_TJFR;
+        }
+        bdp_tjetty->v_tjetty.urma_ctx = ctx;
+        bdp_tjetty->v_tjetty.id = rjfr->jfr_id;
+        bdp_tjetty->v_tjetty.trans_mode = rjfr->trans_mode;
+        bdp_tjetty->v_tjetty.type = URMA_JFR;
+        bdp_tjetty->v_tjetty.flag = rjfr->flag;
+        bdp_tjetty->v_tjetty.tp_type = rjfr->tp_type;
+    } else {
+        if (bondp_import_vjfr(ctx, rjfr, token_value, bdp_tjetty, &udata_out) != 0) {
+            URMA_LOG_ERR("Failed to import vjfr, [" EID_FMT "]=%u\n",
+                         EID_ARGS(rjfr->jfr_id.eid), rjfr->jfr_id.id);
+            goto FREE_TJFR;
+        }
+    }
+    bdp_tjetty->is_msn_enabled = udata_out.is_msn_enabled;
 
     if (init_target_active_indices(bdp_ctx, bdp_tjetty, &udata_out) != 0) {
         URMA_LOG_ERR("Failed to init target active indices\n");
@@ -2527,14 +2619,34 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
         goto UNIMPORT_PJFR;
     }
 
+    if (bondp_import_health_check_tseg(bdp_ctx, bdp_tjetty, &udata_out,
+                                       (const urma_rjetty_t *)rjfr) != 0) {
+        URMA_LOG_ERR("Failed to import health check seg for jfr\n");
+        goto UNIMPORT_TSEG;
+    }
+
+    if (rjfr != NULL && rjfr->flag.bs.has_drv_ext && cfg_jetty != NULL) {
+        URMA_LOG_DEBUG("JFR has drv ext, cfg_jetty is set.\n");
+    }
+
+    if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty, cfg_jetty) != 0) {
+        URMA_LOG_ERR("Failed to register health check task\n");
+        goto UNIMPORT_TSEG;
+    }
+
     URMA_LOG_DEBUG("Imported jfr successfully, jfr_id=%u, dev=%s, eid_idx=%u\n",
                    rjfr->jfr_id.id, ctx->dev->name, ctx->eid_index);
     return &bdp_tjetty->v_tjetty;
 
+UNIMPORT_TSEG:
+    bondp_unimport_health_check_tseg(bdp_tjetty);
+
 UNIMPORT_PJFR:
     bondp_unimport_pjfr(bdp_tjetty);
 UNIMPORT_VJFR:
-    bondp_unimport_vjfr(bdp_tjetty);
+    if (!bdp_tjetty->skip_import_vjetty) {
+        bondp_unimport_vjfr(bdp_tjetty);
+    }
 FREE_TJFR:
     free(bdp_tjetty);
     return NULL;
