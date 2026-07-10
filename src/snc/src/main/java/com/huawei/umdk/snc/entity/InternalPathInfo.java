@@ -16,8 +16,8 @@ import lombok.ToString;
 @ToString
 public class InternalPathInfo {
     private List<InternalPathHop> hops;
-    private String sourceEid;
-    private String destEid;
+    private String srcEid;
+    private String dstEid;
     private String sourceCna;
     private String destCna;
     private int hopCount;
