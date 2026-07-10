@@ -4,7 +4,7 @@
  * Description: notify dispatch tiling function implementation file
  * Create: 2026-01-05
  * Note:
- * History: 2026-01-05 create notify dispatch tiling function file
+ * History: 2026-01-05 create notify dispatch tiling function file.
  */
 
 #include <cmath>
