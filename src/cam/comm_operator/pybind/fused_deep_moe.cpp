@@ -4,7 +4,7 @@
  * Description: add fused_deep_moe file
  * Create: 2025-12-10
  * Note:
- * History: 2025-12-10 fused_deep_moe file
+ * History: 2025-12-10 fused_deep_moe file.
  */
 
 #include <unistd.h>
