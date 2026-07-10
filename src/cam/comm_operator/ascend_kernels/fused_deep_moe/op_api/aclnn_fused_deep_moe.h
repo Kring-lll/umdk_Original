@@ -4,7 +4,7 @@
  * Description: add fused deep moe interface header file.
  * Create: 2025-07-21
  * Note:
- * History: 2025-07-21 add fused deep moe interface header file.
+ * History: 2025-07-21 add fused deep moe interface header file
  */
 
 #ifndef FUSED_DEEP_MOE
