@@ -1,3 +1,12 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2024-2024. All rights reserved.
+ * Description: SNC (Super Node Controller) service
+ * Author: OpenCode
+ * Create: 2024-11-04
+ * Note:
+ * History: 2024-11-04  Create File
+ */
 package com.huawei.umdk.snc.entity;
 
 import java.util.List;
@@ -16,8 +25,8 @@ import lombok.ToString;
 @ToString
 public class InternalPathInfo {
     private List<InternalPathHop> hops;
-    private String sourceEid;
-    private String destEid;
+    private String srcEid;
+    private String dstEid;
     private String sourceCna;
     private String destCna;
     private int hopCount;
