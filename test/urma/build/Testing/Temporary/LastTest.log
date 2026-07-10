@@ -1,0 +1,581 @@
+Start testing: Jul 09 10:42 CST
+----------------------------------------------------------
+1/6 Testing: urma_bond_ut
+1/6 Test: urma_bond_ut
+Command: "/home/zdxfgre/jd/umdk/test/urma/build/ut/bond/urma_bond_ut"
+Directory: /home/zdxfgre/jd/umdk/test/urma/build/ut/bond
+"urma_bond_ut" start time: Jul 09 10:42 CST
+Output:
+----------------------------------------------------------
+Running main() from ./googletest/src/gtest_main.cc
+Note: Google Test filter = -UrmaCoreTest.MainApisValidateProviderContextAndDeviceContracts:UrmaBondTest.WorkerCreatePropagatesEpollCreate1Failure:UrmaBondTest.WorkerCreatePropagatesEventfdFailure:UrmaBondTest.WorkerCreatePropagatesEpollCtlFailure:UrmaUvsTest.TopoHelpersPropagateMainUeBatchIoctlFailure
+[==========] Running 118 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 118 tests from UrmaBondTest
+[ RUN      ] UrmaBondTest.SlideWindowRejectsInvalidInit
+[       OK ] UrmaBondTest.SlideWindowRejectsInvalidInit (0 ms)
+[ RUN      ] UrmaBondTest.SlideWindowAddsAndSlidesHead
+[       OK ] UrmaBondTest.SlideWindowAddsAndSlidesHead (0 ms)
+[ RUN      ] UrmaBondTest.SlideWindowRejectsNullAndOutOfRangeSequence
+[       OK ] UrmaBondTest.SlideWindowRejectsNullAndOutOfRangeSequence (0 ms)
+[ RUN      ] UrmaBondTest.WrBufferAllocGetRelease
+[       OK ] UrmaBondTest.WrBufferAllocGetRelease (0 ms)
+[ RUN      ] UrmaBondTest.WrBufferReleaseJfrAndReuse
+[       OK ] UrmaBondTest.WrBufferReleaseJfrAndReuse (0 ms)
+[ RUN      ] UrmaBondTest.HeaderInlineHelpersCoverStablePureLogic
+[       OK ] UrmaBondTest.HeaderInlineHelpersCoverStablePureLogic (0 ms)
+[ RUN      ] UrmaBondTest.WrBufferBatchAllocReleaseJfs
+[       OK ] UrmaBondTest.WrBufferBatchAllocReleaseJfs (0 ms)
+[ RUN      ] UrmaBondTest.WrBufferBatchAllocReleaseJfrAndRejectOversizedRelease
+[       OK ] UrmaBondTest.WrBufferBatchAllocReleaseJfrAndRejectOversizedRelease (0 ms)
+[ RUN      ] UrmaBondTest.SlideWindowHasDuplicateAndWrapAround
+[       OK ] UrmaBondTest.SlideWindowHasDuplicateAndWrapAround (0 ms)
+[ RUN      ] UrmaBondTest.TimewheelSchedulesCancelsAndAdvancesDeterministically
+[       OK ] UrmaBondTest.TimewheelSchedulesCancelsAndAdvancesDeterministically (0 ms)
+[ RUN      ] UrmaBondTest.TimewheelUsesDefaultsAndDropsPendingTasksOnDestroy
+[       OK ] UrmaBondTest.TimewheelUsesDefaultsAndDropsPendingTasksOnDestroy (0 ms)
+[ RUN      ] UrmaBondTest.HashTableCreateLookupRemoveAndDestroy
+[       OK ] UrmaBondTest.HashTableCreateLookupRemoveAndDestroy (0 ms)
+[ RUN      ] UrmaBondTest.ContextTablesMapJettyIdsAndRemoteTokenIds
+[       OK ] UrmaBondTest.ContextTablesMapJettyIdsAndRemoteTokenIds (0 ms)
+[ RUN      ] UrmaBondTest.ConnectionTableGetOrCreateReusesExistingConnection
+[       OK ] UrmaBondTest.ConnectionTableGetOrCreateReusesExistingConnection (0 ms)
+[ RUN      ] UrmaBondTest.TopoInfoMapsPhysicalAndAggregateEids
+[       OK ] UrmaBondTest.TopoInfoMapsPhysicalAndAggregateEids (0 ms)
+[ RUN      ] UrmaBondTest.TopoInfoMapsMultipleNodes
+[       OK ] UrmaBondTest.TopoInfoMapsMultipleNodes (0 ms)
+[ RUN      ] UrmaBondTest.WorkerPublicApisScheduleCancelAndHandleFdEvents
+[       OK ] UrmaBondTest.WorkerPublicApisScheduleCancelAndHandleFdEvents (36 ms)
+[ RUN      ] UrmaBondTest.WorkerCreatePropagatesPthreadCreateFailure
+[       OK ] UrmaBondTest.WorkerCreatePropagatesPthreadCreateFailure (0 ms)
+[ RUN      ] UrmaBondTest.DatapathCopyAndFreeWorkRequests
+[       OK ] UrmaBondTest.DatapathCopyAndFreeWorkRequests (0 ms)
+[ RUN      ] UrmaBondTest.DatapathCopyAndFreeAllocatedAndInvalidWorkRequests
+[       OK ] UrmaBondTest.DatapathCopyAndFreeAllocatedAndInvalidWorkRequests (0 ms)
+[ RUN      ] UrmaBondTest.DatapathBindUnbindAndUseCountsCoverRwAndAtomicPaths
+[       OK ] UrmaBondTest.DatapathBindUnbindAndUseCountsCoverRwAndAtomicPaths (0 ms)
+[ RUN      ] UrmaBondTest.DatapathEncodeBindAndUnbindWorkRequests
+[       OK ] UrmaBondTest.DatapathEncodeBindAndUnbindWorkRequests (0 ms)
+[ RUN      ] UrmaBondTest.DatapathScheduleCoversModesAndErrors
+[       OK ] UrmaBondTest.DatapathScheduleCoversModesAndErrors (0 ms)
+[ RUN      ] UrmaBondTest.DatapathScheduleCoversAffinityAndBatchReceiveBoundaries
+[       OK ] UrmaBondTest.DatapathScheduleCoversAffinityAndBatchReceiveBoundaries (0 ms)
+[ RUN      ] UrmaBondTest.DatapathPublicPostSendPropagatesSingleDeviceNoStoreFailure
+[       OK ] UrmaBondTest.DatapathPublicPostSendPropagatesSingleDeviceNoStoreFailure (0 ms)
+[ RUN      ] UrmaBondTest.DatapathPublicPostRecvPropagatesSingleDeviceNoStoreFailure
+[       OK ] UrmaBondTest.DatapathPublicPostRecvPropagatesSingleDeviceNoStoreFailure (0 ms)
+[ RUN      ] UrmaBondTest.DatapathPublicPostRecvWithoutBackupSplitsAcrossActivePaths
+[       OK ] UrmaBondTest.DatapathPublicPostRecvWithoutBackupSplitsAcrossActivePaths (0 ms)
+[ RUN      ] UrmaBondTest.DatapathPublicPostRecvWithoutBackupRejectsOversizedList
+[       OK ] UrmaBondTest.DatapathPublicPostRecvWithoutBackupRejectsOversizedList (0 ms)
+[ RUN      ] UrmaBondTest.DatapathPollJfcConvertsSingleDeviceSendCr
+[       OK ] UrmaBondTest.DatapathPollJfcConvertsSingleDeviceSendCr (0 ms)
+[ RUN      ] UrmaBondTest.DatapathFlushJettyConvertsFakeCrAndPropagatesProviderError
+[       OK ] UrmaBondTest.DatapathFlushJettyConvertsFakeCrAndPropagatesProviderError (0 ms)
+[ RUN      ] UrmaBondTest.DatapathPollJfcConvertsRecvCrWithoutBackup
+[       OK ] UrmaBondTest.DatapathPollJfcConvertsRecvCrWithoutBackup (0 ms)
+[ RUN      ] UrmaBondTest.DatapathPollRecvCrWithStoreUsesBufferedWr
+[       OK ] UrmaBondTest.DatapathPollRecvCrWithStoreUsesBufferedWr (0 ms)
+[ RUN      ] UrmaBondTest.DatapathPollJfcConvertsFakeCrWithStore
+[       OK ] UrmaBondTest.DatapathPollJfcConvertsFakeCrWithStore (0 ms)
+[ RUN      ] UrmaBondTest.DatapathPostSendStoreAndPollCompletionRoundTrip
+[       OK ] UrmaBondTest.DatapathPostSendStoreAndPollCompletionRoundTrip (0 ms)
+[ RUN      ] UrmaBondTest.DatapathPostSendStoreHandlesFullBufferAndInvalidPathRetry
+[       OK ] UrmaBondTest.DatapathPostSendStoreHandlesFullBufferAndInvalidPathRetry (0 ms)
+[ RUN      ] UrmaBondTest.DatapathPostSendStoreRollsBackAfterPartialProviderFailure
+[       OK ] UrmaBondTest.DatapathPostSendStoreRollsBackAfterPartialProviderFailure (0 ms)
+[ RUN      ] UrmaBondTest.DatapathPostRecvStoreSubmitsAndCleansProviderFailure
+[       OK ] UrmaBondTest.DatapathPostRecvStoreSubmitsAndCleansProviderFailure (0 ms)
+[ RUN      ] UrmaBondTest.DatapathFailoverCrResendsBufferedJfsWrToBackupPath
+[       OK ] UrmaBondTest.DatapathFailoverCrResendsBufferedJfsWrToBackupPath (0 ms)
+[ RUN      ] UrmaBondTest.PublicDatapathApisRejectInvalidWorkRequests
+[       OK ] UrmaBondTest.PublicDatapathApisRejectInvalidWorkRequests (0 ms)
+[ RUN      ] UrmaBondTest.PublicDatapathApisValidateSendWorkRequestFields
+[       OK ] UrmaBondTest.PublicDatapathApisValidateSendWorkRequestFields (0 ms)
+[ RUN      ] UrmaBondTest.PublicDatapathApisRejectRecvStateBeforeProviderAccess
+[       OK ] UrmaBondTest.PublicDatapathApisRejectRecvStateBeforeProviderAccess (0 ms)
+[ RUN      ] UrmaBondTest.PublicDatapathRecvWithoutBackupRejectsStableScheduleFailures
+[       OK ] UrmaBondTest.PublicDatapathRecvWithoutBackupRejectsStableScheduleFailures (0 ms)
+[ RUN      ] UrmaBondTest.PublicDatapathRecvWithoutBackupRejectsOversizedWrList
+[       OK ] UrmaBondTest.PublicDatapathRecvWithoutBackupRejectsOversizedWrList (0 ms)
+[ RUN      ] UrmaBondTest.DatapathJettyStandaloneDispatchesProviderPostCallbacks
+[       OK ] UrmaBondTest.DatapathJettyStandaloneDispatchesProviderPostCallbacks (0 ms)
+[ RUN      ] UrmaBondTest.DatapathJettyRecvStoreUsesSharedJfrBuffer
+[       OK ] UrmaBondTest.DatapathJettyRecvStoreUsesSharedJfrBuffer (0 ms)
+[ RUN      ] UrmaBondTest.DatapathSendStoreRejectsOversizedList
+[       OK ] UrmaBondTest.DatapathSendStoreRejectsOversizedList (0 ms)
+[ RUN      ] UrmaBondTest.PublicDatapathSendWrListReturnsFirstBadWr
+[       OK ] UrmaBondTest.PublicDatapathSendWrListReturnsFirstBadWr (0 ms)
+[ RUN      ] UrmaBondTest.PublicApiDeletePathsRejectObjectsStillInUse
+[       OK ] UrmaBondTest.PublicApiDeletePathsRejectObjectsStillInUse (0 ms)
+[ RUN      ] UrmaBondTest.PublicDeleteApisReachVirtualDeleteFailurePaths
+[       OK ] UrmaBondTest.PublicDeleteApisReachVirtualDeleteFailurePaths (0 ms)
+[ RUN      ] UrmaBondTest.PublicApiModifyAndQueryHandleEmptyMemberSets
+[       OK ] UrmaBondTest.PublicApiModifyAndQueryHandleEmptyMemberSets (0 ms)
+[ RUN      ] UrmaBondTest.PublicApiModifyAndQueryPropagatePhysicalMemberResults
+[       OK ] UrmaBondTest.PublicApiModifyAndQueryPropagatePhysicalMemberResults (0 ms)
+[ RUN      ] UrmaBondTest.PublicApiRejectsInvalidCreateAndControlInputs
+[       OK ] UrmaBondTest.PublicApiRejectsInvalidCreateAndControlInputs (0 ms)
+[ RUN      ] UrmaBondTest.PublicJfceCreateAndDeleteUseMockPhysicalMember
+[       OK ] UrmaBondTest.PublicJfceCreateAndDeleteUseMockPhysicalMember (0 ms)
+[ RUN      ] UrmaBondTest.PublicJfceCreateAndDeletePropagatePhysicalFailures
+[       OK ] UrmaBondTest.PublicJfceCreateAndDeletePropagatePhysicalFailures (0 ms)
+[ RUN      ] UrmaBondTest.PublicCreateApisRejectInvalidPortIdsBeforeProviderAccess
+[       OK ] UrmaBondTest.PublicCreateApisRejectInvalidPortIdsBeforeProviderAccess (0 ms)
+[ RUN      ] UrmaBondTest.PublicJfcEventApisDispatchToPhysicalMembers
+[       OK ] UrmaBondTest.PublicJfcEventApisDispatchToPhysicalMembers (0 ms)
+[ RUN      ] UrmaBondTest.PublicWaitJfcContinuesAfterEmptyPhysicalEvent
+[       OK ] UrmaBondTest.PublicWaitJfcContinuesAfterEmptyPhysicalEvent (0 ms)
+[ RUN      ] UrmaBondTest.PublicWaitJfcScansBackupWhenStalePrimaryRemainsReadable
+[       OK ] UrmaBondTest.PublicWaitJfcScansBackupWhenStalePrimaryRemainsReadable (0 ms)
+[ RUN      ] UrmaBondTest.PublicWaitJfcContinuesAfterEmptyPhysicalEventWithInfiniteTimeout
+[       OK ] UrmaBondTest.PublicWaitJfcContinuesAfterEmptyPhysicalEventWithInfiniteTimeout (0 ms)
+[ RUN      ] UrmaBondTest.PublicWaitJfcRetriesReadablePhysicalEventUntilTimeout
+[       OK ] UrmaBondTest.PublicWaitJfcRetriesReadablePhysicalEventUntilTimeout (9 ms)
+[ RUN      ] UrmaBondTest.PublicWaitJfcMarksEventSourceForNextRearm
+[       OK ] UrmaBondTest.PublicWaitJfcMarksEventSourceForNextRearm (0 ms)
+[ RUN      ] UrmaBondTest.PublicEventApisCoverProviderFailureContracts
+[       OK ] UrmaBondTest.PublicEventApisCoverProviderFailureContracts (0 ms)
+[ RUN      ] UrmaBondTest.PublicAsyncEventMapsPhysicalJfsAndAckReleasesPrivateEvent
+[       OK ] UrmaBondTest.PublicAsyncEventMapsPhysicalJfsAndAckReleasesPrivateEvent (0 ms)
+[ RUN      ] UrmaBondTest.PublicCreateApisCleanupPhysicalMembersWhenVirtualCreateFails
+[       OK ] UrmaBondTest.PublicCreateApisCleanupPhysicalMembersWhenVirtualCreateFails (0 ms)
+[ RUN      ] UrmaBondTest.PublicCreateJfcCoversVirtualCreateWithMockIoctl
+[       OK ] UrmaBondTest.PublicCreateJfcCoversVirtualCreateWithMockIoctl (0 ms)
+[ RUN      ] UrmaBondTest.PublicCreateAndDeleteApisUseMockPhysicalMembers
+[       OK ] UrmaBondTest.PublicCreateAndDeleteApisUseMockPhysicalMembers (0 ms)
+[ RUN      ] UrmaBondTest.PublicCreateAndDeleteJettyCoverVirtualPhysicalIdMapping
+[       OK ] UrmaBondTest.PublicCreateAndDeleteJettyCoverVirtualPhysicalIdMapping (0 ms)
+[ RUN      ] UrmaBondTest.PublicCreateAndDeleteSharedJfcChildrenFollowIssueCleanupOrder
+[       OK ] UrmaBondTest.PublicCreateAndDeleteSharedJfcChildrenFollowIssueCleanupOrder (1 ms)
+[ RUN      ] UrmaBondTest.PublicCreateJettyUsesEffectiveSharedJfcForRefcount
+[       OK ] UrmaBondTest.PublicCreateJettyUsesEffectiveSharedJfcForRefcount (0 ms)
+[ RUN      ] UrmaBondTest.PublicCreateApisCleanupIdMappingAfterLateWrBufferFailures
+[       OK ] UrmaBondTest.PublicCreateApisCleanupIdMappingAfterLateWrBufferFailures (0 ms)
+[ RUN      ] UrmaBondTest.PublicCreateJettyHonorsExplicitPortIds
+[       OK ] UrmaBondTest.PublicCreateJettyHonorsExplicitPortIds (0 ms)
+[ RUN      ] UrmaBondTest.PublicUserCtlUpdatesStableContextFlags
+[       OK ] UrmaBondTest.PublicUserCtlUpdatesStableContextFlags (0 ms)
+[ RUN      ] UrmaBondTest.PublicUserCtlQueriesPortsAndJfceFds
+[       OK ] UrmaBondTest.PublicUserCtlQueriesPortsAndJfceFds (0 ms)
+[ RUN      ] UrmaBondTest.PublicUserCtlGetRjettyAndSegCtxUseMockIoctl
+[       OK ] UrmaBondTest.PublicUserCtlGetRjettyAndSegCtxUseMockIoctl (0 ms)
+[ RUN      ] UrmaBondTest.PublicApiModifyDoesNotMarkErrorForNonErrorState
+[       OK ] UrmaBondTest.PublicApiModifyDoesNotMarkErrorForNonErrorState (0 ms)
+[ RUN      ] UrmaBondTest.PublicTargetJettyRefHelpersAndAffinityWrapper
+[       OK ] UrmaBondTest.PublicTargetJettyRefHelpersAndAffinityWrapper (0 ms)
+[ RUN      ] UrmaBondTest.PublicJettyBindAndUnimportApisCoverSafeStateTransitions
+[       OK ] UrmaBondTest.PublicJettyBindAndUnimportApisCoverSafeStateTransitions (0 ms)
+[ RUN      ] UrmaBondTest.PublicJettyBindUsesPhysicalTargetsAndRollsBackFailures
+[       OK ] UrmaBondTest.PublicJettyBindUsesPhysicalTargetsAndRollsBackFailures (0 ms)
+[ RUN      ] UrmaBondTest.LinkRecoveryRebuildsLocalPjettyWithMockProvider
+[       OK ] UrmaBondTest.LinkRecoveryRebuildsLocalPjettyWithMockProvider (0 ms)
+[ RUN      ] UrmaBondTest.HealthFallbackKickArmsTaskAndStopsAtStableRebuildFailure
+[       OK ] UrmaBondTest.HealthFallbackKickArmsTaskAndStopsAtStableRebuildFailure (0 ms)
+[ RUN      ] UrmaBondTest.HealthFallbackRequestSelectsBackupLocalIndex
+[       OK ] UrmaBondTest.HealthFallbackRequestSelectsBackupLocalIndex (0 ms)
+[ RUN      ] UrmaBondTest.PublicImportApisPropagateCommandFailureWithoutDevices
+[       OK ] UrmaBondTest.PublicImportApisPropagateCommandFailureWithoutDevices (0 ms)
+[ RUN      ] UrmaBondTest.PublicSegmentApisCoverTokenAndRefcountPaths
+[       OK ] UrmaBondTest.PublicSegmentApisCoverTokenAndRefcountPaths (0 ms)
+[ RUN      ] UrmaBondTest.PublicSegmentRegisterCleansPhysicalSegWhenVirtualRegisterFails
+[       OK ] UrmaBondTest.PublicSegmentRegisterCleansPhysicalSegWhenVirtualRegisterFails (0 ms)
+[ RUN      ] UrmaBondTest.PublicSegmentRegisterAndUnregisterUseMockIoctlSuccessPath
+[       OK ] UrmaBondTest.PublicSegmentRegisterAndUnregisterUseMockIoctlSuccessPath (0 ms)
+[ RUN      ] UrmaBondTest.PublicSegmentApisReleaseLastReferencesThroughStableFailures
+[       OK ] UrmaBondTest.PublicSegmentApisReleaseLastReferencesThroughStableFailures (0 ms)
+[ RUN      ] UrmaBondTest.PublicImportSegmentUsesPhysicalProviderMocks
+[       OK ] UrmaBondTest.PublicImportSegmentUsesPhysicalProviderMocks (0 ms)
+[ RUN      ] UrmaBondTest.PublicImportJettyUsesExtAndPhysicalProviderMocks
+[       OK ] UrmaBondTest.PublicImportJettyUsesExtAndPhysicalProviderMocks (0 ms)
+[ RUN      ] UrmaBondTest.PublicImportJettyUsesMockIoctlAndPhysicalProvider
+[       OK ] UrmaBondTest.PublicImportJettyUsesMockIoctlAndPhysicalProvider (0 ms)
+[ RUN      ] UrmaBondTest.PublicImportJfrUsesMockIoctlAndPhysicalProvider
+[       OK ] UrmaBondTest.PublicImportJfrUsesMockIoctlAndPhysicalProvider (0 ms)
+[ RUN      ] UrmaBondTest.PublicProviderOpsRejectInvalidOrUninitializedState
+[       OK ] UrmaBondTest.PublicProviderOpsRejectInvalidOrUninitializedState (0 ms)
+[ RUN      ] UrmaBondTest.PublicProviderCreateContextUsesCachedTopoAndMockPhysicalContext
+[       OK ] UrmaBondTest.PublicProviderCreateContextUsesCachedTopoAndMockPhysicalContext (0 ms)
+[ RUN      ] UrmaBondTest.PublicProviderCreateContextLoadsTopoFromMockUserCtl
+[       OK ] UrmaBondTest.PublicProviderCreateContextLoadsTopoFromMockUserCtl (14 ms)
+[ RUN      ] UrmaBondTest.PublicProviderCreateContextCleansVirtualContextOnStableFailures
+[       OK ] UrmaBondTest.PublicProviderCreateContextCleansVirtualContextOnStableFailures (15 ms)
+[ RUN      ] UrmaBondTest.PublicProviderCreateContextPropagatesPhysicalContextFailures
+[       OK ] UrmaBondTest.PublicProviderCreateContextPropagatesPhysicalContextFailures (0 ms)
+[ RUN      ] UrmaBondTest.PublicProviderDeleteContextPropagatesPhysicalDeleteFailure
+[       OK ] UrmaBondTest.PublicProviderDeleteContextPropagatesPhysicalDeleteFailure (0 ms)
+[ RUN      ] UrmaBondTest.PublicProviderDeleteContextPropagatesVirtualDeleteFailure
+[       OK ] UrmaBondTest.PublicProviderDeleteContextPropagatesVirtualDeleteFailure (0 ms)
+[ RUN      ] UrmaBondTest.PublicProviderUninitReleasesHeapGlobalContext
+[       OK ] UrmaBondTest.PublicProviderUninitReleasesHeapGlobalContext (0 ms)
+[ RUN      ] UrmaBondTest.PublicProviderInitReadsEnvAndCleansUp
+[       OK ] UrmaBondTest.PublicProviderInitReadsEnvAndCleansUp (0 ms)
+[ RUN      ] UrmaBondTest.PublicProviderInitAcceptsValidEnvValues
+[       OK ] UrmaBondTest.PublicProviderInitAcceptsValidEnvValues (101 ms)
+[ RUN      ] UrmaBondTest.NetlinkInitUsesMockSocketAndCoversFailureBranches
+[       OK ] UrmaBondTest.NetlinkInitUsesMockSocketAndCoversFailureBranches (0 ms)
+[ RUN      ] UrmaBondTest.NetlinkWorkerAndCallbackDispatchUseMockSocket
+[       OK ] UrmaBondTest.NetlinkWorkerAndCallbackDispatchUseMockSocket (1 ms)
+[ RUN      ] UrmaBondTest.FailbackTaskTableCoversScheduleFailureDuplicateAndLookup
+[       OK ] UrmaBondTest.FailbackTaskTableCoversScheduleFailureDuplicateAndLookup (2100 ms)
+[ RUN      ] UrmaBondTest.PublicProviderInitSucceedsWithMockNetlinkAndDisabledHealth
+[       OK ] UrmaBondTest.PublicProviderInitSucceedsWithMockNetlinkAndDisabledHealth (0 ms)
+[ RUN      ] UrmaBondTest.HealthCheckPublicApisHonorDisabledContract
+[       OK ] UrmaBondTest.HealthCheckPublicApisHonorDisabledContract (0 ms)
+[ RUN      ] UrmaBondTest.HealthCheckImportTsegUsesMockProviderRoutes
+[       OK ] UrmaBondTest.HealthCheckImportTsegUsesMockProviderRoutes (0 ms)
+[ RUN      ] UrmaBondTest.HealthCheckLocalSegRegisterFillAndUnregisterUseProviderMocks
+[       OK ] UrmaBondTest.HealthCheckLocalSegRegisterFillAndUnregisterUseProviderMocks (0 ms)
+[ RUN      ] UrmaBondTest.HealthCheckLocalSegRegisterFailureCleansPartialState
+[       OK ] UrmaBondTest.HealthCheckLocalSegRegisterFailureCleansPartialState (0 ms)
+[ RUN      ] UrmaBondTest.HealthCheckContextCreateAndDestroyUseLocalEventFds
+[       OK ] UrmaBondTest.HealthCheckContextCreateAndDestroyUseLocalEventFds (0 ms)
+[ RUN      ] UrmaBondTest.HealthCheckContextCreateCleansUpEventfdFailure
+[       OK ] UrmaBondTest.HealthCheckContextCreateCleansUpEventfdFailure (0 ms)
+[ RUN      ] UrmaBondTest.HealthCheckContextCreateCleansUpEpollCtlFailure
+[       OK ] UrmaBondTest.HealthCheckContextCreateCleansUpEpollCtlFailure (0 ms)
+[ RUN      ] UrmaBondTest.HealthCheckDestroyFreesRegisteredTasks
+[       OK ] UrmaBondTest.HealthCheckDestroyFreesRegisteredTasks (0 ms)
+[ RUN      ] UrmaBondTest.HealthCheckThreadStartsAndStopsWithoutContexts
+[       OK ] UrmaBondTest.HealthCheckThreadStartsAndStopsWithoutContexts (100 ms)
+[ RUN      ] UrmaBondTest.HealthCheckThreadConsumesQueuedLocalEvent
+[       OK ] UrmaBondTest.HealthCheckThreadConsumesQueuedLocalEvent (200 ms)
+[ RUN      ] UrmaBondTest.HealthCheckThreadSendsBackupProbeThroughMockProvider
+[       OK ] UrmaBondTest.HealthCheckThreadSendsBackupProbeThroughMockProvider (200 ms)
+[ RUN      ] UrmaBondTest.HealthCheckEnabledTaskLifecycleUsesLocalObjects
+[       OK ] UrmaBondTest.HealthCheckEnabledTaskLifecycleUsesLocalObjects (0 ms)
+[ RUN      ] UrmaBondTest.HealthCheckCrHandlerConsumesMatchingMockCompletion
+[       OK ] UrmaBondTest.HealthCheckCrHandlerConsumesMatchingMockCompletion (0 ms)
+[ RUN      ] UrmaBondTest.HealthCheckThreadProcessesQueuedLinkFailureEvents
+[       OK ] UrmaBondTest.HealthCheckThreadProcessesQueuedLinkFailureEvents (201 ms)
+[----------] 118 tests from UrmaBondTest (2996 ms total)
+
+[----------] Global test environment tear-down
+[==========] 118 tests from 1 test suite ran. (2996 ms total)
+[  PASSED  ] 118 tests.
+<end of output>
+Test time =   3.02 sec
+----------------------------------------------------------
+Test Passed.
+"urma_bond_ut" end time: Jul 09 10:42 CST
+"urma_bond_ut" time elapsed: 00:00:03
+----------------------------------------------------------
+
+2/6 Testing: urma_common_ut
+2/6 Test: urma_common_ut
+Command: "/home/zdxfgre/jd/umdk/test/urma/build/ut/common/urma_common_ut"
+Directory: /home/zdxfgre/jd/umdk/test/urma/build/ut/common
+"urma_common_ut" start time: Jul 09 10:42 CST
+Output:
+----------------------------------------------------------
+Running main() from ./googletest/src/gtest_main.cc
+Note: Google Test filter = -UrmaCoreTest.MainApisValidateProviderContextAndDeviceContracts:UrmaBondTest.WorkerCreatePropagatesEpollCreate1Failure:UrmaBondTest.WorkerCreatePropagatesEventfdFailure:UrmaBondTest.WorkerCreatePropagatesEpollCtlFailure:UrmaUvsTest.TopoHelpersPropagateMainUeBatchIoctlFailure
+[==========] Running 13 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 13 tests from UrmaCommonTest
+[ RUN      ] UrmaCommonTest.BitmapSetScanAndEqual
+[       OK ] UrmaCommonTest.BitmapSetScanAndEqual (0 ms)
+[ RUN      ] UrmaCommonTest.BitmapAllocOneMasksUnusedBits
+[       OK ] UrmaCommonTest.BitmapAllocOneMasksUnusedBits (0 ms)
+[ RUN      ] UrmaCommonTest.HashBytesMatchesStringHash
+[       OK ] UrmaCommonTest.HashBytesMatchesStringHash (0 ms)
+[ RUN      ] UrmaCommonTest.HmapInsertFindIterateAndRemove
+[       OK ] UrmaCommonTest.HmapInsertFindIterateAndRemove (0 ms)
+[ RUN      ] UrmaCommonTest.DynamicStringCoversMutationAndOwnership
+[       OK ] UrmaCommonTest.DynamicStringCoversMutationAndOwnership (0 ms)
+[ RUN      ] UrmaCommonTest.UtilBitSearchCoversSetAndZeroPaths
+[       OK ] UrmaCommonTest.UtilBitSearchCoversSetAndZeroPaths (0 ms)
+[ RUN      ] UrmaCommonTest.UtilLargeMemAndHugePageBoundaries
+[       OK ] UrmaCommonTest.UtilLargeMemAndHugePageBoundaries (0 ms)
+[ RUN      ] UrmaCommonTest.UtilStringConversionsAcceptValidAndRejectInvalid
+[       OK ] UrmaCommonTest.UtilStringConversionsAcceptValidAndRejectInvalid (0 ms)
+[ RUN      ] UrmaCommonTest.ClockAndErrorHelpersReturnStableValues
+[       OK ] UrmaCommonTest.ClockAndErrorHelpersReturnStableValues (0 ms)
+[ RUN      ] UrmaCommonTest.ClockFallsBackToProcWhenSamplingFails
+[       OK ] UrmaCommonTest.ClockFallsBackToProcWhenSamplingFails (0 ms)
+[ RUN      ] UrmaCommonTest.ClockUsesSampleWhenProcInfoIsUnavailable
+[       OK ] UrmaCommonTest.ClockUsesSampleWhenProcInfoIsUnavailable (220 ms)
+[ RUN      ] UrmaCommonTest.ClockReturnsZeroWhenSamplingAndProcAreUnavailable
+gettimeofday failed.
+[       OK ] UrmaCommonTest.ClockReturnsZeroWhenSamplingAndProcAreUnavailable (0 ms)
+[ RUN      ] UrmaCommonTest.ClockHandlesGettimeofdayAndCpuFrequencyMismatch
+gettimeofday failed.
+Conflicting CPU frequency values detected: 2000.000000 != 2500.000000. CPU Frequency is not max.
+[       OK ] UrmaCommonTest.ClockHandlesGettimeofdayAndCpuFrequencyMismatch (0 ms)
+[----------] 13 tests from UrmaCommonTest (221 ms total)
+
+[----------] Global test environment tear-down
+[==========] 13 tests from 1 test suite ran. (221 ms total)
+[  PASSED  ] 13 tests.
+<end of output>
+Test time =   0.23 sec
+----------------------------------------------------------
+Test Passed.
+"urma_common_ut" end time: Jul 09 10:42 CST
+"urma_common_ut" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/6 Testing: urma_core_ut
+3/6 Test: urma_core_ut
+Command: "/home/zdxfgre/jd/umdk/test/urma/build/ut/core/urma_core_ut"
+Directory: /home/zdxfgre/jd/umdk/test/urma/build/ut/core
+"urma_core_ut" start time: Jul 09 10:42 CST
+Output:
+----------------------------------------------------------
+Running main() from ./googletest/src/gtest_main.cc
+Note: Google Test filter = -UrmaCoreTest.MainApisValidateProviderContextAndDeviceContracts:UrmaBondTest.WorkerCreatePropagatesEpollCreate1Failure:UrmaBondTest.WorkerCreatePropagatesEventfdFailure:UrmaBondTest.WorkerCreatePropagatesEpollCtlFailure:UrmaUvsTest.TopoHelpersPropagateMainUeBatchIoctlFailure
+[==========] Running 46 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 46 tests from UrmaCoreTest
+[ RUN      ] UrmaCoreTest.CheckOptValidUpdatesOnlyOptionMask
+[       OK ] UrmaCoreTest.CheckOptValidUpdatesOnlyOptionMask (0 ms)
+[ RUN      ] UrmaCoreTest.CheckOptValidRejectsWrongLengthAndIgnoresUnknownOpt
+[       OK ] UrmaCoreTest.CheckOptValidRejectsWrongLengthAndIgnoresUnknownOpt (0 ms)
+[ RUN      ] UrmaCoreTest.SetOptionsCommonWritesTargetStruct
+[       OK ] UrmaCoreTest.SetOptionsCommonWritesTargetStruct (0 ms)
+[ RUN      ] UrmaCoreTest.UbaggSwitchCounter
+[       OK ] UrmaCoreTest.UbaggSwitchCounter (0 ms)
+[ RUN      ] UrmaCoreTest.LogApisHandleCallbacksLevelsTagsAndEnv
+[       OK ] UrmaCoreTest.LogApisHandleCallbacksLevelsTagsAndEnv (0 ms)
+[ RUN      ] UrmaCoreTest.PerfApisRecordAndFormatStats
+[       OK ] UrmaCoreTest.PerfApisRecordAndFormatStats (0 ms)
+[ RUN      ] UrmaCoreTest.PerfThreadCleanupRunsOnWorkerExit
+[       OK ] UrmaCoreTest.PerfThreadCleanupRunsOnWorkerExit (0 ms)
+[ RUN      ] UrmaCoreTest.CmdTokenAndSegmentWrappersPropagateIoctlFailure
+[       OK ] UrmaCoreTest.CmdTokenAndSegmentWrappersPropagateIoctlFailure (0 ms)
+[ RUN      ] UrmaCoreTest.CmdJfcJfsJfrWrappersPropagateIoctlFailure
+[       OK ] UrmaCoreTest.CmdJfcJfsJfrWrappersPropagateIoctlFailure (1 ms)
+[ RUN      ] UrmaCoreTest.CmdJettyNotifierAndControlWrappersPropagateIoctlFailure
+[       OK ] UrmaCoreTest.CmdJettyNotifierAndControlWrappersPropagateIoctlFailure (0 ms)
+[ RUN      ] UrmaCoreTest.CmdWrappersRejectInvalidParametersBeforeIoctl
+[       OK ] UrmaCoreTest.CmdWrappersRejectInvalidParametersBeforeIoctl (1 ms)
+[ RUN      ] UrmaCoreTest.CmdWrappersFillObjectsWhenIoctlSucceeds
+[       OK ] UrmaCoreTest.CmdWrappersFillObjectsWhenIoctlSucceeds (0 ms)
+[ RUN      ] UrmaCoreTest.CmdWrappersSucceedForUpdateDeleteAndControlPaths
+[       OK ] UrmaCoreTest.CmdWrappersSucceedForUpdateDeleteAndControlPaths (0 ms)
+[ RUN      ] UrmaCoreTest.CmdDestroyAndBatchFailureOutputsUseMockHardwareValues
+[       OK ] UrmaCoreTest.CmdDestroyAndBatchFailureOutputsUseMockHardwareValues (0 ms)
+[ RUN      ] UrmaCoreTest.CmdDeleteRejectsMixedDevicesAndReportsNonBlockingPendingEvents
+[       OK ] UrmaCoreTest.CmdDeleteRejectsMixedDevicesAndReportsNonBlockingPendingEvents (0 ms)
+[ RUN      ] UrmaCoreTest.CmdQueryJettyCoversSharedAndPrivateReceiveConfigs
+[       OK ] UrmaCoreTest.CmdQueryJettyCoversSharedAndPrivateReceiveConfigs (0 ms)
+[ RUN      ] UrmaCoreTest.CmdNetworkLookupWrappersValidateAndCopyIoctlOutputs
+[       OK ] UrmaCoreTest.CmdNetworkLookupWrappersValidateAndCopyIoctlOutputs (0 ms)
+[ RUN      ] UrmaCoreTest.CmdAsyncEventsMapAndAckAllStableObjectTypes
+[       OK ] UrmaCoreTest.CmdAsyncEventsMapAndAckAllStableObjectTypes (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiJfcValidatesInputsAndDispatchesOps
+[       OK ] UrmaCoreTest.CpApiJfcValidatesInputsAndDispatchesOps (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiJfsValidatesStateAndPropagatesOps
+[       OK ] UrmaCoreTest.CpApiJfsValidatesStateAndPropagatesOps (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiJfrValidatesInputsAndPropagatesOps
+[       OK ] UrmaCoreTest.CpApiJfrValidatesInputsAndPropagatesOps (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiJfsJfrCreateAndActiveCoverStableBoundaryBranches
+[       OK ] UrmaCoreTest.CpApiJfsJfrCreateAndActiveCoverStableBoundaryBranches (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiInactiveJfcJfsJfrApisValidateAndDispatch
+[       OK ] UrmaCoreTest.CpApiInactiveJfcJfsJfrApisValidateAndDispatch (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiSegmentAndTokenApisValidateAndDispatch
+[       OK ] UrmaCoreTest.CpApiSegmentAndTokenApisValidateAndDispatch (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiMiscControlApisValidateAndDispatch
+[       OK ] UrmaCoreTest.CpApiMiscControlApisValidateAndDispatch (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiJettyAndJfceApisValidateAndDispatch
+[       OK ] UrmaCoreTest.CpApiJettyAndJfceApisValidateAndDispatch (1 ms)
+[ RUN      ] UrmaCoreTest.CpApiCreateJettyRejectsInvalidConfigVariants
+[       OK ] UrmaCoreTest.CpApiCreateJettyRejectsInvalidConfigVariants (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiTargetJettyAndNotifierApisValidateAndDispatch
+[       OK ] UrmaCoreTest.CpApiTargetJettyAndNotifierApisValidateAndDispatch (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiJettyGroupAndUtilityApisValidateAndDispatch
+[       OK ] UrmaCoreTest.CpApiJettyGroupAndUtilityApisValidateAndDispatch (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiProviderReturnValuesPropagateForJfcJfsJfrJetty
+[       OK ] UrmaCoreTest.CpApiProviderReturnValuesPropagateForJfcJfsJfrJetty (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiProviderNullAndStateFailuresCoverStableBranches
+[       OK ] UrmaCoreTest.CpApiProviderNullAndStateFailuresCoverStableBranches (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiBatchDeleteReportsConfiguredBadObjects
+[       OK ] UrmaCoreTest.CpApiBatchDeleteReportsConfiguredBadObjects (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiProviderFailuresCoverDeleteBatchAndOptBranches
+[       OK ] UrmaCoreTest.CpApiProviderFailuresCoverDeleteBatchAndOptBranches (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiAdditionalNullAndStateBranchesUseExistingMocks
+[       OK ] UrmaCoreTest.CpApiAdditionalNullAndStateBranchesUseExistingMocks (0 ms)
+[ RUN      ] UrmaCoreTest.CpApiRemoteJettyAndSegContextHelpersUseLocalAndProviderPaths
+[       OK ] UrmaCoreTest.CpApiRemoteJettyAndSegContextHelpersUseLocalAndProviderPaths (0 ms)
+[ RUN      ] UrmaCoreTest.DpApiWrappersValidateInputsAndDispatchOps
+[       OK ] UrmaCoreTest.DpApiWrappersValidateInputsAndDispatchOps (0 ms)
+[ RUN      ] UrmaCoreTest.FormatConvertAndDpErrorBranchesCoverStableContracts
+[       OK ] UrmaCoreTest.FormatConvertAndDpErrorBranchesCoverStableContracts (0 ms)
+[ RUN      ] UrmaCoreTest.DpApiProviderReturnValuesPropagateForWrAndCompletion
+[       OK ] UrmaCoreTest.DpApiProviderReturnValuesPropagateForWrAndCompletion (0 ms)
+[ RUN      ] UrmaCoreTest.CoreAsyncEventAndUserCtlPropagateProviderResults
+[       OK ] UrmaCoreTest.CoreAsyncEventAndUserCtlPropagateProviderResults (0 ms)
+[ RUN      ] UrmaCoreTest.MainCreateContextReadsEidAndOpensLocalCdev
+[       OK ] UrmaCoreTest.MainCreateContextReadsEidAndOpensLocalCdev (0 ms)
+[ RUN      ] UrmaCoreTest.MainProviderLoaderUsesLocalDlopenMocks
+[       OK ] UrmaCoreTest.MainProviderLoaderUsesLocalDlopenMocks (0 ms)
+[ RUN      ] UrmaCoreTest.DeviceSysfsApisParseTemporaryFilesAndFallbackEids
+[       OK ] UrmaCoreTest.DeviceSysfsApisParseTemporaryFilesAndFallbackEids (0 ms)
+[ RUN      ] UrmaCoreTest.DeviceMergeSkipsDuplicateAndRemovesStaleMemoryDevices
+[       OK ] UrmaCoreTest.DeviceMergeSkipsDuplicateAndRemovesStaleMemoryDevices (0 ms)
+[ RUN      ] UrmaCoreTest.DeviceDiscoveryParsesRedirectedSysfsTree
+[       OK ] UrmaCoreTest.DeviceDiscoveryParsesRedirectedSysfsTree (4 ms)
+[ RUN      ] UrmaCoreTest.DeviceDiscoverySkipsExistingAndUnmatchedDevices
+[       OK ] UrmaCoreTest.DeviceDiscoverySkipsExistingAndUnmatchedDevices (1 ms)
+[ RUN      ] UrmaCoreTest.DeviceListAndDriverHelpersUseMemoryObjects
+[       OK ] UrmaCoreTest.DeviceListAndDriverHelpersUseMemoryObjects (0 ms)
+[----------] 46 tests from UrmaCoreTest (21 ms total)
+
+[----------] Global test environment tear-down
+[==========] 46 tests from 1 test suite ran. (21 ms total)
+[  PASSED  ] 46 tests.
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"urma_core_ut" end time: Jul 09 10:42 CST
+"urma_core_ut" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/6 Testing: urma_cmd_tlv_ut
+4/6 Test: urma_cmd_tlv_ut
+Command: "/home/zdxfgre/jd/umdk/test/urma/build/ut/cmd_tlv/urma_cmd_tlv_ut"
+Directory: /home/zdxfgre/jd/umdk/test/urma/build/ut/cmd_tlv
+"urma_cmd_tlv_ut" start time: Jul 09 10:42 CST
+Output:
+----------------------------------------------------------
+Running main() from ./googletest/src/gtest_main.cc
+Note: Google Test filter = -UrmaCoreTest.MainApisValidateProviderContextAndDeviceContracts:UrmaBondTest.WorkerCreatePropagatesEpollCreate1Failure:UrmaBondTest.WorkerCreatePropagatesEventfdFailure:UrmaBondTest.WorkerCreatePropagatesEpollCtlFailure:UrmaUvsTest.TopoHelpersPropagateMainUeBatchIoctlFailure
+[==========] Running 15 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 15 tests from UrmaCmdTlvTest
+[ RUN      ] UrmaCmdTlvTest.CreateCtxTlvAttrsMatchExpected
+[       OK ] UrmaCmdTlvTest.CreateCtxTlvAttrsMatchExpected (0 ms)
+[ RUN      ] UrmaCmdTlvTest.TokenIdTlvAttrsMatchExpected
+[       OK ] UrmaCmdTlvTest.TokenIdTlvAttrsMatchExpected (0 ms)
+[ RUN      ] UrmaCmdTlvTest.SegmentTlvAttrsMatchExpected
+[       OK ] UrmaCmdTlvTest.SegmentTlvAttrsMatchExpected (0 ms)
+[ RUN      ] UrmaCmdTlvTest.JfsTlvAttrsMatchExpected
+[       OK ] UrmaCmdTlvTest.JfsTlvAttrsMatchExpected (0 ms)
+[ RUN      ] UrmaCmdTlvTest.DeleteJfsBatchTlvAttrsMatchExpected
+[       OK ] UrmaCmdTlvTest.DeleteJfsBatchTlvAttrsMatchExpected (0 ms)
+[ RUN      ] UrmaCmdTlvTest.IoctlErrorIsPropagated
+[       OK ] UrmaCmdTlvTest.IoctlErrorIsPropagated (0 ms)
+[ RUN      ] UrmaCmdTlvTest.AllCoreTlvWrappersEmitHeaders
+[       OK ] UrmaCmdTlvTest.AllCoreTlvWrappersEmitHeaders (0 ms)
+[ RUN      ] UrmaCmdTlvTest.AllJettyAndControlTlvWrappersEmitHeaders
+[       OK ] UrmaCmdTlvTest.AllJettyAndControlTlvWrappersEmitHeaders (0 ms)
+[ RUN      ] UrmaCmdTlvTest.AllMiscAndEventTlvWrappersEmitHeaders
+[       OK ] UrmaCmdTlvTest.AllMiscAndEventTlvWrappersEmitHeaders (0 ms)
+[ RUN      ] UrmaCmdTlvTest.HighLevelJettyCommandWrappersPropagateIoctlResults
+[       OK ] UrmaCmdTlvTest.HighLevelJettyCommandWrappersPropagateIoctlResults (0 ms)
+[ RUN      ] UrmaCmdTlvTest.HighLevelMiscCommandWrappersEmitExpectedHeaders
+[       OK ] UrmaCmdTlvTest.HighLevelMiscCommandWrappersEmitExpectedHeaders (0 ms)
+[ RUN      ] UrmaCmdTlvTest.HighLevelMiscCommandWrappersPropagateIoctlFailure
+[       OK ] UrmaCmdTlvTest.HighLevelMiscCommandWrappersPropagateIoctlFailure (0 ms)
+[ RUN      ] UrmaCmdTlvTest.HighLevelJfcLifecycleHelpersAreReached
+[       OK ] UrmaCmdTlvTest.HighLevelJfcLifecycleHelpersAreReached (0 ms)
+[ RUN      ] UrmaCmdTlvTest.HighLevelDeleteContextDestroysInitializedMutex
+[       OK ] UrmaCmdTlvTest.HighLevelDeleteContextDestroysInitializedMutex (0 ms)
+[ RUN      ] UrmaCmdTlvTest.HighLevelCreateContextInitializesContextWithoutSysfs
+[       OK ] UrmaCmdTlvTest.HighLevelCreateContextInitializesContextWithoutSysfs (0 ms)
+[----------] 15 tests from UrmaCmdTlvTest (2 ms total)
+
+[----------] Global test environment tear-down
+[==========] 15 tests from 1 test suite ran. (2 ms total)
+[  PASSED  ] 15 tests.
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"urma_cmd_tlv_ut" end time: Jul 09 10:42 CST
+"urma_cmd_tlv_ut" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/6 Testing: urma_uvs_ut
+5/6 Test: urma_uvs_ut
+Command: "/home/zdxfgre/jd/umdk/test/urma/build/ut/uvs/urma_uvs_ut"
+Directory: /home/zdxfgre/jd/umdk/test/urma/build/ut/uvs
+"urma_uvs_ut" start time: Jul 09 10:42 CST
+Output:
+----------------------------------------------------------
+Running main() from ./googletest/src/gtest_main.cc
+Note: Google Test filter = -UrmaCoreTest.MainApisValidateProviderContextAndDeviceContracts:UrmaBondTest.WorkerCreatePropagatesEpollCreate1Failure:UrmaBondTest.WorkerCreatePropagatesEventfdFailure:UrmaBondTest.WorkerCreatePropagatesEpollCtlFailure:UrmaUvsTest.TopoHelpersPropagateMainUeBatchIoctlFailure
+[==========] Running 18 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 18 tests from UrmaUvsTest
+[ RUN      ] UrmaUvsTest.TlvWrappersBuildExpectedAttrs
+[       OK ] UrmaUvsTest.TlvWrappersBuildExpectedAttrs (0 ms)
+[ RUN      ] UrmaUvsTest.PathSetWrapperBuildsInAndOutAttrs
+[       OK ] UrmaUvsTest.PathSetWrapperBuildsInAndOutAttrs (0 ms)
+[ RUN      ] UrmaUvsTest.IoctlFailureReturnsNegativeErrno
+[       OK ] UrmaUvsTest.IoctlFailureReturnsNegativeErrno (0 ms)
+[ RUN      ] UrmaUvsTest.UbaggAndUbcoreIoctlSuccessPathsUseMockedDevices
+[       OK ] UrmaUvsTest.UbaggAndUbcoreIoctlSuccessPathsUseMockedDevices (72 ms)
+[ RUN      ] UrmaUvsTest.UbaggAndUbcoreIoctlFailuresPropagate
+[       OK ] UrmaUvsTest.UbaggAndUbcoreIoctlFailuresPropagate (72 ms)
+[ RUN      ] UrmaUvsTest.UbaggIoctlRejectsInvalidTopoCount
+[       OK ] UrmaUvsTest.UbaggIoctlRejectsInvalidTopoCount (69 ms)
+[ RUN      ] UrmaUvsTest.PublicApisRejectInvalidParameters
+[       OK ] UrmaUvsTest.PublicApisRejectInvalidParameters (0 ms)
+[ RUN      ] UrmaUvsTest.PublicApisRejectTopoNodeSizeMismatchBeforeIoctl
+[       OK ] UrmaUvsTest.PublicApisRejectTopoNodeSizeMismatchBeforeIoctl (0 ms)
+[ RUN      ] UrmaUvsTest.PublicApisPropagateMissingDeviceFailure
+[       OK ] UrmaUvsTest.PublicApisPropagateMissingDeviceFailure (143 ms)
+[ RUN      ] UrmaUvsTest.PublicApisSucceedWithMockedDevices
+[       OK ] UrmaUvsTest.PublicApisSucceedWithMockedDevices (147 ms)
+[ RUN      ] UrmaUvsTest.LogAndLockHelpersAreStable
+[       OK ] UrmaUvsTest.LogAndLockHelpersAreStable (0 ms)
+[ RUN      ] UrmaUvsTest.TopoHelpersHandleStableBoundaryInput
+[       OK ] UrmaUvsTest.TopoHelpersHandleStableBoundaryInput (0 ms)
+[ RUN      ] UrmaUvsTest.TopoHelpersUpdateMainUeBatchesWithMockedUbcore
+[       OK ] UrmaUvsTest.TopoHelpersUpdateMainUeBatchesWithMockedUbcore (0 ms)
+[ RUN      ] UrmaUvsTest.TopoHelpersBuildHostEidMappingsWithMockedDevices
+[       OK ] UrmaUvsTest.TopoHelpersBuildHostEidMappingsWithMockedDevices (70 ms)
+[ RUN      ] UrmaUvsTest.TopoHelpersAggregateSameHostEidAcrossNormalDevices
+[       OK ] UrmaUvsTest.TopoHelpersAggregateSameHostEidAcrossNormalDevices (68 ms)
+[ RUN      ] UrmaUvsTest.TopoHelpersSplitFullHostEidBatchForSameHost
+[       OK ] UrmaUvsTest.TopoHelpersSplitFullHostEidBatchForSameHost (70 ms)
+[ RUN      ] UrmaUvsTest.TopoHelpersRejectWhenHostEidBatchTableIsFull
+[       OK ] UrmaUvsTest.TopoHelpersRejectWhenHostEidBatchTableIsFull (71 ms)
+[ RUN      ] UrmaUvsTest.TopoHelpersRejectInvalidOrUnmatchedShareTopo
+[       OK ] UrmaUvsTest.TopoHelpersRejectInvalidOrUnmatchedShareTopo (213 ms)
+[----------] 18 tests from UrmaUvsTest (1002 ms total)
+
+[----------] Global test environment tear-down
+[==========] 18 tests from 1 test suite ran. (1002 ms total)
+[  PASSED  ] 18 tests.
+<end of output>
+Test time =   1.02 sec
+----------------------------------------------------------
+Test Passed.
+"urma_uvs_ut" end time: Jul 09 10:42 CST
+"urma_uvs_ut" time elapsed: 00:00:01
+----------------------------------------------------------
+
+6/6 Testing: uvs_api_fuzz
+6/6 Test: uvs_api_fuzz
+Command: "/home/zdxfgre/jd/umdk/test/urma/build/fuzz/uvs_api_fuzz"
+Directory: /home/zdxfgre/jd/umdk/test/urma/build/fuzz
+"uvs_api_fuzz" start time: Jul 09 10:42 CST
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"uvs_api_fuzz" end time: Jul 09 10:42 CST
+"uvs_api_fuzz" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Jul 09 10:42 CST
+
+phase_bond =   3.02 sec*proc
+
+phase_cmd_tlv =   0.01 sec*proc
+
+phase_common =   0.23 sec*proc
+
+phase_core =   0.04 sec*proc
+
+phase_fuzz =   0.02 sec*proc
+
+phase_fuzz_uvs =   0.02 sec*proc
+
+phase_uvs =   1.02 sec*proc
+

@@ -43,15 +43,36 @@ TEST_F(UrmaUvsTest, TlvWrappersBuildExpectedAttrs)
     EXPECT_EQ(1, uvs_ioctl_flush_main_ue_eid(&ctx));
     EXPECT_EQ(UVS_CMD_FLUSH_MAIN_UE_EID, g_uvsIoctl.command);
     ExpectAttrTypes({FLUSH_MAIN_UE_EID_OUT_STATUS});
+    ASSERT_EQ(1U, g_uvsIoctl.fieldSizes.size());
+    EXPECT_EQ(sizeof(int), g_uvsIoctl.fieldSizes[0]);
+    ASSERT_EQ(sizeof(int), g_uvsIoctl.attrData[0].size());
+    int flushStatus = 0;
+    std::memcpy(&flushStatus, g_uvsIoctl.attrData[0].data(), sizeof(flushStatus));
+    EXPECT_EQ(1, flushStatus);
 
     EXPECT_EQ(0, uvs_ioctl_insert_main_ue_eid_batch(&ctx, &batch));
     EXPECT_EQ(UVS_CMD_INSERT_MAIN_UE_EID_BATCH, g_uvsIoctl.command);
     ExpectAttrTypes({INSERT_MAIN_UE_EID_BATCH_IN_ENTRY_MAIN_UE_EID,
         INSERT_MAIN_UE_EID_BATCH_IN_ENTRY_EID_NUM, INSERT_MAIN_UE_EID_BATCH_IN_ENTRY_EIDS});
 
+    hostBatch.in.entry.host_eid = MakeEid(81);
+    hostBatch.in.entry.eid_num = 2;
+    hostBatch.in.entry.eids[0] = MakeEid(82);
+    hostBatch.in.entry.eids[1] = MakeEid(83);
+    hostBatch.in.entry.cnas[0] = MakeEid(84);
+    hostBatch.in.entry.cnas[1] = MakeEid(85);
     EXPECT_EQ(0, uvs_ioctl_insert_host_eid_batch(&ctx, &hostBatch));
     EXPECT_EQ(UVS_CMD_INSERT_HOST_EID_BATCH, g_uvsIoctl.command);
     ExpectAttrTypes({INSERT_HOST_EID_BATCH_IN_ENTRY});
+    ASSERT_EQ(1U, g_uvsIoctl.fieldSizes.size());
+    EXPECT_EQ(sizeof(hostBatch.in.entry), g_uvsIoctl.fieldSizes[0]);
+    ASSERT_EQ(1U, g_uvsIoctl.hostBatches.size());
+    EXPECT_EQ(2U, g_uvsIoctl.hostBatches[0].eid_num);
+    ExpectEidEq(hostBatch.in.entry.host_eid, g_uvsIoctl.hostBatches[0].host_eid);
+    ExpectEidEq(hostBatch.in.entry.eids[0], g_uvsIoctl.hostBatches[0].eids[0]);
+    ExpectEidEq(hostBatch.in.entry.eids[1], g_uvsIoctl.hostBatches[0].eids[1]);
+    ExpectEidEq(hostBatch.in.entry.cnas[0], g_uvsIoctl.hostBatches[0].cnas[0]);
+    ExpectEidEq(hostBatch.in.entry.cnas[1], g_uvsIoctl.hostBatches[0].cnas[1]);
 }
 
 TEST_F(UrmaUvsTest, PathSetWrapperBuildsInAndOutAttrs)

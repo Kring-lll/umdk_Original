@@ -43,6 +43,8 @@ struct UvsIoctlCapture {
     uint32_t ubaggTopoNum = 1;
     std::vector<uint8_t> attrTypes;
     std::vector<uint16_t> fieldSizes;
+    std::vector<std::vector<uint8_t>> attrData;
+    std::vector<uvs_host_eid_batch_entry_t> hostBatches;
     urma_topo_node topoNode = {};
 };
 
@@ -80,6 +82,11 @@ inline void FillTopoUe(struct urma_topo_ue *ue, uint32_t entityId, uint32_t chip
     std::memcpy(ue->cna[0], cna.raw, sizeof(cna.raw));
 }
 
+inline void ExpectEidEq(const uvs_eid_t &expected, const uvs_eid_t &actual)
+{
+    EXPECT_EQ(0, std::memcmp(expected.raw, actual.raw, sizeof(expected.raw)));
+}
+
 inline void InitIoctlCtx(tpsa_ioctl_ctx_t *ctx)
 {
     ctx->ubcore_fd = 7;
@@ -95,6 +102,7 @@ inline void CaptureTlvAttrs(const tpsa_cmd_hdr_t *hdr)
     g_uvsIoctl.argsLen = hdr->args_len;
     g_uvsIoctl.attrTypes.clear();
     g_uvsIoctl.fieldSizes.clear();
+    g_uvsIoctl.attrData.clear();
     for (uint32_t i = 0; i < attrCount; i++) {
         g_uvsIoctl.attrTypes.push_back(attrs[i].type);
         g_uvsIoctl.fieldSizes.push_back(attrs[i].field_size);
@@ -102,6 +110,19 @@ inline void CaptureTlvAttrs(const tpsa_cmd_hdr_t *hdr)
             attrs[i].field_size <= sizeof(uint64_t)) {
             uint64_t value = 1;
             std::memcpy(reinterpret_cast<void *>(attrs[i].data), &value, attrs[i].field_size);
+        }
+        std::vector<uint8_t> data;
+        if (attrs[i].data != 0 && attrs[i].field_size != 0) {
+            auto *ptr = reinterpret_cast<uint8_t *>(attrs[i].data);
+            data.assign(ptr, ptr + attrs[i].field_size);
+        }
+        g_uvsIoctl.attrData.push_back(data);
+        if (attrs[i].type == INSERT_HOST_EID_BATCH_IN_ENTRY &&
+            attrs[i].field_size == sizeof(uvs_host_eid_batch_entry_t) &&
+            attrs[i].data != 0) {
+            uvs_host_eid_batch_entry_t entry = {};
+            std::memcpy(&entry, reinterpret_cast<void *>(attrs[i].data), sizeof(entry));
+            g_uvsIoctl.hostBatches.push_back(entry);
         }
     }
 }
