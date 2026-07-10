@@ -1636,6 +1636,14 @@ jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_qu
         UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_create_jfc failed, errno: %d\n", errno);
         goto DELETE_JFR_JFCE;
     }
+
+    urma_jfc_attr_t jfc_attr = {
+        .mask = JFC_MODERATE_COUNT | JFC_MODERATE_PERIOD,
+        .moderate_count = 32,
+        .moderate_period = 4,
+    };
+    (void)umq_symbol_urma()->urma_modify_jfc(jfr_ctx->jfr_jfc, &jfc_attr);
+
     // create jfr
     // jfr of the main umq needs to be used by the sub-queues of all ports, so it needs to be created on all ports.
     bondp_jfr_cfg_t bondp_jfr_cfg = {

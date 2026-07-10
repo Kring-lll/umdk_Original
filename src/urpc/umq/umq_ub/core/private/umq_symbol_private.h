@@ -31,6 +31,7 @@ typedef urma_status_t (*urma_rearm_jfc_t)(urma_jfc_t *jfc, bool solicited_only);
 typedef int (*urma_poll_jfc_t)(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr);
 typedef int (*urma_wait_jfc_t)(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t *jfc[]);
 typedef void (*urma_ack_jfc_t)(urma_jfc_t *jfc[], uint32_t nevents[], uint32_t jfc_cnt);
+typedef urma_status_t (*urma_modify_jfc_t)(urma_jfc_t *jfc, urma_jfc_attr_t *attr);
 
 // === URMA function pointer types - JFCE ===
 typedef urma_jfce_t* (*urma_create_jfce_t)(urma_context_t *ctx);
@@ -111,6 +112,7 @@ typedef struct umq_symbol_urma {
     urma_poll_jfc_t urma_poll_jfc;
     urma_wait_jfc_t urma_wait_jfc;
     urma_ack_jfc_t urma_ack_jfc;
+    urma_modify_jfc_t urma_modify_jfc;
 
     // JFCE
     urma_create_jfce_t urma_create_jfce;

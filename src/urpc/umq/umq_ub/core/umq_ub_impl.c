@@ -1055,6 +1055,13 @@ static int umq_ub_create_jetty_node(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx,
         goto DELETE_JFCE;
     }
 
+    urma_jfc_attr_t jfc_attr = {
+        .mask = JFC_MODERATE_COUNT | JFC_MODERATE_PERIOD,
+        .moderate_count = 32,
+        .moderate_period = 4,
+    };
+    (void)umq_symbol_urma()->urma_modify_jfc(jetty_node->jfs_jfc[UB_QUEUE_JETTY_IO], &jfc_attr);
+
     char port_str[UMQ_PORT_STR_SIZE] = {0};
     umq_jetty_port_info(port_str, UMQ_PORT_STR_SIZE, queue);
 
@@ -1325,6 +1332,13 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_create_jfc for jfs_jfc failed, errno: %d\n", errno);
             goto DELETE_JFCE;
         }
+
+        urma_jfc_attr_t jfc_attr = {
+            .mask = JFC_MODERATE_COUNT | JFC_MODERATE_PERIOD,
+            .moderate_count = 32,
+            .moderate_period = 4,
+        };
+        (void)umq_symbol_urma()->urma_modify_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_IO], &jfc_attr);
 
         char port_str[UMQ_PORT_STR_SIZE] = {0};
         umq_jetty_port_info(port_str, UMQ_PORT_STR_SIZE, queue);
