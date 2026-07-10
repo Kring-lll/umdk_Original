@@ -12,6 +12,7 @@
 
 #include "urma_types.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -110,6 +111,7 @@ typedef struct bondp_jfs_cfg {
     urma_jfs_cfg_t base;
     const bondp_port_id_t *port_ids;
     uint32_t port_count;
+    bool compact_sge;
 } bondp_jfs_cfg_t;
 
 typedef struct bondp_jfc_cfg {
@@ -122,12 +124,14 @@ typedef struct bondp_jfr_cfg {
     urma_jfr_cfg_t base;
     const bondp_port_id_t *port_ids;
     uint32_t port_count;
+    bool compact_sge;
 } bondp_jfr_cfg_t;
 
 typedef struct bondp_jetty_cfg {
     urma_jetty_cfg_t base;
     const bondp_port_id_t *port_ids;
     uint32_t port_count;
+    bool compact_sge;
 } bondp_jetty_cfg_t;
 
 typedef struct urma_bond_jetty_ext {

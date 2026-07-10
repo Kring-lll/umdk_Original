@@ -77,13 +77,14 @@ static void bondp_uninit_connection_table(bondp_comp_t *bdp_comp)
     bondp_hash_table_destroy(&bdp_comp->v_conn_table);
 }
 
-static int bondp_init_wr_buf(const bondp_comp_t *bdp_comp, wr_buf_t *wr_buf, uint32_t depth)
+static int bondp_init_wr_buf(const bondp_comp_t *bdp_comp, wr_buf_t *wr_buf, uint32_t depth, bool compact)
 {
     if (bdp_comp->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_STANDALONE) {
         return 0;
     }
 
-    return wr_buf_init(wr_buf, depth * bdp_comp->enabled_count);
+    uint32_t max_sge = compact ? BONDP_COMPACT_SGE_NUM : BONDP_MAX_SGE_NUM;
+    return wr_buf_init(wr_buf, depth * bdp_comp->enabled_count, max_sge);
 }
 
 static void bondp_uninit_wr_buf(wr_buf_t *wr_buf)
@@ -745,7 +746,9 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
         goto DEL_P_VJFS_ID;
     }
 
-    if (bondp_init_wr_buf(bdp_jfs, &bdp_jfs->send_wr_buf, cfg->depth) != 0) {
+    bool cfg_compact = (cfg->flag.bs.has_drv_ext != 0) &&
+                       ((const bondp_jfs_cfg_t *)cfg)->compact_sge;
+    if (bondp_init_wr_buf(bdp_jfs, &bdp_jfs->send_wr_buf, cfg->depth, cfg_compact) != 0) {
         URMA_LOG_ERR("Failed to init jfs wr buf\n");
         goto UNINIT_CONNECTION_TABLE;
     }
@@ -1019,7 +1022,9 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
         goto DEL_P_VJFR_ID;
     }
 
-    if (bdp_ctx->msn_enable && bondp_init_wr_buf(bdp_jfr, &bdp_jfr->recv_wr_buf, cfg->depth) != 0) {
+    bool cfg_compact = (cfg->flag.bs.has_drv_ext != 0) &&
+                       ((const bondp_jfr_cfg_t *)cfg)->compact_sge;
+    if (bdp_ctx->msn_enable && bondp_init_wr_buf(bdp_jfr, &bdp_jfr->recv_wr_buf, cfg->depth, cfg_compact) != 0) {
         URMA_LOG_ERR("Failed to init jfr wr buf\n");
         goto UNINIT_JFR_CONNECTION_TABLE;
     }
@@ -1405,7 +1410,9 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         goto DEL_P_VJETTY_ID;
     }
 
-    if (bondp_init_wr_buf(bdp_jetty, &bdp_jetty->send_wr_buf, jetty_cfg->jfs_cfg.depth) != 0) {
+    bool cfg_compact = (jetty_cfg->flag.bs.has_drv_ext != 0) &&
+                       ((const bondp_jetty_cfg_t *)jetty_cfg)->compact_sge;
+    if (bondp_init_wr_buf(bdp_jetty, &bdp_jetty->send_wr_buf, jetty_cfg->jfs_cfg.depth, cfg_compact) != 0) {
         URMA_LOG_ERR("Failed to init jetty send wr buf\n");
         goto UNINIT_JETTY_CONNECTION_TABLE;
     }
