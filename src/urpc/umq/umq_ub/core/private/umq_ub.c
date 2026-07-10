@@ -1639,8 +1639,8 @@ jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_qu
 
     urma_jfc_attr_t jfc_attr = {
         .mask = JFC_MODERATE_COUNT | JFC_MODERATE_PERIOD,
-        .moderate_count = 32,
-        .moderate_period = 4,
+        .moderate_count = 256,
+        .moderate_period = 256,
     };
     (void)umq_symbol_urma()->urma_modify_jfc(jfr_ctx->jfr_jfc, &jfc_attr);
 

@@ -1057,8 +1057,8 @@ static int umq_ub_create_jetty_node(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx,
 
     urma_jfc_attr_t jfc_attr = {
         .mask = JFC_MODERATE_COUNT | JFC_MODERATE_PERIOD,
-        .moderate_count = 32,
-        .moderate_period = 4,
+        .moderate_count = 256,
+        .moderate_period = 256,
     };
     (void)umq_symbol_urma()->urma_modify_jfc(jetty_node->jfs_jfc[UB_QUEUE_JETTY_IO], &jfc_attr);
 
@@ -1335,8 +1335,8 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
 
         urma_jfc_attr_t jfc_attr = {
             .mask = JFC_MODERATE_COUNT | JFC_MODERATE_PERIOD,
-            .moderate_count = 32,
-            .moderate_period = 4,
+            .moderate_count = 256,
+            .moderate_period = 256,
         };
         (void)umq_symbol_urma()->urma_modify_jfc(queue->jfs_jfc[UB_QUEUE_JETTY_IO], &jfc_attr);
 
