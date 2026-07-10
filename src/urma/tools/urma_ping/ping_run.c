@@ -663,6 +663,13 @@ static int recv_ping_msg(ping_cfg_t *cfg, ping_urma_resource_t *res, ping_per_se
 
 static void signal_handler(int signum)
 {
+    static volatile sig_atomic_t in_handler = 0;
+
+    if (in_handler) {
+        return;
+    }
+    in_handler = 1;
+
     LOG_VERBOSE("Received signal %d\n", signum);
     print_stat();
     exit(0);
