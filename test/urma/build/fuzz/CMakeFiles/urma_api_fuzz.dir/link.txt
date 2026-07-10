@@ -1,0 +1,1 @@
+/usr/bin/cc -fsanitize=address --coverage CMakeFiles/urma_api_fuzz.dir/urma_api_fuzz.c.o -o urma_api_fuzz  -Wl,-rpath,/home/zdxfgre/jd/umdk/src/build/urma/lib/urma/core:/home/zdxfgre/jd/umdk/src/build/urma/common /home/zdxfgre/jd/umdk/src/build/urma/lib/urma/core/liburma.so /home/zdxfgre/jd/umdk/src/build/urma/common/liburma_common.so -lnl-genl-3 -lnl-3 -ldl -lrt -lpthread 

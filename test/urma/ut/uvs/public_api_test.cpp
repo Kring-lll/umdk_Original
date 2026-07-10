@@ -35,6 +35,18 @@ TEST_F(UrmaUvsTest, PublicApisRejectInvalidParameters)
     EXPECT_EQ(-EINVAL, uvs_get_path_set(&eid, &eid, UVS_RTP, false, nullptr));
 }
 
+TEST_F(UrmaUvsTest, PublicApisRejectTopoNodeSizeMismatchBeforeIoctl)
+{
+    auto *node = static_cast<urma_topo_node *>(std::calloc(1, sizeof(urma_topo_node)));
+    ASSERT_NE(nullptr, node);
+
+    EXPECT_EQ(-EINVAL, uvs_set_topo_info(node, sizeof(*node) - 1, 1));
+    EXPECT_EQ(-EINVAL, uvs_set_share_topo_info(node, sizeof(*node) - 1, 1));
+    EXPECT_EQ(0U, g_uvsIoctl.callCount);
+
+    std::free(node);
+}
+
 TEST_F(UrmaUvsTest, PublicApisPropagateMissingDeviceFailure)
 {
     uvs_eid_t eid = MakeEid(2);
@@ -145,7 +157,7 @@ TEST_F(UrmaUvsTest, LogAndLockHelpersAreStable)
     tpsa_getenv_log_level();
     EXPECT_EQ(static_cast<unsigned>(TPSA_VLOG_LEVEL_INFO), tpsa_log_get_level());
     ASSERT_EQ(0, unsetenv("UVS_LOG_LEVEL"));
-    tpsa_log("UrmaUvsTest", __LINE__, TPSA_VLOG_LEVEL_INFO, "uvs log smoke %d", 1);
+    tpsa_log("UrmaUvsTest", __func__, __LINE__, TPSA_VLOG_LEVEL_INFO, "uvs log smoke %d", 1);
     tpsa_log_uninit();
 
     uvs_get_api_rdlock();
