@@ -127,7 +127,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
         Epilogue::Block::BlockEpilogue<EpilogueDispatchPolicy, CType, ScaleType, PerTokenScaleType,
             DType, TileRowBroadcastMul, TileBroadcastOneBlk,
             TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>,
-        Epilogue::BlockW8a8::BlockEpilogue<ubStages, 0, CType, W1ScaleType, layout::VectorLayout,
+        Epilogue::BlockW8a8::BlockEpilogueSwiglu<ubStages, 0, CType, W1ScaleType, layout::VectorLayout,
             layout::VectorLayout, DType, TileRowBroadcastMul, TileBroadcastOneBlk,
             TileOneBlkColumnBroadcastMul, TileCopy, TileScheduler>>;
 
