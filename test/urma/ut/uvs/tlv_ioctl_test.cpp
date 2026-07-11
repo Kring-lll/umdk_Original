@@ -107,6 +107,47 @@ TEST_F(UrmaUvsTest, IoctlFailureReturnsNegativeErrno)
     EXPECT_EQ(1U, g_uvsIoctl.callCount);
 }
 
+TEST_F(UrmaUvsTest, MainUeEidStatefulPublicApisRoundTrip)
+{
+    uvs_eid_t eid = MakeEid(21);
+    uvs_eid_t mainEid = MakeEid(22);
+    uvs_eid_t outEid = {};
+    uvs_main_ue_eid_entry_t entry = { .eid = eid, .main_ue_eid = mainEid };
+
+    g_uvsIoctl.mockDeviceOpen = true;
+    g_uvsIoctl.statefulMainUe = true;
+
+    EXPECT_EQ(0, uvs_insert_main_ue_eid(&entry));
+    EXPECT_EQ(0, uvs_lookup_main_ue_eid(&eid, &outEid));
+    ExpectEidEq(mainEid, outEid);
+
+    EXPECT_EQ(0, uvs_delete_main_ue_eid(&eid));
+    EXPECT_EQ(-ENOENT, uvs_lookup_main_ue_eid(&eid, &outEid));
+
+    EXPECT_EQ(0, uvs_insert_main_ue_eid(&entry));
+    EXPECT_EQ(1, uvs_flush_main_ue_eid());
+    EXPECT_EQ(-ENOENT, uvs_lookup_main_ue_eid(&eid, &outEid));
+}
+
+TEST_F(UrmaUvsTest, MainUeEidStatefulBatchInsertLookup)
+{
+    uvs_eid_t outEid = {};
+    uvs_main_ue_eid_batch_entry_t batch = {};
+
+    g_uvsIoctl.mockDeviceOpen = true;
+    g_uvsIoctl.statefulMainUe = true;
+    batch.main_ue_eid = MakeEid(23);
+    batch.eid_num = 2;
+    batch.eids[0] = MakeEid(24);
+    batch.eids[1] = MakeEid(25);
+
+    EXPECT_EQ(0, uvs_ubcore_ioctl_insert_main_ue_eid_batch(&batch));
+    EXPECT_EQ(0, uvs_ubcore_ioctl_lookup_main_ue_eid(&batch.eids[0], &outEid));
+    ExpectEidEq(batch.main_ue_eid, outEid);
+    EXPECT_EQ(0, uvs_ubcore_ioctl_lookup_main_ue_eid(&batch.eids[1], &outEid));
+    ExpectEidEq(batch.main_ue_eid, outEid);
+}
+
 TEST_F(UrmaUvsTest, UbaggAndUbcoreIoctlSuccessPathsUseMockedDevices)
 {
     uvs_eid_t eid = MakeEid(31);
