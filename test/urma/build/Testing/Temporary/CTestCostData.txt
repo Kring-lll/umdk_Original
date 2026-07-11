@@ -1,8 +1,0 @@
-urma_common_ut 7 0.0330063
-urma_uvs_ut 6 0.169631
-urma_bond_ut 6 0.503624
-urma_core_ut 7 0.00509054
-urma_cmd_tlv_ut 6 0.00184799
-urma_api_fuzz 0 0
-uvs_api_fuzz 5 0.00470866
----

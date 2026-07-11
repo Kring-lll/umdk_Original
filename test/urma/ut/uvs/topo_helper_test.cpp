@@ -40,14 +40,50 @@ TEST_F(UrmaUvsTest, TopoHelpersUpdateMainUeBatchesWithMockedUbcore)
     std::free(node);
 }
 
+TEST_F(UrmaUvsTest, TopoHelpersBuildLookupableMainUeMappingsFromTopo)
+{
+    auto *node = static_cast<urma_topo_node *>(std::calloc(1, sizeof(urma_topo_node)));
+    ASSERT_NE(nullptr, node);
+
+    g_uvsIoctl.mockDeviceOpen = true;
+    g_uvsIoctl.statefulMainUe = true;
+    FillTopoUe(&node->agg_devs[0].ues[0], 20, 2, 0, 61, 62, 63);
+    FillTopoUePort(&node->agg_devs[0].ues[0], 1, 64, 65);
+    FillTopoUe(&node->agg_devs[1].ues[0], 20, 2, 1, 41, 42, 43);
+    FillTopoUe(&node->agg_devs[2].ues[0], 21, 3, 0, 71, 72, 73);
+
+    EXPECT_EQ(0, uvs_update_main_ue_eid_table_by_topo(node, 1));
+
+    const uvs_eid_t expectedSharedMain = MakeEid(41);
+    const uvs_eid_t expectedIndependentMain = MakeEid(71);
+    const uvs_eid_t sharedEids[] = {
+        MakeEid(61), MakeEid(62), MakeEid(64), MakeEid(41), MakeEid(42),
+    };
+    for (const uvs_eid_t &eid : sharedEids) {
+        uvs_eid_t outEid = {};
+        EXPECT_EQ(0, uvs_lookup_main_ue_eid(&eid, &outEid));
+        ExpectEidEq(expectedSharedMain, outEid);
+    }
+
+    const uvs_eid_t independentEids[] = {MakeEid(71), MakeEid(72)};
+    for (const uvs_eid_t &eid : independentEids) {
+        uvs_eid_t outEid = {};
+        EXPECT_EQ(0, uvs_lookup_main_ue_eid(&eid, &outEid));
+        ExpectEidEq(expectedIndependentMain, outEid);
+    }
+
+    std::free(node);
+}
+
 TEST_F(UrmaUvsTest, TopoHelpersPropagateMainUeBatchIoctlFailure)
 {
     auto *node = static_cast<urma_topo_node *>(std::calloc(1, sizeof(urma_topo_node)));
     ASSERT_NE(nullptr, node);
 
     g_uvsIoctl.mockDeviceOpen = true;
-    g_uvsIoctl.succeed = false;
+    g_uvsIoctl.failCommand = UVS_CMD_INSERT_MAIN_UE_EID_BATCH;
     g_uvsIoctl.errnoValue = ENODEV;
+    tpsa_log_set_level(TPSA_VLOG_LEVEL_CRIT);
     FillTopoUe(&node->agg_devs[0].ues[0], 4, 1, 0, 51, 52, 53);
 
     EXPECT_EQ(-ENODEV, uvs_update_main_ue_eid_table_by_topo(node, 1));
@@ -95,6 +131,65 @@ TEST_F(UrmaUvsTest, TopoHelpersAggregateSameHostEidAcrossNormalDevices)
     ExpectEidEq(MakeEid(82), batch.eids[1]);
     ExpectEidEq(MakeEid(91), batch.cnas[0]);
     ExpectEidEq(MakeEid(92), batch.cnas[1]);
+
+    std::free(shareNode);
+}
+
+TEST_F(UrmaUvsTest, TopoHelpersBuildHostEidMappingsAcrossMultipleNodes)
+{
+    auto *shareNodes = static_cast<urma_topo_node *>(std::calloc(2, sizeof(urma_topo_node)));
+    ASSERT_NE(nullptr, shareNodes);
+
+    g_uvsIoctl.mockDeviceOpen = true;
+    urma_topo_node topoNodeA = {};
+    topoNodeA.node_id = 0x44;
+    FillTopoUe(&topoNodeA.agg_devs[0].ues[0], 31, 1, 1, 101, 111, 121);
+    urma_topo_node topoNodeB = {};
+    topoNodeB.node_id = 0x45;
+    FillTopoUe(&topoNodeB.agg_devs[0].ues[0], 32, 1, 1, 102, 112, 122);
+    g_uvsIoctl.topoNodes.push_back(topoNodeA);
+    g_uvsIoctl.topoNodes.push_back(topoNodeB);
+
+    shareNodes[0].node_id = 0x44;
+    FillTopoUe(&shareNodes[0].agg_devs[0].ues[0], 31, 1, 1, 103, 113, 123);
+    shareNodes[1].node_id = 0x45;
+    FillTopoUe(&shareNodes[1].agg_devs[0].ues[0], 32, 1, 1, 104, 114, 124);
+
+    EXPECT_EQ(0, uvs_update_host_eid_table_by_share_topo(shareNodes, 2));
+    ASSERT_EQ(2U, g_uvsIoctl.hostBatches.size());
+    EXPECT_EQ(1U, g_uvsIoctl.hostBatches[0].eid_num);
+    ExpectEidEq(MakeEid(113), g_uvsIoctl.hostBatches[0].host_eid);
+    ExpectEidEq(MakeEid(111), g_uvsIoctl.hostBatches[0].eids[0]);
+    ExpectEidEq(MakeEid(121), g_uvsIoctl.hostBatches[0].cnas[0]);
+    EXPECT_EQ(1U, g_uvsIoctl.hostBatches[1].eid_num);
+    ExpectEidEq(MakeEid(114), g_uvsIoctl.hostBatches[1].host_eid);
+    ExpectEidEq(MakeEid(112), g_uvsIoctl.hostBatches[1].eids[0]);
+    ExpectEidEq(MakeEid(122), g_uvsIoctl.hostBatches[1].cnas[0]);
+
+    std::free(shareNodes);
+}
+
+TEST_F(UrmaUvsTest, TopoHelpersBuildHostEidMappingsAcrossPorts)
+{
+    auto *shareNode = static_cast<urma_topo_node *>(std::calloc(1, sizeof(urma_topo_node)));
+    ASSERT_NE(nullptr, shareNode);
+
+    g_uvsIoctl.mockDeviceOpen = true;
+    g_uvsIoctl.topoNode.node_id = 0x46;
+    FillTopoUe(&g_uvsIoctl.topoNode.agg_devs[0].ues[0], 33, 2, 1, 105, 115, 125);
+    FillTopoUePort(&g_uvsIoctl.topoNode.agg_devs[0].ues[0], 1, 116, 126);
+    shareNode->node_id = 0x46;
+    FillTopoUe(&shareNode->agg_devs[0].ues[0], 33, 2, 1, 106, 117, 127);
+    FillTopoUePort(&shareNode->agg_devs[0].ues[0], 1, 118, 128);
+
+    EXPECT_EQ(0, uvs_update_host_eid_table_by_share_topo(shareNode, 1));
+    ASSERT_EQ(2U, g_uvsIoctl.hostBatches.size());
+    ExpectEidEq(MakeEid(117), g_uvsIoctl.hostBatches[0].host_eid);
+    ExpectEidEq(MakeEid(115), g_uvsIoctl.hostBatches[0].eids[0]);
+    ExpectEidEq(MakeEid(125), g_uvsIoctl.hostBatches[0].cnas[0]);
+    ExpectEidEq(MakeEid(118), g_uvsIoctl.hostBatches[1].host_eid);
+    ExpectEidEq(MakeEid(116), g_uvsIoctl.hostBatches[1].eids[0]);
+    ExpectEidEq(MakeEid(126), g_uvsIoctl.hostBatches[1].cnas[0]);
 
     std::free(shareNode);
 }
@@ -150,6 +245,56 @@ TEST_F(UrmaUvsTest, TopoHelpersRejectWhenHostEidBatchTableIsFull)
 
     EXPECT_EQ(-ENOSPC, uvs_update_host_eid_table_by_share_topo(shareNode, 1));
     EXPECT_EQ(1U, g_uvsIoctl.callCount);
+    EXPECT_TRUE(g_uvsIoctl.hostBatches.empty());
+
+    std::free(shareNode);
+}
+
+TEST_F(UrmaUvsTest, TopoHelpersIgnoreEmptySharePortsAndRejectEmptyNormalPort)
+{
+    auto *shareNode = static_cast<urma_topo_node *>(std::calloc(1, sizeof(urma_topo_node)));
+    ASSERT_NE(nullptr, shareNode);
+
+    g_uvsIoctl.mockDeviceOpen = true;
+    g_uvsIoctl.topoNode.node_id = 0x47;
+    FillTopoUe(&g_uvsIoctl.topoNode.agg_devs[0].ues[0], 34, 2, 1, 131, 132, 133);
+    shareNode->node_id = 0x47;
+    FillTopoUe(&shareNode->agg_devs[0].ues[0], 34, 2, 1, 134, 135, 136);
+    std::memset(shareNode->agg_devs[0].ues[0].port_eid[0], 0, EID_LEN);
+
+    EXPECT_EQ(0, uvs_update_host_eid_table_by_share_topo(shareNode, 1));
+    EXPECT_TRUE(g_uvsIoctl.hostBatches.empty());
+
+    ResetUvSioctl();
+    std::memset(shareNode, 0, sizeof(*shareNode));
+    g_uvsIoctl.mockDeviceOpen = true;
+    g_uvsIoctl.topoNode.node_id = 0x48;
+    FillTopoUe(&g_uvsIoctl.topoNode.agg_devs[0].ues[0], 35, 2, 1, 137, 138, 139);
+    std::memset(g_uvsIoctl.topoNode.agg_devs[0].ues[0].port_eid[0], 0, EID_LEN);
+    shareNode->node_id = 0x48;
+    FillTopoUe(&shareNode->agg_devs[0].ues[0], 35, 2, 1, 140, 141, 142);
+
+    EXPECT_EQ(-ENOENT, uvs_update_host_eid_table_by_share_topo(shareNode, 1));
+    EXPECT_TRUE(g_uvsIoctl.hostBatches.empty());
+
+    std::free(shareNode);
+}
+
+TEST_F(UrmaUvsTest, TopoHelpersPropagateHostEidBatchIoctlFailure)
+{
+    auto *shareNode = static_cast<urma_topo_node *>(std::calloc(1, sizeof(urma_topo_node)));
+    ASSERT_NE(nullptr, shareNode);
+
+    g_uvsIoctl.mockDeviceOpen = true;
+    g_uvsIoctl.failCommand = UVS_CMD_INSERT_HOST_EID_BATCH;
+    g_uvsIoctl.errnoValue = ENODEV;
+    tpsa_log_set_level(TPSA_VLOG_LEVEL_CRIT);
+    g_uvsIoctl.topoNode.node_id = 0x49;
+    FillTopoUe(&g_uvsIoctl.topoNode.agg_devs[0].ues[0], 36, 3, 1, 143, 144, 145);
+    shareNode->node_id = 0x49;
+    FillTopoUe(&shareNode->agg_devs[0].ues[0], 36, 3, 1, 146, 147, 148);
+
+    EXPECT_EQ(-ENODEV, uvs_update_host_eid_table_by_share_topo(shareNode, 1));
     EXPECT_TRUE(g_uvsIoctl.hostBatches.empty());
 
     std::free(shareNode);
