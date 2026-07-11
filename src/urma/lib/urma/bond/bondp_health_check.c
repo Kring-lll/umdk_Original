@@ -332,8 +332,6 @@ int bondp_register_health_check_seg_for_jetty(bondp_context_t *bond_ctx, bondp_c
     }
 
     int ret = 0;
-    pthread_rwlock_wrlock(&health->task_table.lock);
-
     urma_seg_cfg_t seg_cfg = {
         .va = 0,
         .len = health->check_buf_len,
@@ -354,7 +352,6 @@ int bondp_register_health_check_seg_for_jetty(bondp_context_t *bond_ctx, bondp_c
         health->check_buf = memalign(BONDP_HEALTH_CHECK_4K_ALIGN, health->check_buf_len);
         if (health->check_buf == NULL) {
             URMA_LOG_ERR("Failed to alloc health check buffer\n");
-            pthread_rwlock_unlock(&health->task_table.lock);
             return -1;
         }
     }
@@ -374,12 +371,10 @@ int bondp_register_health_check_seg_for_jetty(bondp_context_t *bond_ctx, bondp_c
 
         URMA_LOG_INFO("Successfully registered health check segment %d, len=%lu\n", i, health->check_buf_len);
     }
-    pthread_rwlock_unlock(&health->task_table.lock);
     return ret;
 
 ERR_UNREGISTER:
     bondp_unregister_health_check_seg_for_jetty(bdp_jetty);
-    pthread_rwlock_unlock(&health->task_table.lock);
     return ret;
 }
 

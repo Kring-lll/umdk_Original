@@ -19,7 +19,7 @@ set_target_properties(urma_ubagg
         SOVERSION ${PROJECT_VERSION_MAJOR}
 )
 
-target_include_directories(urma_ubagg 
+target_include_directories(urma_ubagg
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE
