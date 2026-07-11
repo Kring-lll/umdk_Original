@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="1"
+	failures="0"
+	disabled="0"
+	skipped="0"
+	hostname=""
+	time="0"
+	timestamp="2026-07-13T21:56:02"
+	>
+	<testcase name="urma_core_ut" classname="urma_core_ut" time="0.0273861" status="run">
+		<system-out>Running main() from ./googletest/src/gtest_main.cc
+[==========] Running 47 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 47 tests from UrmaCoreTest
+[ RUN      ] UrmaCoreTest.CheckOptValidUpdatesOnlyOptionMask
+[       OK ] UrmaCoreTest.CheckOptValidUpdatesOnlyOptionMask (0 ms)
+[ RUN      ] UrmaCoreTest.CheckOptValidRejectsWrongLengthAndIgnoresUnknownOpt
+[       OK ] UrmaCoreTest.CheckOptValidRejectsWrongLengthAndIgnoresUnknownOpt (0 ms)
+[ RUN      ] UrmaCoreTest.SetOptionsCommonWritesTargetStruct
+[       OK ] UrmaCoreTest.SetOptionsCommonWritesTargetStruct (0 ms)
+[ RUN      ] UrmaCoreTest.UbaggSwitchCounter
+[       OK ] UrmaCoreTest.UbaggSwitchCounter (0 ms)
+[ RUN      ] UrmaCoreTest.LogApisHandleCallbacksLevelsTagsAndEnv
+[       OK ] UrmaCoreTest.LogApisHandleCallbacksLevelsTagsAndEnv (0 ms)
+[ RUN      ] UrmaCoreTest.PerfApisRecordAndFormatStats
+[       OK ] UrmaCoreTest.PerfApisRecordAndFormatStats (0 ms)
+[ RUN      ] UrmaCoreTest.PerfThreadCleanupRunsOnWorkerExit
+[      ...
+The rest of the test output was removed since it exceeds the threshold of 1024 bytes.
+</system-out>
+	</testcase>
+</testsuite>
