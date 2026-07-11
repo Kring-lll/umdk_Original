@@ -15,8 +15,9 @@
 #include "urpc_util.h"
 #include "perf.h"
 
-#define UMQ_TRACE_DEFAULT_RECORD_NUM   10240
+#define UMQ_TRACE_DEFAULT_RECORD_NUM   8192
 #define UMQ_TRACE_DEFAULT_RECORD_LIMIT 1
+#define UMQ_TRACE_LOG_BUF_SIZE         512
 
 /*
  * Thread-local trace state — one per thread, no lock needed.
@@ -41,9 +42,11 @@
  */
 static __thread uint32_t g_umq_trace_buf_index = -1;
 static __thread int32_t g_umq_trace_record_index = -1;
+static __thread bool g_umq_trace_thread_inited = false;
 static __thread pthread_once_t g_umq_trace_thread_run_once = PTHREAD_ONCE_INIT;
 static uint32_t g_umq_trace_output_limit = UMQ_TRACE_DEFAULT_RECORD_LIMIT;
 static uint32_t g_umq_trace_record_num = UMQ_TRACE_DEFAULT_RECORD_NUM;
+
 static bool g_umq_trace_enable = false;
 static pthread_spinlock_t g_umq_trace_lock;
 
@@ -59,6 +62,7 @@ typedef struct umq_trace_ctx {
     pthread_once_t *dp_thread_run_once[UMQ_PERF_REC_MAX_NUM];
     umq_trace_buf_t trace_buf[UMQ_PERF_REC_MAX_NUM];
     urpc_timer_t *timer;
+    uint32_t record_mask;
 } umq_trace_ctx_t;
 
 static umq_trace_ctx_t *g_umq_trace_ctx;
@@ -166,6 +170,7 @@ static void umq_trace_closure(uint64_t idx)
     g_umq_trace_ctx->trace_buf[idx].is_used = false;
     g_umq_trace_ctx->dp_thread_run_once[idx] = NULL;
     (void)pthread_spin_unlock(&g_umq_trace_lock);
+    g_umq_trace_thread_inited = false;
 }
 
 static void umq_trace_record_clear(uint32_t idx)
@@ -216,7 +221,10 @@ uint64_t umq_trace_start_timestamp_get(void)
     if (!g_umq_trace_enable) {
         return 0;
     }
-    pthread_once(&g_umq_trace_thread_run_once, umq_dp_thread_run_once);
+    if (!g_umq_trace_thread_inited) {
+        pthread_once(&g_umq_trace_thread_run_once, umq_dp_thread_run_once);
+        g_umq_trace_thread_inited = true;
+    }
     return get_timestamp_ns();
 }
 
@@ -259,10 +267,10 @@ void umq_trace_start_record(umq_trace_type_t type, uint64_t time, uint64_t tag_t
         return;
     }
 
-    uint32_t idx = cur_rec->record_cnt % g_umq_trace_record_num;
+    uint32_t idx = cur_rec->record_cnt & g_umq_trace_ctx->record_mask;
     umq_data_record_t *rec = &cur_rec->data_record[idx];
 
-    rec->timestamp = get_timestamp_ns();
+    rec->timestamp = time;
     rec->tag_timestamp = tag_timestamp;
     rec->type = type;
     rec->start_time = time;
@@ -389,6 +397,7 @@ static void umq_trace_output_single(umq_trace_buf_t *cur_rec, uint32_t thread_id
     uint32_t record_cnt = cur_rec->record_cnt;
     uint32_t previous_output_cnt = cur_rec->previous_output_cnt;
     uint32_t new_records;
+    uint32_t mask = g_umq_trace_ctx->record_mask;
 
     if (record_cnt >= previous_output_cnt) {
         new_records = record_cnt - previous_output_cnt;
@@ -406,25 +415,44 @@ static void umq_trace_output_single(umq_trace_buf_t *cur_rec, uint32_t thread_id
         return;
     }
     for (uint32_t i = 0; i < new_records; i++) {
-        uint32_t idx = (previous_output_cnt + i) % g_umq_trace_record_num;
+        uint32_t idx = (previous_output_cnt + i) & mask;
         umq_data_record_t *rec = &cur_rec->data_record[idx];
         uint64_t umq_exec = (rec->end_time > rec->start_time) ? (rec->end_time - rec->start_time) : 0;
 
-        /* header line: record index + type + meta */
-        UMQ_VLOG_INFO(VLOG_UMQ, "#%u type=%s umq_id=%u umq_start=%lu umq_end=%lu umq_exec=%lu item_cnt=%u ts=%lu "
-            "tag_ts=%lu\n", i, umq_trace_type_str(rec->type), rec->umq_id, rec->start_time, rec->end_time, umq_exec,
+        char buf[UMQ_TRACE_LOG_BUF_SIZE];
+        int pos = 0;
+        int need = 0;
+        pos = snprintf(buf, UMQ_TRACE_LOG_BUF_SIZE,
+            "#%u type=%s umq_id=%u umq_start=%lu umq_end=%lu umq_exec=%lu item_cnt=%u ts=%lu tag_ts=%lu",
+            i, umq_trace_type_str(rec->type), rec->umq_id, rec->start_time, rec->end_time, umq_exec,
             rec->item_cnt, rec->timestamp, rec->tag_timestamp);
-        /* item lines */
         for (uint32_t k = 0; k < rec->item_cnt; k++) {
-            UMQ_VLOG_INFO(VLOG_UMQ, "  item[%u] umq_id=%u sub_umq_id=%u msn=%u size=%u\n", k, rec->umq_id,
-                rec->items[k].sub_umq_id, rec->items[k].msn, rec->items[k].size);
+            need = snprintf(NULL, 0, " item[%u]{umq_id=%u,sub_umq_id=%u,msn=%u,size=%u}",
+                k, rec->umq_id, rec->items[k].sub_umq_id, rec->items[k].msn, rec->items[k].size);
+            if (pos + need >= UMQ_TRACE_LOG_BUF_SIZE - 1) {
+                buf[pos] = '\0';
+                UMQ_VLOG_INFO(VLOG_UMQ, "%s\n", buf);
+                pos = 0;
+            }
+            pos += snprintf(buf + pos, UMQ_TRACE_LOG_BUF_SIZE - pos,
+                " item[%u]{umq_id=%u,sub_umq_id=%u,msn=%u,size=%u}",
+                k, rec->umq_id, rec->items[k].sub_umq_id, rec->items[k].msn, rec->items[k].size);
         }
-        /* sub_time lines */
         for (uint32_t j = 0; j < rec->sub_time_cnt; j++) {
             umq_sub_time_t *sub = &rec->sub_time[j];
-            UMQ_VLOG_INFO(VLOG_UMQ, "  sub[%u] umq_id=%u func=%s start=%lu exec=%lu\n",
-                          j, rec->umq_id, umq_urma_func_str(sub->func_type), sub->start_time, sub->exec_time);
+            need = snprintf(NULL, 0, " sub[%u]{umq_id=%u,func=%s,start_time=%lu,exec_time=%lu}",
+                j, rec->umq_id, umq_urma_func_str(sub->func_type), sub->start_time, sub->exec_time);
+            if (pos + need >= UMQ_TRACE_LOG_BUF_SIZE - 1) {
+                buf[pos] = '\0';
+                UMQ_VLOG_INFO(VLOG_UMQ, "%s\n", buf);
+                pos = 0;
+            }
+            pos += snprintf(buf + pos, UMQ_TRACE_LOG_BUF_SIZE - pos,
+                " sub[%u]{umq_id=%u,func=%s,start_time=%lu,exec_time=%lu}",
+                j, rec->umq_id, umq_urma_func_str(sub->func_type), sub->start_time, sub->exec_time);
         }
+        buf[pos] = '\0';
+        UMQ_VLOG_INFO(VLOG_UMQ, "%s\n", buf);
     }
     (void)pthread_spin_unlock(&g_umq_trace_lock);
     cur_rec->previous_output_cnt = record_cnt;
