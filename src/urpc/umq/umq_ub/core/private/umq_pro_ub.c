@@ -1057,24 +1057,12 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
         }
 
         // Flow control messages sent to the main umq are processed directly.
-        if (real_queue == queue) {
-            if (is_umq_ub_flow_control_msg_duplicate(queue, &imm)) {
-                umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
-                continue;
-            }
-            qbuf_cnt += (int32_t)umq_ub_process_fc_msg(queue, &imm, &buf[qbuf_cnt]);
-            umq_ub_fill_rx_buff_post_process(queue, &imm);
-            umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
-            continue;
-        }
-
         if (is_umq_ub_flow_control_msg_duplicate(real_queue, &imm)) {
-            // Duplicate packet, discard
             umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
             continue;
         }
-
-        qbuf_cnt += (int32_t)umq_ub_fill_fc_buf(real_queue, &buf[qbuf_cnt], UMQ_FAKE_BUF_FC_MSG);
+        qbuf_cnt += (int32_t)umq_ub_process_fc_msg(real_queue, &imm, &buf[qbuf_cnt]);
+        umq_ub_fill_rx_buff_post_process(real_queue, &imm);
         umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
     }
     return qbuf_cnt;
@@ -1274,13 +1262,8 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
 
     if (queue->flow_control.enabled) {
         int fc_qbuf_cnt = 0;
-        if (!UMQ_UB_ENABLE_SHARE_FC_JFR) {
-            /* buf is not NULL here, so umq_ub_poll_fc_rx returns qbuf_cnt >= 0 */
-            fc_qbuf_cnt += umq_ub_poll_fc_rx(queue, buf, max_batch);
-        } else if ((queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0) {
+        if ((queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0) {
             fc_qbuf_cnt += main_umq_ub_poll_fc_rx(queue, buf, max_batch);
-        } else if (is_umq_ub_share_rq(queue->create_flag)) {
-            fc_qbuf_cnt += sub_umq_ub_poll_fc_rx(queue, buf, max_batch);
         } else {
             fc_qbuf_cnt += umq_ub_poll_fc_rx(queue, buf, max_batch);
         }
