@@ -8,11 +8,15 @@
  */
 
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
+#include <string.h>
 #include "perf.h"
 #include "urpc_tlv.h"
 #include "umq_qbuf_pool.h"
 #include "umq_huge_qbuf_pool.h"
 #include "umq_ub_flow_control.h"
+#include "umq_ub_jetty_pool.h"
 #include "qbuf_list.h"
 #include "umq_ub_api.h"
 #include "umq_symbol_private.h"
