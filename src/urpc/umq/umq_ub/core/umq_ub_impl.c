@@ -1298,7 +1298,7 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
 
     if (umq_ub_flow_control_init(&queue->flow_control, queue, dev_ctx->feature, &dev_ctx->flow_control) !=
         UMQ_SUCCESS) {
-        goto DESTROY_JFR_CTX;
+        goto UNINIT_FLOW_CONTROL;
     }
     if (!is_umq_ub_logic_queue(queue->create_flag)) {
         if (queue->mode == UMQ_MODE_INTERRUPT) {
@@ -1670,6 +1670,16 @@ int umq_ub_interrupt_fd_get_impl(uint64_t umqh_tp, umq_interrupt_option_t *optio
         return queue->checker->event_fd;
     }
 
+    if (option->fd_type == UMQ_FD_RETRY) {
+        // Only non-share_rq umq exposes this fd; sub/logic umq use the main umq's shared list.
+        if (is_umq_ub_share_rq(queue->create_flag) ||
+            queue->flow_control.fc_msg_retry_list == NULL ||
+            queue->flow_control.fc_msg_retry_list->fc_msg_retry_fd == UMQ_INVALID_FD) {
+            return -UMQ_ERR_EINVAL;
+        }
+        return queue->flow_control.fc_msg_retry_list->fc_msg_retry_fd;
+    }
+
     if (is_umq_ub_logic_queue(queue->create_flag)) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), logic umq not have io interrupt fd\n", queue->umq_id);
         return -UMQ_ERR_EINVAL;
@@ -1765,6 +1775,19 @@ int umq_ub_interrupt_fd_list_get_impl(uint64_t umqh_tp,
         }
 
         fd_list->fd[0] = queue->checker->event_fd;
+        fd_list->fd_num = 1;
+        return UMQ_SUCCESS;
+    }
+
+    if (option->fd_type == UMQ_FD_RETRY) {
+        // Only non-share_rq umq exposes this fd; sub/logic umq use the main umq's shared list.
+        if (is_umq_ub_share_rq(queue->create_flag) ||
+            queue->flow_control.fc_msg_retry_list == NULL ||
+            queue->flow_control.fc_msg_retry_list->fc_msg_retry_fd == UMQ_INVALID_FD) {
+            return -UMQ_ERR_EINVAL;
+        }
+
+        fd_list->fd[0] = queue->flow_control.fc_msg_retry_list->fc_msg_retry_fd;
         fd_list->fd_num = 1;
         return UMQ_SUCCESS;
     }
