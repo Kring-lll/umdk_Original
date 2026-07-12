@@ -8,11 +8,15 @@
  */
 
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
+#include <string.h>
 #include "perf.h"
 #include "urpc_tlv.h"
 #include "umq_qbuf_pool.h"
 #include "umq_huge_qbuf_pool.h"
 #include "umq_ub_flow_control.h"
+#include "umq_ub_jetty_pool.h"
 #include "qbuf_list.h"
 #include "umq_ub_api.h"
 #include "umq_symbol_private.h"
@@ -26,7 +30,7 @@
 #define UMQ_LEN_ALIGNMENT_4 4
 #define TSEG_MAP_NUM 256
 #define UMQ_CTP_MAX_BUF_SIZE 4096
-#define UMQ_INITIAL_CREDIT 2
+#define UMQ_INITIAL_CREDIT 0
 
 static util_id_allocator_t g_umq_ub_id_allocator = {0};
 static ub_queue_ctx_list_t g_umq_ub_queue_ctx_list;
