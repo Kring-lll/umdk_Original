@@ -30,6 +30,7 @@ typedef struct jetty_pool {
     urpc_list_t active_q;           // Nodes assigned to Sub UMQ, available for Logic UMQ
     urpc_list_t relay_q;
     urpc_list_t thread_cache_list;  // Registry of all active thread-local caches
+    urpc_list_t avail_cb_list;      // Registered availability callbacks (fired when active_count rises)
     pthread_spinlock_t lock;        // Pool-level lock (minimal lock usage)
     int event_fd;                   // Eventfd for idle jetty notification
 
@@ -55,6 +56,7 @@ static bool g_jetty_pool_inited = false;
 
 // Forward declarations
 static void release_thread_cache(uint64_t id);
+static void umq_ub_jetty_fire_avail_callbacks(void);
 
 static ALWAYS_INLINE void recycle_node_to_free_q(jetty_pool_t *pool, jetty_pool_node_t *node)
 {
@@ -178,6 +180,7 @@ int umq_ub_jetty_pool_init(jetty_pool_config_t *config)
     urpc_list_init(&g_jetty_pool.active_q);
     urpc_list_init(&g_jetty_pool.relay_q);
     urpc_list_init(&g_jetty_pool.thread_cache_list);
+    urpc_list_init(&g_jetty_pool.avail_cb_list);
 
     int event_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (event_fd < 0) {
@@ -264,6 +267,13 @@ void umq_ub_jetty_pool_uninit(void)
     (void)close(g_jetty_pool.event_fd);
     (void)pthread_spin_destroy(&g_jetty_pool.lock);
 
+    umq_ub_jetty_avail_cb_node_t *cb_iter = NULL;
+    umq_ub_jetty_avail_cb_node_t *cb_tmp = NULL;
+    URPC_LIST_FOR_EACH_SAFE(cb_iter, cb_tmp, node, &g_jetty_pool.avail_cb_list) {
+        urpc_list_remove(&cb_iter->node);
+        free(cb_iter);
+    }
+
     memset(&g_jetty_pool, 0, sizeof(g_jetty_pool));
 }
 
@@ -325,6 +335,7 @@ int umq_ub_jetty_node_add(jetty_pool_node_t *node)
             UMQ_VLOG_WARN(VLOG_UMQ, "eventfd_write failed, errno: %d\n", errno);
         }
     }
+    umq_ub_jetty_fire_avail_callbacks();
     return UMQ_SUCCESS;
 }
 
@@ -486,6 +497,7 @@ int umq_ub_jetty_node_free(jetty_pool_node_t *node)
                 UMQ_VLOG_WARN(VLOG_UMQ, "eventfd_write failed, errno: %d\n", errno);
             }
         }
+        umq_ub_jetty_fire_avail_callbacks();
     }
 
     return UMQ_SUCCESS;
@@ -498,6 +510,54 @@ int umq_ub_jetty_pool_get_eventfd(void)
         return -UMQ_ERR_EINVAL;
     }
     return g_jetty_pool.event_fd;
+}
+
+static void umq_ub_jetty_fire_avail_callbacks(void)
+{
+    umq_ub_jetty_avail_cb_node_t *cb_node = NULL;
+    umq_ub_jetty_avail_cb_node_t *cb_next = NULL;
+    (void)pthread_spin_lock(&g_jetty_pool.lock);
+    URPC_LIST_FOR_EACH_SAFE(cb_node, cb_next, node, &g_jetty_pool.avail_cb_list) {
+        if (cb_node->cb != NULL) {
+            cb_node->cb(cb_node->user_data);
+        }
+    }
+    (void)pthread_spin_unlock(&g_jetty_pool.lock);
+}
+
+umq_ub_jetty_avail_cb_node_t *umq_ub_jetty_pool_register_avail_cb(umq_ub_jetty_avail_cb_t cb, void *user_data)
+{
+    umq_ub_jetty_avail_cb_node_t *cb_node =
+        (umq_ub_jetty_avail_cb_node_t *)calloc(1, sizeof(*cb_node));
+    if (cb_node == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "calloc jetty avail cb node failed\n");
+        return NULL;
+    }
+    cb_node->cb = cb;
+    cb_node->user_data = user_data;
+    (void)pthread_spin_lock(&g_jetty_pool.lock);
+    urpc_list_push_back(&g_jetty_pool.avail_cb_list, &cb_node->node);
+    (void)pthread_spin_unlock(&g_jetty_pool.lock);
+    return cb_node;
+}
+
+void umq_ub_jetty_pool_unregister_avail_cb(umq_ub_jetty_avail_cb_node_t *cb_node)
+{
+    if (cb_node == NULL) {
+        return;
+    }
+    (void)pthread_spin_lock(&g_jetty_pool.lock);
+    urpc_list_remove(&cb_node->node);
+    (void)pthread_spin_unlock(&g_jetty_pool.lock);
+    free(cb_node);
+}
+
+bool umq_ub_jetty_pool_has_avail(void)
+{
+    if (!g_jetty_pool_inited) {
+        return false;
+    }
+    return __atomic_load_n(&g_jetty_pool.active_count, __ATOMIC_ACQUIRE) > 0;
 }
 
 umq_ub_jetty_node_list_t *umq_ub_jetty_pool_get_jetty_node_list(void)
