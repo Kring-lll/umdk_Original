@@ -76,7 +76,7 @@ struct bondp_fb_ctx {
 #define BONDP_FB_TASK_HASH_BASIS    0x9d4f21U
 #define BONDP_FB_TASK_TABLE_SIZE    1024U
 /* Delay (ms) before rebuilding a failed-back pjetty on the bond worker. */
-#define BONDP_FB_REBUILD_DELAY_MS   2000U
+#define BONDP_FB_REBUILD_DELAY_MS   0U
 /* Delay (ms) before publishing the rebuild_done flag after a rebuild; the
  * worker enforces a minimum of one tick. */
 #define BONDP_FB_MARK_DONE_DELAY_MS 0U
@@ -295,15 +295,29 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
 
     new_jetty->remote_jetty = NULL;
     new_jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+
+    /* Swap the pjetty pointer under send_lock together with flipping valid[local_idx]
+     * to false. The datapath post-send path takes send_lock, re-checks valid[] and only
+     * then reads p_jetty[send_idx]; doing the invalid+swap atomically under the same lock
+     * prevents a sender from observing the old pointer while we free it below.
+     * valid[local_idx] is restored later by try_failback() once rebuild_done is set. */
+    pthread_spin_lock(&bdp_jetty->send_lock);
+    atomic_store(&bdp_jetty->valid[local_idx], false);
     bdp_jetty->p_jetty[local_idx] = new_jetty;
+    pthread_spin_unlock(&bdp_jetty->send_lock);
 
     ret = bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty);
     if (ret != 0) {
+        pthread_spin_lock(&bdp_jetty->send_lock);
         bdp_jetty->p_jetty[local_idx] = old_jetty;
+        atomic_store(&bdp_jetty->valid[local_idx], true);
+        pthread_spin_unlock(&bdp_jetty->send_lock);
         (void)urma_delete_jetty(new_jetty);
         return -1;
     }
 
+    /* No datapath thread can hold old_jetty anymore: valid[] is false and the slot has
+     * been swapped, so freeing old_jetty outside the spinlock is safe. */
     ret = urma_delete_jetty(old_jetty);
     if (ret != URMA_SUCCESS) {
         URMA_LOG_WARN("Failed to delete old pjetty at idx=%d\n", local_idx);
