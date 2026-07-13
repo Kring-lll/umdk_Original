@@ -636,7 +636,7 @@ TEST(UrmaBondTest, PublicWaitJfcRetriesReadablePhysicalEventUntilTimeout)
     EXPECT_GT(g_waitJfcCallCount, 1);
 }
 
-TEST(UrmaBondTest, PublicWaitJfcMarksEventSourceForNextRearm)
+TEST(UrmaBondTest, PublicWaitJfcThenRearmRefreshesAllMembers)
 {
     MockWaitJfcStateGuard stateGuard;
     BondPublicApiFixture fixture;
@@ -653,7 +653,6 @@ TEST(UrmaBondTest, PublicWaitJfcMarksEventSourceForNextRearm)
     fixture.jfc.enabled_indices[0] = 0;
     fixture.jfc.enabled_indices[1] = 1;
     fixture.jfc.p_jfc[1] = &backupPhysicalJfc;
-    fixture.jfc.polled_mask = 1U;
     fixture.jfce.dev_num = 2;
     fixture.phyOps.wait_jfc = MockWaitEmptyThenReadyPhysicalJfc;
     fixture.phyOps.ack_jfc = MockAckPhysicalJfc;
@@ -686,6 +685,11 @@ TEST(UrmaBondTest, PublicWaitJfcMarksEventSourceForNextRearm)
     ASSERT_EQ(2, g_rearmPhysicalJfcCount);
     EXPECT_EQ(&fixture.phyJfc, g_rearmedPhysicalJfc[0]);
     EXPECT_EQ(&backupPhysicalJfc, g_rearmedPhysicalJfc[1]);
+
+    EXPECT_EQ(URMA_SUCCESS, bondp_rearm_jfc(&fixture.jfc.v_jfc, false));
+    ASSERT_EQ(4, g_rearmPhysicalJfcCount);
+    EXPECT_EQ(&fixture.phyJfc, g_rearmedPhysicalJfc[2]);
+    EXPECT_EQ(&backupPhysicalJfc, g_rearmedPhysicalJfc[3]);
 }
 
 TEST(UrmaBondTest, PublicEventApisCoverProviderFailureContracts)
