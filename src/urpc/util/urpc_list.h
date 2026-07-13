@@ -80,7 +80,7 @@ static inline void urpc_list_push_front(struct urpc_list *list, struct urpc_list
 static inline void urpc_list_remove(struct urpc_list *node)
 {
     node->prev->next = node->next;
-    node->next->prev = node->prev;
+    node->next->prev = node->prev; //
 
     node->next = (struct urpc_list *)LIST_POISON_NEXT;
     node->prev = (struct urpc_list *)LIST_POSION_PREV;
