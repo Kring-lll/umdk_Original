@@ -163,9 +163,33 @@ build_ascend_proj() {
         fi
     fi
 
-    # Export CATLASS_HOME_PATH for kernel compilation if CPATH contains catlass
-    if [ -z "${CATLASS_HOME_PATH}" ] && echo "${CPATH}" | grep -q "catlass"; then
-        export CATLASS_HOME_PATH=$(echo "${CPATH}" | tr ':' '\n' | grep "catlass" | sed 's|/include||')
+    # Select catlass version per SOC generation:
+    #   ascend910_93 -> catlass_v1.0   (404b430, AtlasA2)
+    #   ascend950    -> catlass_v1.6.0 (v1.6.0, Ascend950+MmadMx, needs sed patch below)
+    # CATLASS_HOME_PATH drives the kernel -I include path (op_kernel/CMakeLists.txt + KERNEL_COMPILE_OPTS).
+    local catlass_dir="${CAM_THIRD_PARTY_PATH}/catlass_v1.0"
+    if [[ "$soc_version" == "ascend950" ]]; then
+        catlass_dir="${CAM_THIRD_PARTY_PATH}/catlass_v1.6.0"
+    fi
+    if [[ -d "${catlass_dir}/include" ]]; then
+        export CATLASS_HOME_PATH="${catlass_dir}"
+        export CPATH="${catlass_dir}/include:${CPATH}"
+    else
+        echo "ERROR: catlass include not found at ${catlass_dir}/include"
+        return 1
+    fi
+
+    # ascend950 workaround: catlass v1.6.0 block_epilogue.hpp pulls in block_epilogue_dequant.hpp
+    # (a 910_93 dequant BlockEpilogue specialization) inside the CATLASS_ARCH==3510 guard. Its
+    # macro/type expansions are invalid under 950 (errors "expected unqualified-id"), and the
+    # 950 kernel uses its own EpilogueAtlasA5* path that doesn't need it. Comment it out for
+    # 950 only. Idempotent; patches the source tree in place, does not touch the submodule pointer.
+    if [[ "$soc_version" == "ascend950" ]]; then
+        local epilogue_hpp="${CATLASS_HOME_PATH}/include/catlass/epilogue/block/block_epilogue.hpp"
+        if [[ -f "$epilogue_hpp" ]] && grep -q '^#include "catlass/epilogue/block/block_epilogue_dequant.hpp"' "$epilogue_hpp"; then
+            echo "Patching catlass v1.6.0 block_epilogue.hpp (comment out block_epilogue_dequant) for ascend950"
+            sed -i 's|#include "catlass/epilogue/block/block_epilogue_dequant.hpp"|// #include "catlass/epilogue/block/block_epilogue_dequant.hpp"|g' "$epilogue_hpp"
+        fi
     fi
 
     cd ${MODULE_BUILD_PATH}/${proj_name}

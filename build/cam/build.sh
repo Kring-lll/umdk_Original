@@ -23,7 +23,7 @@ export TEST_PATH="${ROOT_PATH}/test/cam"
 export BUILD_PATH="${ROOT_PATH}/build/cam/build_master"
 export CAM_THIRD_PARTY_PATH="${ROOT_PATH}/src/cam/third_party"
 
-export CPATH=${CAM_THIRD_PARTY_PATH}:${CAM_THIRD_PARTY_PATH}/catlass/include:${CPATH}
+export CPATH=${CAM_THIRD_PARTY_PATH}:${CPATH}
 
 export BUILD_TYPE="Release"
 MODULE_NAME="all"
@@ -88,20 +88,23 @@ function is_module_name() {
 
 function prepare_cam_third_party() {
     local third_party="$1"
-    local catlass_dir="${third_party}/catlass"
-
-    if [[ -d "${catlass_dir}" && -d "${catlass_dir}/include" ]]; then
-        echo "catlass submodule has existed: ${catlass_dir}"
-        return 0
-    fi
-
-    echo "Initializing catlass submodule..."
-    if git submodule update --init --recursive src/cam/third_party/catlass; then
-        return 0
-    else
-        echo "Failed to initialize catlass submodule! You can manually run: git submodule update --init --recursive"
-        return 1
-    fi
+    # Two catlass submodules, one per SOC generation:
+    #   catlass_v1.0    -> 404b430 (AtlasA2, for ascend910_93)
+    #   catlass_v1.6.0  -> v1.6.0  (Ascend950+MmadMx, for ascend950)
+    local d
+    for d in catlass_v1.0 catlass_v1.6.0; do
+        local dir="${third_party}/${d}"
+        if [[ -d "${dir}" && -d "${dir}/include" ]]; then
+            echo "catlass submodule ${d} has existed: ${dir}"
+            continue
+        fi
+        echo "Initializing catlass submodule ${d}..."
+        if ! git submodule update --init --recursive "src/cam/third_party/${d}"; then
+            echo "Failed to initialize catlass submodule ${d}! You can manually run: git submodule update --init --recursive src/cam/third_party/${d}"
+            return 1
+        fi
+    done
+    return 0
 }
 
 if is_module_name $@; then
@@ -117,8 +120,8 @@ process_arg $@
 #   ascend910_93  -> all means comm_operator only
 if [[ -n "${SOC_TYPE}" ]]; then
     if [[ "${SOC_TYPE}" == "ascend950" ]]; then
-        if [[ "${MODULE_NAME}" != "nda" && "${MODULE_NAME}" != "all" ]]; then
-            echo "Error: -c ascend950 only supports module 'nda' (or 'all'), but got '${MODULE_NAME}'"
+        if [[ "${MODULE_NAME}" != "nda" && "${MODULE_NAME}" != "all" && "${MODULE_NAME}" != "comm_operator" ]]; then
+            echo "Error: -c ascend950 supports modules 'nda'/'comm_operator' (or 'all'=both), but got '${MODULE_NAME}'"
             exit 1
         fi
     elif [[ "${SOC_TYPE}" == "ascend910_93" ]]; then
@@ -135,7 +138,8 @@ fi
 # Build comm_operator unless -c restricts to nda (ascend950).
 # With -c ascend910_93 or no -c, 'all'/'comm_operator' builds comm_operator.
 if [[ "$MODULE_NAME" == "all" || "$MODULE_NAME" == "comm_operator" ]]; then
-    if [[ -z "${SOC_TYPE}" || "${SOC_TYPE}" == "ascend910_93" ]]; then
+    # comm_operator builds for 910_93 (default), and for 950 when explicitly selected or via 'all'.
+    if [[ -z "${SOC_TYPE}" || "${SOC_TYPE}" == "ascend910_93" || "${SOC_TYPE}" == "ascend950" ]]; then
         IS_MODULE_EXIST=1
         if ! prepare_cam_third_party "${CAM_THIRD_PARTY_PATH}"; then
             exit 1
