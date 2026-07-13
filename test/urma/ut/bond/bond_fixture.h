@@ -583,6 +583,7 @@ struct BondPublicApiFixture {
         jfc.dev_num = 0;
         jfc.v_jfc.urma_ctx = &ctx.v_ctx;
         jfc.v_jfc.jfc_cfg.jfce = &jfce.v_jfce;
+        pthread_mutex_init(&jfc.rearm_lock, nullptr);
         SetRefCount(&jfc.use_cnt, 1);
 
         InitComp(&jfs, BONDP_COMP_JFS);
@@ -606,6 +607,7 @@ struct BondPublicApiFixture {
 
     ~BondPublicApiFixture()
     {
+        pthread_mutex_destroy(&jfc.rearm_lock);
         pthread_rwlock_destroy(&ctx.p_vjetty_id_table.lock);
     }
 
