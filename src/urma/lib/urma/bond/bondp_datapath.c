@@ -26,6 +26,7 @@
 
 #include "bondp_datapath.h"
 
+#define BONDP_JFC_ARM_DIAG_REARM_BUDGET 8U
 #define BONDP_POST_SEND_MAX_RETRY     3
 /* Max consecutive fast returns before forcing a full scan */
 #define BONDP_FAST_RETURN_THRESHOLD   64
@@ -1380,6 +1381,28 @@ static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int
     }
 }
 
+static void bondp_start_jfc_arm_diag(bondp_jfc_t *bdp_jfc, int trigger_idx)
+{
+    uint32_t expected = 0;
+
+    if (!atomic_compare_exchange_strong(&bdp_jfc->diag_rearm_log_budget,
+                                        &expected, BONDP_JFC_ARM_DIAG_REARM_BUDGET)) {
+        return;
+    }
+
+    URMA_LOG_WARN("BONDP_JFC_ARM_DIAG failover snapshot, vjfc_id=%u trigger_idx=%d "
+                  "hot_idx=%d polled_mask=0x%x\n",
+                  bdp_jfc->v_jfc.jfc_id.id, trigger_idx,
+                  atomic_load(&bdp_jfc->lasted_polled_jfc_idx), atomic_load(&bdp_jfc->polled_mask));
+    for (uint32_t n = 0; n < bdp_jfc->enabled_count; ++n) {
+        uint32_t i = bdp_jfc->enabled_indices[n];
+        URMA_LOG_WARN("BONDP_JFC_ARM_DIAG path snapshot, idx=%u pjfc_id=%u events=%u rearms=%u\n",
+                      i, bdp_jfc->p_jfc[i]->jfc_id.id,
+                      atomic_load_explicit(&bdp_jfc->diag_event_count[i], memory_order_relaxed),
+                      atomic_load_explicit(&bdp_jfc->diag_rearm_count[i], memory_order_relaxed));
+    }
+}
+
 int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
 {
     PERF_PROFILING_START(BOND_POLL_JFC);
@@ -1409,6 +1432,9 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
             atomic_fetch_or(&bdp_jfc->polled_mask, (1U << (uint32_t)hot_idx));
             for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
                 urma_cr_t *pcr = &pcr_buf[cr_id];
+                if (is_failover_cr(pcr)) {
+                    bondp_start_jfc_arm_diag(bdp_jfc, hot_idx);
+                }
                 if (!need_full_scan && (is_failover_cr(pcr) || is_fake_cr(pcr))) {
                     need_full_scan = true;
                 }
@@ -1464,6 +1490,9 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
         for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
             urma_cr_t *pcr = &pcr_buf[cr_id];
             cr_convert_ret_t conv_ret;
+            if (is_failover_cr(pcr)) {
+                bondp_start_jfc_arm_diag(bdp_jfc, idx);
+            }
             if (single_dev) {
                 conv_ret = bondp_handle_cr_no_store(bdp_ctx, idx, pcr);
             } else {

@@ -342,7 +342,17 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
     bdp_jfc->dev_num = bdp_ctx->dev_num;
     atomic_init(&bdp_jfc->lasted_polled_jfc_idx, 0);
     atomic_init(&bdp_jfc->polled_mask, 0);
+    if (pthread_mutex_init(&bdp_jfc->rearm_lock, NULL) != 0) {
+        URMA_LOG_ERR("Failed to initialize jfc rearm lock.\n");
+        free(bdp_jfc);
+        return NULL;
+    }
     atomic_init(&bdp_jfc->fast_return_count, 0);
+    atomic_init(&bdp_jfc->diag_rearm_log_budget, 0);
+    for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+        atomic_init(&bdp_jfc->diag_event_count[i], 0);
+        atomic_init(&bdp_jfc->diag_rearm_count[i], 0);
+    }
     atomic_init(&bdp_jfc->use_cnt.atomic_cnt, 0);
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
@@ -375,6 +385,15 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
         goto DELETE_PJFC;
     }
 
+    for (uint32_t n = 0; n < bdp_jfc->enabled_count; ++n) {
+        uint32_t i = bdp_jfc->enabled_indices[n];
+        urma_jfce_t *p_jfce = bdp_jfc->p_jfc[i]->jfc_cfg.jfce;
+        URMA_LOG_WARN("BONDP_JFC_ARM_DIAG mapping, vjfc_id=%u vjfc=0x%lx "
+                      "idx=%u pjfc_id=%u jfce_fd=%d\n",
+                      bdp_jfc->v_jfc.jfc_id.id, (uint64_t)(uintptr_t)&bdp_jfc->v_jfc,
+                      i, bdp_jfc->p_jfc[i]->jfc_id.id, p_jfce == NULL ? -1 : p_jfce->fd);
+    }
+
     if (cfg->jfce != NULL) {
         bondp_jfce_t *bdp_jfce = CONTAINER_OF_FIELD(cfg->jfce, bondp_jfce_t, v_jfce);
         atomic_fetch_add(&bdp_jfce->use_cnt.atomic_cnt, 1);
@@ -387,6 +406,7 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
 DELETE_PJFC:
     bondp_delete_pjfc(bdp_jfc);
 FREE_JFC:
+    (void)pthread_mutex_destroy(&bdp_jfc->rearm_lock);
     free(bdp_jfc);
     return NULL;
 }
@@ -437,6 +457,10 @@ urma_status_t bondp_delete_jfc(urma_jfc_t *jfc)
         ret = URMA_FAIL;
     }
 
+    if (pthread_mutex_destroy(&bdp_jfc->rearm_lock) != 0) {
+        URMA_LOG_ERR("Failed to destroy jfc rearm lock.\n");
+        ret = URMA_FAIL;
+    }
     free(bdp_jfc);
 
     if (bdp_jfce != NULL) {
@@ -2598,10 +2622,27 @@ void bondp_tjetty_put(urma_target_jetty_t *target_jetty)
     }
 }
 
+static bool bondp_take_rearm_diag_budget(bondp_jfc_t *bdp_jfc)
+{
+    uint32_t budget = atomic_load(&bdp_jfc->diag_rearm_log_budget);
+
+    while (budget > 0) {
+        if (atomic_compare_exchange_weak(&bdp_jfc->diag_rearm_log_budget,
+                                         &budget, budget - 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
 {
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(jfc, bondp_jfc_t, v_jfc);
     bool success_once = false;
+    uint32_t enabled_mask = 0;
+    uint32_t rearmed_mask = 0;
+    uint32_t failed_mask = 0;
+    int lock_ret;
 
     PERF_PROFILING_START(BOND_REARM_JFC);
     if (bdp_jfc->v_jfc.jfc_cfg.jfce == NULL) {
@@ -2610,26 +2651,53 @@ urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
         return URMA_EINVAL;
     }
 
-    uint32_t mask = atomic_exchange(&bdp_jfc->polled_mask, 0);
+    lock_ret = pthread_mutex_lock(&bdp_jfc->rearm_lock);
+    if (lock_ret != 0) {
+        URMA_LOG_ERR("Failed to lock jfc rearm lock, ret=%d.\n", lock_ret);
+        PERF_PROFILING_END(BOND_REARM_JFC);
+        return URMA_FAIL;
+    }
 
-    /* Balance mode distributes sends across devices, must rearm all p_jfcs. */
+    uint32_t raw_mask = atomic_exchange(&bdp_jfc->polled_mask, 0);
+    uint32_t mask = raw_mask;
+
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(jfc->urma_ctx, bondp_context_t, v_ctx);
     if (bdp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE) {
         mask = 0;
     }
 
     /**
-     * When mask == 0, rearm all enabled p_jfcs
+     * When mask == 0, rearm all enabled p_jfcs.
      * When mask != 0, only rearm p_jfcs that produced CRs in the last poll cycle.
      */
     for (uint32_t n = 0; n < bdp_jfc->enabled_count; ++n) {
         uint32_t i = bdp_jfc->enabled_indices[n];
-        if (mask != 0 && !(mask & (1U << i))) {
+        uint32_t bit = 1U << i;
+        enabled_mask |= bit;
+        if (mask != 0 && !(mask & bit)) {
             continue;
         }
         if (urma_rearm_jfc(bdp_jfc->p_jfc[i], solicited_only) == URMA_SUCCESS) {
             success_once = true;
+            rearmed_mask |= bit;
+            atomic_fetch_add_explicit(&bdp_jfc->diag_rearm_count[i], 1, memory_order_relaxed);
+        } else {
+            failed_mask |= bit;
         }
+    }
+
+    lock_ret = pthread_mutex_unlock(&bdp_jfc->rearm_lock);
+    if (lock_ret != 0) {
+        URMA_LOG_ERR("Failed to unlock jfc rearm lock, ret=%d.\n", lock_ret);
+        PERF_PROFILING_END(BOND_REARM_JFC);
+        return URMA_FAIL;
+    }
+
+    if (bondp_take_rearm_diag_budget(bdp_jfc)) {
+        URMA_LOG_WARN("BONDP_JFC_ARM_DIAG virtual rearm, vjfc_id=%u raw=0x%x effective=0x%x "
+                      "enabled=0x%x rearmed=0x%x skipped=0x%x failed=0x%x notify=%u\n",
+                      jfc->jfc_id.id, raw_mask, mask, enabled_mask, rearmed_mask,
+                      enabled_mask & ~(rearmed_mask | failed_mask), failed_mask, solicited_only);
     }
 
     PERF_PROFILING_END(BOND_REARM_JFC);
@@ -2654,7 +2722,9 @@ static inline void bondp_record_jfc_event_source(urma_jfc_t *v_jfc, int dev_idx)
     }
 
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(v_jfc, bondp_jfc_t, v_jfc);
-    atomic_fetch_or(&bdp_jfc->polled_mask, (1U << (uint32_t)dev_idx));
+    uint32_t bit = 1U << (uint32_t)dev_idx;
+    atomic_fetch_add_explicit(&bdp_jfc->diag_event_count[dev_idx], 1, memory_order_relaxed);
+    atomic_fetch_or(&bdp_jfc->polled_mask, bit);
 }
 
 static inline urma_jfce_t *bondp_find_p_jfce_by_fd(bondp_jfce_t *bdp_jfce, int fd, int *dev_idx)
@@ -2671,6 +2741,7 @@ static inline urma_jfce_t *bondp_find_p_jfce_by_fd(bondp_jfce_t *bdp_jfce, int f
 static urma_jfc_t *bondp_wait_one_jfc_event(bondp_jfce_t *bdp_jfce, int fd)
 {
     int p_jfce_idx = -1;
+    int lock_ret;
     urma_jfce_t *p_jfce = bondp_find_p_jfce_by_fd(bdp_jfce, fd, &p_jfce_idx);
     if (p_jfce == NULL) {
         URMA_LOG_WARN("Failed to find fd=%d from p_jfce array.\n", fd);
@@ -2683,15 +2754,27 @@ static urma_jfc_t *bondp_wait_one_jfc_event(bondp_jfce_t *bdp_jfce, int fd)
         return NULL;
     }
 
-    uint32_t nevents = 1;
-    urma_ack_jfc(&p_jfc, &nevents, 1);
-
     urma_jfc_t *v_jfc = (urma_jfc_t *)p_jfc->jfc_cfg.user_ctx;
     if (v_jfc == NULL) {
         URMA_LOG_WARN("v_jfc is NULL, pjfc_id=%u.\n", p_jfc->jfc_id.id);
         return NULL;
     }
+
+    bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(v_jfc, bondp_jfc_t, v_jfc);
+    lock_ret = pthread_mutex_lock(&bdp_jfc->rearm_lock);
+    if (lock_ret != 0) {
+        URMA_LOG_ERR("Failed to lock jfc rearm lock, ret=%d.\n", lock_ret);
+        return NULL;
+    }
+
+    uint32_t nevents = 1;
+    urma_ack_jfc(&p_jfc, &nevents, 1);
     bondp_record_jfc_event_source(v_jfc, p_jfce_idx);
+    lock_ret = pthread_mutex_unlock(&bdp_jfc->rearm_lock);
+    if (lock_ret != 0) {
+        URMA_LOG_ERR("Failed to unlock jfc rearm lock, ret=%d.\n", lock_ret);
+        return NULL;
+    }
     return v_jfc;
 }
 
