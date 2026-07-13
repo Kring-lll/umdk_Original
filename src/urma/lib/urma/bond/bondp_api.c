@@ -342,6 +342,11 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
     bdp_jfc->dev_num = bdp_ctx->dev_num;
     atomic_init(&bdp_jfc->lasted_polled_jfc_idx, 0);
     atomic_init(&bdp_jfc->polled_mask, 0);
+    if (pthread_mutex_init(&bdp_jfc->rearm_lock, NULL) != 0) {
+        URMA_LOG_ERR("Failed to initialize jfc rearm lock.\n");
+        free(bdp_jfc);
+        return NULL;
+    }
     atomic_init(&bdp_jfc->fast_return_count, 0);
     atomic_init(&bdp_jfc->use_cnt.atomic_cnt, 0);
 
@@ -387,6 +392,7 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
 DELETE_PJFC:
     bondp_delete_pjfc(bdp_jfc);
 FREE_JFC:
+    (void)pthread_mutex_destroy(&bdp_jfc->rearm_lock);
     free(bdp_jfc);
     return NULL;
 }
@@ -437,6 +443,10 @@ urma_status_t bondp_delete_jfc(urma_jfc_t *jfc)
         ret = URMA_FAIL;
     }
 
+    if (pthread_mutex_destroy(&bdp_jfc->rearm_lock) != 0) {
+        URMA_LOG_ERR("Failed to destroy jfc rearm lock.\n");
+        ret = URMA_FAIL;
+    }
     free(bdp_jfc);
 
     if (bdp_jfce != NULL) {
@@ -2602,6 +2612,7 @@ urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
 {
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(jfc, bondp_jfc_t, v_jfc);
     bool success_once = false;
+    int lock_ret;
 
     PERF_PROFILING_START(BOND_REARM_JFC);
     if (bdp_jfc->v_jfc.jfc_cfg.jfce == NULL) {
@@ -2610,16 +2621,22 @@ urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
         return URMA_EINVAL;
     }
 
+    lock_ret = pthread_mutex_lock(&bdp_jfc->rearm_lock);
+    if (lock_ret != 0) {
+        URMA_LOG_ERR("Failed to lock jfc rearm lock, ret=%d.\n", lock_ret);
+        PERF_PROFILING_END(BOND_REARM_JFC);
+        return URMA_FAIL;
+    }
+
     uint32_t mask = atomic_exchange(&bdp_jfc->polled_mask, 0);
 
-    /* Balance mode distributes sends across devices, must rearm all p_jfcs. */
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(jfc->urma_ctx, bondp_context_t, v_ctx);
     if (bdp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE) {
         mask = 0;
     }
 
     /**
-     * When mask == 0, rearm all enabled p_jfcs
+     * When mask == 0, rearm all enabled p_jfcs.
      * When mask != 0, only rearm p_jfcs that produced CRs in the last poll cycle.
      */
     for (uint32_t n = 0; n < bdp_jfc->enabled_count; ++n) {
@@ -2630,6 +2647,13 @@ urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
         if (urma_rearm_jfc(bdp_jfc->p_jfc[i], solicited_only) == URMA_SUCCESS) {
             success_once = true;
         }
+    }
+
+    lock_ret = pthread_mutex_unlock(&bdp_jfc->rearm_lock);
+    if (lock_ret != 0) {
+        URMA_LOG_ERR("Failed to unlock jfc rearm lock, ret=%d.\n", lock_ret);
+        PERF_PROFILING_END(BOND_REARM_JFC);
+        return URMA_FAIL;
     }
 
     PERF_PROFILING_END(BOND_REARM_JFC);
@@ -2671,6 +2695,7 @@ static inline urma_jfce_t *bondp_find_p_jfce_by_fd(bondp_jfce_t *bdp_jfce, int f
 static urma_jfc_t *bondp_wait_one_jfc_event(bondp_jfce_t *bdp_jfce, int fd)
 {
     int p_jfce_idx = -1;
+    int lock_ret;
     urma_jfce_t *p_jfce = bondp_find_p_jfce_by_fd(bdp_jfce, fd, &p_jfce_idx);
     if (p_jfce == NULL) {
         URMA_LOG_WARN("Failed to find fd=%d from p_jfce array.\n", fd);
@@ -2683,15 +2708,27 @@ static urma_jfc_t *bondp_wait_one_jfc_event(bondp_jfce_t *bdp_jfce, int fd)
         return NULL;
     }
 
-    uint32_t nevents = 1;
-    urma_ack_jfc(&p_jfc, &nevents, 1);
-
     urma_jfc_t *v_jfc = (urma_jfc_t *)p_jfc->jfc_cfg.user_ctx;
     if (v_jfc == NULL) {
         URMA_LOG_WARN("v_jfc is NULL, pjfc_id=%u.\n", p_jfc->jfc_id.id);
         return NULL;
     }
+
+    bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(v_jfc, bondp_jfc_t, v_jfc);
+    lock_ret = pthread_mutex_lock(&bdp_jfc->rearm_lock);
+    if (lock_ret != 0) {
+        URMA_LOG_ERR("Failed to lock jfc rearm lock, ret=%d.\n", lock_ret);
+        return NULL;
+    }
+
+    uint32_t nevents = 1;
+    urma_ack_jfc(&p_jfc, &nevents, 1);
     bondp_record_jfc_event_source(v_jfc, p_jfce_idx);
+    lock_ret = pthread_mutex_unlock(&bdp_jfc->rearm_lock);
+    if (lock_ret != 0) {
+        URMA_LOG_ERR("Failed to unlock jfc rearm lock, ret=%d.\n", lock_ret);
+        return NULL;
+    }
     return v_jfc;
 }
 
