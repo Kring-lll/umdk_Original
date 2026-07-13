@@ -117,8 +117,8 @@ process_arg $@
 #   ascend910_93  -> all means comm_operator only
 if [[ -n "${SOC_TYPE}" ]]; then
     if [[ "${SOC_TYPE}" == "ascend950" ]]; then
-        if [[ "${MODULE_NAME}" != "nda" && "${MODULE_NAME}" != "all" ]]; then
-            echo "Error: -c ascend950 only supports module 'nda' (or 'all'), but got '${MODULE_NAME}'"
+        if [[ "${MODULE_NAME}" != "nda" && "${MODULE_NAME}" != "all" && "${MODULE_NAME}" != "comm_operator" ]]; then
+            echo "Error: -c ascend950 supports modules 'nda'/'comm_operator' (or 'all'=both), but got '${MODULE_NAME}'"
             exit 1
         fi
     elif [[ "${SOC_TYPE}" == "ascend910_93" ]]; then
@@ -135,7 +135,8 @@ fi
 # Build comm_operator unless -c restricts to nda (ascend950).
 # With -c ascend910_93 or no -c, 'all'/'comm_operator' builds comm_operator.
 if [[ "$MODULE_NAME" == "all" || "$MODULE_NAME" == "comm_operator" ]]; then
-    if [[ -z "${SOC_TYPE}" || "${SOC_TYPE}" == "ascend910_93" ]]; then
+    # comm_operator builds for 910_93 (default), and for 950 when explicitly selected or via 'all'.
+    if [[ -z "${SOC_TYPE}" || "${SOC_TYPE}" == "ascend910_93" || "${SOC_TYPE}" == "ascend950" ]]; then
         IS_MODULE_EXIST=1
         if ! prepare_cam_third_party "${CAM_THIRD_PARTY_PATH}"; then
             exit 1

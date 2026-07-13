@@ -26,6 +26,18 @@ elseif(DEFINED ENV{CPATH} AND "$ENV{CPATH}" MATCHES "catlass")
     endforeach()
 endif()
 
+# CATLASS_ARCH macro: activate catlass 950 code paths (#if CATLASS_ARCH==3510).
+# Driven by ASCEND_COMPUTE_UNIT from CMakePresets (set by msopgen per -c soc).
+if(DEFINED ASCEND_COMPUTE_UNIT AND "${ASCEND_COMPUTE_UNIT}" STREQUAL "ascend950")
+    list(APPEND KERNEL_COMPILE_OPTS -DCATLASS_ARCH=3510)
+    # 950 kernel (catlass Mx paths) includes "common.h" from the CANN ops_transformer common dir.
+    if(DEFINED ENV{ASCEND_TOOLKIT_HOME})
+        list(APPEND KERNEL_COMPILE_OPTS -I$ENV{ASCEND_TOOLKIT_HOME}/opp/built-in/op_impl/ai_core/tbe/impl/ops_transformer/ascendc/common/)
+        message(STATUS ">>> [op_kernel] Added ops_transformer common include for ascend950")
+    endif()
+    message(STATUS ">>> [op_kernel] Added -DCATLASS_ARCH=3510 for ascend950")
+endif()
+
 # Common options
 list(APPEND KERNEL_COMPILE_OPTS -DASCENDC_DUMP=0 --cce-auto-sync=off)
 

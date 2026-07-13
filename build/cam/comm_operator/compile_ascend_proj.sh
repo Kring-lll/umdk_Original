@@ -168,6 +168,19 @@ build_ascend_proj() {
         export CATLASS_HOME_PATH=$(echo "${CPATH}" | tr ':' '\n' | grep "catlass" | sed 's|/include||')
     fi
 
+    # ascend950 workaround: catlass v1.6.0 block_epilogue.hpp pulls in block_epilogue_dequant.hpp
+    # (a 910_93 dequant BlockEpilogue specialization) inside the CATLASS_ARCH==3510 guard. Its
+    # macro/type expansions are invalid under 950 (errors "expected unqualified-id"), and the
+    # 950 kernel uses its own EpilogueAtlasA5* path that doesn't need it. Comment it out for
+    # 950 only. Idempotent; patches the source tree in place, does not touch the submodule.
+    if [[ "$soc_version" == "ascend950" && -n "${CATLASS_HOME_PATH}" ]]; then
+        local epilogue_hpp="${CATLASS_HOME_PATH}/include/catlass/epilogue/block/block_epilogue.hpp"
+        if [[ -f "$epilogue_hpp" ]] && grep -q '^#include "catlass/epilogue/block/block_epilogue_dequant.hpp"' "$epilogue_hpp"; then
+            echo "Patching catlass block_epilogue.hpp (comment out block_epilogue_dequant) for ascend950"
+            sed -i 's|#include "catlass/epilogue/block/block_epilogue_dequant.hpp"|// #include "catlass/epilogue/block/block_epilogue_dequant.hpp"|g' "$epilogue_hpp"
+        fi
+    fi
+
     cd ${MODULE_BUILD_PATH}/${proj_name}
 
     # Configure cmake
