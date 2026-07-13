@@ -13,6 +13,8 @@
 
 #include "urma_types.h"
 
+struct bondp_context;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -76,6 +78,10 @@ void bondp_ack_jfc(urma_jfc_t *jfc[], uint32_t nevents[], uint32_t jfc_cnt);
 /* event */
 urma_status_t bondp_get_async_event(urma_context_t *ctx, urma_async_event_t *event);
 void bondp_ack_async_event(urma_async_event_t *event);
+
+/* Re-enable valid[local_idx] for all comps on p_ctxs[local_idx] after the health-check
+ * probe confirmed the port's links are back up. Called from hc_drain_probe_cq. */
+void bondp_revalidate_pctx_path(struct bondp_context *bdp_ctx, uint32_t local_idx);
 
 /* Other ops */
 int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_out_t *out);

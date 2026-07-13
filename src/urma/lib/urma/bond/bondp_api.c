@@ -27,9 +27,11 @@
 #include "bondp_provider_ops.h"
 #include "bondp_segment.h"
 #include "bondp_types.h"
+#include "ub_hmap.h"
 #include "urma_ubagg.h"
 
 #include "bondp_api.h"
+#include "bondp_health.h"
 #include "bondp_health_check.h"
 #include "ub_get_clock.h"
 
@@ -2184,7 +2186,12 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
             }
             URMA_LOG_INFO("bondp unimport pjetty is done, jetty id is %u.\n",
                           bdp_tjetty->p_tjetty[i][j]->id.id);
-            if (urma_unimport_jetty(bdp_tjetty->p_tjetty[i][j]) != URMA_SUCCESS) {
+            /* NULL the slot before freeing so concurrent readers (datapath
+             * scheduling, health probe) observe NULL instead of a dangling
+             * pointer once urma_unimport_jetty releases the object. */
+            urma_target_jetty_t *p_tjetty = bdp_tjetty->p_tjetty[i][j];
+            bdp_tjetty->p_tjetty[i][j] = NULL;
+            if (urma_unimport_jetty(p_tjetty) != URMA_SUCCESS) {
                 ret = URMA_FAIL;
             }
         }
@@ -2270,8 +2277,8 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         cfg_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
     }
 
-    if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty, cfg_jetty) != 0) {
-        URMA_LOG_ERR("Failed to register health check task\n");
+    if (bondp_hc_register_tjetty(bdp_ctx, bdp_tjetty) != 0) {
+        URMA_LOG_ERR("Failed to register health check tjetty\n");
         goto UNIMPORT_TSEG;
     }
 
@@ -2300,7 +2307,7 @@ static urma_status_t bondp_unimport_jetty_inner(urma_target_jetty_t *target_jett
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(target_jetty->urma_ctx, bondp_context_t, v_ctx);
     urma_status_t ret = URMA_SUCCESS;
 
-    bondp_unregister_health_check_task(bdp_ctx, bdp_tjetty);
+    bondp_hc_unregister_tjetty(bdp_ctx, bdp_tjetty);
 
     if (bondp_unimport_pjetty(bdp_tjetty) != URMA_SUCCESS) {
         ret = URMA_FAIL;
@@ -2803,6 +2810,29 @@ static void *get_jetty_and_ret(uint64_t addr, int *ret)
 
     *ret = 0;
     return (void *)addr;
+}
+
+/* Re-enable valid[local_idx]=true for every bondp_comp using p_ctxs[local_idx], so the
+ * datapath scheduler can pick the port again. Called by the health-check probe path
+ * (hc_drain_probe_cq) only after it confirmed all links on this local index are back up,
+ * which guarantees the rebuilt pjetty (and the carrier) are actually usable — posting into
+ * a still-down port crashes in udma_u_post_one_wr. */
+void bondp_revalidate_pctx_path(struct bondp_context *bdp_ctx, uint32_t local_idx)
+{
+    if (bdp_ctx == NULL || local_idx >= URMA_UBAGG_DEV_MAX_NUM ||
+        !g_bondp_global_ctx->enable_failback) {
+        return;
+    }
+    pthread_rwlock_rdlock(&bdp_ctx->p_vjetty_id_table.lock);
+    bdp_p_vjetty_id_t *item = NULL;
+    HMAP_FOR_EACH (item, hmap_node, &bdp_ctx->p_vjetty_id_table.hmap) {
+        bondp_comp_t *comp = item->comp;
+        if (comp != NULL) {
+            atomic_store(&comp->valid[local_idx], true);
+        }
+    }
+    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+    URMA_LOG_INFO("Physical context links recovered, local_idx=%u, datapath paths revalidated.\n", local_idx);
 }
 
 static int init_elment_vjetty(urma_async_event_t *v_event, urma_async_event_t *p_event)
