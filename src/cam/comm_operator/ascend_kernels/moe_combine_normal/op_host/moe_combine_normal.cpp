@@ -4,7 +4,7 @@
  * Description: Normal combine function implementation file
  * Create: 2025-11-25
  * Note:
- * History: 2025-11-25 create normal combine function file
+ * History: 2025-11-25 create normal combine function file.
  */
 
 #include "register/op_def_registry.h"
