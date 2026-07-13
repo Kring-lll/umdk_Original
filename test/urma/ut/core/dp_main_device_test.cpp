@@ -159,6 +159,7 @@ TEST(UrmaCoreTest, CoreAsyncEventAndUserCtlPropagateProviderResults)
 
 TEST(UrmaCoreTest, MainApisValidateProviderContextAndDeviceContracts)
 {
+    TempSysfsTree providerRoot;
     CoreApiFixture fixture;
     urma_provider_ops_t provider = {};
     urma_provider_ops_t badProvider = {};
@@ -173,15 +174,20 @@ TEST(UrmaCoreTest, MainApisValidateProviderContextAndDeviceContracts)
     urma_device_t noEidDev = fixture.dev;
     urma_sysfs_dev_t noEidSysfs = fixture.sysfsDev;
 
+    ASSERT_TRUE(providerRoot.Init());
+    ASSERT_TRUE(providerRoot.Mkdir("urma"));
+    ASSERT_TRUE(providerRoot.WriteFile("liburma.so", "core loader anchor\n"));
+    ASSERT_TRUE(providerRoot.WriteFile("urma/liburma_mock.so", "mock provider\n"));
+    ASSERT_EQ(0, chmod((providerRoot.root + "/urma/liburma_mock.so").c_str(), 0700));
+    CoreProviderRedirectGuard redirect(providerRoot.root + "/liburma.so");
+
     EXPECT_EQ(URMA_SUCCESS, urma_uninit());
-    urma_status_t initRet = urma_init(nullptr);
-    EXPECT_TRUE(initRet == URMA_SUCCESS || initRet == URMA_FAIL || initRet == URMA_EEXIST);
-    if (initRet == URMA_SUCCESS) {
-        deviceList = urma_get_device_list(&deviceNum);
-        EXPECT_TRUE(deviceList == nullptr || deviceNum >= 0);
-        urma_free_device_list(deviceList);
-        EXPECT_EQ(URMA_SUCCESS, urma_uninit());
-    }
+    EXPECT_EQ(URMA_SUCCESS, urma_init(nullptr));
+    deviceList = urma_get_device_list(&deviceNum);
+    EXPECT_TRUE(deviceList == nullptr || deviceNum >= 0);
+    urma_free_device_list(deviceList);
+    EXPECT_EQ(nullptr, urma_get_device_by_eid({}, URMA_TRANSPORT_MAX));
+    EXPECT_EQ(URMA_SUCCESS, urma_uninit());
     EXPECT_EQ(nullptr, urma_get_device_list(nullptr));
     deviceList = static_cast<urma_device_t **>(calloc(1, sizeof(*deviceList)));
     ASSERT_NE(nullptr, deviceList);
@@ -202,7 +208,6 @@ TEST(UrmaCoreTest, MainApisValidateProviderContextAndDeviceContracts)
     EXPECT_EQ(nullptr, urma_get_device_by_name(nullptr));
     (void)memset(longName, 'a', sizeof(longName));
     EXPECT_EQ(nullptr, urma_get_device_by_name(longName));
-    EXPECT_EQ(nullptr, urma_get_device_by_eid({}, URMA_TRANSPORT_MAX));
     EXPECT_EQ(-1, urma_open_cdev(const_cast<char *>("/tmp/urma_core_ut_missing_cdev")));
     EXPECT_EQ(nullptr, urma_create_context(nullptr, 0));
     EXPECT_EQ(URMA_EINVAL, urma_delete_context(nullptr));

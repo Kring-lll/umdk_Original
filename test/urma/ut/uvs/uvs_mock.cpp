@@ -40,8 +40,12 @@ extern "C" int ioctl(int, unsigned long request, ...)
         errno = EINVAL;
         return -1;
     }
-    CaptureTlvAttrs(hdr);
-    return 0;
+    if (g_uvsIoctl.failCommand >= 0 &&
+        hdr->command == static_cast<uint32_t>(g_uvsIoctl.failCommand)) {
+        errno = g_uvsIoctl.errnoValue;
+        return -1;
+    }
+    return CaptureTlvAttrs(hdr);
 }
 
 extern "C" int open(const char *path, int flags, ...)
