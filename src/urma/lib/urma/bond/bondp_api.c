@@ -22,6 +22,7 @@
 
 #include "bondp_connection.h"
 #include "bondp_context_table.h"
+#include "bondp_failback.h"
 #include "bondp_hash_table.h"
 #include "bondp_provider_ops.h"
 #include "bondp_segment.h"
@@ -339,7 +340,9 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
         return NULL;
     }
     bdp_jfc->dev_num = bdp_ctx->dev_num;
-    bdp_jfc->lasted_polled_jfc_idx = 0;
+    atomic_init(&bdp_jfc->lasted_polled_jfc_idx, 0);
+    atomic_init(&bdp_jfc->polled_mask, 0);
+    atomic_init(&bdp_jfc->fast_return_count, 0);
     atomic_init(&bdp_jfc->use_cnt.atomic_cnt, 0);
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
@@ -854,6 +857,7 @@ static int bondp_create_vjfr(bondp_context_t *bdp_ctx, urma_jfr_cfg_t *cfg, bond
         jfr_info.enabled_indices[i] = (uint8_t)bdp_jfr->enabled_indices[i];
     }
     jfr_info.enabled_count = bdp_jfr->enabled_count;
+    jfr_info.is_msn_enabled = bdp_ctx->msn_enable;
 
     urma_cmd_udrv_priv_t udata = {
         .in_addr = (uint64_t)&jfr_info,
@@ -1451,6 +1455,7 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
     if (shared_jfc != NULL) {
         bdp_jfc = CONTAINER_OF_FIELD(shared_jfc, bondp_jfc_t, v_jfc);
     }
+
     /*
     ! This locking mechanism is implemented to prevent other threads from accessing this bondp_comp through this table.
     ! Currently, the only multi-threaded access path to this bondp_comp is through this table.
@@ -1471,6 +1476,7 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
     ! thus allowing us to directly execute the deletion process.
     */
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+    bondp_fb_cancel_tasks(bdp_ctx, jetty->jetty_id.id);
     bondp_unregister_health_check_seg_for_jetty(bdp_jetty);
     bondp_uninit_connection_table(bdp_jetty);
     bondp_uninit_wr_buf(&bdp_jetty->send_wr_buf);
@@ -2190,6 +2196,12 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
 
 urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjetty, urma_token_t *token_value)
 {
+    if (rjetty == NULL) {
+        URMA_LOG_ERR("Input rjetty is NULL\n");
+        errno = EINVAL;
+        return NULL;
+    }
+
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
     // disable cfg jetty
     bondp_comp_t *cfg_jetty = NULL;
@@ -2206,13 +2218,13 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
 
     urma_bond_id_info_out_t rvjetty_info = {0};
-    if (rjetty != NULL && rjetty->flag.bs.has_drv_ext) {
+    if (rjetty->flag.bs.has_drv_ext) {
         const bondp_rjetty_t *bdp_rjetty = (const bondp_rjetty_t *)rjetty;
         if (bdp_rjetty->jetty != NULL) {
             cfg_jetty = CONTAINER_OF_FIELD(bdp_rjetty->jetty, bondp_comp_t, v_jetty);
         }
     }
-    if (rjetty != NULL && bondp_rjetty_has_user_info(rjetty)) {
+    if (bondp_rjetty_has_user_info(rjetty)) {
         bdp_tjetty->skip_import_vjetty = true;
         if (bondp_fill_bond_id_info_from_rjetty_ext(rjetty, &rvjetty_info) != 0) {
             const bondp_rjetty_ext_priv_t *ext_hdr = bondp_rjetty_get_priv_ext_const(rjetty);
@@ -2517,7 +2529,7 @@ urma_target_jetty_t *bondp_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, ur
                      EID_ARGS(rjfr->jfr_id.eid), rjfr->jfr_id.id);
         goto FREE_TJFR;
     }
-
+    bdp_tjetty->is_msn_enabled = udata_out.is_msn_enabled;
     if (init_target_active_indices(bdp_ctx, bdp_tjetty, &udata_out) != 0) {
         URMA_LOG_ERR("Failed to init target active indices\n");
         goto UNIMPORT_VJFR;
@@ -2598,8 +2610,13 @@ urma_status_t bondp_rearm_jfc(urma_jfc_t *jfc, bool solicited_only)
         return URMA_EINVAL;
     }
 
-    uint32_t mask = bdp_jfc->polled_mask;
-    bdp_jfc->polled_mask = 0;
+    uint32_t mask = atomic_exchange(&bdp_jfc->polled_mask, 0);
+
+    /* Balance mode distributes sends across devices, must rearm all p_jfcs. */
+    bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(jfc->urma_ctx, bondp_context_t, v_ctx);
+    if (bdp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE) {
+        mask = 0;
+    }
 
     /**
      * When mask == 0, rearm all enabled p_jfcs
@@ -2637,7 +2654,7 @@ static inline void bondp_record_jfc_event_source(urma_jfc_t *v_jfc, int dev_idx)
     }
 
     bondp_jfc_t *bdp_jfc = CONTAINER_OF_FIELD(v_jfc, bondp_jfc_t, v_jfc);
-    bdp_jfc->polled_mask |= (1U << (uint32_t)dev_idx);
+    atomic_fetch_or(&bdp_jfc->polled_mask, (1U << (uint32_t)dev_idx));
 }
 
 static inline urma_jfce_t *bondp_find_p_jfce_by_fd(bondp_jfce_t *bdp_jfce, int fd, int *dev_idx)

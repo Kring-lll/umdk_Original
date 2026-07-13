@@ -184,7 +184,7 @@ static int umq_ub_prefill_rx_buf(ub_queue_t *queue)
         }
 
         umq_buf_t *bad_buf = NULL;
-        ret = umq_ub_post_rx_inner_impl(queue, qbuf, &bad_buf, NULL);
+        ret = umq_ub_post_rx_inner_impl(queue, qbuf, &bad_buf);
         if (ret != UMQ_SUCCESS) {
             umq_buf_free(bad_buf);
             goto DEC_REF;
@@ -589,9 +589,9 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
         (max_msg_size > info->queue_info->rx_buf_size) ? info->queue_info->rx_buf_size : max_msg_size;
 
     queue->state = QUEUE_STATE_READY;
-    UMQ_VLOG_INFO(VLOG_UMQ, "UMQ(ID:%u), remote eid: " EID_FMT ", remote jetty_id: %u, remote pid: %u, "
-                  "remote namespace: %s, bind jetty success\n",
-                  queue->umq_id, EID_ARGS(ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid),
+    UMQ_VLOG_INFO(VLOG_UMQ, "UMQ(ID:%u), remote umq_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u, "
+                  "remote pid: %u, remote namespace: %s, bind jetty success\n",
+                  queue->umq_id, queue->remote_umq_id, EID_ARGS(ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid),
                   ctx->tjetty[UB_QUEUE_JETTY_IO]->id.id, info->dev_info->pid, info->dev_info->bind_namespace);
     return UMQ_SUCCESS;
 
@@ -787,11 +787,14 @@ static ALWAYS_INLINE uint32_t umq_ub_fc_info_serialize(
         if (fc_info->rjetty_size == 0) {
             return 0;
         }
-        ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
-        uint16_t allocated = pool->ops.available_credit_dec(pool, UMQ_INITIAL_CREDIT);
-        fc_info->initial_credit = allocated;
-        (void)queue->flow_control.ops.local_rx_allocated_inc(&queue->flow_control, allocated);
-
+        // proactive defense to prevent resource exhaustion
+        ub_flow_control_t *fc = &queue->flow_control;
+        if (fc->ops.local_rx_allocated_load(fc) == 0) {
+            ub_credit_pool_t *pool = &queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+            uint16_t allocated = pool->ops.available_credit_dec(pool, UMQ_INITIAL_CREDIT);
+            fc_info->initial_credit = allocated;
+            (void)queue->flow_control.ops.local_rx_allocated_inc(&queue->flow_control, allocated);
+        }
     } else {
         fc_info->rjetty_size = 0;
         fc_info->token.token = 0;
@@ -829,7 +832,7 @@ uint32_t umq_ub_bind_info_serialize(ub_queue_t *queue, uint8_t *bind_info, uint3
     }
     info_data_size += data_size;
 
-    // fill fc info
+    // fill fc info, credit has been allocated, need to consider rollback
     data_size = umq_ub_fc_info_serialize(queue, bind_info + info_data_size, bind_info_size - info_data_size);
     if (data_size == 0) {
         UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), serialize fc info failed\n", queue->umq_id);
@@ -1522,6 +1525,10 @@ void umq_ub_jfr_ctx_destroy(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx)
         if (status != URMA_SUCCESS) {
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_delete_jfce failed, status: %d\n", (int)status);
         }
+    }
+    if (jetty_idx == UB_QUEUE_JETTY_IO && queue->flow_control.enabled &&
+        (queue->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) == 0) {
+        umq_ub_credit_pending_queue_uninit(&queue->jfr_ctx[jetty_idx]->credit.pending_queue);
     }
     rx_buf_ctx_list_uninit(&queue->jfr_ctx[jetty_idx]->rx_buf_ctx_list);
     free(queue->jfr_ctx[jetty_idx]);
@@ -2904,7 +2911,7 @@ void umq_ub_fill_rx_buffer(ub_queue_t *queue, int rx_cnt)
                 break;
             }
             umq_buf_t *bad_buf = NULL;
-            ret = umq_ub_post_rx_inner_impl(queue, qbuf, &bad_buf, NULL);
+            ret = umq_ub_post_rx_inner_impl(queue, qbuf, &bad_buf);
             if (ret != UMQ_SUCCESS) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, post rx failed, status: %d\n",
                     EID_ARGS(*eid), id, ret);
