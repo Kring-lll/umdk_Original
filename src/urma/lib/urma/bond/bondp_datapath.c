@@ -16,7 +16,7 @@
 #include "bondp_datapath_convert.h"
 #include "bondp_datapath_schedule.h"
 #include "bondp_failback.h"
-#include "bondp_health_check.h"
+#include "bondp_health.h"
 #include "bondp_types.h"
 #include "ub_get_clock.h"
 #include "urma_api.h"
@@ -262,11 +262,21 @@ static void try_failback(bondp_comp_t *bdp_comp)
 
     uint32_t rebuilt_cnt = 0;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        if (!atomic_exchange(&bdp_comp->rebuild_done[i], false)) {
+        if (!atomic_load(&bdp_comp->rebuild_done[i])) {
             continue;
         }
+        /* Consume rebuild_done so this only triggers once per rebuild, not on every
+         * post. Without this clear, every subsequent post re-enters the resend loop
+         * and keeps calling put_jfs_vwr_refs on failing WRs, draining target_vjetty
+         * use_cnt to zero and freeing the bdp_tjetty while the loop still iterates
+         * over wr_entries that reference it (use-after-free → segfault). valid[i] is
+         * NOT restored here — it stays false until the health-check probe confirms the
+         * port's links are back up (hc_drain_probe_cq → bondp_revalidate_pctx_path). */
+        atomic_store(&bdp_comp->rebuild_done[i], false);
+        if (bdp_comp->bondp_ctx->hc_ctx == NULL) {
+            atomic_store(&bdp_comp->valid[i], true);
+        }
         rebuilt_cnt++;
-        atomic_store(&bdp_comp->valid[i], true);
     }
 
     if (rebuilt_cnt == 0) {
@@ -1193,6 +1203,12 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         atomic_store(&bdp_comp->valid[send_idx], false);
+        /* Mirror the datapath-confirmed failure into the health-check state so the
+         * recovery gate (hc_port_links_all_recovered) starts from this failure instead
+         * of waiting for an independent probe failure — which may never come if the
+         * link recovers before the next probe round (in which case valid[send_idx] would
+         * stay false forever and the port never returns to scheduling). */
+        bondp_hc_mark_pctx_failed(bdp_comp->bondp_ctx, send_idx);
         /* choose the failover route(0 or 1) through send_idx and target_idx */
         int new_send_idx = send_idx;
         int new_target_idx = target_idx;
@@ -1227,11 +1243,6 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                 URMA_LOG_ERR("Failed to resend jfs wr, wr_id=%lu\n", resend_wr_id);
             }
         }
-        bondp_health_notify_datapath_link_fail(bdp_comp->bondp_ctx, wr_entry->target_vjetty,
-                                               (int)send_idx, (int)target_idx);
-        /* Update active link after failover is finished. */
-        bondp_health_update_active_idx(bdp_comp->bondp_ctx, wr_entry->target_vjetty, new_send_idx);
-
         int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);
         if (ret != 0 && ret != -EEXIST) {
             URMA_LOG_WARN("Failed to add failback task, vjetty_id=%u pjetty_idx=%u ret=%d\n",
@@ -1368,7 +1379,6 @@ static cr_convert_ret_t bondp_handle_cr_no_store(bondp_context_t *bdp_ctx, int i
 static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int idx, urma_cr_t *cr)
 {
     if (is_ctrl_cr(cr)) {
-        (void)bondp_try_handle_health_check_cr(bdp_ctx, idx, cr);
         return CONVERT_SKIP;
     } else if (is_fake_cr(cr)) {
         return handle_fake_cr_with_store(bdp_ctx, idx, cr);
