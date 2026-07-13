@@ -7,6 +7,9 @@
       "moe_combine_normal",
       "moe_dispatch_normal",
       "notify_dispatch"
+    ],
+    "ascend950": [
+      "fused_deep_moe_a5"
     ]
   },
   "operator_meta": {
@@ -25,6 +28,9 @@
       "requires_shmem": false
     },
     "notify_dispatch": {
+      "requires_shmem": false
+    },
+    "fused_deep_moe_a5": {
       "requires_shmem": false
     }
   }
