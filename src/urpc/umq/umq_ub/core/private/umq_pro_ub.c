@@ -960,14 +960,14 @@ static int umq_ub_process_fc_msg_with_retry(ub_queue_t *queue, umq_ub_imm_t *imm
     if (ret < 0) {
         umq_ub_retry_type_t reason;
         switch (ret) {
-        case -UMQ_ERR_EMLINK:
-            reason = UMQ_UB_RETRY_TYPE_NO_JETTY;
-            break;
-        case -UMQ_ERR_EAGAIN:
-            reason = UMQ_UB_RETRY_TYPE_EAGAIN;
-            break;
-        default:
-            return umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_ERR);
+            case -UMQ_ERR_EMLINK:
+                reason = UMQ_UB_RETRY_TYPE_NO_JETTY;
+                break;
+            case -UMQ_ERR_EAGAIN:
+                reason = UMQ_UB_RETRY_TYPE_EAGAIN;
+                break;
+            default:
+                return umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_ERR);
         }
         umq_ub_poll_rx_again_enqueue(queue, imm, reason);
         return 0;
@@ -1130,17 +1130,17 @@ static int umq_ub_poll_rx_again_dequeue(ub_queue_t *queue, umq_ub_poll_rx_again_
         umq_ub_retry_type_t new_reason;
         urpc_list_t *want_list;
         switch (ret) {
-        case -UMQ_ERR_EMLINK:
-            new_reason = UMQ_UB_RETRY_TYPE_NO_JETTY;
-            want_list = &again_list->no_jetty_list;
-            break;
-        case -UMQ_ERR_EAGAIN:
-            new_reason = UMQ_UB_RETRY_TYPE_EAGAIN;
-            want_list = &again_list->no_jetty_list;
-            break;
-        default:
-            ret = umq_ub_fill_fc_buf(real_queue, buf, UMQ_FAKE_BUF_FC_ERR);
-            goto OUT;
+            case -UMQ_ERR_EMLINK:
+                new_reason = UMQ_UB_RETRY_TYPE_NO_JETTY;
+                want_list = &again_list->no_jetty_list;
+                break;
+            case -UMQ_ERR_EAGAIN:
+                new_reason = UMQ_UB_RETRY_TYPE_EAGAIN;
+                want_list = &again_list->no_jetty_list;
+                break;
+            default:
+                ret = umq_ub_fill_fc_buf(real_queue, buf, UMQ_FAKE_BUF_FC_ERR);
+                goto OUT;
         }
 
         if (entry->reason != new_reason) {
@@ -1178,6 +1178,10 @@ int umq_ub_poll_rx_again_drain(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_
             break;
         }
         qbuf_cnt += umq_ub_poll_rx_again_dequeue(queue, again_list, entry, &buf[qbuf_cnt]);
+    }
+
+    if (urpc_list_is_empty(&again_list->retry_list)) {
+        return qbuf_cnt;
     }
 
     entry = NULL;
@@ -1257,9 +1261,8 @@ static int main_umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t b
             continue;
         }
         qbuf_cnt += umq_ub_process_fc_msg_with_retry(real_queue, &imm, &buf[qbuf_cnt]);
-        umq_ub_fill_rx_buff_post_process(queue, &imm);
+        umq_ub_fill_rx_buff_post_process(real_queue, &imm);
         umq_ub_put_real_queue(real_queue, imm.flow_control.umq_id);
-
     }
     return qbuf_cnt;
 }
