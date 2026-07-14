@@ -21,6 +21,7 @@
 
 #include "urma_api.h"
 #include "urma_ubagg.h"
+#include "urma_perf.h"
 
 #include "perftest_parameters.h"
 #include "perftest_resources.h"
@@ -3412,19 +3413,42 @@ int run_write_bw(perftest_context_t *ctx, perftest_config_t *cfg)
     }
     /* WRITE BW test run in both sides */
     print_bw_header(cfg);
+
+    if (cfg->enable_rtt) {
+        urma_start_perf();
+    }
+    int ret = 0;
+
     if (cfg->all == true) {
         for (uint32_t i = 1; i <= cfg->order; i++) {
             cfg->size = (1U << i);
             if (run_bw_once(ctx, cfg) != 0) {
-                return -1;
+                ret = -1;
+                goto perf_dump;
             }
         }
     } else {
         if (run_bw_once(ctx, cfg) != 0) {
-            return -1;
+            ret = -1;
+            goto perf_dump;
         }
     }
-    return 0;
+
+perf_dump:
+    if (cfg->enable_rtt) {
+        urma_stop_perf();
+
+        char perf_buf[16384];
+        uint32_t perf_len = sizeof(perf_buf);
+        if (urma_get_perf_info(perf_buf, &perf_len) == 0) {
+            printf("\n========== URMA Perf RTT Statistics ==========\n");
+            printf("%s", perf_buf);
+        } else {
+            LOG_ERROR("Failed to get urma perf info.\n");
+        }
+    }
+
+    return ret;
 }
 
 /* exchange sum len for recv in send_recv */
@@ -3592,23 +3616,46 @@ int run_send_bw(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     print_bw_header(cfg);
 
+    if (cfg->enable_rtt) {
+        urma_start_perf();
+    }
+    int ret = 0;
+
     if (cfg->all == true) {
         for (uint32_t i = 1; i <= cfg->order; i++) {
             cfg->size = (1U << i);
             if (i > 1 && recreate_jetty(ctx, cfg) != 0) {
                 LOG_ERROR("Failed to recreate jetty, size: %u.\n", cfg->size);
-                return -1;
+                ret = -1;
+                goto perf_dump;
             }
             if (run_send_bw_one_size(ctx, cfg) != 0) {
-                return -1;
+                ret = -1;
+                goto perf_dump;
             }
         }
     } else {
         if (run_send_bw_one_size(ctx, cfg) != 0) {
-            return -1;
+            ret = -1;
+            goto perf_dump;
         }
     }
-    return 0;
+
+perf_dump:
+    if (cfg->enable_rtt) {
+        urma_stop_perf();
+
+        char perf_buf[16384];
+        uint32_t perf_len = sizeof(perf_buf);
+        if (urma_get_perf_info(perf_buf, &perf_len) == 0) {
+            printf("\n========== URMA Perf RTT Statistics ==========\n");
+            printf("%s", perf_buf);
+        } else {
+            LOG_ERROR("Failed to get urma perf info.\n");
+        }
+    }
+
+    return ret;
 }
 
 int run_atomic_bw(perftest_context_t *ctx, perftest_config_t *cfg)

@@ -196,7 +196,8 @@ static void usage(const char *argv0)
         "  --max_size                  Set max size in random io size, only for bw mode.\n"
         "  --bond_mode                 Set bonding device mode, support: standalone, active_backup, balance.\n"
         "                                                       default: standalone.\n"
-        "  --bond_level                Set bonding device level, support: iodie, port, default: iodie.\n");
+        "  --bond_level                Set bonding device level, support: iodie, port, default: iodie.\n"
+        "  --rtt                       Enable urma_perf RTT statistics, only for BW test, default: disable.\n");
 }
 
 static perftest_cmd_type_t parse_command(const char *argv1)
@@ -371,6 +372,7 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->enable_imm = false;
     cfg->enable_err_continue = false;
     cfg->enable_notify = false;
+    cfg->enable_rtt = false;
     cfg->enable_user_tp = false;
     cfg->oor_en = false;
     cfg->spray_en = false;
@@ -706,6 +708,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"stdout",              no_argument,       NULL, PERFTEST_OPT_STDOUT},
         {"bond_mode",           required_argument, NULL, PERFTEST_OPT_BOND_MODE},
         {"bond_level",          required_argument, NULL, PERFTEST_OPT_BOND_LEVEL},
+        {"rtt",                 no_argument,       NULL, PERFTEST_OPT_RTT},
         {NULL,                  no_argument,       NULL, '\0'},
     };
     /* clang-format on */
@@ -1113,6 +1116,9 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                 break;
             case PERFTEST_OPT_STDOUT:
                 verbose_set_level(VLOG_LEVEL_VVERBOSE);
+                break;
+            case PERFTEST_OPT_RTT:
+                cfg->enable_rtt = true;
                 break;
             default:
                 usage(argv[0]);
@@ -1557,6 +1563,10 @@ int check_local_cfg(perftest_config_t *cfg)
     }
     if (cfg->enable_err_continue == true && cfg->type != PERFTEST_BW) {
         LOG_ERROR("enable err continue takes effect only in bw test.\n");
+        exit(1);
+    }
+    if (cfg->enable_rtt == true && cfg->type != PERFTEST_BW) {
+        LOG_ERROR("rtt takes effect only in bw test.\n");
         exit(1);
     }
     if (cfg->enable_user_tp == true) {
