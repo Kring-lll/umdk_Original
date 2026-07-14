@@ -20,6 +20,8 @@ std::string g_coreSysfsRedirectRoot;
 std::string g_coreProviderDliPath;
 int g_coreDlopenCount = 0;
 int g_coreDlcloseCount = 0;
+uint32_t g_coreMockEidCnt = 0;
+urma_eid_info_t g_coreMockEidList[URMA_MAX_EID_CNT] = {};
 } // namespace urma_test_core
 
 using namespace urma_test_core;
