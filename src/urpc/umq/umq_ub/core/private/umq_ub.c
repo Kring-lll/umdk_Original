@@ -26,7 +26,7 @@
 #define UMQ_LEN_ALIGNMENT_4 4
 #define TSEG_MAP_NUM 256
 #define UMQ_CTP_MAX_BUF_SIZE 4096
-#define UMQ_INITIAL_CREDIT 2
+#define UMQ_INITIAL_CREDIT 0
 
 static util_id_allocator_t g_umq_ub_id_allocator = {0};
 static ub_queue_ctx_list_t g_umq_ub_queue_ctx_list;
@@ -499,9 +499,10 @@ static urma_target_jetty_t *umq_ub_connect_jetty(ub_queue_t *queue, umq_ub_bind_
     urma_status_t status = umq_symbol_urma()->urma_bind_jetty(queue->jetty[i], tjetty);
     umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_BIND_JETTY, start_timestamp);
     if (status != URMA_SUCCESS && status != URMA_EEXIST) {
-        UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "UMQ(ID:%u), local jetty_id: %u, remote eid: " EID_FMT ", "
-                     "remote jetty_id: %u, urma_bind_jetty failed, jetty[%d], status: %d, errno %d\n",
-                     queue->umq_id, EID_ARGS(rjetty->jetty_id.eid), rjetty->jetty_id.id, i, (int)status, errno);
+        UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "UMQ(ID:%u), local eid: " EID_FMT ", local jetty_id: %u, remote eid: "
+                     "" EID_FMT ", remote jetty_id: %u, urma_bind_jetty failed, jetty[%d], status: %d, errno %d\n",
+                     queue->umq_id, EID_ARGS(queue->jetty[i]->jetty_id.eid), queue->jetty[i]->jetty_id.id,
+                     EID_ARGS(rjetty->jetty_id.eid), rjetty->jetty_id.id, i, (int)status, errno);
         goto UNIMPORT_JETTY;
     }
 
