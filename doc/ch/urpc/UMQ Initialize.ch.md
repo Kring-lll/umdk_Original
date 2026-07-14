@@ -28,7 +28,7 @@
 - io_lock_free: I/O线程安全时可设为true以提升性能
 - trans_info_num: 数据面传输设备信息的数量，最多支持128个
 - flow_control: 配置流控参数
-- block_cfg: 配置小型内存池block的大小，支持8K, 16K, 32K, 64K 4种类型。
+- block_cfg: 配置小型内存池block的大小，支持4K, 8K, 16K, 32K, 64K等类型。
 - trans_info：数据面传输设备信息，用于初始化对应得设备
 
 ### 说明
