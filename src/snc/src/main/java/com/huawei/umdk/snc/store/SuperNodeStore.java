@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+import com.huawei.umdk.snc.config.Logger;
 import com.huawei.umdk.snc.entity.DeviceEntity;
 import com.huawei.umdk.snc.entity.ForwardingChip;
 import com.huawei.umdk.snc.entity.NpuDevice;
@@ -26,23 +27,30 @@ import com.huawei.umdk.snc.entity.SwDevice;
 
 public class SuperNodeStore {
 
+    private static final Logger LOG = new Logger(SuperNodeStore.class);
+
     private Map<String, SuperNode> superNodeMap;
     private Map<RoutingTableKey, RoutingTable> routingTableMap;
 
     public void init() {
         this.superNodeMap = new ConcurrentHashMap<>();
         this.routingTableMap = new ConcurrentHashMap<>();
+        LOG.info("init: SuperNodeStore initialized");
     }
 
     public void replace(SuperNode superNode) {
         String name = superNode.getName();
+        LOG.info("replace: replacing SuperNode %s", name);
         superNodeMap.put(name, superNode);
 
         routingTableMap.entrySet().removeIf(e -> e.getKey().getSuperNodeName().equals(name));
 
+        int deviceCount = 0;
         for (DeviceEntity device : superNode.getMutableAllDevices().values()) {
             indexRoutingTable(name, device);
+            deviceCount++;
         }
+        LOG.debug("replace: indexed %d devices for SuperNode %s", deviceCount, name);
     }
 
     private void indexRoutingTable(String superNodeName, DeviceEntity device) {
@@ -56,6 +64,9 @@ public class SuperNodeStore {
                     RoutingTableKey key = new RoutingTableKey(
                         superNodeName, device.getDeviceName(), chip.getChipIndex());
                     routingTableMap.put(key, rt);
+                    LOG.debug("indexRoutingTable: indexed routing table for %s/%s/chip%d, routes=%d",
+                        superNodeName, device.getDeviceName(), chip.getChipIndex(),
+                        rt.getRoutes() != null ? rt.getRoutes().size() : 0);
                 }
             }
         }
@@ -68,9 +79,11 @@ public class SuperNodeStore {
         if (routingTableMap != null) {
             routingTableMap.clear();
         }
+        LOG.info("clear: SuperNodeStore cleared");
     }
 
     public void removeSuperNode(String superNodeName) {
+        LOG.info("removeSuperNode: %s", superNodeName);
         if (superNodeMap != null) {
             superNodeMap.remove(superNodeName);
         }
@@ -90,9 +103,11 @@ public class SuperNodeStore {
     public void addNpuDevice(String superNodeName, NpuDevice device) {
         SuperNode superNode = superNodeMap.get(superNodeName);
         if (superNode == null) {
+            LOG.error("addNpuDevice: SuperNode not found: %s. Call setSuperNode() first.", superNodeName);
             throw new IllegalStateException(
                 "SuperNode not found: " + superNodeName + ". Call setSuperNode() first.");
         }
+        LOG.info("addNpuDevice: %s/%s", superNodeName, device.getDeviceName());
         if (superNode.getMutableNpuDevices() == null) {
             superNode.setNpuDevices(new ConcurrentHashMap<>());
         }
@@ -103,9 +118,11 @@ public class SuperNodeStore {
     public void addSwDevice(String superNodeName, SwDevice device) {
         SuperNode superNode = superNodeMap.get(superNodeName);
         if (superNode == null) {
+            LOG.error("addSwDevice: SuperNode not found: %s. Call setSuperNode() first.", superNodeName);
             throw new IllegalStateException(
                 "SuperNode not found: " + superNodeName + ". Call setSuperNode() first.");
         }
+        LOG.info("addSwDevice: %s/%s", superNodeName, device.getDeviceName());
         if (superNode.getMutableSwDevices() == null) {
             superNode.setSwDevices(new ConcurrentHashMap<>());
         }
@@ -114,6 +131,7 @@ public class SuperNodeStore {
     }
 
     public void removeDevice(String superNodeName, String deviceName) {
+        LOG.info("removeDevice: %s/%s", superNodeName, deviceName);
         if (superNodeMap != null) {
             SuperNode superNode = superNodeMap.get(superNodeName);
             if (superNode != null) {
@@ -123,6 +141,8 @@ public class SuperNodeStore {
                 if (superNode.getMutableSwDevices() != null) {
                     superNode.getMutableSwDevices().remove(deviceName);
                 }
+            } else {
+                LOG.warn("removeDevice: SuperNode %s not found, skip device removal", superNodeName);
             }
         }
         if (routingTableMap != null) {
@@ -133,18 +153,23 @@ public class SuperNodeStore {
     }
 
     public void addRoutingEntry(String superNodeName, String deviceName, Integer chipIndex,
-                                RoutePrefix prefix, RoutingEntry entry) {
+                                 RoutePrefix prefix, RoutingEntry entry) {
         RoutingTableKey key = new RoutingTableKey(superNodeName, deviceName, chipIndex);
         RoutingTable rt = routingTableMap.get(key);
         if (rt == null) {
+            LOG.error("addRoutingEntry: RoutingTable not found for %s/%s/%d. Call setSuperNode() or addNpuDevices()/addSwDevices() first.",
+                superNodeName, deviceName, chipIndex);
             throw new IllegalStateException(
                 "RoutingTable not found for " + superNodeName + "/" + deviceName + "/" + chipIndex
                     + ". Call setSuperNode() or addNpuDevices()/addSwDevices() first.");
         }
         if (rt.getRoutes() == null) {
+            LOG.error("addRoutingEntry: RoutingTable routes is null for %s/%s/%d",
+                superNodeName, deviceName, chipIndex);
             throw new IllegalStateException(
                 "RoutingTable routes is null for " + superNodeName + "/" + deviceName + "/" + chipIndex);
         }
+        LOG.info("addRoutingEntry: %s/%s/%d, prefix=%s", superNodeName, deviceName, chipIndex, prefix);
         Map<RoutePrefix, RoutingEntry> mutableRoutes = new java.util.HashMap<>(rt.getRoutes());
         mutableRoutes.put(prefix, entry);
         rt.setRoutes(mutableRoutes);
@@ -153,6 +178,7 @@ public class SuperNodeStore {
 
     public void removeRoutingEntry(String superNodeName, String deviceName, Integer chipIndex,
                                    RoutePrefix prefix) {
+        LOG.info("removeRoutingEntry: %s/%s/%d, prefix=%s", superNodeName, deviceName, chipIndex, prefix);
         RoutingTableKey key = new RoutingTableKey(superNodeName, deviceName, chipIndex);
         RoutingTable rt = routingTableMap.get(key);
         if (rt != null && rt.getRoutes() != null) {
@@ -160,6 +186,9 @@ public class SuperNodeStore {
             mutableRoutes.remove(prefix);
             rt.setRoutes(mutableRoutes);
             updateMaskLengths(rt);
+        } else {
+            LOG.warn("removeRoutingEntry: RoutingTable not found or routes is null for %s/%s/%d",
+                superNodeName, deviceName, chipIndex);
         }
     }
 
