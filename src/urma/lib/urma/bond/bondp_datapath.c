@@ -32,6 +32,56 @@
 
 static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int send_idx, int target_idx);
 
+static bool jfs_wr_entry_is_cqe_wr(const jfs_wr_entry_t *wr_entry)
+{
+    return wr_entry->wr.flag.bs.complete_enable != 0;
+}
+
+static void jfs_wr_entry_ring_set_path(jfs_wr_entry_t *head, int send_idx, int target_idx)
+{
+    jfs_wr_entry_t *cur = head;
+
+    do {
+        cur->send_idx = (uint32_t)send_idx;
+        cur->target_idx = (uint32_t)target_idx;
+        cur = cur->next;
+    } while (cur != NULL && cur != head);
+}
+
+static int jfs_wr_entry_ring_to_array(jfs_wr_entry_t *head, jfs_wr_entry_t **entries, uint32_t max_count)
+{
+    jfs_wr_entry_t *cur = head;
+    uint32_t count = 0;
+
+    do {
+        if (count >= max_count) {
+            return -1;
+        }
+        entries[count++] = cur;
+        cur = cur->next;
+    } while (cur != NULL && cur != head);
+
+    return (int)count;
+}
+
+static void release_jfs_wr_entry_ring(bondp_comp_t *bdp_comp, jfs_wr_entry_t *head)
+{
+    jfs_wr_entry_t *entries[BONDP_BATCH_POST_MAX_NUM];
+    int count = jfs_wr_entry_ring_to_array(head, entries, BONDP_BATCH_POST_MAX_NUM);
+
+    if (count <= 0) {
+        put_jfs_vwr_refs(&head->wr);
+        jfs_wr_buf_release(&bdp_comp->send_wr_buf, head);
+        return;
+    }
+
+    for (int i = 0; i < count; i++) {
+        put_jfs_vwr_refs(&entries[i]->wr);
+        entries[i]->next = NULL;
+    }
+    jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, entries, (uint32_t)count);
+}
+
 static urma_jetty_id_t *get_comp_urma_jetty_id(bondp_comp_t *bdp_comp)
 {
     switch (bdp_comp->comp_type) {
@@ -282,7 +332,8 @@ static void try_failback(bondp_comp_t *bdp_comp)
         jfs_wr_entry_t *resend_wr_entry = jfs_wr_buf_get(&bdp_comp->send_wr_buf, resend_wr_id);
         if (resend_wr_entry == NULL ||
             resend_wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
-            resend_wr_entry->bdp_comp != bdp_comp) {
+            resend_wr_entry->bdp_comp != bdp_comp ||
+            !jfs_wr_entry_is_cqe_wr(resend_wr_entry)) {
             continue;
         }
 
@@ -313,7 +364,7 @@ static void try_failback(bondp_comp_t *bdp_comp)
 
 static void bondp_translate_bad_wr(bondp_comp_t *bdp_comp, int send_idx, int target_idx,
                                    urma_jfs_wr_t *prealloc_wr_list, const urma_jfs_wr_t *wr,
-                                   urma_jfs_wr_t **bad_wr)
+                                   urma_jfs_wr_t **bad_wr, int wr_total)
 {
     int bad_idx = 0;
     urma_jfs_wr_t *pcur = prealloc_wr_list;
@@ -324,7 +375,9 @@ static void bondp_translate_bad_wr(bondp_comp_t *bdp_comp, int send_idx, int tar
     if (pcur == NULL) {
         return;
     }
-    atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], bad_idx);
+    if (bad_idx == wr_total) {
+        atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+    }
     urma_jfs_wr_t *user_cur = (urma_jfs_wr_t *)wr;
     for (int i = 0; i < bad_idx && user_cur != NULL; i++) {
         user_cur = user_cur->next;
@@ -382,9 +435,9 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
         if (!atomic_load(&bdp_comp->valid[send_idx])) {
             continue;
         }
-        ret = comp_post_send(bdp_comp, send_idx, target_idx, prealloc_wr_list, bad_wr, wr_total);
+        ret = comp_post_send(bdp_comp, send_idx, target_idx, prealloc_wr_list, bad_wr, 1);
         if (ret != URMA_SUCCESS && bad_wr != NULL && *bad_wr != NULL) {
-            bondp_translate_bad_wr(bdp_comp, send_idx, target_idx, prealloc_wr_list, wr, bad_wr);
+            bondp_translate_bad_wr(bdp_comp, send_idx, target_idx, prealloc_wr_list, wr, bad_wr, wr_total);
         }
         return ret;
     }
@@ -446,6 +499,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             wr_entry->user_ctx = cur->user_ctx;
             wr_entry->target_vjetty = bdp_tjetty;
             wr_entry->bdp_comp = bdp_comp;
+            wr_entry->next = wr_entries[(i + 1) % wr_total];
 
             urma_jfs_wr_t *pwr = &wr_entry->wr;
             ret = copy_jfs_wr(cur, pwr, wr_entry->src_sge, wr_entry->dst_sge);
@@ -486,6 +540,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
                 hdr->entry_type = 0;
                 wr_entries[i]->send_idx = 0;
                 wr_entries[i]->target_idx = 0;
+                wr_entries[i]->next = NULL;
                 convert_jfs_pwr_to_vwr(&wr_entries[i]->wr, &wr_entries[i]->target_vjetty->v_tjetty);
             }
             pthread_spin_unlock(&bdp_comp->send_lock);
@@ -495,19 +550,22 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, wr_entries, allocated);
             continue;
         }
-        ret = comp_post_send(bdp_comp, send_idx, target_idx, &wr_entries[0]->wr, bad_wr, wr_count);
+        ret = comp_post_send(bdp_comp, send_idx, target_idx, &wr_entries[0]->wr, bad_wr, 1);
         if (ret != URMA_SUCCESS) {
             urma_jfs_wr_t *pcur = &wr_entries[0]->wr;
             while (pcur != NULL && bad_wr != NULL && pcur != *bad_wr) {
                 success_node++;
                 pcur = pcur->next;
             }
-            atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], success_node);
+            if (success_node == wr_total) {
+                atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+            }
             for (int j = success_node; j < wr_total; j++) {
                 wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)wr_entries[j];
                 hdr->entry_type = 0;
                 wr_entries[j]->send_idx = 0;
                 wr_entries[j]->target_idx = 0;
+                wr_entries[j]->next = NULL;
             }
         }
         for (int j = 0; j < wr_count; j++) {
@@ -522,6 +580,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
 ROLLBACK:
         for (int j = success_node; j < wr_count; j++) {
             put_jfs_vwr_refs(&wr_entries[j]->wr);
+            wr_entries[j]->next = NULL;
         }
         jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, &wr_entries[success_node],
             allocated - success_node);
@@ -539,6 +598,7 @@ ROLLBACK:
 CLEANUP:
         for (int j = 0; j < wr_count; j++) {
             put_jfs_vwr_refs(&wr_entries[j]->wr);
+            wr_entries[j]->next = NULL;
         }
         jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, wr_entries, allocated);
         if (ret != URMA_FAIL || atomic_load(&bdp_comp->valid[send_idx])) {
@@ -952,22 +1012,44 @@ typedef enum cr_convert_ret {
 static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
 {
     int ret;
+    jfs_wr_entry_t *cqe_entry = wr_entry;
+    jfs_wr_entry_t *cur = wr_entry;
 
-    wr_entry->send_idx = send_idx;
-    wr_entry->target_idx = target_idx;
-    urma_jfs_wr_t *wr = &wr_entry->wr;
-    urma_target_jetty_t *vtjetty = &wr_entry->target_vjetty->v_tjetty;
+    do {
+        if (jfs_wr_entry_is_cqe_wr(cur)) {
+            cqe_entry = cur;
+            break;
+        }
+        cur = cur->next;
+    } while (cur != NULL && cur != wr_entry);
 
-    ret = check_jfs_wr_path(wr, send_idx, target_idx);
-    if (ret != URMA_SUCCESS) {
-        goto release_wr_entry;
-    }
-    convert_jfs_vwr_to_pwr(wr, send_idx, target_idx);
+    jfs_wr_entry_t *head_entry = (cqe_entry->next == NULL) ? cqe_entry : cqe_entry->next;
+    cur = head_entry;
+    do {
+        ret = check_jfs_wr_path(&cur->wr, send_idx, target_idx);
+        if (ret != URMA_SUCCESS) {
+            goto release_wr_entry;
+        }
+        cur = cur->next;
+    } while (cur != NULL && cur != head_entry);
+
+    jfs_wr_entry_ring_set_path(head_entry, send_idx, target_idx);
+    cur = head_entry;
+    do {
+        jfs_wr_entry_t *next = cur->next;
+
+        convert_jfs_vwr_to_pwr(&cur->wr, send_idx, target_idx);
+        cur->wr.next = (next == NULL || next == head_entry) ? NULL : &next->wr;
+        cur = next;
+    } while (cur != NULL && cur != head_entry);
 
     urma_jfs_wr_t *bad_wr = NULL;
-    wr->next = NULL;
-    ret = comp_post_send(wr_entry->bdp_comp, send_idx, target_idx, wr, &bad_wr, 1);
-    convert_jfs_pwr_to_vwr(wr, vtjetty);
+    ret = comp_post_send(wr_entry->bdp_comp, send_idx, target_idx, &head_entry->wr, &bad_wr, 1);
+    cur = head_entry;
+    do {
+        convert_jfs_pwr_to_vwr(&cur->wr, &cur->target_vjetty->v_tjetty);
+        cur = cur->next;
+    } while (cur != NULL && cur != head_entry);
     if (ret != URMA_SUCCESS) {
         goto release_wr_entry;
     }
@@ -975,8 +1057,7 @@ static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int s
     return ret;
 
 release_wr_entry:
-    put_jfs_vwr_refs(wr);
-    jfs_wr_buf_release(&bdp_comp->send_wr_buf, wr_entry);
+    release_jfs_wr_entry_ring(bdp_comp, head_entry);
     return ret;
 }
 
@@ -1219,7 +1300,8 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                 resend_wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
                 resend_wr_entry->bdp_comp != bdp_comp ||
                 resend_wr_entry->send_idx != send_idx ||
-                resend_wr_entry->target_idx != target_idx) {
+                resend_wr_entry->target_idx != target_idx ||
+                !jfs_wr_entry_is_cqe_wr(resend_wr_entry)) {
                 continue;
             }
             atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
@@ -1251,8 +1333,7 @@ CONVERT_CR:
     cr->user_ctx = wr_entry->user_ctx;
 
     pthread_spin_lock(&bdp_comp->send_lock);
-    put_jfs_vwr_refs(&wr_entry->wr);
-    jfs_wr_buf_release(&bdp_comp->send_wr_buf, wr_entry);
+    release_jfs_wr_entry_ring(bdp_comp, wr_entry);
     pthread_spin_unlock(&bdp_comp->send_lock);
     put_comp(bdp_comp);
     return CONVERT_SUCCESS;
