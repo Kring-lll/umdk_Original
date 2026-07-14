@@ -124,6 +124,21 @@ static inline uint64_t urma_cntvct_avg_to_ns(uint64_t cntvct_sum, uint64_t cnt)
 #define UBCORE_PERF_SUB_BUCKETS  (1 << UBCORE_PERF_SUB_BUCKET_SHIFT)
 #define UBCORE_PERF_BUCKETS          (UBCORE_PERF_BUCKET_SHIFT * UBCORE_PERF_SUB_BUCKETS)
 
+#define URMA_PERF_RTT_THRESHOLD_NS  (127ULL * 1000 * 1000) /* 127ms in nanoseconds */
+
+#ifdef URMA_PERF_USE_CNTVCT
+/* Convert ns threshold to raw CNTVCT ticks for fast comparison in urma_step_perf */
+static uint64_t urma_perf_ns_to_cntvct(uint64_t ns)
+{
+    uint32_t mult = atomic_load_explicit(&g_cntvct_mult, memory_order_relaxed);
+    uint32_t shift = atomic_load_explicit(&g_cntvct_shift, memory_order_relaxed);
+    if (mult == 0) {
+        return 0;
+    }
+    return (ns << shift) / mult;
+}
+#endif
+
 typedef struct urma_perf_record {
     struct {
         uint64_t accumulation;
@@ -131,6 +146,7 @@ typedef struct urma_perf_record {
         uint64_t max;
         uint64_t cnt;
         uint64_t bucket[UBCORE_PERF_BUCKETS];
+        uint64_t max_under_127ms;
     } type_record[URMA_PERF_RECORD_TYPE_MAX];
     // record context data validity control
     bool is_used;
@@ -157,7 +173,10 @@ static const char* perf_type_names[] = {
     "BOND_WAIT_JFC",
     "UB_ACK_JFC",
     "UB_REARM_JFC",
-    "BOND_REARM_JFC"
+    "BOND_REARM_JFC",
+    "BOND_SEND_RTT",
+    "BOND_RESEND_DLY",
+    "BOND_RTT_AFT_RES"
 };
 
 static atomic_bool g_urma_perf_context_inited = ATOMIC_VAR_INIT(false);
@@ -182,6 +201,7 @@ static void urma_perf_reset_record_item(bool reset_all_thread, uint32_t thread_i
             g_urma_perf_record_ctx.record_table[i].type_record[j].accumulation = 0;
             g_urma_perf_record_ctx.record_table[i].type_record[j].max = 0;
             g_urma_perf_record_ctx.record_table[i].type_record[j].cnt = 0;
+            g_urma_perf_record_ctx.record_table[i].type_record[j].max_under_127ms = 0;
             for (int k = 0; k < UBCORE_PERF_BUCKETS; ++k) {
                 g_urma_perf_record_ctx.record_table[i].type_record[j].bucket[k] = 0;
             }
@@ -321,6 +341,12 @@ static void urma_perf_fill_type_stats(urma_perf_stats_t *perf_info, urma_perf_re
     perf_info->type_record[type].p90 = maxinum > p90 ? p90 : maxinum;
     perf_info->type_record[type].p99 = maxinum > p99 ? p99 : maxinum;
     perf_info->type_record[type].p9999 = maxinum > p9999 ? p9999 : maxinum;
+#ifdef URMA_PERF_USE_CNTVCT
+    perf_info->type_record[type].max_under_127ms =
+        urma_cntvct_to_ns(record->type_record[type].max_under_127ms);
+#else
+    perf_info->type_record[type].max_under_127ms = record->type_record[type].max_under_127ms;
+#endif
 }
 
 static void urma_perf_record_agg(urma_perf_record_t *total_perf_record, urma_perf_record_t *perf_record)
@@ -336,6 +362,9 @@ static void urma_perf_record_agg(urma_perf_record_t *total_perf_record, urma_per
         }
         if (perf_record->type_record[i].max > total_perf_record->type_record[i].max) {
             total_perf_record->type_record[i].max = perf_record->type_record[i].max;
+        }
+        if (perf_record->type_record[i].max_under_127ms > total_perf_record->type_record[i].max_under_127ms) {
+            total_perf_record->type_record[i].max_under_127ms = perf_record->type_record[i].max_under_127ms;
         }
         total_perf_record->type_record[i].cnt += perf_record->type_record[i].cnt;
         for (uint32_t j = 0; j < UBCORE_PERF_BUCKETS; j++) {
@@ -487,6 +516,15 @@ urma_status_t urma_step_perf(urma_perf_record_type_t type, uint64_t delta)
                                          delta : cur_record->type_record[type].min;
     cur_record->type_record[type].max = (delta > cur_record->type_record[type].max) ?
                                          delta : cur_record->type_record[type].max;
+#ifdef URMA_PERF_USE_CNTVCT
+    uint64_t threshold = urma_perf_ns_to_cntvct(URMA_PERF_RTT_THRESHOLD_NS);
+#else
+    uint64_t threshold = URMA_PERF_RTT_THRESHOLD_NS;
+#endif
+    if (threshold > 0 && delta < threshold &&
+        delta > cur_record->type_record[type].max_under_127ms) {
+        cur_record->type_record[type].max_under_127ms = delta;
+    }
     return URMA_SUCCESS;
 }
 
@@ -504,21 +542,21 @@ urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length)
     urma_perf_dump_info(&perf_info);
 
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
-        "+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
+        "+----------------------+------------+------------+------------+------------+------------+------------+------------+--------------+\n");
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
         "  retry_count: %-20lu\n", perf_info.retry_count);
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
-        "+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
+        "+----------------------+------------+------------+------------+------------+------------+------------+------------+--------------+\n");
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
-        "  Type                 | samples  | avg[ns]  | min[ns]  | max[ns]  | p90[ns]  | p99[ns]  | p9999[ns]\n");
+        "  Type                 | samples    | avg[ns]    | min[ns]    | max[ns]    | p90[ns]    | p99[ns]    | p9999[ns]  | max<127ms    \n");
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
-        "+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
+        "+----------------------+------------+------------+------------+------------+------------+------------+------------+--------------+\n");
     for (uint32_t i = 0; i < URMA_PERF_RECORD_TYPE_MAX; i++) {
         if (perf_info.type_record[i].sample_num == 0) {
             continue;
         }
         buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
-            "  %-20s | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu  \n",
+            "  %-20s | %-10lu | %-10lu | %-10lu | %-10lu | %-10lu | %-10lu | %-10lu | %-12lu \n",
             perf_type_names[i],
             perf_info.type_record[i].sample_num,
             perf_info.type_record[i].average,
@@ -526,10 +564,11 @@ urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length)
             perf_info.type_record[i].maxinum,
             perf_info.type_record[i].p90,
             perf_info.type_record[i].p99,
-            perf_info.type_record[i].p9999);
+            perf_info.type_record[i].p9999,
+            perf_info.type_record[i].max_under_127ms);
     }
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
-        "+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
+        "+----------------------+------------+------------+------------+------------+------------+------------+------------+--------------+\n");
     if (*length < (uint32_t)buffer_used + 1) {
         URMA_LOG_ERR("Urma perf get info failed, need %d bytes buffer, but only %u provided\n",
             buffer_used + 1, *length);
