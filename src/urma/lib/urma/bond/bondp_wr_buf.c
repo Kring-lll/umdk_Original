@@ -352,3 +352,24 @@ void jfr_wr_buf_release_batch(wr_buf_t *buf, jfr_wr_entry_t **entries, uint32_t 
     }
     wr_buf_release_batch(buf, indices, count);
 }
+
+void jfs_wr_put_refs_and_buf_release_ring(wr_buf_t *buf, jfs_wr_entry_t *tail)
+{
+    jfs_wr_entry_t *cur = tail;
+    uint32_t count = 0;
+    jfs_wr_entry_t *entries[BONDP_BATCH_POST_MAX_NUM];
+    do {
+        if (count == BONDP_BATCH_POST_MAX_NUM) {
+            jfs_wr_put_refs(&tail->wr);
+            jfs_wr_buf_release(buf, tail);
+            return;
+        }
+        entries[count++] = cur;
+        cur = cur->next;
+    } while (cur != NULL && cur != tail);
+    for (int i = 0; i < count; ++i) {
+        jfs_wr_put_refs(&entries[i]->wr);
+        entries[i]->next = NULL;
+    }
+    jfs_wr_buf_release_batch(buf, entries, count);
+}

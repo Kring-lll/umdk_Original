@@ -57,6 +57,9 @@ typedef struct jfs_wr_entry {
     uint64_t user_ctx;
     struct bondp_comp *bdp_comp;
     struct bondp_target_jetty *target_vjetty;
+    struct jfs_wr_entry *next;
+    bool is_bond_cqe_head;
+    bool is_bond_cqe_tail;
     uint32_t send_idx;
     uint32_t target_idx;
     bondp_chip_id_info_t info;
@@ -165,6 +168,11 @@ void jfr_wr_buf_release(wr_buf_t *buf, jfr_wr_entry_t *entry);
  */
 void jfs_wr_buf_release_batch(wr_buf_t *buf, jfs_wr_entry_t **entries, uint32_t count);
 void jfr_wr_buf_release_batch(wr_buf_t *buf, jfr_wr_entry_t **entries, uint32_t count);
+
+/**
+ * Ring release: push entries linked in ring form back in one lock/unlock.
+ */
+void jfs_wr_put_refs_and_buf_release_ring(wr_buf_t *buf, jfs_wr_entry_t *tail);
 
 #ifdef __cplusplus
 }
