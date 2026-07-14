@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.huawei.umdk.snc.config.Logger;
 import com.huawei.umdk.snc.entity.DeviceEntity;
 import com.huawei.umdk.snc.entity.ForwardingChip;
 import com.huawei.umdk.snc.entity.InternalPathHop;
@@ -24,9 +25,14 @@ import com.huawei.umdk.snc.exception.SuperNodeNotFoundException;
 
 public class PathEngine {
 
+    private static final Logger LOG = new Logger(PathEngine.class);
+
     public InternalPathInfo resolveDirectPath(NpuDevice srcDevice,
                                               NpuPortEntity srcPort, NpuDevice destDevice,
                                               NpuPortEntity destPort) {
+        LOG.debug("resolveDirectPath: %s/%s -> %s/%s",
+            srcDevice.getDeviceName(), srcPort.getPortName(),
+            destDevice.getDeviceName(), destPort.getPortName());
         InternalPathInfo pathInfo = new InternalPathInfo();
         List<InternalPathHop> hops = new ArrayList<>();
 
@@ -56,6 +62,9 @@ public class PathEngine {
         pathInfo.setSourceCna(srcPort.getCna());
         pathInfo.setDestCna(destPort.getCna());
 
+        LOG.debug("resolveDirectPath: resolved, srcEid=%s, dstEid=%s",
+            pathInfo.getSrcEid(), pathInfo.getDstEid());
+
         return pathInfo;
     }
 
@@ -64,6 +73,10 @@ public class PathEngine {
                                                 NpuPortEntity destPort,
                                                 Map<String, String> interDevices,
                                                 Map<String, DeviceEntity> allDevices) {
+        LOG.debug("resolveMultiHopPath: %s/%s -> %s/%s, interDevices count=%d",
+            srcDevice.getDeviceName(), srcPort.getPortName(),
+            destDevice.getDeviceName(), destPort.getPortName(),
+            interDevices.size());
         List<InternalPathHop> hops = new ArrayList<>();
 
         Map<String, String> orderedInterDevices = new LinkedHashMap<>(interDevices);
@@ -79,6 +92,7 @@ public class PathEngine {
             String devName = orderedDevices.get(i);
             DeviceEntity device = allDevices.get(devName);
             if (device == null) {
+                LOG.error("resolveMultiHopPath: Device not found: %s", devName);
                 throw new SuperNodeNotFoundException("Device not found: " + devName);
             }
 
@@ -104,6 +118,7 @@ public class PathEngine {
                 if (port == null) {
                     port = findPortByConnection(device);
                     if (port == null) {
+                        LOG.error("resolveMultiHopPath: Port not found: %s in %s", interPortName, devName);
                         throw new SuperNodeNotFoundException(
                             "Port not found: " + interPortName + " in " + devName); // NOPMD
                     }
@@ -133,6 +148,8 @@ public class PathEngine {
             InternalPathHop next = hops.get(i + 1);
             if (current.getRemoteDevice() != null) {
                 if (!current.getRemoteDevice().equals(next.getDeviceName())) {
+                    LOG.error("resolveMultiHopPath: Connection mismatch between %s and %s",
+                        current.getDeviceName(), next.getDeviceName());
                     throw new SuperNodeNotFoundException(
                         "Connection mismatch between " + current.getDeviceName()
                             + " and " + next.getDeviceName());
@@ -147,10 +164,14 @@ public class PathEngine {
         pathInfo.setSourceCna(srcPort.getCna());
         pathInfo.setDestCna(destPort.getCna());
 
+        LOG.debug("resolveMultiHopPath: resolved, hop count=%d, srcEid=%s, dstEid=%s",
+            hops.size(), pathInfo.getSrcEid(), pathInfo.getDstEid());
+
         return pathInfo;
     }
 
     public List<InternalPathHop> reverseHops(List<InternalPathHop> hops) {
+        LOG.debug("reverseHops: reversing %d hops", hops.size());
         List<InternalPathHop> reversed = new ArrayList<>();
         for (int i = hops.size() - 1; i >= 0; i--) {
             InternalPathHop original = hops.get(i);
