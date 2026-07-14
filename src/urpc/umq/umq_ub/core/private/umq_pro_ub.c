@@ -2034,9 +2034,9 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
 
     if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
         ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) == 0)) {
-        qbuf_cnt += umq_ub_poll_tx_round_robin(queue, &buf[qbuf_cnt], buf_count - qbuf_cnt);
+        qbuf_cnt = umq_ub_poll_tx_round_robin(queue, buf, buf_count);
     } else {
-        qbuf_cnt += umq_ub_poll_tx_single(queue, buf, buf_count, tp_handle_idx, option);
+        qbuf_cnt = umq_ub_poll_tx_single(queue, buf, buf_count, tp_handle_idx, option);
     }
 
     umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
