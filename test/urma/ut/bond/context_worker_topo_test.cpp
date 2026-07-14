@@ -184,6 +184,38 @@ TEST(UrmaBondTest, TopoInfoMapsMultipleNodes)
     delete_topo_map(map);
 }
 
+TEST(UrmaBondTest, TopoInfoBuildsPortMatrixAndPrimaryLinks)
+{
+    bondp_topo_node_t topo[2] = {};
+    urma_eid_t localAggEid = MakeEid(0x58);
+    urma_eid_t remoteAggEid = MakeEid(0x59);
+    urma_eid_t missingAggEid = MakeEid(0x5a);
+    bool connected[TOPO_CONNECTED_MAX_NUM][TOPO_CONNECTED_MAX_NUM] = {};
+    uint32_t localPortFlat = PORT_NUM + 2;
+    uint32_t remotePortFlat = 4;
+    uint32_t localPortIndex = IODIE_NUM + localPortFlat;
+    uint32_t remotePortIndex = IODIE_NUM + remotePortFlat;
+
+    topo[0].is_current = true;
+    topo[0].node_id = 1;
+    topo[1].node_id = 2;
+    CopyEidToTopo(topo[0].agg_devs[0].agg_eid, localAggEid);
+    CopyEidToTopo(topo[1].agg_devs[0].agg_eid, remoteAggEid);
+    topo[1].links[localPortFlat][remotePortFlat] = true;
+
+    topo_map_t *map = create_topo_map(topo, 2);
+    ASSERT_NE(nullptr, map);
+    ASSERT_EQ(0, bondp_find_linked_port_by_topo(map, &remoteAggEid, connected));
+
+    EXPECT_TRUE(connected[localPortIndex][remotePortIndex]);
+    EXPECT_TRUE(connected[1][0]);
+    EXPECT_FALSE(connected[0][1]);
+    EXPECT_FALSE(connected[IODIE_NUM][IODIE_NUM]);
+    EXPECT_EQ(-1, bondp_find_linked_port_by_topo(map, &missingAggEid, connected));
+
+    delete_topo_map(map);
+}
+
 TEST(UrmaBondTest, WorkerPublicApisScheduleCancelAndHandleFdEvents)
 {
     BondWorkerGuard guard;
@@ -232,6 +264,8 @@ TEST(UrmaBondTest, WorkerPublicApisScheduleCancelAndHandleFdEvents)
 
 TEST(UrmaBondTest, WorkerCreatePropagatesEpollCreate1Failure)
 {
+    UrmaLogLevelGuard logGuard(URMA_VLOG_LEVEL_CRIT);
+
     g_mockEpollCreate1Fail = true;
     EXPECT_EQ(-EMFILE, bondp_worker_create());
     g_mockEpollCreate1Fail = false;
@@ -240,6 +274,8 @@ TEST(UrmaBondTest, WorkerCreatePropagatesEpollCreate1Failure)
 
 TEST(UrmaBondTest, WorkerCreatePropagatesEventfdFailure)
 {
+    UrmaLogLevelGuard logGuard(URMA_VLOG_LEVEL_CRIT);
+
     g_mockEventfdFail = true;
     EXPECT_EQ(-EMFILE, bondp_worker_create());
     g_mockEventfdFail = false;
@@ -248,6 +284,8 @@ TEST(UrmaBondTest, WorkerCreatePropagatesEventfdFailure)
 
 TEST(UrmaBondTest, WorkerCreatePropagatesEpollCtlFailure)
 {
+    UrmaLogLevelGuard logGuard(URMA_VLOG_LEVEL_CRIT);
+
     g_mockEpollCtlFail = true;
     EXPECT_EQ(-EMFILE, bondp_worker_create());
     g_mockEpollCtlFail = false;

@@ -76,12 +76,20 @@ extern std::string g_coreSysfsRedirectRoot;
 extern std::string g_coreProviderDliPath;
 extern int g_coreDlopenCount;
 extern int g_coreDlcloseCount;
+extern uint32_t g_coreMockEidCnt;
+extern urma_eid_info_t g_coreMockEidList[URMA_MAX_EID_CNT];
 static const char CORE_SYSFS_PREFIX[] = "/sys/class/ubcore";
 
 inline void SetCoreIoctlResult(int returnValue, int errorNo)
 {
     g_coreIoctlReturn = returnValue;
     g_coreIoctlErrno = errorNo;
+}
+
+inline void ResetCoreMockEidList()
+{
+    g_coreMockEidCnt = 0;
+    (void)memset(g_coreMockEidList, 0, sizeof(g_coreMockEidList));
 }
 
 inline std::string MapCoreSysfsPath(const char *path)
@@ -139,6 +147,7 @@ struct CoreApiFixture {
     CoreApiFixture()
     {
         urma_test::ResetHwMockState();
+        ResetCoreMockEidList();
         g_coreQueryJettyFlag = URMA_SHARE_JFR;
         g_coreBatchBadIndex = 0;
         g_coreAsyncEventType = URMA_EVENT_PORT_ACTIVE;
@@ -1367,6 +1376,33 @@ inline void FillCoreNetAddrListOutput(urma_cmd_attr_t *attrs, size_t attrNum)
     addrInfo[1].netaddr.prefix_len = 64;
 }
 
+inline void FillCoreEidListOutput(urma_cmd_attr_t *attrs, size_t attrNum)
+{
+    uint32_t maxEidCnt = 0;
+    uint32_t eidCnt = g_coreMockEidCnt;
+    urma_eid_info_t *eidList = nullptr;
+
+    for (size_t i = 0; i < attrNum; ++i) {
+        if (attrs[i].type == GET_EID_LIST_IN_MAX_EID_CNT) {
+            ReadCoreAttrU32(attrs[i], &maxEidCnt);
+        } else if (attrs[i].type == GET_EID_LIST_OUT_EID_LIST && attrs[i].data != 0) {
+            eidList = reinterpret_cast<urma_eid_info_t *>(static_cast<uintptr_t>(attrs[i].data));
+        }
+    }
+
+    if (eidCnt > maxEidCnt) {
+        eidCnt = maxEidCnt;
+    }
+    for (size_t i = 0; i < attrNum; ++i) {
+        if (attrs[i].type == GET_EID_LIST_OUT_EID_CNT) {
+            WriteCoreAttrValue(attrs[i], eidCnt);
+        }
+    }
+    if (eidList != nullptr && eidCnt > 0) {
+        (void)memcpy(eidList, g_coreMockEidList, eidCnt * sizeof(urma_eid_info_t));
+    }
+}
+
 inline void FillCoreIoctlOutput(urma_cmd_hdr_t *hdr)
 {
     if (hdr == nullptr || hdr->args_addr == 0 || hdr->args_len == 0) {
@@ -1416,6 +1452,9 @@ inline void FillCoreIoctlOutput(urma_cmd_hdr_t *hdr)
             break;
         case URMA_CMD_GET_NETADDR_LIST:
             FillCoreNetAddrListOutput(attrs, attrNum);
+            break;
+        case URMA_CMD_GET_EID_LIST:
+            FillCoreEidListOutput(attrs, attrNum);
             break;
         default:
             break;

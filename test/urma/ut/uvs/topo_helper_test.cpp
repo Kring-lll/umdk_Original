@@ -50,7 +50,10 @@ TEST_F(UrmaUvsTest, TopoHelpersPropagateMainUeBatchIoctlFailure)
     g_uvsIoctl.errnoValue = ENODEV;
     FillTopoUe(&node->agg_devs[0].ues[0], 4, 1, 0, 51, 52, 53);
 
+    unsigned int logLevel = tpsa_log_get_level();
+    tpsa_log_set_level(TPSA_VLOG_LEVEL_CRIT);
     EXPECT_EQ(-ENODEV, uvs_update_main_ue_eid_table_by_topo(node, 1));
+    tpsa_log_set_level(logLevel);
 
     std::free(node);
 }
