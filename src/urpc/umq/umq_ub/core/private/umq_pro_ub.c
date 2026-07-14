@@ -1897,6 +1897,10 @@ static int umq_ub_poll_tx_round_robin(ub_queue_t *queue, umq_buf_t **buf, uint32
 static int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count,
     uint32_t tp_handle_idx, umq_io_option_t *option)
 {
+    if (!umq_ub_poll_get_jetty_node(queue)) {
+        return 0;
+    }
+
     if (queue->flow_control.enabled) {
         if ((queue->mode == UMQ_MODE_POLLING || queue->interrupt_ctx.tx_fc_interrupt ||
             ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0))) {
@@ -2025,11 +2029,6 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
                 (void)eventfd_read(checker->event_fd, &count);
             }
         }
-    }
-
-    if (!umq_ub_poll_get_jetty_node(queue)) {
-        umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
-        return 0;
     }
 
     if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
