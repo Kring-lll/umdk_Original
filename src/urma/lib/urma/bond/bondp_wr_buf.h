@@ -48,6 +48,7 @@ typedef struct jfs_wr_entry {
     struct bondp_target_jetty *target_vjetty;
     uint32_t send_idx;
     uint32_t target_idx;
+    uint64_t post_send_ts; /* timestamp when post send is called, for RTT statistics */
 } jfs_wr_entry_t;
 
 typedef struct jfr_wr_entry {
