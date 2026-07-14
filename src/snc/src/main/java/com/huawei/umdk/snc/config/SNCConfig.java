@@ -8,9 +8,6 @@
  */
 package com.huawei.umdk.snc.config;
 
-import java.util.logging.Level;
-
-import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -20,9 +17,7 @@ import lombok.ToString;
 @Getter
 @Setter
 @NoArgsConstructor
-@AllArgsConstructor
 @EqualsAndHashCode
 @ToString
 public class SNCConfig {
-    private Level logLevel = Level.INFO;
 }
