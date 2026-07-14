@@ -477,6 +477,7 @@ typedef struct ub_queue {
     // umq_ub_jetty_node_list_t jetty_node_list;
     umq_ub_jetty_node_list_t *jetty_node_list;
     volatile uint64_t jetty_node;       // jetty_pool_node_t *, atomically accessed
+    volatile uint32_t next_poll_idx;    // round-robin starting index for shared jetty poll
     pthread_spinlock_t get_jetty_node_lock;
 } ub_queue_t;
 
