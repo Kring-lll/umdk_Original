@@ -6,7 +6,17 @@
 
 #include "core_fixture.h"
 
+#include <fcntl.h>
+
 using namespace urma_test_core;
+
+static int g_lastCreateContextNullDevFd = -1;
+
+static urma_context_t *MockProviderCreateContextNullCapture(urma_device_t *, uint32_t, int devFd)
+{
+    g_lastCreateContextNullDevFd = devFd;
+    return nullptr;
+}
 
 TEST(UrmaCoreTest, DpApiWrappersValidateInputsAndDispatchOps)
 {
@@ -280,11 +290,53 @@ TEST(UrmaCoreTest, MainCreateContextReadsEidAndOpensLocalCdev)
     EXPECT_EQ(URMA_AGGR_MODE_STANDALONE, ctx->aggr_mode);
     EXPECT_EQ(0, memcmp(&ctx->eid, &expectedEid, sizeof(expectedEid)));
     EXPECT_GE(ctx->dev_fd, 0);
+    int devFd = ctx->dev_fd;
+    errno = 0;
+    EXPECT_NE(-1, fcntl(devFd, F_GETFD));
     EXPECT_EQ(URMA_SUCCESS, urma_delete_context(ctx));
+    errno = 0;
+    EXPECT_EQ(-1, fcntl(devFd, F_GETFD));
+    EXPECT_EQ(EBADF, errno);
+
+    provider.delete_context = MockProviderDeleteContextBusy;
+    ctx = urma_create_context(&fixture.dev, 0);
+    ASSERT_NE(nullptr, ctx);
+    devFd = ctx->dev_fd;
+    EXPECT_EQ(URMA_FAIL, urma_delete_context(ctx));
+    errno = 0;
+    EXPECT_NE(-1, fcntl(devFd, F_GETFD));
+    EXPECT_EQ(0, close(devFd));
+    ctx->dev_fd = -1;
 
     provider.create_context = MockProviderCreateContextNull;
     ctx = urma_create_context(&fixture.dev, 0);
     EXPECT_EQ(nullptr, ctx);
+}
+
+TEST(UrmaCoreTest, MainCreateContextClosesLocalCdevWhenProviderCreateFails)
+{
+    TempSysfsTree sysfs;
+    CoreApiFixture fixture;
+    urma_provider_ops_t provider = {};
+
+    ASSERT_TRUE(sysfs.Init());
+    ASSERT_TRUE(sysfs.Mkdir("eids"));
+    ASSERT_TRUE(sysfs.WriteFile("eids/eid0", "192.168.31.1\n"));
+    ASSERT_TRUE(sysfs.WriteFile("mock_cdev", "not a real device\n"));
+
+    provider.create_context = MockProviderCreateContextNullCapture;
+    fixture.dev.ops = &provider;
+    fixture.sysfsDev.flag = 0;
+    fixture.sysfsDev.dev_attr.dev_cap.max_eid_cnt = 1;
+    std::snprintf(fixture.sysfsDev.sysfs_path, sizeof(fixture.sysfsDev.sysfs_path), "%s", sysfs.root.c_str());
+    std::snprintf(fixture.dev.path, sizeof(fixture.dev.path), "%s/mock_cdev", sysfs.root.c_str());
+    g_lastCreateContextNullDevFd = -1;
+
+    EXPECT_EQ(nullptr, urma_create_context(&fixture.dev, 0));
+    ASSERT_GE(g_lastCreateContextNullDevFd, 0);
+    errno = 0;
+    EXPECT_EQ(-1, fcntl(g_lastCreateContextNullDevFd, F_GETFD));
+    EXPECT_EQ(EBADF, errno);
 }
 
 TEST(UrmaCoreTest, MainProviderLoaderUsesLocalDlopenMocks)
@@ -407,6 +459,53 @@ TEST(UrmaCoreTest, DeviceSysfsApisParseTemporaryFilesAndFallbackEids)
     EXPECT_EQ(0, urma_query_eid(&dev, 0, &eid));
     EXPECT_EQ(-1, urma_query_device_attr(&sysfsDev));
     EXPECT_EQ(URMA_FAIL, urma_query_device(&dev, &attr));
+}
+
+TEST(UrmaCoreTest, DeviceEidListPrefersIoctlAndFallsBackToSysfs)
+{
+    TempSysfsTree sysfs;
+    CoreApiFixture fixture;
+    urma_device_t dev = {};
+    urma_sysfs_dev_t sysfsDev = {};
+    urma_eid_info_t eidInfo[3] = {};
+    uint32_t eidCnt = 0;
+
+    ASSERT_TRUE(sysfs.Init());
+    ASSERT_TRUE(sysfs.Mkdir("eids"));
+    ASSERT_TRUE(sysfs.WriteFile("eids/eid0", "192.168.41.1\n"));
+    ASSERT_TRUE(sysfs.WriteFile("eids/eid1", "bad-eid\n"));
+    ASSERT_TRUE(sysfs.WriteFile("mock_cdev", "not a real device\n"));
+    std::snprintf(sysfsDev.sysfs_path, sizeof(sysfsDev.sysfs_path), "%s", sysfs.root.c_str());
+    sysfsDev.dev_attr.dev_cap.max_eid_cnt = 3;
+    dev.sysfs_dev = &sysfsDev;
+    std::snprintf(dev.path, sizeof(dev.path), "%s/mock_cdev", sysfs.root.c_str());
+
+    g_coreMockEidCnt = 2;
+    g_coreMockEidList[0].eid_index = 2;
+    g_coreMockEidList[0].eid.in6.subnet_prefix = 0xabc001ULL;
+    g_coreMockEidList[0].eid.in6.interface_id = 0xabc002ULL;
+    g_coreMockEidList[1].eid_index = 5;
+    g_coreMockEidList[1].eid.in6.subnet_prefix = 0xdef001ULL;
+    g_coreMockEidList[1].eid.in6.interface_id = 0xdef002ULL;
+    SetCoreIoctlResult(0, 0);
+    EXPECT_EQ(2U, urma_read_eid_list(&dev, eidInfo, ARRAY_SIZE(eidInfo)));
+    EXPECT_EQ(2U, eidInfo[0].eid_index);
+    EXPECT_EQ(0xabc001ULL, eidInfo[0].eid.in6.subnet_prefix);
+    EXPECT_EQ(5U, eidInfo[1].eid_index);
+    EXPECT_EQ(0xdef002ULL, eidInfo[1].eid.in6.interface_id);
+
+    ResetCoreMockEidList();
+    (void)memset(eidInfo, 0, sizeof(eidInfo));
+    SetCoreIoctlResult(-1, ENOTTY);
+    EXPECT_EQ(1U, urma_read_eid_list(&dev, eidInfo, ARRAY_SIZE(eidInfo)));
+    EXPECT_EQ(0U, eidInfo[0].eid_index);
+    EXPECT_NE(0ULL, eidInfo[0].eid.in6.interface_id);
+
+    urma_eid_info_t *list = urma_get_eid_list(&dev, &eidCnt);
+    ASSERT_NE(nullptr, list);
+    EXPECT_EQ(1U, eidCnt);
+    EXPECT_EQ(0U, list[0].eid_index);
+    urma_free_eid_list(list);
 }
 
 TEST(UrmaCoreTest, DeviceMergeSkipsDuplicateAndRemovesStaleMemoryDevices)
