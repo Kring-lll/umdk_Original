@@ -1894,8 +1894,19 @@ static int umq_ub_poll_tx_round_robin(ub_queue_t *queue, umq_buf_t **buf, uint32
     return qbuf_cnt;
 }
 
-static int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, uint32_t tp_handle_idx)
+static int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count,
+    uint32_t tp_handle_idx, umq_io_option_t *option)
 {
+    if (queue->flow_control.enabled) {
+        if ((queue->mode == UMQ_MODE_POLLING || queue->interrupt_ctx.tx_fc_interrupt ||
+            ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0))) {
+            int ret = umq_ub_poll_fc_tx(queue, buf, buf_count, tp_handle_idx);
+            if (ret < 0) {
+                return ret;
+            }
+        }
+    }
+
     urma_cr_t cr[UMQ_BATCH_SIZE];
     uint32_t max_batch = buf_count > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : buf_count;
 
@@ -2014,18 +2025,6 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
                 (void)eventfd_read(checker->event_fd, &count);
             }
         }
-        bool is_share_transport_round_robin = is_umq_ub_main_queue(queue->create_flag) &&
-            is_umq_ub_share_transport(queue->create_flag) &&
-            ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) == 0);
-        if ((queue->mode == UMQ_MODE_POLLING || queue->interrupt_ctx.tx_fc_interrupt ||
-            ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0)) && !is_share_transport_round_robin) {
-            int ret = umq_ub_poll_fc_tx(queue, buf, buf_count, tp_handle_idx);
-            if (ret < 0) {
-                umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
-                return ret;
-            }
-            qbuf_cnt += ret;
-        }
     }
 
     if (!umq_ub_poll_get_jetty_node(queue)) {
@@ -2037,7 +2036,7 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
         ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) == 0)) {
         qbuf_cnt += umq_ub_poll_tx_round_robin(queue, &buf[qbuf_cnt], buf_count - qbuf_cnt);
     } else {
-        qbuf_cnt += umq_ub_poll_tx_single(queue, buf, buf_count, tp_handle_idx);
+        qbuf_cnt += umq_ub_poll_tx_single(queue, buf, buf_count, tp_handle_idx, option);
     }
 
     umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
