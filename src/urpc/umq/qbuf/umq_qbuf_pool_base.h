@@ -127,6 +127,7 @@ typedef struct local_qbuf_pool_stats {
 typedef struct thread_local_qbuf_pool {
     urpc_list_t tls_node;
     bool inited;
+    bool released; // set once the thread cache has been released on thread exit; prevents re-registration (resurrection)
     local_block_pool_t block_pool;
     local_qbuf_pool_stats_t stats;
 } thread_local_qbuf_pool_t;
@@ -192,6 +193,13 @@ static ALWAYS_INLINE local_block_pool_t *get_thread_local_cache(
         (void)memset(&thread_cache->stats, 0, sizeof(thread_cache->stats));
         thread_cache->stats.tid = (uint64_t)pthread_self();
         thread_cache->inited = true;
+        // If this thread cache was already released during thread exit, do NOT register it into the global
+        // list again. Doing so would leave a dangling node in the list once this thread's TLS is freed
+        // (the thread-local destructor only runs once), which other exiting threads would later dereference.
+        // Buffers freed after release just stay in the local pool (a small, one-off leak at thread exit).
+        if (thread_cache->released) {
+            return &thread_cache->block_pool;
+        }
         urpc_thread_closure_register(pools->type, 0, pools->closure);
         // register TLS stats to global linked list
         (void)pthread_spin_lock(&pools->tls_stats_lock);
@@ -474,6 +482,7 @@ static ALWAYS_INLINE void release_thread_cache_impl(
     (void)pthread_spin_unlock(&global_pool->global_mutex);
 
     thread_cache->inited = false;
+    thread_cache->released = true;
 }
 
 static ALWAYS_INLINE uint64_t qbuf_tls_capacity_grow(uint64_t local_cap, volatile uint64_t *total_cap,
