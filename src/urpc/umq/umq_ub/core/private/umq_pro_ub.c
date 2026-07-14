@@ -1252,7 +1252,7 @@ int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint8_t rqe_post_factor)
 
     if (rqe_post_factor > URMA_UBAGG_DEV_MAX_NUM) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, "
-            "rqe_post_factor %d of requested recv wr exceeds the upper limit %u\n",
+            "rqe_post_factor %d of requested recv wr exceeds the upper limit %d\n",
             EID_ARGS(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid),
             queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, rqe_post_factor, URMA_UBAGG_DEV_MAX_NUM);
         return -UMQ_ERR_EINVAL;
