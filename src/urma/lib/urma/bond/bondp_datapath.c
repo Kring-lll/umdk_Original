@@ -585,6 +585,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
         /* Copy + encode MSN + link.
          * NOTE: send_idx/target_idx/entry_type are NOT set here —
          * path binding and submit are done inside send_lock below */
+        uint64_t post_send_ts = urma_perf_is_enabled() ? urma_get_perf_timestamp() : 0;
         urma_jfs_wr_t *cur = wr;
         for (int i = 0; i < wr_total; i++) {
             jfs_wr_entry_t *wr_entry = wr_entries[i];
@@ -598,6 +599,10 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
                 wr_entry->info.src_chip_id = bwr->src_chip_id;
                 wr_entry->info.dst_chip_id = bwr->dst_chip_id;
             }
+            wr_entry->post_send_ts = post_send_ts;
+            wr_entry->resend_ts = 0;
+            wr_entry->has_resent = false;
+
             urma_jfs_wr_t *pwr = &wr_entry->wr;
             ret = copy_jfs_wr(cur, pwr, jfs_wr_entry_src_sge(wr_entry),
                               jfs_wr_entry_dst_sge(wr_entry, bdp_comp->max_send_sge),
@@ -1225,6 +1230,21 @@ int bondp_resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int se
     }
     wr_entry->rnr_retry_pending = false;
 
+    /* Record resend statistics: delta from original post_send to this resend trigger.
+     * Update resend_ts so the eventual success CR can compute RTT-after-resend. */
+    if (urma_perf_is_enabled() && wr_entry->post_send_ts != 0) {
+        uint64_t now = urma_get_perf_timestamp();
+        if (wr_entry->has_resent) {
+            /* For multi-resent WRs, measure delta from last resend to this resend trigger. */
+            urma_step_perf(BOND_SEND_RESEND_DELAY, now - wr_entry->resend_ts);
+        } else {
+            /* For initial post_send, measure delta from post_send to this resend trigger. */
+            urma_step_perf(BOND_SEND_RESEND_DELAY, now - wr_entry->post_send_ts);
+        }
+        wr_entry->resend_ts = now;
+        wr_entry->has_resent = true;
+    }
+
     return ret;
 
 release_wr_entry:
@@ -1615,6 +1635,15 @@ CONVERT_CR:
         return CONVERT_SKIP;
     }
     atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+
+    if (urma_perf_is_enabled() && wr_entry->post_send_ts != 0) {
+        uint64_t rtt_end = urma_get_perf_timestamp();
+        urma_step_perf(BOND_SEND_RTT, rtt_end - wr_entry->post_send_ts);
+        /* For resent WRs, also measure delta from last resend to success */
+        if (wr_entry->has_resent && wr_entry->resend_ts != 0) {
+            urma_step_perf(BOND_SEND_RTT_AFTER_RESEND, rtt_end - wr_entry->resend_ts);
+        }
+    }
 
     uint32_t msn = 0;
     convert_pcr_to_vcr(cr, bdp_comp->bondp_ctx, &msn);
