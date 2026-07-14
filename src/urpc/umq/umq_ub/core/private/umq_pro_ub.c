@@ -1765,6 +1765,8 @@ static int umq_ub_poll_tx_round_robin(ub_queue_t *queue, umq_buf_t **buf, uint32
     uint32_t total_success_cnt = 0;
     uint32_t total_failed_cnt = 0;
 
+    util_mutex_lock(jetty_node_list->lock);
+
     uint32_t start_idx = __atomic_load_n(&queue->next_poll_idx, __ATOMIC_ACQUIRE);
     if (start_idx >= jetty_node_list->list_len) {
         start_idx = 0;
@@ -1804,6 +1806,7 @@ static int umq_ub_poll_tx_round_robin(ub_queue_t *queue, umq_buf_t **buf, uint32
         if (queue->flow_control.enabled) {
             int fc_ret = umq_ub_poll_fc_tx(queue, buf, buf_count - qbuf_cnt, current_idx);
             if (fc_ret < 0) {
+                util_mutex_unlock(jetty_node_list->lock);
                 return fc_ret;
             }
             qbuf_cnt += fc_ret;
@@ -1875,6 +1878,8 @@ static int umq_ub_poll_tx_round_robin(ub_queue_t *queue, umq_buf_t **buf, uint32
 
         current_idx++;
     }
+
+    util_mutex_unlock(jetty_node_list->lock);
 
     if (total_success_cnt > 0) {
         umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND_SUCCESS, total_success_cnt, queue->dev_ctx->io_lock_free);
