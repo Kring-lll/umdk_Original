@@ -54,6 +54,7 @@ typedef struct jfs_wr_entry {
     uint32_t send_idx;
     uint32_t target_idx;
     urma_sge_t sge_data[];
+    uint64_t post_send_ts; /* timestamp when post send is called, for RTT statistics */
 } jfs_wr_entry_t;
 
 typedef struct jfr_wr_entry {
