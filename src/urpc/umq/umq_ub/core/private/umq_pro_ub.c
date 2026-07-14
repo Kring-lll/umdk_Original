@@ -1781,9 +1781,11 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
                 (void)eventfd_read(checker->event_fd, &count);
             }
         }
+        bool is_share_transport_round_robin = is_umq_ub_main_queue(queue->create_flag) &&
+            is_umq_ub_share_transport(queue->create_flag) &&
+            ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) == 0);
         if ((queue->mode == UMQ_MODE_POLLING || queue->interrupt_ctx.tx_fc_interrupt ||
-            ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0))) {
-            /* buf is not NULL here, so umq_ub_poll_fc_tx returns qbuf_cnt >= 0 */
+            ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0)) && !is_share_transport_round_robin) {
             int ret = umq_ub_poll_fc_tx(queue, buf, buf_count, tp_handle_idx);
             if (ret < 0) {
                 umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
@@ -1844,6 +1846,15 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
                 }
                 __atomic_store_n(&queue->next_poll_idx, next_idx, __ATOMIC_RELEASE);
                 next_poll_idx_updated = true;
+            }
+
+            if (queue->flow_control.enabled) {
+                int fc_ret = umq_ub_poll_fc_tx(queue, buf, buf_count - qbuf_cnt, current_idx);
+                if (fc_ret < 0) {
+                    umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
+                    return fc_ret;
+                }
+                qbuf_cnt += fc_ret;
             }
 
             urma_jfc_t *node_jfc = node->jfs_jfc[UB_QUEUE_JETTY_IO];
