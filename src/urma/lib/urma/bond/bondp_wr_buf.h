@@ -60,6 +60,9 @@ typedef struct jfs_wr_entry {
     uint32_t send_idx;
     uint32_t target_idx;
     bondp_chip_id_info_t info;
+    uint64_t post_send_ts;  /* timestamp when post send is called, for RTT statistics */
+    uint64_t resend_ts;     /* timestamp of the most recent resend (failover), 0 if never resent */
+    bool has_resent;        /* true if this WR has been resent at least once */
     urma_sge_t sge_data[];
 } jfs_wr_entry_t;
 
