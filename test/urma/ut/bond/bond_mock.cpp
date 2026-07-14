@@ -31,8 +31,14 @@ int g_mockNetlinkRecvReturn = 0;
 int g_mockNetlinkRecvCount = 0;
 size_t g_mockCallocFailNmemb = 0;
 size_t g_mockCallocFailSize = 0;
+CapturedBondCreateUdata g_capturedBondCreateUdata = {};
 static nl_recvmsg_msg_cb_t g_mockNetlinkMsgCb = nullptr;
 static void *g_mockNetlinkMsgCbArg = nullptr;
+
+void ResetCapturedBondCreateUdata()
+{
+    g_capturedBondCreateUdata = {};
+}
 
 void ResetMockNetlinkCallback()
 {

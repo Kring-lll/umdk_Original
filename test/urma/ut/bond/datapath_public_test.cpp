@@ -18,6 +18,18 @@ static void InitSingleEnabledPollJfc(bondp_jfc_t *jfc, BondPathFixture *fixture)
     jfc->p_jfc[0] = &fixture->phyJfc;
 }
 
+static uint64_t MakeRecvImmData(uint32_t remoteJettyId, uint32_t msn, uint64_t userData)
+{
+    bondp_comp_t sender = {};
+    urma_jfs_wr_t wr = {};
+
+    sender.v_jetty.jetty_id.id = remoteJettyId;
+    wr.opcode = URMA_OPC_SEND_IMM;
+    wr.send.imm_data = userData;
+    encode_jfs_wr_msn(&wr, &sender, msn, true);
+    return wr.send.imm_data;
+}
+
 TEST(UrmaBondTest, DatapathPublicPostSendPropagatesSingleDeviceNoStoreFailure)
 {
     BondPathFixture fixture;
@@ -217,6 +229,55 @@ TEST(UrmaBondTest, DatapathPollJfcConvertsRecvCrWithoutBackup)
     EXPECT_EQ(1, bondp_poll_jfc(&vJfc.v_jfc, 1, &outCr));
     EXPECT_EQ(fixture.comp.v_jfr.jfr_id.id, outCr.local_id);
     EXPECT_EQ(0U, fixture.comp.rqe_cnt[0]);
+    EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
+}
+
+TEST(UrmaBondTest, DatapathPollJfcInvalidatesCompletionCacheAfterIdMappingChange)
+{
+    BondPathFixture fixture;
+    bondp_jfc_t vJfc = {};
+    bondp_comp_t newComp = {};
+    urma_cr_t outCr = {};
+    urma_jetty_id_t physicalJfsId = MakeJettyId(0x9d);
+
+    physicalJfsId.uasid = 0;
+    ASSERT_EQ(0, bdp_p_vjetty_id_table_create(&fixture.ctx.p_vjetty_id_table, 8));
+    fixture.ctx.bonding_mode = BONDP_BONDING_MODE_STANDALONE;
+    fixture.ctx.p_ctxs[0] = &fixture.phyCtx;
+    fixture.phyCtx.eid = physicalJfsId.eid;
+    fixture.phyOps.poll_jfc = MockPollOneCr;
+    fixture.comp.comp_type = BONDP_COMP_JFS;
+    fixture.comp.v_jfs.jfs_id.id = 0x901;
+    fixture.comp.sqe_cnt[0][0].store(1);
+    newComp.comp_type = BONDP_COMP_JFS;
+    newComp.bondp_ctx = &fixture.ctx;
+    newComp.v_jfs.jfs_id.id = 0x902;
+    newComp.sqe_cnt[0][0].store(1);
+    ASSERT_EQ(0, bdp_p_vjetty_id_table_add_without_lock(
+        &fixture.ctx.p_vjetty_id_table, physicalJfsId, JFS, fixture.comp.v_jfs.jfs_id.id, &fixture.comp));
+
+    InitSingleEnabledPollJfc(&vJfc, &fixture);
+    g_mockDatapathCr = {};
+    g_mockDatapathCrCount = 1;
+    g_mockDatapathCr.status = URMA_CR_SUCCESS;
+    g_mockDatapathCr.local_id = physicalJfsId.id;
+    g_mockDatapathCr.flag.bs.s_r = 0;
+
+    EXPECT_EQ(1, bondp_poll_jfc(&vJfc.v_jfc, 1, &outCr));
+    EXPECT_EQ(0x901U, outCr.local_id);
+    EXPECT_EQ(0U, fixture.comp.sqe_cnt[0][0].load());
+
+    ASSERT_EQ(0, bdp_p_vjetty_id_table_del_without_lock(&fixture.ctx.p_vjetty_id_table, physicalJfsId, JFS));
+    ASSERT_EQ(0, bdp_p_vjetty_id_table_add_without_lock(
+        &fixture.ctx.p_vjetty_id_table, physicalJfsId, JFS, newComp.v_jfs.jfs_id.id, &newComp));
+    g_mockDatapathCrCount = 1;
+    g_mockDatapathCr.user_ctx = 0;
+
+    EXPECT_EQ(1, bondp_poll_jfc(&vJfc.v_jfc, 1, &outCr));
+    EXPECT_EQ(0x902U, outCr.local_id);
+    EXPECT_EQ(0U, newComp.sqe_cnt[0][0].load());
+    EXPECT_EQ(0U, fixture.comp.use_cnt.atomic_cnt.load());
+    EXPECT_EQ(0U, newComp.use_cnt.atomic_cnt.load());
     EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
 }
 
@@ -500,7 +561,7 @@ TEST(UrmaBondTest, DatapathPostSendStoreRollsBackAfterPartialProviderFailure)
         &fixture.ctx.p_vjetty_id_table, physicalJfsId, JFS, fixture.comp.v_jfs.jfs_id.id, &fixture.comp));
 
     EXPECT_EQ(URMA_EAGAIN, bondp_post_jfs_wr(&fixture.comp.v_jfs, &firstWr, &badWr));
-    EXPECT_NE(nullptr, badWr);
+    EXPECT_EQ(&secondWr, badWr);
     EXPECT_EQ(1, urma_test::GetHwMockState().postJfsCount);
     EXPECT_EQ(1U, fixture.comp.sqe_cnt[0][0].load());
 
@@ -518,6 +579,37 @@ TEST(UrmaBondTest, DatapathPostSendStoreRollsBackAfterPartialProviderFailure)
     pthread_spin_destroy(&fixture.comp.send_lock);
     wr_buf_uninit(&fixture.comp.send_wr_buf);
     EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
+}
+
+TEST(UrmaBondTest, DatapathPostSendNoStoreReturnsUserBadWrAfterProviderFailure)
+{
+    BondPathFixture fixture;
+    urma_jfs_wr_t firstWr = fixture.MakeSendWr(URMA_OPC_SEND);
+    urma_jfs_wr_t secondWr = fixture.MakeSendWr(URMA_OPC_SEND);
+    urma_jfs_wr_t *badWr = nullptr;
+
+    firstWr.next = &secondWr;
+    firstWr.user_ctx = 0x303;
+    secondWr.user_ctx = 0x404;
+
+    fixture.ctx.bonding_mode = BONDP_BONDING_MODE_STANDALONE;
+    fixture.comp.comp_type = BONDP_COMP_JFS;
+    fixture.comp.active_count = 1;
+    fixture.comp.active_indices[0] = 0;
+    fixture.comp.valid[0] = true;
+    fixture.comp.v_jfs.urma_ctx = &fixture.ctx.v_ctx;
+    fixture.comp.p_jfs[0] = &fixture.phyJfs[0];
+    fixture.target.active_count = 1;
+    fixture.target.active_indices[0] = 0;
+    fixture.target.valid[0] = true;
+    fixture.target.v_tjetty.urma_ctx = &fixture.ctx.v_ctx;
+    fixture.target.p_tjetty[0][0] = &fixture.phyTarget[0][0];
+    fixture.phyOps.post_jfs_wr = MockPostSecondJfsWrFails;
+
+    EXPECT_EQ(URMA_EAGAIN, bondp_post_jfs_wr(&fixture.comp.v_jfs, &firstWr, &badWr));
+    EXPECT_EQ(&secondWr, badWr);
+    EXPECT_EQ(1, urma_test::GetHwMockState().postJfsCount);
+    EXPECT_EQ(1U, fixture.comp.sqe_cnt[0][0].load());
 }
 
 TEST(UrmaBondTest, DatapathPostRecvStoreSubmitsAndCleansProviderFailure)
@@ -564,6 +656,100 @@ TEST(UrmaBondTest, DatapathPostRecvStoreSubmitsAndCleansProviderFailure)
     EXPECT_EQ(0U, fixture.comp.rqe_cnt[0]);
 
     wr_buf_uninit(&fixture.comp.recv_wr_buf);
+}
+
+TEST(UrmaBondTest, DatapathPollRecvCrWithStoreDeduplicatesMsnPerRemoteJetty)
+{
+    BondPathFixture fixture;
+    bondp_jfc_t vJfc = {};
+    jfr_wr_entry_t *firstEntry = nullptr;
+    jfr_wr_entry_t *duplicateEntry = nullptr;
+    jfr_wr_entry_t *otherRemoteEntry = nullptr;
+    urma_cr_t outCr = {};
+    urma_jetty_id_t physicalJfrId = MakeJettyId(0x97);
+    urma_jetty_id_t remoteId = MakeJettyId(0x981);
+    urma_jetty_id_t otherRemoteId = MakeJettyId(0x982);
+
+    physicalJfrId.uasid = 0;
+    ASSERT_EQ(0, bdp_p_vjetty_id_table_create(&fixture.ctx.p_vjetty_id_table, 8));
+    ASSERT_EQ(0, wr_buf_init(&fixture.comp.recv_wr_buf, 4));
+    ASSERT_EQ(0, bondp_conn_table_create(&fixture.comp.v_conn_table, 8));
+    fixture.ctx.bonding_mode = BONDP_BONDING_MODE_BALANCE;
+    fixture.ctx.msn_enable = true;
+    fixture.ctx.p_ctxs[0] = &fixture.phyCtx;
+    fixture.phyCtx.eid = physicalJfrId.eid;
+    fixture.phyOps.poll_jfc = MockPollOneCr;
+    fixture.phyOps.post_jfs_wr = MockPostAnyJfsWr;
+    fixture.phyOps.post_jfr_wr = MockPostAnyJfrWr;
+    fixture.comp.comp_type = BONDP_COMP_JFR;
+    fixture.comp.active_count = 1;
+    fixture.comp.active_indices[0] = 0;
+    fixture.comp.valid[0] = true;
+    fixture.comp.v_jfr.urma_ctx = &fixture.ctx.v_ctx;
+    fixture.comp.v_jfr.jfr_id.id = 0x98;
+    fixture.comp.p_jfr[0] = &fixture.phyJfr[0];
+    fixture.phyJfr[0].jfr_id = physicalJfrId;
+    ASSERT_EQ(0, bdp_p_vjetty_id_table_add_without_lock(
+        &fixture.ctx.p_vjetty_id_table, physicalJfrId, JFR, fixture.comp.v_jfr.jfr_id.id, &fixture.comp));
+    firstEntry = jfr_wr_buf_alloc(&fixture.comp.recv_wr_buf);
+    duplicateEntry = jfr_wr_buf_alloc(&fixture.comp.recv_wr_buf);
+    otherRemoteEntry = jfr_wr_buf_alloc(&fixture.comp.recv_wr_buf);
+    ASSERT_NE(nullptr, firstEntry);
+    ASSERT_NE(nullptr, duplicateEntry);
+    ASSERT_NE(nullptr, otherRemoteEntry);
+    firstEntry->bdp_comp = &fixture.comp;
+    firstEntry->recv_idx = 0;
+    firstEntry->user_ctx = 0x1111;
+    firstEntry->wr.src.sge = fixture.srcSge;
+    firstEntry->wr.src.num_sge = 1;
+    duplicateEntry->bdp_comp = &fixture.comp;
+    duplicateEntry->recv_idx = 0;
+    duplicateEntry->user_ctx = 0x2222;
+    duplicateEntry->wr.src.sge = fixture.srcSge;
+    duplicateEntry->wr.src.num_sge = 1;
+    otherRemoteEntry->bdp_comp = &fixture.comp;
+    otherRemoteEntry->recv_idx = 0;
+    otherRemoteEntry->user_ctx = 0x3333;
+    otherRemoteEntry->wr.src.sge = fixture.srcSge;
+    otherRemoteEntry->wr.src.num_sge = 1;
+    fixture.comp.rqe_cnt[0] = 3;
+
+    InitSingleEnabledPollJfc(&vJfc, &fixture);
+    g_mockDatapathCr = {};
+    g_mockDatapathCrCount = 1;
+    g_mockDatapathCr.status = URMA_CR_SUCCESS;
+    g_mockDatapathCr.local_id = physicalJfrId.id;
+    g_mockDatapathCr.user_ctx = firstEntry->wr_id;
+    g_mockDatapathCr.flag.bs.s_r = 1;
+    g_mockDatapathCr.opcode = URMA_CR_OPC_SEND_WITH_IMM;
+    g_mockDatapathCr.remote_id.eid = remoteId.eid;
+    g_mockDatapathCr.imm_data = MakeRecvImmData(remoteId.id, 0, 0xabc);
+    EXPECT_EQ(1, bondp_poll_jfc(&vJfc.v_jfc, 1, &outCr));
+    EXPECT_EQ(0x1111U, outCr.user_ctx);
+    EXPECT_EQ(remoteId.id, outCr.remote_id.id);
+    EXPECT_EQ(2U, fixture.comp.rqe_cnt[0]);
+
+    g_mockDatapathCrCount = 1;
+    g_mockDatapathCr.user_ctx = duplicateEntry->wr_id;
+    g_mockDatapathCr.remote_id.eid = remoteId.eid;
+    g_mockDatapathCr.imm_data = MakeRecvImmData(remoteId.id, 0, 0xdef);
+    EXPECT_EQ(0, bondp_poll_jfc(&vJfc.v_jfc, 1, &outCr));
+    EXPECT_EQ(1, urma_test::GetHwMockState().postJfrCount);
+    EXPECT_EQ(2U, fixture.comp.rqe_cnt[0]);
+    EXPECT_NE(nullptr, jfr_wr_buf_get(&fixture.comp.recv_wr_buf, duplicateEntry->wr_id));
+
+    g_mockDatapathCrCount = 1;
+    g_mockDatapathCr.user_ctx = otherRemoteEntry->wr_id;
+    g_mockDatapathCr.remote_id.eid = otherRemoteId.eid;
+    g_mockDatapathCr.imm_data = MakeRecvImmData(otherRemoteId.id, 0, 0x123);
+    EXPECT_EQ(1, bondp_poll_jfc(&vJfc.v_jfc, 1, &outCr));
+    EXPECT_EQ(0x3333U, outCr.user_ctx);
+    EXPECT_EQ(otherRemoteId.id, outCr.remote_id.id);
+    EXPECT_EQ(1U, fixture.comp.rqe_cnt[0]);
+
+    bondp_hash_table_destroy(&fixture.comp.v_conn_table);
+    wr_buf_uninit(&fixture.comp.recv_wr_buf);
+    EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
 }
 
 TEST(UrmaBondTest, DatapathFailoverCrResendsBufferedJfsWrToBackupPath)

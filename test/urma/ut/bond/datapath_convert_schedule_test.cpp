@@ -310,6 +310,14 @@ TEST(UrmaBondTest, DatapathScheduleCoversAffinityAndBatchReceiveBoundaries)
 
     fixture.comp.comp_type = BONDP_COMP_JETTY;
     fixture.ctx.bonding_level = BONDP_BONDING_LEVEL_PORT;
+    sendIdx = 0;
+    targetIdx = 0;
+    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, &chipInfo));
+    EXPECT_EQ(0, sendIdx);
+    EXPECT_EQ(0, targetIdx);
+
+    sendIdx = 1;
+    targetIdx = 1;
     EXPECT_EQ(URMA_FAIL, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, &chipInfo));
 
     fixture.ctx.bonding_level = static_cast<bondp_bonding_level_t>(0xff);
@@ -327,4 +335,81 @@ TEST(UrmaBondTest, DatapathScheduleCoversAffinityAndBatchReceiveBoundaries)
 
     fixture.comp.active_count = 0;
     EXPECT_EQ(-1, schedule_recv_n(&fixture.comp, 1, recvCnt));
+}
+
+TEST(UrmaBondTest, DatapathSchedulePortAffinityRoutesThroughFailoverTable)
+{
+    BondPathFixture fixture;
+    urma_jetty_t localJetty2 = {};
+    urma_jetty_t localJetty3 = {};
+    urma_target_jetty_t target22 = {};
+    urma_target_jetty_t target33 = {};
+    urma_target_jetty_t mismatchedTarget = {};
+    bondp_chip_id_info_t chipInfo = { BONDP_CHIP_ID_MIN, BONDP_CHIP_ID_MIN };
+    int sendIdx = -1;
+    int targetIdx = -1;
+
+    fixture.ctx.bonding_mode = BONDP_BONDING_MODE_BALANCE;
+    fixture.ctx.bonding_level = BONDP_BONDING_LEVEL_PORT;
+    fixture.comp.comp_type = BONDP_COMP_JETTY;
+    fixture.comp.active_count = 2;
+    fixture.comp.active_indices[0] = 2;
+    fixture.comp.active_indices[1] = 3;
+    fixture.target.active_count = 2;
+    fixture.target.active_indices[0] = 2;
+    fixture.target.active_indices[1] = 3;
+    fixture.comp.valid[2] = true;
+    fixture.comp.valid[3] = true;
+    fixture.target.valid[2] = true;
+    fixture.target.valid[3] = true;
+    fixture.comp.p_jetty[2] = &localJetty2;
+    fixture.comp.p_jetty[3] = &localJetty3;
+    fixture.target.p_tjetty[2][2] = &target22;
+    fixture.target.p_tjetty[3][3] = &target33;
+    localJetty2.remote_jetty = &target22;
+    localJetty3.remote_jetty = &target33;
+
+    for (uint32_t src = 0; src < IODIE_NUM; ++src) {
+        for (uint32_t dst = 0; dst < IODIE_NUM; ++dst) {
+            for (uint32_t route = 0; route < URMA_ACTIVE_PORT_PER_DIE; ++route) {
+                for (uint32_t link = 0; link < URMA_FAILOVER_LINK_NUM; ++link) {
+                    fixture.globalCtx.failover_route[src][dst][route][link] = 8;
+                }
+            }
+        }
+    }
+    fixture.globalCtx.path[1] = { 2, 2, 0 };
+    fixture.globalCtx.path[2] = { 3, 3, 0 };
+    fixture.globalCtx.path[8] = { 19, 19, 0 };
+    fixture.globalCtx.failover_route[0][0][0][0] = 1;
+    fixture.globalCtx.failover_route[0][0][0][1] = 2;
+
+    ASSERT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, &chipInfo));
+    EXPECT_EQ(2, sendIdx);
+    EXPECT_EQ(2, targetIdx);
+
+    fixture.comp.valid[2] = false;
+    sendIdx = -1;
+    targetIdx = -1;
+    ASSERT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, &chipInfo));
+    EXPECT_EQ(3, sendIdx);
+    EXPECT_EQ(3, targetIdx);
+
+    fixture.comp.valid[2] = true;
+    localJetty2.remote_jetty = &mismatchedTarget;
+    sendIdx = -1;
+    targetIdx = -1;
+    ASSERT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, &chipInfo));
+    EXPECT_EQ(3, sendIdx);
+    EXPECT_EQ(3, targetIdx);
+
+    fixture.comp.active_count = 1;
+    fixture.comp.active_indices[0] = 3;
+    fixture.target.active_count = 1;
+    fixture.target.active_indices[0] = 3;
+    sendIdx = 4;
+    targetIdx = 4;
+    ASSERT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, &chipInfo));
+    EXPECT_EQ(3, sendIdx);
+    EXPECT_EQ(3, targetIdx);
 }

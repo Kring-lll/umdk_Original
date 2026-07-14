@@ -1123,15 +1123,32 @@ TEST(UrmaCoreTest, CpApiRemoteJettyAndSegContextHelpersUseLocalAndProviderPaths)
     CoreApiFixture fixture;
     urma_rjetty_t *rjetty = nullptr;
     urma_seg_t *seg = nullptr;
+    urma_jfr_t *savedSharedJfr = fixture.jetty.jetty_cfg.shared.jfr;
+    urma_jetty_grp_t jettyGrp = {};
     uint32_t length = 0;
     uint32_t size = 0;
 
     EXPECT_EQ(URMA_EINVAL, urma_get_rjetty(nullptr, &rjetty, &length));
     EXPECT_EQ(URMA_EINVAL, urma_get_rjetty(&fixture.jetty, nullptr, &length));
     EXPECT_EQ(URMA_EINVAL, urma_get_rjetty(&fixture.jetty, &rjetty, nullptr));
+    fixture.jetty.jetty_cfg.shared.jfr = nullptr;
+    EXPECT_EQ(URMA_EINVAL, urma_get_rjetty(&fixture.jetty, &rjetty, &length));
+    fixture.jetty.jetty_cfg.shared.jfr = savedSharedJfr;
+
+    fixture.jetty.jetty_id.id = 0x5a5a;
+    fixture.jetty.jetty_cfg.jfs_cfg.trans_mode = URMA_TM_RC;
+    fixture.jetty.jetty_cfg.jfs_cfg.flag.bs.order_type = URMA_OL;
+    fixture.jfr.jfr_cfg.flag.bs.token_policy = URMA_TOKEN_PLAIN_TEXT;
+    jettyGrp.cfg.policy = URMA_JETTY_GRP_POLICY_HASH_HINT;
+    fixture.jetty.jetty_cfg.jetty_grp = &jettyGrp;
     EXPECT_EQ(URMA_SUCCESS, urma_get_rjetty(&fixture.jetty, &rjetty, &length));
     ASSERT_NE(nullptr, rjetty);
     EXPECT_EQ(fixture.jetty.jetty_id.id, rjetty->jetty_id.id);
+    EXPECT_EQ(URMA_TM_RC, rjetty->trans_mode);
+    EXPECT_EQ(URMA_JETTY_GRP_POLICY_HASH_HINT, rjetty->policy);
+    EXPECT_EQ(URMA_JETTY, rjetty->type);
+    EXPECT_EQ(URMA_OL, rjetty->flag.bs.order_type);
+    EXPECT_EQ(URMA_TOKEN_PLAIN_TEXT, rjetty->flag.bs.token_policy);
     EXPECT_EQ(sizeof(urma_rjetty_t), length);
     urma_put_rjetty(rjetty);
     urma_put_rjetty(nullptr);

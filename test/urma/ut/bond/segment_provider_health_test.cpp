@@ -656,6 +656,11 @@ TEST(UrmaBondTest, PublicImportJettyUsesMockIoctlAndPhysicalProvider)
     ASSERT_NE(nullptr, target);
     EXPECT_EQ(1, urma_test::GetHwMockState().importJettyCount);
     EXPECT_EQ(URMA_JETTY, target->type);
+    auto *bdpTarget = CONTAINER_OF_FIELD(target, bondp_target_jetty_t, v_tjetty);
+    EXPECT_TRUE(bdpTarget->is_msn_enabled);
+    EXPECT_EQ(1U, bdpTarget->active_count);
+    EXPECT_EQ(0U, bdpTarget->active_indices[0]);
+    EXPECT_EQ(0U, bdpTarget->local_active_indices[0]);
     EXPECT_EQ(URMA_SUCCESS, bondp_unimport_jetty(target));
 
     bondp_health_check_global_ctx_uninit(&fakeGlobal);
@@ -681,6 +686,11 @@ TEST(UrmaBondTest, PublicImportJfrUsesMockIoctlAndPhysicalProvider)
     ASSERT_NE(nullptr, target);
     EXPECT_EQ(1, urma_test::GetHwMockState().importJfrCount);
     EXPECT_EQ(URMA_JFR, target->type);
+    auto *bdpTarget = CONTAINER_OF_FIELD(target, bondp_target_jetty_t, v_tjetty);
+    EXPECT_TRUE(bdpTarget->is_msn_enabled);
+    EXPECT_EQ(1U, bdpTarget->active_count);
+    EXPECT_EQ(0U, bdpTarget->active_indices[0]);
+    EXPECT_EQ(0U, bdpTarget->local_active_indices[0]);
     EXPECT_EQ(URMA_SUCCESS, bondp_unimport_jfr(target));
 
     urma_test::ResetHwMockState();
