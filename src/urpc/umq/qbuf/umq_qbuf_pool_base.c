@@ -183,7 +183,7 @@ int umq_qbuf_base_alloc(qbuf_pool_base_t *base, thread_local_qbuf_pool_t *thread
 void umq_qbuf_base_free(qbuf_pool_base_t *base, thread_local_qbuf_pool_t *thread_cache, umq_buf_list_t *list,
     bool shm)
 {
-    if (base == NULL || !base->inited || list == NULL || QBUF_LIST_FIRST(list) == NULL) {
+    if (base == NULL || !base->inited || thread_cache == NULL || list == NULL || QBUF_LIST_FIRST(list) == NULL) {
         return;
     }
 

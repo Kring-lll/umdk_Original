@@ -16,9 +16,20 @@
 #include "umq_tiny_qbuf_pool.h"
 
 static qbuf_pool_base_t g_tiny_qbuf_pool = {0};
-static __thread thread_local_qbuf_pool_t g_thread_tiny_cache = {0};
+// Heap-allocated per-thread cache referenced only through this TLS pointer (see umq_qbuf_pool.c for rationale):
+// its list node must never live in __thread storage that is unmapped when the thread exits.
+static __thread thread_local_qbuf_pool_t *g_thread_tiny_cache = NULL;
+static __thread bool g_thread_tiny_cache_released = false;
 static void *g_tiny_buffer_addr = NULL;
 static uint64_t g_tiny_total_len = 0;
+
+static thread_local_qbuf_pool_t *umq_tiny_thread_cache_get(void)
+{
+    if (g_thread_tiny_cache == NULL && !g_thread_tiny_cache_released) {
+        g_thread_tiny_cache = (thread_local_qbuf_pool_t *)calloc(1, sizeof(*g_thread_tiny_cache));
+    }
+    return g_thread_tiny_cache;
+}
 
 uint32_t umq_tiny_buf_block_size_bytes(umq_tiny_buf_block_size_t size_enum)
 {
@@ -106,18 +117,23 @@ static int tiny_qbuf_base_fetch(uint32_t needed, local_block_pool_t *local_pool,
         fetch_count += (uint32_t)ret;
     }
     local_pool->capacity_with_data = g_tiny_qbuf_pool.tls_pools.tls_qbuf_pool_depth;
-    g_thread_tiny_cache.stats.tls_fetch_buf_cnt_with_data += fetch_count;
+    g_thread_tiny_cache->stats.tls_fetch_buf_cnt_with_data += fetch_count;
     return UMQ_SUCCESS;
 }
 
 static void release_tiny_thread_cache(uint64_t id)
 {
     (void)id;
-    if (!g_tiny_qbuf_pool.inited) {
+    thread_local_qbuf_pool_t *cache = g_thread_tiny_cache;
+    if (!g_tiny_qbuf_pool.inited || cache == NULL || !cache->inited) {
         return;
     }
 
-    release_thread_cache_impl(&g_thread_tiny_cache, &g_tiny_qbuf_pool.tls_pools, &g_tiny_qbuf_pool.block_pool);
+    release_thread_cache_impl(cache, &g_tiny_qbuf_pool.tls_pools, &g_tiny_qbuf_pool.block_pool);
+
+    g_thread_tiny_cache = NULL;
+    g_thread_tiny_cache_released = true;
+    free(cache);
 }
 
 int umq_tiny_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
@@ -162,12 +178,12 @@ int umq_tiny_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t 
         .num = num,
         .list = list,
     };
-    return umq_qbuf_base_alloc(&g_tiny_qbuf_pool, &g_thread_tiny_cache, option, &param);
+    return umq_qbuf_base_alloc(&g_tiny_qbuf_pool, umq_tiny_thread_cache_get(), option, &param);
 }
 
 void umq_tiny_qbuf_free(umq_buf_list_t *list)
 {
-    umq_qbuf_base_free(&g_tiny_qbuf_pool, &g_thread_tiny_cache, list, true);
+    umq_qbuf_base_free(&g_tiny_qbuf_pool, umq_tiny_thread_cache_get(), list, true);
 }
 
 int umq_tiny_qbuf_headroom_reset(umq_buf_t *qbuf, uint16_t headroom_size)
