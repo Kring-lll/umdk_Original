@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: SNC (Supernode Network Controller) service
- * Author: OpenCode
+ * Author: guoshuangjian
  * Create: 2026-07-07
  * Note:
  * History: 2026-07-07  Create File
@@ -11,6 +11,7 @@ package com.huawei.umdk.snc.service;
 
 import java.util.List;
 
+import com.huawei.umdk.snc.config.Logger;
 import com.huawei.umdk.snc.entity.NpuDevice;
 import com.huawei.umdk.snc.entity.RoutePrefix;
 import com.huawei.umdk.snc.entity.RoutingEntry;
@@ -19,6 +20,8 @@ import com.huawei.umdk.snc.entity.SwDevice;
 import com.huawei.umdk.snc.store.SuperNodeStore;
 
 public class SuperNodeService {
+
+    private static final Logger LOG = new Logger(SuperNodeService.class);
 
     private final SuperNodeStore store;
 
@@ -38,6 +41,7 @@ public class SuperNodeService {
             throw new IllegalArgumentException("SuperNode devices must not be null or empty");
         }
         store.replace(superNode);
+        LOG.info("importSuperNode: %s", superNode.getName());
     }
 
     public void addNpuDevices(String superNodeName, List<NpuDevice> devices) {
@@ -53,6 +57,7 @@ public class SuperNodeService {
             }
             store.addNpuDevice(superNodeName, device);
         }
+        LOG.info("addNpuDevices: %s, count=%d", superNodeName, devices.size());
     }
 
     public void addSwDevices(String superNodeName, List<SwDevice> devices) {
@@ -68,6 +73,7 @@ public class SuperNodeService {
             }
             store.addSwDevice(superNodeName, device);
         }
+        LOG.info("addSwDevices: %s, count=%d", superNodeName, devices.size());
     }
 
     public void removeDevices(String superNodeName, List<String> deviceNames) {
@@ -83,6 +89,7 @@ public class SuperNodeService {
             }
             store.removeDevice(superNodeName, deviceName);
         }
+        LOG.info("removeDevices: %s, count=%d", superNodeName, deviceNames.size());
     }
 
     public void addRoutingEntries(String superNodeName, String deviceName, Integer chipIndex,
@@ -105,6 +112,7 @@ public class SuperNodeService {
             }
             store.addRoutingEntry(superNodeName, deviceName, chipIndex, entry.getPrefix(), entry);
         }
+        LOG.info("addRoutingEntries: %s/%s/%d, count=%d", superNodeName, deviceName, chipIndex, entries.size());
     }
 
     public void removeRoutingEntries(String superNodeName, String deviceName, Integer chipIndex,
@@ -127,13 +135,17 @@ public class SuperNodeService {
             }
             store.removeRoutingEntry(superNodeName, deviceName, chipIndex, prefix);
         }
+        LOG.info("removeRoutingEntries: %s/%s/%d, count=%d", superNodeName, deviceName, chipIndex, prefixes.size());
     }
 
     public SuperNode getSuperNode(String name) {
-        return store.getSuperNode(name);
+        SuperNode result = store.getSuperNode(name);
+        LOG.debug("getSuperNode: %s -> %s", name, result != null ? "found" : "null");
+        return result;
     }
 
     public void removeSuperNode(String name) {
         store.removeSuperNode(name);
+        LOG.info("removeSuperNode: %s", name);
     }
 }

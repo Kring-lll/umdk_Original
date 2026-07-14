@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: SNC (Supernode Network Controller) service
- * Author: OpenCode
+ * Author: guoshuangjian
  * Create: 2026-07-07
  * Note:
  * History: 2026-07-07  Create File
@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+import com.huawei.umdk.snc.config.Logger;
 import com.huawei.umdk.snc.entity.DeviceEntity;
 import com.huawei.umdk.snc.entity.ForwardingChip;
 import com.huawei.umdk.snc.entity.NpuDevice;
@@ -27,6 +28,8 @@ import com.huawei.umdk.snc.entity.SwDevice;
 
 public class SuperNodeStore {
 
+    private static final Logger LOG = new Logger(SuperNodeStore.class);
+
     private Map<String, SuperNode> superNodeMap;
     private Map<RoutingTableKey, RoutingTable> routingTableMap;
 
@@ -37,6 +40,7 @@ public class SuperNodeStore {
 
     public void replace(SuperNode superNode) {
         String name = superNode.getName();
+        LOG.info("replace SuperNode: %s", name);
         superNodeMap.put(name, superNode);
 
         routingTableMap.entrySet().removeIf(e -> e.getKey().getSuperNodeName().equals(name));
@@ -91,6 +95,7 @@ public class SuperNodeStore {
     public void addNpuDevice(String superNodeName, NpuDevice device) {
         SuperNode superNode = superNodeMap.get(superNodeName);
         if (superNode == null) {
+            LOG.error("SuperNode not found: %s. Call setSuperNode() first.", superNodeName);
             throw new IllegalStateException(
                 "SuperNode not found: " + superNodeName + ". Call setSuperNode() first.");
         }
@@ -99,11 +104,13 @@ public class SuperNodeStore {
         }
         superNode.getMutableNpuDevices().put(device.getDeviceName(), device);
         indexRoutingTable(superNodeName, device);
+        LOG.info("addNpuDevice: %s/%s", superNodeName, device.getDeviceName());
     }
 
     public void addSwDevice(String superNodeName, SwDevice device) {
         SuperNode superNode = superNodeMap.get(superNodeName);
         if (superNode == null) {
+            LOG.error("SuperNode not found: %s. Call setSuperNode() first.", superNodeName);
             throw new IllegalStateException(
                 "SuperNode not found: " + superNodeName + ". Call setSuperNode() first.");
         }
@@ -112,6 +119,7 @@ public class SuperNodeStore {
         }
         superNode.getMutableSwDevices().put(device.getDeviceName(), device);
         indexRoutingTable(superNodeName, device);
+        LOG.info("addSwDevice: %s/%s", superNodeName, device.getDeviceName());
     }
 
     public void removeDevice(String superNodeName, String deviceName) {
@@ -138,11 +146,14 @@ public class SuperNodeStore {
         RoutingTableKey key = new RoutingTableKey(superNodeName, deviceName, chipIndex);
         RoutingTable rt = routingTableMap.get(key);
         if (rt == null) {
+            LOG.error("RoutingTable not found for %s/%s/%d. Call setSuperNode() or addNpuDevices()/addSwDevices() first.",
+                superNodeName, deviceName, chipIndex);
             throw new IllegalStateException(
                 "RoutingTable not found for " + superNodeName + "/" + deviceName + "/" + chipIndex
                     + ". Call setSuperNode() or addNpuDevices()/addSwDevices() first.");
         }
         if (rt.getRoutes() == null) {
+            LOG.error("RoutingTable routes is null for %s/%s/%d", superNodeName, deviceName, chipIndex);
             throw new IllegalStateException(
                 "RoutingTable routes is null for " + superNodeName + "/" + deviceName + "/" + chipIndex);
         }

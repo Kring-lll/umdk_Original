@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: SNC (Supernode Network Controller) service
- * Author: OpenCode
+ * Author: guoshuangjian
  * Create: 2026-07-07
  * Note:
  * History: 2026-07-07  Create File
@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import com.huawei.umdk.snc.config.Logger;
 import com.huawei.umdk.snc.dto.HopInfo;
 import com.huawei.umdk.snc.dto.PathInfo;
 import com.huawei.umdk.snc.dto.PathPlanRequest;
@@ -37,6 +38,8 @@ import com.huawei.umdk.snc.store.SuperNodeStore;
 import com.huawei.umdk.snc.util.AddressUtils;
 
 public class PathService {
+    private static final Logger LOG = new Logger(PathService.class);
+
     private final SuperNodeStore superNodeStore;
     private final AclStore aclStore;
     private final PathEngine pathEngine;
@@ -54,9 +57,11 @@ public class PathService {
     }
 
     public PathPlanResult planPath(PathPlanRequest request) {
+        LOG.info("planPath: %s -> %s", request.getSrcDevice(), request.getDestDevice());
         // Step 0: SuperNode lookup
         SuperNode superNode = superNodeStore.getSuperNode(request.getSuperNodeName());
         if (superNode == null) {
+            LOG.warn("SuperNode topology not found: %s", request.getSuperNodeName());
             return new PathPlanResult(PlanStatus.TOPO_NOT_FOUND,
                 "SuperNode topology not found: " + request.getSuperNodeName());
         }
@@ -68,6 +73,7 @@ public class PathService {
             destNpuDevice = superNode.getNpuDevices().get(request.getDestDevice());
         }
         if (srcNpuDevice == null || destNpuDevice == null) {
+            LOG.warn("Source or destination NPU device not found");
             return new PathPlanResult(PlanStatus.TOPO_INCOMPLETE,
                 "Source or destination NPU device not found");
         }
@@ -127,10 +133,12 @@ public class PathService {
         // Step 3-4: ACL bidirectional check
         AclData aclData = aclStore.getAclData(request.getSuperNodeName());
         if (aclData == null) {
+            LOG.warn("ACL data not found for superNode: %s", request.getSuperNodeName());
             return new PathPlanResult(PlanStatus.ACL_NOT_FOUND,
                 "ACL data not found for superNode: " + request.getSuperNodeName());
         }
         if (!aclCheckEngine.checkBothDirection(aclData, srcEid, dstEid, srcCna, destCna)) {
+            LOG.warn("ACL check failed for %s -> %s", srcEid, dstEid);
             return new PathPlanResult(PlanStatus.ACL_CHECK_FAILED,
                 "ACL check failed");
         }
@@ -166,6 +174,7 @@ public class PathService {
                     srcNpuDevice, srcNpuPort,
                     destNpuDevice, destNpuPort, interDevices, superNode.getAllDevices());
             } catch (Exception e) {
+                LOG.error("Multi-hop path resolution failed: %s", e.getMessage());
                 return new PathPlanResult(PlanStatus.TOPO_CONNECTION_NOT_FOUND,
                     "Multi-hop path resolution failed: " + e.getMessage());
             }

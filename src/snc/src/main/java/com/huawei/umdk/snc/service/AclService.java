@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: SNC (Supernode Network Controller) service
- * Author: OpenCode
+ * Author: guoshuangjian
  * Create: 2026-07-07
  * Note:
  * History: 2026-07-07  Create File
@@ -12,12 +12,15 @@ package com.huawei.umdk.snc.service;
 import java.util.List;
 import java.util.Map;
 
+import com.huawei.umdk.snc.config.Logger;
 import com.huawei.umdk.snc.entity.AclData;
 import com.huawei.umdk.snc.entity.AclKey;
 import com.huawei.umdk.snc.entity.TpAclEntity;
 import com.huawei.umdk.snc.store.AclStore;
 
 public class AclService {
+
+    private static final Logger LOG = new Logger(AclService.class);
 
     private final AclStore store;
 
@@ -33,6 +36,7 @@ public class AclService {
             throw new IllegalArgumentException("AclData superNodeName must not be null or empty");
         }
         store.replace(aclData);
+        LOG.info("importAclData: %s", aclData.getSuperNodeName());
     }
 
     public void addAclRules(String superNodeName, Map<AclKey, TpAclEntity> rules) {
@@ -48,6 +52,7 @@ public class AclService {
             }
             store.addAclRule(superNodeName, rule.getKey(), rule.getValue());
         }
+        LOG.info("addAclRules: %s, count=%d", superNodeName, rules.size());
     }
 
     public void removeAclRules(String superNodeName, List<AclKey> keys) {
@@ -63,13 +68,17 @@ public class AclService {
             }
             store.removeAclRule(superNodeName, key);
         }
+        LOG.info("removeAclRules: %s, count=%d", superNodeName, keys.size());
     }
 
     public AclData getAclData(String superNodeName) {
-        return store.getAclData(superNodeName);
+        AclData result = store.getAclData(superNodeName);
+        LOG.debug("getAclData: %s -> %s", superNodeName, result != null ? "found" : "null");
+        return result;
     }
 
     public void removeAclData(String superNodeName) {
         store.removeAclData(superNodeName);
+        LOG.info("removeAclData: %s", superNodeName);
     }
 }

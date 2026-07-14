@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: SNC (Supernode Network Controller) service
- * Author: OpenCode
+ * Author: guoshuangjian
  * Create: 2026-07-07
  * Note:
  * History: 2026-07-07  Create File
@@ -11,7 +11,11 @@ package com.huawei.umdk.snc.util;
 
 import java.util.regex.Pattern;
 
+import com.huawei.umdk.snc.config.Logger;
+
 public final class AddressUtils {
+
+    private static final Logger LOG = new Logger(AddressUtils.class);
 
     private static final Pattern IPV4_PATTERN =
         Pattern.compile("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$");
@@ -23,6 +27,7 @@ public final class AddressUtils {
 
     public static String applyMask(String targetAddr, int maskLength) {
         if (targetAddr == null || maskLength < 0 || maskLength > 32) {
+            LOG.warn("applyMask: invalid input, targetAddr=%s, maskLength=%d", targetAddr, maskLength);
             return targetAddr;
         }
         int ipInt = ipToInt(targetAddr);
