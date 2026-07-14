@@ -36,6 +36,7 @@ typedef enum urma_perf_type {
     UB_ACK_JFC,
     UB_REARM_JFC,
     BOND_REARM_JFC,
+    BOND_SEND_RTT,
     URMA_PERF_RECORD_TYPE_MAX,
 } urma_perf_record_type_t;
 
@@ -50,6 +51,7 @@ typedef struct urma_perf_stats {
         uint64_t p90;
         uint64_t p99;
         uint64_t p9999;
+        uint64_t max_under_128ms;
     } type_record[URMA_PERF_RECORD_TYPE_MAX];
 } urma_perf_stats_t;
 
