@@ -298,22 +298,22 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
     uint32_t min[2] = {0};
     uint32_t max[2] = {0};
 
+    const bondp_chip_id_info_t info_tmp = {1 , 2};
+
     if (min_active_count == 0) {
         URMA_LOG_ERR("Invalid min_active_count.\n");
         return URMA_EINVAL;
     }
 
-    if (info != NULL) {
-        bondp_path_t old_path = {0};
-        if (*send_idx >= 0 && *target_idx >= 0) {
-            old_path.local_idx = *send_idx;
-            old_path.target_idx = *target_idx;
-        }
-        least_load_cnt = select_affinity_path(bdp_comp, bdp_tjetty, info,
-                                              least_load_path, &old_path);
-        if (least_load_cnt == 0 && !g_bondp_global_ctx->enable_failover) {
-            return URMA_FAIL;
-        }
+    bondp_path_t old_path = {0};
+    if (*send_idx >= 0 && *target_idx >= 0) {
+        old_path.local_idx = *send_idx;
+        old_path.target_idx = *target_idx;
+    }
+    least_load_cnt = select_affinity_path(bdp_comp, bdp_tjetty, &info_tmp,
+                                            least_load_path, &old_path);
+    if (least_load_cnt == 0 && !g_bondp_global_ctx->enable_failover) {
+        return URMA_FAIL;
     }
 
     if (least_load_cnt == 0) {

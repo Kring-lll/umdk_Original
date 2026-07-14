@@ -1342,6 +1342,24 @@ static void bondp_del_jetty_p_vjetty_info(bondp_comp_t *bdp_jetty)
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
 }
 
+static uint64_t read_env_uint64(const char *env_name, uint64_t default_val)
+{
+    const char *value = getenv(env_name);
+    if (value == NULL) {
+        return default_val;
+    }
+
+    char *end = NULL;
+    errno = 0;
+    unsigned long long parsed = strtoull(value, &end, 10);
+    if (errno != 0 || end == value || *end != '\0') {
+        URMA_LOG_WARN("Invalid value '%s' for env %s, using default %lu\n",
+                      value, env_name, (unsigned long)default_val);
+        return default_val;
+    }
+    return (uint64_t)parsed;
+}
+
 urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cfg)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
@@ -1367,17 +1385,48 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     (void)pthread_spin_init(&bdp_jetty->send_lock, PTHREAD_PROCESS_PRIVATE);
     bdp_jetty->modify_to_error = false;
 
-    const bondp_port_id_t *cfg_active_port_ids = NULL;
+    bondp_port_id_t *cfg_active_port_ids = NULL;
+    bondp_port_id_t port_tmp[4];
+
     uint32_t cfg_active_port_count = 0;
-    if (jetty_cfg->flag.bs.has_drv_ext != 0) {
-        const bondp_jetty_cfg_t *bdp_cfg = (const bondp_jetty_cfg_t *)jetty_cfg;
-        if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
-            URMA_LOG_ERR("Invalid active port config for jetty, port_ids is NULL or port_count is 0\n");
-            goto FREE_JETTY;
-        }
-        cfg_active_port_count = bdp_cfg->port_count;
-        cfg_active_port_ids = bdp_cfg->port_ids;
+
+    if (read_env_uint64("URMA_UBAGG_PORT_AFFINITY", 1) == 2) {
+        cfg_active_port_count = 4;
+        port_tmp[0].chip_id = 2;
+        port_tmp[0].die_id = 1;
+        port_tmp[0].port_idx = 4;
+        port_tmp[0].reserved = 0;
+        port_tmp[1].chip_id = 2;
+        port_tmp[1].die_id = 1;
+        port_tmp[1].port_idx = 5;
+        port_tmp[1].reserved = 0;
+        port_tmp[2].chip_id = 1;
+        port_tmp[2].die_id = 1;
+        port_tmp[2].port_idx = 4;
+        port_tmp[2].reserved = 0;
+        port_tmp[3].chip_id = 1;
+        port_tmp[3].die_id = 1;
+        port_tmp[3].port_idx = 5;
+        port_tmp[3].reserved = 0;
+    } else {
+        port_tmp[0].chip_id = 1;
+        port_tmp[0].die_id = 1;
+        port_tmp[0].port_idx = 4;
+        port_tmp[0].reserved = 0;
+        port_tmp[1].chip_id = 1;
+        port_tmp[1].die_id = 1;
+        port_tmp[1].port_idx = 5;
+        port_tmp[1].reserved = 0;
+        port_tmp[2].chip_id = 2;
+        port_tmp[2].die_id = 1;
+        port_tmp[2].port_idx = 4;
+        port_tmp[2].reserved = 0;
+        port_tmp[3].chip_id = 2;
+        port_tmp[3].die_id = 1;
+        port_tmp[3].port_idx = 5;
+        port_tmp[3].reserved = 0;
     }
+    cfg_active_port_ids = port_tmp;
 
     if (init_active_indices(bdp_ctx, bdp_jetty, cfg_active_port_ids, cfg_active_port_count) != 0) {
         URMA_LOG_ERR("Failed to init active indices\n");
