@@ -48,6 +48,7 @@ typedef struct jfs_wr_entry {
     struct bondp_target_jetty *target_vjetty;
     uint32_t send_idx;
     uint32_t target_idx;
+    struct jfs_wr_entry *next;
 } jfs_wr_entry_t;
 
 typedef struct jfr_wr_entry {
