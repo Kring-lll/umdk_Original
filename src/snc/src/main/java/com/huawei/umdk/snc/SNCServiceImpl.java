@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: SNC (Supernode Network Controller) service
- * Author: OpenCode
+ * Author: guoshuangjian
  * Create: 2026-07-07
  * Note:
  * History: 2026-07-07  Create File
@@ -11,8 +11,8 @@ package com.huawei.umdk.snc;
 
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Logger;
 
+import com.huawei.umdk.snc.config.Logger;
 import com.huawei.umdk.snc.config.SNCConfig;
 import com.huawei.umdk.snc.dto.PathPlanRequest;
 import com.huawei.umdk.snc.dto.PathPlanResult;
@@ -36,7 +36,7 @@ import com.huawei.umdk.snc.store.SuperNodeStore;
 
 public class SNCServiceImpl implements SNCService {
 
-    private static final Logger LOG = Logger.getLogger(SNCServiceImpl.class.getName());
+    private static final Logger LOG = new Logger(SNCServiceImpl.class);
 
     private enum State {
         INIT, READY, DATAREADY, UNINIT
@@ -60,8 +60,8 @@ public class SNCServiceImpl implements SNCService {
 
     @Override
     public void init(SNCConfig config) {
-        if (config != null && config.getLogLevel() != null) {
-            LOG.setLevel(config.getLogLevel());
+        if (config != null && config.getLogCallback() != null) {
+            Logger.registerLogCallback(config.getLogCallback());
         }
 
         this.superNodeStore = new SuperNodeStore();
@@ -82,7 +82,7 @@ public class SNCServiceImpl implements SNCService {
         this.aclLoaded = false;
         this.state = State.READY;
 
-        log("init: state -> READY");
+        LOG.info("init: state -> READY");
     }
 
     @Override
@@ -101,7 +101,7 @@ public class SNCServiceImpl implements SNCService {
         this.superNodeService = null;
         this.aclService = null;
         this.pathService = null;
-        log("uninit: state -> UNINIT");
+        LOG.info("uninit: state -> UNINIT");
     }
 
     @Override
@@ -113,7 +113,7 @@ public class SNCServiceImpl implements SNCService {
         superNodeService.importSuperNode(superNode);
         superNodeLoaded = true;
         updateDataReadyState();
-        log("setSuperNode: " + superNode.getName() + ", state -> " + state);
+        LOG.info("setSuperNode: %s, state -> %s", superNode.getName(), state);
     }
 
     @Override
@@ -126,7 +126,7 @@ public class SNCServiceImpl implements SNCService {
             throw new IllegalArgumentException("devices must not be null");
         }
         superNodeService.addNpuDevices(superNodeName, devices);
-        log("addNpuDevices: " + superNodeName + ", count=" + devices.size());
+        LOG.info("addNpuDevices: %s, count=%d", superNodeName, devices.size());
     }
 
     @Override
@@ -139,7 +139,7 @@ public class SNCServiceImpl implements SNCService {
             throw new IllegalArgumentException("devices must not be null");
         }
         superNodeService.addSwDevices(superNodeName, devices);
-        log("addSwDevices: " + superNodeName + ", count=" + devices.size());
+        LOG.info("addSwDevices: %s, count=%d", superNodeName, devices.size());
     }
 
     @Override
@@ -152,7 +152,7 @@ public class SNCServiceImpl implements SNCService {
             throw new IllegalArgumentException("deviceNames must not be null");
         }
         superNodeService.removeDevices(superNodeName, deviceNames);
-        log("removeDevices: " + superNodeName + ", count=" + deviceNames.size());
+        LOG.info("removeDevices: %s, count=%d", superNodeName, deviceNames.size());
     }
 
     @Override
@@ -172,8 +172,7 @@ public class SNCServiceImpl implements SNCService {
             throw new IllegalArgumentException("entries must not be null");
         }
         superNodeService.addRoutingEntries(superNodeName, deviceName, chipIndex, entries);
-        log("addRoutingEntries: " + superNodeName + "/" + deviceName + "/" + chipIndex
-            + ", count=" + entries.size());
+        LOG.info("addRoutingEntries: %s/%s/%d, count=%d", superNodeName, deviceName, chipIndex, entries.size());
     }
 
     @Override
@@ -193,8 +192,7 @@ public class SNCServiceImpl implements SNCService {
             throw new IllegalArgumentException("prefixes must not be null");
         }
         superNodeService.removeRoutingEntries(superNodeName, deviceName, chipIndex, prefixes);
-        log("removeRoutingEntries: " + superNodeName + "/" + deviceName + "/" + chipIndex
-            + ", count=" + prefixes.size());
+        LOG.info("removeRoutingEntries: %s/%s/%d, count=%d", superNodeName, deviceName, chipIndex, prefixes.size());
     }
 
     @Override
@@ -206,7 +204,7 @@ public class SNCServiceImpl implements SNCService {
         aclService.importAclData(aclData);
         aclLoaded = true;
         updateDataReadyState();
-        log("setAclData: " + aclData.getSuperNodeName() + ", state -> " + state);
+        LOG.info("setAclData: %s, state -> %s", aclData.getSuperNodeName(), state);
     }
 
     @Override
@@ -219,7 +217,7 @@ public class SNCServiceImpl implements SNCService {
             throw new IllegalArgumentException("rules must not be null");
         }
         aclService.addAclRules(superNodeName, rules);
-        log("addAclRules: " + superNodeName + ", count=" + rules.size());
+        LOG.info("addAclRules: %s, count=%d", superNodeName, rules.size());
     }
 
     @Override
@@ -232,7 +230,7 @@ public class SNCServiceImpl implements SNCService {
             throw new IllegalArgumentException("keys must not be null");
         }
         aclService.removeAclRules(superNodeName, keys);
-        log("removeAclRules: " + superNodeName + ", count=" + keys.size());
+        LOG.info("removeAclRules: %s, count=%d", superNodeName, keys.size());
     }
 
     @Override
@@ -242,7 +240,7 @@ public class SNCServiceImpl implements SNCService {
             throw new IllegalArgumentException("name must not be null or empty");
         }
         SuperNode result = superNodeService.getSuperNode(name);
-        log("getSuperNode: " + name + " -> " + (result != null ? "found" : "null"));
+        LOG.debug("getSuperNode: %s -> %s", name, result != null ? "found" : "null");
         return result;
     }
 
@@ -255,7 +253,7 @@ public class SNCServiceImpl implements SNCService {
         superNodeService.removeSuperNode(name);
         superNodeLoaded = superNodeService.getSuperNode(name) != null;
         updateDataReadyState();
-        log("removeSuperNode: " + name + ", state -> " + state);
+        LOG.info("removeSuperNode: %s, state -> %s", name, state);
     }
 
     @Override
@@ -265,7 +263,7 @@ public class SNCServiceImpl implements SNCService {
             throw new IllegalArgumentException("superNodeName must not be null or empty");
         }
         AclData result = aclService.getAclData(superNodeName);
-        log("getAclData: " + superNodeName + " -> " + (result != null ? "found" : "null"));
+        LOG.debug("getAclData: %s -> %s", superNodeName, result != null ? "found" : "null");
         return result;
     }
 
@@ -278,7 +276,7 @@ public class SNCServiceImpl implements SNCService {
         aclService.removeAclData(superNodeName);
         aclLoaded = aclService.getAclData(superNodeName) != null;
         updateDataReadyState();
-        log("removeAclData: " + superNodeName + ", state -> " + state);
+        LOG.info("removeAclData: %s, state -> %s", superNodeName, state);
     }
 
     @Override
@@ -305,13 +303,14 @@ public class SNCServiceImpl implements SNCService {
             throw new IllegalArgumentException("destPort must not be null or empty");
         }
         PathPlanResult result = pathService.planPath(request);
-        log("planPath: " + request.getSrcDevice() + " -> " + request.getDestDevice()
-            + " status=" + result.getStatus());
+        LOG.info("planPath: %s -> %s status=%s", request.getSrcDevice(), request.getDestDevice(),
+            result.getStatus());
         return result;
     }
 
     private void checkNotUninit() {
         if (state == State.INIT || state == State.UNINIT) {
+            LOG.error("SNC is in %s state", state);
             throw new SNCStateException("SNC is in " + state + " state");
         }
     }
@@ -319,14 +318,10 @@ public class SNCServiceImpl implements SNCService {
     private void updateDataReadyState() {
         if (superNodeLoaded && aclLoaded) {
             this.state = State.DATAREADY;
-            log("state -> DATAREADY");
+            LOG.info("state -> DATAREADY");
         } else if (state == State.DATAREADY) {
             this.state = State.READY;
-            log("state -> READY");
+            LOG.info("state -> READY");
         }
-    }
-
-    private void log(String msg) {
-        LOG.info(msg);
     }
 }

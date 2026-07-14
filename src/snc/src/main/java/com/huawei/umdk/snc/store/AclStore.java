@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: SNC (Supernode Network Controller) service
- * Author: OpenCode
+ * Author: guoshuangjian
  * Create: 2026-07-07
  * Note:
  * History: 2026-07-07  Create File
@@ -12,11 +12,14 @@ package com.huawei.umdk.snc.store;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.huawei.umdk.snc.config.Logger;
 import com.huawei.umdk.snc.entity.AclData;
 import com.huawei.umdk.snc.entity.AclKey;
 import com.huawei.umdk.snc.entity.TpAclEntity;
 
 public class AclStore {
+
+    private static final Logger LOG = new Logger(AclStore.class);
 
     private Map<String, Map<AclKey, TpAclEntity>> store;
 
@@ -25,6 +28,7 @@ public class AclStore {
     }
 
     public void replace(AclData aclData) {
+        LOG.info("replace ACL data: %s", aclData.getSuperNodeName());
         Map<AclKey, TpAclEntity> internalMap = new ConcurrentHashMap<>();
         if (aclData.getTpAcls() != null) {
             internalMap.putAll(aclData.getTpAcls());
@@ -58,18 +62,22 @@ public class AclStore {
     public void addAclRule(String superNodeName, AclKey key, TpAclEntity entity) {
         Map<AclKey, TpAclEntity> internalMap = store.get(superNodeName);
         if (internalMap == null) {
+            LOG.error("ACL data not found for superNode: %s. Call setAclData() first.", superNodeName);
             throw new IllegalStateException(
                 "ACL data not found for superNode: " + superNodeName + ". Call setAclData() first.");
         }
         internalMap.put(key, entity);
+        LOG.debug("addAclRule: %s, key=%s", superNodeName, key);
     }
 
     public void removeAclRule(String superNodeName, AclKey key) {
         Map<AclKey, TpAclEntity> internalMap = store.get(superNodeName);
         if (internalMap == null) {
+            LOG.error("ACL data not found for superNode: %s. Call setAclData() first.", superNodeName);
             throw new IllegalStateException(
                 "ACL data not found for superNode: " + superNodeName + ". Call setAclData() first.");
         }
         internalMap.remove(key);
+        LOG.debug("removeAclRule: %s, key=%s", superNodeName, key);
     }
 }

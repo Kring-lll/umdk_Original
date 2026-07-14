@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: SNC (Supernode Network Controller) service
- * Author: OpenCode
+ * Author: guoshuangjian
  * Create: 2026-07-07
  * Note:
  * History: 2026-07-07  Create File
@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.huawei.umdk.snc.config.Logger;
 import com.huawei.umdk.snc.entity.DeviceEntity;
 import com.huawei.umdk.snc.entity.ForwardingChip;
 import com.huawei.umdk.snc.entity.InternalPathHop;
@@ -24,6 +25,8 @@ import com.huawei.umdk.snc.entity.PortEntity;
 import com.huawei.umdk.snc.exception.SuperNodeNotFoundException;
 
 public class PathEngine {
+
+    private static final Logger LOG = new Logger(PathEngine.class);
 
     public InternalPathInfo resolveDirectPath(NpuDevice srcDevice,
                                               NpuPortEntity srcPort, NpuDevice destDevice,
@@ -80,6 +83,7 @@ public class PathEngine {
             String devName = orderedDevices.get(i);
             DeviceEntity device = allDevices.get(devName);
             if (device == null) {
+                LOG.error("Device not found: %s", devName);
                 throw new SuperNodeNotFoundException("Device not found: " + devName);
             }
 
@@ -105,6 +109,7 @@ public class PathEngine {
                 if (port == null) {
                     port = findPortByConnection(device);
                     if (port == null) {
+                        LOG.error("Port not found: %s in %s", interPortName, devName);
                         throw new SuperNodeNotFoundException(
                             "Port not found: " + interPortName + " in " + devName); // NOPMD
                     }
@@ -134,6 +139,7 @@ public class PathEngine {
             InternalPathHop next = hops.get(i + 1);
             if (current.getRemoteDevice() != null) {
                 if (!current.getRemoteDevice().equals(next.getDeviceName())) {
+                    LOG.error("Connection mismatch between %s and %s", current.getDeviceName(), next.getDeviceName());
                     throw new SuperNodeNotFoundException(
                         "Connection mismatch between " + current.getDeviceName()
                             + " and " + next.getDeviceName());
