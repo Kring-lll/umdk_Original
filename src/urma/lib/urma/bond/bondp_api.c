@@ -30,6 +30,7 @@
 #include "urma_ubagg.h"
 
 #include "bondp_api.h"
+#include "bondp_health.h"
 #include "bondp_health_check.h"
 #include "ub_get_clock.h"
 
@@ -78,13 +79,13 @@ static void bondp_uninit_connection_table(bondp_comp_t *bdp_comp)
     bondp_hash_table_destroy(&bdp_comp->v_conn_table);
 }
 
-static int bondp_init_wr_buf(const bondp_comp_t *bdp_comp, wr_buf_t *wr_buf, uint32_t depth)
+static int bondp_init_wr_buf(const bondp_comp_t *bdp_comp, wr_buf_t *wr_buf, uint32_t depth, uint32_t max_sge)
 {
     if (bdp_comp->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_STANDALONE) {
         return 0;
     }
 
-    return wr_buf_init(wr_buf, depth * bdp_comp->enabled_count);
+    return wr_buf_init(wr_buf, depth * bdp_comp->enabled_count, max_sge);
 }
 
 static void bondp_uninit_wr_buf(wr_buf_t *wr_buf)
@@ -747,7 +748,9 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
         goto DEL_P_VJFS_ID;
     }
 
-    if (bondp_init_wr_buf(bdp_jfs, &bdp_jfs->send_wr_buf, cfg->depth) != 0) {
+    uint32_t cfg_max_sge = (cfg->max_sge == 0 || cfg->max_sge > BONDP_MAX_SGE_NUM) ?
+                           BONDP_MAX_SGE_NUM : cfg->max_sge;
+    if (bondp_init_wr_buf(bdp_jfs, &bdp_jfs->send_wr_buf, cfg->depth, cfg_max_sge) != 0) {
         URMA_LOG_ERR("Failed to init jfs wr buf\n");
         goto UNINIT_CONNECTION_TABLE;
     }
@@ -1022,7 +1025,9 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
         goto DEL_P_VJFR_ID;
     }
 
-    if (bdp_ctx->msn_enable && bondp_init_wr_buf(bdp_jfr, &bdp_jfr->recv_wr_buf, cfg->depth) != 0) {
+    uint32_t cfg_max_sge = (cfg->max_sge == 0 || cfg->max_sge > BONDP_MAX_SGE_NUM) ?
+                           BONDP_MAX_SGE_NUM : cfg->max_sge;
+    if (bdp_ctx->msn_enable && bondp_init_wr_buf(bdp_jfr, &bdp_jfr->recv_wr_buf, cfg->depth, cfg_max_sge) != 0) {
         URMA_LOG_ERR("Failed to init jfr wr buf\n");
         goto UNINIT_JFR_CONNECTION_TABLE;
     }
@@ -1457,7 +1462,9 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         goto DEL_P_VJETTY_ID;
     }
 
-    if (bondp_init_wr_buf(bdp_jetty, &bdp_jetty->send_wr_buf, jetty_cfg->jfs_cfg.depth) != 0) {
+    uint32_t cfg_max_sge = (jetty_cfg->jfs_cfg.max_sge == 0 || jetty_cfg->jfs_cfg.max_sge > BONDP_MAX_SGE_NUM) ?
+                           BONDP_MAX_SGE_NUM : jetty_cfg->jfs_cfg.max_sge;
+    if (bondp_init_wr_buf(bdp_jetty, &bdp_jetty->send_wr_buf, jetty_cfg->jfs_cfg.depth, cfg_max_sge) != 0) {
         URMA_LOG_ERR("Failed to init jetty send wr buf\n");
         goto UNINIT_JETTY_CONNECTION_TABLE;
     }
@@ -2232,7 +2239,12 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
             }
             URMA_LOG_INFO("bondp unimport pjetty is done, jetty id is %u.\n",
                           bdp_tjetty->p_tjetty[i][j]->id.id);
-            if (urma_unimport_jetty(bdp_tjetty->p_tjetty[i][j]) != URMA_SUCCESS) {
+            /* NULL the slot before freeing so concurrent readers (datapath
+             * scheduling, health probe) observe NULL instead of a dangling
+             * pointer once urma_unimport_jetty releases the object. */
+            urma_target_jetty_t *p_tjetty = bdp_tjetty->p_tjetty[i][j];
+            bdp_tjetty->p_tjetty[i][j] = NULL;
+            if (urma_unimport_jetty(p_tjetty) != URMA_SUCCESS) {
                 ret = URMA_FAIL;
             }
         }
@@ -2318,8 +2330,8 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         cfg_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
     }
 
-    if (bondp_register_health_check_task(bdp_ctx, bdp_tjetty, cfg_jetty) != 0) {
-        URMA_LOG_ERR("Failed to register health check task\n");
+    if (bondp_hc_register_tjetty(bdp_ctx, bdp_tjetty) != 0) {
+        URMA_LOG_ERR("Failed to register health check tjetty\n");
         goto UNIMPORT_TSEG;
     }
 
@@ -2348,7 +2360,7 @@ static urma_status_t bondp_unimport_jetty_inner(urma_target_jetty_t *target_jett
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(target_jetty->urma_ctx, bondp_context_t, v_ctx);
     urma_status_t ret = URMA_SUCCESS;
 
-    bondp_unregister_health_check_task(bdp_ctx, bdp_tjetty);
+    bondp_hc_unregister_tjetty(bdp_ctx, bdp_tjetty);
 
     if (bondp_unimport_pjetty(bdp_tjetty) != URMA_SUCCESS) {
         ret = URMA_FAIL;

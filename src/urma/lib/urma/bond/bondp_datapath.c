@@ -16,7 +16,6 @@
 #include "bondp_datapath_convert.h"
 #include "bondp_datapath_schedule.h"
 #include "bondp_failback.h"
-#include "bondp_health_check.h"
 #include "bondp_types.h"
 #include "ub_get_clock.h"
 #include "urma_api.h"
@@ -361,7 +360,7 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
         urma_jfs_wr_t *vwr = (urma_jfs_wr_t *)wr;
         while (vwr != NULL) {
             urma_jfs_wr_t *pwr = &prealloc_wr_list[index];
-            ret = copy_jfs_wr(vwr, pwr, prealloc_src_sge[index], prealloc_dst_sge[index]);
+            ret = copy_jfs_wr(vwr, pwr, prealloc_src_sge[index], prealloc_dst_sge[index], BONDP_MAX_SGE_NUM);
             if (ret != 0) {
                 return ret;
             }
@@ -448,7 +447,9 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             wr_entry->bdp_comp = bdp_comp;
 
             urma_jfs_wr_t *pwr = &wr_entry->wr;
-            ret = copy_jfs_wr(cur, pwr, wr_entry->src_sge, wr_entry->dst_sge);
+            ret = copy_jfs_wr(cur, pwr, jfs_wr_entry_src_sge(wr_entry),
+                              jfs_wr_entry_dst_sge(wr_entry, bdp_comp->send_wr_buf.max_sge),
+                              bdp_comp->send_wr_buf.max_sge);
             if (ret != 0) {
                 URMA_LOG_ERR("Failed to copy jfs wr at index %d\n", i);
                 goto CLEANUP;
@@ -650,7 +651,7 @@ static urma_status_t bondp_post_recv_wr_no_store(bondp_comp_t *bdp_comp,
     urma_jfr_wr_t *vwr = (urma_jfr_wr_t *)wr;
     while (vwr != NULL) {
         urma_jfr_wr_t *pwr = &prealloc_wr_list[index];
-        ret = copy_jfr_wr(vwr, pwr, prealloc_src_sge[index]);
+        ret = copy_jfr_wr(vwr, pwr, prealloc_src_sge[index], BONDP_MAX_SGE_NUM);
         if (ret != 0) {
             return ret;
         }
@@ -724,7 +725,7 @@ static urma_status_t bondp_post_recv_wr_list_without_backup(bondp_comp_t *bdp_co
                 return URMA_EINVAL;
             }
             urma_jfr_wr_t *pwr = &prealloc_wr_list[index];
-            ret = copy_jfr_wr(cur, pwr, prealloc_src_sge[index]);
+            ret = copy_jfr_wr(cur, pwr, prealloc_src_sge[index], BONDP_MAX_SGE_NUM);
             if (ret != 0) {
                 return ret;
             }
@@ -810,7 +811,7 @@ static urma_status_t bondp_post_recv_wr_list_and_store(bondp_comp_t *bdp_comp, u
             wr_entry->recv_idx = (uint32_t)recv_idx;
             wr_entry->user_ctx = cur->user_ctx;
             wr_entry->bdp_comp = bdp_comp;
-            ret = copy_jfr_wr(cur, pwr, wr_entry->src_sge);
+            ret = copy_jfr_wr(cur, pwr, jfr_wr_entry_src_sge(wr_entry), recv_wr_buf->max_sge);
             if (ret != 0) {
                 URMA_LOG_ERR("Failed to copy jfr wr at index %u\n", process_node);
                 goto CLEANUP;
@@ -1227,11 +1228,6 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                 URMA_LOG_ERR("Failed to resend jfs wr, wr_id=%lu\n", resend_wr_id);
             }
         }
-        bondp_health_notify_datapath_link_fail(bdp_comp->bondp_ctx, wr_entry->target_vjetty,
-                                               (int)send_idx, (int)target_idx);
-        /* Update active link after failover is finished. */
-        bondp_health_update_active_idx(bdp_comp->bondp_ctx, wr_entry->target_vjetty, new_send_idx);
-
         int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);
         if (ret != 0 && ret != -EEXIST) {
             URMA_LOG_WARN("Failed to add failback task, vjetty_id=%u pjetty_idx=%u ret=%d\n",
@@ -1368,7 +1364,6 @@ static cr_convert_ret_t bondp_handle_cr_no_store(bondp_context_t *bdp_ctx, int i
 static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int idx, urma_cr_t *cr)
 {
     if (is_ctrl_cr(cr)) {
-        (void)bondp_try_handle_health_check_cr(bdp_ctx, idx, cr);
         return CONVERT_SKIP;
     } else if (is_fake_cr(cr)) {
         return handle_fake_cr_with_store(bdp_ctx, idx, cr);
