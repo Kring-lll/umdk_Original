@@ -36,6 +36,7 @@
 
 #define BONDP_ENV_ENABLE_FAILOVER                 "BOND_ENABLE_FAILOVER"
 #define BONDP_ENV_ENABLE_FAILBACK                 "BOND_ENABLE_FAILBACK"
+#define BONDP_ENV_ENABLE_BACKUP_PJETTY            "BOND_ENABLE_BACKUP_PJETTY"
 #define BONDP_ENV_ENABLE_HEALTH_CHECK             "BOND_ENABLE_HEALTH_CHECK"
 #define BONDP_ENV_HEALTH_CHECK_BACKUP_START       "BOND_HEALTH_CHECK_BACKUP_START"
 #define BONDP_ENV_HEALTH_CHECK_BACKUP_INTERVAL    "BOND_HEALTH_CHECK_BACKUP_INTERVAL"
@@ -244,6 +245,7 @@ static void read_all_env(bondp_global_context_t *ctx)
     bondp_health_thread_ctx_t *thread_ctx = &ctx->health_thread_ctx;
     const bool default_enable_health_check = false;
     const bool default_enable_failback = false;
+    const bool default_enable_backup_pjetty = false;
     const bool default_enable_failover = true;
     const uint64_t default_health_check_backup_start_ms = 2000;
     const uint64_t default_health_check_backup_interval_ms = 32000;
@@ -258,6 +260,8 @@ static void read_all_env(bondp_global_context_t *ctx)
         BONDP_ENV_ENABLE_FAILOVER, default_enable_failover);
     ctx->enable_failback = read_env_bool(
         BONDP_ENV_ENABLE_FAILBACK, default_enable_failback);
+    ctx->enable_backup_pjetty = read_env_bool(
+        BONDP_ENV_ENABLE_BACKUP_PJETTY, default_enable_backup_pjetty);
     cfg->backup_start_ms = read_env_uint64(
         BONDP_ENV_HEALTH_CHECK_BACKUP_START, default_health_check_backup_start_ms);
     cfg->backup_interval_ms = read_env_uint64(
@@ -319,11 +323,13 @@ static void print_all_env(const bondp_global_context_t *ctx)
     const bondp_health_thread_ctx_t *thread_ctx = &ctx->health_thread_ctx;
     const bondp_health_check_cfg_t *cfg = &thread_ctx->cfg;
 
-    URMA_LOG_INFO("Health check config: enable_failover=%s, enable_failback=%s, enable_health_check=%s, "
+    URMA_LOG_INFO("Health check config: enable_failover=%s, enable_failback=%s, enable_backup_pjetty=%s, "
+                  "enable_health_check=%s, "
                   "health_check_backup: start=%lums, interval=%lums, "
                   "health_check_active: start=%lums, interval=%lums, max_backoff=%u\n",
                   ctx->enable_failover ? "true" : "false",
                   ctx->enable_failback ? "true" : "false",
+                  ctx->enable_backup_pjetty ? "true" : "false",
                   thread_ctx->enable_health_check ? "true" : "false",
                   cfg->backup_start_ms,
                   cfg->backup_interval_ms,

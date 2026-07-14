@@ -51,6 +51,7 @@ typedef struct bondp_nl_fb_result {
 typedef struct bondp_fb_task_key {
     uint32_t vjetty_id;
     uint32_t pjetty_idx;
+    bondp_fb_which_t which;
 } bondp_fb_task_key_t;
 
 typedef struct bondp_fb_task {
@@ -61,6 +62,7 @@ typedef struct bondp_fb_task {
     uint32_t request_id;
     uint32_t vjetty_id;
     uint32_t pjetty_idx;
+    bondp_fb_which_t which;
 } bondp_fb_task_t;
 
 struct bondp_fb_ctx {
@@ -75,11 +77,9 @@ struct bondp_fb_ctx {
 
 #define BONDP_FB_TASK_HASH_BASIS    0x9d4f21U
 #define BONDP_FB_TASK_TABLE_SIZE    1024U
-/* Delay (ms) before rebuilding a failed-back pjetty on the bond worker. */
+/* Delay (ms) before running failover recovery (switch to backup pjetty and/or
+ * rebuild the failed pjetty) on the bond worker. */
 #define BONDP_FB_REBUILD_DELAY_MS   2000U
-/* Delay (ms) before publishing the rebuild_done flag after a rebuild; the
- * worker enforces a minimum of one tick. */
-#define BONDP_FB_MARK_DONE_DELAY_MS 0U
 
 static uint32_t next_request_id(bondp_fb_ctx_t *fb_ctx)
 {
@@ -105,7 +105,8 @@ static bool fb_task_matches_key(const struct ub_hmap_node *node, const bondp_fb_
     const bondp_fb_task_t *fb_task = CONTAINER_OF_FIELD(node, bondp_fb_task_t, hmap_node);
 
     return fb_task->vjetty_id == key->vjetty_id &&
-           fb_task->pjetty_idx == key->pjetty_idx;
+           fb_task->pjetty_idx == key->pjetty_idx &&
+           fb_task->which == key->which;
 }
 
 static uint32_t fb_task_hash_key(const bondp_fb_task_key_t *key)
@@ -164,14 +165,6 @@ static bondp_fb_task_t *fb_task_get(bondp_fb_ctx_t *fb_ctx, const bondp_fb_task_
     return NULL;
 }
 
-static void fb_task_set_worker_task_id(bondp_fb_ctx_t *fb_ctx, bondp_fb_task_t *fb_task,
-                                       bondp_worker_task_id_t worker_task_id)
-{
-    (void)pthread_rwlock_wrlock(&fb_ctx->task_lock);
-    fb_task->worker_task_id = worker_task_id;
-    (void)pthread_rwlock_unlock(&fb_ctx->task_lock);
-}
-
 static int fb_task_del(bondp_fb_ctx_t *fb_ctx, const bondp_fb_task_key_t *key);
 
 static void fb_task_table_destroy(bondp_fb_ctx_t *fb_ctx)
@@ -179,36 +172,31 @@ static void fb_task_table_destroy(bondp_fb_ctx_t *fb_ctx)
     bondp_fb_task_t *fb_task = NULL;
     bondp_fb_task_t *next = NULL;
 
-    /* A rebuild task can only transition once, to a mark-done task. */
-    for (uint32_t round = 0; round < 2; round++) {
-        size_t task_num = 0;
-
-        (void)pthread_rwlock_rdlock(&fb_ctx->task_lock);
-        uint32_t task_count = ub_hmap_count(&fb_ctx->task_map);
-        if (task_count == 0) {
-            (void)pthread_rwlock_unlock(&fb_ctx->task_lock);
-            break;
-        }
-
+    /* Each failover recovery task is a single worker callback; cancel all
+     * scheduled tasks before draining the table. */
+    size_t task_num = 0;
+    (void)pthread_rwlock_rdlock(&fb_ctx->task_lock);
+    uint32_t task_count = ub_hmap_count(&fb_ctx->task_map);
+    if (task_count == 0) {
+        (void)pthread_rwlock_unlock(&fb_ctx->task_lock);
+    } else {
         bondp_worker_task_id_t *task_ids = calloc(task_count, sizeof(*task_ids));
         if (task_ids == NULL) {
             (void)pthread_rwlock_unlock(&fb_ctx->task_lock);
-            URMA_LOG_WARN("Failed to allocate failback task IDs.\n");
-            break;
-        }
-
-        HMAP_FOR_EACH (fb_task, hmap_node, &fb_ctx->task_map) {
-            if (fb_task->worker_task_id != 0) {
-                task_ids[task_num++] = fb_task->worker_task_id;
+            URMA_LOG_WARN("Failed to allocate failover recovery task IDs.\n");
+        } else {
+            HMAP_FOR_EACH (fb_task, hmap_node, &fb_ctx->task_map) {
+                if (fb_task->worker_task_id != 0) {
+                    task_ids[task_num++] = fb_task->worker_task_id;
+                }
             }
-        }
-        (void)pthread_rwlock_unlock(&fb_ctx->task_lock);
+            (void)pthread_rwlock_unlock(&fb_ctx->task_lock);
 
-        int ret = task_num == 0 ? 0 : bondp_worker_cancel_batch(task_ids, task_num);
-        free(task_ids);
-        if (ret != 0) {
-            URMA_LOG_WARN("Failed to cancel failback tasks, ret=%d.\n", ret);
-            break;
+            int ret = task_num == 0 ? 0 : bondp_worker_cancel_batch(task_ids, task_num);
+            free(task_ids);
+            if (ret != 0) {
+                URMA_LOG_WARN("Failed to cancel failover recovery tasks, ret=%d.\n", ret);
+            }
         }
     }
 
@@ -314,6 +302,55 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
     return 0;
 }
 
+/* Rebuild the spare (backup) pjetty at idx in place. Mirrors bondp_rebuild_pjetty
+ * but operates on backup_pjetty[idx]. Called when the backup jetty itself fails
+ * while the send path is switched onto it (send_use_backup[idx]==true). */
+static int bondp_rebuild_backup_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
+{
+    int ret;
+
+    if (bdp_jetty == NULL || bdp_jetty->bondp_ctx == NULL ||
+        local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return -1;
+    }
+
+    bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
+
+    urma_jetty_t *old_jetty = bdp_jetty->backup_pjetty[local_idx];
+    if (old_jetty == NULL) {
+        URMA_LOG_ERR("backup pjetty at idx=%u is NULL, cannot rebuild\n", local_idx);
+        return -1;
+    }
+    urma_jetty_cfg_t p_cfg = old_jetty->jetty_cfg;
+    urma_jetty_id_t old_id = old_jetty->jetty_id;
+
+    urma_jetty_t *new_jetty = urma_create_jetty(bdp_ctx->p_ctxs[local_idx], &p_cfg);
+    if (new_jetty == NULL) {
+        URMA_LOG_ERR("Failed to recreate backup pjetty at idx=%d\n", local_idx);
+        return -1;
+    }
+
+    new_jetty->remote_jetty = NULL;
+    new_jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+    bdp_jetty->backup_pjetty[local_idx] = new_jetty;
+
+    ret = bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty);
+    if (ret != 0) {
+        bdp_jetty->backup_pjetty[local_idx] = old_jetty;
+        (void)urma_delete_jetty(new_jetty);
+        return -1;
+    }
+
+    ret = urma_delete_jetty(old_jetty);
+    if (ret != URMA_SUCCESS) {
+        URMA_LOG_WARN("Failed to delete old backup pjetty at idx=%d\n", local_idx);
+    }
+
+    URMA_LOG_INFO("Backup pjetty rebuilt, idx=%d old=" URMA_JETTY_ID_FMT " new=" URMA_JETTY_ID_FMT "\n",
+                  local_idx, URMA_JETTY_ID_ARGS(&old_id), URMA_JETTY_ID_ARGS(&new_jetty->jetty_id));
+    return 0;
+}
+
 static bondp_comp_t *bondp_find_jetty_by_vjetty_id(bondp_context_t *bond_ctx, uint32_t vjetty_id)
 {
     bondp_comp_t *bdp_jetty = NULL;
@@ -340,38 +377,19 @@ typedef struct bondp_fb_async_arg {
     bondp_fb_task_key_t key;
 } bondp_fb_async_arg_t;
 
-typedef struct bondp_fb_mark_done_arg {
-    bondp_fb_ctx_t *fb_ctx;
-    bondp_fb_task_key_t key;
-    bondp_fb_task_t *fb_task;
-    bondp_comp_t *bdp_jetty;
-    uint32_t pjetty_idx;
-} bondp_fb_mark_done_arg_t;
-
-static void bondp_mark_rebuild_done_async(bondp_worker_task_reason_t reason, void *arg)
-{
-    bondp_fb_mark_done_arg_t *arg_typed = arg;
-
-    if (arg_typed == NULL) {
-        return;
-    }
-
-    if (reason == BONDP_WORKER_TASK_EXECUTED && arg_typed->bdp_jetty != NULL &&
-        arg_typed->pjetty_idx < URMA_UBAGG_DEV_MAX_NUM) {
-        atomic_store(&arg_typed->bdp_jetty->rebuild_done[arg_typed->pjetty_idx], true);
-    }
-
-    if (arg_typed->fb_ctx != NULL) {
-        (void)fb_task_del(arg_typed->fb_ctx, &arg_typed->key);
-    }
-
-    if (arg_typed->fb_task != NULL) {
-        fb_task_put(arg_typed->fb_task);
-    }
-    free(arg_typed);
-}
-
-static void bondp_rebuild_pjetty_async(bondp_worker_task_reason_t reason, void *arg)
+/*
+ * Failover recovery worker callback.
+ *
+ * Triggered by the CR failover handler after it invalidated the failed pjetty
+ * (valid[send_idx]=false) and resent the in-flight WRs on an alternate route.
+ * The recovery then either:
+ *   - switch on  (enable_backup_pjetty): switch the send path to the
+ *     pre-created spare pjetty (valid=true immediately, send_use_backup=true),
+ *     rebuild the failed pjetty in place, then switch the send path back to the
+ *     rebuilt pjetty (send_use_backup=false). The spare stays for the next fault.
+ *   - switch off: rebuild the failed pjetty in place, then re-arm valid=true.
+ */
+static void bondp_failover_recover_async(bondp_worker_task_reason_t reason, void *arg)
 {
     bondp_fb_async_arg_t *arg_typed = (bondp_fb_async_arg_t *)arg;
     if (arg_typed == NULL) {
@@ -395,44 +413,85 @@ static void bondp_rebuild_pjetty_async(bondp_worker_task_reason_t reason, void *
     }
     bondp_comp_t *bdp_jetty = bondp_find_jetty_by_vjetty_id(fb_task->bond_ctx, fb_task->vjetty_id);
     if (bdp_jetty == NULL) {
-        URMA_LOG_ERR("Failed to rebuild failback pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
+        URMA_LOG_ERR("Failed to recover failover pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
                      fb_task->vjetty_id, fb_task->pjetty_idx);
         goto del_task;
     }
+    uint32_t pjetty_idx = fb_task->pjetty_idx;
+    bool use_backup = g_bondp_global_ctx != NULL &&
+                      g_bondp_global_ctx->enable_backup_pjetty &&
+                      bdp_jetty->comp_type == BONDP_COMP_JETTY &&
+                      bdp_jetty->backup_pjetty[pjetty_idx] != NULL;
 
-    int ret = bondp_rebuild_pjetty(bdp_jetty, (int)fb_task->pjetty_idx);
-    if (ret != 0) {
-        URMA_LOG_ERR("Failed to rebuild failback pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
-                     fb_task->vjetty_id, fb_task->pjetty_idx);
-        goto del_task;
+    if (fb_task->which == BONDP_FB_PRIMARY) {
+        /* Primary pjetty failure. */
+        if (use_backup) {
+            /* Switch the send path to the spare pjetty and re-arm valid so that
+             * posting resumes immediately while the failed pjetty is rebuilt. */
+            (void)pthread_spin_lock(&bdp_jetty->send_lock);
+            atomic_store(&bdp_jetty->send_use_backup[pjetty_idx], true);
+            atomic_store(&bdp_jetty->valid[pjetty_idx], true);
+            (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+            URMA_LOG_INFO("Failover switched to backup pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
+                          fb_task->vjetty_id, pjetty_idx);
+        }
+
+        /* Rebuild the failed primary pjetty in place (destroys the failed jetty,
+         * creates a fresh one, updates the id mapping). While send_use_backup is
+         * true the send path never dereferences p_jetty[idx]. */
+        int ret = bondp_rebuild_pjetty(bdp_jetty, (int)pjetty_idx);
+        if (ret != 0) {
+            URMA_LOG_ERR("Failed to rebuild failover pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
+                         fb_task->vjetty_id, pjetty_idx);
+            /* On failure: with backup, send stays on the spare (valid already
+             * true); without backup, the failed idx stays invalid. Either way,
+             * leave it for a later recovery. */
+            goto del_task;
+        }
+
+        if (use_backup) {
+            /* The rebuilt primary pjetty is now healthy; switch the send path
+             * back to it and explicitly re-arm valid (a concurrent backup
+             * failure may have cleared it). The spare stays ready. */
+            (void)pthread_spin_lock(&bdp_jetty->send_lock);
+            atomic_store(&bdp_jetty->send_use_backup[pjetty_idx], false);
+            atomic_store(&bdp_jetty->valid[pjetty_idx], true);
+            (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+            URMA_LOG_INFO("Failover switched back to rebuilt pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
+                          fb_task->vjetty_id, pjetty_idx);
+        } else {
+            /* Switch-off path: rebuild succeeded, re-arm the failed idx. */
+            atomic_store(&bdp_jetty->valid[pjetty_idx], true);
+        }
+        /* Signal try_failback (on the next post_send) to re-route in-flight WRs
+         * onto the rebuilt primary path. */
+        atomic_store(&bdp_jetty->rebuild_done[pjetty_idx], true);
+    } else {
+        /* Backup pjetty failure (only reachable when use_backup is true, since
+         * the send path must have been posting to the spare to observe its
+         * failure). Rebuild the spare in place. */
+        int ret = bondp_rebuild_backup_pjetty(bdp_jetty, (int)pjetty_idx);
+        if (ret != 0) {
+            URMA_LOG_ERR("Failed to rebuild backup pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
+                         fb_task->vjetty_id, pjetty_idx);
+            /* The spare stays unusable; the primary recovery (if pending) will
+             * re-arm valid when it switches back to the primary. */
+            goto del_task;
+        }
+        /* If the send path is still on the spare (primary not yet rebuilt),
+         * re-arm valid so posting resumes on the now-healthy spare. If the
+         * primary already recovered and switched back (send_use_backup false),
+         * it owns valid -- do not touch it. */
+        (void)pthread_spin_lock(&bdp_jetty->send_lock);
+        if (atomic_load(&bdp_jetty->send_use_backup[pjetty_idx])) {
+            atomic_store(&bdp_jetty->valid[pjetty_idx], true);
+        }
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+        /* Signal try_failback to re-route in-flight WRs onto the rebuilt spare. */
+        atomic_store(&bdp_jetty->rebuild_done[pjetty_idx], true);
+        URMA_LOG_INFO("Backup pjetty recovered, vjetty_id=%u, pjetty_idx=%u.\n",
+                      fb_task->vjetty_id, pjetty_idx);
     }
-
-    bondp_fb_mark_done_arg_t *mark_arg = calloc(1, sizeof(*mark_arg));
-    if (mark_arg == NULL) {
-        URMA_LOG_ERR("Failed to alloc mark-done arg, vjetty_id=%u, pjetty_idx=%u, flag stays unset.\n",
-                     fb_task->vjetty_id, fb_task->pjetty_idx);
-        goto del_task;
-    }
-    mark_arg->fb_ctx = fb_ctx;
-    mark_arg->key = arg_typed->key;
-    mark_arg->fb_task = fb_task;
-    mark_arg->bdp_jetty = bdp_jetty;
-    mark_arg->pjetty_idx = fb_task->pjetty_idx;
-
-    uint64_t mark_done_task_id = 0;
-    ret = bondp_worker_schedule(BONDP_FB_MARK_DONE_DELAY_MS, bondp_mark_rebuild_done_async,
-                                mark_arg, &mark_done_task_id);
-    if (ret != 0) {
-        URMA_LOG_ERR("Failed to schedule mark-done task, vjetty_id=%u, pjetty_idx=%u, ret=%d\n",
-                     fb_task->vjetty_id, fb_task->pjetty_idx, ret);
-        free(mark_arg);
-        goto del_task;
-    }
-    fb_task_set_worker_task_id(fb_ctx, fb_task, mark_done_task_id);
-
-    /* The mark-done task now owns fb_task; only free arg_typed and return. */
-    free(arg_typed);
-    return;
 
 del_task:
     (void)fb_task_del(fb_ctx, &arg_typed->key);
@@ -442,7 +501,8 @@ free_arg:
     return;
 }
 
-int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx)
+int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx,
+                      bondp_fb_which_t which)
 {
     if (bond_ctx == NULL || bond_ctx->fb_ctx == NULL) {
         return -EINVAL;
@@ -458,11 +518,13 @@ int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pj
     fb_task->request_id = next_request_id(fb_ctx);
     fb_task->vjetty_id = vjetty_id;
     fb_task->pjetty_idx = pjetty_idx;
+    fb_task->which = which;
     atomic_init(&fb_task->use_cnt.atomic_cnt, 1);
 
     bondp_fb_task_key_t key = {
         .vjetty_id = vjetty_id,
         .pjetty_idx = pjetty_idx,
+        .which = which,
     };
     uint32_t hash = fb_task_hash_key(&key);
     bondp_fb_async_arg_t *async_arg = calloc(1, sizeof(*async_arg));
@@ -485,11 +547,11 @@ int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pj
     }
 
     ub_hmap_insert(&fb_ctx->task_map, &fb_task->hmap_node, hash);
-    ret = bondp_worker_schedule(BONDP_FB_REBUILD_DELAY_MS, bondp_rebuild_pjetty_async, async_arg,
+    ret = bondp_worker_schedule(BONDP_FB_REBUILD_DELAY_MS, bondp_failover_recover_async, async_arg,
                                 &fb_task->worker_task_id);
     if (ret != 0) {
         ub_hmap_remove(&fb_ctx->task_map, &fb_task->hmap_node);
-        URMA_LOG_ERR("Failed to schedule failback task, vjetty_id=%u, pjetty_idx=%u, ret=%d.\n",
+        URMA_LOG_ERR("Failed to schedule failover recovery task, vjetty_id=%u, pjetty_idx=%u, ret=%d.\n",
                      vjetty_id, pjetty_idx, ret);
     }
 
@@ -516,28 +578,23 @@ void bondp_fb_cancel_tasks(bondp_context_t *bond_ctx, uint32_t vjetty_id)
     }
     fb_ctx = bond_ctx->fb_ctx;
 
-    /* A rebuild task can only transition once, to a mark-done task. */
-    for (uint32_t round = 0; round < 2; round++) {
-        task_num = 0;
-        (void)pthread_rwlock_rdlock(&fb_ctx->task_lock);
-        HMAP_FOR_EACH (fb_task, hmap_node, &fb_ctx->task_map) {
-            if (fb_task->vjetty_id == vjetty_id && fb_task->worker_task_id != 0 &&
-                task_num < URMA_UBAGG_DEV_MAX_NUM) {
-                task_ids[task_num++] = fb_task->worker_task_id;
-            }
+    /* Each failover recovery task is a single worker callback. */
+    (void)pthread_rwlock_rdlock(&fb_ctx->task_lock);
+    HMAP_FOR_EACH (fb_task, hmap_node, &fb_ctx->task_map) {
+        if (fb_task->vjetty_id == vjetty_id && fb_task->worker_task_id != 0 &&
+            task_num < URMA_UBAGG_DEV_MAX_NUM) {
+            task_ids[task_num++] = fb_task->worker_task_id;
         }
-        (void)pthread_rwlock_unlock(&fb_ctx->task_lock);
-        if (task_num == 0) {
-            return;
-        }
+    }
+    (void)pthread_rwlock_unlock(&fb_ctx->task_lock);
+    if (task_num == 0) {
+        return;
+    }
 
-        int ret = bondp_worker_cancel_batch(task_ids, task_num);
-        if (ret != 0) {
-            URMA_LOG_WARN("Failed to cancel jetty failback tasks, vjetty_id=%u, ret=%d.\n",
-                          vjetty_id, ret);
-            return;
-        }
-        /* The second round cancels a mark-done task installed by an executing rebuild. */
+    int ret = bondp_worker_cancel_batch(task_ids, task_num);
+    if (ret != 0) {
+        URMA_LOG_WARN("Failed to cancel jetty failover recovery tasks, vjetty_id=%u, ret=%d.\n",
+                      vjetty_id, ret);
     }
 }
 
