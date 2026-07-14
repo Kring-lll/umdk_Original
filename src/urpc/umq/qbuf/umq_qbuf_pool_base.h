@@ -452,7 +452,11 @@ static ALWAYS_INLINE void release_thread_cache_impl(
     }
 
     (void)pthread_spin_lock(&tls_pools->tls_stats_lock);
-    urpc_list_remove(&thread_cache->tls_node);
+    // Only unlink when the node is actually still in the list. Guards against a double release and against
+    // removing a node that was never (re-)registered, either of which would corrupt the list.
+    if (urpc_list_is_in_list(&thread_cache->tls_node)) {
+        urpc_list_remove(&thread_cache->tls_node);
+    }
     (void)pthread_spin_unlock(&tls_pools->tls_stats_lock);
 
     local_block_pool_t *local_pool = get_thread_local_cache(thread_cache, tls_pools);

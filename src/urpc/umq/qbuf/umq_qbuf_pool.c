@@ -82,8 +82,22 @@ typedef struct qbuf_pool {
 } qbuf_pool_t;
 
 static qbuf_pool_t g_qbuf_pool = {0};
-static __thread thread_local_qbuf_pool_t g_thread_cache = {0};
+// The per-thread cache is heap-allocated and referenced only through this TLS pointer. Its urpc_list node is
+// linked into the process-wide tls_register_head list; keeping the cache on the heap (instead of in __thread
+// storage that is unmapped on thread exit) guarantees the list never holds a dangling node, even if a thread
+// terminates without running its release closure.
+static __thread thread_local_qbuf_pool_t *g_thread_cache = NULL;
+// Sticky per-thread flag: once the cache is released during thread teardown, never allocate/register it again.
+static __thread bool g_thread_cache_released = false;
 static uint8_t g_umq_qbuf_size_pow_small = UMQ_QBUF_SIZE_POW_4K;
+
+static thread_local_qbuf_pool_t *umq_thread_cache_get(void)
+{
+    if (g_thread_cache == NULL && !g_thread_cache_released) {
+        g_thread_cache = (thread_local_qbuf_pool_t *)calloc(1, sizeof(*g_thread_cache));
+    }
+    return g_thread_cache;
+}
 
 // --- global registry and capacity counters for elastic scaling ---
 static volatile uint64_t g_total_local_cap_with_data = 0;     // sum of all threads' capacity_with_data
@@ -576,15 +590,22 @@ void umq_qbuf_config_get(qbuf_pool_cfg_t *cfg)
 // release all thread cache to global pool. should be called when thread exits
 static void release_thread_cache(uint64_t id)
 {
-    if (!g_qbuf_pool.base.inited || !g_thread_cache.inited) {
+    thread_local_qbuf_pool_t *cache = g_thread_cache;
+    if (!g_qbuf_pool.base.inited || cache == NULL || !cache->inited) {
         return;
     }
 
-    release_thread_cache_impl(&g_thread_cache, &g_qbuf_pool.base.tls_pools, &g_qbuf_pool.base.block_pool);
+    release_thread_cache_impl(cache, &g_qbuf_pool.base.tls_pools, &g_qbuf_pool.base.block_pool);
 
-    __atomic_fetch_sub(&g_total_local_cap_with_data, g_thread_cache.block_pool.capacity_with_data, __ATOMIC_ACQ_REL);
-    __atomic_fetch_sub(&g_total_local_cap_without_data, g_thread_cache.block_pool.capacity_without_data,
+    __atomic_fetch_sub(&g_total_local_cap_with_data, cache->block_pool.capacity_with_data, __ATOMIC_ACQ_REL);
+    __atomic_fetch_sub(&g_total_local_cap_without_data, cache->block_pool.capacity_without_data,
         __ATOMIC_ACQ_REL);
+
+    // The node has been unlinked from the global list; free the heap cache and prevent any re-registration
+    // during the remaining thread teardown.
+    g_thread_cache = NULL;
+    g_thread_cache_released = true;
+    free(cache);
 }
 
 static void umq_qbuf_exp_pool_inner_uninit(qbuf_expansion_pool_t *exp_pool, bool with_data)
@@ -874,14 +895,14 @@ static ALWAYS_INLINE int umq_qbuf_local_pool_fetch_and_expand(
     if (with_data) {
         cap = &local_pool->capacity_with_data;
         g_total = &g_total_local_cap_with_data;
-        stats_fetch_buf_cnt = &g_thread_cache.stats.tls_fetch_buf_cnt_with_data;
+        stats_fetch_buf_cnt = &g_thread_cache->stats.tls_fetch_buf_cnt_with_data;
 
         local_buf_cnt = &local_pool->buf_cnt_with_data;
         local_head = &local_pool->head_with_data;
     } else {
         cap = &local_pool->capacity_without_data;
         g_total = &g_total_local_cap_without_data;
-        stats_fetch_buf_cnt = &g_thread_cache.stats.tls_fetch_buf_cnt_without_data;
+        stats_fetch_buf_cnt = &g_thread_cache->stats.tls_fetch_buf_cnt_without_data;
 
         local_buf_cnt = &local_pool->buf_cnt_without_data;
         local_head = &local_pool->head_without_data;
@@ -940,7 +961,7 @@ static ALWAYS_INLINE void thread_cache_self_shrink(bool with_data)
     } else {
         g_total = &g_total_local_cap_without_data;
     }
-    qbuf_tls_capacity_self_shrink(&g_qbuf_pool.base.block_pool, &g_thread_cache, with_data, g_total,
+    qbuf_tls_capacity_self_shrink(&g_qbuf_pool.base.block_pool, g_thread_cache, with_data, g_total,
         umq_qbuf_pool_shrink_threshold());
 }
 
@@ -1133,7 +1154,7 @@ int umq_normal_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_
         .num = num,
         .list = list,
     };
-    int ret = umq_qbuf_base_alloc(&g_qbuf_pool.base, &g_thread_cache, option, &param);
+    int ret = umq_qbuf_base_alloc(&g_qbuf_pool.base, umq_thread_cache_get(), option, &param);
     if (ret == UMQ_SUCCESS) {
         return UMQ_SUCCESS;
     }
@@ -1162,7 +1183,7 @@ void umq_qbuf_free(umq_buf_list_t *list)
         return;
     }
 
-    umq_qbuf_base_free(&g_qbuf_pool.base, &g_thread_cache, list, false);
+    umq_qbuf_base_free(&g_qbuf_pool.base, umq_thread_cache_get(), list, false);
 }
 
 int umq_qbuf_headroom_reset(umq_buf_t *qbuf, uint16_t headroom_size)
