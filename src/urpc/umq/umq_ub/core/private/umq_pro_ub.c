@@ -1907,7 +1907,6 @@ static int umq_ub_poll_tx_round_robin(ub_queue_t *queue, umq_buf_t **buf, uint32
         start_idx = 0;
     }
     uint32_t current_idx = start_idx;
-    bool next_poll_idx_updated = false;
     bool wrapped = false;
     for (uint32_t scanned = 0; scanned < jetty_node_list->list_len && (uint32_t)qbuf_cnt < buf_count; scanned++) {
         current_idx = (uint32_t)urpc_bitmap_find_next_bit(jetty_node_list->bitmap,
@@ -1936,7 +1935,7 @@ static int umq_ub_poll_tx_round_robin(ub_queue_t *queue, umq_buf_t **buf, uint32
         option->tp_handle_idx = current_idx;
         uint32_t remaining = buf_count - (uint32_t)qbuf_cnt;
         uint32_t poll_batch = remaining > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : remaining;
-        int result = umq_ub_poll_tx_single(queue, buf, buf_count - qbuf_cnt, option);
+        int result = umq_ub_poll_tx_single(queue, buf, poll_batch, option);
         if (result < 0) {
             current_idx++;
             continue;
@@ -1966,7 +1965,6 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
 
     uint64_t poll_start = umq_trace_start_timestamp_get();
     umq_trace_start_record(UMQ_TRACE_TYPE_POLL, poll_start, 0, queue->umq_id);
-    uint32_t tp_handle_idx = option->tp_handle_idx;
     if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
         ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) == 0)) {
         qbuf_cnt = umq_ub_poll_tx_round_robin(queue, buf, buf_count, option);
