@@ -528,6 +528,7 @@ void umq_uninit(void)
     g_umq_config_mutex_lock = NULL;
     util_external_mutex_lock_ops_register(NULL);
     util_external_rwlock_ops_register(NULL);
+    util_thread_key_ops_register(NULL);
 }
 
 #ifndef UMQ_STATIC_LIB
@@ -1647,6 +1648,23 @@ int umq_external_rwlock_ops_register(umq_external_rwlock_ops_t *ops)
     util_ops.try_read_lock = (int (*)(util_external_rwlock *m))ops->try_read_lock;
     util_ops.try_write_lock = (int (*)(util_external_rwlock *m))ops->try_write_lock;
     util_external_rwlock_ops_register(&util_ops);
+    return UMQ_SUCCESS;
+}
+
+int umq_external_thread_key_ops_register(umq_external_thread_key_ops_t *ops)
+{
+    if (ops == NULL || ops->key_create == NULL || ops->key_delete == NULL || ops->setspecific == NULL ||
+        ops->getspecific == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    util_thread_key_ops_t util_ops;
+    util_ops.key_create = (util_thread_key_t *(*)(void  (*destr_function)(void *data)))ops->key_create;
+    util_ops.key_delete = (int (*)(util_thread_key_t *key))ops->key_delete;
+    util_ops.setspecific = (int (*)(util_thread_key_t *key, const void *data))ops->setspecific;
+    util_ops.getspecific = (int (*)(util_thread_key_t *key))ops->getspecific;
+    util_thread_key_ops_register(&util_ops);
     return UMQ_SUCCESS;
 }
 
