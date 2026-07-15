@@ -1952,7 +1952,10 @@ static int umq_ub_poll_tx_round_robin(ub_queue_t *queue, umq_buf_t **buf, uint32
         option->tp_handle_idx = current_idx;
         uint32_t remaining = buf_count - (uint32_t)qbuf_cnt;
         uint32_t poll_batch = remaining > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : remaining;
-        int result = umq_ub_poll_tx_single(queue, buf, poll_batch, option);
+        if (qbuf_cnt >= buf_count) {
+            break;
+        }
+        int result = umq_ub_poll_tx_single(queue, &buf[qbuf_cnt], poll_batch, option);
         if (result < 0) {
             current_idx++;
             continue;
@@ -1964,9 +1967,7 @@ static int umq_ub_poll_tx_round_robin(ub_queue_t *queue, umq_buf_t **buf, uint32
         __atomic_store_n(&jetty_node_list->next_poll_idx, next_idx, __ATOMIC_RELEASE);
         qbuf_cnt += result;
         current_idx++;
-
     }
-
     util_mutex_unlock(jetty_node_list->lock);
 
     return qbuf_cnt;
@@ -1977,11 +1978,9 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
     if (buf_count == 0) {
         return 0;
     }
+
     int32_t qbuf_cnt = 0;
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
-
-    uint64_t poll_start = umq_trace_start_timestamp_get();
-    umq_trace_start_record(UMQ_TRACE_TYPE_POLL, poll_start, 0, queue->umq_id);
     if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
         ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0)) {
         qbuf_cnt = umq_ub_poll_tx_round_robin(queue, buf, buf_count, option);
@@ -1989,6 +1988,5 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
         qbuf_cnt = umq_ub_poll_tx_single(queue, buf, buf_count, option);
     }
 
-    umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
     return qbuf_cnt;
 }
