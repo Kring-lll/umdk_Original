@@ -74,6 +74,7 @@ struct bondp_hc_ctx {
     atomic_uint_fast64_t probe_task_id;
     atomic_bool stopping; /* Set by uninit to stop the probe task from rescheduling */
     uint32_t probe_cur_idx; /* Current polling position for batched node probing */
+    uint32_t probe_cur_target_idx; /* Current start position for target_idx scan */
     uint32_t node_num;
     bondp_hc_node_t nodes[MAX_NODE_NUM];
 };
@@ -167,12 +168,10 @@ static void hc_drain_probe_cq(bondp_probe_res_t *res)
         res != &hc_ctx->probes[local_idx]) {
         return;
     }
-
     urma_jfc_t *jfc = res->jfc;
     urma_cr_t cr[HC_CQE_BATCH];
     bool need_rebuild = false;
     uint32_t drained = 0;
-
     /* Poll the CQ directly rather than going through urma_wait_jfc(jfce).
      * The wait() path is gated on a jfce fd event, which only fires for a CQ
      * that was armed; between two jfce events the worker keeps posting probes
@@ -186,7 +185,6 @@ static void hc_drain_probe_cq(bondp_probe_res_t *res)
             break;
         }
         drained += (uint32_t)n;
-
         for (int k = 0; k < n; k++) {
             uint32_t node_idx;
             uint32_t target_idx;
@@ -316,22 +314,23 @@ static bool hc_probe_sq_has_room(bondp_hc_ctx_t *hc_ctx)
     return false;
 }
 
-static void hc_probe_node(bondp_hc_ctx_t *hc_ctx, bondp_hc_node_t *node)
+/* Probe every local_idx path of a single node toward the given target_idx.
+ * Called once per (node, target_idx) from hc_probe_fn's target_idx loop; the
+ * caller drains the probe CQs after each target_idx so the SQ stays below the
+ * throttle limit. */
+static void hc_probe_node(bondp_hc_ctx_t *hc_ctx, bondp_hc_node_t *node, int target_idx)
 {
     pthread_rwlock_rdlock(&node->lock);
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
         if (hc_ctx->probes[i].inflight >= HC_PROBE_INFLIGHT_HI) {
             continue;
         }
-        for (int j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
-            if (node->hc_tjetty[i][j] == NULL) {
-                continue;
-            }
-            hc_probe_link(hc_ctx, node, i, j);
-            if (hc_ctx->probes[i].inflight >= HC_PROBE_INFLIGHT_HI) {
-                break;
-            }
+        if (node->hc_tjetty[i][target_idx] == NULL) {
+            continue;
         }
+        
+        URMA_LOG_ERR("hc_probe_node, target_idx=%d.\n", (int)target_idx);
+        hc_probe_link(hc_ctx, node, i, target_idx);
     }
     pthread_rwlock_unlock(&node->lock);
 }
@@ -350,30 +349,50 @@ static void hc_probe_fn(bondp_worker_task_reason_t reason, void *arg)
         return;
     }
 
-    /* Drain pending completions before posting new probes. The worker thread
-     * is single-threaded, so the jfce handler cannot run concurrently while
-     * hc_probe_fn is posting. Without this drain, the probe SQ (depth
-     * HC_PROBE_DEPTH) can overflow when a batch covers many nodes x paths,
-     * causing urma_post_jetty_send_wr to return ENOMEM and leaving the SQ
-     * wedged (completions never reaped). Draining here keeps the SQ below
-     * capacity and processes ACK-timeout rebuilds promptly. */
-    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        hc_drain_probe_cq(&hc_ctx->probes[i]);
-    }
-
+    /* Drive probing per target_idx: for each target_idx, probe every link of
+     * the current node batch toward that target (all local_idx), then drain
+     * the probe CQs so ACK-timeout jetties are rebuilt before moving on. The
+     * worker thread is single-threaded, so the jfce handler cannot run
+     * concurrently while hc_probe_fn is posting. Draining once per target_idx
+     * (instead of once up front) keeps the probe SQ (depth HC_PROBE_DEPTH) far
+     * below capacity even when a batch covers many nodes, avoiding the
+     * urma_post_jetty_send_wr ENOMEM / wedged-SQ path. */
     uint32_t probe_cnt = MIN(hc_ctx->cfg.probe_node_num, hc_ctx->node_num);
     uint32_t node_idx = hc_ctx->probe_cur_idx % hc_ctx->node_num;
-    for (uint32_t i = 0; i < probe_cnt; ++i) {
-        if (!hc_probe_sq_has_room(hc_ctx)) {
-            /* All local probe SQs are at the throttle limit; the remaining nodes
-             * will be probed on the next firing after the CQs are drained. */
-            break;
+    for (uint32_t t = 0; t < URMA_UBAGG_DEV_MAX_NUM; ++t) {
+        uint32_t target_idx = (hc_ctx->probe_cur_target_idx + t) % URMA_UBAGG_DEV_MAX_NUM;
+
+        /* Probe all links of this node batch toward the current target_idx. */
+        uint32_t cur = node_idx;
+        for (uint32_t i = 0; i < probe_cnt; ++i) {
+            if (!hc_probe_sq_has_room(hc_ctx)) {
+                /* All local probe SQs are at the throttle limit; the remaining
+                 * nodes for this target_idx will be picked up by the next
+                 * firing after the CQs are drained. */
+                break;
+            }
+            bondp_hc_node_t *node = &hc_ctx->nodes[cur];
+            hc_probe_node(hc_ctx, node, (int)target_idx);
+            cur = (cur + 1) % hc_ctx->node_num;
         }
-        bondp_hc_node_t *node = &hc_ctx->nodes[node_idx];
-        hc_probe_node(hc_ctx, node);
-        node_idx = (node_idx + 1) % hc_ctx->node_num;
+
+        /* All links toward this target_idx have been probed; drain every local
+         * probe CQ now. This reaps pending CQEs (advancing sq->ci, freeing SQ
+         * space for the next target_idx) and rebuilds any jetty whose CQE
+         * reported URMA_CR_ACK_TIMEOUT_ERR. */
+        usleep(200000);
+        for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+            hc_drain_probe_cq(&hc_ctx->probes[i]);
+        }
     }
-    hc_ctx->probe_cur_idx = node_idx;
+
+    /* Advance to the next node batch for the following firing. Each target_idx
+     * probed the same batch, so the batch is consumed once per firing. */
+    hc_ctx->probe_cur_idx = (node_idx + probe_cnt) % hc_ctx->node_num;
+    /* A full target_idx sweep (all URMA_UBAGG_DEV_MAX_NUM targets) completes
+     * every firing, so probe_cur_target_idx stays at the start; keep it
+     * normalized for safety. */
+    hc_ctx->probe_cur_target_idx %= URMA_UBAGG_DEV_MAX_NUM;
 
     /* Reschedule next global probe only if not being torn down. The
      * stopping flag is checked again to close the window between a concurrent
