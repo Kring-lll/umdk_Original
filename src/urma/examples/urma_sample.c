@@ -963,15 +963,19 @@ static int client_send(context_t *ctx)
     urma_cr_t cr;
     for (int i = 0; i < CR_NUM_A_ROUND; i++) {
         int cr_ret = poll_jfc_wait(ctx, &cr);
+        if (cr_ret != 0) {
+            fprintf(stderr, "Failed to poll jfc, cr_ret = %d\n", cr_ret);
+            return -1;
+        }
         if (cr.flag.bs.s_r == 0) {
-            if (cr_ret != 0 || cr.user_ctx != ctx->rid) {
-                fprintf(stderr, "Failed to poll jfc for send, cr_status:%d, cr_ret = %d\n", cr.status, cr_ret);
+            if (cr.user_ctx != ctx->rid) {
+                fprintf(stderr, "Failed to poll jfc for send, cr_status:%d\n", cr.status);
                 return -1;
             }
             printf("Msg sent: %s\n", (char *)ctx->va);
         } else {
-            if (cr_ret != 0 || cr.user_ctx != offset) {
-                fprintf(stderr, "Failed to recv response, cr_status:%d, cr_ret = %d\n", cr.status, cr_ret);
+            if (cr.user_ctx != offset) {
+                fprintf(stderr, "Failed to recv response, cr_status:%d\n", cr.status);
                 return -1;
             }
             printf("Response received: %s at offset %ld\n", (char *)(ctx->va + offset), offset);
