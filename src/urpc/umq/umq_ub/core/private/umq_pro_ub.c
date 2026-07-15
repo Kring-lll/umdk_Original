@@ -983,6 +983,9 @@ static bool is_umq_ub_req_enqueue(ub_queue_t *real_queue, umq_ub_imm_t *imm)
         return false;
     }
 
+    if (real_queue->flow_control.is_limited) {
+        return false;
+    }
     uint16_t credits_per_request = imm->flow_control.window;
     ub_credit_pool_t *pool = &real_queue->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
     uint16_t idle = __atomic_load_n(&pool->stats_u16[CREDIT_POOL_IDLE], __ATOMIC_ACQUIRE);
