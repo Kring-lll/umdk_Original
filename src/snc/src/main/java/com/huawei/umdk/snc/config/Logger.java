@@ -9,7 +9,7 @@
 package com.huawei.umdk.snc.config;
 
 public class Logger {
-    private static LogCallback callback;
+    private static volatile LogCallback callback;
 
     private final String tag;
 
