@@ -387,22 +387,37 @@ static int schedule_recv_balance(const bondp_comp_t *bdp_comp, int *recv_idx)
 {
     int least_load_idx = -1;
     uint32_t least_load = UINT32_MAX;
+    int fallback_idx = -1;
+    uint32_t fallback_load = UINT32_MAX;
 
     for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
         uint32_t active_idx = bdp_comp->active_indices[i];
         uint32_t rqe_cnt = bdp_comp->rqe_cnt[active_idx];
-        if (rqe_cnt < least_load) {
-            least_load = rqe_cnt;
-            least_load_idx = (int)active_idx;
+        if (atomic_load(&bdp_comp->valid[active_idx])) {
+            if (rqe_cnt < least_load) {
+                least_load = rqe_cnt;
+                least_load_idx = (int)active_idx;
+            }
+        } else {
+            /* Track least-loaded invalid port as fallback */
+            if (rqe_cnt < fallback_load) {
+                fallback_load = rqe_cnt;
+                fallback_idx = (int)active_idx;
+            }
         }
     }
 
-    if (least_load_idx < 0) {
-        return -1;
+    if (least_load_idx >= 0) {
+        *recv_idx = least_load_idx;
+        return 0;
     }
-
-    *recv_idx = least_load_idx;
-    return 0;
+    /* All ports invalid: fall back to least-loaded invalid port to avoid complete failure */
+    if (fallback_idx >= 0) {
+        URMA_LOG_WARN_RL("No valid port for recv, fallback to invalid port idx=%d\n", fallback_idx);
+        *recv_idx = fallback_idx;
+        return 0;
+    }
+    return -1;
 }
 
 int schedule_send(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp, int *send_idx, int *target_idx,
@@ -475,10 +490,30 @@ int schedule_recv_n(bondp_comp_t *bdp_comp, uint32_t wr_num, uint32_t recv_wr_cn
         return 0;
     }
 
+    /* In active_backup mode, all traffic goes through a single active port.
+     * Direct all RQEs to the first valid port to avoid wasting RQEs on inactive ports. */
+    if (bdp_comp->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP) {
+        for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
+            uint32_t active_idx = bdp_comp->active_indices[i];
+            if (atomic_load(&bdp_comp->valid[active_idx])) {
+                recv_wr_cnt[active_idx] = wr_num;
+                return 0;
+            }
+        }
+        /* All ports invalid: fall back to least-loaded port */
+        URMA_LOG_WARN_RL("active_backup: no valid port for recv, fallback to all ports\n");
+    }
+
+    /* Count valid ports; if none are valid, fall back to distributing across all ports */
+    uint32_t valid_count = 0;
     for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
         uint32_t active_idx = bdp_comp->active_indices[i];
         current_load[active_idx] = rqe_cnt[active_idx];
+        if (atomic_load(&bdp_comp->valid[active_idx])) {
+            valid_count++;
+        }
     }
+    bool skip_invalid = (valid_count > 0);
 
     for (uint32_t wr_idx = 0; wr_idx < wr_num; wr_idx++) {
         int least_load_idx = -1;
@@ -486,6 +521,9 @@ int schedule_recv_n(bondp_comp_t *bdp_comp, uint32_t wr_num, uint32_t recv_wr_cn
 
         for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
             uint32_t active_idx = bdp_comp->active_indices[i];
+            if (skip_invalid && !atomic_load(&bdp_comp->valid[active_idx])) {
+                continue;
+            }
             if (current_load[active_idx] < least_load) {
                 least_load = current_load[active_idx];
                 least_load_idx = (int)active_idx;
@@ -498,6 +536,11 @@ int schedule_recv_n(bondp_comp_t *bdp_comp, uint32_t wr_num, uint32_t recv_wr_cn
 
         recv_wr_cnt[least_load_idx]++;
         current_load[least_load_idx]++;
+    }
+
+    if (valid_count < bdp_comp->active_count) {
+        URMA_LOG_INFO("schedule_recv_n: valid=%u/%u, wr_num=%u, skip_invalid=%d\n",
+                      valid_count, bdp_comp->active_count, wr_num, skip_invalid);
     }
 
     return 0;

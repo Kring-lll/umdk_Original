@@ -149,6 +149,11 @@ static uint32_t get_rqe_prefill_multiple_simplex(
     if (!cfg->enable_bond_mode || cfg->bond_mode == BONDP_BONDING_MODE_STANDALONE) {
         return 1;
     }
+    /* In active_backup mode, all traffic goes through a single active port.
+     * RQEs are directed to that port only, so no need to multiply by active_count. */
+    if (cfg->bond_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP) {
+        return 1;
+    }
     /* The bonding device needs to issue RQE for active port multiples */
     if (strncmp(urma_ctx->dev->name, "bonding", strlen("bonding")) == 0) {
         bondp_query_port_in_t in_arg = {
@@ -176,6 +181,11 @@ static uint32_t get_rqe_prefill_multiple_duplex(
     const perftest_config_t *cfg, urma_context_t *urma_ctx, urma_jetty_t *jetty)
 {
     if (!cfg->enable_bond_mode || cfg->bond_mode == BONDP_BONDING_MODE_STANDALONE) {
+        return 1;
+    }
+    /* In active_backup mode, all traffic goes through a single active port.
+     * RQEs are directed to that port only, so no need to multiply by active_count. */
+    if (cfg->bond_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP) {
         return 1;
     }
     /* The bonding device needs to issue RQE for active port multiples */

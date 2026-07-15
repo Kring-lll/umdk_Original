@@ -926,7 +926,9 @@ static urma_status_t bondp_post_recv_wr_list_and_store(bondp_comp_t *bdp_comp, u
             success_node += (int)recv_cnt;
             continue;
         }
-        URMA_LOG_ERR("Failed to post recv wr, ret:%d\n", ret);
+        URMA_LOG_ERR("Failed to post recv wr, ret:%d, recv_idx=%d, recv_cnt=%u, rqe_cnt=%u, valid=%d\n",
+                     ret, recv_idx, recv_cnt, bdp_comp->rqe_cnt[recv_idx],
+                     atomic_load(&bdp_comp->valid[recv_idx]));
         int posted_node = 0;
         urma_jfr_wr_t *posted_wr = &wr_entries[success_node]->wr;
         while (posted_wr != NULL && bad_wr != NULL && posted_wr != *bad_wr) {
@@ -1001,6 +1003,9 @@ urma_status_t bondp_post_jetty_recv_wr(urma_jetty_t *jetty, urma_jfr_wr_t *wr, u
 
     if (is_single_dev_mode(bdp_jetty->bondp_ctx)) {
         ret = bondp_post_recv_wr_no_store(bdp_jetty, wr, bad_wr);
+    } else if (bdp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP) {
+        /* active_backup uses a single active port; skip WR entry tracking to reduce overhead */
+        ret = bondp_post_recv_wr_list_without_backup(bdp_jetty, wr, bad_wr);
     } else {
         ret = (bdp_jetty->bondp_ctx->msn_enable) ? bondp_post_recv_wr_list_and_store(bdp_jetty, wr, bad_wr)
                                                : bondp_post_recv_wr_list_without_backup(bdp_jetty, wr, bad_wr);
@@ -1031,6 +1036,9 @@ urma_status_t bondp_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_
 
     if (is_single_dev_mode(bdp_jfr->bondp_ctx)) {
         ret = bondp_post_recv_wr_no_store(bdp_jfr, wr, bad_wr);
+    } else if (bdp_jfr->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP) {
+        /* active_backup uses a single active port; skip WR entry tracking to reduce overhead */
+        ret = bondp_post_recv_wr_list_without_backup(bdp_jfr, wr, bad_wr);
     } else {
         ret = (bdp_jfr->bondp_ctx->msn_enable) ? bondp_post_recv_wr_list_and_store(bdp_jfr, wr, bad_wr)
                                              : bondp_post_recv_wr_list_without_backup(bdp_jfr, wr, bad_wr);
@@ -1296,7 +1304,9 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         atomic_store(&bdp_comp->valid[send_idx], false);
-        /* choose the failover route(0 or 1) through send_idx and target_idx */
+        URMA_LOG_INFO("Port marked invalid due to failover, send_idx=%u target_idx=%u cr_status=%u\n",
+                      send_idx, target_idx, cr->status);
+        /* choose the failover route(0 or 1) through send_idx */
         int new_send_idx = send_idx;
         int new_target_idx = target_idx;
         if (!g_bondp_global_ctx->enable_failover ||
@@ -1470,6 +1480,11 @@ static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int
     } else if (is_fake_cr(cr)) {
         return handle_fake_cr_with_store(bdp_ctx, idx, cr);
     } else if (is_recv_cr(cr)) {
+        /* active_backup recv WRs are posted via without_backup path (no WR entry tracking),
+         * so recv CRs must also use the without_backup handler. */
+        if (bdp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP) {
+            return handle_recv_cr_without_backup(bdp_ctx, idx, cr);
+        }
         return (bdp_ctx->msn_enable) ? handle_recv_cr_with_store(bdp_ctx, idx, cr)
                                    : handle_recv_cr_without_backup(bdp_ctx, idx, cr);
     } else {
