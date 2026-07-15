@@ -1983,7 +1983,7 @@ int umq_ub_poll_tx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
     uint64_t poll_start = umq_trace_start_timestamp_get();
     umq_trace_start_record(UMQ_TRACE_TYPE_POLL, poll_start, 0, queue->umq_id);
     if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
-        ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) == 0)) {
+        ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0)) {
         qbuf_cnt = umq_ub_poll_tx_round_robin(queue, buf, buf_count, option);
     } else {
         qbuf_cnt = umq_ub_poll_tx_single(queue, buf, buf_count, option);
