@@ -1952,7 +1952,10 @@ static int umq_ub_poll_tx_round_robin(ub_queue_t *queue, umq_buf_t **buf, uint32
         option->tp_handle_idx = current_idx;
         uint32_t remaining = buf_count - (uint32_t)qbuf_cnt;
         uint32_t poll_batch = remaining > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : remaining;
-        int result = umq_ub_poll_tx_single(queue, buf, poll_batch, option);
+        if (qbuf_cnt >= buf_count) {
+            break;
+        }
+        int result = umq_ub_poll_tx_single(queue, &buf[qbuf_cnt], poll_batch, option);
         if (result < 0) {
             current_idx++;
             continue;
