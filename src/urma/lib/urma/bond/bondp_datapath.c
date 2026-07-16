@@ -135,7 +135,15 @@ static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, int target
         ret = URMA_EINVAL;
     }
     if (ret == URMA_SUCCESS) {
-        atomic_fetch_add(&comp->sqe_cnt[send_idx][target_idx], wr_count);
+        const urma_jfs_wr_t *cur = send_wr;
+        int idx = 0;
+        while (idx < wr_count && cur != NULL) {
+            if (cur->flag.bs.complete_enable) {
+                atomic_fetch_add(&comp->sqe_cnt[send_idx][target_idx], 1);
+            }
+            ++idx;
+            cur = cur->next;
+        }
     }
     return ret;
 }
@@ -359,19 +367,19 @@ static void try_failback(bondp_comp_t *bdp_comp)
 
 static void bondp_translate_bad_wr(bondp_comp_t *bdp_comp, int send_idx, int target_idx,
                                    urma_jfs_wr_t *prealloc_wr_list, const urma_jfs_wr_t *wr,
-                                   urma_jfs_wr_t **bad_wr, int wr_total)
+                                   urma_jfs_wr_t **bad_wr)
 {
     int bad_idx = 0;
     urma_jfs_wr_t *pcur = prealloc_wr_list;
     while (pcur != NULL && pcur != *bad_wr) {
         bad_idx++;
+        if (pcur->flag.bs.complete_enable) {
+            atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+        }
         pcur = pcur->next;
     }
     if (pcur == NULL) {
         return;
-    }
-    if (bad_idx == wr_total) {
-        atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
     }
     urma_jfs_wr_t *user_cur = (urma_jfs_wr_t *)wr;
     for (int i = 0; i < bad_idx && user_cur != NULL; i++) {
@@ -430,9 +438,9 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
         if (!atomic_load(&bdp_comp->valid[send_idx])) {
             continue;
         }
-        ret = comp_post_send(bdp_comp, send_idx, target_idx, prealloc_wr_list, bad_wr, 1);
+        ret = comp_post_send(bdp_comp, send_idx, target_idx, prealloc_wr_list, bad_wr, wr_total);
         if (ret != URMA_SUCCESS && bad_wr != NULL && *bad_wr != NULL) {
-            bondp_translate_bad_wr(bdp_comp, send_idx, target_idx, prealloc_wr_list, wr, bad_wr, wr_total);
+            bondp_translate_bad_wr(bdp_comp, send_idx, target_idx, prealloc_wr_list, wr, bad_wr);
         }
         return ret;
     }
@@ -549,15 +557,15 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, wr_entries, allocated);
             continue;
         }
-        ret = comp_post_send(bdp_comp, send_idx, target_idx, &wr_entries[0]->wr, bad_wr, 1);
+        ret = comp_post_send(bdp_comp, send_idx, target_idx, &wr_entries[0]->wr, bad_wr,wr_total);
         if (ret != URMA_SUCCESS) {
             urma_jfs_wr_t *pcur = &wr_entries[0]->wr;
             while (pcur != NULL && bad_wr != NULL && pcur != *bad_wr) {
                 success_node++;
+                if (pcur->flag.bs.complete_enable) {
+                    atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+                }
                 pcur = pcur->next;
-            }
-            if (success_node == wr_total) {
-                atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
             }
             for (int j = success_node; j < wr_total; j++) {
                 wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)wr_entries[j];
@@ -1043,7 +1051,7 @@ static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int s
     } while (cur != NULL && cur != head_entry);
 
     urma_jfs_wr_t *bad_wr = NULL;
-    ret = comp_post_send(wr_entry->bdp_comp, send_idx, target_idx, &head_entry->wr, &bad_wr, 1);
+    ret = comp_post_send(wr_entry->bdp_comp, send_idx, target_idx, &head_entry->wr, &bad_wr, wr_total);
     cur = head_entry;
     do {
         convert_jfs_pwr_to_vwr(&cur->wr, &cur->target_vjetty->v_tjetty);
