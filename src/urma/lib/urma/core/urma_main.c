@@ -318,6 +318,11 @@ urma_device_t **urma_get_device_list(int *num_devices)
         errno = EINVAL;
         return NULL;
     }
+    if (atomic_load(&g_init_flag) == 0) {
+        *num_devices = 0;
+        errno = ENODEV;
+        return NULL;
+    }
 
 #if !defined(__OHOS__) && !defined(__OH__) && !defined(__ANDROID__)
     /* Phase 1: scan sysfs and match drivers outside the lock (I/O heavy) */

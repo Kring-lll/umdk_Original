@@ -944,8 +944,15 @@ TEST(UrmaBondTest, PublicCreateAndDeleteApisUseMockPhysicalMembers)
     jfrCfg.max_sge = 1;
     jfrCfg.trans_mode = URMA_TM_RC;
     urma_test::SetHwMockIoctl(true, 0xb20, 0xb200);
+    ResetCapturedBondCreateUdata();
     urma_jfr_t *createdJfr = bondp_create_jfr(&fixture.ctx.v_ctx, &jfrCfg);
     ASSERT_NE(nullptr, createdJfr);
+    EXPECT_TRUE(g_capturedBondCreateUdata.valid);
+    EXPECT_EQ(URMA_CMD_CREATE_JFR, g_capturedBondCreateUdata.command);
+    EXPECT_TRUE(g_capturedBondCreateUdata.isMsnEnabled);
+    EXPECT_EQ(1U, g_capturedBondCreateUdata.enabledCount);
+    EXPECT_EQ(0U, g_capturedBondCreateUdata.enabledIndices[0]);
+    EXPECT_EQ(0xb20U, g_capturedBondCreateUdata.slaveId[0].id);
     createdJfr->async_events_acked = 0;
     SetRefCount(&CONTAINER_OF_FIELD(createdJfr, bondp_comp_t, v_jfr)->use_cnt, 0);
     EXPECT_EQ(URMA_SUCCESS, bondp_delete_jfr(createdJfr));
@@ -964,6 +971,7 @@ TEST(UrmaBondTest, PublicCreateAndDeleteJettyCoverVirtualPhysicalIdMapping)
     fixture.ctx.v_ctx.dev_fd = 7;
     fixture.ctx.enabled_count = 1;
     fixture.ctx.enabled_indices[0] = 0;
+    fixture.ctx.msn_enable = true;
     ASSERT_EQ(0, bdp_p_vjetty_id_table_create(&fixture.ctx.p_vjetty_id_table, 16));
 
     fixture.jfr.v_jfr.jfr_cfg.jfc = &fixture.jfc.v_jfc;
@@ -986,9 +994,16 @@ TEST(UrmaBondTest, PublicCreateAndDeleteJettyCoverVirtualPhysicalIdMapping)
     fakeGlobal.enable_health_check = false;
     g_bondp_global_ctx = &fakeGlobal;
     urma_test::SetHwMockIoctl(true, 0xb50, 0xb500);
+    ResetCapturedBondCreateUdata();
     urma_jetty_t *createdJetty = bondp_create_jetty(&fixture.ctx.v_ctx, &jettyCfg);
     ASSERT_NE(nullptr, createdJetty);
     EXPECT_EQ(0xb50U, createdJetty->jetty_id.id);
+    EXPECT_TRUE(g_capturedBondCreateUdata.valid);
+    EXPECT_EQ(URMA_CMD_CREATE_JETTY, g_capturedBondCreateUdata.command);
+    EXPECT_TRUE(g_capturedBondCreateUdata.isMsnEnabled);
+    EXPECT_EQ(1U, g_capturedBondCreateUdata.enabledCount);
+    EXPECT_EQ(0U, g_capturedBondCreateUdata.enabledIndices[0]);
+    EXPECT_EQ(0xb50U, g_capturedBondCreateUdata.slaveId[0].id);
     createdJetty->async_events_acked = 0;
     SetRefCount(&CONTAINER_OF_FIELD(createdJetty, bondp_comp_t, v_jetty)->use_cnt, 0);
     EXPECT_EQ(URMA_SUCCESS, bondp_delete_jetty(createdJetty));

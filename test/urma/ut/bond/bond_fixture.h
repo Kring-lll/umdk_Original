@@ -26,6 +26,11 @@
 
 #include <gtest/gtest.h>
 
+#ifdef __cplusplus
+using atomic_int = std::atomic_int;
+using atomic_uint = std::atomic_uint;
+#endif
+
 #include "bondp_api.h"
 #include "bondp_connection.h"
 #include "bondp_context_table.h"
@@ -44,6 +49,7 @@
 #include "bondp_worker.h"
 #include "bondp_wr_buf.h"
 #include "ubagg_ioctl.h"
+#include "urma_api.h"
 #include "urma_cmd_tlv.h"
 #include "urma_provider.h"
 #include "urma_private.h"
@@ -79,6 +85,33 @@ extern int g_mockNetlinkRecvCount;
 extern size_t g_mockCallocFailNmemb;
 extern size_t g_mockCallocFailSize;
 
+struct UrmaLogLevelGuard {
+    explicit UrmaLogLevelGuard(urma_vlog_level_t level) : savedLevel(urma_log_get_level())
+    {
+        urma_log_set_level(level);
+    }
+
+    ~UrmaLogLevelGuard()
+    {
+        urma_log_set_level(savedLevel);
+    }
+
+    urma_vlog_level_t savedLevel;
+};
+
+struct CapturedBondCreateUdata {
+    bool valid;
+    uint32_t command;
+    bool isMsnEnabled;
+    uint8_t enabledIndices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t enabledCount;
+    bool isHealthCheckEnabled;
+    urma_jetty_id_t slaveId[URMA_UBAGG_DEV_MAX_NUM];
+};
+
+extern CapturedBondCreateUdata g_capturedBondCreateUdata;
+
+void ResetCapturedBondCreateUdata();
 void ResetMockNetlinkCallback();
 int InvokeMockNetlinkMsg(bondp_nl_cmd_t cmd, const void *payload, size_t payloadLen);
 
@@ -227,12 +260,43 @@ inline void FillMockBondIdInfo(uint64_t outAddr, uint32_t outLen)
     }
 
     auto *out = reinterpret_cast<urma_bond_id_info_out_t *>(outAddr);
+    out->is_msn_enabled = true;
     out->enabled_count = 1;
     out->enabled_indices[0] = 0;
     out->slave_id[0].id = urma_test::GetHwMockState().ioctlId + 1;
     out->slave_id[0].eid.in6.subnet_prefix = 0x11110000ULL;
     out->slave_id[0].eid.in6.interface_id = 0x22220000ULL;
     out->connected[0][0] = true;
+}
+
+struct BondCreateUdataLayoutForTest {
+    urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
+    bool is_msn_enabled;
+    uint8_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t enabled_count;
+    bool is_health_check_enable;
+    urma_bond_seg_info_out_t health_check_seg;
+};
+
+inline void CaptureBondCreateUdata(uint32_t command, const urma_cmd_udrv_priv_t *udata)
+{
+    if (command != URMA_CMD_CREATE_JFR && command != URMA_CMD_CREATE_JETTY) {
+        return;
+    }
+    if (udata == nullptr || udata->in_addr == 0 || udata->in_len < sizeof(BondCreateUdataLayoutForTest)) {
+        return;
+    }
+
+    auto *in = reinterpret_cast<const BondCreateUdataLayoutForTest *>(udata->in_addr);
+    ResetCapturedBondCreateUdata();
+    g_capturedBondCreateUdata.valid = true;
+    g_capturedBondCreateUdata.command = command;
+    g_capturedBondCreateUdata.isMsnEnabled = in->is_msn_enabled;
+    g_capturedBondCreateUdata.enabledCount = in->enabled_count;
+    g_capturedBondCreateUdata.isHealthCheckEnabled = in->is_health_check_enable;
+    std::memcpy(g_capturedBondCreateUdata.enabledIndices, in->enabled_indices,
+                sizeof(g_capturedBondCreateUdata.enabledIndices));
+    std::memcpy(g_capturedBondCreateUdata.slaveId, in->slave_id, sizeof(g_capturedBondCreateUdata.slaveId));
 }
 
 inline void FillMockSegInfo(uint64_t outAddr, uint32_t outLen)
@@ -316,6 +380,12 @@ inline void FillCreateOutput(uint32_t command, urma_cmd_attr_t *attrs, uint32_t 
 {
     for (uint32_t i = 0; i < attrCount; i++) {
         uint8_t type = attrs[i].type;
+
+        if ((command == URMA_CMD_CREATE_JFR && type == CREATE_JFR_IN_UDATA) ||
+            (command == URMA_CMD_CREATE_JETTY && type == CREATE_JETTY_IN_UDATA)) {
+            auto *udata = reinterpret_cast<urma_cmd_udrv_priv_t *>(attrs[i].data);
+            CaptureBondCreateUdata(command, udata);
+        }
 
         if ((command == URMA_CMD_CREATE_JFC && type == CREATE_JFC_OUT_ID) ||
             (command == URMA_CMD_CREATE_JFS && type == CREATE_JFS_OUT_ID) ||
@@ -1129,8 +1199,11 @@ inline uint32_t HashTableNodeHash(void *key)
     return *static_cast<uint32_t *>(key);
 }
 
-inline void TimewheelCountCallback(void *arg)
+inline void TimewheelCountCallback(tw_task_reason_t reason, void *arg)
 {
+    if (reason != TW_TASK_EXECUTED) {
+        return;
+    }
     uint32_t *count = static_cast<uint32_t *>(arg);
 
     (*count)++;
@@ -1203,8 +1276,11 @@ struct EnvGuard {
     }
 };
 
-inline void CountWorkerTask(void *arg)
+inline void CountWorkerTask(bondp_worker_task_reason_t reason, void *arg)
 {
+    if (reason != BONDP_WORKER_TASK_EXECUTED) {
+        return;
+    }
     WorkerCounter *counter = static_cast<WorkerCounter *>(arg);
 
     counter->count.fetch_add(1);
