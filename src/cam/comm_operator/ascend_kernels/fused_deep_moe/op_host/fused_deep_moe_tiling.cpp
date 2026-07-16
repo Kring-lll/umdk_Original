@@ -662,8 +662,6 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
     size_t maxTokenSize = x1TokenSize < x2TokenSize ? x2TokenSize : x1TokenSize;
     maxTokenSize = CeilUp(maxTokenSize, GM_ALIGN_SIZE);
     size_t tokenScaleSize = CeilUp(maxHandleTokenNum * sizeof(float), GM_ALIGN_SIZE);
-    size_t CVSwapBufferSize =
-        CeilUp(aicNum * L1_TILE_BYTE_SIZE * CUBE_WORKSPACE_STAGE * sizeof(int32_t), GM_ALIGN_SIZE);
     size_t swigluOutSize = (maxTokenNum * gmm1HLen + shareExpertTokenNum * shareGmm1HLen) * sizeof(float);
     size_t gmm2DepOutSize = maxTokenNum * h * TOKEN_DTYPE_BYTE_SIZE;
     size_t maxSwigluGmm2Size = swigluOutSize < gmm2DepOutSize ? gmm2DepOutSize : swigluOutSize;
@@ -674,13 +672,13 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
     size_t resveredSize = CeilUp(RESERVED_WORKSPACE_SIZE, GM_ALIGN_SIZE);
     size_t allEpRecvCountSize = CeilUp(epRankSize * epRankSize * moeExpertNumPerRank * sizeof(int32_t), GM_ALIGN_SIZE);
     if (shmemWorkspacePtr == 0) {
-        size_t usrSize = maxTokenSize + tokenScaleSize + CVSwapBufferSize + maxSwigluGmm2Size + groupListSize +
+        size_t usrSize = maxTokenSize + tokenScaleSize + maxSwigluGmm2Size + groupListSize +
                         expandIdxSize + epSendCountSize + resveredSize;
 
         workSpaces[0] = SYSTEM_NEED_WORKSPACE + usrSize;
     } else {
-        size_t usrSize = CVSwapBufferSize + maxSwigluGmm2Size + groupListSize +
-                        expandIdxSize + epSendCountSize + resveredSize + allEpRecvCountSize;
+        size_t usrSize = maxSwigluGmm2Size + groupListSize + expandIdxSize + epSendCountSize +
+                        resveredSize + allEpRecvCountSize;
         workSpaces[0] = SYSTEM_NEED_WORKSPACE + usrSize;
     }
     return ge::GRAPH_SUCCESS;

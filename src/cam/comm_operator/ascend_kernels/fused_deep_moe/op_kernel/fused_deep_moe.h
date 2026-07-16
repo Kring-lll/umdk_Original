@@ -473,13 +473,10 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     shmemWorkspaceOffset += RoundUp<GM_ALIGN_BYTE>(maxHandleTokenNum * sizeof(int32_t));
 
 
-    GM_ADDR gmWorkspace = workspaceGM_ + workspaceOffset;
-    GM_ADDR gmCVSwap = workspaceGM_ + workspaceOffset;
-    workspaceOffset += RoundUp<GM_ALIGN_BYTE>(static_cast<size_t>(blockDim_) * (GMM1_L1M * GMM1_L1N) *
-                                              WORKSPACE_STAGES * sizeof(int32_t));
     int64_t swigluOutSize = (maxTokenNum_ * gmm1OutputDim_ + shareExpertTokenNum * shareGmm1OutputDim_) * sizeof(float);
     int64_t gmm2OutSize = maxTokenNum_ * tokenHiddenSize_ * sizeof(ExpandXType);
     int64_t maxSwigluGmm2Size = swigluOutSize < gmm2OutSize ? gmm2OutSize : swigluOutSize;
+    GM_ADDR gmWorkspace = workspaceGM_ + workspaceOffset;
     gmShareSwigluOut = workspaceGM_ + workspaceOffset;
     gmSwigluOut = gmShareSwigluOut + (static_cast<size_t>(shareExpertTokenNum) * shareGmm1OutputDim_ * sizeof(float));
     GM_ADDR gmGmm2DepOut = workspaceGM_ + workspaceOffset;
