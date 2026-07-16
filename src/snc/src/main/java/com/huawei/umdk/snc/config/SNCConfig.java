@@ -8,7 +8,7 @@
  */
 package com.huawei.umdk.snc.config;
 
-import lombok.AllArgsConstructor;
+import com.huawei.umdk.snc.log.LogCallback;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -18,7 +18,6 @@ import lombok.ToString;
 @Getter
 @Setter
 @NoArgsConstructor
-@AllArgsConstructor
 @EqualsAndHashCode
 @ToString
 public class SNCConfig {
