@@ -17,7 +17,6 @@
 #include "catlass/gemm_coord.hpp"
 #include "catlass/layout/layout.hpp"
 #include "catlass/matrix_coord.hpp"
-#include "shmem.h"
 
 
 namespace Catlass::Epilogue::Block {
@@ -118,12 +117,14 @@ public:
         }
     }
 
-    __aicore__ inline GM_ADDR GetShmemAddrByRankId(GM_ADDR baseAddr, int64_t rankId)
+    __aicore__ inline GM_ADDR GetShmemAddrByRankIdReplaceHccl(GM_ADDR baseAddr, int64_t rankId)
     {
-        if (calcInfo.epRankId_ == rankId) {
-            return baseAddr;
-        }
-        return (GM_ADDR)aclshmem_ptr(baseAddr, rankId);
+        GM_ADDR winBase = (calcInfo.epRankId_ == rankId)
+                            ? ((GM_ADDR)(calcInfo.mc2MoeContext_->ipcBuffer_[calcInfo.epRankId_]))
+                            : ((GM_ADDR)(calcInfo.mc2MoeContext_->ipcBuffer_[rankId])); // 其他卡
+
+        uint64_t addrOffset = (uint64_t)(baseAddr - ((GM_ADDR)(calcInfo.mc2MoeContext_->ipcBuffer_[calcInfo.epRankId_])));
+        return winBase + addrOffset;
     }
 
     CATLASS_DEVICE
@@ -355,8 +356,9 @@ public:
                 uint32_t copyTokenCount = (sendCount < endToken ? sendCount : endToken) - itToken;
                 AscendC::DataCopyExtParams dataCopyParams(copyTokenCount, copyTokenLen, copyTokenSrcStride,
                                                           copyTokenDstStride, 0);
-                GM_ADDR dstCombinSendAddr = (GM_ADDR)aclshmem_ptr(combineSend, epRank) +
-                                                     dstExpertOffset * calcInfo.axisH_ * sizeof(ElementD);
+                GM_ADDR dstCombinSendAddr = (GM_ADDR)(GetShmemAddrByRankIdReplaceHccl(combineSend, epRank) +
+                                                      dstExpertOffset * calcInfo.axisH_ * sizeof(ElementD));
+                
                 AscendC::GlobalTensor<ElementD> dstComBineSendGMTensor;
                 dstComBineSendGMTensor.SetGlobalBuffer((__gm__ ElementD *)dstCombinSendAddr);
                 AscendC::DataCopyPad(dstComBineSendGMTensor[(itToken - prevSendCount) * calcInfo.axisH_ + tokenOffset],
