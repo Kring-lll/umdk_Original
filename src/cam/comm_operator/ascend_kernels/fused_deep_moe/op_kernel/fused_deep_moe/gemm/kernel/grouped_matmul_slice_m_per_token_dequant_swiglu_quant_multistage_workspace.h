@@ -18,7 +18,6 @@
 #include "catlass/matrix_coord.hpp"
 #include "catlass/epilogue/tile/tile_swizzle.hpp"
 #include "catlass/epilogue/tile/tile_copy.hpp"
-#include "shmem.h"
 
 #include "../../../fused_deep_moe_base.h"
 
@@ -505,6 +504,8 @@ public:
         GM_ADDR gmTokenFlag;
         GM_ADDR gmCombineSend;
 
+        GM_ADDR hcclContext;
+
         uint32_t epRankSize;
         uint32_t epRankId;
         uint32_t moeExpertNum;
@@ -520,7 +521,7 @@ public:
         Params() {}
 
         CATLASS_DEVICE
-        Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_,
+        Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR context_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_,
                LayoutA const &layoutA_, GM_ADDR ptrShareB_, LayoutB const &layoutShareB_, GM_ADDR ptrB_,
                LayoutB const &layoutB_, GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_,
                GM_ADDR ptrScale_, LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
@@ -534,6 +535,7 @@ public:
                const FusedDeepMoeInfo &disGmmDeqSwigluQuantGmmDeqComInfo, GM_ADDR gmCombineSend_)
             : problemShape(problemShape_),
               problemCount(problemCount_),
+              hcclContext(context_),
               ptrGroupList(reinterpret_cast<__gm__ ElementGroupList *>(ptrGroupList_)),
               ptrA(reinterpret_cast<__gm__ ElementA *>(ptrA_)),
               layoutA(layoutA_),
@@ -625,10 +627,12 @@ public:
 
     __aicore__ inline GM_ADDR GetShmemAddrByRankId(GM_ADDR baseAddr, int64_t rankId)
     {
-        if (epRankId == rankId) {
-            return baseAddr;
-        }
-        return (GM_ADDR)aclshmem_ptr(baseAddr, rankId);
+        GM_ADDR winBase = (epRankId == rankId)
+                              ? ((GM_ADDR)(hcclMoeContext_->ipcBuffer_[epRankId]))
+                              : ((GM_ADDR)(hcclMoeContext_->ipcBuffer_[rankId])); // 其他卡
+
+        uint64_t addrOffset = (uint64_t)(baseAddr - ((GM_ADDR)(hcclMoeContext_->ipcBuffer_[epRankId])));
+        return winBase + addrOffset;
     }
 
     __aicore__ inline GM_ADDR GetShmemMagicValAddr(int64_t coreId)
@@ -966,9 +970,9 @@ public:
                 uint32_t col = offsetIdx % moeExpertNum;
                 int32_t dstExpertOffset = (col == 0) ? 0 : sendCountsTensor.GetValue(offsetIdx - 1);
 
-                auto dstX1Addr = reinterpret_cast<__gm__ uint8_t *>(aclshmem_ptr(gmX1, tempRankId));
-                auto dstX1ScaleAddr = reinterpret_cast<__gm__ uint8_t *>(aclshmem_ptr(gmX1Scale, tempRankId));
-                auto dstSwigluOutAddr = reinterpret_cast<__gm__ uint8_t *>(aclshmem_ptr(gmSwigluOut, tempRankId));
+                auto dstX1Addr = reinterpret_cast<__gm__ uint8_t *>(GetShmemAddrByRankId(gmX1, tempRankId));
+                auto dstX1ScaleAddr = reinterpret_cast<__gm__ uint8_t *>(GetShmemAddrByRankId(gmX1Scale, tempRankId));
+                auto dstSwigluOutAddr = reinterpret_cast<__gm__ uint8_t *>(GetShmemAddrByRankId(gmSwigluOut, tempRankId));
 
                 dstWinGMTensor.SetGlobalBuffer((__gm__ int8_t *)(dstX1Addr + hOutSize *
                     (dstExpertOffset + curExpertCnt)));
@@ -2415,6 +2419,8 @@ public:
                           4 * epRankSize * sizeof(uint64_t);
             statusDataSpaceGm = metaInfoGm + offset;
             gmTokenFlagGm = params.gmTokenFlag;
+
+            hcclMoeContext_ = (reinterpret_cast<__gm__ Mc2MoeContext *>(params.hcclContext));
         } else {
             winContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<AscendC::HCCL_GROUP_ID_0>();
             statusDataSpaceGm = (GM_ADDR)(winContext_->localWindowsExp);
@@ -2849,6 +2855,8 @@ private:
     uint32_t aicStateGlobalCoreIdx{0};
     uint32_t sendToMoeAivNum{0};
     uint32_t sendToShareAivNum{0};
+
+    __gm__ Mc2MoeContext *hcclMoeContext_;
 };
 
 }  // namespace Catlass::Gemm::Kernel

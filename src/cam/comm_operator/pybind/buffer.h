@@ -43,6 +43,7 @@ public:
     bool is_initialized() const;
 
     std::vector<at::Tensor> zb_fused_deep_moe(
+        const at::Tensor &context,
         const at::Tensor &x,
         const at::Tensor &expert_ids,
         const TensorVector &gmm1_weight,
