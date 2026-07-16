@@ -11,6 +11,18 @@
 
 #include "moe_distribute_base.h"
 
+constexpr uint32_t HCCL_MAX_RANK_SIZE = 1024U;
+
+struct Mc2MoeContext {
+    uint32_t rankId = 0;
+    uint32_t rankSize = 0;
+    uint64_t segmentSize = 0; // 通信API所需的地址
+    uint64_t kfcContextAddr = 0;
+    uint64_t ipcBuffer_[HCCL_MAX_RANK_SIZE] = {}; // ROCE或者URMA通信所需句柄
+//    uint64_t hcommHandle_[HCCL_MAX_RANK_SIZE]; // 支持ROCE或者URMA
+};
+
+
 #define TemplateMC2TypeClass                                                                      \
         typename ExpandXType, typename W1ScaleType, typename W2ScaleType, typename ExpandIdxType, \
         bool IsNeedReduceScatter, uint32_t EXEC_FLAG

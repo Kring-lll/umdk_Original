@@ -13,6 +13,11 @@ class FusedDeepMoe : public OpDef {
 public:
     explicit FusedDeepMoe(const char *name) : OpDef(name)
     {
+        this->Input("context")
+            .ParamType(REQUIRED)
+            .DataTypeList({ge::DT_INT32})
+            .FormatList({ge::FORMAT_ND})
+            .AutoContiguous();
         this->Input("x")
             .ParamType(REQUIRED)
             .DataType({ge::DT_BF16, ge::DT_BF16, ge::DT_BF16, ge::DT_BF16,
@@ -161,8 +166,7 @@ public:
         this->Attr("moe_expert_num").Int();
         this->Attr("quant_mode").Int();
         this->Attr("global_bs").Int();
-        this->Attr("ext_info").Int();
-        this->Attr("shmem_workspace").Int();
+        this->MC2().HcclGroup({"group_ep"});
 
         this->AICore().AddConfig("ascend910_93");
     }
