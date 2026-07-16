@@ -188,7 +188,6 @@ typedef struct ub_flow_control {
     bool local_set;
     bool remote_get;
     bool enabled;
-    bool is_limited;
     volatile bool is_credit_applying;
     volatile uint64_t imm[UB_QUEUE_FC_MSG_TYPE_MAX];
     uint8_t local_req_seq;
@@ -362,6 +361,7 @@ typedef struct ub_credit_pool {
     volatile uint16_t stats_u16[CREDIT_COUNTER_MAX_U16];
     uint16_t capacity;
     ub_credit_pending_queue_t pending_queue;
+    bool is_limited;
 } ub_credit_pool_t;
 
 typedef struct jfr_ctx {
