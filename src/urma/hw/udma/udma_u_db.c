@@ -149,8 +149,11 @@ void *udma_u_alloc_sw_db(struct udma_u_context *ctx, enum udma_db_type type)
 		goto out;
 
 found:
-	(void)udma_bitmap_use_idx(db_page->bitmap, db_page->bitmap_cnt,
-				  db_page->num_db, &npos);
+	if (udma_bitmap_use_idx(db_page->bitmap, db_page->bitmap_cnt,
+				db_page->num_db, &npos)) {
+		UDMA_LOG_ERR("failed to get db index.\n");
+		goto out;
+	}
 
 	db = (char *)db_page->buf.buf + npos * UDMA_DB_SIZE;
 	*(uint32_t *)db = 0;
