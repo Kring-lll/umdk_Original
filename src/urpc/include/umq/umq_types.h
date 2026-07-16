@@ -234,6 +234,9 @@ typedef struct umq_flow_control_cfg {
     uint16_t pending_credit_threshold;
     // use atomic variables as flow control window
     bool use_atomic_window;
+    // flow control credit req rsp timeout in ms, 0 means never timeout, max 60000(60s). When the peer is stuck/dead
+    // and the credit rsp never returns within this duration, post_tx breaks the link.
+    uint32_t fc_req_timeout_ms;
 } umq_flow_control_cfg_t;
 
 typedef enum umq_buf_block_size {
