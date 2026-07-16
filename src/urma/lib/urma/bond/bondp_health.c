@@ -96,6 +96,10 @@ static inline void hc_decode_user_ctx(uint64_t user_ctx, uint32_t *node_idx, uin
     *target_idx = (uint32_t)user_ctx;
 }
 
+/* Forward declaration: called from hc_drain_probe_cq before its definition. */
+static void hc_tjetty_maybe_restore_target_valid(bondp_hc_ctx_t *hc_ctx, uint32_t node_idx,
+                                                 uint32_t target_idx, uint32_t trigger_local_idx);
+
 static urma_jetty_t *hc_create_probe_jetty(urma_context_t *p_ctx, urma_jfc_t *jfc,
                                            urma_jfr_t *jfr, int local_idx)
 {
@@ -206,7 +210,12 @@ static void hc_drain_probe_cq(bondp_probe_res_t *res)
                 continue;
             }
             bool ok = (cr[k].status == URMA_CR_SUCCESS);
+            bool prev = atomic_load(&node->valid[local_idx][target_idx]);
             atomic_store(&node->valid[local_idx][target_idx], ok);
+            if (ok && !prev) {
+                hc_tjetty_maybe_restore_target_valid(hc_ctx, node_idx,
+                    target_idx, (uint32_t)local_idx);
+            }
         }
     }
     if (drained >= res->inflight) {
@@ -989,11 +998,9 @@ void bondp_hc_unregister_tjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *
     URMA_LOG_INFO("Health check tjetty unregistered, node_id=%u.\n", node->node_id);
 }
 
-bool bondp_hc_tjetty_path_valid(const bondp_target_jetty_t *bdp_tjetty,
-                                uint32_t local_idx, uint32_t target_idx)
+bool bondp_hc_tjetty_target_any_valid(const bondp_target_jetty_t *bdp_tjetty, uint32_t target_idx)
 {
-    if (bdp_tjetty == NULL ||
-        local_idx >= URMA_UBAGG_DEV_MAX_NUM || target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+    if (bdp_tjetty == NULL || target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
         return false;
     }
 
@@ -1013,5 +1020,65 @@ bool bondp_hc_tjetty_path_valid(const bondp_target_jetty_t *bdp_tjetty,
     }
 
     bondp_hc_node_t *node = &hc_ctx->nodes[node_idx];
-    return atomic_load(&node->valid[local_idx][target_idx]);
+    bool any_connected = false;
+    pthread_rwlock_rdlock(&node->lock);
+    for (uint32_t local_idx = 0; local_idx < URMA_UBAGG_DEV_MAX_NUM; ++local_idx) {
+        if (node->hc_tjetty[local_idx][target_idx] == NULL) {
+            continue;
+        }
+        any_connected = true;
+        if (atomic_load(&node->valid[local_idx][target_idx])) {
+            pthread_rwlock_unlock(&node->lock);
+            return true;
+        }
+    }
+    pthread_rwlock_unlock(&node->lock);
+
+    /* No connected path to this target: treat as still available rather than
+     * wrongly dropping it — matches the unregistered / no-hc fallback. */
+    return !any_connected;
+}
+
+static void hc_tjetty_maybe_restore_target_valid(bondp_hc_ctx_t *hc_ctx, uint32_t node_idx,
+                                                 uint32_t target_idx, uint32_t trigger_local_idx)
+{
+    if (hc_ctx == NULL || node_idx >= hc_ctx->node_num ||
+        target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return;
+    }
+
+    bondp_hc_node_t *node = &hc_ctx->nodes[node_idx];
+    bool any_connected = false;
+    bool all_true = true;
+    pthread_rwlock_rdlock(&node->lock);
+    for (uint32_t local_idx = 0; local_idx < URMA_UBAGG_DEV_MAX_NUM; ++local_idx) {
+        bondp_target_jetty_t *bdp_tjetty = node->hc_tjetty[local_idx][target_idx];
+        if (bdp_tjetty == NULL) {
+            continue;
+        }
+        any_connected = true;
+        if (!atomic_load(&node->valid[local_idx][target_idx])) {
+            all_true = false;
+            break;
+        }
+    }
+    pthread_rwlock_unlock(&node->lock);
+
+    if (!any_connected || !all_true) {
+        return;
+    }
+
+    /* All connected paths to this target are healthy again; re-arm every
+     * bdp_tjetty registered for it (typically one, but iterate to be safe). */
+    pthread_rwlock_rdlock(&node->lock);
+    for (uint32_t local_idx = 0; local_idx < URMA_UBAGG_DEV_MAX_NUM; ++local_idx) {
+        bondp_target_jetty_t *bdp_tjetty = node->hc_tjetty[local_idx][target_idx];
+        if (bdp_tjetty != NULL) {
+            atomic_store(&bdp_tjetty->valid[target_idx], true);
+            URMA_LOG_INFO("Health check restored target valid, node_id=%u, trigger_local_idx=%u, "
+                          "target_idx=%u, vjetty_id=%u.\n",
+                          node->node_id, trigger_local_idx, target_idx, bdp_tjetty->v_tjetty.id.id);
+        }
+    }
+    pthread_rwlock_unlock(&node->lock);
 }
