@@ -1042,29 +1042,39 @@ public:
     void ShmemRecvCoreFunc(GM_ADDR gmX1, GM_ADDR gmX1Scale, GM_ADDR gmEpSendCount)
     {
         uint32_t recvCoreNumPerGroup = recvCoreNum;
-        uint32_t recvRankNumPerCore = epRankSize / recvCoreNumPerGroup;
-        uint32_t remainderRankNum = epRankSize % recvCoreNumPerGroup;
-
         uint32_t recvCoreIdxInGroup = recvCoreIdx % recvCoreNumPerGroup;
-        uint32_t startRankIdInGroup = recvRankNumPerCore * recvCoreIdxInGroup;
-        if (recvCoreIdxInGroup < remainderRankNum) {
-            recvRankNumPerCore += 1;
-            startRankIdInGroup += recvCoreIdxInGroup;
-        } else {
-            startRankIdInGroup += remainderRankNum;
-        }
-        uint32_t endRankIdInGroup = startRankIdInGroup + recvRankNumPerCore;
 
         uint32_t subUbOffset = CEIL_UP(expertCntUp * UB_BLOCK_SIZE) + CEIL_UP(UB_BLOCK_SIZE) + CEIL_UP(expertCntUp *
             sizeof(float));
 
+        AscendC::GlobalTensor<int32_t> sendCountsGlobalTensor;
+        sendCountsGlobalTensor.SetGlobalBuffer((__gm__ int32_t *)gmEpSendCount);
+
         for (uint32_t groupId = 0; groupId < localExpertNum; ++groupId) {
-            uint32_t startRankId = startRankIdInGroup;
-            uint32_t endRankId = endRankIdInGroup;
+            uint32_t globalExpertId = epRankId * moeExpertNumPerRank + groupId;
+
+            uint32_t currentExpertLastRankIdx = globalExpertId * epRankSize + epRankSize - 1;
+            uint32_t totalTokensForExpert = sendCountsGlobalTensor.GetValue(currentExpertLastRankIdx);
+            if (groupId > 0) {
+                uint32_t prevExpertLastRankIdx = (globalExpertId - 1) * epRankSize + epRankSize - 1;
+                totalTokensForExpert -= sendCountsGlobalTensor.GetValue(prevExpertLastRankIdx);
+            }
+
+            uint32_t tokensPerCore = totalTokensForExpert / recvCoreNumPerGroup;
+            uint32_t remainderTokens = totalTokensForExpert % recvCoreNumPerGroup;
+
+            uint32_t startTokenOffset = tokensPerCore * recvCoreIdxInGroup;
+            if (recvCoreIdxInGroup < remainderTokens) {
+                startTokenOffset += recvCoreIdxInGroup;
+                tokensPerCore += 1;
+            } else {
+                startTokenOffset += remainderTokens;
+            }
+            uint32_t endTokenOffset = startTokenOffset + tokensPerCore;
 
             uint32_t coreTokenCount = 0;
-            ShmemRecvToken(gmX1, gmX1Scale, gmEpSendCount, coreTokenCount, startRankId, endRankId, recvRankNumPerCore,
-                ubOffset, groupId);
+            ShmemRecvToken(gmX1, gmX1Scale, gmEpSendCount, coreTokenCount,
+                ubOffset, groupId, startTokenOffset, endTokenOffset);
 
             AscendC::PipeBarrier<PIPE_ALL>();
             AscendC::LocalTensor<int32_t> tmpLocalTensor = resource.ubBuf.template GetBufferByByte<int32_t>(
@@ -1087,35 +1097,36 @@ public:
 
     CATLASS_DEVICE
     void ShmemRecvToken(GM_ADDR gmX1, GM_ADDR gmX1Scale, GM_ADDR gmEpSendCount, uint32_t &coreTokenCount,
-                        uint32_t startRankId, uint32_t endRankId, uint32_t recvRankNumPerCore, int64_t ubOffset,
-                        uint32_t groupId)
+                        int64_t ubOffset, uint32_t groupId, uint32_t startTokenOffset, uint32_t endTokenOffset)
     {
         AscendC::GlobalTensor<int32_t> dstTokenFlagGMTensor;
         AscendC::LocalTensor<int32_t> tmpFlagTensor = resource.ubBuf.template GetBufferByByte<int32_t>(ubOffset);
-        AscendC::GlobalTensor<int32_t> sendCountsGlobalTensor;
-        sendCountsGlobalTensor.SetGlobalBuffer((__gm__ int32_t *)gmEpSendCount);
+
+        coreTokenCount = endTokenOffset - startTokenOffset;
+        if (coreTokenCount == 0) {
+            AscendC::PipeBarrier<PIPE_ALL>();
+            return;
+        }
 
         uint32_t globalExpertId = epRankId * moeExpertNumPerRank + groupId;
+        uint32_t expertStartOffset = 0;
+        if (groupId > 0) {
+            uint32_t prevExpertLastRankIdx = (globalExpertId - 1) * epRankSize + epRankSize - 1;
+            AscendC::GlobalTensor<int32_t> sendCountsGlobalTensor;
+            sendCountsGlobalTensor.SetGlobalBuffer((__gm__ int32_t *)gmEpSendCount);
+            expertStartOffset = sendCountsGlobalTensor.GetValue(prevExpertLastRankIdx);
+        }
 
-        for (uint32_t srcRank = startRankId; srcRank < endRankId; srcRank++) {
-            uint32_t offsetIdx = globalExpertId * epRankSize + srcRank;
-            uint32_t col = offsetIdx % moeExpertNum;
-            int32_t prevOffset = (col == 0) ? 0 : sendCountsGlobalTensor.GetValue(offsetIdx - 1);
-            int32_t count = sendCountsGlobalTensor.GetValue(offsetIdx) - prevOffset;
-            if (count == 0) continue;
-            coreTokenCount += count;
-            for (uint32_t j = 0; j < count; j++) {
-                dstTokenFlagGMTensor.SetGlobalBuffer((__gm__ int32_t *)(gmTokenFlagGm + (prevOffset + j) *
-                    sizeof(int32_t)));
-                while (true) {
-                    AscendC::DataCopy(tmpFlagTensor, dstTokenFlagGMTensor, INT32_COUNT_PER_BLOCK);
-                    AscendC::SetFlag<AscendC::HardEvent::MTE2_S>(0);
-                    AscendC::WaitFlag<AscendC::HardEvent::MTE2_S>(0);
-                    if (tmpFlagTensor.GetValue(0) == tokenFlag) {
-                        break;
-                    }
-                    SPIN_WAIT_CYCLES();
+        for (uint32_t j = startTokenOffset; j < endTokenOffset; j++) {
+            dstTokenFlagGMTensor.SetGlobalBuffer((__gm__ int32_t *)(gmTokenFlagGm + (expertStartOffset + j) * sizeof(int32_t)));
+            while (true) {
+                AscendC::DataCopy(tmpFlagTensor, dstTokenFlagGMTensor, INT32_COUNT_PER_BLOCK);
+                AscendC::SetFlag<AscendC::HardEvent::MTE2_S>(0);
+                AscendC::WaitFlag<AscendC::HardEvent::MTE2_S>(0);
+                if (tmpFlagTensor.GetValue(0) == tokenFlag) {
+                    break;
                 }
+                SPIN_WAIT_CYCLES();
             }
         }
         AscendC::PipeBarrier<PIPE_ALL>();
@@ -1176,44 +1187,37 @@ public:
         // Represent the full gm
         AscendC::GlobalTensor<ElementA> gmA;
         AscendC::GlobalTensor<ElementB> gmB;
+        AscendC::GlobalTensor<ElementC> gmC;
+        AscendC::ListTensorDesc gmBlistTensorDesc(reinterpret_cast<__gm__ void *>(params.ptrB));
+        gmC.SetGlobalBuffer(reinterpret_cast<__gm__ ElementC *>(params.ptrWorkspace));
+
+        uint32_t currentM = 0;
+        uint32_t startCoreIdx = 0;
+        aicSetFunc1 = {statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(AscendC::GetBlockIdx())};
+        int64_t gmGroupOffsetC = 0;
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
             gmA.SetGlobalBuffer((__gm__ ElementA*)params.gmShareX1);
             gmB.SetGlobalBuffer((__gm__ ElementB*)params.ptrShareB);
             gmB.SetL2CacheHint(AscendC::CacheMode::CACHE_MODE_DISABLE);
-        }
-        AscendC::ListTensorDesc gmBlistTensorDesc(reinterpret_cast<__gm__ void *>(params.ptrB));
-
-        AscendC::GlobalTensor<ElementGroupList> groupList;
-        groupList.SetGlobalBuffer(params.ptrGroupList);
-
-        AscendC::GlobalTensor<ElementC> gmC;
-        gmC.SetGlobalBuffer(reinterpret_cast<__gm__ ElementC *>(params.ptrWorkspace));
-        auto layoutC = layout::RowMajor{L1TileShape::M * aicNum * WORKSPACE_STAGES, L1TileShape::N};
-
-        uint32_t stageId = 0;
-        uint32_t stageUsed = 0;
-        uint32_t startCoreIdx = 0;
-        AscendC::GlobalTensor<int32_t> groupTokenNumStateTensor;
-        aicSetFunc1 = {statusDataSpaceGm + SOFT_SYNC_OFFSET,
-                       static_cast<uint8_t>(aicNum + AscendC::GetBlockIdx())};  // AIV wait for flags in latter part
-        uint32_t target = 1;
-        if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
-            uint32_t currentM = params.bs;
+            currentM = params.bs;
             GemmCoord inGroupProblemShape{currentM, params.shareN, params.problemShape.k()};
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
             LayoutB layoutB = params.layoutShareB;
+            LayoutC layoutC = {currentM, params.shareN};
             blockScheduler.Update(inGroupProblemShape, MakeCoord(L1TileShape::M, L1TileShape::N));
             uint32_t coreLoops = blockScheduler.GetCoreLoops();
-
             // Determine the starting loopIdx of the current core under the current groupIdx
             uint32_t startLoopIdx = ((aicIdx < startCoreIdx) ? (aicIdx + aicNum) : aicIdx) - startCoreIdx;
-            // wait AIV quantize needed tokens
-            AscendC::GlobalTensor<int32_t> shareQuantTokenStateTensor;
-            uint32_t waitFlagCount = params.bs < shareQuantCoreNum ? params.bs : shareQuantCoreNum;
-            shareQuantTokenStateTensor.SetGlobalBuffer((__gm__ int32_t*)(
-                statusDataSpaceGm + SHARE_QUANT_SOFT_SYNC_OFFSET));
-            uint32_t expected = waitFlagCount * vToCFlag;
-            WaitGroupTokenNumReady(shareQuantTokenStateTensor, expected);
+
+            if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
+                // wait AIV quantize needed tokens
+                AscendC::GlobalTensor<int32_t> shareQuantTokenStateTensor;
+                uint32_t waitFlagCount = params.bs < shareQuantCoreNum ? params.bs : shareQuantCoreNum;
+                shareQuantTokenStateTensor.SetGlobalBuffer((__gm__ int32_t*)(
+                    statusDataSpaceGm + SHARE_QUANT_SOFT_SYNC_OFFSET));
+                uint32_t expected = waitFlagCount * vToCFlag;
+                WaitGroupTokenNumReady(shareQuantTokenStateTensor, expected);
+            }
             // Loop through the matmul of each groupIdx
             for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aicNum) {
                 // Compute block location
@@ -1221,20 +1225,12 @@ public:
                 GemmCoord actualBlockShape = blockScheduler.GetActualBlockShape(blockCoord);
 
                 Callback callbackBeforeFixpipe{};
-                if (stageUsed == WORKSPACE_STAGES) {
-                    aicWaitFunc1 = {statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(AscendC::GetBlockIdx()),
-                                    target};  // AIC wait for flags in former part
-                    target += 1;
-                    callbackBeforeFixpipe = MakeCallback(&aicWaitFunc1);
-                } else {
-                    ++stageUsed;
-                }
                 Callback callbackAfterFixpipe = MakeCallback(&aicSetFunc1);
 
                 // Compute initial location in logical coordinates
                 MatrixCoord offsetA{blockCoord.m() * L1TileShape::M, blockCoord.k() * L1TileShape::K};
                 MatrixCoord offsetB{blockCoord.k() * L1TileShape::K, blockCoord.n() * L1TileShape::N};
-                MatrixCoord offsetC{(stageId * aicNum + aicIdx) * L1TileShape::M, 0};
+                MatrixCoord offsetC{blockCoord.m() * L1TileShape::M, blockCoord.n() * L1TileShape::N};
                 int64_t gmOffsetA = layoutA.GetOffset(offsetA);
                 int64_t gmOffsetB = layoutB.GetOffset(offsetB);
                 int64_t gmOffsetC = layoutC.GetOffset(offsetC);
@@ -1249,16 +1245,16 @@ public:
                                 gmC[gmOffsetC], layoutC, actualBlockShape);
                     callbackAfterFixpipe();
                 }
-
-                stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
             }
             startCoreIdx = (startCoreIdx + coreLoops) % aicNum;
+            gmGroupOffsetC += currentM * params.shareN;
         }
 
         gmA.SetGlobalBuffer(params.ptrA);
         if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
             gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(gmBlistTensorDesc.GetDataPtr<int32_t>(0)));
         }
+        AscendC::GlobalTensor<int32_t> groupTokenNumStateTensor;
         int64_t gmGroupOffsetA = 0;
         int64_t gmGroupOffsetB = 0;
         for (uint32_t groupIdx = 0; groupIdx < localExpertNum; ++groupIdx) {
@@ -1266,16 +1262,17 @@ public:
                 gmB.SetGlobalBuffer(reinterpret_cast<__gm__ ElementB *>(
                         gmBlistTensorDesc.GetDataPtr<int32_t>(groupIdx)));
             }
-            groupTokenNumStateTensor.SetGlobalBuffer((__gm__ int32_t *)(statusDataSpaceGm + GROUP_TOKEN_NUM_OFFSET) +
-                                                     groupIdx * GROUP_INFO_SIZE);
+            groupTokenNumStateTensor.SetGlobalBuffer((__gm__ int32_t *)(
+                statusDataSpaceGm + GROUP_TOKEN_NUM_OFFSET) + groupIdx * GROUP_INFO_SIZE);
             // wait AIV recv needed tokens
             uint32_t expected = coreNumPerGroup * vToCFlag;
             WaitGroupTokenNumReady(groupTokenNumStateTensor, expected);
-            uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT);
+            currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT);
             GemmCoord inGroupProblemShape{currentM, params.problemShape.n(), params.problemShape.k()};
 
             LayoutA layoutA = params.layoutA.GetTileLayout(inGroupProblemShape.GetCoordMK());
             LayoutB layoutB = params.layoutB;
+            LayoutC layoutC = {currentM, params.problemShape.n()};
 
             blockScheduler.Update(inGroupProblemShape, MakeCoord(L1TileShape::M, L1TileShape::N));
             uint32_t coreLoops = blockScheduler.GetCoreLoops();
@@ -1289,20 +1286,12 @@ public:
                 GemmCoord actualBlockShape = blockScheduler.GetActualBlockShape(blockCoord);
 
                 Callback callbackBeforeFixpipe{};
-                if (stageUsed == WORKSPACE_STAGES) {
-                    aicWaitFunc1 = {statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(AscendC::GetBlockIdx()),
-                                    target};  // AIC wait for flags in former part
-                    target += 1;
-                    callbackBeforeFixpipe = MakeCallback(&aicWaitFunc1);
-                } else {
-                    ++stageUsed;
-                }
                 Callback callbackAfterFixpipe = MakeCallback(&aicSetFunc1);
 
                 // Compute initial location in logical coordinates
                 MatrixCoord offsetA{blockCoord.m() * L1TileShape::M, blockCoord.k() * L1TileShape::K};
                 MatrixCoord offsetB{blockCoord.k() * L1TileShape::K, blockCoord.n() * L1TileShape::N};
-                MatrixCoord offsetC{(stageId * aicNum + aicIdx) * L1TileShape::M, 0};
+                MatrixCoord offsetC{blockCoord.m() * L1TileShape::M, blockCoord.n() * L1TileShape::N};
                 int64_t gmOffsetA = layoutA.GetOffset(offsetA);
                 int64_t gmOffsetB = layoutB.GetOffset(offsetB);
                 int64_t gmOffsetC = layoutC.GetOffset(offsetC);
@@ -1310,21 +1299,21 @@ public:
                 // Compute block-scoped matrix multiply-add
                 if constexpr (BlockMmad::DispatchPolicy::ASYNC) {
                     blockMmad(gmA[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
-                              gmC[gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe, callbackAfterFixpipe);
+                              gmC[gmGroupOffsetC + gmOffsetC], layoutC, actualBlockShape, callbackBeforeFixpipe,
+                              callbackAfterFixpipe);
                 } else {
                     callbackBeforeFixpipe();
                     blockMmad(gmA[gmGroupOffsetA + gmOffsetA], layoutA, gmB[gmGroupOffsetB + gmOffsetB], layoutB,
-                              gmC[gmOffsetC], layoutC, actualBlockShape);
+                              gmC[gmGroupOffsetC + gmOffsetC], layoutC, actualBlockShape);
                     callbackAfterFixpipe();
                 }
-
-                stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
             }
 
             gmGroupOffsetA += inGroupProblemShape.m() * inGroupProblemShape.k();
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                 gmGroupOffsetB += inGroupProblemShape.k() * inGroupProblemShape.n();
             }
+            gmGroupOffsetC += inGroupProblemShape.m() * inGroupProblemShape.n();
 
             startCoreIdx = (startCoreIdx + coreLoops) % aicNum;
         }
@@ -1333,12 +1322,6 @@ public:
             blockMmad.SynchronizeBlock();
         }
 
-        while (stageUsed > 0) {
-            uint32_t aivComputeStageId =
-                (stageId >= stageUsed) ? (stageId - stageUsed) : (stageId + WORKSPACE_STAGES - stageUsed);
-            target += 1;
-            --stageUsed;
-        }
         AscendC::SyncAll<false>();
     }
 
@@ -2218,31 +2201,30 @@ public:
                 LayoutPerTokenScale wholeLayoutPerTokenScale)
     {
         uint32_t coreNumPerGroup = DISPATCH_RECV_CORE_NUM;
+        int64_t gmGroupOffsetC = 0;
         int64_t gmGroupOffsetScale = 0;
         int64_t gmGroupOffsetPerTokenScale = 0;
         int64_t gmGroupOffsetD = 0;
 
-        AscendC::GlobalTensor<ElementC> gmC;
-        gmC.SetGlobalBuffer(reinterpret_cast<__gm__ ElementC *>(gmCVSwapBuff));
-        auto layoutC = layout::RowMajor{L1TileShape::M * aiCoreGroupNum * WORKSPACE_STAGES, L1TileShape::N};
         {
             BlockScheduler blockScheduler;
             BlockEpilogue blockEpilogue(resource);
 
-            uint32_t stageId = 0;
             uint32_t target = 1;
+            uint32_t currentM = 0;
             uint32_t startCoreIdx = 0;
             AscendC::ListTensorDesc gmScaleListTensor;
             AscendC::GlobalTensor<int32_t> groupTokenNumStateTensor;
             if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
-                // 前面不需要等待，C核已经等待过了
-                uint32_t currentM = axisBS;
+                currentM = axisBS;
                 GemmCoord inGroupProblemShape{currentM, shareN, k};
+                layout::RowMajor layoutC = {currentM, shareN};
                 LayoutPerTokenScale layoutPerTokenScale =
                     wholeLayoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
                 LayoutD layoutD = layout::RowMajor{currentM, shareN};
 
                 EpilogueParams epilogueParams{
+                    reinterpret_cast<__gm__ ElementC *>(gmCVSwapBuff) + gmGroupOffsetC,
                     gmShareMm1Scale, layoutShareScale,
                     gmShareTokenScale, layoutPerTokenScale,
                     gmShareSwigluOutput, layoutD
@@ -2258,19 +2240,12 @@ public:
                 for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
                     GemmCoord blockCoordMNK = blockScheduler.GetBlockCoord(loopIdx);
                     GemmCoord actualBlockShapeMNK = blockScheduler.GetActualBlockShape(blockCoordMNK);
-
-                    MatrixCoord offsetC{(stageId * aiCoreGroupNum + aiCoreGroupIdx) * L1TileShape::M, 0};
-                    int64_t gmOffsetC = layoutC.GetOffset(offsetC);
-                    auto gmBlockC = gmC[gmOffsetC];
-                    auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
-                    CheckSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET,
-                        static_cast<uint8_t>(compCoreNum + compCoreIdx), target); // AIV等待的信号在24~28
+                    CheckSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx), target);
                     target += 1;
-                    blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
-                    EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
-                    stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
+                    blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK);
                 }
                 startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
+                gmGroupOffsetC += currentM * shareN;
             }
             gmScaleListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(gmScale));
             __gm__ ElementScale* gmScalePtr;
@@ -2280,19 +2255,11 @@ public:
             for (uint32_t groupIdx = 0; groupIdx < localExpertNum; ++groupIdx) {
                 // just like AIC
                 groupTokenNumStateTensor.SetGlobalBuffer((__gm__ int32_t *)
-                                                         (statusDataSpaceGm + GROUP_TOKEN_NUM_OFFSET) +
-                                                         groupIdx * GROUP_INFO_SIZE);
-                while (true) {
-                    __asm__ __volatile__("");
-                    AscendC::DataCacheCleanAndInvalid<int32_t, AscendC::CacheLine::SINGLE_CACHE_LINE,
-                                                    AscendC::DcciDst::CACHELINE_OUT>(groupTokenNumStateTensor);
-                    __asm__ __volatile__("");
-                    if (groupTokenNumStateTensor.GetValue(0) == coreNumPerGroup * vToCFlag) {
-                        break;
-                    }
-                    SPIN_WAIT_CYCLES();
-                }
-                uint32_t currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT);
+                                                        (statusDataSpaceGm + GROUP_TOKEN_NUM_OFFSET) +
+                                                        groupIdx * GROUP_INFO_SIZE);
+                uint32_t expected = coreNumPerGroup * vToCFlag;
+                WaitGroupTokenNumReady(groupTokenNumStateTensor, expected);
+                currentM = groupTokenNumStateTensor.GetValue(GROUP_TOKEN_COUNT);
                 GemmCoord inGroupProblemShape{currentM, n, k};
                 LayoutPerTokenScale layoutPerTokenScale =
                     wholeLayoutPerTokenScale.GetTileLayout(inGroupProblemShape.template GetCoordByAxis<0>());
@@ -2302,11 +2269,14 @@ public:
                     gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(
                                     gmScaleListTensor.GetDataPtr<int32_t>(groupIdx));
                     epilogueParams = EpilogueParams {
+                                                reinterpret_cast<__gm__ ElementC *>(gmCVSwapBuff) + gmGroupOffsetC,
                                                 gmScalePtr, layoutScale,
                                                 gmTokenScale + gmGroupOffsetPerTokenScale, layoutPerTokenScale,
                                                 gmSwigluOutput + gmGroupOffsetD, layoutD};
                 } else {
-                    epilogueParams = EpilogueParams{gmScalePtr + gmGroupOffsetScale,
+                    epilogueParams = EpilogueParams{
+                                                reinterpret_cast<__gm__ ElementC *>(gmCVSwapBuff) + gmGroupOffsetC,
+                                                gmScalePtr + gmGroupOffsetScale,
                                                 layoutScale,
                                                 gmTokenScale + gmGroupOffsetPerTokenScale,
                                                 layoutPerTokenScale,
@@ -2323,19 +2293,12 @@ public:
                 for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
                     GemmCoord blockCoordMNK = blockScheduler.GetBlockCoord(loopIdx);
                     GemmCoord actualBlockShapeMNK = blockScheduler.GetActualBlockShape(blockCoordMNK);
-
-                    MatrixCoord offsetC{(stageId * aiCoreGroupNum + aiCoreGroupIdx) * L1TileShape::M, 0};
-                    int64_t gmOffsetC = layoutC.GetOffset(offsetC);
-                    auto gmBlockC = gmC[gmOffsetC];
-                    auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
-                    CheckSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET,
-                        static_cast<uint8_t>(compCoreNum + compCoreIdx), target);
+                    CheckSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx), target);
                     target += 1;
-                    blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
-                    EncreaseSyncFlag(statusDataSpaceGm + SOFT_SYNC_OFFSET, static_cast<uint8_t>(compCoreIdx));
-                    stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
+                    blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK);
                 }
 
+                gmGroupOffsetC += currentM * n;
                 if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                     gmGroupOffsetScale += inGroupProblemShape.n();
                 }
@@ -2345,7 +2308,6 @@ public:
                 startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
             }
         }
-        // clean
         AscendC::PipeBarrier<PIPE_ALL>();
     }
 
@@ -3179,6 +3141,7 @@ public:
                 LayoutD layoutD = layout::RowMajor{currentM, params.shareN};
 
                 EpilogueParams epilogueParams{
+                    reinterpret_cast<__gm__ ElementC *>(params.gmSwigluOut),
                     params.ptrShareScale, params.layoutShareScale,
                     reinterpret_cast<__gm__ float*>(params.gmShareX1Scale), layoutPerTokenScale,
                     reinterpret_cast<__gm__ float*>(params.gmShareSwigluOut), layoutD
@@ -3200,7 +3163,7 @@ public:
                     auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
 
                     Arch::CrossCoreWaitFlag(flagAicFinishStoreList[stageId]);
-                    blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
+                    blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK);
                     Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(flagAivFinishComputeList[stageId]);
 
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
@@ -3227,12 +3190,14 @@ public:
                     gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(
                                     gmScaleListTensor.GetDataPtr<int32_t>(groupIdx));
                     epilogueParams = EpilogueParams {
+                                                reinterpret_cast<__gm__ ElementC *>(params.gmSwigluOut),
                                                 gmScalePtr, layoutScale,
                                                 params.ptrPerTokenScale + gmGroupOffsetPerTokenScale,
                                                 layoutPerTokenScale,
                                                 ptrD + gmGroupOffsetD, layoutD};
                 } else {
-                    epilogueParams = EpilogueParams{gmScalePtr + gmGroupOffsetScale,
+                    epilogueParams = EpilogueParams{reinterpret_cast<__gm__ ElementC *>(params.gmSwigluOut),
+                                                gmScalePtr + gmGroupOffsetScale,
                                                 layoutScale,
                                                 params.ptrPerTokenScale + gmGroupOffsetPerTokenScale,
                                                 layoutPerTokenScale,
@@ -3256,7 +3221,7 @@ public:
                     auto layoutBlockC = layoutC.GetTileLayout(actualBlockShapeMNK.GetCoordMN());
 
                     Arch::CrossCoreWaitFlag(flagAicFinishStoreList[stageId]);
-                    blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK, gmBlockC, layoutBlockC);
+                    blockEpilogue(blockShapeMNK, blockCoordMNK, actualBlockShapeMNK);
                     Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(flagAivFinishComputeList[stageId]);
 
                     stageId = (stageId + 1 < WORKSPACE_STAGES) ? (stageId + 1) : 0;
