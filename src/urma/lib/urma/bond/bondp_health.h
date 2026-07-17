@@ -17,6 +17,7 @@ extern "C" {
 
 struct bondp_context;
 struct bondp_target_jetty;
+struct bondp_comp;
 struct urma_bond_seg_info_out;
 struct urma_bond_id_info_out;
 
@@ -67,6 +68,16 @@ urma_status_t bondp_hc_unimport_tseg(struct bondp_target_jetty *bdp_tjetty);
  */
 bool bondp_hc_tjetty_target_any_valid(const struct bondp_target_jetty *bdp_tjetty,
                                       uint32_t target_idx);
+
+/**
+ * Restore the bound local comp's path validity for the given local_idx when
+ * every health-checked link from that local_idx to the target jetty's node is
+ * healthy (tjetty valid AND node valid). When the target jetty is not
+ * health-check registered, validity is restored unconditionally. Called from
+ * the datapath failback path with the target jetty this comp sends to.
+ */
+void bondp_hc_maybe_restore_comp_valid(struct bondp_comp *bdp_comp,
+                                      const struct bondp_target_jetty *bdp_tjetty, int local_idx);
 
 #ifdef __cplusplus
 }
