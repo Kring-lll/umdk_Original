@@ -4,7 +4,7 @@
  * Description: add notify dispatch zero buffer interface source file
  * Create: 2026-06-10
  * Note:
- * History: 2026-06-10 create add notify dispatch zero buffer interface source file
+ * History: 2026-06-10 create add notify dispatch zero buffer interface source file.
  */
 #include <string.h>
 
