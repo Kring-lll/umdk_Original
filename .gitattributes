@@ -1,5 +1,5 @@
 # text files will be converted to LF format upon submission and will be preserved in their original form upon checkout
 * text=auto eol=lf
-
 # Binary files do not handle newline characters
 *.png binary
+src/snc/src/test/resources/topo_4frame_4lc_v0717.json filter=lfs diff=lfs merge=lfs -text
