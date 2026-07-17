@@ -168,6 +168,67 @@ static void hc_set_tjetty_list_target_valid(bondp_hc_node_t *node, uint32_t targ
     pthread_rwlock_unlock(&node->lock);
 }
 
+/* Restore the bound local comp's path so failback can resume on it, provided
+ * no connected path is in a state where the tjetty is valid but the node side
+ * is not: for every connected target with tjetty->valid[t] true, the matching
+ * node->valid[local_idx][t] must also be true. The caller passes the target
+ * jetty that this comp sends to; the health node is located from the tjetty,
+ * and connected paths are walked forward via node->hc_tjetty[local_idx][t]. */
+void bondp_hc_maybe_restore_comp_valid(bondp_comp_t *bdp_comp,
+                                       const bondp_target_jetty_t *bdp_tjetty, int local_idx)
+{
+    if (bdp_comp == NULL || bdp_tjetty == NULL ||
+        local_idx < 0 || local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return;
+    }
+
+    /* When this target jetty is not HC-tracked, failback owns validity
+     * entirely — re-enable the path (matches the unregistered fallback in
+     * bondp_hc_tjetty_target_any_valid). */
+    if (!bdp_tjetty->hc_registered) {
+        atomic_store(&bdp_comp->valid[local_idx], true);
+        return;
+    }
+
+    /* hc_registered implies a non-NULL hc_ctx and a valid node_idx (set
+     * together in bondp_hc_register_tjetty); reaching here otherwise would be
+     * an inconsistent state, in which case leave validity untouched rather
+     * than wrongly re-enabling the path. */
+    bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(bdp_tjetty->v_tjetty.urma_ctx, bondp_context_t, v_ctx);
+    bondp_hc_ctx_t *hc_ctx = bdp_ctx->hc_ctx;
+    if (hc_ctx == NULL) {
+        return;
+    }
+
+    uint32_t node_idx = bdp_tjetty->hc_node_idx;
+    if (node_idx >= hc_ctx->node_num) {
+        return;
+    }
+
+    bondp_hc_node_t *node = &hc_ctx->nodes[node_idx];
+    bool all_valid = true;
+    bool any_connected = false;
+
+    pthread_rwlock_rdlock(&node->lock);
+    for (uint32_t t = 0; t < URMA_UBAGG_DEV_MAX_NUM; ++t) {
+        bondp_target_jetty_t *tjetty = node->hc_tjetty[local_idx][t];
+        if (tjetty == NULL) {
+            continue;
+        }
+        any_connected = true;
+        /* Violation: the tjetty is valid but the node side is not. */
+        if (atomic_load(&tjetty->valid[t]) &&
+            !atomic_load(&node->valid[local_idx][t])) {
+            all_valid = false;
+        }
+    }
+    pthread_rwlock_unlock(&node->lock);
+
+    if (any_connected && all_valid) {
+        atomic_store(&bdp_comp->valid[local_idx], true);
+    }
+}
+
 static void hc_drain_probe_cq(bondp_probe_res_t *res)
 {
     if (res == NULL || res->jfc == NULL || res->jfce == NULL) {

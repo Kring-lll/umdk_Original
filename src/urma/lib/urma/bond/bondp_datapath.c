@@ -321,7 +321,7 @@ static urma_status_t schedule_send_wr(const urma_jfs_wr_t *wr, bondp_comp_t *bdp
     return schedule_send(wr->tjetty, bdp_comp, send_idx, target_idx, &info);
 }
 
-static void try_failback(bondp_comp_t *bdp_comp)
+static void try_failback(bondp_comp_t *bdp_comp, bondp_target_jetty_t *bdp_tjetty)
 {
     if (!g_bondp_global_ctx->enable_failback) {
         return;
@@ -331,6 +331,18 @@ static void try_failback(bondp_comp_t *bdp_comp)
 
     uint32_t rebuilt_cnt = 0;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+        /* Re-enable the rebuilt path. When health check owns path validity,
+         * defer to it: only restore valid[i] if every health-checked link on
+         * this local_idx is healthy (handled inside the helper); HC-untracked
+         * tjetties degrade to restoring validity unconditionally. */
+        if (g_bondp_global_ctx->enable_health_check &&
+            !atomic_load(&bdp_comp->valid[i]) &&
+            atomic_load(&bdp_comp->rebuild_done[i])) {
+            bondp_hc_maybe_restore_comp_valid(bdp_comp, bdp_tjetty, (int)i);
+            if (!atomic_load(&bdp_comp->valid[i])) {
+                continue;
+            }
+        }
         if (!atomic_exchange(&bdp_comp->rebuild_done[i], false)) {
             continue;
         }
@@ -479,7 +491,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
         URMA_LOG_ERR("WR->tjetty is NULL\n");
         return URMA_EINVAL;
     }
-    try_failback(bdp_comp);
+    try_failback(bdp_comp, bdp_tjetty);
     if (wr_total > BONDP_BATCH_POST_MAX_NUM) {
         URMA_LOG_ERR("Bondp supports at most %d wr_list.\n", BONDP_BATCH_POST_MAX_NUM);
         return URMA_EINVAL;
