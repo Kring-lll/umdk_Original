@@ -11,7 +11,7 @@
 #include "lib/matmul_intf.h"
 
 #define CALL_FUSED_DEEP_MOE(weightT) \
-        FusedDeepMoe<DTYPE_X, DTYPE_GMM1_WEIGHT_SCALE, DTYPE_GMM2_WEIGHT_SCALE, int32_t, false, weightT, TILING_KEY_VAR> op; \
+        FusedDeepMoe<DTYPE_X, DTYPE_GMM1_WEIGHT_SCALE, DTYPE_GMM2_WEIGHT_SCALE, int32_t, false, TILING_KEY_VAR, weightT> op; \
         op.Init(x, expert_ids, gmm1_weight, gmm1_weight_scale, gmm2_weight, gmm2_weight_scale, \
                 expert_scales, share_gmm1_weight, share_gmm1_weight_scale, \
                 share_gmm2_weight, share_gmm2_weight_scale, expert_smooth_scales, share_smooth_scales, x_active_mask, \

@@ -2530,7 +2530,8 @@ public:
                 __gm__ ElementPerTokenScale *gmShareTokenScale, __gm__ ElementPerTokenScale *gmTokenScale,
                 __gm__ float *gmShareSwigluOutput, __gm__ float *gmSwigluOutput, uint32_t shareN, uint32_t n,
                 uint32_t k, LayoutScale layoutShareScale, LayoutScale layoutScale,
-                LayoutPerTokenScale wholeLayoutPerTokenScale)
+                LayoutPerTokenScale wholeLayoutPerTokenScale,
+                __gm__ float *gmWeightAux, __gm__ float *gmShareWeightAux)
     {
         uint32_t coreNumPerGroup = DISPATCH_RECV_CORE_NUM;
         int64_t gmGroupOffsetScale = 0;
@@ -2559,7 +2560,7 @@ public:
 
                 EpilogueParams epilogueParams{
                     gmShareMm1Scale, layoutShareScale,
-                    params.gmShareWeightAux,
+                    gmShareWeightAux,
                     gmShareTokenScale, layoutPerTokenScale,
                     gmShareSwigluOutput, layoutD
                 };
@@ -2595,8 +2596,8 @@ public:
             }
             AscendC::ListTensorDesc gmWeightAuxListTensor;
             __gm__ float* gmWeightAuxPtr = nullptr;
-            if (params.gmWeightAux != nullptr) {
-                gmWeightAuxListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(params.gmWeightAux));
+            if (gmWeightAux != nullptr) {
+                gmWeightAuxListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(gmWeightAux));
                 if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                     gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(gmWeightAuxListTensor.GetDataPtr<int32_t>(0));
                 }
@@ -2984,7 +2985,8 @@ public:
             CompCoreFunc(params.ptrWorkspace, params.ptrShareScale,  params.ptrScale,
                 (__gm__ float*)params.gmShareX1Scale, (__gm__ float*)params.ptrPerTokenScale,
                 gmShareSwigluOutput, gmSwigluOutput, params.shareN, params.problemShape.n(), params.problemShape.k(),
-                params.layoutShareScale, params.layoutScale, params.layoutPerTokenScale);
+                params.layoutShareScale, params.layoutScale, params.layoutPerTokenScale,
+                params.gmWeightAux, params.gmShareWeightAux);
         }
 
         icache_preload(8);
