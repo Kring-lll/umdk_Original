@@ -81,7 +81,8 @@ public:
                                 (std::is_same_v<ElementRawScale, ElementFp32Scale> ?
                                     0 : TileShape::COLUMN * sizeof(ElementRawScale)) +
                                 TileShape::COLUMN * sizeof(ElementFp32Scale) +
-                                TileShape::ROW * sizeof(ElementPerTokenScale) + TileShape::COUNT * sizeof(ElementD)) +
+                                TileShape::ROW * sizeof(ElementPerTokenScale) + TileShape::COUNT * sizeof(ElementD) +
+                                TileShape::COLUMN * sizeof(float)) +
                    (TileShape::COUNT + TileShape::COUNT) * sizeof(float) + TileShape::ROW * BYTE_PER_BLK) <=
                       ArchTag::UB_SIZE,
                   "TileShape is too large to fit in UB");
@@ -89,6 +90,7 @@ public:
     struct Params {
         __gm__ ElementRawScale *ptrScale{nullptr};
         LayoutScale layoutScale{};
+        __gm__ float *ptrWeightAux{nullptr};
         __gm__ ElementPerTokenScale *ptrPerTokenScale{nullptr};
         LayoutPerTokenScale layoutPerTokenScale{};
         __gm__ ElementD *ptrD{nullptr};
@@ -99,10 +101,12 @@ public:
 
         CATLASS_DEVICE
         Params(__gm__ ElementRawScale *ptrScale_, LayoutScale const &layoutScale_,
+               __gm__ float *ptrWeightAux_,
                __gm__ ElementPerTokenScale *ptrPerTokenScale_, LayoutPerTokenScale const &layoutPerTokenScale_,
                __gm__ ElementD *ptrD_, LayoutD const &layoutD_)
             : ptrScale(ptrScale_),
               layoutScale(layoutScale_),
+              ptrWeightAux(ptrWeightAux_),
               ptrPerTokenScale(ptrPerTokenScale_),
               layoutPerTokenScale(layoutPerTokenScale_),
               ptrD(ptrD_),
@@ -131,6 +135,8 @@ public:
             ubOffset += TileShape::ROW * sizeof(ElementPerTokenScale);
             ubDList[i] = resource.ubBuf.template GetBufferByByte<ElementD>(ubOffset);
             ubOffset += TileShape::COUNT * sizeof(ElementD);
+            ubweighAuxList[i] = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
+            ubOffset += TileShape::COLUMN * sizeof(float);
 
             eventUbCVMTE2List[i] = eventVMTE2++;
             eventUbCMTE2VList[i] = eventMTE2V++;
@@ -259,6 +265,25 @@ public:
             }
             tileRowBroadcastMul(ubTmpMxN, ubTmpMxN, ubFp32Scale);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventUbScaleVMTE2List[ubListId]);
+
+            // w4a8: compensation matrix add
+            if (params.ptrWeightAux != nullptr) {
+                AscendC::GlobalTensor<float> gmWeightAux;
+                gmWeightAux.SetGlobalBuffer(params.ptrWeightAux);
+                auto &ubweighAux = ubweighAuxList[ubListId];
+                AscendC::DataCopyPad(ubweighAux,
+                    gmWeightAux[params.layoutScale.GetOffset(scaleTileOffset)],
+                    {1, static_cast<uint16_t>(TileShape::COLUMN * sizeof(float)), 0, 0, 0}, {});
+                AscendC::PipeBarrier<PIPE_V>();
+                constexpr uint32_t w4a8Mask = 64;
+                constexpr uint32_t w4a8RepeatTimes = 16;
+                constexpr uint32_t w4a8DstRepStride = 1;
+                constexpr uint32_t w4a8Src0RepStride = 16;
+                constexpr uint32_t w4a8Src1RepStride = 0;
+                AscendC::Add(ubTmpMxN, ubTmpMxN, ubweighAux, w4a8Mask, w4a8RepeatTimes,
+                    {1, 1, w4a8DstRepStride, w4a8Src0RepStride, w4a8Src0RepStride, w4a8Src1RepStride});
+                AscendC::PipeBarrier<PIPE_V>();
+            }
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(eventUbPerTokenScaleMTE2VList[ubListId]);
             tileBroadcastOneBlk(ubTmpMx32B, ubPerTokenScale);
             AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(eventUbPerTokenScaleVMTE2List[ubListId]);
@@ -302,6 +327,7 @@ private:
     AscendC::LocalTensor<ElementFp32Scale> ubFp32ScaleList[UB_STAGES];
     AscendC::LocalTensor<ElementPerTokenScale> ubPerTokenScaleList[UB_STAGES];
     AscendC::LocalTensor<ElementD> ubDList[UB_STAGES];
+    AscendC::LocalTensor<float> ubweighAuxList[UB_STAGES];
 
     int32_t eventUbCVMTE2List[UB_STAGES];
     int32_t eventUbCMTE2VList[UB_STAGES];

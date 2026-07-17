@@ -307,6 +307,316 @@ private:
     Epilogue::Tile::CopyUb2Gm<ArchTag, OutputType> copyUbToGmOutput;
 };
 
+template <class ArchTag>
+class BlockQuantW4A8 {
+public:
+    using ElementInput = float;
+    using LayoutInput = layout::RowMajor;
+    using ElementDequantScale = float;
+    using LayoutDequantScale = layout::VectorLayout;
+    using ElementOutput = int8_t;
+    using LayoutOutput = layout::RowMajor;
+
+    using InputType = GemmType<ElementInput, LayoutInput>;
+    using DequantScaleType = GemmType<ElementDequantScale, LayoutDequantScale>;
+    using OutputType = GemmType<ElementOutput, LayoutOutput>;
+
+    using EpilogueTileSwizzle = Epilogue::Tile::EpilogueHorizontalTileSwizzle;
+
+    struct Params {
+        __gm__ ElementInput *ptrInput{nullptr};
+        LayoutInput layoutInput;
+        __gm__ ElementDequantScale *ptrDequantScale{nullptr};
+        LayoutDequantScale layoutDequantScale;
+        __gm__ ElementOutput *ptrOutput{nullptr};
+        LayoutOutput layoutOutput;
+        uint32_t tileRow;
+        uint32_t tileColumn;
+
+        CATLASS_DEVICE
+        Params() {};
+
+        CATLASS_DEVICE
+        Params(__gm__ ElementInput *ptrInput_, LayoutInput const &layoutInput_,
+            __gm__ ElementDequantScale *ptrQuantScale_, LayoutDequantScale const &layoutQuantScale_,
+            __gm__ ElementOutput *ptrOutput_, LayoutOutput const layoutOutput_, const uint32_t tileRow_,
+            const uint32_t tileColumn_)
+            : ptrInput(ptrInput_),
+              layoutInput(layoutInput_),
+              ptrDequantScale(ptrQuantScale_),
+              layoutDequantScale(layoutQuantScale_),
+              ptrOutput(ptrOutput_),
+              layoutOutput(layoutOutput_),
+              tileRow(tileRow_),
+              tileColumn(tileColumn_)
+        {}
+    };
+
+    CATLASS_DEVICE
+    BlockQuantW4A8(Arch::Resource<ArchTag> const &resource, Params const &params_) : params(params_)
+    {
+        int64_t ubOffset = 0;
+        constexpr size_t LEN_128 = 128;
+        tileRow = params_.tileRow;
+        tileColumn = params_.tileColumn;
+        tileCount = tileRow * tileColumn;
+        halfTileColumn = tileColumn >> 1U;
+        halfTileCount = tileRow * halfTileColumn;
+
+        ubInput = resource.ubBuf.template GetBufferByByte<ElementInput>(ubOffset);
+        ubOffset += tileCount * sizeof(ElementInput);
+        ubDequantScale = resource.ubBuf.template GetBufferByByte<ElementDequantScale>(ubOffset);
+        ubOffset += CEIL_UP(tileRow * sizeof(ElementDequantScale));
+        ubOutput = resource.ubBuf.template GetBufferByByte<ElementOutput>(ubOffset);
+        ubOffset += tileCount * sizeof(ElementOutput);
+
+        ubAbs = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
+        ubOffset += tileCount * sizeof(float);
+        ubMax = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
+        ubOffset += halfTileCount * sizeof(float);
+        ubReduceMax = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
+        ubOffset += CEIL_UP(tileRow * sizeof(float));
+        ubQuantScale = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
+        ubOffset += CEIL_UP(tileRow * sizeof(float));
+
+        // int8 -> int4
+        xHighI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(ubOffset);
+        ubOffset += CEIL_UP(tileColumn / CONSTANT_TWO);
+        xLowI4Tensor = resource.ubBuf.template GetBufferByByte<AscendC::int4b_t>(ubOffset);
+        ubOffset += CEIL_UP(tileColumn / CONSTANT_TWO);
+        xLowHalfTensor = resource.ubBuf.template GetBufferByByte<half>(ubOffset);
+        ubOffset += CEIL_UP(tileColumn * sizeof(half));
+        xLowHalfTensor2 = resource.ubBuf.template GetBufferByByte<half>(ubOffset);
+        ubOffset += CEIL_UP(tileColumn * sizeof(half));
+        xLowI16Tensor = resource.ubBuf.template GetBufferByByte<int16_t>(ubOffset);
+        ubOffset += CEIL_UP(LEN_128 * sizeof(int16_t));
+
+        ubInputTmp = ubAbs;
+        ubInputRightHalf = ubAbs;
+        ubQuantF32 = ubAbs;
+        ubQuantS32 = ubAbs.ReinterpretCast<int32_t>();
+        ubQuantF16 = ubAbs.ReinterpretCast<half>();
+
+        AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(0);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(0);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+        AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+    }
+
+    CATLASS_DEVICE
+    ~BlockQuantW4A8()
+    {
+        AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(0);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(0);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+    }
+
+    CATLASS_DEVICE
+    void operator()(MatrixCoord const &blockShape, MatrixCoord const &blockCoord, MatrixCoord const &actualBlockShape)
+    {
+        MatrixCoord blockOffset = blockCoord * blockShape;
+
+        AscendC::GlobalTensor<ElementInput> gmInput;
+        gmInput.SetGlobalBuffer(params.ptrInput);
+        AscendC::GlobalTensor<ElementDequantScale> gmDequantScale;
+        gmDequantScale.SetGlobalBuffer(params.ptrDequantScale);
+        AscendC::GlobalTensor<ElementOutput> gmOutput;
+        gmOutput.SetGlobalBuffer(params.ptrOutput);
+
+        auto ubTileStride = MakeCoord(static_cast<int64_t>(tileColumn), 1L);
+        auto ubHalfTileStride = MakeCoord(static_cast<int64_t>(halfTileColumn), 1L);
+        auto tileShape = MakeCoord(tileRow, tileColumn);
+        EpilogueTileSwizzle epilogueTileSwizzle(actualBlockShape, tileShape);
+        uint32_t tileLoops = epilogueTileSwizzle.GetLoops();
+        uint32_t subblockIdx = AscendC::GetSubBlockIdx();
+        uint32_t subblockNum = AscendC::GetSubBlockNum();
+        for (uint32_t loopIdx = subblockIdx; loopIdx < tileLoops; loopIdx += subblockNum) {
+            auto tileCoord = epilogueTileSwizzle.GetTileCoord(loopIdx);
+            auto actualTileShape = epilogueTileSwizzle.GetActualTileShape(tileCoord);
+            auto tileOffsetInBlock = tileCoord * tileShape;
+            auto tileOffset = blockOffset + tileOffsetInBlock;
+
+            auto gmTileInput = gmInput[params.layoutInput.GetOffset(tileOffset)];
+            auto layoutGmTileInput = params.layoutInput.GetTileLayout(actualTileShape);
+
+            layout::RowMajor layoutUbInput{actualTileShape, ubTileStride};
+
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(0);
+            // continue swiglu computing here and then quant
+            copyGmToUbInput(ubInput, gmTileInput, layoutUbInput, layoutGmTileInput);
+            copyGmToUbInput(ubInputRightHalf, gmTileInput[params.layoutInput.shape(1) >> 1],
+                layoutUbInput, layoutGmTileInput);
+            AscendC::SetFlag<AscendC::HardEvent::MTE2_V>(0);
+
+            AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(0);
+            AscendC::Mul(ubInput, ubInput, ubInputRightHalf, tileCount);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::Abs(ubAbs, ubInput, tileCount);
+            AscendC::PipeBarrier<PIPE_V>();
+
+            for (uint32_t rowIdx = 0; rowIdx < tileRow; ++rowIdx) {
+                AscendC::Max(ubMax[rowIdx * halfTileColumn], ubAbs[rowIdx * tileColumn],
+                    ubAbs[rowIdx * tileColumn + halfTileColumn], halfTileColumn);
+            }
+
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::Muls(ubInputTmp, ubInput, 127.f, tileCount);
+
+            constexpr uint32_t elementPerBlk = BYTE_PER_BLK / sizeof(float);
+            constexpr int32_t mask = 64;
+
+            AscendC::BinaryRepeatParams maxParams;
+            maxParams.dstBlkStride = halfTileColumn / elementPerBlk;
+            maxParams.src0BlkStride = halfTileColumn / elementPerBlk;
+            maxParams.src1BlkStride = halfTileColumn / elementPerBlk;
+            maxParams.dstRepStride = 1;
+            maxParams.src0RepStride = 1;
+            maxParams.src1RepStride = 1;
+            constexpr uint32_t colNumPerCompute = BYTE_PER_VECTOR_FRACTAL / sizeof(float);
+            uint32_t reduceWidth = halfTileColumn;
+            while (reduceWidth > (BLK_NUM_PER_VECTOR_FRACTAL * BYTE_PER_BLK / sizeof(float))) {
+                reduceWidth >>= 1;
+                AscendC::Max(ubMax, ubMax, ubMax[reduceWidth], mask, reduceWidth / elementPerBlk, maxParams);
+                AscendC::PipeBarrier<PIPE_V>();
+            }
+
+            AscendC::WholeReduceMax(ubReduceMax, ubMax, mask, tileRow, 1, 1, halfTileColumn / elementPerBlk,
+                AscendC::ReduceOrder::ORDER_ONLY_VALUE);
+            AscendC::SetFlag<AscendC::HardEvent::V_S>(0);
+            AscendC::PipeBarrier<PIPE_V>();
+
+            AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(0);
+            AscendC::Muls(ubDequantScale, ubReduceMax, 1.0f / 127.0f, tileRow);
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(0);
+
+            auto dequantScaleTileOffset = tileOffset.template GetCoordByAxis<0>();
+            auto dequantScaleTileShape = actualTileShape.template GetCoordByAxis<0>();
+
+            auto gmTileDequantScale = gmDequantScale[params.layoutDequantScale.GetOffset(dequantScaleTileOffset)];
+            auto layoutGmTileDequantScale = params.layoutDequantScale.GetTileLayout(dequantScaleTileShape);
+
+            auto layoutUbDequantScale =
+                LayoutDequantScale::template MakeLayoutInUb<ElementDequantScale>(dequantScaleTileShape);
+
+            AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(0);
+            copyUbToGmDequantScale(gmTileDequantScale, ubDequantScale, layoutGmTileDequantScale, layoutUbDequantScale);
+            AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(0);
+
+            AscendC::WaitFlag<AscendC::HardEvent::V_S>(0);
+            for (uint32_t rowIdx = 0; rowIdx < tileRow; ++rowIdx) {
+                AscendC::Muls(ubQuantF32[rowIdx * tileColumn], ubInputTmp[rowIdx * tileColumn],
+                    1.f / ubReduceMax.GetValue(rowIdx), tileColumn);
+            }
+
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::Cast(ubQuantS32, ubQuantF32, AscendC::RoundMode::CAST_RINT, tileCount);
+            AscendC::PipeBarrier<PIPE_V>();
+            AscendC::SetDeqScale(static_cast<half>(1.0));
+            AscendC::Cast(ubQuantF16, ubQuantS32, AscendC::RoundMode::CAST_RINT, tileCount);
+            AscendC::PipeBarrier<PIPE_V>();
+
+            AscendC::Cast(ubOutput, ubQuantF16, AscendC::RoundMode::CAST_RINT, tileCount);
+            AscendC::SetFlag<AscendC::HardEvent::V_MTE2>(0);
+
+            auto gmTileOutput = gmOutput[params.layoutOutput.GetOffset(tileOffset)];
+
+            AscendC::PipeBarrier<PIPE_V>();
+            // extra tensor for extracting low 4 bits
+            constexpr int32_t MASK = 128;
+            AscendC::Duplicate(xLowI16Tensor, static_cast<int16_t>(0x0F0F), MASK);
+            AscendC::PipeBarrier<PIPE_V>();
+            constexpr size_t LEN_128 = 128;
+            const size_t LEN_VK = (tileColumn / CONSTANT_TWO) / LEN_128;
+            const size_t LAST_LEN_VK = (tileColumn % 256) / CONSTANT_TWO;
+            const half ONE_SIXTEENTH = static_cast<half>(0.0625f);
+
+            for (uint32_t rowIdx = 0; rowIdx < tileRow; ++rowIdx) {
+                auto inputOffset = rowIdx * tileColumn;
+                auto outputOffset = inputOffset;
+                // int8 -> int4
+                // High 4-bit processing start
+                AscendC::PipeBarrier<PIPE_ALL>();
+                AscendC::Muls(ubQuantF16[inputOffset], ubQuantF16[inputOffset], ONE_SIXTEENTH, tileColumn);
+                AscendC::PipeBarrier<PIPE_V>();
+                AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+                AscendC::Cast(xHighI4Tensor, ubQuantF16[inputOffset], AscendC::RoundMode::CAST_FLOOR, tileColumn);
+                AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
+                AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID6);
+                AscendC::DataCopy(gmTileOutput[outputOffset],
+                    xHighI4Tensor.template ReinterpretCast<int8_t>(),
+                    tileColumn / CONSTANT_TWO);
+                AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID6);
+                // High 4-bit processing end
+
+                // Low 4-bit processing start
+                AscendC::And(xLowHalfTensor.template ReinterpretCast<int16_t>(),
+                    ubOutput[inputOffset].template ReinterpretCast<int16_t>(),
+                    xLowI16Tensor, LEN_128, LEN_VK, {1, 1, 1, 8, 8, 0});
+                if (LAST_LEN_VK > 0) {
+                    AscendC::And(xLowHalfTensor[LEN_VK * LEN_128].template ReinterpretCast<int16_t>(),
+                        ubOutput[inputOffset + LEN_VK * LEN_128 * CONSTANT_TWO]
+                        .template ReinterpretCast<int16_t>(),
+                        xLowI16Tensor, LAST_LEN_VK, 1,
+                        {1, 1, 1, 8, 8, 0});
+                }
+                AscendC::PipeBarrier<PIPE_V>();
+                AscendC::Cast(xLowHalfTensor2.template ReinterpretCast<half>(),
+                    xLowHalfTensor.template ReinterpretCast<int8_t>(),
+                    AscendC::RoundMode::CAST_NONE, tileColumn);
+                AscendC::PipeBarrier<PIPE_V>();
+                const half MINUS_EIGHT = static_cast<half>(-8);
+                AscendC::Adds(ubQuantF16[inputOffset], xLowHalfTensor2, MINUS_EIGHT, tileColumn);
+                AscendC::PipeBarrier<PIPE_V>();
+                AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+                AscendC::Cast(xLowI4Tensor,
+                    ubQuantF16[inputOffset].template ReinterpretCast<half>(),
+                    AscendC::RoundMode::CAST_NONE,
+                    tileColumn);
+                AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
+                AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(EVENT_ID7);
+                AscendC::DataCopy(gmTileOutput[outputOffset + tileColumn / CONSTANT_TWO],
+                    xLowI4Tensor.template ReinterpretCast<int8_t>(),
+                    tileColumn / CONSTANT_TWO);
+                AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(EVENT_ID7);
+            }
+        }
+    }
+
+private:
+    Params params;
+    uint32_t tileRow;
+    uint32_t tileColumn;
+    uint32_t tileCount;
+    uint32_t halfTileColumn;
+    uint32_t halfTileCount;
+
+    AscendC::LocalTensor<ElementInput> ubInput;
+    AscendC::LocalTensor<ElementDequantScale> ubDequantScale;
+    AscendC::LocalTensor<ElementOutput> ubOutput;
+
+    AscendC::LocalTensor<float> ubAbs;
+    AscendC::LocalTensor<float> ubMax;
+    AscendC::LocalTensor<float> ubReduceMax;
+    AscendC::LocalTensor<float> ubQuantScale;
+    AscendC::LocalTensor<float> ubQuantScaleBrcb;
+    AscendC::LocalTensor<float> ubInputTmp;
+    AscendC::LocalTensor<float> ubInputRightHalf;
+    AscendC::LocalTensor<float> ubQuantF32;
+    AscendC::LocalTensor<int32_t> ubQuantS32;
+    AscendC::LocalTensor<half> ubQuantF16;
+    // post-process int8 -> int4
+    AscendC::LocalTensor<AscendC::int4b_t> xLowI4Tensor;
+    AscendC::LocalTensor<AscendC::int4b_t> xHighI4Tensor;
+    AscendC::LocalTensor<half> xLowHalfTensor;
+    AscendC::LocalTensor<half> xLowHalfTensor2;
+    AscendC::LocalTensor<int16_t> xLowI16Tensor;
+
+    Epilogue::Tile::CopyGm2Ub<ArchTag, InputType> copyGmToUbInput;
+    Epilogue::Tile::CopyUb2Gm<ArchTag, DequantScaleType> copyUbToGmDequantScale;
+    Epilogue::Tile::CopyUb2Gm<ArchTag, OutputType> copyUbToGmOutput;
+};
+
 __aicore__ inline static void EncreaseSyncFlag(__gm__ uint8_t *flagAddr, uint8_t idx)
 {
     // flag++, like set flag
@@ -472,6 +782,8 @@ public:
         LayoutB layoutShareB;
         __gm__ ElementB *ptrB;
         LayoutB layoutB;
+        __gm__ float *gmWeightAux;
+        __gm__ float *gmShareWeightAux;
         __gm__ ElementScale *ptrShareScale;
         LayoutScale layoutShareScale;
         __gm__ ElementScale *ptrScale;
@@ -522,7 +834,8 @@ public:
         CATLASS_DEVICE
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_,
                LayoutA const &layoutA_, GM_ADDR ptrShareB_, LayoutB const &layoutShareB_, GM_ADDR ptrB_,
-               LayoutB const &layoutB_, GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_,
+               LayoutB const &layoutB_, GM_ADDR gmWeightAux_, GM_ADDR gmShareWeightAux_,
+               GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_,
                GM_ADDR ptrScale_, LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale const &layoutPerTokenScale_, GM_ADDR ptrOutput_, LayoutOutput const &layoutOutput_,
                GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_,
@@ -541,6 +854,8 @@ public:
               layoutShareB(layoutShareB_),
               ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
               layoutB(layoutB_),
+              gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)),
+              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)),
               ptrShareScale(reinterpret_cast<__gm__ ElementScale *>(ptrShareScale_)),
               layoutShareScale(layoutShareScale_),
               ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
@@ -2215,7 +2530,8 @@ public:
                 __gm__ ElementPerTokenScale *gmShareTokenScale, __gm__ ElementPerTokenScale *gmTokenScale,
                 __gm__ float *gmShareSwigluOutput, __gm__ float *gmSwigluOutput, uint32_t shareN, uint32_t n,
                 uint32_t k, LayoutScale layoutShareScale, LayoutScale layoutScale,
-                LayoutPerTokenScale wholeLayoutPerTokenScale)
+                LayoutPerTokenScale wholeLayoutPerTokenScale,
+                __gm__ float *gmWeightAux, __gm__ float *gmShareWeightAux)
     {
         uint32_t coreNumPerGroup = DISPATCH_RECV_CORE_NUM;
         int64_t gmGroupOffsetScale = 0;
@@ -2244,6 +2560,7 @@ public:
 
                 EpilogueParams epilogueParams{
                     gmShareMm1Scale, layoutShareScale,
+                    gmShareWeightAux,
                     gmShareTokenScale, layoutPerTokenScale,
                     gmShareSwigluOutput, layoutD
                 };
@@ -2277,6 +2594,14 @@ public:
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                 gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(gmScaleListTensor.GetDataPtr<int32_t>(0));
             }
+            AscendC::ListTensorDesc gmWeightAuxListTensor;
+            __gm__ float* gmWeightAuxPtr = nullptr;
+            if (gmWeightAux != nullptr) {
+                gmWeightAuxListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(gmWeightAux));
+                if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
+                    gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(gmWeightAuxListTensor.GetDataPtr<int32_t>(0));
+                }
+            }
             for (uint32_t groupIdx = 0; groupIdx < localExpertNum; ++groupIdx) {
                 // just like AIC
                 groupTokenNumStateTensor.SetGlobalBuffer((__gm__ int32_t *)
@@ -2301,13 +2626,19 @@ public:
                 if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                     gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(
                                     gmScaleListTensor.GetDataPtr<int32_t>(groupIdx));
+                    if (gmWeightAuxPtr != nullptr) {
+                        gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(
+                            gmWeightAuxListTensor.GetDataPtr<int32_t>(groupIdx));
+                    }
                     epilogueParams = EpilogueParams {
                                                 gmScalePtr, layoutScale,
+                                                gmWeightAuxPtr,
                                                 gmTokenScale + gmGroupOffsetPerTokenScale, layoutPerTokenScale,
                                                 gmSwigluOutput + gmGroupOffsetD, layoutD};
                 } else {
                     epilogueParams = EpilogueParams{gmScalePtr + gmGroupOffsetScale,
                                                 layoutScale,
+                                                gmWeightAuxPtr + gmGroupOffsetScale,
                                                 gmTokenScale + gmGroupOffsetPerTokenScale,
                                                 layoutPerTokenScale,
                                                 gmSwigluOutput + gmGroupOffsetD,
@@ -2654,7 +2985,8 @@ public:
             CompCoreFunc(params.ptrWorkspace, params.ptrShareScale,  params.ptrScale,
                 (__gm__ float*)params.gmShareX1Scale, (__gm__ float*)params.ptrPerTokenScale,
                 gmShareSwigluOutput, gmSwigluOutput, params.shareN, params.problemShape.n(), params.problemShape.k(),
-                params.layoutShareScale, params.layoutScale, params.layoutPerTokenScale);
+                params.layoutShareScale, params.layoutScale, params.layoutPerTokenScale,
+                params.gmWeightAux, params.gmShareWeightAux);
         }
 
         icache_preload(8);
@@ -2666,32 +2998,59 @@ public:
         AscendC::PipeBarrier<PIPE_ALL>();
         uint32_t startCoreIdx = 0;
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
-            // dynamic quant
-            totalTokenCount = axisBS;
-            uint32_t n = params.shareN;
-            uint32_t nOut = params.shareN / 2;
-            uint32_t quantRowOnce = 0;
-            CalQuantRow(nOut, quantRowOnce);
-            typename BlockQuant<ArchTag>::Params quantParams;
-            auto swigluLayout = layout::RowMajor{totalTokenCount, n};
-            quantParams = typename BlockQuant<ArchTag>::Params {
-                (__gm__ float*)params.gmShareSwigluOut, swigluLayout,  // input: swiglu output
-                (__gm__ float*)params.gmShareX2Scale, params.layoutDequantScale,  // output: quant token scale
-                (__gm__ int8_t*)params.gmShareX2, params.layoutShareOutput, // output: x2
-                quantRowOnce,           nOut};
-            BlockQuant<ArchTag> blockQuant(resource, quantParams);
-            MatrixCoord quantShape(totalTokenCount, nOut);
-            MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
-            Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
-            uint32_t coreLoops = quantSwizzle.GetLoops();
-            uint32_t startLoopIdx =
-                        ((sendCoreIdx < startCoreIdx) ? (sendCoreIdx + aiCoreGroupNum) : sendCoreIdx) - startCoreIdx;
-            for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
-                auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
-                auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
-                blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+            if (params.gmWeightAux != nullptr) {
+                totalTokenCount = axisBS;
+                uint32_t n = params.shareN;
+                uint32_t nOut = params.shareN / 2;
+                uint32_t quantRowOnce = 0;
+                CalQuantRow(nOut, quantRowOnce);
+                typename BlockQuantW4A8<ArchTag>::Params quantParams;
+                auto swigluLayout = layout::RowMajor{totalTokenCount, n};
+                quantParams = typename BlockQuantW4A8<ArchTag>::Params {
+                    (__gm__ float*)params.gmShareSwigluOut, swigluLayout,
+                    (__gm__ float*)params.gmShareX2Scale, params.layoutDequantScale,
+                    (__gm__ int8_t*)params.gmShareX2, params.layoutShareOutput,
+                    quantRowOnce,           nOut};
+                BlockQuantW4A8<ArchTag> blockQuant(resource, quantParams);
+                MatrixCoord quantShape(totalTokenCount, nOut);
+                MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
+                Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
+                uint32_t coreLoops = quantSwizzle.GetLoops();
+                uint32_t startLoopIdx =
+                            ((sendCoreIdx < startCoreIdx) ? (sendCoreIdx + aiCoreGroupNum) : sendCoreIdx) - startCoreIdx;
+                for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
+                    auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
+                    auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
+                    blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+                }
+                startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
+            } else {
+                totalTokenCount = axisBS;
+                uint32_t n = params.shareN;
+                uint32_t nOut = params.shareN / 2;
+                uint32_t quantRowOnce = 0;
+                CalQuantRow(nOut, quantRowOnce);
+                typename BlockQuant<ArchTag>::Params quantParams;
+                auto swigluLayout = layout::RowMajor{totalTokenCount, n};
+                quantParams = typename BlockQuant<ArchTag>::Params {
+                    (__gm__ float*)params.gmShareSwigluOut, swigluLayout,  // input: swiglu output
+                    (__gm__ float*)params.gmShareX2Scale, params.layoutDequantScale,  // output: quant token scale
+                    (__gm__ int8_t*)params.gmShareX2, params.layoutShareOutput, // output: x2
+                    quantRowOnce,           nOut};
+                BlockQuant<ArchTag> blockQuant(resource, quantParams);
+                MatrixCoord quantShape(totalTokenCount, nOut);
+                MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
+                Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
+                uint32_t coreLoops = quantSwizzle.GetLoops();
+                uint32_t startLoopIdx =
+                            ((sendCoreIdx < startCoreIdx) ? (sendCoreIdx + aiCoreGroupNum) : sendCoreIdx) - startCoreIdx;
+                for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
+                    auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
+                    auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
+                    blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+                }
+                startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
             }
-            startCoreIdx = (startCoreIdx + coreLoops) % aiCoreGroupNum;
             AscendC::PipeBarrier<PIPE_ALL>();
         }
         {
@@ -2705,26 +3064,50 @@ public:
             __asm__ __volatile__("");
             totalTokenCount = sendCountsGlobal.GetValue(localExpertNum * epRankSize - 1);
             AscendC::PipeBarrier<PIPE_ALL>();
-            uint32_t n = params.problemShape.n();
-            uint32_t nOut = params.problemShape.n() / 2;
-            uint32_t quantRowOnce = 0;
-            CalQuantRow(nOut, quantRowOnce);
-            typename BlockQuant<ArchTag>::Params quantParams;
-            auto swigluLayout = layout::RowMajor{totalTokenCount, n};
-            quantParams = typename BlockQuant<ArchTag>::Params {
-                gmSwigluOutput,   swigluLayout,        params.ptrDequantScale, params.layoutDequantScale,
-                params.ptrOutput, params.layoutOutput, quantRowOnce,           nOut};
-            BlockQuant<ArchTag> blockQuant(resource, quantParams);
-            MatrixCoord quantShape(totalTokenCount, nOut);
-            MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
-            Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
-            uint32_t coreLoops = quantSwizzle.GetLoops();
-            uint32_t startLoopIdx =
-                    ((sendCoreIdx < startCoreIdx) ? (sendCoreIdx + aiCoreGroupNum) : sendCoreIdx) - startCoreIdx;
-            for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
-                auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
-                auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
-                blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+            if (params.gmWeightAux != nullptr) {
+                uint32_t n = params.problemShape.n();
+                uint32_t nOut = params.problemShape.n() / 2;
+                uint32_t quantRowOnce = 0;
+                CalQuantRow(nOut, quantRowOnce);
+                typename BlockQuantW4A8<ArchTag>::Params quantParams;
+                auto swigluLayout = layout::RowMajor{totalTokenCount, n};
+                quantParams = typename BlockQuantW4A8<ArchTag>::Params {
+                    gmSwigluOutput,   swigluLayout,        params.ptrDequantScale, params.layoutDequantScale,
+                    params.ptrOutput, params.layoutOutput, quantRowOnce,           nOut};
+                BlockQuantW4A8<ArchTag> blockQuant(resource, quantParams);
+                MatrixCoord quantShape(totalTokenCount, nOut);
+                MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
+                Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
+                uint32_t coreLoops = quantSwizzle.GetLoops();
+                uint32_t startLoopIdx =
+                        ((sendCoreIdx < startCoreIdx) ? (sendCoreIdx + aiCoreGroupNum) : sendCoreIdx) - startCoreIdx;
+                for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
+                    auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
+                    auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
+                    blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+                }
+            } else {
+                uint32_t n = params.problemShape.n();
+                uint32_t nOut = params.problemShape.n() / 2;
+                uint32_t quantRowOnce = 0;
+                CalQuantRow(nOut, quantRowOnce);
+                typename BlockQuant<ArchTag>::Params quantParams;
+                auto swigluLayout = layout::RowMajor{totalTokenCount, n};
+                quantParams = typename BlockQuant<ArchTag>::Params {
+                    gmSwigluOutput,   swigluLayout,        params.ptrDequantScale, params.layoutDequantScale,
+                    params.ptrOutput, params.layoutOutput, quantRowOnce,           nOut};
+                BlockQuant<ArchTag> blockQuant(resource, quantParams);
+                MatrixCoord quantShape(totalTokenCount, nOut);
+                MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
+                Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
+                uint32_t coreLoops = quantSwizzle.GetLoops();
+                uint32_t startLoopIdx =
+                        ((sendCoreIdx < startCoreIdx) ? (sendCoreIdx + aiCoreGroupNum) : sendCoreIdx) - startCoreIdx;
+                for (uint32_t loopIdx = startLoopIdx; loopIdx < coreLoops; loopIdx += aiCoreGroupNum) {
+                    auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
+                    auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
+                    blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+                }
             }
         }
     }
@@ -2900,6 +3283,8 @@ public:
         LayoutB layoutShareB;
         __gm__ ElementB *ptrB;
         LayoutB layoutB;
+        __gm__ float *gmWeightAux{nullptr};
+        __gm__ float *gmShareWeightAux{nullptr};
         __gm__ ElementScale *ptrShareScale;
         LayoutScale layoutShareScale;
         __gm__ ElementScale *ptrScale;
@@ -2926,9 +3311,10 @@ public:
         Params() {}
 
         CATLASS_DEVICE
-        Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_,
-               LayoutA const &layoutA_, GM_ADDR ptrShareB_, LayoutB const &layoutShareB_, GM_ADDR ptrB_,
-               LayoutB const &layoutB_, GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_,
+       Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_,
+              LayoutA const &layoutA_, GM_ADDR ptrShareB_, LayoutB const &layoutShareB_, GM_ADDR ptrB_,
+              LayoutB const &layoutB_, GM_ADDR gmWeightAux_, GM_ADDR gmShareWeightAux_,
+              GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_,
                GM_ADDR ptrScale_, LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale const &layoutPerTokenScale_, GM_ADDR ptrOutput_, LayoutOutput const &layoutOutput_,
                GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_,
@@ -2944,6 +3330,8 @@ public:
               layoutShareB(layoutShareB_),
               ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
               layoutB(layoutB_),
+              gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)),
+              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)),
               ptrShareScale(reinterpret_cast<__gm__ ElementScale *>(ptrShareScale_)),
               layoutShareScale(layoutShareScale_),
               ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
@@ -3180,6 +3568,7 @@ public:
 
                 EpilogueParams epilogueParams{
                     params.ptrShareScale, params.layoutShareScale,
+                    params.gmShareWeightAux,
                     reinterpret_cast<__gm__ float*>(params.gmShareX1Scale), layoutPerTokenScale,
                     reinterpret_cast<__gm__ float*>(params.gmShareSwigluOut), layoutD
                 };
@@ -3213,6 +3602,14 @@ public:
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                 gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(gmScaleListTensor.GetDataPtr<int32_t>(0));
             }
+            AscendC::ListTensorDesc gmWeightAuxListTensor;
+            __gm__ float* gmWeightAuxPtr = nullptr;
+            if (params.gmWeightAux != nullptr) {
+                gmWeightAuxListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(params.gmWeightAux));
+                if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
+                    gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(gmWeightAuxListTensor.GetDataPtr<int32_t>(0));
+                }
+            }
             for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
                 uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
                                                 : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
@@ -3226,14 +3623,20 @@ public:
                 if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                     gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(
                                     gmScaleListTensor.GetDataPtr<int32_t>(groupIdx));
+                    if (gmWeightAuxPtr != nullptr) {
+                        gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(
+                            gmWeightAuxListTensor.GetDataPtr<int32_t>(groupIdx));
+                    }
                     epilogueParams = EpilogueParams {
                                                 gmScalePtr, layoutScale,
+                                                gmWeightAuxPtr,
                                                 params.ptrPerTokenScale + gmGroupOffsetPerTokenScale,
                                                 layoutPerTokenScale,
                                                 ptrD + gmGroupOffsetD, layoutD};
                 } else {
                     epilogueParams = EpilogueParams{gmScalePtr + gmGroupOffsetScale,
                                                 layoutScale,
+                                                gmWeightAuxPtr + gmGroupOffsetScale,
                                                 params.ptrPerTokenScale + gmGroupOffsetPerTokenScale,
                                                 layoutPerTokenScale,
                                                 ptrD + gmGroupOffsetD,
@@ -3276,55 +3679,108 @@ public:
 
         // Quantize shared expert output if enabled
         if constexpr (EXEC_FLAG & EXEC_FLAG_SHARED_EXPERT) {
-            uint32_t quantRowOnce = 0;
-            uint32_t shareNOut = params.shareN / 2;
-            CalQuantRow(shareNOut, quantRowOnce);
-            auto swigluLayout = layout::RowMajor{params.bs, params.shareN};
-            typename BlockQuant<ArchTag>::Params quantParams{
-                reinterpret_cast<__gm__ float*>(params.gmShareSwigluOut),
-                swigluLayout,
-                reinterpret_cast<__gm__ float*>(params.gmShareX2Scale),
-                params.layoutDequantScale,
-                reinterpret_cast<__gm__ int8_t*>(params.gmShareX2),
-                params.layoutShareOutput,
-                quantRowOnce,
-                shareNOut
-            };
+            if (params.gmWeightAux != nullptr) {
+                uint32_t quantRowOnce = 0;
+                uint32_t shareNOut = params.shareN / 2;
+                CalQuantRow(shareNOut, quantRowOnce);
+                auto swigluLayout = layout::RowMajor{params.bs, params.shareN};
+                typename BlockQuantW4A8<ArchTag>::Params quantParams{
+                    reinterpret_cast<__gm__ float*>(params.gmShareSwigluOut),
+                    swigluLayout,
+                    reinterpret_cast<__gm__ float*>(params.gmShareX2Scale),
+                    params.layoutDequantScale,
+                    reinterpret_cast<__gm__ int8_t*>(params.gmShareX2),
+                    params.layoutShareOutput,
+                    quantRowOnce,
+                    shareNOut
+                };
 
-            BlockQuant<ArchTag> blockQuant(resource, quantParams);
-            MatrixCoord quantShape(params.bs, shareNOut);
-            MatrixCoord quantBlockShape((uint16_t)(AscendC::GetSubBlockNum() * quantRowOnce), shareNOut);
-            Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
-            for (uint32_t loopIdx = coreIdx; loopIdx < quantSwizzle.GetLoops(); loopIdx += coreNum) {
-                auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
-                auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
+                BlockQuantW4A8<ArchTag> blockQuant(resource, quantParams);
+                MatrixCoord quantShape(params.bs, shareNOut);
+                MatrixCoord quantBlockShape((uint16_t)(AscendC::GetSubBlockNum() * quantRowOnce), shareNOut);
+                Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
+                for (uint32_t loopIdx = coreIdx; loopIdx < quantSwizzle.GetLoops(); loopIdx += coreNum) {
+                    auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
+                    auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
 
-                blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+                    blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+                }
+            } else {
+                uint32_t quantRowOnce = 0;
+                uint32_t shareNOut = params.shareN / 2;
+                CalQuantRow(shareNOut, quantRowOnce);
+                auto swigluLayout = layout::RowMajor{params.bs, params.shareN};
+                typename BlockQuant<ArchTag>::Params quantParams{
+                    reinterpret_cast<__gm__ float*>(params.gmShareSwigluOut),
+                    swigluLayout,
+                    reinterpret_cast<__gm__ float*>(params.gmShareX2Scale),
+                    params.layoutDequantScale,
+                    reinterpret_cast<__gm__ int8_t*>(params.gmShareX2),
+                    params.layoutShareOutput,
+                    quantRowOnce,
+                    shareNOut
+                };
+
+                BlockQuant<ArchTag> blockQuant(resource, quantParams);
+                MatrixCoord quantShape(params.bs, shareNOut);
+                MatrixCoord quantBlockShape((uint16_t)(AscendC::GetSubBlockNum() * quantRowOnce), shareNOut);
+                Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
+                for (uint32_t loopIdx = coreIdx; loopIdx < quantSwizzle.GetLoops(); loopIdx += coreNum) {
+                    auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
+                    auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
+
+                    blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+                }
             }
         }
 
         {
-            uint32_t quantRowOnce = 0;
-            CalQuantRow(nOut, quantRowOnce);
-            auto swigluLayout = layout::RowMajor{mActual, n};
-            typename BlockQuant<ArchTag>::Params quantParams{ptrD,
-                                                             swigluLayout,
-                                                             params.ptrDequantScale,
-                                                             params.layoutDequantScale,
-                                                             params.ptrOutput,
-                                                             params.layoutOutput,
-                                                             quantRowOnce,
-                                                             nOut};
+            if (params.gmWeightAux != nullptr) {
+                uint32_t quantRowOnce = 0;
+                CalQuantRow(nOut, quantRowOnce);
+                auto swigluLayout = layout::RowMajor{mActual, n};
+                typename BlockQuantW4A8<ArchTag>::Params quantParams{ptrD,
+                                                                 swigluLayout,
+                                                                 params.ptrDequantScale,
+                                                                 params.layoutDequantScale,
+                                                                 params.ptrOutput,
+                                                                 params.layoutOutput,
+                                                                 quantRowOnce,
+                                                                 nOut};
 
-            BlockQuant<ArchTag> blockQuant(resource, quantParams);
-            MatrixCoord quantShape(mActual, nOut);
-            MatrixCoord quantBlockShape((uint16_t)(AscendC::GetSubBlockNum() * quantRowOnce), nOut);
-            Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
-            for (uint32_t loopIdx = coreIdx; loopIdx < quantSwizzle.GetLoops(); loopIdx += coreNum) {
-                auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
-                auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
+                BlockQuantW4A8<ArchTag> blockQuant(resource, quantParams);
+                MatrixCoord quantShape(mActual, nOut);
+                MatrixCoord quantBlockShape((uint16_t)(AscendC::GetSubBlockNum() * quantRowOnce), nOut);
+                Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
+                for (uint32_t loopIdx = coreIdx; loopIdx < quantSwizzle.GetLoops(); loopIdx += coreNum) {
+                    auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
+                    auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
 
-                blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+                    blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+                }
+            } else {
+                uint32_t quantRowOnce = 0;
+                CalQuantRow(nOut, quantRowOnce);
+                auto swigluLayout = layout::RowMajor{mActual, n};
+                typename BlockQuant<ArchTag>::Params quantParams{ptrD,
+                                                                 swigluLayout,
+                                                                 params.ptrDequantScale,
+                                                                 params.layoutDequantScale,
+                                                                 params.ptrOutput,
+                                                                 params.layoutOutput,
+                                                                 quantRowOnce,
+                                                                 nOut};
+
+                BlockQuant<ArchTag> blockQuant(resource, quantParams);
+                MatrixCoord quantShape(mActual, nOut);
+                MatrixCoord quantBlockShape((uint16_t)(AscendC::GetSubBlockNum() * quantRowOnce), nOut);
+                Epilogue::Tile::EpilogueHorizontalTileSwizzle quantSwizzle(quantShape, quantBlockShape);
+                for (uint32_t loopIdx = coreIdx; loopIdx < quantSwizzle.GetLoops(); loopIdx += coreNum) {
+                    auto blockCoord = quantSwizzle.GetTileCoord(loopIdx);
+                    auto actualBlockShape = quantSwizzle.GetActualTileShape(blockCoord);
+
+                    blockQuant(quantBlockShape, blockCoord, actualBlockShape);
+                }
             }
         }
     }

@@ -93,6 +93,8 @@ public:
         LayoutA layoutA;
         __gm__ ElementB *ptrB;
         LayoutB layoutB;
+        __gm__ float *gmWeightAux;
+        __gm__ float *gmShareWeightAux;
         __gm__ ElementScale *ptrScale;
         LayoutScale layoutScale;
         __gm__ ElementPerTokenScale *ptrPerTokenScale;
@@ -119,7 +121,8 @@ public:
 
         CATLASS_DEVICE
         Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_, LayoutA layoutA_,
-               GM_ADDR ptrB_, LayoutB layoutB_, GM_ADDR ptrScale_, LayoutScale layoutScale_, GM_ADDR ptrPerTokenScale_,
+               GM_ADDR ptrB_, LayoutB layoutB_, GM_ADDR gmWeightAux_, GM_ADDR gmShareWeightAux_,
+               GM_ADDR ptrScale_, LayoutScale layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale layoutPerTokenScale_, GM_ADDR ptrD_, LayoutD layoutD_, uint32_t batchSize_,
                GemmCoord sharedGmm2ProblemShape_, GM_ADDR ptrSharedA_, GM_ADDR ptrSharedB_, GM_ADDR ptrSharedD_,
                GM_ADDR ptrSharedScale_, GM_ADDR ptrSharedPtrPerTokenScale_, LayoutA sharedLayoutA_,
@@ -133,6 +136,8 @@ public:
               layoutA(layoutA_),
               ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
               layoutB(layoutB_),
+              gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)),
+              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)),
               ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),
               layoutScale(layoutScale_),
               ptrPerTokenScale(reinterpret_cast<__gm__ ElementPerTokenScale *>(ptrPerTokenScale_)),
@@ -392,6 +397,14 @@ public:
             if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                 gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(gmScaleListTensor.GetDataPtr<int32_t>(0));
             }
+            AscendC::ListTensorDesc gmWeightAuxListTensor;
+            __gm__ float* gmWeightAuxPtr = nullptr;
+            if (params.gmWeightAux != nullptr) {
+                gmWeightAuxListTensor = AscendC::ListTensorDesc(reinterpret_cast<__gm__ void *>(params.gmWeightAux));
+                if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
+                    gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(gmWeightAuxListTensor.GetDataPtr<int32_t>(0));
+                }
+            }
             for (uint32_t groupIdx = 0; groupIdx < params.problemCount; ++groupIdx) {
                 uint32_t currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
                                                     : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
@@ -405,13 +418,17 @@ public:
                 if constexpr (EXEC_FLAG & EXEC_FLAG_TENSOR_LIST) {
                     gmScalePtr = reinterpret_cast<__gm__ ElementScale*>(
                                     gmScaleListTensor.GetDataPtr<int32_t>(groupIdx));
+                    gmWeightAuxPtr = reinterpret_cast<__gm__ float*>(
+                                        gmWeightAuxListTensor.GetDataPtr<int32_t>(groupIdx));
                     epilogueParams = EpilogueParams {
                             gmScalePtr, layoutScale,
+                            gmWeightAuxPtr,
                             params.ptrPerTokenScale + gmGroupOffsetPerTokenScale, layoutPerTokenScale,
                             params.ptrD + gmGroupOffsetD, layoutD};
                 } else {
                     epilogueParams = EpilogueParams{gmScalePtr + gmGroupOffsetScale,
                                               layoutScale,
+                                              gmWeightAuxPtr + gmGroupOffsetScale,
                                               params.ptrPerTokenScale + gmGroupOffsetPerTokenScale,
                                               layoutPerTokenScale,
                                               params.ptrD + gmGroupOffsetD,
@@ -466,6 +483,7 @@ public:
 
                     EpilogueParams epilogueParams{
                         params.ptrSharedScale, layoutScale,
+                        params.gmShareWeightAux,
                         params.ptrSharedPtrPerTokenScale, layoutPerTokenScale,
                         params.ptrSharedD, layoutD
                     };
