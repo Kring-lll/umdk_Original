@@ -24,6 +24,7 @@
             IsNeedAllgater, EXEC_FLAG
 
 constexpr int64_t SLEEP_CYCLE = 25;
+constexpr int CONSTANT_TWO = 2;
 
 __aicore__ inline void SPIN_WAIT_CYCLES()
 {

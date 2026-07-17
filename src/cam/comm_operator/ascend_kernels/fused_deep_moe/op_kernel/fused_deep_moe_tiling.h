@@ -33,6 +33,7 @@ struct FusedDeepMoeInfo {
     uint64_t shmemWorkspacePtr;  // shmemWorkSpaceGm address
     uint64_t metaInfoPtr;        // MetaInfo (ext_info) address
     bool isTensorList;
+    bool isInt4Weight;  // derived from weight tensor dtype (DT_INT32 => true)
 };
 
 struct FusedDeepMoeTilingData {
@@ -58,6 +59,10 @@ constexpr uint32_t GMM1_EPIM = 64;
 constexpr uint32_t GMM1_SWIZZLE_OFFSET = 3;
 constexpr uint32_t GMM1_SWIZZLE_DIRECTION = 0;
 
+// w4a8: larger K to accommodate int4-packed logical K dimension
+constexpr uint32_t GMM1_L1K_W4A8 = 1024;
+constexpr uint32_t GMM1_L0K_W4A8 = 256;
+
 constexpr uint32_t GMM2_L1A_STAGES = 4;
 constexpr uint32_t GMM2_L1B_STAGES = 2;
 constexpr uint32_t GMM2_L0A_STAGES = 4;
@@ -69,6 +74,10 @@ constexpr uint32_t GMM2_L0K = 128;
 constexpr uint32_t GMM2_EPIM = 32;
 constexpr uint32_t GMM2_SWIZZLE_OFFSET = 3;
 constexpr uint32_t GMM2_SWIZZLE_DIRECTION = 0;
+
+// w4a8: larger K to accommodate int4-packed logical K dimension
+constexpr uint32_t GMM2_L1K_W4A8 = 1024;
+constexpr uint32_t GMM2_L0K_W4A8 = 256;
 
 constexpr uint32_t WORKSPACE_STAGES = 4;
 
