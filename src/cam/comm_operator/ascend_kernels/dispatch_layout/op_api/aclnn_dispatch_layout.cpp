@@ -4,7 +4,7 @@
  * Description: add dispatch layout interface cpp file.
  * Create: 2026-01-05
  * Note:
- * History: 2026-01-05 add dispatch layout interface cpp file.
+ * History: 2026-01-05 add dispatch layout interface cpp file
  */
 
 #include <string.h>
