@@ -3283,6 +3283,8 @@ public:
         LayoutB layoutShareB;
         __gm__ ElementB *ptrB;
         LayoutB layoutB;
+        __gm__ float *gmWeightAux{nullptr};
+        __gm__ float *gmShareWeightAux{nullptr};
         __gm__ ElementScale *ptrShareScale;
         LayoutScale layoutShareScale;
         __gm__ ElementScale *ptrScale;
@@ -3309,9 +3311,10 @@ public:
         Params() {}
 
         CATLASS_DEVICE
-        Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_,
-               LayoutA const &layoutA_, GM_ADDR ptrShareB_, LayoutB const &layoutShareB_, GM_ADDR ptrB_,
-               LayoutB const &layoutB_, GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_,
+       Params(GemmCoord problemShape_, uint32_t problemCount_, GM_ADDR ptrGroupList_, GM_ADDR ptrA_,
+              LayoutA const &layoutA_, GM_ADDR ptrShareB_, LayoutB const &layoutShareB_, GM_ADDR ptrB_,
+              LayoutB const &layoutB_, GM_ADDR gmWeightAux_, GM_ADDR gmShareWeightAux_,
+              GM_ADDR ptrShareScale_, LayoutScale const &layoutShareScale_,
                GM_ADDR ptrScale_, LayoutScale const &layoutScale_, GM_ADDR ptrPerTokenScale_,
                LayoutPerTokenScale const &layoutPerTokenScale_, GM_ADDR ptrOutput_, LayoutOutput const &layoutOutput_,
                GM_ADDR ptrDequantScale_, LayoutDequantScale const &layoutDequantScale_, GM_ADDR ptrWorkspace_,
@@ -3327,6 +3330,8 @@ public:
               layoutShareB(layoutShareB_),
               ptrB(reinterpret_cast<__gm__ ElementB *>(ptrB_)),
               layoutB(layoutB_),
+              gmWeightAux(reinterpret_cast<__gm__ float *>(gmWeightAux_)),
+              gmShareWeightAux(reinterpret_cast<__gm__ float *>(gmShareWeightAux_)),
               ptrShareScale(reinterpret_cast<__gm__ ElementScale *>(ptrShareScale_)),
               layoutShareScale(layoutShareScale_),
               ptrScale(reinterpret_cast<__gm__ ElementScale *>(ptrScale_)),

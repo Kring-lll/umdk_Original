@@ -188,6 +188,8 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
                                            layoutShareB,
                                            gmB,
                                            layoutB,
+                                           gmBias,
+                                           gmShareBias,
                                            gmShareScale,
                                            layoutShareScale,
                                            gmScale,
