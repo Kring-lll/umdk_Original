@@ -620,7 +620,7 @@ Segment是URMA对被内存事务指令访问的内存进行管理和访问的抽
 
 urma语义的内存管理
 
-**注册内存registe_seg：允许设备访问进程的一段内存**
+**注册内存register_seg：允许设备访问进程的一段内存**
 
 - 权限：本地写、远程读、远程写、远程原子
 
@@ -2029,9 +2029,9 @@ urma_admin show -w参数说明：
 
     RC(Reliable connection)，取值为2；
 
-    UM(Unreilable message)，取值为4
+    UM(Unreliable message)，取值为4
 
-    例如trans_mode取值为0x7，表示[RM(Reliable message, 1) RC(Reliable connection, 2) UM(Unreilable message, 4)]
+    例如trans_mode取值为0x7，表示[RM(Reliable message, 1) RC(Reliable connection, 2) UM(Unreliable message, 4)]
 
 3.  congestion_ctrl_alg：按照比特位组合取值，具体如下
 
