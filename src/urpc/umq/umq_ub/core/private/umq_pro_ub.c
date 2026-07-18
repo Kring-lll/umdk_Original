@@ -1900,7 +1900,11 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
             }
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx cr[%d] "
                 "status[%d] local_id[%u]\n", EID_ARGS(*eid), id, i, (int)cr[i].status, cr[i].local_id);
-            ret = -UMQ_ERR_EFLOWCTL;
+            if (cr[i].status == URMA_CR_ACK_TIMEOUT_ERR || cr[i].status == URMA_CR_RNR_RETRY_CNT_EXC_ERR) {
+                ret = -UMQ_ERR_EFLOWCTL_FATAL;
+            } else {
+                ret = -UMQ_ERR_EFLOWCTL;
+            }
             umq_ub_fc_process_tx_error(queue, &obj);
             if (buf != NULL) {
                 qbuf_cnt += (int32_t)umq_ub_fill_fc_buf(queue, &buf[qbuf_cnt], UMQ_FAKE_BUF_FC_ERR);

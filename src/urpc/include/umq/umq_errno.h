@@ -37,6 +37,7 @@ extern "C" {
 #define UMQ_ERR_ETOOMANYREFS                       (ETOOMANYREFS)
 #define UMQ_ERR_ETSEG_NON_IMPORTED                 (0x0201)
 #define UMQ_ERR_EFLOWCTL                           (0x0202)  /* Umq flow control error */
+#define UMQ_ERR_EFLOWCTL_FATAL                     (0x0203)
 
 typedef enum umq_buf_status {
     UMQ_BUF_SUCCESS = 0,
