@@ -89,7 +89,7 @@ modprobe ums # if ums is required
 chmod 755 /usr/lib64/liburma*
 ```
 
-4. Build, package, install, and remove URMA with the Bazel script (workspace root: `src/urma`)
+4. Build, package, query, install, verify, and remove URMA with the Bazel script (workspace root: `src/urma`)
 
 From the UMDK repository root, run the script from `src/urma`. The script checks build dependencies before compiling and runtime dependencies before installing. Already satisfied dependencies are left untouched; missing dependencies are installed with `yum install -y`, so make sure yum repositories are configured and the command is run with sufficient privileges when dependencies are absent.
 
@@ -99,7 +99,9 @@ cd src/urma
 ./urma_bazel.sh compile --config=release --config=arm64 --define=build_udma=true
 ```
 
-The `compile` command builds the fixed URMA package payload with Bazel, stages RPM-equivalent install content, writes `metadata/urma_version`, and creates `urma-bazel-<timestamp>.tar.gz` in `src/urma`. It also removes intermediate files after packaging, including `urma_version`, `bazel-urma-package`, and Bazel convenience symlinks.
+The `compile` command builds the fixed URMA package payload with Bazel, stages RPM-equivalent install content, writes `metadata/urma_version`, `metadata/urma_versions.json`, and `metadata/urma_versions.tsv`, and creates `urma-bazel-<timestamp>.tar.gz` in `src/urma`. It automatically checks the version metadata embedded in packaged shared objects, executables, and the version header before and after packaging. It also removes intermediate files after packaging, including `urma_version`, `bazel-urma-package`, and Bazel convenience symlinks.
+
+The Bazel flow requires Bazel 7.4.1. Set in-tree URMA component versions in `src/urma/bazel/urma_versions.bzl`: update `URMA_VERSION` for the component and package version, and update `URMA_SOVERSION` for the shared-object ABI major version. The external `libummu` version remains independently configured in `src/urma/bazel/urma_deps.bzl`.
 
 Do not install or link against a manually built system `libummu` for this flow. The script reads `LIBUMMU_REMOTE`, `LIBUMMU_COMMIT`, `LIBUMMU_VERSION`, and `LIBUMMU_ABI_VERSION` from `src/urma/WORKSPACE` or `src/urma/bazel/urma_deps.bzl`, fetches that commit into `src/urma/third_party/libummu`, builds it with Bazel, and packages libummu together with URMA.
 
@@ -123,6 +125,34 @@ cd src/urma
 # ThreadSanitizer with cycle profiling enabled.
 ./urma_bazel.sh compile --config=tsan --define=perf_cycle=true --define=build_udma=true
 ```
+
+Bazel-built artifacts expose their versions directly. Executables accept `--version` or `-V`; query a shared object or the generated version header with the packaged `/usr/bin/urma_version` tool. These interfaces are specific to the Bazel flow and do not depend on RPM queries.
+
+```bash
+# Query installed executables.
+urma_admin --version
+urma_perftest --version
+
+# Query installed shared objects and the version header.
+urma_version /usr/lib64/liburma.so.0
+urma_version /usr/lib64/urma/liburma-udma.so
+urma_version /usr/include/ub/umdk/urma/urma_version.h
+
+# Print the version manifest declared by an archive.
+./urma_bazel.sh version urma-bazel-<timestamp>.tar.gz
+```
+
+After installation, use `verify` to compare the environment with the archive. It first validates version metadata inside the archive, then uses `metadata/install_manifest` to compare every packaged URMA executable, every `.so*` file and symlink, and every `.h` file under `usr/include`. Regular files are compared by size and every byte; shared-object symlinks are compared by link target. A missing or different file fails the command. Newly packaged headers are selected automatically from the install manifest.
+
+```bash
+# Compare the archive with the current system root, '/'.
+./urma_bazel.sh verify urma-bazel-<timestamp>.tar.gz
+
+# Compare with a container rootfs, mounted filesystem, or cross-compilation sysroot.
+./urma_bazel.sh verify urma-bazel-<timestamp>.tar.gz /tmp/urma-sysroot
+```
+
+`verify` only reads and compares files; it does not install URMA. The build path performs only the archive-internal version check, so the build host does not need the same URMA version installed. Byte comparison is implemented by the packaged `urma_version` binary and adds no dependency on `md5sum`, OpenSSL, or another comparison tool.
 
 Copy the generated tarball to the target environment, extract it, and install with the packaged script. Run `install` and `remove` as root or with `sudo`; the script installs files according to `metadata/install_manifest`, refreshes `ldconfig`, restores SELinux contexts when `restorecon` is available, and restarts rsyslog when available. The `remove` command removes the URMA/UDMA/TPSA payload from the manifest, but leaves third-party libraries installed by yum and the bundled libummu payload in place.
 

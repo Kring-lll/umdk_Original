@@ -17,6 +17,8 @@ MANDIR="/usr/share/man/man3"
 ROOTFS_DIR="rootfs"
 METADATA_DIR="metadata"
 INSTALL_MANIFEST="install_manifest"
+VERSION_JSON="urma_versions.json"
+VERSION_TSV="urma_versions.tsv"
 THIRD_PARTY_DIR="${WORKSPACE_DIR}/third_party"
 LIBUMMU_DIR="${THIRD_PARTY_DIR}/libummu"
 
@@ -54,6 +56,7 @@ BAZEL_TARGETS=(
     "//:urma_perftest"
     "//:urma_ping"
     "//:urma_sample"
+    "//:version_distribution"
 )
 
 usage()
@@ -80,6 +83,15 @@ Commands:
       Third-party dependencies installed by yum, and the bundled libummu
       payload, are left installed.
 
+  version [package.tar.gz|extracted_package_dir]
+      Print the artifact version manifest from a generated package. If no
+      argument is provided, read the package beside this script.
+
+  verify <package.tar.gz|extracted_package_dir> [environment_root]
+      Check package version metadata, then compare package and environment
+      shared objects, executables, shared-object links, and every installed
+      header byte for byte. The environment root defaults to '/'.
+
   help, -h, --help
       Show this help message.
 
@@ -99,6 +111,12 @@ Examples:
 
   # Remove files by running the script from an extracted package directory.
   /tmp/urma-bazel/urma_bazel.sh remove
+
+  # Verify a package against the currently installed environment.
+  $0 verify ${PACKAGE_NAME}-20260605120000.tar.gz
+
+  # Verify a package against an alternate root, such as a mounted sysroot.
+  $0 verify ${PACKAGE_NAME}-20260605120000.tar.gz /tmp/urma-sysroot
 
 Notes:
   - The compile and install commands check required yum dependencies first.
@@ -169,13 +187,28 @@ libnl3_devel_exists()
         library_glob_exists "libnl-genl-3.so"
 }
 
+current_bazel_version()
+{
+    local version=""
+
+    if ! command -v bazel >/dev/null 2>&1; then
+        return
+    fi
+    version=$(bazel --ignore_all_rc_files version 2>/dev/null |
+        sed -n 's/^Build label:[[:space:]]*//p' | head -n 1)
+    if [ -z "${version}" ]; then
+        version=$(bazel --version 2>/dev/null | sed -n 's/^bazel[[:space:]]*//p' | head -n 1)
+    fi
+    echo "${version}"
+}
+
 dependency_satisfied()
 {
     local package="$1"
 
     case "${package}" in
         bazel)
-            command -v bazel >/dev/null 2>&1
+            [ "$(current_bazel_version)" = "$(config_var BAZEL_REQUIRED_VERSION)" ]
             ;;
         git)
             command -v git >/dev/null 2>&1
@@ -276,6 +309,18 @@ ensure_yum_dependencies()
     done
 
     yum_install_packages "${reason}" "${missing[@]}"
+
+    for package in "${missing[@]}"; do
+        if ! dependency_satisfied "${package}"; then
+            if [ "${package}" = "bazel" ]; then
+                echo "Error: Bazel $(config_var BAZEL_REQUIRED_VERSION) is required;" \
+                    "detected '$(current_bazel_version)'." >&2
+            else
+                echo "Error: ${package} is still unavailable after yum installation." >&2
+            fi
+            exit 1
+        fi
+    done
 }
 
 ensure_archive_tool_dependencies()
@@ -407,76 +452,47 @@ config_var()
     local value=""
 
     if [ -f "${WORKSPACE_DIR}/WORKSPACE" ]; then
-        value=$(sed -n "s/^${name}[[:space:]]*=[[:space:]]*\"\\(.*\\)\"[[:space:]]*$/\\1/p" "${WORKSPACE_DIR}/WORKSPACE" | head -n 1)
+        value=$(sed -n \
+            "s/^${name}[[:space:]]*=[[:space:]]*\"\\(.*\\)\"[[:space:]]*$/\\1/p" \
+            "${WORKSPACE_DIR}/WORKSPACE" | head -n 1)
     fi
     if [ -z "${value}" ] && [ -f "${WORKSPACE_DIR}/bazel/urma_deps.bzl" ]; then
-        value=$(sed -n "s/^${name}[[:space:]]*=[[:space:]]*\"\\(.*\\)\"[[:space:]]*$/\\1/p" "${WORKSPACE_DIR}/bazel/urma_deps.bzl" | head -n 1)
+        value=$(sed -n \
+            "s/^${name}[[:space:]]*=[[:space:]]*\"\\(.*\\)\"[[:space:]]*$/\\1/p" \
+            "${WORKSPACE_DIR}/bazel/urma_deps.bzl" | head -n 1)
+    fi
+    if [ -z "${value}" ] && [ -f "${WORKSPACE_DIR}/bazel/urma_versions.bzl" ]; then
+        value=$(sed -n \
+            "s/^${name}[[:space:]]*=[[:space:]]*\"\\(.*\\)\"[[:space:]]*$/\\1/p" \
+            "${WORKSPACE_DIR}/bazel/urma_versions.bzl" | head -n 1)
     fi
     if [ -z "${value}" ]; then
         value=$(metadata_var "${name}")
     fi
     if [ -z "${value}" ]; then
-        echo "Error: ${name} is not configured in WORKSPACE, bazel/urma_deps.bzl, or metadata/urma_version" >&2
+        echo "Error: ${name} is not configured in Bazel configuration or metadata/urma_version" >&2
         exit 1
     fi
     echo "${value}"
 }
 
-extract_cmake_version()
+artifact_manifest_version()
 {
-    local file="$1"
-    local version
+    local manifest="$1"
+    local component="$2"
+    local artifact_type
+    local artifact_component
+    local artifact_path
+    local artifact_version
 
-    if [ ! -f "${file}" ]; then
-        echo "Error: ${file} not found; cannot determine project version" >&2
-        exit 1
-    fi
-
-    version=$(
-        sed -n \
-            -e 's/^[[:space:]]*VERSION[[:space:]]*\([0-9][0-9.]*\).*/\1/p' \
-            -e 's/^[[:space:]]*set[[:space:]]*([[:space:]]*PROJECT_VERSION[[:space:]]*"\{0,1\}\([0-9][0-9.]*\)"\{0,1\}.*/\1/p' \
-            "${file}" | head -n 1
-    )
-    if [ -n "${version}" ]; then
-        echo "${version}"
-    else
-        echo "Error: cannot determine project version from ${file}" >&2
-        exit 1
-    fi
-}
-
-project_version()
-{
-    local key="$1"
-    local cmake_file="$2"
-    local value
-
-    if [ -f "${cmake_file}" ]; then
-        extract_cmake_version "${cmake_file}"
-        return
-    fi
-
-    value=$(metadata_var "${key}")
-    if [ -n "${value}" ]; then
-        echo "${value}"
-    else
-        echo "Error: ${key} is not available in source CMakeLists.txt or metadata/urma_version" >&2
-        exit 1
-    fi
-}
-
-stage_versioned_so()
-{
-    local src="$1"
-    local dir="$2"
-    local name="$3"
-    local version="$4"
-    local major="${5:-${version%%.*}}"
-
-    install -D -m 0755 "${src}" "${dir}/${name}.so.${version}"
-    ln -sfn "${name}.so.${version}" "${dir}/${name}.so.${major}"
-    ln -sfn "${name}.so.${major}" "${dir}/${name}.so"
+    while IFS=$'\t' read -r artifact_type artifact_component artifact_path artifact_version _; do
+        if [ "${artifact_component}" = "${component}" ]; then
+            echo "${artifact_version}"
+            return
+        fi
+    done < "${manifest}"
+    echo "Error: component ${component} is missing from ${manifest}" >&2
+    exit 1
 }
 
 prepare_libummu()
@@ -521,6 +537,7 @@ create_version_file()
 {
     local version_file="$1"
     local build_cmd="$2"
+    local artifact_manifest="$3"
     local commit_id="unknown"
 
     if git -C "${WORKSPACE_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -531,8 +548,13 @@ create_version_file()
         echo "commit_id=${commit_id}"
         echo "build_time=$(date '+%Y-%m-%d %H:%M:%S %z')"
         echo "build_command=${build_cmd}"
-        echo "COMMON_VERSION=$(extract_cmake_version "${WORKSPACE_DIR}/../CMakeLists.txt")"
-        echo "URMA_VERSION=$(extract_cmake_version "${WORKSPACE_DIR}/lib/urma/core/CMakeLists.txt")"
+        echo "BAZEL_REQUIRED_VERSION=$(config_var BAZEL_REQUIRED_VERSION)"
+        echo "BAZEL_VERSION=$(current_bazel_version)"
+        echo "COMMON_VERSION=$(artifact_manifest_version "${artifact_manifest}" urma_common)"
+        echo "URMA_VERSION=$(artifact_manifest_version "${artifact_manifest}" urma)"
+        echo "TPSA_VERSION=$(artifact_manifest_version "${artifact_manifest}" tpsa)"
+        echo "URMA_UBAGG_VERSION=$(artifact_manifest_version "${artifact_manifest}" urma_ubagg)"
+        echo "URMA_UDMA_VERSION=$(artifact_manifest_version "${artifact_manifest}" urma_udma)"
         echo "libummu_remote=$(workspace_var LIBUMMU_REMOTE)"
         echo "libummu_commit=$(workspace_var LIBUMMU_COMMIT)"
         echo "LIBUMMU_VERSION=$(workspace_var LIBUMMU_VERSION)"
@@ -543,14 +565,7 @@ create_version_file()
 stage_libummu_payload()
 {
     local rootfs="$1"
-    local bin_dir="$2"
-    local libummu_version
-    local libummu_abi_version
 
-    libummu_version=$(config_var LIBUMMU_VERSION)
-    libummu_abi_version=$(config_var LIBUMMU_ABI_VERSION)
-
-    stage_versioned_so "${bin_dir}/libummu.so" "${rootfs}${LIBDIR}" "libummu" "${libummu_version}" "${libummu_abi_version}"
     copy_file "${LIBUMMU_DIR}/include/ummu_api.h" "${rootfs}${UMMU_INCLUDEDIR}/ummu_api.h"
     copy_file "${LIBUMMU_DIR}/kernel_headers/ummu_core.h" "${rootfs}${UMMU_INCLUDEDIR}/ummu_core.h"
     copy_file "${LIBUMMU_DIR}/README.md" "${rootfs}${UMMU_DOCDIR}/README.md"
@@ -560,6 +575,32 @@ stage_libummu_payload()
     copy_file "${LIBUMMU_DIR}/doc/man3/libummu.3" "${rootfs}${MANDIR}/libummu.3"
     gzip -f9n "${rootfs}${MANDIR}/libummu.3"
     chmod 0644 "${rootfs}${MANDIR}/libummu.3.gz"
+}
+
+copy_distribution_dir()
+{
+    local src="$1"
+    local dst="$2"
+
+    if [ ! -d "${src}" ]; then
+        echo "Error: Bazel distribution directory ${src} not found" >&2
+        exit 1
+    fi
+    mkdir -p "${dst}"
+    cp -a "${src}/." "${dst}/"
+}
+
+verify_staged_artifact_versions()
+{
+    local rootfs="$1"
+    local manifest="$2"
+    local verifier="${rootfs}${BINDIR}/urma_version"
+
+    if [ ! -x "${verifier}" ]; then
+        echo "Error: Bazel version verifier ${verifier} is unavailable" >&2
+        exit 1
+    fi
+    "${verifier}" --check-root "${rootfs}" "${manifest}"
 }
 
 generate_install_manifest()
@@ -605,27 +646,22 @@ stage_payload()
     local stage_dir="$1"
     local bin_dir="${WORKSPACE_DIR}/bazel-bin"
     local rootfs="${stage_dir}/${ROOTFS_DIR}"
-    local common_version
-    local library_version
-
-    common_version=$(project_version COMMON_VERSION "${WORKSPACE_DIR}/../CMakeLists.txt")
-    library_version=$(project_version URMA_VERSION "${WORKSPACE_DIR}/lib/urma/core/CMakeLists.txt")
+    local version_metadata_dir="${bin_dir}/versioned/metadata"
 
     rm -rf "${stage_dir}"
     mkdir -p "${rootfs}${LIBDIR}/urma" "${rootfs}${BINDIR}" "${rootfs}${INCLUDEDIR}/udma"
 
-    stage_versioned_so "${bin_dir}/liburma.so" "${rootfs}${LIBDIR}" "liburma" "${library_version}"
-    stage_versioned_so "${bin_dir}/liburma_common.so" "${rootfs}${LIBDIR}" "liburma_common" "${common_version}"
-    stage_versioned_so "${bin_dir}/libtpsa.so" "${rootfs}${LIBDIR}" "libtpsa" "${library_version}"
-    stage_versioned_so "${bin_dir}/liburma_ubagg.so" "${rootfs}${LIBDIR}/urma" "liburma_ubagg" "${library_version}"
-    copy_exec "${bin_dir}/liburma-udma.so" "${rootfs}${LIBDIR}/urma/liburma-udma.so"
-    stage_libummu_payload "${rootfs}" "${bin_dir}"
+    copy_distribution_dir "${bin_dir}/versioned/lib" "${rootfs}${LIBDIR}"
+    copy_distribution_dir "${bin_dir}/versioned/provider" "${rootfs}${LIBDIR}/urma"
+    stage_libummu_payload "${rootfs}"
 
     copy_exec "${bin_dir}/urma_admin" "${rootfs}${BINDIR}/urma_admin"
     copy_exec "${bin_dir}/urma_perftest" "${rootfs}${BINDIR}/urma_perftest"
     copy_exec "${bin_dir}/urma_ping" "${rootfs}${BINDIR}/urma_ping"
     copy_exec "${bin_dir}/urma_sample" "${rootfs}${BINDIR}/urma_sample"
+    copy_exec "${bin_dir}/urma_version" "${rootfs}${BINDIR}/urma_version"
 
+    copy_file "${bin_dir}/versioned/include/urma_version.h" "${rootfs}${INCLUDEDIR}/urma_version.h"
     copy_file "${WORKSPACE_DIR}/lib/urma/core/include/urma_api.h" "${rootfs}${INCLUDEDIR}/urma_api.h"
     copy_file "${WORKSPACE_DIR}/lib/urma/core/include/urma_cmd.h" "${rootfs}${INCLUDEDIR}/urma_cmd.h"
     copy_file "${WORKSPACE_DIR}/lib/urma/core/include/urma_opcode.h" "${rootfs}${INCLUDEDIR}/urma_opcode.h"
@@ -643,10 +679,16 @@ stage_payload()
     copy_private_file "${WORKSPACE_DIR}/lib/urma/config/urma" "${rootfs}/etc/logrotate.d/urma"
     copy_private_file "${WORKSPACE_DIR}/lib/uvs/config/tpsa.conf" "${rootfs}/etc/rsyslog.d/tpsa.conf"
     copy_file "${WORKSPACE_DIR}/lib/uvs/config/tpsa" "${rootfs}/etc/logrotate.d/tpsa"
-    copy_private_file "${WORKSPACE_DIR}/tools/urma_admin/config/urma_admin.conf" "${rootfs}/etc/rsyslog.d/urma_admin.conf"
+    copy_private_file \
+        "${WORKSPACE_DIR}/tools/urma_admin/config/urma_admin.conf" \
+        "${rootfs}/etc/rsyslog.d/urma_admin.conf"
 
     find "${rootfs}" -type d -exec chmod 0755 {} +
     strip_payload_elfs "${rootfs}"
+    mkdir -p "${stage_dir}/${METADATA_DIR}"
+    copy_file "${version_metadata_dir}/${VERSION_JSON}" "${stage_dir}/${METADATA_DIR}/${VERSION_JSON}"
+    copy_file "${version_metadata_dir}/${VERSION_TSV}" "${stage_dir}/${METADATA_DIR}/${VERSION_TSV}"
+    verify_staged_artifact_versions "${rootfs}" "${stage_dir}/${METADATA_DIR}/${VERSION_TSV}"
 }
 
 compile_cmd()
@@ -670,8 +712,9 @@ compile_cmd()
     trap cleanup_compile_artifacts EXIT
     prepare_libummu
     bazel sync --only=libummu
-    create_version_file "${WORKSPACE_DIR}/urma_version" "${build_cmd}"
     bazel build "${BAZEL_TARGETS[@]}" "${build_args[@]}"
+    create_version_file "${WORKSPACE_DIR}/urma_version" "${build_cmd}" \
+        "${WORKSPACE_DIR}/bazel-bin/versioned/metadata/${VERSION_TSV}"
 
     stage_payload "${stage_dir}"
     mkdir -p "${stage_dir}/${METADATA_DIR}"
@@ -680,7 +723,115 @@ compile_cmd()
     copy_exec "${WORKSPACE_DIR}/urma_bazel.sh" "${stage_dir}/urma_bazel.sh"
 
     tar -C "${stage_dir}" -czf "${tarball}" .
+    verify_package_input "${tarball}"
     echo "Created ${tarball}"
+}
+
+version_cmd()
+{
+    local package="${1:-}"
+    local source_dir="${SCRIPT_DIR}"
+    local tmp_dir=""
+    local manifest
+
+    if [ -n "${package}" ] && [ -d "${package}" ]; then
+        source_dir=$(cd "${package}" && pwd)
+    elif [ -n "${package}" ]; then
+        ensure_archive_tool_dependencies
+        need_cmd tar
+        tmp_dir=$(mktemp -d)
+        source_dir=$(extract_package "${package}" "${tmp_dir}")
+    fi
+
+    manifest="${source_dir}/${METADATA_DIR}/${VERSION_JSON}"
+    if [ ! -f "${manifest}" ]; then
+        echo "Error: ${manifest} not found" >&2
+        if [ -n "${tmp_dir}" ]; then
+            rm -rf "${tmp_dir}"
+        fi
+        exit 1
+    fi
+    cat "${manifest}"
+    if [ -n "${tmp_dir}" ]; then
+        rm -rf "${tmp_dir}"
+    fi
+}
+
+verify_package_dir()
+{
+    local source_dir="$1"
+    local rootfs="${source_dir}/${ROOTFS_DIR}"
+    local manifest="${source_dir}/${METADATA_DIR}/${VERSION_TSV}"
+    local verifier="${rootfs}${BINDIR}/urma_version"
+
+    if [ ! -x "${verifier}" ] || [ ! -f "${manifest}" ]; then
+        echo "Error: version verifier or manifest is missing from ${source_dir}" >&2
+        return 1
+    fi
+    "${verifier}" --check-root "${rootfs}" "${manifest}"
+}
+
+verify_environment_dir()
+{
+    local source_dir="$1"
+    local environment_root="$2"
+    local rootfs="${source_dir}/${ROOTFS_DIR}"
+    local manifest="${source_dir}/${METADATA_DIR}/${INSTALL_MANIFEST}"
+    local verifier="${rootfs}${BINDIR}/urma_version"
+    local normalized_root
+
+    if [ ! -d "${environment_root}" ]; then
+        echo "Error: environment root ${environment_root} does not exist" >&2
+        return 1
+    fi
+    normalized_root=$(cd "${environment_root}" && pwd)
+    normalized_root="${normalized_root%/}"
+    echo "Comparing installed artifacts under ${environment_root} with package contents."
+    "${verifier}" --compare-roots "${rootfs}" "${normalized_root}" "${manifest}"
+}
+
+verify_package_input()
+{
+    local package="$1"
+    local environment_root="${2:-}"
+    local source_dir
+    local tmp_dir=""
+    local ret=0
+
+    if [ -d "${package}" ]; then
+        source_dir=$(cd "${package}" && pwd)
+    else
+        ensure_archive_tool_dependencies
+        need_cmd tar
+        tmp_dir=$(mktemp -d)
+        source_dir=$(extract_package "${package}" "${tmp_dir}")
+    fi
+
+    echo "Verifying artifact versions inside the package."
+    verify_package_dir "${source_dir}" || ret=$?
+    if [ "${ret}" -eq 0 ] && [ -n "${environment_root}" ]; then
+        verify_environment_dir "${source_dir}" "${environment_root}" || ret=$?
+    fi
+    if [ -n "${tmp_dir}" ]; then
+        rm -rf "${tmp_dir}"
+    fi
+    return "${ret}"
+}
+
+verify_cmd()
+{
+    local package="${1:-}"
+    local environment_root="${2:-/}"
+
+    if [ -z "${package}" ]; then
+        echo "Error: verify requires a package archive or extracted directory" >&2
+        exit 1
+    fi
+    if [ "$#" -gt 2 ]; then
+        echo "Error: verify accepts only a package and an optional environment root" >&2
+        exit 1
+    fi
+    verify_package_input "${package}" "${environment_root}"
 }
 
 extract_package()
@@ -928,6 +1079,12 @@ main()
             ;;
         remove)
             remove_cmd "$@"
+            ;;
+        version)
+            version_cmd "$@"
+            ;;
+        verify)
+            verify_cmd "$@"
             ;;
         -h|--help|help)
             usage

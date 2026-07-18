@@ -1,1 +1,10 @@
 # Bazel package for Starlark helpers (no CMake).
+
+exports_files(
+    [
+        "urma_binary_version.c.tpl",
+        "urma_so_version.c.tpl",
+        "urma_version.h.tpl",
+    ],
+    visibility = ["//visibility:public"],
+)
