@@ -1,8 +1,35 @@
 package(default_visibility = ["//visibility:public"])
 
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
-load("//bazel:urma_deps.bzl", "LIBUMMU_ABI_VERSION", "LIBUMMU_RUNTIME_LINKOPTS")
-load("//bazel:urma_shared.bzl", "urma_dynamic_linkopts", "urma_linklib_inputs", "urma_shared_library", "urma_shared_library_static_dep")
+load("//bazel:urma_deps.bzl", "LIBUMMU_ABI_VERSION", "LIBUMMU_RUNTIME_LINKOPTS", "LIBUMMU_VERSION")
+load(
+    "//bazel:urma_shared.bzl",
+    "urma_dynamic_linkopts",
+    "urma_linklib_inputs",
+    "urma_shared_library",
+    "urma_shared_library_static_dep",
+)
+load(
+    "//bazel:urma_versioning.bzl",
+    "urma_binary_version",
+    "urma_binary_version_linkopts",
+    "urma_version_linkopts",
+    "urma_version_header",
+    "urma_version_manifest",
+    "urma_version_note",
+    "urma_versioned_artifact",
+)
+load(
+    "//bazel:urma_versions.bzl",
+    "BAZEL_REQUIRED_VERSION",
+    "URMA_BINARY_VERSIONS",
+    "URMA_PACKAGE_VERSION",
+    "URMA_SO_VERSIONS",
+    "URMA_VERSION_HEADER",
+    "libummu_version_info",
+)
+
+LIBUMMU_VERSION_INFO = libummu_version_info(LIBUMMU_VERSION, LIBUMMU_ABI_VERSION)
 
 config_setting(
     name = "perf_cycle_enabled",
@@ -125,7 +152,7 @@ urma_shared_library(
     includes = ["common/include"],
     copts = URMA_COMMON_COPTS,
     linkopts = URMA_COMMON_LINKOPTS,
-    soname = "liburma_common.so.0",
+    version_info = URMA_SO_VERSIONS["urma_common"],
 )
 
 cc_library(
@@ -158,7 +185,7 @@ urma_shared_library(
     compile_deps = [":urma_common_headers"],
     dynamic_lib_names = ["urma_common"],
     linkopts = ["-ldl", "-lrt"],
-    soname = "liburma.so.0",
+    version_info = URMA_SO_VERSIONS["urma"],
 )
 
 urma_shared_library(
@@ -183,7 +210,7 @@ urma_shared_library(
     ],
     dynamic_lib_names = ["urma", "urma_common"],
     linkopts = ["-lnl-genl-3", "-lnl-3"],
-    soname = "liburma_ubagg.so.0",
+    version_info = URMA_SO_VERSIONS["urma_ubagg"],
 )
 
 urma_shared_library_static_dep(
@@ -211,7 +238,7 @@ urma_shared_library_static_dep(
         "-lnl-genl-3",
         "-lnl-3",
     ],
-    soname = "libtpsa.so.0",
+    version_info = URMA_SO_VERSIONS["tpsa"],
 )
 
 cc_library(
@@ -227,11 +254,25 @@ alias(
 cc_binary(
     name = "ummu",
     linkshared = True,
-    deps = ["@libummu//:ummu_internal"],
+    deps = [
+        ":ummu_version_note",
+        "@libummu//:ummu_internal",
+    ],
     linkopts = [
         "-Wl,-z,relro,-z,now",
         "-Wl,-soname,libummu.so." + LIBUMMU_ABI_VERSION,
-    ] + LIBUMMU_RUNTIME_LINKOPTS,
+    ] + urma_version_linkopts(LIBUMMU_VERSION_INFO) + LIBUMMU_RUNTIME_LINKOPTS,
+)
+
+urma_version_note(
+    name = "ummu_version_note",
+    version_info = LIBUMMU_VERSION_INFO,
+)
+
+urma_versioned_artifact(
+    name = "ummu_dist",
+    src = ":ummu",
+    version_info = LIBUMMU_VERSION_INFO,
 )
 
 genrule(
@@ -278,23 +319,38 @@ cc_library(
 cc_binary(
     name = "urma-udma",
     linkshared = True,
-    deps = [":urma_udma_internal"],
+    deps = [
+        ":urma_udma_internal",
+        ":urma_udma_version_note",
+    ],
     additional_linker_inputs = select({
         ":build_udma_disabled": [],
         "//conditions:default": urma_linklib_inputs(["urma", "urma_common"]) + [
             ":ummu_linklib",
         ],
     }),
-    linkopts = select({
+    linkopts = urma_version_linkopts(URMA_SO_VERSIONS["urma_udma"]) + [
+        "-Wl,-soname," + URMA_SO_VERSIONS["urma_udma"].soname,
+    ] + select({
         ":build_udma_disabled": [],
         "//conditions:default": urma_dynamic_linkopts(
             ["urma", "urma_common"],
             extra_libs = [
-                "-Wl,-soname,liburma-udma.so",
                 "-lummu",
             ],
         ),
     }),
+)
+
+urma_version_note(
+    name = "urma_udma_version_note",
+    version_info = URMA_SO_VERSIONS["urma_udma"],
+)
+
+urma_versioned_artifact(
+    name = "urma-udma_dist",
+    src = ":urma-udma",
+    version_info = URMA_SO_VERSIONS["urma_udma"],
 )
 
 genrule(
@@ -307,6 +363,64 @@ genrule(
 alias(
     name = "hw_udma",
     actual = ":urma-udma",
+)
+
+urma_version_header(
+    name = "urma_version_header",
+    version_info = URMA_VERSION_HEADER,
+)
+
+urma_version_manifest(
+    name = "version_manifest",
+    entries = [
+        URMA_SO_VERSIONS["urma_common"],
+        URMA_SO_VERSIONS["urma"],
+        URMA_SO_VERSIONS["tpsa"],
+        URMA_SO_VERSIONS["urma_ubagg"],
+        URMA_SO_VERSIONS["urma_udma"],
+        LIBUMMU_VERSION_INFO,
+        URMA_BINARY_VERSIONS["urma_admin"],
+        URMA_BINARY_VERSIONS["urma_perftest"],
+        URMA_BINARY_VERSIONS["urma_ping"],
+        URMA_BINARY_VERSIONS["urma_sample"],
+        URMA_BINARY_VERSIONS["urma_version"],
+        URMA_VERSION_HEADER,
+    ],
+    bazel_version = BAZEL_REQUIRED_VERSION,
+    package_version = URMA_PACKAGE_VERSION,
+)
+
+filegroup(
+    name = "version_distribution",
+    srcs = [
+        ":ummu_dist",
+        ":urma-udma_dist",
+        ":urma_common_dist",
+        ":urma_dist",
+        ":urma_ubagg_dist",
+        ":tpsa_dist",
+        ":urma_version_header",
+        ":version_manifest",
+        ":urma_version",
+    ],
+)
+
+urma_binary_version(
+    name = "urma_version_binary_version",
+    version_info = URMA_BINARY_VERSIONS["urma_version"],
+)
+
+cc_binary(
+    name = "urma_version",
+    srcs = ["tools/urma_version/urma_version.c"],
+    copts = URMA_COMMON_COPTS,
+    linkopts = urma_binary_version_linkopts(URMA_BINARY_VERSIONS["urma_version"]),
+    deps = [":urma_version_binary_version"],
+)
+
+urma_binary_version(
+    name = "urma_admin_binary_version",
+    version_info = URMA_BINARY_VERSIONS["urma_admin"],
 )
 
 cc_binary(
@@ -324,17 +438,27 @@ cc_binary(
         "-I/usr/include/libnl3",
     ],
     additional_linker_inputs = urma_linklib_inputs(["urma", "urma_common"]),
-    linkopts = URMA_TOOL_LINKOPTS + urma_dynamic_linkopts(
-        ["urma", "urma_common"],
-        extra_libs = [
-            "-lnl-genl-3",
-            "-lnl-3",
-        ],
+    linkopts = (
+        URMA_TOOL_LINKOPTS +
+        urma_binary_version_linkopts(URMA_BINARY_VERSIONS["urma_admin"]) +
+        urma_dynamic_linkopts(
+            ["urma", "urma_common"],
+            extra_libs = [
+                "-lnl-genl-3",
+                "-lnl-3",
+            ],
+        )
     ),
     deps = [
         ":urma_common_headers",
         ":urma_headers",
+        ":urma_admin_binary_version",
     ],
+)
+
+urma_binary_version(
+    name = "urma_perftest_binary_version",
+    version_info = URMA_BINARY_VERSIONS["urma_perftest"],
 )
 
 cc_binary(
@@ -352,17 +476,27 @@ cc_binary(
     ],
     copts = URMA_TOOL_COPTS,
     additional_linker_inputs = urma_linklib_inputs(["urma", "urma_common"]),
-    linkopts = URMA_TOOL_LINKOPTS + urma_dynamic_linkopts(
-        ["urma", "urma_common"],
-        extra_libs = [
-            "-lpthread",
-            "-lm",
-        ],
+    linkopts = (
+        URMA_TOOL_LINKOPTS +
+        urma_binary_version_linkopts(URMA_BINARY_VERSIONS["urma_perftest"]) +
+        urma_dynamic_linkopts(
+            ["urma", "urma_common"],
+            extra_libs = [
+                "-lpthread",
+                "-lm",
+            ],
+        )
     ),
     deps = [
         ":urma_common_headers",
         ":urma_headers",
+        ":urma_perftest_binary_version",
     ],
+)
+
+urma_binary_version(
+    name = "urma_ping_binary_version",
+    version_info = URMA_BINARY_VERSIONS["urma_ping"],
 )
 
 cc_binary(
@@ -380,18 +514,28 @@ cc_binary(
         "-I/usr/include/libnl3",
     ],
     additional_linker_inputs = urma_linklib_inputs(["urma", "urma_common"]),
-    linkopts = URMA_TOOL_LINKOPTS + urma_dynamic_linkopts(
-        ["urma", "urma_common"],
-        extra_libs = [
-            "-lm",
-            "-lnl-genl-3",
-            "-lnl-3",
-        ],
+    linkopts = (
+        URMA_TOOL_LINKOPTS +
+        urma_binary_version_linkopts(URMA_BINARY_VERSIONS["urma_ping"]) +
+        urma_dynamic_linkopts(
+            ["urma", "urma_common"],
+            extra_libs = [
+                "-lm",
+                "-lnl-genl-3",
+                "-lnl-3",
+            ],
+        )
     ),
     deps = [
         ":urma_common_headers",
         ":urma_headers",
+        ":urma_ping_binary_version",
     ],
+)
+
+urma_binary_version(
+    name = "urma_sample_binary_version",
+    version_info = URMA_BINARY_VERSIONS["urma_sample"],
 )
 
 cc_binary(
@@ -400,9 +544,16 @@ cc_binary(
     includes = ["lib/urma/core/include"],
     copts = URMA_TOOL_COPTS,
     additional_linker_inputs = urma_linklib_inputs(["urma", "urma_common"]),
-    linkopts = URMA_TOOL_LINKOPTS + urma_dynamic_linkopts(
-        ["urma", "urma_common"],
-        extra_libs = ["-lpthread"],
+    linkopts = (
+        URMA_TOOL_LINKOPTS +
+        urma_binary_version_linkopts(URMA_BINARY_VERSIONS["urma_sample"]) +
+        urma_dynamic_linkopts(
+            ["urma", "urma_common"],
+            extra_libs = ["-lpthread"],
+        )
     ),
-    deps = [":urma_headers"],
+    deps = [
+        ":urma_headers",
+        ":urma_sample_binary_version",
+    ],
 )

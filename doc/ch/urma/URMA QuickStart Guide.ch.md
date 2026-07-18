@@ -266,13 +266,19 @@ rpm -ivh umdk-urma-tools-26.06.0-B004.oe2403sp3.aarch64.rpm
 rpm -ivh umdk-urma-example-26.06.0-B004.oe2403sp3.aarch64.rpm
 ```
 
-### 方法4：使用 Bazel 脚本编译、打包和安装
+### 方法4：使用 Bazel 脚本编译、打包、安装和校验
 
 ```bash
 cd src/urma
 ./urma_bazel.sh compile --config=release --config=arm64 --define=build_udma=true
+./urma_bazel.sh version urma-bazel-<timestamp>.tar.gz
 ./urma_bazel.sh install urma-bazel-<timestamp>.tar.gz
+./urma_bazel.sh verify urma-bazel-<timestamp>.tar.gz
 ```
+
+Bazel 构建要求使用 7.4.1，URMA 版本统一在 `src/urma/bazel/urma_versions.bzl` 中设置。已安装的二进制可通过 `--version` 或 `-V` 查询，SO 和 `urma_version.h` 可通过 `/usr/bin/urma_version <文件路径>` 查询。
+
+`verify` 默认比较当前系统与 tar 包：先检查包内版本元数据，再逐字节比较全部 URMA 二进制、全部 `.so*` 实体和软链接、以及 `usr/include` 下所有 `.h` 头文件。也可将容器 rootfs 或 sysroot 作为第二个参数，例如 `./urma_bazel.sh verify <tar包> /tmp/urma-sysroot`。该检查不安装 URMA，也不新增 `md5sum` 等工具依赖。
 
 ## 2.5 内核态ko安装
 

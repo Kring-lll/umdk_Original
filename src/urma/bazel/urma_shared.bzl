@@ -1,6 +1,7 @@
 """Helpers to build URMA shared libraries with correct DT_NEEDED (no CMake)."""
 
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("//bazel:urma_versioning.bzl", "urma_version_linkopts", "urma_version_note", "urma_versioned_artifact")
 
 _LINK_NO_AS_NEEDED = ["-Wl,--no-as-needed"]
 _LINK_AS_NEEDED = ["-Wl,--as-needed"]
@@ -40,11 +41,15 @@ def urma_shared_library(
         linkopts = [],
         dynamic_lib_names = [],
         extra_link_dirs = None,
-        soname = None,
+        version_info = None,
         visibility = None):
-    """Emit ``{name}_internal``, ``{name}`` (.so), and ``{name}_linklib``."""
+    """Emit linkable, version-noted, and installable forms of a shared library."""
     internal = name + "_internal"
+    version_note = name + "_version_note"
     vis = visibility if visibility != None else ["//visibility:public"]
+
+    if version_info == None:
+        fail("version_info is required for shared library " + name)
 
     cc_library(
         name = internal,
@@ -59,30 +64,44 @@ def urma_shared_library(
         visibility = vis,
     )
 
+    urma_version_note(
+        name = version_note,
+        version_info = version_info,
+        visibility = vis,
+    )
+
     shared_linkopts = linkopts
     shared_inputs = []
     soname_linkopts = []
-    if soname:
-        soname_linkopts = ["-Wl,-soname," + soname]
+    version_linkopts = urma_version_linkopts(version_info)
+    if version_info.soname:
+        soname_linkopts = ["-Wl,-soname," + version_info.soname]
 
     if dynamic_lib_names:
         shared_inputs = urma_linklib_inputs(dynamic_lib_names)
         shared_linkopts = urma_dynamic_linkopts(
             dynamic_lib_names,
             extra_dirs = extra_link_dirs,
-            extra_libs = soname_linkopts + linkopts,
+            extra_libs = soname_linkopts + version_linkopts + linkopts,
         )
     elif linkopts:
-        shared_linkopts = _LINK_NO_AS_NEEDED + soname_linkopts + linkopts + _LINK_AS_NEEDED
+        shared_linkopts = _LINK_NO_AS_NEEDED + soname_linkopts + version_linkopts + linkopts + _LINK_AS_NEEDED
     elif soname_linkopts:
-        shared_linkopts = soname_linkopts
+        shared_linkopts = soname_linkopts + version_linkopts
 
     cc_binary(
         name = name,
         linkshared = True,
-        deps = [":" + internal],
+        deps = [":" + internal, ":" + version_note],
         additional_linker_inputs = shared_inputs,
         linkopts = shared_linkopts,
+        visibility = vis,
+    )
+
+    urma_versioned_artifact(
+        name = name + "_dist",
+        src = ":" + name,
+        version_info = version_info,
         visibility = vis,
     )
 
@@ -103,11 +122,15 @@ def urma_shared_library_static_dep(
         cxxopts = [],
         static_deps = [],
         linkopts = [],
-        soname = None,
+        version_info = None,
         visibility = None):
-    """Shared library that statically links ``static_deps`` (e.g. tpsa + urma_common)."""
+    """Versioned shared library that statically links the supplied dependencies."""
     internal = name + "_internal"
+    version_note = name + "_version_note"
     vis = visibility if visibility != None else ["//visibility:public"]
+
+    if version_info == None:
+        fail("version_info is required for shared library " + name)
 
     cc_library(
         name = internal,
@@ -122,19 +145,33 @@ def urma_shared_library_static_dep(
         visibility = vis,
     )
 
-    soname_linkopts = []
-    if soname:
-        soname_linkopts = ["-Wl,-soname," + soname]
+    urma_version_note(
+        name = version_note,
+        version_info = version_info,
+        visibility = vis,
+    )
 
-    static_linkopts = soname_linkopts + linkopts
+    soname_linkopts = []
+    if version_info.soname:
+        soname_linkopts = ["-Wl,-soname," + version_info.soname]
+
+    version_linkopts = urma_version_linkopts(version_info)
+    static_linkopts = soname_linkopts + version_linkopts + linkopts
     if linkopts:
-        static_linkopts = _LINK_NO_AS_NEEDED + soname_linkopts + linkopts + _LINK_AS_NEEDED
+        static_linkopts = _LINK_NO_AS_NEEDED + soname_linkopts + version_linkopts + linkopts + _LINK_AS_NEEDED
 
     cc_binary(
         name = name,
         linkshared = True,
-        deps = [":" + internal],
+        deps = [":" + internal, ":" + version_note],
         linkopts = static_linkopts,
+        visibility = vis,
+    )
+
+    urma_versioned_artifact(
+        name = name + "_dist",
+        src = ":" + name,
+        version_info = version_info,
         visibility = vis,
     )
 

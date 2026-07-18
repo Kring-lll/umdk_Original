@@ -92,7 +92,7 @@ chmod 777 /dev/ummu/tid
 chmod 755 /usr/lib64/liburma*
 ```
 
-4. 使用 Bazel 脚本编译、打包、安装和卸载 URMA（工作区根目录：`src/urma`）
+4. 使用 Bazel 脚本编译、打包、查询、安装、校验和卸载 URMA（工作区根目录：`src/urma`）
 
 在 UMDK 仓库根目录下，进入 `src/urma` 运行脚本。脚本会在编译前检查编译依赖，并在安装前检查运行依赖；已满足的依赖不会处理，缺失的依赖会通过 `yum install -y` 安装。因此请确认 yum 源可用，并在存在缺失依赖时使用具备安装权限的用户执行。
 
@@ -102,7 +102,9 @@ cd src/urma
 ./urma_bazel.sh compile --config=release --config=arm64 --define=build_udma=true
 ```
 
-`compile` 命令会通过 Bazel 构建固定的 URMA 打包产物，生成与 RPM 安装效果对齐的 rootfs，写入 `metadata/urma_version`，并在 `src/urma` 下生成 `urma-bazel-<timestamp>.tar.gz`。打包完成后，脚本会清理中间产物，包括 `urma_version`、`bazel-urma-package` 和 Bazel 便捷软链接。
+`compile` 命令会通过 Bazel 构建固定的 URMA 打包产物，生成与 RPM 安装效果对齐的 rootfs，写入 `metadata/urma_version`、`metadata/urma_versions.json` 和 `metadata/urma_versions.tsv`，并在 `src/urma` 下生成 `urma-bazel-<timestamp>.tar.gz`。打包前后会自动检查包内 SO、二进制和版本头文件的版本元数据。打包完成后，脚本会清理中间产物，包括 `urma_version`、`bazel-urma-package` 和 Bazel 便捷软链接。
+
+Bazel 构建要求使用 7.4.1。URMA 仓内组件的版本统一在 `src/urma/bazel/urma_versions.bzl` 中设置：修改 `URMA_VERSION` 可刷新组件和包版本，修改 `URMA_SOVERSION` 可刷新 SO ABI 主版本。外部组件 `libummu` 继续使用 `src/urma/bazel/urma_deps.bzl` 中独立配置的版本。
 
 该流程不需要手动安装或链接系统中的 `libummu`。脚本会从 `src/urma/WORKSPACE` 或 `src/urma/bazel/urma_deps.bzl` 读取 `LIBUMMU_REMOTE`、`LIBUMMU_COMMIT`、`LIBUMMU_VERSION` 和 `LIBUMMU_ABI_VERSION`，将指定 commit 拉取到 `src/urma/third_party/libummu`，通过 Bazel 编译，并随 URMA 一起打入 tar 包。
 
@@ -126,6 +128,34 @@ cd src/urma
 # 开启 ThreadSanitizer，并启用周期性能统计。
 ./urma_bazel.sh compile --config=tsan --define=perf_cycle=true --define=build_udma=true
 ```
+
+Bazel 产物支持直接查询版本：二进制使用 `--version` 或 `-V`，SO 和版本头文件使用随包安装到 `/usr/bin` 的 `urma_version`。这些能力仅用于 Bazel 场景，不依赖 RPM 查询。
+
+```bash
+# 查询已安装二进制。
+urma_admin --version
+urma_perftest --version
+
+# 查询已安装 SO 和版本头文件。
+urma_version /usr/lib64/liburma.so.0
+urma_version /usr/lib64/urma/liburma-udma.so
+urma_version /usr/include/ub/umdk/urma/urma_version.h
+
+# 查看 tar 包声明的版本清单。
+./urma_bazel.sh version urma-bazel-<timestamp>.tar.gz
+```
+
+安装后可用 `verify` 比较当前环境与 tar 包。该命令先检查 tar 包内的版本元数据，再根据 `metadata/install_manifest` 比较环境和 tar 中的全部 URMA 二进制、所有 `.so*` 实体及软链接、以及 `usr/include` 下全部 `.h` 头文件。普通文件按大小和全部字节比较，SO 软链接按链接目标比较；任一文件缺失或内容不同都会返回失败。新增头文件会由安装清单自动纳入，不需要维护检查名单。
+
+```bash
+# 默认检查当前系统根目录 /。
+./urma_bazel.sh verify urma-bazel-<timestamp>.tar.gz
+
+# 检查容器 rootfs、挂载目录或交叉编译 sysroot。
+./urma_bazel.sh verify urma-bazel-<timestamp>.tar.gz /tmp/urma-sysroot
+```
+
+`verify` 只读取并比较文件，不安装 URMA。构建阶段只执行包内版本检查，不要求构建机已经安装同版本 URMA。文件内容比较由包内 `urma_version` 完成，不新增 `md5sum`、OpenSSL 等工具依赖。
 
 将生成的 tar 包复制到目标环境后，解压并使用包内脚本安装。`install` 和 `remove` 需要使用 **root** 或 **sudo** 执行；脚本会按 `metadata/install_manifest` 安装文件，刷新 `ldconfig`，在存在 `restorecon` 时恢复 SELinux 上下文，并在可用时重启 rsyslog。`remove` 命令只卸载 manifest 中的 URMA/UDMA/TPSA 自有安装内容，不会卸载通过 yum 安装的三方库，也会保留随包安装的 libummu 内容。
 

@@ -266,13 +266,19 @@ rpm -ivh umdk-urma-tools-26.06.0-B004.oe2403sp3.aarch64.rpm
 rpm -ivh umdk-urma-example-26.06.0-B004.oe2403sp3.aarch64.rpm
 ```
 
-### Method 4: Build, package, and install using the Bazel script
+### Method 4: Build, package, install, and verify using the Bazel script
 
 ```bash
 cd src/urma
 ./urma_bazel.sh compile --config=release --config=arm64 --define=build_udma=true
+./urma_bazel.sh version urma-bazel-<timestamp>.tar.gz
 ./urma_bazel.sh install urma-bazel-<timestamp>.tar.gz
+./urma_bazel.sh verify urma-bazel-<timestamp>.tar.gz
 ```
+
+The Bazel flow requires Bazel 7.4.1. Set the URMA version centrally in `src/urma/bazel/urma_versions.bzl`. Installed executables accept `--version` or `-V`; query shared objects and `urma_version.h` with `/usr/bin/urma_version <artifact-path>`.
+
+By default, `verify` compares the current system with the archive. It first validates archive-internal version metadata, then compares every URMA executable, every `.so*` file and symlink, and every `.h` file under `usr/include` byte for byte. A container rootfs or sysroot may be passed as the second argument, for example `./urma_bazel.sh verify <archive> /tmp/urma-sysroot`. Verification does not install URMA or add a dependency on `md5sum` or another comparison tool.
 
 ## 2.5 Kernel-mode ko Installation
 
