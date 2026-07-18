@@ -975,6 +975,8 @@ static int umq_ub_process_fc_msg_with_retry(ub_queue_t *queue, umq_ub_imm_t *imm
         case -UMQ_ERR_EAGAIN:
             retry_type = UMQ_UB_RETRY_TYPE_EAGAIN;
             break;
+        case -UMQ_ERR_EFLOWCTL_FATAL:
+            return umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_ERR_FATAL);
         default:
             return umq_ub_fill_fc_buf(queue, buf, UMQ_FAKE_BUF_FC_ERR);
     }
@@ -1894,16 +1896,26 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
             }
             umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND_ERROR);
             if (cr[i].status == URMA_CR_WR_FLUSH_ERR_DONE || cr[i].status == URMA_CR_WR_SUSPEND_DONE) {
-                UMQ_LIMIT_VLOG_INFO(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx "
-                    "cr[%d] status[%d] local_id[%u]\n", EID_ARGS(*eid), id, i, (int)cr[i].status, cr[i].local_id);
+                UMQ_LIMIT_VLOG_INFO(VLOG_UMQ_URMA_CQE,
+                    "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
+                    "remote jetty_id: %u, urma_poll_jfc reports tx cr[%d] status[%d] local_id[%u]\n",
+                    EID_ARGS(*eid), id, EID_ARGS(cr[i].remote_id.eid),
+                    cr[i].remote_id.id, i, (int)cr[i].status, cr[i].local_id);
                 continue;
             }
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx cr[%d] "
-                "status[%d] local_id[%u]\n", EID_ARGS(*eid), id, i, (int)cr[i].status, cr[i].local_id);
-            ret = -UMQ_ERR_EFLOWCTL;
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_CQE,
+                "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
+                "remote jetty_id: %u, urma_poll_jfc reports tx cr[%d] status[%d] local_id[%u]\n",
+                EID_ARGS(*eid), id, EID_ARGS(cr[i].remote_id.eid),
+                cr[i].remote_id.id, i, (int)cr[i].status, cr[i].local_id);
+            bool is_fatal = (cr[i].status == URMA_CR_ACK_TIMEOUT_ERR ||
+                cr[i].status == URMA_CR_RNR_RETRY_CNT_EXC_ERR);
+            ret = is_fatal ? -UMQ_ERR_EFLOWCTL_FATAL : -UMQ_ERR_EFLOWCTL;
             umq_ub_fc_process_tx_error(queue, &obj);
             if (buf != NULL) {
-                qbuf_cnt += (int32_t)umq_ub_fill_fc_buf(queue, &buf[qbuf_cnt], UMQ_FAKE_BUF_FC_ERR);
+                umq_buf_status_t fc_err_status = is_fatal ?
+                    UMQ_FAKE_BUF_FC_ERR_FATAL : UMQ_FAKE_BUF_FC_ERR;
+                qbuf_cnt += (int32_t)umq_ub_fill_fc_buf(queue, &buf[qbuf_cnt], fc_err_status);
             }
             failed_cnt++;
             continue;
