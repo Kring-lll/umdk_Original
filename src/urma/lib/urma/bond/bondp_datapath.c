@@ -1301,8 +1301,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         atomic_store(&bdp_comp->valid[send_idx], false);
         if (g_bondp_global_ctx->enable_health_check) {
             bondp_target_jetty_t *bdp_tjetty = wr_entry->target_vjetty;
-            bool target_any_valid = bondp_hc_tjetty_target_any_valid(bdp_tjetty, target_idx);
-            atomic_store(&bdp_tjetty->valid[target_idx], target_any_valid);
+            bondp_hc_tjetty_sync_valid(bdp_tjetty, send_idx, target_idx);
         }
         /* choose the failover route(0 or 1) through send_idx and target_idx */
         int new_send_idx = send_idx;
