@@ -157,13 +157,13 @@ static void hc_rebuild_probe_jetty(bondp_probe_res_t *res)
     }
 }
 
-static void hc_set_tjetty_list_target_valid(bondp_hc_node_t *node, uint32_t target_idx)
+static void hc_set_tjetty_list_target_valid(bondp_hc_node_t *node, uint32_t local_idx, uint32_t target_idx)
 {
     bondp_target_jetty_t *bdp_tjetty = NULL;
 
     pthread_rwlock_rdlock(&node->lock);
     UB_LIST_FOR_EACH (bdp_tjetty, hc_entry, &node->tjetty_list) {
-        atomic_store(&bdp_tjetty->valid[target_idx], true);
+        atomic_store(&bdp_tjetty->valid[local_idx][target_idx], true);
     }
     pthread_rwlock_unlock(&node->lock);
 }
@@ -210,7 +210,7 @@ static void hc_drain_probe_cq(bondp_probe_res_t *res)
             bool prev = atomic_load(&node->valid[local_idx][target_idx]);
             atomic_store(&node->valid[local_idx][target_idx], ok);
             if (ok && !prev) {
-                hc_set_tjetty_list_target_valid(node, target_idx);
+                hc_set_tjetty_list_target_valid(node, local_idx, target_idx);
             }
 
             node->probe_checked[local_idx][target_idx] = true;
@@ -1018,43 +1018,41 @@ void bondp_hc_unregister_tjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *
     URMA_LOG_INFO("Health check tjetty unregistered, node_id=%u.\n", node->node_id);
 }
 
-bool bondp_hc_tjetty_target_any_valid(const bondp_target_jetty_t *bdp_tjetty, uint32_t target_idx)
+void bondp_hc_tjetty_sync_valid(const bondp_target_jetty_t *bdp_tjetty,
+                                 uint32_t skip_local_idx, uint32_t skip_target_idx)
 {
-    if (bdp_tjetty == NULL || target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
-        return false;
-    }
-
-    if (!bdp_tjetty->hc_registered) {
-        return true;
+    if (bdp_tjetty == NULL || !bdp_tjetty->hc_registered) {
+        return;
     }
 
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(bdp_tjetty->v_tjetty.urma_ctx, bondp_context_t, v_ctx);
     bondp_hc_ctx_t *hc_ctx = bdp_ctx->hc_ctx;
     if (hc_ctx == NULL) {
-        return true;
+        return;
     }
 
     uint32_t node_idx = bdp_tjetty->hc_node_idx;
     if (node_idx >= hc_ctx->node_num) {
-        return true;
+        return;
     }
 
+    /* Synchronise the authoritative per-path node->valid matrix into the
+     * tjetty's own valid matrix, skipping the path (skip_local_idx,
+     * skip_target_idx) — that path is owned by the caller (e.g. the failover
+     * CR handler sets it to false) and must not be overwritten here. */
     bondp_hc_node_t *node = &hc_ctx->nodes[node_idx];
-    bool any_connected = false;
     pthread_rwlock_rdlock(&node->lock);
-    for (uint32_t local_idx = 0; local_idx < URMA_UBAGG_DEV_MAX_NUM; ++local_idx) {
-        if (node->hc_tjetty[local_idx][target_idx] == NULL) {
-            continue;
-        }
-        any_connected = true;
-        if (atomic_load(&node->valid[local_idx][target_idx])) {
-            pthread_rwlock_unlock(&node->lock);
-            return true;
+    for (uint32_t li = 0; li < URMA_UBAGG_DEV_MAX_NUM; ++li) {
+        for (uint32_t ti = 0; ti < URMA_UBAGG_DEV_MAX_NUM; ++ti) {
+            if (node->hc_tjetty[li][ti] == NULL) {
+                continue;
+            }
+            if (li == skip_local_idx && ti == skip_target_idx) {
+                continue;
+            }
+            bool v = atomic_load(&node->valid[li][ti]);
+            atomic_store(&bdp_tjetty->valid[li][ti], v);
         }
     }
     pthread_rwlock_unlock(&node->lock);
-
-    /* No connected path to this target: treat as still available rather than
-     * wrongly dropping it — matches the unregistered / no-hc fallback. */
-    return !any_connected;
 }
