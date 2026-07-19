@@ -2074,6 +2074,12 @@ int umq_ub_unbind_impl(uint64_t umqh)
         return -UMQ_ERR_ENODEV;
     }
 
+    ub_queue_t *real_queue = umq_ub_get_real_queue_by_umq_id(queue, queue->umq_id);
+    if (real_queue == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), queue is in use, cannot unbind\n", queue->umq_id);
+        return -UMQ_ERR_EBUSY;
+    }
+
     umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
     if (queue->flow_control.enabled) {
         urma_target_jetty_t *tjetty = bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
@@ -2128,6 +2134,7 @@ int umq_ub_unbind_impl(uint64_t umqh)
     }
 
     umq_dec_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
+    umq_ub_put_real_queue(queue, queue->umq_id);
 
     return UMQ_SUCCESS;
 }
