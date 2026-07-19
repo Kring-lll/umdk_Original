@@ -2076,8 +2076,7 @@ int umq_ub_unbind_impl(uint64_t umqh)
 
     ub_queue_t *real_queue = umq_ub_get_real_queue_by_umq_id(queue, queue->umq_id);
     if (real_queue == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq_id: %u queue is in use, cannot unbind\n",
-            EID_ARGS(*io_eid), io_id, queue->umq_id);
+        UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), queue is in use, cannot unbind\n", queue->umq_id);
         return -UMQ_ERR_EBUSY;
     }
 
