@@ -216,8 +216,8 @@ static void hc_drain_probe_cq(bondp_probe_res_t *res)
             }
 
             node->probe_checked[local_idx][target_idx] = true;
-
-            if (cr[k].status == URMA_CR_ACK_TIMEOUT_ERR) { /* status 9 */
+            if (cr[k].status == URMA_CR_ACK_TIMEOUT_ERR ||
+                cr[k].status == URMA_CR_LOC_ACCESS_ERR) { /* status 4/9 */
                 need_rebuild = true;
                 break;
             }

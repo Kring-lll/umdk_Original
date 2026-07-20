@@ -29,6 +29,7 @@
 typedef struct bondp_fb_task_key {
     uint32_t vjetty_id;
     uint32_t pjetty_idx;
+    bondp_fb_which_t which;
 } bondp_fb_task_key_t;
 
 typedef struct bondp_fb_task {
@@ -39,6 +40,7 @@ typedef struct bondp_fb_task {
     uint32_t request_id;
     uint32_t vjetty_id;
     uint32_t pjetty_idx;
+    bondp_fb_which_t which;
 } bondp_fb_task_t;
 
 struct bondp_fb_ctx {
@@ -53,7 +55,8 @@ struct bondp_fb_ctx {
 
 #define BONDP_FB_TASK_HASH_BASIS    0x9d4f21U
 #define BONDP_FB_TASK_TABLE_SIZE    1024U
-/* Delay (ms) before rebuilding a failed-back pjetty on the bond worker. */
+/* Delay (ms) before running failover recovery (switch to backup pjetty and/or
+ * rebuild the failed pjetty) on the bond worker. */
 #define BONDP_FB_REBUILD_DELAY_MS   2000U
 /* Delay (ms) before publishing the rebuild_done flag after a rebuild; the
  * worker enforces a minimum of one tick. */
@@ -83,7 +86,8 @@ static bool fb_task_matches_key(const struct ub_hmap_node *node, const bondp_fb_
     const bondp_fb_task_t *fb_task = CONTAINER_OF_FIELD(node, bondp_fb_task_t, hmap_node);
 
     return fb_task->vjetty_id == key->vjetty_id &&
-           fb_task->pjetty_idx == key->pjetty_idx;
+           fb_task->pjetty_idx == key->pjetty_idx &&
+           fb_task->which == key->which;
 }
 
 static uint32_t fb_task_hash_key(const bondp_fb_task_key_t *key)
@@ -292,6 +296,95 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
     return 0;
 }
 
+static int bondp_rebuild_backup_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
+{
+    int ret;
+
+    if (bdp_jetty == NULL || bdp_jetty->bondp_ctx == NULL ||
+        local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return -1;
+    }
+
+    bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
+
+    urma_jetty_t *old_jetty = bdp_jetty->backup_pjetty[local_idx];
+    if (old_jetty == NULL) {
+        URMA_LOG_ERR("backup pjetty at idx=%u is NULL, cannot rebuild\n", local_idx);
+        return -1;
+    }
+    urma_jetty_cfg_t p_cfg = old_jetty->jetty_cfg;
+    urma_jetty_id_t old_id = old_jetty->jetty_id;
+
+    urma_jetty_t *new_jetty = urma_create_jetty(bdp_ctx->p_ctxs[local_idx], &p_cfg);
+    if (new_jetty == NULL) {
+        URMA_LOG_ERR("Failed to recreate backup pjetty at idx=%d\n", local_idx);
+        return -1;
+    }
+
+    new_jetty->remote_jetty = NULL;
+    new_jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+    bdp_jetty->backup_pjetty[local_idx] = new_jetty;
+
+    ret = bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty);
+    if (ret != 0) {
+        bdp_jetty->backup_pjetty[local_idx] = old_jetty;
+        (void)urma_delete_jetty(new_jetty);
+        return -1;
+    }
+
+    ret = urma_delete_jetty(old_jetty);
+    if (ret != URMA_SUCCESS) {
+        URMA_LOG_WARN("Failed to delete old backup pjetty at idx=%d\n", local_idx);
+    }
+
+    URMA_LOG_INFO("Backup pjetty rebuilt, idx=%d old=" URMA_JETTY_ID_FMT " new=" URMA_JETTY_ID_FMT "\n",
+                  local_idx, URMA_JETTY_ID_ARGS(&old_id), URMA_JETTY_ID_ARGS(&new_jetty->jetty_id));
+    return 0;
+}
+
+static bool bondp_has_backup_pjetty(const bondp_comp_t *bdp_jetty, uint32_t pjetty_idx)
+{
+    return bdp_jetty != NULL && bdp_jetty->bondp_ctx != NULL &&
+           bdp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE &&
+           bdp_jetty->comp_type == BONDP_COMP_JETTY &&
+           bdp_jetty->backup_pjetty[pjetty_idx] != NULL;
+}
+
+void bondp_switch_to_backup_pjetty(bondp_comp_t *bdp_jetty, uint32_t pjetty_idx)
+{
+    /* Caller holds send_lock and has already checked bondp_has_backup_pjetty. */
+    atomic_store(&bdp_jetty->send_use_backup[pjetty_idx], true);
+    atomic_store(&bdp_jetty->valid[pjetty_idx], true);
+    URMA_LOG_INFO("Failover switched to backup pjetty, pjetty_idx=%u.\n", pjetty_idx);
+}
+
+static void bondp_switch_back_to_primary_pjetty(bondp_comp_t *bdp_jetty, uint32_t pjetty_idx)
+{
+    (void)pthread_spin_lock(&bdp_jetty->send_lock);
+    atomic_store(&bdp_jetty->send_use_backup[pjetty_idx], false);
+    atomic_store(&bdp_jetty->valid[pjetty_idx], true);
+    (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+    URMA_LOG_INFO("Failover switched back to rebuilt pjetty, pjetty_idx=%u.\n", pjetty_idx);
+}
+
+static int bondp_handle_backup_failure(bondp_comp_t *bdp_jetty, uint32_t pjetty_idx)
+{
+    int ret = bondp_rebuild_backup_pjetty(bdp_jetty, (int)pjetty_idx);
+    if (ret != 0) {
+        return ret;
+    }
+    (void)pthread_spin_lock(&bdp_jetty->send_lock);
+    if (atomic_load(&bdp_jetty->send_use_backup[pjetty_idx])) {
+        /* Send path still on the spare (primary not yet rebuilt by the PRIMARY
+         * task): re-arm valid so posting resumes on the now-healthy spare. */
+        atomic_store(&bdp_jetty->valid[pjetty_idx], true);
+    }
+    (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+    URMA_LOG_INFO("Backup pjetty recovered, pjetty_idx=%u.\n", pjetty_idx);
+    return 0;
+}
+
+
 static bondp_comp_t *bondp_find_jetty_by_vjetty_id(bondp_context_t *bond_ctx, uint32_t vjetty_id)
 {
     bondp_comp_t *bdp_jetty = NULL;
@@ -378,11 +471,35 @@ static void bondp_rebuild_pjetty_async(bondp_worker_task_reason_t reason, void *
         goto del_task;
     }
 
-    int ret = bondp_rebuild_pjetty(bdp_jetty, (int)fb_task->pjetty_idx);
-    if (ret != 0) {
-        URMA_LOG_ERR("Failed to rebuild failback pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
-                     fb_task->vjetty_id, fb_task->pjetty_idx);
+    if (atomic_load(&bdp_jetty->deleting)) {
+        URMA_LOG_INFO("Skip failover recovery, jetty is being deleted, vjetty_id=%u, pjetty_idx=%u.\n",
+                      fb_task->vjetty_id, fb_task->pjetty_idx);
         goto del_task;
+    }
+    uint32_t pjetty_idx = fb_task->pjetty_idx;
+    bool use_backup = bondp_has_backup_pjetty(bdp_jetty, pjetty_idx);
+
+    int ret;
+    if (fb_task->which == BONDP_FB_PRIMARY) {
+
+        ret = bondp_rebuild_pjetty(bdp_jetty, (int)pjetty_idx);
+        if (ret != 0) {
+            URMA_LOG_ERR("Failed to rebuild failover pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
+                         fb_task->vjetty_id, pjetty_idx);
+            goto del_task;
+        }
+        if (use_backup && atomic_load(&bdp_jetty->send_use_backup[pjetty_idx])) {
+            bondp_switch_back_to_primary_pjetty(bdp_jetty, pjetty_idx);
+        } else {
+            atomic_store(&bdp_jetty->valid[pjetty_idx], true);
+        }
+    } else {
+        ret = bondp_handle_backup_failure(bdp_jetty, pjetty_idx);
+        if (ret != 0) {
+            URMA_LOG_ERR("Failed to recover backup pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
+                         fb_task->vjetty_id, pjetty_idx);
+            goto del_task;
+        }
     }
 
     bondp_fb_mark_done_arg_t *mark_arg = calloc(1, sizeof(*mark_arg));
@@ -395,7 +512,7 @@ static void bondp_rebuild_pjetty_async(bondp_worker_task_reason_t reason, void *
     mark_arg->key = arg_typed->key;
     mark_arg->fb_task = fb_task;
     mark_arg->bdp_jetty = bdp_jetty;
-    mark_arg->pjetty_idx = fb_task->pjetty_idx;
+    mark_arg->pjetty_idx = pjetty_idx;
 
     uint64_t mark_done_task_id = 0;
     ret = bondp_worker_schedule(BONDP_FB_MARK_DONE_DELAY_MS, bondp_mark_rebuild_done_async,
@@ -420,7 +537,8 @@ free_arg:
     return;
 }
 
-int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx)
+int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx,
+                      bondp_fb_which_t which)
 {
     if (bond_ctx == NULL || bond_ctx->fb_ctx == NULL) {
         return -EINVAL;
@@ -436,11 +554,13 @@ int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pj
     fb_task->request_id = next_request_id(fb_ctx);
     fb_task->vjetty_id = vjetty_id;
     fb_task->pjetty_idx = pjetty_idx;
+    fb_task->which = which;
     atomic_init(&fb_task->use_cnt.atomic_cnt, 1);
 
     bondp_fb_task_key_t key = {
         .vjetty_id = vjetty_id,
         .pjetty_idx = pjetty_idx,
+        .which = which,
     };
     uint32_t hash = fb_task_hash_key(&key);
     bondp_fb_async_arg_t *async_arg = calloc(1, sizeof(*async_arg));

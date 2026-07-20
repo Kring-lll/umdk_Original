@@ -32,6 +32,8 @@
 
 static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int send_idx, int target_idx);
 
+static urma_jetty_t *get_active_send_pjetty(bondp_comp_t *bdp_comp, int send_idx);
+
 static urma_jetty_id_t *get_comp_urma_jetty_id(bondp_comp_t *bdp_comp)
 {
     switch (bdp_comp->comp_type) {
@@ -77,12 +79,23 @@ static bondp_comp_t *get_recv_count_comp(bondp_comp_t *recv_comp)
     return recv_comp;
 }
 
+static urma_jetty_t *get_active_send_pjetty(bondp_comp_t *bdp_comp, int send_idx)
+{
+    /* When send_use_backup[send_idx] is set, the failed primary pjetty is being
+     * rebuilt and the send path must post to the pre-created spare jetty. */
+    if (bdp_comp->comp_type == BONDP_COMP_JETTY &&
+        atomic_load(&bdp_comp->send_use_backup[send_idx])) {
+        return bdp_comp->backup_pjetty[send_idx];
+    }
+    return bdp_comp->p_jetty[send_idx];
+}
+
 static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, int target_idx,
                                     urma_jfs_wr_t *send_wr, urma_jfs_wr_t **bad_wr, int wr_count)
 {
     urma_status_t ret;
     if (comp->comp_type == BONDP_COMP_JETTY) {
-        ret = urma_post_jetty_send_wr(comp->p_jetty[send_idx], send_wr, bad_wr);
+        ret = urma_post_jetty_send_wr(get_active_send_pjetty(comp, send_idx), send_wr, bad_wr);
     } else if (comp->comp_type == BONDP_COMP_JFS) {
         ret = urma_post_jfs_wr(comp->p_jfs[send_idx], send_wr, bad_wr);
     } else {
@@ -1302,8 +1315,26 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
-        atomic_store(&bdp_comp->valid[send_idx], false);
-        if (g_bondp_env.enable_health_check) {
+        if (bdp_comp->bondp_ctx->bonding_mode != BONDP_BONDING_MODE_BALANCE) {
+            atomic_store(&bdp_comp->valid[send_idx], false);
+        }
+
+        bondp_fb_which_t which = BONDP_FB_PRIMARY;
+        if (bdp_comp->comp_type == BONDP_COMP_JETTY &&
+            bdp_comp->backup_pjetty[send_idx] != NULL &&
+            cr->local_id == bdp_comp->backup_pjetty[send_idx]->jetty_id.id) {
+            which = BONDP_FB_BACKUP;
+        }
+
+        if (which == BONDP_FB_PRIMARY &&
+            bdp_comp->comp_type == BONDP_COMP_JETTY &&
+            bdp_comp->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE &&
+            bdp_comp->backup_pjetty[send_idx] != NULL &&
+            !atomic_load(&bdp_comp->send_use_backup[send_idx])) {
+            bondp_switch_to_backup_pjetty(bdp_comp, send_idx);
+        }
+
+        if (g_bondp_global_ctx->enable_health_check) {
             bondp_target_jetty_t *bdp_tjetty = wr_entry->target_vjetty;
             bondp_hc_tjetty_sync_valid(bdp_tjetty, send_idx, target_idx);
         }
@@ -1345,12 +1376,16 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                 URMA_LOG_ERR("Failed to resend jfs wr, wr_id=%lu\n", resend_wr_id);
             }
         }
-        int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);
-        if (ret != 0 && ret != -EEXIST) {
-            URMA_LOG_WARN("Failed to add failback task, vjetty_id=%u pjetty_idx=%u ret=%d\n",
-                          wr_entry->target_vjetty->v_tjetty.id.id, send_idx, ret);
-        }
+        /* Trigger the async failover recovery outside send_lock to avoid
+         * blocking the CR path on the worker callback. */
+        uint32_t vjetty_id = bdp_comp->v_jetty.jetty_id.id;
+        bondp_context_t *fb_ctx = bdp_comp->bondp_ctx;
         (void)pthread_spin_unlock(&bdp_comp->send_lock);
+        int ret = bondp_fb_add_task(fb_ctx, vjetty_id, send_idx, which);
+        if (ret != 0 && ret != -EEXIST) {
+            URMA_LOG_WARN("Failed to add failover recovery task, vjetty_id=%u pjetty_idx=%u ret=%d\n",
+                          vjetty_id, send_idx, ret);
+        }
         put_comp(bdp_comp);
         return CONVERT_SKIP;
     }
