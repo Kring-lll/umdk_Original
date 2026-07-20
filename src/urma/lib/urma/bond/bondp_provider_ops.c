@@ -10,7 +10,9 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
@@ -20,7 +22,7 @@
 #include "bondp_context_table.h"
 #include "bondp_datapath.h"
 #include "bondp_failback.h"
-#include "bondp_health_check.h"
+#include "bondp_health.h"
 #include "bondp_netlink.h"
 #include "bondp_segment.h"
 #include "bondp_types.h"
@@ -36,11 +38,8 @@
 #define BONDP_ENV_ENABLE_FAILOVER                 "BOND_ENABLE_FAILOVER"
 #define BONDP_ENV_ENABLE_FAILBACK                 "BOND_ENABLE_FAILBACK"
 #define BONDP_ENV_ENABLE_HEALTH_CHECK             "BOND_ENABLE_HEALTH_CHECK"
-#define BONDP_ENV_HEALTH_CHECK_BACKUP_START       "BOND_HEALTH_CHECK_BACKUP_START"
-#define BONDP_ENV_HEALTH_CHECK_BACKUP_INTERVAL    "BOND_HEALTH_CHECK_BACKUP_INTERVAL"
-#define BONDP_ENV_HEALTH_CHECK_ACTIVE_START       "BOND_HEALTH_CHECK_ACTIVE_START"
-#define BONDP_ENV_HEALTH_CHECK_ACTIVE_INTERVAL    "BOND_HEALTH_CHECK_ACTIVE_INTERVAL"
-#define BONDP_ENV_HEALTH_CHECK_ACTIVE_MAX_BACKOFF "BOND_HEALTH_CHECK_ACTIVE_MAX_BACKOFF"
+#define BONDP_ENV_HEALTH_CHECK_INTERVAL           "BOND_HEALTH_CHECK_ACTIVE_INTERVAL"
+#define BONDP_ENV_MAX_CR_CNT_PER_DEV               "BOND_MAX_CR_CNT_PER_DEV"
 #define BONDP_ENV_LEN_MAX                         (128)
 /*
  * #define BONDP_ENV_FAILOVER_DIEX_Y_ROUTEZ          "BOND_FAILOVER_DIEX_Y_ROUTEZ"
@@ -151,6 +150,46 @@ static uint64_t read_env_uint64(const char *env_name, uint64_t default_val)
     return (uint64_t)parsed;
 }
 
+static bool is_decimal_env_value(const char *value)
+{
+    if (value == NULL || value[0] == '\0') {
+        return false;
+    }
+    for (const char *cur = value; *cur != '\0'; cur++) {
+        if (*cur < '0' || *cur > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
+static int read_env_max_cr_cnt_per_dev(void)
+{
+    static int s_max_cr_cnt_per_dev;
+
+    if (s_max_cr_cnt_per_dev != 0) {
+        return s_max_cr_cnt_per_dev;
+    }
+
+    const uint64_t default_value = URMA_UBAGG_MAX_CR_CNT_PER_DEV;
+    const char *env_value = getenv(BONDP_ENV_MAX_CR_CNT_PER_DEV);
+    if (env_value != NULL && !is_decimal_env_value(env_value)) {
+        URMA_LOG_WARN("Invalid value '%s' for env %s, using default %llu\n",
+                      env_value, BONDP_ENV_MAX_CR_CNT_PER_DEV, (unsigned long long)default_value);
+        s_max_cr_cnt_per_dev = (int)default_value;
+        return s_max_cr_cnt_per_dev;
+    }
+    uint64_t value = read_env_uint64(BONDP_ENV_MAX_CR_CNT_PER_DEV, default_value);
+    if (value == 0 || value > INT_MAX) {
+        URMA_LOG_WARN("Invalid value %llu for env %s, using default %llu\n",
+                      (unsigned long long)value, BONDP_ENV_MAX_CR_CNT_PER_DEV,
+                      (unsigned long long)default_value);
+        value = default_value;
+    }
+    s_max_cr_cnt_per_dev = (int)value;
+    return s_max_cr_cnt_per_dev;
+}
+
 static void filter_balance_route_env(char *value, const char *origin_val)
 {
     int i = 0;
@@ -240,95 +279,39 @@ static void read_env_balance_route_all(bondp_global_context_t *ctx)
 
 static void read_all_env(bondp_global_context_t *ctx)
 {
-    bondp_health_thread_ctx_t *thread_ctx = &ctx->health_thread_ctx;
     const bool default_enable_health_check = false;
     const bool default_enable_failback = false;
     const bool default_enable_failover = true;
-    const uint64_t default_health_check_backup_start_ms = 2000;
-    const uint64_t default_health_check_backup_interval_ms = 32000;
-    const uint64_t default_health_check_active_start_ms = 2000;
-    const uint64_t default_health_check_active_interval_ms = 1000;
-    const uint32_t default_health_check_active_max_backoff = 13;
-    thread_ctx->enable_health_check = read_env_bool(
+    const uint64_t default_health_check_interval_ms = BONDP_HC_DEFAULT_PROBE_INTERVAL_MS;
+    ctx->enable_health_check = read_env_bool(
         BONDP_ENV_ENABLE_HEALTH_CHECK, default_enable_health_check);
-
-    bondp_health_check_cfg_t *cfg = &thread_ctx->cfg;
     ctx->enable_failover = read_env_bool(
         BONDP_ENV_ENABLE_FAILOVER, default_enable_failover);
     ctx->enable_failback = read_env_bool(
         BONDP_ENV_ENABLE_FAILBACK, default_enable_failback);
-    cfg->backup_start_ms = read_env_uint64(
-        BONDP_ENV_HEALTH_CHECK_BACKUP_START, default_health_check_backup_start_ms);
-    cfg->backup_interval_ms = read_env_uint64(
-        BONDP_ENV_HEALTH_CHECK_BACKUP_INTERVAL, default_health_check_backup_interval_ms);
-    cfg->active_start_ms = read_env_uint64(
-        BONDP_ENV_HEALTH_CHECK_ACTIVE_START, default_health_check_active_start_ms);
-    cfg->active_interval_ms = read_env_uint64(
-        BONDP_ENV_HEALTH_CHECK_ACTIVE_INTERVAL, default_health_check_active_interval_ms);
-    cfg->active_max_backoff = (uint32_t)read_env_uint64(
-        BONDP_ENV_HEALTH_CHECK_ACTIVE_MAX_BACKOFF, default_health_check_active_max_backoff);
+    ctx->health_check_interval_ms = read_env_uint64(
+        BONDP_ENV_HEALTH_CHECK_INTERVAL, default_health_check_interval_ms);
+    ctx->max_cr_cnt_per_dev = read_env_max_cr_cnt_per_dev();
     read_env_balance_route_all(ctx);
 
     const uint64_t time_100ms = 100;
-    const uint64_t time_1s = 1000;
     const uint64_t time_60s = 60000;
-    const uint64_t time_1h = 3600000;
-    const uint32_t min_backoff = 1;
-    const uint32_t max_backoff = 100;
-
-    if (cfg->backup_start_ms < time_100ms ||
-        cfg->backup_start_ms > time_1h) {
-        URMA_LOG_WARN("Invalid BOND_HEALTH_CHECK_BACKUP_START value %lu (range %lu~%lu), using default %lu\n",
-                      cfg->backup_start_ms, time_100ms, time_1h,
-                      default_health_check_backup_start_ms);
-        cfg->backup_start_ms = default_health_check_backup_start_ms;
-    }
-    if (cfg->backup_interval_ms < time_1s ||
-        cfg->backup_interval_ms > time_1h) {
-        URMA_LOG_WARN("Invalid BOND_HEALTH_CHECK_BACKUP_INTERVAL value %lu (range %lu~%lu), using default %lu\n",
-                      cfg->backup_interval_ms, time_1s, time_1h,
-                      default_health_check_backup_interval_ms);
-        cfg->backup_interval_ms = default_health_check_backup_interval_ms;
-    }
-    if (cfg->active_start_ms < time_100ms ||
-        cfg->active_start_ms > time_1h) {
-        URMA_LOG_WARN("Invalid BOND_HEALTH_CHECK_ACTIVE_START value %lu (range %lu~%lu), using default %lu\n",
-                      cfg->active_start_ms, time_100ms, time_1h,
-                      default_health_check_active_start_ms);
-        cfg->active_start_ms = default_health_check_active_start_ms;
-    }
-    if (cfg->active_interval_ms < time_100ms ||
-        cfg->active_interval_ms > time_60s) {
+    if (ctx->health_check_interval_ms < time_100ms || ctx->health_check_interval_ms > time_60s) {
         URMA_LOG_WARN("Invalid BOND_HEALTH_CHECK_ACTIVE_INTERVAL value %lu (range %lu~%lu), using default %lu\n",
-                      cfg->active_interval_ms, time_100ms, time_60s,
-                      default_health_check_active_interval_ms);
-        cfg->active_interval_ms = default_health_check_active_interval_ms;
-    }
-    if (cfg->active_max_backoff < min_backoff ||
-        cfg->active_max_backoff > max_backoff) {
-        URMA_LOG_WARN("Invalid BOND_HEALTH_CHECK_ACTIVE_MAX_BACKOFF value %u (range %u~%u), using default %u\n",
-                      cfg->active_max_backoff, min_backoff, max_backoff,
-                      default_health_check_active_max_backoff);
-        cfg->active_max_backoff = default_health_check_active_max_backoff;
+                      ctx->health_check_interval_ms, time_100ms, time_60s,
+                      default_health_check_interval_ms);
+        ctx->health_check_interval_ms = default_health_check_interval_ms;
     }
 }
 
 static void print_all_env(const bondp_global_context_t *ctx)
 {
-    const bondp_health_thread_ctx_t *thread_ctx = &ctx->health_thread_ctx;
-    const bondp_health_check_cfg_t *cfg = &thread_ctx->cfg;
-
     URMA_LOG_INFO("Health check config: enable_failover=%s, enable_failback=%s, enable_health_check=%s, "
-                  "health_check_backup: start=%lums, interval=%lums, "
-                  "health_check_active: start=%lums, interval=%lums, max_backoff=%u\n",
+                  "interval=%lums, max_cr_cnt_per_dev=%d\n",
                   ctx->enable_failover ? "true" : "false",
                   ctx->enable_failback ? "true" : "false",
-                  thread_ctx->enable_health_check ? "true" : "false",
-                  cfg->backup_start_ms,
-                  cfg->backup_interval_ms,
-                  cfg->active_start_ms,
-                  cfg->active_interval_ms,
-                  cfg->active_max_backoff);
+                  ctx->enable_health_check ? "true" : "false",
+                  ctx->health_check_interval_ms, ctx->max_cr_cnt_per_dev);
 }
 
 static void bondp_global_ctx_read_env(bondp_global_context_t *ctx)
@@ -362,7 +345,6 @@ static int bondp_global_ctx_init(bondp_global_context_t **bondp_global_ctx)
     }
 
     ctx->pid = (uint32_t)getpid();
-    bondp_health_check_global_ctx_init(ctx);
     bondp_global_ctx_read_env(ctx);
     bondp_global_ctx_real_path_init(ctx);
     *bondp_global_ctx = ctx;
@@ -371,10 +353,7 @@ static int bondp_global_ctx_init(bondp_global_context_t **bondp_global_ctx)
 
 static int bondp_global_ctx_uninit(bondp_global_context_t *bondp_global_ctx)
 {
-    bondp_health_check_global_ctx_uninit(bondp_global_ctx);
-    if (bondp_global_ctx->topo_map != NULL) {
-        delete_topo_map(bondp_global_ctx->topo_map);
-    }
+    bondp_topo_uninit();
     free(bondp_global_ctx);
     return 0;
 }
@@ -400,17 +379,9 @@ urma_status_t bondp_init(urma_init_attr_t *conf)
         goto ERR_WORKER_DESTROY;
     }
 
-    if (bondp_start_health_check_thread() != 0) {
-        URMA_LOG_ERR("Failed to start health check thread.\n");
-        (void)bondp_global_ctx_uninit(g_bondp_global_ctx);
-        g_bondp_global_ctx = NULL;
-        goto ERR_NL_WORKER_UNINIT;
-    }
     URMA_LOG_INFO("Bond provider initialized successfully.\n");
     return URMA_SUCCESS;
 
-ERR_NL_WORKER_UNINIT:
-    bondp_nl_worker_uninit();
 ERR_WORKER_DESTROY:
     bondp_worker_destroy();
     return URMA_FAIL;
@@ -422,8 +393,6 @@ urma_status_t bondp_uninit(void)
         URMA_LOG_WARN("Deinitialized already.\n");
         return URMA_SUCCESS; /* Keep the same logic as urma_uninit */
     }
-
-    bondp_stop_health_check_thread();
 
     int ret = bondp_global_ctx_uninit(g_bondp_global_ctx);
     if (ret != 0) {
@@ -438,7 +407,7 @@ urma_status_t bondp_uninit(void)
 
 static int get_topo_info_from_ko(bondp_context_t *bdp_ctx)
 {
-    if (g_bondp_global_ctx->topo_map != NULL) {
+    if (bondp_topo_is_initialized()) {
         return 0;
     }
     struct ubagg_topo_info_out *info_out = calloc(1, sizeof(*info_out));
@@ -460,14 +429,12 @@ static int get_topo_info_from_ko(bondp_context_t *bdp_ctx)
         free(info_out);
         return -1;
     }
-    g_bondp_global_ctx->topo_map = create_topo_map(info_out->topo_info, info_out->node_num);
+    int ret = bondp_topo_init(info_out->topo_info, info_out->node_num);
     free(info_out);
-    if (g_bondp_global_ctx->topo_map == NULL) {
+    if (ret != 0) {
         URMA_LOG_ERR("Failed to create topo map\n");
         return -1;
     }
-
-    bdp_ctx->topo_map = g_bondp_global_ctx->topo_map;
     return 0;
 }
 
@@ -483,11 +450,6 @@ static int bondp_create_vcontext(bondp_context_t *bdp_ctx, urma_device_t *dev, u
         goto DESTROY_P_VJETTY_ID_TABLE;
     }
 
-    if (bondp_fb_init(bdp_ctx) != 0) {
-        URMA_LOG_ERR("Failed to init failback context\n");
-        goto DESTROY_R_V2P_TOKEN_ID_TABLE;
-    }
-
     urma_context_cfg_t cfg = {
         .dev = dev,
         .dev_fd = dev_fd,
@@ -499,7 +461,7 @@ static int bondp_create_vcontext(bondp_context_t *bdp_ctx, urma_device_t *dev, u
     int ret = urma_cmd_create_context(&bdp_ctx->v_ctx, &cfg, &udata);
     if (ret != 0) {
         URMA_LOG_ERR("Failed to create context, ret=%d\n", ret);
-        goto FB_UNINIT;
+        goto DESTROY_R_V2P_TOKEN_ID_TABLE;
     }
 
     const int max_event = 1;
@@ -520,8 +482,6 @@ static int bondp_create_vcontext(bondp_context_t *bdp_ctx, urma_device_t *dev, u
 
 UNINIT_CTX_TABLE:
     urma_cmd_delete_context(&bdp_ctx->v_ctx);
-FB_UNINIT:
-    bondp_fb_uninit(bdp_ctx);
 DESTROY_R_V2P_TOKEN_ID_TABLE:
     bdp_r_v2p_token_id_table_destroy(&bdp_ctx->remote_v2p_token_id_table);
 DESTROY_P_VJETTY_ID_TABLE:
@@ -544,8 +504,6 @@ static int bondp_delete_vcontext(bondp_context_t *bdp_ctx)
     bdp_ctx->real_async_fd = -1;
     URMA_LOG_INFO("bondp delete_vctx, eid_idx is %d, ref_cnt is %lu, dev_num is %d, bonding_model is %d, bonding_level is %d.\n",
                   bdp_ctx->v_ctx.eid_index, ref_cnt, bdp_ctx->dev_num, bdp_ctx->bonding_mode, bdp_ctx->bonding_level);
-
-    bondp_fb_uninit(bdp_ctx);
 
     if (urma_cmd_delete_context(&bdp_ctx->v_ctx) != 0) {
         URMA_LOG_ERR("Failed to urma_cmd_delete_context\n");
@@ -731,6 +689,13 @@ static void bondp_init_ctx_enabled_indices(bondp_context_t *bdp_ctx)
         bdp_ctx->enabled_count++;
     }
 }
+static int bondp_hc_init_from_env(bondp_context_t *bdp_ctx)
+{
+    bondp_hc_cfg_t cfg = {
+        .probe_interval_ms = g_bondp_global_ctx->health_check_interval_ms,
+    };
+    return bondp_hc_init(bdp_ctx, &cfg);
+}
 
 urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int dev_fd)
 {
@@ -745,7 +710,6 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
         return NULL;
     }
 
-    bondp_health_check_ctx_init(bdp_ctx);
     bdp_ctx->msn_enable = true;
     bdp_ctx->seg_cache_enable = false;
 
@@ -769,9 +733,16 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
 
     bondp_init_ctx_enabled_indices(bdp_ctx);
 
-    if (bondp_create_health_check_ctx(bdp_ctx) != 0) {
-        URMA_LOG_ERR("Failed to create health check scene\n");
-        goto DELETE_PCONTEXT;
+    if (g_bondp_global_ctx->enable_health_check) {
+        if (bondp_hc_init_from_env(bdp_ctx) != 0) {
+            URMA_LOG_ERR("Failed to create health check context\n");
+            goto DELETE_PCONTEXT;
+        }
+    }
+
+    if (bondp_fb_init(bdp_ctx) != 0) {
+        URMA_LOG_ERR("Failed to init failback context\n");
+        goto HC_UNINIT;
     }
 
     URMA_LOG_INFO("Finish to create ctx, dev_name=%s, eid_idx=%u.\n",
@@ -779,6 +750,8 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
 
     return &bdp_ctx->v_ctx;
 
+HC_UNINIT:
+    bondp_hc_uninit(bdp_ctx);
 DELETE_PCONTEXT:
     bondp_delete_pcontext(bdp_ctx);
 DELETE_VCONTEXT:
@@ -796,8 +769,8 @@ urma_status_t bondp_delete_context(urma_context_t *ctx)
     uint32_t eid_index = ctx->eid_index;
 
     (void)strcpy(dev_name, ctx->dev->name);
-    bondp_destroy_health_check_ctx(bdp_ctx);
-
+    bondp_fb_uninit(bdp_ctx);
+    bondp_hc_uninit(bdp_ctx);
     if (bondp_delete_pcontext(bdp_ctx) != 0) {
         URMA_LOG_ERR("Failed to delete pcontext\n");
         ret = URMA_FAIL;
@@ -853,6 +826,14 @@ int bondp_set_bonding_mode(urma_context_t *ctx, bondp_bonding_mode_t bonding_mod
     bdp_ctx->bonding_mode = bonding_mode;
     bdp_ctx->bonding_level = bonding_level;
 
+    /* Health check and failback hold references to the physical contexts
+     * (p_ctxs). They must be torn down before deleting p_ctxs so that the
+     * p_ctxs can actually be released, and re-created afterwards against the
+     * new p_ctxs. Otherwise the old p_ctxs leak (urma_delete_context rejects
+     * them because atomic_cnt > 1) and the new p_ctxs have no probe paths. */
+    bondp_fb_uninit(bdp_ctx);
+    bondp_hc_uninit(bdp_ctx);
+
     ret = bondp_delete_pcontext(bdp_ctx);
     if (ret != 0) {
         URMA_LOG_ERR("Failed to delete pctx when set bonding mode, ret=%d\n", ret);
@@ -866,6 +847,20 @@ int bondp_set_bonding_mode(urma_context_t *ctx, bondp_bonding_mode_t bonding_mod
     }
 
     bondp_init_ctx_enabled_indices(bdp_ctx);
+
+    if (g_bondp_global_ctx->enable_health_check) {
+        ret = bondp_hc_init_from_env(bdp_ctx);
+        if (ret != 0) {
+            URMA_LOG_ERR("Failed to recreate health check context, ret=%d\n", ret);
+            goto EXIT;
+        }
+    }
+
+    ret = bondp_fb_init(bdp_ctx);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to recreate failback context, ret=%d\n", ret);
+        bondp_hc_uninit(bdp_ctx);
+    }
 
 EXIT:
     (void)pthread_mutex_unlock(&ctx->mutex);

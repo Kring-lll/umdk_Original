@@ -33,9 +33,8 @@
 #include "bondp_datapath_convert.h"
 #include "bondp_datapath_schedule.h"
 #include "bondp_hash_table.h"
-#include "bondp_health_check.h"
+#include "bondp_health.h"
 #include "bondp_failback.h"
-#include "bondp_link_recovery.h"
 #include "bondp_netlink.h"
 #include "bondp_provider_ops.h"
 #include "bondp_segment.h"
@@ -185,20 +184,14 @@ struct BondProviderMockGuard {
 };
 
 struct BondTopoMapCleanup {
-    bondp_global_context_t *globalCtx;
-
-    explicit BondTopoMapCleanup(bondp_global_context_t *ctx) : globalCtx(ctx)
+    BondTopoMapCleanup()
     {
+        bondp_topo_uninit();
     }
 
     ~BondTopoMapCleanup()
     {
-        auto *sentinel = reinterpret_cast<topo_map_t *>(0x1);
-
-        if (globalCtx != nullptr && globalCtx->topo_map != nullptr && globalCtx->topo_map != sentinel) {
-            delete_topo_map(globalCtx->topo_map);
-            globalCtx->topo_map = nullptr;
-        }
+        bondp_topo_uninit();
     }
 };
 
@@ -353,9 +346,6 @@ inline void FillCreateOutput(uint32_t command, urma_cmd_attr_t *attrs, uint32_t 
 }
 
 static const uint32_t BOND_TEST_RECV_BATCH_POST_MAX_NUM = 280;
-static constexpr uint8_t BOND_TEST_FALLBACK_CTRL_REQ = 1;
-static constexpr uint8_t BOND_TEST_FALLBACK_CTRL_RESP = 2;
-
 struct BondPathFixture {
     bondp_context_t ctx = {};
     urma_device_t dev = {};
@@ -447,8 +437,8 @@ struct BondPathFixture {
         target.active_count = 2;
         target.active_indices[0] = 0;
         target.active_indices[1] = 1;
-        target.valid[0] = true;
-        target.valid[1] = true;
+        target.valid[0][0] = true;
+        target.valid[1][1] = true;
         target.p_tjetty[0][0] = &phyTarget[0][0];
         target.p_tjetty[1][1] = &phyTarget[1][1];
         comp.p_jetty[0]->remote_jetty = &phyTarget[0][0];
@@ -1158,28 +1148,6 @@ inline urma_eid_t MakeEid(uint32_t id)
     eid.in6.subnet_prefix = 0x30000000ULL + id;
     eid.in6.interface_id = 0x40000000ULL + id;
     return eid;
-}
-
-inline uint64_t MakeHealthUserCtx(uint32_t vjettyId, uint32_t localIdx, uint32_t targetIdx)
-{
-    constexpr uint64_t healthMagic = 0xFF12000000000000ULL;
-    constexpr uint32_t healthIdxMask = 0xFFFF;
-    constexpr uint32_t vjettyIdShift = 32;
-    constexpr uint32_t localIdxShift = 16;
-
-    return healthMagic | ((static_cast<uint64_t>(vjettyId & healthIdxMask)) << vjettyIdShift) |
-        ((static_cast<uint64_t>(localIdx & healthIdxMask)) << localIdxShift) |
-        static_cast<uint64_t>(targetIdx & healthIdxMask);
-}
-
-inline bondp_health_task_t *FindFirstHealthTask(bondp_heath_check_ctx_t *health)
-{
-    bondp_health_task_t *task = nullptr;
-
-    HMAP_FOR_EACH(task, hmap_node, &health->task_table.hmap) {
-        return task;
-    }
-    return nullptr;
 }
 
 inline void CopyEidToTopo(char dst[EID_LEN], const urma_eid_t &eid)

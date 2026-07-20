@@ -13,7 +13,7 @@
 #include "bondp_api.h"
 #include "bondp_segment.h"
 #include "bondp_types.h"
-#include "topo_info.h"
+#include "bondp_topo_info.h"
 #include "urma_log.h"
 
 #include "bondp_datapath_convert.h"
@@ -54,16 +54,16 @@ void free_jfr_wr(urma_jfr_wr_t *wr)
     }
 }
 
-static int copy_sg_list(const urma_sg_t *src, urma_sg_t *dst, urma_sge_t *prealloc_sge)
+static int copy_sg_list(const urma_sg_t *src, urma_sg_t *dst, urma_sge_t *prealloc_sge, uint32_t max_sge)
 {
     dst->num_sge = src->num_sge;
     dst->sge = NULL;
 
     if (dst->num_sge > 0) {
         if (prealloc_sge != NULL) {
-            if (dst->num_sge > BONDP_MAX_SGE_NUM) {
+            if (dst->num_sge > max_sge) {
                 URMA_LOG_ERR("The number of SGE(%u) exceeds the limit(%u)",
-                    dst->num_sge, BONDP_MAX_SGE_NUM);
+                    dst->num_sge, max_sge);
                 return -1;
             }
             dst->sge = prealloc_sge;
@@ -109,18 +109,19 @@ static int copy_atomic_sge(const urma_sge_t *src, urma_sge_t **dst, urma_sge_t *
  *   URMA_OPC_CAS, URMA_OPC_FADD
  */
 urma_status_t copy_jfs_wr(const urma_jfs_wr_t *src, urma_jfs_wr_t *dst,
-                          urma_sge_t *prealloc_src_sge, urma_sge_t *prealloc_dst_sge)
+                          urma_sge_t *prealloc_src_sge, urma_sge_t *prealloc_dst_sge,
+                          uint32_t max_sge)
 {
     *dst = *src;
     dst->next = NULL;
 
     if (is_rw_wr(src)) {
-        if (copy_sg_list(&src->rw.src, &dst->rw.src, prealloc_src_sge) != 0 ||
-            copy_sg_list(&src->rw.dst, &dst->rw.dst, prealloc_dst_sge) != 0) {
+        if (copy_sg_list(&src->rw.src, &dst->rw.src, prealloc_src_sge, max_sge) != 0 ||
+            copy_sg_list(&src->rw.dst, &dst->rw.dst, prealloc_dst_sge, max_sge) != 0) {
             return URMA_ENOMEM;
         }
     } else if (is_send_wr(src)) {
-        if (copy_sg_list(&src->send.src, &dst->send.src, prealloc_src_sge) != 0) {
+        if (copy_sg_list(&src->send.src, &dst->send.src, prealloc_src_sge, max_sge) != 0) {
             return URMA_ENOMEM;
         }
     } else if (is_atomic_wr(src)) {
@@ -138,12 +139,12 @@ urma_status_t copy_jfs_wr(const urma_jfs_wr_t *src, urma_jfs_wr_t *dst,
  * Performs a deep copy of a JFR work request.
  */
 urma_status_t copy_jfr_wr(const urma_jfr_wr_t *src, urma_jfr_wr_t *dst,
-                          urma_sge_t *prealloc_src_sge)
+                          urma_sge_t *prealloc_src_sge, uint32_t max_sge)
 {
     *dst = *src;
     dst->next = NULL;
 
-    if (copy_sg_list(&src->src, &dst->src, prealloc_src_sge) != 0) {
+    if (copy_sg_list(&src->src, &dst->src, prealloc_src_sge, max_sge) != 0) {
         return URMA_ENOMEM;
     }
     return URMA_SUCCESS;
@@ -233,6 +234,10 @@ static inline urma_target_seg_t *get_p_tseg(urma_target_seg_t *tseg, int local_i
 
 static inline urma_target_seg_t *get_v_tseg(urma_target_seg_t *tseg)
 {
+    if (tseg == NULL) {
+        URMA_LOG_WARN_RL("get_v_tseg called with NULL tseg; bind wrote a NULL p_tseg (path not ready or seg freed)\n");
+        return NULL;
+    }
     return (urma_target_seg_t *)(uintptr_t)tseg->handle;
 }
 
@@ -575,61 +580,6 @@ void convert_jfr_vwr_to_pwr(urma_jfr_wr_t *wr, int recv_idx)
     }
 }
 
-/* Thread-local cache for EID mapping lookup in convert_pcr_to_vcr */
-#define TL_EID_CACHE_SLOTS 8
-
-static urma_eid_t lookup_bonding_eid_cached(topo_map_t *topo_map, const urma_eid_t *target_eid)
-{
-    static __thread topo_map_t *tl_topo;
-    static __thread uint32_t   tl_gen;
-    static __thread int        tl_fill_pos;
-    static __thread int        tl_evict_pos;
-    static __thread struct {
-        urma_eid_t target;
-        urma_eid_t bonding;
-        bool       valid;
-    } tl_slots[TL_EID_CACHE_SLOTS];
-
-    if (topo_map == NULL) {
-        return *target_eid;
-    }
-    /* Invalidate entire cache if topo_map pointer or gen changed. */
-    uint32_t cur_gen = atomic_load(&topo_map->eid_mapping_hash_table.gen);
-    if (tl_topo != topo_map || tl_gen != cur_gen) {
-        for (int i = 0; i < TL_EID_CACHE_SLOTS; i++) {
-            tl_slots[i].valid = false;
-        }
-        tl_topo      = topo_map;
-        tl_gen       = cur_gen;
-        tl_fill_pos  = 0;
-        tl_evict_pos = 0;
-    }
-    /* Fast path: TL cache hit */
-    for (int i = 0; i < TL_EID_CACHE_SLOTS; i++) {
-        if (tl_slots[i].valid &&
-            memcmp(&tl_slots[i].target, target_eid, sizeof(urma_eid_t)) == 0) {
-            return tl_slots[i].bonding;
-        }
-    }
-    /* Slow path: rwlock + hash-table lookup */
-    urma_eid_t bonding;
-    if (get_bonding_eid_by_target_eid(topo_map, (urma_eid_t *)target_eid, &bonding) != 0) {
-        return *target_eid;
-    }
-    int slot;
-    if (tl_fill_pos < TL_EID_CACHE_SLOTS) {
-        slot = tl_fill_pos++;
-    } else {
-        slot = tl_evict_pos;
-        tl_evict_pos = (tl_evict_pos + 1) & (TL_EID_CACHE_SLOTS - 1);
-    }
-    tl_slots[slot].target  = *target_eid;
-    tl_slots[slot].bonding = bonding;
-    tl_slots[slot].valid   = true;
-
-    return bonding;
-}
-
 void convert_pcr_to_vcr(urma_cr_t *cr, bondp_context_t *bdp_ctx, uint32_t *msn)
 {
     bool msn_enable = bdp_ctx->msn_enable;
@@ -637,7 +587,10 @@ void convert_pcr_to_vcr(urma_cr_t *cr, bondp_context_t *bdp_ctx, uint32_t *msn)
     if (is_recv_cr(cr)) {
         decode_imm_data(cr->imm_data, &cr->opcode, msn, &cr->remote_id.id, &cr->imm_data, msn_enable);
 
-        cr->remote_id.eid = lookup_bonding_eid_cached(bdp_ctx->topo_map, &cr->remote_id.eid);
+        urma_eid_t bonding_eid;
+        if (bondp_topo_query_bonding_eid(&cr->remote_id.eid, &bonding_eid) == 0) {
+            cr->remote_id.eid = bonding_eid;
+        }
     } else {
         /*
          * NOTE: imm_data should only be valid for RECV CR.

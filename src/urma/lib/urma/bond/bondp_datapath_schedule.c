@@ -14,7 +14,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "bondp_health_check.h"
+#include "bondp_health.h"
 #include "bondp_types.h"
 #include "urma_log.h"
 
@@ -34,6 +34,13 @@ static urma_transport_mode_t get_comp_urma_trans_mode(const bondp_comp_t *bdp_co
     }
 }
 
+static bool target_path_available(const bondp_target_jetty_t *bdp_tjetty,
+                                  uint32_t local_idx, uint32_t target_idx)
+{
+    return atomic_load(&bdp_tjetty->valid[local_idx][target_idx]) &&
+           bdp_tjetty->p_tjetty[local_idx][target_idx] != NULL;
+}
+
 static uint32_t select_path_by_priority(const bondp_comp_t *bdp_comp,
                                         const bondp_target_jetty_t *bdp_tjetty,
                                         const bondp_chip_id_info_t *chip_pri,
@@ -47,8 +54,13 @@ static uint32_t select_path_by_priority(const bondp_comp_t *bdp_comp,
             continue;
         }
         target_idx = chip_pri[i].dst_chip_id - BONDP_CHIP_ID_MIN;
-        if (!atomic_load(&bdp_tjetty->valid[target_idx]) ||
-            bdp_tjetty->p_tjetty[local_idx][target_idx] == NULL) {
+        if (!target_path_available(bdp_tjetty, local_idx, target_idx)) {
+            continue;
+        }
+        /* p_jetty[local_idx] may be transiently NULL during a concurrent
+         * failback/health rebuild (the swap happens under send_lock, but this
+         * scheduling pass runs lockless); skip the path rather than deref NULL. */
+        if (bdp_comp->p_jetty[local_idx] == NULL) {
             continue;
         }
         if (get_comp_urma_trans_mode(bdp_comp) == URMA_TM_RC && bdp_comp->comp_type == BONDP_COMP_JETTY &&
@@ -80,7 +92,7 @@ static uint32_t select_path_by_chip(const bondp_comp_t *bdp_comp,
         g_bondp_global_ctx->failover_route[src_chip_id][dst_chip_id][route_id];
     for (int i = 0 ; i < URMA_FAILOVER_LINK_NUM; i++) {
         path_idx = failover_route[i];
-        if (path_idx > IODIE_NUM * IODIE_NUM * URMA_ACTIVE_PORT_PER_DIE + 1) {
+        if (path_idx > IODIE_NUM * IODIE_NUM * URMA_ACTIVE_PORT_PER_DIE) {
             break;
         }
         local_idx = g_bondp_global_ctx->path[path_idx].local_idx;
@@ -88,8 +100,10 @@ static uint32_t select_path_by_chip(const bondp_comp_t *bdp_comp,
             continue;
         }
         target_idx = g_bondp_global_ctx->path[path_idx].target_idx;
-        if (!atomic_load(&bdp_tjetty->valid[target_idx]) ||
-            bdp_tjetty->p_tjetty[local_idx][target_idx] == NULL) {
+        if (!target_path_available(bdp_tjetty, local_idx, target_idx)) {
+            continue;
+        }
+        if (bdp_comp->p_jetty[local_idx] == NULL) {
             continue;
         }
         if (get_comp_urma_trans_mode(bdp_comp) == URMA_TM_RC && bdp_comp->comp_type == BONDP_COMP_JETTY &&
@@ -102,6 +116,27 @@ static uint32_t select_path_by_chip(const bondp_comp_t *bdp_comp,
         return URMA_SUCCESS;
     }
     return URMA_FAIL;
+}
+
+static void filter_least_load_path(bondp_path_t least_load_path[], uint32_t *least_load_cnt)
+{
+    if (*least_load_cnt <= 1) {
+        return;
+    }
+
+    uint32_t out_cnt = 1;
+    uint32_t min_load = least_load_path[0].least_load;
+    for (uint32_t i = 1; i < *least_load_cnt; i++) {
+        if (least_load_path[i].least_load < min_load) {
+            min_load = least_load_path[i].least_load;
+            out_cnt = 1;
+            least_load_path[0] = least_load_path[i];
+        } else if (least_load_path[i].least_load == min_load) {
+            least_load_path[out_cnt] = least_load_path[i];
+            out_cnt++;
+        }
+    }
+    *least_load_cnt = out_cnt;
 }
 
 static uint32_t select_least_load_path(const bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
@@ -123,8 +158,11 @@ static uint32_t select_least_load_path(const bondp_comp_t *bdp_comp, const bondp
         }
         for (uint32_t j = 0; j < bdp_tjetty->active_count; j++) {
             uint32_t target_idx = bdp_tjetty->active_indices[j];
-            if (!atomic_load(&bdp_tjetty->valid[target_idx]) || target_idx < min_idx[1] || target_idx >= max_idx[1] ||
-                bdp_tjetty->p_tjetty[local_idx][target_idx] == NULL) {
+            if (target_idx < min_idx[1] || target_idx >= max_idx[1] ||
+                !target_path_available(bdp_tjetty, local_idx, target_idx)) {
+                continue;
+            }
+            if (bdp_comp->p_jetty[local_idx] == NULL) {
                 continue;
             }
             if (trans_mode == URMA_TM_RC && bdp_comp->comp_type == BONDP_COMP_JETTY &&
@@ -184,7 +222,7 @@ static int schedule_send_standalone(const bondp_comp_t *bdp_comp, const bondp_ta
         }
         for (uint32_t j = 0; j < bdp_tjetty->active_count; j++) {
             uint32_t tar_idx = bdp_tjetty->active_indices[j];
-            if (!atomic_load(&bdp_tjetty->valid[tar_idx]) || bdp_tjetty->p_tjetty[loc_idx][tar_idx] == NULL) {
+            if (!target_path_available(bdp_tjetty, loc_idx, tar_idx)) {
                 continue;
             }
             *send_idx = (int)loc_idx;
@@ -205,21 +243,18 @@ static int schedule_send_active_backup(const bondp_comp_t *bdp_comp, const bondp
         uint32_t loc_idx = bdp_comp->active_indices[i];
         for (uint32_t j = 0; j < bdp_tjetty->active_count; j++) {
             uint32_t tar_idx = bdp_tjetty->active_indices[j];
-            if (!atomic_load(&bdp_tjetty->valid[tar_idx]) ||
-                bdp_tjetty->p_tjetty[loc_idx][tar_idx] == NULL ||
-                target_used[tar_idx]) {
+            if (bdp_tjetty->p_tjetty[loc_idx][tar_idx] == NULL || target_used[tar_idx]) {
                 continue;
             }
-            if (atomic_load(&bdp_comp->valid[loc_idx])) {
+            target_used[tar_idx] = true;
+            if (target_path_available(bdp_tjetty, loc_idx, tar_idx) && atomic_load(&bdp_comp->valid[loc_idx])) {
                 *send_idx = (int)loc_idx;
                 *target_idx = (int)tar_idx;
                 return 0;
             }
-            target_used[tar_idx] = true;
             break;
         }
     }
-
     return -1;
 }
 
@@ -250,6 +285,9 @@ static bool is_in_failover_route(const bondp_chip_id_info_t *info, uint32_t rout
     g_bondp_global_ctx->failover_route[src_chip_id][dst_chip_id][route_id];
     for (int i = 0; i < URMA_FAILOVER_LINK_NUM; i++) {
         uint32_t path_idx = failover_route[i];
+        if (path_idx > IODIE_NUM * IODIE_NUM * URMA_ACTIVE_PORT_PER_DIE) {
+            break;
+        }
         if (g_bondp_global_ctx->path[path_idx].local_idx == old_path->local_idx &&
             g_bondp_global_ctx->path[path_idx].target_idx == old_path->target_idx) {
             return true;
@@ -314,6 +352,7 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
         if (least_load_cnt == 0 && !g_bondp_global_ctx->enable_failover) {
             return URMA_FAIL;
         }
+        filter_least_load_path(least_load_path, &least_load_cnt);
     }
 
     if (least_load_cnt == 0) {
@@ -357,7 +396,7 @@ static int schedule_recv_standalone(const bondp_comp_t *bdp_comp, int *recv_idx)
         }
         for (uint32_t j = 0; j < bdp_tjetty->active_count; j++) {
             uint32_t tar_idx = bdp_tjetty->active_indices[j];
-            if (!atomic_load(&bdp_tjetty->valid[tar_idx]) || bdp_tjetty->p_tjetty[loc_idx][tar_idx] == NULL) {
+            if (!target_path_available(bdp_tjetty, loc_idx, tar_idx)) {
                 continue;
             }
             *recv_idx = (int)loc_idx;

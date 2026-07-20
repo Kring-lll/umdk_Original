@@ -26,7 +26,7 @@
 #define UMQ_LEN_ALIGNMENT_4 4
 #define TSEG_MAP_NUM 256
 #define UMQ_CTP_MAX_BUF_SIZE 4096
-#define UMQ_INITIAL_CREDIT 2
+#define UMQ_INITIAL_CREDIT 0
 
 static util_id_allocator_t g_umq_ub_id_allocator = {0};
 static ub_queue_ctx_list_t g_umq_ub_queue_ctx_list;
@@ -168,6 +168,13 @@ int umq_ub_bind_info_check(ub_queue_t *queue, umq_ub_bind_info_t *info)
 
 static int umq_ub_prefill_rx_buf(ub_queue_t *queue)
 {
+    uint32_t headroom_size = umq_qbuf_headroom_get();
+    if (queue->rx_buf_size <= headroom_size) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, post rx failed, rx_buf_size(%u) <= headroom_size(%u)\n",
+            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid), queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id,
+            queue->rx_buf_size, headroom_size);
+        return -UMQ_ERR_EINVAL;
+    }
     uint32_t require_rx_count = umq_ub_pjfr_depth(queue);
     uint32_t cur_batch_count = 0;
     int ret = UMQ_SUCCESS;
@@ -175,11 +182,11 @@ static int umq_ub_prefill_rx_buf(ub_queue_t *queue)
     umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
     do {
         cur_batch_count = require_rx_count > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : require_rx_count;
-        umq_buf_t *qbuf = umq_buf_alloc(queue->rx_buf_size, cur_batch_count, 0, NULL);
+        umq_buf_t *qbuf = umq_buf_alloc(queue->rx_buf_size - headroom_size, cur_batch_count, 0, NULL);
         if (qbuf == NULL) {
             UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, alloc rx failed\n",
                 EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid), queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id);
-            ret = UMQ_ERR_ENOMEM;
+            ret = -UMQ_ERR_ENOMEM;
             goto DEC_REF;
         }
 
@@ -499,9 +506,10 @@ static urma_target_jetty_t *umq_ub_connect_jetty(ub_queue_t *queue, umq_ub_bind_
     urma_status_t status = umq_symbol_urma()->urma_bind_jetty(queue->jetty[i], tjetty);
     umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_BIND_JETTY, start_timestamp);
     if (status != URMA_SUCCESS && status != URMA_EEXIST) {
-        UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "UMQ(ID:%u), local jetty_id: %u, remote eid: " EID_FMT ", "
-                     "remote jetty_id: %u, urma_bind_jetty failed, jetty[%d], status: %d, errno %d\n",
-                     queue->umq_id, EID_ARGS(rjetty->jetty_id.eid), rjetty->jetty_id.id, i, (int)status, errno);
+        UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "UMQ(ID:%u), local eid: " EID_FMT ", local jetty_id: %u, remote eid: "
+                     "" EID_FMT ", remote jetty_id: %u, urma_bind_jetty failed, jetty[%d], status: %d, errno %d\n",
+                     queue->umq_id, EID_ARGS(queue->jetty[i]->jetty_id.eid), queue->jetty[i]->jetty_id.id,
+                     EID_ARGS(rjetty->jetty_id.eid), rjetty->jetty_id.id, i, (int)status, errno);
         goto UNIMPORT_JETTY;
     }
 
@@ -642,7 +650,7 @@ static int umq_ub_get_namespace(char *remote_namespace, uint32_t namespace_buf_s
     buf[len++] = '\0';
     if (len > namespace_buf_size) {
         errno = UMQ_ERR_ENOMEM;
-        UMQ_VLOG_ERR(VLOG_UMQ, "namespace buf size insufficient, max buf size: %u, but real namespace size: %u\n",
+        UMQ_VLOG_ERR(VLOG_UMQ, "namespace buf size insufficient, max buf size: %u, but real namespace size: %zd\n",
             namespace_buf_size, len);
         return UMQ_FAIL;
     }
@@ -693,7 +701,7 @@ int umq_ub_rjetty_get(urma_rjetty_t *dst_rjetty, ub_queue_jetty_index_t index,
     urma_status_t status = umq_symbol_urma()->urma_get_rjetty(jetty, &rjetty, &length);
     umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_RJETTY_GET, start_timestamp);
     if (status != URMA_SUCCESS) {
-        UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_get_rjetty failed, status: %u\n",
+        UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_get_rjetty failed, status: %d\n",
             EID_ARGS(jetty->jetty_id.eid), jetty->jetty_id.id, (int)status);
         return 0;
     }
@@ -933,7 +941,7 @@ int umq_modify_ubq_to_err(ub_queue_t *queue, umq_io_direction_t direction, ub_qu
         urma_status = umq_symbol_urma()->urma_modify_jetty(queue->jetty[jetty_idx], &jetty_attr);
         if (urma_status != URMA_SUCCESS) {
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_modify_jetty to "
-                "URMA_JETTY_STATE_ERROR failed, status: %u\n",  EID_ARGS(queue->jetty[jetty_idx]->jetty_id.eid),
+                "URMA_JETTY_STATE_ERROR failed, status: %d\n",  EID_ARGS(queue->jetty[jetty_idx]->jetty_id.eid),
                 queue->jetty[jetty_idx]->jetty_id.id, (int)urma_status);
         }
     }
@@ -946,7 +954,7 @@ int umq_modify_ubq_to_err(ub_queue_t *queue, umq_io_direction_t direction, ub_qu
         urma_status = umq_symbol_urma()->urma_modify_jfr(queue->jfr_ctx[jetty_idx]->jfr, &jfr_attr);
         if (urma_status != URMA_SUCCESS) {
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_modify_jfr to URMA_JFR_STATE_ERROR"
-                " failed, status: %u\n", EID_ARGS(queue->jetty[jetty_idx]->jetty_id.eid),
+                " failed, status: %d\n", EID_ARGS(queue->jetty[jetty_idx]->jetty_id.eid),
                 queue->jetty[jetty_idx]->jetty_id.id, (int)urma_status);
         }
     }
@@ -1001,7 +1009,7 @@ int umq_ub_create_urma_ctx(urma_device_t *urma_dev, uint32_t eid_index, umq_ub_c
     urma_device_attr_t dev_attr;
     urma_status_t status = umq_symbol_urma()->urma_query_device(urma_dev, &dev_attr);
     if (status != URMA_SUCCESS) {
-        UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_query_device failed, device name: %s, status: %d\n", *urma_dev->name,
+        UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_query_device failed, device name: %s, status: %d\n", urma_dev->name,
             (int)status);
         return umq_status_convert(status);
     }
@@ -1052,7 +1060,7 @@ DEL_CTX:
 
 int umq_ub_delete_urma_ctx(umq_ub_ctx_t *ub_ctx)
 {
-    if (ub_ctx == NULL || ub_ctx->urma_ctx) {
+    if (ub_ctx == NULL || ub_ctx->urma_ctx == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
         return -UMQ_ERR_EINVAL;
     }
@@ -1276,7 +1284,7 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
     uint32_t max_msg_size = max_msg_size_get(queue);
     if (option->create_flag & UMQ_CREATE_FLAG_RX_BUF_SIZE) {
         if (option->rx_buf_size > max_msg_size) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "rx buf size [%u] exceed max buf size [%d]\n", option->rx_buf_size, max_msg_size);
+            UMQ_VLOG_ERR(VLOG_UMQ, "rx buf size [%u] exceed max buf size [%u]\n", option->rx_buf_size, max_msg_size);
             return -UMQ_ERR_EINVAL;
         }
         queue->rx_buf_size = option->rx_buf_size;
@@ -1285,7 +1293,7 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
     }
     if (option->create_flag & UMQ_CREATE_FLAG_TX_BUF_SIZE) {
         if (option->tx_buf_size > max_msg_size) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "tx buf size [%u] exceed max buf size [%d]\n", option->tx_buf_size, max_msg_size);
+            UMQ_VLOG_ERR(VLOG_UMQ, "tx buf size [%u] exceed max buf size [%u]\n", option->tx_buf_size, max_msg_size);
             return -UMQ_ERR_EINVAL;
         }
         queue->tx_buf_size = option->tx_buf_size;
@@ -1297,7 +1305,7 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
         dev_ctx->dev_attr.dev_cap.max_jfr_depth : dev_ctx->dev_attr.dev_cap.max_jfc_depth;
     if (option->create_flag & UMQ_CREATE_FLAG_RX_DEPTH) {
         if (option->rx_depth > min_dev_rx) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "rx depth [%u] exceed max depth [%d]\n", option->rx_depth, min_dev_rx);
+            UMQ_VLOG_ERR(VLOG_UMQ, "rx depth [%u] exceed max depth [%u]\n", option->rx_depth, min_dev_rx);
             return -UMQ_ERR_EINVAL;
         }
         queue->rx_depth = option->rx_depth;
@@ -1316,7 +1324,7 @@ int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_q
         dev_ctx->dev_attr.dev_cap.max_jfs_depth : dev_ctx->dev_attr.dev_cap.max_jfc_depth - 1;
     if (option->create_flag & UMQ_CREATE_FLAG_TX_DEPTH) {
         if (option->tx_depth > min_dev_tx) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "tx depth [%u] exceed max depth [%d]\n", option->tx_depth, min_dev_tx);
+            UMQ_VLOG_ERR(VLOG_UMQ, "tx depth [%u] exceed max depth [%u]\n", option->tx_depth, min_dev_tx);
             return -UMQ_ERR_EINVAL;
         }
         queue->tx_depth = option->tx_depth;
@@ -1473,6 +1481,15 @@ int share_rq_param_check(ub_queue_t *queue, ub_queue_t *share_rq)
     } else {
         queue->rx_buf_size = share_rq->rx_buf_size;
     }
+    if (queue->create_flag & UMQ_CREATE_FLAG_TX_BUF_SIZE) {
+        if (share_rq->tx_buf_size != queue->tx_buf_size) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "share_rq tx_buf_size %u and creating_queue tx_buf_size %u is different\n",
+                share_rq->tx_buf_size, queue->tx_buf_size);
+            goto ERR;
+        }
+    } else {
+        queue->tx_buf_size = share_rq->tx_buf_size;
+    }
     if (queue->create_flag & UMQ_CREATE_FLAG_RX_DEPTH) {
         if (share_rq->rx_depth != queue->rx_depth) {
             UMQ_VLOG_ERR(VLOG_UMQ, "share_rq rx_depth %u and creating_queue rx_depth %u is different\n",
@@ -1482,6 +1499,15 @@ int share_rq_param_check(ub_queue_t *queue, ub_queue_t *share_rq)
     } else {
         queue->rx_depth = share_rq->rx_depth;
     }
+    if (queue->create_flag & UMQ_CREATE_FLAG_TX_DEPTH) {
+        if (share_rq->tx_depth != queue->tx_depth) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "share_rq tx_depth %u and creating_queue tx_depth %u is different\n",
+                share_rq->tx_depth, queue->tx_depth);
+            goto ERR;
+        }
+    } else {
+        queue->tx_depth = share_rq->tx_depth;
+    }
     if (queue->create_flag & UMQ_CREATE_FLAG_QUEUE_MODE) {
         if (share_rq->mode != queue->mode) {
             UMQ_VLOG_ERR(VLOG_UMQ, "share_rq mode %u and creating_queue mode %u is different\n",
@@ -1490,6 +1516,16 @@ int share_rq_param_check(ub_queue_t *queue, ub_queue_t *share_rq)
         }
     } else {
         queue->mode = share_rq->mode;
+    }
+    if (is_umq_ub_share_transport(queue->create_flag) &&
+        !is_umq_ub_share_transport(share_rq->create_flag)) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "creating_queue has SHARE_TRANSPORT, but share_rq does not have SHARE_TRANSPORT\n");
+        goto ERR;
+    }
+    if (is_umq_ub_share_transport(share_rq->create_flag) &&
+        !is_umq_ub_share_transport(queue->create_flag)) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "share_rq has SHARE_TRANSPORT, but creating_queue does not have SHARE_TRANSPORT\n");
+        goto ERR;
     }
     queue->rqe_post_factor = share_rq->rqe_post_factor;
     return UMQ_SUCCESS;
@@ -2663,7 +2699,7 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
 
     uint32_t ref_sge_size = ref_sge_cnt * sizeof(ub_ref_sge_t);
     if (ref_sge_size + (uint32_t)sizeof(umq_imm_head_t) > umq_buf_size_small()) {
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, the buf num [%d] exceeds the maximum limit\n",
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, the buf num [%u] exceeds the maximum limit\n",
             EID_ARGS(*eid), id, ref_sge_cnt);
         goto FREE_BUF;
     }
@@ -2681,7 +2717,7 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
     };
     while ((*buffer) && rest_size != 0) {
         if (mempool_info_size < (umq_imm_head->mempool_num * sizeof(ub_import_mempool_info_t))) {
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, the buf num [%d] mempool info num [%u] "
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, the buf num [%u] mempool info num [%u] "
                 "exceeds the maximum limit [%u]\n", EID_ARGS(*eid), id, ref_sge_cnt, umq_imm_head->mempool_num,
                 mempool_info_size / sizeof(ub_import_mempool_info_t));
             goto FREE_BUF;
@@ -2698,7 +2734,7 @@ static int umq_ub_send_big_data(ub_queue_t *queue, umq_buf_t **buffer)
         ++buf_index;
     }
     if (buf_index >= UMQ_MAX_MSG_ID_NUM) {
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, the buf index [%d] "
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, the buf index [%u] "
             "exceeds the maximum limit\n", EID_ARGS(*eid), id, buf_index);
     }
     umq_imm_head->mem_interval = get_mem_interval(max_data_size);
@@ -2895,16 +2931,23 @@ static int umq_report_incomplete_and_merge_rx(
 
 void umq_ub_fill_rx_buffer(ub_queue_t *queue, int rx_cnt)
 {
+    urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
+    uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
+    uint32_t headroom_size = umq_qbuf_headroom_get();
+    if (queue->rx_buf_size <= headroom_size) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, post rx failed, "
+            "rx_buf_size(%u) <= headroom_size(%u)\n", EID_ARGS(*eid), id, queue->rx_buf_size, headroom_size);
+        return;
+    }
     __atomic_fetch_add(&queue->require_rx_count, rx_cnt, __ATOMIC_ACQ_REL);
     uint32_t require_rx_count = umq_get_post_rx_num(queue->rx_depth, &queue->require_rx_count);
     if (require_rx_count > 0) {
         uint32_t cur_batch_count = 0;
         int ret = UMQ_SUCCESS;
-        urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
-        uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
         do {
             cur_batch_count = require_rx_count > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : require_rx_count;
-            umq_buf_t *qbuf = umq_buf_alloc(queue->rx_buf_size, cur_batch_count, UMQ_INVALID_HANDLE, NULL);
+            umq_buf_t *qbuf = umq_buf_alloc(queue->rx_buf_size - headroom_size, cur_batch_count,
+                UMQ_INVALID_HANDLE, NULL);
             if (qbuf == NULL) {
                 __atomic_fetch_add(&queue->require_rx_count, cur_batch_count, __ATOMIC_ACQ_REL);
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, alloc rx failed\n", EID_ARGS(*eid), id);

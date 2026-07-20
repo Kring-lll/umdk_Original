@@ -636,7 +636,7 @@ TEST(UrmaBondTest, PublicWaitJfcRetriesReadablePhysicalEventUntilTimeout)
     EXPECT_GT(g_waitJfcCallCount, 1);
 }
 
-TEST(UrmaBondTest, PublicWaitJfcMarksEventSourceForNextRearm)
+TEST(UrmaBondTest, PublicWaitJfcThenRearmRefreshesAllMembers)
 {
     MockWaitJfcStateGuard stateGuard;
     BondPublicApiFixture fixture;
@@ -653,7 +653,6 @@ TEST(UrmaBondTest, PublicWaitJfcMarksEventSourceForNextRearm)
     fixture.jfc.enabled_indices[0] = 0;
     fixture.jfc.enabled_indices[1] = 1;
     fixture.jfc.p_jfc[1] = &backupPhysicalJfc;
-    fixture.jfc.polled_mask = 1U;
     fixture.jfce.dev_num = 2;
     fixture.phyOps.wait_jfc = MockWaitEmptyThenReadyPhysicalJfc;
     fixture.phyOps.ack_jfc = MockAckPhysicalJfc;
@@ -686,6 +685,34 @@ TEST(UrmaBondTest, PublicWaitJfcMarksEventSourceForNextRearm)
     ASSERT_EQ(2, g_rearmPhysicalJfcCount);
     EXPECT_EQ(&fixture.phyJfc, g_rearmedPhysicalJfc[0]);
     EXPECT_EQ(&backupPhysicalJfc, g_rearmedPhysicalJfc[1]);
+}
+
+TEST(UrmaBondTest, PublicRearmJfcRefreshesAllMembersRepeatedly)
+{
+    MockWaitJfcStateGuard stateGuard;
+    BondPublicApiFixture fixture;
+    urma_jfc_t backupPhysicalJfc = {};
+
+    fixture.InitSinglePhysicalMember();
+    fixture.ctx.dev_num = 2;
+    fixture.jfc.dev_num = 2;
+    fixture.jfc.enabled_count = 2;
+    fixture.jfc.enabled_indices[0] = 0;
+    fixture.jfc.enabled_indices[1] = 1;
+    fixture.jfc.p_jfc[1] = &backupPhysicalJfc;
+    fixture.phyOps.rearm_jfc = MockRecordRearmPhysicalJfc;
+    backupPhysicalJfc.urma_ctx = &fixture.phyCtx;
+    g_rearmPhysicalJfcCount = 0;
+
+    EXPECT_EQ(URMA_SUCCESS, bondp_rearm_jfc(&fixture.jfc.v_jfc, false));
+    ASSERT_EQ(2, g_rearmPhysicalJfcCount);
+    EXPECT_EQ(&fixture.phyJfc, g_rearmedPhysicalJfc[0]);
+    EXPECT_EQ(&backupPhysicalJfc, g_rearmedPhysicalJfc[1]);
+
+    EXPECT_EQ(URMA_SUCCESS, bondp_rearm_jfc(&fixture.jfc.v_jfc, false));
+    ASSERT_EQ(4, g_rearmPhysicalJfcCount);
+    EXPECT_EQ(&fixture.phyJfc, g_rearmedPhysicalJfc[2]);
+    EXPECT_EQ(&backupPhysicalJfc, g_rearmedPhysicalJfc[3]);
 }
 
 TEST(UrmaBondTest, PublicEventApisCoverProviderFailureContracts)
@@ -956,8 +983,7 @@ TEST(UrmaBondTest, PublicCreateAndDeleteJettyCoverVirtualPhysicalIdMapping)
     jettyCfg.shared.jfr = &fixture.jfr.v_jfr;
     jettyCfg.shared.jfc = &fixture.jfc.v_jfc;
 
-    bondp_health_check_global_ctx_init(&fakeGlobal);
-    fakeGlobal.health_thread_ctx.enable_health_check = false;
+    fakeGlobal.enable_health_check = false;
     g_bondp_global_ctx = &fakeGlobal;
     urma_test::SetHwMockIoctl(true, 0xb50, 0xb500);
     urma_jetty_t *createdJetty = bondp_create_jetty(&fixture.ctx.v_ctx, &jettyCfg);
@@ -968,7 +994,6 @@ TEST(UrmaBondTest, PublicCreateAndDeleteJettyCoverVirtualPhysicalIdMapping)
     EXPECT_EQ(URMA_SUCCESS, bondp_delete_jetty(createdJetty));
 
     g_bondp_global_ctx = nullptr;
-    bondp_health_check_global_ctx_uninit(&fakeGlobal);
     EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
 }
 
@@ -1005,8 +1030,7 @@ TEST(UrmaBondTest, PublicCreateAndDeleteSharedJfcChildrenFollowIssueCleanupOrder
     jettyCfg.jfs_cfg = jfsCfg;
     jettyCfg.shared.jfc = nullptr;
 
-    bondp_health_check_global_ctx_init(&fakeGlobal);
-    fakeGlobal.health_thread_ctx.enable_health_check = false;
+    fakeGlobal.enable_health_check = false;
     g_bondp_global_ctx = &fakeGlobal;
 
     urma_jfs_t *createdJfsList[3] = {};
@@ -1058,7 +1082,6 @@ TEST(UrmaBondTest, PublicCreateAndDeleteSharedJfcChildrenFollowIssueCleanupOrder
     EXPECT_EQ(0UL, fixture.jfc.use_cnt.atomic_cnt.load());
 
     g_bondp_global_ctx = nullptr;
-    bondp_health_check_global_ctx_uninit(&fakeGlobal);
     EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
 }
 
@@ -1092,8 +1115,7 @@ TEST(UrmaBondTest, PublicCreateJettyUsesEffectiveSharedJfcForRefcount)
     jettyCfg.shared.jfr = &fixture.jfr.v_jfr;
     jettyCfg.shared.jfc = nullptr;
 
-    bondp_health_check_global_ctx_init(&fakeGlobal);
-    fakeGlobal.health_thread_ctx.enable_health_check = false;
+    fakeGlobal.enable_health_check = false;
     g_bondp_global_ctx = &fakeGlobal;
     urma_test::SetHwMockIoctl(true, 0xb55, 0xb550);
     SetRefCount(&fixture.jfc.use_cnt, 0);
@@ -1109,7 +1131,6 @@ TEST(UrmaBondTest, PublicCreateJettyUsesEffectiveSharedJfcForRefcount)
     EXPECT_EQ(0UL, fixture.jfc.use_cnt.atomic_cnt.load());
 
     g_bondp_global_ctx = nullptr;
-    bondp_health_check_global_ctx_uninit(&fakeGlobal);
     EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
 }
 
@@ -1169,15 +1190,13 @@ TEST(UrmaBondTest, PublicCreateApisCleanupIdMappingAfterLateWrBufferFailures)
     jettyCfg.shared.jfr = &fixture.jfr.v_jfr;
     jettyCfg.shared.jfc = &fixture.jfc.v_jfc;
 
-    bondp_health_check_global_ctx_init(&fakeGlobal);
-    fakeGlobal.health_thread_ctx.enable_health_check = false;
+    fakeGlobal.enable_health_check = false;
     g_bondp_global_ctx = &fakeGlobal;
     urma_test::SetHwMockIoctl(true, 0xb62, 0xb620);
     g_mockCallocFailSize = WrBufEntrySize();
     EXPECT_EQ(nullptr, bondp_create_jetty(&fixture.ctx.v_ctx, &jettyCfg));
     g_mockCallocFailSize = 0;
     g_bondp_global_ctx = nullptr;
-    bondp_health_check_global_ctx_uninit(&fakeGlobal);
 
     EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
 }
@@ -1218,13 +1237,11 @@ TEST(UrmaBondTest, PublicCreateJettyHonorsExplicitPortIds)
     jettyCfg.port_ids = &portId;
     jettyCfg.port_count = 1;
 
-    bondp_health_check_global_ctx_init(&fakeGlobal);
-    fakeGlobal.health_thread_ctx.enable_health_check = false;
+    fakeGlobal.enable_health_check = false;
     g_bondp_global_ctx = &fakeGlobal;
     urma_test::SetHwMockIoctl(true, 0xb40, 0xb400);
     EXPECT_EQ(nullptr, bondp_create_jetty(&fixture.ctx.v_ctx, &jettyCfg.base));
     g_bondp_global_ctx = nullptr;
-    bondp_health_check_global_ctx_uninit(&fakeGlobal);
     EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
 }
 
@@ -1344,6 +1361,7 @@ TEST(UrmaBondTest, PublicUserCtlQueriesPortsAndJfceFds)
 
 TEST(UrmaBondTest, PublicUserCtlGetRjettyAndSegCtxUseMockIoctl)
 {
+    BondTopoMapCleanup topoCleanup;
     BondPublicApiFixture fixture;
     bondp_tseg_t inputTseg = {};
     urma_target_seg_t physicalSeg = {};
@@ -1366,8 +1384,7 @@ TEST(UrmaBondTest, PublicUserCtlGetRjettyAndSegCtxUseMockIoctl)
     CopyEidToTopo(topo[0].agg_devs[0].ues[0].port_eid[0], MakeEid(0xa05));
     CopyEidToTopo(topo[1].agg_devs[0].agg_eid, fixture.jetty.v_jetty.jetty_id.eid);
     topo[1].links[0][0] = true;
-    fixture.ctx.topo_map = create_topo_map(topo, 2);
-    ASSERT_NE(nullptr, fixture.ctx.topo_map);
+    ASSERT_EQ(0, bondp_topo_init(topo, 2));
 
     out = MakeUserCtlOut(&rjetty, sizeof(rjetty));
     EXPECT_EQ(0, CallBondUserCtl(&fixture.ctx.v_ctx, BONDP_USER_CTL_OPCODE_GET_RJETTY,
@@ -1403,8 +1420,6 @@ TEST(UrmaBondTest, PublicUserCtlGetRjettyAndSegCtxUseMockIoctl)
     EXPECT_EQ(0x55U, segExt->peer_p_seg[0].token_id);
     EXPECT_TRUE(segExt->connected[0][0]);
     std::free(seg);
-    delete_topo_map(fixture.ctx.topo_map);
-    fixture.ctx.topo_map = nullptr;
 }
 
 TEST(UrmaBondTest, PublicApiModifyDoesNotMarkErrorForNonErrorState)
