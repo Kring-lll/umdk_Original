@@ -14,11 +14,27 @@
 extern "C" {
 #endif
 
+/* Which pjetty a failover recovery task targets: the primary pjetty
+ * (p_jetty[idx]) or its pre-created spare (backup_pjetty[idx]). The two are
+ * deduplicated independently so a primary failure and a backup failure on the
+ * same idx do not starve each other. */
+typedef enum {
+    BONDP_FB_PRIMARY = 0,
+    BONDP_FB_BACKUP  = 1,
+} bondp_fb_which_t;
+
 void bondp_fb_handle_notify_nl_msg(struct nlattr *attrs[]);
 void bondp_fb_handle_done_nl_msg(struct nlattr *attrs[]);
 
-int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx);
+int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx,
+                      bondp_fb_which_t which);
 void bondp_fb_cancel_tasks(bondp_context_t *bond_ctx, uint32_t vjetty_id);
+
+/* Switch the send path onto the pre-created spare pjetty at idx and re-arm
+ * valid so posting resumes immediately while the failed primary is rebuilt
+ * asynchronously. Caller must hold bdp_comp->send_lock and must have confirmed
+ * a spare exists (balance mode, BONDP_COMP_JETTY, backup_pjetty[idx] != NULL). */
+void bondp_switch_to_backup_pjetty(bondp_comp_t *bdp_comp, uint32_t pjetty_idx);
 
 int bondp_fb_init(bondp_context_t *bond_ctx);
 void bondp_fb_uninit(bondp_context_t *bond_ctx);
