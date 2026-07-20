@@ -482,6 +482,7 @@ int umq_ub_jetty_node_free(jetty_pool_node_t *node)
     (void)__atomic_add_fetch(&pool->acc_free_count, 1, __ATOMIC_RELAXED);
     if (node->is_jetty_err) {
         (void)pthread_spin_lock(&pool->lock);
+        pool->active_count++;
         recycle_node_to_relay_q(pool, node);
         (void)pthread_spin_unlock(&pool->lock);
         umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_FREE_JETTY_NODE, start_timestamp);
