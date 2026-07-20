@@ -33,6 +33,27 @@
 
 static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int send_idx, int target_idx);
 
+static inline bool bondp_is_write_wr(const urma_jfs_wr_t *wr)
+{
+    return wr->opcode == URMA_OPC_WRITE || wr->opcode == URMA_OPC_WRITE_IMM ||
+           wr->opcode == URMA_OPC_WRITE_NOTIFY;
+}
+
+static void bondp_log_write_resend(const char *reason, const jfs_wr_entry_t *wr_entry,
+                                   uint32_t old_send_idx, uint32_t old_target_idx,
+                                   int new_send_idx, int new_target_idx, int trigger_status)
+{
+    if (!bondp_is_write_wr(&wr_entry->wr)) {
+        return;
+    }
+
+    URMA_LOG_WARN("Bond %s resend WRITE-class WR, wr_id=%lu user_ctx=0x%lx ctrl_bit=%d opcode=%d "
+                  "old_path=[%u,%u] new_path=[%d,%d] trigger_status=%d\n",
+                  reason, wr_entry->wr_id, wr_entry->user_ctx,
+                  (wr_entry->user_ctx & BONDP_CTRL_USER_CTX_MASK) != 0, wr_entry->wr.opcode,
+                  old_send_idx, old_target_idx, new_send_idx, new_target_idx, trigger_status);
+}
+
 static urma_jetty_id_t *get_comp_urma_jetty_id(bondp_comp_t *bdp_comp)
 {
     switch (bdp_comp->comp_type) {
@@ -372,6 +393,8 @@ static void try_failback(bondp_comp_t *bdp_comp)
         }
 
         atomic_fetch_sub(&bdp_comp->sqe_cnt[old_send_idx][old_target_idx], 1);
+        bondp_log_write_resend("failback", resend_wr_entry, old_send_idx, old_target_idx,
+                               new_send_idx, new_target_idx, -1);
         if (resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
             URMA_LOG_ERR("Failed failback resend on post, wr_id=%lu new_send_idx=%d new_target_idx=%d\n",
                          resend_wr_id, new_send_idx, new_target_idx);
@@ -1286,6 +1309,8 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
          * but this is risky because subsequent WRs may reuse the same memory,
          * resulting in WR/CR mismatch.
          */
+        URMA_LOG_WARN_RL("Skip send cr without wr_entry, wr_id=%lu idx=%d local_id=%u status=%u\n",
+                         wr_id, idx, cr->local_id, cr->status);
         put_comp(bdp_comp);
         return CONVERT_SKIP;
     }
@@ -1324,6 +1349,10 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
 
         URMA_LOG_INFO("Resend from [%u, %u] to [%d, %d]\n", send_idx, target_idx,
                       new_send_idx, new_target_idx);
+        URMA_LOG_WARN("Bond failover CR, wr_id=%lu user_ctx=0x%lx ctrl_bit=%d opcode=%d status=%u "
+                      "old_path=[%u,%u] new_path=[%d,%d]\n",
+                      wr_entry->wr_id, wr_entry->user_ctx, (wr_entry->user_ctx & BONDP_CTRL_USER_CTX_MASK) != 0,
+                      wr_entry->wr.opcode, cr->status, send_idx, target_idx, new_send_idx, new_target_idx);
         urma_ubagg_switch_inc();
 
         for (int i = 0; i < bdp_comp->send_wr_buf.max_wr_num; i++) {
@@ -1337,6 +1366,8 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                 continue;
             }
             atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+            bondp_log_write_resend("failover", resend_wr_entry, send_idx, target_idx,
+                                   new_send_idx, new_target_idx, cr->status);
             if (resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
                 URMA_LOG_ERR("Failed to resend jfs wr, wr_id=%lu\n", resend_wr_id);
             }
