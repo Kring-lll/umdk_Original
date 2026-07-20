@@ -59,6 +59,107 @@ perftest_config_t *g_perftest_cfg;
 
 volatile sig_atomic_t g_exit_flag = 0;
 
+static bool perftest_credit_debug_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled < 0) {
+        const char *env = getenv("PERFTEST_CREDIT_DEBUG");
+        enabled = (env != NULL && env[0] != '\0' && strcmp(env, "0") != 0) ? 1 : 0;
+    }
+    return enabled != 0;
+}
+
+static inline bool perftest_is_credit_user_ctx(uint64_t user_ctx)
+{
+    return (user_ctx & (1ULL << PERFTEST_FLAG_USER_CTX)) != 0;
+}
+
+static inline uint64_t perftest_credit_user_ctx_id(uint64_t user_ctx)
+{
+    return user_ctx & ~(1ULL << PERFTEST_FLAG_USER_CTX);
+}
+
+static int perftest_credit_debug_init(perftest_config_t *cfg, uint64_t **max_peer_credit, bool **blocked)
+{
+    *max_peer_credit = NULL;
+    *blocked = NULL;
+
+    if (!cfg->enable_credit || !perftest_credit_debug_enabled()) {
+        return 0;
+    }
+
+    *max_peer_credit = calloc(1, sizeof(uint64_t) * cfg->jettys);
+    *blocked = calloc(1, sizeof(bool) * cfg->jettys);
+    if (*max_peer_credit == NULL || *blocked == NULL) {
+        free(*max_peer_credit);
+        free(*blocked);
+        *max_peer_credit = NULL;
+        *blocked = NULL;
+        return -1;
+    }
+    return 0;
+}
+
+static void perftest_credit_debug_check_window(const char *tag, uint32_t jetty, uint64_t posted,
+                                               uint32_t post_list, uint64_t peer_credit, uint64_t swindow,
+                                               uint32_t threshold, uint64_t *max_peer_credit, bool *blocked)
+{
+    if (max_peer_credit == NULL || blocked == NULL) {
+        return;
+    }
+
+    if (peer_credit < max_peer_credit[jetty]) {
+        LOG_ERROR("[CREDIT_DBG][%s] peer credit regressed, jetty=%u old_max=%lu new=%lu "
+                  "posted=%lu post_list=%u swindow=%lu threshold=%u\n",
+                  tag, jetty, max_peer_credit[jetty], peer_credit, posted, post_list, swindow, threshold);
+    } else if (peer_credit > max_peer_credit[jetty]) {
+        max_peer_credit[jetty] = peer_credit;
+    }
+
+    if (swindow >= threshold) {
+        if (!blocked[jetty]) {
+            LOG_ERROR("[CREDIT_DBG][%s] credit window blocked, jetty=%u posted=%lu post_list=%u "
+                      "peer_credit=%lu swindow=%lu threshold=%u\n",
+                      tag, jetty, posted, post_list, peer_credit, swindow, threshold);
+        }
+        blocked[jetty] = true;
+        return;
+    }
+
+    if (blocked[jetty]) {
+        LOG_ERROR("[CREDIT_DBG][%s] credit window unblocked, jetty=%u posted=%lu post_list=%u "
+                  "peer_credit=%lu swindow=%lu threshold=%u\n",
+                  tag, jetty, posted, post_list, peer_credit, swindow, threshold);
+    }
+    blocked[jetty] = false;
+}
+
+static void perftest_credit_debug_log_post(const char *tag, uint32_t jetty, uint64_t credit,
+                                           uint64_t outstanding_credit, int total_outstanding_credit)
+{
+    if (!perftest_credit_debug_enabled()) {
+        return;
+    }
+
+    LOG_ERROR("[CREDIT_DBG][%s] post credit WRITE, jetty=%u credit=%lu "
+              "outstanding_credit=%lu total_outstanding_credit=%d\n",
+              tag, jetty, credit, outstanding_credit, total_outstanding_credit);
+}
+
+static void perftest_credit_debug_log_cr(const char *tag, const urma_cr_t *cr,
+                                         uint64_t decoded_id, uint64_t outstanding_credit)
+{
+    if (!perftest_credit_debug_enabled()) {
+        return;
+    }
+
+    LOG_ERROR("[CREDIT_DBG][%s] poll credit WRITE CR, raw_user_ctx=0x%lx decoded_id=%lu "
+              "is_credit=%d status=%u outstanding_credit=%lu\n",
+              tag, cr->user_ctx, decoded_id, perftest_is_credit_user_ctx(cr->user_ctx), cr->status,
+              outstanding_credit);
+}
+
 typedef struct bi_exchange_info {
     char *before;
     char *after;
@@ -1855,6 +1956,12 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
     if (cr == NULL) {
         return -1;
     }
+    uint64_t *credit_max_peer = NULL;
+    bool *credit_blocked = NULL;
+    if (perftest_credit_debug_init(cfg, &credit_max_peer, &credit_blocked) != 0) {
+        free(cr);
+        return -1;
+    }
 
     if (cfg->time_type.bs.duration == 1) {
         update_duration_state(ctx, cfg);
@@ -1884,9 +1991,13 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                    (outstanding_cnt + cfg->jfs_post_list) <= cfg->jfs_depth &&
                    !(cfg->is_rate_limit == true && is_send_burst == false)) {
                 if (cfg->enable_credit == true) {
-                    uint64_t swinow = (run_ctx->scnt[index] + cfg->jfs_post_list) > ctx->ctrl_buf[index][1]
-                                          ? (run_ctx->scnt[index] + cfg->jfs_post_list - ctx->ctrl_buf[index][1])
+                    uint64_t peer_credit = ctx->ctrl_buf[index][1];
+                    uint64_t swinow = (run_ctx->scnt[index] + cfg->jfs_post_list) > peer_credit
+                                          ? (run_ctx->scnt[index] + cfg->jfs_post_list - peer_credit)
                                           : 0;
+                    perftest_credit_debug_check_window("run_once_bw", index, run_ctx->scnt[index],
+                                                       cfg->jfs_post_list, peer_credit, swinow,
+                                                       cfg->credit_threshold, credit_max_peer, credit_blocked);
                     if (swinow >= (uint64_t)cfg->credit_threshold) {
                         break;
                     }
@@ -2025,9 +2136,13 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
     if (cfg->no_peak == true && cfg->time_type.bs.iterations == 1) {
         run_ctx->tcompleted[0] = get_cycles();
     }
+    free(credit_blocked);
+    free(credit_max_peer);
     free(cr);
     return 0;
 free_cr:
+    free(credit_blocked);
+    free(credit_max_peer);
     free(cr);
     return -1;
 }
@@ -2049,13 +2164,15 @@ static int clean_scq_credit(int send_cnt, perftest_context_t *ctx, perftest_conf
         sne = urma_poll_jfc(ctx->jfc_s[0], cfg->jfs_depth, swc);
         if (sne > 0) {
             for (i = 0; i < sne; i++) {
+                uint64_t credit_id = perftest_credit_user_ctx_id(swc[i].user_ctx);
                 if (swc[i].status != URMA_SUCCESS) {
-                    LOG_ERROR("Poll send CQ error status=%u qp %d\n",
-                              swc[i].status, (int)swc[i].user_ctx);
+                    LOG_ERROR("Poll send CQ error status=%u raw_user_ctx=0x%lx decoded_id=%lu\n",
+                              swc[i].status, swc[i].user_ctx, credit_id);
                     ret = -1;
                     goto cleaning;
                 }
                 send_cnt--;
+                perftest_credit_debug_log_cr("clean_scq_credit", &swc[i], credit_id, send_cnt);
             }
         } else if (sne < 0) {
             LOG_ERROR("Poll send CR to clean credit failed ne=%d\n", sne);
@@ -2214,17 +2331,26 @@ static int run_once_bw_recv(perftest_context_t *ctx, perftest_config_t *cfg)
                                 sne = urma_poll_jfc(ctx->jfc_s[0], cfg->jfs_depth, scr);
                                 if (sne > 0) {
                                     for (j = 0; j < sne; j++) {
-                                        if (scr[j].status != URMA_CR_SUCCESS) {
-                                            LOG_ERROR("Poll send CQ error status=%u jetty %d \n",
-                                                      scr[j].status, (int)scr[j].user_ctx);
-                                            LOG_ERROR("credit=%lu scredit=%lu\n",
-                                                      rcnt_pre_jetty[scr[j].user_ctx],
-                                                      scredit_pre_jetty[scr[j].user_ctx]);
+                                        uint64_t credit_id = perftest_credit_user_ctx_id(scr[j].user_ctx);
+                                        if (!perftest_is_credit_user_ctx(scr[j].user_ctx) || credit_id >= cfg->jettys) {
+                                            LOG_ERROR("Invalid credit send CR, raw_user_ctx=0x%lx, decoded_id=%lu, "
+                                                      "jettys=%u, status=%u\n",
+                                                      scr[j].user_ctx, credit_id, cfg->jettys, scr[j].status);
                                             ret = -1;
                                             goto cleaning;
                                         }
-                                        scredit_pre_jetty[scr[j].user_ctx]--;
+                                        if (scr[j].status != URMA_CR_SUCCESS) {
+                                            LOG_ERROR("Poll send CQ error status=%u raw_user_ctx=0x%lx jetty %lu\n",
+                                                      scr[j].status, scr[j].user_ctx, credit_id);
+                                            LOG_ERROR("credit=%lu scredit=%lu\n",
+                                                      rcnt_pre_jetty[credit_id], scredit_pre_jetty[credit_id]);
+                                            ret = -1;
+                                            goto cleaning;
+                                        }
+                                        scredit_pre_jetty[credit_id]--;
                                         tot_scredit--;
+                                        perftest_credit_debug_log_cr("run_once_bw_recv", &scr[j], credit_id,
+                                                                     scredit_pre_jetty[credit_id]);
                                     }
                                 } else if (sne < 0) {
                                     LOG_ERROR("Poll send cr failed ne=%d\n", sne);
@@ -2247,6 +2373,8 @@ static int run_once_bw_recv(perftest_context_t *ctx, perftest_config_t *cfg)
                             }
                             scredit_pre_jetty[cr_id]++;
                             tot_scredit++;
+                            perftest_credit_debug_log_post("run_once_bw_recv", cr_id, rcnt_pre_jetty[cr_id],
+                                                           scredit_pre_jetty[cr_id], tot_scredit);
                         }
                     }
                 }
@@ -2301,6 +2429,8 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
     urma_jfs_wr_t *bad_jfs_wr = NULL;
     urma_jfr_wr_t *bad_jfr_wr = NULL;
     int ret = 0;
+    uint64_t *credit_max_peer = NULL;
+    bool *credit_blocked = NULL;
 
     urma_cr_t *cr_recv = (urma_cr_t *)calloc(1, sizeof(urma_cr_t) * cfg->jfr_depth);
     if (cr_recv == NULL) {
@@ -2331,6 +2461,10 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
         ret = -1;
         goto free_unused_recv_for_jetty;
     }
+    if (perftest_credit_debug_init(cfg, &credit_max_peer, &credit_blocked) != 0) {
+        ret = -1;
+        goto cleaning;
+    }
     for (uint32_t i = 0; i < jettys; i++) {
         posted_per_jetty[i] = (uint32_t)run_ctx->rposted;
     }
@@ -2356,9 +2490,13 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                    (((run_ctx->scnt[index] + scredit_pre_jetty[index] - run_ctx->ccnt[index]) + cfg->jfs_post_list) <=
                     cfg->jfs_depth)) {
                 if (cfg->enable_credit == true) {
-                    uint64_t swinow = (run_ctx->scnt[index] + cfg->jfs_post_list) > ctx->ctrl_buf[index][1]
-                                          ? (run_ctx->scnt[index] + cfg->jfs_post_list - ctx->ctrl_buf[index][1])
+                    uint64_t peer_credit = ctx->ctrl_buf[index][1];
+                    uint64_t swinow = (run_ctx->scnt[index] + cfg->jfs_post_list) > peer_credit
+                                          ? (run_ctx->scnt[index] + cfg->jfs_post_list - peer_credit)
                                           : 0;
+                    perftest_credit_debug_check_window("run_once_bi_bw", index, run_ctx->scnt[index],
+                                                       cfg->jfs_post_list, peer_credit, swinow,
+                                                       cfg->credit_threshold, credit_max_peer, credit_blocked);
                     if (swinow >= (uint64_t)cfg->credit_threshold) {
                         break;
                     }
@@ -2517,12 +2655,19 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                         while ((run_ctx->scnt[cr_id] + scredit_pre_jetty[cr_id] - run_ctx->ccnt[cr_id]) >=
                                cfg->jfs_depth) {
                             sne = urma_poll_jfc(ctx->jfc_s[0], 1, &credit_cr);
-                            bool is_credit = credit_cr.user_ctx & (1ULL << PERFTEST_FLAG_USER_CTX);
-                            uint64_t credit_id = credit_cr.user_ctx & ~(1ULL << PERFTEST_FLAG_USER_CTX);
                             if (sne > 0) {
+                                bool is_credit = perftest_is_credit_user_ctx(credit_cr.user_ctx);
+                                uint64_t credit_id = perftest_credit_user_ctx_id(credit_cr.user_ctx);
+                                if (credit_id >= cfg->jettys) {
+                                    LOG_ERROR("Invalid send CR, raw_user_ctx=0x%lx, decoded_id=%lu, jettys=%u, "
+                                              "status=%u\n",
+                                              credit_cr.user_ctx, credit_id, cfg->jettys, credit_cr.status);
+                                    ret = -1;
+                                    goto cleaning;
+                                }
                                 if (credit_cr.status != URMA_CR_SUCCESS) {
-                                    LOG_ERROR("Poll send CQ error status=%u jetty %d \n",
-                                              credit_cr.status, (int)credit_id);
+                                    LOG_ERROR("Poll send CQ error status=%u raw_user_ctx=0x%lx jetty %lu\n",
+                                              credit_cr.status, credit_cr.user_ctx, credit_id);
                                     LOG_ERROR("credit=%lu scredit=%lu\n",
                                               rcnt_pre_jetty[credit_id], scredit_pre_jetty[credit_id]);
                                     ret = -1;
@@ -2531,6 +2676,8 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                                 if (credit_cr.flag.bs.s_r == 0 && is_credit) {
                                     scredit_pre_jetty[credit_id]--;
                                     tot_scredit--;
+                                    perftest_credit_debug_log_cr("run_once_bi_bw", &credit_cr, credit_id,
+                                                                 scredit_pre_jetty[credit_id]);
                                 } else {
                                     if (cfg->use_jfce == true) {
                                         consume_pending_send_cqes(&pending_send_cqes, 1);
@@ -2569,6 +2716,8 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                         }
                         scredit_pre_jetty[cr_id]++;
                         tot_scredit++;
+                        perftest_credit_debug_log_post("run_once_bi_bw", cr_id, rcnt_pre_jetty[cr_id],
+                                                       scredit_pre_jetty[cr_id], tot_scredit);
                     }
                 }
             }
@@ -2581,20 +2730,24 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
         bool is_credit_send = false;
         if (send_cqe_cnt > 0) {
             for (int i = 0; i < send_cqe_cnt; i++) {
-                if (cr_send[i].user_ctx & (1ULL << PERFTEST_FLAG_USER_CTX)) {
-                    cr_id = cr_send[i].user_ctx & ~(1ULL << PERFTEST_FLAG_USER_CTX);
+                uint64_t send_cr_id;
+                if (perftest_is_credit_user_ctx(cr_send[i].user_ctx)) {
+                    send_cr_id = perftest_credit_user_ctx_id(cr_send[i].user_ctx);
                     is_credit_send = true;
                 } else {
-                    cr_id = (uint32_t)cr_send[i].user_ctx;
+                    send_cr_id = cr_send[i].user_ctx;
                     is_credit_send = false;
                 }
                 if (cfg->use_jfce == true && is_credit_send == false) {
                     consume_pending_send_cqes(&pending_send_cqes, 1);
                 }
-                if (cr_id > cfg->jettys) {
+                if (send_cr_id >= cfg->jettys) {
+                    LOG_ERROR("Invalid send CR id, raw_user_ctx=0x%lx, decoded_id=%lu, jettys=%u, status=%u\n",
+                              cr_send[i].user_ctx, send_cr_id, cfg->jettys, cr_send[i].status);
                     ret = -1;
                     goto cleaning;
                 }
+                cr_id = (uint32_t)send_cr_id;
                 if (cr_send[i].status != URMA_CR_SUCCESS) {
                     LOG_ERROR("Failed cr_send, status: %d, i: %d, tot_ccnt: %lu\n.",
                               (int)cr_send[i].status, i, tot_ccnt);
@@ -2614,6 +2767,8 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                     }
                     scredit_pre_jetty[cr_id]--;
                     tot_scredit--;
+                    perftest_credit_debug_log_cr("run_once_bi_bw", &cr_send[i], cr_id,
+                                                 scredit_pre_jetty[cr_id]);
                 } else {
                     tot_ccnt += cfg->cq_mod;
                     run_ctx->ccnt[cr_id] += cfg->cq_mod;
@@ -2650,6 +2805,8 @@ cleaning:
         }
     }
 
+    free(credit_blocked);
+    free(credit_max_peer);
     free(posted_per_jetty);
 free_unused_recv_for_jetty:
     free(unused_recv_for_jetty);
@@ -2898,6 +3055,13 @@ static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
         free(cr);
         return -1;
     }
+    uint64_t *credit_max_peer = NULL;
+    bool *credit_blocked = NULL;
+    if (perftest_credit_debug_init(cfg, &credit_max_peer, &credit_blocked) != 0) {
+        free(scnt_for_jetty);
+        free(cr);
+        return -1;
+    }
 
     g_perftest_ctx = ctx;
     g_perftest_cfg = cfg;
@@ -2906,6 +3070,8 @@ static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
     pthread_t print_thread;
     if (pthread_create(&print_thread, NULL, infinite_print_thread, (void *)&cfg->inf_period_ms) != 0) {
         LOG_ERROR("Failed to create thread.\n");
+        free(credit_blocked);
+        free(credit_max_peer);
         free(cr);
         free(scnt_for_jetty);
         return -1;
@@ -2936,9 +3102,13 @@ static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
             while ((outstanding_cnt + cfg->jfs_post_list) <= cfg->jfs_depth &&
                    !(cfg->is_rate_limit == true && is_send_burst == false)) {
                 if (cfg->enable_credit == true) {
-                    uint64_t swinow = (scnt_for_jetty[index] + cfg->jfs_post_list) > ctx->ctrl_buf[index][1]
-                                          ? (scnt_for_jetty[index] + cfg->jfs_post_list - ctx->ctrl_buf[index][1])
+                    uint64_t peer_credit = ctx->ctrl_buf[index][1];
+                    uint64_t swinow = (scnt_for_jetty[index] + cfg->jfs_post_list) > peer_credit
+                                          ? (scnt_for_jetty[index] + cfg->jfs_post_list - peer_credit)
                                           : 0;
+                    perftest_credit_debug_check_window("run_once_bw_infinite", index, scnt_for_jetty[index],
+                                                       cfg->jfs_post_list, peer_credit, swinow,
+                                                       cfg->credit_threshold, credit_max_peer, credit_blocked);
                     if (swinow >= (uint64_t)cfg->credit_threshold) {
                         break;
                     }
@@ -3026,6 +3196,8 @@ static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
     }
     g_perftest_ctx->infinite_print = false;
     (void)pthread_join(print_thread, &thread_ret);
+    free(credit_blocked);
+    free(credit_max_peer);
     free(scnt_for_jetty);
     free(cr);
     return 0;
@@ -3033,6 +3205,8 @@ static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
 err_exit:
     g_perftest_ctx->infinite_print = false;
     (void)pthread_join(print_thread, &thread_ret);
+    free(credit_blocked);
+    free(credit_max_peer);
     free(scnt_for_jetty);
     free(cr);
     return -1;
@@ -3047,6 +3221,7 @@ static int run_once_bw_recv_infinite(perftest_context_t *ctx, perftest_config_t 
     int first_rx = 1;
     urma_status_t status;
     urma_jfr_wr_t *bad_wr = NULL;
+    int tot_scredit = 0;
 
     urma_cr_t *cr = calloc(1, sizeof(urma_cr_t) * PERFTEST_POLL_BATCH);
     if (cr == NULL) {
@@ -3169,15 +3344,26 @@ static int run_once_bw_recv_infinite(perftest_context_t *ctx, perftest_config_t 
                             sne = urma_poll_jfc(ctx->jfc_s[0], cfg->jfs_depth, scr);
                             if (sne > 0) {
                                 for (j = 0; j < sne; j++) {
-                                    if (scr[j].status != URMA_CR_SUCCESS) {
-                                        LOG_ERROR("Poll send CQ error status=%u jetty %d",
-                                                  scr[j].status, (int)scr[j].user_ctx);
-                                        LOG_ERROR("credit=%lu scredit=%lu\n",
-                                                  rcnt_pre_jetty[scr[j].user_ctx], ccnt_pre_jetty[scr[j].user_ctx]);
+                                    uint64_t credit_id = perftest_credit_user_ctx_id(scr[j].user_ctx);
+                                    if (!perftest_is_credit_user_ctx(scr[j].user_ctx) || credit_id >= cfg->jettys) {
+                                        LOG_ERROR("Invalid credit send CR, raw_user_ctx=0x%lx, decoded_id=%lu, "
+                                                  "jettys=%u, status=%u\n",
+                                                  scr[j].user_ctx, credit_id, cfg->jettys, scr[j].status);
                                         ret = -1;
                                         goto err_exit;
                                     }
-                                    ccnt_pre_jetty[scr[j].user_ctx]--;
+                                    if (scr[j].status != URMA_CR_SUCCESS) {
+                                        LOG_ERROR("Poll send CQ error status=%u raw_user_ctx=0x%lx jetty %lu",
+                                                  scr[j].status, scr[j].user_ctx, credit_id);
+                                        LOG_ERROR("credit=%lu scredit=%lu\n",
+                                                  rcnt_pre_jetty[credit_id], ccnt_pre_jetty[credit_id]);
+                                        ret = -1;
+                                        goto err_exit;
+                                    }
+                                    ccnt_pre_jetty[credit_id]--;
+                                    tot_scredit--;
+                                    perftest_credit_debug_log_cr("run_once_bw_recv_infinite", &scr[j], credit_id,
+                                                                 ccnt_pre_jetty[credit_id]);
                                 }
                             } else if (sne < 0) {
                                 LOG_ERROR("Poll send cr failed ne=%d\n", sne);
@@ -3199,7 +3385,10 @@ static int run_once_bw_recv_infinite(perftest_context_t *ctx, perftest_config_t 
                             goto err_exit;
                         }
                         ccnt_pre_jetty[cr_id]++;
+                        tot_scredit++;
                         scredit_pre_jetty[cr_id] = 0;
+                        perftest_credit_debug_log_post("run_once_bw_recv_infinite", cr_id, rcnt_pre_jetty[cr_id],
+                                                       ccnt_pre_jetty[cr_id], tot_scredit);
                     }
                 }
             }
