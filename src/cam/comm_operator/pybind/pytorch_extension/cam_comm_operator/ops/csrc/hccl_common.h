@@ -16,7 +16,6 @@
 #ifndef CANN_OPS_TRANSFORMER_HCCL_COMMON_H
 #define CANN_OPS_TRANSFORMER_HCCL_COMMON_H
 
-#include "aclnn_common.h"
 #include <torch_npu/csrc/framework/utils/OpAdapter.h>
 #include <dlfcn.h>
 #include <vector>
@@ -111,6 +110,24 @@ inline const char *GetHcclLibName(void)
 inline const char *GetHcclFwkLibName(void)
 {
     return "libhccl_fwk.so";
+}
+
+inline void *GetOpApiFuncAddrInLib(void *handler, const char *libName, const char *apiName)
+{
+    auto funcAddr = dlsym(handler, apiName);
+    if (funcAddr == nullptr) {
+        ASCEND_LOGW("dlsym %s from %s failed, error:%s.", apiName, libName, dlerror());
+    }
+    return funcAddr;
+}
+
+inline void *GetOpApiLibHandler(const char *libName)
+{
+    auto handler = dlopen(libName, RTLD_LAZY);
+    if (handler == nullptr) {
+        ASCEND_LOGW("dlopen %s failed, error:%s.", libName, dlerror());
+    }
+    return handler;
 }
 
 template <typename T>
