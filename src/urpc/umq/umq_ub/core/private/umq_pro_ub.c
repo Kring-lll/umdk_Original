@@ -1889,7 +1889,6 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
     uint32_t success_cnt = 0;
     int32_t qbuf_cnt = 0;
     uint32_t failed_cnt = 0;
-    int32_t fill_buf_cnt = 0;
     for (int i = 0; i < tx_cr_cnt; i++) {
         umq_ub_fc_user_ctx_t obj = {.value = cr[i].user_ctx};
         if (cr[i].status != URMA_CR_SUCCESS) {
@@ -1910,16 +1909,15 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
             bool is_fatal = (cr[i].status == URMA_CR_ACK_TIMEOUT_ERR ||
                 cr[i].status == URMA_CR_RNR_RETRY_CNT_EXC_ERR);
             ret = is_fatal ? -UMQ_ERR_EFLOWCTL_FATAL : -UMQ_ERR_EFLOWCTL;
-            umq_ub_fc_process_tx_error(queue, &obj);
+            ub_queue_t *rearl_queue = umq_ub_get_real_queue_by_umq_id(queue, obj.bs.umq_id);
+            umq_ub_fc_process_tx_error(rearl_queue, &obj);
             umq_buf_status_t fc_err_status = is_fatal ?
                     UMQ_FAKE_BUF_FC_ERR_FATAL : UMQ_FAKE_BUF_FC_ERR;
-            if (buf != NULL &&
-                (fill_buf_cnt = (int32_t)umq_ub_fill_fc_buf(queue, &buf[qbuf_cnt], fc_err_status)) > 0) {
-                umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf[qbuf_cnt]->qbuf_ext;
-                buf_pro->umq_ctx = obj.bs.umq_ctx;
-                qbuf_cnt += fill_buf_cnt;
+            if (buf != NULL) {
+                qbuf_cnt += (int32_t)umq_ub_fill_fc_buf(rearl_queue, &buf[qbuf_cnt], fc_err_status);
             }
             failed_cnt++;
+            umq_ub_put_real_queue(rearl_queue, obj.bs.umq_id);
             continue;
         }
 
@@ -2019,7 +2017,7 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
     for (int i = 0; i < tx_cr_cnt; i++) {
         if (cr[i].status != URMA_CR_SUCCESS) {
             if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
-                ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) == 0)) {
+                ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0)) {
                 umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
                 umq_ub_jetty_node_mark_err(jetty_node_list->node_list[tp_handle_idx]);
             } else if (is_umq_ub_logic_queue(queue->create_flag)) {
