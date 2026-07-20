@@ -64,6 +64,11 @@ static int bondp_init_connection_table(bondp_comp_t *bdp_comp)
         }
     }
 
+    if (!bdp_comp->bondp_ctx->msn_enable) {
+        URMA_LOG_DEBUG("MSN is not enabled, skip creating connection table\n");
+        return 0;
+    }
+
     if (bondp_conn_table_create(&bdp_comp->v_conn_table, BONDP_MAX_NUM_JETTYS) != 0) {
         return -1;
     }
@@ -75,6 +80,9 @@ static void bondp_uninit_connection_table(bondp_comp_t *bdp_comp)
     if (bdp_comp == NULL) {
         return;
     }
+    if (!bdp_comp->bondp_ctx->msn_enable) {
+        return;
+    }
     bondp_hash_table_destroy(&bdp_comp->v_conn_table);
 }
 
@@ -84,7 +92,11 @@ static int bondp_init_wr_buf(const bondp_comp_t *bdp_comp, wr_buf_t *wr_buf, uin
         return 0;
     }
 
-    return wr_buf_init(wr_buf, depth * bdp_comp->enabled_count, max_sge);
+    /* active_backup: only 1 active port, no need to reserve entries for backups */
+    uint32_t port_cnt = (bdp_comp->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP)
+                            ? 1
+                            : bdp_comp->enabled_count;
+    return wr_buf_init(wr_buf, depth * port_cnt, max_sge);
 }
 
 static void bondp_uninit_wr_buf(wr_buf_t *wr_buf)

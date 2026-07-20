@@ -46,13 +46,22 @@ typedef struct bondp_topo_agg_dev {
     bondp_topo_ue_t ues[IODIE_NUM];
 } bondp_topo_agg_dev_t;
 
-typedef struct bondp_topo_node {
+typedef struct bondp_topo_node_raw {
     uint32_t type;
     uint32_t super_node_id;
     uint32_t node_id;
     uint32_t is_current;
     bool links[IODIE_NUM * PORT_NUM][IODIE_NUM * PORT_NUM];
     bondp_topo_agg_dev_t agg_devs[DEV_NUM];
+} bondp_topo_node_raw_t;
+
+/* Compact node: agg_devs removed, lookups via eid_mapping_hash_table */
+typedef struct bondp_topo_node {
+    uint32_t type;
+    uint32_t super_node_id;
+    uint32_t node_id;
+    uint32_t is_current;
+    bool links[IODIE_NUM * PORT_NUM][IODIE_NUM * PORT_NUM];
 } bondp_topo_node_t;
 
 /**
@@ -62,6 +71,7 @@ typedef struct eid_mapping_entry {
     hmap_node_t hmap_node;
     urma_eid_t key_eid;
     urma_eid_t bonding_eid;
+    uint32_t node_idx;
 } eid_mapping_entry_t;
 
 typedef struct topo_map {
@@ -72,7 +82,7 @@ typedef struct topo_map {
 
 /* The following functions needs the caller to check the validity of the parameters */
 
-topo_map_t *create_topo_map(bondp_topo_node_t *topo_infos, uint32_t node_num);
+topo_map_t *create_topo_map(bondp_topo_node_raw_t *topo_infos, uint32_t node_num);
 
 void delete_topo_map(topo_map_t *topo_map);
 
@@ -82,6 +92,12 @@ void delete_topo_map(topo_map_t *topo_map);
  * @return 0 for success, other for error or not found
  */
 int get_bonding_eid_by_target_eid(topo_map_t *topo_map, urma_eid_t *target_eid, urma_eid_t *output);
+
+/**
+ * Look up node index by any EID (agg_eid, primary_eid, port_eid) via the prebuilt hash table.
+ * @return 0 for success, other for error or not found
+ */
+int get_node_idx_by_eid(const topo_map_t *topo_map, const urma_eid_t *eid, uint32_t *node_idx);
 
 /*
  * Build connection matrix between local bonding context and dst node in topo map.

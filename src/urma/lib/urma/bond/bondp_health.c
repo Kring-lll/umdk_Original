@@ -887,26 +887,7 @@ int bondp_hc_import_tseg(const bondp_context_t *bdp_ctx, bondp_target_jetty_t *b
 
 static int hc_find_node_idx_by_eid(topo_map_t *topo_map, const urma_eid_t *eid, uint32_t *node_idx)
 {
-    if (topo_map == NULL || eid == NULL || node_idx == NULL) {
-        return -1;
-    }
-
-    for (uint32_t i = 0; i < topo_map->node_num; ++i) {
-        bondp_topo_node_t *node = &topo_map->topo_infos[i];
-
-        for (int d = 0; d < DEV_NUM; ++d) {
-            bondp_topo_agg_dev_t *dev = &node->agg_devs[d];
-            if (is_empty_eid((urma_eid_t *)(dev->agg_eid))) {
-                continue;
-            }
-            if (!memcmp(dev->agg_eid, eid, EID_LEN)) {
-                *node_idx = i;
-                return 0;
-            }
-        }
-    }
-
-    return -1;
+    return get_node_idx_by_eid(topo_map, eid, node_idx);
 }
 
 static bool hc_tjetty_has_probe_path(const bondp_target_jetty_t *bdp_tjetty)

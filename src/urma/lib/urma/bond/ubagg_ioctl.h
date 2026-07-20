@@ -46,7 +46,7 @@ typedef struct bondp_userctl_physical_device_out {
 } bondp_userctl_physical_device_out_t;
 
 struct ubagg_topo_info_out {
-    bondp_topo_node_t topo_info[MAX_NODE_NUM];
+    bondp_topo_node_raw_t topo_info[MAX_NODE_NUM];
     uint32_t node_num;
 };
 #endif // UBAGG_IOCTL_H
