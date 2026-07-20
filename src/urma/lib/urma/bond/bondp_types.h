@@ -211,6 +211,11 @@ typedef struct bondp_comp {
         urma_jfr_t *p_jfr[URMA_UBAGG_DEV_MAX_NUM];
         urma_jetty_t *p_jetty[URMA_UBAGG_DEV_MAX_NUM];
     };
+    /* Pre-created spare jetty per send index; only used for BONDP_COMP_JETTY.
+     * In bond balance mode a spare is created alongside the primary pjetty. On
+     * CR failover the send path switches to this spare jetty while the failed
+     * pjetty is rebuilt in place. */
+    urma_jetty_t *backup_pjetty[URMA_UBAGG_DEV_MAX_NUM];
     int dev_num;
     uint32_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t enabled_count;
@@ -228,10 +233,20 @@ typedef struct bondp_comp {
     wr_buf_t send_wr_buf;
 #ifndef __cplusplus
     atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
+    /* When true, the send path posts to backup_pjetty[idx] instead of the
+     * (being rebuilt) p_jetty[idx]. Flipped under send_lock by the failover
+     * recovery worker; read by comp_post_send/resend_jfs_wr (also under
+     * send_lock). The recv path never consults this flag. */
+    atomic_bool send_use_backup[URMA_UBAGG_DEV_MAX_NUM];
+    /* Set by the async failover recovery worker after a pjetty (primary or
+     * backup) is rebuilt; consumed (and cleared) by try_failback on the next
+     * post_send to re-route in-flight WRs onto the rebuilt path. try_failback
+     * also re-arms valid[idx] as an idempotent backstop. */
     atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     atomic_uint msn;
 #else
     std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
+    std::atomic_bool send_use_backup[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_uint msn;
 #endif
