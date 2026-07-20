@@ -51,6 +51,7 @@ typedef struct bondp_nl_fb_result {
 typedef struct bondp_fb_task_key {
     uint32_t vjetty_id;
     uint32_t pjetty_idx;
+    bondp_fb_which_t which;
 } bondp_fb_task_key_t;
 
 typedef struct bondp_fb_task {
@@ -61,6 +62,7 @@ typedef struct bondp_fb_task {
     uint32_t request_id;
     uint32_t vjetty_id;
     uint32_t pjetty_idx;
+    bondp_fb_which_t which;
 } bondp_fb_task_t;
 
 struct bondp_fb_ctx {
@@ -75,7 +77,8 @@ struct bondp_fb_ctx {
 
 #define BONDP_FB_TASK_HASH_BASIS    0x9d4f21U
 #define BONDP_FB_TASK_TABLE_SIZE    1024U
-/* Delay (ms) before rebuilding a failed-back pjetty on the bond worker. */
+/* Delay (ms) before running failover recovery (switch to backup pjetty and/or
+ * rebuild the failed pjetty) on the bond worker. */
 #define BONDP_FB_REBUILD_DELAY_MS   2000U
 /* Delay (ms) before publishing the rebuild_done flag after a rebuild; the
  * worker enforces a minimum of one tick. */
@@ -105,7 +108,8 @@ static bool fb_task_matches_key(const struct ub_hmap_node *node, const bondp_fb_
     const bondp_fb_task_t *fb_task = CONTAINER_OF_FIELD(node, bondp_fb_task_t, hmap_node);
 
     return fb_task->vjetty_id == key->vjetty_id &&
-           fb_task->pjetty_idx == key->pjetty_idx;
+           fb_task->pjetty_idx == key->pjetty_idx &&
+           fb_task->which == key->which;
 }
 
 static uint32_t fb_task_hash_key(const bondp_fb_task_key_t *key)
@@ -314,6 +318,118 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
     return 0;
 }
 
+/* Rebuild the spare (backup) pjetty at idx in place. Mirrors bondp_rebuild_pjetty
+ * but operates on backup_pjetty[idx]. Called when the backup jetty itself fails
+ * while the send path is switched onto it (send_use_backup[idx]==true). */
+static int bondp_rebuild_backup_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
+{
+    int ret;
+
+    if (bdp_jetty == NULL || bdp_jetty->bondp_ctx == NULL ||
+        local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return -1;
+    }
+
+    bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
+
+    urma_jetty_t *old_jetty = bdp_jetty->backup_pjetty[local_idx];
+    if (old_jetty == NULL) {
+        URMA_LOG_ERR("backup pjetty at idx=%u is NULL, cannot rebuild\n", local_idx);
+        return -1;
+    }
+    urma_jetty_cfg_t p_cfg = old_jetty->jetty_cfg;
+    urma_jetty_id_t old_id = old_jetty->jetty_id;
+
+    urma_jetty_t *new_jetty = urma_create_jetty(bdp_ctx->p_ctxs[local_idx], &p_cfg);
+    if (new_jetty == NULL) {
+        URMA_LOG_ERR("Failed to recreate backup pjetty at idx=%d\n", local_idx);
+        return -1;
+    }
+
+    new_jetty->remote_jetty = NULL;
+    new_jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+    bdp_jetty->backup_pjetty[local_idx] = new_jetty;
+
+    ret = bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty);
+    if (ret != 0) {
+        bdp_jetty->backup_pjetty[local_idx] = old_jetty;
+        (void)urma_delete_jetty(new_jetty);
+        return -1;
+    }
+
+    ret = urma_delete_jetty(old_jetty);
+    if (ret != URMA_SUCCESS) {
+        URMA_LOG_WARN("Failed to delete old backup pjetty at idx=%d\n", local_idx);
+    }
+
+    URMA_LOG_INFO("Backup pjetty rebuilt, idx=%d old=" URMA_JETTY_ID_FMT " new=" URMA_JETTY_ID_FMT "\n",
+                  local_idx, URMA_JETTY_ID_ARGS(&old_id), URMA_JETTY_ID_ARGS(&new_jetty->jetty_id));
+    return 0;
+}
+
+/* Returns whether a pre-created spare pjetty exists at idx for this jetty, i.e.
+ * whether the backup switch logic applies. The spare only exists in balance
+ * mode, where it was created alongside the primary. */
+static bool bondp_has_backup_pjetty(const bondp_comp_t *bdp_jetty, uint32_t pjetty_idx)
+{
+    return bdp_jetty != NULL && bdp_jetty->bondp_ctx != NULL &&
+           bdp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE &&
+           bdp_jetty->comp_type == BONDP_COMP_JETTY &&
+           bdp_jetty->backup_pjetty[pjetty_idx] != NULL;
+}
+
+/* Switch the send path onto the pre-created spare pjetty at idx and re-arm
+ * valid so posting resumes immediately. Called from the CR failover handler
+ * (under send_lock) so the send path keeps flowing while the failed primary is
+ * rebuilt asynchronously by the worker. */
+void bondp_switch_to_backup_pjetty(bondp_comp_t *bdp_jetty, uint32_t pjetty_idx)
+{
+    /* Caller holds send_lock and has already checked bondp_has_backup_pjetty. */
+    atomic_store(&bdp_jetty->send_use_backup[pjetty_idx], true);
+    atomic_store(&bdp_jetty->valid[pjetty_idx], true);
+    URMA_LOG_INFO("Failover switched to backup pjetty, pjetty_idx=%u.\n", pjetty_idx);
+}
+
+/* Switch the send path back to the (now rebuilt) primary pjetty at idx. Called
+ * by the failover recovery worker after the primary rebuild succeeds. */
+static void bondp_switch_back_to_primary_pjetty(bondp_comp_t *bdp_jetty, uint32_t pjetty_idx)
+{
+    (void)pthread_spin_lock(&bdp_jetty->send_lock);
+    atomic_store(&bdp_jetty->send_use_backup[pjetty_idx], false);
+    atomic_store(&bdp_jetty->valid[pjetty_idx], true);
+    (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+    URMA_LOG_INFO("Failover switched back to rebuilt pjetty, pjetty_idx=%u.\n", pjetty_idx);
+}
+
+/* Handle a backup (spare) pjetty failure. This task only rebuilds the failed
+ * spare; it never switches the send path back to the primary -- that is the
+ * PRIMARY task's job (it rebuilds the primary and switches back). Doing the
+ * spare->primary switch here too would race with the PRIMARY task and re-switch
+ * a primary that may not be fully ready, causing post failures.
+ *   - If the send path is still on the spare (send_use_backup=true, i.e. the
+ *     PRIMARY task has not yet switched back to the primary), rebuild the spare
+ *     in place and re-arm valid so posting resumes on the now-healthy spare.
+ *   - If the send path has already switched back to the primary
+ *     (send_use_backup=false), just rebuild the spare so it is ready for the
+ *     next primary fault; do not touch valid (the primary owns it). */
+static int bondp_handle_backup_failure(bondp_comp_t *bdp_jetty, uint32_t pjetty_idx)
+{
+    int ret = bondp_rebuild_backup_pjetty(bdp_jetty, (int)pjetty_idx);
+    if (ret != 0) {
+        return ret;
+    }
+    (void)pthread_spin_lock(&bdp_jetty->send_lock);
+    if (atomic_load(&bdp_jetty->send_use_backup[pjetty_idx])) {
+        /* Send path still on the spare (primary not yet rebuilt by the PRIMARY
+         * task): re-arm valid so posting resumes on the now-healthy spare. */
+        atomic_store(&bdp_jetty->valid[pjetty_idx], true);
+    }
+    (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+    URMA_LOG_INFO("Backup pjetty recovered, pjetty_idx=%u.\n", pjetty_idx);
+    return 0;
+}
+
+
 static bondp_comp_t *bondp_find_jetty_by_vjetty_id(bondp_context_t *bond_ctx, uint32_t vjetty_id)
 {
     bondp_comp_t *bdp_jetty = NULL;
@@ -371,6 +487,25 @@ static void bondp_mark_rebuild_done_async(bondp_worker_task_reason_t reason, voi
     free(arg_typed);
 }
 
+/*
+ * Failover recovery rebuild worker callback.
+ *
+ * In balance mode the CR failover handler has already switched the send path
+ * onto the pre-created spare (send_use_backup=true, bdp_comp->valid[idx]=true)
+ * so posting kept flowing during the rebuild delay. This callback then:
+ *   - PRIMARY failure: rebuild the failed primary pjetty in place, then switch
+ *     the send path back to it (send_use_backup=false, valid=true).
+ *   - BACKUP failure: either switch back to the primary if it is available
+ *     (spare->primary), or rebuild the spare in place; either way the send path
+ *     lands on a usable pjetty and bdp_comp->valid[idx] is re-armed.
+ * Whichever pjetty the send path is switched onto (primary or spare), the
+ * corresponding bdp_comp->valid[idx] is set to true unconditionally.
+ * Non-balance modes have no spare and just rebuild the primary in place, then
+ * re-arm valid. After a successful rebuild the callback schedules
+ * bondp_mark_rebuild_done_async to publish rebuild_done, which try_failback
+ * consumes on the next post_send to re-route in-flight WRs (and re-arm valid as
+ * an idempotent backstop).
+ */
 static void bondp_rebuild_pjetty_async(bondp_worker_task_reason_t reason, void *arg)
 {
     bondp_fb_async_arg_t *arg_typed = (bondp_fb_async_arg_t *)arg;
@@ -400,11 +535,55 @@ static void bondp_rebuild_pjetty_async(bondp_worker_task_reason_t reason, void *
         goto del_task;
     }
 
-    int ret = bondp_rebuild_pjetty(bdp_jetty, (int)fb_task->pjetty_idx);
-    if (ret != 0) {
-        URMA_LOG_ERR("Failed to rebuild failback pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
-                     fb_task->vjetty_id, fb_task->pjetty_idx);
+    if (atomic_load(&bdp_jetty->deleting)) {
+        URMA_LOG_INFO("Skip failover recovery, jetty is being deleted, vjetty_id=%u, pjetty_idx=%u.\n",
+                      fb_task->vjetty_id, fb_task->pjetty_idx);
         goto del_task;
+    }
+    uint32_t pjetty_idx = fb_task->pjetty_idx;
+    bool use_backup = bondp_has_backup_pjetty(bdp_jetty, pjetty_idx);
+
+    int ret;
+    if (fb_task->which == BONDP_FB_PRIMARY) {
+        /* Primary pjetty failure. In balance mode the CR handler already
+         * switched the send path onto the spare (send_use_backup=true) so
+         * posting kept flowing during the rebuild delay; here we just rebuild
+         * the failed primary in place and, once healthy, switch back to it.
+         * While send_use_backup is true the send path never dereferences
+         * p_jetty[idx]. */
+        ret = bondp_rebuild_pjetty(bdp_jetty, (int)pjetty_idx);
+        if (ret != 0) {
+            URMA_LOG_ERR("Failed to rebuild failover pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
+                         fb_task->vjetty_id, pjetty_idx);
+            /* On failure: with backup, send stays on the spare (valid already
+             * true); without backup, the failed idx stays invalid. Either way,
+             * leave it for a later recovery. */
+            goto del_task;
+        }
+        if (use_backup && atomic_load(&bdp_jetty->send_use_backup[pjetty_idx])) {
+            /* The CR handler switched onto the spare (a local send-pjetty
+             * fault); switch back to the rebuilt primary. A failover CR that
+             * did not switch onto the spare (e.g. ACK_TIMEOUT) leaves
+             * send_use_backup false, so we only re-arm valid here. */
+            bondp_switch_back_to_primary_pjetty(bdp_jetty, pjetty_idx);
+        } else {
+            /* No spare switch happened (ACK_TIMEOUT / non-balance): rebuild
+             * succeeded, re-arm the failed idx. */
+            atomic_store(&bdp_jetty->valid[pjetty_idx], true);
+        }
+    } else {
+        /* Backup (spare) pjetty failure (only reachable when use_backup is true,
+         * since the send path must have been posting to the spare to observe
+         * its failure). Either switch back to the primary if it is available,
+         * or rebuild the spare in place. */
+        ret = bondp_handle_backup_failure(bdp_jetty, pjetty_idx);
+        if (ret != 0) {
+            URMA_LOG_ERR("Failed to recover backup pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
+                         fb_task->vjetty_id, pjetty_idx);
+            /* The spare stays unusable; the primary recovery (if pending) will
+             * re-arm valid when it switches back to the primary. */
+            goto del_task;
+        }
     }
 
     bondp_fb_mark_done_arg_t *mark_arg = calloc(1, sizeof(*mark_arg));
@@ -417,7 +596,7 @@ static void bondp_rebuild_pjetty_async(bondp_worker_task_reason_t reason, void *
     mark_arg->key = arg_typed->key;
     mark_arg->fb_task = fb_task;
     mark_arg->bdp_jetty = bdp_jetty;
-    mark_arg->pjetty_idx = fb_task->pjetty_idx;
+    mark_arg->pjetty_idx = pjetty_idx;
 
     uint64_t mark_done_task_id = 0;
     ret = bondp_worker_schedule(BONDP_FB_MARK_DONE_DELAY_MS, bondp_mark_rebuild_done_async,
@@ -442,7 +621,8 @@ free_arg:
     return;
 }
 
-int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx)
+int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx,
+                      bondp_fb_which_t which)
 {
     if (bond_ctx == NULL || bond_ctx->fb_ctx == NULL) {
         return -EINVAL;
@@ -458,11 +638,13 @@ int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pj
     fb_task->request_id = next_request_id(fb_ctx);
     fb_task->vjetty_id = vjetty_id;
     fb_task->pjetty_idx = pjetty_idx;
+    fb_task->which = which;
     atomic_init(&fb_task->use_cnt.atomic_cnt, 1);
 
     bondp_fb_task_key_t key = {
         .vjetty_id = vjetty_id,
         .pjetty_idx = pjetty_idx,
+        .which = which,
     };
     uint32_t hash = fb_task_hash_key(&key);
     bondp_fb_async_arg_t *async_arg = calloc(1, sizeof(*async_arg));
