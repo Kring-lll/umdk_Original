@@ -1903,7 +1903,12 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
             ret = -UMQ_ERR_EFLOWCTL;
             umq_ub_fc_process_tx_error(queue, &obj);
             if (buf != NULL) {
-                qbuf_cnt += (int32_t)umq_ub_fill_fc_buf(queue, &buf[qbuf_cnt], UMQ_FAKE_BUF_FC_ERR);
+                int32_t fill_buf_cnt = (int32_t)umq_ub_fill_fc_buf(queue, &buf[qbuf_cnt], UMQ_FAKE_BUF_FC_ERR);
+                if (fill_buf_cnt > 0) {
+                    umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf[qbuf_cnt]->qbuf_ext;
+                    buf_pro->umq_ctx = obj.bs.umq_ctx;
+                    qbuf_cnt += fill_buf_cnt;
+                }
             }
             failed_cnt++;
             continue;
