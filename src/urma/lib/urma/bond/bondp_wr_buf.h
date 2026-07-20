@@ -34,9 +34,18 @@ typedef struct jfs_wr_entry {
     uint64_t user_ctx;
     struct bondp_comp *bdp_comp;
     struct bondp_target_jetty *target_vjetty;
+    struct jfs_wr_entry *group_head;
+    struct jfs_wr_entry *group_next;
+    uint32_t group_count;
     uint32_t send_idx;
     uint32_t target_idx;
 } jfs_wr_entry_t;
+
+typedef struct jfs_wr_group {
+    jfs_wr_entry_t *head;
+    jfs_wr_entry_t *tail;
+    uint32_t count;
+} jfs_wr_group_t;
 
 typedef struct jfr_wr_entry {
     uint64_t wr_id;
@@ -101,5 +110,8 @@ jfr_wr_entry_t *jfr_wr_buf_alloc(wr_buf_t *buf);
 
 void jfs_wr_buf_release(jfs_wr_entry_t *entry);
 void jfr_wr_buf_release(jfr_wr_entry_t *entry);
+
+void jfs_wr_group_append(jfs_wr_group_t *group, jfs_wr_entry_t *entry);
+void jfs_wr_group_clear(jfs_wr_group_t *group);
 
 #endif // BONDP_WR_BUF_H

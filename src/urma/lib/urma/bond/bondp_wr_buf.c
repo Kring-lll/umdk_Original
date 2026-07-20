@@ -100,3 +100,24 @@ void jfr_wr_buf_release(jfr_wr_entry_t *entry)
 {
     memset(entry, 0, sizeof(jfr_wr_entry_t));
 }
+
+void jfs_wr_group_append(jfs_wr_group_t *group, jfs_wr_entry_t *entry)
+{
+    entry->group_next = NULL;
+    if (group->tail == NULL) {
+        group->head = entry;
+    } else {
+        group->tail->group_next = entry;
+    }
+    group->tail = entry;
+    group->count++;
+    entry->group_head = group->head;
+    entry->group_count = group->count;
+}
+
+void jfs_wr_group_clear(jfs_wr_group_t *group)
+{
+    group->head = NULL;
+    group->tail = NULL;
+    group->count = 0;
+}

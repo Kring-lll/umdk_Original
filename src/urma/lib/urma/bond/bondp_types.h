@@ -233,6 +233,7 @@ typedef struct bondp_comp {
     pthread_spinlock_t send_lock;
     wr_buf_t send_wr_buf;
     pthread_spinlock_t send_wr_lock;
+    jfs_wr_group_t pending_send_group[URMA_UBAGG_DEV_MAX_NUM];
     bool valid[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t msn;
     urma_target_seg_t *check_tseg[URMA_UBAGG_DEV_MAX_NUM];
