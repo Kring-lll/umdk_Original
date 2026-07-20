@@ -16,6 +16,7 @@
 
 #include <torch/extension.h>
 #include <acl/acl_rt.h>
+#include "hccl_common.h"
 
 namespace op_api {
 
