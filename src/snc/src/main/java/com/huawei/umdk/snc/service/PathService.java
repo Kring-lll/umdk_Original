@@ -23,7 +23,9 @@ import com.huawei.umdk.snc.engine.PathEngine;
 import com.huawei.umdk.snc.engine.RouteLookupEngine;
 import com.huawei.umdk.snc.entity.AclData;
 import com.huawei.umdk.snc.entity.DeviceEntity;
+import com.huawei.umdk.snc.entity.DeviceType;
 import com.huawei.umdk.snc.entity.InternalPathHop;
+import com.huawei.umdk.snc.exception.PathPlanException;
 import com.huawei.umdk.snc.entity.InternalPathInfo;
 import com.huawei.umdk.snc.entity.NpuDevice;
 import com.huawei.umdk.snc.entity.NpuPortEntity;
@@ -63,26 +65,44 @@ public class PathService {
         // Step 0: SuperNode lookup
         SuperNode superNode = superNodeStore.getSuperNode(request.getSuperNodeName());
         if (superNode == null) {
-            LOG.error("planPath: error=SuperNode topology not found, superNode=" + request.getSuperNodeName());
+            LOG.error("planPath: error=SuperNode topology not found, superNode=%s", request.getSuperNodeName());
             return new PathPlanResult(PlanStatus.TOPO_NOT_FOUND,
                 "SuperNode topology not found: " + request.getSuperNodeName());
         }
         LOG.debug("planPath: step=0, SuperNode found, superNode=" + request.getSuperNodeName());
 
-        NpuDevice srcNpuDevice = null;
-        NpuDevice destNpuDevice = null;
-        if (superNode.getNpuDevices() != null) {
-            srcNpuDevice = superNode.getNpuDevices().get(request.getSrcDevice());
-            destNpuDevice = superNode.getNpuDevices().get(request.getDestDevice());
-        }
-        if (srcNpuDevice == null || destNpuDevice == null) {
-            LOG.error("planPath: error=Source or destination NPU device not found, src=" + request.getSrcDevice()
-                + ", dst=" + request.getDestDevice());
+        Map<String, DeviceEntity> allDevices = superNode.getAllDevices();
+
+        DeviceEntity srcDevice = allDevices.get(request.getSrcDevice());
+        if (srcDevice == null) {
+            LOG.error("planPath: error=Source device not found in topology, src=%s", request.getSrcDevice());
             return new PathPlanResult(PlanStatus.TOPO_INCOMPLETE,
-                "Source or destination NPU device not found");
+                "Source device not found in topology: " + request.getSrcDevice());
         }
-        LOG.debug("planPath: step=0, srcNpu=" + srcNpuDevice.getDeviceName()
-            + ", dstNpu=" + destNpuDevice.getDeviceName());
+        if (srcDevice.getDeviceType() != DeviceType.NPU) {
+            LOG.error("planPath: error=Source must be NPU device, src=%s, deviceType=%s",
+                request.getSrcDevice(), srcDevice.getDeviceType());
+            return new PathPlanResult(PlanStatus.SRC_AND_DST_MUST_BE_NPU,
+                "Source must be NPU device: " + request.getSrcDevice() + " is " + srcDevice.getDeviceType());
+        }
+
+        DeviceEntity destDevice = allDevices.get(request.getDestDevice());
+        if (destDevice == null) {
+            LOG.error("planPath: error=Destination device not found in topology, dst=%s", request.getDestDevice());
+            return new PathPlanResult(PlanStatus.TOPO_INCOMPLETE,
+                "Destination device not found in topology: " + request.getDestDevice());
+        }
+        if (destDevice.getDeviceType() != DeviceType.NPU) {
+            LOG.error("planPath: error=Destination must be NPU device, dst=%s, deviceType=%s",
+                request.getDestDevice(), destDevice.getDeviceType());
+            return new PathPlanResult(PlanStatus.SRC_AND_DST_MUST_BE_NPU,
+                "Destination must be NPU device: " + request.getDestDevice() + " is " + destDevice.getDeviceType());
+        }
+
+        NpuDevice srcNpuDevice = (NpuDevice) srcDevice;
+        NpuDevice destNpuDevice = (NpuDevice) destDevice;
+        LOG.debug("planPath: step=0, srcNpu=%s, dstNpu=%s",
+            srcNpuDevice.getDeviceName(), destNpuDevice.getDeviceName());
 
         // Step 1: Find src port
         LOG.debug("planPath: step=1, finding source port, srcPort=" + request.getSrcPort());
@@ -212,12 +232,17 @@ public class PathService {
             }
 
             // Step 8-12: Route lookup for intermediate devices (forward + reverse)
-            LOG.debug("planPath: step=8, Forward route phase, targetCna=" + destCna);
+            LOG.debug("planPath: step=8, Forward route phase, targetCna=%s", destCna);
             String forwardTarget = destCna;
-            routePhase(multiHopPath, forwardTarget, request.getSuperNodeName());
+            try {
+                routePhase(multiHopPath, forwardTarget, request.getSuperNodeName());
+            } catch (PathPlanException e) {
+                LOG.error("planPath: error=Forward route phase failed, reason=%s", e.getMessage());
+                return new PathPlanResult(e.getStatus(), e.getMessage());
+            }
 
             // Step 9: Reverse phase
-            LOG.debug("planPath: step=9, Reverse route phase, targetCna=" + srcCna);
+            LOG.debug("planPath: step=9, Reverse route phase, targetCna=%s", srcCna);
             List<InternalPathHop> reversedHops = pathEngine.reverseHops(
                 multiHopPath.getHops());
             InternalPathInfo reversedPath = new InternalPathInfo();
@@ -228,7 +253,12 @@ public class PathService {
             reversedPath.setDestCna(multiHopPath.getSourceCna());
 
             String reverseTarget = srcCna;
-            routePhase(reversedPath, reverseTarget, request.getSuperNodeName());
+            try {
+                routePhase(reversedPath, reverseTarget, request.getSuperNodeName());
+            } catch (PathPlanException e) {
+                LOG.error("planPath: error=Reverse route phase failed, reason=%s", e.getMessage());
+                return new PathPlanResult(e.getStatus(), e.getMessage());
+            }
 
             // Re-reverse back to forward order
             LOG.debug("planPath: step=10, Re-reversing hops back to forward order");
@@ -249,17 +279,19 @@ public class PathService {
         List<InternalPathHop> hops = pathInfo.getHops();
         SuperNode sn = superNodeStore.getSuperNode(superNodeName);
         if (sn == null) {
-            LOG.error("routePhase: error=TOPOLOGY_NOT_FOUND, superNode=" + superNodeName);
-            throw new RuntimeException("TOPOLOGY_NOT_FOUND: " + superNodeName);
+            LOG.error("routePhase: error=TOPOLOGY_NOT_FOUND, superNode=%s", superNodeName);
+            throw new PathPlanException(PlanStatus.TOPO_NOT_FOUND,
+                "SuperNode topology not found: " + superNodeName);
         }
         Map<String, DeviceEntity> devices = sn.getAllDevices();
         for (int i = 1; i < hops.size() - 1; i++) {
             InternalPathHop hop = hops.get(i);
             DeviceEntity device = devices.get(hop.getDeviceName());
             if (device == null) {
-                LOG.error("routePhase: error=DEVICE_NOT_FOUND, device=" + hop.getDeviceName()
-                    + ", superNode=" + superNodeName);
-                throw new RuntimeException("DEVICE_NOT_FOUND: " + hop.getDeviceName() + " in " + superNodeName);
+                LOG.error("routePhase: error=DEVICE_NOT_FOUND, device=%s, superNode=%s",
+                    hop.getDeviceName(), superNodeName);
+                throw new PathPlanException(PlanStatus.TOPO_CONNECTION_NOT_FOUND,
+                    "Device not found: " + hop.getDeviceName() + " in " + superNodeName);
             }
 
             RoutingEntry bestEntry = null;
@@ -285,17 +317,18 @@ public class PathService {
             }
 
             if (bestEntry == null) {
-                LOG.error("routePhase: error=ROUTE_NOT_REACHABLE, device=" + hop.getDeviceName()
-                    + ", target=" + targetCna);
-                throw new RuntimeException("ROUTE_NOT_REACHABLE: no route for device "
-                    + hop.getDeviceName() + " to target " + targetCna);
+                LOG.error("routePhase: error=ROUTE_NOT_REACHABLE, device=%s, target=%s",
+                    hop.getDeviceName(), targetCna);
+                throw new PathPlanException(PlanStatus.ROUTE_NOT_REACHABLE,
+                    "ROUTE_NOT_REACHABLE: no route for device " + hop.getDeviceName() + " to target " + targetCna);
             }
 
             Map<String, OutPortInfo> outPortInfos = bestEntry.getOutPortInfos();
             if (outPortInfos == null || outPortInfos.isEmpty()) {
-                LOG.error("routePhase: error=ROUTE_NOT_REACHABLE, no outPort for device=" + hop.getDeviceName());
-                throw new RuntimeException("ROUTE_NOT_REACHABLE: no outPort for device "
-                    + hop.getDeviceName());
+                LOG.error("routePhase: error=ROUTE_NOT_REACHABLE, no outPort for device=%s",
+                    hop.getDeviceName());
+                throw new PathPlanException(PlanStatus.ROUTE_NOT_REACHABLE,
+                    "ROUTE_NOT_REACHABLE: no outPort for device " + hop.getDeviceName());
             }
 
             // Set the first outPort on the hop (ECMP handling in V2)
