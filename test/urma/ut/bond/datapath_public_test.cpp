@@ -6,6 +6,10 @@
 
 #include "bond_fixture.h"
 
+#include <cstdlib>
+#include <future>
+#include <thread>
+
 using namespace urma_test_bond;
 
 static void InitSingleEnabledPollJfc(bondp_jfc_t *jfc, BondPathFixture *fixture)
@@ -669,6 +673,29 @@ TEST(UrmaBondTest, PublicDatapathApisRejectInvalidWorkRequests)
     EXPECT_EQ(0, bondp_flush_jetty(&fixture.jetty.v_jetty, 1, &cr));
 }
 
+TEST(UrmaBondTest, DatapathThreadCrBuffersAreReleasedOnThreadExit)
+{
+    bondp_global_context_t globalCtx = {};
+    bondp_global_context_t *savedGlobalCtx = g_bondp_global_ctx;
+    bondp_context_t ctx = {};
+    bondp_jfc_t jfc = {};
+    bondp_comp_t jetty = {};
+
+    globalCtx.max_cr_cnt_per_dev = URMA_UBAGG_MAX_CR_CNT_PER_DEV;
+    g_bondp_global_ctx = &globalCtx;
+    ctx.bonding_mode = BONDP_BONDING_MODE_BALANCE;
+    jfc.v_jfc.urma_ctx = &ctx.v_ctx;
+    jetty.v_jetty.urma_ctx = &ctx.v_ctx;
+
+    std::thread worker([&]() {
+        urma_cr_t cr = {};
+        EXPECT_EQ(0, bondp_poll_jfc(&jfc.v_jfc, 1, &cr));
+        EXPECT_EQ(0, bondp_flush_jetty(&jetty.v_jetty, 1, &cr));
+    });
+    worker.join();
+    g_bondp_global_ctx = savedGlobalCtx;
+}
+
 TEST(UrmaBondTest, PublicDatapathApisValidateSendWorkRequestFields)
 {
     BondPublicApiFixture fixture;
@@ -908,4 +935,42 @@ TEST(UrmaBondTest, PublicDatapathSendWrListReturnsFirstBadWr)
 
     EXPECT_EQ(URMA_EINVAL, bondp_post_jfs_wr(&fixture.jfs.v_jfs, &firstWr, &badSend));
     EXPECT_EQ(&secondWr, badSend);
+}
+
+TEST(UrmaBondTest, DatapathThreadCrBuffersAreReleasedWhileWorkerIsQuiesced)
+{
+    ASSERT_EXIT(
+        {
+            bondp_global_context_t globalCtx = {};
+            bondp_context_t ctx = {};
+            bondp_jfc_t jfc = {};
+            bondp_comp_t jetty = {};
+            std::promise<void> workerReady;
+            std::promise<void> workerRelease;
+            std::future<void> ready = workerReady.get_future();
+            std::future<void> release = workerRelease.get_future();
+            int workerRet = 0;
+
+            globalCtx.max_cr_cnt_per_dev = URMA_UBAGG_MAX_CR_CNT_PER_DEV;
+            g_bondp_global_ctx = &globalCtx;
+            ctx.bonding_mode = BONDP_BONDING_MODE_BALANCE;
+            jfc.v_jfc.urma_ctx = &ctx.v_ctx;
+            jetty.v_jetty.urma_ctx = &ctx.v_ctx;
+
+            std::thread worker([&]() {
+                urma_cr_t cr = {};
+                workerRet = bondp_poll_jfc(&jfc.v_jfc, 1, &cr);
+                if (workerRet == 0) {
+                    workerRet = bondp_flush_jetty(&jetty.v_jetty, 1, &cr);
+                }
+                workerReady.set_value();
+                release.wait();
+            });
+            ready.wait();
+            int uninitRet = bondp_datapath_thread_buf_uninit();
+            workerRelease.set_value();
+            worker.join();
+            std::exit(workerRet == 0 && uninitRet == 0 ? 0 : 1);
+        },
+        ::testing::ExitedWithCode(0), "");
 }
