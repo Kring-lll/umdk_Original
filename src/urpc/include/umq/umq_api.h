@@ -80,6 +80,14 @@ int umq_bind(uint64_t umqh, uint8_t *bind_info, uint32_t bind_info_size);
 int umq_unbind(uint64_t umqh);
 
 /**
+ * Thread safety function
+ * Confirm that the peer has successfully bound, start queue timeout checking
+ * @param[in] umqh: umq handle
+ * Return 0 on success, error code on failure
+ */
+int umq_bind_confirmed(uint64_t umqh);
+
+/**
  * User should ensure thread safety if io_lock_free is true
  * Set umq state
  * @param[in] umqh: umq handle
