@@ -7,14 +7,14 @@
  * History: 2025-06-04
  */
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "ub_hash.h"
+#include "ub_hmap.h"
 #include "urma_log.h"
 #include "urma_types.h"
-
-#include "bondp_hash_table.h"
 
 #include "bondp_topo_info.h"
 
@@ -22,51 +22,41 @@
 #define TL_EID_CACHE_SLOTS    (8)
 
 typedef struct eid_mapping_entry {
-    hmap_node_t hmap_node;
+    struct ub_hmap_node hmap_node;
     urma_eid_t key_eid;
     urma_eid_t bonding_eid;
 } eid_mapping_entry_t;
 
 typedef struct topo_map {
     uint32_t node_num;
-    bondp_hash_table_t eid_mapping_hash_table;
+    struct ub_hmap eid_mapping_hmap;
     bondp_topo_node_t topo_infos[];
 } topo_map_t;
 
 static topo_map_t *g_topo_map;
 
-static inline bool is_empty_eid(urma_eid_t *eid)
+static uint32_t eid_hash_func(const urma_eid_t *eid)
 {
-    return eid->in6.interface_id == 0 && eid->in6.subnet_prefix == 0;
-}
-
-static inline bool is_eid_equal(urma_eid_t *eid1, urma_eid_t *eid2)
-{
-    return !memcmp(eid1, eid2, sizeof(urma_eid_t));
-}
-
-static bool eid_comp_func(struct ub_hmap_node *node, void *key)
-{
-    eid_mapping_entry_t *entry = CONTAINER_OF_FIELD(node, eid_mapping_entry_t, hmap_node);
-    urma_eid_t *target = (urma_eid_t *)key;
-    return is_eid_equal(&entry->key_eid, target);
-}
-
-static void eid_free_func(struct ub_hmap_node *node)
-{
-    eid_mapping_entry_t *entry = CONTAINER_OF_FIELD(node, eid_mapping_entry_t, hmap_node);
-    free(entry);
-}
-
-static uint32_t eid_hash_func(void *key)
-{
-    urma_eid_t *eid = (urma_eid_t *)key;
     return ub_hash_bytes(eid, sizeof(urma_eid_t), DIRECT_DEV_HASH_BASIS);
 }
 
-static int eid_mapping_hash_table_create(bondp_hash_table_t *tbl, uint32_t size)
+static int eid_mapping_hmap_create(struct ub_hmap *hmap, uint32_t size)
 {
-    return bondp_hash_table_create(tbl, size, eid_comp_func, eid_free_func, eid_hash_func);
+    return ub_hmap_init(hmap, size);
+}
+
+static void eid_mapping_hmap_destroy(struct ub_hmap *hmap)
+{
+    struct ub_hmap_node *node = ub_hmap_first(hmap);
+
+    while (node != NULL) {
+        struct ub_hmap_node *next = ub_hmap_next(hmap, node);
+        eid_mapping_entry_t *entry = CONTAINER_OF_FIELD(node, eid_mapping_entry_t, hmap_node);
+        ub_hmap_remove(hmap, node);
+        free(entry);
+        node = next;
+    }
+    ub_hmap_destroy(hmap);
 }
 
 static bool get_topo_map_alloc_size(uint32_t node_num, size_t *size)
@@ -91,32 +81,35 @@ static bool get_eid_mapping_hash_size(uint32_t node_num, uint32_t *size)
     return true;
 }
 
-static int eid_mapping_hash_table_add(bondp_hash_table_t *tbl, urma_eid_t *key, urma_eid_t *bonding_eid)
+static eid_mapping_entry_t *eid_mapping_hmap_lookup(struct ub_hmap *hmap, const urma_eid_t *key)
 {
-    hmap_node_t *node = NULL;
-    uint32_t hash = tbl->hash_f(key);
-    node = bondp_hash_table_lookup_without_lock(tbl, key, hash);
-    if (node) {
-        return BONDP_HASH_MAP_COLLIDE_ERROR;
+    uint32_t hash = eid_hash_func(key);
+    struct ub_hmap_node *node = ub_hmap_first_with_hash(hmap, hash);
+
+    while (node != NULL) {
+        eid_mapping_entry_t *entry = CONTAINER_OF_FIELD(node, eid_mapping_entry_t, hmap_node);
+        if (is_eid_equal(&entry->key_eid, key)) {
+            return entry;
+        }
+        node = ub_hmap_next_with_hash(node, hash);
     }
+    return NULL;
+}
+
+static int eid_mapping_hmap_add(topo_map_t *topo_map, const urma_eid_t *key, const urma_eid_t *bonding_eid)
+{
+    if (eid_mapping_hmap_lookup(&topo_map->eid_mapping_hmap, key) != NULL) {
+        return -EEXIST;
+    }
+
     eid_mapping_entry_t *entry = calloc(1, sizeof(eid_mapping_entry_t));
     if (entry == NULL) {
-        return BONDP_HASH_MAP_ALLOC_ERROR;
+        return -ENOMEM;
     }
     entry->key_eid = *key;
     entry->bonding_eid = *bonding_eid;
-    bondp_hash_table_add_with_hash(tbl, &entry->hmap_node, hash);
+    ub_hmap_insert(&topo_map->eid_mapping_hmap, &entry->hmap_node, eid_hash_func(key));
     return 0;
-}
-
-static eid_mapping_entry_t *eid_mapping_hash_table_lookup(bondp_hash_table_t *tbl, urma_eid_t *key)
-{
-    hmap_node_t *node = NULL;
-    node = bondp_hash_table_lookup(tbl, key, tbl->hash_f(key));
-    if (node == NULL) {
-        return NULL;
-    }
-    return CONTAINER_OF_FIELD(node, eid_mapping_entry_t, hmap_node);
 }
 
 static int update_mapping_hash_table(topo_map_t *topo_map)
@@ -125,29 +118,27 @@ static int update_mapping_hash_table(topo_map_t *topo_map)
         bondp_topo_node_t *cur_node = &topo_map->topo_infos[node_idx];
         for (int dev_idx = 0; dev_idx < DEV_NUM; ++dev_idx) {
             bondp_topo_agg_dev_t *cur_dev = &cur_node->agg_devs[dev_idx];
-            if (is_empty_eid((urma_eid_t *)cur_dev->agg_eid)) {
+            if (is_empty_eid((const urma_eid_t *)cur_dev->agg_eid)) {
                 continue;
             }
-            if (eid_mapping_hash_table_add(&topo_map->eid_mapping_hash_table, (urma_eid_t *)cur_dev->agg_eid,
-                                           (urma_eid_t *)cur_dev->agg_eid)) {
+            if (eid_mapping_hmap_add(topo_map, (const urma_eid_t *)cur_dev->agg_eid,
+                                     (const urma_eid_t *)cur_dev->agg_eid)) {
                 URMA_LOG_ERR("Failed to add agg eid to mapping hash table\n");
                 return -1;
             }
             for (int iodie_idx = 0; iodie_idx < IODIE_NUM; ++iodie_idx) {
                 bondp_topo_ue_t *ue_info = &cur_dev->ues[iodie_idx];
-                if (!is_empty_eid((urma_eid_t *)ue_info->primary_eid)) {
-                    if (eid_mapping_hash_table_add(&topo_map->eid_mapping_hash_table,
-                                                   (urma_eid_t *)ue_info->primary_eid,
-                                                   (urma_eid_t *)cur_dev->agg_eid)) {
+                if (!is_empty_eid((const urma_eid_t *)ue_info->primary_eid)) {
+                    if (eid_mapping_hmap_add(topo_map, (const urma_eid_t *)ue_info->primary_eid,
+                                             (const urma_eid_t *)cur_dev->agg_eid)) {
                         URMA_LOG_ERR("Failed to add primary eid to mapping hash table\n");
                         return -1;
                     }
                 }
                 for (int port_idx = 0; port_idx < PORT_NUM; ++port_idx) {
-                    if (!is_empty_eid((urma_eid_t *)ue_info->port_eid[port_idx])) {
-                        if (eid_mapping_hash_table_add(&topo_map->eid_mapping_hash_table,
-                                                       (urma_eid_t *)ue_info->port_eid[port_idx],
-                                                       (urma_eid_t *)cur_dev->agg_eid)) {
+                    if (!is_empty_eid((const urma_eid_t *)ue_info->port_eid[port_idx])) {
+                        if (eid_mapping_hmap_add(topo_map, (const urma_eid_t *)ue_info->port_eid[port_idx],
+                                                 (const urma_eid_t *)cur_dev->agg_eid)) {
                             URMA_LOG_ERR("Failed to add port eid to mapping hash table\n");
                             return -1;
                         }
@@ -194,7 +185,7 @@ static topo_map_t *create_topo_map(const bondp_topo_node_t *topo_infos, uint32_t
         return NULL;
     }
 
-    int ret = eid_mapping_hash_table_create(&topo_map->eid_mapping_hash_table, hash_size);
+    int ret = eid_mapping_hmap_create(&topo_map->eid_mapping_hmap, hash_size);
     if (ret) {
         URMA_LOG_ERR("Failed to create eid_mapping_hash_table\n");
         free(topo_map);
@@ -202,7 +193,7 @@ static topo_map_t *create_topo_map(const bondp_topo_node_t *topo_infos, uint32_t
     }
 
     if (update_mapping_hash_table(topo_map) != 0) {
-        bondp_hash_table_destroy(&topo_map->eid_mapping_hash_table);
+        eid_mapping_hmap_destroy(&topo_map->eid_mapping_hmap);
         free(topo_map);
         return NULL;
     }
@@ -213,7 +204,7 @@ static topo_map_t *create_topo_map(const bondp_topo_node_t *topo_infos, uint32_t
 static void delete_topo_map(topo_map_t *topo_map)
 {
     if (topo_map != NULL) {
-        bondp_hash_table_destroy(&topo_map->eid_mapping_hash_table);
+        eid_mapping_hmap_destroy(&topo_map->eid_mapping_hmap);
         free(topo_map);
     }
 }
@@ -251,7 +242,7 @@ int bondp_topo_query_node_idx(const urma_eid_t *bonding_eid, uint32_t *node_idx)
 
         for (int d = 0; d < DEV_NUM; ++d) {
             const bondp_topo_agg_dev_t *dev = &node->agg_devs[d];
-            if (is_empty_eid((urma_eid_t *)dev->agg_eid)) {
+            if (is_empty_eid((const urma_eid_t *)dev->agg_eid)) {
                 continue;
             }
             if (memcmp(dev->agg_eid, bonding_eid, EID_LEN) == 0) {
@@ -380,7 +371,6 @@ int bondp_topo_query_linked_port(
 int bondp_topo_query_bonding_eid(const urma_eid_t *target_eid, urma_eid_t *output)
 {
     static __thread const topo_map_t *tl_topo;
-    static __thread uint32_t tl_gen;
     static __thread int tl_fill_pos;
     static __thread int tl_evict_pos;
     static __thread struct {
@@ -393,13 +383,11 @@ int bondp_topo_query_bonding_eid(const urma_eid_t *target_eid, urma_eid_t *outpu
         return -1;
     }
 
-    uint32_t cur_gen = atomic_load(&g_topo_map->eid_mapping_hash_table.gen);
-    if (tl_topo != g_topo_map || tl_gen != cur_gen) {
+    if (tl_topo != g_topo_map) {
         for (int i = 0; i < TL_EID_CACHE_SLOTS; ++i) {
             tl_slots[i].valid = false;
         }
         tl_topo = g_topo_map;
-        tl_gen = cur_gen;
         tl_fill_pos = 0;
         tl_evict_pos = 0;
     }
@@ -411,8 +399,7 @@ int bondp_topo_query_bonding_eid(const urma_eid_t *target_eid, urma_eid_t *outpu
         }
     }
 
-    eid_mapping_entry_t *entry = eid_mapping_hash_table_lookup(&g_topo_map->eid_mapping_hash_table,
-                                                               (urma_eid_t *)target_eid);
+    eid_mapping_entry_t *entry = eid_mapping_hmap_lookup(&g_topo_map->eid_mapping_hmap, target_eid);
     if (entry == NULL) {
         return -1;
     }
