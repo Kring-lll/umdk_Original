@@ -32,7 +32,7 @@
 #include "bondp_health.h"
 #include "bondp_failback.h"
 #include "bondp_provider_ops.h"
-#include "bondp_segment.h"
+#include "bondp_cp_seg.h"
 #include "bondp_slide_window.h"
 #include "bondp_timewheel.h"
 #include "bondp_types.h"

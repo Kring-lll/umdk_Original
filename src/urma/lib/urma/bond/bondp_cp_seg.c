@@ -20,7 +20,7 @@
 #include "bondp_hash_table.h"
 #include "bondp_types.h"
 
-#include "bondp_segment.h"
+#include "bondp_cp_seg.h"
 
 typedef struct bondp_udata_import_seg {
     urma_seg_base_t peer_p_seg[URMA_UBAGG_DEV_MAX_NUM];
