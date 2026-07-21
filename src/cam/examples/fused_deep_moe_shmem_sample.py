@@ -261,12 +261,6 @@ class ShmemFusionOp(DecodeMoeOps):
 
     def _init_shmem_buffer(self):
         self.buffer = umdk_cam_op_lib.FusedDeepMoeBuffer()
-        # self.buffer.init(
-        #     rank=self.global_rank_id,
-        #     num_ranks=self.ep_world_size,
-        #     memsize=self.shmem_memsize,
-        #     ip_port=self.ip_port
-        # )
         print(f"rank-{self.global_rank_id} SHMEM Buffer initialized: "
               f"rank={self.global_rank_id}, num_ranks={self.ep_world_size}, "
               f"memsize={self.shmem_memsize}, ip_port={self.ip_port}")

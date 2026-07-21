@@ -148,10 +148,6 @@ std::vector<at::Tensor> Buffer::zb_fused_deep_moe(
     int64_t quant_mode,
     int64_t global_bs)
 {
-    // if (!initialized_) {
-    //     throw std::runtime_error("Buffer not initialized, call init() first");
-    // }
-
     auto x_shape = x.sizes();
     int h = x_shape[1];
     int bs = x_shape[0];
@@ -170,9 +166,6 @@ std::vector<at::Tensor> Buffer::zb_fused_deep_moe(
 
     const std::string group_ep_str(group_ep.data(), group_ep.size());
     const char *group_ep_ptr = group_ep_str.c_str();
-
-    // int64_t ext_info = get_ext_info();
-    // int64_t shmem_workspace = get_shmem_workspace();
 
     EXEC_NPU_CMD(aclnnFusedDeepMoe,
         context, x, expert_ids, gmm1_weight_list, gmm1_weight_scale_list, gmm2_weight_list, gmm2_weight_scale_list,

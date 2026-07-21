@@ -140,6 +140,9 @@ private:
 
     __aicore__ GM_ADDR GetShmemAddrByRankId(GM_ADDR baseAddr, int64_t rankId)
     {
+        if (static_cast<uint64_t>(rankId) >= HCCL_MAX_RANK_SIZE || rankId < 0) {
+            return baseAddr;
+        }
         GM_ADDR winBase = (epRankId_ == rankId)
                             ? ((GM_ADDR)(mc2MoeContext_->ipcBuffer_[epRankId_]))
                             : ((GM_ADDR)(mc2MoeContext_->ipcBuffer_[rankId])); // 其他卡
@@ -303,7 +306,8 @@ template <TemplateMC2TypeClass>
 __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     GM_ADDR expandX, GM_ADDR expertIds, GM_ADDR expandIdx, GM_ADDR epSendCount, GM_ADDR tpSendCount, GM_ADDR scales,
     GM_ADDR xActiveMask, GM_ADDR XOut, GM_ADDR workspaceGM, TPipe *pipe, const FusedDeepMoeTilingData *tilingData,
-    GM_ADDR allExpertTokenNums, GM_ADDR allEpRecvCount, GM_ADDR combineSend, uint64_t statusDataSpaceOffset, GM_ADDR hcclContext)
+    GM_ADDR allExpertTokenNums, GM_ADDR allEpRecvCount, GM_ADDR combineSend, uint64_t statusDataSpaceOffset,
+    GM_ADDR hcclContext)
 {
     tpipe_ = pipe;
     coreIdx_ = GetBlockIdx();

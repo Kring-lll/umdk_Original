@@ -9,6 +9,7 @@
 # -----------------------------------------------------------------------------------------------------------
 import torch
 import torch_npu
+import sys
 from .op_builder.builder import OpBuilder
 
 
@@ -49,4 +50,16 @@ class _LazyClassProxy:
 def __getattr__(name):
     if name == "CommContextManager":
         return _LazyClassProxy("CommContextManager", comm_context_op_builder)
-    raise AttributeError(f"module '{__name__}' has no attribute {name}")
+    module = sys.modules[__name__]
+    try:
+        return module.__dict__[name]
+    except KeyError:
+        raise AttributeError(f"module '{module.__name__}' has no attribute '{name}'") from None
+
+
+def __dir__():
+    module = sys.modules[__name__]
+    attrs = list(module.__dict__.keys())
+    attrs.append("CommContextManager")
+    return sorted(attrs)
+

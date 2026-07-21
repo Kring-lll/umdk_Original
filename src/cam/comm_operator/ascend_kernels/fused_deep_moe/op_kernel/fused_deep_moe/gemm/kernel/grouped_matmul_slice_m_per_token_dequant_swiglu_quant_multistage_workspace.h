@@ -972,7 +972,9 @@ public:
 
                 auto dstX1Addr = reinterpret_cast<__gm__ uint8_t *>(GetShmemAddrByRankId(gmX1, tempRankId));
                 auto dstX1ScaleAddr = reinterpret_cast<__gm__ uint8_t *>(GetShmemAddrByRankId(gmX1Scale, tempRankId));
-                auto dstSwigluOutAddr = reinterpret_cast<__gm__ uint8_t *>(GetShmemAddrByRankId(gmSwigluOut, tempRankId));
+                auto dstSwigluOutAddr = reinterpret_cast<__gm__ uint8_t *>(
+                    GetShmemAddrByRankId(gmSwigluOut, tempRankId)
+                );
 
                 dstWinGMTensor.SetGlobalBuffer((__gm__ int8_t *)(dstX1Addr + hOutSize *
                     (dstExpertOffset + curExpertCnt)));

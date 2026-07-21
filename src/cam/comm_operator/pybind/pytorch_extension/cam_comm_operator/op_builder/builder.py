@@ -33,6 +33,8 @@ class OpBuilder(ABC):
     def __init__(self, name):
         self.name = name
         self._cann_path = self.get_cann_path()
+        if self._cann_path is None:
+            RuntimeError("ASCEND_HOME_PATH is not set")
         self._torch_npu_path = os.path.dirname(os.path.abspath(torch_npu.__file__))
         self._package_path = os.path.dirname(os.path.abspath(umdk_cam_op_lib.__file__))
         self.register_schema(self.schema())
