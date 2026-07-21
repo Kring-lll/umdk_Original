@@ -36,7 +36,19 @@
 #define UMQ_UB_FC_REQ_TIMEOUT_DEFAULT_MS  1000  // default cfg->fc_req_timeout_ms when 0 is passed (ms, = 1s)
 #define UMQ_UB_FC_CREDIT_STEP 2
 
-static uint8_t g_umq_ub_credit_ratio[] = {1, 3, 5, 7};
+enum {
+    UMQ_UB_CREDIT_RATIO_VERY_LOW,
+    UMQ_UB_CREDIT_RATIO_LOW,
+    UMQ_UB_CREDIT_RATIO_MID,
+    UMQ_UB_CREDIT_RATIO_HIGH,
+};
+
+static uint8_t g_umq_ub_credit_ratio[] = {
+    [UMQ_UB_CREDIT_RATIO_VERY_LOW] = 1,
+    [UMQ_UB_CREDIT_RATIO_LOW] = 3,
+    [UMQ_UB_CREDIT_RATIO_MID] = 5,
+    [UMQ_UB_CREDIT_RATIO_HIGH] = 7,
+};
 #define UMQ_UB_CREDIT_RATIO_SIZE (sizeof(g_umq_ub_credit_ratio) / sizeof(uint8_t))
 
 static uint8_t umq_ub_fc_raito_to_imm(uint64_t available, uint16_t total)
@@ -59,7 +71,7 @@ static uint8_t umq_ub_fc_raito_to_imm(uint64_t available, uint16_t total)
 static uint8_t umq_ub_fc_imm_to_ratio(uint8_t ratio)
 {
     if (ratio >= (uint8_t)UMQ_UB_CREDIT_RATIO_SIZE) {
-        return g_umq_ub_credit_ratio[0];
+        return g_umq_ub_credit_ratio[UMQ_UB_CREDIT_RATIO_VERY_LOW];
     }
 
     return g_umq_ub_credit_ratio[ratio];
@@ -1018,16 +1030,16 @@ static uint16_t allocate_credits_by_load(uint64_t pool_allocated, uint16_t rx_de
     uint64_t remaining_ratio = (remaining * UMQ_UB_CREDIT_PERCENT) / rx_depth;
     uint64_t credits = 0;
 
-    if (remaining_ratio >= g_umq_ub_credit_ratio[3]) {
+    if (remaining_ratio >= g_umq_ub_credit_ratio[UMQ_UB_CREDIT_RATIO_HIGH]) {
         credits = req_count;
-    } else if (remaining_ratio >= g_umq_ub_credit_ratio[2]) {
-        credits = (uint16_t)(req_count * g_umq_ub_credit_ratio[3] / UMQ_UB_CREDIT_PERCENT);
-    } else if (remaining_ratio >= g_umq_ub_credit_ratio[1]) {
-        credits = (uint16_t)(req_count * g_umq_ub_credit_ratio[2] / UMQ_UB_CREDIT_PERCENT);
-    } else if (remaining_ratio >= g_umq_ub_credit_ratio[0]) {
-        credits = (uint16_t)(req_count * g_umq_ub_credit_ratio[1] / UMQ_UB_CREDIT_PERCENT);
+    } else if (remaining_ratio >= g_umq_ub_credit_ratio[UMQ_UB_CREDIT_RATIO_MID]) {
+        credits = (uint16_t)(req_count * g_umq_ub_credit_ratio[UMQ_UB_CREDIT_RATIO_HIGH] / UMQ_UB_CREDIT_PERCENT);
+    } else if (remaining_ratio >= g_umq_ub_credit_ratio[UMQ_UB_CREDIT_RATIO_LOW]) {
+        credits = (uint16_t)(req_count * g_umq_ub_credit_ratio[UMQ_UB_CREDIT_RATIO_MID] / UMQ_UB_CREDIT_PERCENT);
+    } else if (remaining_ratio >= g_umq_ub_credit_ratio[UMQ_UB_CREDIT_RATIO_VERY_LOW]) {
+        credits = (uint16_t)(req_count * g_umq_ub_credit_ratio[UMQ_UB_CREDIT_RATIO_LOW] / UMQ_UB_CREDIT_PERCENT);
     } else {
-        credits = (uint16_t)(req_count * g_umq_ub_credit_ratio[0] / UMQ_UB_CREDIT_PERCENT);
+        credits = (uint16_t)(req_count * g_umq_ub_credit_ratio[UMQ_UB_CREDIT_RATIO_VERY_LOW] / UMQ_UB_CREDIT_PERCENT);
     }
 
     if (credits > UINT16_MAX) {
