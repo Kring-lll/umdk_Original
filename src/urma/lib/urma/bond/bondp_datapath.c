@@ -9,6 +9,7 @@
  */
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <threads.h>
 
@@ -32,6 +33,180 @@
 #define BONDP_FAST_RETURN_THRESHOLD   64
 
 static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int send_idx, int target_idx);
+
+typedef struct bondp_thread_cr_buf {
+    struct bondp_thread_cr_buf *next;
+    urma_cr_t cr[];
+} bondp_thread_cr_buf_t;
+
+static pthread_key_t s_poll_cr_buf_key;
+static pthread_key_t s_flush_cr_buf_key;
+static pthread_once_t s_poll_cr_buf_key_once = PTHREAD_ONCE_INIT;
+static pthread_once_t s_flush_cr_buf_key_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t s_poll_cr_buf_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t s_flush_cr_buf_lock = PTHREAD_MUTEX_INITIALIZER;
+static bondp_thread_cr_buf_t *s_poll_cr_buf_list;
+static bondp_thread_cr_buf_t *s_flush_cr_buf_list;
+static int s_poll_cr_buf_key_ret;
+static int s_flush_cr_buf_key_ret;
+static bool s_poll_cr_buf_key_created;
+static bool s_flush_cr_buf_key_created;
+
+static bool remove_thread_cr_buf(bondp_thread_cr_buf_t *thread_buf, pthread_mutex_t *lock,
+                                 bondp_thread_cr_buf_t **buf_list)
+{
+    bool removed = false;
+    (void)pthread_mutex_lock(lock);
+    bondp_thread_cr_buf_t **cur = buf_list;
+    while (*cur != NULL) {
+        if (*cur == thread_buf) {
+            *cur = thread_buf->next;
+            removed = true;
+            break;
+        }
+        cur = &(*cur)->next;
+    }
+    (void)pthread_mutex_unlock(lock);
+    return removed;
+}
+
+static void destroy_poll_cr_buf(void *arg)
+{
+    bondp_thread_cr_buf_t *thread_buf = (bondp_thread_cr_buf_t *)arg;
+    if (remove_thread_cr_buf(thread_buf, &s_poll_cr_buf_lock, &s_poll_cr_buf_list)) {
+        free(thread_buf);
+    }
+}
+
+static void destroy_flush_cr_buf(void *arg)
+{
+    bondp_thread_cr_buf_t *thread_buf = (bondp_thread_cr_buf_t *)arg;
+    if (remove_thread_cr_buf(thread_buf, &s_flush_cr_buf_lock, &s_flush_cr_buf_list)) {
+        free(thread_buf);
+    }
+}
+
+static void create_poll_cr_buf_key(void)
+{
+    s_poll_cr_buf_key_ret = pthread_key_create(&s_poll_cr_buf_key, destroy_poll_cr_buf);
+    s_poll_cr_buf_key_created = s_poll_cr_buf_key_ret == 0;
+}
+
+static void create_flush_cr_buf_key(void)
+{
+    s_flush_cr_buf_key_ret = pthread_key_create(&s_flush_cr_buf_key, destroy_flush_cr_buf);
+    s_flush_cr_buf_key_created = s_flush_cr_buf_key_ret == 0;
+}
+
+static int delete_thread_cr_buf_key(pthread_key_t key, bool *key_created, pthread_mutex_t *lock,
+                                    bondp_thread_cr_buf_t **buf_list)
+{
+    (void)pthread_mutex_lock(lock);
+    int ret = pthread_key_delete(key);
+    if (ret != 0) {
+        (void)pthread_mutex_unlock(lock);
+        URMA_LOG_ERR("Failed to delete thread CR buffer key, ret=%d\n", ret);
+        return -ret;
+    }
+    bondp_thread_cr_buf_t *thread_buf = *buf_list;
+    *buf_list = NULL;
+    *key_created = false;
+    (void)pthread_mutex_unlock(lock);
+
+    while (thread_buf != NULL) {
+        bondp_thread_cr_buf_t *next = thread_buf->next;
+        free(thread_buf);
+        thread_buf = next;
+    }
+    return 0;
+}
+
+int bondp_datapath_thread_buf_uninit(void)
+{
+    int ret = 0;
+
+    if (s_flush_cr_buf_key_created) {
+        ret = delete_thread_cr_buf_key(s_flush_cr_buf_key, &s_flush_cr_buf_key_created,
+                                        &s_flush_cr_buf_lock, &s_flush_cr_buf_list);
+    }
+    if (s_poll_cr_buf_key_created) {
+        int poll_ret = delete_thread_cr_buf_key(s_poll_cr_buf_key, &s_poll_cr_buf_key_created,
+                                                 &s_poll_cr_buf_lock, &s_poll_cr_buf_list);
+        if (ret == 0) {
+            ret = poll_ret;
+        }
+    }
+    return ret;
+}
+
+static urma_cr_t *get_thread_cr_buf(pthread_key_t key, pthread_mutex_t *lock,
+                                    bondp_thread_cr_buf_t **buf_list, int max_cr_cnt_per_dev, int *err)
+{
+    bondp_thread_cr_buf_t *thread_buf = (bondp_thread_cr_buf_t *)pthread_getspecific(key);
+    if (thread_buf != NULL) {
+        return thread_buf->cr;
+    }
+
+    size_t buf_size = sizeof(*thread_buf) + (size_t)max_cr_cnt_per_dev * sizeof(thread_buf->cr[0]);
+    thread_buf = (bondp_thread_cr_buf_t *)malloc(buf_size);
+    if (thread_buf == NULL) {
+        URMA_LOG_ERR("Failed to allocate thread CR buffer, count=%d\n", max_cr_cnt_per_dev);
+        *err = -ENOMEM;
+        return NULL;
+    }
+
+    (void)pthread_mutex_lock(lock);
+    thread_buf->next = *buf_list;
+    *buf_list = thread_buf;
+    (void)pthread_mutex_unlock(lock);
+
+    int ret = pthread_setspecific(key, thread_buf);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to set thread CR buffer, ret=%d\n", ret);
+        if (remove_thread_cr_buf(thread_buf, lock, buf_list)) {
+            free(thread_buf);
+        }
+        *err = -ret;
+        return NULL;
+    }
+    return thread_buf->cr;
+}
+
+static urma_cr_t *get_poll_thread_cr_buf(int max_cr_cnt_per_dev, int *err)
+{
+    int ret = pthread_once(&s_poll_cr_buf_key_once, create_poll_cr_buf_key);
+    if (ret != 0 || s_poll_cr_buf_key_ret != 0 || !s_poll_cr_buf_key_created) {
+        if (ret == 0 && s_poll_cr_buf_key_ret == 0) {
+            URMA_LOG_ERR("Poll CR buffer key has been deleted.\n");
+            *err = -ESHUTDOWN;
+            return NULL;
+        }
+        ret = ret != 0 ? ret : s_poll_cr_buf_key_ret;
+        URMA_LOG_ERR("Failed to create poll CR buffer key, ret=%d\n", ret);
+        *err = -ret;
+        return NULL;
+    }
+    return get_thread_cr_buf(s_poll_cr_buf_key, &s_poll_cr_buf_lock, &s_poll_cr_buf_list,
+                             max_cr_cnt_per_dev, err);
+}
+
+static urma_cr_t *get_flush_thread_cr_buf(int max_cr_cnt_per_dev, int *err)
+{
+    int ret = pthread_once(&s_flush_cr_buf_key_once, create_flush_cr_buf_key);
+    if (ret != 0 || s_flush_cr_buf_key_ret != 0 || !s_flush_cr_buf_key_created) {
+        if (ret == 0 && s_flush_cr_buf_key_ret == 0) {
+            URMA_LOG_ERR("Flush CR buffer key has been deleted.\n");
+            *err = -ESHUTDOWN;
+            return NULL;
+        }
+        ret = ret != 0 ? ret : s_flush_cr_buf_key_ret;
+        URMA_LOG_ERR("Failed to create flush CR buffer key, ret=%d\n", ret);
+        *err = -ret;
+        return NULL;
+    }
+    return get_thread_cr_buf(s_flush_cr_buf_key, &s_flush_cr_buf_lock, &s_flush_cr_buf_list,
+                             max_cr_cnt_per_dev, err);
+}
 
 static urma_jetty_id_t *get_comp_urma_jetty_id(bondp_comp_t *bdp_comp)
 {
@@ -1489,16 +1664,12 @@ static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int
 int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
 {
     PERF_PROFILING_START(BOND_POLL_JFC);
-    static thread_local urma_cr_t *pcr_buf;
-
     const int max_cr_cnt_per_dev = g_bondp_global_ctx->max_cr_cnt_per_dev;
+    int ret = 0;
+    urma_cr_t *pcr_buf = get_poll_thread_cr_buf(max_cr_cnt_per_dev, &ret);
     if (pcr_buf == NULL) {
-        pcr_buf = (urma_cr_t *)malloc((size_t)max_cr_cnt_per_dev * sizeof(*pcr_buf));
-        if (pcr_buf == NULL) {
-            URMA_LOG_ERR("Failed to allocate thread CR buffer, count=%d\n", max_cr_cnt_per_dev);
-            PERF_PROFILING_END(BOND_POLL_JFC);
-            return -ENOMEM;
-        }
+        PERF_PROFILING_END(BOND_POLL_JFC);
+        return ret;
     }
 
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(jfc->urma_ctx, bondp_context_t, v_ctx);
@@ -1601,15 +1772,11 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
 
 int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
 {
-    static thread_local urma_cr_t *pcr_buf;
-
     const int max_cr_cnt_per_dev = g_bondp_global_ctx->max_cr_cnt_per_dev;
+    int ret = 0;
+    urma_cr_t *pcr_buf = get_flush_thread_cr_buf(max_cr_cnt_per_dev, &ret);
     if (pcr_buf == NULL) {
-        pcr_buf = (urma_cr_t *)malloc((size_t)max_cr_cnt_per_dev * sizeof(*pcr_buf));
-        if (pcr_buf == NULL) {
-            URMA_LOG_ERR("Failed to allocate thread CR buffer, count=%d\n", max_cr_cnt_per_dev);
-            return -ENOMEM;
-        }
+        return ret;
     }
 
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(jetty->urma_ctx, bondp_context_t, v_ctx);

@@ -9,6 +9,7 @@
  */
 
 #include "bondp_provider_ops.h"
+#include "bondp_datapath.h"
 #include "urma_log.h"
 #include "urma_provider.h"
 
@@ -44,6 +45,11 @@ static __attribute__((destructor)) void urma_provider_bond_uninit(void)
     ret = urma_unregister_provider_ops(&g_bondp_provider_ops);
     if (ret != 0) {
         URMA_LOG_ERR("Failed to unregister bond provider ops during so unload, ret=%d.\n", ret);
+        return;
+    }
+    ret = bondp_datapath_thread_buf_uninit();
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to release bond datapath thread buffers, ret=%d.\n", ret);
     }
     return;
 }
