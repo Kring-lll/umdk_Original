@@ -604,7 +604,6 @@ static void SetHcommCfg(const gert::TilingContext &context, FusedDeepMoeTilingDa
 
 static ge::graphStatus CheckHcclBufferSize(const char *nodeName, const FusedDeepMoeTilingData &tilingData)
 {
-    return ge::GRAPH_SUCCESS;
     uint32_t moeExpertNumPerRank = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     uint32_t globalBatchSize = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.globalBs;
     uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
@@ -670,18 +669,17 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
 static ge::graphStatus CheckMc2Context(gert::TilingContext &context, const char *nodeName)
 {
     const gert::StorageShape *contextStorageShape = context.GetInputShape(INPUT_CONTEXT_INDEX);
-    OPS_ERR_IF(contextStorageShape == nullptr, OPS_LOG_E(nodeName, "contextStorageShape is nullptr."), return ge::GRAPH_FAILED);
+    OPS_ERR_IF(contextStorageShape == nullptr, OPS_LOG_E(nodeName, "contextStorageShape is nullptr."),
+        return ge::GRAPH_FAILED);
 
     OPS_ERR_IF(contextStorageShape->GetStorageShape().GetDimNum() != 1, OPS_LOG_E(nodeName,
         "contextStorageShape is invalid."), return ge::GRAPH_FAILED);
 
-    int64_t contextDim0 = contextStorageShape->GetStorageShape().GetDim(0);
-    OPS_LOG_I(nodeName, "context dim0 = %ld", contextDim0);
-
     auto contextDesc = context.GetInputDesc(INPUT_CONTEXT_INDEX);
     OPS_ERR_IF(contextDesc == nullptr, OPS_LOG_E(nodeName, "contextDesc is nullptr"), return ge::GRAPH_FAILED);
 
-    OPS_ERR_IF(contextDesc->GetDataType() != ge::DT_INT32, OPS_LOG_E(nodeName, "contextDesc type is not int32"), return ge::GRAPH_FAILED);
+    OPS_ERR_IF(contextDesc->GetDataType() != ge::DT_INT32,
+        OPS_LOG_E(nodeName, "contextDesc type is not int32"), return ge::GRAPH_FAILED);
 
     OPS_ERR_IF(static_cast<ge::Format>(ge::GetPrimaryFormat(contextDesc->GetStorageFormat())) == ge::FORMAT_FRACTAL_NZ,
         OPS_LOG_E(nodeName, "contextDesc format is not non-FRACTAL_NZ"), return ge::GRAPH_FAILED);

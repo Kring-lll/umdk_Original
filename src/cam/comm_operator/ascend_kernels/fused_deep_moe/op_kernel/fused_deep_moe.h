@@ -121,7 +121,7 @@ CATLASS_DEVICE void GmmDeqSwigluQuant(GemmCoord problemShape, uint32_t groupCoun
     if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
         typename GemmKernel::Params params{problemShape,
                                            groupCount,
-                                           hcclContext_, 
+                                           hcclContext_,
                                            gmGroupList,
                                            gmA,
                                            layoutA,
@@ -419,7 +419,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
 
     mc2Context_ = reinterpret_cast<__gm__ Mc2MoeContext *>(hcclContext_);
     if constexpr (EXEC_FLAG & EXEC_FLAG_ZERO_BUFFER) {
-        shmemWorkspaceGM_ = (GM_ADDR)(mc2Context_->ipcBuffer_[epRankId_] + 1024 * 1024 * 2 );
+        shmemWorkspaceGM_ = (GM_ADDR)(mc2Context_->ipcBuffer_[epRankId_] + WORKSPACE_OFFSET_SIZE);
     }
     metaInfoGm_ = (GM_ADDR)(mc2Context_->ipcBuffer_[epRankId_]);
 }
