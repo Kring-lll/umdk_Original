@@ -45,6 +45,7 @@ static uint32_t jfs_wr_list_get_cqe_count(const urma_jfs_wr_t *wr)
         if (jfs_wr_is_cqe_wr(cur)) {
             ++cqe_count;
         }
+        cur = cur->next;
     }
     return cqe_count;
 }
