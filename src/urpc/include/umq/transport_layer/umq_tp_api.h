@@ -87,6 +87,14 @@ typedef struct umq_ops {
     int (*umq_tp_unbind)(uint64_t umqh_tp);
 
     /**
+     * Thread safety function
+     * Confirm peer bind success
+     * @param[in] umqh_tp: umq handle
+     * Return 0 on success, error code on failure
+     */
+    int (*umq_tp_bind_confirmed)(uint64_t umqh_tp);
+
+    /**
     * User should ensure thread safety if io_lock_free is true
     * Set umq state
     * @param[in] umqh_tp: umq handle

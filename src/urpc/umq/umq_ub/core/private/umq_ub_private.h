@@ -428,6 +428,7 @@ typedef struct ub_queue_idle_check {
     volatile uint64_t target_slot_id;
     volatile bool need_return_credit;
     int event_fd;
+    bool is_stop;
     util_external_mutex_lock *lock;
 } ub_queue_idle_check_t;
 
@@ -502,6 +503,7 @@ typedef struct ub_queue {
     bool tx_flush_done;         // tx recv flush err done
     bool rx_flush_done;         // rx buf ctx all report
     bool prefill_done;          // until prefill_rqe_cnt = rqe_post_factor * rx_depth, prefill is done
+    bool bind_confirmed;        // peer bind confirmed via TCP
     umq_queue_mode_t mode;      // mode of queue, QUEUE_MODE_POLLING for default
     umq_state_t state;
     uint64_t umqh;
