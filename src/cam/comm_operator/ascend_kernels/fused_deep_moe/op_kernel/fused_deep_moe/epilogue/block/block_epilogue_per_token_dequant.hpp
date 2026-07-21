@@ -126,7 +126,7 @@ public:
                             ? ((GM_ADDR)(calcInfo.mc2MoeContext_->ipcBuffer_[calcInfo.epRankId_]))
                             : ((GM_ADDR)(calcInfo.mc2MoeContext_->ipcBuffer_[rankId])); // 其他卡
 
-        uint64_t addrOffset = (uint64_t)(baseAddr - 
+        uint64_t addrOffset = (uint64_t)(baseAddr -
             ((GM_ADDR)(calcInfo.mc2MoeContext_->ipcBuffer_[calcInfo.epRankId_])));
         return winBase + addrOffset;
     }
