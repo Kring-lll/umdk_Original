@@ -176,6 +176,16 @@ public class SuperNodeService {
                 LOG.debug("removeRoutingEntries: prefix=%s, superNode=%s, device=%s, chip=%d",
                     prefix, superNodeName, deviceName, chipIndex);
             store.removeRoutingEntry(superNodeName, deviceName, chipIndex, prefix);
+        for (RoutePrefix prefix : prefixes) {
+            if (prefix == null) {
+                LOG.error("removeRoutingEntries: error=prefix in list must not be null");
+                throw new IllegalArgumentException("prefix in list must not be null");
+            }
+        }
+        for (RoutePrefix prefix : prefixes) {
+            LOG.debug("removeRoutingEntries: prefix=%s, superNode=%s, device=%s, chip=%d",
+                prefix, superNodeName, deviceName, chipIndex);
+            store.removeRoutingEntry(superNodeName, deviceName, chipIndex, prefix);
         }
     }
 
