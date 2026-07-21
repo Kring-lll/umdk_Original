@@ -1209,6 +1209,7 @@ uint32_t umq_ub_transport_pool_resource_create_impl(uint64_t umqh_tp, umq_tp_res
     umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
     umq_ub_ctx_t *dev_ctx = queue->dev_ctx;
     int ret = 0;
+
     (void)util_mutex_lock(jetty_node_list->lock);
     unsigned long offset = urpc_bitmap_find_next_zero_bit(jetty_node_list->bitmap, jetty_node_list->list_len, 0);
     if (offset >= jetty_node_list->list_len) {
