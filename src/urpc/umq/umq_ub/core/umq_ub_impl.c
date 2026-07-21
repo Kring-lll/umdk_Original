@@ -204,6 +204,25 @@ int umq_ub_bind_impl(uint64_t umqh, uint8_t *bind_info_buf, uint32_t bind_info_s
     return umq_ub_bind_inner_impl(queue, &bind_info);
 }
 
+int umq_ub_bind_confirmed_impl(uint64_t umqh_tp)
+{
+    ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
+
+    if (queue->bind_ctx == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), umq has not been binded\n", queue->umq_id);
+        return -UMQ_ERR_ENODEV;
+    }
+
+    if (queue->bind_confirmed) {
+        UMQ_VLOG_WARN(VLOG_UMQ, "UMQ(ID:%u), bind already confirmed\n", queue->umq_id);
+        return UMQ_SUCCESS;
+    }
+
+    queue->bind_confirmed = true;
+    UMQ_VLOG_INFO(VLOG_UMQ, "UMQ(ID:%u), bind confirmed\n", queue->umq_id);
+    return UMQ_SUCCESS;
+}
+
 static int32_t umq_ub_register_memory_with_id(uint16_t mempool_id, void *buf, uint64_t size)
 {
     if (g_ub_ctx == NULL) {
@@ -426,6 +445,10 @@ void umq_ub_idle_queue_check(void *args)
             urpc_list_remove(&cur_node->node);
             (void)util_mutex_unlock(cur_node->lock);
             umq_ub_idle_checker_uninit(cur_node);
+            continue;
+        }
+        if (cur_node->is_stop || !queue->bind_confirmed) {
+            (void)util_mutex_unlock(cur_node->lock);
             continue;
         }
         ub_flow_control_t *fc = &queue->flow_control;
@@ -2121,6 +2144,11 @@ int umq_ub_unbind_impl(uint64_t umqh)
 
     umq_inc_ref(queue->dev_ctx->io_lock_free, &queue->ref_cnt, 1);
     if (queue->flow_control.enabled) {
+        if (queue->checker != NULL) {
+            (void)util_mutex_lock(queue->checker->lock);
+            queue->checker->is_stop = true;
+            (void)util_mutex_unlock(queue->checker->lock);
+        }
         urma_target_jetty_t *tjetty = bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
         UMQ_VLOG_INFO(VLOG_UMQ, "UMQ(ID:%u), remote eid: " EID_FMT ", remote jetty_id: %u, unbind flowcontrol jetty\n",
             queue->umq_id, EID_ARGS(tjetty->id.eid), tjetty->id.id);

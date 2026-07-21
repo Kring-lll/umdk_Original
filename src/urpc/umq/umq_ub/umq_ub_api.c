@@ -91,6 +91,11 @@ static int umq_tp_ub_unbind(uint64_t umqh_tp)
     return umq_ub_unbind_impl(umqh_tp);
 }
 
+static int umq_tp_ub_bind_confirmed(uint64_t umqh_tp)
+{
+    return umq_ub_bind_confirmed_impl(umqh_tp);
+}
+
 static int umq_tp_ub_state_set(uint64_t umqh_tp, umq_state_t state)
 {
     return umq_ub_state_set_impl(umqh_tp, state);
@@ -243,6 +248,7 @@ static umq_ops_t g_umq_ub_ops = {
     .umq_tp_bind_info_get = umq_tp_ub_bind_info_get,
     .umq_tp_bind = umq_tp_ub_bind,
     .umq_tp_unbind = umq_tp_ub_unbind,
+    .umq_tp_bind_confirmed = umq_tp_ub_bind_confirmed,
     .umq_tp_state_set = umq_tp_ub_state_set,
     .umq_tp_state_get = umq_tp_ub_state_get,
     .umq_tp_log_config_set = umq_tp_ub_log_config_set,
