@@ -924,6 +924,19 @@ int umq_unbind(uint64_t umqh)
     return ret;
 }
 
+int umq_bind_confirmed(uint64_t umqh)
+{
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+
+    if ((umq == NULL) || (umq->umqh_tp == UMQ_INVALID_HANDLE) || (umq->tp_ops == NULL) ||
+        (umq->tp_ops->umq_tp_bind_confirmed == NULL)) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "umqh invalid\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    return umq->tp_ops->umq_tp_bind_confirmed(umq->umqh_tp);
+}
+
 umq_buf_t *umq_buf_alloc(uint32_t request_size, uint32_t request_qbuf_num, uint64_t umqh, umq_alloc_option_t *option)
 {
     umq_buf_t *qbuf = NULL;
