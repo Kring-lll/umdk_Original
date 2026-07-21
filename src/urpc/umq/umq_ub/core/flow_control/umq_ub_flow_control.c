@@ -1010,24 +1010,24 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify, ui
 
 static uint16_t allocate_credits_by_load(uint64_t pool_allocated, uint16_t rx_depth, uint16_t req_count)
 {
-    if (pool_allocated >= rx_depth) {
+    if (rx_depth == 0 || pool_allocated >= rx_depth) {
         return UMQ_UB_MIN_CREDITS_PER_REQUEST;
     }
 
     uint64_t remaining = rx_depth - pool_allocated;
-    uint64_t remaining_percent = (remaining * 100) / rx_depth;
+    uint64_t remaining_ratio = (remaining * UMQ_UB_CREDIT_PERCENT) / rx_depth;
     uint64_t credits = 0;
 
-    if (remaining_percent >= 70) {
+    if (remaining_ratio >= g_umq_ub_credit_ratio[3]) {
         credits = req_count;
-    } else if (remaining_percent >= 50) {
-        credits = (uint16_t)(req_count * 70 / 100);
-    } else if (remaining_percent >= 30) {
-        credits = (uint16_t)(req_count * 50 / 100);
-    } else if (remaining_percent >= 10) {
-        credits = (uint16_t)(req_count * 30 / 100);
+    } else if (remaining_ratio >= g_umq_ub_credit_ratio[2]) {
+        credits = (uint16_t)(req_count * g_umq_ub_credit_ratio[3] / UMQ_UB_CREDIT_PERCENT);
+    } else if (remaining_ratio >= g_umq_ub_credit_ratio[1]) {
+        credits = (uint16_t)(req_count * g_umq_ub_credit_ratio[2] / UMQ_UB_CREDIT_PERCENT);
+    } else if (remaining_ratio >= g_umq_ub_credit_ratio[0]) {
+        credits = (uint16_t)(req_count * g_umq_ub_credit_ratio[1] / UMQ_UB_CREDIT_PERCENT);
     } else {
-        credits = (uint16_t)(req_count * 10 / 100);
+        credits = (uint16_t)(req_count * g_umq_ub_credit_ratio[0] / UMQ_UB_CREDIT_PERCENT);
     }
 
     if (credits > UINT16_MAX) {
@@ -1076,7 +1076,11 @@ static uint16_t umq_ub_next_credit_req_count_update(uint16_t reply_credits,
         }
     } else {
         if (ratio == 0) {
-            new_request = (uint32_t)(request / fc->credit_multiple);
+            if (fc->credit_multiple == 0) {
+                new_request = UMQ_UB_MIN_CREDITS_PER_REQUEST;
+            } else {
+                new_request = (uint32_t)(request / fc->credit_multiple);
+            }
         } else {
             new_request = request + UMQ_UB_FC_CREDIT_STEP;
         }
@@ -1084,6 +1088,8 @@ static uint16_t umq_ub_next_credit_req_count_update(uint16_t reply_credits,
     if (new_request == 0) {
         new_request = UMQ_UB_MIN_CREDITS_PER_REQUEST;
     }
+
+    return (uint16_t)new_request;
 }
 
 void umq_ub_shared_credit_resp_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
@@ -1092,7 +1098,7 @@ void umq_ub_shared_credit_resp_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
     uint16_t reply_credits = imm->flow_control.window;
     uint16_t credits_per_request = fc->credits_per_request;
     fc->credits_per_request =
-        umq_ub_next_credit_req_count_update(reply_credits, credits_per_request, imm->flow_control.ratio);
+        umq_ub_next_credit_req_count_update(reply_credits, credits_per_request, imm->flow_control.ratio, fc);
     umq_ub_window_inc(fc, reply_credits);
     return;
 }
