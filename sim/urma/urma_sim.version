@@ -1,0 +1,51 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+ *
+ * 链接器版本脚本：被拦截的 libc 函数按 urma_admin 实际引用的版本导出。
+ * open/close/opendir/readdir/closedir/realpath/read/ioctl 都是 @GLIBC_2.17，
+ * 但 stat 在新 glibc 上是 @GLIBC_2.33（glibc 2.33 起 stat 不再走 __xstat 包装，
+ * 直接导出 stat@GLIBC_2.33）。版本必须精确匹配，否则拦不住带版本引用。
+ */
+GLIBC_2.33 {
+    global:
+        stat;
+};
+
+GLIBC_2.17 {
+    global:
+        open;
+        __open_2;
+        close;
+        opendir;
+        readdir;
+        realpath;
+        read;
+        ioctl;
+        access;
+        mmap;
+        munmap;
+    local:
+        *;
+};
+
+/* ummu 库符号无版本号，单独块导出（供真 udma provider 拦截）。 */
+URMA_SIM_UMMU {
+    global:
+        ummu_allocate_tid;
+        ummu_grant;
+        ummu_ungrant;
+        ummu_ungrant_by_token;
+        ummu_free_tid;
+};
+
+/* sim 内部 API（供 test 程序调用，如起 IPC socket、UT 测纯函数）。无版本号导出。 */
+URMA_SIM_API {
+    global:
+        urma_sim_ipc_start;
+        urma_sim_ipc_is_local;
+        urma_sim_ipc_read;
+        urma_sim_ipc_write;
+        urma_sim_hw_start;
+        urma_sim_mmap_decode_offset;   /* UT 测试用（test/test_mmap_decode_ut.c）*/
+};

@@ -1,0 +1,10 @@
+NONEMPTY|ctx|
+NONEMPTY|jfc|
+NONEMPTY|jfs|
+NONEMPTY|seg|
+NONEMPTY|tjetty|
+VAL|faa_ret|0
+VAL|faa_n|1
+VAL|faa_status|0
+HEX|faa_atomic|0x205
+HEX|faa_orig|0x200

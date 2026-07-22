@@ -1,0 +1,15 @@
+NONEMPTY|ctx|
+NONEMPTY|jfc|
+NONEMPTY|jfs|
+NONEMPTY|seg|
+NONEMPTY|tjetty|
+VAL|cas1_ret|0
+VAL|cas1_n|1
+VAL|cas1_status|0
+HEX|cas1_atomic|0x200
+HEX|cas1_orig|0x100
+VAL|cas2_ret|0
+VAL|cas2_n|1
+VAL|cas2_status|0
+HEX|cas2_atomic|0x200
+HEX|cas2_orig|0x200
