@@ -171,6 +171,7 @@ enum perftest_opts {
     PERFTEST_OPT_INF_PERIOD_MS,
     PERFTEST_OPT_ENABLE_ERR_CONTINUE,
     PERFTEST_OPT_ENABLE_NOTIFY,
+    PERFTEST_OPT_ENABLE_ATOMIC_ADD,
     PERFTEST_OPT_ENABLE_USER_TP,
     PERFTEST_OPT_OOR_EN,
     PERFTEST_OPT_SPRAY_EN,
@@ -355,6 +356,7 @@ typedef struct perftest_config {
     bool enable_va;
     uint64_t v_address;
     bool share_jfs;
+    bool enable_atomic_add;
 } perftest_config_t;
 
 typedef struct perftest_value_range {
