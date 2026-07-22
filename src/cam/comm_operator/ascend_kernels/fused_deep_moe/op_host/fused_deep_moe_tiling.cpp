@@ -62,8 +62,6 @@ constexpr uint32_t ATTR_EP_RANK_ID_INDEX = 2;
 constexpr uint32_t ATTR_MOE_EXPERT_NUM_INDEX = 3;
 constexpr uint32_t ATTR_QUANT_MODE_INDEX = 4;
 constexpr uint32_t ATTR_GLOBAL_BS_INDEX = 5;
-//constexpr uint32_t ATTR_EXT_INFO_INDEX = 6;
-//constexpr uint32_t ATTR_SHMEM_WORKSPACE_INDEX = 7;
 constexpr uint32_t ATTR_SHMEM_WORKSPACE_SIZE_INDEX = 6;
 
 constexpr uint32_t MIN_BATCH_SIZE = 0;
