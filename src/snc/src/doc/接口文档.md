@@ -45,8 +45,8 @@ SNC（SuperNode Network Controller）模块提供 SuperNode 拓扑管理、ACL �
 | 方法 | 参数 | 返回值 | 描述 | 异常说明 |
 |------|------|--------|------|---------|
 | `setAclData` | `AclData aclData` | `void` | 导入（**按 superNodeName 覆盖**）ACL 数据，标记 aclLoaded，更新数据就绪状态；同 superNodeName 的旧 ACL 被覆盖，不同 name 的 ACL 共存不受影响 | INIT/UNINIT → `SNCStateException`；参数 null/name空 → `IllegalArgumentException`；**子字段（tpAcls/AclKey/TpAclEntity 内部字段）不校验**，缺失时 `planPath` 返回 `ACL_CHECK_FAILED` |
-| `addAclRules` | `String superNodeName, Map<AclKey, TpAclEntity> rules` | `void` | 批量添加 ACL 规则；ACL 数据不存在则**静默丢失** | INIT/UNINIT → `SNCStateException`；null参数 → `IllegalArgumentException` |
-| `removeAclRules` | `String superNodeName, List<AclKey> keys` | `void` | 批量移除 ACL 规则；不存在则**静默无操作** | INIT/UNINIT → `SNCStateException`；null参数 → `IllegalArgumentException` |
+| `addAclRules` | `String superNodeName, Map<AclKey, TpAclEntity> rules` | `void` | 批量添加 ACL 规则；ACL 数据不存在则**抛 IllegalStateException**（"ACL data not found for superNode: \<name\>"） | INIT/UNINIT → `SNCStateException`；null参数 → `IllegalArgumentException`；null key/value → `IllegalArgumentException`；目标 ACL 不存在 → `IllegalStateException` |
+| `removeAclRules` | `String superNodeName, List<AclKey> keys` | `void` | 批量移除 ACL 规则；目标 ACL 数据不存在则**抛 IllegalStateException**（"ACL data not found for superNode: \<name\>"） | INIT/UNINIT → `SNCStateException`；null参数 → `IllegalArgumentException`；null key → `IllegalArgumentException`；目标 ACL 不存在 → `IllegalStateException` |
 | `getAclData` | `String superNodeName` | `AclData` | 查询指定 SuperNode 的 ACL 数据 | INIT/UNINIT → `SNCStateException`；不存在返回 `null`（非异常） |
 | `removeAclData` | `String superNodeName` | `void` | 删除指定 SuperNode 的 ACL 数据 | INIT/UNINIT → `SNCStateException` |
 
@@ -54,10 +54,11 @@ SNC（SuperNode Network Controller）模块提供 SuperNode 拓扑管理、ACL �
 
 | 方法 | 参数 | 返回值 | 描述 | 异常说明 |
 |------|------|--------|------|---------|
-| `planPath` | `PathPlanRequest request` | `PathPlanResult` | 规划源到目的的传输路径 | INIT/READY/UNINIT → `SNCStateException`（仅 DATAREADY 允许） |
+| `planPath` | `PathPlanRequest request` | `PathPlanResult` | 规划源到目的的传输路径 | 非 DATAREADY 状态 → `SNCStateException`（消息格式："SNC is not in DATAREADY state, current state: \<STATE\>"，**不同于**其他方法的 checkNotUninit 拦截消息） |
 | | | | | request 为 null 或 superNodeName/srcDevice/destDevice/srcPort/destPort 任一为 null/空 → `IllegalArgumentException` |
 | | | | | **interDevices 字段可选**（可为 null/空，表示直连场景） |
 | | | | | 业务失败时不抛异常，返回 `PathPlanResult.status` 非 SUCCESS，详见下方 `PlanStatus` 映射表 |
+| | | | | **路由查找机制**：planPath 内部路由查找以目的端口的 CNA（`destCna`）作为查找目标，直接与路由前缀做 LPM 匹配。代码无 `cnaToTargetAddr` 地址变换方法，因此路由条目的 `prefix` 值须与目的端口 CNA 一致才能命中。 |
 
 ---
 
@@ -86,7 +87,7 @@ SNC（SuperNode Network Controller）模块提供 SuperNode 拓扑管理、ACL �
 - `uninit()`: INIT / READY / DATAREADY → UNINIT（INIT 状态调用仅清空状态标记，无副作用）
 - `setSuperNode()` + `setAclData()`: READY → DATAREADY（二者均下发后自动迁移）
 - `setSuperNode()` / `setAclData()`: DATAREADY → DATAREADY（数据就绪态可继续更新数据）
-- `planPath()`: 仅在 **DATAREADY** 状态下可用，未到 DATAREADY 时返回 SNCStateException
+- `planPath()`: 仅在 **DATAREADY** 状态下可用，非 DATAREADY 时抛 `SNCStateException`，消息为 `"SNC is not in DATAREADY state, current state: <STATE>"`（**注意**：planPath 不走 `checkNotUninit`，自有状态判断，消息格式与其他方法不同）
 
 ---
 
@@ -119,7 +120,7 @@ SNC（SuperNode Network Controller）模块提供 SuperNode 拓扑管理、ACL �
 |------|------|---------|-----------|
 | L0 | `aclData` 本身 | non-null | `IllegalArgumentException` |
 | L1 | `aclData.superNodeName` | non-null, non-empty | `IllegalArgumentException` |
-| L1 | `aclData.tpAcls` | **不校验** | 可为 null/空，`addAclRules` 后续操作静默丢失 |
+| L1 | `aclData.tpAcls` | **不校验** | 可为 null/空，后续 `addAclRules` 需 ACL 数据已存在，否则抛 `IllegalStateException` |
 | L2 | `AclKey.srcEid` | **不校验** | `AclCheckEngine.checkBothDirection` 中用 null 查 Map → 匹配失败 |
 | L2 | `AclKey.dstEid` | **不校验** | 同上 |
 | L2 | `AclKey.transportType` | **不校验** | 同上（RCTP 硬编码查找，其他类型不匹配） |
@@ -151,6 +152,8 @@ addNpuDevices("sn1", Arrays.asList(
 ## 3b. 通用异常行为
 
 所有方法（除 `init` 外）在错误状态调用时抛出 `SNCStateException`：
+
+> ⚠️ **planPath 例外**：`planPath` 不走 `checkNotUninit` 拦截，自有 `state != DATAREADY` 判断，统一抛 `"SNC is not in DATAREADY state, current state: <STATE>"`（INIT/READY/UNINIT 同形）。其余方法走 `checkNotUninit`，消息为 `"SNC is in INIT state"` 或 `"SNC is in UNINIT state"`。
 
 | 当前状态 | 调用 `init` | 调用 `uninit` | 调用其他方法 |
 |----------|------------|--------------|-------------|
@@ -210,8 +213,8 @@ sncService.setSuperNode(completeSN);         // ③ 正常导入
 | `removeDevices("nonExistent", ...)` | 该 SuperNode 不存在 | **静默无操作** | 数据未被删除，也无异常 |
 | `addRoutingEntries("nonExistent", ...)` | 该路由表不存在 | **抛 IllegalStateException** | 明确提示 |
 | `removeRoutingEntries("nonExistent", ...)` | 该路由表不存在 | **静默无操作** | 同上 |
-| `addAclRules("nonExistent", ...)` | 该 ACL 数据不存在 | **静默无操作** | ACL 规则丢失 |
-| `removeAclRules("nonExistent", ...)` | 该 ACL 数据不存在 | **静默无操作** | 同上 |
+| `addAclRules("nonExistent", ...)` | 该 ACL 数据不存在 | **抛 IllegalStateException** | 明确提示："ACL data not found for superNode: nonExistent" |
+| `removeAclRules("nonExistent", ...)` | 该 ACL 数据不存在 | **抛 IllegalStateException** | 同上 |
 | `removeSuperNode("nonExistent")` | 该 SuperNode 不存在 | **静默无操作** | Map.remove null → 无影响 |
 | `removeAclData("nonExistent")` | 该 ACL 不存在 | **静默无操作** | 同上 |
 
@@ -251,7 +254,7 @@ planPath(req);                             // 状态检查失败 → SNCStateExc
 
 `updateDataReadyState()` 在 `superNodeLoaded` 或 `aclLoaded` 变为 false 时，会将状态从 DATAREADY 回退到 READY。因此删除数据后**状态会回退**，后续 `planPath` 调用会抛出 `SNCStateException`。
 
-### 3c.6 批量操作部分失败
+### 3c.6 批量操作校验失败（原子性）
 
 ```java
 // 列表中前两个 device 正常，第三个为 null
@@ -260,12 +263,11 @@ addNpuDevices("sn1", Arrays.asList(d1, d2, null, d3));
 
 | 步骤 | 行为 |
 |------|------|
-| d1 | 正常添加成功 |
-| d2 | 正常添加成功 |
-| null | Service 层校验出 null → 抛出 `IllegalArgumentException` |
-| d3 | **未被执行**（前功尽弃，但 d1、d2 已提交） |
+| 预校验阶段 | 逐元素校验合法性 |
+| null | Service 层校验出 null → 抛出 `IllegalArgumentException`，**预校验中止** |
+| d1、d2、d3 | **全部未提交**（预校验失败时 Store 无任何变更） |
 
-批量操作中一旦遇到非法元素，**已执行的变更不回滚**（非事务性）。
+批量操作采用**预校验+全提交（两阶段）**设计：阶段1 先遍历全部元素做合法性校验，发现非法立即抛出异常（此时 Store 尚未被修改）；阶段2 全部校验通过后才遍历列表执行 Store 操作。保证原子性——**要么全成功（校验通过 + 全部提交），要么全失败（校验失败抛异常 + Store 无变更）**。
 
 ### 3c.7 setSuperNode 后状态不完全
 
@@ -299,16 +301,18 @@ planPath(req);     // SNCStateException
 
 | 场景 | 行为 | 结果 |
 |------|------|------|
-| `planPath` 时状态为 INIT | SNCServiceImpl.checkNotUninit 拦截 | `SNCStateException("SNC is in INIT state")` |
-| `planPath` 时状态为 READY | 同上 | `SNCStateException("SNC is not in DATAREADY state")` |
-| `planPath` 时状态为 UNINIT | 同上 | `SNCStateException("SNC is in UNINIT state")` |
+| `planPath` 时状态为 INIT | `SNCServiceImpl.planPath` 自有状态判断（不走 checkNotUninit） | `SNCStateException("SNC is not in DATAREADY state, current state: INIT")` |
+| `planPath` 时状态为 READY | 同上 | `SNCStateException("SNC is not in DATAREADY state, current state: READY")` |
+| `planPath` 时状态为 UNINIT | 同上 | `SNCStateException("SNC is not in DATAREADY state, current state: UNINIT")` |
 | `planPath(request)` 中 srcDevice 不存在于 SuperNode | PathService.planPath lookup 返回 null | `TOPO_INCOMPLETE` |
 | `planPath(request)` 中 destDevice 不存在 | 同上 | `TOPO_INCOMPLETE` |
+| `planPath(request)` 中 srcDevice/destDevice 为交换机（非 NPU） | PathService.planPath 两层判断：设备存在于 swDevices 但 deviceType ≠ NPU | `SRC_AND_DST_MUST_BE_NPU(3002)` |
 | `planPath(request)` 中 srcPort 在设备上不存在 | NpuDevice.findNpuPort 返回 null | `SRC_INFO_ERR` |
 | `planPath(request)` 中 destPort 在设备上不存在 | 同上 | `DST_INFO_ERR` |
 | `planPath` 时 ACL 数据在 store 中不存在（跨名错配） | getAclData 返回 null | `ACL_NOT_FOUND` |
 | `planPath` 直连场景两端 remote 不匹配 | PathService 验证失败 | `TOPO_CONNECTION_ERROR` |
 | `planPath` 多跳场景中间连接不一致 | PathEngine.resolveMultiHopPath 抛出异常 | `TOPO_CONNECTION_NOT_FOUND` |
+| `planPath` 路由不可达（中间设备最长前缀匹配未命中或无出端口） | PathService.routePhase 抛 `PathPlanException(ROUTE_NOT_REACHABLE)` | `ROUTE_NOT_REACHABLE(1010)` |
 | `planPath` 直连场景经 init 重置后未重设拓扑/ACL | 状态为 READY | `SNCStateException`（不会进入 planPath 逻辑） |
 
 ---
