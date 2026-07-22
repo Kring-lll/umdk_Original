@@ -52,6 +52,7 @@ typedef struct jfs_wr_entry {
     struct bondp_comp *bdp_comp;
     struct bondp_target_jetty *target_vjetty;
     struct jfs_wr_entry *next;
+    bool is_batch_head;
     uint32_t send_idx;
     uint32_t target_idx;
     urma_sge_t sge_data[];
