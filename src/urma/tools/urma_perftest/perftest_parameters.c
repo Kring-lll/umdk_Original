@@ -160,6 +160,7 @@ static void usage(const char *argv0)
         "  --enable_err_continue       Enable continue running when cr erros, default: disable.\n"
         "  --notify_data <value>       enable write_with_notify, value is ensured by hardware.\n"
         "  --enable_notify             Enable write_with_notify, default: disable.\n"
+        "  --enable_atomic_add        Enable write_atomic_add for write test, default: disable.\n"
         "  --enable_user_tp            Enable user tp for UB device, if enable,UVS is not required. default: disable.\n"
         "  --oor_en                    Enable out of order for user_tp, default: disable.\n"
         "  --spray_en                  Enable multipathing for user_tp, default: disable.\n"
@@ -368,6 +369,7 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->enable_imm = false;
     cfg->enable_err_continue = false;
     cfg->enable_notify = false;
+    cfg->enable_atomic_add = false;
     cfg->enable_user_tp = false;
     cfg->oor_en = false;
     cfg->spray_en = false;
@@ -652,6 +654,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"inf_period_ms",       required_argument, NULL, PERFTEST_OPT_INF_PERIOD_MS},
         {"enable_err_continue", no_argument,       NULL, PERFTEST_OPT_ENABLE_ERR_CONTINUE},
         {"enable_notify",   no_argument,     NULL, PERFTEST_OPT_ENABLE_NOTIFY},
+        {"enable_atomic_add", no_argument,   NULL, PERFTEST_OPT_ENABLE_ATOMIC_ADD},
         {"enable_user_tp",      no_argument,       NULL, PERFTEST_OPT_ENABLE_USER_TP},
         {"oor_en",              no_argument,       NULL, PERFTEST_OPT_OOR_EN},
         {"spray_en",            no_argument,       NULL, PERFTEST_OPT_SPRAY_EN},
@@ -927,6 +930,9 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                 break;
             case PERFTEST_OPT_ENABLE_NOTIFY:
                 cfg->enable_notify = true;
+                break;
+            case PERFTEST_OPT_ENABLE_ATOMIC_ADD:
+                cfg->enable_atomic_add = true;
                 break;
             case PERFTEST_OPT_ENABLE_USER_TP:
                 cfg->enable_user_tp = true;
@@ -1490,6 +1496,11 @@ int check_local_cfg(perftest_config_t *cfg)
     if (cfg->enable_notify == true &&
         (cfg->api_type != PERFTEST_WRITE || cfg->enable_imm == true)) {
         LOG_ERROR("notify takes effect only in write test, and conflicts with immediate.\n");
+        exit(1);
+    }
+    if (cfg->enable_atomic_add == true &&
+        (cfg->api_type != PERFTEST_WRITE || cfg->enable_imm == true || cfg->enable_notify == true)) {
+        LOG_ERROR("atomic_add takes effect only in write test, and conflicts with immediate or notify.\n");
         exit(1);
     }
     if (cfg->inf_period_ms != 0) {
