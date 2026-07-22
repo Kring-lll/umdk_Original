@@ -91,7 +91,7 @@ static int check_dev_cap(perftest_context_t *ctx, perftest_config_t *cfg)
         return -1;
     }
 
-    uint32_t max_rsge = cfg->sge_num + (cfg->enable_notify ? 1 : 0);
+    uint32_t max_rsge = cfg->sge_num + ((cfg->enable_notify || cfg->enable_atomic_add) ? 1 : 0);
     if (max_rsge > ctx->dev_attr.dev_cap.max_jfs_rsge) {
         LOG_ERROR("Error: max_jfs_rsge out of range, max_jfs_rsge:%u.\n", ctx->dev_attr.dev_cap.max_jfs_rsge);
         return -1;
@@ -429,11 +429,15 @@ static int create_jfs(perftest_context_t *ctx, const perftest_config_t *cfg)
         .trans_mode = cfg->trans_mode,
         .priority = cfg->priority, /* Highest priority */
         .max_sge = 1,
+        .max_rsge = 1,
         .max_inline_data = cfg->inline_size,
         .rnr_retry = URMA_TYPICAL_RNR_RETRY,
         .err_timeout = cfg->err_timeout,
         .user_ctx = (uint64_t)NULL,
     };
+    if (cfg->enable_notify || cfg->enable_atomic_add) {
+        jfs_cfg.max_rsge += 1;
+    }
     if (cfg->use_bonding) {
         jfs_cfg.max_sge += 1; /* there is one more sge in bonding mode */
     }
@@ -525,6 +529,9 @@ static void fill_jfs_cfg(perftest_context_t *ctx, const perftest_config_t *cfg, 
     if (cfg->sge_num != 1) {
         jfs_cfg->max_sge = cfg->sge_num;
         jfs_cfg->max_rsge = cfg->sge_num;
+    }
+    if (cfg->enable_notify || cfg->enable_atomic_add) {
+        jfs_cfg->max_rsge += 1;
     }
     if (cfg->use_bonding) {
         jfs_cfg->max_sge += 1; /* there is one more sge in bonding mode */
@@ -1240,7 +1247,7 @@ static void free_remote_notify(perftest_context_t *ctx)
 
 static int exchange_notify_info(perftest_context_t *ctx, perftest_config_t *cfg)
 {
-    if (!cfg->enable_notify) {
+    if (!cfg->enable_notify && !cfg->enable_atomic_add) {
         return 0;
     }
 
@@ -1604,7 +1611,7 @@ static int import_seg_for_simplex(perftest_context_t *ctx, perftest_config_t *cf
         }
     }
 
-    if (cfg->enable_notify == true) {
+    if (cfg->enable_notify == true || cfg->enable_atomic_add == true) {
         ctx->import_notify_seg = calloc(1, sizeof(urma_target_seg_t *) * ctx->jetty_num);
         if (ctx->import_notify_seg == NULL) {
             goto free_credit;
@@ -1636,7 +1643,7 @@ static int import_seg_for_simplex(perftest_context_t *ctx, perftest_config_t *cf
 unimp_simp_seg:
     unimport_seg(ctx, i);
 free_notify:
-    if (cfg->enable_notify == true) {
+    if (cfg->enable_notify == true || cfg->enable_atomic_add == true) {
         unimport_notify(ctx, ctx->jetty_num);
     }
 free_credit:
@@ -1672,7 +1679,7 @@ static int import_seg_for_duplex(perftest_context_t *ctx, perftest_config_t *cfg
         }
     }
 
-    if (cfg->enable_notify == true) {
+    if (cfg->enable_notify == true || cfg->enable_atomic_add == true) {
         ctx->import_notify_seg = calloc(1, sizeof(urma_target_seg_t *) * ctx->jetty_num);
         if (ctx->import_notify_seg == NULL) {
             goto free_credit;
@@ -1705,7 +1712,7 @@ static int import_seg_for_duplex(perftest_context_t *ctx, perftest_config_t *cfg
 unimp_dup_seg:
     unimport_seg(ctx, i);
 free_notify:
-    if (cfg->enable_notify == true) {
+    if (cfg->enable_notify == true || cfg->enable_atomic_add == true) {
         unimport_notify(ctx, ctx->jetty_num);
     }
 free_credit:
@@ -2496,7 +2503,7 @@ static int create_simplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
         goto unregister_mem;
     }
 
-    if (cfg->enable_notify == true && create_notify_ctx(ctx, cfg) != 0) {
+    if ((cfg->enable_notify == true || cfg->enable_atomic_add == true) && create_notify_ctx(ctx, cfg) != 0) {
         goto delete_credit_ctx;
     }
 
@@ -2524,7 +2531,7 @@ unimport_seg:
 destroy_remote_info:
     destroy_connection_info(ctx, cfg);
 delete_notify_ctx:
-    if (cfg->enable_notify == true) {
+    if (cfg->enable_notify == true || cfg->enable_atomic_add == true) {
         destroy_notify_ctx(ctx, cfg);
     }
 delete_credit_ctx:
@@ -2734,7 +2741,7 @@ static int create_duplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
         goto unregister_mem;
     }
 
-    if (cfg->enable_notify == true && create_notify_ctx(ctx, cfg) != 0) {
+    if ((cfg->enable_notify == true || cfg->enable_atomic_add == true) && create_notify_ctx(ctx, cfg) != 0) {
         goto delete_credit_ctx;
     }
 
@@ -2772,7 +2779,7 @@ unimport_seg:
 delete_remote_info:
     destroy_connection_info(ctx, cfg);
 delete_notify_ctx:
-    if (cfg->enable_notify == true) {
+    if (cfg->enable_notify == true || cfg->enable_atomic_add == true) {
         destroy_notify_ctx(ctx, cfg);
     }
 delete_credit_ctx:
@@ -2804,14 +2811,14 @@ static void destroy_simplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     for (uint32_t i = 0; i < cfg->pair_num; i++) {
         (void)sync_time(cfg, i, "unimport_jfr");
     }
-    if (cfg->enable_notify == true) {
+    if (cfg->enable_notify == true || cfg->enable_atomic_add == true) {
         unimport_notify(ctx, ctx->jetty_num);
     }
     if (cfg->enable_credit == true) {
         unimport_credit(ctx, ctx->jetty_num);
     }
     destroy_connection_info(ctx, cfg);
-    if (cfg->enable_notify == true) {
+    if (cfg->enable_notify == true || cfg->enable_atomic_add == true) {
         destroy_notify_ctx(ctx, cfg);
     }
     if (cfg->enable_credit == true) {
@@ -2834,7 +2841,7 @@ static void destroy_duplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     for (uint32_t i = 0; i < cfg->pair_num; i++) {
         (void)sync_time(cfg, i, "unimport_jetty");
     }
-    if (cfg->enable_notify == true) {
+    if (cfg->enable_notify == true || cfg->enable_atomic_add == true) {
         unimport_notify(ctx, ctx->jetty_num);
     }
     if (cfg->enable_credit == true) {
@@ -2842,7 +2849,7 @@ static void destroy_duplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     }
     unimport_seg(ctx, (int)ctx->jetty_num);
     destroy_connection_info(ctx, cfg);
-    if (cfg->enable_notify == true) {
+    if (cfg->enable_notify == true || cfg->enable_atomic_add == true) {
         destroy_notify_ctx(ctx, cfg);
     }
     if (cfg->enable_credit == true) {
