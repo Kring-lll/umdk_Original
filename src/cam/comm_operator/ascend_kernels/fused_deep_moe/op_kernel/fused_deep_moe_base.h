@@ -13,6 +13,8 @@
 
 constexpr uint32_t HCCL_MAX_RANK_SIZE = 1024U;
 
+constexpr uint32_t WORKSPACE_OFFSET_SIZE = 1024 * 1024 * 2;
+
 struct Mc2MoeContext {
     uint32_t rankId = 0;
     uint32_t rankSize = 0;
