@@ -19,6 +19,7 @@
 #include "bondp_dp_failback.h"
 #include "bondp_dp_health.h"
 #include "bondp_types.h"
+#include "bondp_cp_tjetty.h"
 #include "ub_get_clock.h"
 #include "urma_api.h"
 #include "urma_log.h"
