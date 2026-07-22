@@ -162,7 +162,10 @@ static void hc_set_tjetty_list_target_valid(bondp_hc_node_t *node, uint32_t loca
 
     pthread_rwlock_rdlock(&node->lock);
     UB_LIST_FOR_EACH (bdp_tjetty, hc_entry, &node->tjetty_list) {
-        atomic_store(&bdp_tjetty->valid[local_idx][target_idx], true);
+        bondp_tjetty_path_t *path = bondp_find_path(bdp_tjetty, local_idx, target_idx);
+        if (path != NULL) {
+            atomic_store(&path->valid, true);
+        }
     }
     pthread_rwlock_unlock(&node->lock);
 }
@@ -207,8 +210,11 @@ static void hc_drain_probe_cq(bondp_probe_res_t *res)
             }
             bool ok = (cr[k].status == URMA_CR_SUCCESS);
             bondp_target_jetty_t *bdp_tjetty = node->hc_tjetty[local_idx][target_idx];
-            bool prev = (bdp_tjetty != NULL) ?
-                atomic_load(&bdp_tjetty->valid[local_idx][target_idx]) : true;
+            bool prev = true;
+            if (bdp_tjetty != NULL) {
+                const bondp_tjetty_path_t *path = bondp_find_path_const(bdp_tjetty, local_idx, target_idx);
+                prev = (path != NULL) ? atomic_load(&path->valid) : true;
+            }
             atomic_store(&node->valid[local_idx][target_idx], ok);
             if (ok && !prev) {
                 hc_set_tjetty_list_target_valid(node, local_idx, target_idx);
@@ -273,8 +279,13 @@ static void hc_probe_link(bondp_hc_ctx_t *hc_ctx, bondp_hc_node_t *node,
         return;
     }
 
-    urma_target_jetty_t *tjetty = bdp_tjetty->p_tjetty[local_idx][target_idx];
-    urma_target_seg_t *tseg = bdp_tjetty->p_check_tseg[local_idx][target_idx];
+    bondp_tjetty_path_t *path = bondp_find_path(bdp_tjetty, local_idx, target_idx);
+    if (path == NULL) {
+        return;
+    }
+
+    urma_target_jetty_t *tjetty = path->p_tjetty;
+    urma_target_seg_t *tseg = path->p_check_tseg;
     if (tjetty == NULL || tseg == NULL) {
         return;
     }
@@ -827,17 +838,15 @@ urma_status_t bondp_hc_unimport_tseg(bondp_target_jetty_t *bdp_tjetty)
     }
 
     urma_status_t ret = URMA_SUCCESS;
-    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        for (uint32_t j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
-            urma_target_seg_t *tseg = bdp_tjetty->p_check_tseg[i][j];
-            if (tseg == NULL) {
-                continue;
-            }
-            bdp_tjetty->p_check_tseg[i][j] = NULL;
-            if (urma_unimport_seg(tseg) != URMA_SUCCESS) {
-                URMA_LOG_ERR("Failed to unimport health probe seg, local_idx=%u, target_idx=%u.\n", i, j);
-                ret = URMA_FAIL;
-            }
+    for (uint32_t i = 0; i < bdp_tjetty->path_count; ++i) {
+        urma_target_seg_t *tseg = bdp_tjetty->paths[i].p_check_tseg;
+        if (tseg == NULL) {
+            continue;
+        }
+        bdp_tjetty->paths[i].p_check_tseg = NULL;
+        if (urma_unimport_seg(tseg) != URMA_SUCCESS) {
+            URMA_LOG_ERR("Failed to unimport health probe seg, path_idx=%u.\n", i);
+            ret = URMA_FAIL;
         }
     }
     return ret;
@@ -858,28 +867,28 @@ int bondp_hc_import_tseg(const bondp_context_t *bdp_ctx, bondp_target_jetty_t *b
         .bs.mapping = URMA_SEG_NOMAP,
         .bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE,
     };
-    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+    for (uint32_t k = 0; k < bdp_tjetty->path_count; ++k) {
+        bondp_tjetty_path_t *path = &bdp_tjetty->paths[k];
+        if (path->p_tjetty == NULL) {
+            continue;
+        }
+        uint32_t i = path->local_indice;
+        uint32_t j = path->remote_indice;
         if (bdp_ctx->p_ctxs[i] == NULL) {
             continue;
         }
-        for (uint32_t j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
-            if (bdp_tjetty->p_tjetty[i][j] == NULL) {
-                continue;
-            }
-            const urma_seg_base_t *base = &rjetty_info->health_check_seg.slaves[j];
-            if (base->len == 0) {
-                continue;
-            }
+        const urma_seg_base_t *base = &rjetty_info->health_check_seg.slaves[j];
+        if (base->len == 0) {
+            continue;
+        }
 
-            urma_seg_t seg = {0};
-            bondp_seg_base_to_seg(base, &seg);
-            bdp_tjetty->p_check_tseg[i][j] =
-                urma_import_seg(bdp_ctx->p_ctxs[i], &seg, NULL, 0, flag);
-            if (bdp_tjetty->p_check_tseg[i][j] == NULL) {
-                URMA_LOG_ERR("Failed to import health probe seg, local_idx=%u, target_idx=%u.\n", i, j);
-                (void)bondp_hc_unimport_tseg(bdp_tjetty);
-                return -1;
-            }
+        urma_seg_t seg = {0};
+        bondp_seg_base_to_seg(base, &seg);
+        path->p_check_tseg = urma_import_seg(bdp_ctx->p_ctxs[i], &seg, NULL, 0, flag);
+        if (path->p_check_tseg == NULL) {
+            URMA_LOG_ERR("Failed to import health probe seg, local_idx=%u, target_idx=%u.\n", i, j);
+            (void)bondp_hc_unimport_tseg(bdp_tjetty);
+            return -1;
         }
     }
     return 0;
@@ -887,11 +896,9 @@ int bondp_hc_import_tseg(const bondp_context_t *bdp_ctx, bondp_target_jetty_t *b
 
 static bool hc_tjetty_has_probe_path(const bondp_target_jetty_t *bdp_tjetty)
 {
-    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        for (uint32_t j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
-            if (bdp_tjetty->p_tjetty[i][j] != NULL && bdp_tjetty->p_check_tseg[i][j] != NULL) {
-                return true;
-            }
+    for (uint32_t i = 0; i < bdp_tjetty->path_count; ++i) {
+        if (bdp_tjetty->paths[i].p_tjetty != NULL && bdp_tjetty->paths[i].p_check_tseg != NULL) {
+            return true;
         }
     }
     return false;
@@ -899,14 +906,16 @@ static bool hc_tjetty_has_probe_path(const bondp_target_jetty_t *bdp_tjetty)
 
 static void hc_register_tjetty_path(bondp_hc_node_t *node, bondp_target_jetty_t *bdp_tjetty)
 {
-    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        for (uint32_t j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
-            if (bdp_tjetty->p_tjetty[i][j] == NULL || bdp_tjetty->p_check_tseg[i][j] == NULL ||
-                node->hc_tjetty[i][j] != NULL) {
-                continue;
-            }
-            node->hc_tjetty[i][j] = bdp_tjetty;
+    for (uint32_t k = 0; k < bdp_tjetty->path_count; ++k) {
+        if (bdp_tjetty->paths[k].p_tjetty == NULL || bdp_tjetty->paths[k].p_check_tseg == NULL) {
+            continue;
         }
+        uint32_t i = bdp_tjetty->paths[k].local_indice;
+        uint32_t j = bdp_tjetty->paths[k].remote_indice;
+        if (node->hc_tjetty[i][j] != NULL) {
+            continue;
+        }
+        node->hc_tjetty[i][j] = bdp_tjetty;
     }
 }
 
@@ -916,8 +925,8 @@ static bondp_target_jetty_t *hc_find_tjetty_for_path(bondp_hc_node_t *node, uint
     bondp_target_jetty_t *tjetty = NULL;
 
     UB_LIST_FOR_EACH (tjetty, hc_entry, &node->tjetty_list) {
-        if (tjetty->p_tjetty[local_idx][target_idx] != NULL &&
-            tjetty->p_check_tseg[local_idx][target_idx] != NULL) {
+        const bondp_tjetty_path_t *path = bondp_find_path_const(tjetty, local_idx, target_idx);
+        if (path != NULL && path->p_tjetty != NULL && path->p_check_tseg != NULL) {
             return tjetty;
         }
     }
@@ -1016,7 +1025,10 @@ void bondp_hc_tjetty_sync_valid(const bondp_target_jetty_t *bdp_tjetty,
     bondp_target_jetty_t *cur = NULL;
     pthread_rwlock_rdlock(&node->lock);
     UB_LIST_FOR_EACH (cur, hc_entry, &node->tjetty_list) {
-        atomic_store(&cur->valid[skip_local_idx][skip_target_idx], false);
+        bondp_tjetty_path_t *skip_path = bondp_find_path(cur, skip_local_idx, skip_target_idx);
+        if (skip_path != NULL) {
+            atomic_store(&skip_path->valid, false);
+        }
         for (uint32_t li = 0; li < URMA_UBAGG_DEV_MAX_NUM; ++li) {
             for (uint32_t ti = 0; ti < URMA_UBAGG_DEV_MAX_NUM; ++ti) {
                 if (li == skip_local_idx && ti == skip_target_idx) {
@@ -1025,8 +1037,12 @@ void bondp_hc_tjetty_sync_valid(const bondp_target_jetty_t *bdp_tjetty,
                 if (node->hc_tjetty[li][ti] == NULL) {
                     continue;
                 }
+                bondp_tjetty_path_t *path = bondp_find_path(cur, li, ti);
+                if (path == NULL) {
+                    continue;
+                }
                 bool v = atomic_load(&node->valid[li][ti]);
-                atomic_store(&cur->valid[li][ti], v);
+                atomic_store(&path->valid, v);
             }
         }
     }

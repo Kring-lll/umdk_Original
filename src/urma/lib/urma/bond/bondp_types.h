@@ -28,6 +28,7 @@
 
 #define BONDP_MAX_NUM_JETTYS          (10240)
 #define BONDP_MAX_NUM_RSEGS           (10240)
+#define BONDP_MAX_PATH_NUM            (8)
 #define BONDP_MAX_WR_LIST_NUM         (300)
 #define PRIMARY_EID_NUM               (2)
 #define PORT_EID_MAX_NUM_PER_DEV      (9)
@@ -252,29 +253,64 @@ typedef struct bondp_comp {
     uint32_t rqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
 } bondp_comp_t;
 
+typedef struct bondp_tjetty_path {
+    urma_target_jetty_t *p_tjetty;
+    urma_target_seg_t *p_check_tseg;
+#ifndef __cplusplus
+    atomic_bool valid;
+#else
+    std::atomic_bool valid;
+#endif
+    uint8_t local_indice;
+    uint8_t remote_indice;
+    bool is_active;
+} bondp_tjetty_path_t;
+
 typedef struct bondp_target_jetty {
     urma_target_jetty_t v_tjetty;
     urma_token_t import_token_value;
     bool import_token_valid;
     bool skip_import_vjetty;
-    urma_target_jetty_t *p_tjetty[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
-    urma_target_seg_t *p_check_tseg[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
+    bondp_tjetty_path_t paths[BONDP_MAX_PATH_NUM];
+    uint32_t path_count;
     int local_dev_num;
     int target_dev_num;
-    uint32_t local_active_indices[URMA_UBAGG_DEV_MAX_NUM];
-    uint32_t active_indices[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t active_count;
-#ifndef __cplusplus
-    atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
-#else
-    std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
-#endif
     urma_ref_t use_cnt;
     bool is_msn_enabled;
     bool hc_registered;
     uint32_t hc_node_idx;
     struct ub_list hc_entry;
 } bondp_target_jetty_t;
+
+static inline bondp_tjetty_path_t *bondp_find_path(bondp_target_jetty_t *t,
+                                                   uint32_t local_idx, uint32_t target_idx)
+{
+    for (uint32_t i = 0; i < t->path_count; i++) {
+        if (t->paths[i].local_indice == (uint8_t)local_idx &&
+            t->paths[i].remote_indice == (uint8_t)target_idx) {
+            return &t->paths[i];
+        }
+    }
+    return NULL;
+}
+
+static inline const bondp_tjetty_path_t *bondp_find_path_const(const bondp_target_jetty_t *t,
+                                                               uint32_t local_idx, uint32_t target_idx)
+{
+    for (uint32_t i = 0; i < t->path_count; i++) {
+        if (t->paths[i].local_indice == (uint8_t)local_idx &&
+            t->paths[i].remote_indice == (uint8_t)target_idx) {
+            return &t->paths[i];
+        }
+    }
+    return NULL;
+}
+
+static inline bool bondp_path_available(const bondp_tjetty_path_t *path)
+{
+    return path != NULL && atomic_load(&path->valid) && path->p_tjetty != NULL;
+}
 
 typedef struct bondp_import_target_seg {
     urma_target_seg_t v_tseg;

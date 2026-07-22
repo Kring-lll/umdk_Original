@@ -182,8 +182,14 @@ static int init_target_active_indices(bondp_context_t *bdp_ctx, bondp_target_jet
         for (uint32_t n = 0; n < bdp_ctx->enabled_count; ++n) {
             uint32_t local_indice = bdp_ctx->enabled_indices[n];
             if (rvjetty_info->connected[local_indice][target_indice]) {
-                bdp_tjetty->active_indices[active_count] = target_indice;
-                bdp_tjetty->local_active_indices[active_count] = local_indice;
+                if (active_count >= BONDP_MAX_PATH_NUM) {
+                    URMA_LOG_ERR("Path count exceeds BONDP_MAX_PATH_NUM(%d)\n", BONDP_MAX_PATH_NUM);
+                    return -1;
+                }
+                bdp_tjetty->paths[active_count].local_indice = (uint8_t)local_indice;
+                bdp_tjetty->paths[active_count].remote_indice = (uint8_t)target_indice;
+                bdp_tjetty->paths[active_count].is_active = true;
+                atomic_init(&bdp_tjetty->paths[active_count].valid, false);
                 active_count += 1;
                 break;
             }
@@ -195,6 +201,7 @@ static int init_target_active_indices(bondp_context_t *bdp_ctx, bondp_target_jet
         return -1;
     }
     bdp_tjetty->active_count = active_count;
+    bdp_tjetty->path_count = active_count;
     bdp_tjetty->local_dev_num = (int)active_count;
     bdp_tjetty->target_dev_num = (int)active_count;
     return 0;
@@ -321,18 +328,35 @@ static int bondp_import_pjetty(
                 continue;
             }
 
-            if (bdp_tjetty->p_tjetty[local_idx][target_idx] != NULL) {
+            bondp_tjetty_path_t *path = bondp_find_path(bdp_tjetty, local_idx, target_idx);
+            if (path == NULL) {
+                /* Non-active connected pair: add a new path */
+                if (bdp_tjetty->path_count >= BONDP_MAX_PATH_NUM) {
+                    URMA_LOG_ERR("Path count exceeds BONDP_MAX_PATH_NUM(%d) at local=%u, target=%u\n",
+                                 BONDP_MAX_PATH_NUM, local_idx, target_idx);
+                    return -1;
+                }
+                path = &bdp_tjetty->paths[bdp_tjetty->path_count];
+                path->local_indice = (uint8_t)local_idx;
+                path->remote_indice = (uint8_t)target_idx;
+                path->is_active = false;
+                path->p_tjetty = NULL;
+                path->p_check_tseg = NULL;
+                atomic_init(&path->valid, false);
+                bdp_tjetty->path_count++;
+            }
+
+            if (path->p_tjetty != NULL) {
                 continue;
             }
 
-            bdp_tjetty->p_tjetty[local_idx][target_idx] =
-                urma_import_jetty(bdp_ctx->p_ctxs[local_idx], &p_rjetty, rjetty_token);
-            if (bdp_tjetty->p_tjetty[local_idx][target_idx] == NULL) {
+            path->p_tjetty = urma_import_jetty(bdp_ctx->p_ctxs[local_idx], &p_rjetty, rjetty_token);
+            if (path->p_tjetty == NULL) {
                 URMA_LOG_ERR("Failed to import tjetty local_idx=%u, target_idx=%u, jetty_id=%u\n",
                              local_idx, target_idx, rvjetty_info->slave_id[target_idx].id);
                 return -1;
             }
-            atomic_store(&bdp_tjetty->valid[local_idx][target_idx], true);
+            atomic_store(&path->valid, true);
         }
     }
     return 0;
@@ -356,22 +380,22 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
         ret = URMA_FAIL;
     }
 
-    memset(bdp_tjetty->valid, 0, sizeof(bdp_tjetty->valid));
-    for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        for (int j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
-            if (bdp_tjetty->p_tjetty[i][j] == NULL) {
-                continue;
-            }
-            URMA_LOG_INFO("bondp unimport pjetty is done, jetty id is %u.\n",
-                          bdp_tjetty->p_tjetty[i][j]->id.id);
-            /* NULL the slot before freeing so concurrent readers (datapath
-             * scheduling, health probe) observe NULL instead of a dangling
-             * pointer once urma_unimport_jetty releases the object. */
-            urma_target_jetty_t *p_tjetty = bdp_tjetty->p_tjetty[i][j];
-            bdp_tjetty->p_tjetty[i][j] = NULL;
-            if (urma_unimport_jetty(p_tjetty) != URMA_SUCCESS) {
-                ret = URMA_FAIL;
-            }
+    for (uint32_t i = 0; i < bdp_tjetty->path_count; ++i) {
+        atomic_store(&bdp_tjetty->paths[i].valid, false);
+    }
+    for (uint32_t i = 0; i < bdp_tjetty->path_count; ++i) {
+        if (bdp_tjetty->paths[i].p_tjetty == NULL) {
+            continue;
+        }
+        URMA_LOG_INFO("bondp unimport pjetty is done, jetty id is %u.\n",
+                      bdp_tjetty->paths[i].p_tjetty->id.id);
+        /* NULL the slot before freeing so concurrent readers (datapath
+         * scheduling, health probe) observe NULL instead of a dangling
+         * pointer once urma_unimport_jetty releases the object. */
+        urma_target_jetty_t *p_tjetty = bdp_tjetty->paths[i].p_tjetty;
+        bdp_tjetty->paths[i].p_tjetty = NULL;
+        if (urma_unimport_jetty(p_tjetty) != URMA_SUCCESS) {
+            ret = URMA_FAIL;
         }
     }
 
@@ -556,9 +580,12 @@ urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
     for (uint32_t n = 0; n < bdp_jetty->active_count; ++n) {
         uint32_t local_idx = bdp_jetty->active_indices[n];
         urma_jetty_t *pjetty = bdp_jetty->p_jetty[local_idx];
-        for (uint32_t m = 0; m < bdp_tjetty->active_count; ++m) {
-            uint32_t target_idx = bdp_tjetty->active_indices[m];
-            urma_target_jetty_t *ptjetty = bdp_tjetty->p_tjetty[local_idx][target_idx];
+        for (uint32_t m = 0; m < bdp_tjetty->path_count; ++m) {
+            if (bdp_tjetty->paths[m].local_indice != local_idx) {
+                continue;
+            }
+            uint32_t target_idx = bdp_tjetty->paths[m].remote_indice;
+            urma_target_jetty_t *ptjetty = bdp_tjetty->paths[m].p_tjetty;
             if (ptjetty == NULL || target_used[target_idx]) {
                 continue;
             }
@@ -672,18 +699,34 @@ static int bondp_import_pjfr(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
                 continue;
             }
 
-            if (bdp_tjetty->p_tjetty[local_idx][target_idx] != NULL) {
+            bondp_tjetty_path_t *path = bondp_find_path(bdp_tjetty, local_idx, target_idx);
+            if (path == NULL) {
+                if (bdp_tjetty->path_count >= BONDP_MAX_PATH_NUM) {
+                    URMA_LOG_ERR("Path count exceeds BONDP_MAX_PATH_NUM(%d) at local=%u, target=%u\n",
+                                 BONDP_MAX_PATH_NUM, local_idx, target_idx);
+                    return -1;
+                }
+                path = &bdp_tjetty->paths[bdp_tjetty->path_count];
+                path->local_indice = (uint8_t)local_idx;
+                path->remote_indice = (uint8_t)target_idx;
+                path->is_active = false;
+                path->p_tjetty = NULL;
+                path->p_check_tseg = NULL;
+                atomic_init(&path->valid, false);
+                bdp_tjetty->path_count++;
+            }
+
+            if (path->p_tjetty != NULL) {
                 continue;
             }
 
-            bdp_tjetty->p_tjetty[local_idx][target_idx] =
-                urma_import_jfr(bdp_ctx->p_ctxs[local_idx], &p_rjfr, token_value);
-            if (bdp_tjetty->p_tjetty[local_idx][target_idx] == NULL) {
+            path->p_tjetty = urma_import_jfr(bdp_ctx->p_ctxs[local_idx], &p_rjfr, token_value);
+            if (path->p_tjetty == NULL) {
                 URMA_LOG_ERR("Failed to import tjetty loc_idx=%u, tar_idx=%u, jfr_id=%u\n",
                              local_idx, target_idx, udata_out->slave_id[target_idx].id);
                 return -1;
             }
-            atomic_store(&bdp_tjetty->valid[local_idx][target_idx], true);
+            atomic_store(&path->valid, true);
         }
     }
     return 0;
@@ -699,21 +742,19 @@ static int bondp_unimport_pjfr(bondp_target_jetty_t *bdp_tjetty)
     int ret = URMA_SUCCESS;
     uint32_t tjetty_id = bdp_tjetty->v_tjetty.id.id;
 
-    for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        for (int j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
-            if (bdp_tjetty->p_tjetty[i][j] == NULL) {
-                continue;
-            }
-            uint32_t jfr_id = bdp_tjetty->p_tjetty[i][j]->id.id;
-            int p_ret = urma_unimport_jfr(bdp_tjetty->p_tjetty[i][j]);
-            if (p_ret != URMA_SUCCESS) {
-                URMA_LOG_ERR("Failed to unimport pjfr, tjetty_id=%u, idx=%d/%d, jfr_id=%u, ret=%d\n",
-                             tjetty_id, i, j, jfr_id, p_ret);
-                ret = URMA_FAIL;
-            } else {
-                URMA_LOG_INFO_RL("Unimported pjfr successfully, tjetty_id=%u, idx=%d/%d, jfr_id=%u\n",
-                                 tjetty_id, i, j, jfr_id);
-            }
+    for (uint32_t i = 0; i < bdp_tjetty->path_count; ++i) {
+        if (bdp_tjetty->paths[i].p_tjetty == NULL) {
+            continue;
+        }
+        uint32_t jfr_id = bdp_tjetty->paths[i].p_tjetty->id.id;
+        int p_ret = urma_unimport_jfr(bdp_tjetty->paths[i].p_tjetty);
+        if (p_ret != URMA_SUCCESS) {
+            URMA_LOG_ERR("Failed to unimport pjfr, tjetty_id=%u, idx=%u, jfr_id=%u, ret=%d\n",
+                         tjetty_id, i, jfr_id, p_ret);
+            ret = URMA_FAIL;
+        } else {
+            URMA_LOG_INFO_RL("Unimported pjfr successfully, tjetty_id=%u, idx=%u, jfr_id=%u\n",
+                             tjetty_id, i, jfr_id);
         }
     }
 
