@@ -166,6 +166,7 @@ public:
         this->Attr("moe_expert_num").Int();
         this->Attr("quant_mode").Int();
         this->Attr("global_bs").Int();
+        this->Attr("shmem_workspace_size").Int();
 
         this->AICore().AddConfig("ascend910_93");
     }

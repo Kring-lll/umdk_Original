@@ -257,7 +257,7 @@ class ShmemFusionOp(DecodeMoeOps):
             "Ascend950": "channel"
         })
         self.context = self._ctx_manager.create_context()
-
+        self.ccl_buffer_size = self._ctx_manager.ccl_buffer_size
 
     def _init_shmem_buffer(self):
         self.buffer = umdk_cam_op_lib.FusedDeepMoeBuffer()
@@ -287,7 +287,8 @@ class ShmemFusionOp(DecodeMoeOps):
             self.global_rank_id,
             self.moe_expert_num,
             0,
-            self.global_batch_size
+            self.global_batch_size,
+            self.ccl_buffer_size
         )
         return (output, share_output, expert_token_nums)
 

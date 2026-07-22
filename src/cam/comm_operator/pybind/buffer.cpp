@@ -146,7 +146,8 @@ std::vector<at::Tensor> Buffer::zb_fused_deep_moe(
     int64_t ep_rank_id,
     int64_t moe_expert_num,
     int64_t quant_mode,
-    int64_t global_bs)
+    int64_t global_bs,
+    int64_t calcBufferSize)
 {
     auto x_shape = x.sizes();
     int h = x_shape[1];
@@ -167,6 +168,7 @@ std::vector<at::Tensor> Buffer::zb_fused_deep_moe(
     const std::string group_ep_str(group_ep.data(), group_ep.size());
     const char *group_ep_ptr = group_ep_str.c_str();
 
+    int64_t shmem_workspace_size = calcBufferSize - static_cast<int64_t>(EXT_INFO_SIZE);
     EXEC_NPU_CMD(aclnnFusedDeepMoe,
         context, x, expert_ids, gmm1_weight_list, gmm1_weight_scale_list, gmm2_weight_list, gmm2_weight_scale_list,
         expert_scales,
@@ -174,8 +176,8 @@ std::vector<at::Tensor> Buffer::zb_fused_deep_moe(
         share_gmm2_weight, share_gmm2_weight_scale,
         expert_smooth_scales, share_smooth_scales, x_active_mask,
         group_ep_ptr, ep_rank_size, ep_rank_id, moe_expert_num, quant_mode, global_bs,
+        shmem_workspace_size,
         output, share_output, expert_token_nums);
-
     return {output, share_output, expert_token_nums};
 }
 
