@@ -12,14 +12,25 @@
 
 #include "umq_errno.h"
 #include "umq_vlog.h"
+#include "util_thread_key.h"
 #include "umq_ub_thread_wr.h"
 
 typedef struct umq_ub_thread_wr_ctx {
-    umq_ub_thread_wr_t *slots[UMQ_THREAD_ID_MAX];
+    util_thread_key_t *key;
     bool inited;
 } umq_ub_thread_wr_ctx_t;
 
 static umq_ub_thread_wr_ctx_t g_umq_ub_thread_wr_ctx;
+
+static void umq_thread_wr_destructor(void *data)
+{
+    (void)util_thread_setspecific(g_umq_ub_thread_wr_ctx.key, NULL);
+
+    if (data == NULL) {
+        return;
+    }
+    free(data);
+}
 
 int umq_ub_thread_wr_init(void)
 {
@@ -29,19 +40,27 @@ int umq_ub_thread_wr_init(void)
     }
 
     memset(&g_umq_ub_thread_wr_ctx, 0, sizeof(g_umq_ub_thread_wr_ctx));
+    g_umq_ub_thread_wr_ctx.key = util_thread_key_create(umq_thread_wr_destructor);
+    if (g_umq_ub_thread_wr_ctx.key == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "umq thread wr key create failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
     g_umq_ub_thread_wr_ctx.inited = true;
     return UMQ_SUCCESS;
 }
 
 void umq_ub_thread_wr_uninit(void)
 {
-    g_umq_ub_thread_wr_ctx.inited = false;
+    if (!g_umq_ub_thread_wr_ctx.inited) {
+        return;
+    }
 
-    /* Free every slot uniformly -- both the init-time allocations and the
-     * lazily-allocated ones -- since thread exit never frees them. */
-    for (uint32_t i = 0; i < UMQ_THREAD_ID_MAX; i++) {
-        free(g_umq_ub_thread_wr_ctx.slots[i]);
-        g_umq_ub_thread_wr_ctx.slots[i] = NULL;
+    umq_thread_wr_destructor((void *)umq_ub_thread_wr_get());
+    g_umq_ub_thread_wr_ctx.inited = false;
+    if (g_umq_ub_thread_wr_ctx.key != NULL) {
+        (void)util_thread_key_delete(g_umq_ub_thread_wr_ctx.key);
+        g_umq_ub_thread_wr_ctx.key = NULL;
     }
 }
 
@@ -51,27 +70,21 @@ umq_ub_thread_wr_t *umq_ub_thread_wr_get(void)
         return NULL;
     }
 
-    /* umq_thread_id_get() is idempotent per thread (it caches the id in its own
-     * thread-key fast path), so this is lock-free on the steady state. Thread
-     * ids are unique per-thread, so writes to slots[id] from different threads
-     * never collide on the same index. */
-    uint32_t id = umq_thread_id_get();
-    if (id >= UMQ_THREAD_ID_MAX) {
-        return NULL;
-    }
-
-    /* Fast path: slot already wired up (allocated on a previous call from this thread,
-     * or reused from a recycled id). */
-    umq_ub_thread_wr_t *wr = g_umq_ub_thread_wr_ctx.slots[id];
+    umq_ub_thread_wr_t *wr = util_thread_getspecific(g_umq_ub_thread_wr_ctx.key);
     if (wr != NULL) {
         return wr;
     }
 
     wr = (umq_ub_thread_wr_t *)calloc(1, sizeof(umq_ub_thread_wr_t));
     if (wr == NULL) {
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "umq ub thread wr alloc failed for id %u\n", id);
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "umq ub thread wr alloc failed\n");
         return NULL;
     }
-    g_umq_ub_thread_wr_ctx.slots[id] = wr;
+
+    if (util_thread_setspecific(g_umq_ub_thread_wr_ctx.key, (void *)wr) != 0) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "umq thread wr setspecific failed\n");
+        free(wr);
+        return NULL;
+    }
     return wr;
 }
