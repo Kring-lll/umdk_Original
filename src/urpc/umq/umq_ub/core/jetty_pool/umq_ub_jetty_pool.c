@@ -486,6 +486,12 @@ jetty_pool_node_t *umq_ub_jetty_node_alloc(void)
                     (void)pthread_spin_unlock(&pool->lock);
                 }
                 continue;
+            } else if (node->is_jetty_err) {
+                (void)pthread_spin_lock(&pool->lock);
+                pool->active_count++;
+                recycle_node_to_relay_q(pool, node);
+                (void)pthread_spin_unlock(&pool->lock);
+                continue;
             }
 
             node->borrow_count = 0;
@@ -663,6 +669,24 @@ void umq_ub_jetty_node_mark_err(jetty_pool_node_t *node)
         return; // was already true
     }
     (void)__atomic_add_fetch(&g_jetty_pool.err_count, 1, __ATOMIC_RELAXED);
+}
+
+int umq_ub_move_jetty_node_to_relay(jetty_pool_node_t *node)
+{
+    if (node == NULL) {
+        return -UMQ_ERR_EINVAL;
+    }
+
+    (void)pthread_spin_lock(&g_jetty_pool.lock);
+    if (!node->in_global_pool) {
+        (void)pthread_spin_unlock(&g_jetty_pool.lock);
+        return -UMQ_ERR_EBUSY;
+    }
+
+    urpc_list_remove(&node->node);
+    recycle_node_to_relay_q(&g_jetty_pool, node);
+    (void)pthread_spin_unlock(&g_jetty_pool.lock);
+    return UMQ_SUCCESS;
 }
 
 int umq_ub_jetty_pool_align_tx(uint32_t queue_tx_depth, uint32_t queue_tx_buf_size)
