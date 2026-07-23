@@ -4,12 +4,6 @@
  * Description: umq ub thread-local tx work-request pool.
  * Create: 2026-07-17
  *
- * Each thread occupies one fixed slot in a pointer table indexed by thread id.
- * -- all of them are released uniformly at uninit.
- *
- * Relies on umq_thread_id_get() (from umq_thread_local.h), which is idempotent
- * per thread and already provides a thread-key fast path; this module just
- * indexes a pointer table by the id.
  */
 
 #ifndef UMQ_UB_THREAD_WR_H
