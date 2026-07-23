@@ -163,6 +163,7 @@ static void usage(const char *argv0)
         "  --enable_err_continue       Enable continue running when cr erros, default: disable.\n"
         "  --enable_notify             Enable write_with_notify, default: disable.\n"
         "  --enable_atomic_add         Enable write_atomic_add for write test, default: disable.\n"
+        "  --enable_ctp_rc_mul_path    Enable ctp rc multi-path mode for write test, default: disable.\n"
         "  --enable_user_tp            Enable user tp for UB device, if enable,UVS is not required. default: disable.\n"
         "  --oor_en                    Enable out of order for user_tp, default: disable.\n"
         "  --spray_en                  Enable multipathing for user_tp, default: disable.\n"
@@ -373,6 +374,7 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->enable_err_continue = false;
     cfg->enable_notify = false;
     cfg->enable_atomic_add = false;
+    cfg->enable_ctp_rc_mul_path = false;
     cfg->enable_user_tp = false;
     cfg->oor_en = false;
     cfg->spray_en = false;
@@ -674,6 +676,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"enable_err_continue", no_argument,       NULL, PERFTEST_OPT_ENABLE_ERR_CONTINUE},
         {"enable_notify",   no_argument,     NULL, PERFTEST_OPT_ENABLE_NOTIFY},
         {"enable_atomic_add", no_argument,   NULL, PERFTEST_OPT_ENABLE_ATOMIC_ADD},
+        {"enable_ctp_rc_mul_path", no_argument, NULL, PERFTEST_OPT_ENABLE_CTP_RC_MUL_PATH},
         {"enable_user_tp",      no_argument,       NULL, PERFTEST_OPT_ENABLE_USER_TP},
         {"oor_en",              no_argument,       NULL, PERFTEST_OPT_OOR_EN},
         {"spray_en",            no_argument,       NULL, PERFTEST_OPT_SPRAY_EN},
@@ -957,6 +960,9 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                 break;
             case PERFTEST_OPT_ENABLE_ATOMIC_ADD:
                 cfg->enable_atomic_add = true;
+                break;
+            case PERFTEST_OPT_ENABLE_CTP_RC_MUL_PATH:
+                cfg->enable_ctp_rc_mul_path = true;
                 break;
             case PERFTEST_OPT_ENABLE_USER_TP:
                 cfg->enable_user_tp = true;
@@ -1544,6 +1550,11 @@ int check_local_cfg(perftest_config_t *cfg)
             LOG_ERROR("atomic_add requires sge_num to be 1.\n");
             exit(1);
         }
+    }
+    if (cfg->enable_ctp_rc_mul_path == true &&
+        (cfg->trans_mode != URMA_TM_RC || cfg->use_ctp != true)) {
+        LOG_ERROR("ctp_rc_mul_path takes effect only with RC trans_mode and CTP enabled.\n");
+        exit(1);
     }
     if (cfg->inf_period_ms != 0) {
         if (cfg->time_type.bs.infinite != 1) {
