@@ -1244,8 +1244,23 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
         jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
         bdp_jetty->p_jetty[i] = jetty;
         atomic_store(&bdp_jetty->valid[i], true);
+        atomic_store(&bdp_jetty->send_use_backup[i], false);
         URMA_LOG_DEBUG("Created pjetty successfully, idx=%u, jetty_id=%u, dev=%s, eid_idx=%u\n",
                        i, jetty->jetty_id.id, bdp_ctx->p_ctxs[i]->dev->name, bdp_ctx->p_ctxs[i]->eid_index);
+
+        if (bdp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE) {
+            urma_jetty_t *backup = urma_create_jetty(bdp_ctx->p_ctxs[i], &p_cfg);
+            if (backup == NULL) {
+                URMA_LOG_ERR("Failed to create backup pjetty %d.\n", i);
+                return -1;
+            }
+            backup->remote_jetty = NULL;
+            backup->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+            bdp_jetty->backup_pjetty[i] = backup;
+            URMA_LOG_DEBUG("Created backup pjetty, idx=%u, jetty_id=%u, dev=%s, eid_idx=%u\n",
+                           i, backup->jetty_id.id, bdp_ctx->p_ctxs[i]->dev->name,
+                           bdp_ctx->p_ctxs[i]->eid_index);
+        }
     }
     return 0;
 }
@@ -1277,6 +1292,19 @@ static int bondp_delete_pjetty(bondp_comp_t *bdp_jetty)
             ret = p_ret;
         }
         bdp_jetty->p_jetty[i] = NULL;
+
+        if (bdp_jetty->backup_pjetty[i] != NULL) {
+            URMA_LOG_INFO("bondp delete, backup p_jetty id is %u.\n",
+                          bdp_jetty->backup_pjetty[i]->jetty_id.id);
+            int b_ret = urma_delete_jetty(bdp_jetty->backup_pjetty[i]);
+            if (b_ret != 0) {
+                URMA_LOG_ERR("Failed to delete backup pjetty %d, ret=%d.\n", i, b_ret);
+                if (ret == 0) {
+                    ret = b_ret;
+                }
+            }
+            bdp_jetty->backup_pjetty[i] = NULL;
+        }
     }
     return ret;
 }
@@ -1300,16 +1328,34 @@ static int bondp_add_jetty_p_vjetty_id_info(bondp_context_t *bdp_ctx, bondp_comp
                          i, ret, pjetty_id.id, jetty_id);
             goto DEL_P_VJETTY_ID;
         }
+
+        if (bdp_jetty->backup_pjetty[i] != NULL) {
+            urma_jetty_id_t backup_id = bdp_jetty->backup_pjetty[i]->jetty_id;
+            int b_ret = bdp_p_vjetty_id_table_add_without_lock(
+                &bdp_ctx->p_vjetty_id_table, backup_id, JETTY, jetty_id, bdp_jetty);
+            if (b_ret == BONDP_HASH_MAP_COLLIDE_ERROR &&
+                jetty_id > 0 && jetty_id < BONDP_MAX_WELL_KNOWN_JETTY_ID) {
+                URMA_LOG_INFO("Add repeated wk-jetty backup id[%d]: ret=%d, p_jetty_id=%u, v_jetty_id=%u\n",
+                              i, b_ret, backup_id.id, jetty_id);
+            } else if (b_ret != 0) {
+                URMA_LOG_ERR("Failed to add backup p_vjetty_id[%d]: ret=%d, p_jetty_id=%u, v_jetty_id=%u\n",
+                             i, b_ret, backup_id.id, jetty_id);
+                goto DEL_P_VJETTY_ID;
+            }
+        }
     }
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
     return 0;
 DEL_P_VJETTY_ID:
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        if (!bdp_jetty->p_jetty[i]) {
-            continue;
+        if (bdp_jetty->p_jetty[i]) {
+            urma_jetty_id_t pjetty_id = bdp_jetty->p_jetty[i]->jetty_id;
+            (void)bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, pjetty_id, JETTY);
         }
-        urma_jetty_id_t pjetty_id = bdp_jetty->p_jetty[i]->jetty_id;
-        (void)bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, pjetty_id, JETTY);
+        if (bdp_jetty->backup_pjetty[i]) {
+            urma_jetty_id_t backup_id = bdp_jetty->backup_pjetty[i]->jetty_id;
+            (void)bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, backup_id, JETTY);
+        }
     }
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
     return -1;
@@ -1319,14 +1365,21 @@ static void bondp_del_jetty_p_vjetty_info_without_lock(bondp_comp_t *bdp_jetty)
 {
     bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        if (bdp_jetty->p_jetty[i] == NULL) {
-            continue;
+        if (bdp_jetty->p_jetty[i] != NULL) {
+            urma_jetty_id_t pjetty_id = bdp_jetty->p_jetty[i]->jetty_id;
+            int ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, pjetty_id, JETTY);
+            if (ret) {
+                URMA_LOG_ERR("Failed to delete p_vjetty_id node: ret=%d pjetty_id=%u\n",
+                             ret, bdp_jetty->p_jetty[i]->jetty_id.id);
+            }
         }
-        urma_jetty_id_t pjetty_id = bdp_jetty->p_jetty[i]->jetty_id;
-        int ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, pjetty_id, JETTY);
-        if (ret) {
-            URMA_LOG_ERR("Failed to delete p_vjetty_id node: ret=%d pjetty_id=%u\n",
-                         ret, bdp_jetty->p_jetty[i]->jetty_id.id);
+        if (bdp_jetty->backup_pjetty[i] != NULL) {
+            urma_jetty_id_t backup_id = bdp_jetty->backup_pjetty[i]->jetty_id;
+            int b_ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, backup_id, JETTY);
+            if (b_ret) {
+                URMA_LOG_ERR("Failed to delete backup p_vjetty_id node: ret=%d pjetty_id=%u\n",
+                             b_ret, bdp_jetty->backup_pjetty[i]->jetty_id.id);
+            }
         }
     }
 }

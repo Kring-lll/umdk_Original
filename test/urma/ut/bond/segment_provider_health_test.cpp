@@ -559,17 +559,17 @@ TEST(UrmaBondTest, FailbackTaskTableCoversScheduleFailureDuplicateAndLookup)
 {
     BondPathFixture fixture;
 
-    EXPECT_EQ(-EINVAL, bondp_fb_add_task(nullptr, 0x920, 0));
-    EXPECT_EQ(-EINVAL, bondp_fb_add_task(&fixture.ctx, 0x920, 0));
+    EXPECT_EQ(-EINVAL, bondp_fb_add_task(nullptr, 0x920, 0, BONDP_FB_PRIMARY));
+    EXPECT_EQ(-EINVAL, bondp_fb_add_task(&fixture.ctx, 0x920, 0, BONDP_FB_PRIMARY));
     ASSERT_EQ(0, bondp_fb_init(&fixture.ctx));
 
     /* No worker is present here; the task is inserted then removed through the stable failure path. */
     bondp_worker_destroy();
-    EXPECT_EQ(-ENODEV, bondp_fb_add_task(&fixture.ctx, 0x920, 0));
+    EXPECT_EQ(-ENODEV, bondp_fb_add_task(&fixture.ctx, 0x920, 0, BONDP_FB_PRIMARY));
 
     ASSERT_EQ(0, bondp_worker_create());
-    EXPECT_EQ(0, bondp_fb_add_task(&fixture.ctx, 0x921, 1));
-    EXPECT_EQ(-EEXIST, bondp_fb_add_task(&fixture.ctx, 0x921, 1));
+    EXPECT_EQ(0, bondp_fb_add_task(&fixture.ctx, 0x921, 1, BONDP_FB_PRIMARY));
+    EXPECT_EQ(-EEXIST, bondp_fb_add_task(&fixture.ctx, 0x921, 1, BONDP_FB_PRIMARY));
     usleep(2100000);
     bondp_fb_uninit(&fixture.ctx);
     bondp_worker_destroy();
