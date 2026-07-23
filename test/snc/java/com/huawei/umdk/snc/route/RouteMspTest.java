@@ -25,6 +25,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -97,9 +98,9 @@ public class RouteMspTest {
     public static void init() {
         try {
             List<String> templateFiles = new ArrayList<>();
-            templateFiles.add("src/main/resources/128_npu_rack.json");
-            templateFiles.add("src/main/resources/128_npu_inter_rack.json");
-            for (String template : templateFiles) {
+            templateFiles.add("src/main/resources/128_npu_rack.json");	 
+            templateFiles.add("src/main/resources/128_npu_inter_rack.json");	 
+            for (String template : templateFiles) {	 
                 String jsonStr = Files.readString(Paths.get(template), StandardCharsets.UTF_8);
                 SncTopology topology = TopoTemplateService.parseTemplateJson(jsonStr);
                 topologyMap.put(topology.getLabel().getNames().get("type"), topology);
