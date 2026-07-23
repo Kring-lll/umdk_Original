@@ -30,6 +30,10 @@
 
 #define PERFTEST_DEF_UM_MAX_SGE (2)
 
+#define PERFTEST_UNREG_RETRY_MAX  50
+#define PERFTEST_UNREG_RETRY_US   10000 /* 10ms */
+#define PERFTEST_DRAIN_POLL_BATCH 16
+
 static urma_token_t g_perftest_token = {
     .token = 0xABCDEF,
 };
@@ -402,6 +406,42 @@ delete_jfc:
     return -1;
 }
 
+static void modify_jfs_to_error(perftest_context_t *ctx)
+{
+    urma_jfs_attr_t attr = {
+        .mask = JFS_STATE,
+        .state = URMA_JETTY_STATE_ERROR,
+    };
+    for (uint32_t i = 0; i < ctx->jetty_num; i++) {
+        if (ctx->jetty_num > 1 && i > 0 && ctx->jfs[i] == ctx->jfs[0]) {
+            break;
+        }
+        if (ctx->jfs[i] != NULL) {
+            urma_status_t ret = urma_modify_jfs(ctx->jfs[i], &attr);
+            if (ret != URMA_SUCCESS) {
+                LOG_ERROR("Failed to modify jfs %u to ERROR, ret=%d\n", i, (int)ret);
+            }
+        }
+    }
+}
+
+static void modify_jfr_to_error(perftest_context_t *ctx)
+{
+    urma_jfr_attr_t attr = {
+        .mask = JFR_STATE,
+        .state = URMA_JFR_STATE_ERROR,
+    };
+    for (uint32_t i = 0; i < ctx->jetty_num; i++) {
+        if (ctx->jfr[i] == NULL) {
+            continue;
+        }
+        urma_status_t ret = urma_modify_jfr(ctx->jfr[i], &attr);
+        if (ret != URMA_SUCCESS) {
+            LOG_ERROR("Failed to modify jfr %u to ERROR, ret=%d\n", i, (int)ret);
+        }
+    }
+}
+
 static inline void destroy_jfs(perftest_context_t *ctx, const int idx)
 {
     if (idx > 1 && ctx->jfs[0] != ctx->jfs[1]) {
@@ -551,6 +591,25 @@ static void fill_jfr_cfg(perftest_context_t *ctx, const perftest_config_t *cfg, 
     }
     if (cfg->use_bonding) {
         jfr_cfg->max_sge += 1; /* there is one more sge in bonding mode */
+    }
+}
+
+static void modify_jetty_to_error(perftest_context_t *ctx)
+{
+    urma_jetty_attr_t attr = {
+        .mask = JETTY_STATE,
+        .state = URMA_JETTY_STATE_ERROR,
+    };
+    for (uint32_t i = 0; i < ctx->jetty_num; i++) {
+        if (ctx->jetty_num > 1 && i > 0 && ctx->jetty[i] == ctx->jetty[0]) {
+            break;
+        }
+        if (ctx->jetty[i] != NULL) {
+            urma_status_t ret = urma_modify_jetty(ctx->jetty[i], &attr);
+            if (ret != URMA_SUCCESS) {
+                LOG_ERROR("Failed to modify jetty %u to ERROR, ret=%d\n", i, (int)ret);
+            }
+        }
     }
 }
 
@@ -709,12 +768,43 @@ static void destroy_duplex_jettys(perftest_context_t *ctx, perftest_config_t *cf
     ctx->jetty_num = 0;
 }
 
-static inline void unregister_seg(perftest_context_t *ctx, const perftest_config_t *cfg, const int idx)
+static void drain_inflight_wr(perftest_context_t *ctx, const perftest_config_t *cfg)
+{
+    if (ctx->jfc_s == NULL && ctx->jfc_r == NULL) {
+        return;
+    }
+    urma_cr_t cr[PERFTEST_DRAIN_POLL_BATCH];
+    for (uint32_t i = 0; i < cfg->jettys; i++) {
+        if (i > 0 && (cfg->pair_flag == false || cfg->type == PERFTEST_BW)) {
+            break;
+        }
+        if (ctx->jfc_s != NULL && ctx->jfc_s[i] != NULL) {
+            while (urma_poll_jfc(ctx->jfc_s[i], PERFTEST_DRAIN_POLL_BATCH, cr) > 0) {
+                /* drain send completions to release in-flight seg references */
+            }
+        }
+        if (ctx->jfc_r != NULL && ctx->jfc_r[i] != NULL) {
+            while (urma_poll_jfc(ctx->jfc_r[i], PERFTEST_DRAIN_POLL_BATCH, cr) > 0) {
+                /* drain recv completions to release in-flight seg references */
+            }
+        }
+    }
+}
+
+static void unregister_seg(perftest_context_t *ctx, const perftest_config_t *cfg, const int idx)
 {
     uint32_t seg_num = (cfg->seg_pre_jetty == false) ? 1 : cfg->jettys;
     for (uint32_t k = 0; k < idx; k++) {
         if (k < seg_num) {
-            (void)urma_unregister_seg(ctx->local_tseg[k]);
+            urma_status_t ret = urma_unregister_seg(ctx->local_tseg[k]);
+            for (uint32_t retry = 0; ret == URMA_EAGAIN && retry < PERFTEST_UNREG_RETRY_MAX; retry++) {
+                drain_inflight_wr(ctx, cfg);
+                usleep(PERFTEST_UNREG_RETRY_US);
+                ret = urma_unregister_seg(ctx->local_tseg[k]);
+            }
+            if (ret != URMA_SUCCESS) {
+                LOG_ERROR("Failed to unregister seg %u, ret=%d\n", k, (int)ret);
+            }
         }
     }
     free(ctx->local_tseg);
@@ -2316,7 +2406,12 @@ static void destroy_credit_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
 
     for (i = 0; i < cfg->jettys; i++) {
         if (ctx->credit_seg[i] != NULL) {
-            (void)urma_unregister_seg(ctx->credit_seg[i]);
+            urma_status_t ret = urma_unregister_seg(ctx->credit_seg[i]);
+            for (uint32_t retry = 0; ret == URMA_EAGAIN && retry < PERFTEST_UNREG_RETRY_MAX; retry++) {
+                drain_inflight_wr(ctx, cfg);
+                usleep(PERFTEST_UNREG_RETRY_US);
+                ret = urma_unregister_seg(ctx->credit_seg[i]);
+            }
         }
     }
 
@@ -2432,7 +2527,12 @@ free_buf:
 
 static void destroy_notify_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
 {
-    (void)urma_unregister_seg(ctx->notify_seg);
+    urma_status_t ret = urma_unregister_seg(ctx->notify_seg);
+    for (uint32_t retry = 0; ret == URMA_EAGAIN && retry < PERFTEST_UNREG_RETRY_MAX; retry++) {
+        drain_inflight_wr(ctx, cfg);
+        usleep(PERFTEST_UNREG_RETRY_US);
+        ret = urma_unregister_seg(ctx->notify_seg);
+    }
     urma_free_token_id(ctx->notify_token_id);
     free(ctx->notify_buf);
     ctx->notify_buf = NULL;
@@ -2799,11 +2899,14 @@ int create_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
 static void destroy_simplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     destroy_run_ctx(ctx);
+    modify_jfs_to_error(ctx);
+    modify_jfr_to_error(ctx);
     disconnect_jfr(ctx, cfg);
     unimport_seg(ctx, (int)ctx->jetty_num);
     for (uint32_t i = 0; i < cfg->pair_num; i++) {
         (void)sync_time(cfg, i, "unimport_jfr");
     }
+    drain_inflight_wr(ctx, cfg);
     if (cfg->enable_notify == true) {
         unimport_notify(ctx, ctx->jetty_num);
     }
@@ -2830,10 +2933,12 @@ static void destroy_duplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
         free(ctx->user_tp);
         free(ctx->remote_user_tp);
     }
+    modify_jetty_to_error(ctx);
     disconnect_jetty(ctx, cfg);
     for (uint32_t i = 0; i < cfg->pair_num; i++) {
         (void)sync_time(cfg, i, "unimport_jetty");
     }
+    drain_inflight_wr(ctx, cfg);
     if (cfg->enable_notify == true) {
         unimport_notify(ctx, ctx->jetty_num);
     }
