@@ -537,6 +537,9 @@ static void fill_jfs_cfg(perftest_context_t *ctx, const perftest_config_t *cfg, 
         jfs_cfg->max_sge += 1; /* there is one more sge in bonding mode */
     }
     jfs_cfg->flag.bs.order_type = cfg->order_type;
+    if (cfg->enable_ctp_rc_mul_path == true) {
+        jfs_cfg->flag.bs.ctp_rc_mul_path_mode = 1;
+    }
     if (jfs_cfg->trans_mode == URMA_TM_RC &&
         (jfs_cfg->flag.bs.order_type == URMA_OT)) {
     }
