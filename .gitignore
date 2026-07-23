@@ -1,0 +1,7 @@
+# Maven build output
+target/
+
+# Large test data files (>10 MiB, must use Git LFS if tracked)
+acl_data_A5-SuperNode-128NPU.json
+topo_4frame_4lc_v0720.json
+gen_acl.py
