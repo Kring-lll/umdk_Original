@@ -541,6 +541,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             wr_entry->bdp_comp = bdp_comp;
             wr_entry->next = (i + 1) < wr_total ? wr_entries[i + 1] : wr_entries[0];
             wr_entry->is_batch_head = (i == 0) || (i > 0 && jfs_wr_is_cqe_wr(&wr_entries[i - 1]->wr));
+            wr_entry->is_ring_tail = (i == wr_total - 1);
             if (cur->flag.bs.has_drv_ext) {
                 bondp_jfs_wr_t *bwr = CONTAINER_OF_FIELD(cur, bondp_jfs_wr_t, base);
                 wr_entry->info.src_chip_id = bwr->src_chip_id;
@@ -1092,21 +1093,28 @@ typedef enum cr_convert_ret {
 static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
 {
     int ret;
+    jfs_wr_entry_t *entries[BONDP_BATCH_POST_MAX_NUM];
     jfs_wr_entry_t *cur = wr_entry;
     int total_cnt = 0;
+    int converted_cnt = 0;
 
     while (cur != NULL) {
         cur->send_idx = send_idx;
         cur->target_idx = target_idx;
         urma_jfs_wr_t *wr = &cur->wr;
+        entries[total_cnt++] = cur;
 
         ret = check_jfs_wr_path(wr, send_idx, target_idx);
         if (ret != URMA_SUCCESS) {
-            jfs_wr_put_refs(wr);
+            for (int i = 0; i < converted_cnt && entries[i] != NULL; ++i) {
+                urma_jfs_wr_t *wr = &entries[i]->wr;
+                urma_target_jetty_t *vtjetty = &entries[i]->target_vjetty->v_tjetty;
+                convert_jfs_pwr_to_vwr(wr, vtjetty);
+            }
             goto release_wr_entry;
         }
         convert_jfs_vwr_to_pwr(wr, send_idx, target_idx);
-        ++total_cnt;
+        converted_cnt++;
 
         if (jfs_wr_is_cqe_wr(wr)) {
             cur->wr.next = NULL;
@@ -1117,13 +1125,10 @@ static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int s
 
     urma_jfs_wr_t *bad_wr = NULL;
     ret = comp_post_send(bdp_comp, send_idx, target_idx, &wr_entry->wr, &bad_wr);
-
-    cur = wr_entry;
-    for (int i = 0; i < total_cnt && cur != NULL; ++i) {
-        urma_jfs_wr_t *wr = &cur->wr;
-        urma_target_jetty_t *vtjetty = &cur->target_vjetty->v_tjetty;
+    for (int i = 0; i < converted_cnt && entries[i] != NULL; ++i) {
+        urma_jfs_wr_t *wr = &entries[i]->wr;
+        urma_target_jetty_t *vtjetty = &entries[i]->target_vjetty->v_tjetty;
         convert_jfs_pwr_to_vwr(wr, vtjetty);
-        cur = cur->next;
     }
     if (ret != URMA_SUCCESS) {
         goto release_wr_entry;
@@ -1131,12 +1136,10 @@ static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int s
     return ret;
 
 release_wr_entry:
-    cur = wr_entry;
-    for (int i = 0; i < total_cnt && cur != NULL; ++i) {
-        jfs_wr_put_refs(&cur->wr);
-        cur = cur->next;
+    for (int i = 0; i < total_cnt && entries[i] != NULL; ++i) {
+        jfs_wr_put_refs(&entries[i]->wr);
     }
-    jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, &wr_entry, total_cnt);
+    jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, entries, total_cnt);
     return ret;
 }
 
@@ -1417,7 +1420,7 @@ CONVERT_CR:
     cr->local_id = get_comp_urma_jetty_id(bdp_comp)->id;
     cr->user_ctx = wr_entry->user_ctx;
 
-    if (wr_entry->wr.next == NULL) {
+    if (wr_entry->is_ring_tail) {
         pthread_spin_lock(&bdp_comp->send_lock);
         jfs_wr_buf_release_ring(&bdp_comp->send_wr_buf, wr_entry);
         pthread_spin_unlock(&bdp_comp->send_lock);

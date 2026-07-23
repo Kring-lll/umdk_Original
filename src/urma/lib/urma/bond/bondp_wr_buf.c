@@ -344,12 +344,12 @@ void jfs_wr_buf_release_ring(wr_buf_t *buf, jfs_wr_entry_t *head)
     uint32_t count = 0;
     jfs_wr_entry_t *entries[BONDP_BATCH_POST_MAX_NUM];
     do {
-        entries[count++] = cur;
         if (count == BONDP_BATCH_POST_MAX_NUM) {
             jfs_wr_put_refs(&head->wr);
             jfs_wr_buf_release(buf, head);
             return;
         }
+        entries[count++] = cur;
         cur = cur->next;
     } while (cur != NULL && cur != head);
     for (int i = 0; i < count; ++i) {

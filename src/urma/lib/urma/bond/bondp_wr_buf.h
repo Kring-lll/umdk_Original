@@ -58,6 +58,7 @@ typedef struct jfs_wr_entry {
     struct bondp_target_jetty *target_vjetty;
     struct jfs_wr_entry *next;
     bool is_batch_head;
+    bool is_ring_tail;
     uint32_t send_idx;
     uint32_t target_idx;
     bondp_chip_id_info_t info;
