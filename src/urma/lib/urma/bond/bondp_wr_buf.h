@@ -90,7 +90,8 @@ typedef struct wr_buf {
     uint32_t max_wr_num;
     uint32_t latest_used;       /* deprecated: only used by WR_BUF_FOREACH, no longer updated */
     uint32_t wr_entry_size;
-    uint32_t max_sge;           /* max sge count per sge array in each entry */
+    uint32_t max_sge;           /* max sge count per src sge array in each entry */
+    uint32_t max_rsge;          /* max sge count per dst sge array in each entry */
     void *entries;
     uint32_t free_head;         /* index of first free entry, UINT32_MAX = empty */
     uint32_t *next_free;        /* next_free[idx] = next free entry index, UINT32_MAX = end */
@@ -126,7 +127,7 @@ static inline uint32_t wr_buf_idx_from_ptr(wr_buf_t *buf, char *ptr)
 #define JFR_WR_BUF_FOREACH(buf, idx_var, entry_var) \
     WR_BUF_FOREACH((buf), jfr_wr_entry_t, idx_var, entry_var)
 
-int wr_buf_init(wr_buf_t *buf, uint32_t max_wr_num, uint32_t max_sge);
+int wr_buf_init(wr_buf_t *buf, uint32_t max_wr_num, uint32_t max_sge, uint32_t max_rsge, bool is_send);
 void wr_buf_uninit(wr_buf_t *buf);
 
 void jfs_wr_get_refs(urma_jfs_wr_t *wr);
