@@ -542,7 +542,7 @@ class CompressedTensorW4A8Int8MoEGMMMethod(QuantizeMethodBase):
 
         # fusion kernel: swiglu + clip + dynamic_quant
         # To enhance quantization accuracy, a clip kernel has been introduced prior to the dynamic_quant kernel
-        intermediate_h, pertoken_scale = torch_npu.npu_swiglu_clip_quant(
+        intermediate_h, pertoken_scale = torch.ops.umdk_cam_op_lib.swiglu_clip_quant(
             mm1_mm3,
             expert_tokens,
             layer.w2_alpha,

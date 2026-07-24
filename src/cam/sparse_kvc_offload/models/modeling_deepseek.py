@@ -1338,7 +1338,7 @@ class DeepseekIndexerAttention(nn.Module):
             selection_kv_block_status = offload_cache.selection_kv_block_status[self.layer_idx]
 
             topk_indices = topk_indices.view(bsz, -1, 1, self.index_topk)
-            selection_kv_actual_seq = torch_npu.npu_gather_selection_kv_cache(
+            selection_kv_actual_seq = torch.ops.umdk_cam_op_lib.gather_selection_kv_cache(
                 selection_k_rope, selection_kv_cache,
                 selection_kv_block_table, selection_kv_block_status,
                 topk_indices, full_k_rope, full_kv_cache,
