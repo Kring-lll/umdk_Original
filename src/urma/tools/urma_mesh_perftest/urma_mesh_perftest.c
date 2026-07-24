@@ -58,7 +58,7 @@ static bool g_verbose = false;
 #define LOG_INFO(fmt, ...)  fprintf(stdout, "[INFO]  " fmt "\n", ##__VA_ARGS__)
 #define LOG_QUIET(fmt, ...) fprintf(stdout, fmt "\n", ##__VA_ARGS__)
 #define LOG_DEBUG(fmt, ...) do { \
-    if (g_verbose) fprintf(stdout, "[DEBUG] " fmt "\n", ##__VA_ARGS__); \
+    if (g_verbose) { fprintf(stdout, "[DEBUG] " fmt "\n", ##__VA_ARGS__); } \
 } while (0)
 
 /* ------------------------------------------------------------------ */
@@ -1121,8 +1121,8 @@ static int cycles_compare(const void *a, const void *b)
 {
     uint64_t va = *(const uint64_t *)a;
     uint64_t vb = *(const uint64_t *)b;
-    if (va < vb) return -1;
-    if (va > vb) return 1;
+    if (va < vb) { return -1; }
+    if (va > vb) { return 1; }
     return 0;
 }
 
@@ -1131,6 +1131,10 @@ static void print_lat_stats(const traffic_arg_t *targ, double cpu_mhz)
     const lat_stats_t *s = &targ->stats;
     if (s->count == 0) {
         LOG_QUIET("  [%s EID%u] no data", targ->node->ip, targ->remote_eid_idx);
+        return;
+    }
+    if (cpu_mhz <= 0.0) {
+        LOG_ERROR("Invalid cpu_mhz=%.2f, cannot compute latency", cpu_mhz);
         return;
     }
 
@@ -1156,8 +1160,8 @@ static void print_lat_stats(const traffic_arg_t *targ, double cpu_mhz)
     /* Percentiles: ceil(N * p) gives 1-based rank, subtract 1 for 0-based index */
     uint64_t p99_idx   = (uint64_t)ceil((double)measure_cnt * 0.99) - 1;
     uint64_t p9999_idx = (uint64_t)ceil((double)measure_cnt * 0.9999) - 1;
-    if (p99_idx >= measure_cnt) p99_idx = measure_cnt - 1;
-    if (p9999_idx >= measure_cnt) p9999_idx = measure_cnt - 1;
+    if (p99_idx >= measure_cnt) { p99_idx = measure_cnt - 1; }
+    if (p9999_idx >= measure_cnt) { p9999_idx = measure_cnt - 1; }
 
     double min_us = (double)sorted[0] / cpu_mhz;
     double max_us = (double)sorted[measure_cnt - 1] / cpu_mhz;
