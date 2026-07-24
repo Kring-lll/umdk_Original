@@ -246,6 +246,26 @@ static int sock_sync_data(int fd, const void *local, void *remote, size_t len)
     return 0;
 }
 
+/* Send to all peers first, then recv from all - avoids circular-wait deadlock */
+static int sync_all_peers(mesh_ctx_t *mctx, const char *msg)
+{
+    size_t len = strlen(msg);
+
+    for (uint32_t i = 0; i < mctx->node_cnt; i++) {
+        if (send_all(mctx->nodes[i].sock_fd, msg, len) != 0) {
+            return -1;
+        }
+    }
+    for (uint32_t i = 0; i < mctx->node_cnt; i++) {
+        char echo[64] = {0};
+        if (recv_all(mctx->nodes[i].sock_fd, echo, len) != 0 ||
+            memcmp(msg, echo, len) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static int set_sock_opts(int fd)
 {
     int enable = 1;
@@ -881,18 +901,9 @@ static int establish_mesh_connections(mesh_ctx_t *mctx)
     LOG_INFO("All %u peer connections established", mctx->node_cnt);
 
     /* Sync: confirm all links established (like perftest sync_time) */
-    const char *sync_msg = "MESH_SYNC_READY";
-    for (uint32_t i = 0; i < mctx->node_cnt; i++) {
-        char echo[64] = {0};
-        if (sock_sync_data(mctx->nodes[i].sock_fd, sync_msg, echo, strlen(sync_msg)) != 0) {
-            LOG_ERROR("sync with %s failed", mctx->nodes[i].ip);
-            return -1;
-        }
-        if (memcmp(sync_msg, echo, strlen(sync_msg)) != 0) {
-            LOG_ERROR("sync mismatch with %s", mctx->nodes[i].ip);
-            return -1;
-        }
-        LOG_DEBUG("sync OK with %s", mctx->nodes[i].ip);
+    if (sync_all_peers(mctx, "MESH_SYNC_READY") != 0) {
+        LOG_ERROR("sync with peers failed");
+        return -1;
     }
     LOG_INFO("All peers synced");
     return 0;
@@ -943,39 +954,45 @@ static void pack_local_info(mesh_ctx_t *mctx, exchange_msg_t *msg)
     }
 }
 
-static int exchange_info_with_peer(mesh_ctx_t *mctx, uint32_t idx)
+/* Exchange info with all peers: send to all first, then recv from all - avoids deadlock */
+static int exchange_info_all_peers(mesh_ctx_t *mctx)
 {
-    remote_node_t *node = &mctx->nodes[idx];
-
     exchange_msg_t local_msg;
     pack_local_info(mctx, &local_msg);
 
-    exchange_msg_t remote_msg;
-    (void)memset(&remote_msg, 0, sizeof(remote_msg));
-
-    /* Send local info, receive remote info */
-    if (sock_sync_data(node->sock_fd, &local_msg, &remote_msg, sizeof(exchange_msg_t)) != 0) {
-        LOG_ERROR("exchange_info with %s failed", node->ip);
-        return -1;
+    /* Phase 1: send local info to all peers */
+    for (uint32_t i = 0; i < mctx->node_cnt; i++) {
+        if (send_all(mctx->nodes[i].sock_fd, &local_msg, sizeof(exchange_msg_t)) != 0) {
+            LOG_ERROR("send exchange info to %s failed", mctx->nodes[i].ip);
+            return -1;
+        }
     }
 
-    if (remote_msg.eid_cnt == 0 || remote_msg.eid_cnt > MESH_MAX_EIDS) {
-        LOG_ERROR("Invalid remote eid_cnt=%u from %s", remote_msg.eid_cnt, node->ip);
-        return -1;
+    /* Phase 2: recv remote info from all peers */
+    for (uint32_t i = 0; i < mctx->node_cnt; i++) {
+        remote_node_t *node = &mctx->nodes[i];
+        exchange_msg_t remote_msg;
+        (void)memset(&remote_msg, 0, sizeof(remote_msg));
+        if (recv_all(node->sock_fd, &remote_msg, sizeof(exchange_msg_t)) != 0) {
+            LOG_ERROR("recv exchange info from %s failed", node->ip);
+            return -1;
+        }
+        if (remote_msg.eid_cnt == 0 || remote_msg.eid_cnt > MESH_MAX_EIDS) {
+            LOG_ERROR("Invalid remote eid_cnt=%u from %s", remote_msg.eid_cnt, node->ip);
+            return -1;
+        }
+        node->eid_cnt = remote_msg.eid_cnt;
+        for (uint32_t j = 0; j < remote_msg.eid_cnt; j++) {
+            node->eids[j].info = remote_msg.eids[j];
+            node->eids[j].import_tseg = NULL;
+            node->eids[j].import_tjetty = NULL;
+            LOG_DEBUG("  remote %s EID[%u]: seg_va=0x%lx seg_len=%lu jetty_id=%u uasid=%u",
+                      node->ip, j, (unsigned long)remote_msg.eids[j].seg_va,
+                      (unsigned long)remote_msg.eids[j].seg_len,
+                      remote_msg.eids[j].jetty_id, remote_msg.eids[j].uasid);
+        }
+        LOG_INFO("Exchanged info with %s: %u remote EIDs", node->ip, remote_msg.eid_cnt);
     }
-
-    node->eid_cnt = remote_msg.eid_cnt;
-    for (uint32_t i = 0; i < remote_msg.eid_cnt; i++) {
-        node->eids[i].info = remote_msg.eids[i];
-        node->eids[i].import_tseg = NULL;
-        node->eids[i].import_tjetty = NULL;
-        LOG_DEBUG("  remote %s EID[%u]: seg_va=0x%lx seg_len=%lu jetty_id=%u uasid=%u",
-                  node->ip, i, (unsigned long)remote_msg.eids[i].seg_va,
-                  (unsigned long)remote_msg.eids[i].seg_len,
-                  remote_msg.eids[i].jetty_id, remote_msg.eids[i].uasid);
-    }
-
-    LOG_INFO("Exchanged info with %s: %u remote EIDs", node->ip, remote_msg.eid_cnt);
     return 0;
 }
 
@@ -1037,13 +1054,9 @@ static int import_remote_resources(mesh_ctx_t *mctx)
     }
 
     /* Sync: confirm all imports are complete on both sides */
-    const char *sync_msg = "MESH_IMPORT_DONE";
-    for (uint32_t i = 0; i < mctx->node_cnt; i++) {
-        char echo[64] = {0};
-        if (sock_sync_data(mctx->nodes[i].sock_fd, sync_msg, echo, strlen(sync_msg)) != 0) {
-            LOG_ERROR("import sync with %s failed", mctx->nodes[i].ip);
-            return -1;
-        }
+    if (sync_all_peers(mctx, "MESH_IMPORT_DONE") != 0) {
+        LOG_ERROR("import sync with peers failed");
+        return -1;
     }
     LOG_INFO("All remote resources imported and synced");
     return 0;
@@ -1136,9 +1149,9 @@ static void print_lat_stats(const traffic_arg_t *targ, double cpu_mhz)
     }
     double avg = sum / (double)measure_cnt;
 
-    /* Percentiles */
-    uint64_t p99_idx   = (uint64_t)ceil((double)measure_cnt * 0.99);
-    uint64_t p9999_idx = (uint64_t)ceil((double)measure_cnt * 0.9999);
+    /* Percentiles: ceil(N * p) gives 1-based rank, subtract 1 for 0-based index */
+    uint64_t p99_idx   = (uint64_t)ceil((double)measure_cnt * 0.99) - 1;
+    uint64_t p9999_idx = (uint64_t)ceil((double)measure_cnt * 0.9999) - 1;
     if (p99_idx >= measure_cnt) p99_idx = measure_cnt - 1;
     if (p9999_idx >= measure_cnt) p9999_idx = measure_cnt - 1;
 
@@ -1162,6 +1175,15 @@ static void *traffic_thread_main(void *arg)
     local_eid_t *le = targ->local;
     remote_node_t *node = targ->node;
     remote_eid_res_t *re = &node->eids[targ->remote_eid_idx];
+
+    if ((uint64_t)mctx->msg_size > re->info.seg_len ||
+        mctx->msg_size > mctx->dev_attr.dev_cap.max_write_size) {
+        LOG_ERROR("Invalid write size %u for %s EID%u (segment=%lu, device=%u)",
+                  mctx->msg_size, node->ip, targ->remote_eid_idx,
+                  (unsigned long)re->info.seg_len,
+                  mctx->dev_attr.dev_cap.max_write_size);
+        return NULL;
+    }
 
     if (lat_stats_init(&targ->stats, mctx->iters) != 0) {
         LOG_ERROR("lat_stats_init failed for %s EID%u", node->ip, targ->remote_eid_idx);
@@ -1221,7 +1243,6 @@ static void *traffic_thread_main(void *arg)
         do {
             poll_cnt = urma_poll_jfc(le->jfc, 1, &cr);
             if (poll_cnt < 0) {
-                pthread_mutex_unlock(&le->jetty_mutex);
                 targ->err_cnt++;
                 LOG_ERROR("urma_poll_jfc error: %d (node=%s, iter=%u)",
                           poll_cnt, node->ip, iter);
@@ -1275,8 +1296,8 @@ static int start_traffic(mesh_ctx_t *mctx)
             targ->mesh = mctx;
             targ->node = node;
             targ->remote_eid_idx = e;
-            /* Round-robin assign local jetty */
-            targ->local = &mctx->eids[idx % mctx->eid_cnt];
+            /* Remote resources are imported through eids[0].ctx, so must use eids[0]'s jetty */
+            targ->local = &mctx->eids[0];
             targ->thread_idx = idx;
             targ->send_cnt = 0;
             targ->err_cnt = 0;
@@ -1287,6 +1308,10 @@ static int start_traffic(mesh_ctx_t *mctx)
             if (pthread_create(&mctx->traffic_threads[idx], NULL,
                                traffic_thread_main, targ) != 0) {
                 LOG_ERROR("pthread_create(traffic %u) failed", idx);
+                /* Join already-started threads before returning */
+                for (uint32_t i = 0; i < mctx->traffic_thread_cnt; i++) {
+                    (void)pthread_join(mctx->traffic_threads[i], NULL);
+                }
                 return -1;
             }
             mctx->traffic_thread_cnt++;
@@ -1315,6 +1340,7 @@ int main(int argc, char *argv[])
     int ret = 0;
     mesh_ctx_t mctx;
     (void)memset(&mctx, 0, sizeof(mctx));
+    mctx.listen_fd = -1;
 
     ret = parse_args(argc, argv, &mctx);
     if (ret != 0) {
@@ -1339,17 +1365,15 @@ int main(int argc, char *argv[])
     ret = establish_mesh_connections(&mctx);
     if (ret != 0) {
         LOG_ERROR("establish_mesh_connections failed");
-        goto destroy_local;
+        goto close_conn;
     }
 
     /* Step 3: Exchange seg/jetty info with each peer */
     LOG_INFO("[Step 3] Exchanging seg/jetty info...");
-    for (uint32_t i = 0; i < mctx.node_cnt; i++) {
-        ret = exchange_info_with_peer(&mctx, i);
-        if (ret != 0) {
-            LOG_ERROR("exchange_info_with_peer(%u) failed", i);
-            goto close_conn;
-        }
+    ret = exchange_info_all_peers(&mctx);
+    if (ret != 0) {
+        LOG_ERROR("exchange_info_all_peers failed");
+        goto close_conn;
     }
 
     /* Step 4: Import remote segs and jettys */
@@ -1357,7 +1381,7 @@ int main(int argc, char *argv[])
     ret = import_remote_resources(&mctx);
     if (ret != 0) {
         LOG_ERROR("import_remote_resources failed");
-        goto close_conn;
+        goto unimport;
     }
 
     /* Step 5: Run traffic */
