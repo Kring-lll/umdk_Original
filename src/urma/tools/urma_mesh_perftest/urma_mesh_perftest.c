@@ -576,8 +576,12 @@ static int init_local_resources(mesh_ctx_t *mctx)
                   (unsigned long)le->buf_len);
     }
 
-    urma_free_eid_list(eid_list);
     mctx->cpu_mhz = get_cpu_mhz(false);
+    if (mctx->cpu_mhz <= 0.0) {
+        LOG_ERROR("Failed to acquire CPU frequency");
+        goto destroy_eids;
+    }
+    urma_free_eid_list(eid_list);
     LOG_INFO("CPU MHz = %.2f", mctx->cpu_mhz);
     return 0;
 
@@ -1282,6 +1286,21 @@ static void *traffic_thread_main(void *arg)
 
 static int start_traffic(mesh_ctx_t *mctx)
 {
+    /* Pre-validate write size against all remote segments and device capability */
+    for (uint32_t n = 0; n < mctx->node_cnt; n++) {
+        remote_node_t *node = &mctx->nodes[n];
+        for (uint32_t e = 0; e < node->eid_cnt; e++) {
+            if ((uint64_t)mctx->msg_size > node->eids[e].info.seg_len ||
+                mctx->msg_size > mctx->dev_attr.dev_cap.max_write_size) {
+                LOG_ERROR("Invalid write size %u for %s EID%u (segment=%lu, device=%u)",
+                          mctx->msg_size, node->ip, e,
+                          (unsigned long)node->eids[e].info.seg_len,
+                          mctx->dev_attr.dev_cap.max_write_size);
+                return -1;
+            }
+        }
+    }
+
     mctx->traffic_thread_cnt = 0;
 
     for (uint32_t n = 0; n < mctx->node_cnt; n++) {
@@ -1308,6 +1327,7 @@ static int start_traffic(mesh_ctx_t *mctx)
             if (pthread_create(&mctx->traffic_threads[idx], NULL,
                                traffic_thread_main, targ) != 0) {
                 LOG_ERROR("pthread_create(traffic %u) failed", idx);
+                mctx->running = false;
                 /* Join already-started threads before returning */
                 for (uint32_t i = 0; i < mctx->traffic_thread_cnt; i++) {
                     (void)pthread_join(mctx->traffic_threads[i], NULL);
@@ -1413,7 +1433,6 @@ unimport:
     }
 close_conn:
     close_connections(&mctx);
-destroy_local:
     destroy_local_resources(&mctx);
 clean_args:
     for (uint32_t i = 0; i < mctx.node_cnt; i++) {
