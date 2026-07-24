@@ -146,7 +146,7 @@ libraries.
 Summary:        tools of urma
 Requires:       umdk-urma-lib = %{version}
 %description urma-tools
-tools of urma, contains  urma_perftest, urma_admin, urma_ping.
+tools of urma, contains urma_perftest, urma_admin, urma_ping, urma_mesh_perftest.
 
 %package urma-bin
 Summary:        binary file of urma
@@ -406,6 +406,7 @@ fi
     %{_bindir}/urma_ping
     /etc/rsyslog.d/urma_admin.conf
     %{_bindir}/urma_perftest
+    %{_bindir}/urma_mesh_perftest
 
 %post urma-tools
 if [ -x %{_bindir}/systemctl ] && [ -x %{_sbindir}/rsyslogd ]; then
