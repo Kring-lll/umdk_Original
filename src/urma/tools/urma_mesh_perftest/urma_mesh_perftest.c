@@ -1286,6 +1286,8 @@ static void *traffic_thread_main(void *arg)
 
 static int start_traffic(mesh_ctx_t *mctx)
 {
+    bool write_size_valid = true;
+
     /* Pre-validate write size against all remote segments and device capability */
     for (uint32_t n = 0; n < mctx->node_cnt; n++) {
         remote_node_t *node = &mctx->nodes[n];
@@ -1296,9 +1298,33 @@ static int start_traffic(mesh_ctx_t *mctx)
                           mctx->msg_size, node->ip, e,
                           (unsigned long)node->eids[e].info.seg_len,
                           mctx->dev_attr.dev_cap.max_write_size);
-                return -1;
+                write_size_valid = false;
             }
         }
+    }
+
+    /* Sync validation result with all peers: send all, then recv all */
+    const char *local_status = write_size_valid ? "MESH_SIZE_OK" : "MESH_SIZE_NG";
+    size_t status_len = strlen(local_status);
+    for (uint32_t i = 0; i < mctx->node_cnt; i++) {
+        if (send_all(mctx->nodes[i].sock_fd, local_status, status_len) != 0) {
+            LOG_ERROR("Failed to send size status to %s", mctx->nodes[i].ip);
+            return -1;
+        }
+    }
+    for (uint32_t i = 0; i < mctx->node_cnt; i++) {
+        char peer_status[32] = {0};
+        if (recv_all(mctx->nodes[i].sock_fd, peer_status, status_len) != 0) {
+            LOG_ERROR("Failed to recv size status from %s", mctx->nodes[i].ip);
+            return -1;
+        }
+        if (memcmp(peer_status, "MESH_SIZE_OK", status_len) != 0) {
+            LOG_ERROR("Peer %s reported invalid write size", mctx->nodes[i].ip);
+            write_size_valid = false;
+        }
+    }
+    if (!write_size_valid) {
+        return -1;
     }
 
     mctx->traffic_thread_cnt = 0;
