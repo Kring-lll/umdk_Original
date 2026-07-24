@@ -49,6 +49,7 @@
 #define NON_INF_BI_FACTOR      (1)
 #define PERFTEST_IMM_DATA      (0x20230416)
 #define PERFTEST_NOTIFY_DATA   (0x20230416)
+#define PERFTEST_ATOMIC_ADD_DATA (1)
 #define PERFTEST_FLAG_USER_CTX (63)
 #define PERFTEST_EXIT_CMD      ('Q')
 
@@ -366,6 +367,8 @@ static void *run_write_lat_simplex(void *arg)
     volatile char *post_buf = (char *)ctx->local_buf[id] + ctx->buf_size + cfg->size - 1;
     volatile char *poll_buf = (char *)ctx->local_buf[id] + cfg->size - 1;
 
+    volatile uint64_t *atomic_add_poll_buf = cfg->enable_atomic_add ? &ctx->notify_buf[id] : NULL;
+
     if (cfg->time_type.bs.duration == 1) {
         update_duration_state(ctx, cfg);
     }
@@ -374,8 +377,13 @@ static void *run_write_lat_simplex(void *arg)
            (cfg->time_type.bs.duration == 1 && run_ctx->state != END_STATE)) {
         if ((rcnt < cfg->iters || cfg->time_type.bs.duration == 1) && !(scnt < 1 && is_server)) {
             rcnt += cfg->jfs_post_list;
-            while (*poll_buf != (char)(rcnt / cfg->jfs_post_list) && run_ctx->state != END_STATE) {
-            };
+            if (atomic_add_poll_buf != NULL) {
+                while (*atomic_add_poll_buf != (uint64_t)rcnt && run_ctx->state != END_STATE) {
+                };
+            } else {
+                while (*poll_buf != (char)(rcnt / cfg->jfs_post_list) && run_ctx->state != END_STATE) {
+                };
+            }
         }
 
         if (scnt < cfg->iters || cfg->time_type.bs.duration == 1) {
@@ -741,6 +749,11 @@ static void init_jfs_write_wr_opcode(urma_jfs_wr_t *wr, const perftest_config_t 
         wr->rw.notify_data = PERFTEST_NOTIFY_DATA;
         return;
     }
+    if (cfg->enable_atomic_add == true) {
+        wr->opcode = URMA_OPC_WRITE_ATOMIC;
+        wr->rw.notify_data = PERFTEST_ATOMIC_ADD_DATA;
+        return;
+    }
     wr->opcode = URMA_OPC_WRITE;
 }
 
@@ -912,9 +925,9 @@ static void init_write_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, per
                        : get_remote_seg_va(ctx, cfg, i);
 
     uint32_t sge_block_idx = (i * cfg->jfs_post_list + j) * (PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num +
-                                                             (cfg->enable_notify ? 1 : 0));
+                                                             ((cfg->enable_notify || cfg->enable_atomic_add) ? 1 : 0));
 
-    uint32_t local_sge_idx = sge_block_idx + (cfg->sge_num + (cfg->enable_notify ? 1 : 0));
+    uint32_t local_sge_idx = sge_block_idx + (cfg->sge_num + ((cfg->enable_notify || cfg->enable_atomic_add) ? 1 : 0));
     uint32_t remote_sge_idx = sge_block_idx;
     urma_sge_t *local_sge = &run_ctx->jfs_sge[local_sge_idx];   // First sge in sge arrays
     urma_sge_t *remote_sge = &run_ctx->jfs_sge[remote_sge_idx]; // First sge in sge arrays
@@ -926,8 +939,8 @@ static void init_write_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, per
     // the following remote_sge addr judgement is the same.
     if (j > 0) {
         uint32_t idx = (i * cfg->jfs_post_list + j - 1) * (PERFTEST_SGE_NUM_PRE_WR * cfg->sge_num +
-                                                           (cfg->enable_notify ? 1 : 0));
-        uint32_t l_idx = idx + cfg->sge_num + (cfg->enable_notify ? 1 : 0);
+                                                           ((cfg->enable_notify || cfg->enable_atomic_add) ? 1 : 0));
+        uint32_t l_idx = idx + cfg->sge_num + ((cfg->enable_notify || cfg->enable_atomic_add) ? 1 : 0);
         uint32_t r_idx = idx;
         local_sge[0].addr = run_ctx->jfs_sge[l_idx].addr;
         remote_sge[0].addr = run_ctx->jfs_sge[r_idx].addr;
@@ -957,14 +970,16 @@ static void init_write_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, per
     wr->rw.dst.sge = remote_sge;
     wr->rw.dst.num_sge = cfg->sge_num;
 
-    if (cfg->enable_notify) {
+    if (cfg->enable_notify || cfg->enable_atomic_add) {
         remote_sge[cfg->sge_num].addr = ctx->import_notify_seg[i]->seg.ubva.va +
                                         sizeof(uint64_t) * ctx->remote_jetty_idx;
         remote_sge[cfg->sge_num].len = sizeof(uint64_t);
         remote_sge[cfg->sge_num].tseg = ctx->import_notify_seg[i];
         wr->rw.dst.num_sge++;
     }
-    wr->rw.notify_data = 0;
+    if (!cfg->enable_notify && !cfg->enable_atomic_add && !cfg->enable_imm) {
+        wr->rw.notify_data = 0;
+    }
 }
 
 static void init_send_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, perftest_config_t *cfg,
@@ -1174,7 +1189,7 @@ static int prepare_jfs_wr(perftest_context_t *ctx, perftest_config_t *cfg)
     }
     uint32_t sge_num = cfg->jettys * cfg->jfs_post_list * cfg->sge_num *
                            PERFTEST_SGE_NUM_PRE_WR + // local + remote
-                       (cfg->enable_notify ? cfg->jettys * cfg->jfs_post_list : 0);
+                       ((cfg->enable_notify || cfg->enable_atomic_add) ? cfg->jettys * cfg->jfs_post_list : 0);
     run_ctx->jfs_sge = calloc(1, sizeof(urma_sge_t) * sge_num);
     if (run_ctx->jfs_sge == NULL) {
         goto free_wr;
@@ -1505,6 +1520,7 @@ static void *run_write_lat_duplex(void *arg)
 
     volatile char *post_buf = (char *)ctx->local_buf[id] + ctx->buf_size + cfg->size - 1;
     volatile char *poll_buf = (char *)ctx->local_buf[id] + cfg->size - 1;
+    volatile uint64_t *atomic_add_poll_buf = cfg->enable_atomic_add ? &ctx->notify_buf[id] : NULL;
 
     if (cfg->time_type.bs.duration == 1) {
         update_duration_state(ctx, cfg);
@@ -1514,8 +1530,13 @@ static void *run_write_lat_duplex(void *arg)
            (cfg->time_type.bs.duration == 1 && run_ctx->state != END_STATE)) {
         if ((rcnt < cfg->iters || cfg->time_type.bs.duration == 1) && !(scnt < 1 && is_server)) {
             rcnt += cfg->jfs_post_list;
-            while (*poll_buf != (char)(rcnt / cfg->jfs_post_list) && run_ctx->state != END_STATE) {
-            };
+            if (atomic_add_poll_buf != NULL) {
+                while (*atomic_add_poll_buf != (uint64_t)rcnt && run_ctx->state != END_STATE) {
+                };
+            } else {
+                while (*poll_buf != (char)(rcnt / cfg->jfs_post_list) && run_ctx->state != END_STATE) {
+                };
+            }
         }
 
         if (scnt < cfg->iters || cfg->time_type.bs.duration == 1) {
