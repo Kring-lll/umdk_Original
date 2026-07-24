@@ -117,6 +117,35 @@ static urma_status_t comp_post_recv(bondp_comp_t *comp, int recv_idx, urma_jfr_w
     return ret;
 }
 
+static uint32_t bondp_min_u32(uint32_t a, uint32_t b)
+{
+    return a < b ? a : b;
+}
+
+static uint32_t bondp_get_cfg_max_jfs_sge(const bondp_comp_t *bdp_comp)
+{
+    if (bdp_comp->comp_type == BONDP_COMP_JETTY) {
+        return bdp_comp->v_jetty.jetty_cfg.jfs_cfg.max_sge;
+    }
+    return bdp_comp->v_jfs.jfs_cfg.max_sge;
+}
+
+static uint32_t bondp_get_cfg_max_jfs_rsge(const bondp_comp_t *bdp_comp)
+{
+    if (bdp_comp->comp_type == BONDP_COMP_JETTY) {
+        return bdp_comp->v_jetty.jetty_cfg.jfs_cfg.max_rsge;
+    }
+    return bdp_comp->v_jfs.jfs_cfg.max_rsge;
+}
+
+static uint32_t bondp_get_cfg_max_jfr_sge(const bondp_comp_t *bdp_comp)
+{
+    if (bdp_comp->comp_type == BONDP_COMP_JETTY) {
+        return bdp_comp->v_jetty.jetty_cfg.shared.jfr->jfr_cfg.max_sge;
+    }
+    return bdp_comp->v_jfr.jfr_cfg.max_sge;
+}
+
 static urma_status_t post_send_check_jfs_wr_valid(const urma_jfs_wr_t *wr,
                                                   uint32_t max_jfs_sge, uint32_t max_jfs_rsge)
 {
@@ -128,10 +157,9 @@ static urma_status_t post_send_check_jfs_wr_valid(const urma_jfs_wr_t *wr,
                UDMA will take care of it, as SEND_WITH_IMM may allow NULL to be passed.
             */
             if (max_jfs_sge < wr->send.src.num_sge) {
-                URMA_LOG_WARN("The number of sge %u the destination segment is greater than the maximum supported=%u"
-                              "by the device.\n",
-                              wr->send.src.num_sge,
-                              max_jfs_sge);
+                URMA_LOG_ERR("The number of sge %u is greater than the maximum supported=%u by the device.\n",
+                             wr->send.src.num_sge, max_jfs_sge);
+                return URMA_EINVAL;
             }
             break;
         case URMA_OPC_WRITE:
@@ -148,29 +176,29 @@ static urma_status_t post_send_check_jfs_wr_valid(const urma_jfs_wr_t *wr,
                whether for write or read operations. */
             if (wr->opcode == URMA_OPC_READ) {
                 if (max_jfs_rsge < wr->rw.src.num_sge) {
-                    URMA_LOG_WARN("The number of remote sge %u is greater than the maximum supported=%u"
-                                  " by the device.\n",
-                                  wr->rw.src.num_sge,
-                                  max_jfs_rsge);
+                    URMA_LOG_ERR("The number of remote sge %u is greater than the maximum supported=%u"
+                                 " by the device.\n",
+                                 wr->rw.src.num_sge, max_jfs_rsge);
+                    return URMA_EINVAL;
                 }
                 if (max_jfs_sge < wr->rw.dst.num_sge) {
-                    URMA_LOG_WARN("The number of local sge %u is greater than the maximum supported=%u"
-                                  " by the device.\n",
-                                  wr->rw.dst.num_sge,
-                                  max_jfs_sge);
+                    URMA_LOG_ERR("The number of local sge %u is greater than the maximum supported=%u"
+                                 " by the device.\n",
+                                 wr->rw.dst.num_sge, max_jfs_sge);
+                    return URMA_EINVAL;
                 }
             } else {
                 if (max_jfs_sge < wr->rw.src.num_sge) {
-                    URMA_LOG_WARN("The number of local sge %u is greater than the maximum supported=%u"
-                                  " by the device.\n",
-                                  wr->rw.src.num_sge,
-                                  max_jfs_sge);
+                    URMA_LOG_ERR("The number of local sge %u is greater than the maximum supported=%u"
+                                 " by the device.\n",
+                                 wr->rw.src.num_sge, max_jfs_sge);
+                    return URMA_EINVAL;
                 }
                 if (max_jfs_rsge < wr->rw.dst.num_sge) {
-                    URMA_LOG_WARN("The number of remote sge %u is greater than the maximum supported=%u"
-                                  " by the device.\n",
-                                  wr->rw.dst.num_sge,
-                                  max_jfs_rsge);
+                    URMA_LOG_ERR("The number of remote sge %u is greater than the maximum supported=%u"
+                                 " by the device.\n",
+                                 wr->rw.dst.num_sge, max_jfs_rsge);
+                    return URMA_EINVAL;
                 }
             }
             break;
@@ -293,8 +321,10 @@ static urma_status_t post_send_check_wr_list_valid(bondp_comp_t *bdp_send_comp, 
     }
 
     const urma_device_cap_t *dev_cap = &bdp_send_comp->bondp_ctx->v_ctx.dev->sysfs_dev->dev_attr.dev_cap;
-    uint32_t max_jfs_sge = dev_cap->max_jfs_sge;
-    uint32_t max_jfs_rsge = dev_cap->max_jfs_rsge;
+    uint32_t max_jfs_sge = bondp_min_u32(dev_cap->max_jfs_sge, bdp_send_comp->send_wr_buf.max_sge);
+    uint32_t max_jfs_rsge = bondp_min_u32(dev_cap->max_jfs_rsge, bdp_send_comp->send_wr_buf.max_sge);
+    max_jfs_sge = bondp_min_u32(max_jfs_sge, bondp_get_cfg_max_jfs_sge(bdp_send_comp));
+    max_jfs_rsge = bondp_min_u32(max_jfs_rsge, bondp_get_cfg_max_jfs_rsge(bdp_send_comp));
 
     while (cur != NULL) {
         ret = post_send_check_valid(bdp_send_comp, cur, max_jfs_sge, max_jfs_rsge);
@@ -954,14 +984,21 @@ CLEANUP:
     return ret;
 }
 
-static urma_status_t post_recv_check_jfr_wr_valid(const bondp_context_t *bdp_ctx, const urma_jfr_wr_t *wr)
+static urma_status_t post_recv_check_jfr_wr_valid(const bondp_comp_t *bdp_comp, const urma_jfr_wr_t *wr)
 {
+    uint32_t max_jfr_sge = bondp_min_u32(bdp_comp->bondp_ctx->v_ctx.dev->sysfs_dev->dev_attr.dev_cap.max_jfr_sge,
+                                         BONDP_MAX_SGE_NUM);
+    max_jfr_sge = bondp_min_u32(max_jfr_sge, bondp_get_cfg_max_jfr_sge(bdp_comp));
+    if (bdp_comp->recv_wr_buf.max_sge != 0) {
+        max_jfr_sge = bondp_min_u32(max_jfr_sge, bdp_comp->recv_wr_buf.max_sge);
+    }
+
     /* No need to handle cases where num_sge == 0 or sge == NULL; Certain hardware supports this usage. */
-    if (bdp_ctx->v_ctx.dev->sysfs_dev->dev_attr.dev_cap.max_jfr_sge < wr->src.num_sge) {
-        URMA_LOG_WARN("The number of sge %u the src segment is greater than the maximum supported=%u"
-                      " by the device.\n",
-                      wr->src.num_sge,
-                      bdp_ctx->v_ctx.dev->sysfs_dev->dev_attr.dev_cap.max_jfr_sge);
+    if (max_jfr_sge < wr->src.num_sge) {
+        URMA_LOG_ERR("The number of sge %u the src segment is greater than the maximum supported=%u"
+                     " by the device.\n",
+                     wr->src.num_sge, max_jfr_sge);
+        return URMA_EINVAL;
     }
     return URMA_SUCCESS;
 }
@@ -977,7 +1014,7 @@ static urma_status_t post_recv_check_wr_list_valid(bondp_comp_t *bdp_recv_comp, 
     urma_status_t ret = URMA_SUCCESS;
     urma_jfr_wr_t *cur = (urma_jfr_wr_t *)wr;
     while (cur != NULL) {
-        ret = post_recv_check_jfr_wr_valid(bdp_recv_comp->bondp_ctx, cur);
+        ret = post_recv_check_jfr_wr_valid(bdp_recv_comp, cur);
         if (ret != URMA_SUCCESS) {
             *bad_wr = cur;
             return ret;
