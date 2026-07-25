@@ -85,7 +85,9 @@ sources = [
     "./ext_utils.cpp",
     "./all2_all_detour.cpp",
     "./reduce_scatter_detour.cpp",
-    "./buffer.cpp"
+    "./buffer.cpp",
+    "./pytorch_extension/NPUBridge.cpp",
+    "./pytorch_extension/NPUStorageImpl.cpp",
 ]
 
 libraries = [
