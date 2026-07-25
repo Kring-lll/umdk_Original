@@ -86,6 +86,8 @@ sources = [
     "./all2_all_detour.cpp",
     "./reduce_scatter_detour.cpp",
     "./buffer.cpp",
+    "./pytorch_extension/NPUBridge.cpp",
+    "./pytorch_extension/NPUStorageImpl.cpp",
     "./gather_selection_kv_cache.cpp",
     "./quant_lightning_indexer.cpp",
     "./swiglu_clip_quant.cpp"
