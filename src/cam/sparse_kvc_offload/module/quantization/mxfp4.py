@@ -135,7 +135,7 @@ class W4A8MxFp4MoEGMMMethod(QuantizeMethodBase):
             per_token_scale=[pertoken_scale],
             group_list=expert_tokens, split_item=3,
             output_dtype=torch.bfloat16, group_type=0,
-            weight_dtype = torch_npu.float4_e2m1fn_x2,
+            weight_dtype=torch_npu.float4_e2m1fn_x2,
             per_token_scale_dtype=torch_npu.float8_e8m0fnu,
             group_list_type=group_list_type,
             tuning_config=[0]
@@ -144,7 +144,7 @@ class W4A8MxFp4MoEGMMMethod(QuantizeMethodBase):
         swiglu_limit = kwargs.get("swiglu_limit", None)
         enable_custom_ops = kwargs.get("enable_custom_ops", False)
         if enable_custom_ops:
-            intermediate_h, pertoken_scale , _ = torch.ops.custom.npu_swiglu_group_quant(mm1_mm3,
+            intermediate_h, pertoken_scale, _ = torch.ops.custom.npu_swiglu_group_quant(mm1_mm3,
                                                                                         dst_type=torch.float8_e4m3fn,
                                                                                         round_scale=True,
                                                                                         quant_mode=1,
@@ -160,7 +160,7 @@ class W4A8MxFp4MoEGMMMethod(QuantizeMethodBase):
             per_token_scale=[pertoken_scale],
             group_list=expert_tokens, split_item=3,
             output_dtype=final_output_dtype, group_type=0,
-            weight_dtype = torch_npu.float4_e2m1fn_x2,
+            weight_dtype=torch_npu.float4_e2m1fn_x2,
             per_token_scale_dtype=torch_npu.float8_e8m0fnu,
             group_list_type=group_list_type,
             tuning_config=[0]
@@ -267,8 +267,8 @@ class UpGateW4A4DownW4A8MxFp4MoEGMMMethod(W4A8MxFp4MoEGMMMethod):
             per_token_scale=[pertoken_scale],
             group_list=expert_tokens, split_item=3, group_type=0,
             output_dtype=torch.bfloat16,
-            x_dtype = torch_npu.float4_e2m1fn_x2,
-            weight_dtype = torch_npu.float4_e2m1fn_x2,
+            x_dtype=torch_npu.float4_e2m1fn_x2,
+            weight_dtype=torch_npu.float4_e2m1fn_x2,
             scale_dtype=torch_npu.float8_e8m0fnu,
             per_token_scale_dtype=torch_npu.float8_e8m0fnu,
             group_list_type=group_list_type,
@@ -278,7 +278,7 @@ class UpGateW4A4DownW4A8MxFp4MoEGMMMethod(W4A8MxFp4MoEGMMMethod):
         swiglu_limit = kwargs.get("swiglu_limit", None)
         enable_custom_ops = kwargs.get("enable_custom_ops", False)
         if enable_custom_ops:
-            intermediate_h, pertoken_scale , _ = torch.ops.custom.npu_swiglu_group_quant(mm1_mm3,
+            intermediate_h, pertoken_scale, _ = torch.ops.custom.npu_swiglu_group_quant(mm1_mm3,
                                                                                         dst_type=torch.float8_e4m3fn,
                                                                                         round_scale=True,
                                                                                         quant_mode=1,
@@ -294,7 +294,7 @@ class UpGateW4A4DownW4A8MxFp4MoEGMMMethod(W4A8MxFp4MoEGMMMethod):
             per_token_scale=[pertoken_scale],
             group_list=expert_tokens, split_item=3,
             output_dtype=final_output_dtype, group_type=0,
-            weight_dtype = torch_npu.float4_e2m1fn_x2,
+            weight_dtype=torch_npu.float4_e2m1fn_x2,
             per_token_scale_dtype=torch_npu.float8_e8m0fnu,
             group_list_type=group_list_type,
             tuning_config=[0]

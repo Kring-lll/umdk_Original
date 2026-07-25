@@ -164,7 +164,7 @@ def init_comm_group(
                 if group_name not in created_group.keys():
                     logging.info(f"group:{group_name} create type {group_type} comm group")
                     options = torch_npu._C._distributed_c10d.ProcessGroupHCCL.Options()
-                    options.hccl_config = {"hccl_op_expansion_mode" : group_type}
+                    options.hccl_config = {"hccl_op_expansion_mode": group_type}
                     options.hccl_config = {"hccl_buffer_size": hccl_buffer_size}
                     if platform_version == "950":
                         os.environ["HCCL_BUFFSIZE"] = str(hccl_buffer_size)

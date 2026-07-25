@@ -126,7 +126,7 @@ class ModelRunner:
             if default_pg is None:
                 options = torch_npu._C._distributed_c10d.ProcessGroupHCCL.Options()
                 if self.platform_version == "950": # use ccu_ms for 950
-                    options.hccl_config = {"hccl_op_expansion_mode" : 5}
+                    options.hccl_config = {"hccl_op_expansion_mode": 5}
                 torch.distributed.init_process_group(
                     backend="hccl", world_size=self.world_size, rank=self.global_rank, pg_options=options)
 

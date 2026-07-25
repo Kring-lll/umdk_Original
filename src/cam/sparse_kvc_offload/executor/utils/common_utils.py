@@ -136,17 +136,21 @@ def limit_core_num(switch_flag: bool, aic_num: str, aiv_num: str):
     else:
         return FakeContextManager()
 
+
 def record_event(switch_flag: bool, events: tuple[torch.npu.Event], idx: int):
     if switch_flag:
         tng.ops.npu_tagged_event_record(events[idx])
+
 
 def wait_event(switch_flag: bool, events: tuple[torch.npu.Event], idx: int):
     if switch_flag:
         tng.ops.npu_tagged_event_wait(events[idx])
 
+
 def record_stream(switch_flag: bool, out: torch.Tensor, stream_id: str):
     if switch_flag:
         tng.ops.npu_record_tagged_stream(out, stream_id)
+
 
 def npu_prefetch(switch_flag, weight, depend, size, offset=0):
     if switch_flag:
@@ -220,6 +224,7 @@ def remove_eos_right(output_tensorlist: list[torch.Tensor], eos_id: int) -> list
             toks = toks[:toks.index(eos_id)]
         res.append(toks.cpu().tolist().append(eos_id))
     return res
+
 
 def detokenize_outputs(generate_ids_list, tokenizer, input_lens):
     res_list = []

@@ -1015,8 +1015,8 @@ class DeepseekIndexerAttention(nn.Module):
         # while enable cp, attention calc needs to split in half
         q_nope, q_rope = query_states
         bsz, seq_len, num_heads, _ = q_nope.shape
-        q_nope_prev, q_nope_next = torch.split(q_nope.view(1, bsz*seq_len, num_heads, -1), bsz * seq_len // 2, dim=1)
-        q_rope_prev, q_rope_next = torch.split(q_rope.view(1, bsz*seq_len, num_heads, -1), bsz * seq_len // 2, dim=1)
+        q_nope_prev, q_nope_next = torch.split(q_nope.view(1, bsz * seq_len, num_heads, -1), bsz * seq_len // 2, dim=1)
+        q_rope_prev, q_rope_next = torch.split(q_rope.view(1, bsz * seq_len, num_heads, -1), bsz * seq_len // 2, dim=1)
         topk_indices_prev, topk_indices_next = topk_indices
         query_states_prev = q_nope_prev, q_rope_prev
         query_states_next = q_nope_next, q_rope_next
@@ -1324,8 +1324,8 @@ class DeepseekIndexerAttention(nn.Module):
 
         bsz, q_len, num_heads, _ = q_nope.shape  # B,S,N,D
 
-        q_nope = q_nope.contiguous().view(bsz*q_len, num_heads, -1) # B,S,N,D -> B*S,N,D
-        q_pe = q_pe.contiguous().view(bsz*q_len, num_heads, -1) # B,S,N,D -> B*S,N,D
+        q_nope = q_nope.contiguous().view(bsz * q_len, num_heads, -1) # B,S,N,D -> B*S,N,D
+        q_pe = q_pe.contiguous().view(bsz * q_len, num_heads, -1) # B,S,N,D -> B*S,N,D
         block_table = self.prefill_block_table if is_prefill else self.block_table
 
         if self.enable_offload and not is_prefill:

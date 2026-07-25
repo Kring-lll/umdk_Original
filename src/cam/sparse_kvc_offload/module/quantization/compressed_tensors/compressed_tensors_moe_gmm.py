@@ -160,7 +160,10 @@ class CompressedTensorW8A8Int8MoEGMMMethod(QuantizeMethodBase):
 
         swiglu_limit = kwargs.get("swiglu_limit", None)
         enable_custom_ops = kwargs.get("enable_custom_ops", False)
-        dequant_swiglu_quant_ops = torch_npu.npu_dequant_swiglu_clamp_quant if enable_custom_ops else torch_npu.npu_dequant_swiglu_quant
+        if enable_custom_ops:
+            dequant_swiglu_quant_ops = torch_npu.npu_dequant_swiglu_clamp_quant
+        else:
+            dequant_swiglu_quant_ops = torch_npu.npu_dequant_swiglu_quant
         swiglu_limit_args = {}
         if swiglu_limit:
             swiglu_limit_args.update({
@@ -357,7 +360,7 @@ class CompressedTensorW4A16Int4MoEGMMMethod(QuantizeMethodBase):
         value: torch.Tensor,
         num_bits: int,
         shape: torch.Size = None,
-        packed_dim = 1,
+        packed_dim=1,
     ) -> torch.Tensor:
         """
         Unpacks a tensor of packed int32 weights into individual int8s, maintaining the

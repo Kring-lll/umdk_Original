@@ -281,7 +281,7 @@ class MxFp8MoEGMMMethod(QuantizeMethodBase):
         swiglu_limit = kwargs.get("swiglu_limit", None)
         enable_custom_ops = kwargs.get("enable_custom_ops", False)
         if enable_custom_ops:
-            intermediate_h, pertoken_scale , _ = torch.ops.custom.npu_swiglu_group_quant(mm1_mm3,
+            intermediate_h, pertoken_scale, _ = torch.ops.custom.npu_swiglu_group_quant(mm1_mm3,
                                                                                         dst_type=torch.float8_e4m3fn,
                                                                                         round_scale=True,
                                                                                         quant_mode=1,

@@ -376,8 +376,10 @@ class Infer(nn.Module):
 
         input_dict["past_key_values"] = past_key_values_cur
         input_dict['past_key_values_indexer'] = past_key_values_indexer_cur
-        input_dict['prev_hidden_states'] = torch.cat([input_dict['prev_hidden_states'],
-                                                      prev_hidden_states[:, -1:, :]], dim=1)[:,-prev_hidden_states.shape[1]:,:]
+        input_dict['prev_hidden_states'] = torch.cat(
+            [input_dict['prev_hidden_states'], prev_hidden_states[:, -1:, :]],
+            dim=1,
+        )[:, -prev_hidden_states.shape[1]:, :]
         input_dict['input_ids'] = torch.cat([input_dict['input_ids'], spec_token], dim=-1)[:, 1:]
 
         return input_dict
