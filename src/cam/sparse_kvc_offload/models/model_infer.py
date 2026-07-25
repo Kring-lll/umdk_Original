@@ -433,7 +433,7 @@ class Infer(nn.Module):
                                           self.main_model.max_new_tokens, is_chat=True)
         input_prompts = []
         for prompt in prompts:
-            input_prompts.append([{"role":"user", "content": prompt}])
+            input_prompts.append([{"role": "user", "content": prompt}])
         inputs = tokenizer.apply_chat_template(input_prompts, **kwargs).to(self.main_model.device)
 
         input_lens = copy.deepcopy(inputs.input_ids.size()[1])
