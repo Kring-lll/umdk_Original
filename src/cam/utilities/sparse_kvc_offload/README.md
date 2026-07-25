@@ -7,7 +7,7 @@
 该能力从 [cann-recipes-infer](https://gitcode.com/cann/cann-recipes-infer) 迁移而来，并整理为一套可在 UMDK 仓内**端到端运行**的自包含栈（模型 + runner + 配置 + 必要的框架子集），运行在华为 Atlas A3 集群上。
 
 - KVCache Offload 的方案设计（Prefill 单层 KVCache + 多流 D2H、Decode 阶段 `GatherSelectionKvCache` 按 TopK 从 Host 侧聚合）可参考上游文档 [NPU DeepSeek-V3.2-Exp 推理优化实践](https://gitcode.com/cann/cann-recipes-infer/blob/master/docs/models/deepseek-v3.2-exp/deepseek_v3.2_exp_inference_guide.md) 的 “KVCache Offload” 章节。
-- CAM 组件整体介绍与算子构建见 [CAM README](../README.md)。
+- CAM 组件整体介绍与算子构建见 [CAM README](../../README.md)。
 
 > 本特性依赖 CAM 自定义算子库 `umdk_cam_op_lib`（其中需提供 `gather_selection_kv_cache` 等算子）。代码中通过 `import umdk_cam_op_lib` 注册算子，运行前请确保该 whl 已构建并安装（见下文“构建并安装 CAM 算子库”）。
 
@@ -31,12 +31,12 @@
 
 ### 下载源码
 
-在各个节点上克隆 UMDK 源码，本特性位于 `src/cam/sparse_kvc_offload`。
+在各个节点上克隆 UMDK 源码，本特性位于 `src/cam/utilities/sparse_kvc_offload`。
 
 ```shell
 mkdir -p /home/code; cd /home/code/
 git clone https://gitcode.com/openeuler/umdk.git
-cd umdk/src/cam/sparse_kvc_offload
+cd umdk/src/cam/utilities/sparse_kvc_offload
 ```
 
 ### 下载数据集
@@ -90,12 +90,12 @@ docker run -u root -itd --name umdk_sparse_kvc_offload --ulimit nproc=65535:6553
 
 ```shell
 docker attach umdk_sparse_kvc_offload
-cd /home/code/umdk/src/cam/sparse_kvc_offload
+cd /home/code/umdk/src/cam/utilities/sparse_kvc_offload
 ```
 
 ### 构建并安装 CAM 算子库
 
-本特性通过 `import umdk_cam_op_lib` 注册所需自定义算子（如 `gather_selection_kv_cache`）。请先按 [CAM README](../README.md) 构建并安装算子库：
+本特性通过 `import umdk_cam_op_lib` 注册所需自定义算子（如 `gather_selection_kv_cache`）。请先按 [CAM README](../../README.md) 构建并安装算子库：
 
 ```shell
 # 在 UMDK 仓根目录构建 CAM 算子（whl + run 包），SOC 以实际环境为准
@@ -186,5 +186,5 @@ bash infer.sh
 
 ### FAQ
 
-- **自定义算子导入失败**：如果报错日志中出现类似 `'_OpNamespace' object has no attribute 'gather_selection_kv_cache'` 或 `import umdk_cam_op_lib` 失败等关键字，说明 CAM 算子库未正确构建/安装，请参考 [CAM README](../README.md) 重新构建并安装 `umdk_cam_op_lib`。
+- **自定义算子导入失败**：如果报错日志中出现类似 `'_OpNamespace' object has no attribute 'gather_selection_kv_cache'` 或 `import umdk_cam_op_lib` 失败等关键字，说明 CAM 算子库未正确构建/安装，请参考 [CAM README](../../README.md) 重新构建并安装 `umdk_cam_op_lib`。
 - **HCCL_BUFFSIZE 不足问题**：如果报错日志中出现关键字 "HCCL_BUFFSIZE is too SMALL, ..., NEEDED_HCCL_BUFFSIZE..., HCCL_BUFFSIZE=200MB, ..."，可通过配置环境变量 `export HCCL_BUFFSIZE=实际需要的大小` 解决，所有 Rank 上的该环境变量需保持一致。HCCL_BUFFSIZE 参数介绍可参考[昇腾资料](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/83RC1alpha003/maintenref/envvar/envref_07_0080.html)中的详细描述。
