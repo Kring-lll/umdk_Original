@@ -18,11 +18,13 @@
 
 from typing import Callable, Any, Dict, List, Optional, Union
 
+import math
+
 import torch
 import torch_npu
 import torch.nn.functional as F
 from torch.nn import Parameter
-import math
+
 from module.quantization import QuantizationMethods, QuantizeMethodBase, QuantizationConfig
 from module.linear import LinearBase, LinearMethodBase, UnquantizedLinearMethod
 from module.quantization.utils.quant_utils import is_layer_skipped, reshape_mx_scale

@@ -135,7 +135,6 @@ class DeepSeekRunner(ModelRunner):
             compiler_config = CompilerConfig()
             if self.execute_mode == "acl_graph":
                 compiler_config.mode = "reduce-overhead"
-                # TODO there is perfomance issue when setting clone_input=True, will be fixed in 2026 Q1.
                 # Need to remove the config once torch_npu released at that time.
                 if hasattr(compiler_config.debug.aclgraph, "clone_input"):
                     compiler_config.debug.aclgraph.clone_input = False
