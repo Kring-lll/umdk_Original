@@ -772,17 +772,18 @@ static ALWAYS_INLINE uint32_t umq_ub_fc_info_serialize(
     uint32_t temp_size = (uint32_t)sizeof(umq_ub_bind_fc_info_t) + (uint32_t)sizeof(urpc_tlv_head_t);
     if (left_buf_size < temp_size) {
         errno = UMQ_ERR_ENOMEM;
-        UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, bind info size insufficient, version info cannot "
-            "serialize, errno: %d\n", EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
-            queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, errno);
+        UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), bind info size insufficient, version info cannot "
+            "serialize, errno: %d\n", queue->umq_id, errno);
         return 0;
     }
 
     urma_jetty_t *jetty = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
     if (is_umq_ub_logic_queue(queue->create_flag)) {
-        umq_t *umq = (umq_t *)(uintptr_t)queue->share_rq_umqh;
-        ub_queue_t *main_queue = (ub_queue_t *)(uintptr_t)umq->umqh_tp;
-        jetty = main_queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
+        jetty = umq_ub_fc_bind_jetty_by_logic_queue(queue);
+        if (jetty == NULL) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), get fc bind jetty failed\n", queue->umq_id);
+            return 0;
+        }
     }
 
     urpc_tlv_head_t *info_tlv_head = (urpc_tlv_head_t *)(uintptr_t)bind_info_buf;
@@ -1179,7 +1180,8 @@ urma_jetty_t *umq_create_jetty(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, umq_cre
     };
     bondp_jetty_cfg.base.flag.bs.share_jfr = true;
     bondp_jetty_cfg.base.flag.bs.has_drv_ext = ((queue->create_flag & UMQ_CREATE_FLAG_USED_PORTS) != 0);
-    bondp_jetty_cfg.base.shared.jfr = queue->jfr_ctx[config->jetty_idx]->jfr;
+    // caller must set config->jfr to the jfr this jetty shares
+    bondp_jetty_cfg.base.shared.jfr = config->jfr;
 
     uint64_t start_timestamp = umq_perf_get_start_timestamp();
     urma_jetty_t *jetty = umq_symbol_urma()->urma_create_jetty(dev_ctx->urma_ctx, &bondp_jetty_cfg.base);
@@ -1189,6 +1191,184 @@ urma_jetty_t *umq_create_jetty(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, umq_cre
         return NULL;
     }
     return jetty;
+}
+
+// Forward declarations: both are defined later in this file but used by umq_ub_fc_ext_jetty_create.
+static int umq_ub_rqe_post_factor_query(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, urma_jfr_t *jfr);
+static urma_jfr_t *umq_ub_jfr_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, urma_jfc_t *jfc,
+    ub_queue_jetty_index_t jetty_idx);
+
+int umq_ub_fc_ext_jetty_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, const char *port_str)
+{
+    if (!is_umq_ub_main_queue(queue->create_flag)) {
+        return UMQ_SUCCESS; // not main umq — nothing to do
+    }
+
+    uint32_t ext_cnt = queue->fc_ext_jetty_num; // extra ext jfr_ctxs (main jfr_ctx[FC] is owned by the queue)
+    if (ext_cnt == 0 || queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL] == NULL) {
+        return UMQ_SUCCESS; // no ext jfr_ctxs or main jfr_ctx not built yet (caller's FC disabled)
+    }
+    umq_ext_jetty_ctx_t *ext_ctx = calloc(ext_cnt, sizeof(umq_ext_jetty_ctx_t));
+    if (ext_ctx == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "calloc ext_fc_jetty_ctx failed\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+    queue->ext_fc_jetty_ctx = ext_ctx;
+
+    jfr_ctx_t *main_jfr_ctx = queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL];
+    urma_jfc_t *main_jfr_jfc = main_jfr_ctx->jfr_jfc;
+    urma_jfc_t *main_jfs_jfc = queue->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL];
+
+    // each ext jfr_ctx: embedded jfr_ctx sharing the main jfr_jfc + jfr_jfce, new jfr, new only-import jetty
+    for (uint32_t i = 0; i < ext_cnt; i++) {
+        jfr_ctx_t *ext_jfr_ctx = &ext_ctx[i].jfr_ctx;
+        ext_jfr_ctx->jfr_jfc = main_jfr_jfc;
+        ext_jfr_ctx->jfr_jfce = main_jfr_ctx->jfr_jfce;
+        ext_jfr_ctx->jfr = umq_ub_jfr_create(queue, dev_ctx, main_jfr_jfc, UB_QUEUE_JETTY_FLOW_CONTROL);
+        if (ext_jfr_ctx->jfr == NULL) {
+            goto DESTROY_EXT;
+        }
+        ext_jfr_ctx->ref_cnt = 1;
+
+        umq_create_jetty_config_t create_ext_jetty_config = {
+            .jetty_idx = UB_QUEUE_JETTY_FLOW_CONTROL,
+            .jfs_jfc = main_jfs_jfc,
+            .port_str = port_str,
+            .used_port = queue->used_port,
+            .used_port_num = queue->used_port_num,
+            .jfr = ext_jfr_ctx->jfr,   // ext's own jfr; CQEs feed into the shared main jfr_jfc
+        };
+        urma_jetty_t *ext_jetty = umq_create_jetty(queue, dev_ctx, &create_ext_jetty_config);
+        if (ext_jetty == NULL) {
+            (void)umq_symbol_urma()->urma_delete_jfr(ext_jfr_ctx->jfr);
+            ext_jfr_ctx->jfr = NULL;
+            goto DESTROY_EXT;
+        }
+        ext_ctx[i].jetty = ext_jetty;
+    }
+    return UMQ_SUCCESS;
+
+DESTROY_EXT:
+    // rollback ext jfr_ctxs: delete each ext jetty + jfr (jfr_ctx is embedded, freed with ext_ctx)
+    for (uint32_t i = 0; i < ext_cnt; i++) {
+        if (ext_ctx[i].jetty != NULL) {
+            (void)umq_symbol_urma()->urma_delete_jetty(ext_ctx[i].jetty);
+            ext_ctx[i].jetty = NULL;
+        }
+        if (ext_ctx[i].jfr_ctx.jfr != NULL) {
+            (void)umq_symbol_urma()->urma_delete_jfr(ext_ctx[i].jfr_ctx.jfr);
+            ext_ctx[i].jfr_ctx.jfr = NULL;
+        }
+    }
+    free(ext_ctx);
+    queue->ext_fc_jetty_ctx = NULL;
+    return UMQ_FAIL;
+}
+
+void umq_ub_fc_ext_jetty_destroy(ub_queue_t *queue)
+{
+    umq_ext_jetty_ctx_t *ext_ctx = queue->ext_fc_jetty_ctx;
+    if (ext_ctx == NULL) {
+        return;
+    }
+    for (uint32_t i = 0; i < queue->fc_ext_jetty_num; i++) {
+        umq_ext_jetty_ctx_t *ext = &ext_ctx[i];
+        if (ext->jetty != NULL) {
+            (void)umq_symbol_urma()->urma_delete_jetty(ext->jetty);
+            ext->jetty = NULL;
+        }
+        if (ext->jfr_ctx.jfr != NULL) {
+            (void)umq_symbol_urma()->urma_delete_jfr(ext->jfr_ctx.jfr);
+            ext->jfr_ctx.jfr = NULL;
+        }
+        // jfr_jfc/jfr_jfce are shared from the main jfr_ctx, do NOT delete here
+    }
+    free(ext_ctx);
+    queue->ext_fc_jetty_ctx = NULL;
+}
+
+jfr_ctx_t *umq_ub_fc_ext_jfr_ctx_get(ub_queue_t *main_queue, uint32_t fc_rx_depth)
+{
+    // Main jfr_ctx[FC]: the main jfr_ctx[FC] (owned by the queue, participates in sharing too)
+    jfr_ctx_t *jfr_ctx = main_queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL];
+    if (jfr_ctx != NULL) {
+        uint32_t ref_cnt = __atomic_add_fetch(&jfr_ctx->ref_cnt, 1, __ATOMIC_ACQ_REL);
+        if (ref_cnt * UMQ_UB_FLOW_CONTORL_JETTY_DEPTH > fc_rx_depth) {
+            (void)__atomic_sub_fetch(&jfr_ctx->ref_cnt, 1, __ATOMIC_ACQ_REL);
+        } else {
+            return jfr_ctx;
+        }
+    }
+
+    // ext jfr_ctx[0..N-1]: the ext entries (embedded jfr_ctx in ext_fc_jetty_ctx[i])
+    umq_ext_jetty_ctx_t *ext_ctx = main_queue->ext_fc_jetty_ctx;
+    if (ext_ctx == NULL) {
+        return NULL;
+    }
+    for (uint32_t i = 0; i < main_queue->fc_ext_jetty_num; i++) {
+        jfr_ctx = &ext_ctx[i].jfr_ctx;
+        uint32_t ref_cnt = __atomic_add_fetch(&jfr_ctx->ref_cnt, 1, __ATOMIC_ACQ_REL);
+        if (ref_cnt * UMQ_UB_FLOW_CONTORL_JETTY_DEPTH > fc_rx_depth) {
+            (void)__atomic_sub_fetch(&jfr_ctx->ref_cnt, 1, __ATOMIC_ACQ_REL);
+            continue;
+        }
+        return jfr_ctx;
+    }
+    return NULL; // all full
+}
+
+// Resolve the jetty sharing the sub-umq's FC jfr_ctx via share_rq_umqh -> main umq
+urma_jetty_t *umq_ub_fc_bind_jetty_by_logic_queue(ub_queue_t *logic_queue)
+{
+    if (logic_queue == NULL || logic_queue->share_rq_umqh == UMQ_INVALID_HANDLE) {
+        return NULL;
+    }
+    jfr_ctx_t *jfr_ctx = logic_queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL];
+    if (jfr_ctx == NULL) {
+        return NULL;
+    }
+    umq_t *umq = (umq_t *)(uintptr_t)logic_queue->share_rq_umqh;
+    ub_queue_t *main_queue = (ub_queue_t *)(uintptr_t)umq->umqh_tp;
+    // Main jfr_ctx[FC]: the main jfr_ctx[FC] itself (owned by the main queue, not in ext_jetty)
+    if (jfr_ctx == main_queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]) {
+        return main_queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL];
+    }
+    // Ext jfr_ctxs: embedded jfr_ctx inside ext_fc_jetty_ctx[i]
+    umq_ext_jetty_ctx_t *ext_ctx = main_queue->ext_fc_jetty_ctx;
+    if (ext_ctx == NULL) {
+        return NULL;
+    }
+    for (uint32_t i = 0; i < main_queue->fc_ext_jetty_num; i++) {
+        if (&ext_ctx[i].jfr_ctx == jfr_ctx) {
+            return ext_ctx[i].jetty;
+        }
+    }
+    return NULL;
+}
+
+// Resolve the FC jfr_ctx whose jfr_ctx's jetty id == local_id (to re-post RQEs to the source jfr_ctx)
+jfr_ctx_t *umq_ub_fc_jfr_ctx_by_local_id(ub_queue_t *main_queue, uint32_t local_id)
+{
+    if (main_queue == NULL) {
+        return NULL;
+    }
+    // Main jfr_ctx[FC]: main jetty[FC]
+    if (main_queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL] != NULL &&
+        main_queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id == local_id) {
+        return main_queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL];
+    }
+    // Ext jfr_ctxs: ext_fc_jetty_ctx[i].jetty -> embedded jfr_ctx
+    umq_ext_jetty_ctx_t *ext_ctx = main_queue->ext_fc_jetty_ctx;
+    if (ext_ctx == NULL) {
+        return NULL;
+    }
+    for (uint32_t i = 0; i < main_queue->fc_ext_jetty_num; i++) {
+        if (ext_ctx[i].jetty != NULL &&
+            ext_ctx[i].jetty->jetty_id.id == local_id) {
+            return &ext_ctx[i].jfr_ctx;
+        }
+    }
+    return NULL;
 }
 
 static urma_transport_mode_t umq_tp_mode_convert_to_urma(umq_tp_mode_t tp_mode)
@@ -1634,9 +1814,9 @@ static int umq_ub_rqe_post_factor_query(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx
     return UMQ_SUCCESS;
 }
 
-jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_queue_jetty_index_t jetty_idx)
+static urma_jfr_t *umq_ub_jfr_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, urma_jfc_t *jfc,
+    ub_queue_jetty_index_t jetty_idx)
 {
-    uint64_t start_timestamp;
     bool enable_token = (dev_ctx->feature & UMQ_FEATURE_ENABLE_TOKEN_POLICY) != 0;
     uint32_t jetty_token = 0;
     int ret = umq_ub_token_generate(enable_token, &jetty_token);
@@ -1645,6 +1825,38 @@ jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_qu
         return NULL;
     }
 
+    uint32_t jfr_depth = jetty_idx == UB_QUEUE_JETTY_IO ? queue->rx_depth : queue->fc_rx_depth;
+    bondp_jfr_cfg_t bondp_jfr_cfg = {
+        .base = {
+            .flag.bs.token_policy = token_policy_get(enable_token),
+            .trans_mode = queue->tp_mode,
+            .depth = jfr_depth,
+            .max_sge = queue->max_rx_sge,
+            .min_rnr_timer = queue->min_rnr_timer,
+            .jfc = jfc,
+            .token_value = {.token = jetty_token},
+            .flag.bs.lock_free = dev_ctx->rq_lock_free,
+            .flag.bs.has_drv_ext = ((queue->create_flag & UMQ_CREATE_FLAG_USED_PORTS) != 0) &&
+                ((queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) == 0)
+        },
+        .port_ids = queue->used_port,
+        .port_count = queue->used_port_num,
+    };
+
+    bondp_jfr_cfg.base.flag.bs.order_type = queue->order_type;
+    uint64_t start_timestamp = umq_perf_get_start_timestamp();
+    urma_jfr_t *jfr = umq_symbol_urma()->urma_create_jfr(dev_ctx->urma_ctx, &bondp_jfr_cfg.base);
+    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_CREATE_JFR, start_timestamp);
+    if (jfr == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_create_jfr failed, errno: %d\n", errno);
+        return NULL;
+    }
+    return jfr;
+}
+
+jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_queue_jetty_index_t jetty_idx)
+{
+    uint64_t start_timestamp;
     jfr_ctx_t *jfr_ctx = calloc(1, sizeof(jfr_ctx_t));
     if (jfr_ctx == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "calloc jfr_ctx failed\n");
@@ -1667,10 +1879,20 @@ jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_qu
     // create jfr_jfc
     // jfr_jfc of the main umq needs to be used by the sub-queues of all ports, so it needs to be created on all ports.
     uint32_t jfr_depth = jetty_idx == UB_QUEUE_JETTY_IO ? queue->rx_depth : queue->fc_rx_depth;
+    // Main umq's FC jfr_jfc is shared by all jfr_ctxs: size = (ext+1)*fc_rx_depth (jfc cap 1M >> jfr 32K).
+    uint32_t jfc_depth = jfr_depth;
+    if (jetty_idx == UB_QUEUE_JETTY_FLOW_CONTROL && is_umq_ub_main_queue(queue->create_flag)) {
+        jfc_depth = jfr_depth * (queue->fc_ext_jetty_num + 1);   // total = ext + main jfr_ctx[FC]
+        if (jfc_depth > dev_ctx->dev_attr.dev_cap.max_jfc_depth) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), shared fc jfc depth %u exceed max_jfc_depth %u\n",
+                queue->umq_id, jfc_depth, dev_ctx->dev_attr.dev_cap.max_jfc_depth);
+            goto FREE_JFR_CTX;
+        }
+    }
 
     bondp_jfc_cfg_t bondp_jfc_cfg = {
         .base = {
-            .depth = jfr_depth,
+            .depth = jfc_depth,
             .jfce = jfr_ctx->jfr_jfce,
             .flag.bs.lock_free = dev_ctx->rq_lock_free,
             .flag.bs.has_drv_ext = ((queue->create_flag & UMQ_CREATE_FLAG_USED_PORTS) != 0) &&
@@ -1686,36 +1908,14 @@ jfr_ctx_t *umq_ub_jfr_ctx_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, ub_qu
         UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_create_jfc failed, errno: %d\n", errno);
         goto DELETE_JFR_JFCE;
     }
-    // create jfr
-    // jfr of the main umq needs to be used by the sub-queues of all ports, so it needs to be created on all ports.
-    bondp_jfr_cfg_t bondp_jfr_cfg = {
-        .base = {
-            .flag.bs.token_policy = token_policy_get(enable_token),
-            .trans_mode = queue->tp_mode,
-            .depth = jfr_depth,
-            .max_sge = queue->max_rx_sge,
-            .min_rnr_timer = queue->min_rnr_timer,
-            .jfc = jfr_ctx->jfr_jfc,
-            .token_value = {.token = jetty_token},
-            .flag.bs.lock_free = dev_ctx->rq_lock_free,
-            .flag.bs.has_drv_ext = ((queue->create_flag & UMQ_CREATE_FLAG_USED_PORTS) != 0) &&
-                ((queue->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) == 0)
-        },
-        .port_ids = queue->used_port,
-        .port_count = queue->used_port_num,
-    };
-
-    bondp_jfr_cfg.base.flag.bs.order_type = queue->order_type;
-    start_timestamp = umq_perf_get_start_timestamp();
-    jfr_ctx->jfr = umq_symbol_urma()->urma_create_jfr(dev_ctx->urma_ctx, &bondp_jfr_cfg.base);
-    umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_CREATE_JFR, start_timestamp);
+    // create jfr bound to the jfc just created (normal path: jfc owned by this jfr_ctx)
+    jfr_ctx->jfr = umq_ub_jfr_create(queue, dev_ctx, jfr_ctx->jfr_jfc, jetty_idx);
     if (jfr_ctx->jfr == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_create_jfr failed, errno: %d\n", errno);
         goto DELETE_JFR_JFC;
     }
-
+    // query rqe_post_factor on the freshly created jfr (moved out of umq_ub_jfr_create)
     if (umq_ub_rqe_post_factor_query(queue, dev_ctx, jfr_ctx->jfr) != UMQ_SUCCESS) {
-        goto DELETE_JFR_JFC;
+        goto DELETE_JFR;
     }
 
     // fc not use rx buf list
@@ -1749,14 +1949,22 @@ int umq_ub_jfr_ctx_get(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, umq_create_opti
                        ub_queue_t *share_queue, ub_queue_jetty_index_t jetty_idx)
 {
     if (is_umq_ub_share_rq(option->create_flag) && (jetty_idx == UB_QUEUE_JETTY_IO || UMQ_UB_ENABLE_SHARE_FC_JFR)) {
-        uint32_t ref_cnt = __atomic_add_fetch(&share_queue->jfr_ctx[jetty_idx]->ref_cnt, 1, __ATOMIC_ACQ_REL);
-        if (jetty_idx == UB_QUEUE_JETTY_FLOW_CONTROL &&
-            ref_cnt * UMQ_UB_FLOW_CONTORL_JETTY_DEPTH > share_queue->fc_rx_depth) {
-            UMQ_VLOG_ERR(VLOG_UMQ, "number of shared flow control JFRs has reached the upper limit %u\n",
-                share_queue->fc_rx_depth / UMQ_UB_FLOW_CONTORL_JETTY_DEPTH);
-            (void)__atomic_sub_fetch(&share_queue->jfr_ctx[jetty_idx]->ref_cnt, 1, __ATOMIC_ACQ_REL);
-            return UMQ_FAIL;
+        // FC: spread sub-umqs across jfr_ctxs (main jfr_ctx[FC] + ext), ref-counted, full jfr_ctx skipped. NULL = all full.
+        if (jetty_idx == UB_QUEUE_JETTY_FLOW_CONTROL) {
+            jfr_ctx_t *jfr_ctx = umq_ub_fc_ext_jfr_ctx_get(share_queue, share_queue->fc_rx_depth);
+            if (jfr_ctx == NULL) {
+                uint32_t total_jfrs = (share_queue->ext_fc_jetty_ctx != NULL) ?
+                    (share_queue->fc_ext_jetty_num + 1) : 1; // +1 for the main jfr_ctx
+                UMQ_VLOG_ERR(VLOG_UMQ, "number of shared flow control JFRs has reached the upper limit %u\n",
+                    total_jfrs * share_queue->fc_rx_depth / UMQ_UB_FLOW_CONTORL_JETTY_DEPTH);
+                return UMQ_FAIL;
+            }
+            queue->fc_rx_depth = share_queue->fc_rx_depth;
+            queue->jfr_ctx[jetty_idx] = jfr_ctx;
+            return UMQ_SUCCESS;
         }
+        // IO jetty: legacy single-jfr share path
+        (void)__atomic_add_fetch(&share_queue->jfr_ctx[jetty_idx]->ref_cnt, 1, __ATOMIC_ACQ_REL);
         queue->fc_rx_depth = share_queue->fc_rx_depth;
         queue->jfr_ctx[jetty_idx] = share_queue->jfr_ctx[jetty_idx];
         return UMQ_SUCCESS;
