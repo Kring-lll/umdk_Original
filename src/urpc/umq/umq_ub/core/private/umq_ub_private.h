@@ -402,11 +402,16 @@ typedef struct ub_credit_pool {
 typedef struct jfr_ctx {
     urma_jfr_t *jfr;
     urma_jfc_t *jfr_jfc;
-    urma_jfce_t *jfr_jfce; // io and flow control jetty share same jfce
+    urma_jfce_t *jfr_jfce;
     volatile uint32_t ref_cnt;
     rx_buf_ctx_list_t rx_buf_ctx_list;
     ub_credit_pool_t credit;
 } jfr_ctx_t;
+
+typedef struct umq_ext_jetty_ctx {
+    jfr_ctx_t jfr_ctx;
+    urma_jetty_t *jetty;
+} umq_ext_jetty_ctx_t;
 
 typedef struct ub_queue_interrupt_ctx {
     bool tx_io_interrupt;
@@ -464,6 +469,8 @@ typedef struct ub_queue {
     jfr_ctx_t *jfr_ctx[UB_QUEUE_JETTY_NUM];
     urma_jfc_t *jfs_jfc[UB_QUEUE_JETTY_NUM];
     urma_jfce_t *jfs_jfce; // io and flow control jetty share same jfce
+    umq_ext_jetty_ctx_t *ext_fc_jetty_ctx;  // main umq: array of fc_ext_jetty_num ext jfr_ctxs (NULL if none)
+    uint32_t fc_ext_jetty_num;              // ext jfr_ctx count, 0 = no ext
     ub_queue_interrupt_ctx_t interrupt_ctx;
     umq_ub_ctx_t *dev_ctx;
     struct ub_bind_ctx *bind_ctx;
@@ -549,6 +556,7 @@ typedef struct umq_create_jetty_config {
     urma_jfc_t *jfs_jfc;
     bondp_port_id_t *used_port;
     uint8_t used_port_num;
+    urma_jfr_t *jfr;
 } umq_create_jetty_config_t;
 
 int rx_buf_ctx_list_init(rx_buf_ctx_list_t *rx_buf_ctx_list, uint32_t ctx_num);
@@ -577,6 +585,11 @@ int umq_modify_ubq_to_err(ub_queue_t *queue, umq_io_direction_t direction, ub_qu
 remote_imported_tseg_info_t *umq_ub_ctx_imported_info_create(void);
 void umq_ub_ctx_imported_info_destroy(umq_ub_ctx_t *ub_ctx);
 urma_jetty_t *umq_create_jetty(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, umq_create_jetty_config_t *config);
+int umq_ub_fc_ext_jetty_create(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, const char *port_str);
+void umq_ub_fc_ext_jetty_destroy(ub_queue_t *queue);
+jfr_ctx_t *umq_ub_fc_ext_jfr_ctx_get(ub_queue_t *main_queue, uint32_t fc_rx_depth);
+urma_jetty_t *umq_ub_fc_bind_jetty_by_logic_queue(ub_queue_t *logic_queue);
+jfr_ctx_t *umq_ub_fc_jfr_ctx_by_local_id(ub_queue_t *main_queue, uint32_t local_id);
 int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_queue_t *queue);
 int umq_ub_register_seg(umq_ub_ctx_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
 void umq_ub_unregister_seg(umq_ub_ctx_t *ctx_list, uint32_t ctx_cnt, uint16_t mempool_id);
@@ -639,7 +652,7 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm);
 int umq_ub_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *urma_wr_ptr,
                         urma_sge_t *sges, uint32_t remain_tx);
 
-int umq_ub_fill_fc_rx_buf(ub_queue_t *queue);
+int umq_ub_fill_fc_rx_buf(ub_queue_t *queue, jfr_ctx_t *jfr_ctx);
 int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint8_t rqe_post_factor);
 int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, uint32_t tp_handle_idx);
 
