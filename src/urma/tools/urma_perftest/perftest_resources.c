@@ -743,7 +743,6 @@ static inline void destroy_simplex_jettys(perftest_context_t *ctx, perftest_conf
     destroy_jfr(ctx, (int)ctx->jetty_num);
     destroy_jfs(ctx, (int)ctx->jetty_num);
     destroy_jfc(ctx, cfg);
-    ctx->jetty_num = 0;
 }
 
 static void destroy_duplex_jettys(perftest_context_t *ctx, perftest_config_t *cfg)
@@ -760,12 +759,14 @@ static void destroy_duplex_jettys(perftest_context_t *ctx, perftest_config_t *cf
         ctx->jfr = NULL;
     }
     destroy_jfc(ctx, cfg);
-    ctx->jetty_num = 0;
 }
 
 static void drain_inflight_wr(perftest_context_t *ctx, const perftest_config_t *cfg)
 {
     const uint32_t drain_poll_batch = 16;
+    const uint32_t drain_max_retry = 100;
+    const uint32_t drain_retry_us = 10000; /* 10ms */
+
     if (ctx->jfc_s == NULL && ctx->jfc_r == NULL) {
         return;
     }
@@ -776,11 +777,17 @@ static void drain_inflight_wr(perftest_context_t *ctx, const perftest_config_t *
         }
         if (ctx->jfc_s != NULL && ctx->jfc_s[i] != NULL) {
             bool flush_done = false;
-            while (!flush_done) {
+            int total = 0;
+            uint32_t retry = 0;
+            while (!flush_done && retry < drain_max_retry) {
                 int n = urma_poll_jfc(ctx->jfc_s[i], drain_poll_batch, cr);
                 if (n <= 0) {
-                    break;
+                    usleep(drain_retry_us);
+                    retry++;
+                    continue;
                 }
+                retry = 0;
+                total += n;
                 for (int j = 0; j < n; j++) {
                     if (cr[j].status == URMA_CR_WR_FLUSH_ERR_DONE) {
                         flush_done = true;
@@ -789,17 +796,8 @@ static void drain_inflight_wr(perftest_context_t *ctx, const perftest_config_t *
             }
         }
         if (ctx->jfc_r != NULL && ctx->jfc_r[i] != NULL) {
-            bool flush_done = false;
-            while (!flush_done) {
-                int n = urma_poll_jfc(ctx->jfc_r[i], drain_poll_batch, cr);
-                if (n <= 0) {
-                    break;
-                }
-                for (int j = 0; j < n; j++) {
-                    if (cr[j].status == URMA_CR_WR_FLUSH_ERR_DONE) {
-                        flush_done = true;
-                    }
-                }
+            while (urma_poll_jfc(ctx->jfc_r[i], drain_poll_batch, cr) > 0) {
+                /* drain recv completions */
             }
         }
     }
@@ -2916,8 +2914,9 @@ static void destroy_simplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     if (cfg->enable_credit == true) {
         destroy_credit_ctx(ctx, cfg);
     }
-    unregister_mem(ctx, cfg);
     destroy_simplex_jettys(ctx, cfg);
+    unregister_mem(ctx, cfg);
+    ctx->jetty_num = 0;
     /* Close mgmt channel BEFORE uninit_device: urma_uninit is not refcounted
      * and dlclose()'s provider .so, after which mgmt ctx->ops dangles. */
     close_connection(cfg);
@@ -2955,8 +2954,9 @@ static void destroy_duplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     if (cfg->enable_credit == true) {
         destroy_credit_ctx(ctx, cfg);
     }
-    unregister_mem(ctx, cfg);
     destroy_duplex_jettys(ctx, cfg);
+    unregister_mem(ctx, cfg);
+    ctx->jetty_num = 0;
     /* See destroy_simplex_ctx for ordering rationale. */
     close_connection(cfg);
     uninit_device(ctx);
