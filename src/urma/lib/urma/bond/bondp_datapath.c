@@ -1016,6 +1016,29 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         atomic_store(&bdp_comp->valid[send_idx], false);
 
         int new_send_idx = -1, new_target_idx = -1;
+        
+        URMA_LOG_ERR("--- FAILOVER TRACE START ---\n");
+        URMA_LOG_ERR("global->enable_failover: %d\n", g_bondp_global_ctx->enable_failover);
+        URMA_LOG_ERR("bdp_comp->active_count: %u\n", bdp_comp->active_count);
+        bondp_target_jetty_t *tjetty = wr_entry->target_vjetty;
+        URMA_LOG_ERR("tjetty->active_count: %u\n", tjetty->active_count);
+        for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+            bool valid = atomic_load(&bdp_comp->valid[i]);
+            bool pjetty = (bdp_comp->p_jetty[i] != NULL);
+            if (valid || pjetty) {
+                URMA_LOG_ERR("  Local idx %d: valid=%d, pjetty_exists=%d\n", i, valid, pjetty);
+            }
+        }
+        for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+            for (int j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
+                bool ptjetty = (tjetty->p_tjetty[i][j] != NULL);
+                if (ptjetty) {
+                    URMA_LOG_ERR("  Target idx %d->%d: ptjetty_exists=%d\n", i, j, ptjetty);
+                }
+            }
+        }
+        URMA_LOG_ERR("--- FAILOVER TRACE END ---\n");
+
         if (!g_bondp_global_ctx->enable_failover ||
             schedule_send(&wr_entry->target_vjetty->v_tjetty, bdp_comp,
                           &new_send_idx, &new_target_idx, NULL) != 0) {
