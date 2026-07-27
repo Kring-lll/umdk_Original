@@ -947,7 +947,7 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
     } else if (status == URMA_EAGAIN || status == URMA_ENOMEM) {
         umq_ub_post_release_jetty_node(queue, 1);
         umq_ub_permission_release(fc);
-        return -UMQ_ERR_EAGAIN;
+        return -UMQ_ERR_EFLOWCTL_EAGAIN;
     }
     umq_ub_post_release_jetty_node(queue, 1);
     umq_ub_permission_release(fc);
@@ -1009,7 +1009,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify, ui
         return UMQ_SUCCESS;
     } else if (status == URMA_EAGAIN || status == URMA_ENOMEM) {
         umq_ub_post_release_jetty_node(queue, 1);
-        return -UMQ_ERR_EAGAIN;
+        return -UMQ_ERR_EFLOWCTL_EAGAIN;
     }
     umq_ub_post_release_jetty_node(queue, 1);
     UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
@@ -1207,7 +1207,7 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
         umq_ub_post_release_jetty_node(queue, 1);
         umq_ub_permission_release(fc);
         fc->ops.remote_rx_window_inc(fc, return_credit, true);
-        return -UMQ_ERR_EAGAIN;
+        return -UMQ_ERR_EFLOWCTL_EAGAIN;
     }
 
     umq_ub_post_release_jetty_node(queue, 1);
@@ -1280,7 +1280,7 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
         return UMQ_SUCCESS;
     } else if (status == URMA_EAGAIN || status == URMA_ENOMEM) {
         umq_ub_post_release_jetty_node(queue, 1);
-        return -UMQ_ERR_EAGAIN;
+        return -UMQ_ERR_EFLOWCTL_EAGAIN;
     }
     umq_ub_post_release_jetty_node(queue, 1);
     UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
