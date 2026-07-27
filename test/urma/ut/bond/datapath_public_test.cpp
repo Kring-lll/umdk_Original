@@ -465,6 +465,8 @@ TEST(UrmaBondTest, DatapathPostSendStoreRollsBackAfterPartialProviderFailure)
     physicalJfsId.uasid = 0;
     firstWr.user_ctx = 0x101;
     secondWr.user_ctx = 0x202;
+    firstWr.flag.bs.complete_enable = URMA_COMPLETE_ENABLE;
+    secondWr.flag.bs.complete_enable = URMA_COMPLETE_ENABLE;
     firstWr.next = &secondWr;
     ASSERT_EQ(0, bdp_p_vjetty_id_table_create(&fixture.ctx.p_vjetty_id_table, 8));
     ASSERT_EQ(0, wr_buf_init(&fixture.comp.send_wr_buf, 4, BONDP_MAX_SGE_NUM));
@@ -515,6 +517,240 @@ TEST(UrmaBondTest, DatapathPostSendStoreRollsBackAfterPartialProviderFailure)
     EXPECT_EQ(firstWr.user_ctx, outCr.user_ctx);
     EXPECT_EQ(0U, fixture.comp.sqe_cnt[0][0].load());
 
+    pthread_spin_destroy(&fixture.comp.send_lock);
+    wr_buf_uninit(&fixture.comp.send_wr_buf);
+    EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
+}
+
+TEST(UrmaBondTest, DatapathPostSendStoreBondCqe)
+{
+    constexpr uint32_t WR_TOTAL = 8;
+    BondPathFixture fixture;
+    bondp_jfc_t vJfc = {};
+    urma_jfs_wr_t wr[WR_TOTAL] = {};
+    urma_jfs_wr_t *badWr = nullptr;
+    urma_cr_t outCr = {};
+    urma_jetty_id_t physicalJfsId = MakeJettyId(0xa0);
+    jfs_wr_entry_t *entries[WR_TOTAL] = {};
+    uint64_t wrIds[WR_TOTAL] = {};
+    uint32_t expectedSqeCnt = 0U;
+    std::set<uint32_t> cqeIdx = {};
+
+    physicalJfsId.uasid = 0;
+    for (uint32_t i = 0; i < WR_TOTAL; ++i) {
+        wr[i] = fixture.MakeSendWr(URMA_OPC_SEND);
+        wr[i].user_ctx = 0x100 + i;
+        bool completeEnable = (i == WR_TOTAL / 2) || (i == WR_TOTAL - 1);
+        wr[i].flag.bs.complete_enable = completeEnable ? URMA_COMPLETE_ENABLE : URMA_COMPLETE_DISABLE;
+        if (completeEnable) {
+            ++expectedSqeCnt;
+            cqeIdx.insert(i);
+        }
+        if (i > 0) {
+            wr[i - 1].next = &wr[i];
+        }
+    }
+
+    ASSERT_EQ(0, bdp_p_vjetty_id_table_create(&fixture.ctx.p_vjetty_id_table, 8));
+    ASSERT_EQ(0, wr_buf_init(&fixture.comp.send_wr_buf, WR_TOTAL, BONDP_MAX_SGE_NUM));
+    ASSERT_EQ(0, pthread_spin_init(&fixture.comp.send_lock, PTHREAD_PROCESS_PRIVATE));
+    fixture.ctx.bonding_mode = BONDP_BONDING_MODE_BALANCE;
+    fixture.ctx.msn_enable = true;
+    fixture.ctx.p_ctxs[0] = &fixture.phyCtx;
+    fixture.phyCtx.eid = physicalJfsId.eid;
+    fixture.phyOps.post_jfs_wr = MockPostAnyJfsWr;
+    fixture.phyOps.poll_jfc = MockPollOneCr;
+    fixture.comp.comp_type = BONDP_COMP_JFS;
+    fixture.comp.active_count = 1;
+    fixture.comp.active_indices[0] = 0;
+    fixture.comp.valid[0] = true;
+    fixture.comp.v_jfs.urma_ctx = &fixture.ctx.v_ctx;
+    fixture.comp.v_jfs.jfs_id.id = 0xa1;
+    fixture.comp.p_jfs[0] = &fixture.phyJfs[0];
+    fixture.target.active_count = 1;
+    fixture.target.active_indices[0] = 0;
+    fixture.target.local_active_indices[0] = 0;
+    fixture.target.valid[0][0] = true;
+    fixture.target.is_msn_enabled = true;
+    fixture.target.v_tjetty.urma_ctx = &fixture.ctx.v_ctx;
+    fixture.target.v_tjetty.id.id = 0xa2;
+    fixture.target.v_tjetty.type = URMA_JETTY;
+    fixture.target.p_tjetty[0][0] = &fixture.phyTarget[0][0];
+    fixture.phyJfs[0].jfs_id = physicalJfsId;
+    fixture.phyJfs[0].jfs_cfg.jfc = &fixture.phyJfc;
+    SetRefCount(&fixture.target.use_cnt, 16);
+    SetRefCount(&fixture.localSeg.use_cnt, 16);
+    SetRefCount(&fixture.remoteSeg.use_cnt, 16);
+    ASSERT_EQ(0, bdp_p_vjetty_id_table_add_without_lock(
+        &fixture.ctx.p_vjetty_id_table, physicalJfsId, JFS, fixture.comp.v_jfs.jfs_id.id, &fixture.comp));
+
+    ASSERT_EQ(URMA_SUCCESS, bondp_post_jfs_wr(&fixture.comp.v_jfs, &wr[0], &badWr));
+    EXPECT_EQ(nullptr, badWr);
+    EXPECT_EQ(1, urma_test::GetHwMockState().postJfsCount);
+    EXPECT_EQ(expectedSqeCnt, fixture.comp.sqe_cnt[0][0].load());
+
+    for (uint32_t i = 0; i < WR_TOTAL; ++i) {
+        entries[i] = jfs_wr_buf_get(&fixture.comp.send_wr_buf, i + 1);
+        ASSERT_NE(nullptr, entries[i]);
+        wrIds[i] = entries[i]->wr_id;
+        if (cqeIdx.count(i)) {
+            EXPECT_TRUE(entries[i]->is_bond_cqe_tail);
+        } else {
+            EXPECT_FALSE(entries[i]->is_bond_cqe_tail);
+        }
+    }
+
+    InitSingleEnabledPollJfc(&vJfc, &fixture);
+    g_mockDatapathCr = {};
+    g_mockDatapathCr.status = URMA_CR_SUCCESS;
+    g_mockDatapathCr.local_id = physicalJfsId.id;
+    for (const uint32_t &idx : cqeIdx) {
+        outCr = {};
+        g_mockDatapathCrCount = 1;
+        g_mockDatapathCr.user_ctx = entries[idx]->wr_id;
+        EXPECT_EQ(1, bondp_poll_jfc(&vJfc.v_jfc, 1, &outCr));
+        EXPECT_EQ(wr[idx].user_ctx, outCr.user_ctx);
+        EXPECT_EQ(--expectedSqeCnt, fixture.comp.sqe_cnt[0][0].load());
+        for (uint32_t i = 0; i < WR_TOTAL; ++i) {
+            if (i <= idx) {
+                EXPECT_EQ(nullptr, jfs_wr_buf_get(&fixture.comp.send_wr_buf, wrIds[i]));
+            } else {
+                EXPECT_NE(nullptr, jfs_wr_buf_get(&fixture.comp.send_wr_buf, wrIds[i]));
+            }
+        }
+    }
+
+    pthread_spin_destroy(&fixture.comp.send_lock);
+    wr_buf_uninit(&fixture.comp.send_wr_buf);
+    EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
+}
+
+TEST(UrmaBondTest, DatapathFailoverResendsFirstBondCqeGroup)
+{
+    constexpr uint32_t WR_TOTAL = 8;
+    BondPathFixture fixture;
+    bondp_jfc_t vJfc = {};
+    urma_jfs_wr_t wr[WR_TOTAL] = {};
+    urma_jfs_wr_t *badWr = nullptr;
+    urma_cr_t outCr = {};
+    urma_jetty_id_t physicalJfsId = MakeJettyId(0xa3);
+    jfs_wr_entry_t *entries[WR_TOTAL] = {};
+    uint64_t wrIds[WR_TOTAL] = {};
+    uint32_t expectedSqeCnt = 0U;
+    std::set<uint32_t> cqeIdx = {};
+
+    physicalJfsId.uasid = 0;
+    for (uint32_t i = 0; i < WR_TOTAL; ++i) {
+        wr[i] = fixture.MakeSendWr(URMA_OPC_SEND);
+        wr[i].user_ctx = 0x200 + i;
+        bool completeEnable = (i == WR_TOTAL / 2) || (i == WR_TOTAL - 1);
+        wr[i].flag.bs.complete_enable = completeEnable ? URMA_COMPLETE_ENABLE : URMA_COMPLETE_DISABLE;
+        if (completeEnable) {
+            ++expectedSqeCnt;
+            cqeIdx.insert(i);
+        }
+        if (i > 0) {
+            wr[i - 1].next = &wr[i];
+        }
+    }
+
+    ASSERT_EQ(0, bdp_p_vjetty_id_table_create(&fixture.ctx.p_vjetty_id_table, 8));
+    ASSERT_EQ(0, wr_buf_init(&fixture.comp.send_wr_buf, WR_TOTAL, BONDP_MAX_SGE_NUM));
+    ASSERT_EQ(0, pthread_spin_init(&fixture.comp.send_lock, PTHREAD_PROCESS_PRIVATE));
+    fixture.ctx.bonding_mode = BONDP_BONDING_MODE_BALANCE;
+    fixture.ctx.msn_enable = true;
+    fixture.ctx.p_ctxs[0] = &fixture.phyCtx;
+    fixture.ctx.p_ctxs[1] = &fixture.phyCtx;
+    fixture.phyCtx.eid = physicalJfsId.eid;
+    fixture.phyOps.post_jfs_wr = MockPostAnyJfsWr;
+    fixture.phyOps.poll_jfc = MockPollOneCr;
+    fixture.comp.comp_type = BONDP_COMP_JFS;
+    fixture.comp.active_count = 2;
+    fixture.comp.active_indices[0] = 0;
+    fixture.comp.active_indices[1] = 1;
+    fixture.comp.valid[0] = true;
+    fixture.comp.valid[1] = true;
+    fixture.comp.v_jfs.urma_ctx = &fixture.ctx.v_ctx;
+    fixture.comp.v_jfs.jfs_id.id = 0xa4;
+    fixture.comp.p_jfs[0] = &fixture.phyJfs[0];
+    fixture.comp.p_jfs[1] = &fixture.phyJfs[1];
+    fixture.target.active_count = 2;
+    fixture.target.active_indices[0] = 0;
+    fixture.target.local_active_indices[0] = 0;
+    fixture.target.active_indices[1] = 1;
+    fixture.target.local_active_indices[1] = 1;
+    fixture.target.valid[0][0] = true;
+    fixture.target.valid[1][1] = true;
+    fixture.target.is_msn_enabled = true;
+    fixture.target.v_tjetty.urma_ctx = &fixture.ctx.v_ctx;
+    fixture.target.v_tjetty.id.id = 0xa5;
+    fixture.target.v_tjetty.type = URMA_JETTY;
+    fixture.target.p_tjetty[0][0] = &fixture.phyTarget[0][0];
+    fixture.target.p_tjetty[1][1] = &fixture.phyTarget[1][1];
+    fixture.phyJfs[0].jfs_id = physicalJfsId;
+    fixture.phyJfs[1].jfs_id = physicalJfsId;
+    fixture.phyJfs[0].jfs_cfg.jfc = &fixture.phyJfc;
+    fixture.phyJfs[1].jfs_cfg.jfc = &fixture.phyJfc;
+    SetRefCount(&fixture.target.use_cnt, 16);
+    SetRefCount(&fixture.localSeg.use_cnt, 16);
+    SetRefCount(&fixture.remoteSeg.use_cnt, 16);
+    constexpr uint32_t INITIAL_SQE_CNT = 10U;
+    fixture.comp.sqe_cnt[1][1].store(INITIAL_SQE_CNT);
+    ASSERT_EQ(0, bdp_p_vjetty_id_table_add_without_lock(
+        &fixture.ctx.p_vjetty_id_table, physicalJfsId, JFS, fixture.comp.v_jfs.jfs_id.id, &fixture.comp));
+
+    ASSERT_EQ(URMA_SUCCESS, bondp_post_jfs_wr(&fixture.comp.v_jfs, &wr[0], &badWr));
+    EXPECT_EQ(nullptr, badWr);
+    EXPECT_EQ(1, urma_test::GetHwMockState().postJfsCount);
+    EXPECT_EQ(expectedSqeCnt, fixture.comp.sqe_cnt[0][0].load());
+    for (uint32_t i = 0; i < WR_TOTAL; ++i) {
+        entries[i] = jfs_wr_buf_get(&fixture.comp.send_wr_buf, i + 1);
+        ASSERT_NE(nullptr, entries[i]);
+        wrIds[i] = entries[i]->wr_id;
+    }
+
+    InitSingleEnabledPollJfc(&vJfc, &fixture);
+    g_mockDatapathCr = {};
+    g_mockDatapathCr.local_id = physicalJfsId.id;
+
+    /* failover CR */
+    const uint32_t RESEND_IDX = *cqeIdx.begin();
+    outCr = {};
+    g_mockDatapathCrCount = 1;
+    g_mockDatapathCr.user_ctx = entries[RESEND_IDX]->wr_id;
+    g_mockDatapathCr.status = URMA_CR_ACK_TIMEOUT_ERR;
+    EXPECT_EQ(0, bondp_poll_jfc(&vJfc.v_jfc, 1, &outCr));
+    EXPECT_EQ(0U, fixture.comp.sqe_cnt[0][0].load());
+    EXPECT_EQ(INITIAL_SQE_CNT + expectedSqeCnt, fixture.comp.sqe_cnt[1][1].load());
+    for (uint32_t i = 0; i < WR_TOTAL; ++i) {
+        jfs_wr_entry_t *entry = jfs_wr_buf_get(&fixture.comp.send_wr_buf, wrIds[i]);
+        EXPECT_NE(nullptr, entry);
+        EXPECT_EQ(entry->send_idx, 1U);
+        EXPECT_EQ(entry->target_idx, 1U);
+    }
+
+    /* poll pjetty 1 */
+    vJfc.enabled_indices[0] = 1;
+    vJfc.p_jfc[1] = &fixture.phyJfc;
+    for (const uint32_t &idx : cqeIdx) {
+        outCr = {};
+        g_mockDatapathCrCount = 1;
+        g_mockDatapathCr.user_ctx = entries[idx]->wr_id;
+        g_mockDatapathCr.status = URMA_CR_SUCCESS;
+        
+        EXPECT_EQ(1, bondp_poll_jfc(&vJfc.v_jfc, 1, &outCr));
+        EXPECT_EQ(wr[idx].user_ctx, outCr.user_ctx);
+
+        EXPECT_EQ(0U, fixture.comp.sqe_cnt[0][0].load());
+        EXPECT_EQ(INITIAL_SQE_CNT + (--expectedSqeCnt), fixture.comp.sqe_cnt[1][1].load());
+        for (uint32_t i = 0; i < WR_TOTAL; ++i) {
+            if (i <= idx) {
+                EXPECT_EQ(nullptr, jfs_wr_buf_get(&fixture.comp.send_wr_buf, wrIds[i]));
+            } else {
+                EXPECT_NE(nullptr, jfs_wr_buf_get(&fixture.comp.send_wr_buf, wrIds[i]));
+            }
+        }
+    }
     pthread_spin_destroy(&fixture.comp.send_lock);
     wr_buf_uninit(&fixture.comp.send_wr_buf);
     EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&fixture.ctx.p_vjetty_id_table));
