@@ -348,6 +348,7 @@ typedef struct umq_used_ports {
 #define UMQ_CREATE_FLAG_SUB_UMQ             (1 << 12)       // indicate that the umq uses shared jfr from main queue,
                                                             // associated with UMQ_CREATE_FLAG_SHARE_RQ
 #define UMQ_CREATE_FLAG_SHARE_TRANSPORT     (1 << 13)      // jetty pool mode: creates shared jetty pool
+#define UMQ_CREATE_FLAG_MAX_SHARE_QUEUE_NUM (1 << 14)     // main umq: enable max_share_queue_num
 
 typedef struct umq_create_option {
     /*************Required paramenters start*****************/
@@ -369,6 +370,7 @@ typedef struct umq_create_option {
     umq_tp_type_t tp_type;
     umq_used_ports_t used_ports;
     uint8_t priority;
+    uint32_t max_share_queue_num;   // main umq: max sub-umq share count,
     /*************Optional paramenters end*******************/
 } umq_create_option_t;
 
