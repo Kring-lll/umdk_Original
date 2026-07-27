@@ -15,6 +15,7 @@
 #include <cerrno>
 #include <dlfcn.h>
 #include <vector>
+#include <set>
 #include <sys/eventfd.h>
 #include <sys/epoll.h>
 #include <sys/syscall.h>
