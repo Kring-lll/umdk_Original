@@ -243,114 +243,152 @@ static int do_gen_test(const char *src_path, const char *exp_path, const char *o
     FILE *out = fopen(out_path, "w");
     if (!out) { fprintf(stderr, "write %s fail\n", out_path); fclose(src); return 1; }
 
-    /* 头部：gtest + fixture 头（生成的 .cpp 需要 include 才能编译）*/
+    /* 头部 */
     fprintf(out, "/* SPDX-License-Identifier: MIT */\n");
-    fprintf(out, "/* 自动生成：gen_baseline gen_test <src.cpp> <expected.txt> <out.cpp>\n");
+    fprintf(out, "/* 自动生成：gen_baseline gen_test <src.c> <expected.txt> <out.cpp>\n");
     fprintf(out, " * 由 baseline 生成器从测试源 + 录制基准合成。改源改基准后重生成，勿手编。 */\n\n");
     fprintf(out, "#include <gtest/gtest.h>\n");
     fprintf(out, "#include <cstdio>\n#include <cstdlib>\n#include <cstring>\n#include <cstdint>\n");
+    fprintf(out, "#include <unistd.h>\n");
     fprintf(out, "#include \"bl_fixture.hpp\"\n#include \"baseline_macros.h\"\n\n");
 
-    /* 提取测试体：模板用 TEST(...) 或 int main() 均可。
-     * 如果是 TEST：保留壳 + 体，宏换 EXPECT。
-     * 如果是 int main：包进 TEST(Generated, RecordedRun) 壳，去掉 main/return。
-     * 不生成 main（gtest_main 提供）、不加 ok/fprintf。 */
+    /* 提取策略:
+     * 找 void test_xxx(void) 或 void cross_xxx(void) 函数
+     * 提取函数体, 宏替换, 包成 TEST(xxx, Run) { body }
+     * #define / typedef 保留
+     * #include 跳过
+     * int main 跳过
+     */
     char line[MAX_LINE];
-    int in_test = 0;       /* 0=未进入，1=在体内，-1=找到了待 { */
-    int depth = 0;
-    int is_main = 0;      /* 模板用 int main 而非 TEST */
+    int depth = 0;          /* { } 配对深度 */
+    int in_func = 0;        /* 0=未进函数, -1=找到了函数名等{, 1=在函数体内 */
+    char func_name[64] = {0};  /* 提取的函数名 */
+
     while (fgets(line, sizeof(line), src)) {
-        /* 检测 TEST( 或 int main( 开始 */
-        if (!in_test && (strstr(line, "TEST(") != NULL || strstr(line, "int main(") != NULL)) {
-            is_main = (strstr(line, "int main(") != NULL);
-            if (is_main) {
-                fprintf(out, "TEST(Generated, RecordedRun)\n{\n");
+        const char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+
+        /* skip includes */
+        if (strncmp(p, "#include ", 9) == 0) continue;
+
+        /* keep #define / typedef */
+        if (in_func == 0 && (strncmp(p, "#define ", 8) == 0 || strncmp(p, "typedef ", 8) == 0)) {
+            fputs(line, out); continue;
+        }
+
+        /* skip int main + its body */
+        if (in_func == 0 && strstr(line, "int main(") != NULL) {
+            in_func = 2;  /* 2=跳过 main 全部 */
+            depth = 0;
+            continue;
+        }
+        if (in_func == 2) {
+            for (const char *q = line; *q && *q != '\n'; q++) {
+                if (*q == '{') depth++;
+                else if (*q == '}') depth--;
             }
+            if (depth <= 0 && strstr(line, "}")) { in_func = 0; }
+            continue;
+        }
+
+        /* 检测函数开始: void xxx(void) 或 static void *xxx(void *) 等 */
+        if (in_func == 0) {
+            const char *fp = p;
+            int is_static = 0;
+            if (strncmp(fp, "static ", 7) == 0) { is_static = 1; fp += 7; }
+            if (strncmp(fp, "void ", 5) == 0) {
+                const char *fn = fp + 5;
+                if (*fn == '*') fn++;  /* void * 返回值 */
+                while (*fn == ' ') fn++;
+                const char *paren = strchr(fn, '(');
+                if (paren) {
+                    size_t nl = paren - fn;
+                    while (nl > 0 && (fn[nl-1] == ' ')) nl--;
+                    if (nl >= sizeof(func_name)) nl = sizeof(func_name) - 1;
+                    memcpy(func_name, fn, nl);
+                    func_name[nl] = '\0';
+                    int wrap_as_test = (!is_static && fp[5] != '*');
+                    if (wrap_as_test) {
+                        fprintf(out, "TEST(%s, Run)\n", func_name);
+                    } else {
+                        fputs(p, out);
+                    }
+                    int opens = 0, closes = 0;
+                    for (const char *q = line; *q && *q != '\n'; q++) {
+                        if (*q == '{') opens++; else if (*q == '}') closes++;
+                    }
+                    if (opens > 0) { in_func = 1; depth = opens - closes; }
+                    else { in_func = -1; }
+                    continue;
+                }
+            }
+        }
+
+        /* 等函数开 { */
+        if (in_func == -1) {
             int opens = 0, closes = 0;
-            for (const char *p = line; *p && *p != '\n'; p++) {
-                if (*p == '{') opens++;
-                else if (*p == '}') closes++;
+            for (const char *q = line; *q && *q != '\n'; q++) {
+                if (*q == '{') opens++; else if (*q == '}') closes++;
             }
             if (opens > 0) {
-                in_test = 1;
-                depth = opens - closes;  /* main 的 { 算一个 depth，但 is_main 已输出了 { */
-                if (is_main) depth = 1;  /* is_main：跳过模板的 {，depth=1 表示已在 TEST 体内 */
-                else fputs(line, out);
-                continue;
+                fprintf(out, "{\n");
+                in_func = 1; depth = opens - closes;
             }
-            in_test = -1;
-            if (!is_main) fputs(line, out);
             continue;
         }
-        if (in_test == -1) {
-            int opens = 0, closes = 0;
-            for (const char *p = line; *p && *p != '\n'; p++) {
-                if (*p == '{') opens++;
-                else if (*p == '}') closes++;
-            }
-            if (opens > 0) {
-                in_test = 1;
-                depth = opens - closes;
-                if (!is_main) fputs(line, out);  /* 保留模板的开 { */
-                else depth = 1;  /* is_main：depth=1 已在 TEST 体内 */
-                continue;
-            }
-            if (!is_main) fputs(line, out);
-            continue;
-        }
-        if (in_test == 0) {
-            /* TEST 前的 #define 复制进生成测试 */
-            const char *p = line;
-            while (*p == ' ' || *p == '\t') p++;
-            if (strncmp(p, "#define ", 8) == 0) fputs(line, out);
-            continue;
-        }
-        /* 在 TEST 体内：数 { } */
+
+        if (in_func != 1) continue;
+
+        /* 在函数体内: 数 { } */
         int opens = 0, closes = 0;
-        for (const char *p = line; *p && *p != '\n'; p++) {
-            if (*p == '{') opens++;
-            else if (*p == '}') closes++;
+        for (const char *q = line; *q && *q != '\n'; q++) {
+            if (*q == '{') opens++; else if (*q == '}') closes++;
         }
         int newdepth = depth + opens - closes;
         if (newdepth <= 0) {
-            /* 闭 } 行：is_main 不输出模板的 }（TEST 的 } 已在 is_main 头输出了对应的 {，
-             * 这里补 }），非 is_main 原样输出 */
-            if (is_main) fprintf(out, "}\n");
-            else fputs(line, out);
-            break;
+            /* 函数闭 } */
+            fprintf(out, "}\n\n");
+            in_func = 0;
+            depth = 0;
+            continue;
         }
         depth = newdepth;
-        /* return 处理：int main 的 return → 删（gtest TEST 是 void）*/
+
+        /* return 删 */
         {
-            const char *p = line;
-            while (*p == ' ' || *p == '\t') p++;
-            if (strncmp(p, "return ", 7) == 0 && strchr(p, ';') != NULL) continue;
+            const char *q = line;
+            while (*q == ' ' || *q == '\t') q++;
+            if (strncmp(q, "return ", 7) == 0 && strchr(q, ';') != NULL) continue;
         }
-        /* 宏行替换成 gtest 断言（用录制的基准值） */
-        char name[64], var[256];
-        if (extract_macro_args(line, "WRITE_VAL", name, sizeof(name), var, sizeof(var)) == 0) {
-            entry_t *e = find_entry(ents, n, name);
-            if (e) fprintf(out, "    EXPECT_EQ(%s, %s);\n", e->value, var);
-            else fprintf(out, "    /* WRITE_VAL(%s) 无基准 */\n", name);
+
+        /* goto cleanup: 保持(goto 跨 NULL 初始化变量 C++ 允许) */
+        /* cleanup: 标签: 保持 */
+
+        /* 宏替换 */
+        char mname[64], mvar[256];
+        if (extract_macro_args(line, "WRITE_VAL", mname, sizeof(mname), mvar, sizeof(mvar)) == 0) {
+            entry_t *e = find_entry(ents, n, mname);
+            if (e) fprintf(out, "    EXPECT_EQ(%s, %s);\n", e->value, mvar);
+            else fprintf(out, "    /* WRITE_VAL(%s) no baseline */\n", mname);
             continue;
         }
-        if (extract_macro_args(line, "WRITE_HEX", name, sizeof(name), var, sizeof(var)) == 0) {
-            entry_t *e = find_entry(ents, n, name);
-            if (e) fprintf(out, "    EXPECT_EQ(%s, %s);\n", e->value, var);
-            else fprintf(out, "    /* WRITE_HEX(%s) 无基准 */\n", name);
+        if (extract_macro_args(line, "WRITE_HEX", mname, sizeof(mname), mvar, sizeof(mvar)) == 0) {
+            entry_t *e = find_entry(ents, n, mname);
+            if (e) fprintf(out, "    EXPECT_EQ(%s, %s);\n", e->value, mvar);
+            else fprintf(out, "    /* WRITE_HEX(%s) no baseline */\n", mname);
             continue;
         }
-        if (extract_macro_args(line, "ASSERT_NONEMPTY", name, sizeof(name), var, sizeof(var)) == 0) {
-            fprintf(out, "    ASSERT_NE(nullptr, %s);\n", var);
+        if (extract_macro_args(line, "ASSERT_NONEMPTY", mname, sizeof(mname), mvar, sizeof(mvar)) == 0) {
+            fprintf(out, "    ASSERT_NE(nullptr, %s);\n", mvar);
             continue;
         }
-        if (extract_macro_args(line, "WRITE_STR", name, sizeof(name), var, sizeof(var)) == 0) {
-            entry_t *e = find_entry(ents, n, name);
-            if (e) fprintf(out, "    EXPECT_EQ(0, strncmp(\"%s\", %s, strlen(\"%s\")));\n", e->value, var, e->value);
-            else fprintf(out, "    /* WRITE_STR(%s) 无基准 */\n", name);
+        if (extract_macro_args(line, "WRITE_STR", mname, sizeof(mname), mvar, sizeof(mvar)) == 0) {
+            entry_t *e = find_entry(ents, n, mname);
+            if (e) fprintf(out, "    EXPECT_EQ(0, strncmp(\"%s\", %s, strlen(\"%s\")));\n", e->value, mvar, e->value);
+            else fprintf(out, "    /* WRITE_STR(%s) no baseline */\n", mname);
             continue;
         }
-        /* 普通行原样输出 */
+        /* 普通行原样 */
         fputs(line, out);
     }
     fclose(src);
@@ -373,7 +411,12 @@ int main(int argc, char **argv)
     if (strcmp(argv[1], "check") == 0) return do_check(argv[2], argv[3]);
     if (strcmp(argv[1], "gen_test") == 0) {
         if (argc < 5) { fprintf(stderr, "gen_test 需要 <src.c> <expected.txt> <out.cpp>\n"); return 2; }
-        return do_gen_test(argv[2], argv[3], argv[4]);
+        int r = do_gen_test(argv[2], argv[3], argv[4]);
+        if (r == 0) {
+            remove(argv[3]);  /* 生成 .cpp 后删基准 .txt（值已编进 EXPECT 断言） */
+            printf("removed %s\n", argv[3]);
+        }
+        return r;
     }
     fprintf(stderr, "unknown mode: %s\n", argv[1]);
     return 2;

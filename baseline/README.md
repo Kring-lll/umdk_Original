@@ -1,162 +1,252 @@
-# baseline：门禁式回归测试框架
+# baseline：URMA 仿真测试框架
 
-从测试模板（纯 C + 宏标注）自动生成 gtest 风格 C++ 测试用例，版本更迭改了行为就 FAIL 挡住。
+为 URMA 仿真代码提供自动化回归测试：录制一次正确运行的输出值固化为基准，版本更迭后自动比对，改了行为就 FAIL 挡住。
 
-## 结构
+## 工作流程
+
+```
+写模板（.c，用 fixture 建链 + WRITE_VAL 标注验证点）
+  ↓ 编译跑
+BASELINE 行输出（stderr，含验证点的名字和值）
+  ↓ gen_baseline gen
+基准文件（expected.txt，固化这次运行的值）
+  ↓ gen_baseline gen_test
+gtest 测试（.cpp，宏行换成 EXPECT_EQ，值从基准来）
+  ↓ g++ + gtest 编译跑
+[ PASSED ] N tests.（自动判定 PASS/FAIL）
+```
+
+版本更迭后重跑：行为没变 → EXPECT_EQ 通过 → PASS；行为变了 → 不匹配 → FAIL 挡住，强制开发者确认。
+
+## 三件事
+
+baseline 做了三件事，解决传统手写测试的痛点：
+
+| 痛点 | 解法 |
+|---|---|
+| 断言靠手写期望值（容易漏、写错） | 录制断言——跑一次成功运行，自动提取输出值固化为基准 |
+| 没有基准，改了不知道影响范围 | 回归比对——重跑后和基准逐条比，变了就 FAIL |
+| 新测试要手抄 50 行建链样板 | fixture 模块化——建链/释放/操作封装成函数，写新测试只调 fixture + 标注宏 |
+
+## 目录结构
 
 ```
 baseline/
-├── gen/                        工具层
-│   ├── gen_baseline.c           生成器/比对器（gen / check / gen_test 三模式）
-│   ├── baseline_macros.h        录制宏（WRITE_VAL / WRITE_HEX / WRITE_STR / ASSERT_NONEMPTY）
-│   ├── bl_fixture.h / .c        C 版 fixture（setup / post_rw / poll_cr / teardown）
-│   └── bl_fixture.hpp / .cpp    C++ 版 fixture（同接口 + RAII 析构）
-├── src/                        测试模板（纯 C，gcc 编译）
-│   ├── test_baseline_demo2.c    READ 模板
-│   ├── test_write.c             WRITE 模板
-│   ├── test_cas.c               CAS 模板（匹配 + 不匹配）
-│   ├── test_faa.c               FAA 模板
-│   └── test_inject_err.c        异常注入模板
-└── out/                        生成产物
-    ├── *_expected.txt           基准（gen 产出）
-    └── *.cpp                    gtest 测试用例（gen_test 产出）
+├── gen/                          工具层
+│   ├── gen_baseline.c              生成器/比对器
+│   ├── baseline_macros.h           录制宏
+│   ├── bl_fixture.h / .c           C 版 fixture
+│   └── bl_fixture.hpp / .cpp       C++ 版 fixture
+├── src/                          测试模板
+│   ├── test_read.c                 基础：READ
+│   ├── test_write.c                基础：WRITE
+│   ├── ...                         基础模板共 10 个
+│   ├── test_comm.c                 通讯测试集 #1-#12
+│   └── test_comm_ext.c            通讯测试补充集 #13-#20
+├── out/                          生成产物
+│   └── *.cpp                      gtest 测试用例
+├── build_and_test.sh             一站式脚本
+└── SKILL.md                      模板编写规范
 ```
 
-## 编译
-
-### 前提
-
-在 oe-arm 容器内，liburma_sim.so + build_noasan 的 liburma 已编好。
-
-### 编译模板（纯 C，gcc）
+## 快速开始
 
 ```bash
-UA_CORE=/umdk/src/build_noasan/urma/lib/urma/core
-UA_COMMON=/umdk/src/build_noasan/urma/common
-URMA_INC=/umdk/src/urma/lib/urma/core/include
-URMA_COMMON_INC=/umdk/src/urma/common/include
-
-# 编一个模板（例：test_write）
-gcc -I/umdk/baseline/gen -I$URMA_INC -I$URMA_COMMON_INC \
-    -L/umdk/sim/urma/build -lurma_sim -L$UA_CORE -lurma -L$UA_COMMON -lurma_common \
-    -Wl,-rpath,/umdk/sim/urma/build -Wl,-rpath,$UA_CORE -Wl,-rpath,$UA_COMMON \
-    /umdk/baseline/gen/bl_fixture.c /umdk/baseline/src/test_write.c -o /tmp/test_write
-```
-
-### 编译生成测试（C++，g++ + gtest）
-
-```bash
-g++ -std=c++17 -fpermissive -Wno-error \
-    -I/usr/local/include -I/umdk/baseline/gen -I$URMA_INC -I$URMA_COMMON_INC \
-    -L/umdk/sim/urma/build -lurma_sim -L$UA_CORE -lurma -L$UA_COMMON -lurma_common \
-    -Wl,-rpath,/umdk/sim/urma/build -Wl,-rpath,$UA_CORE -Wl,-rpath,$UA_COMMON \
-    /umdk/baseline/gen/bl_fixture.cpp /umdk/baseline/out/test_write.cpp \
-    -L/usr/local/lib64 -lgtest_main -lgtest -lpthread -o /tmp/test_write_gen
-```
-
-### 编译生成器
-
-```bash
-gcc /umdk/baseline/gen/gen_baseline.c -o /tmp/gen_baseline
-```
-
-## 测试流程
-
-### 1. 跑模板 → 录制基准
-
-```bash
-export LD_LIBRARY_PATH=$UA_CORE:$UA_COMMON
-export LD_PRELOAD=/umdk/sim/urma/build/liburma_sim.so
-export URMA_SIM_CONFIG=/umdk/sim/urma/urma_sim_config.json
-export URMA_SIM_HW=1
-
-# 跑模板，BASELINE 行进 stderr
-/tmp/test_write 2> /tmp/write_out.txt
-
-# 生成基准
-/tmp/gen_baseline gen /tmp/write_out.txt /umdk/baseline/out/test_write_expected.txt
-```
-
-### 2. 生成 gtest 测试用例
-
-```bash
-/tmp/gen_baseline gen_test /umdk/baseline/src/test_write.c \
-    /umdk/baseline/out/test_write_expected.txt \
-    /umdk/baseline/out/test_write.cpp
-```
-
-### 3. 编译 + 跑生成测试
-
-```bash
-g++ ...（见上文编译生成测试）...
-/tmp/test_write_gen
-# [  PASSED  ] 1 test.
-```
-
-### 4. 回归比对（不重编，轻量验门禁）
-
-```bash
-# 版本更迭后重新跑模板
-/tmp/test_write 2> /tmp/write_new.txt
-
-# 比对基准
-/tmp/gen_baseline check /tmp/write_new.txt /umdk/baseline/out/test_write_expected.txt
-# 11 passed, 0 failed / BASELINE PASS
-```
-
-### 5. 异常注入测试
-
-```bash
-# 注入 ACK_TIMEOUT error CQE
-URMA_SIM_INJECT_STATUS=5 /tmp/test_inject_err 2> /tmp/inj_out.txt
-
-# 生成注入后的基准（poll_status 变成 9=ACK_TIMEOUT_ERR）
-/tmp/gen_baseline gen /tmp/inj_out.txt /umdk/baseline/out/test_inject_err_expected.txt
-
-# 生成测试（断言 poll_status==9）
-/tmp/gen_baseline gen_test /umdk/baseline/src/test_inject_err.c \
-    /umdk/baseline/out/test_inject_err_expected.txt \
-    /umdk/baseline/out/test_inject_err.cpp
-```
-
-## 现有模板
-
-| 模板 | 验什么 | BASELINE 条数 | 关键断言 |
-|---|---|---|---|
-| test_baseline_demo2.c | READ 搬数据 | 11 | post_ret=0, poll_n=1, status=0, user_ctx=0x42, dst_buf='A' |
-| test_write.c | WRITE 反向搬数据 | 11 | post_ret=0, poll_n=1, status=0, user_ctx=0x43, dst_buf='B' |
-| test_cas.c | CAS 匹配+不匹配 | 15 | atomic 0x100→0x200, orig=0x100；不匹配不变 |
-| test_faa.c | FAA fetch-and-add | 10 | atomic 0x200→0x205, orig=0x200 |
-| test_inject_err.c | 异常注入（正常+注入） | 9 | 正常: status=0；注入: status=9 (ACK_TIMEOUT) |
-
-## fixture 函数
-
-```c
-ctx_t *setup(int dev_idx, urma_transport_mode_t trans_mode);  // 建链（RAII 析构自动释放）
-urma_target_seg_t *register_seg(ctx_t *c, void *buf, size_t len);  // 注册 seg
-urma_target_jetty_t *import_self(ctx_t *c);  // import 自引用 jetty
-int post_rw(ctx_t *c, urma_target_jetty_t *tj, urma_opcode_t opcode,
-            void *local, void *remote_buf, urma_target_seg_t *remote_tseg,
-            size_t len, uint64_t user_ctx, uint64_t extra1, uint64_t extra2);  // 统一 post
-// 便捷包装：
-int post_read(...);   int post_write(...);   int post_cas(...);   int post_faa(...);
-int poll_cr(ctx_t *c, urma_cr_t *cr);  // poll 循环（重试 100 次）
-void teardown(ctx_t *c);  // 释放（C++ 版析构自动调）
-```
-
-## 录制宏
-
-```c
-WRITE_VAL("post_ret", ret);        // 值断言（生成 EXPECT_EQ）
-WRITE_HEX("user_ctx", cr.user_ctx); // hex 值断言（生成 EXPECT_EQ）
-WRITE_STR("dst_buf", dst_buf);     // 字符串断言（生成 EXPECT_EQ(strncmp)）
-ASSERT_NONEMPTY("ctx", ctx);       // 非空断言（生成 ASSERT_NE(nullptr)）——fixture 内部已调
+# 在 umdk 根目录执行
+bash baseline/build_and_test.sh
 ```
 
 ## gen_baseline 三模式
 
-```bash
-gen_baseline gen   <run_output.txt> <expected.txt>           # 生成基准
-gen_baseline check <new_output.txt> <expected.txt>           # 回归比对（不重编）
-gen_baseline gen_test <src.c> <expected.txt> <out.cpp>       # 生成 gtest 测试用例
+| 模式 | 命令 | 作用 |
+|---|---|---|
+| gen | `gen_baseline gen <out.txt> <expected.txt>` | 从跑模板的 BASELINE 行生成基准 |
+| gen_test | `gen_baseline gen_test <src.c> <expected.txt> <out.cpp>` | 从模板 + 基准生成 gtest .cpp，生成后自动删 expected.txt |
+| check | `gen_baseline check <new.txt> <expected.txt>` | 重跑模板拿新输出和基准文本比对（不重编） |
+
+### gen_test 提取规则
+
+- 找 `void test_xxx(void)` → 包成 `TEST(test_xxx, Run) { body }`
+- `static void *xxx(void *)` → 原样保留（不包 TEST）
+- `#define` / `typedef` → 保留
+- `#include` / `int main` → 跳过
+- 宏行换成 EXPECT_EQ（值从基准来）
+- `return` → 删（TEST 返回 void）
+- 一个文件多个函数 → 每个各一个 TEST
+
+## 录制宏
+
+宏是模板和生成器之间的协议——标注"这里要验什么"，跑时输出固定格式行。
+
+| 宏 | 适用场景 | gen_test 产出 |
+|---|---|---|
+| `WRITE_VAL("name", val)` | 逻辑值（status/ret/计数），每次跑一样 | `EXPECT_EQ(value, var)` |
+| `WRITE_HEX("name", val)` | hex 值（user_ctx/handle） | `EXPECT_EQ(0xNN, var)` |
+| `WRITE_STR("name", str)` | 数据搬运结果（buf 内容） | `EXPECT_EQ(0, strncmp(...))` |
+| `ASSERT_NONEMPTY("name", ptr)` | 地址/句柄（每次跑不同，只验非空） | `ASSERT_NE(nullptr, ptr)` |
+
+> **注意**：同一文件内多个函数的 WRITE_VAL 名字必须唯一（如 `read_dst_first` / `write_dst_first`），
+> 否则 gen_test 的 find_entry 按名字匹配到第一个值导致期望值错配。
+
+## fixture 模块
+
+封装了每个测试都会做的建链/释放/操作。写新测试只调 fixture，不裸调 urma API：
+
+```c
+// 建链
+ctx_t *c = setup(0, URMA_TM_UM, URMA_UTP);          // UM + UTP（默认最常用）
+ctx_t *c = setup(0, URMA_TM_RC, URMA_CTP);          // RC + CTP
+
+// 注册 + import
+urma_target_seg_t *tseg = register_seg(c, buf, len);
+urma_target_jetty_t *tj = import_self(c);             // UM 单进程自引用
+urma_target_jetty_t *tj = bind_remote(c, eid, ...); // RC 跨进程 import+bind
+
+// 操作
+int ret = post_read(c, tj, dst, src, tseg, len, 0x42);
+int ret = post_write(c, tj, src, tseg, dst, len, 0x43);
+int ret = post_send(c, tj, data, len, 0x42);
+post_recv(c, recv_buf, len, 0xA1);
+
+// poll + 释放
+int n = poll_cr(c, &cr);
+teardown(c);
 ```
+
+### 函数速查
+
+| 函数 | 用途 |
+|---|---|
+| `setup(dev_idx, trans_mode, tp_type)` | 建 jetty(share_jfr)，支持 UM/RC/RM × RTP/CTP |
+| `setup_default(dev_idx)` | 便捷：UM + UTP |
+| `register_seg(c, buf, len)` | 注册 seg |
+| `import_self(c)` | import 自引用 jetty（UM） |
+| `bind_remote(c, eid, uasid, jetty_id)` | import + bind 对端 jetty（RC） |
+| `import_jetty_remote(c, eid, ...)` | import 对端 jetty（UM 跨进程） |
+| `import_seg_remote(c, eid, ...)` | import 对端 seg |
+| `post_rw(c, tj, opcode, ...)` | 统一 post（READ/WRITE/CAS/FAA/NOP） |
+| `post_read/write/cas/faa(...)` | 便捷包装 |
+| `post_send(c, tj, buf, len, ctx)` | post SEND |
+| `post_recv(c, buf, len, ctx)` | post recv WQE |
+| `poll_cr(c, &cr)` | poll 重试 100 次 |
+| `get_jetty_id(c)` | 取 jetty_id（OOB 传给对端用） |
+| `teardown(c)` | 逆序释放 |
+
+## 模板写法
+
+详见 [SKILL.md](SKILL.md)。六条规则：
+
+1. 函数是 `void test_xxx(void)` → gen_test 生成 `TEST(test_xxx, Run)`
+2. 子函数用 `static` → gen_test 原样保留
+3. 局部变量全部最前声明（C++ goto 不跨初始化）
+4. 用 fixture 函数不裸调 urma API
+5. 用宏标注验证点（名字必须唯一）
+6. 不手写 ok/fprintf（gtest 自动判定）
+
+## 现有测试
+
+### 基础模板（10 个）
+
+| 模板 | 验什么 | BL 条数 | gtest |
+|---|---|---|---|
+| test_read | READ 搬数据 dst Z→A | 12 | PASS ✅ |
+| test_write | WRITE 搬数据 dst Z→B | 11 | PASS ✅ |
+| test_cas | CAS 匹配 swap + 不匹配不变 | 15 | PASS ✅ |
+| test_faa | FAA atomic += operand | 10 | PASS ✅ |
+| test_nop | NOP 不搬数据只产 CQE | 10 | PASS ✅ |
+| test_multi_post | 8 post 全 poll 到 | 9 | PASS ✅ |
+| test_inject_err | 注入 ACK_TIMEOUT cr=9 | 9 | PASS ✅ |
+| test_inject_rnr | 注入 RNR_RETRY cr=10 | 9 | PASS ✅ |
+| test_inject_local_err | 注入 UNSUPPORTED_OPCODE cr=1 | 9 | PASS ✅ |
+| test_cross_read | 跨进程 B 读 A 的 seg | 17 | PASS ✅ |
+
+### 通讯测试（20 个，8 维度全覆盖）
+
+**test_comm.c — 12 个 TEST**
+
+| # | 语义 | 模式 | 共享 | 通讯 | 方向 | 设备 |
+|---|---|---|---|---|---|---|
+| 1 | read | UM | TP | jetty | 单向 | udma |
+| 2 | write | UM | CTP | jfs+jfr | 单向 | udma |
+| 3 | send | UM | TP | jfs+jfr | 双向 | udma |
+| 4 | send_imm | UM | CTP | jetty | 双向 | udma |
+| 5 | write_imm | UM | TP | jfs+jfr | 单向 | udma |
+| 6 | read | RC | CTP | jetty | 双向 | udma |
+| 7 | write | RM | TP | jfs+jfr | 双向 | udma |
+| 8 | send | RC | TP | jetty | 单向 | bonding |
+| 9 | read | RM | CTP | jfs+jfr | 单向 | bonding |
+| 10 | send_imm | RC | CTP | jetty | 双向 | bonding |
+| 11 | send | RC | TP | jetty | 双向 | bonding+故障切换 |
+| 12 | read | RM | CTP | jfs+jfr | 双向 | bonding+故障回切 |
+
+`[ PASSED ] 12 tests.` ✅
+
+**test_comm_ext.c — 8 个 TEST（补充组合）**
+
+| # | 语义 | 模式 | 共享 | 通讯 | 方向 | 设备 |
+|---|---|---|---|---|---|---|
+| 13 | read | UM | CTP | jetty | 单向 | udma |
+| 14 | write | RM | CTP | jetty | 双向 | udma |
+| 15 | send | RC | CTP | jfs+jfr | 双向 | udma |
+| 16 | read | RC | TP | jfs+jfr | 单向 | udma |
+| 17 | write | RC | CTP | jetty | 单向 | bonding |
+| 18 | send | RM | CTP | jetty | 双向 | bonding |
+| 19 | read | UM | TP | jfs+jfr | 双向 | bonding |
+| 20 | write_imm | RC | CTP | jetty | 单向 | bonding |
+
+`[ PASSED ] 8 tests.` ✅
+
+### 维度覆盖
+
+| 维度 | 取值 | 覆盖 |
+|---|---|---|
+| 语义 | send / read / write / send_imm / write_imm | ✅ 全 5 |
+| 模式 | RC / RM / UM | ✅ 全 3 |
+| 共享 | TP / CTP | ✅ 全 2 |
+| 通讯 | jetty / jfs+jfr | ✅ 全 2 |
+| 方向 | 单向 / 双向 | ✅ 全 2 |
+| 设备 | udma / bonding | ✅ 全 2 |
+| 故障切换 | bonding | ✅ #11 |
+| 故障回切 | bonding | ✅ #12 |
+
+## 故障注入
+
+### CQE 错误注入
+
+```bash
+# 录制时设环境变量注入 error CQE
+URMA_SIM_INJECT_STATUS=5 ./test_inject_err 2> out.txt
+# poll_status=9 (ACK_TIMEOUT) ← 错误转换链验证
+
+| URMA_SIM_INJECT_STATUS | cr.status | 语义 |
+|---|---|---|
+| 0 | 0 (SUCCESS) | 正常 |
+| 1 | 1 | UNSUPPORTED_OPCODE |
+| 4 | 10 | RNR_RETRY |
+| 5 | 9 | ACK_TIMEOUT |
+```
+
+### 链路故障注入
+
+```bash
+# 注入链路 down（按 eid 前 8 字节匹配）
+URMA_SIM_LINK_DOWN=010aa8c0ffff0000 ./test_cross_read
+# IPC 请求返错 → error CQE (cr.status=9) → 模拟 bonding 故障切换
+```
+
+## 脚本
+
+| 脚本 | 用途 |
+|---|---|
+| `build_and_test.sh` | 一站式：编译→录制→生成→gtest(sim+no-sim)→check→汇总 |
+| `run_all_tests.sh` | 只跑 out/*.cpp（带 sim） |
+| `run_all_tests_no_sim.sh` | 只跑 out/*.cpp（不带 sim，真机用） |
+| `run_baseline_demo.sh` | 演示门禁流程 |
+
+## gtest 路径
+
+gtest 不在标准位置时：
+```bash
+export GTEST_DIR=/path/to/googletest-x.x.x
+```
+脚本自动检测 `$GTEST_DIR/googletest/include` 和 `$GTEST_DIR/build/lib`。

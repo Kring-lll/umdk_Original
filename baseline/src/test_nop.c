@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-// NOP 模板：post NOP，验产 CQE 但不搬数据（dst 不变）。
+// NOP 模板。
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,7 +11,7 @@
 
 #define SEG_LEN 4096
 
-int main(void)
+void test_nop(void)
 {
     ctx_t *c = NULL;
     char *buf = NULL;
@@ -27,19 +27,21 @@ int main(void)
     if (!tseg) goto cleanup;
     tj = import_self(c);
     if (!tj) goto cleanup;
-
-    /* NOP：不搬数据只产 CQE。local/remote 随便给（NOP 不用 sge） */
     ret = post_rw(c, tj, URMA_OPC_NOP, buf, buf, tseg, SEG_LEN, 0x4E, 0, 0);
     WRITE_VAL("post_ret", ret);
     n = poll_cr(c, &cr);
     WRITE_VAL("poll_n", n);
     WRITE_VAL("poll_status", cr.status);
     WRITE_HEX("poll_user_ctx", cr.user_ctx);
-    WRITE_VAL("buf_first", buf[0]);  /* 期望 'X'=88，NOP 不搬数据 */
-
+    WRITE_VAL("buf_first", buf[0]);
 cleanup:
     if (tj) urma_unimport_jetty(tj);
     free(buf);
     if (c) teardown(c);
+}
+
+int main(void)
+{
+    test_nop();
     return 0;
 }

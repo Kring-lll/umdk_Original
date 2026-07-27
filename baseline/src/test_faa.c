@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-// 单进程 FAA 模板：fetch-and-add。
+// FAA 模板。
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,7 +11,7 @@
 
 #define SEG_LEN 4096
 
-int main(void)
+void test_faa(void)
 {
     ctx_t *c = NULL;
     char *abuf = NULL, *obuf = NULL;
@@ -28,7 +28,6 @@ int main(void)
     obuf = calloc(1, 8);
     tj = import_self(c);
     if (!tj) goto cleanup;
-
     ret = post_faa(c, tj, abuf, tseg, obuf, 5, 8, 0xF1);
     WRITE_VAL("faa_ret", ret);
     n = poll_cr(c, &cr);
@@ -36,10 +35,14 @@ int main(void)
     WRITE_VAL("faa_status", cr.status);
     WRITE_HEX("faa_atomic", *(uint64_t *)abuf);
     WRITE_HEX("faa_orig", *(uint64_t *)obuf);
-
 cleanup:
     if (tj) urma_unimport_jetty(tj);
     free(abuf); free(obuf);
     if (c) teardown(c);
+}
+
+int main(void)
+{
+    test_faa();
     return 0;
 }

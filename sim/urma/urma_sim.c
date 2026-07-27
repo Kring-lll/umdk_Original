@@ -324,7 +324,8 @@ static char *urma_sim_provider_redirect(const char *path)
     }
     const char *basename = last + strlen("/urma/");
     size_t blen = strlen(basename);
-    if (blen < 3 || strcmp(basename + blen - 3, ".so") != 0) {
+    /* 接受 .so / .so.0 / .so.0.0.3 等版本后缀：basename 必须含 ".so" 子串 */
+    if (blen < 3 || strstr(basename, ".so") == NULL) {
         return NULL;
     }
     char *out = malloc(strlen("/usr/lib64/urma/") + blen + 1);

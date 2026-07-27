@@ -44,6 +44,40 @@ static uint8_t g_local_eid[16] = {0};
 static atomic_int g_ipc_started = 0;
 static pthread_t g_ipc_thread;
 
+/* 链路故障注入：按 eid 前 8 字节 hex 设置 down。
+ * 环境变量 URMA_SIM_LINK_DOWN=hex 下指定 eid 的链路 down（IPC 请求返错）。
+ * URMA_SIM_LINK_UP=hex 恢复。 */
+static uint8_t g_link_down_eid[16] = {0};
+static int g_link_down_active = 0;
+
+static void link_fault_init(void)
+{
+    const char *down = getenv("URMA_SIM_LINK_DOWN");
+    if (down != NULL && strlen(down) >= 16) {
+        for (int i = 0; i < 8; i++) {
+            unsigned int v;
+            sscanf(down + i * 2, "%02x", &v);
+            g_link_down_eid[i] = (uint8_t)v;
+        }
+        g_link_down_active = 1;
+        fprintf(stderr, "DBG ipc: link DOWN for eid %02x%02x%02x%02x%02x%02x%02x%02x\n",
+                g_link_down_eid[0],g_link_down_eid[1],g_link_down_eid[2],g_link_down_eid[3],
+                g_link_down_eid[4],g_link_down_eid[5],g_link_down_eid[6],g_link_down_eid[7]);
+    }
+    const char *up = getenv("URMA_SIM_LINK_UP");
+    if (up != NULL && g_link_down_active) {
+        g_link_down_active = 0;
+        fprintf(stderr, "DBG ipc: link UP (fault cleared)\n");
+    }
+}
+
+/* 检查 rmt_eid 是否处于故障 down 状态 */
+static int link_is_down(const uint8_t *rmt_eid)
+{
+    if (!g_link_down_active) return 0;
+    return memcmp(rmt_eid, g_link_down_eid, 8) == 0;
+}
+
 /* 16 字节反转（与 udma_u_swap_endian128 一致）。 */
 static void swap_eid128(const uint8_t *src, uint8_t *dst)
 {
@@ -215,6 +249,7 @@ void urma_sim_ipc_start(const uint8_t *eid)
         /* 存 swap 版，与 WQE 里 rmt_eid（le_eid，反转版）同格式，比较/寻址一致 */
         swap_eid128(eid, g_local_eid);
     }
+    link_fault_init();  /* 初始化链路故障注入（读环境变量）*/
     char path[96];   /* 实际约 40 字节，留余量但 < sun_path(108) 防 -Wformat-truncation */
     eid_to_sockpath(g_local_eid, path, sizeof(path));
     unlink(path);   /* 清理上次残留 */
@@ -275,6 +310,7 @@ static int ipc_connect(const uint8_t *rmt_eid)
 
 int urma_sim_ipc_read(const uint8_t *rmt_eid, uint32_t tid, void *local_buf, uint32_t len)
 {
+    if (link_is_down(rmt_eid)) return -1;
     int fd = ipc_connect(rmt_eid);
     if (fd < 0) return -1;
     uint32_t hdr[4] = {URMA_SIM_IPC_MAGIC, URMA_SIM_IPC_OP_READ, tid, len};
@@ -291,6 +327,7 @@ int urma_sim_ipc_read(const uint8_t *rmt_eid, uint32_t tid, void *local_buf, uin
 
 int urma_sim_ipc_write(const uint8_t *rmt_eid, uint32_t tid, const void *local_buf, uint32_t len)
 {
+    if (link_is_down(rmt_eid)) return -1;
     int fd = ipc_connect(rmt_eid);
     if (fd < 0) return -1;
     uint32_t hdr[4] = {URMA_SIM_IPC_MAGIC, URMA_SIM_IPC_OP_WRITE, tid, len};
@@ -312,6 +349,7 @@ int urma_sim_ipc_send(const uint8_t *rmt_eid, uint32_t jetty_id,
                       uint8_t cqe_opcode, uint64_t imm_data)
 {
     (void)src_jfc_id;   /* 保留接口，当前不用（send CQE 由发起方自己的 process_wqe 造） */
+    if (link_is_down(rmt_eid)) return -1;
     int fd = ipc_connect(rmt_eid);
     if (fd < 0) return -1;
     /* 协议头扩展：magic/op/tid(jetty_id)/len + cqe_opcode(4) + imm_l(4) + imm_h(4) = 7 个 u32 */

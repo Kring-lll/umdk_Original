@@ -823,7 +823,9 @@ static void process_wqe(urma_sim_queue_assoc_t *qa, uint8_t *wqe_buf, uint32_t w
                     if (urma_sim_ipc_read(rmt_eid, tid, dst, local_len) == 0) {
                         done_len = local_len;
                     } else {
-                        fprintf(stderr, "DBG poll: ipc_read fail tid=%u\n", tid);
+                        /* 链路故障或 IPC 失败：造 error CQE 而非 success */
+                        fprintf(stderr, "DBG poll: ipc_read fail tid=%u (link down?)\n", tid);
+                        g_inject_cqe_status = 5;  /* ACK_TIMEOUT 表示链路故障 */
                     }
                 }
             }

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-// 异常注入 RNR_RETRY：URMA_SIM_INJECT_STATUS=4 → cr.status=RNR_RETRY_CNT_EXC_ERR(10)。
-// 正常路径 status=0；注入后 status=10。
+// 注入 RNR_RETRY 模板。
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +11,7 @@
 
 #define SEG_LEN 4096
 
-int main(void)
+void test_inject_rnr(void)
 {
     ctx_t *c = NULL;
     char *src = NULL, *dst = NULL;
@@ -29,17 +28,20 @@ int main(void)
     dst = calloc(1, SEG_LEN); memset(dst, 'Z', SEG_LEN);
     tj = import_self(c);
     if (!tj) goto cleanup;
-
     ret = post_read(c, tj, dst, src, tseg, SEG_LEN, 0xE2);
     WRITE_VAL("post_ret", ret);
     n = poll_cr(c, &cr);
     WRITE_VAL("poll_n", n);
     WRITE_VAL("poll_status", cr.status);
     WRITE_HEX("poll_user_ctx", cr.user_ctx);
-
 cleanup:
     if (tj) urma_unimport_jetty(tj);
     free(dst); free(src);
     if (c) teardown(c);
+}
+
+int main(void)
+{
+    test_inject_rnr();
     return 0;
 }
