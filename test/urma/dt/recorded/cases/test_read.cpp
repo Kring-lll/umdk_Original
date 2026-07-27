@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/* 自动生成：gen_baseline gen_test <src.cpp> <expected.txt> <out.cpp>
- * 由 baseline 生成器从测试源 + 录制基准合成。改源改基准后重生成，勿手编。 */
+/* 自动生成：由 recorded 源样例和 expected 基准合成。改源改基准后重生成，勿手编。 */
 
 #include <gtest/gtest.h>
 #include <cstdio>
@@ -31,13 +30,15 @@ TEST(Generated, RecordedRun)
     tj = import_self(c);
     if (tj == NULL) goto cleanup;
 
-    ret = post_read(c, tj, dst, src, tseg, SEG_LEN, 0xE1);
+    ret = post_read(c, tj, dst, src, tseg, SEG_LEN, 0x42);
     EXPECT_EQ(0, ret);
 
     n = poll_cr(c, &cr);
     EXPECT_EQ(1, n);
     EXPECT_EQ(0, cr.status);
-    EXPECT_EQ(0xe1, cr.user_ctx);
+    EXPECT_EQ(0x42, cr.user_ctx);
+    EXPECT_EQ(0, strncmp("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", dst, strlen("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")));
+    EXPECT_EQ(65, dst[0]);
 
 cleanup:
     if (tj) urma_unimport_jetty(tj);
