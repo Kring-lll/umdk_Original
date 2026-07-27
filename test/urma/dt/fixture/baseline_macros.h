@@ -1,0 +1,48 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+ *
+ * 门禁式回归测试的宏标注。测试代码用这些宏标注"要验什么"，跑时输出固定格式行，
+ * 生成器逐行读测试代码的宏 + 输出，一一对应生成基准/比对。
+ */
+
+#ifndef URMA_BASELINE_MACROS_H
+#define URMA_BASELINE_MACROS_H
+
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+
+#define _BL_LINE(file, kind, name, valstr) \
+    fprintf(stderr, "BASELINE|%s|%d|%s|%s|%s\n", file, __LINE__, kind, name, valstr)
+
+#define WRITE_VAL(name, val) do { \
+    char _buf[32]; \
+    snprintf(_buf, sizeof(_buf), "%d", (int)(long)(val)); \
+    _BL_LINE(__FILE__, "VAL", name, _buf); \
+} while (0)
+
+#define WRITE_HEX(name, val) do { \
+    char _buf[32]; \
+    snprintf(_buf, sizeof(_buf), "0x%lx", (unsigned long)(val)); \
+    _BL_LINE(__FILE__, "HEX", name, _buf); \
+} while (0)
+
+#define ASSERT_NONEMPTY(name, p) do { \
+    char _buf[32]; \
+    snprintf(_buf, sizeof(_buf), "%p", (void *)(uintptr_t)(p)); \
+    _BL_LINE(__FILE__, "NONEMPTY", name, _buf); \
+} while (0)
+
+#define WRITE_STR(name, s) do { \
+    const char *_s = (s); \
+    char _buf[128]; \
+    if (_s != NULL) { \
+        size_t _n = strchr(_s, '\n') ? (size_t)(strchr(_s, '\n') - _s) : strlen(_s); \
+        if (_n >= sizeof(_buf)) _n = sizeof(_buf) - 1; \
+        memcpy(_buf, _s, _n); _buf[_n] = '\0'; \
+    } else { _buf[0] = '\0'; } \
+    _BL_LINE(__FILE__, "STR", name, _buf); \
+} while (0)
+
+#endif /* URMA_BASELINE_MACROS_H */
