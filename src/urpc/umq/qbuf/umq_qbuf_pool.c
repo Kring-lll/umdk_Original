@@ -82,7 +82,7 @@ typedef struct qbuf_pool {
 } qbuf_pool_t;
 
 static qbuf_pool_t g_qbuf_pool = {0};
-static __thread thread_local_qbuf_pool_t g_thread_cache = {0};
+static util_thread_key_t *g_umq_qbuf_pool_key;
 static uint8_t g_umq_qbuf_size_pow_small = UMQ_QBUF_SIZE_POW_4K;
 
 // --- global registry and capacity counters for elastic scaling ---
@@ -116,6 +116,46 @@ static inline uint32_t umq_qbuf_expansion_count(void)
 
 static int normal_qbuf_base_fetch(uint32_t needed, local_block_pool_t *local_pool, bool with_data);
 static void normal_qbuf_base_self_shrink(bool with_data);
+
+static thread_local_qbuf_pool_t *umq_qbuf_pool_tls_cache_get(void)
+{
+    if (!g_qbuf_pool.base.inited) {
+        return NULL;
+    }
+
+    thread_local_qbuf_pool_t *tls_cache = (thread_local_qbuf_pool_t *)util_thread_getspecific(g_umq_qbuf_pool_key);
+    if (tls_cache != NULL) {
+        return tls_cache;
+    }
+
+    tls_cache = (thread_local_qbuf_pool_t *)calloc(1, sizeof(thread_local_qbuf_pool_t));
+    if (tls_cache == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "calloc for qbuf pool tls cache failed\n");
+        return NULL;
+    }
+
+    if (util_thread_setspecific(g_umq_qbuf_pool_key, (const void *)tls_cache) != 0) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "qbuf pool tls cache setspecific failed\n");
+        free(tls_cache);
+        return NULL;
+    }
+
+    tls_cache->block_pool.capacity_with_data = 0;
+    tls_cache->block_pool.capacity_without_data = 0;
+    QBUF_LIST_INIT(&tls_cache->block_pool.head_with_data);
+    tls_cache->block_pool.buf_cnt_with_data = 0;
+    QBUF_LIST_INIT(&tls_cache->block_pool.head_without_data);
+    tls_cache->block_pool.buf_cnt_without_data = 0;
+    tls_cache->stats.tid = (uint64_t)pthread_self();
+    tls_cache->inited = true;
+
+    // register TLS stats to global linked list
+    (void)pthread_spin_lock(&g_qbuf_pool.base.tls_pools.tls_stats_lock);
+    urpc_list_push_back(&g_qbuf_pool.base.tls_pools.tls_register_head, &tls_cache->tls_node);
+    (void)pthread_spin_unlock(&g_qbuf_pool.base.tls_pools.tls_stats_lock);
+
+    return tls_cache;
+}
 
 static void free_expansion_pool_slot(qbuf_expansion_pool_t *exp_pool, qbuf_expansion_pool_slot_t *slot)
 {
@@ -574,17 +614,26 @@ void umq_qbuf_config_get(qbuf_pool_cfg_t *cfg)
 }
 
 // release all thread cache to global pool. should be called when thread exits
-static void release_thread_cache(uint64_t id)
+static void release_thread_cache(void *data)
 {
-    if (!g_qbuf_pool.base.inited || !g_thread_cache.inited) {
+    thread_local_qbuf_pool_t *tls_cache = (thread_local_qbuf_pool_t *)data;
+    if (tls_cache == NULL) {
         return;
     }
 
-    release_thread_cache_impl(&g_thread_cache, &g_qbuf_pool.base.tls_pools, &g_qbuf_pool.base.block_pool);
+    if (!g_qbuf_pool.base.inited) {
+        goto FREE_TLS_CACHE;
+    }
 
-    __atomic_fetch_sub(&g_total_local_cap_with_data, g_thread_cache.block_pool.capacity_with_data, __ATOMIC_ACQ_REL);
-    __atomic_fetch_sub(&g_total_local_cap_without_data, g_thread_cache.block_pool.capacity_without_data,
-        __ATOMIC_ACQ_REL);
+    (void)util_thread_setspecific(g_umq_qbuf_pool_key, NULL);
+
+    release_thread_cache_impl(tls_cache, &g_qbuf_pool.base.tls_pools, &g_qbuf_pool.base.block_pool);
+
+    __atomic_fetch_sub(&g_total_local_cap_with_data, tls_cache->block_pool.capacity_with_data, __ATOMIC_ACQ_REL);
+    __atomic_fetch_sub(&g_total_local_cap_without_data, tls_cache->block_pool.capacity_without_data, __ATOMIC_ACQ_REL);
+
+FREE_TLS_CACHE:
+    free(tls_cache);
 }
 
 static void umq_qbuf_exp_pool_inner_uninit(qbuf_expansion_pool_t *exp_pool, bool with_data)
@@ -769,7 +818,6 @@ int umq_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
     }
 
     g_qbuf_pool.base.tls_pools.type = THREAD_CLOSURE_QBUF;
-    g_qbuf_pool.base.tls_pools.closure = release_thread_cache;
     g_qbuf_pool.base.block_size = umq_buf_size_small();
     g_qbuf_pool.base.data_size = cfg->data_size;
     g_qbuf_pool.base.mempool_id = UMQ_QBUF_DEFAULT_MEMPOOL_ID;
@@ -813,20 +861,30 @@ int umq_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
     }
     g_total_escape_buf_cnt = 0;
 
+    g_umq_qbuf_pool_key = util_thread_key_create(release_thread_cache);
+    if (g_umq_qbuf_pool_key == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "qbuf pool key create failed\n");
+        goto EXPANSION_POOL_UNINIT;
+    }
+
     /* move without data expansion to control plane for reduce the first-packet I/O latency */
     if (!cfg->disable_scale_cap && cfg->mode == UMQ_BUF_SPLIT) {
         ret = expand_global_pool(false);
         if (ret != UMQ_SUCCESS) {
-            goto EXPANSION_POOL_UNINIT;
+            goto UNINIT_KEY;
         }
     }
     return UMQ_SUCCESS;
+
+UNINIT_KEY:
+    (void)util_thread_key_delete(g_umq_qbuf_pool_key);
+    g_umq_qbuf_pool_key = NULL;
 
 EXPANSION_POOL_UNINIT:
     umq_qbuf_expansion_pool_uninit();
 
 BLOCK_POOL_UNINIT:
-    umq_qbuf_base_uninit(&g_qbuf_pool.base, NULL);
+    umq_qbuf_base_uninit(&g_qbuf_pool.base);
 
     return ret;
 }
@@ -837,15 +895,20 @@ void umq_qbuf_pool_uninit(void)
         return;
     }
 
-    // Toto: release thread cache
+    release_thread_cache(umq_qbuf_pool_tls_cache_get());
 
     umq_qbuf_expansion_pool_uninit();
 
-    umq_qbuf_base_uninit(&g_qbuf_pool.base, NULL);
+    umq_qbuf_base_uninit(&g_qbuf_pool.base);
     memset(&g_qbuf_pool, 0, sizeof(qbuf_pool_t));
 
     __atomic_store_n(&g_total_local_cap_with_data, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&g_total_local_cap_without_data, 0, __ATOMIC_RELEASE);
+
+    if (g_umq_qbuf_pool_key != NULL) {
+        (void)util_thread_key_delete(g_umq_qbuf_pool_key);
+        g_umq_qbuf_pool_key = NULL;
+    }
 }
 
 // expand local pool capacity and fetch bufs from global
@@ -871,17 +934,23 @@ static ALWAYS_INLINE int umq_qbuf_local_pool_fetch_and_expand(
     uint64_t *stats_fetch_buf_cnt;
     uint64_t *local_buf_cnt;
     umq_buf_list_t *local_head;
+    thread_local_qbuf_pool_t *tls_cache = umq_qbuf_pool_tls_cache_get();
+    if (tls_cache == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "qbuf local pool fetch failed, tls cache not exist\n");
+        return -UMQ_ERR_ENOMEM;
+    }
+
     if (with_data) {
         cap = &local_pool->capacity_with_data;
         g_total = &g_total_local_cap_with_data;
-        stats_fetch_buf_cnt = &g_thread_cache.stats.tls_fetch_buf_cnt_with_data;
+        stats_fetch_buf_cnt = &tls_cache->stats.tls_fetch_buf_cnt_with_data;
 
         local_buf_cnt = &local_pool->buf_cnt_with_data;
         local_head = &local_pool->head_with_data;
     } else {
         cap = &local_pool->capacity_without_data;
         g_total = &g_total_local_cap_without_data;
-        stats_fetch_buf_cnt = &g_thread_cache.stats.tls_fetch_buf_cnt_without_data;
+        stats_fetch_buf_cnt = &tls_cache->stats.tls_fetch_buf_cnt_without_data;
 
         local_buf_cnt = &local_pool->buf_cnt_without_data;
         local_head = &local_pool->head_without_data;
@@ -931,7 +1000,8 @@ ROLLBACK:
 
 static ALWAYS_INLINE void thread_cache_self_shrink(bool with_data)
 {
-    if (g_qbuf_pool.base.block_pool.disable_scale_cap) {
+    thread_local_qbuf_pool_t *tls_cache = umq_qbuf_pool_tls_cache_get();
+    if (g_qbuf_pool.base.block_pool.disable_scale_cap || tls_cache == NULL) {
         return;
     }
     volatile uint64_t *g_total;
@@ -940,7 +1010,7 @@ static ALWAYS_INLINE void thread_cache_self_shrink(bool with_data)
     } else {
         g_total = &g_total_local_cap_without_data;
     }
-    qbuf_tls_capacity_self_shrink(&g_qbuf_pool.base.block_pool, &g_thread_cache, with_data, g_total,
+    qbuf_tls_capacity_self_shrink(&g_qbuf_pool.base.block_pool, tls_cache, with_data, g_total,
         umq_qbuf_pool_shrink_threshold());
 }
 
@@ -1133,7 +1203,12 @@ int umq_normal_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_
         .num = num,
         .list = list,
     };
-    int ret = umq_qbuf_base_alloc(&g_qbuf_pool.base, &g_thread_cache, option, &param);
+    thread_local_qbuf_pool_t *tls_cache = umq_qbuf_pool_tls_cache_get();
+    if (tls_cache == NULL) {
+        return -UMQ_ERR_ENOMEM;
+    }
+
+    int ret = umq_qbuf_base_alloc(&g_qbuf_pool.base, tls_cache, option, &param);
     if (ret == UMQ_SUCCESS) {
         return UMQ_SUCCESS;
     }
@@ -1151,7 +1226,8 @@ int umq_normal_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_
 
 void umq_qbuf_free(umq_buf_list_t *list)
 {
-    if (!g_qbuf_pool.base.inited) {
+    thread_local_qbuf_pool_t *tls_cache = umq_qbuf_pool_tls_cache_get();
+    if (!g_qbuf_pool.base.inited || tls_cache == NULL) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "qbuf pool has not been inited\n");
         return;
     }
@@ -1162,7 +1238,7 @@ void umq_qbuf_free(umq_buf_list_t *list)
         return;
     }
 
-    umq_qbuf_base_free(&g_qbuf_pool.base, &g_thread_cache, list, false);
+    umq_qbuf_base_free(&g_qbuf_pool.base, tls_cache, list, false);
 }
 
 int umq_qbuf_headroom_reset(umq_buf_t *qbuf, uint16_t headroom_size)

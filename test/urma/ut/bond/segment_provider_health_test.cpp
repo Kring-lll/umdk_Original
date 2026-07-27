@@ -9,44 +9,22 @@
 using namespace urma_test_bond;
 
 namespace {
-struct MockFailbackTaskPayload {
-    uint32_t requestId;
-    uint32_t peerNodeId;
-    urma_eid_t srcEid;
-    uint32_t vjettyId;
-    uint32_t pjettyIdx;
-    uint32_t newPjettyId;
-};
-
-struct MockFailbackResultPayload {
-    uint32_t requestId;
-    uint32_t peerNodeId;
-    urma_eid_t srcEid;
-    uint32_t vjettyId;
-    uint32_t pjettyIdx;
-    uint32_t newPjettyId;
-    int32_t result;
-};
-
-static size_t FillSingleConnectedRjettyExt(urma_rjetty_t *remote, uint32_t localIdx, uint32_t targetIdx,
-                                           const urma_jetty_id_t &slaveId)
+static size_t FillSingleRjettyExt(urma_rjetty_t *remote, uint32_t localIdx, uint32_t targetIdx,
+                                  const urma_jetty_id_t &slaveId)
 {
     auto *extHdr = bondp_rjetty_get_priv_ext(remote);
     auto *ext = reinterpret_cast<urma_bond_jetty_ext_v0_t *>(extHdr->data);
     auto *localIndices = reinterpret_cast<uint8_t *>(ext->data);
     auto *targetEntry = reinterpret_cast<bondp_rjetty_target_ctx_t *>(ext->data + 1);
-    uint32_t bitIdx = localIdx * URMA_UBAGG_DEV_MAX_NUM + targetIdx;
 
     std::memset(ext, 0, sizeof(*ext) + 1 + sizeof(*targetEntry));
     ext->version = BONDP_RJETTY_EXT_VERSION_V0;
-    ext->mask = BONDP_RJETTY_EXT_MASK_LOCAL_CTX | BONDP_RJETTY_EXT_MASK_TARGET_CTX |
-                BONDP_RJETTY_EXT_MASK_CONNECTED_BITMAP;
+    ext->mask = BONDP_RJETTY_EXT_MASK_LOCAL_CTX | BONDP_RJETTY_EXT_MASK_TARGET_CTX;
     ext->local_ctx_cnt = 1;
     ext->target_ctx_cnt = 1;
     localIndices[0] = static_cast<uint8_t>(localIdx);
     targetEntry->target_idx = static_cast<uint8_t>(targetIdx);
     targetEntry->slave_id = slaveId;
-    ext->connected_bitmap[bitIdx >> 3U] |= static_cast<uint8_t>(1U << (bitIdx & 0x7U));
 
     remote->flag.bs.has_user_info = 1;
     extHdr->len = static_cast<uint32_t>(sizeof(*ext) + 1 + sizeof(*targetEntry));
@@ -202,7 +180,9 @@ TEST(UrmaBondTest, PublicSegmentApisReleaseLastReferencesThroughStableFailures)
 
 TEST(UrmaBondTest, PublicImportSegmentUsesPhysicalProviderMocks)
 {
+    BondTopoMapCleanup topoCleanup;
     BondPublicApiFixture fixture;
+    bondp_topo_node_t topo[2] = {};
     urma_token_t token = {};
     urma_import_seg_flag_t flag = {};
     urma_target_seg_t *target = nullptr;
@@ -227,7 +207,14 @@ TEST(UrmaBondTest, PublicImportSegmentUsesPhysicalProviderMocks)
     ext->peer_p_seg[0].ubva.va = 0x200000;
     ext->peer_p_seg[0].len = 4096;
     ext->peer_p_seg[0].token_id = 0x72;
-    ext->connected[0][0] = true;
+
+    topo[0].is_current = true;
+    CopyEidToTopo(topo[0].agg_devs[0].agg_eid, MakeEid(0x800));
+    CopyEidToTopo(topo[0].agg_devs[0].ues[0].primary_eid, MakeEid(0x803));
+    CopyEidToTopo(topo[0].agg_devs[0].ues[0].port_eid[0], MakeEid(0x804));
+    CopyEidToTopo(topo[1].agg_devs[0].agg_eid, remote->ubva.eid);
+    topo[1].links[0][0] = true;
+    ASSERT_EQ(0, bondp_topo_init(topo, 2));
 
     target = bondp_import_seg(&fixture.ctx.v_ctx, remote, &token, 0x300000, flag);
     ASSERT_NE(nullptr, target);
@@ -251,7 +238,7 @@ TEST(UrmaBondTest, PublicImportJettyUsesExtAndPhysicalProviderMocks)
 {
     BondTopoMapCleanup topoCleanup;
     BondPublicApiFixture fixture;
-    bondp_global_context_t fakeGlobal = {};
+    bondp_env_t fakeEnv = {};
     bondp_topo_node_t topo[2] = {};
     urma_token_t token = {};
     urma_target_jetty_t *target = nullptr;
@@ -270,14 +257,14 @@ TEST(UrmaBondTest, PublicImportJettyUsesExtAndPhysicalProviderMocks)
     CopyEidToTopo(topo[1].agg_devs[0].agg_eid, MakeEid(0x811));
     topo[1].links[0][0] = true;
     ASSERT_EQ(0, bondp_topo_init(topo, 2));
-    g_bondp_global_ctx = &fakeGlobal;
-    fakeGlobal.enable_health_check = false;
+    fakeEnv.enable_health_check = false;
+    g_bondp_env = fakeEnv;
 
     remote->jetty_id = MakeJettyId(0x811);
     remote->jetty_id.eid = MakeEid(0x811);
     remote->trans_mode = URMA_TM_RC;
     remote->type = URMA_JETTY;
-    size_t extLength = FillSingleConnectedRjettyExt(remote, 0, 0, MakeJettyId(0x812));
+    size_t extLength = FillSingleRjettyExt(remote, 0, 0, MakeJettyId(0x812));
 
     target = bondp_import_jetty(&fixture.ctx.v_ctx, remote, &token);
     EXPECT_EQ(1, urma_test::GetHwMockState().importJettyCount);
@@ -299,14 +286,14 @@ TEST(UrmaBondTest, PublicImportJettyUsesExtAndPhysicalProviderMocks)
     urma_test::SetHwMockStatus(URMA_FAIL);
     EXPECT_EQ(nullptr, bondp_import_jetty(&fixture.ctx.v_ctx, remote, &token));
 
-    g_bondp_global_ctx = nullptr;
+    g_bondp_env = {};
     std::free(bondRemote);
 }
 
 TEST(UrmaBondTest, PublicImportJettyUsesMockIoctlAndPhysicalProvider)
 {
     BondPublicApiFixture fixture;
-    bondp_global_context_t fakeGlobal = {};
+    bondp_env_t fakeEnv = {};
     urma_rjetty_t rjetty = {};
     urma_token_t token = {};
     urma_target_jetty_t *target = nullptr;
@@ -315,8 +302,8 @@ TEST(UrmaBondTest, PublicImportJettyUsesMockIoctlAndPhysicalProvider)
     fixture.ctx.v_ctx.dev_fd = 7;
     fixture.ctx.enabled_count = 1;
     fixture.ctx.enabled_indices[0] = 0;
-    g_bondp_global_ctx = &fakeGlobal;
-    fakeGlobal.enable_health_check = false;
+    fakeEnv.enable_health_check = false;
+    g_bondp_env = fakeEnv;
     urma_test::SetHwMockIoctl(true, 0xa30, 0xa300);
     rjetty.jetty_id = MakeJettyId(0xa31);
     rjetty.trans_mode = URMA_TM_RC;
@@ -328,7 +315,7 @@ TEST(UrmaBondTest, PublicImportJettyUsesMockIoctlAndPhysicalProvider)
     EXPECT_EQ(URMA_JETTY, target->type);
     EXPECT_EQ(URMA_SUCCESS, bondp_unimport_jetty(target));
 
-    g_bondp_global_ctx = nullptr;
+    g_bondp_env = {};
 }
 
 TEST(UrmaBondTest, PublicImportJfrUsesMockIoctlAndPhysicalProvider)
@@ -359,13 +346,11 @@ TEST(UrmaBondTest, PublicImportJfrUsesMockIoctlAndPhysicalProvider)
     EXPECT_EQ(nullptr, bondp_import_jfr(&fixture.ctx.v_ctx, &rjfr, &token));
 }
 
-TEST(UrmaBondTest, PublicProviderOpsRejectInvalidOrUninitializedState)
+TEST(UrmaBondTest, PublicProviderOpsRejectInvalidState)
 {
     BondPublicApiFixture fixture;
-    bondp_global_context_t fakeGlobal = {};
     urma_device_t dev = {};
 
-    g_bondp_global_ctx = nullptr;
     std::snprintf(dev.name, sizeof(dev.name), "bond_ut");
     fixture.ctx.v_ctx.dev = &dev;
     fixture.ctx.v_ctx.ref.atomic_cnt.store(0);
@@ -410,20 +395,16 @@ TEST(UrmaBondTest, PublicProviderOpsRejectInvalidOrUninitializedState)
     EXPECT_EQ(nullptr, fixture.ctx.p_ctxs[0]);
     g_mockDeleteContextFail = false;
 
-    g_bondp_global_ctx = &fakeGlobal;
-    EXPECT_EQ(URMA_FAIL, bondp_init(nullptr));
-    EXPECT_EQ(nullptr, bondp_create_context(&dev, 0, -1));
-    g_bondp_global_ctx = nullptr;
 }
 
 TEST(UrmaBondTest, PublicProviderCreateContextUsesCachedTopoAndMockPhysicalContext)
 {
     BondPublicApiFixture fixture;
-    bondp_global_context_t fakeGlobal = {};
+    bondp_env_t fakeEnv = {};
     urma_context_t *createdCtx = nullptr;
 
     fixture.ctx.v_ctx.dev_fd = 7;
-    BondProviderMockGuard mockGuard(&fakeGlobal, &fixture.phyDev, &fixture.phyOps);
+    BondProviderMockGuard mockGuard(&fakeEnv, &fixture.phyDev, &fixture.phyOps);
     BondTopoMapCleanup topoCleanup;
     bondp_topo_node_t topo = {};
     topo.is_current = true;
@@ -434,17 +415,16 @@ TEST(UrmaBondTest, PublicProviderCreateContextUsesCachedTopoAndMockPhysicalConte
     ASSERT_NE(nullptr, createdCtx);
     EXPECT_GT(urma_test::GetHwMockState().ioctlCount, 0);
     EXPECT_EQ(1, g_mockCreateContextCount);
-    EXPECT_FALSE(fakeGlobal.skip_load_topo);
     EXPECT_EQ(URMA_SUCCESS, bondp_delete_context(createdCtx));
 }
 
 TEST(UrmaBondTest, PublicProviderCreateContextLoadsTopoFromMockUserCtl)
 {
     BondPublicApiFixture fixture;
-    bondp_global_context_t fakeGlobal = {};
+    bondp_env_t fakeEnv = {};
     urma_context_t *createdCtx = nullptr;
 
-    BondProviderMockGuard mockGuard(&fakeGlobal, &fixture.phyDev, &fixture.phyOps);
+    BondProviderMockGuard mockGuard(&fakeEnv, &fixture.phyDev, &fixture.phyOps);
     BondTopoMapCleanup topoCleanup;
     urma_test::SetHwMockIoctl(true, 0xd20, 0xd200);
 
@@ -452,15 +432,14 @@ TEST(UrmaBondTest, PublicProviderCreateContextLoadsTopoFromMockUserCtl)
     ASSERT_NE(nullptr, createdCtx);
     EXPECT_TRUE(bondp_topo_is_initialized());
     EXPECT_EQ(1U, bondp_topo_get_node_num());
-    EXPECT_FALSE(fakeGlobal.skip_load_topo);
     EXPECT_EQ(URMA_SUCCESS, bondp_delete_context(createdCtx));
 }
 
 TEST(UrmaBondTest, PublicProviderCreateContextCleansVirtualContextOnStableFailures)
 {
     BondPublicApiFixture fixture;
-    bondp_global_context_t fakeGlobal = {};
-    BondProviderMockGuard mockGuard(&fakeGlobal, &fixture.phyDev, &fixture.phyOps);
+    bondp_env_t fakeEnv = {};
+    BondProviderMockGuard mockGuard(&fakeEnv, &fixture.phyDev, &fixture.phyOps);
     BondTopoMapCleanup topoCleanup;
 
     urma_test::SetHwMockIoctl(true, 0xd30, 0xd300);
@@ -471,16 +450,14 @@ TEST(UrmaBondTest, PublicProviderCreateContextCleansVirtualContextOnStableFailur
     urma_test::SetHwMockIoctl(true, 0xd31, 0xd310);
     g_mockUserCtlFail = true;
     EXPECT_EQ(nullptr, bondp_create_context(&fixture.dev, 0, 7));
-    EXPECT_TRUE(fakeGlobal.skip_load_topo);
     g_mockUserCtlFail = false;
-    fakeGlobal.skip_load_topo = false;
 }
 
 TEST(UrmaBondTest, PublicProviderCreateContextPropagatesPhysicalContextFailures)
 {
     BondPublicApiFixture fixture;
-    bondp_global_context_t fakeGlobal = {};
-    BondProviderMockGuard mockGuard(&fakeGlobal, &fixture.phyDev, &fixture.phyOps);
+    bondp_env_t fakeEnv = {};
+    BondProviderMockGuard mockGuard(&fakeEnv, &fixture.phyDev, &fixture.phyOps);
     BondTopoMapCleanup topoCleanup;
 
     urma_test::SetHwMockIoctl(true, 0xd40, 0xd400);
@@ -501,10 +478,10 @@ TEST(UrmaBondTest, PublicProviderCreateContextPropagatesPhysicalContextFailures)
 TEST(UrmaBondTest, PublicProviderDeleteContextPropagatesPhysicalDeleteFailure)
 {
     BondPublicApiFixture fixture;
-    bondp_global_context_t fakeGlobal = {};
+    bondp_env_t fakeEnv = {};
     urma_context_t *createdCtx = nullptr;
 
-    BondProviderMockGuard mockGuard(&fakeGlobal, &fixture.phyDev, &fixture.phyOps);
+    BondProviderMockGuard mockGuard(&fakeEnv, &fixture.phyDev, &fixture.phyOps);
     BondTopoMapCleanup topoCleanup;
     bondp_topo_node_t topo = {};
     topo.is_current = true;
@@ -521,7 +498,7 @@ TEST(UrmaBondTest, PublicProviderDeleteContextPropagatesVirtualDeleteFailure)
 {
     auto *ctx = static_cast<bondp_context_t *>(std::calloc(1, sizeof(bondp_context_t)));
     ASSERT_NE(nullptr, ctx);
-    bondp_global_context_t fakeGlobal = {};
+    bondp_env_t fakeEnv = {};
     urma_device_t dev = {};
 
     std::snprintf(dev.name, sizeof(dev.name), "bond_delete_ut");
@@ -532,48 +509,35 @@ TEST(UrmaBondTest, PublicProviderDeleteContextPropagatesVirtualDeleteFailure)
     ASSERT_EQ(0, bdp_p_vjetty_id_table_create(&ctx->p_vjetty_id_table, 4));
     ASSERT_EQ(0, bdp_r_v2p_token_id_table_create(&ctx->remote_v2p_token_id_table, 4));
 
-    g_bondp_global_ctx = &fakeGlobal;
-    fakeGlobal.enable_health_check = false;
+    fakeEnv.enable_health_check = false;
+    g_bondp_env = fakeEnv;
     EXPECT_EQ(URMA_FAIL, bondp_delete_context(&ctx->v_ctx));
-    g_bondp_global_ctx = nullptr;
+    g_bondp_env = {};
 }
 
-TEST(UrmaBondTest, PublicProviderUninitReleasesHeapGlobalContext)
+TEST(UrmaBondTest, PublicProviderUninitIsIdempotentAndRetainsStaticEnvironment)
 {
-    auto *global = static_cast<bondp_global_context_t *>(std::calloc(1, sizeof(bondp_global_context_t)));
-    ASSERT_NE(nullptr, global);
-
-    /*
-     * bondp_uninit owns and frees the global context. Keep this fixture heap-backed
-     * and health-check disabled so the test covers cleanup without starting threads.
-     */
-    global->enable_health_check = false;
-    g_bondp_global_ctx = global;
+    g_bondp_env.enable_failover = true;
 
     EXPECT_EQ(URMA_SUCCESS, bondp_uninit());
-    EXPECT_EQ(nullptr, g_bondp_global_ctx);
+    EXPECT_EQ(URMA_SUCCESS, bondp_uninit());
+    EXPECT_TRUE(g_bondp_env.enable_failover);
 }
 
-TEST(UrmaBondTest, PublicProviderInitReadsEnvAndCleansUp)
+TEST(UrmaBondTest, PublicProviderInitUsesDefaultEnvValuesAndCleansUp)
 {
-    EnvGuard failover("BOND_ENABLE_FAILOVER", "false");
-    EnvGuard failback("BOND_ENABLE_FAILBACK", "bad-bool");
-    EnvGuard backupStart("BOND_HEALTH_CHECK_BACKUP_START", "99");
-    EnvGuard backupInterval("BOND_HEALTH_CHECK_BACKUP_INTERVAL", "3600001");
-    EnvGuard activeStart("BOND_HEALTH_CHECK_ACTIVE_START", "200");
-    EnvGuard activeInterval("BOND_HEALTH_CHECK_ACTIVE_INTERVAL", "bad-int");
-    EnvGuard activeBackoff("BOND_HEALTH_CHECK_ACTIVE_MAX_BACKOFF", "0");
+    EnvGuard failover("BOND_ENABLE_FAILOVER", nullptr);
+    EnvGuard failback("BOND_ENABLE_FAILBACK", nullptr);
+    EnvGuard healthCheck("BOND_ENABLE_HEALTH_CHECK", nullptr);
+    EnvGuard healthInterval("BOND_HEALTH_CHECK_ACTIVE_INTERVAL", "bad-int");
 
-    g_bondp_global_ctx = nullptr;
-    g_mockNetlink = true;
-    g_mockNetlinkConnectFail = true;
     EXPECT_EQ(URMA_SUCCESS, bondp_init(nullptr));
-    EXPECT_NE(nullptr, g_bondp_global_ctx);
+    EXPECT_TRUE(g_bondp_env.enable_failover);
+    EXPECT_TRUE(g_bondp_env.enable_failback);
+    EXPECT_TRUE(g_bondp_env.enable_health_check);
+    EXPECT_EQ(BONDP_HC_DEFAULT_PROBE_INTERVAL_MS,
+              g_bondp_env.health_check_interval_ms);
     EXPECT_EQ(URMA_SUCCESS, bondp_uninit());
-    EXPECT_EQ(nullptr, g_bondp_global_ctx);
-    bondp_nl_sock_uninit();
-    g_mockNetlinkConnectFail = false;
-    g_mockNetlink = false;
 }
 
 TEST(UrmaBondTest, PublicProviderInitAcceptsValidEnvValues)
@@ -581,99 +545,14 @@ TEST(UrmaBondTest, PublicProviderInitAcceptsValidEnvValues)
     EnvGuard failover("BOND_ENABLE_FAILOVER", "true");
     EnvGuard failback("BOND_ENABLE_FAILBACK", "false");
     EnvGuard healthCheck("BOND_ENABLE_HEALTH_CHECK", "true");
-    EnvGuard backupStart("BOND_HEALTH_CHECK_BACKUP_START", "100");
-    EnvGuard backupInterval("BOND_HEALTH_CHECK_BACKUP_INTERVAL", "1000");
-    EnvGuard activeStart("BOND_HEALTH_CHECK_ACTIVE_START", "100");
-    EnvGuard activeInterval("BOND_HEALTH_CHECK_ACTIVE_INTERVAL", "60000");
-    EnvGuard activeBackoff("BOND_HEALTH_CHECK_ACTIVE_MAX_BACKOFF", "100");
+    EnvGuard healthInterval("BOND_HEALTH_CHECK_ACTIVE_INTERVAL", "60000");
 
-    g_bondp_global_ctx = nullptr;
-    g_mockNetlink = true;
-    g_mockNetlinkConnectFail = true;
     EXPECT_EQ(URMA_SUCCESS, bondp_init(nullptr));
-    EXPECT_NE(nullptr, g_bondp_global_ctx);
-    EXPECT_TRUE(g_bondp_global_ctx->enable_health_check);
+    EXPECT_TRUE(g_bondp_env.enable_failover);
+    EXPECT_FALSE(g_bondp_env.enable_failback);
+    EXPECT_TRUE(g_bondp_env.enable_health_check);
+    EXPECT_EQ(60000U, g_bondp_env.health_check_interval_ms);
     EXPECT_EQ(URMA_SUCCESS, bondp_uninit());
-    EXPECT_EQ(nullptr, g_bondp_global_ctx);
-    bondp_nl_sock_uninit();
-    g_mockNetlinkConnectFail = false;
-    g_mockNetlink = false;
-}
-
-TEST(UrmaBondTest, NetlinkInitUsesMockSocketAndCoversFailureBranches)
-{
-    g_mockNetlink = true;
-    g_mockNetlinkAllocFail = true;
-    EXPECT_EQ(-ENOMEM, bondp_nl_sock_init());
-
-    g_mockNetlinkAllocFail = false;
-    g_mockNetlinkConnectFail = true;
-    EXPECT_EQ(-EIO, bondp_nl_sock_init());
-
-    g_mockNetlinkConnectFail = false;
-    g_mockNetlinkResolveFail = true;
-    EXPECT_EQ(-ENOENT, bondp_nl_sock_init());
-
-    g_mockNetlinkResolveFail = false;
-    EXPECT_EQ(0, bondp_nl_sock_init());
-    EXPECT_EQ(0, bondp_nl_sock_init());
-    bondp_nl_sock_uninit();
-    bondp_nl_sock_uninit();
-    g_mockNetlink = false;
-}
-
-TEST(UrmaBondTest, NetlinkWorkerAndCallbackDispatchUseMockSocket)
-{
-    int evtFd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
-    ASSERT_GE(evtFd, 0);
-
-    MockFailbackTaskPayload task = {};
-    MockFailbackResultPayload result = {};
-    task.requestId = 1;
-    task.srcEid = MakeEid(0x910);
-    task.vjettyId = 0x911;
-    task.pjettyIdx = 0;
-    task.newPjettyId = 0x912;
-    result.requestId = task.requestId;
-    result.srcEid = task.srcEid;
-    result.vjettyId = task.vjettyId;
-    result.pjettyIdx = task.pjettyIdx;
-    result.newPjettyId = task.newPjettyId;
-    result.result = 0;
-
-    g_mockNetlink = true;
-    EXPECT_EQ(-ENODEV, bondp_nl_worker_init());
-    g_mockNetlinkFd = -1;
-    EXPECT_EQ(0, bondp_nl_sock_init());
-    EXPECT_EQ(-EINVAL, bondp_nl_worker_init());
-
-    g_mockNetlinkFd = evtFd;
-    g_mockNetlinkRecvReturn = -NLE_AGAIN;
-    ASSERT_EQ(0, bondp_worker_create());
-    EXPECT_EQ(0, bondp_nl_worker_init());
-    EXPECT_EQ(0, bondp_nl_worker_init());
-    ASSERT_EQ(0, eventfd_write(evtFd, 1));
-    for (int i = 0; i < 50 && g_mockNetlinkRecvCount == 0; i++) {
-        usleep(1000);
-    }
-    EXPECT_GT(g_mockNetlinkRecvCount, 0);
-    bondp_nl_worker_uninit();
-    bondp_nl_worker_uninit();
-    bondp_worker_destroy();
-
-    EXPECT_EQ(NL_OK, InvokeMockNetlinkMsg(BONDP_NL_CMD_FAILBACK_NOTIFY, &task, sizeof(task)));
-    EXPECT_EQ(NL_OK, InvokeMockNetlinkMsg(BONDP_NL_CMD_FAILBACK_NOTIFY, &task, sizeof(task) - 1));
-    EXPECT_EQ(NL_OK, InvokeMockNetlinkMsg(BONDP_NL_CMD_FAILBACK_DONE, &result, sizeof(result)));
-    EXPECT_EQ(NL_OK, InvokeMockNetlinkMsg(BONDP_NL_CMD_FAILBACK_DONE, nullptr, 0));
-    EXPECT_EQ(NL_OK, InvokeMockNetlinkMsg(static_cast<bondp_nl_cmd_t>(0xff), nullptr, 0));
-
-    bondp_nl_sock_uninit();
-    g_mockNetlink = false;
-    g_mockNetlinkFd = -1;
-    g_mockNetlinkRecvReturn = 0;
-    g_mockNetlinkRecvCount = 0;
-    ResetMockNetlinkCallback();
-    EXPECT_EQ(0, close(evtFd));
 }
 
 TEST(UrmaBondTest, FailbackTaskTableCoversScheduleFailureDuplicateAndLookup)
@@ -697,18 +576,14 @@ TEST(UrmaBondTest, FailbackTaskTableCoversScheduleFailureDuplicateAndLookup)
     bondp_fb_uninit(&fixture.ctx);
 }
 
-TEST(UrmaBondTest, PublicProviderInitSucceedsWithMockNetlinkAndDisabledHealth)
+TEST(UrmaBondTest, PublicProviderInitSucceedsWithDisabledHealth)
 {
     EnvGuard failover("BOND_ENABLE_FAILOVER", "false");
+    EnvGuard healthCheck("BOND_ENABLE_HEALTH_CHECK", "false");
 
-    g_mockNetlink = true;
-    g_bondp_global_ctx = nullptr;
     EXPECT_EQ(URMA_SUCCESS, bondp_init(nullptr));
-    EXPECT_NE(nullptr, g_bondp_global_ctx);
     EXPECT_EQ(URMA_FAIL, bondp_init(nullptr));
     EXPECT_EQ(URMA_SUCCESS, bondp_uninit());
-    EXPECT_EQ(nullptr, g_bondp_global_ctx);
-    g_mockNetlink = false;
 }
 
 TEST(UrmaBondTest, HealthV2PublicApisHonorDisabledAndInvalidContracts)

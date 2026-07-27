@@ -12,10 +12,8 @@
 
 int qbuf_pool_base_init(qbuf_pool_base_t *base, const qbuf_pool_cfg_t *cfg, uint32_t split_extra_header_count)
 {
-    if (base == NULL || cfg == NULL) {
-        return -UMQ_ERR_EINVAL;
-    }
-    if (cfg->buf_addr == NULL || cfg->total_size == 0 || base->block_size <= sizeof(umq_buf_t)) {
+    if (base == NULL || base->block_size <= sizeof(umq_buf_t) || cfg == NULL || cfg->buf_addr == NULL ||
+        cfg->total_size == 0) {
         return -UMQ_ERR_EINVAL;
     }
 
@@ -77,15 +75,12 @@ void *umq_qbuf_base_io_buf_malloc(uint64_t total_len, uint64_t min_size)
     return buffer_addr;
 }
 
-void umq_qbuf_base_uninit(qbuf_pool_base_t *base, void (*release_thread_cache)(uint64_t))
+void umq_qbuf_base_uninit(qbuf_pool_base_t *base)
 {
     if (base == NULL || !base->inited) {
         return;
     }
 
-    if (release_thread_cache != NULL) {
-        release_thread_cache(0);
-    }
     (void)pthread_spin_destroy(&base->tls_pools.tls_stats_lock);
     umq_qbuf_block_pool_uninit(&base->block_pool);
     (void)memset(base, 0, sizeof(*base));
@@ -176,7 +171,7 @@ int umq_qbuf_base_alloc(qbuf_pool_base_t *base, thread_local_qbuf_pool_t *thread
         param->actual_buf_count = num;
     }
 
-    local_block_pool_t *local_pool = get_thread_local_cache(thread_cache, &base->tls_pools);
+    local_block_pool_t *local_pool = &thread_cache->block_pool;
     if (param->request_size == 0) {
         return umq_qbuf_base_alloc_without_data(base, thread_cache, local_pool, param);
     }
@@ -191,7 +186,7 @@ void umq_qbuf_base_free(qbuf_pool_base_t *base, thread_local_qbuf_pool_t *thread
         return;
     }
 
-    local_block_pool_t *local_pool = get_thread_local_cache(thread_cache, &base->tls_pools);
+    local_block_pool_t *local_pool = &thread_cache->block_pool;
     umq_buf_list_t *local_head = NULL;
     uint64_t *local_buf_cnt = NULL;
     uint64_t *free_cnt = NULL;

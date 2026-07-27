@@ -8,12 +8,13 @@
  * History: 2026-04-02   Create File
  */
 
+#include <stdlib.h>
 #include <string.h>
 
-#include "bondp_api.h"
-#include "bondp_segment.h"
-#include "bondp_types.h"
+#include "ub_util.h"
+
 #include "bondp_topo_info.h"
+#include "bondp_types.h"
 #include "urma_log.h"
 
 #include "bondp_datapath_convert.h"
@@ -63,7 +64,7 @@ static int copy_sg_list(const urma_sg_t *src, urma_sg_t *dst, urma_sge_t *preall
         if (prealloc_sge != NULL) {
             if (dst->num_sge > max_sge) {
                 URMA_LOG_ERR("The number of SGE(%u) exceeds the limit(%u)",
-                    dst->num_sge, max_sge);
+                             dst->num_sge, max_sge);
                 return -1;
             }
             dst->sge = prealloc_sge;
@@ -110,14 +111,14 @@ static int copy_atomic_sge(const urma_sge_t *src, urma_sge_t **dst, urma_sge_t *
  */
 urma_status_t copy_jfs_wr(const urma_jfs_wr_t *src, urma_jfs_wr_t *dst,
                           urma_sge_t *prealloc_src_sge, urma_sge_t *prealloc_dst_sge,
-                          uint32_t max_sge)
+                          uint32_t max_sge, uint32_t max_rsge)
 {
     *dst = *src;
     dst->next = NULL;
 
     if (is_rw_wr(src)) {
         if (copy_sg_list(&src->rw.src, &dst->rw.src, prealloc_src_sge, max_sge) != 0 ||
-            copy_sg_list(&src->rw.dst, &dst->rw.dst, prealloc_dst_sge, max_sge) != 0) {
+            copy_sg_list(&src->rw.dst, &dst->rw.dst, prealloc_dst_sge, max_rsge) != 0) {
             return URMA_ENOMEM;
         }
     } else if (is_send_wr(src)) {
@@ -308,11 +309,13 @@ urma_status_t check_jfs_wr_path(urma_jfs_wr_t *wr, int send_idx, int target_idx)
         case URMA_OPC_READ:
             return (check_write_wr_path(wr, send_idx, target_idx) == 0) ? URMA_SUCCESS : URMA_EINVAL;
         case URMA_OPC_CAS:
-            return (check_atomic_wr_path(wr->cas.src, wr->cas.dst, send_idx, target_idx) == 0) ?
-                URMA_SUCCESS : URMA_EINVAL;
+            return (check_atomic_wr_path(wr->cas.src, wr->cas.dst, send_idx, target_idx) == 0)
+                       ? URMA_SUCCESS
+                       : URMA_EINVAL;
         case URMA_OPC_FADD:
-            return (check_atomic_wr_path(wr->faa.src, wr->faa.dst, send_idx, target_idx) == 0) ?
-                URMA_SUCCESS : URMA_EINVAL;
+            return (check_atomic_wr_path(wr->faa.src, wr->faa.dst, send_idx, target_idx) == 0)
+                       ? URMA_SUCCESS
+                       : URMA_EINVAL;
         default:
             return URMA_SUCCESS;
     }
@@ -485,88 +488,6 @@ void convert_jfs_pwr_to_vwr(urma_jfs_wr_t *wr, urma_target_jetty_t *vtjetty)
             return;
         case URMA_OPC_FADD:
             restore_faa_pwr_to_vwr(wr, vtjetty);
-            return;
-        default:
-            return;
-    }
-}
-
-void get_jfs_vwr_refs(urma_jfs_wr_t *wr)
-{
-    if (wr->tjetty != NULL) {
-        bondp_tjetty_get(wr->tjetty);
-    }
-
-    switch (wr->opcode) {
-        case URMA_OPC_SEND:
-        case URMA_OPC_SEND_IMM:
-        case URMA_OPC_SEND_INVALIDATE:
-            if (wr->send.src.sge != NULL) {
-                for (int i = 0; i < wr->send.src.num_sge; ++i) {
-                    bondp_tseg_get(wr->send.src.sge[i].tseg);
-                }
-            }
-            return;
-        case URMA_OPC_WRITE:
-        case URMA_OPC_WRITE_IMM:
-        case URMA_OPC_WRITE_NOTIFY:
-        case URMA_OPC_READ:
-            for (int i = 0; i < wr->rw.src.num_sge; ++i) {
-                bondp_tseg_get(wr->rw.src.sge[i].tseg);
-            }
-            for (int i = 0; i < wr->rw.dst.num_sge; ++i) {
-                bondp_tseg_get(wr->rw.dst.sge[i].tseg);
-            }
-            return;
-        case URMA_OPC_CAS:
-        case URMA_OPC_FADD:
-            if (wr->cas.src != NULL && wr->cas.src->tseg != NULL) {
-                bondp_tseg_get(wr->cas.src->tseg);
-            }
-            if (wr->cas.dst != NULL && wr->cas.dst->tseg != NULL) {
-                bondp_tseg_get(wr->cas.dst->tseg);
-            }
-            return;
-        default:
-            return;
-    }
-}
-
-void put_jfs_vwr_refs(urma_jfs_wr_t *wr)
-{
-    if (wr->tjetty != NULL) {
-        bondp_tjetty_put(wr->tjetty);
-    }
-
-    switch (wr->opcode) {
-        case URMA_OPC_SEND:
-        case URMA_OPC_SEND_IMM:
-        case URMA_OPC_SEND_INVALIDATE:
-            if (wr->send.src.sge != NULL) {
-                for (int i = 0; i < wr->send.src.num_sge; ++i) {
-                    bondp_tseg_put(wr->send.src.sge[i].tseg);
-                }
-            }
-            return;
-        case URMA_OPC_WRITE:
-        case URMA_OPC_WRITE_IMM:
-        case URMA_OPC_WRITE_NOTIFY:
-        case URMA_OPC_READ:
-            for (int i = 0; i < wr->rw.src.num_sge; ++i) {
-                bondp_tseg_put(wr->rw.src.sge[i].tseg);
-            }
-            for (int i = 0; i < wr->rw.dst.num_sge; ++i) {
-                bondp_tseg_put(wr->rw.dst.sge[i].tseg);
-            }
-            return;
-        case URMA_OPC_CAS:
-        case URMA_OPC_FADD:
-            if (wr->cas.src != NULL && wr->cas.src->tseg != NULL) {
-                bondp_tseg_put(wr->cas.src->tseg);
-            }
-            if (wr->cas.dst != NULL && wr->cas.dst->tseg != NULL) {
-                bondp_tseg_put(wr->cas.dst->tseg);
-            }
             return;
         default:
             return;

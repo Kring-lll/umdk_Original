@@ -24,7 +24,7 @@ typedef union umq_ub_fc_user_ctx {
         uint64_t type : 5;
         uint64_t notify : 16;
         uint64_t rsvd0 : 11;
-        uint64_t umq_ctx : 32;
+        uint64_t umq_id : 32;
     } bs;
 } umq_ub_fc_user_ctx_t;
 
@@ -50,6 +50,15 @@ int umq_ub_credit_pending_req_enqueue(ub_credit_pending_queue_t *pq, ub_queue_t 
 void umq_ub_credit_pending_req_remove_by_queue(ub_credit_pending_queue_t *pq, ub_queue_t *queue);
 
 static inline void umq_ub_window_inc(ub_flow_control_t *fc, uint16_t win)
+{
+    if (win == 0 || !fc->enabled) {
+        return;
+    }
+
+    (void)fc->ops.remote_rx_window_inc(fc, win, true);
+}
+
+static inline void umq_ub_credit_received_inc(ub_flow_control_t *fc, uint16_t win)
 {
     if (win == 0 || !fc->enabled) {
         return;

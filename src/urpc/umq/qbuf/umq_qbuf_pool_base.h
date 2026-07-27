@@ -21,8 +21,8 @@
 #include "umq_vlog.h"
 #include "urpc_util.h"
 #include "urpc_list.h"
-#include "urpc_thread_closure.h"
 #include "util_lock.h"
+#include "util_thread_key.h"
 #include "urpc_id_generator.h"
 
 #ifdef __cplusplus
@@ -150,7 +150,6 @@ typedef struct local_qbuf_pool_ctrl {
     urpc_list_t tls_register_head;
     pthread_spinlock_t tls_stats_lock;
     urpc_thread_closure_type_t type;
-    void (*closure)(uint64_t id);
 } local_qbuf_pool_ctrl_t;
 
 typedef struct qbuf_pool_base {
@@ -178,29 +177,6 @@ typedef struct qbuf_pool_base {
 static ALWAYS_INLINE uint64_t umq_qbuf_pool_expand_max(uint64_t total_size)
 {
     return ((total_size) - (total_size) / QBUF_POOL_EXPAND_MAX_RATIO);
-}
-
-static ALWAYS_INLINE local_block_pool_t *get_thread_local_cache(
-    thread_local_qbuf_pool_t *thread_cache, local_qbuf_pool_ctrl_t *pools)
-{
-    if (!thread_cache->inited) {
-        thread_cache->block_pool.capacity_with_data = 0;
-        thread_cache->block_pool.capacity_without_data = 0;
-        QBUF_LIST_INIT(&thread_cache->block_pool.head_with_data);
-        thread_cache->block_pool.buf_cnt_with_data = 0;
-        QBUF_LIST_INIT(&thread_cache->block_pool.head_without_data);
-        thread_cache->block_pool.buf_cnt_without_data = 0;
-        (void)memset(&thread_cache->stats, 0, sizeof(thread_cache->stats));
-        thread_cache->stats.tid = (uint64_t)pthread_self();
-        thread_cache->inited = true;
-        // Todo: register closure
-        // register TLS stats to global linked list
-        (void)pthread_spin_lock(&pools->tls_stats_lock);
-        urpc_list_push_back(&pools->tls_register_head, &thread_cache->tls_node);
-        (void)pthread_spin_unlock(&pools->tls_stats_lock);
-    }
-
-    return &thread_cache->block_pool;
 }
 
 static ALWAYS_INLINE uint64_t round_up(uint64_t size, uint64_t align)
@@ -456,7 +432,7 @@ static ALWAYS_INLINE void release_thread_cache_impl(
     urpc_list_remove(&thread_cache->tls_node);
     (void)pthread_spin_unlock(&tls_pools->tls_stats_lock);
 
-    local_block_pool_t *local_pool = get_thread_local_cache(thread_cache, tls_pools);
+    local_block_pool_t *local_pool = &thread_cache->block_pool;
     uint64_t return_buf_cnt;
     (void)pthread_spin_lock(&global_pool->global_mutex);
     if (local_pool->head_with_data.first != NULL) {
@@ -864,7 +840,7 @@ static ALWAYS_INLINE void umq_qbuf_block_pool_uninit(global_block_pool_t *block_
 
 int qbuf_pool_base_init(qbuf_pool_base_t *base, const qbuf_pool_cfg_t *cfg, uint32_t split_extra_header_count);
 void *umq_qbuf_base_io_buf_malloc(uint64_t total_len, uint64_t min_size);
-void umq_qbuf_base_uninit(qbuf_pool_base_t *base, void (*release_thread_cache)(uint64_t));
+void umq_qbuf_base_uninit(qbuf_pool_base_t *base);
 
 int umq_qbuf_base_alloc(qbuf_pool_base_t *base, thread_local_qbuf_pool_t *thread_cache,
     umq_alloc_option_t *option, qbuf_alloc_param_t *param);

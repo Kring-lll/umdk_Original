@@ -18,6 +18,7 @@
 #endif
 #include <stdbool.h>
 
+#include "bondp_env.h"
 #include "bondp_hash_table.h"
 #include "bondp_wr_buf.h"
 #include "bondp_topo_info.h"
@@ -89,21 +90,6 @@ static inline bool bondp_rjetty_has_user_info(const urma_rjetty_t *rjetty)
 typedef struct bondp_hc_ctx bondp_hc_ctx_t;
 typedef struct bondp_fb_ctx bondp_fb_ctx_t;
 
-/** Process-granularity global variable */
-typedef struct bondp_global_context {
-    uint32_t pid;
-    bool skip_load_topo;
-    bool enable_failover;
-    bool enable_failback;
-    bool enable_health_check;
-    uint64_t health_check_interval_ms;
-    uint32_t failover_route[IODIE_NUM][IODIE_NUM][URMA_ACTIVE_PORT_PER_DIE][URMA_FAILOVER_LINK_NUM];
-    bondp_path_t path[IODIE_NUM * IODIE_NUM * URMA_ACTIVE_PORT_PER_DIE + 1];
-    int max_cr_cnt_per_dev;
-} bondp_global_context_t;
-
-extern bondp_global_context_t *g_bondp_global_ctx;
-
 typedef struct bondp_device {
     urma_device_t v_dev;
     urma_device_t p_devs[URMA_UBAGG_DEV_MAX_NUM];
@@ -130,16 +116,13 @@ typedef struct bondp_context {
     int real_async_fd; /* vcontex async_fd */
     bondp_hc_ctx_t *hc_ctx;
     bondp_fb_ctx_t *fb_ctx;
-    bondp_hash_table_t remote_v2p_token_id_table;
+    pthread_rwlock_t seg_cache_lock;
+    struct ub_hmap seg_cache_map;
+    unsigned long seg_cache_insert_cnt;
     bool msn_enable;
     bool seg_cache_enable;
     uint32_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t enabled_count;
-#ifndef __cplusplus
-    atomic_ulong token_id_cnt;
-#else
-    std::atomic_ulong token_id_cnt;
-#endif
 } bondp_context_t;
 
 typedef struct bondp_jfc {
@@ -169,7 +152,11 @@ typedef struct bondp_tseg {
     int dev_num;
     bondp_context_t *bondp_ctx;
     urma_ref_t use_cnt;
+#ifndef __cplusplus
     atomic_bool deleting;
+#else
+    std::atomic_bool deleting;
+#endif
     uint64_t p_orig_handle[URMA_UBAGG_DEV_MAX_NUM];
     uint64_t v_orig_handle;
 } bondp_tseg_t;
@@ -220,7 +207,11 @@ typedef struct bondp_comp {
     bondp_hash_table_t v_conn_table;
     bondp_comp_type_t comp_type;
     urma_ref_t use_cnt; /* Initialize to 0 */
+#ifndef __cplusplus
     atomic_bool deleting;
+#else
+    std::atomic_bool deleting;
+#endif
     // send
     bool modify_to_error;
     pthread_spinlock_t send_lock;
@@ -308,11 +299,6 @@ static inline void bondp_seg_base_to_seg(const urma_seg_base_t *base, urma_seg_t
     seg->len = base->len;
     seg->attr.value = base->attr.value;
     seg->token_id = base->token_id;
-}
-
-static inline bool is_empty_eid(urma_eid_t *eid)
-{
-    return eid->in6.interface_id == 0 && eid->in6.subnet_prefix == 0;
 }
 
 static inline bool is_single_dev_mode(bondp_context_t *ctx)
