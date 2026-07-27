@@ -864,7 +864,7 @@ static urma_status_t umq_ub_flow_control_try_post_send(ub_queue_t *queue, urma_j
 
     do {
         status = umq_symbol_urma()->urma_post_jetty_send_wr(jetty, urma_wr, bad_wr);
-        if (status != URMA_EAGAIN) {
+        if (status != URMA_EAGAIN && status != URMA_ENOMEM) {
             break;
         }
 
@@ -944,7 +944,7 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
         umq_ub_post_release_jetty_node(queue, 0);
         umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND);
         return UMQ_SUCCESS;
-    } else if (status == URMA_EAGAIN) {
+    } else if (status == URMA_EAGAIN || status == URMA_ENOMEM) {
         umq_ub_post_release_jetty_node(queue, 1);
         umq_ub_permission_release(fc);
         return -UMQ_ERR_EAGAIN;
@@ -1007,7 +1007,7 @@ static int umq_ub_shared_credit_resp_send(ub_queue_t *queue, uint16_t notify, ui
         umq_ub_post_release_jetty_node(queue, 0);
         umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND);
         return UMQ_SUCCESS;
-    } else if (status == URMA_EAGAIN) {
+    } else if (status == URMA_EAGAIN || status == URMA_ENOMEM) {
         umq_ub_post_release_jetty_node(queue, 1);
         return -UMQ_ERR_EAGAIN;
     }
@@ -1203,7 +1203,7 @@ int umq_ub_shared_credit_return_req_send(ub_queue_t *queue)
         umq_ub_post_release_jetty_node(queue, 0);
         umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND);
         return UMQ_SUCCESS;
-    } else if (status == URMA_EAGAIN) {
+    } else if (status == URMA_EAGAIN || status == URMA_ENOMEM) {
         umq_ub_post_release_jetty_node(queue, 1);
         umq_ub_permission_release(fc);
         fc->ops.remote_rx_window_inc(fc, return_credit, true);
@@ -1278,7 +1278,7 @@ static int umq_ub_shared_credit_return_ack(ub_queue_t *queue, uint16_t return_cr
         umq_ub_post_release_jetty_node(queue, 0);
         umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND);
         return UMQ_SUCCESS;
-    } else if (status == URMA_EAGAIN) {
+    } else if (status == URMA_EAGAIN || status == URMA_ENOMEM) {
         umq_ub_post_release_jetty_node(queue, 1);
         return -UMQ_ERR_EAGAIN;
     }
