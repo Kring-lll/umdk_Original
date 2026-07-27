@@ -929,6 +929,15 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
     };
 
     umq_ub_ctx_t *dev_ctx = queue->dev_ctx;
+    // ext jetty count from max_share_queue_num (main umq only; sub/logic umqs leave it 0)
+    queue->fc_ext_jetty_num = 0;
+    if (is_umq_ub_main_queue(option->create_flag) &&
+        (option->create_flag & UMQ_CREATE_FLAG_MAX_SHARE_QUEUE_NUM) != 0 && option->max_share_queue_num > 0) {
+        uint32_t total_queue_num = option->max_share_queue_num + 1; // share umq + main umq
+        uint32_t per_jfr_cap = queue->fc_rx_depth / UMQ_UB_FLOW_CONTORL_JETTY_DEPTH;
+        uint32_t total_jfrs = (total_queue_num + per_jfr_cap - 1) / per_jfr_cap;
+        queue->fc_ext_jetty_num = (total_jfrs > 1) ? (total_jfrs - 1) : 0; // total jfr num - main jfr num
+    }
     if (umq_ub_jfr_ctx_get(queue, dev_ctx, option, share_queue, UB_QUEUE_JETTY_FLOW_CONTROL) != UMQ_SUCCESS) {
         UMQ_VLOG_ERR(VLOG_UMQ, "get flow control jfr ctx failed\n");
         return UMQ_FAIL;
@@ -951,6 +960,7 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
             .port_str = port_str,
             .used_port = queue->used_port,
             .used_port_num = queue->used_port_num,
+            .jfr = queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr,
         };
         queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL] = umq_create_jetty(queue, dev_ctx, &create_fc_jetty_config);
         if (queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL] == NULL) {
@@ -966,6 +976,11 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
         }
     }
 
+    // Build the FC ext jfr_ctxs (main umq only; no-op otherwise).
+    if (umq_ub_fc_ext_jetty_create(queue, dev_ctx, port_str) != UMQ_SUCCESS) {
+        goto DELETE_FC_EXT_JETTY;
+    }
+
     uint8_t rqe_post_factor = queue->used_port_num == 0 ? 1 : queue->used_port_num;
     if (UMQ_UB_ENABLE_SHARE_FC_JFR && (option->create_flag & UMQ_CREATE_FLAG_MAIN_UMQ) != 0) {
         // the coefficient for the number of main umq post flow control rx operations uses rqe_post_factor
@@ -978,7 +993,7 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
     }
 
     if (umq_ub_fill_fc_rx_buf_batch(queue, rqe_post_factor) != UMQ_SUCCESS) {
-        goto DELETE_FC_JETTY;
+        goto DELETE_FC_EXT_JETTY;
     }
 
     /* if step A after umq_ub_idle_checker_init, step A fails,
@@ -986,11 +1001,14 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
      * umq_ub_idle_queue_check or umq_ub_monitor_slots_uninit free resoures */
     if ((queue->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0) {
         if (umq_ub_idle_checker_init(queue) != UMQ_SUCCESS) {
-            goto DELETE_FC_JETTY;
+            goto DELETE_FC_EXT_JETTY;
         }
     }
 
     return UMQ_SUCCESS;
+
+DELETE_FC_EXT_JETTY:
+    umq_ub_fc_ext_jetty_destroy(queue);
 
 DELETE_FC_JETTY:
     if (!is_umq_ub_logic_queue(option->create_flag)) {
@@ -1097,6 +1115,7 @@ static int umq_ub_create_jetty_node(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx,
         .port_str = port_str,
         .used_port = used_port,
         .used_port_num = used_port_num,
+        .jfr = queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr,
     };
     jetty_node->jetty[UB_QUEUE_JETTY_IO] = umq_create_jetty(queue, dev_ctx, &create_io_jetty_config);
     if (jetty_node->jetty[UB_QUEUE_JETTY_IO] == NULL) {
@@ -1120,6 +1139,7 @@ static int umq_ub_create_jetty_node(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx,
             .port_str = port_str,
             .used_port = used_port,
             .used_port_num = used_port_num,
+            .jfr = queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr,
         };
         jetty_node->jetty[UB_QUEUE_JETTY_FLOW_CONTROL] = umq_create_jetty(queue, dev_ctx, &create_fc_jetty_config);
         if (jetty_node->jetty[UB_QUEUE_JETTY_FLOW_CONTROL] == NULL) {
@@ -1367,6 +1387,7 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
             .port_str = port_str,
             .used_port = queue->used_port,
             .used_port_num = queue->used_port_num,
+            .jfr = queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr,
         };
         queue->jetty[UB_QUEUE_JETTY_IO] = umq_create_jetty(queue, dev_ctx, &create_io_jetty_config);
         if (queue->jetty[UB_QUEUE_JETTY_IO] == NULL) {
@@ -1547,6 +1568,8 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
     if (queue->flow_control.enabled && !is_umq_ub_logic_queue(queue->create_flag)) {
         urma_eid_t *fc_eid = &queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.eid;
         uint32_t fc_id = queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id;
+        // ext jetty/jfr must be torn down before the shared main jfr_jfc is released by jfr_ctx_put
+        umq_ub_fc_ext_jetty_destroy(queue);
         umq_ub_credit_clean_up(queue);
         UMQ_VLOG_INFO(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, delete flowcontrol jetty\n",
             EID_ARGS(*fc_eid), fc_id);

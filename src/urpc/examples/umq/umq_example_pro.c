@@ -26,6 +26,28 @@ int run_umq_example_pro_server(struct urpc_example_config *cfg)
         return -1;
     }
 
+    uint64_t main_umqh = example_create_main_umq(cfg);
+    if (main_umqh == 0) {
+        LOG_PRINT_ERR("example_create_main_umq failed\n");
+        return -1;
+    }
+    cfg->main_umqh = main_umqh;
+    static uint64_t logic_umq[65535];
+    uint32_t umq_cnt = 0;
+    for (umq_cnt = 0; umq_cnt < 65535; umq_cnt++) {
+        logic_umq[umq_cnt] = example_create_logic_umq(cfg);
+        if (logic_umq[umq_cnt] == 0) {
+            LOG_PRINT_ERR("example_create_logic_umq failed, umq cnt %u\n", umq_cnt);
+            break;
+        }
+    }
+
+    for (uint32_t i = 0; i < umq_cnt; i++) {
+        umq_destroy(logic_umq[i]);
+    }
+    umq_destroy(main_umqh);
+
+
     if (server_accept(cfg->server_ip, cfg->tcp_port) != 0) {
         goto UNINIT;
     }
