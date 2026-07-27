@@ -89,6 +89,109 @@ int example_init_umq(struct urpc_example_config *cfg)
     return 0;
 }
 
+uint64_t example_create_main_umq(struct urpc_example_config *cfg)
+{
+    umq_create_option_t option = {
+        .trans_mode = cfg->trans_mode,
+        .create_flag = UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_TX_BUF_SIZE | UMQ_CREATE_FLAG_RX_DEPTH |
+                       UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE | UMQ_CREATE_FLAG_TP_MODE |
+                       UMQ_CREATE_FLAG_TP_TYPE | UMQ_CREATE_FLAG_MAIN_UMQ | UMQ_CREATE_FLAG_SHARE_TRANSPORT|
+                       UMQ_CREATE_FLAG_MAX_SHARE_QUEUE_NUM,
+        .rx_buf_size = EXAMPLE_BUFFER_SIZE,
+        .tx_buf_size = EXAMPLE_BUFFER_SIZE,
+        .rx_depth = EXAMPLE_DEPTH,
+        .tx_depth = EXAMPLE_DEPTH,
+        .mode = cfg->poll_mode,
+        .tp_mode = cfg->tp_mode,
+        .tp_type = cfg->tp_type,
+        .max_share_queue_num = 1024 * 512 - 1,
+    };
+    if (cfg->instance_mode == SERVER) {
+        if (sprintf(option.name, "%s", "server") <= 0) {
+            LOG_PRINT_ERR("set name failed\n");
+            return UMQ_INVALID_HANDLE;
+        }
+    } else {
+        if (sprintf(option.name, "%s", "client") <= 0) {
+            LOG_PRINT_ERR("set name failed\n");
+            return UMQ_INVALID_HANDLE;
+        }
+    }
+
+    umq_port_id_t src_port_id = {
+        .bs = {
+            .chip_id = 1,
+            .die_id = 1,
+            .port_idx = 4,
+        }
+    };
+
+    if (strstr(cfg->dev_name, "bond") != NULL) {
+        option.create_flag |= UMQ_CREATE_FLAG_USED_PORTS;
+        option.used_ports.port = &src_port_id;
+        option.used_ports.num = 1;
+    }
+
+    (void)memcpy(&option.dev_info, &cfg->dev_info, sizeof(umq_dev_assign_t));
+    uint64_t umqh = umq_create(&option);
+    if (umqh == UMQ_INVALID_HANDLE) {
+        LOG_PRINT_ERR("umq_create failed\n");
+        return UMQ_INVALID_HANDLE;
+    }
+    return umqh;
+}
+
+uint64_t example_create_logic_umq(struct urpc_example_config *cfg)
+{
+    umq_create_option_t option = {
+        .trans_mode = cfg->trans_mode,
+        .create_flag = UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_TX_BUF_SIZE | UMQ_CREATE_FLAG_RX_DEPTH |
+                       UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE | UMQ_CREATE_FLAG_TP_MODE |
+                       UMQ_CREATE_FLAG_TP_TYPE | UMQ_CREATE_FLAG_SHARE_RQ | UMQ_CREATE_FLAG_SHARE_TRANSPORT,
+        .rx_buf_size = EXAMPLE_BUFFER_SIZE,
+        .tx_buf_size = EXAMPLE_BUFFER_SIZE,
+        .rx_depth = EXAMPLE_DEPTH,
+        .tx_depth = EXAMPLE_DEPTH,
+        .mode = cfg->poll_mode,
+        .tp_mode = cfg->tp_mode,
+        .tp_type = cfg->tp_type,
+        .share_rq_umqh = cfg->main_umqh,
+    };
+    if (cfg->instance_mode == SERVER) {
+        if (sprintf(option.name, "%s", "server") <= 0) {
+            LOG_PRINT_ERR("set name failed\n");
+            return UMQ_INVALID_HANDLE;
+        }
+    } else {
+        if (sprintf(option.name, "%s", "client") <= 0) {
+            LOG_PRINT_ERR("set name failed\n");
+            return UMQ_INVALID_HANDLE;
+        }
+    }
+
+    umq_port_id_t src_port_id = {
+        .bs = {
+            .chip_id = 1,
+            .die_id = 1,
+            .port_idx = 4,
+        }
+    };
+
+    if (strstr(cfg->dev_name, "bond") != NULL) {
+        option.create_flag |= UMQ_CREATE_FLAG_USED_PORTS;
+        option.used_ports.port = &src_port_id;
+        option.used_ports.num = 1;
+    }
+
+    (void)memcpy(&option.dev_info, &cfg->dev_info, sizeof(umq_dev_assign_t));
+    uint64_t umqh = umq_create(&option);
+    if (umqh == UMQ_INVALID_HANDLE) {
+        LOG_PRINT_ERR("umq_create failed\n");
+        return UMQ_INVALID_HANDLE;
+    }
+    return umqh;
+}
+
 uint64_t example_create_umq(struct urpc_example_config *cfg, uint8_t *local_bind_info, uint32_t *bind_info_size)
 {
     umq_create_option_t option = {

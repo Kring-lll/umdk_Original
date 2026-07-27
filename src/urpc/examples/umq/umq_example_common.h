@@ -66,6 +66,7 @@ struct urpc_example_config {
     char m_dev_name[EXAMPLE_MAX_DEV_NUM][EXAMPLE_DEV_NAME_LEN];
     uint16_t m_eid_idx[EXAMPLE_MAX_DEV_NUM];
     uint32_t m_dev_num;
+    uint64_t main_umqh;
 };
 
 struct req_cb_arg {
@@ -115,6 +116,9 @@ void log_get_current_time(char *buffer, uint32_t len);
 
 int dev_eid_query(struct urpc_example_config *cfg, umq_eid_t *dev_eid);
 int used_port_query(struct urpc_example_config *cfg);
+
+uint64_t example_create_main_umq(struct urpc_example_config *cfg);
+uint64_t example_create_logic_umq(struct urpc_example_config *cfg);
 
 #ifdef __cplusplus
 }
