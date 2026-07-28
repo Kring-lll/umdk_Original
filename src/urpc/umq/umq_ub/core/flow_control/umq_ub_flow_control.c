@@ -941,12 +941,21 @@ int umq_ub_shared_credit_req_send(ub_queue_t *queue)
     if (status == URMA_SUCCESS) {
         /* record req send time so an unresponsive peer (rsp never returns) can be detected as timeout */
         __atomic_store_n(&fc->credit_req_send_time, get_timestamp_us(), __ATOMIC_RELEASE);
+        /* a successful send breaks any ongoing EAGAIN streak */
+        __atomic_store_n(&fc->fc_eagain_start_us, 0, __ATOMIC_RELEASE);
         umq_ub_post_release_jetty_node(queue, 0);
         umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND);
         return UMQ_SUCCESS;
     } else if (status == URMA_EAGAIN || status == URMA_ENOMEM) {
         umq_ub_post_release_jetty_node(queue, 1);
+        /* check before permission release so fc_eagain_start_us access stays serialized */
+        bool fatal = umq_ub_fc_eagain_check_fatal(fc);
         umq_ub_permission_release(fc);
+        if (fatal) {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "UMQ(ID:%u), credit req send continuous EAGAIN "
+                "exceeded fatal timeout(%u us)\n", queue->umq_id, fc->fc_req_timeout_us);
+            return -UMQ_ERR_EFLOWCTL_FATAL;
+        }
         return -UMQ_ERR_EFLOWCTL_EAGAIN;
     }
     umq_ub_post_release_jetty_node(queue, 1);
