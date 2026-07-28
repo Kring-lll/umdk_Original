@@ -331,6 +331,31 @@ static void try_failback(bondp_comp_t *bdp_comp)
         return;
     }
 
+    /*
+     * Steady-state fast path (lock-free): rebuild_done[] is published
+     * (false -> true) only by the async failback worker
+     * (bondp_mark_rebuild_done_async). On the vast majority of posts no rebuild
+     * has completed, so acquiring send_lock and running the URMA_UBAGG_DEV_MAX_NUM
+     * atomic_exchange scan on every post is pure overhead and needlessly
+     * contends with the poll thread's failover-CR handling.
+     *
+     * Probe the flags with plain loads first. If none is set we return without
+     * touching the lock. A rebuild that becomes visible right after this check is
+     * picked up by the next post (failback is opportunistic and also has the
+     * worker path), so nothing is lost. The authoritative atomic_exchange scan
+     * below still consumes each rebuild_done exactly once under the lock.
+     */
+    bool maybe_pending = false;
+    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+        if (atomic_load(&bdp_comp->rebuild_done[i])) {
+            maybe_pending = true;
+            break;
+        }
+    }
+    if (!maybe_pending) {
+        return;
+    }
+
     pthread_spin_lock(&bdp_comp->send_lock);
 
     uint32_t rebuilt_cnt = 0;
