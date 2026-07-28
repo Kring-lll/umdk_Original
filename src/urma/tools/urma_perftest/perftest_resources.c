@@ -834,18 +834,26 @@ static void free_memory(perftest_context_t *ctx, const perftest_config_t *cfg, c
     uint32_t seg_num = (cfg->seg_pre_jetty == false) ? 1 : cfg->jettys;
     for (uint32_t j = 0; j < idx; j++) {
         if (j < seg_num) {
-            if (cfg->use_huge_page == false) {
-                free(ctx->local_buf[j]);
-            } else {
-                ret = ub_hugefree(ctx->local_buf[j], ctx->buf_len);
-                if (ret != 0) {
-                    LOG_ERROR("addr=%p, length=%lu\n", ctx->local_buf[j], ctx->buf_len);
-                }
+            switch (ctx->local_buf_ownership) {
+                case PERFTEST_BUF_OWNERSHIP_MALLOC:
+                    free(ctx->local_buf[j]);
+                    break;
+                case PERFTEST_BUF_OWNERSHIP_HUGEPAGE:
+                    ret = ub_hugefree(ctx->local_buf[j], ctx->buf_len);
+                    if (ret != 0) {
+                        LOG_ERROR("addr=%p, length=%lu\n", ctx->local_buf[j], ctx->buf_len);
+                    }
+                    break;
+                case PERFTEST_BUF_OWNERSHIP_EXTERNAL:
+                case PERFTEST_BUF_OWNERSHIP_NONE:
+                default:
+                    break;
             }
         }
     }
     free(ctx->local_buf);
     ctx->local_buf = NULL;
+    ctx->local_buf_ownership = PERFTEST_BUF_OWNERSHIP_NONE;
 }
 
 static int register_mem(perftest_context_t *ctx, perftest_config_t *cfg)
@@ -856,6 +864,14 @@ static int register_mem(perftest_context_t *ctx, perftest_config_t *cfg)
     ctx->local_buf = calloc(1, sizeof(void *) * cfg->jettys);
     if (ctx->local_buf == NULL) {
         return -ENOMEM;
+    }
+
+    if (cfg->use_huge_page) {
+        ctx->local_buf_ownership = PERFTEST_BUF_OWNERSHIP_HUGEPAGE;
+    } else if (cfg->enable_va) {
+        ctx->local_buf_ownership = PERFTEST_BUF_OWNERSHIP_EXTERNAL;
+    } else {
+        ctx->local_buf_ownership = PERFTEST_BUF_OWNERSHIP_MALLOC;
     }
 
     uint32_t seg_num = (cfg->seg_pre_jetty == false) ? 1 : cfg->jettys;
