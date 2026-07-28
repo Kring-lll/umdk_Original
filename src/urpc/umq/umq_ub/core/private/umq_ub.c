@@ -396,6 +396,7 @@ static int umq_ub_remote_tseg_info_get(ub_queue_t *queue, umq_ub_bind_info_t *in
     bool find = false;
     int ret = 0;
     remote_eid_hmap_node_t *eid_node;
+    return 0;
     (void)util_mutex_lock(remote_imported_info->remote_eid_table_lock);
     URPC_HMAP_FOR_EACH_WITH_HASH(eid_node, node, hash, &remote_imported_info->remote_eid_table) {
         if ((memcmp(&eid_node->eid, remote_eid, sizeof(urma_eid_t)) == 0) && (info->dev_info->pid == eid_node->pid) &&
