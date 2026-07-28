@@ -184,10 +184,9 @@ static int bondp_worker_get_wait_timeout_ms(bondp_worker_t *worker, uint64_t now
     return (int)(next_tick_ms - now_ms);
 }
 
-static void bondp_worker_advance_by_now(bondp_worker_t *worker)
+static void bondp_worker_advance(bondp_worker_t *worker, uint64_t now_ms)
 {
     uint32_t tick_ms = tw_get_tick_ms(worker->tw);
-    uint64_t now_ms = bondp_worker_now_ms();
     uint64_t tick_cnt;
 
     if (tick_ms == 0 || now_ms < worker->last_tick_ms + tick_ms) {
@@ -310,6 +309,7 @@ static void *bondp_worker_thread_main(void *arg)
 
     while (true) {
         uint64_t now_ms = bondp_worker_now_ms();
+        bondp_worker_advance(worker, now_ms);
         int timeout_ms = bondp_worker_get_wait_timeout_ms(worker, now_ms);
         int nfds = epoll_wait(worker->epoll_fd, events, BONDP_WORKER_EVENT_NUM, timeout_ms);
 
@@ -339,8 +339,6 @@ static void *bondp_worker_thread_main(void *arg)
             break;
         }
         (void)pthread_mutex_unlock(&worker->lock);
-
-        bondp_worker_advance_by_now(worker);
     }
 
     return NULL;
