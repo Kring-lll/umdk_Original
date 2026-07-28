@@ -4,6 +4,8 @@
  * Description: Bond worker thread implementation
  */
 
+#define _GNU_SOURCE
+
 #include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -25,6 +27,8 @@
 #define BONDP_WORKER_EVENT_NUM         (16)
 #define BONDP_WORKER_HANDLER_MAP_SIZE  (64U)
 #define BONDP_WORKER_MAX_ADVANCE_TICKS (64U)
+
+static const char s_bondp_worker_thread_name[] = "urma_bond_worker";
 
 typedef struct bondp_worker_event_handler {
     int fd;
@@ -418,6 +422,10 @@ static bondp_worker_t *bondp_worker_create_instance(int *err_code)
         URMA_LOG_ERR("Failed to create bond worker thread, ret: %d.\n", ret);
         *err_code = -ret;
         goto ERR_WAKE;
+    }
+    ret = pthread_setname_np(worker->thread, s_bondp_worker_thread_name);
+    if (ret != 0) {
+        URMA_LOG_WARN("Failed to set bond worker thread name, ret: %d.\n", ret);
     }
 
     return worker;
