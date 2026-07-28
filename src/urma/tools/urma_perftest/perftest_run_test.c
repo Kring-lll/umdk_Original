@@ -3352,7 +3352,10 @@ static int run_bw_once(perftest_context_t *ctx, perftest_config_t *cfg)
             (void)signal(SIGINT, SIG_DFL);
             return -1;
         }
-        notify_peer_exit();
+        /* A completed duration test must keep the management channel available for final synchronization. */
+        if (g_exit_flag) {
+            notify_peer_exit();
+        }
         (void)signal(SIGINT, SIG_DFL);
     } else {
         if (prepare_run_bw_once(ctx, cfg, &local_bw_report, &remote_bw_report) != 0) {
@@ -3528,7 +3531,10 @@ static int run_send_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
         }
     }
 
-    notify_peer_exit();
+    /* A completed duration test must keep the management channel available for final synchronization. */
+    if (ret != 0 || g_exit_flag) {
+        notify_peer_exit();
+    }
     (void)signal(SIGINT, SIG_DFL);
 
     return ret;
