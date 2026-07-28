@@ -30,6 +30,13 @@ typedef enum duration_states {
     END_STATE
 } duration_states_t;
 
+typedef enum perftest_buf_ownership {
+    PERFTEST_BUF_OWNERSHIP_NONE,
+    PERFTEST_BUF_OWNERSHIP_MALLOC,
+    PERFTEST_BUF_OWNERSHIP_HUGEPAGE,
+    PERFTEST_BUF_OWNERSHIP_EXTERNAL,
+} perftest_buf_ownership_t;
+
 typedef struct user_tp_ctx {
     urma_tp_cfg_t cfg;
     urma_tp_attr_t attr;
@@ -95,6 +102,7 @@ typedef struct perftest_context {
     // buf
     uint64_t page_size;
     void **local_buf;
+    perftest_buf_ownership_t local_buf_ownership;
     uint64_t buf_size;
     uint64_t buf_len; // buf_len = buf_size * PERFTEST_BUF_NUM
     urma_target_seg_t **local_tseg;
