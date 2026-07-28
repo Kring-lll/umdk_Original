@@ -223,6 +223,9 @@ typedef struct urpc_security_exthdr {
  */
 static inline void urpc_req_fill_basic_info(urpc_req_head_t *req_head, uint8_t ack, uint32_t client_channel)
 {
+    if (req_head == NULL) {
+        return;
+    }
     req_head->version = URPC_PROTO_VERSION;
     req_head->type = URPC_MSG_REQ;
     req_head->ack = ack;
