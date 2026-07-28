@@ -98,17 +98,23 @@ static int ssl_cfg_copy(urpc_ssl_config_t *dst_cfg, urpc_ssl_config_t *src_cfg)
     dst_cfg->ssl_mode = src_cfg->ssl_mode;
     dst_cfg->min_tls_version = src_cfg->min_tls_version;
     dst_cfg->max_tls_version = src_cfg->max_tls_version;
-
+    int ret = 0;
     if (src_cfg->psk.cipher_list != NULL) {
-        strncpy(dst_cfg->psk.cipher_list, src_cfg->psk.cipher_list, URPC_MAX_CIPHER_LIST_LENGTH - 1);
-        dst_cfg->psk.cipher_list[URPC_MAX_CIPHER_LIST_LENGTH - 1] = '\0';
+        ret = snprintf(dst_cfg->psk.cipher_list, URPC_MAX_CIPHER_LIST_LENGTH, "%s", src_cfg->psk.cipher_list);
+        if (ret < 0 || ret >= URPC_MAX_CIPHER_LIST_LENGTH) {
+            URPC_LIB_LOG_ERR("snprintf cipher_list failed\n");
+            return URPC_FAIL;
+        }
     } else {
         memset(dst_cfg->psk.cipher_list, 0, URPC_MAX_CIPHER_LIST_LENGTH);
     }
 
     if (src_cfg->psk.cipher_suites != NULL) {
-        strncpy(dst_cfg->psk.cipher_suites, src_cfg->psk.cipher_suites, URPC_MAX_CIPHER_LIST_LENGTH - 1);
-        dst_cfg->psk.cipher_suites[URPC_MAX_CIPHER_LIST_LENGTH - 1] = '\0';
+        ret = snprintf(dst_cfg->psk.cipher_suites, URPC_MAX_CIPHER_LIST_LENGTH, "%s", src_cfg->psk.cipher_suites);
+        if (ret < 0 || ret >= URPC_MAX_CIPHER_LIST_LENGTH) {
+            URPC_LIB_LOG_ERR("snprintf cipher_suites failed\n");
+            return URPC_FAIL;
+        }
     } else {
         memset(dst_cfg->psk.cipher_suites, 0, URPC_MAX_CIPHER_LIST_LENGTH);
     }
