@@ -181,7 +181,14 @@ static void hc_drain_probe_cq(bondp_probe_res_t *res)
         return;
     }
 
-    urma_jfc_t *jfc = res->jfc;
+    urma_jfce_t *jfce = res->jfce;
+    urma_jfc_t *jfc = NULL;
+    int p_num = urma_wait_jfc(jfce, 1, 0, &jfc);
+    if (p_num <= 0 || jfc == NULL) {
+        return;
+    }
+    uint32_t nevents = (uint32_t)p_num;
+    urma_ack_jfc(&jfc, &nevents, 1);
     urma_cr_t cr[HC_CQE_BATCH];
     bool need_rebuild = false;
     uint32_t drained = 0;
