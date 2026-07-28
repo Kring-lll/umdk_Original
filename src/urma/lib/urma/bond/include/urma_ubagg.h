@@ -178,11 +178,26 @@ typedef struct urma_bond_jetty_ext_v0 {
     char data[0];
 } urma_bond_jetty_ext_v0_t;
 
-typedef struct urma_bond_seg_ext {
+/*
+ * Compact variable-length seg ext layout (version 0):
+ *   data: bondp_seg_peer_ctx_t entries[peer_cnt]
+ * Peer entries omit va/len/attr/uasid (reused from outer vseg); only eid+token_id differ.
+ * Packed to drop alignment padding in the on-wire / user_info buffer.
+ */
+#pragma pack(push, 1)
+typedef struct bondp_seg_peer_ctx {
+    uint8_t peer_idx; /* absolute device index; import writes back to peer_p_seg[peer_idx] */
+    urma_eid_t eid;
+    uint32_t token_id;
+} __attribute__((packed)) bondp_seg_peer_ctx_t;
+
+typedef struct urma_bond_seg_ext_v0 {
     uint8_t version;
     uint64_t mask;
-    urma_seg_base_t peer_p_seg[URMA_UBAGG_DEV_MAX_NUM];
-} urma_bond_seg_ext_t;
+    uint32_t peer_cnt;
+    char data[0];
+} __attribute__((packed)) urma_bond_seg_ext_v0_t;
+#pragma pack(pop)
 
 typedef struct bondp_rjetty {
     urma_rjetty_t base;
