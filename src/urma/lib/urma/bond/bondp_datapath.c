@@ -371,7 +371,7 @@ static void try_failback(bondp_comp_t *bdp_comp)
         if (resend_wr_entry == NULL ||
             resend_wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
             resend_wr_entry->bdp_comp != bdp_comp ||
-            !resend_wr_entry->is_batch_head) {
+            !resend_wr_entry->is_bond_cqe_head) {
             continue;
         }
 
@@ -534,14 +534,27 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
          * NOTE: send_idx/target_idx/entry_type are NOT set here —
          * path binding and submit are done inside send_lock below */
         urma_jfs_wr_t *cur = wr;
+        jfs_wr_entry_t *bond_cqe_head = NULL;
         for (int i = 0; i < wr_total; i++) {
             jfs_wr_entry_t *wr_entry = wr_entries[i];
             wr_entry->user_ctx = cur->user_ctx;
             wr_entry->target_vjetty = bdp_tjetty;
             wr_entry->bdp_comp = bdp_comp;
-            wr_entry->next = (i + 1) < wr_total ? wr_entries[i + 1] : wr_entries[0];
-            wr_entry->is_batch_head = (i == 0) || (i > 0 && jfs_wr_is_cqe_wr(&wr_entries[i - 1]->wr));
-            wr_entry->is_ring_tail = (i == wr_total - 1);
+            
+            bool is_bond_cqe_head = (i == 0) || (i > 0 && wr_entries[i - 1]->is_bond_cqe_tail));
+            bool is_bond_cqe_tail = jfs_wr_is_cqe_wr(cur) || (i + 1) == wr_total;
+            wr_entry->is_bond_cqe_head = is_bond_cqe_head;
+            if (is_bond_cqe_head) {
+                bond_cqe_head = wr_entry;
+            }
+            wr_entry->is_bond_cqe_tail = is_bond_cqe_tail;
+            if (is_bond_cqe_tail && bond_cqe_head != NULL) {
+                wr_entry->next = bond_cqe_head;
+                bond_cqe_head = NULL;
+            } else {
+                wr_entry->next = wr_entries[i + 1];
+            }
+
             if (cur->flag.bs.has_drv_ext) {
                 bondp_jfs_wr_t *bwr = CONTAINER_OF_FIELD(cur, bondp_jfs_wr_t, base);
                 wr_entry->info.src_chip_id = bwr->src_chip_id;
@@ -623,8 +636,8 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
                 wr_entries[j]->send_idx = 0;
                 wr_entries[j]->target_idx = 0;
                 wr_entries[j]->next = NULL;
-                wr_entries[j]->is_batch_head = false;
-                wr_entries[j]->is_ring_tail = false;
+                wr_entries[j]->is_bond_cqe_head = false;
+                wr_entries[j]->is_bond_cqe_tail = false;
             }
         }
         for (int j = 0; j < wr_count; j++) {
@@ -640,8 +653,8 @@ ROLLBACK:
         for (int j = success_node; j < wr_count; j++) {
             jfs_wr_put_refs(&wr_entries[j]->wr);
             wr_entries[j]->next = NULL;
-            wr_entries[j]->is_batch_head = false;
-            wr_entries[j]->is_ring_tail = false;
+            wr_entries[j]->is_bond_cqe_head = false;
+            wr_entries[j]->is_bond_cqe_tail = false;
         }
         jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, &wr_entries[success_node],
             allocated - success_node);
@@ -660,8 +673,8 @@ CLEANUP:
         for (int j = 0; j < wr_count; j++) {
             jfs_wr_put_refs(&wr_entries[j]->wr);
             wr_entries[j]->next = NULL;
-            wr_entries[j]->is_batch_head = false;
-            wr_entries[j]->is_ring_tail = false;
+            wr_entries[j]->is_bond_cqe_head = false;
+            wr_entries[j]->is_bond_cqe_tail = false;
         }
         jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, wr_entries, allocated);
         if (ret != URMA_FAIL || atomic_load(&bdp_comp->valid[send_idx])) {
@@ -1102,7 +1115,7 @@ typedef enum cr_convert_ret {
 
 static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int send_idx, int target_idx)
 {
-    if (wr_entry == NULL || !wr_entry->is_batch_head) {
+    if (wr_entry == NULL || !wr_entry->is_bond_cqe_head) {
         return URMA_EINVAL;
     }
 
@@ -1407,7 +1420,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                 resend_wr_entry->bdp_comp != bdp_comp ||
                 resend_wr_entry->send_idx != send_idx ||
                 resend_wr_entry->target_idx != target_idx ||
-                !resend_wr_entry->is_batch_head) {
+                !resend_wr_entry->is_bond_cqe_head) {
                 continue;
             }
             atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
@@ -1434,9 +1447,9 @@ CONVERT_CR:
     cr->local_id = get_comp_urma_jetty_id(bdp_comp)->id;
     cr->user_ctx = wr_entry->user_ctx;
 
-    if (wr_entry->is_ring_tail) {
+    if (wr_entry->is_bond_cqe_tail) {
         pthread_spin_lock(&bdp_comp->send_lock);
-        jfs_wr_buf_release_ring(&bdp_comp->send_wr_buf, wr_entry);
+        jfs_wr_put_refs_and_buf_release_ring(&bdp_comp->send_wr_buf, wr_entry);
         pthread_spin_unlock(&bdp_comp->send_lock);
     }
     put_comp(bdp_comp);
