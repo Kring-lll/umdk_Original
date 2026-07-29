@@ -1548,7 +1548,7 @@ bonding设备不感知TP。
 | urma_flush_jfs | 清空jfs软件队列，功能接口，应用不要求所有下发的sqe必须上报，则不依赖此功能 |
 | urma_advise_jfr/urma_unadvise_jfr | 非UB功能API |
 | urma_query_jetty | 用于查询jetty的状态和接收端配置水线，主要为DFX功能，非必要功能接口。说明：jetty作为接收端的配置水线功能，鲲鹏950硬件当前不支持 |
-| urma_flush_jetty | 清空jetty发送软件队列，功能接口，应用不要求所有下发的sqe必须上报，则不依赖此功能 |
+
 | urma_advise_jetty_async | 非UB功能API |
 | urma_create_jetty_grp/urma_delete_jetty_grp | 创建和删除jetty grp，功能接口 |
 | urma_get_tpn | 当前管控面不支持此能力 |
