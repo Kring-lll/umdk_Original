@@ -10,8 +10,7 @@
 #include "umq_huge_qbuf_pool.h"
 #include "umq_tiny_qbuf_pool.h"
 
-static uint64_t umq_normal_pool_supported_block_count(umq_buf_mode_t mode, uint64_t normal_pool_size,
-    bool disable_scale_cap)
+static uint64_t umq_normal_pool_supported_block_count(umq_buf_mode_t mode, uint64_t normal_pool_size)
 {
     uint32_t block_size = umq_buf_size_small();
     if (block_size == 0) {
@@ -19,9 +18,7 @@ static uint64_t umq_normal_pool_supported_block_count(umq_buf_mode_t mode, uint6
     }
 
     if (mode == UMQ_BUF_SPLIT) {
-        uint64_t one_block_size = disable_scale_cap ?
-            ((UMQ_EMPTY_HEADER_COEFFICIENT + 1) * (uint64_t)sizeof(umq_buf_t) + block_size) :
-            ((uint64_t)sizeof(umq_buf_t) + block_size);
+        uint64_t one_block_size = ((UMQ_EMPTY_HEADER_COEFFICIENT + 1) * (uint64_t)sizeof(umq_buf_t) + block_size);
         return normal_pool_size / one_block_size;
     }
     if (mode == UMQ_BUF_COMBINE) {
@@ -101,8 +98,7 @@ int umq_qbuf_pool_cfg_check(const umq_init_cfg_t *cfg, umq_qbuf_pool_plan_t *pla
 
     plan->normal_io_buf_size = init_size - plan->tiny_io_buf_size;
     if (cfg->buf_pool_cfg.normal_pool_block_count != 0) {
-        uint64_t supported_block_count = umq_normal_pool_supported_block_count(
-            cfg->buf_mode, plan->normal_io_buf_size, cfg->buf_pool_cfg.disable_scale_cap);
+        uint64_t supported_block_count = umq_normal_pool_supported_block_count(cfg->buf_mode, plan->normal_io_buf_size);
         if (cfg->buf_pool_cfg.normal_pool_block_count > supported_block_count) {
             UMQ_VLOG_ERR(VLOG_UMQ, "normal pool block count %u > supported block count %llu by normal init size %llu\n",
                 cfg->buf_pool_cfg.normal_pool_block_count, supported_block_count, plan->normal_io_buf_size);
