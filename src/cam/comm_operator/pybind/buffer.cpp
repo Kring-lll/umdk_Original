@@ -126,6 +126,7 @@ bool Buffer::is_initialized() const
 }
 
 std::vector<at::Tensor> Buffer::zb_fused_deep_moe(
+    const at::Tensor &context,
     const at::Tensor &x,
     const at::Tensor &expert_ids,
     const TensorVector &gmm1_weight,
@@ -145,12 +146,9 @@ std::vector<at::Tensor> Buffer::zb_fused_deep_moe(
     int64_t ep_rank_id,
     int64_t moe_expert_num,
     int64_t quant_mode,
-    int64_t global_bs)
+    int64_t global_bs,
+    int64_t calcBufferSize)
 {
-    if (!initialized_) {
-        throw std::runtime_error("Buffer not initialized, call init() first");
-    }
-
     auto x_shape = x.sizes();
     int h = x_shape[1];
     int bs = x_shape[0];
@@ -170,20 +168,16 @@ std::vector<at::Tensor> Buffer::zb_fused_deep_moe(
     const std::string group_ep_str(group_ep.data(), group_ep.size());
     const char *group_ep_ptr = group_ep_str.c_str();
 
-    int64_t ext_info = get_ext_info();
-    int64_t shmem_workspace = get_shmem_workspace();
-    int64_t shmem_workspace_size = static_cast<int64_t>(shmem_workspace_size_);
-
+    int64_t shmem_workspace_size = calcBufferSize - static_cast<int64_t>(EXT_INFO_SIZE);
     EXEC_NPU_CMD(aclnnFusedDeepMoe,
-        x, expert_ids, gmm1_weight_list, gmm1_weight_scale_list, gmm2_weight_list, gmm2_weight_scale_list,
+        context, x, expert_ids, gmm1_weight_list, gmm1_weight_scale_list, gmm2_weight_list, gmm2_weight_scale_list,
         expert_scales,
         share_gmm1_weight, share_gmm1_weight_scale,
         share_gmm2_weight, share_gmm2_weight_scale,
         expert_smooth_scales, share_smooth_scales, x_active_mask,
         group_ep_ptr, ep_rank_size, ep_rank_id, moe_expert_num, quant_mode, global_bs,
-        ext_info, shmem_workspace, shmem_workspace_size,
+        shmem_workspace_size,
         output, share_output, expert_token_nums);
-
     return {output, share_output, expert_token_nums};
 }
 

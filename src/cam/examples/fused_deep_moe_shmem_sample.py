@@ -22,6 +22,7 @@ import torch_npu
 import torchair
 
 import umdk_cam_op_lib
+from cam_comm_operator.comm_context import CommContextManager
 
 torch.manual_seed(42)
 torch_npu.npu.config.allow_internal_format = True
@@ -44,7 +45,7 @@ BASE_KWARGS = {
     "shmem_memsize": 3 * 1024 * 1024 * 1024,
 }
 
-DEFAULT_SHMEM_IP_PORT = "tcp://172.16.0.146:8766"
+DEFAULT_SHMEM_IP_PORT = "tcp://127.0.0.1:8766"
 
 
 def redirect_output(log_file_path):
@@ -249,21 +250,25 @@ class ShmemFusionOp(DecodeMoeOps):
         self.ip_port = ip_port
         self.buffer = None
         self._init_shmem_buffer()
+        self.ep_hcomm_info = ep_hcomm_info
+        self._ctx_manager = CommContextManager(self.ep_hcomm_info, self.global_rank_id, self.ep_world_size,
+                self.shmem_memsize, self.ip_port, backend={
+                    "Ascend910B": "kfc",
+                    "Ascend910_93": "kfc",
+                    "Ascend950": "channel"
+                })
+        self.context = self._ctx_manager.create_context()
+        self.ccl_buffer_size = self._ctx_manager.ccl_buffer_size
 
     def _init_shmem_buffer(self):
         self.buffer = umdk_cam_op_lib.FusedDeepMoeBuffer()
-        self.buffer.init(
-            rank=self.global_rank_id,
-            num_ranks=self.ep_world_size,
-            memsize=self.shmem_memsize,
-            ip_port=self.ip_port
-        )
         print(f"rank-{self.global_rank_id} SHMEM Buffer initialized: "
               f"rank={self.global_rank_id}, num_ranks={self.ep_world_size}, "
               f"memsize={self.shmem_memsize}, ip_port={self.ip_port}")
 
     def _apply_ops(self, x, expert_ids, expert_scales, x_active_mask):
         output, share_output, expert_token_nums = self.buffer.zb_fused_deep_moe(
+            self.context,
             x,
             expert_ids,
             self.gmm1_weight,
@@ -278,12 +283,13 @@ class ShmemFusionOp(DecodeMoeOps):
             self.smooth_scales,
             self.share_smooth_scales_fp32 if hasattr(self, 'share_smooth_scales_fp32') else None,
             x_active_mask,
-            "",
+            self.ep_hcomm_info,
             self.ep_world_size,
             self.global_rank_id,
             self.moe_expert_num,
             0,
-            self.global_batch_size
+            self.global_batch_size,
+            self.ccl_buffer_size
         )
         return (output, share_output, expert_token_nums)
 

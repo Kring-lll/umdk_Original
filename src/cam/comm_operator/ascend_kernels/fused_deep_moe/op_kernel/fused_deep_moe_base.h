@@ -1,15 +1,28 @@
 /*
  * SPDX-License-Identifier: MIT
- * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+ * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: Definition of communication group related structures
- * Create: 2025-07-19
+ * Create: 2026-07-10
  * Note:
- * History: 2025-07-19 Create a definition file for a distribution group related structure
+ * History: 2026-07-10 Create a definition file for a distribution group related structure
  */
 #ifndef FUSED_DEEP_MOE_BASE_H
 #define FUSED_DEEP_MOE_BASE_H
 
 #include "moe_distribute_base.h"
+
+constexpr uint32_t HCCL_MAX_RANK_SIZE = 1024U;
+
+constexpr uint32_t WORKSPACE_OFFSET_SIZE = 1024 * 1024 * 2;
+
+struct Mc2MoeContext {
+    uint32_t rankId = 0;
+    uint32_t rankSize = 0;
+    uint64_t segmentSize = 0;
+    uint64_t kfcContextAddr = 0;
+    uint64_t ipcBuffer_[HCCL_MAX_RANK_SIZE] = {};
+};
+
 
 #define TemplateMC2TypeClass                                                                      \
         typename ExpandXType, typename W1ScaleType, typename W2ScaleType, typename ExpandIdxType, \

@@ -43,6 +43,7 @@ public:
     bool is_initialized() const;
 
     std::vector<at::Tensor> zb_fused_deep_moe(
+        const at::Tensor &context,
         const at::Tensor &x,
         const at::Tensor &expert_ids,
         const TensorVector &gmm1_weight,
@@ -62,7 +63,8 @@ public:
         int64_t ep_rank_id,
         int64_t moe_expert_num,
         int64_t quant_mode,
-        int64_t global_bs);
+        int64_t global_bs,
+        int64_t calcBufferSize);
 };
 
 }  // namespace fused_deep_moe

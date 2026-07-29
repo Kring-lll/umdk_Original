@@ -40,20 +40,21 @@ constexpr uint32_t ROUND_RECV_TOKEN_ALIGN = GMM1_EPIM;
 static_assert(ROUND_RECV_TOKEN_ALIGN % GMM2_EPIM == 0,
               "The round token alignment must satisfy both GMM1 and GMM2 epilogues.");
 
-constexpr uint32_t INPUT_X_INDEX = 0;
-constexpr uint32_t INPUT_EXPERT_IDS_INDEX = 1;
-constexpr uint32_t INPUT_GMM1_WEIGHT_INDEX = 2;
-constexpr uint32_t INPUT_GMM1_WEIGHT_SCALE_INDEX = 3;
-constexpr uint32_t INPUT_GMM2_WEIGHT_INDEX = 4;
-constexpr uint32_t INPUT_GMM2_WEIGHT_SCALE_INDEX = 5;
-constexpr uint32_t INPUT_EXPERT_SCALE_INDEX = 6;
-constexpr uint32_t INPUT_SHARE_GMM1_WEIGHT_INDEX = 7;
-constexpr uint32_t INPUT_SHARE_GMM1_WEIGHT_SCALE_INDEX = 8;
-constexpr uint32_t INPUT_SHARE_GMM2_WEIGHT_INDEX = 9;
-constexpr uint32_t INPUT_SHARE_GMM2_WEIGHT_SCALE_INDEX = 10;
-constexpr uint32_t INPUT_SMOOTH_SCALE_INDEX = 11;
-constexpr uint32_t INPUT_SHARE_SMOOTH_SCALE_INDEX = 12;
-constexpr uint32_t INPUT_SHARE_X_ACTIVE_MASK_INDEX = 13;
+constexpr uint32_t INPUT_CONTEXT_INDEX = 0;
+constexpr uint32_t INPUT_X_INDEX = 1;
+constexpr uint32_t INPUT_EXPERT_IDS_INDEX = 2;
+constexpr uint32_t INPUT_GMM1_WEIGHT_INDEX = 3;
+constexpr uint32_t INPUT_GMM1_WEIGHT_SCALE_INDEX = 4;
+constexpr uint32_t INPUT_GMM2_WEIGHT_INDEX = 5;
+constexpr uint32_t INPUT_GMM2_WEIGHT_SCALE_INDEX = 6;
+constexpr uint32_t INPUT_EXPERT_SCALE_INDEX = 7;
+constexpr uint32_t INPUT_SHARE_GMM1_WEIGHT_INDEX = 8;
+constexpr uint32_t INPUT_SHARE_GMM1_WEIGHT_SCALE_INDEX = 9;
+constexpr uint32_t INPUT_SHARE_GMM2_WEIGHT_INDEX = 10;
+constexpr uint32_t INPUT_SHARE_GMM2_WEIGHT_SCALE_INDEX = 11;
+constexpr uint32_t INPUT_SMOOTH_SCALE_INDEX = 12;
+constexpr uint32_t INPUT_SHARE_SMOOTH_SCALE_INDEX = 13;
+constexpr uint32_t INPUT_SHARE_X_ACTIVE_MASK_INDEX = 14;
 
 constexpr uint32_t ATTR_GROUP_EP_INDEX = 0;
 constexpr uint32_t ATTR_EP_RANK_SIZE_INDEX = 1;
@@ -61,9 +62,7 @@ constexpr uint32_t ATTR_EP_RANK_ID_INDEX = 2;
 constexpr uint32_t ATTR_MOE_EXPERT_NUM_INDEX = 3;
 constexpr uint32_t ATTR_QUANT_MODE_INDEX = 4;
 constexpr uint32_t ATTR_GLOBAL_BS_INDEX = 5;
-constexpr uint32_t ATTR_EXT_INFO_INDEX = 6;
-constexpr uint32_t ATTR_SHMEM_WORKSPACE_INDEX = 7;
-constexpr uint32_t ATTR_SHMEM_WORKSPACE_SIZE_INDEX = 8;
+constexpr uint32_t ATTR_SHMEM_WORKSPACE_SIZE_INDEX = 6;
 
 constexpr uint32_t MIN_BATCH_SIZE = 0;
 constexpr uint32_t MAX_BATCH_SIZE = 256;
@@ -521,14 +520,8 @@ static ge::graphStatus CheckData(const char *nodeName, FusedDeepMoeTilingData &t
     uint32_t batchSize = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.bs;
     OPS_ERR_IF(batchSize < MIN_BATCH_SIZE, OPS_LOG_E(nodeName, "batchSize(bs) must >= %u.", MIN_BATCH_SIZE),
                     return ge::GRAPH_FAILED);
-    uint64_t shmemWorkspacePtr = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.shmemWorkspacePtr;
-    if (shmemWorkspacePtr == 0) {
-        OPS_ERR_IF(batchSize > MAX_BATCH_SIZE, OPS_LOG_E(nodeName, "batchSize(bs) must <= %u.", MAX_BATCH_SIZE),
-                        return ge::GRAPH_FAILED);
-    } else {
-        OPS_ERR_IF(batchSize > ZB_MAX_BATCH_SIZE, OPS_LOG_E(nodeName, "batchSize(bs) must <= %u.", ZB_MAX_BATCH_SIZE),
-                        return ge::GRAPH_FAILED);
-    }
+    OPS_ERR_IF(batchSize > ZB_MAX_BATCH_SIZE, OPS_LOG_E(nodeName, "batchSize(bs) must <= %u.", ZB_MAX_BATCH_SIZE),
+                    return ge::GRAPH_FAILED);
     uint32_t tokenLength = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
     OPS_ERR_IF(
         tokenLength < MIN_TOKEN_LENGTH || tokenLength > MAX_TOKEN_LENGTH,
@@ -573,8 +566,6 @@ static ge::graphStatus GetAttrAndSetTilingData(const gert::TilingContext &contex
     auto moeExpertNumPtr = attrs->GetAttrPointer<int64_t>(ATTR_MOE_EXPERT_NUM_INDEX);
     auto quantModePtr = attrs->GetAttrPointer<int64_t>(ATTR_QUANT_MODE_INDEX);
     auto globalBsPtr = attrs->GetAttrPointer<int64_t>(ATTR_GLOBAL_BS_INDEX);
-    auto extInfoPtr = attrs->GetAttrPointer<int64_t>(ATTR_EXT_INFO_INDEX);
-    auto shmemWorkspacePtr = attrs->GetAttrPointer<int64_t>(ATTR_SHMEM_WORKSPACE_INDEX);
     auto shmemWorkspaceSizePtr = attrs->GetAttrPointer<int64_t>(ATTR_SHMEM_WORKSPACE_SIZE_INDEX);
 
     uint32_t epRankSize = static_cast<uint32_t>(*epRankSizePtr);
@@ -602,8 +593,7 @@ static ge::graphStatus GetAttrAndSetTilingData(const gert::TilingContext &contex
     tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.quantMode = static_cast<uint32_t>(*quantModePtr);
     tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.globalBs = static_cast<uint32_t>(*globalBsPtr);
     tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank = moeExpertNumPerRank;
-    tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.metaInfoPtr = static_cast<uint64_t>(*extInfoPtr);
-    tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.shmemWorkspacePtr = static_cast<uint64_t>(*shmemWorkspacePtr);
+
     OPS_ERR_IF(*shmemWorkspaceSizePtr < 0,
                     OPS_LOG_E(nodeName, "shmemWorkspaceSize must be non-negative, but got %ld.",
                               *shmemWorkspaceSizePtr),
@@ -616,10 +606,6 @@ static ge::graphStatus SetRoundRecvTokenNum(const char *nodeName, FusedDeepMoeTi
                                             uint64_t shmemWorkspaceSize)
 {
     auto &info = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo;
-    if (info.shmemWorkspacePtr == 0) {
-        info.roundRecvTokenNum = GMM2_EPIM;
-        return ge::GRAPH_SUCCESS;
-    }
 
     OPS_ERR_IF(shmemWorkspaceSize == 0,
                     OPS_LOG_E(nodeName, "shmemWorkspaceSize must be positive when shmemWorkspace is set."),
@@ -642,7 +628,6 @@ static ge::graphStatus SetRoundRecvTokenNum(const char *nodeName, FusedDeepMoeTi
                               "SHMEM workspace is too small: size=%lu, fixedSize=%lu.",
                               shmemWorkspaceSize, fixedSize),
                     return ge::GRAPH_FAILED);
-
     const uint64_t commonPerTokenSize = sizeof(float) + TOKEN_FLAG_SLOT_SIZE;
     const uint64_t x1PerTokenSize = info.h * sizeof(int8_t) + commonPerTokenSize;
     const uint64_t x2PerTokenSize = gmm2InputDim * sizeof(int8_t) + commonPerTokenSize;
@@ -680,10 +665,6 @@ static void SetHcommCfg(const gert::TilingContext &context, FusedDeepMoeTilingDa
 
 static ge::graphStatus CheckHcclBufferSize(const char *nodeName, const FusedDeepMoeTilingData &tilingData)
 {
-    uint64_t shmemWorkspacePtr = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.shmemWorkspacePtr;
-    if (shmemWorkspacePtr != 0) {
-        return ge::GRAPH_SUCCESS;
-    }
     uint32_t moeExpertNumPerRank = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
     uint32_t globalBatchSize = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.globalBs;
     uint32_t h = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.h;
@@ -705,7 +686,6 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
 {
     size_t *workSpaces = context.GetWorkspaceSizes(1);
     OPS_ERR_IF(workSpaces == nullptr, OPS_LOG_E(nodeName, "workSpaces is nullptr."), return ge::GRAPH_FAILED);
-    uint64_t shmemWorkspacePtr = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.shmemWorkspacePtr;
     size_t maxTokenNum;
     size_t maxHandleTokenNum;
     uint32_t epRankSize = tilingData.disGmmDeqSwigluQuantGmmDeqComInfo.epRankSize;
@@ -745,17 +725,30 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
     size_t epSendCountSize = CeilUp(epRankSize * epRankSize * moeExpertNumPerRank * sizeof(int32_t), GM_ALIGN_SIZE);
     size_t resveredSize = CeilUp(RESERVED_WORKSPACE_SIZE, GM_ALIGN_SIZE);
     size_t allEpRecvCountSize = CeilUp(epRankSize * epRankSize * moeExpertNumPerRank * sizeof(int32_t), GM_ALIGN_SIZE);
-    if (shmemWorkspacePtr == 0) {
-        size_t usrSize = maxTokenSize + tokenScaleSize + CVSwapBufferSize + maxSwigluGmm2Size + groupListSize +
-                        expandIdxSize + epSendCountSize + resveredSize;
+    size_t usrSize = CVSwapBufferSize + maxSwigluGmm2Size + groupListSize +
+                    expandIdxSize + epSendCountSize + resveredSize + allEpRecvCountSize;
+    workSpaces[0] = SYSTEM_NEED_WORKSPACE + usrSize;
+    return ge::GRAPH_SUCCESS;
+}
 
-        workSpaces[0] = SYSTEM_NEED_WORKSPACE + usrSize;
-    } else {
-        size_t usrSize = CVSwapBufferSize + maxSwigluGmm2Size + groupListSize +
-                        expandIdxSize + epSendCountSize + resveredSize + allEpRecvCountSize +
-                        shareTokenSize + shareTokenScaleSize;
-        workSpaces[0] = SYSTEM_NEED_WORKSPACE + usrSize;
-    }
+static ge::graphStatus CheckMc2Context(gert::TilingContext &context, const char *nodeName)
+{
+    const gert::StorageShape *contextStorageShape = context.GetInputShape(INPUT_CONTEXT_INDEX);
+    OPS_ERR_IF(contextStorageShape == nullptr, OPS_LOG_E(nodeName, "contextStorageShape is nullptr."),
+        return ge::GRAPH_FAILED);
+
+    OPS_ERR_IF(contextStorageShape->GetStorageShape().GetDimNum() != 1, OPS_LOG_E(nodeName,
+        "contextStorageShape is invalid."), return ge::GRAPH_FAILED);
+
+    auto contextDesc = context.GetInputDesc(INPUT_CONTEXT_INDEX);
+    OPS_ERR_IF(contextDesc == nullptr, OPS_LOG_E(nodeName, "contextDesc is nullptr"), return ge::GRAPH_FAILED);
+
+    OPS_ERR_IF(contextDesc->GetDataType() != ge::DT_INT32,
+        OPS_LOG_E(nodeName, "contextDesc type is not int32"), return ge::GRAPH_FAILED);
+
+    OPS_ERR_IF(static_cast<ge::Format>(ge::GetPrimaryFormat(contextDesc->GetStorageFormat())) == ge::FORMAT_FRACTAL_NZ,
+        OPS_LOG_E(nodeName, "contextDesc format is not non-FRACTAL_NZ"), return ge::GRAPH_FAILED);
+
     return ge::GRAPH_SUCCESS;
 }
 
@@ -767,6 +760,9 @@ static ge::graphStatus FusedDeepMoeTilingFuncImpl(gert::TilingContext &context)
     OPS_ERR_IF(tilingData == nullptr, OPS_LOG_E(nodeName, "tilingData is nullptr."), return ge::GRAPH_FAILED);
     std::string groupEp = "";
     uint64_t shmemWorkspaceSize = 0;
+
+    OPS_ERR_IF(CheckMc2Context(context, nodeName) != ge::GRAPH_SUCCESS, OPS_LOG_E(nodeName, "CheckMc2Context Failed."),
+        return ge::GRAPH_FAILED);
 
     const gert::StorageShape *xStorageShape = context.GetInputShape(INPUT_X_INDEX);
     OPS_ERR_IF(xStorageShape == nullptr, OPS_LOG_E(nodeName, "x shape is null."), return ge::GRAPH_FAILED);
@@ -849,9 +845,7 @@ static ge::graphStatus FusedDeepMoeTilingFuncImpl(gert::TilingContext &context)
     if (expertSmoothScalesExist) {
         tilingKey |= EXEC_FLAG_SMOOTH_QUANT;
     }
-    if (tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.shmemWorkspacePtr != 0) {
-        tilingKey |= EXEC_FLAG_ZERO_BUFFER;
-    }
+    tilingKey |= EXEC_FLAG_ZERO_BUFFER;
     context.SetTilingKey(tilingKey);
     context.SetBlockDim(aicNum);
     return ge::GRAPH_SUCCESS;

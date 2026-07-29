@@ -22,7 +22,7 @@
   },
   "operator_meta": {
     "fused_deep_moe": {
-      "requires_shmem": true,
+      "requires_shmem": false,
       "family": "fused_deep_moe",
       "variant": "base"
     },

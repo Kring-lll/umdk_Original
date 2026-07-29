@@ -25,6 +25,7 @@ extern "C" {
 #endif
 
 aclnnStatus aclnnFusedDeepMoeGetWorkspaceSize(
+    const aclTensor *context,
     const aclTensor *x,
     const aclTensor *expertIds,
     const aclTensorList *gmm1Weight,
@@ -45,8 +46,6 @@ aclnnStatus aclnnFusedDeepMoeGetWorkspaceSize(
     int64_t moeExpertNum,
     int64_t quantMode,
     int64_t globalBs,
-    int64_t extInfo,
-    int64_t shmemWorkspace,
     int64_t shmemWorkspaceSize,
     const aclTensor *output,
     const aclTensor *shareOutput,
@@ -54,13 +53,13 @@ aclnnStatus aclnnFusedDeepMoeGetWorkspaceSize(
     uint64_t *workspaceSize,
     aclOpExecutor **executor)
 {
-    return aclnnInnerFusedDeepMoeGetWorkspaceSize(x, expertIds, gmm1Weight, gmm1WeightScale,
+    return aclnnInnerFusedDeepMoeGetWorkspaceSize(context, x, expertIds, gmm1Weight, gmm1WeightScale,
         gmm2Weight, gmm2WeightScale, expertScales,
         shareGmm1WeightOptional, shareGmm1WeightScaleOptional,
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional,
         expertSmoothScalesOptional, shareSmoothScalesOptional, xActiveMaskOptional,
         groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs,
-        extInfo, shmemWorkspace, shmemWorkspaceSize,
+        shmemWorkspaceSize,
         output, shareOutput, expertTokenNums, workspaceSize, executor);
 }
 

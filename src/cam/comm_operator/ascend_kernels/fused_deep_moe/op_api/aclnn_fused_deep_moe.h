@@ -17,6 +17,7 @@ extern "C" {
 #endif
 
 __attribute__((visibility("default"))) aclnnStatus aclnnFusedDeepMoeGetWorkspaceSize(
+    const aclTensor *context,
     const aclTensor *x,
     const aclTensor *expertIds,
     const aclTensorList *gmm1Weight,
@@ -37,8 +38,6 @@ __attribute__((visibility("default"))) aclnnStatus aclnnFusedDeepMoeGetWorkspace
     int64_t moeExpertNum,
     int64_t quantMode,
     int64_t globalBs,
-    int64_t extInfo,
-    int64_t shmemWorkspace,
     int64_t shmemWorkspaceSize,
     const aclTensor *output,
     const aclTensor *shareOutput,

@@ -14,7 +14,6 @@
 #include "kernel_tiling/kernel_tiling.h"
 #include "../../fused_deep_moe_base.h"
 #include "../../fused_deep_moe_tiling.h"
-#include "shmem.h"
 
 using namespace Cam;
 namespace MoeDistributeCombineImpl {
@@ -54,6 +53,7 @@ struct CombineCalcInfo {
     uint32_t moeSendNum_;
     GM_ADDR epSendCount_;
     __gm__ HcclOpResParam *epWinContext_;
+    __gm__ Mc2MoeContext *mc2MoeContext_;
     uint64_t winDataSizeOffset_;
     uint32_t aivNum_;
     uint32_t moeExpertNum_;
@@ -73,7 +73,7 @@ public:
                                 GM_ADDR tpSendCount, GM_ADDR scales, GM_ADDR xActiveMask, GM_ADDR XOut,
                                 GM_ADDR workspaceGM, TPipe *pipe, const FusedDeepMoeTilingData *tilingData,
                                 GM_ADDR allExpertTokenNums, GM_ADDR allEpRecvCount, GM_ADDR combineSend,
-                                uint64_t statusDataSpaceOffset);
+                                uint64_t statusDataSpaceOffset, GM_ADDR hcclContext);
     __aicore__ inline void Process();
     __aicore__ inline void AllToAllSend();
     __aicore__ inline void ReducePermute();
@@ -141,10 +141,15 @@ private:
 
     __aicore__ GM_ADDR GetShmemAddrByRankId(GM_ADDR baseAddr, int64_t rankId)
     {
-        if (epRankId_ == rankId) {
+        if (static_cast<uint64_t>(rankId) >= HCCL_MAX_RANK_SIZE || rankId < 0) {
             return baseAddr;
         }
-        return (GM_ADDR)aclshmem_ptr(baseAddr, rankId);
+        GM_ADDR winBase = (epRankId_ == rankId)
+                            ? ((GM_ADDR)(mc2MoeContext_->ipcBuffer_[epRankId_]))
+                            : ((GM_ADDR)(mc2MoeContext_->ipcBuffer_[rankId])); // 其他卡
+
+        uint64_t addrOffset = (uint64_t)(baseAddr - ((GM_ADDR)(mc2MoeContext_->ipcBuffer_[epRankId_])));
+        return winBase +  addrOffset;
     }
 
     __aicore__ GM_ADDR GetShmemStateAddrByRankId(int64_t rankId)
@@ -249,6 +254,7 @@ private:
     uint32_t endIndex_{0};
     __gm__ HcclOpResParam *epWinContext_{nullptr};
     __gm__ HcclOpResParam *tpWinContext_{nullptr};
+    __gm__ Mc2MoeContext *mc2MoeContext_{nullptr};
     uint32_t epDataOffsetOnWin_{0};
     uint32_t tpDataOffsetOnWin_{0};
     uint32_t epStateOffsetOnWin_{0};
@@ -301,7 +307,8 @@ template <TemplateMC2TypeClass>
 __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     GM_ADDR expandX, GM_ADDR expertIds, GM_ADDR expandIdx, GM_ADDR epSendCount, GM_ADDR tpSendCount, GM_ADDR scales,
     GM_ADDR xActiveMask, GM_ADDR XOut, GM_ADDR workspaceGM, TPipe *pipe, const FusedDeepMoeTilingData *tilingData,
-    GM_ADDR allExpertTokenNums, GM_ADDR allEpRecvCount, GM_ADDR combineSend, uint64_t statusDataSpaceOffset)
+    GM_ADDR allExpertTokenNums, GM_ADDR allEpRecvCount, GM_ADDR combineSend, uint64_t statusDataSpaceOffset,
+    GM_ADDR hcclContext)
 {
     tpipe_ = pipe;
     coreIdx_ = GetBlockIdx();
@@ -310,7 +317,10 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     GlobalTensor<int32_t> selfDataStatusTensor;
     GM_ADDR statusDataSpaceGm;
     if constexpr (EXEC_FLAG & EXEC_FLAG_ZERO_BUFFER) {
-        metaInfoGm_ = (GM_ADDR)(tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.metaInfoPtr);
+        mc2MoeContext_ = reinterpret_cast<__gm__ Mc2MoeContext *>(hcclContext);
+        metaInfoGm_ = (GM_ADDR)mc2MoeContext_->ipcBuffer_[epRankId_];
+
+        calcInfo_.mc2MoeContext_ = mc2MoeContext_;
         statusDataSpaceGm = metaInfoGm_ + statusDataSpaceOffset;
     } else {
         epWinContext_ = (__gm__ HcclOpResParam *)contextGM0;

@@ -129,7 +129,15 @@ setup(
     version=env_version,
     keywords="umdk_cam_op_lib",
     ext_modules=exts,
-    packages=find_packages(),
+
+    package_dir={
+        "cam_comm_operator": "./pytorch_extension/cam_comm_operator"
+    },
+    packages=["cam_comm_operator"],
+    package_data={
+        "cam_comm_operator": ["**/*"]
+    },
+    zip_safe=False,
     cmdclass={
         "build_ext": BuildExtension,
         "bdist_wheel": BdistWheelBuild
