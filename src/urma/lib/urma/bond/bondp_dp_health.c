@@ -163,18 +163,17 @@ static void hc_rebuild_probe_jetty(bondp_hc_ctx_t *hc_ctx, bondp_probe_res_t *re
     }
 }
 
-static void hc_set_tjetty_list_target_valid(bondp_hc_node_t *node, uint32_t local_idx, uint32_t target_idx)
+static void hc_store_tjetty_list_target_valid(bondp_hc_node_t *node,
+                                              uint32_t local_idx, uint32_t target_idx, bool valid)
 {
     bondp_target_jetty_t *bdp_tjetty = NULL;
 
-    pthread_rwlock_rdlock(&node->lock);
     UB_LIST_FOR_EACH (bdp_tjetty, hc_entry, &node->tjetty_list) {
         bondp_p_target_jetty_t *p_tjetty = bondp_find_p_tjetty(bdp_tjetty, local_idx, target_idx);
         if (p_tjetty != NULL) {
-            atomic_store(&p_tjetty->valid, true);
+            atomic_store(&p_tjetty->valid, valid);
         }
     }
-    pthread_rwlock_unlock(&node->lock);
 }
 
 static void hc_process_probe_cr(bondp_hc_ctx_t *hc_ctx, int local_idx, const urma_cr_t *cr)
@@ -202,7 +201,9 @@ static void hc_process_probe_cr(bondp_hc_ctx_t *hc_ctx, int local_idx, const urm
     atomic_store(&node->valid[local_idx][target_idx], ok);
     if (ok && !prev) {
         URMA_LOG_INFO("Health probe link [%d, %d] recovered.\n", local_idx, target_idx);
-        hc_set_tjetty_list_target_valid(node, local_idx, target_idx);
+        pthread_rwlock_rdlock(&node->lock);
+        hc_store_tjetty_list_target_valid(node, local_idx, target_idx, true);
+        pthread_rwlock_unlock(&node->lock);
     }
 
     node->no_cqe_round[local_idx][target_idx] = 0;
@@ -268,6 +269,17 @@ static void hc_probe_link(bondp_hc_ctx_t *hc_ctx, bondp_hc_node_t *node,
     if (node->no_cqe_round[local_idx][target_idx] != 0) {
         if (node->no_cqe_round[local_idx][target_idx] != UINT8_MAX) {
             node->no_cqe_round[local_idx][target_idx]++;
+        }
+        if (node->no_cqe_round[local_idx][target_idx] > g_bondp_env.health_check_timeout_rounds) {
+            bool prev = atomic_exchange(&node->valid[local_idx][target_idx], false);
+            // hc_store_tjetty_list_target_valid(node, (uint32_t)local_idx, (uint32_t)target_idx, false);
+            if (prev) {
+                URMA_LOG_WARN("Health probe timeout, node_idx=%u, local_idx=%d, target_idx=%d, "
+                              "no_cqe_round=%u, timeout_rounds=%u.\n",
+                              node->node_idx, local_idx, target_idx,
+                              node->no_cqe_round[local_idx][target_idx],
+                              g_bondp_env.health_check_timeout_rounds);
+            }
         }
         return;
     }
@@ -837,6 +849,10 @@ static void hc_register_tjetty_path(bondp_hc_node_t *node, bondp_target_jetty_t 
         }
         uint32_t i = bdp_tjetty->p_tjettys[k].local_indice;
         uint32_t j = bdp_tjetty->p_tjettys[k].remote_indice;
+        if (!atomic_load(&node->valid[i][j]) ||
+            node->no_cqe_round[i][j] > g_bondp_env.health_check_timeout_rounds) {
+            atomic_store(&bdp_tjetty->p_tjettys[k].valid, false);
+        }
         if (node->hc_tjetty[i][j] != NULL) {
             continue;
         }
