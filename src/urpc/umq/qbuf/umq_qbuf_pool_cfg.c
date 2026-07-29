@@ -10,8 +10,7 @@
 #include "umq_huge_qbuf_pool.h"
 #include "umq_tiny_qbuf_pool.h"
 
-static uint64_t umq_normal_pool_supported_block_count(umq_buf_mode_t mode, uint64_t normal_pool_size,
-    bool disable_scale_cap)
+static uint64_t umq_normal_pool_supported_block_count(umq_buf_mode_t mode, uint64_t normal_pool_size)
 {
     uint32_t block_size = umq_buf_size_small();
     if (block_size == 0) {
@@ -19,9 +18,7 @@ static uint64_t umq_normal_pool_supported_block_count(umq_buf_mode_t mode, uint6
     }
 
     if (mode == UMQ_BUF_SPLIT) {
-        uint64_t one_block_size = disable_scale_cap ?
-            ((UMQ_EMPTY_HEADER_COEFFICIENT + 1) * (uint64_t)sizeof(umq_buf_t) + block_size) :
-            ((uint64_t)sizeof(umq_buf_t) + block_size);
+        uint64_t one_block_size = ((UMQ_EMPTY_HEADER_COEFFICIENT + 1) * (uint64_t)sizeof(umq_buf_t) + block_size);
         return normal_pool_size / one_block_size;
     }
     if (mode == UMQ_BUF_COMBINE) {
