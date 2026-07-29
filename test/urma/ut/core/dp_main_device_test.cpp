@@ -8,6 +8,17 @@
 
 using namespace urma_test_core;
 
+namespace {
+int g_postJettySendCount;
+
+urma_status_t CountingPostJettySendWr(urma_jetty_t *, urma_jfs_wr_t *, urma_jfs_wr_t **badWr)
+{
+    g_postJettySendCount++;
+    *badWr = static_cast<urma_jfs_wr_t *>(urma_test::GetHwMockState().badSendWr);
+    return urma_test::GetHwMockState().status;
+}
+}
+
 TEST(UrmaCoreTest, DpApiWrappersValidateInputsAndDispatchOps)
 {
     CoreApiFixture fixture;
@@ -74,6 +85,75 @@ TEST(UrmaCoreTest, DpApiWrappersValidateInputsAndDispatchOps)
     EXPECT_EQ(URMA_SUCCESS, urma_post_jetty_send_wr(&fixture.jetty, &sendWr, &badSend));
     EXPECT_EQ(URMA_EINVAL, urma_post_jetty_recv_wr(&fixture.jetty, nullptr, &badRecv));
     EXPECT_EQ(URMA_SUCCESS, urma_post_jetty_recv_wr(&fixture.jetty, &recvWr, &badRecv));
+}
+
+TEST(UrmaCoreTest, PostJettySendWrRejectsFirstInvalidSglBeforeProvider)
+{
+    CoreApiFixture fixture;
+    urma_jfs_wr_t firstWr = {};
+    urma_jfs_wr_t invalidWr = {};
+    urma_jfs_wr_t *badWr = nullptr;
+
+    fixture.ops.post_jetty_send_wr = CountingPostJettySendWr;
+    g_postJettySendCount = 0;
+
+    firstWr.opcode = URMA_OPC_SEND;
+    firstWr.next = &invalidWr;
+    invalidWr.opcode = URMA_OPC_SEND;
+    invalidWr.send.src.num_sge = 1;
+
+    EXPECT_EQ(URMA_EINVAL, urma_post_jetty_send_wr(&fixture.jetty, &firstWr, &badWr));
+    EXPECT_EQ(&invalidWr, badWr);
+    EXPECT_EQ(0, g_postJettySendCount);
+
+    firstWr.send.src.num_sge = 1;
+    badWr = nullptr;
+    EXPECT_EQ(URMA_EINVAL, urma_post_jetty_send_wr(&fixture.jetty, &firstWr, &badWr));
+    EXPECT_EQ(&firstWr, badWr);
+    EXPECT_EQ(0, g_postJettySendCount);
+}
+
+TEST(UrmaCoreTest, PostJettySendWrValidatesOnlyOpcodeSglAndPreservesDispatch)
+{
+    CoreApiFixture fixture;
+    urma_sge_t sge = {};
+    urma_jfs_wr_t wr = {};
+    urma_jfs_wr_t providerBadWr = {};
+    urma_jfs_wr_t *badWr = nullptr;
+
+    fixture.ops.post_jetty_send_wr = CountingPostJettySendWr;
+    g_postJettySendCount = 0;
+
+    wr.opcode = URMA_OPC_SEND;
+    EXPECT_EQ(URMA_SUCCESS, urma_post_jetty_send_wr(&fixture.jetty, &wr, &badWr));
+    wr.send.src.num_sge = 1;
+    wr.send.src.sge = &sge;
+    EXPECT_EQ(URMA_SUCCESS, urma_post_jetty_send_wr(&fixture.jetty, &wr, &badWr));
+
+    wr = {};
+    wr.opcode = URMA_OPC_READ;
+    wr.rw.src.num_sge = 1;
+    EXPECT_EQ(URMA_EINVAL, urma_post_jetty_send_wr(&fixture.jetty, &wr, &badWr));
+    EXPECT_EQ(&wr, badWr);
+    wr.rw.src.sge = &sge;
+    wr.rw.dst.num_sge = 1;
+    EXPECT_EQ(URMA_EINVAL, urma_post_jetty_send_wr(&fixture.jetty, &wr, &badWr));
+
+    wr.opcode = URMA_OPC_NOP;
+    EXPECT_EQ(URMA_SUCCESS, urma_post_jetty_send_wr(&fixture.jetty, &wr, &badWr));
+
+    wr = {};
+    wr.opcode = URMA_OPC_WRITE;
+    wr.rw.src.num_sge = 1;
+    wr.rw.src.sge = &sge;
+    wr.rw.dst.num_sge = 1;
+    wr.rw.dst.sge = &sge;
+    urma_test::SetHwMockStatus(URMA_EAGAIN);
+    urma_test::SetHwMockBadWr(&providerBadWr, nullptr);
+    badWr = nullptr;
+    EXPECT_EQ(URMA_EAGAIN, urma_post_jetty_send_wr(&fixture.jetty, &wr, &badWr));
+    EXPECT_EQ(&providerBadWr, badWr);
+    EXPECT_EQ(4, g_postJettySendCount);
 }
 
 TEST(UrmaCoreTest, FormatConvertAndDpErrorBranchesCoverStableContracts)
