@@ -357,6 +357,25 @@ urma_status_t urma_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_t
     return ret;
 }
 
+static bool urma_jfs_wr_has_invalid_sgl(const urma_jfs_wr_t *wr)
+{
+    switch (wr->opcode) {
+        case URMA_OPC_SEND:
+        case URMA_OPC_SEND_IMM:
+        case URMA_OPC_SEND_INVALIDATE:
+            return wr->send.src.num_sge > 0 && wr->send.src.sge == NULL;
+        case URMA_OPC_WRITE:
+        case URMA_OPC_WRITE_IMM:
+        case URMA_OPC_WRITE_NOTIFY:
+        case URMA_OPC_READ:
+        case URMA_OPC_WRITE_ATOMIC:
+            return (wr->rw.src.num_sge > 0 && wr->rw.src.sge == NULL) ||
+                (wr->rw.dst.num_sge > 0 && wr->rw.dst.sge == NULL);
+        default:
+            return false;
+    }
+}
+
 urma_status_t urma_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr)
 {
     /* check parameter */
@@ -366,6 +385,14 @@ urma_status_t urma_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, ur
         urma_dev == NULL) {
         URMA_LOG_ERR("Invalid parameter.\n");
         return URMA_EINVAL;
+    }
+
+    for (urma_jfs_wr_t *current_wr = wr; current_wr != NULL; current_wr = current_wr->next) {
+        if (urma_jfs_wr_has_invalid_sgl(current_wr)) {
+            *bad_wr = current_wr;
+            URMA_LOG_ERR("Invalid SGL parameter.\n");
+            return URMA_EINVAL;
+        }
     }
     
     urma_status_t ret;
