@@ -85,7 +85,11 @@ sources = [
     "./ext_utils.cpp",
     "./all2_all_detour.cpp",
     "./reduce_scatter_detour.cpp",
-    "./buffer.cpp"
+    "./buffer.cpp",
+    "./gather_selection_kv_cache.cpp",
+    "./gather_selection_kv_cache_custom.cpp",
+    "./quant_lightning_indexer.cpp",
+    "./swiglu_clip_quant.cpp",
 ]
 
 libraries = [

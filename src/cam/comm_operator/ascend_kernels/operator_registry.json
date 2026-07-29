@@ -14,7 +14,10 @@
       "moe_dispatch_lowlatency_zb",
       "moe_dispatch_normal_zb",
       "moe_notify_dispatch_zb",
-      "reduce_scatter_detour"
+      "reduce_scatter_detour",
+      "gather_selection_kv_cache",
+      "gather_selection_kv_cache_custom",
+      "swiglu_clip_quant"
     ]
   },
   "operator_meta": {
