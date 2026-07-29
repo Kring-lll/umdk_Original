@@ -18,6 +18,17 @@
 #include <acl/acl_rt.h>
 #include "hccl_common.h"
 
+#if defined(COMM_BACKEND_HCCL) && defined(COMM_BACKEND_SHMEM)
+#error "Cannot specify both COMM_BACKEND_HCCL and COMM_BACKEND_SHMEM"
+#endif
+
+#if defined(COMM_BACKEND_SHMEM)
+#include "shmem.h"
+#include "host_device/shmem_common_types.h"
+#endif
+
+constexpr uint64_t EXT_INFO_SIZE = 2 * 1024 * 1024;
+
 namespace op_api {
 
 // ======================== Common constants ========================
@@ -102,6 +113,7 @@ static void CopyContextToTensor(const CommContext &context, at::Tensor &tensor)
     tensor.copy_(hostContext);
 }
 
+#if defined(COMM_BACKEND_HCCL)
 // ======================== KFC Mode ========================
 class KfcContextBuilder {
 public:
@@ -191,15 +203,117 @@ private:
         CollectRankBuffers(commHandle, worldSize, cclBufferSize, mc2ContextHost);
     }
 };
+#endif
+
+#if defined(COMM_BACKEND_SHMEM)
+class ShmemChannelContextBuilder {
+public:
+    void Build(const std::string &group, int64_t rankId, int64_t worldSize, int64_t &cclBufferSize,
+        uint64_t memsize_, std::string port, at::Tensor &contextTensor)
+    {
+        cclBufferSize = static_cast<int64_t>(memsize_);
+
+        initSheme(rankId, worldSize, memsize_, port);
+
+        CommContext mc2Context;
+        mc2Context.rankId = rankId;
+        mc2Context.rankSize = worldSize;
+        // mc2Context.segmentSize = heapBase;
+        mc2Context.kfcContextAddr = (uint64_t)shmem_workspace_ptr_;
+
+        for (int peer = 0; peer < worldSize; peer++) {
+            uint64_t buffAddr = (uint64_t)aclshmem_ptr(shmem_workspace_ptr_, peer);
+            mc2Context.ipcBuffer_[peer] = buffAddr;
+        }
+        CopyContextToTensor(mc2Context, contextTensor);
+
+    }
+private:
+    void initSheme(int rank, int num_ranks, uint64_t memsize, const std::string &ip_port) {
+        if (initialized_) {
+            return;
+        }
+        rank_ = rank;
+        num_ranks_ = num_ranks;
+        // Shmem init
+        int32_t status = 0;
+        const char *ipport = ip_port.c_str();
+        uint64_t local_mem_size = memsize;
+        aclshmemx_set_conf_store_tls(false, nullptr, 0);
+        aclshmemx_init_attr_t attributes;
+        aclshmemx_uniqueid_t default_flag_uid = {};
+        status = shmem_set_attr(rank, num_ranks, local_mem_size, ipport, default_flag_uid, &attributes);
+        if (status != ACLSHMEM_SUCCESS) {
+            throw std::runtime_error("shmem_set_attr failed");
+        }
+        status = aclshmemx_init_attr(ACLSHMEMX_INIT_WITH_DEFAULT, &attributes);
+        if (status != ACLSHMEM_SUCCESS) {
+            throw std::runtime_error("shmem_init_attr failed");
+        }
+
+        if (aclshmemx_init_status() != ACLSHMEM_STATUS_IS_INITIALIZED) {
+            throw std::runtime_error("shmem not initialized");
+        }
+
+        ext_info_ptr_ = aclshmem_malloc(EXT_INFO_SIZE);
+        if (ext_info_ptr_ == nullptr) {
+            throw std::runtime_error("aclshmem_malloc ext_info failed");
+        }
+
+        shmem_workspace_size_ = local_mem_size - EXT_INFO_SIZE;
+        shmem_workspace_ptr_ = aclshmem_malloc(shmem_workspace_size_);
+
+        if (shmem_workspace_ptr_ == nullptr) {
+            throw std::runtime_error("aclshmem_malloc shmem_workspace failed");
+        }
+        initialized_ = true;
+    }
+
+    int32_t shmem_set_attr(int32_t my_pe, int32_t n_pes, uint64_t local_mem_size,
+                       const char *ip_port, aclshmemx_uniqueid_t default_flag_uid,
+                       aclshmemx_init_attr_t *attributes)
+    {
+        size_t ip_len = 0;
+        if (ip_port != nullptr) {
+            ip_len = std::min(strlen(ip_port), static_cast<size_t>(ACLSHMEM_MAX_IP_PORT_LEN) - 1);
+            std::copy_n(ip_port, ip_len, attributes->ip_port);
+            if (attributes->ip_port[0] == '\0') {
+                return ACLSHMEM_INVALID_VALUE;
+            }
+        }
+        int attr_version = (1 << 16) + sizeof(aclshmemx_init_attr_t);
+        attributes->my_pe = my_pe;
+        attributes->n_pes = n_pes;
+        attributes->local_mem_size = local_mem_size;
+        attributes->ip_port[ip_len] = '\0';
+        attributes->option_attr = {attr_version, ACLSHMEM_DATA_OP_MTE, DEFAULT_TIMEOUT,
+                                    DEFAULT_TIMEOUT, DEFAULT_TIMEOUT};
+        attributes->comm_args = reinterpret_cast<void *>(&default_flag_uid);
+        return ACLSHMEM_SUCCESS;
+    }
+
+
+    int rank_;
+    int num_ranks_;
+    bool initialized_ = false;
+
+    void *ext_info_ptr_ = nullptr;
+    void *shmem_workspace_ptr_ = nullptr;
+    uint64_t shmem_workspace_size_ = 0;
+
+};
+#endif
 
 // ======================== CommContextManager ========================
 
 class CommContextManager {
 public:
-    CommContextManager(const std::string &group, int64_t worldSize, const py::object &backend = py::str("kfc"),
-                       const std::string &commAlg = "ub-mem", const std::string &opName = "moe_dispatch_ffn_combine")
-        : group_(group), worldSize_(worldSize), commAlg_(commAlg), opName_(opName), backend_(backend),
-          mode_(BackendMode::UNINITIALIZED), cclBufferSize_(0), topoType_(TopoType::INTRA_SUPER_NODE)
+    CommContextManager(const std::string &group, int64_t rannkId, int64_t worldSize , uint64_t memsize,
+        const std::string &port, const py::object &backend = py::str("kfc"),
+        const std::string &commAlg = "ub-mem", const std::string &opName = "moe_dispatch_ffn_combine")
+        : group_(group), rankId_(rannkId), worldSize_(worldSize), memsize_(memsize), port_(port), commAlg_(commAlg),
+        opName_(opName), backend_(backend), mode_(BackendMode::UNINITIALIZED), cclBufferSize_(0),
+        topoType_(TopoType::INTRA_SUPER_NODE)
     {
     }
 
@@ -249,14 +363,27 @@ private:
         switch (mode_) {
             case BackendMode::KFC:
                 {
+#if defined(COMM_BACKEND_HCCL)
                     KfcContextBuilder builder;
                     builder.Build(group_, worldSize_, cclBufferSize_, tensor);
                     return;
+#elif defined(COMM_BACKEND_SHMEM)
+                    ShmemChannelContextBuilder builder;
+                    builder.Build(group_, rankId_, worldSize_, cclBufferSize_, memsize_, port_, tensor);
+                    return;
+#else
+                   throw std::runtime_error("The COMM_BACKEND is not set, please set COMM_BACKEND hccl or shmem"); 
+#endif
                 }
             default:
                 TORCH_CHECK(false, "Unknown backend mode: ", static_cast<int>(mode_));
         }
     }
+
+
+    int64_t rankId_;
+    uint64_t memsize_;
+    std::string port_;
 
     std::string group_;
     std::string commAlg_;
@@ -272,9 +399,10 @@ private:
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     py::class_<CommContextManager>(m, "CommContextManager")
-        .def(py::init<const std::string &, int64_t, const py::object &, const std::string &, const std::string &>(),
-             py::arg("group"), py::arg("worldSize"), py::arg("backend") = std::string("kfc"),
-             py::arg("commAlg") = std::string("ub-mem"), py::arg("opName") = std::string("moe_dispatch_ffn_combine"))
+        .def(py::init<const std::string &, int64_t, int64_t, uint64_t, const std::string &, const py::object &,
+            const std::string &, const std::string &>(), py::arg("group"), py::arg("rankId"), py::arg("worldSize"),
+            py::arg("memsize"), py::arg("ipPort"), py::arg("backend") = std::string("kfc"),
+            py::arg("commAlg") = std::string("ub-mem"), py::arg("opName") = std::string("moe_dispatch_ffn_combine"))
         .def("create_context", &CommContextManager::CreateContext)
         .def("update_group", &CommContextManager::UpdateGroup, py::arg("group"), py::arg("contextTensor").noconvert())
         .def_property_readonly("ccl_buffer_size", &CommContextManager::CclBufferSize)

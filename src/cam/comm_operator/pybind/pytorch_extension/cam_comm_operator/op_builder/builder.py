@@ -36,6 +36,18 @@ class OpBuilder(ABC):
         if self._cann_path is None:
             RuntimeError("ASCEND_HOME_PATH is not set")
         self._torch_npu_path = os.path.dirname(os.path.abspath(torch_npu.__file__))
+        self._comm_backend = os.environ.get("COMM_BACKEND", "")
+
+        if self._comm_backend == "shmem":
+            shmem_home_path = os.environ.get("SHMEM_HOME_PATH")
+            if not shmem_home_path:
+                raise RuntimeError("shmem not installled")
+            if not os.path.exists(shmem_home_path):
+                raise RuntimeError("shmem not installled")
+            self.shmem_path = shmem_home_path
+        else:
+            self.shmem_path = None
+
         self._package_path = os.path.dirname(os.path.abspath(umdk_cam_op_lib.__file__))
         self.register_schema(self.schema())
         self.register_meta()
@@ -76,6 +88,8 @@ class OpBuilder(ABC):
             os.path.join(self._cann_path, 'include'),
             os.path.join(self._package_path, 'common/inc')
         ]
+        if self.shmem_path:
+            paths.append(os.path.join(self.shmem_path, 'shmem/include'))
         return paths
 
     def cxx_args(self):
@@ -85,6 +99,8 @@ class OpBuilder(ABC):
             args.append('-D_GLIBCXX_USE_CXX11_ABI=1')
         else:
             args.append('-D_GLIBCXX_USE_CXX11_ABI=0')
+        if self._comm_backend:
+            args.append(f'-DCOMM_BACKEND_{self._comm_backend.upper()}=1')
         return args
 
     def extra_ldflags(self):
@@ -92,6 +108,8 @@ class OpBuilder(ABC):
             '-L' + os.path.join(self._cann_path, 'lib64'), '-lascendcl',
             '-L' + os.path.join(self._torch_npu_path, 'lib'), '-ltorch_npu'
         ]
+        if self.shmem_path:
+            flags.extend(['-L' + os.path.join(self.shmem_path, 'shmem/lib'), '-lshmem'])
         return flags
 
     def load(self, verbose=True):

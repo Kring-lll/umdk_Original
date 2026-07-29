@@ -251,11 +251,12 @@ class ShmemFusionOp(DecodeMoeOps):
         self.buffer = None
         self._init_shmem_buffer()
         self.ep_hcomm_info = ep_hcomm_info
-        self._ctx_manager = CommContextManager(self.ep_hcomm_info, self.ep_world_size, backend={
-            "Ascend910B": "kfc",
-            "Ascend910_93": "kfc",
-            "Ascend950": "channel"
-        })
+        self._ctx_manager = CommContextManager(self.ep_hcomm_info, self.global_rank_id, self.ep_world_size,
+                self.shmem_memsize, self.ip_port, backend={
+                    "Ascend910B": "kfc",
+                    "Ascend910_93": "kfc",
+                    "Ascend950": "channel"
+                })
         self.context = self._ctx_manager.create_context()
         self.ccl_buffer_size = self._ctx_manager.ccl_buffer_size
 
