@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include "umq_dfx_api.h"
 
 #include "umq_example_common.h"
 #include "umq_example_pro.h"
@@ -16,6 +17,56 @@
 static const uint32_t EXAMPLE_MAX_DEPTH = 64;
 static const char *EXAMPLE_CLIENT_POST_DATA = "hello, this is umq pro client";
 static const char *EXAMPLE_SERVER_POST_DATA = "hello, this is umq pro server";
+
+static void test_qbuf_pool()
+{
+    umq_buf_t *last = NULL, *qbuf;
+    umq_buf_t *head = umq_buf_alloc(0, 1, 0, NULL);
+    if (head == NULL) {
+        LOG_PRINT_ERR("umq_buf_alloc failed\n");
+        return;
+    }
+    umq_qbuf_pool_stats_t qbuf_pool_stats;
+    int max_buf_len = 20480;
+    char buf[max_buf_len];
+    int ret = umq_stats_qbuf_pool_get(0, &qbuf_pool_stats);
+    if (ret != UMQ_SUCCESS) {
+        LOG_PRINT_ERR("umq_stats_qbuf_pool_get failed\n");
+        return;
+    }
+    umq_qbuf_pool_stats_to_str(&qbuf_pool_stats, buf, max_buf_len);
+    printf("%s\n", buf);
+
+    last = head;
+    for (uint32_t i = 0; i < 1000000; i++) {
+        qbuf = umq_buf_alloc(0, 1, 0, NULL);
+        if (head == NULL) {
+            LOG_PRINT_ERR("umq_buf_alloc failed, i = %u\n", i);
+            return;
+        }
+        last->qbuf_next = qbuf;
+        last = qbuf;
+    }
+
+    ret = umq_stats_qbuf_pool_get(0, &qbuf_pool_stats);
+    if (ret != UMQ_SUCCESS) {
+        LOG_PRINT_ERR("umq_stats_qbuf_pool_get failed\n");
+        return;
+    }
+    umq_qbuf_pool_stats_to_str(&qbuf_pool_stats, buf, max_buf_len);
+    printf("\n\n %s\n", buf);
+
+    umq_buf_free(head);
+
+    ret = umq_stats_qbuf_pool_get(0, &qbuf_pool_stats);
+    if (ret != UMQ_SUCCESS) {
+        LOG_PRINT_ERR("umq_stats_qbuf_pool_get failed\n");
+        return;
+    }
+    umq_qbuf_pool_stats_to_str(&qbuf_pool_stats, buf, max_buf_len);
+    printf("\n\n %s\n", buf);
+}
+
 
 int run_umq_example_pro_server(struct urpc_example_config *cfg)
 {
@@ -25,6 +76,8 @@ int run_umq_example_pro_server(struct urpc_example_config *cfg)
         LOG_PRINT_ERR("init umq failed\n");
         return -1;
     }
+
+    test_qbuf_pool();
 
     if (server_accept(cfg->server_ip, cfg->tcp_port) != 0) {
         goto UNINIT;

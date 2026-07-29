@@ -78,7 +78,7 @@ int example_init_umq(struct urpc_example_config *cfg)
     }
 
     (void)memcpy(&cfg->dev_info, &init_cfg->trans_info[0].dev_info, sizeof(umq_dev_assign_t));
-
+    init_cfg->buf_pool_cfg.umq_mem_pool_init_size = 200 * 1024 * 1024;
     if (umq_init(init_cfg) != UMQ_SUCCESS) {
         LOG_PRINT_ERR("umq_init failed\n");
         free(init_cfg);
