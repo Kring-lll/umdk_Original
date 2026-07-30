@@ -339,11 +339,68 @@ static int bondp_import_vjetty(
     return ret;
 }
 
+static int bondp_import_pjetty_custom(bondp_context_t *bdp_ctx,
+    bondp_target_jetty_t *bdp_tjetty, urma_rjetty_t *rjetty,
+    urma_token_t *rjetty_token, urma_bond_id_info_out_t *rvjetty_info)
+{
+    urma_rjetty_t p_rjetty = *rjetty;
+    p_rjetty.flag.bs.has_user_info = 0;
+
+    /* Custom mode: single loop pairing the configured local ports with the
+     * remote enabled devices one-to-one. The loop bound is the smaller of the
+     * remote enabled count and the local configured port count, so each
+     * iteration pairs port_ids[m] with enabled_indices[m]. */
+    uint32_t pair_count = rvjetty_info->enabled_count < bdp_ctx->port_cfg.port_count
+                              ? rvjetty_info->enabled_count
+                              : bdp_ctx->port_cfg.port_count;
+    for (uint32_t m = 0; m < pair_count; ++m) {
+        uint32_t local_idx = bdp_ctx->port_cfg.port_ids[m].port_idx;
+        uint32_t target_idx = rvjetty_info->enabled_indices[m];
+        p_rjetty.jetty_id = rvjetty_info->slave_id[target_idx];
+
+        if (bdp_ctx->p_ctxs[local_idx] == NULL) {
+            URMA_LOG_ERR("p_ctxs[%u] is NULL for custom port config.\n", local_idx);
+            return -1;
+        }
+        if (!rvjetty_info->connected[local_idx][target_idx]) {
+            continue;
+        }
+
+        bondp_p_target_jetty_t *p_tjetty = bondp_find_p_tjetty(bdp_tjetty, local_idx, target_idx);
+        if (p_tjetty == NULL) {
+            p_tjetty = &bdp_tjetty->p_tjettys[bdp_tjetty->p_tjetty_count];
+            p_tjetty->local_indice = (uint8_t)local_idx;
+            p_tjetty->remote_indice = (uint8_t)target_idx;
+            p_tjetty->p_tjetty = NULL;
+            p_tjetty->p_check_tseg = NULL;
+            atomic_init(&p_tjetty->valid, false);
+            bdp_tjetty->p_tjetty_count++;
+        }
+
+        if (p_tjetty->p_tjetty != NULL) {
+            continue;
+        }
+
+        p_tjetty->p_tjetty = urma_import_jetty(bdp_ctx->p_ctxs[local_idx], &p_rjetty, rjetty_token);
+        if (p_tjetty->p_tjetty == NULL) {
+            URMA_LOG_ERR("Failed to import tjetty local_idx=%u, target_idx=%u, jetty_id=%u\n",
+                         local_idx, target_idx, rvjetty_info->slave_id[target_idx].id);
+            return -1;
+        }
+        atomic_store(&p_tjetty->valid, true);
+    }
+    return 0;
+}
+
 static int bondp_import_pjetty(
     bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
     urma_rjetty_t *rjetty, urma_token_t *rjetty_token,
     urma_bond_id_info_out_t *rvjetty_info)
 {
+    if (bdp_ctx->port_cfg_enable) {
+        return bondp_import_pjetty_custom(bdp_ctx, bdp_tjetty, rjetty, rjetty_token, rvjetty_info);
+    }
+    
     urma_rjetty_t p_rjetty = *rjetty;
     p_rjetty.flag.bs.has_user_info = 0;
 
