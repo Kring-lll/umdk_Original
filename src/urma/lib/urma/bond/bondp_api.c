@@ -357,6 +357,30 @@ static int init_active_indices_ex(bondp_context_t *bdp_ctx,
                                   uint32_t active_indices[], uint32_t *active_count,
                                   const bondp_port_id_t *port_ids, uint32_t port_count);
 
+/* Check that the caller-supplied active port config (when has_drv_ext is set)
+ * is consistent with the port config previously stored via
+ * BONDP_USER_CTL_SET_BONDING_PORT. Returns 0 if consistent (or if no
+ * user_ctl config was set), -1 otherwise. port_ids and port_count are
+ * already validated by the caller. */
+static int bondp_check_port_cfg_consistency(const bondp_context_t *bdp_ctx,
+                                            const bondp_port_id_t *port_ids, uint32_t port_count)
+{
+    if (!bdp_ctx->port_cfg_enable) {
+        /* No user_ctl config set; the caller's config is the source of truth. */
+        return 0;
+    }
+    if (port_count != bdp_ctx->port_cfg.port_count) {
+        URMA_LOG_ERR("Active port count=%u mismatches user_ctl port_count=%u.\n",
+                     port_count, bdp_ctx->port_cfg.port_count);
+        return -1;
+    }
+    if (memcmp(port_ids, bdp_ctx->port_cfg.port_ids, port_count * sizeof(bondp_port_id_t)) != 0) {
+        URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config.\n");
+        return -1;
+    }
+    return 0;
+}
+
 urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
@@ -376,6 +400,10 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
         const bondp_jfc_cfg_t *bdp_cfg = (const bondp_jfc_cfg_t *)cfg;
         if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
             URMA_LOG_ERR("Invalid active port config, port_ids is NULL or port_count is 0.\n");
+            goto FREE_JFC;
+        }
+        if (bondp_check_port_cfg_consistency(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config.\n");
             goto FREE_JFC;
         }
         cfg_active_port_count = bdp_cfg->port_count;
@@ -717,6 +745,10 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
             URMA_LOG_ERR("Invalid active port config for jfs, port_ids is NULL or port_count is 0.\n");
             goto FREE_JFS;
         }
+        if (bondp_check_port_cfg_consistency(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config.\n");
+            goto FREE_JFS;
+        }
         cfg_active_port_count = bdp_cfg->port_count;
         cfg_active_port_ids = bdp_cfg->port_ids;
     }
@@ -1001,6 +1033,10 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
         const bondp_jfr_cfg_t *bdp_cfg = (const bondp_jfr_cfg_t *)cfg;
         if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
             URMA_LOG_ERR("Invalid active port config, port_ids is NULL or port_count is 0.\n");
+            goto FREE_JFR;
+        }
+        if (bondp_check_port_cfg_consistency(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config.\n");
             goto FREE_JFR;
         }
         cfg_active_port_count = bdp_cfg->port_count;
@@ -1390,6 +1426,10 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         const bondp_jetty_cfg_t *bdp_cfg = (const bondp_jetty_cfg_t *)jetty_cfg;
         if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
             URMA_LOG_ERR("Invalid active port config for jetty, port_ids is NULL or port_count is 0\n");
+            goto FREE_JETTY;
+        }
+        if (bondp_check_port_cfg_consistency(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config.\n");
             goto FREE_JETTY;
         }
         cfg_active_port_count = bdp_cfg->port_count;
