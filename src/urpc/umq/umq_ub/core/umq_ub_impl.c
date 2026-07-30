@@ -1105,9 +1105,18 @@ static int umq_ub_create_jetty_node(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx,
     }
 
     if (queue->flow_control.enabled) {
+        bondp_jfc_cfg_t bondp_fc_jfc_cfg = {
+            .base = {
+                .depth = UMQ_UB_FLOW_CONTORL_JETTY_DEPTH + 1, // flush done consumes one cqe
+                .jfce = jetty_node->jfs_jfce,
+                .flag.bs.has_drv_ext = ((option->create_flag & UMQ_TP_CREATE_FLAG_USED_PORTS) != 0)
+            },
+            .port_ids = used_port,
+            .port_count = used_port_num,
+        };
         start_timestamp = umq_perf_get_start_timestamp();
         jetty_node->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL] =
-        umq_symbol_urma()->urma_create_jfc(dev_ctx->urma_ctx, &bondp_jfc_cfg.base);
+        umq_symbol_urma()->urma_create_jfc(dev_ctx->urma_ctx, &bondp_fc_jfc_cfg.base);
         umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_CREATE_JFC, start_timestamp);
         if (jetty_node->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL] == NULL) {
             UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "urma_create_jfc for flowcontrol jfs_jfc failed, errno: %d\n", errno);
