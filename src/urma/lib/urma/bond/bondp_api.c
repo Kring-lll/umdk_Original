@@ -357,6 +357,79 @@ static int init_active_indices_ex(bondp_context_t *bdp_ctx,
                                   uint32_t active_indices[], uint32_t *active_count,
                                   const bondp_port_id_t *port_ids, uint32_t port_count);
 
+/* Check that the active indices derived from the caller's port_ids (now stored
+ * in enabled_indices after init_active_indices(_ex)) match the bonding port
+ * config previously set via BONDP_USER_CTL_SET_BONDING_PORT (which is also
+ * stored as matrix active indices in bdp_ctx->port_cfg). Comparison is
+ * order-independent and treats the two index sets as equal only when they
+ * contain exactly the same elements. Returns 0 if consistent (or if no
+ * user_ctl config was set), -1 otherwise. Shared by create_jfc/jfs/jfr/jetty. */
+static int bondp_check_port_cfg_match(const bondp_context_t *bdp_ctx,
+                                      const uint32_t enabled_indices[], uint32_t enabled_count)
+{
+    if (!bdp_ctx->port_cfg_enable) {
+        /* No user_ctl config set; the caller's config is the source of truth. */
+        return 0;
+    }
+
+    if (enabled_count != bdp_ctx->port_cfg.enabled_count) {
+        URMA_LOG_ERR("Active port count=%u mismatches user_ctl enabled_count=%u.\n",
+                     enabled_count, bdp_ctx->port_cfg.enabled_count);
+        return -1;
+    }
+
+    /* Both sets are de-duplicated by init_active_indices / set_bonding_port,
+     * so an O(n^2) containment check over at most URMA_UBAGG_DEV_MAX_NUM
+     * elements is fine and avoids ordering assumptions. */
+    for (uint32_t i = 0; i < enabled_count; ++i) {
+        bool found = false;
+        for (uint32_t j = 0; j < bdp_ctx->port_cfg.enabled_count; ++j) {
+            if (bdp_ctx->port_cfg.enabled_indices[j] == enabled_indices[i]) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            URMA_LOG_ERR("Active port index=%u not in user_ctl bonding port config.\n",
+                         enabled_indices[i]);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* Check that the chip_id sequence of the caller's port_ids matches the chip_id
+ * sequence stored in bdp_ctx->port_cfg.chip_id[] position by position. Unlike
+ * bondp_check_port_cfg_match (order-independent on the index set), this
+ * enforces chip_id ordering: the caller's port_ids must list chips in the same
+ * order as configured via user_ctl. port_cfg.chip_id[] is stored verbatim (no
+ * de-dup) at set time, so the caller's port_ids are compared directly, without
+ * conversion or de-duplication; the caller is expected to supply port_ids in
+ * the same order and count as set. Returns 0 if consistent (or if no user_ctl
+ * config was set), -1 otherwise. Shared by create_jfc/jfs/jfr/jetty. */
+static int bondp_check_port_chip_id_order(const bondp_context_t *bdp_ctx,
+                                          const bondp_port_id_t *port_ids, uint32_t port_count)
+{
+    if (!bdp_ctx->port_cfg_enable) {
+        return 0;
+    }
+
+    if (port_count != bdp_ctx->port_cfg.chip_id_count) {
+        URMA_LOG_ERR("Active port count=%u mismatches user_ctl chip_id_count=%u.\n",
+                     port_count, bdp_ctx->port_cfg.chip_id_count);
+        return -1;
+    }
+
+    for (uint32_t i = 0; i < port_count; ++i) {
+        if (port_ids[i].chip_id != bdp_ctx->port_cfg.chip_id[i]) {
+            URMA_LOG_ERR("chip_id mismatch at index=%u, caller=%u, user_ctl=%u.\n",
+                         i, port_ids[i].chip_id, bdp_ctx->port_cfg.chip_id[i]);
+            return -1;
+        }
+    }
+    return 0;
+}
+
 urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
@@ -379,6 +452,10 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
             URMA_LOG_ERR("Invalid active port config, port_ids is NULL or port_count is 0.\n");
             goto FREE_JFC;
         }
+        if (bondp_check_port_chip_id_order(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port chip_id order mismatches user_ctl bonding port config.\n");
+            goto FREE_JFC;
+        }
         cfg_active_port_count = bdp_cfg->port_count;
         cfg_active_port_ids = bdp_cfg->port_ids;
     }
@@ -387,6 +464,11 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
                                bdp_jfc->active_indices, &bdp_jfc->active_count,
                                cfg_active_port_ids, cfg_active_port_count) != 0) {
         URMA_LOG_ERR("Failed to init active indices\n");
+        goto FREE_JFC;
+    }
+
+    if (bondp_check_port_cfg_match(bdp_ctx, bdp_jfc->enabled_indices, bdp_jfc->enabled_count) != 0) {
+        URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config.\n");
         goto FREE_JFC;
     }
 
@@ -477,8 +559,8 @@ static inline int get_matrix_port_p_idx(int primary_idx, int port_idx)
     return primary_idx * PORT_EID_MAX_NUM_PER_DEV + port_idx + PRIMARY_EID_NUM;
 }
 
-static int convert_bond_port_id_to_active_index(const bondp_context_t *bdp_ctx, bondp_port_id_t port_id,
-                                                uint32_t *active_index)
+int convert_bond_port_id_to_active_index(const bondp_context_t *bdp_ctx, bondp_port_id_t port_id,
+                                         uint32_t *active_index)
 {
     if (port_id.chip_id == 0 || port_id.chip_id > CHIP_NUM) {
         URMA_LOG_ERR("Invalid primary chip_id=%u.\n", port_id.chip_id);
@@ -718,12 +800,21 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
             URMA_LOG_ERR("Invalid active port config for jfs, port_ids is NULL or port_count is 0.\n");
             goto FREE_JFS;
         }
+        if (bondp_check_port_chip_id_order(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port chip_id order mismatches user_ctl bonding port config.\n");
+            goto FREE_JFS;
+        }
         cfg_active_port_count = bdp_cfg->port_count;
         cfg_active_port_ids = bdp_cfg->port_ids;
     }
 
     if (init_active_indices(bdp_ctx, bdp_jfs, cfg_active_port_ids, cfg_active_port_count) != 0) {
         URMA_LOG_ERR("Failed to init active indices\n");
+        goto FREE_JFS;
+    }
+
+    if (bondp_check_port_cfg_match(bdp_ctx, bdp_jfs->enabled_indices, bdp_jfs->enabled_count) != 0) {
+        URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config.\n");
         goto FREE_JFS;
     }
 
@@ -1004,12 +1095,21 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
             URMA_LOG_ERR("Invalid active port config, port_ids is NULL or port_count is 0.\n");
             goto FREE_JFR;
         }
+        if (bondp_check_port_chip_id_order(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port chip_id order mismatches user_ctl bonding port config.\n");
+            goto FREE_JFR;
+        }
         cfg_active_port_count = bdp_cfg->port_count;
         cfg_active_port_ids = bdp_cfg->port_ids;
     }
 
     if (init_active_indices(bdp_ctx, bdp_jfr, cfg_active_port_ids, cfg_active_port_count) != 0) {
         URMA_LOG_ERR("Failed to init active indices\n");
+        goto FREE_JFR;
+    }
+
+    if (bondp_check_port_cfg_match(bdp_ctx, bdp_jfr->enabled_indices, bdp_jfr->enabled_count) != 0) {
+        URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config.\n");
         goto FREE_JFR;
     }
 
@@ -1393,12 +1493,21 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
             URMA_LOG_ERR("Invalid active port config for jetty, port_ids is NULL or port_count is 0\n");
             goto FREE_JETTY;
         }
+        if (bondp_check_port_chip_id_order(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port chip_id order mismatches user_ctl bonding port config.\n");
+            goto FREE_JETTY;
+        }
         cfg_active_port_count = bdp_cfg->port_count;
         cfg_active_port_ids = bdp_cfg->port_ids;
     }
 
     if (init_active_indices(bdp_ctx, bdp_jetty, cfg_active_port_ids, cfg_active_port_count) != 0) {
         URMA_LOG_ERR("Failed to init active indices\n");
+        goto FREE_JETTY;
+    }
+
+    if (bondp_check_port_cfg_match(bdp_ctx, bdp_jetty->enabled_indices, bdp_jetty->enabled_count) != 0) {
+        URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config.\n");
         goto FREE_JETTY;
     }
 
