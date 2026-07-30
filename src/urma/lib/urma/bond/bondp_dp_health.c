@@ -67,8 +67,10 @@ typedef struct bondp_hc_node {
 /* Per-context health-check context */
 struct bondp_hc_ctx {
     bondp_hc_cfg_t cfg;
+    uint8_t priority;
     bondp_probe_res_t probes[URMA_UBAGG_DEV_MAX_NUM];
     atomic_uint_fast64_t probe_task_id;
+    atomic_bool started;    /* Resources are created lazily by bondp_hc_start */
     atomic_bool stopping;   /* Set by uninit to stop the probe task from rescheduling */
     uint32_t probe_cur_idx; /* Current polling position for batched node probing */
     uint32_t node_num;
@@ -94,13 +96,14 @@ static inline void hc_decode_user_ctx(uint64_t user_ctx, uint32_t *node_idx, uin
 }
 
 static urma_jetty_t *hc_create_probe_jetty(urma_context_t *p_ctx, urma_jfc_t *jfc,
-                                           urma_jfr_t *jfr, int local_idx)
+                                           urma_jfr_t *jfr, int local_idx, uint8_t priority)
 {
     urma_jetty_cfg_t p_cfg = {
         .flag = {.bs = {.share_jfr = URMA_SHARE_JFR}},
         .jfs_cfg = {
             .depth = HC_PROBE_QUEUE_DEPTH,
             .trans_mode = URMA_TM_RM,
+            .priority = priority,
             .max_sge = 1,
             .rnr_retry = URMA_TYPICAL_RNR_RETRY,
             .err_timeout = 0,
@@ -157,7 +160,7 @@ static void hc_rebuild_probe_jetty(bondp_hc_ctx_t *hc_ctx, bondp_probe_res_t *re
         pthread_rwlock_unlock(&node->lock);
     }
 
-    res->jetty = hc_create_probe_jetty(p_ctx, res->jfc, res->jfr, local_idx);
+    res->jetty = hc_create_probe_jetty(p_ctx, res->jfc, res->jfr, local_idx, hc_ctx->priority);
     if (res->jetty == NULL) {
         URMA_LOG_ERR("Failed to rebuild health probe jetty, local_idx=%d.\n", local_idx);
     }
@@ -514,7 +517,7 @@ static void hc_destroy_probe_resource(bondp_hc_ctx_t *hc_ctx, int local_idx)
     *res = (bondp_probe_res_t){0};
 }
 
-static int hc_init_probe_resource(urma_context_t *p_ctx, bondp_probe_res_t *res)
+static int hc_init_probe_resource(urma_context_t *p_ctx, bondp_probe_res_t *res, uint8_t priority)
 {
     int local_idx = res->local_idx;
     urma_jfc_cfg_t jfc_cfg = {
@@ -559,7 +562,7 @@ static int hc_init_probe_resource(urma_context_t *p_ctx, bondp_probe_res_t *res)
         goto FREE_PROBE_BUF;
     }
 
-    urma_jetty_t *jetty = hc_create_probe_jetty(p_ctx, jfc, jfr, local_idx);
+    urma_jetty_t *jetty = hc_create_probe_jetty(p_ctx, jfc, jfr, local_idx, priority);
     if (jetty == NULL) {
         goto UNREGISTER_SEG;
     }
@@ -622,7 +625,7 @@ static int hc_init_probe_resources(bondp_context_t *bdp_ctx, bondp_hc_ctx_t *hc_
             continue;
         }
         hc_ctx->probes[i].local_idx = i;
-        int ret = hc_init_probe_resource(p_ctx, &hc_ctx->probes[i]);
+        int ret = hc_init_probe_resource(p_ctx, &hc_ctx->probes[i], hc_ctx->priority);
         if (ret != 0) {
             URMA_LOG_ERR("Failed to create health probe resources, local_idx=%u.\n", i);
             goto ERR_DESTROY_PROBES;
@@ -674,14 +677,39 @@ int bondp_hc_init(bondp_context_t *bdp_ctx, const bondp_hc_cfg_t *cfg)
         goto ERR_FREE_CTX;
     }
 
+    bdp_ctx->hc_ctx = hc_ctx;
+    return 0;
+
+ERR_FREE_CTX:
+    free(hc_ctx);
+    return ret;
+}
+
+int bondp_hc_start(bondp_context_t *bdp_ctx, uint8_t priority)
+{
+    int ret;
+
+    if (bdp_ctx == NULL || bdp_ctx->hc_ctx == NULL) {
+        return 0;
+    }
+
+    bondp_hc_ctx_t *hc_ctx = bdp_ctx->hc_ctx;
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&hc_ctx->started, &expected, true)) {
+        return 0;
+    }
+
+    hc_ctx->priority = priority;
+
     bool has_probe_res = false;
     ret = hc_init_probe_resources(bdp_ctx, hc_ctx, &has_probe_res);
     if (ret != 0) {
-        goto ERR_DESTROY_NODES;
+        atomic_store(&hc_ctx->started, false);
+        return ret;
     }
     if (!has_probe_res) {
-        URMA_LOG_INFO("No health probe resource, skip mounting context.\n");
-        goto ERR_DESTROY_NODES;
+        URMA_LOG_INFO("No health probe resource, skip starting health probe.\n");
+        return 0;
     }
 
     bondp_worker_task_id_t task_id = 0;
@@ -692,18 +720,14 @@ int bondp_hc_init(bondp_context_t *bdp_ctx, const bondp_hc_cfg_t *cfg)
         goto ERR_DESTROY_PROBES;
     }
     atomic_store(&hc_ctx->probe_task_id, task_id);
-    URMA_LOG_INFO("Health probe task scheduled, interval=%lums, node_num=%u.\n",
-                  hc_ctx->cfg.probe_interval_ms, hc_ctx->node_num);
+    URMA_LOG_INFO("Health probe task scheduled, interval=%lums, node_num=%u, priority=%u.\n",
+                  hc_ctx->cfg.probe_interval_ms, hc_ctx->node_num, hc_ctx->priority);
 
-    bdp_ctx->hc_ctx = hc_ctx;
     return 0;
 
 ERR_DESTROY_PROBES:
     hc_destroy_probe_resources(hc_ctx);
-ERR_DESTROY_NODES:
-    hc_destroy_nodes(hc_ctx);
-ERR_FREE_CTX:
-    free(hc_ctx);
+    atomic_store(&hc_ctx->started, false);
     return ret;
 }
 
