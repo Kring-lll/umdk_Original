@@ -498,6 +498,14 @@ urma_status_t bondp_delete_context(urma_context_t *ctx)
         ret = URMA_FAIL;
     }
 
+    /* Free the copied bonding port config if set via user_ctl. */
+    if (bdp_ctx->port_cfg_enable && bdp_ctx->port_cfg.port_ids != NULL) {
+        free((void *)bdp_ctx->port_cfg.port_ids);
+        bdp_ctx->port_cfg.port_ids = NULL;
+        bdp_ctx->port_cfg.port_count = 0;
+        bdp_ctx->port_cfg_enable = false;
+    }
+
     free(bdp_ctx);
 
     URMA_LOG_DEBUG("Finish to delete ctx, dev_name=%s, eid_idx=%u.\n",
