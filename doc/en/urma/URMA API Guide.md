@@ -6813,6 +6813,37 @@ typedef struct urma_user_ctl_out {
 } urma_user_ctl_out_t;
 ```
 
+##### 2.5.1.1.3 BONDP_USER_CTL_SET_BONDING_PORT
+
+A bonding device may set a unified physical port list through this opcode before creating JFC, JFS, JFR, and Jetty, so that subsequently created objects establish physical connections only on this port subset, reducing the number of physical connections. The opcode and its input structure are defined in [urma_ubagg.h](../../../src/urma/lib/urma/bond/include/urma_ubagg.h).
+
+Usage:
+
+- `in.opcode` is `BONDP_USER_CTL_SET_BONDING_PORT`;
+- `in.addr` points to a `bondp_set_bonding_port_in_t` structure, and `in.len` is the size of that structure;
+- `out` is unused (may be 0).
+
+```c
+typedef struct bondp_set_bonding_port_in {
+    const bondp_port_id_t *port_ids; /* [Required] array of physical port ids */
+    uint32_t port_count;             /* [Required] number of elements, in [1, URMA_UBAGG_DEV_MAX_NUM] */
+} bondp_set_bonding_port_in_t;
+```
+
+The three semantic fields of `bondp_port_id_t`:
+
+- `chip_id`: chip number, valid range [1, CHIP_NUM];
+- `die_id`: fixed to 1;
+- `port_idx`: port EID number, valid range [0, PORT_NUM]; `UINT8_MAX` represents the primary EID of the chip.
+
+Constraints and ordering:
+
+- liburma copies the `port_ids` array internally; the caller may release the buffer immediately after the call returns.
+- The configuration is context-scoped and applies to JFC/JFS/JFR/Jetty created afterwards on the same `urma_context_t`. When the caller sets `has_drv_ext` while creating these objects, the supplied `port_ids` must be identical to this configuration (chip_id/die_id/port_idx matched item by item), otherwise the creation fails.
+- The configuration must be done **before** creating any JFC/JFS/JFR/Jetty; if the context is still referenced by existing objects, a subsequent call returns `URMA_EAGAIN`, and the caller must destroy the existing objects first before reconfiguring.
+
+Return: 0 on success, `URMA_EAGAIN` when the context is still referenced by existing objects, other value on error.
+
 ### 2.5.2 Logging
 
 #### 2.5.2.1 urma_register_log_func

@@ -216,6 +216,56 @@ static int bondp_user_ctl_get_seg_ctx(urma_context_t *ctx, urma_user_ctl_in_t *i
     return 0;
 }
 
+static int bondp_user_ctl_set_bonding_port(urma_context_t *ctx, urma_user_ctl_in_t *in,
+                                           urma_user_ctl_out_t *out)
+{
+    (void)out;
+
+    if (in->addr == 0 || in->len != sizeof(bondp_set_bonding_port_in_t)) {
+        URMA_LOG_ERR("Invalid set bonding port param.\n");
+        return -EINVAL;
+    }
+
+    bondp_set_bonding_port_in_t *port_in = (bondp_set_bonding_port_in_t *)(uintptr_t)in->addr;
+    if (port_in->port_ids == NULL || port_in->port_count == 0 ||
+        port_in->port_count > URMA_UBAGG_DEV_MAX_NUM) {
+        URMA_LOG_ERR("Invalid bonding port config, port_count=%u.\n", port_in->port_count);
+        return -EINVAL;
+    }
+
+    /* The bonding port config drives which p_ctxs are used by JFC/JFS/JFR/Jetty
+     * created afterwards. Reject reconfiguration once any object has taken a
+     * reference (atomic_cnt > 1), otherwise existing objects built on the old
+     * port set would be paired with the new indices and get NULL p_jfc/p_jfr. */
+    uint64_t cnt = (uint64_t)atomic_load(&ctx->ref.atomic_cnt);
+    if (cnt > 1) {
+        URMA_LOG_WARN("Context already in use, atomic_cnt=%lu, dev_name=%s.\n", cnt, ctx->dev->name);
+        return URMA_EAGAIN;
+    }
+
+    bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
+    /* Copy the port_ids array so the caller's buffer may be released after
+     * return. Free any previously stored config first. */
+    if (bdp_ctx->port_cfg_enable && bdp_ctx->port_cfg.port_ids != NULL) {
+        free((void *)bdp_ctx->port_cfg.port_ids);
+        bdp_ctx->port_cfg.port_ids = NULL;
+        bdp_ctx->port_cfg.port_count = 0;
+        bdp_ctx->port_cfg_enable = false;
+    }
+
+    bondp_port_id_t *port_ids_copy = calloc(port_in->port_count, sizeof(bondp_port_id_t));
+    if (port_ids_copy == NULL) {
+        URMA_LOG_ERR("Failed to alloc bonding port cfg.\n");
+        return -ENOMEM;
+    }
+    (void)memcpy(port_ids_copy, port_in->port_ids, port_in->port_count * sizeof(bondp_port_id_t));
+    bdp_ctx->port_cfg.port_ids = port_ids_copy;
+    bdp_ctx->port_cfg.port_count = port_in->port_count;
+    bdp_ctx->port_cfg_enable = true;
+    URMA_LOG_INFO("Set bonding port cfg, port_count=%u.\n", port_in->port_count);
+    return 0;
+}
+
 int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_out_t *out)
 {
     if (in == NULL) {
@@ -240,6 +290,8 @@ int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_ou
             return bondp_get_rjetty(ctx, in, out);
         case BONDP_USER_CTL_OPCODE_GET_SEG_CTX:
             return bondp_user_ctl_get_seg_ctx(ctx, in, out);
+        case BONDP_USER_CTL_SET_BONDING_PORT:
+            return bondp_user_ctl_set_bonding_port(ctx, in, out);
         default: {
             URMA_LOG_ERR("Unsupported opcode, opcode=%d\n", in->opcode);
             return -EINVAL;

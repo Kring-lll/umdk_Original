@@ -357,6 +357,39 @@ static int init_active_indices_ex(bondp_context_t *bdp_ctx,
                                   uint32_t active_indices[], uint32_t *active_count,
                                   const bondp_port_id_t *port_ids, uint32_t port_count);
 
+/* Check that the caller-supplied active port config (when has_drv_ext is set)
+ * is consistent with the port config previously stored via
+ * BONDP_USER_CTL_SET_BONDING_PORT. Returns 0 if consistent (or if no
+ * user_ctl config was set), -1 otherwise. port_ids and port_count are
+ * already validated by the caller. */
+static int bondp_check_port_cfg_consistency(const bondp_context_t *bdp_ctx,
+                                            const bondp_port_id_t *port_ids, uint32_t port_count)
+{
+    if (!bdp_ctx->port_cfg_enable) {
+        /* No user_ctl config set; the caller's config is the source of truth. */
+        return 0;
+    }
+    if (port_count != bdp_ctx->port_cfg.port_count) {
+        URMA_LOG_ERR("Active port count=%u mismatches user_ctl port_count=%u.\n",
+                     port_count, bdp_ctx->port_cfg.port_count);
+        return -1;
+    }
+    /* Compare only the semantic fields (chip_id/die_id/port_idx). bondp_port_id_t
+     * is a union whose reserved byte and trailing padding bytes are not part of
+     * the port identity and may be uninitialized when the caller fills it
+     * field-by-field, so a whole-object memcmp would misjudge equal configs. */
+    for (uint32_t i = 0; i < port_count; ++i) {
+        const bondp_port_id_t *lhs = &port_ids[i];
+        const bondp_port_id_t *rhs = &bdp_ctx->port_cfg.port_ids[i];
+        if (lhs->chip_id != rhs->chip_id || lhs->die_id != rhs->die_id ||
+            lhs->port_idx != rhs->port_idx) {
+            URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config at index=%u.\n", i);
+            return -1;
+        }
+    }
+    return 0;
+}
+
 urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
@@ -377,6 +410,10 @@ urma_jfc_t *bondp_create_jfc(urma_context_t *ctx, urma_jfc_cfg_t *cfg)
         const bondp_jfc_cfg_t *bdp_cfg = (const bondp_jfc_cfg_t *)cfg;
         if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
             URMA_LOG_ERR("Invalid active port config, port_ids is NULL or port_count is 0.\n");
+            goto FREE_JFC;
+        }
+        if (bondp_check_port_cfg_consistency(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config.\n");
             goto FREE_JFC;
         }
         cfg_active_port_count = bdp_cfg->port_count;
@@ -477,8 +514,8 @@ static inline int get_matrix_port_p_idx(int primary_idx, int port_idx)
     return primary_idx * PORT_EID_MAX_NUM_PER_DEV + port_idx + PRIMARY_EID_NUM;
 }
 
-static int convert_bond_port_id_to_active_index(const bondp_context_t *bdp_ctx, bondp_port_id_t port_id,
-                                                uint32_t *active_index)
+int convert_bond_port_id_to_active_index(const bondp_context_t *bdp_ctx, bondp_port_id_t port_id,
+                                         uint32_t *active_index)
 {
     if (port_id.chip_id == 0 || port_id.chip_id > CHIP_NUM) {
         URMA_LOG_ERR("Invalid primary chip_id=%u.\n", port_id.chip_id);
@@ -716,6 +753,10 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
         const bondp_jfs_cfg_t *bdp_cfg = (const bondp_jfs_cfg_t *)cfg;
         if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
             URMA_LOG_ERR("Invalid active port config for jfs, port_ids is NULL or port_count is 0.\n");
+            goto FREE_JFS;
+        }
+        if (bondp_check_port_cfg_consistency(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config.\n");
             goto FREE_JFS;
         }
         cfg_active_port_count = bdp_cfg->port_count;
@@ -1002,6 +1043,10 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg)
         const bondp_jfr_cfg_t *bdp_cfg = (const bondp_jfr_cfg_t *)cfg;
         if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
             URMA_LOG_ERR("Invalid active port config, port_ids is NULL or port_count is 0.\n");
+            goto FREE_JFR;
+        }
+        if (bondp_check_port_cfg_consistency(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config.\n");
             goto FREE_JFR;
         }
         cfg_active_port_count = bdp_cfg->port_count;
@@ -1391,6 +1436,10 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         const bondp_jetty_cfg_t *bdp_cfg = (const bondp_jetty_cfg_t *)jetty_cfg;
         if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
             URMA_LOG_ERR("Invalid active port config for jetty, port_ids is NULL or port_count is 0\n");
+            goto FREE_JETTY;
+        }
+        if (bondp_check_port_cfg_consistency(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port config mismatches user_ctl bonding port config.\n");
             goto FREE_JETTY;
         }
         cfg_active_port_count = bdp_cfg->port_count;
