@@ -6815,6 +6815,37 @@ typedef struct urma_user_ctl_out {
 } urma_user_ctl_out_t;
 ```
 
+##### 2.5.1.1.3 BONDP_USER_CTL_SET_BONDING_PORT
+
+聚合（bonding）设备可在创建 JFC、JFS、JFR、Jetty 之前，通过该 opcode 设置统一的物理端口列表，使后续创建的对象仅在该端口子集上建立物理连接，从而减少物理连接数。该 opcode 与输入结构定义在 [urma_ubagg.h](../../../src/urma/lib/urma/bond/include/urma_ubagg.h) 中。
+
+调用方式：
+
+- `in.opcode` 取 `BONDP_USER_CTL_SET_BONDING_PORT`；
+- `in.addr` 指向 `bondp_set_bonding_port_in_t` 结构，`in.len` 为该结构的大小；
+- `out` 不使用（可为 0）。
+
+```c
+typedef struct bondp_set_bonding_port_in {
+    const bondp_port_id_t *port_ids; /* [Required] 物理端口 id 数组 */
+    uint32_t port_count;             /* [Required] 数组元素个数，取值范围 [1, URMA_UBAGG_DEV_MAX_NUM] */
+} bondp_set_bonding_port_in_t;
+```
+
+`bondp_port_id_t` 的三个语义字段：
+
+- `chip_id`：芯片号，合法取值 [1, CHIP_NUM]；
+- `die_id`：固定为 1；
+- `port_idx`：端口 EID 编号，合法取值 [0, PORT_NUM]；取 `UINT8_MAX` 时表示该芯片的 primary EID。
+
+约束与时序：
+
+- liburma 内部会拷贝 `port_ids` 数组，调用返回后调用方可立即释放该缓冲区。
+- 该配置为上下文级，作用于同一 `urma_context_t` 上后续创建的 JFC/JFS/JFR/Jetty。调用方在创建这些对象时若置位 `has_drv_ext`，其传入的 `port_ids` 必须与本配置完全一致（chip_id/die_id/port_idx 逐项相同），否则创建失败。
+- 配置必须在创建任何 JFC/JFS/JFR/Jetty **之前**完成；若上下文已被对象引用（仍有存活对象），再次调用将返回 `URMA_EAGAIN`，调用方需先销毁已有对象再重新设置。
+
+Return: 0 on success, `URMA_EAGAIN` when the context is still referenced by existing objects, other value on error.
+
 ### 2.5.2 日志
 
 #### 2.5.2.1 urma_register_log_func
