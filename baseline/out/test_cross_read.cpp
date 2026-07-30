@@ -13,10 +13,10 @@
 
 #define SEG_LEN 4096
 #define OOB_FILE "/tmp/urma_cross_oob"
-typedef struct { urma_eid_t eid; uint32_t uasid; uint32_t token_id; uint64_t va; uint64_t len; } oob_t;
+typedef struct { urma_eid_t eid; uint32_t uasid; uint32_t token_id; uint32_t jetty_id; uint64_t va; uint64_t len; } oob_t;
 static void do_a_side(void)
 {
-    ctx_t *c = setup(0, URMA_TM_UM);
+    ctx_t *c = setup_default(0);
     if (!c) return;
     char *buf = calloc(1, SEG_LEN); memset(buf, 'A', SEG_LEN);
     urma_target_seg_t *tseg = register_seg(c, buf, SEG_LEN);
@@ -25,6 +25,7 @@ static void do_a_side(void)
     oob.eid = c->ctx->eid;
     oob.uasid = c->ctx->uasid;
     oob.token_id = tseg->seg.token_id;
+    oob.jetty_id = get_jetty_id(c);
     oob.va = (uint64_t)(uintptr_t)buf;
     oob.len = SEG_LEN;
     FILE *f = fopen(OOB_FILE, "wb");
@@ -50,7 +51,7 @@ TEST(test_cross_read, Run)
     if (pid == 0) { do_a_side(); _exit(0); }
 
     sleep(3);
-    c = setup(1, URMA_TM_UM);
+    c = setup_default(1);
     if (!c) goto done;
     for (i = 0; i < 100; i++) {
         FILE *f = fopen(OOB_FILE, "rb");
@@ -61,7 +62,7 @@ TEST(test_cross_read, Run)
     imp_tseg = import_seg_remote(c, oob.eid, oob.uasid, oob.token_id, oob.va, oob.len);
     if (!imp_tseg) goto done;
     EXPECT_EQ(0, 0);
-    tj = import_jetty_remote(c, oob.eid, oob.uasid, c->jfs->jfs_id.id);
+    tj = import_jetty_remote(c, oob.eid, oob.uasid, oob.jetty_id);
     if (!tj) goto done;
     EXPECT_EQ(0, 0);
     dst = calloc(1, SEG_LEN); memset(dst, 'Z', SEG_LEN);

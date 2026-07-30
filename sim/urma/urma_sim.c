@@ -266,9 +266,11 @@ DIR *opendir(const char *name)
         return real_opendir(g_sim_dir_root);
     }
     /* build 路径下的 provider 目录（urma_open_drivers 用 dladdr 推算 liburma 路径，
-     * build_noasan 的 liburma 没有 /urma/ 子目录）。重定向到装版 provider 目录，
-     * 让 urma_init 能 dlopen 真 udma provider（与 sim 同名，sim 先注册赢）。 */
-    if (strncmp(name, "/umdk/src/build", 15) == 0 &&
+     * 但路径基于 cwd 拼相对前缀，如 /umdk/baseline/../src/build_noasan/.../urma，
+     * build_noasan 的 liburma 没有 /urma/ 子目录）。匹配任意含 "/build" 且以
+     * "/urma" 结尾的路径，重定向到装版 provider 目录，让 urma_init 能 dlopen 真
+     * udma provider（与 sim 同名，sim 先注册赢）。 */
+    if (strstr(name, "/build") != NULL &&
         strcmp(name + strlen(name) - 5, "/urma") == 0) {
         return real_opendir("/usr/lib64/urma");
     }
@@ -309,7 +311,7 @@ static char *urma_sim_provider_redirect(const char *path)
     if (path == NULL) {
         return NULL;
     }
-    if (strncmp(path, "/umdk/src/build", 15) != 0) {
+    if (strstr(path, "/build") == NULL) {
         return NULL;
     }
     /* 路径必须含 /urma/ 段，且以 .so 结尾。取最后一个 /urma/ 后的 basename。 */

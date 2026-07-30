@@ -53,6 +53,10 @@ ctx_t *setup(int dev_idx, urma_transport_mode_t trans_mode, urma_tp_type_t tp_ty
 /* 便捷：UM+UTP（最常用，兼容旧调用） */
 ctx_t *setup_default(int dev_idx);
 
+/* 探测有无真设备（不依赖 sim）。0=有真设备可测，非 0=无设备。
+ * no-sim 模式用它判断该不该跑功能测试，避免"无设备假 PASS"。 */
+int probe_device(void);
+
 /* register_seg：给 buf 注册 seg。buf 由 caller 分配。
  * 返回 target_seg，失败 NULL。 */
 urma_target_seg_t *register_seg(ctx_t *c, void *buf, size_t len);

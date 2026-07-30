@@ -25,6 +25,8 @@ struct ctx_t {
 
 ctx_t *setup(int dev_idx, urma_transport_mode_t trans_mode, urma_tp_type_t tp_type);
 ctx_t *setup_default(int dev_idx);
+/* 探测有无真设备（不依赖 sim）。0=有设备可测，非 0=无设备。 */
+int probe_device(void);
 urma_target_seg_t *register_seg(ctx_t *c, void *buf, size_t len);
 urma_target_jetty_t *import_self(ctx_t *c);
 urma_target_jetty_t *bind_remote(ctx_t *c, urma_eid_t rmt_eid,

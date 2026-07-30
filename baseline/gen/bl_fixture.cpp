@@ -19,6 +19,26 @@ static void bl_log(int level, char *message) {
     if (level <= 3) fprintf(stderr, "[urma L%d] %s", level, message);
 }
 
+/* 探测有无真设备（不依赖 sim）。no-sim 模式判断该不该跑功能测试。
+ * 0=有真设备可测；非 0=无设备。不创建资源，不污染 setup 的 static flag。 */
+int probe_device(void) {
+    static int inited = 0;
+    if (!inited) {
+        urma_init_attr_t init_attr = {0};
+        (void)urma_register_log_func(bl_log);
+        if (urma_init(&init_attr) != 0) return 1;
+        inited = 1;
+    }
+    int num_devs = 0;
+    urma_device_t **devs = urma_get_device_list(&num_devs);
+    if (devs == nullptr || num_devs <= 0) {
+        if (devs) urma_free_device_list(devs);
+        return 2;
+    }
+    urma_free_device_list(devs);
+    return 0;
+}
+
 ctx_t::~ctx_t() {
     if (jetty) urma_delete_jetty(jetty);
     if (jfr) urma_delete_jfr(jfr);

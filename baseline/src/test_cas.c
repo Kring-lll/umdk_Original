@@ -20,7 +20,7 @@ void test_cas(void)
     int ret = -1, n = 0;
     urma_cr_t cr = {0};
 
-    c = setup(0, URMA_TM_UM);
+    c = setup_default(0);
     if (!c) goto cleanup;
     abuf = calloc(1, SEG_LEN); *(uint64_t *)abuf = 0x100;
     tseg = register_seg(c, abuf, SEG_LEN);

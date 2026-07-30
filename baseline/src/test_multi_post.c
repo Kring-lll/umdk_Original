@@ -20,7 +20,7 @@ void test_multi_post(void)
     int ret = -1, i, got = 0;
     urma_cr_t cr = {0};
 
-    c = setup(0, URMA_TM_UM);
+    c = setup_default(0);
     if (!c) goto cleanup;
     src = calloc(1, SEG_LEN); memset(src, 'A', SEG_LEN);
     tseg = register_seg(c, src, SEG_LEN);

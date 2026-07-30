@@ -2,17 +2,17 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #
-# 一站式：从零编 umdk 全部源码 → 生成测试 → 跑 sim + no-sim 两套测试 → 汇总。
-# 在 umdk 根目录执行：bash baseline/build_and_test.sh
+# Full pipeline: build all umdk sources -> generate tests -> run sim + no-sim suites -> summary.
+# Run from the umdk root: bash baseline/build_and_test.sh
 #
-# 步骤：
-#   [build]  编 liburma → 编 liburma_sim → 编 gen_baseline + fixture
-#   [gen]   跑模板 → 生成基准 + .cpp → out/
-#   [sim]   编 + 跑 gtest（带 sim LD_PRELOAD，标记 [sim]）
-#   [no-sim] 编 + 跑 gtest（不带 sim，直连真 urma，标记 [no-sim]）
-#   [check]  回归比对
+# Phases:
+#   [build]  liburma -> liburma_sim -> gen_baseline + bl_fixture
+#   [gen]    run templates -> record baseline -> gen_test -> out/*.cpp
+#   [sim]    build + run gtest (liburma_sim LD_PRELOAD)
+#   [no-sim] probe real device; build + run gtest (direct urma, no sim)
+#   [check]  regression comparison
 
-# 不用 set -e——中间步骤失败不退出，最后汇总
+# No set -e: intermediate phase failures do not abort; final summary aggregates.
 
 BL=$(cd "$(dirname "$0")" && pwd)
 SRC=$BL/../src
@@ -22,76 +22,76 @@ UA_COMMON=$SRC/build_noasan/urma/common
 URMA_INC=$SRC/urma/lib/urma/core/include
 URMA_COMMON_INC=$SRC/urma/common/include
 
-# gtest 路径：默认搜标准位置，找不到用环境变量 GTEST_DIR 覆盖
-# 用户设 GTEST_DIR=/home/zyc/umdk/tmp/googletest-1.17.0 即可
+# gtest discovery: check standard locations first, override with GTEST_DIR.
+# e.g. GTEST_DIR=/path/to/googletest-1.17.0 (expects include/ and build/lib/)
 if [ -n "$GTEST_DIR" ]; then
     GTEST_INC=$GTEST_DIR/googletest/include
     GTEST_LIB=$GTEST_DIR/build/lib
-elif [ -f /usr/local/lib64/libgtest.a ]; then
+elif [ -f /usr/local/lib64/libgtest.a ] || [ -f /usr/local/lib64/libgtest.so ]; then
     GTEST_INC=/usr/local/include
     GTEST_LIB=/usr/local/lib64
-elif [ -f /usr/lib64/libgtest.a ]; then
+elif [ -f /usr/lib64/libgtest.a ] || [ -f /usr/lib64/libgtest.so ]; then
     GTEST_INC=/usr/include
     GTEST_LIB=/usr/lib64
 else
-    echo "✗ gtest 未找到。设环境变量：export GTEST_DIR=/path/to/googletest-x.x.x"
-    echo "  （该路径下需有 include/gtest/gtest.h 和 build/lib/libgtest.a）"
+    echo "fail: gtest not found. set GTEST_DIR=/path/to/googletest-x.x.x"
+    echo "      (expects include/gtest/gtest.h and build/lib/libgtest.a or libgtest.so)"
     exit 1
 fi
 
-echo "╔══════════════════════════════════════════════╗"
-echo "║  umdk 全量构建 + 测试（sim / no-sim）        ║"
-echo "╚══════════════════════════════════════════════╝"
+echo "╔══════════════════════════════════════════════════╗"
+echo "║  umdk build + test (sim / no-sim / regression)  ║"
+echo "╚══════════════════════════════════════════════════╝"
 
 ############################################
-# [build] 编译全部
+# [build] compile all
 ############################################
 echo ""
-echo "=== [build] 编译 ==="
+echo "=== [build] compile liburma / liburma_sim / gen_baseline ==="
 
-# 1. 编 liburma（force rebuild）
-echo "[1/5] 编 liburma（build_noasan）"
+# 1. liburma (force rebuild)
+echo "[1/5] liburma (build_noasan)"
 cd $SRC && rm -rf build_noasan && mkdir build_noasan && cd build_noasan
 cmake .. -DBUILD_ALL=disable -DBUILD_URMA=enable -DBUILD_UDMA=disable \
          -DGTEST=disable -DASAN=disable -DCODE_COVERAGE=disable 2>&1 | tail -2
 cmake --build . -j 2>&1 | tail -2
-echo "  ✓ liburma.so"
+echo "  ok: liburma.so"
 cd $BL
 
-# 2. 编 liburma_sim（force rebuild）
-echo "[2/5] 编 liburma_sim.so"
+# 2. liburma_sim (force rebuild)
+echo "[2/5] liburma_sim.so"
 cd $SIM && rm -rf build && mkdir build && cd build
 cmake .. 2>&1 | tail -2
 cmake --build . -j 2>&1 | tail -2
-echo "  ✓ liburma_sim.so"
+echo "  ok: liburma_sim.so"
 cd $BL
 
-# 3. 编 gen_baseline
-echo "[3/5] 编 gen_baseline"
+# 3. gen_baseline tool
+echo "[3/5] gen_baseline"
 gcc $BL/gen/gen_baseline.c -o /tmp/gen_baseline 2>&1
-echo "  ✓ gen_baseline"
+echo "  ok: gen_baseline"
 
-# 4. 编 fixture（C 版 .o 供模板用）
-echo "[4/5] 编 bl_fixture（C）"
+# 4. bl_fixture (C object, for templates)
+echo "[4/5] bl_fixture (C)"
 gcc -c -I$BL/gen -I$URMA_INC -I$URMA_COMMON_INC $BL/gen/bl_fixture.c -o /tmp/bl_fixture.o 2>&1
-echo "  ✓ bl_fixture.o"
+echo "  ok: bl_fixture.o"
 
-# 5. 确认 gtest 库在（用前面检测到的 GTEST_LIB）
-echo "[5/5] 检查 gtest"
-if [ ! -f "$GTEST_LIB/libgtest.a" ]; then
-    echo "  ✗ gtest 库未找到（$GTEST_LIB/libgtest.a）"
-    echo "  跳过 gtest 步骤，只做模板录制 + check"
+# 5. gtest availability
+echo "[5/5] gtest"
+if [ ! -f "$GTEST_LIB/libgtest.a" ] && [ ! -f "$GTEST_LIB/libgtest.so" ]; then
+    echo "  fail: gtest not found in $GTEST_LIB (need libgtest.a or libgtest.so)"
+    echo "  skipping gtest phases, recording + check only"
     NO_GTEST=1
 else
-    echo "  ✓ gtest 就绪（$GTEST_LIB）"
+    echo "  ok: gtest in $GTEST_LIB"
     NO_GTEST=0
 fi
 
 ############################################
-# [gen] 跑模板 → 生成基准 + .cpp
+# [gen] run templates -> record baseline -> gen_test -> out/
 ############################################
 echo ""
-echo "=== [gen] 跑模板 → 生成基准 + .cpp → out/ ==="
+echo "=== [gen] record baseline -> gen_test -> out/ ==="
 
 export LD_LIBRARY_PATH=$UA_CORE:$UA_COMMON
 export LD_PRELOAD=$SIM/build/liburma_sim.so
@@ -119,10 +119,10 @@ for tmpl in $BL/src/test_*.c; do
 done
 
 ############################################
-# [sim] 编 + 跑 gtest（带 sim）
+# [sim] build + run gtest (with liburma_sim)
 ############################################
 echo ""
-echo "=== [sim] gtest 测试（带仿真）==="
+echo "=== [sim] gtest (with liburma_sim LD_PRELOAD) ==="
 
 export LD_PRELOAD=$SIM/build/liburma_sim.so
 export URMA_SIM_HW=1
@@ -144,65 +144,100 @@ if [ "$NO_GTEST" != "1" ]; then
                 echo "    PASS"
                 spass=$((spass+1))
             else
-                echo "    FAIL（运行失败，输出：）"
+                echo "    FAIL (run failure, tail):"
                 timeout 30 /tmp/${name}_sim 2>&1 | tail -5 | sed 's/^/    /'
                 sfail=$((sfail+1))
             fi
         else
-            echo "    COMPILE FAIL（编译错误见上）"
+            echo "    COMPILE FAIL"
             sfail=$((sfail+1))
         fi
         rm -f /tmp/${name}_sim
     done
 else
-    echo "  (跳过，无 gtest)"
+    echo "  (skipped, no gtest)"
 fi
 
 ############################################
-# [no-sim] 编 + 跑 gtest（不带 sim）
+# [no-sim] probe real device; build + run gtest (direct urma, no sim)
 ############################################
 echo ""
-echo "=== [no-sim] gtest 测试（直连真 urma，无仿真）==="
+echo "=== [no-sim] gtest (direct urma, no simulation) ==="
 
 export LD_PRELOAD=""
 export URMA_SIM_HW=""
 
 npass=0
+nskip=0
 nfail=0
+nprobe_failed=0
 if [ "$NO_GTEST" != "1" ]; then
-    for cpp in $BL/out/*.cpp; do
-        name=$(basename "$cpp" .cpp)
-        echo "  [no-sim] $name:"
-        if g++ -std=c++17 -fpermissive -w \
-            -I$GTEST_INC -I$BL/gen -I$URMA_INC -I$URMA_COMMON_INC \
-            -L$UA_CORE -lurma -L$UA_COMMON -lurma_common \
-            -Wl,-rpath,$UA_CORE -Wl,-rpath,$UA_COMMON \
-            $BL/gen/bl_fixture.cpp "$cpp" \
-            -L$GTEST_LIB -lgtest_main -lgtest -lpthread \
-            -o /tmp/${name}_nosim 2>&1; then
-            if timeout 30 /tmp/${name}_nosim 2>&1 | grep -q "\[  PASSED  \]"; then
-                echo "    PASS"
-                npass=$((npass+1))
+    # Probe for real hardware before running no-sim suite.
+    # Without a device, urma_init fails and every TEST body returns early at
+    # the `if (!c) goto cleanup` guard, so gtest reports PASSED with zero
+    # assertions executed. We probe first and SKIP the whole suite instead of
+    # emitting misleading PASS results.
+    echo "  [probe] checking for real urma device..."
+    cat > /tmp/probe_dev.cpp <<'EOF'
+#include "bl_fixture.hpp"
+int main(void) { return probe_device(); }
+EOF
+    if g++ -std=c++17 -fpermissive -w \
+        -I$GTEST_INC -I$BL/gen -I$URMA_INC -I$URMA_COMMON_INC \
+        -L$UA_CORE -lurma -L$UA_COMMON -lurma_common \
+        -Wl,-rpath,$UA_CORE -Wl,-rpath,$UA_COMMON \
+        $BL/gen/bl_fixture.cpp /tmp/probe_dev.cpp \
+        -o /tmp/probe_dev 2>&1; then
+        timeout 10 /tmp/probe_dev >/dev/null 2>&1
+        nprobe_failed=$?
+    else
+        nprobe_failed=99   # probe compile failure -> treat as no device
+    fi
+    rm -f /tmp/probe_dev /tmp/probe_dev.cpp
+
+    if [ "$nprobe_failed" != "0" ]; then
+        echo "  [probe] no real device (rc=$nprobe_failed); skipping no-sim suite"
+        for cpp in $BL/out/*.cpp; do
+            name=$(basename "$cpp" .cpp)
+            echo "  [no-sim] $name: SKIP"
+            nskip=$((nskip+1))
+        done
+    else
+        echo "  [probe] real device detected; running no-sim suite"
+        for cpp in $BL/out/*.cpp; do
+            name=$(basename "$cpp" .cpp)
+            echo "  [no-sim] $name:"
+            if g++ -std=c++17 -fpermissive -w \
+                -I$GTEST_INC -I$BL/gen -I$URMA_INC -I$URMA_COMMON_INC \
+                -L$UA_CORE -lurma -L$UA_COMMON -lurma_common \
+                -Wl,-rpath,$UA_CORE -Wl,-rpath,$UA_COMMON \
+                $BL/gen/bl_fixture.cpp "$cpp" \
+                -L$GTEST_LIB -lgtest_main -lgtest -lpthread \
+                -o /tmp/${name}_nosim 2>&1; then
+                if timeout 30 /tmp/${name}_nosim 2>&1 | grep -q "\[  PASSED  \]"; then
+                    echo "    PASS"
+                    npass=$((npass+1))
+                else
+                    echo "    FAIL (tail):"
+                    timeout 30 /tmp/${name}_nosim 2>&1 | tail -5 | sed 's/^/    /'
+                    nfail=$((nfail+1))
+                fi
             else
-                echo "    FAIL（无真硬件正常，输出末尾：）"
-                timeout 30 /tmp/${name}_nosim 2>&1 | tail -5 | sed 's/^/    /'
+                echo "    COMPILE FAIL"
                 nfail=$((nfail+1))
             fi
-        else
-            echo "    COMPILE FAIL（编译错误见上）"
-            nfail=$((nfail+1))
-        fi
-        rm -f /tmp/${name}_nosim
-    done
+            rm -f /tmp/${name}_nosim
+        done
+    fi
 else
-    echo "  (跳过，无 gtest)"
+    echo "  (skipped, no gtest)"
 fi
 
 ############################################
-# [check] 回归比对（带 sim）
+# [check] regression comparison (with sim)
 ############################################
 echo ""
-echo "=== [check] 回归比对 ==="
+echo "=== [check] regression comparison ==="
 
 export LD_PRELOAD=$SIM/build/liburma_sim.so
 export URMA_SIM_HW=1
@@ -238,9 +273,13 @@ done
 # 汇总
 ############################################
 echo ""
-echo "╔══════════════════════════════════════════════╗"
+echo "╔════════════════════════════════════════════════════════════════╗"
 echo "  [sim]    gtest:    $spass passed, $sfail failed"
-echo "  [no-sim] gtest:    $npass passed, $nfail failed"
+if [ "$nprobe_failed" != "0" ] && [ "$NO_GTEST" != "1" ]; then
+    echo "  [no-sim] gtest:    $npass passed, $nskip skipped, $nfail failed  (no real device)"
+else
+    echo "  [no-sim] gtest:    $npass passed, $nskip skipped, $nfail failed"
+fi
 echo "  [check]  baseline: $cpass passed, $cfail failed"
-echo "╚══════════════════════════════════════════════╝"
+echo "╚════════════════════════════════════════════════════════════════╝"
 exit $((sfail + nfail + cfail))
