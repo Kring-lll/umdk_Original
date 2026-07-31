@@ -6,6 +6,12 @@ Warranty Disclaimer
 THE OPEN SOURCE SOFTWARE IN THIS OPENEULER DISTRIBUTION IS PROVIDED ON AN "AS IS" BASIS, WITHOUT ANY WARRANTY OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE. See the applicable licenses for more details.
 
 Copyright Notice and License Texts
+Software: Catlass (src/cam/third_party/catlass)
+Copyright notice:
+Copyright (c) Huawei Technologies Co., Ltd. All rights reserved.
+License: CANN Open Software License Agreement Version 2.0
+License text: see LICENSES/cann-osl-2.0.txt
+
 Software: openEuler:kernel 6.6.0-28.0.0.34.oe2403
 Copyright notice: 
 Copyright (c) 2004 Daniel Mack <daniel@qanu.de> and Holger Waechtler <holger@qanu.de>
