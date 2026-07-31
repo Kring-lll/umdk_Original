@@ -390,6 +390,55 @@ static int bondp_import_pjetty_custom(
     urma_rjetty_t *rjetty, urma_token_t *rjetty_token,
     urma_bond_id_info_out_t *rvjetty_info)
 {
+    urma_rjetty_t p_rjetty = *rjetty;
+    p_rjetty.flag.bs.has_user_info = 0;
+    uint32_t remote_cnt = rvjetty_info->enabled_count;
+    uint32_t local_cnt = bdp_ctx->port_cfg.enabled_count;
+
+    /* Each local port is used at most once: once a local port has built a
+     * link for some remote target, later remotes skip it. */
+    bool local_used[URMA_UBAGG_DEV_MAX_NUM] = {0};
+
+    for (uint32_t m = 0; m < remote_cnt; ++m) {
+        uint32_t target_idx = rvjetty_info->enabled_indices[m];
+        p_rjetty.jetty_id = rvjetty_info->slave_id[target_idx];
+        for (uint32_t n = 0; n < local_cnt; ++n) {
+            uint32_t local_idx = bdp_ctx->port_cfg.enabled_indices[n];
+
+            if (local_used[local_idx]) {
+                continue;
+            }
+            if (!rvjetty_info->connected[local_idx][target_idx]) {
+                continue;
+            }
+
+            bondp_p_target_jetty_t *p_tjetty = bondp_find_p_tjetty(bdp_tjetty, local_idx, target_idx);
+            if (p_tjetty == NULL) {
+                /* Non-active connected pair: add a new path */
+                p_tjetty = &bdp_tjetty->p_tjettys[bdp_tjetty->p_tjetty_count];
+                p_tjetty->local_indice = (uint8_t)local_idx;
+                p_tjetty->remote_indice = (uint8_t)target_idx;
+                p_tjetty->p_tjetty = NULL;
+                p_tjetty->p_check_tseg = NULL;
+                atomic_init(&p_tjetty->valid, false);
+                bdp_tjetty->p_tjetty_count++;
+            }
+
+            if (p_tjetty->p_tjetty != NULL) {
+                continue;
+            }
+
+            p_tjetty->p_tjetty = urma_import_jetty(bdp_ctx->p_ctxs[local_idx], &p_rjetty, rjetty_token);
+            if (p_tjetty->p_tjetty == NULL) {
+                URMA_LOG_ERR("Failed to import tjetty local_idx=%u, target_idx=%u, jetty_id=%u\n",
+                             local_idx, target_idx, rvjetty_info->slave_id[target_idx].id);
+                return -1;
+            }
+            atomic_store(&p_tjetty->valid, true);
+            local_used[local_idx] = true;
+            break;
+        }
+    }
     return 0;
 }
 
