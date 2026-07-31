@@ -399,10 +399,6 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
 {
     int ret = URMA_SUCCESS;
 
-    if (bondp_hc_unimport_tseg(bdp_tjetty) != URMA_SUCCESS) {
-        ret = URMA_FAIL;
-    }
-
     for (uint32_t i = 0; i < bdp_tjetty->p_tjetty_count; ++i) {
         atomic_store(&bdp_tjetty->p_tjettys[i].valid, false);
     }
@@ -520,27 +516,19 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         goto UNIMPORT_PJETTY;
     }
 
-    if (bondp_hc_import_tseg(bdp_ctx, bdp_tjetty, &rvjetty_info) != 0) {
-        URMA_LOG_ERR("Failed to import health check seg for jetty\n");
-        goto UNIMPORT_TSEG;
+    if (bondp_hc_register_tjetty(bdp_ctx, bdp_tjetty, &rvjetty_info) != 0) {
+        URMA_LOG_ERR("Failed to register health check tjetty\n");
+        goto UNIMPORT_PJETTY;
     }
 
     if (rjetty->trans_mode == URMA_TM_RM && rjetty->flag.bs.has_drv_ext && cfg_jetty != NULL) {
         cfg_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
     }
 
-    if (bondp_hc_register_tjetty(bdp_ctx, bdp_tjetty) != 0) {
-        URMA_LOG_ERR("Failed to register health check tjetty\n");
-        goto UNIMPORT_TSEG;
-    }
-
     URMA_LOG_DEBUG("Successfully imported target jetty=" URMA_JETTY_ID_FMT "\n",
                    URMA_JETTY_ID_ARGS(&rjetty->jetty_id));
 
     return &bdp_tjetty->v_tjetty;
-
-UNIMPORT_TSEG:
-    (void)bondp_hc_unimport_tseg(bdp_tjetty);
 
 UNIMPORT_PJETTY:
     bondp_unimport_pjetty(bdp_tjetty);
