@@ -18,6 +18,9 @@
       "gather_selection_kv_cache",
       "gather_selection_kv_cache_custom",
       "swiglu_clip_quant"
+    ],
+    "ascend950": [
+      "fused_deep_moe_arch35"
     ]
   },
   "operator_meta": {
@@ -36,6 +39,12 @@
       "family": "fused_deep_moe",
       "variant": "fwk",
       "_note": "independent operator; files are fused_deep_moe_fwk.*, do NOT conflict with base/w4a8, can coexist"
+    },
+    "fused_deep_moe_arch35": {
+      "requires_shmem": false,
+      "family": "fused_deep_moe",
+      "variant": "arch35",
+      "_note": "Ascend950/A5 MX path; lives only under ascend950. Shares fused_deep_moe.* filenames with base/w4a8 but different SOC so no mutex."
     },
     "moe_combine_lowlatency_zb": {
       "requires_shmem": true
