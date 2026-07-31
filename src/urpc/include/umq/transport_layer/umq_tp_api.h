@@ -331,6 +331,12 @@ typedef struct umq_ops {
      * Return 0 on success, error code on failure
      */
     int (*umq_tp_transport_pool_resource_destroy)(uint64_t umqh_tp, uint32_t tp_handle_idx);
+
+    /**
+     * Get avail transport resource cnt.
+     * Return avail_resource_cnt >= 0 on success, UINT32_MAX on failure(get error code from errno)
+     */
+    uint32_t (*umq_tp_transport_pool_avail_resource_cnt_get)(void);
 } umq_ops_t;
 
 typedef umq_ops_t* (*umq_ops_get_t)(void);

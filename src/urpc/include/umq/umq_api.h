@@ -384,6 +384,13 @@ uint32_t umq_transport_pool_resource_create(uint64_t umqh, umq_tp_resource_creat
  */
 int umq_transport_pool_resource_destroy(uint64_t umqh, uint32_t tp_handle_idx);
 
+/**
+ * Get avail transport resource cnt.
+ * @param[in] umqh: umq handle
+ * Return avail_resource_cnt >= 0 on success, UINT32_MAX on failure(get error code from errno)
+ */
+uint32_t umq_transport_pool_avail_resource_cnt_get(uint64_t umqh);
+
 #ifdef __cplusplus
 }
 #endif
