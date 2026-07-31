@@ -23,7 +23,9 @@ export TEST_PATH="${ROOT_PATH}/test/cam"
 export BUILD_PATH="${ROOT_PATH}/build/cam/build_feature"
 export CAM_THIRD_PARTY_PATH="${ROOT_PATH}/src/cam/third_party"
 
-export CPATH=${CAM_THIRD_PARTY_PATH}:${CAM_THIRD_PARTY_PATH}/catlass/include:${CPATH}
+# Do not pin a single catlass include here; compile_ascend_proj.sh selects
+# catlass (910_93) vs catlass_v1.6.0 (ascend950) per SOC and prepends CPATH.
+export CPATH=${CAM_THIRD_PARTY_PATH}:${CPATH}
 
 export BUILD_TYPE="Release"
 MODULE_NAME="all"
@@ -38,8 +40,8 @@ function print_help() {
 
     opt (forwarded to the module build script):
     -d: Enable debug
-    -c <soc>: Target SOC generation (e.g. ascend910_93). Omit to build all
-        registered generations. Supported: [ascend910_93]
+    -c <soc>: Target SOC generation (e.g. ascend910_93 / ascend950). Omit to
+        build all registered generations. Supported: [ascend910_93, ascend950]
     -a <ops>: Semicolon-separated operator list (requires -c)
     -q: Select the fused_deep_moe_w4a8 quantization variant
     -p: Build only the pybind (whl) package; skip the run package
@@ -84,20 +86,28 @@ function is_module_name() {
 
 function prepare_cam_third_party() {
     local third_party="$1"
-    local catlass_dir="${third_party}/catlass"
-
-    if [[ -d "${catlass_dir}" && -d "${catlass_dir}/include" ]]; then
-        echo "catlass submodule has existed: ${catlass_dir}"
-        return 0
-    fi
-
-    echo "Initializing catlass submodule..."
-    if git submodule update --init --recursive src/cam/third_party/catlass; then
-        return 0
-    else
-        echo "Failed to initialize catlass submodule! You can manually run: git submodule update --init --recursive src/cam/third_party/catlass"
-        return 1
-    fi
+    # Two catlass trees:
+    #   catlass         -> existing AtlasA2 path for ascend910_93
+    #   catlass_v1.6.0  -> Ascend950+MmadMx for ascend950 / arch35
+    local d
+    for d in catlass catlass_v1.6.0; do
+        local dir="${third_party}/${d}"
+        if [[ -d "${dir}" && -d "${dir}/include" ]]; then
+            echo "catlass tree ${d} has existed: ${dir}"
+            continue
+        fi
+        if [[ "$d" == "catlass" ]]; then
+            echo "Initializing catlass tree ${d}..."
+            if ! git submodule update --init --recursive "src/cam/third_party/${d}"; then
+                echo "Failed to initialize catlass tree ${d}! You can manually run: git submodule update --init --recursive src/cam/third_party/${d}"
+                return 1
+            fi
+        else
+            echo "ERROR: ${dir} missing. Place Ascend950 catlass (v1.6.0 / MmadMx) at src/cam/third_party/catlass_v1.6.0"
+            return 1
+        fi
+    done
+    return 0
 }
 
 if is_module_name $@; then
@@ -107,13 +117,38 @@ else
     process_arg $@
 fi
 
-if [[ "$MODULE_NAME" == "all" || "$MODULE_NAME" == "comm_operator" ]]; then
-    IS_MODULE_EXIST=1
-    if ! prepare_cam_third_party "${CAM_THIRD_PARTY_PATH}"; then
-        exit 1
+# Restrict modules when -c is set (parsed loosely from remaining args).
+SOC_TYPE=""
+prev=""
+for arg in "$@"; do
+    if [[ "${prev}" == "-c" ]]; then
+        SOC_TYPE="${arg}"
+        break
     fi
-    echo "${SCRIPTS_PATH}/comm_operator/build.sh $@"
-    ${SCRIPTS_PATH}/comm_operator/build.sh $@
+    prev="${arg}"
+done
+
+if [[ -n "${SOC_TYPE}" ]]; then
+    if [[ "${SOC_TYPE}" == "ascend950" ]]; then
+        if [[ "${MODULE_NAME}" != "nda" && "${MODULE_NAME}" != "all" && "${MODULE_NAME}" != "comm_operator" ]]; then
+            echo "Error: -c ascend950 supports modules 'nda'/'comm_operator' (or 'all'=both), but got '${MODULE_NAME}'"
+            exit 1
+        fi
+    elif [[ "${SOC_TYPE}" == "ascend910_93" ]]; then
+        :
+    fi
+fi
+
+# Build comm_operator for 910_93 (default) and for 950 when selected.
+if [[ "$MODULE_NAME" == "all" || "$MODULE_NAME" == "comm_operator" ]]; then
+    if [[ -z "${SOC_TYPE}" || "${SOC_TYPE}" == "ascend910_93" || "${SOC_TYPE}" == "ascend950" ]]; then
+        IS_MODULE_EXIST=1
+        if ! prepare_cam_third_party "${CAM_THIRD_PARTY_PATH}"; then
+            exit 1
+        fi
+        echo "${SCRIPTS_PATH}/comm_operator/build.sh $@"
+        ${SCRIPTS_PATH}/comm_operator/build.sh $@
+    fi
 fi
 
 if [ $IS_MODULE_EXIST -eq 0 ]; then
