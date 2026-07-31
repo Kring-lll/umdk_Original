@@ -1279,6 +1279,11 @@ int umq_ub_transport_pool_resource_destroy_impl(uint64_t umqh_tp, uint32_t tp_ha
     return UMQ_SUCCESS;
 }
 
+uint32_t umq_ub_transport_pool_avail_resource_cnt_get_impl(void)
+{
+    return umq_ub_jetty_pool_get_avail_cnt();
+}
+
 uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *option)
 {
     uint64_t start_timestamp;

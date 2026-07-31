@@ -39,7 +39,7 @@ typedef struct jetty_pool {
     int event_fd;                   // Eventfd for idle jetty notification
 
     uint32_t free_count;            // Current count in free_q (protected by lock)
-    uint32_t active_count;          // Current count in active_q (protected by lock)
+    volatile uint32_t active_count; // Current count in active_q (protected by lock)
     uint64_t in_use_count;          // Nodes currently borrowed by a Logic UMQ (state == IN_USE)
     uint64_t err_count;             // Nodes marked with is_jetty_err == true
     uint64_t acc_alloc_count;        // Cumulative allocs (nodes borrowed by Logic UMQ)
@@ -143,7 +143,7 @@ static ALWAYS_INLINE void release_jetty_pool_thread_cache(void *data)
                 recycle_node_to_free_q(&g_jetty_pool, cached);
             } else {
                 urpc_list_push_back(&g_jetty_pool.active_q, &cached->node);
-                g_jetty_pool.active_count++;
+                (void)__atomic_fetch_add(&g_jetty_pool.active_count, 1, __ATOMIC_RELAXED);
             }
         }
         tls_cache->cached_count = 0;
@@ -379,9 +379,8 @@ int umq_ub_jetty_node_add(jetty_pool_node_t *node)
     __atomic_store_n(&add_node->state, JETTY_POOL_NODE_IDLE, __ATOMIC_RELEASE);
 
     urpc_list_push_back(&pool->active_q, &add_node->node);
-    pool->active_count++;
     pool->node_count++;
-    uint32_t active_after_add = pool->active_count;
+    uint32_t active_after_add = __atomic_fetch_add(&pool->active_count, 1, __ATOMIC_RELAXED);
     (void)pthread_spin_unlock(&pool->lock);
 
     // Notify via eventfd when active_count reaches every notify_threshold
@@ -419,7 +418,7 @@ int umq_ub_jetty_node_remove(jetty_pool_node_t *node)
     if (node->in_global_pool) {
         // Node in active_q: return to free_q for reassignment.
         urpc_list_remove(&node->node);
-        pool->active_count--;
+        (void)__atomic_fetch_sub(&pool->active_count, 1, __ATOMIC_RELAXED);
         recycle_node_to_free_q(pool, node);
     }
     pool->node_count--;
@@ -454,13 +453,13 @@ jetty_pool_node_t *umq_ub_jetty_node_alloc(void)
         return NULL;
     }
 
-    while (pool->active_count > 0) {
+    while (__atomic_load_n(&pool->active_count, __ATOMIC_ACQUIRE) > 0) {
         // 1. Batch fetch from active_q to fill thread-local cache.
         //    active_q never contains ERR nodes (remove() moves them to free_q).
         if (cache->cached_count == 0) {
             (void)pthread_spin_lock(&pool->lock);
             uint32_t moved = urpc_list_move_n(&pool->active_q, &cache->cache_list, pool->batch_size);
-            pool->active_count -= moved;
+            (void)__atomic_fetch_sub(&pool->active_count, moved, __ATOMIC_RELAXED);
             jetty_pool_node_t *iter = NULL;
             URPC_LIST_FOR_EACH(iter, node, &cache->cache_list) {
                 iter->in_global_pool = false;
@@ -490,14 +489,15 @@ jetty_pool_node_t *umq_ub_jetty_node_alloc(void)
                 continue;
             } else if (node->is_jetty_err) {
                 (void)pthread_spin_lock(&pool->lock);
-                pool->active_count++;
+                (void)__atomic_fetch_add(&pool->active_count, 1, __ATOMIC_RELAXED);
                 recycle_node_to_relay_q(pool, node);
                 (void)pthread_spin_unlock(&pool->lock);
                 continue;
             }
 
             node->borrow_count = 0;
-            node->borrow_limit = get_borrow_limit(pool->node_count, pool->active_count);
+            node->borrow_limit = get_borrow_limit(pool->node_count,
+                __atomic_load_n(&pool->active_count, __ATOMIC_ACQUIRE));
             (void)__atomic_add_fetch(&pool->in_use_count, 1, __ATOMIC_RELAXED);
             (void)__atomic_add_fetch(&pool->acc_alloc_count, 1, __ATOMIC_RELAXED);
             umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_ALLOC_JETTY_NODE, start_timestamp);
@@ -534,7 +534,7 @@ int umq_ub_jetty_node_free(jetty_pool_node_t *node)
     (void)__atomic_add_fetch(&pool->acc_free_count, 1, __ATOMIC_RELAXED);
     if (node->is_jetty_err) {
         (void)pthread_spin_lock(&pool->lock);
-        pool->active_count++;
+        (void)__atomic_fetch_add(&pool->active_count, 1, __ATOMIC_RELAXED);
         recycle_node_to_relay_q(pool, node);
         (void)pthread_spin_unlock(&pool->lock);
         umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_FREE_JETTY_NODE, start_timestamp);
@@ -563,13 +563,12 @@ int umq_ub_jetty_node_free(jetty_pool_node_t *node)
         }
 
         uint32_t cnt = urpc_list_move_n(&cache->cache_list, &pool->active_q, to_mark);
-        pool->active_count += cnt;
         cache->cached_count -= cnt;
-        uint64_t value = (uint64_t)pool->active_count;
+        uint32_t value = _atomic_fetch_add(&pool->active_count, cnt, __ATOMIC_RELAXED);
         (void)pthread_spin_unlock(&pool->lock);
 
         if ((value % pool->notify_threshold) < cnt) {
-            if (eventfd_write(pool->event_fd, value) != 0) {
+            if (eventfd_write(pool->event_fd, (uint64_t)value) != 0) {
                 UMQ_VLOG_WARN(VLOG_UMQ, "eventfd_write failed, errno: %d\n", errno);
             }
         }
@@ -648,6 +647,14 @@ bool umq_ub_jetty_pool_has_avail(void)
         return false;
     }
     return __atomic_load_n(&g_jetty_pool.active_count, __ATOMIC_ACQUIRE) > 0;
+}
+
+uint32_t umq_ub_jetty_pool_get_avail_cnt(void)
+{
+    if (!g_jetty_pool_inited) {
+        return false;
+    }
+    return __atomic_load_n(&g_jetty_pool.active_count, __ATOMIC_ACQUIRE);
 }
 
 umq_ub_jetty_node_list_t *umq_ub_jetty_pool_get_jetty_node_list(void)
@@ -764,7 +771,7 @@ int umq_ub_jetty_pool_stats_get(umq_ub_jetty_pool_stats_t *stats)
     jetty_pool_t *pool = &g_jetty_pool;
     (void)pthread_spin_lock(&pool->lock);
     stats->total_num = pool->node_count;
-    stats->global_num = pool->active_count;
+    stats->global_num = __atomic_load_n(&pool->active_count, __ATOMIC_ACQUIRE);
     uint32_t thread_cache_total = 0;
     thread_local_jetty_cache_t *cache = NULL;
     URPC_LIST_FOR_EACH(cache, registry_node, &pool->thread_cache_list) {
