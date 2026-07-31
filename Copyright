@@ -1,0 +1,10 @@
+Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
+
+UMDK is licensed under the MIT License.
+See LICENSES/mit.txt and LICENSES/README for details.
+
+Kernel modules under src/usock/ums/kmod are licensed under the GNU General Public
+License, version 2. See LICENSES/gpl-2.0.txt.
+
+Third-party open source software notices are provided in
+LICENSES/Third_Party_Open_Source_Software_Notice.txt.
