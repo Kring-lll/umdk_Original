@@ -1742,3 +1742,14 @@ int umq_transport_pool_resource_destroy(uint64_t umqh, uint32_t tp_handle_idx)
     }
     return umq->tp_ops->umq_tp_transport_pool_resource_destroy(umq->umqh_tp, tp_handle_idx);
 }
+
+uint32_t umq_transport_pool_avail_resource_cnt_get(uint64_t umqh)
+{
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+    if (umq == NULL || umq->tp_ops == NULL || umq->tp_ops->umq_tp_transport_pool_avail_resource_cnt_get == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "get avail transport resource cnt failed, transport ops not available\n");
+        errno = UMQ_ERR_EINVAL;
+        return UINT32_MAX;
+    }
+    return umq->tp_ops->umq_tp_transport_pool_avail_resource_cnt_get();
+}

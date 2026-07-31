@@ -76,6 +76,7 @@ umq_ub_jetty_avail_cb_node_t *umq_ub_jetty_pool_register_avail_cb(umq_ub_jetty_a
 void umq_ub_jetty_pool_unregister_avail_cb(umq_ub_jetty_avail_cb_node_t *cb_node);
 // Query whether at least one jetty is currently available to borrow (active_count > 0).
 bool umq_ub_jetty_pool_has_avail(void);
+uint32_t umq_ub_jetty_pool_get_avail_cnt(void);
 umq_ub_jetty_node_list_t *umq_ub_jetty_pool_get_jetty_node_list(void);
 uint32_t umq_ub_jetty_pool_put_jetty_node_list(umq_ub_jetty_node_list_t *jetty_node_list);
 void umq_ub_jetty_node_mark_err(jetty_pool_node_t *node);

@@ -241,6 +241,12 @@ static int umq_tp_ub_plus_transport_pool_resource_destroy(uint64_t umqh_tp, uint
 {
     return umq_ub_transport_pool_resource_destroy_impl(umqh_tp, tp_handle_idx);
 }
+
+static uint32_t umq_tp_ub_plus_transport_pool_avail_resource_cnt_get(void)
+{
+    return umq_ub_transport_pool_avail_resource_cnt_get_impl();
+}
+
 static umq_ops_t g_umq_ub_plus_ops = {
     .mode = UMQ_TRANS_MODE_UB_PLUS,
     // control plane api
@@ -269,6 +275,7 @@ static umq_ops_t g_umq_ub_plus_ops = {
     .umq_tp_transport_pool_resource_modify = umq_tp_ub_plus_transport_pool_resource_modify,
     .umq_tp_transport_pool_resource_create = umq_tp_ub_plus_transport_pool_resource_create,
     .umq_tp_transport_pool_resource_destroy = umq_tp_ub_plus_transport_pool_resource_destroy,
+    .umq_tp_transport_pool_avail_resource_cnt_get = umq_tp_ub_plus_transport_pool_avail_resource_cnt_get,
 
     // datapath plane api
     .umq_tp_buf_alloc = umq_tp_ub_plus_buf_alloc,
