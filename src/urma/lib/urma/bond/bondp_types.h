@@ -242,7 +242,8 @@ typedef struct bondp_comp {
 
 typedef struct bondp_p_target_jetty {
     urma_target_jetty_t *p_tjetty;
-    urma_target_seg_t *p_check_tseg;
+    uint64_t hc_va;
+    uint32_t hc_token_id;
 #ifndef __cplusplus
     atomic_bool valid;
 #else
