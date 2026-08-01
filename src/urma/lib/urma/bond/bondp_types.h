@@ -96,6 +96,13 @@ typedef struct bondp_device {
     int dev_num;
 } bondp_device_t;
 
+typedef struct bondp_port_cfg {
+    uint32_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t enabled_count;
+    uint8_t chip_id[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t chip_id_count;
+} bondp_port_cfg_t;
+
 /**
  *  The first field is exposed to user.
  *  p_ctxs and p_devs stores neccesary parameters of slave devices.
@@ -123,6 +130,8 @@ typedef struct bondp_context {
     bool seg_cache_enable;
     uint32_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t enabled_count;
+    bool port_cfg_enable;
+    bondp_port_cfg_t port_cfg;
 } bondp_context_t;
 
 typedef struct bondp_jfc {
@@ -140,8 +149,10 @@ typedef struct bondp_jfc {
     uint32_t active_count;
 #ifndef __cplusplus
     atomic_uint fast_return_count;
+    atomic_uint rearm_mask; /* bit i set: p_jfc[i] needs rearm */
 #else
     std::atomic_uint fast_return_count;
+    std::atomic_uint rearm_mask; /* bit i set: p_jfc[i] needs rearm */
 #endif
     urma_ref_t use_cnt; /* Initialize to 0 */
 } bondp_jfc_t;
@@ -215,6 +226,8 @@ typedef struct bondp_comp {
     // send
     bool modify_to_error;
     pthread_spinlock_t send_lock;
+    uint32_t max_send_sge;
+    uint32_t max_send_rsge;
     wr_buf_t send_wr_buf;
 #ifndef __cplusplus
     atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
@@ -231,39 +244,41 @@ typedef struct bondp_comp {
     std::atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
 #endif
     // recv
+    uint32_t max_recv_sge;
     wr_buf_t recv_wr_buf;
     uint32_t rqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
 } bondp_comp_t;
+
+typedef struct bondp_p_target_jetty {
+    urma_target_jetty_t *p_tjetty;
+    urma_target_seg_t *p_check_tseg;
+#ifndef __cplusplus
+    atomic_bool valid;
+#else
+    std::atomic_bool valid;
+#endif
+    uint8_t local_indice;
+    uint8_t remote_indice;
+} bondp_p_target_jetty_t;
 
 typedef struct bondp_target_jetty {
     urma_target_jetty_t v_tjetty;
     urma_token_t import_token_value;
     bool import_token_valid;
     bool skip_import_vjetty;
-    urma_target_jetty_t *p_tjetty[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
-    urma_target_seg_t *p_check_tseg[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
-    int local_dev_num;
-    int target_dev_num;
-    uint32_t local_active_indices[URMA_UBAGG_DEV_MAX_NUM];
-    uint32_t active_indices[URMA_UBAGG_DEV_MAX_NUM];
+    uint32_t p_tjetty_count;
     uint32_t active_count;
-#ifndef __cplusplus
-    atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
-#else
-    std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
-#endif
     urma_ref_t use_cnt;
     bool is_msn_enabled;
     bool hc_registered;
     uint32_t hc_node_idx;
     struct ub_list hc_entry;
+    bondp_p_target_jetty_t p_tjettys[];
 } bondp_target_jetty_t;
 
 typedef struct bondp_import_target_seg {
     urma_target_seg_t v_tseg;
     urma_target_seg_t *p_tseg[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
-    int local_dev_num;
-    int target_dev_num;
     bool is_reused;
     bool skip_import_vseg;
     urma_ref_t use_cnt;

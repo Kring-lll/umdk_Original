@@ -234,7 +234,7 @@ static ALWAYS_INLINE urma_opcode_t transform_op_code(umq_opcode_t opcode)
 static ALWAYS_INLINE void umq_ub_tx_eagain_cnt(int ret, bool user_send_imm, ub_queue_t *queue, uint16_t eagain_wr_cnt,
                                                umq_buf_t *qbuf)
 {
-    if (ret != -UMQ_ERR_EAGAIN) {
+    if (ret != -UMQ_ERR_EAGAIN && ret != -UMQ_ERR_EFLOWCTL_EAGAIN) {
         return;
     }
 
@@ -966,7 +966,7 @@ static int umq_ub_process_fc_msg_with_retry(ub_queue_t *queue, umq_ub_imm_t *imm
         case -UMQ_ERR_EMLINK:
             retry_type = UMQ_UB_RETRY_TYPE_NO_JETTY;
             break;
-        case -UMQ_ERR_EAGAIN:
+        case -UMQ_ERR_EFLOWCTL_EAGAIN:
             retry_type = UMQ_UB_RETRY_TYPE_EAGAIN;
             break;
         case -UMQ_ERR_EFLOWCTL_FATAL:
@@ -1150,7 +1150,7 @@ static int umq_ub_fc_msg_retry_dequeue(ub_queue_t *queue, umq_ub_fc_msg_retry_li
             new_retry_type = UMQ_UB_RETRY_TYPE_NO_JETTY;
             want_list = &retry_list->no_jetty_list;
             break;
-        case -UMQ_ERR_EAGAIN:
+        case -UMQ_ERR_EFLOWCTL_EAGAIN:
             new_retry_type = UMQ_UB_RETRY_TYPE_EAGAIN;
             want_list = &retry_list->no_jetty_list;
             break;
@@ -1950,12 +1950,6 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
     umq_trace_start_record(UMQ_TRACE_TYPE_POLL, poll_start, 0, queue->umq_id);
     uint32_t tp_handle_idx = option->tp_handle_idx;
 
-    if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
-        (option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) == 0) {
-        umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
-        return 0;
-    }
-
     if (queue->flow_control.enabled) {
         if ((queue->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0) {
             uint64_t count;
@@ -1989,7 +1983,8 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
 
     urma_cr_t cr[max_batch];
     urma_jfc_t *jfs_jfc = queue->jfs_jfc[UB_QUEUE_JETTY_IO];
-    if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag)) {
+    if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
+        (option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0) {
         umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
         if (jetty_node_list->bitmap != NULL && tp_handle_idx < jetty_node_list->list_len &&
             urpc_bitmap_is_set(jetty_node_list->bitmap, tp_handle_idx)) {
@@ -2077,7 +2072,9 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
     }
 
     // Logic UMQ: release completed WRs back to pool
-    umq_ub_poll_release_jetty_node(queue, success_cnt + failed_cnt, tp_handle_idx);
+    if (((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0) || is_umq_ub_logic_queue(queue->create_flag)) {
+        umq_ub_poll_release_jetty_node(queue, success_cnt + failed_cnt, tp_handle_idx);
+    }
 
     umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
     return qbuf_cnt;

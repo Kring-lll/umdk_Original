@@ -29,7 +29,7 @@
 extern "C" {
 #endif
 
-#define UMQ_EMPTY_HEADER_COEFFICIENT    16      // if block count is n, there will be n*16 count of empty qbuf header
+#define UMQ_EMPTY_HEADER_COEFFICIENT    8      // if block count is n, there will be n*16 count of empty qbuf header
 #define UMQ_QBUF_DEFAULT_MEMPOOL_ID     (0)
 #define UMQ_HEADROOM_SIZE_LIMIT         (512)
 #define UMQ_QBUF_SIZE_POW_4K            (12)
@@ -147,6 +147,7 @@ typedef struct local_qbuf_pool_ctrl {
     uint64_t default_tls_qbuf_pool_depth;
     uint32_t batch_count;
     bool enable_tls_expand_qbuf_pool;
+    volatile bool tls_expand_qbuf_pool_depth_is_set;
     urpc_list_t tls_register_head;
     pthread_spinlock_t tls_stats_lock;
     urpc_thread_closure_type_t type;
@@ -838,7 +839,7 @@ static ALWAYS_INLINE void umq_qbuf_block_pool_uninit(global_block_pool_t *block_
     (void)pthread_spin_destroy(&block_pool->global_mutex);
 }
 
-int qbuf_pool_base_init(qbuf_pool_base_t *base, const qbuf_pool_cfg_t *cfg, uint32_t split_extra_header_count);
+int qbuf_pool_base_init(qbuf_pool_base_t *base, const qbuf_pool_cfg_t *cfg, uint64_t split_extra_header_count);
 void *umq_qbuf_base_io_buf_malloc(uint64_t total_len, uint64_t min_size);
 void umq_qbuf_base_uninit(qbuf_pool_base_t *base);
 
