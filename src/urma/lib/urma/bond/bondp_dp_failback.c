@@ -422,8 +422,11 @@ free_arg:
 
 int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx)
 {
-    if (bond_ctx == NULL || bond_ctx->fb_ctx == NULL) {
+    if (bond_ctx == NULL) {
         return -EINVAL;
+    }
+    if (bond_ctx->fb_ctx == NULL) {
+        return 0;
     }
 
     bondp_fb_ctx_t *fb_ctx = bond_ctx->fb_ctx;
