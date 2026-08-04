@@ -59,6 +59,7 @@ typedef struct jfs_wr_entry {
     struct bondp_target_jetty *target_vjetty;
     uint32_t send_idx;
     uint32_t target_idx;
+    uint32_t rnr_retry_cnt;
     bondp_chip_id_info_t info;
     urma_sge_t sge_data[];
 } jfs_wr_entry_t;

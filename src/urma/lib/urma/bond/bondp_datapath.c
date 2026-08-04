@@ -8,8 +8,8 @@
  * History: 2025-02-19   Create File
  */
 
-#include <errno.h>
 #include <threads.h>
+#include <time.h>
 
 #include "bondp_connection.h"
 #include "bondp_context_table.h"
@@ -30,6 +30,8 @@
 #define BONDP_POST_SEND_MAX_RETRY     3
 /* Max consecutive fast returns before forcing a full scan */
 #define BONDP_FAST_RETURN_THRESHOLD   64
+#define BONDP_MS_PER_SEC              1000
+#define BONDP_NS_PER_MS               1000000
 
 // All post paths (jfs_send, jetty_send, jfr_recv, jetty_recv) are sequential
 // within a thread, share one thread_local copy to minimize TLS memory.
@@ -44,6 +46,23 @@ static thread_local struct {
 } tl_post_prealloc;
 
 static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int send_idx, int target_idx);
+
+static void sleep_before_rnr_retry_resend(uint32_t retry_cnt)
+{
+    uint64_t sleep_ms = g_bondp_env.rnr_retry_sleep_ms;
+    if (sleep_ms == 0) {
+        return;
+    }
+    for (uint32_t i = 0; i < retry_cnt; i++) {
+        sleep_ms *= 2;
+    }
+
+    struct timespec sleep_time = {
+        .tv_sec = (time_t)(sleep_ms / BONDP_MS_PER_SEC),
+        .tv_nsec = (long)((sleep_ms % BONDP_MS_PER_SEC) * BONDP_NS_PER_MS),
+    };
+    (void)nanosleep(&sleep_time, NULL);
+}
 
 static urma_jetty_id_t *get_comp_urma_jetty_id(bondp_comp_t *bdp_comp)
 {
@@ -560,6 +579,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             wr_entry->user_ctx = cur->user_ctx;
             wr_entry->target_vjetty = bdp_tjetty;
             wr_entry->bdp_comp = bdp_comp;
+            wr_entry->rnr_retry_cnt = 0;
             if (cur->flag.bs.has_drv_ext) {
                 bondp_jfs_wr_t *bwr = CONTAINER_OF_FIELD(cur, bondp_jfs_wr_t, base);
                 wr_entry->info.src_chip_id = bwr->src_chip_id;
@@ -1348,6 +1368,47 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
     uint32_t target_idx = wr_entry->target_idx;
 
     if (atomic_load(&bdp_comp->valid[idx]) == false || idx != send_idx) {
+        put_comp(bdp_comp);
+        return CONVERT_SKIP;
+    }
+
+    if (is_rnr_retry_cr(cr) && !bdp_comp->modify_to_error) {
+        (void)pthread_spin_lock(&bdp_comp->send_lock);
+        if (wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
+            wr_entry->bdp_comp != bdp_comp ||
+            wr_entry->send_idx != send_idx ||
+            wr_entry->target_idx != target_idx) {
+            (void)pthread_spin_unlock(&bdp_comp->send_lock);
+            put_comp(bdp_comp);
+            return CONVERT_SKIP;
+        }
+        if (wr_entry->rnr_retry_cnt >= g_bondp_env.rnr_retry_max) {
+            (void)pthread_spin_unlock(&bdp_comp->send_lock);
+            URMA_LOG_ERR("RNR retry exceeded, wr_id=%lu retry_cnt=%u retry_max=%lu\n",
+                         wr_id, wr_entry->rnr_retry_cnt, g_bondp_env.rnr_retry_max);
+            goto CONVERT_CR;
+        }
+        uint32_t retry_cnt = wr_entry->rnr_retry_cnt++;
+        (void)pthread_spin_unlock(&bdp_comp->send_lock);
+
+        sleep_before_rnr_retry_resend(retry_cnt);
+
+        (void)pthread_spin_lock(&bdp_comp->send_lock);
+        wr_entry = jfs_wr_buf_get(&bdp_comp->send_wr_buf, wr_id);
+        if (wr_entry == NULL ||
+            wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
+            wr_entry->bdp_comp != bdp_comp ||
+            wr_entry->send_idx != send_idx ||
+            wr_entry->target_idx != target_idx) {
+            (void)pthread_spin_unlock(&bdp_comp->send_lock);
+            put_comp(bdp_comp);
+            return CONVERT_SKIP;
+        }
+        atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+        if (resend_jfs_wr(bdp_comp, wr_entry, send_idx, target_idx) != 0) {
+            URMA_LOG_ERR("Failed to resend rnr retry jfs wr, wr_id=%lu\n", wr_id);
+        }
+        (void)pthread_spin_unlock(&bdp_comp->send_lock);
         put_comp(bdp_comp);
         return CONVERT_SKIP;
     }
