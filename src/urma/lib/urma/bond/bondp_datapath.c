@@ -1382,10 +1382,12 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                 URMA_LOG_ERR("Failed to resend jfs wr, wr_id=%lu\n", resend_wr_id);
             }
         }
-        int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);
-        if (ret != 0 && ret != -EEXIST) {
-            URMA_LOG_WARN("Failed to add failback task, vjetty_id=%u pjetty_idx=%u ret=%d\n",
-                          wr_entry->target_vjetty->v_tjetty.id.id, send_idx, ret);
+        if (is_need_rebuild_jetty(cr)) {
+            int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);
+            if (ret != 0 && ret != -EEXIST) {
+                URMA_LOG_WARN("Failed to add failback task, vjetty_id=%u pjetty_idx=%u ret=%d\n",
+                              wr_entry->target_vjetty->v_tjetty.id.id, send_idx, ret);
+            }
         }
         (void)pthread_spin_unlock(&bdp_comp->send_lock);
         put_comp(bdp_comp);
