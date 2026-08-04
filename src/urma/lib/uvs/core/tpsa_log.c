@@ -170,14 +170,14 @@ static int tpsa_vlog(const char *file, const char *function, int line, unsigned 
 
     int woker_idx = uvs_get_worker_idx();
     if (woker_idx != -1) {
-        /* add log head info, "[URMA][libuvs][thread_id][tpsaprocessname][worker_idx][file:func:line]format" */
-        ret = snprintf(newformat, sizeof(newformat), "[%s][%s][%ld][%s][work_%d][%s:%s:%d]%s",
-            URMA_LOG_TAG, LIBUVS_LOG, (long)syscall(__NR_gettid), g_tpsa_process_name,
-            woker_idx, file, function, line, format);
+        /* add log head info, "[URMA][file:func:line][libuvs][thread_id][tpsaprocessname][worker_idx]format" */
+        ret = snprintf(newformat, sizeof(newformat), "[%s][%s:%s:%d][%s][%ld][%s][work_%d]%s",
+            URMA_LOG_TAG, file, function, line, LIBUVS_LOG, (long)syscall(__NR_gettid), g_tpsa_process_name,
+            woker_idx, format);
     } else {
-        /* add log head info, "[URMA][libuvs][thread_id][tpsaprocessname][-][file:func:line]format" */
-        ret = snprintf(newformat, sizeof(newformat), "[%s][%s][%ld][%s][-][%s:%s:%d]%s",
-            URMA_LOG_TAG, LIBUVS_LOG, (long)syscall(__NR_gettid), g_tpsa_process_name, file, function, line, format);
+        /* add log head info, "[URMA][file:func:line][libuvs][thread_id][tpsaprocessname][-]format" */
+        ret = snprintf(newformat, sizeof(newformat), "[%s][%s:%s:%d][%s][%ld][%s][-]%s",
+            URMA_LOG_TAG, file, function, line, LIBUVS_LOG, (long)syscall(__NR_gettid), g_tpsa_process_name, format);
     }
 
     if (ret < 0 || ret >= (int)sizeof(newformat)) {
