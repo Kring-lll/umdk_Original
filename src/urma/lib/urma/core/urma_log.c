@@ -47,8 +47,6 @@ static void urma_default_log_func(int level, char *message)
 }
 
 static urma_log_cb_t g_urma_log_func = urma_default_log_func;
-static urma_loc_log_cb g_urma_loc_log_func = NULL;
-static bool g_use_loc_log = false;
 
 urma_status_t urma_register_log_func(urma_log_cb_t func)
 {
@@ -57,35 +55,20 @@ urma_status_t urma_register_log_func(urma_log_cb_t func)
         return URMA_EINVAL;
     }
     g_urma_log_func = func;
-    g_urma_loc_log_func = NULL;
-    g_use_loc_log = false;
-    URMA_LOG_INFO("registered log successfully.\n");
+    URMA_LOG_INFO("Registered log successfully.\n");
     return URMA_SUCCESS;
 }
 
 urma_status_t urma_register_loc_log_func(urma_loc_log_cb func)
 {
-    if (func == NULL) {
-        URMA_LOG_ERR("Invalid parameter.\n");
-        return URMA_EINVAL;
-    }
-    g_urma_loc_log_func = func;
-    g_use_loc_log = true;
-    URMA_LOG_INFO("registered extended log successfully.\n");
+    (void)func;
     return URMA_SUCCESS;
 }
 
 urma_status_t urma_unregister_log_func(void)
 {
-    char logmsg[MAX_LOG_LEN + 1] = {0};
-    (void)snprintf(logmsg, MAX_LOG_LEN, "%s%s%s%s%ld%s%s%s%s[%d]%sunregister log successfully.\n",
-        URMA_LOG_TAG, g_urma_log_separator, LIBURMA_LOG, g_urma_log_separator,
-        (long)syscall(__NR_gettid), g_urma_log_separator, g_thread_tag, g_urma_log_separator,
-        __func__, __LINE__, g_urma_log_separator);
-    (*g_urma_log_func)((int)URMA_VLOG_LEVEL_INFO, logmsg);
+    URMA_LOG_INFO("Unregistered log successfully.\n");
     g_urma_log_func = urma_default_log_func;
-    g_urma_loc_log_func = NULL;
-    g_use_loc_log = false;
     return URMA_SUCCESS;
 }
 
@@ -229,16 +212,16 @@ void urma_getenv_log_separator(void)
     pthread_mutex_unlock(&g_urma_log_lock);
 }
 
-static int urma_vlog(const char *function, int line, urma_vlog_level_t level, const char *format, va_list va)
+static int urma_vlog(const char *file, const char *function, int line, urma_vlog_level_t level,
+                     const char *format, va_list va)
 {
     int ret;
     char newformat[MAX_LOG_LEN + 1] = {0};
     char logmsg[MAX_LOG_LEN + 1] = {0};
 
-    /* add log head info, "[URMA][liburma][thread_id=tid][thread_tag][function[Line=line]]format" */
-    ret = snprintf(newformat, MAX_LOG_LEN, "[%s][%s][thread_id=%ld][%s][%s[Line=%d]]%s",
-                   URMA_LOG_TAG, LIBURMA_LOG, (long)syscall(__NR_gettid), g_thread_tag, function,
-                   line, format);
+    /* add log head info, "[URMA][file:function:line][liburma][tid][thread_tag]format" */
+    ret = snprintf(newformat, MAX_LOG_LEN, "[%s][%s:%s:%d][%s][%ld][%s]%s",
+                   URMA_LOG_TAG, file, function, line, LIBURMA_LOG, (long)syscall(__NR_gettid), g_thread_tag, format);
     if (ret <= 0 || ret >= sizeof(newformat)) {
         return ret;
     }
@@ -248,56 +231,17 @@ static int urma_vlog(const char *function, int line, urma_vlog_level_t level, co
         return ret;
     }
 
-    /* urma_vlog has no file parameter, only use original callback */
     (*g_urma_log_func)((int)level, logmsg);
 
     return ret;
 }
 
-void urma_log(const char *function, int line, urma_vlog_level_t level, const char *format, ...)
+void urma_log(const char *file, const char *function, int line, urma_vlog_level_t level, const char *format, ...)
 {
     va_list va;
 
     va_start(va, format);
-    (void)urma_vlog(function, line, level, format, va);
-    va_end(va);
-}
-
-static int urma_vlog_loc(const char *file, const char *function, int line, urma_vlog_level_t level,
-                         const char *format, va_list va)
-{
-    int ret;
-    char newformat[MAX_LOG_LEN + 1] = {0};
-    char logmsg[MAX_LOG_LEN + 1] = {0};
-
-    /* add log head info, "[URMA][liburma][thread_id=tid][thread_tag][file:function:line]format" */
-    ret = snprintf(newformat, MAX_LOG_LEN, "[%s][%s][thread_id=%ld][%s][%s:%s:%d]%s",
-                   URMA_LOG_TAG, LIBURMA_LOG, (long)syscall(__NR_gettid), g_thread_tag, file,
-                   function, line, format);
-    if (ret <= 0 || ret >= sizeof(newformat)) {
-        return ret;
-    }
-    ret = vsnprintf(logmsg, MAX_LOG_LEN, newformat, va);
-    if (ret == -1) {
-        (void)printf("logmsg size exceeds MAX_LOG_LEN size :%d.\n", MAX_LOG_LEN);
-        return ret;
-    }
-
-    if (g_use_loc_log && g_urma_loc_log_func != NULL) {
-        (*g_urma_loc_log_func)((int)level, file, function, line, logmsg);
-    } else {
-        (*g_urma_log_func)((int)level, logmsg);
-    }
-
-    return ret;
-}
-
-void urma_log_loc(const char *file, const char *function, int line, urma_vlog_level_t level, const char *format, ...)
-{
-    va_list va;
-
-    va_start(va, format);
-    (void)urma_vlog_loc(file, function, line, level, format, va);
+    (void)urma_vlog(file, function, line, level, format, va);
     va_end(va);
 }
 
@@ -369,7 +313,7 @@ bool urma_log_rl_check(urma_log_rl_state_t *rs, const char *file,
         unsigned long m = atomic_exchange(&rs->missed, 0);
         if (m > 0) {
             /* Use recorded log point location for summary output */
-            urma_log_loc(rs->file, rs->function, rs->line, URMA_VLOG_LEVEL_INFO,
+            urma_log(rs->file, rs->function, rs->line, URMA_VLOG_LEVEL_INFO,
                     "rate limit: %lu logs suppressed in last %ds",
                     m, URMA_LOG_RL_WINDOW_SEC);
         }
