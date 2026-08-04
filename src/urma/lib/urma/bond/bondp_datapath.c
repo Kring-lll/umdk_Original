@@ -13,6 +13,7 @@
 
 #include "bondp_connection.h"
 #include "bondp_context_table.h"
+#include "bondp_cp_tjetty.h"
 #include "bondp_datapath_convert.h"
 #include "bondp_datapath_schedule.h"
 #include "bondp_dp_failback.h"
@@ -29,8 +30,24 @@
 #define BONDP_POST_SEND_MAX_RETRY     3
 /* Max consecutive fast returns before forcing a full scan */
 #define BONDP_FAST_RETURN_THRESHOLD   64
+#define BONDP_MS_PER_SEC              1000
+#define BONDP_NS_PER_MS               1000000
 
 static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int send_idx, int target_idx);
+
+static void sleep_before_rnr_retry_resend(void)
+{
+    uint64_t sleep_ms = g_bondp_env.rnr_retry_sleep_ms;
+    if (sleep_ms == 0) {
+        return;
+    }
+
+    struct timespec sleep_time = {
+        .tv_sec = (time_t)(sleep_ms / BONDP_MS_PER_SEC),
+        .tv_nsec = (long)((sleep_ms % BONDP_MS_PER_SEC) * BONDP_NS_PER_MS),
+    };
+    (void)thrd_sleep(&sleep_time, NULL);
+}
 
 static urma_jetty_id_t *get_comp_urma_jetty_id(bondp_comp_t *bdp_comp)
 {
@@ -347,9 +364,6 @@ static inline bool failback_has_pending_rebuild(bondp_comp_t *bdp_comp)
 
 static void try_failback(bondp_comp_t *bdp_comp)
 {
-    if (!g_bondp_env.enable_failback) {
-        return;
-    }
     /* Skip send_lock and the exchange scan below when nothing is pending. */
     if (!failback_has_pending_rebuild(bdp_comp)) {
         return;
@@ -1337,11 +1351,19 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
     }
 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
+        bool need_rebuild_jetty = is_need_rebuild_jetty(cr);
+        if (is_rnr_retry_cr(cr)) {
+            sleep_before_rnr_retry_resend();
+        }
         (void)pthread_spin_lock(&bdp_comp->send_lock);
-        atomic_store(&bdp_comp->valid[send_idx], false);
-        if (g_bondp_env.enable_health_check) {
-            bondp_target_jetty_t *bdp_tjetty = wr_entry->target_vjetty;
-            bondp_hc_tjetty_sync_valid(bdp_tjetty, send_idx, target_idx);
+        if (need_rebuild_jetty) {
+            atomic_store(&bdp_comp->valid[send_idx], false);
+        }
+        bondp_target_jetty_t *bdp_tjetty = wr_entry->target_vjetty;
+        bondp_hc_tjetty_sync_valid(bdp_tjetty);
+        bondp_p_target_jetty_t *skip_p_tjetty = bondp_find_p_tjetty(bdp_tjetty, send_idx, target_idx);
+        if (skip_p_tjetty != NULL) {
+            atomic_store(&skip_p_tjetty->valid, false);
         }
         /* choose the failover route(0 or 1) through send_idx and target_idx */
         int new_send_idx = send_idx;
@@ -1382,10 +1404,12 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                 URMA_LOG_ERR("Failed to resend jfs wr, wr_id=%lu\n", resend_wr_id);
             }
         }
-        int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);
-        if (ret != 0 && ret != -EEXIST) {
-            URMA_LOG_WARN("Failed to add failback task, vjetty_id=%u pjetty_idx=%u ret=%d\n",
-                          wr_entry->target_vjetty->v_tjetty.id.id, send_idx, ret);
+        if (need_rebuild_jetty) {
+            int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);
+            if (ret != 0 && ret != -EEXIST) {
+                URMA_LOG_WARN("Failed to add failback task, vjetty_id=%u pjetty_idx=%u ret=%d\n",
+                              wr_entry->target_vjetty->v_tjetty.id.id, send_idx, ret);
+            }
         }
         (void)pthread_spin_unlock(&bdp_comp->send_lock);
         put_comp(bdp_comp);
