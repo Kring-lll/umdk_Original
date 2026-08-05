@@ -4,7 +4,7 @@
  * Description: dispatch layout tiling function implementation file
  * Create: 2026-01-05
  * Note:
- * History: 2026-01-05 create dispatch layout tiling function file
+ * History: 2026-01-05 create dispatch layout tiling function file..
  */
 
 #include <cmath>
