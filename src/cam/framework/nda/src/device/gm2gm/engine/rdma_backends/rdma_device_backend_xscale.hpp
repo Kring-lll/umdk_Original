@@ -300,6 +300,22 @@ constexpr uint64_t ACLSHMEMI_BYTE_MASK = 0xFF;
 constexpr uint32_t BYTES_32 = sizeof(uint32_t);
 constexpr uint32_t BYTES_64 = sizeof(uint64_t);
 
+// IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN = 1 << 1; when set, the CQ is created in ignore-overrun mode and the hardware does
+// not stall on CQ overflow, so the consumer must drive cur_tail itself (see aclshmemi_roce_xscale_poll_cq_overrun).
+constexpr uint32_t ACLSHMEMI_IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN = 2;
+// ---- CQE / WQE field layout constants for the XSCALE ignore-overrun poll path ----
+// The CQE qp_id field is 15 bits wide; mask used to extract the QP number from cqe.qp_id.
+constexpr uint32_t ACLSHMEMI_XSC_CQE_QP_ID_MASK = 0x7FFF;
+// wqe_id is stored in the CQE as (wqe_index << 3); shifting right by 3 recovers the logical wqe_index.
+constexpr uint32_t ACLSHMEMI_XSC_CQE_WQE_ID_SHIFT = 3;
+// Sentinel value for "no previous wqe_id seen yet". Although the CQE wqe_id field is 20 bits wide, it stores
+// (wqe_index << 3), so the recovered wqe_id is at most 17 bits (0x1FFFF); 0xFFFFFFFF is therefore unreachable.
+constexpr uint32_t ACLSHMEMI_XSC_CQE_WQE_ID_INVALID = 0xFFFFFFFF;
+// In ignore-overrun mode cur_tail packs [generation bit : wqe_index] with the generation bit at bit 17.
+constexpr uint32_t ACLSHMEMI_XSC_OVERRUN_WQE_INDEX_WIDTH = 17; // low 17 bits hold the wqe_index
+constexpr uint32_t ACLSHMEMI_XSC_OVERRUN_WQE_INDEX_MASK = (1U << ACLSHMEMI_XSC_OVERRUN_WQE_INDEX_WIDTH) - 1; // 0x1FFFF
+constexpr uint32_t ACLSHMEMI_XSC_OVERRUN_GEN_STEP = 1U << ACLSHMEMI_XSC_OVERRUN_WQE_INDEX_WIDTH;             // 0x20000
+
 constexpr uint64_t ACLSHMEMI_HOST_BYTE_7_SHIFT = 0;
 constexpr uint64_t ACLSHMEMI_HOST_BYTE_6_SHIFT = ACLSHMEMI_BYTE_WIDTH * 1; // 8
 constexpr uint64_t ACLSHMEMI_HOST_BYTE_5_SHIFT = ACLSHMEMI_BYTE_WIDTH * 2; // 16
