@@ -421,6 +421,101 @@ ACLSHMEM_DEVICE void aclshmemi_roce_ring_cq_doorbell<aclshmemi_rdma_backend_t::X
         cq_context->db_addr, ub_local64, sizeof(aclshmemi_xscdv_diamond_cq_doorbell_t), sync_id);
 }
 
+ACLSHMEM_DEVICE void aclshmemi_roce_xscale_cq_overrun_validation(uint32_t depth)
+{
+    if (depth >= ACLSHMEMI_XSC_OVERRUN_GEN_STEP) {
+        aclshmemi_kernel_abort(
+            "XSCALE backend overrun ability only supports depth < 0x20000, current depth: %u\n", depth);
+    }
+}
+// This path does not validate whether target_idx is reachable; if an unsatisfiable target_idx is passed in the loop
+// will spin until the timeout fires.
+ACLSHMEM_DEVICE uint32_t aclshmemi_roce_xscale_poll_cq_overrun(
+    uint32_t pe, uint32_t qp_idx, __gm__ aclshmemi_rdma_cq_ctx* cq_context, uint32_t target_idx,
+    AscendC::LocalTensor<uint64_t>& ub_local64, AscendC::LocalTensor<uint32_t>& ub_local32, uint32_t sync_id)
+{
+    // ! If `target_idx` has already caused the `uint32_t` to wrap around, this check might encounter issues.
+    if (target_idx == 0) {
+        return 0;
+    }
+    auto cur_hardware_tail_addr = cq_context->tail_addr;
+    dcci_cachelines((__gm__ uint8_t*)cur_hardware_tail_addr, sizeof(uint32_t));
+    uint32_t cur_tail = *(__gm__ uint32_t*)(cur_hardware_tail_addr);
+    uint32_t depth = cq_context->depth;
+    uint32_t original_cur_tail = cur_tail;
+    uint64_t cq_base_addr = cq_context->buf_addr;
+    // When cq overrun is enabled on the XSCALE NIC, all CQEs are written only to the first slot of the CQ.
+    __gm__ aclshmemi_xscdv_cqe64_t* cqe_addr = (__gm__ aclshmemi_xscdv_cqe64_t*)(cq_base_addr);
+    uint64_t run_cycles = 0;
+    uint32_t status = 0;
+    uint32_t wqn = 0;
+    uint32_t wqe_id = 0;
+    uint32_t last_wqe_id = ACLSHMEMI_XSC_CQE_WQE_ID_INVALID;
+
+    ACLSHMEM_DEBUG_FUNC(aclshmemi_roce_xscale_cq_overrun_validation, depth);
+
+    while (run_cycles < ACLSHMEMI_XSC_POLL_CQ_TIMEOUT_CYCLES) {
+        run_cycles++;
+        dcci_cachelines((__gm__ uint8_t*)cqe_addr, sizeof(aclshmemi_xscdv_cqe64_t));
+        wqn = cqe_addr->cqe.qp_id & ACLSHMEMI_XSC_CQE_QP_ID_MASK;
+        // wqe_id occupies 20 bits in the CQE, of which only the upper 17 bits are valid.
+        wqe_id = cqe_addr->cqe.wqe_id >> ACLSHMEMI_XSC_CQE_WQE_ID_SHIFT;
+        // This check is correct at present because depth is currently set to 32768 (1<<15).
+        // When checking owner_bit, expect_bit = cur_tail >> log(depth) is computed,
+        // i.e. expect_bit = cur_tail >> 15. Since wqe_id is the lower 17 bits of cur_tail,
+        // the two conditions are equivalent.
+        if (!aclshmemi_roce_xscale_check_cqe_owner(cqe_addr, wqe_id, depth)) {
+            continue;
+        }
+        if (wqe_id == last_wqe_id) {
+            continue;
+        }
+        // A wrap-around of the wqe_index was detected; advance the generation bit so cur_tail keeps increasing
+        // monotonically across ring wraps.
+        // We do not need to consider whether wqe_id wraps twice here, since a double wrap can only occur when
+        // wqe_id increases by more than 1<<17 in a single step. As cq depth is currently set to 1<<15,
+        // this situation cannot arise.
+        if ((wqe_id + 1) < (cur_tail & ACLSHMEMI_XSC_OVERRUN_WQE_INDEX_MASK)) {
+            cur_tail += ACLSHMEMI_XSC_OVERRUN_GEN_STEP;
+        }
+        cur_tail &= ~ACLSHMEMI_XSC_OVERRUN_WQE_INDEX_MASK;
+        cur_tail |= wqe_id & ACLSHMEMI_XSC_OVERRUN_WQE_INDEX_MASK;
+        cur_tail += 1;
+        // Check CQE status
+        status = cqe_addr->cqe.error_code;
+        if (status) {
+            // when we receive CQE with error, return
+            // Even though cq overrun mode may result in receiving multiple error CQEs, regardless of
+            // whether subsequent CQEs are received, the current CQE being in error indicates the loop
+            // condition is very likely unsatisfiable, so we should exit.
+            ACLSHMEM_DEBUG_FUNC(
+                aclshmemi_kernel_printf,
+                "Receive CQE with error: %d in pe %u, cur_tail: %u, wqn: %u, qp_idx: %u, target_idx: %u, "
+                "original_tail: %u\n",
+                status, pe, cur_tail, wqn, qp_idx, target_idx, original_cur_tail);
+            break;
+        }
+        if (cur_tail == target_idx) {
+            break;
+        }
+        last_wqe_id = wqe_id;
+    }
+
+    // When CQ overrun (ignore-overrun) mode is enabled, ringing the CQ doorbell is not required, but cur_tail still
+    // must be written back to global memory so the hardware/software tail stays consistent.
+    ub_local32.SetValue(0, cur_tail);
+    aclshmemi_roce_write_ub_to_gm_with_sync(cq_context->tail_addr, ub_local32, sizeof(uint32_t), sync_id);
+
+    if (cur_tail != target_idx) {
+        status = ACLSHMEMI_XSC_POLL_CQ_TIMEOUT_ERROR;
+        ACLSHMEM_DEBUG_FUNC(
+            aclshmemi_kernel_printf,
+            "Poll CQE timeout: pe=%u, qp_idx=%u, cur_tail=%u, target_idx=%u, original_tail=%u\n", pe, qp_idx, cur_tail,
+            target_idx, original_cur_tail);
+    }
+    return status;
+}
+
 // This function expects cur_tail to reach target_idx within the internally set timeout period. If this requirement is
 // not met when exiting, the function is considered to have an error.
 template <>
@@ -433,6 +528,10 @@ ACLSHMEM_DEVICE uint32_t aclshmemi_roce_poll_cq<aclshmemi_rdma_backend_t::XSCALE
     __gm__ aclshmemi_rdma_cq_ctx* cq_context =
         (__gm__ aclshmemi_rdma_cq_ctx*)(rdma_info->scq_ptr +
                                         ((uint64_t)pe * qp_num + qp_idx) * sizeof(aclshmemi_rdma_cq_ctx));
+    if ((cq_context->cq_attr_flags & ACLSHMEMI_IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN) != 0) {
+        return aclshmemi_roce_xscale_poll_cq_overrun(
+            pe, qp_idx, cq_context, target_idx, ub_local64, ub_local32, sync_id);
+    }
     auto cq_base_addr = cq_context->buf_addr;
     auto cqe_size = cq_context->cqe_size;
     auto depth = cq_context->depth;
