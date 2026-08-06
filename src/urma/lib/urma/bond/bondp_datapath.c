@@ -507,8 +507,8 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
             }
             vwr = vwr->next;
             index++;
-            if (index >= BONDP_MAX_WR_LIST_NUM - 1) {
-                URMA_LOG_ERR("Bondp supports at most %d wr_list.\n", BONDP_MAX_WR_LIST_NUM - 1);
+            if (index >= BONDP_MAX_WR_LIST_NUM) {
+                URMA_LOG_ERR("Bondp supports at most %d wr_list.\n", BONDP_MAX_WR_LIST_NUM);
                 return URMA_EINVAL;
             }
         }
