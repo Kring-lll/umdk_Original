@@ -29,12 +29,12 @@
 #include "tiling_args.h"
 #include "../op_kernel/cam_moe_distribute_dispatch_tiling.h"
 
-#ifdef USE_CANN83_PATH
+#if __has_include("platform/platform_infos_def.h")
 #include "platform/platform_infos_def.h"
-#elif defined(USE_CANN82_PATH)
+#elif __has_include("experiment/platform/platform/platform_infos_def.h")
 #include "experiment/platform/platform/platform_infos_def.h"
 #else
-#error "CANN version not supported or platform_infos_def.h not found. Check CANN_VERSION_MACRO definition."
+#error "CANN version not supported or platform_infos_def.h not found."
 #endif
 
 using namespace AscendC;

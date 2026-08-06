@@ -12,7 +12,7 @@ set -e
 exclude_list=()
 if [ -z "${SHMEM_HOME_PATH}" ]; then
     echo "Skipping shmem (SHMEM_HOME_PATH not set)"
-    exclude_list+=("moe_combine_shmem" "moe_dispatch_shmem")
+    exclude_list+=("moe_combine_shmem" "moe_dispatch_shmem" "cmake_files")
 fi
 
 copy_ops() {
@@ -80,7 +80,7 @@ build_ascend_proj() {
     local build_type=$4
     local proj_name="ascend_kernels_${soc_version}_proj"
     # 修改默认算子名
-    export OPS_PROJECT_NAME=aclnnInner
+    # export OPS_PROJECT_NAME=aclnnInner
     # 使能AscendC算子覆盖率统计
     if [ -n "${ENABLE_COV}" ]; then
         export ASCENDC_COV=1
@@ -112,7 +112,7 @@ build_ascend_proj() {
 
     source $ASCEND_HOME_PATH/bin/setenv.bash || true
     cd ${MODULE_BUILD_PATH}/${proj_name}
-    modify_func_cmake
+    # modify_func_cmake
     ./build.sh
     # 根据is_extract判断是否抽取run包
     if [ $is_extract -eq 1 ]; then
