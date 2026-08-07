@@ -681,10 +681,10 @@ TEST(UrmaBondTest, PublicWaitJfcThenRearmRefreshesAllMembers)
     EXPECT_EQ(1, bondp_wait_jfc(&fixture.jfce.v_jfce, 1, 100, readyJfc));
     EXPECT_EQ(&fixture.jfc.v_jfc, readyJfc[0]);
 
-    /* Only the physical JFC that fired (the backup member) is rearmed. */
     EXPECT_EQ(URMA_SUCCESS, bondp_rearm_jfc(&fixture.jfc.v_jfc, false));
-    ASSERT_EQ(1, g_rearmPhysicalJfcCount);
-    EXPECT_EQ(&backupPhysicalJfc, g_rearmedPhysicalJfc[0]);
+    ASSERT_EQ(2, g_rearmPhysicalJfcCount);
+    EXPECT_EQ(&fixture.phyJfc, g_rearmedPhysicalJfc[0]);
+    EXPECT_EQ(&backupPhysicalJfc, g_rearmedPhysicalJfc[1]);
 }
 
 TEST(UrmaBondTest, PublicRearmJfcRefreshesAllMembersRepeatedly)
@@ -704,22 +704,15 @@ TEST(UrmaBondTest, PublicRearmJfcRefreshesAllMembersRepeatedly)
     backupPhysicalJfc.urma_ctx = &fixture.phyCtx;
     g_rearmPhysicalJfcCount = 0;
 
-    /* Simulate that both physical members have fired events by arming the rearm mask. */
-    fixture.jfc.rearm_mask.store(0x3u);
     EXPECT_EQ(URMA_SUCCESS, bondp_rearm_jfc(&fixture.jfc.v_jfc, false));
     ASSERT_EQ(2, g_rearmPhysicalJfcCount);
     EXPECT_EQ(&fixture.phyJfc, g_rearmedPhysicalJfc[0]);
     EXPECT_EQ(&backupPhysicalJfc, g_rearmedPhysicalJfc[1]);
-    /* Successful rearm clears the corresponding bits. */
-    EXPECT_EQ(0u, fixture.jfc.rearm_mask.load());
 
-    /* Re-arm the mask to verify rearm can be repeated after the mask is cleared. */
-    fixture.jfc.rearm_mask.store(0x3u);
     EXPECT_EQ(URMA_SUCCESS, bondp_rearm_jfc(&fixture.jfc.v_jfc, false));
     ASSERT_EQ(4, g_rearmPhysicalJfcCount);
     EXPECT_EQ(&fixture.phyJfc, g_rearmedPhysicalJfc[2]);
     EXPECT_EQ(&backupPhysicalJfc, g_rearmedPhysicalJfc[3]);
-    EXPECT_EQ(0u, fixture.jfc.rearm_mask.load());
 }
 
 TEST(UrmaBondTest, PublicEventApisCoverProviderFailureContracts)
@@ -736,11 +729,7 @@ TEST(UrmaBondTest, PublicEventApisCoverProviderFailureContracts)
     fixture.jfce.dev_num = 1;
     fixture.phyOps.rearm_jfc = MockRearmPhysicalJfc;
     urma_test::SetHwMockStatus(URMA_EAGAIN);
-    /* Arm the rearm mask so rearm iterates the physical member and surfaces the provider failure. */
-    fixture.jfc.rearm_mask.store(0x1u);
     EXPECT_EQ(URMA_FAIL, bondp_rearm_jfc(&fixture.jfc.v_jfc, true));
-    /* Failed rearm does not clear the bit, leaving it for the next retry. */
-    EXPECT_EQ(0x1u, fixture.jfc.rearm_mask.load());
 
     epollFd = epoll_create1(EPOLL_CLOEXEC);
     ASSERT_GE(epollFd, 0);
@@ -1411,8 +1400,9 @@ TEST(UrmaBondTest, PublicUserCtlGetRjettyAndSegCtxUseMockIoctl)
     EXPECT_EQ(1U, jettyExt->target_ctx_cnt);
     EXPECT_NE(0U, jettyExt->mask & BONDP_RJETTY_EXT_MASK_LOCAL_CTX);
     EXPECT_NE(0U, jettyExt->mask & BONDP_RJETTY_EXT_MASK_TARGET_CTX);
-    auto *targetEntry = reinterpret_cast<bondp_rjetty_target_ctx_t *>(jettyExt->data + 1);
-    EXPECT_EQ(0U, targetEntry->target_idx);
+    bondp_rjetty_target_ctx_t targetEntry = {};
+    std::memcpy(&targetEntry, jettyExt->data + 1, sizeof(targetEntry));
+    EXPECT_EQ(0U, targetEntry.target_idx);
     std::free(rjetty);
 
     inputTseg.v_tseg.urma_ctx = &fixture.ctx.v_ctx;
@@ -1426,9 +1416,14 @@ TEST(UrmaBondTest, PublicUserCtlGetRjettyAndSegCtxUseMockIoctl)
     ASSERT_NE(nullptr, seg);
     EXPECT_TRUE(bondp_seg_has_user_info(seg));
     auto *segPrivExt = bondp_seg_get_priv_ext(seg);
-    EXPECT_EQ(sizeof(urma_bond_seg_ext_t), segPrivExt->len);
-    auto *segExt = reinterpret_cast<urma_bond_seg_ext_t *>(segPrivExt->data);
-    EXPECT_EQ(0x55U, segExt->peer_p_seg[0].token_id);
+    EXPECT_EQ(sizeof(urma_bond_seg_ext_v0_t) + sizeof(bondp_seg_peer_ctx_t), segPrivExt->len);
+    auto *segExt = reinterpret_cast<urma_bond_seg_ext_v0_t *>(segPrivExt->data);
+    EXPECT_EQ(0U, segExt->version);
+    EXPECT_EQ(1U, segExt->peer_cnt);
+    bondp_seg_peer_ctx_t entry = {};
+    std::memcpy(&entry, segExt->data, sizeof(entry));
+    EXPECT_EQ(0U, entry.peer_idx);
+    EXPECT_EQ(0x55U, entry.token_id);
     std::free(seg);
 }
 

@@ -17,7 +17,8 @@ if [[ -n "${SOC_TYPE}" && "${SOC_TYPE}" != "ascend950" ]]; then
 fi
 
 # rdma_backends source path (inside umdk)
-RDMA_BACKENDS_SRC="${ROOT_PATH}/src/cam/framework/nda/src/device/gm2gm/engine/rdma_backends"
+CAM_NDA_ROOT="${ROOT_PATH}/src/cam/framework/nda"
+SHMEM_ROOT="shmem"
 
 if [ ! -d "$MODULE_BUILD_OUT_PATH" ]; then
     mkdir -p "$MODULE_BUILD_OUT_PATH"
@@ -27,14 +28,15 @@ cd "$MODULE_BUILD_OUT_PATH"
 
 rm -rf shmem
 # Download and build the shmem package
-SHMEM_COMMIT_HASH="7573f42e06259d538d52652858bbcc950d58da2e"
+SHMEM_COMMIT_HASH="e7063f6e7cf9b043c5d483ee2b8c9e203bdbb5fa"
 git clone https://gitcode.com/cann/shmem
 cd shmem
 git checkout "${SHMEM_COMMIT_HASH}" -b nda-base
 cd ..
 
 # Override the rdma_backends
-cp -f ${RDMA_BACKENDS_SRC}/* shmem/src/device/gm2gm/engine/rdma_backends/
+cp -rf ${CAM_NDA_ROOT}/src/* ${SHMEM_ROOT}/src
+cp -rf ${CAM_NDA_ROOT}/include/* ${SHMEM_ROOT}/include
 
 # Build shmem
 cd shmem

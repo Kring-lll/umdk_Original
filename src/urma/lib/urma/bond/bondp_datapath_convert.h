@@ -34,6 +34,17 @@ static inline bool is_atomic_wr(const urma_jfs_wr_t *wr)
     return wr->opcode == URMA_OPC_CAS || wr->opcode == URMA_OPC_FADD;
 }
 
+static inline uint32_t jfs_wr_src_num_sge(const urma_jfs_wr_t *wr)
+{
+    if (is_rw_wr(wr)) {
+        return wr->rw.src.num_sge;
+    }
+    if (is_send_wr(wr)) {
+        return wr->send.src.num_sge;
+    }
+    return 1; // atomic ops use single SGE
+}
+
 urma_status_t copy_jfs_wr(const urma_jfs_wr_t *src, urma_jfs_wr_t *dst,
                           urma_sge_t *prealloc_src_sge, urma_sge_t *prealloc_dst_sge,
                           uint32_t max_sge, uint32_t max_rsge);
@@ -78,6 +89,16 @@ static inline bool is_failover_cr(const urma_cr_t *cr)
     return cr->status == URMA_CR_LOC_LEN_ERR ||
            cr->status == URMA_CR_LOC_ACCESS_ERR ||
            cr->status == URMA_CR_ACK_TIMEOUT_ERR;
+}
+
+static inline bool is_need_rebuild_jetty(const urma_cr_t *cr)
+{
+    return cr->status == URMA_CR_ACK_TIMEOUT_ERR;
+}
+
+static inline bool is_rnr_retry_cr(const urma_cr_t *cr)
+{
+    return cr->status == URMA_CR_RNR_RETRY_CNT_EXC_ERR;
 }
 
 #ifdef __cplusplus

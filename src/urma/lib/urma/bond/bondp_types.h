@@ -29,7 +29,7 @@
 
 #define BONDP_MAX_NUM_JETTYS          (10240)
 #define BONDP_MAX_NUM_RSEGS           (10240)
-#define BONDP_MAX_WR_LIST_NUM         (300)
+#define BONDP_MAX_WR_LIST_NUM         (256)
 #define PRIMARY_EID_NUM               (2)
 #define PORT_EID_MAX_NUM_PER_DEV      (9)
 #define PORT_EID_MAX_NUM              (PORT_EID_MAX_NUM_PER_DEV * PRIMARY_EID_NUM)
@@ -99,6 +99,8 @@ typedef struct bondp_device {
 typedef struct bondp_port_cfg {
     uint32_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t enabled_count;
+    /* chip_id shall not be used for p-connection, only for chip_id check
+       when creating jfc/jfs/jfr/jetty */
     uint8_t chip_id[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t chip_id_count;
 } bondp_port_cfg_t;
@@ -149,10 +151,8 @@ typedef struct bondp_jfc {
     uint32_t active_count;
 #ifndef __cplusplus
     atomic_uint fast_return_count;
-    atomic_uint rearm_mask; /* bit i set: p_jfc[i] needs rearm */
 #else
     std::atomic_uint fast_return_count;
-    std::atomic_uint rearm_mask; /* bit i set: p_jfc[i] needs rearm */
 #endif
     urma_ref_t use_cnt; /* Initialize to 0 */
 } bondp_jfc_t;
@@ -233,10 +233,12 @@ typedef struct bondp_comp {
     atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
     atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     atomic_uint msn;
+    atomic_uint rnr_retry_cnt;
 #else
     std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_uint msn;
+    std::atomic_uint rnr_retry_cnt;
 #endif
 #ifndef __cplusplus
     atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
@@ -251,14 +253,15 @@ typedef struct bondp_comp {
 
 typedef struct bondp_p_target_jetty {
     urma_target_jetty_t *p_tjetty;
-    urma_target_seg_t *p_check_tseg;
+    uint64_t hc_va;
+    uint32_t hc_token_id;
+    uint8_t local_indice;
+    uint8_t remote_indice;
 #ifndef __cplusplus
     atomic_bool valid;
 #else
     std::atomic_bool valid;
 #endif
-    uint8_t local_indice;
-    uint8_t remote_indice;
 } bondp_p_target_jetty_t;
 
 typedef struct bondp_target_jetty {
