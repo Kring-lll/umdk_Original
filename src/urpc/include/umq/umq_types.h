@@ -409,8 +409,19 @@ struct umq_buf {
 
     uint64_t status : 32;                 // umq_buf_status_t
     uint64_t io_direction : 2;            // 0: no direction; 1: tx qbuf; 2: rx qbuf
-    uint64_t umq_id : 18;
-    uint64_t rsvd3 : 12;
+
+    struct {
+        uint64_t flag : 1;                // 0: enable umq_id, invalid to user, 1: enable tphandel
+        union {
+            uint64_t umq_id : 18;         // internal use by umq, get umq_id by tx cqe 
+            struct {
+                uint64_t tp_handle_idx : 16;
+                uint64_t rsvd0 : 2;
+            } tp_handle;                  // used by umq users, get tp handle idx by tx buf
+        };
+    } tx_ref;                         // 19 bit, only valid for tx buffers
+
+    uint64_t rsvd3 : 11;
 
     uint64_t rsvd4;
 
