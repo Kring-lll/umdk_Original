@@ -1891,18 +1891,24 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
     for (int i = 0; i < tx_cr_cnt; i++) {
         umq_ub_fc_user_ctx_t obj = {.value = cr[i].user_ctx};
         if (cr[i].status != URMA_CR_SUCCESS) {
-            if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag)) {
-                umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
-                umq_ub_jetty_node_mark_err(jetty_node_list->node_list[tp_handle_idx]);
-            } else if (is_umq_ub_logic_queue(queue->create_flag)) {
-                umq_ub_jetty_node_mark_err((jetty_pool_node_t*)(uintptr_t)queue->jetty_node);
-            }
             umq_ub_fc_packet_stats(&queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND_ERROR);
             if (cr[i].status == URMA_CR_WR_FLUSH_ERR_DONE || cr[i].status == URMA_CR_WR_SUSPEND_DONE) {
                 UMQ_LIMIT_VLOG_INFO(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx "
                     "cr[%d] status[%d] local_id[%u]\n", EID_ARGS(*eid), id, i, (int)cr[i].status, cr[i].local_id);
                 continue;
             }
+
+            if (cr[i].status == URMA_CR_ACK_TIMEOUT_ERR) {
+                umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
+                if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
+                    ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0 && jetty_node_list != NULL &&
+                    tp_handle_idx < jetty_node_list->list_len)) {
+                    umq_ub_jetty_node_mark_err(jetty_node_list->node_list[tp_handle_idx]);
+                } else if (is_umq_ub_logic_queue(queue->create_flag)) {
+                    umq_ub_jetty_node_mark_err((jetty_pool_node_t*)(uintptr_t)queue->jetty_node);
+                }
+            }
+
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx cr[%d] "
                 "status[%d] local_id[%u]\n", EID_ARGS(*eid), id, i, (int)cr[i].status, cr[i].local_id);
             bool is_fatal = (cr[i].status == URMA_CR_ACK_TIMEOUT_ERR || cr[i].status == URMA_CR_RNR_RETRY_CNT_EXC_ERR);
@@ -2014,13 +2020,6 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
     uint32_t failed_cnt = 0;
     for (int i = 0; i < tx_cr_cnt; i++) {
         if (cr[i].status != URMA_CR_SUCCESS) {
-            if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
-                ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0)) {
-                umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
-                umq_ub_jetty_node_mark_err(jetty_node_list->node_list[tp_handle_idx]);
-            } else if (is_umq_ub_logic_queue(queue->create_flag)) {
-                umq_ub_jetty_node_mark_err((jetty_pool_node_t*)(uintptr_t)queue->jetty_node);
-            }
             if (cr[i].status == URMA_CR_WR_FLUSH_ERR_DONE) {
                 UMQ_LIMIT_VLOG_INFO(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx "
                     "cr[%d] status: %d local_id: %u\n", EID_ARGS(*eid), id, i, cr[i].status, cr[i].local_id);
@@ -2034,6 +2033,18 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
                 "tx cr[%d] status: %d local_id: %u\n", EID_ARGS(*eid), id, i, cr[i].status, cr[i].local_id);
                 continue;
             }
+
+            if (cr[i].status == URMA_CR_ACK_TIMEOUT_ERR) {
+                umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
+                if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
+                    ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0 && jetty_node_list != NULL &&
+                    tp_handle_idx < jetty_node_list->list_len)) {
+                    umq_ub_jetty_node_mark_err(jetty_node_list->node_list[tp_handle_idx]);
+                } else if (is_umq_ub_logic_queue(queue->create_flag)) {
+                    umq_ub_jetty_node_mark_err((jetty_pool_node_t*)(uintptr_t)queue->jetty_node);
+                }
+            }
+
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx cr[%d] "
                 "status: %d local_id: %u\n", EID_ARGS(*eid), id, i, cr[i].status, cr[i].local_id);
             failed_cnt++;
