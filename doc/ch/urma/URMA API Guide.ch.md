@@ -3645,7 +3645,7 @@ Return: 0 on success, EINVAL on invalid parameter, other value on other batch de
 
 @param[in] [Required] rjfr: the information of remote jfr to import into user node, trans_mode required, trans_mode same to create_jfr trans_mode;
 
-@param[in] [Required] token_value: token_valueto put into output jetty/protection table;
+@param[in] [Required] token_value: token to put into output jetty/protection table;
 
 5.  返回值
 
@@ -4707,7 +4707,7 @@ Return: the number of CR returned, 0 means no CR returned, -1 on error.
 
 ![](figures/urma_notice.png)
 
-若执行成功，则出参cr status为URMA_CR_WR_FLUSH_ERR。
+若执行成功，则出参cr status为URMA_CR_WR_FLUSH_ERR或URMA_CR_WR_UNHANDLED。
 
 ##### 2.3.1.6.15 urma_get_rjetty
 
@@ -10137,7 +10137,7 @@ int ubcore_delete_jfs_batch([4.4.2.1.4](#34214-ubcore_jfs) [ubcore_jfs](#34214-u
 
 ![](figures/urma_notice.png)
 
-1、如果发生删除失败的情况（包括非法的参数），接口会在第一个删除失败的jfs返回，在这个jfs之前的jfs都会被正常删除。
+1、如果发生删除失败的情况（非法参数除外），接口会在第一个删除失败的jfs返回，在这个jfs之前的jfs都会被正常删除。
 
 #### 3.4.2.6 ubcore_flush_jfs
 
@@ -11380,7 +11380,7 @@ Jetty group收到消息，但jetty group没有有效的jetty时，将调用jfae_
 
 5.  返回值
 
-Return: etty group pointer on success, NULL on error
+Return: jetty group pointer on success, NULL on error
 
 ##### 3.4.5.1.1 ubcore_jetty_grp_flag
 
