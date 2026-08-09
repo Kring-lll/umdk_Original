@@ -3644,7 +3644,7 @@ Import remote JFR information, including registering its token locally.
 
 @param[in] [Required] rjfr: the information of remote jfr to import into user node, trans_mode required, trans_mode same to create_jfr trans_mode;
 
-@param[in] [Required] token_value: token_value to put into output jetty/protection table;
+@param[in] [Required] token_value: token to put into output jetty/protection table;
 
 5. Return Value
 
@@ -4706,7 +4706,7 @@ Return: the number of CR returned, 0 means no CR returned, -1 on error.
 
 ![](figures/urma_notice.png)
 
-If execution is successful, the output parameter cr status will be URMA_CR_WR_FLUSH_ERR.
+If execution is successful, the output parameter cr status will be URMA_CR_WR_FLUSH_ERR or URMA_CR_WR_UNHANDLED.
 
 ##### 2.3.1.6.15 urma_get_rjetty
 
