@@ -154,9 +154,16 @@ static void put_event_handler(bondp_worker_event_handler_t *entry)
 static void flush_event_handlers(bondp_worker_t *worker)
 {
     bondp_worker_event_handler_t *entry = NULL;
-    bondp_worker_event_handler_t *next = NULL;
+    struct ub_hmap_node *node = NULL;
+    struct ub_hmap_node *next_node = NULL;
 
-    HMAP_FOR_EACH_SAFE (entry, next, hmap_node, &worker->handler_map) {
+    if (worker->handler_map.bucket == NULL) {
+        return;
+    }
+
+    for (node = ub_hmap_first(&worker->handler_map); node != NULL; node = next_node) {
+        next_node = ub_hmap_next(&worker->handler_map, node);
+        entry = CONTAINER_OF_FIELD(node, bondp_worker_event_handler_t, hmap_node);
         ub_hmap_remove(&worker->handler_map, &entry->hmap_node);
         entry->deleting = true;
         free(entry);

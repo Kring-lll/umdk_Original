@@ -93,7 +93,9 @@ int bondp_topo_query_bonding_eid(const urma_eid_t *target_eid, urma_eid_t *outpu
 
 static inline bool is_empty_eid(const urma_eid_t *eid)
 {
-    return eid->in6.interface_id == 0 && eid->in6.subnet_prefix == 0;
+    /* Use memcmp to avoid misaligned access when eid is cast from a char array */
+    urma_eid_t empty = {0};
+    return memcmp(eid, &empty, sizeof(urma_eid_t)) == 0;
 }
 
 static inline bool is_eid_equal(const urma_eid_t *eid1, const urma_eid_t *eid2)

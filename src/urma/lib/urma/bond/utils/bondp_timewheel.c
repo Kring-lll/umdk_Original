@@ -205,13 +205,16 @@ void tw_destroy(tw_t *tw)
 void tw_cancel_all(tw_t *tw)
 {
     tw_task_t *task = NULL;
-    tw_task_t *next = NULL;
+    struct ub_hmap_node *node = NULL;
+    struct ub_hmap_node *next_node = NULL;
 
-    if (tw == NULL) {
+    if (tw == NULL || tw->task_map.bucket == NULL) {
         return;
     }
 
-    HMAP_FOR_EACH_SAFE (task, next, hmap_node, &tw->task_map) {
+    for (node = ub_hmap_first(&tw->task_map); node != NULL; node = next_node) {
+        next_node = ub_hmap_next(&tw->task_map, node);
+        task = CONTAINER_OF_FIELD(node, tw_task_t, hmap_node);
         TAILQ_REMOVE(&tw->slots[task->slot_idx].tasks, task, slot_entry);
         ub_hmap_remove(&tw->task_map, &task->hmap_node);
         task->fn(TW_TASK_CANCELED, task->arg);
