@@ -81,6 +81,20 @@ static int server_manage_channel_delayed_release(urpc_instance_key_t *client, ui
     return 0;
 }
 
+int server_manage_channel_init(void)
+{
+    if (!is_feature_enable(URPC_MANAGE_FEATURE_FLAG)) {
+        return 0;
+    }
+
+    if (urpc_hmap_init(&g_urpc_server_manage_channel_ctx.hmap, SERVER_MANAGE_CHANNEL_SIZE) != URPC_SUCCESS) {
+        URPC_LIB_LOG_ERR("server manage_channel_ctx init failed\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 void server_manage_channel_uninit(void)
 {
     if (!is_feature_enable(URPC_MANAGE_FEATURE_FLAG)) {

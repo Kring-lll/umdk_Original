@@ -12,6 +12,7 @@
 extern "C" {
 #endif
 
+int server_manage_channel_init(void);
 void server_manage_channel_uninit(void);
 int server_manage_channel_get(urpc_instance_key_t *client, uint32_t client_manage_chid, uint64_t user_ctx,
     uint32_t *mange_chid, uint32_t *mapped_id);
