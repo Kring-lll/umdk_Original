@@ -207,7 +207,7 @@ void tw_cancel_all(tw_t *tw)
     tw_task_t *task = NULL;
     tw_task_t *next = NULL;
 
-    if (tw == NULL) {
+    if (tw == NULL || tw->task_map.bucket == NULL) {
         return;
     }
 
