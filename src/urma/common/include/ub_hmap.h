@@ -116,19 +116,20 @@ static inline uint32_t ub_hmap_count(const struct ub_hmap *hmap)
 }
 
 #define HMAP_FOR_EACH_WITH_HASH(NODE, MEMBER, HASH, TABLE)                       \
-    for (INIT_CONTAINER_PTR(NODE, ub_hmap_first_with_hash(TABLE, HASH), MEMBER); \
-        (((NODE) != OBJ_CONTAINING(NULL, NODE, MEMBER)) || ((NODE) = NULL));           \
-        ASSIGN_CONTAINER_PTR(NODE, ub_hmap_next_with_hash(&(NODE)->MEMBER, HASH), MEMBER))
+    for (NODE = SAFE_OBJ_CONTAINING(ub_hmap_first_with_hash(TABLE, HASH), NODE, MEMBER); \
+        (NODE) != NULL;                                                          \
+        NODE = SAFE_OBJ_CONTAINING(ub_hmap_next_with_hash(&(NODE)->MEMBER, HASH), NODE, MEMBER))
 
-#define HMAP_FOR_EACH(NODE, MEMBER, TABLE) for (INIT_CONTAINER_PTR(NODE, ub_hmap_first(TABLE), MEMBER);       \
-        (((NODE) != OBJ_CONTAINING(NULL, NODE, MEMBER)) || ((NODE) = NULL)); \
-        ASSIGN_CONTAINER_PTR(NODE, ub_hmap_next(TABLE, &(NODE)->MEMBER), MEMBER))
+#define HMAP_FOR_EACH(NODE, MEMBER, TABLE)                                       \
+    for (NODE = SAFE_OBJ_CONTAINING(ub_hmap_first(TABLE), NODE, MEMBER);        \
+        (NODE) != NULL;                                                          \
+        NODE = SAFE_OBJ_CONTAINING(ub_hmap_next(TABLE, &(NODE)->MEMBER), NODE, MEMBER))
 
 #define HMAP_FOR_EACH_SAFE(NODE, NEXT, MEMBER, HMAP)                           \
-    for (INIT_CONTAINER_PTR(NODE, ub_hmap_first(HMAP), MEMBER);                \
-        ((((NODE) != OBJ_CONTAINING(NULL, NODE, MEMBER)) || ((NODE) = NULL)) ?       \
-        INIT_CONTAINER_PTR(NEXT, ub_hmap_next(HMAP, &(NODE)->MEMBER), MEMBER), 1 : 0); \
-        (NODE) = (NEXT))
+    for (NODE = SAFE_OBJ_CONTAINING(ub_hmap_first(HMAP), NODE, MEMBER);        \
+         (NODE) != NULL ?                                                      \
+         (NEXT = SAFE_OBJ_CONTAINING(ub_hmap_next(HMAP, &(NODE)->MEMBER), NEXT, MEMBER), 1) : 0; \
+         (NODE) = (NEXT))
 
 /*
 * Find target in table.

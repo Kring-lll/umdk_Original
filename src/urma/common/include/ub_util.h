@@ -222,6 +222,13 @@ unsigned long ub_find_first_zero_bit(const unsigned long *array, unsigned long s
 #define OBJ_CONTAINING(field_ptr, obj_ptr, field) \
     ((typeof(obj_ptr))(void *)((char *)(field_ptr) - OBJ_OFFSETOF(obj_ptr, field)))
 
+/* Safe version of OBJ_CONTAINING that returns NULL when field_ptr is NULL,
+ * avoiding undefined behavior from NULL pointer arithmetic in sanitizers.
+ */
+#define SAFE_OBJ_CONTAINING(field_ptr, obj_ptr, field) \
+    ({ typeof(field_ptr) __p = (field_ptr); \
+       __p == NULL ? (typeof(obj_ptr))NULL : OBJ_CONTAINING(__p, obj_ptr, field); })
+
 /* get the structure object from the pointer of the given field by struct type,
  * Then assign the structure object to the obj_ptr
  */
