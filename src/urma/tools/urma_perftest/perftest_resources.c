@@ -1491,6 +1491,21 @@ static int create_tp_info(perftest_context_t *ctx, perftest_config_t *cfg)
                 LOG_ERROR("Failed to set_tp_attr, ret:%d\n", ret);
                 goto free_buf;
             }
+        } else if (cfg->uboe_sl) {
+            urma_tp_attr_value_t tp_attr = {0};   // 所有字段清零
+            uint8_t set_tp_attr_cnt = 0;
+            uint32_t set_tp_attr_flag = 0;
+
+            tp_attr.sl = cfg->sl;
+            set_tp_attr_cnt++;
+            set_tp_attr_flag |= PERFTEST_SET_ATTR_BITMAP_SL_FLAG;
+
+            ret = urma_set_tp_attr(ctx->urma_ctx, ctx->tp_info[i].tp_handle, set_tp_attr_cnt,
+                                   set_tp_attr_flag, &tp_attr);
+            if (ret != URMA_SUCCESS) {
+                LOG_ERROR("Failed to set_tp_attr(sl), ret:%d\n", ret);
+                goto free_buf;
+            }
         }
     }
     return 0;
