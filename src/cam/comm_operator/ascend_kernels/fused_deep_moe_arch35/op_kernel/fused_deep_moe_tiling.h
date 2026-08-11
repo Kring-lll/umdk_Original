@@ -20,8 +20,7 @@
     #define ENABLE_REUSE_MEMORY
 #endif
 namespace Cam {
-struct WorkSpaceOffset
-{
+struct WorkSpaceOffset {
     // MM1/GMM1-Swiglu input
     int64_t shareX1TokenOffset;
     int64_t x1TokenOffset;

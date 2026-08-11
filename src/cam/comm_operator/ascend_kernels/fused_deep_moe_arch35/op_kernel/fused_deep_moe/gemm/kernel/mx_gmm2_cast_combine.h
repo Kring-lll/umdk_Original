@@ -170,7 +170,8 @@ public:
 
         uint32_t currentM = 0;
         uint32_t startCoreIdx = 0;
-        aicSetFunc = {reinterpret_cast<__gm__ int32_t *>(syncGmAddr + GMM2::SOFT_SYNC_OFFSET), static_cast<int32_t>(AscendC::GetBlockIdx())};
+        aicSetFunc = {reinterpret_cast<__gm__ int32_t *>(syncGmAddr + GMM2::SOFT_SYNC_OFFSET),
+                      static_cast<int32_t>(AscendC::GetBlockIdx())};
         Callback callbackAfterFixpipe = MakeCallback(&aicSetFunc);
         {
             AscendC::GlobalTensor<ElementGroupList> groupList;
@@ -197,7 +198,8 @@ public:
                     gmMxScaleB.SetGlobalBuffer(gmBScalelistTensorDesc.GetDataPtr<ElementMxScaleB>(groupIdx));
                 } else {
                     gmB.SetGlobalBuffer(gmBlistTensorDesc.GetDataPtr<ElementB>(0) + gmGroupOffsetB);
-                    gmMxScaleB.SetGlobalBuffer(gmBScalelistTensorDesc.GetDataPtr<ElementMxScaleB>(0) + gmGroupOffsetMxScaleB);
+                    gmMxScaleB.SetGlobalBuffer(
+                        gmBScalelistTensorDesc.GetDataPtr<ElementMxScaleB>(0) + gmGroupOffsetMxScaleB);
                 }
             currentM = (groupIdx == 0) ? groupList.GetValue(groupIdx)
                                                     : (groupList.GetValue(groupIdx) - groupList.GetValue(groupIdx - 1));
@@ -404,9 +406,11 @@ public:
                         tla::MakeCoord(totalM + blockCoord.m() * L1_TILE_M, blockCoord.n() * L1_TILE_N),
                         tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
 
-                    CheckSyncFlag(reinterpret_cast<__gm__ int32_t*>(syncGmAddr + GMM2::SOFT_SYNC_OFFSET), static_cast<int32_t>(coreIdx), target);
+                    CheckSyncFlag(reinterpret_cast<__gm__ int32_t*>(syncGmAddr + GMM2::SOFT_SYNC_OFFSET),
+                                  static_cast<int32_t>(coreIdx), target);
                     target += 1;
-                    blockEpilogue(tensorBlockC, tensorBlockD, actualBlockShape, groupIdx, totalM + blockCoord.m() * L1_TILE_M, blockCoord.n() * L1_TILE_N);
+                    blockEpilogue(tensorBlockC, tensorBlockD, actualBlockShape, groupIdx,
+                                  totalM + blockCoord.m() * L1_TILE_M, blockCoord.n() * L1_TILE_N);
                 }
 
                 totalM += inGroupProblemShape.m();
@@ -450,7 +454,8 @@ public:
                             tla::MakeCoord(blockCoord.m() * L1_TILE_M, blockCoord.n() * L1_TILE_N),
                             tla::MakeShape(actualBlockShape.m(), actualBlockShape.n()));
 
-                        CheckSyncFlag(reinterpret_cast<__gm__ int32_t*>(syncGmAddr + GMM2::SOFT_SYNC_OFFSET), static_cast<int32_t>(coreIdx), target);
+                        CheckSyncFlag(reinterpret_cast<__gm__ int32_t*>(syncGmAddr + GMM2::SOFT_SYNC_OFFSET),
+                                      static_cast<int32_t>(coreIdx), target);
                         target += 1;
                         blockEpilogue(tensorBlockC, tensorBlockD, actualBlockShape, UINT32_MAX, 0, 0);
                     }

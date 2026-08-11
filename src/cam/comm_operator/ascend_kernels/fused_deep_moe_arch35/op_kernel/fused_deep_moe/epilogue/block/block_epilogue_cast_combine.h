@@ -137,7 +137,8 @@ public:
 
     CATLASS_DEVICE GM_ADDR GetWinAddrByRankId(const int32_t rankId, const uint8_t expertLocalId = 0U)
     {
-        return Mc2Kernel::GetBaseWindAddrByRankId(calcInfo.epWinContext_, rankId, calcInfo.epRankId_) + calcInfo.winDataSizeOffset_ + expertLocalId * calcInfo.expertPerSizeOnWin_ + rankId * OPT_RANK_OFFSET;
+        return Mc2Kernel::GetBaseWindAddrByRankId(calcInfo.epWinContext_, rankId, calcInfo.epRankId_) +
+               calcInfo.winDataSizeOffset_ + expertLocalId * calcInfo.expertPerSizeOnWin_ + rankId * OPT_RANK_OFFSET;
     }
 
     CATLASS_DEVICE void SetCombineSendEpRank(uint32_t epRank, uint32_t &remoteEpRank, uint32_t &localEpRank)

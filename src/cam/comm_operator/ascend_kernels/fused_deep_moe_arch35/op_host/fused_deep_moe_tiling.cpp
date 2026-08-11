@@ -616,7 +616,7 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
     uint64_t x1MxScaleNum = CeilUp(Ceil(h, MX_BLOCK_SIZE), MX_LAST_DIM);
     uint64_t shareX1MxScaleNum = x1MxScaleNum;
     uint64_t x2MxScaleNum = CeilUp(Ceil(gmm2HLen, MX_BLOCK_SIZE), MX_LAST_DIM);
-    uint64_t shareX2MxScaleNum = CeilUp(Ceil(shareGmm2HLen, MX_BLOCK_SIZE), MX_LAST_DIM);;
+    uint64_t shareX2MxScaleNum = CeilUp(Ceil(shareGmm2HLen, MX_BLOCK_SIZE), MX_LAST_DIM);
     maxTokenNum = globalBs * std::min(topK, moeExpertNumPerRank);
     bool isMxFp4 = tilingData.fusedDeepMoeInfo.mxActStorageFp4 == MX_FP4_QUANT_MODE;
 
