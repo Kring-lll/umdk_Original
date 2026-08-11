@@ -81,6 +81,7 @@ static int server_manage_channel_delayed_release(urpc_instance_key_t *client, ui
     return 0;
 }
 
+
 void server_manage_channel_uninit(void)
 {
     if (!is_feature_enable(URPC_MANAGE_FEATURE_FLAG)) {
