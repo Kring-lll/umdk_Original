@@ -110,7 +110,7 @@ public:
             GM_ADDR ptrMxScaleB_, LayoutMxScaleB layoutMxScaleB_,
             GM_ADDR ptrC_, LayoutC const &layoutC_,
             GM_ADDR ptrD_,
-            GemmCoord const &sharedProblemShape_, 
+            GemmCoord const &sharedProblemShape_,
             GM_ADDR ptrSharedA_, LayoutA const &layoutSharedA_,
             GM_ADDR ptrSharedB_, LayoutB const &layoutSharedB_,
             GM_ADDR ptrSharedMxScaleA_, LayoutMxScaleA layoutSharedMxScaleA_,
@@ -257,8 +257,8 @@ public:
 
                 if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                     if constexpr (AscendC::Std::is_one_of_v<ElementB, float4_e2m1x2_t, float4_e1m2x2_t>) {
-                        gmGroupOffsetB += std::is_same_v<LayoutB, layout::ColumnMajor> ? 
-                            CeilDiv<2>(inGroupProblemShape.k()) * inGroupProblemShape.n() : 
+                        gmGroupOffsetB += std::is_same_v<LayoutB, layout::ColumnMajor> ?
+                            CeilDiv<2>(inGroupProblemShape.k()) * inGroupProblemShape.n() :
                             CeilDiv<2>(inGroupProblemShape.n()) * inGroupProblemShape.k();
                     } else {
                         gmGroupOffsetB += inGroupProblemShape.k() * inGroupProblemShape.n();

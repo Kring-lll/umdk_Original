@@ -196,7 +196,7 @@ public:
             GM_ADDR ptrShareMxScaleB_, LayoutMxScaleB layoutShareMxScaleB_,
             GM_ADDR ptrShareC_, LayoutC const &layoutShareC_,
             GM_ADDR gmShareSwigluOut_,GM_ADDR ptrShareX2_, GM_ADDR gmShareX2Scale_,
-            GM_ADDR gmX_, GM_ADDR gmExpertIds_, GM_ADDR gmXActiveMask_, GM_ADDR gmMoeSmoothScales_, GM_ADDR gmShareSmoothScales_, 
+            GM_ADDR gmX_, GM_ADDR gmExpertIds_, GM_ADDR gmXActiveMask_, GM_ADDR gmMoeSmoothScales_, GM_ADDR gmShareSmoothScales_,
             GM_ADDR gmExpandIdx_, GM_ADDR gmEpSendCount_, GM_ADDR gmExpertTokenNums_, const FusedDeepMoeInfo &fusedDeepMoeInfo
         ) : problemShape(problemShape_),
             problemCount(problemCount_), ptrGroupList(reinterpret_cast<__gm__ ElementGroupList *>(ptrGroupList_)),
@@ -498,8 +498,8 @@ public:
 
                 if constexpr (!(EXEC_FLAG & EXEC_FLAG_TENSOR_LIST)) {
                     if constexpr (AscendC::Std::is_one_of_v<ElementB, float4_e2m1x2_t, float4_e1m2x2_t>) {
-                        gmGroupOffsetB += std::is_same_v<LayoutB, layout::ColumnMajor> ? 
-                            CeilDiv<2>(inGroupProblemShape.k()) * inGroupProblemShape.n() : 
+                        gmGroupOffsetB += std::is_same_v<LayoutB, layout::ColumnMajor> ?
+                            CeilDiv<2>(inGroupProblemShape.k()) * inGroupProblemShape.n() :
                             CeilDiv<2>(inGroupProblemShape.n()) * inGroupProblemShape.k();
                     } else {
                         gmGroupOffsetB += inGroupProblemShape.k() * inGroupProblemShape.n();
@@ -787,7 +787,7 @@ public:
             yInt8Tensor[i] = resource.ubBuf.template GetBufferByByte<ElementA>(ubOffset);
             yScaleTensor[i] = yInt8Tensor[i][tokenLength].template ReinterpretCast<ElementMxScaleA>();
             ubOffset += CEIL_UP(hCommuSize);
-            if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) { 
+            if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
                 moeSmoothScaleTensor[i] = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
                 ubOffset += CEIL_UP(tokenLength * sizeof(float));
             }
@@ -974,7 +974,7 @@ public:
     }
 
     CATLASS_DEVICE
-    void RecvToken(GM_ADDR gmX1, GM_ADDR gmX1Scale, 
+    void RecvToken(GM_ADDR gmX1, GM_ADDR gmX1Scale,
                    uint32_t startRankId, uint32_t startTokenIdx, uint32_t startTokenIdxInRank, uint32_t recvTokenNum)
     {
         AscendC::DataCopyExtParams dataCopyParamsFloat = {1U, (uint32_t)(x1MxScaleNum * sizeof(ElementMxScaleA)), 0U, 0U, 0U};
@@ -1067,7 +1067,7 @@ public:
 
         ubOffset += CEIL_UP((expertCntUp / recvCoreNum + 1) * sizeof(int32_t));
         reduceSumWorkLocalTensor = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
-        ubOffset += REDUCE_SUM_WORK_SIZE; 
+        ubOffset += REDUCE_SUM_WORK_SIZE;
 
         RecvCount(ubOffset);
 
@@ -1151,7 +1151,7 @@ public:
         GetCumSum(sendCountStart, sendCountNum, ubOffset);
         sendCountsLocalTensor(0) = gatherMaskOutCountTensor.GetValue(0);
         for (uint32_t index = 1; index < sendCountPerCore; ++ index) {
-            sendCountsLocalTensor(index) = sendCountsLocalTensor(index-1) + statusTensor_.GetValue((sendCountStart + index) * INT32_COUNT_PER_BLOCK + 1); 
+            sendCountsLocalTensor(index) = sendCountsLocalTensor(index-1) + statusTensor_.GetValue((sendCountStart + index) * INT32_COUNT_PER_BLOCK + 1);
         }
         AscendC::DataCopyExtParams sendCountDataCopyOutParams = {1U, static_cast<uint32_t>(sendCountPerCore * sizeof(int32_t)), 0U, 0U, 0U};
         AscendC::SetFlag<AscendC::HardEvent::S_MTE3>(0);

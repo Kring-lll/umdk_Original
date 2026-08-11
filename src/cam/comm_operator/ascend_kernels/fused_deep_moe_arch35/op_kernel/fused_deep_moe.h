@@ -241,6 +241,7 @@ private:
     GM_ADDR gmShareWeight2Scale_;
     GM_ADDR gmShareOutput_;
     GM_ADDR gmExpertTokenNums_;
+    GM_ADDR workspaceGM_;
     GM_ADDR gmSmoothScales_;
     GM_ADDR gmShareSmoothScales_;
     GM_ADDR gmexpertScales_;
