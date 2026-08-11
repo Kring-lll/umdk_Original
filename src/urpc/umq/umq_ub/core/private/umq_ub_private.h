@@ -54,7 +54,6 @@ extern "C" {
 #define UMQ_UB_FLOW_CONTORL_JETTY_DEPTH 2
 
 #define UMQ_UB_DEV_STR_LENGTH 64
-#define UMQ_UB_NAMESPACE_SIZE 256
 #define UMQ_UB_NAMESPACE_PATH "/proc/self/ns/net"
 
 #define UMQ_UB_ENABLE_SHARE_FC_JFR (true)
@@ -250,7 +249,7 @@ typedef struct remote_eid_hmap_node {
     struct urpc_hmap_node node;
     urma_eid_t eid;
     uint32_t pid;
-    char remote_namespace[UMQ_UB_NAMESPACE_SIZE];
+    char remote_namespace[UMQ_NAMESPACE_SIZE];
     uint32_t ref_cnt;
     import_tseg_table_t tseg; // save the current ub ctx imported tseg
     urpc_bitmap_t tseg_imported; // record whether the peer has imported the local memory
@@ -352,7 +351,7 @@ typedef struct umq_ub_bind_info {
 typedef struct ub_bind_ctx {
     urma_target_jetty_t *tjetty[UB_QUEUE_JETTY_NUM];
     uint32_t remote_pid;
-    char remote_namespace[UMQ_UB_NAMESPACE_SIZE];
+    char remote_namespace[UMQ_NAMESPACE_SIZE];
     import_tseg_table_t *tseg_table;
     urpc_bitmap_t tseg_imported;
 } ub_bind_ctx_t;

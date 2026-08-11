@@ -408,9 +408,35 @@ int umq_info_to_str(const umq_info_t *umq_info, char *buf, int max_buf_len)
         UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
             "%-40s %-40u\n", "Local FC Jetty ID", umq_info->ub.local_fc_jetty_id);
         UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-40s %-40u\n", "Local IO JFR ID", umq_info->ub.local_io_jfr_id);
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-40s %-40u\n", "Local FC JFR ID", umq_info->ub.local_fc_jfr_id);
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-40s %-40s\n", "Port Info", umq_info->ub.port_str);
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-40s %-40u\n", "TP Mode", umq_info->ub.tp_mode);
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-40s %-40u\n", "TP Type", umq_info->ub.tp_type);
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-40s %-40u\n", "Priority", umq_info->ub.priority);
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-40s %-40u\n", "RNR Retry", umq_info->ub.rnr_retry);
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-40s %-40u\n", "Err Timeout", umq_info->ub.err_timeout);
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-40s %-40s\n", "Use Atomic Window", umq_info->ub.use_atomic_window ? "true" : "false");
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-40s %-40u\n", "Remote UMQ ID", umq_info->ub.remote_umq_id);
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
             "%-40s %-40u\n", "Remote IO Jetty ID", umq_info->ub.remote_io_jetty_id);
         UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
             "%-40s %-40u\n", "Remote FC Jetty ID", umq_info->ub.remote_fc_jetty_id);
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-40s " EID_FMT "\n", "Remote EID", EID_ARGS(umq_info->ub.remote_eid));
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-40s %-40u\n", "Remote PID", umq_info->ub.remote_pid);
+        UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+            "%-40s %-40s\n", "Remote Namespace", umq_info->ub.remote_namespace);
     }
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_EQUALS);

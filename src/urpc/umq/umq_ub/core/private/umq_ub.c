@@ -573,9 +573,9 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
     }
 
     ctx->remote_pid = info->dev_info->pid;
-    if (info->dev_info->namespace_len > UMQ_UB_NAMESPACE_SIZE) {
+    if (info->dev_info->namespace_len > UMQ_NAMESPACE_SIZE) {
         UMQ_VLOG_ERR(VLOG_UMQ, "dev info namespace len %u exceeds the maximum length %u\n",
-            info->dev_info->namespace_len, UMQ_UB_NAMESPACE_SIZE);
+            info->dev_info->namespace_len, UMQ_NAMESPACE_SIZE);
         goto RESET_BIND_CTX;
     }
     ret = snprintf(ctx->remote_namespace, info->dev_info->namespace_len, "%s", info->dev_info->bind_namespace);
@@ -596,7 +596,7 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
         (max_msg_size > info->queue_info->rx_buf_size) ? info->queue_info->rx_buf_size : max_msg_size;
 
     queue->state = QUEUE_STATE_READY;
-    UMQ_VLOG_INFO(VLOG_UMQ, "UMQ(ID:%u), remote umq_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u, "
+    UMQ_VLOG_DEBUG(VLOG_UMQ, "UMQ(ID:%u), remote umq_id: %u, remote eid: " EID_FMT ", remote jetty_id: %u, "
                   "remote pid: %u, remote namespace: %s, bind jetty success\n",
                   queue->umq_id, queue->remote_umq_id, EID_ARGS(ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid),
                   ctx->tjetty[UB_QUEUE_JETTY_IO]->id.id, info->dev_info->pid, info->dev_info->bind_namespace);
@@ -635,9 +635,9 @@ static ALWAYS_INLINE uint32_t umq_ub_version_info_serialize(uint8_t *bind_info_b
 
 static int umq_ub_get_namespace(char *remote_namespace, uint32_t namespace_buf_size)
 {
-    char buf[UMQ_UB_NAMESPACE_SIZE] = {0};
+    char buf[UMQ_NAMESPACE_SIZE] = {0};
     ssize_t len = readlink(UMQ_UB_NAMESPACE_PATH, buf, sizeof(buf) - 1);
-    if (len == -1 || len >= UMQ_UB_NAMESPACE_SIZE) {
+    if (len == -1 || len >= UMQ_NAMESPACE_SIZE) {
         if (errno != ENOENT) {
             UMQ_VLOG_ERR(VLOG_UMQ, "readlink failed %d, %s\n", errno, strerror(errno));
             return UMQ_FAIL;
@@ -665,7 +665,7 @@ static ALWAYS_INLINE uint32_t umq_ub_dev_info_serialize(
     umq_ub_ctx_t *dev_ctx, uint8_t *bind_info_buf, uint32_t left_buf_size)
 {
     if (left_buf_size <
-        (uint32_t)sizeof(umq_ub_bind_dev_info_t) + (uint32_t)sizeof(urpc_tlv_head_t) + UMQ_UB_NAMESPACE_SIZE) {
+        (uint32_t)sizeof(umq_ub_bind_dev_info_t) + (uint32_t)sizeof(urpc_tlv_head_t) + UMQ_NAMESPACE_SIZE) {
         errno = UMQ_ERR_ENOMEM;
         UMQ_VLOG_ERR(VLOG_UMQ, "bind info size insufficient, dev info cannot serialize, errno: %d\n", errno);
         return 0;
@@ -678,7 +678,7 @@ static ALWAYS_INLINE uint32_t umq_ub_dev_info_serialize(
     dev_info->feature = dev_ctx->feature;
     dev_info->pid = (uint32_t)getpid();
 
-    int ret = umq_ub_get_namespace(dev_info->bind_namespace, UMQ_UB_NAMESPACE_SIZE);
+    int ret = umq_ub_get_namespace(dev_info->bind_namespace, UMQ_NAMESPACE_SIZE);
     if (ret < 0) {
         UMQ_VLOG_ERR(VLOG_UMQ, "get remote_namespace failed\n");
         return 0;
