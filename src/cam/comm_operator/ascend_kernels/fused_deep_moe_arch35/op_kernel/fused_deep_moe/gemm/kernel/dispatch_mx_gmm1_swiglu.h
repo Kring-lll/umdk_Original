@@ -650,7 +650,7 @@ public:
     {
         int64_t subUbOffset = ubOffset;
         AscendC::LocalTensor<int32_t> yInt32Tensor = (yInt8Tensor[tokenLength].template ReinterpretCast<ElementMxScaleA>())[x1MxScaleNum].template ReinterpretCast<int32_t>();
-        if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
+        if constexpr (EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
             AscendC::Cast(xFp32TmpTensor, xInTensor, AscendC::RoundMode::CAST_NONE, tokenLength);
             AscendC::PipeBarrier<PIPE_V>();
             AscendC::Mul(xFp32TmpTensor, xFp32TmpTensor, smoothScaleTensor, tokenLength);
@@ -687,7 +687,7 @@ public:
         srcWinGMTensor.SetGlobalBuffer((__gm__ XType *)gmX);
         AscendC::GlobalTensor<float> moeSmoothScaleGMTensor;
 
-        if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
+        if constexpr (EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
             moeSmoothScaleGMTensor.SetGlobalBuffer((__gm__ float*) gmMoeSmoothScales);
         }
         AscendC::GlobalTensor<ElementA> dstWinGMTensor;
@@ -722,7 +722,7 @@ public:
                 AscendC::WaitFlag<AscendC::HardEvent::V_MTE2>(eventId);
                 AscendC::WaitFlag<AscendC::HardEvent::MTE3_MTE2>(eventId);
                 AscendC::DataCopy(xInTensor[index], srcWinGMTensor[tokenIndex / axisK * tokenLength], tokenLength);
-                if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
+                if constexpr (EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
                     AscendC::PipeBarrier<PIPE_MTE2>();
                     AscendC::DataCopy(
                         moeSmoothScaleTensor[index], moeSmoothScaleGMTensor[dstExpertId * tokenLength], tokenLength);
@@ -787,7 +787,7 @@ public:
             yInt8Tensor[i] = resource.ubBuf.template GetBufferByByte<ElementA>(ubOffset);
             yScaleTensor[i] = yInt8Tensor[i][tokenLength].template ReinterpretCast<ElementMxScaleA>();
             ubOffset += CEIL_UP(hCommuSize);
-            if constexpr(EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
+            if constexpr (EXEC_FLAG & EXEC_FLAG_SMOOTH_QUANT) {
                 moeSmoothScaleTensor[i] = resource.ubBuf.template GetBufferByByte<float>(ubOffset);
                 ubOffset += CEIL_UP(tokenLength * sizeof(float));
             }
@@ -1344,7 +1344,7 @@ public:
         AscendC::GlobalTensor<ElementC> gmC;
         AscendC::GlobalTensor<ElementC> gmSwigluOutTensor;
         AscendC::GlobalTensor<ElementC> gmShareSwigluOutTensor;
-        
+
         BlockEpilogue blockEpilogue(resource);
         uint32_t startCoreIdx = 0;
         uint32_t currentM = 0;

@@ -384,20 +384,20 @@ static ge::graphStatus CheckWeightTensorList(gert::TilingContext &context,
 }
 
 ge::graphStatus CheckXActiveMaskShape(const gert::TilingContext &context, const char *nodeName,
-                                      const FusedDeepMoeTilingData &tilingData)
+    const FusedDeepMoeTilingData &tilingData)
 {
     uint32_t batchSize = tilingData.fusedDeepMoeInfo.bs;
     const gert::StorageShape* xActiveMaskStorageShape = context.GetOptionalInputShape(
-    INPUT_SHARE_X_ACTIVE_MASK_INDEX);
+        INPUT_SHARE_X_ACTIVE_MASK_INDEX);
     OPS_ERR_IF(xActiveMaskStorageShape->GetStorageShape().GetDimNum() != ONE_DIMS,
-                OPS_LOG_E(nodeName, " xActiveMask scale shape dims must be 1, but current dim num is %lu.",
-                        xActiveMaskStorageShape->GetStorageShape().GetDimNum()),
-                return ge::GRAPH_FAILED);
+        OPS_LOG_E(nodeName, " xActiveMask scale shape dims must be 1, but current dim num is %lu.",
+            xActiveMaskStorageShape->GetStorageShape().GetDimNum()),
+        return ge::GRAPH_FAILED);
     const int64_t xActiveMaskDim0 = xActiveMaskStorageShape->GetStorageShape().GetDim(0);
     OPS_ERR_IF(xActiveMaskDim0 != batchSize,
         OPS_LOG_E(nodeName, "xActiveMask Dim0 must be batchSize(%u), but current dim is %ld.",
             batchSize, xActiveMaskDim0),
-                return ge::GRAPH_FAILED);
+        return ge::GRAPH_FAILED);
     return ge::GRAPH_SUCCESS;
 }
 
@@ -578,14 +578,14 @@ static ge::graphStatus CheckHcclBufferSize(const char *nodeName, const FusedDeep
         (h * QUANT_DTYPE_BYTE_SIZE + TOKEN_EXTRA_BYTE_SIZE) * DOUBLE_BUFFER;
     uint64_t maxWindowSize = Mc2TilingUtils::GetMaxWindowSize();
     OPS_ERR_IF(bufferDemand > maxWindowSize,
-                    OPS_LOG_E(nodeName,
-                            "HCCL_BUFFSIZE is too SMALL, globalBatchSize = %u, h = %u, moeExpertNumPerRank = %u,"
-                            " NEEDED_HCCL_BUFFSIZE(moeExpertNumPerRank * globalBatchSize * "
-                            "(h * QUANT_DTYPE_BYTE_SIZE + TOKEN_EXTRA_BYTE_SIZE) *"
-                            " doubleBuffer) B=%luMB, HCCL_BUFFSIZE=%luMB.",
-                            globalBatchSize, h, moeExpertNumPerRank, (bufferDemand + MB_SIZE - 1) / MB_SIZE,
-                            maxWindowSize / MB_SIZE),
-                    return ge::GRAPH_FAILED);
+        OPS_LOG_E(nodeName,
+            "HCCL_BUFFSIZE is too SMALL, globalBatchSize = %u, h = %u, moeExpertNumPerRank = %u,"
+            " NEEDED_HCCL_BUFFSIZE(moeExpertNumPerRank * globalBatchSize * "
+            "(h * QUANT_DTYPE_BYTE_SIZE + TOKEN_EXTRA_BYTE_SIZE) *"
+            " doubleBuffer) B=%luMB, HCCL_BUFFSIZE=%luMB.",
+            globalBatchSize, h, moeExpertNumPerRank, (bufferDemand + MB_SIZE - 1) / MB_SIZE,
+            maxWindowSize / MB_SIZE),
+        return ge::GRAPH_FAILED);
     return ge::GRAPH_SUCCESS;
 }
 
