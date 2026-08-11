@@ -47,6 +47,8 @@ constexpr int32_t ODD_EVEN_BASE = 2;
 constexpr int32_t BUFFER_NUM = 2;
 constexpr int32_t GATHER_SECOND_NUM = 2;
 constexpr uint32_t FLOAT_PAIR = 2;
+constexpr uint32_t MX_BLOCK_SIZE = 32;
+constexpr uint32_t MX_LAST_DIM = 2;
 #define OPT_RANK_OFFSET 512
 
 #define UB_BLOCK_SIZE (32)
@@ -1184,7 +1186,7 @@ public:
         moeExpertNum = params.moeExpertNum;
         tokenLength = params.tokenLen;
 
-        x1MxScaleNum = CEIL(tokenLength, 32);
+        x1MxScaleNum = CEIL(tokenLength, MX_BLOCK_SIZE);
         hOutSize = MxCount2Byte<ElementA>(tokenLength);
         scaleSize = MxCount2Byte<ElementMxScaleA>(x1MxScaleNum);
         scaleFlagSize = CEIL(scaleSize + sizeof(int32_t), TOKEN_EXTRA_SPACE) * TOKEN_EXTRA_SPACE; // scale and flag
@@ -1275,7 +1277,7 @@ public:
                                 uint32_t &startCoreIdx) {
         uint32_t quantLength = mmOutDim / 2;
         uint32_t quantTokenSize = MxCount2Byte<ElementA>(quantLength);
-        uint32_t mxScaleNumPerToken = CeilDiv(CeilDiv(quantLength, 32), 2) * 2;
+        uint32_t mxScaleNumPerToken = CeilDiv(CeilDiv(quantLength, MX_BLOCK_SIZE), MX_LAST_DIM) * MX_LAST_DIM;
         AscendC::GlobalTensor<ElementC> gmSwigluOutTensor;
         gmSwigluOutTensor.SetGlobalBuffer(swigluOutAddr);
         AscendC::GlobalTensor<ElementA> gmX2;
