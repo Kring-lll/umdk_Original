@@ -175,7 +175,6 @@ static ge::graphStatus CheckShareExpertShapes(gert::TilingContext &context, Fuse
         OPS_LOG_E(nodeName, "shareGmm1Weight shape is invalid."),
         return ge::GRAPH_FAILED);
 
-    uint64_t shareGmm1HLen = 0;
     if (gmm1WeightDims == THREE_DIMS) {
         OPS_ERR_IF(1 != shareGmm1OriginShape.GetDim(0),
             OPS_LOG_E(nodeName, "shareGmm1Weight dim0 should be 1 for shared expert, but got %ld.",
@@ -268,7 +267,7 @@ static ge::graphStatus CheckGmm1ScaleShape(gert::TilingContext &context,
     } else if (elementDims == FOUR_DIMS) {
         OPS_ERR_IF(localExpertNum != gmm1ScaleFirstTensorElementShape.GetDim(0),
             OPS_LOG_E(nodeName, "gmm1Scale dim-0 does not match local expert number perRank(%d).",
-            g   mm1ScaleFirstTensorElementShape.GetDim(0), localExpertNum),
+                gmm1ScaleFirstTensorElementShape.GetDim(0), localExpertNum),
             return ge::GRAPH_FAILED);
     }
 
@@ -328,8 +327,8 @@ static ge::graphStatus CheckGmm2ScaleShape(gert::TilingContext &context,
     uint32_t epRankId = tilingData.fusedDeepMoeInfo.epRankId;
     uint32_t localExpertNum = moeExpertNumPerRank;
     uint32_t scaleFirstDim = Ceil(Ceil(gmm2K, MX_BLOCK_SIZE), MX_LAST_DIM);
-    bool listFlag = gmm2ScaleListLen > 1;
     uint32_t gmm2ScaleListLen = CountTensorListLen(context, INPUT_GMM2_WEIGHT_SCALE_INDEX);
+    bool listFlag = gmm2ScaleListLen > 1;
     auto gmm2ScaleFirstTensorElement = context.GetDynamicInputTensor(INPUT_GMM2_WEIGHT_SCALE_INDEX, 0);
 
     OPS_ERR_IF(listFlag != tilingData.fusedDeepMoeInfo.isTensorList,
