@@ -106,6 +106,7 @@ void usage(const char *filename)
               "  -s <size>        Send buffer size in bytes (default: 4)\n"
               "  -w <deadline>    Total execution time limit in seconds (default: unlimited)\n"
               "  -W <timeout>     Per-reply timeout in seconds (default: 1)\n"
+              "  -O <priority>    Priority of JFS, ranging from [0, 15] (default: first available CTP priority)\n"
               "  -q               Quiet output\n"
               "  -v --verbose     Verbose output\n"
               "  -h --help        Show this help and exit\n"
@@ -116,13 +117,14 @@ int parse_args(ping_cfg_t *cfg)
 {
     static const struct option long_options[] = {
         {"verbose", no_argument, NULL, 'v'},
+        {"priority", required_argument, NULL, 'O'},
         {"help", no_argument, NULL, 'h'},
         {"version", no_argument, NULL, 'V'},
         {NULL, 0, NULL, 0},
     };
 
     int opt, ret = 0;
-    while ((opt = getopt_long(cfg->argc, cfg->argv, ":c:I:i:s:qw:W:ShVv", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(cfg->argc, cfg->argv, ":c:I:i:s:qw:W:O:ShVv", long_options, NULL)) != -1) {
         switch (opt) {
             case 'c':
                 ret = str_to_u32(optarg, &cfg->count);
@@ -143,6 +145,16 @@ int parse_args(ping_cfg_t *cfg)
             case 'W':
                 ret = str_to_u32(optarg, &cfg->timeout);
                 break;
+            case 'O': {
+                uint32_t pri;
+                ret = str_to_u32(optarg, &pri);
+                if (ret == 0 && pri > URMA_MAX_PRIORITY) {
+                    ret = -ERANGE;
+                } else if (ret == 0) {
+                     cfg->priority = (uint8_t)pri;
+                 }
+                break;
+            }
             case 'q':
                 cfg->verbose_level = VLOG_LEVEL_QUIET;
                 break;
@@ -197,6 +209,11 @@ int check_args(ping_cfg_t *cfg)
 
     if (cfg->size > MAX_PING_SIZE) {
         LOG_ERROR("Size must be less than or equal to 4096\n");
+        return -EINVAL;
+    }
+
+    if (cfg->priority != PING_INVALID_PRIORITY && cfg->priority > URMA_MAX_PRIORITY) {
+        LOG_ERROR("Priority must be in range [0, %d]\n", URMA_MAX_PRIORITY);
         return -EINVAL;
     }
 
