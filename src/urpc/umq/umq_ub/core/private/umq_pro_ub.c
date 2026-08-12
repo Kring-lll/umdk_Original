@@ -450,6 +450,9 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
         } else {
             *bad_qbuf = qbuf;
         }
+        if (status == URMA_ENOMEM) {
+            ret = -UMQ_ERR_ENOBUFS;
+        }
         failed_num = umq_ub_tx_failed_num(g_umq_ub_urma_wr, wr_cnt_limit, *bad_qbuf);
         urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
         uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
