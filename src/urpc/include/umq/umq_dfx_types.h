@@ -160,6 +160,9 @@ typedef struct umq_qbuf_pool_stats {
     uint64_t escape_buf_cnt;
 } umq_qbuf_pool_stats_t;
 
+#define UMQ_NAMESPACE_SIZE 256
+#define UMQ_PORT_STR_SIZE  512
+
 typedef struct umq_info {
     umq_trans_mode_t trans_mode; // transmission mode of the queue
     union {
@@ -171,6 +174,19 @@ typedef struct umq_info {
             uint32_t local_fc_jetty_id; // the flow control jetty ID within the UMQ
             uint32_t remote_io_jetty_id; // the I/O jetty ID of the peer UMQ that is bound to the local UMQ
             uint32_t remote_fc_jetty_id; // the flow control jetty ID of the peer UMQ that is bound to the local UMQ
+            uint32_t local_io_jfr_id; // the I/O jfr ID within the UMQ
+            uint32_t local_fc_jfr_id; // the flow control jfr ID within the UMQ
+            umq_tp_mode_t tp_mode; // transport mode of the queue
+            umq_tp_type_t tp_type; // tp_type of the queue
+            uint8_t priority; // priority of the queue
+            uint8_t rnr_retry; // number of times that jfs will resend packets before report error
+            uint8_t err_timeout; // jetty timeout before report error
+            bool use_atomic_window; // flowcontrol use atomic window
+            uint32_t remote_umq_id; // the remote umq ID
+            umq_eid_t remote_eid; // the remote EID
+            uint32_t remote_pid; // the remote pid
+            char remote_namespace[UMQ_NAMESPACE_SIZE]; // the remote namespace
+            char port_str[UMQ_PORT_STR_SIZE]; // the jetty port info
         } ub;
     };
 } umq_info_t;
