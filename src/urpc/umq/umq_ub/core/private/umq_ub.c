@@ -544,7 +544,13 @@ static uint32_t max_msg_size_get(ub_queue_t *queue)
 int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
 {
     int ret = UMQ_SUCCESS;
-    ub_bind_ctx_t *ctx = (ub_bind_ctx_t *)calloc(1, sizeof(ub_bind_ctx_t));
+    if (info->dev_info->namespace_len > UMQ_UB_NAMESPACE_SIZE) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "dev info namespace len %u exceeds the maximum length %u\n",
+            info->dev_info->namespace_len, UMQ_UB_NAMESPACE_SIZE);
+        return -UMQ_ERR_EINVAL;
+    }
+
+    ub_bind_ctx_t *ctx = (ub_bind_ctx_t *)calloc(1, sizeof(ub_bind_ctx_t) + info->dev_info->namespace_len);
     if (ctx == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), bind ctx calloc failed\n", queue->umq_id);
         return -UMQ_ERR_ENOMEM;
@@ -573,16 +579,7 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
     }
 
     ctx->remote_pid = info->dev_info->pid;
-    if (info->dev_info->namespace_len > UMQ_UB_NAMESPACE_SIZE) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "dev info namespace len %u exceeds the maximum length %u\n",
-            info->dev_info->namespace_len, UMQ_UB_NAMESPACE_SIZE);
-        goto RESET_BIND_CTX;
-    }
-    ret = snprintf(ctx->remote_namespace, info->dev_info->namespace_len, "%s", info->dev_info->bind_namespace);
-    if (ret < 0 || ret >= (int)info->dev_info->namespace_len) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "snprintf failed, ret: %d\n", ret);
-        goto RESET_BIND_CTX;
-    }
+    (void)memcpy(ctx->remote_namespace, info->dev_info->bind_namespace, info->dev_info->namespace_len);
     queue->bind_ctx = ctx;
 
     ret = umq_ub_remote_tseg_info_get(queue, info, ctx);
@@ -653,7 +650,7 @@ static int umq_ub_get_namespace(char *remote_namespace, uint32_t namespace_buf_s
             namespace_buf_size, len);
         return UMQ_FAIL;
     }
-    memcpy(remote_namespace, buf, len);
+    (void)memcpy(remote_namespace, buf, len);
     if ((uint32_t)len < namespace_buf_size) {
         // clean remote_namespace
         (void)memset(remote_namespace + len, 0, namespace_buf_size - (uint32_t)len);
