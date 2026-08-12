@@ -531,6 +531,8 @@ int umq_stats_trace_start(umq_trace_cfg_t *cfg)
         UMQ_VLOG_ERR(VLOG_UMQ, "cfg invalid\n");
         return -UMQ_ERR_EINVAL;
     }
+
+    umq_thread_init();
     return umq_trace_start(cfg);
 }
 
