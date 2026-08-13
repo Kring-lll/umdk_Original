@@ -208,6 +208,7 @@ typedef struct bondp_comp {
         urma_jfr_t *p_jfr[URMA_UBAGG_DEV_MAX_NUM];
         urma_jetty_t *p_jetty[URMA_UBAGG_DEV_MAX_NUM];
     };
+    urma_jetty_t *standby_pjetty[URMA_UBAGG_DEV_MAX_NUM];
     int dev_num;
     uint32_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t enabled_count;
@@ -231,6 +232,10 @@ typedef struct bondp_comp {
     wr_buf_t send_wr_buf;
 #ifndef __cplusplus
     atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
+    /* standby_ok[i]: standby_pjetty[i] is healthy and may take over on failure.
+     * Cleared when the twins are swapped (the failed one becomes the standby)
+     * and set again once the failed twin is rebuilt. */
+    atomic_bool standby_ok[URMA_UBAGG_DEV_MAX_NUM];
     atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     atomic_bool hc_valid[URMA_UBAGG_DEV_MAX_NUM];
     atomic_uint msn;
@@ -238,6 +243,7 @@ typedef struct bondp_comp {
     atomic_uint rnr_retry_wr_cnt;
 #else
     std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
+    std::atomic_bool standby_ok[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_bool hc_valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_uint msn;

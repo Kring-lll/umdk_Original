@@ -1346,8 +1346,29 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
         jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
         bdp_jetty->p_jetty[i] = jetty;
         atomic_store(&bdp_jetty->valid[i], true);
+        atomic_store(&bdp_jetty->standby_ok[i], false);
         URMA_LOG_DEBUG("Created pjetty successfully, idx=%u, jetty_id=%u, dev=%s, eid_idx=%u\n",
                        i, jetty->jetty_id.id, bdp_ctx->p_ctxs[i]->dev->name, bdp_ctx->p_ctxs[i]->eid_index);
+
+        if (bdp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE) {
+            /* Equal-priority twin: always let the driver assign its id so it
+             * never clashes with a well-known primary id. A creation failure
+             * only degrades this slot to single-jetty mode. */
+            urma_jetty_cfg_t standby_cfg = p_cfg;
+            standby_cfg.id = 0;
+            urma_jetty_t *standby = urma_create_jetty(bdp_ctx->p_ctxs[i], &standby_cfg);
+            if (standby == NULL) {
+                URMA_LOG_WARN("Failed to create standby pjetty %u, slot degrades to single jetty.\n", i);
+                continue;
+            }
+            standby->remote_jetty = NULL;
+            standby->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+            bdp_jetty->standby_pjetty[i] = standby;
+            atomic_store(&bdp_jetty->standby_ok[i], true);
+            URMA_LOG_DEBUG("Created standby pjetty, idx=%u, jetty_id=%u, dev=%s, eid_idx=%u\n",
+                           i, standby->jetty_id.id, bdp_ctx->p_ctxs[i]->dev->name,
+                           bdp_ctx->p_ctxs[i]->eid_index);
+        }
     }
     return 0;
 }
@@ -1367,18 +1388,27 @@ static int bondp_delete_pjetty(bondp_comp_t *bdp_jetty)
 {
     int ret = 0;
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        if (bdp_jetty->p_jetty[i] == NULL) {
-            continue;
+        if (bdp_jetty->p_jetty[i] != NULL) {
+            URMA_LOG_DEBUG("bondp delete, p_jetty id is %u.\n",
+                           bdp_jetty->p_jetty[i]->jetty_id.id);
+            int p_ret = urma_delete_jetty(bdp_jetty->p_jetty[i]);
+            if (p_ret != 0) {
+                URMA_LOG_ERR("Failed to delete pjetty %d, ret=%d.\n", i, p_ret);
+                ret = p_ret;
+            }
+            bdp_jetty->p_jetty[i] = NULL;
         }
 
-        URMA_LOG_DEBUG("bondp delete, p_jetty id is %u.\n",
-                       bdp_jetty->p_jetty[i]->jetty_id.id);
-        int p_ret = urma_delete_jetty(bdp_jetty->p_jetty[i]);
-        if (p_ret != 0) {
-            URMA_LOG_ERR("Failed to delete pjetty %d, ret=%d.\n", i, ret);
-            ret = p_ret;
+        if (bdp_jetty->standby_pjetty[i] != NULL) {
+            URMA_LOG_DEBUG("bondp delete, standby p_jetty id is %u.\n",
+                           bdp_jetty->standby_pjetty[i]->jetty_id.id);
+            int s_ret = urma_delete_jetty(bdp_jetty->standby_pjetty[i]);
+            if (s_ret != 0) {
+                URMA_LOG_ERR("Failed to delete standby pjetty %d, ret=%d.\n", i, s_ret);
+                ret = ret == 0 ? s_ret : ret;
+            }
+            bdp_jetty->standby_pjetty[i] = NULL;
         }
-        bdp_jetty->p_jetty[i] = NULL;
     }
     return ret;
 }
@@ -1402,16 +1432,30 @@ static int bondp_add_jetty_p_vjetty_id_info(bondp_context_t *bdp_ctx, bondp_comp
                          i, ret, pjetty_id.id, jetty_id);
             goto DEL_P_VJETTY_ID;
         }
+
+        if (bdp_jetty->standby_pjetty[i] != NULL) {
+            urma_jetty_id_t standby_id = bdp_jetty->standby_pjetty[i]->jetty_id;
+            ret = bdp_p_vjetty_id_table_add_without_lock(&bdp_ctx->p_vjetty_id_table, standby_id, JETTY,
+                                                         jetty_id, bdp_jetty);
+            if (ret != 0) {
+                URMA_LOG_ERR("Failed to add standby p_vjetty_id[%d]: ret=%d, p_jetty_id=%u, v_jetty_id=%u\n",
+                             i, ret, standby_id.id, jetty_id);
+                goto DEL_P_VJETTY_ID;
+            }
+        }
     }
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
     return 0;
 DEL_P_VJETTY_ID:
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        if (!bdp_jetty->p_jetty[i]) {
-            continue;
+        if (bdp_jetty->p_jetty[i]) {
+            urma_jetty_id_t pjetty_id = bdp_jetty->p_jetty[i]->jetty_id;
+            (void)bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, pjetty_id, JETTY);
         }
-        urma_jetty_id_t pjetty_id = bdp_jetty->p_jetty[i]->jetty_id;
-        (void)bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, pjetty_id, JETTY);
+        if (bdp_jetty->standby_pjetty[i]) {
+            urma_jetty_id_t standby_id = bdp_jetty->standby_pjetty[i]->jetty_id;
+            (void)bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, standby_id, JETTY);
+        }
     }
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
     return -1;
@@ -1421,14 +1465,21 @@ static void bondp_del_jetty_p_vjetty_info_without_lock(bondp_comp_t *bdp_jetty)
 {
     bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
-        if (bdp_jetty->p_jetty[i] == NULL) {
-            continue;
+        if (bdp_jetty->p_jetty[i] != NULL) {
+            urma_jetty_id_t pjetty_id = bdp_jetty->p_jetty[i]->jetty_id;
+            int ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, pjetty_id, JETTY);
+            if (ret) {
+                URMA_LOG_ERR("Failed to delete p_vjetty_id node: ret=%d pjetty_id=%u\n",
+                             ret, pjetty_id.id);
+            }
         }
-        urma_jetty_id_t pjetty_id = bdp_jetty->p_jetty[i]->jetty_id;
-        int ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, pjetty_id, JETTY);
-        if (ret) {
-            URMA_LOG_ERR("Failed to delete p_vjetty_id node: ret=%d pjetty_id=%u\n",
-                         ret, bdp_jetty->p_jetty[i]->jetty_id.id);
+        if (bdp_jetty->standby_pjetty[i] != NULL) {
+            urma_jetty_id_t standby_id = bdp_jetty->standby_pjetty[i]->jetty_id;
+            int ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, standby_id, JETTY);
+            if (ret) {
+                URMA_LOG_ERR("Failed to delete standby p_vjetty_id node: ret=%d pjetty_id=%u\n",
+                             ret, standby_id.id);
+            }
         }
     }
 }
@@ -1643,6 +1694,13 @@ urma_status_t bondp_modify_jetty(urma_jetty_t *jetty, urma_jetty_attr_t *attr)
         }
         URMA_LOG_DEBUG("bondp modify_jetty p_jetty id is %u, new_state is %d.\n",
                        bdp_jetty->p_jetty[i]->jetty_id.id, attr->state);
+        if (bdp_jetty->standby_pjetty[i] != NULL) {
+            ret = urma_modify_jetty(bdp_jetty->standby_pjetty[i], attr);
+            if (ret != URMA_SUCCESS) {
+                final_ret = ret;
+                URMA_LOG_ERR("modify standby pjetty fail, index=%d, ret=%d\n", i, final_ret);
+            }
+        }
     }
     return final_ret;
 }
