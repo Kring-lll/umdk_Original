@@ -1180,6 +1180,21 @@ static void resend_matched_jfs_wrs(bondp_comp_t *bdp_comp, uint64_t base_wr_id,
     }
 }
 
+/* Schedule the async rebuild of a failed pjetty twin. Must be called without
+ * send_lock held; -EEXIST just means the slot is already being recovered. */
+static void bondp_fb_add_task_when_needed(bondp_comp_t *bdp_comp, uint32_t pjetty_idx, bool needed)
+{
+    if (!needed) {
+        return;
+    }
+    uint32_t vjetty_id = bdp_comp->v_jetty.jetty_id.id;
+    int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, vjetty_id, pjetty_idx);
+    if (ret != 0 && ret != -EEXIST) {
+        URMA_LOG_WARN("Failed to add failback task, vjetty_id=%u pjetty_idx=%u ret=%d\n",
+                      vjetty_id, pjetty_idx, ret);
+    }
+}
+
 /*
  * Thread-local 16-slot cache for get_comp_by_cr.
  */
@@ -1392,6 +1407,17 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         return CONVERT_SKIP;
     }
 
+    if (bdp_comp->comp_type == BONDP_COMP_JETTY &&
+        bdp_comp->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE) {
+        urma_jetty_t *active_twin = bdp_comp->p_jetty[idx];
+        urma_jetty_t *standby_twin = bdp_comp->standby_pjetty[idx];
+        if (active_twin != NULL && standby_twin != NULL &&
+            cr->local_id != active_twin->jetty_id.id) {
+            put_comp(bdp_comp);
+            return CONVERT_SKIP;
+        }
+    }
+
     if (g_bondp_env.enable_rnr_retry && is_rnr_retry_cr(cr) && !bdp_comp->modify_to_error) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         if (wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
@@ -1438,50 +1464,66 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
         bool need_rebuild_jetty = is_need_rebuild_jetty(cr);
+        bool need_fb_task = false;
         (void)pthread_spin_lock(&bdp_comp->send_lock);
-        if (need_rebuild_jetty) {
+        if (bdp_comp->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE &&
+            bondp_fb_cr_from_benched_twin(bdp_comp, send_idx, cr->local_id)) {
+            (void)pthread_spin_unlock(&bdp_comp->send_lock);
+            put_comp(bdp_comp);
+            return CONVERT_SKIP;
+        }
+        bool swapped = need_rebuild_jetty && g_bondp_env.enable_failover &&
+                       bdp_comp->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE &&
+                       bondp_fb_swap_to_standby(bdp_comp, send_idx);
+        if (need_rebuild_jetty && !swapped) {
             atomic_store(&bdp_comp->valid[send_idx], false);
         }
         bondp_target_jetty_t *bdp_tjetty = wr_entry->target_vjetty;
         bondp_hc_tjetty_sync_valid(bdp_tjetty);
-        bondp_p_target_jetty_t *skip_p_tjetty = bondp_find_p_tjetty(bdp_tjetty, send_idx, target_idx);
-        if (skip_p_tjetty != NULL) {
-            atomic_store(&skip_p_tjetty->valid, false);
-        }
-        /* choose the failover route(0 or 1) through send_idx and target_idx */
         int new_send_idx = send_idx;
         int new_target_idx = target_idx;
-        if (!g_bondp_env.enable_failover ||
-            schedule_send(&wr_entry->target_vjetty->v_tjetty, bdp_comp,
-                          &new_send_idx, &new_target_idx,
-                          wr_entry->wr.flag.bs.has_drv_ext ? &wr_entry->info : NULL) != 0) {
-            /*
-             * When all ports are invalid and no port is available to resend the wr,
-             * this error CQE is returned directly to the upper layer.
-             */
-            URMA_LOG_ERR("Failed to find valid port for retransmission, local veid: " EID_FMT
-                         ", remote veid: " EID_FMT ".\n",
-                         EID_ARGS(bdp_comp->v_jetty.jetty_id.eid),
-                         EID_ARGS(wr_entry->target_vjetty->v_tjetty.id.eid));
-            (void)pthread_spin_unlock(&bdp_comp->send_lock);
-            goto CONVERT_CR;
-        }
-
-        URMA_LOG_INFO("Resend from [%u, %u] to [%d, %d], cr status=%d, jetty_id=%u, tjetty_id=%u\n",
-                      send_idx, target_idx, new_send_idx, new_target_idx, cr->status,
-                      bdp_comp->v_jetty.jetty_id.id, wr_entry->target_vjetty->v_tjetty.id.id);
-        urma_ubagg_switch_inc();
-
-        resend_matched_jfs_wrs(bdp_comp, wr_entry->wr_id, send_idx, target_idx,
-                               new_send_idx, new_target_idx, "failover");
-        if (need_rebuild_jetty && g_bondp_env.enable_failback) {
-            int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);
-            if (ret != 0 && ret != -EEXIST) {
-                URMA_LOG_WARN("Failed to add failback task, vjetty_id=%u pjetty_idx=%u ret=%d\n",
-                              wr_entry->target_vjetty->v_tjetty.id.id, send_idx, ret);
+        if (swapped) {
+            URMA_LOG_INFO("Resend on swapped twin [%u, %u], cr status=%d, jetty_id=%u, tjetty_id=%u\n",
+                          send_idx, target_idx, cr->status,
+                          bdp_comp->v_jetty.jetty_id.id, bdp_tjetty->v_tjetty.id.id);
+            resend_matched_jfs_wrs(bdp_comp, wr_entry->wr_id, send_idx, target_idx,
+                                   send_idx, target_idx, "twin swap");
+            need_fb_task = g_bondp_env.enable_failback;
+        } else {
+            bondp_p_target_jetty_t *skip_p_tjetty = bondp_find_p_tjetty(bdp_tjetty, send_idx, target_idx);
+            if (skip_p_tjetty != NULL) {
+                atomic_store(&skip_p_tjetty->valid, false);
             }
+            need_fb_task = need_rebuild_jetty && g_bondp_env.enable_failback;
+            /* choose the failover route(0 or 1) through send_idx and target_idx */
+            if (!g_bondp_env.enable_failover ||
+                schedule_send(&bdp_tjetty->v_tjetty, bdp_comp,
+                              &new_send_idx, &new_target_idx,
+                              wr_entry->wr.flag.bs.has_drv_ext ? &wr_entry->info : NULL) != 0) {
+                /*
+                 * When all ports are invalid and no port is available to resend the wr,
+                 * this error CQE is returned directly to the upper layer. Still schedule
+                 * the rebuild below so the failed pjetty can recover.
+                 */
+                URMA_LOG_ERR("Failed to find valid port for retransmission, local veid: " EID_FMT
+                             ", remote veid: " EID_FMT ".\n",
+                             EID_ARGS(bdp_comp->v_jetty.jetty_id.eid),
+                             EID_ARGS(bdp_tjetty->v_tjetty.id.eid));
+                (void)pthread_spin_unlock(&bdp_comp->send_lock);
+                bondp_fb_add_task_when_needed(bdp_comp, send_idx, need_fb_task);
+                goto CONVERT_CR;
+            }
+
+            URMA_LOG_INFO("Resend from [%u, %u] to [%d, %d], cr status=%d, jetty_id=%u, tjetty_id=%u\n",
+                          send_idx, target_idx, new_send_idx, new_target_idx, cr->status,
+                          bdp_comp->v_jetty.jetty_id.id, bdp_tjetty->v_tjetty.id.id);
+            urma_ubagg_switch_inc();
+
+            resend_matched_jfs_wrs(bdp_comp, wr_entry->wr_id, send_idx, target_idx,
+                                   new_send_idx, new_target_idx, "failover");
         }
         (void)pthread_spin_unlock(&bdp_comp->send_lock);
+        bondp_fb_add_task_when_needed(bdp_comp, send_idx, need_fb_task);
         put_comp(bdp_comp);
         return CONVERT_SKIP;
     }
