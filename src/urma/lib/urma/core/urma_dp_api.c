@@ -367,12 +367,35 @@ urma_status_t urma_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, ur
         URMA_LOG_ERR("Invalid parameter.\n");
         return URMA_EINVAL;
     }
-    
+
+    if (wr->tjetty != NULL) {
+        urma_sl_tp_t *sl_tp = &jetty->urma_jetty_opt.sl_tp;
+        bool tp_match = false;
+        switch (wr->tjetty->tp_type) {
+            case URMA_RTP:
+                tp_match = sl_tp->bs.rtp;
+                break;
+            case URMA_CTP:
+                tp_match = sl_tp->bs.ctp;
+                break;
+            case URMA_UTP:
+                tp_match = sl_tp->bs.utp;
+                break;
+            default:
+                break;
+        }
+        if (!tp_match) {
+            URMA_LOG_ERR("tp type %d of tjetty mismatch with jetty sl_tp.\n", (int)wr->tjetty->tp_type);
+            *bad_wr = wr;
+            return URMA_EINVAL;
+        }
+    }
+
     urma_status_t ret;
     UDMA_PERF_PROFILING_START(UB_JETTY_POST_SEND, urma_dev->name);
     ret = dp_ops->post_jetty_send_wr(jetty, wr, bad_wr);
     UDMA_PERF_PROFILING_END(UB_JETTY_POST_SEND, urma_dev->name);
-    
+
     return ret;
 }
 
