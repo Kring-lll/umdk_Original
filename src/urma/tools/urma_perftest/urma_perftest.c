@@ -191,7 +191,7 @@ int main(int argc, char *argv[])
     // Create resource for test
     ret = create_ctx(&ctx, &cfg);
     if (ret != 0) {
-        goto close_connect;
+        goto clean_cfg;
     }
 
     // Prepare the operation before the test. For example: print test information, create wr_ list.
