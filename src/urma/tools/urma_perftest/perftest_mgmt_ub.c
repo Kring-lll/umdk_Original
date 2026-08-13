@@ -42,6 +42,8 @@ typedef struct ub_jpair {
     bool                 have_pending_recv;  /* probe recv posted, not yet completed */
     bool                 have_pending_data;  /* probe recv completed, recv_buf has data */
     uint32_t             pending_data_len;   /* valid when have_pending_data == true */
+    bool                 have_deferred_recv;  /* next-round recv CQE stashed for next sync */
+    uint32_t             deferred_buf_idx;
 } ub_jpair_t;
 
 typedef struct ub_mgmt_ctx {
@@ -50,10 +52,12 @@ typedef struct ub_mgmt_ctx {
     urma_jfc_t        *jfc;          /* shared jfc for both send and recv CQE */
     urma_jfr_t        *jfr;          /* shared jfr (UB requires share_jfr) */
     char              *send_buf;     /* shared 4KB buffer for SEND */
-    char              *recv_buf;     /* shared 4KB buffer for data RECV */
+    char              *recv_buf;     /* data RECV buffer A */
+    char              *recv_buf_b;   /* data RECV buffer B (second pre-post for RNR tolerance) */
     char              *recv_buf_hs;  /* dedicated 4KB buffer for handshake RECV (server only) */
     urma_target_seg_t *tseg_send;    /* registered seg covering send_buf */
     urma_target_seg_t *tseg_recv;    /* registered seg covering recv_buf */
+    urma_target_seg_t *tseg_recv_b;  /* registered seg covering recv_buf_b */
     urma_target_seg_t *tseg_recv_hs; /* registered seg covering recv_buf_hs (server only) */
     bool               is_server;
     ub_jpair_t         pair;         /* single pair (UB mgmt does not support multi-pair) */
@@ -97,17 +101,24 @@ static int poll_one_cqe(urma_jfc_t *jfc, urma_cr_t *cr, bool interruptible)
     }
 }
 
-/* Post one max-size RECV WR. Used for pre-post at handshake and refill in sync_data. */
-static int ub_post_one_recv(ub_mgmt_ctx_t *ctx)
+/* Post one max-size RECV WR. buf_idx 0=recv_buf, 1=recv_buf_b. user_ctx
+ * carries buf_idx so refill routes to the consumed slot. */
+static int ub_post_one_recv(ub_mgmt_ctx_t *ctx, int buf_idx)
 {
     urma_sge_t sge = {0};
     urma_jfr_wr_t wr = {0};
     urma_jfr_wr_t *bad = NULL;
-    sge.addr = (uint64_t)ctx->recv_buf;
+    if (buf_idx == 0) {
+        sge.addr = (uint64_t)ctx->recv_buf;
+        sge.tseg = ctx->tseg_recv;
+    } else {
+        sge.addr = (uint64_t)ctx->recv_buf_b;
+        sge.tseg = ctx->tseg_recv_b;
+    }
     sge.len = UB_MGMT_MSG_MAX_SIZE;
-    sge.tseg = ctx->tseg_recv;
     wr.src.sge = &sge;
     wr.src.num_sge = 1;
+    wr.user_ctx = (uint64_t)buf_idx;
     wr.next = NULL;
     return (urma_post_jetty_recv_wr(ctx->pair.jetty, &wr, &bad) == URMA_SUCCESS) ? 0 : -1;
 }
@@ -173,9 +184,11 @@ static int ub_create_local_resources(const comm_ub_cfg_t *cfg, ub_mgmt_ctx_t **c
     urma_jfr_t *jfr = NULL;
     urma_target_seg_t *tseg_send = NULL;
     urma_target_seg_t *tseg_recv = NULL;
+    urma_target_seg_t *tseg_recv_b = NULL;
     urma_target_seg_t *tseg_recv_hs = NULL;
     char *send_buf = NULL;
     char *recv_buf = NULL;
+    char *recv_buf_b = NULL;
     char *recv_buf_hs = NULL;
     urma_jfc_cfg_t jfc_cfg = {0};
     urma_seg_cfg_t seg_cfg = {0};
@@ -209,13 +222,15 @@ static int ub_create_local_resources(const comm_ub_cfg_t *cfg, ub_mgmt_ctx_t **c
 
     send_buf = (char *)memalign(UB_MGMT_SEG_ALIGN, UB_MGMT_MSG_MAX_SIZE);
     recv_buf = (char *)memalign(UB_MGMT_SEG_ALIGN, UB_MGMT_MSG_MAX_SIZE);
+    recv_buf_b = (char *)memalign(UB_MGMT_SEG_ALIGN, UB_MGMT_MSG_MAX_SIZE);
     recv_buf_hs = (char *)memalign(UB_MGMT_SEG_ALIGN, UB_MGMT_MSG_MAX_SIZE);
-    if (send_buf == NULL || recv_buf == NULL || recv_buf_hs == NULL) {
+    if (send_buf == NULL || recv_buf == NULL || recv_buf_b == NULL || recv_buf_hs == NULL) {
         LOG_ERROR("Failed to alloc mgmt buffers.\n");
         goto free_jfc;
     }
     memset(send_buf, 0, UB_MGMT_MSG_MAX_SIZE);
     memset(recv_buf, 0, UB_MGMT_MSG_MAX_SIZE);
+    memset(recv_buf_b, 0, UB_MGMT_MSG_MAX_SIZE);
     memset(recv_buf_hs, 0, UB_MGMT_MSG_MAX_SIZE);
 
     seg_cfg.len = UB_MGMT_MSG_MAX_SIZE;
@@ -240,11 +255,20 @@ static int ub_create_local_resources(const comm_ub_cfg_t *cfg, ub_mgmt_ctx_t **c
         goto unregister_send;
     }
 
+    /* Second data recv seg: pre-post 2 recvs so RQ always has >=1 spare. */
+    seg_cfg.va = (uint64_t)recv_buf_b;
+    tseg_recv_b = urma_register_seg(urma_ctx, &seg_cfg);
+    if (tseg_recv_b == NULL) {
+        LOG_ERROR("Failed to register mgmt recv_b seg.\n");
+        goto unregister_recv;
+    }
+
     /*
-     * Dedicated handshake recv seg. Server posts 2 recvs at handshake entry:
+     * Dedicated handshake recv seg. Server posts 3 recvs at handshake entry:
      *   WQE[0] = handshake (1B) on recv_buf_hs
      *   WQE[1] = data (4KB)    on recv_buf
-     * Both stay outstanding before peer's first send arrives, eliminating the
+     *   WQE[2] = data (4KB)    on recv_buf_b (pre-posted in ub_server_handshake)
+     * All stay outstanding before peer's first send arrives, eliminating the
      * race where peer's sync_data SEND reaches our RQ before stage 6.5's
      * post_recv runs (RNR in UB+RM, no kernel buffering).
      *
@@ -255,7 +279,7 @@ static int ub_create_local_resources(const comm_ub_cfg_t *cfg, ub_mgmt_ctx_t **c
     tseg_recv_hs = urma_register_seg(urma_ctx, &seg_cfg);
     if (tseg_recv_hs == NULL) {
         LOG_ERROR("Failed to register mgmt handshake recv seg.\n");
-        goto unregister_recv;
+        goto unregister_recv_b;
     }
 
     jfs_cfg.depth = UB_MGMT_JFS_DEPTH;
@@ -299,9 +323,11 @@ static int ub_create_local_resources(const comm_ub_cfg_t *cfg, ub_mgmt_ctx_t **c
     ctx->jfr = jfr;
     ctx->send_buf = send_buf;
     ctx->recv_buf = recv_buf;
+    ctx->recv_buf_b = recv_buf_b;
     ctx->recv_buf_hs = recv_buf_hs;
     ctx->tseg_send = tseg_send;
     ctx->tseg_recv = tseg_recv;
+    ctx->tseg_recv_b = tseg_recv_b;
     ctx->tseg_recv_hs = tseg_recv_hs;
     ctx->is_server = (cfg->dst_eid == NULL);
 
@@ -336,6 +362,8 @@ delete_jfr:
     (void)urma_delete_jfr(jfr);
 unregister_recv_hs:
     (void)urma_unregister_seg(tseg_recv_hs);
+unregister_recv_b:
+    (void)urma_unregister_seg(tseg_recv_b);
 unregister_recv:
     (void)urma_unregister_seg(tseg_recv);
 unregister_send:
@@ -343,6 +371,7 @@ unregister_send:
 free_bufs:
     free(send_buf);
     free(recv_buf);
+    free(recv_buf_b);
     free(recv_buf_hs);
 free_jfc:
     (void)urma_delete_jfc(jfc);
@@ -381,16 +410,29 @@ static int ub_server_handshake(ub_mgmt_ctx_t *ctx)
         return -1;
     }
 
-    /* WQE[1]: data recv (4KB), stays in RQ across handshake. */
+    /* WQE[1]: data recv (4KB) on recv_buf, stays in RQ across handshake. */
     sge.addr = (uint64_t)ctx->recv_buf;
     sge.len = UB_MGMT_MSG_MAX_SIZE;
     sge.tseg = ctx->tseg_recv;
     wr.src.sge = &sge;
     wr.src.num_sge = 1;
-    wr.user_ctx = 0;
+    wr.user_ctx = 0;  /* buf_idx 0 = recv_buf, for refill routing */
     wr.next = NULL;
     if (urma_post_jetty_recv_wr(ctx->pair.jetty, &wr, &bad) != URMA_SUCCESS) {
         LOG_ERROR("Failed to pre-post data recv.\n");
+        return -1;
+    }
+
+    /* WQE[2]: data recv (4KB) on recv_buf_b, spare for RNR tolerance. */
+    sge.addr = (uint64_t)ctx->recv_buf_b;
+    sge.len = UB_MGMT_MSG_MAX_SIZE;
+    sge.tseg = ctx->tseg_recv_b;
+    wr.src.sge = &sge;
+    wr.src.num_sge = 1;
+    wr.user_ctx = 1;  /* buf_idx 1 = recv_buf_b */
+    wr.next = NULL;
+    if (urma_post_jetty_recv_wr(ctx->pair.jetty, &wr, &bad) != URMA_SUCCESS) {
+        LOG_ERROR("Failed to pre-post data recv_b.\n");
         return -1;
     }
 
@@ -427,6 +469,12 @@ static int ub_client_handshake(ub_mgmt_ctx_t *ctx, const char *peer_eid_str, uin
     ctx->pair.tjetty = urma_import_jetty(ctx->urma_ctx, &rjetty, &g_ub_mgmt_token);
     if (ctx->pair.tjetty == NULL) {
         LOG_ERROR("Failed to import peer mgmt jetty.\n");
+        return -1;
+    }
+
+    /* Make the client RQ ready before the handshake lets the server advance. */
+    if (ub_post_one_recv(ctx, 0) != 0 || ub_post_one_recv(ctx, 1) != 0) {
+        LOG_ERROR("Failed to pre-post client data recvs.\n");
         return -1;
     }
 
@@ -504,18 +552,6 @@ int ub_establish_connection(const comm_ub_cfg_t *cfg)
         }
     }
 
-    /*
-     * Pre-post one data RECV on client before any sync_data send. Server
-     * already has data recv pre-posted inside ub_server_handshake (WQE[1]).
-     * Without this, peer's SEND arriving at an empty RQ exhausts rnr_retry
-     * in RM mode (UB has no kernel buffering). Mirrors ping_run.c:682.
-     */
-    if (!ctx->is_server) {
-        if (ub_post_one_recv(ctx) != 0) {
-            LOG_ERROR("Failed to pre-post mgmt recv.\n");
-            goto rollback_handshake;
-        }
-    }
     ctx->pair.have_pending_recv = !ctx->is_server;
 
     g_ub_ctx = ctx;
@@ -531,10 +567,12 @@ rollback_handshake:
     }
     (void)urma_delete_jfr(ctx->jfr);
     (void)urma_unregister_seg(ctx->tseg_recv_hs);
+    (void)urma_unregister_seg(ctx->tseg_recv_b);
     (void)urma_unregister_seg(ctx->tseg_recv);
     (void)urma_unregister_seg(ctx->tseg_send);
     free(ctx->send_buf);
     free(ctx->recv_buf);
+    free(ctx->recv_buf_b);
     free(ctx->recv_buf_hs);
     (void)urma_delete_jfc(ctx->jfc);
     (void)urma_delete_context(ctx->urma_ctx);
@@ -566,6 +604,10 @@ void ub_close_connection(void)
         (void)urma_unregister_seg(g_ub_ctx->tseg_recv);
         g_ub_ctx->tseg_recv = NULL;
     }
+    if (g_ub_ctx->tseg_recv_b != NULL) {
+        (void)urma_unregister_seg(g_ub_ctx->tseg_recv_b);
+        g_ub_ctx->tseg_recv_b = NULL;
+    }
     if (g_ub_ctx->tseg_recv_hs != NULL) {
         (void)urma_unregister_seg(g_ub_ctx->tseg_recv_hs);
         g_ub_ctx->tseg_recv_hs = NULL;
@@ -586,6 +628,8 @@ void ub_close_connection(void)
     g_ub_ctx->send_buf = NULL;
     free(g_ub_ctx->recv_buf);
     g_ub_ctx->recv_buf = NULL;
+    free(g_ub_ctx->recv_buf_b);
+    g_ub_ctx->recv_buf_b = NULL;
     free(g_ub_ctx->recv_buf_hs);
     g_ub_ctx->recv_buf_hs = NULL;
     free(g_ub_ctx);
@@ -602,7 +646,6 @@ int ub_sync_data(uint32_t index, int size, char *local_data, char *remote_data)
     urma_jfs_wr_t send_wr = {0};
     urma_jfs_wr_t *send_bad = NULL;
     urma_cr_t cr = {0};
-    int pending = 2; /* expect 1 send CQE + 1 recv CQE */
 
     (void)index; /* single pair; index ignored */
 
@@ -612,14 +655,9 @@ int ub_sync_data(uint32_t index, int size, char *local_data, char *remote_data)
         return -EINVAL;
     }
 
-    /*
-     * RECV is already pre-posted (ub_establish_connection) and refilled
-     * after each consumption below. DO NOT post recv here: posting recv
-     * synchronously with peer's post_send races in UB+RM. UB has no kernel
-     * buffering (unlike TCP), so the brief window where peer's SEND arrives
-     * before our post_recv is processed by HW exhausts rnr_retry=7 in RM
-     * mode. Same idiom as ping_run.c:682 (pre-post before send) and
-     * urma_sample.c:624 (pre-post RECV_BATCH_CNT before accept loop).
+    /* RECV pre-posted in establish/handshake; refilled on each recv CQE below.
+     * Don't post recv here —sync post races with peer send in UB+RM (no
+     * kernel buffering, exhausts rnr_retry=7). 
      */
 
     /* copy local_data into registered send_buf */
@@ -643,8 +681,12 @@ int ub_sync_data(uint32_t index, int size, char *local_data, char *remote_data)
         return -1;
     }
 
-    /* poll for 2 CQEs (send + recv); refill recv immediately on recv CQE. */
-    while (pending > 0) {
+    bool send_done = false;
+    bool recv_done = g_ub_ctx->pair.have_deferred_recv;
+    int consumed_buf_idx = recv_done ? (int)g_ub_ctx->pair.deferred_buf_idx : 0;
+    g_ub_ctx->pair.have_deferred_recv = false;
+
+    while (!send_done || !recv_done) {
         if (g_exit_flag) {
             return -EINTR;
         }
@@ -653,25 +695,34 @@ int ub_sync_data(uint32_t index, int size, char *local_data, char *remote_data)
             LOG_ERROR("Failed to poll jfc.\n");
             return -1;
         }
-        if (n == 1) {
-            if (cr.status != URMA_CR_SUCCESS) {
-                LOG_ERROR("mgmt CR status %d (s_r=%u).\n", (int)cr.status, cr.flag.bs.s_r);
-                return -1;
+        if (n != 1) {
+            continue;
+        }
+        if (cr.status != URMA_CR_SUCCESS) {
+            LOG_ERROR("mgmt CR status %d (s_r=%u).\n", (int)cr.status, cr.flag.bs.s_r);
+            return -1;
+        }
+        if (cr.flag.bs.s_r == 1) { /* recv CQE */
+            if (!recv_done) {
+                consumed_buf_idx = (int)cr.user_ctx;
+                recv_done = true;
+            } else {
+                /* Next round's recv arrived before our send CQE — stash. */
+                g_ub_ctx->pair.have_deferred_recv = true;
+                g_ub_ctx->pair.deferred_buf_idx = (uint32_t)cr.user_ctx;
             }
-            if (cr.flag.bs.s_r == 1) { /* recv CQE: refill */
-                if (ub_post_one_recv(g_ub_ctx) != 0) {
-                    LOG_ERROR("Failed to refill mgmt recv.\n");
-                    return -1;
-                }
-            }
-            pending--;
+        } else { /* send CQE */
+            send_done = true;
         }
     }
 
-    /* copy recv_buf into remote_data. After this call RQ has 1 recv (the
-     * refill above), have_pending_recv=false (not a probe). Caller may
-     * immediately call comm_poll, which will skip posting a duplicate probe. */
-    (void)memcpy(remote_data, g_ub_ctx->recv_buf, (size_t)size);
+    /* memcpy before refill: HW writes buf before CQE, but keep order clear. */
+    char *consumed_buf = (consumed_buf_idx == 1) ? g_ub_ctx->recv_buf_b : g_ub_ctx->recv_buf;
+    (void)memcpy(remote_data, consumed_buf, (size_t)size);
+    if (ub_post_one_recv(g_ub_ctx, consumed_buf_idx) != 0) {
+        LOG_ERROR("Failed to refill mgmt recv (buf=%d).\n", consumed_buf_idx);
+        return -1;
+    }
     return 0;
 }
 
