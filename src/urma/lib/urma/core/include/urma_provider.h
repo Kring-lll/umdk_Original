@@ -34,6 +34,7 @@ typedef struct {
     urma_field_target_t tgt; /* which sub-struct the field belongs to */
     size_t offset;          /* offsetof(sub-struct, member) */
     size_t size;            /* sizeof(member) */
+    uint64_t reserved[2];
 } opt_map_t;
 
 extern const opt_map_t JFS_OPT_TABLE[];
@@ -191,6 +192,7 @@ typedef struct urma_ops {
     urma_status_t (*get_ip_by_eid)(const urma_context_t *ctx, const urma_eid_t *eid, urma_net_addr_t *net_addr);
     urma_status_t (*get_smac)(const urma_context_t *ctx, uint8_t *mac);
     urma_status_t (*get_dmac)(const urma_context_t *ctx, const urma_net_addr_t *net_addr, uint8_t *mac);
+    uint64_t reserved[8];
 } urma_ops_t;
 
 typedef struct urma_provider_attr {
@@ -212,6 +214,7 @@ typedef struct urma_provider_ops {
     /* Log Ops */
     urma_status_t (*register_log_func)(urma_log_cb_t func);
     urma_status_t (*unregister_log_func)(void);
+    uint64_t reserved[8];
 } urma_provider_ops_t;
 
 typedef struct urma_import_tseg_cfg {
@@ -222,6 +225,7 @@ typedef struct urma_import_tseg_cfg {
     urma_token_t *token;
     urma_import_seg_flag_t flag;
     uint64_t mva;
+    uint64_t reserved[4];
 } urma_import_tseg_cfg_t;
 
 typedef struct urma_tjfr_cfg {
@@ -230,6 +234,7 @@ typedef struct urma_tjfr_cfg {
     urma_token_t *token;
     urma_transport_mode_t trans_mode;
     urma_tp_type_t tp_type;
+    uint64_t reserved[4];
 } urma_tjfr_cfg_t;
 
 typedef struct urma_tjetty_cfg {
@@ -240,6 +245,7 @@ typedef struct urma_tjetty_cfg {
     urma_jetty_grp_policy_t policy;
     urma_target_type_t type;
     urma_tp_type_t tp_type;
+    uint64_t reserved[4];
 } urma_tjetty_cfg_t;
 
 typedef struct urma_context_cfg {

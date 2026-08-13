@@ -50,7 +50,9 @@ typedef struct urma_perf_stats {
         uint64_t p90;
         uint64_t p99;
         uint64_t p9999;
+        uint64_t reserved[2];
     } type_record[URMA_PERF_RECORD_TYPE_MAX];
+    uint64_t reserved[2];
 } urma_perf_stats_t;
 
 /**
