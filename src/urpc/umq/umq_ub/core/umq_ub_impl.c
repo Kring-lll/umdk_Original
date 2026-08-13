@@ -1402,14 +1402,11 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
     dev_ctx->umq_ctx_table[queue->umq_id] = (uint64_t)(uintptr_t)queue;
     __atomic_store_n(&dev_ctx->umq_ctx_ref_cnt_table[queue->umq_id], 1, __ATOMIC_RELEASE);
 
-    queue->wait_ack_import.lock = util_rwlock_create();
-    if (queue->wait_ack_import.lock == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "queue wait_ack_import lock create failed\n");
-        if (is_umq_ub_logic_queue(queue->create_flag)) {
-            goto DESTROY_JFR_CTX;
-        }
-        goto CLEAR_TABLE;
-    }
+    /*
+    * wait_ack_import.lock 不再随队列创建：绝大多数队列从不接收导入内存池流量，
+    * 每队列常驻一把读写锁（锁对象 + 两个信号量 butex，约 0.3KB/队列）纯属浪费。
+    * 与 wait_ack_pool_id 数组一致，改为首次 umq_ub_return_import_result 时惰性创建。
+    */
 
     char port_str[UMQ_PORT_STR_SIZE] = {0};
     umq_jetty_port_info(port_str, UMQ_PORT_STR_SIZE, queue);
@@ -1449,9 +1446,10 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
     return (uint64_t)(uintptr_t)queue;
 
 LOCK_DESTROY:
-    (void)util_rwlock_destroy(queue->wait_ack_import.lock);
-    queue->wait_ack_import.lock = NULL;
-CLEAR_TABLE:
+    if (queue->wait_ack_import.lock != NULL) {
+        (void)util_rwlock_destroy(queue->wait_ack_import.lock);
+        queue->wait_ack_import.lock = NULL;
+    }
     dev_ctx->umq_ctx_table[queue->umq_id] = 0;
 DELETE_JETTY:
     (void)umq_symbol_urma()->urma_delete_jetty(queue->jetty[UB_QUEUE_JETTY_IO]);
@@ -1629,8 +1627,10 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
     if (queue->wait_ack_import.wait_ack_pool_id != NULL) {
         free(queue->wait_ack_import.wait_ack_pool_id);
     }
-    (void)util_rwlock_destroy(queue->wait_ack_import.lock);
-    queue->wait_ack_import.lock = NULL;
+    if (queue->wait_ack_import.lock != NULL) {
+        (void)util_rwlock_destroy(queue->wait_ack_import.lock);
+        queue->wait_ack_import.lock = NULL;
+    }
     (void)pthread_spin_destroy(&queue->get_jetty_node_lock);
     umq_ub_jfr_ctx_put(queue, UB_QUEUE_JETTY_IO);
     umq_ub_queue_ctx_list_remove(&queue->qctx_node);
