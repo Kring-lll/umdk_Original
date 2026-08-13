@@ -1702,6 +1702,24 @@ static int urma_create_jetty_check_jfc(urma_jetty_cfg_t *jetty_cfg)
     return 0;
 }
 
+static void urma_fill_jetty_sl_tp(urma_jetty_t *jetty)
+{
+    urma_jfs_cfg_t *jfs_cfg = &jetty->jetty_cfg.jfs_cfg;
+    if (jfs_cfg->priority > URMA_MAX_PRIORITY) {
+        URMA_LOG_ERR("jfs priority %hhu is out of range [0, %d], skip filling sl_tp.\n",
+            jfs_cfg->priority, URMA_MAX_PRIORITY);
+        return;
+    }
+
+    urma_device_attr_t *attr = &jetty->urma_ctx->dev->sysfs_dev->dev_attr;
+    struct urma_sl_info *sl_info = &attr->dev_cap.priority_info[jfs_cfg->priority];
+
+    jetty->urma_jetty_opt.sl_tp.bs.sl = sl_info->SL;
+    jetty->urma_jetty_opt.sl_tp.bs.rtp = sl_info->tp_type.bs.rtp;
+    jetty->urma_jetty_opt.sl_tp.bs.ctp = sl_info->tp_type.bs.ctp;
+    jetty->urma_jetty_opt.sl_tp.bs.utp = sl_info->tp_type.bs.utp;
+}
+
 urma_jetty_t *urma_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cfg)
 {
     if (ctx == NULL || jetty_cfg == NULL || ctx->dev == NULL) {
@@ -1749,6 +1767,7 @@ urma_jetty_t *urma_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cfg
         return NULL;
     }
 
+    urma_fill_jetty_sl_tp(jetty);
     jetty->urma_jetty_opt.is_actived = true;
     return jetty;
 }
