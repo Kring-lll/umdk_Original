@@ -246,7 +246,7 @@ static int bondp_update_pjetty_id_mapping(
     return 0;
 }
 
-static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
+static int bondp_rebuild_pjetty_slot(bondp_comp_t *bdp_jetty, uint32_t local_idx, bool standby)
 {
     int ret;
 
@@ -256,40 +256,93 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
     }
 
     bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
+    urma_jetty_t **slot = standby ? &bdp_jetty->standby_pjetty[local_idx] : &bdp_jetty->p_jetty[local_idx];
 
-    urma_jetty_t *old_jetty = bdp_jetty->p_jetty[local_idx];
+    urma_jetty_t *old_jetty = *slot;
     if (old_jetty == NULL) {
-        URMA_LOG_ERR("pjetty at idx=%u is NULL, cannot rebuild\n", local_idx);
+        URMA_LOG_ERR("%s pjetty at idx=%u is NULL, cannot rebuild\n",
+                     standby ? "standby" : "active", local_idx);
         return -1;
     }
     urma_jetty_cfg_t p_cfg = old_jetty->jetty_cfg;
     urma_jetty_id_t old_id = old_jetty->jetty_id;
+    if (standby) {
+        /* The benched twin may carry a well-known id; recreating it with the
+         * same id would clash with the not-yet-deleted old jetty, so a standby
+         * always takes a driver-assigned id. */
+        p_cfg.id = 0;
+    }
 
     urma_jetty_t *new_jetty = urma_create_jetty(bdp_ctx->p_ctxs[local_idx], &p_cfg);
     if (new_jetty == NULL) {
-        URMA_LOG_ERR("Failed to recreate pjetty at idx=%d\n", local_idx);
+        URMA_LOG_ERR("Failed to recreate %s pjetty at idx=%u\n",
+                     standby ? "standby" : "active", local_idx);
         return -1;
     }
 
     new_jetty->remote_jetty = NULL;
     new_jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
-    bdp_jetty->p_jetty[local_idx] = new_jetty;
+    /* Publish the new jetty under send_lock so the CR path never sees a
+     * half-swapped twin pair. */
+    (void)pthread_spin_lock(&bdp_jetty->send_lock);
+    *slot = new_jetty;
+    (void)pthread_spin_unlock(&bdp_jetty->send_lock);
 
     ret = bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty);
     if (ret != 0) {
-        bdp_jetty->p_jetty[local_idx] = old_jetty;
+        (void)pthread_spin_lock(&bdp_jetty->send_lock);
+        *slot = old_jetty;
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
         (void)urma_delete_jetty(new_jetty);
         return -1;
     }
 
     ret = urma_delete_jetty(old_jetty);
     if (ret != URMA_SUCCESS) {
-        URMA_LOG_WARN("Failed to delete old pjetty at idx=%d\n", local_idx);
+        URMA_LOG_WARN("Failed to delete old %s pjetty at idx=%u\n",
+                      standby ? "standby" : "active", local_idx);
     }
 
-    URMA_LOG_INFO("Failback pjetty rebuilt, idx=%d old=" URMA_JETTY_ID_FMT " new=" URMA_JETTY_ID_FMT "\n",
-                  local_idx, URMA_JETTY_ID_ARGS(&old_id), URMA_JETTY_ID_ARGS(&new_jetty->jetty_id));
+    if (standby) {
+        atomic_store(&bdp_jetty->standby_ok[local_idx], true);
+    }
+    URMA_LOG_INFO("Rebuilt %s pjetty, idx=%u old=" URMA_JETTY_ID_FMT " new=" URMA_JETTY_ID_FMT "\n",
+                  standby ? "standby" : "active", local_idx,
+                  URMA_JETTY_ID_ARGS(&old_id), URMA_JETTY_ID_ARGS(&new_jetty->jetty_id));
     return 0;
+}
+
+static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
+{
+    return bondp_rebuild_pjetty_slot(bdp_jetty, local_idx, false);
+}
+
+bool bondp_fb_cr_from_benched_twin(bondp_comp_t *bdp_comp, uint32_t pjetty_idx, uint32_t cr_local_id)
+{
+    return bdp_comp->comp_type == BONDP_COMP_JETTY &&
+           pjetty_idx < URMA_UBAGG_DEV_MAX_NUM &&
+           bdp_comp->standby_pjetty[pjetty_idx] != NULL &&
+           !atomic_load(&bdp_comp->standby_ok[pjetty_idx]) &&
+           bdp_comp->standby_pjetty[pjetty_idx]->jetty_id.id == cr_local_id;
+}
+
+bool bondp_fb_swap_to_standby(bondp_comp_t *bdp_comp, uint32_t pjetty_idx)
+{
+    if (bdp_comp->comp_type != BONDP_COMP_JETTY ||
+        pjetty_idx >= URMA_UBAGG_DEV_MAX_NUM ||
+        bdp_comp->standby_pjetty[pjetty_idx] == NULL ||
+        !atomic_load(&bdp_comp->standby_ok[pjetty_idx])) {
+        return false;
+    }
+
+    urma_jetty_t *failed = bdp_comp->p_jetty[pjetty_idx];
+    bdp_comp->p_jetty[pjetty_idx] = bdp_comp->standby_pjetty[pjetty_idx];
+    bdp_comp->standby_pjetty[pjetty_idx] = failed;
+    atomic_store(&bdp_comp->standby_ok[pjetty_idx], false);
+    URMA_LOG_INFO("Failover swapped pjetty twins, pjetty_idx=%u, active_id=%u, benched_id=%u.\n",
+                  pjetty_idx, bdp_comp->p_jetty[pjetty_idx]->jetty_id.id,
+                  failed != NULL ? failed->jetty_id.id : 0);
+    return true;
 }
 
 static bondp_comp_t *bondp_find_jetty_by_vjetty_id(bondp_context_t *bond_ctx, uint32_t vjetty_id)
@@ -377,11 +430,58 @@ static void bondp_rebuild_pjetty_async(bondp_worker_task_reason_t reason, void *
                      fb_task->vjetty_id, fb_task->pjetty_idx);
         goto del_task;
     }
+    if (atomic_load(&bdp_jetty->deleting)) {
+        URMA_LOG_INFO("Skip failback rebuild, jetty is being deleted, vjetty_id=%u, pjetty_idx=%u.\n",
+                      fb_task->vjetty_id, fb_task->pjetty_idx);
+        goto del_task;
+    }
 
-    int ret = bondp_rebuild_pjetty(bdp_jetty, (int)fb_task->pjetty_idx);
+    uint32_t pjetty_idx = fb_task->pjetty_idx;
+    bool standby_failed = bdp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE &&
+                          bdp_jetty->standby_pjetty[pjetty_idx] != NULL &&
+                          !atomic_load(&bdp_jetty->standby_ok[pjetty_idx]);
+
+    /* Repair whichever twin is broken. After a twin swap only the benched
+     * standby needs a rebuild (the slot stayed valid, no failback replay);
+     * without a healthy twin the classic path rebuilds the active jetty and
+     * publishes rebuild_done for the opportunistic failback on post. */
+    int ret;
+    if (standby_failed) {
+        ret = bondp_rebuild_pjetty_slot(bdp_jetty, pjetty_idx, true);
+        if (ret != 0) {
+            URMA_LOG_ERR("Failed to rebuild standby pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
+                         fb_task->vjetty_id, pjetty_idx);
+            goto del_task;
+        }
+    }
+    /* Re-read after the standby rebuild: the active twin may have failed
+     * while this task was already queued (its add returned -EEXIST). */
+    if (atomic_load(&bdp_jetty->valid[pjetty_idx])) {
+        bondp_context_t *bond_ctx = fb_task->bond_ctx;
+        uint32_t vjetty_id = fb_task->vjetty_id;
+        (void)fb_task_del(fb_ctx, &arg_typed->key);
+        fb_task_put(fb_task);
+        /* Close the -EEXIST race: a failover CR between the check above and
+         * the task removal was dropped. It either invalidated the slot
+         * (reroute path clears valid) or swapped the twins (swap keeps valid
+         * true and only clears standby_ok), so re-arm on both conditions. */
+        (void)pthread_spin_lock(&bdp_jetty->send_lock);
+        bool need_rearm = !atomic_load(&bdp_jetty->valid[pjetty_idx]) ||
+                          (bdp_jetty->bondp_ctx->bonding_mode == BONDP_BONDING_MODE_BALANCE &&
+                           bdp_jetty->standby_pjetty[pjetty_idx] != NULL &&
+                           !atomic_load(&bdp_jetty->standby_ok[pjetty_idx]));
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+        if (need_rearm) {
+            (void)bondp_fb_add_task(bond_ctx, vjetty_id, pjetty_idx);
+        }
+        free(arg_typed);
+        return;
+    }
+
+    ret = bondp_rebuild_pjetty(bdp_jetty, pjetty_idx);
     if (ret != 0) {
         URMA_LOG_ERR("Failed to rebuild failback pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
-                     fb_task->vjetty_id, fb_task->pjetty_idx);
+                     fb_task->vjetty_id, pjetty_idx);
         goto del_task;
     }
 
