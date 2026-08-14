@@ -30,6 +30,7 @@ static void umq_tseg_node_destroy(imported_tseg_node_t *tseg_node);
  * only 1-2 mempools, so 8 buckets keeps chains at length 1 while avoiding the
  * 4KB-per-connection cost a large bucket array would add at 48K+ peers. */
 #define TSEG_MAP_NUM 8
+
 #define UMQ_CTP_MAX_BUF_SIZE 4096
 #define UMQ_INITIAL_CREDIT 16
 
