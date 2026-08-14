@@ -396,15 +396,14 @@ static void try_failback(bondp_comp_t *bdp_comp)
         }
         recovered_cnt++;
         atomic_store(&bdp_comp->valid[i], true);
+        URMA_LOG_INFO("Path switched: failback to recovered pjetty path, vjetty_id=%u, local_idx=%u\n",
+                      bdp_comp->v_jetty.jetty_id.id, i);
     }
 
     if (recovered_cnt == 0) {
         pthread_spin_unlock(&bdp_comp->send_lock);
         return;
     }
-
-    URMA_LOG_INFO("Failback triggered after health check recovery, vjetty_id=%u recovered_cnt=%u\n",
-                  bdp_comp->v_jetty.jetty_id.id, recovered_cnt);
 
     for (uint32_t i = 0; i < bdp_comp->send_wr_buf.max_wr_num; ++i) {
         const uint64_t resend_wr_id = (uint64_t)i + 1;
@@ -421,8 +420,11 @@ static void try_failback(bondp_comp_t *bdp_comp)
         int new_target_idx = -1;
         if (schedule_send(&resend_wr_entry->target_vjetty->v_tjetty, bdp_comp,
                           &new_send_idx, &new_target_idx, NULL) != 0) {
-            URMA_LOG_DEBUG("Skip failback resend on post, no valid route for wr_id=%lu vjetty_id=%u\n",
-                           resend_wr_id, resend_wr_entry->target_vjetty->v_tjetty.id.id);
+            URMA_LOG_DEBUG("Skip failback resend on post, no valid route for wr_id=%lu, "
+                           "vjetty_id=%u, tjetty_id=%u, from=[%u, %u]\n",
+                           resend_wr_id, bdp_comp->v_jetty.jetty_id.id,
+                           resend_wr_entry->target_vjetty->v_tjetty.id.id,
+                           old_send_idx, old_target_idx);
             continue;
         }
 
@@ -431,9 +433,12 @@ static void try_failback(bondp_comp_t *bdp_comp)
         }
 
         atomic_fetch_sub(&bdp_comp->sqe_cnt[old_send_idx][old_target_idx], 1);
+        uint32_t target_vjetty_id = resend_wr_entry->target_vjetty->v_tjetty.id.id;
         if (resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
-            URMA_LOG_ERR("Failed failback resend on post, wr_id=%lu new_send_idx=%d new_target_idx=%d\n",
-                         resend_wr_id, new_send_idx, new_target_idx);
+            URMA_LOG_ERR("Failed failback resend on post, wr_id=%lu, vjetty_id=%u, tjetty_id=%u, "
+                         "from=[%u, %u], to=[%d, %d]\n",
+                         resend_wr_id, bdp_comp->v_jetty.jetty_id.id,
+                         target_vjetty_id, old_send_idx, old_target_idx, new_send_idx, new_target_idx);
             continue;
         }
     }
@@ -1452,16 +1457,23 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
     }
 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
-        bool need_rebuild_jetty = is_need_rebuild_jetty(cr);
         (void)pthread_spin_lock(&bdp_comp->send_lock);
-        if (need_rebuild_jetty) {
-            atomic_store(&bdp_comp->valid[send_idx], false);
-        }
+        atomic_store(&bdp_comp->valid[send_idx], false);
         bondp_target_jetty_t *bdp_tjetty = wr_entry->target_vjetty;
         bondp_hc_tjetty_sync_valid(bdp_tjetty);
         bondp_p_target_jetty_t *skip_p_tjetty = bondp_find_p_tjetty(bdp_tjetty, send_idx, target_idx);
+        bool tjetty_path_down = (skip_p_tjetty != NULL);
         if (skip_p_tjetty != NULL) {
             atomic_store(&skip_p_tjetty->valid, false);
+        }
+        if (is_need_rebuild_jetty(cr) && g_bondp_env.enable_failback) {
+            int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);
+            if (ret != 0 && ret != -EEXIST) {
+                URMA_LOG_WARN("Failed to add failback task, vjetty_id=%u, pjetty_idx=%u, ret=%d\n",
+                              bdp_comp->v_jetty.jetty_id.id, send_idx, ret);
+            }
+        } else {
+            atomic_store(&bdp_comp->rebuild_done[send_idx], true);
         }
         /* choose the failover route(0 or 1) through send_idx and target_idx */
         int new_send_idx = send_idx;
@@ -1474,28 +1486,26 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
              * When all ports are invalid and no port is available to resend the wr,
              * this error CQE is returned directly to the upper layer.
              */
-            URMA_LOG_ERR("Failed to find valid port for retransmission, local veid: " EID_FMT
-                         ", remote veid: " EID_FMT ".\n",
+            URMA_LOG_ERR("Failed to find valid port for retransmission, wr_id=%lu, "
+                         "vjetty_id=%u, tjetty_id=%u, path=[%u, %u], cr_status=%d, "
+                         "local veid: " EID_FMT ", remote veid: " EID_FMT ".\n",
+                         wr_id, bdp_comp->v_jetty.jetty_id.id,
+                         wr_entry->target_vjetty->v_tjetty.id.id,
+                         send_idx, target_idx, cr->status,
                          EID_ARGS(bdp_comp->v_jetty.jetty_id.eid),
                          EID_ARGS(wr_entry->target_vjetty->v_tjetty.id.eid));
             (void)pthread_spin_unlock(&bdp_comp->send_lock);
             goto CONVERT_CR;
         }
 
-        URMA_LOG_INFO("Resend from [%u, %u] to [%d, %d], cr status=%d, jetty_id=%u, tjetty_id=%u\n",
-                      send_idx, target_idx, new_send_idx, new_target_idx, cr->status,
-                      bdp_comp->v_jetty.jetty_id.id, wr_entry->target_vjetty->v_tjetty.id.id);
+        URMA_LOG_INFO("Path switched: failover to backup path, wr_id=%lu, vjetty_id=%u, tjetty_id=%u, "
+                      "from=[%u, %u], to=[%d, %d], tjetty_path_down=%d, cr_status=%d\n",
+                      wr_id, bdp_comp->v_jetty.jetty_id.id, wr_entry->target_vjetty->v_tjetty.id.id,
+                      send_idx, target_idx, new_send_idx, new_target_idx, tjetty_path_down, cr->status);
         urma_ubagg_switch_inc();
 
         resend_matched_jfs_wrs(bdp_comp, wr_entry->wr_id, send_idx, target_idx,
                                new_send_idx, new_target_idx, "failover");
-        if (need_rebuild_jetty && g_bondp_env.enable_failback) {
-            int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);
-            if (ret != 0 && ret != -EEXIST) {
-                URMA_LOG_WARN("Failed to add failback task, vjetty_id=%u pjetty_idx=%u ret=%d\n",
-                              wr_entry->target_vjetty->v_tjetty.id.id, send_idx, ret);
-            }
-        }
         (void)pthread_spin_unlock(&bdp_comp->send_lock);
         put_comp(bdp_comp);
         return CONVERT_SKIP;
