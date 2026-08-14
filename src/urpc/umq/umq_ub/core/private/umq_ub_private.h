@@ -18,6 +18,11 @@
 #include <stdbool.h>
 
 #include "urma_api.h"
+
+/* 进程退出标志：ubsocket_uninit() 入口置 true。worker 线程的 poll 路径据此
+ * 跳过对已释放资源（jfc/jetty/queue）的访问，避免退出时序竞态导致的 UAF。
+ * 退出期不再处理 CQE，丢掉的 poll 由 OS 回收资源，安全。 */
+extern volatile bool g_ubsocket_exiting;
 #include "urma_ubagg.h"
 #include "umq_inner.h"
 #include "urpc_bitmap.h"
@@ -102,6 +107,8 @@ typedef struct ub_import_mempool_info {
     uint32_t mempool_token_id : 20;
     uint32_t mempool_id : 12;
     uint32_t mempool_token_value;
+    uint32_t version; /* bumped each time the source mempool is (re)registered;
+                         the peer compares it to decide reuse / re-import */
 } ub_import_mempool_info_t;
 
 typedef enum ub_packet_stats_type {
@@ -233,6 +240,9 @@ typedef struct imported_tseg_node {
     struct urpc_hmap_node node;
     uint32_t mempool_id;
     urma_target_seg_t *tseg;
+    uint32_t version; /* the version carried when this mempool was imported; the
+                         receiver compares it against the freshly arrived version
+                         to decide reuse / unimport+reimport (design §3.5) */
 } imported_tseg_node_t;
 
 typedef struct import_remote_record_node {
@@ -273,6 +283,12 @@ typedef struct umq_ub_ctx {
     umq_dev_assign_t dev_info;
     pthread_spinlock_t tseg_list_lock;
     urma_target_seg_t *tseg_list[UMQ_MAX_TSEG_NUM];
+    /* Per-mempool version, bumped each time the local mempool is (re)registered
+     * so the peer can detect a recycled/reallocated mempool and re-import
+     * (design §3.5). Read/written under tseg_list_lock (together with the
+     * tseg_list[mempool_id] publish in umq_ub_register_seg / read in
+     * umq_ub_mempool_info_get_impl). */
+    uint32_t mempool_version[UMQ_MAX_TSEG_NUM];
     remote_imported_tseg_info_t *remote_imported_info;
     urma_target_jetty_t *tjetty;
     umq_trans_info_t trans_info;
@@ -483,6 +499,7 @@ typedef struct jetty_pool_node {
     volatile uint64_t umq_ref;          // owner umq_id (hi 32) + ref_cnt (lo 32), single atomic access
     volatile uint32_t tx_outstanding;
     volatile uint32_t state;            // Track node state (atomic CAS operations)
+    volatile uint32_t borrow_count;     // WRs posted in current borrow cycle (atomic — concurrent post)
     uint32_t borrow_limit;              // Max WRs per borrow (0 = unlimited)
     bool in_global_pool;                // Whether node is in a global pool list (free_q/active_q/err_q)
     bool is_jetty_err;
@@ -712,6 +729,22 @@ static ALWAYS_INLINE void umq_ub_io_packet_stats(
 }
 
 urma_target_seg_t *umq_ub_tseg_lookup(import_tseg_table_t *tseg_table, uint32_t mempool_id);
+
+/* Look up the imported-tseg node (carrying its import-time version) for a
+ * mempool, under the table's read lock. Returns NULL if not imported. The
+ * caller must not free the returned node; it is owned by the table. */
+imported_tseg_node_t *umq_ub_tseg_node_lookup(import_tseg_table_t *tseg_table, uint32_t mempool_id);
+
+/* Same as umq_ub_tseg_node_lookup but assumes the caller already holds
+ * tseg_hmap_lock (read or write) — does not take the lock itself. Use when the
+ * caller dereferences the returned node before dropping the lock, so a
+ * concurrent umq_ub_tseg_remove cannot free it in between. */
+imported_tseg_node_t *umq_ub_tseg_node_lookup_locked(import_tseg_table_t *tseg_table, uint32_t mempool_id);
+
+/* Remove and unimport the node for a mempool (no-op if absent). Used by the
+ * version-aware re-import path: the caller detected a stale version and must
+ * unimport before re-importing the same mempool (design §3.5). */
+void umq_ub_tseg_remove(import_tseg_table_t *tseg_table, uint32_t mempool_id);
 
 static ALWAYS_INLINE bool umq_ub_enable_import_remote_mem(uint32_t feature)
 {
