@@ -169,6 +169,13 @@ static uint32_t select_least_load_path(const bondp_comp_t *bdp_comp, const bondp
                 bdp_comp->p_jetty[local_idx]->remote_jetty != bdp_tjetty->p_tjettys[j].p_tjetty) {
                 continue;
             }
+            /* balance_route_mode 过滤: 仅影响非亲和选路. 1=仅同chip, 2=仅跨chip */
+            if (bdp_comp->balance_route_mode == 1 && local_idx != target_idx) {
+                continue;
+            }
+            if (bdp_comp->balance_route_mode == 2 && local_idx == target_idx) {
+                continue;
+            }
             uint32_t sqe_cnt = atomic_load(&bdp_comp->sqe_cnt[local_idx][target_idx]);
             if (sqe_cnt < least_load) {
                 least_load = sqe_cnt;

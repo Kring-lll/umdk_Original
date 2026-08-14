@@ -30,6 +30,29 @@
 
 #include "bondp_api.h"
 
+#define BONDP_ENV_BALANCE_ROUTE_MODE "BOND_URMA_BALANCE_ROUTE_MODE"
+
+/* 读取 BOND_URMA_BALANCE_ROUTE_MODE 环境变量, 仅影响 balance 模式非亲和选路:
+ * 0/未设置=全部路径, 1=仅同chip(local_idx==target_idx), 2=仅跨chip(local_idx!=target_idx),
+ * 非法值按 0 处理. */
+static uint8_t read_balance_route_mode(void)
+{
+    const char *value = getenv(BONDP_ENV_BALANCE_ROUTE_MODE);
+    if (value == NULL) {
+        return 0;
+    }
+    if (strcmp(value, "1") == 0) {
+        return 1;
+    }
+    if (strcmp(value, "2") == 0) {
+        return 2;
+    }
+    if (strcmp(value, "0") != 0) {
+        URMA_LOG_WARN("Invalid value '%s' for env %s, using default 0\n", value, BONDP_ENV_BALANCE_ROUTE_MODE);
+    }
+    return 0;
+}
+
 typedef struct bondp_create_vjetty_udata {
     urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
     bool is_msn_enabled; // deprecated
@@ -703,6 +726,11 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     atomic_init(&bdp_jfs->deleting, false);
     (void)pthread_spin_init(&bdp_jfs->send_lock, PTHREAD_PROCESS_PRIVATE);
     bdp_jfs->modify_to_error = false;
+    bdp_jfs->balance_route_mode = read_balance_route_mode();
+    if (bdp_jfs->balance_route_mode != 0) {
+        URMA_LOG_INFO("Balance route mode=%u (0=all, 1=same-chip, 2=cross-chip)\n",
+                      bdp_jfs->balance_route_mode);
+    }
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
         for (uint32_t j = 0; j < URMA_UBAGG_DEV_MAX_NUM; j++) {
             atomic_init(&bdp_jfs->sqe_cnt[i][j], 0);
@@ -1383,6 +1411,11 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     atomic_init(&bdp_jetty->deleting, false);
     (void)pthread_spin_init(&bdp_jetty->send_lock, PTHREAD_PROCESS_PRIVATE);
     bdp_jetty->modify_to_error = false;
+    bdp_jetty->balance_route_mode = read_balance_route_mode();
+    if (bdp_jetty->balance_route_mode != 0) {
+        URMA_LOG_INFO("Balance route mode=%u (0=all, 1=same-chip, 2=cross-chip)\n",
+                      bdp_jetty->balance_route_mode);
+    }
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
     uint32_t cfg_active_port_count = 0;

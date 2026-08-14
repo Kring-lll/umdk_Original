@@ -236,6 +236,9 @@ typedef struct bondp_comp {
     uint32_t max_recv_sge;
     wr_buf_t recv_wr_buf;
     uint32_t rqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
+    /* balance 模式非亲和选路过滤: 0=全部路径, 1=仅同chip(local_idx==target_idx),
+     * 2=仅跨chip(local_idx!=target_idx). 仅在 schedule_send_balance 非亲和路径生效. */
+    uint8_t balance_route_mode;
 } bondp_comp_t;
 
 typedef struct bondp_p_target_jetty {
