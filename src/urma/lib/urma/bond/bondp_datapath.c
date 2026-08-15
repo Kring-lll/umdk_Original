@@ -9,11 +9,6 @@
  */
 
 #include <threads.h>
-#include <time.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
 
 #include "bondp_connection.h"
 #include "bondp_context_table.h"
@@ -22,6 +17,7 @@
 #include "bondp_datapath_schedule.h"
 #include "bondp_dp_failback.h"
 #include "bondp_dp_health.h"
+#include "bondp_dp_rnr_retry.h"
 #include "bondp_types.h"
 #include "ub_get_clock.h"
 #include "urma_api.h"
@@ -31,12 +27,9 @@
 
 #include "bondp_datapath.h"
 
-#define BONDP_POST_SEND_MAX_RETRY     3
+#define BONDP_POST_SEND_MAX_RETRY   3
 /* Max consecutive fast returns before forcing a full scan */
-#define BONDP_FAST_RETURN_THRESHOLD   64
-#define BONDP_MS_PER_SEC              1000
-#define BONDP_NS_PER_MS               1000000
-#define BONDP_RATIO_PERCENT           100
+#define BONDP_FAST_RETURN_THRESHOLD 64
 
 // All post paths (jfs_send, jetty_send, jfr_recv, jetty_recv) are sequential
 // within a thread, share one thread_local copy to minimize TLS memory.
@@ -51,70 +44,6 @@ static thread_local struct {
 } tl_post_prealloc;
 
 static int resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int send_idx, int target_idx);
-
-static uint64_t get_rnr_retry_jitter_rand(void)
-{
-    static thread_local struct random_data rand_data;
-    static thread_local char rand_state[32] = {0};
-    static thread_local bool rand_inited = false;
-    int32_t rand_val = 0;
-
-    if (!rand_inited) {
-        struct timespec ts = {0};
-        unsigned int seed = (unsigned int)getpid();
-
-        if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-            seed ^= (unsigned int)ts.tv_nsec ^ (unsigned int)ts.tv_sec;
-        }
-        seed ^= (unsigned int)(uintptr_t)&rand_data;
-        (void)memset(&rand_data, 0, sizeof(rand_data));
-        (void)initstate_r(seed, rand_state, sizeof(rand_state), &rand_data);
-        rand_inited = true;
-    }
-
-    if (random_r(&rand_data, &rand_val) != 0) {
-        return 0;
-    }
-    return (uint64_t)(uint32_t)rand_val;
-}
-
-static uint64_t add_rnr_retry_jitter(uint64_t sleep_ms)
-{
-    uint32_t ratio = g_bondp_env.rnr_retry_jitter_ratio;
-    if (ratio == 0) {
-        return sleep_ms;
-    }
-
-    uint64_t jitter_ms = (sleep_ms / BONDP_RATIO_PERCENT) * ratio +
-                         ((sleep_ms % BONDP_RATIO_PERCENT) * ratio) / BONDP_RATIO_PERCENT;
-    if (jitter_ms == 0) {
-        return sleep_ms;
-    }
-    uint64_t rand_val = get_rnr_retry_jitter_rand();
-    uint64_t jitter = (jitter_ms == UINT64_MAX) ? rand_val : rand_val % (jitter_ms + 1);
-    if (UINT64_MAX - sleep_ms < jitter) {
-        return UINT64_MAX;
-    }
-    return sleep_ms + jitter;
-}
-
-static void sleep_before_rnr_retry_resend(uint32_t retry_cnt)
-{
-    uint64_t sleep_ms = g_bondp_env.rnr_retry_sleep_ms;
-    if (sleep_ms == 0) {
-        return;
-    }
-    for (uint32_t i = 0; i < retry_cnt; i++) {
-        sleep_ms <<= 1;
-    }
-    sleep_ms = add_rnr_retry_jitter(sleep_ms);
-
-    struct timespec sleep_time = {
-        .tv_sec = (time_t)(sleep_ms / BONDP_MS_PER_SEC),
-        .tv_nsec = (long)((sleep_ms % BONDP_MS_PER_SEC) * BONDP_NS_PER_MS),
-    };
-    (void)nanosleep(&sleep_time, NULL);
-}
 
 static urma_jetty_id_t *get_comp_urma_jetty_id(bondp_comp_t *bdp_comp)
 {
@@ -365,8 +294,8 @@ static urma_status_t post_send_check_valid(bondp_comp_t *bdp_send_comp, const ur
     }
     if (wr->flag.bs.has_drv_ext) {
         bondp_jfs_wr_t *bwr = CONTAINER_OF_FIELD(wr, bondp_jfs_wr_t, base);
-        if (bwr->src_chip_id < BONDP_CHIP_ID_MIN || bwr->src_chip_id > BONDP_CHIP_ID_MAX
-            || bwr->dst_chip_id < BONDP_CHIP_ID_MIN || bwr->dst_chip_id > BONDP_CHIP_ID_MAX) {
+        if (bwr->src_chip_id < BONDP_CHIP_ID_MIN || bwr->src_chip_id > BONDP_CHIP_ID_MAX ||
+            bwr->dst_chip_id < BONDP_CHIP_ID_MIN || bwr->dst_chip_id > BONDP_CHIP_ID_MAX) {
             URMA_LOG_ERR("Invalid src_chip_id=%u or dst_chip_id=%u.\n", bwr->src_chip_id, bwr->dst_chip_id);
             return URMA_EINVAL;
         }
@@ -518,7 +447,7 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
                                                  int wr_total)
 {
     urma_jfs_wr_t *prealloc_wr_list = tl_post_prealloc.wr_list.jfs;
-    urma_sge_t (*prealloc_sge)[BONDP_MAX_SGE_NUM + 1] = tl_post_prealloc.sge;
+    urma_sge_t(*prealloc_sge)[BONDP_MAX_SGE_NUM + 1] = tl_post_prealloc.sge;
 
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(wr->tjetty, bondp_target_jetty_t, v_tjetty);
     if (bdp_tjetty == NULL) {
@@ -582,7 +511,7 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
  * converts the WRs, then submits them as a batch to comp_post_send.
  */
 static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
-    urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr, int wr_total)
+                                                       urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr, int wr_total)
 {
     if (bdp_comp->comp_type != BONDP_COMP_JFS && bdp_comp->comp_type != BONDP_COMP_JETTY) {
         URMA_LOG_ERR("Try to call post_send api by invalid comp_type=%d\n", bdp_comp->comp_type);
@@ -714,12 +643,12 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             goto ROLLBACK;
         }
         return URMA_SUCCESS;
-ROLLBACK:
+    ROLLBACK:
         for (int j = success_node; j < wr_count; j++) {
             jfs_wr_put_refs(&wr_entries[j]->wr);
         }
         jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, &wr_entries[success_node],
-            allocated - success_node);
+                                 allocated - success_node);
         /* The provider pointed *bad_wr at an internal copy that has just been
          * released; translate it back to the user's original WR using the
          * index computed above (success_node), without touching freed memory. */
@@ -731,7 +660,7 @@ ROLLBACK:
             *bad_wr = user_cur;
         }
         return ret;
-CLEANUP:
+    CLEANUP:
         for (int j = 0; j < wr_count; j++) {
             jfs_wr_put_refs(&wr_entries[j]->wr);
         }
@@ -846,7 +775,7 @@ static urma_status_t bondp_post_recv_wr_no_store(bondp_comp_t *bdp_comp,
 {
     // Pre-allocated space to improve datapath performance
     urma_jfr_wr_t *prealloc_wr_list = tl_post_prealloc.wr_list.jfr;
-    urma_sge_t (*prealloc_src_sge)[BONDP_MAX_SGE_NUM + 1] = tl_post_prealloc.sge;
+    urma_sge_t(*prealloc_src_sge)[BONDP_MAX_SGE_NUM + 1] = tl_post_prealloc.sge;
 
     urma_status_t ret = 0;
     int recv_idx = -1;
@@ -884,7 +813,7 @@ static urma_status_t bondp_post_recv_wr_list_without_backup(bondp_comp_t *bdp_co
                                                             urma_jfr_wr_t **bad_wr)
 {
     urma_jfr_wr_t *prealloc_wr_list = tl_post_prealloc.wr_list.jfr;
-    urma_sge_t (*prealloc_src_sge)[BONDP_MAX_SGE_NUM + 1] = tl_post_prealloc.sge;
+    urma_sge_t(*prealloc_src_sge)[BONDP_MAX_SGE_NUM + 1] = tl_post_prealloc.sge;
 
     if (bdp_comp == NULL) {
         URMA_LOG_ERR("Invalid bdp_comp: NULL in recv post without backup.\n");
@@ -969,9 +898,9 @@ static urma_status_t bondp_post_recv_wr_list_without_backup(bondp_comp_t *bdp_co
 }
 
 /**
-* Batch post recv WRs: allocate all entries in one lock, copy+convert,
-* link into a single WR chain, then submit with one comp_post_recv.
-*/
+ * Batch post recv WRs: allocate all entries in one lock, copy+convert,
+ * link into a single WR chain, then submit with one comp_post_recv.
+ */
 static urma_status_t bondp_post_recv_wr_list_and_store(bondp_comp_t *bdp_comp, urma_jfr_wr_t *wr,
                                                        urma_jfr_wr_t **bad_wr)
 {
@@ -999,7 +928,7 @@ static urma_status_t bondp_post_recv_wr_list_and_store(bondp_comp_t *bdp_comp, u
     uint32_t allocated = jfr_wr_buf_alloc_batch(recv_wr_buf, wr_entries, (uint32_t)wr_count);
     if (allocated != (uint32_t)wr_count) {
         URMA_LOG_ERR("Bondp WR buffer is not enough, reqeusted %u, available %u.\n",
-            wr_count, allocated);
+                     wr_count, allocated);
         jfr_wr_buf_release_batch(recv_wr_buf, wr_entries, allocated);
         return URMA_ENOMEM;
     }
@@ -1132,7 +1061,7 @@ urma_status_t bondp_post_jetty_recv_wr(urma_jetty_t *jetty, urma_jfr_wr_t *wr, u
         ret = bondp_post_recv_wr_no_store(bdp_jetty, wr, bad_wr);
     } else {
         ret = (bdp_jetty->bondp_ctx->msn_enable) ? bondp_post_recv_wr_list_and_store(bdp_jetty, wr, bad_wr)
-                                               : bondp_post_recv_wr_list_without_backup(bdp_jetty, wr, bad_wr);
+                                                 : bondp_post_recv_wr_list_without_backup(bdp_jetty, wr, bad_wr);
     }
     atomic_fetch_sub(&bdp_jetty->use_cnt.atomic_cnt, 1);
     PERF_PROFILING_END(BOND_JETTY_POST_RECV);
@@ -1162,7 +1091,7 @@ urma_status_t bondp_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_
         ret = bondp_post_recv_wr_no_store(bdp_jfr, wr, bad_wr);
     } else {
         ret = (bdp_jfr->bondp_ctx->msn_enable) ? bondp_post_recv_wr_list_and_store(bdp_jfr, wr, bad_wr)
-                                             : bondp_post_recv_wr_list_without_backup(bdp_jfr, wr, bad_wr);
+                                               : bondp_post_recv_wr_list_without_backup(bdp_jfr, wr, bad_wr);
     }
     atomic_fetch_sub(&bdp_jfr->use_cnt.atomic_cnt, 1);
     PERF_PROFILING_END(BOND_POST_JFR_RECV);
@@ -1244,9 +1173,9 @@ static bondp_comp_t *get_comp_by_cr(bondp_context_t *bdp_ctx, int dev_idx, urma_
     static thread_local int tl_fill_pos;
     static thread_local int tl_evict_pos;
     static thread_local struct {
-        int           dev_idx;
-        uint32_t      local_id;
-        uint8_t       type;
+        int dev_idx;
+        uint32_t local_id;
+        uint8_t type;
         bondp_comp_t *comp;
     } tl_slots[TL_COMP_CACHE_SLOTS];
 
@@ -1265,11 +1194,11 @@ static bondp_comp_t *get_comp_by_cr(bondp_context_t *bdp_ctx, int dev_idx, urma_
         for (int i = 0; i < TL_COMP_CACHE_SLOTS; i++) {
             tl_slots[i].comp = NULL;
         }
-        tl_ctx       = bdp_ctx;
-        tl_gen       = cur_gen;
-        tl_fill_pos  = 0;
+        tl_ctx = bdp_ctx;
+        tl_gen = cur_gen;
+        tl_fill_pos = 0;
         tl_evict_pos = 0;
-        cache_valid  = false;
+        cache_valid = false;
     }
 
     /* Fast path */
@@ -1291,7 +1220,7 @@ static bondp_comp_t *get_comp_by_cr(bondp_context_t *bdp_ctx, int dev_idx, urma_
                     for (int j = 0; j < TL_COMP_CACHE_SLOTS; j++) {
                         tl_slots[j].comp = NULL;
                     }
-                    tl_fill_pos  = 0;
+                    tl_fill_pos = 0;
                     tl_evict_pos = 0;
                     break;
                 }
@@ -1323,10 +1252,10 @@ static bondp_comp_t *get_comp_by_cr(bondp_context_t *bdp_ctx, int dev_idx, urma_
         slot = tl_evict_pos;
         tl_evict_pos = (tl_evict_pos + 1) & (TL_COMP_CACHE_SLOTS - 1);
     }
-    tl_slots[slot].dev_idx  = dev_idx;
+    tl_slots[slot].dev_idx = dev_idx;
     tl_slots[slot].local_id = cr->local_id;
-    tl_slots[slot].type     = (uint8_t)p_vjetty_type;
-    tl_slots[slot].comp     = comp;
+    tl_slots[slot].type = (uint8_t)p_vjetty_type;
+    tl_slots[slot].comp = comp;
 
     return comp;
 }
@@ -1478,7 +1407,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                           send_idx, target_idx, cr->status, sleep_cnt,
                           bdp_comp->v_jetty.jetty_id.id, wr_entry->target_vjetty->v_tjetty.id.id);
             (void)pthread_spin_unlock(&bdp_comp->send_lock);
-            sleep_before_rnr_retry_resend(sleep_cnt);
+            bondp_rnr_retry_sleep_before_resend(sleep_cnt);
 
             (void)pthread_spin_lock(&bdp_comp->send_lock);
 
@@ -1686,7 +1615,7 @@ static cr_convert_ret_t bondp_handle_cr_with_store(bondp_context_t *bdp_ctx, int
         return handle_fake_cr_with_store(bdp_ctx, idx, cr);
     } else if (is_recv_cr(cr)) {
         return (bdp_ctx->msn_enable) ? handle_recv_cr_with_store(bdp_ctx, idx, cr)
-                                   : handle_recv_cr_without_backup(bdp_ctx, idx, cr);
+                                     : handle_recv_cr_without_backup(bdp_ctx, idx, cr);
     } else {
         return handle_send_cr_with_store(bdp_ctx, idx, cr);
     }
@@ -1724,8 +1653,8 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
                     need_full_scan = true;
                 }
                 cr_convert_ret_t conv_ret = single_dev
-                    ? bondp_handle_cr_no_store(bdp_ctx, hot_idx, pcr)
-                    : bondp_handle_cr_with_store(bdp_ctx, hot_idx, pcr);
+                                                ? bondp_handle_cr_no_store(bdp_ctx, hot_idx, pcr)
+                                                : bondp_handle_cr_with_store(bdp_ctx, hot_idx, pcr);
                 if (conv_ret == CONVERT_FAIL) {
                     PERF_PROFILING_END(BOND_POLL_JFC);
                     return -1;
