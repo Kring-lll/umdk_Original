@@ -111,6 +111,11 @@
 #define PERFTEST_RESULT_LINE      "---------------------------------------------------------------------------------------\n"
 #define PERFTEST_INVALID_PRIORITY (255)
 
+/* Chip id range for bonding balance mode affinity configuration.
+ * Mirrors liburma internal BONDP_CHIP_ID_MIN/BONDP_CHIP_ID_MAX. */
+#define PERFTEST_CHIP_ID_MIN (1)
+#define PERFTEST_CHIP_ID_MAX (2)
+
 typedef enum perftest_api_type {
     PERFTEST_READ,
     PERFTEST_WRITE,
@@ -207,7 +212,9 @@ enum perftest_opts {
     PERFTEST_OPT_V_ADDRESS,
     PERFTEST_OPT_SHARE_JFS,
     PERFTEST_OPT_SET_MIN_SIZE,
-    PERFTEST_OPT_SET_MAX_SIZE
+    PERFTEST_OPT_SET_MAX_SIZE,
+    PERFTEST_OPT_SRC_CHIP,
+    PERFTEST_OPT_DST_CHIP
 };
 
 typedef enum perftest_rate_limiter_units {
@@ -359,6 +366,9 @@ typedef struct perftest_config {
     bool share_jfs;
     perftest_mgmt_type_t mgmt_type;
     char *mgmt_addr; /* UB only: local eid string for mgmt channel. Required in UB mode. */
+    bool use_chip_affinity; /* true when --src_chip and --dst_chip are configured for balance mode */
+    uint32_t src_chip;      /* source chip id for affinity, valid only when use_chip_affinity is true */
+    uint32_t dst_chip;      /* destination chip id for affinity, valid only when use_chip_affinity is true */
 } perftest_config_t;
 
 typedef struct perftest_value_range {

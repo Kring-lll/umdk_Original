@@ -14,6 +14,7 @@
 #include "urma_types.h"
 
 #include "ub_util.h"
+#include "urma_ubagg.h"
 
 #include "perftest_parameters.h"
 #include "ub_get_clock.h"
@@ -63,7 +64,7 @@ typedef struct run_test_ctx {
     int rposted;
     uint64_t *scnt;
     uint64_t *ccnt;
-    urma_jfs_wr_t *jfs_wr;
+    bondp_jfs_wr_t *jfs_wr;
     urma_jfr_wr_t *jfr_wr;
 
     /*           post_list
@@ -82,7 +83,7 @@ typedef struct run_test_ctx {
     urma_sge_t *jfr_sge;
     uint64_t *rx_buf_addr;
 
-    urma_jfs_wr_t *credit_wr;
+    bondp_jfs_wr_t *credit_wr;
     urma_sge_t *credit_sge;
     urma_sge_t *remote_credit_sge;
 } run_test_ctx_t;
