@@ -5,6 +5,7 @@
  * Create: 2025-12-10
  * Note:
  * History: 2025-12-10 fused_deep_moe file
+ * 111222333
  */
 
 #include <unistd.h>
@@ -58,14 +59,14 @@ TensorVector FusedDeepMoeImplNpu(
     int h = xShape[1];
     int bs = xShape[0];
     int topk = expertIdsShape[1];
-    
+
     at::Tensor output = at::empty({bs, h}, x.options());
     at::Tensor shareOutput = at::empty({bs, h}, x.options());
 
     int64_t localExpertNum = moeExpertNum / epRankSize;
     auto opts = expertIds.options().dtype(at::kLong);
     at::Tensor expertTokenNums = at::empty({localExpertNum}, opts);
-    
+
     const std::string groupEpStr(groupEp.data(), groupEp.size());
     const char* groupEpPtr = groupEpStr.c_str();
 
@@ -123,7 +124,7 @@ TensorVector FusedDeepMoeImplMeta(
     int64_t localExpertNum = moeExpertNum / epRankSize;
     auto opts = expertIds.options().dtype(at::kLong);
     at::Tensor expertTokenNums = at::empty({localExpertNum}, opts.device(at::kMeta));
-    
+
     return {output, shareOutput, expertTokenNums};
 }
 
