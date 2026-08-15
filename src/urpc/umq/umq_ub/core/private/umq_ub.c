@@ -155,12 +155,6 @@ int umq_ub_bind_info_check(ub_queue_t *queue, umq_ub_bind_info_t *info)
         eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
         id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
     }
-    if (memcmp(eid, &queue_info->rjetty->jetty_id.eid, sizeof(urma_eid_t)) == 0 &&
-        id == queue_info->rjetty->jetty_id.id) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, UMQ(ID:%u), the queue cannot bind itself\n",
-                     EID_ARGS(*eid), id, queue->umq_id);
-        return -UMQ_ERR_EINVAL;
-    }
     return UMQ_SUCCESS;
 }
 
