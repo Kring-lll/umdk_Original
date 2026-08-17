@@ -27,10 +27,13 @@
 #define UMQ_VLOG_SUMMARY(__type, __format, ...) ((void)0)
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #else
-#define UMQ_VLOG_DEBUG_ORIG(__type, __format, ...) UTIL_VLOG(umq_get_log_ctx(), UTIL_VLOG_LEVEL_DEBUG, __type, __format, ##__VA_ARGS__)
+#define UMQ_VLOG_DEBUG_ORIG(__type, __format, ...) \
+    UTIL_VLOG(umq_get_log_ctx(), UTIL_VLOG_LEVEL_DEBUG, __type, __format, ##__VA_ARGS__)
 #undef UMQ_VLOG_DEBUG
-#define UMQ_VLOG_DEBUG(__type, __format, ...) do { if (qbuf_debug_on()) UMQ_VLOG_DEBUG_ORIG(__type, __format, ##__VA_ARGS__); } while(0)
-#define UMQ_VLOG_SUMMARY(__type, __format, ...) do { if (qbuf_debug_on()) UMQ_VLOG_INFO(__type, __format, ##__VA_ARGS__); } while(0)
+#define UMQ_VLOG_DEBUG(__type, __format, ...) \
+    do { if (qbuf_debug_on()) UMQ_VLOG_DEBUG_ORIG(__type, __format, ##__VA_ARGS__); } while(0)
+#define UMQ_VLOG_SUMMARY(__type, __format, ...) \
+    do { if (qbuf_debug_on()) UMQ_VLOG_INFO(__type, __format, ##__VA_ARGS__); } while(0)
 #endif
 #include "urpc_list.h"
 #include "urpc_thread_closure.h"
@@ -1721,7 +1724,8 @@ static int init_size_class_config(const qbuf_pool_cfg_t *cfg, uint64_t max_umq_b
             uint64_t layout_end = data_end;
             if (cfg->mode == UMQ_BUF_SPLIT) {
                 layout_end += hdr_size;
-                layout_end += (uint64_t)UMQ_EMPTY_HEADER_COEFFICIENT * QBUF_POOL_DEFAULT_EXPANSION_COUNT * sizeof(umq_buf_t);
+                layout_end +=
+                    (uint64_t)UMQ_EMPTY_HEADER_COEFFICIENT * QBUF_POOL_DEFAULT_EXPANSION_COUNT * sizeof(umq_buf_t);
             }
             if (layout_end <= cfg->total_size) {
                 break; // fits!
@@ -1855,7 +1859,8 @@ static void init_split_mode_layout(const qbuf_pool_cfg_t *cfg, uint32_t count)
         g_qbuf_pool.block_pool[sc].buf_cnt_without_data = 0;
         uint64_t exp_blk_cnt = g_qbuf_pool.expansion_size / blk_size;
         if (exp_blk_cnt == 0) exp_blk_cnt = 1;
-        g_qbuf_pool.exp_pool_with_data[sc].trigger_expand_block_num = exp_blk_cnt * g_qbuf_pool.expansion_threshold / 100;
+        g_qbuf_pool.exp_pool_with_data[sc].trigger_expand_block_num =
+            exp_blk_cnt * g_qbuf_pool.expansion_threshold / 100;
     }
 
     {
