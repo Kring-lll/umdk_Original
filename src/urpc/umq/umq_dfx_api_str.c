@@ -101,18 +101,19 @@ int umq_qbuf_pool_stats_to_str(const umq_qbuf_pool_stats_t *qbuf_pool_stats, cha
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n",
                          "                                             Global Pool Config");
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE_120);
-    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-13s %-9s %-11s %-8s %-8s %-8s %-8s %-8s %-11s %-11s %-11s %-13s %-13s\n",
-                         "Type", "Mode", "TotalSize", "TotalBlk", "BlkSize", "Headroom", "DataSize", "BufSize",
-                         "UmqBufSize", "FreeBlk", "FreeSize", "NoBufFreeBlk", "NoBufFreeSize");
+    UMQ_DFX_SNPRINTF_BUF(buf,
+        max_buf_len, str_size, "%-13s %-9s %-11s %-8s %-8s %-8s %-8s %-8s %-11s %-11s %-11s %-13s %-13s\n",
+        "Type", "Mode", "TotalSize", "TotalBlk", "BlkSize", "Headroom", "DataSize", "BufSize",
+        "UmqBufSize", "FreeBlk", "FreeSize", "NoBufFreeBlk", "NoBufFreeSize");
     for (uint32_t i = 0; i < qbuf_pool_stats->num; i++) {
         const umq_qbuf_pool_info_t *info = &qbuf_pool_stats->qbuf_pool_info[i];
         UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
-                             "%-13s %-9s %-11lu %-8lu %-8u %-8u %-8u %-8u %-11u %-11lu %-11lu %-13lu %-13lu\n",
-                             umq_qbuf_pool_type_name(info->type), info->mode == UMQ_BUF_SPLIT ? "SPLIT" : "COMBINE",
-                             info->total_size, info->total_block_num, info->block_size, info->headroom_size,
-                             info->data_size, info->buf_size, info->umq_buf_t_size,
-                             info->available_mem.split.block_num_with_data, info->available_mem.split.size_with_data,
-                             info->available_mem.split.block_num_without_data, info->available_mem.split.size_without_data);
+            "%-13s %-9s %-11lu %-8lu %-8u %-8u %-8u %-8u %-11u %-11lu %-11lu %-13lu %-13lu\n",
+            umq_qbuf_pool_type_name(info->type), info->mode == UMQ_BUF_SPLIT ? "SPLIT" : "COMBINE",
+            info->total_size, info->total_block_num, info->block_size, info->headroom_size,
+            info->data_size, info->buf_size, info->umq_buf_t_size,
+            info->available_mem.split.block_num_with_data, info->available_mem.split.size_with_data,
+            info->available_mem.split.block_num_without_data, info->available_mem.split.size_without_data);
     }
 
     // === Pool Config (multi-level size_class + expansion settings) ===
@@ -170,18 +171,18 @@ int umq_qbuf_pool_stats_to_str(const umq_qbuf_pool_stats_t *qbuf_pool_stats, cha
                              umq_qbuf_pool_type_name(info->type), info->sc_count);
         UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE_120);
         UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
-                             "%-4s %-10s %-10s %-10s %-10s %-14s %-14s %-14s %-10s %-8s %-10s %-10s\n",
-                             "sc", "blk_size", "glbl_free", "hdr_free", "exp_slots",
-                             "exp_total_blk", "exp_total_exp", "exp_total_shrink", "glbl_total", "cap", "exp_free", "trig_expand");
+            "%-4s %-10s %-10s %-10s %-10s %-14s %-14s %-14s %-10s %-8s %-10s %-10s\n",
+            "sc", "blk_size", "glbl_free", "hdr_free", "exp_slots",
+            "exp_total_blk", "exp_total_exp", "exp_total_shrink", "glbl_total", "cap", "exp_free", "trig_expand");
         for (uint32_t sc = 0; sc < info->sc_count; sc++) {
             const umq_qbuf_sc_info_t *sci = &info->sc_info[sc];
             UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
-                                 "%-4u %-10u %-10lu %-10lu %-10u %-14lu %-14lu %-14lu %-10lu %-8lu %-10lu %-10lu\n", sc,
-                                 sci->blk_size, (unsigned long)sci->buf_cnt_with_data,
-                                 (unsigned long)sci->buf_cnt_without_data, sci->exp_slots,
-                                 (unsigned long)sci->exp_total_block_num, (unsigned long)sci->exp_total_expansion_count,
-                                 (unsigned long)sci->exp_total_shrink_count, (unsigned long)sci->global_total,
-                                 (unsigned long)sci->capacity, (unsigned long)sci->exp_free_blk, (unsigned long)sci->trigger_expand);
+                "%-4u %-10u %-10lu %-10lu %-10u %-14lu %-14lu %-14lu %-10lu %-8lu %-10lu %-10lu\n", sc,
+                sci->blk_size, (unsigned long)sci->buf_cnt_with_data,
+                (unsigned long)sci->buf_cnt_without_data, sci->exp_slots,
+                (unsigned long)sci->exp_total_block_num, (unsigned long)sci->exp_total_expansion_count,
+                (unsigned long)sci->exp_total_shrink_count, (unsigned long)sci->global_total,
+                (unsigned long)sci->capacity, (unsigned long)sci->exp_free_blk, (unsigned long)sci->trigger_expand);
         }
     }
 
@@ -190,29 +191,32 @@ int umq_qbuf_pool_stats_to_str(const umq_qbuf_pool_stats_t *qbuf_pool_stats, cha
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n",
                          "                                             Expansion Pool");
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE_120);
-    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-13s %-15s %-17s %-15s %-17s %-17s %-17s %-17s %-17s\n", "Type", "ExpandCnt",
-                         "TotalBlk", "FreeBlk", "MemSize", "AccExpCnt", "SyncExpCnt", "AsyncExpCnt", "AccShrinkCnt");
-    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-13s %-15u %-17lu %-15lu %-17lu %-17lu %-17lu %-17lu %-17lu\n", "WithData",
-                         qbuf_pool_stats->exp_pool_with_data.expansion_count,
-                         qbuf_pool_stats->exp_pool_with_data.exp_total_block_num,
-                         qbuf_pool_stats->exp_pool_with_data.exp_total_free_block_num,
-                         qbuf_pool_stats->exp_pool_with_data.exp_total_mem_size,
-                         qbuf_pool_stats->exp_pool_with_data.total_expansion_count,
-                         qbuf_pool_stats->exp_pool_with_data.sync_expansion_count,
-                         qbuf_pool_stats->exp_pool_with_data.async_expansion_count,
-                         qbuf_pool_stats->exp_pool_with_data.total_shrink_count);
-    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-13s %-15u %-17lu %-15lu %-17lu %-17lu %-17lu %-17lu %-17lu\n", "WithoutData",
-                         qbuf_pool_stats->exp_pool_without_data.expansion_count,
-                         qbuf_pool_stats->exp_pool_without_data.exp_total_block_num,
-                         qbuf_pool_stats->exp_pool_without_data.exp_total_free_block_num,
-                         qbuf_pool_stats->exp_pool_without_data.exp_total_mem_size,
-                         qbuf_pool_stats->exp_pool_without_data.total_expansion_count,
-                         qbuf_pool_stats->exp_pool_without_data.sync_expansion_count,
-                         qbuf_pool_stats->exp_pool_without_data.async_expansion_count,
-                         qbuf_pool_stats->exp_pool_without_data.total_shrink_count);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-13s %-15s %-17s %-15s %-17s %-17s %-17s %-17s %-17s\n", "Type", "ExpandCnt",
+        "TotalBlk", "FreeBlk", "MemSize", "AccExpCnt", "SyncExpCnt", "AsyncExpCnt", "AccShrinkCnt");
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-13s %-15u %-17lu %-15lu %-17lu %-17lu %-17lu %-17lu %-17lu\n", "WithData",
+        qbuf_pool_stats->exp_pool_with_data.expansion_count,
+        qbuf_pool_stats->exp_pool_with_data.exp_total_block_num,
+        qbuf_pool_stats->exp_pool_with_data.exp_total_free_block_num,
+        qbuf_pool_stats->exp_pool_with_data.exp_total_mem_size,
+        qbuf_pool_stats->exp_pool_with_data.total_expansion_count,
+        qbuf_pool_stats->exp_pool_with_data.sync_expansion_count,
+        qbuf_pool_stats->exp_pool_with_data.async_expansion_count,
+        qbuf_pool_stats->exp_pool_with_data.total_shrink_count);
+    UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size,
+        "%-13s %-15u %-17lu %-15lu %-17lu %-17lu %-17lu %-17lu %-17lu\n", "WithoutData",
+        qbuf_pool_stats->exp_pool_without_data.expansion_count,
+        qbuf_pool_stats->exp_pool_without_data.exp_total_block_num,
+        qbuf_pool_stats->exp_pool_without_data.exp_total_free_block_num,
+        qbuf_pool_stats->exp_pool_without_data.exp_total_mem_size,
+        qbuf_pool_stats->exp_pool_without_data.total_expansion_count,
+        qbuf_pool_stats->exp_pool_without_data.sync_expansion_count,
+        qbuf_pool_stats->exp_pool_without_data.async_expansion_count,
+        qbuf_pool_stats->exp_pool_without_data.total_shrink_count);
     UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "partial_slot_count: WithData=%u WithoutData=%u\n",
-                         qbuf_pool_stats->exp_pool_with_data.partial_slot_count,
-                         qbuf_pool_stats->exp_pool_without_data.partial_slot_count);
+        qbuf_pool_stats->exp_pool_with_data.partial_slot_count,
+        qbuf_pool_stats->exp_pool_without_data.partial_slot_count);
 
     // Per-SC Expansion Slot Detail
     for (uint32_t i = 0; i < qbuf_pool_stats->num; i++) {
