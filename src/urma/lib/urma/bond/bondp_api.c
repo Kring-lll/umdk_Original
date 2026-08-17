@@ -24,6 +24,7 @@
 #include "bondp_context_table.h"
 #include "bondp_dp_failback.h"
 #include "bondp_dp_health.h"
+#include "bondp_dp_rnr_retry.h"
 #include "bondp_hash_table.h"
 #include "bondp_types.h"
 #include "urma_ubagg.h"
@@ -764,8 +765,6 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     bdp_jfs->comp_type = BONDP_COMP_JFS;
     atomic_init(&bdp_jfs->use_cnt.atomic_cnt, 0);
     atomic_init(&bdp_jfs->deleting, false);
-    atomic_init(&bdp_jfs->rnr_retry_sleep_cnt, 0);
-    atomic_init(&bdp_jfs->rnr_retry_wr_cnt, 0);
     (void)pthread_spin_init(&bdp_jfs->send_lock, PTHREAD_PROCESS_PRIVATE);
     bdp_jfs->modify_to_error = false;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
@@ -863,11 +862,15 @@ urma_status_t bondp_delete_jfs(urma_jfs_t *jfs)
      */
     pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
     atomic_store(&bdp_jfs->deleting, true);
+    /* Stop cached lookups before deciding whether only retry tasks hold refs. */
+    bondp_hash_table_inc_gen(&bdp_ctx->p_vjetty_id_table);
     unsigned long use_cnt = atomic_load(&bdp_jfs->use_cnt.atomic_cnt);
-    if (use_cnt == 0) {
-        /* Invalidate fast-path cache */
-        bondp_hash_table_inc_gen(&bdp_ctx->p_vjetty_id_table);
-        /* Re-check */
+    uint32_t retry_task_num = bondp_rnr_retry_pending_task_num(bdp_jfs);
+    if (use_cnt <= retry_task_num) {
+        int cancel_ret = bondp_rnr_retry_cancel_all(bdp_jfs);
+        if (cancel_ret != 0) {
+            URMA_LOG_WARN("Failed to cancel jfs[%u] RNR retry tasks, ret=%d\n", jfs_id, cancel_ret);
+        }
         use_cnt = atomic_load(&bdp_jfs->use_cnt.atomic_cnt);
     }
     if (use_cnt > 0) {
@@ -1464,8 +1467,6 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     bdp_jetty->comp_type = BONDP_COMP_JETTY;
     atomic_init(&bdp_jetty->use_cnt.atomic_cnt, 0);
     atomic_init(&bdp_jetty->deleting, false);
-    atomic_init(&bdp_jetty->rnr_retry_sleep_cnt, 0);
-    atomic_init(&bdp_jetty->rnr_retry_wr_cnt, 0);
     (void)pthread_spin_init(&bdp_jetty->send_lock, PTHREAD_PROCESS_PRIVATE);
     bdp_jetty->modify_to_error = false;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
@@ -1580,11 +1581,16 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
     */
     pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
     atomic_store(&bdp_jetty->deleting, true);
+    /* Stop cached lookups before deciding whether only retry tasks hold refs. */
+    bondp_hash_table_inc_gen(&bdp_ctx->p_vjetty_id_table);
     unsigned long use_cnt = atomic_load(&bdp_jetty->use_cnt.atomic_cnt);
-    if (use_cnt == 0) {
-        /* Invalidate fast-path cache */
-        bondp_hash_table_inc_gen(&bdp_ctx->p_vjetty_id_table);
-        /* Re-check */
+    uint32_t retry_task_num = bondp_rnr_retry_pending_task_num(bdp_jetty);
+    if (use_cnt <= retry_task_num) {
+        int cancel_ret = bondp_rnr_retry_cancel_all(bdp_jetty);
+        if (cancel_ret != 0) {
+            URMA_LOG_WARN("Failed to cancel jetty[%u] RNR retry tasks, ret=%d\n",
+                          jetty->jetty_id.id, cancel_ret);
+        }
         use_cnt = atomic_load(&bdp_jetty->use_cnt.atomic_cnt);
     }
     if (use_cnt > 0) {

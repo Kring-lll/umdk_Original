@@ -17,6 +17,8 @@
 extern "C" {
 #endif
 
+#define URMA_CR_RNR_RETRY_CNT_EXC_ERR_FAKE 99
+
 /* For version compatibility */
 #define BONDP_USER_CTL_BONDING BONDP_USER_CTL_BONDING
 
