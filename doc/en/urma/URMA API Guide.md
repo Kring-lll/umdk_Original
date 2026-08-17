@@ -4594,6 +4594,8 @@ Bind a remote target Jetty to establish a connection.
 
 4. Supports reentrant multi-threaded operations.
 
+5. The tp_type bitmap of the local Jetty priority must contain the target Jetty tp_type; otherwise URMA_ENOPERM is returned.
+
 4. Parameters
 
 @param[in] [Required] jetty: local jetty to construct the transport channel;

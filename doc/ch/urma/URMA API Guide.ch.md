@@ -4595,6 +4595,8 @@ Return: 0 on success, other value on error.
 
 4\. 支持多线程操作重入操作。
 
+5\. 本地Jetty所用priority的tp_type位图必须包含target Jetty的tp_type，否则返回URMA_ENOPERM。
+
 4.  参数
 
 @param[in] [Required] jetty: local jetty to construct the transport channel;
