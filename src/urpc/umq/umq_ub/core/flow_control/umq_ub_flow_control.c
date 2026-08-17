@@ -723,21 +723,22 @@ int umq_ub_flow_control_init(ub_queue_t *queue, uint32_t feature, umq_flow_contr
         }
     }
 
-    fc->local_rx_depth = umq_ub_queue_cfg_get(queue)->rx_depth;
-    fc->local_tx_depth = umq_ub_queue_cfg_get(queue)->tx_depth;
+    ub_queue_cfg_t *qcfg = umq_ub_queue_cfg_get(queue);
+    fc->local_rx_depth = qcfg->rx_depth;
+    fc->local_tx_depth = qcfg->tx_depth;
     fc->initial_credit = cfg->initial_credit;
     fc->return_ratio = cfg->return_ratio;
     fc->min_reserved_credit = cfg->min_reserved_credit;
     fc->credit_multiple = cfg->credit_multiple;
     fc->max_credits_request = cfg->max_credits_request;
 
-    if (cfg->return_ratio == 0 || cfg->return_ratio > umq_ub_queue_cfg_get(queue)->rx_depth) {
+    if (cfg->return_ratio == 0 || cfg->return_ratio > qcfg->rx_depth) {
         fc->return_ratio = UMQ_UB_RETURN_CREDIT_RATIO;
     }
-    if (cfg->min_reserved_credit == 0 || cfg->min_reserved_credit > umq_ub_queue_cfg_get(queue)->rx_depth) {
+    if (cfg->min_reserved_credit == 0 || cfg->min_reserved_credit > qcfg->rx_depth) {
         fc->min_reserved_credit = UMQ_UB_MIN_RESERVED_CREDIT;
     }
-    if (cfg->initial_credit == 0 || cfg->initial_credit > umq_ub_queue_cfg_get(queue)->rx_depth) {
+    if (cfg->initial_credit == 0 || cfg->initial_credit > qcfg->rx_depth) {
         fc->initial_credit = fc->local_rx_depth >> UMQ_UB_INITIAL_CREDITS_PER_UMQ;
     }
     if (fc->initial_credit == 0) {
@@ -758,8 +759,7 @@ int umq_ub_flow_control_init(ub_queue_t *queue, uint32_t feature, umq_flow_contr
     }
     fc->credits_per_request = fc->initial_credit;
     fc->credit_request_threshold = fc->min_reserved_credit;
-    if (cfg->credit_multiple < 1 || cfg->credit_multiple >
-        ((float)umq_ub_queue_cfg_get(queue)->rx_depth / fc->initial_credit)) {
+    if (cfg->credit_multiple < 1 || cfg->credit_multiple > ((float)qcfg->rx_depth / fc->initial_credit)) {
         fc->credit_multiple = UMQ_UB_DEFAULT_CREDIT_MULTIPLE;
     }
 
