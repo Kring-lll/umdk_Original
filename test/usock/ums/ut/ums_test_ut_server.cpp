@@ -585,6 +585,27 @@ TEST_F(SocketInterfaceTest, test_closeFd)
     close(acceptFd);
 }
 
+TEST_F(SocketInterfaceTest, invalid_ip)
+{
+    /* Client-side case; server waits to keep order aligned */
+    usleep(500000);
+}
+
+TEST_F(SocketInterfaceTest, test_netlink)
+{
+    usleep(500000);
+}
+
+TEST_F(SocketInterfaceTest, test_client_ioctl)
+{
+    usleep(500000);
+}
+
+TEST_F(SocketInterfaceTest, test_sockopt)
+{
+    usleep(500000);
+}
+
 TEST_F(SocketInterfaceTest, test_ulp_init)
 {
     int sockfd;
@@ -630,11 +651,15 @@ TEST_F(SocketInterfaceTest, error_handling_bind_port_in_use)
 TEST_F(SocketInterfaceTest, boundary_listen_queue_full)
 {
     int32_t ret;
+    int32_t accepted = 0;
     int32_t tempSockFd = socket(AF_SMC, SOCK_STREAM, 0);
     EXPECT_TRUE(tempSockFd >= 0);
 
     int32_t reuse = 1;
     ret = setsockopt(tempSockFd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
+    EXPECT_TRUE(ret == 0);
+
+    ret = SetSocketNonBlock(tempSockFd);
     EXPECT_TRUE(ret == 0);
 
     struct sockaddr_in servaddr;
@@ -649,7 +674,7 @@ TEST_F(SocketInterfaceTest, boundary_listen_queue_full)
     ret = listen(tempSockFd, 1);
     EXPECT_TRUE(ret == 0);
 
-    const int CLIENT_NUM = 3;
+    const int CLIENT_NUM = 10;
     int32_t clientFds[CLIENT_NUM];
     struct sockaddr_in clientServaddr;
     bzero(&clientServaddr, sizeof(clientServaddr));
@@ -663,7 +688,20 @@ TEST_F(SocketInterfaceTest, boundary_listen_queue_full)
         connect(clientFds[i], (struct sockaddr *)&clientServaddr, sizeof(clientServaddr));
     }
 
-    usleep(100000);
+    usleep(200000);
+
+    for (int i = 0; i < CLIENT_NUM; i++) {
+        struct sockaddr_in client;
+        socklen_t len = sizeof(client);
+        ret = accept(tempSockFd, (struct sockaddr *)&client, &len);
+        if (ret >= 0) {
+            accepted++;
+            close(ret);
+        }
+    }
+
+    EXPECT_TRUE(accepted >= 1);
+    EXPECT_TRUE(accepted <= CLIENT_NUM);
 
     for (int i = 0; i < CLIENT_NUM; i++) {
         if (clientFds[i] >= 0) {
@@ -712,34 +750,6 @@ TEST_F(SocketInterfaceTest, multi_client_connection_test)
     }
 }
 
-TEST_F(SocketInterfaceTest, socket_option_tcp_keepalive)
-{
-    int32_t ret;
-    int enable = 1;
-    int value = 0;
-    socklen_t optLen = sizeof(int);
-
-    ret = setsockopt(g_listenFd, SOL_SOCKET, SO_KEEPALIVE, &enable, sizeof(enable));
-    EXPECT_TRUE(ret == 0);
-
-    ret = getsockopt(g_listenFd, SOL_SOCKET, SO_KEEPALIVE, &value, &optLen);
-    EXPECT_TRUE(ret == 0);
-    EXPECT_TRUE(value == enable);
-
-    int keepidle = 30;
-    int keepintvl = 5;
-    int keepcnt = 3;
-
-    ret = setsockopt(g_listenFd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
-    EXPECT_TRUE(ret == 0);
-
-    ret = setsockopt(g_listenFd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl));
-    EXPECT_TRUE(ret == 0);
-
-    ret = setsockopt(g_listenFd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
-    EXPECT_TRUE(ret == 0);
-}
-
 TEST_F(SocketInterfaceTest, ipv6_boundary_listen_ipv6_address)
 {
     int32_t ret;
@@ -774,6 +784,98 @@ TEST_F(SocketInterfaceTest, server_getsockopt_acceptconn)
     ret = getsockopt(g_listenFd, SOL_SOCKET, SO_ACCEPTCONN, &acceptConn, &optLen);
     EXPECT_TRUE(ret == 0);
     EXPECT_TRUE(acceptConn != 0);
+}
+
+TEST_F(SocketInterfaceTest, ipv6_error_handling_invalid_address)
+{
+    /* Client-side self-check; server waits to keep case order aligned */
+    usleep(500000);
+}
+
+TEST_F(SocketInterfaceTest, error_handling_invalid_sockopt)
+{
+    usleep(200000);
+}
+
+TEST_F(SocketInterfaceTest, address_reuse_test)
+{
+    usleep(200000);
+}
+
+TEST_F(SocketInterfaceTest, fcntl_nonblock_flag_test)
+{
+    usleep(200000);
+}
+
+TEST_F(SocketInterfaceTest, timeout_handling_connect_timeout)
+{
+    int32_t acceptFd;
+
+    /* Hold accepted connection without sending, so client recv times out */
+    acceptFd = ServerAccept(g_listenFd);
+    EXPECT_TRUE(acceptFd >= 0);
+
+    usleep(2500000);
+
+    close(acceptFd);
+}
+
+TEST_F(SocketInterfaceTest, socket_option_tcp_keepalive)
+{
+    int32_t ret;
+    int32_t acceptFd;
+    int enable = 1;
+    int value = 0;
+    socklen_t optLen = sizeof(int);
+
+    acceptFd = ServerAccept(g_listenFd);
+    EXPECT_TRUE(acceptFd >= 0);
+
+    ret = setsockopt(acceptFd, SOL_SOCKET, SO_KEEPALIVE, &enable, sizeof(enable));
+    EXPECT_TRUE(ret == 0);
+
+    ret = getsockopt(acceptFd, SOL_SOCKET, SO_KEEPALIVE, &value, &optLen);
+    EXPECT_TRUE(ret == 0);
+    EXPECT_TRUE(value == enable);
+
+    int keepidle = 30;
+    int keepintvl = 5;
+    int keepcnt = 3;
+
+    ret = setsockopt(acceptFd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
+    EXPECT_TRUE(ret == 0);
+
+    ret = setsockopt(acceptFd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl));
+    EXPECT_TRUE(ret == 0);
+
+    ret = setsockopt(acceptFd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
+    EXPECT_TRUE(ret == 0);
+
+    close(acceptFd);
+}
+
+TEST_F(SocketInterfaceTest, getpeername_after_connect)
+{
+    int32_t acceptFd;
+
+    acceptFd = ServerAccept(g_listenFd);
+    EXPECT_TRUE(acceptFd >= 0);
+
+    usleep(1500000);
+
+    close(acceptFd);
+}
+
+TEST_F(SocketInterfaceTest, so_error_after_nonblock_connect)
+{
+    int32_t acceptFd;
+
+    acceptFd = ServerAccept(g_listenFd);
+    EXPECT_TRUE(acceptFd >= 0);
+
+    usleep(1500000);
+
+    close(acceptFd);
 }
 
 TEST_F(SocketInterfaceTest, bidirectional_transfer_test)

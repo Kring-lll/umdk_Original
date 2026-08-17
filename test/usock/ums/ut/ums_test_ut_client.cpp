@@ -713,6 +713,38 @@ TEST_F(SocketInterfaceTest, test_sockopt)
     EXPECT_TRUE(set_val == get_val);
 }
 
+TEST_F(SocketInterfaceTest, test_ulp_init)
+{
+    /* Server-side case; client waits to keep order aligned */
+    usleep(1000000);
+}
+
+TEST_F(SocketInterfaceTest, error_handling_bind_port_in_use)
+{
+    /* Server-side self-check; client waits to keep case order aligned */
+    usleep(500000);
+}
+
+TEST_F(SocketInterfaceTest, boundary_listen_queue_full)
+{
+    usleep(500000);
+}
+
+TEST_F(SocketInterfaceTest, multi_client_connection_test)
+{
+    usleep(500000);
+}
+
+TEST_F(SocketInterfaceTest, ipv6_boundary_listen_ipv6_address)
+{
+    usleep(500000);
+}
+
+TEST_F(SocketInterfaceTest, server_getsockopt_acceptconn)
+{
+    usleep(200000);
+}
+
 TEST_F(SocketInterfaceTest, ipv6_error_handling_invalid_address)
 {
     int32_t ret;
@@ -751,20 +783,6 @@ TEST_F(SocketInterfaceTest, error_handling_invalid_sockopt)
     EXPECT_TRUE(errno == EINVAL || errno == ENOPROTOOPT);
 }
 
-TEST_F(SocketInterfaceTest, timeout_handling_connect_timeout)
-{
-    int32_t ret;
-    struct timeval timeout;
-    timeout.tv_sec = 1;
-    timeout.tv_usec = 0;
-
-    ret = setsockopt(g_connectFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-    EXPECT_TRUE(ret == 0);
-
-    ret = setsockopt(g_connectFd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    EXPECT_TRUE(ret == 0);
-}
-
 TEST_F(SocketInterfaceTest, address_reuse_test)
 {
     int32_t ret;
@@ -787,6 +805,42 @@ TEST_F(SocketInterfaceTest, fcntl_nonblock_flag_test)
     flags = fcntl(g_connectFd, F_GETFL, 0);
     EXPECT_TRUE(flags >= 0);
     EXPECT_TRUE((flags & O_NONBLOCK) != 0);
+}
+
+TEST_F(SocketInterfaceTest, timeout_handling_connect_timeout)
+{
+    int32_t ret;
+    struct timeval timeout;
+    char buf[64];
+
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+
+    ret = setsockopt(g_connectFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    EXPECT_TRUE(ret == 0);
+
+    ret = setsockopt(g_connectFd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    EXPECT_TRUE(ret == 0);
+
+    ret = ClientConnect(g_connectFd);
+    EXPECT_TRUE(ret == 0);
+
+    usleep(1000000);
+
+    /* Peer holds connection without sending; recv should time out */
+    ret = recv(g_connectFd, buf, sizeof(buf), 0);
+    EXPECT_TRUE(ret < 0);
+    EXPECT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK || errno == ETIMEDOUT);
+}
+
+TEST_F(SocketInterfaceTest, socket_option_tcp_keepalive)
+{
+    int32_t ret;
+
+    ret = ClientConnect(g_connectFd);
+    EXPECT_TRUE(ret == 0);
+
+    usleep(1500000);
 }
 
 TEST_F(SocketInterfaceTest, getpeername_after_connect)
@@ -820,4 +874,23 @@ TEST_F(SocketInterfaceTest, so_error_after_nonblock_connect)
     ret = getsockopt(g_connectFd, SOL_SOCKET, SO_ERROR, &error, &optLen);
     EXPECT_TRUE(ret == 0);
     EXPECT_TRUE(error == 0);
+}
+
+TEST_F(SocketInterfaceTest, bidirectional_transfer_test)
+{
+    int32_t ret;
+    size_t dataLen = 512;
+
+    ret = ClientConnect(g_connectFd);
+    EXPECT_TRUE(ret == 0);
+
+    usleep(1000000);
+
+    ret = send(g_connectFd, g_sendBuff, dataLen, 0);
+    EXPECT_TRUE(ret == (int32_t)dataLen);
+
+    usleep(1000000);
+
+    ret = recv(g_connectFd, g_sendBuff, dataLen, 0);
+    EXPECT_TRUE(ret == (int32_t)dataLen);
 }

@@ -405,6 +405,9 @@ TEST_F(SocketInterfaceTest, io_multiplex_epoll)
 TEST_F(SocketInterfaceTest, error_handling_connect_failure)
 {
     int32_t ret;
+    int32_t soError = 0;
+    socklen_t optLen = sizeof(soError);
+    struct pollfd pfd;
     int32_t tempSockFd = socket(AF_SMC, SOCK_STREAM, 0);
     EXPECT_TRUE(tempSockFd >= 0);
 
@@ -414,12 +417,23 @@ TEST_F(SocketInterfaceTest, error_handling_connect_failure)
     struct sockaddr_in servaddr;
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
-    servaddr.sin_addr.s_addr = inet_addr("192.0.2.1");
-    servaddr.sin_port = htons(9999);
+    /* Closed local port: prefer fast ECONNREFUSED over blackhole wait */
+    servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    servaddr.sin_port = htons(1);
 
     ret = connect(tempSockFd, (struct sockaddr *)&servaddr, sizeof(servaddr));
     EXPECT_TRUE(ret < 0);
     EXPECT_TRUE(errno == EINPROGRESS || errno == ECONNREFUSED);
+
+    if (errno == EINPROGRESS) {
+        pfd.fd = tempSockFd;
+        pfd.events = POLLOUT | POLLERR | POLLHUP;
+        ret = poll(&pfd, 1, 3000);
+        EXPECT_TRUE(ret >= 0);
+        ret = getsockopt(tempSockFd, SOL_SOCKET, SO_ERROR, &soError, &optLen);
+        EXPECT_TRUE(ret == 0);
+        EXPECT_TRUE(soError != 0);
+    }
 
     close(tempSockFd);
 }
@@ -464,15 +478,31 @@ TEST_F(SocketInterfaceTest, boundary_partial_read_write)
 
     for (size_t offset = 0; offset < totalLen; offset += chunkLen) {
         size_t sendLen = (totalLen - offset < chunkLen) ? (totalLen - offset) : chunkLen;
-        ret = write(g_connectFd, g_sendBuff + offset, sendLen);
-        EXPECT_TRUE(ret == (int32_t)sendLen);
+        size_t sent = 0;
+        while (sent < sendLen) {
+            ret = write(g_connectFd, g_sendBuff + offset + sent, sendLen - sent);
+            if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                struct pollfd pfd;
+                pfd.fd = g_connectFd;
+                pfd.events = POLLOUT;
+                poll(&pfd, 1, 1000);
+                continue;
+            }
+            EXPECT_TRUE(ret > 0);
+            sent += (size_t)ret;
+        }
     }
-
-    usleep(200000);
 
     while (received < totalLen) {
         size_t toRead = (totalLen - received < chunkLen) ? (totalLen - received) : chunkLen;
         ret = read(acceptFd, g_recvBuff + received, toRead);
+        if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            struct pollfd pfd;
+            pfd.fd = acceptFd;
+            pfd.events = POLLIN;
+            poll(&pfd, 1, 1000);
+            continue;
+        }
         EXPECT_TRUE(ret > 0);
         received += (size_t)ret;
     }
@@ -548,7 +578,13 @@ TEST_F(SocketInterfaceTest, getsockname_and_getpeername)
     ret = send(g_connectFd, g_sendBuff, 100, 0);
     EXPECT_TRUE(ret == 100);
 
-    usleep(100000);
+    {
+        struct pollfd pfd;
+        pfd.fd = acceptFd;
+        pfd.events = POLLIN;
+        ret = poll(&pfd, 1, 2000);
+        EXPECT_TRUE(ret > 0);
+    }
 
     ret = recv(acceptFd, g_recvBuff, 100, MSG_PEEK);
     EXPECT_TRUE(ret == 100);
