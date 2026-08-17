@@ -4595,6 +4595,8 @@ Return: 0 on success, other value on error.
 
 4\. 支持多线程操作重入操作。
 
+5\. RC模式：bind校验本地priority的tp_type位图包含target Jetty的tp_type，否则返回URMA_ENOPERM。RM模式：不在控制面拦截，URMA在数据面亦不提供该校验。
+
 4.  参数
 
 @param[in] [Required] jetty: local jetty to construct the transport channel;

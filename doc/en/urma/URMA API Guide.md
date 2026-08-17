@@ -4594,6 +4594,8 @@ Bind a remote target Jetty to establish a connection.
 
 4. Supports reentrant multi-threaded operations.
 
+5. RC mode: bind checks that the local priority tp_type bitmap contains the target Jetty tp_type, otherwise URMA_ENOPERM is returned. RM mode: not intercepted at the control plane; URMA does not provide this check in the data plane either.
+
 4. Parameters
 
 @param[in] [Required] jetty: local jetty to construct the transport channel;
