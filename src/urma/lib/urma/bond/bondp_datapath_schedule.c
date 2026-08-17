@@ -136,17 +136,35 @@ static void filter_least_load_path(bondp_path_t least_load_path[], uint32_t *lea
     *least_load_cnt = out_cnt;
 }
 
-static uint32_t select_least_load_path(const bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
+static void select_cross_path(bondp_path_t least_load_path[], bondp_path_t cross_path[], uint32_t *path_cnt)
+{
+    for (int i = 0; cross_path[i].local_idx != 0; i++) {
+        uint32_t port_idx = (cross_path[i].local_idx - IODIE_NUM) % PORT_NUM;
+        uint32_t same_chip_idx =
+                cross_path[i].local_idx + (port_idx == URMA_ACTIVE_PORT_MIN ? 1 : -1);
+        bool valid = true;
+        for (int j = 0; least_load_path[j].local_idx != 0; j++) {
+            if (least_load_path[j].local_idx == same_chip_idx) {
+                valid = false;
+                break;
+            }
+        }
+        if (valid) {
+            least_load_path[*path_cnt] = cross_path[i];
+            if (++*path_cnt >= URMA_UBAGG_CHIP_LINK_NUM) {
+                return;
+            }
+        }
+    }
+}
+
+static void select_least_load_path(const bondp_comp_t *bdp_comp, const bondp_target_jetty_t *bdp_tjetty,
                                        uint32_t min_idx[], uint32_t max_idx[], bondp_path_t least_load_path[],
                                        uint32_t *least_load_cnt)
 {
-    uint32_t least_load = UINT32_MAX;
-    uint32_t valid_route = 0;
     urma_transport_mode_t trans_mode = get_comp_urma_trans_mode(bdp_comp);
-
-    if (*least_load_cnt != 0) {
-        least_load = least_load_path[0].least_load;
-    }
+    bondp_path_t cross_path[URMA_UBAGG_MAX_CONNECTION] = {0};
+    uint32_t cross_path_cnt = 0;
 
     for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
         uint32_t local_idx = bdp_comp->active_indices[i];
@@ -170,23 +188,19 @@ static uint32_t select_least_load_path(const bondp_comp_t *bdp_comp, const bondp
                 continue;
             }
             uint32_t sqe_cnt = atomic_load(&bdp_comp->sqe_cnt[local_idx][target_idx]);
-            if (sqe_cnt < least_load) {
-                least_load = sqe_cnt;
-                least_load_path[0].least_load = least_load;
-                least_load_path[0].local_idx = local_idx;
-                least_load_path[0].target_idx = target_idx;
-                *least_load_cnt = 1;
-                valid_route++;
-            } else if (sqe_cnt == least_load) {
-                least_load_path[(*least_load_cnt)].least_load = least_load;
-                least_load_path[(*least_load_cnt)].local_idx = local_idx;
-                least_load_path[(*least_load_cnt)].target_idx = target_idx;
+            if (local_idx == target_idx || min_idx[0] == 0) {
+                least_load_path[*least_load_cnt] = (bondp_path_t){local_idx, target_idx, sqe_cnt};
                 (*least_load_cnt)++;
-                valid_route++;
+            } else {
+                cross_path[cross_path_cnt] = (bondp_path_t){local_idx, target_idx, sqe_cnt};
+                cross_path_cnt++;
             }
         }
     }
-    return valid_route;
+    if (*least_load_cnt < URMA_UBAGG_CHIP_LINK_NUM && min_idx[0] != 0) {
+        select_cross_path(least_load_path, cross_path, least_load_cnt);
+    }
+    filter_least_load_path(least_load_path, least_load_cnt);
 }
 
 static __thread struct random_data schedule_rand_data;
@@ -341,6 +355,7 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
     uint32_t least_load_cnt = 0;
     uint32_t min[2] = {0};
     uint32_t max[2] = {0};
+    bondp_chip_id_info_t tmp_info;
 
     if (min_active_count == 0) {
         URMA_LOG_ERR("Invalid min_active_count.\n");
