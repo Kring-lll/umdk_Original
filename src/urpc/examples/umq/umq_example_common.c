@@ -23,6 +23,9 @@ static const uint32_t EXAMPLE_MAX_POLL_BATCH = 64;
 static const uint32_t SOCKET_SEND_RECV_TIMEOUT = 5;
 static const uint32_t EXAMPLE_BUFFER_SIZE = 4096;
 static const uint32_t EXAMPLE_DEPTH = 128;
+static const uint32_t EXAMPLE_SIZE_CLASS_COUNT = 2;
+static const uint32_t EXAMPLE_BLOCK_SIZE_4K = 4096;
+static const uint32_t EXAMPLE_BLOCK_SIZE_128K = 131072;
 
 typedef struct exchange_info {
     uint32_t msg_len;
@@ -73,9 +76,9 @@ int example_init_umq(struct urpc_example_config *cfg)
     }
     init_cfg->feature = cfg->feature;
     init_cfg->buf_pool_cfg.small_block_size = BLOCK_SIZE_4K;
-    init_cfg->buf_pool_cfg.size_class_count = 2;
-    init_cfg->buf_pool_cfg.explicit_block_sizes[0] = 4096;
-    init_cfg->buf_pool_cfg.explicit_block_sizes[1] = 131072;
+    init_cfg->buf_pool_cfg.size_class_count = EXAMPLE_SIZE_CLASS_COUNT;
+    init_cfg->buf_pool_cfg.explicit_block_sizes[0] = EXAMPLE_BLOCK_SIZE_4K;
+    init_cfg->buf_pool_cfg.explicit_block_sizes[1] = EXAMPLE_BLOCK_SIZE_128K;
 
     if (parse_trans_info(cfg, init_cfg) != 0) {
         free(init_cfg);
@@ -611,7 +614,7 @@ static int cfg_get_dev_name(struct urpc_example_config *cfg, char *data)
         new_data = strtok_r(NULL, ",", &save);
         i++;
     }
-    
+
     if (cfg->m_dev_num != 0 && cfg->m_dev_num != i) {
         return -1;
     }

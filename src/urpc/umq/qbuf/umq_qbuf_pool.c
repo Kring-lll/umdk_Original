@@ -51,6 +51,29 @@
 #define QBUF_POOL_ASYNC_SHRINK_PTHREAD_NAME "umq_buf_shrink"
 #define QBUF_POOL_ASYNC_EXPAND_PTHREAD_NAME "umq_buf_expand"
 
+/* Latency bucket definitions (unit: nanoseconds) */
+typedef enum {
+    QBUF_LAT_BUCKET_100NS  = 100ULL,      /* 100 ns */
+    QBUF_LAT_BUCKET_1US    = 1000ULL,     /* 1 us */
+    QBUF_LAT_BUCKET_5US    = 5000ULL,     /* 5 us */
+    QBUF_LAT_BUCKET_10US   = 10000ULL,    /* 10 us */
+    QBUF_LAT_BUCKET_100US  = 100000ULL,   /* 100 us */
+    QBUF_LAT_BUCKET_1MS    = 1000000ULL,  /* 1 ms */
+    QBUF_LAT_BUCKET_10MS   = 10000000ULL, /* 10 ms */
+} qbuf_lat_threshold_t;
+
+typedef enum {
+    QBUF_LAT_IDX_0 = 0,   /* < 100ns */
+    QBUF_LAT_IDX_1 = 1,   /* 100ns - 1us */
+    QBUF_LAT_IDX_2 = 2,   /* 1us - 5us */
+    QBUF_LAT_IDX_3 = 3,   /* 5us - 10us */
+    QBUF_LAT_IDX_4 = 4,   /* 10us - 100us */
+    QBUF_LAT_IDX_5 = 5,   /* 100us - 1ms */
+    QBUF_LAT_IDX_6 = 6,   /* 1ms - 10ms */
+    QBUF_LAT_IDX_7 = 7,   /* > 10ms */
+    QBUF_LAT_NUM_BUCKETS = 8
+} qbuf_lat_bucket_idx_t;
+
 typedef struct qbuf_expansion_pool_slot {
     urpc_list_t node;    // linkage in exp_pool.slot_list
     uint32_t slot_id;    // global id (0-indexed, mapped to mempool_id = slot_id + QBUF_POOL_EXP_SLOT_ID_MIN)
@@ -254,14 +277,28 @@ static inline uint64_t qbuf_mono_ns(void)
 // Buckets: [0,100ns) [100ns,1us) [1us,10us) [10us,100us) [100us,1ms) [1ms,10ms) [10ms,+inf)
 static inline int qbuf_lat_bucket(uint64_t ns)
 {
-    if (ns < 100ULL)          return 0;  // <100ns
-    if (ns < 1000ULL)         return 1;  // 100ns-1us
-    if (ns < 5000ULL)         return 2;  // 1-5us
-    if (ns < 10000ULL)        return 3;  // 5-10us
-    if (ns < 100000ULL)       return 4;  // 10us-100us
-    if (ns < 1000000ULL)      return 5;  // 100us-1ms
-    if (ns < 10000000ULL)     return 6;  // 1ms-10ms
-    return 7;                             // >10ms
+    if (ns < QBUF_LAT_BUCKET_100NS) {
+        return QBUF_LAT_IDX_0;
+    }
+    if (ns < QBUF_LAT_BUCKET_1US) {
+        return QBUF_LAT_IDX_1;
+    }
+    if (ns < QBUF_LAT_BUCKET_5US) {
+        return QBUF_LAT_IDX_2;
+    }
+    if (ns < QBUF_LAT_BUCKET_10US) {
+        return QBUF_LAT_IDX_3;
+    }
+    if (ns < QBUF_LAT_BUCKET_100US) {
+        return QBUF_LAT_IDX_4;
+    }
+    if (ns < QBUF_LAT_BUCKET_1MS) {
+        return QBUF_LAT_IDX_5;
+    }
+    if (ns < QBUF_LAT_BUCKET_10MS) {
+        return QBUF_LAT_IDX_6;
+    }
+    return QBUF_LAT_IDX_7;
 }
 
 static const char *qbuf_lat_labels[QBUF_LAT_BUCKETS] = {
@@ -2609,7 +2646,7 @@ int umq_normal_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_
         if (local_pool->buf_cnt_without_data >= num) {
             if (qbuf_debug_on())
                 g_dbg_stats.alloc_nodata_tls_hit += num;
-            
+
         }
         if (local_pool->buf_cnt_without_data < num) {
             int ret =
@@ -2664,7 +2701,7 @@ int umq_normal_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_
     if (buf_cnt >= needed) {
         if (qbuf_debug_on())
             g_dbg_stats.alloc_with_data_tls_hit += needed;
-        
+
     }
     if (buf_cnt < needed) {
         int ret = umq_qbuf_local_pool_fetch_and_expand(needed - buf_cnt, local_pool, true, sc);
