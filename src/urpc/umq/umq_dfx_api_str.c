@@ -33,6 +33,10 @@ static const char UMQ_DFX_UNDERLINE_120[] =
     "----------------------------------------"; /* 80 + 40 = 120 */
 #define UMQ_DFX_QBUF_POOL_TYPE_NAME_MAX_LEN 20
 
+#define UMQ_BIT_SHIFT_GB   30
+#define UMQ_BIT_SHIFT_MB   20
+#define UMQ_BIT_SHIFT_KB   10
+
 #define UMQ_DFX_SNPRINTF_BUF(__buf, __max_buf_len, __offset, __format, ...)                                \
     do {                                                                                                   \
         int __ret;                                                                                         \
@@ -65,12 +69,12 @@ static const char *umq_qbuf_pool_type_name(umq_qbuf_pool_type_t type)
  * values in one column. */
 static void umq_format_size_hr(uint64_t bytes, char *out, size_t out_size)
 {
-    if (bytes >= (1ULL << 30)) {
-        snprintf(out, out_size, "%lu (%.2fG)", (unsigned long)bytes, (double)bytes / (1ULL << 30));
-    } else if (bytes >= (1ULL << 20)) {
-        snprintf(out, out_size, "%lu (%.2fM)", (unsigned long)bytes, (double)bytes / (1ULL << 20));
-    } else if (bytes >= (1ULL << 10)) {
-        snprintf(out, out_size, "%lu (%.2fK)", (unsigned long)bytes, (double)bytes / (1ULL << 10));
+    if (bytes >= (1ULL << UMQ_BIT_SHIFT_GB)) {
+        snprintf(out, out_size, "%lu (%.2fG)", (unsigned long)bytes, (double)bytes / (1ULL << UMQ_BIT_SHIFT_GB));
+    } else if (bytes >= (1ULL << UMQ_BIT_SHIFT_MB)) {
+        snprintf(out, out_size, "%lu (%.2fM)", (unsigned long)bytes, (double)bytes / (1ULL << UMQ_BIT_SHIFT_MB));
+    } else if (bytes >= (1ULL << UMQ_BIT_SHIFT_KB)) {
+        snprintf(out, out_size, "%lu (%.2fK)", (unsigned long)bytes, (double)bytes / (1ULL << UMQ_BIT_SHIFT_KB));
     } else {
         snprintf(out, out_size, "%lu (%luB)", (unsigned long)bytes, (unsigned long)bytes);
     }
