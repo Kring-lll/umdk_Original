@@ -1584,6 +1584,20 @@ static int urma_create_jetty_check_trans_mode(urma_context_t *ctx, urma_jetty_cf
     return 0;
 }
 
+static inline uint32_t urma_tp_type_to_mask(urma_tp_type_t tp_type)
+{
+    switch (tp_type) {
+        case URMA_RTP:
+            return 0x1;
+        case URMA_CTP:
+            return 0x2;
+        case URMA_UTP:
+            return 0x4;
+        default:
+            return 0;
+    }
+}
+
 static int urma_create_jetty_check_dev_cap(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cfg)
 {
     urma_device_cap_t *cap = &ctx->dev->sysfs_dev->dev_attr.dev_cap;
@@ -1612,6 +1626,19 @@ static int urma_create_jetty_check_dev_cap(urma_context_t *ctx, urma_jetty_cfg_t
                      jfs_cfg->depth, cap->max_jfs_depth, jfs_cfg->max_inline_data, cap->max_jfs_inline_len,
                      jfr_cfg->depth, cap->max_jfr_depth, jfs_cfg->max_sge, cap->max_jfs_sge, jfs_cfg->max_rsge,
                      cap->max_jfs_rsge, jfr_cfg->max_sge, cap->max_jfr_sge);
+        return -1;
+    }
+    if (jfs_cfg->priority > URMA_MAX_PRIORITY) {
+        URMA_LOG_ERR("jfs priority %u out of range [0, %u].\n", jfs_cfg->priority, URMA_MAX_PRIORITY);
+        return -1;
+    }
+    uint32_t allow = (jfs_cfg->trans_mode == URMA_TM_UM)
+        ? (urma_tp_type_to_mask(URMA_UTP) | urma_tp_type_to_mask(URMA_CTP))
+        : (urma_tp_type_to_mask(URMA_RTP) | urma_tp_type_to_mask(URMA_CTP));
+    union urma_tp_type_en sup = cap->priority_info[jfs_cfg->priority].tp_type;
+    if ((sup.value & allow) == 0) {
+        URMA_LOG_ERR("priority %u (trans_mode=%d) supports none of allowed tp (sup=0x%x, allow=0x%x).\n",
+                     jfs_cfg->priority, (int)jfs_cfg->trans_mode, sup.value, allow);
         return -1;
     }
     return 0;
@@ -2167,6 +2194,30 @@ void urma_put_rjetty(urma_rjetty_t *rjetty)
     free(rjetty);
 }
 
+static int urma_check_bind_tp_in_priority(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
+{
+    urma_device_cap_t *cap = &jetty->urma_ctx->dev->sysfs_dev->dev_attr.dev_cap;
+    uint8_t priority = jetty->jetty_cfg.jfs_cfg.priority;
+
+    if (priority > URMA_MAX_PRIORITY) {
+        URMA_LOG_ERR("local jetty=%u priority %u out of range [0, %u].\n",
+                     jetty->jetty_id.id, priority, URMA_MAX_PRIORITY);
+        return -1;
+    }
+    uint32_t mask = urma_tp_type_to_mask(tjetty->tp_type);
+    if (mask == 0) {
+        URMA_LOG_ERR("remote jetty tp_type=%d invalid.\n", (int)tjetty->tp_type);
+        return -1;
+    }
+    union urma_tp_type_en sup = cap->priority_info[priority].tp_type;
+    if ((sup.value & mask) == 0) {
+        URMA_LOG_ERR("local jetty=%u priority %u does not support remote tp_type=%d (sup=0x%x).\n",
+                     jetty->jetty_id.id, priority, (int)tjetty->tp_type, sup.value);
+        return -1;
+    }
+    return 0;
+}
+
 static urma_status_t urma_bind_jetty_compat(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
 {
     urma_context_t *ctx = jetty->urma_ctx;
@@ -2202,6 +2253,10 @@ urma_status_t urma_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
         return URMA_ENOPERM;
     }
 
+    if (urma_check_bind_tp_in_priority(jetty, tjetty) != 0) {
+        return URMA_ENOPERM;
+    }
+
     urma_ops_t *ops = ctx->ops;
     if (urma_check_ctrlplane_compat(ops->bind_jetty)) {
         return urma_bind_jetty_compat(jetty, tjetty);
@@ -2227,6 +2282,10 @@ urma_status_t urma_bind_jetty_ex(urma_jetty_t *jetty, urma_target_jetty_t *tjett
     uint32_t remote_order_type = tjetty->flag.bs.order_type;
     if (remote_order_type != order_type) {
         URMA_LOG_ERR("Not allowed to bind local jetty=%u, with remote jetty=%u.\n", jetty->jetty_id.id, tjetty->id.id);
+        return URMA_ENOPERM;
+    }
+
+    if (urma_check_bind_tp_in_priority(jetty, tjetty) != 0) {
         return URMA_ENOPERM;
     }
 
@@ -2376,6 +2435,10 @@ urma_status_t urma_bind_jetty_async(urma_notifier_t *notifier, urma_jetty_t *jet
     uint32_t remote_order_type = tjetty->flag.bs.order_type;
     if (remote_order_type != order_type) {
         URMA_LOG_ERR("Not allowed to bind local jetty=%u, with remote jetty=%u.\n", jetty->jetty_id.id, tjetty->id.id);
+        return URMA_ENOPERM;
+    }
+
+    if (urma_check_bind_tp_in_priority(jetty, tjetty) != 0) {
         return URMA_ENOPERM;
     }
 
