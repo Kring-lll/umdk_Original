@@ -19,9 +19,11 @@
 #include <acl/acl_base.h>
 #include <acl/acl_rt.h>
 #include <c10/util/Exception.h>
+#include <cstdlib>
 #include <dlfcn.h>
 #include <functional>
 #include <iostream>
+#include <string>
 #include <torch/extension.h>
 #include <torch_npu/csrc/framework/utils/CalcuOpUtil.h>
 #include <torch_npu/csrc/framework/utils/OpAdapter.h>
@@ -149,9 +151,14 @@ inline const char *GetOpApiLibName(void)
     return "libopapi.so";
 }
 
-inline const char *GetCustOpApiLibName(void)
+inline const char *GetCamOpApiLibName(void)
 {
-    return "libcust_opapi.so";
+    return "libumdk_cam_opapi.so";
+}
+
+inline const char *GetCamOpApiRelativePath(void)
+{
+    return "/vendors/CAM/op_api/lib/libumdk_cam_opapi.so";
 }
 
 inline void *GetOpApiFuncAddrInLib(void *handler, const char *libName, const char *apiName)
@@ -172,11 +179,35 @@ inline void *GetOpApiLibHandler(const char *libName)
     return handler;
 }
 
+inline void *GetCamOpApiLibHandler(void)
+{
+    const char *oppPath = std::getenv("ASCEND_OPP_PATH");
+    if (oppPath != nullptr && oppPath[0] != '\0') {
+        const std::string camOpApiPath = std::string(oppPath) + GetCamOpApiRelativePath();
+        auto handler = GetOpApiLibHandler(camOpApiPath.c_str());
+        if (handler != nullptr) {
+            return handler;
+        }
+    }
+
+    const char *ascendHomePath = std::getenv("ASCEND_HOME_PATH");
+    if (ascendHomePath != nullptr && ascendHomePath[0] != '\0') {
+        const std::string camOpApiPath =
+            std::string(ascendHomePath) + "/opp" + GetCamOpApiRelativePath();
+        auto handler = GetOpApiLibHandler(camOpApiPath.c_str());
+        if (handler != nullptr) {
+            return handler;
+        }
+    }
+
+    return GetOpApiLibHandler(GetCamOpApiLibName());
+}
+
 inline void *GetOpApiFuncAddr(const char *apiName)
 {
-    static auto custOpApiHandler = GetOpApiLibHandler(GetCustOpApiLibName());
-    if (custOpApiHandler != nullptr) {
-        auto funcAddr = GetOpApiFuncAddrInLib(custOpApiHandler, GetCustOpApiLibName(), apiName);
+    static auto camOpApiHandler = GetCamOpApiLibHandler();
+    if (camOpApiHandler != nullptr) {
+        auto funcAddr = GetOpApiFuncAddrInLib(camOpApiHandler, GetCamOpApiLibName(), apiName);
         if (funcAddr != nullptr) {
             return funcAddr;
         }
@@ -571,8 +602,8 @@ typedef void (*ReleaseHugeMem)(void *, bool);
         static const auto unInitMemAddr = GetOpApiFuncAddr("UnInitHugeMemThreadLocal");                                \
         static const auto releaseMemAddr = GetOpApiFuncAddr("ReleaseHugeMem");                                         \
         TORCH_CHECK(getWorkspaceSizeFuncAddr != nullptr && opApiFuncAddr != nullptr, #aclnn_api, " or ",               \
-                    #aclnn_api "GetWorkspaceSize", " not in ", GetOpApiLibName(), ", or ", GetOpApiLibName(),          \
-                    "not found.");                                                                                     \
+                    #aclnn_api "GetWorkspaceSize", " not found in CAM op API library ", GetCamOpApiLibName(),          \
+                    " or CANN op API library ", GetOpApiLibName(), ".");                                               \
         auto acl_stream = c10_npu::getCurrentNPUStream().stream(false);                                                \
         uint64_t workspace_size = 0;                                                                                   \
         uint64_t *workspace_size_addr = &workspace_size;                                                               \

@@ -20,6 +20,7 @@
   - [x] Support BF16/FP16 input
   - [x] Support W8A8 for GEMM
   - [ ] Support W4A8 for GEMM
+  - [ ] Support clamped SwiGLU (`swiglu_limit`)
 - [ ]  **KVCache Transfer** 
 - [ ]  **RL Weights Transfer** 
 - [ ]  **AFD Communication**
@@ -130,8 +131,29 @@ To install these two packets, you may follow the commands below:
 ```bash
 # Step 1: install run packet. The recommended install path is the opp folder in your environment.
 ./output/cam/comm_operator/run/CAM_<soc>_<os>_<arch>.run --install-path=/usr/local/Ascend/ascend-toolkit/latest/opp
-# Step 2: enable environment variables. The path is provided from the output that install run packet.
-source /usr/local/Ascend/ascend-toolkit/latest/opp/vendors/CAM/bin/set_env.bash
-# Step 3: install whl packet.
+# Step 2: install whl packet. Source the CANN toolkit environment before running CAM.
 pip install --force-reinstall ./output/cam/comm_operator/dist/umdk_cam_op_lib_XXX.whl
 ```
+
+The run package installs the CAM-specific ACLNN library as
+`vendors/CAM/op_api/lib/libumdk_cam_opapi.so`. The vendor-specific name avoids
+collisions with the generic `libcust_opapi.so` installed by other custom
+operator packages.
+
+The Python extension first resolves this library from
+`$ASCEND_OPP_PATH/vendors/CAM/op_api/lib`, then from
+`$ASCEND_HOME_PATH/opp/vendors/CAM/op_api/lib`, and finally through the dynamic
+linker's normal library search path. Source the CANN toolkit environment before
+running CAM so that `ASCEND_OPP_PATH` or `ASCEND_HOME_PATH` is available. A
+CAM-specific `vendors/CAM/bin/set_env.bash` is not required.
+
+When upgrading from a CAM package built before this library rename, uninstall
+the old CAM run package before installing the new one. After installation,
+verify that `vendors/CAM/op_api/lib/libcust_opapi.so` is no longer present; a
+stale copy can still be selected by another framework's generic custom-op
+loader.
+
+> **FusedDeepMoE limitation:** `fused_deep_moe` currently implements standard
+> SwiGLU only. Clamped SwiGLU configured through `swiglu_limit` is not
+> supported. Models that require a non-zero `swiglu_limit` must not use this
+> operator.

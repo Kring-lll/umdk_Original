@@ -212,7 +212,10 @@ Return value is a list of tensors，which stores combine_x and expert_token_nums
 4. Support aclgraph only when graph in on.
 5. Do not support external shared experts, that is, shared experts are deployed on dedicated cards .
 6. The performance may decline when batch_size is lower than 16, as it is not the target scenario.
-7. Other Constraints need to be satisfied:
+7. The operator currently implements standard SwiGLU only. Clamped SwiGLU
+   configured through `swiglu_limit` is not supported. Models that require a
+   non-zero `swiglu_limit` must not use this operator.
+8. Other Constraints need to be satisfied:
  - top_k range：[0， 12] and it should be lower than expert number.
  - BS range：[0，256]
  - num_experts range：(0， 512]

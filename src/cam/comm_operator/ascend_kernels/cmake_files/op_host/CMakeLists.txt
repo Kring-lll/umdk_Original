@@ -128,3 +128,17 @@ npu_op_package_add(${package_name}
         cust_opapi
         cust_op_proto
 )
+
+# CANN 9.0 builds the ACLNN target above as an OBJECT library, then creates
+# this package-level SHARED target in npu_op_package_add with the default
+# output name "cust_opapi". Override the final target so the run package can
+# coexist with other vendors' libcust_opapi.so in the same process.
+set(cam_opapi_shared_target "${package_name}_ascendc_cust_opapi")
+if(NOT TARGET ${cam_opapi_shared_target})
+    message(FATAL_ERROR
+        "CANN did not create the expected ACLNN shared target: ${cam_opapi_shared_target}"
+    )
+endif()
+set_target_properties(${cam_opapi_shared_target} PROPERTIES
+    OUTPUT_NAME umdk_cam_opapi
+)
