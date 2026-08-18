@@ -61,6 +61,11 @@ if("${STRIP}" STREQUAL "enable")
 endif()
 
 add_compile_definitions(URPC_VERSION="${PROJECT_VERSION}")
+
+if("${UMQ_QBUF_DEBUG}" STREQUAL "enable")
+    add_compile_definitions(UMQ_QBUF_DEBUG)
+endif()
+
 message("Using build version ${URPC_VERSION}")
 
 add_compile_definitions(URPC_RELEASE_VERSION="${PROJECT_VERSION_MAJOR}")
