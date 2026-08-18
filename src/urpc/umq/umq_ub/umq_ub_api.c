@@ -191,6 +191,23 @@ static int umq_tp_ub_mempool_state_refresh(uint64_t umqh_tp, uint32_t mempool_id
     return umq_ub_mempool_state_refresh_impl(umqh_tp, mempool_id);
 }
 
+static int umq_tp_ub_mempool_info_get(uint64_t umqh_tp, uint32_t mempool_id, uint8_t *mempool_info,
+    uint32_t mempool_info_size)
+{
+    return umq_ub_mempool_info_get_impl(umqh_tp, mempool_id, mempool_info, mempool_info_size);
+}
+
+static int umq_tp_ub_mempool_info_set(uint64_t umqh_tp, uint32_t mempool_id, uint8_t *mempool_info,
+    uint32_t mempool_info_size, uint32_t version)
+{
+    return umq_ub_mempool_info_set_impl(umqh_tp, mempool_id, mempool_info, mempool_info_size, version);
+}
+
+static int umq_tp_ub_remote_mempool_state_get(uint64_t umqh_tp, uint32_t mempool_id, uint32_t version)
+{
+    return umq_ub_remote_mempool_state_get_impl(umqh_tp, mempool_id, version);
+}
+
 static int umq_tp_ub_dev_info_get(char *dev_name, umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq_dev_info)
 {
     return umq_ub_dev_info_get_impl(dev_name, umq_trans_mode, umq_dev_info);
@@ -231,6 +248,15 @@ static int umq_tp_ub_transport_pool_resource_destroy(uint64_t umqh_tp, uint32_t 
     return umq_ub_transport_pool_resource_destroy_impl(umqh_tp, tp_handle_idx);
 }
 
+static void umq_tp_ub_exiting_set(bool exiting)
+{
+    umq_ub_exiting_set_impl(exiting);
+}
+
+static bool umq_tp_ub_exiting_get(void)
+{
+    return umq_ub_exiting_get_impl();
+}
 
 static umq_ops_t g_umq_ub_ops = {
     .mode = UMQ_TRANS_MODE_UB,
@@ -252,6 +278,9 @@ static umq_ops_t g_umq_ub_ops = {
     .umq_tp_get_topo = umq_tp_ub_get_route_list_impl,
     .umq_tp_mempool_state_get = umq_tp_ub_mempool_state_get,
     .umq_tp_mempool_state_refresh = umq_tp_ub_mempool_state_refresh,
+    .umq_tp_mempool_info_get = umq_tp_ub_mempool_info_get,
+    .umq_tp_mempool_info_set = umq_tp_ub_mempool_info_set,
+    .umq_tp_remote_mempool_state_get = umq_tp_ub_remote_mempool_state_get,
     .umq_tp_dev_info_get = umq_tp_ub_dev_info_get,
     .umq_tp_dev_info_list_get = umq_tp_ub_dev_info_list_get,
     .umq_tp_dev_info_list_free = umq_tp_ub_dev_info_list_free,
@@ -260,6 +289,8 @@ static umq_ops_t g_umq_ub_ops = {
     .umq_tp_transport_pool_resource_modify = umq_tp_ub_transport_pool_resource_modify,
     .umq_tp_transport_pool_resource_create = umq_tp_ub_transport_pool_resource_create,
     .umq_tp_transport_pool_resource_destroy = umq_tp_ub_transport_pool_resource_destroy,
+    .umq_tp_exiting_set = umq_tp_ub_exiting_set,
+    .umq_tp_exiting_get = umq_tp_ub_exiting_get,
 
     // datapath plane api
     .umq_tp_buf_alloc = umq_tp_ub_buf_alloc,
