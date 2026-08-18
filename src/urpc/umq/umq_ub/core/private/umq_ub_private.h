@@ -16,8 +16,14 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "urma_api.h"
+
+/* 进程退出标志：ubsocket_uninit() 入口置 true。worker 线程的 poll 路径据此
+ * 跳过对已释放资源（jfc/jetty/queue）的访问，避免退出时序竞态导致的 UAF。
+ * 退出期不再处理 CQE，丢掉的 poll 由 OS 回收资源，安全。 */
+extern volatile bool g_ubsocket_exiting;
 #include "urma_ubagg.h"
 #include "umq_inner.h"
 #include "urpc_bitmap.h"
@@ -50,7 +56,7 @@ extern "C" {
 #define UMQ_UB_MAX_REMOTE_EID_NUM 1024
 
 #define MEMPOOL_UBVA_SIZE 28
-#define UMQ_IMM_VERSION 0
+#define UMQ_IMM_VERSION 1
 #define UMQ_UB_FLOW_CONTORL_JETTY_DEPTH 2
 
 #define UMQ_UB_DEV_STR_LENGTH 64
@@ -95,14 +101,40 @@ typedef struct ub_ref_sge {
     uint32_t token_value;
 } ub_ref_sge_t;
 
+/*
+ * Mempool import descriptor exchanged between peers. The segment context is
+ * produced by urma_get_seg_ctx (an urma_seg_t, optionally carrying a
+ * has_user_info extension tail on bonding devices), so the entry is variable
+ * length: seg_size bytes follow the fixed header. The peer forwards the seg
+ * blob verbatim to urma_import_seg. mempool_id / token_value / version are
+ * umq-specific and have no place inside urma_seg_t, so they ride in the header.
+ *
+ * Not __attribute__((packed)): the 20B header is all uint32, and urma_seg_t
+ * needs 8B alignment (its uint64 len) which offset 24 satisfies (4-byte padding
+ * after the 20B header), so the natural layout is already 72B with seg naturally
+ * aligned — packing would only force unaligned access on the embedded urma_seg_t.
+ * The static_asserts below pin the layout so any drift is caught at compile time.
+ */
 typedef struct ub_import_mempool_info {
-    char mempool_ubva[MEMPOOL_UBVA_SIZE];
-    uint32_t mempool_seg_flag;
-    uint32_t mempool_length;
-    uint32_t mempool_token_id : 20;
-    uint32_t mempool_id : 12;
-    uint32_t mempool_token_value;
+    uint32_t seg_size;            /* urma_get_seg_ctx size output, in bytes (>= sizeof(urma_seg_t)) */
+    uint32_t mempool_id;          /* umq mempool id (was 12-bit packed; widened to a full u32) */
+    uint32_t mempool_token_value; /* = tseg->user_ctx; urma_token_t carries it into urma_import_seg */
+    uint32_t version;             /* bumped each time the source mempool is (re)registered;
+                                     the peer compares it to decide reuse / re-import */
+    uint32_t token_id;            /* = urma_seg_t.token_id, promoted to header so the ubsocket
+                                     READ work-request build and umq import consume it standalone,
+                                     without inspecting the opaque seg blob below */
+    urma_seg_t seg;               /* seg_size bytes, including any has_user_info extension tail */
+    char seg_ext[0];              /* extension data when seg_size > sizeof(urma_seg_t) */
 } ub_import_mempool_info_t;
+
+_Static_assert(sizeof(ub_import_mempool_info_t) == 72, "ub_import_mempool_info_t must be 72B");
+_Static_assert(offsetof(ub_import_mempool_info_t, seg) == 24,
+               "seg must follow the 24B aligned offset (20B header + 4B padding)");
+
+/* Fixed header before the variable-length seg blob. Entry total size =
+ * UB_IMPORT_MEMPOOL_INFO_HDR_SIZE + entry->seg_size. */
+#define UB_IMPORT_MEMPOOL_INFO_HDR_SIZE (offsetof(ub_import_mempool_info_t, seg))
 
 typedef enum ub_packet_stats_type {
     UB_PACKET_STATS_TYPE_SEND,
@@ -244,6 +276,9 @@ typedef struct imported_tseg_node {
     struct urpc_hmap_node node;
     urma_target_seg_t *tseg;
     uint32_t mempool_id;
+    uint32_t version; /* the version carried when this mempool was imported; the
+                         receiver compares it against the freshly arrived version
+                         to decide reuse / unimport+reimport (design §3.5) */
 } imported_tseg_node_t;
 
 typedef struct import_remote_record_node {
@@ -284,6 +319,12 @@ typedef struct umq_ub_ctx {
     umq_dev_assign_t dev_info;
     pthread_spinlock_t tseg_list_lock;
     urma_target_seg_t *tseg_list[UMQ_MAX_TSEG_NUM];
+    /* Per-mempool version, bumped each time the local mempool is (re)registered
+     * so the peer can detect a recycled/reallocated mempool and re-import
+     * (design §3.5). Read/written under tseg_list_lock (together with the
+     * tseg_list[mempool_id] publish in umq_ub_register_seg / read in
+     * umq_ub_mempool_info_get_impl). */
+    uint32_t mempool_version[UMQ_MAX_TSEG_NUM];
     remote_imported_tseg_info_t *remote_imported_info;
     urma_target_jetty_t *tjetty;
     umq_trans_info_t trans_info;
@@ -477,6 +518,7 @@ typedef struct jetty_pool_node {
     volatile uint64_t umq_ref;          // owner umq_id (hi 32) + ref_cnt (lo 32), single atomic access
     volatile uint32_t tx_outstanding;
     volatile uint32_t state;            // Track node state (atomic CAS operations)
+    volatile uint32_t borrow_count;     // WRs posted in current borrow cycle (atomic — concurrent post)
     uint32_t borrow_limit;              // Max WRs per borrow (0 = unlimited)
     bool in_global_pool;                // Whether node is in a global pool list (free_q/active_q/err_q)
     bool is_jetty_err;
@@ -585,6 +627,32 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
 int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t ref_seg_num, bool send_ack);
 rx_buf_ctx_t *queue_rx_buf_ctx_flush(rx_buf_ctx_list_t *rx_buf_ctx_list);
 
+/*
+ * Serialize a local target segment into a peer-bound ub_import_mempool_info_t
+ * entry, using urma_get_seg_ctx to obtain the (possibly variable-length,
+ * has_user_info-bearing) urma_seg_t blob. The peer forwards &entry->seg
+ * verbatim to urma_import_seg. Fills the fixed header (seg_size, mempool_id,
+ * mempool_token_value, version, token_id) and copies seg_size bytes of the seg
+ * blob after it. The full variable-length blob (including the bonding
+ * has_user_info extension tail) is always carried; callers must size their
+ * wire buffer to hold the worst-case seg_size (ubsocket sizes its stack buffer
+ * to UMQ_MEMPOOL_INFO_MAX_SIZE, which reserves UBS_MEMPOOL_INFO_SEG_EXT_MAX
+ * bytes for this).
+ *
+ * @param tseg         local target segment to export (must outlive the call)
+ * @param mempool_id   umq mempool id carried in the header
+ * @param token_value  tseg->user_ctx, carried as the urma_token_t value
+ * @param version      mempool version carried in the header
+ * @param out          destination entry; the full entry (header + seg blob)
+ *                    must fit within out_cap bytes starting at @out
+ * @param out_cap     total bytes available at @out (covers header + seg blob;
+ *                    must be >= UB_IMPORT_MEMPOOL_INFO_HDR_SIZE + seg_size)
+ * @return total bytes written (UB_IMPORT_MEMPOOL_INFO_HDR_SIZE + seg_size),
+ *         or 0 on failure (urma_get_seg_ctx failed or out_cap too small)
+ */
+uint32_t umq_ub_fill_seg_ctx(urma_target_seg_t *tseg, uint32_t mempool_id, uint32_t token_value,
+                             uint32_t version, ub_import_mempool_info_t *out, uint32_t out_cap);
+
 int umq_ub_post_rx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_option_t *option);
 int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_option_t *option);
 int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_option_t *option);
@@ -644,12 +712,20 @@ int umq_ub_dequeue_plus_with_poll_tx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t
 uint32_t umq_ub_ref_sge_cnt(umq_buf_t *buffer);
 
 typedef struct mempool_info_ctx {
-    ub_import_mempool_info_t *import_mempool_info;
+    ub_import_mempool_info_t *import_mempool_info; /* cursor for next entry (variable-length) */
+    uint32_t mempool_info_cap;                     /* remaining bytes from the cursor */
     umq_imm_head_t *umq_imm_head;
     bool mempool_info_record[UMQ_MAX_TSEG_NUM];
 } mempool_info_ctx_t;
 
-int fill_big_data_ref_sge(ub_queue_t *queue, ub_ref_sge_t *ref_sge, umq_buf_t *buffer, mempool_info_ctx_t *ctx);
+/*
+ * Fill ref_sge for one buffer; if this mempool is being imported for the first
+ * time on the peer, also append a ub_import_mempool_info_t entry (via
+ * umq_ub_fill_seg_ctx) at ctx->import_mempool_info and advance that cursor.
+ * Returns the bytes appended to the mempool-info area (0 if none / on failure).
+ */
+uint32_t fill_big_data_ref_sge(ub_queue_t *queue, ub_ref_sge_t *ref_sge, umq_buf_t *buffer,
+                               mempool_info_ctx_t *ctx);
 void umq_ub_fill_rx_buffer(ub_queue_t *queue, int rx_cnt);
 int umq_ub_dequeue_with_poll_rx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t **buf);
 int umq_ub_dequeue_plus_with_poll_rx(uint64_t umqh_tp, urma_cr_t *cr, umq_buf_t **buf);
@@ -714,6 +790,22 @@ static ALWAYS_INLINE void umq_ub_io_packet_stats(
 }
 
 urma_target_seg_t *umq_ub_tseg_lookup(import_tseg_table_t *tseg_table, uint32_t mempool_id);
+
+/* Look up the imported-tseg node (carrying its import-time version) for a
+ * mempool, under the table's read lock. Returns NULL if not imported. The
+ * caller must not free the returned node; it is owned by the table. */
+imported_tseg_node_t *umq_ub_tseg_node_lookup(import_tseg_table_t *tseg_table, uint32_t mempool_id);
+
+/* Same as umq_ub_tseg_node_lookup but assumes the caller already holds
+ * tseg_hmap_lock (read or write) — does not take the lock itself. Use when the
+ * caller dereferences the returned node before dropping the lock, so a
+ * concurrent umq_ub_tseg_remove cannot free it in between. */
+imported_tseg_node_t *umq_ub_tseg_node_lookup_locked(import_tseg_table_t *tseg_table, uint32_t mempool_id);
+
+/* Remove and unimport the node for a mempool (no-op if absent). Used by the
+ * version-aware re-import path: the caller detected a stale version and must
+ * unimport before re-importing the same mempool (design §3.5). */
+void umq_ub_tseg_remove(import_tseg_table_t *tseg_table, uint32_t mempool_id);
 
 static ALWAYS_INLINE bool umq_ub_enable_import_remote_mem(uint32_t feature)
 {
