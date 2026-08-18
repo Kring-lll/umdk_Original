@@ -34,6 +34,10 @@
 #define TOOL_MAX_POLL_BATCH             64
 #define TOOL_INITIAL_CREDIT             4
 #define TOOL_REQIEST_CREDITS            4
+#define TOOL_SIZE_CLASS_COUNT           3
+#define TOOL_BLOCK_SIZE_4K              4096
+#define TOOL_BLOCK_SIZE_32K             32768
+#define TOOL_BLOCK_SIZE_128K            131072
 
 #define CONNETION_SETUP_MSG_SZIE    100
 #define CONNECTION_SETUP_LISTEN     128
@@ -112,6 +116,11 @@ static int init_umq(struct urpc_example_config *cfg)
     init_cfg->feature = cfg->feature;
     init_cfg->flow_control.use_atomic_window = true;
     init_cfg->flow_control.initial_credit = TOOL_INITIAL_CREDIT;
+    init_cfg->buf_pool_cfg.small_block_size = BLOCK_SIZE_4K;
+    init_cfg->buf_pool_cfg.size_class_count = TOOL_SIZE_CLASS_COUNT;
+    init_cfg->buf_pool_cfg.explicit_block_sizes[0] = TOOL_BLOCK_SIZE_4K;
+    init_cfg->buf_pool_cfg.explicit_block_sizes[1] = TOOL_BLOCK_SIZE_32K;
+    init_cfg->buf_pool_cfg.explicit_block_sizes[TOOL_SIZE_CLASS_COUNT - 1] = TOOL_BLOCK_SIZE_128K;
 
     if (cfg->instance_mode == SERVER) {
         if (parse_m_trans_info(cfg, init_cfg) != 0) {
