@@ -34,6 +34,7 @@ cc_library(
     ],
     copts = UMQ_DEFAULT_STATIC_COPTS + [
         "-DUMQ_STATIC_LIB",
+        "-DUMQ_QBUF_DEBUG",
     ],
     linkopts = ["-lpthread", "-lurma", "-lurma_ubagg", "-lurma-udma", "-lurma_common", "-ltpsa"],
     deps = [
