@@ -256,6 +256,22 @@ int umq_log_config_set(umq_log_config_t *config);
 int umq_log_config_get(umq_log_config_t *config);
 
 /**
+ * Thread safety function
+ * Set the process exiting flag. Dispatched to every enabled transport backend
+ * via the umq_tp_exiting_set callback; UB backend post/poll entries then skip
+ * resources that may already be released during teardown, avoiding exit-time UAF.
+ * @param[in] exiting: true means the process is exiting
+ */
+void umq_exiting_set(bool exiting);
+
+/**
+ * Thread safety function
+ * Query the process exiting flag from enabled transport backends.
+ * Return true if any backend reports the process is exiting
+ */
+bool umq_exiting_get(void);
+
+/**
  * Add dev for umq, only support ub
  * @param[in] trans_info: transport info;
  * Return: 0 on success, other value on error
@@ -297,6 +313,44 @@ int umq_mempool_state_get(uint64_t umqh, uint32_t mempool_id, umq_mempool_state_
  * Return: 0 on success, other value on error
  */
 int umq_mempool_state_refresh(uint64_t umqh, uint32_t mempool_id);
+
+/**
+ * Get mempool info: serialize the local mempool import descriptor so it can be
+ * sent to the peer and imported there (used by the UBSocket bigdata READ path).
+ * @param[in] umqh: umq handle
+ * @param[in] mempool_id: mempool id, the ID of the memory pool from which the buffer was obtained
+ * @param[in] mempool_info_size: size of mempool_info buffer
+ * @param[out] mempool_info: mempool import information
+ * Return: 0 on success, other value on error
+ */
+int umq_mempool_info_get(uint64_t umqh, uint32_t mempool_id, uint8_t *mempool_info, uint32_t mempool_info_size);
+
+/**
+ * Set mempool info: import a peer mempool from the descriptor received in a
+ * control message (used by the UBSocket bigdata READ path). The carried
+ * version is recorded on the imported entry so the next state_get can decide
+ * reuse vs unimport+reimport (design ¡ì3.5).
+ * @param[in] umqh: umq handle
+ * @param[in] mempool_id: mempool id, the ID of the memory pool from which the buffer was obtained
+ * @param[in] mempool_info_size: size of mempool_info buffer
+ * @param[in] mempool_info: mempool import information
+ * @param[in] version: current mempool version
+ * Return: 0 on success, other value on error
+ */
+int umq_mempool_info_set(uint64_t umqh, uint32_t mempool_id, uint8_t *mempool_info, uint32_t mempool_info_size,
+                         uint32_t version);
+
+/**
+ * Get remote mempool import state vs the given version.
+ * @param[in] umqh: umq handle
+ * @param[in] mempool_id: mempool id, the ID of the memory pool from which the buffer was obtained
+ * @param[in] version: current mempool version
+ * Return: 0 no import needed (cached version matches); 1 need import (not imported);
+ *         2 need unimport & re-import (imported but version grew);
+ *         3 protocol error: version rolled back or field conflict, caller sends READ_ABORT;
+ *         -1 error
+ */
+int umq_remote_mempool_state_get(uint64_t umqh, uint32_t mempool_id, uint32_t version);
 
 /**
  * Get device information.

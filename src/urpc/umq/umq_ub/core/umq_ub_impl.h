@@ -38,6 +38,8 @@ void umq_ub_unregister_memory_impl(void);
 
 int umq_ub_log_config_set_impl(umq_log_config_t *config);
 int umq_ub_log_config_reset_impl(void);
+void umq_ub_exiting_set_impl(bool exiting);
+bool umq_ub_exiting_get_impl(void);
 int32_t umq_ub_huge_qbuf_pool_init(umq_init_cfg_t *cfg);
 void umq_ub_huge_qbuf_pool_uninit(void);
 
@@ -81,6 +83,22 @@ int umq_ub_get_route_list_impl(const umq_route_key_t *route_key, umq_route_list_
 
 int umq_ub_mempool_state_get_impl(uint64_t umqh_tp, uint32_t mempool_id, umq_mempool_state_t *mempool_state);
 int umq_ub_mempool_state_refresh_impl(uint64_t umqh_tp, uint32_t mempool_id);
+int umq_ub_mempool_info_get_impl(uint64_t umqh_tp, uint32_t mempool_id, uint8_t *mempool_info,
+    uint32_t mempool_info_size);
+int umq_ub_mempool_info_set_impl(uint64_t umqh_tp, uint32_t mempool_id, uint8_t *mempool_info,
+    uint32_t mempool_info_size, uint32_t version);
+/* Return values of umq_ub_remote_mempool_state_get_impl:
+ *   -1 = parameter error
+ *    0 = cached version matches: reuse existing import, no action needed
+ *    1 = not imported: need first-time import
+ *    2 = version grew: need unimport \& re-import
+ */
+#define UMQ_REMOTE_MEMPOOL_STATE_ERR          (-1)
+#define UMQ_REMOTE_MEMPOOL_STATE_REUSE        0
+#define UMQ_REMOTE_MEMPOOL_STATE_NEED_IMPORT  1
+#define UMQ_REMOTE_MEMPOOL_STATE_NEED_REIMPORT 2
+
+int umq_ub_remote_mempool_state_get_impl(uint64_t umqh_tp, uint32_t mempool_id, uint32_t version);
 int umq_ub_dev_info_get_impl(char *dev_name, umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq_dev_info);
 umq_dev_info_t *umq_ub_dev_info_list_get_impl(umq_trans_mode_t umq_trans_mode, int *dev_num);
 void umq_ub_dev_info_list_free_impl(umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq_dev_info);
