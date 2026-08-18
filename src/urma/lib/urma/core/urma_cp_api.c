@@ -3331,9 +3331,6 @@ urma_status_t urma_set_tp_attr(const urma_context_t *ctx, const uint64_t tp_hand
     urma_ops_t *ops = NULL;
     URMA_CHECK_OP_INVALID_RETURN_STATUS(ctx, ops, set_tp_attr);
 
-    URMA_LOG_INFO("urma_set_tp_attr: cnt=%u, bitmap=0x%x, sl_set=%u, sl=%u.\n", tp_attr_cnt,
-                  tp_attr_bitmap, (tp_attr_bitmap & (1U << 10)) ? 1 : 0, tp_attr->sl);
-
     uint32_t tmp_bitmap = tp_attr_bitmap;
     tmp_bitmap &= ~(1U << 16);
     return ops->set_tp_attr(ctx, tp_handle, tp_attr_cnt, tmp_bitmap, tp_attr);
