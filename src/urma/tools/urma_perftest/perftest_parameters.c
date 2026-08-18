@@ -196,7 +196,11 @@ static void usage(const char *argv0)
         "  --max_size                  Set max size in random io size, only for bw mode.\n"
         "  --bond_mode                 Set bonding device mode, support: standalone, active_backup, balance.\n"
         "                                                       default: standalone.\n"
-        "  --bond_level                Set bonding device level, support: iodie, port, default: iodie.\n");
+        "  --bond_level                Set bonding device level, support: iodie, port, default: iodie.\n"
+        "  --src_chip <chip_id>        Set source chip id for affinity in balance mode, range: [1, 2].\n"
+        "                              Must be used together with --dst_chip and only valid when --bond_mode balance.\n"
+        "  --dst_chip <chip_id>        Set destination chip id for affinity in balance mode, range: [1, 2].\n"
+        "                              Must be used together with --src_chip and only valid when --bond_mode balance.\n");
 }
 
 static perftest_cmd_type_t parse_command(const char *argv1)
@@ -399,6 +403,9 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->min_size = 0;
     cfg->max_size = 0;
     cfg->enable_random_size = 0;
+    cfg->use_chip_affinity = false;
+    cfg->src_chip = 0;
+    cfg->dst_chip = 0;
     verbose_set_level(VLOG_LEVEL_INFO);
 }
 
@@ -706,6 +713,8 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"stdout",              no_argument,       NULL, PERFTEST_OPT_STDOUT},
         {"bond_mode",           required_argument, NULL, PERFTEST_OPT_BOND_MODE},
         {"bond_level",          required_argument, NULL, PERFTEST_OPT_BOND_LEVEL},
+        {"src_chip",            required_argument, NULL, PERFTEST_OPT_SRC_CHIP},
+        {"dst_chip",            required_argument, NULL, PERFTEST_OPT_DST_CHIP},
         {NULL,                  no_argument,       NULL, '\0'},
     };
     /* clang-format on */
@@ -1040,6 +1049,14 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                     return -1;
                 }
                 break;
+            case PERFTEST_OPT_SRC_CHIP:
+                (void)ub_str_to_u32(optarg, &cfg->src_chip);
+                cfg->use_chip_affinity = true;
+                break;
+            case PERFTEST_OPT_DST_CHIP:
+                (void)ub_str_to_u32(optarg, &cfg->dst_chip);
+                cfg->use_chip_affinity = true;
+                break;
             case PERFTEST_OPT_SIP:
                 (void)str_to_ip(optarg, &cfg->sip);
                 cfg->uboe_sip = true;
@@ -1232,6 +1249,23 @@ int check_local_cfg(perftest_config_t *cfg)
     if (strstr(cfg->dev_name, "bonding_dev") != NULL) {
         if (cfg->bond_level != BONDP_BONDING_LEVEL_PORT && !cfg->use_ctp) {
             LOG_ERROR("Invalid config: --bond_level iodie requires --ctp.\n");
+            return -1;
+        }
+    }
+
+    if (cfg->use_chip_affinity == true) {
+        if (cfg->bond_mode != BONDP_BONDING_MODE_BALANCE) {
+            LOG_ERROR("Invalid config: --src_chip/--dst_chip only valid when --bond_mode balance.\n");
+            return -1;
+        }
+        if (cfg->src_chip == 0 || cfg->dst_chip == 0) {
+            LOG_ERROR("Invalid config: --src_chip and --dst_chip must be configured together.\n");
+            return -1;
+        }
+        if (cfg->src_chip < PERFTEST_CHIP_ID_MIN || cfg->src_chip > PERFTEST_CHIP_ID_MAX ||
+            cfg->dst_chip < PERFTEST_CHIP_ID_MIN || cfg->dst_chip > PERFTEST_CHIP_ID_MAX) {
+            LOG_ERROR("Invalid config: --src_chip/--dst_chip must be in range [%u, %u].\n",
+                      PERFTEST_CHIP_ID_MIN, PERFTEST_CHIP_ID_MAX);
             return -1;
         }
     }

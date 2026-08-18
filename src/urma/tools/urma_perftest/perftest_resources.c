@@ -3007,20 +3007,26 @@ void destroy_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
 
 static urma_status_t warm_up_post_send(perftest_context_t *ctx, uint32_t index, const perftest_config_t *cfg)
 {
-    urma_jfs_wr_t jfs_wr = ctx->run_ctx.jfs_wr[index * cfg->jfs_post_list];
+    bondp_jfs_wr_t bwr = ctx->run_ctx.jfs_wr[index * cfg->jfs_post_list];
+    urma_jfs_wr_t *jfs_wr = &bwr.base;
     if (cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX) {
-        jfs_wr.tjetty = ctx->import_tjfr[index];
+        jfs_wr->tjetty = ctx->import_tjfr[index];
     } else {
-        jfs_wr.tjetty = ctx->import_tjetty[index];
+        jfs_wr->tjetty = ctx->import_tjetty[index];
     }
-    jfs_wr.flag.bs.complete_enable = 1;
-    jfs_wr.next = NULL;
+    jfs_wr->flag.bs.complete_enable = 1;
+    jfs_wr->next = NULL;
+    if (cfg->use_chip_affinity == true) {
+        jfs_wr->flag.bs.has_drv_ext = 1;
+        bwr.src_chip_id = cfg->src_chip;
+        bwr.dst_chip_id = cfg->dst_chip;
+    }
 
     urma_jfs_wr_t *bad_wr = NULL;
     if (cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX) {
-        return urma_post_jfs_wr(ctx->jfs[index], &jfs_wr, &bad_wr);
+        return urma_post_jfs_wr(ctx->jfs[index], jfs_wr, &bad_wr);
     }
-    return urma_post_jetty_send_wr(ctx->jetty[index], &jfs_wr, &bad_wr);
+    return urma_post_jetty_send_wr(ctx->jetty[index], jfs_wr, &bad_wr);
 }
 
 int perform_warm_up(perftest_context_t *ctx, perftest_config_t *cfg)
