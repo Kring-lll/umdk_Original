@@ -153,5 +153,3 @@ We warmly welcome contributions from developers. If you have discovered a bug or
 The license for code, please refer to [LICENSES](./LICENSES/README)
 
 The license for documents in doc directory, please refer to [LICENSE](./doc/LICENSE)
-
-你确定这条语句“urma_perftest write_bw -d udmac0d0e2 -p1 --tp_aware --sl 5 -O 1 -n 5 -s 2 -S 127.0.0.1 --tp_aware”会调用create_tp_info

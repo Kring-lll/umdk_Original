@@ -1491,8 +1491,9 @@ static int create_tp_info(perftest_context_t *ctx, perftest_config_t *cfg)
                 LOG_ERROR("Failed to set_tp_attr, ret:%d\n", ret);
                 goto free_buf;
             }
+
         } else if (cfg->enable_sl) {
-            urma_tp_attr_value_t tp_attr = {0};   // 所有字段清零
+            urma_tp_attr_value_t tp_attr = {0}; 
             uint8_t set_tp_attr_cnt = 0;
             uint32_t set_tp_attr_flag = 0;
 
