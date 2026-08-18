@@ -40,7 +40,7 @@ extern "C" {
 #endif
 
 #define UMQ_MAX_MSG_ID_NUM (1 << 5)
-#define UMQ_ID_ALLOC_SIZE (256 * 1024)
+#define UMQ_ID_ALLOC_SIZE (128 * 1024)
 
 #define UMQ_CONTINUE_FLAG 1
 #define UMQ_MAX_TSEG_NUM (1024)
@@ -250,10 +250,10 @@ typedef struct remote_eid_hmap_node {
     struct urpc_hmap_node node;
     urma_eid_t eid;
     uint32_t pid;
-    char remote_namespace[UMQ_UB_NAMESPACE_SIZE];
     uint32_t ref_cnt;
     import_tseg_table_t tseg; // save the current ub ctx imported tseg
     urpc_bitmap_t tseg_imported; // record whether the peer has imported the local memory
+    char remote_namespace[0]; // namespace string, allocated with namespace_len (see umq_ub_eid_node_create)
 } remote_eid_hmap_node_t;
 
 typedef struct remote_imported_tseg_info {
@@ -279,6 +279,7 @@ typedef struct umq_ub_ctx {
     volatile uint64_t *umq_ctx_table;
     volatile uint32_t *umq_ctx_ref_cnt_table;
     volatile uint64_t *rx_consumed_jetty_table;
+    volatile bool is_bonding_port_configured;
 } umq_ub_ctx_t;
 
 typedef struct rx_buf_ctx {
@@ -311,15 +312,45 @@ typedef struct umq_ub_bind_version_info {
     uint32_t version;
 } umq_ub_bind_version_info_t;
 
+/*
+ * Device info serialized in bind info. The segment context is produced by
+ * urma_get_seg_ctx (an urma_seg_t, optionally carrying a has_user_info
+ * extension tail on bonding devices), so the seg blob is variable length:
+ * seg_size bytes follow the namespace. mempool_token_value carries
+ * tseg->user_ctx for the peer's urma_import_seg.
+ *
+ * Layout: [fixed header][bind_namespace: namespace_len bytes (8-byte aligned)]
+ *         [seg blob: seg_size bytes (8-byte aligned)]
+ * The 8-byte alignment of namespace_len ensures the seg blob (which contains
+ * urma_seg_t with uint64_t fields) is naturally aligned.
+ */
 typedef struct umq_ub_bind_dev_info {
     umq_trans_mode_t umq_trans_mode;
-    urma_target_seg_t tseg;
     umq_buf_mode_t buf_pool_mode;
     uint32_t feature;
     uint32_t pid;
-    uint32_t namespace_len;
-    char bind_namespace[0];
+    uint32_t namespace_len;       /* 8-byte aligned; bounds the namespace string */
+    uint32_t seg_size;            /* urma_get_seg_ctx size output, in bytes (>= sizeof(urma_seg_t)) */
+    uint32_t mempool_token_value; /* = tseg->user_ctx; carried for urma_import_seg */
+    uint32_t reserved;            /* padding so bind_namespace starts at offset 32 (8-byte aligned) */
+    char bind_namespace[0];       /* namespace_len bytes, then seg_size bytes of seg blob */
 } umq_ub_bind_dev_info_t;
+
+_Static_assert(sizeof(umq_ub_bind_dev_info_t) == 32, "umq_ub_bind_dev_info_t must be 32B");
+_Static_assert(offsetof(umq_ub_bind_dev_info_t, bind_namespace) == 32,
+    "bind_namespace must start at offset 32 for 8-byte alignment");
+
+/* Total TLV value length = fixed header + namespace_len + seg_size. */
+#define UB_BIND_DEV_INFO_TOTAL_LEN(di) \
+    (sizeof(umq_ub_bind_dev_info_t) + (di)->namespace_len + (di)->seg_size)
+
+/* Pointer to the variable-length seg blob (urma_seg_t + optional extension tail),
+ * located immediately after bind_namespace. 8-byte aligned when namespace_len
+ * is 8-byte aligned (guaranteed by umq_ub_dev_info_serialize). */
+static inline urma_seg_t *umq_ub_bind_dev_info_seg(const umq_ub_bind_dev_info_t *di)
+{
+    return (urma_seg_t *)((const char *)di->bind_namespace + di->namespace_len);
+}
 
 typedef struct umq_ub_bind_queue_info {
     urma_token_t token;
@@ -352,9 +383,9 @@ typedef struct umq_ub_bind_info {
 typedef struct ub_bind_ctx {
     urma_target_jetty_t *tjetty[UB_QUEUE_JETTY_NUM];
     uint32_t remote_pid;
-    char remote_namespace[UMQ_UB_NAMESPACE_SIZE];
     import_tseg_table_t *tseg_table;
     urpc_bitmap_t tseg_imported;
+    char remote_namespace[0]; // namespace string, allocated with namespace_len (see umq_ub_bind_inner_impl)
 } ub_bind_ctx_t;
 
 struct ub_credit_pool;
@@ -482,7 +513,7 @@ typedef struct ub_queue {
     urma_order_type_t order_type;
     urma_transport_mode_t tp_mode;
     urma_tp_type_t tp_type;
-    ub_flow_control_t flow_control;
+    ub_flow_control_t *flow_control;
     char name[UMQ_NAME_MAX_LEN];
     uint32_t rx_buf_size;
     uint32_t tx_buf_size;
@@ -529,14 +560,6 @@ typedef struct ub_queue_ctx_list {
     util_external_rwlock *lock;
 } ub_queue_ctx_list_t;
 
-typedef struct xchg_mem_info {
-    uint64_t seg_len;
-    uint32_t seg_token_id;
-    urma_import_seg_flag_t seg_flag;
-    urma_token_t token;
-    urma_ubva_t ubva;
-} __attribute__((packed)) xchg_mem_info_t;
-
 typedef struct umq_ub_raw_dev {
     urma_device_t *urma_dev;
     umq_eid_t eid;
@@ -578,6 +601,7 @@ remote_imported_tseg_info_t *umq_ub_ctx_imported_info_create(void);
 void umq_ub_ctx_imported_info_destroy(umq_ub_ctx_t *ub_ctx);
 urma_jetty_t *umq_create_jetty(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, umq_create_jetty_config_t *config);
 int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_queue_t *queue);
+void umq_ub_config_bonding_port(umq_ub_ctx_t *dev_ctx, ub_queue_t *queue);
 int umq_ub_register_seg(umq_ub_ctx_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
 void umq_ub_unregister_seg(umq_ub_ctx_t *ctx_list, uint32_t ctx_cnt, uint16_t mempool_id);
 int share_rq_param_check(ub_queue_t *queue, ub_queue_t *share_rq);

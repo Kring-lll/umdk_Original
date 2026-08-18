@@ -19,6 +19,7 @@
 #define TW_HMAP_MIN_SIZE (1024U)
 
 typedef struct tw_task {
+    struct ub_hmap_node hmap_node;
     tw_task_id_t task_id;
     uint64_t round;
     uint32_t slot_idx;
@@ -26,7 +27,6 @@ typedef struct tw_task {
     void *arg;
     TAILQ_ENTRY(tw_task)
     slot_entry;
-    struct ub_hmap_node hmap_node;
 } tw_task_t;
 
 TAILQ_HEAD(tw_task_head, tw_task);

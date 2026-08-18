@@ -50,6 +50,7 @@ extern "C" {
 #define QBUF_POOL_SHRINK_THRESHOLD (64) // self-driven shrink threshold: N/4 >= this value (N >= 256)
 #define QBUF_POOL_SELF_SHRINK_RATIO (4) // adaptive shrink ratio(1/4)
 #define QBUF_POOL_EXPAND_MAX_RATIO (8)
+#define QBUF_POOL_INITIAL_NODATA_BUF_CNT 32768
 #define QBUF_POOL_DEFAULT_EXPANSION_COUNT 8192
 #define QBUF_POOL_DEFAULT_EXPANSION_MEM_SIZE (2ULL * 1024 * 1024 * 1024)
 #define QBUF_POOL_MEM_SIZE_MAX (6ULL * 1024 * 1024 * 1024)
@@ -482,11 +483,9 @@ static ALWAYS_INLINE void qbuf_tls_capacity_sub(uint64_t *local_cap, volatile ui
     if (shrink == 0) {
         return;
     }
-    if (shrink > *local_cap) {
-        shrink = *local_cap;
-    }
-    *local_cap -= shrink;
-    __atomic_fetch_sub(total_cap, shrink, __ATOMIC_ACQ_REL);
+    uint64_t to_shrink = (shrink > *local_cap) ? *local_cap : shrink;
+    *local_cap -= to_shrink;
+    __atomic_fetch_sub(total_cap, to_shrink, __ATOMIC_ACQ_REL);
 }
 
 static ALWAYS_INLINE void qbuf_tls_capacity_self_shrink(global_block_pool_t *global_pool,

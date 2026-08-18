@@ -66,6 +66,7 @@ bool is_perftest_force_quit(void)
 static int fill_dev_info(umq_dev_assign_t *dev_info, umq_perftest_config_t *cfg)
 {
     uint32_t addr;
+    int ret = 0;
     if (strlen(cfg->config.dev_name) != 0) {
         LOG_PRINT("umq perftest init with dev: %s\n", cfg->config.dev_name);
         dev_info->assign_mode = UMQ_DEV_ASSIGN_MODE_DEV;
@@ -74,7 +75,11 @@ static int fill_dev_info(umq_dev_assign_t *dev_info, umq_perftest_config_t *cfg)
     } else if (inet_pton(AF_INET, cfg->config.local_ip, &addr) == 1) {
         LOG_PRINT("umq perftest init with ipv4: %s\n", cfg->config.local_ip);
         dev_info->assign_mode = UMQ_DEV_ASSIGN_MODE_IPV4;
-        memcpy(dev_info->ipv4.ip_addr, cfg->config.local_ip, strlen(cfg->config.local_ip));
+        ret = snprintf(dev_info->ipv4.ip_addr, UMQ_IPV4_SIZE, "%s", cfg->config.local_ip);
+        if (ret < 0 || ret >= UMQ_IPV4_SIZE) {
+            LOG_PRINT("snprintf ipv4 failed\n");
+            return -1;
+        }
     } else {
         LOG_PRINT("umq perftest init with ipv6: %s\n", cfg->config.local_ip);
         dev_info->assign_mode = UMQ_DEV_ASSIGN_MODE_IPV6;
@@ -227,7 +232,8 @@ static int umq_perftest_create_umqh(umq_perftest_config_t *cfg)
     umq_create_option_t option = {
         .trans_mode = (umq_trans_mode_t)cfg->trans_mode,
         .create_flag = UMQ_CREATE_FLAG_RX_BUF_SIZE | UMQ_CREATE_FLAG_TX_BUF_SIZE | UMQ_CREATE_FLAG_TP_MODE |
-            UMQ_CREATE_FLAG_RX_DEPTH | UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE | UMQ_CREATE_FLAG_TP_TYPE,
+            UMQ_CREATE_FLAG_RX_DEPTH | UMQ_CREATE_FLAG_TX_DEPTH | UMQ_CREATE_FLAG_QUEUE_MODE | UMQ_CREATE_FLAG_TP_TYPE |
+            UMQ_CREATE_FLAG_PRIORITY,
         .rx_buf_size = cfg->config.size,
         .tx_buf_size = cfg->config.size,
         .rx_depth = cfg->config.rx_depth,
@@ -235,6 +241,7 @@ static int umq_perftest_create_umqh(umq_perftest_config_t *cfg)
         .mode = cfg->config.interrupt ? UMQ_MODE_INTERRUPT : UMQ_MODE_POLLING,
         .tp_mode = cfg->tp_mode,
         .tp_type = cfg->tp_type,
+        .priority = cfg->priority,
     };
     char *name = cfg->config.instance_mode == PERF_INSTANCE_SERVER ? "umq_perftest_server" : "umq_perftest_client";
     (void)sprintf(option.name, "%s", name);
