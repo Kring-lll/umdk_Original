@@ -10,6 +10,7 @@ package com.huawei.umdk.snc.entity;
 
 import java.util.Collections;
 import java.util.Map;
+
 import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;

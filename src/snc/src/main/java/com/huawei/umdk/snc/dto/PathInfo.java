@@ -24,5 +24,6 @@ import lombok.ToString;
 @EqualsAndHashCode
 @ToString
 public class PathInfo {
+
     private List<HopInfo> hops;
 }

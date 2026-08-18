@@ -20,7 +20,7 @@ import lombok.ToString;
 @NoArgsConstructor
 @AllArgsConstructor
 @EqualsAndHashCode
-@ToString(exclude = {"ip", "username", "password"})
+@ToString(exclude = "password")
 public class MgmtInfo {
     private String ip;
     private Integer port;
