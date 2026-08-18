@@ -81,7 +81,9 @@ static ALWAYS_INLINE void recycle_node_to_relay_q(jetty_pool_t *pool, jetty_pool
 
 static ALWAYS_INLINE thread_local_jetty_cache_t *get_thread_jetty_cache(void)
 {
-    if (!g_jetty_pool_inited) {
+     /* During TLS destruction the list may hold dangling nodes; never re-init
+     * (which would push_back into the poisoned list) once we are exiting. */
+    if (!g_jetty_pool_inited || g_tls_dtors_running) {
         return NULL;
     }
 
@@ -124,7 +126,36 @@ static ALWAYS_INLINE void release_jetty_pool_thread_cache(void *data)
 
     (void)util_thread_setspecific(g_umq_ub_jetty_pool_key, NULL);
 
+    /* TLS-destruction fast path: during exit() glibc runs __call_tls_dtors()
+     * which destroys our urpc_thread_closure and calls us. Other threads'
+     * registry nodes in g_jetty_pool.thread_cache_list may be dangling, so
+     * skip urpc_list_remove(registry_node). The cache_list holds nodes we
+     * malloc'd ourselves — free them directly (no global lock needed; these
+     * nodes are thread-private until pushed back to active_q). Leaking the
+     * registry node is acceptable since the list itself is about to die with
+     * the process. */
+    if (g_tls_dtors_running) {
+        while (!urpc_list_is_empty(&tls_cache->cache_list)) {
+            jetty_pool_node_t *cached = (jetty_pool_node_t *)urpc_list_pop_front(
+                &tls_cache->cache_list);
+            free(cached);
+        }
+        tls_cache->cached_count = 0;
+        tls_cache->inited = false;
+        return;
+    }
+
     if (!g_jetty_pool_inited) {
+
+        /* Pool already uninitialized; lock may be destroyed, so remove
+         * registry_node without locking. This is safe because uninit()
+         * will not touch thread_cache_list after it returns, and each
+         * thread only removes its own node. Failing to remove leaves a
+         * dangling pointer in the list that causes SIGSEGV when other
+         * threads traverse or modify the list. */
+        if (urpc_list_is_in_list(&tls_cache->registry_node)) {
+            urpc_list_remove(&tls_cache->registry_node);
+        }
         while (!urpc_list_is_empty(&tls_cache->cache_list)) {
             jetty_pool_node_t *cached = (jetty_pool_node_t *)urpc_list_pop_front(&tls_cache->cache_list);
             free(cached);
@@ -134,7 +165,9 @@ static ALWAYS_INLINE void release_jetty_pool_thread_cache(void *data)
     }
 
     (void)pthread_spin_lock(&g_jetty_pool.lock);
-    urpc_list_remove(&tls_cache->registry_node);
+    if (urpc_list_is_in_list(&tls_cache->registry_node)) {
+        urpc_list_remove(&tls_cache->registry_node);
+    }
     if (!urpc_list_is_empty(&tls_cache->cache_list)) {
         while (!urpc_list_is_empty(&tls_cache->cache_list)) {
             jetty_pool_node_t *cached = (jetty_pool_node_t *)urpc_list_pop_front(&tls_cache->cache_list);
@@ -537,7 +570,25 @@ int umq_ub_jetty_node_free(jetty_pool_node_t *node, bool should_report_event)
         (void)pthread_spin_unlock(&pool->lock);
     }
 
-    urpc_list_push_back(&cache->cache_list, &node->node);
+    /* TLS 析构后（glibc 2.32: TLS dtors 先于 atexit handler），thread-local jetty
+     * cache 可能未初始化（inited=false, cache_list.next=NULL）或已析构。此时若走
+     * get_thread_jetty_cache() + urpc_list_push_back 路径，会因 cache_list.next 始终
+     * 为 NULL 导致后续 URPC_LIST_FOR_EACH 解引用 NULL->in_global_pool 而 SIGSEGV。
+     * 退出路径下 jetty 资源由 urma/OS 回收，node 本身为 calloc 所得，直接 free 安全。
+     * 与 release_thread_cache 的 g_tls_dtors_running 快速路径保持一致。 */
+    if (g_tls_dtors_running) {
+        /* TLS 析构先于 ubsocket_uninit（g_ubsocket_exiting 仍为 false）。此时 worker
+         * 线程的 poll 回调链可能在 free(node) 后继续调 HandleTxCompletion→SendSimpleCtrl
+         * →umq_post→umq_ub_post_tx 读已 free 的 node（heap-use-after-free）。同步置退出
+         * 标志使 umq_ub_post_tx/poll 守卫生效，跳过对已 free node 的访问。 */
+        g_ubsocket_exiting = true;
+        __sync_synchronize();
+        free(node);
+        umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_FREE_JETTY_NODE, start_timestamp);
+        return UMQ_SUCCESS;
+    }
+    node->borrow_count = 0;
+    urpc_list_push_front(&cache->cache_list, &node->node);
     cache->cached_count++;
 
     // Check if cache exceeds limit, batch return excess to active_q
@@ -557,7 +608,7 @@ int umq_ub_jetty_node_free(jetty_pool_node_t *node, bool should_report_event)
             }
         }
 
-        uint32_t cnt = urpc_list_move_n(&cache->cache_list, &pool->active_q, to_mark);
+        uint32_t cnt = urpc_list_move_n_front(&cache->cache_list, &pool->active_q, to_mark);
         pool->active_count += cnt;
         cache->cached_count -= cnt;
         uint64_t value = (uint64_t)pool->active_count;
