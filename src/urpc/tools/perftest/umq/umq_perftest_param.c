@@ -40,6 +40,7 @@ static struct option g_long_options[] = {
     {"num", required_argument, NULL, 'n'},
     {"enable-perf", no_argument, NULL, 'F'},
     {"blk-size", required_argument, NULL, 'L'},
+    {"share-jfr", no_argument, NULL, 'j'},
     {NULL, 0, NULL, 0}
 };
 // clang-format on
@@ -72,6 +73,9 @@ static void usage(void)
     (void)printf("      --num                           set number of iterations.\n");
     (void)printf("      --enable-perf                   enable perf.\n");
     (void)printf("      --blk-size                      set umq_buf_block_size(default:0), 0=BLOCK_SIZE_4K\n");
+    (void)printf("      --share-jfr                     enable shared jfr: create 1 main + 1 sub umq,\n");
+    (void)printf("                                      sub reuses main's FC jfr_ctx (worker bound to sub)\n");
+    (void)printf("                                      requires pro api (-f 1)\n");
     (void)printf("  -h, --help                          show help info.\n\n");
 }
 
@@ -96,6 +100,7 @@ static void init_cfg(umq_perftest_config_t *cfg)
     cfg->test_round = DEFAULT_LAT_TEST_ROUND;
     cfg->blk_mode = 0;
     cfg->tp_type = UMQ_TP_TYPE_CTP;
+    cfg->share_jfr = false;
 }
 
 static int copy_optarg_to_buf(char *dst, size_t dst_size, const char *opt_name, const char *opt_arg)
@@ -216,6 +221,9 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
             case 'L':
                 cfg->blk_mode = (uint32_t)strtoul(optarg, NULL, 0);
                 break;
+            case 'j':
+                cfg->share_jfr = true;
+                break;
             default:
                 usage();
                 return -1;
@@ -224,6 +232,12 @@ int umq_perftest_parse_arguments(int argc, char **argv, umq_perftest_config_t *c
 
     if (optind < argc) {
         usage();
+        return -1;
+    }
+
+    // share_jfr requires pro api: sub umq IO jetty reuse only supported in pro mode
+    if (cfg->share_jfr && (cfg->feature & UMQ_FEATURE_API_PRO) == 0) {
+        LOG_PRINT("--share-jfr requires pro api (-f 1)\n");
         return -1;
     }
 
