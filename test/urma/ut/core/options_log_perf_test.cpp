@@ -148,7 +148,7 @@ TEST(UrmaCoreTest, LogApisHandleCallbacksLevelsTagsAndEnv)
 
 TEST(UrmaCoreTest, PerfApisRecordAndFormatStats)
 {
-    char perfBuf[8192] = {};
+    char perfBuf[16384] = {};
     uint32_t len = sizeof(perfBuf);
     uint64_t start = 0;
     uint64_t end = 0;
@@ -173,6 +173,22 @@ TEST(UrmaCoreTest, PerfApisRecordAndFormatStats)
     EXPECT_EQ(URMA_SUCCESS, urma_get_perf_info(perfBuf, &len));
     EXPECT_NE(nullptr, strstr(perfBuf, "UB_JFS_POST_SEND"));
     EXPECT_GT(len, 0U);
+
+    /* Verify per-link SQE total accounting is reported by urma_get_perf_info. */
+    urma_ubagg_switch_init();
+    EXPECT_EQ(0U, urma_ubagg_sqe_total_get(0, 0));
+    urma_ubagg_sqe_total_inc(0, 0, 5);
+    urma_ubagg_sqe_total_inc(2, 3, 7);
+    EXPECT_EQ(5U, urma_ubagg_sqe_total_get(0, 0));
+    EXPECT_EQ(7U, urma_ubagg_sqe_total_get(2, 3));
+    EXPECT_EQ(0U, urma_ubagg_sqe_total_get(1, 1));
+    len = sizeof(perfBuf);
+    EXPECT_EQ(URMA_SUCCESS, urma_get_perf_info(perfBuf, &len));
+    EXPECT_NE(nullptr, strstr(perfBuf, "sqe_total:"));
+    EXPECT_NE(nullptr, strstr(perfBuf, "[0,0]:5"));
+    EXPECT_NE(nullptr, strstr(perfBuf, "[2,3]:7"));
+    urma_ubagg_switch_init();
+    EXPECT_EQ(0U, urma_ubagg_sqe_total_get(0, 0));
 
     EXPECT_EQ(URMA_SUCCESS, urma_stop_perf());
     EXPECT_FALSE(urma_perf_is_enabled());

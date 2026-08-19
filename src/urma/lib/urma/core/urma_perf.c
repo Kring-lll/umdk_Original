@@ -545,6 +545,19 @@ urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length)
         "+----------------------+------------+------------+------------+------------+------------+------------+------------+--------------+\n");
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
         "  retry_count: %-20lu\n", perf_info.retry_count);
+    /* Per-link cumulative SQE total: [local_idx,target_idx]:count, non-zero only. */
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used, "  sqe_total:");
+    for (uint32_t li = 0; li < URMA_UBAGG_SQE_TOTAL_DIM; li++) {
+        for (uint32_t ti = 0; ti < URMA_UBAGG_SQE_TOTAL_DIM; ti++) {
+            uint64_t cnt = urma_ubagg_sqe_total_get(li, ti);
+            if (cnt == 0) {
+                continue;
+            }
+            buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+                " [%u,%u]:%lu", li, ti, cnt);
+        }
+    }
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used, "\n");
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
         "+----------------------+------------+------------+------------+------------+------------+------------+------------+--------------+\n");
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,

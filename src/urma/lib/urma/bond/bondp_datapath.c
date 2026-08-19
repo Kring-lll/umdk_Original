@@ -91,6 +91,7 @@ static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, int target
     }
     if (ret == URMA_SUCCESS) {
         atomic_fetch_add(&comp->sqe_cnt[send_idx][target_idx], wr_count);
+        urma_ubagg_sqe_total_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)wr_count);
     } else {
         URMA_LOG_ERR("Bondp post send failed, ret=%d\n", ret);
     }
@@ -406,6 +407,7 @@ static void bondp_translate_bad_wr(bondp_comp_t *bdp_comp, int send_idx, int tar
         return;
     }
     atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], bad_idx);
+    urma_ubagg_sqe_total_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)bad_idx);
     urma_jfs_wr_t *user_cur = (urma_jfs_wr_t *)wr;
     for (int i = 0; i < bad_idx && user_cur != NULL; i++) {
         user_cur = user_cur->next;
@@ -715,6 +717,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
                 pcur = pcur->next;
             }
             atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], success_node);
+            urma_ubagg_sqe_total_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)success_node);
             for (int j = success_node; j < wr_total; j++) {
                 wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)wr_entries[j];
                 hdr->entry_type = 0;
