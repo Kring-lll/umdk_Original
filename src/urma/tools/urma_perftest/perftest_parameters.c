@@ -338,7 +338,7 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->uboe = false;
     cfg->uboe_vlan = false;
     cfg->uboe_dscp = false;
-    cfg->uboe_sl = false;
+    cfg->enable_sl = false;
     cfg->uboe_dip = false;
     cfg->uboe_sip = false;
 
@@ -1057,7 +1057,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                 (void)ub_str_to_u16(optarg, &cfg->vlan_id);
                 break;
             case PERFTEST_OPT_SL:
-                cfg->uboe_sl = true;
+                cfg->enable_sl = true;
                 (void)ub_str_to_u8(optarg, &cfg->sl);
                 break;
             case PERFTEST_OPT_BIND_IP:
