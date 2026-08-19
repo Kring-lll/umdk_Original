@@ -1,0 +1,107 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
+ * Description: SNC (Supernode Network Controller) service
+ * Create: 2026-08-20
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+#include <time.h>
+#include <pthread.h>
+#include "urma_ping_log.h"
+
+static FILE* g_logFile = NULL;
+static pthread_mutex_t g_logMutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_initMutex = PTHREAD_MUTEX_INITIALIZER;
+static bool g_isInited = false;
+
+static const char* LevelToStr(int level)
+{
+    if(level == LOG_LEVEL_INFO) {
+        return "INFO";
+    } else {
+        return "ERROR";
+    }
+}
+
+int SncLogInit(void)
+{
+    pthread_mutex_lock(&g_initMutex);
+    if (g_isInited) {
+        pthread_mutex_unlock(&g_initMutex);
+        return 0;
+    }
+    const char* logDir = getenv("SNC_LOG_DIR");
+    if(logDir == NULL || strlen(logDir) == 0) {
+        fprintf(stderr, "SncLogInit: SNC_LOG_DIR is not set or empty\n");
+        g_isInited = true;
+        pthread_mutex_unlock(&g_initMutex);
+        return 0;
+    }
+    size_t fullPathLen = strlen(logDir) + 32;
+    char* logPath = (char*)malloc(fullPathLen);
+    if(logPath == NULL) {
+        fprintf(stderr, "SncLogInit: failed to allocate memory for log path\n");
+        pthread_mutex_unlock(&g_initMutex);
+        return 0;
+    }
+    snprintf(logPath, fullPathLen, "%s/snc.log", logDir);
+    g_logFile = fopen(logPath, "a");
+    free(logPath);
+    if(g_logFile == NULL) {
+        fprintf(stderr, "SncLogInit: failed to open log file %s\n", logPath);
+        g_isInited = true;
+        pthread_mutex_unlock(&g_initMutex);
+        return 0;
+    }
+    g_isInited = true;
+    pthread_mutex_unlock(&g_initMutex);
+    return 0;
+}
+
+void SncLogDeinit(void)
+{
+    pthread_mutex_lock(&g_initMutex);
+    if (!g_isInited) {
+        pthread_mutex_unlock(&g_initMutex);
+        return;
+    }
+    pthread_mutex_lock(&g_logMutex);
+    if (g_logFile != NULL) {
+        fclose(g_logFile);
+        g_logFile = NULL;
+    }
+    g_isInited = false;
+    pthread_mutex_unlock(&g_logMutex);
+    pthread_mutex_unlock(&g_initMutex);
+}
+
+static void SncLogWriteInternal(int level, const char* fmt, va_list args)
+{
+    struct tm tmInfo;
+    const int TIME_LEN = 32;
+    time_t now = time(NULL);
+    localtime_r(&now, &tmInfo);
+    char timeStr[TIME_LEN];
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &tmInfo);
+    pthread_mutex_lock(&g_logMutex);
+    FILE* output = g_logFile != NULL ? g_logFile : stdout;
+    fprintf(output, "[%s] [%s] ", timeStr, LevelToStr(level));
+    vfprintf(output, fmt, args);
+    fprintf(output, "\n");
+    fflush(output);
+    pthread_mutex_unlock(&g_logMutex);
+}
+
+void SncLogWrite(int level, const char* fmt, ...)
+{
+    if(!g_isInited) {
+        return;
+    }
+    va_list args;
+    va_start(args, fmt);
+    SncLogWriteInternal(level, fmt, args);
+    va_end(args);
+}
