@@ -4,8 +4,8 @@
  * Description: SNC (Supernode Network Controller) service
  * Create: 2026-07-13
  */
-#ifndef URMA_PING_H
-#define URMA_PING_H
+#ifndef SNC_PING_H
+#define SNC_PING_H
 
 #include <stdio.h>
 #include <stdint.h>
