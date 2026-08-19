@@ -39,6 +39,7 @@ typedef enum urma_perf_type {
     BOND_SEND_RTT,
     BOND_SEND_RESEND_DELAY,           /* delta from post_send to resend trigger */
     BOND_SEND_RTT_AFTER_RESEND,       /* delta from last resend to cr success (only for resent WRs) */
+    BOND_SQE_INFLIGHT_DIFF,           /* max-min spread of per-port in-flight WR count at post_send */
     URMA_PERF_RECORD_TYPE_MAX,
 } urma_perf_record_type_t;
 
