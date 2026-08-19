@@ -512,6 +512,41 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
     return URMA_FAIL;
 }
 
+static void adjust_bad_wr_on_bond_cqe_head(jfs_wr_entry_t *wr_entries[], urma_jfs_wr_t **bad_wr,
+    int wr_total, int *success_node, int *cqe_count)
+{
+    urma_jfs_wr_t *pcur = &wr_entries[0]->wr;
+    int cqe = 0;
+    int success = 0;
+    while (pcur != NULL && bad_wr != NULL && pcur != *bad_wr) {
+        success++;
+        if (jfs_wr_is_cqe_wr(pcur)) {
+            cqe++;
+        }
+        pcur = pcur->next;
+    }
+    /* If bad_wr is in the middle of a CQE group, roll back to the
+        * group head so the entire group is released atomically. This
+        * avoids dangling ring pointers and buffer leaks.
+        * Each CQE group has exactly one complete_enable WR (the tail),
+        * which is after bad_wr, so no cqe_count correction is needed. */
+    if (success > 0 && bad_wr != NULL && *bad_wr != NULL && !wr_entries[success]->is_bond_cqe_head) {
+        jfs_wr_entry_t *cur = wr_entries[success];
+        while (cur != NULL && !cur->is_bond_cqe_head) {
+            cur = cur->next;
+        }
+        for (int i = 0; i < wr_total; i++) {
+            if (wr_entries[i] == cur) {
+                success = i;
+                *bad_wr = &wr_entries[i]->wr;
+                break;
+            }
+        }
+    }
+    *success_node = success;
+    *cqe_count = cqe;
+}
+
 /**
  * This function assumes all WRs in the list share the same tjetty and scheduling result.
  * It processes each WR under a single lock acquisition, allocates entries, copies and
@@ -647,13 +682,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
         }
         ret = comp_post_send(bdp_comp, send_idx, target_idx, &wr_entries[0]->wr, bad_wr);
         if (ret != URMA_SUCCESS) {
-            urma_jfs_wr_t *pcur = &wr_entries[0]->wr;
-            int cqe_count = 0;
-            while (pcur != NULL && bad_wr != NULL && pcur != *bad_wr) {
-                success_node++;
-                cqe_count = jfs_wr_is_cqe_wr(pcur) ? cqe_count + 1 : cqe_count;
-                pcur = pcur->next;
-            }
+            adjust_bad_wr_on_bond_cqe_head(wr_entries, bad_wr, wr_total, &success_node, &cqe_count);
             atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], cqe_count);
             for (int j = success_node; j < wr_total; j++) {
                 wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)wr_entries[j];
