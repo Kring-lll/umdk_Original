@@ -87,6 +87,16 @@ void urma_ubagg_switch_init(void);
 void urma_ubagg_switch_inc(void);
 uint32_t urma_ubagg_switch_get(void);
 
+/* SQE total counter: per-link (local_idx, target_idx) cumulative count of
+ * submitted send WRs. Sized to URMA_UBAGG_SQE_TOTAL_DIM to cover the
+ * [local_idx][target_idx] matrix used by the bond datapath. */
+#ifndef URMA_UBAGG_SQE_TOTAL_DIM
+#define URMA_UBAGG_SQE_TOTAL_DIM 20
+#endif
+void urma_ubagg_sqe_total_init(void);
+void urma_ubagg_sqe_total_inc(uint32_t local_idx, uint32_t target_idx, uint32_t wr_count);
+uint64_t urma_ubagg_sqe_total_get(uint32_t local_idx, uint32_t target_idx);
+
 typedef struct urma_jfce_cnt_info {
     char dev_name[URMA_MAX_NAME];
     uint64_t jfce_total_cnt;
