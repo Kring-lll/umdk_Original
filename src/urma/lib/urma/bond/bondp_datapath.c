@@ -77,6 +77,46 @@ static bondp_comp_t *get_recv_count_comp(bondp_comp_t *recv_comp)
     return recv_comp;
 }
 
+/* Record the max-min spread of per-link (local_idx, target_idx) in-flight WR
+ * counts. Each non-zero sqe_cnt[i][j] is one active link. If at least 2 links
+ * are active AND their counts differ, the spread (max-min) is recorded as a
+ * BOND_SQE_INFLIGHT_DIFF sample so min/max/avg/p* are computed. Otherwise
+ * (fewer than 2 active links, or all active links have equal in-flight counts
+ * so diff==0), the event is counted into single_port_cnt (surfaced via the
+ * max<127ms column) so users can reconcile sample_num with post_send count. */
+static void bondp_record_inflight_diff(const bondp_comp_t *comp)
+{
+    const uint32_t allpath[URMA_UBAGG_CHIP_LINK_NUM * IODIE_NUM][2] =
+        {{6, 6}, {6, 15}, {7, 7}, {7, 16}, {15, 6}, {15, 15}, {16, 7}, {16, 16}};
+    if (!urma_perf_is_enabled() || comp == NULL) {
+        return;
+    }
+    uint32_t active_cnt = 0;
+    uint64_t cur_max = 0;
+    uint64_t cur_min = UINT64_MAX;
+    for (uint32_t i = 0; i < URMA_UBAGG_CHIP_LINK_NUM * IODIE_NUM; i++) {
+        uint64_t cnt = atomic_load(&comp->sqe_cnt[allpath[i][0]][allpath[i][1]]);
+        if (cnt == 0) {
+            continue;
+        }
+        active_cnt++;
+        if (cnt > cur_max) {
+            cur_max = cnt;
+        }
+        if (cnt < cur_min) {
+            cur_min = cnt;
+        }
+    }
+    if (active_cnt == 1) {
+        cur_min = 0;
+    }
+    if (active_cnt == 0 || cur_max == cur_min) {
+        (void)urma_perf_record_single_port(BOND_SQE_INFLIGHT_DIFF);
+        return;
+    }
+    (void)urma_step_perf(BOND_SQE_INFLIGHT_DIFF, (cur_max - cur_min) * 10);
+}
+
 static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, int target_idx,
                                     urma_jfs_wr_t *send_wr, urma_jfs_wr_t **bad_wr, int wr_count)
 {
@@ -92,6 +132,7 @@ static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, int target
     if (ret == URMA_SUCCESS) {
         atomic_fetch_add(&comp->sqe_cnt[send_idx][target_idx], wr_count);
         urma_ubagg_sqe_total_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)wr_count);
+        bondp_record_inflight_diff(comp);
     } else {
         URMA_LOG_ERR("Bondp post send failed, ret=%d\n", ret);
     }
@@ -408,6 +449,7 @@ static void bondp_translate_bad_wr(bondp_comp_t *bdp_comp, int send_idx, int tar
     }
     atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], bad_idx);
     urma_ubagg_sqe_total_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)bad_idx);
+    bondp_record_inflight_diff(bdp_comp);
     urma_jfs_wr_t *user_cur = (urma_jfs_wr_t *)wr;
     for (int i = 0; i < bad_idx && user_cur != NULL; i++) {
         user_cur = user_cur->next;
@@ -718,6 +760,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             }
             atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], success_node);
             urma_ubagg_sqe_total_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)success_node);
+            bondp_record_inflight_diff(bdp_comp);
             for (int j = success_node; j < wr_total; j++) {
                 wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)wr_entries[j];
                 hdr->entry_type = 0;

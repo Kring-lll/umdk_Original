@@ -148,6 +148,9 @@ urma_status_t urma_get_jfce_cnt_info(urma_jfce_cnt_info_t *info_arr, uint32_t *c
 bool urma_perf_is_enabled(void);
 uint64_t urma_get_perf_timestamp(void);
 urma_status_t urma_step_perf(urma_perf_record_type_t type, uint64_t delta);
+/* Count a post_send event where fewer than 2 ports had non-zero in-flight WRs
+ * (no spread sample). Surfaced via the max<127ms column for the given type. */
+urma_status_t urma_perf_record_single_port(urma_perf_record_type_t type);
 
 #ifdef __cplusplus
 }
