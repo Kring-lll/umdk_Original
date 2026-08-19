@@ -14,7 +14,7 @@
 #include <unistd.h>
 
 #ifdef __cplusplus
-extern "C"{
+extern "C" {
 #endif
 
 #define IP_LEN 33
