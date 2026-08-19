@@ -14,17 +14,20 @@
 #include <unistd.h>
 
 #ifdef __cplusplus
-extern "C"{
+extern "C"
+{
 #endif
 
 #define IP_LEN 33
 
-typedef struct {
+typedef struct
+{
     int devId;
     char eid[IP_LEN];
 } UrmaPingEntity;
 
-typedef struct {
+typedef struct
+{
     uint32_t txPkt;
     uint32_t rxPkt;
     uint32_t minRTT;
