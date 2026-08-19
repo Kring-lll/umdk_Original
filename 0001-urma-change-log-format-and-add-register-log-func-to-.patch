@@ -1,0 +1,416 @@
+From 595bd4be5235216e3e1163c705003aa9fa424285 Mon Sep 17 00:00:00 2001
+From: chenyutao <chenyutao2@huawei.com>
+Date: Tue, 4 Aug 2026 19:12:23 +0800
+Subject: [PATCH] urma: change log format and add register log func to
+ providers
+
+- Change urma log header format to [URMA][file:function:line][tid][thread_tag][liburma]
+- Add provider register log func support
+
+Signed-off-by: chenyutao <chenyutao2@huawei.com>
+---
+ doc/ch/urma/URMA User Guide.ch.md             |  6 +--
+ doc/en/urma/URMA User Guide.md                |  6 +--
+ src/ulock/dlock/lib/include/dlock_log.h       |  2 +-
+ src/urma/lib/urma/bond/bondp_main.c           |  2 +
+ src/urma/lib/urma/config/urma.conf            |  2 +-
+ .../lib/urma/core/include/urma_provider.h     |  3 ++
+ src/urma/lib/urma/core/urma_log.c             | 45 ++++++++++++-------
+ src/urma/lib/urma/core/urma_log.h             | 12 +++--
+ src/urma/lib/urma/core/urma_main.c            | 42 +++++++++++++++++
+ src/urma/lib/urma/core/urma_private.h         |  7 +++
+ src/urma/lib/uvs/config/tpsa.conf             |  2 +-
+ src/urma/lib/uvs/core/tpsa_log.c              | 14 +++---
+ src/urma/tools/urma_admin/admin_log.c         |  6 +--
+ .../tools/urma_admin/config/urma_admin.conf   |  2 +-
+ test/urma/ut/core/options_log_perf_test.cpp   |  2 +-
+ 15 files changed, 111 insertions(+), 42 deletions(-)
+
+diff --git a/doc/ch/urma/URMA User Guide.ch.md b/doc/ch/urma/URMA User Guide.ch.md
+index 1f5eb167..b96d0b07 100644
+--- a/doc/ch/urma/URMA User Guide.ch.md	
++++ b/doc/ch/urma/URMA User Guide.ch.md	
+@@ -2100,9 +2100,9 @@ URMA整体使用OS自带的rsyslog工具来实现日志重定向打印特性，
+ 用户态日志头格式如下：
+ 
+ ```
+-[URMA][liburma][thread_id=<tid>][<thread_tag>][<file>:<function>:<line>]<message>
+-[URMA][libuvs][<tid>][<process_name>][work_<idx>|-][<file>:<function>:<line>]<message>
+-[URMA][urma_admin][thread_id=<tid>][-][<file>:<function>:<line>]<message>
++[URMA][<file>:<function>:<line>][<tid>][<thread_tag>][liburma]<message>
++[URMA][<file>:<function>:<line>][<tid>][<process_name>][work_<idx>|-][libuvs]<message>
++[URMA][<file>:<function>:<line>][<tid>][-][urma_admin]<message>
+ ```
+ 
+ ![](figures/urma_caution.png)
+diff --git a/doc/en/urma/URMA User Guide.md b/doc/en/urma/URMA User Guide.md
+index 3e5c95a4..041bc416 100644
+--- a/doc/en/urma/URMA User Guide.md	
++++ b/doc/en/urma/URMA User Guide.md	
+@@ -2023,9 +2023,9 @@ URMA uses the OS's built-in rsyslog tool to implement log redirection and printi
+ User-mode log headers use the following formats:
+ 
+ ```
+-[URMA][liburma][thread_id=<tid>][<thread_tag>][<file>:<function>:<line>]<message>
+-[URMA][libuvs][<tid>][<process_name>][work_<idx>|-][<file>:<function>:<line>]<message>
+-[URMA][urma_admin][thread_id=<tid>][-][<file>:<function>:<line>]<message>
++[URMA][<file>:<function>:<line>][<tid>][<thread_tag>][liburma]<message>
++[URMA][<file>:<function>:<line>][<tid>][<process_name>][work_<idx>|-][libuvs]<message>
++[URMA][<file>:<function>:<line>][<tid>][-][urma_admin]<message>
+ ```
+ 
+ ![](figures/urma_caution.png)
+diff --git a/src/ulock/dlock/lib/include/dlock_log.h b/src/ulock/dlock/lib/include/dlock_log.h
+index 6889fe2e..001b4a79 100644
+--- a/src/ulock/dlock/lib/include/dlock_log.h
++++ b/src/ulock/dlock/lib/include/dlock_log.h
+@@ -25,7 +25,7 @@ void dlock_set_log_level(int log_level);
+     do {                                                           \
+         dlock_log(__FUNCTION__, __LINE__, dbg_level, fmt, ##args); \
+         if (!urma_log_drop(static_cast<urma_vlog_level_t>(dbg_level))) { \
+-            urma_log(__FUNCTION__, __LINE__, static_cast<urma_vlog_level_t>(dbg_level), fmt, ##args); \
++            urma_log(__FILE_NAME__, __FUNCTION__, __LINE__, static_cast<urma_vlog_level_t>(dbg_level), fmt, ##args); \
+         } \
+     } while (0)
+ 
+diff --git a/src/urma/lib/urma/bond/bondp_main.c b/src/urma/lib/urma/bond/bondp_main.c
+index c55e8cb6..8a8e9750 100644
+--- a/src/urma/lib/urma/bond/bondp_main.c
++++ b/src/urma/lib/urma/bond/bondp_main.c
+@@ -25,6 +25,8 @@ static urma_provider_ops_t g_bondp_provider_ops = {
+     .create_context = bondp_create_context,
+     .delete_context = bondp_delete_context,
+     .get_uasid = NULL,
++    .register_log_func = NULL,
++    .unregister_log_func = NULL,
+ };
+ 
+ static __attribute__((constructor)) void urma_provider_bond_init(void)
+diff --git a/src/urma/lib/urma/config/urma.conf b/src/urma/lib/urma/config/urma.conf
+index 2022bfbf..199d6aa1 100644
+--- a/src/urma/lib/urma/config/urma.conf
++++ b/src/urma/lib/urma/config/urma.conf
+@@ -6,4 +6,4 @@
+ $template UrmaDynamicFile,"/var/log/umdk/urma/%programname%.log"
+ $template urmaLogMsg,"%TIMESTAMP:::date-rfc3339%|%syslogseverity-text%|%programname%[%PROCID%]|%msg%\n"
+ 
+-if $msg startswith '[URMA][liburma]' then ?UrmaDynamicFile;urmaLogMsg
+\ No newline at end of file
++if $msg startswith '[URMA]' and $msg contains '[liburma]' then ?UrmaDynamicFile;urmaLogMsg
+\ No newline at end of file
+diff --git a/src/urma/lib/urma/core/include/urma_provider.h b/src/urma/lib/urma/core/include/urma_provider.h
+index 8507c586..d2510e31 100644
+--- a/src/urma/lib/urma/core/include/urma_provider.h
++++ b/src/urma/lib/urma/core/include/urma_provider.h
+@@ -209,6 +209,9 @@ typedef struct urma_provider_ops {
+     urma_context_t *(*create_context)(urma_device_t *dev, uint32_t eid_index, int dev_fd);
+     urma_status_t (*delete_context)(urma_context_t *ctx);
+     urma_status_t (*get_uasid)(uint32_t *uasid); /* obsolete */
++    /* Log Ops */
++    urma_status_t (*register_log_func)(urma_log_cb_t func);
++    urma_status_t (*unregister_log_func)(void);
+ } urma_provider_ops_t;
+ 
+ typedef struct urma_import_tseg_cfg {
+diff --git a/src/urma/lib/urma/core/urma_log.c b/src/urma/lib/urma/core/urma_log.c
+index b3ba0a7f..936fab0e 100644
+--- a/src/urma/lib/urma/core/urma_log.c
++++ b/src/urma/lib/urma/core/urma_log.c
+@@ -23,6 +23,7 @@
+ #include "urma_opcode.h"
+ #include "urma_types.h"
+ 
++#include "urma_private.h"
+ #include "urma_log.h"
+ 
+ pthread_mutex_t g_urma_log_lock = PTHREAD_MUTEX_INITIALIZER;
+@@ -50,6 +51,16 @@ static urma_log_cb_t g_urma_log_func = urma_default_log_func;
+ static urma_loc_log_cb g_urma_loc_log_func = NULL;
+ static bool g_use_loc_log = false;
+ 
++urma_log_cb_t urma_get_log_func(void)
++{
++    return g_urma_log_func;
++}
++
++bool urma_is_log_func_registered(void)
++{
++    return g_urma_log_func != urma_default_log_func;
++}
++
+ urma_status_t urma_register_log_func(urma_log_cb_t func)
+ {
+     if (func == NULL) {
+@@ -59,6 +70,8 @@ urma_status_t urma_register_log_func(urma_log_cb_t func)
+     g_urma_log_func = func;
+     g_urma_loc_log_func = NULL;
+     g_use_loc_log = false;
++    /* No-op before urma_init (g_driver_list empty); urma_init compensates. */
++    urma_register_log_func_to_providers(func);
+     URMA_LOG_INFO("registered log successfully.\n");
+     return URMA_SUCCESS;
+ }
+@@ -77,12 +90,8 @@ urma_status_t urma_register_loc_log_func(urma_loc_log_cb func)
+ 
+ urma_status_t urma_unregister_log_func(void)
+ {
+-    char logmsg[MAX_LOG_LEN + 1] = {0};
+-    (void)snprintf(logmsg, MAX_LOG_LEN, "%s%s%s%s%ld%s%s%s%s[%d]%sunregister log successfully.\n",
+-        URMA_LOG_TAG, g_urma_log_separator, LIBURMA_LOG, g_urma_log_separator,
+-        (long)syscall(__NR_gettid), g_urma_log_separator, g_thread_tag, g_urma_log_separator,
+-        __func__, __LINE__, g_urma_log_separator);
+-    (*g_urma_log_func)((int)URMA_VLOG_LEVEL_INFO, logmsg);
++    URMA_LOG_INFO("Unregistered log successfully.\n");
++    urma_unregister_log_func_to_providers();
+     g_urma_log_func = urma_default_log_func;
+     g_urma_loc_log_func = NULL;
+     g_use_loc_log = false;
+@@ -229,16 +238,17 @@ void urma_getenv_log_separator(void)
+     pthread_mutex_unlock(&g_urma_log_lock);
+ }
+ 
+-static int urma_vlog(const char *function, int line, urma_vlog_level_t level, const char *format, va_list va)
++static int urma_vlog(const char *file, const char *function, int line, urma_vlog_level_t level,
++    const char *format, va_list va)
+ {
+     int ret;
+     char newformat[MAX_LOG_LEN + 1] = {0};
+     char logmsg[MAX_LOG_LEN + 1] = {0};
+ 
+-    /* add log head info, "[URMA][liburma][thread_id=tid][thread_tag][function[Line=line]]format" */
+-    ret = snprintf(newformat, MAX_LOG_LEN, "[%s][%s][thread_id=%ld][%s][%s[Line=%d]]%s",
+-                   URMA_LOG_TAG, LIBURMA_LOG, (long)syscall(__NR_gettid), g_thread_tag, function,
+-                   line, format);
++    /* add log head info, "[URMA][file:function:line][tid][thread_tag][liburma]format" */
++    ret = snprintf(newformat, MAX_LOG_LEN, "[%s][%s:%s:%d][%ld][%s][%s]%s",
++                   URMA_LOG_TAG, file, function, line, (long)syscall(__NR_gettid),
++                   g_thread_tag, LIBURMA_LOG, format);
+     if (ret <= 0 || ret >= sizeof(newformat)) {
+         return ret;
+     }
+@@ -254,12 +264,13 @@ static int urma_vlog(const char *function, int line, urma_vlog_level_t level, co
+     return ret;
+ }
+ 
+-void urma_log(const char *function, int line, urma_vlog_level_t level, const char *format, ...)
++void urma_log(const char *file, const char *function, int line, urma_vlog_level_t level,
++    const char *format, ...)
+ {
+     va_list va;
+ 
+     va_start(va, format);
+-    (void)urma_vlog(function, line, level, format, va);
++    (void)urma_vlog(file, function, line, level, format, va);
+     va_end(va);
+ }
+ 
+@@ -270,10 +281,10 @@ static int urma_vlog_loc(const char *file, const char *function, int line, urma_
+     char newformat[MAX_LOG_LEN + 1] = {0};
+     char logmsg[MAX_LOG_LEN + 1] = {0};
+ 
+-    /* add log head info, "[URMA][liburma][thread_id=tid][thread_tag][file:function:line]format" */
+-    ret = snprintf(newformat, MAX_LOG_LEN, "[%s][%s][thread_id=%ld][%s][%s:%s:%d]%s",
+-                   URMA_LOG_TAG, LIBURMA_LOG, (long)syscall(__NR_gettid), g_thread_tag, file,
+-                   function, line, format);
++    /* add log head info, "[URMA][file:function:line][tid][thread_tag][liburma]format" */
++    ret = snprintf(newformat, MAX_LOG_LEN, "[%s][%s:%s:%d][%ld][%s][%s]%s",
++                   URMA_LOG_TAG, file, function, line, (long)syscall(__NR_gettid),
++                   g_thread_tag, LIBURMA_LOG, format);
+     if (ret <= 0 || ret >= sizeof(newformat)) {
+         return ret;
+     }
+diff --git a/src/urma/lib/urma/core/urma_log.h b/src/urma/lib/urma/core/urma_log.h
+index 61f74882..a866ee08 100644
+--- a/src/urma/lib/urma/core/urma_log.h
++++ b/src/urma/lib/urma/core/urma_log.h
+@@ -26,8 +26,8 @@
+ extern "C" {
+ #endif
+ 
+-#define LOG_FORMAT_IDX 4 /* index of 'format' of urma_log */
+-#define LOG_VA_ARG_IDX 5 /* index of variable argument of urma_log */
++#define LOG_FORMAT_IDX 5 /* index of 'format' of urma_log */
++#define LOG_VA_ARG_IDX 6 /* index of variable argument of urma_log */
+ 
+ /* Rate limit parameters */
+ #define URMA_LOG_RL_WINDOW_SEC     1   /* Rate limit time window (seconds) */
+@@ -38,12 +38,16 @@ extern "C" {
+ #define URMA_LOG_RL_INITIALIZING   0x02
+ 
+ int urma_log_init(void);
++/* Return the currently registered log callback (default if none registered). */
++urma_log_cb_t urma_get_log_func(void);
++/* Return true if a non-default log callback has been registered. */
++bool urma_is_log_func_registered(void);
+ void urma_getenv_log_level(void);
+ void urma_getenv_log_separator(void);
+ bool urma_log_drop(urma_vlog_level_t level);
+ void __attribute__((format(printf, LOG_FORMAT_IDX, LOG_VA_ARG_IDX)))
+-urma_log(const char *function, int line, urma_vlog_level_t level, const char *format, ...);
+-void __attribute__((format(printf, LOG_FORMAT_IDX + 1, LOG_VA_ARG_IDX + 1)))
++urma_log(const char *file, const char *function, int line, urma_vlog_level_t level, const char *format, ...);
++void __attribute__((format(printf, LOG_FORMAT_IDX, LOG_VA_ARG_IDX)))
+ urma_log_loc(const char *file, const char *function, int line, urma_vlog_level_t level, const char *format, ...);
+ const char *urma_get_level_print(urma_vlog_level_t level);
+ urma_vlog_level_t urma_log_get_level_from_string(const char *level_string);
+diff --git a/src/urma/lib/urma/core/urma_main.c b/src/urma/lib/urma/core/urma_main.c
+index 18865ebe..99cb4aaf 100644
+--- a/src/urma/lib/urma/core/urma_main.c
++++ b/src/urma/lib/urma/core/urma_main.c
+@@ -138,6 +138,43 @@ int urma_unregister_provider_ops(urma_provider_ops_t *provider_ops)
+     return 0;
+ }
+ 
++/* Register the log callback with all loaded providers. No-op when g_driver_list
++ * is empty (before urma_init / after urma_uninit). */
++void urma_register_log_func_to_providers(urma_log_cb_t func)
++{
++    if (func == NULL) {
++        return;
++    }
++    urma_driver_t *driver, *next;
++    UB_LIST_FOR_EACH_SAFE (driver, next, node, &g_driver_list) {
++        if (driver->ops == NULL || driver->ops->register_log_func == NULL) {
++            continue;
++        }
++        urma_status_t ret = driver->ops->register_log_func(func);
++        if (ret != URMA_SUCCESS) {
++            URMA_LOG_ERR("Register log func to provider %s failed, ret=%d.\n",
++                         driver->ops->name ? driver->ops->name : "unknown", ret);
++        }
++    }
++}
++
++/* Unregister the log callback from all loaded providers. No-op when g_driver_list
++ * is empty (before urma_init / after urma_uninit). */
++void urma_unregister_log_func_to_providers(void)
++{
++    urma_driver_t *driver, *next;
++    UB_LIST_FOR_EACH_SAFE (driver, next, node, &g_driver_list) {
++        if (driver->ops == NULL || driver->ops->unregister_log_func == NULL) {
++            continue;
++        }
++        urma_status_t ret = driver->ops->unregister_log_func();
++        if (ret != URMA_SUCCESS) {
++            URMA_LOG_ERR("Unregister log func from provider %s failed, ret=%d.\n",
++                         driver->ops->name ? driver->ops->name : "unknown", ret);
++        }
++    }
++}
++
+ #if !defined(__OHOS__) && !defined(__OH__) && !defined(__ANDROID__)
+ static bool urma_validate_driver(struct dirent *dent)
+ {
+@@ -230,6 +267,11 @@ urma_status_t urma_init(urma_init_attr_t *conf)
+ #endif
+ 
+     (void)pthread_spin_init(&g_dev_list_lock, PTHREAD_PROCESS_PRIVATE);
++    /* Compensate: a callback registered before init could not be forwarded
++     * (providers not loaded yet); now they are. */
++    if (urma_is_log_func_registered()) {
++        urma_register_log_func_to_providers(urma_get_log_func());
++    }
+     urma_driver_t *driver, *next;
+     UB_LIST_FOR_EACH_SAFE (driver, next, node, &g_driver_list) {
+         if (driver->ops->init == NULL || driver->ops->init(conf) != URMA_SUCCESS) {
+diff --git a/src/urma/lib/urma/core/urma_private.h b/src/urma/lib/urma/core/urma_private.h
+index 1a29c207..119bd816 100644
+--- a/src/urma/lib/urma/core/urma_private.h
++++ b/src/urma/lib/urma/core/urma_private.h
+@@ -60,6 +60,13 @@ int urma_init_jetty_cfg(urma_jetty_cfg_t *p, urma_jetty_cfg_t *cfg);
+ void urma_uninit_jetty_cfg(urma_jetty_cfg_t *p);
+ int urma_query_eid(urma_device_t *dev, uint32_t eid_index, urma_eid_t *eid);
+ int urma_open_cdev(char *path);
++
++/* Register a log callback with all loaded providers. No-op when g_driver_list
++ * is empty (before urma_init / after urma_uninit). */
++void urma_register_log_func_to_providers(urma_log_cb_t func);
++/* Unregister the log callback from all loaded providers. */
++void urma_unregister_log_func_to_providers(void);
++
+ urma_status_t urma_check_opt_valid(void *opt_mask_addr, const opt_map_t *table,
+     size_t table_cnt, uint64_t opt, uint32_t len);
+ urma_status_t urma_set_options_common(void *obj, const opt_map_t *table,
+diff --git a/src/urma/lib/uvs/config/tpsa.conf b/src/urma/lib/uvs/config/tpsa.conf
+index 66682d51..e8e9eea4 100644
+--- a/src/urma/lib/uvs/config/tpsa.conf
++++ b/src/urma/lib/uvs/config/tpsa.conf
+@@ -6,4 +6,4 @@
+ $template TpsaDynamicFile,"/var/log/umdk/tpsa/%programname%.log"
+ $template tpsaLogMsg,"%TIMESTAMP:::date-rfc3339%|%syslogseverity-text%|%programname%[%PROCID%]|%msg%\n"
+ 
+-if $msg startswith '[URMA][libuvs]' then ?TpsaDynamicFile;tpsaLogMsg
+\ No newline at end of file
++if $msg startswith '[URMA]' and $msg contains '[libuvs]' then ?TpsaDynamicFile;tpsaLogMsg
+\ No newline at end of file
+diff --git a/src/urma/lib/uvs/core/tpsa_log.c b/src/urma/lib/uvs/core/tpsa_log.c
+index 88c411be..b8d2459d 100644
+--- a/src/urma/lib/uvs/core/tpsa_log.c
++++ b/src/urma/lib/uvs/core/tpsa_log.c
+@@ -170,14 +170,14 @@ static int tpsa_vlog(const char *file, const char *function, int line, unsigned
+ 
+     int woker_idx = uvs_get_worker_idx();
+     if (woker_idx != -1) {
+-        /* add log head info, "[URMA][libuvs][thread_id][tpsaprocessname][worker_idx][file:func:line]format" */
+-        ret = snprintf(newformat, sizeof(newformat), "[%s][%s][%ld][%s][work_%d][%s:%s:%d]%s",
+-            URMA_LOG_TAG, LIBUVS_LOG, (long)syscall(__NR_gettid), g_tpsa_process_name,
+-            woker_idx, file, function, line, format);
++        /* add log head info, "[URMA][file:func:line][thread_id][tpsaprocessname][worker_idx][libuvs]format" */
++        ret = snprintf(newformat, sizeof(newformat), "[%s][%s:%s:%d][%ld][%s][work_%d][%s]%s",
++            URMA_LOG_TAG, file, function, line, (long)syscall(__NR_gettid), g_tpsa_process_name,
++            woker_idx, LIBUVS_LOG, format);
+     } else {
+-        /* add log head info, "[URMA][libuvs][thread_id][tpsaprocessname][-][file:func:line]format" */
+-        ret = snprintf(newformat, sizeof(newformat), "[%s][%s][%ld][%s][-][%s:%s:%d]%s",
+-            URMA_LOG_TAG, LIBUVS_LOG, (long)syscall(__NR_gettid), g_tpsa_process_name, file, function, line, format);
++        /* add log head info, "[URMA][file:func:line][thread_id][tpsaprocessname][-][libuvs]format" */
++        ret = snprintf(newformat, sizeof(newformat), "[%s][%s:%s:%d][%ld][%s][-][%s]%s",
++            URMA_LOG_TAG, file, function, line, (long)syscall(__NR_gettid), g_tpsa_process_name, LIBUVS_LOG, format);
+     }
+ 
+     if (ret < 0 || ret >= (int)sizeof(newformat)) {
+diff --git a/src/urma/tools/urma_admin/admin_log.c b/src/urma/tools/urma_admin/admin_log.c
+index 9d330498..1d0dfc7c 100644
+--- a/src/urma/tools/urma_admin/admin_log.c
++++ b/src/urma/tools/urma_admin/admin_log.c
+@@ -28,9 +28,9 @@ static int urma_admin_vlog(const char *file, const char *function, int line,
+     char newformat[MAX_LOG_LEN + 1] = {0};
+     char logmsg[MAX_LOG_LEN + 1] = {0};
+ 
+-    /* add log head info, "[URMA][urma_admin][thread_id=tid][-][file:function:line]format" */
+-    ret = snprintf(newformat, MAX_LOG_LEN, "[%s][%s][thread_id=%ld][-][%s:%s:%d]%s",
+-        URMA_LOG_TAG, ADMIN_LOG_TAG, (long)syscall(__NR_gettid), file, function, line, format);
++    /* add log head info, "[URMA][file:function:line][urma_admin][tid][-]format" */
++    ret = snprintf(newformat, MAX_LOG_LEN, "[%s][%s:%s:%d][%ld][-][%s]%s",
++        URMA_LOG_TAG, file, function, line, (long)syscall(__NR_gettid), ADMIN_LOG_TAG, format);
+     if (ret <= 0 || ret >= (int)sizeof(newformat)) {
+         return ret;
+     }
+diff --git a/src/urma/tools/urma_admin/config/urma_admin.conf b/src/urma/tools/urma_admin/config/urma_admin.conf
+index 000ee259..17a81473 100644
+--- a/src/urma/tools/urma_admin/config/urma_admin.conf
++++ b/src/urma/tools/urma_admin/config/urma_admin.conf
+@@ -6,4 +6,4 @@
+ $template UrmaAdminDynamicFile,"/var/log/umdk/urma/%programname%.log"
+ $template urmaAdminLogMsg,"%TIMESTAMP:::date-rfc3339%|%syslogseverity-text%|%programname%[%PROCID%]|%msg%\n"
+ 
+-if $msg startswith '[URMA][urma_admin]' then ?UrmaAdminDynamicFile;urmaAdminLogMsg
+\ No newline at end of file
++if $msg startswith '[URMA]' and $msg contains '[urma_admin]' then ?UrmaAdminDynamicFile;urmaAdminLogMsg
+\ No newline at end of file
+diff --git a/test/urma/ut/core/options_log_perf_test.cpp b/test/urma/ut/core/options_log_perf_test.cpp
+index 13c44817..7fdce405 100644
+--- a/test/urma/ut/core/options_log_perf_test.cpp
++++ b/test/urma/ut/core/options_log_perf_test.cpp
+@@ -79,7 +79,7 @@ TEST(UrmaCoreTest, LogApisHandleCallbacksLevelsTagsAndEnv)
+     g_locLogCallbackCount = 0;
+     EXPECT_EQ(URMA_EINVAL, urma_register_log_func(nullptr));
+     EXPECT_EQ(URMA_SUCCESS, urma_register_log_func(MockLogCallback));
+-    urma_log("CoreLogTest", 1, URMA_VLOG_LEVEL_INFO, "plain %d", 1);
++    urma_log("core_test.cpp", "CoreLogTest", 1, URMA_VLOG_LEVEL_INFO, "plain %d", 1);
+     EXPECT_EQ(1, g_logCallbackCount);
+     EXPECT_EQ(static_cast<int>(URMA_VLOG_LEVEL_INFO), g_lastLogLevel);
+ 
+-- 
+2.49.0
+
