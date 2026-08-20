@@ -7,18 +7,19 @@
 #ifndef URMA_PING_INNER_H
 #define URMA_PING_INNER_H
 
-#include "urma_ping.h"
+#include <atomic>
+#include <condition_variable>
 #include <map>
-#include <string>
-#include <vector>
+#include <memory>
 #include <mutex>
 #include <queue>
-#include <condition_variable>
-#include <atomic>
+#include <string>
 #include <thread>
-#include <memory>
+#include <vector>
+
 #include "acl/acl.h"
 #include "hccl/hccn_rping.h"
+#include "urma_ping.h"
 
 #define PKT_NUM 10
 #define PING_PORT 13886
@@ -31,13 +32,15 @@
 #define PING_CALLER_WAIT_TIMEOUT_SEC 60
 #define PING_QUEUE_WAIT_TIMEOUT_SEC 1
 
-typedef struct{
+typedef struct
+{
     char eid[IP_LEN];
     HccnRpingCtx rpingCtx;
     bool isInited;
-}UrmaPingEidCtx;
+} UrmaPingEidCtx;
 
-typedef struct{
+typedef struct
+{
     int clientDevId;
     char clientEid[IP_LEN];
     char serverEid[IP_LEN];
@@ -47,9 +50,10 @@ typedef struct{
     std::atomic<int> ret;
     std::mutex cvMutex;
     std::condition_variable cv;
-}UrmaPingTask;
+} UrmaPingTask;
 
-typedef struct{
+typedef struct
+{
     int devId;
     std::vector<UrmaPingEidCtx> eidCtxs;
     std::atomic<bool> isStop;
@@ -58,6 +62,6 @@ typedef struct{
     std::mutex queueMutex;
     std::condition_variable queueCv;
     std::queue<std::shared_ptr<UrmaPingTask>> taskQueue;
-}UrmaPingDevThread;
+} UrmaPingDevThread;
 
 #endif
