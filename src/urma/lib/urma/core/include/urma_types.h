@@ -807,10 +807,22 @@ typedef struct urma_jetty_attr {
     urma_jetty_state_t state;
 } urma_jetty_attr_t;
 
+typedef union urma_sl_tp {
+    struct {
+        uint64_t sl : 32;
+        uint64_t rtp : 1;
+        uint64_t ctp : 1;
+        uint64_t utp : 1;
+        uint64_t reserved : 29;
+    } bs;
+    uint64_t value;
+} urma_sl_tp_t;
+
 typedef struct urma_jetty_opt {
     bool is_actived;
     urma_jfs_opt_t jfs_opt;
-    uint64_t reserved[URMA_OPT_REVERSED_NUM];
+    urma_sl_tp_t sl_tp;
+    uint64_t reserved[3];
 } urma_jetty_opt_t;
 
 typedef struct urma_jetty {
