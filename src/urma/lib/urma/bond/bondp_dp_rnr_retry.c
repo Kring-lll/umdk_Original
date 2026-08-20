@@ -120,9 +120,9 @@ static void resend_rnr_retry_wrs_async(bondp_worker_task_reason_t reason, void *
             }
         }
     }
+    atomic_fetch_sub(&bdp_comp->use_cnt.atomic_cnt, 1);
     (void)pthread_spin_unlock(&bdp_comp->send_lock);
 
-    atomic_fetch_sub(&bdp_comp->use_cnt.atomic_cnt, 1);
     free(async_arg);
 }
 
