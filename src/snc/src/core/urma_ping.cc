@@ -97,19 +97,24 @@ static int DoPing(UrmaPingDevThread* devThread, UrmaPingEidCtx* eidCtx, UrmaPing
         return -1;
     }
 
-    if(task->result != nullptr){
-        task->result->txPkt = hccnResult.txPkt;
-        task->result->rxPkt = hccnResult.rxPkt;
-        task->result->minRTT = hccnResult.minRTT;
-        task->result->maxRTT = hccnResult.maxRTT;
-        task->result->avgRTT = hccnResult.avgRTT;
-        task->result->state = (uint32_t)hccnResult.state;
+    {
+        std::lock_guard<std::mutex> resLock(task->cvMutex);
+        if(task->canceled.load()){
+            printf("DoPing: task canceled by caller before filling result, skip filling\n");
+        }else if(task->result != nullptr){
+            task->result->txPkt = hccnResult.txPkt;
+            task->result->rxPkt = hccnResult.rxPkt;
+            task->result->minRTT = hccnResult.minRTT;
+            task->result->maxRTT = hccnResult.maxRTT;
+            task->result->avgRTT = hccnResult.avgRTT;
+            task->result->state = (uint32_t)hccnResult.state;
 
-        printf("DoPing: txPkt[%u] rxPkt[%u] minRTT[%u] maxRTT[%u] avgRTT[%u] state[%u]\n",
-                task->result->txPkt, task->result->rxPkt, task->result->minRTT,
-                task->result->maxRTT, task->result->avgRTT, task->result->state);
-    }else{
-        printf("DoPing: result pointer is null, skip filling\n");
+            printf("DoPing: txPkt[%u] rxPkt[%u] minRTT[%u] maxRTT[%u] avgRTT[%u] state[%u]\n",
+                    task->result->txPkt, task->result->rxPkt, task->result->minRTT,
+                    task->result->maxRTT, task->result->avgRTT, task->result->state);
+        }else{
+            printf("DoPing: result pointer is null, skip filling\n");
+        }
     }
 
     ret = HccnRpingBatchPingStop(eidCtx->rpingCtx);
@@ -124,12 +129,15 @@ static int DoPing(UrmaPingDevThread* devThread, UrmaPingEidCtx* eidCtx, UrmaPing
         printf("DoPing: remove target failed, ret=%d\n", (int)ret);
         return -1;
     }
-
-    return 0;
+    return task->canceled.load() ? -1 : 0;
 }
 
 static void WorkerThreadFunc(UrmaPingDevThread* devThread){
-    aclrtSetDevice(devThread->devId);
+    aclError setDevRet = aclrtSetDevice(devThread->devId);
+    if(setDevRet != ACL_SUCCESS){
+        printf("WorkerThread: aclrtSetDevice failed for devId=%d, ret=%d, eidCtx init will likely fail\n",
+                devThread->devId, (int)setDevRet);
+    }
     {
         std::lock_guard<std::mutex> lock(devThread->eidMutex);
         for(auto& eidCtx : devThread->eidCtxs){
@@ -172,14 +180,19 @@ static void WorkerThreadFunc(UrmaPingDevThread* devThread){
         }
 
         if(task){
-            UrmaPingEidCtx* eidCtx = FindEidCtx(devThread, task->clientEid);
-            if(eidCtx == nullptr || !eidCtx->isInited){
-                printf("WorkerThread: eidCtx not found or not inited for devId=%d, eid=%s\n",
+            if(task->canceled.load()){
+                printf("WorkerThread: task already canceled, skip processing for devId=%d, eid=%s\n",
                         task->clientDevId, task->clientEid);
-                task->ret.store(-1);
             }else{
-                int doPingRet = DoPing(devThread, eidCtx, task.get());
-                task->ret.store(doPingRet);
+                UrmaPingEidCtx* eidCtx = FindEidCtx(devThread, task->clientEid);
+                if(eidCtx == nullptr || !eidCtx->isInited){
+                    printf("WorkerThread: eidCtx not found or not inited for devId=%d, eid=%s\n",
+                            task->clientDevId, task->clientEid);
+                    task->ret.store(-1);
+                }else{
+                    int doPingRet = DoPing(devThread, eidCtx, task.get());
+                    task->ret.store(doPingRet);
+                }
             }
             task->done.store(true);
             task->cv.notify_one();
@@ -203,6 +216,15 @@ static void WorkerThreadFunc(UrmaPingDevThread* devThread){
 }
 
 int UrmaPingInit(UrmaPingEntity* entities, int count){
+    if(entities == nullptr){
+        printf("UrmaPingInit: invalid input, entities is null\n");
+        return -1;
+    }
+    if(count <= 0){
+        printf("UrmaPingInit: invalid input, count=%d (must be > 0)\n", count);
+        return -1;
+    }
+
     std::lock_guard<std::mutex> lock(g_devMutex);
 
     std::map<int, std::vector<UrmaPingEntity>> devToEids;
@@ -266,14 +288,31 @@ int UrmaPingOne(int clientDevId, const char* clientEid, const char* serverEid, U
 
     {
         std::lock_guard<std::mutex> lock(devThread->queueMutex);
+        if(devThread->isStop.load()){
+            printf("UrmaPingOne: devThread is being torn down for devId=%d, reject new task\n",
+                    clientDevId);
+            return -1;
+        }
         devThread->taskQueue.push(task);
         devThread->queueCv.notify_one();
     }
 
     {
         std::unique_lock<std::mutex> lock(task->cvMutex);
+        auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::seconds(PING_CALLER_WAIT_TIMEOUT_SEC);
         while(!task->done.load() && !task->canceled.load()){
-            task->cv.wait_for(lock, std::chrono::seconds(PING_CALLER_WAIT_TIMEOUT_SEC));
+            if(task->cv.wait_until(lock, deadline) == std::cv_status::timeout){
+                if(task->done.load() || task->canceled.load()){
+                    break;
+                }
+                task->canceled.store(true);
+                printf("UrmaPingOne: task timed out after %d sec, devId=%d, clientEid=%s, serverEid=%s\n",
+                        PING_CALLER_WAIT_TIMEOUT_SEC, clientDevId,
+                        clientEid ? clientEid : "(null)",
+                        serverEid ? serverEid : "(null)");
+                break;
+            }
         }
     }
 
@@ -285,6 +324,15 @@ int UrmaPingOne(int clientDevId, const char* clientEid, const char* serverEid, U
 }
 
 int UrmaPingDeinit(UrmaPingEntity* entities, int count){
+    if(entities == nullptr){
+        printf("UrmaPingDeinit: invalid input, entities is null\n");
+        return -1;
+    }
+    if(count <= 0){
+        printf("UrmaPingDeinit: invalid input, count=%d (must be > 0)\n", count);
+        return -1;
+    }
+
     std::lock_guard<std::mutex> lock(g_devMutex);
 
     std::set<int> processed;
