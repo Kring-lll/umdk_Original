@@ -21,6 +21,7 @@
 #include "ub_util.h"
 #include "urma_api.h"
 #include "urma_provider.h"
+// #include "urma_types_str.h"
 #include "urma_ubagg.h"
 
 #include "perftest_parameters.h"
@@ -511,6 +512,25 @@ static inline void destroy_jfr(perftest_context_t *ctx, const int idx)
     ctx->jfr = NULL;
 }
 
+// /* Query the jfr right after creation and print the queried values,
+//  * used to verify urma_query_jfr behavior (e.g. state aggregation on bonding devices). */
+// static void query_and_show_jfr(const char *tag, uint32_t idx, urma_jfr_t *jfr)
+// {
+//     urma_jfr_cfg_t cfg = {0};
+//     urma_jfr_attr_t attr = {0};
+
+//     if (urma_query_jfr(jfr, &cfg, &attr) != URMA_SUCCESS) {
+//         LOG_ERROR("Failed to query %s jfr[%u], jfr_id=%u\n", tag, idx, jfr->jfr_id.id);
+//         return;
+//     }
+//     LOG_INFO("%s jfr[%u]: jfr_id=%u, state=%u [%s], rx_threshold=%u, attr_mask=0x%x "
+//              "(state_valid=%d, threshold_valid=%d), depth=%u, trans_mode=%d\n",
+//              tag, idx, cfg.id, (uint32_t)attr.state, urma_jfr_state_to_string((uint8_t)attr.state),
+//              attr.rx_threshold, attr.mask,
+//              (attr.mask & JFR_STATE) != 0 ? 1 : 0, (attr.mask & JFR_RX_THRESHOLD) != 0 ? 1 : 0,
+//              cfg.depth, (int)cfg.trans_mode);
+// }
+
 static int create_jfr(perftest_context_t *ctx, const perftest_config_t *cfg)
 {
     urma_jfr_cfg_t jfr_cfg = {
@@ -537,6 +557,7 @@ static int create_jfr(perftest_context_t *ctx, const perftest_config_t *cfg)
             LOG_ERROR("Failed to create jfr: %u!\n", i);
             goto delete_jfr;
         }
+        // query_and_show_jfr("jfr", i, ctx->jfr[i]);
     }
 
     return 0;
@@ -658,6 +679,7 @@ static int create_jetty(perftest_context_t *ctx, const perftest_config_t *cfg)
                 LOG_ERROR("Failed to create share_jfr, %u!\n", j);
                 goto err_delete_jfr;
             }
+            // query_and_show_jfr("share_jfr", j, ctx->jfr[j]);
         }
         jetty_flag.bs.share_jfr = 1;
         jetty_cfg.flag = jetty_flag;

@@ -1236,15 +1236,19 @@ urma_status_t bondp_query_jfr(urma_jfr_t *jfr, urma_jfr_cfg_t *cfg, urma_jfr_att
     bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jfr, bondp_comp_t, v_jfr);
     int cmp_threshold = UINT32_MAX;
     bool isready = false;
+    bool has_member = false;
     /*
-    The sequential traversal from 0 to 2 is because JFR currently only supports multi-path configuration,
-    hence it is only necessary to traverse the JFR corresponding to the primary EID.
+    p_jfr[] is sparsely indexed by enabled_indices, which can reach URMA_UBAGG_DEV_MAX_NUM
+    in port-level bonding. Scan the full range with a NULL check, as bondp_delete_pjfr does.
     */
-    for (int i = 0; i < IODIE_NUM; i++) {
+    for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
         if (bdp_jfr->p_jfr[i] == NULL) {
             continue;
         }
+        has_member = true;
         ret = urma_query_jfr(bdp_jfr->p_jfr[i], cfg, attr);
+        // URMA_LOG_INFO("query pjfr, index=%d, jfr_id=%u, ret=%d, state=%d, rx_threshold=%u\n",
+        //               i, bdp_jfr->p_jfr[i]->jfr_id.id, ret, attr->state, attr->rx_threshold);
         if (ret == URMA_SUCCESS) {
             /*
             Consider only three scenarios:
@@ -1252,7 +1256,8 @@ urma_status_t bondp_query_jfr(urma_jfr_t *jfr, urma_jfr_cfg_t *cfg, urma_jfr_att
             2. Both return values are different and one is ready.
             3. Both return values are different and neither is ready.
             */
-            if ((attr->mask & JFR_STATE) && attr->state == URMA_JFR_STATE_READY) {
+            if (attr->state == URMA_JFR_STATE_READY) {
+                // URMA_LOG_INFO("v_jfr has ready event, jfr_id=%u\n", bdp_jfr->v_jfr.jfr_id.id);
                 isready = true;
             }
             if ((attr->mask & JFR_RX_THRESHOLD) && attr->rx_threshold != 0) {
@@ -1266,7 +1271,12 @@ urma_status_t bondp_query_jfr(urma_jfr_t *jfr, urma_jfr_cfg_t *cfg, urma_jfr_att
             return ret;
         }
     }
+    if (!has_member) {
+        URMA_LOG_ERR("no physical jfr on v_jfr, jfr_id=%u\n", bdp_jfr->v_jfr.jfr_id.id);
+        return URMA_EINVAL;
+    }
     if (isready) {
+        // URMA_LOG_INFO("v_jfr has ready event, jfr_id=%u\n", bdp_jfr->v_jfr.jfr_id.id);
         attr->state = URMA_JFR_STATE_READY;
     }
     if (cmp_threshold != UINT32_MAX) {
