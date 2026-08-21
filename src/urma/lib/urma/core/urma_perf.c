@@ -421,6 +421,21 @@ static void urma_perf_dump_info(urma_perf_stats_t *perf_info)
     }
 
     perf_info->retry_count = urma_ubagg_switch_get();
+    perf_info->wr_complete_cnt = urma_ubagg_wr_complete_snapshot_and_reset();
+
+    /* Snapshot+reset windowed per-path RTT accumulators into rtt_avg so each
+     * urma_get_perf_info() call reports the avg RTT of the adjacent window. */
+    {
+        uint64_t rtt_sum[URMA_UBAGG_SQE_TOTAL_DIM * URMA_UBAGG_SQE_TOTAL_DIM];
+        uint64_t rtt_cnt[URMA_UBAGG_SQE_TOTAL_DIM * URMA_UBAGG_SQE_TOTAL_DIM];
+        urma_ubagg_rtt_snapshot_and_reset(rtt_sum, rtt_cnt);
+        for (uint32_t li = 0; li < URMA_UBAGG_SQE_TOTAL_DIM; li++) {
+            for (uint32_t ti = 0; ti < URMA_UBAGG_SQE_TOTAL_DIM; ti++) {
+                uint32_t idx = li * URMA_UBAGG_SQE_TOTAL_DIM + ti;
+                perf_info->rtt_avg[li][ti] = (rtt_cnt[idx] > 0) ? (rtt_sum[idx] / rtt_cnt[idx]) : 0;
+            }
+        }
+    }
 }
 
 bool urma_perf_is_enabled()
@@ -595,6 +610,20 @@ urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length)
         "+----------------------+------------+------------+------------+------------+------------+------------+------------+--------------+\n");
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
         "  retry_count: %-20lu\n", perf_info.retry_count);
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+        "  wr_complete_cnt: %-16lu\n", perf_info.wr_complete_cnt);
+    /* Per-path average WR RTT over the window since the previous call. */
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used, "  rtt_avg:");
+    for (uint32_t li = 0; li < URMA_UBAGG_SQE_TOTAL_DIM; li++) {
+        for (uint32_t ti = 0; ti < URMA_UBAGG_SQE_TOTAL_DIM; ti++) {
+            if (perf_info.rtt_avg[li][ti] == 0) {
+                continue;
+            }
+            buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+                " [%u,%u]:%lu", li, ti, perf_info.rtt_avg[li][ti]);
+        }
+    }
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used, "\n");
     /* Per-link cumulative SQE total: [local_idx,target_idx]:count, non-zero only. */
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used, "  sqe_total:");
     for (uint32_t li = 0; li < URMA_UBAGG_SQE_TOTAL_DIM; li++) {
@@ -638,6 +667,63 @@ urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length)
         return URMA_EINVAL;
     }
     (void)memcpy(perf_buf, temp_buf, (size_t)(buffer_used + 1));
+    *length = buffer_used + 1;
+    return URMA_SUCCESS;
+}
+
+urma_status_t urma_start_path_perf(void)
+{
+    urma_ubagg_path_start();
+    return URMA_SUCCESS;
+}
+
+urma_status_t urma_stop_path_perf(void)
+{
+    urma_ubagg_path_stop();
+    return URMA_SUCCESS;
+}
+
+urma_status_t urma_get_path_info(char *path_buf, uint32_t *length)
+{
+    char temp_buf[16384] = {0};
+    int buffer_used = 0;
+
+    if (path_buf == NULL || length == NULL) {
+        URMA_LOG_ERR("Urma path info get failed, path_buf or length is invalid\n");
+        return URMA_EINVAL;
+    }
+
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+        "+----------------------------------------------------------------------------+\n");
+
+    /* (1) Current per-path in-flight WR count (non-zero only). */
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+        "  inflight_wr:");
+    for (uint32_t li = 0; li < URMA_UBAGG_SQE_TOTAL_DIM; li++) {
+        for (uint32_t ti = 0; ti < URMA_UBAGG_SQE_TOTAL_DIM; ti++) {
+            uint64_t cnt = urma_ubagg_inflight_path_get(li, ti);
+            if (cnt == 0) {
+                continue;
+            }
+            buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+                " [%u,%u]:%lu", li, ti, cnt);
+        }
+    }
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used, "\n");
+
+    /* (2) Count of virtual jetties with in-flight WRs. */
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+        "  pjetty_inflight_cnt: %u\n", urma_ubagg_pjetty_inflight_get());
+
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+        "+----------------------------------------------------------------------------+\n");
+
+    if (*length < (uint32_t)buffer_used + 1) {
+        URMA_LOG_ERR("Urma path info get failed, need %d bytes buffer, but only %u provided\n",
+            buffer_used + 1, *length);
+        return URMA_EINVAL;
+    }
+    (void)memcpy(path_buf, temp_buf, (size_t)(buffer_used + 1));
     *length = buffer_used + 1;
     return URMA_SUCCESS;
 }
