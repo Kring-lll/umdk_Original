@@ -108,6 +108,22 @@ static inline uint32_t __idx_to_wr_id(uint32_t idx)
 {
     return (uint32_t)(idx + 1);
 }
+
+/*
+ * Compute the next monotonic wr_id for a slot being (re)allocated.
+ * old_id is the wr_id currently stored in the entry header (preserved across
+ * release). On first use (old_id == 0) or on uint64 overflow, reset to the
+ * base value idx + 1. Otherwise advance by max_wr_num so that
+ * __wr_id_to_idx(next, max_wr_num) == idx but next != old_id, preventing
+ * ABA: a stale CQE carrying the old wr_id cannot match a recycled entry.
+ */
+static inline uint64_t __next_wr_id(uint64_t old_id, uint32_t idx, uint32_t max_wr_num)
+{
+    if (old_id == 0 || old_id > UINT64_MAX - max_wr_num) {
+        return (uint64_t)idx + 1;
+    }
+    return old_id + max_wr_num;
+}
 static inline void *__wr_buf_idx(wr_buf_t *buf, uint32_t idx)
 {
     return ((char *)buf->entries + idx * buf->wr_entry_size);
