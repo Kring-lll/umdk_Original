@@ -1673,7 +1673,7 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
     if (is_umq_ub_logic_queue(queue->create_flag) && queue->jetty_node != 0) {
         jetty_pool_node_t *node = (jetty_pool_node_t *)(uintptr_t)queue->jetty_node;
         __atomic_store_n(&queue->jetty_node, 0, __ATOMIC_RELEASE);
-        if (g_ubsocket_exiting) {
+        if (umq_ub_exiting_get_impl()) {
             /* Process exit ONLY. The shared poll runners are stopped, so the
              * pool round-robin will not drain/free this node; return it here to
              * avoid leaving it IN_USE (which makes Clean()->node_remove CAS fail

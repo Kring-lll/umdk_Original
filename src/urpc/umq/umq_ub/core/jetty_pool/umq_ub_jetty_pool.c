@@ -576,8 +576,7 @@ int umq_ub_jetty_node_free(jetty_pool_node_t *node, bool should_report_event)
          * 线程的 poll 回调链可能在 free(node) 后继续调 HandleTxCompletion→SendSimpleCtrl
          * →umq_post→umq_ub_post_tx 读已 free 的 node（heap-use-after-free）。同步置退出
          * 标志使 umq_ub_post_tx/poll 守卫生效，跳过对已 free node 的访问。 */
-        g_ubsocket_exiting = true;
-        __sync_synchronize();
+        umq_ub_exiting_set_impl(true);
         free(node);
         umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_FREE_JETTY_NODE, start_timestamp);
         return UMQ_SUCCESS;
