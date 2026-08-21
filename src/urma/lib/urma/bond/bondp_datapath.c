@@ -1405,8 +1405,15 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                 jfs_wr_put_refs(&wr_entry->wr);
                 jfs_wr_buf_release(&bdp_comp->send_wr_buf, wr_entry);
             } else {
-                wr_entry->rnr_retry_cnt++;
                 if (new_task) {
+                    /* Only advance retry_cnt on a newly scheduled task. When a
+                     * resend is already pending (task_pending), the WR is not in
+                     * flight and URMA keeps reporting status=10 for it; advancing
+                     * retry_cnt here would let a burst of duplicate RNR CQEs
+                     * exhaust rnr_retry_max far faster than the exponential
+                     * backoff intends (observed: minutes instead of ~27min at
+                     * sleep=100ms/max=15). */
+                    wr_entry->rnr_retry_cnt++;
                     URMA_LOG_INFO("Schedule RNR retry resend, path=[%u, %u], "
                                   "retry_cnt=%u, local_id=%u, tjetty_id=%u\n",
                                   send_idx, target_idx, retry_cnt,
