@@ -163,6 +163,7 @@ typedef struct urma_port_attr {
     urma_link_width_t active_width; /* [Public] link width: X1, X2, X4. */
     urma_speed_t active_speed;      /* [Public] bandwidth. */
     urma_mtu_t active_mtu;          /* [Public] current effective mtu. */
+    uint64_t reserved[2];
 } urma_port_attr_t;
 
 union urma_tp_type_en {
@@ -294,6 +295,7 @@ typedef struct urma_device_cap {
     urma_tp_type_cap_t um_tp_cap;
     urma_tp_feature_t tp_feature;
     struct urma_sl_info priority_info[URMA_MAX_PRIORITY_CNT];
+    uint64_t reserved[8];
 } urma_device_cap_t;
 
 typedef struct urma_guid {
@@ -307,6 +309,7 @@ typedef struct urma_device_attr {
     struct urma_port_attr port_attr[MAX_PORT_CNT];
     uint32_t reserved_jetty_id_min;
     uint32_t reserved_jetty_id_max;
+    uint64_t reserved[4];
 } urma_device_attr_t;
 
 /* security information */
@@ -375,6 +378,7 @@ typedef struct urma_device {
     urma_transport_type_t type;       /* [Public] urma device's transport type. */
     struct urma_provider_ops *ops;    /* [Private] urma device driver's ops. */
     struct urma_sysfs_dev *sysfs_dev; /* [Private] internal device corresponding to the urma device */
+    uint64_t reserved[4];
 } urma_device_t;
 
 typedef enum urma_context_opt_name {
@@ -398,6 +402,7 @@ typedef struct urma_context {
     uint32_t uasid;                     /* [Public] uasid of current process. */
     struct urma_ref ref;                /* [Private] reference count of urma context. */
     urma_context_aggr_mode_t aggr_mode; /* [Public] aggregated mode of urma context. */
+    uint64_t reserved[4];
 } urma_context_t;
 
 typedef struct urma_eid_info {
@@ -408,12 +413,14 @@ typedef struct urma_eid_info {
 typedef struct urma_jfce_cfg {
     uint32_t depth;
     uint64_t user_ctx;
+    uint64_t reserved[2];
 } urma_jfce_cfg_t;
 
 typedef struct urma_jfce {
     urma_context_t *urma_ctx; /* [Private] point to urma context. */
     int fd;                   /* [Private] fd of completed event. */
     struct urma_ref ref;      /* [Private] reference count of urma context. */
+    uint64_t reserved[2];
 } urma_jfce_t;
 
 typedef union urma_jfc_flag {
@@ -434,6 +441,7 @@ typedef struct urma_jfc_cfg {
                               set to 0 by default */
     urma_jfce_t *jfce;    /* [Required] the event of jfc */
     uint64_t user_ctx;    /* [Optional] private data of jfc, set to NULL by default */
+    uint64_t reserved[2];
 } urma_jfc_cfg_t;
 
 typedef enum urma_jfc_attr_mask {
@@ -445,6 +453,7 @@ typedef struct urma_jfc_attr {
     uint32_t mask; /* mask value, refer to urma_jfc_attr_mask_t */
     uint16_t moderate_count;
     uint16_t moderate_period; /* in micro seconds */
+    uint64_t reserved[2];
 } urma_jfc_attr_t;
 
 typedef struct urma_jetty_id {
@@ -494,7 +503,7 @@ typedef struct urma_jfc {
     pthread_cond_t event_cond;
     uint32_t comp_events_acked;
     uint32_t async_events_acked;
-    urma_jfc_opt_t urma_jfc_opt;
+    urma_jfc_opt_t urma_jfc_opt; // 以此结尾，可以不预留
 } urma_jfc_t;
 
 typedef enum urma_order_type {
@@ -570,6 +579,7 @@ typedef struct urma_jfs_cfg {
                                  the actual timeout in usec is caculated by: 4.096*(2^err_timeout) */
     urma_jfc_t *jfc;          /* [Required] need to specify jfc */
     uint64_t user_ctx;        /* [Optional] private data of jfs */
+    uint64_t reserved[2];
 } urma_jfs_cfg_t;
 
 typedef struct urma_jfs {
@@ -580,7 +590,7 @@ typedef struct urma_jfs {
     pthread_mutex_t event_mutex;
     pthread_cond_t event_cond;
     uint32_t async_events_acked;
-    urma_jfs_opt_t urma_jfs_opt;
+    urma_jfs_opt_t urma_jfs_opt; // 以此结尾，可以不预留
 } urma_jfs_t;
 
 typedef enum urma_jfs_attr_mask {
@@ -592,6 +602,7 @@ typedef urma_jetty_state_t urma_jfs_state_t;
 typedef struct urma_jfs_attr {
     uint32_t mask; /* mask value refer to urma_jfs_attr_mask_t */
     urma_jfs_state_t state;
+    uint64_t reserved[2];
 } urma_jfs_attr_t;
 
 typedef union urma_jfr_flag {
@@ -657,6 +668,7 @@ typedef struct urma_jfr_cfg {
     urma_jfc_t *jfc;                  /* [Required] need to specify jfc. */
     urma_token_t token_value;         /* [Required] specify token_value for jfr. */
     uint64_t user_ctx;                /* [Optional] private data of jfr */
+    uint64_t reserved[2];
 } urma_jfr_cfg_t;
 
 typedef enum urma_jfr_attr_mask {
@@ -668,6 +680,7 @@ typedef struct urma_jfr_attr {
     uint32_t mask; // mask value refer to urma_jfr_attr_mask_t
     uint32_t rx_threshold;
     urma_jfr_state_t state;
+    uint64_t reserved[2];
 } urma_jfr_attr_t;
 
 typedef struct urma_jfr {
@@ -678,7 +691,7 @@ typedef struct urma_jfr {
     pthread_mutex_t event_mutex;
     pthread_cond_t event_cond;
     uint32_t async_events_acked;
-    urma_jfr_opt_t urma_jfr_opt;
+    urma_jfr_opt_t urma_jfr_opt; // 以此结尾，可以不预留
 } urma_jfr_t;
 
 typedef union urma_import_jetty_flag {
@@ -710,10 +723,12 @@ typedef struct urma_rjfr {
     urma_transport_mode_t trans_mode;
     urma_import_jetty_flag_t flag;
     urma_tp_type_t tp_type;
+    uint64_t reserved[2];
 } urma_rjfr_t;
 
 typedef struct urma_tp {
     uint32_t tpn; /* vtpn */
+    uint64_t reserved[2];
 } urma_tp_t;
 
 typedef union urma_jetty_flag {
@@ -748,6 +763,7 @@ typedef struct urma_jetty_cfg {
     };
     urma_jetty_grp_t *jetty_grp; /* [Optional] user specified jetty group. */
     uint64_t user_ctx;           /* [Optional] private data of jetty */
+    uint64_t reserved[2];
 } urma_jetty_cfg_t;
 
 typedef enum urma_jetty_grp_policy {
@@ -773,7 +789,7 @@ typedef struct urma_ext {
     urma_ext_flag_t flag;
     uint32_t length;
     char buf[0];
-} urma_ext_t;
+} urma_ext_t;  // 空字段，当前暂无用途，可以作为扩展字段
 
 typedef struct urma_rjetty {
     urma_jetty_id_t jetty_id;
@@ -782,6 +798,7 @@ typedef struct urma_rjetty {
     urma_target_type_t type;
     urma_import_jetty_flag_t flag;
     urma_tp_type_t tp_type;
+    uint64_t reserved[2];
 } urma_rjetty_t;
 
 typedef struct urma_target_jetty {
@@ -794,6 +811,7 @@ typedef struct urma_target_jetty {
     urma_import_jetty_flag_t flag;
     urma_jetty_grp_policy_t policy;
     urma_tp_type_t tp_type;
+    uint64_t reserved[2];
 } urma_target_jetty_t;
 
 typedef enum urma_jetty_attr_mask {
@@ -805,6 +823,7 @@ typedef struct urma_jetty_attr {
     uint32_t mask; // mask value refer to urma_jetty_attr_mask_t
     uint32_t rx_threshold;
     urma_jetty_state_t state;
+    uint64_t reserved[2];
 } urma_jetty_attr_t;
 
 typedef struct urma_jetty_opt {
@@ -823,7 +842,7 @@ typedef struct urma_jetty {
     pthread_mutex_t event_mutex;
     pthread_cond_t event_cond;
     uint32_t async_events_acked;
-    urma_jetty_opt_t urma_jetty_opt;
+    urma_jetty_opt_t urma_jetty_opt; // 以此结尾，可以不预留
 } urma_jetty_t;
 
 typedef struct urma_notifier {
@@ -867,6 +886,7 @@ typedef struct urma_jetty_grp_cfg {
                                        If the parameter is 0, UMDK will assign a non_0 value. */
     urma_jetty_grp_policy_t policy; /* Hash or RR(on default) */
     uint64_t user_ctx;              /* [Optional] private data of jetty */
+    uint64_t reserved[2];
 } urma_jetty_grp_cfg_t;
 
 struct urma_jetty_grp {
@@ -880,6 +900,7 @@ struct urma_jetty_grp {
     pthread_mutex_t event_mutex;
     pthread_cond_t event_cond;
     uint32_t async_events_acked;
+    uint64_t reserved[2];
 };
 
 /* memory information */
@@ -973,6 +994,7 @@ typedef struct urma_token_id {
     uint64_t handle;
     urma_ref_t ref;
     urma_token_id_flag_t flag;
+    uint64_t reserved[2];
 } urma_token_id_t;
 
 typedef struct urma_seg_cfg {
@@ -983,6 +1005,7 @@ typedef struct urma_seg_cfg {
     urma_reg_seg_flag_t flag;
     uint64_t user_ctx;
     uint64_t iova; /* user iova, maybe zero-based-address */
+    uint64_t reserved[2];
 } urma_seg_cfg_t;
 
 typedef struct urma_seg {
@@ -990,6 +1013,7 @@ typedef struct urma_seg {
     uint64_t len;         /* [Public] length of segment. */
     urma_seg_attr_t attr; /* [Public] include: access flag, token policy, cacheability. */
     uint32_t token_id;    /* [Private] match token */
+    uint64_t reserved[2];
 } urma_seg_t;
 
 typedef struct urma_target_seg {
@@ -999,6 +1023,7 @@ typedef struct urma_target_seg {
     urma_context_t *urma_ctx;  /* [Private] point to urma context. */
     urma_token_id_t *token_id; /* When registering seg, it is a valid address; when importing seg, it is NULL */
     uint64_t handle;
+    uint64_t reserved[2];
 } urma_target_seg_t;
 
 typedef struct urma_user_ctl_in {
@@ -1033,11 +1058,13 @@ typedef struct urma_sge {
      */
     urma_target_seg_t *tseg;
     urma_user_tseg_t *user_tseg; /* To support the exemption of import_seg */
+    uint64_t reserved[2];
 } urma_sge_t;
 
 typedef struct urma_sg {
     urma_sge_t *sge;
     uint32_t num_sge;
+    uint32_t reserved; // 此处补齐不影响长度
 } urma_sg_t;
 
 /* wr for batch operations */
@@ -1080,12 +1107,14 @@ typedef struct urma_rw_wr {
     urma_sg_t dst;        /* dst is remote va for write, and local va for read.
                              only support 1 dst sge in write operation. */
     uint8_t target_hint;  // required when using jetty group
+    // 说明：此处有padding
     uint64_t notify_data; // notify data or imm data in host byte order;
 } urma_rw_wr_t;
 
 typedef struct urma_send_wr {
     urma_sg_t src;           // including total data length
     uint8_t target_hint;     // required when using jetty group
+    // 此处有padding
     uint64_t imm_data;       // imm_data in host byte order;
     urma_target_seg_t *tseg; /* tseg used only when send with invalidate */
 } urma_send_wr_t;
@@ -1163,7 +1192,9 @@ typedef struct urma_cr {
         urma_cr_token_t invalid_token; // Valid only for receiving CR: send with invalidate.
     };
     uint32_t tpn;        // TP number or TPG number
+    // 此处有padding
     uintptr_t user_data; // e.g. use as pointer to local jetty struct.
+    uint64_t reserved;
 } urma_cr_t;
 
 typedef struct urma_async_event {
@@ -1182,7 +1213,7 @@ typedef struct urma_async_event {
     void *priv;
 } urma_async_event_t;
 
-/* URMA region definition */
+/* URMA region definition, 当前不再使用 */
 typedef union urma_ur_attr {
     struct {
         uint32_t reserved : 32;
@@ -1373,10 +1404,12 @@ typedef struct urma_get_tp_cfg {
     urma_transport_mode_t trans_mode;
     urma_eid_t local_eid;
     urma_eid_t peer_eid;
+    uint64_t reserved[2];
 } urma_get_tp_cfg_t;
 
 typedef struct urma_tp_info {
     uint64_t tp_handle;
+    uint64_t reserved[2];
 } urma_tp_info_t;
 
 typedef struct urma_active_tp_attr {
