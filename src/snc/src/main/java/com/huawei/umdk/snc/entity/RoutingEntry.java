@@ -28,15 +28,15 @@ import lombok.ToString;
 @ToString
 public class RoutingEntry {
     private RoutePrefix prefix;
-    private Map<String, OutPortInfo> outPortInfos;
+    private List<OutPortInfo> outPortInfos;
 
     /**
      * 路由可达性：表示 outPortInfos 中是否存在 convergedFlag==0 的有效出端口。
      */
     private boolean reachable = true;
 
-    public Map<String, OutPortInfo> getOutPortInfos() {
-        return outPortInfos == null ? null : Collections.unmodifiableMap(outPortInfos);
+    public List<OutPortInfo> getOutPortInfos() {
+        return outPortInfos == null ? null : Collections.unmodifiableList(outPortInfos);
     }
 
     /**
@@ -72,22 +72,20 @@ public class RoutingEntry {
         RoutePrefix dstPrefix = (srcPrefix == null) ? null
             : new RoutePrefix(srcPrefix.getDstAddress(), srcPrefix.getMaskLength());
 
-        Map<String, OutPortInfo> dstOutPortMap = new HashMap<>();
-        Map<String, OutPortInfo> srcOutPortMap = srcRoutingEntry.getOutPortInfos();
-        if (srcOutPortMap != null) {
-            for (Map.Entry<String, OutPortInfo> portEntry : srcOutPortMap.entrySet()) {
-                OutPortInfo srcPort = portEntry.getValue();
+        List<OutPortInfo> dstOutPortList = new ArrayList<>();
+        List<OutPortInfo> srcOutPortList = srcRoutingEntry.getOutPortInfos();
+        if (srcOutPortList != null) {
+            for (OutPortInfo srcPort : srcOutPortList) {
                 OutPortInfo dstPort = (srcPort == null) ? null : new OutPortInfo(
                     srcPort.getPortName(), srcPort.getNextHop(), srcPort.getPreference(),
-                    srcPort.getTag(), srcPort.getProtocol(), srcPort.getConvergedFlag());
-                dstOutPortMap.put(portEntry.getKey(), dstPort);
+                    srcPort.getTag(), srcPort.getProtocol(), srcPort.isActive());
+                dstOutPortList.add(dstPort);
             }
         }
 
         RoutingEntry destEntry = new RoutingEntry();
         destEntry.setPrefix(dstPrefix);
-        destEntry.setOutPortInfos(dstOutPortMap);
-        destEntry.setReachable(srcRoutingEntry.isReachable());
+        destEntry.setOutPortInfos(dstOutPortList);
         return destEntry;
     }
 }
