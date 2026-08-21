@@ -27,7 +27,9 @@ import com.huawei.umdk.snc.route.topo.template.model.SncNode;
 import com.huawei.umdk.snc.route.topo.template.model.SncPort;
 import com.huawei.umdk.snc.route.topo.template.model.SncTopology;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class RouteInstantiationService {
@@ -279,15 +281,15 @@ public class RouteInstantiationService {
             String dstAddress = longToIp(prefix.getAddr());
             RoutePrefix routePrefix = new RoutePrefix(dstAddress, prefix.getMaskLen());
 
-            Map<String, OutPortInfo> outPortInfoMap = new HashMap<>();
+            List<OutPortInfo> outPortInfoList = new ArrayList<>();
             for (NextHopPort nhp : routeEntry.getNhpSet()) {
                 OutPortInfo outPortInfo = new OutPortInfo();
                 outPortInfo.setPortName(nhp.getOutPortName());
                 outPortInfo.setActive(true);
-                outPortInfoMap.put(nhp.getOutPortName(), outPortInfo);
+                outPortInfoList.add(outPortInfo);
             }
 
-            result.put(dstAddress, new RoutingEntry(routePrefix, outPortInfoMap));
+            result.put(dstAddress, new RoutingEntry(routePrefix, outPortInfoList));
         }
         return result;
     }
