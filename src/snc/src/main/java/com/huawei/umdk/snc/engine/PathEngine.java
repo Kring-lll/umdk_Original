@@ -27,7 +27,7 @@ public class PathEngine {
 
     private static final Logger LOG = new Logger(PathEngine.class);
 
-    public InternalPathInfo resolveDirectPath(NpuDevice srcDevice,
+    public InternalPathInfo resolveDirectPath(String superNodeName, NpuDevice srcDevice,
                                               NpuPortEntity srcPort, NpuDevice destDevice,
                                               NpuPortEntity destPort) {
         LOG.debug("resolveDirectPath: srcDevice=" + srcDevice.getDeviceName()
@@ -67,7 +67,7 @@ public class PathEngine {
         return pathInfo;
     }
 
-    public InternalPathInfo resolveMultiHopPath(NpuDevice srcDevice,
+    public InternalPathInfo resolveMultiHopPath(String superNodeName, NpuDevice srcDevice,
                                                 NpuPortEntity srcPort, NpuDevice destDevice,
                                                 NpuPortEntity destPort,
                                                 Map<String, String> interDevices,
@@ -115,15 +115,11 @@ public class PathEngine {
                 }
                 if (port == null) {
                     port = findPortByConnection(device);
-                    if (port == null) {
-                        LOG.error("resolveMultiHopPath: error=Port not found, port=" + interPortName
-                            + ", device=" + devName);
-                        throw new SuperNodeNotFoundException(
-                            "Port not found: " + interPortName + " in " + devName); // NOPMD
-                    }
                 }
-                hop.setInPort(null);
-                hop.setOutPort(port.getPortName());
+                if (port != null) {
+                    hop.setInPort(port.getPortName());
+                    hop.setOutPort(port.getPortName());
+                }
             }
 
             if (port != null) {
@@ -178,13 +174,17 @@ public class PathEngine {
             reversedHop.setDeviceName(original.getDeviceName());
             reversedHop.setDeviceType(original.getDeviceType());
             reversedHop.setInPort(original.getOutPort());
-            reversedHop.setOutPort(original.getInPort());
             reversedHop.setCna(original.getCna());
             reversedHop.setEid(original.getEid());
             reversedHop.setRemoteDevice(original.getRemoteDevice());
             reversedHop.setRemotePort(original.getRemotePort());
             reversedHop.setRack(original.getRack());
             reversedHop.setHopIndex(reversed.size());
+            if (i > 0 && i < hops.size() - 1) {
+                reversedHop.setOutPort(hops.get(i - 1).getRemotePort());
+            } else {
+                reversedHop.setOutPort(original.getInPort());
+            }
             reversed.add(reversedHop);
         }
         return reversed;
