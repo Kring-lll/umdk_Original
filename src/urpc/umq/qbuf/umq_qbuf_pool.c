@@ -519,7 +519,7 @@ static void qbuf_dbg_print_summary(void)
 #define QBUF_NON_POOL_PTR_LOG_LIMIT 32
 static volatile uint32_t g_non_pool_ptr_log_count = 0;
 
-void qbuf_log_non_pool_pointer(const char *caller, void *data)
+void umq_qbuf_log_non_pool_pointer(const char *caller, void *data)
 {
     uint32_t n = __atomic_add_fetch(&g_non_pool_ptr_log_count, 1, __ATOMIC_RELAXED);
     if (n > QBUF_NON_POOL_PTR_LOG_LIMIT) {
