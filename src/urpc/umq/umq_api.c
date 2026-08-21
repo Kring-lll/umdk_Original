@@ -1218,7 +1218,7 @@ umq_buf_t *umq_data_to_head(void *data)
      * to any pool. Forward to the diagnostic helper in umq_qbuf_pool.c which prints
      * the pointer value, pool regions, and call stack to identify the upstream
      * caller passing a non-pool pointer. */
-    qbuf_log_non_pool_pointer(__func__, data);
+    umq_qbuf_log_non_pool_pointer(__func__, data);
 
     return NULL;
 }

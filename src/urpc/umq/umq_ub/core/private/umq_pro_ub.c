@@ -32,17 +32,17 @@ static __thread urma_sge_t g_umq_ub_jfr_sges[UMQ_BATCH_SIZE][UMQ_MAX_SGE_NUM];
 
 /* 进程退出标志：ubsocket 经 umq_exiting_set() -> umq_tp_exiting_set 回调置 true。
  * umq_ub_poll_fc_tx 等据此跳过 poll，避免 worker 线程在主线程释放 jfc 后仍访问悬空指针。 */
-volatile bool g_ubsocket_exiting = false;
+volatile bool g_umq_exiting = false;
 
 void umq_ub_exiting_set_impl(bool exiting)
 {
-    g_ubsocket_exiting = exiting;
+    g_umq_exiting = exiting;
     __sync_synchronize();
 }
 
 bool umq_ub_exiting_get_impl(void)
 {
-    return g_ubsocket_exiting;
+    return g_umq_exiting;
 }
 
 int rx_buf_ctx_list_init(rx_buf_ctx_list_t *rx_buf_ctx_list, uint32_t ctx_num)
@@ -284,7 +284,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
      * 守卫一致。退出期 release 路径会回收 jetty node 并释放 jfc，poll 回调
      * (HandleTxCompletion->SendSimpleCtrl) 触发的 umq_post 读 queue->jetty_node
      * 或调 urma post 会 UAF/SEGV。退出期无需 post，交还 qbuf 安全。 */
-    if (g_ubsocket_exiting) {
+    if (g_umq_exiting) {
         *bad_qbuf = qbuf;
         return -UMQ_ERR_ENODEV;
     }
@@ -1980,7 +1980,7 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
     /* 进程退出期跳过 poll：ubsocket_uninit 先 ReleaseAll(Socket) 释放 jfc，
      * 后 Stop(TX_RUNNER)，窗口期内 worker 仍 poll 已释放的 jfc 会 UAF。
      * 退出期无需处理 CQE，直接返回 0 安全。 */
-    if (g_ubsocket_exiting) {
+    if (g_umq_exiting) {
         return 0;
     }
 
@@ -2087,7 +2087,7 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
      * 后 Stop(TX_RUNNER)，窗口期内 worker 仍 poll 已释放资源会 UAF (SEGV in
      * urma_poll_jfc)。此守卫覆盖 FC jfc 和 IO jfc 两条 poll 路径。退出期无需
      * 处理 CQE，直接返回 0 安全。 */
-    if (g_ubsocket_exiting) {
+    if (g_umq_exiting) {
         return 0;
     }
 
@@ -2253,7 +2253,7 @@ static int umq_ub_poll_tx_round_robin(ub_queue_t *queue, umq_buf_t **buf, uint32
     /* 进程退出期跳过 poll：与 umq_ub_poll_tx_single/umq_ub_poll_fc_tx 守卫一致。
      * 退出期 release 路径会 umq_ub_jetty_node_free 回收 node，round_robin 仍读
      * node_list[]->is_jetty_err 会与 release 竞争 heap-use-after-free。 */
-    if (g_ubsocket_exiting) {
+    if (g_umq_exiting) {
         return 0;
     }
 
