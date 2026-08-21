@@ -1346,6 +1346,11 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         return CONVERT_SKIP;
     }
 
+    URMA_LOG_INFO("[CQE_TRACE] enter send_cr, wr_id=%lu, idx=%d, cr_status=%d, "
+                  "modify_to_error=%d, jetty_id=%u\n",
+                  wr_id, idx, cr->status, bdp_comp->modify_to_error,
+                  get_comp_urma_jetty_id(bdp_comp)->id);
+
     jfs_wr_entry_t *wr_entry = jfs_wr_buf_get(&bdp_comp->send_wr_buf, wr_id);
     if ((wr_entry == NULL) || (wr_entry->entry_type != WR_BUF_ENTRY_JFS)) {
         /*
@@ -1355,19 +1360,40 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
          * but this is risky because subsequent WRs may reuse the same memory,
          * resulting in WR/CR mismatch.
          */
+        URMA_LOG_INFO("[CQE_TRACE] skip: wr_entry not found or not JFS, wr_id=%lu, "
+                      "wr_entry=%p, entry_type=%d\n",
+                      wr_id, wr_entry, wr_entry ? wr_entry->entry_type : -1);
         put_comp(bdp_comp);
         return CONVERT_SKIP;
     }
     uint32_t send_idx = wr_entry->send_idx;
     uint32_t target_idx = wr_entry->target_idx;
 
-    if (atomic_load(&bdp_comp->valid[idx]) == false || idx != send_idx) {
+    if (idx != send_idx) {
+        URMA_LOG_INFO("[CQE_TRACE] skip: idx mismatch (stale cqe from resent wr), "
+                      "wr_id=%lu, idx=%d, send_idx=%u\n",
+                      wr_id, idx, send_idx);
         put_comp(bdp_comp);
         return CONVERT_SKIP;
+    }
+    if (atomic_load(&bdp_comp->valid[idx]) == false) {
+        /*
+         * Path was invalidated by a previous failover CR, but this WR was not
+         * resent to a backup path (idx == send_idx). Return this CR to the
+         * user and release the WR entry instead of silently dropping it.
+         */
+        URMA_LOG_INFO("[CQE_TRACE] path invalidated but wr not resent, "
+                      "reporting CQE to user, wr_id=%lu, idx=%d, "
+                      "send_idx=%u, valid[idx]=%d\n",
+                      wr_id, idx, send_idx, atomic_load(&bdp_comp->valid[idx]));
+        goto CONVERT_CR;
     }
 
     const bondp_context_t *comp_ctx = bdp_comp->bondp_ctx;
     if (comp_ctx->enable_rnr_retry && is_rnr_retry_cr(cr) && !bdp_comp->modify_to_error) {
+        URMA_LOG_INFO("[CQE_TRACE] enter RNR retry path, wr_id=%lu, idx=%d, "
+                      "send_idx=%u, target_idx=%u, retry_cnt=%u\n",
+                      wr_id, idx, send_idx, target_idx, wr_entry->rnr_retry_cnt);
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         if (wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
             wr_entry->bdp_comp != bdp_comp ||
@@ -1425,6 +1451,11 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
     }
 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
+        URMA_LOG_INFO("[CQE_TRACE] enter failover path, wr_id=%lu, idx=%d, "
+                      "send_idx=%u, target_idx=%u, cr_status=%d, "
+                      "valid[send_idx]=%d(before), enable_failover=%d\n",
+                      wr_id, idx, send_idx, target_idx, cr->status,
+                      atomic_load(&bdp_comp->valid[send_idx]), comp_ctx->enable_failover);
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         atomic_store(&bdp_comp->valid[send_idx], false);
         bondp_target_jetty_t *bdp_tjetty = wr_entry->target_vjetty;
@@ -1479,6 +1510,11 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
     }
 
 CONVERT_CR:
+    URMA_LOG_INFO("[CQE_TRACE] CONVERT_CR: returning CQE to user, wr_id=%lu, "
+                  "idx=%d, send_idx=%u, target_idx=%u, cr_status=%d, "
+                  "valid[idx]=%d, modify_to_error=%d\n",
+                  wr_id, idx, send_idx, target_idx, cr->status,
+                  atomic_load(&bdp_comp->valid[idx]), bdp_comp->modify_to_error);
     atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
 
     uint32_t msn = 0;
