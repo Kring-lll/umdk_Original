@@ -1296,6 +1296,7 @@ int umq_ub_transport_pool_resource_destroy_impl(uint64_t umqh_tp, uint32_t tp_ha
 uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *option)
 {
     uint64_t start_timestamp;
+    bool bonding_port_in_progress = false;
     umq_ub_ctx_t *ub_ctx = (umq_ub_ctx_t *)ctx;
     umq_ub_ctx_t *dev_ctx = umq_ub_get_ub_ctx_by_dev_info(ub_ctx, g_ub_ctx_count, &option->dev_info);
     if (dev_ctx == NULL) {
@@ -1318,7 +1319,7 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
         goto FREE_QUEUE;
     }
 
-    umq_ub_config_bonding_port(dev_ctx, queue);
+    bonding_port_in_progress = umq_ub_config_bonding_port(dev_ctx, queue);
 
     ub_queue_t *share_rq = NULL;
     if ((option->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0) {
@@ -1439,6 +1440,7 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
             port_str, queue->umq_id, queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr->jfr_id.id, queue->tp_mode, queue->tp_type,
             queue->priority, queue->rnr_retry, queue->err_timeout);
     }
+    __atomic_store_n(&dev_ctx->is_bonding_port_configured, true, __ATOMIC_RELEASE);
     return (uint64_t)(uintptr_t)queue;
 
 CLEAR_TABLE:
@@ -1464,6 +1466,9 @@ FREE_QUEUE:
     free(queue);
 DEC_REF:
     umq_dec_ref(dev_ctx->io_lock_free, &dev_ctx->ref_cnt, 1);
+    if (bonding_port_in_progress) {
+        __atomic_store_n(&dev_ctx->is_bonding_port_configured, false, __ATOMIC_RELEASE);
+    }
 
     return UMQ_INVALID_HANDLE;
 }
