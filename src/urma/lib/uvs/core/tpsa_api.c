@@ -13,6 +13,7 @@
 #include "uvs_api.h"
 #include "uvs_cmd_tlv.h"
 #include "uvs_private_api.h"
+#include "uvs_topo_path.h"
 #include "uvs_ubagg_ioctl.h"
 #include <errno.h>
 #include <string.h>
@@ -182,6 +183,14 @@ static int uvs_set_topo_info_inner(struct urma_topo_node *topo, uint32_t topo_nu
         TPSA_LOG_INFO("successfully setted topo info in ubcore\n");
     }
 
+    /*
+     * Keep a private copy so the path set can be derived locally. This is a
+     * shadow path today, so a failure here must not fail the caller.
+     */
+    if (uvs_topo_path_update(topo, topo_num) != 0) {
+        TPSA_LOG_ERR("failed to update local topo copy, local path set disabled.\n");
+    }
+
     return ret;
 }
 
@@ -293,6 +302,31 @@ int uvs_get_path_set(const uvs_eid_t *src_bonding_eid,
     if (ret != 0) {
         TPSA_LOG_ERR("Failed to get path set, ret = %d.\n", ret);
         return ret;
+    }
+
+    /*
+     * Shadow comparison: derive the same path set locally and check it against
+     * the kernel answer. Callers still receive the kernel result; the local
+     * implementation replaces it only after the mismatch count stays at zero.
+     */
+    if (uvs_topo_path_shadow_enabled() && uvs_topo_path_ready()) {
+        uvs_path_set_t local_path_set = {0};
+        int local_ret;
+        bool matched;
+
+        local_ret = uvs_topo_local_get_path_set(src_bonding_eid, dst_bonding_eid,
+                                                tp_type, iodie_level, &local_path_set);
+        matched = (local_ret == 0) && uvs_path_set_equal(uvs_path_set, &local_path_set);
+        uvs_topo_path_count_cmp(matched);
+        if (!matched) {
+            TPSA_LOG_ERR("Local path set differs from kernel: tp_type = %d, "
+                         "iodie_level = %d, local_ret = %d, kernel_count = %u, "
+                         "local_count = %u, diff = %llu/%llu.\n",
+                         (int)tp_type, (int)iodie_level, local_ret,
+                         uvs_path_set->path_count, local_path_set.path_count,
+                         (unsigned long long)uvs_topo_path_diff_count(),
+                         (unsigned long long)uvs_topo_path_cmp_count());
+        }
     }
 
     return ret;
