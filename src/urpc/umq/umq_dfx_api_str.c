@@ -236,7 +236,7 @@ int umq_qbuf_pool_stats_to_str(const umq_qbuf_pool_stats_t *qbuf_pool_stats, cha
                              umq_qbuf_pool_type_name(info->type));
         UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%s\n", UMQ_DFX_UNDERLINE_120);
         UMQ_DFX_SNPRINTF_BUF(buf, max_buf_len, str_size, "%-4s %-10s %-10s %-14s %-14s %-14s %-14s\n",
-                             "sc", "blk_size", "exp_slots", "exp_total_blk", "exp_free_blk", "exp_expand_cnt", "exp_shrink_cnt");
+            "sc", "blk_size", "exp_slots", "exp_total_blk", "exp_free_blk", "exp_expand_cnt", "exp_shrink_cnt");
         for (uint32_t sc = 0; sc < info->sc_count; sc++) {
             const umq_qbuf_sc_info_t *sci = &info->sc_info[sc];
             if (sci->exp_slots == 0 && sci->exp_total_expansion_count == 0) continue;
