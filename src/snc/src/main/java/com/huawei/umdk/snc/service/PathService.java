@@ -9,8 +9,11 @@
 package com.huawei.umdk.snc.service;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.huawei.umdk.snc.log.Logger;
 import com.huawei.umdk.snc.dto.HopInfo;
@@ -18,23 +21,35 @@ import com.huawei.umdk.snc.dto.PathInfo;
 import com.huawei.umdk.snc.dto.PathPlanRequest;
 import com.huawei.umdk.snc.dto.PathPlanResult;
 import com.huawei.umdk.snc.dto.PathPlanResult.PlanStatus;
-import com.huawei.umdk.snc.engine.AclCheckEngine;
+import com.huawei.umdk.snc.dto.CoverageLink;
+import com.huawei.umdk.snc.dto.CoveragePathsRequest;
+import com.huawei.umdk.snc.dto.CoveragePathsResult;
+import com.huawei.umdk.snc.dto.CoverageStats;
+import com.huawei.umdk.snc.dto.CoverageRequirement;
+import com.huawei.umdk.snc.dto.CoveredEidPair;
+import com.huawei.umdk.snc.dto.CoveredEidPairRef;
+import com.huawei.umdk.snc.engine.CoveragePlanEngine;
+import com.huawei.umdk.snc.engine.CoveragePlanEngine.CoveredLinkDetail;
+import com.huawei.umdk.snc.engine.CoveragePlanEngine.CoverageSearchResult;
+import com.huawei.umdk.snc.engine.CoveragePlanEngine.CoveredPair;
+import com.huawei.umdk.snc.engine.CoveragePlanEngine.LinkInfo;
 import com.huawei.umdk.snc.engine.PathEngine;
 import com.huawei.umdk.snc.engine.RouteLookupEngine;
-import com.huawei.umdk.snc.entity.AclData;
 import com.huawei.umdk.snc.entity.DeviceEntity;
 import com.huawei.umdk.snc.entity.DeviceType;
+import com.huawei.umdk.snc.entity.ForwardingChip;
 import com.huawei.umdk.snc.entity.InternalPathHop;
 import com.huawei.umdk.snc.exception.PathPlanException;
 import com.huawei.umdk.snc.entity.InternalPathInfo;
 import com.huawei.umdk.snc.entity.NpuDevice;
 import com.huawei.umdk.snc.entity.NpuPortEntity;
 import com.huawei.umdk.snc.entity.OutPortInfo;
+import com.huawei.umdk.snc.entity.PortEntity;
+import com.huawei.umdk.snc.entity.RouteSelectionRecord;
 import com.huawei.umdk.snc.entity.RoutingEntry;
 import com.huawei.umdk.snc.entity.RoutingTable;
 import com.huawei.umdk.snc.entity.RoutingTableKey;
 import com.huawei.umdk.snc.entity.SuperNode;
-import com.huawei.umdk.snc.store.AclStore;
 import com.huawei.umdk.snc.store.SuperNodeStore;
 import com.huawei.umdk.snc.util.AddressUtils;
 
@@ -42,19 +57,20 @@ public class PathService {
     private static final Logger LOG = new Logger(PathService.class);
 
     private final SuperNodeStore superNodeStore;
-    private final AclStore aclStore;
-    private final PathEngine pathEngine;
-    private final RouteLookupEngine routeLookupEngine;
-    private final AclCheckEngine aclCheckEngine;
 
-    public PathService(SuperNodeStore superNodeStore, AclStore aclStore,
+    private final PathEngine pathEngine;
+
+    private final RouteLookupEngine routeLookupEngine;
+
+    private final CoveragePlanEngine coveragePlanEngine;
+
+    public PathService(SuperNodeStore superNodeStore,
                        PathEngine pathEngine, RouteLookupEngine routeLookupEngine,
-                       AclCheckEngine aclCheckEngine) {
+                       CoveragePlanEngine coveragePlanEngine) {
         this.superNodeStore = superNodeStore;
-        this.aclStore = aclStore;
         this.pathEngine = pathEngine;
         this.routeLookupEngine = routeLookupEngine;
-        this.aclCheckEngine = aclCheckEngine;
+        this.coveragePlanEngine = coveragePlanEngine;
     }
 
     public PathPlanResult planPath(PathPlanRequest request) {
@@ -69,53 +85,32 @@ public class PathService {
             return new PathPlanResult(PlanStatus.TOPO_NOT_FOUND,
                 "SuperNode topology not found: " + request.getSuperNodeName());
         }
-        LOG.debug("planPath: SuperNode found, superNode=" + request.getSuperNodeName());
 
-        Map<String, DeviceEntity> allDevices = superNode.getAllDevices();
-
-        DeviceEntity srcDevice = allDevices.get(request.getSrcDevice());
-        if (srcDevice == null) {
-            LOG.error("planPath: error=Source device not found in topology, src=%s", request.getSrcDevice());
+        DeviceEntity srcDevice = superNode.getAllDevices().get(request.getSrcDevice());
+        DeviceEntity destDevice = superNode.getAllDevices().get(request.getDestDevice());
+        if (srcDevice == null || destDevice == null) {
             return new PathPlanResult(PlanStatus.TOPO_INCOMPLETE,
-                "Source device not found in topology: " + request.getSrcDevice());
-        }
-        if (srcDevice.getDeviceType() != DeviceType.NPU) {
-            LOG.error("planPath: error=Source must be NPU device, src=%s, deviceType=%s",
-                request.getSrcDevice(), srcDevice.getDeviceType());
-            return new PathPlanResult(PlanStatus.SRC_AND_DST_MUST_BE_NPU,
-                "Source must be NPU device: " + request.getSrcDevice() + " is " + srcDevice.getDeviceType());
+                "Source or destination device not found");
         }
 
-        DeviceEntity destDevice = allDevices.get(request.getDestDevice());
-        if (destDevice == null) {
-            LOG.error("planPath: error=Destination device not found in topology, dst=%s", request.getDestDevice());
-            return new PathPlanResult(PlanStatus.TOPO_INCOMPLETE,
-                "Destination device not found in topology: " + request.getDestDevice());
-        }
-        if (destDevice.getDeviceType() != DeviceType.NPU) {
-            LOG.error("planPath: error=Destination must be NPU device, dst=%s, deviceType=%s",
-                request.getDestDevice(), destDevice.getDeviceType());
+        // Both must be NPU
+        if (srcDevice.getDeviceType() != DeviceType.NPU
+            || destDevice.getDeviceType() != DeviceType.NPU) {
             return new PathPlanResult(PlanStatus.SRC_AND_DST_MUST_BE_NPU,
-                "Destination must be NPU device: " + request.getDestDevice() + " is " + destDevice.getDeviceType());
+                "Both source and destination must be NPU");
         }
-
-        NpuDevice srcNpuDevice = (NpuDevice) srcDevice;
-        NpuDevice destNpuDevice = (NpuDevice) destDevice;
-        LOG.debug("planPath: srcNpu=%s, dstNpu=%s",
-            srcNpuDevice.getDeviceName(), destNpuDevice.getDeviceName());
 
         // Step 1: Find src port
-        LOG.debug("planPath: finding source port, srcPort=" + request.getSrcPort());
-        NpuPortEntity srcNpuPort = srcNpuDevice.findNpuPort(request.getSrcPort());
-        if (srcNpuPort == null) {
-            LOG.error("planPath: error=Source port not found or invalid, srcPort=" + request.getSrcPort());
+        PortEntity srcPort = findPortInDevice(srcDevice, request.getSrcPort());
+        if (srcPort == null || !(srcPort instanceof NpuPortEntity)) {
             return new PathPlanResult(PlanStatus.SRC_INFO_ERR,
                 "Source port not found or invalid");
         }
+        NpuPortEntity srcNpuPort = (NpuPortEntity) srcPort;
         String srcEid = srcNpuPort.getEid();
-        String srcCna = srcNpuPort.getCna();
-        String srcRemoteDevice = srcNpuPort.getRemoteDevice();
-        String srcRemotePort = srcNpuPort.getRemotePort();
+        String srcCna = srcPort.getCna();
+        String srcRemoteDevice = srcPort.getRemoteDevice();
+        String srcRemotePort = srcPort.getRemotePort();
         if (srcEid == null || srcCna == null) {
             LOG.error("planPath: error=Source EID or CNA missing, srcEid=" + srcEid + ", srcCna=" + srcCna);
             return new PathPlanResult(PlanStatus.SRC_INFO_ERR,
@@ -134,115 +129,81 @@ public class PathService {
         LOG.debug("planPath: src port found, eid=" + srcEid + ", cna=" + srcCna);
 
         // Step 2: Find dest port
-        LOG.debug("planPath: finding destination port, dstPort=" + request.getDestPort());
-        NpuPortEntity destNpuPort = destNpuDevice.findNpuPort(request.getDestPort());
-        if (destNpuPort == null) {
-            LOG.error("planPath: error=Destination port not found or invalid, dstPort=" + request.getDestPort());
+        PortEntity destPort = findPortInDevice(destDevice, request.getDestPort());
+        if (destPort == null || !(destPort instanceof NpuPortEntity)) {
             return new PathPlanResult(PlanStatus.DST_INFO_ERR,
                 "Destination port not found or invalid");
         }
+        NpuPortEntity destNpuPort = (NpuPortEntity) destPort;
         String dstEid = destNpuPort.getEid();
-        String destCna = destNpuPort.getCna();
+        String destCna = destPort.getCna();
         if (dstEid == null || destCna == null) {
-            LOG.error("planPath: error=Destination EID or CNA missing, dstEid=" + dstEid + ", destCna=" + destCna);
             return new PathPlanResult(PlanStatus.DST_INFO_ERR,
                 "Destination EID or CNA missing");
         }
         if (!AddressUtils.isValidEid(dstEid)) {
-            LOG.error("planPath: error=Destination EID format invalid, dstEid=" + dstEid);
             return new PathPlanResult(PlanStatus.DST_INFO_ERR,
                 "Destination EID format invalid");
         }
         if (!AddressUtils.isValidCna(destCna)) {
-            LOG.error("planPath: error=Destination CNA format invalid, destCna=" + destCna);
             return new PathPlanResult(PlanStatus.DST_INFO_ERR,
                 "Destination CNA format invalid");
         }
-        LOG.debug("planPath: dst port found, eid=" + dstEid + ", cna=" + destCna);
 
         // Check UPI consistency
         if (srcNpuPort.getUpi() != null && destNpuPort.getUpi() != null) {
             if (!srcNpuPort.getUpi().equals(destNpuPort.getUpi())) {
-                LOG.error("planPath: error=UPI mismatch, srcUpi=" + srcNpuPort.getUpi()
-                    + ", dstUpi=" + destNpuPort.getUpi());
                 return new PathPlanResult(PlanStatus.UPI_MISMATCH,
                     "UPI mismatch between source and destination");
             }
-            LOG.debug("planPath: upi=" + srcNpuPort.getUpi() + ", check=UPI consistency passed");
         }
-
-        // Step 3-4: ACL bidirectional check
-        LOG.debug("planPath: ACL bidirectional check, srcEid=" + srcEid
-            + ", dstEid=" + dstEid + ", srcCna=" + srcCna + ", destCna=" + destCna);
-        AclData aclData = aclStore.getAclData(request.getSuperNodeName());
-        if (aclData == null) {
-            LOG.error("planPath: error=ACL data not found, superNode=" + request.getSuperNodeName());
-            return new PathPlanResult(PlanStatus.ACL_NOT_FOUND,
-                "ACL data not found for superNode: " + request.getSuperNodeName());
-        }
-        if (!aclCheckEngine.checkBothDirection(aclData, srcEid, dstEid, srcCna, destCna)) {
-            LOG.error("planPath: error=ACL check failed, srcEid=" + srcEid + ", dstEid=" + dstEid);
-            return new PathPlanResult(PlanStatus.ACL_CHECK_FAILED,
-                "ACL check failed");
-        }
-        LOG.debug("planPath: ACL bidirectional check passed");
 
         // Step 5: Direct or multi-hop
         Map<String, String> interDevices = request.getInterDevices();
         if (interDevices == null || interDevices.isEmpty()) {
             // Step 6: Direct path verification
-            LOG.debug("planPath: Direct path mode");
             if (srcRemoteDevice == null
-                || !srcRemoteDevice.equals(destNpuDevice.getDeviceName())
+                || !srcRemoteDevice.equals(destDevice.getDeviceName())
                 || srcRemotePort == null
-                || !srcRemotePort.equals(destNpuPort.getPortName())) {
-                LOG.error("planPath: error=Direct connection not found, src=" + srcNpuDevice.getDeviceName()
-                    + ", dst=" + destNpuDevice.getDeviceName());
+                || !srcRemotePort.equals(destPort.getPortName())) {
                 return new PathPlanResult(PlanStatus.TOPO_CONNECTION_ERROR,
                     "Direct connection not found between source and destination");
             }
             // Verify reverse direction too
-            if (destNpuPort.getRemoteDevice() == null
-                || !destNpuPort.getRemoteDevice().equals(srcNpuDevice.getDeviceName())
-                || destNpuPort.getRemotePort() == null
-                || !destNpuPort.getRemotePort().equals(srcNpuPort.getPortName())) {
-                LOG.error("planPath: error=Reverse direct connection not found, src=" + destNpuDevice.getDeviceName()
-                    + ", dst=" + srcNpuDevice.getDeviceName());
+            if (destPort.getRemoteDevice() == null
+                || !destPort.getRemoteDevice().equals(srcDevice.getDeviceName())
+                || destPort.getRemotePort() == null
+                || !destPort.getRemotePort().equals(srcPort.getPortName())) {
                 return new PathPlanResult(PlanStatus.TOPO_CONNECTION_ERROR,
                     "Reverse direct connection not found");
             }
 
             InternalPathInfo directPath = pathEngine.resolveDirectPath(
-                srcNpuDevice, srcNpuPort, destNpuDevice, destNpuPort);
-            LOG.info("planPath: mode=direct, srcEid=" + directPath.getSrcEid() + ", dstEid=" + directPath.getDstEid());
+                request.getSuperNodeName(), (NpuDevice) srcDevice, srcNpuPort,
+                (NpuDevice) destDevice, destNpuPort);
             return buildResult(directPath);
         } else {
             // Step 7: Build multi-hop path
-            LOG.debug("planPath: Multi-hop path mode, interDevicesCount=" + interDevices.size());
             InternalPathInfo multiHopPath;
             try {
                 multiHopPath = pathEngine.resolveMultiHopPath(
-                    srcNpuDevice, srcNpuPort,
-                    destNpuDevice, destNpuPort, interDevices, superNode.getAllDevices());
-                LOG.debug("planPath: multi-hop path built, hopCount=" + multiHopPath.getHops().size());
+                    request.getSuperNodeName(), (NpuDevice) srcDevice, srcNpuPort,
+                    (NpuDevice) destDevice, destNpuPort, interDevices, superNode.getAllDevices());
             } catch (Exception e) {
-                LOG.error("planPath: error=Multi-hop path resolution failed, reason=" + e.getMessage());
                 return new PathPlanResult(PlanStatus.TOPO_CONNECTION_NOT_FOUND,
                     "Multi-hop path resolution failed: " + e.getMessage());
             }
 
             // Step 8-12: Route lookup for intermediate devices (forward + reverse)
-            LOG.debug("planPath: Forward route phase, targetCna=%s", destCna);
-            String forwardTarget = destCna;
-            try {
-                routePhase(multiHopPath, forwardTarget, request.getSuperNodeName());
-            } catch (PathPlanException e) {
-                LOG.error("planPath: error=Forward route phase failed, reason=%s", e.getMessage());
-                return new PathPlanResult(e.getStatus(), e.getMessage());
-            }
+            String[] srcParts = srcCna.split("\\.");
+            int refUdpPort = (Integer.parseInt(srcParts[2])
+                ^ Integer.parseInt(srcParts[3])) & 0xFF;
+
+            routePhase(multiHopPath,
+                destCna, request.getSuperNodeName(), srcCna, destCna,
+                RouteSelectionRecord.Direction.FORWARD, refUdpPort);
 
             // Step 9: Reverse phase
-            LOG.debug("planPath: Reverse route phase, targetCna=%s", srcCna);
             List<InternalPathHop> reversedHops = pathEngine.reverseHops(
                 multiHopPath.getHops());
             InternalPathInfo reversedPath = new InternalPathInfo();
@@ -252,54 +213,38 @@ public class PathService {
             reversedPath.setSourceCna(multiHopPath.getDestCna());
             reversedPath.setDestCna(multiHopPath.getSourceCna());
 
-            String reverseTarget = srcCna;
-            try {
-                routePhase(reversedPath, reverseTarget, request.getSuperNodeName());
-            } catch (PathPlanException e) {
-                LOG.error("planPath: error=Reverse route phase failed, reason=%s", e.getMessage());
-                return new PathPlanResult(e.getStatus(), e.getMessage());
-            }
+            routePhase(reversedPath,
+                srcCna, request.getSuperNodeName(), destCna, srcCna,
+                RouteSelectionRecord.Direction.REVERSE, refUdpPort);
 
             // Re-reverse back to forward order
-            LOG.debug("planPath: Re-reversing hops back to forward order");
             List<InternalPathHop> restoredHops = pathEngine.reverseHops(reversedHops);
             multiHopPath.setHops(restoredHops);
 
-            // Step 13-15: Build result
-            LOG.info("planPath: mode=multi-hop, srcEid=" + multiHopPath.getSrcEid()
-                + ", dstEid=" + multiHopPath.getDstEid()
-                + ", hopCount=" + (multiHopPath.getHops() != null ? multiHopPath.getHops().size() : 0));
             return buildResult(multiHopPath);
         }
     }
 
-    private void routePhase(InternalPathInfo pathInfo, String targetCna, String superNodeName) {
-        LOG.debug("routePhase: targetCna=" + targetCna + ", superNode=" + superNodeName
-            + ", hopCount=" + (pathInfo.getHops() != null ? pathInfo.getHops().size() : 0));
+    private List<RouteSelectionRecord> routePhase(InternalPathInfo pathInfo, String targetCna,
+                                                    String superNodeName, String scna, String dcna,
+                                                    RouteSelectionRecord.Direction direction,
+                                                    int refUdpPort) {
         List<InternalPathHop> hops = pathInfo.getHops();
-        SuperNode sn = superNodeStore.getSuperNode(superNodeName);
-        if (sn == null) {
-            LOG.error("routePhase: error=TOPOLOGY_NOT_FOUND, superNode=%s", superNodeName);
-            throw new PathPlanException(PlanStatus.TOPO_NOT_FOUND,
-                "SuperNode topology not found: " + superNodeName);
-        }
-        Map<String, DeviceEntity> devices = sn.getAllDevices();
+        List<RouteSelectionRecord> records = new ArrayList<>();
         for (int i = 1; i < hops.size() - 1; i++) {
             InternalPathHop hop = hops.get(i);
-            DeviceEntity device = devices.get(hop.getDeviceName());
+            SuperNode sn = superNodeStore.getSuperNode(superNodeName);
+            if (sn == null) {
+                throw new RuntimeException("TOPOLOGY_NOT_FOUND: " + superNodeName);
+            }
+            DeviceEntity device = sn.getAllDevices().get(hop.getDeviceName());
             if (device == null) {
-                LOG.error("routePhase: error=DEVICE_NOT_FOUND, device=%s, superNode=%s",
-                    hop.getDeviceName(), superNodeName);
-                throw new PathPlanException(PlanStatus.TOPO_CONNECTION_NOT_FOUND,
-                    "Device not found: " + hop.getDeviceName() + " in " + superNodeName);
+                throw new RuntimeException("DEVICE_NOT_FOUND: " + hop.getDeviceName() + " in " + superNodeName);
             }
 
             RoutingEntry bestEntry = null;
             int bestMaskLen = -1;
 
-            if (device.getForwardingChips() == null) {
-                continue;
-            }
             for (Integer chipIdx : device.getForwardingChips().keySet()) {
                 RoutingTableKey rtKey = new RoutingTableKey(
                     superNodeName, hop.getDeviceName(), chipIdx);
@@ -317,32 +262,200 @@ public class PathService {
             }
 
             if (bestEntry == null) {
-                LOG.error("routePhase: error=ROUTE_NOT_REACHABLE, device=%s, target=%s",
-                    hop.getDeviceName(), targetCna);
-                throw new PathPlanException(PlanStatus.ROUTE_NOT_REACHABLE,
-                    "ROUTE_NOT_REACHABLE: no route for device " + hop.getDeviceName() + " to target " + targetCna);
+                throw new RuntimeException("ROUTE_NOT_REACHABLE: no route for device "
+                    + hop.getDeviceName() + " to target " + targetCna);
             }
 
-            Map<String, OutPortInfo> outPortInfos = bestEntry.getOutPortInfos();
+            List<OutPortInfo> outPortInfos = bestEntry.getOutPortInfos();
             if (outPortInfos == null || outPortInfos.isEmpty()) {
-                LOG.error("routePhase: error=ROUTE_NOT_REACHABLE, no outPort for device=%s",
-                    hop.getDeviceName());
-                throw new PathPlanException(PlanStatus.ROUTE_NOT_REACHABLE,
-                    "ROUTE_NOT_REACHABLE: no outPort for device " + hop.getDeviceName());
+                throw new RuntimeException("ROUTE_NOT_REACHABLE: no outPort for device "
+                    + hop.getDeviceName());
             }
 
-            // Set the first outPort on the hop (ECMP handling in V2)
-            String outPort = outPortInfos.keySet().iterator().next();
-            hop.setOutPort(outPort);
-            LOG.debug("routePhase: hopIndex=" + i + ", device=" + hop.getDeviceName()
-                + ", outPort=" + outPort + ", mask=" + bestMaskLen);
-
-            // Set multiPath flag
+            // Candidate ports keep the received order for ECMP selection
             if (outPortInfos.size() > 1) {
-                // V1: multi-path detected, but not fully supported
-                // Would check device capability here
+                int selectedIndex = -1;
+                String expectedPort = hop.getOutPort();
+                for (int j = 0; j < outPortInfos.size(); j++) {
+                    if (expectedPort.equals(outPortInfos.get(j).getPortName())) {
+                        selectedIndex = j;
+                        break;
+                    }
+                }
+                if (direction == RouteSelectionRecord.Direction.FORWARD) {
+                    if (selectedIndex < 0) {
+                        throw new RuntimeException("EXPECTED_PORT_NOT_FOUND: expected port "
+                            + expectedPort + " not in route candidates for " + hop.getDeviceName()
+                            + " route to " + targetCna);
+                    }
+                } else {
+                    if (selectedIndex < 0) {
+                        continue;
+                    }
+                }
+
+                List<RouteSelectionRecord.CandidateOutPort> candidateOutPorts = new ArrayList<>();
+                for (int j = 0; j < outPortInfos.size(); j++) {
+                    OutPortInfo info = outPortInfos.get(j);
+                    candidateOutPorts.add(new RouteSelectionRecord.CandidateOutPort(
+                        info.getPortName(),
+                        info.getNextHop(),
+                        j == selectedIndex));
+                }
+
+                String hashInfo = scna + ":" + dcna;
+                RouteSelectionRecord record = new RouteSelectionRecord(
+                    hop.getDeviceName(),
+                    bestEntry.getPrefix(),
+                    candidateOutPorts,
+                    scna, dcna, hashInfo, direction);
+                records.add(record);
+            } else {
+                hop.setOutPort(outPortInfos.get(0).getPortName());
             }
         }
+        return records.isEmpty() ? null : records;
+    }
+
+    public CoveragePathsResult planPathsCoverage(CoveragePathsRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("CoveragePathsRequest must not be null");
+        }
+        if (request.getSuperNodeName() == null || request.getSuperNodeName().isEmpty()) {
+            CoveragePathsResult result = new CoveragePathsResult();
+            result.setStatus(PlanStatus.TOPO_NOT_FOUND);
+            result.setErrorMessage("superNodeName is required for COVERAGE mode");
+            return result;
+        }
+        // Fixed UDP source ports come from SNCConfig (default 0), not the request.
+        int dataUdpSrcPort = coveragePlanEngine.getFixedDataUdpPort();
+        int ackUdpSrcPort = coveragePlanEngine.getFixedAckUdpPort();
+
+        SuperNode superNode = superNodeStore.getSuperNode(request.getSuperNodeName());
+        if (superNode == null) {
+            CoveragePathsResult result = new CoveragePathsResult();
+            result.setStatus(PlanStatus.TOPO_NOT_FOUND);
+            result.setErrorMessage("SuperNode not found: " + request.getSuperNodeName());
+            return result;
+        }
+
+        CoverageRequirement requirement = request.getCoverageRequirement();
+        CoverageSearchResult searchResult = coveragePlanEngine.findCoverage(
+            superNode, dataUdpSrcPort, ackUdpSrcPort, requirement);
+
+        // Build eidPairs from CoveragePlanEngine results
+        // Note: generateHtml() only uses coveredLinks (fixed 4-per-pair order) to render paths.
+        List<CoveredEidPair> eidPairs = new ArrayList<>();
+        for (CoveredPair pair : searchResult.selectedPairs) {
+            List<CoverageLink> pairLinks = new ArrayList<>();
+            for (CoveragePlanEngine.CoveredLinkDetail d : pair.forwardLinkDetails) {
+                pairLinks.add(toCoverageLinkFromDetail(d));
+            }
+            for (CoveragePlanEngine.CoveredLinkDetail d : pair.reverseLinkDetails) {
+                pairLinks.add(toCoverageLinkFromDetail(d));
+            }
+
+            CoveredEidPair eidPair = new CoveredEidPair();
+            eidPair.setSrcEid(pair.src.eid);
+            eidPair.setDstEid(pair.dst.eid);
+            eidPair.setSrcCna(pair.src.cna);
+            eidPair.setDstCna(pair.dst.cna);
+            eidPair.setSrcDevice(pair.src.deviceName);
+            eidPair.setSrcPort(pair.src.portName);
+            eidPair.setDestDevice(pair.dst.deviceName);
+            eidPair.setDestPort(pair.dst.portName);
+            eidPair.setCoveredLinks(pairLinks);
+            eidPairs.add(eidPair);
+        }
+
+        // Build coverage links
+        List<CoverageLink> coverageLinks = new ArrayList<>();
+        for (LinkInfo link : searchResult.allLinkInfos) {
+            coverageLinks.add(toCoverageLink(link));
+        }
+
+        // Reverse index: for each out-port, record which EID pairs cover it.
+        Map<String, CoverageLink> linkByKey = new HashMap<>();
+        for (CoverageLink cl : coverageLinks) {
+            linkByKey.put(cl.getSwitchDevice() + ":" + cl.getOutPort(), cl);
+        }
+        for (CoveredPair pair : searchResult.selectedPairs) {
+            CoveredEidPairRef pairRef = new CoveredEidPairRef(pair.src.eid, pair.dst.eid);
+            List<String> keys = new ArrayList<>();
+            for (CoveragePlanEngine.CoveredLinkDetail d : pair.forwardLinkDetails) {
+                keys.add(d.getLinkKey());
+            }
+            for (CoveragePlanEngine.CoveredLinkDetail d : pair.reverseLinkDetails) {
+                keys.add(d.getLinkKey());
+            }
+            for (String key : keys) {
+                CoverageLink cl = linkByKey.get(key);
+                if (cl != null) {
+                    if (cl.getCoveredPairs() == null) {
+                        cl.setCoveredPairs(new ArrayList<>());
+                    }
+                    cl.getCoveredPairs().add(pairRef);
+                }
+            }
+        }
+
+        CoveragePathsResult result = new CoveragePathsResult();
+        result.setStatus(searchResult.fullCoverage ? PlanStatus.SUCCESS : PlanStatus.COVERAGE_INCOMPLETE);
+        if (!searchResult.fullCoverage) {
+            result.setErrorMessage("物理遍历覆盖率未达100%: "
+                + String.format("%.2f%%", searchResult.coverageRate * 100)
+                + " (" + searchResult.coveredCount + "/" + searchResult.totalLinks + " 出端口已覆盖)");
+        }
+        result.setEidPairs(eidPairs);
+        result.setCoverageLinks(coverageLinks);
+        CoverageStats stats = new CoverageStats();
+        stats.setTotalLinks(searchResult.totalLinks);
+        stats.setCoveredCount(searchResult.coveredCount);
+        stats.setCoverageRate(searchResult.coverageRate);
+        stats.setMinRepeatCount(searchResult.minRepeatCount);
+        stats.setMaxRepeatCount(searchResult.maxRepeatCount);
+        stats.setAvgRepeatCount(searchResult.avgRepeatCount);
+        stats.setRepeatRate(searchResult.repeatRate);
+        stats.setUniqueEidCount(searchResult.uniqueEidCount);
+        stats.setTotalEidAppearances(searchResult.totalEidAppearances);
+        stats.setEidRepeatRate(searchResult.eidRepeatRate);
+        stats.setEidMinRepeat(searchResult.eidMinRepeat);
+        stats.setEidMaxRepeat(searchResult.eidMaxRepeat);
+        stats.setEidAvgRepeat(searchResult.eidAvgRepeat);
+        stats.setSrcEidMinRepeat(searchResult.srcEidMinRepeat);
+        stats.setSrcEidMaxRepeat(searchResult.srcEidMaxRepeat);
+        stats.setSrcEidAvgRepeat(searchResult.srcEidAvgRepeat);
+        stats.setDstEidMinRepeat(searchResult.dstEidMinRepeat);
+        stats.setDstEidMaxRepeat(searchResult.dstEidMaxRepeat);
+        stats.setDstEidAvgRepeat(searchResult.dstEidAvgRepeat);
+        stats.setNpuUsageByChassis(searchResult.npuUsageByChassis);
+        result.setStats(stats);
+        return result;
+    }
+
+    private CoverageLink toCoverageLink(LinkInfo li) {
+        CoverageLink cl = new CoverageLink();
+        cl.setSwitchDevice(li.switchDevice);
+        cl.setChipIndex(li.chipIndex);
+        cl.setOutPort(li.outPortName);
+        cl.setRemoteSwitch(li.remoteSwitch);
+        cl.setRemotePort(li.remotePort);
+        cl.setOutPortIndex(li.outPortIndex);
+        cl.setTotalOutPorts(li.totalOutPorts);
+        cl.setCoverCount(li.coverCount);
+        return cl;
+    }
+
+    private CoverageLink toCoverageLinkFromDetail(CoveredLinkDetail d) {
+        CoverageLink cl = new CoverageLink();
+        cl.setSwitchDevice(d.switchDeviceName);
+        cl.setChipIndex(d.chipIndex);
+        cl.setOutPort(d.outPortName);
+        cl.setRemoteSwitch(d.remoteDeviceName);
+        cl.setRemotePort(d.remotePortName);
+        cl.setOutPortIndex(d.outPortIndex);
+        cl.setTotalOutPorts(d.totalOutPorts);
+        return cl;
     }
 
     private PathPlanResult buildResult(InternalPathInfo pathInfo) {
@@ -371,4 +484,18 @@ public class PathService {
         return result;
     }
 
+    public PortEntity findPortInDevice(DeviceEntity device, String portName) {
+        if (device == null || device.getForwardingChips() == null) {
+            return null;
+        }
+        for (ForwardingChip chip : device.getForwardingChips().values()) {
+            if (chip.getPorts() != null) {
+                PortEntity port = chip.getPorts().get(portName);
+                if (port != null) {
+                    return port;
+                }
+            }
+        }
+        return null;
+    }
 }
