@@ -212,7 +212,7 @@ static void *wr_buf_alloc(wr_buf_t *buf, wr_buf_entry_type_t entry_type)
 
     void *e = __wr_buf_idx(buf, idx);
     wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)e;
-    hdr->wr_id = __idx_to_wr_id(idx);
+    hdr->wr_id = __next_wr_id(hdr->wr_id, idx, buf->max_wr_num);
     hdr->entry_type = (uint8_t)entry_type;
     return e;
 }
@@ -249,7 +249,7 @@ static uint32_t wr_buf_alloc_batch(wr_buf_t *buf,
     for (uint32_t i = 0; i < allocated; i++) {
         char *e = (char *)__wr_buf_idx(buf, indices[i]);
         wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)e;
-        hdr->wr_id = __idx_to_wr_id(indices[i]);
+        hdr->wr_id = __next_wr_id(hdr->wr_id, indices[i], buf->max_wr_num);
         entries[i] = e;
     }
     pthread_spin_unlock(&buf->lock);
@@ -272,11 +272,10 @@ uint32_t jfr_wr_buf_alloc_batch(wr_buf_t *buf, jfr_wr_entry_t **entries, uint32_
  */
 static void wr_buf_release_entry(wr_buf_t *buf, uint32_t idx)
 {
-    /* Only clear the header (wr_id + entry_type) to mark the entry free */
+    /* Clear entry_type to mark free; preserve wr_id for monotonic reuse */
     pthread_spin_lock(&buf->lock);
     void *e = __wr_buf_idx(buf, idx);
     wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)e;
-    hdr->wr_id = 0;
     hdr->entry_type = 0;
     buf->next_free[idx] = buf->free_head;
     buf->free_head = idx;
@@ -304,11 +303,10 @@ static void wr_buf_release_batch(wr_buf_t *buf, uint32_t *indices, uint32_t coun
         return;
     }
     pthread_spin_lock(&buf->lock);
-    /* Only clear headers (wr_id + entry_type) to mark entries free */
+    /* Clear entry_type to mark free; preserve wr_id for monotonic reuse */
     for (uint32_t i = 0; i < count; i++) {
         void *e = __wr_buf_idx(buf, indices[i]);
         wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)e;
-        hdr->wr_id = 0;
         hdr->entry_type = 0;
     }
     /* Push all entries back to free list */
