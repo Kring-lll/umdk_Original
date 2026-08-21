@@ -97,6 +97,24 @@ void urma_ubagg_sqe_total_init(void);
 void urma_ubagg_sqe_total_inc(uint32_t local_idx, uint32_t target_idx, uint32_t wr_count);
 uint64_t urma_ubagg_sqe_total_get(uint32_t local_idx, uint32_t target_idx);
 
+/* Global path statistics: current per-path in-flight WR count, count of virtual
+ * jetties with in-flight WRs, and windowed per-path RTT accumulators. All
+ * indexed by [local_idx, target_idx] over URMA_UBAGG_SQE_TOTAL_DIM. */
+void urma_ubagg_path_init(void);
+void urma_ubagg_inflight_path_inc(uint32_t local_idx, uint32_t target_idx, uint32_t wr_count);
+void urma_ubagg_inflight_path_dec(uint32_t local_idx, uint32_t target_idx, uint32_t wr_count);
+uint64_t urma_ubagg_inflight_path_get(uint32_t local_idx, uint32_t target_idx);
+void urma_ubagg_pjetty_inflight_inc(void);
+void urma_ubagg_pjetty_inflight_dec(void);
+uint32_t urma_ubagg_pjetty_inflight_get(void);
+void urma_ubagg_rtt_add(uint32_t local_idx, uint32_t target_idx, uint64_t rtt_ns);
+void urma_ubagg_rtt_snapshot_and_reset(uint64_t *sum_out, uint64_t *cnt_out);
+void urma_ubagg_path_start(void);
+void urma_ubagg_path_stop(void);
+bool urma_ubagg_path_is_enabled(void);
+void urma_ubagg_wr_complete_inc(void);
+uint64_t urma_ubagg_wr_complete_snapshot_and_reset(void);
+
 typedef struct urma_jfce_cnt_info {
     char dev_name[URMA_MAX_NAME];
     uint64_t jfce_total_cnt;

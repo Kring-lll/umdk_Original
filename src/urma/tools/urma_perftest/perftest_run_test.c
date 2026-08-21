@@ -3416,6 +3416,7 @@ int run_write_bw(perftest_context_t *ctx, perftest_config_t *cfg)
 
     if (cfg->enable_rtt) {
         urma_start_perf();
+        urma_start_path_perf();
     }
     int ret = 0;
 
@@ -3437,6 +3438,7 @@ int run_write_bw(perftest_context_t *ctx, perftest_config_t *cfg)
 perf_dump:
     if (cfg->enable_rtt) {
         urma_stop_perf();
+        urma_stop_path_perf();
 
         char perf_buf[16384];
         uint32_t perf_len = sizeof(perf_buf);
@@ -3445,6 +3447,15 @@ perf_dump:
             printf("%s", perf_buf);
         } else {
             LOG_ERROR("Failed to get urma perf info.\n");
+        }
+
+        char path_buf[16384];
+        uint32_t path_len = sizeof(path_buf);
+        if (urma_get_path_info(path_buf, &path_len) == 0) {
+            printf("\n========== URMA Path Statistics ==========\n");
+            printf("%s", path_buf);
+        } else {
+            LOG_ERROR("Failed to get urma path info.\n");
         }
     }
 
@@ -3618,6 +3629,7 @@ int run_send_bw(perftest_context_t *ctx, perftest_config_t *cfg)
 
     if (cfg->enable_rtt) {
         urma_start_perf();
+        urma_start_path_perf();
     }
     int ret = 0;
 
@@ -3644,6 +3656,7 @@ int run_send_bw(perftest_context_t *ctx, perftest_config_t *cfg)
 perf_dump:
     if (cfg->enable_rtt) {
         urma_stop_perf();
+        urma_stop_path_perf();
 
         char perf_buf[16384];
         uint32_t perf_len = sizeof(perf_buf);
@@ -3652,6 +3665,15 @@ perf_dump:
             printf("%s", perf_buf);
         } else {
             LOG_ERROR("Failed to get urma perf info.\n");
+        }
+
+        char path_buf[16384];
+        uint32_t path_len = sizeof(path_buf);
+        if (urma_get_path_info(path_buf, &path_len) == 0) {
+            printf("\n========== URMA Path Statistics ==========\n");
+            printf("%s", path_buf);
+        } else {
+            LOG_ERROR("Failed to get urma path info.\n");
         }
     }
 
