@@ -213,6 +213,9 @@ static int umq_perftest_init_umq(umq_perftest_config_t *cfg)
     umq_config->trans_info[0].trans_mode = (umq_trans_mode_t)cfg->trans_mode;
     umq_config->buf_pool_cfg.small_block_size = cfg->blk_mode;
     umq_config->buf_pool_cfg.size_class_count = PERFTEST_SIZE_CLASS_COUNT;
+    if (cfg->blk_mode >= BLOCK_SIZE_MAX) {
+        LOG_PRINT("umq_config blk_mode is invalid\n");
+    }
     {
         uint32_t base = 4096U << cfg->blk_mode;
         umq_config->buf_pool_cfg.explicit_block_sizes[0] = base;
