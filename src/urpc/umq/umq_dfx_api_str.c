@@ -45,7 +45,7 @@ static const char UMQ_DFX_UNDERLINE_120[] =
         } else {                                                                                           \
             __ret = snprintf((__buf) + (__offset), (__max_buf_len) - (__offset), __format, ##__VA_ARGS__); \
         }                                                                                                  \
-        (__offset) += __ret;                                                                               \
+        (__offset) += (__ret < (__max_buf_len) - (__offset)) ? __ret : (__max_buf_len) - (__offset);       \
     } while (0)
 
 static const char *umq_qbuf_pool_type_name(umq_qbuf_pool_type_t type)
