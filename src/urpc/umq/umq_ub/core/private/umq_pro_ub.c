@@ -36,13 +36,12 @@ volatile bool g_umq_exiting = false;
 
 void umq_ub_exiting_set_impl(bool exiting)
 {
-    g_umq_exiting = exiting;
-    __sync_synchronize();
+    __atomic_store_n(&g_umq_exiting, exiting, __ATOMIC_SEQ_CST);
 }
 
 bool umq_ub_exiting_get_impl(void)
 {
-    return g_umq_exiting;
+    return __atomic_load_n(&g_umq_exiting, __ATOMIC_ACQUIRE);
 }
 
 int rx_buf_ctx_list_init(rx_buf_ctx_list_t *rx_buf_ctx_list, uint32_t ctx_num)
