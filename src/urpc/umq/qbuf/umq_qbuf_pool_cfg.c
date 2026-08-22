@@ -109,9 +109,8 @@ int umq_qbuf_pool_cfg_check(const umq_init_cfg_t *cfg, umq_qbuf_pool_plan_t *pla
         required += tls_required;
         if (init_size < required) {
             UMQ_VLOG_WARN(VLOG_UMQ, "init_size %llu < tls_ideal %llu (rx %llu + tiny %llu + nonlazy*depth %llu), "
-                         "per-sc block count will be reduced to fit\n",
-                         init_size, required, plan->rx_io_buf_size, plan->tiny_io_buf_size,
-                         tls_required);
+                "per-sc block count will be reduced to fit\n", init_size, required, plan->rx_io_buf_size,
+                plan->tiny_io_buf_size, tls_required);
             // Don't fail - let init_size_class_config auto-adjust per_sc_block_count
         }
     }
