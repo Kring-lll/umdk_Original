@@ -405,8 +405,9 @@ void umq_qbuf_set_debug(int enable)
 
 static void qbuf_dbg_print_summary(void)
 {
-    if (!qbuf_debug_on())
+    if (!qbuf_debug_on()) {
         return;
+    }
     uint64_t wd_total = g_dbg_stats.alloc_with_data_tls_hit + g_dbg_stats.alloc_with_data_fetch_global +
                         g_dbg_stats.alloc_with_data_fetch_expansion + g_dbg_stats.alloc_with_data_escape +
                         g_dbg_stats.alloc_with_data_fetch_fail;
@@ -2637,8 +2638,9 @@ static ALWAYS_INLINE int umq_qbuf_alloc_escape(umq_buf_list_t *list, uint32_t sc
 
     QBUF_LIST_FIRST(list) = qbuf;
     (void)__atomic_add_fetch(&g_total_escape_buf_cnt, 1, __ATOMIC_RELAXED);
-    if (qbuf_debug_on())
+    if (qbuf_debug_on()) {
         g_dbg_stats.alloc_with_data_escape++;
+    }
     UMQ_VLOG_DEBUG(VLOG_UMQ, "ALLOC_ESCAPE: sc=%u blk_size=%u total_escape=%llu mpool=1023\n", sc, blk_size,
                    (unsigned long long)__atomic_load_n(&g_total_escape_buf_cnt, __ATOMIC_RELAXED));
     return UMQ_SUCCESS;
@@ -2707,9 +2709,9 @@ int umq_normal_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_
             QBUF_LIST_FIRST(&local_pool->head_without_data) ?
                 QBUF_LIST_FIRST(&local_pool->head_without_data)->mempool_id : 0xFFFF);
         if (local_pool->buf_cnt_without_data >= num) {
-            if (qbuf_debug_on())
+            if (qbuf_debug_on()) {
                 g_dbg_stats.alloc_nodata_tls_hit += num;
-
+            }
         }
         if (local_pool->buf_cnt_without_data < num) {
             int ret =
@@ -2785,8 +2787,9 @@ int umq_normal_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_
                 if (qbuf_debug_on()) qbuf_dbg_record_alloc_escape(_t0);
                 ret = umq_qbuf_alloc_escape(list, sc);
                 if (ret != UMQ_SUCCESS) {
-                    if (qbuf_debug_on())
+                    if (qbuf_debug_on()) {
                         g_dbg_stats.alloc_with_data_fetch_fail++;
+                    }   
                     return ret;
                 }
                 return ret;
@@ -2812,9 +2815,8 @@ int umq_normal_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_
         g_dbg_stats.alloc_with_data_by_sc[sc] += param.actual_buf_count;
     if (qbuf_debug_on())
         g_dbg_stats.alloc_with_data_bytes_by_sc[sc] += (uint64_t)param.actual_buf_count * blk_size;
-    if (qbuf_debug_on() &&
-            __atomic_add_fetch(&g_dbg_alloc_count, param.actual_buf_count, __ATOMIC_RELAXED) %
-                QBUF_DBG_SUMMARY_INTERVAL < param.actual_buf_count) {
+    if (qbuf_debug_on() && __atomic_add_fetch(&g_dbg_alloc_count, param.actual_buf_count, __ATOMIC_RELAXED) %
+        QBUF_DBG_SUMMARY_INTERVAL < param.actual_buf_count) {
         qbuf_dbg_print_summary();
     }
     if (qbuf_debug_on()) qbuf_dbg_record_alloc_data(_t0, sc);
