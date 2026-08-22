@@ -171,8 +171,7 @@ uint32_t urma_ubagg_pjetty_inflight_get(void)
 
 void urma_ubagg_rtt_add(uint32_t local_idx, uint32_t target_idx, uint64_t rtt_ns)
 {
-    if (!atomic_load(&g_ubagg_path_enabled) ||
-        local_idx >= URMA_UBAGG_SQE_TOTAL_DIM || target_idx >= URMA_UBAGG_SQE_TOTAL_DIM) {
+    if (local_idx >= URMA_UBAGG_SQE_TOTAL_DIM || target_idx >= URMA_UBAGG_SQE_TOTAL_DIM) {
         return;
     }
     (void)atomic_fetch_add(&g_ubagg_rtt_sum[local_idx][target_idx], (unsigned long long)rtt_ns);
