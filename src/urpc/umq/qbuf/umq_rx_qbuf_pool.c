@@ -204,8 +204,7 @@ int umq_rx_qbuf_register_seg(uint8_t *ctx, mempool_segment_ops_t *ops)
         return UMQ_SUCCESS;
     }
 
-    int ret = ops->register_seg_callback(ctx, UMQ_RX_QBUF_MEMPOOL_ID,
-                                          g_rx_buffer_addr, g_rx_total_len);
+    int ret = ops->register_seg_callback(ctx, UMQ_RX_QBUF_MEMPOOL_ID, g_rx_buffer_addr, g_rx_total_len);
     if (ret != UMQ_SUCCESS) {
         UMQ_VLOG_ERR(VLOG_UMQ, "rx qbuf register seg failed, status: %d\n", ret);
     }
