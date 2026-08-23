@@ -102,6 +102,8 @@ typedef struct ub_import_mempool_info {
     uint32_t mempool_token_id : 20;
     uint32_t mempool_id : 12;
     uint32_t mempool_token_value;
+    uint32_t version; /* bumped each time the source mempool is (re)registered;
+                         the peer compares it to decide reuse / re-import */
 } ub_import_mempool_info_t;
 
 typedef enum ub_packet_stats_type {
@@ -233,6 +235,9 @@ typedef struct imported_tseg_node {
     struct urpc_hmap_node node;
     uint32_t mempool_id;
     urma_target_seg_t *tseg;
+    uint32_t version; /* the version carried when this mempool was imported; the
+                         receiver compares it against the freshly arrived version
+                         to decide reuse / unimport+reimport (design §3.5) */
 } imported_tseg_node_t;
 
 typedef struct import_remote_record_node {
@@ -273,6 +278,10 @@ typedef struct umq_ub_ctx {
     umq_dev_assign_t dev_info;
     pthread_spinlock_t tseg_list_lock;
     urma_target_seg_t *tseg_list[UMQ_MAX_TSEG_NUM];
+    /* Per-mempool version, bumped each time the local mempool is (re)registered
+     * so the peer can detect a recycled/reallocated mempool and re-import
+     * (design §3.5). Serialized by tseg_list_lock. */
+    uint32_t mempool_version[UMQ_MAX_TSEG_NUM];
     remote_imported_tseg_info_t *remote_imported_info;
     urma_target_jetty_t *tjetty;
     umq_trans_info_t trans_info;
@@ -712,6 +721,16 @@ static ALWAYS_INLINE void umq_ub_io_packet_stats(
 }
 
 urma_target_seg_t *umq_ub_tseg_lookup(import_tseg_table_t *tseg_table, uint32_t mempool_id);
+
+/* Look up the imported-tseg node (carrying its import-time version) for a
+ * mempool, under the table's read lock. Returns NULL if not imported. The
+ * caller must not free the returned node; it is owned by the table. */
+imported_tseg_node_t *umq_ub_tseg_node_lookup(import_tseg_table_t *tseg_table, uint32_t mempool_id);
+
+/* Remove and unimport the node for a mempool (no-op if absent). Used by the
+ * version-aware re-import path: the caller detected a stale version and must
+ * unimport before re-importing the same mempool (design §3.5). */
+void umq_ub_tseg_remove(import_tseg_table_t *tseg_table, uint32_t mempool_id);
 
 static ALWAYS_INLINE bool umq_ub_enable_import_remote_mem(uint32_t feature)
 {
