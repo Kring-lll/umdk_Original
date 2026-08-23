@@ -284,6 +284,7 @@ typedef struct bondp_path {
     uint32_t local_idx;
     uint32_t target_idx;
     uint32_t least_load;
+    uint64_t least_load_bytes; /* in-flight data bytes of this path */
 } bondp_path_t;
 
 urma_status_t urma_write_affinity(urma_jfs_t *jfs, urma_target_jetty_t *target_jfr,

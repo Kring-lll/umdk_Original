@@ -24,6 +24,8 @@
 #define BONDP_ENV_RNR_RETRY_SLEEP_MS       "BOND_RNR_RETRY_SLEEP_MS"
 #define BONDP_ENV_RNR_RETRY_MAX            "BOND_RNR_RETRY_MAX"
 #define BONDP_ENV_RNR_RETRY_JITTER_RATIO   "BOND_RNR_RETRY_JITTER_RATIO"
+#define BONDP_ENV_PER_WR_OVERHEAD_BYTES    "BOND_PER_WR_OVERHEAD_BYTES"
+#define BONDP_ENV_MAX_INFLIGHT_WR_PER_PORT "BOND_MAX_INFLIGHT_WR_PER_PORT"
 #define BONDP_ENV_LEN_MAX                  (128)
 /*
  * #define BONDP_ENV_FAILOVER_DIEX_Y_ROUTEZ          "BOND_FAILOVER_DIEX_Y_ROUTEZ"
@@ -145,6 +147,10 @@ static void read_all_env(bondp_env_t *env)
     const bool default_enable_failback = true;
     const bool default_enable_failover = true;
     const bool default_enable_rnr_retry = true;
+    const uint32_t default_per_wr_overhead_bytes = 128;
+    const uint32_t default_max_inflight_wr_per_port = 0;
+    const uint32_t max_per_wr_overhead_bytes = 1024 * 1024;
+    const uint32_t max_inflight_wr_cap = 1024 * 1024;
     const uint64_t default_health_check_interval_ms = BONDP_HC_DEFAULT_PROBE_INTERVAL_MS;
     const uint64_t default_rnr_retry_sleep_ms = 100;
     const uint64_t default_rnr_retry_max = 15;
@@ -170,6 +176,24 @@ static void read_all_env(bondp_env_t *env)
         BONDP_ENV_HEALTH_CHECK_NODE_NUM, default_health_check_batch_node_num);
     env->rnr_retry_jitter_ratio = default_rnr_retry_jitter_ratio;
     env->health_check_batch_node_num = default_health_check_batch_node_num;
+    uint64_t per_wr_overhead_bytes = read_env_uint64(
+        BONDP_ENV_PER_WR_OVERHEAD_BYTES, default_per_wr_overhead_bytes);
+    uint64_t max_inflight_wr = read_env_uint64(
+        BONDP_ENV_MAX_INFLIGHT_WR_PER_PORT, default_max_inflight_wr_per_port);
+    if (per_wr_overhead_bytes > max_per_wr_overhead_bytes) {
+        URMA_LOG_WARN("Invalid BOND_PER_WR_OVERHEAD_BYTES value %lu (range 0~%u), using default %u\n",
+                      per_wr_overhead_bytes, max_per_wr_overhead_bytes, default_per_wr_overhead_bytes);
+        env->per_wr_overhead_bytes = default_per_wr_overhead_bytes;
+    } else {
+        env->per_wr_overhead_bytes = (uint32_t)per_wr_overhead_bytes;
+    }
+    if (max_inflight_wr > max_inflight_wr_cap) {
+        URMA_LOG_WARN("Invalid BOND_MAX_INFLIGHT_WR_PER_PORT value %lu (range 0~%u), using default %u\n",
+                      max_inflight_wr, max_inflight_wr_cap, default_max_inflight_wr_per_port);
+        env->max_inflight_wr_per_port = default_max_inflight_wr_per_port;
+    } else {
+        env->max_inflight_wr_per_port = (uint32_t)max_inflight_wr;
+    }
     read_env_balance_route_all(env);
 
     const uint64_t time_100ms = 100;
@@ -201,7 +225,8 @@ static void print_all_env(const bondp_env_t *env)
     URMA_LOG_INFO("Health check config: enable_failover=%s, enable_failback=%s, enable_health_check=%s, "
                   "enable_rnr_retry=%s, interval=%lums, batch_node_num=%u, "
                   "rnr_retry_sleep=%lums, rnr_retry_max=%lu, "
-                  "rnr_retry_jitter_ratio=%u\n",
+                  "rnr_retry_jitter_ratio=%u, per_wr_overhead_bytes=%u, "
+                  "max_inflight_wr_per_port=%u\n",
                   env->enable_failover ? "true" : "false",
                   env->enable_failback ? "true" : "false",
                   env->enable_health_check ? "true" : "false",
@@ -210,7 +235,9 @@ static void print_all_env(const bondp_env_t *env)
                   env->health_check_batch_node_num,
                   env->rnr_retry_sleep_ms,
                   env->rnr_retry_max,
-                  env->rnr_retry_jitter_ratio);
+                  env->rnr_retry_jitter_ratio,
+                  env->per_wr_overhead_bytes,
+                  env->max_inflight_wr_per_port);
 }
 
 static void init_path(bondp_env_t *env)

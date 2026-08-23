@@ -45,6 +45,41 @@ static inline uint32_t jfs_wr_src_num_sge(const urma_jfs_wr_t *wr)
     return 1; // atomic ops use single SGE
 }
 
+/* Data bytes carried by one WR on the initiator port.
+ * WRITE/SEND: src SGE length (payload). READ: src SGE is the remote source,
+ * its length equals the response bytes that return on the same port pair.
+ * Atomic ops use a fixed small weight. */
+static inline uint64_t jfs_wr_total_bytes(const urma_jfs_wr_t *wr)
+{
+    uint64_t total = 0;
+    if (is_rw_wr(wr)) {
+        if (wr->rw.src.sge != NULL) {
+            for (uint32_t i = 0; i < wr->rw.src.num_sge; i++) {
+                total += wr->rw.src.sge[i].len;
+            }
+        }
+    } else if (is_send_wr(wr)) {
+        if (wr->send.src.sge != NULL) {
+            for (uint32_t i = 0; i < wr->send.src.num_sge; i++) {
+                total += wr->send.src.sge[i].len;
+            }
+        }
+    } else {
+        total = 8; /* CAS/FADD fixed weight */
+    }
+    return total;
+}
+
+static inline uint64_t jfs_wr_list_total_bytes(const urma_jfs_wr_t *wr)
+{
+    uint64_t total = 0;
+    while (wr != NULL) {
+        total += jfs_wr_total_bytes(wr);
+        wr = wr->next;
+    }
+    return total;
+}
+
 urma_status_t copy_jfs_wr(const urma_jfs_wr_t *src, urma_jfs_wr_t *dst,
                           urma_sge_t *prealloc_src_sge, urma_sge_t *prealloc_dst_sge,
                           uint32_t max_sge, uint32_t max_rsge);
