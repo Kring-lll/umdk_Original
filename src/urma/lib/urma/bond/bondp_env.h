@@ -23,6 +23,8 @@ typedef struct bondp_env {
     uint64_t rnr_retry_max;
     uint32_t rnr_retry_jitter_ratio;
     uint32_t health_check_batch_node_num;
+    uint32_t per_wr_overhead_bytes;      /* fixed per-WR overhead in bytes (lambda) */
+    uint32_t max_inflight_wr_per_port;   /* 0: auto (= wr_buf depth) */
     uint32_t failover_route[IODIE_NUM][IODIE_NUM][URMA_ACTIVE_PORT_PER_DIE][URMA_FAILOVER_LINK_NUM];
     bondp_path_t path[IODIE_NUM * IODIE_NUM * URMA_ACTIVE_PORT_PER_DIE + 1];
 } bondp_env_t;

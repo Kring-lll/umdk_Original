@@ -90,6 +90,7 @@ static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, int target
     }
     if (ret == URMA_SUCCESS) {
         atomic_fetch_add(&comp->sqe_cnt[send_idx][target_idx], wr_count);
+        atomic_fetch_add(&comp->sqe_bytes[send_idx][target_idx], jfs_wr_list_total_bytes(send_wr));
     } else {
         URMA_LOG_ERR("Bondp post send failed, ret=%d\n", ret);
     }
@@ -363,6 +364,7 @@ static void failback_resend_wr(bondp_comp_t *bdp_comp, uint64_t resend_wr_id)
     }
 
     atomic_fetch_sub(&bdp_comp->sqe_cnt[old_send_idx][old_target_idx], 1);
+    atomic_fetch_sub(&bdp_comp->sqe_bytes[old_send_idx][old_target_idx], resend_wr_entry->total_bytes);
     if (bondp_resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
         URMA_LOG_ERR("Failed failback resend on post, wr_id=%lu, vjetty_id=%u, tjetty_id=%u, "
                      "from=[%u, %u], to=[%d, %d]\n",
@@ -405,10 +407,13 @@ static void bondp_translate_bad_wr(bondp_comp_t *bdp_comp, int send_idx, int tar
         return;
     }
     atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], bad_idx);
+    uint64_t prefix_bytes = 0;
     urma_jfs_wr_t *user_cur = (urma_jfs_wr_t *)wr;
     for (int i = 0; i < bad_idx && user_cur != NULL; i++) {
+        prefix_bytes += jfs_wr_total_bytes(user_cur);
         user_cur = user_cur->next;
     }
+    atomic_fetch_add(&bdp_comp->sqe_bytes[send_idx][target_idx], prefix_bytes);
     *bad_wr = user_cur;
 }
 
@@ -566,6 +571,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
                 URMA_LOG_ERR("Failed to copy jfs wr at index %d\n", i);
                 goto CLEANUP;
             }
+            wr_entry->total_bytes = jfs_wr_total_bytes(pwr);
             jfs_wr_get_refs(pwr);
             ret = check_wr_tseg_not_deleting(pwr);
             if (ret != URMA_SUCCESS) {
@@ -621,6 +627,11 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
                 pcur = pcur->next;
             }
             atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], success_node);
+            uint64_t posted_bytes = 0;
+            for (int j = 0; j < success_node; j++) {
+                posted_bytes += wr_entries[j]->total_bytes;
+            }
+            atomic_fetch_add(&bdp_comp->sqe_bytes[send_idx][target_idx], posted_bytes);
             for (int j = success_node; j < wr_total; j++) {
                 wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)wr_entries[j];
                 hdr->entry_type = 0;
@@ -1148,6 +1159,7 @@ static void resend_matched_jfs_wrs(bondp_comp_t *bdp_comp, uint64_t base_wr_id,
         }
 
         atomic_fetch_sub(&bdp_comp->sqe_cnt[old_send_idx][old_target_idx], 1);
+        atomic_fetch_sub(&bdp_comp->sqe_bytes[old_send_idx][old_target_idx], resend_wr_entry->total_bytes);
         if (bondp_resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
             URMA_LOG_ERR("Failed to resend %s jfs wr, wr_id=%lu\n", reason, resend_wr_id);
         }
@@ -1381,6 +1393,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         uint64_t user_ctx = wr_entry->user_ctx;
         uint32_t retry_cnt = wr_entry->rnr_retry_cnt;
         atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+        atomic_fetch_sub(&bdp_comp->sqe_bytes[send_idx][target_idx], wr_entry->total_bytes);
         wr_entry->rnr_retry_pending = true;
         if (retry_cnt == 0) {
             wr_entry->rnr_retry_cnt++;
@@ -1480,6 +1493,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
 
 CONVERT_CR:
     atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+    atomic_fetch_sub(&bdp_comp->sqe_bytes[send_idx][target_idx], wr_entry->total_bytes);
 
     uint32_t msn = 0;
     convert_pcr_to_vcr(cr, bdp_comp->bondp_ctx, &msn);

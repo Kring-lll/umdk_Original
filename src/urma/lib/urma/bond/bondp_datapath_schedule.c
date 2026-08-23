@@ -67,6 +67,7 @@ static uint32_t select_path_by_priority(const bondp_comp_t *bdp_comp,
         path->local_idx = local_idx;
         path->target_idx = target_idx;
         path->least_load = atomic_load(&bdp_comp->sqe_cnt[local_idx][target_idx]);
+        path->least_load_bytes = atomic_load(&bdp_comp->sqe_bytes[local_idx][target_idx]);
         return URMA_SUCCESS;
     }
     return URMA_FAIL;
@@ -111,25 +112,61 @@ static uint32_t select_path_by_chip(const bondp_comp_t *bdp_comp,
         path->local_idx = local_idx;
         path->target_idx = target_idx;
         path->least_load = atomic_load(&bdp_comp->sqe_cnt[local_idx][target_idx]);
+        path->least_load_bytes = atomic_load(&bdp_comp->sqe_bytes[local_idx][target_idx]);
         return URMA_SUCCESS;
     }
     return URMA_FAIL;
 }
 
-static void filter_least_load_path(bondp_path_t least_load_path[], uint32_t *least_load_cnt)
+/* Combined load score: in-flight bytes dominate bandwidth balance, while the
+ * per-WR overhead term (lambda) accounts for the fixed cost of every request
+ * (headers, READ request packet, CR processing). */
+static inline uint64_t path_load_score(const bondp_path_t *path)
+{
+    return path->least_load_bytes +
+           (uint64_t)g_bondp_env.per_wr_overhead_bytes * path->least_load;
+}
+
+static void filter_least_load_path(const bondp_comp_t *bdp_comp, bondp_path_t least_load_path[],
+                                   uint32_t *least_load_cnt)
 {
     if (*least_load_cnt <= 1) {
         return;
     }
 
-    uint32_t out_cnt = 1;
-    uint32_t min_load = least_load_path[0].least_load;
-    for (uint32_t i = 1; i < *least_load_cnt; i++) {
-        if (least_load_path[i].least_load < min_load) {
-            min_load = least_load_path[i].least_load;
+    uint32_t n_max = g_bondp_env.max_inflight_wr_per_port;
+    if (n_max == 0) {
+        n_max = bdp_comp->send_wr_buf.max_wr_num;
+    }
+    if (n_max == 0) {
+        n_max = UINT32_MAX;
+    }
+
+    /* If every candidate is above the depth guard, relax the guard so that
+     * the least-loaded path is still usable instead of failing the post. */
+    bool any_eligible = false;
+    for (uint32_t i = 0; i < *least_load_cnt; i++) {
+        if (least_load_path[i].least_load < n_max) {
+            any_eligible = true;
+            break;
+        }
+    }
+    if (!any_eligible) {
+        n_max = UINT32_MAX;
+    }
+
+    uint32_t out_cnt = 0;
+    uint64_t min_score = UINT64_MAX;
+    for (uint32_t i = 0; i < *least_load_cnt; i++) {
+        if (least_load_path[i].least_load >= n_max) {
+            continue; /* in-flight WR depth guard */
+        }
+        uint64_t score = path_load_score(&least_load_path[i]);
+        if (score < min_score) {
+            min_score = score;
             out_cnt = 1;
             least_load_path[0] = least_load_path[i];
-        } else if (least_load_path[i].least_load == min_load) {
+        } else if (score == min_score) {
             least_load_path[out_cnt] = least_load_path[i];
             out_cnt++;
         }
@@ -166,13 +203,14 @@ static void select_least_load_path(const bondp_comp_t *bdp_comp, const bondp_tar
             target_used[target_idx] = true;
             if (atomic_load(&bdp_comp->valid[local_idx]) && bondp_p_tjetty_available(&bdp_tjetty->p_tjettys[j])) {
                 uint32_t sqe_cnt = atomic_load(&bdp_comp->sqe_cnt[local_idx][target_idx]);
-                least_load_path[*least_load_cnt] = (bondp_path_t){local_idx, target_idx, sqe_cnt};
+                uint64_t sqe_bytes = atomic_load(&bdp_comp->sqe_bytes[local_idx][target_idx]);
+                least_load_path[*least_load_cnt] = (bondp_path_t){local_idx, target_idx, sqe_cnt, sqe_bytes};
                 (*least_load_cnt)++;
             }
             break;
         }
     }
-    filter_least_load_path(least_load_path, least_load_cnt);
+    filter_least_load_path(bdp_comp, least_load_path, least_load_cnt);
 }
 
 static __thread struct random_data schedule_rand_data;
@@ -344,7 +382,7 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
         if (least_load_cnt == 0 && !bdp_comp->bondp_ctx->enable_failover) {
             return URMA_FAIL;
         }
-        filter_least_load_path(least_load_path, &least_load_cnt);
+        filter_least_load_path(bdp_comp, least_load_path, &least_load_cnt);
     }
 
     if (least_load_cnt == 0) {
