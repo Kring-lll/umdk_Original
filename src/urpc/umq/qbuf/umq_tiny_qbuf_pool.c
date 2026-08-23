@@ -6,14 +6,14 @@
  */
 
 #include <malloc.h>
-#include <unistd.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 #include "umq_errno.h"
+#include "umq_tiny_qbuf_pool.h"
 #include "umq_vlog.h"
 #include "urpc_list.h"
 #include "urpc_thread_closure.h"
-#include "umq_tiny_qbuf_pool.h"
 
 static qbuf_pool_base_t g_tiny_qbuf_pool = {0};
 static util_thread_key_t *g_umq_tiny_qbuf_pool_key;
@@ -55,8 +55,8 @@ void *umq_tiny_io_buf_malloc(umq_buf_mode_t buf_mode, uint64_t size)
 
     g_tiny_buffer_addr = umq_qbuf_base_io_buf_malloc(g_tiny_total_len, min_size);
     if (g_tiny_buffer_addr == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "tiny qbuf memory alloc failed, size %lu, expect at least %lu\n",
-            g_tiny_total_len, min_size);
+        UMQ_VLOG_ERR(VLOG_UMQ, "tiny qbuf memory alloc failed, size %lu, expect at least %lu\n", g_tiny_total_len,
+                     min_size);
         g_tiny_total_len = 0;
         return NULL;
     }
@@ -111,10 +111,12 @@ static thread_local_qbuf_pool_t *umq_tiny_qbuf_pool_tls_cache_get(void)
         return NULL;
     }
 
-    tls_cache->block_pool.capacity_with_data = 0;
+    for (uint32_t i = 0; i < UMQ_QBUF_SIZE_CLASS_MAX; i++) {
+        QBUF_LIST_INIT(&tls_cache->block_pool.head_with_data[i]);
+        tls_cache->block_pool.buf_cnt_with_data[i] = 0;
+        tls_cache->block_pool.bytes_with_data[i] = 0;
+    }
     tls_cache->block_pool.capacity_without_data = 0;
-    QBUF_LIST_INIT(&tls_cache->block_pool.head_with_data);
-    tls_cache->block_pool.buf_cnt_with_data = 0;
     QBUF_LIST_INIT(&tls_cache->block_pool.head_without_data);
     tls_cache->block_pool.buf_cnt_without_data = 0;
     tls_cache->stats.tid = (uint64_t)pthread_self();
@@ -143,14 +145,14 @@ static int tiny_qbuf_base_fetch(uint32_t needed, local_block_pool_t *local_pool,
     uint32_t batch_count = qbuf_tls_round_batch(needed, QBUF_POOL_BATCH_CNT);
 
     while (fetch_count < batch_count) {
-        int32_t ret = fetch_from_global(&g_tiny_qbuf_pool.block_pool, local_pool, true, batch_count - fetch_count);
+        int32_t ret =
+            fetch_from_global(&g_tiny_qbuf_pool.block_pool[0], local_pool, true, 0, batch_count - fetch_count);
         if (ret <= 0) {
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "tiny qbuf pool not enough, suggestion: increase tiny qbuf total_size\n");
             return ret;
         }
         fetch_count += (uint32_t)ret;
     }
-    local_pool->capacity_with_data = g_tiny_qbuf_pool.tls_pools.tls_qbuf_pool_depth;
     tls_cache->stats.tls_fetch_buf_cnt_with_data += fetch_count;
     return UMQ_SUCCESS;
 }
@@ -168,7 +170,7 @@ static void release_tiny_thread_cache(void *data)
 
     (void)util_thread_setspecific(g_umq_tiny_qbuf_pool_key, NULL);
 
-    release_thread_cache_impl(tls_cache, &g_tiny_qbuf_pool.tls_pools, &g_tiny_qbuf_pool.block_pool);
+    release_thread_cache_impl(tls_cache, &g_tiny_qbuf_pool.tls_pools, &g_tiny_qbuf_pool.block_pool[0], 1);
 
 FREE_TLS_CACHE:
     free(tls_cache);
@@ -196,7 +198,6 @@ int umq_tiny_qbuf_pool_init(qbuf_pool_cfg_t *cfg)
     g_tiny_qbuf_pool.block_size = block_size;
     g_tiny_qbuf_pool.data_size = block_size;
     g_tiny_qbuf_pool.mempool_id = UMQ_TINY_QBUF_MEMPOOL_ID;
-    g_tiny_qbuf_pool.block_pool.disable_scale_cap = true;
     g_tiny_qbuf_pool.tls_pools.default_tls_qbuf_pool_depth = QBUF_POOL_BATCH_CNT;
     g_tiny_qbuf_pool.tls_pools.enable_tls_expand_qbuf_pool = false;
     g_tiny_qbuf_pool.support_without_data = false;
@@ -234,12 +235,8 @@ int umq_tiny_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t 
         return -UMQ_ERR_ENOMEM;
     }
 
-    qbuf_alloc_param_t param = {
-        .request_size = request_size,
-        .num = num,
-        .list = list,
-    };
-    return umq_qbuf_base_alloc(&g_tiny_qbuf_pool, tls_cache, option, &param);
+    qbuf_alloc_param_t param = {0};
+    return umq_qbuf_base_alloc(&g_tiny_qbuf_pool, tls_cache, request_size, num, list, option, &param);
 }
 
 void umq_tiny_qbuf_free(umq_buf_list_t *list)
@@ -283,7 +280,7 @@ int umq_tiny_qbuf_register_seg(uint8_t *ctx, mempool_segment_ops_t *ops)
         return -UMQ_ERR_EINVAL;
     }
     return ops->register_seg_callback(ctx, UMQ_TINY_QBUF_MEMPOOL_ID, g_tiny_qbuf_pool.data_buffer,
-        g_tiny_qbuf_pool.total_size);
+                                      g_tiny_qbuf_pool.total_size);
 }
 
 void umq_tiny_qbuf_unregister_seg(uint8_t *ctx, mempool_segment_ops_t *ops)
