@@ -248,6 +248,10 @@ typedef enum umq_buf_block_size {
     BLOCK_SIZE_16K,
     BLOCK_SIZE_32K,
     BLOCK_SIZE_64K,
+    BLOCK_SIZE_128K,
+    BLOCK_SIZE_256K,
+    BLOCK_SIZE_512K,
+    BLOCK_SIZE_1M,
 
     BLOCK_SIZE_MAX,
 } umq_buf_block_size_t;
@@ -284,6 +288,8 @@ typedef struct umq_buf_pool_cfg {
     // local qbuf pool cfg
     uint64_t tls_qbuf_pool_depth; // the sum of the capacities of all thread-local qbuf pools
     uint64_t tls_expand_qbuf_pool_depth; // reserved
+    uint64_t tls_pool_mem_budget; // global TLS total bytes cap (default 96MB)
+    uint64_t tls_expand_mem_budget; // per-thread TLS bytes cap (default 7/8 of tls_pool_mem_budget)
 
     // multi-level size_class: 0 = use defaults. block_size[i] = base * step_multiplier^i
     uint32_t size_class_count;            // 0 = default (2), range 1..16
