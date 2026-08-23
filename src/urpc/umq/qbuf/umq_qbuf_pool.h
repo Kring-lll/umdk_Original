@@ -83,6 +83,16 @@ int umq_qbuf_register_seg(uint8_t *ctx, mempool_segment_ops_t *ops);
 void umq_qbuf_unregister_seg(uint8_t *ctx, mempool_segment_ops_t *ops);
 void umq_qbuf_set_tls_expand_qbuf_pool_depth(uint32_t pjfr_depth);
 
+typedef struct umq_expansion_slot_info {
+    uint16_t mempool_id;
+    uint16_t size_class;
+    uint32_t slot_id;
+    uint64_t total_block_cnt;
+    uint64_t free_block_cnt;
+    uint64_t in_use_cnt;
+} umq_expansion_slot_info_t;
+
+
 #ifdef __cplusplus
 }
 #endif

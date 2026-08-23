@@ -136,7 +136,7 @@ int umq_qbuf_pool_cfg_check(const umq_init_cfg_t *cfg, umq_qbuf_pool_plan_t *pla
         return -UMQ_ERR_EINVAL;
     }
 
-    uint64_t without_data_expand_mem_size = umq_without_data_expand_mem_size(&cfg->buf_pool_cfg, cfg->buf_mode);
+    without_data_expand_mem_size = umq_without_data_expand_mem_size(&cfg->buf_pool_cfg, cfg->buf_mode);
     if (!cfg->buf_pool_cfg.disable_scale_cap &&
         max_umq_buf_pool_size < init_required_size + without_data_expand_mem_size) {
         UMQ_VLOG_INFO(VLOG_UMQ, "max buf pool size %llu < support expand without data buf, required %llu\n",
