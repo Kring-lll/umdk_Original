@@ -285,6 +285,12 @@ typedef struct umq_buf_pool_cfg {
     uint64_t tls_qbuf_pool_depth; // the sum of the capacities of all thread-local qbuf pools
     uint64_t tls_expand_qbuf_pool_depth; // reserved
 
+    // multi-level size_class: 0 = use defaults. block_size[i] = base * step_multiplier^i
+    uint32_t size_class_count;            // 0 = default (2), range 1..16
+    uint32_t size_class_step_multiplier;  // 0 = default (16), power of 2
+    uint64_t expansion_size;              // 0 = default (32MB), per-expansion memory size
+    uint32_t expansion_threshold;         // 0 = default (30), water level percentage [1,100] that triggers expansion
+
     bool disable_scale_cap; // expansion and shrink switch
     // escape
     bool disable_malloc_escape; // disable the escape mechanism
