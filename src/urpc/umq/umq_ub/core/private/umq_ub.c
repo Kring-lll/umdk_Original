@@ -302,12 +302,6 @@ void umq_ub_tseg_remove(import_tseg_table_t *tseg_table, uint32_t mempool_id)
     }
     if (found != NULL) {
         urpc_hmap_remove(&tseg_table->tseg_hmap, &found->node);
-<<<<<<< ours
-    }
-    (void)util_rwlock_unlock(tseg_table->tseg_hmap_lock);
-    if (found != NULL) {
-=======
->>>>>>> theirs
         umq_tseg_node_destroy(found);
     }
     (void)util_rwlock_unlock(tseg_table->tseg_hmap_lock);
