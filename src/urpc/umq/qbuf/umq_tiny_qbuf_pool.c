@@ -114,7 +114,7 @@ static thread_local_qbuf_pool_t *umq_tiny_qbuf_pool_tls_cache_get(void)
     for (uint32_t i = 0; i < UMQ_QBUF_SIZE_CLASS_MAX; i++) {
         QBUF_LIST_INIT(&tls_cache->block_pool.head_with_data[i]);
         tls_cache->block_pool.buf_cnt_with_data[i] = 0;
-        tls_cache->block_pool.bytes_with_data[i] = 0;
+        tls_cache->block_pool.capacity_with_data[i] = 0;
     }
     tls_cache->block_pool.capacity_without_data = 0;
     QBUF_LIST_INIT(&tls_cache->block_pool.head_without_data);
