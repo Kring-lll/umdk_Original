@@ -261,6 +261,11 @@ typedef struct bondp_comp {
 #else
     std::atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
 #endif
+#ifndef __cplusplus
+    atomic_ullong sqe_bytes[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
+#else
+    std::atomic_ullong sqe_bytes[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
+#endif
     // recv
     uint32_t max_recv_sge;
     wr_buf_t recv_wr_buf;

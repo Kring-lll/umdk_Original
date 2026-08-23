@@ -60,6 +60,7 @@ typedef struct jfs_wr_entry {
     struct bondp_target_jetty *target_vjetty;
     uint32_t send_idx;
     uint32_t target_idx;
+    uint64_t total_bytes; /* data bytes of this WR, used to balance by in-flight bytes */
     bool rnr_retry_pending;
     uint32_t rnr_retry_cnt;
     bondp_chip_id_info_t info;

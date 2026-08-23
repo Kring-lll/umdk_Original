@@ -77,7 +77,8 @@ static bondp_comp_t *get_recv_count_comp(bondp_comp_t *recv_comp)
 }
 
 static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, int target_idx,
-                                    urma_jfs_wr_t *send_wr, urma_jfs_wr_t **bad_wr, int wr_count)
+                                    urma_jfs_wr_t *send_wr, urma_jfs_wr_t **bad_wr, int wr_count,
+                                    uint64_t total_bytes)
 {
     urma_status_t ret;
     if (comp->comp_type == BONDP_COMP_JETTY) {
@@ -90,10 +91,30 @@ static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, int target
     }
     if (ret == URMA_SUCCESS) {
         atomic_fetch_add(&comp->sqe_cnt[send_idx][target_idx], wr_count);
+        atomic_fetch_add(&comp->sqe_bytes[send_idx][target_idx], total_bytes);
     } else {
         URMA_LOG_ERR("Bondp post send failed, ret=%d\n", ret);
     }
     return ret;
+}
+
+/* Decrement in-flight bytes with underflow protection. If accounting drifts
+ * (double CR, missed add), a plain fetch_sub would wrap to a huge value and
+ * permanently blacklist the path; clamp back to 0 as best-effort rollback. */
+static inline void bondp_sqe_bytes_sub(bondp_comp_t *bdp_comp, uint32_t send_idx,
+                                       uint32_t target_idx, uint64_t bytes)
+{
+    if (bytes == 0) {
+        return;
+    }
+    uint64_t old = atomic_fetch_sub(&bdp_comp->sqe_bytes[send_idx][target_idx], bytes);
+    if (old < bytes) {
+        URMA_LOG_WARN_RL("sqe_bytes underflow, path=[%u, %u], old=%llu, sub=%llu\n",
+                         send_idx, target_idx, (unsigned long long)old, (unsigned long long)bytes);
+        uint64_t wrapped = old - bytes;
+        uint64_t expect = wrapped;
+        (void)atomic_compare_exchange_strong(&bdp_comp->sqe_bytes[send_idx][target_idx], &expect, 0);
+    }
 }
 
 static urma_status_t comp_post_recv(bondp_comp_t *comp, int recv_idx, urma_jfr_wr_t *recv_wr, urma_jfr_wr_t **bad_wr,
@@ -363,6 +384,7 @@ static void failback_resend_wr(bondp_comp_t *bdp_comp, uint64_t resend_wr_id)
     }
 
     atomic_fetch_sub(&bdp_comp->sqe_cnt[old_send_idx][old_target_idx], 1);
+    bondp_sqe_bytes_sub(bdp_comp, old_send_idx, old_target_idx, resend_wr_entry->total_bytes);
     if (bondp_resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
         URMA_LOG_ERR("Failed failback resend on post, wr_id=%lu, vjetty_id=%u, tjetty_id=%u, "
                      "from=[%u, %u], to=[%d, %d]\n",
@@ -405,10 +427,13 @@ static void bondp_translate_bad_wr(bondp_comp_t *bdp_comp, int send_idx, int tar
         return;
     }
     atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], bad_idx);
+    uint64_t prefix_bytes = 0;
     urma_jfs_wr_t *user_cur = (urma_jfs_wr_t *)wr;
     for (int i = 0; i < bad_idx && user_cur != NULL; i++) {
+        prefix_bytes += jfs_wr_total_bytes(user_cur);
         user_cur = user_cur->next;
     }
+    atomic_fetch_add(&bdp_comp->sqe_bytes[send_idx][target_idx], prefix_bytes);
     *bad_wr = user_cur;
 }
 
@@ -459,6 +484,7 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
             return URMA_FAIL;
         }
         int index = 0;
+        uint64_t batch_bytes = 0;
         urma_jfs_wr_t *vwr = (urma_jfs_wr_t *)wr;
         while (vwr != NULL) {
             if (index >= BONDP_MAX_WR_LIST_NUM) {
@@ -474,6 +500,7 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
             if (ret != 0) {
                 return ret;
             }
+            batch_bytes += jfs_wr_total_bytes(vwr);
             uint32_t wr_msn = (base_msn + index) % BONDP_MAX_BITMAP_SIZE;
             bool msn_enable = bdp_tjetty->is_msn_enabled;
             encode_jfs_wr_msn(pwr, bdp_comp, wr_msn, msn_enable);
@@ -487,7 +514,8 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
         if (!atomic_load(&bdp_comp->valid[send_idx])) {
             continue;
         }
-        ret = comp_post_send(bdp_comp, send_idx, target_idx, prealloc_wr_list, bad_wr, wr_total);
+        ret = comp_post_send(bdp_comp, send_idx, target_idx, prealloc_wr_list, bad_wr, wr_total,
+                             batch_bytes);
         if (ret != URMA_SUCCESS && bad_wr != NULL && *bad_wr != NULL) {
             bondp_translate_bad_wr(bdp_comp, send_idx, target_idx, prealloc_wr_list, wr, bad_wr);
         }
@@ -527,6 +555,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
     for (int retry = 0; retry < BONDP_POST_SEND_MAX_RETRY; retry++) {
         urma_status_t ret = URMA_SUCCESS;
         int wr_count = 0;
+        uint64_t batch_bytes = 0;
         int send_idx = -1;
         int target_idx = -1;
         jfs_wr_entry_t *wr_entries[BONDP_BATCH_POST_MAX_NUM];
@@ -566,6 +595,8 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
                 URMA_LOG_ERR("Failed to copy jfs wr at index %d\n", i);
                 goto CLEANUP;
             }
+            wr_entry->total_bytes = jfs_wr_total_bytes(pwr);
+            batch_bytes += wr_entry->total_bytes;
             jfs_wr_get_refs(pwr);
             ret = check_wr_tseg_not_deleting(pwr);
             if (ret != URMA_SUCCESS) {
@@ -613,7 +644,8 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, wr_entries, allocated);
             continue;
         }
-        ret = comp_post_send(bdp_comp, send_idx, target_idx, &wr_entries[0]->wr, bad_wr, wr_count);
+        ret = comp_post_send(bdp_comp, send_idx, target_idx, &wr_entries[0]->wr, bad_wr, wr_count,
+                             batch_bytes);
         if (ret != URMA_SUCCESS) {
             urma_jfs_wr_t *pcur = &wr_entries[0]->wr;
             while (pcur != NULL && bad_wr != NULL && pcur != *bad_wr) {
@@ -621,6 +653,11 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
                 pcur = pcur->next;
             }
             atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], success_node);
+            uint64_t posted_bytes = 0;
+            for (int j = 0; j < success_node; j++) {
+                posted_bytes += wr_entries[j]->total_bytes;
+            }
+            atomic_fetch_add(&bdp_comp->sqe_bytes[send_idx][target_idx], posted_bytes);
             for (int j = success_node; j < wr_total; j++) {
                 wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)wr_entries[j];
                 hdr->entry_type = 0;
@@ -1117,7 +1154,8 @@ int bondp_resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int se
 
     urma_jfs_wr_t *bad_wr = NULL;
     wr->next = NULL;
-    ret = comp_post_send(wr_entry->bdp_comp, send_idx, target_idx, wr, &bad_wr, 1);
+    ret = comp_post_send(wr_entry->bdp_comp, send_idx, target_idx, wr, &bad_wr, 1,
+                         wr_entry->total_bytes);
     convert_jfs_pwr_to_vwr(wr, vtjetty);
     if (ret != URMA_SUCCESS) {
         goto release_wr_entry;
@@ -1148,6 +1186,7 @@ static void resend_matched_jfs_wrs(bondp_comp_t *bdp_comp, uint64_t base_wr_id,
         }
 
         atomic_fetch_sub(&bdp_comp->sqe_cnt[old_send_idx][old_target_idx], 1);
+        bondp_sqe_bytes_sub(bdp_comp, old_send_idx, old_target_idx, resend_wr_entry->total_bytes);
         if (bondp_resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
             URMA_LOG_ERR("Failed to resend %s jfs wr, wr_id=%lu\n", reason, resend_wr_id);
         }
@@ -1381,6 +1420,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         uint64_t user_ctx = wr_entry->user_ctx;
         uint32_t retry_cnt = wr_entry->rnr_retry_cnt;
         atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+        bondp_sqe_bytes_sub(bdp_comp, send_idx, target_idx, wr_entry->total_bytes);
         wr_entry->rnr_retry_pending = true;
         if (retry_cnt == 0) {
             wr_entry->rnr_retry_cnt++;
@@ -1480,6 +1520,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
 
 CONVERT_CR:
     atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+    bondp_sqe_bytes_sub(bdp_comp, send_idx, target_idx, wr_entry->total_bytes);
 
     uint32_t msn = 0;
     convert_pcr_to_vcr(cr, bdp_comp->bondp_ctx, &msn);
