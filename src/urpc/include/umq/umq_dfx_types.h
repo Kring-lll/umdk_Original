@@ -146,6 +146,45 @@ typedef struct umq_qbuf_pool_info {
     } available_mem;
 } umq_qbuf_pool_info_t;
 
+/* Maximum number of size_class levels exposed via DFX. Mirrors UMQ_QBUF_SIZE_CLASS_MAX
+ * in the internal umq_qbuf_pool_base.h; duplicated here because the internal header
+ * is not visible to public DFX consumers. */
+#define UMQ_DFX_QBUF_SIZE_CLASS_MAX (16u)
+
+/* Per-size_class breakdown of a multi-level qbuf pool. Replaces the single-level
+ * fields above for multi-level pools: for single-level pools sc_count=1 and
+ * only sc_info[0] is filled; per-sc fields are the raw per-sc values (NOT summed).
+ * above are the SUM across these sc entries). Valid indices: [0..sc_count-1]. */
+typedef struct umq_qbuf_sc_info {
+    uint32_t blk_size;             // g_qbuf_pool.block_sizes[sc]
+    uint64_t data_region_start;    // g_qbuf_pool.data_region_start[sc] cast to uint64_t
+    uint64_t data_region_end;      // g_qbuf_pool.data_region_end[sc] cast to uint64_t
+    uint64_t header_region_start;  // g_qbuf_pool.header_region_start[sc] cast to uint64_t
+    uint64_t buf_cnt_with_data;    // block_pool[sc].buf_cnt_with_data (global with_data count)
+    uint64_t buf_cnt_without_data; // block_pool[sc].buf_cnt_without_data (sc0 carries the without_data count; others 0)
+    uint32_t exp_expansion_count;  // exp_pool_with_data[sc].expansion_count
+    uint64_t exp_total_block_num;  // exp_pool_with_data[sc].exp_total_block_num
+    uint64_t exp_total_expansion_count; // exp_pool_with_data[sc].total_expansion_count
+    uint64_t exp_total_shrink_count;    // exp_pool_with_data[sc].total_shrink_count
+} umq_qbuf_sc_info_t;
+
+/* Multi-level size_class pool configuration. These fields were previously hidden
+ * inside the static g_qbuf_pool state and not exposed via DFX. */
+typedef struct umq_qbuf_pool_config {
+    uint32_t size_class_count;           // 1..UMQ_DFX_QBUF_SIZE_CLASS_MAX
+    uint32_t size_class_step_multiplier; // block_size[i] = base * mult^i
+    uint64_t per_sc_block_count;         // per-sc total block count (uniform across sc levels)
+    uint8_t disable_scale_cap;           // expansion/shrink switch (1 = disabled)
+    uint8_t disable_malloc_escape;       // escape mechanism switch (1 = disabled)
+    uint64_t expansion_size;             // per-expansion memory size
+    uint32_t expansion_threshold;        // water level % triggering expansion (1-100)
+    uint64_t expansion_mem_size_max;     // cap on expansion memory
+    uint64_t exp_total_mem_pool_size;    // current total expansion pool memory
+    uint64_t tls_pool_mem_budget;        // global TLS total bytes cap
+    uint64_t tls_expand_mem_budget;      // per-thread TLS bytes cap (default 7/8 of tls_pool_mem_budget)
+    uint64_t tls_expand_qbuf_pool_depth; // per-thread TLS depth cap (default 7/8 of tls_qbuf_pool_depth)
+} umq_qbuf_pool_config_t;
+
 typedef struct umq_qbuf_pool_stats {
     umq_qbuf_pool_info_t qbuf_pool_info[UMQ_STATS_QBUF_POOL_TYPE_MAX]; // statistical information list for qbuf pool
     uint32_t num; // number of valid qbuf pool info structures
