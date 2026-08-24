@@ -91,6 +91,7 @@ typedef struct umq_expansion_slot_info {
     uint64_t free_block_cnt;
     uint64_t in_use_cnt;  /* total > free ? total - free : 0, number of blocks fetched out and not yet returned */
 } umq_expansion_slot_info_t;
+uint32_t umq_qbuf_expansion_slot_dist(umq_expansion_slot_info_t *infos, uint32_t cap);
 
 /* Diagnostic: log details (pointer, pool regions, call stack) when a pointer
  * passed to umq_data_to_head does not belong to any normal/tiny/expansion pool.
