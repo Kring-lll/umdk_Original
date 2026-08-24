@@ -23,7 +23,7 @@
 
 """ PyTorch DeepSeek model."""
 import os
-from typing import List, Optional, Tuple, Union, Dict, Iterable, Set
+from typing import List, NamedTuple, Optional, Tuple, Union, Dict, Iterable, Set
 
 import torch
 import torch.nn.functional as F
@@ -671,6 +671,20 @@ class DeepseekV3MoE(nn.Module):
 
 
 # Copied from transformers.models.llama.modeling_llama.LlamaAttention with Llama->DeepseekV3
+class _GatherSfaPipelineInputs(NamedTuple):
+    q_nope: torch.Tensor
+    q_pe: torch.Tensor
+    topk_indices: torch.Tensor
+    full_kv_cache: torch.Tensor
+    full_k_rope: torch.Tensor
+    block_table: torch.Tensor
+    actual_seq_lengths_kv: torch.Tensor
+    actual_seq_qlen: torch.Tensor
+    offload_cache: "OffloadCache"
+    bsz: int
+    q_len: int
+
+
 class DeepseekIndexerAttention(nn.Module):
     def __init__(self, config: DeepseekV3Config, runner_settings: Dict, layer_idx: Optional[int] = None,
                  prefix: Optional[str] = "", **kwargs):
@@ -1331,15 +1345,14 @@ class DeepseekIndexerAttention(nn.Module):
         q_pe = q_pe.contiguous().view(bsz * q_len, num_heads, -1) # B,S,N,D -> B*S,N,D
         block_table = self.prefill_block_table if is_prefill else self.block_table
 
-        if self.enable_offload and not is_prefill \
-                and self.enable_dual_stream_offload and self.exe_mode == "eager":
+        if self._use_dual_stream_offload(is_prefill):
             # 双流流水: gather(H2D) 走专用流, 与主流 SFA 计算按 batch 切块重叠
             full_kv_cache = k_nope.squeeze(2)
             full_k_rope = k_pe.squeeze(2) if not self.kv_cache_quant_mode == "int8" else offload_cache.empty_rope
-            slc_fa_fusion = self._gather_sfa_pipelined(
+            slc_fa_fusion = self._gather_sfa_pipelined(_GatherSfaPipelineInputs(
                 q_nope, q_pe, topk_indices, full_kv_cache, full_k_rope,
                 block_table, actual_seq_lengths_kv, actual_seq_qlen,
-                offload_cache, bsz, q_len)
+                offload_cache, bsz, q_len))
             return slc_fa_fusion.transpose(0, 1)
 
         if self.enable_offload and not is_prefill:
@@ -1426,11 +1439,15 @@ class DeepseekIndexerAttention(nn.Module):
         slc_fa_fusion = slc_fa_fusion.transpose(0, 1)
         return slc_fa_fusion
 
-    def _gather_sfa_pipelined(
-        self, q_nope, q_pe, topk_indices, full_kv_cache, full_k_rope,
-        block_table, actual_seq_lengths_kv, actual_seq_qlen,
-        offload_cache, bsz, q_len,
-    ):
+    def _use_dual_stream_offload(self, is_prefill: bool) -> bool:
+        return (
+            self.enable_offload
+            and not is_prefill
+            and self.enable_dual_stream_offload
+            and self.exe_mode == "eager"
+        )
+
+    def _gather_sfa_pipelined(self, inputs: _GatherSfaPipelineInputs):
         """offload decode 双流流水: 把 gather + SFA 按 batch 切成 2 块, gather(H2D) 走专用流,
         与主流上的 SFA 计算重叠, 从而把 SFA 藏进 gather 的搬运时间里。
 
@@ -1442,6 +1459,18 @@ class DeepseekIndexerAttention(nn.Module):
         仅 eager 模式使用: 依赖 torch.npu.Stream/Event/record_stream 等运行时原语, 无法被图捕获。
         """
         n_chunks = 2
+
+        q_nope = inputs.q_nope
+        q_pe = inputs.q_pe
+        topk_indices = inputs.topk_indices
+        full_kv_cache = inputs.full_kv_cache
+        full_k_rope = inputs.full_k_rope
+        block_table = inputs.block_table
+        actual_seq_lengths_kv = inputs.actual_seq_lengths_kv
+        actual_seq_qlen = inputs.actual_seq_qlen
+        offload_cache = inputs.offload_cache
+        bsz = inputs.bsz
+        q_len = inputs.q_len
 
         selection_k_rope = offload_cache.selected_key_values[self.layer_idx][1]
         selection_kv_cache = offload_cache.selected_key_values[self.layer_idx][0]
