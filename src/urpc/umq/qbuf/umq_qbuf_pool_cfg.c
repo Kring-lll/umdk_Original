@@ -19,12 +19,7 @@ static uint64_t umq_without_data_expand_mem_size(const umq_buf_pool_cfg_t *cfg, 
     return (uint64_t)sizeof(umq_buf_t) * UMQ_EMPTY_HEADER_COEFFICIENT * expansion_block_count;
 }
 
-static uint64_t umq_init_buf_pool_size(const umq_buf_pool_cfg_t *cfg)
-{
-    return cfg->umq_mem_pool_init_size == 0 ? UMQ_BUF_DEFAULT_TOTAL_SIZE : cfg->umq_mem_pool_init_size;
-}
-
-static int umq_tiny_pool_cfg_check(const umq_init_cfg_t *cfg, uint64_t init_size, umq_qbuf_pool_plan_t *plan)
+static int umq_tiny_pool_cfg_check(const umq_init_cfg_t *cfg, umq_qbuf_pool_plan_t *plan)
 {
     if (!cfg->buf_pool_cfg.enable_tiny_pool) {
         return UMQ_SUCCESS;
@@ -57,12 +52,6 @@ static int umq_tiny_pool_cfg_check(const umq_init_cfg_t *cfg, uint64_t init_size
         return -UMQ_ERR_EINVAL;
     }
 
-    if (init_size <= plan->tiny_io_buf_size) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "umq mem pool init size %llu is too small for tiny pool size %llu\n", init_size,
-                     plan->tiny_io_buf_size);
-        return -UMQ_ERR_EINVAL;
-    }
-
     return UMQ_SUCCESS;
 }
 
@@ -73,16 +62,11 @@ int umq_qbuf_pool_cfg_check(const umq_init_cfg_t *cfg, umq_qbuf_pool_plan_t *pla
     }
     (void)memset(plan, 0, sizeof(*plan));
 
-    uint64_t init_size = umq_init_buf_pool_size(&cfg->buf_pool_cfg);
-    int ret = umq_tiny_pool_cfg_check(cfg, init_size, plan);
+    int ret = umq_tiny_pool_cfg_check(cfg, plan);
     if (ret != UMQ_SUCCESS) {
         return ret;
     }
 
-    uint64_t without_data_expand_mem_size = 0;
-    if (cfg->buf_mode == UMQ_BUF_SPLIT) {
-        without_data_expand_mem_size = QBUF_POOL_INITIAL_NODATA_BUF_CNT * sizeof(umq_buf_t);
-    }
     // RX pool plan: 4KB-only, independent from normal pool
     plan->rx_block_count = cfg->buf_pool_cfg.rx_block_count;
     if (plan->rx_block_count > 0) {
@@ -90,38 +74,52 @@ int umq_qbuf_pool_cfg_check(const umq_init_cfg_t *cfg, umq_qbuf_pool_plan_t *pla
         plan->rx_io_buf_size = (uint64_t)plan->rx_block_count * (rx_blk_size + sizeof(umq_buf_t));
     }
 
-    plan->normal_io_buf_size = init_size - plan->tiny_io_buf_size - plan->rx_io_buf_size;
-    if (plan->normal_io_buf_size < without_data_expand_mem_size) {
-        UMQ_VLOG_INFO(VLOG_UMQ, "normal buf pool init size %llu < support without data buf, required %llu\n",
-            plan->normal_io_buf_size, without_data_expand_mem_size);
+    // Normal pool size is now the direct sum of per-SC block counts (no weighted
+    // allocation / auto-shrink layout simulation). per_sc_block_counts[sc]==0
+    // means that SC is lazy (expansion pool only, no initial reserve).
+    uint32_t count = (cfg->buf_pool_cfg.size_class_count == 0) ? QBUF_POOL_DEFAULT_SIZE_CLASS_COUNT :
+                                                                 cfg->buf_pool_cfg.size_class_count;
+    if (count < 1 || count > UMQ_SIZE_CLASS_MAX) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "size_class_count %u out of range [1, %u]\n", count, UMQ_SIZE_CLASS_MAX);
         return -UMQ_ERR_EINVAL;
     }
 
-    // Validate: init_size >= rx + tiny (minimum for pool to function).
-    // tls_qbuf_pool_depth is a per-thread cap, not a hard minimum for global pool.
-    // per_sc_block_count in init_size_class_config will auto-fit to available memory.
-    if (!cfg->buf_pool_cfg.disable_scale_cap && cfg->buf_pool_cfg.tls_qbuf_pool_depth > 0) {
-        uint64_t required = plan->rx_io_buf_size + plan->tiny_io_buf_size;
-        uint32_t count = (cfg->buf_pool_cfg.size_class_count == 0) ? QBUF_POOL_DEFAULT_SIZE_CLASS_COUNT :
-                                                                     cfg->buf_pool_cfg.size_class_count;
-        uint64_t tls_required = 0;
-        for (uint32_t i = 0; i < count; i++) {
-            // Skip zero-reserve SCs (per_sc_weights[i]==0 means no initial blocks)
-            if (i < UMQ_QBUF_SIZE_CLASS_MAX && cfg->buf_pool_cfg.per_sc_weights[i] == 0) {
-                continue;
-            }
-            uint64_t bs = cfg->buf_pool_cfg.explicit_block_sizes[i];
-            tls_required += bs * cfg->buf_pool_cfg.tls_qbuf_pool_depth;
+    uint64_t normal_io_buf_size = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        uint64_t blk_cnt = cfg->buf_pool_cfg.per_sc_block_counts[i];
+        uint32_t blk_sz = cfg->buf_pool_cfg.explicit_block_sizes[i];
+        plan->per_sc_block_counts[i] = blk_cnt;
+        plan->per_sc_tls_qbuf_pool_depth[i] = cfg->buf_pool_cfg.per_sc_tls_qbuf_pool_depth[i];
+        if (blk_cnt == 0) {
+            continue;
         }
-        required += tls_required;
-        if (init_size < required) {
-            UMQ_VLOG_WARN(VLOG_UMQ, "init_size %llu < tls_ideal %llu (rx %llu + tiny %llu + nonlazy*depth %llu), "
-                         "per-sc block count will be reduced to fit\n",
-                         init_size, required, plan->rx_io_buf_size, plan->tiny_io_buf_size,
-                         tls_required);
-            // Don't fail - let init_size_class_config auto-adjust per_sc_block_count
+        if (blk_sz == 0) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "per_sc_block_counts[%u]=%llu but explicit_block_sizes[%u]=0\n",
+                         i, (unsigned long long)blk_cnt, i);
+            return -UMQ_ERR_EINVAL;
+        }
+        normal_io_buf_size += blk_cnt * blk_sz;
+        if (cfg->buf_mode == UMQ_BUF_SPLIT) {
+            normal_io_buf_size += blk_cnt * sizeof(umq_buf_t);
         }
     }
+
+    if (normal_io_buf_size == 0) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "normal pool has zero blocks (all per_sc_block_counts are 0)\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    uint64_t without_data_expand_mem_size = QBUF_POOL_INITIAL_NODATA_BUF_CNT;
+    if (cfg->buf_mode == UMQ_BUF_SPLIT) {
+        without_data_expand_mem_size *= sizeof(umq_buf_t);
+    }
+    if (normal_io_buf_size < without_data_expand_mem_size) {
+        UMQ_VLOG_INFO(VLOG_UMQ, "normal buf pool init size %llu < support without data buf, required %llu\n",
+            normal_io_buf_size, without_data_expand_mem_size);
+        return -UMQ_ERR_EINVAL;
+    }
+
+    plan->normal_io_buf_size = normal_io_buf_size;
 
     if (!cfg->buf_pool_cfg.disable_scale_cap && cfg->buf_pool_cfg.umq_buf_pool_max_size > QBUF_POOL_MEM_SIZE_MAX) {
         UMQ_VLOG_INFO(VLOG_UMQ, "the maximum value of expansion mem size max %llu exceed %llu\n",
@@ -132,21 +130,22 @@ int umq_qbuf_pool_cfg_check(const umq_init_cfg_t *cfg, umq_qbuf_pool_plan_t *pla
     uint64_t max_umq_buf_pool_size = cfg->buf_pool_cfg.umq_buf_pool_max_size == 0 ?
                                          QBUF_POOL_DEFAULT_EXPANSION_MEM_SIZE :
                                          cfg->buf_pool_cfg.umq_buf_pool_max_size;
-    uint64_t init_required_size = init_size;
-    if (max_umq_buf_pool_size < init_required_size) {
-        UMQ_VLOG_INFO(VLOG_UMQ, "max buf pool size %llu is too small to support initial buf pool, required %llu\n",
-                      max_umq_buf_pool_size, init_required_size);
+    uint64_t total_initial_size = plan->tiny_io_buf_size + plan->rx_io_buf_size + plan->normal_io_buf_size;
+    if (max_umq_buf_pool_size < total_initial_size) {
+        UMQ_VLOG_INFO(VLOG_UMQ, "max buf pool size %llu is too small for total initial %llu (tiny %llu + rx %llu + normal %llu)\n",
+                      max_umq_buf_pool_size, total_initial_size,
+                      plan->tiny_io_buf_size, plan->rx_io_buf_size, plan->normal_io_buf_size);
         return -UMQ_ERR_EINVAL;
     }
 
     without_data_expand_mem_size = umq_without_data_expand_mem_size(&cfg->buf_pool_cfg, cfg->buf_mode);
     if (!cfg->buf_pool_cfg.disable_scale_cap &&
-        max_umq_buf_pool_size < init_required_size + without_data_expand_mem_size) {
+        max_umq_buf_pool_size < total_initial_size + without_data_expand_mem_size) {
         UMQ_VLOG_INFO(VLOG_UMQ, "max buf pool size %llu < support expand without data buf, required %llu\n",
-                      max_umq_buf_pool_size, init_required_size + without_data_expand_mem_size);
+                      max_umq_buf_pool_size, total_initial_size + without_data_expand_mem_size);
         return -UMQ_ERR_EINVAL;
     }
 
-    plan->normal_pool_max_size = max_umq_buf_pool_size - plan->tiny_io_buf_size;
+    plan->normal_pool_max_size = max_umq_buf_pool_size - plan->tiny_io_buf_size - plan->rx_io_buf_size;
     return UMQ_SUCCESS;
 }
