@@ -18,10 +18,8 @@ import com.huawei.umdk.snc.dto.PathInfo;
 import com.huawei.umdk.snc.dto.PathPlanRequest;
 import com.huawei.umdk.snc.dto.PathPlanResult;
 import com.huawei.umdk.snc.dto.PathPlanResult.PlanStatus;
-import com.huawei.umdk.snc.engine.AclCheckEngine;
 import com.huawei.umdk.snc.engine.PathEngine;
 import com.huawei.umdk.snc.engine.RouteLookupEngine;
-import com.huawei.umdk.snc.entity.AclData;
 import com.huawei.umdk.snc.entity.DeviceEntity;
 import com.huawei.umdk.snc.entity.DeviceType;
 import com.huawei.umdk.snc.entity.InternalPathHop;
@@ -34,7 +32,6 @@ import com.huawei.umdk.snc.entity.RoutingEntry;
 import com.huawei.umdk.snc.entity.RoutingTable;
 import com.huawei.umdk.snc.entity.RoutingTableKey;
 import com.huawei.umdk.snc.entity.SuperNode;
-import com.huawei.umdk.snc.store.AclStore;
 import com.huawei.umdk.snc.store.SuperNodeStore;
 import com.huawei.umdk.snc.util.AddressUtils;
 
@@ -42,19 +39,14 @@ public class PathService {
     private static final Logger LOG = new Logger(PathService.class);
 
     private final SuperNodeStore superNodeStore;
-    private final AclStore aclStore;
     private final PathEngine pathEngine;
     private final RouteLookupEngine routeLookupEngine;
-    private final AclCheckEngine aclCheckEngine;
 
-    public PathService(SuperNodeStore superNodeStore, AclStore aclStore,
-                       PathEngine pathEngine, RouteLookupEngine routeLookupEngine,
-                       AclCheckEngine aclCheckEngine) {
+    public PathService(SuperNodeStore superNodeStore,
+                       PathEngine pathEngine, RouteLookupEngine routeLookupEngine) {
         this.superNodeStore = superNodeStore;
-        this.aclStore = aclStore;
         this.pathEngine = pathEngine;
         this.routeLookupEngine = routeLookupEngine;
-        this.aclCheckEngine = aclCheckEngine;
     }
 
     public PathPlanResult planPath(PathPlanRequest request) {
@@ -170,22 +162,6 @@ public class PathService {
             }
             LOG.debug("planPath: upi=" + srcNpuPort.getUpi() + ", check=UPI consistency passed");
         }
-
-        // Step 3-4: ACL bidirectional check
-        LOG.debug("planPath: ACL bidirectional check, srcEid=" + srcEid
-            + ", dstEid=" + dstEid + ", srcCna=" + srcCna + ", destCna=" + destCna);
-        AclData aclData = aclStore.getAclData(request.getSuperNodeName());
-        if (aclData == null) {
-            LOG.error("planPath: error=ACL data not found, superNode=" + request.getSuperNodeName());
-            return new PathPlanResult(PlanStatus.ACL_NOT_FOUND,
-                "ACL data not found for superNode: " + request.getSuperNodeName());
-        }
-        if (!aclCheckEngine.checkBothDirection(aclData, srcEid, dstEid, srcCna, destCna)) {
-            LOG.error("planPath: error=ACL check failed, srcEid=" + srcEid + ", dstEid=" + dstEid);
-            return new PathPlanResult(PlanStatus.ACL_CHECK_FAILED,
-                "ACL check failed");
-        }
-        LOG.debug("planPath: ACL bidirectional check passed");
 
         // Step 5: Direct or multi-hop
         Map<String, String> interDevices = request.getInterDevices();
