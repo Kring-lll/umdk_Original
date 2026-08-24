@@ -6,8 +6,40 @@
  */
 
 #include <thread>
+#include <stdlib.h>
 
 #include "urpc_thread_closure.h"
+
+/* Defined here (not in a header) so only this TU owns the symbol; declared in
+ * urpc_thread_closure.h for visibility to the C-side release_thread_cache variants. */
+volatile bool g_tls_dtors_running = false;
+
+/* Set g_tls_dtors_running=true via atexit() handler, which runs BEFORE
+ * __call_tls_dtors() during exit(). This ensures the flag is only set during
+ * process exit — NOT during normal thread exit (pthread_exit/return).
+ *
+ * umdk's per-thread TLS release is driven by util_thread_key (its destructor
+ * fires on BOTH normal thread exit AND process exit). If g_tls_dtors_running
+ * were set in ~urpc_thread_closure() (as ubscomm originally did), it would flip
+ * on every thread exit, causing release_thread_cache() to skip cleanup (buf
+ * leak) and DFX stats to skip traversal (local_qbuf_pool_num=0 even when other
+ * threads are alive).
+ *
+ * Fix (per zlj umdk blueprint): move flag-setting to atexit(), which only fires
+ * during process exit. Normal thread exit: flag stays false → full cleanup runs.
+ * Process exit: atexit runs first → flag=true → TLS destructors skip list ops. */
+static void set_tls_dtors_running(void)
+{
+    g_tls_dtors_running = true;
+    __sync_synchronize();
+}
+
+/* Register the atexit handler exactly once (constructor runs at process start,
+ * before any threads are created). atexit() itself is thread-safe per POSIX. */
+__attribute__((constructor)) static void register_tls_dtors_handler(void)
+{
+    (void)atexit(set_tls_dtors_running);
+}
 
 class urpc_thread_closure {
 public:
@@ -19,6 +51,9 @@ public:
 
     ~urpc_thread_closure()
     {
+        /* Do NOT set g_tls_dtors_running here — it fires on every thread exit,
+         * not just process exit. The flag is now set via atexit() handler
+         * (see register_tls_dtors_handler above) which only runs during exit(). */
         if (m_closure != nullptr) {
             m_closure(m_id);
         }
