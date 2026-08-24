@@ -65,6 +65,7 @@ extern "C" {
 #define QBUF_POOL_EXP_SLOT_TABLE_SIZE (QBUF_POOL_EXP_SLOT_ID_MAX - QBUF_POOL_EXP_SLOT_ID_MIN)
 
 #define UMQ_TINY_QBUF_MEMPOOL_ID (1022U)
+#define UMQ_RX_QBUF_MEMPOOL_ID (1021U)
 
 #define QBUF_POOL_TLS_MAX (2048)        // max count of thread local buffer storage
 #define QBUF_POOL_BATCH_CNT (64)        // batch size when fetch from global or return to global
