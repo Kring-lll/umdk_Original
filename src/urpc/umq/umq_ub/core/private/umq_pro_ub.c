@@ -416,11 +416,16 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
             goto RECOVER_WINDOW;
         }
         jetty_pool_node_t *jetty_node = (jetty_pool_node_t *)(uintptr_t)queue->jetty_node;
-        uint32_t tx_outstanding = __atomic_load_n(&jetty_node->tx_outstanding, __ATOMIC_ACQUIRE);
-        uint32_t total = tx_outstanding + wr_cnt_limit;
-        if (total > jetty_node->borrow_limit) {
-            uint32_t excess = total - jetty_node->borrow_limit;
-            wr_cnt_limit -= excess;
+        /* flow_control may be NULL when ubsocket_flow_control_enable=false
+         * (queue->flow_control is a pointer, not embedded). Guard the
+         * borrow-limit check so fc=NULL doesn't dereference. */
+        if (queue->flow_control != NULL) {
+            uint32_t tx_outstanding = __atomic_load_n(&jetty_node->tx_outstanding, __ATOMIC_ACQUIRE);
+            uint32_t total = tx_outstanding + wr_cnt_limit;
+            if (total > jetty_node->borrow_limit) {
+                uint32_t excess = total - jetty_node->borrow_limit;
+                wr_cnt_limit -= excess;
+            }
         }
     }
 
