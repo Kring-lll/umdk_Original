@@ -14,6 +14,7 @@
 #include "umq_vlog.h"
 #include "umq_errno.h"
 #include "urpc_thread_closure.h"
+#include "umq_ub_impl.h"
 #include "umq_ub_private.h"
 #include "umq_ub_jetty_pool.h"
 

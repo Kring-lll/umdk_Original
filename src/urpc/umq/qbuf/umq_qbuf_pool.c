@@ -339,6 +339,15 @@ int g_qbuf_debug_enabled = 0;
 // When UMQ_QBUF_DEBUG is defined, qbuf_debug_on() is provided by umq_qbuf_pool_base.h.
 #ifndef UMQ_QBUF_DEBUG
 static inline bool qbuf_debug_on(void) { return false; }
+static inline void qbuf_dbg_record_alloc_nodata(uint64_t _t0) { (void)_t0; }
+static inline void qbuf_dbg_record_alloc_data(uint64_t _t0, uint32_t sc)
+{
+    (void)_t0;
+    (void)sc;
+}
+
+static inline void qbuf_dbg_record_alloc_escape(uint64_t _t0) { (void)_t0; }
+static inline void qbuf_dbg_record_free(uint64_t _t0) { (void)_t0; }
 #endif
 
 #ifdef UMQ_QBUF_DEBUG
@@ -2789,7 +2798,7 @@ int umq_normal_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_
                 if (ret != UMQ_SUCCESS) {
                     if (qbuf_debug_on()) {
                         g_dbg_stats.alloc_with_data_fetch_fail++;
-                    }   
+                    }
                     return ret;
                 }
                 return ret;
