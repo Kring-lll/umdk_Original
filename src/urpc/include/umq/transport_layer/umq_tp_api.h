@@ -275,32 +275,40 @@ typedef struct umq_ops {
      * @param[in] mempool_id: mempool id, the ID of the memory pool from which the buffer was obtained
      * @param[in] mempool_info_size: size of mempool_info buffer
      * @param[out] mempool_info: mempool import information
+     * @param[out] mempool_info_len: actual byte length written (set on success)
      * Return: 0 on success, other value on error
      */
     int (*umq_tp_mempool_info_get)(uint64_t umqh_tp, uint32_t mempool_id, uint8_t *mempool_info,
-        uint32_t mempool_info_size);
+        uint32_t mempool_info_size, uint32_t *mempool_info_len);
 
     /**
-     * Set mempool info: import a peer mempool from a received descriptor.
+     * Set mempool info: import a peer mempool from the opaque blob received over
+     * the wire. The transport parses mempool_id/version internally.
      * @param[in] umqh_tp: umq tp handle
-     * @param[in] mempool_id: mempool id, the ID of the memory pool from which the buffer was obtained
-     * @param[in] mempool_info_size: size of mempool_info buffer
-     * @param[in] mempool_info: mempool import information
-     * @param[in] version: current mempool version
+     * @param[in] mempool_info: opaque blob received over the wire
+     * @param[in] mempool_info_len: byte length of the blob
      * Return: 0 on success, other value on error
      */
-    int (*umq_tp_mempool_info_set)(uint64_t umqh_tp, uint32_t mempool_id, uint8_t *mempool_info,
-        uint32_t mempool_info_size, uint32_t version);
+    int (*umq_tp_mempool_info_set)(uint64_t umqh_tp, const uint8_t *mempool_info, uint32_t mempool_info_len);
 
     /**
-     * Get remote mempool import state vs the given version.
+     * Check remote mempool import state vs the version carried in the opaque blob.
+     * The transport parses mempool_id/version internally.
      * @param[in] umqh_tp: umq tp handle
-     * @param[in] mempool_id: mempool id, the ID of the memory pool from which the buffer was obtained
-     * @param[in] version: current mempool version
+     * @param[in] mempool_info: opaque blob received over the wire
+     * @param[in] mempool_info_len: byte length of the blob
      * Return: 0 no import needed; 1 need import; 2 need unimport & re-import (version grew);
      *         3 protocol error (version rollback), caller sends READ_ABORT; -1 error
      */
-    int (*umq_tp_remote_mempool_state_get)(uint64_t umqh_tp, uint32_t mempool_id, uint32_t version);
+    int (*umq_tp_remote_mempool_state_check)(uint64_t umqh_tp, const uint8_t *mempool_info,
+        uint32_t mempool_info_len);
+
+    /**
+     * Extract mempool_id/token_id/token_value from the opaque blob so the caller
+     * can build a READ/WRITE work-request's remote_sge. Pure parse, no state.
+     */
+    int (*umq_tp_mempool_info_get_remote_fields)(const uint8_t *mempool_info, uint32_t mempool_info_len,
+        uint32_t *out_mempool_id, uint32_t *out_token_id, uint32_t *out_token_value);
 
     /**
      * Get device information.
