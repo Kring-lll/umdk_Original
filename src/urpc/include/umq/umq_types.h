@@ -271,6 +271,7 @@ typedef enum umq_alloc_pool_type {
     UMQ_ALLOC_POOL_HUGE = 2,
     UMQ_ALLOC_POOL_ESCAPE = 3,
     UMQ_ALLOC_POOL_AUTO = 4,
+    UMQ_ALLOC_POOL_RX = 5,
     UMQ_ALLOC_POOL_MAX,
 } umq_alloc_pool_type_t;
 
@@ -278,8 +279,10 @@ typedef struct umq_buf_pool_cfg {
     // set block_size for umq_buf_size_small(), umq_buf_size_middle() and umq_buf_size_big() will be automatically
     // adjusted
     umq_buf_block_size_t small_block_size;
-    // Total initial size of normal and tiny pools. Set to 1024MB if 0 in UB/UB_PLUS mode.
+    // Total initial size of normal, tiny and RX pools. Set to 1024MB if 0 in UB/UB_PLUS mode.
     uint64_t umq_mem_pool_init_size;
+    // RX pool block count (minimum). 0 means no validation.
+    uint32_t rx_block_count;
     // Minimum initial normal-pool block count. 0 means no validation.
     uint32_t normal_pool_block_count;
     // global pool
