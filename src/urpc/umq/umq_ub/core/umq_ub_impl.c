@@ -734,7 +734,7 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
         .tls_expand_mem_budget = cfg->buf_pool_cfg.tls_expand_mem_budget,
     };
     memcpy(qbuf_cfg.explicit_block_sizes,
-           cfg->buf_pool_cfg.explicit_block_sizes,
+           buf_pool_plan.explicit_block_sizes,
            sizeof(uint32_t) * cfg->buf_pool_cfg.size_class_count);
     memcpy(qbuf_cfg.per_sc_block_counts,
            buf_pool_plan.per_sc_block_counts,
