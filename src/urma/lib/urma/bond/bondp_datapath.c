@@ -1361,15 +1361,31 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
     uint32_t send_idx = wr_entry->send_idx;
     uint32_t target_idx = wr_entry->target_idx;
 
-    if (atomic_load(&bdp_comp->valid[idx]) == false || idx != send_idx) {
+    if (idx != send_idx) {
+        URMA_LOG_INFO("[CQE_TRACE] skip: idx mismatch (stale cqe from resent wr), "
+                      "wr_id=%lu, idx=%d, send_idx=%u\n",
+                      wr_id, idx, send_idx);
         put_comp(bdp_comp);
         return CONVERT_SKIP;
+    }
+    if (atomic_load(&bdp_comp->valid[idx]) == false) {
+        /*
+         * Path was invalidated by a previous failover CR, but this WR was not
+         * resent to a backup path (idx == send_idx). Return this CR to the
+         * user and release the WR entry instead of silently dropping it.
+         */
+        URMA_LOG_INFO("[CQE_TRACE] path invalidated but wr not resent, "
+                      "reporting CQE to user, wr_id=%lu, idx=%d, "
+                      "send_idx=%u, valid[idx]=%d\n",
+                      wr_id, idx, send_idx, atomic_load(&bdp_comp->valid[idx]));
+        goto CONVERT_CR;
     }
 
     const bondp_context_t *comp_ctx = bdp_comp->bondp_ctx;
     if (comp_ctx->enable_rnr_retry && is_rnr_retry_cr(cr) && !bdp_comp->modify_to_error) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
-        if (wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
+        if (wr_entry->wr_id != wr_id ||
+            wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
             wr_entry->bdp_comp != bdp_comp ||
             wr_entry->send_idx != send_idx ||
             wr_entry->target_idx != target_idx) {
@@ -1425,6 +1441,11 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
     }
 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
+        URMA_LOG_INFO("[CQE_TRACE] enter failover path, wr_id=%lu, idx=%d, "
+                      "send_idx=%u, target_idx=%u, cr_status=%d, "
+                      "valid[send_idx]=%d(before), enable_failover=%d\n",
+                      wr_id, idx, send_idx, target_idx, cr->status,
+                      atomic_load(&bdp_comp->valid[send_idx]), comp_ctx->enable_failover);
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         atomic_store(&bdp_comp->valid[send_idx], false);
         bondp_target_jetty_t *bdp_tjetty = wr_entry->target_vjetty;
@@ -1479,13 +1500,28 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
     }
 
 CONVERT_CR:
+    pthread_spin_lock(&bdp_comp->send_lock);
+    if (wr_entry->wr_id != wr_id ||
+        wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
+        wr_entry->bdp_comp != bdp_comp ||
+        wr_entry->send_idx != send_idx ||
+        wr_entry->target_idx != target_idx) {
+        /*
+         * Another polling thread may have already resent this WR to a backup
+         * path (updating send_idx/target_idx) while holding send_lock.
+         * This CQE is stale; skip it to avoid double-decrement of sqe_cnt
+         * and premature release of a still-in-flight resent WR entry.
+         */
+        pthread_spin_unlock(&bdp_comp->send_lock);
+        put_comp(bdp_comp);
+        return CONVERT_SKIP;
+    }
     atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
 
     uint32_t msn = 0;
     convert_pcr_to_vcr(cr, bdp_comp->bondp_ctx, &msn);
     cr->local_id = get_comp_urma_jetty_id(bdp_comp)->id;
     cr->user_ctx = wr_entry->user_ctx;
-    pthread_spin_lock(&bdp_comp->send_lock);
     jfs_wr_put_refs(&wr_entry->wr);
     jfs_wr_buf_release(&bdp_comp->send_wr_buf, wr_entry);
     pthread_spin_unlock(&bdp_comp->send_lock);
