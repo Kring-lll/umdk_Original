@@ -273,15 +273,23 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
     /* record start before flow control so FC URMA calls can be captured as sub_time */
     umq_trace_start_record(UMQ_TRACE_TYPE_POST, post_start, 0, queue->umq_id);
 
-    ret = umq_ub_credit_check_and_request_send(fc, queue);
-    if (ret != UMQ_SUCCESS) {
-        *bad_qbuf = qbuf;
-        umq_trace_end_record(UMQ_TRACE_TYPE_POST, umq_trace_timestamp_get());
-        return ret;
+    /* READ operations pull data from the remote memory and do not consume the
+     * peer's RX buffer / send credit, so skip the send-credit check for them.
+     * Otherwise a READ OFFER handler can be permanently blocked by flow
+     * control even though READ doesn't deplete the remote RX window. */
+    umq_buf_pro_t *first_pro = (umq_buf_pro_t *)qbuf->qbuf_ext;
+    bool is_read_only = (first_pro != NULL && first_pro->opcode == UMQ_OPC_READ);
+    if (!is_read_only) {
+        ret = umq_ub_credit_check_and_request_send(fc, queue);
+        if (ret != UMQ_SUCCESS) {
+            *bad_qbuf = qbuf;
+            umq_trace_end_record(UMQ_TRACE_TYPE_POST, umq_trace_timestamp_get());
+            return ret;
+        }
     }
     uint32_t max_sge_num = qcfg->max_tx_sge;
     urma_jfs_wr_t *urma_wr_ptr = g_umq_ub_urma_wr;
-    urma_sge_t src_sge, dst_sge;
+    urma_sge_t src_sge[UMQ_BATCH_SIZE] = {}, dst_sge[UMQ_BATCH_SIZE] = {};
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO];
     urma_target_seg_t **tseg_list = queue->dev_ctx->tseg_list;
     urma_sge_t *sges_ptr;
@@ -371,7 +379,11 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
             goto ERROR;
         }
         urma_wr_ptr->opcode = transform_op_code(opcode);
-        ret = umq_ub_fill_wr(queue, tmp_buf, urma_wr_ptr, g_umq_ub_sges[wr_index], sge_num, &src_sge, &dst_sge);
+        /* Zero the WR union to clear stale target_hint/notify_data from
+         * previous SEND/WRITE WRs that share g_umq_ub_urma_wr[] entries. */
+        urma_wr_ptr->rw.target_hint = 0;
+        urma_wr_ptr->rw.notify_data = 0;
+        ret = umq_ub_fill_wr(queue, tmp_buf, urma_wr_ptr, g_umq_ub_sges[wr_index], sge_num, &src_sge[wr_index], &dst_sge[wr_index]);
         if (ret != UMQ_SUCCESS) {
             *bad_qbuf = qbuf;
             goto ERROR;
@@ -418,8 +430,9 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
         jetty_pool_node_t *jetty_node = (jetty_pool_node_t *)(uintptr_t)queue->jetty_node;
         /* flow_control may be NULL when ubsocket_flow_control_enable=false
          * (queue->flow_control is a pointer, not embedded). Guard the
-         * borrow-limit check so fc=NULL doesn't dereference. */
-        if (queue->flow_control != NULL) {
+         * borrow-limit check so fc=NULL doesn't dereference. READ ops skip
+         * the borrow check (they don't consume peer RX / send credit). */
+        if (!is_read_only && queue->flow_control != NULL && queue->flow_control->enabled) {
             uint32_t tx_outstanding = __atomic_load_n(&jetty_node->tx_outstanding, __ATOMIC_ACQUIRE);
             uint32_t total = tx_outstanding + wr_cnt_limit;
             if (total > jetty_node->borrow_limit) {
