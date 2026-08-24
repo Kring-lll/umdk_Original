@@ -58,6 +58,7 @@ typedef enum umq_buf_status {
     UMQ_BUF_WR_UNHANDLED,               /* Return of flush jetty/jfs, and the hardware has not processed the WR. */
     UMQ_BUF_LOC_DATA_POISON,            /* Local Data Poison */
     UMQ_BUF_REM_DATA_POISON,            /* Remote Data Poison */
+    UMQ_BUF_RNR_RETRY_CNT_EXC = 99,     /* RNR retries: remote jfr has no buffer */
 
     UMQ_BUF_FLOW_CONTROL_UPDATE = 128,  /* Umq flow control window is updated, this is not error case */
     UMQ_MEMPOOL_UPDATE_SUCCESS,
