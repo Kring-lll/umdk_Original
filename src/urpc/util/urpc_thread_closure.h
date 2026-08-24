@@ -8,11 +8,24 @@
 #ifndef URPC_THREAD_CLOSURE_H
 #define URPC_THREAD_CLOSURE_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* Set to true by the atexit() handler during process exit (registered from
+ * urpc_thread_closure.cpp via __attribute__((constructor))). Once set, all
+ * release_thread_cache variants skip cross-thread list operations
+ * (g_tls_register_head / thread_cache_list) because nodes from already-exited
+ * threads may be dangling. This guards the exit() -> __call_tls_dtors -> release
+ * path which is NOT covered by umq_*_uninit()'s g_process_exiting flag (uninit is
+ * not guaranteed to run before TLS dtors). Unlike ubscomm (which sets it in the
+ * C++ destructor), umdk sets it via atexit() so it only flips on process exit,
+ * not on every normal thread exit — otherwise util_thread_key's per-thread
+ * destructor would trigger the flag and leak bufs on worker thread exit. */
+extern volatile bool g_tls_dtors_running;
 
 typedef enum urpc_thread_closure_type {
     THREAD_CLOSURE_PERF,

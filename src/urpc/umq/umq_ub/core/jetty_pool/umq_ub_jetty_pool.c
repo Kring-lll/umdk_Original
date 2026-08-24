@@ -82,7 +82,9 @@ static ALWAYS_INLINE void recycle_node_to_relay_q(jetty_pool_t *pool, jetty_pool
 
 static ALWAYS_INLINE thread_local_jetty_cache_t *get_thread_jetty_cache(void)
 {
-    if (!g_jetty_pool_inited) {
+    /* During TLS destruction the registry list may hold dangling nodes;
+     * never re-init (which would push_back into the poisoned list). */
+    if (!g_jetty_pool_inited || g_tls_dtors_running) {
         return NULL;
     }
 
@@ -125,7 +127,35 @@ static ALWAYS_INLINE void release_jetty_pool_thread_cache(void *data)
 
     (void)util_thread_setspecific(g_umq_ub_jetty_pool_key, NULL);
 
+    /* TLS-destruction fast path: during exit() glibc runs __call_tls_dtors()
+     * which destroys our util_thread_key TLS and calls us. Other threads'
+     * registry nodes in g_jetty_pool.thread_cache_list may be dangling, so
+     * skip urpc_list_remove(registry_node). The cache_list holds nodes we
+     * malloc'd ourselves — free them directly (no global lock needed; these
+     * nodes are thread-private until pushed back to active_q). Leaking the
+     * registry node is acceptable since the list itself is about to die with
+     * the process. */
+    if (g_tls_dtors_running) {
+        while (!urpc_list_is_empty(&tls_cache->cache_list)) {
+            jetty_pool_node_t *cached = (jetty_pool_node_t *)urpc_list_pop_front(&tls_cache->cache_list);
+            free(cached);
+        }
+        tls_cache->cached_count = 0;
+        tls_cache->inited = false;
+        free(tls_cache);
+        return;
+    }
+
     if (!g_jetty_pool_inited) {
+        /* Pool already uninitialized; lock may be destroyed, so remove
+         * registry_node without locking. This is safe because uninit()
+         * will not touch thread_cache_list after it returns, and each
+         * thread only removes its own node. Failing to remove leaves a
+         * dangling pointer in the list that causes SIGSEGV when other
+         * threads traverse or modify the list. */
+        if (urpc_list_is_in_list(&tls_cache->registry_node)) {
+            urpc_list_remove(&tls_cache->registry_node);
+        }
         while (!urpc_list_is_empty(&tls_cache->cache_list)) {
             jetty_pool_node_t *cached = (jetty_pool_node_t *)urpc_list_pop_front(&tls_cache->cache_list);
             free(cached);
@@ -135,7 +165,9 @@ static ALWAYS_INLINE void release_jetty_pool_thread_cache(void *data)
     }
 
     (void)pthread_spin_lock(&g_jetty_pool.lock);
-    urpc_list_remove(&tls_cache->registry_node);
+    if (urpc_list_is_in_list(&tls_cache->registry_node)) {
+        urpc_list_remove(&tls_cache->registry_node);
+    }
     if (!urpc_list_is_empty(&tls_cache->cache_list)) {
         while (!urpc_list_is_empty(&tls_cache->cache_list)) {
             jetty_pool_node_t *cached = (jetty_pool_node_t *)urpc_list_pop_front(&tls_cache->cache_list);
