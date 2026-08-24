@@ -3105,17 +3105,16 @@ int umq_ub_remote_mempool_state_check_impl(uint64_t umqh_tp, const uint8_t *memp
         return UMQ_REMOTE_MEMPOOL_STATE_NEED_IMPORT; /* not imported: need import */
     }
     /* Version decision (design §3.5):
-     *   equal            -> 0 reuse (no import)
-     *   larger (grew)    -> 2 unimport & re-import (mempool re-registered)
-     *   smaller (rolled) -> 3 protocol error: a peer must never rewind version,
-     *                       caller sends READ_ABORT. */
+     *   equal  -> 0 reuse (no import)
+     *   differ -> 2 unimport & re-import. A version change — whether the peer's
+     *             mempool grew (re-registered) or rolled back (rewind) — is
+     *             treated uniformly as NEED_REIMPORT; rollback is NOT a protocol
+     *             error, so there is no distinct VERSION_ROLLBACK value. */
     int ret;
     if (node->version == version) {
         ret = UMQ_REMOTE_MEMPOOL_STATE_REUSE;
-    } else if (version > node->version) {
-        ret = UMQ_REMOTE_MEMPOOL_STATE_NEED_REIMPORT;
     } else {
-        ret = UMQ_REMOTE_MEMPOOL_STATE_VERSION_ROLLBACK; /* version rollback */
+        ret = UMQ_REMOTE_MEMPOOL_STATE_NEED_REIMPORT;
     }
     (void)util_rwlock_unlock(queue->bind_ctx->tseg_table->tseg_hmap_lock);
     return ret;
