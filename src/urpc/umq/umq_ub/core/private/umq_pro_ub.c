@@ -2018,7 +2018,12 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
             umq_buf_status_t fc_err_status = is_fatal ? UMQ_FAKE_BUF_FC_ERR_FATAL : UMQ_FAKE_BUF_FC_ERR;
 
             ub_queue_t *real_queue = umq_ub_get_real_queue_by_umq_id(queue, obj.bs.umq_id);
-            qbuf_cnt += umq_ub_fill_fc_tx_buf(real_queue, &buf[qbuf_cnt], option, fc_err_status);
+            int32_t fill_cnt = umq_ub_fill_fc_tx_buf(real_queue, &buf[qbuf_cnt], option, fc_err_status);
+            if (fill_cnt > 0) {
+                umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf[qbuf_cnt]->qbuf_ext;
+                buf_pro->umq_ctx = obj.bs.umq_id;
+                qbuf_cnt += fill_cnt;
+            }
             failed_cnt++;
             if (real_queue == NULL) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u) sub queue has been destroyed\n", obj.bs.umq_id);
