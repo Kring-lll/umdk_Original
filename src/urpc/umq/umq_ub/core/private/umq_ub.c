@@ -268,6 +268,22 @@ imported_tseg_node_t *umq_ub_tseg_node_lookup(import_tseg_table_t *tseg_table, u
     return NULL;
 }
 
+/* Same as umq_ub_tseg_node_lookup but assumes the caller already holds
+ * tseg_table->tseg_hmap_lock (read or write), so a concurrent
+ * umq_ub_tseg_remove cannot free the node between the lookup and the
+ * dereference. */
+imported_tseg_node_t *umq_ub_tseg_node_lookup_locked(import_tseg_table_t *tseg_table, uint32_t mempool_id)
+{
+    imported_tseg_node_t *tseg_node = NULL;
+    uint32_t hash = umq_ub_tseg_hash_get(mempool_id);
+    URPC_HMAP_FOR_EACH_WITH_HASH(tseg_node, node, hash, &tseg_table->tseg_hmap) {
+        if (tseg_node->mempool_id == mempool_id) {
+            return tseg_node;
+        }
+    }
+    return NULL;
+}
+
 uint32_t umq_ub_fill_seg_ctx(urma_target_seg_t *tseg, uint32_t mempool_id, uint32_t token_value,
                              uint32_t version, ub_import_mempool_info_t *out, uint32_t out_cap)
 {
