@@ -92,6 +92,11 @@ typedef struct umq_expansion_slot_info {
     uint64_t in_use_cnt;
 } umq_expansion_slot_info_t;
 
+/* Diagnostic: log details (pointer, pool regions, call stack) when a pointer
+ * passed to umq_data_to_head does not belong to any normal/tiny/expansion pool.
+ * Rate-limited to the first QBUF_NON_POOL_PTR_LOG_LIMIT occurrences per process. */
+void qbuf_log_non_pool_pointer(const char *caller, void *data);
+
 
 #ifdef __cplusplus
 }
