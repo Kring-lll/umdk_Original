@@ -45,7 +45,7 @@ extern "C" {
 // middle = small * UMQ_QBUF_SIZE_MULTIPLE_INTERVAL, and big = middle * UMQ_QBUF_SIZE_MULTIPLE_INTERVAL
 #define UMQ_QBUF_SIZE_MULTIPLE_INTERVAL (4)
 // Multi-level size_class support: block_size[i] = base x mult^i, i = 0..count-1
-#define UMQ_QBUF_SIZE_CLASS_MAX (16)
+#define UMQ_QBUF_SIZE_CLASS_MAX UMQ_SIZE_CLASS_MAX  /* backward compat, prefer UMQ_SIZE_CLASS_MAX */
 #define QBUF_ALLOC_STATE_FREE 0          // define qbuf free state
 #define QBUF_ALLOC_STATE_ALLOCATED 1     // define qbuf allocated state
 #define QBUF_POOL_MEMPOOL_ID_MAX (1023)  // escape mempool id: 1023, other memopool id must not exceed 1023
@@ -53,7 +53,7 @@ extern "C" {
 
 // Multi-level size_class defaults
 #define QBUF_POOL_DEFAULT_SIZE_CLASS_COUNT (2)
-#define QBUF_POOL_DEFAULT_STEP_MULTIPLIER (16)
+// QBUF_POOL_DEFAULT_STEP_MULTIPLIER removed (replaced by explicit_block_sizes[])
 #define QBUF_POOL_DEFAULT_EXPANSION_SIZE (32ULL * 1024 * 1024)
 #define QBUF_POOL_DEFAULT_TLS_POOL_MEM_BUDGET (96ULL * 1024 * 1024)
 #define QBUF_POOL_DEFAULT_EXPANSION_THRESHOLD (30)
@@ -78,9 +78,10 @@ extern "C" {
 #define QBUF_POOL_MEM_SIZE_MAX (6ULL * 1024 * 1024 * 1024)
 #define QBUF_MEMALIGN_SIZE (2ULL * 1024 * 1024)
 #define QBUF_POOL_MAX_BLOCK_SIZE (1024U * 1024U)
+#define QBUF_POOL_LOW_MEMORY_LIMIT_OF_WITHOUT_DATA (4 * 1024 * 1024)
 #define QBUF_POOL_TARGET_FETCH_BYTES (4ULL * 1024 * 1024)
 #define QBUF_POOL_BATCH_CNT_MIN (4)
-#define QBUF_POOL_DEFAULT_LAZY_INIT_BLOCK_SIZE_THRESHOLD (1024U * 1024U)
+// Lazy SCs now controlled by per_sc_weights[sc]==0 (no reserve, expansion pool only)
 
 typedef struct mempool_segment_ops {
     int (*register_seg_callback)(uint8_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
@@ -100,9 +101,13 @@ typedef struct qbuf_pool_cfg {
     uint32_t expansion_threshold; // water level percentage (1-100) that triggers expansion, default 30
     mempool_segment_ops_t seg_ops;
 
-    // multi-level size_class config: block_size[i] = data_size * size_class_step_multiplier^i
+    // Multi-level size_class config: explicit_block_sizes[0..size_class_count-1]
+    // specifies each SC's block size in ascending order. Caller must always fill valid values.
+    // Constraints: each size must be 4096*2^n, ascending, and larger size must be exact multiple
+    // of smaller size (required for memory layout alignment).
     uint32_t size_class_count;           // 1..UMQ_QBUF_SIZE_CLASS_MAX, default 2
-    uint32_t size_class_step_multiplier; // power of 2, default 16
+    uint32_t explicit_block_sizes[UMQ_QBUF_SIZE_CLASS_MAX]; // [0..count-1] ascending block sizes
+    uint32_t per_sc_weights[UMQ_QBUF_SIZE_CLASS_MAX];       // [0..count-1] weight for per-SC block allocation, default all-1 (equal)
 
     // thread local qbuf pool (byte budget)
     uint64_t
@@ -111,7 +116,6 @@ typedef struct qbuf_pool_cfg {
     uint64_t tls_pool_mem_budget;        // global TLS total bytes cap (flat across all threads), default 96MB
     uint64_t tls_expand_mem_budget;      // per-thread TLS bytes cap, default 7/8 of tls_pool_mem_budget
 
-    uint64_t lazy_init_block_size_threshold; // 0 = disabled, default 1MB
     bool disable_scale_cap; // expansion and shrink switch
     // escape
     bool disable_malloc_escape; // disable the escape mechanism
@@ -294,26 +298,6 @@ static ALWAYS_INLINE uint32_t allocate_batch(umq_buf_list_t *input, uint32_t n, 
     /* prepend [input_head .. batch_tail] to output */
     QBUF_LIST_FIRST(output) = input_head;
     QBUF_LIST_NEXT(batch_tail) = output_head;
-    return cnt;
-}
-
-// release input to output and return count of elements released
-static ALWAYS_INLINE uint32_t release_to_global(umq_buf_list_t *input, umq_buf_list_t *output)
-{
-    uint32_t cnt = 0;
-    umq_buf_t *cur_node;
-    umq_buf_t *last_node = NULL;
-    QBUF_LIST_FOR_EACH(cur_node, input)
-    {
-        ++cnt;
-        last_node = cur_node;
-    }
-
-    umq_buf_t *output_head = QBUF_LIST_FIRST(output);
-    // switch head node
-    QBUF_LIST_FIRST(output) = QBUF_LIST_FIRST(input);
-    // set output
-    QBUF_LIST_NEXT(last_node) = output_head;
     return cnt;
 }
 
