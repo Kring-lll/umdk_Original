@@ -89,7 +89,7 @@ typedef struct umq_expansion_slot_info {
     uint32_t slot_id;
     uint64_t total_block_cnt;
     uint64_t free_block_cnt;
-    uint64_t in_use_cnt;
+    uint64_t in_use_cnt;  /* total > free ? total - free : 0, number of blocks fetched out and not yet returned */
 } umq_expansion_slot_info_t;
 
 /* Diagnostic: log details (pointer, pool regions, call stack) when a pointer
