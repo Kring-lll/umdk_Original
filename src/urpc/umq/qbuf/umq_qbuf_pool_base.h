@@ -85,7 +85,7 @@ extern "C" {
 #define QBUF_POOL_LOW_MEMORY_LIMIT_OF_WITHOUT_DATA (4 * 1024 * 1024)
 #define QBUF_POOL_TARGET_FETCH_BYTES (4ULL * 1024 * 1024)
 #define QBUF_POOL_BATCH_CNT_MIN (4)
-// Lazy SCs now controlled by per_sc_weights[sc]==0 (no reserve, expansion pool only)
+// Lazy SCs now controlled by per_sc_block_counts[sc]==0 (no reserve, expansion pool only)
 
 typedef struct mempool_segment_ops {
     int (*register_seg_callback)(uint8_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
@@ -111,7 +111,8 @@ typedef struct qbuf_pool_cfg {
     // of smaller size (required for memory layout alignment).
     uint32_t size_class_count;           // 1..UMQ_QBUF_SIZE_CLASS_MAX, default 2
     uint32_t explicit_block_sizes[UMQ_QBUF_SIZE_CLASS_MAX]; // [0..count-1] ascending block sizes
-    uint32_t per_sc_weights[UMQ_QBUF_SIZE_CLASS_MAX];       // [0..count-1] weight for per-SC block allocation, default all-1 (equal)
+    uint64_t per_sc_block_counts[UMQ_QBUF_SIZE_CLASS_MAX];       // [0..count-1] per-SC initial block count (0 = lazy/expansion-only)
+    uint64_t per_sc_tls_qbuf_pool_depth[UMQ_QBUF_SIZE_CLASS_MAX]; // [0..count-1] per-SC TLS depth cap (0 = inherit tls_qbuf_pool_depth)
 
     // thread local qbuf pool (byte budget)
     uint64_t
