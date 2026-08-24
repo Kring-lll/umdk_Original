@@ -284,8 +284,6 @@ typedef struct umq_buf_pool_cfg {
     // set block_size for umq_buf_size_small(), umq_buf_size_middle() and umq_buf_size_big() will be automatically
     // adjusted
     umq_buf_block_size_t small_block_size;
-    // Total initial size of normal, tiny and RX pools. Set to 1024MB if 0 in UB/UB_PLUS mode.
-    uint64_t umq_mem_pool_init_size;
     // RX pool block count (minimum). 0 means no validation.
     uint32_t rx_block_count;
     // Minimum initial normal-pool block count. 0 means no validation.
@@ -303,7 +301,8 @@ typedef struct umq_buf_pool_cfg {
     // specifies each SC's block size in ascending order.
     uint32_t size_class_count;            // 0 = default (2), range 1..UMQ_SIZE_CLASS_MAX
     uint32_t explicit_block_sizes[UMQ_SIZE_CLASS_MAX];   // [0..count-1] ascending block sizes, e.g. {4096, 32768, 131072}
-    uint32_t per_sc_weights[UMQ_SIZE_CLASS_MAX];         // [0..count-1] allocation weight, default {2,1,1} for 4K-heavy
+    uint64_t per_sc_block_counts[UMQ_SIZE_CLASS_MAX];   // [0..count-1] per-SC initial block count (0 = lazy/expansion-only)
+    uint64_t per_sc_tls_qbuf_pool_depth[UMQ_SIZE_CLASS_MAX]; // [0..count-1] per-SC TLS depth cap (0 = inherit tls_qbuf_pool_depth)
     uint64_t expansion_size;              // 0 = default (32MB), per-expansion memory size
     uint32_t expansion_threshold;         // 0 = default (30), water level percentage [1,100] that triggers expansion
 
