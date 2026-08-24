@@ -104,6 +104,7 @@ typedef enum umq_qbuf_pool_type {
     UMQ_QBUF_POOL_TYPE_HUGE,
     UMQ_QBUF_POOL_TYPE_GIGANTIC,
     UMQ_QBUF_POOL_TYPE_TINY,
+    UMQ_QBUF_POOL_TYPE_IOBUF,
     UMQ_QBUF_POOL_TYPE_MAX,
 } umq_qbuf_pool_type_t;
 
