@@ -297,6 +297,7 @@ typedef struct umq_buf_pool_cfg {
     uint64_t expansion_size;              // 0 = default (32MB), per-expansion memory size
     uint32_t expansion_threshold;         // 0 = default (30), water level percentage [1,100] that triggers expansion
 
+    uint64_t lazy_init_block_size_threshold; // 0 = disabled (no lazy init), default 1048576 (1MB)
     bool disable_scale_cap; // expansion and shrink switch
     // escape
     bool disable_malloc_escape; // disable the escape mechanism
