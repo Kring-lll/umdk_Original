@@ -1223,6 +1223,7 @@ static void release_thread_cache(void *data)
     if (tls_cache == NULL || !tls_cache->inited || !g_qbuf_pool.inited) { return; }
     (void)pthread_spin_lock(&g_tls_stats_lock);
     urpc_list_remove(&tls_cache->tls_node);
+    tls_cache->inited = false;
     (void)pthread_spin_unlock(&g_tls_stats_lock);
     local_block_pool_t *local_pool = &tls_cache->block_pool;
     uint64_t return_buf_cnt, total_tls_bytes = 0;
@@ -1248,7 +1249,6 @@ static void release_thread_cache(void *data)
         __atomic_fetch_sub(&g_total_local_cap_with_data_cnt[sc], local_pool->capacity_with_data[sc], __ATOMIC_RELAXED);
     }
     __atomic_fetch_sub(&g_total_local_cap_without_data, local_pool->capacity_without_data, __ATOMIC_RELAXED);
-    tls_cache->inited = false;
 }
 
 static void umq_qbuf_exp_pool_inner_uninit(qbuf_expansion_pool_t *exp_pool, bool with_data)
