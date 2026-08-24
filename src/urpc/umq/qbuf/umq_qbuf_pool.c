@@ -91,6 +91,8 @@ typedef struct expansion_qbuf_pool {
     uint64_t exp_total_block_num;
     async_shrink_pool_task_list_t shrink_task_list;
     uint64_t total_expansion_count;
+    uint64_t sync_expansion_count;   // expansion in alloc hot path (caller blocked)
+    uint64_t async_expansion_count;  // expansion by background prefill
     uint64_t total_shrink_count;
     uint64_t sub_slot_blk_count;
     uint64_t sub_slot_count;
@@ -2138,6 +2140,11 @@ int expand_global_pool(bool with_data, uint32_t sc)
     exp_pool->expansion_count += 1;
     exp_pool->exp_total_block_num += slot->total_block_cnt;
     exp_pool->total_expansion_count++;
+    if (g_dbg_in_async_expand) {
+        exp_pool->async_expansion_count++;
+    } else {
+        exp_pool->sync_expansion_count++;
+    }
     (void)pthread_spin_unlock(&exp_pool->expansion_pool_lock);
     UMQ_VLOG_DEBUG(VLOG_UMQ,
                    "%s_EXPAND_%s sc=%u slot_id=%u mpool=%u blk_count=%llu total_size=%llu "
