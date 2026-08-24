@@ -15,6 +15,8 @@ add_subdirectory(umq_ub)
 
 aux_source_directory(${CMAKE_CURRENT_LIST_DIR} UMQ_LIB_DIR_SRCS)
 
+add_compile_definitions(UMQ_QBUF_DEBUG)
+
 add_library(umq SHARED
     $<TARGET_OBJECTS:common_util>
     ${UMQ_LIB_DIR_SRCS}
