@@ -81,6 +81,41 @@ CHART_COLORS = [
 
 QUANTILES = ['min', 'avg', 'max', 'p90', 'p99', 'p9999']
 
+# Maximum data points per chart. If a series exceeds this, it is downsampled
+# in Python to keep the JSON small and the browser responsive.
+MAX_POINTS = 10000
+
+
+def _downsample(data_list, max_points=MAX_POINTS, key=None):
+    """Downsample a sorted list to at most ~2*max_points entries, preserving
+    extremes (peaks and valleys).
+
+    Divides data into buckets of equal stride. For each bucket, keeps the
+    data points with the minimum and maximum aggregate value (computed by
+    the key function). If key is None, keeps the first element of each bucket.
+
+    This ensures that extreme values (which matter most for performance
+    analysis) are never lost, while still dramatically reducing data size.
+    The result is sorted by timestamp.
+    """
+    n = len(data_list)
+    if n <= max_points or key is None:
+        return data_list
+    stride = (n + max_points - 1) // max_points
+    result = []
+    for start in range(0, n, stride):
+        bucket = data_list[start:start + stride]
+        if not bucket:
+            continue
+        min_pt = min(bucket, key=key)
+        max_pt = max(bucket, key=key)
+        if min_pt is max_pt:
+            result.append(min_pt)
+        else:
+            ts_key = lambda x: x[0] if x[0] is not None else float('inf')
+            result.extend(sorted([min_pt, max_pt], key=ts_key))
+    return result
+
 LATENCY_GROUPS = [
     {'name': 'POST_SEND', 'types': ['UB_JETTY_POST_SEND', 'BOND_JETTY_POST_SEND']},
     {'name': 'POLL_JFC', 'types': ['UB_POLL_JFC', 'BOND_POLL_JFC']},
@@ -244,6 +279,7 @@ def _build_single(data_list, base_ts):
     has_ts = base_ts is not None
     if has_ts:
         data_list = sorted(data_list, key=lambda x: x[0] if x[0] is not None else float('inf'))
+    data_list = _downsample(data_list, key=lambda x: x[1])
 
     time_axis = []
     values = []
@@ -262,6 +298,14 @@ def _build_path(data_list, base_ts):
     if has_ts:
         data_list = sorted(data_list, key=lambda x: x[0] if x[0] is not None else float('inf'))
 
+    # Collect all_paths from full (pre-downsample) data
+    all_paths = set()
+    for ts, snap in data_list:
+        all_paths.update(snap.keys())
+    all_paths = sorted(all_paths)
+
+    data_list = _downsample(data_list, key=lambda x: sum(x[1].values()))
+
     time_axis = []
     snapshots = []
     for i, (ts, snap) in enumerate(data_list):
@@ -270,11 +314,6 @@ def _build_path(data_list, base_ts):
         else:
             time_axis.append(float(i))
         snapshots.append(snap)
-
-    all_paths = set()
-    for snap in snapshots:
-        all_paths.update(snap.keys())
-    all_paths = sorted(all_paths)
 
     return {
         'time_axis': time_axis,
@@ -311,6 +350,16 @@ def _build_port(data_list, base_ts, mode):
     if has_ts:
         data_list = sorted(data_list, key=lambda x: x[0] if x[0] is not None else float('inf'))
 
+    # Collect all_ports from full (pre-downsample) data
+    all_ports = set()
+    for ts, snap in data_list:
+        for path in snap.keys():
+            li = int(path.strip('[]').split(',')[0])
+            all_ports.add(li)
+    all_ports = sorted(all_ports)
+
+    data_list = _downsample(data_list, key=lambda x: sum(x[1].values()))
+
     time_axis = []
     snapshots = []
     for i, (ts, snap) in enumerate(data_list):
@@ -319,13 +368,6 @@ def _build_port(data_list, base_ts, mode):
         else:
             time_axis.append(float(i))
         snapshots.append(snap)
-
-    all_ports = set()
-    for snap in snapshots:
-        for path in snap.keys():
-            li = int(path.strip('[]').split(',')[0])
-            all_ports.add(li)
-    all_ports = sorted(all_ports)
 
     port_names = [_port_label(p) for p in all_ports]
 
@@ -362,6 +404,21 @@ def _build_latency(data_list, base_ts):
     if has_ts:
         filtered = sorted(filtered, key=lambda x: x[0] if x[0] is not None else float('inf'))
 
+    # Collect all_types from the FULL (pre-downsample) data so that types
+    # which only appear in some snapshots are not lost during downsampling.
+    all_types = set()
+    for ts, snap in filtered:
+        all_types.update(snap.keys())
+    all_types = sorted(all_types)
+
+    def _latency_max(pt):
+        snap = pt[1]
+        # Use only actual latency fields, exclude 'samples' (a count, not latency)
+        maxes = [t.get('max', 0) for t in snap.values()]
+        return max(maxes) if maxes else 0
+
+    filtered = _downsample(filtered, key=_latency_max)
+
     time_axis = []
     snapshots = []
     for i, (ts, snap) in enumerate(filtered):
@@ -370,11 +427,6 @@ def _build_latency(data_list, base_ts):
         else:
             time_axis.append(float(i))
         snapshots.append(snap)
-
-    all_types = set()
-    for snap in snapshots:
-        all_types.update(snap.keys())
-    all_types = sorted(all_types)
 
     types_data = {}
     for t in all_types:
@@ -613,7 +665,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     name: path,
                     type: 'line',
                     data: data,
-                    smooth: true,
                     symbol: 'none',
                     lineStyle: { width: 2 },
                     itemStyle: { color: COLORS[i % COLORS.length] },
@@ -664,7 +715,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 name: field,
                 type: 'line',
                 data: data,
-                smooth: true,
                 symbol: 'none',
                 lineStyle: { width: 2 },
                 itemStyle: { color: color },
@@ -694,7 +744,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                     name: type,
                     type: 'line',
                     data: data,
-                    smooth: true,
                     symbol: 'none',
                     lineStyle: { width: 2 },
                     itemStyle: { color: COLORS[i % COLORS.length] },
