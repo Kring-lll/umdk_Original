@@ -1198,7 +1198,12 @@ static thread_local_qbuf_pool_t *umq_qbuf_pool_tls_cache_get(void)
     tls_cache->block_pool.capacity_without_data = 0;
     QBUF_LIST_INIT(&tls_cache->block_pool.head_without_data);
     tls_cache->block_pool.buf_cnt_without_data = 0;
-    tls_cache->stats.tid = (uint64_t)pthread_self();
+    /* Use kernel TID (gettid via syscall, compatible with all glibc versions)
+     * instead of pthread_self() (pthread_t address = ~15-digit number with
+     * no mapping to ps/top). Kernel TID is a small integer matching what
+     * `ps -L` / `top -H` report, so testers can correlate DFX TID rows
+     * with OS-level per-thread diagnostics. */
+    tls_cache->stats.tid = (uint64_t)syscall(SYS_gettid);
     tls_cache->inited = true;
     (void)pthread_spin_lock(&g_tls_stats_lock);
     urpc_list_push_back(&g_tls_register_head, &tls_cache->tls_node);
