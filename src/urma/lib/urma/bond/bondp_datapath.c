@@ -1430,7 +1430,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         cr->user_ctx = user_ctx;
         (void)pthread_spin_unlock(&bdp_comp->send_lock);
         put_comp(bdp_comp);
-        return CONVERT_SUCCESS;
+        return (cr->status == BOND_CR_FLOW_CONTROL_NOTIFY) ? CONVERT_SKIP : CONVERT_SUCCESS;
     }
 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
