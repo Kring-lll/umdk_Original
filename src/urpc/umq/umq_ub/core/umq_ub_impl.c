@@ -981,7 +981,6 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
     }
     ub_queue_cfg_t *qcfg = umq_ub_queue_cfg_get(queue);
     bondp_jfc_cfg_t bondp_jfc_cfg = {
-<<<<<<< ours
         .base = {
             .depth = UMQ_UB_FLOW_CONTORL_JETTY_DEPTH, // jfs_jfce is shared between fc jfs_jfc and io jfs_jfc
             .jfce = queue->jfs_jfce,
@@ -989,13 +988,6 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
         },
         .port_ids = qcfg->used_port,
         .port_count = qcfg->used_port_num,
-=======
-        .base = {.depth = UMQ_UB_FLOW_CONTORL_JETTY_DEPTH, // jfs_jfce is shared between fc jfs_jfc and io jfs_jfc
-                 .jfce = queue->jfs_jfce,
-                 .flag.bs.has_drv_ext = ((queue->create_flag & UMQ_CREATE_FLAG_USED_PORTS) != 0)},
-        .port_ids = queue->used_port,
-        .port_count = queue->used_port_num,
->>>>>>> theirs
     };
 
     umq_ub_ctx_t *dev_ctx = queue->dev_ctx;
@@ -1144,17 +1136,11 @@ static int umq_ub_create_jetty_node(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, um
     }
 
     bondp_jfc_cfg_t bondp_jfc_cfg = {
-<<<<<<< ours
         .base = {
             .depth = qcfg->tx_depth + 1, // flush done consumes one cqe
             .jfce = jetty_node->jfs_jfce,
             .flag.bs.has_drv_ext = ((option->create_flag & UMQ_TP_CREATE_FLAG_USED_PORTS) != 0)
         },
-=======
-        .base = {.depth = queue->tx_depth + 1, // flush done consumes one cqe
-                 .jfce = jetty_node->jfs_jfce,
-                 .flag.bs.has_drv_ext = ((option->create_flag & UMQ_TP_CREATE_FLAG_USED_PORTS) != 0)},
->>>>>>> theirs
         .port_ids = used_port,
         .port_count = used_port_num,
     };
@@ -1424,7 +1410,6 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
         }
 
         bondp_jfc_cfg_t bondp_jfc_cfg = {
-<<<<<<< ours
             .base = {
                 .depth = qcfg->tx_depth + 1, // flush done consumes one cqe
                 .jfce = queue->jfs_jfce,
@@ -1432,13 +1417,6 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
             },
             .port_ids = qcfg->used_port,
             .port_count = qcfg->used_port_num,
-=======
-            .base = {.depth = queue->tx_depth + 1, // flush done consumes one cqe
-                     .jfce = queue->jfs_jfce,
-                     .flag.bs.has_drv_ext = ((queue->create_flag & UMQ_CREATE_FLAG_USED_PORTS) != 0)},
-            .port_ids = queue->used_port,
-            .port_count = queue->used_port_num,
->>>>>>> theirs
         };
         start_timestamp = umq_perf_get_start_timestamp();
         queue->jfs_jfc[UB_QUEUE_JETTY_IO] = umq_symbol_urma()->urma_create_jfc(dev_ctx->urma_ctx, &bondp_jfc_cfg.base);
@@ -1494,7 +1472,6 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
     } else if (queue->flow_control != NULL) {
         UMQ_VLOG_INFO(VLOG_UMQ, "eid: " EID_FMT ", jetty_id[0]: %u, jetty_id[1]: %u,%s create UMQ(ID:%u)"
             "success, jfr_id[0]: %u, jfr_id[1]: %u, urma transmode %d, tp_type %d, priority %d, rnr_retry %d, "
-<<<<<<< ours
             "err_timeout %d, flowcontrol use %s window\n", EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
             queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id,
             port_str, queue->umq_id, queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr->jfr_id.id,
@@ -1507,23 +1484,6 @@ uint64_t umq_ub_create_impl(uint64_t umqh, uint8_t *ctx, umq_create_option_t *op
             EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid), queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id,
             port_str, queue->umq_id, queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr->jfr_id.id, qcfg->tp_mode, qcfg->tp_type,
             qcfg->priority, qcfg->rnr_retry, qcfg->err_timeout);
-=======
-            "err_timeout %d, flowcontrol use %s window\n",
-            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid), queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id,
-            queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id, port_str, queue->umq_id,
-            queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr->jfr_id.id,
-            queue->jfr_ctx[UB_QUEUE_JETTY_FLOW_CONTROL]->jfr->jfr_id.id, queue->tp_mode, queue->tp_type,
-            queue->priority, queue->rnr_retry, queue->err_timeout,
-            dev_ctx->flow_control.use_atomic_window ? "atomic" : "non-atomic");
-    } else {
-        UMQ_VLOG_INFO(VLOG_UMQ,
-                      "eid: " EID_FMT ", jetty_id[0]: %u,%s create UMQ(ID:%u) success, jfr_id[0]: %u, "
-                      "urma transmode %d, tp_type %d, priority %d, rnr_retry %d, err_timeout %d\n",
-                      EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
-                      queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, port_str, queue->umq_id,
-                      queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr->jfr_id.id, queue->tp_mode, queue->tp_type,
-                      queue->priority, queue->rnr_retry, queue->err_timeout);
->>>>>>> theirs
     }
     return (uint64_t)(uintptr_t)queue;
 
@@ -1608,11 +1568,7 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
 
     if (qcfg->umq_trans_mode != UMQ_TRANS_MODE_UB && qcfg->umq_trans_mode != UMQ_TRANS_MODE_UB_PLUS) {
         UMQ_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, destroy umq failed, trans mode %d is not UB\n",
-<<<<<<< ours
             EID_ARGS(*io_eid), io_id, qcfg->umq_trans_mode);
-=======
-                     EID_ARGS(*io_eid), io_id, queue->umq_trans_mode);
->>>>>>> theirs
         return -UMQ_ERR_EINVAL;
     }
     if (queue->flow_control != NULL) {
@@ -1821,15 +1777,9 @@ int umq_ub_wait_interrupt_impl(uint64_t wait_umqh_tp, int time_out, umq_interrup
     ub_queue_cfg_t *qcfg = umq_ub_queue_cfg_get(queue);
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
-<<<<<<< ours
     if (qcfg->mode != UMQ_MODE_INTERRUPT) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, queue mode is not interrupt\n",
             EID_ARGS(*eid), id);
-=======
-    if (queue->mode != UMQ_MODE_INTERRUPT) {
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, queue mode is not interrupt\n", EID_ARGS(*eid),
-                           id);
->>>>>>> theirs
         return -UMQ_ERR_EINVAL;
     }
 
@@ -2098,15 +2048,9 @@ int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicited, umq_interrupt_option_t *
     ub_queue_cfg_t *qcfg = umq_ub_queue_cfg_get(queue);
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
-<<<<<<< ours
     if (qcfg->mode != UMQ_MODE_INTERRUPT) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, queue mode is not interrupt\n",
             EID_ARGS(*eid), id);
-=======
-    if (queue->mode != UMQ_MODE_INTERRUPT) {
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, queue mode is not interrupt\n", EID_ARGS(*eid),
-                           id);
->>>>>>> theirs
         return -UMQ_ERR_EINVAL;
     }
 
@@ -2305,13 +2249,8 @@ int umq_ub_unbind_impl(uint64_t umqh)
     if (queue->flow_control != NULL) {
         urma_target_jetty_t *tjetty = bind_ctx->tjetty[UB_QUEUE_JETTY_FLOW_CONTROL];
         UMQ_VLOG_INFO(VLOG_UMQ, "UMQ(ID:%u), remote eid: " EID_FMT ", remote jetty_id: %u, unbind flowcontrol jetty\n",
-<<<<<<< ours
             queue->umq_id, EID_ARGS(tjetty->id.eid), tjetty->id.id);
         if (qcfg->tp_mode == URMA_TM_RC) {
-=======
-                      queue->umq_id, EID_ARGS(tjetty->id.eid), tjetty->id.id);
-        if (queue->tp_mode == URMA_TM_RC) {
->>>>>>> theirs
             start_timestamp = umq_perf_get_start_timestamp();
             (void)umq_symbol_urma()->urma_unbind_jetty(queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]);
             umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_UNBIND_JETTY, start_timestamp);
@@ -2330,15 +2269,9 @@ int umq_ub_unbind_impl(uint64_t umqh)
 
     urma_target_jetty_t *tjetty = bind_ctx->tjetty[UB_QUEUE_JETTY_IO];
     (void)umq_ub_remote_tseg_info_release(queue->dev_ctx->remote_imported_info, bind_ctx);
-<<<<<<< ours
     UMQ_VLOG_INFO(VLOG_UMQ, "UMQ(ID:%u), remote eid: " EID_FMT ", remote jetty_id: %u, unbind jetty\n",
         queue->umq_id, EID_ARGS(tjetty->id.eid), tjetty->id.id);
     if (qcfg->tp_mode == URMA_TM_RC) {
-=======
-    UMQ_VLOG_INFO(VLOG_UMQ, "UMQ(ID:%u), remote eid: " EID_FMT ", remote jetty_id: %u, unbind jetty\n", queue->umq_id,
-                  EID_ARGS(tjetty->id.eid), tjetty->id.id);
-    if (queue->tp_mode == URMA_TM_RC) {
->>>>>>> theirs
         start_timestamp = umq_perf_get_start_timestamp();
         (void)umq_symbol_urma()->urma_unbind_jetty(queue->jetty[UB_QUEUE_JETTY_IO]);
         umq_perf_record_write(UMQ_PERF_RECORD_TRANSPORT_UNBIND_JETTY, start_timestamp);
