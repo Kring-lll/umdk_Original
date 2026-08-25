@@ -229,9 +229,6 @@ typedef struct umq_qbuf_pool_info {
     uint32_t exp_slot_used_count;
 } umq_qbuf_pool_info_t;
 
-
-
-
 typedef struct umq_qbuf_pool_stats {
     umq_qbuf_pool_info_t qbuf_pool_info[UMQ_STATS_QBUF_POOL_TYPE_MAX]; // statistical information list for qbuf pool
     uint32_t num; // number of valid qbuf pool info structures

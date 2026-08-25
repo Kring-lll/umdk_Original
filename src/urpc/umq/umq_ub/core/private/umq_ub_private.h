@@ -136,6 +136,10 @@ _Static_assert(offsetof(ub_import_mempool_info_t, seg) == 24,
  * UB_IMPORT_MEMPOOL_INFO_HDR_SIZE + entry->seg_size. */
 #define UB_IMPORT_MEMPOOL_INFO_HDR_SIZE (offsetof(ub_import_mempool_info_t, seg))
 
+/* Count of uint32 fields preceding the seg blob: seg_size, mempool_id,
+ * mempool_token_value, version, token_id (5 * 4B = 20B header body). */
+#define UB_IMPORT_HDR_U32_COUNT 5
+
 typedef enum ub_packet_stats_type {
     UB_PACKET_STATS_TYPE_SEND,
     UB_PACKET_STATS_TYPE_SEND_SUCCESS,
