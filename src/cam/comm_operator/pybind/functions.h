@@ -36,7 +36,8 @@ std::vector<at::Tensor> FusedDeepMoeImplAutograd(
     int64_t epRankId, \
     int64_t moeExpertNum, \
     int64_t quantMode, \
-    int64_t globalBs);
+    int64_t globalBs, \
+    double swigluClamp);
 
 std::tuple<at::Tensor, at::Tensor> GetDispatchLayoutImplAutograd(
     const at::Tensor &topIdx,

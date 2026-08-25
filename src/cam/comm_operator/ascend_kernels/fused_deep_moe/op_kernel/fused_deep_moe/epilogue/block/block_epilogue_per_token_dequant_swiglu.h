@@ -20,6 +20,8 @@
 
 namespace Catlass::Epilogue::Block {
 
+constexpr float SWIGLU_CLAMP_DEFAULT = 3.4028235e+38f; // FLT_MAX
+
 template <uint32_t UB_STAGES_, uint32_t EXEC_FLAG_,
           class CType_, class ScaleType_, class LayoutScale_, class LayoutPerTokenScale_,
           class DType_, class TileRowBroadcastMul_, class TileBroadcastOneBlk_, class TileOneBlkColumnBroadcastMul_,
@@ -94,6 +96,7 @@ public:
         LayoutPerTokenScale layoutPerTokenScale{};
         __gm__ ElementD *ptrD{nullptr};
         LayoutD layoutD{};
+        float swigluClamp{SWIGLU_CLAMP_DEFAULT};
 
         CATLASS_DEVICE
         Params() {};
@@ -101,14 +104,15 @@ public:
         CATLASS_DEVICE
         Params(__gm__ ElementC *ptrC_, __gm__ ElementRawScale *ptrScale_, LayoutScale const &layoutScale_,
                __gm__ ElementPerTokenScale *ptrPerTokenScale_, LayoutPerTokenScale const &layoutPerTokenScale_,
-               __gm__ ElementD *ptrD_, LayoutD const &layoutD_)
+               __gm__ ElementD *ptrD_, LayoutD const &layoutD_, float swigluClamp_ = SWIGLU_CLAMP_DEFAULT)
             : ptrC(ptrC_),
               ptrScale(ptrScale_),
               layoutScale(layoutScale_),
               ptrPerTokenScale(ptrPerTokenScale_),
               layoutPerTokenScale(layoutPerTokenScale_),
               ptrD(ptrD_),
-              layoutD(layoutD_)
+              layoutD(layoutD_),
+              swigluClamp(swigluClamp_)
         {}
     };
 
@@ -281,9 +285,21 @@ public:
                 AscendC::PipeBarrier<PIPE_V>();
                 AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(eventUbDMTE3VList[ubListId]);
                 AscendC::Div(ubD, ubTmpMxN, ubDenominatorMxN, TileShape::COUNT);
+                // swiglu clamp: g' = min(silu(g), swiglu_clamp)
+                if (params.swigluClamp < SWIGLU_CLAMP_DEFAULT) {
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Mins(ubD, ubD, params.swigluClamp, TileShape::COUNT);
+                }
             } else {
                 AscendC::WaitFlag<AscendC::HardEvent::MTE3_V>(eventUbDMTE3VList[ubListId]);
                 tileOneBlkColumnBroadcastMul(ubD, ubTmpMxN, ubTmpMx32B);
+                // swiglu clamp: u' = min(max(u, -swiglu_clamp), swiglu_clamp)
+                if (params.swigluClamp < SWIGLU_CLAMP_DEFAULT) {
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Maxs(ubD, ubD, -params.swigluClamp, TileShape::COUNT);
+                    AscendC::PipeBarrier<PIPE_V>();
+                    AscendC::Mins(ubD, ubD, params.swigluClamp, TileShape::COUNT);
+                }
             }
             AscendC::SetFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
 

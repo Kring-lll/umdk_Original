@@ -56,6 +56,7 @@ struct FusedDeepMoeInfo {
     uint64_t gmm1HLen;
     uint64_t shareGmm1HLen;  // shared expert gmm1 hidden length
     bool isTensorList;
+    float swigluClamp; // swiglu clamp value, default is FLT_MAX
 };
 
 struct FusedDeepMoeTilingData {
@@ -69,6 +70,9 @@ struct FusedDeepMoeTilingData {
 // Routing is driven by ASCENDC_TPL_TILING_STRUCT_SEL in fused_deep_moe_tiling_key.h.
 using FusedDeepMoeTilingDataPlain = FusedDeepMoeTilingData;
 using FusedDeepMoeTilingDataShared = FusedDeepMoeTilingData;
+
+// Use a named constant to avoid <cfloat> dependency on device side.
+constexpr float SWIGLU_CLAMP_DEFAULT = 3.402823466e+38F;
 
 constexpr uint32_t GM_ALIGN_BYTE = 512;
 constexpr uint32_t CUSTOM_PRELOAD_STAGES = 1;
