@@ -201,8 +201,8 @@ int umq_qbuf_pool_cfg_check(const umq_init_cfg_t *cfg, umq_qbuf_pool_plan_t *pla
     uint64_t total_initial_size = plan->tiny_io_buf_size + plan->rx_io_buf_size + plan->normal_io_buf_size;
     if (max_umq_buf_pool_size < total_initial_size) {
         UMQ_VLOG_ERR(VLOG_UMQ, "max buf pool size %llu is too small for total initial %llu (tiny %llu + rx %llu + normal %llu)\n",
-                      max_umq_buf_pool_size, total_initial_size,
-                      plan->tiny_io_buf_size, plan->rx_io_buf_size, plan->normal_io_buf_size);
+                     max_umq_buf_pool_size, total_initial_size,
+                     plan->tiny_io_buf_size, plan->rx_io_buf_size, plan->normal_io_buf_size);
         return -UMQ_ERR_EINVAL;
     }
 
