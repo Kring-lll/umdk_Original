@@ -1394,6 +1394,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
             wr_entry->rnr_retry_cnt++;
             if (bondp_resend_jfs_wr(bdp_comp, wr_entry, send_idx, target_idx) != 0) {
                 URMA_LOG_ERR("Failed to resend first rnr retry jfs wr, wr_id=%lu\n", wr_id);
+                cr->status = BOND_CR_RNR_RETRY_CNT_EXC_ERR;
             }
         } else if (retry_cnt >= comp_ctx->rnr_retry_max) {
             URMA_LOG_ERR("RNR retry exceeded, wr_id=%lu retry_cnt=%u retry_max=%lu\n",
@@ -1429,7 +1430,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         cr->user_ctx = user_ctx;
         (void)pthread_spin_unlock(&bdp_comp->send_lock);
         put_comp(bdp_comp);
-        return CONVERT_SUCCESS;
+        return (cr->status == BOND_CR_RNR_RETRY_CNT_EXC_ERR) ? CONVERT_SUCCESS : CONVERT_SKIP;
     }
 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
