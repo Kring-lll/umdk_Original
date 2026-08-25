@@ -571,10 +571,6 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         errno = ENOMEM;
         return NULL;
     }
-    if (token_value != NULL) {
-        bdp_tjetty->import_token_value = *token_value;
-        bdp_tjetty->import_token_valid = true;
-    }
     atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
 
     urma_bond_id_info_out_t rvjetty_info = {0};

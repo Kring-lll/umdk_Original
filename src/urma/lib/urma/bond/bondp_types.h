@@ -282,16 +282,14 @@ typedef struct bondp_p_target_jetty {
 
 typedef struct bondp_target_jetty {
     urma_target_jetty_t v_tjetty;
-    urma_token_t import_token_value;
-    bool import_token_valid;
-    bool skip_import_vjetty;
-    uint32_t p_tjetty_count;
-    uint32_t active_count;
     urma_ref_t use_cnt;
-    bool is_msn_enabled;
-    bool hc_registered;
-    uint32_t hc_node_idx;
     struct ub_list hc_entry;
+    uint16_t p_tjetty_count;
+    uint16_t hc_node_idx;
+    uint8_t active_count;
+    uint8_t skip_import_vjetty : 1;
+    uint8_t is_msn_enabled : 1;
+    uint8_t hc_registered : 1;
     bondp_p_target_jetty_t p_tjettys[];
 } bondp_target_jetty_t;
 
