@@ -10,10 +10,10 @@
 #include <unistd.h>
 
 #include "umq_errno.h"
-#include "umq_tiny_qbuf_pool.h"
 #include "umq_vlog.h"
 #include "urpc_list.h"
 #include "urpc_thread_closure.h"
+#include "umq_tiny_qbuf_pool.h"
 
 static qbuf_pool_base_t g_tiny_qbuf_pool = {0};
 static util_thread_key_t *g_umq_tiny_qbuf_pool_key;

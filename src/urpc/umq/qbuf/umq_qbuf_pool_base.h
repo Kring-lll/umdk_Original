@@ -101,7 +101,8 @@ extern "C" {
 #define QBUF_POOL_BLOCK_COUNT_DEFAULT        (1536)
 #define QBUF_POOL_BLOCK_COUNT_MIN            (1)
 #define QBUF_POOL_BLOCK_COUNT_MAX            (30720)
-// explicit_block_sizes[i>=1] default / range bounds (i==0 must equal small_block_size, validated in init_size_class_config)
+// explicit_block_sizes[i>=1] default / range bounds
+// (i==0 must equal small_block_size, validated in init_size_class_config)
 #define QBUF_POOL_MIDDLE_BLOCK_SIZE_DEFAULT  (64 * 1024)
 #define QBUF_POOL_MIDDLE_BLOCK_SIZE_MIN      (8 * 1024)
 #define QBUF_POOL_MIDDLE_BLOCK_SIZE_MAX      (1024 * 1024)
@@ -133,13 +134,17 @@ typedef struct qbuf_pool_cfg {
     // Constraints: each size must be 4096*2^n, ascending, and larger size must be exact multiple
     // of smaller size (required for memory layout alignment).
     uint32_t size_class_count;           // 1..UMQ_QBUF_SIZE_CLASS_MAX, default 2
-    uint32_t explicit_block_sizes[UMQ_QBUF_SIZE_CLASS_MAX]; // [0..count-1] ascending block sizes
-    uint64_t per_sc_block_counts[UMQ_QBUF_SIZE_CLASS_MAX];       // [0..count-1] per-SC initial block count (0 = lazy/expansion-only)
-    uint64_t per_sc_tls_qbuf_pool_depth[UMQ_QBUF_SIZE_CLASS_MAX]; // [0..count-1] per-SC TLS depth cap (0 = inherit tls_qbuf_pool_depth)
+    // [0..count-1] ascending block sizes
+    uint32_t explicit_block_sizes[UMQ_QBUF_SIZE_CLASS_MAX];
+    // [0..count-1] per-SC initial block count (0 = lazy/expansion-only)
+    uint64_t per_sc_block_counts[UMQ_QBUF_SIZE_CLASS_MAX];
+    // [0..count-1] per-SC TLS depth cap (0 = inherit tls_qbuf_pool_depth)
+    uint64_t per_sc_tls_qbuf_pool_depth[UMQ_QBUF_SIZE_CLASS_MAX];
 
-    // thread local qbuf pool (byte budget)
+    // thread local qbuf pool (byte budget). TLS depth cap for single-level pools
+    // (tiny/huge/shm); normal pool uses tls_pool_mem_budget
     uint64_t
-        tls_qbuf_pool_depth; // TLS depth cap for single-level pools (tiny/huge/shm); normal pool uses tls_pool_mem_budget
+        tls_qbuf_pool_depth;
     uint64_t tls_expand_qbuf_pool_depth; // per-thread TLS depth cap, default 7/8 of tls_qbuf_pool_depth
     uint64_t tls_pool_mem_budget;        // global TLS total bytes cap (flat across all threads), default 96MB
     uint64_t tls_expand_mem_budget;      // per-thread TLS bytes cap, default 7/8 of tls_pool_mem_budget

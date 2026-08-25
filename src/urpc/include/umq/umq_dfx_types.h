@@ -113,7 +113,8 @@ typedef enum umq_qbuf_pool_type {
 typedef struct umq_local_qbuf_pool_stats {
     umq_qbuf_pool_type_t type;                 // qbuf pool type
     uint64_t tid;                              // thread ID
-    uint64_t capacity_with_data;              // with-data local pool capacity in buffer COUNT (sum of per-SC high-water mark caps)
+    // with-data local pool capacity in buffer COUNT (sum of per-SC high-water mark caps)
+    uint64_t capacity_with_data;
     uint64_t buf_cnt_with_data;                // number of with-data buffer in the local memory pool
     uint64_t capacity_without_data;            // capacity of without-data buffer in the local memory pool
     uint64_t buf_cnt_without_data;             // number of without-data buffer in the local memory pool
@@ -174,7 +175,8 @@ typedef struct umq_qbuf_sc_info {
     uint64_t exp_async_expansion_count; // exp_pool_with_data[sc].async_expansion_count
     uint64_t global_total;
     uint64_t capacity;
-    uint64_t init_block_count;     // per_sc_block_counts[sc]: initial reserved block count, set once at init, NEVER changes at runtime
+    // per_sc_block_counts[sc]: initial reserved block count, set once at init, NEVER changes at runtime
+    uint64_t init_block_count;
     uint32_t exp_slots;
     uint64_t exp_free_blk;
     uint64_t trigger_expand;
@@ -194,7 +196,8 @@ typedef struct umq_qbuf_pool_config {
     uint64_t tls_expand_qbuf_pool_depth;
     uint64_t tls_qbuf_pool_depth;
     uint32_t batch_count;
-    uint32_t per_sc_batch_count[UMQ_DFX_QBUF_SIZE_CLASS_MAX]; // per-sc batch count (get_batch_count(sc), varies by blk_size)
+    // per-sc batch count (get_batch_count(sc), varies by blk_size)
+    uint32_t per_sc_batch_count[UMQ_DFX_QBUF_SIZE_CLASS_MAX];
     uint64_t rx_pool_total_size;        // RX recv pool total memory (bytes)
     uint32_t rx_pool_block_size;        // RX recv pool block size (bytes)
     uint32_t rx_pool_depth;             // RX recv pool total block count (capacity)
@@ -228,9 +231,6 @@ typedef struct umq_qbuf_pool_info {
     uint32_t sc_count;
     uint32_t exp_slot_used_count;
 } umq_qbuf_pool_info_t;
-
-
-
 
 typedef struct umq_qbuf_pool_stats {
     umq_qbuf_pool_info_t qbuf_pool_info[UMQ_STATS_QBUF_POOL_TYPE_MAX]; // statistical information list for qbuf pool
