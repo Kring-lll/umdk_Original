@@ -55,6 +55,7 @@ constexpr uint32_t ATTR_EP_RANK_ID_INDEX = 2;
 constexpr uint32_t ATTR_MOE_EXPERT_NUM_INDEX = 3;
 constexpr uint32_t ATTR_QUANT_MODE_INDEX = 4;
 constexpr uint32_t ATTR_GLOBAL_BS_INDEX = 5;
+constexpr uint32_t ATTR_SWIGLU_CLAMP_INDEX = 6;
 
 constexpr uint32_t MIN_BATCH_SIZE = 0;
 constexpr uint32_t MAX_BATCH_SIZE = 256;
@@ -573,6 +574,7 @@ static ge::graphStatus GetAttrAndSetTilingData(const gert::TilingContext &contex
     auto moeExpertNumPtr = attrs->GetAttrPointer<int64_t>(ATTR_MOE_EXPERT_NUM_INDEX);
     auto quantModePtr = attrs->GetAttrPointer<int64_t>(ATTR_QUANT_MODE_INDEX);
     auto globalBsPtr = attrs->GetAttrPointer<int64_t>(ATTR_GLOBAL_BS_INDEX);
+    auto swigluClampPtr = attrs->GetAttrPointer<float>(ATTR_SWIGLU_CLAMP_INDEX);
 
     uint32_t epRankSize = static_cast<uint32_t>(*epRankSizePtr);
     uint32_t epRankId = static_cast<uint32_t>(*epRankIdPtr);
@@ -599,6 +601,7 @@ static ge::graphStatus GetAttrAndSetTilingData(const gert::TilingContext &contex
     tilingData.fusedDeepMoeInfo.quantMode = static_cast<uint32_t>(*quantModePtr);
     tilingData.fusedDeepMoeInfo.globalBs = static_cast<uint32_t>(*globalBsPtr);
     tilingData.fusedDeepMoeInfo.moeExpertNumPerRank = moeExpertNumPerRank;
+    tilingData.fusedDeepMoeInfo.swigluClamp = (swigluClampPtr != nullptr) ? *swigluClampPtr : SWIGLU_CLAMP_DEFAULT;
     return ge::GRAPH_SUCCESS;
 }
 
