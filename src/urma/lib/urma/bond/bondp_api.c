@@ -31,6 +31,10 @@
 
 #include "bondp_api.h"
 
+/* Bonding only accepts port EIDs in [BONDP_PORT_IDX_MIN, BONDP_PORT_IDX_MAX]. */
+#define BONDP_PORT_IDX_MIN (4)
+#define BONDP_PORT_IDX_MAX (5)
+
 typedef struct bondp_create_vjetty_udata {
     urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
     bool is_msn_enabled; // deprecated
@@ -558,8 +562,9 @@ int convert_bond_port_id_to_active_index(const bondp_context_t *bdp_ctx, bondp_p
         return 0;
     }
 
-    if (port_id.port_idx > PORT_NUM) {
-        URMA_LOG_ERR("Invalid port_id.port_idx=%u.\n", port_id.port_idx);
+    if (port_id.port_idx < BONDP_PORT_IDX_MIN || port_id.port_idx > BONDP_PORT_IDX_MAX) {
+        URMA_LOG_ERR("Invalid port_id.port_idx=%u, valid range is [%u, %u].\n",
+                     port_id.port_idx, BONDP_PORT_IDX_MIN, BONDP_PORT_IDX_MAX);
         return -1;
     }
 
