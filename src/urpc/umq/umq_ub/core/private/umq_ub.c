@@ -329,8 +329,8 @@ uint32_t umq_ub_fill_seg_ctx(urma_target_seg_t *tseg, uint32_t mempool_id, uint3
     /* Zero the compiler-inserted 4-byte padding between the 20B header and the
      * 8B-aligned seg (offset 20..24) so no stack garbage is carried over the
      * wire — the wire ub_mempool_info_t reserves the same 4 bytes explicitly. */
-    (void)memset((uint8_t *)out + 5 * sizeof(uint32_t), 0,
-                 UB_IMPORT_MEMPOOL_INFO_HDR_SIZE - 5 * sizeof(uint32_t));
+    (void)memset((uint8_t *)out + UB_IMPORT_HDR_U32_COUNT * sizeof(uint32_t), 0,
+                 UB_IMPORT_MEMPOOL_INFO_HDR_SIZE - UB_IMPORT_HDR_U32_COUNT * sizeof(uint32_t));
     out->seg_size = seg_size;
     out->mempool_id = mempool_id;
     out->mempool_token_value = token_value;
@@ -721,7 +721,8 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
                   queue->umq_id, queue->remote_umq_id, EID_ARGS(ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid),
                   ctx->tjetty[UB_QUEUE_JETTY_IO]->id.id, info->dev_info->pid, info->dev_info->bind_namespace);
 
-    umq_ub_fc_msg_retry_list_t *retry_list = (queue->flow_control != NULL) ? queue->flow_control->fc_msg_retry_list : NULL;
+    umq_ub_fc_msg_retry_list_t *retry_list =
+        (queue->flow_control != NULL) ? queue->flow_control->fc_msg_retry_list : NULL;
     if (retry_list != NULL && retry_list->inited && !urpc_list_is_empty(&retry_list->no_jetty_list)) {
         umq_ub_fc_msg_retry_notify(retry_list);
     }
