@@ -41,7 +41,8 @@ BASE_KWARGS = {
     "dynamic_eplb": False,
     "with_share": False,
     "with_smooth": False,
-    "share_expert_intermediate_size": 2048
+    "share_expert_intermediate_size": 2048,
+    "swiglu_clamp": 3.4028235e+38
 }
 
 def redirect_output(log_file_path):
@@ -235,8 +236,10 @@ class FusionOp(DecodeMoeOps):
                  ep_hcomm_info,
                  meta_info,
                  weight_datas,
-                 share_weight_datas):
+                 share_weight_datas,
+                 swiglu_clamp=3.4028235e+38):
         super().__init__(ep_hcomm_info, meta_info, weight_datas, share_weight_datas)
+        self.swiglu_clamp = swiglu_clamp
 
     def _apply_ops(self, x, expert_ids, expert_scales, x_active_mask):
         output, share_output, expert_token_nums = torch.ops.umdk_cam_op_lib.fused_deep_moe(
@@ -259,7 +262,8 @@ class FusionOp(DecodeMoeOps):
             ep_rank_id=self.global_rank_id,
             moe_expert_num=self.moe_expert_num,
             quant_mode=0,
-            global_bs=self.global_batch_size)
+            global_bs=self.global_batch_size,
+            swiglu_clamp=self.swiglu_clamp)
         return (output, share_output, expert_token_nums)
 
     def _process_share_weights_after_loading(self, share_weight_datas):
@@ -391,7 +395,8 @@ def run_once(local_rank_id,
              dynamic_eplb=False,
              with_share=False,
              with_smooth=False,
-             share_expert_intermediate_size=None):
+             share_expert_intermediate_size=None,
+             swiglu_clamp=3.4028235e+38):
     # 配置日志输出文件名
     log_file = redirect_output(f"local_rank_{local_rank_id}.log"
                                ) if output_to_file(local_rank_id) else None
@@ -434,7 +439,8 @@ def run_once(local_rank_id,
     ]
     
     small_ops = SmallOps(ep_hcomm_info_small, meta_info, weight_datas, share_weight_datas).npu()  # type: ignore
-    fused_ops = FusionOp(ep_hcomm_info_fused, meta_info, weight_datas, share_weight_datas).npu()  # type: ignore
+    fused_ops = FusionOp(ep_hcomm_info_fused, meta_info, weight_datas, share_weight_datas,
+                         swiglu_clamp=swiglu_clamp).npu()  # type: ignore
     if test_graph:
         config = torchair.CompilerConfig()
         config.mode = "reduce-overhead"
@@ -521,6 +527,7 @@ if __name__ == "__main__":
     parser.add_argument("--with_share", action="store_true", default=False)
     parser.add_argument("--with_smooth", action="store_true", default=False)
     parser.add_argument("--share_expert_intermediate_size", type=int)
+    parser.add_argument("--swiglu_clamp", type=float, default=3.4028235e+38)
     args = parser.parse_args()
     BASE_KWARGS["batch_size"] = args.batch_size
     BASE_KWARGS["token_hidden_size"] = args.token_hidden_size
@@ -537,4 +544,5 @@ if __name__ == "__main__":
     BASE_KWARGS["with_smooth"] = args.with_smooth
     BASE_KWARGS["share_expert_intermediate_size"] = args.share_expert_intermediate_size \
         if args.share_expert_intermediate_size is not None else args.moe_intermediate_size
+    BASE_KWARGS["swiglu_clamp"] = args.swiglu_clamp
     test_fused_deep_moe_base()

@@ -144,6 +144,7 @@ public:
         uint32_t topK;
         uint32_t tokenLen;
         uint32_t shareN;
+        float swigluClamp; // swiglu clamp value, default is FLT_MAX
         // Methods
         CATLASS_DEVICE
         Params() {}
@@ -205,7 +206,8 @@ public:
               bs(fusedDeepMoeInfo.bs),
               topK(fusedDeepMoeInfo.k),
               tokenLen(fusedDeepMoeInfo.h),
-              shareN(fusedDeepMoeInfo.shareGmm1HLen)
+              shareN(fusedDeepMoeInfo.shareGmm1HLen),
+              swigluClamp(fusedDeepMoeInfo.swigluClamp)
         {}
     };
 
@@ -1096,7 +1098,7 @@ public:
                 __gm__ ElementPerTokenScale *gmShareTokenScale, __gm__ ElementPerTokenScale *gmTokenScale,
                 __gm__ float *gmShareSwigluOutput, __gm__ float *gmSwigluOutput, __gm__ ElementGroupList *gmGroupList,
                 uint32_t shareN, uint32_t n, uint32_t k, LayoutScale layoutShareScale, LayoutScale layoutScale,
-                LayoutPerTokenScale wholeLayoutPerTokenScale)
+                LayoutPerTokenScale wholeLayoutPerTokenScale, float swigluClamp)
     {
         uint32_t coreNumPerGroup = recvCoreNum;
         int64_t gmGroupOffsetC = 0;
@@ -1127,7 +1129,8 @@ public:
                     reinterpret_cast<__gm__ ElementC *>(gmCVSwapBuff) + gmGroupOffsetC,
                     gmShareMm1Scale, layoutShareScale,
                     gmShareTokenScale, layoutPerTokenScale,
-                    gmShareSwigluOutput, layoutD
+                    gmShareSwigluOutput, layoutD,
+                    swigluClamp
                 };
 
                 blockScheduler.Update(inGroupProblemShape, L1TileShape::ToCoordMN());
@@ -1177,7 +1180,7 @@ public:
                                                 reinterpret_cast<__gm__ ElementC *>(gmCVSwapBuff) + gmGroupOffsetC,
                                                 gmScalePtr, layoutScale,
                                                 gmTokenScale + gmGroupOffsetPerTokenScale, layoutPerTokenScale,
-                                                gmSwigluOutput + gmGroupOffsetD, layoutD};
+                                                gmSwigluOutput + gmGroupOffsetD, layoutD, swigluClamp};
                 } else {
                     epilogueParams = EpilogueParams{
                                                 reinterpret_cast<__gm__ ElementC *>(gmCVSwapBuff) + gmGroupOffsetC,
@@ -1186,7 +1189,7 @@ public:
                                                 gmTokenScale + gmGroupOffsetPerTokenScale,
                                                 layoutPerTokenScale,
                                                 gmSwigluOutput + gmGroupOffsetD,
-                                                layoutD};
+                                                layoutD, swigluClamp};
                 }
                 blockScheduler.Update(inGroupProblemShape, L1TileShape::ToCoordMN());
                 blockEpilogue.UpdateParams(epilogueParams);
@@ -1341,7 +1344,9 @@ public:
             CompCoreFunc(params.ptrWorkspace, params.ptrShareScale,  params.ptrScale,
                 (__gm__ float*)params.gmShareX1Scale, (__gm__ float*)params.ptrPerTokenScale,
                 gmShareSwigluOutput, gmSwigluOutput, params.ptrGroupList, params.shareN, params.problemShape.n(),
-                params.problemShape.k(), params.layoutShareScale, params.layoutScale, params.layoutPerTokenScale);
+                params.problemShape.k(), params.layoutShareScale, params.layoutScale, params.layoutPerTokenScale,
+                params.swigluClamp
+            );
         }
 
         icache_preload(8);

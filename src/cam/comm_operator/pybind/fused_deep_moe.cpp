@@ -47,7 +47,8 @@ TensorVector FusedDeepMoeImplNpu(
     int64_t epRankId, \
     int64_t moeExpertNum, \
     int64_t quantMode, \
-    int64_t globalBs
+    int64_t globalBs, \
+    double swigluClamp
 )
 {
     TORCH_BIND_ASSERT(x.dim() == DIM_TWO);
@@ -69,6 +70,8 @@ TensorVector FusedDeepMoeImplNpu(
     const std::string groupEpStr(groupEp.data(), groupEp.size());
     const char* groupEpPtr = groupEpStr.c_str();
 
+    float swigluClampFp32 = static_cast<float>(swigluClamp);
+
     EXEC_NPU_CMD(aclnnFusedDeepMoe,
         // input
         x, expertIds, gmm1Weight, gmm1WeightScale, gmm2Weight, gmm2WeightScale, \
@@ -78,6 +81,7 @@ TensorVector FusedDeepMoeImplNpu(
         expertSmoothScales, shareSmoothScales, xActiveMask, \
         // attr
         groupEpPtr, epRankSize, epRankId, moeExpertNum, quantMode, globalBs, \
+        swigluClampFp32, \
         // output
         output, shareOutput, expertTokenNums);
     return {output, shareOutput, expertTokenNums};
@@ -109,7 +113,8 @@ TensorVector FusedDeepMoeImplMeta(
     int64_t epRankId, \
     int64_t moeExpertNum, \
     int64_t quantMode, \
-    int64_t globalBs)
+    int64_t globalBs, \
+    double swigluClamp)
 {
     TORCH_BIND_ASSERT(x.dim() == DIM_TWO);
     TORCH_BIND_ASSERT(expertIds.dim() == DIM_TWO);
@@ -147,7 +152,8 @@ TensorVector FusedDeepMoeImpl(
     int64_t epRankId, \
     int64_t moeExpertNum, \
     int64_t quantMode, \
-    int64_t globalBs)
+    int64_t globalBs, \
+    double swigluClamp)
 {
     static auto op = torch::Dispatcher::singleton()
                         .findSchemaOrThrow("umdk_cam_op_lib::fused_deep_moe", "")
@@ -157,7 +163,7 @@ TensorVector FusedDeepMoeImpl(
         shareGmm1WeightOptional, shareGmm1WeightScaleOptional, \
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
         expertSmoothScales, shareSmoothScales, xActiveMask, \
-        groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs);
+        groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs, swigluClamp);
 }
 
 class FusedDeepMoe : public torch::autograd::Function<FusedDeepMoe> {
@@ -182,7 +188,8 @@ public:
                             int64_t epRankId, \
                             int64_t moeExpertNum, \
                             int64_t quantMode, \
-                            int64_t globalBs)
+                            int64_t globalBs, \
+                            double swigluClamp)
     {
         at::AutoDispatchBelowADInplaceOrView guard;
         auto result = FusedDeepMoeImpl(x, expertIds, gmm1Weight, gmm1WeightScale, gmm2Weight, \
@@ -190,13 +197,14 @@ public:
             shareGmm1WeightOptional, shareGmm1WeightScaleOptional, \
             shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
             expertSmoothScales, shareSmoothScales, xActiveMask, \
-            groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs);
+            groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs, swigluClamp);
         return result;
     }
 
     static TensorVector backward(AutogradContext *ctx, TensorVector grad_outputs)
     {
         return {at::Tensor(),
+                at::Tensor(),
                 at::Tensor(),
                 at::Tensor(),
                 at::Tensor(),
@@ -235,14 +243,15 @@ TensorVector FusedDeepMoeImplAutograd(
     int64_t epRankId, \
     int64_t moeExpertNum, \
     int64_t quantMode, \
-    int64_t globalBs)
+    int64_t globalBs, \
+    double swigluClamp)
 {
     auto result = FusedDeepMoe::apply(x, expertIds, gmm1Weight, gmm1WeightScale, gmm2Weight, \
             gmm2WeightScale, expertScales, \
             shareGmm1WeightOptional, shareGmm1WeightScaleOptional, \
             shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
             expertSmoothScales, shareSmoothScales, xActiveMask, \
-            groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs);
+            groupEp, epRankSize, epRankId, moeExpertNum, quantMode, globalBs, swigluClamp);
         return result;
 }
 
