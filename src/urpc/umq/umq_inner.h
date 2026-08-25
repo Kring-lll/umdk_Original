@@ -44,7 +44,7 @@ typedef struct umq {
     umq_trans_mode_t mode;
 } umq_t;
 
-static inline uint32_t umq_get_post_rx_num(uint32_t rx_depth, volatile uint32_t *require_rx_count)
+static inline uint32_t umq_get_post_rx_num(uint32_t rx_depth, uint32_t *require_rx_count)
 {
     if (rx_depth <= UMQ_BATCH_SIZE) {
         return __atomic_exchange_n(require_rx_count, 0, __ATOMIC_ACQ_REL);
