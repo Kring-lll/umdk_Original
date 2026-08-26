@@ -1137,8 +1137,22 @@ void umq_ub_shared_credit_resp_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
     uint16_t reply_credits = imm->flow_control.window;
     uint16_t credits_per_request = fc->credits_per_request;
     fc->peer_ratio = imm->flow_control.ratio;
-    fc->credits_per_request =
-        umq_ub_next_credit_req_count_update(reply_credits, credits_per_request, imm->flow_control.ratio, fc);
+    ub_credit_pool_t *pool = &umq_ub_queue_cfg_get(queue)->jfr_ctx[UB_QUEUE_JETTY_IO]->credit;
+    uint32_t new_request;
+    if (reply_credits < credits_per_request || (!pool->is_limited && fc->peer_ratio == 0)) {
+        new_request = (uint32_t)(credits_per_request / fc->credit_multiple);
+    } else {
+        new_request = (uint32_t)(credits_per_request * fc->credit_multiple);
+        if (new_request > fc->max_credits_request) {
+            new_request = fc->max_credits_request;
+        }
+    }
+    /*
+    * Prevent the current credit from being 2. If after doubling and multiplying by the idle ratio,
+    * the rounded result is still 2, the credit count will remain permanently at 2.
+    * Therefore, an increment of 1 is required.
+    */
+    fc->credits_per_request = umq_ub_flow_control_threashold_modify((uint16_t)new_request, fc->peer_ratio) + 1;
     umq_ub_credit_received_inc(fc, reply_credits);
     return;
 }

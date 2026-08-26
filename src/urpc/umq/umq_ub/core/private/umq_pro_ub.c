@@ -141,6 +141,7 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
      * ubsocket (DoReadOffer posts under the state mutex CleanupSocketState
      * drains with, before any unbind). */
     ub_bind_ctx_t *bind_ctx = queue->bind_ctx;
+    umq_ub_ctx_t *dev_ctx = umq_ub_queue_cfg_get(queue)->dev_ctx;
     umq_ub_imm_t imm_data = {
         .io_imm.type = IMM_TYPE_USER_WITHOUT_IMM,
         .io_imm.umq_id = queue->remote_umq_id,
@@ -336,7 +337,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
     urma_jfs_wr_t *urma_wr_ptr = g_umq_ub_urma_wr;
     urma_sge_t src_sge[UMQ_BATCH_SIZE] = {}, dst_sge[UMQ_BATCH_SIZE] = {};
     urma_target_jetty_t *tjetty = bind_ctx_snap->tjetty[UB_QUEUE_JETTY_IO]; /* issue#38: snapshot, not re-read */
-    urma_target_seg_t **tseg_list = queue->dev_ctx->tseg_list;
+    urma_target_seg_t **tseg_list = qcfg->dev_ctx->tseg_list;
     urma_sge_t *sges_ptr;
     umq_buf_t *buffer = qbuf;
     uint16_t wr_index = 0;
@@ -454,9 +455,8 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
         wr_index++;
         if (wr_index == UMQ_BATCH_SIZE && buffer != NULL) {
             // wr count exceed UMQ_BATCH_SIZE
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), opcode: %u, wr count exceeds %d, not supported, first_qbuf=%p, "
-                               "cur_buffer=%p, total_data_size=%u\n", queue->umq_id, opcode, UMQ_BATCH_SIZE,
-                               (void *)qbuf, (void *)buffer, buffer->total_data_size);
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), opcode: %u, wr count exceeds %d, not supported, first_qbuf=%p, cur_buffer=%p, total_data_size=%u\n",
+                queue->umq_id, opcode, UMQ_BATCH_SIZE, (void *)qbuf, (void *)buffer, buffer->total_data_size);
             *bad_qbuf = qbuf;
             ret = -UMQ_ERR_EINVAL;
             goto ERROR;
@@ -2169,8 +2169,7 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
     // NULL polling_node means the queue owns its jetty (no pool); flush then uses queue->jetty.
     urma_jfc_t *jfs_jfc = queue->jfs_jfc[UB_QUEUE_JETTY_IO];
     jetty_pool_node_t *polling_node = (jetty_pool_node_t *)(uintptr_t)queue->jetty_node;
-    if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
-        (option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0) {
+    if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag)) {
         umq_ub_jetty_node_list_t *jetty_node_list = umq_ub_queue_jetty_node_list_get(queue);
         if (jetty_node_list->bitmap != NULL && tp_handle_idx < jetty_node_list->list_len &&
             urpc_bitmap_is_set(jetty_node_list->bitmap, tp_handle_idx)) {
