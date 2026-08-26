@@ -13,8 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -240,7 +242,7 @@ class RouteConvergeServiceTest {
         // 给 L1SW 的 PREFIX_NPU0 再加一个出端口 L1SW_DOWN_TO_NPU1，使 down NPU0 后仍可达
         RoutingEntry l1Entry = routeMap.get(RouteInstantiationService.buildRouteTableKey(L1_SW, SW_CHIP))
             .get(PREFIX_NPU0);
-        l1Entry.getMutableOutPortInfos().put(L1SW_DOWN_TO_NPU1,
+        l1Entry.getMutableOutPortInfos().add(
             new OutPortInfo(L1SW_DOWN_TO_NPU1, null, null, null, null, 0));
         l1Entry.refreshReachable();
 
@@ -551,8 +553,8 @@ class RouteConvergeServiceTest {
      */
     private RoutingEntry buildRoute(String prefix, String outPortName) {
         RoutePrefix routePrefix = new RoutePrefix(prefix, 32);
-        Map<String, OutPortInfo> outPorts = new LinkedHashMap<>();
-        outPorts.put(outPortName, new OutPortInfo(outPortName, null, null, null, null, 0));
+        List<OutPortInfo> outPorts = new ArrayList<>();
+        outPorts.add(new OutPortInfo(outPortName, null, null, null, null, 0));
         RoutingEntry entry = new RoutingEntry(routePrefix, outPorts, true);
         entry.refreshReachable();
         return entry;
@@ -574,7 +576,10 @@ class RouteConvergeServiceTest {
         Map<String, RoutingEntry> routes = routeMap.get(RouteInstantiationService.buildRouteTableKey(device, chip));
         RoutingEntry entry = routes.get(prefix);
         assertNotNull(entry, "routing entry not found for prefix " + prefix);
-        OutPortInfo outPort = entry.getMutableOutPortInfos().get(portName);
+        OutPortInfo outPort = entry.getMutableOutPortInfos().stream()
+            .filter(p -> p != null && portName.equals(p.getPortName()))
+            .findFirst()
+            .orElse(null);
         assertNotNull(outPort, "out port not found: " + portName);
         if (converged) {
             assertTrue(outPort.isConverged(),

@@ -108,7 +108,7 @@ public class RouteInstantiationTest {
             RoutingEntry routingEntry = entry.getValue();
             log.info("%s/%d", routingEntry.getPrefix().getDstAddress(),
                 routingEntry.getPrefix().getMaskLength());
-            for (OutPortInfo outPortInfo : routingEntry.getOutPortInfos().values()) {
+            for (OutPortInfo outPortInfo : routingEntry.getOutPortInfos()) {
                 log.info("    %s converged=%s", outPortInfo.getPortName(), outPortInfo.isConverged());
             }
         }

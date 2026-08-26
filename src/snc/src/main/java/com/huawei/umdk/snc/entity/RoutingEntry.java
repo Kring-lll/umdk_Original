@@ -8,9 +8,9 @@
  */
 package com.huawei.umdk.snc.entity;
 
+import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.List;
 
 import com.huawei.umdk.snc.route.model.RouteEntry;
 import lombok.AllArgsConstructor;
@@ -28,21 +28,21 @@ import lombok.ToString;
 @ToString
 public class RoutingEntry {
     private RoutePrefix prefix;
-    private Map<String, OutPortInfo> outPortInfos;
+    private List<OutPortInfo> outPortInfos;
 
     /**
      * 路由可达性：表示 outPortInfos 中是否存在 convergedFlag==0 的有效出端口。
      */
     private boolean reachable = true;
 
-    public Map<String, OutPortInfo> getOutPortInfos() {
-        return outPortInfos == null ? null : Collections.unmodifiableMap(outPortInfos);
+    public List<OutPortInfo> getOutPortInfos() {
+        return outPortInfos == null ? null : Collections.unmodifiableList(outPortInfos);
     }
 
     /**
      * 获取可变的出端口 Map，供收敛逻辑直接修改 OutPortInfo 的 convergedFlag。
      */
-    public Map<String, OutPortInfo> getMutableOutPortInfos() {
+    public List<OutPortInfo> getMutableOutPortInfos() {
         return outPortInfos;
     }
 
@@ -53,7 +53,7 @@ public class RoutingEntry {
     public void refreshReachable() {
         boolean newReachable = false;
         if (outPortInfos != null) {
-            for (OutPortInfo port : outPortInfos.values()) {
+            for (OutPortInfo port : outPortInfos) {
                 if (port != null && port.getConvergedFlag() == 0) {
                     newReachable = true;
                     break;
@@ -72,21 +72,20 @@ public class RoutingEntry {
         RoutePrefix dstPrefix = (srcPrefix == null) ? null
             : new RoutePrefix(srcPrefix.getDstAddress(), srcPrefix.getMaskLength());
 
-        Map<String, OutPortInfo> dstOutPortMap = new HashMap<>();
-        Map<String, OutPortInfo> srcOutPortMap = srcRoutingEntry.getOutPortInfos();
-        if (srcOutPortMap != null) {
-            for (Map.Entry<String, OutPortInfo> portEntry : srcOutPortMap.entrySet()) {
-                OutPortInfo srcPort = portEntry.getValue();
+        List<OutPortInfo> dstOutPortList = new ArrayList<>();
+        List<OutPortInfo> srcOutPortList = srcRoutingEntry.getOutPortInfos();
+        if (srcOutPortList != null) {
+            for (OutPortInfo srcPort : srcOutPortList) {
                 OutPortInfo dstPort = (srcPort == null) ? null : new OutPortInfo(
                     srcPort.getPortName(), srcPort.getNextHop(), srcPort.getPreference(),
                     srcPort.getTag(), srcPort.getProtocol(), srcPort.getConvergedFlag());
-                dstOutPortMap.put(portEntry.getKey(), dstPort);
+                dstOutPortList.add(dstPort);
             }
         }
 
         RoutingEntry destEntry = new RoutingEntry();
         destEntry.setPrefix(dstPrefix);
-        destEntry.setOutPortInfos(dstOutPortMap);
+        destEntry.setOutPortInfos(dstOutPortList);
         destEntry.setReachable(srcRoutingEntry.isReachable());
         return destEntry;
     }

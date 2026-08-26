@@ -10,6 +10,7 @@ package com.huawei.umdk.snc.route.service;
 
 import java.util.HashSet;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
@@ -204,11 +205,11 @@ public class RouteConvergeService {
             if (routingEntry == null) {
                 continue;
             }
-            Map<String, OutPortInfo> outPorts = routingEntry.getMutableOutPortInfos();
+            List<OutPortInfo> outPorts = routingEntry.getMutableOutPortInfos();
             if (outPorts == null) {
                 continue;
             }
-            OutPortInfo outPort = outPorts.get(portName);
+            OutPortInfo outPort = findOutPort(outPorts, portName);
             if (outPort == null) {
                 continue;
             }
@@ -238,11 +239,11 @@ public class RouteConvergeService {
             if (routingEntry == null) {
                 continue;
             }
-            Map<String, OutPortInfo> outPorts = routingEntry.getMutableOutPortInfos();
+            List<OutPortInfo> outPorts = routingEntry.getMutableOutPortInfos();
             if (outPorts == null) {
                 continue;
             }
-            OutPortInfo outPort = outPorts.get(portName);
+            OutPortInfo outPort = findOutPort(outPorts, portName);
             if (outPort == null) {
                 continue;
             }
@@ -266,6 +267,21 @@ public class RouteConvergeService {
         }
         routingEntry.refreshReachable();
         return routingEntry.isReachable() != oldReachable;
+    }
+
+    /**
+     * 在出端口列表中按 portName 查找对应的 OutPortInfo。
+     */
+    private OutPortInfo findOutPort(List<OutPortInfo> outPorts, String portName) {
+        if (outPorts == null || portName == null) {
+            return null;
+        }
+        for (OutPortInfo port : outPorts) {
+            if (port != null && portName.equals(port.getPortName())) {
+                return port;
+            }
+        }
+        return null;
     }
 
     /**

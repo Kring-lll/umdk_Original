@@ -299,16 +299,16 @@ public class PathService {
                     "ROUTE_NOT_REACHABLE: no route for device " + hop.getDeviceName() + " to target " + targetCna);
             }
 
-            Map<String, OutPortInfo> outPortInfos = bestEntry.getOutPortInfos();
+            List<OutPortInfo> outPortInfos = bestEntry.getOutPortInfos();
             if (outPortInfos == null || outPortInfos.isEmpty()) {
                 LOG.error("routePhase: error=ROUTE_NOT_REACHABLE, no outPort for device=%s",
                     hop.getDeviceName());
                 throw new PathPlanException(PlanStatus.ROUTE_NOT_REACHABLE,
-                    "ROUTE_NOT_REACHABLE: no outPort for device " + hop.getDeviceName());
+                    "ROUTE_NOT_REACHABLE: no out port for device " + hop.getDeviceName());
             }
 
             // Set the first outPort on the hop (ECMP handling in V2)
-            String outPort = outPortInfos.keySet().iterator().next();
+            String outPort = outPortInfos.get(0).getPortName();
             hop.setOutPort(outPort);
             LOG.debug("routePhase: hopIndex=" + i + ", device=" + hop.getDeviceName()
                 + ", outPort=" + outPort + ", mask=" + bestMaskLen);
