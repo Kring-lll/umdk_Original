@@ -364,7 +364,6 @@ static ALWAYS_INLINE uint32_t release_batch(umq_buf_list_t *input, umq_buf_list_
         }
         cur_node->alloc_state = QBUF_ALLOC_STATE_FREE;
     }
-
     umq_buf_t *output_head = QBUF_LIST_FIRST(output);
     // switch head node
     QBUF_LIST_FIRST(output) = QBUF_LIST_FIRST(input);
