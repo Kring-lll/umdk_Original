@@ -1670,7 +1670,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                     lazy_info.new_send_idx = (uint32_t)lazy_send_idx;
                     lazy_info.new_target_idx = (uint32_t)lazy_target_idx;
 
-                    int lazy_ret = bondp_fb_add_lazy_task(comp_ctx, bdp_comp->v_jetty.jetty_id.id,
+                    int lazy_ret = bondp_fb_add_lazy_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id,
                                                           (uint32_t)lazy_send_idx, &lazy_info);
                     if (lazy_ret == 0 || lazy_ret == -EEXIST) {
                         URMA_LOG_INFO("Lazy failover scheduled, vjetty_id=%u, tjetty_id=%u, "
