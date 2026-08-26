@@ -92,7 +92,11 @@ static int umq_qbuf_base_alloc_without_data(qbuf_pool_base_t *base, thread_local
         }
         thread_cache->stats.tls_fetch_cnt_without_data++;
     }
-
+    if (local_pool->head_without_data.first == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "cnt %lu mismatch with actual list length\n",
+            (uint32_t)local_pool->buf_cnt_without_data);
+        return UMQ_FAIL;
+    }
     umq_qbuf_alloc_nodata(local_pool, param->num, param->list, param->shm);
     if (base->self_shrink_fn != NULL) {
         base->self_shrink_fn(false);
@@ -113,7 +117,11 @@ static int umq_qbuf_base_alloc_with_data(qbuf_pool_base_t *base, thread_local_qb
         }
         thread_cache->stats.tls_fetch_cnt_with_data++;
     }
-
+    if (local_pool->head_with_data.first == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "cnt %lu mismatch with actual list length\n",
+            (uint32_t)local_pool->buf_cnt_with_data);
+        return UMQ_FAIL;
+    }
     if (base->mode == UMQ_BUF_SPLIT) {
         umq_qbuf_alloc_data_with_split(local_pool, param->request_size, param, param->list, base->block_size);
     } else {
