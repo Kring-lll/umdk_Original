@@ -208,6 +208,9 @@ static ALWAYS_INLINE uint32_t allocate_batch(umq_buf_list_t *input, uint32_t n, 
     umq_buf_t *input_head = QBUF_LIST_FIRST(input);
     umq_buf_t *output_head = QBUF_LIST_FIRST(output);
     // switch head node
+    if (cur_node == NULL) {
+        return 0;
+    }
     QBUF_LIST_FIRST(input) = QBUF_LIST_NEXT(cur_node);
     QBUF_LIST_FIRST(output) = input_head;
     // set output
@@ -259,6 +262,9 @@ static ALWAYS_INLINE uint32_t release_batch(umq_buf_list_t *input, umq_buf_list_
     // switch head node
     QBUF_LIST_FIRST(output) = QBUF_LIST_FIRST(input);
     // set output
+    if (last_node == NULL) {
+        return cnt;
+    }
     QBUF_LIST_NEXT(last_node) = output_head;
     return cnt;
 }
@@ -676,6 +682,10 @@ static ALWAYS_INLINE void umq_qbuf_alloc_data_with_split(local_block_pool_t *loc
 
     umq_buf_t *head = QBUF_LIST_FIRST(&local_pool->head_with_data);
     // switch head node
+    if (cur_node == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "cur_node is null\n");
+        return;
+    }
     QBUF_LIST_FIRST(&local_pool->head_with_data) = QBUF_LIST_NEXT(cur_node);
     QBUF_LIST_NEXT(cur_node) = QBUF_LIST_FIRST(list);
 
@@ -729,6 +739,10 @@ static ALWAYS_INLINE void umq_qbuf_alloc_data_with_combine(local_block_pool_t *l
 
     umq_buf_t *head = QBUF_LIST_FIRST(&local_pool->head_with_data);
     // switch head node
+    if (cur_node == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "cur_node is null\n");
+        return;
+    }
     QBUF_LIST_FIRST(&local_pool->head_with_data) = QBUF_LIST_NEXT(cur_node);
     QBUF_LIST_NEXT(cur_node) = QBUF_LIST_FIRST(list);
 
