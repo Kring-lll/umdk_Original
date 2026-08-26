@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "bondp_context_table.h"
+#include "bondp_datapath.h"
 #include "bondp_types.h"
 #include "bondp_worker.h"
 #include "ub_hmap.h"
@@ -31,6 +32,13 @@ typedef struct bondp_fb_task_key {
     uint32_t pjetty_idx;
 } bondp_fb_task_key_t;
 
+typedef enum bondp_fb_task_type {
+    /* Recreate a failed pjetty in place so the slot stays pre-built. */
+    BONDP_FB_TASK_REBUILD = 0,
+    /* Create a not-yet-built cross-IODIE pjetty on demand (lazy failover). */
+    BONDP_FB_TASK_LAZY_CREATE,
+} bondp_fb_task_type_t;
+
 typedef struct bondp_fb_task {
     struct ub_hmap_node hmap_node;
     urma_ref_t use_cnt;
@@ -39,6 +47,7 @@ typedef struct bondp_fb_task {
     uint32_t request_id;
     uint32_t vjetty_id;
     uint32_t pjetty_idx;
+    bondp_fb_task_type_t type;
 } bondp_fb_task_t;
 
 struct bondp_fb_ctx {
@@ -276,6 +285,64 @@ static int bondp_update_pjetty_id_mapping(
     return 0;
 }
 
+/*
+ * lazy pjetty failback (v4): a cross-IODIE pjetty is destroyed on its own
+ * failure instead of being rebuilt, restoring the initial "only the primary
+ * IODIE is pre-built" state. The destroy is deferred while WRs are still in
+ * flight on the slot (e.g. the link flapped back and posts resumed).
+ */
+static int bondp_destroy_lazy_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
+{
+    bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
+    uint64_t inflight = 0;
+
+    for (uint32_t t = 0; t < URMA_UBAGG_DEV_MAX_NUM; ++t) {
+        inflight += atomic_load(&bdp_jetty->sqe_cnt[local_idx][t]);
+    }
+    if (inflight > 0) {
+        URMA_LOG_WARN("Lazy destroy deferred: %lu WRs still in flight, vjetty_id=%u, idx=%u\n",
+                      inflight, bdp_jetty->v_jetty.jetty_id.id, local_idx);
+        return 0;
+    }
+
+    (void)pthread_spin_lock(&bdp_jetty->send_lock);
+    urma_jetty_t *old_jetty = bdp_jetty->p_jetty[local_idx];
+    if (old_jetty == NULL) {
+        atomic_store(&bdp_jetty->valid[local_idx], false);
+        atomic_store(&bdp_jetty->hc_valid[local_idx], false);
+        atomic_store(&bdp_jetty->rebuild_done[local_idx], false);
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+        URMA_LOG_INFO("Lazy destroy skip: pjetty idx=%u already NULL, vjetty_id=%u\n",
+                      local_idx, bdp_jetty->v_jetty.jetty_id.id);
+        return 0;
+    }
+    urma_jetty_id_t old_id = old_jetty->jetty_id;
+    bdp_jetty->p_jetty[local_idx] = NULL;
+    atomic_store(&bdp_jetty->valid[local_idx], false);
+    /* Clear the recovery flags too: a stale hc_valid would re-validate the
+     * NULL slot through bondp_fb_switch_path(). */
+    atomic_store(&bdp_jetty->hc_valid[local_idx], false);
+    atomic_store(&bdp_jetty->rebuild_done[local_idx], false);
+    (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+
+    pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
+    int ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, old_id, JETTY);
+    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+    if (ret != 0) {
+        URMA_LOG_WARN("Lazy destroy: pjetty id mapping del failed, ret=%d, " URMA_JETTY_ID_FMT "\n",
+                      ret, URMA_JETTY_ID_ARGS(&old_id));
+    }
+
+    ret = urma_delete_jetty(old_jetty);
+    if (ret != URMA_SUCCESS) {
+        URMA_LOG_WARN("Lazy destroy: urma_delete_jetty failed, vjetty_id=%u, idx=%u, ret=%d\n",
+                      bdp_jetty->v_jetty.jetty_id.id, local_idx, ret);
+    }
+    URMA_LOG_INFO("Lazy pjetty destroyed (restore primary-IODIE-only state), vjetty_id=%u, idx=%u, "
+                  "jetty_id=%u\n", bdp_jetty->v_jetty.jetty_id.id, local_idx, old_id.id);
+    return 0;
+}
+
 static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
 {
     int ret;
@@ -286,6 +353,27 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
     }
 
     bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
+
+    /*
+     * lazy pjetty (v4) failback dispatch:
+     * - cross-IODIE pjetty (lazy-created): destroy it on failure to restore
+     *   the initial "only primary-IODIE pre-built" state.
+     * - same-IODIE pjetty (pre-built): fall through to the regular in-place
+     *   rebuild so the slot stays pre-built (zero-latency next failover) and
+     *   re-validation stays health-check gated.
+     */
+    if (bdp_ctx->enable_lazy_pjetty_by_iodie && bdp_jetty->comp_type == BONDP_COMP_JETTY &&
+        bdp_jetty->active_count > 0) {
+        uint32_t primary_iodie = bondp_iodie_idx_of(bdp_jetty->active_indices[0]);
+        uint32_t local_iodie = bondp_iodie_idx_of(local_idx);
+        if (primary_iodie != UINT32_MAX && local_iodie != UINT32_MAX &&
+            local_iodie != primary_iodie) {
+            return bondp_destroy_lazy_pjetty(bdp_jetty, local_idx);
+        }
+        URMA_LOG_INFO("Failback rebuild of pre-built same-IODIE pjetty, vjetty_id=%u, idx=%u, "
+                      "iodie=%u, primary_iodie=%u\n",
+                      bdp_jetty->v_jetty.jetty_id.id, local_idx, local_iodie, primary_iodie);
+    }
 
     urma_jetty_t *old_jetty = bdp_jetty->p_jetty[local_idx];
     if (old_jetty == NULL) {
@@ -346,6 +434,9 @@ static bondp_comp_t *bondp_find_jetty_by_vjetty_id(bondp_context_t *bond_ctx, ui
 typedef struct bondp_fb_async_arg {
     bondp_fb_ctx_t *fb_ctx;
     bondp_fb_task_key_t key;
+    bondp_fb_task_type_t type;
+    /* Payload for BONDP_FB_TASK_LAZY_CREATE. */
+    bondp_lazy_create_info_t lazy;
 } bondp_fb_async_arg_t;
 
 typedef struct bondp_fb_mark_done_arg {
@@ -379,7 +470,7 @@ static void bondp_mark_rebuild_done_async(bondp_worker_task_reason_t reason, voi
     free(arg_typed);
 }
 
-static void bondp_rebuild_pjetty_async(bondp_worker_task_reason_t reason, void *arg)
+static void bondp_fb_task_async(bondp_worker_task_reason_t reason, void *arg)
 {
     bondp_fb_async_arg_t *arg_typed = (bondp_fb_async_arg_t *)arg;
     if (arg_typed == NULL) {
@@ -403,8 +494,19 @@ static void bondp_rebuild_pjetty_async(bondp_worker_task_reason_t reason, void *
     }
     bondp_comp_t *bdp_jetty = bondp_find_jetty_by_vjetty_id(fb_task->bond_ctx, fb_task->vjetty_id);
     if (bdp_jetty == NULL) {
-        URMA_LOG_ERR("Failed to rebuild failback pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
+        URMA_LOG_ERR("Failed to run fb task, vjetty %u not found (destroyed?), pjetty_idx=%u.\n",
                      fb_task->vjetty_id, fb_task->pjetty_idx);
+        goto del_task;
+    }
+
+    if (fb_task->type == BONDP_FB_TASK_LAZY_CREATE) {
+        /* urma_create_jetty is a heavy op (ioctl + HW resource alloc), it must
+         * run on the worker thread, never in the poll thread spinlock. */
+        int ret = bondp_lazy_create_and_resend(bdp_jetty, fb_task->pjetty_idx, &arg_typed->lazy);
+        if (ret != 0) {
+            URMA_LOG_ERR("Lazy create task failed, vjetty_id=%u, pjetty_idx=%u, ret=%d\n",
+                         fb_task->vjetty_id, fb_task->pjetty_idx, ret);
+        }
         goto del_task;
     }
 
@@ -412,6 +514,14 @@ static void bondp_rebuild_pjetty_async(bondp_worker_task_reason_t reason, void *
     if (ret != 0) {
         URMA_LOG_ERR("Failed to rebuild failback pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
                      fb_task->vjetty_id, fb_task->pjetty_idx);
+        goto del_task;
+    }
+
+    /* A lazy destroy leaves the slot NULL: never publish rebuild_done for it,
+     * otherwise health check could re-validate a non-existent pjetty. */
+    if (bdp_jetty->p_jetty[fb_task->pjetty_idx] == NULL) {
+        URMA_LOG_INFO("Failback task left pjetty NULL (lazy destroy), skip mark-done, "
+                      "vjetty_id=%u, pjetty_idx=%u\n", fb_task->vjetty_id, fb_task->pjetty_idx);
         goto del_task;
     }
 
@@ -450,12 +560,9 @@ free_arg:
     return;
 }
 
-int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx)
+static int fb_add_task_common(bondp_context_t *bond_ctx, bondp_fb_task_type_t type,
+                              uint64_t delay_ms, bondp_fb_async_arg_t *async_arg)
 {
-    if (bond_ctx == NULL || bond_ctx->fb_ctx == NULL) {
-        return -EINVAL;
-    }
-
     bondp_fb_ctx_t *fb_ctx = bond_ctx->fb_ctx;
     bondp_fb_task_t *fb_task = calloc(1, sizeof(*fb_task));
     if (fb_task == NULL) {
@@ -464,22 +571,13 @@ int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pj
 
     fb_task->bond_ctx = bond_ctx;
     fb_task->request_id = next_request_id(fb_ctx);
-    fb_task->vjetty_id = vjetty_id;
-    fb_task->pjetty_idx = pjetty_idx;
+    fb_task->vjetty_id = async_arg->key.vjetty_id;
+    fb_task->pjetty_idx = async_arg->key.pjetty_idx;
+    fb_task->type = type;
     atomic_init(&fb_task->use_cnt.atomic_cnt, 1);
 
-    bondp_fb_task_key_t key = {
-        .vjetty_id = vjetty_id,
-        .pjetty_idx = pjetty_idx,
-    };
+    bondp_fb_task_key_t key = async_arg->key;
     uint32_t hash = fb_task_hash_key(&key);
-    bondp_fb_async_arg_t *async_arg = calloc(1, sizeof(*async_arg));
-    if (async_arg == NULL) {
-        free(fb_task);
-        return -ENOMEM;
-    }
-    async_arg->fb_ctx = fb_ctx;
-    async_arg->key = key;
 
     bondp_fb_task_t *existing_task = NULL;
     int ret = 0;
@@ -493,23 +591,72 @@ int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pj
     }
 
     ub_hmap_insert(&fb_ctx->task_map, &fb_task->hmap_node, hash);
-    ret = bondp_worker_schedule(BONDP_FB_REBUILD_DELAY_MS, bondp_rebuild_pjetty_async, async_arg,
+    ret = bondp_worker_schedule(delay_ms, bondp_fb_task_async, async_arg,
                                 &fb_task->worker_task_id);
     if (ret != 0) {
         ub_hmap_remove(&fb_ctx->task_map, &fb_task->hmap_node);
-        URMA_LOG_ERR("Failed to schedule failback task, vjetty_id=%u, pjetty_idx=%u, ret=%d.\n",
-                     vjetty_id, pjetty_idx, ret);
+        URMA_LOG_ERR("Failed to schedule fb task (type=%d), vjetty_id=%u, pjetty_idx=%u, ret=%d.\n",
+                     type, key.vjetty_id, key.pjetty_idx, ret);
     }
 
 out_unlock:
     (void)pthread_rwlock_unlock(&fb_ctx->task_lock);
     if (ret != 0) {
-        free(async_arg);
         fb_task_put(fb_task);
         return ret;
     }
 
     return 0;
+}
+
+int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx)
+{
+    if (bond_ctx == NULL || bond_ctx->fb_ctx == NULL) {
+        return -EINVAL;
+    }
+
+    bondp_fb_async_arg_t *async_arg = calloc(1, sizeof(*async_arg));
+    if (async_arg == NULL) {
+        return -ENOMEM;
+    }
+    async_arg->fb_ctx = bond_ctx->fb_ctx;
+    async_arg->key.vjetty_id = vjetty_id;
+    async_arg->key.pjetty_idx = pjetty_idx;
+    async_arg->type = BONDP_FB_TASK_REBUILD;
+
+    int ret = fb_add_task_common(bond_ctx, BONDP_FB_TASK_REBUILD, BONDP_FB_REBUILD_DELAY_MS, async_arg);
+    if (ret != 0) {
+        /* Ownership of async_arg only transfers to the worker task on success. */
+        free(async_arg);
+    }
+    return ret;
+}
+
+int bondp_fb_add_lazy_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx,
+                           const bondp_lazy_create_info_t *info)
+{
+    if (bond_ctx == NULL || bond_ctx->fb_ctx == NULL || info == NULL) {
+        return -EINVAL;
+    }
+
+    bondp_fb_async_arg_t *async_arg = calloc(1, sizeof(*async_arg));
+    if (async_arg == NULL) {
+        return -ENOMEM;
+    }
+    async_arg->fb_ctx = bond_ctx->fb_ctx;
+    async_arg->key.vjetty_id = vjetty_id;
+    async_arg->key.pjetty_idx = pjetty_idx;
+    async_arg->type = BONDP_FB_TASK_LAZY_CREATE;
+    async_arg->lazy = *info;
+
+    /* delay 0: the cross-IODIE failover is waiting for this pjetty, create it
+     * as soon as the worker picks the task up. */
+    int ret = fb_add_task_common(bond_ctx, BONDP_FB_TASK_LAZY_CREATE, 0, async_arg);
+    if (ret != 0) {
+        /* Ownership of async_arg only transfers to the worker task on success. */
+        free(async_arg);
+    }
+    return ret;
 }
 
 void bondp_fb_cancel_tasks(bondp_context_t *bond_ctx, uint32_t vjetty_id)

@@ -1132,10 +1132,12 @@ release_wr_entry:
     return ret;
 }
 
-static void resend_matched_jfs_wrs(bondp_comp_t *bdp_comp, uint64_t base_wr_id,
-                                   uint32_t old_send_idx, uint32_t old_target_idx,
-                                   int new_send_idx, int new_target_idx, const char *reason)
+static uint32_t resend_matched_jfs_wrs(bondp_comp_t *bdp_comp, uint64_t base_wr_id,
+                                       uint32_t old_send_idx, uint32_t old_target_idx,
+                                       int new_send_idx, int new_target_idx, const char *reason)
 {
+    uint32_t resent_cnt = 0;
+
     for (int i = 0; i < bdp_comp->send_wr_buf.max_wr_num; i++) {
         const uint64_t resend_wr_id = (base_wr_id + i - 1) % bdp_comp->send_wr_buf.max_wr_num + 1;
         jfs_wr_entry_t *resend_wr_entry = jfs_wr_buf_get(&bdp_comp->send_wr_buf, resend_wr_id);
@@ -1150,8 +1152,155 @@ static void resend_matched_jfs_wrs(bondp_comp_t *bdp_comp, uint64_t base_wr_id,
         atomic_fetch_sub(&bdp_comp->sqe_cnt[old_send_idx][old_target_idx], 1);
         if (bondp_resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
             URMA_LOG_ERR("Failed to resend %s jfs wr, wr_id=%lu\n", reason, resend_wr_id);
+        } else {
+            resent_cnt++;
         }
     }
+    return resent_cnt;
+}
+
+/*
+ * Lazy-create a cross-IODIE backup pjetty on the bond worker thread. Runs with
+ * NO locks held on entry: urma_create_jetty/urma_delete_jetty/urma_bind_jetty
+ * are heavy ioctls and must stay outside send_lock. Only the pointer swap,
+ * the id-mapping registration and the resend run under send_lock.
+ */
+int bondp_lazy_create_and_resend(bondp_comp_t *bdp_jetty, uint32_t pjetty_idx,
+                                 const bondp_lazy_create_info_t *info)
+{
+    if (bdp_jetty == NULL || info == NULL || bdp_jetty->bondp_ctx == NULL ||
+        pjetty_idx >= URMA_UBAGG_DEV_MAX_NUM || bdp_jetty->comp_type != BONDP_COMP_JETTY) {
+        return -EINVAL;
+    }
+
+    bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
+    if (bdp_ctx->p_ctxs[pjetty_idx] == NULL) {
+        URMA_LOG_ERR("Lazy create failed: no p_ctx, vjetty_id=%u, idx=%u\n",
+                     bdp_jetty->v_jetty.jetty_id.id, pjetty_idx);
+        return -ENODEV;
+    }
+    if (bdp_jetty->p_jetty[pjetty_idx] != NULL) {
+        /* Already created by a previous task or a concurrent failback. */
+        URMA_LOG_INFO("Lazy create skip: pjetty idx=%u already exists, vjetty_id=%u, jetty_id=%u\n",
+                      pjetty_idx, bdp_jetty->v_jetty.jetty_id.id,
+                      bdp_jetty->p_jetty[pjetty_idx]->jetty_id.id);
+        return 0;
+    }
+
+    /* Rebind the per-slot jfc/jfr members onto the cfg template copied from a
+     * live pjetty at failover time. */
+    urma_jetty_cfg_t p_cfg = info->jetty_cfg;
+    bondp_jfc_t *bdp_jfs_jfc = CONTAINER_OF_FIELD(p_cfg.jfs_cfg.jfc, bondp_jfc_t, v_jfc);
+    bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(p_cfg.shared.jfr, bondp_comp_t, base);
+    bondp_jfc_t *bdp_rplc_jfc = NULL;
+    if (p_cfg.shared.jfc != NULL) {
+        bdp_rplc_jfc = CONTAINER_OF_FIELD(p_cfg.shared.jfc, bondp_jfc_t, v_jfc);
+    }
+    if (bdp_jfs_jfc->p_jfc[pjetty_idx] == NULL || bdp_jfr->p_jfr[pjetty_idx] == NULL) {
+        URMA_LOG_ERR("Lazy create failed: per-slot jfc/jfr missing, vjetty_id=%u, idx=%u\n",
+                     bdp_jetty->v_jetty.jetty_id.id, pjetty_idx);
+        return -ENODEV;
+    }
+    p_cfg.jfs_cfg.jfc = bdp_jfs_jfc->p_jfc[pjetty_idx];
+    p_cfg.shared.jfr = bdp_jfr->p_jfr[pjetty_idx];
+    if (bdp_rplc_jfc != NULL) {
+        p_cfg.shared.jfc = bdp_rplc_jfc->p_jfc[pjetty_idx];
+    }
+    if (bdp_ctx->bonding_level == BONDP_BONDING_LEVEL_PORT) {
+        p_cfg.id = 0;
+    }
+
+    URMA_LOG_INFO("Lazy create begin, vjetty_id=%u, idx=%u, iodie=%u, old_path=[%u, %u], "
+                  "new_path=[%u, %u], base_wr_id=%lu\n",
+                  bdp_jetty->v_jetty.jetty_id.id, pjetty_idx, bondp_iodie_idx_of(pjetty_idx),
+                  info->old_send_idx, info->old_target_idx,
+                  info->new_send_idx, info->new_target_idx, info->base_wr_id);
+
+    urma_jetty_t *new_jetty = urma_create_jetty(bdp_ctx->p_ctxs[pjetty_idx], &p_cfg);
+    if (new_jetty == NULL) {
+        URMA_LOG_ERR("Lazy create failed: urma_create_jetty, vjetty_id=%u, idx=%u\n",
+                     bdp_jetty->v_jetty.jetty_id.id, pjetty_idx);
+        return -EIO;
+    }
+    new_jetty->remote_jetty = NULL;
+    new_jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+
+    /* RC mode: bind to the imported tjetty, otherwise the scheduler RC check
+     * (p_jetty->remote_jetty == p_tjetty) rejects the new path forever. */
+    if (bdp_jetty->v_jetty.jetty_cfg.jfs_cfg.trans_mode == URMA_TM_RC &&
+        bdp_jetty->v_jetty.remote_jetty != NULL) {
+        bondp_target_jetty_t *bdp_tjetty =
+            CONTAINER_OF_FIELD(bdp_jetty->v_jetty.remote_jetty, bondp_target_jetty_t, v_tjetty);
+        urma_target_jetty_t *bind_tjetty = NULL;
+        for (uint32_t k = 0; k < bdp_tjetty->p_tjetty_count; ++k) {
+            bondp_p_target_jetty_t *p_tjetty = &bdp_tjetty->p_tjettys[k];
+            if (p_tjetty->local_indice == (uint8_t)pjetty_idx && p_tjetty->p_tjetty != NULL) {
+                bind_tjetty = p_tjetty->p_tjetty;
+                break;
+            }
+        }
+        if (bind_tjetty == NULL || urma_bind_jetty(new_jetty, bind_tjetty) != 0) {
+            URMA_LOG_ERR("Lazy create failed: RC bind, vjetty_id=%u, idx=%u, tjetty_id=%u\n",
+                         bdp_jetty->v_jetty.jetty_id.id, pjetty_idx, bdp_tjetty->v_tjetty.id.id);
+            (void)urma_delete_jetty(new_jetty);
+            return -EIO;
+        }
+        URMA_LOG_INFO("Lazy create: RC bind done, vjetty_id=%u, idx=%u, tjetty_id=%u\n",
+                      bdp_jetty->v_jetty.jetty_id.id, pjetty_idx, bind_tjetty->id.id);
+    }
+
+    (void)pthread_spin_lock(&bdp_jetty->send_lock);
+    if (bdp_jetty->p_jetty[pjetty_idx] != NULL) {
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+        (void)urma_delete_jetty(new_jetty);
+        URMA_LOG_INFO("Lazy create raced: pjetty idx=%u exists, vjetty_id=%u\n",
+                      pjetty_idx, bdp_jetty->v_jetty.jetty_id.id);
+        return 0;
+    }
+
+    pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
+    int ret = bdp_p_vjetty_id_table_add_without_lock(&bdp_ctx->p_vjetty_id_table,
+        new_jetty->jetty_id, JETTY, bdp_jetty->v_jetty.jetty_id.id, bdp_jetty);
+    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+    if (ret != 0) {
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+        (void)urma_delete_jetty(new_jetty);
+        URMA_LOG_ERR("Lazy create failed: register pjetty id mapping, ret=%d, vjetty_id=%u, idx=%u, "
+                     "jetty_id=%u\n", ret, bdp_jetty->v_jetty.jetty_id.id, pjetty_idx,
+                     new_jetty->jetty_id.id);
+        return -EIO;
+    }
+
+    bdp_jetty->p_jetty[pjetty_idx] = new_jetty;
+    atomic_store(&bdp_jetty->valid[pjetty_idx], true);
+
+    /*
+     * Resend the WRs stranded on every invalid path, not just the pair stored
+     * in the task: when both same-IODIE ports fail close together, entries
+     * can sit on both old paths. sqe_cnt is used as a cheap in-flight hint;
+     * resend_matched_jfs_wrs re-checks each entry anyway.
+     */
+    uint32_t resent_cnt = 0;
+    for (uint32_t s = 0; s < URMA_UBAGG_DEV_MAX_NUM; ++s) {
+        if (atomic_load(&bdp_jetty->valid[s])) {
+            continue;
+        }
+        for (uint32_t t = 0; t < URMA_UBAGG_DEV_MAX_NUM; ++t) {
+            if (atomic_load(&bdp_jetty->sqe_cnt[s][t]) == 0) {
+                continue;
+            }
+            resent_cnt += resend_matched_jfs_wrs(bdp_jetty, info->base_wr_id, s, t,
+                                                 (int)info->new_send_idx, (int)info->new_target_idx,
+                                                 "lazy_failover");
+        }
+    }
+    (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+
+    URMA_LOG_INFO("Lazy create done, vjetty_id=%u, idx=%u, jetty_id=%u, new_path=[%u, %u], "
+                  "resent_wr=%u\n",
+                  bdp_jetty->v_jetty.jetty_id.id, pjetty_idx, new_jetty->jetty_id.id,
+                  info->new_send_idx, info->new_target_idx, resent_cnt);
+    return 0;
 }
 
 /*
@@ -1451,6 +1600,98 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         } else {
             atomic_store(&bdp_comp->rebuild_done[send_idx], true);
         }
+
+        /*
+         * lazy pjetty (v4): same-IODIE backups are pre-built, cross-IODIE
+         * backups are created on demand by the bond worker.
+         * Priority 1: any VALID pre-built backup exists (same-IODIE preferred,
+         *             but a recovered primary also qualifies) -> fall through
+         *             to the regular schedule_send + resend path: zero worker,
+         *             zero latency.
+         * Priority 2: no valid pre-built slot at all -> pick a cross-IODIE lazy
+         *             slot with a usable imported tjetty pair. If its pjetty is
+         *             not created yet, schedule a lazy-create task, keep the
+         *             in-flight WRs cached and return without blocking the
+         *             poll thread; new posts fail with URMA_FAIL until the
+         *             worker publishes valid=true.
+         */
+        if (comp_ctx->enable_lazy_pjetty_by_iodie && comp_ctx->enable_failover &&
+            bdp_comp->comp_type == BONDP_COMP_JETTY) {
+            uint32_t failed_iodie = bondp_iodie_idx_of(send_idx);
+            bool has_valid_backup = false;
+
+            for (uint32_t n = 0; n < bdp_comp->enabled_count; ++n) {
+                uint32_t cand = bdp_comp->enabled_indices[n];
+                if (cand == send_idx) {
+                    continue;
+                }
+                if (atomic_load(&bdp_comp->valid[cand]) && bdp_comp->p_jetty[cand] != NULL) {
+                    has_valid_backup = true;
+                    URMA_LOG_DEBUG("Lazy failover has live backup, path=[%u] iodie=%u, "
+                                   "vjetty_id=%u\n", cand, bondp_iodie_idx_of(cand),
+                                   bdp_comp->v_jetty.jetty_id.id);
+                    break;
+                }
+            }
+
+            if (!has_valid_backup && bdp_comp->p_jetty[send_idx] != NULL) {
+                /* Cross-IODIE failover: find a lazy slot with a usable tjetty
+                 * pair from the WR's own target jetty (real pairing, do not
+                 * assume target_idx == local_idx). */
+                int lazy_send_idx = -1;
+                int lazy_target_idx = -1;
+
+                for (uint32_t n = 0; n < bdp_comp->enabled_count && lazy_send_idx < 0; ++n) {
+                    uint32_t cand = bdp_comp->enabled_indices[n];
+                    if (cand == send_idx || bondp_iodie_idx_of(cand) == failed_iodie ||
+                        bdp_comp->p_jetty[cand] != NULL) {
+                        continue; /* same-IODIE already dead / slot already built */
+                    }
+                    for (uint32_t k = 0; k < bdp_tjetty->p_tjetty_count; ++k) {
+                        bondp_p_target_jetty_t *p_tjetty = &bdp_tjetty->p_tjettys[k];
+                        if (p_tjetty->local_indice != (uint8_t)cand || p_tjetty->p_tjetty == NULL) {
+                            continue;
+                        }
+                        if (!atomic_load(&p_tjetty->valid)) {
+                            continue;
+                        }
+                        lazy_send_idx = (int)cand;
+                        lazy_target_idx = (int)p_tjetty->remote_indice;
+                        break;
+                    }
+                }
+
+                if (lazy_send_idx >= 0) {
+                    bondp_lazy_create_info_t lazy_info = {0};
+                    lazy_info.jetty_cfg = bdp_comp->p_jetty[send_idx]->jetty_cfg;
+                    lazy_info.base_wr_id = wr_entry->wr_id;
+                    lazy_info.old_send_idx = send_idx;
+                    lazy_info.old_target_idx = target_idx;
+                    lazy_info.new_send_idx = (uint32_t)lazy_send_idx;
+                    lazy_info.new_target_idx = (uint32_t)lazy_target_idx;
+
+                    int lazy_ret = bondp_fb_add_lazy_task(comp_ctx, bdp_comp->v_jetty.jetty_id.id,
+                                                          (uint32_t)lazy_send_idx, &lazy_info);
+                    if (lazy_ret == 0 || lazy_ret == -EEXIST) {
+                        URMA_LOG_INFO("Lazy failover scheduled, vjetty_id=%u, tjetty_id=%u, "
+                                      "failed_path=[%u, %u] iodie=%u, lazy_to=[%d, %d], wr_id=%lu, "
+                                      "task_ret=%d\n",
+                                      bdp_comp->v_jetty.jetty_id.id,
+                                      wr_entry->target_vjetty->v_tjetty.id.id,
+                                      send_idx, target_idx, failed_iodie,
+                                      lazy_send_idx, lazy_target_idx, wr_id, lazy_ret);
+                        urma_ubagg_switch_inc();
+                        (void)pthread_spin_unlock(&bdp_comp->send_lock);
+                        put_comp(bdp_comp);
+                        return CONVERT_SKIP;
+                    }
+                    URMA_LOG_ERR("Lazy failover schedule failed, fall to regular route, "
+                                 "vjetty_id=%u, idx=%d, ret=%d\n",
+                                 bdp_comp->v_jetty.jetty_id.id, lazy_send_idx, lazy_ret);
+                }
+            }
+        }
+
         /* choose the failover route(0 or 1) through send_idx and target_idx */
         int new_send_idx = send_idx;
         int new_target_idx = target_idx;
@@ -1480,8 +1721,12 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                       send_idx, target_idx, new_send_idx, new_target_idx, cr->status);
         urma_ubagg_switch_inc();
 
-        resend_matched_jfs_wrs(bdp_comp, wr_entry->wr_id, send_idx, target_idx,
-                               new_send_idx, new_target_idx, "failover");
+        uint32_t resent_cnt = resend_matched_jfs_wrs(bdp_comp, wr_entry->wr_id, send_idx, target_idx,
+                                                    new_send_idx, new_target_idx, "failover");
+        URMA_LOG_INFO("Failover resend done, wr_id=%lu, vjetty_id=%u, from=[%u, %u], "
+                      "to=[%d, %d], resent_wr=%u\n",
+                      wr_id, bdp_comp->v_jetty.jetty_id.id, send_idx, target_idx,
+                      new_send_idx, new_target_idx, resent_cnt);
         (void)pthread_spin_unlock(&bdp_comp->send_lock);
         put_comp(bdp_comp);
         return CONVERT_SKIP;

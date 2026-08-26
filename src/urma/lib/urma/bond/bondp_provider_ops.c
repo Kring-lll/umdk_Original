@@ -609,6 +609,7 @@ static bondp_set_ctx_cfg_in_t bondp_get_ctx_cfg(const bondp_context_t *bdp_ctx)
         .rnr_retry_sleep_ms = bdp_ctx->rnr_retry_sleep_ms,
         .rnr_retry_max = bdp_ctx->rnr_retry_max,
         .rnr_retry_jitter_ratio = bdp_ctx->rnr_retry_jitter_ratio,
+        .enable_lazy_pjetty_by_iodie = bdp_ctx->enable_lazy_pjetty_by_iodie,
     };
 }
 
@@ -623,6 +624,7 @@ static void bondp_store_ctx_cfg(bondp_context_t *bdp_ctx, const bondp_set_ctx_cf
     bdp_ctx->rnr_retry_sleep_ms = cfg->rnr_retry_sleep_ms;
     bdp_ctx->rnr_retry_max = cfg->rnr_retry_max;
     bdp_ctx->rnr_retry_jitter_ratio = cfg->rnr_retry_jitter_ratio;
+    bdp_ctx->enable_lazy_pjetty_by_iodie = cfg->enable_lazy_pjetty_by_iodie;
 }
 
 static void bondp_apply_bool_cfg(bondp_set_ctx_cfg_in_t *cfg, const bondp_set_ctx_cfg_in_t *cfg_in)
@@ -638,6 +640,9 @@ static void bondp_apply_bool_cfg(bondp_set_ctx_cfg_in_t *cfg, const bondp_set_ct
     }
     if ((cfg_in->mask & BONDP_CTX_CFG_ENABLE_RNR_RETRY) != 0) {
         cfg->enable_rnr_retry = cfg_in->enable_rnr_retry;
+    }
+    if ((cfg_in->mask & BONDP_CTX_CFG_ENABLE_LAZY_PJETTY_BY_IODIE) != 0) {
+        cfg->enable_lazy_pjetty_by_iodie = cfg_in->enable_lazy_pjetty_by_iodie;
     }
 }
 
@@ -701,6 +706,13 @@ int bondp_set_ctx_cfg(urma_context_t *ctx, const bondp_set_ctx_cfg_in_t *cfg_in)
     if (ret != 0) {
         URMA_LOG_ERR("Invalid context configuration.\n");
         goto EXIT;
+    }
+
+    if (new_cfg.enable_lazy_pjetty_by_iodie && !new_cfg.enable_failover) {
+        /* Without failover the lazy cross-IODIE pjetty is never created on
+         * demand: all traffic dies once the primary IODIE fails. */
+        URMA_LOG_WARN("lazy_pjetty_by_iodie is enabled while failover is disabled, "
+                      "cross-IODIE backup pjetty will never be created.\n");
     }
 
     bondp_set_ctx_cfg_in_t old_cfg = bondp_get_ctx_cfg(bdp_ctx);
