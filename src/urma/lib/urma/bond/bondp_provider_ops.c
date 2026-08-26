@@ -460,6 +460,7 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
     bdp_ctx->rnr_retry_sleep_ms = g_bondp_env.rnr_retry_sleep_ms;
     bdp_ctx->rnr_retry_max = g_bondp_env.rnr_retry_max;
     bdp_ctx->rnr_retry_jitter_ratio = g_bondp_env.rnr_retry_jitter_ratio;
+    bdp_ctx->enable_lazy_pjetty_by_iodie = g_bondp_env.enable_lazy_pjetty_by_iodie;
 
     int ret = 0;
     ret = bondp_create_vcontext(bdp_ctx, dev, eid_index, dev_fd);
