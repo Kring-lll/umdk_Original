@@ -1530,6 +1530,7 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     bdp_jetty->comp_type = BONDP_COMP_JETTY;
     atomic_init(&bdp_jetty->use_cnt.atomic_cnt, 0);
     atomic_init(&bdp_jetty->deleting, false);
+    atomic_init(&bdp_jetty->lazy_create_pending, false);
     (void)pthread_spin_init(&bdp_jetty->send_lock, PTHREAD_PROCESS_PRIVATE);
     bdp_jetty->modify_to_error = false;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {

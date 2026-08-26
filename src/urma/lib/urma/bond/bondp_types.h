@@ -278,11 +278,17 @@ typedef struct bondp_comp {
     atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     atomic_bool hc_valid[URMA_UBAGG_DEV_MAX_NUM];
     atomic_uint msn;
+    /* lazy pjetty (v4): true while a cross-IODIE lazy create is in flight on
+     * the bond worker; failover CRs on invalid paths are cached (CONVERT_SKIP)
+     * instead of being surfaced, so the worker can resend those WRs once the
+     * new path is published. */
+    atomic_bool lazy_create_pending;
 #else
     std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_bool hc_valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_uint msn;
+    std::atomic_bool lazy_create_pending;
 #endif
 #ifndef __cplusplus
     atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];

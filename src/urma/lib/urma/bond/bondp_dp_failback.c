@@ -503,6 +503,11 @@ static void bondp_fb_task_async(bondp_worker_task_reason_t reason, void *arg)
         /* urma_create_jetty is a heavy op (ioctl + HW resource alloc), it must
          * run on the worker thread, never in the poll thread spinlock. */
         int ret = bondp_lazy_create_and_resend(bdp_jetty, fb_task->pjetty_idx, &arg_typed->lazy);
+        /* Close the lazy window (covers every return path of the create, both
+         * success and failure). On failure the WRs cached during the window
+         * stay in send_wr_buf; a later successful lazy create rescans all
+         * invalid paths and resends them. */
+        atomic_store(&bdp_jetty->lazy_create_pending, false);
         if (ret != 0) {
             URMA_LOG_ERR("Lazy create task failed, vjetty_id=%u, pjetty_idx=%u, ret=%d\n",
                          fb_task->vjetty_id, fb_task->pjetty_idx, ret);

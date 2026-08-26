@@ -1515,6 +1515,19 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         return CONVERT_SKIP;
     }
     if (atomic_load(&bdp_comp->valid[idx]) == false) {
+        if (atomic_load(&bdp_comp->lazy_create_pending)) {
+            /*
+             * lazy pjetty (v4): a cross-IODIE lazy create is in flight on the
+             * bond worker. Cache this WR (drop the CR, keep the entry with its
+             * sqe_cnt): the worker resends it to the new path once the pjetty
+             * is published, then the app gets a normal completion CR.
+             */
+            URMA_LOG_INFO("Cache failover CR during lazy window, wr_id=%lu, vjetty_id=%u, "
+                          "path=[%u, %u], cr_status=%d\n",
+                          wr_id, bdp_comp->v_jetty.jetty_id.id, send_idx, target_idx, cr->status);
+            put_comp(bdp_comp);
+            return CONVERT_SKIP;
+        }
         /*
          * Path was invalidated by a previous failover CR, but this WR was not
          * resent to a backup path (idx == send_idx). Return this CR to the
@@ -1663,7 +1676,12 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
 
                 if (lazy_send_idx >= 0) {
                     bondp_lazy_create_info_t lazy_info = {0};
-                    lazy_info.jetty_cfg = bdp_comp->p_jetty[send_idx]->jetty_cfg;
+                    /* Copy the VJETTY cfg (user cfg): its jfc/jfr point to the
+                     * bondp wrapper objects (vjfc/vjfr), so the worker can
+                     * derive them with CONTAINER_OF_FIELD and pick the lazy
+                     * slot's per-slot p_jfc/p_jfr members. A PJETTY cfg would
+                     * only carry core-layer objects and corrupt the wrappers. */
+                    lazy_info.jetty_cfg = bdp_comp->v_jetty.jetty_cfg;
                     lazy_info.base_wr_id = wr_entry->wr_id;
                     lazy_info.old_send_idx = send_idx;
                     lazy_info.old_target_idx = target_idx;
@@ -1673,6 +1691,13 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                     int lazy_ret = bondp_fb_add_lazy_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id,
                                                           (uint32_t)lazy_send_idx, &lazy_info);
                     if (lazy_ret == 0 || lazy_ret == -EEXIST) {
+                        if (lazy_ret == 0) {
+                            /* Open the lazy window: failover CRs on invalid paths
+                             * must be cached (CONVERT_SKIP) until the worker
+                             * publishes the new path, so their WRs are still in
+                             * send_wr_buf for the worker's resend scan. */
+                            atomic_store(&bdp_comp->lazy_create_pending, true);
+                        }
                         URMA_LOG_INFO("Lazy failover scheduled, vjetty_id=%u, tjetty_id=%u, "
                                       "failed_path=[%u, %u] iodie=%u, lazy_to=[%d, %d], wr_id=%lu, "
                                       "task_ret=%d\n",
