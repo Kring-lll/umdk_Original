@@ -2200,11 +2200,11 @@ static ALWAYS_INLINE int umq_qbuf_local_pool_fetch_and_expand(uint32_t needed, l
         uint64_t cur_cap = local_pool->capacity_with_data[sc];
         if (actual_cnt > cur_cap) {
             uint64_t delta = actual_cnt - cur_cap;
-            // Clamp by per-thread budget
-            if (cur_cap + delta > g_qbuf_pool.tls_expand_qbuf_pool_depth) {
-                delta = (cur_cap >= g_qbuf_pool.tls_expand_qbuf_pool_depth) ?
-                             0 :
-                            (g_qbuf_pool.tls_expand_qbuf_pool_depth - cur_cap);
+            // Clamp by per-thread budget: with_data per-thread cap = global cap / 2.
+            // tls_expand_qbuf_pool_depth is reserved for without_data only.
+            uint64_t per_thread_cap = g_qbuf_pool.per_sc_tls_qbuf_pool_depth[sc] / 2;
+            if (cur_cap + delta > per_thread_cap) {
+                delta = (cur_cap >= per_thread_cap) ? 0 : (per_thread_cap - cur_cap);
             }
             // Clamp by global budget
             uint64_t g_total = __atomic_load_n(&g_total_local_cap_with_data_cnt[sc], __ATOMIC_RELAXED);
@@ -3204,11 +3204,10 @@ int umq_qbuf_pool_info_get(umq_qbuf_pool_stats_t *qbuf_pool_stats)
         __atomic_load_n(&g_qbuf_pool.exp_total_mem_pool_size, __ATOMIC_RELAXED);
     qbuf_pool_info->config.tls_expand_qbuf_pool_depth = g_qbuf_pool.tls_expand_qbuf_pool_depth;
     qbuf_pool_info->config.tls_qbuf_pool_depth = g_qbuf_pool.tls_qbuf_pool_depth;
-    /* batch_count: legacy uniform batch granularity reported for compatibility.
-     * The actual per-sc batch count is now adaptive via get_batch_count(sc). */
-    qbuf_pool_info->config.batch_count = umq_qbuf_pool_batch_cnt();
     for (uint32_t sc = 0; sc < g_qbuf_pool.size_class_count; sc++) {
         qbuf_pool_info->config.per_sc_batch_count[sc] = get_batch_count(sc);
+        qbuf_pool_info->config.per_sc_block_counts[sc] = g_qbuf_pool.per_sc_block_counts[sc];
+        qbuf_pool_info->config.per_sc_tls_qbuf_pool_depth[sc] = g_qbuf_pool.per_sc_tls_qbuf_pool_depth[sc];
     }
     qbuf_pool_info->sc_count = g_qbuf_pool.size_class_count;
     /* Global pool-granularity alloc/free counters (atomic, cross-thread).
@@ -3254,12 +3253,17 @@ int umq_qbuf_pool_info_get(umq_qbuf_pool_stats_t *qbuf_pool_stats)
          * causing use-after-free (SEGV on unmapped slot memory). */
         (void)pthread_spin_lock(&e->expansion_pool_lock);
         sci->exp_expansion_count = e->expansion_count;
-        sci->exp_total_block_num = e->exp_total_block_num;
+        /* exp_total_block_num should be the total capacity (expansion_count *
+         * expansion_block_count), NOT e->exp_total_block_num which tracks
+         * free blocks (decremented on alloc, incremented on free, making it
+         * always equal to exp_free_blk). Use the capacity formula so
+         * TotalBlk != FreeBlk when blocks are in use. */
+        sci->exp_total_block_num = (uint64_t)e->expansion_count * e->expansion_block_count;
         sci->exp_total_expansion_count = e->total_expansion_count;
         sci->exp_total_shrink_count = e->total_shrink_count;
         sci->exp_sync_expansion_count = e->sync_expansion_count;
         sci->exp_async_expansion_count = e->async_expansion_count;
-        sci->global_total = g_qbuf_pool.per_sc_block_counts[sc] + e->exp_total_block_num;
+        sci->global_total = g_qbuf_pool.per_sc_block_counts[sc] + sci->exp_total_block_num;
         /* count expansion slots and free blocks for this sc */
         uint32_t slot_cnt = 0;
         uint64_t exp_free = 0;
@@ -3297,6 +3301,12 @@ int umq_qbuf_pool_info_get(umq_qbuf_pool_stats_t *qbuf_pool_stats)
         }
         qbuf_pool_info->available_mem.split.block_num_without_data = total_buf_cnt_without_data;
         qbuf_pool_info->available_mem.split.size_without_data = total_buf_cnt_without_data * umq_buf_t_size;
+        /* Total capacity of without-data pool: fixed at init (QBUF_POOL_INITIAL_NODATA_BUF_CNT),
+         * never changes at runtime. Use this for DFX TotalBlk/TotalSize instead of
+         * block_num_without_data (which is the free count, decremented on alloc). */
+        qbuf_pool_info->available_mem.split.total_block_num_without_data = QBUF_POOL_INITIAL_NODATA_BUF_CNT;
+        qbuf_pool_info->available_mem.split.total_size_without_data =
+            (uint64_t)QBUF_POOL_INITIAL_NODATA_BUF_CNT * umq_buf_t_size;
     } else {
         qbuf_pool_info->data_size = block_size - umq_buf_t_size;
         qbuf_pool_info->buf_size = block_size;
@@ -3323,15 +3333,20 @@ int umq_qbuf_pool_info_get(umq_qbuf_pool_stats_t *qbuf_pool_stats)
         for (uint32_t sc = 0; sc < g_qbuf_pool.size_class_count; sc++) {
             qbuf_expansion_pool_t *e = &g_qbuf_pool.exp_pool_with_data[sc];
             exp_count += e->expansion_count;
+            /* exp_free_blocks: sum of free blocks across all exp slots for this sc.
+             * e->exp_total_block_num tracks free blocks (decremented on alloc,
+             * incremented on free), so it IS the free count. */
             exp_free_blocks += e->exp_total_block_num;
-            /* Fix P1-5: use exp_total_block_num (currently alive blocks) instead of
-             * expansion_count * expansion_block_count (cumulative allocated).
-             * After shrink, the latter overstates alive blocks. */
-            exp_total_blocks += e->exp_total_block_num;
+            /* exp_total_blocks: total CAPACITY = expansion_count * expansion_block_count.
+             * Previously used e->exp_total_block_num (free count), which made
+             * TotalBlk always equal FreeBlk. Use capacity formula so TotalBlk
+             * reflects total reserved blocks regardless of alloc/free state. */
+            uint64_t sc_exp_capacity = (uint64_t)e->expansion_count * e->expansion_block_count;
+            exp_total_blocks += sc_exp_capacity;
             if (mode == UMQ_BUF_SPLIT) {
-                exp_total_mem += e->exp_total_block_num * (g_qbuf_pool.block_sizes[sc] + umq_buf_t_size);
+                exp_total_mem += sc_exp_capacity * (g_qbuf_pool.block_sizes[sc] + umq_buf_t_size);
             } else {
-                exp_total_mem += e->exp_total_block_num * g_qbuf_pool.block_sizes[sc];
+                exp_total_mem += sc_exp_capacity * g_qbuf_pool.block_sizes[sc];
             }
             exp_total_expansion += e->total_expansion_count;
             exp_total_shrink += e->total_shrink_count;
