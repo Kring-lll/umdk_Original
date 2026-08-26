@@ -1679,48 +1679,29 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
             atomic_store(&bdp_comp->rebuild_done[send_idx], true);
         }
 
-        /*
-         * lazy pjetty (v4): same-IODIE backups are pre-built, cross-IODIE
-         * backups are created on demand by the bond worker.
-         * Priority 1: any VALID pre-built backup exists (same-IODIE preferred,
-         *             but a recovered primary also qualifies) -> fall through
-         *             to the regular schedule_send + resend path: zero worker,
-         *             zero latency.
-         * Priority 2: no valid pre-built slot at all -> collect the cross-IODIE
-         *             cold-standby slots with a usable imported tjetty pair. If
-         *             their pjettys are not created yet, schedule ONE
-         *             lazy-create event (the worker creates BOTH), keep the
-         *             in-flight WRs cached and return without blocking the
-         *             poll thread; new posts fail with URMA_FAIL until the
-         *             worker publishes valid=true.
-         */
-        if (comp_ctx->enable_lazy_pjetty_by_iodie && comp_ctx->enable_failover &&
-            bdp_comp->comp_type == BONDP_COMP_JETTY) {
-            uint32_t failed_iodie = bondp_iodie_idx_of(send_idx);
-            bool has_valid_backup = false;
-
-            for (uint32_t n = 0; n < bdp_comp->enabled_count; ++n) {
-                uint32_t cand = bdp_comp->enabled_indices[n];
-                if (cand == send_idx) {
-                    continue;
-                }
-                if (atomic_load(&bdp_comp->valid[cand]) && bdp_comp->p_jetty[cand] != NULL) {
-                    has_valid_backup = true;
-                    URMA_LOG_DEBUG("Lazy failover has live backup, path=[%u] iodie=%u, "
-                                   "vjetty_id=%u\n", cand, bondp_iodie_idx_of(cand),
-                                   bdp_comp->v_jetty.jetty_id.id);
-                    break;
-                }
-            }
-
-            if (!has_valid_backup && bdp_comp->p_jetty[send_idx] != NULL) {
-                /*
-                 * Cross-IODIE failover: collect BOTH cold-standby slots of the
-                 * backup IODIE with a usable tjetty pair from the WR's own
-                 * target jetty (real pairing, do not assume target_idx ==
-                 * local_idx). One worker event creates both pjettys, then the
-                 * stranded WRs are resent alternating between the two paths.
-                 */
+        /* choose the failover route(0 or 1) through send_idx and target_idx */
+        int new_send_idx = send_idx;
+        int new_target_idx = target_idx;
+        if (!comp_ctx->enable_failover ||
+            schedule_send(&wr_entry->target_vjetty->v_tjetty, bdp_comp,
+                          &new_send_idx, &new_target_idx,
+                          wr_entry->wr.flag.bs.has_drv_ext ? &wr_entry->info : NULL) != 0) {
+            /*
+             * lazy pjetty (v4): the scheduler found no usable path right now.
+             * With health check on, the same-IODIE backup's remote pair may
+             * already be invalidated by failed probes while its local slot is
+             * still valid (the scheduler checks BOTH), so the regular route is
+             * rejected. Fall back to the cross-IODIE cold-standby slots:
+             * collect BOTH slots of the backup IODIE with a usable imported
+             * tjetty pair (real pairing, do not assume target_idx ==
+             * local_idx), schedule ONE lazy-create event (the worker creates
+             * both pjettys), keep the in-flight WRs cached and return without
+             * blocking the poll thread; new posts fail with URMA_FAIL until
+             * the worker publishes valid=true.
+             */
+            if (comp_ctx->enable_lazy_pjetty_by_iodie && comp_ctx->enable_failover &&
+                bdp_comp->comp_type == BONDP_COMP_JETTY && bdp_comp->p_jetty[send_idx] != NULL) {
+                uint32_t failed_iodie = bondp_iodie_idx_of(send_idx);
                 int lazy_send_idx = -1;
                 int lazy_target_idx = -1;
                 int lazy_send_idx2 = -1;
@@ -1795,16 +1776,8 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                                  "vjetty_id=%u, idx=%d, ret=%d\n",
                                  bdp_comp->v_jetty.jetty_id.id, lazy_send_idx, lazy_ret);
                 }
+                /* No cold-standby candidate either: fall through to the error below. */
             }
-        }
-
-        /* choose the failover route(0 or 1) through send_idx and target_idx */
-        int new_send_idx = send_idx;
-        int new_target_idx = target_idx;
-        if (!comp_ctx->enable_failover ||
-            schedule_send(&wr_entry->target_vjetty->v_tjetty, bdp_comp,
-                          &new_send_idx, &new_target_idx,
-                          wr_entry->wr.flag.bs.has_drv_ext ? &wr_entry->info : NULL) != 0) {
             /*
              * When all ports are invalid and no port is available to resend the wr,
              * this error CQE is returned directly to the upper layer.
