@@ -32,6 +32,31 @@
 #define PRIMARY_EID_NUM               (2)
 #define PORT_EID_MAX_NUM_PER_DEV      (9)
 #define PORT_EID_MAX_NUM              (PORT_EID_MAX_NUM_PER_DEV * PRIMARY_EID_NUM)
+
+/*
+ * Reverse of the matrix index formula: given an active_index (the pjetty slot
+ * index in p_jetty[] / enabled_indices[] / active_indices[]), return the IODIE
+ * it belongs to.
+ * - BONDP_BONDING_LEVEL_PORT: active_index = iodie_idx * PORT_EID_MAX_NUM_PER_DEV
+ *   + port_idx + PRIMARY_EID_NUM  =>  iodie_idx = (idx - PRIMARY_EID_NUM) / 9
+ * - BONDP_BONDING_LEVEL_IODIE: active_index is the primary EID index (0/1),
+ *   which equals the IODIE number.
+ * The two ranges ([0, PRIMARY_EID_NUM) and [PRIMARY_EID_NUM, PRIMARY_EID_NUM +
+ * PORT_EID_MAX_NUM)) are disjoint, so the level does not need to be passed in.
+ * Returns UINT32_MAX if active_index is out of range.
+ */
+static inline uint32_t bondp_iodie_idx_of(uint32_t active_index)
+{
+    if (active_index < PRIMARY_EID_NUM) {
+        /* IODIE-level bonding: the primary EID index is the IODIE number. */
+        return active_index;
+    }
+    if (active_index < PRIMARY_EID_NUM + PORT_EID_MAX_NUM) {
+        /* PORT-level bonding: reverse the matrix formula. */
+        return (active_index - PRIMARY_EID_NUM) / PORT_EID_MAX_NUM_PER_DEV;
+    }
+    return UINT32_MAX;
+}
 #define BONDP_MAX_WELL_KNOWN_JETTY_ID (1024)
 /* Use single die primary eid and port eid to create urma_context */
 #define SINGLE_DIE_DEVNUM             (11)
@@ -126,6 +151,9 @@ typedef struct bondp_context {
     uint64_t rnr_retry_sleep_ms;
     uint64_t rnr_retry_max;
     uint32_t rnr_retry_jitter_ratio;
+    /* v4: only the primary IODIE's pjettys are pre-built at vjetty creation;
+     * cross-IODIE pjettys are created on demand on cross-IODIE failover. */
+    bool enable_lazy_pjetty_by_iodie;
 
     /* This variable represents the maximum number of times all available devices need to be traversed. */
     /* In general mode, dev_num is the same as the number of non-empty devices in the first few positions. */
