@@ -35,8 +35,10 @@ typedef struct bondp_fb_task_key {
 typedef enum bondp_fb_task_type {
     /* Recreate a failed pjetty in place so the slot stays pre-built. */
     BONDP_FB_TASK_REBUILD = 0,
-    /* Create a not-yet-built cross-IODIE pjetty on demand (lazy failover). */
+    /* Create the not-yet-built cross-IODIE pjettys on demand (lazy failover). */
     BONDP_FB_TASK_LAZY_CREATE,
+    /* Destroy a cross-IODIE pjetty after failback to the primary IODIE. */
+    BONDP_FB_TASK_LAZY_DESTROY,
 } bondp_fb_task_type_t;
 
 typedef struct bondp_fb_task {
@@ -97,6 +99,10 @@ uint32_t bondp_fb_switch_path(bondp_comp_t *bdp_comp)
 /* Delay (ms) before publishing the rebuild_done flag after a rebuild; the
  * worker enforces a minimum of one tick. */
 #define BONDP_FB_MARK_DONE_DELAY_MS 0U
+/* Delay (ms) between lazy-destroy retries while WRs are still in flight. */
+#define BONDP_LAZY_DESTROY_RETRY_MS  1000U
+/* Max lazy-destroy retries before giving up (slot stays until teardown). */
+#define BONDP_LAZY_DESTROY_MAX_RETRY 30U
 
 static uint32_t next_request_id(bondp_fb_ctx_t *fb_ctx)
 {
@@ -300,9 +306,9 @@ static int bondp_destroy_lazy_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx
         inflight += atomic_load(&bdp_jetty->sqe_cnt[local_idx][t]);
     }
     if (inflight > 0) {
-        URMA_LOG_WARN("Lazy destroy deferred: %lu WRs still in flight, vjetty_id=%u, idx=%u\n",
+        URMA_LOG_INFO("Lazy destroy deferred: %lu WRs still in flight, vjetty_id=%u, idx=%u\n",
                       inflight, bdp_jetty->v_jetty.jetty_id.id, local_idx);
-        return 0;
+        return 1;
     }
 
     (void)pthread_spin_lock(&bdp_jetty->send_lock);
@@ -368,7 +374,9 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
         uint32_t local_iodie = bondp_iodie_idx_of(local_idx);
         if (primary_iodie != UINT32_MAX && local_iodie != UINT32_MAX &&
             local_iodie != primary_iodie) {
-            return bondp_destroy_lazy_pjetty(bdp_jetty, local_idx);
+            int dret = bondp_destroy_lazy_pjetty(bdp_jetty, local_idx);
+            /* 1 = deferred (in-flight WRs): not an error for the caller. */
+            return dret == 1 ? 0 : dret;
         }
         URMA_LOG_INFO("Failback rebuild of pre-built same-IODIE pjetty, vjetty_id=%u, idx=%u, "
                       "iodie=%u, primary_iodie=%u\n",
@@ -435,9 +443,14 @@ typedef struct bondp_fb_async_arg {
     bondp_fb_ctx_t *fb_ctx;
     bondp_fb_task_key_t key;
     bondp_fb_task_type_t type;
+    /* Retry counter for BONDP_FB_TASK_LAZY_DESTROY deferrals. */
+    uint32_t retry_cnt;
     /* Payload for BONDP_FB_TASK_LAZY_CREATE. */
     bondp_lazy_create_info_t lazy;
 } bondp_fb_async_arg_t;
+
+static int fb_add_task_common(bondp_context_t *bond_ctx, bondp_fb_task_type_t type,
+                              uint64_t delay_ms, bondp_fb_async_arg_t *async_arg);
 
 typedef struct bondp_fb_mark_done_arg {
     bondp_fb_ctx_t *fb_ctx;
@@ -513,6 +526,46 @@ static void bondp_fb_task_async(bondp_worker_task_reason_t reason, void *arg)
                          fb_task->vjetty_id, fb_task->pjetty_idx, ret);
         }
         goto del_task;
+    }
+
+    if (fb_task->type == BONDP_FB_TASK_LAZY_DESTROY) {
+        bondp_context_t *task_ctx = fb_task->bond_ctx;
+        uint32_t vjetty_id = fb_task->vjetty_id;
+        uint32_t pjetty_idx = fb_task->pjetty_idx;
+        uint32_t retry_cnt = arg_typed->retry_cnt;
+        int ret = bondp_destroy_lazy_pjetty(bdp_jetty, pjetty_idx);
+
+        (void)fb_task_del(fb_ctx, &arg_typed->key);
+        fb_task_put(fb_task);
+        free(arg_typed);
+
+        if (ret == 1 && retry_cnt < BONDP_LAZY_DESTROY_MAX_RETRY) {
+            /* In-flight WRs still on the slot (they keep completing on the
+             * old path after the failback switch): retry on the worker. */
+            bondp_fb_async_arg_t *retry_arg = calloc(1, sizeof(*retry_arg));
+            if (retry_arg != NULL) {
+                retry_arg->fb_ctx = fb_ctx;
+                retry_arg->key.vjetty_id = vjetty_id;
+                retry_arg->key.pjetty_idx = pjetty_idx;
+                retry_arg->type = BONDP_FB_TASK_LAZY_DESTROY;
+                retry_arg->retry_cnt = retry_cnt + 1;
+                int rret = fb_add_task_common(task_ctx, BONDP_FB_TASK_LAZY_DESTROY,
+                                              BONDP_LAZY_DESTROY_RETRY_MS, retry_arg);
+                if (rret != 0) {
+                    free(retry_arg);
+                    URMA_LOG_WARN("Lazy destroy retry schedule failed, vjetty_id=%u, pjetty_idx=%u, "
+                                  "ret=%d\n", vjetty_id, pjetty_idx, rret);
+                } else {
+                    URMA_LOG_INFO("Lazy destroy deferred, retry %u/%u scheduled, vjetty_id=%u, "
+                                  "pjetty_idx=%u\n", retry_cnt + 1, BONDP_LAZY_DESTROY_MAX_RETRY,
+                                  vjetty_id, pjetty_idx);
+                }
+            }
+        } else if (ret == 1) {
+            URMA_LOG_ERR("Lazy destroy retries exhausted, cold-standby slot kept, "
+                         "vjetty_id=%u, pjetty_idx=%u\n", vjetty_id, pjetty_idx);
+        }
+        return;
     }
 
     int ret = bondp_rebuild_pjetty(bdp_jetty, (int)fb_task->pjetty_idx);
@@ -662,6 +715,77 @@ int bondp_fb_add_lazy_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32
         free(async_arg);
     }
     return ret;
+}
+
+int bondp_fb_add_lazy_destroy_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx,
+                                   uint64_t delay_ms)
+{
+    if (bond_ctx == NULL || bond_ctx->fb_ctx == NULL) {
+        return -EINVAL;
+    }
+
+    bondp_fb_async_arg_t *async_arg = calloc(1, sizeof(*async_arg));
+    if (async_arg == NULL) {
+        return -ENOMEM;
+    }
+    async_arg->fb_ctx = bond_ctx->fb_ctx;
+    async_arg->key.vjetty_id = vjetty_id;
+    async_arg->key.pjetty_idx = pjetty_idx;
+    async_arg->type = BONDP_FB_TASK_LAZY_DESTROY;
+
+    int ret = fb_add_task_common(bond_ctx, BONDP_FB_TASK_LAZY_DESTROY, delay_ms, async_arg);
+    if (ret != 0) {
+        /* Ownership of async_arg only transfers to the worker task on success. */
+        free(async_arg);
+    }
+    return ret;
+}
+
+void bondp_fb_schedule_lazy_destroy(bondp_comp_t *bdp_comp)
+{
+    if (bdp_comp == NULL || bdp_comp->bondp_ctx == NULL || bdp_comp->bondp_ctx->fb_ctx == NULL) {
+        return;
+    }
+    bondp_context_t *bond_ctx = bdp_comp->bondp_ctx;
+    if (!bond_ctx->enable_lazy_pjetty_by_iodie || bdp_comp->comp_type != BONDP_COMP_JETTY ||
+        bdp_comp->active_count == 0) {
+        return;
+    }
+
+    uint32_t primary_iodie = bondp_iodie_idx_of(bdp_comp->active_indices[0]);
+    if (primary_iodie == UINT32_MAX) {
+        return;
+    }
+
+    /* Only tear the cold-standby pjettys down once the primary IODIE is live
+     * again, so traffic fails back to the pre-built pjettys first. */
+    bool primary_alive = false;
+    for (uint32_t n = 0; n < bdp_comp->enabled_count; ++n) {
+        uint32_t i = bdp_comp->enabled_indices[n];
+        if (bondp_iodie_idx_of(i) == primary_iodie && bdp_comp->p_jetty[i] != NULL &&
+            atomic_load(&bdp_comp->valid[i])) {
+            primary_alive = true;
+            break;
+        }
+    }
+    if (!primary_alive) {
+        return;
+    }
+
+    for (uint32_t n = 0; n < bdp_comp->enabled_count; ++n) {
+        uint32_t i = bdp_comp->enabled_indices[n];
+        if (bondp_iodie_idx_of(i) == primary_iodie || bdp_comp->p_jetty[i] == NULL) {
+            continue; /* primary slot / never created */
+        }
+        int ret = bondp_fb_add_lazy_destroy_task(bond_ctx, bdp_comp->v_jetty.jetty_id.id, i, 0);
+        if (ret == 0) {
+            URMA_LOG_INFO("Lazy destroy scheduled after failback, vjetty_id=%u, idx=%u, "
+                          "primary_iodie=%u\n", bdp_comp->v_jetty.jetty_id.id, i, primary_iodie);
+        } else if (ret != -EEXIST) {
+            URMA_LOG_WARN("Failed to schedule lazy destroy, vjetty_id=%u, idx=%u, ret=%d\n",
+                          bdp_comp->v_jetty.jetty_id.id, i, ret);
+        }
+    }
 }
 
 void bondp_fb_cancel_tasks(bondp_context_t *bond_ctx, uint32_t vjetty_id)
