@@ -334,14 +334,13 @@ static urma_status_t schedule_send_wr(const urma_jfs_wr_t *wr, bondp_comp_t *bdp
  * try_failback() skip send_lock entirely. A health-check recovery that becomes
  * visible right after this check is picked up by the next post.
  */
-static void failback_resend_wr(bondp_comp_t *bdp_comp, uint64_t resend_wr_id)
+static void failback_resend_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *resend_wr_entry)
 {
-    jfs_wr_entry_t *resend_wr_entry = jfs_wr_buf_get(&bdp_comp->send_wr_buf, resend_wr_id);
-    if (resend_wr_entry == NULL ||
-        resend_wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
+    if (resend_wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
         resend_wr_entry->bdp_comp != bdp_comp) {
         return;
     }
+    const uint64_t resend_wr_id = resend_wr_entry->wr_id;
 
     uint32_t old_send_idx = resend_wr_entry->send_idx;
     uint32_t old_target_idx = resend_wr_entry->target_idx;
@@ -387,7 +386,11 @@ static void try_failback(bondp_comp_t *bdp_comp)
     }
 
     for (uint32_t i = 0; i < bdp_comp->send_wr_buf.max_wr_num; ++i) {
-        failback_resend_wr(bdp_comp, (uint64_t)i + 1);
+        jfs_wr_entry_t *wr_entry = (jfs_wr_entry_t *)__wr_buf_idx(&bdp_comp->send_wr_buf, i);
+        if (wr_entry->entry_type != WR_BUF_ENTRY_JFS) {
+            continue;
+        }
+        failback_resend_wr(bdp_comp, wr_entry);
     }
     pthread_spin_unlock(&bdp_comp->send_lock);
 }
@@ -1237,17 +1240,25 @@ static void resend_matched_jfs_wrs(bondp_comp_t *bdp_comp, uint64_t base_wr_id,
                                    uint32_t old_send_idx, uint32_t old_target_idx,
                                    int new_send_idx, int new_target_idx, const char *reason)
 {
-    for (int i = 0; i < bdp_comp->send_wr_buf.max_wr_num; i++) {
-        const uint64_t resend_wr_id = (base_wr_id + i - 1) % bdp_comp->send_wr_buf.max_wr_num + 1;
-        jfs_wr_entry_t *resend_wr_entry = jfs_wr_buf_get(&bdp_comp->send_wr_buf, resend_wr_id);
-        if (resend_wr_entry == NULL ||
-            resend_wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
+    /*
+     * Scan rotationally starting from the failover-triggering WR's slot: the CQE
+     * that triggers failover is flushed first, so its WR is the oldest in-flight
+     * one on this path and must be resent first. Slot order beyond that is only
+     * a best-effort approximation of submission order (LIFO free list reuse).
+     */
+    uint32_t max_wr_num = bdp_comp->send_wr_buf.max_wr_num;
+    uint32_t base_idx = __wr_id_to_idx(base_wr_id, max_wr_num);
+    for (uint32_t i = 0; i < max_wr_num; i++) {
+        uint32_t idx = (base_idx + i) % max_wr_num;
+        jfs_wr_entry_t *resend_wr_entry = (jfs_wr_entry_t *)__wr_buf_idx(&bdp_comp->send_wr_buf, idx);
+        if (resend_wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
             resend_wr_entry->bdp_comp != bdp_comp ||
             resend_wr_entry->send_idx != old_send_idx ||
             resend_wr_entry->target_idx != old_target_idx) {
             continue;
         }
 
+        const uint64_t resend_wr_id = resend_wr_entry->wr_id;
         atomic_fetch_sub(&bdp_comp->sqe_cnt[old_send_idx][old_target_idx], 1);
         if (bondp_resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
             URMA_LOG_ERR("Failed to resend %s jfs wr, wr_id=%lu\n", reason, resend_wr_id);
@@ -1591,6 +1602,14 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
                       send_idx, target_idx, new_send_idx, new_target_idx, cr->status);
         urma_ubagg_switch_inc();
 
+        /*
+         * NOTE: aggregation-device failover does NOT guarantee strict WR
+         * ordering. Only the failover-triggering WR is resent first; the
+         * other in-flight WRs are resent in slot order, which does not
+         * track submission order (LIFO free-list slot reuse). The peer may
+         * therefore execute SEND/WRITE/atomic operations out of submission
+         * order after a path switch.
+         */
         resend_matched_jfs_wrs(bdp_comp, wr_entry->wr_id, send_idx, target_idx,
                                new_send_idx, new_target_idx, "failover");
         (void)pthread_spin_unlock(&bdp_comp->send_lock);
