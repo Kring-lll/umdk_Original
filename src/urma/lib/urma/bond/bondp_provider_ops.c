@@ -425,7 +425,12 @@ static int bondp_init_ctx_features(bondp_context_t *bdp_ctx)
         }
     }
 
-    if (bdp_ctx->enable_failback) {
+    if (bdp_ctx->enable_failback || bdp_ctx->enable_lazy_pjetty_by_iodie) {
+        /*
+         * fb_ctx is the worker task infrastructure for REBUILD and LAZY
+         * create/destroy tasks alike; the failback switch only gates the
+         * automatic switch-back, not this base infrastructure.
+         */
         ret = bondp_fb_init(bdp_ctx);
         if (ret != 0) {
             bondp_hc_uninit(bdp_ctx);
@@ -460,6 +465,8 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
     bdp_ctx->rnr_retry_sleep_ms = g_bondp_env.rnr_retry_sleep_ms;
     bdp_ctx->rnr_retry_max = g_bondp_env.rnr_retry_max;
     bdp_ctx->rnr_retry_jitter_ratio = g_bondp_env.rnr_retry_jitter_ratio;
+    /* enable_lazy_pjetty_by_iodie stays false (calloc zero): it is only
+     * enabled per-context through BONDP_USER_CTL_SET_LAZY_PJETTY. */
 
     int ret = 0;
     ret = bondp_create_vcontext(bdp_ctx, dev, eid_index, dev_fd);
@@ -561,6 +568,16 @@ int bondp_set_bonding_mode(urma_context_t *ctx, bondp_bonding_mode_t bonding_mod
         goto EXIT;
     }
 
+    if (bonding_mode != BONDP_BONDING_MODE_ACTIVE_BACKUP &&
+        bdp_ctx->enable_lazy_pjetty_by_iodie) {
+        /* Mirror of the ctx-cfg check: never leave a mode where the saved
+         * lazy config would silently stop applying. */
+        URMA_LOG_ERR("Cannot switch bonding mode to %d while lazy_pjetty_by_iodie "
+                     "is enabled; disable it first.\n", bonding_mode);
+        ret = -EINVAL;
+        goto EXIT;
+    }
+
     bdp_ctx->bonding_mode = bonding_mode;
     bdp_ctx->bonding_level = bonding_level;
 
@@ -609,6 +626,7 @@ static bondp_set_ctx_cfg_in_t bondp_get_ctx_cfg(const bondp_context_t *bdp_ctx)
         .rnr_retry_sleep_ms = bdp_ctx->rnr_retry_sleep_ms,
         .rnr_retry_max = bdp_ctx->rnr_retry_max,
         .rnr_retry_jitter_ratio = bdp_ctx->rnr_retry_jitter_ratio,
+        .enable_lazy_pjetty_by_iodie = bdp_ctx->enable_lazy_pjetty_by_iodie,
     };
 }
 
@@ -623,6 +641,7 @@ static void bondp_store_ctx_cfg(bondp_context_t *bdp_ctx, const bondp_set_ctx_cf
     bdp_ctx->rnr_retry_sleep_ms = cfg->rnr_retry_sleep_ms;
     bdp_ctx->rnr_retry_max = cfg->rnr_retry_max;
     bdp_ctx->rnr_retry_jitter_ratio = cfg->rnr_retry_jitter_ratio;
+    bdp_ctx->enable_lazy_pjetty_by_iodie = cfg->enable_lazy_pjetty_by_iodie;
 }
 
 static void bondp_apply_bool_cfg(bondp_set_ctx_cfg_in_t *cfg, const bondp_set_ctx_cfg_in_t *cfg_in)
@@ -638,6 +657,9 @@ static void bondp_apply_bool_cfg(bondp_set_ctx_cfg_in_t *cfg, const bondp_set_ct
     }
     if ((cfg_in->mask & BONDP_CTX_CFG_ENABLE_RNR_RETRY) != 0) {
         cfg->enable_rnr_retry = cfg_in->enable_rnr_retry;
+    }
+    if ((cfg_in->mask & BONDP_CTX_CFG_ENABLE_LAZY_PJETTY_BY_IODIE) != 0) {
+        cfg->enable_lazy_pjetty_by_iodie = cfg_in->enable_lazy_pjetty_by_iodie;
     }
 }
 
@@ -701,6 +723,27 @@ int bondp_set_ctx_cfg(urma_context_t *ctx, const bondp_set_ctx_cfg_in_t *cfg_in)
     if (ret != 0) {
         URMA_LOG_ERR("Invalid context configuration.\n");
         goto EXIT;
+    }
+
+    /*
+     * lazy pjetty is a failover feature and only applies to ACTIVE_BACKUP:
+     * without failover the cross-IODIE pjettys would never be created on
+     * demand, and BALANCE/STANDALONE would silently run the full-prebuild
+     * fallback. Reject instead of saving a config the data plane ignores;
+     * the old configuration stays untouched on failure.
+     */
+    if (new_cfg.enable_lazy_pjetty_by_iodie) {
+        if (!new_cfg.enable_failover) {
+            URMA_LOG_ERR("lazy_pjetty_by_iodie requires failover to be enabled.\n");
+            ret = -EINVAL;
+            goto EXIT;
+        }
+        if (bdp_ctx->bonding_mode != BONDP_BONDING_MODE_ACTIVE_BACKUP) {
+            URMA_LOG_ERR("lazy_pjetty_by_iodie requires active_backup bonding mode "
+                         "(current mode=%d); set the bonding mode first.\n", bdp_ctx->bonding_mode);
+            ret = -EINVAL;
+            goto EXIT;
+        }
     }
 
     bondp_set_ctx_cfg_in_t old_cfg = bondp_get_ctx_cfg(bdp_ctx);
