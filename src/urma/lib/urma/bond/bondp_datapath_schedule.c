@@ -386,6 +386,10 @@ static int schedule_recv_standalone(const bondp_comp_t *bdp_comp, int *recv_idx)
         if (!atomic_load(&bdp_comp->valid[loc_idx])) {
             continue;
         }
+        /* lazy pjetty (v4): a not-yet-created slot cannot take recv WRs. */
+        if (bdp_comp->members[loc_idx] == NULL) {
+            continue;
+        }
         for (uint32_t j = 0; j < bdp_tjetty->p_tjetty_count; j++) {
             if (bdp_tjetty->p_tjettys[j].local_indice != loc_idx) {
                 continue;
@@ -407,6 +411,10 @@ static int schedule_recv_balance(const bondp_comp_t *bdp_comp, int *recv_idx)
 
     for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
         uint32_t active_idx = bdp_comp->active_indices[i];
+        /* lazy pjetty (v4): a not-yet-created slot cannot take recv WRs. */
+        if (bdp_comp->members[active_idx] == NULL) {
+            continue;
+        }
         uint32_t rqe_cnt = bdp_comp->rqe_cnt[active_idx];
         if (rqe_cnt < least_load) {
             least_load = rqe_cnt;
@@ -494,6 +502,10 @@ int schedule_recv_n(bondp_comp_t *bdp_comp, uint32_t wr_num, uint32_t recv_wr_cn
 
     for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
         uint32_t active_idx = bdp_comp->active_indices[i];
+        /* lazy pjetty (v4): a not-yet-created slot cannot take recv WRs. */
+        if (bdp_comp->members[active_idx] == NULL) {
+            continue;
+        }
         current_load[active_idx] = rqe_cnt[active_idx];
     }
 
@@ -503,6 +515,10 @@ int schedule_recv_n(bondp_comp_t *bdp_comp, uint32_t wr_num, uint32_t recv_wr_cn
 
         for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
             uint32_t active_idx = bdp_comp->active_indices[i];
+            /* lazy pjetty (v4): skip not-yet-created slots. */
+            if (bdp_comp->members[active_idx] == NULL) {
+                continue;
+            }
             if (current_load[active_idx] < least_load) {
                 least_load = current_load[active_idx];
                 least_load_idx = (int)active_idx;
