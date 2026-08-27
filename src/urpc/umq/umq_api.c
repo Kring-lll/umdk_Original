@@ -452,6 +452,31 @@ int umq_log_config_get(umq_log_config_t *config)
     return UMQ_SUCCESS;
 }
 
+void umq_exiting_set(bool exiting)
+{
+    for (uint8_t i = 0; i < UMQ_TRANS_MODE_MAX; i++) {
+        umq_framework_t *umq_fw = &g_umq_fws[i];
+        if (!umq_fw->enable || umq_fw->tp_ops == NULL || umq_fw->tp_ops->umq_tp_exiting_set == NULL) {
+            continue;
+        }
+        umq_fw->tp_ops->umq_tp_exiting_set(exiting);
+    }
+}
+
+bool umq_exiting_get(void)
+{
+    for (uint8_t i = 0; i < UMQ_TRANS_MODE_MAX; i++) {
+        umq_framework_t *umq_fw = &g_umq_fws[i];
+        if (!umq_fw->enable || umq_fw->tp_ops == NULL || umq_fw->tp_ops->umq_tp_exiting_get == NULL) {
+            continue;
+        }
+        if (umq_fw->tp_ops->umq_tp_exiting_get()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void framework_uninit(void)
 {
     for (uint8_t fw_i = 0; fw_i < UMQ_TRANS_MODE_MAX; fw_i++) {
@@ -1033,12 +1058,13 @@ void umq_buf_free(umq_buf_t *qbuf)
         umq_buf_list_t free_head;
         QBUF_LIST_FIRST(&free_head) = free_node;
         umq_pool_type_t type = umq_pool_type_get(qbuf->mempool_id);
+        bool is_nodata = (qbuf->mempool_without_data == 1);
         QBUF_LIST_FIRST(&head) = QBUF_LIST_NEXT(qbuf);
 
         QBUF_LIST_FOR_EACH_SAFE(cur_node, &head, next_node)
         {
-            if (type == umq_pool_type_get(cur_node->mempool_id)) {
-                // current qbuf is in the same pool, scan the next one directly
+            if (type == umq_pool_type_get(cur_node->mempool_id) &&
+                is_nodata == (cur_node->mempool_without_data == 1)) {
                 last_node = cur_node;
                 continue;
             }
@@ -1048,6 +1074,7 @@ void umq_buf_free(umq_buf_t *qbuf)
             umq_invalid_handle_buf_free(&free_head, umq_pool_type_get(QBUF_LIST_FIRST(&free_head)->mempool_id));
             free_node = cur_node;
             type = umq_pool_type_get(cur_node->mempool_id);
+            is_nodata = (cur_node->mempool_without_data == 1);
             last_node = cur_node;
         }
 
@@ -1176,9 +1203,24 @@ umq_buf_t *umq_data_to_head(void *data)
     }
 
     buf = umq_qbuf_expansion_data_to_head(data);
+    if (buf != NULL) {
+        umq_perf_record_write(UMQ_PERF_RECORD_BUF_DATA_TO_HEAD, start_timestamp);
+        return buf;
+    }
 
-    umq_perf_record_write(UMQ_PERF_RECORD_BUF_DATA_TO_HEAD, start_timestamp);
-    return buf;
+    buf = umq_rx_qbuf_data_to_head(data);
+    if (buf != NULL) {
+        umq_perf_record_write(UMQ_PERF_RECORD_BUF_DATA_TO_HEAD, start_timestamp);
+        return buf;
+    }
+
+    /* All lookups (normal / tiny / expansion / rx) failed: data does not belong
+     * to any pool. Forward to the diagnostic helper in umq_qbuf_pool.c which prints
+     * the pointer value, pool regions, and call stack to identify the upstream
+     * caller passing a non-pool pointer. */
+    umq_qbuf_log_non_pool_pointer(__func__, data);
+
+    return NULL;
 }
 
 int umq_enqueue(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
@@ -1566,6 +1608,58 @@ int umq_mempool_state_refresh(uint64_t umqh, uint32_t mempool_id)
     }
 
     return ops->umq_tp_mempool_state_refresh(umqh, mempool_id);
+}
+
+int umq_mempool_info_get(uint64_t umqh, uint32_t mempool_id, uint8_t *mempool_info, uint32_t mempool_info_size,
+                         uint32_t *mempool_info_len)
+{
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+    if (umq == NULL || umq->umqh_tp == UMQ_INVALID_HANDLE || umq->tp_ops == NULL ||
+        umq->tp_ops->umq_tp_mempool_info_get == NULL || mempool_info == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    return umq->tp_ops->umq_tp_mempool_info_get(umq->umqh_tp, mempool_id, mempool_info, mempool_info_size,
+                                                mempool_info_len);
+}
+
+int umq_mempool_info_set(uint64_t umqh, const uint8_t *mempool_info, uint32_t mempool_info_len)
+{
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+    if (umq == NULL || umq->umqh_tp == UMQ_INVALID_HANDLE || umq->tp_ops == NULL ||
+        umq->tp_ops->umq_tp_mempool_info_set == NULL || mempool_info == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
+        return -UMQ_ERR_EINVAL;
+    }
+
+    return umq->tp_ops->umq_tp_mempool_info_set(umq->umqh_tp, mempool_info, mempool_info_len);
+}
+
+int umq_remote_mempool_state_check(uint64_t umqh, const uint8_t *mempool_info, uint32_t mempool_info_len)
+{
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+    if (umq == NULL || umq->umqh_tp == UMQ_INVALID_HANDLE || umq->tp_ops == NULL ||
+        umq->tp_ops->umq_tp_remote_mempool_state_check == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
+        return -1;
+    }
+
+    return umq->tp_ops->umq_tp_remote_mempool_state_check(umq->umqh_tp, mempool_info, mempool_info_len);
+}
+
+int umq_mempool_info_get_remote_fields(uint64_t umqh, const uint8_t *mempool_info,
+                                       uint32_t mempool_info_len, uint32_t *out_mempool_id,
+                                       uint32_t *out_token_id, uint32_t *out_token_value)
+{
+    umq_t *umq = (umq_t *)(uintptr_t)umqh;
+    if (umq == NULL || umq->umqh_tp == UMQ_INVALID_HANDLE || umq->tp_ops == NULL ||
+        umq->tp_ops->umq_tp_mempool_info_get_remote_fields == NULL || mempool_info == NULL) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "invalid parameter\n");
+        return -UMQ_ERR_EINVAL;
+    }
+    return umq->tp_ops->umq_tp_mempool_info_get_remote_fields(mempool_info, mempool_info_len,
+                                                              out_mempool_id, out_token_id, out_token_value);
 }
 
 int umq_dev_info_get(char *dev_name, umq_trans_mode_t umq_trans_mode, umq_dev_info_t *umq_dev_info)

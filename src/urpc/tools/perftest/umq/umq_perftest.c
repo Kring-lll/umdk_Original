@@ -29,6 +29,8 @@
 #define PERFTEST_STR_SIZE 1024
 #define PERFTEST_WAIT_TIMEOUT_US 100
 #define PERFTEST_WAIT_UMQ_READY_ROUND 10000
+#define PERFTEST_SIZE_CLASS_COUNT 2
+#define PERFTEST_SIZE_CLASS_MULTIPLIER 32
 
 #define UMQ_PERFTEST_ERTF_INFO_STR_SIZE (16384)
 
@@ -211,6 +213,15 @@ static int umq_perftest_init_umq(umq_perftest_config_t *cfg)
     umq_config->trans_info_num = 1;
     umq_config->trans_info[0].trans_mode = (umq_trans_mode_t)cfg->trans_mode;
     umq_config->buf_pool_cfg.small_block_size = cfg->blk_mode;
+    umq_config->buf_pool_cfg.size_class_count = PERFTEST_SIZE_CLASS_COUNT;
+    if (cfg->blk_mode >= BLOCK_SIZE_MAX) {
+        LOG_PRINT("umq_config blk_mode is invalid\n");
+    }
+    {
+        uint32_t base = 4096U << cfg->blk_mode;
+        umq_config->buf_pool_cfg.explicit_block_sizes[0] = base;
+        umq_config->buf_pool_cfg.explicit_block_sizes[1] = base * PERFTEST_SIZE_CLASS_MULTIPLIER;
+    }
     if (fill_dev_info(&umq_config->trans_info[0].dev_info, cfg) != 0) {
         free(umq_config);
         return -1;

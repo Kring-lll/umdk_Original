@@ -11,10 +11,10 @@
 #include "umq_errno.h"
 #include "umq_huge_qbuf_pool.h"
 #include "umq_qbuf_pool.h"
-#include "umq_ub_impl.h"
-#include "umq_ub_api.h"
-#include "umq_vlog.h"
 #include "umq_symbol_private.h"
+#include "umq_ub_api.h"
+#include "umq_ub_impl.h"
+#include "umq_vlog.h"
 
 static int umq_tp_ub_plus_symbol_load(void)
 {
@@ -46,11 +46,6 @@ static uint8_t *umq_tp_ub_plus_init(umq_init_cfg_t *cfg)
             goto UNINIT_MEM;
         }
     }
-    ret = umq_ub_huge_qbuf_pool_init(cfg);
-    if (ret != UMQ_SUCCESS) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "init huge qbuf pool configuration failed, status: %d\n", ret);
-        goto UNINIT_MEM;
-    }
 
     return ub_ctx;
 
@@ -68,7 +63,6 @@ static void umq_tp_ub_plus_uninit(uint8_t *ctx)
         UMQ_VLOG_ERR(VLOG_UMQ, "ub_ctx is null\n");
         return;
     }
-    umq_ub_huge_qbuf_pool_uninit();
     umq_ub_unregister_memory_impl();
     umq_ub_ctx_uninit_impl(ctx);
 }
@@ -109,7 +103,7 @@ static umq_state_t umq_tp_ub_plus_state_get(uint64_t umqh_tp)
 }
 
 static umq_buf_t *umq_tp_ub_plus_buf_alloc(uint32_t request_size, uint32_t request_qbuf_num, uint64_t umqh_tp,
-    umq_alloc_option_t *option)
+                                           umq_alloc_option_t *option)
 {
     return umq_ub_plus_buf_alloc_impl(request_size, request_qbuf_num, umqh_tp, option);
 }
@@ -241,6 +235,17 @@ static int umq_tp_ub_plus_transport_pool_resource_destroy(uint64_t umqh_tp, uint
 {
     return umq_ub_transport_pool_resource_destroy_impl(umqh_tp, tp_handle_idx);
 }
+
+static void umq_tp_ub_plus_exiting_set(bool exiting)
+{
+    umq_ub_exiting_set_impl(exiting);
+}
+
+static bool umq_tp_ub_plus_exiting_get(void)
+{
+    return umq_ub_exiting_get_impl();
+}
+
 static umq_ops_t g_umq_ub_plus_ops = {
     .mode = UMQ_TRANS_MODE_UB_PLUS,
     // control plane api
@@ -269,6 +274,8 @@ static umq_ops_t g_umq_ub_plus_ops = {
     .umq_tp_transport_pool_resource_modify = umq_tp_ub_plus_transport_pool_resource_modify,
     .umq_tp_transport_pool_resource_create = umq_tp_ub_plus_transport_pool_resource_create,
     .umq_tp_transport_pool_resource_destroy = umq_tp_ub_plus_transport_pool_resource_destroy,
+    .umq_tp_exiting_set = umq_tp_ub_plus_exiting_set,
+    .umq_tp_exiting_get = umq_tp_ub_plus_exiting_get,
 
     // datapath plane api
     .umq_tp_buf_alloc = umq_tp_ub_plus_buf_alloc,
