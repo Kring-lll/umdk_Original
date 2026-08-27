@@ -559,7 +559,7 @@ int umq_stats_perf_stop(void)
 int umq_stats_perf_to_str(umq_perf_stats_t *umq_perf_stats, char *buf, int max_buf_len)
 {
     if (umq_perf_stats == NULL || buf == NULL || max_buf_len <= 0) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "parameters invalid");
+        UMQ_VLOG_ERR(VLOG_UMQ, "parameters invalid\n");
         return -UMQ_ERR_EINVAL;
     }
     static char perf_record_type_name[UMQ_PERF_RECORD_TYPE_MAX][UMQ_DFX_PERF_REC_NAME_MAX_LEN] = {

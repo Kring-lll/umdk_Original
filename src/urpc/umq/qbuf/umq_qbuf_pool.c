@@ -756,7 +756,7 @@ UNINIT_ID_GEN:
 static int umq_qbuf_expansion_pool_cfg_check(const qbuf_pool_cfg_t *cfg, uint64_t *max_umq_buf_pool_size)
 {
     if (cfg->umq_buf_pool_max_size > QBUF_POOL_MEM_SIZE_MAX) {
-        UMQ_VLOG_INFO(VLOG_UMQ, "the maximum value of expansion mem size max %llu exceed %llu\n",
+        UMQ_VLOG_ERR(VLOG_UMQ, "the maximum value of expansion mem size max %llu exceed %llu\n",
             cfg->umq_buf_pool_max_size, QBUF_POOL_MEM_SIZE_MAX);
         return -UMQ_ERR_EINVAL;
     }
@@ -771,7 +771,7 @@ static int umq_qbuf_expansion_pool_cfg_check(const qbuf_pool_cfg_t *cfg, uint64_
 
     if (*max_umq_buf_pool_size < cfg->total_size ||
         *max_umq_buf_pool_size - cfg->total_size < without_data_expand_mem_size) {
-        UMQ_VLOG_INFO(VLOG_UMQ,
+        UMQ_VLOG_ERR(VLOG_UMQ,
             "max buf pool size %llu is too small to support expand without data buf, required %llu\n",
             *max_umq_buf_pool_size, cfg->total_size + without_data_expand_mem_size);
         return -UMQ_ERR_EINVAL;
