@@ -2985,6 +2985,7 @@ typedef struct urma_jfs {
     pthread_mutex_t event_mutex;
     pthread_cond_t event_cond;
     uint32_t async_events_acked;
+    urma_jfs_opt_t urma_jfs_opt;
 } urma_jfs_t;
 \`\`\`
 
@@ -4426,7 +4427,7 @@ Supports reentrant multi-threaded operations.
 
 @param[in] [Required] ctx: the urma context created before;
 
-@param[in] [Required] rjetty: information of remote jetty to import, including jetty id and mode, trans_mode same to create_jetty trans_mode;
+@param[in] [Required] rjetty: information of remote jetty to import, including jetty id and trans_mode, trans_mode same to create_jetty trans_mode;
 
 @param[in] [Required] token_value: token to put into output jetty protection table;
 

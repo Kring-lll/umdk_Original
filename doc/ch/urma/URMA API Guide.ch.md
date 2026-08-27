@@ -2986,10 +2986,9 @@ typedef struct urma_jfs {
     pthread_mutex_t event_mutex;
     pthread_cond_t event_cond;
     uint32_t async_events_acked;
+    urma_jfs_opt_t urma_jfs_opt;
 } urma_jfs_t;
 ```
-
-> 说明：上述结构体定义未列出 `urma_jfs_opt` 成员；当前实现会访问 `jfs->urma_jfs_opt.is_actived` 和 `jfs->urma_jfs_opt.jfs_opt_mask`。
 
 10. [urma_jfs_id_t](#_ZH-CN_TOPIC_0000002521872519-chtext)
 
@@ -4429,7 +4428,7 @@ Return: 0 on success, EINVAL on invalid parameter, other value on other batch de
 
 @param[in] [Required] ctx: the urma context created before;
 
-@param[in] [Required] rjetty: information of remote jetty to import, including jetty id and mode, trans_mode same to create_jetty trans_mode;
+@param[in] [Required] rjetty: information of remote jetty to import, including jetty id and trans_mode, trans_mode same to create_jetty trans_mode;
 
 @param[in] [Required] token_value: token to put into output jetty protection table;
 
