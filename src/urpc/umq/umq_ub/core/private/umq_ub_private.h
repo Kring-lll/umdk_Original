@@ -531,6 +531,8 @@ typedef struct ub_queue_cfg {
     umq_ub_ctx_t *dev_ctx;   // device ctx; Logic UMQ borrows share_rq's cfg (same dev_ctx, validated)
     urma_jfce_t *jfs_jfce;  // io and flow control jetty share same jfce
     jfr_ctx_t *jfr_ctx[UB_QUEUE_JETTY_NUM];
+    umq_ub_jetty_node_list_t *jetty_node_list;  // main+share queue owns it; Logic UMQ borrows via share_rq's cfg
+    umq_buf_t *addr_list;                       // msg_id->buf map; lazily alloc; Logic UMQ borrows via share_rq's cfg
     urma_order_type_t order_type;
     urma_transport_mode_t tp_mode;
     urma_tp_type_t tp_type;
@@ -567,11 +569,8 @@ typedef struct ub_queue {
     urma_jetty_t *jetty[UB_QUEUE_JETTY_NUM];
     urma_jfc_t *jfs_jfc[UB_QUEUE_JETTY_NUM];
     ub_bind_ctx_t *bind_ctx;
-    umq_buf_t *addr_list;
     ub_flow_control_t *flow_control;
 
-    // umq_ub_jetty_node_list_t jetty_node_list;
-    umq_ub_jetty_node_list_t *jetty_node_list;
     volatile uint64_t jetty_node;       // jetty_pool_node_t *, atomically accessed
     pthread_spinlock_t get_jetty_node_lock;
 
@@ -829,6 +828,18 @@ static inline ub_queue_cfg_t *umq_ub_queue_cfg_get(ub_queue_t *queue)
     // share_rq_umqh has been validated
     ub_queue_t *share_rq = (ub_queue_t *)(uintptr_t)queue->share_rq_umqh;
     return share_rq->cfg;
+}
+
+// jetty_node_list is main-queue-only; Logic UMQ borrows share_rq's cfg (hence its list).
+static inline umq_ub_jetty_node_list_t *umq_ub_queue_jetty_node_list_get(ub_queue_t *queue)
+{
+    return umq_ub_queue_cfg_get(queue)->jetty_node_list;
+}
+
+// addr_list is lazily alloc'd on first big-data send; Logic UMQ borrows share_rq's cfg (hence its list).
+static inline umq_buf_t *umq_ub_queue_addr_list_get(ub_queue_t *queue)
+{
+    return umq_ub_queue_cfg_get(queue)->addr_list;
 }
 
 // for exclusive acquisition of umq, it needs to be put back after use
