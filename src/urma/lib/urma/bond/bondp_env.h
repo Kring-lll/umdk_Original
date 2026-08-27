@@ -18,6 +18,7 @@ typedef struct bondp_env {
     bool enable_failback;
     bool enable_health_check;
     bool enable_rnr_retry;
+    bool enable_lazy_pjetty_by_iodie;
     uint64_t health_check_interval_ms;
     uint64_t rnr_retry_sleep_ms;
     uint64_t rnr_retry_max;

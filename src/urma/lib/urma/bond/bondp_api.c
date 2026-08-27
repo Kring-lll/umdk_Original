@@ -1342,6 +1342,58 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
     if (jetty_cfg->shared.jfc != NULL) {
         bdp_rplc_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfc, bondp_jfc_t, v_jfc);
     }
+
+    /*
+     * lazy pjetty (v4): only pre-build the pjettys of the primary IODIE (the
+     * IODIE of active_indices[0]). The other IODIE's pjettys stay NULL and are
+     * created on demand by the bond worker on cross-IODIE failover, so that
+     * same-IODIE failover keeps zero latency while cross-IODIE failover only
+     * pays the lazy-create cost. On any index inconsistency fall back to the
+     * full pre-build (existing behavior) rather than failing creation.
+     */
+    if (bdp_ctx->enable_lazy_pjetty_by_iodie && bdp_jetty->active_count > 0) {
+        uint32_t primary_iodie = bondp_iodie_idx_of(bdp_jetty->active_indices[0]);
+        if (primary_iodie != UINT32_MAX) {
+            uint32_t prebuilt_cnt = 0;
+            uint32_t lazy_cnt = 0;
+            for (uint32_t n = 0; n < bdp_jetty->enabled_count; ++n) {
+                uint32_t i = bdp_jetty->enabled_indices[n];
+                if (bondp_iodie_idx_of(i) != primary_iodie) {
+                    lazy_cnt++;
+                    URMA_LOG_INFO("Lazy pjetty deferred at create, vjetty cfg id=%u, idx=%u, iodie=%u, "
+                                  "primary_iodie=%u\n", jetty_cfg->id, i, bondp_iodie_idx_of(i), primary_iodie);
+                    continue;
+                }
+                p_cfg.jfs_cfg.jfc = bdp_jfs_jfc->p_jfc[i];
+                p_cfg.shared.jfr = bdp_jfr->p_jfr[i];
+                if (bdp_ctx->bonding_level == BONDP_BONDING_LEVEL_PORT) {
+                    p_cfg.id = 0;
+                }
+                if (bdp_rplc_jfc) {
+                    p_cfg.shared.jfc = bdp_rplc_jfc->p_jfc[i];
+                }
+                urma_jetty_t *jetty = urma_create_jetty(bdp_ctx->p_ctxs[i], &p_cfg);
+                if (jetty == NULL) {
+                    URMA_LOG_ERR("Failed to create pjetty (lazy prebuild) idx=%u, iodie=%u.\n", i, primary_iodie);
+                    return -1;
+                }
+                jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+                bdp_jetty->p_jetty[i] = jetty;
+                atomic_store(&bdp_jetty->valid[i], true);
+                prebuilt_cnt++;
+                URMA_LOG_INFO("Created pjetty (lazy prebuild), idx=%u, iodie=%u, jetty_id=%u, dev=%s, eid_idx=%u\n",
+                              i, primary_iodie, jetty->jetty_id.id, bdp_ctx->p_ctxs[i]->dev->name,
+                              bdp_ctx->p_ctxs[i]->eid_index);
+            }
+            URMA_LOG_INFO("Lazy pjetty prebuild done, vjetty cfg id=%u, primary_iodie=%u, prebuilt=%u, lazy=%u, "
+                          "enabled_count=%u\n", jetty_cfg->id, primary_iodie, prebuilt_cnt, lazy_cnt,
+                          bdp_jetty->enabled_count);
+            return 0;
+        }
+        URMA_LOG_WARN("Invalid primary active_index=%u, fallback to full prebuild, vjetty cfg id=%u\n",
+                      bdp_jetty->active_indices[0], jetty_cfg->id);
+    }
+
     for (uint32_t n = 0; n < bdp_jetty->enabled_count; ++n) {
         uint32_t i = bdp_jetty->enabled_indices[n];
         p_cfg.jfs_cfg.jfc = bdp_jfs_jfc->p_jfc[i];
@@ -1478,6 +1530,7 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     bdp_jetty->comp_type = BONDP_COMP_JETTY;
     atomic_init(&bdp_jetty->use_cnt.atomic_cnt, 0);
     atomic_init(&bdp_jetty->deleting, false);
+    atomic_init(&bdp_jetty->lazy_create_pending, false);
     (void)pthread_spin_init(&bdp_jetty->send_lock, PTHREAD_PROCESS_PRIVATE);
     bdp_jetty->modify_to_error = false;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
