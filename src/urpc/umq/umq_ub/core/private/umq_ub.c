@@ -2508,13 +2508,13 @@ static ALWAYS_INLINE void umq_ub_return_import_result(ub_queue_t *queue, uint16_
     if (ack_type == UMQ_UB_ACK_IMPORT_TYPE_ACK_IMM) {
         if (umq_ub_import_mem_done(queue, mempool_id) != UMQ_SUCCESS) {
             // send import mem done failed not cause the data plane to be unavailable
-            UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, send import mem done imm failed",
+            UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, send import mem done imm failed\n",
                 EID_ARGS(*eid), id);
         }
         return;
     }
     if (!umq_ub_wait_ack_lock_ensure(queue)) {
-        UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, create wait ack lock failed",
+        UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, create wait ack lock failed\n",
             EID_ARGS(*eid), id);
         return;
     }
@@ -2524,7 +2524,7 @@ static ALWAYS_INLINE void umq_ub_return_import_result(ub_queue_t *queue, uint16_
             queue->wait_ack_import.wait_ack_pool_id = (uint16_t *)(uintptr_t)calloc(UMQ_MAX_TSEG_NUM, sizeof(uint16_t));
             if (queue->wait_ack_import.wait_ack_pool_id == NULL) {
                 (void)util_rwlock_unlock(queue->wait_ack_import.lock);
-                UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, calloc wait ack pool id failed",
+                UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, calloc wait ack pool id failed\n",
                     EID_ARGS(*eid), id);
                 return;
             }
@@ -2533,7 +2533,7 @@ static ALWAYS_INLINE void umq_ub_return_import_result(ub_queue_t *queue, uint16_
         (void)util_rwlock_unlock(queue->wait_ack_import.lock);
     } else {
         (void)util_rwlock_unlock(queue->wait_ack_import.lock);
-        UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, wait ack import table is full",
+        UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, wait ack import table is full\n",
             EID_ARGS(*eid), id);
     }
 }

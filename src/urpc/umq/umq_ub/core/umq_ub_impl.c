@@ -2709,7 +2709,7 @@ int umq_ub_dev_add_impl(umq_trans_info_t *info, umq_init_cfg_t *cfg)
     }
 
     if (info->trans_mode != UMQ_TRANS_MODE_UB && info->trans_mode != UMQ_TRANS_MODE_UB_PLUS) {
-        UMQ_VLOG_INFO(VLOG_UMQ, "trans init mode: %d not UB\n", info->trans_mode);
+        UMQ_VLOG_ERR(VLOG_UMQ, "trans init mode: %d not UB\n", info->trans_mode);
         return -UMQ_ERR_EINVAL;
     }
 
