@@ -32,6 +32,31 @@
 #define PRIMARY_EID_NUM               (2)
 #define PORT_EID_MAX_NUM_PER_DEV      (9)
 #define PORT_EID_MAX_NUM              (PORT_EID_MAX_NUM_PER_DEV * PRIMARY_EID_NUM)
+
+/*
+ * Reverse of the matrix index formula: given an active_index (the pjetty slot
+ * index in p_jetty[] / enabled_indices[] / active_indices[]), return the IODIE
+ * it belongs to.
+ * - BONDP_BONDING_LEVEL_PORT: active_index = iodie_idx * PORT_EID_MAX_NUM_PER_DEV
+ *   + port_idx + PRIMARY_EID_NUM  =>  iodie_idx = (idx - PRIMARY_EID_NUM) / 9
+ * - BONDP_BONDING_LEVEL_IODIE: active_index is the primary EID index (0/1),
+ *   which equals the IODIE number.
+ * The two ranges ([0, PRIMARY_EID_NUM) and [PRIMARY_EID_NUM, PRIMARY_EID_NUM +
+ * PORT_EID_MAX_NUM)) are disjoint, so the level does not need to be passed in.
+ * Returns UINT32_MAX if active_index is out of range.
+ */
+static inline uint32_t bondp_iodie_idx_of(uint32_t active_index)
+{
+    if (active_index < PRIMARY_EID_NUM) {
+        /* IODIE-level bonding: the primary EID index is the IODIE number. */
+        return active_index;
+    }
+    if (active_index < PRIMARY_EID_NUM + PORT_EID_MAX_NUM) {
+        /* PORT-level bonding: reverse the matrix formula. */
+        return (active_index - PRIMARY_EID_NUM) / PORT_EID_MAX_NUM_PER_DEV;
+    }
+    return UINT32_MAX;
+}
 #define BONDP_MAX_WELL_KNOWN_JETTY_ID (1024)
 /* Use single die primary eid and port eid to create urma_context */
 #define SINGLE_DIE_DEVNUM             (11)
@@ -126,6 +151,9 @@ typedef struct bondp_context {
     uint64_t rnr_retry_sleep_ms;
     uint64_t rnr_retry_max;
     uint32_t rnr_retry_jitter_ratio;
+    /* v4: only the primary IODIE's pjettys are pre-built at vjetty creation;
+     * cross-IODIE pjettys are created on demand on cross-IODIE failover. */
+    bool enable_lazy_pjetty_by_iodie;
 
     /* This variable represents the maximum number of times all available devices need to be traversed. */
     /* In general mode, dev_num is the same as the number of non-empty devices in the first few positions. */
@@ -150,6 +178,26 @@ typedef struct bondp_context {
     bool port_cfg_enable;
     bondp_port_cfg_t port_cfg;
 } bondp_context_t;
+
+/*
+ * lazy pjetty (v4) applicability: ACTIVE_BACKUP bonding + RM transport only.
+ * - BALANCE mode uses every path simultaneously; deferring the backup IODIE's
+ *   pjettys would permanently run on half the paths (the lazy create only
+ *   triggers when schedule_send fails outright, i.e. all built paths dead).
+ * - RC mode requires each pjetty to be bound to its target jetty
+ *   (bondp_datapath_schedule.c), and lazy-created pjettys stay unbound, so a
+ *   lazy cold standby could never carry traffic.
+ * When inapplicable, every lazy decision point (pre-build, rebuild-vs-destroy
+ * dispatch, failback destroy hook, rjetty ext marking) falls back to the
+ * regular full-prebuild / in-place-rebuild behavior.
+ */
+static inline bool bondp_lazy_pjetty_applicable(const bondp_context_t *bdp_ctx,
+                                                urma_transport_mode_t trans_mode)
+{
+    return bdp_ctx->enable_lazy_pjetty_by_iodie &&
+           bdp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP &&
+           trans_mode == URMA_TM_RM;
+}
 
 typedef struct bondp_jfc {
     urma_jfc_t v_jfc;
@@ -250,11 +298,17 @@ typedef struct bondp_comp {
     atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     atomic_bool hc_valid[URMA_UBAGG_DEV_MAX_NUM];
     atomic_uint msn;
+    /* lazy pjetty (v4): true while a cross-IODIE lazy create is in flight on
+     * the bond worker; failover CRs on invalid paths are cached (CONVERT_SKIP)
+     * instead of being surfaced, so the worker can resend those WRs once the
+     * new path is published. */
+    atomic_bool lazy_create_pending;
 #else
     std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_bool hc_valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_uint msn;
+    std::atomic_bool lazy_create_pending;
 #endif
 #ifndef __cplusplus
     atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
