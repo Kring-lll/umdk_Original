@@ -36,5 +36,6 @@ install(TARGETS urma_ubagg
 )
 install(FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/include/urma_ubagg.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/bondp_pub_api.h
     DESTINATION /usr/include/ub/umdk/urma
 )
