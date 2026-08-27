@@ -19,9 +19,19 @@ extern "C" {
 
 struct bondp_comp;
 struct jfs_wr_entry;
+struct bondp_lazy_create_info;
 
 int bondp_resend_jfs_wr(struct bondp_comp *bdp_comp, struct jfs_wr_entry *wr_entry,
                         int send_idx, int target_idx);
+
+/*
+ * Create a not-yet-built cross-IODIE pjetty on the bond worker thread (heavy
+ * ioctl + HW resource alloc, must never run in the poll thread spinlock),
+ * register its id mapping, publish valid[idx]=true and resend the WRs
+ * stranded on invalid paths to the new path. Implemented in bondp_datapath.c.
+ */
+int bondp_lazy_create_and_resend(struct bondp_comp *bdp_jetty, uint32_t pjetty_idx,
+                                 const struct bondp_lazy_create_info *info);
 
 urma_status_t bondp_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr);
 urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr);

@@ -60,9 +60,12 @@ typedef enum bondp_ctx_cfg_mask {
     BONDP_CTX_CFG_RNR_SLEEP              = 1ULL << 6,
     BONDP_CTX_CFG_RNR_MAX                = 1ULL << 7,
     BONDP_CTX_CFG_RNR_JITTER_RATIO       = 1ULL << 8,
+    /* Pre-build only the primary-IODIE pjettys at vjetty creation; the other
+     * IODIE's pjettys are created on demand on cross-IODIE failover. */
+    BONDP_CTX_CFG_ENABLE_LAZY_PJETTY_BY_IODIE = 1ULL << 9,
 } bondp_ctx_cfg_mask_t;
 
-#define BONDP_CTX_CFG_MASK_ALL ((1ULL << 9) - 1)
+#define BONDP_CTX_CFG_MASK_ALL ((1ULL << 10) - 1)
 
 typedef struct bondp_set_ctx_cfg_in {
     uint64_t mask;
@@ -75,6 +78,7 @@ typedef struct bondp_set_ctx_cfg_in {
     uint64_t rnr_retry_sleep_ms;
     uint64_t rnr_retry_max;
     uint32_t rnr_retry_jitter_ratio;
+    bool enable_lazy_pjetty_by_iodie;
 } bondp_set_ctx_cfg_in_t;
 
 // URMA_USER_CTL_BOND_SET_BONDING_MODE,
@@ -196,6 +200,10 @@ typedef enum bondp_rjetty_ext_mask {
     BONDP_RJETTY_EXT_MASK_HEALTH_CHECK = 1ULL << 1,
     BONDP_RJETTY_EXT_MASK_LOCAL_CTX = 1ULL << 2,
     BONDP_RJETTY_EXT_MASK_TARGET_CTX = 1ULL << 3,
+    /* The rjetty owner runs in lazy-pjetty mode: target_ctx entries whose
+     * jetty id is 0 are not-yet-created cross-IODIE pjettys. The importer
+     * must skip them instead of failing the whole connection setup. */
+    BONDP_RJETTY_EXT_MASK_LAZY_PJETTY = 1ULL << 4,
 } bondp_rjetty_ext_mask_t;
 
 /*
