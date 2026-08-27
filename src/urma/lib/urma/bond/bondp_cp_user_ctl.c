@@ -354,6 +354,29 @@ static int bondp_user_ctl_set_ctx_cfg(urma_context_t *ctx, urma_user_ctl_in_t *i
     return bondp_set_ctx_cfg(ctx, cfg_in);
 }
 
+static int bondp_user_ctl_set_lazy_pjetty(urma_context_t *ctx, urma_user_ctl_in_t *in,
+                                           urma_user_ctl_out_t *out)
+{
+    (void)out;
+
+    if (in->addr == 0 || in->len != sizeof(bondp_set_lazy_pjetty_in_t)) {
+        URMA_LOG_ERR("Invalid set lazy pjetty parameter.\n");
+        return -EINVAL;
+    }
+
+    const bondp_set_lazy_pjetty_in_t *lazy_in =
+        (const bondp_set_lazy_pjetty_in_t *)(uintptr_t)in->addr;
+    /* Reuse the ctx-cfg path: the ref-count guard, validation and feature
+     * re-init all apply; only the lazy bit is set, other fields read back
+     * from the context. */
+    bondp_set_ctx_cfg_in_t cfg_in = {
+        .mask = BONDP_CTX_CFG_ENABLE_LAZY_PJETTY_BY_IODIE,
+        .enable_lazy_pjetty_by_iodie = lazy_in->enable,
+    };
+    URMA_LOG_INFO("Set lazy pjetty by iodie via user ctl, enable=%d\n", (int)lazy_in->enable);
+    return bondp_set_ctx_cfg(ctx, &cfg_in);
+}
+
 int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_out_t *out)
 {
     if (in == NULL) {
@@ -382,6 +405,8 @@ int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_ou
             return bondp_user_ctl_set_bonding_port(ctx, in, out);
         case BONDP_USER_CTL_SET_CTX_CFG:
             return bondp_user_ctl_set_ctx_cfg(ctx, in, out);
+        case BONDP_USER_CTL_SET_LAZY_PJETTY:
+            return bondp_user_ctl_set_lazy_pjetty(ctx, in, out);
         default: {
             URMA_LOG_ERR("Unsupported opcode, opcode=%d\n", in->opcode);
             return -EINVAL;
