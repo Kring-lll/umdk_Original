@@ -830,7 +830,7 @@ static ALWAYS_INLINE bool umq_ub_enable_import_remote_mem(uint32_t feature)
 
 static ALWAYS_INLINE bool umq_ub_enable_no_import(uint32_t feature)
 {
-    return (feature & UMQ_FEATURE_NO_IMPORT_REMOTE_MEM) != 0;
+    return true; //(feature & UMQ_FEATURE_NO_IMPORT_REMOTE_MEM) != 0;
 }
 
 // for exclusive acquisition of umq, it needs to be put back after use

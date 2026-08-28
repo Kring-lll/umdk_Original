@@ -165,6 +165,9 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
                 (void)memset(user_tseg, 0, sizeof(*user_tseg));
                 user_tseg->token_id = mempool_id;
                 src_sge->tseg = NULL;
+                tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, mempool_id);
+                user_tseg->attr = tseg->seg.attr;
+                user_tseg->token_id =  tseg->seg.token_id;
                 src_sge->user_tseg = user_tseg;
             } else {
                 tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, mempool_id);
@@ -209,6 +212,9 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
                 (void)memset(user_tseg, 0, sizeof(*user_tseg));
                 user_tseg->token_id = mempool_id;
                 dst_sge->tseg = NULL;
+                tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, mempool_id);
+                user_tseg->attr = tseg->seg.attr;
+                user_tseg->token_id =  tseg->seg.token_id;
                 dst_sge->user_tseg = user_tseg;
             } else {
                 tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, mempool_id);
