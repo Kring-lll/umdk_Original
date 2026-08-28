@@ -448,6 +448,43 @@ int schedule_send(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp, int *send
     }
 }
 
+/*
+ * Fixed-target scheduling: the caller has pinned the receiving port
+ * (fixed_target_idx) whose RQEs will be consumed. Only local ports that can
+ * reach it are considered; the least-loaded one is selected as the egress.
+ * Returns 0 on success, -1 when no path is available.
+ */
+int schedule_send_fixed(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp,
+                        int fixed_target_idx, int *send_idx)
+{
+    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(tjetty, bondp_target_jetty_t, v_tjetty);
+    if (bdp_tjetty == NULL || fixed_target_idx < 0 || (uint32_t)fixed_target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return -1;
+    }
+
+    int best_local = -1;
+    uint32_t best_load = UINT32_MAX;
+    for (uint32_t j = 0; j < bdp_tjetty->p_tjetty_count; j++) {
+        const bondp_p_target_jetty_t *path = &bdp_tjetty->p_tjettys[j];
+        if (path->remote_indice != (uint8_t)fixed_target_idx || !bondp_p_tjetty_available(path)) {
+            continue;
+        }
+        if (!atomic_load(&bdp_comp->valid[path->local_indice])) {
+            continue;
+        }
+        uint32_t load = atomic_load(&bdp_comp->sqe_cnt[path->local_indice][fixed_target_idx]);
+        if (load < best_load) {
+            best_load = load;
+            best_local = path->local_indice;
+        }
+    }
+    if (best_local < 0) {
+        return -1;
+    }
+    *send_idx = best_local;
+    return 0;
+}
+
 int schedule_recv(bondp_comp_t *bdp_comp, int *recv_idx)
 {
     if (bdp_comp->active_count == 0) {
