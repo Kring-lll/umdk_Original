@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
  * Description: Service registry for AIGW.
  * Create: 2026-04-29

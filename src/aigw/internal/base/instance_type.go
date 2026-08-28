@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
  * Description: definitions of types for AIGW core.
  * Create: 2026-03-10

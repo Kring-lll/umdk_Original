@@ -1,8 +1,3 @@
-/*
- * SPDX-License-Identifier: MIT
- * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
- */
-
 package base
 
 // KvcConfig is the top-level KVC management config section.

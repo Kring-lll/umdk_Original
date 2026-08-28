@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: MessagePack decoder for vLLM KV Events, matching aibrix-main implementation.
  * Create: 2026-06-03

@@ -1,17 +1,14 @@
-"""
-Agent loop test (Phase 3 Group C1).
-
-Exercises the ReAct loop + tools + judge path against mock_vllm's stub LLM
-and a tiny mock AIGW (no real AIGW needed). Proves the loop drives the
-scripted solution to a passing judge before any fault injection is involved.
-"""
+"""Agent loop test (Phase 3 Group C1) — exercises the ReAct loop + tools +
+judge path against mock_vllm's stub LLM and a tiny mock AIGW (no real AIGW
+needed). Proves the loop drives the scripted solution to a passing judge
+before any fault injection is involved."""
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -19,25 +16,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-# ensure the agent module is importable (use importlib to avoid sys.path.insert)
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-
-
-def _load_module(name, rel_path):
-    spec = importlib.util.spec_from_file_location(
-        name, os.path.join(_HERE, rel_path)
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-mra = _load_module("minimal_react_agent", "minimal_react_agent.py")
-MockVllm = _load_module("mock_vllm", "mock_vllm.py").MockVllm
-FixFailingTestTask = _load_module(
-    "tasks.fix_failing_test", os.path.join("tasks", "fix_failing_test.py")
-).FixFailingTestTask
+# ensure the agent module is importable
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import minimal_react_agent as mra  # type: ignore
+from mock_vllm import MockVllm  # type: ignore
+from tasks.fix_failing_test import FixFailingTestTask  # type: ignore
 
 
 class _MockAigwHandler(BaseHTTPRequestHandler):
@@ -51,7 +34,7 @@ class _MockAigwHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def _do_post(self):  # noqa: D401
+    def do_POST(self):  # noqa: N802
         n = int(self.headers.get("Content-Length", "0") or "0")
         if n:
             self.rfile.read(n)
@@ -69,13 +52,8 @@ class _MockAigwHandler(BaseHTTPRequestHandler):
         else:
             self._ok(200)
 
-    def _do_get(self):  # noqa: D401
+    def do_GET(self):  # noqa: N802
         self._ok(200)
-
-    # BaseHTTPRequestHandler dispatches via getattr(self, 'do_'+command);
-    # expose runtime names as class-body aliases (G.NAM.01 scans def names).
-    do_POST = _do_post
-    do_GET = _do_get
 
 
 @pytest.fixture

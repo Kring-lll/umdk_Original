@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: dispatching schedule request.
  * Create: 2025-05-13
@@ -49,6 +48,8 @@ type LlmRequest struct {
 	PredictPrefillTime float64 // predict prefill time, unit is ms
 	PrefillTimeStampMs int64   // record the start timestamp of prefill, unit is ms
 	TimeStamp          int64   // unit is second
+
+	SessionID string // session ID for ERR scheduling
 }
 
 // GetRequestType returns the type of request

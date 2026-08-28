@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (i) Huawei Technologies Co., Ltd. 2025-2026 All rights reserved.
  * Description: define the functions of central cache.
  * Create: 2026-01-20

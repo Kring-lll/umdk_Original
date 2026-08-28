@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: Provider adapters (URL build + auth injection) for the provider pool.
  * Create: 2026-06-09

@@ -24,13 +24,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 
 def _now_ms() -> int:
@@ -144,12 +141,7 @@ _TASK_SCRIPTS: dict[str, list[str]] = {
         "Action: bash_exec\nAction Input: cat mod.py",
         "Action: read_file\nAction Input: mod.py",
         "Action: grep_find\nAction Input: def",
-        (
-            "Action: write_file\nAction Input: mod.py|\"\"\"mod doc.\"\"\"\n"
-            "def f():\n    \"\"\"f doc.\"\"\"\n    return 1\ndef g():\n"
-            "    \"\"\"g doc.\"\"\"\n    return 2\ndef h():\n    \"\"\"h doc.\"\"\"\n"
-            "    return 3\n"
-        ),
+        "Action: write_file\nAction Input: mod.py|\"\"\"mod doc.\"\"\"\ndef f():\n    \"\"\"f doc.\"\"\"\n    return 1\ndef g():\n    \"\"\"g doc.\"\"\"\n    return 2\ndef h():\n    \"\"\"h doc.\"\"\"\n    return 3\n",
         "Action: bash_exec\nAction Input: python3 -m py_compile mod.py",
         "Final Answer: done",
     ],
@@ -217,7 +209,7 @@ def make_handler(call_log: _CallLog, jobs: _JobStore, stub: _StubLLM):
                 return {"_raw": raw.decode("utf-8", "replace")}
 
         # ---- KVC control plane ----
-        def _do_post(self):  # noqa: D401
+        def do_POST(self):  # noqa: N802
             path = self.path.split("?")[0]
             body = self._read_body()
             if path == "/v1/kvc/offload":
@@ -300,7 +292,7 @@ def make_handler(call_log: _CallLog, jobs: _JobStore, stub: _StubLLM):
                 return
             self._send_json(404, {"error": "not_found", "path": path})
 
-        def _do_get(self):  # noqa: D401
+        def do_GET(self):  # noqa: N802
             path = self.path.split("?")[0]
             if path.startswith("/v1/kvc/jobs/"):
                 jid = path.rsplit("/", 1)[-1]
@@ -311,12 +303,6 @@ def make_handler(call_log: _CallLog, jobs: _JobStore, stub: _StubLLM):
                 self._send_json(200, st)
                 return
             self._send_json(404, {"error": "not_found", "path": path})
-
-        # BaseHTTPRequestHandler dispatches via getattr(self, 'do_'+command),
-        # so expose the runtime names as class-body aliases (the G.NAM.01
-        # checker scans def <name>, not class-body assignments).
-        do_POST = _do_post
-        do_GET = _do_get
 
         def _extract_task_and_count(self, body: Any) -> tuple[str, int]:
             """Pull the task name (from the system-prompt "TASK: <name>" stamp)
@@ -392,7 +378,7 @@ def _main() -> int:
     args = ap.parse_args()
     mv = MockVllm(port=args.port, prefetch_complete_ms=args.prefetch_complete_ms)
     mv.start()
-    logger.info(f"mock_vllm listening on {mv.base_url}")
+    print(f"mock_vllm listening on {mv.base_url}", flush=True)
     try:
         while True:
             time.sleep(60)

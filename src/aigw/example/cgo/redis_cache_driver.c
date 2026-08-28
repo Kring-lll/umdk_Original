@@ -1,8 +1,3 @@
-/*
- * SPDX-License-Identifier: MIT
- * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,46 +5,21 @@
 
 #include "redis_cache_driver.h"
 
-// Redis connection defaults
-#define REDIS_DEFAULT_HOST "127.0.0.1"
-#define REDIS_DEFAULT_PORT 6379
-
-// Index offsets for interleaved key/value pairs in Redis command argv arrays
-#define KV_PAIR_STRIDE 2 // each pair occupies 2 argv slots (key, value)
-#define KV_PAIR_OFFSET 2 // first pair starts at argv index 2 (after cmd + key)
-
-// Lengths of fixed Redis command-name literals (kept explicit to satisfy
-// G.CNS.02; these mirror strlen of the matching argv[] string literal)
-#define LEN_CMD_HSET   4
-#define LEN_CMD_EXPIRE 6
-#define LEN_CMD_HDEL   4
-
-// Test fixture: number of key/value pairs written in test_redis_cache()
-#define TEST_PAIR_COUNT 2
-
-// Test fixture: request IDs and payloads written by test_redis_cache()
-#define TEST_REQ_ID_1 "req_001"
-#define TEST_REQ_ID_2 "req_002"
-#define TEST_PAYLOAD_1 "{\"input\":\"Hello\",\"tokens\":512}"
-#define TEST_PAYLOAD_2 "{\"input\":\"World\",\"tokens\":256}"
-
 // Thread-local Redis context (thread-safe for single-thread-per-connection)
 // Note: For multi-threaded use, ensure one thread uses one connection.
 static __thread redisContext *tls_redis_context = NULL;
 
 // Helper: Free redisReply object
-static void free_redis_reply(redisReply *reply)
-{
+static void free_redis_reply(void *reply) {
     if (reply) {
         freeReplyObject(reply);
     }
 }
 
 // Get or create thread-local Redis connection
-static redisContext *get_redis_context(void)
-{
+static redisContext *get_redis_context(void) {
     if (tls_redis_context == NULL) {
-        tls_redis_context = redisConnect(REDIS_DEFAULT_HOST, REDIS_DEFAULT_PORT);
+        tls_redis_context = redisConnect("127.0.0.1", 6379);
         if (tls_redis_context == NULL) {
             printf("Failed to allocate Redis context\n");
             return NULL;
@@ -65,8 +35,7 @@ static redisContext *get_redis_context(void)
 }
 
 // Release thread-local Redis connection (optional, called on thread exit)
-void destroy_redis_context(void)
-{
+void destroy_redis_context(void) {
     if (tls_redis_context) {
         redisFree(tls_redis_context);
         tls_redis_context = NULL;
@@ -74,8 +43,7 @@ void destroy_redis_context(void)
 }
 
 // Retrieve all fields from a Redis hash
-aigw_error_t redis_hash_get_all(const char *key, key_value_array_t *out_fields)
-{
+aigw_error_t redis_hash_get_all(const char *key, key_value_array_t *out_fields) {
     if (!key || !out_fields) {
         return AIGW_ERR_INVALID_PARAM;
     }
@@ -118,7 +86,7 @@ aigw_error_t redis_hash_get_all(const char *key, key_value_array_t *out_fields)
     }
 
     int idx = 0;
-    for (size_t i = 0; i < reply->elements - 1; i += KV_PAIR_STRIDE) {
+    for (size_t i = 0; i < reply->elements - 1; i += 2) {
         redisReply *field = reply->element[i];
         redisReply *value = reply->element[i + 1];
 
@@ -140,43 +108,8 @@ aigw_error_t redis_hash_get_all(const char *key, key_value_array_t *out_fields)
     return AIGW_SUCCESS;
 }
 
-// Set TTL (EXPIRE) on a Redis key; no-op for ttl <= 0
-static aigw_error_t redis_set_expire(redisContext *ctx, const char *key, int ttl)
-{
-    if (ttl <= 0) {
-        return AIGW_SUCCESS;
-    }
-
-    const char *expire_argv[3];
-    size_t expire_argvlen[3];
-
-    expire_argv[0] = "EXPIRE";
-    expire_argvlen[0] = LEN_CMD_EXPIRE;
-    expire_argv[1] = key;
-    expire_argvlen[1] = strlen(key);
-
-    char ttl_str[12]; // Supports up to 2^32 (~4e9 seconds)
-    int len = snprintf(ttl_str, sizeof(ttl_str), "%d", ttl);
-    if (len < 0 || len >= (int)sizeof(ttl_str)) {
-        return AIGW_ERR_INTERNAL; // Should not happen
-    }
-    // TTL value occupies the 3rd argv slot (index 2) of "EXPIRE key ttl"
-    expire_argv[KV_PAIR_STRIDE] = ttl_str;
-    expire_argvlen[KV_PAIR_STRIDE] = len;
-
-    redisReply *expire_reply = redisCommandArgv(ctx, 3, expire_argv, expire_argvlen);
-    if (!expire_reply || expire_reply->type == REDIS_REPLY_ERROR) {
-        free_redis_reply(expire_reply);
-        printf("Failed to set ttl\n");
-    }
-    free_redis_reply(expire_reply);
-
-    return AIGW_SUCCESS;
-}
-
 // Set multiple fields in a Redis hash
-aigw_error_t redis_hash_set_fields(const char *key, const key_value_array_t *fields)
-{
+aigw_error_t redis_hash_set_fields(const char *key, const key_value_array_t *fields) {
     if (!key || !fields || !fields->pairs || fields->count <= 0) {
         return AIGW_ERR_INVALID_PARAM;
     }
@@ -187,7 +120,7 @@ aigw_error_t redis_hash_set_fields(const char *key, const key_value_array_t *fie
     }
 
     // Step 1: Build command: HSET key field1 value1 field2 value2 ...
-    int argc = 2 + fields->count * KV_PAIR_STRIDE;
+    int argc = 2 + fields->count * 2;
     const char **argv = (const char**)calloc(argc, sizeof(char*));
     size_t *argvlen = (size_t*)malloc(argc * sizeof(size_t));
 
@@ -198,12 +131,12 @@ aigw_error_t redis_hash_set_fields(const char *key, const key_value_array_t *fie
     }
 
     argv[0] = "HSET";
-    argvlen[0] = LEN_CMD_HSET;
+    argvlen[0] = 4;
     argv[1] = key;
     argvlen[1] = strlen(key);
 
     for (int i = 0; i < fields->count; i++) {
-        int idx = KV_PAIR_OFFSET + i * KV_PAIR_STRIDE;
+        int idx = 2 + i * 2;
         argv[idx] = fields->pairs[i].key;
         argvlen[idx] = strlen(fields->pairs[i].key);
         argv[idx + 1] = fields->pairs[i].value;
@@ -221,13 +154,39 @@ aigw_error_t redis_hash_set_fields(const char *key, const key_value_array_t *fie
 
     free_redis_reply(reply);
 
+    if (fields->ttl <= 0) {
+        return AIGW_SUCCESS;
+    }
+
     // Step 2: Set TTL if needed
-    return redis_set_expire(ctx, key, fields->ttl);
+    const char *expire_argv[3];
+    size_t expire_argvlen[3];
+
+    expire_argv[0] = "EXPIRE";
+    expire_argvlen[0] = 6;
+    expire_argv[1] = key;
+    expire_argvlen[1] = strlen(key);
+
+    char ttl_str[12]; // Supports up to 2^32 (~4e9 seconds)
+    int len = snprintf(ttl_str, sizeof(ttl_str), "%d", fields->ttl);
+    if (len < 0 || len >= (int)sizeof(ttl_str)) {
+        return AIGW_ERR_INTERNAL; // Should not happen
+    }
+    expire_argv[2] = ttl_str;
+    expire_argvlen[2] = len;
+
+    redisReply *expire_reply = redisCommandArgv(ctx, 3, expire_argv, expire_argvlen);
+    if (!expire_reply || expire_reply->type == REDIS_REPLY_ERROR) {
+        free_redis_reply(expire_reply);
+        printf("Failed to set ttl\n");
+    }
+    free_redis_reply(expire_reply);
+
+    return AIGW_SUCCESS;
 }
 
 // Delete multiple fields from a Redis hash
-aigw_error_t redis_hash_delete_fields(const char *key, char **field_keys, uint32_t field_count)
-{
+aigw_error_t redis_hash_delete_fields(const char *key, char **field_keys, uint32_t field_count) {
     if (!key || !field_keys || field_count <= 0) {
         return AIGW_ERR_INVALID_PARAM;
     }
@@ -256,13 +215,13 @@ aigw_error_t redis_hash_delete_fields(const char *key, char **field_keys, uint32
     }
 
     argv[0] = "HDEL";
-    argvlen[0] = LEN_CMD_HDEL;
+    argvlen[0] = 4;
     argv[1] = key;
     argvlen[1] = strlen(key);
 
     for (int i = 0; i < field_count; i++) {
-        argv[KV_PAIR_OFFSET + i] = field_keys[i];
-        argvlen[KV_PAIR_OFFSET + i] = strlen(field_keys[i]);
+        argv[2 + i] = field_keys[i];
+        argvlen[2 + i] = strlen(field_keys[i]);
     }
 
     redisReply *reply = redisCommandArgv(ctx, argc, argv, argvlen);
@@ -281,61 +240,6 @@ aigw_error_t redis_hash_delete_fields(const char *key, char **field_keys, uint32
     return AIGW_SUCCESS;
 }
 
-// Free allocated pairs across an array of key_value_array_t (helper)
-static void free_kv_arrays(key_value_array_t *arrays, uint32_t count)
-{
-    for (uint32_t j = 0; j < count; j++) {
-        if (arrays[j].pairs) {
-            free(arrays[j].pairs);
-        }
-    }
-}
-
-// Parse one HGETALL reply into out->pairs/out->count (pairs may be NULL).
-// Returns AIGW_SUCCESS (incl. NIL/empty), AIGW_ERR_NO_MEMORY, or AIGW_ERR_INTERNAL.
-static aigw_error_t parse_hgetall_reply(redisReply *reply, key_value_array_t *out)
-{
-    if (reply->type == REDIS_REPLY_NIL) {
-        // key does not exist
-        out->pairs = NULL;
-        out->count = 0;
-        return AIGW_SUCCESS;
-    }
-    if (reply->type != REDIS_REPLY_ARRAY) {
-        return AIGW_ERR_INTERNAL;
-    }
-
-    int num_pairs = reply->elements / 2;
-    if (num_pairs <= 0) {
-        out->pairs = NULL;
-        out->count = 0;
-        return AIGW_SUCCESS;
-    }
-
-    key_value_pair_t *pairs = (key_value_pair_t*)calloc(num_pairs, sizeof(key_value_pair_t));
-    if (!pairs) {
-        return AIGW_ERR_NO_MEMORY;
-    }
-
-    int idx = 0;
-    for (size_t j = 0; j < reply->elements - 1; j += KV_PAIR_STRIDE) {
-        redisReply *field = reply->element[j];
-        redisReply *value = reply->element[j + 1];
-
-        if (field->type == REDIS_REPLY_STRING && value->type == REDIS_REPLY_STRING) {
-            strncpy(pairs[idx].key, field->str, AIGW_CACHE_KEY_MAX_LEN - 1);
-            strncpy(pairs[idx].value, value->str, AIGW_CACHE_VALUE_MAX_LEN - 1);
-            pairs[idx].key[AIGW_CACHE_KEY_MAX_LEN - 1] = '\0';
-            pairs[idx].value[AIGW_CACHE_VALUE_MAX_LEN - 1] = '\0';
-            idx++;
-        }
-    }
-
-    out->pairs = pairs;
-    out->count = idx;
-    return AIGW_SUCCESS;
-}
-
 /**
  * @brief Batch retrieve all fields from multiple Redis hashes using Pipeline.
  *
@@ -349,8 +253,7 @@ static aigw_error_t parse_hgetall_reply(redisReply *reply, key_value_array_t *ou
  * @return AIGW_SUCCESS on success, or error code.
  */
 aigw_error_t redis_hash_get_all_batch(const char **keys, uint32_t key_count,
-                                      key_value_array_t *out_arrays)
-{
+                                      key_value_array_t *out_arrays) {
     // Parameter validation
     if (!keys || key_count == 0 || !out_arrays) {
         return AIGW_ERR_INVALID_PARAM;
@@ -378,25 +281,77 @@ aigw_error_t redis_hash_get_all_batch(const char **keys, uint32_t key_count,
     for (uint32_t i = 0; i < key_count; i++) {
         redisReply *reply = NULL;
         int ret = redisGetReply(ctx, (void**)&reply);
+
         if (ret != REDIS_OK || !reply) {
-            free_kv_arrays(out_arrays, key_count);
+            // Clean allocated memory
+            for (uint32_t j = 0; j < key_count; j++) {
+                if (out_arrays[j].pairs) {
+                    free(out_arrays[j].pairs);
+                }
+            }
             return AIGW_ERR_INTERNAL;
         }
 
-        aigw_error_t err = parse_hgetall_reply(reply, &out_arrays[i]);
-        freeReplyObject(reply);
-        if (err != AIGW_SUCCESS) {
-            free_kv_arrays(out_arrays, key_count);
-            return err;
+        // Parse the response (reuse the parsing logic of redis_hash_get_all)
+        if (reply->type == REDIS_REPLY_NIL) {
+            // key does not exist
+            out_arrays[i].pairs = NULL;
+            out_arrays[i].count = 0;
+        } else if (reply->type == REDIS_REPLY_ARRAY) {
+            int num_pairs = reply->elements / 2;
+            if (num_pairs > 0) {
+                key_value_pair_t *pairs = (key_value_pair_t*)calloc(num_pairs, sizeof(key_value_pair_t));
+                if (!pairs) {
+                    freeReplyObject(reply);
+                    // Clean allocated memory
+                    for (uint32_t j = 0; j < key_count; j++) {
+                        if (out_arrays[j].pairs) {
+                            free(out_arrays[j].pairs);
+                        }
+                    }
+                    return AIGW_ERR_NO_MEMORY;
+                }
+
+                int idx = 0;
+                for (size_t j = 0; j < reply->elements - 1; j += 2) {
+                    redisReply *field = reply->element[j];
+                    redisReply *value = reply->element[j + 1];
+
+                    if (field->type == REDIS_REPLY_STRING && value->type == REDIS_REPLY_STRING) {
+                        strncpy(pairs[idx].key, field->str, AIGW_CACHE_KEY_MAX_LEN - 1);
+                        strncpy(pairs[idx].value, value->str, AIGW_CACHE_VALUE_MAX_LEN - 1);
+                        pairs[idx].key[AIGW_CACHE_KEY_MAX_LEN - 1] = '\0';
+                        pairs[idx].value[AIGW_CACHE_VALUE_MAX_LEN - 1] = '\0';
+                        idx++;
+                    }
+                }
+
+                out_arrays[i].pairs = pairs;
+                out_arrays[i].count = idx;
+            } else {
+                out_arrays[i].pairs = NULL;
+                out_arrays[i].count = 0;
+            }
+        } else {
+            freeReplyObject(reply);
+            // Clean allocated memory
+            for (uint32_t j = 0; j < key_count; j++) {
+                if (out_arrays[j].pairs) {
+                    free(out_arrays[j].pairs);
+                }
+            }
+
+            return AIGW_ERR_INTERNAL;
         }
+
+        freeReplyObject(reply);
     }
 
     return AIGW_SUCCESS;
 }
 
 // Get the Redis cache driver instance (thread-safe due to static init)
-aigw_cache_driver_t *get_redis_cache_driver(void)
-{
+aigw_cache_driver_t *get_redis_cache_driver(void) {
     static aigw_cache_driver_t driver = {
         .driver_name = "redis_cache",
         .ops = {
@@ -409,84 +364,8 @@ aigw_cache_driver_t *get_redis_cache_driver(void)
     return &driver;
 }
 
-// Build the test key/value pairs written by test_redis_cache()
-static aigw_error_t build_test_fields(key_value_array_t *fields)
-{
-    fields->count = TEST_PAIR_COUNT;
-    fields->pairs = (key_value_pair_t*)calloc(TEST_PAIR_COUNT, sizeof(key_value_pair_t));
-    if (!fields->pairs) {
-        return AIGW_ERR_NO_MEMORY;
-    }
-
-    strncpy(fields->pairs[0].key, TEST_REQ_ID_1, AIGW_CACHE_KEY_MAX_LEN - 1);
-    strncpy(fields->pairs[0].value, TEST_PAYLOAD_1, AIGW_CACHE_VALUE_MAX_LEN - 1);
-    fields->pairs[0].key[AIGW_CACHE_KEY_MAX_LEN - 1] = '\0';
-    fields->pairs[0].value[AIGW_CACHE_VALUE_MAX_LEN - 1] = '\0';
-
-    strncpy(fields->pairs[1].key, TEST_REQ_ID_2, AIGW_CACHE_KEY_MAX_LEN - 1);
-    strncpy(fields->pairs[1].value, TEST_PAYLOAD_2, AIGW_CACHE_VALUE_MAX_LEN - 1);
-    fields->pairs[1].key[AIGW_CACHE_KEY_MAX_LEN - 1] = '\0';
-    fields->pairs[1].value[AIGW_CACHE_VALUE_MAX_LEN - 1] = '\0';
-
-    return AIGW_SUCCESS;
-}
-
-// Helper: read and print all fields for a model key (extracted from
-// test_redis_cache; G.FUD.05). Returns the driver call status.
-static aigw_error_t test_redis_read_fields(aigw_cache_driver_t *driver,
-                                           const char *model_key)
-{
-    key_value_array_t out_fields = {0};
-    aigw_error_t ret = driver->ops.hash_get_all((char*)model_key, &out_fields);
-    if (ret != AIGW_SUCCESS) {
-        printf("hash_get_all failed: %d\n", ret);
-        return ret;
-    }
-    printf("Retrieved %d fields:\n", out_fields.count);
-    for (int i = 0; i < out_fields.count; i++) {
-        printf("  %s = %s\n", out_fields.pairs[i].key, out_fields.pairs[i].value);
-    }
-    if (out_fields.pairs) {
-        free(out_fields.pairs);
-    }
-    return AIGW_SUCCESS;
-}
-
-// Helper: delete one field and verify the remaining contents (extracted from
-// test_redis_cache; G.FUD.05).
-static aigw_error_t test_redis_delete_and_verify(aigw_cache_driver_t *driver,
-                                                 const char *model_key)
-{
-    char *fields_to_del[] = {(char*)TEST_REQ_ID_1};
-    aigw_error_t ret = driver->ops.hash_delete_fields(
-        (char*)model_key, fields_to_del, 1);
-    if (ret != AIGW_SUCCESS) {
-        printf("hash_delete_fields failed: %d\n", ret);
-        return ret;
-    }
-    printf("Deleted field: %s\n", TEST_REQ_ID_1);
-
-    // Verify remaining data
-    key_value_array_t out_fields = {0};
-    ret = driver->ops.hash_get_all((char*)model_key, &out_fields);
-    if (ret == AIGW_SUCCESS) {
-        printf("After delete, remaining fields (%d):\n", out_fields.count);
-        for (int i = 0; i < out_fields.count; i++) {
-            printf("  %s = %s\n", out_fields.pairs[i].key,
-                    out_fields.pairs[i].value);
-        }
-        free(out_fields.pairs);
-    } else if (ret == AIGW_ERR_NOT_FOUND) {
-        printf("No fields left in hash.\n");
-    } else {
-        printf("hash_get_all after delete failed: %d\n", ret);
-    }
-    return AIGW_SUCCESS;
-}
-
 // Test function to verify Redis cache operations
-aigw_error_t test_redis_cache(void)
-{
+aigw_error_t test_redis_cache(void) {
     aigw_cache_driver_t *driver = get_redis_cache_driver();
     if (!driver) {
         printf("Failed to get Redis driver\n");
@@ -494,15 +373,30 @@ aigw_error_t test_redis_cache(void)
     }
 
     const char *model_key = "model:llama3";
+    const char *req_id_1 = "req_001";
+    const char *req_id_2 = "req_002";
+    const char *payload1 = "{\"input\":\"Hello\",\"tokens\":512}";
+    const char *payload2 = "{\"input\":\"World\",\"tokens\":256}";
 
     // === Test: Write data ===
     key_value_array_t fields;
-    aigw_error_t ret = build_test_fields(&fields);
-    if (ret != AIGW_SUCCESS) {
-        return ret;
+    fields.count = 2;
+    fields.pairs = (key_value_pair_t*)calloc(2, sizeof(key_value_pair_t));
+    if (!fields.pairs) {
+        return AIGW_ERR_NO_MEMORY;
     }
 
-    ret = driver->ops.hash_set_fields((char*)model_key, &fields);
+    strncpy(fields.pairs[0].key, req_id_1, AIGW_CACHE_KEY_MAX_LEN - 1);
+    strncpy(fields.pairs[0].value, payload1, AIGW_CACHE_VALUE_MAX_LEN - 1);
+    fields.pairs[0].key[AIGW_CACHE_KEY_MAX_LEN - 1] = '\0';
+    fields.pairs[0].value[AIGW_CACHE_VALUE_MAX_LEN - 1] = '\0';
+
+    strncpy(fields.pairs[1].key, req_id_2, AIGW_CACHE_KEY_MAX_LEN - 1);
+    strncpy(fields.pairs[1].value, payload2, AIGW_CACHE_VALUE_MAX_LEN - 1);
+    fields.pairs[1].key[AIGW_CACHE_KEY_MAX_LEN - 1] = '\0';
+    fields.pairs[1].value[AIGW_CACHE_VALUE_MAX_LEN - 1] = '\0';
+
+    aigw_error_t ret = driver->ops.hash_set_fields((char*)model_key, &fields);
     if (ret != AIGW_SUCCESS) {
         printf("hash_set_fields failed: %d\n", ret);
         free(fields.pairs);
@@ -511,17 +405,46 @@ aigw_error_t test_redis_cache(void)
     printf("hash_set_fields succeeded\n");
 
     // === Test: Read data ===
-    ret = test_redis_read_fields(driver, model_key);
+    key_value_array_t out_fields = {0};
+    ret = driver->ops.hash_get_all((char*)model_key, &out_fields);
     if (ret != AIGW_SUCCESS) {
+        printf("hash_get_all failed: %d\n", ret);
         free(fields.pairs);
         return ret;
     }
 
+    printf("Retrieved %d fields:\n", out_fields.count);
+    for (int i = 0; i < out_fields.count; i++) {
+        printf("  %s = %s\n", out_fields.pairs[i].key, out_fields.pairs[i].value);
+    }
+
+    // Free output pairs
+    if (out_fields.pairs) {
+        free(out_fields.pairs);
+    }
+
     // === Test: Delete field ===
-    ret = test_redis_delete_and_verify(driver, model_key);
+    char *fields_to_del[] = {(char*)req_id_1};
+    ret = driver->ops.hash_delete_fields((char*)model_key, fields_to_del, 1);
     if (ret != AIGW_SUCCESS) {
+        printf("hash_delete_fields failed: %d\n", ret);
         free(fields.pairs);
         return ret;
+    }
+    printf("Deleted field: %s\n", req_id_1);
+
+    // Verify remaining data
+    ret = driver->ops.hash_get_all((char*)model_key, &out_fields);
+    if (ret == AIGW_SUCCESS) {
+        printf("After delete, remaining fields (%d):\n", out_fields.count);
+        for (int i = 0; i < out_fields.count; i++) {
+            printf("  %s = %s\n", out_fields.pairs[i].key, out_fields.pairs[i].value);
+        }
+        free(out_fields.pairs);
+    } else if (ret == AIGW_ERR_NOT_FOUND) {
+        printf("No fields left in hash.\n");
+    } else {
+        printf("hash_get_all after delete failed: %d\n", ret);
     }
 
     // Cleanup

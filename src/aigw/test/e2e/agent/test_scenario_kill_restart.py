@@ -10,17 +10,13 @@ Asserted bidirectionally: AIGW debug state sequence
 
 from __future__ import annotations
 
-import importlib
 import os
+import sys
 
 import pytest
 
-_here = os.path.dirname(os.path.abspath(__file__))
-_spec = importlib.util.spec_from_file_location(
-    "run_scenario", os.path.join(_here, "run_scenario.py")
-)
-run_scenario = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(run_scenario)  # type: ignore
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import run_scenario  # type: ignore
 
 pytestmark = pytest.mark.requires_aigw_binary
 

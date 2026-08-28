@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: rust to C wrapper for HuggingFace tokenizers API.
  * Create: 2025-06-18

@@ -39,6 +39,25 @@ from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 
 
+# Threading HTTP Server to handle multiple concurrent connections
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """HTTP Server with thread-per-request handling."""
+    daemon_threads = True  # Auto-kill threads when main process exits
+
+try:
+    import zmq
+    HAS_ZMQ = True
+except ImportError:
+    HAS_ZMQ = False
+    print("[WARN] pyzmq not installed. KV event publishing disabled. Install with: pip install pyzmq")
+
+try:
+    import msgpack
+    HAS_MSGPACK = True
+except ImportError:
+    HAS_MSGPACK = False
+    print("[WARN] msgpack not installed. KV events will use JSON (may not work). Install with: pip install msgpack")
+
 # Configure logging to file
 LOG_FILE = "/tmp/mock_server.log"
 logging.basicConfig(
@@ -50,28 +69,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("mock_server")
-
-
-# Threading HTTP Server to handle multiple concurrent connections
-class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
-    """HTTP Server with thread-per-request handling."""
-    daemon_threads = True  # Auto-kill threads when main process exits
-
-try:
-    import zmq
-    HAS_ZMQ = True
-except ImportError:
-    HAS_ZMQ = False
-    logger.warning("[WARN] pyzmq not installed. KV event publishing disabled. Install with: pip install pyzmq")
-
-try:
-    import msgpack
-    HAS_MSGPACK = True
-except ImportError:
-    HAS_MSGPACK = False
-    logger.warning(
-        "[WARN] msgpack not installed. KV events will use JSON "
-        "(may not work). Install with: pip install msgpack")
 
 WORKER_PORTS = [19000, 19001, 19002, 19003]
 MOCK_K8S_PORT = 8000       # K8s API mock server
@@ -101,7 +98,7 @@ for port in WORKER_PORTS:
 class K8sMockHandler(BaseHTTPRequestHandler):
     """Mock K8s API server for endpoint watch."""
 
-    def _do_get(self):
+    def do_GET(self):
         parsed = urlparse(self.path)
         logger.info(f"[K8S] GET {self.path} from {self.client_address}")
         if parsed.path.endswith("/endpoints") and "watch" in parse_qs(parsed.query):
@@ -117,7 +114,7 @@ class K8sMockHandler(BaseHTTPRequestHandler):
             "kind": "EndpointsList",
             "items": []
         }
-        for worker_port, worker in WORKERS.items():
+        for port, worker in WORKERS.items():
             ep = {
                 "kind": "Endpoints",
                 "metadata": {
@@ -146,7 +143,7 @@ class K8sMockHandler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
 
-        for worker_port, worker in WORKERS.items():
+        for port, worker in WORKERS.items():
             event = {
                 "type": "ADDED",
                 "object": {
@@ -175,14 +172,9 @@ class K8sMockHandler(BaseHTTPRequestHandler):
 
         self.wfile.write(b"0\r\n\r\n")
 
-    def _do_post(self):
+    def do_POST(self):
         """Handle POST requests (if needed)."""
         self._return_json(200, {"status": "ok"})
-
-    # BaseHTTPRequestHandler dispatches via getattr(self, 'do_'+command);
-    # expose runtime names as class-body aliases (G.NAM.01 scans def names).
-    do_GET = _do_get
-    do_POST = _do_post
 
     def _return_json(self, status_code, data):
         self.send_response(status_code)
@@ -190,7 +182,7 @@ class K8sMockHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(data).encode())
 
-    def log_message(self, fmt, *args):  # noqa: N803 - override base class signature
+    def log_message(self, format, *args):
         """Suppress default logging."""
         pass
 
@@ -202,14 +194,14 @@ class K8sMockHandler(BaseHTTPRequestHandler):
 class RenderMockHandler(BaseHTTPRequestHandler):
     """Mock vLLM render service - provides deterministic tokenization."""
 
-    def _do_get(self):
+    def do_GET(self):
         if self.path == "/health" or self.path == "/aigw/health":
             logger.info(f"[RENDER_HEALTH] Request from {self.client_address}")
             self._return_json(200, {"status": "healthy"})
         else:
             self._return_json(404, {"error": "not found"})
 
-    def _do_post(self):
+    def do_POST(self):
         parsed = urlparse(self.path)
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length).decode() if content_length > 0 else "{}"
@@ -226,11 +218,6 @@ class RenderMockHandler(BaseHTTPRequestHandler):
             self._handle_chat(data)
         else:
             self._return_json(404, {"error": "not found"})
-
-    # BaseHTTPRequestHandler dispatches via getattr(self, 'do_'+command);
-    # expose runtime names as class-body aliases (G.NAM.01 scans def names).
-    do_GET = _do_get
-    do_POST = _do_post
 
     def _handle_render(self, data):
         """Simulate vLLM render service - tokenize messages.
@@ -281,7 +268,7 @@ class RenderMockHandler(BaseHTTPRequestHandler):
         prompt = " ".join(m.get("content", "") for m in messages)
 
         logger.info(f"[CHAT] Request: model={model}, messages={messages}")
-
+        
         response = {
             "id": f"chatcmpl-{int(time.time())}",
             "object": "chat.completion",
@@ -301,7 +288,7 @@ class RenderMockHandler(BaseHTTPRequestHandler):
                 "total_tokens": len(prompt) + 10
             }
         }
-
+        
         logger.info(f"[CHAT] Response: content={response['choices'][0]['message']['content']}")
         self._return_json(200, response)
 
@@ -311,7 +298,7 @@ class RenderMockHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(data).encode())
 
-    def log_message(self, fmt, *args):  # noqa: N803 - override base class signature
+    def log_message(self, format, *args):
         pass
 
 
@@ -322,8 +309,8 @@ class RenderMockHandler(BaseHTTPRequestHandler):
 class ZMQPublisher:
     """ZMQ Publisher that sends KV events to AIGW on port 5557."""
 
-    def __init__(self, pub_port=5557):
-        self.port = pub_port
+    def __init__(self, port=5557):
+        self.port = port
         self.context = None
         self.socket = None
         self.running = False
@@ -383,7 +370,8 @@ class ZMQPublisher:
                 # Encode as msgpack
                 data = msgpack.packb(batch, use_bin_type=True)
             else:
-                # Fallback to JSON (may not work); json is imported at module level
+                # Fallback to JSON (may not work)
+                import json
                 data = json.dumps(batch).encode()
 
             # Send 3-part message: [topic, seq_bytes, data]
@@ -462,17 +450,15 @@ def generate_token_ids(content: str, min_tokens: int = 16) -> list:
 class KVEventSender:
     """Helper class to send KV events via ZMQPublisher."""
 
-    def __init__(self, worker_id: str, model_name: str, zmq_publisher: ZMQPublisher = None,
-                 seed: int = 12345678901234567890, block_size: int = 1):
+    def __init__(self, worker_id: str, model_name: str, zmq_publisher: ZMQPublisher = None):
         self.worker_id = worker_id
         self.model_name = model_name
         self.zmq_publisher = zmq_publisher
-        self.seed = seed  # Must match Go's xxhash seed
-        self.block_size = block_size  # Must match Go's blockSize (token count)
+        self.block_size = 1  # Must match Go's blockSize (token count)
 
     def _generate_block_hashes(self, token_ids: list, num_blocks: int) -> list:
         """Generate block hashes using xxhash (matching Go's hash.go algorithm).
-
+        
         Updated for vLLM v1 format:
           - Tokens are encoded as uint32 big-endian (4 bytes per token)
           - blockSize is token count per block (e.g., 16 tokens per block)
@@ -482,7 +468,7 @@ class KVEventSender:
             - Write blockTokens (bytesPerBlock bytes)
             - Return digest.Sum64()
           - Chain: each block hash becomes parent for next block
-
+        
         Block hashes sent to AIGW are SHA-256 (first 8 bytes big-endian as int64).
         """
         try:
@@ -493,7 +479,7 @@ class KVEventSender:
                 int(hashlib.md5(str(t).encode()).hexdigest()[:8], 16)
                 for t in token_ids[:num_blocks]
             ]
-
+        
         # Seed must match Go's configuration
         seed = getattr(self, 'seed', 12345678901234567890)
 
@@ -510,16 +496,16 @@ class KVEventSender:
         for block_idx in range(num_blocks):
             start_idx = block_idx * self.block_size
             end_idx = min(start_idx + self.block_size, len(token_ids))
-
+            
             if start_idx >= len(token_ids):
                 break
-
+            
             # Get block tokens and convert to bytes (uint32 big-endian, 4 bytes per token)
             block_tokens = b''.join(
                 token_id.to_bytes(4, byteorder='big')
                 for token_id in token_ids[start_idx:end_idx]
             )
-
+            
             # Compute xxhash(seed + parent_hash + block_tokens) - exactly matching Go's hash.go
             digest = xxhash.xxh64(seed=seed)
             parent_bytes = parent_hash.to_bytes(8, byteorder='big')  # Big-endian matching Go
@@ -539,7 +525,7 @@ class KVEventSender:
                         f"block_tokens_hex={block_tokens.hex()}, "
                         f"num_tokens={len(token_ids)}, "
                         f"xxhash={block_hash}")
-
+        
         return block_hashes
 
     def send_block_stored(self, content: str = "default content", num_blocks: int = 1) -> dict:
@@ -547,7 +533,7 @@ class KVEventSender:
 
         vLLM v1 format:
         Event array: [tag, block_hashes, parent_hash, token_ids (flat list), block_size, lora_id]
-
+        
         Token encoding: Each token is uint32 big-endian (4 bytes).
         Block hashes: SHA-256 (first 8 bytes big-endian as int64).
 
@@ -645,7 +631,7 @@ class WorkerMockHandler(BaseHTTPRequestHandler):
     worker_id = None
     kv_event_sender = None  # Will be set by create_worker_handler
 
-    def _do_get(self):
+    def do_GET(self):
         if self.path == "/health" or self.path == "/aigw/health":
             logger.info(f"[HEALTH] Request from {self.client_address}")
             self._return_json(200, {"status": "healthy", "worker": getattr(self, "worker_id", "unknown")})
@@ -658,7 +644,7 @@ class WorkerMockHandler(BaseHTTPRequestHandler):
         else:
             self._return_json(404, {"error": "not found"})
 
-    def _do_post(self):
+    def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")  # Strip trailing slashes for robust matching
         logger.info(f"[POST] Request path={path} from {self.client_address}")
@@ -685,14 +671,9 @@ class WorkerMockHandler(BaseHTTPRequestHandler):
             logger.warninging(f"[POST] Path not found: {path}")
             self._return_json(404, {"error": "not found"})
 
-    # BaseHTTPRequestHandler dispatches via getattr(self, 'do_'+command);
-    # expose runtime names as class-body aliases (G.NAM.01 scans def names).
-    do_GET = _do_get
-    do_POST = _do_post
-
     def _handle_subscribe_event(self):
         """Simulate SSE endpoint for instance event subscription.
-
+        
         AIGW connects here to receive real-time instance updates.
         We send periodic heartbeat events to keep the connection alive.
         """
@@ -723,11 +704,8 @@ class WorkerMockHandler(BaseHTTPRequestHandler):
                 self.wfile.flush()
                 # Wait before next heartbeat (5 seconds)
                 time.sleep(5)
-        except (BrokenPipeError, ConnectionResetError):
-            # Client disconnected (broken/reset connection)
-            pass
-        except OSError:
-            # Client disconnected (other I/O error)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            # Client disconnected
             pass
 
     def _handle_chat(self, data):
@@ -737,7 +715,7 @@ class WorkerMockHandler(BaseHTTPRequestHandler):
         prompt = " ".join(m.get("content", "") for m in messages)
 
         logger.info(f"[CHAT] Request: model={model}, messages={messages}")
-
+        
         response = {
             "id": f"chatcmpl-{int(time.time())}",
             "object": "chat.completion",
@@ -822,34 +800,29 @@ class WorkerMockHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
         self.wfile.flush()
 
-    def log_message(self, fmt, *args):  # noqa: N803 - override base class signature
+    def log_message(self, format, *args):
         pass
 
 
 def create_worker_handler(wid, kv_publisher=None, seed=12345678901234567890, block_size=1):
     """Create a handler class with worker_id set and KV event sender.
-
+    
     Note: Using class attributes instead of __init__ to avoid ThreadingHTTPServer
     initialization order issues.
     """
-    sender = KVEventSender(
-        wid, "prefix-cache-test-model", kv_publisher,
-        seed=seed, block_size=block_size)
+    sender = KVEventSender(wid, "prefix-cache-test-model", kv_publisher)
+    sender.seed = seed
+    sender.block_size = block_size
 
     class Handler(WorkerMockHandler):
         worker_id = wid
         kv_event_sender = sender
 
     if kv_publisher:
-        logger.info(
-            f"[WORKER] KV event sender initialized for {wid} with seed={seed}, "
-            f"block_size={block_size}")
+        logger.info(f"[WORKER] KV event sender initialized for {wid} with seed={seed}, block_size={block_size}")
     else:
-        logger.warning(
-            f"[WORKER] KV event sender initialized for {wid} WITHOUT publisher "
-            f"(seed={seed}, block_size={block_size})")
+        logger.warning(f"[WORKER] KV event sender initialized for {wid} WITHOUT publisher (seed={seed}, block_size={block_size})")
     return Handler
-
 
 # ============================================================
 # AIGW Process Management
@@ -872,7 +845,7 @@ def start_aigw(config_path, log_path="/tmp/aigw_pc.log"):
     """Start AIGW process."""
     aigw_bin = find_aigw_binary()
     if not aigw_bin:
-        logger.error("[ERROR] AIGW binary not found. Build first with 'sh build.sh'")
+        print("[ERROR] AIGW binary not found. Build first with 'sh build.sh'")
         return None
 
     env = os.environ.copy()
@@ -905,24 +878,24 @@ class ServerThread(threading.Thread):
         self.name = name
 
     def run(self):
+        print(f"[INFO] {self.name} starting on {self.server.server_address}")
         logger.info(f"[START] {self.name} starting on {self.server.server_address}")
         self.server.serve_forever()
 
     def stop(self):
+        print(f"[INFO] Stopping {self.name}")
         logger.info(f"[STOP] Stopping {self.name}")
         self.server.shutdown()
 
 
-def wait_for_port(host, target_port, timeout=30):
+def wait_for_port(host, port, timeout=30):
     """Wait for a port to be ready."""
     start = time.time()
     while time.time() - start < timeout:
         try:
-            with socket.create_connection((host, target_port), timeout=1):
+            with socket.create_connection((host, port), timeout=1):
                 return True
-        except ConnectionRefusedError:
-            time.sleep(0.5)
-        except OSError:
+        except (ConnectionRefusedError, OSError):
             time.sleep(0.5)
     return False
 
@@ -945,11 +918,12 @@ def main():
                 pid = int(f.read().strip())
             os.kill(pid, signal.SIGTERM)
             os.remove(args.pid_file)
-            logger.info("[INFO] Mock server stopped")
+            print("[INFO] Mock server stopped")
         return
 
     # Log configuration
     logger.info(f"[CONFIG] seed={args.seed}, block_size={args.block_size}")
+    print(f"[INFO] Configuration: seed={args.seed}, block_size={args.block_size}")
 
     # Start K8s mock on port 8000
     k8s_server = ThreadingHTTPServer(("0.0.0.0", MOCK_K8S_PORT), K8sMockHandler)
@@ -965,26 +939,26 @@ def main():
 
     # Start worker servers (each with its own ZMQ publisher on unique port)
     # This prevents cross-talk: sending event from worker-19000 only notifies AIGW subscribed to that port
-    zmq_port_start = 55570
+    ZMQ_PORT_START = 55570
     worker_threads = []
     worker_publishers = {}
-    for i, worker_port in enumerate(WORKER_PORTS):
-        zmq_port = zmq_port_start + i
-        publisher = ZMQPublisher(pub_port=zmq_port)
+    for i, port in enumerate(WORKER_PORTS):
+        zmq_port = ZMQ_PORT_START + i
+        publisher = ZMQPublisher(port=zmq_port)
         publisher.start()
-        worker_publishers[worker_port] = publisher
-        logger.info(f"[INFO] ZMQ publisher for worker-{worker_port} on port {zmq_port}")
+        worker_publishers[port] = publisher
+        logger.info(f"[INFO] ZMQ publisher for worker-{port} on port {zmq_port}")
 
-        handler = create_worker_handler(f"worker-{worker_port}", publisher, args.seed, args.block_size)
-        server = ThreadingHTTPServer(("0.0.0.0", worker_port), handler)
-        thread = ServerThread(server, f"WorkerMock(:{worker_port})")
+        handler = create_worker_handler(f"worker-{port}", publisher, args.seed, args.block_size)
+        server = ThreadingHTTPServer(("0.0.0.0", port), handler)
+        thread = ServerThread(server, f"WorkerMock(:{port})")
         thread.start()
         worker_threads.append(thread)
-        logger.info(f"[INFO] Worker mock on port {worker_port}")
+        logger.info(f"[INFO] Worker mock on port {port}")
 
     # Wait for all ports
-    for wait_port in [MOCK_K8S_PORT, MOCK_RENDER_PORT] + WORKER_PORTS:
-        wait_for_port("127.0.0.1", wait_port)
+    for port in [MOCK_K8S_PORT, MOCK_RENDER_PORT] + WORKER_PORTS:
+        wait_for_port("127.0.0.1", port)
 
     logger.info("[INFO] All mock servers ready")
 

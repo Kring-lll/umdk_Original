@@ -18,25 +18,16 @@ Usage:
 import argparse
 import csv
 import json
-import logging
 import random
+import sys
 import time
-import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
-from typing import List, Tuple
-
-logger = logging.getLogger(__name__)
 
 MODEL = "Qwen2.5-7B"
 W1 = "http://169.254.30.2:8081"
 W2 = "http://169.254.30.3:8082"
 AIGW = "http://127.0.0.1:8701/aigw/v1/openai/chat/completions"
 HITS_METRIC = "vllm:prefix_cache_hits_total"
-
-# Global RNG seed; reassigned in main() from --seed (default 42). Declared at
-# module level so `global seed` inside main() binds an existing name (G.VAR.02).
-seed = 42
 
 SENTENCE = ("The quick brown fox jumps over the lazy dog and chases "
             "the playful squirrel through the autumn forest.")
@@ -74,15 +65,14 @@ def get_hits(port, host="127.0.0.1"):
                 line = line.decode().strip()
                 if line.startswith(HITS_METRIC + "{") and line.split()[0].endswith("}"):
                     return float(line.split()[1])
-    except Exception as e:
-        logger.warning(f"get_hits({port}) failed: {e}")
+    except Exception:
+        pass
     return -1.0
 
 
 def tokenize_count(url, prompt):
     body = json.dumps({"model": MODEL, "prompt": prompt, "add_special_tokens": False}).encode()
-    req = urllib.request.Request(urllib.parse.urljoin(url, "tokenize"),
-                                 data=body,
+    req = urllib.request.Request(url + "/tokenize", data=body,
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read())["count"]
@@ -94,8 +84,7 @@ def measure_template_overhead(url):
     body = json.dumps({"model": MODEL,
                        "messages": [{"role": "user", "content": probe}],
                        "max_tokens": 1}).encode()
-    req = urllib.request.Request(urllib.parse.urljoin(url, "v1/chat/completions"),
-                                 data=body,
+    req = urllib.request.Request(url + "/v1/chat/completions", data=body,
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=60) as resp:
         used = json.loads(resp.read())["usage"]["prompt_tokens"]
@@ -162,7 +151,7 @@ def sse_ttft(url, body, timeout=180):
                     if content:
                         return (time.perf_counter() - start) * 1000.0, True
     except Exception as e:
-        logger.warning(f"request failed: {e}")
+        print(f"    [warn] request failed: {e}", file=sys.stderr)
         return -1.0, False
     return -1.0, False
 
@@ -174,22 +163,7 @@ def chat_body(prompt):
             "stream": True}
 
 
-@dataclass
-class RunConfig:
-    """Correlated per-group run parameters bundled for run_requests()."""
-    tier: int
-    group: str
-    n: int
-    url: str
-    prompts: List[Tuple[str, int]] = field(default_factory=list)
-
-
-def run_requests(csvw, run_cfg):
-    tier = run_cfg.tier
-    group = run_cfg.group
-    n = run_cfg.n
-    url = run_cfg.url
-    prompts = run_cfg.prompts
+def run_requests(csvw, tier, group, prompts, n, url):
     rng = random.Random(seed + GROUP_SEED_OFFSET[group])
     order = list(range(len(prompts)))
     rng.shuffle(order)
@@ -217,10 +191,11 @@ def run_requests(csvw, run_cfg):
         mean = sum(ttfts) / len(ttfts)
         median = ttfts[len(ttfts) // 2]
         p95 = ttfts[int(len(ttfts) * 0.95) - 1]
-        logger.info(f"  [{group}] tier={tier} done={done} "
-                    f"ttft mean={mean:.1f} median={median:.1f} p95={p95:.1f} "
-                    f"hits_w1_delta={h1_1 - h1_0:.0f} hits_w2_delta={h2_1 - h2_0:.0f}")
-        logger.info(f"  [{group}] sorted={[round(t, 1) for t in ttfts]}")
+        print(f"  [{group}] tier={tier} done={done} "
+              f"ttft mean={mean:.1f} median={median:.1f} p95={p95:.1f} "
+              f"hits_w1_delta={h1_1 - h1_0:.0f} hits_w2_delta={h2_1 - h2_0:.0f}",
+              flush=True)
+        print(f"  [{group}] sorted={[round(t, 1) for t in ttfts]}", flush=True)
     return done, h1_1 - h1_0, h2_1 - h2_0
 
 
@@ -230,8 +205,8 @@ def build_shared_dataset(tok_url, tier, overhead, group, n):
     n_pref = calibrate_prefix(tok_url, header, tier, overhead)
     prefix = header + " " + " ".join([SENTENCE] * n_pref)
     pref_tokens = tokenize_count(tok_url, prefix) + overhead
-    logger.info(f"  [dataset {group}] tier={tier} prefix: header+{n_pref} sentences "
-                f"(={pref_tokens} tokens)")
+    print(f"  [dataset {group}] tier={tier} prefix: header+{n_pref} sentences "
+          f"(={pref_tokens} tokens)", flush=True)
     tails = []
     for i in range(n):
         tgt = random.Random(seed_g + i * 7 + 1).randint(256, 512)
@@ -257,7 +232,7 @@ def main():
     url = AIGW
 
     overhead = measure_template_overhead(W1)
-    logger.info(f"[setup] template overhead={overhead} tokens")
+    print(f"[setup] template overhead={overhead} tokens", flush=True)
 
     with open(args.out, "a", newline="") as f:
         csvw = csv.writer(f)
@@ -268,8 +243,8 @@ def main():
             datasets = {}
             for group in groups:
                 if group == "control":
-                    logger.info(f"  [dataset control] tier={tier} independent prompts "
-                                f"(no shared prefix)")
+                    print(f"  [dataset control] tier={tier} independent prompts "
+                          f"(no shared prefix)", flush=True)
                 else:
                     datasets[group] = build_shared_dataset(tok_url, tier, overhead, group, args.n)
 
@@ -277,20 +252,20 @@ def main():
                 if group == "control":
                     prompts = [calibrate_independent(tok_url, tier, overhead)
                                for _ in range(args.n)]
-                    logger.info(f"  [control] tier={tier} leastConn + independent prompts, "
-                                f"n={args.n} ...")
+                    print(f"  [control] tier={tier} leastConn + independent prompts, "
+                          f"n={args.n} ...", flush=True)
                 else:
                     prefix, tails = datasets[group]
                     warm_prompt = prefix + " " + tails[0][0]
-                    ttft, ok = sse_ttft(urllib.parse.urljoin(W1, "v1/chat/completions"),
-                                         chat_body(warm_prompt))
-                    logger.info(f"  [warm {group}] worker1 direct ttft={ttft:.1f}ms ok={ok}")
+                    ttft, ok = sse_ttft(W1 + "/v1/chat/completions", chat_body(warm_prompt))
+                    print(f"  [warm {group}] worker1 direct ttft={ttft:.1f}ms ok={ok}",
+                          flush=True)
                     time.sleep(3)
                     prompts = [(prefix + " " + t, tn) for t, tn in tails]
-                    logger.info(f"  [{group}] tier={tier} shared-prefix prompts, n={args.n} ...")
-                run_requests(csvw, RunConfig(tier=tier, group=group, n=args.n,
-                                             url=url, prompts=prompts))
-    logger.info("[done]")
+                    print(f"  [{group}] tier={tier} shared-prefix prompts, n={args.n} ...",
+                          flush=True)
+                run_requests(csvw, tier, group, prompts, args.n, url)
+    print("[done]")
 
 
 if __name__ == "__main__":

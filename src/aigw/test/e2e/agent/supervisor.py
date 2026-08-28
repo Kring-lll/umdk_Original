@@ -16,7 +16,6 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass
 from typing import Any
 
 from fault_driver import reached_turn  # type: ignore
@@ -36,8 +35,7 @@ class _AgentProcess:
 
     def _start_reader(self) -> None:
         def _read():
-            if self.proc.stdout is None:
-                raise RuntimeError("agent process stdout is None")
+            assert self.proc.stdout is not None
             for line in self.proc.stdout:
                 with self._lock:
                     self.stdout_lines.append(line.rstrip("\n"))
@@ -47,16 +45,6 @@ class _AgentProcess:
     def turn_lines(self) -> list[str]:
         with self._lock:
             return list(self.stdout_lines)
-
-
-@dataclass
-class _StartArgs:
-    """Correlated arguments for spawning an agent subprocess."""
-
-    session_id: str
-    task: str
-    workspace: str
-    from_turn: int = 0
 
 
 class SubprocessSupervisor:
@@ -72,14 +60,14 @@ class SubprocessSupervisor:
         self.turn_delay = turn_delay
         self._agents: dict[str, _AgentProcess] = {}
 
-    def _start(self, agent_id: str, args: _StartArgs, restart: bool) -> None:
-        workspace = args.workspace
+    def _start(self, agent_id: str, session_id: str, task: str,
+               workspace: str, restart: bool, from_turn: int = 0) -> None:
         os.makedirs(workspace, exist_ok=True)
         argv = [
             sys.executable, _AGENT_SCRIPT,
             "--aigw-url", self.aigw_url, "--vllm-url", self.vllm_url,
-            "--agent-id", agent_id, "--session-id", args.session_id,
-            "--model", self.model, "--task", args.task, "--task-prompt", f"do {args.task}",
+            "--agent-id", agent_id, "--session-id", session_id,
+            "--model", self.model, "--task", task, "--task-prompt", f"do {task}",
             "--workspace", workspace, "--max-turns", "20",
         ]
         if self.hb > 0:
@@ -94,17 +82,13 @@ class SubprocessSupervisor:
 
     def start_agent(self, agent_id: str, session_id: str, task: str,
                     workspace: str) -> None:
-        self._start(agent_id, _StartArgs(session_id=session_id, task=task, workspace=workspace),
-                    restart=False)
+        self._start(agent_id, session_id, task, workspace, restart=False)
 
     def restart_agent(self, agent_id: str, session_id: str, task: str,
                       workspace: str, from_turn: int = 0) -> None:
         # kill any lingering proc, then start fresh with --restart
         self.kill_agent(agent_id)
-        self._start(agent_id,
-                    _StartArgs(session_id=session_id, task=task, workspace=workspace,
-                               from_turn=from_turn),
-                    restart=True)
+        self._start(agent_id, session_id, task, workspace, restart=True, from_turn=from_turn)
 
     def agent_pid(self, agent_id: str) -> int:
         ap = self._agents.get(agent_id)

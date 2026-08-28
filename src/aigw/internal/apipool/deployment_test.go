@@ -1,8 +1,3 @@
-/*
- * SPDX-License-Identifier: MIT
- * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
- */
-
 // internal/apipool/deployment_test.go
 package apipool
 

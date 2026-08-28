@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: Unit tests for ZMQ receive error classification and reconnect trigger.
  * Create: 2026-08-05

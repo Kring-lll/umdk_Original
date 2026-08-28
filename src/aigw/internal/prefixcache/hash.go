@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: Hash computation for prefix cache, matching vLLM/aibrix implementation.
  *   - Tokens are encoded as uint32 big-endian (4 bytes per token)

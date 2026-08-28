@@ -2,7 +2,6 @@
 // +build cshared
 
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
  * Description: Server provides north interfaces for AIGW.
  * Create: 2026-01-15

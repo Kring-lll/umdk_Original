@@ -1,8 +1,3 @@
-/*
- * SPDX-License-Identifier: MIT
- * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
- */
-
 // Package agentregistry tracks agent lifecycle (register/heartbeat/suspect/recover/gone)
 // and broadcasts state transitions to subscribers (per-model KvcSessionManager).
 // It does NOT import internal/gs (avoids import cycle). Subscribers implement Subscriber.

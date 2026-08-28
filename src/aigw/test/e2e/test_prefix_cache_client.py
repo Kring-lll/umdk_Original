@@ -12,15 +12,12 @@ Usage:
 import argparse
 import concurrent.futures
 import json
-import logging
 import sys
 import threading
 import time
 import urllib.request
 import urllib.error
 import uuid
-
-logger = logging.getLogger(__name__)
 
 AIGW_HOST = "127.0.0.1"
 AIGW_PORT = 8701
@@ -35,7 +32,6 @@ WORKER_INSTANCES = [
 # ============================================================================
 # HTTP UTILITIES
 # ============================================================================
-
 
 def build_url(path):
     return f"http://{AIGW_HOST}:{AIGW_PORT}{path}"
@@ -88,7 +84,7 @@ def _cache_op(method, worker_ip, worker_port, path, body=None):
     status, data = do_request("POST", url, body)
     if status == 200:
         return True
-    logger.warning(f"  [WARN] {method} on {worker_ip}:{worker_port}: status={status}, data={data}")
+    print(f"  [WARN] {method} on {worker_ip}:{worker_port}: status={status}, data={data}")
     return False
 
 
@@ -124,12 +120,12 @@ def register_instance(name, model, ip, port, role):
             "port": str(port), "role": role}
     status, data = do_request("POST", build_url("/aigw/v1/register-instance"), body)
     if status == 200:
-        logger.info(f"  [OK] Registered: {name} ({ip}:{port})")
+        print(f"  [OK] Registered: {name} ({ip}:{port})")
         return True
     if "already exists" in str(data.get("error", "")):
-        logger.info(f"  [OK] Already registered: {name} ({ip}:{port})")
+        print(f"  [OK] Already registered: {name} ({ip}:{port})")
         return True
-    logger.warning(f"  [WARN] Register failed {name}: status={status}, data={data}")
+    print(f"  [WARN] Register failed {name}: status={status}, data={data}")
     return False
 
 
@@ -137,9 +133,9 @@ def unregister_instance(model, ip, port):
     body = {"model": model, "instanceIp": ip, "port": str(port)}
     status, data = do_request("POST", build_url("/aigw/v1/unregister-instance"), body)
     if status == 200:
-        logger.info(f"  [OK] Unregistered {ip}:{port}")
+        print(f"  [OK] Unregistered {ip}:{port}")
         return True
-    logger.warning(f"  [WARN] Unregister failed {ip}:{port}: status={status}, data={data}")
+    print(f"  [WARN] Unregister failed {ip}:{port}: status={status}, data={data}")
     return False
 
 
@@ -157,7 +153,7 @@ def assert_routed_to(instance, expected, msg=""):
     """Assert routing matches expected worker, return False on mismatch."""
     if instance == expected:
         return True
-    logger.error(f"  [FAIL] Expected {expected}, got {instance}" + (f" ({msg})" if msg else ""))
+    print(f"  [FAIL] Expected {expected}, got {instance}" + (f" ({msg})" if msg else ""))
     return False
 
 
@@ -165,7 +161,7 @@ def assert_not_routed_to(instance, avoid, msg=""):
     """Assert routing does NOT go to a specific worker."""
     if instance != avoid:
         return True
-    logger.error(f"  [FAIL] Should not route to {avoid}" + (f" ({msg})" if msg else ""))
+    print(f"  [FAIL] Should not route to {avoid}" + (f" ({msg})" if msg else ""))
     return False
 
 
@@ -173,7 +169,7 @@ def analyze_routing_distribution(results):
     """Print routing distribution summary. Returns (unique_nodes, main_node_count, other_count)."""
     unique = set(results)
     counts = {r: results.count(r) for r in unique}
-    logger.info(f"  Distribution: {dict(sorted(counts.items()))}")
+    print(f"  Distribution: {dict(sorted(counts.items()))}")
     main_count = max(counts.values()) if counts else 0
     other_count = len(results) - main_count
     return unique, main_count, other_count
@@ -181,12 +177,12 @@ def analyze_routing_distribution(results):
 
 def test_health():
     """Test AIGW health endpoint."""
-    logger.info("\n=== Test: Health Check ===")
+    print("\n=== Test: Health Check ===")
     status, data = do_request("GET", build_url("/aigw/v1/health"))
     if status == 200:
-        logger.info(f"[PASS] Health check: {status}")
+        print(f"[PASS] Health check: {status}")
         return True
-    logger.error(f"[FAIL] Health check: status={status}, data={data}")
+    print(f"[FAIL] Health check: status={status}, data={data}")
     return False
 
 
@@ -201,13 +197,13 @@ def register_instance(name, model, ip, port, role):
     }
     status, data = do_request("POST", build_url("/aigw/v1/register-instance"), body)
     if status == 200:
-        logger.info(f"  [OK] Registered instance: {name} ({ip}:{port})")
+        print(f"  [OK] Registered instance: {name} ({ip}:{port})")
         return True
     elif "already exists" in str(data.get("error", "")):
-        logger.info(f"  [OK] Instance already registered: {name} ({ip}:{port})")
+        print(f"  [OK] Instance already registered: {name} ({ip}:{port})")
         return True  # Ignore already exists error
     else:
-        logger.warning(f"  [WARN] Failed to register {name}: status={status}, data={data}")
+        print(f"  [WARN] Failed to register {name}: status={status}, data={data}")
         return False
 
 
@@ -230,12 +226,10 @@ def store_prefix_cache(worker_ip, worker_port, content, num_blocks=3):
     body = {"content": content, "num_blocks": num_blocks}
     status, data = do_request("POST", url, body)
     if status == 200:
-        logger.info(f"  [OK] Stored prefix cache on {worker_ip}:{worker_port}")
+        print(f"  [OK] Stored prefix cache on {worker_ip}:{worker_port}")
         return True
     else:
-        logger.warning(
-            f"  [WARN] Failed to store prefix cache on {worker_ip}:{worker_port}: "
-            f"status={status}, data={data}")
+        print(f"  [WARN] Failed to store prefix cache on {worker_ip}:{worker_port}: status={status}, data={data}")
         return False
 
 
@@ -245,30 +239,28 @@ def remove_prefix_cache(worker_ip, worker_port, content, num_blocks=2):
     body = {"content": content, "num_blocks": num_blocks}
     status, data = do_request("POST", url, body)
     if status == 200:
-        logger.info(f"  [OK] Removed prefix cache from {worker_ip}:{worker_port}")
+        print(f"  [OK] Removed prefix cache from {worker_ip}:{worker_port}")
         return True
-    logger.warning(
-        f"  [WARN] Failed to remove prefix cache from {worker_ip}:{worker_port}: "
-        f"status={status}, data={data}")
+    print(f"  [WARN] Failed to remove prefix cache from {worker_ip}:{worker_port}: status={status}, data={data}")
     return False
 
 
 def test_suggestion(model):
     """Test suggestion endpoint."""
-    logger.info(f"\n=== Test: Suggestion ({model}) ===")
+    print(f"\n=== Test: Suggestion ({model}) ===")
     status, _, data = send_suggestion(model, "Hello, what is AI?", "suggestion")
     if status == 200:
-        logger.info(f"[PASS] Suggestion: {json.dumps(data, indent=2)[:200]}")
+        print(f"[PASS] Suggestion: {json.dumps(data, indent=2)[:200]}")
         return True
-    logger.error(f"[FAIL] Suggestion: status={status}, data={data}")
+    print(f"[FAIL] Suggestion: status={status}, data={data}")
     return False
 
 
 def test_prefix_matching_same_prompt(model):
     """Test that identical prompts route to the same instance."""
-    logger.info(f"\n=== Test: Same Prompt -> Same Instance ===")
+    print(f"\n=== Test: Same Prompt -> Same Instance ===")
     prompt = "What is the capital of France?"
-    logger.info("Storing prefix cache on worker-19000...")
+    print("Storing prefix cache on worker-19000...")
     store_prefix_cache("127.0.0.1", 19000, prompt, num_blocks=16)
     time.sleep(1)
 
@@ -276,16 +268,16 @@ def test_prefix_matching_same_prompt(model):
     for i in range(3):
         status, instance, _ = send_suggestion(model, prompt, f"same-{i}")
         if status != 200:
-            logger.error(f"  Request {i+1}: FAILED (status={status})")
+            print(f"  Request {i+1}: FAILED (status={status})")
             return False
         instances.append(instance)
-        logger.info(f"  Request {i+1}: routed to {instance}")
+        print(f"  Request {i+1}: routed to {instance}")
 
     all_same = all(inst == instances[0] for inst in instances)
     if all_same:
-        logger.info(f"[PASS] All {len(instances)} requests routed to same instance: {instances[0]}")
+        print(f"[PASS] All {len(instances)} requests routed to same instance: {instances[0]}")
         return True
-    logger.error(f"[ERROR] Requests routed to different instances: {instances}")
+    print(f"[ERROR] Requests routed to different instances: {instances}")
     return False
 
 
@@ -301,12 +293,12 @@ def test_prefix_matching_shared_prefix(model):
     (same prompt) will achieve high match percentage. For partial prefix matching,
     the stored content must have identical padding to query content.
     """
-    logger.info(f"\n=== Test: Shared Prefix -> Same Instance ===")
+    print(f"\n=== Test: Shared Prefix -> Same Instance ===")
 
     # Store a prompt on worker-19002
     # Using the same prompt for all queries ensures 100% match
     shared_prompt = "What is the best way to learn programming, pls"
-    logger.info(f"Storing shared prompt '{shared_prompt}' on worker-19002...")
+    print(f"Storing shared prompt '{shared_prompt}' on worker-19002...")
     store_prefix_cache("127.0.0.1", 19002, shared_prompt, num_blocks=16)
     time.sleep(1)
 
@@ -323,18 +315,18 @@ def test_prefix_matching_shared_prefix(model):
     for i, prompt in enumerate(prompts):
         status, instance, data = send_suggestion(model, prompt, f"shared-{i}")
         if status != 200:
-            logger.error(f"  Request {i+1}: FAILED (status={status})")
+            print(f"  Request {i+1}: FAILED (status={status})")
             return False
         instances.append(instance)
-        logger.info(f"  Request {i+1}: routed to {instance}")
+        print(f"  Request {i+1}: routed to {instance}")
 
     # Check if all prompts went to the same instance (should route to worker-19002)
     all_same = all(inst == instances[0] for inst in instances)
     if all_same:
-        logger.info(f"[PASS] All shared-prefix requests routed to same instance: {instances[0]}")
+        print(f"[PASS] All shared-prefix requests routed to same instance: {instances[0]}")
         return True
     else:
-        logger.error(f"[ERROR] Requests routed to different instances: {instances}")
+        print(f"[ERROR] Requests routed to different instances: {instances}")
         # This may be expected if prefix cache integration is incomplete
         return False
 
@@ -352,17 +344,17 @@ def test_different_prompts(model):
     If prefix cache works correctly, each query should route to the worker
     that has the matching prefix stored.
     """
-    logger.info(f"\n=== Test: Different Prompts -> Different Instances ===")
+    print(f"\n=== Test: Different Prompts -> Different Instances ===")
 
     # Store different prompts on different workers
     prompt_worker_a = "What is machine learning?"
     prompt_worker_b = "How does neural network work?"
 
-    logger.info(f"Storing prompt A on worker-19000: '{prompt_worker_a}'")
+    print(f"Storing prompt A on worker-19000: '{prompt_worker_a}'")
     store_prefix_cache("127.0.0.1", 19000, prompt_worker_a, num_blocks=16)
     time.sleep(0.5)
 
-    logger.info(f"Storing prompt B on worker-19003: '{prompt_worker_b}'")
+    print(f"Storing prompt B on worker-19003: '{prompt_worker_b}'")
     store_prefix_cache("127.0.0.1", 19003, prompt_worker_b, num_blocks=16)
     time.sleep(1)
 
@@ -376,25 +368,25 @@ def test_different_prompts(model):
     for expected_worker, prompt, name in test_cases:
         status, instance, _ = send_suggestion(model, prompt, f"diff-{name.lower()}")
         if status != 200:
-            logger.error(f"  {name}: FAILED (status={status})")
+            print(f"  {name}: FAILED (status={status})")
             return False
         routed_to = instance or "unknown"
         results[name] = {"expected": expected_worker, "actual": routed_to}
         match = "✓" if routed_to == expected_worker else "✗"
-        logger.info(f"  {name}: expected={expected_worker}, actual={routed_to} {match}")
+        print(f"  {name}: expected={expected_worker}, actual={routed_to} {match}")
 
     # Verify routing
     all_correct = True
     for name, result in results.items():
         if result["actual"] != result["expected"]:
             all_correct = False
-            logger.error(f"[ERROR] {name} routed to {result['actual']}, expected {result['expected']}")
+            print(f"[ERROR] {name} routed to {result['actual']}, expected {result['expected']}")
 
     if all_correct:
-        logger.info(f"[PASS] All {len(results)} different prompts routed to correct instances")
+        print(f"[PASS] All {len(results)} different prompts routed to correct instances")
         return True
     else:
-        logger.info(f"[INFO] Prefix cache routing mismatch - may fall back to LB")
+        print(f"[INFO] Prefix cache routing mismatch - may fall back to LB")
         # Don't fail the test - fallback to LB is expected behavior
         return True
 
@@ -411,52 +403,52 @@ def test_prefix_cache_eviction(model):
     4. Sends 3 more requests - they should NOT all route to worker-19000
        (since cache was cleared, fallback to LB)
     """
-    logger.info(f"\n=== Test: Prefix Cache Eviction ===")
+    print(f"\n=== Test: Prefix Cache Eviction ===")
 
     # Store a prompt on worker-19000
     prompt = "Explain the theory of relativity in simple terms"
-    logger.info(f"Storing prompt on worker-19000: '{prompt}'")
+    print(f"Storing prompt on worker-19000: '{prompt}'")
     store_prefix_cache("127.0.0.1", 19000, prompt, num_blocks=16)
     time.sleep(1)
 
     # Step 1: Verify request routes to worker-19000 (before eviction)
-    logger.info("\nStep 1: Verify prefix cache hit before eviction...")
+    print("\nStep 1: Verify prefix cache hit before eviction...")
     status, instance, _ = send_suggestion(model, prompt, "evict-before")
     if status == 200:
         before_eviction_ok = assert_routed_to(instance, "127.0.0.1:19000", "before eviction")
     else:
-        logger.error(f"  Before eviction: FAILED (status={status})")
+        print(f"  Before eviction: FAILED (status={status})")
         before_eviction_ok = False
 
     # Step 2: Trigger blockRemoved event
-    logger.info(f"\nStep 2: Trigger blockRemoved event on worker-19000...")
+    print(f"\nStep 2: Trigger blockRemoved event on worker-19000...")
     remove_prefix_cache("127.0.0.1", 19000, prompt, num_blocks=16)
     time.sleep(1)
 
     # Step 3: Send 3 requests - should NOT all go to worker-19000
-    logger.info("\nStep 3: Send 3 requests after eviction (expect fallback to LB)...")
+    print("\nStep 3: Send 3 requests after eviction (expect fallback to LB)...")
     results_after = []
     for i in range(3):
         status, instance, data = send_suggestion(model, prompt, f"evict-after-{i}")
         if status == 200:
             results_after.append(instance)
-            logger.info(f"  Request {i+1}: routed to {instance}")
+            print(f"  Request {i+1}: routed to {instance}")
         else:
-            logger.error(f"  Request {i+1}: FAILED (status={status})")
+            print(f"  Request {i+1}: FAILED (status={status})")
             results_after.append("unknown")
 
     # Verify: Not all requests should route to the same node
     # If prefix cache was properly cleared, requests will fallback to LB
     unique_nodes = set(results_after)
-    logger.info(f"\nStep 4: Verify routing behavior...")
-    logger.info(f"  Unique nodes after eviction: {unique_nodes}")
+    print(f"\nStep 4: Verify routing behavior...")
+    print(f"  Unique nodes after eviction: {unique_nodes}")
 
     # Calculate how many went to worker-19000 vs other nodes
     worker_19000_count = results_after.count("127.0.0.1:19000")
     other_nodes_count = len(results_after) - worker_19000_count
 
-    logger.info(f"  Requests to worker-19000: {worker_19000_count}")
-    logger.info(f"  Requests to other nodes: {other_nodes_count}")
+    print(f"  Requests to worker-19000: {worker_19000_count}")
+    print(f"  Requests to other nodes: {other_nodes_count}")
 
     # PASS if:
     # 1. Before eviction, we got a prefix cache hit
@@ -464,17 +456,17 @@ def test_prefix_cache_eviction(model):
     # OR if before_eviction_ok is False, still pass (prefix cache not enabled)
     if before_eviction_ok:
         if len(unique_nodes) > 1:
-            logger.info(f"[PASS] After eviction, requests distributed across {len(unique_nodes)} nodes")
+            print(f"[PASS] After eviction, requests distributed across {len(unique_nodes)} nodes")
             return True
         elif other_nodes_count > 0:
-            logger.info(f"[PASS] After eviction, {other_nodes_count} requests routed to different nodes")
+            print(f"[PASS] After eviction, {other_nodes_count} requests routed to different nodes")
             return True
         else:
-            logger.warning(f"[WARN] All requests still routed to worker-19000 after eviction")
-            logger.warning(f"[WARN] Prefix cache may not be properly refreshed")
+            print(f"[WARN] All requests still routed to worker-19000 after eviction")
+            print(f"[WARN] Prefix cache may not be properly refreshed")
             return False  # Don't fail - just informational
     else:
-        logger.info(f"[INFO] Before eviction routing failed - prefix cache may not be enabled")
+        print(f"[INFO] Before eviction routing failed - prefix cache may not be enabled")
         return False  # Don't fail - prefix cache not enabled
 
 
@@ -489,73 +481,73 @@ def test_prefix_cache_clear_all(model):
     3. Triggers AllBlocksCleared event on worker-19001
     4. Sends 3 more requests - they should be distributed to different nodes
     """
-    logger.info(f"\n=== Test: Prefix Cache Clear All ===")
+    print(f"\n=== Test: Prefix Cache Clear All ===")
 
     # Clear any existing cache first
-    logger.info("Clearing all prefix caches...")
+    print("Clearing all prefix caches...")
     clear_all_prefix_cache("127.0.0.1", 19001)
     time.sleep(0.5)
 
     # Store a prompt on worker-19001
     prompt = "What is artificial intelligence?"
-    logger.info(f"Storing prompt on worker-19001: '{prompt}'")
+    print(f"Storing prompt on worker-19001: '{prompt}'")
     store_prefix_cache("127.0.0.1", 19001, prompt, num_blocks=16)
     time.sleep(1)
 
     # Step 1: Verify request routes to worker-19001 (before clear)
-    logger.info("\nStep 1: Verify prefix cache hit before clear...")
+    print("\nStep 1: Verify prefix cache hit before clear...")
     status, routed_to, _ = send_suggestion(model, prompt, "clear-before")
     if status == 200:
         before_clear_ok = assert_routed_to(routed_to, "127.0.0.1:19001", "before clear")
     else:
-        logger.error(f"  Before clear: FAILED (status={status})")
+        print(f"  Before clear: FAILED (status={status})")
         before_clear_ok = False
 
     # Step 2: Trigger AllBlocksCleared event
-    logger.info(f"\nStep 2: Trigger AllBlocksCleared event on worker-19001...")
+    print(f"\nStep 2: Trigger AllBlocksCleared event on worker-19001...")
     clear_all_prefix_cache("127.0.0.1", 19001)
     time.sleep(1)
 
     # Step 3: Send 3 requests - should be distributed across nodes
-    logger.info("\nStep 3: Send 3 requests after clear (expect distributed routing)...")
+    print("\nStep 3: Send 3 requests after clear (expect distributed routing)...")
     results_after = []
     for i in range(3):
         status, instance, _ = send_suggestion(model, prompt, f"clear-after-{i}")
         if status == 200:
             results_after.append(instance)
-            logger.info(f"  Request {i+1}: routed to {instance}")
+            print(f"  Request {i+1}: routed to {instance}")
         else:
-            logger.error(f"  Request {i+1}: FAILED (status={status})")
+            print(f"  Request {i+1}: FAILED (status={status})")
             results_after.append("unknown")
 
     # Verify routing distribution
     unique_nodes = set(results_after)
-    logger.info(f"\nStep 4: Verify routing behavior...")
-    logger.info(f"  Unique nodes after clear: {unique_nodes}")
+    print(f"\nStep 4: Verify routing behavior...")
+    print(f"  Unique nodes after clear: {unique_nodes}")
 
     # Count routing to 19001 vs other nodes
     worker_19001_count = results_after.count("127.0.0.1:19001")
     other_nodes_count = len(results_after) - worker_19001_count
 
-    logger.info(f"  Requests to worker-19001: {worker_19001_count}")
-    logger.info(f"  Requests to other nodes: {other_nodes_count}")
+    print(f"  Requests to worker-19001: {worker_19001_count}")
+    print(f"  Requests to other nodes: {other_nodes_count}")
 
     # PASS if:
     # 1. Before clear, we got a prefix cache hit
     # 2. After clear, not all requests go to the same node
     if before_clear_ok:
         if len(unique_nodes) > 1:
-            logger.info(f"[PASS] After clear, requests distributed across {len(unique_nodes)} nodes")
+            print(f"[PASS] After clear, requests distributed across {len(unique_nodes)} nodes")
             return True
         elif other_nodes_count > 0:
-            logger.info(f"[PASS] After clear, {other_nodes_count} requests routed to different nodes")
+            print(f"[PASS] After clear, {other_nodes_count} requests routed to different nodes")
             return True
         else:
-            logger.warning(f"[WARN] All requests still routed to worker-19001 after clear")
-            logger.warning(f"[WARN] AllBlocksCleared may not be properly processed")
+            print(f"[WARN] All requests still routed to worker-19001 after clear")
+            print(f"[WARN] AllBlocksCleared may not be properly processed")
             return False
     else:
-        logger.info(f"[INFO] Before clear routing failed - prefix cache may not be enabled")
+        print(f"[INFO] Before clear routing failed - prefix cache may not be enabled")
         return False
 
 
@@ -572,71 +564,71 @@ def test_prefix_cache_on_unregister(model):
     5. Re-registers worker-19002
     6. Sends 3 requests - should be distributed across different nodes
     """
-    logger.info(f"\n=== Test: Prefix Cache On Unregister ===")
+    print(f"\n=== Test: Prefix Cache On Unregister ===")
 
     # Clear any existing cache first (instances already registered by register_all_instances)
-    logger.info("Clearing all prefix caches on worker-19002...")
+    print("Clearing all prefix caches on worker-19002...")
     clear_all_prefix_cache("127.0.0.1", 19002)
     time.sleep(0.5)
 
     # Store a prompt on worker-19002
     prompt = "Tell me about machine learning algorithms"
-    logger.info(f"Storing prompt on worker-19002: '{prompt}'")
+    print(f"Storing prompt on worker-19002: '{prompt}'")
     store_prefix_cache("127.0.0.1", 19002, prompt, num_blocks=16)
     time.sleep(1)
 
     # Step 1: Verify request routes to worker-19002 (before unregister)
-    logger.info("\nStep 1: Verify prefix cache hit before unregister...")
+    print("\nStep 1: Verify prefix cache hit before unregister...")
     status, routed_to, _ = send_suggestion(model, prompt, "unreg-before")
     if status == 200:
         before_unreg_ok = assert_routed_to(routed_to, "127.0.0.1:19002", "before unregister")
     else:
-        logger.error(f"  Before unregister: FAILED (status={status})")
+        print(f"  Before unregister: FAILED (status={status})")
         before_unreg_ok = False
 
     # Step 2: Unregister worker-19002 from AIGW (which should clean prefixStore)
-    logger.info(f"\nStep 2: Unregister worker-19002 from AIGW...")
+    print(f"\nStep 2: Unregister worker-19002 from AIGW...")
     unregister_instance(model, "127.0.0.1", "19002")
     time.sleep(1)
 
     # Step 3: Send 1 request - should NOT route to worker-19002 (prefixStore was cleaned)
-    logger.info("\nStep 3: Send 1 request after unregister (expect NOT to 19002)...")
+    print("\nStep 3: Send 1 request after unregister (expect NOT to 19002)...")
     status, instance, _ = send_suggestion(model, prompt, "unreg-after")
     cache_cleared = False
     if status == 200:
-        logger.info(f"  After unregister: routed to {instance}")
+        print(f"  After unregister: routed to {instance}")
         cache_cleared = assert_not_routed_to(instance, "127.0.0.1:19002", "after unregister")
     else:
-        logger.error(f"  Request FAILED (status={status})")
+        print(f"  Request FAILED (status={status})")
 
     # Step 4: Re-register worker-19002 (role must match original: "mixed")
-    logger.info(f"\nStep 4: Re-register worker-19002...")
+    print(f"\nStep 4: Re-register worker-19002...")
     register_instance("worker-19002", model, "127.0.0.1", 19002, "mixed")
     time.sleep(0.5)
 
     # Step 5: Send 3 requests - should be distributed across different nodes
-    logger.info("\nStep 5: Send 3 requests after re-register (expect distributed routing)...")
+    print("\nStep 5: Send 3 requests after re-register (expect distributed routing)...")
     results_after = []
     for i in range(3):
         status, instance, _ = send_suggestion(model, prompt, f"rereg-after-{i}")
         if status == 200:
             results_after.append(instance)
-            logger.info(f"  Request {i+1}: routed to {instance}")
+            print(f"  Request {i+1}: routed to {instance}")
         else:
-            logger.error(f"  Request {i+1}: FAILED (status={status})")
+            print(f"  Request {i+1}: FAILED (status={status})")
             results_after.append("unknown")
 
     # Step 6: Verify routing distribution
     unique_nodes = set(results_after)
-    logger.info(f"\nStep 6: Verify routing behavior...")
-    logger.info(f"  Unique nodes after re-register: {unique_nodes}")
+    print(f"\nStep 6: Verify routing behavior...")
+    print(f"  Unique nodes after re-register: {unique_nodes}")
 
     # Count routing to 19002 vs other nodes
     worker_19002_count = results_after.count("127.0.0.1:19002")
     other_nodes_count = len(results_after) - worker_19002_count
 
-    logger.info(f"  Requests to worker-19002: {worker_19002_count}")
-    logger.info(f"  Requests to other nodes: {other_nodes_count}")
+    print(f"  Requests to worker-19002: {worker_19002_count}")
+    print(f"  Requests to other nodes: {other_nodes_count}")
 
     # PASS if:
     # 1. Before unregister, we got a prefix cache hit
@@ -644,19 +636,19 @@ def test_prefix_cache_on_unregister(model):
     # 3. After re-register, requests are distributed
     if before_unreg_ok and cache_cleared:
         if len(unique_nodes) > 1:
-            logger.info(f"[PASS] After re-register, requests distributed across {len(unique_nodes)} nodes")
+            print(f"[PASS] After re-register, requests distributed across {len(unique_nodes)} nodes")
             return True
         elif other_nodes_count > 0:
-            logger.info(f"[PASS] After re-register, {other_nodes_count} requests routed to different nodes")
+            print(f"[PASS] After re-register, {other_nodes_count} requests routed to different nodes")
             return True
         else:
-            logger.warning(f"[WARN] All requests still routed to worker-19002 after re-register")
+            print(f"[WARN] All requests still routed to worker-19002 after re-register")
             return False  # Still pass - main test (cache cleared) passed
     elif not cache_cleared:
-        logger.error(f"[FAIL] Prefix cache was NOT cleared by unregister")
+        print(f"[FAIL] Prefix cache was NOT cleared by unregister")
         return False
     else:
-        logger.info(f"[INFO] Before unregister routing failed - prefix cache may not be enabled")
+        print(f"[INFO] Before unregister routing failed - prefix cache may not be enabled")
         return False
 
 
@@ -676,70 +668,64 @@ def test_prefix_cache_partial_match(model):
     Step 4: 发送另一个部分查询，验证路由到 worker-19001 (部分 prefix 匹配)
     Step 5: 发送不匹配的查询，验证 fallback 到负载均衡策略
     """
-    logger.info(f"\n=== Test: Partial Prefix Matching ===")
+    print(f"\n=== Test: Partial Prefix Matching ===")
 
     # Clear caches first
-    logger.info("Clearing all prefix caches...")
+    print("Clearing all prefix caches...")
     clear_all_prefix_cache("127.0.0.1", 19000)
     clear_all_prefix_cache("127.0.0.1", 19001)
     time.sleep(0.5)
 
     # Step 1: Store complete prompt on worker-19000 (16 words -> 16 tokens)
     # Prompt must have at least 16 words to match minMatchedLength threshold (50% of 16 blocks = 8)
-    full_prompt_19000 = (
-        "Python is a programming language that is widely used for web development data analysis and "
-        "machine learning"
-    )
-    logger.info(f"Storing full prompt on worker-19000: '{full_prompt_19000}'")
+    full_prompt_19000 = "Python is a programming language that is widely used for web development data analysis and machine learning"
+    print(f"Storing full prompt on worker-19000: '{full_prompt_19000}'")
     store_prefix_cache("127.0.0.1", 19000, full_prompt_19000, num_blocks=16)
     time.sleep(0.5)
 
     # Step 2: Store different prompt on worker-19001 (16 words -> 16 tokens)
-    full_prompt_19001 = (
-        "Java is a programming language that runs on the Java Virtual Machine and is known for its "
-        "portability"
-    )
-    logger.info(f"Storing full prompt on worker-19001: '{full_prompt_19001}'")
+    full_prompt_19001 = "Java is a programming language that runs on the Java Virtual Machine and is known for its portability"
+    print(f"Storing full prompt on worker-19001: '{full_prompt_19001}'")
     store_prefix_cache("127.0.0.1", 19001, full_prompt_19001, num_blocks=16)
     time.sleep(0.5)
 
     # Step 3: Query with partial prefix of worker-19000's prompt (at least 8 words for 50% match)
-    logger.info("\nStep 3: Query with partial prefix of worker-19000's prompt...")
+    print("\nStep 3: Query with partial prefix of worker-19000's prompt...")
     partial_query_19000 = "Python is a programming language that is widely used for web development data"
     status, instance, _ = send_suggestion(model, partial_query_19000, "partial-19000")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Partial query routed to: {instance}")
+    print(f"  Partial query routed to: {instance}")
     if instance != "127.0.0.1:19000":
-        logger.error(f"  [FAIL] Expected worker-19000, got {instance}")
+        print(f"  [FAIL] Expected worker-19000, got {instance}")
         return False
-    logger.info(f"  [OK] Partial prefix matched worker-19000")
+    print(f"  [OK] Partial prefix matched worker-19000")
 
     # Step 4: Query with partial prefix of worker-19001's prompt (at least 8 words for 50% match)
-    logger.info("\nStep 4: Query with partial prefix of worker-19001's prompt...")
+    print("\nStep 4: Query with partial prefix of worker-19001's prompt...")
     partial_query_19001 = "Java is a programming language that runs on the Java Virtual Machine and"
     status, instance, _ = send_suggestion(model, partial_query_19001, "partial-19001")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Partial query routed to: {instance}")
+    print(f"  Partial query routed to: {instance}")
     if instance != "127.0.0.1:19001":
-        logger.error(f"  [FAIL] Expected worker-19001, got {instance}")
+        print(f"  [FAIL] Expected worker-19001, got {instance}")
         return False
-    logger.info(f"  [OK] Partial prefix matched worker-19001")
+    print(f"  [OK] Partial prefix matched worker-19001")
 
     # Step 5: Query that should NOT match either stored prompt (fallback to LB)
-    logger.info("\nStep 5: Query without matching prefix...")
+    print("\nStep 5: Query without matching prefix...")
     non_matching_query = "Python is used for web applications and data science"
     status, instance, _ = send_suggestion(model, non_matching_query, "partial-nomatch")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Non-matching query routed to: {instance}")
-    logger.info(f"  [OK] Non-matching query handled (LB fallback)")
+    print(f"  Non-matching query routed to: {instance}")
+    print(f"  [OK] Non-matching query handled (LB fallback)")
 
-    logger.info(f"\n[PASS] Partial prefix matching works correctly")
+    print(f"\n[PASS] Partial prefix matching works correctly")
     return True
 
 
@@ -755,92 +741,89 @@ def test_prefix_cache_multi_instance_same_prefix(model):
     Step 5: 发送请求，验证只路由到另一个节点
     Step 6: 恢复故障节点
     """
-    logger.info(f"\n=== Test: Multi Instance Same Prefix ===")
+    print(f"\n=== Test: Multi Instance Same Prefix ===")
 
     # Clear caches first for isolation
-    logger.info("Clearing all prefix caches...")
+    print("Clearing all prefix caches...")
     clear_all_prefix_cache("127.0.0.1", 19000)
     clear_all_prefix_cache("127.0.0.1", 19001)
     time.sleep(0.5)
 
     # Step 1: Store same prompt on both worker-19000 and worker-19001 (need 16+ words)
-    same_prompt = (
-        "Deep learning neural networks are powerful models that can learn complex patterns from large "
-        "datasets through multiple layers of interconnected neurons for accurate predictions"
-    )
-    logger.info(f"Storing same prompt on worker-19000 and worker-19001...")
-    logger.info(f"  Prompt: '{same_prompt}'")
+    same_prompt = "Deep learning neural networks are powerful models that can learn complex patterns from large datasets through multiple layers of interconnected neurons for accurate predictions"
+    print(f"Storing same prompt on worker-19000 and worker-19001...")
+    print(f"  Prompt: '{same_prompt}'")
     store_prefix_cache("127.0.0.1", 19000, same_prompt, num_blocks=16)
     store_prefix_cache("127.0.0.1", 19001, same_prompt, num_blocks=16)
     time.sleep(1)
 
     # Step 2: Send 5 requests with the same prompt
-    logger.info("\nStep 2: Sending 5 requests with same prompt...")
+    print("\nStep 2: Sending 5 requests with same prompt...")
     instances = []
     for i in range(5):
         status, instance, _ = send_suggestion(model, same_prompt, f"multi-{i}")
         if status != 200:
-            logger.error(f"  Request {i+1}: [FAIL] status={status}")
+            print(f"  Request {i+1}: [FAIL] status={status}")
             return False
         instances.append(instance)
-        logger.info(f"  Request {i+1}: routed to {instance}")
+        print(f"  Request {i+1}: routed to {instance}")
 
     # Step 3: Verify requests are distributed across the two nodes (both have the prefix)
     unique_instances = set(instances)
-    logger.info(f"\nStep 3: Verifying distribution...")
-    logger.info(f"  Unique nodes: {unique_instances}")
+    print(f"\nStep 3: Verifying distribution...")
+    print(f"  Unique nodes: {unique_instances}")
 
     # Both 19000 and 19001 should be in the routing results since both have the prefix
     has_19000 = "127.0.0.1:19000" in unique_instances
     has_19001 = "127.0.0.1:19001" in unique_instances
 
     if has_19000 and has_19001:
-        logger.info(f"  [OK] Requests distributed across both nodes (multi-instance routing works)")
+        print(f"  [OK] Requests distributed across both nodes (multi-instance routing works)")
     elif has_19000 or has_19001:
-        logger.info(f"  [OK] Requests routed to one instance (LB strategy: {list(unique_instances)[0]})")
+        print(f"  [OK] Requests routed to one instance (LB strategy: {list(unique_instances)[0]})")
     else:
-        logger.error(f"  [FAIL] Unexpected routing: {unique_instances}")
+        print(f"  [FAIL] Unexpected routing: {unique_instances}")
         return False
 
     # Step 4: Simulate node failure by clearing cache on worker-19000
-    logger.info("\nStep 4: Simulating node failure (clearing cache on worker-19000)...")
+    print("\nStep 4: Simulating node failure (clearing cache on worker-19000)...")
     clear_all_prefix_cache("127.0.0.1", 19000)
     time.sleep(0.5)
 
     # Step 5: Send request - should route to 19001 only
-    logger.info("\nStep 5: Sending request after simulated failure...")
+    print("\nStep 5: Sending request after simulated failure...")
     status, instance, _ = send_suggestion(model, same_prompt, "multi-after-fail")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Request routed to: {instance}")
+    print(f"  Request routed to: {instance}")
 
     if instance == "127.0.0.1:19000":
-        logger.error(f"  [FAIL] Still routing to failed node (19000)")
+        print(f"  [FAIL] Still routing to failed node (19000)")
         return False
-    logger.info(f"  [OK] Request not routed to failed node (19000)")
+    print(f"  [OK] Request not routed to failed node (19000)")
 
     # Step 6: Restore node by re-storing cache
-    logger.info("\nStep 6: Restoring node (re-storing cache on worker-19000)...")
+    print("\nStep 6: Restoring node (re-storing cache on worker-19000)...")
     store_prefix_cache("127.0.0.1", 19000, same_prompt, num_blocks=16)
     time.sleep(0.5)
 
     # Verify both nodes can be used again
-    logger.info("\nStep 7: Verifying both nodes are available again...")
+    print("\nStep 7: Verifying both nodes are available again...")
     status, instance, _ = send_suggestion(model, same_prompt, "multi-after-restore")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Request routed to: {instance}")
+    print(f"  Request routed to: {instance}")
 
     # Should route to either 19000 or 19001
     if instance in ["127.0.0.1:19000", "127.0.0.1:19001"]:
-        logger.info(f"  [OK] Node restored, request routed to: {instance}")
+        print(f"  [OK] Node restored, request routed to: {instance}")
     else:
-        logger.error(f"  [FAIL] Unexpected routing: {instance}")
+        print(f"  [FAIL] Unexpected routing: {instance}")
         return False
 
-    logger.info(f"\n[PASS] Multi instance same prefix test passed")
+    print(f"\n[PASS] Multi instance same prefix test passed")
     return True
 
 
@@ -856,29 +839,22 @@ def test_prefix_cache_concurrent_requests(model):
     Step 5: 验证 prompt B 的请求都路由到 19001
     Step 6: 检查无锁竞争或数据竞争问题
     """
-    logger.info(f"\n=== Test: Concurrent Requests ===")
+    print(f"\n=== Test: Concurrent Requests ===")
 
     # Clear caches first for isolation
-    logger.info("Clearing all prefix caches...")
+    print("Clearing all prefix caches...")
     clear_all_prefix_cache("127.0.0.1", 19000)
     clear_all_prefix_cache("127.0.0.1", 19001)
     time.sleep(0.5)
 
     # Step 1: Store different prompts on different workers (need 16+ words each)
-    prompt_a = (
-        "Natural language processing enables computers to understand interpret and generate human "
-        "language through sophisticated algorithms and deep learning techniques for various applications"
-    )
-    prompt_b = (
-        "Computer vision allows machines to extract meaningful information from images videos and visual "
-        "inputs to perform actions or make recommendations based on that analysis for automation "
-        "purposes"
-    )
-    logger.info(f"Storing prompt A on worker-19000...")
-    logger.info(f"  Prompt A: '{prompt_a}'")
+    prompt_a = "Natural language processing enables computers to understand interpret and generate human language through sophisticated algorithms and deep learning techniques for various applications"
+    prompt_b = "Computer vision allows machines to extract meaningful information from images videos and visual inputs to perform actions or make recommendations based on that analysis for automation purposes"
+    print(f"Storing prompt A on worker-19000...")
+    print(f"  Prompt A: '{prompt_a}'")
     store_prefix_cache("127.0.0.1", 19000, prompt_a, num_blocks=16)
-    logger.info(f"Storing prompt B on worker-19001...")
-    logger.info(f"  Prompt B: '{prompt_b}'")
+    print(f"Storing prompt B on worker-19001...")
+    print(f"  Prompt B: '{prompt_b}'")
     store_prefix_cache("127.0.0.1", 19001, prompt_b, num_blocks=16)
     time.sleep(1)
 
@@ -903,7 +879,7 @@ def test_prefix_cache_concurrent_requests(model):
                 results_list.append({"error": f"status={status}"})
             return False
 
-    logger.info("\nStep 2: Sending 10 concurrent requests (5 prompt A, 5 prompt B)...")
+    print("\nStep 2: Sending 10 concurrent requests (5 prompt A, 5 prompt B)...")
 
     # Use ThreadPoolExecutor for concurrent requests
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
@@ -923,56 +899,56 @@ def test_prefix_cache_concurrent_requests(model):
         concurrent.futures.wait(futures)
 
     # Step 3: Analyze results for prompt A
-    logger.info(f"\nStep 3: Analyzing results for prompt A (expecting worker-19000)...")
-    logger.info(f"  Total requests: {len(results_a)}")
+    print(f"\nStep 3: Analyzing results for prompt A (expecting worker-19000)...")
+    print(f"  Total requests: {len(results_a)}")
     errors_a = [r for r in results_a if "error" in r]
     if errors_a:
-        logger.error(f"  [FAIL] {len(errors_a)} requests failed: {errors_a}")
+        print(f"  [FAIL] {len(errors_a)} requests failed: {errors_a}")
         return False
 
     match_a = [r for r in results_a if r.get("match")]
     mismatch_a = [r for r in results_a if not r.get("match")]
-    logger.info(f"  Matched: {len(match_a)}")
-    logger.info(f"  Mismatched: {len(mismatch_a)}")
+    print(f"  Matched: {len(match_a)}")
+    print(f"  Mismatched: {len(mismatch_a)}")
     for r in mismatch_a:
-        logger.info(f"    Expected {r['expected']}, got {r['instance']}")
+        print(f"    Expected {r['expected']}, got {r['instance']}")
 
     if len(mismatch_a) > 0:
-        logger.error(f"  [FAIL] {len(mismatch_a)} requests routed to wrong node for prompt A")
+        print(f"  [FAIL] {len(mismatch_a)} requests routed to wrong node for prompt A")
         return False
-    logger.info(f"  [OK] All prompt A requests routed to correct node")
+    print(f"  [OK] All prompt A requests routed to correct node")
 
     # Step 4: Analyze results for prompt B
-    logger.info(f"\nStep 4: Analyzing results for prompt B (expecting worker-19001)...")
-    logger.info(f"  Total requests: {len(results_b)}")
+    print(f"\nStep 4: Analyzing results for prompt B (expecting worker-19001)...")
+    print(f"  Total requests: {len(results_b)}")
     errors_b = [r for r in results_b if "error" in r]
     if errors_b:
-        logger.error(f"  [FAIL] {len(errors_b)} requests failed: {errors_b}")
+        print(f"  [FAIL] {len(errors_b)} requests failed: {errors_b}")
         return False
 
     match_b = [r for r in results_b if r.get("match")]
     mismatch_b = [r for r in results_b if not r.get("match")]
-    logger.info(f"  Matched: {len(match_b)}")
-    logger.info(f"  Mismatched: {len(mismatch_b)}")
+    print(f"  Matched: {len(match_b)}")
+    print(f"  Mismatched: {len(mismatch_b)}")
     for r in mismatch_b:
-        logger.info(f"    Expected {r['expected']}, got {r['instance']}")
+        print(f"    Expected {r['expected']}, got {r['instance']}")
 
     if len(mismatch_b) > 0:
-        logger.error(f"  [FAIL] {len(mismatch_b)} requests routed to wrong node for prompt B")
+        print(f"  [FAIL] {len(mismatch_b)} requests routed to wrong node for prompt B")
         return False
-    logger.info(f"  [OK] All prompt B requests routed to correct node")
+    print(f"  [OK] All prompt B requests routed to correct node")
 
     # Step 5: Check for race conditions (no crashes or errors)
-    logger.info(f"\nStep 5: Checking for race conditions...")
+    print(f"\nStep 5: Checking for race conditions...")
     total_requests = len(results_a) + len(results_b)
     total_errors = len([r for r in results_a + results_b if "error" in r])
     if total_errors == 0:
-        logger.info(f"  [OK] All {total_requests} concurrent requests completed without errors")
+        print(f"  [OK] All {total_requests} concurrent requests completed without errors")
     else:
-        logger.error(f"  [FAIL] {total_errors}/{total_requests} requests had errors")
+        print(f"  [FAIL] {total_errors}/{total_requests} requests had errors")
         return False
 
-    logger.info(f"\n[PASS] Concurrent requests test passed")
+    print(f"\n[PASS] Concurrent requests test passed")
     return True
 
 
@@ -989,8 +965,8 @@ def test_prefix_cache_lora_id_awareness(model):
     Step 5: 使用 Lora-B 发送查询
     Step 6: 验证查询匹配到 Lora-B 的 cache（不匹配 Lora-A 的）
     """
-    logger.info(f"\n=== Test: LoRA ID Awareness (Not Implemented) ===")
-    logger.info(f"  This test requires LoRA adapter support in the mock server and AIGW")
+    print(f"\n=== Test: LoRA ID Awareness (Not Implemented) ===")
+    print(f"  This test requires LoRA adapter support in the mock server and AIGW")
     return True
 
 
@@ -1007,78 +983,75 @@ def test_prefix_cache_degraded_mode(model):
     Step 6: 恢复 prefix cache（重新存储）
     Step 7: 验证 prefix cache 功能恢复正常
     """
-    logger.info(f"\n=== Test: Degraded Mode (Prefix Cache Unavailable) ===")
+    print(f"\n=== Test: Degraded Mode (Prefix Cache Unavailable) ===")
 
     # Clear all caches first
-    logger.info("Clearing all prefix caches...")
+    print("Clearing all prefix caches...")
     for port in [19000, 19001, 19002, 19003]:
         clear_all_prefix_cache("127.0.0.1", port)
     time.sleep(0.5)
 
     # Step 1: Store prefix cache normally
-    logger.info("\nStep 1: Storing prefix cache normally...")
-    prompt = (
-        "Reinforcement learning is a type of machine learning where an agent learns to make decisions by "
-        "taking actions in an environment to maximize a reward signal through trial and error"
-    )
-    logger.info(f"  Storing prompt on worker-19000...")
+    print("\nStep 1: Storing prefix cache normally...")
+    prompt = "Reinforcement learning is a type of machine learning where an agent learns to make decisions by taking actions in an environment to maximize a reward signal through trial and error"
+    print(f"  Storing prompt on worker-19000...")
     store_prefix_cache("127.0.0.1", 19000, prompt, num_blocks=16)
     time.sleep(0.5)
 
     # Step 2: Verify normal routing (prefix cache hit)
-    logger.info("\nStep 2: Verifying normal routing (prefix cache hit)...")
+    print("\nStep 2: Verifying normal routing (prefix cache hit)...")
     status, instance, _ = send_suggestion(model, prompt, "degraded-before")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Routed to: {instance}")
+    print(f"  Routed to: {instance}")
 
     if instance == "127.0.0.1:19000":
-        logger.info(f"  [OK] Normal routing works (prefix cache hit)")
+        print(f"  [OK] Normal routing works (prefix cache hit)")
     else:
-        logger.warning(f"  [WARN] Did not route to 19000, but request succeeded")
-        logger.info(f"  [INFO] Continuing test...")
+        print(f"  [WARN] Did not route to 19000, but request succeeded")
+        print(f"  [INFO] Continuing test...")
 
     # Step 3: Simulate prefix cache unavailable (clear all caches)
-    logger.info("\nStep 3: Simulating prefix cache unavailable (clearing all caches)...")
+    print("\nStep 3: Simulating prefix cache unavailable (clearing all caches)...")
     for port in [19000, 19001, 19002, 19003]:
         clear_all_prefix_cache("127.0.0.1", port)
     time.sleep(0.5)
 
     # Step 4: Send request - should fallback to LB and work normally
-    logger.info("\nStep 4: Sending request with prefix cache unavailable...")
+    print("\nStep 4: Sending request with prefix cache unavailable...")
     status, instance, _ = send_suggestion(model, prompt, "degraded-fallback")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed with status={status}")
-        logger.error(f"  [FAIL] Degraded mode should still allow requests via LB fallback")
+        print(f"  [FAIL] Request failed with status={status}")
+        print(f"  [FAIL] Degraded mode should still allow requests via LB fallback")
         return False
-    logger.info(f"  Routed to: {instance} (LB fallback)")
-    logger.info(f"  [OK] Request succeeded in degraded mode (LB fallback works)")
+    print(f"  Routed to: {instance} (LB fallback)")
+    print(f"  [OK] Request succeeded in degraded mode (LB fallback works)")
 
     # Step 5: Verify prefix cache returns 503 (degraded mode indicator)
     # Actually, this test verifies the request still works, not a specific status code
     # AIGW should gracefully fallback to LB when prefix cache has no entries
 
     # Step 6: Restore prefix cache
-    logger.info("\nStep 6: Restoring prefix cache...")
+    print("\nStep 6: Restoring prefix cache...")
     store_prefix_cache("127.0.0.1", 19000, prompt, num_blocks=16)
     time.sleep(0.5)
 
     # Step 7: Verify prefix cache functionality is restored
-    logger.info("\nStep 7: Verifying prefix cache functionality restored...")
+    print("\nStep 7: Verifying prefix cache functionality restored...")
     status, instance, _ = send_suggestion(model, prompt, "degraded-after")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Routed to: {instance}")
+    print(f"  Routed to: {instance}")
 
     if instance == "127.0.0.1:19000":
-        logger.info(f"  [OK] Prefix cache functionality restored")
+        print(f"  [OK] Prefix cache functionality restored")
     else:
-        logger.info(f"  [INFO] Did not route to 19000, but request succeeded")
-        logger.info(f"  [INFO] This may be due to timing or LB strategy")
+        print(f"  [INFO] Did not route to 19000, but request succeeded")
+        print(f"  [INFO] This may be due to timing or LB strategy")
 
-    logger.info(f"\n[PASS] Degraded mode test passed")
+    print(f"\n[PASS] Degraded mode test passed")
     return True
 
 
@@ -1096,52 +1069,49 @@ def test_prefix_cache_ttl_expiration(model):
     Step 4: 发送相同请求
     Step 5: 验证请求不再路由到 19000（cache 已失效）
     """
-    logger.info(f"\n=== Test: Prefix Cache TTL Expiration ===")
+    print(f"\n=== Test: Prefix Cache TTL Expiration ===")
 
     # Clear caches first
-    logger.info("Clearing all prefix caches...")
+    print("Clearing all prefix caches...")
     clear_all_prefix_cache("127.0.0.1", 19000)
     time.sleep(0.5)
 
     # Step 1: Store a prompt on worker-19000 (need 16+ words for 16 blocks)
-    prompt = (
-        "Machine learning is a subset of artificial intelligence that enables computers to learn from "
-        "data and improve performance without explicit programming for complex tasks"
-    )
-    logger.info(f"Storing prompt on worker-19000: '{prompt}'")
+    prompt = "Machine learning is a subset of artificial intelligence that enables computers to learn from data and improve performance without explicit programming for complex tasks"
+    print(f"Storing prompt on worker-19000: '{prompt}'")
     store_prefix_cache("127.0.0.1", 19000, prompt, num_blocks=16)
     time.sleep(0.5)
 
     # Step 2: Verify request routes to worker-19000 (before expiration)
-    logger.info("\nStep 2: Verify prefix cache hit before expiration...")
+    print("\nStep 2: Verify prefix cache hit before expiration...")
     status, instance, _ = send_suggestion(model, prompt, "ttl-before")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Before expiration: routed to {instance}")
+    print(f"  Before expiration: routed to {instance}")
     if instance != "127.0.0.1:19000":
-        logger.error(f"  [FAIL] Expected worker-19000, got {instance}")
+        print(f"  [FAIL] Expected worker-19000, got {instance}")
         return False
-    logger.info(f"  [OK] Prefix cache hit before expiration")
+    print(f"  [OK] Prefix cache hit before expiration")
 
     # Step 3: Trigger blockRemoved event to simulate cache expiration
-    logger.info("\nStep 3: Trigger blockRemoved event to simulate TTL expiration...")
+    print("\nStep 3: Trigger blockRemoved event to simulate TTL expiration...")
     remove_prefix_cache("127.0.0.1", 19000, prompt, num_blocks=16)
     time.sleep(0.5)
 
     # Step 4: Send request after "expiration" - should not route to 19000
-    logger.info("\nStep 4: Send request after TTL expiration...")
+    print("\nStep 4: Send request after TTL expiration...")
     status, instance, _ = send_suggestion(model, prompt, "ttl-after")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  After expiration: routed to {instance}")
+    print(f"  After expiration: routed to {instance}")
     if instance == "127.0.0.1:19000":
-        logger.error(f"  [FAIL] Still routing to worker-19000 - cache not expired")
+        print(f"  [FAIL] Still routing to worker-19000 - cache not expired")
         return False
-    logger.info(f"  [OK] Request not routed to worker-19000 after TTL expiration (LB fallback)")
+    print(f"  [OK] Request not routed to worker-19000 after TTL expiration (LB fallback)")
 
-    logger.info(f"\n[PASS] TTL expiration test passed")
+    print(f"\n[PASS] TTL expiration test passed")
     return True
 
 
@@ -1175,68 +1145,65 @@ def test_prefix_cache_prevent_circular_routing(model):
     Step 5: 验证请求不再路由到 19000（防止循环）
     Step 6: 验证请求 fallback 到负载均衡
     """
-    logger.info(f"\n=== Test: Prevent Circular Routing ===")
+    print(f"\n=== Test: Prevent Circular Routing ===")
 
     # Clear caches first
-    logger.info("Clearing all prefix caches...")
+    print("Clearing all prefix caches...")
     for port in [19000, 19001, 19002, 19003]:
         clear_all_prefix_cache("127.0.0.1", port)
     time.sleep(0.5)
 
     # Step 1: Store prefix cache on worker-19000 (need 16+ words)
-    prompt = (
-        "Gradient descent optimization algorithms are used to train neural networks by iteratively "
-        "updating weights to minimize the loss function through backpropagation of gradients"
-    )
-    logger.info(f"Storing prefix cache on worker-19000...")
+    prompt = "Gradient descent optimization algorithms are used to train neural networks by iteratively updating weights to minimize the loss function through backpropagation of gradients"
+    print(f"Storing prefix cache on worker-19000...")
     store_prefix_cache("127.0.0.1", 19000, prompt, num_blocks=16)
     time.sleep(0.5)
 
     # Step 2: Send request - should route to 19000 (prefix cache hit)
-    logger.info("\nStep 2: Sending request (expecting prefix cache hit on worker-19000)...")
+    print("\nStep 2: Sending request (expecting prefix cache hit on worker-19000)...")
     status, instance, _ = send_suggestion(model, prompt, "circular-before")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Routed to: {instance}")
+    print(f"  Routed to: {instance}")
 
     if instance != "127.0.0.1:19000":
-        logger.warning(f"  [WARN] Expected 19000 for prefix cache hit, got {instance}")
-        logger.info(f"  [INFO] This may indicate prefix cache is not enabled")
+        print(f"  [WARN] Expected 19000 for prefix cache hit, got {instance}")
+        print(f"  [INFO] This may indicate prefix cache is not enabled")
     else:
-        logger.info(f"  [OK] First request routed to 19000 (prefix cache hit)")
+        print(f"  [OK] First request routed to 19000 (prefix cache hit)")
 
     # Step 3: Simulate circular routing scenario - trigger block-removed
     # In a real scenario, this would be triggered by vLLM when it processes the request
     # Here we simulate by sending block-removed event
-    logger.info("\nStep 3: Simulating block-removed event (preventing circular routing)...")
+    print("\nStep 3: Simulating block-removed event (preventing circular routing)...")
     remove_prefix_cache("127.0.0.1", 19000, prompt, num_blocks=16)
     time.sleep(0.5)
 
     # Step 4: Send same prompt request - should NOT route to 19000
-    logger.info("\nStep 4: Sending same prompt request (should not route to 19000)...")
+    print("\nStep 4: Sending same prompt request (should not route to 19000)...")
     status, instance, _ = send_suggestion(model, prompt, "circular-after")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Routed to: {instance}")
+    print(f"  Routed to: {instance}")
 
     # Step 5: Verify request does not route to 19000 (circular routing prevented)
     if instance == "127.0.0.1:19000":
-        logger.error(f"  [FAIL] Still routing to 19000 - circular routing not prevented")
+        print(f"  [FAIL] Still routing to 19000 - circular routing not prevented")
         return False
-    logger.info(f"  [OK] Request not routed to 19000 (circular routing prevented)")
+    print(f"  [OK] Request not routed to 19000 (circular routing prevented)")
 
     # Step 6: Verify fallback to other nodes (LB should select another)
-    logger.info("\nStep 6: Verifying LB fallback works...")
+    print("\nStep 6: Verifying LB fallback works...")
     if instance in ["127.0.0.1:19001", "127.0.0.1:19002", "127.0.0.1:19003"]:
-        logger.info(f"  [OK] Request fallback to {instance} (LB working)")
+        print(f"  [OK] Request fallback to {instance} (LB working)")
     elif instance == "unknown" or instance == "":
-        logger.info(f"  [INFO] No targetPrefill returned (may be fallback to default LB)")
+        print(f"  [INFO] No targetPrefill returned (may be fallback to default LB)")
     else:
-        logger.info(f"  [INFO] Request routed to {instance} (LB selection)")
+        print(f"  [INFO] Request routed to {instance} (LB selection)")
 
-    logger.info(f"\n[PASS] Prevent circular routing test passed")
+    print(f"\n[PASS] Prevent circular routing test passed")
     return True
 
 
@@ -1257,99 +1224,91 @@ def test_prefix_cache_hash_collision(model):
     注意：由于 SHA-256 的抗碰撞性，真正的 hash 碰撞测试需要修改 hasher 逻辑。
     本测试验证 hash 唯一性保证路由隔离。
     """
-    logger.info(f"\n=== Test: Hash Collision Handling ===")
+    print(f"\n=== Test: Hash Collision Handling ===")
 
     # Clear caches first
-    logger.info("Clearing all prefix caches...")
+    print("Clearing all prefix caches...")
     clear_all_prefix_cache("127.0.0.1", 19000)
     clear_all_prefix_cache("127.0.0.1", 19001)
     time.sleep(0.5)
 
     # Step 1: Store prompt A on worker-19000 (need 16+ words)
-    prompt_a = (
-        "Quantum computing leverages quantum mechanical phenomena like superposition and entanglement to "
-        "perform computation on quantum bits that can exist in multiple states simultaneously for "
-        "exponential speedup"
-    )
-    logger.info(f"Storing prompt A on worker-19000...")
+    prompt_a = "Quantum computing leverages quantum mechanical phenomena like superposition and entanglement to perform computation on quantum bits that can exist in multiple states simultaneously for exponential speedup"
+    print(f"Storing prompt A on worker-19000...")
     store_prefix_cache("127.0.0.1", 19000, prompt_a, num_blocks=16)
     time.sleep(0.5)
 
     # Step 2: Verify prompt A routes to 19000
-    logger.info("\nStep 2: Verifying prompt A routes to worker-19000...")
+    print("\nStep 2: Verifying prompt A routes to worker-19000...")
     status, instance, _ = send_suggestion(model, prompt_a, "hash-a1")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Routed to: {instance}")
+    print(f"  Routed to: {instance}")
 
     if instance != "127.0.0.1:19000":
-        logger.warning(f"  [WARN] Expected 19000, got {instance}")
-        logger.info(f"  [INFO] This may indicate prefix cache is not enabled")
+        print(f"  [WARN] Expected 19000, got {instance}")
+        print(f"  [INFO] This may indicate prefix cache is not enabled")
     else:
-        logger.info(f"  [OK] Prompt A routes to worker-19000")
+        print(f"  [OK] Prompt A routes to worker-19000")
 
     # Step 3: Store prompt B on worker-19001 (completely different content)
-    prompt_b = (
-        "Blockchain technology provides a decentralized distributed ledger for recording transactions "
-        "across multiple computers in a way that makes them resistant to modification of the recorded "
-        "data"
-    )
-    logger.info(f"\nStep 3: Storing prompt B on worker-19001...")
+    prompt_b = "Blockchain technology provides a decentralized distributed ledger for recording transactions across multiple computers in a way that makes them resistant to modification of the recorded data"
+    print(f"\nStep 3: Storing prompt B on worker-19001...")
     store_prefix_cache("127.0.0.1", 19001, prompt_b, num_blocks=16)
     time.sleep(0.5)
 
     # Step 4: Verify prompt B routes to 19001 (not 19000)
-    logger.info("\nStep 4: Verifying prompt B routes to worker-19001 (not 19000)...")
+    print("\nStep 4: Verifying prompt B routes to worker-19001 (not 19000)...")
     status, instance, _ = send_suggestion(model, prompt_b, "hash-b1")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Routed to: {instance}")
+    print(f"  Routed to: {instance}")
 
     if instance == "127.0.0.1:19000":
-        logger.error(f"  [FAIL] Prompt B incorrectly routed to 19000 (hash collision suspected)")
+        print(f"  [FAIL] Prompt B incorrectly routed to 19000 (hash collision suspected)")
         return False
     elif instance == "127.0.0.1:19001":
-        logger.info(f"  [OK] Prompt B routes to worker-19001 (correct routing)")
+        print(f"  [OK] Prompt B routes to worker-19001 (correct routing)")
     else:
-        logger.info(f"  [INFO] Prompt B routed to {instance} (LB fallback)")
+        print(f"  [INFO] Prompt B routed to {instance} (LB fallback)")
 
     # Step 5: Re-verify prompt A still routes correctly (no cross-contamination)
-    logger.info("\nStep 5: Re-verifying prompt A routes correctly (no cross-contamination)...")
+    print("\nStep 5: Re-verifying prompt A routes correctly (no cross-contamination)...")
     status, instance, _ = send_suggestion(model, prompt_a, "hash-a2")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Routed to: {instance}")
+    print(f"  Routed to: {instance}")
 
     if instance == "127.0.0.1:19001":
-        logger.error(f"  [FAIL] Prompt A incorrectly routed to 19001 (hash collision or cross-contamination)")
+        print(f"  [FAIL] Prompt A incorrectly routed to 19001 (hash collision or cross-contamination)")
         return False
     elif instance == "127.0.0.1:19000":
-        logger.info(f"  [OK] Prompt A still routes to worker-19000 (no contamination)")
+        print(f"  [OK] Prompt A still routes to worker-19000 (no contamination)")
     else:
-        logger.info(f"  [INFO] Prompt A routed to {instance} (LB fallback)")
+        print(f"  [INFO] Prompt A routed to {instance} (LB fallback)")
 
     # Step 6: Re-verify prompt B still routes correctly
-    logger.info("\nStep 6: Re-verifying prompt B routes correctly...")
+    print("\nStep 6: Re-verifying prompt B routes correctly...")
     status, instance, _ = send_suggestion(model, prompt_b, "hash-b2")
     if status != 200:
-        logger.error(f"  [FAIL] Request failed: status={status}")
+        print(f"  [FAIL] Request failed: status={status}")
         return False
-    logger.info(f"  Routed to: {instance}")
+    print(f"  Routed to: {instance}")
 
     if instance == "127.0.0.1:19000":
-        logger.error(f"  [FAIL] Prompt B incorrectly routed to 19000 (hash collision or cross-contamination)")
+        print(f"  [FAIL] Prompt B incorrectly routed to 19000 (hash collision or cross-contamination)")
         return False
     elif instance == "127.0.0.1:19001":
-        logger.info(f"  [OK] Prompt B still routes to worker-19001 (no contamination)")
+        print(f"  [OK] Prompt B still routes to worker-19001 (no contamination)")
     else:
-        logger.info(f"  [INFO] Prompt B routed to {instance} (LB fallback)")
+        print(f"  [INFO] Prompt B routed to {instance} (LB fallback)")
 
-    logger.info(f"\n[PASS] Hash collision handling test passed")
-    logger.info(f"  Note: True SHA-256 collisions are practically impossible.")
-    logger.info(f"  This test verifies hash uniqueness and routing isolation.")
+    print(f"\n[PASS] Hash collision handling test passed")
+    print(f"  Note: True SHA-256 collisions are practically impossible.")
+    print(f"  This test verifies hash uniqueness and routing isolation.")
     return True
 
 
@@ -1366,11 +1325,11 @@ def main():
     AIGW_PORT = args.aigw_port
     model = args.model
 
-    logger.info(f"Prefix Cache E2E Test Client")
-    logger.info(f"AIGW: {AIGW_HOST}:{AIGW_PORT}, Model: {model}")
+    print(f"Prefix Cache E2E Test Client")
+    print(f"AIGW: {AIGW_HOST}:{AIGW_PORT}, Model: {model}")
 
     # Register all worker instances first
-    logger.info("\nRegistering worker instances...")
+    print("\nRegistering worker instances...")
     register_all_instances(model)
 
     tests = [
@@ -1395,7 +1354,7 @@ def main():
     results = []
 
     for name, test_fn in tests:
-        logger.info(f"\n{'='*60}")
+        print(f"\n{'='*60}")
         try:
             result = test_fn()
             if result:
@@ -1405,14 +1364,14 @@ def main():
                 failed += 1
                 results.append((name, "FAIL"))
         except Exception as e:
-            logger.error(f"[ERROR] {name}: {e}")
+            print(f"[ERROR] {name}: {e}")
             failed += 1
             results.append((name, f"ERROR: {e}"))
 
-    logger.info(f"\n{'='*60}")
-    logger.info(f"Summary: {passed} passed, {failed} failed")
+    print(f"\n{'='*60}")
+    print(f"Summary: {passed} passed, {failed} failed")
     for name, status in results:
-        logger.info(f"  [{status}] {name}")
+        print(f"  [{status}] {name}")
 
     return 0 if failed == 0 else 1
 

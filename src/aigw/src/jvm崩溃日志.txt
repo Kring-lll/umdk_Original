@@ -1,0 +1,214 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  SIGSEGV (0xb) at pc=0x0000ffff90c92810, pid=156, tid=250
+#
+# JRE version: OpenJDK Runtime Environment BiSheng_JDK_Enterprise_203.2.0.082.B002 (21.0.8+9) (build 21.0.8+9)
+# Java VM: OpenJDK 64-Bit Server VM BiSheng_JDK_Enterprise_203.2.0.082.B002 (21.0.8+9, mixed mode, sharing, tiered, compressed oops, compressed class ptrs, g1 gc, linux-aarch64)
+# Problematic frame:
+# C  [libc.so.6+0x91810]  free+0x20
+#
+# Core dump will be written. Default location: /tmp/core-file/core.%t.%e.156
+#
+# If you would like to submit a bug report, please visit:
+#   https://gitee.com/openeuler/bishengjdk-21/issues/
+# The crash happened outside the Java Virtual Machine in native code.
+# See problematic frame for where to report the bug.
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -Ddubbo.application.logger=slf4j -Dfile.encoding=utf-8 -Xms1g -Xmx1g -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:ParallelGCThreads=4 -XX:ConcGCThreads=4 -XX:MaxTenuringThreshold=15 -XX:SoftRefLRUPolicyMSPerMB=0 -Djute.maxbuffer=4194304 -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp -Dorg.apache.catalina.connector.RECYCLE_FACADES=true -Djdk.tls.ephemeralDHKeySize=3072 -Dserver.address=127.0.0.1 -Djava.library.path=/usr/lib64 com.huawei.smartrouter.SmartRouterApplication --spring.config.location=file:/opt/huawei/app/service/config/application.properties
+
+Host: AArch64, 320 cores, 1958G, Huawei Cloud EulerOS release 2.0 (West Lake)
+Time: Thu Apr 23 20:10:20 2026 CST elapsed time: 133.218922 seconds (0d 0h 2m 13s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x0000fffe18184170):  JavaThread "Thread-10"        [_thread_in_native, id=250, stack(0x0000fffe40750000,0x0000fffe40f50000) (8192K)]
+
+Stack: [0x0000fffe40750000,0x0000fffe40f50000],  sp=0x0000fffe40f4e740,  free space=8185k
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+C  [libc.so.6+0x91810]  free+0x20
+
+siginfo: si_signo: 11 (SIGSEGV), si_code: 1 (SEGV_MAPERR), si_addr: 0x0000fff0d3fa5b2a
+
+Registers:
+R0=0x0000fff0d3fa5b32
+R1=0x0000fff0d3fa5b22
+R2=0x00000040001c5860
+R3=0x00000040005608c0
+R4=0x00000000000007a0
+R5=0x00000040001c4000
+R6=0x0000000000000001
+R7=0x0000000000000000
+R8=0x0000004000500808
+R9=0x00000040001c58e8
+R10=0x0003ce69bc269aed
+R11=0x00009ee257d26f56
+R12=0x000000007fffffff
+R13=0x0000fffe40f4e780
+R14=0x0000000000000001
+R15=0x0000000000000000
+R16=0x0000ffff35c83968
+R17=0x0000ffff90c927f0
+R18=0x0000000000000001
+R19=0x0000fffe40f4f8e0
+R20=0x0000000000000020
+R21=0x0000004000500808
+R22=0x0000000000000001
+R23=0x0000000000000000
+R24=0x0000fffe40f4f120
+R25=0x0000ffff30012480
+R26=0x0000000000000000
+R27=0x0000000000000400
+R28=0x00000040005608c0
+R29=0x0000fffe40f4e740
+R30=0x0000ffff34ce353c
+
+
+Register to memory mapping:
+
+R0 =0x0000fff0d3fa5b32 is an unknown value
+R1 =0x0000fff0d3fa5b22 is an unknown value
+R2 =0x00000040001c5860 points into unknown readable memory: 0x0000ffff34cd8ed0 | d0 8e cd 34 ff ff 00 00
+R3 =0x00000040005608c0 points into unknown readable memory: 0x0000fffe4074eba0 | a0 eb 74 40 fe ff 00 00
+R4 =0x00000000000007a0 is an unknown value
+R5 =0x00000040001c4000 points into unknown readable memory: 0x00000040001c6000 | 00 60 1c 00 40 00 00 00
+R6 =0x0000000000000001 is an unknown value
+R7 =0x0 is null
+R8 =0x0000004000500808 points into unknown readable memory: 0x00000040005608c0 | c0 08 56 00 40 00 00 00
+R9 =0x00000040001c58e8 points into unknown readable memory: 0x0000fff0d3fa5b32 | 32 5b fa d3 f0 ff 00 00
+R10=0x0003ce69bc269aed is an unknown value
+R11=0x00009ee257d26f56 is an unknown value
+R12=0x000000007fffffff is an unknown value
+R13=0x0000fffe40f4e780 is pointing into the stack for thread: 0x0000fffe18184170
+R14=0x0000000000000001 is an unknown value
+R15=0x0 is null
+R16=0x0000ffff35c83968: <offset 0x000000000131c968> in /usr/lib64/libaigw.so at 0x0000ffff34967000
+R17=0x0000ffff90c927f0: free+0x0000000000000000 in /usr/lib64/libc.so.6 at 0x0000ffff90c01000
+R18=0x0000000000000001 is an unknown value
+R19=0x0000fffe40f4f8e0 is pointing into the stack for thread: 0x0000fffe18184170
+R20=0x0000000000000020 is an unknown value
+R21=0x0000004000500808 points into unknown readable memory: 0x00000040005608c0 | c0 08 56 00 40 00 00 00
+R22=0x0000000000000001 is an unknown value
+R23=0x0 is null
+R24=0x0000fffe40f4f120 is pointing into the stack for thread: 0x0000fffe18184170
+R25=0x0000ffff30012480 points into unknown readable memory: 0x0000ffff90b30058 | 58 00 b3 90 ff ff 00 00
+R26=0x0 is null
+R27=0x0000000000000400 is an unknown value
+R28=0x00000040005608c0 points into unknown readable memory: 0x0000fffe4074eba0 | a0 eb 74 40 fe ff 00 00
+R29=0x0000fffe40f4e740 is pointing into the stack for thread: 0x0000fffe18184170
+R30=0x0000ffff34ce353c: <offset 0x000000000037c53c> in /usr/lib64/libaigw.so at 0x0000ffff34967000
+
+Top of Stack: (sp=0x0000fffe40f4e740)
+0x0000fffe40f4e740:   0000000000000000 0000ffff34ce353c
+0x0000fffe40f4e750:   0000004000168070 0000fffe40f4e600
+0x0000fffe40f4e910:   0000000000000000 0000000000000000
+0x0000fffe40f4e920:   0000000000000000 0000000000000000
+0x0000fffe40f4e930:   0000000000000000 03d6b77f724a6b00
+
+Instructions: (pc=0x0000ffff90c92810)
+0x0000ffff90c92710:   60 08 00 f0 f5 5b 42 a9 00 e0 29 91 fd 7b c3 a8
+0x0000ffff90c92720:   48 fe ff 17 f5 5b 42 a9 e0 03 01 aa fd 7b c3 a8
+0x0000ffff90c92730:   30 ff ff 17 d3 ef ff 97 f4 03 00 aa 40 fa ff b5
+0x0000ffff90c92740:   a0 82 00 91 01 00 80 d2 00 00 13 8b e6 f3 ff 97
+0x0000ffff90c92750:   e2 03 15 aa f4 03 00 aa e1 03 13 aa 39 fe ff 97
+0x0000ffff90c92760:   1f 00 00 f1 f6 03 00 aa 84 0a 40 fa 40 01 00 54
+0x0000ffff90c92770:   1f 20 03 d5 e0 03 14 aa e1 03 15 aa e9 f4 ff 97
+0x0000ffff90c92780:   f4 03 00 aa e2 03 15 aa e1 03 13 aa 2d fe ff 97
+0x0000ffff90c92790:   f6 03 00 aa 54 f8 ff b5 e0 03 16 aa f3 53 41 a9
+0x0000ffff90c927a0:   f5 5b 42 a9 fd 7b c3 a8 c0 03 5f d6 60 08 00 d0
+0x0000ffff90c927b0:   00 f0 46 f9 41 d0 3b d5 c2 02 80 52 16 00 80 d2
+0x0000ffff90c927c0:   22 68 20 b8 bb ff ff 17 e0 03 14 aa b5 b4 ff 97
+0x0000ffff90c927d0:   ad ff ff 17 f3 03 00 aa 9c ff ff 17 e0 03 14 aa
+0x0000ffff90c927e0:   f4 b4 ff 97 b3 ff ff 17 1f 20 03 d5 1f 20 03 d5
+0x0000ffff90c927f0:   40 07 00 b4 fd 7b bc a9 01 40 00 d1 fd 03 00 91
+0x0000ffff90c92800:   f3 53 01 a9 53 d0 3b d5 74 08 00 d0 94 f2 46 f9
+0x0000ffff90c92810:   20 04 40 f9 f5 13 00 f9 75 6a 74 b8 20 02 08 36
+0x0000ffff90c92820:   63 08 00 f0 62 20 04 91 44 48 40 b9 c4 00 00 35
+0x0000ffff90c92830:   45 08 40 f9 04 40 a0 d2 1f 00 05 eb 02 80 44 fa
+0x0000ffff90c92840:   09 04 00 54 e0 03 01 aa 7a f0 ff 97 75 6a 34 b8
+0x0000ffff90c92850:   f3 53 41 a9 f5 13 40 f9 fd 7b c4 a8 c0 03 5f d6
+0x0000ffff90c92860:   62 08 00 d0 42 c8 46 f9 62 02 02 8b 43 04 40 f9
+0x0000ffff90c92870:   63 03 00 b4 00 02 10 36 62 08 00 f0 e3 97 66 b2
+0x0000ffff90c92880:   40 9c 40 f9 1f 00 00 f1 e0 0b 00 cb 00 10 83 9a
+0x0000ffff90c92890:   20 00 00 8a 00 00 40 f9 02 00 80 52 b5 f5 ff 97
+0x0000ffff90c928a0:   75 6a 34 b8 f3 53 41 a9 f5 13 40 f9 fd 7b c4 a8
+0x0000ffff90c928b0:   c0 03 5f d6 60 08 00 f0 00 e0 29 91 f7 ff ff 17
+0x0000ffff90c928c0:   00 f0 7d 92 40 08 00 f9 02 f8 7f d3 62 84 00 f9
+0x0000ffff90c928d0:   1f 20 03 d5 dc ff ff 17 c0 03 5f d6 42 40 40 39
+0x0000ffff90c928e0:   a2 fc ff 35 e1 1f 00 f9 0a fd ff 97 e1 1f 40 f9
+0x0000ffff90c928f0:   20 04 40 f9 e0 ff ff 17 1f 20 03 d5 1f 20 03 d5
+0x0000ffff90c92900:   fd 7b bc a9 21 00 80 52 fd 03 00 91 f5 5b 02 a9
+
+
+Stack slot to memory mapping:
+
+stack at sp + 0 slots: 0x0 is null
+stack at sp + 1 slots: 0x0000ffff34ce353c: <offset 0x000000000037c53c> in /usr/lib64/libaigw.so at 0x0000ffff34967000
+stack at sp + 2 slots: 0x0000004000168070 points into unknown readable memory: 0x0000000000000000 | 00 00 00 00 00 00 00 00
+stack at sp + 3 slots: 0x0000fffe40f4e600 is pointing into the stack for thread: 0x0000fffe18184170
+stack at sp + 4 slots: 0x0 is null
+stack at sp + 5 slots: 0x0 is null
+stack at sp + 6 slots: 0x0000004000500808 points into unknown readable memory: 0x00000040005608c0 | c0 08 56 00 40 00 00 00
+stack at sp + 7 slots: 0x0000000002109dfe is an unknown value
+
+
+---------------  P R O C E S S  ---------------
+
+Threads class SMR info:
+_java_thread_list=0x0000ffff200d6f70, length=51, elements={
+0x0000ffff8835a1c0, 0x0000ffff8835b8d0, 0x0000ffff8835d080, 0x0000ffff8835e6d0,
+0x0000ffff8835fc80, 0x0000ffff883617e0, 0x0000ffff88362eb0, 0x0000ffff8836d140,
+0x0000ffff88371d40, 0x0000ffff8937be40, 0x0000fffef80019d0, 0x0000ffff89387610,
+0x0000ffff894aaa70, 0x0000ffff89647ad0, 0x0000ffff8965d660, 0x0000ffff89751050,
+0x0000ffff8983fcc0, 0x0000ffff89851140, 0x0000ffff89858220, 0x0000ffff8985e780,
+0x0000ffff898ac010, 0x0000ffff8992aed0, 0x0000ffff8993d6f0, 0x0000ffff89977c50,
+0x0000ffff8997d100, 0x0000ffff89b767b0, 0x0000ffff89c9cf70, 0x0000ffff89c9dc40,
+0x0000ffff89c9e870, 0x0000ffff89c9fa90, 0x0000ffff89ca0cb0, 0x0000ffff89ca1ee0,
+0x0000ffff89ca3940, 0x0000ffff89ca4c50, 0x0000ffff89ca5f60, 0x0000ffff89ca7120,
+0x0000ffff89ca9410, 0x0000ffff89cab5c0, 0x0000ffff8802d410, 0x0000ffff1c021910,
+0x0000fffe90000b70, 0x0000ffff2050a810, 0x0000fffe94000e70, 0x0000ffff2c5c8be0,
+0x0000fffe5c008e70, 0x0000ffff0c0016b0, 0x0000fffe18184170, 0x0000fffe58001f60,
+0x0000fffe5c009bb0, 0x0000ffff300ffa20, 0x0000ffff200d60e0
+}
+
+Java Threads: ( => current thread )
+  0x0000ffff8835a1c0 JavaThread "Reference Handler"          daemon [_thread_blocked, id=166, stack(0x0000ffff70d74000,0x0000ffff70f72000) (2040K)]
+  0x0000ffff8835b8d0 JavaThread "Finalizer"                  daemon [_thread_blocked, id=167, stack(0x0000ffff70b66000,0x0000ffff70d64000) (2040K)]
+  0x0000ffff8835d080 JavaThread "Signal Dispatcher"          daemon [_thread_blocked, id=168, stack(0x0000ffff70958000,0x0000ffff70b56000) (2040K)]
+  0x0000ffff8835e6d0 JavaThread "Service Thread"             daemon [_thread_blocked, id=169, stack(0x0000ffff7074a000,0x0000ffff70948000) (2040K)]
+  0x0000ffff8835fc80 JavaThread "Monitor Deflation Thread"   daemon [_thread_blocked, id=170, stack(0x0000ffff7053c000,0x0000ffff7073a000) (2040K)]
+  0x0000ffff883617e0 JavaThread "C2 CompilerThread0"         daemon [_thread_blocked, id=171, stack(0x0000ffff7032e000,0x0000ffff7052c000) (2040K)]
+  0x0000ffff88362eb0 JavaThread "C1 CompilerThread0"         daemon [_thread_blocked, id=172, stack(0x0000ffff70120000,0x0000ffff7031e000) (2040K)]
+  0x0000ffff8836d140 JavaThread "Notification Thread"        daemon [_thread_blocked, id=174, stack(0x0000ffff37bf4000,0x0000ffff37df2000) (2040K)]
+  0x0000ffff88371d40 JavaThread "Common-Cleaner"             daemon [_thread_blocked, id=175, stack(0x0000ffff379e6000,0x0000ffff37be4000) (2040K)]
+  0x0000ffff8937be40 JavaThread "Catalina-utility-1"                [_thread_blocked, id=189, stack(0x0000ffff3613e000,0x0000ffff3633c000) (2040K)]
+  0x0000fffef80019d0 JavaThread "Catalina-utility-2"                [_thread_blocked, id=190, stack(0x0000ffff35f30000,0x0000ffff3612e000) (2040K)]
+  0x0000ffff89387610 JavaThread "container-0"                       [_thread_blocked, id=191, stack(0x0000ffff35d22000,0x0000ffff35f20000) (2040K)]
+  0x0000ffff894aaa70 JavaThread "Thread-1"                          [_thread_blocked, id=198, stack(0x0000ffff34243000,0x0000ffff34441000) (2040K)]
+  0x0000ffff89647ad0 JavaThread "sts-consumer-credentials-provider-0"        [_thread_blocked, id=199, stack(0x0000ffff34035000,0x0000ffff34233000) (2040K)]
+  0x0000ffff8965d660 JavaThread "pool-4-thread-1"                   [_thread_blocked, id=201, stack(0x0000fffee83d4000,0x0000fffee85d2000) (2040K)]
+  0x0000ffff89751050 JavaThread "nuwa-cloudmap-http-pool1"   daemon [_thread_blocked, id=202, stack(0x0000fffee8052000,0x0000fffee8250000) (2040K)]
+  0x0000ffff8983fcc0 JavaThread "nuwa-cloudmap-cluster-event-notify-1" daemon [_thread_blocked, id=203, stack(0x0000fffe9ddc2000,0x0000fffe9dfc0000) (2040K)]
+  0x0000ffff89851140 JavaThread "nuwa-cloudmap-http-health-check1" daemon [_thread_blocked, id=204, stack(0x0000fffe9dbb4000,0x0000fffe9ddb2000) (2040K)]
+  0x0000ffff89858220 JavaThread "nuwa-cloudmap-http-health-check1" daemon [_thread_blocked, id=205, stack(0x0000fffe9d9a6000,0x0000fffe9dba4000) (2040K)]
+  0x0000ffff8985e780 JavaThread "refresh task Task [java.util.concurrent.ThreadPoolExecutor$Worker@19b9f903[State = -1, empty queue][49]]" daemon [_thread_blocked, id=206, stack(0x0000fffe9d798000,0x0000fffe9d996000) (2040K)]
+  0x0000ffff898ac010 JavaThread "dcsdk.common.scheduler-0"   daemon [_thread_blocked, id=207, stack(0x0000fffe9d58a000,0x0000fffe9d788000) (2040K)]
+  0x0000ffff8992aed0 JavaThread "nuwa-cloudmap-http-pool2"   daemon [_thread_in_native, id=208, stack(0x0000fffe9d37c000,0x0000fffe9d57a000) (2040K)]
+  0x0000ffff8993d6f0 JavaThread "nuwa-cloudmap-save-cache1"  daemon [_thread_blocked, id=209, stack(0x0000fffe9cd6d000,0x0000fffe9cf6b000) (2040K)]
+  0x0000ffff89977c50 JavaThread "nuwa-cloudmap-middleware-cluster-refresh1" daemon [_thread_blocked, id=210, stack(0x0000fffe9cb5f000,0x0000fffe9cd5d000) (2040K)]
+  0x0000ffff8997d100 JavaThread "Timer-0"                           [_thread_blocked, id=211, stack(0x0000fffe9c951000,0x0000fffe9cb4f000) (2040K)]
+  0x0000ffff89b767b0 JavaThread "commons-pool-evictor"       daemon [_thread_blocked, id=212, stack(0x0000fffe9c743000,0x0000fffe9c941000) (2040K)]
+  0x0000ffff89c9cf70 JavaThread "http-nio-127.0.0.1-9090-exec-1" daemon [_thread_blocked, id=216, stack(0x0000ffff373bc000,0x0000ffff375ba000) (2040K)]
+  0x0000ffff89c9dc40 JavaThread "http-nio-127.0.0.1-9090-exec-2" daemon [_thread_blocked, id=217, stack(0x0000ffff371ae000,0x0000ffff373ac000) (2040K)]
+  0x0000ffff89c9e870 JavaThread "http-nio-127.0.0.1-9090-exec-3" daemon [_thread_blocked, id=218, stack(0x0000fffe9c535000,0x0000fffe9c733000) (2040K)]
+  0x0000ffff89c9fa90 JavaThread "http-nio-127.0.0.1-9090-exec-4" daemon [_thread_blocked, id=219, stack(0x0000fffe9c327000,0x0000fffe9c525000) (2040K)]
+  0x0000ffff89ca0cb0 JavaThread "http-nio-127.0.0.1-9090-exec-5" daemon [_thread_blocked, id=220, stack(0x0000fffe9c119000,0x0000fffe9c317000) (2040K)]
+  0x0000ffff89ca1ee0 JavaThread "http-nio-127.0.0.1-9090-exec-6" daemon [_thread_blocked, id=221, stack(0x0000fffe43e02000,0x0000fffe44000000) (2040K)]
+  0x0000ffff89ca3940 JavaThread "http-nio-127.0.0.1-9090-exec-7" daemon [_thread_blocked, id=222, stack(0x0000fffe43bf4000,0x0000fffe43df2000) (2040K)]
+  0x0000ffff89ca4c50 JavaThread "http-nio-127.0.0.1-9090-exec-8" daemon [_thread_blocked, id=223, stack(0x0000fffe439e6000,0x0000fffe43be4000) (2040K)]
+  0x0000ffff89ca5f60 JavaThread "http-nio-127.0.0.1-9090-exec-9" daemon [_thread_blocked, id=224, stack(0x0000fffe437d8000,0x0000fffe439d6000) (2040K)]
+  0x0000ffff89ca7120 JavaThread "http-nio-127.0.0.1-9090-exec-10" daemon [_thread_blocked, id=225, stack(0x0000fffe435ca000,0x0000fffe437c8000) (2040K)]
+  0x0000ffff89ca9410 JavaThread "http-nio-127.0.0.1-9090-Poller" daemon [_thread_in_native, id=226, stack(0x0000fffe433bc000,0x0000fffe435ba000) (2040K)]

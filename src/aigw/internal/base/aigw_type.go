@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  * Description: definitions of types for AIGW core.
  * Create: 2025-06-11
@@ -29,9 +28,10 @@ type OpenAiRequest struct {
 
 // GetSuggestionOut specified the out parameters for GetSuggestion.
 type GetSuggestionOut struct {
-	TargetPrefillUrl string `json:"targetPrefill"`
-	TargetDecodeUrl  string `json:"targetDecode"`
-	DpRank           *int   `json:"dpRank,omitempty"` // DP rank for data parallel routing
+	TargetPrefillUrl string   `json:"targetPrefill"`
+	TargetDecodeUrl  string   `json:"targetDecode"`
+	DpRank           *int     `json:"dpRank,omitempty"`  // DP rank for data parallel routing
+	Priority         *int     `json:"priority,omitempty"` // ERR scheduling priority
 }
 
 // RegisterInstanceIn specified the input parameters for RegisterInstance.
@@ -140,6 +140,24 @@ type LoadBalancerConfig struct {
 	DpSize       int `json:"dpSize"`       // Data parallel size for DP-aware routing
 }
 
+// ErrSchedulerConfig holds ERR-scheduler-specific parameters. These are kept
+// separate from LoadBalancerConfig (they are not load-balancer concerns) per
+// review [9]/[11]. BatchSize (used both by LBs and ERR capacity) stays in
+// LoadBalancerConfig and is passed into initErrScheduler separately.
+type ErrSchedulerConfig struct {
+	ErrSchedulerType   string `json:"errSchedulerType"`   // "mej", "err", "caterr", "" or "none" = disabled
+	QueueSize          int    `json:"queueSize"`          // pending queue max size (0 = passthrough mode, >0 = queue mode)
+	WarmupSessions     int    `json:"warmupSessions"`     // total observations threshold for warmup completion (default: 100; 0 = ignore total)
+	WarmupPerCat       int    `json:"warmupPerCat"`        // per-category observations threshold, CatERR only (default: 10; 0 = ignore per-category)
+	MaxK               int    `json:"maxK"`               // MEJ offset / E[rem|k] precompute limit (default: 10000)
+	WindowSize         int    `json:"windowSize"`         // EmpiricalDist sliding window size (0 = unbounded, default: 5000)
+	TrainDataPath      string `json:"trainDataPath"`      // path to pre-trained distributions JSON (CatERR only; ERR can warm up online)
+	TfidfVocabPath     string `json:"tfidfVocabPath"`     // path to TF-IDF vocab JSON (CatERR)
+	TfidfCentroidsPath string `json:"tfidfCentroidsPath"` // path to K-means centroids JSON (CatERR)
+	SessionTimeout     int    `json:"sessionTimeout"`     // session idle timeout after tool_calls/other finish_reason (seconds, default: 660) — extreme anomaly cleanup (agent crash/disconnect)
+	TaskIdleTimeout    int    `json:"taskIdleTimeout"`   // session idle timeout after stop finish_reason (seconds, default: 60) — normal task loop completion
+}
+
 // GlobalSchedulerConfig struct contains configuration for a global scheduler
 type GlobalSchedulerConfig struct {
 	Model                string             `json:"model"`
@@ -149,6 +167,7 @@ type GlobalSchedulerConfig struct {
 	MaxTimeBetweenTokens float64            `json:"maxTimeBetweenTokens"`
 	TokenizeModelName    string             `json:"tokenizeModelName"`
 	LoadBalancer         LoadBalancerConfig `json:"loadBalancer"`
+	ErrScheduler         ErrSchedulerConfig `json:"errScheduler"`
 	// Mode selects scheduling path: "instance" (default when empty) | "provider".
 	Mode string `json:"mode,omitempty"`
 	// ProviderPool holds config for mode=provider.

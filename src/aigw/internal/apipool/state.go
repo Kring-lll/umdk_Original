@@ -1,5 +1,4 @@
 /*
- * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * Description: Shared runtime State (quota/cooldown/latency) for the provider pool.
  * Create: 2026-06-09
