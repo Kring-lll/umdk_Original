@@ -1,0 +1,117 @@
+{
+  "global": {
+    "host": "127.0.0.1",
+    "port": "18080",
+    "logPath": "/tmp/aigw-log",
+    "logLevel": "debug",
+    "cryptoSock": "",
+    "snapshotUpdateInterval": 1,
+    "securitySchema": "default",
+    "reqTimeout": 600
+  },
+  "zookeeper": {
+    "address": "",
+    "aclScheme": "default",
+    "connectTimeout": 0,
+    "sessionTimeout": 0,
+    "inferenceInstancePath": "/mep/aigw/instances",
+    "scheduleServicePath": "/mep/aigw/global_schedulers",
+    "enableTls": false,
+    "tlsCaFile": "",
+    "tlsCrtFile": "",
+    "tlsKeyFile": "",
+    "tlsServerName": ""
+  },
+  "monitor": {
+    "address": "",
+    "alarmPath": "/mep/v1/modelmonitor/alarm",
+    "serviceName": "aigw_service",
+    "version": "1.0.0",
+    "businessId": ""
+  },
+  "dataSync": {
+    "address": "",
+    "path": "/getAIGWEnableModelList",
+    "interval": 5
+  },
+  "prefixCache": {
+    "enabled": false,
+    "blockSize": 16,
+    "seed": 12345678901234567890,
+    "maxContexts": 1000,
+    "maxPrefixsPerContext": 10000,
+    "matchThreshold": 50,
+    "evictionIntervalSeconds": 60,
+    "evictionDurationMinutes": 20
+  },
+  "predictor": {
+    "predictType": "none",
+    "lightgbm": {
+      "classifierFile": "",
+      "vectorizerFile": ""
+    }
+  },
+  "tokenizers": [
+    {
+      "tokenizeModelName": "DeepSeek-R1",
+      "configPath": "/home/DeepSeek-R1/tokenizer.json",
+      "tokenizerType": "huggingfaceTokenizers"
+    }
+  ],
+  "globalSchedulers": [
+    {
+      "model": "DeepSeek-R1",
+      "blockSize": 128,
+      "deployPolicy": "mixed",
+      "maxTimeToFirstToken": 200,
+      "maxTimeBetweenTokens": 50,
+      "tokenizeModelName": "DeepSeek-R1",
+      "loadBalancer": {
+        "mixed": "roundRobin",
+        "prefill": "roundRobin",
+        "decode": "roundRobin",
+        "batchSize": 1,
+        "enablePowerOfTwo": false,
+        "reservedBlockNumber": 50,
+        "minMatchedLength": 200,
+        "pretrainTTFTPath": ""
+      },
+      "errScheduler": {
+        "errSchedulerType": "err",
+        "queueSize": 5,
+        "warmupSessions": 100,
+        "warmupPerCat": 10,
+        "maxK": 10000,
+        "windowSize": 0,
+        "trainDataPath": "data/err_train.json",
+        "tfidfVocabPath": "",
+        "tfidfCentroidsPath": "",
+        "sessionTimeout": 660,
+        "taskIdleTimeout": 60
+      },
+      "instanceConnectType": "sse",
+      "mode": "instance",
+      "skipInstanceConnection": true
+    }
+  ],
+  "limits": {
+    "totalInsNum": 2048,
+    "insNumPerModel": 128,
+    "modelNum": 128,
+    "concurrency": 128,
+    "maxPromptRunes": 131072
+  },
+  "proxy": {
+    "enable": true,
+    "timeout": 600,
+    "maxRetry": 0,
+    "retryBaseInterval": 100,
+    "retryMaxInterval": 1000,
+    "circuitBreaker": {
+      "enabled": false,
+      "failureThreshold": 5,
+      "successThreshold": 1,
+      "timeout": 30
+    }
+  }
+}
