@@ -1217,7 +1217,7 @@ The following scenarios trigger the JFC to generate a completion record:
 | Data Plane Interface | Send Configuration | solicited enable | — | — | Solicited enable | √ | √ |
 | Data Plane Interface | Send Configuration | Config completion event | — | — | Configure completion event | √ | √ |
 | Data Plane Interface | Send Configuration | Config inline | — | — | Configure inline | √ | √ |
-| Data Plane Interface | Send Configuration | import-free seg | — | — | Support import-free segment | todo | todo |
+| Data Plane Interface | Send Configuration | import-free seg | — | — | Support import-free segment (including bonding devices, see 6.2.3) | √ | √ |
 | Data Plane Interface | Memory Continuity | sgl config | Non-contiguous remote send/recv & local read/write/send/recv | — | SGL support | √ | √ |
 | Data Plane Interface | Memory Continuity | wr_list config | — | — | WR list configuration | √ | √ |
 | Data Plane Interface | One-sided Operations | read | Only 1 src sge | — | Read operation | √ | √ |
@@ -1485,6 +1485,8 @@ The bonding device is TP-unaware.
 5. Health check and fault failback are only supported by Jetty, not by JFR or JFS. Health check performs periodic probing of link status by creating an out-of-band probe Jetty for each path (reusing JFR receive resources); fault failback, after a recovery is detected, rebuilds the Jetty to switch traffic back to the primary path. Both paths depend on the Jetty object; independently created JFR or JFS do not provide health check or fault failback capabilities.
 
 6. The aggregation-device fault failback scheme requires the user's send and receive Jetty resources to be isolated. A Jetty used for sending must not be exposed as a receive resource that peers can import, and must not be imported by other processes for receive operations. If a Jetty needs to be imported by a peer and used for receive, use a separate receive Jetty to avoid external references to send-side resources during failback rebuild.
+
+7. Aggregation devices support import-free segments: the memory owner exports, via urma_get_user_tseg, a single block carrying the bonding extension (attr.bs.has_user_info=1, with the per-slave token ids) and passes it to the peer, which fills it into urma_sge_t.user_tseg to send import-free on the remote SGEs of WRITE/WRITE_IMM/WRITE_NOTIFY/READ/CAS/FADD. Constraints: remote SGEs must use the complete buffer with the extension (a bare urma_user_tseg_t cannot be used for multi-path sending on aggregation devices); local SGEs forbid user_tseg; peer_idx in the extension maps to the aggregation device's internal path-selection index and must not be modified by the application. The aggregation data path deep-copies the whole extension buffer at post time, so the caller may use a stack variable and release it once post returns.
 
 - **Aggregation Device Feature List**
 

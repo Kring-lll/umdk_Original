@@ -1163,6 +1163,88 @@ free_buf:
     return -1;
 }
 
+static inline void free_remote_user_tseg(perftest_context_t *ctx, const perftest_config_t *cfg)
+{
+    if (ctx->remote_user_tseg == NULL) {
+        return;
+    }
+    uint32_t free_num = (cfg->pair_flag) ? cfg->pair_num : ctx->jetty_num;
+    /* Buffers were allocated by sync_var_data on the receive side (raw wire
+     * copies), not by urma_get_user_tseg, so a plain free() is enough. */
+    for (uint32_t i = 0; i < free_num; i++) {
+        free(ctx->remote_user_tseg[i]);
+    }
+    free(ctx->remote_user_tseg);
+    ctx->remote_user_tseg = NULL;
+}
+
+/*
+ * Import-free mode: export each local seg as a user_tseg block via
+ * urma_get_user_tseg, send the whole variable-length block to the peer, and
+ * keep the peer's blocks in ctx->remote_user_tseg[]. The local export is
+ * released right after the exchange; the received blocks stay alive for the
+ * whole test because pre-built WRs reference them.
+ */
+static int exchange_user_tseg(perftest_context_t *ctx, perftest_config_t *cfg)
+{
+    uint32_t sync_num = cfg->pair_flag ? cfg->pair_num : ctx->jetty_num;
+    urma_user_tseg_t **local_ut_arr = calloc(ctx->jetty_num, sizeof(urma_user_tseg_t *));
+    uint32_t *local_len_arr = calloc(ctx->jetty_num, sizeof(uint32_t));
+    ctx->remote_user_tseg = calloc(ctx->jetty_num, sizeof(urma_user_tseg_t *));
+    if (local_ut_arr == NULL || local_len_arr == NULL || ctx->remote_user_tseg == NULL) {
+        goto free_buf;
+    }
+
+    for (uint32_t i = 0; i < ctx->jetty_num; i++) {
+        urma_status_t ret = urma_get_user_tseg(ctx->local_tseg[i], &g_perftest_token,
+                                               &local_ut_arr[i], &local_len_arr[i]);
+        if (ret != URMA_SUCCESS || local_ut_arr[i] == NULL || local_len_arr[i] == 0) {
+            LOG_ERROR("Failed to urma_get_user_tseg %u, ret: %d (only locally registered"
+                      " segs on UB devices are supported)!\n", i, ret);
+            goto free_buf;
+        }
+    }
+
+    for (uint32_t i = 0; i < sync_num; i++) {
+        char *peer_buf = NULL;
+        uint32_t peer_len = 0;
+        if (sync_var_data(cfg, cfg->pair_flag ? i : 0,
+                          (const char *)local_ut_arr[i], local_len_arr[i],
+                          &peer_buf, &peer_len) != 0) {
+            LOG_ERROR("Failed to exchange user_tseg %u!\n", i);
+            goto free_buf;
+        }
+        ctx->remote_user_tseg[i] = (urma_user_tseg_t *)peer_buf;
+    }
+    if (cfg->pair_flag) {
+        for (uint32_t i = cfg->pair_num; i < ctx->jetty_num; i++) {
+            ctx->remote_user_tseg[i] = ctx->remote_user_tseg[i % cfg->pair_num];
+        }
+    }
+
+    for (uint32_t i = 0; i < ctx->jetty_num; i++) {
+        if (local_ut_arr[i] != NULL) {
+            urma_put_user_tseg(local_ut_arr[i]);
+        }
+    }
+    free(local_ut_arr);
+    free(local_len_arr);
+    return 0;
+
+free_buf:
+    if (local_ut_arr != NULL) {
+        for (uint32_t i = 0; i < ctx->jetty_num; i++) {
+            if (local_ut_arr[i] != NULL) {
+                urma_put_user_tseg(local_ut_arr[i]);
+            }
+        }
+        free(local_ut_arr);
+    }
+    free(local_len_arr);
+    free_remote_user_tseg(ctx, cfg);
+    return -1;
+}
+
 static inline void free_remote_jetty(perftest_context_t *ctx)
 {
     free(ctx->remote_jetty_id);
@@ -1601,6 +1683,16 @@ static int exchange_connection_info(perftest_context_t *ctx, perftest_config_t *
         return -1;
     }
 
+    /* Import-free mode: exchange the user_tseg blocks right after the seg
+     * info; the peer blocks replace the imported tsegs in data WRs. */
+    if (cfg->no_import) {
+        ret = exchange_user_tseg(ctx, cfg);
+        if (ret != 0) {
+            LOG_ERROR("Failed to exchange_user_tseg, ret: %d\n", ret);
+            goto exchange_jetty_id_fail;
+        }
+    }
+
     if (is_bonding_duplex) {
         ret = exchange_rjetty(ctx, cfg);
     } else {
@@ -1648,6 +1740,7 @@ exchange_credit_fail:
         free_remote_jetty(ctx);
     }
 exchange_jetty_id_fail:
+    free_remote_user_tseg(ctx, cfg);
     if (ctx->remote_seg_duplex != NULL) {
         free_remote_seg_duplex(ctx, cfg);
     } else {
@@ -1662,6 +1755,7 @@ static void destroy_connection_info(perftest_context_t *ctx, const perftest_conf
     free_tp_info(ctx);
     free_remote_notify(ctx);
     free_remote_credit(ctx);
+    free_remote_user_tseg(ctx, cfg);
     if (ctx->remote_seg_duplex != NULL) {
         free_remote_seg_duplex(ctx, cfg);
     } else {
@@ -1677,7 +1771,10 @@ static void destroy_connection_info(perftest_context_t *ctx, const perftest_conf
 static inline void unimport_seg(perftest_context_t *ctx, const int idx)
 {
     for (int k = 0; k < idx; k++) {
-        (void)urma_unimport_seg(ctx->import_tseg[k]);
+        /* Import-free mode leaves the entries NULL (no urma_import_seg done). */
+        if (ctx->import_tseg[k] != NULL) {
+            (void)urma_unimport_seg(ctx->import_tseg[k]);
+        }
     }
     if (ctx->import_tseg != NULL) {
         free(ctx->import_tseg);
@@ -1757,6 +1854,12 @@ static int import_seg_for_simplex(perftest_context_t *ctx, perftest_config_t *cf
         goto free_notify;
     }
 
+    if (cfg->no_import) {
+        /* Import-free mode: remote data segs are described by the exchanged
+         * user_tseg blocks (ctx->remote_user_tseg); leave entries NULL. */
+        return 0;
+    }
+
     for (i = 0; i < (int)ctx->jetty_num; i++) {
         ctx->import_tseg[i] = urma_import_seg(ctx->urma_ctx, &ctx->remote_seg[i], &g_perftest_token, 0, flag);
         if (ctx->import_tseg[i] == NULL) {
@@ -1823,6 +1926,12 @@ static int import_seg_for_duplex(perftest_context_t *ctx, perftest_config_t *cfg
     ctx->import_tseg = calloc(1, sizeof(urma_target_seg_t *) * ctx->jetty_num);
     if (ctx->import_tseg == NULL) {
         goto free_notify;
+    }
+
+    if (cfg->no_import) {
+        /* Import-free mode: remote data segs are described by the exchanged
+         * user_tseg blocks (ctx->remote_user_tseg); leave entries NULL. */
+        return 0;
     }
 
     for (i = 0; i < (int)ctx->jetty_num; i++) {

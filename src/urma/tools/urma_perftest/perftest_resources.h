@@ -117,6 +117,10 @@ typedef struct perftest_context {
     urma_jetty_id_t *remote_jetty_id;
     urma_rjetty_t **remote_rjetty;
     urma_seg_t **remote_seg_duplex;
+    /* import-free: peer user_tseg blocks received via mgmt channel, one per jetty.
+     * Plain buffers received over the wire; freed with free(), kept alive for the
+     * whole test because pre-built WRs reference them. */
+    urma_user_tseg_t **remote_user_tseg;
     perftest_tp_info_t *local_tp_info;
     perftest_tp_info_t *remote_tp_info;
 

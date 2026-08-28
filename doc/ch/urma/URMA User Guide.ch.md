@@ -1259,7 +1259,7 @@ UMDK支持向接收端发送立即数，见urma_post_jfs_wr接口，所发送的
 | 数据面接口 | 发送配置 | solicited使能 | — | — | Solicited使能 | √ | √ |
 | 数据面接口 | 发送配置 | 配置完成事件产生 | — | — | 配置完成事件产生 | √ | √ |
 | 数据面接口 | 发送配置 | 配置是否inline | — | — | 配置是否inline | √ | √ |
-| 数据面接口 | 发送配置 | 支持免import seg | — | — | 支持免import seg | todo | todo |
+| 数据面接口 | 发送配置 | 支持免import seg | — | — | 支持免import seg（含聚合设备，见6.2.3） | √ | √ |
 | 数据面接口 | 内存连续 | sgl配置 | 远端send/recv支持不连续，本端read/write/send/recv支持不连续 | — | SGL支持 | √ | √ |
 | 数据面接口 | 内存连续 | wr_list配置 | — | — | WR列表配置 | √ | √ |
 | 数据面接口 | 单边操作 | read | 仅支持1个src sge | — | Read操作 | √ | √ |
@@ -1532,6 +1532,8 @@ bonding设备不感知TP。
 5\. 健康检查与故障回切（failback）仅支持 Jetty，不支持 JFR、JFS。健康检查通过为每条路径创建带外探测 Jetty（复用 JFR 接收资源）实现对链路状态的周期性探测；故障回切在探测恢复后通过重建 Jetty 将流量切回主路径。上述两条路径均依赖 Jetty 对象，独立创建的 JFR、JFS 不具备健康检查与故障回切能力。
 
 6\. 聚合设备故障回切方案要求用户的收发 Jetty 隔离。用于发送的 Jetty 不能作为对端可 import 的接收资源对外暴露，也不能被其他进程 import 后用于接收；如需被对端 import 并承载接收，应使用独立的接收 Jetty，避免回切重建过程中发送侧资源被外部引用。
+
+7\. 聚合设备支持免 import seg：内存属主通过 urma_get_user_tseg 导出携带 bonding 扩展（attr.bs.has_user_info=1，含各从设备 token_id）的整块缓冲并透传给对端，对端填入 urma_sge_t.user_tseg 后即可在 WRITE/WRITE_IMM/WRITE_NOTIFY/READ/CAS/FADD 的远端 SGE 上免 import 发送。约束：远端 SGE 必须使用带扩展的完整缓冲（裸 urma_user_tseg_t 不可用于聚合设备多路径发送）；本地 SGE 禁止 user_tseg；扩展中 peer_idx 与聚合设备内部选路索引对应，业务不得修改映射关系。聚合设备数据面会在 post 时深拷贝整块扩展缓冲，调用方可使用栈变量，post 返回后即可释放。
 
 - 聚合设备的特性列表
 

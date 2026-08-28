@@ -207,7 +207,8 @@ enum perftest_opts {
     PERFTEST_OPT_V_ADDRESS,
     PERFTEST_OPT_SHARE_JFS,
     PERFTEST_OPT_SET_MIN_SIZE,
-    PERFTEST_OPT_SET_MAX_SIZE
+    PERFTEST_OPT_SET_MAX_SIZE,
+    PERFTEST_OPT_NO_IMPORT
 };
 
 typedef enum perftest_rate_limiter_units {
@@ -309,6 +310,9 @@ typedef struct perftest_config {
 
     bool enable_imm;
     bool enable_notify;
+    /* Import-free remote seg: exchange urma_get_user_tseg buffers with the peer
+     * and fill urma_sge_t.user_tseg instead of importing the remote seg. */
+    bool no_import;
     bool enable_err_continue;
 
     /* user tp */

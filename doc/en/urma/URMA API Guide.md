@@ -132,6 +132,8 @@
             - [2.3.2.4 urma_unimport_seg](#2324-urma_unimport_seg)
             - [2.3.2.5 urma_get_seg_ctx](#2325-urma_get_seg_ctx)
             - [2.3.2.6 urma_put_seg_ctx](#2326-urma_put_seg_ctx)
+            - [2.3.2.7 urma_get_user_tseg](#2327-urma_get_user_tseg)
+            - [2.3.2.8 urma_put_user_tseg](#2328-urma_put_user_tseg)
         - [2.3.3 TP Channel](#233-tp-channel)
             - [2.3.3.1 urma_get_tpn](#2331-urma_get_tpn)
             - [2.3.3.2 urma_modify_tp](#2332-urma_modify_tp)
@@ -5617,6 +5619,66 @@ Release the segment context returned by [urma_get_seg_ctx](#2325-urma_get_seg_ct
 4. Parameters
 
 @param[in] [Required] seg: segment context returned by [urma_get_seg_ctx](#2325-urma_get_seg_ctx).
+
+5. Return Value
+
+void
+
+#### 2.3.2.7 urma_get_user_tseg
+
+1. Header File
+
+#include "urma_api.h"
+
+2. Prototype
+
+[3.2.1.1.2](#22112-urma_status_t) [urma_status_t](#22112-urma_status_t) urma_get_user_tseg([3.3.2.1.3](#23213-urma_target_seg_t) [urma_target_seg_t](#23213-urma_target_seg_t) *tseg, [3.2.1.1.7](#23217-urma_token_t) [urma_token_t](#23217-urma_token_t) *token, [urma_user_tseg_t](#23217-urma_token_t) **user_tseg, uint32_t *size);
+
+Definition file: [urma_api.h](../../../src/urma/lib/urma/core/include/urma_api.h)
+
+3. Description
+
+Get the user target segment context for proxy transmission, so that the peer can access the segment import-free by filling it into urma_sge_t.user_tseg (the peer then skips urma_import_seg). Only locally registered segments are supported.
+
+For bonding devices, the returned buffer carries a bonding extension (attr.bs.has_user_info=1) that records the per-slave token ids; the peer must transfer the whole buffer of size bytes as-is and must not modify the peer mapping. For bare devices the returned urma_user_tseg_t has no extension (has_user_info=0) and cannot be used for multi-path sending on bonding devices.
+
+4. Parameters
+
+@param[in] [Required] tseg: target segment returned by [urma_register_seg](#2321-urma_register_seg); only locally registered segments are supported;
+
+@param[in] [Required] token: token value used by the peer for access check;
+
+@param[out] [Required] user_tseg: address used to return the allocated user target segment context;
+
+@param[out] [Required] size: length of the returned buffer, including any extension data;
+
+5. Return Value
+
+Return: 0 on success, URMA_EINVAL on invalid parameters (including an imported tseg), URMA_ENOMEM on allocation failure, URMA_FAIL if the provider cannot return the context, other value on error.
+
+![](figures/urma_notice.png)
+
+The memory returned in user_tseg is allocated by this API. The caller must call [urma_put_user_tseg](#2328-urma_put_user_tseg) to release it. When posting with user_tseg on a bonding device, the data path deep-copies the whole extension buffer, so the caller may use a stack variable and release it once the post interface returns.
+
+#### 2.3.2.8 urma_put_user_tseg
+
+1. Header File
+
+#include "urma_api.h"
+
+2. Prototype
+
+void urma_put_user_tseg(urma_user_tseg_t *user_tseg);
+
+Definition file: [urma_api.h](../../../src/urma/lib/urma/core/include/urma_api.h)
+
+3. Description
+
+Release the user target segment context returned by [urma_get_user_tseg](#2327-urma_get_user_tseg).
+
+4. Parameters
+
+@param[in] [Required] user_tseg: user target segment context returned by [urma_get_user_tseg](#2327-urma_get_user_tseg).
 
 5. Return Value
 

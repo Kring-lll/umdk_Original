@@ -161,6 +161,7 @@ static void usage(const char *argv0)
         "  --enable_imm                Enable immediate data for write or send, default: disable.\n"
         "  --enable_err_continue       Enable continue running when cr erros, default: disable.\n"
         "  --enable_notify             Enable write_with_notify, default: disable.\n"
+        "  --no_import                 Access the remote seg import-free via user_tseg (read/write only), default: disable.\n"
         "  --enable_user_tp            Enable user tp for UB device, if enable,UVS is not required. default: disable.\n"
         "  --oor_en                    Enable out of order for user_tp, default: disable.\n"
         "  --spray_en                  Enable multipathing for user_tp, default: disable.\n"
@@ -371,6 +372,7 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->enable_imm = false;
     cfg->enable_err_continue = false;
     cfg->enable_notify = false;
+    cfg->no_import = false;
     cfg->enable_user_tp = false;
     cfg->oor_en = false;
     cfg->spray_en = false;
@@ -451,6 +453,10 @@ void print_cfg(const perftest_config_t *cfg)
 
     if (cfg->type == PERFTEST_BW) {
         LOG_QUIET(" CQ Moderation       : %u\n", cfg->cq_mod);
+    }
+
+    if (cfg->no_import) {
+        LOG_QUIET(" Import-free remote seg (user_tseg) enabled.\n");
     }
 
     if (cfg->api_type != PERFTEST_READ && cfg->api_type != PERFTEST_ATOMIC) {
@@ -672,6 +678,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"inf_period_ms",       required_argument, NULL, PERFTEST_OPT_INF_PERIOD_MS},
         {"enable_err_continue", no_argument,       NULL, PERFTEST_OPT_ENABLE_ERR_CONTINUE},
         {"enable_notify",   no_argument,     NULL, PERFTEST_OPT_ENABLE_NOTIFY},
+        {"no_import",           no_argument,       NULL, PERFTEST_OPT_NO_IMPORT},
         {"enable_user_tp",      no_argument,       NULL, PERFTEST_OPT_ENABLE_USER_TP},
         {"oor_en",              no_argument,       NULL, PERFTEST_OPT_OOR_EN},
         {"spray_en",            no_argument,       NULL, PERFTEST_OPT_SPRAY_EN},
@@ -952,6 +959,9 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                 break;
             case PERFTEST_OPT_ENABLE_NOTIFY:
                 cfg->enable_notify = true;
+                break;
+            case PERFTEST_OPT_NO_IMPORT:
+                cfg->no_import = true;
                 break;
             case PERFTEST_OPT_ENABLE_USER_TP:
                 cfg->enable_user_tp = true;
@@ -1546,6 +1556,22 @@ int check_local_cfg(perftest_config_t *cfg)
         LOG_ERROR("notify takes effect only in write test, and conflicts with immediate.\n");
         exit(1);
     }
+    if (cfg->no_import == true) {
+        /* Only READ/WRITE carry remote data SGEs; SEND is local-only and the
+         * bare driver does not support user_tseg on atomic/notify paths yet. */
+        if (cfg->api_type != PERFTEST_READ && cfg->api_type != PERFTEST_WRITE) {
+            LOG_ERROR("no_import takes effect only in read or write test.\n");
+            exit(1);
+        }
+        if (cfg->use_flat_api == true) {
+            LOG_ERROR("no_import conflicts with use_flat_api (flat api takes a tseg).\n");
+            exit(1);
+        }
+        if (cfg->enable_notify == true) {
+            LOG_ERROR("no_import conflicts with enable_notify (notify seg must be imported).\n");
+            exit(1);
+        }
+    }
     if (cfg->inf_period_ms != 0) {
         if (cfg->time_type.bs.infinite != 1) {
             LOG_ERROR("inf_period_ms takes effect only in infinite mode.\n");
@@ -1749,6 +1775,11 @@ static int check_both_side_cfg(const perftest_config_t *local_cfg, const perftes
     }
     if (local_cfg->enable_err_continue != remote_cfg->enable_err_continue) {
         LOG_ERROR("Config inconsistent[enable_err_continue].\n");
+        return -1;
+    }
+    if (local_cfg->no_import != remote_cfg->no_import) {
+        LOG_ERROR("Config inconsistent[no_import], local: %d, remote: %d.\n",
+                  (int)local_cfg->no_import, (int)remote_cfg->no_import);
         return -1;
     }
     if (local_cfg->enable_user_tp != remote_cfg->enable_user_tp) {

@@ -134,6 +134,8 @@
             - [2.3.2.4 urma_unimport_seg](#2324-urma_unimport_seg)
             - [2.3.2.5 urma_get_seg_ctx](#2325-urma_get_seg_ctx)
             - [2.3.2.6 urma_put_seg_ctx](#2326-urma_put_seg_ctx)
+            - [2.3.2.7 urma_get_user_tseg](#2327-urma_get_user_tseg)
+            - [2.3.2.8 urma_put_user_tseg](#2328-urma_put_user_tseg)
         - [2.3.3 TP Channel](#233-tp-channel)
             - [2.3.3.1 urma_get_tpn](#2331-urma_get_tpn)
             - [2.3.3.2 urma_modify_tp](#2332-urma_modify_tp)
@@ -5620,6 +5622,66 @@ void urma_put_seg_ctx([3.3.2.1.4](#23214-urma_seg_t) [urma_seg_t](#23214-urma_se
 4.  参数
 
 @param[in] [Required] seg: segment context returned by [urma_get_seg_ctx](#2325-urma_get_seg_ctx).
+
+5.  返回值
+
+void
+
+#### 2.3.2.7 urma_get_user_tseg
+
+1.  头文件
+
+#include "urma_api.h"
+
+2.  原型
+
+[3.2.1.1.2](#22112-urma_status_t) [urma_status_t](#22112-urma_status_t) urma_get_user_tseg([3.3.2.1.3](#23213-urma_target_seg_t) [urma_target_seg_t](#23213-urma_target_seg_t) *tseg, [3.2.1.1.7](#23217-urma_token_t) [urma_token_t](#23217-urma_token_t) *token, urma_user_tseg_t **user_tseg, uint32_t *size);
+
+定义文件: [urma_api.h](../../../src/urma/lib/urma/core/include/urma_api.h)
+
+3.  描述
+
+获取用于代理传输的user target segment上下文，对端将其填入urma_sge_t.user_tseg后即可免urma_import_seg访问该内存段。仅支持本地注册的segment。
+
+对于bonding设备，返回的缓冲携带bonding扩展（attr.bs.has_user_info=1），记录各从设备各自的token_id；对端必须按size整块透传，不得修改peer映射关系。裸设备返回的urma_user_tseg_t无扩展（has_user_info=0），不能用于bonding设备的多路径发送。
+
+4.  参数
+
+@param[in] [Required] tseg: 由[urma_register_seg](#2321-urma_register_seg)返回的target segment，仅支持本地注册段；
+
+@param[in] [Required] token: 供对端访问校验使用的token值；
+
+@param[out] [Required] user_tseg: 用于返回分配的user target segment上下文的地址；
+
+@param[out] [Required] size: 返回缓冲的总长度，含扩展数据；
+
+5.  返回值
+
+Return: 0 on success, URMA_EINVAL on invalid parameters (including an imported tseg), URMA_ENOMEM on allocation failure, URMA_FAIL if the provider cannot return the context, other value on error.
+
+![](figures/urma_notice.png)
+
+user_tseg返回的内存由本接口分配，调用者必须调用[urma_put_user_tseg](#2328-urma_put_user_tseg)释放。在bonding设备上以user_tseg方式发送时，数据面会深拷贝整块扩展缓冲，调用方可使用栈变量，post接口返回后即可释放。
+
+#### 2.3.2.8 urma_put_user_tseg
+
+1.  头文件
+
+#include "urma_api.h"
+
+2.  原型
+
+void urma_put_user_tseg(urma_user_tseg_t *user_tseg);
+
+定义文件: [urma_api.h](../../../src/urma/lib/urma/core/include/urma_api.h)
+
+3.  描述
+
+释放[urma_get_user_tseg](#2327-urma_get_user_tseg)返回的user target segment上下文。
+
+4.  参数
+
+@param[in] [Required] user_tseg: user target segment context returned by [urma_get_user_tseg](#2327-urma_get_user_tseg).
 
 5.  返回值
 
