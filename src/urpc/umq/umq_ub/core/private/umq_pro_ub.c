@@ -27,6 +27,7 @@
 
 static __thread urma_jfs_wr_t g_umq_ub_urma_wr[UMQ_BATCH_SIZE];
 static __thread urma_sge_t g_umq_ub_sges[UMQ_BATCH_SIZE][UMQ_MAX_SGE_NUM];
+static __thread urma_user_tseg_t g_umq_ub_user_tseg[UMQ_BATCH_SIZE];
 
 /* 进程退出标志：ubsocket 经 umq_exiting_set() -> umq_tp_exiting_set 回调置 true。
  * umq_ub_poll_fc_tx 等据此跳过 poll，避免 worker 线程在主线程释放 jfc 后仍访问悬空指针。 */
@@ -127,7 +128,7 @@ static uint16_t umq_ub_tx_failed_num(urma_jfs_wr_t *urma_wr, uint16_t wr_index, 
 }
 
 int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_ptr, urma_sge_t *sges_ptr,
-    uint32_t sge_num, urma_sge_t *src_sge, urma_sge_t *dst_sge)
+    uint32_t sge_num, urma_sge_t *src_sge, urma_sge_t *dst_sge, urma_user_tseg_t *user_tseg)
 {
     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buffer->qbuf_ext;
     uint16_t mempool_id = buf_pro->remote_sge.mempool_id;
@@ -158,15 +159,23 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
                     queue->umq_id, mempool_id);
                 return -UMQ_ERR_ETSEG_NON_IMPORTED;
             }
-            tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, mempool_id);
-            if (tseg == NULL) {
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool_id %u has not been imported\n",
-                    queue->umq_id, mempool_id);
-                return -UMQ_ERR_ETSEG_NON_IMPORTED;
-            }
             src_sge->addr = buf_pro->remote_sge.addr;
             src_sge->len = buf_pro->remote_sge.length;
-            src_sge->tseg = tseg;
+            if (umq_ub_enable_no_import(queue->dev_ctx->feature) && user_tseg != NULL) {
+                (void)memset(user_tseg, 0, sizeof(*user_tseg));
+                user_tseg->token_id = mempool_id;
+                src_sge->tseg = NULL;
+                src_sge->user_tseg = user_tseg;
+            } else {
+                tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, mempool_id);
+                if (tseg == NULL) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool_id %u has not been imported\n",
+                        queue->umq_id, mempool_id);
+                    return -UMQ_ERR_ETSEG_NON_IMPORTED;
+                }
+                src_sge->tseg = tseg;
+                src_sge->user_tseg = NULL;
+            }
             urma_wr_ptr->rw.src.sge = src_sge;
             urma_wr_ptr->rw.src.num_sge = 1;
             urma_wr_ptr->rw.dst.sge = sges_ptr;
@@ -194,15 +203,23 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
                     queue->umq_id, mempool_id);
                 return -UMQ_ERR_ETSEG_NON_IMPORTED;
             }
-            tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, mempool_id);
-            if (tseg == NULL) {
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool_id %u has not been imported\n",
-                    queue->umq_id, mempool_id);
-                return -UMQ_ERR_ETSEG_NON_IMPORTED;
-            }
             dst_sge->addr = buf_pro->remote_sge.addr;
             dst_sge->len = buf_pro->remote_sge.length;
-            dst_sge->tseg = tseg;
+            if (umq_ub_enable_no_import(queue->dev_ctx->feature) && user_tseg != NULL) {
+                (void)memset(user_tseg, 0, sizeof(*user_tseg));
+                user_tseg->token_id = mempool_id;
+                dst_sge->tseg = NULL;
+                dst_sge->user_tseg = user_tseg;
+            } else {
+                tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, mempool_id);
+                if (tseg == NULL) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool_id %u has not been imported\n",
+                        queue->umq_id, mempool_id);
+                    return -UMQ_ERR_ETSEG_NON_IMPORTED;
+                }
+                dst_sge->tseg = tseg;
+                dst_sge->user_tseg = NULL;
+            }
             urma_wr_ptr->rw.dst.sge = dst_sge;
             urma_wr_ptr->rw.dst.num_sge = 1;
             urma_wr_ptr->rw.src.sge = sges_ptr;
@@ -412,7 +429,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
         urma_wr_ptr->rw.target_hint = 0;
         urma_wr_ptr->rw.notify_data = 0;
         ret = umq_ub_fill_wr(queue, tmp_buf, urma_wr_ptr, g_umq_ub_sges[wr_index], sge_num,
-                             &src_sge[wr_index], &dst_sge[wr_index]);
+                             &src_sge[wr_index], &dst_sge[wr_index], &g_umq_ub_user_tseg[wr_index]);
         if (ret != UMQ_SUCCESS) {
             *bad_qbuf = qbuf;
             goto ERROR;

@@ -828,6 +828,11 @@ static ALWAYS_INLINE bool umq_ub_enable_import_remote_mem(uint32_t feature)
     return (feature & UMQ_FEATURE_ENABLE_REMOTE_MEM_ACCESS) != 0;
 }
 
+static ALWAYS_INLINE bool umq_ub_enable_no_import(uint32_t feature)
+{
+    return (feature & UMQ_FEATURE_NO_IMPORT_REMOTE_MEM) != 0;
+}
+
 // for exclusive acquisition of umq, it needs to be put back after use
 static ALWAYS_INLINE ub_queue_t *umq_ub_get_real_queue_by_umq_id(ub_queue_t *queue, const uint32_t umq_id)
 {
