@@ -21,7 +21,7 @@
 #include "urma_provider.h"
 #include "urma_types.h"
 
-#include "bondp_api.h"
+#include "bondp_cp_jetty.h"
 #include "bondp_context_table.h"
 #include "bondp_cp_seg.h"
 #include "bondp_cp_tjetty.h"
@@ -410,13 +410,35 @@ static void bondp_init_ctx_enabled_indices(bondp_context_t *bdp_ctx)
         bdp_ctx->enabled_count++;
     }
 }
-static int bondp_hc_init_from_env(bondp_context_t *bdp_ctx)
+static int bondp_init_ctx_features(bondp_context_t *bdp_ctx)
 {
-    bondp_hc_cfg_t cfg = {
-        .probe_interval_ms = g_bondp_env.health_check_interval_ms,
-        .batch_node_num = g_bondp_env.health_check_batch_node_num,
-    };
-    return bondp_hc_init(bdp_ctx, &cfg);
+    int ret;
+
+    if (bdp_ctx->enable_health_check) {
+        bondp_hc_cfg_t hc_cfg = {
+            .probe_interval_ms = bdp_ctx->health_check_interval_ms,
+            .batch_node_num = bdp_ctx->health_check_batch_node_num,
+        };
+        ret = bondp_hc_init(bdp_ctx, &hc_cfg);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    if (bdp_ctx->enable_failback) {
+        ret = bondp_fb_init(bdp_ctx);
+        if (ret != 0) {
+            bondp_hc_uninit(bdp_ctx);
+            return ret;
+        }
+    }
+    return 0;
+}
+
+static void bondp_uninit_ctx_features(bondp_context_t *bdp_ctx)
+{
+    bondp_fb_uninit(bdp_ctx);
+    bondp_hc_uninit(bdp_ctx);
 }
 
 urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int dev_fd)
@@ -429,6 +451,15 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
 
     bdp_ctx->msn_enable = false;
     bdp_ctx->seg_cache_enable = false;
+    bdp_ctx->enable_failover = g_bondp_env.enable_failover;
+    bdp_ctx->enable_failback = g_bondp_env.enable_failback;
+    bdp_ctx->enable_health_check = g_bondp_env.enable_health_check;
+    bdp_ctx->health_check_interval_ms = g_bondp_env.health_check_interval_ms;
+    bdp_ctx->health_check_batch_node_num = g_bondp_env.health_check_batch_node_num;
+    bdp_ctx->enable_rnr_retry = g_bondp_env.enable_rnr_retry;
+    bdp_ctx->rnr_retry_sleep_ms = g_bondp_env.rnr_retry_sleep_ms;
+    bdp_ctx->rnr_retry_max = g_bondp_env.rnr_retry_max;
+    bdp_ctx->rnr_retry_jitter_ratio = g_bondp_env.rnr_retry_jitter_ratio;
 
     int ret = 0;
     ret = bondp_create_vcontext(bdp_ctx, dev, eid_index, dev_fd);
@@ -450,18 +481,9 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
 
     bondp_init_ctx_enabled_indices(bdp_ctx);
 
-    if (g_bondp_env.enable_health_check) {
-        if (bondp_hc_init_from_env(bdp_ctx) != 0) {
-            URMA_LOG_ERR("Failed to create health check context\n");
-            goto DELETE_PCONTEXT;
-        }
-    }
-
-    if (g_bondp_env.enable_failback) {
-        if (bondp_fb_init(bdp_ctx) != 0) {
-            URMA_LOG_ERR("Failed to init failback context\n");
-            goto HC_UNINIT;
-        }
+    if (bondp_init_ctx_features(bdp_ctx) != 0) {
+        URMA_LOG_ERR("Failed to initialize context features\n");
+        goto DELETE_PCONTEXT;
     }
 
     URMA_LOG_DEBUG("Finish to create ctx, dev_name=%s, eid_idx=%u.\n",
@@ -469,8 +491,6 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
 
     return &bdp_ctx->v_ctx;
 
-HC_UNINIT:
-    bondp_hc_uninit(bdp_ctx);
 DELETE_PCONTEXT:
     bondp_delete_pcontext(bdp_ctx);
 DELETE_VCONTEXT:
@@ -488,8 +508,7 @@ urma_status_t bondp_delete_context(urma_context_t *ctx)
     uint32_t eid_index = ctx->eid_index;
 
     (void)strcpy(dev_name, ctx->dev->name);
-    bondp_fb_uninit(bdp_ctx);
-    bondp_hc_uninit(bdp_ctx);
+    bondp_uninit_ctx_features(bdp_ctx);
     if (bondp_delete_pcontext(bdp_ctx) != 0) {
         URMA_LOG_ERR("Failed to delete pcontext\n");
         ret = URMA_FAIL;
@@ -567,19 +586,133 @@ int bondp_set_bonding_mode(urma_context_t *ctx, bondp_bonding_mode_t bonding_mod
 
     bondp_init_ctx_enabled_indices(bdp_ctx);
 
-    if (g_bondp_env.enable_health_check) {
-        ret = bondp_hc_init_from_env(bdp_ctx);
-        if (ret != 0) {
-            URMA_LOG_ERR("Failed to recreate health check context, ret=%d\n", ret);
-            goto EXIT;
-        }
+    ret = bondp_init_ctx_features(bdp_ctx);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to recreate context features, ret=%d\n", ret);
     }
 
-    if (g_bondp_env.enable_failback) {
-        ret = bondp_fb_init(bdp_ctx);
-        if (ret != 0) {
-            URMA_LOG_ERR("Failed to recreate failback context, ret=%d\n", ret);
-            bondp_hc_uninit(bdp_ctx);
+EXIT:
+    (void)pthread_mutex_unlock(&ctx->mutex);
+    return ret;
+}
+
+static bondp_set_ctx_cfg_in_t bondp_get_ctx_cfg(const bondp_context_t *bdp_ctx)
+{
+    return (bondp_set_ctx_cfg_in_t) {
+        .mask = BONDP_CTX_CFG_MASK_ALL,
+        .enable_failover = bdp_ctx->enable_failover,
+        .enable_failback = bdp_ctx->enable_failback,
+        .enable_health_check = bdp_ctx->enable_health_check,
+        .health_check_interval_ms = bdp_ctx->health_check_interval_ms,
+        .health_check_batch_node_num = bdp_ctx->health_check_batch_node_num,
+        .enable_rnr_retry = bdp_ctx->enable_rnr_retry,
+        .rnr_retry_sleep_ms = bdp_ctx->rnr_retry_sleep_ms,
+        .rnr_retry_max = bdp_ctx->rnr_retry_max,
+        .rnr_retry_jitter_ratio = bdp_ctx->rnr_retry_jitter_ratio,
+    };
+}
+
+static void bondp_store_ctx_cfg(bondp_context_t *bdp_ctx, const bondp_set_ctx_cfg_in_t *cfg)
+{
+    bdp_ctx->enable_failover = cfg->enable_failover;
+    bdp_ctx->enable_failback = cfg->enable_failback;
+    bdp_ctx->enable_health_check = cfg->enable_health_check;
+    bdp_ctx->health_check_interval_ms = cfg->health_check_interval_ms;
+    bdp_ctx->health_check_batch_node_num = cfg->health_check_batch_node_num;
+    bdp_ctx->enable_rnr_retry = cfg->enable_rnr_retry;
+    bdp_ctx->rnr_retry_sleep_ms = cfg->rnr_retry_sleep_ms;
+    bdp_ctx->rnr_retry_max = cfg->rnr_retry_max;
+    bdp_ctx->rnr_retry_jitter_ratio = cfg->rnr_retry_jitter_ratio;
+}
+
+static void bondp_apply_bool_cfg(bondp_set_ctx_cfg_in_t *cfg, const bondp_set_ctx_cfg_in_t *cfg_in)
+{
+    if ((cfg_in->mask & BONDP_CTX_CFG_ENABLE_FAILOVER) != 0) {
+        cfg->enable_failover = cfg_in->enable_failover;
+    }
+    if ((cfg_in->mask & BONDP_CTX_CFG_ENABLE_FAILBACK) != 0) {
+        cfg->enable_failback = cfg_in->enable_failback;
+    }
+    if ((cfg_in->mask & BONDP_CTX_CFG_ENABLE_HEALTH_CHECK) != 0) {
+        cfg->enable_health_check = cfg_in->enable_health_check;
+    }
+    if ((cfg_in->mask & BONDP_CTX_CFG_ENABLE_RNR_RETRY) != 0) {
+        cfg->enable_rnr_retry = cfg_in->enable_rnr_retry;
+    }
+}
+
+static void bondp_apply_numeric_cfg(bondp_set_ctx_cfg_in_t *cfg, const bondp_set_ctx_cfg_in_t *cfg_in)
+{
+    if ((cfg_in->mask & BONDP_CTX_CFG_HEALTH_CHECK_INTERVAL) != 0) {
+        cfg->health_check_interval_ms = cfg_in->health_check_interval_ms;
+    }
+    if ((cfg_in->mask & BONDP_CTX_CFG_HEALTH_CHECK_BATCH_NUM) != 0) {
+        cfg->health_check_batch_node_num = cfg_in->health_check_batch_node_num;
+    }
+    if ((cfg_in->mask & BONDP_CTX_CFG_RNR_SLEEP) != 0) {
+        cfg->rnr_retry_sleep_ms = cfg_in->rnr_retry_sleep_ms;
+    }
+    if ((cfg_in->mask & BONDP_CTX_CFG_RNR_MAX) != 0) {
+        cfg->rnr_retry_max = cfg_in->rnr_retry_max;
+    }
+    if ((cfg_in->mask & BONDP_CTX_CFG_RNR_JITTER_RATIO) != 0) {
+        cfg->rnr_retry_jitter_ratio = cfg_in->rnr_retry_jitter_ratio;
+    }
+}
+
+static int bondp_validate_ctx_cfg(const bondp_set_ctx_cfg_in_t *cfg)
+{
+    const uint64_t min_health_check_interval_ms = 100;
+    const uint64_t max_health_check_interval_ms = 60000;
+    const uint32_t max_jitter_ratio = 100;
+
+    if (cfg->health_check_interval_ms < min_health_check_interval_ms ||
+        cfg->health_check_interval_ms > max_health_check_interval_ms ||
+        cfg->health_check_batch_node_num == 0 ||
+        cfg->health_check_batch_node_num > MAX_NODE_NUM ||
+        cfg->rnr_retry_jitter_ratio > max_jitter_ratio) {
+        return -EINVAL;
+    }
+    return 0;
+}
+
+int bondp_set_ctx_cfg(urma_context_t *ctx, const bondp_set_ctx_cfg_in_t *cfg_in)
+{
+    if (ctx == NULL || cfg_in == NULL || cfg_in->mask == 0 ||
+        (cfg_in->mask & ~BONDP_CTX_CFG_MASK_ALL) != 0) {
+        return -EINVAL;
+    }
+
+    bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
+    int ret = 0;
+
+    (void)pthread_mutex_lock(&ctx->mutex);
+    uint64_t cnt = (uint64_t)atomic_load(&ctx->ref.atomic_cnt);
+    if (cnt > 1) {
+        URMA_LOG_WARN("Context already in use, atomic_cnt=%lu, dev_name=%s.\n", cnt, ctx->dev->name);
+        ret = URMA_EAGAIN;
+        goto EXIT;
+    }
+
+    bondp_set_ctx_cfg_in_t new_cfg = bondp_get_ctx_cfg(bdp_ctx);
+    bondp_apply_bool_cfg(&new_cfg, cfg_in);
+    bondp_apply_numeric_cfg(&new_cfg, cfg_in);
+    ret = bondp_validate_ctx_cfg(&new_cfg);
+    if (ret != 0) {
+        URMA_LOG_ERR("Invalid context configuration.\n");
+        goto EXIT;
+    }
+
+    bondp_set_ctx_cfg_in_t old_cfg = bondp_get_ctx_cfg(bdp_ctx);
+    bondp_uninit_ctx_features(bdp_ctx);
+    bondp_store_ctx_cfg(bdp_ctx, &new_cfg);
+    ret = bondp_init_ctx_features(bdp_ctx);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to apply context configuration, ret=%d.\n", ret);
+        bondp_uninit_ctx_features(bdp_ctx);
+        bondp_store_ctx_cfg(bdp_ctx, &old_cfg);
+        if (bondp_init_ctx_features(bdp_ctx) != 0) {
+            URMA_LOG_ERR("Failed to restore context features.\n");
         }
     }
 

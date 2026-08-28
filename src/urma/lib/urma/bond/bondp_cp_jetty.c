@@ -24,11 +24,12 @@
 #include "bondp_context_table.h"
 #include "bondp_dp_failback.h"
 #include "bondp_dp_health.h"
+#include "bondp_dp_rnr_retry.h"
 #include "bondp_hash_table.h"
 #include "bondp_types.h"
 #include "urma_ubagg.h"
 
-#include "bondp_api.h"
+#include "bondp_cp_jetty.h"
 
 typedef struct bondp_create_vjetty_udata {
     urma_jetty_id_t slave_id[URMA_UBAGG_DEV_MAX_NUM];
@@ -764,8 +765,6 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     bdp_jfs->comp_type = BONDP_COMP_JFS;
     atomic_init(&bdp_jfs->use_cnt.atomic_cnt, 0);
     atomic_init(&bdp_jfs->deleting, false);
-    atomic_init(&bdp_jfs->rnr_retry_sleep_cnt, 0);
-    atomic_init(&bdp_jfs->rnr_retry_wr_cnt, 0);
     (void)pthread_spin_init(&bdp_jfs->send_lock, PTHREAD_PROCESS_PRIVATE);
     bdp_jfs->modify_to_error = false;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
@@ -863,14 +862,11 @@ urma_status_t bondp_delete_jfs(urma_jfs_t *jfs)
      */
     pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
     atomic_store(&bdp_jfs->deleting, true);
+    /* Stop cached lookups before deciding whether only retry tasks hold refs. */
+    bondp_hash_table_inc_gen(&bdp_ctx->p_vjetty_id_table);
+    uint32_t retry_task_num = bondp_rnr_retry_pending_task_num(bdp_jfs);
     unsigned long use_cnt = atomic_load(&bdp_jfs->use_cnt.atomic_cnt);
-    if (use_cnt == 0) {
-        /* Invalidate fast-path cache */
-        bondp_hash_table_inc_gen(&bdp_ctx->p_vjetty_id_table);
-        /* Re-check */
-        use_cnt = atomic_load(&bdp_jfs->use_cnt.atomic_cnt);
-    }
-    if (use_cnt > 0) {
+    if (use_cnt > retry_task_num) {
         atomic_store(&bdp_jfs->deleting, false);
         pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
         URMA_LOG_ERR("Failed to delete jfs[%u], still in use. use_cnt=%lu\n", jfs_id, use_cnt);
@@ -884,7 +880,24 @@ urma_status_t bondp_delete_jfs(urma_jfs_t *jfs)
     */
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
 
+    /*
+     * RNR retry cancellation waits for the worker callback. Do it only after
+     * removing the jfs from the lookup table and releasing the table lock,
+     * because other callbacks on the same worker may need that lock.
+     */
+    int cancel_ret = bondp_rnr_retry_cancel_all(bdp_jfs);
+    if (cancel_ret != 0) {
+        URMA_LOG_WARN("Failed to cancel jfs[%u] RNR retry tasks, ret=%d\n", jfs_id, cancel_ret);
+    }
+    use_cnt = atomic_load(&bdp_jfs->use_cnt.atomic_cnt);
+    if (use_cnt > 0) {
+        URMA_LOG_ERR("Failed to delete jfs[%u], RNR retry tasks still in use. use_cnt=%lu\n",
+                     jfs_id, use_cnt);
+        return URMA_EAGAIN;
+    }
+
     bondp_uninit_connection_table(bdp_jfs);
+    /* Drop all outstanding WRs and their target jetty/segment references. */
     bondp_uninit_wr_buf(&bdp_jfs->send_wr_buf);
 
     if (bondp_delete_vjfs(bdp_jfs) != URMA_SUCCESS) {
@@ -1225,9 +1238,6 @@ urma_status_t bondp_modify_jfr(urma_jfr_t *jfr, urma_jfr_attr_t *attr)
     @param[out]attr->rx_threshold:urma_query_jfr returns the smaller value if two are returned; returns the value
     directly if only one is returned; returns zero if neither is returned.
 
-    @param[out]attr->mask:Use bits to indicate whether the aforementioned two values are valid. The state remains
-    valid at all times, whereas rx_threshold requires processing based on the return value of urma_query_jfr.
-
     @param[out]cfg:Directly assign jfr_cfg to v_jfr
 */
 urma_status_t bondp_query_jfr(urma_jfr_t *jfr, urma_jfr_cfg_t *cfg, urma_jfr_attr_t *attr)
@@ -1236,14 +1246,16 @@ urma_status_t bondp_query_jfr(urma_jfr_t *jfr, urma_jfr_cfg_t *cfg, urma_jfr_att
     bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(jfr, bondp_comp_t, v_jfr);
     int cmp_threshold = UINT32_MAX;
     bool isready = false;
+    bool has_member = false;
     /*
-    The sequential traversal from 0 to 2 is because JFR currently only supports multi-path configuration,
-    hence it is only necessary to traverse the JFR corresponding to the primary EID.
+    p_jfr[] is sparsely indexed by enabled_indices, which can reach URMA_UBAGG_DEV_MAX_NUM
+    in port-level bonding. Scan the full range with a NULL check, as bondp_delete_pjfr does.
     */
-    for (int i = 0; i < IODIE_NUM; i++) {
+    for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
         if (bdp_jfr->p_jfr[i] == NULL) {
             continue;
         }
+        has_member = true;
         ret = urma_query_jfr(bdp_jfr->p_jfr[i], cfg, attr);
         if (ret == URMA_SUCCESS) {
             /*
@@ -1252,10 +1264,10 @@ urma_status_t bondp_query_jfr(urma_jfr_t *jfr, urma_jfr_cfg_t *cfg, urma_jfr_att
             2. Both return values are different and one is ready.
             3. Both return values are different and neither is ready.
             */
-            if ((attr->mask & JFR_STATE) && attr->state == URMA_JFR_STATE_READY) {
+            if (attr->state == URMA_JFR_STATE_READY) {
                 isready = true;
             }
-            if ((attr->mask & JFR_RX_THRESHOLD) && attr->rx_threshold != 0) {
+            if (attr->rx_threshold != 0) {
                 cmp_threshold = cmp_threshold > attr->rx_threshold ? attr->rx_threshold : cmp_threshold;
             }
         } else {
@@ -1266,15 +1278,17 @@ urma_status_t bondp_query_jfr(urma_jfr_t *jfr, urma_jfr_cfg_t *cfg, urma_jfr_att
             return ret;
         }
     }
+    if (!has_member) {
+        URMA_LOG_ERR("no physical jfr on v_jfr, jfr_id=%u\n", bdp_jfr->v_jfr.jfr_id.id);
+        return URMA_EINVAL;
+    }
     if (isready) {
         attr->state = URMA_JFR_STATE_READY;
     }
     if (cmp_threshold != UINT32_MAX) {
         attr->rx_threshold = cmp_threshold;
-        attr->mask = JFR_STATE | JFR_RX_THRESHOLD;
     } else {
         attr->rx_threshold = 0;
-        attr->mask = JFR_STATE;
     }
     *cfg = bdp_jfr->v_jfr.jfr_cfg;
     return URMA_SUCCESS;
@@ -1464,8 +1478,6 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     bdp_jetty->comp_type = BONDP_COMP_JETTY;
     atomic_init(&bdp_jetty->use_cnt.atomic_cnt, 0);
     atomic_init(&bdp_jetty->deleting, false);
-    atomic_init(&bdp_jetty->rnr_retry_sleep_cnt, 0);
-    atomic_init(&bdp_jetty->rnr_retry_wr_cnt, 0);
     (void)pthread_spin_init(&bdp_jetty->send_lock, PTHREAD_PROCESS_PRIVATE);
     bdp_jetty->modify_to_error = false;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
@@ -1580,14 +1592,11 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
     */
     pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
     atomic_store(&bdp_jetty->deleting, true);
+    /* Stop cached lookups before deciding whether only retry tasks hold refs. */
+    bondp_hash_table_inc_gen(&bdp_ctx->p_vjetty_id_table);
+    uint32_t retry_task_num = bondp_rnr_retry_pending_task_num(bdp_jetty);
     unsigned long use_cnt = atomic_load(&bdp_jetty->use_cnt.atomic_cnt);
-    if (use_cnt == 0) {
-        /* Invalidate fast-path cache */
-        bondp_hash_table_inc_gen(&bdp_ctx->p_vjetty_id_table);
-        /* Re-check */
-        use_cnt = atomic_load(&bdp_jetty->use_cnt.atomic_cnt);
-    }
-    if (use_cnt > 0) {
+    if (use_cnt > retry_task_num) {
         atomic_store(&bdp_jetty->deleting, false);
         pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
         URMA_LOG_ERR("Failed to delete jetty[%d], still in use. use_cnt=%lu\n", jetty->jetty_id.id, use_cnt);
@@ -1600,8 +1609,27 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
     ! thus allowing us to directly execute the deletion process.
     */
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+
+    /*
+     * RNR retry cancellation waits for the worker callback. Do it only after
+     * removing the jetty from the lookup table and releasing the table lock,
+     * because other callbacks on the same worker may need that lock.
+     */
+    int cancel_ret = bondp_rnr_retry_cancel_all(bdp_jetty);
+    if (cancel_ret != 0) {
+        URMA_LOG_WARN("Failed to cancel jetty[%u] RNR retry tasks, ret=%d\n",
+                      jetty->jetty_id.id, cancel_ret);
+    }
+    use_cnt = atomic_load(&bdp_jetty->use_cnt.atomic_cnt);
+    if (use_cnt > 0) {
+        URMA_LOG_ERR("Failed to delete jetty[%d], RNR retry tasks still in use. use_cnt=%lu\n",
+                     jetty->jetty_id.id, use_cnt);
+        return URMA_EAGAIN;
+    }
+
     bondp_fb_cancel_tasks(bdp_ctx, jetty->jetty_id.id);
     bondp_uninit_connection_table(bdp_jetty);
+    /* Drop all outstanding WRs and their target jetty/segment references. */
     bondp_uninit_wr_buf(&bdp_jetty->send_wr_buf);
     if (bondp_delete_vjetty(bdp_jetty) != URMA_SUCCESS) {
         URMA_LOG_ERR("Failed to delete vjetty\n");

@@ -16,8 +16,14 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "urma_api.h"
+
+/* 进程退出标志：ubsocket_uninit() 入口置 true。worker 线程的 poll 路径据此
+ * 跳过对已释放资源（jfc/jetty/queue）的访问，避免退出时序竞态导致的 UAF。
+ * 退出期不再处理 CQE，丢掉的 poll 由 OS 回收资源，安全。 */
+extern volatile bool g_ubsocket_exiting;
 #include "urma_ubagg.h"
 #include "umq_inner.h"
 #include "urpc_bitmap.h"
@@ -50,7 +56,7 @@ extern "C" {
 #define UMQ_UB_MAX_REMOTE_EID_NUM 1024
 
 #define MEMPOOL_UBVA_SIZE 28
-#define UMQ_IMM_VERSION 0
+#define UMQ_IMM_VERSION 1
 #define UMQ_UB_FLOW_CONTORL_JETTY_DEPTH 2
 
 #define UMQ_UB_DEV_STR_LENGTH 64
@@ -95,14 +101,40 @@ typedef struct ub_ref_sge {
     uint32_t token_value;
 } ub_ref_sge_t;
 
+/*
+ * Mempool import descriptor exchanged between peers. The segment context is
+ * produced by urma_get_seg_ctx (an urma_seg_t, optionally carrying a
+ * has_user_info extension tail on bonding devices), so the entry is variable
+ * length: seg_size bytes follow the fixed header. The peer forwards the seg
+ * blob verbatim to urma_import_seg. mempool_id / token_value / version are
+ * umq-specific and have no place inside urma_seg_t, so they ride in the header.
+ *
+ * Not __attribute__((packed)): the 20B header is all uint32, and urma_seg_t
+ * needs 8B alignment (its uint64 len) which offset 24 satisfies (4-byte padding
+ * after the 20B header), so the natural layout is already 72B with seg naturally
+ * aligned — packing would only force unaligned access on the embedded urma_seg_t.
+ * The static_asserts below pin the layout so any drift is caught at compile time.
+ */
 typedef struct ub_import_mempool_info {
-    char mempool_ubva[MEMPOOL_UBVA_SIZE];
-    uint32_t mempool_seg_flag;
-    uint32_t mempool_length;
-    uint32_t mempool_token_id : 20;
-    uint32_t mempool_id : 12;
-    uint32_t mempool_token_value;
+    uint32_t seg_size;            /* urma_get_seg_ctx size output, in bytes (>= sizeof(urma_seg_t)) */
+    uint32_t mempool_id;          /* umq mempool id (was 12-bit packed; widened to a full u32) */
+    uint32_t mempool_token_value; /* = tseg->user_ctx; urma_token_t carries it into urma_import_seg */
+    uint32_t version;             /* bumped each time the source mempool is (re)registered;
+                                     the peer compares it to decide reuse / re-import */
+    uint32_t token_id;            /* = urma_seg_t.token_id, promoted to header so the ubsocket
+                                     READ work-request build and umq import consume it standalone,
+                                     without inspecting the opaque seg blob below */
+    urma_seg_t seg;               /* seg_size bytes, including any has_user_info extension tail */
+    char seg_ext[0];              /* extension data when seg_size > sizeof(urma_seg_t) */
 } ub_import_mempool_info_t;
+
+_Static_assert(sizeof(ub_import_mempool_info_t) == 72, "ub_import_mempool_info_t must be 72B");
+_Static_assert(offsetof(ub_import_mempool_info_t, seg) == 24,
+               "seg must follow the 24B aligned offset (20B header + 4B padding)");
+
+/* Fixed header before the variable-length seg blob. Entry total size =
+ * UB_IMPORT_MEMPOOL_INFO_HDR_SIZE + entry->seg_size. */
+#define UB_IMPORT_MEMPOOL_INFO_HDR_SIZE (offsetof(ub_import_mempool_info_t, seg))
 
 typedef enum ub_packet_stats_type {
     UB_PACKET_STATS_TYPE_SEND,
@@ -187,6 +219,16 @@ typedef struct umq_ub_fc_msg_retry_list {
     bool inited;
 } umq_ub_fc_msg_retry_list_t;
 
+typedef struct ub_queue_idle_check {
+    urpc_list_t node;
+    struct ub_queue *umq;
+    volatile uint64_t last_send;
+    volatile uint64_t target_slot_id;
+    volatile bool need_return_credit;
+    int event_fd;
+    util_external_mutex_lock *lock;
+} ub_queue_idle_check_t;
+
 typedef struct ub_flow_control {
     ub_flow_control_window_ops_t ops;
     volatile uint64_t total_local_rx_posted;
@@ -225,14 +267,18 @@ typedef struct ub_flow_control {
     volatile uint64_t fc_eagain_start_us; // timestamp(us) of the first continuous EAGAIN on credit req send;
     volatile uint64_t imm[UB_QUEUE_FC_MSG_TYPE_MAX];
     umq_ub_fc_msg_retry_list_t *fc_msg_retry_list;
+    ub_queue_idle_check_t *checker;
     uint8_t local_req_seq;
     uint8_t remote_expect_seq;
 } ub_flow_control_t;
 
 typedef struct imported_tseg_node {
     struct urpc_hmap_node node;
-    uint32_t mempool_id;
     urma_target_seg_t *tseg;
+    uint32_t mempool_id;
+    uint32_t version; /* the version carried when this mempool was imported; the
+                         receiver compares it against the freshly arrived version
+                         to decide reuse / unimport+reimport (design §3.5) */
 } imported_tseg_node_t;
 
 typedef struct import_remote_record_node {
@@ -273,6 +319,12 @@ typedef struct umq_ub_ctx {
     umq_dev_assign_t dev_info;
     pthread_spinlock_t tseg_list_lock;
     urma_target_seg_t *tseg_list[UMQ_MAX_TSEG_NUM];
+    /* Per-mempool version, bumped each time the local mempool is (re)registered
+     * so the peer can detect a recycled/reallocated mempool and re-import
+     * (design §3.5). Read/written under tseg_list_lock (together with the
+     * tseg_list[mempool_id] publish in umq_ub_register_seg / read in
+     * umq_ub_mempool_info_get_impl). */
+    uint32_t mempool_version[UMQ_MAX_TSEG_NUM];
     remote_imported_tseg_info_t *remote_imported_info;
     urma_target_jetty_t *tjetty;
     umq_trans_info_t trans_info;
@@ -382,9 +434,9 @@ typedef struct umq_ub_bind_info {
 
 typedef struct ub_bind_ctx {
     urma_target_jetty_t *tjetty[UB_QUEUE_JETTY_NUM];
-    uint32_t remote_pid;
     import_tseg_table_t *tseg_table;
     urpc_bitmap_t tseg_imported;
+    uint32_t remote_pid;
     char remote_namespace[0]; // namespace string, allocated with namespace_len (see umq_ub_bind_inner_impl)
 } ub_bind_ctx_t;
 
@@ -440,28 +492,11 @@ typedef struct jfr_ctx {
     ub_credit_pool_t credit;
 } jfr_ctx_t;
 
-typedef struct ub_queue_interrupt_ctx {
-    bool tx_io_interrupt;
-    bool rx_io_interrupt;
-    bool tx_fc_interrupt;
-    bool rx_fc_interrupt;
-} ub_queue_interrupt_ctx_t;
-
 typedef struct wait_ack_import {
+    util_external_rwlock *lock;
     uint16_t *wait_ack_pool_id;
     uint16_t wait_ack_idx;
-    util_external_rwlock *lock;
 } wait_ack_import_t;
-
-typedef struct ub_queue_idle_check {
-    urpc_list_t node;
-    struct ub_queue *umq;
-    volatile uint64_t last_send;
-    volatile uint64_t target_slot_id;
-    volatile bool need_return_credit;
-    int event_fd;
-    util_external_mutex_lock *lock;
-} ub_queue_idle_check_t;
 
 typedef enum jetty_pool_node_state {
     JETTY_POOL_NODE_IDLE,             // node is in free_q/active_q or thread-local cache
@@ -486,42 +521,24 @@ typedef struct jetty_pool_node {
     uint32_t borrow_limit;              // Max WRs per borrow (0 = unlimited)
     bool in_global_pool;                // Whether node is in a global pool list (free_q/active_q/err_q)
     bool is_jetty_err;
+    bool tx_flush_done;                 // polled URMA_CR_WR_FLUSH_ERR_DONE on this jetty; flush_sqe pending
 } jetty_pool_node_t;
 
-typedef struct ub_queue {
-    urpc_list_t qctx_node;
-    // queue param
-    urma_jetty_t *jetty[UB_QUEUE_JETTY_NUM];
-    jfr_ctx_t *jfr_ctx[UB_QUEUE_JETTY_NUM];
-    urma_jfc_t *jfs_jfc[UB_QUEUE_JETTY_NUM];
-    urma_jfce_t *jfs_jfce; // io and flow control jetty share same jfce
-    ub_queue_interrupt_ctx_t interrupt_ctx;
-    umq_ub_ctx_t *dev_ctx;
-    struct ub_bind_ctx *bind_ctx;
-    volatile uint32_t prefill_rqe_cnt;
-    volatile uint32_t ref_cnt;
-    volatile uint32_t require_rx_count;
-    volatile uint32_t tx_outstanding;
-    volatile uint64_t packet_stats[UB_PACKET_STATS_TYPE_MAX];
-    uint32_t create_flag;
-    uint64_t umq_ctx;
-    umq_buf_t *addr_list;
-    wait_ack_import_t wait_ack_import;
-
-    // config param
-    umq_trans_mode_t umq_trans_mode;
+typedef struct ub_queue_cfg {
+    bondp_port_id_t *used_port;
     urma_order_type_t order_type;
     urma_transport_mode_t tp_mode;
     urma_tp_type_t tp_type;
-    ub_flow_control_t *flow_control;
-    char name[UMQ_NAME_MAX_LEN];
+    umq_queue_mode_t mode;      // mode of queue, QUEUE_MODE_POLLING for default
+
     uint32_t rx_buf_size;
     uint32_t tx_buf_size;
     uint32_t rx_depth;
     uint32_t tx_depth;
-    uint32_t remote_rx_buf_size;
     uint32_t fc_rx_depth;
-
+    volatile uint32_t require_rx_count;
+    volatile uint32_t prefill_rqe_cnt;
+    bool prefill_done;          // until prefill_rqe_cnt = rqe_post_factor * rx_depth, prefill is done
     uint8_t priority;           // priority of the queue
     uint8_t max_rx_sge;         // max sge number of receive array
     uint8_t max_tx_sge;         // max sge number of send array
@@ -530,23 +547,59 @@ typedef struct ub_queue {
     uint8_t min_rnr_timer;      // minimum RNR NACK timer
     uint8_t rqe_post_factor;    // 1 by default, and multiple times when use port_ids
     uint8_t used_port_num;
-    bool tx_flush_done;         // tx recv flush err done
-    bool rx_flush_done;         // rx buf ctx all report
-    bool prefill_done;          // until prefill_rqe_cnt = rqe_post_factor * rx_depth, prefill is done
-    umq_queue_mode_t mode;      // mode of queue, QUEUE_MODE_POLLING for default
+} ub_queue_cfg_t;
+
+typedef struct ub_queue {
+    /* `mode` MUST be the first member (offset 0) so an external uint64_t handle
+     * (a ub_queue_t pointer) can be cast to umq_t* to read mode, matching the
+     * umq_t layout defined in umq_inner.h. `state` follows at offset 4 to fill
+     * the 4B alignment pad before qctx_node (8B-aligned), avoiding memory waste;
+     * moved up from its previous position with no net increase of sizeof(ub_queue_t). */
+    umq_trans_mode_t mode;
     umq_state_t state;
-    uint64_t umqh;
-    uint64_t share_rq_umqh;
-    ub_queue_idle_check_t *checker;
-    bondp_port_id_t *used_port;
-    uint32_t umq_id;
-    uint32_t remote_umq_id;
+    urpc_list_t qctx_node;
+    // queue param
+    urma_jetty_t *jetty[UB_QUEUE_JETTY_NUM];
+    jfr_ctx_t *jfr_ctx[UB_QUEUE_JETTY_NUM];
+    urma_jfc_t *jfs_jfc[UB_QUEUE_JETTY_NUM];
+    urma_jfce_t *jfs_jfce; // io and flow control jetty share same jfce
+    umq_ub_ctx_t *dev_ctx;
+    ub_bind_ctx_t *bind_ctx;
+    umq_buf_t *addr_list;
+    ub_flow_control_t *flow_control;
 
     // umq_ub_jetty_node_list_t jetty_node_list;
     umq_ub_jetty_node_list_t *jetty_node_list;
     volatile uint64_t jetty_node;       // jetty_pool_node_t *, atomically accessed
     pthread_spinlock_t get_jetty_node_lock;
+
+    uint64_t share_rq_umqh;
+    uint64_t umq_ctx;
+    volatile uint64_t *packet_stats;
+    volatile uint32_t ref_cnt;
+    volatile uint32_t tx_outstanding;
+
+    uint32_t create_flag;
+    uint32_t umq_id;
+    uint32_t remote_umq_id;
+    uint32_t remote_rx_buf_size;
+    wait_ack_import_t wait_ack_import;
+
+    volatile bool tx_io_interrupt;
+    volatile bool rx_io_interrupt;
+    volatile bool tx_fc_interrupt;
+    volatile bool rx_fc_interrupt;
+    volatile bool tx_flush_done;               // tx recv flush err done
+    volatile bool rx_flush_done;               // rx buf ctx all report
+
+    // config param, logic umq get cfg from share_rq_umqh
+    ub_queue_cfg_t cfg[0];
 } ub_queue_t;
+
+/* Lock the overlay cast contract: ub_queue_t::mode MUST sit at offset 0 so an
+ * external uint64_t handle (a ub_queue_t pointer) can be cast to umq_t* to read
+ * mode before dispatching into umq_ub. See umq_inner.h for the umq_t layout. */
+_Static_assert(offsetof(ub_queue_t, mode) == 0, "ub_queue_t.mode must be at offset 0 for umq_t overlay cast");
 
 typedef struct user_ctx {
     umq_buf_t *dst_buf;
@@ -574,14 +627,47 @@ typedef struct umq_create_jetty_config {
     uint8_t used_port_num;
 } umq_create_jetty_config_t;
 
+typedef enum umq_ub_ack_import_type {
+    UMQ_UB_ACK_IMPORT_TYPE_NO_ACK,
+    UMQ_UB_ACK_IMPORT_TYPE_ACK_IMM,
+    UMQ_UB_ACK_IMPORT_TYPE_ACK_DELAY,
+} umq_ub_ack_import_type_t;
+
 int rx_buf_ctx_list_init(rx_buf_ctx_list_t *rx_buf_ctx_list, uint32_t ctx_num);
 void rx_buf_ctx_list_uninit(rx_buf_ctx_list_t *rx_buf_ctx_list);
 umq_buf_t *umq_get_buf_by_user_ctx(ub_queue_t *queue, uint64_t user_ctx, ub_queue_jetty_index_t jetty_index);
 
 // for control plane on umq ub api
 int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **bad_qbuf);
-int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t ref_seg_num, bool send_ack);
+int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t ref_seg_num,
+    umq_ub_ack_import_type_t ack_type);
 rx_buf_ctx_t *queue_rx_buf_ctx_flush(rx_buf_ctx_list_t *rx_buf_ctx_list);
+
+/*
+ * Serialize a local target segment into a peer-bound ub_import_mempool_info_t
+ * entry, using urma_get_seg_ctx to obtain the (possibly variable-length,
+ * has_user_info-bearing) urma_seg_t blob. The peer forwards &entry->seg
+ * verbatim to urma_import_seg. Fills the fixed header (seg_size, mempool_id,
+ * mempool_token_value, version, token_id) and copies seg_size bytes of the seg
+ * blob after it. The full variable-length blob (including the bonding
+ * has_user_info extension tail) is always carried; callers must size their
+ * wire buffer to hold the worst-case seg_size (ubsocket sizes its stack buffer
+ * to UMQ_MEMPOOL_INFO_MAX_SIZE, which reserves UBS_MEMPOOL_INFO_SEG_EXT_MAX
+ * bytes for this).
+ *
+ * @param tseg         local target segment to export (must outlive the call)
+ * @param mempool_id   umq mempool id carried in the header
+ * @param token_value  tseg->user_ctx, carried as the urma_token_t value
+ * @param version      mempool version carried in the header
+ * @param out          destination entry; the full entry (header + seg blob)
+ *                    must fit within out_cap bytes starting at @out
+ * @param out_cap     total bytes available at @out (covers header + seg blob;
+ *                    must be >= UB_IMPORT_MEMPOOL_INFO_HDR_SIZE + seg_size)
+ * @return total bytes written (UB_IMPORT_MEMPOOL_INFO_HDR_SIZE + seg_size),
+ *         or 0 on failure (urma_get_seg_ctx failed or out_cap too small)
+ */
+uint32_t umq_ub_fill_seg_ctx(urma_target_seg_t *tseg, uint32_t mempool_id, uint32_t token_value,
+                             uint32_t version, ub_import_mempool_info_t *out, uint32_t out_cap);
 
 int umq_ub_post_rx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_option_t *option);
 int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_option_t *option);
@@ -601,10 +687,10 @@ remote_imported_tseg_info_t *umq_ub_ctx_imported_info_create(void);
 void umq_ub_ctx_imported_info_destroy(umq_ub_ctx_t *ub_ctx);
 urma_jetty_t *umq_create_jetty(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, umq_create_jetty_config_t *config);
 int check_and_set_param(umq_ub_ctx_t *dev_ctx, umq_create_option_t *option, ub_queue_t *queue);
-void umq_ub_config_bonding_port(umq_ub_ctx_t *dev_ctx, ub_queue_t *queue);
+bool umq_ub_config_bonding_port(umq_ub_ctx_t *dev_ctx, ub_queue_cfg_t *qcfg);
 int umq_ub_register_seg(umq_ub_ctx_t *ctx, uint16_t mempool_id, void *addr, uint64_t size);
 void umq_ub_unregister_seg(umq_ub_ctx_t *ctx_list, uint32_t ctx_cnt, uint16_t mempool_id);
-int share_rq_param_check(ub_queue_t *queue, ub_queue_t *share_rq);
+int share_rq_param_reset(ub_queue_t *queue, ub_queue_t *share_rq);
 void umq_ub_jfr_ctx_put(ub_queue_t *queue, ub_queue_jetty_index_t jetty_idx);
 int umq_ub_jfr_ctx_get(ub_queue_t *queue, umq_ub_ctx_t *dev_ctx, umq_create_option_t *option,
                        ub_queue_t *share_queue, ub_queue_jetty_index_t jetty_idx);
@@ -642,12 +728,20 @@ int umq_ub_dequeue_plus_with_poll_tx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t
 uint32_t umq_ub_ref_sge_cnt(umq_buf_t *buffer);
 
 typedef struct mempool_info_ctx {
-    ub_import_mempool_info_t *import_mempool_info;
+    ub_import_mempool_info_t *import_mempool_info; /* cursor for next entry (variable-length) */
+    uint32_t mempool_info_cap;                     /* remaining bytes from the cursor */
     umq_imm_head_t *umq_imm_head;
     bool mempool_info_record[UMQ_MAX_TSEG_NUM];
 } mempool_info_ctx_t;
 
-int fill_big_data_ref_sge(ub_queue_t *queue, ub_ref_sge_t *ref_sge, umq_buf_t *buffer, mempool_info_ctx_t *ctx);
+/*
+ * Fill ref_sge for one buffer; if this mempool is being imported for the first
+ * time on the peer, also append a ub_import_mempool_info_t entry (via
+ * umq_ub_fill_seg_ctx) at ctx->import_mempool_info and advance that cursor.
+ * Returns the bytes appended to the mempool-info area (0 if none / on failure).
+ */
+uint32_t fill_big_data_ref_sge(ub_queue_t *queue, ub_ref_sge_t *ref_sge, umq_buf_t *buffer,
+                               mempool_info_ctx_t *ctx);
 void umq_ub_fill_rx_buffer(ub_queue_t *queue, int rx_cnt);
 int umq_ub_dequeue_with_poll_rx(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t **buf);
 int umq_ub_dequeue_plus_with_poll_rx(uint64_t umqh_tp, urma_cr_t *cr, umq_buf_t **buf);
@@ -700,7 +794,7 @@ int umq_bondp_port_id_set(umq_used_ports_t *used_ports, bondp_port_id_t *used_po
 static ALWAYS_INLINE void umq_ub_io_packet_stats(
     ub_queue_t *queue, ub_packet_stats_type_t type, uint32_t cnt, bool lock_free)
 {
-    if ((queue->dev_ctx->feature & UMQ_FEATURE_ENABLE_STATS) == 0) {
+    if (queue->packet_stats == NULL) {
         return;
     }
 
@@ -712,6 +806,22 @@ static ALWAYS_INLINE void umq_ub_io_packet_stats(
 }
 
 urma_target_seg_t *umq_ub_tseg_lookup(import_tseg_table_t *tseg_table, uint32_t mempool_id);
+
+/* Look up the imported-tseg node (carrying its import-time version) for a
+ * mempool, under the table's read lock. Returns NULL if not imported. The
+ * caller must not free the returned node; it is owned by the table. */
+imported_tseg_node_t *umq_ub_tseg_node_lookup(import_tseg_table_t *tseg_table, uint32_t mempool_id);
+
+/* Same as umq_ub_tseg_node_lookup but assumes the caller already holds
+ * tseg_hmap_lock (read or write) — does not take the lock itself. Use when the
+ * caller dereferences the returned node before dropping the lock, so a
+ * concurrent umq_ub_tseg_remove cannot free it in between. */
+imported_tseg_node_t *umq_ub_tseg_node_lookup_locked(import_tseg_table_t *tseg_table, uint32_t mempool_id);
+
+/* Remove and unimport the node for a mempool (no-op if absent). Used by the
+ * version-aware re-import path: the caller detected a stale version and must
+ * unimport before re-importing the same mempool (design §3.5). */
+void umq_ub_tseg_remove(import_tseg_table_t *tseg_table, uint32_t mempool_id);
 
 static ALWAYS_INLINE bool umq_ub_enable_import_remote_mem(uint32_t feature)
 {
@@ -777,6 +887,17 @@ static ALWAYS_INLINE bool is_umq_ub_share_rq(uint32_t create_flag)
 static inline bool is_umq_ub_bonding_dev(const char *name)
 {
     return strstr(name, "bonding") != NULL;
+}
+
+static inline ub_queue_cfg_t *umq_ub_queue_cfg_get(ub_queue_t *queue)
+{
+    if (!is_umq_ub_logic_queue(queue->create_flag)) {
+        return queue->cfg;
+    }
+
+    // share_rq_umqh has been validated
+    ub_queue_t *share_rq = (ub_queue_t *)(uintptr_t)queue->share_rq_umqh;
+    return share_rq->cfg;
 }
 
 #ifdef __cplusplus

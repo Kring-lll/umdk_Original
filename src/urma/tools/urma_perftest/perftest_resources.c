@@ -136,17 +136,22 @@ static int check_dev_cap(perftest_context_t *ctx, perftest_config_t *cfg)
     return 0;
 }
 
+static inline bool priority_supports_tp(urma_device_attr_t *attr, uint8_t p, union urma_tp_type_en tp_type)
+{
+    if (p > URMA_MAX_PRIORITY) {
+        return false;
+    }
+    return (attr->dev_cap.priority_info[p].tp_type.value & tp_type.value) != 0;
+}
+
 static int get_jetty_priority_by_tp_type(urma_device_attr_t *dev_attr, union urma_tp_type_en tp_type)
 {
-    int pri = -1;
-
     for (int i = 0; i <= URMA_MAX_PRIORITY; i++) {
-        if (tp_type.value == dev_attr->dev_cap.priority_info[i].tp_type.value) {
-            pri = i;
-            return pri;
+        if ((dev_attr->dev_cap.priority_info[i].tp_type.value & tp_type.value) != 0) {
+            return i;
         }
     }
-    LOG_ERROR("Failed to get sl resources");
+    LOG_ERROR("Failed to get sl resources for tp_type=0x%x\n", tp_type.value);
     return -1;
 }
 
@@ -215,14 +220,14 @@ static int init_device(perftest_context_t *ctx, perftest_config_t *cfg)
         }
         if (cfg->use_ctp && ctx->urma_ctx->ops->import_jetty_ex != NULL) {
             tp_type.bs.ctp = 1;
-            if (tp_type.value != ctx->dev_attr.dev_cap.priority_info[cfg->priority].tp_type.value) {
-                LOG_ERROR("You should set the priority of type CTP\n");
+            if (!priority_supports_tp(&ctx->dev_attr, cfg->priority, tp_type)) {
+                LOG_ERROR("Priority %hhu does not support CTP\n", cfg->priority);
                 goto uninit;
             }
         } else if (ctx->urma_ctx->ops->import_jetty_ex != NULL) {
             tp_type.bs.rtp = 1;
-            if (tp_type.value != ctx->dev_attr.dev_cap.priority_info[cfg->priority].tp_type.value) {
-                LOG_ERROR("You should set the priority of type RTP\n");
+            if (!priority_supports_tp(&ctx->dev_attr, cfg->priority, tp_type)) {
+                LOG_ERROR("Priority %hhu does not support RTP\n", cfg->priority);
                 goto uninit;
             }
         }
@@ -261,13 +266,23 @@ static int init_device(perftest_context_t *ctx, perftest_config_t *cfg)
 del_ctx:
     (void)urma_delete_context(ctx->urma_ctx);
 uninit:
+    /* UB mgmt: close mgmt channel before urma_uninit, since urma_uninit
+     * dlclose()'s provider.so 
+     */
+    if (cfg->mgmt_type == PERFTEST_MGMT_UB) {
+        close_connection(cfg);
+    }
     (void)urma_uninit();
     return -1;
 }
 
-static void uninit_device(perftest_context_t *ctx)
+static void uninit_device(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     urma_status_t status;
+
+    if (cfg->mgmt_type == PERFTEST_MGMT_UB) {
+        close_connection(cfg);
+    }
 
     status = urma_delete_context(ctx->urma_ctx);
     if (status != URMA_SUCCESS) {
@@ -1403,7 +1418,7 @@ static void create_tp_info_get_attr_uboe(perftest_config_t *cfg, urma_tp_attr_va
     if (cfg->uboe_dscp) {
         tp_attr->dscp = cfg->dscp;
     }
-    if (cfg->uboe_sl) {
+    if (cfg->enable_sl) {
         tp_attr->sl = cfg->sl;
         (*set_tp_attr_cnt)++;
         (*set_tp_attr_flag) |= PERFTEST_SET_ATTR_BITMAP_SL_FLAG;
@@ -1489,6 +1504,23 @@ static int create_tp_info(perftest_context_t *ctx, perftest_config_t *cfg)
                                    set_tp_attr_flag, &tp_attr);
             if (ret != URMA_SUCCESS) {
                 LOG_ERROR("Failed to set_tp_attr, ret:%d\n", ret);
+                goto free_buf;
+            }
+        } else if (cfg->enable_sl) {
+            if (cfg->use_ctp) {
+                LOG_ERROR("ctp does not support setting sl.\n");
+                goto free_buf;
+            }
+            urma_tp_attr_value_t tp_attr = {0};
+            uint8_t set_tp_attr_cnt = 0;
+            uint32_t set_tp_attr_flag = 0;
+            tp_attr.sl = cfg->sl;
+            set_tp_attr_cnt++;
+            set_tp_attr_flag |= PERFTEST_SET_ATTR_BITMAP_SL_FLAG;
+            ret = urma_set_tp_attr(ctx->urma_ctx, ctx->tp_info[i].tp_handle, set_tp_attr_cnt,
+                                   set_tp_attr_flag, &tp_attr);
+            if (ret != URMA_SUCCESS) {
+                LOG_ERROR("Failed to set_tp_attr(sl), ret:%d\n", ret);
                 goto free_buf;
             }
         }
@@ -2660,7 +2692,7 @@ unregister_mem:
 delete_jettys:
     destroy_simplex_jettys(ctx, cfg);
 uninit_dev:
-    uninit_device(ctx);
+    uninit_device(ctx, cfg);
     return -1;
 }
 
@@ -2911,7 +2943,7 @@ unregister_mem:
 delete_jettys:
     destroy_duplex_jettys(ctx, cfg);
 uninit_dev:
-    uninit_device(ctx);
+    uninit_device(ctx, cfg);
     return -1;
 }
 
@@ -2950,10 +2982,7 @@ static void destroy_simplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     destroy_simplex_jettys(ctx, cfg);
     unregister_mem(ctx, cfg);
     ctx->jetty_num = 0;
-    /* Close mgmt channel BEFORE uninit_device: urma_uninit is not refcounted
-     * and dlclose()'s provider .so, after which mgmt ctx->ops dangles. */
-    close_connection(cfg);
-    uninit_device(ctx);
+    uninit_device(ctx, cfg);
     return;
 }
 
@@ -2990,9 +3019,7 @@ static void destroy_duplex_ctx(perftest_context_t *ctx, perftest_config_t *cfg)
     destroy_duplex_jettys(ctx, cfg);
     unregister_mem(ctx, cfg);
     ctx->jetty_num = 0;
-    /* See destroy_simplex_ctx for ordering rationale. */
-    close_connection(cfg);
-    uninit_device(ctx);
+    uninit_device(ctx, cfg);
     return;
 }
 

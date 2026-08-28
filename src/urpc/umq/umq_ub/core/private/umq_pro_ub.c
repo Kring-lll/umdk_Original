@@ -26,9 +26,22 @@
 #define UMQ_UB_FC_POLL_COUNT_MAX 1 // the upper limit of the number of flow control buffers for poll
 
 static __thread urma_jfs_wr_t g_umq_ub_urma_wr[UMQ_BATCH_SIZE];
-static __thread urma_jfr_wr_t g_umq_ub_jfr_wr[UMQ_BATCH_SIZE];
 static __thread urma_sge_t g_umq_ub_sges[UMQ_BATCH_SIZE][UMQ_MAX_SGE_NUM];
-static __thread urma_sge_t g_umq_ub_jfr_sges[UMQ_BATCH_SIZE][UMQ_MAX_SGE_NUM];
+
+/* 进程退出标志：ubsocket 经 umq_exiting_set() -> umq_tp_exiting_set 回调置 true。
+ * umq_ub_poll_fc_tx 等据此跳过 poll，避免 worker 线程在主线程释放 jfc 后仍访问悬空指针。 */
+volatile bool g_ubsocket_exiting = false;
+
+void umq_ub_exiting_set_impl(bool exiting)
+{
+    g_ubsocket_exiting = exiting;
+    __sync_synchronize();
+}
+
+bool umq_ub_exiting_get_impl(void)
+{
+    return g_ubsocket_exiting;
+}
 
 int rx_buf_ctx_list_init(rx_buf_ctx_list_t *rx_buf_ctx_list, uint32_t ctx_num)
 {
@@ -196,6 +209,15 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
             urma_wr_ptr->rw.src.num_sge = sge_num;
             break;
         case UMQ_OPC_SEND_IMM:
+            /* io_imm.rsvd1 (bits 20-39) is reserved for the umq backend; ubsocket
+             * borrows bit 20 (UBS_IMM_BIG_CTRL_BIT) to classify a packet as
+             * BIG_CTRL vs SMALL_DATA/ordinary SEND. The receiver reads it back
+             * from the CQE imm (umq_ub_poll_rx fills buf_pro->imm_data from
+             * cr->imm_data), so the sender must propagate it into the wire imm.
+             * type (bits 0-1) and umq_id (bits 2-19) stay backend-owned; only the
+             * reserved rsvd1 bits are passed through. Clearing imm.rsvd0 below
+             * would drop the marker, so capture it first. */
+            imm_data.value |= (buf_pro->imm_data & UMQ_UB_IMM_RSV1_MASK);
             buf_pro->imm.rsvd0 = 0;
             imm_data.io_imm.type = IMM_TYPE_USER;
             imm_data.io_imm.user_data = buf_pro->imm.user_data;
@@ -252,7 +274,16 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
     uint64_t post_start = umq_trace_start_timestamp_get();
     int ret = UMQ_SUCCESS;
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh;
+    ub_queue_cfg_t *qcfg = umq_ub_queue_cfg_get(queue);
     uint32_t wr_cnt_limit = UMQ_BATCH_SIZE;
+    /* 进程退出期跳过 post：与 umq_ub_poll_tx_single/umq_ub_poll_fc_tx/round_robin
+     * 守卫一致。退出期 release 路径会回收 jetty node 并释放 jfc，poll 回调
+     * (HandleTxCompletion->SendSimpleCtrl) 触发的 umq_post 读 queue->jetty_node
+     * 或调 urma post 会 UAF/SEGV。退出期无需 post，交还 qbuf 安全。 */
+    if (g_ubsocket_exiting) {
+        *bad_qbuf = qbuf;
+        return -UMQ_ERR_ENODEV;
+    }
     if (queue->bind_ctx == NULL) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), umq has not been binded\n", queue->umq_id);
         *bad_qbuf = qbuf;
@@ -263,15 +294,24 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
     /* record start before flow control so FC URMA calls can be captured as sub_time */
     umq_trace_start_record(UMQ_TRACE_TYPE_POST, post_start, 0, queue->umq_id);
 
-    ret = umq_ub_credit_check_and_request_send(fc, queue);
-    if (ret != UMQ_SUCCESS) {
-        *bad_qbuf = qbuf;
-        umq_trace_end_record(UMQ_TRACE_TYPE_POST, umq_trace_timestamp_get());
-        return ret;
+    /* READ operations pull data from the remote memory and do not consume the
+     * peer's RX buffer / send credit, so skip the send-credit check for them.
+     * Otherwise a READ OFFER handler can be permanently blocked by flow
+     * control even though READ doesn't deplete the remote RX window. */
+    umq_buf_pro_t *first_pro = (umq_buf_pro_t *)qbuf->qbuf_ext;
+    bool is_read_only = (first_pro != NULL && first_pro->opcode == UMQ_OPC_READ);
+    if (!is_read_only) {
+        ret = umq_ub_credit_check_and_request_send(fc, queue);
+        if (ret != UMQ_SUCCESS) {
+            *bad_qbuf = qbuf;
+            umq_trace_end_record(UMQ_TRACE_TYPE_POST, umq_trace_timestamp_get());
+            return ret;
+        }
     }
-    uint32_t max_sge_num = queue->max_tx_sge;
+    uint32_t max_sge_num = qcfg->max_tx_sge;
     urma_jfs_wr_t *urma_wr_ptr = g_umq_ub_urma_wr;
-    urma_sge_t src_sge, dst_sge;
+    urma_sge_t src_sge[UMQ_BATCH_SIZE] = {};
+    urma_sge_t dst_sge[UMQ_BATCH_SIZE] = {};
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO];
     urma_target_seg_t **tseg_list = queue->dev_ctx->tseg_list;
     urma_sge_t *sges_ptr;
@@ -281,7 +321,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
     bool opcode_consume_rqe = false;
     bool user_send_imm = false;
     uint32_t max_send_size =
-        (queue->remote_rx_buf_size > queue->tx_buf_size) ? queue->tx_buf_size : queue->remote_rx_buf_size;
+        (queue->remote_rx_buf_size > qcfg->tx_buf_size) ? qcfg->tx_buf_size : queue->remote_rx_buf_size;
     uint32_t failed_num = 0;
 
     *bad_qbuf = NULL;
@@ -291,6 +331,12 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
         umq_trace_item_record(buf_pro->imm.user_data, buffer->total_data_size, 0);
         umq_opcode_t opcode = buf_pro->opcode;
         uint32_t rest_size = buffer->total_data_size;
+        if (rest_size == 0) {
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), total_data_size is 0, skip empty qbuf\n", queue->umq_id);
+            *bad_qbuf = qbuf;
+            ret = -UMQ_ERR_EINVAL;
+            goto ERROR;
+        }
         if (rest_size > max_send_size && (opcode == UMQ_OPC_SEND || opcode == UMQ_OPC_SEND_IMM)) {
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), total data size[%u] exceed max send size[%u]\n",
                 queue->umq_id, rest_size, max_send_size);
@@ -361,7 +407,12 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
             goto ERROR;
         }
         urma_wr_ptr->opcode = transform_op_code(opcode);
-        ret = umq_ub_fill_wr(queue, tmp_buf, urma_wr_ptr, g_umq_ub_sges[wr_index], sge_num, &src_sge, &dst_sge);
+        /* Zero the WR union to clear stale target_hint/notify_data from
+         * previous SEND/WRITE WRs that share g_umq_ub_urma_wr[] entries. */
+        urma_wr_ptr->rw.target_hint = 0;
+        urma_wr_ptr->rw.notify_data = 0;
+        ret = umq_ub_fill_wr(queue, tmp_buf, urma_wr_ptr, g_umq_ub_sges[wr_index], sge_num,
+                             &src_sge[wr_index], &dst_sge[wr_index]);
         if (ret != UMQ_SUCCESS) {
             *bad_qbuf = qbuf;
             goto ERROR;
@@ -377,8 +428,10 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
         wr_index++;
         if (wr_index == UMQ_BATCH_SIZE && buffer != NULL) {
             // wr count exceed UMQ_BATCH_SIZE
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), wr count exceeds %d, not supported\n",
-                queue->umq_id, UMQ_BATCH_SIZE);
+            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ,
+                               "UMQ(ID:%u), wr count exceeds %d, not supported, first_qbuf=%p, "
+                               "cur_buffer=%p, total_data_size=%u\n",
+                queue->umq_id, UMQ_BATCH_SIZE, (void *)qbuf, (void *)buffer, buffer->total_data_size);
             *bad_qbuf = qbuf;
             ret = -UMQ_ERR_EINVAL;
             goto ERROR;
@@ -401,7 +454,6 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
     if (is_umq_ub_logic_queue(queue->create_flag)) {
         ret = umq_ub_get_jetty_node(queue, 0);
         if (ret != UMQ_SUCCESS) {
-            UMQ_LIMIT_VLOG_DEBUG(VLOG_UMQ, "UMQ(ID:%u) get jetty node failed\n", queue->umq_id);
             *bad_qbuf = qbuf;
             goto RECOVER_WINDOW;
         }
@@ -460,7 +512,9 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
     }
 
     umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND, wr_cnt_limit, queue->dev_ctx->io_lock_free);
-    // Logic UMQ: release the post borrow reference acquired by get_jetty_node.
+    /* Logic UMQ: release the borrow reference acquired by get_jetty_node.
+     * tx_outstanding is not decremented here (failed_cnt=0); the node stays
+     * alive until all TX CQEs are reaped by umq_ub_poll_release_jetty_node. */
     if (is_umq_ub_logic_queue(queue->create_flag)) {
         umq_ub_post_release_jetty_node(queue, 0);
     }
@@ -539,22 +593,27 @@ static uint16_t umq_ub_post_rx_failed_num(urma_jfr_wr_t *recv_wr, uint16_t num, 
 
 static void umq_ub_rqe_posted_cnt_inc(ub_queue_t *queue, uint16_t count)
 {
-    if (queue->prefill_done) {
+    ub_queue_cfg_t *qcfg = umq_ub_queue_cfg_get(queue);
+    if (qcfg->prefill_done) {
         umq_ub_shared_credit_recharge(queue, count);
         return;
     }
 
-    uint32_t total_prefill = __atomic_add_fetch(&queue->prefill_rqe_cnt, count, __ATOMIC_RELAXED);
-    if (total_prefill >= queue->rqe_post_factor * queue->rx_depth) {
-        umq_ub_shared_credit_recharge(queue, queue->rx_depth);
-        queue->prefill_done = true;
+    uint32_t total_prefill = __atomic_add_fetch(&qcfg->prefill_rqe_cnt, count, __ATOMIC_RELAXED);
+    if (total_prefill >= (uint32_t)qcfg->rqe_post_factor * qcfg->rx_depth) {
+        umq_ub_shared_credit_recharge(queue, qcfg->rx_depth);
+        qcfg->prefill_done = true;
     }
 }
 
 int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **bad_qbuf)
 {
-    uint32_t max_sge_num = queue->max_rx_sge;
-    urma_jfr_wr_t *recv_wr_ptr = g_umq_ub_jfr_wr;
+    ub_queue_cfg_t *qcfg = umq_ub_queue_cfg_get(queue);
+    uint32_t max_sge_num = qcfg->max_rx_sge;
+    urma_jfr_wr_t recv_wr[UMQ_BATCH_SIZE] = {0};
+    urma_jfr_wr_t *recv_wr_ptr = recv_wr;
+
+    urma_sge_t sges[UMQ_BATCH_SIZE][max_sge_num];
     urma_sge_t *sges_ptr;
     urma_target_seg_t **tseg_list = queue->dev_ctx->tseg_list;
     urma_jfr_wr_t *bad_wr = NULL;
@@ -583,7 +642,7 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
         }
         rx_buf_ctx->buffer = buffer;
         uint64_t user_ctx = (uint64_t)(uintptr_t)rx_buf_ctx;
-        sges_ptr = g_umq_ub_jfr_sges[wr_index];
+        sges_ptr = sges[wr_index];
         while (buffer && rest_size > 0) { // try to add up to total_size
             if (sge_num++ >= max_sge_num) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, sge num exceed max sge num[%u]\n",
@@ -627,7 +686,7 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
         }
 
         wr_last_buf->qbuf_next = NULL;  // last buffer of current wr
-        recv_wr_ptr->src.sge = g_umq_ub_jfr_sges[wr_index];
+        recv_wr_ptr->src.sge = sges[wr_index];
         recv_wr_ptr->src.num_sge = sge_num;
         recv_wr_ptr->user_ctx = user_ctx;
         recv_wr_ptr++;
@@ -648,9 +707,9 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
     bool post_jfr = is_umq_ub_main_queue(queue->create_flag);
     uint64_t tp_start = umq_trace_timestamp_get();
     if (post_jfr) {
-        status = umq_symbol_urma()->urma_post_jfr_wr(queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr, g_umq_ub_jfr_wr, &bad_wr);
+        status = umq_symbol_urma()->urma_post_jfr_wr(queue->jfr_ctx[UB_QUEUE_JETTY_IO]->jfr, recv_wr, &bad_wr);
     } else {
-        status = umq_symbol_urma()->urma_post_jetty_recv_wr(queue->jetty[UB_QUEUE_JETTY_IO], g_umq_ub_jfr_wr, &bad_wr);
+        status = umq_symbol_urma()->urma_post_jetty_recv_wr(queue->jetty[UB_QUEUE_JETTY_IO], recv_wr, &bad_wr);
     }
     uint64_t delta_ns = umq_trace_write_delta(tp_start);
     umq_trace_sub_record(UMQ_TRACE_TYPE_POST, UMQ_URMA_FUNC_POST_RX, tp_start, delta_ns);
@@ -667,9 +726,9 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
             *bad_qbuf = (umq_buf_t *)(uintptr_t)bad_wr->user_ctx;
         } else {
             *bad_qbuf = qbuf;
-            bad_wr = g_umq_ub_jfr_wr;
+            bad_wr = recv_wr;
         }
-        umq_ub_rqe_posted_cnt_inc(queue, wr_index - umq_ub_post_rx_failed_num(g_umq_ub_jfr_wr, wr_index, *bad_qbuf));
+        umq_ub_rqe_posted_cnt_inc(queue, wr_index - umq_ub_post_rx_failed_num(recv_wr, wr_index, *bad_qbuf));
         // if fails, add chain of qbuf back for rx
         process_bad_wr(queue, bad_wr, NULL);
         return umq_status_convert(status);
@@ -687,8 +746,8 @@ PUT_ALL_RX_CTX:
     // put rx buf in recv wr
     if (wr_index > 0) {
         (recv_wr_ptr - 1)->next = NULL;
-        *bad_qbuf = ((rx_buf_ctx_t *)(uintptr_t)g_umq_ub_jfr_wr->user_ctx)->buffer;
-        process_bad_wr(queue, g_umq_ub_jfr_wr, buffer);
+        *bad_qbuf = ((rx_buf_ctx_t *)(uintptr_t)recv_wr->user_ctx)->buffer;
+        process_bad_wr(queue, recv_wr, buffer);
     } else {
         *bad_qbuf = qbuf;
     }
@@ -754,7 +813,8 @@ static void umq_ub_extend_imm_on_rx_done(ub_queue_t *queue, urma_cr_t *cr, umq_b
     umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)rx_buf->qbuf_ext;
     switch (imm.bs_ext.extend_type) {
         case IMM_TYPE_EXTEND_MEM_IMPORT:
-            if (umq_ub_data_plan_import_mem((uint64_t)(uintptr_t)real_queue, rx_buf, 0, false) != UMQ_SUCCESS) {
+            if (umq_ub_data_plan_import_mem((uint64_t)(uintptr_t)real_queue, rx_buf, 0,
+                UMQ_UB_ACK_IMPORT_TYPE_ACK_DELAY) != UMQ_SUCCESS) {
                 *qbuf_status = UMQ_IMPORT_TSEG_FAILED;
                 break;
             }
@@ -788,7 +848,7 @@ static int umq_ub_on_rx_done(ub_queue_t *queue, urma_cr_t *cr, umq_buf_t *rx_buf
     switch (imm.bs.type) {
         case IMM_TYPE_USER:
             buf_pro->opcode = UMQ_OPC_SEND_IMM;
-            buf_pro->imm.user_data = imm.io_imm.user_data;
+            buf_pro->imm_data = imm.value;
             umq_io_perf_process(UMQ_PERF_RECORD_TRANSPORT_POLL_RX, rx_buf);
             break;
         case IMM_TYPE_USER_WITHOUT_IMM:
@@ -1071,8 +1131,7 @@ static ub_queue_t *umq_ub_get_main_umq(ub_queue_t *queue)
     if (queue->share_rq_umqh == UMQ_INVALID_HANDLE) {
         return queue;
     }
-    umq_t *umq = (umq_t *)(uintptr_t)queue->share_rq_umqh;
-    return (ub_queue_t *)(uintptr_t)umq->umqh_tp;
+    return (ub_queue_t *)(uintptr_t)queue->share_rq_umqh;
 }
 
 static void umq_ub_fc_msg_retry_enqueue(ub_queue_t *queue, umq_ub_imm_t *imm, umq_ub_retry_type_t retry_type)
@@ -1312,7 +1371,7 @@ static int umq_ub_poll_fc_rx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_co
     }
 
     if (rx_cr_cnt > 0) {
-        queue->interrupt_ctx.rx_fc_interrupt = false;
+        queue->rx_fc_interrupt = false;
         umq_ub_fc_packet_stats(queue->flow_control, (uint32_t)rx_cr_cnt, UB_PACKET_STATS_TYPE_RECV);
     }
     int ret = UMQ_SUCCESS;
@@ -1400,7 +1459,8 @@ static int umq_ub_post_fc_recv_wrs(ub_queue_t *queue, urma_jfr_wr_t *recv_wr)
 int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint8_t rqe_post_factor)
 {
     int ret;
-    uint32_t batch = queue->fc_rx_depth * rqe_post_factor;
+    ub_queue_cfg_t *qcfg = umq_ub_queue_cfg_get(queue);
+    uint32_t batch = qcfg->fc_rx_depth * rqe_post_factor;
     if (batch == 0) {
         return UMQ_SUCCESS;
     }
@@ -1425,8 +1485,8 @@ int umq_ub_fill_fc_rx_buf_batch(ub_queue_t *queue, uint8_t rqe_post_factor)
         recv_wr[i - 1].next = &recv_wr[i];
     }
 
-    uint32_t post_left_num = queue->fc_rx_depth;
-    uint32_t post_round = (queue->fc_rx_depth + UMQ_BATCH_SIZE - 1) / UMQ_BATCH_SIZE;
+    uint32_t post_left_num = qcfg->fc_rx_depth;
+    uint32_t post_round = (qcfg->fc_rx_depth + UMQ_BATCH_SIZE - 1) / UMQ_BATCH_SIZE;
     for (uint32_t i = 0; i < post_round; i++) {
         uint32_t post_num = post_left_num > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : post_left_num;
         post_left_num -= post_num;
@@ -1606,12 +1666,24 @@ static int process_tx_msg(umq_buf_t *buf)
     return UMQ_SUCCESS;
 }
 
-static int umq_ub_flush_sqe(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count)
+static ALWAYS_INLINE uint64_t umq_get_buf_ref_id_type(umq_io_option_t *option)
 {
+    if (option != NULL && (option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0) {
+        return UMQ_BUF_REF_ID_TYPE_TP_HANDEL;
+    }
+    return UMQ_BUF_REF_ID_TYPE_UMQ_ID;
+}
+
+static int umq_ub_flush_sqe(urma_jetty_t *jetty, umq_buf_t **buf, uint32_t buf_count, umq_io_option_t *option)
+{
+    if (jetty == NULL) {
+        return 0;
+    }
+
     uint32_t max_batach = buf_count > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : buf_count;
     urma_cr_t cr[max_batach];
     int cnt = 0;
-    int cr_cnt = umq_symbol_urma()->urma_flush_jetty(queue->jetty[UB_QUEUE_JETTY_IO], max_batach, cr);
+    int cr_cnt = umq_symbol_urma()->urma_flush_jetty(jetty, max_batach, cr);
     for (int i = 0; i < cr_cnt; i++) {
         if (cr[i].status == URMA_CR_WR_SUSPEND_DONE || cr[i].status == URMA_CR_WR_FLUSH_ERR_DONE ||
             cr[i].user_ctx <= UINT16_MAX) {
@@ -1621,13 +1693,14 @@ static int umq_ub_flush_sqe(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_cou
         buf[cnt] = (umq_buf_t *)(uintptr_t)cr[i].user_ctx;
         buf[cnt]->io_direction = UMQ_IO_TX;
         buf[cnt]->status = (umq_buf_status_t)cr[i].status;
+        buf[cnt]->buf_ref_id_type = umq_get_buf_ref_id_type(option);
+        buf[cnt]->buf_ref_id = option->tp_handle_idx;
         cnt++;
     }
 
     if (cr_cnt > 0) {
         UMQ_VLOG_INFO(VLOG_UMQ_URMA_API, "eid: " EID_FMT ", jetty_id: %u, urma_flush_jetty flush %d sqe, cr_cnt %d\n",
-            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid), queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id, cnt,
-            cr_cnt);
+            EID_ARGS(jetty->jetty_id.eid), jetty->jetty_id.id, cnt, cr_cnt);
     }
 
     return cnt;
@@ -1861,14 +1934,6 @@ static void umq_ub_process_cr_err_for_jetty_pool(ub_queue_t *queue, urma_cr_t *c
     }
 }
 
-static ALWAYS_INLINE uint64_t umq_get_buf_ref_id_type(umq_io_option_t *option)
-{
-    if (option != NULL && (option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0) {
-        return UMQ_BUF_REF_ID_TYPE_TP_HANDEL;
-    }
-    return UMQ_BUF_REF_ID_TYPE_UMQ_ID;
-}
-
 static int32_t umq_ub_fill_fc_tx_buf(
     ub_queue_t *queue, umq_buf_t **buf, umq_io_option_t *option, umq_buf_status_t status)
 {
@@ -1894,6 +1959,13 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
                       umq_io_option_t *option)
 {
     urma_cr_t cr[UMQ_UB_FLOW_CONTORL_JETTY_DEPTH];
+
+    /* 进程退出期跳过 poll：ubsocket_uninit 先 ReleaseAll(Socket) 释放 jfc，
+     * 后 Stop(TX_RUNNER)，窗口期内 worker 仍 poll 已释放的 jfc 会 UAF。
+     * 退出期无需处理 CQE，直接返回 0 安全。 */
+    if (g_ubsocket_exiting) {
+        return 0;
+    }
 
     if (!umq_ub_poll_get_jetty_node(queue)) {
         return 0;
@@ -1928,7 +2000,7 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
     }
 
     if (tx_cr_cnt > 0) {
-        queue->interrupt_ctx.tx_fc_interrupt = false;
+        queue->tx_fc_interrupt = false;
     }
 
     int ret = UMQ_SUCCESS;
@@ -1939,7 +2011,8 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
         umq_ub_fc_user_ctx_t obj = {.value = cr[i].user_ctx};
         if (cr[i].status != URMA_CR_SUCCESS) {
             umq_ub_fc_packet_stats(queue->flow_control, 1, UB_PACKET_STATS_TYPE_SEND_ERROR);
-            if (cr[i].status == URMA_CR_WR_FLUSH_ERR_DONE || cr[i].status == URMA_CR_WR_SUSPEND_DONE) {
+            if (cr[i].status == URMA_CR_WR_FLUSH_ERR_DONE || cr[i].status == URMA_CR_WR_SUSPEND_DONE ||
+                cr[i].status == BOND_CR_FLOW_CONTROL_NOTIFY) {
                 UMQ_LIMIT_VLOG_INFO(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx "
                     "cr[%d] status[%d] local_id[%u]\n", EID_ARGS(*eid), id, i, (int)cr[i].status, cr[i].local_id);
                 continue;
@@ -1952,8 +2025,14 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
             umq_buf_status_t fc_err_status = is_fatal ? UMQ_FAKE_BUF_FC_ERR_FATAL : UMQ_FAKE_BUF_FC_ERR;
 
             ub_queue_t *real_queue = umq_ub_get_real_queue_by_umq_id(queue, obj.bs.umq_id);
-            qbuf_cnt += umq_ub_fill_fc_tx_buf(real_queue, &buf[qbuf_cnt], option, fc_err_status);
+            int32_t fill_cnt = umq_ub_fill_fc_tx_buf(real_queue, &buf[qbuf_cnt], option, fc_err_status);
+            if (fill_cnt > 0) {
+                umq_buf_pro_t *buf_pro = (umq_buf_pro_t *)buf[qbuf_cnt]->qbuf_ext;
+                buf_pro->umq_ctx = obj.bs.umq_id;
+                qbuf_cnt += fill_cnt;
+            }
             failed_cnt++;
+
             if (real_queue == NULL) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u) sub queue has been destroyed\n", obj.bs.umq_id);
                 continue;
@@ -1977,8 +2056,25 @@ int umq_ub_poll_fc_tx(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, ui
     return (buf != NULL) ? qbuf_cnt : ret;
 }
 
+static inline void umq_ub_process_flush_done(ub_queue_t *queue, jetty_pool_node_t *node, umq_io_option_t *option)
+{
+    if (node != NULL && node->is_jetty_err) {
+        node->tx_flush_done = true;
+    } else if (queue->state == QUEUE_STATE_ERR && (option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) == 0) {
+        queue->tx_flush_done = true;
+    }
+}
+
 int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, umq_io_option_t *option)
 {
+    /* 进程退出期跳过 poll：ubsocket_uninit 先 ReleaseAll(Socket) 释放 jfc/jetty，
+     * 后 Stop(TX_RUNNER)，窗口期内 worker 仍 poll 已释放资源会 UAF (SEGV in
+     * urma_poll_jfc)。此守卫覆盖 FC jfc 和 IO jfc 两条 poll 路径。退出期无需
+     * 处理 CQE，直接返回 0 安全。 */
+    if (g_ubsocket_exiting) {
+        return 0;
+    }
+
     if (buf_count == 0) {
         return 0;
     }
@@ -1990,10 +2086,16 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
     umq_trace_start_record(UMQ_TRACE_TYPE_POLL, poll_start, 0, queue->umq_id);
     uint32_t tp_handle_idx = option->tp_handle_idx;
 
+    if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
+        (option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) == 0) {
+        umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
+        return 0;
+    }
+
     if (queue->flow_control != NULL) {
         if ((queue->create_flag & UMQ_CREATE_FLAG_SHARE_RQ) != 0) {
             uint64_t count;
-            ub_queue_idle_check_t *checker = queue->checker;
+            ub_queue_idle_check_t *checker = queue->flow_control->checker;
             if (__atomic_load_n(&checker->need_return_credit, __ATOMIC_ACQUIRE)) {
                 int ret = umq_ub_shared_credit_return_req_send(queue);
                 if (ret != UMQ_SUCCESS) {
@@ -2004,16 +2106,19 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
                 (void)eventfd_read(checker->event_fd, &count);
             }
         }
-        if ((queue->mode == UMQ_MODE_POLLING || queue->interrupt_ctx.tx_fc_interrupt ||
-            ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0))) {
-            /* buf is not NULL here, so umq_ub_poll_fc_tx returns qbuf_cnt >= 0 */
-            int ret = umq_ub_poll_fc_tx(queue, buf, buf_count, tp_handle_idx, option);
-            if (ret < 0) {
-                umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
-                return ret;
-            }
-            qbuf_cnt += ret;
+        /* Always poll FC TX CQ regardless of mode/interrupt/flag. FC jetty
+         * depth is only 2 (UMQ_UB_FLOW_CONTORL_JETTY_DEPTH), so even a couple
+         * of un-reaped CQEs fill the SQ and block credit req/resp/ack sends
+         * with status:12, causing credit timeouts and RPC failures. The
+         * previous condition gated FC polling on POLLING mode, tx_fc_interrupt,
+         * or TP_HANDLE_IDX flag, which let FC CQEs accumulate in INTERRUPT
+         * mode until the SQ filled up. */
+        int ret = umq_ub_poll_fc_tx(queue, buf, buf_count, tp_handle_idx, option);
+        if (ret < 0) {
+            umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
+            return ret;
         }
+        qbuf_cnt += ret;
     }
 
     if (!umq_ub_poll_get_jetty_node(queue)) {
@@ -2022,13 +2127,16 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
     }
 
     urma_cr_t cr[max_batch];
+    // jfs_jfc and polling_node track the jetty_pool_node whose IO jfc is polled this round.
+    // NULL polling_node means the queue owns its jetty (no pool); flush then uses queue->jetty.
     urma_jfc_t *jfs_jfc = queue->jfs_jfc[UB_QUEUE_JETTY_IO];
-    if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
-        (option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0) {
+    jetty_pool_node_t *polling_node = (jetty_pool_node_t *)(uintptr_t)queue->jetty_node;
+    if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag)) {
         umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
         if (jetty_node_list->bitmap != NULL && tp_handle_idx < jetty_node_list->list_len &&
             urpc_bitmap_is_set(jetty_node_list->bitmap, tp_handle_idx)) {
-            jfs_jfc = jetty_node_list->node_list[tp_handle_idx]->jfs_jfc[UB_QUEUE_JETTY_IO];
+            polling_node = jetty_node_list->node_list[tp_handle_idx];
+            jfs_jfc = polling_node->jfs_jfc[UB_QUEUE_JETTY_IO];
         }
     }
 
@@ -2056,9 +2164,7 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
             if (cr[i].status == URMA_CR_WR_FLUSH_ERR_DONE) {
                 UMQ_LIMIT_VLOG_INFO(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx "
                     "cr[%d] status: %d local_id: %u\n", EID_ARGS(*eid), id, i, cr[i].status, cr[i].local_id);
-                if (queue->state == QUEUE_STATE_ERR && ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) == 0)) {
-                    queue->tx_flush_done = true;
-                }
+                umq_ub_process_flush_done(queue, polling_node, option);
                 continue;
             }
             if (cr[i].status == URMA_CR_WR_SUSPEND_DONE) {
@@ -2067,10 +2173,15 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
                 continue;
             }
 
-            umq_ub_process_cr_err_for_jetty_pool(queue, &cr[i], tp_handle_idx, option);
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx cr[%d] "
-                "status: %d local_id: %u\n", EID_ARGS(*eid), id, i, cr[i].status, cr[i].local_id);
-            failed_cnt++;
+            if (cr[i].status != BOND_CR_FLOW_CONTROL_NOTIFY) {
+                umq_ub_process_cr_err_for_jetty_pool(queue, &cr[i], tp_handle_idx, option);
+                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx cr[%d] "
+                    "status: %d local_id: %u\n", EID_ARGS(*eid), id, i, cr[i].status, cr[i].local_id);
+                failed_cnt++;
+            } else {
+                UMQ_LIMIT_VLOG_INFO(VLOG_UMQ_URMA_CQE, "eid: " EID_FMT ", jetty_id: %u, urma_poll_jfc reports tx cr[%d]"
+                    " status: %d local_id: %u\n", EID_ARGS(*eid), id, i, cr[i].status, cr[i].local_id);
+            }
         } else {
             success_cnt++;
         }
@@ -2097,8 +2208,16 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
         umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND_SUCCESS, success_cnt, queue->dev_ctx->io_lock_free);
     }
 
-    if (queue->state == QUEUE_STATE_ERR && queue->tx_flush_done && (int)buf_count > qbuf_cnt) {
-        tx_cr_cnt = umq_ub_flush_sqe(queue, &buf[qbuf_cnt], buf_count - qbuf_cnt);
+    // flush residual sqe of a jetty that already drained its flush-done CQE. Pick the
+    // jetty to flush: pool jetty -> the node's jetty, own jetty -> queue->jetty.
+    if (((queue->state == QUEUE_STATE_ERR && queue->tx_flush_done) ||
+        (polling_node != NULL && polling_node->is_jetty_err && polling_node->tx_flush_done)) &&
+        (int)buf_count > qbuf_cnt) {
+        urma_jetty_t *flush_jetty = queue->jetty[UB_QUEUE_JETTY_IO];
+        if (polling_node != NULL) {
+            flush_jetty = polling_node->jetty[UB_QUEUE_JETTY_IO];
+        }
+        tx_cr_cnt = umq_ub_flush_sqe(flush_jetty, &buf[qbuf_cnt], buf_count - qbuf_cnt, option);
         if (tx_cr_cnt > 0) {
             qbuf_cnt += tx_cr_cnt;
             failed_cnt += (uint32_t)tx_cr_cnt;
@@ -2109,9 +2228,7 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
     }
 
     // Logic UMQ: release completed WRs back to pool
-    if (((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0) || is_umq_ub_logic_queue(queue->create_flag)) {
-        umq_ub_poll_release_jetty_node(queue, success_cnt + failed_cnt, tp_handle_idx, option, false);
-    }
+    umq_ub_poll_release_jetty_node(queue, success_cnt + failed_cnt, tp_handle_idx, option, false);
 
     umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
     return qbuf_cnt;
@@ -2119,6 +2236,13 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
 
 static int umq_ub_poll_tx_round_robin(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count, umq_io_option_t *option)
 {
+    /* 进程退出期跳过 poll：与 umq_ub_poll_tx_single/umq_ub_poll_fc_tx 守卫一致。
+     * 退出期 release 路径会 umq_ub_jetty_node_free 回收 node，round_robin 仍读
+     * node_list[]->is_jetty_err 会与 release 竞争 heap-use-after-free。 */
+    if (g_ubsocket_exiting) {
+        return 0;
+    }
+
     umq_ub_jetty_node_list_t *jetty_node_list = queue->jetty_node_list;
     if (jetty_node_list == NULL || jetty_node_list->bitmap == NULL) {
         return 0;
