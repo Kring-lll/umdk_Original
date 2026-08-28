@@ -27,6 +27,8 @@ struct HwMockState {
     urma_async_event_t asyncEvent;
     int ackAsyncCount;
     int importSegCount;
+    int freeTokenIdCount;
+    int unregisterSegCount;
     int importJettyCount;
     int importJfrCount;
     int postJfsCount;

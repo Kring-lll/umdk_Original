@@ -696,6 +696,7 @@ inline urma_token_id_t *MockAllocTokenIdEx(urma_context_t *ctx, urma_token_id_fl
 
 inline urma_status_t MockFreeTokenId(urma_token_id_t *)
 {
+    urma_test::GetHwMockState().freeTokenIdCount++;
     return URMA_SUCCESS;
 }
 
@@ -726,7 +727,8 @@ inline urma_target_seg_t *MockRegisterSeg(urma_context_t *ctx, urma_seg_cfg_t *c
 
 inline urma_status_t MockUnregisterSeg(urma_target_seg_t *)
 {
-    return URMA_SUCCESS;
+    urma_test::GetHwMockState().unregisterSegCount++;
+    return urma_test::GetHwMockState().status;
 }
 
 inline urma_status_t MockGetAsyncEvent(urma_context_t *, urma_async_event_t *)

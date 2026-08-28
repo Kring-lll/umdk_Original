@@ -461,6 +461,22 @@ TEST(UrmaCoreTest, CpApiMiscControlApisValidateAndDispatch)
     EXPECT_EQ(URMA_SUCCESS, urma_get_dmac(&fixture.ctx, &netAddr, mac));
 }
 
+TEST(UrmaCoreTest, UnregisterSegKeepsAutoTokenWhenProviderFails)
+{
+    CoreApiFixture fixture;
+
+    fixture.ops.unregister_seg = MockUnregisterSeg;
+    fixture.ops.free_token_id = MockFreeTokenId;
+    fixture.tseg.seg.attr.bs.user_token_id = URMA_TOKEN_ID_INVALID;
+    fixture.token.ref.atomic_cnt.store(1);
+    urma_test::SetHwMockStatus(URMA_EAGAIN);
+
+    EXPECT_EQ(URMA_EAGAIN, urma_unregister_seg(&fixture.tseg));
+    EXPECT_EQ(1, urma_test::GetHwMockState().unregisterSegCount);
+    EXPECT_EQ(0, urma_test::GetHwMockState().freeTokenIdCount);
+    EXPECT_EQ(1UL, fixture.token.ref.atomic_cnt.load());
+}
+
 TEST(UrmaCoreTest, CpApiJettyAndJfceApisValidateAndDispatch)
 {
     CoreApiFixture fixture;

@@ -6,9 +6,24 @@
 
 #include "bond_fixture.h"
 
+#include <thread>
+
 using namespace urma_test_bond;
 
 namespace {
+static pthread_barrier_t s_unregisterEnteredBarrier;
+static pthread_barrier_t s_unregisterReleaseBarrier;
+static std::atomic<int> s_unregisterPhysicalCount = 0;
+
+static urma_status_t BlockingUnregisterPhysicalSeg(urma_target_seg_t *seg)
+{
+    s_unregisterPhysicalCount.fetch_add(1);
+    (void)pthread_barrier_wait(&s_unregisterEnteredBarrier);
+    (void)pthread_barrier_wait(&s_unregisterReleaseBarrier);
+    std::free(seg);
+    return URMA_SUCCESS;
+}
+
 static size_t FillSingleRjettyExt(urma_rjetty_t *remote, uint32_t localIdx, uint32_t targetIdx,
                                   const urma_jetty_id_t &slaveId)
 {
@@ -140,6 +155,47 @@ TEST(UrmaBondTest, PublicSegmentRegisterAndUnregisterUseMockIoctlSuccessPath)
         EXPECT_EQ(&fixture.ctx.v_ctx, target->urma_ctx);
         EXPECT_EQ(URMA_SUCCESS, bondp_unregister_seg(target));
     }
+}
+
+TEST(UrmaBondTest, ConcurrentSegmentUnregisterDeletesPhysicalSegmentOnce)
+{
+    BondPublicApiFixture fixture;
+    urma_token_id_t token = {};
+    urma_seg_cfg_t segCfg = {};
+    urma_target_seg_t *target = nullptr;
+    urma_status_t firstRet = URMA_FAIL;
+    urma_status_t secondRet = URMA_FAIL;
+
+    fixture.InitSinglePhysicalMember();
+    fixture.ctx.v_ctx.dev_fd = 7;
+    token.urma_ctx = &fixture.ctx.v_ctx;
+    segCfg.token_id = &token;
+    segCfg.flag.bs.token_id_valid = URMA_TOKEN_ID_VALID;
+    segCfg.va = 0x130000;
+    segCfg.len = 4096;
+    urma_test::SetHwMockIoctl(true, 0xc20, 0xc200);
+    target = bondp_register_seg(&fixture.ctx.v_ctx, &segCfg);
+    ASSERT_NE(nullptr, target);
+
+    fixture.phyOps.unregister_seg = BlockingUnregisterPhysicalSeg;
+    s_unregisterPhysicalCount.store(0);
+    ASSERT_EQ(0, pthread_barrier_init(&s_unregisterEnteredBarrier, nullptr, 2));
+    ASSERT_EQ(0, pthread_barrier_init(&s_unregisterReleaseBarrier, nullptr, 2));
+
+    std::thread first([&]() { firstRet = bondp_unregister_seg(target); });
+    (void)pthread_barrier_wait(&s_unregisterEnteredBarrier);
+    std::thread second([&]() { secondRet = bondp_unregister_seg(target); });
+    second.join();
+
+    EXPECT_EQ(URMA_EAGAIN, secondRet);
+    EXPECT_EQ(1, s_unregisterPhysicalCount.load());
+    (void)pthread_barrier_wait(&s_unregisterReleaseBarrier);
+    first.join();
+
+    EXPECT_EQ(URMA_SUCCESS, firstRet);
+    EXPECT_EQ(1, s_unregisterPhysicalCount.load());
+    EXPECT_EQ(0, pthread_barrier_destroy(&s_unregisterEnteredBarrier));
+    EXPECT_EQ(0, pthread_barrier_destroy(&s_unregisterReleaseBarrier));
 }
 
 TEST(UrmaBondTest, PublicSegmentApisReleaseLastReferencesThroughStableFailures)
