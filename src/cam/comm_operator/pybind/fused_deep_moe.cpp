@@ -16,6 +16,7 @@
 #include "torch_bind_exception.h"
 #include <hccl/hccl.h>
 #include <iostream>
+#include "comm_context.h"
 
 using torch::autograd::AutogradContext;
 using torch::autograd::Function;
@@ -69,9 +70,15 @@ TensorVector FusedDeepMoeImplNpu(
     const std::string groupEpStr(groupEp.data(), groupEp.size());
     const char* groupEpPtr = groupEpStr.c_str();
 
+    int64_t cclBufferSize = 3L * 1024L * 1024L * 1024L;
+    int64_t customCclBufferSize = 10L * 1024L * 1024L * 1024L;
+
+    CommContextManager manager(groupEpStr, epRankId, epRankSize, cclBufferSize, "ub-mem", "moe_dispatch_ffn_combine", customCclBufferSize);
+    at::Tensor context = manager.CreateContext();
+
     EXEC_NPU_CMD(aclnnFusedDeepMoe,
         // input
-        x, expertIds, gmm1Weight, gmm1WeightScale, gmm2Weight, gmm2WeightScale, \
+        context, x, expertIds, gmm1Weight, gmm1WeightScale, gmm2Weight, gmm2WeightScale, \
         expertScales, \
         shareGmm1WeightOptional, shareGmm1WeightScaleOptional, \
         shareGmm2WeightOptional, shareGmm2WeightScaleOptional, \
