@@ -883,10 +883,19 @@ static void init_read_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, perf
             local_sge[sge_idx].len = sge_size;
         }
         local_sge[sge_idx].tseg = ctx->local_tseg[i];
+        local_sge[sge_idx].user_tseg = NULL;
 
         remote_sge[sge_idx].addr = remote_sge[0].addr + sge_size * sge_idx; // offset
         remote_sge[sge_idx].len = local_sge[sge_idx].len;
-        remote_sge[sge_idx].tseg = ctx->import_tseg[i];
+        if (cfg->no_import) {
+            /* Import-free: describe the remote seg with the exchanged user_tseg
+             * block instead of an imported tseg (READ pulls from remote src). */
+            remote_sge[sge_idx].tseg = NULL;
+            remote_sge[sge_idx].user_tseg = ctx->remote_user_tseg[i];
+        } else {
+            remote_sge[sge_idx].tseg = ctx->import_tseg[i];
+            remote_sge[sge_idx].user_tseg = NULL;
+        }
     }
     wr->rw.src.sge = remote_sge;
     wr->rw.src.num_sge = cfg->sge_num;
@@ -946,10 +955,19 @@ static void init_write_jfs_wr_sg(urma_jfs_wr_t *wr, perftest_context_t *ctx, per
             local_sge[sge_idx].len = sge_size;
         }
         local_sge[sge_idx].tseg = ctx->local_tseg[i];
+        local_sge[sge_idx].user_tseg = NULL;
 
         remote_sge[sge_idx].addr = remote_sge[0].addr + sge_size * sge_idx; // offset
         remote_sge[sge_idx].len = local_sge[sge_idx].len;
-        remote_sge[sge_idx].tseg = ctx->import_tseg[i];
+        if (cfg->no_import) {
+            /* Import-free: describe the remote seg with the exchanged user_tseg
+             * block instead of an imported tseg (WRITE pushes to remote dst). */
+            remote_sge[sge_idx].tseg = NULL;
+            remote_sge[sge_idx].user_tseg = ctx->remote_user_tseg[i];
+        } else {
+            remote_sge[sge_idx].tseg = ctx->import_tseg[i];
+            remote_sge[sge_idx].user_tseg = NULL;
+        }
     }
 
     wr->rw.src.sge = local_sge;
