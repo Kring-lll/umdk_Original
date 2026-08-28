@@ -55,12 +55,12 @@ void *umq_tiny_io_buf_malloc(umq_buf_mode_t buf_mode, uint64_t size)
 
     g_tiny_buffer_addr = umq_qbuf_base_io_buf_malloc(g_tiny_total_len, min_size);
     if (g_tiny_buffer_addr == NULL) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "tiny qbuf memory alloc failed, size %lu, expect at least %lu\n", g_tiny_total_len,
+        UMQ_VLOG_ERR(VLOG_UMQ, "tiny qbuf memory alloc failed, size %llu, expect at least %llu\n", g_tiny_total_len,
                      min_size);
         g_tiny_total_len = 0;
         return NULL;
     }
-    UMQ_VLOG_INFO(VLOG_UMQ, "malloc tiny qbuf io buf %lu bytes\n", g_tiny_total_len);
+    UMQ_VLOG_INFO(VLOG_UMQ, "malloc tiny qbuf io buf %llu bytes\n", g_tiny_total_len);
     return g_tiny_buffer_addr;
 }
 
