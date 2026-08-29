@@ -2804,10 +2804,11 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm)
                 ", remote jetty_id: %u, urma_post_jetty_send_wr failed, status: %d\n", EID_ARGS(*eid), id,
                 EID_ARGS(queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid),
                 queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.id, (int)status);
+            ret = umq_status_convert(status);
             if (i == 0) {
                 goto FREE_CTX_BUF;
             } else {
-                return umq_status_convert(status);
+                return ret;
             }
         }
     }

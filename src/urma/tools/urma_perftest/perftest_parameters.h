@@ -207,7 +207,8 @@ enum perftest_opts {
     PERFTEST_OPT_V_ADDRESS,
     PERFTEST_OPT_SHARE_JFS,
     PERFTEST_OPT_SET_MIN_SIZE,
-    PERFTEST_OPT_SET_MAX_SIZE
+    PERFTEST_OPT_SET_MAX_SIZE,
+    PERFTEST_OPT_LAZY_CREATE
 };
 
 typedef enum perftest_rate_limiter_units {
@@ -359,6 +360,9 @@ typedef struct perftest_config {
     bool share_jfs;
     perftest_mgmt_type_t mgmt_type;
     char *mgmt_addr; /* UB only: local eid string for mgmt channel. Required in UB mode. */
+    /* Keep local-only options at the end: check_remote_cfg() exchanges a fixed prefix. */
+    bool lazy_create_set;
+    bool lazy_create;
 } perftest_config_t;
 
 typedef struct perftest_value_range {
