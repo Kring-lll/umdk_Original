@@ -362,7 +362,17 @@ static urma_status_t bondp_clone_sge_user_tseg(urma_sge_t *sge, bool remote, uin
 
     uint32_t total = bondp_user_tseg_total_len(sge->user_tseg);
     if (total == 0) {
-        URMA_LOG_ERR("Invalid bonding user_tseg buffer (no extension or oversize).\n");
+        /* Distinguish the three failure modes: has_user_info=0 (bare-device
+         * export or truncated/zeroed blob), garbage ext_hdr->len (tail lost),
+         * or oversize. attr+token_id+head bytes tell them apart at a glance. */
+        const urma_user_tseg_t *ut = sge->user_tseg;
+        const uint8_t *raw = (const uint8_t *)ut;
+        URMA_LOG_ERR("Invalid bonding user_tseg buffer (no extension or oversize): "
+                     "attr=0x%08x, has_user_info=%u, token_id=%u, head="
+                     "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x.\n",
+                     ut->attr.value, ut->attr.bs.has_user_info, ut->token_id,
+                     raw[0], raw[1], raw[2], raw[3], raw[4], raw[5],
+                     raw[6], raw[7], raw[8], raw[9], raw[10], raw[11]);
         return URMA_EINVAL;
     }
     if (*slot_idx >= max_slots) {
