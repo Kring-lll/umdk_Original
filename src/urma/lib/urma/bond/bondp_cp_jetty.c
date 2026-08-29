@@ -1522,6 +1522,50 @@ static void bondp_del_jetty_p_vjetty_info(bondp_comp_t *bdp_jetty)
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
 }
 
+static int bondp_apply_jetty_create_cfg(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty,
+                                        const urma_jetty_cfg_t *jetty_cfg,
+                                        const bondp_port_id_t **port_ids, uint32_t *port_count)
+{
+    bdp_jetty->pjetty_create_mode = BONDP_PJETTY_CREATE_FULL;
+    if (jetty_cfg->flag.bs.has_drv_ext == 0) {
+        return 0;
+    }
+
+    const bondp_jetty_cfg_t *bdp_cfg = (const bondp_jetty_cfg_t *)jetty_cfg;
+    if ((bdp_cfg->port_ids == NULL) != (bdp_cfg->port_count == 0)) {
+        URMA_LOG_ERR("Invalid active port config for jetty, port_ids=%p, port_count=%u.\n",
+                     (const void *)bdp_cfg->port_ids, bdp_cfg->port_count);
+        return -EINVAL;
+    }
+    if (bdp_cfg->port_count != 0) {
+        if (bondp_check_port_chip_id_order(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port chip_id order mismatches user_ctl bonding port config.\n");
+            return -EINVAL;
+        }
+        *port_ids = bdp_cfg->port_ids;
+        *port_count = bdp_cfg->port_count;
+    }
+    if (!bdp_cfg->lazy_create) {
+        return 0;
+    }
+
+    int ret = 0;
+    (void)pthread_mutex_lock(&bdp_ctx->v_ctx.mutex);
+    if (!bondp_lazy_pjetty_mode_supported(bdp_ctx, jetty_cfg->jfs_cfg.trans_mode)) {
+        ret = -EINVAL;
+    } else if (bdp_ctx->fb_ctx == NULL) {
+        ret = bondp_fb_init(bdp_ctx);
+    }
+    (void)pthread_mutex_unlock(&bdp_ctx->v_ctx.mutex);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to enable lazy pjetty creation, ret=%d.\n", ret);
+        return ret;
+    }
+
+    bdp_jetty->pjetty_create_mode = BONDP_PJETTY_CREATE_LAZY_BY_IODIE;
+    return 0;
+}
+
 urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cfg)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
@@ -1548,36 +1592,19 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     atomic_init(&bdp_jetty->modify_to_error, false);
     atomic_init(&bdp_jetty->lazy_create_pending, false);
     (void)pthread_spin_init(&bdp_jetty->send_lock, PTHREAD_PROCESS_PRIVATE);
-    (void)pthread_mutex_lock(&ctx->mutex);
-    bdp_jetty->pjetty_create_mode = bdp_ctx->default_pjetty_create_mode;
-    if (bdp_jetty->pjetty_create_mode == BONDP_PJETTY_CREATE_LAZY_BY_IODIE &&
-        !bondp_lazy_pjetty_mode_supported(bdp_ctx, jetty_cfg->jfs_cfg.trans_mode)) {
-        (void)pthread_mutex_unlock(&ctx->mutex);
-        URMA_LOG_ERR("Lazy pjetty create mode requires active-backup RM failover.\n");
-        errno = EINVAL;
+
+    const bondp_port_id_t *cfg_active_port_ids = NULL;
+    uint32_t cfg_active_port_count = 0;
+    int ret = bondp_apply_jetty_create_cfg(bdp_ctx, bdp_jetty, jetty_cfg,
+                                           &cfg_active_port_ids, &cfg_active_port_count);
+    if (ret != 0) {
+        errno = -ret;
         goto FREE_JETTY;
     }
-    (void)pthread_mutex_unlock(&ctx->mutex);
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
         for (uint32_t j = 0; j < URMA_UBAGG_DEV_MAX_NUM; j++) {
             atomic_init(&bdp_jetty->sqe_cnt[i][j], 0);
         }
-    }
-
-    const bondp_port_id_t *cfg_active_port_ids = NULL;
-    uint32_t cfg_active_port_count = 0;
-    if (jetty_cfg->flag.bs.has_drv_ext != 0) {
-        const bondp_jetty_cfg_t *bdp_cfg = (const bondp_jetty_cfg_t *)jetty_cfg;
-        if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
-            URMA_LOG_ERR("Invalid active port config for jetty, port_ids is NULL or port_count is 0\n");
-            goto FREE_JETTY;
-        }
-        if (bondp_check_port_chip_id_order(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
-            URMA_LOG_ERR("Active port chip_id order mismatches user_ctl bonding port config.\n");
-            goto FREE_JETTY;
-        }
-        cfg_active_port_count = bdp_cfg->port_count;
-        cfg_active_port_ids = bdp_cfg->port_ids;
     }
 
     if (init_active_indices(bdp_ctx, bdp_jetty, cfg_active_port_ids, cfg_active_port_count) != 0) {

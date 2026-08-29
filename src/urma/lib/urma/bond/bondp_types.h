@@ -146,8 +146,6 @@ typedef struct bondp_context {
     uint64_t rnr_retry_sleep_ms;
     uint64_t rnr_retry_max;
     uint32_t rnr_retry_jitter_ratio;
-    /* Default mode captured by each subsequently created jetty. */
-    bondp_pjetty_create_mode_t default_pjetty_create_mode;
 
     /* This variable represents the maximum number of times all available devices need to be traversed. */
     /* In general mode, dev_num is the same as the number of non-empty devices in the first few positions. */

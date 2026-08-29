@@ -160,37 +160,6 @@ static int get_jetty_priority_by_tp_type(urma_device_attr_t *dev_attr, union urm
     return -1;
 }
 
-static int set_pjetty_create_mode(urma_context_t *urma_ctx, const perftest_config_t *cfg)
-{
-    if (!cfg->lazy_create_set) {
-        return 0;
-    }
-
-    bondp_set_pjetty_create_mode_in_t mode_in = {
-        .version = BONDP_PJETTY_CREATE_CFG_VERSION_V1,
-        .length = (uint16_t)sizeof(mode_in),
-        .mode = cfg->lazy_create ? BONDP_PJETTY_CREATE_LAZY_BY_IODIE : BONDP_PJETTY_CREATE_FULL,
-        .flags = 0,
-        .reserved = 0,
-    };
-    urma_user_ctl_in_t in = {
-        .addr = (uint64_t)(uintptr_t)&mode_in,
-        .len = sizeof(mode_in),
-        .opcode = BONDP_USER_CTL_SET_PJETTY_CREATE_MODE,
-    };
-    urma_user_ctl_out_t out = {0};
-    urma_status_t status = urma_user_ctl(urma_ctx, &in, &out);
-    if (status != URMA_SUCCESS) {
-        LOG_ERROR("LAZY_CREATE_CONFIG FAIL: requested=%s, status=%d.\n",
-                  cfg->lazy_create ? "LAZY" : "FULL", (int)status);
-        return -1;
-    }
-
-    LOG_INFO("LAZY_CREATE_CONFIG PASS: requested=%s, version=%u.\n",
-             cfg->lazy_create ? "LAZY" : "FULL", (unsigned int)mode_in.version);
-    return 0;
-}
-
 static int init_device(perftest_context_t *ctx, perftest_config_t *cfg)
 {
     urma_status_t status;
@@ -290,9 +259,6 @@ static int init_device(perftest_context_t *ctx, perftest_config_t *cfg)
         status = urma_user_ctl(ctx->urma_ctx, &in, &out);
         if (status != URMA_SUCCESS) {
             LOG_ERROR("Failed to set bonding mode, status:%d!\n", (int)status);
-            goto del_ctx;
-        }
-        if (set_pjetty_create_mode(ctx->urma_ctx, cfg) != 0) {
             goto del_ctx;
         }
     }
@@ -822,6 +788,7 @@ static int create_jetty(perftest_context_t *ctx, const perftest_config_t *cfg)
     fill_jfr_cfg(ctx, cfg, &jfr_cfg);
 
     urma_jetty_cfg_t jetty_cfg = {0};
+    bondp_jetty_cfg_t bond_jetty_cfg = {0};
     if (cfg->share_jfr == false) {
         jetty_flag.bs.share_jfr = 0; /* No shared jfr */
         jetty_cfg.flag = jetty_flag;
@@ -861,7 +828,14 @@ static int create_jetty(perftest_context_t *ctx, const perftest_config_t *cfg)
             jetty_cfg.shared.jfr = ctx->jfr[i / cfg->jettys_pre_jfr];
         }
         jetty_cfg.id = cfg->jetty_id;
-        ctx->jetty[i] = urma_create_jetty(ctx->urma_ctx, &jetty_cfg);
+        urma_jetty_cfg_t *create_cfg = &jetty_cfg;
+        if (cfg->lazy_create_set) {
+            bond_jetty_cfg.base = jetty_cfg;
+            bond_jetty_cfg.base.flag.bs.has_drv_ext = 1;
+            bond_jetty_cfg.lazy_create = cfg->lazy_create;
+            create_cfg = &bond_jetty_cfg.base;
+        }
+        ctx->jetty[i] = urma_create_jetty(ctx->urma_ctx, create_cfg);
         if (ctx->jetty[i] == NULL) {
             LOG_ERROR("Failed to create jetty: %d!\n", i);
             goto err_delete_jetty;

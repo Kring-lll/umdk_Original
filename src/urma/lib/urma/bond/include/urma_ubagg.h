@@ -23,7 +23,6 @@ extern "C" {
 /* For version compatibility */
 #define BONDP_USER_CTL_BONDING BONDP_USER_CTL_BONDING
 #define BONDP_USER_CTL_SET_CTX_CFG BONDP_USER_CTL_SET_CTX_CFG
-#define BONDP_USER_CTL_SET_PJETTY_CREATE_MODE BONDP_USER_CTL_SET_PJETTY_CREATE_MODE
 
 #define URMA_UBAGG_DEV_MAX_NUM        (20)
 #define URMA_UBAGG_MAX_CONNECTION     (URMA_UBAGG_DEV_MAX_NUM * URMA_UBAGG_DEV_MAX_NUM)
@@ -49,8 +48,6 @@ typedef enum bondp_user_ctl_opcode {
        config when creating jetty */
     BONDP_USER_CTL_SET_BONDING_PORT,
     BONDP_USER_CTL_SET_CTX_CFG,
-    /* Set the default pjetty creation mode for subsequent jetty creation. */
-    BONDP_USER_CTL_SET_PJETTY_CREATE_MODE,
 } bondp_user_ctl_opcode_t;
 
 typedef enum bondp_ctx_cfg_mask {
@@ -87,24 +84,6 @@ typedef enum bondp_pjetty_create_mode {
     BONDP_PJETTY_CREATE_LAZY_BY_IODIE,
     BONDP_PJETTY_CREATE_MODE_MAX,
 } bondp_pjetty_create_mode_t;
-
-#define BONDP_PJETTY_CREATE_CFG_VERSION_V1 (1U)
-
-/*
- * Input for BONDP_USER_CTL_SET_PJETTY_CREATE_MODE. The selected mode is the
- * default for subsequent urma_create_jetty() calls on this context. Existing
- * jettys retain the mode captured when they were created. Lazy mode requires
- * active-backup RM failover. A lazy jetty is outbound-only: its peer must not
- * bind or send WRs to the advertised rjetty, and the outbound target used by
- * the lazy jetty must be advertised in FULL mode.
- */
-typedef struct bondp_set_pjetty_create_mode_in {
-    uint16_t version;
-    uint16_t length;
-    uint32_t mode;
-    uint32_t flags;
-    uint32_t reserved;
-} bondp_set_pjetty_create_mode_in_t;
 
 // URMA_USER_CTL_BOND_SET_BONDING_MODE,
 typedef enum bondp_bonding_mode {
@@ -201,6 +180,8 @@ typedef struct bondp_jetty_cfg {
     urma_jetty_cfg_t base;
     const bondp_port_id_t *port_ids;
     uint32_t port_count;
+    /* Build only the primary IODIE pjettys during this jetty creation. */
+    bool lazy_create;
 } bondp_jetty_cfg_t;
 
 typedef struct urma_bond_jetty_ext {

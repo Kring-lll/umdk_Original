@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include "bondp_cp_jetty.h"
 #include "bondp_cp_tjetty.h"
 #include "bondp_cp_user_ctl.h"
 #include "bondp_context_table.h"
@@ -181,7 +182,6 @@ protected:
         ctx_.enable_failback = true;
         ctx_.bonding_mode = BONDP_BONDING_MODE_ACTIVE_BACKUP;
         ctx_.bonding_level = BONDP_BONDING_LEVEL_IODIE;
-        ctx_.default_pjetty_create_mode = BONDP_PJETTY_CREATE_FULL;
         ctx_.enabled_count = 1;
         ctx_.enabled_indices[0] = 0;
         ctx_.p_ctxs[0] = &physicalCtx_;
@@ -279,33 +279,6 @@ protected:
         comp->active_indices[1] = 1;
     }
 
-    int SetMode(uint32_t mode)
-    {
-        bondp_set_pjetty_create_mode_in_t modeIn = {
-            .version = BONDP_PJETTY_CREATE_CFG_VERSION_V1,
-            .length = sizeof(modeIn),
-            .mode = mode,
-            .flags = 0,
-            .reserved = 0,
-        };
-        urma_user_ctl_in_t in = {
-            .addr = reinterpret_cast<uint64_t>(&modeIn),
-            .len = sizeof(modeIn),
-            .opcode = BONDP_USER_CTL_SET_PJETTY_CREATE_MODE,
-        };
-        return bondp_user_ctl(&ctx_.v_ctx, &in, nullptr);
-    }
-
-    int SetModeWithPayload(const bondp_set_pjetty_create_mode_in_t *modeIn, uint32_t inputLen)
-    {
-        urma_user_ctl_in_t in = {
-            .addr = reinterpret_cast<uint64_t>(modeIn),
-            .len = inputLen,
-            .opcode = BONDP_USER_CTL_SET_PJETTY_CREATE_MODE,
-        };
-        return bondp_user_ctl(&ctx_.v_ctx, &in, nullptr);
-    }
-
     urma_rjetty_t *GetRjetty(bondp_comp_t *comp)
     {
         urma_rjetty_t *rjetty = nullptr;
@@ -334,78 +307,23 @@ protected:
     bool workerStarted_ = false;
 };
 
-TEST_F(LazyPjettyModeTest, SetModeValidatesVersionedInputAndPreservesStateOnFailure)
+TEST_F(LazyPjettyModeTest, JettyConfigBooleanControlsLazyAndFullRjettyExt)
 {
-    bondp_set_pjetty_create_mode_in_t input = {
-        .version = BONDP_PJETTY_CREATE_CFG_VERSION_V1,
-        .length = sizeof(input),
-        .mode = BONDP_PJETTY_CREATE_LAZY_BY_IODIE,
-        .flags = 0,
-        .reserved = 0,
-    };
-    urma_user_ctl_in_t validCtl = {
-        .addr = reinterpret_cast<uint64_t>(&input),
-        .len = sizeof(input),
-        .opcode = BONDP_USER_CTL_SET_PJETTY_CREATE_MODE,
-    };
+    bondp_jetty_cfg_t lazyCfg = {};
+    lazyCfg.base.flag.bs.has_drv_ext = 1;
+    lazyCfg.lazy_create = true;
+    lazyComp_.pjetty_create_mode = lazyCfg.lazy_create ?
+        BONDP_PJETTY_CREATE_LAZY_BY_IODIE : BONDP_PJETTY_CREATE_FULL;
 
-    EXPECT_EQ(-EINVAL, bondp_user_ctl(&ctx_.v_ctx, nullptr, nullptr));
-    EXPECT_EQ(-EINVAL, bondp_user_ctl(nullptr, &validCtl, nullptr));
-    EXPECT_EQ(-EINVAL, SetModeWithPayload(nullptr, sizeof(input)));
-    EXPECT_EQ(-EINVAL, SetModeWithPayload(&input, sizeof(input) - 1));
-    EXPECT_EQ(-EINVAL, SetModeWithPayload(&input, sizeof(input) + 1));
-    EXPECT_EQ(BONDP_PJETTY_CREATE_FULL, ctx_.default_pjetty_create_mode);
-    EXPECT_EQ(nullptr, ctx_.fb_ctx);
-
-    input.version = 0;
-    EXPECT_EQ(-EINVAL, SetModeWithPayload(&input, sizeof(input)));
-    input.version = BONDP_PJETTY_CREATE_CFG_VERSION_V1;
-    input.length = sizeof(input) - 1;
-    EXPECT_EQ(-EINVAL, SetModeWithPayload(&input, sizeof(input)));
-    input.length = sizeof(input);
-    input.mode = BONDP_PJETTY_CREATE_MODE_MAX;
-    EXPECT_EQ(-EINVAL, SetModeWithPayload(&input, sizeof(input)));
-    input.mode = BONDP_PJETTY_CREATE_LAZY_BY_IODIE;
-    input.flags = 1;
-    EXPECT_EQ(-EINVAL, SetModeWithPayload(&input, sizeof(input)));
-    input.flags = 0;
-    input.reserved = 1;
-    EXPECT_EQ(-EINVAL, SetModeWithPayload(&input, sizeof(input)));
-    input.reserved = 0;
-    EXPECT_EQ(BONDP_PJETTY_CREATE_FULL, ctx_.default_pjetty_create_mode);
-    EXPECT_EQ(nullptr, ctx_.fb_ctx);
-
-    ctx_.enable_failover = false;
-    EXPECT_EQ(-EINVAL, SetModeWithPayload(&input, sizeof(input)));
-    ctx_.enable_failover = true;
-    ctx_.bonding_mode = BONDP_BONDING_MODE_BALANCE;
-    EXPECT_EQ(-EINVAL, SetModeWithPayload(&input, sizeof(input)));
-    ctx_.bonding_mode = BONDP_BONDING_MODE_ACTIVE_BACKUP;
-    EXPECT_EQ(BONDP_PJETTY_CREATE_FULL, ctx_.default_pjetty_create_mode);
-    EXPECT_EQ(nullptr, ctx_.fb_ctx);
-
-    EXPECT_EQ(0, SetMode(BONDP_PJETTY_CREATE_LAZY_BY_IODIE));
-    EXPECT_EQ(BONDP_PJETTY_CREATE_LAZY_BY_IODIE, ctx_.default_pjetty_create_mode);
-    ASSERT_NE(nullptr, ctx_.fb_ctx);
-    bondp_fb_ctx_t *fbCtx = ctx_.fb_ctx;
-
-    EXPECT_EQ(0, SetMode(BONDP_PJETTY_CREATE_FULL));
-    EXPECT_EQ(BONDP_PJETTY_CREATE_FULL, ctx_.default_pjetty_create_mode);
-    EXPECT_EQ(fbCtx, ctx_.fb_ctx);
-}
-
-TEST_F(LazyPjettyModeTest, ExistingJettySnapshotControlsLazyAndFullRjettyExt)
-{
-    ASSERT_EQ(0, SetMode(BONDP_PJETTY_CREATE_LAZY_BY_IODIE));
-    lazyComp_.pjetty_create_mode = ctx_.default_pjetty_create_mode;
-
-    ASSERT_EQ(0, SetMode(BONDP_PJETTY_CREATE_FULL));
     EXPECT_EQ(BONDP_PJETTY_CREATE_LAZY_BY_IODIE, lazyComp_.pjetty_create_mode);
     urma_rjetty_t *lazyRjetty = GetRjetty(&lazyComp_);
     ASSERT_NE(nullptr, lazyRjetty);
 
-    fullComp_.pjetty_create_mode = ctx_.default_pjetty_create_mode;
-    ASSERT_EQ(0, SetMode(BONDP_PJETTY_CREATE_LAZY_BY_IODIE));
+    bondp_jetty_cfg_t fullCfg = {};
+    fullCfg.base.flag.bs.has_drv_ext = 1;
+    fullCfg.lazy_create = false;
+    fullComp_.pjetty_create_mode = fullCfg.lazy_create ?
+        BONDP_PJETTY_CREATE_LAZY_BY_IODIE : BONDP_PJETTY_CREATE_FULL;
     EXPECT_EQ(BONDP_PJETTY_CREATE_FULL, fullComp_.pjetty_create_mode);
     urma_rjetty_t *fullRjetty = GetRjetty(&fullComp_);
     ASSERT_NE(nullptr, fullRjetty);
@@ -430,6 +348,29 @@ TEST_F(LazyPjettyModeTest, ExistingJettySnapshotControlsLazyAndFullRjettyExt)
 
     std::free(fullRjetty);
     std::free(lazyRjetty);
+}
+
+TEST_F(LazyPjettyModeTest, JettyCreateReadsLazyBooleanFromDriverExtension)
+{
+    urma_jfr_t sharedJfr = {};
+    bondp_jetty_cfg_t jettyCfg = {};
+    jettyCfg.base.flag.bs.share_jfr = 1;
+    jettyCfg.base.flag.bs.has_drv_ext = 1;
+    jettyCfg.base.shared.jfr = &sharedJfr;
+    jettyCfg.base.jfs_cfg.trans_mode = URMA_TM_RM;
+    jettyCfg.lazy_create = true;
+    ctx_.enabled_count = 0;
+
+    ctx_.enable_failover = false;
+    errno = 0;
+    EXPECT_EQ(nullptr, bondp_create_jetty(&ctx_.v_ctx, &jettyCfg.base));
+    EXPECT_EQ(EINVAL, errno);
+    EXPECT_EQ(nullptr, ctx_.fb_ctx);
+
+    ctx_.enable_failover = true;
+    errno = 0;
+    EXPECT_EQ(nullptr, bondp_create_jetty(&ctx_.v_ctx, &jettyCfg.base));
+    EXPECT_NE(nullptr, ctx_.fb_ctx);
 }
 
 TEST_F(LazyPjettyModeTest, ImportRequiresAtLeastOneUsableRemotePjetty)
@@ -556,7 +497,7 @@ TEST_F(LazyPjettyModeTest, PendingLazyCreateWithNoRoutePreservesMsnAndSetsBadWr)
 
 TEST_F(LazyPjettyModeTest, RebuildPublishesRecoveryForHealthCheckFailback)
 {
-    ASSERT_EQ(0, SetMode(BONDP_PJETTY_CREATE_LAZY_BY_IODIE));
+    ASSERT_EQ(0, bondp_fb_init(&ctx_));
     lazyComp_.pjetty_create_mode = BONDP_PJETTY_CREATE_LAZY_BY_IODIE;
     lazyComp_.valid[0].store(false);
     lazyComp_.rebuild_done[0].store(false);
@@ -581,7 +522,7 @@ TEST_F(LazyPjettyModeTest, RebuildPublishesRecoveryForHealthCheckFailback)
 TEST_F(LazyPjettyModeTest, FailbackDestroysMaterializedColdStandby)
 {
     constexpr uint32_t COLD_IDX = 1;
-    ASSERT_EQ(0, SetMode(BONDP_PJETTY_CREATE_LAZY_BY_IODIE));
+    ASSERT_EQ(0, bondp_fb_init(&ctx_));
     lazyComp_.pjetty_create_mode = BONDP_PJETTY_CREATE_LAZY_BY_IODIE;
     ctx_.p_ctxs[COLD_IDX] = &physicalCtx_;
     lazyComp_.p_jetty[COLD_IDX] = &fullBackup_;

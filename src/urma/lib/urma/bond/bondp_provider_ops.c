@@ -425,12 +425,11 @@ static int bondp_init_ctx_features(bondp_context_t *bdp_ctx)
         }
     }
 
-    if (bdp_ctx->enable_failback ||
-        bdp_ctx->default_pjetty_create_mode == BONDP_PJETTY_CREATE_LAZY_BY_IODIE) {
+    if (bdp_ctx->enable_failback) {
         /*
          * fb_ctx is the worker task infrastructure for REBUILD and LAZY
-         * create tasks alike; the failback switch only gates the automatic
-         * switch-back, not this base infrastructure.
+         * create tasks alike. Lazy jetty creation initializes it on demand
+         * when automatic failback is disabled.
          */
         ret = bondp_fb_init(bdp_ctx);
         if (ret != 0) {
@@ -470,7 +469,6 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
     bdp_ctx->rnr_retry_sleep_ms = g_bondp_env.rnr_retry_sleep_ms;
     bdp_ctx->rnr_retry_max = g_bondp_env.rnr_retry_max;
     bdp_ctx->rnr_retry_jitter_ratio = g_bondp_env.rnr_retry_jitter_ratio;
-    bdp_ctx->default_pjetty_create_mode = BONDP_PJETTY_CREATE_FULL;
 
     int ret = 0;
     ret = bondp_create_vcontext(bdp_ctx, dev, eid_index, dev_fd);
@@ -573,14 +571,6 @@ int bondp_set_bonding_mode(urma_context_t *ctx, bondp_bonding_mode_t bonding_mod
     (void)pthread_mutex_lock(&ctx->mutex);
     if (bdp_ctx->bonding_mode == bonding_mode &&
         bdp_ctx->bonding_level == bonding_level) {
-        goto EXIT;
-    }
-
-    if (bonding_mode != BONDP_BONDING_MODE_ACTIVE_BACKUP &&
-        bdp_ctx->default_pjetty_create_mode == BONDP_PJETTY_CREATE_LAZY_BY_IODIE) {
-        URMA_LOG_ERR("Cannot switch bonding mode to %d while the default pjetty create mode is lazy; "
-                     "set the default mode to full first.\n", bonding_mode);
-        ret = -EINVAL;
         goto EXIT;
     }
 
@@ -729,13 +719,6 @@ int bondp_set_ctx_cfg(urma_context_t *ctx, const bondp_set_ctx_cfg_in_t *cfg_in)
         URMA_LOG_ERR("Invalid context configuration.\n");
         goto EXIT;
     }
-    if (!new_cfg.enable_failover &&
-        bdp_ctx->default_pjetty_create_mode == BONDP_PJETTY_CREATE_LAZY_BY_IODIE) {
-        URMA_LOG_ERR("Cannot disable failover while lazy pjetty is the default create mode.\n");
-        ret = -EINVAL;
-        goto EXIT;
-    }
-
     bondp_set_ctx_cfg_in_t old_cfg = bondp_get_ctx_cfg(bdp_ctx);
     ret = bondp_uninit_ctx_features(bdp_ctx);
     if (ret != 0) {
