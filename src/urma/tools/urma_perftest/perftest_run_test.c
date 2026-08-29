@@ -32,6 +32,8 @@
 #define PERFTEST_ITERS_99_99_9  (0.99999)
 #define PERFTEST_SGE_NUM_PRE_WR (2)
 #define PERFTEST_POLL_BATCH     (16)
+#define PERFTEST_LAZY_POST_RETRY_NUM      (30000U)
+#define PERFTEST_LAZY_POST_RETRY_SLEEP_US (1000U)
 
 #define LAT_MEASURE_TAIL   (2) // Remove the two max value
 #define RESULT_LAT_FMT     " bytes   iterations  t_min[us]  t_max[us]  t_median[us]  t_avg[us]  t_stdev[us]  " \
@@ -58,6 +60,30 @@ perftest_context_t *g_perftest_ctx;
 perftest_config_t *g_perftest_cfg;
 
 volatile sig_atomic_t g_exit_flag = 0;
+
+static urma_status_t post_jetty_send_wr_with_lazy_retry(urma_jetty_t *jetty, urma_jfs_wr_t *wr,
+                                                        urma_jfs_wr_t **bad_wr,
+                                                        const perftest_config_t *cfg)
+{
+    urma_jfs_wr_t *retry_wr = wr;
+
+    for (uint32_t retry = 0; ; ++retry) {
+        urma_status_t status = urma_post_jetty_send_wr(jetty, retry_wr, bad_wr);
+        if (status != URMA_EAGAIN || cfg == NULL || !cfg->lazy_create_set || !cfg->lazy_create) {
+            return status;
+        }
+        if (retry >= PERFTEST_LAZY_POST_RETRY_NUM || bad_wr == NULL || *bad_wr == NULL ||
+            g_exit_flag != 0) {
+            LOG_ERROR("Lazy pjetty was not materialized after %u retries.\n", retry);
+            return status;
+        }
+
+        /* WRs before bad_wr were accepted. Retry only the unposted suffix so
+         * counters advance once after the entire user batch is accepted. */
+        retry_wr = *bad_wr;
+        (void)usleep(PERFTEST_LAZY_POST_RETRY_SLEEP_US);
+    }
+}
 
 typedef struct bi_exchange_info {
     char *before;
@@ -1407,7 +1433,7 @@ static void *run_read_lat_duplex(void *arg)
         for (uint32_t i = 0; i < cfg->jfs_post_list; i++) {
             wr[i].user_ctx = (uintptr_t)++rid;
         }
-        urma_status_t status = urma_post_jetty_send_wr(ctx->jetty[id], wr, &bad_wr);
+        urma_status_t status = post_jetty_send_wr_with_lazy_retry(ctx->jetty[id], wr, &bad_wr, cfg);
         if (status != URMA_SUCCESS) {
             LOG_ERROR("Failed to post jfs wr, id:%u, status:%d, scnt:%lu\n", id, (int)status, scnt);
             goto free_cr;
@@ -1531,7 +1557,7 @@ static void *run_write_lat_duplex(void *arg)
             for (uint32_t i = 0; i < cfg->jfs_post_list; i++) {
                 wr[i].user_ctx = (uintptr_t)++rid;
             }
-            urma_status_t status = urma_post_jetty_send_wr(ctx->jetty[id], wr, &bad_wr);
+            urma_status_t status = post_jetty_send_wr_with_lazy_retry(ctx->jetty[id], wr, &bad_wr, cfg);
             if (status != URMA_SUCCESS) {
                 LOG_ERROR("Failed to post jfs wr, id:%u, status:%d, scnt:%lu, rcnt:%lu\n",
                           id, (int)status, scnt, rcnt);
@@ -1758,7 +1784,7 @@ static void *run_send_lat_duplex(void *arg)
                     wr[0].flag.bs.complete_enable = URMA_COMPLETE_DISABLE;
                 }
             }
-            urma_status_t status = urma_post_jetty_send_wr(ctx->jetty[id], wr, &bad_wr);
+            urma_status_t status = post_jetty_send_wr_with_lazy_retry(ctx->jetty[id], wr, &bad_wr, cfg);
             if (status != URMA_SUCCESS) {
                 LOG_ERROR("Failed to post jetty send wr, id:%u, status:%d, scnt:%lu, rcnt:%lu\n",
                           id, (int)status, scnt, rcnt);
@@ -1914,7 +1940,7 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                 if (cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX) {
                     status = urma_post_jfs_wr(ctx->jfs[index], wr, &bad_wr);
                 } else {
-                    status = urma_post_jetty_send_wr(ctx->jetty[index], wr, &bad_wr);
+                    status = post_jetty_send_wr_with_lazy_retry(ctx->jetty[index], wr, &bad_wr, cfg);
                 }
 
                 if (status != URMA_SUCCESS) {
@@ -2238,8 +2264,9 @@ static int run_once_bw_recv(perftest_context_t *ctx, perftest_config_t *cfg)
                                 status = urma_post_jfs_wr(ctx->jfs[cr_id], &run_ctx->credit_wr[cr_id],
                                                           &bad_send_wr);
                             } else {
-                                status = urma_post_jetty_send_wr(ctx->jetty[cr_id], &run_ctx->credit_wr[cr_id],
-                                                                 &bad_send_wr);
+                                status = post_jetty_send_wr_with_lazy_retry(ctx->jetty[cr_id],
+                                                                           &run_ctx->credit_wr[cr_id],
+                                                                           &bad_send_wr, cfg);
                             }
                             if (status != URMA_SUCCESS) {
                                 LOG_ERROR("Couldn't post send jetty %u credit = %lu scredit = %lu\n",
@@ -2383,7 +2410,7 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                 if (cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX) {
                     status = urma_post_jfs_wr(ctx->jfs[index], wr, &bad_jfs_wr);
                 } else {
-                    status = urma_post_jetty_send_wr(ctx->jetty[index], wr, &bad_jfs_wr);
+                    status = post_jetty_send_wr_with_lazy_retry(ctx->jetty[index], wr, &bad_jfs_wr, cfg);
                 }
                 if (status != URMA_SUCCESS) {
                     LOG_ERROR("Failed to post jfs: jetty %u, scnt=%lu, tot_scnt:%lu, ccnt:%lu, \
@@ -2560,8 +2587,9 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
                             status = urma_post_jfs_wr(ctx->jfs[cr_id], &run_ctx->credit_wr[cr_id],
                                                       &bad_send_wr);
                         } else {
-                            status = urma_post_jetty_send_wr(ctx->jetty[cr_id], &run_ctx->credit_wr[cr_id],
-                                                             &bad_send_wr);
+                            status = post_jetty_send_wr_with_lazy_retry(ctx->jetty[cr_id],
+                                                                       &run_ctx->credit_wr[cr_id],
+                                                                       &bad_send_wr, cfg);
                         }
                         if (status != URMA_SUCCESS) {
                             LOG_ERROR("Couldn't post send jetty %u credit = %lu scredit = %lu\n",
@@ -2961,7 +2989,7 @@ static int run_once_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
                 if (cfg->jetty_mode == PERFTEST_JETTY_SIMPLEX) {
                     status = urma_post_jfs_wr(ctx->jfs[index], wr, &bad_wr);
                 } else {
-                    status = urma_post_jetty_send_wr(ctx->jetty[index], wr, &bad_wr);
+                    status = post_jetty_send_wr_with_lazy_retry(ctx->jetty[index], wr, &bad_wr, cfg);
                 }
                 if (status != URMA_SUCCESS) {
                     LOG_ERROR("Failed to post send, status: %d, scnt: %lu, tot_scnt: %lu, ccnt: %lu, \
@@ -3192,8 +3220,9 @@ static int run_once_bw_recv_infinite(perftest_context_t *ctx, perftest_config_t 
                             status = urma_post_jfs_wr(ctx->jfs[cr_id], &run_ctx->credit_wr[cr_id],
                                                       &bad_send_wr);
                         } else {
-                            status = urma_post_jetty_send_wr(ctx->jetty[cr_id], &run_ctx->credit_wr[cr_id],
-                                                             &bad_send_wr);
+                            status = post_jetty_send_wr_with_lazy_retry(ctx->jetty[cr_id],
+                                                                       &run_ctx->credit_wr[cr_id],
+                                                                       &bad_send_wr, cfg);
                         }
                         if (status != URMA_SUCCESS) {
                             LOG_ERROR("Couldn't post send jetty %d credit = %lu\n",

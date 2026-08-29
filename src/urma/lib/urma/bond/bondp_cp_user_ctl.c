@@ -16,6 +16,7 @@
 #include "urma_log.h"
 
 #include "bondp_cp_tjetty.h"
+#include "bondp_dp_failback.h"
 #include "bondp_provider_ops.h"
 #include "bondp_types.h"
 #include "urma_ubagg.h"
@@ -354,6 +355,58 @@ static int bondp_user_ctl_set_ctx_cfg(urma_context_t *ctx, urma_user_ctl_in_t *i
     return bondp_set_ctx_cfg(ctx, cfg_in);
 }
 
+static int bondp_validate_pjetty_create_mode_in(const bondp_set_pjetty_create_mode_in_t *mode_in)
+{
+    if (mode_in->version != BONDP_PJETTY_CREATE_CFG_VERSION_V1 ||
+        mode_in->length != sizeof(*mode_in) ||
+        mode_in->mode >= BONDP_PJETTY_CREATE_MODE_MAX ||
+        mode_in->flags != 0 || mode_in->reserved != 0) {
+        URMA_LOG_ERR("Invalid pjetty create mode input, version=%u, length=%u, mode=%u, flags=%u.\n",
+                     mode_in->version, mode_in->length, mode_in->mode, mode_in->flags);
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static int bondp_user_ctl_set_pjetty_create_mode(urma_context_t *ctx, urma_user_ctl_in_t *in,
+                                                  urma_user_ctl_out_t *out)
+{
+    (void)out;
+
+    if (ctx == NULL || in->addr == 0 || in->len != sizeof(bondp_set_pjetty_create_mode_in_t)) {
+        URMA_LOG_ERR("Invalid set pjetty create mode parameter.\n");
+        return -EINVAL;
+    }
+
+    bondp_set_pjetty_create_mode_in_t mode_in;
+    (void)memcpy(&mode_in, (const void *)(uintptr_t)in->addr, sizeof(mode_in));
+    if (bondp_validate_pjetty_create_mode_in(&mode_in) != 0) {
+        return -EINVAL;
+    }
+
+    bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
+    (void)pthread_mutex_lock(&ctx->mutex);
+    if (mode_in.mode == BONDP_PJETTY_CREATE_LAZY_BY_IODIE &&
+        (!bdp_ctx->enable_failover || bdp_ctx->bonding_mode != BONDP_BONDING_MODE_ACTIVE_BACKUP)) {
+        (void)pthread_mutex_unlock(&ctx->mutex);
+        URMA_LOG_ERR("Lazy pjetty mode requires active-backup failover support.\n");
+        return -EINVAL;
+    }
+    if (mode_in.mode == BONDP_PJETTY_CREATE_LAZY_BY_IODIE && bdp_ctx->fb_ctx == NULL) {
+        int ret = bondp_fb_init(bdp_ctx);
+        if (ret != 0) {
+            (void)pthread_mutex_unlock(&ctx->mutex);
+            URMA_LOG_ERR("Failed to initialize lazy pjetty task context, ret=%d.\n", ret);
+            return ret;
+        }
+    }
+    bdp_ctx->default_pjetty_create_mode = (bondp_pjetty_create_mode_t)mode_in.mode;
+    (void)pthread_mutex_unlock(&ctx->mutex);
+
+    URMA_LOG_INFO("Set default pjetty create mode, mode=%u.\n", mode_in.mode);
+    return 0;
+}
+
 int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_out_t *out)
 {
     if (in == NULL) {
@@ -382,6 +435,8 @@ int bondp_user_ctl(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_ou
             return bondp_user_ctl_set_bonding_port(ctx, in, out);
         case BONDP_USER_CTL_SET_CTX_CFG:
             return bondp_user_ctl_set_ctx_cfg(ctx, in, out);
+        case BONDP_USER_CTL_SET_PJETTY_CREATE_MODE:
+            return bondp_user_ctl_set_pjetty_create_mode(ctx, in, out);
         default: {
             URMA_LOG_ERR("Unsupported opcode, opcode=%d\n", in->opcode);
             return -EINVAL;

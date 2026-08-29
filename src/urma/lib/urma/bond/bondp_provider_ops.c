@@ -425,7 +425,13 @@ static int bondp_init_ctx_features(bondp_context_t *bdp_ctx)
         }
     }
 
-    if (bdp_ctx->enable_failback) {
+    if (bdp_ctx->enable_failback ||
+        bdp_ctx->default_pjetty_create_mode == BONDP_PJETTY_CREATE_LAZY_BY_IODIE) {
+        /*
+         * fb_ctx is the worker task infrastructure for REBUILD and LAZY
+         * create tasks alike; the failback switch only gates the automatic
+         * switch-back, not this base infrastructure.
+         */
         ret = bondp_fb_init(bdp_ctx);
         if (ret != 0) {
             bondp_hc_uninit(bdp_ctx);
@@ -435,10 +441,14 @@ static int bondp_init_ctx_features(bondp_context_t *bdp_ctx)
     return 0;
 }
 
-static void bondp_uninit_ctx_features(bondp_context_t *bdp_ctx)
+static int bondp_uninit_ctx_features(bondp_context_t *bdp_ctx)
 {
-    bondp_fb_uninit(bdp_ctx);
+    int ret = bondp_fb_uninit(bdp_ctx);
+    if (ret != 0) {
+        return ret;
+    }
     bondp_hc_uninit(bdp_ctx);
+    return 0;
 }
 
 urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int dev_fd)
@@ -460,6 +470,7 @@ urma_context_t *bondp_create_context(urma_device_t *dev, uint32_t eid_index, int
     bdp_ctx->rnr_retry_sleep_ms = g_bondp_env.rnr_retry_sleep_ms;
     bdp_ctx->rnr_retry_max = g_bondp_env.rnr_retry_max;
     bdp_ctx->rnr_retry_jitter_ratio = g_bondp_env.rnr_retry_jitter_ratio;
+    bdp_ctx->default_pjetty_create_mode = BONDP_PJETTY_CREATE_FULL;
 
     int ret = 0;
     ret = bondp_create_vcontext(bdp_ctx, dev, eid_index, dev_fd);
@@ -508,7 +519,11 @@ urma_status_t bondp_delete_context(urma_context_t *ctx)
     uint32_t eid_index = ctx->eid_index;
 
     (void)strcpy(dev_name, ctx->dev->name);
-    bondp_uninit_ctx_features(bdp_ctx);
+    int feature_ret = bondp_uninit_ctx_features(bdp_ctx);
+    if (feature_ret != 0) {
+        URMA_LOG_ERR("Failed to drain context worker tasks, ret=%d\n", feature_ret);
+        return URMA_EAGAIN;
+    }
     if (bondp_delete_pcontext(bdp_ctx) != 0) {
         URMA_LOG_ERR("Failed to delete pcontext\n");
         ret = URMA_FAIL;
@@ -561,16 +576,28 @@ int bondp_set_bonding_mode(urma_context_t *ctx, bondp_bonding_mode_t bonding_mod
         goto EXIT;
     }
 
-    bdp_ctx->bonding_mode = bonding_mode;
-    bdp_ctx->bonding_level = bonding_level;
+    if (bonding_mode != BONDP_BONDING_MODE_ACTIVE_BACKUP &&
+        bdp_ctx->default_pjetty_create_mode == BONDP_PJETTY_CREATE_LAZY_BY_IODIE) {
+        URMA_LOG_ERR("Cannot switch bonding mode to %d while the default pjetty create mode is lazy; "
+                     "set the default mode to full first.\n", bonding_mode);
+        ret = -EINVAL;
+        goto EXIT;
+    }
 
     /* Health check and failback hold references to the physical contexts
      * (p_ctxs). They must be torn down before deleting p_ctxs so that the
      * p_ctxs can actually be released, and re-created afterwards against the
      * new p_ctxs. Otherwise the old p_ctxs leak (urma_delete_context rejects
      * them because atomic_cnt > 1) and the new p_ctxs have no probe paths. */
-    bondp_fb_uninit(bdp_ctx);
+    ret = bondp_fb_uninit(bdp_ctx);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to drain failback tasks when setting bonding mode, ret=%d\n", ret);
+        goto EXIT;
+    }
     bondp_hc_uninit(bdp_ctx);
+
+    bdp_ctx->bonding_mode = bonding_mode;
+    bdp_ctx->bonding_level = bonding_level;
 
     ret = bondp_delete_pcontext(bdp_ctx);
     if (ret != 0) {
@@ -702,14 +729,30 @@ int bondp_set_ctx_cfg(urma_context_t *ctx, const bondp_set_ctx_cfg_in_t *cfg_in)
         URMA_LOG_ERR("Invalid context configuration.\n");
         goto EXIT;
     }
+    if (!new_cfg.enable_failover &&
+        bdp_ctx->default_pjetty_create_mode == BONDP_PJETTY_CREATE_LAZY_BY_IODIE) {
+        URMA_LOG_ERR("Cannot disable failover while lazy pjetty is the default create mode.\n");
+        ret = -EINVAL;
+        goto EXIT;
+    }
 
     bondp_set_ctx_cfg_in_t old_cfg = bondp_get_ctx_cfg(bdp_ctx);
-    bondp_uninit_ctx_features(bdp_ctx);
+    ret = bondp_uninit_ctx_features(bdp_ctx);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to drain context features before applying configuration, ret=%d.\n", ret);
+        goto EXIT;
+    }
     bondp_store_ctx_cfg(bdp_ctx, &new_cfg);
     ret = bondp_init_ctx_features(bdp_ctx);
     if (ret != 0) {
         URMA_LOG_ERR("Failed to apply context configuration, ret=%d.\n", ret);
-        bondp_uninit_ctx_features(bdp_ctx);
+        int uninit_ret = bondp_uninit_ctx_features(bdp_ctx);
+        if (uninit_ret != 0) {
+            URMA_LOG_ERR("Failed to drain partially initialized context features, ret=%d.\n",
+                         uninit_ret);
+            ret = uninit_ret;
+            goto EXIT;
+        }
         bondp_store_ctx_cfg(bdp_ctx, &old_cfg);
         if (bondp_init_ctx_features(bdp_ctx) != 0) {
             URMA_LOG_ERR("Failed to restore context features.\n");
