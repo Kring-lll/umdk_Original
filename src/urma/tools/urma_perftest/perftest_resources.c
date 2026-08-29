@@ -30,6 +30,11 @@
 
 #define PERFTEST_DEF_UM_MAX_SGE (2)
 
+#define PERFTEST_BOND_IODIE_NUM          (2U)
+#define PERFTEST_EXPECTED_PJETTY_NUM     (PERFTEST_BOND_IODIE_NUM * URMA_ACTIVE_PORT_PER_DIE)
+#define PERFTEST_PRIMARY_EID_NUM          (2U)
+#define PERFTEST_PORT_EID_NUM_PER_IODIE   (9U)
+
 static urma_token_t g_perftest_token = {
     .token = 0xABCDEF,
 };
@@ -637,6 +642,133 @@ static void destroy_jetty(perftest_context_t *ctx)
     ctx->jetty = NULL;
 }
 
+static int parse_compact_rjetty_ext(const urma_rjetty_t *rjetty, uint32_t rjetty_len,
+                                    urma_bond_jetty_ext_v0_t *ext,
+                                    const uint8_t **target_ctx_bytes, uint32_t *ext_len_out)
+{
+    const size_t ext_offset = sizeof(*rjetty) + sizeof(uint32_t);
+    if (rjetty->flag.bs.has_user_info == 0 || rjetty_len < ext_offset + sizeof(*ext)) {
+        return -1;
+    }
+
+    const uint8_t *rjetty_bytes = (const uint8_t *)rjetty;
+    uint32_t ext_len = 0;
+    (void)memcpy(&ext_len, rjetty_bytes + sizeof(*rjetty), sizeof(ext_len));
+    *ext_len_out = ext_len;
+    if (ext_len < sizeof(*ext) || ext_len > (size_t)rjetty_len - ext_offset) {
+        return -1;
+    }
+
+    const uint8_t *ext_bytes = rjetty_bytes + ext_offset;
+    (void)memcpy(ext, ext_bytes, sizeof(*ext));
+    if (ext->version != BONDP_RJETTY_EXT_VERSION_V0 ||
+        (ext->mask & BONDP_RJETTY_EXT_MASK_TARGET_CTX) == 0 ||
+        ext->local_ctx_cnt > URMA_UBAGG_DEV_MAX_NUM ||
+        ext->target_ctx_cnt > URMA_UBAGG_DEV_MAX_NUM) {
+        return -1;
+    }
+
+    size_t expected_len = sizeof(*ext) + ext->local_ctx_cnt +
+                          ext->target_ctx_cnt * sizeof(bondp_rjetty_target_ctx_t);
+    if (expected_len > ext_len) {
+        return -1;
+    }
+
+    *target_ctx_bytes = ext_bytes + sizeof(*ext) + ext->local_ctx_cnt;
+    return 0;
+}
+
+static int perftest_port_idx_to_iodie(uint8_t target_idx, uint32_t *iodie_idx)
+{
+    if (iodie_idx == NULL || target_idx < PERFTEST_PRIMARY_EID_NUM ||
+        target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return -1;
+    }
+
+    uint32_t iodie = (target_idx - PERFTEST_PRIMARY_EID_NUM) /
+                     PERFTEST_PORT_EID_NUM_PER_IODIE;
+    if (iodie >= PERFTEST_BOND_IODIE_NUM) {
+        return -1;
+    }
+    *iodie_idx = iodie;
+    return 0;
+}
+
+static int verify_pjetty_create_mode(urma_jetty_t *jetty, const perftest_config_t *cfg)
+{
+    if (!cfg->lazy_create_set) {
+        return 0;
+    }
+
+    urma_rjetty_t *rjetty = NULL;
+    uint32_t rjetty_len = 0;
+    if (urma_get_rjetty(jetty, &rjetty, &rjetty_len) != URMA_SUCCESS) {
+        LOG_ERROR("LAZY_CREATE_LOCAL FAIL: jetty_id=%u, failed to get rjetty.\n", jetty->jetty_id.id);
+        return -1;
+    }
+
+    urma_bond_jetty_ext_v0_t ext = {0};
+    const uint8_t *target_ctx_bytes = NULL;
+    uint32_t ext_len = 0;
+    uint32_t created_count = 0;
+    uint32_t created_per_iodie[PERFTEST_BOND_IODIE_NUM] = {0};
+    uint32_t deferred_per_iodie[PERFTEST_BOND_IODIE_NUM] = {0};
+    bool target_seen[URMA_UBAGG_DEV_MAX_NUM] = {0};
+    bool entries_valid =
+        parse_compact_rjetty_ext(rjetty, rjetty_len, &ext, &target_ctx_bytes, &ext_len) == 0;
+    if (entries_valid) {
+        for (uint32_t i = 0; i < ext.target_ctx_cnt; ++i) {
+            bondp_rjetty_target_ctx_t entry = {0};
+            (void)memcpy(&entry, target_ctx_bytes + i * sizeof(entry), sizeof(entry));
+            if (entry.target_idx >= URMA_UBAGG_DEV_MAX_NUM || target_seen[entry.target_idx]) {
+                entries_valid = false;
+                continue;
+            }
+            target_seen[entry.target_idx] = true;
+            created_count += (entry.jetty_id != 0);
+            if (cfg->lazy_create) {
+                uint32_t iodie_idx = 0;
+                if (perftest_port_idx_to_iodie(entry.target_idx, &iodie_idx) != 0) {
+                    entries_valid = false;
+                    continue;
+                }
+                if (entry.jetty_id != 0) {
+                    created_per_iodie[iodie_idx]++;
+                } else {
+                    deferred_per_iodie[iodie_idx]++;
+                }
+            }
+        }
+    }
+
+    uint32_t deferred_count = ext.target_ctx_cnt >= created_count ?
+                              ext.target_ctx_cnt - created_count : 0;
+    bool lazy_mask = (ext.mask & BONDP_RJETTY_EXT_MASK_LAZY_PJETTY) != 0;
+    bool lazy_layout =
+        (created_per_iodie[0] == URMA_ACTIVE_PORT_PER_DIE && deferred_per_iodie[0] == 0 &&
+         created_per_iodie[1] == 0 && deferred_per_iodie[1] == URMA_ACTIVE_PORT_PER_DIE) ||
+        (created_per_iodie[1] == URMA_ACTIVE_PORT_PER_DIE && deferred_per_iodie[1] == 0 &&
+         created_per_iodie[0] == 0 && deferred_per_iodie[0] == URMA_ACTIVE_PORT_PER_DIE);
+    bool pass = entries_valid &&
+                (cfg->lazy_create ?
+                 (ext.target_ctx_cnt == PERFTEST_EXPECTED_PJETTY_NUM && lazy_mask &&
+                  created_count == URMA_ACTIVE_PORT_PER_DIE &&
+                  deferred_count == URMA_ACTIVE_PORT_PER_DIE && lazy_layout) :
+                 (ext.target_ctx_cnt > 0 && !lazy_mask && created_count == ext.target_ctx_cnt));
+    const char *result = pass ? "PASS" : "FAIL";
+    FILE *stream = pass ? stdout : stderr;
+    perftest_vlog_level_t level = pass ? VLOG_LEVEL_INFO : VLOG_LEVEL_QUIET;
+    verbose_print(stream, level,
+        "LAZY_CREATE_LOCAL %s: jetty_id=%u, requested=%s, version=%u, rjetty_len=%u, ext_len=%u, "
+        "mask=0x%lx, created=%u, deferred=%u, total=%u, "
+        "created_by_iodie=[%u,%u], deferred_by_iodie=[%u,%u].\n",
+        result, jetty->jetty_id.id, cfg->lazy_create ? "LAZY" : "FULL", (unsigned int)ext.version,
+        rjetty_len, ext_len, (unsigned long)ext.mask, created_count, deferred_count, ext.target_ctx_cnt,
+        created_per_iodie[0], created_per_iodie[1], deferred_per_iodie[0], deferred_per_iodie[1]);
+    urma_put_rjetty(rjetty);
+    return pass ? 0 : -1;
+}
+
 static int create_jetty(perftest_context_t *ctx, const perftest_config_t *cfg)
 {
     uint32_t j = 0;
@@ -656,6 +788,7 @@ static int create_jetty(perftest_context_t *ctx, const perftest_config_t *cfg)
     fill_jfr_cfg(ctx, cfg, &jfr_cfg);
 
     urma_jetty_cfg_t jetty_cfg = {0};
+    bondp_jetty_cfg_t bond_jetty_cfg = {0};
     if (cfg->share_jfr == false) {
         jetty_flag.bs.share_jfr = 0; /* No shared jfr */
         jetty_cfg.flag = jetty_flag;
@@ -695,7 +828,14 @@ static int create_jetty(perftest_context_t *ctx, const perftest_config_t *cfg)
             jetty_cfg.shared.jfr = ctx->jfr[i / cfg->jettys_pre_jfr];
         }
         jetty_cfg.id = cfg->jetty_id;
-        ctx->jetty[i] = urma_create_jetty(ctx->urma_ctx, &jetty_cfg);
+        urma_jetty_cfg_t *create_cfg = &jetty_cfg;
+        if (cfg->lazy_create_set) {
+            bond_jetty_cfg.base = jetty_cfg;
+            bond_jetty_cfg.base.flag.bs.has_drv_ext = 1;
+            bond_jetty_cfg.lazy_create = cfg->lazy_create;
+            create_cfg = &bond_jetty_cfg.base;
+        }
+        ctx->jetty[i] = urma_create_jetty(ctx->urma_ctx, create_cfg);
         if (ctx->jetty[i] == NULL) {
             LOG_ERROR("Failed to create jetty: %d!\n", i);
             goto err_delete_jetty;
@@ -703,6 +843,9 @@ static int create_jetty(perftest_context_t *ctx, const perftest_config_t *cfg)
         if (cfg->jetty_id != 0 && cfg->jetty_id != ctx->jetty[i]->jetty_id.id) {
             LOG_ERROR("Set jetty id %u, actually jetty id %d\n",
                       cfg->jetty_id, ctx->jetty[i]->jetty_id.id);
+        }
+        if (verify_pjetty_create_mode(ctx->jetty[i], cfg) != 0) {
+            goto err_delete_jetty;
         }
     }
 

@@ -196,7 +196,9 @@ static void usage(const char *argv0)
         "  --max_size                  Set max size in random io size, only for bw mode.\n"
         "  --bond_mode                 Set bonding device mode, support: standalone, active_backup, balance.\n"
         "                                                       default: standalone.\n"
-        "  --bond_level                Set bonding device level, support: iodie, port, default: iodie.\n");
+        "  --bond_level                Set bonding device level, support: iodie, port, default: iodie.\n"
+        "  --lazy_create <true/false>  Set the pjetty create mode for subsequently created bond jettys.\n"
+        "                              LAZY is for one-way send_bw clients; configure the server as FULL.\n");
 }
 
 static perftest_cmd_type_t parse_command(const char *argv1)
@@ -399,6 +401,8 @@ static void init_cfg(perftest_config_t *cfg)
     cfg->min_size = 0;
     cfg->max_size = 0;
     cfg->enable_random_size = 0;
+    cfg->lazy_create_set = false;
+    cfg->lazy_create = false;
     verbose_set_level(VLOG_LEVEL_INFO);
 }
 
@@ -455,6 +459,9 @@ void print_cfg(const perftest_config_t *cfg)
 
     if (cfg->api_type != PERFTEST_READ && cfg->api_type != PERFTEST_ATOMIC) {
         LOG_QUIET(" Max inline size     : %u[B]\n", cfg->inline_size);
+    }
+    if (cfg->lazy_create_set) {
+        LOG_QUIET(" Lazy pjetty create  : %s\n", PERFTEST_BOOL_TO_STR(cfg->lazy_create));
     }
     LOG_QUIET(PERFTEST_RESULT_LINE);
 }
@@ -706,6 +713,7 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
         {"stdout",              no_argument,       NULL, PERFTEST_OPT_STDOUT},
         {"bond_mode",           required_argument, NULL, PERFTEST_OPT_BOND_MODE},
         {"bond_level",          required_argument, NULL, PERFTEST_OPT_BOND_LEVEL},
+        {"lazy_create",         required_argument, NULL, PERFTEST_OPT_LAZY_CREATE},
         {NULL,                  no_argument,       NULL, '\0'},
     };
     /* clang-format on */
@@ -1040,6 +1048,13 @@ int perftest_parse_args(int argc, char *argv[], perftest_config_t *cfg)
                     return -1;
                 }
                 break;
+            case PERFTEST_OPT_LAZY_CREATE:
+                if (ub_str_to_bool(optarg, &cfg->lazy_create) != 0) {
+                    LOG_ERROR("Invalid parameter(lazy_create), expected true or false.\n");
+                    return -1;
+                }
+                cfg->lazy_create_set = true;
+                break;
             case PERFTEST_OPT_SIP:
                 (void)str_to_ip(optarg, &cfg->sip);
                 cfg->uboe_sip = true;
@@ -1229,6 +1244,28 @@ int check_local_cfg(perftest_config_t *cfg)
 
     if (strlen(cfg->dev_name) == 0 || strnlen(cfg->dev_name, URMA_MAX_NAME) >= URMA_MAX_NAME) {
         LOG_ERROR("No device specified, name: %s.\n", cfg->dev_name);
+        return -1;
+    }
+
+    if (cfg->lazy_create_set && strstr(cfg->dev_name, "bonding_dev") == NULL) {
+        LOG_ERROR("Invalid config: --lazy_create is only available for a bonding device.\n");
+        return -1;
+    }
+
+    if (cfg->lazy_create_set && cfg->lazy_create &&
+        (cfg->bond_mode != BONDP_BONDING_MODE_ACTIVE_BACKUP ||
+         cfg->bond_level != BONDP_BONDING_LEVEL_PORT ||
+         cfg->trans_mode != URMA_TM_RM ||
+         cfg->jetty_mode != PERFTEST_JETTY_DUPLEX)) {
+        LOG_ERROR("Invalid config: --lazy_create requires active_backup, port, RM and DUPLEX.\n");
+        return -1;
+    }
+
+    if (cfg->lazy_create_set && cfg->lazy_create &&
+        (cfg->server_ip == NULL || cfg->api_type != PERFTEST_SEND ||
+         cfg->type != PERFTEST_BW || cfg->bidirection || cfg->enable_credit)) {
+        LOG_ERROR("Invalid config: lazy --lazy_create requires a one-way send_bw client; "
+                  "run the server with --lazy_create false and do not enable credit feedback.\n");
         return -1;
     }
 

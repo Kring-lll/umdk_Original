@@ -82,6 +82,26 @@ static int bondp_fill_compact_rjetty_ext(const bondp_context_t *bdp_ctx, const b
     ext->version = BONDP_RJETTY_EXT_VERSION_V0;
     ext->mask = BONDP_RJETTY_EXT_MASK_MULTI_PATH | BONDP_RJETTY_EXT_MASK_LOCAL_CTX |
                 BONDP_RJETTY_EXT_MASK_TARGET_CTX;
+    bool lazy_mode = bondp_comp_uses_lazy_pjetty(bdp_jetty);
+    uint32_t primary_iodie = UINT32_MAX;
+    if (lazy_mode) {
+        if (bdp_jetty->active_count == 0) {
+            URMA_LOG_ERR("Lazy vjetty has no active index, vjetty_id=%u.\n",
+                         bdp_jetty->v_jetty.jetty_id.id);
+            return -EINVAL;
+        }
+        primary_iodie = bondp_iodie_idx_of(bdp_jetty->active_indices[0]);
+        if (primary_iodie == UINT32_MAX) {
+            URMA_LOG_ERR("Lazy vjetty has invalid primary index=%u, vjetty_id=%u.\n",
+                         bdp_jetty->active_indices[0], bdp_jetty->v_jetty.jetty_id.id);
+            return -EINVAL;
+        }
+        /* Tell the peer to skip importing the not-yet-created cross-IODIE
+         * pjettys (slave id 0) instead of failing the connection setup. */
+        ext->mask |= BONDP_RJETTY_EXT_MASK_LAZY_PJETTY;
+        URMA_LOG_INFO("rjetty ext marked lazy-pjetty, vjetty_id=%u, target_ctx_cnt=%u\n",
+                      bdp_jetty->v_jetty.jetty_id.id, bdp_jetty->enabled_count);
+    }
     ext->is_multipath = bdp_ctx->msn_enable;
     ext->is_health_check_enable = false;
     ext->local_ctx_cnt = bdp_ctx->enabled_count;
@@ -108,8 +128,22 @@ static int bondp_fill_compact_rjetty_ext(const bondp_context_t *bdp_ctx, const b
     for (uint32_t i = 0; i < ext->target_ctx_cnt; ++i) {
         uint32_t target_idx = bdp_jetty->enabled_indices[i];
         bondp_rjetty_target_ctx_t entry = {0};
+        if (target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+            URMA_LOG_ERR("Invalid target index=%u while exporting vjetty_id=%u.\n",
+                         target_idx, bdp_jetty->v_jetty.jetty_id.id);
+            return -EINVAL;
+        }
         entry.target_idx = (uint8_t)target_idx;
-        if (target_idx < URMA_UBAGG_DEV_MAX_NUM && bdp_jetty->p_jetty[target_idx] != NULL) {
+        if (bdp_jetty->p_jetty[target_idx] == NULL) {
+            uint32_t target_iodie = bondp_iodie_idx_of(target_idx);
+            if (!lazy_mode || target_iodie == UINT32_MAX || target_iodie == primary_iodie) {
+                URMA_LOG_ERR("Missing required pjetty while exporting vjetty_id=%u, idx=%u, "
+                             "mode=%u, primary_iodie=%u.\n",
+                             bdp_jetty->v_jetty.jetty_id.id, target_idx,
+                             bdp_jetty->pjetty_create_mode, primary_iodie);
+                return -EINVAL;
+            }
+        } else {
             const urma_jetty_id_t *slave_id = &bdp_jetty->p_jetty[target_idx]->jetty_id;
             if (slave_id->uasid != v_uasid) {
                 URMA_LOG_ERR("slave jetty uasid mismatch, idx=%u, p_uasid=%u, v_uasid=%u.\n",
@@ -184,7 +218,9 @@ int bondp_get_rjetty(urma_context_t *ctx, urma_user_ctl_in_t *in,
     bondp_rjetty_ext_priv_t *ext_hdr = bondp_rjetty_get_priv_ext(new_rjetty);
     ext_hdr->len = (uint32_t)ext_len;
     urma_bond_jetty_ext_v0_t *ext = (urma_bond_jetty_ext_v0_t *)ext_hdr->data;
+    (void)pthread_spin_lock(&bdp_jetty->send_lock);
     int ret = bondp_fill_compact_rjetty_ext(bdp_ctx, bdp_jetty, ext, ext_len);
+    (void)pthread_spin_unlock(&bdp_jetty->send_lock);
     if (ret != 0) {
         free(new_rjetty);
         return ret;
@@ -265,12 +301,14 @@ static int init_target_active_indices(bondp_context_t *bdp_ctx, bondp_target_jet
 
 static int bondp_fill_bond_id_info_from_compact_ext(const urma_bond_jetty_ext_v0_t *ext, uint32_t ext_len,
                                                     const urma_rjetty_t *rjetty,
-                                                    urma_bond_id_info_out_t *info)
+                                                    urma_bond_id_info_out_t *info,
+                                                    bool *remote_lazy_pjetty)
 {
     uint32_t known_mask = BONDP_RJETTY_EXT_MASK_MULTI_PATH |
                           BONDP_RJETTY_EXT_MASK_HEALTH_CHECK |
                           BONDP_RJETTY_EXT_MASK_LOCAL_CTX |
-                          BONDP_RJETTY_EXT_MASK_TARGET_CTX;
+                          BONDP_RJETTY_EXT_MASK_TARGET_CTX |
+                          BONDP_RJETTY_EXT_MASK_LAZY_PJETTY;
     if ((ext->mask & (~(uint64_t)known_mask)) != 0) {
         URMA_LOG_DEBUG("Unknown rjetty ext mask bits=0x%lx, ignore them.\n",
                        ext->mask & (~(uint64_t)known_mask));
@@ -294,6 +332,9 @@ static int bondp_fill_bond_id_info_from_compact_ext(const urma_bond_jetty_ext_v0
     info->is_msn_enabled = ((ext->mask & BONDP_RJETTY_EXT_MASK_MULTI_PATH) != 0) ? ext->is_multipath : false;
     info->is_health_check_enable =
         ((ext->mask & BONDP_RJETTY_EXT_MASK_HEALTH_CHECK) != 0) ? ext->is_health_check_enable : false;
+    if (remote_lazy_pjetty != NULL) {
+        *remote_lazy_pjetty = (ext->mask & BONDP_RJETTY_EXT_MASK_LAZY_PJETTY) != 0;
+    }
 
     for (uint32_t i = 0; i < target_ctx_cnt; ++i) {
         bondp_rjetty_target_ctx_t entry = {0};
@@ -322,7 +363,8 @@ static int bondp_fill_bond_id_info_from_compact_ext(const urma_bond_jetty_ext_v0
     return 0;
 }
 
-static int bondp_fill_bond_id_info_from_rjetty_ext(const urma_rjetty_t *rjetty, urma_bond_id_info_out_t *info)
+static int bondp_fill_bond_id_info_from_rjetty_ext(const urma_rjetty_t *rjetty, urma_bond_id_info_out_t *info,
+                                                   bool *remote_lazy_pjetty)
 {
     if (!bondp_rjetty_has_user_info(rjetty)) {
         URMA_LOG_ERR("rjetty user_info ext is not enabled.\n");
@@ -337,7 +379,7 @@ static int bondp_fill_bond_id_info_from_rjetty_ext(const urma_rjetty_t *rjetty, 
     if (compact_ext->version != BONDP_RJETTY_EXT_VERSION_V0) {
         URMA_LOG_DEBUG("rjetty ext version=%u, parse by mask only.\n", compact_ext->version);
     }
-    return bondp_fill_bond_id_info_from_compact_ext(compact_ext, ext_hdr->len, rjetty, info);
+    return bondp_fill_bond_id_info_from_compact_ext(compact_ext, ext_hdr->len, rjetty, info, remote_lazy_pjetty);
 }
 
 static int bondp_import_vjetty(
@@ -379,14 +421,30 @@ static int bondp_import_vjetty(
 static int bondp_import_pjetty_default(
     bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
     urma_rjetty_t *rjetty, urma_token_t *rjetty_token,
-    urma_bond_id_info_out_t *rvjetty_info)
+    urma_bond_id_info_out_t *rvjetty_info, bool remote_lazy_pjetty)
 {
     urma_rjetty_t p_rjetty = *rjetty;
     p_rjetty.flag.bs.has_user_info = 0;
+    bool imported = false;
 
     for (uint32_t m = 0; m < rvjetty_info->enabled_count; ++m) {
         uint32_t target_idx = rvjetty_info->enabled_indices[m];
         p_rjetty.jetty_id = rvjetty_info->slave_id[target_idx];
+
+        if (p_rjetty.jetty_id.id == 0) {
+            if (remote_lazy_pjetty) {
+                /* Not-yet-created cross-IODIE pjetty on the remote: skip,
+                 * leaving that path absent so nothing schedules onto it. */
+                URMA_LOG_INFO("Skip import of remote lazy pjetty, target_idx=%u, tjetty_id=%u, "
+                              "tjetty_eid=" EID_FMT "\n",
+                              target_idx, rjetty->jetty_id.id, EID_ARGS(rjetty->jetty_id.eid));
+                continue;
+            }
+            URMA_LOG_ERR("Invalid remote slave jetty id=0, target_idx=%u, tjetty_id=%u\n",
+                         target_idx, rjetty->jetty_id.id);
+            return -1;
+        }
+
         for (uint32_t n = 0; n < bdp_ctx->enabled_count; ++n) {
             uint32_t local_idx = bdp_ctx->enabled_indices[n];
 
@@ -406,6 +464,7 @@ static int bondp_import_pjetty_default(
             }
 
             if (p_tjetty->p_tjetty != NULL) {
+                imported = true;
                 continue;
             }
 
@@ -416,7 +475,13 @@ static int bondp_import_pjetty_default(
                 return -1;
             }
             atomic_store(&p_tjetty->valid, true);
+            imported = true;
         }
+    }
+    if (!imported) {
+        URMA_LOG_ERR("No usable remote pjetty was imported, tjetty_id=%u, remote_lazy=%u\n",
+                     rjetty->jetty_id.id, remote_lazy_pjetty);
+        return -1;
     }
     return 0;
 }
@@ -424,7 +489,7 @@ static int bondp_import_pjetty_default(
 static int bondp_import_pjetty_custom(
     bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
     urma_rjetty_t *rjetty, urma_token_t *rjetty_token,
-    urma_bond_id_info_out_t *rvjetty_info)
+    urma_bond_id_info_out_t *rvjetty_info, bool remote_lazy_pjetty)
 {
     urma_rjetty_t p_rjetty = *rjetty;
     p_rjetty.flag.bs.has_user_info = 0;
@@ -439,6 +504,18 @@ static int bondp_import_pjetty_custom(
     for (uint32_t m = 0; m < remote_cnt; ++m) {
         uint32_t target_idx = rvjetty_info->enabled_indices[m];
         p_rjetty.jetty_id = rvjetty_info->slave_id[target_idx];
+
+        if (p_rjetty.jetty_id.id == 0) {
+            if (remote_lazy_pjetty) {
+                URMA_LOG_INFO("Skip import of remote lazy pjetty (custom), target_idx=%u, tjetty_id=%u\n",
+                              target_idx, rjetty->jetty_id.id);
+                continue;
+            }
+            URMA_LOG_ERR("Invalid remote slave jetty id=0, target_idx=%u, tjetty_id=%u\n",
+                         target_idx, rjetty->jetty_id.id);
+            return -1;
+        }
+
         for (uint32_t n = 0; n < local_cnt; ++n) {
             uint32_t local_idx = bdp_ctx->port_cfg.enabled_indices[n];
 
@@ -488,12 +565,14 @@ static int bondp_import_pjetty_custom(
 static int bondp_import_pjetty(
     bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp_tjetty,
     urma_rjetty_t *rjetty, urma_token_t *rjetty_token,
-    urma_bond_id_info_out_t *rvjetty_info)
+    urma_bond_id_info_out_t *rvjetty_info, bool remote_lazy_pjetty)
 {
     if (!bdp_ctx->port_cfg_enable) {
-        return bondp_import_pjetty_default(bdp_ctx, bdp_tjetty, rjetty, rjetty_token, rvjetty_info);
+        return bondp_import_pjetty_default(bdp_ctx, bdp_tjetty, rjetty, rjetty_token, rvjetty_info,
+                                           remote_lazy_pjetty);
     }
-    return bondp_import_pjetty_custom(bdp_ctx, bdp_tjetty, rjetty, rjetty_token, rvjetty_info);
+    return bondp_import_pjetty_custom(bdp_ctx, bdp_tjetty, rjetty, rjetty_token, rvjetty_info,
+                                      remote_lazy_pjetty);
 }
 
 static int bondp_unimport_vjetty(bondp_target_jetty_t *bdp_tjetty)
@@ -580,9 +659,10 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
             cfg_jetty = CONTAINER_OF_FIELD(bdp_rjetty->jetty, bondp_comp_t, v_jetty);
         }
     }
+    bool remote_lazy_pjetty = false;
     if (bondp_rjetty_has_user_info(rjetty)) {
         bdp_tjetty->mask |= BONDP_TJETTY_FLAG_SKIP_IMPORT_VJETTY;
-        if (bondp_fill_bond_id_info_from_rjetty_ext(rjetty, &rvjetty_info) != 0) {
+        if (bondp_fill_bond_id_info_from_rjetty_ext(rjetty, &rvjetty_info, &remote_lazy_pjetty) != 0) {
             const bondp_rjetty_ext_priv_t *ext_hdr = bondp_rjetty_get_priv_ext_const(rjetty);
             URMA_LOG_ERR("Invalid rjetty ext, length=%u.\n", ext_hdr->len);
             goto FREE_TJETTY;
@@ -600,6 +680,24 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
                          EID_ARGS(rjetty->jetty_id.eid), rjetty->jetty_id.id);
             goto FREE_TJETTY;
         }
+    }
+
+    if (remote_lazy_pjetty) {
+        /* Preserve the wire property until bind(), where both the local
+         * vjetty and imported target are available. A plain wire rjetty does
+         * not carry the private local-vjetty pointer used by direct imports. */
+        bdp_tjetty->mask |= BONDP_TJETTY_FLAG_REMOTE_LAZY;
+    }
+
+    /* A private direct import carries the local vjetty pointer, so reject a
+     * two-lazy pair here. Serialized wire imports have no such pointer and
+     * are enforced by the REMOTE_LAZY checks in bind/post instead. */
+    if (remote_lazy_pjetty && bondp_comp_uses_lazy_pjetty(cfg_jetty)) {
+        URMA_LOG_ERR("Both local and remote jettys use lazy pjetty mode; one peer must use full mode, "
+                     "local_vjetty_id=%u, remote_vjetty_id=%u.\n",
+                     cfg_jetty->v_jetty.jetty_id.id, rjetty->jetty_id.id);
+        errno = EOPNOTSUPP;
+        goto UNIMPORT_VJETTY;
     }
 
     if (bondp_rebuild_connected_by_topo(&rjetty->jetty_id.eid, &rvjetty_info) != 0) {
@@ -620,7 +718,8 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         goto UNIMPORT_VJETTY;
     }
 
-    if (bondp_import_pjetty(bdp_ctx, bdp_tjetty, rjetty, token_value, &rvjetty_info) != 0) {
+    if (bondp_import_pjetty(bdp_ctx, bdp_tjetty, rjetty, token_value, &rvjetty_info,
+                            remote_lazy_pjetty) != 0) {
         URMA_LOG_ERR("Failed to import pjetty\n");
         goto UNIMPORT_PJETTY;
     }
@@ -690,6 +789,15 @@ urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(tjetty, bondp_target_jetty_t, v_tjetty);
     bool target_used[URMA_UBAGG_DEV_MAX_NUM] = {0};
     bool bind_done = false;
+
+    /* A lazy peer does not export its cold-IODIE IDs and therefore cannot be
+     * used as a peer-send target, regardless of the local create mode. */
+    if ((bdp_tjetty->mask & BONDP_TJETTY_FLAG_REMOTE_LAZY) != 0) {
+        URMA_LOG_ERR("Cannot bind a remote lazy jetty as a peer-send target, "
+                     "local_vjetty_id=%u, remote_vjetty_id=%u.\n",
+                     bdp_jetty->v_jetty.jetty_id.id, bdp_tjetty->v_tjetty.id.id);
+        return URMA_ENOPERM;
+    }
 
     if (jetty->remote_jetty) {
         URMA_LOG_ERR("Jetty already has a binded target jetty\n");
