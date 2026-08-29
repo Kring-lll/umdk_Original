@@ -22,7 +22,7 @@ IS_EXTRACT=0
 SOC_VERSION="all"
 ENABLE_UT_BUILD=0
 ENABLE_PYBIND_BUILD=1
-ENABLE_SRC_BUILD=1
+ENABLE_SRC_BUILD=0
 ENABLE_RUN_ONLY=0    # -r flag: 1 = build only the run package, skip the whl
 OP_SELECT=""        # -a operator list (semicolon-separated); empty = full set
 USE_W4A8=0          # -q flag: 1 = compile the fused_deep_moe_w4a8 quantization variant
