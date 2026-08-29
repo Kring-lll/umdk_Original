@@ -39,6 +39,8 @@ typedef struct bondp_lazy_create_info {
 int bondp_fb_add_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx);
 int bondp_fb_add_lazy_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32_t pjetty_idx,
                            const bondp_lazy_create_info_t *info);
+/* Tear down materialized cross-IODIE pjettys after traffic returns to the primary IODIE. */
+void bondp_fb_schedule_lazy_destroy(bondp_comp_t *bdp_comp);
 int bondp_fb_cancel_tasks(bondp_context_t *bond_ctx, uint32_t vjetty_id);
 
 int bondp_fb_init(bondp_context_t *bond_ctx);

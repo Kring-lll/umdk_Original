@@ -27,17 +27,20 @@
 
 #include "bondp_dp_failback.h"
 
-typedef struct bondp_fb_task_key {
-    uint32_t vjetty_id;
-    uint32_t pjetty_idx;
-} bondp_fb_task_key_t;
-
 typedef enum bondp_fb_task_type {
     /* Recreate a failed pjetty in place so the slot stays pre-built. */
     BONDP_FB_TASK_REBUILD = 0,
     /* Create the not-yet-built cross-IODIE pjettys on demand (lazy failover). */
     BONDP_FB_TASK_LAZY_CREATE,
+    /* Destroy materialized cross-IODIE pjettys after failback. */
+    BONDP_FB_TASK_LAZY_DESTROY,
 } bondp_fb_task_type_t;
+
+typedef struct bondp_fb_task_key {
+    uint32_t vjetty_id;
+    uint32_t pjetty_idx;
+    uint32_t type;
+} bondp_fb_task_key_t;
 
 typedef struct bondp_fb_task {
     struct ub_hmap_node hmap_node;
@@ -100,11 +103,14 @@ uint32_t bondp_fb_switch_path(bondp_comp_t *bdp_comp)
 #define BONDP_FB_TASK_TABLE_SIZE    1024U
 /* Delay (ms) before rebuilding a failed-back pjetty on the bond worker. */
 #define BONDP_FB_REBUILD_DELAY_MS   2000U
-/* Delay (ms) before publishing the rebuild_done flag after a rebuild; the
- * worker enforces a minimum of one tick. */
+/* Delay (ms) between rebuild retries after a transient failure. */
+#define BONDP_FB_REBUILD_RETRY_MS   1000U
+/* Publish rebuild completion on the next worker tick to reject stale CRs. */
 #define BONDP_FB_MARK_DONE_DELAY_MS 0U
 /* Delay (ms) between lazy-create retries after a transient create failure. */
 #define BONDP_LAZY_CREATE_RETRY_MS   1000U
+/* Delay (ms) while cold-standby WRs drain before pjetty destruction. */
+#define BONDP_LAZY_DESTROY_RETRY_MS  1000U
 
 static uint32_t next_request_id(bondp_fb_ctx_t *fb_ctx)
 {
@@ -130,7 +136,8 @@ static bool fb_task_matches_key(const struct ub_hmap_node *node, const bondp_fb_
     const bondp_fb_task_t *fb_task = CONTAINER_OF_FIELD(node, bondp_fb_task_t, hmap_node);
 
     return fb_task->vjetty_id == key->vjetty_id &&
-           fb_task->pjetty_idx == key->pjetty_idx;
+           fb_task->pjetty_idx == key->pjetty_idx &&
+           (uint32_t)fb_task->type == key->type;
 }
 
 static uint32_t fb_task_hash_key(const bondp_fb_task_key_t *key)
@@ -318,6 +325,129 @@ static int bondp_update_pjetty_id_mapping(
     return 0;
 }
 
+static bool bondp_is_cold_lazy_idx(const bondp_comp_t *bdp_jetty, uint32_t local_idx)
+{
+    if (!bondp_comp_uses_lazy_pjetty(bdp_jetty) || bdp_jetty->active_count == 0) {
+        return false;
+    }
+
+    uint32_t primary_iodie = bondp_iodie_idx_of(bdp_jetty->active_indices[0]);
+    uint32_t local_iodie = bondp_iodie_idx_of(local_idx);
+    return primary_iodie != UINT32_MAX && local_iodie != UINT32_MAX &&
+           local_iodie != primary_iodie;
+}
+
+static bool bondp_primary_iodie_alive(const bondp_comp_t *bdp_jetty)
+{
+    uint32_t primary_iodie = bondp_iodie_idx_of(bdp_jetty->active_indices[0]);
+    if (primary_iodie == UINT32_MAX) {
+        return false;
+    }
+
+    for (uint32_t n = 0; n < bdp_jetty->enabled_count; ++n) {
+        uint32_t idx = bdp_jetty->enabled_indices[n];
+        if (bondp_iodie_idx_of(idx) == primary_iodie && atomic_load(&bdp_jetty->valid[idx])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool bondp_lazy_pjetty_has_inflight(const bondp_comp_t *bdp_jetty, uint32_t local_idx)
+{
+    for (uint32_t target_idx = 0; target_idx < URMA_UBAGG_DEV_MAX_NUM; ++target_idx) {
+        if (atomic_load(&bdp_jetty->sqe_cnt[local_idx][target_idx]) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void bondp_clear_lazy_pjetty_slot(bondp_comp_t *bdp_jetty, uint32_t local_idx)
+{
+    bdp_jetty->p_jetty[local_idx] = NULL;
+    atomic_store(&bdp_jetty->valid[local_idx], false);
+    atomic_store(&bdp_jetty->hc_valid[local_idx], false);
+    atomic_store(&bdp_jetty->rebuild_done[local_idx], false);
+}
+
+static int bondp_detach_lazy_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx,
+                                    urma_jetty_t **old_jetty)
+{
+    *old_jetty = bdp_jetty->p_jetty[local_idx];
+    if (*old_jetty == NULL) {
+        bondp_clear_lazy_pjetty_slot(bdp_jetty, local_idx);
+        return 0;
+    }
+
+    bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
+    pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
+    int ret = bdp_p_vjetty_id_table_del_without_lock(
+        &bdp_ctx->p_vjetty_id_table, (*old_jetty)->jetty_id, JETTY);
+    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+    if (ret != 0 && ret != BONDP_HASH_MAP_NOT_FOUND_ERROR) {
+        *old_jetty = NULL;
+        return -EAGAIN;
+    }
+    bondp_clear_lazy_pjetty_slot(bdp_jetty, local_idx);
+    return 0;
+}
+
+static void bondp_restore_lazy_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx,
+                                      urma_jetty_t *old_jetty)
+{
+    (void)pthread_spin_lock(&bdp_jetty->send_lock);
+    bdp_jetty->p_jetty[local_idx] = old_jetty;
+    pthread_rwlock_wrlock(&bdp_jetty->bondp_ctx->p_vjetty_id_table.lock);
+    int ret = bdp_p_vjetty_id_table_add_without_lock(
+        &bdp_jetty->bondp_ctx->p_vjetty_id_table, old_jetty->jetty_id, JETTY,
+        bdp_jetty->v_jetty.jetty_id.id, bdp_jetty);
+    pthread_rwlock_unlock(&bdp_jetty->bondp_ctx->p_vjetty_id_table.lock);
+    (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+    if (ret != 0 && ret != BONDP_HASH_MAP_COLLIDE_ERROR) {
+        URMA_LOG_WARN("Failed to restore cold-standby pjetty mapping, "
+                      "vjetty_id=%u, idx=%u, ret=%d\n",
+                      bdp_jetty->v_jetty.jetty_id.id, local_idx, ret);
+    }
+}
+
+static int bondp_destroy_lazy_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
+{
+    if (bdp_jetty == NULL || bdp_jetty->bondp_ctx == NULL ||
+        local_idx >= URMA_UBAGG_DEV_MAX_NUM || !bondp_is_cold_lazy_idx(bdp_jetty, local_idx)) {
+        return -EINVAL;
+    }
+
+    (void)pthread_spin_lock(&bdp_jetty->send_lock);
+    if (atomic_load(&bdp_jetty->modify_to_error) || atomic_load(&bdp_jetty->deleting)) {
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+        return -ECANCELED;
+    }
+    if (!bondp_primary_iodie_alive(bdp_jetty) ||
+        bondp_lazy_pjetty_has_inflight(bdp_jetty, local_idx)) {
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+        return -EAGAIN;
+    }
+    urma_jetty_t *old_jetty = NULL;
+    int ret = bondp_detach_lazy_pjetty(bdp_jetty, local_idx, &old_jetty);
+    (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+    if (ret != 0 || old_jetty == NULL) {
+        return ret;
+    }
+
+    urma_jetty_id_t old_id = old_jetty->jetty_id;
+    ret = urma_delete_jetty(old_jetty);
+    if (ret != URMA_SUCCESS) {
+        URMA_LOG_WARN("Failed to delete cold-standby pjetty, vjetty_id=%u, idx=%u, ret=%d\n",
+                      bdp_jetty->v_jetty.jetty_id.id, local_idx, ret);
+        bondp_restore_lazy_pjetty(bdp_jetty, local_idx, old_jetty);
+        return -EAGAIN;
+    }
+    URMA_LOG_INFO("Cold-standby pjetty destroyed after failback, vjetty_id=%u, idx=%u, jetty_id=%u\n",
+                  bdp_jetty->v_jetty.jetty_id.id, local_idx, old_id.id);
+    return 0;
+}
+
 static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
 {
     int ret;
@@ -337,6 +467,9 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
     urma_jetty_t *old_jetty = bdp_jetty->p_jetty[local_idx];
     if (old_jetty == NULL) {
         (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+        if (bondp_is_cold_lazy_idx(bdp_jetty, local_idx)) {
+            return -ECANCELED;
+        }
         URMA_LOG_ERR("pjetty at idx=%u is NULL, cannot rebuild\n", local_idx);
         return -1;
     }
@@ -423,7 +556,7 @@ typedef struct bondp_fb_async_arg {
     bondp_fb_ctx_t *fb_ctx;
     bondp_fb_task_key_t key;
     bondp_fb_task_type_t type;
-    /* Retry counter for LAZY_CREATE retries. */
+    /* Retry counter for rebuild/create/destroy retries. */
     uint32_t retry_cnt;
     /* Payload for BONDP_FB_TASK_LAZY_CREATE. */
     bondp_lazy_create_info_t lazy;
@@ -436,8 +569,6 @@ typedef struct bondp_fb_mark_done_arg {
     bondp_fb_ctx_t *fb_ctx;
     bondp_fb_task_key_t key;
     bondp_fb_task_t *fb_task;
-    /* No bare comp pointer: the delayed callback re-looks it up with a
-     * reference, so a concurrent vjetty deletion cannot leave it dangling. */
     bondp_context_t *bond_ctx;
     uint32_t vjetty_id;
     uint32_t pjetty_idx;
@@ -445,31 +576,48 @@ typedef struct bondp_fb_mark_done_arg {
 
 static void bondp_mark_rebuild_done_async(bondp_worker_task_reason_t reason, void *arg)
 {
-    bondp_fb_mark_done_arg_t *arg_typed = arg;
+    bondp_fb_mark_done_arg_t *mark_arg = arg;
 
-    if (arg_typed == NULL) {
+    if (mark_arg == NULL) {
         return;
     }
-
-    if (reason == BONDP_WORKER_TASK_EXECUTED && arg_typed->bond_ctx != NULL &&
-        arg_typed->pjetty_idx < URMA_UBAGG_DEV_MAX_NUM) {
-        bondp_comp_t *bdp_jetty = bondp_get_jetty_by_vjetty_id_ref(arg_typed->bond_ctx,
-                                                                  arg_typed->vjetty_id);
+    if (reason == BONDP_WORKER_TASK_EXECUTED) {
+        bondp_comp_t *bdp_jetty = bondp_get_jetty_by_vjetty_id_ref(
+            mark_arg->bond_ctx, mark_arg->vjetty_id);
         if (bdp_jetty != NULL) {
-            atomic_store(&bdp_jetty->rebuild_done[arg_typed->pjetty_idx], true);
+            atomic_store(&bdp_jetty->rebuild_done[mark_arg->pjetty_idx], true);
+            URMA_LOG_INFO("Failback pjetty ready for health-check recovery, "
+                          "vjetty_id=%u, idx=%u\n",
+                          mark_arg->vjetty_id, mark_arg->pjetty_idx);
             bondp_put_jetty_ref(bdp_jetty);
         }
-        /* Comp gone or deleting: the flag would be pointless anyway. */
     }
 
-    if (arg_typed->fb_ctx != NULL) {
-        (void)fb_task_del(arg_typed->fb_ctx, &arg_typed->key);
-    }
+    (void)fb_task_del(mark_arg->fb_ctx, &mark_arg->key);
+    fb_task_put(mark_arg->fb_task);
+    free(mark_arg);
+}
 
-    if (arg_typed->fb_task != NULL) {
-        fb_task_put(arg_typed->fb_task);
+static int bondp_schedule_mark_rebuild_done(bondp_fb_ctx_t *fb_ctx, bondp_fb_task_t *fb_task,
+                                            const bondp_fb_task_key_t *key)
+{
+    bondp_fb_mark_done_arg_t *mark_arg = calloc(1, sizeof(*mark_arg));
+    if (mark_arg == NULL) {
+        return -ENOMEM;
     }
-    free(arg_typed);
+    mark_arg->fb_ctx = fb_ctx;
+    mark_arg->key = *key;
+    mark_arg->fb_task = fb_task;
+    mark_arg->bond_ctx = fb_task->bond_ctx;
+    mark_arg->vjetty_id = fb_task->vjetty_id;
+    mark_arg->pjetty_idx = fb_task->pjetty_idx;
+
+    int ret = fb_task_schedule_next(fb_ctx, fb_task, BONDP_FB_MARK_DONE_DELAY_MS,
+                                     bondp_mark_rebuild_done_async, mark_arg);
+    if (ret != 0) {
+        free(mark_arg);
+    }
+    return ret;
 }
 
 static void bondp_fb_task_async(bondp_worker_task_reason_t reason, void *arg)
@@ -555,38 +703,67 @@ static void bondp_fb_task_async(bondp_worker_task_reason_t reason, void *arg)
         goto del_task;
     }
 
-    int ret = bondp_rebuild_pjetty(bdp_jetty, (int)fb_task->pjetty_idx);
-    if (ret != 0) {
-        URMA_LOG_ERR("Failed to rebuild failback pjetty, vjetty_id=%u, pjetty_idx=%u.\n",
-                     fb_task->vjetty_id, fb_task->pjetty_idx);
+    if (fb_task->type == BONDP_FB_TASK_LAZY_DESTROY) {
+        int ret = bondp_destroy_lazy_pjetty(bdp_jetty, fb_task->pjetty_idx);
+        if (ret == -EAGAIN) {
+            if (arg_typed->retry_cnt < UINT32_MAX) {
+                arg_typed->retry_cnt++;
+            }
+            int rret = fb_task_schedule_next(fb_ctx, fb_task, BONDP_LAZY_DESTROY_RETRY_MS,
+                                              bondp_fb_task_async, arg_typed);
+            if (rret == 0) {
+                fb_task_put(fb_task);
+                bondp_put_jetty_ref(bdp_jetty);
+                return;
+            }
+            ret = rret;
+        }
+        if (ret != 0 && ret != -ECANCELED) {
+            URMA_LOG_ERR("Failed to destroy cold-standby pjetty, vjetty_id=%u, "
+                         "pjetty_idx=%u, ret=%d\n",
+                         fb_task->vjetty_id, fb_task->pjetty_idx, ret);
+        }
         goto del_task;
     }
 
-    bondp_fb_mark_done_arg_t *mark_arg = calloc(1, sizeof(*mark_arg));
-    if (mark_arg == NULL) {
-        URMA_LOG_ERR("Failed to alloc mark-done arg, vjetty_id=%u, pjetty_idx=%u, flag stays unset.\n",
-                     fb_task->vjetty_id, fb_task->pjetty_idx);
-        goto del_task;
+    int ret = bondp_rebuild_pjetty(bdp_jetty, fb_task->pjetty_idx);
+    if (ret != 0 && ret != -ECANCELED) {
+        if (arg_typed->retry_cnt < UINT32_MAX) {
+            arg_typed->retry_cnt++;
+        }
+        int rret = fb_task_schedule_next(fb_ctx, fb_task, BONDP_FB_REBUILD_RETRY_MS,
+                                          bondp_fb_task_async, arg_typed);
+        if (rret == 0) {
+            if (arg_typed->retry_cnt == 1 || arg_typed->retry_cnt % 30 == 0) {
+                URMA_LOG_WARN("Failback rebuild still failing, retry %u scheduled, "
+                              "vjetty_id=%u, pjetty_idx=%u, ret=%d\n",
+                              arg_typed->retry_cnt, fb_task->vjetty_id,
+                              fb_task->pjetty_idx, ret);
+            }
+            fb_task_put(fb_task);
+            bondp_put_jetty_ref(bdp_jetty);
+            return;
+        }
+        ret = rret;
     }
-    mark_arg->fb_ctx = fb_ctx;
-    mark_arg->key = arg_typed->key;
-    mark_arg->fb_task = fb_task;
-    mark_arg->bond_ctx = fb_task->bond_ctx;
-    mark_arg->vjetty_id = fb_task->vjetty_id;
-    mark_arg->pjetty_idx = fb_task->pjetty_idx;
-
-    ret = fb_task_schedule_next(fb_ctx, fb_task, BONDP_FB_MARK_DONE_DELAY_MS,
-                                bondp_mark_rebuild_done_async, mark_arg);
-    if (ret != 0) {
-        URMA_LOG_ERR("Failed to schedule mark-done task, vjetty_id=%u, pjetty_idx=%u, ret=%d\n",
+    if (ret == 0) {
+        ret = bondp_schedule_mark_rebuild_done(fb_ctx, fb_task, &arg_typed->key);
+        if (ret == 0) {
+            bondp_put_jetty_ref(bdp_jetty);
+            free(arg_typed);
+            return;
+        }
+        if (ret != -ECANCELED) {
+            atomic_store(&bdp_jetty->rebuild_done[fb_task->pjetty_idx], true);
+            URMA_LOG_WARN("Failed to defer rebuild completion; publish recovery directly, "
+                          "vjetty_id=%u, pjetty_idx=%u, ret=%d\n",
+                          fb_task->vjetty_id, fb_task->pjetty_idx, ret);
+        }
+    } else if (ret != -ECANCELED) {
+        URMA_LOG_ERR("Failed to rebuild failback pjetty, vjetty_id=%u, pjetty_idx=%u, ret=%d\n",
                      fb_task->vjetty_id, fb_task->pjetty_idx, ret);
-        free(mark_arg);
-        goto del_task;
     }
-    /* The mark-done task now owns fb_task; only free arg_typed and return. */
-    bondp_put_jetty_ref(bdp_jetty);
-    free(arg_typed);
-    return;
+    goto del_task;
 
 del_task:
     bondp_put_jetty_ref(bdp_jetty);
@@ -601,6 +778,7 @@ static int fb_add_task_common(bondp_context_t *bond_ctx, bondp_fb_task_type_t ty
                               uint64_t delay_ms, bondp_fb_async_arg_t *async_arg)
 {
     bondp_fb_ctx_t *fb_ctx = bond_ctx->fb_ctx;
+    async_arg->key.type = (uint32_t)type;
     bondp_fb_task_t *fb_task = calloc(1, sizeof(*fb_task));
     if (fb_task == NULL) {
         return -ENOMEM;
@@ -698,6 +876,51 @@ int bondp_fb_add_lazy_task(bondp_context_t *bond_ctx, uint32_t vjetty_id, uint32
         free(async_arg);
     }
     return ret;
+}
+
+static int bondp_fb_add_lazy_destroy_task(bondp_context_t *bond_ctx, uint32_t vjetty_id,
+                                           uint32_t pjetty_idx)
+{
+    bondp_fb_async_arg_t *async_arg = calloc(1, sizeof(*async_arg));
+    if (async_arg == NULL) {
+        return -ENOMEM;
+    }
+    async_arg->fb_ctx = bond_ctx->fb_ctx;
+    async_arg->key.vjetty_id = vjetty_id;
+    async_arg->key.pjetty_idx = pjetty_idx;
+    async_arg->type = BONDP_FB_TASK_LAZY_DESTROY;
+
+    int ret = fb_add_task_common(bond_ctx, BONDP_FB_TASK_LAZY_DESTROY, 0, async_arg);
+    if (ret != 0) {
+        free(async_arg);
+    }
+    return ret;
+}
+
+void bondp_fb_schedule_lazy_destroy(bondp_comp_t *bdp_comp)
+{
+    if (bdp_comp == NULL || bdp_comp->bondp_ctx == NULL ||
+        bdp_comp->bondp_ctx->fb_ctx == NULL || !bondp_comp_uses_lazy_pjetty(bdp_comp) ||
+        bdp_comp->active_count == 0 || !bondp_primary_iodie_alive(bdp_comp)) {
+        return;
+    }
+
+    uint32_t primary_iodie = bondp_iodie_idx_of(bdp_comp->active_indices[0]);
+    for (uint32_t n = 0; n < bdp_comp->enabled_count; ++n) {
+        uint32_t idx = bdp_comp->enabled_indices[n];
+        if (bondp_iodie_idx_of(idx) == primary_iodie) {
+            continue;
+        }
+        int ret = bondp_fb_add_lazy_destroy_task(bdp_comp->bondp_ctx,
+                                                  bdp_comp->v_jetty.jetty_id.id, idx);
+        if (ret == 0) {
+            URMA_LOG_INFO("Cold-standby destroy scheduled after failback, vjetty_id=%u, idx=%u\n",
+                          bdp_comp->v_jetty.jetty_id.id, idx);
+        } else if (ret != -EEXIST) {
+            URMA_LOG_WARN("Failed to schedule cold-standby destroy, vjetty_id=%u, idx=%u, ret=%d\n",
+                          bdp_comp->v_jetty.jetty_id.id, idx, ret);
+        }
+    }
 }
 
 int bondp_fb_cancel_tasks(bondp_context_t *bond_ctx, uint32_t vjetty_id)

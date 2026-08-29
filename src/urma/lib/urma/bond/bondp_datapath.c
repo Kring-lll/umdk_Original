@@ -433,6 +433,8 @@ static void try_failback(bondp_comp_t *bdp_comp)
         failback_resend_wr(bdp_comp, (uint64_t)i + 1);
     }
     pthread_spin_unlock(&bdp_comp->send_lock);
+
+    bondp_fb_schedule_lazy_destroy(bdp_comp);
 }
 
 static void bondp_translate_bad_wr(bondp_comp_t *bdp_comp, int send_idx, int target_idx,

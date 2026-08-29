@@ -4,26 +4,34 @@
  * Description: URMA bonding lazy pjetty mode unit tests.
  */
 
+#include <atomic>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <unistd.h>
 
 #include <gtest/gtest.h>
 
 #include "bondp_cp_tjetty.h"
 #include "bondp_cp_user_ctl.h"
+#include "bondp_context_table.h"
 #include "bondp_datapath.h"
 #include "bondp_dp_failback.h"
 #include "bondp_topo_info.h"
 #include "bondp_types.h"
+#include "bondp_worker.h"
 #include "urma_ubagg.h"
 
 namespace {
 
 uint32_t gPhysicalImportCount = 0;
 uint32_t gPhysicalUnimportCount = 0;
-uint32_t gPhysicalCreateCount = 0;
+std::atomic_uint gPhysicalCreateCount = 0;
+std::atomic_uint gPhysicalDeleteCount = 0;
+std::atomic_uint gPhysicalDeleteFailures = 0;
+std::atomic_bool gPhysicalCreateSucceeds = false;
 urma_target_jetty_t gPhysicalTarget = {};
+urma_jetty_t gCreatedJetty = {};
 
 } // namespace
 
@@ -48,10 +56,27 @@ extern "C" urma_status_t urma_unimport_jetty(urma_target_jetty_t *)
     return URMA_SUCCESS;
 }
 
-extern "C" urma_jetty_t *urma_create_jetty(urma_context_t *, urma_jetty_cfg_t *)
+extern "C" urma_jetty_t *urma_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *cfg)
 {
     gPhysicalCreateCount++;
-    return nullptr;
+    if (!gPhysicalCreateSucceeds.load()) {
+        return nullptr;
+    }
+    gCreatedJetty = {};
+    gCreatedJetty.urma_ctx = ctx;
+    gCreatedJetty.jetty_cfg = *cfg;
+    gCreatedJetty.jetty_id.id = 0x501 + gPhysicalCreateCount.load();
+    return &gCreatedJetty;
+}
+
+extern "C" urma_status_t urma_delete_jetty(urma_jetty_t *)
+{
+    gPhysicalDeleteCount++;
+    if (gPhysicalDeleteFailures.load() != 0) {
+        gPhysicalDeleteFailures--;
+        return URMA_FAIL;
+    }
+    return URMA_SUCCESS;
 }
 
 namespace {
@@ -150,8 +175,10 @@ protected:
         ASSERT_EQ(0, pthread_mutex_init(&ctx_.v_ctx.mutex, nullptr));
         ASSERT_EQ(0, pthread_spin_init(&lazyComp_.send_lock, PTHREAD_PROCESS_PRIVATE));
         ASSERT_EQ(0, pthread_spin_init(&fullComp_.send_lock, PTHREAD_PROCESS_PRIVATE));
+        ASSERT_EQ(0, bdp_p_vjetty_id_table_create(&ctx_.p_vjetty_id_table, 16));
 
         ctx_.enable_failover = true;
+        ctx_.enable_failback = true;
         ctx_.bonding_mode = BONDP_BONDING_MODE_ACTIVE_BACKUP;
         ctx_.bonding_level = BONDP_BONDING_LEVEL_IODIE;
         ctx_.default_pjetty_create_mode = BONDP_PJETTY_CREATE_FULL;
@@ -160,8 +187,12 @@ protected:
         ctx_.p_ctxs[0] = &physicalCtx_;
         gPhysicalImportCount = 0;
         gPhysicalUnimportCount = 0;
-        gPhysicalCreateCount = 0;
+        gPhysicalCreateCount.store(0);
+        gPhysicalDeleteCount.store(0);
+        gPhysicalDeleteFailures.store(0);
+        gPhysicalCreateSucceeds.store(false);
         gPhysicalTarget = {};
+        gCreatedJetty = {};
 
         InitComp(&lazyComp_, 0x101);
         InitComp(&fullComp_, 0x102);
@@ -172,15 +203,65 @@ protected:
         lazyComp_.p_jetty[0] = &lazyPrimary_;
         fullComp_.p_jetty[0] = &fullPrimary_;
         fullComp_.p_jetty[1] = &fullBackup_;
+        ASSERT_EQ(0, bdp_p_vjetty_id_table_add_without_lock(
+            &ctx_.p_vjetty_id_table, lazyPrimary_.jetty_id, JETTY,
+            lazyComp_.v_jetty.jetty_id.id, &lazyComp_));
     }
 
     void TearDown() override
     {
         bondp_topo_uninit();
-        bondp_fb_uninit(&ctx_);
+        EXPECT_EQ(0, bondp_fb_uninit(&ctx_));
+        if (workerStarted_) {
+            bondp_worker_destroy();
+        }
+        EXPECT_EQ(0, bdp_p_vjetty_id_table_destroy(&ctx_.p_vjetty_id_table));
         (void)pthread_spin_destroy(&fullComp_.send_lock);
         (void)pthread_spin_destroy(&lazyComp_.send_lock);
         (void)pthread_mutex_destroy(&ctx_.v_ctx.mutex);
+    }
+
+    void StartWorker()
+    {
+        ASSERT_FALSE(workerStarted_);
+        ASSERT_EQ(0, bondp_worker_create());
+        workerStarted_ = true;
+    }
+
+    bool WaitForRebuildDone(uint32_t idx)
+    {
+        for (uint32_t retry = 0; retry < 300; ++retry) {
+            if (lazyComp_.rebuild_done[idx].load()) {
+                return true;
+            }
+            usleep(10000);
+        }
+        return false;
+    }
+
+    bool WaitForPhysicalCreate(uint32_t expected)
+    {
+        for (uint32_t retry = 0; retry < 300; ++retry) {
+            if (gPhysicalCreateCount.load() >= expected) {
+                return true;
+            }
+            usleep(10000);
+        }
+        return false;
+    }
+
+    bool WaitForPjettyDestroyed(uint32_t idx)
+    {
+        for (uint32_t retry = 0; retry < 400; ++retry) {
+            (void)pthread_spin_lock(&lazyComp_.send_lock);
+            bool destroyed = lazyComp_.p_jetty[idx] == nullptr;
+            (void)pthread_spin_unlock(&lazyComp_.send_lock);
+            if (destroyed) {
+                return true;
+            }
+            usleep(10000);
+        }
+        return false;
     }
 
     void InitComp(bondp_comp_t *comp, uint32_t id)
@@ -250,6 +331,7 @@ protected:
     urma_jetty_t fullPrimary_ = {};
     urma_jetty_t fullBackup_ = {};
     urma_context_t physicalCtx_ = {};
+    bool workerStarted_ = false;
 };
 
 TEST_F(LazyPjettyModeTest, SetModeValidatesVersionedInputAndPreservesStateOnFailure)
@@ -446,7 +528,7 @@ TEST_F(LazyPjettyModeTest, ModifyToErrorCancelsLazyCreateBeforePhysicalCreate)
     EXPECT_NE(0, bondp_lazy_create_and_resend(&lazyComp_, COLD_IDX, &info));
     EXPECT_EQ(nullptr, lazyComp_.p_jetty[COLD_IDX]);
     EXPECT_FALSE(lazyComp_.valid[COLD_IDX].load());
-    EXPECT_EQ(0U, gPhysicalCreateCount);
+    EXPECT_EQ(0U, gPhysicalCreateCount.load());
 }
 
 TEST_F(LazyPjettyModeTest, PendingLazyCreateWithNoRoutePreservesMsnAndSetsBadWr)
@@ -470,6 +552,62 @@ TEST_F(LazyPjettyModeTest, PendingLazyCreateWithNoRoutePreservesMsnAndSetsBadWr)
     EXPECT_EQ(&wr, badWr);
     EXPECT_EQ(INITIAL_MSN, lazyComp_.msn.load());
     std::free(target);
+}
+
+TEST_F(LazyPjettyModeTest, RebuildPublishesRecoveryForHealthCheckFailback)
+{
+    ASSERT_EQ(0, SetMode(BONDP_PJETTY_CREATE_LAZY_BY_IODIE));
+    lazyComp_.pjetty_create_mode = BONDP_PJETTY_CREATE_LAZY_BY_IODIE;
+    lazyComp_.valid[0].store(false);
+    lazyComp_.rebuild_done[0].store(false);
+    gPhysicalCreateSucceeds.store(false);
+    StartWorker();
+
+    ASSERT_EQ(0, bondp_fb_add_task(&ctx_, lazyComp_.v_jetty.jetty_id.id, 0));
+    ASSERT_TRUE(WaitForPhysicalCreate(1));
+    EXPECT_FALSE(lazyComp_.rebuild_done[0].load());
+    gPhysicalCreateSucceeds.store(true);
+    ASSERT_TRUE(WaitForRebuildDone(0));
+    EXPECT_NE(&lazyPrimary_, lazyComp_.p_jetty[0]);
+    EXPECT_GE(gPhysicalCreateCount.load(), 2U);
+    EXPECT_EQ(1U, gPhysicalDeleteCount.load());
+
+    lazyComp_.hc_valid[0].store(true);
+    EXPECT_TRUE(bondp_fb_need_switch_path(&lazyComp_));
+    EXPECT_EQ(1U, bondp_fb_switch_path(&lazyComp_));
+    EXPECT_TRUE(lazyComp_.valid[0].load());
+}
+
+TEST_F(LazyPjettyModeTest, FailbackDestroysMaterializedColdStandby)
+{
+    constexpr uint32_t COLD_IDX = 1;
+    ASSERT_EQ(0, SetMode(BONDP_PJETTY_CREATE_LAZY_BY_IODIE));
+    lazyComp_.pjetty_create_mode = BONDP_PJETTY_CREATE_LAZY_BY_IODIE;
+    ctx_.p_ctxs[COLD_IDX] = &physicalCtx_;
+    lazyComp_.p_jetty[COLD_IDX] = &fullBackup_;
+    lazyComp_.valid[0].store(true);
+    lazyComp_.valid[COLD_IDX].store(true);
+    lazyComp_.hc_valid[COLD_IDX].store(true);
+    lazyComp_.rebuild_done[COLD_IDX].store(true);
+    lazyComp_.sqe_cnt[COLD_IDX][0].store(1);
+    gPhysicalDeleteFailures.store(1);
+    ASSERT_EQ(0, bdp_p_vjetty_id_table_add_without_lock(
+        &ctx_.p_vjetty_id_table, fullBackup_.jetty_id, JETTY,
+        lazyComp_.v_jetty.jetty_id.id, &lazyComp_));
+    StartWorker();
+
+    bondp_fb_schedule_lazy_destroy(&lazyComp_);
+    usleep(100000);
+    (void)pthread_spin_lock(&lazyComp_.send_lock);
+    EXPECT_EQ(&fullBackup_, lazyComp_.p_jetty[COLD_IDX]);
+    (void)pthread_spin_unlock(&lazyComp_.send_lock);
+    EXPECT_EQ(0U, gPhysicalDeleteCount.load());
+    lazyComp_.sqe_cnt[COLD_IDX][0].store(0);
+    ASSERT_TRUE(WaitForPjettyDestroyed(COLD_IDX));
+    EXPECT_FALSE(lazyComp_.valid[COLD_IDX].load());
+    EXPECT_FALSE(lazyComp_.hc_valid[COLD_IDX].load());
+    EXPECT_FALSE(lazyComp_.rebuild_done[COLD_IDX].load());
+    EXPECT_EQ(2U, gPhysicalDeleteCount.load());
 }
 
 } // namespace
