@@ -410,34 +410,23 @@ struct umq_buf {
 
     uint32_t data_size;          // size of umq buf data
     uint16_t headroom_size;      // size of umq buf headroom
-    /* CAUTION: headroom_size (lo 16 bits) + the bitfield group below are written
-     * together by a single 4-byte store in umq_qbuf_pool_base.h (hs_field), an
-     * instruction-set optimization (SIMD/STP on aarch64). Keep this group 16 bits
-     * wide and the fields contiguous; a layout change breaks that combined write. */
     uint16_t first_fragment : 1; // first piece of each batch buf
     uint16_t alloc_state : 1;    // 0: free; 1: allocated
     uint16_t is_coalesced_small : 1; // 1: coalesced SMALL_DATA buf (no brpc Block to DecRef in CQE)
     uint16_t rsvd1 : 13;
 
-    union {
-        struct {
-            uint32_t token_id : 20;
-            uint32_t rsvd2 : 12;          // former mempool bits cleared out
-            uint32_t token_value;
-        };
-        uint64_t user_tseg;               // when has_user_tseg=1: user_tseg pointer, parsed by URMA
-    };
+    uint32_t token_id : 20;            // token_id for reference operation
+    uint32_t mempool_without_data : 1; // 0 : with data, 1 : without data
+    uint32_t mempool_id : 11;          // indicate which memory pool it is allocated from
+    uint32_t token_value;              // token_value for reference operation
 
     uint64_t status : 32;                 // umq_buf_status_t
     uint64_t io_direction : 2;            // 0: no direction; 1: tx qbuf; 2: rx qbuf
-    uint64_t has_user_tseg : 1;           // from rsvd3
-    uint64_t rsvd3 : 10;
+    uint64_t rsvd3 : 11;
     uint64_t buf_ref_id_type : 1;          // 0: enable umq_id, invalid to user, 1: enable tphandel
     uint64_t buf_ref_id : 18;              // buf_ref_id_type = 0 : umq_id, buf_ref_id_type = 1 : tp_handle_idx
 
-    uint64_t mempool_without_data : 1; // 0 : with data, 1 : without data
-    uint64_t mempool_id : 11;          // indicate which memory pool it is allocated from
-    uint64_t rsvd4 : 52;
+    uint64_t rsvd4;
 
     char *buf_data; // point to data[0]
 
@@ -724,10 +713,8 @@ typedef struct umq_tp_resource_create_option {
  * static_asserts in umq_ub_private.h. */
 #define UMQ_MEMPOOL_INFO_HDR_SIZE 24u
 
-/* Worst-case blob size = fixed header (UMQ_MEMPOOL_INFO_HDR_SIZE) +
- * sizeof(urma_seg_t) (48B) + bonding has_user_info extension tail (up to ~973B
- * uncompressed; 1024B covers it with slack, so one umq build runs against
- * either umdk variant). Callers size stack buffers to this. */
+/* Worst-case blob size = fixed header (UMQ_MEMPOOL_INFO_HDR_SIZE) plus an
+ * opaque segment or user-target-segment context and its bonding extension. */
 #define UMQ_MEMPOOL_INFO_MAX_SIZE (UMQ_MEMPOOL_INFO_HDR_SIZE + 48u + 1024u)
 
 #ifdef __cplusplus

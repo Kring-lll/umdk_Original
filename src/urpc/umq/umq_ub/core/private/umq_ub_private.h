@@ -101,39 +101,31 @@ typedef struct ub_ref_sge {
     uint32_t token_value;
 } ub_ref_sge_t;
 
-/*
- * Mempool import descriptor exchanged between peers. The segment context is
- * produced by urma_get_seg_ctx (an urma_seg_t, optionally carrying a
- * has_user_info extension tail on bonding devices), so the entry is variable
- * length: seg_size bytes follow the fixed header. The peer forwards the seg
- * blob verbatim to urma_import_seg. mempool_id / token_value / version are
- * umq-specific and have no place inside urma_seg_t, so they ride in the header.
- *
- * Not __attribute__((packed)): the 20B header is all uint32, and urma_seg_t
- * needs 8B alignment (its uint64 len) which offset 24 satisfies (4-byte padding
- * after the 20B header), so the natural layout is already 72B with seg naturally
- * aligned — packing would only force unaligned access on the embedded urma_seg_t.
- * The static_asserts below pin the layout so any drift is caught at compile time.
- */
+typedef enum ub_seg_ctx_type {
+    UB_SEG_CTX_TYPE_SEG = 0,
+    UB_SEG_CTX_TYPE_USER_TSEG,
+    UB_SEG_CTX_TYPE_MAX,
+} ub_seg_ctx_type_t;
+
+/* Mempool descriptor exchanged between peers. seg_size bytes of opaque
+ * segment data start at seg. ctx_type selects whether the receiver imports an
+ * urma_seg_t or caches an urma_user_tseg_t for import-free remote SGEs. */
 typedef struct ub_import_mempool_info {
-    uint32_t seg_size;            /* urma_get_seg_ctx size output, in bytes (>= sizeof(urma_seg_t)) */
-    uint32_t mempool_id;          /* umq mempool id (was 12-bit packed; widened to a full u32) */
-    uint32_t mempool_token_value; /* = tseg->user_ctx; urma_token_t carries it into urma_import_seg */
-    uint32_t version;             /* bumped each time the source mempool is (re)registered;
-                                     the peer compares it to decide reuse / re-import */
-    uint32_t token_id;            /* = urma_seg_t.token_id, promoted to header so the ubsocket
-                                     READ work-request build and umq import consume it standalone,
-                                     without inspecting the opaque seg blob below */
-    urma_seg_t seg;               /* seg_size bytes, including any has_user_info extension tail */
-    char seg_ext[0];              /* extension data when seg_size > sizeof(urma_seg_t) */
+    uint32_t seg_size;
+    uint32_t mempool_id;
+    uint32_t mempool_token_value;
+    uint32_t version;
+    uint32_t token_id;
+    uint32_t ctx_type;
+    urma_seg_t seg;
+    char seg_ext[0];
 } ub_import_mempool_info_t;
 
 _Static_assert(sizeof(ub_import_mempool_info_t) == 72, "ub_import_mempool_info_t must be 72B");
 _Static_assert(offsetof(ub_import_mempool_info_t, seg) == 24,
-               "seg must follow the 24B aligned offset (20B header + 4B padding)");
+               "seg must follow the 24B wire header");
 
-/* Fixed header before the variable-length seg blob. Entry total size =
- * UB_IMPORT_MEMPOOL_INFO_HDR_SIZE + entry->seg_size. */
+/* Fixed header before the variable-length context blob. */
 #define UB_IMPORT_MEMPOOL_INFO_HDR_SIZE (offsetof(ub_import_mempool_info_t, seg))
 
 typedef enum ub_packet_stats_type {
@@ -279,6 +271,8 @@ typedef struct imported_tseg_node {
     uint32_t version; /* the version carried when this mempool was imported; the
                          receiver compares it against the freshly arrived version
                          to decide reuse / unimport+reimport (design §3.5) */
+    uint32_t user_tseg_size;
+    uint8_t user_tseg[0];
 } imported_tseg_node_t;
 
 typedef struct import_remote_record_node {
@@ -365,16 +359,11 @@ typedef struct umq_ub_bind_version_info {
 } umq_ub_bind_version_info_t;
 
 /*
- * Device info serialized in bind info. The segment context is produced by
- * urma_get_seg_ctx (an urma_seg_t, optionally carrying a has_user_info
- * extension tail on bonding devices), so the seg blob is variable length:
- * seg_size bytes follow the namespace. mempool_token_value carries
- * tseg->user_ctx for the peer's urma_import_seg.
+ * Device info serialized in bind info. seg_size bytes of segment or user tseg
+ * context follow the namespace. ctx_type selects the interpretation.
  *
  * Layout: [fixed header][bind_namespace: namespace_len bytes (8-byte aligned)]
- *         [seg blob: seg_size bytes (8-byte aligned)]
- * The 8-byte alignment of namespace_len ensures the seg blob (which contains
- * urma_seg_t with uint64_t fields) is naturally aligned.
+ *         [context blob: seg_size bytes (8-byte aligned)]
  */
 typedef struct umq_ub_bind_dev_info {
     umq_trans_mode_t umq_trans_mode;
@@ -382,26 +371,24 @@ typedef struct umq_ub_bind_dev_info {
     uint32_t feature;
     uint32_t pid;
     uint32_t namespace_len;       /* 8-byte aligned; bounds the namespace string */
-    uint32_t seg_size;            /* urma_get_seg_ctx size output, in bytes (>= sizeof(urma_seg_t)) */
+    uint32_t seg_size;
     uint32_t mempool_token_value; /* = tseg->user_ctx; carried for urma_import_seg */
-    uint32_t reserved;            /* padding so bind_namespace starts at offset 32 (8-byte aligned) */
-    char bind_namespace[0];       /* namespace_len bytes, then seg_size bytes of seg blob */
+    uint32_t ctx_type;
+    char bind_namespace[0];       /* namespace_len bytes, then seg_size bytes */
 } umq_ub_bind_dev_info_t;
 
 _Static_assert(sizeof(umq_ub_bind_dev_info_t) == 32, "umq_ub_bind_dev_info_t must be 32B");
 _Static_assert(offsetof(umq_ub_bind_dev_info_t, bind_namespace) == 32,
     "bind_namespace must start at offset 32 for 8-byte alignment");
 
-/* Total TLV value length = fixed header + namespace_len + seg_size. */
+/* Total TLV value length = fixed header + namespace_len + context size. */
 #define UB_BIND_DEV_INFO_TOTAL_LEN(di) \
     (sizeof(umq_ub_bind_dev_info_t) + (di)->namespace_len + (di)->seg_size)
 
-/* Pointer to the variable-length seg blob (urma_seg_t + optional extension tail),
- * located immediately after bind_namespace. 8-byte aligned when namespace_len
- * is 8-byte aligned (guaranteed by umq_ub_dev_info_serialize). */
-static inline urma_seg_t *umq_ub_bind_dev_info_seg(const umq_ub_bind_dev_info_t *di)
+/* Pointer to the variable-length context immediately after bind_namespace. */
+static inline void *umq_ub_bind_dev_info_seg(const umq_ub_bind_dev_info_t *di)
 {
-    return (urma_seg_t *)((const char *)di->bind_namespace + di->namespace_len);
+    return (void *)((const char *)di->bind_namespace + di->namespace_len);
 }
 
 typedef struct umq_ub_bind_queue_info {
@@ -644,31 +631,23 @@ int umq_ub_data_plan_import_mem(uint64_t umqh_tp, umq_buf_t *rx_buf, uint32_t re
 rx_buf_ctx_t *queue_rx_buf_ctx_flush(rx_buf_ctx_list_t *rx_buf_ctx_list);
 
 /*
- * Serialize a local target segment into a peer-bound ub_import_mempool_info_t
- * entry, using urma_get_seg_ctx to obtain the (possibly variable-length,
- * has_user_info-bearing) urma_seg_t blob. The peer forwards &entry->seg
- * verbatim to urma_import_seg. Fills the fixed header (seg_size, mempool_id,
- * mempool_token_value, version, token_id) and copies seg_size bytes of the seg
- * blob after it. The full variable-length blob (including the bonding
- * has_user_info extension tail) is always carried; callers must size their
- * wire buffer to hold the worst-case seg_size (ubsocket sizes its stack buffer
- * to UMQ_MEMPOOL_INFO_MAX_SIZE, which reserves UBS_MEMPOOL_INFO_SEG_EXT_MAX
- * bytes for this).
+ * Serialize a local target segment into a peer-bound descriptor. Depending on
+ * use_user_tseg, the context is obtained with urma_get_seg_ctx or
+ * urma_get_user_tseg and copied in full after the fixed wire header.
  *
  * @param tseg         local target segment to export (must outlive the call)
  * @param mempool_id   umq mempool id carried in the header
  * @param token_value  tseg->user_ctx, carried as the urma_token_t value
  * @param version      mempool version carried in the header
- * @param out          destination entry; the full entry (header + seg blob)
+ * @param out          destination entry; the full entry (header + context)
  *                    must fit within out_cap bytes starting at @out
- * @param out_cap     total bytes available at @out (covers header + seg blob;
- *                    must be >= UB_IMPORT_MEMPOOL_INFO_HDR_SIZE + seg_size)
- * @return total bytes written (UB_IMPORT_MEMPOOL_INFO_HDR_SIZE + seg_size),
- *         or 0 on failure (urma_get_seg_ctx failed or out_cap too small)
+ * @param out_cap      total bytes available at @out
+ * @return total bytes written, or 0 on failure
  */
 uint32_t umq_ub_fill_seg_ctx(urma_target_seg_t *tseg, uint32_t mempool_id, uint32_t token_value,
                              uint32_t version, ub_import_mempool_info_t *out, uint32_t out_cap,
                              bool use_user_tseg);
+bool umq_ub_mempool_info_valid(const uint8_t *mempool_info, uint32_t mempool_info_len);
 
 int umq_ub_post_rx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_option_t *option);
 int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_option_t *option);

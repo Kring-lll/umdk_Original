@@ -30,6 +30,13 @@ static void *g_umq_tpsa_dlhandler = NULL;
         } \
     } while (0)
 
+#define LOAD_OPTIONAL_SYMBOL(sym, handle, type, name) \
+    do { \
+        (void)dlerror(); \
+        sym->name = (type)dlsym(handle, #name); \
+        (void)dlerror(); \
+    } while (0)
+
 umq_symbol_urma_t *umq_symbol_urma(void)
 {
     return &g_umq_symbol_urma;
@@ -109,8 +116,8 @@ int umq_symbol_urma_load(umq_symbol_urma_t *sym)
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_unimport_seg_t, urma_unimport_seg);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_get_seg_ctx_t, urma_get_seg_ctx);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_put_seg_ctx_t, urma_put_seg_ctx);
-    LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_get_user_tseg_t, urma_get_user_tseg);
-    LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_put_user_tseg_t, urma_put_user_tseg);
+    LOAD_OPTIONAL_SYMBOL(sym, g_umq_urma_dlhandler, urma_get_user_tseg_t, urma_get_user_tseg);
+    LOAD_OPTIONAL_SYMBOL(sym, g_umq_urma_dlhandler, urma_put_user_tseg_t, urma_put_user_tseg);
 
     // Async Event functions
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_get_async_event_t, urma_get_async_event);
