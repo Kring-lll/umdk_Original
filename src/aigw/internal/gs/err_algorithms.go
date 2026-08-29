@@ -1,4 +1,5 @@
 /*
+ * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
  * Description: ERR scheduling algorithms — MEJ, ERR, CatERR.
  * Create: 2026-08-25
@@ -118,16 +119,17 @@ func (a *CatErrAlg) Priority(_ string, k int, prompt string) float64 {
 			if ok && dist.TotalCount() > 0 {
 				return dist.ExpectedRemaining(k)
 			}
-			log.Debug().Msgf("[CatERR] category %s has no dist, falling back to global", category)
+			// Category has no per-category distribution. IsWarmingUp should
+			// have caught this and returned MEJ. As a defensive fallback
+			// (e.g. new category after recluster), degrade to MEJ — NOT
+			// global E[rem] (global mixes all categories, no discrimination).
+			log.Debug().Msgf("[CatERR] category %s has no dist, falling back to MEJ", category)
+			return float64(10001 - k)
 		}
 	}
 
-	// Fallback to global distribution
-	if a.GlobalDist != nil {
-		return a.GlobalDist.ExpectedRemaining(k)
-	}
-
-	// No distribution at all — degenerate to MEJ (k越大越优先)
+	// Classification failed — degenerate to MEJ.
+	// (CatERR does not use globalDist for priority.)
 	return float64(10001 - k)
 }
 

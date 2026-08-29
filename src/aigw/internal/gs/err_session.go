@@ -1,4 +1,5 @@
 /*
+ * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
  * Description: Session state tracking for ERR scheduler.
  * Create: 2026-08-25
