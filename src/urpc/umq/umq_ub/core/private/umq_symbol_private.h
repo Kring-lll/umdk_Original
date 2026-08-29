@@ -68,6 +68,10 @@ typedef urma_target_seg_t* (*urma_import_seg_t)(urma_context_t *ctx, urma_seg_t 
 typedef urma_status_t (*urma_unimport_seg_t)(urma_target_seg_t *tseg);
 typedef urma_status_t (*urma_get_seg_ctx_t)(urma_target_seg_t *tseg, urma_seg_t **seg, uint32_t *size);
 typedef void (*urma_put_seg_ctx_t)(urma_seg_t *seg);
+typedef urma_status_t (*urma_get_user_tseg_t)(urma_target_seg_t *tseg, urma_token_t *token,
+    urma_user_tseg_t **user_tseg, uint32_t *size);
+
+typedef void (*urma_put_user_tseg_t)(urma_user_tseg_t *user_tseg);
 
 // === URMA function pointer types - Async Event ===
 typedef urma_status_t (*urma_get_async_event_t)(urma_context_t *ctx, urma_async_event_t *event);
@@ -146,6 +150,8 @@ typedef struct umq_symbol_urma {
     urma_unimport_seg_t urma_unimport_seg;
     urma_get_seg_ctx_t urma_get_seg_ctx;
     urma_put_seg_ctx_t urma_put_seg_ctx;
+    urma_get_user_tseg_t urma_get_user_tseg;
+    urma_put_user_tseg_t urma_put_user_tseg;
 
     // Async Event
     urma_get_async_event_t urma_get_async_event;

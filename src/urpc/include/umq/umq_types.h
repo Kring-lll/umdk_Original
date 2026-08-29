@@ -222,6 +222,7 @@ typedef struct umq_trans_info {
 #define UMQ_FEATURE_ENABLE_PERF (1 << 3)              // enable performance collection
 #define UMQ_FEATURE_ENABLE_FLOW_CONTROL (1 << 4)      // enable flow control
 #define UMQ_FEATURE_ENABLE_REMOTE_MEM_ACCESS (1 << 5) // enable single side memory access
+#define UMQ_FEATURE_ENABLE_USER_TSEG (1 << 6)         // enable user_tseg path, skip urma_import_seg
 
 typedef struct umq_flow_control_cfg {
     // initial available credit for each umq
@@ -409,23 +410,34 @@ struct umq_buf {
 
     uint32_t data_size;          // size of umq buf data
     uint16_t headroom_size;      // size of umq buf headroom
+    /* CAUTION: headroom_size (lo 16 bits) + the bitfield group below are written
+     * together by a single 4-byte store in umq_qbuf_pool_base.h (hs_field), an
+     * instruction-set optimization (SIMD/STP on aarch64). Keep this group 16 bits
+     * wide and the fields contiguous; a layout change breaks that combined write. */
     uint16_t first_fragment : 1; // first piece of each batch buf
     uint16_t alloc_state : 1;    // 0: free; 1: allocated
     uint16_t is_coalesced_small : 1; // 1: coalesced SMALL_DATA buf (no brpc Block to DecRef in CQE)
     uint16_t rsvd1 : 13;
 
-    uint32_t token_id : 20;            // token_id for reference operation
-    uint32_t mempool_without_data : 1; // 0 : with data, 1 : without data
-    uint32_t mempool_id : 11;          // indicate which memory pool it is allocated from
-    uint32_t token_value;              // token_value for reference operation
+    union {
+        struct {
+            uint32_t token_id : 20;
+            uint32_t rsvd2 : 12;          // former mempool bits cleared out
+            uint32_t token_value;
+        };
+        uint64_t user_tseg;               // when has_user_tseg=1: user_tseg pointer, parsed by URMA
+    };
 
     uint64_t status : 32;                 // umq_buf_status_t
     uint64_t io_direction : 2;            // 0: no direction; 1: tx qbuf; 2: rx qbuf
-    uint64_t rsvd3 : 11;
+    uint64_t has_user_tseg : 1;           // from rsvd3
+    uint64_t rsvd3 : 10;
     uint64_t buf_ref_id_type : 1;          // 0: enable umq_id, invalid to user, 1: enable tphandel
     uint64_t buf_ref_id : 18;              // buf_ref_id_type = 0 : umq_id, buf_ref_id_type = 1 : tp_handle_idx
 
-    uint64_t rsvd4;
+    uint64_t mempool_without_data : 1; // 0 : with data, 1 : without data
+    uint64_t mempool_id : 11;          // indicate which memory pool it is allocated from
+    uint64_t rsvd4 : 52;
 
     char *buf_data; // point to data[0]
 

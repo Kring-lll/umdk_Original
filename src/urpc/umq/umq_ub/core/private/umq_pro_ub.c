@@ -153,20 +153,30 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
                     buf_pro->remote_sge.length);
                 return -UMQ_ERR_EINVAL;
             }
-            if (mempool_id >= UMQ_MAX_TSEG_NUM) {
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool_id %u invalid\n",
-                    queue->umq_id, mempool_id);
-                return -UMQ_ERR_ETSEG_NON_IMPORTED;
+            if (buffer->has_user_tseg) {
+                /* user_tseg read: the blob was carried by the offer, URMA parses
+                 * it directly — no import, no tseg_table lookup. */
+                src_sge->addr = buf_pro->remote_sge.addr;
+                src_sge->len = buf_pro->remote_sge.length;
+                src_sge->user_tseg = (urma_user_tseg_t *)(uintptr_t)buffer->user_tseg;
+                src_sge->tseg = NULL;
+            } else {
+                if (mempool_id >= UMQ_MAX_TSEG_NUM) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool_id %u invalid\n",
+                        queue->umq_id, mempool_id);
+                    return -UMQ_ERR_ETSEG_NON_IMPORTED;
+                }
+                tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, mempool_id);
+                if (tseg == NULL) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool_id %u has not been imported\n",
+                        queue->umq_id, mempool_id);
+                    return -UMQ_ERR_ETSEG_NON_IMPORTED;
+                }
+                src_sge->addr = buf_pro->remote_sge.addr;
+                src_sge->len = buf_pro->remote_sge.length;
+                src_sge->user_tseg = NULL;
+                src_sge->tseg = tseg;
             }
-            tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, mempool_id);
-            if (tseg == NULL) {
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool_id %u has not been imported\n",
-                    queue->umq_id, mempool_id);
-                return -UMQ_ERR_ETSEG_NON_IMPORTED;
-            }
-            src_sge->addr = buf_pro->remote_sge.addr;
-            src_sge->len = buf_pro->remote_sge.length;
-            src_sge->tseg = tseg;
             urma_wr_ptr->rw.src.sge = src_sge;
             urma_wr_ptr->rw.src.num_sge = 1;
             urma_wr_ptr->rw.dst.sge = sges_ptr;
@@ -189,20 +199,30 @@ int umq_ub_fill_wr(ub_queue_t *queue, umq_buf_t *buffer, urma_jfs_wr_t *urma_wr_
                     buf_pro->remote_sge.length);
                 return -UMQ_ERR_EINVAL;
             }
-            if (mempool_id >= UMQ_MAX_TSEG_NUM) {
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool_id %u invalid\n",
-                    queue->umq_id, mempool_id);
-                return -UMQ_ERR_ETSEG_NON_IMPORTED;
+            if (buffer->has_user_tseg) {
+                /* user_tseg write: no urma_import_seg; URMA parses the carried
+                 * blob directly. */
+                dst_sge->addr = buf_pro->remote_sge.addr;
+                dst_sge->len = buf_pro->remote_sge.length;
+                dst_sge->user_tseg = (urma_user_tseg_t *)(uintptr_t)buffer->user_tseg;
+                dst_sge->tseg = NULL;
+            } else {
+                if (mempool_id >= UMQ_MAX_TSEG_NUM) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool_id %u invalid\n",
+                        queue->umq_id, mempool_id);
+                    return -UMQ_ERR_ETSEG_NON_IMPORTED;
+                }
+                tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, mempool_id);
+                if (tseg == NULL) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool_id %u has not been imported\n",
+                        queue->umq_id, mempool_id);
+                    return -UMQ_ERR_ETSEG_NON_IMPORTED;
+                }
+                dst_sge->addr = buf_pro->remote_sge.addr;
+                dst_sge->len = buf_pro->remote_sge.length;
+                dst_sge->user_tseg = NULL;
+                dst_sge->tseg = tseg;
             }
-            tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, mempool_id);
-            if (tseg == NULL) {
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool_id %u has not been imported\n",
-                    queue->umq_id, mempool_id);
-                return -UMQ_ERR_ETSEG_NON_IMPORTED;
-            }
-            dst_sge->addr = buf_pro->remote_sge.addr;
-            dst_sge->len = buf_pro->remote_sge.length;
-            dst_sge->tseg = tseg;
             urma_wr_ptr->rw.dst.sge = dst_sge;
             urma_wr_ptr->rw.dst.num_sge = 1;
             urma_wr_ptr->rw.src.sge = sges_ptr;
@@ -361,7 +381,6 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
             }
             sges_ptr->addr = (uint64_t)(uintptr_t)buffer->buf_data;
             sges_ptr->len = buffer->data_size;
-            sges_ptr->user_tseg = NULL;
             if (buffer->mempool_without_data == 1) {
                 real_buf = umq_data_to_head(buffer->buf_data);
                 if (real_buf == NULL) {
@@ -373,18 +392,26 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
                 real_buf = buffer;
             }
 
-            if (real_buf->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), ub only supports using pooled memory\n", queue->umq_id);
-                ret = -UMQ_ERR_EFAULT;
-                goto ERROR;
-            }
+            if (real_buf->has_user_tseg) {
+                /* user_tseg path: the peer carries the blob from the offer and
+                 * URMA parses it — no urma_import_seg, no tseg lookup. */
+                sges_ptr->user_tseg = (urma_user_tseg_t *)(uintptr_t)real_buf->user_tseg;
+                sges_ptr->tseg = NULL;
+            } else {
+                if (real_buf->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), ub only supports using pooled memory\n", queue->umq_id);
+                    ret = -UMQ_ERR_EFAULT;
+                    goto ERROR;
+                }
 
-            sges_ptr->tseg = tseg_list[real_buf->mempool_id];
-            if (sges_ptr->tseg == NULL) {
-                UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool %u tseg not exist\n",
-                    queue->umq_id, real_buf->mempool_id);
-                ret = -UMQ_ERR_EINVAL;
-                goto ERROR;
+                sges_ptr->user_tseg = NULL;
+                sges_ptr->tseg = tseg_list[real_buf->mempool_id];
+                if (sges_ptr->tseg == NULL) {
+                    UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), mempool %u tseg not exist\n",
+                        queue->umq_id, real_buf->mempool_id);
+                    ret = -UMQ_ERR_EINVAL;
+                    goto ERROR;
+                }
             }
             sges_ptr++;
 
@@ -411,8 +438,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
          * previous SEND/WRITE WRs that share g_umq_ub_urma_wr[] entries. */
         urma_wr_ptr->rw.target_hint = 0;
         urma_wr_ptr->rw.notify_data = 0;
-        ret = umq_ub_fill_wr(queue, tmp_buf, urma_wr_ptr, g_umq_ub_sges[wr_index], sge_num,
-                             &src_sge[wr_index], &dst_sge[wr_index]);
+        ret = umq_ub_fill_wr(queue, tmp_buf, urma_wr_ptr, g_umq_ub_sges[wr_index], sge_num, &src_sge[wr_index], &dst_sge[wr_index]);
         if (ret != UMQ_SUCCESS) {
             *bad_qbuf = qbuf;
             goto ERROR;
@@ -802,7 +828,10 @@ static void process_rx_mem_import_done(umq_ub_imm_t imm, ub_queue_t *queue, ub_q
         return;
     }
 
-    urpc_bitmap_set1(real_queue->bind_ctx->tseg_imported, imm.mem_import.mempool_id);
+    if ((real_queue->bind_ctx->tseg_imported != NULL) &&
+        !umq_ub_enable_user_tseg(real_queue->dev_ctx->feature)) {
+        urpc_bitmap_set1(real_queue->bind_ctx->tseg_imported, imm.mem_import.mempool_id);
+    }
     *qbuf_status = UMQ_MEMPOOL_UPDATE_SUCCESS;
 }
 
