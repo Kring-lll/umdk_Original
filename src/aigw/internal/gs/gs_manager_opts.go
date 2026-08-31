@@ -90,12 +90,13 @@ func WithSLOThreshold(maxTTFT float64, maxTBT float64) GlobalSchedulerManagerOpt
 }
 
 // WithAlgorithmThreshold supplies algorithm threshold
-func WithAlgorithmThreshold(minBlocks int, batchSize int, powerOfTwo bool, blockSize int) GlobalSchedulerManagerOption {
+func WithAlgorithmThreshold(minBlocks int, batchSize int, powerOfTwo bool, blockSize int, loadImbalanceThreshold int) GlobalSchedulerManagerOption {
 	return func(gs *GlobalSchedulerManager) error {
 		gs.config.lbConfig.MinBlockThreshold = minBlocks
 		gs.config.lbConfig.BatchSize = batchSize
 		gs.config.lbConfig.PowerOfTwo = powerOfTwo
 		gs.config.lbConfig.BlockSize = blockSize
+		gs.config.lbConfig.LoadImbalanceThreshold = loadImbalanceThreshold
 		return nil
 	}
 }
