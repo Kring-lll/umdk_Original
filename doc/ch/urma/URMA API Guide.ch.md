@@ -6881,6 +6881,26 @@ typedef struct bondp_set_bonding_port_in {
 
 Return: 0 on success, `URMA_EAGAIN` when the context is still referenced by existing objects, other value on error.
 
+##### 2.5.1.1.4 Bond 按端口投递 WR
+
+[bondp_api.h](../../../src/urma/lib/urma/bond/include/bondp_api.h) 提供四个按指定 bond 成员端口投递 WR 的接口：
+
+- `bondp_post_jfs_wr` / `bondp_post_jetty_send_wr`：提交发送 WR，消耗指定目标端口上的 RQE。`port_id` 指定远端接收端口，且必须是该 WR 可达的目标端口。
+- `bondp_post_jfr_wr` / `bondp_post_jetty_recv_wr`：在指定端口提交接收 WR。`port_id` 指定本地接收端口，且必须是该 JFR/Jetty 的成员端口。
+
+`port_id` 非法或不是成员端口时，调用返回 `URMA_EINVAL`。端口标识使用 [urma_ubagg.h](../../../src/urma/lib/urma/bond/include/urma_ubagg.h) 中定义的 `bondp_port_id_t`，其字段语义与 [BONDP_USER_CTL_SET_BONDING_PORT](#25113-bondp_user_ctl_set_bonding_port) 中的说明相同。
+
+按端口提交的发送 WR 固定到指定目标端口，不会改投其他目标端口：该端口失效时返回错误 CQE，而不会经由备份路径重发。同路径上按调度投递的普通发送 WR 仍会切换到备份路径。
+
+bonding 上下文的接收 CQE 中，接收成员端口编码在 `imm_data` 的 [22, 37] 位：
+
+```c
+uint16_t recv_port = (cr->imm_data & BONDP_IMM_PORT_ID_MASK) >> BONDP_IMM_PORT_ID_SHIFT;
+/* recv_port == BONDP_RECV_PORT_UNAVAILABLE (0) 表示端口信息不可用。 */
+```
+
+该编码对 bonding 上下文的所有接收 CQE 生效，包括通过普通调度接口提交的接收 WR。应用在比较或以立即数语义解释 `imm_data` 前，必须先掩去 `BONDP_IMM_PORT_ID_MASK` 对应的位。
+
 ### 2.5.2 日志
 
 #### 2.5.2.1 urma_register_log_func
