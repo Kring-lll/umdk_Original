@@ -8,6 +8,7 @@
 package gs
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -17,31 +18,23 @@ import (
 )
 
 // PendingRequest represents a request held in the pending queue.
-// Each request carries its own ControlMessage (with Response channel),
-// so when it's dispatched, the response can be sent back to the HTTP handler.
 type PendingRequest struct {
 	ReqID       string
-	SessionID   string // ERR session id (may be "" for anonymous); used for k-tracking, NOT as map key
+	SessionID   string
 	Priority    int
-	Msg         *ControlMessage // contains ScheduleRequestMsg + Response channel
+	Msg         *ControlMessage
 	EnqueueTime time.Time
 }
 
 // PendingQueue is a per-model pending queue using a hash map.
 // Pick scans all entries O(n) to find the highest priority (lowest value).
-// Expected queue size is 10-500, so O(n) scan is < 0.1ms.
-//
-// The map key is ReqID (unique per request), NOT SessionID: SessionID is not
-// guaranteed present (anonymous requests) and reusing it would let anonymous
-// requests overwrite each other. See review [27]/E1.
+// The map key is ReqID (unique per request), NOT SessionID.
 type PendingQueue struct {
 	mu       sync.Mutex
 	maxSize  int
-	requests map[string]*PendingRequest // key = ReqID
+	requests map[string]*PendingRequest
 }
 
-// NewPendingQueue creates a new PendingQueue with the given max size.
-// maxSize > 0 enables the size limit; maxSize == 0 means unbounded.
 func NewPendingQueue(maxSize int) *PendingQueue {
 	return &PendingQueue{
 		maxSize:  maxSize,
@@ -49,14 +42,10 @@ func NewPendingQueue(maxSize int) *PendingQueue {
 	}
 }
 
-// ErrQueueFull is returned by Add when the queue is at maxSize.
-var ErrQueueFull = fmt.Errorf("pending queue full")
+var ErrQueueFull = errors.New("pending queue full")
 
 // Add adds a request to the pending queue.
 // Returns ErrQueueFull if the queue is at maxSize and the ReqID is new.
-// A request whose ReqID already exists replaces the old entry (does not count
-// against the size limit). Callers that hold m.dispatchMu can do IsFull()+Add
-// atomically (no TOCTOU). See review [26].
 func (q *PendingQueue) Add(req *PendingRequest) error {
 	if req == nil {
 		return nil
@@ -65,7 +54,6 @@ func (q *PendingQueue) Add(req *PendingRequest) error {
 	defer q.mu.Unlock()
 
 	if req.ReqID == "" {
-		// Defensive: a request without ReqID would collapse onto a single key.
 		req.ReqID = fmt.Sprintf("auto-%p", req)
 	}
 	if req.EnqueueTime.IsZero() {
@@ -80,9 +68,8 @@ func (q *PendingQueue) Add(req *PendingRequest) error {
 	return nil
 }
 
-// Pick removes and returns the highest-priority (lowest priority value) request.
-// Ties are broken by EnqueueTime (oldest first) for stable FIFO and to avoid
-// starvation. Returns nil if the queue is empty. See review [28].
+// Pick removes and returns the highest-priority (lowest value) request.
+// Ties broken by EnqueueTime (oldest first). Returns nil if empty.
 func (q *PendingQueue) Pick() *PendingRequest {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -110,14 +97,12 @@ func (q *PendingQueue) Pick() *PendingRequest {
 	return best
 }
 
-// IsEmpty returns true if the queue has no pending requests.
 func (q *PendingQueue) IsEmpty() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.requests) == 0
 }
 
-// IsFull returns true if the queue has reached its max size.
 func (q *PendingQueue) IsFull() bool {
 	if q.maxSize <= 0 {
 		return false
@@ -127,14 +112,12 @@ func (q *PendingQueue) IsFull() bool {
 	return len(q.requests) >= q.maxSize
 }
 
-// Size returns the current number of pending requests.
 func (q *PendingQueue) Size() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.requests)
 }
 
-// Remove removes a request by ReqID (e.g. on cancel).
 func (q *PendingQueue) Remove(reqID string) {
 	if reqID == "" {
 		return
@@ -144,8 +127,7 @@ func (q *PendingQueue) Remove(reqID string) {
 	delete(q.requests, reqID)
 }
 
-// RemoveBySession removes a request by SessionID (best-effort, for cancel
-// when only the session id is known). Scans the map; expected small.
+// RemoveBySession removes a request by SessionID (best-effort, for cancel).
 func (q *PendingQueue) RemoveBySession(sessionID string) {
 	if sessionID == "" {
 		return
@@ -160,7 +142,6 @@ func (q *PendingQueue) RemoveBySession(sessionID string) {
 	}
 }
 
-// UpdatePriority updates the priority of a pending request (e.g. after dist update).
 func (q *PendingQueue) UpdatePriority(reqID string, priority int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()

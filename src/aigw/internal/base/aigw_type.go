@@ -150,13 +150,12 @@ type ErrSchedulerConfig struct {
 	QueueSize          int    `json:"queueSize"`          // pending queue max size (0 = passthrough mode, >0 = queue mode)
 	WarmupSessions     int    `json:"warmupSessions"`     // total observations threshold for warmup completion (default: 100; 0 = ignore total)
 	WarmupPerCat       int    `json:"warmupPerCat"`        // per-category observations threshold, CatERR only (default: 10; 0 = ignore per-category)
-	MaxK               int    `json:"maxK"`               // MEJ offset / E[rem|k] precompute limit (default: 10000)
 	WindowSize         int    `json:"windowSize"`         // EmpiricalDist sliding window size (0 = unbounded, default: 5000)
 	TrainDataPath      string `json:"trainDataPath"`      // path to pre-trained distributions JSON (CatERR only; ERR can warm up online)
 	TfidfVocabPath     string `json:"tfidfVocabPath"`     // path to TF-IDF vocab JSON (CatERR)
 	TfidfCentroidsPath string `json:"tfidfCentroidsPath"` // path to K-means centroids JSON (CatERR)
-	SessionTimeout     int    `json:"sessionTimeout"`     // session idle timeout after tool_calls/other finish_reason (seconds, default: 660) — extreme anomaly cleanup (agent crash/disconnect)
-	TaskIdleTimeout    int    `json:"taskIdleTimeout"`   // session idle timeout after stop finish_reason (seconds, default: 60) — normal task loop completion
+	SessionTimeout     int    `json:"sessionTimeout"`     // session idle timeout after tool_calls/other, seconds (default: 660)
+	TaskIdleTimeout    int    `json:"taskIdleTimeout"`    // session idle timeout after stop, seconds (default: 60)
 }
 
 // GlobalSchedulerConfig struct contains configuration for a global scheduler

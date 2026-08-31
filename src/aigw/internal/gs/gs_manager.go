@@ -141,12 +141,9 @@ type GlobalSchedulerManager struct {
 	// dispatchMu serializes this model's ERR dispatch path (dispatchErr in the
 	// scheduleLoop goroutine vs tryDispatchFromQueue in HTTP-handler goroutines)
 	// to protect the non-thread-safe LB (rrLoadBalancer.reqCount) during
-	// schedule(). Per-GSM so different models don't block each other (was a
-	// package-level global var, see review [14]). schedule() in ERR/instance
-	// mode is an in-memory pool read (no network I/O), so holding this lock
-	// across it is cheap; narrowing it further (atomic reqCount + split locks)
-	// is deferred -- marginal benefit for completion-paced dispatch, real
-	// re-enqueue-gap risk.
+	// schedule(). Per-GSM so different models do not block each other.
+	// schedule() in ERR/instance mode is an in-memory pool read (no network
+	// I/O), so holding this lock across it is cheap.
 	dispatchMu sync.Mutex
 
 	// kvcSessionMgr drives vLLM KVC offload/prefetch on agent lifecycle events.
@@ -324,11 +321,9 @@ func (m *GlobalSchedulerManager) setConfig(gsConfig *base.GlobalSchedulerConfig)
 	return nil
 }
 
-// initErrScheduler initializes ERR scheduler, capacity provider, and pending queue
-// based on the ERR scheduler config. batchSize comes from LoadBalancerConfig
-// (shared with LBs). Returns an error if a required ERR prerequisite is missing
-// (e.g. CatERR without TF-IDF training data) so that startup is blocked rather
-// than silently degrading. See review [7]/[9]/[11].
+// initErrScheduler initializes ERR scheduler, capacity provider, and pending queue.
+// Returns an error if a required prerequisite is missing (e.g. CatERR without
+// TF-IDF data) so startup is blocked rather than silently degrading.
 func (m *GlobalSchedulerManager) initErrScheduler(errCfg *base.ErrSchedulerConfig, batchSize int) error {
 	if errCfg.ErrSchedulerType == "" || errCfg.ErrSchedulerType == "none" {
 		log.Info().Msgf("[ERR] ERR scheduler disabled for model %s", m.config.model)
@@ -339,7 +334,6 @@ func (m *GlobalSchedulerManager) initErrScheduler(errCfg *base.ErrSchedulerConfi
 		SchedulerType:      errCfg.ErrSchedulerType,
 		WarmupSessions:     errCfg.WarmupSessions,
 		WarmupPerCat:       errCfg.WarmupPerCat,
-		MaxK:               errCfg.MaxK,
 		WindowSize:         errCfg.WindowSize,
 		TrainDataPath:      errCfg.TrainDataPath,
 		TfidfVocabPath:     errCfg.TfidfVocabPath,
@@ -350,14 +344,11 @@ func (m *GlobalSchedulerManager) initErrScheduler(errCfg *base.ErrSchedulerConfi
 
 	m.errScheduler = NewErrSchedulerManager(internalCfg)
 
-	// CatERR requires a loaded TF-IDF classifier (vocab + centroids). Without
-	// it, every prompt falls back to the global dist and CatERR == ERR. Block
-	// startup until training data is provided. (Zero-shot TF-IDF support is a
-	// TODO — see ERR_SCHEDULER_DESIGN.md; remove this block once supported.)
+	// CatERR requires a loaded TF-IDF classifier (vocab + centroids).
 	if errCfg.ErrSchedulerType == "caterr" && !m.errScheduler.classifier.IsLoaded() {
 		return fmt.Errorf("[ERR] caterr requires TF-IDF vocab+centroids but the classifier is not loaded "+
-			"(tfidfVocabPath=%q, tfidfCentroidsPath=%q); provide trained data or switch to err. "+
-			"(zero-shot TF-IDF is a TODO, see design doc)", errCfg.TfidfVocabPath, errCfg.TfidfCentroidsPath)
+			"(tfidfVocabPath=%q, tfidfCentroidsPath=%q); provide trained data or switch to err",
+			errCfg.TfidfVocabPath, errCfg.TfidfCentroidsPath)
 	}
 
 	if batchSize <= 0 {

@@ -83,7 +83,6 @@
         "queueSize": "0=passthrough/>0=queue",
         "warmupSessions": 100,
         "warmupPerCat": 10,
-        "maxK": 10000,
         "windowSize": 5000,
         "trainDataPath": "",
         "tfidfVocabPath": "data/caterr/tfidf_vocab.json",
