@@ -252,6 +252,8 @@ typedef struct umq_qbuf_pool_stats {
     umq_qbuf_pool_alloc_stats_t alloc_stats;
 } umq_qbuf_pool_stats_t;
 
+#define UMQ_NAMESPACE_SIZE 256
+
 typedef struct umq_info {
     umq_trans_mode_t trans_mode; // transmission mode of the queue
     union {
@@ -263,6 +265,11 @@ typedef struct umq_info {
             uint32_t local_fc_jetty_id;       // the flow control jetty ID within the UMQ
             uint32_t remote_io_jetty_id;      // the I/O jetty ID of the peer UMQ that is bound to the local UMQ
             uint32_t remote_fc_jetty_id; // the flow control jetty ID of the peer UMQ that is bound to the local UMQ
+            umq_tp_mode_t tp_mode; // transport mode of the queue
+            uint32_t remote_umq_id; // the remote umq ID
+            umq_eid_t remote_eid; // the remote EID
+            uint32_t remote_pid; // the remote pid
+            char remote_namespace[UMQ_NAMESPACE_SIZE]; // the remote namespace
         } ub;
     };
 } umq_info_t;
