@@ -49,6 +49,8 @@ type LlmRequest struct {
 	PredictPrefillTime float64 // predict prefill time, unit is ms
 	PrefillTimeStampMs int64   // record the start timestamp of prefill, unit is ms
 	TimeStamp          int64   // unit is second
+
+	SessionID string // session ID for ERR scheduling
 }
 
 // GetRequestType returns the type of request
