@@ -51,6 +51,12 @@ const (
 
 	defaultCacheRefreshIntervalMs = 100
 	defaultTokenizationRatio      = float64(0.35)
+
+	// ERR scheduler defaults
+	defaultErrWarmupSessions  = 100
+	defaultErrWarmupPerCat    = 10
+	defaultErrSessionTimeout  = 660
+	defaultErrTaskIdleTimeout = 60
 )
 
 var validCommonLBTypes = map[string]bool{
@@ -262,6 +268,54 @@ func validateInsConnectType(gsCfg *base.GlobalSchedulerConfig) error {
 	return nil
 }
 
+func validateErrSchedulerConfig(gsCfg *base.GlobalSchedulerConfig) error {
+	errCfg := &gsCfg.ErrScheduler
+	t := errCfg.ErrSchedulerType
+	if t == "" || t == "none" {
+		return nil
+	}
+	if t != "mej" && t != "err" && t != "caterr" {
+		return fmt.Errorf("invalid errSchedulerType %q, model %q", t, gsCfg.Model)
+	}
+
+	if errCfg.WarmupSessions < 0 {
+		return fmt.Errorf("invalid warmupSessions %d, should >= 0, model %q", errCfg.WarmupSessions, gsCfg.Model)
+	}
+	if errCfg.WarmupPerCat < 0 {
+		return fmt.Errorf("invalid warmupPerCat %d, should >= 0, model %q", errCfg.WarmupPerCat, gsCfg.Model)
+	}
+	if errCfg.QueueSize < 0 {
+		return fmt.Errorf("invalid queueSize %d, should >= 0, model %q", errCfg.QueueSize, gsCfg.Model)
+	}
+	if errCfg.WindowSize < 0 {
+		return fmt.Errorf("invalid windowSize %d, should >= 0, model %q", errCfg.WindowSize, gsCfg.Model)
+	}
+	if errCfg.SessionTimeoutSec < 0 {
+		return fmt.Errorf("invalid sessionTimeoutSec %d, should >= 0, model %q", errCfg.SessionTimeoutSec, gsCfg.Model)
+	}
+	if errCfg.TaskIdleTimeoutSec < 0 {
+		return fmt.Errorf("invalid taskIdleTimeoutSec %d, should >= 0, model %q", errCfg.TaskIdleTimeoutSec, gsCfg.Model)
+	}
+
+	if errCfg.WarmupSessions == 0 && errCfg.WarmupPerCat == 0 {
+		errCfg.WarmupSessions = defaultErrWarmupSessions
+		errCfg.WarmupPerCat = defaultErrWarmupPerCat
+	}
+	if errCfg.SessionTimeoutSec == 0 {
+		errCfg.SessionTimeoutSec = defaultErrSessionTimeout
+	}
+	if errCfg.TaskIdleTimeoutSec == 0 {
+		errCfg.TaskIdleTimeoutSec = defaultErrTaskIdleTimeout
+	}
+
+	if t == "caterr" {
+		if errCfg.TfidfVocabPath == "" || errCfg.TfidfCentroidsPath == "" {
+			return fmt.Errorf("caterr requires tfidfVocabPath and tfidfCentroidsPath, model %q", gsCfg.Model)
+		}
+	}
+	return nil
+}
+
 func validateMonitorConfig(cfg *base.MonitorConfig) error {
 	address := strings.TrimSpace(cfg.Address)
 	alarmPath := strings.TrimSpace(cfg.AlarmPath)
@@ -386,6 +440,9 @@ func validateGlobalSchedulersConfig(gsConfigs []base.GlobalSchedulerConfig) erro
 			return err
 		}
 		if err := validateInsConnectType(&scheduler); err != nil {
+			return err
+		}
+		if err := validateErrSchedulerConfig(&scheduler); err != nil {
 			return err
 		}
 		if err := utils.CheckStringLength(scheduler.TokenizeModelName); err != nil {
