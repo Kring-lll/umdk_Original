@@ -1,4 +1,5 @@
 /*
+ * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
  * Description: ErrSchedulerManager — per-model ERR scheduling state.
  * Create: 2026-08-25
@@ -62,6 +63,15 @@ type ErrSchedulerManager struct {
 type trainDataFile struct {
 	Global  map[int]int            `json:"global"`             // {steps: count}
 	CatDist map[string]map[int]int `json:"cat_dist,omitempty"` // {category: {steps: count}}
+}
+
+// catDistKeys returns the keys of a cat_dist map (for logging).
+func catDistKeys(m map[string]map[int]int) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // NewErrSchedulerManager creates a new ErrSchedulerManager.
@@ -164,6 +174,55 @@ func (m *ErrSchedulerManager) loadTrainingData() {
 		totalObserved := m.globalDist.TotalCount()
 		atomic.StoreInt64(&m.completedCount, int64(totalObserved))
 		log.Info().Msgf("[ERR] seeded global dist with %d observations", totalObserved)
+
+		// For CatERR: validate cat_dist seed categories against classifier labels.
+		// Three cases:
+		//   A. cat_dist is a superset of classifier labels → keep matching,
+		//      ignore extras (info log).
+		//   B. cat_dist categories completely mismatch classifier labels →
+		//      discard all cat_dist seed, warn, enter warmup.
+		//   C. cat_dist partially matches → keep matching, discard unmatched
+		//      (warn for each discarded), enter warmup for missing categories.
+		if m.config.SchedulerType == "caterr" && len(data.CatDist) > 0 {
+			classifierLabels := make(map[string]bool)
+			for _, l := range m.classifier.Labels() {
+				classifierLabels[l] = true
+			}
+
+			matched := 0
+			unmatched := []string{}
+			for cat := range data.CatDist {
+				if classifierLabels[cat] {
+					matched++
+				} else {
+					unmatched = append(unmatched, cat)
+				}
+			}
+
+			if matched == 0 {
+				// Case B: complete mismatch — discard all cat_dist seed.
+				log.Warn().Msgf("[ERR] cat_dist seed categories %v do not match any classifier label %v; "+
+					"discarding all cat_dist seed, entering warmup",
+					catDistKeys(data.CatDist), m.classifier.Labels())
+				m.catMu.Lock()
+				m.catDists = make(map[string]*EmpiricalDist)
+				m.catMu.Unlock()
+			} else if len(unmatched) > 0 {
+				// Case C: partial mismatch — discard unmatched, keep matched.
+				log.Warn().Msgf("[ERR] cat_dist seed has unmatched categories %v (classifier labels %v); "+
+					"discarding unmatched, entering warmup for missing categories",
+					unmatched, m.classifier.Labels())
+				m.catMu.Lock()
+				for _, cat := range unmatched {
+					delete(m.catDists, cat)
+				}
+				m.catMu.Unlock()
+			} else if len(data.CatDist) > len(classifierLabels) {
+				// Case A: superset — extras are harmless (never queried).
+				log.Info().Msgf("[ERR] cat_dist seed has extra categories beyond classifier labels %v; "+
+					"extras will be ignored", m.classifier.Labels())
+			}
+		}
 	}
 	// Note: an empty trainDataPath is fine for ERR/MEJ (they warm up online);
 	// CatERR's required TF-IDF data is validated in initErrScheduler (blocks
@@ -300,32 +359,47 @@ func (m *ErrSchedulerManager) RestartIdleTimer(sessionID string) {
 //
 // For ERR/MEJ: warmup is done when globalDist has >= WarmupSessions observations.
 //
-// For CatERR: warmup is done when BOTH thresholds are met:
-//   - globalDist total >= WarmupSessions (0 = skip this check)
-//   - every known category's catDists[cat] total >= WarmupPerCat (0 = skip)
+// For CatERR: warmup is done when EVERY category known to the classifier has
+// >= WarmupPerCat observations in catDists. CatERR does NOT use globalDist for
+// warmup — global seed is irrelevant (it mixes all categories and has no
+// per-category discrimination). Each category accumulates independently via
+// OnFinish; only when all categories are ready does CatERR activate.
+//
+// When catDists is empty (no pre-trained cat_dist seed), the classifier still
+// knows the category labels from vocab/centroids. Each category must have
+// >= WarmupPerCat observations before CatERR activates.
 //
 // During warmup, Priority returns MEJ (not E[rem]) for ALL categories — so
 // categories never mix E[rem] (some warm, some not) vs MEJ (-k, always lower),
 // which would starve the MEJ ones. Only after ALL categories are warm do we
 // switch to CatERR (all E[rem]). See review [19].
 func (m *ErrSchedulerManager) IsWarmingUp() bool {
-	// Global total threshold (applies to all algorithm types).
+	// CatERR: only per-category threshold matters (no global check).
+	if m.config.SchedulerType == "caterr" {
+		if m.config.WarmupPerCat <= 0 {
+			return false // per-category check disabled
+		}
+		labels := m.classifier.Labels()
+		m.catMu.RLock()
+		defer m.catMu.RUnlock()
+		if len(labels) == 0 {
+			// Classifier not loaded — shouldn't happen (initErrScheduler
+			// blocks startup for caterr without vocab/centroids).
+			return true
+		}
+		for _, label := range labels {
+			dist, ok := m.catDists[label]
+			if !ok || dist.TotalCount() < m.config.WarmupPerCat {
+				return true // this category not warm enough
+			}
+		}
+		return false
+	}
+
+	// ERR/MEJ: global total threshold only.
 	if m.config.WarmupSessions > 0 && m.globalDist.TotalCount() < m.config.WarmupSessions {
 		return true
 	}
-
-	// Per-category threshold (CatERR only).
-	if m.config.SchedulerType == "caterr" && m.config.WarmupPerCat > 0 {
-		m.catMu.RLock()
-		for _, dist := range m.catDists {
-			if dist.TotalCount() < m.config.WarmupPerCat {
-				m.catMu.RUnlock()
-				return true // at least one category not warm enough
-			}
-		}
-		m.catMu.RUnlock()
-	}
-
 	return false
 }
 
