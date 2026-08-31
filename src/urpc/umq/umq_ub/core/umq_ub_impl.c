@@ -25,7 +25,6 @@
 #include "umq_tiny_qbuf_pool.h"
 #include "umq_ub_flow_control.h"
 #include "umq_ub_imm_data.h"
-#include "umq_ub_impl.h"
 #include "umq_ub_private.h"
 #include "umq_vlog.h"
 #include "urma_api.h"
@@ -39,6 +38,7 @@
 #include "urpc_util.h"
 #include "util_id_generator.h"
 #include "uvs_api.h"
+#include "umq_ub_impl.h"
 
 #define UMQ_FLUSH_MAX_RETRY_TIMES 10000
 #define UMQ_UB_DEFAULT_SLOT_NUM 10
@@ -48,7 +48,10 @@
 #define UMQ_UB_WAIT_QUEUE_IDLE_TIMEOUT_US 1000
 #define UMQ_UB_WAIT_QUEUE_IDLE_RETRY_CNT 8
 
-#define UMQ_ALIGN_64K(__size) (((__size) + 65535) & ~65535)
+static inline uint32_t umq_align_64k(uint32_t size)
+{
+    return (size + 65535U) & ~65535U;
+}
 
 static umq_ub_ctx_t *g_ub_ctx = NULL;
 static uint32_t g_ub_ctx_count = 0;
@@ -846,7 +849,7 @@ ROLLBACK_UB_CTX:
             g_ub_ctx[i].umq_ctx_ref_cnt_table = NULL;
         }
 
-        if (g_ub_ctx[i].rx_consumed_jetty_table ) {
+        if (g_ub_ctx[i].rx_consumed_jetty_table) {
             free((void*)g_ub_ctx[i].rx_consumed_jetty_table);
             g_ub_ctx[i].rx_consumed_jetty_table = NULL;
         }
@@ -1015,10 +1018,10 @@ static int umq_ub_create_flow_control_resource(ub_queue_t *queue, ub_queue_t *sh
         }
 
         if (queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id >=
-            UMQ_ALIGN_64K(dev_ctx->dev_attr.dev_cap.max_jetty)) {
+            umq_align_64k(dev_ctx->dev_attr.dev_cap.max_jetty)) {
             UMQ_VLOG_ERR(VLOG_UMQ, "jetty id %u exceed max jetty %u\n",
                          queue->jetty[UB_QUEUE_JETTY_FLOW_CONTROL]->jetty_id.id,
-                         UMQ_ALIGN_64K(dev_ctx->dev_attr.dev_cap.max_jetty));
+                         umq_align_64k(dev_ctx->dev_attr.dev_cap.max_jetty));
             goto DELETE_FC_JETTY;
         }
     }
@@ -1430,9 +1433,9 @@ uint64_t umq_ub_create_impl(uint8_t *ctx, umq_create_option_t *option)
             goto DELETE_JFS_JFC;
         }
 
-        if (queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id >= UMQ_ALIGN_64K(dev_ctx->dev_attr.dev_cap.max_jetty)) {
+        if (queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id >= umq_align_64k(dev_ctx->dev_attr.dev_cap.max_jetty)) {
             UMQ_VLOG_ERR(VLOG_UMQ, "jetty id %u exceed max jetty %u\n", queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id,
-                         UMQ_ALIGN_64K(dev_ctx->dev_attr.dev_cap.max_jetty));
+                         umq_align_64k(dev_ctx->dev_attr.dev_cap.max_jetty));
             goto DELETE_JETTY;
         }
     }
