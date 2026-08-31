@@ -42,6 +42,14 @@ typedef struct bondp_probe_res {
     urma_jfr_t *jfr;
     urma_target_seg_t *seg;
     urma_jetty_t *jetty;
+    /* Protects jetty pointer lifecycle (modify + delete + NULL + rebuild).
+     * The worker thread's hc_rebuild_probe_jetty and the uninit thread's
+     * hc_destroy_probe_resource / hc_destroy_probe_jettys must take this lock
+     * before touching res->jetty to avoid a concurrent double-delete.
+     * A spinlock is used because critical sections are short (pointer modify/
+     * delete/rebuild) and the uninit path must not sleep while the worker may
+     * be holding it. */
+    pthread_spinlock_t lock;
     /* Number of probe WRs posted but not yet completed. Only touched on the
      * single worker thread, so a plain counter is safe. Used to stop posting
      * when the probe SQ nears capacity, otherwise urma_post_jetty_send_wr
@@ -122,23 +130,23 @@ static urma_jetty_t *hc_create_probe_jetty(urma_context_t *p_ctx, urma_jfc_t *jf
     return jetty;
 }
 
-static void hc_rebuild_probe_jetty(bondp_hc_ctx_t *hc_ctx, bondp_probe_res_t *res)
+/* Tear down res->jetty under res->lock: modify to error, delete, NULL it,
+ * reset inflight. Returns true if the jetty was present and deleted (caller
+ * may proceed to recreate); false if it was already NULL or deletion failed
+ * (caller must abort the rebuild). */
+static bool hc_teardown_probe_jetty(bondp_probe_res_t *res)
 {
     int local_idx = res->local_idx;
-    if (res->jfc == NULL || res->jfc->urma_ctx == NULL || res->jfr == NULL) {
-        URMA_LOG_ERR("Invalid health probe resource for jetty rebuild, local_idx=%d.\n", local_idx);
-        return;
-    }
+    pthread_spin_lock(&res->lock);
     if (res->jetty == NULL) {
-        return;
+        pthread_spin_unlock(&res->lock);
+        return false;
     }
 
-    urma_context_t *p_ctx = res->jfc->urma_ctx;
     urma_jetty_attr_t attr = {
         .mask = JETTY_STATE,
         .state = URMA_JETTY_STATE_ERROR,
     };
-
     urma_status_t ret = urma_modify_jetty(res->jetty, &attr);
     if (ret != URMA_SUCCESS) {
         URMA_LOG_WARN("Failed to modify health probe jetty to error, local_idx=%d, ret=%d.\n",
@@ -148,24 +156,65 @@ static void hc_rebuild_probe_jetty(bondp_hc_ctx_t *hc_ctx, bondp_probe_res_t *re
     if (ret != URMA_SUCCESS) {
         URMA_LOG_ERR("Failed to delete old health probe jetty, local_idx=%d, ret=%d.\n",
                      local_idx, ret);
-        return;
+        pthread_spin_unlock(&res->lock);
+        return false;
     }
     res->jetty = NULL;
     res->inflight = 0; /* The old SQ is gone; its outstanding WRs are flushed. */
+    pthread_spin_unlock(&res->lock);
+    return true;
+}
+
+/* Reset per-target no_cqe_round counters for local_idx across all nodes: the
+ * old probe SQ (and its pending CQEs) are gone after a jetty rebuild. */
+static void hc_reset_local_no_cqe_round(bondp_hc_ctx_t *hc_ctx, int local_idx)
+{
     for (uint32_t i = 0; i < hc_ctx->node_num; ++i) {
         bondp_hc_node_t *node = &hc_ctx->nodes[i];
-
         pthread_rwlock_wrlock(&node->lock);
         for (uint32_t j = 0; j < URMA_UBAGG_DEV_MAX_NUM; ++j) {
             node->no_cqe_round[local_idx][j] = 0;
         }
         pthread_rwlock_unlock(&node->lock);
     }
+}
 
+/* Recreate res->jetty under res->lock after teardown. Honors hc_ctx->stopping
+ * (uninit raced in) and a concurrent destroy+recreate race (leaves an existing
+ * jetty alone). */
+static void hc_recreate_probe_jetty(bondp_hc_ctx_t *hc_ctx, bondp_probe_res_t *res)
+{
+    /* Don't recreate if uninit raced in; destroy thread will see NULL and skip. */
+    if (atomic_load(&hc_ctx->stopping)) {
+        return;
+    }
+    int local_idx = res->local_idx;
+    urma_context_t *p_ctx = res->jfc->urma_ctx;
+    pthread_spin_lock(&res->lock);
+    if (res->jetty != NULL) {
+        /* Concurrent destroy+recreate race; leave existing jetty alone. */
+        pthread_spin_unlock(&res->lock);
+        return;
+    }
     res->jetty = hc_create_probe_jetty(p_ctx, res->jfc, res->jfr, local_idx, hc_ctx->priority);
+    pthread_spin_unlock(&res->lock);
     if (res->jetty == NULL) {
         URMA_LOG_ERR("Failed to rebuild health probe jetty, local_idx=%d.\n", local_idx);
     }
+}
+
+static void hc_rebuild_probe_jetty(bondp_hc_ctx_t *hc_ctx, bondp_probe_res_t *res)
+{
+    if (res->jfc == NULL || res->jfc->urma_ctx == NULL || res->jfr == NULL) {
+        URMA_LOG_ERR("Invalid health probe resource for jetty rebuild, local_idx=%d.\n",
+                     res->local_idx);
+        return;
+    }
+    if (!hc_teardown_probe_jetty(res)) {
+        return;
+    }
+    hc_reset_local_no_cqe_round(hc_ctx, res->local_idx);
+    hc_recreate_probe_jetty(hc_ctx, res);
 }
 
 static void hc_set_tjetty_list_target_valid(bondp_hc_node_t *node, uint32_t local_idx, uint32_t target_idx)
@@ -559,10 +608,12 @@ static void hc_destroy_probe_resource(bondp_hc_ctx_t *hc_ctx, int local_idx)
 {
     bondp_probe_res_t *res = &hc_ctx->probes[local_idx];
 
+    pthread_spin_lock(&res->lock);
     if (res->jetty != NULL) {
         urma_delete_jetty(res->jetty);
         res->jetty = NULL;
     }
+    pthread_spin_unlock(&res->lock);
     if (res->jfr != NULL) {
         urma_delete_jfr(res->jfr);
         res->jfr = NULL;
@@ -579,6 +630,7 @@ static void hc_destroy_probe_resource(bondp_hc_ctx_t *hc_ctx, int local_idx)
         urma_delete_jfc(res->jfc);
         res->jfc = NULL;
     }
+    pthread_spin_destroy(&res->lock);
     *res = (bondp_probe_res_t){0};
 }
 
@@ -635,6 +687,7 @@ static int hc_init_probe_resource(urma_context_t *p_ctx, bondp_probe_res_t *res)
         .seg = seg,
         .jetty = NULL,
     };
+    pthread_spin_init(&res->lock, 0);
 
     return 0;
 
@@ -709,12 +762,13 @@ static void hc_destroy_probe_jettys(bondp_hc_ctx_t *hc_ctx)
 {
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
         bondp_probe_res_t *res = &hc_ctx->probes[i];
-        if (res->jetty == NULL) {
-            continue;
+        pthread_spin_lock(&res->lock);
+        if (res->jetty != NULL) {
+            urma_delete_jetty(res->jetty);
+            res->jetty = NULL;
         }
-        urma_delete_jetty(res->jetty);
-        res->jetty = NULL;
         res->inflight = 0;
+        pthread_spin_unlock(&res->lock);
     }
 }
 
