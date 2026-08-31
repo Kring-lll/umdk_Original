@@ -247,6 +247,14 @@ func validateLoadBalancer(gsCfg *base.GlobalSchedulerConfig) error {
 	if gsCfg.LoadBalancer.MinMatchedLength <= 0 {
 		return fmt.Errorf("invalid MinMatchedLength value: %v, should > 0", gsCfg.LoadBalancer.MinMatchedLength)
 	}
+	// loadImbalanceThreshold is consumed only by the prefixCache load
+	// balancer (0 disables the imbalance intervention, prefix-only selection).
+	// The non-negativity guard runs unconditionally for all LB types as a
+	// harmless fail-fast: non-prefixCache types simply never read this field.
+	if gsCfg.LoadBalancer.LoadImbalanceThreshold < 0 {
+		return fmt.Errorf("invalid loadImbalanceThreshold value: %v, should >= 0",
+			gsCfg.LoadBalancer.LoadImbalanceThreshold)
+	}
 	if (gsCfg.LoadBalancer.Mixed == "prefillTimeAware" || gsCfg.LoadBalancer.Prefill == "prefillTimeAware" ||
 		gsCfg.LoadBalancer.Decode == "prefillTimeAware") && gsCfg.LoadBalancer.PretrainTTFTPath == "" {
 		return fmt.Errorf("invalid empty pretrainTTFTPath when prefillTimeAware load balancer is used")
