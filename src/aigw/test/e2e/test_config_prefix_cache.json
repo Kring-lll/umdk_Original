@@ -44,7 +44,8 @@
         "mixed": "prefixCache",
         "batchSize": 32,
         "reservedBlockNumber": 50,
-        "minMatchedLength": 200
+        "minMatchedLength": 200,
+        "loadImbalanceThreshold": 1000
       },
       "renderClient": {
         "endpointTemplate": "http://{ip}:8000",
