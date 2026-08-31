@@ -18,12 +18,12 @@ import (
 // Session header names in priority order (highest priority first).
 // These headers are checked for session affinity.
 var sessionHeaderNames = []string{
-	"x-session-id",      // Priority 1: Explicit session ID
-	"x-user-id",         // Priority 2: User-based affinity
-	"x-tenant-id",       // Priority 3: Tenant-based affinity
-	"x-correlation-id",  // Priority 4: Correlation ID
-	"x-request-id",      // Priority 5: Request ID
-	"x-trace-id",        // Priority 6: Trace ID
+	"x-session-id",     // Priority 1: Explicit session ID
+	"x-user-id",        // Priority 2: User-based affinity
+	"x-tenant-id",      // Priority 3: Tenant-based affinity
+	"x-correlation-id", // Priority 4: Correlation ID
+	"x-request-id",     // Priority 5: Request ID
+	"x-trace-id",       // Priority 6: Trace ID
 }
 
 // HashKey represents an extracted hash key with source information.
@@ -66,6 +66,13 @@ func ExtractHashKey(headers http.Header, body map[string]interface{}) string {
 
 	// 2. Check request body fields
 	if body != nil {
+		// agent_hint.session_id (jiuwenclaw KV cache affinity format)
+		if agentHint, ok := body["agent_hint"].(map[string]interface{}); ok {
+			if sessionID, ok := agentHint["session_id"].(string); ok && sessionID != "" {
+				return fmt.Sprintf("body:agent_hint.session_id:%s", sessionID)
+			}
+		}
+
 		// session_params.session_id (nested field)
 		if sessionParams, ok := body["session_params"].(map[string]interface{}); ok {
 			if sessionID, ok := sessionParams["session_id"].(string); ok && sessionID != "" {
@@ -105,6 +112,23 @@ func ExtractHashKey(headers http.Header, body map[string]interface{}) string {
 
 	// Final fallback: empty string (will be hashed to a value)
 	return "fallback:empty"
+}
+
+// ExtractSessionID extracts the ERR session id from the request body at the
+// single ingress point (forwardToInstance). Only body.agent_hint.session_id is
+// honored (jiuwenclaw format); anything else → "" (anonymous → p50 placement).
+// The extracted id is recorded on GetSuggestionIn.SessionID and every ERR path
+// (OnRequest/OnFinish/OnCancel/capacity) reuses that single value.
+func ExtractSessionID(body map[string]interface{}) string {
+	if body == nil {
+		return ""
+	}
+	if agentHint, ok := body["agent_hint"].(map[string]interface{}); ok {
+		if sessionID, ok := agentHint["session_id"].(string); ok && sessionID != "" {
+			return sessionID
+		}
+	}
+	return ""
 }
 
 // ExtractHashKeyFromBytes extracts hash key from raw JSON body bytes.

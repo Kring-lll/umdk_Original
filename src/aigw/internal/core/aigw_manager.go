@@ -30,7 +30,8 @@ import (
 )
 
 const (
-	waitResponseTimeout = 3 * time.Second
+	waitResponseTimeout      = 3 * time.Second
+	waitResponseQueueTimeout = 30 * time.Second // ERR queue mode: requests may wait in queue
 )
 
 const (
@@ -42,12 +43,20 @@ type GetSuggestionIn struct {
 	UUID   string
 	Prompt string
 	Model  string
+	// Ctx is the upstream HTTP request's context. The ERR queue-wait (and the
+	// schedule select) is bounded by THIS, not a fixed internal timeout: when
+	// the upstream (client) gives up / its timeout fires and closes the
+	// connection, ctx cancels -> the queued request is dequeued and cleaned up.
+	// Nil falls back to manager.ctx.
+	Ctx context.Context
 	// Headers and Body are used for consistent hash key extraction.
 	// Headers maps HTTP header names to values (e.g., "X-Session-Id" -> "session-123").
 	Headers map[string]string
 	// Body contains the parsed request body fields for hash key extraction
 	// (e.g., "user", "session_id", "session_params.session_id").
 	Body map[string]interface{}
+	// SessionID for ERR scheduling (extracted from agent_hint.session_id)
+	SessionID string
 }
 
 // AigwManager is the core manager of AIGW
@@ -371,14 +380,22 @@ func (manager *AigwManager) scheduleRequest(m *gs.GlobalSchedulerManager, in *Ge
 	if e1 != nil {
 		return nil, e1
 	}
+	req.SessionID = in.SessionID
 	// do tokenization and execute lightGBM prediction
 	if err := m.PreprocessForSchedule(req); err != nil {
 		return nil, err
 	}
 
-	// create a context with timeout
-	ctx, cancel := context.WithTimeout(manager.ctx, waitResponseTimeout)
-	defer cancel()
+	// Bound the schedule wait by the UPSTREAM's HTTP context (in.Ctx = the
+	// client's r.Context()), not a fixed internal timeout. When the upstream
+	// gives up / closes the connection, ctx cancels -> this select returns and
+	// the caller (HTTP handler) runs ErrOnCancel to dequeue + free the slot.
+	// A hung downstream that blocks a queued request is eventually freed by
+	// proxy.timeout (the aigw->LLM http client timeout).
+	ctx := in.Ctx
+	if ctx == nil {
+		ctx = manager.ctx
+	}
 
 	rsp := make(chan interface{}, 1)
 	msg := &gs.ControlMessage{
@@ -388,6 +405,7 @@ func (manager *AigwManager) scheduleRequest(m *gs.GlobalSchedulerManager, in *Ge
 			CandidateInstanceIDs: candidateInstanceIDs,
 			Headers:              in.Headers,
 			Body:                 in.Body,
+			SessionID:            in.SessionID,
 		},
 		Response: rsp,
 	}
@@ -405,6 +423,7 @@ func (manager *AigwManager) scheduleRequest(m *gs.GlobalSchedulerManager, in *Ge
 				TargetPrefillUrl: result.PrefillUrl,
 				TargetDecodeUrl:  result.DecodeUrl,
 				DpRank:           result.DpRank,
+				Priority:         result.Priority,
 			}, nil
 		case error:
 			return nil, result
@@ -473,6 +492,28 @@ func (manager *AigwManager) GetSuggestion(in *GetSuggestionIn) (*base.GetSuggest
 	}
 
 	return manager.scheduleRequest(m, in, nil)
+}
+
+// ErrOnResponse is called when an HTTP response completes for a session.
+// It notifies the ERR scheduler to free capacity, update distributions,
+// and dispatch any pending queued requests.
+// insURL is the instance the request was forwarded to (from the HTTP handler's
+// suggestion); empty means the request was never dispatched (nothing to free).
+func (manager *AigwManager) ErrOnResponse(model, sessionID, insURL, finishReason string) {
+	m := manager.getGsManager(model)
+	if m == nil {
+		return
+	}
+	m.ErrOnResponse(sessionID, insURL, finishReason)
+}
+
+// ErrOnCancel is called when an HTTP connection is closed abnormally.
+func (manager *AigwManager) ErrOnCancel(model, sessionID, insURL string) {
+	m := manager.getGsManager(model)
+	if m == nil {
+		return
+	}
+	m.ErrOnCancel(sessionID, insURL)
 }
 
 func (manager *AigwManager) createGBM(gbmPath string, vectorPath string) error {
