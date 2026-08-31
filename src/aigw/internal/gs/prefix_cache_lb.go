@@ -26,7 +26,6 @@ type prefixCacheLoadBalancer struct {
 	prefixCacheMgr prefixcache.PrefixCacheManager
 	renderClient   *renderclient.RenderClient
 	fallbackLB     loadBalancer
-	matchThreshold int
 	// loadImbalanceThreshold is the token-load imbalance threshold: when
 	// max(TokenNum)-min(TokenNum) across all ready pods exceeds it, the
 	// scheduler prioritizes load balancing (lowest-load pod) over prefix
@@ -63,7 +62,6 @@ func newPrefixCacheLB(metricProvider MetricProvider, params *AlgorithmParams) (*
 			instanceRoleType: params.InstanceRoleType,
 		},
 		prefixCacheMgr:         pcMgr,
-		matchThreshold:         pcConfig.MatchThreshold,
 		loadImbalanceThreshold: params.LoadImbalanceThreshold,
 		fallbackLB:             fallback,
 	}, nil
@@ -218,23 +216,15 @@ func (lb *prefixCacheLoadBalancer) fallback(request *ScheduleRequestMsg, options
 	return lb.fallbackLB.schedule(request, options)
 }
 
-// selectFromMatched implements the prefix-match load-balancing-aware
-// scheduling algorithm.
+// selectFromMatched picks a target pod using the prefix-match
+// load-balancing-aware algorithm. It evaluates ALL ready pods:
+//  1. spread = max(TokenNum) - min(TokenNum) across all ready pods.
+//  2. If spread > loadImbalanceThreshold (imbalanced): return the
+//     lowest-load pod to avoid hot spots, regardless of prefix match.
+//  3. Otherwise (balanced): return the highest prefix-match pod; ties
+//     broken by lower token load.
 //
-// It evaluates ALL ready pods (not just the matched subset):
-//  1. Compute the token-load spread = max(TokenNum) - min(TokenNum) across all
-//     ready pods.
-//  2. If the spread exceeds loadImbalanceThreshold (load明显不均衡): schedule to
-//     the lowest-load pod to rebalance, regardless of prefix match. This
-//     avoids hot-spot pods.
-//  3. Otherwise (load基本均衡): among pods whose prefix match rate meets
-//     matchThreshold, schedule to the one with the highest match rate; ties
-//     are broken by lower token load. This maximizes "以存代算" (compute via
-//     stored KV cache). If no pod reaches the gate, return nil so schedule()
-//     falls back to leastConn (which picks the lowest-load pod).
-//
-// loadImbalanceThreshold == 0 disables the imbalance branch: only the
-// prefix-match path runs, preserving the original prefix-only behavior.
+// loadImbalanceThreshold == 0 disables branch 2 (prefix-only selection).
 func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched map[string]int, urlToInstanceName map[string]string) *InstanceMetric {
 	type instanceScore struct {
 		metric       *InstanceMetric
@@ -277,15 +267,14 @@ func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched
 	}
 
 	if len(scores) == 0 {
-		log.Info().Msgf("[prefixCache] selectFromMatched: no ready instances with metrics")
+		log.Debug().Msgf("[prefixCache] selectFromMatched: no ready instances with metrics")
 		return nil
 	}
 
 	// --- Branch 1: load imbalance ---
-	// Compute the token-load spread across ALL ready pods. If it exceeds the
-	// threshold, prioritize load balancing: pick the lowest-load pod. On a
-	// TokenNum tie, instanceName provides a deterministic order so routing is
-	// reproducible across equivalent pods.
+	// spread = max(TokenNum) - min(TokenNum) across all ready pods. If it
+	// exceeds the threshold, return the lowest-load pod to avoid hot spots.
+	// instanceName breaks TokenNum ties for deterministic routing.
 	if lb.loadImbalanceThreshold > 0 {
 		minIdx := 0
 		maxIdx := 0
@@ -301,22 +290,19 @@ func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched
 		}
 		spread := scores[maxIdx].metric.TokenNum - scores[minIdx].metric.TokenNum
 		if spread > lb.loadImbalanceThreshold {
-			log.Info().Msgf("[prefixCache] selectFromMatched: load imbalanced (spread=%d > threshold=%d), "+
-				"selecting lowest-load instance %s (load=%d, match=%d%%)",
+			log.Debug().Msgf("[prefixCache] selectFromMatched: imbalanced (spread=%d > %d), pick lowest %s (load=%d, match=%d%%)",
 				spread, lb.loadImbalanceThreshold, scores[minIdx].instanceName,
 				scores[minIdx].metric.TokenNum, scores[minIdx].matchPercent)
 			return scores[minIdx].metric
 		}
-		log.Debug().Msgf("[prefixCache] selectFromMatched: load balanced (spread=%d <= threshold=%d), "+
-			"selecting by prefix match rate", spread, lb.loadImbalanceThreshold)
+		log.Debug().Msgf("[prefixCache] selectFromMatched: balanced (spread=%d <= %d), pick by match",
+			spread, lb.loadImbalanceThreshold)
 	}
 
-	// --- Branch 2: load balanced -> prioritize prefix cache hit ---
-	// Among pods that reached the matchThreshold gate, sort by matchPercent
-	// desc then TokenNum asc (lower load wins on ties). SliceStable + the
-	// instanceName final tiebreak keeps routing deterministic across fully
-	// equivalent pods. If none meets the gate, return nil so schedule()
-	// falls back to leastConn.
+	// --- Branch 2: load balanced -> pick highest prefix-match pod ---
+	// sort by matchPercent desc, then TokenNum asc, then instanceName for a
+	// fully deterministic order across equivalent pods. Return the top pod;
+	// a partial match still beats leastConn (some KV reuse > none).
 	sort.SliceStable(scores, func(i, j int) bool {
 		if scores[i].matchPercent != scores[j].matchPercent {
 			return scores[i].matchPercent > scores[j].matchPercent
@@ -327,15 +313,9 @@ func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched
 		return scores[i].instanceName < scores[j].instanceName
 	})
 
-	if scores[0].matchPercent >= lb.matchThreshold {
-		log.Info().Msgf("[prefixCache] selectFromMatched: selected instance %s with %d%% match (load=%d)",
-			scores[0].instanceName, scores[0].matchPercent, scores[0].metric.TokenNum)
-		return scores[0].metric
-	}
-
-	log.Info().Msgf("[prefixCache] selectFromMatched: top match %d%% below threshold %d, deferring to fallback",
-		scores[0].matchPercent, lb.matchThreshold)
-	return nil
+	log.Debug().Msgf("[prefixCache] selectFromMatched: selected %s with %d%% match (load=%d)",
+		scores[0].instanceName, scores[0].matchPercent, scores[0].metric.TokenNum)
+	return scores[0].metric
 }
 
 func (lb *prefixCacheLoadBalancer) getReadyInstances(candidateIDs []string) ([]string, error) {

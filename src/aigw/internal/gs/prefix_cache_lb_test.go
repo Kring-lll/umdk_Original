@@ -48,12 +48,11 @@ func (p *prefixCacheMockProvider) GetDPAwareMetrics(_ *MetricQueryOptions, _ int
 // buildPrefixCacheLB constructs a prefixCacheLoadBalancer wired with a mock
 // provider, bypassing the kvevents/render machinery so selectFromMatched can
 // be tested in isolation.
-func buildPrefixCacheLB(metrics map[string]*InstanceMetric, matchThreshold, imbalanceThreshold int) *prefixCacheLoadBalancer {
+func buildPrefixCacheLB(metrics map[string]*InstanceMetric, imbalanceThreshold int) *prefixCacheLoadBalancer {
 	return &prefixCacheLoadBalancer{
 		baseLoadBalancer: baseLoadBalancer{
 			metricProvider: &prefixCacheMockProvider{byURL: metrics},
 		},
-		matchThreshold:         matchThreshold,
 		loadImbalanceThreshold: imbalanceThreshold,
 	}
 }
@@ -94,7 +93,7 @@ func TestSelectFromMatched_LoadImbalanced_SelectsLowestLoad(t *testing.T) {
 		[2]string{"127.0.0.1:3", nameC})
 	matched := map[string]int{nameA: 80, nameB: 90, nameC: 70}
 
-	lb := buildPrefixCacheLB(metrics, 50, 1000)
+	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3"}
 
 	got := lb.selectFromMatched(urls, matched, urlMap)
@@ -117,7 +116,7 @@ func TestSelectFromMatched_LoadBalanced_SelectsHighestMatch(t *testing.T) {
 		[2]string{"127.0.0.1:3", nameC})
 	matched := map[string]int{nameA: 80, nameB: 90, nameC: 70}
 
-	lb := buildPrefixCacheLB(metrics, 50, 1000)
+	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3"}
 
 	got := lb.selectFromMatched(urls, matched, urlMap)
@@ -140,7 +139,7 @@ func TestSelectFromMatched_Balanced_TiebreakByLowerLoad(t *testing.T) {
 		[2]string{"127.0.0.1:3", nameC})
 	matched := map[string]int{nameA: 80, nameB: 80, nameC: 70}
 
-	lb := buildPrefixCacheLB(metrics, 50, 1000)
+	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3"}
 
 	got := lb.selectFromMatched(urls, matched, urlMap)
@@ -148,11 +147,11 @@ func TestSelectFromMatched_Balanced_TiebreakByLowerLoad(t *testing.T) {
 	assert.Equal(t, "127.0.0.1:2", got.InsUrl, "should tiebreak to lower-load pod B (800)")
 }
 
-// TestSelectFromMatched_BelowThresholdGate_DeferredToFallback: when load is
-// balanced but no pod reaches matchThreshold, returns nil so schedule() falls
-// back to leastConn (per design decision Q2).
-func TestSelectFromMatched_BelowThresholdGate_DeferredToFallback(t *testing.T) {
-	// pods: A(1000,30%), B(1100,20%); balanced, but match < threshold 50
+// TestSelectFromMatched_Balanced_LowMatchStillSelectsTopMatch: under balanced
+// load, even a low match rate wins (partial KV reuse beats leastConn) — the
+// old matchThreshold gate is gone, so the top-match pod is always returned.
+func TestSelectFromMatched_Balanced_LowMatchStillSelectsTopMatch(t *testing.T) {
+	// pods: A(1000,30%), B(1100,20%); balanced -> pick A (30% > 20%)
 	mA, nameA := makeMetric("127.0.0.1:1", "worker-1", 1000, 5)
 	mB, nameB := makeMetric("127.0.0.1:2", "worker-2", 1100, 1)
 
@@ -162,11 +161,12 @@ func TestSelectFromMatched_BelowThresholdGate_DeferredToFallback(t *testing.T) {
 		[2]string{"127.0.0.1:2", nameB})
 	matched := map[string]int{nameA: 30, nameB: 20}
 
-	lb := buildPrefixCacheLB(metrics, 50, 1000)
+	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2"}
 
 	got := lb.selectFromMatched(urls, matched, urlMap)
-	assert.Nil(t, got, "should defer to fallback when match below gate")
+	assert.NotNil(t, got)
+	assert.Equal(t, "127.0.0.1:1", got.InsUrl, "low match still selects top-match pod A")
 }
 
 // TestSelectFromMatched_Imbalanced_SelectsUnmatchedLowestLoad: when load is
@@ -182,7 +182,7 @@ func TestSelectFromMatched_Imbalanced_SelectsUnmatchedLowestLoad(t *testing.T) {
 		[2]string{"127.0.0.1:2", nameB})
 	matched := map[string]int{nameA: 90} // only A matched; B is unmatched
 
-	lb := buildPrefixCacheLB(metrics, 50, 1000)
+	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2"}
 
 	got := lb.selectFromMatched(urls, matched, urlMap)
@@ -204,7 +204,7 @@ func TestSelectFromMatched_ThresholdZero_DisablesImbalanceBranch(t *testing.T) {
 		[2]string{"127.0.0.1:2", nameB})
 	matched := map[string]int{nameA: 90, nameB: 80}
 
-	lb := buildPrefixCacheLB(metrics, 50, 0)
+	lb := buildPrefixCacheLB(metrics, 0)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2"}
 
 	got := lb.selectFromMatched(urls, matched, urlMap)
@@ -223,7 +223,7 @@ func TestSelectFromMatched_SinglePod_FallsToBalancedBranch(t *testing.T) {
 	urlMap := buildURLMap([2]string{"127.0.0.1:1", nameA})
 	matched := map[string]int{nameA: 90}
 
-	lb := buildPrefixCacheLB(metrics, 50, 1000) // 1000>0 but single pod: spread=0
+	lb := buildPrefixCacheLB(metrics, 1000) // 1000>0 but single pod: spread=0
 	urls := []string{"127.0.0.1:1"}
 
 	got := lb.selectFromMatched(urls, matched, urlMap)
@@ -245,7 +245,7 @@ func TestSelectFromMatched_AllPodsEqualTokenNum(t *testing.T) {
 		[2]string{"127.0.0.1:3", nameC})
 	matched := map[string]int{nameA: 80, nameB: 90, nameC: 70}
 
-	lb := buildPrefixCacheLB(metrics, 50, 1000)
+	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3"}
 
 	got := lb.selectFromMatched(urls, matched, urlMap)
@@ -267,7 +267,7 @@ func TestSelectFromMatched_EqualTokenNumTiebreak_Deterministic(t *testing.T) {
 		[2]string{"127.0.0.1:2", nameB})
 	matched := map[string]int{nameA: 80, nameB: 80}
 
-	lb := buildPrefixCacheLB(metrics, 50, 1000)
+	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2"}
 
 	got := lb.selectFromMatched(urls, matched, urlMap)
@@ -326,7 +326,6 @@ func TestSelectFromMatched_PartialMetrics(t *testing.T) {
 		baseLoadBalancer: baseLoadBalancer{
 			metricProvider: &filteredMockProvider{byURL: byURL},
 		},
-		matchThreshold:         50,
 		loadImbalanceThreshold: 1000,
 	}
 	urlMap := buildURLMap(
