@@ -27,6 +27,11 @@ type prefixCacheLoadBalancer struct {
 	renderClient   *renderclient.RenderClient
 	fallbackLB     loadBalancer
 	matchThreshold int
+	// loadImbalanceThreshold is the token-load imbalance threshold: when
+	// max(TokenNum)-min(TokenNum) across all ready pods exceeds it, the
+	// scheduler prioritizes load balancing (lowest-load pod) over prefix
+	// cache hit. 0 disables the intervention.
+	loadImbalanceThreshold int
 }
 
 func newPrefixCacheLB(metricProvider MetricProvider, params *AlgorithmParams) (*prefixCacheLoadBalancer, error) {
@@ -57,9 +62,10 @@ func newPrefixCacheLB(metricProvider MetricProvider, params *AlgorithmParams) (*
 			metricProvider:   metricProvider,
 			instanceRoleType: params.InstanceRoleType,
 		},
-		prefixCacheMgr: pcMgr,
-		matchThreshold: pcConfig.MatchThreshold,
-		fallbackLB:     fallback,
+		prefixCacheMgr:         pcMgr,
+		matchThreshold:         pcConfig.MatchThreshold,
+		loadImbalanceThreshold: params.LoadImbalanceThreshold,
+		fallbackLB:             fallback,
 	}, nil
 }
 
@@ -202,14 +208,30 @@ func (lb *prefixCacheLoadBalancer) fallback(request *ScheduleRequestMsg, options
 	return lb.fallbackLB.schedule(request, options)
 }
 
+// selectFromMatched implements the prefix-match load-balancing-aware
+// scheduling algorithm.
+//
+// It evaluates ALL ready pods (not just the matched subset):
+//  1. Compute the token-load spread = max(TokenNum) - min(TokenNum) across all
+//     ready pods.
+//  2. If the spread exceeds loadImbalanceThreshold (load明显不均衡): schedule to
+//     the lowest-load pod to rebalance, regardless of prefix match. This
+//     avoids hot-spot pods.
+//  3. Otherwise (load基本均衡): among pods whose prefix match rate meets
+//     matchThreshold, schedule to the one with the highest match rate; ties
+//     are broken by lower token load. This maximizes "以存代算" (compute via
+//     stored KV cache). If no pod reaches the gate, return nil so schedule()
+//     falls back to leastConn (which picks the lowest-load pod).
+//
+// loadImbalanceThreshold == 0 disables the imbalance branch: only the
+// prefix-match path runs, preserving the original prefix-only behavior.
 func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched map[string]int, urlToInstanceName map[string]string) *InstanceMetric {
 	type instanceScore struct {
 		metric       *InstanceMetric
 		instanceName string
 		matchPercent int
+		hasMatch     bool
 	}
-
-	scores := make([]instanceScore, 0, len(matched))
 
 	metrics, err := lb.metricProvider.GetInstanceMetrics(instances, lb.buildQueryOptions(nil))
 	if err != nil || len(metrics) == 0 {
@@ -219,7 +241,8 @@ func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched
 
 	// matched key is instanceName (e.g., "worker-19000")
 	// metrics InsUrl is URL (e.g., "127.0.0.1:19000")
-	// Use the pre-built urlToInstanceName map passed from schedule() to avoid redundant lookups
+	// Use the pre-built urlToInstanceName map passed from schedule() to avoid redundant lookups.
+	scores := make([]instanceScore, 0, len(metrics))
 	for _, m := range metrics {
 		instanceName, ok := urlToInstanceName[m.InsUrl]
 		if !ok {
@@ -228,41 +251,73 @@ func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched
 		}
 
 		matchPercent, hasMatch := matched[instanceName]
-		if !hasMatch {
-			log.Debug().Msgf("[prefixCache] selectFromMatched: instance %s (url=%s) not in matched map",
-				instanceName, m.InsUrl)
-			continue
+		if hasMatch {
+			log.Debug().Msgf("[prefixCache] selectFromMatched: matched instance %s (url=%s) with %d%%, load=%d",
+				instanceName, m.InsUrl, matchPercent, m.TokenNum)
+		} else {
+			log.Debug().Msgf("[prefixCache] selectFromMatched: instance %s (url=%s) no prefix match, load=%d",
+				instanceName, m.InsUrl, m.TokenNum)
+			matchPercent = 0
 		}
-
-		log.Debug().Msgf("[prefixCache] selectFromMatched: matched instance %s (url=%s) with %d%%",
-			instanceName, m.InsUrl, matchPercent)
 
 		scores = append(scores, instanceScore{
 			metric:       m,
 			instanceName: instanceName,
 			matchPercent: matchPercent,
+			hasMatch:     hasMatch,
 		})
 	}
 
 	if len(scores) == 0 {
-		log.Info().Msgf("[prefixCache] selectFromMatched: no matching instances found")
+		log.Info().Msgf("[prefixCache] selectFromMatched: no ready instances with metrics")
 		return nil
 	}
 
-	//when the matchPercent of instances are same, choose the lower ReqNum one
+	// --- Branch 1: load imbalance ---
+	// Compute the token-load spread across ALL ready pods. If it exceeds the
+	// threshold, prioritize load balancing: pick the lowest-load pod.
+	if lb.loadImbalanceThreshold > 0 {
+		minIdx := 0
+		maxIdx := 0
+		for i := 1; i < len(scores); i++ {
+			if scores[i].metric.TokenNum < scores[minIdx].metric.TokenNum {
+				minIdx = i
+			}
+			if scores[i].metric.TokenNum > scores[maxIdx].metric.TokenNum {
+				maxIdx = i
+			}
+		}
+		spread := scores[maxIdx].metric.TokenNum - scores[minIdx].metric.TokenNum
+		if spread > lb.loadImbalanceThreshold {
+			log.Info().Msgf("[prefixCache] selectFromMatched: load imbalanced (spread=%d > threshold=%d), "+
+				"selecting lowest-load instance %s (load=%d, match=%d%%)",
+				spread, lb.loadImbalanceThreshold, scores[minIdx].instanceName,
+				scores[minIdx].metric.TokenNum, scores[minIdx].matchPercent)
+			return scores[minIdx].metric
+		}
+		log.Debug().Msgf("[prefixCache] selectFromMatched: load balanced (spread=%d <= threshold=%d), "+
+			"selecting by prefix match rate", spread, lb.loadImbalanceThreshold)
+	}
+
+	// --- Branch 2: load balanced -> prioritize prefix cache hit ---
+	// Among pods that reached the matchThreshold gate, sort by matchPercent
+	// desc then TokenNum asc (lower load wins on ties). If none meets the gate,
+	// return nil so schedule() falls back to leastConn.
 	sort.Slice(scores, func(i, j int) bool {
 		if scores[i].matchPercent != scores[j].matchPercent {
 			return scores[i].matchPercent > scores[j].matchPercent
 		}
-		return scores[i].metric.ReqNum < scores[j].metric.ReqNum
+		return scores[i].metric.TokenNum < scores[j].metric.TokenNum
 	})
 
 	if scores[0].matchPercent >= lb.matchThreshold {
-		log.Info().Msgf("[prefixCache] selectFromMatched: selected instance %s with %d%% match",
-			scores[0].instanceName, scores[0].matchPercent)
+		log.Info().Msgf("[prefixCache] selectFromMatched: selected instance %s with %d%% match (load=%d)",
+			scores[0].instanceName, scores[0].matchPercent, scores[0].metric.TokenNum)
 		return scores[0].metric
 	}
 
+	log.Info().Msgf("[prefixCache] selectFromMatched: top match %d%% below threshold %d, deferring to fallback",
+		scores[0].matchPercent, lb.matchThreshold)
 	return nil
 }
 
