@@ -96,7 +96,7 @@ func TestSelectFromMatched_LoadImbalanced_SelectsLowestLoad(t *testing.T) {
 	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3"}
 
-	got := lb.selectFromMatched(urls, matched, urlMap)
+	got := lb.selectFromMatched(urls, matched, urlMap, nil)
 	assert.NotNil(t, got)
 	assert.Equal(t, "127.0.0.1:2", got.InsUrl, "should pick lowest-load pod B")
 }
@@ -119,7 +119,7 @@ func TestSelectFromMatched_LoadBalanced_SelectsHighestMatch(t *testing.T) {
 	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3"}
 
-	got := lb.selectFromMatched(urls, matched, urlMap)
+	got := lb.selectFromMatched(urls, matched, urlMap, nil)
 	assert.NotNil(t, got)
 	assert.Equal(t, "127.0.0.1:2", got.InsUrl, "should pick highest-match pod B (90%)")
 }
@@ -142,7 +142,7 @@ func TestSelectFromMatched_Balanced_TiebreakByLowerLoad(t *testing.T) {
 	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3"}
 
-	got := lb.selectFromMatched(urls, matched, urlMap)
+	got := lb.selectFromMatched(urls, matched, urlMap, nil)
 	assert.NotNil(t, got)
 	assert.Equal(t, "127.0.0.1:2", got.InsUrl, "should tiebreak to lower-load pod B (800)")
 }
@@ -164,7 +164,7 @@ func TestSelectFromMatched_Balanced_LowMatchStillSelectsTopMatch(t *testing.T) {
 	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2"}
 
-	got := lb.selectFromMatched(urls, matched, urlMap)
+	got := lb.selectFromMatched(urls, matched, urlMap, nil)
 	assert.NotNil(t, got)
 	assert.Equal(t, "127.0.0.1:1", got.InsUrl, "low match still selects top-match pod A")
 }
@@ -185,7 +185,7 @@ func TestSelectFromMatched_Imbalanced_SelectsUnmatchedLowestLoad(t *testing.T) {
 	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2"}
 
-	got := lb.selectFromMatched(urls, matched, urlMap)
+	got := lb.selectFromMatched(urls, matched, urlMap, nil)
 	assert.NotNil(t, got)
 	assert.Equal(t, "127.0.0.1:2", got.InsUrl, "should pick unmatched lowest-load pod B")
 }
@@ -207,7 +207,7 @@ func TestSelectFromMatched_ThresholdZero_DisablesImbalanceBranch(t *testing.T) {
 	lb := buildPrefixCacheLB(metrics, 0)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2"}
 
-	got := lb.selectFromMatched(urls, matched, urlMap)
+	got := lb.selectFromMatched(urls, matched, urlMap, nil)
 	assert.NotNil(t, got)
 	assert.Equal(t, "127.0.0.1:1", got.InsUrl,
 		"threshold=0 disables imbalance branch -> pick highest-match A (90%)")
@@ -226,7 +226,7 @@ func TestSelectFromMatched_SinglePod_FallsToBalancedBranch(t *testing.T) {
 	lb := buildPrefixCacheLB(metrics, 1000) // 1000>0 but single pod: spread=0
 	urls := []string{"127.0.0.1:1"}
 
-	got := lb.selectFromMatched(urls, matched, urlMap)
+	got := lb.selectFromMatched(urls, matched, urlMap, nil)
 	assert.NotNil(t, got)
 	assert.Equal(t, "127.0.0.1:1", got.InsUrl, "single pod above gate should be selected")
 }
@@ -248,7 +248,7 @@ func TestSelectFromMatched_AllPodsEqualTokenNum(t *testing.T) {
 	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3"}
 
-	got := lb.selectFromMatched(urls, matched, urlMap)
+	got := lb.selectFromMatched(urls, matched, urlMap, nil)
 	assert.NotNil(t, got)
 	assert.Equal(t, "127.0.0.1:2", got.InsUrl, "equal load -> highest match B (90%)")
 }
@@ -270,7 +270,7 @@ func TestSelectFromMatched_EqualTokenNumTiebreak_Deterministic(t *testing.T) {
 	lb := buildPrefixCacheLB(metrics, 1000)
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2"}
 
-	got := lb.selectFromMatched(urls, matched, urlMap)
+	got := lb.selectFromMatched(urls, matched, urlMap, nil)
 	assert.NotNil(t, got)
 	assert.Equal(t, "127.0.0.1:1", got.InsUrl,
 		"full tie -> deterministic instanceName tiebreak picks worker-1 (lexically smaller)")
@@ -335,7 +335,7 @@ func TestSelectFromMatched_PartialMetrics(t *testing.T) {
 	matched := map[string]int{nameA: 90, nameB: 80} // worker-3 unmatched anyway
 	urls := []string{"127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3"}
 
-	got := lb.selectFromMatched(urls, matched, urlMap)
+	got := lb.selectFromMatched(urls, matched, urlMap, nil)
 	assert.NotNil(t, got)
 	// spread over {A(5000),B(1000)} = 4000 > 1000 -> lowest load -> B(1000)
 	assert.Equal(t, "127.0.0.1:2", got.InsUrl,
