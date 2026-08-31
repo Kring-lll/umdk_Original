@@ -1,0 +1,28 @@
+# case 14: poolMaxSz 瀛楁姝ｅ悜鏄犲皠 + 6G 纭笂闄愯竟鐣?# 楠岃瘉宸ュ叿淇鍚?init poolMaxSz= 鍙傛暟琚纭В鏋愩€佷紶缁?# cfg.umq_buf_pool_max_size, 骞惰 umq_qbuf_pool_init 鎺ュ彈銆?#
+# 鐢熶骇璇箟瀵圭収:
+#   cfg.umq_buf_pool_max_size  鈫? g_qbuf_pool.expansion_mem_size_max
+#                                = umq_buf_pool_max_size - g_total_len
+#   榛樿鍊? 0 鈫?2GB (QBUF_POOL_DEFAULT_EXPANSION_MEM_SIZE)
+#   纭笂闄? 6GB (QBUF_POOL_MEM_SIZE_MAX, umq_qbuf_pool.c:1356)
+#
+# 宸ュ叿鐜板湪璧版爣鍑?API 閾捐矾 (umq_qbuf_pool_cfg_check 鈫?umq_io_buf_malloc
+# 鈫?umq_qbuf_pool_init), g_total_len 鐢?umq_io_buf_malloc 姝ｇ‘璁剧疆,
+# expansion_mem_size_max = poolMaxSz - g_total_len, 涓庣敓浜т竴鑷淬€?#
+# 閫€鍑虹爜: 0 (鎵€鏈夊懡浠ゆ垚鍔?
+init count=2 blockSizes=4K,64K mode=split scaleCap=on poolMaxSz=6G threads=1
+# Expect stdout:
+#   pool inited ok (threads=1 count=2 mode=split
+#                  scaleCap=on poolMaxSz=6442450944 expSlotSz=0
+#                  blockSizes=4096,65536 blockCounts=auto tlsDepths=default ...)
+#                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 6G 杈圭晫鍊艰鎺ュ彈, ==6G 閫氳繃
+
+# info 娈? Pool Config [Small] 搴旀樉绀?
+#   expansion_mem_size_max = poolMaxSz - allocSz (鍑忓垵濮嬫睜澶у皬)
+#   expansion_size        = 33554432    (= 32M, expSlotSz=0 鏃跺彇榛樿)
+#   exp_total_mem_pool_size = 0        (鏃?expansion 瑙﹀彂)
+info
+
+# alloc + free 楠岃瘉 init 鎴愬姛璺緞涓嬫睜鍙敤
+thread_0 alloc 4096 100
+thread_0 free all
+status

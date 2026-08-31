@@ -1,75 +1,65 @@
-# qbuf_pool_tool 测试使用
+# qbuf_pool_tool 娴嬭瘯浣跨敤
 
-## 1. 概述
+## 1. 姒傝堪
 
-`qbuf_pool_tool` 是 umq 多级 size_class qbuf pool 的文件驱动测试工具。一个 `.txt` 脚本 = 一个用例，主线程读脚本分发命令到工作线程执行。聚焦验证多级池核心特性：多级 sc 路由、TLS 字节预算、fetch/return 生命周期、多线程 TLS 隔离、泄漏检测。
-
-## 2. 构建与运行
-
-独立 cmake 项目，不依赖顶层 hcom cmake、不需要 `BUILD_TESTS=ON`、不需要装 gtest/mockcpp。从仓库根：
+`qbuf_pool_tool` 鏄?umq 澶氱骇 size_class qbuf pool 鐨勬枃浠堕┍鍔ㄦ祴璇曞伐鍏枫€備竴涓?`.txt` 鑴氭湰 = 涓€涓敤渚嬶紝涓荤嚎绋嬭鑴氭湰鍒嗗彂鍛戒护鍒板伐浣滅嚎绋嬫墽琛屻€傝仛鐒﹂獙璇佸绾ф睜鏍稿績鐗规€э細澶氱骇 sc 璺敱銆乀LS 瀛楄妭棰勭畻銆乫etch/return 鐢熷懡鍛ㄦ湡銆佸绾跨▼ TLS 闅旂銆佹硠婕忔娴嬨€?
+## 2. 鏋勫缓涓庤繍琛?
+鐙珛 cmake 椤圭洰锛屼笉渚濊禆椤跺眰 hcom cmake銆佷笉闇€瑕?`BUILD_TESTS=ON`銆佷笉闇€瑕佽 gtest/mockcpp銆備粠浠撳簱鏍癸細
 
 ```bash
-cmake -S test/hcom/unit_test/umq/qbuf_pool_tool -B build_qbuf_tool
+cmake -S test/urpc/umq/qbuf_pool_tool -B build_qbuf_tool
 cmake --build build_qbuf_tool -j
 ./build_qbuf_tool/qbuf_pool_tool <script.txt>
 ```
 
-跑批：
-```bash
-for f in test/hcom/unit_test/umq/qbuf_pool_tool/cases/*.txt; do
+璺戞壒锛?```bash
+for f in test/urpc/umq/qbuf_pool_tool/cases/*.txt; do
     echo "=== $(basename $f) ==="
     ./build_qbuf_tool/qbuf_pool_tool "$f"
 done
 ```
 
-退出码：0=全部命令成功，非0=有命令失败。
+閫€鍑虹爜锛?=鍏ㄩ儴鍛戒护鎴愬姛锛岄潪0=鏈夊懡浠ゅけ璐ャ€?
+## 3. 鍛戒护闆?
+姣忚涓€鍛戒护,`#` 寮€澶存敞閲?鍚?inline `#`),绌鸿蹇界暐銆?
+### 3.1 鍗曡鍛戒护
 
-## 3. 命令集
-
-每行一命令,`#` 开头注释(含 inline `#`),空行忽略。
-
-### 3.1 单行命令
-
-| 命令 | 形式 | 执行者 | 说明 |
+| 鍛戒护 | 褰㈠紡 | 鎵ц鑰?| 璇存槑 |
 |---|---|---|---|
-| `init` | `init count=2 blockSizes=4K,64K mode=split scaleCap=on totalSz=200M tlsBudget=0 poolMaxSz=0 expSlotSz=0 weights=2,1 escape=on expThreshold=0 tlsExpandBudget=0 threads=1` | 主线程 | key=value 顺序无关,缺省用默认;`threads=N` 启动 N 工作线程。**下限:threads≥1**(无上限,但 threads>8 时 spinlock 自旋烧 CPU,见 case_13)。`blockSizes=` 必填(无 `mult` 几何级数回退),`weights=` 缺省时生产代码兜底 `{1,1}` 等权 |
-| `thread_K alloc` | `thread_K alloc <size> [num=1] [headroom=0]` | worker K | 分配,size 支持 `4K`/`64K`/`1M` 后缀;输出每个 buf 的 sc/ptr/buf_size。**上限:num≤1000** |
-| `thread_K free` | `thread_K free <orig_idx>` 或 `thread_K free all` | worker K | `orig_idx` 是 buf 的**稳定索引**(alloc 时分配,单调递增,erase 不前移);`free all` 清该线程全部并重置 orig_idx 计数器 |
-| `info` | `info` | 主线程 | 全量状态(开发调试用,~50 行) |
-| `status` | `status` | 主线程 | 精简状态(测试用,3 段一个框) |
-| `quit` | `quit` | 主线程 | 提前退出(触发 Cleanup:泄漏检查 + join workers) |
+| `init` | `init count=2 blockSizes=4K,64K mode=split scaleCap=on tlsBudget=0 poolMaxSz=0 expSlotSz=0 weights=2,1 escape=on expThreshold=0 tlsExpandBudget=0 threads=1` | 涓荤嚎绋?| key=value 椤哄簭鏃犲叧,缂虹渷鐢ㄩ粯璁?`threads=N` 鍚姩 N 宸ヤ綔绾跨▼銆?*涓嬮檺:threads鈮?**(鏃犱笂闄?浣?threads>8 鏃?spinlock 鑷棆鐑?CPU,瑙?case_13)銆俙blockSizes=` 蹇呭～(鏃?`mult` 鍑犱綍绾ф暟鍥為€€),`weights=` 缂虹渷鏃剁敓浜т唬鐮佸厹搴?`{1,1}` 绛夋潈 |
+| `thread_K alloc` | `thread_K alloc <size> [num=1] [headroom=0]` | worker K | 鍒嗛厤,size 鏀寔 `4K`/`64K`/`1M` 鍚庣紑;杈撳嚭姣忎釜 buf 鐨?sc/ptr/buf_size銆?*涓婇檺:num鈮?000** |
+| `thread_K free` | `thread_K free <orig_idx>` 鎴?`thread_K free all` | worker K | `orig_idx` 鏄?buf 鐨?*绋冲畾绱㈠紩**(alloc 鏃跺垎閰?鍗曡皟閫掑,erase 涓嶅墠绉?;`free all` 娓呰绾跨▼鍏ㄩ儴骞堕噸缃?orig_idx 璁℃暟鍣?|
+| `info` | `info` | 涓荤嚎绋?| 鍏ㄩ噺鐘舵€?寮€鍙戣皟璇曠敤,~50 琛? |
+| `status` | `status` | 涓荤嚎绋?| 绮剧畝鐘舵€?娴嬭瘯鐢?3 娈典竴涓) |
+| `quit` | `quit` | 涓荤嚎绋?| 鎻愬墠閫€鍑?瑙﹀彂 Cleanup:娉勬紡妫€鏌?+ join workers) |
 
-**init 参数对照表(对应 cfg 字段)**:
+**init 鍙傛暟瀵圭収琛?瀵瑰簲 cfg 瀛楁)**:
 
-| 参数 | cfg 字段 | 默认值 | 语义 |
+| 鍙傛暟 | cfg 瀛楁 | 榛樿鍊?| 璇箟 |
 |---|---|---|---|
-| `totalSz` | `total_size` | 200M | 初始预分配池大小 |
-| `poolMaxSz` | `umq_buf_pool_max_size` | 2GB(=0 时) | **总内存 ceiling** = 初始池 + 全部 expansion 槽。硬上限 6GB(`scaleCap=on` 时 `poolMaxSz>6G` 会被 umq_qbuf_pool_init 拒绝) |
-| `expSlotSz` | `expansion_size` | 32MB(=0 时) | **per-slot 目标内存**(每次 expansion 想"加"多少)。经量化(÷blk_size→÷sub_slot_blk_count→×2MB)后变成实际 `slot.total_buf_size`,与 `expSlotSz` 不严格相等 |
-| `tlsBudget` | `tls_pool_mem_budget` | 96MB(=0 时) | 全局 TLS bytes cap |
-| `blockSizes` | `explicit_block_sizes[]` | 未设置→mult 几何级数回退 | **显式 per-SC block_size 数组**(commit 600d24a 后替代 `size_class_step_multiplier`)。格式:`blockSizes=4K,64K` 或 `4K,32K,128K`,逗号分隔,token 数必须等于 `count`。生产路径见 `umq_backend.cpp:67-69` memcpy `UmqSetting::UMQ_EXPLICIT_BLOCK_SIZES = {4096, 65536}`。**未设置时**工具用 `mult` 计算几何级数 `base * mult^i`(默认 `mult=16 base=4K` → `{4K, 64K}` 巧合与生产一致),但只能表达几何级数——非几何分布(如 `{4K, 32K, 128K}`)必须用 `blockSizes=`。token 支持 K/M/G 后缀(`ParseSize`) |
-| `weights` | `per_sc_weights[]` | 未设置→全 0→生产兜底 {1,1} | **per-SC 分配权重数组**(commit 600d24a 后替代 `lazy_init_block_size_threshold`)。格式:`weights=2,1` 或 `1,1,0`,逗号分隔,token 数必须等于 `count`。**特殊值 0 = lazy SC**(init 时不预分配,首次 alloc 触发 expansion,替代旧的 `lazyThreshold` 阈值机制,改为 per-SC 粒度控制)。生产路径见 `umq_backend.cpp:70-72` memcpy `UmqSetting::UMQ_PER_SC_WEIGHTS = {2, 1}`(4K 拿 2x 份额避免 expansion)。**未设置时** `cfg.per_sc_weights[]` 全 0,生产代码 `umq_qbuf_pool.c:1595-1597` 检测全 0 → 回退默认 `{1, 1}` 等权 |
-| `escape` | `disable_malloc_escape`(取反) | on(=启用 escape) | **malloc escape 开关**。`escape=off` 时 `cfg.disable_malloc_escape=true`,escape 路径关闭:`umq_qbuf_escape_alloc` 立即返回 EINVAL(`umq_qbuf_pool.c:2034`)、`umq_normal_qbuf_alloc` 跳过内部 escape 分支(`:2143`/`:2182`)。用于测试 pool 耗尽时返回 ENOMEM 而非 fallback 到 malloc escape 的场景 |
-| `expThreshold` | `expansion_threshold` | 0(→生产默认 30) | **expansion 触发水位百分比**。控制 `trigger_expand_block_num = expansion_block_count * threshold / 100`。0 时生产代码取 `QBUF_POOL_DEFAULT_EXPANSION_THRESHOLD`(=30%)。范围 **[1, 100]**,越界 init 返回 EINVAL(`umq_qbuf_pool.c:1225-1228`)。高值(如 90)= expansion 更早触发;低值(如 5)= 滞后触发 |
-| `tlsExpandBudget` | `tls_expand_mem_budget` | 0(→生产默认 7/8 tlsBudget) | **per-thread TLS bytes cap**。0 时生产代码取 `umq_qbuf_pool_expand_max(tls_pool_mem_budget)` = 7/8 的 `tlsBudget`(`umq_qbuf_pool.c:1214-1216`)。控制 TLS fetch 截断:`local_total_bytes + delta > tlsExpandBudget` 时截断 delta(`:1666-1669`)。与 `tlsBudget`(全局所有线程总 cap)独立语义 |
-| `count`/`mode`/`scaleCap`/`threads` | (对应字段) | 见示例 | `count` 是 SC 数量(1..UMQ_SIZE_CLASS_MAX,默认 2);**`mult` 和 `base` 参数已移除**——`base` 从 `blockSizes[0]` 自动推导(经 `BlkSizeToEnum` 反向映射) |
+| `poolMaxSz` | `umq_buf_pool_max_size` | 2GB(=0 鏃? | **鎬诲唴瀛?ceiling** = 鍒濆姹?+ 鍏ㄩ儴 expansion 妲姐€傜‖涓婇檺 6GB(`scaleCap=on` 鏃?`poolMaxSz>6G` 浼氳 umq_qbuf_pool_init 鎷掔粷) |
+| `expSlotSz` | `expansion_size` | 32MB(=0 鏃? | **per-slot 鐩爣鍐呭瓨**(姣忔 expansion 鎯?鍔?澶氬皯)銆傜粡閲忓寲(梅blk_size鈫捗穝ub_slot_blk_count鈫捗?MB)鍚庡彉鎴愬疄闄?`slot.total_buf_size`,涓?`expSlotSz` 涓嶄弗鏍肩浉绛?|
+| `tlsBudget` | `tls_pool_mem_budget` | 96MB(=0 鏃? | 鍏ㄥ眬 TLS bytes cap |
+| `blockSizes` | `explicit_block_sizes[]` | 鏈缃啋mult 鍑犱綍绾ф暟鍥為€€ | **鏄惧紡 per-SC block_size 鏁扮粍**(commit 600d24a 鍚庢浛浠?`size_class_step_multiplier`)銆傛牸寮?`blockSizes=4K,64K` 鎴?`4K,32K,128K`,閫楀彿鍒嗛殧,token 鏁板繀椤荤瓑浜?`count`銆傜敓浜ц矾寰勮 `umq_backend.cpp:67-69` memcpy `UmqSetting::UMQ_EXPLICIT_BLOCK_SIZES = {4096, 65536}`銆?*鏈缃椂**宸ュ叿鐢?`mult` 璁＄畻鍑犱綍绾ф暟 `base * mult^i`(榛樿 `mult=16 base=4K` 鈫?`{4K, 64K}` 宸у悎涓庣敓浜т竴鑷?,浣嗗彧鑳借〃杈惧嚑浣曠骇鏁扳€斺€旈潪鍑犱綍鍒嗗竷(濡?`{4K, 32K, 128K}`)蹇呴』鐢?`blockSizes=`銆倀oken 鏀寔 K/M/G 鍚庣紑(`ParseSize`) |
+| `weights` | `per_sc_weights[]` | 鏈缃啋鍏?0鈫掔敓浜у厹搴?{1,1} | **per-SC 鍒嗛厤鏉冮噸鏁扮粍**(commit 600d24a 鍚庢浛浠?`lazy_init_block_size_threshold`)銆傛牸寮?`weights=2,1` 鎴?`1,1,0`,閫楀彿鍒嗛殧,token 鏁板繀椤荤瓑浜?`count`銆?*鐗规畩鍊?0 = lazy SC**(init 鏃朵笉棰勫垎閰?棣栨 alloc 瑙﹀彂 expansion,鏇夸唬鏃х殑 `lazyThreshold` 闃堝€兼満鍒?鏀逛负 per-SC 绮掑害鎺у埗)銆傜敓浜ц矾寰勮 `umq_backend.cpp:70-72` memcpy `UmqSetting::UMQ_PER_SC_WEIGHTS = {2, 1}`(4K 鎷?2x 浠介閬垮厤 expansion)銆?*鏈缃椂** `cfg.per_sc_weights[]` 鍏?0,鐢熶骇浠ｇ爜 `umq_qbuf_pool.c:1595-1597` 妫€娴嬪叏 0 鈫?鍥為€€榛樿 `{1, 1}` 绛夋潈 |
+| `escape` | `disable_malloc_escape`(鍙栧弽) | on(=鍚敤 escape) | **malloc escape 寮€鍏?*銆俙escape=off` 鏃?`cfg.disable_malloc_escape=true`,escape 璺緞鍏抽棴:`umq_qbuf_escape_alloc` 绔嬪嵆杩斿洖 EINVAL(`umq_qbuf_pool.c:2034`)銆乣umq_normal_qbuf_alloc` 璺宠繃鍐呴儴 escape 鍒嗘敮(`:2143`/`:2182`)銆傜敤浜庢祴璇?pool 鑰楀敖鏃惰繑鍥?ENOMEM 鑰岄潪 fallback 鍒?malloc escape 鐨勫満鏅?|
+| `expThreshold` | `expansion_threshold` | 0(鈫掔敓浜ч粯璁?30) | **expansion 瑙﹀彂姘翠綅鐧惧垎姣?*銆傛帶鍒?`trigger_expand_block_num = expansion_block_count * threshold / 100`銆? 鏃剁敓浜т唬鐮佸彇 `QBUF_POOL_DEFAULT_EXPANSION_THRESHOLD`(=30%)銆傝寖鍥?**[1, 100]**,瓒婄晫 init 杩斿洖 EINVAL(`umq_qbuf_pool.c:1225-1228`)銆傞珮鍊?濡?90)= expansion 鏇存棭瑙﹀彂;浣庡€?濡?5)= 婊炲悗瑙﹀彂 |
+| `tlsExpandBudget` | `tls_expand_mem_budget` | 0(鈫掔敓浜ч粯璁?7/8 tlsBudget) | **per-thread TLS bytes cap**銆? 鏃剁敓浜т唬鐮佸彇 `umq_qbuf_pool_expand_max(tls_pool_mem_budget)` = 7/8 鐨?`tlsBudget`(`umq_qbuf_pool.c:1214-1216`)銆傛帶鍒?TLS fetch 鎴柇:`local_total_bytes + delta > tlsExpandBudget` 鏃舵埅鏂?delta(`:1666-1669`)銆備笌 `tlsBudget`(鍏ㄥ眬鎵€鏈夌嚎绋嬫€?cap)鐙珛璇箟 |
+| `count`/`mode`/`scaleCap`/`threads` | (瀵瑰簲瀛楁) | 瑙佺ず渚?| `count` 鏄?SC 鏁伴噺(1..UMQ_SIZE_CLASS_MAX,榛樿 2);**`mult` 鍜?`base` 鍙傛暟宸茬Щ闄?*鈥斺€擿base` 浠?`blockSizes[0]` 鑷姩鎺ㄥ(缁?`BlkSizeToEnum` 鍙嶅悜鏄犲皠) |
 
-**`blockSizes=` 历史**(commit 600d24a 后):
-- 旧字段 `size_class_step_multiplier`(单一整数,几何级数 `base * mult^i`)已从 `qbuf_pool_cfg_t` 移除,改为显式数组 `explicit_block_sizes[]`
-- 工具原 `mult` 参数(几何级数回退)和 `base` 参数(显式枚举)已**彻底移除**——`base` 现从 `blockSizes[0]` 自动推导(经 `utils.cpp` 的 `BlkSizeToEnum()` 反向映射,4096→`BLOCK_SIZE_4K` 等),避免冗余参数
-- `blockSizes=` 现为**必填**参数(无回退);token 支持 K/M/G 后缀(`ParseSize`),如 `4K,64K` 或 `4096,65536`
+**`blockSizes=` 鍘嗗彶**(commit 600d24a 鍚?:
+- 鏃у瓧娈?`size_class_step_multiplier`(鍗曚竴鏁存暟,鍑犱綍绾ф暟 `base * mult^i`)宸蹭粠 `qbuf_pool_cfg_t` 绉婚櫎,鏀逛负鏄惧紡鏁扮粍 `explicit_block_sizes[]`
+- 宸ュ叿鍘?`mult` 鍙傛暟(鍑犱綍绾ф暟鍥為€€)鍜?`base` 鍙傛暟(鏄惧紡鏋氫妇)宸?*褰诲簳绉婚櫎**鈥斺€擿base` 鐜颁粠 `blockSizes[0]` 鑷姩鎺ㄥ(缁?`utils.cpp` 鐨?`BlkSizeToEnum()` 鍙嶅悜鏄犲皠,4096鈫抈BLOCK_SIZE_4K` 绛?,閬垮厤鍐椾綑鍙傛暟
+- `blockSizes=` 鐜颁负**蹇呭～**鍙傛暟(鏃犲洖閫€);token 鏀寔 K/M/G 鍚庣紑(`ParseSize`),濡?`4K,64K` 鎴?`4096,65536`
 
-**`weights=` 与旧 `lazyThreshold` 的关系**(commit 600d24a 后):
-- 旧字段 `lazy_init_block_size_threshold`(单一阈值,blk_size ≥ 阈值的 SC 走 lazy)已被移除,改为 per-SC 数组 `per_sc_weights[]`
-- `weights[i]=0` 即该 SC lazy(语义与旧 `lazyThreshold` 等价,但粒度从"阈值"改为"per-SC")
-- 旧用例 `case_16~20` 已从 `lazyThreshold=1M` 迁移到 `weights=1,1,0`(3 SCs,sc2 即 1M lazy)
+**`weights=` 涓庢棫 `lazyThreshold` 鐨勫叧绯?*(commit 600d24a 鍚?:
+- 鏃у瓧娈?`lazy_init_block_size_threshold`(鍗曚竴闃堝€?blk_size 鈮?闃堝€肩殑 SC 璧?lazy)宸茶绉婚櫎,鏀逛负 per-SC 鏁扮粍 `per_sc_weights[]`
+- `weights[i]=0` 鍗宠 SC lazy(璇箟涓庢棫 `lazyThreshold` 绛変环,浣嗙矑搴︿粠"闃堝€?鏀逛负"per-SC")
+- 鏃х敤渚?`case_16~20` 宸蹭粠 `lazyThreshold=1M` 杩佺Щ鍒?`weights=1,1,0`(3 SCs,sc2 鍗?1M lazy)
 
-**`poolMaxSz` 与 `expSlotSz` 的关键区别**(易混):
-- `poolMaxSz` 是**总上限**,经派生 `expansion_mem_size_max = poolMaxSz - 初始池大小` 后,用 CAS 限制 `exp_total_mem_pool_size`(当前已用 expansion 内存)。**这才是真正"限制总内存"的配置**。
-- `expSlotSz` 是**per-slot 目标**,经派生链推算 per-slot 实际分配大小,init 时不与 `poolMaxSz` 做比较。设 `expSlotSz > poolMaxSz` 会让 init 静默通过、运行时 expansion 必败(每次 slot 申请都超 cap)。
-- 验证 expansion 行为时:**先调 `poolMaxSz` 设小**(如 `poolMaxSz=64M`)让 expansion 触发后能很快撞到上限;再用 `expSlotSz` 控制 per-slot 粒度。
-
-### 3.2 并行块:`parallel` / `join`
+**`poolMaxSz` 涓?`expSlotSz` 鐨勫叧閿尯鍒?*(鏄撴贩):
+- `poolMaxSz` 鏄?*鎬讳笂闄?*,缁忔淳鐢?`expansion_mem_size_max = poolMaxSz - 鍒濆姹犲ぇ灏廯 鍚?鐢?CAS 闄愬埗 `exp_total_mem_pool_size`(褰撳墠宸茬敤 expansion 鍐呭瓨)銆?*杩欐墠鏄湡姝?闄愬埗鎬诲唴瀛?鐨勯厤缃?*銆?- `expSlotSz` 鏄?*per-slot 鐩爣**,缁忔淳鐢熼摼鎺ㄧ畻 per-slot 瀹為檯鍒嗛厤澶у皬,init 鏃朵笉涓?`poolMaxSz` 鍋氭瘮杈冦€傝 `expSlotSz > poolMaxSz` 浼氳 init 闈欓粯閫氳繃銆佽繍琛屾椂 expansion 蹇呰触(姣忔 slot 鐢宠閮借秴 cap)銆?- 楠岃瘉 expansion 琛屼负鏃?**鍏堣皟 `poolMaxSz` 璁惧皬**(濡?`poolMaxSz=64M`)璁?expansion 瑙﹀彂鍚庤兘寰堝揩鎾炲埌涓婇檺;鍐嶇敤 `expSlotSz` 鎺у埗 per-slot 绮掑害銆?
+### 3.2 骞惰鍧?`parallel` / `join`
 
 ```
 parallel
@@ -79,16 +69,14 @@ parallel
 join
 ```
 
-**语义**:`parallel` 和 `join` 之间的所有 `thread_K` 命令异步派发(主线程不阻塞等待每个 worker),`join` 时统一收割。多个 worker 真正并发执行——验证生产代码的 spinlock(`block_pool[sc].global_mutex`)、原子计数器(`g_total_local_cap_with_data_bytes`)、CAS(`is_async_expanding`)等并发原语。
+**璇箟**:`parallel` 鍜?`join` 涔嬮棿鐨勬墍鏈?`thread_K` 鍛戒护寮傛娲惧彂(涓荤嚎绋嬩笉闃诲绛夊緟姣忎釜 worker),`join` 鏃剁粺涓€鏀跺壊銆傚涓?worker 鐪熸骞跺彂鎵ц鈥斺€旈獙璇佺敓浜т唬鐮佺殑 spinlock(`block_pool[sc].global_mutex`)銆佸師瀛愯鏁板櫒(`g_total_local_cap_with_data_bytes`)銆丆AS(`is_async_expanding`)绛夊苟鍙戝師璇€?
+**纭鍒?*:
+1. 鍧楀唴鍙兘鏀?`thread_K alloc/free` 鍛戒护,绂佹 `init/info/status/quit/repeat/parallel`
+2. 鍚屼竴 worker 鍦ㄥ悓涓€ `parallel` 鍧楀唴涓嶈兘鏃?alloc 鍙?free(閬垮厤 `w.alloced` 涓荤嚎绋?drain 涓?worker free 鐨?race)銆傞渶瑕?alloc+free 鏃剁敤涓や釜鐙珛 parallel 鍧?3. 鍚屼竴 worker 涓嶈兘鍦ㄥ悓涓€ parallel 鍧楀唴鍑虹幇涓ゆ(鐢ㄥ崟鏉?`alloc num=N` 浠ｆ浛)
+4. `parallel` 涓嶈兘宓屽 `parallel`
+5. `info`/`status` 蹇呴』鍦?`join` 涔嬪悗璋冪敤(姝ゆ椂鎵€鏈?worker 宸插仠,DFX 鎷垮埌绋冲畾蹇収)
 
-**硬规则**:
-1. 块内只能放 `thread_K alloc/free` 命令,禁止 `init/info/status/quit/repeat/parallel`
-2. 同一 worker 在同一 `parallel` 块内不能既 alloc 又 free(避免 `w.alloced` 主线程 drain 与 worker free 的 race)。需要 alloc+free 时用两个独立 parallel 块
-3. 同一 worker 不能在同一 parallel 块内出现两次(用单条 `alloc num=N` 代替)
-4. `parallel` 不能嵌套 `parallel`
-5. `info`/`status` 必须在 `join` 之后调用(此时所有 worker 已停,DFX 拿到稳定快照)
-
-### 3.3 重复块:`repeat N` / `end`
+### 3.3 閲嶅鍧?`repeat N` / `end`
 
 ```
 repeat 1000
@@ -99,16 +87,14 @@ repeat 1000
 end
 ```
 
-**语义**:`repeat N` 和 `end` 之间的内容串行执行 N 次。**上限:N≤10000**。每次迭代可以是单行 `thread_K` 命令(串行)或一个嵌套的 `parallel/join` 块。
+**璇箟**:`repeat N` 鍜?`end` 涔嬮棿鐨勫唴瀹逛覆琛屾墽琛?N 娆°€?*涓婇檺:N鈮?0000**銆傛瘡娆¤凯浠ｅ彲浠ユ槸鍗曡 `thread_K` 鍛戒护(涓茶)鎴栦竴涓祵濂楃殑 `parallel/join` 鍧椼€?
+**纭鍒?*:
+1. 鍧楀唴绂佹 `info/status/init/quit`(妫€鏌ュ畧鎭掑湪 repeat 涔嬪悗鍋?
+2. 鍧楀唴绂佹宓屽 `repeat` 鎴?`stress_repeat`
+3. 鍧楀唴鏈€澶氫竴涓?`parallel` 瀛愬潡
+4. 鍗曟 race 姒傜巼浣?鐢?`repeat` 鏀惧ぇ绔炴€佺獥鍙?5. 鍧楀唴鍏佽 `snapshot N` 鎸囦护(瑙?搂3.5)
 
-**硬规则**:
-1. 块内禁止 `info/status/init/quit`(检查守恒在 repeat 之后做)
-2. 块内禁止嵌套 `repeat` 或 `stress_repeat`
-3. 块内最多一个 `parallel` 子块
-4. 单次 race 概率低,用 `repeat` 放大竞态窗口
-5. 块内允许 `snapshot N` 指令(见 §3.5)
-
-### 3.4 长稳重复块:`stress_repeat` / `end`(无限循环)
+### 3.4 闀跨ǔ閲嶅鍧?`stress_repeat` / `end`(鏃犻檺寰幆)
 
 ```
 stress_repeat
@@ -124,32 +110,31 @@ stress_repeat
 end
 ```
 
-**语义**:`stress_repeat` 和 `end` 之间的内容**无限循环执行**,直到:
-1. **SIGINT/SIGTERM**(Ctrl-C 或 `kill -INT <pid>`):优雅退出 — 当前 iter 完成后 break,打印 `[stress] interrupted by signal at iter N` + 最终 summary,parser 继续下一行(可后续 `status`/`quit`)。退出码 0
-2. **ExecuteBlockLines 返回非 0**(alloc/free 失败):立即 abort,退出码 1
-3. **第二次 Ctrl-C**:`OnStopSignal` 重装默认 handler 并 raise,进程立即死(用于 cleanup 卡死场景)
+**璇箟**:`stress_repeat` 鍜?`end` 涔嬮棿鐨勫唴瀹?*鏃犻檺寰幆鎵ц**,鐩村埌:
+1. **SIGINT/SIGTERM**(Ctrl-C 鎴?`kill -INT <pid>`):浼橀泤閫€鍑?鈥?褰撳墠 iter 瀹屾垚鍚?break,鎵撳嵃 `[stress] interrupted by signal at iter N` + 鏈€缁?summary,parser 缁х画涓嬩竴琛?鍙悗缁?`status`/`quit`)銆傞€€鍑虹爜 0
+2. **ExecuteBlockLines 杩斿洖闈?0**(alloc/free 澶辫触):绔嬪嵆 abort,閫€鍑虹爜 1
+3. **绗簩娆?Ctrl-C**:`OnStopSignal` 閲嶈榛樿 handler 骞?raise,杩涚▼绔嬪嵆姝?鐢ㄤ簬 cleanup 鍗℃鍦烘櫙)
 
-**与 `repeat` 的关键区别**(memory-bounded 设计):
-1. **不记录 action 历史**:`g_actions` 在 stress 模式下不 push 任何条目,无限循环后 `g_actions` 大小恒等于 stress_repeat 之前的条目数(通常只有 1 条 `init`)。`DrainWorkerResult` 在 `g_stress_mode==true` 时跳过所有 `g_actions` 写入
-2. **不打印 per-buf 详情**:`DrainWorkerResult` 在 stress 模式下跳过 `printf("[tN] buf[i]...")`,避免无限迭代 × 1000 buf 输出洪水
-3. **每轮末尾清空 `Worker::alloc_ops` 并重置 `next_orig_idx`**:当某 worker 的 `alloced.empty()`(用户保证 alloc/free 配对)时,`DoStressRepeatBlock` 静默 `alloc_ops.clear()` + `next_orig_idx = 0`。这覆盖 `free <idx>` 模式(不像 `free all` 自动重置)——让 `free 0`/`free 1` 等稳定索引在无限循环下每轮都能正确匹配(否则 `next_orig_idx` 持续增长,第二轮起 `free 0` 找不到 orig_idx=0 的 buf)。**用户必须保证每轮 alloc 和 free 配对**,否则 `alloced` 非空时 `alloc_ops` 和 `next_orig_idx` 都不会重置(保护 `FREE_IDX` cross-ref),内存会随泄漏线性增长,最终触发 `WORKER_ALLOCED_CAP=65536` 上限终止 stress
-4. **StressCounters 汇总**:`g_stress` 全局计数器(total_allocs / total_frees / total_bufs_alloced / total_bufs_freed / errors)在 `DrainWorkerResult` + `DoFree` serial 路径 bump,主线程单线程无需 atomic。`status` 在 `g_stress_mode==true` 或 `g_stress.iters_done>0` 时在顶部追加 `stress running` / `stress interrupted` / `stress done` 段
-5. **无限循环 ≠ 无界内存**:工具自身内存恒定(g_actions 不增长、alloc_ops 每轮清空、counters 1 个 struct、snapshot 直输 stdout 不存)。可放心跑天级别长稳
+**涓?`repeat` 鐨勫叧閿尯鍒?*(memory-bounded 璁捐):
+1. **涓嶈褰?action 鍘嗗彶**:`g_actions` 鍦?stress 妯″紡涓嬩笉 push 浠讳綍鏉＄洰,鏃犻檺寰幆鍚?`g_actions` 澶у皬鎭掔瓑浜?stress_repeat 涔嬪墠鐨勬潯鐩暟(閫氬父鍙湁 1 鏉?`init`)銆俙DrainWorkerResult` 鍦?`g_stress_mode==true` 鏃惰烦杩囨墍鏈?`g_actions` 鍐欏叆
+2. **涓嶆墦鍗?per-buf 璇︽儏**:`DrainWorkerResult` 鍦?stress 妯″紡涓嬭烦杩?`printf("[tN] buf[i]...")`,閬垮厤鏃犻檺杩唬 脳 1000 buf 杈撳嚭娲按
+3. **姣忚疆鏈熬娓呯┖ `Worker::alloc_ops` 骞堕噸缃?`next_orig_idx`**:褰撴煇 worker 鐨?`alloced.empty()`(鐢ㄦ埛淇濊瘉 alloc/free 閰嶅)鏃?`DoStressRepeatBlock` 闈欓粯 `alloc_ops.clear()` + `next_orig_idx = 0`銆傝繖瑕嗙洊 `free <idx>` 妯″紡(涓嶅儚 `free all` 鑷姩閲嶇疆)鈥斺€旇 `free 0`/`free 1` 绛夌ǔ瀹氱储寮曞湪鏃犻檺寰幆涓嬫瘡杞兘鑳芥纭尮閰?鍚﹀垯 `next_orig_idx` 鎸佺画澧為暱,绗簩杞捣 `free 0` 鎵句笉鍒?orig_idx=0 鐨?buf)銆?*鐢ㄦ埛蹇呴』淇濊瘉姣忚疆 alloc 鍜?free 閰嶅**,鍚﹀垯 `alloced` 闈炵┖鏃?`alloc_ops` 鍜?`next_orig_idx` 閮戒笉浼氶噸缃?淇濇姢 `FREE_IDX` cross-ref),鍐呭瓨浼氶殢娉勬紡绾挎€у闀?鏈€缁堣Е鍙?`WORKER_ALLOCED_CAP=65536` 涓婇檺缁堟 stress
+4. **StressCounters 姹囨€?*:`g_stress` 鍏ㄥ眬璁℃暟鍣?total_allocs / total_frees / total_bufs_alloced / total_bufs_freed / errors)鍦?`DrainWorkerResult` + `DoFree` serial 璺緞 bump,涓荤嚎绋嬪崟绾跨▼鏃犻渶 atomic銆俙status` 鍦?`g_stress_mode==true` 鎴?`g_stress.iters_done>0` 鏃跺湪椤堕儴杩藉姞 `stress running` / `stress interrupted` / `stress done` 娈?5. **鏃犻檺寰幆 鈮?鏃犵晫鍐呭瓨**:宸ュ叿鑷韩鍐呭瓨鎭掑畾(g_actions 涓嶅闀裤€乤lloc_ops 姣忚疆娓呯┖銆乧ounters 1 涓?struct銆乻napshot 鐩磋緭 stdout 涓嶅瓨)銆傚彲鏀惧績璺戝ぉ绾у埆闀跨ǔ
 
-**硬规则**(同 `repeat`):
-1. 块内禁止 `info/status/init/quit`
-2. 块内禁止嵌套 `repeat` 或 `stress_repeat`
-3. 块内允许 `parallel/join` 子块和 `snapshot N` 指令
-4. **用户保证每轮 alloc/free 配对**(工具不强制守恒检查,但泄漏时内存会增长,无限循环下必然 OOM)
-5. **不能在 batch 跑批中混用** — stress_repeat 无限循环,自动化脚本会卡住。手动 Ctrl-C 控制
+**纭鍒?*(鍚?`repeat`):
+1. 鍧楀唴绂佹 `info/status/init/quit`
+2. 鍧楀唴绂佹宓屽 `repeat` 鎴?`stress_repeat`
+3. 鍧楀唴鍏佽 `parallel/join` 瀛愬潡鍜?`snapshot N` 鎸囦护
+4. **鐢ㄦ埛淇濊瘉姣忚疆 alloc/free 閰嶅**(宸ュ叿涓嶅己鍒跺畧鎭掓鏌?浣嗘硠婕忔椂鍐呭瓨浼氬闀?鏃犻檺寰幆涓嬪繀鐒?OOM)
+5. **涓嶈兘鍦?batch 璺戞壒涓贩鐢?* 鈥?stress_repeat 鏃犻檺寰幆,鑷姩鍖栬剼鏈細鍗′綇銆傛墜鍔?Ctrl-C 鎺у埗
 
-**Ctrl-C 退出后查询**:
+**Ctrl-C 閫€鍑哄悗鏌ヨ**:
 ```bash
-# Terminal 1: 启动 stress_repeat
+# Terminal 1: 鍚姩 stress_repeat
 ./build_qbuf_tool/qbuf_pool_tool cases/case_21_stress_repeat.txt
 
-# (跑一段时间后按 Ctrl-C)
-# 输出:
+# (璺戜竴娈垫椂闂村悗鎸?Ctrl-C)
+# 杈撳嚭:
 # [stress] interrupted by signal at iter 12345 (waiting for current iter to complete, then exiting gracefully)
 # [stress interrupted] iters=12345 uptime=0h 1m 2s allocs=98760 frees=98760 ...
 # ====================[ status ]====================
@@ -158,7 +143,7 @@ end
 #   ...
 ```
 
-### 3.5 snapshot 指令(可选,用于 `repeat` 和 `stress_repeat` 块内)
+### 3.5 snapshot 鎸囦护(鍙€?鐢ㄤ簬 `repeat` 鍜?`stress_repeat` 鍧楀唴)
 
 ```
 stress_repeat 1000000
@@ -172,85 +157,76 @@ stress_repeat 1000000
 end
 ```
 
-**语义**:每 N 轮迭代打印一行进度摘要到 stdout,**不存入任何 vector**——内存恒定,与迭代数无关。
-
-输出格式(stress 模式):
+**璇箟**:姣?N 杞凯浠ｆ墦鍗颁竴琛岃繘搴︽憳瑕佸埌 stdout,**涓嶅瓨鍏ヤ换浣?vector**鈥斺€斿唴瀛樻亽瀹?涓庤凯浠ｆ暟鏃犲叧銆?
+杈撳嚭鏍煎紡(stress 妯″紡):
 ```
 [stress] iter=1000/1000000 uptime=0h 12m 34s allocs=8000 frees=8000 errors=0 alloced_held=0
 ```
 
-`repeat`(非 stress)模式下输出 `[snapshot]` 前缀,字段相同。
+`repeat`(闈?stress)妯″紡涓嬭緭鍑?`[snapshot]` 鍓嶇紑,瀛楁鐩稿悓銆?
+**瀹炵幇**:`DoRepeatBlock` / `DoStressRepeatBlock` 棰勬壂鎻忓潡鍐呯殑 `snapshot N` 鎸囦护鎻愬彇 interval,鍦ㄥ惊鐜腑 `(i+1) % interval == 0` 鏃舵墦鍗般€俙ExecuteBlockLines` 鎶?`snapshot` 褰?no-op 璺宠繃銆?
+### 3.6 actions 搴忓彿璇箟
 
-**实现**:`DoRepeatBlock` / `DoStressRepeatBlock` 预扫描块内的 `snapshot N` 指令提取 interval,在循环中 `(i+1) % interval == 0` 时打印。`ExecuteBlockLines` 把 `snapshot` 当 no-op 跳过。
+`g_actions` 搴忓彿鎸?*娲惧彂椤哄簭**璁板綍(涓嶆寜瀹屾垚椤哄簭)銆傚苟琛屽潡鍐呯殑鍛戒护鍦ㄦ淳鍙戞椂棰勫崰 `g_actions` 妲戒綅,`SyncAll` 鏀跺壊鏃跺洖濉瓧绗︿覆銆傝繖淇濊瘉搴忓彿绋冲畾鍙鐜扳€斺€斿悓鏍风殑鑴氭湰澶氭璺戝嚭鏉ョ殑搴忓彿涓€鑷?渚夸簬 debug銆?
 
-### 3.6 actions 序号语义
+## 4. 鐢ㄤ緥璇存槑锛坈ases/锛?
+### 4.1 涓茶鐢ㄤ緥(鍘?case_01~07)
 
-`g_actions` 序号按**派发顺序**记录(不按完成顺序)。并行块内的命令在派发时预占 `g_actions` 槽位,`SyncAll` 收割时回填字符串。这保证序号稳定可复现——同样的脚本多次跑出来的序号一致,便于 debug。
-
-
-## 4. 用例说明（cases/）
-
-### 4.1 串行用例(原 case_01~07)
-
-| 用例 | 场景 | 验证点 |
+| 鐢ㄤ緥 | 鍦烘櫙 | 楠岃瘉鐐?|
 |---|---|---|
-| `case_01_basic_init_alloc_free.txt` | init + info 全量 + 跨 sc alloc + free all | info 多级字段 + 路由函数 + TLS 字节预算 |
-| `case_02_status.txt` | status 基本流程（init→alloc→free all→status） | actions / held allocs / pool state 演变 |
-| `case_03_leak.txt` | alloc 不 free | alloced > 0 + 退出 NOTE per thread |
-| `case_04_interleaved_alloc_free.txt` | 单线程穿插 alloc/free，每步 status | TLS 复用 + 全程守恒 + idx 语义 |
-| `case_05_multi_thread.txt` | 多线程基础（threads=2） | per-thread TLS 隔离（t0/t1 不同 tid/fetch） |
-| `case_06_complex_multi_thread.txt` | 复杂多线程（threads=3，混合 sc，穿插 free，泄漏） | per-thread TLS + held allocs per-worker + per-thread 泄漏 |
-| `case_07_tls_fetch_return.txt` | TLS fetch/return 生命周期（单线程） | fetch_from_global → free 还 TLS → self_shrink return_to_global |
+| `case_01_basic_init_alloc_free.txt` | init + info 鍏ㄩ噺 + 璺?sc alloc + free all | info 澶氱骇瀛楁 + 璺敱鍑芥暟 + TLS 瀛楄妭棰勭畻 |
+| `case_02_status.txt` | status 鍩烘湰娴佺▼锛坕nit鈫抋lloc鈫抐ree all鈫抯tatus锛?| actions / held allocs / pool state 婕斿彉 |
+| `case_03_leak.txt` | alloc 涓?free | alloced > 0 + 閫€鍑?NOTE per thread |
+| `case_04_interleaved_alloc_free.txt` | 鍗曠嚎绋嬬┛鎻?alloc/free锛屾瘡姝?status | TLS 澶嶇敤 + 鍏ㄧ▼瀹堟亽 + idx 璇箟 |
+| `case_05_multi_thread.txt` | 澶氱嚎绋嬪熀纭€锛坱hreads=2锛?| per-thread TLS 闅旂锛坱0/t1 涓嶅悓 tid/fetch锛?|
+| `case_06_complex_multi_thread.txt` | 澶嶆潅澶氱嚎绋嬶紙threads=3锛屾贩鍚?sc锛岀┛鎻?free锛屾硠婕忥級 | per-thread TLS + held allocs per-worker + per-thread 娉勬紡 |
+| `case_07_tls_fetch_return.txt` | TLS fetch/return 鐢熷懡鍛ㄦ湡锛堝崟绾跨▼锛?| fetch_from_global 鈫?free 杩?TLS 鈫?self_shrink return_to_global |
 
-### 4.2 并行用例(新增 case_08~13)
+### 4.2 骞惰鐢ㄤ緥(鏂板 case_08~13)
 
-| 用例 | 场景 | 验证点 | 涉及原语 |
+| 鐢ㄤ緥 | 鍦烘櫙 | 楠岃瘉鐐?| 娑夊強鍘熻 |
 |---|---|---|---|
-| `case_08_concurrent_alloc_race.txt` | 8 worker 同时 alloc 同 sc(C1) | fetch_from_global spinlock race + 守恒 | `block_pool[sc].global_mutex` |
-| `case_09_concurrent_free_race.txt` | 8 worker TLS 装满后同时 free all(C2) | return_to_global/TLS-update race + 守恒 | 同上 |
-| `case_10_mixed_alloc_free_race.txt` | repeat 500,每 iter alloc 块 + free 块(C3+C8) | alloc/free churn 守恒 + self_shrink 反复触发 | spinlock + atomic |
-| `case_11_cross_sc_parallel.txt` | 不同 worker 不同 sc 并发(C7) | per-sc 锁粒度隔离 + 多级 sc 路由 | 不同 spinlock |
-| `case_12_stress_repeat.txt` | repeat 10000 长跑(C8) | 长程守恒 + 计数器累积 + 自旋压力 | 综合所有原语 |
-| `case_13_threads_beyond_8.txt` | threads=16(突破旧 8 上限) | init 不报错 + 16 worker 全部拿 buf + 守恒 + per-thread TLS 16 行不同 tid | 综合所有原语 |
+| `case_08_concurrent_alloc_race.txt` | 8 worker 鍚屾椂 alloc 鍚?sc(C1) | fetch_from_global spinlock race + 瀹堟亽 | `block_pool[sc].global_mutex` |
+| `case_09_concurrent_free_race.txt` | 8 worker TLS 瑁呮弧鍚庡悓鏃?free all(C2) | return_to_global/TLS-update race + 瀹堟亽 | 鍚屼笂 |
+| `case_10_mixed_alloc_free_race.txt` | repeat 500,姣?iter alloc 鍧?+ free 鍧?C3+C8) | alloc/free churn 瀹堟亽 + self_shrink 鍙嶅瑙﹀彂 | spinlock + atomic |
+| `case_11_cross_sc_parallel.txt` | 涓嶅悓 worker 涓嶅悓 sc 骞跺彂(C7) | per-sc 閿佺矑搴﹂殧绂?+ 澶氱骇 sc 璺敱 | 涓嶅悓 spinlock |
+| `case_12_stress_repeat.txt` | repeat 10000 闀胯窇(C8) | 闀跨▼瀹堟亽 + 璁℃暟鍣ㄧ疮绉?+ 鑷棆鍘嬪姏 | 缁煎悎鎵€鏈夊師璇?|
+| `case_13_threads_beyond_8.txt` | threads=16(绐佺牬鏃?8 涓婇檺) | init 涓嶆姤閿?+ 16 worker 鍏ㄩ儴鎷?buf + 瀹堟亽 + per-thread TLS 16 琛屼笉鍚?tid | 缁煎悎鎵€鏈夊師璇?|
 
-**注意**:并行用例 threads=8 时 CPU 占用高(spinklock 自旋烧 CPU),单次 case_12 跑 1~3 秒。threads>8(如 case_13=16)自旋压力更大,机器核数不足时实际并发度受限,但 init 不再拒绝、守恒仍成立。
+**娉ㄦ剰**:骞惰鐢ㄤ緥 threads=8 鏃?CPU 鍗犵敤楂?spinklock 鑷棆鐑?CPU),鍗曟 case_12 璺?1~3 绉掋€倀hreads>8(濡?case_13=16)鑷棆鍘嬪姏鏇村ぇ,鏈哄櫒鏍告暟涓嶈冻鏃跺疄闄呭苟鍙戝害鍙楅檺,浣?init 涓嶅啀鎷掔粷銆佸畧鎭掍粛鎴愮珛銆?
+### 4.3 瀛楁鏄犲皠鐢ㄤ緥(鏂板 case_14~16)
 
-### 4.3 字段映射用例(新增 case_14~16)
-
-修复 `expSz → cfg.expansion_size` 误用后新增的 3 个用例,验证 `poolMaxSz`/`expSlotSz` 两个字段映射的正确性。
-
-| 用例 | 场景 | 验证点 | 退出码 |
+淇 `expSz 鈫?cfg.expansion_size` 璇敤鍚庢柊澧炵殑 3 涓敤渚?楠岃瘉 `poolMaxSz`/`expSlotSz` 涓や釜瀛楁鏄犲皠鐨勬纭€с€?
+| 鐢ㄤ緥 | 鍦烘櫙 | 楠岃瘉鐐?| 閫€鍑虹爜 |
 |---|---|---|---|
-| `case_14_poolMaxSz_field_mapping.txt` | `poolMaxSz=6G`(走硬上限边界)正向 | 字段被正确解析、传给 `cfg.umq_buf_pool_max_size`、被 `umq_qbuf_pool_init` 接受;`info` 段2 `expansion_mem_size_max` 字段显示对应值 | 0 |
-| `case_15_expSlotSz_field_mapping.txt` | `expSlotSz=64M` 正向 | 字段被正确解析、传给 `cfg.expansion_size`、被接受;`info` 段2 `expansion_size` 字段显示对应值 | 0 |
-| `case_16_field_mapping_rejected.txt` | 旧名 `expSz=` + `poolMaxSz=7G` 越界 | (1) 旧名 `expSz` 被工具 parsing 拒绝(防回归) (2) `poolMaxSz>6G` 被生产代码 `umq_qbuf_pool.c:1356` 拒绝(证明映射走的是 `umq_buf_pool_max_size` 路径而非 `expansion_size`) | 1(预期失败) |
+| `case_14_poolMaxSz_field_mapping.txt` | `poolMaxSz=6G`(璧扮‖涓婇檺杈圭晫)姝ｅ悜 | 瀛楁琚纭В鏋愩€佷紶缁?`cfg.umq_buf_pool_max_size`銆佽 `umq_qbuf_pool_init` 鎺ュ彈;`info` 娈? `expansion_mem_size_max` 瀛楁鏄剧ず瀵瑰簲鍊?| 0 |
+| `case_15_expSlotSz_field_mapping.txt` | `expSlotSz=64M` 姝ｅ悜 | 瀛楁琚纭В鏋愩€佷紶缁?`cfg.expansion_size`銆佽鎺ュ彈;`info` 娈? `expansion_size` 瀛楁鏄剧ず瀵瑰簲鍊?| 0 |
+| `case_16_field_mapping_rejected.txt` | 鏃у悕 `expSz=` + `poolMaxSz=7G` 瓒婄晫 | (1) 鏃у悕 `expSz` 琚伐鍏?parsing 鎷掔粷(闃插洖褰? (2) `poolMaxSz>6G` 琚敓浜т唬鐮?`umq_qbuf_pool.c:1356` 鎷掔粷(璇佹槑鏄犲皠璧扮殑鏄?`umq_buf_pool_max_size` 璺緞鑰岄潪 `expansion_size`) | 1(棰勬湡澶辫触) |
 
-**case_16 注意**:两个 init 都预期失败,退出码=1 是正确行为。用例的"通过"语义是"两个 init 都按预期被拒绝",不是"所有命令成功"。batch 跑(`for f in cases/*.txt; do ... done`)会看到 case_16 退出码非0,属预期。
+**case_16 娉ㄦ剰**:涓や釜 init 閮介鏈熷け璐?閫€鍑虹爜=1 鏄纭涓恒€傜敤渚嬬殑"閫氳繃"璇箟鏄?涓や釜 init 閮芥寜棰勬湡琚嫆缁?,涓嶆槸"鎵€鏈夊懡浠ゆ垚鍔?銆俠atch 璺?`for f in cases/*.txt; do ... done`)浼氱湅鍒?case_16 閫€鍑虹爜闈?,灞為鏈熴€?
+### 4.4 闀跨ǔ鐢ㄤ緥(鏂板 case_21~23)
 
-### 4.4 长稳用例(新增 case_21~23)
-
-**注意**:case_21~23 用 `stress_repeat`(无限循环),**不能在 batch `for f in cases/*.txt; do ...` 中跑** — 会卡住。手动启动 + Ctrl-C 控制。
-
-| 用例 | 场景 | 验证点 |
+**娉ㄦ剰**:case_21~23 鐢?`stress_repeat`(鏃犻檺寰幆),**涓嶈兘鍦?batch `for f in cases/*.txt; do ...` 涓窇** 鈥?浼氬崱浣忋€傛墜鍔ㄥ惎鍔?+ Ctrl-C 鎺у埗銆?
+| 鐢ㄤ緥 | 鍦烘櫙 | 楠岃瘉鐐?|
 |------|------|--------|
-| `case_21_stress_repeat.txt` | 8 worker 无限 `stress_repeat` + `snapshot 100` | g_actions 不增长(只 17 条 bootstrap);Ctrl-C 后 stress summary 段显示 allocs=frees/errors=0;状态=interrupted |
-| `case_22_stress_infinite.txt` | 8 worker 无限 `stress_repeat` + `snapshot 10000` | 长稳压力:RSS 恒定 ~204MB(=200MB pool + 4MB 工具);配合外部 `ps -o rss= -p <pid>` 监控 |
-| `case_23_stress_free_idx.txt` | 2 worker 无限 `stress_repeat` 用 `free <idx>` 而非 `free all` | 验证 `alloc_ops` 和 `next_orig_idx` 在 iter 边界被静默清空/重置(否则 `free <idx>` 模式下 `next_orig_idx` 持续增长,第二轮起 `free 0` 找不到匹配 buf,无限循环下立即失败) |
+| `case_21_stress_repeat.txt` | 8 worker 鏃犻檺 `stress_repeat` + `snapshot 100` | g_actions 涓嶅闀?鍙?17 鏉?bootstrap);Ctrl-C 鍚?stress summary 娈垫樉绀?allocs=frees/errors=0;鐘舵€?interrupted |
+| `case_22_stress_infinite.txt` | 8 worker 鏃犻檺 `stress_repeat` + `snapshot 10000` | 闀跨ǔ鍘嬪姏:RSS 鎭掑畾 ~204MB(=200MB pool + 4MB 宸ュ叿);閰嶅悎澶栭儴 `ps -o rss= -p <pid>` 鐩戞帶 |
+| `case_23_stress_free_idx.txt` | 2 worker 鏃犻檺 `stress_repeat` 鐢?`free <idx>` 鑰岄潪 `free all` | 楠岃瘉 `alloc_ops` 鍜?`next_orig_idx` 鍦?iter 杈圭晫琚潤榛樻竻绌?閲嶇疆(鍚﹀垯 `free <idx>` 妯″紡涓?`next_orig_idx` 鎸佺画澧為暱,绗簩杞捣 `free 0` 鎵句笉鍒板尮閰?buf,鏃犻檺寰幆涓嬬珛鍗冲け璐? |
 
-**手动验证流程**:
+**鎵嬪姩楠岃瘉娴佺▼**:
 ```bash
-# Terminal 1: 启动 stress
+# Terminal 1: 鍚姩 stress
 ./build_qbuf_tool/qbuf_pool_tool cases/case_22_stress_infinite.txt &
 PID=$!
 
-# Terminal 2: 监控 RSS(应保持 ~204MB 恒定)
+# Terminal 2: 鐩戞帶 RSS(搴斾繚鎸?~204MB 鎭掑畾)
 while kill -0 $PID 2>/dev/null; do
     ps -o rss= -p $PID | awk '{print strftime("%H:%M:%S"), $1"KB"}'
     sleep 60
 done
 
-# Terminal 1(回到 1): Ctrl-C 优雅停止
-# 期望输出:
+# Terminal 1(鍥炲埌 1): Ctrl-C 浼橀泤鍋滄
+# 鏈熸湜杈撳嚭:
 #   [stress] interrupted by signal at iter N (waiting for current iter to complete, then exiting gracefully)
 #   [stress interrupted] iters=N uptime=... allocs=... frees=... errors=0 ...
 #   ====================[ status ]====================
@@ -259,73 +235,63 @@ done
 #     ...
 ```
 
-### 4.5 burst/sustained 用例(新增 case_14_burst / case_15_sustained)
+### 4.5 burst/sustained 鐢ㄤ緥(鏂板 case_14_burst / case_15_sustained)
 
-> **编号说明**:这两个用例与 §4.3 的 `case_14_poolMaxSz_field_mapping` / `case_15_expSlotSz_field_mapping` 共用编号(case_14、case_15)。batch 跑批时同号用例都会执行,语义上易混淆——建议未来重编号(见 §10 已知问题)。
-
-验证 high-water mark cap 修复:TLS cap 不随 burst 膨胀、expansion pool 在 free 后能收缩。
-
-| 用例 | 场景 | 验证点 | 退出码 |
+> **缂栧彿璇存槑**:杩欎袱涓敤渚嬩笌 搂4.3 鐨?`case_14_poolMaxSz_field_mapping` / `case_15_expSlotSz_field_mapping` 鍏辩敤缂栧彿(case_14銆乧ase_15)銆俠atch 璺戞壒鏃跺悓鍙风敤渚嬮兘浼氭墽琛?璇箟涓婃槗娣锋穯鈥斺€斿缓璁湭鏉ラ噸缂栧彿(瑙?搂10 宸茬煡闂)銆?
+楠岃瘉 high-water mark cap 淇:TLS cap 涓嶉殢 burst 鑶ㄨ儉銆乪xpansion pool 鍦?free 鍚庤兘鏀剁缉銆?
+| 鐢ㄤ緥 | 鍦烘櫙 | 楠岃瘉鐐?| 閫€鍑虹爜 |
 |---|---|---|---|
-| `case_14_burst_alloc_free_shrink.txt` | 10000 sc1 buf burst(10 批×1000,共 655360000 字节)+ free all + 5 次 status + 最终 info | 修复前 TLS sc1 buf=62K(inflated)、`expansion_count=15`(不收缩);修复后 <10K、`expansion_count<=2`(大部分收缩)。**注意**:工具限制单次 alloc num≤1000,故 10000 拆 10 批 | 0 |
-| `case_15_sustained_burst_stability.txt` | `repeat 1000` 轮 burst alloc 1000 sc1 + free all + 最终 status/info | 修复前 expansion memory 单调增长(每轮 burst 留 residual);修复后稳定(cap 不膨胀、slot 收缩) | 0 |
+| `case_14_burst_alloc_free_shrink.txt` | 10000 sc1 buf burst(10 鎵姑?000,鍏?655360000 瀛楄妭)+ free all + 5 娆?status + 鏈€缁?info | 淇鍓?TLS sc1 buf=62K(inflated)銆乣expansion_count=15`(涓嶆敹缂?;淇鍚?<10K銆乣expansion_count<=2`(澶ч儴鍒嗘敹缂?銆?*娉ㄦ剰**:宸ュ叿闄愬埗鍗曟 alloc num鈮?000,鏁?10000 鎷?10 鎵?| 0 |
+| `case_15_sustained_burst_stability.txt` | `repeat 1000` 杞?burst alloc 1000 sc1 + free all + 鏈€缁?status/info | 淇鍓?expansion memory 鍗曡皟澧為暱(姣忚疆 burst 鐣?residual);淇鍚庣ǔ瀹?cap 涓嶈啫鑳€銆乻lot 鏀剁缉) | 0 |
 
-### 4.6 lazy init 用例(case_16~20)
+### 4.6 lazy init 鐢ㄤ緥(case_16~20)
 
-> **编号说明**:`case_16_lazy_init_3sc` 与 §4.3 的 `case_16_field_mapping_rejected` 共用编号 case_16;`case_17_lazy_init_multi_expand` 与 §4.7 的 `case_17_without_data` 共用编号 case_17。batch 跑批时同号用例都会执行——建议未来重编号(见 §10 已知问题)。
-
-验证 `weights=` 参数中 weight=0 的 lazy SC 行为:weight=0 的 SC 在 init 时不预分配,首次 alloc 触发 expansion。
-
-> **历史**:这 5 个用例原使用 `lazyThreshold=1M`(基于 `lazy_init_block_size_threshold` 阈值字段),commit `600d24a` 移除该字段改为 per-SC `per_sc_weights[]` 数组后,用例迁移到 `weights=1,1,0`(sc2 即 1M SC weight=0 = lazy)。同时把 `mult=16 base=4K` 改为更显式的 `blockSizes=4K,64K,1M`,并修复 case_17/19 中误用的 `expSz=` 旧名(应 `expSlotSz=`)。
-
-| 用例 | 场景 | 验证点 |
+> **缂栧彿璇存槑**:`case_16_lazy_init_3sc` 涓?搂4.3 鐨?`case_16_field_mapping_rejected` 鍏辩敤缂栧彿 case_16;`case_17_lazy_init_multi_expand` 涓?搂4.7 鐨?`case_17_without_data` 鍏辩敤缂栧彿 case_17銆俠atch 璺戞壒鏃跺悓鍙风敤渚嬮兘浼氭墽琛屸€斺€斿缓璁湭鏉ラ噸缂栧彿(瑙?搂10 宸茬煡闂)銆?
+楠岃瘉 `weights=` 鍙傛暟涓?weight=0 鐨?lazy SC 琛屼负:weight=0 鐨?SC 鍦?init 鏃朵笉棰勫垎閰?棣栨 alloc 瑙﹀彂 expansion銆?
+> **鍘嗗彶**:杩?5 涓敤渚嬪師浣跨敤 `lazyThreshold=1M`(鍩轰簬 `lazy_init_block_size_threshold` 闃堝€煎瓧娈?,commit `600d24a` 绉婚櫎璇ュ瓧娈垫敼涓?per-SC `per_sc_weights[]` 鏁扮粍鍚?鐢ㄤ緥杩佺Щ鍒?`weights=1,1,0`(sc2 鍗?1M SC weight=0 = lazy)銆傚悓鏃舵妸 `mult=16 base=4K` 鏀逛负鏇存樉寮忕殑 `blockSizes=4K,64K,1M`,骞朵慨澶?case_17/19 涓鐢ㄧ殑 `expSz=` 鏃у悕(搴?`expSlotSz=`)銆?
+| 鐢ㄤ緥 | 鍦烘櫙 | 楠岃瘉鐐?|
 |---|---|---|
-| `case_16_lazy_init_3sc.txt` | 3-SC `blockSizes=4K,64K,1M` `weights=1,1,0`,基础 alloc/free | 1M SC init 时为空(`info` 段3 `glbl_free=0`);首次 alloc 1M 触发 expansion;3 个 SC alloc + free all 正常 |
-| `case_17_lazy_init_multi_expand.txt` | lazy 1M 多轮 expansion,`expSlotSz=2M`(2 块/轮),4 个 1M alloc | 触发 2 轮 expansion(每轮 2 块);`info` 段3 `exp_count`/`exp_total_blk` 反映多轮累积 |
-| `case_18_lazy_init_combine.txt` | lazy 1M + COMBINE 模式(`mode=combine`) | lazy init 与 COMBINE 模式叠加正确:buf_size = block_size(无 header 分离);1M SC 同样走 lazy 路径 |
-| `case_19_lazy_init_concurrent.txt` | 8 worker 并发跨 SC alloc(t0-3 alloc 4K、t4-5 alloc 64K、t6-7 alloc 1M),`expSlotSz=4M` | per-sc expansion 隔离:1M SC 的 expansion 不被 4K/64K 并发 alloc 干扰;`status` 守恒 + per-thread TLS 隔离 |
-| `case_20_lazy_init_headroom.txt` | lazy 1M + `headroom=512`(`thread_0 alloc 524288 1 512`) | lazy init 与 headroom 叠加:alloc 时携带 headroom 元数据,buf_size 反映 block_size + headroom |
+| `case_16_lazy_init_3sc.txt` | 3-SC `blockSizes=4K,64K,1M` `weights=1,1,0`,鍩虹 alloc/free | 1M SC init 鏃朵负绌?`info` 娈? `glbl_free=0`);棣栨 alloc 1M 瑙﹀彂 expansion;3 涓?SC alloc + free all 姝ｅ父 |
+| `case_17_lazy_init_multi_expand.txt` | lazy 1M 澶氳疆 expansion,`expSlotSz=2M`(2 鍧?杞?,4 涓?1M alloc | 瑙﹀彂 2 杞?expansion(姣忚疆 2 鍧?;`info` 娈? `exp_count`/`exp_total_blk` 鍙嶆槧澶氳疆绱Н |
+| `case_18_lazy_init_combine.txt` | lazy 1M + COMBINE 妯″紡(`mode=combine`) | lazy init 涓?COMBINE 妯″紡鍙犲姞姝ｇ‘:buf_size = block_size(鏃?header 鍒嗙);1M SC 鍚屾牱璧?lazy 璺緞 |
+| `case_19_lazy_init_concurrent.txt` | 8 worker 骞跺彂璺?SC alloc(t0-3 alloc 4K銆乼4-5 alloc 64K銆乼6-7 alloc 1M),`expSlotSz=4M` | per-sc expansion 闅旂:1M SC 鐨?expansion 涓嶈 4K/64K 骞跺彂 alloc 骞叉壈;`status` 瀹堟亽 + per-thread TLS 闅旂 |
+| `case_20_lazy_init_headroom.txt` | lazy 1M + `headroom=512`(`thread_0 alloc 524288 1 512`) | lazy init 涓?headroom 鍙犲姞:alloc 鏃舵惡甯?headroom 鍏冩暟鎹?buf_size 鍙嶆槧 block_size + headroom |
 
-### 4.7 without_data 路径用例(新增 case_17_without_data)
+### 4.7 without_data 璺緞鐢ㄤ緥(鏂板 case_17_without_data)
 
-> **编号说明**:与 §4.6 的 `case_17_lazy_init_multi_expand` 共用编号 case_17。batch 跑批时两者都会执行——建议未来重编号(见 §10 已知问题)。
-
-验证 `request_size=0` 的 without_data mempool 路径:独立 buf pool,只借 `umq_buf_t` header(描述符)不带 data region。
-
-| 用例 | 场景 | 验证点 |
+> **缂栧彿璇存槑**:涓?搂4.6 鐨?`case_17_lazy_init_multi_expand` 鍏辩敤缂栧彿 case_17銆俠atch 璺戞壒鏃朵袱鑰呴兘浼氭墽琛屸€斺€斿缓璁湭鏉ラ噸缂栧彿(瑙?搂10 宸茬煡闂)銆?
+楠岃瘉 `request_size=0` 鐨?without_data mempool 璺緞:鐙珛 buf pool,鍙€?`umq_buf_t` header(鎻忚堪绗?涓嶅甫 data region銆?
+| 鐢ㄤ緥 | 鍦烘櫙 | 楠岃瘉鐐?|
 |---|---|---|
-| `case_17_without_data.txt` | `scaleCap=off`,threads=2;4 阶段:info → 单线程 alloc 0 5 + status → free all + status → 多线程并发 alloc 0 10 + free all | (1) `DoAlloc` 接受 size=0(此前拒绝为 invalid) (2) `umq_normal_qbuf_alloc(0,...)` 路由到 without_data 路径(`umq_qbuf_pool.c:1942`) (3) buf 输出 `sc=- ... [nodata]`(无 SC 概念) (4) DFX 段6 Per-Thread TLS Pool Stats (WithoutData) 计数增长:`CurBuf`/`AccFetchCnt`/`AccAllocCnt`/`AccFreeCnt` (5) free all 还 TLS 非 global(同 FAQ Q1) (6) `status` alloced 列**不**计 without_data buf(单独 `without_data: N bufs` 行) (7) held allocs 显示 `alloc 0 -> nodata, N/M bufs held` (8) 多线程 per-thread TLS WithoutData 隔离 |
+| `case_17_without_data.txt` | `scaleCap=off`,threads=2;4 闃舵:info 鈫?鍗曠嚎绋?alloc 0 5 + status 鈫?free all + status 鈫?澶氱嚎绋嬪苟鍙?alloc 0 10 + free all | (1) `DoAlloc` 鎺ュ彈 size=0(姝ゅ墠鎷掔粷涓?invalid) (2) `umq_normal_qbuf_alloc(0,...)` 璺敱鍒?without_data 璺緞(`umq_qbuf_pool.c:1942`) (3) buf 杈撳嚭 `sc=- ... [nodata]`(鏃?SC 姒傚康) (4) DFX 娈? Per-Thread TLS Pool Stats (WithoutData) 璁℃暟澧為暱:`CurBuf`/`AccFetchCnt`/`AccAllocCnt`/`AccFreeCnt` (5) free all 杩?TLS 闈?global(鍚?FAQ Q1) (6) `status` alloced 鍒?*涓?*璁?without_data buf(鍗曠嫭 `without_data: N bufs` 琛? (7) held allocs 鏄剧ず `alloc 0 -> nodata, N/M bufs held` (8) 澶氱嚎绋?per-thread TLS WithoutData 闅旂 |
 
-**关键配置**:`scaleCap=off`(`disable_scale_cap=true`)让 `init_split_mode_layout` 预分配 without_data pool(`umq_qbuf_pool.c:1283-1299`,`head_without_data_count = total_blk_num * UMQ_EMPTY_HEADER_COEFFICIENT`),使 alloc 0 N 直接命中 global without_data pool 无需 expansion。
+**鍏抽敭閰嶇疆**:`scaleCap=off`(`disable_scale_cap=true`)璁?`init_split_mode_layout` 棰勫垎閰?without_data pool(`umq_qbuf_pool.c:1283-1299`,`head_without_data_count = total_blk_num * UMQ_EMPTY_HEADER_COEFFICIENT`),浣?alloc 0 N 鐩存帴鍛戒腑 global without_data pool 鏃犻渶 expansion銆?
+### 4.8 鏂板 init 鍙傛暟鐢ㄤ緥(case_24~27)
 
-### 4.8 新增 init 参数用例(case_24~27)
-
-补齐 `qbuf_pool_cfg_t` 中此前工具未暴露的字段:`disable_malloc_escape`、`expansion_threshold`、`tls_expand_mem_budget`、`explicit_block_sizes[]`、`per_sc_weights[]`。
-
-| 用例 | 场景 | 验证点 | 退出码 |
+琛ラ綈 `qbuf_pool_cfg_t` 涓鍓嶅伐鍏锋湭鏆撮湶鐨勫瓧娈?`disable_malloc_escape`銆乣expansion_threshold`銆乣tls_expand_mem_budget`銆乣explicit_block_sizes[]`銆乣per_sc_weights[]`銆?
+| 鐢ㄤ緥 | 鍦烘櫙 | 楠岃瘉鐐?| 閫€鍑虹爜 |
 |---|---|---|---|
-| `case_24_escape_disabled.txt` | `escape=off` + 小 pool(4M),alloc 100(范围内)+ alloc 700(超 pool) | (1) init 段2 `disable_malloc_escape=1` (2) 范围内 alloc 成功 (3) 超 pool alloc **失败**(ret≠0),无 escape fallback (4) 段9 `escape_buf_cnt=0`(无 escape buf 创建)。对比默认 `escape=on`:同场景会静默创建 escape buf | 0 |
-| `case_25_expansion_threshold.txt` | `expThreshold=90`(激进早 expansion) + alloc 100 | (1) init 段2 `expansion_threshold=90` (2) expansion 在 90% 水位触发(比默认 30% 更早)。注:`expThreshold=0` 不报错,生产代码取默认 30(`:1223-1224`);`expThreshold=200` 越界 init 返回 EINVAL(`:1225-1228`) | 0 |
-| `case_26_tls_expand_budget.txt` | `tlsBudget=96M` + `tlsExpandBudget=1M` + 2 线程各 alloc 100 | (1) init 段2 `tls_expand_qbuf_pool_depth=1048576` (2) 段5 每线程 `CurCap ≤ 256`（1M/4K=256，对比默认 84M/4K=21504） (3) 段7 每线程 `sc0 tls_cap_cnt ≤ 256`。证明 per-thread cap 独立于全局 `tlsBudget` | 0 |
-| `case_27_blockSizes_weights_field_mapping.txt` | `blockSizes=4K,64K` `weights=2,1` 正向(对齐生产默认) | (1) init 段2 `explicit_block_sizes=[4096,65536]` (2) 段3 `sc0 initial_blocks` 约为 `sc1` 的 32x(`2x weight × 64K/4K`)(3) 跨 SC alloc/free 正常。**对齐生产**:`UmqSetting::UMQ_EXPLICIT_BLOCK_SIZES={4096,65536}` `UMQ_PER_SC_WEIGHTS={2,1}` 经 `umq_backend.cpp:67-72` memcpy 路径,工具与生产走相同代码路径 | 0 |
+| `case_24_escape_disabled.txt` | `escape=off` + 灏?pool(4M),alloc 100(鑼冨洿鍐?+ alloc 700(瓒?pool) | (1) init 娈? `disable_malloc_escape=1` (2) 鑼冨洿鍐?alloc 鎴愬姛 (3) 瓒?pool alloc **澶辫触**(ret鈮?),鏃?escape fallback (4) 娈? `escape_buf_cnt=0`(鏃?escape buf 鍒涘缓)銆傚姣旈粯璁?`escape=on`:鍚屽満鏅細闈欓粯鍒涘缓 escape buf | 0 |
+| `case_25_expansion_threshold.txt` | `expThreshold=90`(婵€杩涙棭 expansion) + alloc 100 | (1) init 娈? `expansion_threshold=90` (2) expansion 鍦?90% 姘翠綅瑙﹀彂(姣旈粯璁?30% 鏇存棭)銆傛敞:`expThreshold=0` 涓嶆姤閿?鐢熶骇浠ｇ爜鍙栭粯璁?30(`:1223-1224`);`expThreshold=200` 瓒婄晫 init 杩斿洖 EINVAL(`:1225-1228`) | 0 |
+| `case_26_tls_expand_budget.txt` | `tlsBudget=96M` + `tlsExpandBudget=1M` + 2 绾跨▼鍚?alloc 100 | (1) init 娈? `tls_expand_qbuf_pool_depth=1048576` (2) 娈? 姣忕嚎绋?`CurCap 鈮?256`锛?M/4K=256锛屽姣旈粯璁?84M/4K=21504锛?(3) 娈? 姣忕嚎绋?`sc0 tls_cap_cnt 鈮?256`銆傝瘉鏄?per-thread cap 鐙珛浜庡叏灞€ `tlsBudget` | 0 |
+| `case_27_blockSizes_weights_field_mapping.txt` | `blockSizes=4K,64K` `weights=2,1` 姝ｅ悜(瀵归綈鐢熶骇榛樿) | (1) init 娈? `explicit_block_sizes=[4096,65536]` (2) 娈? `sc0 initial_blocks` 绾︿负 `sc1` 鐨?32x(`2x weight 脳 64K/4K`)(3) 璺?SC alloc/free 姝ｅ父銆?*瀵归綈鐢熶骇**:`UmqSetting::UMQ_EXPLICIT_BLOCK_SIZES={4096,65536}` `UMQ_PER_SC_WEIGHTS={2,1}` 缁?`umq_backend.cpp:67-72` memcpy 璺緞,宸ュ叿涓庣敓浜ц蛋鐩稿悓浠ｇ爜璺緞 | 0 |
 
-**字段对照**:
+**瀛楁瀵圭収**:
 
-| init 参数 | cfg 字段 | 默认值(=0 时) | 生产消费点 |
+| init 鍙傛暟 | cfg 瀛楁 | 榛樿鍊?=0 鏃? | 鐢熶骇娑堣垂鐐?|
 |---|---|---|---|
-| `escape` | `disable_malloc_escape`(取反) | false(escape 启用) | `umq_qbuf_pool.c:2034/2143/2182/2481` |
+| `escape` | `disable_malloc_escape`(鍙栧弽) | false(escape 鍚敤) | `umq_qbuf_pool.c:2034/2143/2182/2481` |
 | `expThreshold` | `expansion_threshold` | 30(`QBUF_POOL_DEFAULT_EXPANSION_THRESHOLD`) | `umq_qbuf_pool.c:1111/1229/1311/1330/1393/1412` |
-| `tlsExpandBudget` | `tls_expand_mem_budget` | 7/8 × `tlsBudget`(`umq_qbuf_pool_expand_max`) | `umq_qbuf_pool.c:1214-1216/1666-1669` |
-| `blockSizes` | `explicit_block_sizes[]` | 未设→`mult` 几何级数回退(`base * mult^i`) | `umq_backend.cpp:67-69`(memcpy `UmqSetting::UMQ_EXPLICIT_BLOCK_SIZES`) |
-| `weights` | `per_sc_weights[]` | 未设→全 0→生产兜底 `{1,1}` | `umq_backend.cpp:70-72`(memcpy `UmqSetting::UMQ_PER_SC_WEIGHTS`),`umq_qbuf_pool.c:1586-1599`(默认回退) |
+| `tlsExpandBudget` | `tls_expand_mem_budget` | 7/8 脳 `tlsBudget`(`umq_qbuf_pool_expand_max`) | `umq_qbuf_pool.c:1214-1216/1666-1669` |
+| `blockSizes` | `explicit_block_sizes[]` | 鏈鈫抈mult` 鍑犱綍绾ф暟鍥為€€(`base * mult^i`) | `umq_backend.cpp:67-69`(memcpy `UmqSetting::UMQ_EXPLICIT_BLOCK_SIZES`) |
+| `weights` | `per_sc_weights[]` | 鏈鈫掑叏 0鈫掔敓浜у厹搴?`{1,1}` | `umq_backend.cpp:70-72`(memcpy `UmqSetting::UMQ_PER_SC_WEIGHTS`),`umq_qbuf_pool.c:1586-1599`(榛樿鍥為€€) |
 
 
-## 5. status 输出示例（case_06 actions 段后）
-
+## 5. status 杈撳嚭绀轰緥锛坈ase_06 actions 娈靛悗锛?
 ```
 ====================[ status ]====================
 actions (8):
-  [1] init threads=3 count=2 mode=split scaleCap=on totalSz=209715200 poolMaxSz=0 expSlotSz=0 blockSizes=4096,65536 weights=default(1,1) escape=on expThreshold=0 tlsExpandBudget=0
+  [1] init threads=3 count=2 mode=split scaleCap=on allocSz=209715200 poolMaxSz=0 expSlotSz=0 blockSizes=4096,65536 weights=default(1,1) escape=on expThreshold=0 tlsExpandBudget=0
   [2] [t0] alloc 4096 -> sc=0, 1 buf
   [3] [t0] alloc 32768 -> sc=1, 1 buf
   [4] [t1] alloc 65536 -> sc=1, 1 buf
@@ -357,229 +323,191 @@ pool state (per-sc global/alloced/exp + per-thread tls):
 ==================================================
 ```
 
-### 三段分工
+### 涓夋鍒嗗伐
 
-1. **actions** — 完整动作历史（含 `[tK]` 前缀，alloc/free 都记录）
-2. **held allocs** — 当前持有（去掉 alloc 又 free 的，`[tK][actions_idx]` 格式，显示 `remaining/total` 如 `1/2 bufs held`，括号内 `(free N)` 或 `(free N-M)` 提示该 op 的稳定 orig_idx 范围）
-3. **pool state** — per-sc `global/alloced/exp`（全局总和）+ `per-thread TLS` 子表（每 thread 一块含 kernel tid，sc 分行 `buf/cap`）+ `Pool OS Mem Claimed` 行（initial + expansion + escape 三部分总和）
+1. **actions** 鈥?瀹屾暣鍔ㄤ綔鍘嗗彶锛堝惈 `[tK]` 鍓嶇紑锛宎lloc/free 閮借褰曪級
+2. **held allocs** 鈥?褰撳墠鎸佹湁锛堝幓鎺?alloc 鍙?free 鐨勶紝`[tK][actions_idx]` 鏍煎紡锛屾樉绀?`remaining/total` 濡?`1/2 bufs held`锛屾嫭鍙峰唴 `(free N)` 鎴?`(free N-M)` 鎻愮ず璇?op 鐨勭ǔ瀹?orig_idx 鑼冨洿锛?3. **pool state** 鈥?per-sc `global/alloced/exp`锛堝叏灞€鎬诲拰锛? `per-thread TLS` 瀛愯〃锛堟瘡 thread 涓€鍧楀惈 kernel tid锛宻c 鍒嗚 `buf/cap`锛? `Pool OS Mem Claimed` 琛岋紙initial + expansion + escape 涓夐儴鍒嗘€诲拰锛?
+### 瀹堟亽涓€鐪煎彲瑙?
+姣?sc `global + tls + alloced` 鎭掑畾銆傚 sc0锛歚global 2816 + tls 63 + alloced 1 = 2880`锛坕nit 鎬诲潡鏁帮級锛泂c1锛歚global 2816 + tls(t0 8 + t1 16 + t2 8) 32 + alloced 5 = 2853` 鈮?2880锛坅lloc 70000 鍗犵敤 2 涓?64K buf锛屾晠 tls 鐣ュ浜?fetch锛夈€?
+> **娉?*锛歚tid` 鏄?kernel TID锛坄syscall(SYS_gettid)`锛屽皬鏁板瓧锛夛紝涓庣敓浜т唬鐮?`g_thread_cache.stats.tid` 涓€鑷达紱闈?`pthread_self()` 鍦板潃锛堟棫鏂囨。绀轰緥濡?`129814476351168` 鏄?pthread_t 鍦板潃锛屽凡搴熷純锛夈€俙cap` 鏄?TLS per-SC 瀹归噺涓婇檺锛坈ount锛岄潪 bytes锛夛紝`buf` 鏄綋鍓?TLS 缂撳瓨鐨?buf 鏁般€?
+## 6. info 杈撳嚭锛堝叏閲忥紝~9 娈碉級
 
-### 守恒一眼可见
+`info` 璋冪敤 `umq_qbuf_pool_stats_to_str` 杈撳嚭 DFX 瀛楃涓诧紝鎸?init 楠岃瘉娴佺▼鎺掑簭锛坰ummary 鈫?config 鈫?per-sc 鈫?娲剧敓鎸囨爣锛夛細
 
-每 sc `global + tls + alloced` 恒定。如 sc0：`global 2816 + tls 63 + alloced 1 = 2880`（init 总块数）；sc1：`global 2816 + tls(t0 8 + t1 16 + t2 8) 32 + alloced 5 = 2853` ≈ 2880（alloc 70000 占用 2 个 64K buf，故 tls 略多于 fetch）。
-
-> **注**：`tid` 是 kernel TID（`syscall(SYS_gettid)`，小数字），与生产代码 `g_thread_cache.stats.tid` 一致；非 `pthread_self()` 地址（旧文档示例如 `129814476351168` 是 pthread_t 地址，已废弃）。`cap` 是 TLS per-SC 容量上限（count，非 bytes），`buf` 是当前 TLS 缓存的 buf 数。
-
-## 6. info 输出（全量，~9 段）
-
-`info` 调用 `umq_qbuf_pool_stats_to_str` 输出 DFX 字符串，按 init 验证流程排序（summary → config → per-sc → 派生指标）：
-
-| 段 | 标题 | 关键列 | 说明 |
+| 娈?| 鏍囬 | 鍏抽敭鍒?| 璇存槑 |
 |----|------|--------|------|
-| 1 | Global Pool Config | Type/Mode/TotalSize/TotalBlk/BlkSize/Headroom/DataSize/BufSize/UmqBufSize/FreeBlk/FreeSize/NoBufFreeBlk/NoBufFreeSize | 池总览（raw 数值），含 without_data pool 的 NoBuf 列 |
-| 2 | Pool Config [Normal] | size_class_count/blk_size[]/per_sc_block_count/disable_scale_cap/disable_malloc_escape/expansion_size/expansion_threshold/batch_count/expansion_mem_size_max/exp_total_mem_pool_size/tls_qbuf_pool_depth/tls_expand_qbuf_pool_depth/exp_slot_used_count | 配置参数（init key=value 直接对照）；`blk_size[]` 是 `explicit_block_sizes[]` 的 DFX 别名；**`per_sc_weights[]` 不在 DFX 输出中**（生产代码内部使用，仅在 init 时影响 `per_sc_block_count` 分配） |
-| 3 | Per-SizeClass State | sc/blk_size/glbl_free/hdr_free/exp_slots/exp_total_blk/exp_total_exp/exp_total_shrink/glbl_total/cap/exp_free/trig_expand | per-sc 状态；`glbl_free` 是 global 可用 buf 数（with_data）；`hdr_free` 是 without_data pool 可用数（sc0 列）；`exp_slots`/`exp_free` 是 expansion 槽位与可用块；`trig_expand` 是触发 expansion 的水位阈值 |
-| 4 | Expansion Pool | Type/ExpandCnt/TotalBlk/FreeBlk/MemSize/AccExpCnt/SyncExpCnt/AsyncExpCnt/AccShrinkCnt + `partial_slot_count: WithData=N WithoutData=N` | WithData + WithoutData 两行 + partial_slot_count 单行（部分填充槽统计） |
-| 5 | Per-Thread TLS Pool Stats (WithData) | Type/TID/CurCap/CurBuf/AccFetchCnt/AccFetchBuf/AccReturnCnt/AccReturnBuf/AccAllocCnt/AccFreeCnt | `total` 行 + 每 thread 一行；`AccAlloc`→`AccAllocCnt`、`AccFree`→`AccFreeCnt`（Cnt 后缀统一） |
-| 6 | Per-Thread TLS Pool Stats (WithoutData) | 同上列名 | 借用 header 场景，多数情况下全 0 |
-| 7 | Per-Thread Per-SC TLS (WithData) | sc/tls_buf_cnt/tls_cap_cnt | per-thread per-sc 细分（`local_qbuf_pool_num==0` 时整段跳过）；`tls_buf_cnt` 是当前 TLS 缓存 buf 数，`tls_cap_cnt` 是 per-SC 容量上限（count，非 bytes） |
-| 8 | Derived Metrics | Pool/TotalSize/TotalCnt/FreeSize/FreeCnt/Utilization/TlsLocality/AllocMinusFree + 每行 `Normal-scN` 子行 | 派生指标：`utilization=(total-free)/total%`、`tls_locality=tls/(tls+global)%`、`alloc_minus_free=AccAlloc-AccFree`（leak 探针，应=0 或=tls cur_buf 总和）；size 列同时显示 raw + K/M/G 单位；per-SC 子行独立显示各 SC 利用率 |
-| 9 | Escape | escape_buf_cnt | 加 `== [ Escape ] ==` 三段式框架，与其他段一致 |
+| 1 | Global Pool Config | Type/Mode/TotalSize/TotalBlk/BlkSize/Headroom/DataSize/BufSize/UmqBufSize/FreeBlk/FreeSize/NoBufFreeBlk/NoBufFreeSize | 姹犳€昏锛坮aw 鏁板€硷級锛屽惈 without_data pool 鐨?NoBuf 鍒?|
+| 2 | Pool Config [Normal] | size_class_count/blk_size[]/per_sc_block_count/disable_scale_cap/disable_malloc_escape/expansion_size/expansion_threshold/batch_count/expansion_mem_size_max/exp_total_mem_pool_size/tls_qbuf_pool_depth/tls_expand_qbuf_pool_depth/exp_slot_used_count | 閰嶇疆鍙傛暟锛坕nit key=value 鐩存帴瀵圭収锛夛紱`blk_size[]` 鏄?`explicit_block_sizes[]` 鐨?DFX 鍒悕锛?*`per_sc_weights[]` 涓嶅湪 DFX 杈撳嚭涓?*锛堢敓浜т唬鐮佸唴閮ㄤ娇鐢紝浠呭湪 init 鏃跺奖鍝?`per_sc_block_count` 鍒嗛厤锛?|
+| 3 | Per-SizeClass State | sc/blk_size/glbl_free/hdr_free/exp_slots/exp_total_blk/exp_total_exp/exp_total_shrink/glbl_total/cap/exp_free/trig_expand | per-sc 鐘舵€侊紱`glbl_free` 鏄?global 鍙敤 buf 鏁帮紙with_data锛夛紱`hdr_free` 鏄?without_data pool 鍙敤鏁帮紙sc0 鍒楋級锛沗exp_slots`/`exp_free` 鏄?expansion 妲戒綅涓庡彲鐢ㄥ潡锛沗trig_expand` 鏄Е鍙?expansion 鐨勬按浣嶉槇鍊?|
+| 4 | Expansion Pool | Type/ExpandCnt/TotalBlk/FreeBlk/MemSize/AccExpCnt/SyncExpCnt/AsyncExpCnt/AccShrinkCnt + `partial_slot_count: WithData=N WithoutData=N` | WithData + WithoutData 涓よ + partial_slot_count 鍗曡锛堥儴鍒嗗～鍏呮Ы缁熻锛?|
+| 5 | Per-Thread TLS Pool Stats (WithData) | Type/TID/CurCap/CurBuf/AccFetchCnt/AccFetchBuf/AccReturnCnt/AccReturnBuf/AccAllocCnt/AccFreeCnt | `total` 琛?+ 姣?thread 涓€琛岋紱`AccAlloc`鈫抈AccAllocCnt`銆乣AccFree`鈫抈AccFreeCnt`锛圕nt 鍚庣紑缁熶竴锛?|
+| 6 | Per-Thread TLS Pool Stats (WithoutData) | 鍚屼笂鍒楀悕 | 鍊熺敤 header 鍦烘櫙锛屽鏁版儏鍐典笅鍏?0 |
+| 7 | Per-Thread Per-SC TLS (WithData) | sc/tls_buf_cnt/tls_cap_cnt | per-thread per-sc 缁嗗垎锛坄local_qbuf_pool_num==0` 鏃舵暣娈佃烦杩囷級锛沗tls_buf_cnt` 鏄綋鍓?TLS 缂撳瓨 buf 鏁帮紝`tls_cap_cnt` 鏄?per-SC 瀹归噺涓婇檺锛坈ount锛岄潪 bytes锛?|
+| 8 | Derived Metrics | Pool/TotalSize/TotalCnt/FreeSize/FreeCnt/Utilization/TlsLocality/AllocMinusFree + 姣忚 `Normal-scN` 瀛愯 | 娲剧敓鎸囨爣锛歚utilization=(total-free)/total%`銆乣tls_locality=tls/(tls+global)%`銆乣alloc_minus_free=AccAlloc-AccFree`锛坙eak 鎺㈤拡锛屽簲=0 鎴?tls cur_buf 鎬诲拰锛夛紱size 鍒楀悓鏃舵樉绀?raw + K/M/G 鍗曚綅锛沺er-SC 瀛愯鐙珛鏄剧ず鍚?SC 鍒╃敤鐜?|
+| 9 | Escape | escape_buf_cnt | 鍔?`== [ Escape ] ==` 涓夋寮忔鏋讹紝涓庡叾浠栨涓€鑷?|
 
-## 7. 测试场景对照表
-
-| 测试目的 | 用例 / 命令 | 关键观察点 |
+## 7. 娴嬭瘯鍦烘櫙瀵圭収琛?
+| 娴嬭瘯鐩殑 | 鐢ㄤ緥 / 鍛戒护 | 鍏抽敭瑙傚療鐐?|
 |---|---|---|
-| 多级 sc 路由正确 | case_01 / `alloc 4096`+`alloc 65536` | alloc 输出 `sc=0` / `sc=1`；info 段 3 Per-SizeClass `blk_size=4096/65536` 反推 |
-| 多级结构初始化 | case_01 `info` 段 2+3 | 段 2 `size_class_count=2`、`blk_size[0]=4096`/`blk_size[1]=65536`；段 3 `blk_size=4096`(sc0) / `65536`(sc1)、`glbl_free`/`hdr_free` 分行 |
-| TLS 字节预算机制 | case_01 `info` 段 5+7 alloc 前后 | 段 5 `CurCap`（=TLS 总 buf 容量）累加（不随 alloc 递减）；段 7 per-sc `tls_cap_cnt` 是 per-SC 容量上限 |
-| TLS fetch 批量预取 | case_07 阶段1 `info` 段 5 | `AccFetchBuf=320`（5 批×64），`AccAllocCnt=300` |
-| free 还 TLS 非 global | case_07 阶段2 `info` 段 5 | free all 后 `CurBuf` 升到 fetch 量（320），`FreeBlk` 不变（actual==cap） |
-| self_shrink 归还 global | case_07 阶段3 `info` 段 5+段 8 | alloc 1 触发 shrink，`CurBuf` 降、`FreeBlk` 升；段 8 `TlsLocality` 同步下降 |
-| 多线程 TLS 隔离 | case_05/06 `status` 或 `info` 段 5 | 段 5 不同 `TID`（kernel TID 小数字）的行各自 `AccFetchBuf`/`CurBuf` 独立 |
-| per-thread 泄漏检测 | case_03/06 | `info` 段 8 `AllocMinusFree > 0`（运行中可见）；退出 `NOTE: thread K has N bufs unfreed` |
-| 守恒一眼可见 | case_04 `info` 段 3+5+8 | 每 sc：段 3 `glbl_free` + 段 5 `CurBuf` + alloced（=AccAlloc-AccFree） 恒等于 init 总块数；段 8 `Utilization` 与之对齐 |
-| held allocs 过滤 | case_04 status | alloc+free 对隐藏，只显示仍持有的（`remaining/total`） |
+| 澶氱骇 sc 璺敱姝ｇ‘ | case_01 / `alloc 4096`+`alloc 65536` | alloc 杈撳嚭 `sc=0` / `sc=1`锛沬nfo 娈?3 Per-SizeClass `blk_size=4096/65536` 鍙嶆帹 |
+| 澶氱骇缁撴瀯鍒濆鍖?| case_01 `info` 娈?2+3 | 娈?2 `size_class_count=2`銆乣blk_size[0]=4096`/`blk_size[1]=65536`锛涙 3 `blk_size=4096`(sc0) / `65536`(sc1)銆乣glbl_free`/`hdr_free` 鍒嗚 |
+| TLS 瀛楄妭棰勭畻鏈哄埗 | case_01 `info` 娈?5+7 alloc 鍓嶅悗 | 娈?5 `CurCap`锛?TLS 鎬?buf 瀹归噺锛夌疮鍔狅紙涓嶉殢 alloc 閫掑噺锛夛紱娈?7 per-sc `tls_cap_cnt` 鏄?per-SC 瀹归噺涓婇檺 |
+| TLS fetch 鎵归噺棰勫彇 | case_07 闃舵1 `info` 娈?5 | `AccFetchBuf=320`锛? 鎵姑?4锛夛紝`AccAllocCnt=300` |
+| free 杩?TLS 闈?global | case_07 闃舵2 `info` 娈?5 | free all 鍚?`CurBuf` 鍗囧埌 fetch 閲忥紙320锛夛紝`FreeBlk` 涓嶅彉锛坅ctual==cap锛?|
+| self_shrink 褰掕繕 global | case_07 闃舵3 `info` 娈?5+娈?8 | alloc 1 瑙﹀彂 shrink锛宍CurBuf` 闄嶃€乣FreeBlk` 鍗囷紱娈?8 `TlsLocality` 鍚屾涓嬮檷 |
+| 澶氱嚎绋?TLS 闅旂 | case_05/06 `status` 鎴?`info` 娈?5 | 娈?5 涓嶅悓 `TID`锛坘ernel TID 灏忔暟瀛楋級鐨勮鍚勮嚜 `AccFetchBuf`/`CurBuf` 鐙珛 |
+| per-thread 娉勬紡妫€娴?| case_03/06 | `info` 娈?8 `AllocMinusFree > 0`锛堣繍琛屼腑鍙锛夛紱閫€鍑?`NOTE: thread K has N bufs unfreed` |
+| 瀹堟亽涓€鐪煎彲瑙?| case_04 `info` 娈?3+5+8 | 姣?sc锛氭 3 `glbl_free` + 娈?5 `CurBuf` + alloced锛?AccAlloc-AccFree锛?鎭掔瓑浜?init 鎬诲潡鏁帮紱娈?8 `Utilization` 涓庝箣瀵归綈 |
+| held allocs 杩囨护 | case_04 status | alloc+free 瀵归殣钘忥紝鍙樉绀轰粛鎸佹湁鐨勶紙`remaining/total`锛?|
 
-## 8. 常见问题
+## 8. 甯歌闂
 
-### Q1: free all 后 TLS buf 没下降、global 没升，为什么不归还？
-`umq_qbuf_free` 把 buf 还到 **TLS 缓存**（with_data 池），不是直接 global。`return_to_global` 只在 `actual_bytes > cap_bytes`（`umq_qbuf_pool.c:1750`）触发，`cap_bytes = bytes_with_data[sc]`（fetch 时累加）。free all 后 `actual = fetch×block = bytes_with_data = cap`，相等不超，不归还。归还 global 在 `self_shrink`（alloc 路径，`remaining/4 >= 64`）。见 case_07 阶段3。
-### Q2: `alloc 4096 num=300` 报 "size/num invalid"？
+### Q1: free all 鍚?TLS buf 娌′笅闄嶃€乬lobal 娌″崌锛屼负浠€涔堜笉褰掕繕锛?`umq_qbuf_free` 鎶?buf 杩樺埌 **TLS 缂撳瓨**锛坵ith_data 姹狅級锛屼笉鏄洿鎺?global銆俙return_to_global` 鍙湪 `actual_bytes > cap_bytes`锛坄umq_qbuf_pool.c:1750`锛夎Е鍙戯紝`cap_bytes = bytes_with_data[sc]`锛坒etch 鏃剁疮鍔狅級銆俧ree all 鍚?`actual = fetch脳block = bytes_with_data = cap`锛岀浉绛変笉瓒咃紝涓嶅綊杩樸€傚綊杩?global 鍦?`self_shrink`锛坅lloc 璺緞锛宍remaining/4 >= 64`锛夈€傝 case_07 闃舵3銆?### Q2: `alloc 4096 num=300` 鎶?"size/num invalid"锛?
+alloc 鐨?num 鏄?*浣嶇疆鍙傛暟**锛坅rgs[2] 鐩存帴 strtoul锛夛紝涓嶆槸 key=value銆俙num=300` 琚В鏋愭垚 0銆傜敤 `alloc 4096 300`锛堜綅缃弬鏁帮級銆俰nit 鎵嶇敤 key=value銆?
+**alloc 涓婇檺**锛堜笁灞傦級锛?1. **鍗曟 alloc**: `num 鈮?1000`锛坄DoAlloc` 妫€鏌ワ紝闃叉鍗曟杩囧ぇ锛?2. **per-worker 绱**: `alloced.size() 鈮?WORKER_ALLOCED_CAP=65536`锛堥槻姝?`alloced` vector 鏃犵晫澧為暱 + O(n) 鎵弿閫€鍖栵級銆傝秴闄愭椂 `DoAlloc` 杩斿洖閿欒锛屾彁绀?"Free some bufs first or use `free all` to reset"
+3. **姹犲瓙鑰楀敖**: `umq_normal_qbuf_alloc` 杩斿洖 ENOMEM锛堣嚜鐒朵笂闄愶紝閫氬父鏈€鍏堣Е鍙戯級
 
-alloc 的 num 是**位置参数**（args[2] 直接 strtoul），不是 key=value。`num=300` 被解析成 0。用 `alloc 4096 300`（位置参数）。init 才用 key=value。
-
-**alloc 上限**（三层）：
-1. **单次 alloc**: `num ≤ 1000`（`DoAlloc` 检查，防止单次过大）
-2. **per-worker 累计**: `alloced.size() ≤ WORKER_ALLOCED_CAP=65536`（防止 `alloced` vector 无界增长 + O(n) 扫描退化）。超限时 `DoAlloc` 返回错误，提示 "Free some bufs first or use `free all` to reset"
-3. **池子耗尽**: `umq_normal_qbuf_alloc` 返回 ENOMEM（自然上限，通常最先触发）
-
-per-worker 上限是安全网——池子通常只有 ~5760 bufs（200M totalSz），8 worker 平均每个 ~720 bufs，远低于 65536。只有当用户忘记 `free all` 而持续 alloc 时才会撞上限。
-
-### Q3: 多线程时 actions 序号和 held allocs 序号怎么对应？
-held allocs 的 `[tK][N]` 中 `N` 是 `actions_idx+1`，对应 actions 段的序号（含 alloc+free 对，alloc 操作的序号）。alloc 又 free 的 `remaining=0` 时从 held allocs 隐藏，但 actions 段保留全历史。
-### Q4: `thread_K free <orig_idx>` 的 orig_idx 是全局还是 per-thread？
-
-**per-thread**。`thread_K free <orig_idx>` 只 free worker K 自己的 `alloced` 中 `orig_idx` 匹配的 buf，不支持跨线程 free。
-
-**orig_idx 语义**（稳定索引，不会因 erase 前移）：
-- 每个 buf 在 drain 时分配一个单调递增的 `orig_idx`（从 0 开始）
-- `free N` 通过扫描 `alloced` 查找 `orig_idx == N` 的 buf，erase 该 buf 后**其他 buf 的 orig_idx 不变**
-- `free all` 清空 `alloced` 并重置 `next_orig_idx = 0`，下次 alloc 从 0 重新开始
-- `held allocs` 段每行末尾的 `(free N)` 或 `(free N-M)` 提示该 op 的 orig_idx 范围，用户直接照抄即可
-
-**与旧版本（erase 前移）的区别**：旧版 `free 0; free 1; free 2; free 3; free 4` 因 erase 前移只释放 3 个 buf（b0/b2/b4），剩 2 个泄漏；新版稳定索引下 5 个全部正确释放。
-
-### Q5: 退出码怎么看？
-0=全部命令成功，非0=有命令失败（ERROR 打到 stderr）。脚本结束自动 Cleanup（泄漏检查 + join workers + uninit）。
-
-### Q6: 为什么 `info` 的 TLS 段要遍历 `g_tls_register_head`？
-`g_thread_cache` 是 `__thread`，主线程访问只看主线程 TLS（空，主线程不分发业务）。要看所有 worker TLS，必须遍历全局链表 `g_tls_register_head`（加锁 `g_tls_stats_lock`）。
-
-### Q7: 并行块内的 buf[i] 输出是按 worker 顺序打印的，看起来像串行？是并行的吗？
-
-**是并行的——worker 执行并发，但 drain（打印）由主线程串行做**。
-
-设计如此：主线程在 `SyncAll()` 中按 `g_workers` 顺序（worker idx 升序）`pthread_cond_wait(done)` + drain `task.alloc_list`，保证 `g_actions` 序号稳定（按派发顺序，非完成顺序）。所以 buf[i] 输出顺序是 t0 全部、t1 全部、…、t7 全部——这**只反映 drain 顺序，不反映执行顺序**。
-
-要验证 worker 真并发执行，开 verbose 模式：
-
+per-worker 涓婇檺鏄畨鍏ㄧ綉鈥斺€旀睜瀛愰€氬父鍙湁 ~3072 bufs锛垀106MB allocSz锛夛紝8 worker 骞冲潎姣忎釜 ~384 bufs锛岃繙浣庝簬 65536銆傚彧鏈夊綋鐢ㄦ埛蹇樿 `free all` 鑰屾寔缁?alloc 鏃舵墠浼氭挒涓婇檺銆?
+### Q3: 澶氱嚎绋嬫椂 actions 搴忓彿鍜?held allocs 搴忓彿鎬庝箞瀵瑰簲锛?held allocs 鐨?`[tK][N]` 涓?`N` 鏄?`actions_idx+1`锛屽搴?actions 娈电殑搴忓彿锛堝惈 alloc+free 瀵癸紝alloc 鎿嶄綔鐨勫簭鍙凤級銆俛lloc 鍙?free 鐨?`remaining=0` 鏃朵粠 held allocs 闅愯棌锛屼絾 actions 娈典繚鐣欏叏鍘嗗彶銆?### Q4: `thread_K free <orig_idx>` 鐨?orig_idx 鏄叏灞€杩樻槸 per-thread锛?
+**per-thread**銆俙thread_K free <orig_idx>` 鍙?free worker K 鑷繁鐨?`alloced` 涓?`orig_idx` 鍖归厤鐨?buf锛屼笉鏀寔璺ㄧ嚎绋?free銆?
+**orig_idx 璇箟**锛堢ǔ瀹氱储寮曪紝涓嶄細鍥?erase 鍓嶇Щ锛夛細
+- 姣忎釜 buf 鍦?drain 鏃跺垎閰嶄竴涓崟璋冮€掑鐨?`orig_idx`锛堜粠 0 寮€濮嬶級
+- `free N` 閫氳繃鎵弿 `alloced` 鏌ユ壘 `orig_idx == N` 鐨?buf锛宔rase 璇?buf 鍚?*鍏朵粬 buf 鐨?orig_idx 涓嶅彉**
+- `free all` 娓呯┖ `alloced` 骞堕噸缃?`next_orig_idx = 0`锛屼笅娆?alloc 浠?0 閲嶆柊寮€濮?- `held allocs` 娈垫瘡琛屾湯灏剧殑 `(free N)` 鎴?`(free N-M)` 鎻愮ず璇?op 鐨?orig_idx 鑼冨洿锛岀敤鎴风洿鎺ョ収鎶勫嵆鍙?
+**涓庢棫鐗堟湰锛坋rase 鍓嶇Щ锛夌殑鍖哄埆**锛氭棫鐗?`free 0; free 1; free 2; free 3; free 4` 鍥?erase 鍓嶇Щ鍙噴鏀?3 涓?buf锛坆0/b2/b4锛夛紝鍓?2 涓硠婕忥紱鏂扮増绋冲畾绱㈠紩涓?5 涓叏閮ㄦ纭噴鏀俱€?
+### Q5: 閫€鍑虹爜鎬庝箞鐪嬶紵
+0=鍏ㄩ儴鍛戒护鎴愬姛锛岄潪0=鏈夊懡浠ゅけ璐ワ紙ERROR 鎵撳埌 stderr锛夈€傝剼鏈粨鏉熻嚜鍔?Cleanup锛堟硠婕忔鏌?+ join workers + uninit锛夈€?
+### Q6: 涓轰粈涔?`info` 鐨?TLS 娈佃閬嶅巻 `g_tls_register_head`锛?`g_thread_cache` 鏄?`__thread`锛屼富绾跨▼璁块棶鍙湅涓荤嚎绋?TLS锛堢┖锛屼富绾跨▼涓嶅垎鍙戜笟鍔★級銆傝鐪嬫墍鏈?worker TLS锛屽繀椤婚亶鍘嗗叏灞€閾捐〃 `g_tls_register_head`锛堝姞閿?`g_tls_stats_lock`锛夈€?
+### Q7: 骞惰鍧楀唴鐨?buf[i] 杈撳嚭鏄寜 worker 椤哄簭鎵撳嵃鐨勶紝鐪嬭捣鏉ュ儚涓茶锛熸槸骞惰鐨勫悧锛?
+**鏄苟琛岀殑鈥斺€攚orker 鎵ц骞跺彂锛屼絾 drain锛堟墦鍗帮級鐢变富绾跨▼涓茶鍋?*銆?
+璁捐濡傛锛氫富绾跨▼鍦?`SyncAll()` 涓寜 `g_workers` 椤哄簭锛坵orker idx 鍗囧簭锛塦pthread_cond_wait(done)` + drain `task.alloc_list`锛屼繚璇?`g_actions` 搴忓彿绋冲畾锛堟寜娲惧彂椤哄簭锛岄潪瀹屾垚椤哄簭锛夈€傛墍浠?buf[i] 杈撳嚭椤哄簭鏄?t0 鍏ㄩ儴銆乼1 鍏ㄩ儴銆佲€︺€乼7 鍏ㄩ儴鈥斺€旇繖**鍙弽鏄?drain 椤哄簭锛屼笉鍙嶆槧鎵ц椤哄簭**銆?
+瑕侀獙璇?worker 鐪熷苟鍙戞墽琛岋紝寮€ verbose 妯″紡锛?
 ```bash
 QBUF_TOOL_VERBOSE=1 ./build_qbuf_tool/qbuf_pool_tool case_08_concurrent_alloc_race.txt 2>&1 1>/dev/null
 ```
 
-输出示例（关键证据）：
-```
-[parallel] dispatched 8 commands in 158μs, entering barrier (workers now running concurrently)
-[sync] t0 drained: worker ran [95925..95933]μs (dur=8μs), main waited 0μs for done
-[sync] t1 drained: worker ran [95936..95959]μs (dur=23μs), main waited 0μs for done
-[sync] t2 drained: worker ran [95946..95964]μs (dur=18μs), main waited 1μs for done
+杈撳嚭绀轰緥锛堝叧閿瘉鎹級锛?```
+[parallel] dispatched 8 commands in 158渭s, entering barrier (workers now running concurrently)
+[sync] t0 drained: worker ran [95925..95933]渭s (dur=8渭s), main waited 0渭s for done
+[sync] t1 drained: worker ran [95936..95959]渭s (dur=23渭s), main waited 0渭s for done
+[sync] t2 drained: worker ran [95946..95964]渭s (dur=18渭s), main waited 1渭s for done
 ...
-[sync] barrier complete: total=346μs, parallel_exec_window=152μs,
-       per-worker wait: min=0μs max=1μs avg=0μs
+[sync] barrier complete: total=346渭s, parallel_exec_window=152渭s,
+       per-worker wait: min=0渭s max=1渭s avg=0渭s
 ```
 
-**判断标准**：
-1. **per-worker wait ≈ 0**（max=1μs）：主线程到达 SyncAll 时 8 个 worker 都已完成 → 必然并发（串行的话每个 wait ≈ worker 执行时间）
-2. **worker 区间重叠**：t1=[95936..95959] 与 t2=[95946..95964] 在 [95946..95959] 重叠 13μs 同时跑
-3. **parallel_exec_window < Σ(worker dur)**：152μs < 8+23+18+4+3+9+7+5=77μs 的 8 倍 — 并发节省了 ~6 倍时间
+**鍒ゆ柇鏍囧噯**锛?1. **per-worker wait 鈮?0**锛坢ax=1渭s锛夛細涓荤嚎绋嬪埌杈?SyncAll 鏃?8 涓?worker 閮藉凡瀹屾垚 鈫?蹇呯劧骞跺彂锛堜覆琛岀殑璇濇瘡涓?wait 鈮?worker 鎵ц鏃堕棿锛?2. **worker 鍖洪棿閲嶅彔**锛歵1=[95936..95959] 涓?t2=[95946..95964] 鍦?[95946..95959] 閲嶅彔 13渭s 鍚屾椂璺?3. **parallel_exec_window < 危(worker dur)**锛?52渭s < 8+23+18+4+3+9+7+5=77渭s 鐨?8 鍊?鈥?骞跺彂鑺傜渷浜?~6 鍊嶆椂闂?
+Verbose 妯″紡榛樿鍏抽棴锛宻tress 鐢ㄤ緥(case_10/12)鑻ュ紑 verbose 浼氫骇鐢熷ぇ閲?timing 琛岋紝寤鸿鍙湪璋冭瘯 race 鏃跺惎鐢ㄣ€?
 
-Verbose 模式默认关闭，stress 用例(case_10/12)若开 verbose 会产生大量 timing 行，建议只在调试 race 时启用。
+### Q8: `repeat` 鍜?`stress_repeat` 鎬庝箞閫?
 
-
-### Q8: `repeat` 和 `stress_repeat` 怎么选?
-
-| 维度 | `repeat N` | `stress_repeat` |
+| 缁村害 | `repeat N` | `stress_repeat` |
 |------|-----------|-------------------|
-| 上限 | N≤10000 | **无限循环** |
-| 退出条件 | 跑完 N 次 | Ctrl-C(SIGINT/SIGTERM)或 alloc/free 失败 |
-| g_actions | 每轮 push,线性增长 | 不 push,恒定 |
-| per-buf printf | 每轮打印 | 跳过 |
-| Worker::alloc_ops | 不主动清(由 `free all` 清) | 每轮末尾静默清+重置 `next_orig_idx`(当 `alloced.empty()`) |
-| 适用场景 | 调试竞态、放大 race window | 天级别长稳、内存压力验证 |
-| 出错时调试 | g_actions 完整历史可回溯 | 只有 iter 号 + 失败行(stress 模式不记历史) |
-| batch 自动化 | ✅ 可在 `for f in cases/*.txt; do ...` 中跑 | ❌ 无限循环,不能进 batch(会卡住) |
+| 涓婇檺 | N鈮?0000 | **鏃犻檺寰幆** |
+| 閫€鍑烘潯浠?| 璺戝畬 N 娆?| Ctrl-C(SIGINT/SIGTERM)鎴?alloc/free 澶辫触 |
+| g_actions | 姣忚疆 push,绾挎€у闀?| 涓?push,鎭掑畾 |
+| per-buf printf | 姣忚疆鎵撳嵃 | 璺宠繃 |
+| Worker::alloc_ops | 涓嶄富鍔ㄦ竻(鐢?`free all` 娓? | 姣忚疆鏈熬闈欓粯娓?閲嶇疆 `next_orig_idx`(褰?`alloced.empty()`) |
+| 閫傜敤鍦烘櫙 | 璋冭瘯绔炴€併€佹斁澶?race window | 澶╃骇鍒暱绋炽€佸唴瀛樺帇鍔涢獙璇?|
+| 鍑洪敊鏃惰皟璇?| g_actions 瀹屾暣鍘嗗彶鍙洖婧?| 鍙湁 iter 鍙?+ 澶辫触琛?stress 妯″紡涓嶈鍘嗗彶) |
+| batch 鑷姩鍖?| 鉁?鍙湪 `for f in cases/*.txt; do ...` 涓窇 | 鉂?鏃犻檺寰幆,涓嶈兘杩?batch(浼氬崱浣? |
 
-**建议**:
-- 短测试(N≤10000)、需要 action 历史、自动化 batch → `repeat`
-- 长稳(手动控制时长)、验证内存恒定 → `stress_repeat` + `snapshot N`,Ctrl-C 控制
-- 调试 race 时先用 `repeat` 跑小 N 看 action 历史,确认逻辑无误后再切 `stress_repeat` 长跑
+**寤鸿**:
+- 鐭祴璇?N鈮?0000)銆侀渶瑕?action 鍘嗗彶銆佽嚜鍔ㄥ寲 batch 鈫?`repeat`
+- 闀跨ǔ(鎵嬪姩鎺у埗鏃堕暱)銆侀獙璇佸唴瀛樻亽瀹?鈫?`stress_repeat` + `snapshot N`,Ctrl-C 鎺у埗
+- 璋冭瘯 race 鏃跺厛鐢?`repeat` 璺戝皬 N 鐪?action 鍘嗗彶,纭閫昏緫鏃犺鍚庡啀鍒?`stress_repeat` 闀胯窇
 
-### Q9: `stress_repeat` 跑到一半 OOM 了怎么办?
+### Q9: `stress_repeat` 璺戝埌涓€鍗?OOM 浜嗘€庝箞鍔?
 
-`stress_repeat` 设计上保证工具自身内存恒定(g_actions 不增长、alloc_ops 每轮清空、counters 1 个 struct)。如果 RSS 仍增长,排查:
+`stress_repeat` 璁捐涓婁繚璇佸伐鍏疯嚜韬唴瀛樻亽瀹?g_actions 涓嶅闀裤€乤lloc_ops 姣忚疆娓呯┖銆乧ounters 1 涓?struct)銆傚鏋?RSS 浠嶅闀?鎺掓煡:
 
-1. **用户泄漏**:`status` 的 `stress progress` 段看 `alloced_held`——若非 0 且持续增长,说明每轮 alloc/free 未配对。修复脚本。
-2. **pool expansion**: `status` 的 `Pool OS Mem Claimed` 行看 `initial + expansion + escape`——若 expansion 持续增长,说明生产代码 expansion 没回收(可能 pool 配置问题,检查 `poolMaxSz` cap)。pool 自身受 `poolMaxSz` CAS 约束,理论上限确定。
-3. **glibc malloc arena**:多线程场景 glibc 会为每个线程分配 malloc arena(默认 8×CPU 核数)。用 `MALLOC_ARENA_MAX=2 ./build_qbuf_tool/qbuf_pool_tool ...` 限制 arena 数,可显著降 RSS。
-4. **buf printf 拖留**:stress 模式下 per-buf printf 已跳过;若仍看到大量 stdout 输出,检查是否误用了 `repeat` 而非 `stress_repeat`。
+1. **鐢ㄦ埛娉勬紡**:`status` 鐨?`stress progress` 娈电湅 `alloced_held`鈥斺€旇嫢闈?0 涓旀寔缁闀?璇存槑姣忚疆 alloc/free 鏈厤瀵广€備慨澶嶈剼鏈€?2. **pool expansion**: `status` 鐨?`Pool OS Mem Claimed` 琛岀湅 `initial + expansion + escape`鈥斺€旇嫢 expansion 鎸佺画澧為暱,璇存槑鐢熶骇浠ｇ爜 expansion 娌″洖鏀?鍙兘 pool 閰嶇疆闂,妫€鏌?`poolMaxSz` cap)銆俻ool 鑷韩鍙?`poolMaxSz` CAS 绾︽潫,鐞嗚涓婇檺纭畾銆?3. **glibc malloc arena**:澶氱嚎绋嬪満鏅?glibc 浼氫负姣忎釜绾跨▼鍒嗛厤 malloc arena(榛樿 8脳CPU 鏍告暟)銆傜敤 `MALLOC_ARENA_MAX=2 ./build_qbuf_tool/qbuf_pool_tool ...` 闄愬埗 arena 鏁?鍙樉钁楅檷 RSS銆?4. **buf printf 鎷栫暀**:stress 妯″紡涓?per-buf printf 宸茶烦杩?鑻ヤ粛鐪嬪埌澶ч噺 stdout 杈撳嚭,妫€鏌ユ槸鍚﹁鐢ㄤ簡 `repeat` 鑰岄潪 `stress_repeat`銆?
 
-
-## 9. 文件清单
+## 9. 鏂囦欢娓呭崟
 
 ```
-test/hcom/unit_test/umq/qbuf_pool_tool/
-├── CMakeLists.txt          # 独立 cmake 项目
-├── qbuf_pool_tool.h        # struct + 全局 extern + 函数声明
-├── stubs.cpp               # extern C stubs(不 include .c)
-├── utils.cpp               # 纯解析器
-├── core.cpp                # tool state + 命令分发;不再 #include umq_qbuf_pool.c
-│                           #  (由 CMakeLists.txt 编入 tool target);所有 umq pool
-│                           #  状态访问走公共 DFX API (umq_stats_qbuf_pool_get +
-│                           #  umq_qbuf_pool_stats_to_str) 和公共 umq_qbuf_pool.h
-│                           #  函数(init/uninit/normal_qbuf_alloc/qbuf_free/...)
-│                           #  + DispatchAsync/SyncAll/DrainWorkerResult/
-│                           #    DoParallelBlock/DoRepeatBlock/DoStressRepeatBlock/
-│                           #    ExecuteBlockLines
-├── main.cpp                # 脚本读 + 命令分发 + parallel/repeat/stress_repeat 块解析状态机
-└── cases/                  # 30 个用例(含 4 组重号,见 §10)
-    ├── case_01_basic_init_alloc_free.txt
-    ├── case_02_status.txt
-    ├── case_03_leak.txt
-    ├── case_04_interleaved_alloc_free.txt
-    ├── case_05_multi_thread.txt
-    ├── case_06_complex_multi_thread.txt
-    ├── case_07_tls_fetch_return.txt
-    ├── case_08_concurrent_alloc_race.txt   # 并行
-    ├── case_09_concurrent_free_race.txt    # 并行
-    ├── case_10_mixed_alloc_free_race.txt   # 并行+repeat
-    ├── case_11_cross_sc_parallel.txt       # 并行
-    ├── case_12_stress_repeat.txt           # 并行+repeat
-    ├── case_13_threads_beyond_8.txt         # 并行(突破旧 8 上限)
-    ├── case_14_poolMaxSz_field_mapping.txt  # 字段映射正向 (poolMaxSz) — §4.3
-    ├── case_14_burst_alloc_free_shrink.txt  # burst + shrink — §4.5
-    ├── case_15_expSlotSz_field_mapping.txt  # 字段映射正向 (expSlotSz) — §4.3
-    ├── case_15_sustained_burst_stability.txt # sustained burst 稳定性 — §4.5
-    ├── case_16_field_mapping_rejected.txt   # 字段映射负向 (旧名+越界) — §4.3
-    ├── case_16_lazy_init_3sc.txt            # lazy 1M 基础 — §4.6
-    ├── case_17_lazy_init_multi_expand.txt   # lazy 多轮 expansion — §4.6
-    ├── case_17_without_data.txt             # without_data 路径 — §4.7
-    ├── case_18_lazy_init_combine.txt         # lazy + COMBINE — §4.6
-    ├── case_19_lazy_init_concurrent.txt      # lazy + 并发 — §4.6
-    ├── case_20_lazy_init_headroom.txt        # lazy + headroom — §4.6
-    ├── case_21_stress_repeat.txt            # 长稳 stress_repeat 基础(无限循环)
-    ├── case_22_stress_infinite.txt          # 长稳无限循环 + RSS 监控示例
-    ├── case_23_stress_free_idx.txt          # 长稳 free <idx> 模式 (alloc_ops 清空验证)
-    ├── case_24_escape_disabled.txt          # escape=off + pool 耗尽验证 — §4.8
-    ├── case_25_expansion_threshold.txt       # expThreshold 水位控制 — §4.8
-    ├── case_26_tls_expand_budget.txt          # tlsExpandBudget per-thread cap — §4.8
-    └── case_27_blockSizes_weights_field_mapping.txt  # blockSizes=/weights= 字段映射 — §4.8
+test/urpc/umq/qbuf_pool_tool/
+鈹溾攢鈹€ CMakeLists.txt          # 鐙珛 cmake 椤圭洰
+鈹溾攢鈹€ qbuf_pool_tool.h        # struct + 鍏ㄥ眬 extern + 鍑芥暟澹版槑
+鈹溾攢鈹€ stubs.cpp               # extern C stubs(涓?include .c)
+鈹溾攢鈹€ utils.cpp               # 绾В鏋愬櫒
+鈹溾攢鈹€ core.cpp                # tool state + 鍛戒护鍒嗗彂;涓嶅啀 #include umq_qbuf_pool.c
+鈹?                          #  (鐢?CMakeLists.txt 缂栧叆 tool target);鎵€鏈?umq pool
+鈹?                          #  鐘舵€佽闂蛋鍏叡 DFX API (umq_stats_qbuf_pool_get +
+鈹?                          #  umq_qbuf_pool_stats_to_str) 鍜屽叕鍏?umq_qbuf_pool.h
+鈹?                          #  鍑芥暟(init/uninit/normal_qbuf_alloc/qbuf_free/...)
+鈹?                          #  + DispatchAsync/SyncAll/DrainWorkerResult/
+鈹?                          #    DoParallelBlock/DoRepeatBlock/DoStressRepeatBlock/
+鈹?                          #    ExecuteBlockLines
+鈹溾攢鈹€ main.cpp                # 鑴氭湰璇?+ 鍛戒护鍒嗗彂 + parallel/repeat/stress_repeat 鍧楄В鏋愮姸鎬佹満
+鈹斺攢鈹€ cases/                  # 30 涓敤渚?鍚?4 缁勯噸鍙?瑙?搂10)
+    鈹溾攢鈹€ case_01_basic_init_alloc_free.txt
+    鈹溾攢鈹€ case_02_status.txt
+    鈹溾攢鈹€ case_03_leak.txt
+    鈹溾攢鈹€ case_04_interleaved_alloc_free.txt
+    鈹溾攢鈹€ case_05_multi_thread.txt
+    鈹溾攢鈹€ case_06_complex_multi_thread.txt
+    鈹溾攢鈹€ case_07_tls_fetch_return.txt
+    鈹溾攢鈹€ case_08_concurrent_alloc_race.txt   # 骞惰
+    鈹溾攢鈹€ case_09_concurrent_free_race.txt    # 骞惰
+    鈹溾攢鈹€ case_10_mixed_alloc_free_race.txt   # 骞惰+repeat
+    鈹溾攢鈹€ case_11_cross_sc_parallel.txt       # 骞惰
+    鈹溾攢鈹€ case_12_stress_repeat.txt           # 骞惰+repeat
+    鈹溾攢鈹€ case_13_threads_beyond_8.txt         # 骞惰(绐佺牬鏃?8 涓婇檺)
+    鈹溾攢鈹€ case_14_poolMaxSz_field_mapping.txt  # 瀛楁鏄犲皠姝ｅ悜 (poolMaxSz) 鈥?搂4.3
+    鈹溾攢鈹€ case_14_burst_alloc_free_shrink.txt  # burst + shrink 鈥?搂4.5
+    鈹溾攢鈹€ case_15_expSlotSz_field_mapping.txt  # 瀛楁鏄犲皠姝ｅ悜 (expSlotSz) 鈥?搂4.3
+    鈹溾攢鈹€ case_15_sustained_burst_stability.txt # sustained burst 绋冲畾鎬?鈥?搂4.5
+    鈹溾攢鈹€ case_16_field_mapping_rejected.txt   # 瀛楁鏄犲皠璐熷悜 (鏃у悕+瓒婄晫) 鈥?搂4.3
+    鈹溾攢鈹€ case_16_lazy_init_3sc.txt            # lazy 1M 鍩虹 鈥?搂4.6
+    鈹溾攢鈹€ case_17_lazy_init_multi_expand.txt   # lazy 澶氳疆 expansion 鈥?搂4.6
+    鈹溾攢鈹€ case_17_without_data.txt             # without_data 璺緞 鈥?搂4.7
+    鈹溾攢鈹€ case_18_lazy_init_combine.txt         # lazy + COMBINE 鈥?搂4.6
+    鈹溾攢鈹€ case_19_lazy_init_concurrent.txt      # lazy + 骞跺彂 鈥?搂4.6
+    鈹溾攢鈹€ case_20_lazy_init_headroom.txt        # lazy + headroom 鈥?搂4.6
+    鈹溾攢鈹€ case_21_stress_repeat.txt            # 闀跨ǔ stress_repeat 鍩虹(鏃犻檺寰幆)
+    鈹溾攢鈹€ case_22_stress_infinite.txt          # 闀跨ǔ鏃犻檺寰幆 + RSS 鐩戞帶绀轰緥
+    鈹溾攢鈹€ case_23_stress_free_idx.txt          # 闀跨ǔ free <idx> 妯″紡 (alloc_ops 娓呯┖楠岃瘉)
+    鈹溾攢鈹€ case_24_escape_disabled.txt          # escape=off + pool 鑰楀敖楠岃瘉 鈥?搂4.8
+    鈹溾攢鈹€ case_25_expansion_threshold.txt       # expThreshold 姘翠綅鎺у埗 鈥?搂4.8
+    鈹溾攢鈹€ case_26_tls_expand_budget.txt          # tlsExpandBudget per-thread cap 鈥?搂4.8
+    鈹斺攢鈹€ case_27_blockSizes_weights_field_mapping.txt  # blockSizes=/weights= 瀛楁鏄犲皠 鈥?搂4.8
 ```
 
-## 10. 已知问题
+## 10. 宸茬煡闂
 
-### 10.1 用例编号冲突(4 组重号)
+### 10.1 鐢ㄤ緥缂栧彿鍐茬獊(4 缁勯噸鍙?
 
-cases/ 目录存在 4 组共用编号的文件:
+cases/ 鐩綍瀛樺湪 4 缁勫叡鐢ㄧ紪鍙风殑鏂囦欢:
 
-| 编号 | 文件 A | 文件 B |
+| 缂栧彿 | 鏂囦欢 A | 鏂囦欢 B |
 |---|---|---|
-| case_14 | `case_14_poolMaxSz_field_mapping.txt`(§4.3,退出码 0) | `case_14_burst_alloc_free_shrink.txt`(§4.5,退出码 0) |
-| case_15 | `case_15_expSlotSz_field_mapping.txt`(§4.3,退出码 0) | `case_15_sustained_burst_stability.txt`(§4.5,退出码 0) |
-| case_16 | `case_16_field_mapping_rejected.txt`(§4.3,**退出码 1**) | `case_16_lazy_init_3sc.txt`(§4.6,退出码 0) |
-| case_17 | `case_17_lazy_init_multi_expand.txt`(§4.6,退出码 0) | `case_17_without_data.txt`(§4.7,退出码 0) |
+| case_14 | `case_14_poolMaxSz_field_mapping.txt`(搂4.3,閫€鍑虹爜 0) | `case_14_burst_alloc_free_shrink.txt`(搂4.5,閫€鍑虹爜 0) |
+| case_15 | `case_15_expSlotSz_field_mapping.txt`(搂4.3,閫€鍑虹爜 0) | `case_15_sustained_burst_stability.txt`(搂4.5,閫€鍑虹爜 0) |
+| case_16 | `case_16_field_mapping_rejected.txt`(搂4.3,**閫€鍑虹爜 1**) | `case_16_lazy_init_3sc.txt`(搂4.6,閫€鍑虹爜 0) |
+| case_17 | `case_17_lazy_init_multi_expand.txt`(搂4.6,閫€鍑虹爜 0) | `case_17_without_data.txt`(搂4.7,閫€鍑虹爜 0) |
 
-**影响**:
-1. `for f in cases/*.txt; do ./build_qbuf_tool/qbuf_pool_tool "$f"; done` 跑批时同号用例都会执行——case_16 一个退出 0 一个退出 1,自动化结果难以按编号归因
-2. `cases/` 目录按字母序排列时,`case_16_field_mapping_rejected.txt` 排在 `case_16_lazy_init_3sc.txt` 之前;两者都跑时日志混杂
+**褰卞搷**:
+1. `for f in cases/*.txt; do ./build_qbuf_tool/qbuf_pool_tool "$f"; done` 璺戞壒鏃跺悓鍙风敤渚嬮兘浼氭墽琛屸€斺€攃ase_16 涓€涓€€鍑?0 涓€涓€€鍑?1,鑷姩鍖栫粨鏋滈毦浠ユ寜缂栧彿褰掑洜
+2. `cases/` 鐩綍鎸夊瓧姣嶅簭鎺掑垪鏃?`case_16_field_mapping_rejected.txt` 鎺掑湪 `case_16_lazy_init_3sc.txt` 涔嬪墠;涓よ€呴兘璺戞椂鏃ュ織娣锋潅
 
-**建议修复**:lazy init 系列(case_16~20 共 5 个)+ burst 系列(case_14_burst、case_15_sustained 共 2 个)+ without_data(case_17_without_data 1 个)重编号为 case_27~34,避免与字段映射用例冲突(case_24~26 已被新增的 init 参数用例占用,见 §4.8)。重编号后同步更新本文件 §4.5~§4.7 与 §9 文件清单。
+**寤鸿淇**:lazy init 绯诲垪(case_16~20 鍏?5 涓?+ burst 绯诲垪(case_14_burst銆乧ase_15_sustained 鍏?2 涓?+ without_data(case_17_without_data 1 涓?閲嶇紪鍙蜂负 case_27~34,閬垮厤涓庡瓧娈垫槧灏勭敤渚嬪啿绐?case_24~26 宸茶鏂板鐨?init 鍙傛暟鐢ㄤ緥鍗犵敤,瑙?搂4.8)銆傞噸缂栧彿鍚庡悓姝ユ洿鏂版湰鏂囦欢 搂4.5~搂4.7 涓?搂9 鏂囦欢娓呭崟銆?
+### 10.2 娴嬭瘯澹扮О涓嶆敮鎸佺殑瀛楁 鈥?瀹為檯鎯呭喌
 
-### 10.2 测试声称不支持的字段 — 实际情况
+娴嬭瘯鏇惧０绉板伐鍏蜂笉鏀寔 5 涓?init 閫夐」,瀹為檯鏍告煡(`qbuf_pool_cfg_t` 瀹氫箟瑙?`umq_qbuf_pool_base.h:85-113`):
 
-测试曾声称工具不支持 5 个 init 选项,实际核查(`qbuf_pool_cfg_t` 定义见 `umq_qbuf_pool_base.h:85-113`):
-
-| 字段 | 测试声称 | 实际 | 说明 |
+| 瀛楁 | 娴嬭瘯澹扮О | 瀹為檯 | 璇存槑 |
 |---|---|---|---|
-| `umq_buf_pool_max_size` | 不支持 | **已支持** | init 参数 `poolMaxSz`,见 §3.1。case_14_poolMaxSz/case_16_field_mapping 已验证 |
-| `disable_malloc_escape` | 不支持 | 已补齐(§4.8) | init 参数 `escape`,case_24 验证 |
-| `expansion_threshold` | 不支持 | 已补齐(§4.8) | init 参数 `expThreshold`,case_25 验证 |
-| `tls_expand_mem_budget` | 不支持 | 已补齐(§4.8) | init 参数 `tlsExpandBudget`,case_26 验证 |
-| `explicit_block_sizes` | (commit 600d24a 新增字段) | 已补齐(§4.8) | init 参数 `blockSizes`,case_27 验证。此前工具用 `mult` 几何级数近似,凑巧与生产 `{4K, 64K}` 一致但无法表达非几何分布 |
-| `per_sc_weights` | (commit 600d24a 新增字段) | 已补齐(§4.8) | init 参数 `weights`,case_27 验证。此前工具 `cfg.per_sc_weights[]` 全 0→生产代码兜底 `{1,1}`,与生产 `{2,1}` 不一致 |
-| `lazy_init_block_size_threshold` | (旧字段,已移除) | **已删除** | commit `600d24a` 移除该字段,改为 per-SC `per_sc_weights[i]==0` 表达 lazy。工具 `lazyThreshold` 参数同步移除,旧用例迁移到 `weights=1,1,0`(见 §4.6) |
-| `size_class_step_multiplier` | (旧字段,已移除) | **已删除** | commit `600d24a` 移除该字段,改为显式数组 `explicit_block_sizes[]`。工具原 `mult` 参数(几何级数回退)和 `base` 参数(显式枚举)已彻底移除——`base` 现从 `blockSizes[0]` 自动推导,`blockSizes=` 必填 |
-| `batch_mem_size` | 不支持 | **字段不存在** | `qbuf_pool_cfg_t` 中无此字段;全仓 grep 返回 0 匹配。疑为拼写错误或幻觉字段名,需向测试团队核实来源 |
+| `umq_buf_pool_max_size` | 涓嶆敮鎸?| **宸叉敮鎸?* | init 鍙傛暟 `poolMaxSz`,瑙?搂3.1銆俢ase_14_poolMaxSz/case_16_field_mapping 宸查獙璇?|
+| `disable_malloc_escape` | 涓嶆敮鎸?| 宸茶ˉ榻?搂4.8) | init 鍙傛暟 `escape`,case_24 楠岃瘉 |
+| `expansion_threshold` | 涓嶆敮鎸?| 宸茶ˉ榻?搂4.8) | init 鍙傛暟 `expThreshold`,case_25 楠岃瘉 |
+| `tls_expand_mem_budget` | 涓嶆敮鎸?| 宸茶ˉ榻?搂4.8) | init 鍙傛暟 `tlsExpandBudget`,case_26 楠岃瘉 |
+| `explicit_block_sizes` | (commit 600d24a 鏂板瀛楁) | 宸茶ˉ榻?搂4.8) | init 鍙傛暟 `blockSizes`,case_27 楠岃瘉銆傛鍓嶅伐鍏风敤 `mult` 鍑犱綍绾ф暟杩戜技,鍑戝阀涓庣敓浜?`{4K, 64K}` 涓€鑷翠絾鏃犳硶琛ㄨ揪闈炲嚑浣曞垎甯?|
+| `per_sc_weights` | (commit 600d24a 鏂板瀛楁) | 宸茶ˉ榻?搂4.8) | init 鍙傛暟 `weights`,case_27 楠岃瘉銆傛鍓嶅伐鍏?`cfg.per_sc_weights[]` 鍏?0鈫掔敓浜т唬鐮佸厹搴?`{1,1}`,涓庣敓浜?`{2,1}` 涓嶄竴鑷?|
+| `lazy_init_block_size_threshold` | (鏃у瓧娈?宸茬Щ闄? | **宸插垹闄?* | commit `600d24a` 绉婚櫎璇ュ瓧娈?鏀逛负 per-SC `per_sc_weights[i]==0` 琛ㄨ揪 lazy銆傚伐鍏?`lazyThreshold` 鍙傛暟鍚屾绉婚櫎,鏃х敤渚嬭縼绉诲埌 `weights=1,1,0`(瑙?搂4.6) |
+| `size_class_step_multiplier` | (鏃у瓧娈?宸茬Щ闄? | **宸插垹闄?* | commit `600d24a` 绉婚櫎璇ュ瓧娈?鏀逛负鏄惧紡鏁扮粍 `explicit_block_sizes[]`銆傚伐鍏峰師 `mult` 鍙傛暟(鍑犱綍绾ф暟鍥為€€)鍜?`base` 鍙傛暟(鏄惧紡鏋氫妇)宸插交搴曠Щ闄も€斺€擿base` 鐜颁粠 `blockSizes[0]` 鑷姩鎺ㄥ,`blockSizes=` 蹇呭～ |
+| `batch_mem_size` | 涓嶆敮鎸?| **瀛楁涓嶅瓨鍦?* | `qbuf_pool_cfg_t` 涓棤姝ゅ瓧娈?鍏ㄤ粨 grep 杩斿洖 0 鍖归厤銆傜枒涓烘嫾鍐欓敊璇垨骞昏瀛楁鍚?闇€鍚戞祴璇曞洟闃熸牳瀹炴潵婧?|
 
-### 10.3 build_qbuf_tool/ 构建产物目录
+### 10.3 build_qbuf_tool/ 鏋勫缓浜х墿鐩綍
 
-`qbuf_pool_tool/build_qbuf_tool/` 包含 `CMakeCache.txt`/`Makefile`/`qbuf_pool_tool` 二进制等构建产物。构建产物不应进 git 跟踪——需确认 `.gitignore` 是否已忽略;若已 commit,应 `git rm -r --cached qbuf_pool_tool/build_qbuf_tool` 清理并加入 `.gitignore`。
+`qbuf_pool_tool/build_qbuf_tool/` 鍖呭惈 `CMakeCache.txt`/`Makefile`/`qbuf_pool_tool` 浜岃繘鍒剁瓑鏋勫缓浜х墿銆傛瀯寤轰骇鐗╀笉搴旇繘 git 璺熻釜鈥斺€旈渶纭 `.gitignore` 鏄惁宸插拷鐣?鑻ュ凡 commit,搴?`git rm -r --cached qbuf_pool_tool/build_qbuf_tool` 娓呯悊骞跺姞鍏?`.gitignore`銆?

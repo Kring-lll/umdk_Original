@@ -1,5 +1,5 @@
 # qbuf_pool_tool: standalone file-driven test driver for umq multi-level
-# size_class qbuf pool. Independent CMake project — does NOT require the top-
+# size_class qbuf pool. Independent CMake project 鈥?does NOT require the top-
 # level hcom cmake config, BUILD_TESTS=ON, or gtest/mockcpp. Build from repo
 # root with:
 #   cmake -S test/urpc/umq/qbuf_pool_tool -B build_qbuf_tool
@@ -19,7 +19,7 @@ get_filename_component(UMDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../.." ABSOL
 # - utils.cpp: pure parsers
 # - core.cpp: tool state + dispatcher (worker threads, alloc/free/info/status)
 # - main.cpp: script reader + command dispatcher
-# - umq_dfx_api_str.c: DFX to_str (string-conversion) — pulled in so the tool
+# - umq_dfx_api_str.c: DFX to_str (string-conversion) 鈥?pulled in so the tool
 #   can call umq_qbuf_pool_stats_to_str() without dragging in umq_inner.h /
 #   perf.h from umq_dfx_api.c (which holds the *_get() funcs that depend on the
 #   transport-layer chain). The tool provides its own umq_stats_qbuf_pool_get
@@ -28,6 +28,13 @@ get_filename_component(UMDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../.." ABSOL
 #   info_get + multi-level size_class state). Compiled into the tool target
 #   (replaces the previous #include "umq_qbuf_pool.c" approach in core.cpp so
 #   the tool no longer reaches into production static state).
+# - umq_qbuf_pool_cfg.c: umq_qbuf_pool_cfg_check 鈥?config validation +
+#   normal_io_buf_size computation. Required so the tool can use the standard
+#   API init chain (umq_qbuf_pool_cfg_check -> umq_io_buf_malloc -> umq_qbuf_pool_init)
+#   instead of bypassing cfg_check with a self-allocated memalign buffer.
+# - util_lock.c: util_mutex_lock_create/lock/unlock/destroy 鈥?required by
+#   escape_registry_init/uninit/insert/remove/lookup in umq_qbuf_pool.c
+#   (escape buf address registry, added in commit b2c0c6de/ddbefc93).
 add_executable(qbuf_pool_tool
     stubs.cpp
     utils.cpp
@@ -36,6 +43,7 @@ add_executable(qbuf_pool_tool
     ${UMDK_ROOT}/src/urpc/umq/umq_dfx_api_str.c
     ${UMDK_ROOT}/src/urpc/umq/qbuf/umq_qbuf_pool.c
     ${UMDK_ROOT}/src/urpc/umq/qbuf/umq_qbuf_pool_base.c
+    ${UMDK_ROOT}/src/urpc/umq/qbuf/umq_qbuf_pool_cfg.c
     ${UMDK_ROOT}/src/urpc/umq/qbuf/umq_rx_qbuf_pool.c
     ${UMDK_ROOT}/src/urpc/umq/qbuf/umq_tiny_qbuf_pool.c
     ${UMDK_ROOT}/src/urpc/util/urpc_thread_closure.cpp
