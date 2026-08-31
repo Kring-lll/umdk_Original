@@ -212,3 +212,133 @@ func TestSelectFromMatched_ThresholdZero_DisablesImbalanceBranch(t *testing.T) {
 	assert.Equal(t, "127.0.0.1:1", got.InsUrl,
 		"threshold=0 disables imbalance branch -> pick highest-match A (90%)")
 }
+
+// TestSelectFromMatched_SinglePod_FallsToBalancedBranch: a single pod has
+// spread=0 (maxIdx==minIdx==0), so it never enters the imbalance branch and
+// returns the only pod if it meets the match gate.
+func TestSelectFromMatched_SinglePod_FallsToBalancedBranch(t *testing.T) {
+	mA, nameA := makeMetric("127.0.0.1:1", "worker-1", 5000, 5)
+
+	metrics := map[string]*InstanceMetric{"A": mA}
+	urlMap := buildURLMap([2]string{"127.0.0.1:1", nameA})
+	matched := map[string]int{nameA: 90}
+
+	lb := buildPrefixCacheLB(metrics, 50, 1000) // 1000>0 but single pod: spread=0
+	urls := []string{"127.0.0.1:1"}
+
+	got := lb.selectFromMatched(urls, matched, urlMap)
+	assert.NotNil(t, got)
+	assert.Equal(t, "127.0.0.1:1", got.InsUrl, "single pod above gate should be selected")
+}
+
+// TestSelectFromMatched_AllPodsEqualTokenNum: when every pod has the same
+// TokenNum, spread=0 -> balanced branch -> pick highest match.
+func TestSelectFromMatched_AllPodsEqualTokenNum(t *testing.T) {
+	mA, nameA := makeMetric("127.0.0.1:1", "worker-1", 1000, 5)
+	mB, nameB := makeMetric("127.0.0.1:2", "worker-2", 1000, 3)
+	mC, nameC := makeMetric("127.0.0.1:3", "worker-3", 1000, 9)
+
+	metrics := map[string]*InstanceMetric{"A": mA, "B": mB, "C": mC}
+	urlMap := buildURLMap(
+		[2]string{"127.0.0.1:1", nameA},
+		[2]string{"127.0.0.1:2", nameB},
+		[2]string{"127.0.0.1:3", nameC})
+	matched := map[string]int{nameA: 80, nameB: 90, nameC: 70}
+
+	lb := buildPrefixCacheLB(metrics, 50, 1000)
+	urls := []string{"127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3"}
+
+	got := lb.selectFromMatched(urls, matched, urlMap)
+	assert.NotNil(t, got)
+	assert.Equal(t, "127.0.0.1:2", got.InsUrl, "equal load -> highest match B (90%)")
+}
+
+// TestSelectFromMatched_EqualTokenNumTiebreak_Deterministic: when match%
+// AND TokenNum both tie, the deterministic instanceName tiebreak must pick a
+// fixed pod (the lexicographically smaller name).
+func TestSelectFromMatched_EqualTokenNumTiebreak_Deterministic(t *testing.T) {
+	// worker-1 and worker-3 tie at 80% / load 1000; worker-1 < worker-3 lexically.
+	mA, nameA := makeMetric("127.0.0.1:1", "worker-1", 1000, 5)
+	mB, nameB := makeMetric("127.0.0.1:2", "worker-3", 1000, 3)
+
+	metrics := map[string]*InstanceMetric{"A": mA, "B": mB}
+	urlMap := buildURLMap(
+		[2]string{"127.0.0.1:1", nameA},
+		[2]string{"127.0.0.1:2", nameB})
+	matched := map[string]int{nameA: 80, nameB: 80}
+
+	lb := buildPrefixCacheLB(metrics, 50, 1000)
+	urls := []string{"127.0.0.1:1", "127.0.0.1:2"}
+
+	got := lb.selectFromMatched(urls, matched, urlMap)
+	assert.NotNil(t, got)
+	assert.Equal(t, "127.0.0.1:1", got.InsUrl,
+		"full tie -> deterministic instanceName tiebreak picks worker-1 (lexically smaller)")
+}
+
+// filteredMockProvider returns metrics only for requested URLs, simulating a
+// real provider that may return FEWER metrics than ready instances (e.g., a
+// freshly registered pod whose metrics aren't collected yet).
+type filteredMockProvider struct {
+	byURL map[string]*InstanceMetric
+}
+
+func (p *filteredMockProvider) GetInstanceMetrics(ids []string, _ *MetricQueryOptions) ([]*InstanceMetric, error) {
+	out := make([]*InstanceMetric, 0, len(ids))
+	for _, id := range ids {
+		if m, ok := p.byURL[id]; ok {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+func (p *filteredMockProvider) RangeMetrics(_ []string, _ *MetricQueryOptions, fn func(*InstanceMetric) bool) error {
+	for _, m := range p.byURL {
+		if !fn(m) {
+			break
+		}
+	}
+	return nil
+}
+
+func (p *filteredMockProvider) AddRequest(_ *LlmRequest, _ *InstanceContext) error    { return nil }
+func (p *filteredMockProvider) RemoveRequest(_ *LlmRequest, _ *InstanceContext) error { return nil }
+func (p *filteredMockProvider) PredictTokensByEMA(_ *LlmRequest) int                  { return 0 }
+func (p *filteredMockProvider) GetDPAwareMetrics(_ *MetricQueryOptions, _ int) ([]*DPAwareMetric, error) {
+	return nil, nil
+}
+
+// TestSelectFromMatched_PartialMetrics: the provider returns metrics for only
+// a subset of ready URLs. The missing pod is skipped; min/max are computed on
+// the returned subset and the algorithm still selects correctly (no panic).
+func TestSelectFromMatched_PartialMetrics(t *testing.T) {
+	// ready: A, B, C; provider only has A and B (C missing -> skipped).
+	mA, nameA := makeMetric("127.0.0.1:1", "worker-1", 5000, 5)
+	mB, nameB := makeMetric("127.0.0.1:2", "worker-2", 1000, 1)
+
+	byURL := map[string]*InstanceMetric{
+		"127.0.0.1:1": mA,
+		"127.0.0.1:2": mB,
+		// 127.0.0.1:3 absent -> provider returns nothing for it
+	}
+	lb := &prefixCacheLoadBalancer{
+		baseLoadBalancer: baseLoadBalancer{
+			metricProvider: &filteredMockProvider{byURL: byURL},
+		},
+		matchThreshold:         50,
+		loadImbalanceThreshold: 1000,
+	}
+	urlMap := buildURLMap(
+		[2]string{"127.0.0.1:1", nameA},
+		[2]string{"127.0.0.1:2", nameB},
+		[2]string{"127.0.0.1:3", "worker-3"}) // ready but no metric
+	matched := map[string]int{nameA: 90, nameB: 80} // worker-3 unmatched anyway
+	urls := []string{"127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3"}
+
+	got := lb.selectFromMatched(urls, matched, urlMap)
+	assert.NotNil(t, got)
+	// spread over {A(5000),B(1000)} = 4000 > 1000 -> lowest load -> B(1000)
+	assert.Equal(t, "127.0.0.1:2", got.InsUrl,
+		"partial metrics: missing pod skipped, imbalance -> lowest-load B")
+}

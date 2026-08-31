@@ -177,8 +177,18 @@ func (lb *prefixCacheLoadBalancer) schedule(request *ScheduleRequestMsg, options
 				)
 			}
 
-			log.Debug().Msgf("[prefixCache] req %v scheduled to %s with matchLen %d",
-				request.Request.ReqId, targetInstance.InsUrl, matchLength)
+			// Report the selected pod's OWN match percent, not the global
+			// matchLength: the imbalance branch may route to a zero-match pod,
+			// in which case the global matchLen would mislead. Fall back to the
+			// global matchLength only when the selected pod has no entry.
+			selMatchPct := 0
+			if selName, ok := urlToInstanceName[targetInstance.InsUrl]; ok {
+				if pct, hasMatch := matched[selName]; hasMatch {
+					selMatchPct = pct
+				}
+			}
+			log.Debug().Msgf("[prefixCache] req %v scheduled to %s with match %d%% (global max matchLen %d)",
+				request.Request.ReqId, targetInstance.InsUrl, selMatchPct, matchLength)
 
 			return &ScheduleResult{
 				ResultType:     DispatchRequest,
@@ -230,7 +240,6 @@ func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched
 		metric       *InstanceMetric
 		instanceName string
 		matchPercent int
-		hasMatch     bool
 	}
 
 	metrics, err := lb.metricProvider.GetInstanceMetrics(instances, lb.buildQueryOptions(nil))
@@ -264,7 +273,6 @@ func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched
 			metric:       m,
 			instanceName: instanceName,
 			matchPercent: matchPercent,
-			hasMatch:     hasMatch,
 		})
 	}
 
@@ -275,12 +283,16 @@ func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched
 
 	// --- Branch 1: load imbalance ---
 	// Compute the token-load spread across ALL ready pods. If it exceeds the
-	// threshold, prioritize load balancing: pick the lowest-load pod.
+	// threshold, prioritize load balancing: pick the lowest-load pod. On a
+	// TokenNum tie, instanceName provides a deterministic order so routing is
+	// reproducible across equivalent pods.
 	if lb.loadImbalanceThreshold > 0 {
 		minIdx := 0
 		maxIdx := 0
 		for i := 1; i < len(scores); i++ {
-			if scores[i].metric.TokenNum < scores[minIdx].metric.TokenNum {
+			if scores[i].metric.TokenNum < scores[minIdx].metric.TokenNum ||
+				(scores[i].metric.TokenNum == scores[minIdx].metric.TokenNum &&
+					scores[i].instanceName < scores[minIdx].instanceName) {
 				minIdx = i
 			}
 			if scores[i].metric.TokenNum > scores[maxIdx].metric.TokenNum {
@@ -301,13 +313,18 @@ func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched
 
 	// --- Branch 2: load balanced -> prioritize prefix cache hit ---
 	// Among pods that reached the matchThreshold gate, sort by matchPercent
-	// desc then TokenNum asc (lower load wins on ties). If none meets the gate,
-	// return nil so schedule() falls back to leastConn.
-	sort.Slice(scores, func(i, j int) bool {
+	// desc then TokenNum asc (lower load wins on ties). SliceStable + the
+	// instanceName final tiebreak keeps routing deterministic across fully
+	// equivalent pods. If none meets the gate, return nil so schedule()
+	// falls back to leastConn.
+	sort.SliceStable(scores, func(i, j int) bool {
 		if scores[i].matchPercent != scores[j].matchPercent {
 			return scores[i].matchPercent > scores[j].matchPercent
 		}
-		return scores[i].metric.TokenNum < scores[j].metric.TokenNum
+		if scores[i].metric.TokenNum != scores[j].metric.TokenNum {
+			return scores[i].metric.TokenNum < scores[j].metric.TokenNum
+		}
+		return scores[i].instanceName < scores[j].instanceName
 	})
 
 	if scores[0].matchPercent >= lb.matchThreshold {
