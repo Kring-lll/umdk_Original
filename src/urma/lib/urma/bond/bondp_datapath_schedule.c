@@ -448,6 +448,44 @@ int schedule_send(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp, int *send
     }
 }
 
+int schedule_send_fixed(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp,
+                        int fixed_target_idx, int *send_idx)
+{
+    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(tjetty, bondp_target_jetty_t, v_tjetty);
+    if (bdp_tjetty == NULL || fixed_target_idx < 0 || (uint32_t)fixed_target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return -1;
+    }
+
+    int best_local = -1;
+    uint32_t best_load = UINT32_MAX;
+    urma_transport_mode_t trans_mode = get_comp_urma_trans_mode(bdp_comp);
+    for (uint32_t j = 0; j < bdp_tjetty->p_tjetty_count; j++) {
+        const bondp_p_target_jetty_t *path = &bdp_tjetty->p_tjettys[j];
+        if (path->remote_indice != (uint8_t)fixed_target_idx || !bondp_p_tjetty_available(path)) {
+            continue;
+        }
+        if (!atomic_load(&bdp_comp->valid[path->local_indice])) {
+            continue;
+        }
+        if (bdp_comp->comp_type == BONDP_COMP_JETTY &&
+            (bdp_comp->p_jetty[path->local_indice] == NULL ||
+             (trans_mode == URMA_TM_RC &&
+              bdp_comp->p_jetty[path->local_indice]->remote_jetty != path->p_tjetty))) {
+            continue;
+        }
+        uint32_t load = atomic_load(&bdp_comp->sqe_cnt[path->local_indice][fixed_target_idx]);
+        if (load < best_load) {
+            best_load = load;
+            best_local = path->local_indice;
+        }
+    }
+    if (best_local < 0) {
+        return -1;
+    }
+    *send_idx = best_local;
+    return 0;
+}
+
 int schedule_recv(bondp_comp_t *bdp_comp, int *recv_idx)
 {
     if (bdp_comp->active_count == 0) {
