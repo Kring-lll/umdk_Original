@@ -68,7 +68,16 @@ func newPrefixCacheLB(metricProvider MetricProvider, params *AlgorithmParams) (*
 }
 
 func (lb *prefixCacheLoadBalancer) schedule(request *ScheduleRequestMsg, options *ScheduleOptions) *ScheduleResult {
-	readyInstances, err := lb.getReadyInstances(request.CandidateInstanceIDs)
+	// Write back the prompt token count so instance.addReq accumulates real
+	// load (tokenNum += PredictTokens) once the request is dispatched. The
+	// prefixCache algorithm counts prompt tokens only (no decode prediction),
+	// matching the spec's "token 数目仅统计累计的 prompt token 数". Without
+	// this, TokenNum never grows and the load-imbalance branch can never fire.
+	if request.Request != nil && request.Request.PromptLen > 0 {
+		request.Request.PredictTokens = request.Request.PromptLen
+	}
+
+	readyInstances, err := lb.getReadyInstances(request.CandidateInstanceIDs, options)
 	if err != nil {
 		log.Error().Msgf("[prefixCache] failed to get ready instances: %v", err)
 		return lb.fallback(request, options)
@@ -156,24 +165,9 @@ func (lb *prefixCacheLoadBalancer) schedule(request *ScheduleRequestMsg, options
 	}
 
 	if len(matched) > 0 {
-		targetInstance := lb.selectFromMatched(readyInstances, matched, urlToInstanceName)
+		targetInstance := lb.selectFromMatched(readyInstances, matched, urlToInstanceName, options)
 		if targetInstance != nil {
 			log.Debug().Msgf("[prefixCache] branch: selected target instance %s", targetInstance.InsUrl)
-			// Get instance name for AddPrefix - use URL -> instance name mapping
-			addPrefixInstanceName := targetInstance.InsUrl
-			if name, ok := urlToInstanceName[targetInstance.InsUrl]; ok {
-				addPrefixInstanceName = name
-			}
-			if len(tokenIDs) > 0 {
-				log.Debug().Msgf("[prefixCache] branch: adding prefix to instance %s (url=%s), tokenIDs=%v",
-					addPrefixInstanceName, targetInstance.InsUrl, tokenIDs)
-				lb.prefixCacheMgr.AddPrefix(
-					modelName,
-					-1,
-					addPrefixInstanceName,
-					tokenIDs,
-				)
-			}
 
 			// Report the selected pod's OWN match percent, not the global
 			// matchLength: the imbalance branch may route to a zero-match pod,
@@ -225,14 +219,14 @@ func (lb *prefixCacheLoadBalancer) fallback(request *ScheduleRequestMsg, options
 //     broken by lower token load.
 //
 // loadImbalanceThreshold == 0 disables branch 2 (prefix-only selection).
-func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched map[string]int, urlToInstanceName map[string]string) *InstanceMetric {
+func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched map[string]int, urlToInstanceName map[string]string, options *ScheduleOptions) *InstanceMetric {
 	type instanceScore struct {
 		metric       *InstanceMetric
 		instanceName string
 		matchPercent int
 	}
 
-	metrics, err := lb.metricProvider.GetInstanceMetrics(instances, lb.buildQueryOptions(nil))
+	metrics, err := lb.metricProvider.GetInstanceMetrics(instances, lb.buildQueryOptions(options))
 	if err != nil || len(metrics) == 0 {
 		log.Warn().Msgf("[prefixCache] selectFromMatched: no metrics found for instances: %v", instances)
 		return nil
@@ -318,8 +312,8 @@ func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched
 	return scores[0].metric
 }
 
-func (lb *prefixCacheLoadBalancer) getReadyInstances(candidateIDs []string) ([]string, error) {
-	metrics, err := lb.metricProvider.GetInstanceMetrics(candidateIDs, lb.buildQueryOptions(nil))
+func (lb *prefixCacheLoadBalancer) getReadyInstances(candidateIDs []string, options *ScheduleOptions) ([]string, error) {
+	metrics, err := lb.metricProvider.GetInstanceMetrics(candidateIDs, lb.buildQueryOptions(options))
 	if err != nil {
 		return nil, err
 	}

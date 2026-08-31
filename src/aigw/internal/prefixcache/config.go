@@ -53,7 +53,6 @@ var (
 	envMaxPrefixesPerContext   = loadEnvInt("AIGW_PREFIX_CACHE_MAX_PREFIXES_PER_CONTEXT", defaultMaxPrefixesPerContext)
 	envEvictionIntervalSeconds = loadEnvInt("AIGW_PREFIX_CACHE_EVICTION_INTERVAL_SECONDS", defaultEvictionIntervalSeconds)
 	envEvictionDurationMinutes = loadEnvInt("AIGW_PREFIX_CACHE_EVICTION_DURATION_MINUTES", defaultEvictionDurationMinutes)
-	envMatchThreshold          = loadEnvInt("AIGW_PREFIX_CACHE_MATCH_THRESHOLD", 50)
 	envFallbackStringMatching  = loadEnvBool("AIGW_PREFIX_CACHE_FALLBACK_STRING_MATCHING", true)
 	envSeed                    = loadEnvUint64("AIGW_PREFIX_CACHE_SEED", 0) // 0 means random seed
 )
@@ -65,7 +64,6 @@ type Config struct {
 	MaxPrefixesPerContext  int
 	EvictionInterval       time.Duration
 	EvictionDuration       time.Duration
-	MatchThreshold         int
 	FallbackStringMatching bool
 	Seed                   uint64 // 0 means generate random seed
 }
@@ -78,7 +76,6 @@ func DefaultConfig() Config {
 		MaxPrefixesPerContext:  envMaxPrefixesPerContext,
 		EvictionInterval:       time.Duration(envEvictionIntervalSeconds) * time.Second,
 		EvictionDuration:       time.Duration(envEvictionDurationMinutes) * time.Minute,
-		MatchThreshold:         envMatchThreshold,
 		FallbackStringMatching: envFallbackStringMatching,
 		Seed:                   envSeed,
 	}
