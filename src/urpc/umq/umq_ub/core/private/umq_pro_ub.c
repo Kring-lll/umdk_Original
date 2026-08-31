@@ -312,7 +312,8 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
     }
     uint32_t max_sge_num = qcfg->max_tx_sge;
     urma_jfs_wr_t *urma_wr_ptr = g_umq_ub_urma_wr;
-    urma_sge_t src_sge[UMQ_BATCH_SIZE] = {}, dst_sge[UMQ_BATCH_SIZE] = {};
+    urma_sge_t src_sge[UMQ_BATCH_SIZE] = {};
+    urma_sge_t dst_sge[UMQ_BATCH_SIZE] = {};
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO];
     urma_target_seg_t **tseg_list = qcfg->dev_ctx->tseg_list;
     urma_sge_t *sges_ptr;
@@ -412,7 +413,8 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
          * previous SEND/WRITE WRs that share g_umq_ub_urma_wr[] entries. */
         urma_wr_ptr->rw.target_hint = 0;
         urma_wr_ptr->rw.notify_data = 0;
-        ret = umq_ub_fill_wr(queue, tmp_buf, urma_wr_ptr, g_umq_ub_sges[wr_index], sge_num, &src_sge[wr_index], &dst_sge[wr_index]);
+        ret = umq_ub_fill_wr(queue, tmp_buf, urma_wr_ptr, g_umq_ub_sges[wr_index], sge_num, &src_sge[wr_index],
+            &dst_sge[wr_index]);
         if (ret != UMQ_SUCCESS) {
             *bad_qbuf = qbuf;
             goto ERROR;
