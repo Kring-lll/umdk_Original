@@ -78,6 +78,18 @@
         "minMatchedLength": 200,
         "pretrainTTFTPath": ""
       },
+      "errScheduler": {
+        "errSchedulerType": "none/mej/err/caterr",
+        "queueSize": "0=passthrough/>0=queue",
+        "warmupSessions": 100,
+        "warmupPerCat": 10,
+        "windowSize": 5000,
+        "trainDataPath": "",
+        "tfidfVocabPath": "data/caterr/tfidf_vocab.json",
+        "tfidfCentroidsPath": "data/caterr/tfidf_centroids.json",
+        "sessionTimeout": 660,
+        "taskIdleTimeout": 60
+      },
       "instanceConnectType": "sse"
     },
     {
