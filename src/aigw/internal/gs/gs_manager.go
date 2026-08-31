@@ -134,6 +134,14 @@ type GlobalSchedulerManager struct {
 	runtimeMode    base.RuntimeMode
 	metricProvider MetricProvider
 
+	// ERR scheduler components (nil if ERR disabled)
+	errScheduler     *ErrSchedulerManager
+	capacityProvider *CapacityProvider
+	pendingQueue     *PendingQueue
+	// dispatchMu serializes ERR dispatch to protect the non-thread-safe LB.
+	// Per-GSM so different models do not block each other.
+	dispatchMu sync.Mutex
+
 	// kvcSessionMgr drives vLLM KVC offload/prefetch on agent lifecycle events.
 	// nil when KVC management is disabled (SdkMode or kvc.enabled=false). Wired in H1.
 	kvcSessionMgr *KvcSessionManager
@@ -301,7 +309,64 @@ func (m *GlobalSchedulerManager) setConfig(gsConfig *base.GlobalSchedulerConfig)
 		m.stats.Record(statType)
 	}
 
+	// Initialize ERR scheduler components
+	if err := m.initErrScheduler(&gsConfig.ErrScheduler, lbCfg.BatchSize); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// initErrScheduler initializes ERR scheduler, capacity provider, and pending queue.
+// Returns an error if a required prerequisite is missing (e.g. CatERR without
+// TF-IDF data) so startup is blocked rather than silently degrading.
+func (m *GlobalSchedulerManager) initErrScheduler(errCfg *base.ErrSchedulerConfig, batchSize int) error {
+	if errCfg.ErrSchedulerType == "" || errCfg.ErrSchedulerType == "none" {
+		log.Info().Msgf("[ERR] ERR scheduler disabled for model %s", m.config.model)
+		return nil
+	}
+
+	internalCfg := ErrSchedulerConfig{
+		SchedulerType:      errCfg.ErrSchedulerType,
+		WarmupSessions:     errCfg.WarmupSessions,
+		WarmupPerCat:       errCfg.WarmupPerCat,
+		WindowSize:         errCfg.WindowSize,
+		TrainDataPath:      errCfg.TrainDataPath,
+		TfidfVocabPath:     errCfg.TfidfVocabPath,
+		TfidfCentroidsPath: errCfg.TfidfCentroidsPath,
+		SessionTimeoutSec:  errCfg.SessionTimeoutSec,
+		TaskIdleTimeoutSec: errCfg.TaskIdleTimeoutSec,
+	}
+
+	m.errScheduler = NewErrSchedulerManager(internalCfg)
+
+	// CatERR requires a loaded classifier. config_manager checks file existence;
+	// this checks content validity (file exists but format is broken).
+	if errCfg.ErrSchedulerType == "caterr" && !m.errScheduler.classifier.IsLoaded() {
+		return fmt.Errorf("[ERR] caterr classifier not loaded (vocab or centroids invalid), model %s", m.config.model)
+	}
+
+	m.capacityProvider = NewCapacityProvider(batchSize)
+
+	if errCfg.QueueSize > 0 {
+		m.pendingQueue = NewPendingQueue(errCfg.QueueSize)
+		log.Info().Msgf("[ERR] queue mode enabled: queueSize=%d, batchSize=%d, algo=%s",
+			errCfg.QueueSize, batchSize, errCfg.ErrSchedulerType)
+	} else {
+		log.Info().Msgf("[ERR] passthrough mode: batchSize=%d, algo=%s",
+			batchSize, errCfg.ErrSchedulerType)
+	}
+	return nil
+}
+
+// HasQueueMode returns true if ERR queue mode (queueSize > 0) is enabled.
+func (m *GlobalSchedulerManager) HasQueueMode() bool {
+	return m.pendingQueue != nil
+}
+
+// HasErrScheduler returns true if ERR scheduler is enabled.
+func (m *GlobalSchedulerManager) HasErrScheduler() bool {
+	return m.errScheduler != nil
 }
 
 // LastAccessAt returns gs last accessed time
@@ -553,6 +618,13 @@ func (m *GlobalSchedulerManager) handleSchedule(msg *ControlMessage) {
 			}
 		}
 
+		// ERR dispatch path (handles priority computation, queue, and LB scheduling)
+		if m.errScheduler != nil {
+			m.dispatchErr(msg)
+			return
+		}
+
+		// Original dispatch path (no ERR)
 		result := m.scheduler.schedule(request, nil)
 		m.recordScheduleStats(result)
 
