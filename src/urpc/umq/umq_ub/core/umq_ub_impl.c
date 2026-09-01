@@ -39,6 +39,7 @@
 #include "util_id_generator.h"
 #include "uvs_api.h"
 #include "umq_ub_impl.h"
+#include "umq_ub_impl.h"
 
 #define UMQ_FLUSH_MAX_RETRY_TIMES 10000
 #define UMQ_UB_DEFAULT_SLOT_NUM 10
