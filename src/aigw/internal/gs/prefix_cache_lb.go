@@ -141,7 +141,12 @@ func (lb *prefixCacheLoadBalancer) schedule(request *ScheduleRequestMsg, options
 	if lb.renderClient != nil && request.Request != nil {
 		log.Debug().Msg("[prefixCache] branch: using render client for tokenization")
 		messages := lb.buildChatMessages(request.Request)
-		tokenIDs, err = lb.prefixCacheMgr.Tokenize(context.Background(), modelName, messages)
+		// Forward the inbound Authorization header verbatim to the render
+		// endpoint so a vLLM started with --api-key can be authenticated
+		// without storing a secret in config. Empty (no inbound Authorization)
+		// => the render client sends no auth header. See renderclient.withAuth.
+		authHeader := request.Headers["Authorization"]
+		tokenIDs, err = lb.prefixCacheMgr.Tokenize(context.Background(), modelName, messages, authHeader)
 		if err != nil || len(tokenIDs) == 0 {
 			log.Error().Msgf("[prefixCache] branch: render tokenization failed: %v, tokenIDs=%v", err, tokenIDs)
 		} else {

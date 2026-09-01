@@ -365,6 +365,11 @@ func extractHeaders(r *http.Request) map[string]string {
 		"X-Correlation-Id",
 		"X-Request-Id",
 		"X-Trace-Id",
+		// Forwarded verbatim to the vLLM render endpoint when the model's
+		// renderClient.passThroughAuth is enabled (prefix_cache_lb.go). Not read
+		// by the consistent-hash path (hash_key.go only consults session headers
+		// above), so it neither pollutes the hash key nor reaches logs.
+		"Authorization",
 	}
 	headers := make(map[string]string)
 	for _, name := range sessionHeaders {

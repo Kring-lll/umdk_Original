@@ -47,26 +47,21 @@ func NewRenderClient(config RenderClientConfig, model, baseURL string) *RenderCl
 	}
 }
 
-// withAuth injects the configured API key into the request. When APIKey is
-// empty it is a no-op (backward compatible with unauthenticated vLLM). The
-// header convention mirrors apipool.Adapter.InjectAuth: AuthHeaderName empty
-// -> "Authorization: Bearer <key>"; otherwise -> <AuthHeaderName>: [<prefix> ]<key>.
-func (c *RenderClient) withAuth(req *http.Request) {
-	if c.config.APIKey == "" {
+// withAuth injects the per-request Authorization value into the render
+// request when PassThroughAuth is enabled. authHeader is the verbatim inbound
+// Authorization header value (e.g. "Bearer sk-..."); it is forwarded as-is so
+// the scheme chosen by the caller is preserved. When PassThroughAuth is false,
+// or when authHeader is empty (the inbound request carried no Authorization),
+// no header is set — preserving backward compatibility with unauthenticated
+// backends. The value is not logged or persisted; it only lives for this call.
+func (c *RenderClient) withAuth(req *http.Request, authHeader string) {
+	if !c.config.PassThroughAuth || authHeader == "" {
 		return
 	}
-	if c.config.AuthHeaderName != "" {
-		val := c.config.APIKey
-		if c.config.AuthHeaderPrefix != "" {
-			val = c.config.AuthHeaderPrefix + " " + c.config.APIKey
-		}
-		req.Header.Set(c.config.AuthHeaderName, val)
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	req.Header.Set("Authorization", authHeader)
 }
 
-func (c *RenderClient) RenderChat(ctx context.Context, model string, messages []ChatMessage) ([]int64, error) {
+func (c *RenderClient) RenderChat(ctx context.Context, model string, messages []ChatMessage, authHeader string) ([]int64, error) {
 	req := RenderChatRequest{
 		Model:    model,
 		Messages: messages,
@@ -83,7 +78,7 @@ func (c *RenderClient) RenderChat(ctx context.Context, model string, messages []
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	c.withAuth(httpReq)
+	c.withAuth(httpReq, authHeader)
 
 	resp, err := c.doRequest(httpReq)
 	if err != nil {
@@ -114,7 +109,7 @@ func (c *RenderClient) RenderChat(ctx context.Context, model string, messages []
 // TokenizePrompt tokenizes a raw prompt in the content domain (no chat
 // template, no special tokens), matching the token domain used by vLLM KV
 // events that report raw content tokens.
-func (c *RenderClient) TokenizePrompt(ctx context.Context, model, prompt string) ([]int64, error) {
+func (c *RenderClient) TokenizePrompt(ctx context.Context, model, prompt, authHeader string) ([]int64, error) {
 	req := TokenizeRequest{
 		Model:            model,
 		Prompt:           prompt,
@@ -132,7 +127,7 @@ func (c *RenderClient) TokenizePrompt(ctx context.Context, model, prompt string)
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	c.withAuth(httpReq)
+	c.withAuth(httpReq, authHeader)
 
 	resp, err := c.doRequest(httpReq)
 	if err != nil {
@@ -159,7 +154,7 @@ func (c *RenderClient) TokenizePrompt(ctx context.Context, model, prompt string)
 	return tokenizeResp.Tokens, nil
 }
 
-func (c *RenderClient) RenderCompletion(ctx context.Context, model string, prompt string) ([]int64, error) {
+func (c *RenderClient) RenderCompletion(ctx context.Context, model string, prompt, authHeader string) ([]int64, error) {
 	req := RenderCompletionRequest{
 		Model:  model,
 		Prompt: prompt,
@@ -176,7 +171,7 @@ func (c *RenderClient) RenderCompletion(ctx context.Context, model string, promp
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	c.withAuth(httpReq)
+	c.withAuth(httpReq, authHeader)
 
 	resp, err := c.doRequest(httpReq)
 	if err != nil {
@@ -271,7 +266,7 @@ func (c *RenderClient) IsHealthy(ctx context.Context) bool {
 		return false
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	c.withAuth(httpReq)
+	c.withAuth(httpReq, "") // health probe has no inbound request to source auth from
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {

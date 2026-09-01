@@ -49,10 +49,10 @@ func (m *mockPrefixCacheMgr) AddPrefix(_ string, _ int64, _ string, _ []int64) e
 }
 
 func (m *mockPrefixCacheMgr) RemoveInstance(_ string) error { return nil }
-func (m *mockPrefixCacheMgr) Tokenize(_ context.Context, _ string, _ []prefixcache.ChatMessage) ([]int64, error) {
+func (m *mockPrefixCacheMgr) Tokenize(_ context.Context, _ string, _ []prefixcache.ChatMessage, _ string) ([]int64, error) {
 	return nil, nil
 }
-func (m *mockPrefixCacheMgr) TokenizePrompt(_ context.Context, _, _ string) ([]int64, error) {
+func (m *mockPrefixCacheMgr) TokenizePrompt(_ context.Context, _, _, _ string) ([]int64, error) {
 	return nil, nil
 }
 func (m *mockPrefixCacheMgr) GetStats() prefixcache.PrefixCacheStats {

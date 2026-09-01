@@ -52,9 +52,7 @@
         "timeout": 5000,
         "maxRetries": 3,
         "connPoolSize": 100,
-        "apiKey": "",
-        "authHeaderName": "",
-        "authHeaderPrefix": ""
+        "passThroughAuth": false
       }
     }
   ],

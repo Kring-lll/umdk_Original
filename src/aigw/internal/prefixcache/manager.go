@@ -27,9 +27,16 @@ type PrefixCacheManager interface {
 
 	RemoveInstance(instanceName string) error
 
-	Tokenize(ctx context.Context, modelName string, messages []ChatMessage) ([]int64, error)
+	// Tokenize tokenizes messages via the render (chat-template) domain.
+	// authHeader is the verbatim inbound Authorization header value forwarded
+	// to the vLLM render endpoint when the render client has PassThroughAuth
+	// enabled; pass "" when there is no inbound request to source it from
+	// (then no auth header is sent).
+	Tokenize(ctx context.Context, modelName string, messages []ChatMessage, authHeader string) ([]int64, error)
 
-	TokenizePrompt(ctx context.Context, modelName, prompt string) ([]int64, error)
+	// TokenizePrompt tokenizes a raw prompt (content domain). authHeader has
+	// the same semantics as Tokenize.
+	TokenizePrompt(ctx context.Context, modelName, prompt, authHeader string) ([]int64, error)
 
 	GetStats() PrefixCacheStats
 
@@ -175,23 +182,23 @@ func (m *prefixCacheManager) RemoveInstance(instanceName string) error {
 	return m.syncTable.RemoveInstance("", -1, instanceName)
 }
 
-func (m *prefixCacheManager) Tokenize(ctx context.Context, modelName string, messages []ChatMessage) ([]int64, error) {
+func (m *prefixCacheManager) Tokenize(ctx context.Context, modelName string, messages []ChatMessage, authHeader string) ([]int64, error) {
 	if m.renderClient == nil {
 		return nil, nil
 	}
 
-	return m.renderClient.RenderChat(ctx, modelName, messages)
+	return m.renderClient.RenderChat(ctx, modelName, messages, authHeader)
 }
 
 // TokenizePrompt tokenizes a raw prompt in the content domain (no chat
 // template). Some workers' KV events report raw content tokens rather than
 // chat-template tokens; this provides the matching domain for those workers.
-func (m *prefixCacheManager) TokenizePrompt(ctx context.Context, modelName, prompt string) ([]int64, error) {
+func (m *prefixCacheManager) TokenizePrompt(ctx context.Context, modelName, prompt, authHeader string) ([]int64, error) {
 	if m.renderClient == nil {
 		return nil, nil
 	}
 
-	return m.renderClient.TokenizePrompt(ctx, modelName, prompt)
+	return m.renderClient.TokenizePrompt(ctx, modelName, prompt, authHeader)
 }
 
 func (m *prefixCacheManager) GetStats() PrefixCacheStats {

@@ -51,16 +51,14 @@ type RenderClientConfig struct {
 	MaxRetries       int    `json:"maxRetries"`
 	ConnPoolSize     int    `json:"connPoolSize"`
 	BaseURL          string `json:"baseURL"`
-	// APIKey authenticates render requests against a vLLM backend that has
-	// --api-key configured. Empty (default) sends no auth header, preserving
-	// backward compatibility with unauthenticated backends.
-	APIKey string `json:"apiKey,omitempty"`
-	// AuthHeaderName overrides the default "Authorization" header. When set,
-	// the key is sent under this header name instead. Matches apipool.Adapter.
-	AuthHeaderName string `json:"authHeaderName,omitempty"`
-	// AuthHeaderPrefix prepends a scheme prefix to the key (e.g. "Bearer").
-	// Only used when AuthHeaderName is set. Matches apipool.Adapter.
-	AuthHeaderPrefix string `json:"authHeaderPrefix,omitempty"`
+	// PassThroughAuth forwards the inbound request's Authorization header
+	// value (as given to RenderChat/TokenizePrompt/RenderCompletion) verbatim
+	// to the vLLM render endpoint, so a vLLM started with --api-key can be
+	// authenticated without storing a secret in config. Default false: no auth
+	// header is sent (backward compatible with unauthenticated backends). The
+	// auth value is per-request and only flows as far as the render call — it
+	// is not logged or persisted.
+	PassThroughAuth bool `json:"passThroughAuth,omitempty"`
 }
 
 func DefaultRenderClientConfig() RenderClientConfig {

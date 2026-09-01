@@ -64,49 +64,45 @@ func TestReadSSEResponse_EmptyBody(t *testing.T) {
 	}
 }
 
-// TestWithAuth_NoKey pins backward compatibility: with no APIKey configured the
-// client must not touch the Authorization header, so unauthenticated vLLM
-// backends keep working.
-func TestWithAuth_NoKey(t *testing.T) {
-	c := &RenderClient{}
+// TestWithAuth_PassThroughDisabled pins backward compatibility: when
+// passThroughAuth is false (default), no Authorization header is sent even if
+// an auth value is supplied, so unauthenticated vLLM backends keep working.
+func TestWithAuth_PassThroughDisabled(t *testing.T) {
+	c := &RenderClient{config: RenderClientConfig{PassThroughAuth: false}}
 	req := httptest.NewRequest("POST", "http://x", nil)
-	c.withAuth(req)
+	c.withAuth(req, "Bearer sk-test")
 	if got := req.Header.Get("Authorization"); got != "" {
-		t.Fatalf("expected no Authorization header, got %q", got)
+		t.Fatalf("expected no Authorization header when passThroughAuth disabled, got %q", got)
 	}
 }
 
-// TestWithAuth_BearerDefault verifies that a configured key is sent as
-// "Authorization: Bearer <key>" by default (vLLM --api-key convention).
-func TestWithAuth_BearerDefault(t *testing.T) {
-	c := &RenderClient{config: RenderClientConfig{APIKey: "sk-test"}}
+// TestWithAuth_PassThrough_Forwards verifies that with passThroughAuth enabled
+// and a non-empty auth value, the inbound Authorization value is forwarded
+// verbatim (no scheme rewrite) to the render endpoint.
+func TestWithAuth_PassThrough_Forwards(t *testing.T) {
+	c := &RenderClient{config: RenderClientConfig{PassThroughAuth: true}}
 	req := httptest.NewRequest("POST", "http://x", nil)
-	c.withAuth(req)
+	c.withAuth(req, "Bearer sk-test")
 	if got := req.Header.Get("Authorization"); got != "Bearer sk-test" {
-		t.Fatalf("expected 'Bearer sk-test', got %q", got)
+		t.Fatalf("expected verbatim 'Bearer sk-test', got %q", got)
 	}
 }
 
-// TestWithAuth_CustomHeader verifies a custom header name + prefix, mirroring
-// apipool.Adapter.InjectAuth (e.g. providers that use "api-key: <key>").
-func TestWithAuth_CustomHeader(t *testing.T) {
-	c := &RenderClient{config: RenderClientConfig{
-		APIKey:           "sk-test",
-		AuthHeaderName:   "api-key",
-		AuthHeaderPrefix: "",
-	}}
+// TestWithAuth_PassThrough_EmptySkips verifies that when passThroughAuth is
+// enabled but the inbound request carried no Authorization (empty value), no
+// header is sent — the backend is treated as unauthenticated for this call.
+func TestWithAuth_PassThrough_EmptySkips(t *testing.T) {
+	c := &RenderClient{config: RenderClientConfig{PassThroughAuth: true}}
 	req := httptest.NewRequest("POST", "http://x", nil)
-	c.withAuth(req)
-	if got := req.Header.Get("api-key"); got != "sk-test" {
-		t.Fatalf("expected api-key header 'sk-test', got %q", got)
-	}
+	c.withAuth(req, "")
 	if got := req.Header.Get("Authorization"); got != "" {
-		t.Fatalf("expected no Authorization header when custom header set, got %q", got)
+		t.Fatalf("expected no Authorization header for empty auth value, got %q", got)
 	}
 }
 
-// TestRenderChat_SendsAuth end-to-end: a render client with an API key must
-// reach a 200 handler without 401, proving the key is sent on the wire.
+// TestRenderChat_SendsAuth end-to-end: a render client with passThroughAuth
+// enabled must forward the supplied Authorization value on the wire and reach
+// a 200 handler (proving the vLLM --api-key check passes without a 401).
 func TestRenderChat_SendsAuth(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer sk-test" {
@@ -118,8 +114,8 @@ func TestRenderChat_SendsAuth(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewRenderClient(RenderClientConfig{APIKey: "sk-test"}, "m", srv.URL)
-	ids, err := c.RenderChat(context.Background(), "m", []ChatMessage{{Role: "user", Content: "hi"}})
+	c := NewRenderClient(RenderClientConfig{PassThroughAuth: true}, "m", srv.URL)
+	ids, err := c.RenderChat(context.Background(), "m", []ChatMessage{{Role: "user", Content: "hi"}}, "Bearer sk-test")
 	if err != nil {
 		t.Fatalf("RenderChat failed: %v", err)
 	}
