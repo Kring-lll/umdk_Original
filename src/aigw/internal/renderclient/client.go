@@ -200,15 +200,11 @@ func (c *RenderClient) readSSEResponse(body io.Reader) ([]byte, error) {
 	reader := bufio.NewReader(body)
 	for {
 		line, err := reader.ReadBytes('\n')
-		// Write whatever we got, even on a partial read. vLLM's render
-		// endpoint returns a single JSON object with no trailing newline
-		// (and no SSE "data:" framing) when stream mode is not used; in that
-		// case ReadBytes returns (data, io.EOF) simultaneously. Writing
-		// before checking err ensures we don't drop that data.
+		// Write before checking err: ReadBytes may return (data, io.EOF)
+		// together for non-SSE single-line JSON with no trailing newline.
 		buf.Write(line)
 		if err != nil {
 			if err == io.EOF && buf.Len() > 0 {
-				// EOF reached but we have data, return what we have
 				return buf.Bytes(), nil
 			}
 			return nil, err

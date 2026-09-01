@@ -25,16 +25,11 @@ type prefixCacheLoadBalancer struct {
 	modelName      string
 	prefixCacheMgr prefixcache.PrefixCacheManager
 	renderClient   *renderclient.RenderClient
-	// fallbackLB is used when prefix matching yields no usable target
-	// (no match, render tokenization failed, no ready instances). It is a
-	// token-based LB so the degraded path picks the lowest-TokenNum pod,
-	// matching the load dimension prefixCache optimizes for, rather than
-	// leastConn's ReqNum dimension. See #899.
-	fallbackLB     loadBalancer
-	// loadImbalanceThreshold is the token-load imbalance threshold: when
-	// max(TokenNum)-min(TokenNum) across all ready pods exceeds it, the
-	// scheduler prioritizes load balancing (lowest-load pod) over prefix
-	// cache hit. 0 disables the intervention.
+	// fallbackLB runs when prefix matching yields no usable target.
+	// Token-based (TokenNum), not leastConn (ReqNum). #899.
+	fallbackLB loadBalancer
+	// loadImbalanceThreshold: when max(TokenNum)-min(TokenNum) across ready
+	// pods exceeds it, prioritize load balancing over prefix hit. 0 disables.
 	loadImbalanceThreshold int
 }
 
@@ -60,9 +55,7 @@ func newPrefixCacheLB(metricProvider MetricProvider, params *AlgorithmParams) (*
 		return nil, err
 	}
 
-	// fallback uses the token load balancer (TokenNum-based), not leastConn
-	// (ReqNum-based), so the degraded path stays consistent with the
-	// TokenNum load dimension prefixCache actually cares about. See #899.
+	// See fallbackLB above. #899.
 	fallback, err := newTokenLB(metricProvider, params)
 	if err != nil {
 		log.Warn().Msgf("[prefixCache] failed to create fallback token LB: %v", err)
@@ -80,11 +73,8 @@ func newPrefixCacheLB(metricProvider MetricProvider, params *AlgorithmParams) (*
 }
 
 func (lb *prefixCacheLoadBalancer) schedule(request *ScheduleRequestMsg, options *ScheduleOptions) *ScheduleResult {
-	// Write back the prompt token count so instance.addReq accumulates real
-	// load (tokenNum += PredictTokens) once the request is dispatched. The
-	// prefixCache algorithm counts prompt tokens only (no decode prediction),
-	// matching the spec's "token 数目仅统计累计的 prompt token 数". Without
-	// this, TokenNum never grows and the load-imbalance branch can never fire.
+	// Write back prompt tokens so TokenNum grows (prefixCache counts prompt
+	// tokens only); otherwise the load-imbalance branch never fires.
 	if request.Request != nil && request.Request.PromptLen > 0 {
 		request.Request.PredictTokens = request.Request.PromptLen
 	}
@@ -100,7 +90,6 @@ func (lb *prefixCacheLoadBalancer) schedule(request *ScheduleRequestMsg, options
 		return lb.fallback(request, options)
 	}
 
-	// Merge two loops into one: build readyInstanceNames and urlToInstanceName simultaneously
 	readyInstanceNames := make([]string, 0, len(readyInstances))
 	urlToInstanceName := make(map[string]string, len(readyInstances))
 	for _, url := range readyInstances {
@@ -115,7 +104,7 @@ func (lb *prefixCacheLoadBalancer) schedule(request *ScheduleRequestMsg, options
 	if len(readyInstanceNames) == 0 {
 		log.Debug().Msg("[prefixCache] no ready instances after URL->name mapping, using original URLs")
 		readyInstanceNames = readyInstances
-		// Rebuild urlToInstanceName using original URLs for consistency
+		// Fall back: map URL to itself.
 		urlToInstanceName = make(map[string]string, len(readyInstances))
 		for _, url := range readyInstances {
 			urlToInstanceName[url] = url
@@ -141,24 +130,15 @@ func (lb *prefixCacheLoadBalancer) schedule(request *ScheduleRequestMsg, options
 		} else {
 			usePrefixCache = true
 		}
-
-		// Content-domain tokenization (TokenizePrompt via /tokenize) is
-		// bypassed: matching runs on the render (chat-template) domain only.
-		// We do NOT hit /tokenize per request. buildContentText/
-		// TokenizePrompt/mergeMatched are retained as API for when each
-		// worker's reported domain is known; re-enable then and key AddPrefix
-		// by the worker's reported domain instead of request-matched percent.
 	}
 
 	var matched map[string]int
 	var matchLength int
 
 	if usePrefixCache {
-		// Single-domain matching on the chat-template (render) domain. The
-		// dual-domain merge (mergeMatched) is bypassed: cross-domain match-
-		// percentage comparison is not meaningful (template and content
-		// domains produce different token counts and block alignments), and
-		// we lack the signal for which domain each worker actually reports.
+		// Match on the render (chat-template) domain only. /tokenize per
+		// request and dual-domain merge are bypassed (TokenizePrompt/
+		// mergeMatched remain as API for when a worker's reported domain is known).
 		matched, matchLength, err = lb.prefixCacheMgr.MatchPrefix(
 			modelName,
 			-1,
@@ -183,10 +163,8 @@ func (lb *prefixCacheLoadBalancer) schedule(request *ScheduleRequestMsg, options
 		if targetInstance != nil {
 			log.Debug().Msgf("[prefixCache] branch: selected target instance %s", targetInstance.InsUrl)
 
-			// Report the selected pod's OWN match percent, not the global
-			// matchLength: the imbalance branch may route to a zero-match pod,
-			// in which case the global matchLen would mislead. Fall back to the
-			// global matchLength only when the selected pod has no entry.
+			// Report the selected pod's own match percent (imbalance branch may
+			// pick a zero-match pod); fall back to global matchLength.
 			selMatchPct := 0
 			if selName, ok := urlToInstanceName[targetInstance.InsUrl]; ok {
 				if pct, hasMatch := matched[selName]; hasMatch {
@@ -224,15 +202,9 @@ func (lb *prefixCacheLoadBalancer) fallback(request *ScheduleRequestMsg, options
 	return lb.fallbackLB.schedule(request, options)
 }
 
-// selectFromMatched picks a target pod using the prefix-match
-// load-balancing-aware algorithm. It evaluates ALL ready pods:
-//  1. spread = max(TokenNum) - min(TokenNum) across all ready pods.
-//  2. If spread > loadImbalanceThreshold (imbalanced): return the
-//     lowest-load pod to avoid hot spots, regardless of prefix match.
-//  3. Otherwise (balanced): return the highest prefix-match pod; ties
-//     broken by lower token load.
-//
-// loadImbalanceThreshold == 0 disables branch 2 (prefix-only selection).
+// selectFromMatched picks a target pod: if token-load spread across ready pods
+// exceeds loadImbalanceThreshold, return the lowest-load pod; otherwise the
+// highest prefix-match pod (ties: lower load). Threshold 0 = prefix-only.
 func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched map[string]int, urlToInstanceName map[string]string, options *ScheduleOptions) *InstanceMetric {
 	type instanceScore struct {
 		metric       *InstanceMetric
@@ -246,9 +218,7 @@ func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched
 		return nil
 	}
 
-	// matched key is instanceName (e.g., "worker-19000")
-	// metrics InsUrl is URL (e.g., "127.0.0.1:19000")
-	// Use the pre-built urlToInstanceName map passed from schedule() to avoid redundant lookups.
+	// matched is keyed by instanceName; metrics by URL — bridge via urlToInstanceName.
 	scores := make([]instanceScore, 0, len(metrics))
 	for _, m := range metrics {
 		instanceName, ok := urlToInstanceName[m.InsUrl]
@@ -279,10 +249,7 @@ func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched
 		return nil
 	}
 
-	// --- Branch 1: load imbalance ---
-	// spread = max(TokenNum) - min(TokenNum) across all ready pods. If it
-	// exceeds the threshold, return the lowest-load pod to avoid hot spots.
-	// instanceName breaks TokenNum ties for deterministic routing.
+	// Branch 1: load imbalance — spread > threshold => lowest-load pod.
 	if lb.loadImbalanceThreshold > 0 {
 		minIdx := 0
 		maxIdx := 0
@@ -307,10 +274,7 @@ func (lb *prefixCacheLoadBalancer) selectFromMatched(instances []string, matched
 			spread, lb.loadImbalanceThreshold)
 	}
 
-	// --- Branch 2: load balanced -> pick highest prefix-match pod ---
-	// sort by matchPercent desc, then TokenNum asc, then instanceName for a
-	// fully deterministic order across equivalent pods. Return the top pod;
-	// a partial match still beats leastConn (some KV reuse > none).
+	// Branch 2: balanced — highest match, then lowest load, then name.
 	sort.SliceStable(scores, func(i, j int) bool {
 		if scores[i].matchPercent != scores[j].matchPercent {
 			return scores[i].matchPercent > scores[j].matchPercent
@@ -348,8 +312,7 @@ func (lb *prefixCacheLoadBalancer) buildChatMessages(request *LlmRequest) []pref
 	messages := make([]prefixcache.ChatMessage, 0, 1)
 
 	if request.Prompt != "" {
-		// Reverse parse: "role:content " -> role, content
-		// This reverses the processMessages format: role + ":" + content + " "
+		// Reverse processMessages format: "role:content " -> role, content.
 		prompt := strings.TrimSpace(request.Prompt)
 		idx := strings.Index(prompt, ":")
 		if idx > 0 {
@@ -371,8 +334,7 @@ func (lb *prefixCacheLoadBalancer) buildChatMessages(request *LlmRequest) []pref
 }
 
 // buildContentText joins message contents in the raw content domain (no chat
-// template). Workers whose KV events report raw content tokens tokenize this
-// exact text.
+// template). Retained for content-domain matching; currently bypassed.
 func (lb *prefixCacheLoadBalancer) buildContentText(messages []prefixcache.ChatMessage) string {
 	if len(messages) == 0 {
 		return ""
@@ -388,9 +350,8 @@ func (lb *prefixCacheLoadBalancer) buildContentText(messages []prefixcache.ChatM
 	return strings.Join(parts, "\n")
 }
 
-// mergeMatched merges matches from both token domains, keeping the higher
-// match percent per instance and recording which domain's tokenIDs were used
-// so AddPrefix can extend the table in the correct domain.
+// mergeMatched merges both token domains, keeping the higher match percent and
+// its domain's tokenIDs. Retained for dual-domain matching; currently bypassed.
 func mergeMatched(
 	templateMatched map[string]int, templateIDs []int64,
 	contentMatched map[string]int, contentIDs []int64,
@@ -423,9 +384,8 @@ func (lb *prefixCacheLoadBalancer) SetModelName(modelName string) {
 	lb.modelName = modelName
 }
 
-// PrefixCacheCapable is implemented by load balancers that support prefix caching.
-// This interface allows GlobalSchedulerManager to access the prefix cache manager
-// without directly depending on the prefixCacheLoadBalancer implementation.
+// PrefixCacheCapable exposes the prefix cache manager without coupling callers
+// to prefixCacheLoadBalancer.
 type PrefixCacheCapable interface {
 	GetPrefixCacheManager() prefixcache.PrefixCacheManager
 }

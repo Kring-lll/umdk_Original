@@ -132,8 +132,7 @@ func (s *HttpServer) Start() error {
 	return s.checkHealth(errChan)
 }
 
-// registerRoutes wires all ServeMux routes. Called from Start(); also used by tests
-// (via testHandler) to exercise handlers without the limiter middleware / network bind.
+// registerRoutes wires all ServeMux routes (called from Start; also via testHandler).
 func (s *HttpServer) registerRoutes(mx *http.ServeMux) {
 	mx.HandleFunc("/aigw/v1/health", s.health)
 	mx.HandleFunc("/aigw/v1/register-instance", s.serHmacMgr.WithHMAC(s.registerInstance))
@@ -158,10 +157,8 @@ func (s *HttpServer) registerRoutes(mx *http.ServeMux) {
 	}
 }
 
-// testHandler returns a ServeMux with all routes registered, without the limiter
-// middleware or network bind — for httptest.NewRecorder-based handler tests.
-// KVC agent endpoints are registered WITHOUT the HMAC wrapper so tests can call them
-// unsigned (production wiring keeps the HMAC wrapper via registerRoutes).
+// testHandler returns a ServeMux for handler tests (no limiter/network bind).
+// KVC agent endpoints are registered unsigned; production keeps HMAC via registerRoutes.
 func (s *HttpServer) testHandler() http.Handler {
 	mx := http.NewServeMux()
 	mx.HandleFunc("/aigw/v1/health", s.health)
@@ -392,10 +389,8 @@ func (s *HttpServer) scheduleForOpenAi(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Phase 2: implicit heartbeat — when KVC management is enabled and
-	// implicitHeartbeatFromRequests is true, a schedule request carrying X-Agent-Id
-	// counts as a heartbeat (agent is alive, doing inference). Lets agents that don't
-	// call /agents/{id}/heartbeat still be tracked for fault recovery.
+	// Implicit heartbeat: a schedule request carrying X-Agent-Id counts as a
+	// heartbeat, so agents that don't call /agents/{id}/heartbeat are still tracked.
 	if aigwCfg.Kvc.Enabled && aigwCfg.Kvc.Agent.ImplicitHeartbeatFromRequests {
 		if reg := s.manager.GetAgentRegistry(); reg != nil {
 			if agentID := in.Headers["X-Agent-Id"]; agentID != "" {

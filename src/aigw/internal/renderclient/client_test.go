@@ -16,14 +16,8 @@ import (
 	"testing"
 )
 
-// TestReadSSEResponse_SingleLineJSONNoTrailingNewline pins the non-SSE response
-// path. vLLM's /v1/chat/completions/render returns a single JSON object with no
-// trailing newline (and no SSE "data:" framing) when stream mode is not used.
-// bufio.Reader.ReadBytes('\n') on such a body returns (data, io.EOF)
-// simultaneously; the previous implementation checked the error before writing
-// the partial line to the buffer, so buf.Len()==0 on EOF and the function
-// returned "failed to read response body: EOF", dropping the JSON and breaking
-// every non-SSE render call.
+// TestReadSSEResponse_SingleLineJSONNoTrailingNewline: render returns single-line
+// JSON with no trailing newline (non-SSE path).
 func TestReadSSEResponse_SingleLineJSONNoTrailingNewline(t *testing.T) {
 	body := []byte(`{"request_id":"abc","token_ids":[151644,8948,198]}`)
 	c := &RenderClient{}
@@ -51,8 +45,7 @@ func TestReadSSEResponse_SSEDataLines(t *testing.T) {
 	}
 }
 
-// TestReadSSEResponse_EmptyBody ensures a truly empty body still returns EOF
-// (not silently returning empty data that masks a real error).
+// TestReadSSEResponse_EmptyBody: empty body returns EOF, not empty data.
 func TestReadSSEResponse_EmptyBody(t *testing.T) {
 	c := &RenderClient{}
 	_, err := c.readSSEResponse(bytes.NewReader(nil))

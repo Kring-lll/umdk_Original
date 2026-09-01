@@ -46,8 +46,7 @@ type PrefixCacheManager interface {
 	SetRenderClient(client *renderclient.RenderClient)
 	Stop()
 
-	// GetInstanceNameByUrl returns the instance name for a given URL (ip:port format).
-	// This is used by selectFromMatched to correctly map between URL and instance name.
+	// GetInstanceNameByUrl maps a URL (ip:port) to its instance name.
 	GetInstanceNameByUrl(url string) (string, bool)
 }
 
@@ -65,7 +64,6 @@ type prefixCacheManager struct {
 	fallbackStringMatching bool
 
 	// urlToInstanceName maps URL (ip:port) to instance name.
-	// Used by selectFromMatched to correctly map between URL and instance name.
 	urlToInstanceName map[string]string
 }
 
@@ -186,9 +184,7 @@ func (m *prefixCacheManager) Tokenize(ctx context.Context, modelName string, mes
 	return m.renderClient.RenderChat(ctx, modelName, messages, authHeader)
 }
 
-// TokenizePrompt tokenizes a raw prompt in the content domain (no chat
-// template). Some workers' KV events report raw content tokens rather than
-// chat-template tokens; this provides the matching domain for those workers.
+// TokenizePrompt tokenizes a raw prompt in the content domain (no chat template).
 func (m *prefixCacheManager) TokenizePrompt(ctx context.Context, modelName, prompt, authHeader string) ([]int64, error) {
 	if m.renderClient == nil {
 		return nil, nil
