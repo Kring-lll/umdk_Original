@@ -9,8 +9,6 @@
 package com.huawei.umdk.snc.entity;
 
 import java.util.Map;
-import com.alibaba.fastjson2.annotation.JSONField;
-import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -23,7 +21,6 @@ import lombok.ToString;
 @EqualsAndHashCode(callSuper = true)
 @ToString(callSuper = true)
 public class SwDevice extends DeviceEntity {
-    @Getter(AccessLevel.NONE)
     private Map<Integer, SwForwardingChip> forwardingChips;
     private SwitchLevel switchLevel;
     private Integer index;
@@ -35,16 +32,5 @@ public class SwDevice extends DeviceEntity {
         this.forwardingChips = forwardingChips;
         this.switchLevel = switchLevel;
         this.index = index;
-    }
-
-    @Override
-    public DeviceType getDeviceType() {
-        return DeviceType.SW;
-    }
-
-    @JSONField(serialize = false)
-    @Override
-    public Map<Integer, SwForwardingChip> getForwardingChips() {
-        return forwardingChips;
     }
 }
