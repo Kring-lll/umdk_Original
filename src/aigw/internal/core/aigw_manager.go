@@ -493,21 +493,20 @@ func (manager *AigwManager) GetSuggestion(in *GetSuggestionIn) (*base.GetSuggest
 // and dispatch any pending queued requests.
 // insURL is the instance the request was forwarded to (from the HTTP handler's
 // suggestion); empty means the request was never dispatched (nothing to free).
-func (manager *AigwManager) ErrOnResponse(model, sessionID, insURL, finishReason string) {
+func (manager *AigwManager) ErrOnResponse(model, sessionID, reqID, prefillURL, decodeURL, finishReason string) {
 	m := manager.getGsManager(model)
 	if m == nil {
 		return
 	}
-	m.ErrOnResponse(sessionID, insURL, finishReason)
+	m.ErrOnResponse(sessionID, reqID, prefillURL, decodeURL, finishReason)
 }
 
-// ErrOnCancel is called when an HTTP connection is closed abnormally.
-func (manager *AigwManager) ErrOnCancel(model, sessionID, insURL string) {
+func (manager *AigwManager) ErrOnCancel(model, sessionID, reqID, prefillURL, decodeURL string) {
 	m := manager.getGsManager(model)
 	if m == nil {
 		return
 	}
-	m.ErrOnCancel(sessionID, insURL)
+	m.ErrOnCancel(sessionID, reqID, prefillURL, decodeURL)
 }
 
 func (manager *AigwManager) createGBM(gbmPath string, vectorPath string) error {

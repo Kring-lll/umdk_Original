@@ -326,6 +326,12 @@ func (m *GlobalSchedulerManager) initErrScheduler(errCfg *base.ErrSchedulerConfi
 		return nil
 	}
 
+	queueSize := errCfg.QueueSize
+	if m.runtimeMode != base.ServiceMode && queueSize > 0 {
+		log.Warn().Msgf("[ERR] queue mode requires ServiceMode; falling back to passthrough for model %s", m.config.model)
+		queueSize = 0
+	}
+
 	internalCfg := ErrSchedulerConfig{
 		SchedulerType:      errCfg.ErrSchedulerType,
 		WarmupSessions:     errCfg.WarmupSessions,
@@ -340,18 +346,21 @@ func (m *GlobalSchedulerManager) initErrScheduler(errCfg *base.ErrSchedulerConfi
 
 	m.errScheduler = NewErrSchedulerManager(internalCfg)
 
-	// CatERR requires a loaded classifier. config_manager checks file existence;
-	// this checks content validity (file exists but format is broken).
 	if errCfg.ErrSchedulerType == "caterr" && !m.errScheduler.classifier.IsLoaded() {
 		return fmt.Errorf("[ERR] caterr classifier not loaded (vocab or centroids invalid), model %s", m.config.model)
 	}
 
-	m.capacityProvider = NewCapacityProvider(batchSize)
+	m.capacityProvider = NewCapacityProvider(batchSize, func() int {
+		if m.instanceManager == nil {
+			return 0
+		}
+		return m.instanceManager.getInsNum()
+	})
 
-	if errCfg.QueueSize > 0 {
-		m.pendingQueue = NewPendingQueue(errCfg.QueueSize)
+	if queueSize > 0 {
+		m.pendingQueue = NewPendingQueue(queueSize)
 		log.Info().Msgf("[ERR] queue mode enabled: queueSize=%d, batchSize=%d, algo=%s",
-			errCfg.QueueSize, batchSize, errCfg.ErrSchedulerType)
+			queueSize, batchSize, errCfg.ErrSchedulerType)
 	} else {
 		log.Info().Msgf("[ERR] passthrough mode: batchSize=%d, algo=%s",
 			batchSize, errCfg.ErrSchedulerType)
@@ -516,6 +525,13 @@ func (m *GlobalSchedulerManager) registerInstance(ctrlMsg *ControlMessage) {
 	}
 
 	log.Info().Msgf("instance %s registered successfully", registerMsg.Name)
+
+	// Registration increases capacity — trigger drain if ERR queue mode is active
+	if m.errScheduler != nil && m.pendingQueue != nil {
+		m.dispatchMu.Lock()
+		m.tryDispatchFromQueue()
+		m.dispatchMu.Unlock()
+	}
 }
 
 func (m *GlobalSchedulerManager) unregisterInstance(ctrlMsg *ControlMessage) {
@@ -544,6 +560,16 @@ func (m *GlobalSchedulerManager) unregisterInstance(ctrlMsg *ControlMessage) {
 	}
 
 	log.Info().Msgf("instance (%v:%v) unregistered successfully", unregisterMsg.IP, unregisterMsg.Port)
+
+	// If all instances are gone, fail all queued requests (503)
+	if m.errScheduler != nil && m.pendingQueue != nil && m.instanceManager.getInsNum() == 0 {
+		m.dispatchMu.Lock()
+		for _, pr := range m.pendingQueue.DrainAll() {
+			log.Warn().Msgf("[ERR] queue flushed on instance unregister: session %s 503", pr.SessionID)
+			pr.Msg.Response <- ErrNoInstance
+		}
+		m.dispatchMu.Unlock()
+	}
 }
 
 // PutControlMessage sends control message to GS.

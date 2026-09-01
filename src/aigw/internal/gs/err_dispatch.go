@@ -9,12 +9,12 @@ package gs
 
 import (
 	"fmt"
+	"time"
 
 	"huawei.com/aigw/pkg/log"
 )
 
 // dispatchErr is the ERR-aware entry point for handling schedule requests.
-// Flow: compute priority → enqueue (queue mode) or dispatch directly (passthrough).
 func (m *GlobalSchedulerManager) dispatchErr(msg *ControlMessage) {
 	req, ok := msg.Request.(*ScheduleRequestMsg)
 	if !ok {
@@ -31,90 +31,61 @@ func (m *GlobalSchedulerManager) dispatchErr(msg *ControlMessage) {
 		}
 	}
 
-	sessionID := req.SessionID
-	var priority int
-
-	if m.errScheduler != nil {
-		var k int
-		if sessionID == "" {
-			priority = int(m.errScheduler.AnonymousPriority(req.Request.Prompt))
-		} else {
-			k = m.errScheduler.OnRequest(sessionID, m.config.model, req.Request.Prompt)
-			priority = int(m.errScheduler.Priority(sessionID, k, req.Request.Prompt))
-		}
-		log.Debug().Msgf("[ERR] session %s, k=%d, priority=%d, algo=%s",
-			sessionID, k, priority, m.errScheduler.AlgorithmName())
+	// Fast-fail: no instances registered → 503 (queue mode only)
+	if m.pendingQueue != nil && m.capacityProvider != nil && m.capacityProvider.InstanceCount() == 0 {
+		msg.Response <- ErrNoInstance
+		return
 	}
+
+	sessionID := req.SessionID
+	k := 0
+	cat := ""
+	if m.errScheduler != nil {
+		k = m.errScheduler.OnRequest(sessionID, m.config.model, req.Request.Prompt)
+		cat = m.errScheduler.SessionCategory(sessionID)
+	}
+
+	log.Debug().Msgf("[ERR] recv: session=%s k=%d cat=%s queue=%d free=%d",
+		sessionID, k, cat, m.pendingQueue.Size(), m.capacityProvider.FreeSlots())
 
 	m.dispatchMu.Lock()
 	defer m.dispatchMu.Unlock()
 
 	if m.pendingQueue != nil {
-		m.dispatchWithQueue(msg, priority)
+		m.dispatchWithQueue(msg, k)
 	} else {
+		priority := m.computePrioritySingle(sessionID, k, req.Request.Prompt)
 		m.dispatchDirect(msg, priority)
 	}
 }
 
-// dispatchDirect dispatches immediately without queueing.
-// Does NOT gate on capacity; only bumps in-flight tracking. Caller must hold m.dispatchMu.
-func (m *GlobalSchedulerManager) dispatchDirect(msg *ControlMessage, priority int) {
-	req := msg.Request.(*ScheduleRequestMsg)
-
-	result := m.scheduler.schedule(req, nil)
-	m.recordScheduleStats(result)
-
-	if result.PrefillUrl != "" && m.capacityProvider != nil {
-		m.capacityProvider.OnDispatched(result.PrefillUrl)
+func (m *GlobalSchedulerManager) computePrioritySingle(sessionID string, k int, prompt string) int {
+	if sessionID == "" {
+		return int(m.errScheduler.AnonymousPriority(prompt))
 	}
-
-	log.Debug().Msgf("[ERR] dispatched: session %s → %s, priority=%d",
-		req.SessionID, result.PrefillUrl, priority)
-
-	msg.Response <- &SuggestionResultMsg{
-		PrefillUrl: result.PrefillUrl,
-		DecodeUrl:  result.DecodeUrl,
-		DpRank:     result.DpRank,
-		Priority:   &priority,
-	}
+	return int(m.errScheduler.Priority(sessionID, k, prompt))
 }
 
 // dispatchWithQueue enqueues the request and attempts to dispatch from queue.
-// When the queue is full, forwards the higher-priority of (new, queue front)
-// and enqueues the other. Caller must hold m.dispatchMu.
-func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, priority int) {
+// When the queue is full, evicts the lowest-K request (503 it) and enqueues the new one.
+// Caller must hold m.dispatchMu.
+func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, k int) {
 	req := msg.Request.(*ScheduleRequestMsg)
 
 	if m.pendingQueue.IsFull() {
-		picked := m.pendingQueue.Pick()
-		if picked == nil {
-			log.Warn().Msgf("[ERR] queue full but Pick nil, force-forwarding session %s", req.SessionID)
-			m.dispatchDirect(msg, priority)
-			return
+		victim := m.pendingQueue.EvictLowestK()
+		if victim != nil {
+			log.Warn().Msgf("[ERR] queue full, evicting session %s (k=%d, waited=%v) for session %s (k=%d)",
+				victim.SessionID, victim.K, time.Since(victim.EnqueueTime),
+				req.SessionID, k)
+			victim.Msg.Response <- ErrQueueFull
 		}
-		if priority < picked.Priority {
-			m.dispatchDirect(msg, priority)
-			if err := m.pendingQueue.Add(picked); err != nil {
-				picked.Msg.Response <- err
-			}
-		} else {
-			m.dispatchDirect(picked.Msg, picked.Priority)
-			if err := m.pendingQueue.Add(&PendingRequest{
-				ReqID:     req.Request.ReqId,
-				SessionID: req.SessionID,
-				Priority:  priority,
-				Msg:       msg,
-			}); err != nil {
-				msg.Response <- err
-			}
-		}
-		return
 	}
 
 	if err := m.pendingQueue.Add(&PendingRequest{
 		ReqID:     req.Request.ReqId,
 		SessionID: req.SessionID,
-		Priority:  priority,
+		K:         k,
 		Msg:       msg,
 	}); err != nil {
 		msg.Response <- err
@@ -131,12 +102,23 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 		return
 	}
 
+	snap := m.errScheduler.AlgoSnapshot()
+
 	for {
 		if m.pendingQueue.IsEmpty() {
 			return
 		}
+		if m.capacityProvider != nil && !m.capacityProvider.HasCapacity() {
+			return
+		}
 
-		pr := m.pendingQueue.Pick()
+		pr := m.pendingQueue.Pick(func(r *PendingRequest) int {
+			req := r.Msg.Request.(*ScheduleRequestMsg)
+			if r.SessionID == "" {
+				return int(m.errScheduler.AnonymousPriorityWith(snap, req.Request.Prompt))
+			}
+			return int(m.errScheduler.PriorityWith(snap, r.SessionID, r.K, req.Request.Prompt))
+		})
 		if pr == nil {
 			return
 		}
@@ -150,6 +132,7 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 		if req.ReqCTX != nil {
 			select {
 			case <-req.ReqCTX.Done():
+				pr.Msg.Response <- ErrNoInstance
 				continue
 			default:
 			}
@@ -157,44 +140,87 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 
 		result := m.scheduler.schedule(req, nil)
 
-		if result.PrefillUrl == "" || (m.capacityProvider != nil && !m.capacityProvider.HasFreeSlot(result.PrefillUrl)) {
-			if err := m.pendingQueue.Add(pr); err != nil {
-				pr.Msg.Response <- err
-				continue
-			}
+		if result.PrefillUrl == "" {
+			pr.Msg.Response <- ErrNoInstance
+			continue
+		}
+
+		priority := m.computePriorityWithSnapshot(snap, pr.SessionID, pr.K, req.Request.Prompt)
+		m.dispatchScheduled(pr.Msg, req, result, priority)
+	}
+}
+
+func (m *GlobalSchedulerManager) computePriorityWithSnapshot(snap *algoSnapshot, sessionID string, k int, prompt string) int {
+	if sessionID == "" {
+		return int(m.errScheduler.AnonymousPriorityWith(snap, prompt))
+	}
+	return int(m.errScheduler.PriorityWith(snap, sessionID, k, prompt))
+}
+
+// dispatchDirect dispatches immediately without queueing (passthrough mode).
+// Caller must hold m.dispatchMu.
+func (m *GlobalSchedulerManager) dispatchDirect(msg *ControlMessage, priority int) {
+	req := msg.Request.(*ScheduleRequestMsg)
+
+	result := m.scheduler.schedule(req, nil)
+
+	if result.PrefillUrl == "" {
+		msg.Response <- &SuggestionResultMsg{}
+		return
+	}
+
+	m.dispatchScheduled(msg, req, result, priority)
+}
+
+// dispatchScheduled is the shared dispatch step for both passthrough and queue modes.
+// Feeds RR's instance capacity (AddRequest), KVC hooks, model-level in-flight tracking,
+// writes the response with priority hint. Caller must hold m.dispatchMu.
+func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *ScheduleRequestMsg,
+	result *ScheduleResult, priority int) {
+
+	m.recordScheduleStats(result)
+
+	if result.PrefillUrl != "" {
+		if err := m.metricProvider.AddRequest(req.Request, &InstanceContext{
+			InstanceID:       result.PrefillUrl,
+			GroupID:          result.PrefillGroupID,
+			DecodeInstanceID: result.DecodeUrl,
+		}); err != nil {
+			msg.Response <- fmt.Errorf("failed to add request to provider: %v", err)
 			return
 		}
+	}
 
-		m.recordScheduleStats(result)
+	if m.kvcSessionMgr != nil {
+		sessionID := headerVal(req.Headers, "x-session-id")
+		agentID := headerVal(req.Headers, "x-agent-id")
+		m.kvcSessionMgr.OnRequestScheduled(sessionID, agentID, result.PrefillUrl, nil)
+	}
 
-		if m.capacityProvider != nil {
-			m.capacityProvider.OnDispatched(result.PrefillUrl)
-		}
+	m.capacityProvider.OnDispatched()
 
-		// TODO: capacity slot leak if handler ctx fires between ctx check and OnDispatched.
+	log.Debug().Msgf("[ERR] dispatch: session=%s k=%d cat=%s priority=%d -> %s inFlight=%d/%d queue=%d",
+		req.SessionID, m.errScheduler.SessionIteration(req.SessionID),
+		m.errScheduler.SessionCategory(req.SessionID), priority,
+		result.PrefillUrl, m.capacityProvider.InFlight(), m.capacityProvider.TotalSlots(), m.pendingQueue.Size())
 
-		log.Debug().Msgf("[ERR] dispatched: session %s → %s, priority=%d",
-			pr.SessionID, result.PrefillUrl, pr.Priority)
+	req.Request.Prompt = ""
+	req.Request.PromptToken = nil
 
-		pr.Msg.Response <- &SuggestionResultMsg{
-			PrefillUrl: result.PrefillUrl,
-			DecodeUrl:  result.DecodeUrl,
-			DpRank:     result.DpRank,
-			Priority:   &pr.Priority,
-		}
+	msg.Response <- &SuggestionResultMsg{
+		PrefillUrl: result.PrefillUrl,
+		DecodeUrl:  result.DecodeUrl,
+		DpRank:     result.DpRank,
+		Priority:   &priority,
 	}
 }
 
 // ErrOnResponse is called when an HTTP response completes.
-// Frees capacity, updates ERR distribution, and tries to dispatch from queue.
-// insURL is the instance this request was forwarded to; empty if never dispatched.
-func (m *GlobalSchedulerManager) ErrOnResponse(sessionID, insURL, finishReason string) {
+// insURL is the instance the request was forwarded to; empty if never dispatched.
+// Caller does NOT hold dispatchMu — counter adjustments and drain acquire it internally.
+func (m *GlobalSchedulerManager) ErrOnResponse(sessionID, reqID, prefillURL, decodeURL, finishReason string) {
 	if m.errScheduler == nil {
 		return
-	}
-
-	if insURL != "" && m.capacityProvider != nil {
-		m.capacityProvider.OnCompleted(insURL)
 	}
 
 	switch finishReason {
@@ -202,38 +228,55 @@ func (m *GlobalSchedulerManager) ErrOnResponse(sessionID, insURL, finishReason s
 		m.errScheduler.OnFinish(sessionID)
 	case "cancelled":
 		m.errScheduler.OnCancel(sessionID)
+		log.Warn().Msgf("[ERR] session %s stream cancelled (insURL=%s)", sessionID, prefillURL)
 	default:
-		// tool_calls/other: arm long idle timer (agent may send next iteration)
 		m.errScheduler.RestartIdleTimer(sessionID)
 	}
 
-	if m.pendingQueue != nil && !m.pendingQueue.IsEmpty() {
-		m.dispatchMu.Lock()
-		m.tryDispatchFromQueue()
-		m.dispatchMu.Unlock()
+	m.dispatchMu.Lock()
+	if prefillURL != "" {
+		if m.capacityProvider != nil {
+			m.capacityProvider.OnCompleted()
+		}
+		if reqID != "" {
+			if err := m.metricProvider.RemoveRequest(&LlmRequest{ReqId: reqID}, &InstanceContext{
+				InstanceID:       prefillURL,
+				DecodeInstanceID: decodeURL,
+			}); err != nil {
+				log.Debug().Msgf("[ERR] RemoveRequest failed for req %s: %v", reqID, err)
+			}
+		}
 	}
+	m.tryDispatchFromQueue()
+	m.dispatchMu.Unlock()
 }
 
-// ErrOnCancel is called when the HTTP connection is closed abnormally.
-// insURL is the request's instance URL; empty if never dispatched.
-func (m *GlobalSchedulerManager) ErrOnCancel(sessionID, insURL string) {
+// ErrOnCancel is called when an HTTP connection is closed abnormally.
+func (m *GlobalSchedulerManager) ErrOnCancel(sessionID, reqID, prefillURL, decodeURL string) {
 	if m.errScheduler == nil {
 		return
 	}
 
-	if insURL != "" && m.capacityProvider != nil {
-		m.capacityProvider.OnCompleted(insURL)
-	}
-
+	log.Warn().Msgf("[ERR] session %s connection closed (insURL=%s)", sessionID, prefillURL)
 	m.errScheduler.OnCancel(sessionID)
 
+	m.dispatchMu.Lock()
+	if prefillURL != "" {
+		if m.capacityProvider != nil {
+			m.capacityProvider.OnCompleted()
+		}
+		if reqID != "" {
+			if err := m.metricProvider.RemoveRequest(&LlmRequest{ReqId: reqID}, &InstanceContext{
+				InstanceID:       prefillURL,
+				DecodeInstanceID: decodeURL,
+			}); err != nil {
+				log.Debug().Msgf("[ERR] RemoveRequest failed for req %s: %v", reqID, err)
+			}
+		}
+	}
 	if m.pendingQueue != nil {
 		m.pendingQueue.RemoveBySession(sessionID)
 	}
-
-	if m.pendingQueue != nil && !m.pendingQueue.IsEmpty() {
-		m.dispatchMu.Lock()
-		m.tryDispatchFromQueue()
-		m.dispatchMu.Unlock()
-	}
+	m.tryDispatchFromQueue()
+	m.dispatchMu.Unlock()
 }

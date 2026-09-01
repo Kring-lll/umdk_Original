@@ -14,10 +14,11 @@ import (
 // ErrAlgorithm computes scheduling priority. Lower value = dispatched first.
 type ErrAlgorithm interface {
 	Priority(sessionID string, k int, prompt string) float64
+	PriorityWith(snap *algoSnapshot, sessionID string, k int, prompt string) float64
 	Name() string
 }
 
-// MejAlg implements MEJ: priority = -k. Higher k (closer to completion) = higher priority.
+// MejAlg implements MEJ: priority = -k.
 type MejAlg struct{}
 
 func NewMejAlg() *MejAlg {
@@ -29,6 +30,10 @@ func (a *MejAlg) Priority(_ string, k int, _ string) float64 {
 		k = 1
 	}
 	return -float64(k)
+}
+
+func (a *MejAlg) PriorityWith(_ *algoSnapshot, _ string, k int, _ string) float64 {
+	return a.Priority("", k, "")
 }
 
 func (a *MejAlg) Name() string { return "mej" }
@@ -50,6 +55,16 @@ func (a *ErrAlg) Priority(_ string, k int, _ string) float64 {
 		return -float64(k)
 	}
 	return a.Dist.ExpectedRemaining(k)
+}
+
+func (a *ErrAlg) PriorityWith(snap *algoSnapshot, _ string, k int, _ string) float64 {
+	if k <= 0 {
+		k = 1
+	}
+	if snap != nil && snap.global != nil {
+		return snap.global.ExpectedRemaining(k)
+	}
+	return a.Priority("", k, "")
 }
 
 func (a *ErrAlg) Name() string { return "err" }
@@ -75,20 +90,36 @@ func (a *CatErrAlg) Priority(_ string, k int, prompt string) float64 {
 	if k <= 0 {
 		k = 1
 	}
-
 	if a.Classifier != nil && a.Classifier.IsLoaded() {
 		category := a.Classifier.Classify(prompt)
 		if category != "" {
-			a.mu.RLock()
+			if a.mu != nil {
+				a.mu.RLock()
+			}
 			dist, ok := a.CatDists[category]
-			a.mu.RUnlock()
+			if a.mu != nil {
+				a.mu.RUnlock()
+			}
 			if ok && dist.TotalCount() > 0 {
 				return dist.ExpectedRemaining(k)
 			}
-			return -float64(k)
 		}
 	}
+	return -float64(k)
+}
 
+func (a *CatErrAlg) PriorityWith(snap *algoSnapshot, _ string, k int, prompt string) float64 {
+	if k <= 0 {
+		k = 1
+	}
+	if a.Classifier != nil && a.Classifier.IsLoaded() {
+		category := a.Classifier.Classify(prompt)
+		if category != "" && snap != nil && snap.cats != nil {
+			if s, ok := snap.cats[category]; ok && s.TotalCount() > 0 {
+				return s.ExpectedRemaining(k)
+			}
+		}
+	}
 	return -float64(k)
 }
 

@@ -11,29 +11,56 @@ import (
 	"container/list"
 	"sort"
 	"sync"
+	"sync/atomic"
 )
 
-// EmpiricalDist maintains an empirical distribution of session step counts
-// and supports O(log n) E[rem|k] queries via prefix-sum + binary search.
-// Per-session single-record semantics: one session_id contributes at most ONE
-// entry. Seeded entries (from SeedFromCounts) are immutable.
-// When windowSize > 0, a FIFO sliding window bounds memory usage.
+// distSnapshot is an immutable, pre-computed view of an EmpiricalDist.
+// Readers access it via atomic pointer load — no locks needed.
+// A Refresh() call builds a new snapshot and atomically swaps it in.
+type distSnapshot struct {
+	sortedVals []int
+	prefixSum  []int64 // prefix[i] = sum of sortedVals[0..i-1]
+	erCache    map[int]float64
+	totalCount int
+}
+
+func (s *distSnapshot) ExpectedRemaining(k int) float64 {
+	if s == nil || len(s.sortedVals) == 0 {
+		return 0.0
+	}
+	return s.erCache[k]
+}
+
+func (s *distSnapshot) TotalCount() int {
+	if s == nil {
+		return 0
+	}
+	return s.totalCount
+}
+
+func (s *distSnapshot) Median() int {
+	if s == nil || len(s.sortedVals) == 0 {
+		return 0
+	}
+	return s.sortedVals[len(s.sortedVals)/2]
+}
+
 type distEntry struct {
 	sessionID string // "" for seeded/anonymous (immutable)
 	steps     int
 }
 
+// EmpiricalDist maintains an empirical distribution of session step counts.
+// Per-session single-record semantics: one session_id contributes at most ONE
+// entry. Seeded entries (from SeedFromCounts) are immutable.
+// When windowSize > 0, a FIFO sliding window bounds memory usage.
 type EmpiricalDist struct {
-	mu            sync.RWMutex
+	mu            sync.Mutex // protects rawValues and sessionValues only
 	windowSize    int
 	rawValues     *list.List
 	sessionValues map[string]*list.Element
 	dirty         bool
-
-	sortedVals []int
-	prefixSum  []int64
-	erCache    map[int]float64
-	totalCount int
+	snapshot      atomic.Pointer[distSnapshot]
 }
 
 func NewEmpiricalDist(windowSize int) *EmpiricalDist {
@@ -41,12 +68,67 @@ func NewEmpiricalDist(windowSize int) *EmpiricalDist {
 		windowSize:    windowSize,
 		rawValues:     list.New(),
 		sessionValues: make(map[string]*list.Element),
-		erCache:       make(map[int]float64),
-		dirty:         true,
 	}
 }
 
-// evictFront removes the front (oldest) entry. Caller must hold d.mu.
+// Snapshot returns the current immutable snapshot. Lock-free.
+func (d *EmpiricalDist) Snapshot() *distSnapshot {
+	return d.snapshot.Load()
+}
+
+// Refresh builds a new snapshot from rawValues and atomically swaps it in.
+// Call after AddValue/SeedFromCounts to publish fresh E[rem|k] tables.
+// Readers may briefly see the previous snapshot until the swap completes.
+func (d *EmpiricalDist) Refresh() {
+	d.mu.Lock()
+	if !d.dirty {
+		d.mu.Unlock()
+		return
+	}
+	d.dirty = false
+
+	n := d.rawValues.Len()
+	if n == 0 {
+		d.mu.Unlock()
+		d.snapshot.Store(&distSnapshot{
+			erCache: make(map[int]float64),
+		})
+		return
+	}
+
+	steps := make([]int, 0, n)
+	for e := d.rawValues.Front(); e != nil; e = e.Next() {
+		steps = append(steps, e.Value.(distEntry).steps)
+	}
+	d.mu.Unlock()
+
+	// Build outside the lock
+	sort.Ints(steps)
+	prefixSum := make([]int64, n+1)
+	for i := 0; i < n; i++ {
+		prefixSum[i+1] = prefixSum[i] + int64(steps[i])
+	}
+	erCache := make(map[int]float64, steps[n-1])
+	maxStep := steps[n-1]
+	for k := 1; k <= maxStep; k++ {
+		idx := sort.SearchInts(steps, k)
+		nRem := n - idx
+		if nRem == 0 {
+			erCache[k] = 0.0
+			continue
+		}
+		suffixSum := prefixSum[n] - prefixSum[idx]
+		erCache[k] = float64(suffixSum-int64(k)*int64(nRem)) / float64(nRem)
+	}
+
+	d.snapshot.Store(&distSnapshot{
+		sortedVals: steps,
+		prefixSum:  prefixSum,
+		erCache:    erCache,
+		totalCount: n,
+	})
+}
+
 func (d *EmpiricalDist) evictFront() {
 	front := d.rawValues.Front()
 	if front == nil {
@@ -60,19 +142,14 @@ func (d *EmpiricalDist) evictFront() {
 	d.rawValues.Remove(front)
 }
 
-// AddValue records (or updates) a session's step count.
-// If the session already has an entry, the old entry is replaced.
 func (d *EmpiricalDist) AddValue(sessionID string, steps int) {
 	if steps <= 0 {
 		return
 	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	if oldElem, ok := d.sessionValues[sessionID]; ok && oldElem != nil {
 		d.rawValues.Remove(oldElem)
 	}
-
 	d.rawValues.PushBack(distEntry{sessionID: sessionID, steps: steps})
 	if d.windowSize > 0 && d.rawValues.Len() > d.windowSize {
 		d.evictFront()
@@ -81,16 +158,14 @@ func (d *EmpiricalDist) AddValue(sessionID string, steps int) {
 		d.sessionValues[sessionID] = d.rawValues.Back()
 	}
 	d.dirty = true
+	d.mu.Unlock()
 }
 
-// SeedFromCounts bulk-loads from a {steps: count} map.
-// Seeded entries are anonymous (sessionID=""): immutable, never replaced.
 func (d *EmpiricalDist) SeedFromCounts(counts map[int]int) {
 	if len(counts) == 0 {
 		return
 	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	for steps, cnt := range counts {
 		if steps <= 0 || cnt <= 0 {
 			continue
@@ -103,93 +178,18 @@ func (d *EmpiricalDist) SeedFromCounts(counts map[int]int) {
 		}
 	}
 	d.dirty = true
+	d.mu.Unlock()
+	d.Refresh()
 }
 
-// ExpectedRemaining returns E[rem|k] = E[L-k | L>=k].
-// Returns 0.0 when k is beyond the distribution's support.
 func (d *EmpiricalDist) ExpectedRemaining(k int) float64 {
-	d.mu.RLock()
-	if d.dirty {
-		d.mu.RUnlock()
-		d.rebuild()
-		d.mu.RLock()
-	}
-	defer d.mu.RUnlock()
-
-	if len(d.sortedVals) == 0 {
-		return 0.0
-	}
-	return d.erCache[k]
+	return d.snapshot.Load().ExpectedRemaining(k)
 }
 
 func (d *EmpiricalDist) TotalCount() int {
-	d.mu.RLock()
-	if d.dirty {
-		d.mu.RUnlock()
-		d.rebuild()
-		d.mu.RLock()
-	}
-	defer d.mu.RUnlock()
-	return d.totalCount
+	return d.snapshot.Load().TotalCount()
 }
 
-// Median returns the 50th-percentile step count (0 if empty).
 func (d *EmpiricalDist) Median() int {
-	d.mu.RLock()
-	if d.dirty {
-		d.mu.RUnlock()
-		d.rebuild()
-		d.mu.RLock()
-	}
-	defer d.mu.RUnlock()
-	if len(d.sortedVals) == 0 {
-		return 0
-	}
-	return d.sortedVals[len(d.sortedVals)/2]
-}
-
-// rebuild recomputes sortedVals, prefixSum, and erCache from rawValues.
-func (d *EmpiricalDist) rebuild() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if !d.dirty {
-		return
-	}
-
-	n := d.rawValues.Len()
-	if n == 0 {
-		d.sortedVals = nil
-		d.prefixSum = nil
-		d.erCache = make(map[int]float64)
-		d.totalCount = 0
-		d.dirty = false
-		return
-	}
-
-	d.sortedVals = make([]int, 0, n)
-	for e := d.rawValues.Front(); e != nil; e = e.Next() {
-		d.sortedVals = append(d.sortedVals, e.Value.(distEntry).steps)
-	}
-	sort.Ints(d.sortedVals)
-	d.totalCount = n
-
-	d.prefixSum = make([]int64, n+1)
-	for i := 0; i < n; i++ {
-		d.prefixSum[i+1] = d.prefixSum[i] + int64(d.sortedVals[i])
-	}
-
-	d.erCache = make(map[int]float64, d.sortedVals[n-1])
-	maxStep := d.sortedVals[n-1]
-	for k := 1; k <= maxStep; k++ {
-		idx := sort.SearchInts(d.sortedVals, k)
-		nRem := n - idx
-		if nRem == 0 {
-			d.erCache[k] = 0.0
-			continue
-		}
-		suffixSum := d.prefixSum[n] - d.prefixSum[idx]
-		d.erCache[k] = float64(suffixSum-int64(k)*int64(nRem)) / float64(nRem)
-	}
-
-	d.dirty = false
+	return d.snapshot.Load().Median()
 }

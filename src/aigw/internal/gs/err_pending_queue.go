@@ -19,13 +19,12 @@ import (
 type PendingRequest struct {
 	ReqID       string
 	SessionID   string
-	Priority    int
+	K           int
 	Msg         *ControlMessage
 	EnqueueTime time.Time
 }
 
 // PendingQueue is a per-model pending queue using a hash map.
-// Pick scans all entries O(n) to find the highest priority (lowest value).
 // The map key is ReqID (unique per request), NOT SessionID.
 type PendingQueue struct {
 	mu       sync.Mutex
@@ -41,9 +40,8 @@ func NewPendingQueue(maxSize int) *PendingQueue {
 }
 
 var ErrQueueFull = errors.New("pending queue full")
+var ErrNoInstance = errors.New("no instance available")
 
-// Add adds a request to the pending queue.
-// Returns ErrQueueFull if the queue is at maxSize and the ReqID is new.
 func (q *PendingQueue) Add(req *PendingRequest) error {
 	if req == nil {
 		return nil
@@ -64,9 +62,9 @@ func (q *PendingQueue) Add(req *PendingRequest) error {
 	return nil
 }
 
-// Pick removes and returns the highest-priority (lowest value) request.
-// Ties broken by EnqueueTime (oldest first). Returns nil if empty.
-func (q *PendingQueue) Pick() *PendingRequest {
+// Pick removes and returns the highest-priority request. Priority is computed
+// on-the-fly by fn. Ties broken by EnqueueTime (oldest first).
+func (q *PendingQueue) Pick(fn func(*PendingRequest) int) *PendingRequest {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -78,9 +76,10 @@ func (q *PendingQueue) Pick() *PendingRequest {
 	bestPri := math.MaxInt32
 
 	for _, req := range q.requests {
-		if best == nil || req.Priority < bestPri ||
-			(req.Priority == bestPri && req.EnqueueTime.Before(best.EnqueueTime)) {
-			bestPri = req.Priority
+		pri := fn(req)
+		if best == nil || pri < bestPri ||
+			(pri == bestPri && req.EnqueueTime.Before(best.EnqueueTime)) {
+			bestPri = pri
 			best = req
 		}
 	}
@@ -107,12 +106,14 @@ func (q *PendingQueue) IsFull() bool {
 }
 
 func (q *PendingQueue) Size() int {
+	if q == nil {
+		return 0
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.requests)
 }
 
-// RemoveBySession removes a request by SessionID (best-effort, for cancel).
 func (q *PendingQueue) RemoveBySession(sessionID string) {
 	if sessionID == "" {
 		return
@@ -127,3 +128,51 @@ func (q *PendingQueue) RemoveBySession(sessionID string) {
 	}
 }
 
+// EvictLowestK finds and removes the request with the smallest K (least progress).
+// Among same-K requests, picks the one with the shortest wait (most recent EnqueueTime).
+// Returns the evicted request, or nil if the queue is empty.
+func (q *PendingQueue) EvictLowestK() *PendingRequest {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if len(q.requests) == 0 {
+		return nil
+	}
+
+	// Scan from most-recently-enqueued to find the smallest K.
+	// If we hit K=1, stop early (can't go lower).
+	var victim *PendingRequest
+	for _, req := range q.requests {
+		if victim == nil {
+			victim = req
+			continue
+		}
+		if req.K < victim.K {
+			victim = req
+			if req.K <= 1 {
+				break
+			}
+		} else if req.K == victim.K && req.EnqueueTime.After(victim.EnqueueTime) {
+			// Same K: prefer shorter wait (more recent enqueue)
+			victim = req
+		}
+	}
+
+	if victim != nil {
+		delete(q.requests, victim.ReqID)
+	}
+	return victim
+}
+
+// DrainAll removes and returns all pending requests (for instance-unregister cleanup).
+func (q *PendingQueue) DrainAll() []*PendingRequest {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	result := make([]*PendingRequest, 0, len(q.requests))
+	for _, req := range q.requests {
+		result = append(result, req)
+	}
+	q.requests = make(map[string]*PendingRequest)
+	return result
+}

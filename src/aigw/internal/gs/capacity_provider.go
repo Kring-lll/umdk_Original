@@ -1,72 +1,100 @@
 /*
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
- * Description: CapacityProvider — tracks per-instance in-flight request count.
+ * Description: CapacityProvider — model-level in-flight tracking for ERR scheduling.
  * Create: 2026-08-25
  */
 
 package gs
 
 import (
-	"sync"
 	"sync/atomic"
 
 	"huawei.com/aigw/pkg/log"
 )
 
-// CapacityProvider tracks instance capacity for ERR scheduling.
-// batchSize is the per-instance max concurrency.
+// CapacityProvider tracks model-level capacity for ERR scheduling.
+// totalSlots = instanceCount() * batchSize, where instanceCount reads the
+// live instance pool. inFlight is an atomic counter incremented on dispatch
+// and decremented on completion. FreeSlots may go negative after over-subscription.
 type CapacityProvider struct {
-	mu        sync.Mutex
-	batchSize int
-	inFlight  map[string]*int32
+	batchSize     int
+	instanceCount func() int
+	inFlight      atomic.Int32
 }
 
-func NewCapacityProvider(batchSize int) *CapacityProvider {
+func NewCapacityProvider(batchSize int, instanceCount func() int) *CapacityProvider {
+	if instanceCount == nil {
+		instanceCount = func() int { return 0 }
+	}
 	return &CapacityProvider{
-		batchSize: batchSize,
-		inFlight:  make(map[string]*int32),
+		batchSize:     batchSize,
+		instanceCount: instanceCount,
 	}
 }
 
-func (c *CapacityProvider) getOrCreateCounter(insURL string) *int32 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if counter, ok := c.inFlight[insURL]; ok {
-		return counter
+func (c *CapacityProvider) TotalSlots() int {
+	if c == nil {
+		return 0
 	}
-	var v int32
-	counter := &v
-	c.inFlight[insURL] = counter
-	return counter
+	return c.instanceCount() * c.batchSize
 }
 
-// HasFreeSlot returns true if the instance has capacity for another request.
-func (c *CapacityProvider) HasFreeSlot(insURL string) bool {
-	counter := c.getOrCreateCounter(insURL)
-	current := atomic.LoadInt32(counter)
-	return int(current) < c.batchSize
+func (c *CapacityProvider) HasCapacity() bool {
+	if c == nil {
+		return false
+	}
+	return c.inFlight.Load() < int32(c.TotalSlots())
 }
 
-// OnDispatched is called when a request is dispatched to an instance.
-func (c *CapacityProvider) OnDispatched(insURL string) {
-	counter := c.getOrCreateCounter(insURL)
-	atomic.AddInt32(counter, 1)
+func (c *CapacityProvider) FreeSlots() int {
+	if c == nil {
+		return 0
+	}
+	return c.TotalSlots() - int(c.inFlight.Load())
 }
 
-// OnCompleted is called when a request completes on an instance.
-// Never drives the counter below 0: a spurious duplicate completion is a no-op.
-func (c *CapacityProvider) OnCompleted(insURL string) {
-	counter := c.getOrCreateCounter(insURL)
+func (c *CapacityProvider) OnDispatched() {
+	if c == nil {
+		return
+	}
+	c.inFlight.Add(1)
+}
+
+func (c *CapacityProvider) InFlight() int32 {
+	if c == nil {
+		return 0
+	}
+	return c.inFlight.Load()
+}
+
+// OnCompleted decrements the in-flight counter. Never goes below 0.
+func (c *CapacityProvider) OnCompleted() {
+	if c == nil {
+		return
+	}
 	for {
-		cur := atomic.LoadInt32(counter)
+		cur := c.inFlight.Load()
 		if cur <= 0 {
-			log.Warn().Msgf("[Capacity] OnCompleted no-op on %s: inFlight already 0", insURL)
+			log.Warn().Msgf("[Capacity] OnCompleted no-op: inFlight already 0")
 			return
 		}
-		if atomic.CompareAndSwapInt32(counter, cur, cur-1) {
+		if c.inFlight.CompareAndSwap(cur, cur-1) {
 			return
 		}
 	}
 }
 
+func (c *CapacityProvider) InstanceCount() int {
+	if c == nil || c.instanceCount == nil {
+		return 0
+	}
+	return c.instanceCount()
+}
+
+func (c *CapacityProvider) BatchSize() int {
+	if c == nil {
+		return 0
+	}
+	return c.batchSize
+}

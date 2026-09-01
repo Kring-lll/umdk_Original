@@ -12,6 +12,7 @@ import "C"
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -503,11 +504,14 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 
 	suggestion, err := s.manager.GetSuggestion(in)
 	if err != nil {
+		statusCode := http.StatusInternalServerError
+		if errors.Is(err, gs.ErrQueueFull) || errors.Is(err, gs.ErrNoInstance) {
+			statusCode = http.StatusServiceUnavailable
+		}
 		log.Error().Msgf("Failed to get scheduling suggestion: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to get scheduling suggestion: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to get scheduling suggestion: %v", err), statusCode)
 		if sessionID != "" {
-			// No suggestion -> request was never dispatched -> nothing to free.
-			s.manager.ErrOnCancel(model, sessionID, "")
+			s.manager.ErrOnCancel(model, sessionID, in.UUID, "", "")
 		}
 		return
 	}
@@ -519,8 +523,7 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 	if targetURL == "" {
 		http.Error(w, "No available worker instance", http.StatusServiceUnavailable)
 		if sessionID != "" {
-			// suggestion exists but has no instance URL (TargetPrefillUrl == "").
-			s.manager.ErrOnCancel(model, sessionID, suggestion.TargetPrefillUrl)
+			s.manager.ErrOnCancel(model, sessionID, in.UUID, suggestion.TargetPrefillUrl, suggestion.TargetDecodeUrl)
 		}
 		return
 	}
@@ -554,8 +557,7 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		log.Error().Msgf("Forward request failed: %v", err)
 		http.Error(w, fmt.Sprintf("Forward request failed: %v", err), http.StatusBadGateway)
 		if sessionID != "" {
-			// Request was dispatched (OnDispatched already counted it); free its slot.
-			s.manager.ErrOnCancel(model, sessionID, suggestion.TargetPrefillUrl)
+			s.manager.ErrOnCancel(model, sessionID, in.UUID, suggestion.TargetPrefillUrl, suggestion.TargetDecodeUrl)
 		}
 		return
 	}
@@ -612,7 +614,7 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		}
 		// Free the instance slot this request used (== OnDispatched's key, since
 		// suggestion.TargetPrefillUrl == result.PrefillUrl). HTTP-level, not session.
-		s.manager.ErrOnResponse(model, sessionID, suggestion.TargetPrefillUrl, finishReason)
+		s.manager.ErrOnResponse(model, sessionID, in.UUID, suggestion.TargetPrefillUrl, suggestion.TargetDecodeUrl, finishReason)
 	}
 }
 

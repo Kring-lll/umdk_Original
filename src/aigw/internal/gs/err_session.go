@@ -14,21 +14,21 @@ import (
 	"huawei.com/aigw/pkg/log"
 )
 
-// ErrSessionState tracks the iteration count and lifecycle of a single user input.
+// ErrSessionState tracks the iteration count and lifecycle of a single session.
 type ErrSessionState struct {
 	SessionID      string
 	Iteration      int
 	Model          string
-	Category       string // classified at OnRequest, used at OnFinish
+	Category       string
 	LastActiveTime time.Time
 	idleTimer      *time.Timer
 }
 
-// SessionTracker manages session state for all active and completed sessions.
+// SessionTracker manages per-session state for ERR scheduling.
 type SessionTracker struct {
 	mu              sync.RWMutex
-	taskIdleTimeout time.Duration // post-stop idle cleanup (default 60s)
-	sessionTimeout  time.Duration // post-tool_calls idle cleanup (default 660s)
+	taskIdleTimeout time.Duration
+	sessionTimeout  time.Duration
 	sessions        map[string]*ErrSessionState
 }
 
@@ -40,8 +40,7 @@ func NewSessionTracker(taskIdleTimeout, sessionTimeout time.Duration) *SessionTr
 	}
 }
 
-// armIdleTimer arms the per-session idle-cleanup timer. Caller must hold t.mu.
-func (t *SessionTracker) armIdleTimer(s *ErrSessionState, timeout time.Duration) {
+func (t *SessionTracker) armIdleTimer(s *ErrSessionState, timeout time.Duration, isLong bool) {
 	if timeout == 0 || s == nil {
 		return
 	}
@@ -50,7 +49,7 @@ func (t *SessionTracker) armIdleTimer(s *ErrSessionState, timeout time.Duration)
 	}
 	sessionID := s.SessionID
 	s.idleTimer = time.AfterFunc(timeout, func() {
-		t.cleanupIdleSession(sessionID, timeout)
+		t.cleanupIdleSession(sessionID, timeout, isLong)
 	})
 }
 
@@ -61,7 +60,6 @@ func (t *SessionTracker) cancelIdleTimer(s *ErrSessionState) {
 	}
 }
 
-// RestartIdleTimer arms the long idle timer after tool_calls/other finish_reason.
 func (t *SessionTracker) RestartIdleTimer(sessionID string) {
 	if sessionID == "" || t.sessionTimeout == 0 {
 		return
@@ -70,12 +68,11 @@ func (t *SessionTracker) RestartIdleTimer(sessionID string) {
 	defer t.mu.Unlock()
 	if s, ok := t.sessions[sessionID]; ok {
 		s.LastActiveTime = time.Now()
-		t.armIdleTimer(s, t.sessionTimeout)
+		t.armIdleTimer(s, t.sessionTimeout, true)
 	}
 }
 
-// cleanupIdleSession removes the session if it has been inactive for >= timeout.
-func (t *SessionTracker) cleanupIdleSession(sessionID string, timeout time.Duration) {
+func (t *SessionTracker) cleanupIdleSession(sessionID string, timeout time.Duration, isLong bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	s, ok := t.sessions[sessionID]
@@ -89,10 +86,12 @@ func (t *SessionTracker) cleanupIdleSession(sessionID string, timeout time.Durat
 		s.idleTimer.Stop()
 	}
 	delete(t.sessions, sessionID)
+	if isLong {
+		log.Warn().Msgf("[ERRSession] session %s idle-cleanup after %v (agent likely disconnected after tool_calls)", sessionID, timeout)
+	}
 }
 
-// OnRequest increments the iteration counter and returns the new k value.
-// First request for a session returns k=1.
+// OnRequest increments the iteration counter and returns k. First request returns k=1.
 func (t *SessionTracker) OnRequest(sessionID, model string) int {
 	if sessionID == "" {
 		return 1
@@ -120,6 +119,18 @@ func (t *SessionTracker) OnRequest(sessionID, model string) int {
 	return s.Iteration
 }
 
+func (t *SessionTracker) GetIteration(sessionID string) int {
+	if sessionID == "" {
+		return 0
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if s, ok := t.sessions[sessionID]; ok {
+		return s.Iteration
+	}
+	return 0
+}
+
 // OnFinish returns the total step count and arms the short idle timer.
 func (t *SessionTracker) OnFinish(sessionID string) int {
 	if sessionID == "" {
@@ -135,11 +146,11 @@ func (t *SessionTracker) OnFinish(sessionID string) int {
 	}
 
 	s.LastActiveTime = time.Now()
-	t.armIdleTimer(s, t.taskIdleTimeout)
+	t.armIdleTimer(s, t.taskIdleTimeout, false)
 	return s.Iteration
 }
 
-// OnCancel removes the session. Step count is NOT recorded (unreliable).
+// OnCancel removes the session without recording its step count.
 func (t *SessionTracker) OnCancel(sessionID string) {
 	if sessionID == "" {
 		return
