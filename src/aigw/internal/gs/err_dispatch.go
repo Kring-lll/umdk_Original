@@ -45,7 +45,7 @@ func (m *GlobalSchedulerManager) dispatchErr(msg *ControlMessage) {
 		cat = m.errScheduler.SessionCategory(sessionID)
 	}
 
-	log.Debug().Msgf("[ERR] recv: session=%s k=%d cat=%s queue=%d free=%d",
+	log.Debug().Msgf("[ERR] recv: session=%s k=%d cat=%s curQueue=%d free=%d",
 		sessionID, k, cat, m.pendingQueue.Size(), m.capacityProvider.FreeSlots())
 
 	m.dispatchMu.Lock()
