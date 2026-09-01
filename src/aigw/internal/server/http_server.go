@@ -326,11 +326,7 @@ func extractHeaders(r *http.Request) map[string]string {
 		"X-Correlation-Id",
 		"X-Request-Id",
 		"X-Trace-Id",
-		// Forwarded verbatim to the vLLM render endpoint (prefix_cache_lb.go)
-		// so a vLLM started with --api-key can be authenticated without
-		// storing a secret in config. Not read by the consistent-hash path
-		// (hash_key.go only consults session headers above), so it neither
-		// pollutes the hash key nor reaches logs.
+		// Forwarded to the vLLM render endpoint (prefix_cache_lb.go).
 		"Authorization",
 	}
 	headers := make(map[string]string)

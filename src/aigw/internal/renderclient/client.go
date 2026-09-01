@@ -47,14 +47,8 @@ func NewRenderClient(config RenderClientConfig, model, baseURL string) *RenderCl
 	}
 }
 
-// withAuth injects the per-request Authorization value into the render
-// request. authHeader is the verbatim inbound Authorization header value
-// (e.g. "Bearer sk-..."); it is forwarded as-is so the scheme chosen by the
-// caller is preserved, letting a vLLM started with --api-key be authenticated
-// without storing a secret in config. When authHeader is empty (the inbound
-// request carried no Authorization), no header is set — preserving backward
-// compatibility with unauthenticated backends, which ignore the header
-// anyway. The value is not logged or persisted; it only lives for this call.
+// withAuth forwards the inbound Authorization header verbatim to the render
+// endpoint (vLLM --api-key auth without a secret in config). Empty = no header.
 func (c *RenderClient) withAuth(req *http.Request, authHeader string) {
 	if authHeader == "" {
 		return
@@ -267,7 +261,7 @@ func (c *RenderClient) IsHealthy(ctx context.Context) bool {
 		return false
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	c.withAuth(httpReq, "") // health probe has no inbound request to source auth from
+	c.withAuth(httpReq, "") // health probe: no inbound auth to forward
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {

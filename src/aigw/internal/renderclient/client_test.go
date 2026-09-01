@@ -64,8 +64,7 @@ func TestReadSSEResponse_EmptyBody(t *testing.T) {
 	}
 }
 
-// TestWithAuth_Forwards verifies that a non-empty auth value is forwarded
-// verbatim (no scheme rewrite) to the render endpoint.
+// TestWithAuth_Forwards: non-empty auth value is forwarded verbatim.
 func TestWithAuth_Forwards(t *testing.T) {
 	c := &RenderClient{}
 	req := httptest.NewRequest("POST", "http://x", nil)
@@ -75,10 +74,7 @@ func TestWithAuth_Forwards(t *testing.T) {
 	}
 }
 
-// TestWithAuth_EmptySkips verifies that when the inbound request carried no
-// Authorization (empty value), no header is sent — preserving backward
-// compatibility with unauthenticated backends (which ignore the header
-// anyway, so sending it is harmless, but we still skip it for cleanliness).
+// TestWithAuth_EmptySkips: empty auth value sends no header.
 func TestWithAuth_EmptySkips(t *testing.T) {
 	c := &RenderClient{}
 	req := httptest.NewRequest("POST", "http://x", nil)
@@ -88,9 +84,7 @@ func TestWithAuth_EmptySkips(t *testing.T) {
 	}
 }
 
-// TestRenderChat_SendsAuth end-to-end: the render client must forward the
-// supplied Authorization value on the wire and reach a 200 handler (proving
-// the vLLM --api-key check passes without a 401).
+// TestRenderChat_SendsAuth: forwarded Authorization reaches a 200 handler.
 func TestRenderChat_SendsAuth(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer sk-test" {

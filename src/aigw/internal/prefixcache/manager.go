@@ -28,14 +28,10 @@ type PrefixCacheManager interface {
 	RemoveInstance(instanceName string) error
 
 	// Tokenize tokenizes messages via the render (chat-template) domain.
-	// authHeader is the verbatim inbound Authorization header value forwarded
-	// to the vLLM render endpoint (so a vLLM started with --api-key can be
-	// authenticated without storing a secret in config); pass "" when there is
-	// no inbound request to source it from (then no auth header is sent).
+	// authHeader is forwarded to the render endpoint (vLLM --api-key); "" = none.
 	Tokenize(ctx context.Context, modelName string, messages []ChatMessage, authHeader string) ([]int64, error)
 
-	// TokenizePrompt tokenizes a raw prompt (content domain). authHeader has
-	// the same semantics as Tokenize.
+	// TokenizePrompt tokenizes a raw prompt (content domain).
 	TokenizePrompt(ctx context.Context, modelName, prompt, authHeader string) ([]int64, error)
 
 	GetStats() PrefixCacheStats

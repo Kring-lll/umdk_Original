@@ -88,10 +88,7 @@ type KVEventsManager struct {
 	wg     sync.WaitGroup
 }
 
-// NewKVEventsManager creates a manager that is active on construction.
-// kvevents is driven solely by the prefixCache algorithm selection — selecting
-// prefixCache creates the manager and subscribes to instances, so no separate
-// enable flag or env var (#900) is needed.
+// NewKVEventsManager creates a manager active on construction.
 func NewKVEventsManager(handler EventHandler, config KVEventsManagerConfig) *KVEventsManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	log.Info().Msg("[kvevents] KV Events support is enabled")
@@ -106,9 +103,7 @@ func NewKVEventsManager(handler EventHandler, config KVEventsManagerConfig) *KVE
 	}
 }
 
-// IsEnabled reports whether the manager is active. A constructed manager is
-// always active; the method is retained as a non-nil convenience check for
-// callers (e.g. prefixcache.Start) that gate on it.
+// IsEnabled reports whether the manager is active (always true once constructed).
 func (m *KVEventsManager) IsEnabled() bool {
 	return m != nil
 }

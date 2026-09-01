@@ -43,18 +43,11 @@ func newPrefixCacheLB(metricProvider MetricProvider, params *AlgorithmParams) (*
 
 	pcConfig := prefixcache.DefaultConfig()
 	pcConfig.Enabled = true
-	// Drive prefix block size from the per-model blockSize (params.BlockSize,
-	// = GlobalSchedulerConfig.BlockSize) so it automatically aligns with the
-	// vLLM --block-size the user already configures, without requiring the
-	// AIGW_PREFIX_CACHE_BLOCK_SIZE env var. The env var still wins when set
-	// (DefaultConfig applies it), preserving the escape hatch. See #900.
+	// Align block size with the per-model blockSize (vLLM --block-size). env still wins.
 	if params.BlockSize > 0 {
 		pcConfig.BlockSize = params.BlockSize
 	}
 
-	// Selecting the prefixCache algorithm implies the KV-events subscription
-	// that populates the prefix table. kvevents is active on construction, so
-	// no separate enable flag or env var is needed (#900).
 	kveventsConfig := kvevents.DefaultKVEventsManagerConfig()
 	var extraHandlers []kvevents.EventHandler
 	if params.KvcSessionMgr != nil {
@@ -140,10 +133,7 @@ func (lb *prefixCacheLoadBalancer) schedule(request *ScheduleRequestMsg, options
 	if lb.renderClient != nil && request.Request != nil {
 		log.Debug().Msg("[prefixCache] branch: using render client for tokenization")
 		messages := lb.buildChatMessages(request.Request)
-		// Forward the inbound Authorization header verbatim to the render
-		// endpoint so a vLLM started with --api-key can be authenticated
-		// without storing a secret in config. Empty (no inbound Authorization)
-		// => the render client sends no auth header. See renderclient.withAuth.
+		// Forward the inbound Authorization header to the render endpoint.
 		authHeader := request.Headers["Authorization"]
 		tokenIDs, err = lb.prefixCacheMgr.Tokenize(context.Background(), modelName, messages, authHeader)
 		if err != nil || len(tokenIDs) == 0 {

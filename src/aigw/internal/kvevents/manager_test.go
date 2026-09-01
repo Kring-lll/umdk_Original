@@ -11,9 +11,7 @@ import (
 	"time"
 )
 
-// TestNewKVEventsManager_ConstructedActive asserts that a manager is active on
-// construction — kvevents is driven solely by the prefixCache algorithm
-// selection, with no enable flag or env var (#900).
+// TestNewKVEventsManager_ConstructedActive: manager is active on construction.
 func TestNewKVEventsManager_ConstructedActive(t *testing.T) {
 	cfg := KVEventsManagerConfig{
 		EndpointTemplate: "tcp://{ip}:5557",
