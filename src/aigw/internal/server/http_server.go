@@ -138,6 +138,8 @@ func (s *HttpServer) registerRoutes(mx *http.ServeMux) {
 	mx.HandleFunc("/aigw/v1/health", s.health)
 	mx.HandleFunc("/aigw/v1/register-instance", s.serHmacMgr.WithHMAC(s.registerInstance))
 	mx.HandleFunc("/aigw/v1/unregister-instance", s.serHmacMgr.WithHMAC(s.unregisterInstance))
+	// Management-plane auto-register webhook (#897): model + instances in one call.
+	mx.HandleFunc("/aigw/v1/models/auto-register", s.serHmacMgr.WithHMAC(s.autoRegister))
 	mx.HandleFunc("/aigw/v1/openai/get-suggestion",
 		s.serHmacMgr.WithHMAC(s.serAesMgr.WithAesDecrypt(s.scheduleForOpenAi)))
 	mx.HandleFunc("/aigw/v1/stats", s.serHmacMgr.WithHMAC(s.stats))
@@ -304,6 +306,43 @@ func (s *HttpServer) unregisterInstance(w http.ResponseWriter, r *http.Request) 
 
 	w.WriteHeader(http.StatusOK)
 	log.Info().Msgf("unregister instance (%v:%v) successfully, model %v", req.IP, req.Port, req.Model)
+}
+
+// autoRegister is the management-plane webhook: when the management plane adds
+// a model it calls this endpoint so AIGW auto-registers the model (and, unless
+// ZK drives instance discovery, its instances), removing the need for users
+// to curl /aigw/v1/register-instance manually (#897). Unlike
+// registerInstance this stays available when ZK is enabled — ZK owns
+// instance discovery, but the model definition still comes through here.
+func (s *HttpServer) autoRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.Body == nil || r.ContentLength == 0 {
+		err := fmt.Errorf("the body is None")
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		log.Error().Msgf("failed to decode auto-register, err: %v", err)
+		return
+	}
+
+	var req base.AutoRegisterIn
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		log.Error().Msgf("failed to decode auto-register, err: %v", err)
+		return
+	}
+
+	log.Info().Msgf("start to auto-register model %v with %d instance(s)", req.Model, len(req.Instances))
+
+	if err := s.manager.AutoRegister(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Error().Msgf("failed to auto-register, err: %v", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	log.Info().Msgf("auto-register model %v successfully", req.Model)
 }
 
 func processMessages(messages []base.OpenAiMessage) string {

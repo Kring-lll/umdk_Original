@@ -630,6 +630,72 @@ func (manager *AigwManager) UnregisterModel(model string) error {
 	return nil
 }
 
+// AutoRegister handles the management-plane auto-register webhook (#897): it
+// registers the model (creating its GlobalSchedulerManager) and, unless ZK
+// service discovery is driving instance registration, each carried instance.
+//
+// When ZK is enabled, instances are expected to be discovered via ZK watches;
+// registering them here would duplicate that responsibility, so we skip
+// instance registration and only ensure the model exists. The model is
+// (re)registered so the management plane is the source of truth for model
+// config (blockSize, deploy policy, LB strategy).
+func (manager *AigwManager) AutoRegister(in *base.AutoRegisterIn) error {
+	if in == nil || in.Model == "" {
+		return fmt.Errorf("auto-register: model is empty")
+	}
+
+	gsCfg := &base.GlobalSchedulerConfig{
+		Model:                in.Model,
+		BlockSize:            in.BlockSize,
+		DeployPolicy:         in.DeployPolicy,
+		MaxTimeToFirstToken:  in.MaxTimeToFirstToken,
+		MaxTimeBetweenTokens: in.MaxTimeBetweenTokens,
+		TokenizeModelName:    in.TokenizeModelName,
+		LoadBalancer:         in.LoadBalancer,
+		InsConnectType:       "sse",
+	}
+	// Default the mixed LB to prefixCache when unset — the prefix-match
+	// feature is the primary consumer of this webhook. Callers may override
+	// by setting loadBalancer.mixed explicitly.
+	if gsCfg.LoadBalancer.Mixed == "" {
+		gsCfg.LoadBalancer.Mixed = "prefixCache"
+	}
+
+	if err := manager.RegisterModel(gsCfg); err != nil {
+		return fmt.Errorf("auto-register: register model %s failed: %w", in.Model, err)
+	}
+
+	if manager.IsEnableZK() {
+		log.Info().Msgf("auto-register: ZK enabled, skipping %d instance(s) for model %s "+
+			"(expected via ZK discovery)", len(in.Instances), in.Model)
+		return nil
+	}
+
+	var regErrs []string
+	for _, ins := range in.Instances {
+		regIn := &base.RegisterInstanceIn{
+			Name:    ins.Name,
+			Model:   in.Model,
+			IP:      ins.IP,
+			Port:    ins.Port,
+			Role:    ins.Role,
+			GroupID: ins.GroupID,
+			DpRank:  ins.DpRank,
+		}
+		if err := manager.RegisterInstance(regIn); err != nil {
+			regErrs = append(regErrs, fmt.Sprintf("%s: %v", ins.Name, err))
+			log.Error().Msgf("auto-register: register instance %s failed: %v", ins.Name, err)
+			continue
+		}
+		log.Info().Msgf("auto-register: instance %s registered for model %s", ins.Name, in.Model)
+	}
+	if len(regErrs) > 0 {
+		return fmt.Errorf("auto-register: model registered but %d/%d instance(s) failed: %s",
+			len(regErrs), len(in.Instances), strings.Join(regErrs, "; "))
+	}
+	return nil
+}
+
 // GetAgentRegistry returns the AgentRegistry (nil if KVC management is disabled).
 // HTTP agent lifecycle handlers (G1) use this to gate on ServiceMode + kvc.enabled.
 func (manager *AigwManager) GetAgentRegistry() agentregistry.Registry {

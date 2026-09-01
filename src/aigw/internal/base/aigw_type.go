@@ -46,6 +46,38 @@ type RegisterInstanceIn struct {
 	DpRank  int    `json:"dpRank"` // DP rank for data parallel routing
 }
 
+// AutoRegisterInstance is one inference instance carried by an auto-register
+// request from the management plane. It mirrors RegisterInstanceIn but is
+// nested under AutoRegisterIn, so the management plane can push a model's
+// instances together with the model definition in one call (#897).
+type AutoRegisterInstance struct {
+	Name    string `json:"name"`
+	IP      string `json:"instanceIp"`
+	Port    string `json:"port"`
+	Role    string `json:"role"`
+	GroupID string `json:"groupID"`
+	DpRank  int    `json:"dpRank"`
+}
+
+// AutoRegisterIn is the body of the management-plane auto-register webhook.
+// The management plane pushes this when a model is added so AIGW auto-registers
+// the model (GlobalSchedulerManager) and its instances without users having
+// to curl /aigw/v1/register-instance manually (#897).
+//
+// Model is the GlobalSchedulerConfig fields needed to create the per-model GS.
+// The load balancer defaults to prefixCache when empty (the prefix-match
+// feature is the primary consumer of this webhook).
+type AutoRegisterIn struct {
+	Model                string                 `json:"model"`
+	BlockSize            int                    `json:"blockSize"`
+	DeployPolicy         string                 `json:"deployPolicy"`
+	MaxTimeToFirstToken  float64                `json:"maxTimeToFirstToken"`
+	MaxTimeBetweenTokens float64                `json:"maxTimeBetweenTokens"`
+	TokenizeModelName    string                 `json:"tokenizeModelName"`
+	LoadBalancer         LoadBalancerConfig     `json:"loadBalancer"`
+	Instances            []AutoRegisterInstance `json:"instances"`
+}
+
 // UnregisterInstanceIn specified the input parameters for UnregisterInstance.
 type UnregisterInstanceIn struct {
 	Model  string `json:"model"`
