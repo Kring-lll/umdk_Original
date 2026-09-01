@@ -51,6 +51,16 @@ type RenderClientConfig struct {
 	MaxRetries       int    `json:"maxRetries"`
 	ConnPoolSize     int    `json:"connPoolSize"`
 	BaseURL          string `json:"baseURL"`
+	// APIKey authenticates render requests against a vLLM backend that has
+	// --api-key configured. Empty (default) sends no auth header, preserving
+	// backward compatibility with unauthenticated backends.
+	APIKey string `json:"apiKey,omitempty"`
+	// AuthHeaderName overrides the default "Authorization" header. When set,
+	// the key is sent under this header name instead. Matches apipool.Adapter.
+	AuthHeaderName string `json:"authHeaderName,omitempty"`
+	// AuthHeaderPrefix prepends a scheme prefix to the key (e.g. "Bearer").
+	// Only used when AuthHeaderName is set. Matches apipool.Adapter.
+	AuthHeaderPrefix string `json:"authHeaderPrefix,omitempty"`
 }
 
 func DefaultRenderClientConfig() RenderClientConfig {

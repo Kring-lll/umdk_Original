@@ -8,7 +8,10 @@ package renderclient
 
 import (
 	"bytes"
+	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -58,5 +61,69 @@ func TestReadSSEResponse_EmptyBody(t *testing.T) {
 	}
 	if err != io.EOF {
 		t.Fatalf("expected io.EOF for empty body, got %v", err)
+	}
+}
+
+// TestWithAuth_NoKey pins backward compatibility: with no APIKey configured the
+// client must not touch the Authorization header, so unauthenticated vLLM
+// backends keep working.
+func TestWithAuth_NoKey(t *testing.T) {
+	c := &RenderClient{}
+	req := httptest.NewRequest("POST", "http://x", nil)
+	c.withAuth(req)
+	if got := req.Header.Get("Authorization"); got != "" {
+		t.Fatalf("expected no Authorization header, got %q", got)
+	}
+}
+
+// TestWithAuth_BearerDefault verifies that a configured key is sent as
+// "Authorization: Bearer <key>" by default (vLLM --api-key convention).
+func TestWithAuth_BearerDefault(t *testing.T) {
+	c := &RenderClient{config: RenderClientConfig{APIKey: "sk-test"}}
+	req := httptest.NewRequest("POST", "http://x", nil)
+	c.withAuth(req)
+	if got := req.Header.Get("Authorization"); got != "Bearer sk-test" {
+		t.Fatalf("expected 'Bearer sk-test', got %q", got)
+	}
+}
+
+// TestWithAuth_CustomHeader verifies a custom header name + prefix, mirroring
+// apipool.Adapter.InjectAuth (e.g. providers that use "api-key: <key>").
+func TestWithAuth_CustomHeader(t *testing.T) {
+	c := &RenderClient{config: RenderClientConfig{
+		APIKey:           "sk-test",
+		AuthHeaderName:   "api-key",
+		AuthHeaderPrefix: "",
+	}}
+	req := httptest.NewRequest("POST", "http://x", nil)
+	c.withAuth(req)
+	if got := req.Header.Get("api-key"); got != "sk-test" {
+		t.Fatalf("expected api-key header 'sk-test', got %q", got)
+	}
+	if got := req.Header.Get("Authorization"); got != "" {
+		t.Fatalf("expected no Authorization header when custom header set, got %q", got)
+	}
+}
+
+// TestRenderChat_SendsAuth end-to-end: a render client with an API key must
+// reach a 200 handler without 401, proving the key is sent on the wire.
+func TestRenderChat_SendsAuth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer sk-test" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token_ids":[1,2,3]}`))
+	}))
+	defer srv.Close()
+
+	c := NewRenderClient(RenderClientConfig{APIKey: "sk-test"}, "m", srv.URL)
+	ids, err := c.RenderChat(context.Background(), "m", []ChatMessage{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("RenderChat failed: %v", err)
+	}
+	if len(ids) != 3 {
+		t.Fatalf("expected 3 tokens, got %v", ids)
 	}
 }

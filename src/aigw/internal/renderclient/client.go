@@ -47,6 +47,25 @@ func NewRenderClient(config RenderClientConfig, model, baseURL string) *RenderCl
 	}
 }
 
+// withAuth injects the configured API key into the request. When APIKey is
+// empty it is a no-op (backward compatible with unauthenticated vLLM). The
+// header convention mirrors apipool.Adapter.InjectAuth: AuthHeaderName empty
+// -> "Authorization: Bearer <key>"; otherwise -> <AuthHeaderName>: [<prefix> ]<key>.
+func (c *RenderClient) withAuth(req *http.Request) {
+	if c.config.APIKey == "" {
+		return
+	}
+	if c.config.AuthHeaderName != "" {
+		val := c.config.APIKey
+		if c.config.AuthHeaderPrefix != "" {
+			val = c.config.AuthHeaderPrefix + " " + c.config.APIKey
+		}
+		req.Header.Set(c.config.AuthHeaderName, val)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+}
+
 func (c *RenderClient) RenderChat(ctx context.Context, model string, messages []ChatMessage) ([]int64, error) {
 	req := RenderChatRequest{
 		Model:    model,
@@ -64,6 +83,7 @@ func (c *RenderClient) RenderChat(ctx context.Context, model string, messages []
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	c.withAuth(httpReq)
 
 	resp, err := c.doRequest(httpReq)
 	if err != nil {
@@ -112,6 +132,7 @@ func (c *RenderClient) TokenizePrompt(ctx context.Context, model, prompt string)
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	c.withAuth(httpReq)
 
 	resp, err := c.doRequest(httpReq)
 	if err != nil {
@@ -155,6 +176,7 @@ func (c *RenderClient) RenderCompletion(ctx context.Context, model string, promp
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	c.withAuth(httpReq)
 
 	resp, err := c.doRequest(httpReq)
 	if err != nil {
@@ -249,6 +271,7 @@ func (c *RenderClient) IsHealthy(ctx context.Context) bool {
 		return false
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	c.withAuth(httpReq)
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
