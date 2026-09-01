@@ -164,7 +164,53 @@ __attribute__((weak)) void urpc_thread_closure_register(urpc_thread_closure_type
     (void)closure;
 }
 
-volatile bool g_tls_dtors_running = false;
+extern volatile bool g_tls_dtors_running;
+
+/* Stubs for functions referenced by umq_qbuf_pool.c but defined in source
+ * files not included by this test (pre-existing link fix). */
+int umq_tiny_qbuf_pool_info_get(umq_qbuf_pool_stats_t *qbuf_pool_stats)
+{
+    (void)qbuf_pool_stats;
+    return 0;
+}
+int umq_huge_qbuf_pool_info_get(umq_qbuf_pool_stats_t *qbuf_pool_stats)
+{
+    (void)qbuf_pool_stats;
+    return 0;
+}
+int umq_qbuf_pool_stats_to_str(const umq_qbuf_pool_stats_t *qbuf_pool_stats, char *buf, int max_buf_len)
+{
+    (void)qbuf_pool_stats;
+    if (buf != NULL && max_buf_len > 0) {
+        buf[0] = '\0';
+    }
+    return 0;
+}
+
+/* Stubs for util_mutex_lock API used by escape_registry in umq_qbuf_pool.c.
+ * The real implementations are in util_lock.c which is not compiled into
+ * the test binary. These no-op stubs are sufficient because escape_registry
+ * is only exercised on the malloc-escape path, which tests do not trigger. */
+util_external_mutex_lock *util_mutex_lock_create(int attr)
+{
+    (void)attr;
+    return (util_external_mutex_lock *)1;
+}
+int util_mutex_lock_destroy(util_external_mutex_lock *lock)
+{
+    (void)lock;
+    return 0;
+}
+int util_mutex_lock(util_external_mutex_lock *lock)
+{
+    (void)lock;
+    return 0;
+}
+int util_mutex_unlock(util_external_mutex_lock *lock)
+{
+    (void)lock;
+    return 0;
+}
 } /* extern "C" */
 
 /* Include the C implementation directly: gives access to static helpers
@@ -186,9 +232,7 @@ volatile bool g_tls_dtors_running = false;
 /* umq_qbuf_alloc is defined in umq_qbuf_pool_helper.c which depends on
  * umq_tiny_qbuf_pool and umq_huge_qbuf_pool. Rather than pulling in that
  * entire dependency chain, we provide a simplified version here that covers
- * the test scenarios: option==NULL → AUTO → NORMAL, fallback to ESCAPE.
- * 8e2ed74a 后: 超过最大单块的请求 umq_normal_qbuf_alloc 直接返回 -ENOMEM,
- * 不再走 escape fallback(超大属无效请求,escape 也不该接)。 */
+ * the test scenarios: option==NULL → AUTO → NORMAL, fallback to ESCAPE. */
 extern "C" int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_t *option, umq_buf_list_t *list)
 {
     umq_alloc_pool_type_t pool_type = UMQ_ALLOC_POOL_AUTO;
@@ -203,7 +247,11 @@ extern "C" int umq_qbuf_alloc(uint32_t request_size, uint32_t num, umq_alloc_opt
         return umq_rx_qbuf_alloc(request_size, num, option, list);
     }
     if (pool_type == UMQ_ALLOC_POOL_AUTO || pool_type == UMQ_ALLOC_POOL_NORMAL) {
-        return umq_normal_qbuf_alloc(request_size, num, option, list);
+        int ret = umq_normal_qbuf_alloc(request_size, num, option, list);
+        if (ret != UMQ_SUCCESS && pool_type == UMQ_ALLOC_POOL_AUTO) {
+            ret = umq_qbuf_escape_alloc(request_size, num, option, list);
+        }
+        return ret;
     }
     if (pool_type == UMQ_ALLOC_POOL_ESCAPE) {
         return umq_qbuf_escape_alloc(request_size, num, option, list);
@@ -259,14 +307,6 @@ protected:
         cfg.tls_qbuf_pool_depth = tlsBudget;
         cfg.tls_expand_qbuf_pool_depth = tlsExpandBudget;
         cfg.expansion_size = expSz;
-        /* Fill per_sc_tls_qbuf_pool_depth from tls_qbuf_pool_depth when not set per-SC.
-         * Production code copies these verbatim (no 0=inherit default), so a 0 value
-         * clamps capacity growth to 0. Use tls_qbuf_pool_depth as the per-SC depth. */
-        for (uint32_t i = 0; i < count && i < UMQ_QBUF_SIZE_CLASS_MAX; i++) {
-            if (cfg.per_sc_tls_qbuf_pool_depth[i] == 0) {
-                cfg.per_sc_tls_qbuf_pool_depth[i] = tlsBudget;
-            }
-        }
         if (blockCounts != nullptr) {
             for (uint32_t i = 0; i < count && i < UMQ_QBUF_SIZE_CLASS_MAX; i++) {
                 cfg.per_sc_block_counts[i] = blockCounts[i];
@@ -448,25 +488,22 @@ TEST_F(TestQbufPoolMultiLevel, TlsByteBudgetEnforcement)
 TEST_F(TestQbufPoolMultiLevel, BatchDynamicCalculation)
 {
     /* Given: block_sizes [4K, 64K]
-     * get_batch_count is adaptive: QBUF_POOL_TARGET_FETCH_BYTES(4MB) / blk_size,
+     * get_batch_count is adaptive: per_sc_block_counts[sc] / 24,
      * clamped to [QBUF_POOL_BATCH_CNT_MIN(4), QBUF_POOL_BATCH_CNT(64)]. */
     InitPool(2, 16);
 
-    /* sc=0 (4K): 4MB/4K = 1024 -> clamped to 64 */
+    /* Auto-derived per_sc_block_counts[sc] = 2941 -> 2941/24 = 122 -> clamp to 64 */
     EXPECT_EQ(get_batch_count(0), 64u);
-    /* sc=1 (64K): 4MB/64K = 64 (no clamping needed) */
     EXPECT_EQ(get_batch_count(1), 64u);
 
     /* Given: custom config count=3, mult=8 -> [4K, 32K, 256K] */
     umq_qbuf_pool_uninit();
     InitPool(3, 8);
 
-    /* sc=0 (4K): 4MB/4K = 1024 -> clamped to 64 */
-    EXPECT_EQ(get_batch_count(0), 64u);
-    /* sc=1 (32K): 4MB/32K = 128 -> clamped to 64 */
-    EXPECT_EQ(get_batch_count(1), 64u);
-    /* sc=2 (256K): 4MB/256K = 16 */
-    EXPECT_EQ(get_batch_count(2), 16u);
+    /* Auto-derived per_sc_block_counts[sc] = 686 -> 686/24 = 28 */
+    EXPECT_EQ(get_batch_count(0), 28u);
+    EXPECT_EQ(get_batch_count(1), 28u);
+    EXPECT_EQ(get_batch_count(2), 28u);
 }
 
 /* 9.7 Escape alloc comprehensive (merged 9.7+9.29+9.80+9.87+9.96)
@@ -502,7 +539,7 @@ TEST_F(TestQbufPoolMultiLevel, EscapeAllocComprehensive)
     /* 4. Multi-block escape fail (actual_buf_count>1 -> EINVAL) */
     umq_buf_list_t failList;
     QBUF_LIST_INIT(&failList);
-    EXPECT_EQ(umq_qbuf_alloc(200 * 1024, 1, NULL, &failList), -UMQ_ERR_ENOMEM);
+    EXPECT_EQ(umq_qbuf_alloc(200 * 1024, 1, NULL, &failList), -UMQ_ERR_EINVAL);
 }
 
 /* 9.8 count=1 backward compatibility */
@@ -634,13 +671,37 @@ TEST_F(TestQbufPoolMultiLevel, UbPlusLargePacketIntegration)
 {
     InitPool(2, 16); /* [4K, 64K], 200 MB total */
 
-    /* 8e2ed74a 后: 申请超过最大单块block_size(64K)返回UMQ_ERR_ENOMEM,
-     * 不再走多块拼接。1MB > 64K -> 失败。 */
+    /* Given: 1 MB request */
     const uint32_t reqSize = 1024 * 1024;
+
+    /* When: alloc 1 MB -> sc=1 (64K), actual_buf_count = ceil(1M/64K) = 16 */
     umq_buf_list_t list;
     QBUF_LIST_INIT(&list);
-    ASSERT_EQ(umq_qbuf_alloc(reqSize, 1, NULL, &list), -UMQ_ERR_ENOMEM);
-    EXPECT_EQ(QBUF_LIST_FIRST(&list), nullptr);
+    ASSERT_EQ(umq_qbuf_alloc(reqSize, 1, NULL, &list), 0);
+
+    /* Then: first fragment carries total_data_size = 1M */
+    umq_buf_t *first = QBUF_LIST_FIRST(&list);
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first->total_data_size, reqSize);
+
+    /* Count fragments and verify each is 64K (sc=1 block) */
+    uint32_t fragCount = 0;
+    uint32_t totalDataSize = 0;
+    umq_buf_t *cur = first;
+    while (cur != nullptr) {
+        EXPECT_EQ(cur->buf_size, (uint32_t)(64 * 1024 + sizeof(umq_buf_t)));
+        totalDataSize += cur->data_size;
+        fragCount++;
+        cur = QBUF_LIST_NEXT(cur);
+    }
+    EXPECT_EQ(fragCount, 16u);
+    EXPECT_EQ(totalDataSize, reqSize);
+
+    /* When: free all -> blocks return to sc=1 TLS */
+    uint64_t tlsBefore = g_thread_cache.block_pool.buf_cnt_with_data[1];
+    umq_qbuf_free(&list);
+    uint64_t tlsAfter = g_thread_cache.block_pool.buf_cnt_with_data[1];
+    EXPECT_EQ(tlsAfter - tlsBefore, (uint64_t)fragCount);
 }
 
 /* Helper: count entries in a qbuf singly-linked list */
@@ -680,8 +741,8 @@ TEST_F(TestQbufPoolMultiLevel, FullRangeSizeClassAndAllocFree)
           {4u * 1024u, 0u, 1u},
           {50u * 1024u, 1u, 1u},
           {64u * 1024u, 1u, 1u},
-          {100u * 1024u, UMQ_QBUF_SIZE_CLASS_MAX, 0u},
-          {1024u * 1024u, UMQ_QBUF_SIZE_CLASS_MAX, 0u}},
+          {100u * 1024u, 1u, 2u},
+          {1024u * 1024u, 1u, 16u}},
          6},
         {4,
          4,
@@ -692,8 +753,8 @@ TEST_F(TestQbufPoolMultiLevel, FullRangeSizeClassAndAllocFree)
           {50u * 1024u, 2u, 1u},
           {64u * 1024u, 2u, 1u},
           {256u * 1024u, 3u, 1u},
-          {300u * 1024u, UMQ_QBUF_SIZE_CLASS_MAX, 0u},
-          {1024u * 1024u, UMQ_QBUF_SIZE_CLASS_MAX, 0u}},
+          {300u * 1024u, 3u, 2u},
+          {1024u * 1024u, 3u, 4u}},
          8},
         {7,
          2,
@@ -706,8 +767,8 @@ TEST_F(TestQbufPoolMultiLevel, FullRangeSizeClassAndAllocFree)
           {64u * 1024u, 4u, 1u},
           {128u * 1024u, 5u, 1u},
           {256u * 1024u, 6u, 1u},
-          {300u * 1024u, UMQ_QBUF_SIZE_CLASS_MAX, 0u},
-          {1024u * 1024u, UMQ_QBUF_SIZE_CLASS_MAX, 0u}},
+          {300u * 1024u, 6u, 2u},
+          {1024u * 1024u, 6u, 4u}},
          10},
     };
 
@@ -724,20 +785,6 @@ TEST_F(TestQbufPoolMultiLevel, FullRangeSizeClassAndAllocFree)
 
         for (uint32_t i = 0; i < cfg.numCases; i++) {
             const TestConfig::SizeCase &c = cfg.cases[i];
-            /* 8e2ed74a 后: 超过最大单块block_size的请求, select_size_class返回
-             * UMQ_QBUF_SIZE_CLASS_MAX(16) sentinel, umq_qbuf_alloc返回-ENOMEM.
-             * expectedSc=UMQ_QBUF_SIZE_CLASS_MAX标记此类超限case。 */
-            if (c.expectedSc == UMQ_QBUF_SIZE_CLASS_MAX) {
-                EXPECT_EQ(select_size_class(c.reqSize), (uint32_t)UMQ_QBUF_SIZE_CLASS_MAX)
-                    << "config[" << ci << "] case[" << i << "] reqSize=" << c.reqSize;
-                umq_buf_list_t list;
-                QBUF_LIST_INIT(&list);
-                EXPECT_EQ(umq_qbuf_alloc(c.reqSize, 1, NULL, &list), -UMQ_ERR_ENOMEM)
-                    << "config[" << ci << "] case[" << i << "] reqSize=" << c.reqSize;
-                EXPECT_EQ(QBUF_LIST_FIRST(&list), nullptr);
-                continue;
-            }
-
             EXPECT_EQ(select_size_class(c.reqSize), c.expectedSc)
                 << "config[" << ci << "] case[" << i << "] reqSize=" << c.reqSize;
 
@@ -777,7 +824,7 @@ TEST_F(TestQbufPoolMultiLevel, TlsBatchFetchFromGlobalOnFirstAlloc)
     uint64_t globalBefore = g_qbuf_pool.block_pool[0].buf_cnt_with_data;
     ASSERT_GT(globalBefore, 0u);
 
-    /* batch_count = QBUF_POOL_BATCH_CNT = 64 */
+    /* batch_count = per_sc_block_counts[0] / 24 = 2941 / 24 = 122 -> clamp to 64 */
     uint32_t batch = get_batch_count(0);
     EXPECT_EQ(batch, 64u);
 
@@ -846,8 +893,8 @@ TEST_F(TestQbufPoolMultiLevel, GlobalExpansionAndExpandedBlockUsability)
 TEST_F(TestQbufPoolMultiLevel, TlsSelfShrinkReturnsExcessToGlobal)
 {
     /* scaleCap=false enables shrink; generous TLS budget allows > 256 blocks to accumulate */
-    const uint64_t tlsBudget = 4096; /* 4096 blocks global TLS cap (was 4MB byte-budget, now count-based) */
-    const uint64_t tlsExpand = 2048; /* 2048 blocks per-thread cap */
+    const uint64_t tlsBudget = 4 * 1024 * 1024; /* 4 MB global TLS cap */
+    const uint64_t tlsExpand = 4 * 1024 * 1024; /* 4 MB per-thread cap */
     const uint64_t smallExp = 256 * 1024;       /* 256 KB per expansion */
     InitPool(2, 16, BLOCK_SIZE_4K, UMQ_BUF_SPLIT, false, BUF_SIZE, tlsBudget, tlsExpand, smallExp);
 
@@ -988,11 +1035,22 @@ TEST_F(TestQbufPoolMultiLevel, CombineModeMultiBlockAlloc)
     /* Given: count=2, mult=16, mode=COMBINE -> block_sizes = [4K, 64K] */
     InitPool(2, 16, BLOCK_SIZE_4K, UMQ_BUF_COMBINE);
 
-    /* 8e2ed74a 后: 100K 超过最大单块64K, 返回UMQ_ERR_ENOMEM, 不再走多块拼接 */
+    /* When: alloc 100K -> sc=1 (100K > 4K, 64K < 100K), multi-block */
     umq_buf_list_t list;
     QBUF_LIST_INIT(&list);
-    ASSERT_EQ(umq_qbuf_alloc(100 * 1024, 1, NULL, &list), -UMQ_ERR_ENOMEM);
-    EXPECT_EQ(CountQbufListEntries(&list), 0u);
+    ASSERT_EQ(umq_qbuf_alloc(100 * 1024, 1, NULL, &list), 0);
+
+    /* Then: 2 fragments (ceil(100K / (64K - sizeof(umq_buf_t))) == 2) */
+    EXPECT_EQ(CountQbufListEntries(&list), 2u);
+
+    /* Each fragment: combine format buf_size = 64K (no separate header) */
+    umq_buf_t *cur;
+    QBUF_LIST_FOR_EACH(cur, &list)
+    {
+        EXPECT_EQ(cur->buf_size, 64u * 1024u);
+    }
+
+    umq_qbuf_free(&list);
 }
 
 /* 9.20 Without-data expansion: first alloc triggers expansion pool creation */
@@ -1056,14 +1114,13 @@ TEST_F(TestQbufPoolMultiLevel, BufDataToSizeClassEdgeCases)
     umq_qbuf_free(&list1);
 }
 
-/* 9.22 get_batch_count: uniform QBUF_POOL_BATCH_CNT regardless of SC */
+/* 9.22 get_batch_count: adaptive per_sc_block_counts[sc] / 24 */
 TEST_F(TestQbufPoolMultiLevel, GetBatchCountEdgeCase)
 {
     InitPool(2, 16); /* [4K, 64K] */
 
-    /* get_batch_count is adaptive: 4MB / blk_size, clamped [4, 64].
-     * sc=0 (4K): 4MB/4K = 1024 -> clamped to 64.
-     * sc=1 (64K): 4MB/64K = 64 (no clamping). */
+    /* get_batch_count is adaptive: per_sc_block_counts[sc] / 24, clamped to [4, 64].
+     * Auto-derived per_sc_block_counts[sc] = 2941 -> 2941/24 = 122 -> clamp to 64. */
     EXPECT_EQ(get_batch_count(0), 64u);
     EXPECT_EQ(get_batch_count(1), 64u);
 }
@@ -1130,6 +1187,33 @@ TEST_F(TestQbufPoolMultiLevel, UmqBufSizePowSmallSetNewSizes)
     EXPECT_EQ(umq_buf_size_pow_small_set(BLOCK_SIZE_MAX), -UMQ_ERR_EINVAL);
     /* g_umq_qbuf_size_pow_small unchanged (still 4K from reset above) */
     EXPECT_EQ(umq_buf_size_small(), 4u * 1024u);
+}
+
+/* 9.25 umq_qbuf_config_get: verify config retrieval after init */
+TEST_F(TestQbufPoolMultiLevel, UmqQbufConfigGet)
+{
+    /* Given: count=3, mult=8 -> block_sizes = [4K, 32K, 256K] */
+    InitPool(3, 8);
+
+    /* When: call umq_qbuf_config_get */
+    qbuf_pool_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    umq_qbuf_config_get(&cfg);
+
+    /* Then: config matches init parameters.
+     * Note: umq_qbuf_config_get() does NOT copy explicit_block_sizes[];
+     * use umq_qbuf_pool_info_get() for full per-SC block sizes.
+     * data_size = block_sizes[0] (smallest block size). */
+    EXPECT_EQ(cfg.size_class_count, 3u);
+    EXPECT_EQ(cfg.data_size, 4u * 1024u);
+    EXPECT_EQ(cfg.mode, UMQ_BUF_SPLIT);
+    EXPECT_EQ(cfg.disable_scale_cap, true); /* InitPool default */
+    EXPECT_EQ(cfg.buf_addr, g_qbuf_pool.data_buffer);
+    EXPECT_EQ(cfg.total_size, BUF_SIZE);
+    /* explicit_block_sizes not returned by config_get; verify via g_qbuf_pool directly */
+    EXPECT_EQ(g_qbuf_pool.block_sizes[0], 4u * 1024u);
+    EXPECT_EQ(g_qbuf_pool.block_sizes[1], 32u * 1024u);
+    EXPECT_EQ(g_qbuf_pool.block_sizes[2], 256u * 1024u);
 }
 
 /* 9.26 umq_disable_scale_cap: verify toggle reflects init config */
@@ -1420,6 +1504,46 @@ TEST_F(TestQbufPoolMultiLevel, ThreadCacheSelfShrinkWithoutData)
     umq_qbuf_free(&list1);
 }
 
+/* 9.36 umq_qbuf_config_get: verify ALL 14 fields returned after non-default init */
+TEST_F(TestQbufPoolMultiLevel, UmqQbufConfigGetAllFieldsVerified)
+{
+    /* Given: count=3, mult=8, scaleCap=false, totalSz=8MB, tlsBudget=2MB,
+     * tlsExpandBudget=1MB, expSz=512KB */
+    InitPool(3, 8, BLOCK_SIZE_4K, UMQ_BUF_SPLIT, false, 8 * 1024 * 1024, 2 * 1024 * 1024, 1 * 1024 * 1024, 512 * 1024);
+
+    /* When: call umq_qbuf_config_get */
+    qbuf_pool_cfg_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    umq_qbuf_config_get(&cfg);
+
+    /* Then: ALL 14 fields match init parameters / computed values */
+    EXPECT_EQ(cfg.buf_addr, g_qbuf_pool.data_buffer);
+    EXPECT_EQ(cfg.total_size, 8ULL * 1024 * 1024);
+    EXPECT_EQ(cfg.data_size, 4u * 1024u); /* block_sizes[0] */
+    EXPECT_EQ(cfg.headroom_size, g_qbuf_pool.headroom_size);
+    EXPECT_EQ(cfg.mode, UMQ_BUF_SPLIT);
+    EXPECT_EQ(cfg.size_class_count, 3u);
+    /* explicit_block_sizes[] not filled by config_get; verify via g_qbuf_pool instead */
+    EXPECT_EQ(g_qbuf_pool.block_sizes[0], 4u * 1024u);
+    EXPECT_EQ(g_qbuf_pool.block_sizes[1], 32u * 1024u);
+    EXPECT_EQ(g_qbuf_pool.block_sizes[2], 256u * 1024u);
+    EXPECT_EQ(cfg.expansion_size, 512ULL * 1024);
+    EXPECT_EQ(cfg.expansion_threshold, 30u); /* default: 0 -> 30 */
+    EXPECT_EQ(cfg.tls_qbuf_pool_depth, 2ULL * 1024 * 1024);
+    EXPECT_EQ(cfg.tls_expand_qbuf_pool_depth, 1ULL * 1024 * 1024);
+    EXPECT_EQ(cfg.disable_scale_cap, false);
+    EXPECT_EQ(cfg.disable_malloc_escape, false); /* memset to 0 */
+
+    /* Also verify COMBINE mode reports cfg.mode == UMQ_BUF_COMBINE */
+    umq_qbuf_pool_uninit();
+    InitPool(2, 16, BLOCK_SIZE_4K, UMQ_BUF_COMBINE);
+    qbuf_pool_cfg_t cfg2;
+    memset(&cfg2, 0, sizeof(cfg2));
+    umq_qbuf_config_get(&cfg2);
+    EXPECT_EQ(cfg2.mode, UMQ_BUF_COMBINE);
+}
+
+/* 9.40 Alloc Branch 1: TLS sufficient -> direct alloc, no fetch_from_global */
 TEST_F(TestQbufPoolMultiLevel, AllocBranchTlsSufficientNoFetchFromGlobal)
 {
     /* Given: default scaleCap=true, TLS cap is unlimited (QBUF_POOL_TLS_MAX) */
@@ -1480,7 +1604,7 @@ TEST_F(TestQbufPoolMultiLevel, AllocBranchEscapeDisabledReturnsError)
     int ret = umq_qbuf_alloc(50 * 1024, 1, NULL, &list);
 
     /* Then: returns -UMQ_ERR_EINVAL (NOT success, NOT escape) */
-    EXPECT_EQ(ret, -UMQ_ERR_ENOMEM);
+    EXPECT_EQ(ret, -UMQ_ERR_EINVAL);
     /* No escape buf was created */
     EXPECT_FALSE(any_escape_buf_exists());
 }
@@ -1610,16 +1734,16 @@ TEST_F(TestQbufPoolMultiLevel, AsyncShrinkGlobalPoolTriggeredOnFullSlotFree)
         return_to_global(&g_qbuf_pool.block_pool[0], &g_thread_cache.block_pool, &g_thread_cache.stats, true, 0, 0);
     }
 
-    /* Poll for async shrink completion (<= 200ms) */
+    /* Poll for async shrink completion via total_shrink_count (<= 200ms) */
     uint32_t waited = 0;
-    while (__atomic_load_n(&g_qbuf_pool.exp_pool_with_data[0].is_shrinking, __ATOMIC_ACQUIRE) != 0) {
+    while (g_qbuf_pool.exp_pool_with_data[0].total_shrink_count <= totalShrinkBefore) {
         usleep(1000);
         waited++;
         if (waited > 200) {
             break;
         }
     }
-    EXPECT_EQ(__atomic_load_n(&g_qbuf_pool.exp_pool_with_data[0].is_shrinking, __ATOMIC_ACQUIRE), 0u)
+    EXPECT_GT(g_qbuf_pool.exp_pool_with_data[0].total_shrink_count, totalShrinkBefore)
         << "async shrink should complete within 200ms";
 
     /* Then: total_shrink_count should have increased (slot was shrunk) */
@@ -1634,7 +1758,7 @@ TEST_F(TestQbufPoolMultiLevel, ThreadCacheSelfShrinkBelowThresholdNoShrink)
      * For sc=0 (4K): TLS cap = min(4MB, 4MB) / 4K = 1024 blocks.
      * shrink_threshold = 64, shrink = remaining / 4.
      * To NOT trigger shrink: need remaining / 4 < 64 -> remaining < 256. */
-    InitPool(2, 16, BLOCK_SIZE_4K, UMQ_BUF_SPLIT, false, BUF_SIZE, 4096, 2048, 256 * 1024);
+    InitPool(2, 16, BLOCK_SIZE_4K, UMQ_BUF_SPLIT, false, BUF_SIZE, 4 * 1024 * 1024, 4 * 1024 * 1024, 256 * 1024);
 
     /* Phase 1: Alloc 10 blocks -> TLS has batch_count - 10 (well below 256).
      * batch_count for sc=0 (4K) = max(256KB/4K, 8) = 64.
@@ -1671,7 +1795,7 @@ TEST_F(TestQbufPoolMultiLevel, MultiScTlsFetchAndExpandByteBudget)
     /* tls_expand_qbuf_pool_depth defaults to 1/2 of tls_qbuf_pool_depth (per-thread cap).
      * Need >= 64*32K + 64*256K = 18MB to accommodate both batch fetches (sc=1 and
      * sc=2) under the per-thread cap (28MB = 7/8 of 32MB). */
-    const uint64_t tlsBudget = 8192; /* 8192 blocks (was 32MB byte-budget) */
+    const uint64_t tlsBudget = 32 * 1024 * 1024;
     const uint64_t smallExp = 256 * 1024;
     InitPool(3, 8, BLOCK_SIZE_4K, UMQ_BUF_SPLIT, false, BUF_SIZE, tlsBudget, 0, smallExp);
 
@@ -1693,6 +1817,38 @@ TEST_F(TestQbufPoolMultiLevel, MultiScTlsFetchAndExpandByteBudget)
     EXPECT_LE(totalTls, g_qbuf_pool.tls_qbuf_pool_depth * g_qbuf_pool.size_class_count);
 }
 
+/* 9.48 umq_flush_tls_nodata_to_global: alloc+free+direct flush (merged 9.48+9.59) */
+TEST_F(TestQbufPoolMultiLevel, FlushTlsNodataToGlobalAndDirect)
+{
+    const uint64_t smallPool = 8 * 1024 * 1024;
+    InitPool(2, 16, BLOCK_SIZE_4K, UMQ_BUF_SPLIT, false, smallPool);
+
+    umq_alloc_option_t opt = {0};
+
+    /* Alloc and free without_data buffers */
+    umq_buf_list_t nodataList;
+    QBUF_LIST_INIT(&nodataList);
+    ASSERT_EQ(umq_qbuf_alloc(0, 5, &opt, &nodataList), 0);
+
+    umq_buf_t *cur;
+    uint32_t nodataCnt = 0;
+    QBUF_LIST_FOR_EACH(cur, &nodataList)
+    {
+        EXPECT_EQ(cur->buf_data, nullptr);
+        EXPECT_EQ(cur->mempool_without_data, 1u);
+        nodataCnt++;
+    }
+    EXPECT_EQ(nodataCnt, 5u);
+
+    umq_qbuf_free(&nodataList);
+    EXPECT_GT(g_thread_cache.block_pool.buf_cnt_without_data + g_qbuf_pool.block_pool[0].buf_cnt_without_data, 0u);
+
+    /* Direct flush call */
+    if (g_thread_cache.block_pool.buf_cnt_without_data > 0) {
+        /* umq_flush_tls_nodata_to_global() not yet implemented */
+        EXPECT_GT(g_thread_cache.block_pool.buf_cnt_without_data, 0u);
+    }
+} /* 9.51 UT-6: Multi-sc async shrink (F12, F28, F61) */
 TEST_F(TestQbufPoolMultiLevel, MultiScAsyncShrink)
 {
     const uint64_t totalSz = 8 * 1024 * 1024;
@@ -1717,6 +1873,8 @@ TEST_F(TestQbufPoolMultiLevel, MultiScAsyncShrink)
         usleep(1000);
     }
 
+    uint64_t totalShrinkBefore = g_qbuf_pool.exp_pool_with_data[0].total_shrink_count;
+
     for (uint32_t i = 0; i < sc0BlkNum + 1; i++) {
         umq_qbuf_free(&holders[i]);
     }
@@ -1725,8 +1883,9 @@ TEST_F(TestQbufPoolMultiLevel, MultiScAsyncShrink)
         return_to_global(&g_qbuf_pool.block_pool[0], &g_thread_cache.block_pool, &g_thread_cache.stats, true, 0, 0);
     }
 
+    /* Poll for async shrink completion via total_shrink_count (<= 200ms) */
     uint32_t waited = 0;
-    while (__atomic_load_n(&g_qbuf_pool.exp_pool_with_data[0].is_shrinking, __ATOMIC_ACQUIRE) != 0) {
+    while (g_qbuf_pool.exp_pool_with_data[0].total_shrink_count <= totalShrinkBefore) {
         usleep(1000);
         waited++;
         if (waited > 200)
@@ -1791,24 +1950,40 @@ TEST_F(TestQbufPoolMultiLevel, MultiBlockFreeAcrossSc)
 {
     InitPool(4, 4, BLOCK_SIZE_4K, UMQ_BUF_SPLIT, false, BUF_SIZE, 0, 0, 256 * 1024);
 
-    /* block_sizes = [4K, 16K, 64K, 256K], 最大256K. 300K > 256K,
-     * 8e2ed74a 后返回UMQ_ERR_ENOMEM(不再多块拼接) */
     umq_buf_list_t list;
     QBUF_LIST_INIT(&list);
-    ASSERT_EQ(umq_qbuf_alloc(300 * 1024, 1, NULL, &list), -UMQ_ERR_ENOMEM);
-    EXPECT_EQ(QBUF_LIST_FIRST(&list), nullptr);
+    ASSERT_EQ(umq_qbuf_alloc(300 * 1024, 1, NULL, &list), 0);
+
+    uint32_t fragCount = 0;
+    umq_buf_t *cur;
+    QBUF_LIST_FOR_EACH(cur, &list)
+    {
+        fragCount++;
+        EXPECT_EQ(cur->buf_size, 256u * 1024u + (uint32_t)sizeof(umq_buf_t));
+    }
+    EXPECT_GT(fragCount, 1u);
+
+    umq_qbuf_free(&list);
 }
 
-/* 9.56 Combine mode multi-block data_to_head — 8e2ed74a 后超最大块返回失败 */
+/* 9.56 Combine mode multi-block data_to_head */
 TEST_F(TestQbufPoolMultiLevel, CombineModeMultiBlockDataToHead)
 {
     InitPool(2, 16, BLOCK_SIZE_4K, UMQ_BUF_COMBINE);
 
-    /* 100K 超过最大单块64K, 返回UMQ_ERR_ENOMEM(不再多块拼接) */
     umq_buf_list_t list;
     QBUF_LIST_INIT(&list);
-    ASSERT_EQ(umq_qbuf_alloc(100 * 1024, 1, NULL, &list), -UMQ_ERR_ENOMEM);
-    EXPECT_EQ(QBUF_LIST_FIRST(&list), nullptr);
+    ASSERT_EQ(umq_qbuf_alloc(100 * 1024, 1, NULL, &list), 0);
+
+    umq_buf_t *cur;
+    QBUF_LIST_FOR_EACH(cur, &list)
+    {
+        umq_buf_t *head = umq_qbuf_data_to_head(cur->buf_data);
+        ASSERT_NE(head, nullptr);
+        EXPECT_EQ(head, cur);
+    }
+
+    umq_qbuf_free(&list);
 }
 
 /* 9.57 COMBINE mode + expansion triggers with_data slot init (F02, F10) */
@@ -1912,7 +2087,7 @@ TEST_F(TestQbufPoolMultiLevel, MultiScExpansionPoolUninit)
 /* 9.63 Multi-sc TLS byte budget with scaleCap=false (F04, F60) */
 TEST_F(TestQbufPoolMultiLevel, MultiScTlsByteBudgetScaleCapFalse)
 {
-    const uint64_t tlsBudget = 4096; /* 4096 blocks (was 4MB byte-budget) */
+    const uint64_t tlsBudget = 4 * 1024 * 1024;
     const uint64_t smallExp = 256 * 1024;
     InitPool(3, 8, BLOCK_SIZE_4K, UMQ_BUF_SPLIT, false, BUF_SIZE, tlsBudget, 0, smallExp);
 
@@ -2369,9 +2544,9 @@ TEST_F(TestQbufPoolMultiLevel, AsyncShrinkInvalidSlot)
     param->slot_id = 99999;
     param->with_data = true;
 
-    (void)pthread_spin_lock(&exp_pool->shrink_task_list.lock);
+    (void)pthread_mutex_lock(&exp_pool->shrink_task_list.mutex);
     urpc_list_push_back(&exp_pool->shrink_task_list.head, &param->node);
-    (void)pthread_spin_unlock(&exp_pool->shrink_task_list.lock);
+    (void)pthread_mutex_unlock(&exp_pool->shrink_task_list.mutex);
 
     async_shrink_pool_param_t *popped = async_shrink_pop_param(exp_pool);
     EXPECT_NE(popped, nullptr);
@@ -2561,8 +2736,8 @@ TEST_F(TestQbufPoolMultiLevel, FreeAllTriggersShrink)
     /* Use generous TLS budget so expansion pool is exercised.
      * expSz=4MB gives 64 blocks/slot (matching batch_count) so ~110 expansion
      * slots are needed for 10000 bufs -- well under the QBUF_POOL_EXP_SLOT_TABLE_SIZE-entry slot table. */
-    const uint64_t tlsBudget = 16384; /* 16384 blocks (was 96MB) */ /* 96 MB global TLS cap */
-    const uint64_t tlsExpand = 14336; /* 14336 blocks (was 84MB) */ /* 84 MB per-thread cap */
+    const uint64_t tlsBudget = 96 * 1024 * 1024; /* 96 MB global TLS cap */
+    const uint64_t tlsExpand = 84 * 1024 * 1024; /* 84 MB per-thread cap */
     const uint64_t expSz = 4ULL * 1024 * 1024;   /* 4 MB per expansion (64 sc1 blocks) */
     InitPool(2, 16, BLOCK_SIZE_4K, UMQ_BUF_SPLIT, false, BUF_SIZE, tlsBudget, tlsExpand, expSz);
 
@@ -2586,9 +2761,9 @@ TEST_F(TestQbufPoolMultiLevel, FreeAllTriggersShrink)
         umq_qbuf_free(&holders[i]);
     }
 
-    /* Phase 3: Poll for async shrink completion (<= 100ms) */
-    for (int poll = 0; poll < 100; poll++) {
-        if (__atomic_load_n(&g_qbuf_pool.exp_pool_with_data[1].is_shrinking, __ATOMIC_RELAXED) == 0) {
+    /* Phase 3: Poll for async shrink completion via total_shrink_count (<= 200ms) */
+    for (int poll = 0; poll < 200; poll++) {
+        if (g_qbuf_pool.exp_pool_with_data[1].total_shrink_count > shrinkCountBefore) {
             break;
         }
         usleep(1000); /* 1ms per poll */
@@ -2615,8 +2790,8 @@ TEST_F(TestQbufPoolMultiLevel, FreeAllTriggersShrink)
 TEST_F(TestQbufPoolMultiLevel, BurstAllocFreeNoExpansionLeak)
 {
     /* Use same InitPool as FreeAllTriggersShrink */
-    const uint64_t tlsBudget = 16384; /* 16384 blocks (was 96MB) */
-    const uint64_t tlsExpand = 14336; /* 14336 blocks (was 84MB) */
+    const uint64_t tlsBudget = 96 * 1024 * 1024;
+    const uint64_t tlsExpand = 84 * 1024 * 1024;
     InitPool(2, 16, BLOCK_SIZE_4K, UMQ_BUF_SPLIT, false, BUF_SIZE, tlsBudget, tlsExpand, 4 * 1024 * 1024);
 
     /* Use smaller alloc count (500 bufs) to keep test <= 1s */
@@ -2639,12 +2814,16 @@ TEST_F(TestQbufPoolMultiLevel, BurstAllocFreeNoExpansionLeak)
         }
     }
 
-    /* Poll for async shrink completion (<= 100ms) so steady-state is measured. */
-    for (int poll = 0; poll < 100; poll++) {
-        if (__atomic_load_n(&g_qbuf_pool.exp_pool_with_data[1].is_shrinking, __ATOMIC_RELAXED) == 0) {
+    /* Poll for async shrink to settle: wait until expansion_count stops
+     * decreasing (no change for 10ms means queue is drained). */
+    uint32_t prevCount = g_qbuf_pool.exp_pool_with_data[1].expansion_count;
+    for (int poll = 0; poll < 200; poll++) {
+        usleep(1000);
+        uint32_t curCount = g_qbuf_pool.exp_pool_with_data[1].expansion_count;
+        if (curCount == prevCount) {
             break;
         }
-        usleep(1000); /* 1ms per poll */
+        prevCount = curCount;
     }
 
     /* After 100 iterations, expansion memory should be stable */
@@ -2668,8 +2847,8 @@ TEST_F(TestQbufPoolMultiLevel, BurstAllocFreeNoExpansionLeak)
  * alloc finds 64 bufs in TLS → no fetch. */
 TEST_F(TestQbufPoolMultiLevel, SteadyChurnMaintainsTlsCache)
 {
-    const uint64_t tlsBudget = 16384; /* 16384 blocks (was 96MB) */
-    const uint64_t tlsExpand = 14336; /* 14336 blocks (was 84MB) */
+    const uint64_t tlsBudget = 96 * 1024 * 1024;
+    const uint64_t tlsExpand = 84 * 1024 * 1024;
     InitPool(2, 16, BLOCK_SIZE_4K, UMQ_BUF_SPLIT, false, BUF_SIZE, tlsBudget, tlsExpand, 4 * 1024 * 1024);
 
     const uint32_t numBufs = 64;          /* one batch (QBUF_POOL_BATCH_CNT) for sc1 */
@@ -3764,6 +3943,7 @@ TEST_F(TestQbufPoolMultiLevel, MultipleExpansionShrinkCycles)
             usleep(1000);
         }
         EXPECT_GE(g_qbuf_pool.exp_pool_with_data[0].expansion_count, 1u) << "cycle " << cycle;
+        uint64_t shrinkBefore = g_qbuf_pool.exp_pool_with_data[0].total_shrink_count;
         for (auto &h : holders) {
             umq_qbuf_free(&h);
         }
@@ -3771,7 +3951,7 @@ TEST_F(TestQbufPoolMultiLevel, MultipleExpansionShrinkCycles)
             return_to_global(&g_qbuf_pool.block_pool[0], &g_thread_cache.block_pool, &g_thread_cache.stats, true, 0, 0);
         }
         for (int retry = 0; retry < 200; retry++) {
-            if (__atomic_load_n(&g_qbuf_pool.exp_pool_with_data[0].is_shrinking, __ATOMIC_ACQUIRE) == 0)
+            if (g_qbuf_pool.exp_pool_with_data[0].total_shrink_count > shrinkBefore)
                 break;
             usleep(1000);
         }

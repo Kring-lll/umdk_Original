@@ -39,6 +39,7 @@
 #include "util_id_generator.h"
 #include "uvs_api.h"
 #include "umq_ub_impl.h"
+#include "umq_ub_impl.h"
 
 #define UMQ_FLUSH_MAX_RETRY_TIMES 10000
 #define UMQ_UB_DEFAULT_SLOT_NUM 10
@@ -735,6 +736,7 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
         .tls_qbuf_pool_depth = cfg->buf_pool_cfg.tls_qbuf_pool_depth,
         .tls_expand_qbuf_pool_depth = cfg->buf_pool_cfg.tls_expand_qbuf_pool_depth,
         .disable_malloc_escape = cfg->buf_pool_cfg.disable_malloc_escape,
+        .shrink_decay_ms = cfg->buf_pool_cfg.shrink_decay_ms,
         .size_class_count = buf_pool_plan.size_class_count,
         .expansion_size = cfg->buf_pool_cfg.expansion_size,
         .expansion_threshold = cfg->buf_pool_cfg.expansion_threshold,
@@ -1678,12 +1680,14 @@ int32_t umq_ub_destroy_impl(uint64_t umqh)
         }
     }
 
-    if (queue->wait_ack_import.wait_ack_pool_id != NULL) {
-        free(queue->wait_ack_import.wait_ack_pool_id);
-    }
-    if (queue->wait_ack_import.lock != NULL) {
-        (void)util_rwlock_destroy(queue->wait_ack_import.lock);
-        queue->wait_ack_import.lock = NULL;
+    if (!is_umq_ub_logic_queue(queue->create_flag)) {
+        if (qcfg->wait_ack_import.wait_ack_pool_id != NULL) {
+            free(qcfg->wait_ack_import.wait_ack_pool_id);
+        }
+        if (qcfg->wait_ack_import.lock != NULL) {
+            (void)util_rwlock_destroy(qcfg->wait_ack_import.lock);
+            qcfg->wait_ack_import.lock = NULL;
+        }
     }
     (void)pthread_spin_destroy(&queue->get_jetty_node_lock);
 
