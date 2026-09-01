@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)
+![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)
 ![License](https://img.shields.io/badge/License-Proprietary-red)
 ![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen)
 
@@ -31,7 +31,7 @@ AIGW (AI Gateway) 是一个企业级的大语言模型推理网关，专为大�
 
 | 功能 | 描述 |
 |------|------|
-| **智能调度** | 支持Token、时间感知、容量等多种负载均衡策略 |
+| **智能调度** | 支持Token、时间感知、容量、前缀匹配等多种负载均衡策略 |
 | **智能路由** | 区分prefill和decode阶段，实现上下文感知的请求分发 |
 | **缓存管理** | Redis和本地缓存双重缓存机制，有效降低重复请求开销 |
 | **延迟预测** | 基于LightGBM和EMA算法的机器学习预测，优化调度决策 |
@@ -249,6 +249,80 @@ AIGW/
 | `token` | Token敏感场景 | 基于Token数量分配 |
 | `prefillTimeAware` | Prefill阶段 | 预填充时间感知调度 |
 | `decode` | Decode阶段 | 解码阶段专用策略 |
+| `prefixCache` | KV 复用场景 | 前缀匹配负载感知调度，见下节 |
+
+---
+
+## 前缀匹配负载均衡特性（prefixCache）
+
+前缀匹配调度（`loadBalancer.mixed = "prefixCache"`）按请求前缀的 KV 命中率把请求路由到 KV 复用最佳的 worker，最大化 vLLM 的 KV cache 复用，降低 prefill 延迟与算力消耗。
+
+### 工作原理
+
+```
+请求 ──► render 服务 /v1/chat/completions/render 取 token_ids
+     ──► aigw 侧 xxhash 前缀链匹配 ──► 查 hash→worker 表
+     ──► 选 命中%最高 且 TokenNum 最低 的 worker
+              │
+              └─ 无命中/无 render ──► fallback 到 token 负载均衡（TokenNum 维度）
+```
+
+前缀表由 vLLM 的 KV 事件维护：vLLM scheduler 经 ZMQ（默认 `tcp://{ip}:5557`）发布 `BlockStored/Removed/AllBlocksCleared`，aigw 据此重算前缀 hash 并维护 `hash → worker` 映射。
+
+### 前置条件（务必满足，否则不命中）
+
+1. **blockSize 对齐**：aigw 的 `globalSchedulers[].blockSize` 必须等于 vLLM 启动参数 `--block-size`（如 vLLM 设 128，aigw 也设 128）。粒度不一致会导致 hash 永不命中。
+2. **KV 事件发布**：vLLM 需开启 KV cache 事件发布（ZMQ:5557）。aigw 选 prefixCache 算法时会自动启用 KV 事件订阅，无需额外环境变量。
+3. **render 服务可达**：aigw 通过 `renderClient` 访问 vLLM 的 render 端点做分词。vLLM 若配置了 `--api-key`，必须在 `renderClient.apiKey` 填入同一 key，否则 render 返回 401、前缀匹配降级失效。
+4. **实例已注册**：worker 实例需注册到 aigw（见「实例注册」一节）。
+
+### 最小配置示例
+
+参考 `configs/aigw-prefix-cache.example.json`，关键片段：
+
+```jsonc
+{
+  "globalSchedulers": [{
+    "model": "Qwen2.5-7B",
+    "blockSize": 128,                      // 必须等于 vLLM --block-size
+    "deployPolicy": "mixed",
+    "maxTimeToFirstToken": 200,
+    "maxTimeBetweenTokens": 50,
+    "loadBalancer": { "mixed": "prefixCache" },  // 启用前缀匹配
+    "renderClient": {
+      "endpointTemplate": "http://{ip}:8000",
+      "apiKey": ""                        // vLLM 配了 --api-key 时填同 key，否则留空
+    }
+  }]
+}
+```
+
+> 说明：`AIGW_PREFIX_CACHE_ENABLED`、`AIGW_KV_EVENTS_ENABLED`、
+> `AIGW_PREFIX_CACHE_BLOCK_SIZE`、`loadBalancer.loadImbalanceThreshold`、
+> `renderClient.baseURL` 等项在选 prefixCache 算法后会自动推断或采用默认值，
+> 通常无需手动设置。`AIGW_PREFIX_CACHE_MATCH_THRESHOLD` 并不存在，匹配阈值由
+> `loadBalancer.minMatchedLength` 控制。
+
+### 环境变量（通常无需设置）
+
+以下环境变量在选 prefixCache 算法后会自动推断或采用默认，仅作高级调优/逃生口：
+
+| 环境变量 | 默认 | 含义 |
+|----------|------|------|
+| `AIGW_PREFIX_CACHE_ENABLED` | false | prefixCache 特性总开关（选 prefixCache 算法时自动启用） |
+| `AIGW_KV_EVENTS_ENABLED` | false | KV 事件订阅开关（选 prefixCache 算法时自动启用） |
+| `AIGW_PREFIX_CACHE_BLOCK_SIZE` | 16 | 前缀 hash 块大小（自动由 `globalSchedulers[].blockSize` 驱动，env 可覆盖） |
+| `AIGW_PREFIX_CACHE_MAX_CONTEXTS` | 1000 | 最大并发上下文数 |
+| `AIGW_PREFIX_CACHE_MAX_PREFIXES_PER_CONTEXT` | 10000 | 单上下文最大前缀条目数 |
+| `AIGW_PREFIX_CACHE_EVICTION_INTERVAL_SECONDS` | 60 | 前缀驱逐扫描间隔 |
+| `AIGW_PREFIX_CACHE_EVICTION_DURATION_MINUTES` | 20 | 空闲多久后驱逐 |
+| `AIGW_PREFIX_CACHE_FALLBACK_STRING_MATCHING` | true | hash 未命中时回退文本匹配 |
+| `AIGW_PREFIX_CACHE_SEED` | 0（随机） | xxhash 种子 |
+| `AIGW_KV_EVENTS_ENDPOINT_TEMPLATE` | tcp://{ip}:5557 | vLLM KV 事件 ZMQ 订阅端点 |
+| `AIGW_KV_EVENTS_TOPIC` | （空=全部） | ZMQ topic 过滤 |
+| `AIGW_KV_EVENTS_POLL_TIMEOUT_MS` | 100 | ZMQ poll 超时 |
+| `AIGW_KV_EVENTS_RECONNECT_DELAY_MS` | 1000 | 重连退避 |
+| `AIGW_KV_EVENTS_HWM` | 100000 | ZMQ 高水位 |
 
 ---
 
@@ -380,6 +454,102 @@ aigw_uninit();
 
 ---
 
+## 部署流程（RPM）
+
+### 源码构建 RPM
+
+在满足构建环境（Go ≥ 1.24、Rust ≥ 1.89、CMake ≥ 3.28、gcc/g++）的机器上：
+
+```bash
+cd src/aigw
+bash build.sh --rpm --version 1.0.0 --release B001
+```
+
+产物位于 `/home/aigw/rpmbuild/RPMS/`，包含两个子包：
+
+| 包 | 内容 | 安装路径 |
+|----|------|----------|
+| `aigw` | 二进制 + 默认配置 | `/usr/local/bin/aigw`、`/etc/aigw/conf/aigw.json`、`/var/log/aigw` |
+| `aigw-lib` | 共享库 + 头文件（共享库模式） | `libaigw.so`、`include/aigw/aigw.h` |
+
+### 安装与启动
+
+```bash
+# 安装（创建 aigw:aigw 用户与目录，也可用 CUSTOM_USER/CUSTOM_GROUP 覆盖）
+rpm -ivh aigw-1.0.0-B001.aarch64.rpm
+
+# 编辑配置（按实际模型/部署调整）
+vi /etc/aigw/conf/aigw.json
+
+# 启动
+/usr/local/bin/aigw --config=/etc/aigw/conf/aigw.json
+```
+
+### 健康检查
+
+```bash
+curl http://<aigw-ip>:8701/aigw/v1/health
+# 期望 200
+```
+
+---
+
+## 实例注册
+
+推理实例（vLLM worker）需注册到 aigw 才能被调度。支持三种方式：
+
+| 方式 | 触发 | 配置 | 适用 |
+|------|------|------|------|
+| **ZooKeeper**（推荐，自动） | aigw 监听 ZK 路径，推理侧写 znode 即自动注册 | `zookeeper.address` 非空 | 生产 |
+| **Kubernetes 发现**（自动） | aigw watch k8s Endpoints | `discovery.enable=true` + `discovery.type=k8s` | k8s 部署 |
+| **HTTP 手动注册**（测试用） | `curl` 调用注册接口 | 无需 ZK（ZK 启用时该端点返回 403） | 联调/测试 |
+
+HTTP 手动注册示例（仅测试，ZK 启用时不可用）：
+
+```bash
+curl -X POST http://<aigw-ip>:8701/aigw/v1/register-instance \
+  -H "Content-Type: application/json" \
+  -d '{"name":"worker-19000","model":"Qwen2.5-7B","instanceIp":"127.0.0.1","port":"19000","role":"mixed","groupID":""}'
+```
+
+> 管理面集成：若 AgentOS 管理面添加模型后需自动注册实例，可调用
+> `POST /aigw/v1/models/auto-register`（见 #897），无需手动 curl。
+
+---
+
+## 操作步骤（从 0 到可用，前缀匹配场景）
+
+以单机 vLLM + aigw 前缀匹配调度为例：
+
+1. **启动 vLLM**（开启 KV 事件发布、指定 block-size）：
+   ```bash
+   vllm serve Qwen/Qwen2.5-7B --port 19000 \
+     --block-size 128 \
+     --api-key sk-xxx \          # 如不配 api-key 可省略，aigw 侧也留空
+     # + 启用 KV cache 事件发布到 ZMQ:5557（按 vLLM 版本参数）
+   ```
+2. **配置 aigw**：编辑 `/etc/aigw/conf/aigw.json`（或用 `configs/aigw-prefix-cache.example.json`），关键项：
+   - `globalSchedulers[].model` 与 vLLM 模型一致；
+   - `globalSchedulers[].blockSize = 128`（= vLLM `--block-size`）；
+   - `loadBalancer.mixed = "prefixCache"`；
+   - `renderClient.apiKey = "sk-xxx"`（与 vLLM `--api-key` 一致，未配则留空）。
+3. **启动 aigw**：
+   ```bash
+   /usr/local/bin/aigw --config=/etc/aigw/conf/aigw.json
+   ```
+4. **注册实例**：任选一种（ZK 推荐 / k8s 发现 / HTTP 测试用），见上节。
+5. **校验**：
+   ```bash
+   curl http://127.0.0.1:8701/aigw/v1/health    # 200
+   curl http://127.0.0.1:8701/aigw/v1/stats     # 查看调度统计
+   ```
+6. **发送推理请求**：经 aigw 调度到后端 vLLM。日志中 `[prefixCache] branch` 出现 `match %` 即命中前缀、走 prefixCache 调度；出现 `falling back to LB` 即降级到 token 负载均衡（仍按 TokenNum 选最低负载）。
+
+> 排错：若日志反复出现 `render tokenization failed: status=401`，说明 vLLM 配了
+> api-key 但 aigw 的 `renderClient.apiKey` 未填或填错（见 #893）。
+
+---
+
 ## 示例代码
 
 完整示例代码位于 `example/cgo/` 目录，演示了：
@@ -472,8 +642,8 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
 
 如有问题或建议，请通过以下方式联系：
 
-- 提交Issue：[GitHub Issues](https://github.com/your-repo/aigw/issues)
-- 发送邮件：[your-email@example.com]
+- 提交Issue：[gitcode Issues](https://gitcode.com/openeuler/umdk/issues)
+- 发送邮件：aigw 团队
 
 ---
 
