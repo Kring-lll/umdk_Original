@@ -205,3 +205,44 @@ func TestPrefixCacheSchedule_PropagatesScheduleOptions(t *testing.T) {
 	assert.Equal(t, map[string]bool{"g-excluded": true}, provider.lastOpts.ExcludeGroupIDs,
 		"ExcludeGroupIDs must propagate to provider")
 }
+
+// TestPrefixCacheFallback_UsesTokenLBNotLeastConn: the degraded fallback path
+// must pick the lowest-TokenNum pod, NOT the lowest-ReqNum pod. #899: the prior
+// fallback used leastConn (ReqNum), which is uncorrelated with the TokenNum
+// load dimension prefixCache optimizes for.
+//
+// Setup: pod A has lower ReqNum (1) but higher TokenNum (5000); pod B has higher
+// ReqNum (9) but lower TokenNum (1000). leastConn would pick A (reqNum 1);
+// token LB must pick B (tokenNum 1000). We assert B.
+func TestPrefixCacheFallback_UsesTokenLBNotLeastConn(t *testing.T) {
+	mA, nameA := makeMetric("127.0.0.1:1", "worker-1", 5000, 1) // low ReqNum, high TokenNum
+	mB, nameB := makeMetric("127.0.0.1:2", "worker-2", 1000, 9) // high ReqNum, low TokenNum
+	byURL := map[string]*InstanceMetric{mA.InsUrl: mA, mB.InsUrl: mB}
+	provider := &recordingProvider{byURL: byURL}
+
+	// matched is empty -> schedule() falls through to lb.fallback(). Build a
+	// real token LB as the fallback (mirror newPrefixCacheLB after #899).
+	tokenLB, err := newTokenLB(provider, &AlgorithmParams{
+		TbtThreshold:  50,
+		TtftThreshold: 200,
+	})
+	assert.NoError(t, err)
+
+	lb := &prefixCacheLoadBalancer{
+		baseLoadBalancer: baseLoadBalancer{metricProvider: provider},
+		prefixCacheMgr: &mockPrefixCacheMgr{
+			urlToName: map[string]string{mA.InsUrl: nameA, mB.InsUrl: nameB},
+			matched:   map[string]int{}, // no prefix match -> fallback
+		},
+		fallbackLB: tokenLB,
+	}
+
+	req := &ScheduleRequestMsg{
+		Request:              &LlmRequest{ReqId: "r1", PromptLen: 10},
+		CandidateInstanceIDs: []string{mA.InsUrl, mB.InsUrl},
+	}
+	r := lb.schedule(req, nil)
+	assert.NotNil(t, r)
+	assert.Equal(t, mB.InsUrl, r.PrefillUrl,
+		"fallback must pick lowest-TokenNum pod B, not leastConn's lowest-ReqNum pod A")
+}

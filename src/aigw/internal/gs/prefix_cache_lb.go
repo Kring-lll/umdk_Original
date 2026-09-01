@@ -25,6 +25,11 @@ type prefixCacheLoadBalancer struct {
 	modelName      string
 	prefixCacheMgr prefixcache.PrefixCacheManager
 	renderClient   *renderclient.RenderClient
+	// fallbackLB is used when prefix matching yields no usable target
+	// (no match, render tokenization failed, no ready instances). It is a
+	// token-based LB so the degraded path picks the lowest-TokenNum pod,
+	// matching the load dimension prefixCache optimizes for, rather than
+	// leastConn's ReqNum dimension. See #899.
 	fallbackLB     loadBalancer
 	// loadImbalanceThreshold is the token-load imbalance threshold: when
 	// max(TokenNum)-min(TokenNum) across all ready pods exceeds it, the
@@ -51,9 +56,12 @@ func newPrefixCacheLB(metricProvider MetricProvider, params *AlgorithmParams) (*
 		return nil, err
 	}
 
-	fallback, err := newLeastConnLB(metricProvider, params)
+	// fallback uses the token load balancer (TokenNum-based), not leastConn
+	// (ReqNum-based), so the degraded path stays consistent with the
+	// TokenNum load dimension prefixCache actually cares about. See #899.
+	fallback, err := newTokenLB(metricProvider, params)
 	if err != nil {
-		log.Warn().Msgf("[prefixCache] failed to create fallback LB: %v", err)
+		log.Warn().Msgf("[prefixCache] failed to create fallback token LB: %v", err)
 	}
 
 	return &prefixCacheLoadBalancer{
