@@ -32,6 +32,26 @@
 #define PRIMARY_EID_NUM               (2)
 #define PORT_EID_MAX_NUM_PER_DEV      (9)
 #define PORT_EID_MAX_NUM              (PORT_EID_MAX_NUM_PER_DEV * PRIMARY_EID_NUM)
+
+/*
+ * Reverse of get_matrix_port_p_idx: return the IODIE of a slot index in
+ * p_jetty[]/active_indices[]. IODIE level: idx == primary EID index (0/1);
+ * PORT level: idx = iodie * PORT_EID_MAX_NUM_PER_DEV + port + PRIMARY_EID_NUM.
+ * The two ranges are disjoint, so the level is not needed. Returns UINT32_MAX
+ * if out of range.
+ */
+static inline uint32_t bondp_iodie_idx_of(uint32_t active_index)
+{
+    if (active_index < PRIMARY_EID_NUM) {
+        /* IODIE-level bonding: the primary EID index is the IODIE number. */
+        return active_index;
+    }
+    if (active_index < PRIMARY_EID_NUM + PORT_EID_MAX_NUM) {
+        /* PORT-level bonding: reverse the matrix formula. */
+        return (active_index - PRIMARY_EID_NUM) / PORT_EID_MAX_NUM_PER_DEV;
+    }
+    return UINT32_MAX;
+}
 #define BONDP_MAX_WELL_KNOWN_JETTY_ID (1024)
 /* Use single die primary eid and port eid to create urma_context */
 #define SINGLE_DIE_DEVNUM             (11)
@@ -151,6 +171,20 @@ typedef struct bondp_context {
     bondp_port_cfg_t port_cfg;
 } bondp_context_t;
 
+/*
+ * lazy pjetty applies to ACTIVE_BACKUP + RM only: in BALANCE mode the lazy
+ * create would never trigger (it needs all built paths dead), leaving half the
+ * paths unused; in RC mode the unbound lazy pjetty could never carry traffic.
+ * The create path rejects lazy mode when these prerequisites are not met.
+ */
+static inline bool bondp_lazy_pjetty_mode_supported(const bondp_context_t *bdp_ctx,
+                                                    urma_transport_mode_t trans_mode)
+{
+    return bdp_ctx != NULL && bdp_ctx->enable_failover &&
+           bdp_ctx->bonding_mode == BONDP_BONDING_MODE_ACTIVE_BACKUP &&
+           trans_mode == URMA_TM_RM;
+}
+
 typedef struct bondp_jfc {
     urma_jfc_t v_jfc;
     urma_jfc_t *p_jfc[URMA_UBAGG_DEV_MAX_NUM];
@@ -232,14 +266,17 @@ typedef struct bondp_comp {
     uint8_t pjettys_error_done[URMA_UBAGG_DEV_MAX_NUM];
     bondp_hash_table_t v_conn_table;
     bondp_comp_type_t comp_type;
+    /* Immutable after creation; independent of later context default changes. */
+    bondp_pjetty_create_mode_t pjetty_create_mode;
     urma_ref_t use_cnt; /* Initialize to 0 */
 #ifndef __cplusplus
     atomic_bool deleting;
+    atomic_bool modify_to_error;
 #else
     std::atomic_bool deleting;
+    std::atomic_bool modify_to_error;
 #endif
     // send
-    bool modify_to_error;
     pthread_spinlock_t send_lock;
     uint32_t max_send_sge;
     uint32_t max_send_rsge;
@@ -250,11 +287,17 @@ typedef struct bondp_comp {
     atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     atomic_bool hc_valid[URMA_UBAGG_DEV_MAX_NUM];
     atomic_uint msn;
+    /* True while a cross-IODIE lazy create is in flight on
+     * the bond worker; failover CRs on invalid paths are cached (CONVERT_SKIP)
+     * instead of being surfaced, so the worker can resend those WRs once the
+     * new path is published. */
+    atomic_bool lazy_create_pending;
 #else
     std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_bool hc_valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_uint msn;
+    std::atomic_bool lazy_create_pending;
 #endif
 #ifndef __cplusplus
     atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
@@ -266,6 +309,12 @@ typedef struct bondp_comp {
     wr_buf_t recv_wr_buf;
     uint32_t rqe_cnt[URMA_UBAGG_DEV_MAX_NUM];
 } bondp_comp_t;
+
+static inline bool bondp_comp_uses_lazy_pjetty(const bondp_comp_t *bdp_comp)
+{
+    return bdp_comp != NULL && bdp_comp->comp_type == BONDP_COMP_JETTY &&
+           bdp_comp->pjetty_create_mode == BONDP_PJETTY_CREATE_LAZY_BY_IODIE;
+}
 
 typedef struct bondp_p_target_jetty {
     urma_target_jetty_t *p_tjetty;
@@ -283,7 +332,8 @@ typedef struct bondp_p_target_jetty {
 typedef enum bondp_tjetty_flag_mask {
     BONDP_TJETTY_FLAG_SKIP_IMPORT_VJETTY = 0x1,
     BONDP_TJETTY_FLAG_MSN_ENABLED        = 0x1 << 1,
-    BONDP_TJETTY_FLAG_HC_REGISTERED      = 0x1 << 2
+    BONDP_TJETTY_FLAG_HC_REGISTERED      = 0x1 << 2,
+    BONDP_TJETTY_FLAG_REMOTE_LAZY        = 0x1 << 3
 } bondp_tjetty_flag_mask_t;
 
 typedef struct bondp_target_jetty {

@@ -16,3 +16,13 @@ target_link_options(urma_bond_ut PRIVATE -Wl,--export-dynamic)
 
 add_test(NAME urma_bond_ut COMMAND urma_bond_ut)
 set_tests_properties(urma_bond_ut PROPERTIES LABELS phase_bond)
+
+add_executable(urma_bond_lazy_mode_ut
+    lazy_pjetty_mode_test.cpp
+)
+target_link_libraries(urma_bond_lazy_mode_ut PRIVATE urma_test_common ${URMA_UBAGG_SO} ${URMA_SO}
+    ${URMA_COMMON_SO} GTest::gtest_main dl rt pthread)
+target_link_options(urma_bond_lazy_mode_ut PRIVATE -Wl,--export-dynamic)
+
+add_test(NAME urma_bond_lazy_mode_ut COMMAND urma_bond_lazy_mode_ut)
+set_tests_properties(urma_bond_lazy_mode_ut PROPERTIES LABELS phase_bond)
