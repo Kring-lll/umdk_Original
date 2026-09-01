@@ -51,14 +51,6 @@ type RenderClientConfig struct {
 	MaxRetries       int    `json:"maxRetries"`
 	ConnPoolSize     int    `json:"connPoolSize"`
 	BaseURL          string `json:"baseURL"`
-	// PassThroughAuth forwards the inbound request's Authorization header
-	// value (as given to RenderChat/TokenizePrompt/RenderCompletion) verbatim
-	// to the vLLM render endpoint, so a vLLM started with --api-key can be
-	// authenticated without storing a secret in config. Default false: no auth
-	// header is sent (backward compatible with unauthenticated backends). The
-	// auth value is per-request and only flows as far as the render call — it
-	// is not logged or persisted.
-	PassThroughAuth bool `json:"passThroughAuth,omitempty"`
 }
 
 func DefaultRenderClientConfig() RenderClientConfig {

@@ -51,8 +51,7 @@
         "endpointTemplate": "http://{ip}:8000",
         "timeout": 5000,
         "maxRetries": 3,
-        "connPoolSize": 100,
-        "passThroughAuth": false
+        "connPoolSize": 100
       }
     }
   ],

@@ -64,23 +64,10 @@ func TestReadSSEResponse_EmptyBody(t *testing.T) {
 	}
 }
 
-// TestWithAuth_PassThroughDisabled pins backward compatibility: when
-// passThroughAuth is false (default), no Authorization header is sent even if
-// an auth value is supplied, so unauthenticated vLLM backends keep working.
-func TestWithAuth_PassThroughDisabled(t *testing.T) {
-	c := &RenderClient{config: RenderClientConfig{PassThroughAuth: false}}
-	req := httptest.NewRequest("POST", "http://x", nil)
-	c.withAuth(req, "Bearer sk-test")
-	if got := req.Header.Get("Authorization"); got != "" {
-		t.Fatalf("expected no Authorization header when passThroughAuth disabled, got %q", got)
-	}
-}
-
-// TestWithAuth_PassThrough_Forwards verifies that with passThroughAuth enabled
-// and a non-empty auth value, the inbound Authorization value is forwarded
+// TestWithAuth_Forwards verifies that a non-empty auth value is forwarded
 // verbatim (no scheme rewrite) to the render endpoint.
-func TestWithAuth_PassThrough_Forwards(t *testing.T) {
-	c := &RenderClient{config: RenderClientConfig{PassThroughAuth: true}}
+func TestWithAuth_Forwards(t *testing.T) {
+	c := &RenderClient{}
 	req := httptest.NewRequest("POST", "http://x", nil)
 	c.withAuth(req, "Bearer sk-test")
 	if got := req.Header.Get("Authorization"); got != "Bearer sk-test" {
@@ -88,11 +75,12 @@ func TestWithAuth_PassThrough_Forwards(t *testing.T) {
 	}
 }
 
-// TestWithAuth_PassThrough_EmptySkips verifies that when passThroughAuth is
-// enabled but the inbound request carried no Authorization (empty value), no
-// header is sent — the backend is treated as unauthenticated for this call.
-func TestWithAuth_PassThrough_EmptySkips(t *testing.T) {
-	c := &RenderClient{config: RenderClientConfig{PassThroughAuth: true}}
+// TestWithAuth_EmptySkips verifies that when the inbound request carried no
+// Authorization (empty value), no header is sent — preserving backward
+// compatibility with unauthenticated backends (which ignore the header
+// anyway, so sending it is harmless, but we still skip it for cleanliness).
+func TestWithAuth_EmptySkips(t *testing.T) {
+	c := &RenderClient{}
 	req := httptest.NewRequest("POST", "http://x", nil)
 	c.withAuth(req, "")
 	if got := req.Header.Get("Authorization"); got != "" {
@@ -100,9 +88,9 @@ func TestWithAuth_PassThrough_EmptySkips(t *testing.T) {
 	}
 }
 
-// TestRenderChat_SendsAuth end-to-end: a render client with passThroughAuth
-// enabled must forward the supplied Authorization value on the wire and reach
-// a 200 handler (proving the vLLM --api-key check passes without a 401).
+// TestRenderChat_SendsAuth end-to-end: the render client must forward the
+// supplied Authorization value on the wire and reach a 200 handler (proving
+// the vLLM --api-key check passes without a 401).
 func TestRenderChat_SendsAuth(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer sk-test" {
@@ -114,7 +102,7 @@ func TestRenderChat_SendsAuth(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewRenderClient(RenderClientConfig{PassThroughAuth: true}, "m", srv.URL)
+	c := NewRenderClient(RenderClientConfig{}, "m", srv.URL)
 	ids, err := c.RenderChat(context.Background(), "m", []ChatMessage{{Role: "user", Content: "hi"}}, "Bearer sk-test")
 	if err != nil {
 		t.Fatalf("RenderChat failed: %v", err)

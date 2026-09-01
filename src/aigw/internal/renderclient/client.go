@@ -48,14 +48,15 @@ func NewRenderClient(config RenderClientConfig, model, baseURL string) *RenderCl
 }
 
 // withAuth injects the per-request Authorization value into the render
-// request when PassThroughAuth is enabled. authHeader is the verbatim inbound
-// Authorization header value (e.g. "Bearer sk-..."); it is forwarded as-is so
-// the scheme chosen by the caller is preserved. When PassThroughAuth is false,
-// or when authHeader is empty (the inbound request carried no Authorization),
-// no header is set — preserving backward compatibility with unauthenticated
-// backends. The value is not logged or persisted; it only lives for this call.
+// request. authHeader is the verbatim inbound Authorization header value
+// (e.g. "Bearer sk-..."); it is forwarded as-is so the scheme chosen by the
+// caller is preserved, letting a vLLM started with --api-key be authenticated
+// without storing a secret in config. When authHeader is empty (the inbound
+// request carried no Authorization), no header is set — preserving backward
+// compatibility with unauthenticated backends, which ignore the header
+// anyway. The value is not logged or persisted; it only lives for this call.
 func (c *RenderClient) withAuth(req *http.Request, authHeader string) {
-	if !c.config.PassThroughAuth || authHeader == "" {
+	if authHeader == "" {
 		return
 	}
 	req.Header.Set("Authorization", authHeader)
