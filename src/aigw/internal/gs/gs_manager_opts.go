@@ -96,6 +96,12 @@ func WithAlgorithmThreshold(minBlocks int, batchSize int, powerOfTwo bool, block
 		gs.config.lbConfig.BatchSize = batchSize
 		gs.config.lbConfig.PowerOfTwo = powerOfTwo
 		gs.config.lbConfig.BlockSize = blockSize
+		// Fall back to the built-in default when unset so the prefixCache
+		// imbalance intervention is active without requiring users to set
+		// loadBalancer.loadImbalanceThreshold. See #900.
+		if loadImbalanceThreshold <= 0 {
+			loadImbalanceThreshold = defaultLoadImbalanceThreshold
+		}
 		gs.config.lbConfig.LoadImbalanceThreshold = loadImbalanceThreshold
 		return nil
 	}

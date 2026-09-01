@@ -57,6 +57,13 @@ const (
 // VirtualNodesPerWorker is the number of virtual nodes per worker in consistent hash.
 const VirtualNodesPerWorker = 160
 
+// defaultLoadImbalanceThreshold is the token-load spread (max(TokenNum)-
+// min(TokenNum) across ready pods) at which the prefixCache LB switches from
+// prefix-hit selection to load balancing. Applied when the user does not set
+// loadBalancer.loadImbalanceThreshold, so the imbalance intervention has a
+// sane default without surfacing the knob to users. See #900.
+const defaultLoadImbalanceThreshold = 1000
+
 var globalRandom = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 // createEmptyScheduleResult creates an empty schedule result

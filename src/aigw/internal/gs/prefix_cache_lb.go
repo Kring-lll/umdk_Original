@@ -43,8 +43,20 @@ func newPrefixCacheLB(metricProvider MetricProvider, params *AlgorithmParams) (*
 
 	pcConfig := prefixcache.DefaultConfig()
 	pcConfig.Enabled = true
+	// Drive prefix block size from the per-model blockSize (params.BlockSize,
+	// = GlobalSchedulerConfig.BlockSize) so it automatically aligns with the
+	// vLLM --block-size the user already configures, without requiring the
+	// AIGW_PREFIX_CACHE_BLOCK_SIZE env var. The env var still wins when set
+	// (DefaultConfig applies it), preserving the escape hatch. See #900.
+	if params.BlockSize > 0 {
+		pcConfig.BlockSize = params.BlockSize
+	}
 
+	// Force-enable kvevents: selecting the prefixCache algorithm implies the
+	// KV-events subscription that populates the prefix table. Users should
+	// not have to separately set AIGW_KV_EVENTS_ENABLED. See #900.
 	kveventsConfig := kvevents.DefaultKVEventsManagerConfig()
+	kveventsConfig.Enabled = true
 	var extraHandlers []kvevents.EventHandler
 	if params.KvcSessionMgr != nil {
 		// Phase 2: fan out kvevents to both prefixcache and the per-model KvcSessionManager.

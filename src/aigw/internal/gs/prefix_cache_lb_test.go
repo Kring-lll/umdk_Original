@@ -67,6 +67,24 @@ func makeMetric(url, name string, tokenNum, reqNum int) (*InstanceMetric, string
 	}, name
 }
 
+// TestWithAlgorithmThreshold_DefaultLoadImbalanceThreshold: when the caller
+// passes loadImbalanceThreshold <= 0 (user did not set the knob), the option
+// applies the built-in default so the prefixCache imbalance intervention is
+// active without surfacing the config to users. See #900.
+func TestWithAlgorithmThreshold_DefaultLoadImbalanceThreshold(t *testing.T) {
+	gs := &GlobalSchedulerManager{}
+	opt := WithAlgorithmThreshold(50, 32, false, 128, 0)
+	assert.NoError(t, opt(gs))
+	assert.Equal(t, defaultLoadImbalanceThreshold, gs.config.lbConfig.LoadImbalanceThreshold,
+		"unset threshold must fall back to default")
+
+	gs2 := &GlobalSchedulerManager{}
+	opt2 := WithAlgorithmThreshold(50, 32, false, 128, 5000)
+	assert.NoError(t, opt2(gs2))
+	assert.Equal(t, 5000, gs2.config.lbConfig.LoadImbalanceThreshold,
+		"explicit threshold must be honored")
+}
+
 // buildURLMap builds urlToInstanceName from a list of (url,name) pairs.
 func buildURLMap(pods ...[2]string) map[string]string {
 	m := make(map[string]string, len(pods))

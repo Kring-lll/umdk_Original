@@ -45,15 +45,13 @@
         "mixed": "prefixCache",
         "batchSize": 1000000,
         "reservedBlockNumber": 50,
-        "minMatchedLength": 10,
-        "loadImbalanceThreshold": 1000
+        "minMatchedLength": 10
       },
       "renderClient": {
         "endpointTemplate": "http://{ip}:8000",
         "timeout": 5000,
         "maxRetries": 3,
         "connPoolSize": 100,
-        "baseURL": "http://127.0.0.1:8081",
         "apiKey": "",
         "authHeaderName": "",
         "authHeaderPrefix": ""

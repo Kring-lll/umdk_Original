@@ -64,6 +64,11 @@ type KVEventsManagerConfig struct {
 	PollTimeout      time.Duration
 	ReconnectDelay   time.Duration
 	HWM              int
+	// Enabled forces the KV events subscription on. When true the manager is
+	// active regardless of the AIGW_KV_EVENTS_ENABLED env var, so the
+	// prefixCache LB can drive this from its own algorithm selection without
+	// requiring users to set a separate env var. See #900.
+	Enabled bool
 }
 
 func DefaultKVEventsManagerConfig() KVEventsManagerConfig {
@@ -73,6 +78,7 @@ func DefaultKVEventsManagerConfig() KVEventsManagerConfig {
 		PollTimeout:      time.Duration(envKVEventsPollTimeoutMs) * time.Millisecond,
 		ReconnectDelay:   time.Duration(envKVEventsReconnectDelayMs) * time.Millisecond,
 		HWM:              envKVEventsHWM,
+		Enabled:          envKVEventsEnabled,
 	}
 }
 
@@ -93,7 +99,10 @@ type KVEventsManager struct {
 func NewKVEventsManager(handler EventHandler, config KVEventsManagerConfig) *KVEventsManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	enabled := envKVEventsEnabled
+	// Enabled is driven by the prefixCache LB (config.Enabled) OR the
+	// legacy AIGW_KV_EVENTS_ENABLED env var, whichever is true. #900: users
+	// selecting prefixCache should not have to also set the env var.
+	enabled := config.Enabled || envKVEventsEnabled
 
 	if enabled {
 		log.Info().Msg("[kvevents] KV Events support is enabled")
