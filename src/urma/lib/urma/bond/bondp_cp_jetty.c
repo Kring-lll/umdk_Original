@@ -765,8 +765,8 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
     bdp_jfs->comp_type = BONDP_COMP_JFS;
     atomic_init(&bdp_jfs->use_cnt.atomic_cnt, 0);
     atomic_init(&bdp_jfs->deleting, false);
+    atomic_init(&bdp_jfs->modify_to_error, false);
     (void)pthread_spin_init(&bdp_jfs->send_lock, PTHREAD_PROCESS_PRIVATE);
-    bdp_jfs->modify_to_error = false;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
         for (uint32_t j = 0; j < URMA_UBAGG_DEV_MAX_NUM; j++) {
             atomic_init(&bdp_jfs->sqe_cnt[i][j], 0);
@@ -924,7 +924,9 @@ urma_status_t bondp_modify_jfs(urma_jfs_t *jfs, urma_jfs_attr_t *attr)
     bondp_comp_t *bdp_jfs = CONTAINER_OF_FIELD(jfs, bondp_comp_t, v_jfs);
 
     if (((attr->mask & JFS_STATE) != 0) && attr->state == URMA_JETTY_STATE_ERROR) {
-        bdp_jfs->modify_to_error = true;
+        (void)pthread_spin_lock(&bdp_jfs->send_lock);
+        atomic_store(&bdp_jfs->modify_to_error, true);
+        (void)pthread_spin_unlock(&bdp_jfs->send_lock);
     }
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
         if (bdp_jfs->p_jfs[i] == NULL) {
@@ -1342,6 +1344,71 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
     if (jetty_cfg->shared.jfc != NULL) {
         bdp_rplc_jfc = CONTAINER_OF_FIELD(jetty_cfg->shared.jfc, bondp_jfc_t, v_jfc);
     }
+
+    /* Pre-build the primary IODIE and defer every enabled non-primary IODIE. */
+    if (bdp_jetty->pjetty_create_mode == BONDP_PJETTY_CREATE_LAZY_BY_IODIE) {
+        if (bdp_jetty->active_count == 0) {
+            URMA_LOG_ERR("No active index is available for lazy pjetty creation.\n");
+            errno = EINVAL;
+            return -EINVAL;
+        }
+        uint32_t primary_iodie = bondp_iodie_idx_of(bdp_jetty->active_indices[0]);
+        if (primary_iodie == UINT32_MAX) {
+            URMA_LOG_ERR("Invalid primary active_index=%u for lazy pjetty creation.\n",
+                         bdp_jetty->active_indices[0]);
+            errno = EINVAL;
+            return -EINVAL;
+        }
+
+        uint32_t prebuilt_cnt = 0;
+        uint32_t lazy_cnt = 0;
+        for (uint32_t n = 0; n < bdp_jetty->enabled_count; ++n) {
+            uint32_t i = bdp_jetty->enabled_indices[n];
+            uint32_t iodie = bondp_iodie_idx_of(i);
+            if (iodie == UINT32_MAX) {
+                URMA_LOG_ERR("Invalid enabled index=%u for lazy pjetty creation.\n", i);
+                errno = EINVAL;
+                return -EINVAL;
+            }
+            if (iodie != primary_iodie) {
+                lazy_cnt++;
+                URMA_LOG_INFO("Lazy pjetty deferred at create, vjetty cfg id=%u, idx=%u, iodie=%u, "
+                              "primary_iodie=%u\n", jetty_cfg->id, i, iodie, primary_iodie);
+                continue;
+            }
+            p_cfg.jfs_cfg.jfc = bdp_jfs_jfc->p_jfc[i];
+            p_cfg.shared.jfr = bdp_jfr->p_jfr[i];
+            if (bdp_ctx->bonding_level == BONDP_BONDING_LEVEL_PORT) {
+                p_cfg.id = 0;
+            }
+            if (bdp_rplc_jfc) {
+                p_cfg.shared.jfc = bdp_rplc_jfc->p_jfc[i];
+            }
+            urma_jetty_t *jetty = urma_create_jetty(bdp_ctx->p_ctxs[i], &p_cfg);
+            if (jetty == NULL) {
+                URMA_LOG_ERR("Failed to create pjetty (lazy prebuild) idx=%u, iodie=%u.\n", i, primary_iodie);
+                return -1;
+            }
+            jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+            bdp_jetty->p_jetty[i] = jetty;
+            atomic_store(&bdp_jetty->valid[i], true);
+            prebuilt_cnt++;
+            URMA_LOG_INFO("Created pjetty (lazy prebuild), idx=%u, iodie=%u, jetty_id=%u, dev=%s, eid_idx=%u\n",
+                          i, primary_iodie, jetty->jetty_id.id, bdp_ctx->p_ctxs[i]->dev->name,
+                          bdp_ctx->p_ctxs[i]->eid_index);
+        }
+        if (prebuilt_cnt == 0 || lazy_cnt == 0) {
+            URMA_LOG_ERR("Lazy pjetty requires enabled paths on both primary and backup IODIEs, "
+                         "prebuilt=%u, lazy=%u.\n", prebuilt_cnt, lazy_cnt);
+            errno = EINVAL;
+            return -EINVAL;
+        }
+        URMA_LOG_INFO("Lazy pjetty prebuild done, vjetty cfg id=%u, primary_iodie=%u, prebuilt=%u, lazy=%u, "
+                      "enabled_count=%u\n", jetty_cfg->id, primary_iodie, prebuilt_cnt, lazy_cnt,
+                      bdp_jetty->enabled_count);
+        return 0;
+    }
+
     for (uint32_t n = 0; n < bdp_jetty->enabled_count; ++n) {
         uint32_t i = bdp_jetty->enabled_indices[n];
         p_cfg.jfs_cfg.jfc = bdp_jfs_jfc->p_jfc[i];
@@ -1373,7 +1440,7 @@ static int bondp_delete_vjetty(bondp_comp_t *bdp_jetty)
     ref_cnt = atomic_load(&(bdp_jetty->use_cnt.atomic_cnt));
 
     URMA_LOG_INFO("bondp delete, v_jetty id is %u, modify_to err is %d, vjetty_use_cnt is %lu.\n",
-                  bdp_jetty->v_jetty.jetty_id.id, bdp_jetty->modify_to_error, ref_cnt);
+                  bdp_jetty->v_jetty.jetty_id.id, atomic_load(&bdp_jetty->modify_to_error), ref_cnt);
     return urma_cmd_delete_jetty(&bdp_jetty->v_jetty);
 }
 
@@ -1455,6 +1522,50 @@ static void bondp_del_jetty_p_vjetty_info(bondp_comp_t *bdp_jetty)
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
 }
 
+static int bondp_apply_jetty_create_cfg(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty,
+                                        const urma_jetty_cfg_t *jetty_cfg,
+                                        const bondp_port_id_t **port_ids, uint32_t *port_count)
+{
+    bdp_jetty->pjetty_create_mode = BONDP_PJETTY_CREATE_FULL;
+    if (jetty_cfg->flag.bs.has_drv_ext == 0) {
+        return 0;
+    }
+
+    const bondp_jetty_cfg_t *bdp_cfg = (const bondp_jetty_cfg_t *)jetty_cfg;
+    if ((bdp_cfg->port_ids == NULL) != (bdp_cfg->port_count == 0)) {
+        URMA_LOG_ERR("Invalid active port config for jetty, port_ids=%p, port_count=%u.\n",
+                     (const void *)bdp_cfg->port_ids, bdp_cfg->port_count);
+        return -EINVAL;
+    }
+    if (bdp_cfg->port_count != 0) {
+        if (bondp_check_port_chip_id_order(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
+            URMA_LOG_ERR("Active port chip_id order mismatches user_ctl bonding port config.\n");
+            return -EINVAL;
+        }
+        *port_ids = bdp_cfg->port_ids;
+        *port_count = bdp_cfg->port_count;
+    }
+    if (!bdp_cfg->lazy_create) {
+        return 0;
+    }
+
+    int ret = 0;
+    (void)pthread_mutex_lock(&bdp_ctx->v_ctx.mutex);
+    if (!bondp_lazy_pjetty_mode_supported(bdp_ctx, jetty_cfg->jfs_cfg.trans_mode)) {
+        ret = -EINVAL;
+    } else if (bdp_ctx->fb_ctx == NULL) {
+        ret = bondp_fb_init(bdp_ctx);
+    }
+    (void)pthread_mutex_unlock(&bdp_ctx->v_ctx.mutex);
+    if (ret != 0) {
+        URMA_LOG_ERR("Failed to enable lazy pjetty creation, ret=%d.\n", ret);
+        return ret;
+    }
+
+    bdp_jetty->pjetty_create_mode = BONDP_PJETTY_CREATE_LAZY_BY_IODIE;
+    return 0;
+}
+
 urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cfg)
 {
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
@@ -1478,28 +1589,22 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     bdp_jetty->comp_type = BONDP_COMP_JETTY;
     atomic_init(&bdp_jetty->use_cnt.atomic_cnt, 0);
     atomic_init(&bdp_jetty->deleting, false);
+    atomic_init(&bdp_jetty->modify_to_error, false);
+    atomic_init(&bdp_jetty->lazy_create_pending, false);
     (void)pthread_spin_init(&bdp_jetty->send_lock, PTHREAD_PROCESS_PRIVATE);
-    bdp_jetty->modify_to_error = false;
+
+    const bondp_port_id_t *cfg_active_port_ids = NULL;
+    uint32_t cfg_active_port_count = 0;
+    int ret = bondp_apply_jetty_create_cfg(bdp_ctx, bdp_jetty, jetty_cfg,
+                                           &cfg_active_port_ids, &cfg_active_port_count);
+    if (ret != 0) {
+        errno = -ret;
+        goto FREE_JETTY;
+    }
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
         for (uint32_t j = 0; j < URMA_UBAGG_DEV_MAX_NUM; j++) {
             atomic_init(&bdp_jetty->sqe_cnt[i][j], 0);
         }
-    }
-
-    const bondp_port_id_t *cfg_active_port_ids = NULL;
-    uint32_t cfg_active_port_count = 0;
-    if (jetty_cfg->flag.bs.has_drv_ext != 0) {
-        const bondp_jetty_cfg_t *bdp_cfg = (const bondp_jetty_cfg_t *)jetty_cfg;
-        if (bdp_cfg->port_ids == NULL || bdp_cfg->port_count == 0) {
-            URMA_LOG_ERR("Invalid active port config for jetty, port_ids is NULL or port_count is 0\n");
-            goto FREE_JETTY;
-        }
-        if (bondp_check_port_chip_id_order(bdp_ctx, bdp_cfg->port_ids, bdp_cfg->port_count) != 0) {
-            URMA_LOG_ERR("Active port chip_id order mismatches user_ctl bonding port config.\n");
-            goto FREE_JETTY;
-        }
-        cfg_active_port_count = bdp_cfg->port_count;
-        cfg_active_port_ids = bdp_cfg->port_ids;
     }
 
     if (init_active_indices(bdp_ctx, bdp_jetty, cfg_active_port_ids, cfg_active_port_count) != 0) {
@@ -1627,7 +1732,12 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
         return URMA_EAGAIN;
     }
 
-    bondp_fb_cancel_tasks(bdp_ctx, jetty->jetty_id.id);
+    int fb_cancel_ret = bondp_fb_cancel_tasks(bdp_ctx, jetty->jetty_id.id);
+    if (fb_cancel_ret != 0) {
+        URMA_LOG_ERR("Failed to drain jetty[%u] failback tasks, ret=%d\n",
+                     jetty->jetty_id.id, fb_cancel_ret);
+        return URMA_EAGAIN;
+    }
     bondp_uninit_connection_table(bdp_jetty);
     /* Drop all outstanding WRs and their target jetty/segment references. */
     bondp_uninit_wr_buf(&bdp_jetty->send_wr_buf);
@@ -1656,7 +1766,20 @@ urma_status_t bondp_modify_jetty(urma_jetty_t *jetty, urma_jetty_attr_t *attr)
     bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
 
     if (((attr->mask & JETTY_STATE) != 0) && attr->state == URMA_JETTY_STATE_ERROR) {
-        bdp_jetty->modify_to_error = true;
+        (void)pthread_spin_lock(&bdp_jetty->send_lock);
+        atomic_store(&bdp_jetty->modify_to_error, true);
+        /* ERROR owns the terminal transition even if worker cancellation
+         * later fails; do not let CR handling wait on a task that can no
+         * longer publish or resend. */
+        atomic_store(&bdp_jetty->lazy_create_pending, false);
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+        int cancel_ret = bondp_fb_cancel_tasks(bdp_jetty->bondp_ctx,
+                                               bdp_jetty->v_jetty.jetty_id.id);
+        if (cancel_ret != 0) {
+            URMA_LOG_ERR("Failed to drain jetty[%u] failback tasks before ERROR, ret=%d\n",
+                         bdp_jetty->v_jetty.jetty_id.id, cancel_ret);
+            final_ret = URMA_FAIL;
+        }
     }
     URMA_LOG_DEBUG("bondp modify_jetty v_jetty id is %u, old_state is %d.\n",
                    bdp_jetty->v_jetty.jetty_id.id, attr->state);
