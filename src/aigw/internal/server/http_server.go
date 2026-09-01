@@ -613,7 +613,7 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		finishReason = parseFinishReasonFromJSON(result.Body)
 	}
 
-	if sessionID != "" {
+	if suggestion.TargetPrefillUrl != "" {
 		if finishReason == "" {
 			finishReason = "unknown"
 		}
