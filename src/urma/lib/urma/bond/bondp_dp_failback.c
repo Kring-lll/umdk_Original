@@ -9,6 +9,7 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -423,8 +424,40 @@ static int bondp_destroy_lazy_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx
         (void)pthread_spin_unlock(&bdp_jetty->send_lock);
         return -ECANCELED;
     }
-    if (!bondp_primary_iodie_alive(bdp_jetty) ||
-        bondp_lazy_pjetty_has_inflight(bdp_jetty, local_idx)) {
+    bool primary_alive = bondp_primary_iodie_alive(bdp_jetty);
+    bool has_inflight = bondp_lazy_pjetty_has_inflight(bdp_jetty, local_idx);
+    if (!primary_alive || has_inflight) {
+        if (has_inflight) {
+            /* The task retries every BONDP_LAZY_DESTROY_RETRY_MS, so keep the
+             * snapshot rate-limited: it answers whether the drain check is
+             * seeing the real outstanding WR count or a stale one. */
+            char inflight[256];
+            size_t off = 0;
+            for (uint32_t t = 0; t < URMA_UBAGG_DEV_MAX_NUM && off + 1 < sizeof(inflight); ++t) {
+                uint32_t cnt = atomic_load(&bdp_jetty->sqe_cnt[local_idx][t]);
+                if (cnt == 0) {
+                    continue;
+                }
+                int n = snprintf(inflight + off, sizeof(inflight) - off, "%s[%u]=%u",
+                                 off != 0 ? " " : "", t, cnt);
+                if (n < 0) {
+                    break;
+                }
+                if ((size_t)n >= sizeof(inflight) - off) {
+                    off = sizeof(inflight) - 1;
+                    break;
+                }
+                off += (size_t)n;
+            }
+            inflight[off] = '\0';
+            URMA_LOG_WARN_RL("Cold-standby destroy deferred, wrs still in flight, vjetty_id=%u, "
+                             "idx=%u, sqe_cnt(target=count):%s\n",
+                             bdp_jetty->v_jetty.jetty_id.id, local_idx, inflight);
+        } else {
+            URMA_LOG_INFO("Cold-standby destroy deferred, primary iodie not alive, "
+                          "vjetty_id=%u, idx=%u\n",
+                          bdp_jetty->v_jetty.jetty_id.id, local_idx);
+        }
         (void)pthread_spin_unlock(&bdp_jetty->send_lock);
         return -EAGAIN;
     }

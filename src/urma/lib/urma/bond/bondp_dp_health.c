@@ -9,6 +9,7 @@
 
 #include <errno.h>
 #include <malloc.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -217,6 +218,10 @@ static void hc_rebuild_probe_jetty(bondp_hc_ctx_t *hc_ctx, bondp_probe_res_t *re
     res->jetty = hc_create_probe_jetty(p_ctx, res->jfc, res->jfr, local_idx, hc_ctx->priority);
     if (res->jetty == NULL) {
         URMA_LOG_ERR("Failed to rebuild health probe jetty, local_idx=%d.\n", local_idx);
+    } else {
+        /* Permanently failed ports rebuild every probe round; keep this
+         * verbose line at debug level to avoid flooding the log. */
+        URMA_LOG_DEBUG("Health probe jetty rebuilt after ack timeout, local_idx=%d.\n", local_idx);
     }
 }
 
@@ -307,6 +312,7 @@ static void hc_process_probe_cr(bondp_hc_ctx_t *hc_ctx, int local_idx, const urm
                                                                            target_idx);
         prev = (p_tjetty != NULL) ? atomic_load(&p_tjetty->valid) : true;
     }
+    bool path_prev = atomic_load(&path->valid);
     atomic_store(&path->valid, ok);
     path->no_cqe_round = 0;
     path->probe_checked = true;
@@ -320,6 +326,13 @@ static void hc_process_probe_cr(bondp_hc_ctx_t *hc_ctx, int local_idx, const urm
     if (ok && !prev) {
         URMA_LOG_INFO("Health probe link [%d, %d] recovered.\n", local_idx, target_idx);
         hc_set_tjetty_list_target_valid(node, (uint32_t)local_idx, target_idx);
+    }
+    /* Log the good-to-bad transition only: a probe failure flips path->valid
+     * and later feeds bondp_hc_tjetty_sync_valid, which clears the schedulable
+     * target flag on the next failover CR. */
+    if (!ok && path_prev) {
+        URMA_LOG_WARN("Health probe link [%d, %d] failed, cr_status=%d.\n", local_idx, target_idx,
+                      cr->status);
     }
     if (bdp_ctx != NULL) {
         hc_set_local_idx_jettys_hc_valid(bdp_ctx, (uint32_t)local_idx);
@@ -1185,8 +1198,32 @@ void bondp_hc_tjetty_sync_valid(const bondp_target_jetty_t *bdp_tjetty)
     }
 
     bondp_hc_node_t *node = &hc_ctx->nodes[node_idx];
+    /* Diagnostic: collect the probe-invalid paths this sync is about to
+     * propagate into the target-jetty valid flags. */
+    char failed_pairs[256];
+    size_t off = 0;
+    uint32_t failed_cnt = 0;
+
     bondp_target_jetty_t *cur = NULL;
     pthread_rwlock_rdlock(&node->lock);
+    for (uint32_t p = 0; p < node->path_cnt && off + 1 < sizeof(failed_pairs); ++p) {
+        bondp_hc_path_t *path = &node->paths[p];
+        if (path->tjetty == NULL || atomic_load(&path->valid)) {
+            continue;
+        }
+        int n = snprintf(failed_pairs + off, sizeof(failed_pairs) - off, "%s[%u, %u]",
+                         failed_cnt != 0 ? " " : "",
+                         (uint32_t)path->local_idx, (uint32_t)path->target_idx);
+        if (n < 0) {
+            break;
+        }
+        if ((size_t)n >= sizeof(failed_pairs) - off) {
+            off = sizeof(failed_pairs) - 1;
+            break;
+        }
+        off += (size_t)n;
+        failed_cnt++;
+    }
     UB_LIST_FOR_EACH (cur, hc_entry, &node->tjetty_list) {
         for (uint32_t p = 0; p < node->path_cnt; ++p) {
             bondp_hc_path_t *path = &node->paths[p];
@@ -1204,4 +1241,10 @@ void bondp_hc_tjetty_sync_valid(const bondp_target_jetty_t *bdp_tjetty)
         }
     }
     pthread_rwlock_unlock(&node->lock);
+
+    if (failed_cnt != 0) {
+        URMA_LOG_WARN_RL("Health check sync invalidated %u path(s) after link failure: "
+                         "vjetty_id=%u, paths:%s\n",
+                         failed_cnt, bdp_tjetty->v_tjetty.id.id, failed_pairs);
+    }
 }

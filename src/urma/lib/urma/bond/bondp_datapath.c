@@ -8,6 +8,7 @@
  * History: 2025-02-19   Create File
  */
 
+#include <stdio.h>
 #include <threads.h>
 
 #include "bondp_connection.h"
@@ -377,7 +378,8 @@ static urma_status_t schedule_send_wr_with_lazy_sync(const urma_jfs_wr_t *wr,
  * try_failback() skip send_lock entirely. A health-check recovery that becomes
  * visible right after this check is picked up by the next post.
  */
-static void failback_resend_wr(bondp_comp_t *bdp_comp, uint64_t resend_wr_id)
+static void failback_resend_wr(bondp_comp_t *bdp_comp, uint64_t resend_wr_id,
+                               const bool *slot_live_before_switch)
 {
     jfs_wr_entry_t *resend_wr_entry = jfs_wr_buf_get(&bdp_comp->send_wr_buf, resend_wr_id);
     if (resend_wr_entry == NULL ||
@@ -388,6 +390,17 @@ static void failback_resend_wr(bondp_comp_t *bdp_comp, uint64_t resend_wr_id)
 
     uint32_t old_send_idx = resend_wr_entry->send_idx;
     uint32_t old_target_idx = resend_wr_entry->target_idx;
+    /* Entries on a slot that was ALREADY valid before this failback switch are
+     * in flight on a live path (e.g. the cold standby): reposting them would
+     * double-deliver the WR and prematurely drop sqe_cnt, which also lets a
+     * concurrent cold-standby destroy pass its inflight check and flush the
+     * still-outstanding original. Entries on invalid slots, or on slots
+     * recovered by THIS switch, are stranded (their error CR was consumed)
+     * and must be resent. */
+    if (slot_live_before_switch[old_send_idx]) {
+        return;
+    }
+
     uint32_t target_vjetty_id = resend_wr_entry->target_vjetty->v_tjetty.id.id;
     int new_send_idx = -1;
     int new_target_idx = -1;
@@ -414,6 +427,10 @@ static void failback_resend_wr(bondp_comp_t *bdp_comp, uint64_t resend_wr_id)
                      target_vjetty_id, old_send_idx, old_target_idx, new_send_idx, new_target_idx);
         return;
     }
+    URMA_LOG_INFO("Failback resend wr, wr_id=%lu, vjetty_id=%u, tjetty_id=%u, "
+                  "from=[%u, %u], to=[%d, %d]\n",
+                  resend_wr_id, bdp_comp->v_jetty.jetty_id.id,
+                  target_vjetty_id, old_send_idx, old_target_idx, new_send_idx, new_target_idx);
 }
 
 static void try_failback(bondp_comp_t *bdp_comp)
@@ -424,13 +441,22 @@ static void try_failback(bondp_comp_t *bdp_comp)
 
     pthread_spin_lock(&bdp_comp->send_lock);
 
+    /* Snapshot which slots are already live BEFORE the switch, so the resend
+     * pass can distinguish in-flight WRs (live slot, keep) from stranded ones
+     * (invalid or just-recovered slot, resend). send_lock excludes concurrent
+     * failover-CR invalidation and lazy destroy. */
+    bool slot_live_before_switch[URMA_UBAGG_DEV_MAX_NUM] = {false};
+    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+        slot_live_before_switch[i] = atomic_load(&bdp_comp->valid[i]);
+    }
+
     if (bondp_fb_switch_path(bdp_comp) == 0) {
         pthread_spin_unlock(&bdp_comp->send_lock);
         return;
     }
 
     for (uint32_t i = 0; i < bdp_comp->send_wr_buf.max_wr_num; ++i) {
-        failback_resend_wr(bdp_comp, (uint64_t)i + 1);
+        failback_resend_wr(bdp_comp, (uint64_t)i + 1, slot_live_before_switch);
     }
     pthread_spin_unlock(&bdp_comp->send_lock);
 
@@ -480,6 +506,42 @@ static int bondp_translate_recv_bad_wr(urma_jfr_wr_t *prealloc_wr_list, urma_jfr
     return bad_idx;
 }
 
+/*
+ * Dump the scheduling state when a post finds no usable path (URMA_FAIL /
+ * 4096): per target pair (local->remote) whether the target side is imported
+ * and valid, and whether the local slot is valid, so the failure can be
+ * attributed to a specific flag instead of a silent return.
+ */
+static void bondp_log_post_no_route(const bondp_comp_t *bdp_comp,
+                                    const bondp_target_jetty_t *bdp_tjetty)
+{
+    char pairs[512];
+    size_t off = 0;
+
+    for (uint32_t j = 0; j < bdp_tjetty->p_tjetty_count && off + 1 < sizeof(pairs); ++j) {
+        const bondp_p_target_jetty_t *p_tjetty = &bdp_tjetty->p_tjettys[j];
+        int n = snprintf(pairs + off, sizeof(pairs) - off, " [%u->%u imp:%s tgt:%s lcl:%s]",
+                         (uint32_t)p_tjetty->local_indice, (uint32_t)p_tjetty->remote_indice,
+                         p_tjetty->p_tjetty != NULL ? "Y" : "N",
+                         atomic_load(&p_tjetty->valid) ? "Y" : "N",
+                         atomic_load(&bdp_comp->valid[p_tjetty->local_indice]) ? "Y" : "N");
+        if (n < 0) {
+            break;
+        }
+        if ((size_t)n >= sizeof(pairs) - off) {
+            off = sizeof(pairs) - 1;
+            break;
+        }
+        off += (size_t)n;
+    }
+    pairs[off] = '\0';
+
+    const urma_jetty_id_t *comp_id = get_comp_urma_jetty_id((bondp_comp_t *)bdp_comp);
+    URMA_LOG_WARN_RL("Post send found no usable path, comp_id=%u, tjetty_id=%u, "
+                     "pairs(local->remote imp/tgt/lcl):%s\n",
+                     comp_id != NULL ? comp_id->id : 0, bdp_tjetty->v_tjetty.id.id, pairs);
+}
+
 static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
                                                  const urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr,
                                                  int wr_total)
@@ -500,6 +562,9 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
         int target_idx = -1;
         ret = schedule_send_wr_with_lazy_sync(wr, bdp_comp, &send_idx, &target_idx);
         if (ret != 0) {
+            if (ret == URMA_FAIL) {
+                bondp_log_post_no_route(bdp_comp, bdp_tjetty);
+            }
             if (ret == URMA_EAGAIN && bad_wr != NULL) {
                 *bad_wr = (urma_jfs_wr_t *)wr;
             }
@@ -583,6 +648,9 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
         jfs_wr_entry_t *wr_entries[BONDP_BATCH_POST_MAX_NUM];
         ret = schedule_send_wr_with_lazy_sync(wr, bdp_comp, &send_idx, &target_idx);
         if (ret != 0) {
+            if (ret == URMA_FAIL) {
+                bondp_log_post_no_route(bdp_comp, bdp_tjetty);
+            }
             if (ret == URMA_EAGAIN && bad_wr != NULL) {
                 *bad_wr = wr;
             }
@@ -1753,11 +1821,21 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         }
         atomic_store(&bdp_comp->valid[send_idx], false);
         bondp_target_jetty_t *bdp_tjetty = wr_entry->target_vjetty;
+        /* The target-side valid flag is LINK-level state and must stay fully
+         * probe-driven: cleared node-wide by the sync above once the probe
+         * confirms the path bad, restored node-wide on probe recovery. Do NOT
+         * clear the flag of this CR's tjetty only: with many tjettys sharing
+         * one health-check path (e.g. many vjettys importing the same remote),
+         * a per-tjetty clear desynchronizes them from the single-tjetty sample
+         * the recovery gate uses, leaving one tjetty's flag stuck false after
+         * failback (post 4096 with no route). This comp is already blocked by
+         * valid[send_idx]=false above. */
         bondp_hc_tjetty_sync_valid(bdp_tjetty);
-        bondp_p_target_jetty_t *skip_p_tjetty = bondp_find_p_tjetty(bdp_tjetty, send_idx, target_idx);
-        if (skip_p_tjetty != NULL) {
-            atomic_store(&skip_p_tjetty->valid, false);
-        }
+        URMA_LOG_INFO("Path fail: wr_id=%lu, "
+                      "vjetty_id=%u, tjetty_id=%u, path=[%u, %u], cr_status=%d\n",
+                      wr_id, bdp_comp->v_jetty.jetty_id.id,
+                      wr_entry->target_vjetty->v_tjetty.id.id,
+                      send_idx, target_idx, cr->status);
         if (is_need_rebuild_jetty(cr) && comp_ctx->enable_failback) {
             int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);
             if (ret != 0 && ret != -EEXIST) {
