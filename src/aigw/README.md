@@ -512,9 +512,6 @@ curl -X POST http://<aigw-ip>:8701/aigw/v1/register-instance \
   -d '{"name":"worker-19000","model":"Qwen2.5-7B","instanceIp":"127.0.0.1","port":"19000","role":"mixed","groupID":""}'
 ```
 
-> 管理面集成：若 AgentOS 管理面添加模型后需自动注册实例，可调用
-> `POST /aigw/v1/models/auto-register`（见 #897），无需手动 curl。
-
 ---
 
 ## 操作步骤（从 0 到可用，前缀匹配场景）
