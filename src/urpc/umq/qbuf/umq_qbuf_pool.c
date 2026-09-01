@@ -79,6 +79,18 @@
 #define QBUF_BLOCK_RAW_WORD_SIZE_CAP     (1)
 #define QBUF_BLOCK_RAW_WORD_META         (2)
 #define QBUF_BLOCK_RAW_WORD_DATA_PTR     (3)
+// Additional named constants for literals carried in by the sync commits
+#define QBUF_LAT_NS_5US        5000ULL
+#define QBUF_LAT_NS_10US       10000ULL
+#define QBUF_LAT_NS_100US      100000ULL
+#define QBUF_LAT_NS_1MS        1000000ULL
+#define QBUF_LAT_NS_10MS       10000000ULL
+#define QBUF_LC_PATH_COUNT     4
+#define QBUF_PAGE_SIZE         4096
+#define QBUF_1MB               (1U << 20)
+#define QBUF_HASH_SHIFT_21     21
+#define QBUF_HASH_SHIFT_33     33
+
 #define QBUF_BLOCK_RAW_WORD_COUNT        (4)
 
 typedef struct qbuf_expansion_pool_slot {
@@ -332,19 +344,19 @@ static inline int qbuf_lat_bucket(uint64_t ns)
     if (ns < 1000ULL) {
         return QBUF_LAT_BUCKET_100NS_TO_1US;
     }
-    if (ns < 5000ULL) {
+    if (ns < QBUF_LAT_NS_5US) {
         return QBUF_LAT_BUCKET_1US_TO_5US;
     }
-    if (ns < 10000ULL) {
+    if (ns < QBUF_LAT_NS_10US) {
         return QBUF_LAT_BUCKET_5US_TO_10US;
     }
-    if (ns < 100000ULL) {
+    if (ns < QBUF_LAT_NS_100US) {
         return QBUF_LAT_BUCKET_10US_TO_100US;
     }
-    if (ns < 1000000ULL) {
+    if (ns < QBUF_LAT_NS_1MS) {
         return QBUF_LAT_BUCKET_100US_TO_1MS;
     }
-    if (ns < 10000000ULL) {
+    if (ns < QBUF_LAT_NS_10MS) {
         return QBUF_LAT_BUCKET_1MS_TO_10MS;
     }
     return QBUF_LAT_BUCKET_OVER_10MS;
@@ -994,6 +1006,74 @@ static async_shrink_pool_param_t *async_shrink_pop_param(qbuf_expansion_pool_t *
     return param;
 }
 
+/* Drain one pending shrink task. Extracted from the async shrink worker to
+ * keep nesting shallow (codecheck FUD.05). On any pre-condition failure the
+ * spinlock is released and the param freed; otherwise the slot is removed and
+ * the accounting/debug counters are updated. */
+static void qbuf_async_shrink_drain_param(qbuf_expansion_pool_t *exp_pool,
+                                          async_shrink_pool_param_t *shrink_param)
+{
+    (void)pthread_spin_lock(&exp_pool->expansion_pool_lock);
+    if (!exp_pool->inited || shrink_param->slot_id >= QBUF_POOL_EXP_SLOT_TABLE_SIZE) {
+        (void)pthread_spin_unlock(&exp_pool->expansion_pool_lock);
+        free(shrink_param);
+        return;
+    }
+    qbuf_expansion_pool_slot_t *slot = NULL;
+    URPC_LIST_FOR_EACH(slot, node, &exp_pool->slot_list) {
+        if (slot->slot_id == shrink_param->slot_id) {
+            break;
+        }
+    }
+    if (&slot->node == &exp_pool->slot_list || slot->free_block_cnt != slot->total_block_cnt) {
+        (void)pthread_spin_unlock(&exp_pool->expansion_pool_lock);
+        free(shrink_param);
+        return;
+    }
+    urpc_list_remove(&slot->node);
+    g_exp_slot_table[shrink_param->slot_id] = NULL;
+
+    exp_pool->expansion_count -= 1;
+    exp_pool->slot_count -= 1;
+    exp_pool->exp_total_block_num -= slot->total_block_cnt;
+    (void)pthread_spin_unlock(&exp_pool->expansion_pool_lock);
+
+    bool shrink_wd = shrink_param->with_data;
+    slot_uninit(shrink_wd, slot);
+    free_expansion_pool_slot(slot);
+    free(shrink_param);
+    exp_pool->total_shrink_count++;
+    if (shrink_wd) {
+        if (qbuf_debug_on())
+            g_dbg_stats.shrink_with_data++;
+    } else {
+        if (qbuf_debug_on())
+            g_dbg_stats.shrink_without_data++;
+    }
+}
+
+/* Decay delay: keep the slot's memory reserved for a configurable window so a
+ * near-term re-alloc can reuse it without going through free+mmap again.
+ * Skip the sleep if the pool is being torn down (inited==false or stop==true)
+ * so pthread_join in uninit is not blocked for up to shrink_decay_ms. */
+static void qbuf_shrink_decay_wait(const qbuf_expansion_pool_t *exp_pool,
+                                   const async_shrink_pool_param_t *shrink_param)
+{
+    if (g_qbuf_pool.shrink_decay_ms == 0 || !exp_pool->inited || exp_pool->shrink_task_list.stop) {
+        return;
+    }
+
+    struct timespec decay_ts;
+    clock_gettime(CLOCK_MONOTONIC, &decay_ts);
+    uint64_t now_ns = (uint64_t)decay_ts.tv_sec * NS_PER_SEC + (uint64_t)decay_ts.tv_nsec;
+    uint64_t elapsed_ns = now_ns - shrink_param->push_time_ns;
+    uint64_t decay_ns = (uint64_t)g_qbuf_pool.shrink_decay_ms * NS_PER_MS;
+    if (elapsed_ns < decay_ns) {
+        uint64_t remaining_us = (decay_ns - elapsed_ns) / 1000ULL;
+        (void)usleep((useconds_t)remaining_us);
+    }
+}
+
 static void *async_shrink_global_pool_callback(void *arg)
 {
     if (pthread_setname_np(pthread_self(), QBUF_POOL_ASYNC_SHRINK_PTHREAD_NAME) != 0) {
@@ -1016,6 +1096,7 @@ static void *async_shrink_global_pool_callback(void *arg)
         }
         if (exp_pool->shrink_task_list.stop) {
             (void)pthread_mutex_unlock(&exp_pool->shrink_task_list.mutex);
+            keep_running = false;
             break;
         }
         /* List is non-empty — drain all pending tasks. */

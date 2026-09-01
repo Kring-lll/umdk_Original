@@ -17,6 +17,8 @@
 #include "umq_ub_api.h"
 #include "umq_ub_private.h"
 #include "umq_symbol_private.h"
+/* Codecheck (CNS.02) named constant */
+#define UB_IMPORT_MEMPOOL_INFO_HDR_U32CNT 5  /* header uint32_t words before seg */
 
 #define DEFAULT_RNR_RETRY 6      // Retry 6 times
 #define DEFAULT_ERR_TIMEOUT 2
