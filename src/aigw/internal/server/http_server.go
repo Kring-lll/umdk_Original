@@ -511,6 +511,7 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		log.Error().Msgf("Failed to get scheduling suggestion: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to get scheduling suggestion: %v", err), statusCode)
 		if sessionID != "" {
+			// No suggestion → request was never dispatched → nothing to free.
 			s.manager.ErrOnCancel(model, sessionID, in.UUID, "", "")
 		}
 		return
@@ -523,6 +524,7 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 	if targetURL == "" {
 		http.Error(w, "No available worker instance", http.StatusServiceUnavailable)
 		if sessionID != "" {
+			// Suggestion exists but has no instance URL (PrefillUrl == "").
 			s.manager.ErrOnCancel(model, sessionID, in.UUID, suggestion.TargetPrefillUrl, suggestion.TargetDecodeUrl)
 		}
 		return
@@ -557,6 +559,7 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		log.Error().Msgf("Forward request failed: %v", err)
 		http.Error(w, fmt.Sprintf("Forward request failed: %v", err), http.StatusBadGateway)
 		if sessionID != "" {
+			// Request was dispatched (OnDispatched already counted it); free its slot.
 			s.manager.ErrOnCancel(model, sessionID, in.UUID, suggestion.TargetPrefillUrl, suggestion.TargetDecodeUrl)
 		}
 		return
