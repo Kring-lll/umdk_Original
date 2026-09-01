@@ -507,8 +507,10 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		statusCode := http.StatusInternalServerError
 		if errors.Is(err, gs.ErrQueueFull) || errors.Is(err, gs.ErrNoInstance) {
 			statusCode = http.StatusServiceUnavailable
+			log.Warn().Msgf("Scheduling unavailable: %v", err)
+		} else {
+			log.Error().Msgf("Failed to get scheduling suggestion: %v", err)
 		}
-		log.Error().Msgf("Failed to get scheduling suggestion: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to get scheduling suggestion: %v", err), statusCode)
 		if sessionID != "" {
 			// No suggestion → request was never dispatched → nothing to free.
