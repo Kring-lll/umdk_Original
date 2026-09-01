@@ -52,11 +52,10 @@ func newPrefixCacheLB(metricProvider MetricProvider, params *AlgorithmParams) (*
 		pcConfig.BlockSize = params.BlockSize
 	}
 
-	// Force-enable kvevents: selecting the prefixCache algorithm implies the
-	// KV-events subscription that populates the prefix table. Users should
-	// not have to separately set AIGW_KV_EVENTS_ENABLED. See #900.
+	// Selecting the prefixCache algorithm implies the KV-events subscription
+	// that populates the prefix table. kvevents is active on construction, so
+	// no separate enable flag or env var is needed (#900).
 	kveventsConfig := kvevents.DefaultKVEventsManagerConfig()
-	kveventsConfig.Enabled = true
 	var extraHandlers []kvevents.EventHandler
 	if params.KvcSessionMgr != nil {
 		// Phase 2: fan out kvevents to both prefixcache and the per-model KvcSessionManager.

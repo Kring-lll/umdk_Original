@@ -49,7 +49,6 @@ func loadEnvInt(key string, defaultVal int) int {
 }
 
 var (
-	envKVEventsEnabled          = loadEnvBool("AIGW_KV_EVENTS_ENABLED", false)
 	envKVEventsEndpointTemplate = loadEnvString("AIGW_KV_EVENTS_ENDPOINT_TEMPLATE", "tcp://{ip}:5557")
 	envKVEventsTopic            = loadEnvString("AIGW_KV_EVENTS_TOPIC", "")
 	envKVEventsPollTimeoutMs    = loadEnvInt("AIGW_KV_EVENTS_POLL_TIMEOUT_MS", 100)
@@ -64,11 +63,6 @@ type KVEventsManagerConfig struct {
 	PollTimeout      time.Duration
 	ReconnectDelay   time.Duration
 	HWM              int
-	// Enabled forces the KV events subscription on. When true the manager is
-	// active regardless of the AIGW_KV_EVENTS_ENABLED env var, so the
-	// prefixCache LB can drive this from its own algorithm selection without
-	// requiring users to set a separate env var. See #900.
-	Enabled bool
 }
 
 func DefaultKVEventsManagerConfig() KVEventsManagerConfig {
@@ -78,13 +72,11 @@ func DefaultKVEventsManagerConfig() KVEventsManagerConfig {
 		PollTimeout:      time.Duration(envKVEventsPollTimeoutMs) * time.Millisecond,
 		ReconnectDelay:   time.Duration(envKVEventsReconnectDelayMs) * time.Millisecond,
 		HWM:              envKVEventsHWM,
-		Enabled:          envKVEventsEnabled,
 	}
 }
 
 type KVEventsManager struct {
 	config  KVEventsManagerConfig
-	enabled bool
 	handler EventHandler
 
 	mu       sync.RWMutex
@@ -96,23 +88,16 @@ type KVEventsManager struct {
 	wg     sync.WaitGroup
 }
 
+// NewKVEventsManager creates a manager that is active on construction.
+// kvevents is driven solely by the prefixCache algorithm selection — selecting
+// prefixCache creates the manager and subscribes to instances, so no separate
+// enable flag or env var (#900) is needed.
 func NewKVEventsManager(handler EventHandler, config KVEventsManagerConfig) *KVEventsManager {
 	ctx, cancel := context.WithCancel(context.Background())
-
-	// Enabled is driven by the prefixCache LB (config.Enabled) OR the
-	// legacy AIGW_KV_EVENTS_ENABLED env var, whichever is true. #900: users
-	// selecting prefixCache should not have to also set the env var.
-	enabled := config.Enabled || envKVEventsEnabled
-
-	if enabled {
-		log.Info().Msg("[kvevents] KV Events support is enabled")
-	} else {
-		log.Info().Msg("[kvevents] KV Events support is disabled")
-	}
+	log.Info().Msg("[kvevents] KV Events support is enabled")
 
 	return &KVEventsManager{
 		config:   config,
-		enabled:  enabled,
 		handler:  handler,
 		clients:  make(map[string]*ZMQClient),
 		handlers: make(map[string]*eventHandler),
@@ -121,15 +106,14 @@ func NewKVEventsManager(handler EventHandler, config KVEventsManagerConfig) *KVE
 	}
 }
 
+// IsEnabled reports whether the manager is active. A constructed manager is
+// always active; the method is retained as a non-nil convenience check for
+// callers (e.g. prefixcache.Start) that gate on it.
 func (m *KVEventsManager) IsEnabled() bool {
-	return m.enabled
+	return m != nil
 }
 
 func (m *KVEventsManager) SubscribeInstance(instanceName, instanceIP, modelName string) error {
-	if !m.enabled {
-		return nil
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

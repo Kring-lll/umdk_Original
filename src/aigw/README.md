@@ -290,14 +290,13 @@ AIGW/
     "maxTimeBetweenTokens": 50,
     "loadBalancer": { "mixed": "prefixCache" },  // 启用前缀匹配
     "renderClient": {
-      "endpointTemplate": "http://{ip}:8000",
-      "apiKey": ""                        // vLLM 配了 --api-key 时填同 key，否则留空
+      "endpointTemplate": "http://{ip}:8000"   // vLLM 配了 --api-key 时，鉴权由入站请求的 Authorization 头透传，无需在此配 key
     }
   }]
 }
 ```
 
-> 说明：`AIGW_PREFIX_CACHE_ENABLED`、`AIGW_KV_EVENTS_ENABLED`、
+> 说明：`AIGW_PREFIX_CACHE_ENABLED`、
 > `AIGW_PREFIX_CACHE_BLOCK_SIZE`、`loadBalancer.loadImbalanceThreshold`、
 > `renderClient.baseURL` 等项在选 prefixCache 算法后会自动推断或采用默认值，
 > 通常无需手动设置。`AIGW_PREFIX_CACHE_MATCH_THRESHOLD` 并不存在，匹配阈值由
@@ -310,7 +309,6 @@ AIGW/
 | 环境变量 | 默认 | 含义 |
 |----------|------|------|
 | `AIGW_PREFIX_CACHE_ENABLED` | false | prefixCache 特性总开关（选 prefixCache 算法时自动启用） |
-| `AIGW_KV_EVENTS_ENABLED` | false | KV 事件订阅开关（选 prefixCache 算法时自动启用） |
 | `AIGW_PREFIX_CACHE_BLOCK_SIZE` | 16 | 前缀 hash 块大小（自动由 `globalSchedulers[].blockSize` 驱动，env 可覆盖） |
 | `AIGW_PREFIX_CACHE_MAX_CONTEXTS` | 1000 | 最大并发上下文数 |
 | `AIGW_PREFIX_CACHE_MAX_PREFIXES_PER_CONTEXT` | 10000 | 单上下文最大前缀条目数 |
