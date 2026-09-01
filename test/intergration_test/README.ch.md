@@ -27,7 +27,7 @@
 
 2. Environment YAML File Preparation
 - YAML format requirements are as follows:
-  - host1 and host2 represent 2 test environments
+  - `host1` and `host2` represent 2 test environments
   - `user` and `passwd` are the username and password for logging into the environment
   - `manage_nic` represents the management network interface card (NIC).   
     `name` and `ip` represent the NIC name and IP address of the management NIC.
