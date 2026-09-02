@@ -6876,6 +6876,26 @@ Constraints and ordering:
 
 Return: 0 on success, `URMA_EAGAIN` when the context is still referenced by existing objects, other value on error.
 
+##### 2.5.1.1.4 Bond per-port WR posting
+
+[bondp_api.h](../../../src/urma/lib/urma/bond/include/bondp_api.h) provides four interfaces for posting WRs on a specified bond member port:
+
+- `bondp_post_jfs_wr` / `bondp_post_jetty_send_wr`: post a send WR that consumes RQEs on the given target port. `port_id` selects the remote receiving port, which must be a reachable target of this WR.
+- `bondp_post_jfr_wr` / `bondp_post_jetty_recv_wr`: post a receive WR on the given port. `port_id` selects the local receiving port, which must be a member of the JFR/Jetty.
+
+An invalid or non-member `port_id` fails the call with `URMA_EINVAL`. The port id uses `bondp_port_id_t` defined in [urma_ubagg.h](../../../src/urma/lib/urma/bond/include/urma_ubagg.h); the semantics of its fields are the same as those described in [BONDP_USER_CTL_SET_BONDING_PORT](#25113-bondp_user_ctl_set_bonding_port).
+
+A send WR posted this way is pinned to the specified target port and is never rerouted to another target port: if that port fails, the error CQE is returned instead of resending through a backup path. Normally scheduled send WRs on the same failed path are still failed over to a backup path.
+
+For receive CQEs on a bonding context, the receiving member port is encoded in `imm_data` bits [22, 37]:
+
+```c
+uint16_t recv_port = (cr->imm_data & BONDP_IMM_PORT_ID_MASK) >> BONDP_IMM_PORT_ID_SHIFT;
+/* recv_port == BONDP_RECV_PORT_UNAVAILABLE (0) means the port information is unavailable. */
+```
+
+This encoding applies to all receive CQEs of a bonding context, including receive WRs posted through the normal scheduled interfaces. Applications must mask off `BONDP_IMM_PORT_ID_MASK` before comparing or interpreting `imm_data` as immediate data.
+
 ### 2.5.2 Logging
 
 #### 2.5.2.1 urma_register_log_func
