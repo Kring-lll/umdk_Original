@@ -93,13 +93,9 @@ func (a *CatErrAlg) Priority(_ string, k int, prompt string) float64 {
 	if a.Classifier != nil && a.Classifier.IsLoaded() {
 		category := a.Classifier.Classify(prompt)
 		if category != "" {
-			if a.mu != nil {
-				a.mu.RLock()
-			}
+			a.mu.RLock()
 			dist, ok := a.CatDists[category]
-			if a.mu != nil {
-				a.mu.RUnlock()
-			}
+			a.mu.RUnlock()
 			if ok && dist.TotalCount() > 0 {
 				return dist.ExpectedRemaining(k)
 			}

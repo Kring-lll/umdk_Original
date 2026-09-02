@@ -129,6 +129,8 @@ func (d *EmpiricalDist) Refresh() {
 	})
 }
 
+// evictFront removes the oldest entry from rawValues.
+// Caller must hold d.mu.
 func (d *EmpiricalDist) evictFront() {
 	front := d.rawValues.Front()
 	if front == nil {
