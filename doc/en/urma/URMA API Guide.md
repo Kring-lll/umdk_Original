@@ -6660,6 +6660,39 @@ Constraints and ordering:
 
 Return: 0 on success, `URMA_EAGAIN` when the context is still referenced by existing objects, other value on error.
 
+##### 2.5.1.1.4 Bond per-port WR posting
+
+[bondp_api.h](../../../src/urma/lib/urma/bond/include/bondp_api.h) provides four interfaces for posting WRs on a specified bond member port:
+
+```c
+urma_status_t bondp_post_jfs_wr(urma_jfs_t *jfs, urma_jfs_wr_t *wr,
+                                bondp_path_hint_t *hint, urma_jfs_wr_t **bad_wr);
+urma_status_t bondp_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr,
+                                       bondp_path_hint_t *hint, urma_jfs_wr_t **bad_wr);
+urma_status_t bondp_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr,
+                                bondp_path_hint_t *hint, urma_jfr_wr_t **bad_wr);
+urma_status_t bondp_post_jetty_recv_wr(urma_jetty_t *jetty, urma_jfr_wr_t *wr,
+                                       bondp_path_hint_t *hint, urma_jfr_wr_t **bad_wr);
+```
+
+- `bondp_post_jfs_wr` / `bondp_post_jetty_send_wr`: post a send WR that consumes RQEs on the given target port. `hint->dst_port_id` selects the remote receiving port, which must be a reachable target of this WR.
+- `bondp_post_jfr_wr` / `bondp_post_jetty_recv_wr`: post a receive WR on the given port. `hint->src_port_id` selects the local receiving port, which must be a member of the JFR/Jetty.
+
+The port is specified through the `hint` parameter of type `bondp_path_hint_t`, defined in [bondp_api.h](../../../src/urma/lib/urma/bond/include/bondp_api.h). `hint` must not be NULL and should be zero-initialized as a whole (including the reserved bits): send interfaces set `flag.bs.has_dst_port = 1` and fill in `dst_port_id`; receive interfaces set `flag.bs.has_src_port = 1` and fill in `src_port_id`; the other port-valid bit must remain 0. The port id uses `bondp_port_id_t` defined in [urma_ubagg.h](../../../src/urma/lib/urma/bond/include/urma_ubagg.h); the semantics of its fields are the same as those described in [BONDP_USER_CTL_SET_BONDING_PORT](#25113-bondp_user_ctl_set_bonding_port).
+
+A NULL `hint` or port-valid bits not set as described above fails the call with `URMA_EINVAL`; an invalid or non-member `src_port_id` on the receive interfaces also fails with `URMA_EINVAL`. On the send interfaces, an invalid or unreachable `dst_port_id`, or a specified port that is already invalid at post time, returns `URMA_EAGAIN` and the caller decides whether to retry; the receive interfaces also return `URMA_EAGAIN` when the specified port path is already invalid.
+
+A send WR posted this way is pinned to the specified target port and is never rerouted to another target port: if that port fails, the error CQE is returned instead of resending through a backup path. Normally scheduled send WRs on the same failed path are still failed over to a backup path.
+
+For receive CQEs on a bonding context, the receiving member port is encoded in `imm_data` bits [22, 37]:
+
+```c
+uint16_t recv_port = (cr->imm_data & BONDP_IMM_PORT_ID_MASK) >> BONDP_IMM_PORT_ID_SHIFT;
+/* recv_port == BONDP_RECV_PORT_UNAVAILABLE (0) means the port information is unavailable. */
+```
+
+This encoding applies to all receive CQEs of a bonding context, including receive WRs posted through the normal scheduled interfaces. Applications must mask off `BONDP_IMM_PORT_ID_MASK` before comparing or interpreting `imm_data` as immediate data.
+
 ### 2.5.2 Logging
 
 #### 2.5.2.1 urma_register_log_func

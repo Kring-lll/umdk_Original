@@ -643,6 +643,7 @@ stage_payload()
     copy_file "${WORKSPACE_DIR}/lib/urma/core/include/urma_types.h" "${rootfs}${INCLUDEDIR}/urma_types.h"
     copy_file "${WORKSPACE_DIR}/lib/urma/core/include/urma_perf.h" "${rootfs}${INCLUDEDIR}/urma_perf.h"
     copy_file "${WORKSPACE_DIR}/lib/urma/bond/include/urma_ubagg.h" "${rootfs}${INCLUDEDIR}/urma_ubagg.h"
+    copy_file "${WORKSPACE_DIR}/lib/urma/bond/include/bondp_api.h" "${rootfs}${INCLUDEDIR}/bondp_api.h"
     copy_file "${WORKSPACE_DIR}/lib/uvs/core/include/uvs_api.h" "${rootfs}${INCLUDEDIR}/uvs_api.h"
     copy_file "${WORKSPACE_DIR}/lib/uvs/core/include/uvs_types.h" "${rootfs}${INCLUDEDIR}/uvs_types.h"
     copy_file "${WORKSPACE_DIR}/hw/udma/include/udma_u_ctl.h" "${rootfs}${INCLUDEDIR}/udma/udma_u_ctl.h"
