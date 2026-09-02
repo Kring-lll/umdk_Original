@@ -314,9 +314,6 @@ func (m *GlobalSchedulerManager) setConfig(gsConfig *base.GlobalSchedulerConfig)
 		m.stats.Record(statType)
 	}
 
-	// Initialize ERR scheduler components
-	// Note: initErrScheduler is called after opts are applied in NewGlobalSchedulerManager,
-	// so runtimeMode (set via WithRuntimeMode) is already correct.
 	return nil
 }
 

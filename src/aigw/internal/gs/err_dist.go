@@ -133,6 +133,8 @@ func (d *EmpiricalDist) Refresh() {
 	})
 }
 
+// MaybeRefresh rate-limits snapshot rebuilds to once per refreshCooldown.
+// AddValue always writes under lock; only the snapshot rebuild is deferred.
 func (d *EmpiricalDist) MaybeRefresh() {
 	d.mu.Lock()
 	now := time.Now().UnixNano()

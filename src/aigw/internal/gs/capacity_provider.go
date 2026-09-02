@@ -14,11 +14,8 @@ import (
 )
 
 // CapacityProvider tracks model-level capacity for ERR scheduling.
-// For mixed deployment: totalSlots = instanceCount * batchSize.
-// For separated deployment: totalSlots = min(prefillCount, decodeCount) * batchSize,
-// since each request occupies one prefill slot AND one decode slot.
-// inFlight is an atomic counter incremented on dispatch and decremented on
-// completion. FreeSlots may go negative after over-subscription.
+// separated deployment uses min(prefill, decode) since each request
+// occupies one slot in both pools.
 type CapacityProvider struct {
 	batchSize      int
 	instanceCount  func() int

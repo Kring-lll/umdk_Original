@@ -74,10 +74,9 @@ func (m *GlobalSchedulerManager) computePrioritySingle(sessionID string, curStep
 	return int(m.errScheduler.Priority(sessionID, curStep, prompt))
 }
 
-// dispatchWithQueue enqueues the request and attempts to dispatch from queue.
-// When the queue is full, compares the new request's curStep with the queued
-// request that has the lowest curStep. If the new request's curStep is <= that,
-// it is rejected (less progress = reject first for better UX).
+// dispatchWithQueue enqueues a request. On full queue, rejects the request
+// with lower curStep (less progress, better UX) or evicts the lowest-curStep
+// queued request if the new one has more progress.
 // Caller must hold m.dispatchMu.
 func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, curStep int) {
 	req := msg.Request.(*ScheduleRequestMsg)
