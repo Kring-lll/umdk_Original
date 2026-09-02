@@ -387,6 +387,7 @@ fi
     %{_libdir}/urma/liburma_ubagg.so
     %dir %{_includedir}/ub/umdk/urma
     %{_includedir}/ub/umdk/urma/urma_*.h
+    %{_includedir}/ub/umdk/urma/bondp_api.h
     %{_includedir}/ub/umdk/urma/uvs_types.h
     %{_includedir}/ub/umdk/urma/uvs_api.h
 %if %{with udma}
