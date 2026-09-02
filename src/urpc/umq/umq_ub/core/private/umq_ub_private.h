@@ -926,6 +926,29 @@ static ALWAYS_INLINE void umq_ub_io_packet_stats(ub_queue_t *queue, ub_packet_st
     }
 }
 
+/*
+ * Extract the local IO jetty's eid and id from a queue for logging.
+ * For logic UMQ (no own jetty), fall back to the share_rq's IO jetty.
+ * Only updates *eid and *jetty_id when the jetty exists; caller should
+ * initialize them with fallback values (e.g. &empty_eid / 0) before calling.
+ */
+static ALWAYS_INLINE void umq_ub_io_jetty_info_get(ub_queue_t *queue, urma_eid_t **eid, uint32_t *jetty_id)
+{
+    urma_jetty_t *jetty = NULL;
+    if (is_umq_ub_logic_queue(queue->create_flag)) {
+        ub_queue_t *share_rq = (ub_queue_t *)(uintptr_t)queue->share_rq_umqh;
+        if (share_rq != NULL) {
+            jetty = share_rq->jetty[UB_QUEUE_JETTY_IO];
+        }
+    } else {
+        jetty = queue->jetty[UB_QUEUE_JETTY_IO];
+    }
+    if (jetty != NULL) {
+        *eid = &jetty->jetty_id.eid;
+        *jetty_id = jetty->jetty_id.id;
+    }
+}
+
 #ifdef __cplusplus
 }
 #endif
