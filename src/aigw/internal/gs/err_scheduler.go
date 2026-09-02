@@ -325,6 +325,7 @@ func (m *ErrSchedulerManager) OnFinish(sessionID string) int {
 		}
 	}
 
+	log.Debug().Msgf("[ERR] session=%s finished: steps=%d cat=%s", sessionID, steps, m.sessionTracker.GetCategory(sessionID))
 	return steps
 }
 
