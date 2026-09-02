@@ -219,6 +219,11 @@ func NewGlobalSchedulerManager(parentCtx context.Context, gsConfig *base.GlobalS
 		}
 	}
 
+	// Initialize ERR scheduler after opts (runtimeMode is set via WithRuntimeMode).
+	if e := manager.initErrScheduler(&gsConfig.ErrScheduler, gsConfig.LoadBalancer.BatchSize); e != nil {
+		return nil, e
+	}
+
 	var cacheOptions []cachecenter.ManagerOption
 	if manager.cacheDriverOps != nil {
 		adp := cachecenter.NewRedisCacheCenter(manager.cacheDriverOps, int(manager.config.reqSurvivalDuration))
@@ -310,10 +315,8 @@ func (m *GlobalSchedulerManager) setConfig(gsConfig *base.GlobalSchedulerConfig)
 	}
 
 	// Initialize ERR scheduler components
-	if err := m.initErrScheduler(&gsConfig.ErrScheduler, lbCfg.BatchSize); err != nil {
-		return err
-	}
-
+	// Note: initErrScheduler is called after opts are applied in NewGlobalSchedulerManager,
+	// so runtimeMode (set via WithRuntimeMode) is already correct.
 	return nil
 }
 
@@ -350,14 +353,30 @@ func (m *GlobalSchedulerManager) initErrScheduler(errCfg *base.ErrSchedulerConfi
 		return fmt.Errorf("[ERR] caterr classifier not loaded (vocab or centroids invalid), model %s", m.config.model)
 	}
 
-	m.capacityProvider = NewCapacityProvider(batchSize, func() int {
-		if m.instanceManager == nil {
-			return 0
-		}
-		return m.instanceManager.getInsNum()
-	})
-
 	if queueSize > 0 {
+		if m.config.deployPolicy == SeparatedDeployment {
+			m.capacityProvider = NewCapacityProviderSeparated(batchSize,
+				func() int {
+					if m.instanceManager == nil {
+						return 0
+					}
+					return m.instanceManager.getInsNumByRole(base.PrefillRoleInstance)
+				},
+				func() int {
+					if m.instanceManager == nil {
+						return 0
+					}
+					return m.instanceManager.getInsNumByRole(base.DecodeRoleInstance)
+				},
+			)
+		} else {
+			m.capacityProvider = NewCapacityProvider(batchSize, func() int {
+				if m.instanceManager == nil {
+					return 0
+				}
+				return m.instanceManager.getInsNum()
+			})
+		}
 		m.pendingQueue = NewPendingQueue(queueSize)
 		log.Info().Msgf("[ERR] queue mode enabled: queueSize=%d, batchSize=%d, algo=%s",
 			queueSize, batchSize, errCfg.ErrSchedulerType)

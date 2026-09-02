@@ -13,32 +13,32 @@ import (
 
 // ErrAlgorithm computes scheduling priority. Lower value = dispatched first.
 type ErrAlgorithm interface {
-	Priority(sessionID string, k int, prompt string) float64
-	PriorityWith(snap *algoSnapshot, sessionID string, k int, prompt string) float64
+	Priority(sessionID string, curStep int, prompt string) float64
+	PriorityWith(snap *algoSnapshot, sessionID string, curStep int, prompt string) float64
 	Name() string
 }
 
-// MejAlg implements MEJ: priority = -k.
+// MejAlg implements MEJ: priority = -curStep.
 type MejAlg struct{}
 
 func NewMejAlg() *MejAlg {
 	return &MejAlg{}
 }
 
-func (a *MejAlg) Priority(_ string, k int, _ string) float64 {
-	if k <= 0 {
-		k = 1
+func (a *MejAlg) Priority(_ string, curStep int, _ string) float64 {
+	if curStep <= 0 {
+		curStep = 1
 	}
-	return -float64(k)
+	return -float64(curStep)
 }
 
-func (a *MejAlg) PriorityWith(_ *algoSnapshot, _ string, k int, _ string) float64 {
-	return a.Priority("", k, "")
+func (a *MejAlg) PriorityWith(_ *algoSnapshot, _ string, curStep int, _ string) float64 {
+	return a.Priority("", curStep, "")
 }
 
 func (a *MejAlg) Name() string { return "mej" }
 
-// ErrAlg implements ERR: priority = dist.ExpectedRemaining(k).
+// ErrAlg implements ERR: priority = dist.ExpectedRemaining(curStep).
 type ErrAlg struct {
 	Dist *EmpiricalDist
 }
@@ -47,29 +47,29 @@ func NewErrAlg(dist *EmpiricalDist) *ErrAlg {
 	return &ErrAlg{Dist: dist}
 }
 
-func (a *ErrAlg) Priority(_ string, k int, _ string) float64 {
-	if k <= 0 {
-		k = 1
+func (a *ErrAlg) Priority(_ string, curStep int, _ string) float64 {
+	if curStep <= 0 {
+		curStep = 1
 	}
 	if a.Dist == nil {
-		return -float64(k)
+		return -float64(curStep)
 	}
-	return a.Dist.ExpectedRemaining(k)
+	return a.Dist.ExpectedRemaining(curStep)
 }
 
-func (a *ErrAlg) PriorityWith(snap *algoSnapshot, _ string, k int, _ string) float64 {
-	if k <= 0 {
-		k = 1
+func (a *ErrAlg) PriorityWith(snap *algoSnapshot, _ string, curStep int, _ string) float64 {
+	if curStep <= 0 {
+		curStep = 1
 	}
 	if snap != nil && snap.global != nil {
-		return snap.global.ExpectedRemaining(k)
+		return snap.global.ExpectedRemaining(curStep)
 	}
-	return a.Priority("", k, "")
+	return a.Priority("", curStep, "")
 }
 
 func (a *ErrAlg) Name() string { return "err" }
 
-// CatErrAlg implements CatERR: classify prompt, use per-category E[rem|k].
+// CatErrAlg implements CatERR: classify prompt, use per-category E[rem|curStep].
 // Falls back to MEJ on classification failure or missing category distribution.
 type CatErrAlg struct {
 	Classifier *CatErrClassifier
@@ -86,9 +86,9 @@ func NewCatErrAlg(classifier *CatErrClassifier, catDists map[string]*EmpiricalDi
 	}
 }
 
-func (a *CatErrAlg) Priority(_ string, k int, prompt string) float64 {
-	if k <= 0 {
-		k = 1
+func (a *CatErrAlg) Priority(_ string, curStep int, prompt string) float64 {
+	if curStep <= 0 {
+		curStep = 1
 	}
 	if a.Classifier != nil && a.Classifier.IsLoaded() {
 		category := a.Classifier.Classify(prompt)
@@ -97,26 +97,26 @@ func (a *CatErrAlg) Priority(_ string, k int, prompt string) float64 {
 			dist, ok := a.CatDists[category]
 			a.mu.RUnlock()
 			if ok && dist.TotalCount() > 0 {
-				return dist.ExpectedRemaining(k)
+				return dist.ExpectedRemaining(curStep)
 			}
 		}
 	}
-	return -float64(k)
+	return -float64(curStep)
 }
 
-func (a *CatErrAlg) PriorityWith(snap *algoSnapshot, _ string, k int, prompt string) float64 {
-	if k <= 0 {
-		k = 1
+func (a *CatErrAlg) PriorityWith(snap *algoSnapshot, _ string, curStep int, prompt string) float64 {
+	if curStep <= 0 {
+		curStep = 1
 	}
 	if a.Classifier != nil && a.Classifier.IsLoaded() {
 		category := a.Classifier.Classify(prompt)
 		if category != "" && snap != nil && snap.cats != nil {
 			if s, ok := snap.cats[category]; ok && s.TotalCount() > 0 {
-				return s.ExpectedRemaining(k)
+				return s.ExpectedRemaining(curStep)
 			}
 		}
 	}
-	return -float64(k)
+	return -float64(curStep)
 }
 
 func (a *CatErrAlg) Name() string { return "caterr" }

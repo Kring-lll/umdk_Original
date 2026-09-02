@@ -421,13 +421,14 @@ func validatePredictorConfig(cfg *base.PredictorConfig) error {
 }
 
 func validateGlobalSchedulersConfig(gsConfigs []base.GlobalSchedulerConfig) error {
-	for _, scheduler := range gsConfigs {
+	for i := range gsConfigs {
+		scheduler := &gsConfigs[i]
 		log.Info().Msgf("checking global scheduler config, model %v", scheduler.Model)
-		if err := validateModeField(&scheduler); err != nil {
+		if err := validateModeField(scheduler); err != nil {
 			return err
 		}
 		if scheduler.Mode == "provider" {
-			if err := validateProviderPool(&scheduler); err != nil {
+			if err := validateProviderPool(scheduler); err != nil {
 				return err
 			}
 			log.Info().Msgf("finished to check provider pool config, model %v", scheduler.Model)
@@ -450,13 +451,13 @@ func validateGlobalSchedulersConfig(gsConfigs []base.GlobalSchedulerConfig) erro
 			return fmt.Errorf("invalid tbt SLO %v, value should > 0", tbt)
 		}
 
-		if err := validateLoadBalancer(&scheduler); err != nil {
+		if err := validateLoadBalancer(scheduler); err != nil {
 			return err
 		}
-		if err := validateInsConnectType(&scheduler); err != nil {
+		if err := validateInsConnectType(scheduler); err != nil {
 			return err
 		}
-		if err := validateErrSchedulerConfig(&scheduler); err != nil {
+		if err := validateErrSchedulerConfig(scheduler); err != nil {
 			return err
 		}
 		if err := utils.CheckStringLength(scheduler.TokenizeModelName); err != nil {

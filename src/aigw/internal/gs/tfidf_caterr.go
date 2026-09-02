@@ -118,7 +118,7 @@ func (c *CatErrClassifier) LoadCentroids(centroidsPath string) error {
 func (c *CatErrClassifier) IsLoaded() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.loaded
+	return c.loaded && len(c.vocab) > 0 && len(c.centroids) > 0 && len(c.labels) > 0
 }
 
 // Labels returns the category labels known to the classifier.

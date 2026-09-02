@@ -346,6 +346,19 @@ func (insManager *InstanceManager) getInsNum() int {
 	return len(insManager.insPool)
 }
 
+func (insManager *InstanceManager) getInsNumByRole(role base.InstanceRole) int {
+	insManager.poolRWLock.RLock()
+	defer insManager.poolRWLock.RUnlock()
+
+	count := 0
+	for _, ins := range insManager.insPool {
+		if ins.insRole == role {
+			count++
+		}
+	}
+	return count
+}
+
 func (insManager *InstanceManager) checkReqSurvival(duration time.Duration) {
 	now := time.Now()
 	insManager.poolRWLock.RLock()

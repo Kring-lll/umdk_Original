@@ -80,7 +80,7 @@
       },
       "errScheduler": {
         "errSchedulerType": "none/mej/err/caterr",
-        "queueSize": "0=passthrough/>0=queue",
+        "queueSize": 100,
         "warmupSessions": 100,
         "warmupPerCat": 10,
         "windowSize": 5000,

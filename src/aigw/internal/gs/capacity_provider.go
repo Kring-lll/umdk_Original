@@ -14,13 +14,17 @@ import (
 )
 
 // CapacityProvider tracks model-level capacity for ERR scheduling.
-// totalSlots = instanceCount() * batchSize, where instanceCount reads the
-// live instance pool. inFlight is an atomic counter incremented on dispatch
-// and decremented on completion. FreeSlots may go negative after over-subscription.
+// For mixed deployment: totalSlots = instanceCount * batchSize.
+// For separated deployment: totalSlots = min(prefillCount, decodeCount) * batchSize,
+// since each request occupies one prefill slot AND one decode slot.
+// inFlight is an atomic counter incremented on dispatch and decremented on
+// completion. FreeSlots may go negative after over-subscription.
 type CapacityProvider struct {
-	batchSize     int
-	instanceCount func() int
-	inFlight      atomic.Int32
+	batchSize      int
+	instanceCount  func() int
+	prefillCount   func() int
+	decodeCount    func() int
+	inFlight       atomic.Int32
 }
 
 func NewCapacityProvider(batchSize int, instanceCount func() int) *CapacityProvider {
@@ -33,9 +37,31 @@ func NewCapacityProvider(batchSize int, instanceCount func() int) *CapacityProvi
 	}
 }
 
+func NewCapacityProviderSeparated(batchSize int, prefillCount func() int, decodeCount func() int) *CapacityProvider {
+	if prefillCount == nil {
+		prefillCount = func() int { return 0 }
+	}
+	if decodeCount == nil {
+		decodeCount = func() int { return 0 }
+	}
+	return &CapacityProvider{
+		batchSize:    batchSize,
+		prefillCount: prefillCount,
+		decodeCount:  decodeCount,
+	}
+}
+
 func (c *CapacityProvider) TotalSlots() int {
 	if c == nil {
 		return 0
+	}
+	if c.prefillCount != nil && c.decodeCount != nil {
+		p := c.prefillCount()
+		d := c.decodeCount()
+		if p < d {
+			return p * c.batchSize
+		}
+		return d * c.batchSize
 	}
 	return c.instanceCount() * c.batchSize
 }
@@ -86,7 +112,18 @@ func (c *CapacityProvider) OnCompleted() {
 }
 
 func (c *CapacityProvider) InstanceCount() int {
-	if c == nil || c.instanceCount == nil {
+	if c == nil {
+		return 0
+	}
+	if c.prefillCount != nil && c.decodeCount != nil {
+		p := c.prefillCount()
+		d := c.decodeCount()
+		if p < d {
+			return p
+		}
+		return d
+	}
+	if c.instanceCount == nil {
 		return 0
 	}
 	return c.instanceCount()

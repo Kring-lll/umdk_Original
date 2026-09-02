@@ -19,7 +19,7 @@ import (
 type PendingRequest struct {
 	ReqID       string
 	SessionID   string
-	K           int
+	CurStep     int
 	Msg         *ControlMessage
 	EnqueueTime time.Time
 }
@@ -41,6 +41,7 @@ func NewPendingQueue(maxSize int) *PendingQueue {
 
 var ErrQueueFull = errors.New("pending queue full")
 var ErrNoInstance = errors.New("no instance available")
+var ErrDuplicateReqID = errors.New("duplicate request ID in pending queue")
 
 func (q *PendingQueue) Add(req *PendingRequest) error {
 	if req == nil {
@@ -55,7 +56,10 @@ func (q *PendingQueue) Add(req *PendingRequest) error {
 	if req.EnqueueTime.IsZero() {
 		req.EnqueueTime = time.Now()
 	}
-	if _, exists := q.requests[req.ReqID]; !exists && q.maxSize > 0 && len(q.requests) >= q.maxSize {
+	if _, exists := q.requests[req.ReqID]; exists {
+		return ErrDuplicateReqID
+	}
+	if q.maxSize > 0 && len(q.requests) >= q.maxSize {
 		return ErrQueueFull
 	}
 	q.requests[req.ReqID] = req
@@ -123,15 +127,13 @@ func (q *PendingQueue) RemoveBySession(sessionID string) {
 	for id, req := range q.requests {
 		if req.SessionID == sessionID {
 			delete(q.requests, id)
-			return
 		}
 	}
 }
 
-// EvictLowestK finds and removes the request with the smallest K (least progress).
-// Among same-K requests, picks the one with the shortest wait (most recent EnqueueTime).
-// Returns the evicted request, or nil if the queue is empty.
-func (q *PendingQueue) EvictLowestK() *PendingRequest {
+// PeekLowestStep returns the request with the smallest CurStep without removing it.
+// Returns nil if the queue is empty.
+func (q *PendingQueue) PeekLowestStep() *PendingRequest {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -139,21 +141,43 @@ func (q *PendingQueue) EvictLowestK() *PendingRequest {
 		return nil
 	}
 
-	// Scan from most-recently-enqueued to find the smallest K.
-	// If we hit K=1, stop early (can't go lower).
+	var victim *PendingRequest
+	for _, req := range q.requests {
+		if victim == nil || req.CurStep < victim.CurStep {
+			victim = req
+			if req.CurStep <= 1 {
+				break
+			}
+		} else if req.CurStep == victim.CurStep && req.EnqueueTime.After(victim.EnqueueTime) {
+			victim = req
+		}
+	}
+	return victim
+}
+
+// EvictLowestStep finds and removes the request with the smallest CurStep (least progress).
+// Among same-CurStep requests, picks the one with the shortest wait (most recent EnqueueTime).
+// Returns the evicted request, or nil if the queue is empty.
+func (q *PendingQueue) EvictLowestStep() *PendingRequest {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if len(q.requests) == 0 {
+		return nil
+	}
+
 	var victim *PendingRequest
 	for _, req := range q.requests {
 		if victim == nil {
 			victim = req
 			continue
 		}
-		if req.K < victim.K {
+		if req.CurStep < victim.CurStep {
 			victim = req
-			if req.K <= 1 {
+			if req.CurStep <= 1 {
 				break
 			}
-		} else if req.K == victim.K && req.EnqueueTime.After(victim.EnqueueTime) {
-			// Same K: prefer shorter wait (more recent enqueue)
+		} else if req.CurStep == victim.CurStep && req.EnqueueTime.After(victim.EnqueueTime) {
 			victim = req
 		}
 	}

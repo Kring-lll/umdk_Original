@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
- * Description: EmpiricalDist for ERR scheduler — E[rem|k] computation.
+ * Description: EmpiricalDist for ERR scheduler — E[rem|curStep] computation.
  * Create: 2026-08-25
  */
 
@@ -12,6 +12,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // distSnapshot is an immutable, pre-computed view of an EmpiricalDist.
@@ -24,11 +25,11 @@ type distSnapshot struct {
 	totalCount int
 }
 
-func (s *distSnapshot) ExpectedRemaining(k int) float64 {
+func (s *distSnapshot) ExpectedRemaining(curStep int) float64 {
 	if s == nil || len(s.sortedVals) == 0 {
 		return 0.0
 	}
-	return s.erCache[k]
+	return s.erCache[curStep]
 }
 
 func (s *distSnapshot) TotalCount() int {
@@ -61,7 +62,10 @@ type EmpiricalDist struct {
 	sessionValues map[string]*list.Element
 	dirty         bool
 	snapshot      atomic.Pointer[distSnapshot]
+	lastRefreshNs int64 // protected by d.mu
 }
+
+const refreshCooldownNs = int64(time.Second)
 
 func NewEmpiricalDist(windowSize int) *EmpiricalDist {
 	return &EmpiricalDist{
@@ -110,15 +114,15 @@ func (d *EmpiricalDist) Refresh() {
 	}
 	erCache := make(map[int]float64, steps[n-1])
 	maxStep := steps[n-1]
-	for k := 1; k <= maxStep; k++ {
-		idx := sort.SearchInts(steps, k)
+	for curStep := 1; curStep <= maxStep; curStep++ {
+		idx := sort.SearchInts(steps, curStep)
 		nRem := n - idx
 		if nRem == 0 {
-			erCache[k] = 0.0
+			erCache[curStep] = 0.0
 			continue
 		}
 		suffixSum := prefixSum[n] - prefixSum[idx]
-		erCache[k] = float64(suffixSum-int64(k)*int64(nRem)) / float64(nRem)
+		erCache[curStep] = float64(suffixSum-int64(curStep)*int64(nRem)) / float64(nRem)
 	}
 
 	d.snapshot.Store(&distSnapshot{
@@ -127,6 +131,18 @@ func (d *EmpiricalDist) Refresh() {
 		erCache:    erCache,
 		totalCount: n,
 	})
+}
+
+func (d *EmpiricalDist) MaybeRefresh() {
+	d.mu.Lock()
+	now := time.Now().UnixNano()
+	if now-d.lastRefreshNs < refreshCooldownNs {
+		d.mu.Unlock()
+		return
+	}
+	d.lastRefreshNs = now
+	d.mu.Unlock()
+	d.Refresh()
 }
 
 // evictFront removes the oldest entry from rawValues.
@@ -184,8 +200,8 @@ func (d *EmpiricalDist) SeedFromCounts(counts map[int]int) {
 	d.Refresh()
 }
 
-func (d *EmpiricalDist) ExpectedRemaining(k int) float64 {
-	return d.snapshot.Load().ExpectedRemaining(k)
+func (d *EmpiricalDist) ExpectedRemaining(curStep int) float64 {
+	return d.snapshot.Load().ExpectedRemaining(curStep)
 }
 
 func (d *EmpiricalDist) TotalCount() int {

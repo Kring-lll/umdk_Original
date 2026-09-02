@@ -38,46 +38,63 @@ func (m *GlobalSchedulerManager) dispatchErr(msg *ControlMessage) {
 	}
 
 	sessionID := req.SessionID
-	k := 0
+	curStep := 0
 	cat := ""
 	if m.errScheduler != nil {
-		k = m.errScheduler.OnRequest(sessionID, m.config.model, req.Request.Prompt)
+		curStep = m.errScheduler.OnRequest(sessionID, m.config.model, req.Request.Prompt)
 		cat = m.errScheduler.SessionCategory(sessionID)
 	}
 
-	log.Debug().Msgf("[ERR] recv: session=%s k=%d cat=%s curQueue=%d free=%d",
-		sessionID, k, cat, m.pendingQueue.Size(), m.capacityProvider.FreeSlots())
+	queueSize := 0
+	freeSlots := 0
+	if m.pendingQueue != nil {
+		queueSize = m.pendingQueue.Size()
+	}
+	if m.capacityProvider != nil {
+		freeSlots = m.capacityProvider.FreeSlots()
+	}
+	log.Debug().Msgf("[ERR] recv: session=%s curStep=%d cat=%s curQueue=%d free=%d",
+		sessionID, curStep, cat, queueSize, freeSlots)
 
 	m.dispatchMu.Lock()
 	defer m.dispatchMu.Unlock()
 
 	if m.pendingQueue != nil {
-		m.dispatchWithQueue(msg, k)
+		m.dispatchWithQueue(msg, curStep)
 	} else {
-		priority := m.computePrioritySingle(sessionID, k, req.Request.Prompt)
+		priority := m.computePrioritySingle(sessionID, curStep, req.Request.Prompt)
 		m.dispatchDirect(msg, priority)
 	}
 }
 
-func (m *GlobalSchedulerManager) computePrioritySingle(sessionID string, k int, prompt string) int {
+func (m *GlobalSchedulerManager) computePrioritySingle(sessionID string, curStep int, prompt string) int {
 	if sessionID == "" {
 		return int(m.errScheduler.AnonymousPriority(prompt))
 	}
-	return int(m.errScheduler.Priority(sessionID, k, prompt))
+	return int(m.errScheduler.Priority(sessionID, curStep, prompt))
 }
 
 // dispatchWithQueue enqueues the request and attempts to dispatch from queue.
-// When the queue is full, evicts the lowest-K request (503 it) and enqueues the new one.
+// When the queue is full, compares the new request's curStep with the queued
+// request that has the lowest curStep. If the new request's curStep is <= that,
+// it is rejected (less progress = reject first for better UX).
 // Caller must hold m.dispatchMu.
-func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, k int) {
+func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, curStep int) {
 	req := msg.Request.(*ScheduleRequestMsg)
 
 	if m.pendingQueue.IsFull() {
-		victim := m.pendingQueue.EvictLowestK()
+		victim := m.pendingQueue.PeekLowestStep()
+		if victim != nil && curStep <= victim.CurStep {
+			log.Warn().Msgf("[ERR] queue full, rejecting session %s (curStep=%d) — victim has curStep=%d (more progress, kept)",
+				req.SessionID, curStep, victim.CurStep)
+			msg.Response <- ErrQueueFull
+			return
+		}
+		victim = m.pendingQueue.EvictLowestStep()
 		if victim != nil {
-			log.Warn().Msgf("[ERR] queue full, evicting session %s (k=%d, waited=%v) for session %s (k=%d)",
-				victim.SessionID, victim.K, time.Since(victim.EnqueueTime),
-				req.SessionID, k)
+			log.Warn().Msgf("[ERR] queue full, evicting session %s (curStep=%d, waited=%v) for session %s (curStep=%d)",
+				victim.SessionID, victim.CurStep, time.Since(victim.EnqueueTime),
+				req.SessionID, curStep)
 			victim.Msg.Response <- ErrQueueFull
 		}
 	}
@@ -85,7 +102,7 @@ func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, k int) {
 	if err := m.pendingQueue.Add(&PendingRequest{
 		ReqID:     req.Request.ReqId,
 		SessionID: req.SessionID,
-		K:         k,
+		CurStep:   curStep,
 		Msg:       msg,
 	}); err != nil {
 		msg.Response <- err
@@ -117,7 +134,7 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 			if r.SessionID == "" {
 				return int(m.errScheduler.AnonymousPriorityWith(snap, req.Request.Prompt))
 			}
-			return int(m.errScheduler.PriorityWith(snap, r.SessionID, r.K, req.Request.Prompt))
+			return int(m.errScheduler.PriorityWith(snap, r.SessionID, r.CurStep, req.Request.Prompt))
 		})
 		if pr == nil {
 			return
@@ -145,16 +162,16 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 			continue
 		}
 
-		priority := m.computePriorityWithSnapshot(snap, pr.SessionID, pr.K, req.Request.Prompt)
+		priority := m.computePriorityWithSnapshot(snap, pr.SessionID, pr.CurStep, req.Request.Prompt)
 		m.dispatchScheduled(pr.Msg, req, result, priority)
 	}
 }
 
-func (m *GlobalSchedulerManager) computePriorityWithSnapshot(snap *algoSnapshot, sessionID string, k int, prompt string) int {
+func (m *GlobalSchedulerManager) computePriorityWithSnapshot(snap *algoSnapshot, sessionID string, curStep int, prompt string) int {
 	if sessionID == "" {
 		return int(m.errScheduler.AnonymousPriorityWith(snap, prompt))
 	}
-	return int(m.errScheduler.PriorityWith(snap, sessionID, k, prompt))
+	return int(m.errScheduler.PriorityWith(snap, sessionID, curStep, prompt))
 }
 
 // dispatchDirect dispatches immediately without queueing (passthrough mode).
@@ -199,10 +216,20 @@ func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *Sch
 
 	m.capacityProvider.OnDispatched()
 
-	log.Debug().Msgf("[ERR] dispatch: session=%s k=%d cat=%s priority=%d -> %s inFlight=%d/%d queue=%d",
+	inFlight := 0
+	totalSlots := 0
+	queueSize := 0
+	if m.capacityProvider != nil {
+		inFlight = int(m.capacityProvider.InFlight())
+		totalSlots = m.capacityProvider.TotalSlots()
+	}
+	if m.pendingQueue != nil {
+		queueSize = m.pendingQueue.Size()
+	}
+	log.Debug().Msgf("[ERR] dispatch: session=%s curStep=%d cat=%s priority=%d -> %s inFlight=%d/%d queue=%d",
 		req.SessionID, m.errScheduler.SessionIteration(req.SessionID),
 		m.errScheduler.SessionCategory(req.SessionID), priority,
-		result.PrefillUrl, m.capacityProvider.InFlight(), m.capacityProvider.TotalSlots(), m.pendingQueue.Size())
+		result.PrefillUrl, inFlight, totalSlots, queueSize)
 
 	req.Request.Prompt = ""
 	req.Request.PromptToken = nil

@@ -190,45 +190,45 @@ func (m *ErrSchedulerManager) initAlgorithm() {
 }
 
 func (m *ErrSchedulerManager) OnRequest(sessionID, model, prompt string) int {
-	k := m.sessionTracker.OnRequest(sessionID, model)
+	curStep := m.sessionTracker.OnRequest(sessionID, model)
 	if m.config.SchedulerType == "caterr" && m.classifier.IsLoaded() && sessionID != "" {
 		if cat := m.classifier.Classify(prompt); cat != "" {
 			m.sessionTracker.SetCategory(sessionID, cat)
 		}
 	}
-	return k
+	return curStep
 }
 
 func (m *ErrSchedulerManager) AnonymousPriority(prompt string) float64 {
-	medianK := m.medianKForAnonymous(prompt)
-	if medianK <= 0 {
-		medianK = 1
+	medianStep := m.medianStepForAnonymous(prompt)
+	if medianStep <= 0 {
+		medianStep = 1
 	}
 	if m.IsWarmingUp() {
-		return -float64(medianK)
+		return -float64(medianStep)
 	}
 	if m.algorithm != nil {
-		return m.algorithm.Priority("", medianK, prompt)
+		return m.algorithm.Priority("", medianStep, prompt)
 	}
-	return -float64(medianK)
+	return -float64(medianStep)
 }
 
 // AnonymousPriorityWith uses the provided snapshot for consistent reads within one Pick.
 func (m *ErrSchedulerManager) AnonymousPriorityWith(snap *algoSnapshot, prompt string) float64 {
-	medianK := m.medianKForAnonymousWith(snap, prompt)
-	if medianK <= 0 {
-		medianK = 1
+	medianStep := m.medianStepForAnonymousWith(snap, prompt)
+	if medianStep <= 0 {
+		medianStep = 1
 	}
 	if m.IsWarmingUp() {
-		return -float64(medianK)
+		return -float64(medianStep)
 	}
 	if m.algorithm != nil {
-		return m.algorithm.PriorityWith(snap, "", medianK, prompt)
+		return m.algorithm.PriorityWith(snap, "", medianStep, prompt)
 	}
-	return -float64(medianK)
+	return -float64(medianStep)
 }
 
-func (m *ErrSchedulerManager) medianKForAnonymous(prompt string) int {
+func (m *ErrSchedulerManager) medianStepForAnonymous(prompt string) int {
 	if m.config.SchedulerType == "caterr" && m.classifier.IsLoaded() {
 		if cat := m.classifier.Classify(prompt); cat != "" {
 			m.catMu.RLock()
@@ -245,7 +245,7 @@ func (m *ErrSchedulerManager) medianKForAnonymous(prompt string) int {
 	return 0
 }
 
-func (m *ErrSchedulerManager) medianKForAnonymousWith(snap *algoSnapshot, prompt string) int {
+func (m *ErrSchedulerManager) medianStepForAnonymousWith(snap *algoSnapshot, prompt string) int {
 	if m.config.SchedulerType == "caterr" && m.classifier.IsLoaded() {
 		if cat := m.classifier.Classify(prompt); cat != "" {
 			if snap.cats != nil {
@@ -261,19 +261,19 @@ func (m *ErrSchedulerManager) medianKForAnonymousWith(snap *algoSnapshot, prompt
 	return 0
 }
 
-func (m *ErrSchedulerManager) Priority(sessionID string, k int, prompt string) float64 {
+func (m *ErrSchedulerManager) Priority(sessionID string, curStep int, prompt string) float64 {
 	if m.IsWarmingUp() {
-		return -float64(k)
+		return -float64(curStep)
 	}
-	return m.algorithm.Priority(sessionID, k, prompt)
+	return m.algorithm.Priority(sessionID, curStep, prompt)
 }
 
 // PriorityWith uses the provided snapshot for consistent reads within one Pick.
-func (m *ErrSchedulerManager) PriorityWith(snap *algoSnapshot, sessionID string, k int, prompt string) float64 {
+func (m *ErrSchedulerManager) PriorityWith(snap *algoSnapshot, sessionID string, curStep int, prompt string) float64 {
 	if m.IsWarmingUp() {
-		return -float64(k)
+		return -float64(curStep)
 	}
-	return m.algorithm.PriorityWith(snap, sessionID, k, prompt)
+	return m.algorithm.PriorityWith(snap, sessionID, curStep, prompt)
 }
 
 // AlgoSnapshot loads all dist snapshots for consistent reads within one Pick.
@@ -301,7 +301,7 @@ func (m *ErrSchedulerManager) OnFinish(sessionID string) int {
 
 	if m.globalDist != nil {
 		m.globalDist.AddValue(sessionID, steps)
-		m.globalDist.Refresh()
+		m.globalDist.MaybeRefresh()
 	}
 
 	if m.config.SchedulerType == "caterr" {
@@ -314,7 +314,7 @@ func (m *ErrSchedulerManager) OnFinish(sessionID string) int {
 			}
 			m.catMu.Unlock()
 			dist.AddValue(sessionID, steps)
-			dist.Refresh()
+			dist.MaybeRefresh()
 		}
 	}
 
