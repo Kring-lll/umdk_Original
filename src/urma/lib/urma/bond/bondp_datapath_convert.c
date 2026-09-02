@@ -586,12 +586,8 @@ static int check_atomic_wr_path(const urma_sge_t *src, const urma_sge_t *dst, in
  * instead of returning an error. Reject such WRs here - the software path
  * (clone/check/map) handles them fine, only the hardware encoding is missing.
  * Drop this guard once UDMA gains the user_tseg branches for these opcodes.
+ * Uses sge_is_import_free() defined above near jfs_wr_count_remote_user_tseg().
  */
-static bool sge_is_import_free(const urma_sge_t *sge)
-{
-    return sge != NULL && sge->tseg == NULL && sge->user_tseg != NULL;
-}
-
 static int check_user_tseg_opcode(urma_jfs_wr_t *wr)
 {
     bool unsupported = false;
