@@ -710,7 +710,7 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
         goto ROLLBACK_UB_CTX;
     }
 
-    if (umq_io_buf_malloc(cfg->buf_mode, buf_pool_plan.normal_io_buf_size) == NULL) {
+    if (umq_qbuf_unified_io_buf_malloc(cfg->buf_mode, &buf_pool_plan) == NULL) {
         goto ROLLBACK_UB_CTX;
     }
 
@@ -730,6 +730,7 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
         .tls_qbuf_pool_depth = cfg->buf_pool_cfg.tls_qbuf_pool_depth,
         .tls_expand_qbuf_pool_depth = cfg->buf_pool_cfg.tls_expand_qbuf_pool_depth,
         .disable_malloc_escape = cfg->buf_pool_cfg.disable_malloc_escape,
+        .shrink_decay_ms = cfg->buf_pool_cfg.shrink_decay_ms,
         .size_class_count = buf_pool_plan.size_class_count,
         .expansion_size = cfg->buf_pool_cfg.expansion_size,
         .expansion_threshold = cfg->buf_pool_cfg.expansion_threshold,
@@ -750,9 +751,6 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
     }
 
     if (buf_pool_plan.rx_block_count > 0) {
-        if (umq_rx_io_buf_malloc(cfg->buf_mode, buf_pool_plan.rx_io_buf_size) == NULL) {
-            goto QBUF_POOL_UNINIT;
-        }
         qbuf_pool_cfg_t rx_qbuf_cfg = {
             .buf_addr = umq_rx_io_buf_addr(),
             .total_size = umq_rx_io_buf_size(),
@@ -764,15 +762,11 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
         ret = umq_rx_qbuf_pool_init(&rx_qbuf_cfg);
         if (ret != UMQ_SUCCESS && ret != -UMQ_ERR_EEXIST) {
             UMQ_VLOG_ERR(VLOG_UMQ, "rx qbuf pool init failed, status: %d\n", ret);
-            goto RX_IO_BUF_FREE;
+            goto QBUF_POOL_UNINIT;
         }
     }
 
     if (cfg->buf_pool_cfg.enable_tiny_pool) {
-        if (umq_tiny_io_buf_malloc(cfg->buf_mode, buf_pool_plan.tiny_io_buf_size) == NULL) {
-            goto RX_QBUF_POOL_UNINIT;
-        }
-
         qbuf_pool_cfg_t tiny_qbuf_cfg = qbuf_cfg;
         tiny_qbuf_cfg.buf_addr = umq_tiny_io_buf_addr();
         tiny_qbuf_cfg.total_size = umq_tiny_io_buf_size();
@@ -781,7 +775,7 @@ uint8_t *umq_ub_ctx_init_impl(umq_init_cfg_t *cfg)
         ret = umq_tiny_qbuf_pool_init(&tiny_qbuf_cfg);
         if (ret != UMQ_SUCCESS && ret != -UMQ_ERR_EEXIST) {
             UMQ_VLOG_ERR(VLOG_UMQ, "tiny qbuf pool init failed, status: %d\n", ret);
-            goto TINY_IO_BUF_FREE;
+            goto RX_QBUF_POOL_UNINIT;
         }
     }
 
@@ -816,20 +810,14 @@ QUEUE_CTX_LIST_UNINIT:
 TINY_QBUF_POOL_UNINIT:
     umq_tiny_qbuf_pool_uninit();
 
-TINY_IO_BUF_FREE:
-    umq_tiny_io_buf_free();
-
 RX_QBUF_POOL_UNINIT:
     umq_rx_qbuf_pool_uninit();
-
-RX_IO_BUF_FREE:
-    umq_rx_io_buf_free();
 
 QBUF_POOL_UNINIT:
     umq_qbuf_pool_uninit();
 
 IO_BUF_FREE:
-    umq_io_buf_free();
+    umq_qbuf_unified_io_buf_free();
 
 ROLLBACK_UB_CTX:
     for (uint32_t i = 0; i < g_ub_ctx_count; i++) {
@@ -913,9 +901,7 @@ void umq_ub_ctx_uninit_impl(uint8_t *ctx)
         (void)pthread_spin_destroy(&context[i].tseg_list_lock);
     }
 
-    umq_tiny_io_buf_free();
-    umq_rx_io_buf_free();
-    umq_io_buf_free();
+    umq_qbuf_unified_io_buf_free();
     umq_ub_id_allocator_uninit();
     umq_ub_dev_info_uninit();
 

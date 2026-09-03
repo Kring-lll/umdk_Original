@@ -81,6 +81,7 @@ void *umq_qbuf_base_io_buf_malloc(uint64_t total_len, uint64_t min_size)
         return NULL;
     }
     madvise(buffer_addr, total_len, MADV_HUGEPAGE);
+    qbuf_touch_huge_pages(buffer_addr, total_len);
     return buffer_addr;
 }
 
