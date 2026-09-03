@@ -719,7 +719,7 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
     ub_bind_ctx_t *ctx = (ub_bind_ctx_t *)calloc(1, sizeof(ub_bind_ctx_t) + info->dev_info->namespace_len);
     if (ctx == NULL) {
         UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), eid: " EID_FMT ", jetty_id: %u, remote umq_id: %u, remote pid: %u, "
-            ", bind ctx calloc failed\n", queue->umq_id, EID_ARGS(*local_eid), local_jetty_id,
+            "bind ctx calloc failed\n", queue->umq_id, EID_ARGS(*local_eid), local_jetty_id,
             info->queue_info->umq_id, info->dev_info->pid);
         return -UMQ_ERR_ENOMEM;
     }
@@ -749,7 +749,7 @@ int umq_ub_bind_inner_impl(ub_queue_t *queue, umq_ub_bind_info_t *info)
         ret = umq_ub_prefill_rx_buf(queue);
         if (ret != UMQ_SUCCESS) {
             UMQ_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), eid: " EID_FMT ", jetty_id: %u, remote umq_id: %u, remote pid: %u, "
-                "umq_ub_connect_jetty failed\n", queue->umq_id, EID_ARGS(*local_eid),
+                "umq_ub_prefill_rx_buf failed\n", queue->umq_id, EID_ARGS(*local_eid),
                 local_jetty_id, info->queue_info->umq_id, info->dev_info->pid);
             goto DISCONNECT_FC_JETTY;
         }
