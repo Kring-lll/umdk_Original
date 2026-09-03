@@ -2961,13 +2961,8 @@ int umq_ub_mempool_state_refresh_impl(uint64_t umqh_tp, uint32_t mempool_id)
         return UMQ_SUCCESS;
     }
 
-    urma_target_seg_t *tseg = qcfg->dev_ctx->tseg_list[mempool_id];
-    if (tseg == NULL) {
-        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, mempool %u tseg not exist\n", EID_ARGS(*eid), id,
-                           mempool_id);
-        return -UMQ_ERR_ENODEV;
-    }
-
+    /* umq_buf_alloc is done before taking tseg_list_lock so the spinlock is
+     * not held across buffer-pool allocation. */
     umq_buf_t *send_buf = umq_buf_alloc(umq_buf_size_small(), 1, (uint64_t)(uintptr_t)queue, NULL);
     if (send_buf == NULL) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq malloc failed\n", EID_ARGS(*eid), id);
@@ -2995,22 +2990,48 @@ int umq_ub_mempool_state_refresh_impl(uint64_t umqh_tp, uint32_t mempool_id)
     umq_imm_head->mem_interval = UMQ_SIZE_0K_SMALL_INTERVAL;
 
     ub_import_mempool_info_t *import_mempool_info = (ub_import_mempool_info_t *)(umq_imm_head + 1);
-    uint32_t ver = qcfg->dev_ctx->mempool_version[mempool_id];
     uint32_t cap = (uint32_t)umq_buf_size_small() - (uint32_t)sizeof(umq_imm_head_t);
+
+    /* Read tseg_list[mempool_id], mempool_version[mempool_id] and sge.tseg
+     * under tseg_list_lock, and serialize umq_ub_fill_seg_ctx under the same
+     * lock. umq_ub_register_seg / umq_ub_unregister_seg mutate tseg_list and
+     * mempool_version under this lock; without it a concurrent
+     * umq_ub_unregister_seg (including the async umq_ub_unregister_seg_callback
+     * from liburma) could free the tseg while umq_ub_fill_seg_ctx (which calls
+     * urma_get_seg_ctx) dereferences it (use-after-free), or a concurrent
+     * (re)registration could publish a new tseg with a stale version (data
+     * race). This mirrors umq_ub_mempool_info_get_impl and completes the
+     * locking started in 9f296021, which locked the sibling info_get path but
+     * missed this refresh path that reads the same fields. This is a
+     * per-control-segment (not per-packet) path, so the longer critical
+     * section is acceptable. */
+    (void)pthread_spin_lock(&qcfg->dev_ctx->tseg_list_lock);
+    urma_target_seg_t *tseg = qcfg->dev_ctx->tseg_list[mempool_id];
+    if (tseg == NULL) {
+        (void)pthread_spin_unlock(&qcfg->dev_ctx->tseg_list_lock);
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, mempool %u tseg not exist\n", EID_ARGS(*eid), id,
+                           mempool_id);
+        ret = -UMQ_ERR_ENODEV;
+        goto FREE_BUF;
+    }
+    uint32_t ver = qcfg->dev_ctx->mempool_version[mempool_id];
     uint32_t written = umq_ub_fill_seg_ctx(tseg, mempool_id, (uint32_t)tseg->user_ctx, ver,
                                            import_mempool_info, cap);
     if (written == 0) {
+        (void)pthread_spin_unlock(&qcfg->dev_ctx->tseg_list_lock);
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, fill_seg_ctx failed, mempool_id: %u\n",
                            EID_ARGS(*eid), id, mempool_id);
         ret = -UMQ_ERR_EFAULT;
         goto FREE_BUF;
     }
+    urma_target_seg_t *sge_tseg = qcfg->dev_ctx->tseg_list[send_buf->mempool_id];
+    (void)pthread_spin_unlock(&qcfg->dev_ctx->tseg_list_lock);
 
     urma_sge_t sge = {
         .addr = (uint64_t)(uintptr_t)send_buf->buf_data,
         .len = sizeof(umq_imm_head_t) + written,
         .user_tseg = NULL,
-        .tseg = qcfg->dev_ctx->tseg_list[send_buf->mempool_id],
+        .tseg = sge_tseg,
     };
     uint16_t max_tx = umq_ub_window_dec(queue->flow_control, queue, 1);
     if (max_tx == 0) {
