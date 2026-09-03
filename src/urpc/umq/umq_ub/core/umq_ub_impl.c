@@ -2918,7 +2918,7 @@ int umq_ub_mempool_state_get_impl(uint64_t umqh_tp, uint32_t mempool_id, umq_mem
 {
     ub_queue_t *queue = (ub_queue_t *)(uintptr_t)umqh_tp;
     ub_queue_cfg_t *qcfg = umq_ub_queue_cfg_get(queue);
-    if (qcfg->dev_ctx == NULL || qcfg->dev_ctx->remote_imported_info == NULL || queue->bind_ctx == NULL ||
+    if (qcfg->dev_ctx == NULL || qcfg->dev_ctx->remote_imported_info == NULL ||
         mempool_id >= UMQ_MAX_TSEG_NUM) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq ub get mempool state parameter invalid\n",
                            EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
@@ -2926,11 +2926,25 @@ int umq_ub_mempool_state_get_impl(uint64_t umqh_tp, uint32_t mempool_id, umq_mem
         return -UMQ_ERR_EINVAL;
     }
 
+    /* Lock-protected bind_ctx access: umq_ub_unbind_impl sets bind_ctx=NULL
+     * under the same lock before freeing, so we either see a valid bind_ctx
+     * or NULL — never a freed pointer. The bitmap read happens under the
+     * lock against a stable bind_ctx. */
+    remote_imported_tseg_info_t *remote_info = qcfg->dev_ctx->remote_imported_info;
+    (void)util_mutex_lock(remote_info->remote_eid_table_lock);
+    if (queue->bind_ctx == NULL) {
+        (void)util_mutex_unlock(remote_info->remote_eid_table_lock);
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq ub get mempool state: queue unbind\n",
+                           EID_ARGS(queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid),
+                           queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id);
+        return -UMQ_ERR_EINVAL;
+    }
     if (urpc_bitmap_is_set(queue->bind_ctx->tseg_imported, mempool_id)) {
         mempool_state->import_state = MEMPOOL_STATE_IMPORTED;
     } else {
         mempool_state->import_state = MEMPOOL_STATE_NON_IMPORTED;
     }
+    (void)util_mutex_unlock(remote_info->remote_eid_table_lock);
     return UMQ_SUCCESS;
 }
 
