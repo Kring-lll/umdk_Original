@@ -17,11 +17,12 @@ import (
 // separated deployment uses min(prefill, decode) since each request
 // occupies one slot in both pools.
 type CapacityProvider struct {
-	batchSize      int
-	instanceCount  func() int
-	prefillCount   func() int
-	decodeCount    func() int
-	inFlight       atomic.Int32
+	batchSize          int
+	instanceCount      func() int
+	prefillCount       func() int
+	decodeCount        func() int
+	separatedCapacity  func() int
+	inFlight           atomic.Int32
 }
 
 func NewCapacityProvider(batchSize int, instanceCount func() int) *CapacityProvider {
@@ -48,9 +49,26 @@ func NewCapacityProviderSeparated(batchSize int, prefillCount func() int, decode
 	}
 }
 
+// NewCapacityProviderSeparatedGroupAware creates a capacity provider for
+// separated deployment that accounts for groupID constraints. The
+// groupAwareCapacity callback should return the sum over groups of
+// min(prefill_g, decode_g).
+func NewCapacityProviderSeparatedGroupAware(batchSize int, groupAwareCapacity func() int) *CapacityProvider {
+	if groupAwareCapacity == nil {
+		groupAwareCapacity = func() int { return 0 }
+	}
+	return &CapacityProvider{
+		batchSize:         batchSize,
+		separatedCapacity: groupAwareCapacity,
+	}
+}
+
 func (c *CapacityProvider) TotalSlots() int {
 	if c == nil {
 		return 0
+	}
+	if c.separatedCapacity != nil {
+		return c.separatedCapacity() * c.batchSize
 	}
 	if c.prefillCount != nil && c.decodeCount != nil {
 		p := c.prefillCount()
@@ -111,6 +129,9 @@ func (c *CapacityProvider) OnCompleted() {
 func (c *CapacityProvider) InstanceCount() int {
 	if c == nil {
 		return 0
+	}
+	if c.separatedCapacity != nil {
+		return c.separatedCapacity()
 	}
 	if c.prefillCount != nil && c.decodeCount != nil {
 		p := c.prefillCount()

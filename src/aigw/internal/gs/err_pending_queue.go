@@ -66,9 +66,10 @@ func (q *PendingQueue) Add(req *PendingRequest) error {
 	return nil
 }
 
-// Pick removes and returns the highest-priority request. Priority is computed
-// on-the-fly by fn. Ties broken by EnqueueTime (oldest first).
-func (q *PendingQueue) Pick(fn func(*PendingRequest) int) *PendingRequest {
+// Peek returns the highest-priority request without removing it from the
+// queue. Priority is computed on-the-fly by fn. Ties broken by EnqueueTime
+// (oldest first). Call Remove(reqID) only after the request is dispatched.
+func (q *PendingQueue) Peek(fn func(*PendingRequest) int) *PendingRequest {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -87,11 +88,13 @@ func (q *PendingQueue) Pick(fn func(*PendingRequest) int) *PendingRequest {
 			best = req
 		}
 	}
-
-	if best != nil {
-		delete(q.requests, best.ReqID)
-	}
 	return best
+}
+
+func (q *PendingQueue) Remove(reqID string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	delete(q.requests, reqID)
 }
 
 func (q *PendingQueue) IsEmpty() bool {

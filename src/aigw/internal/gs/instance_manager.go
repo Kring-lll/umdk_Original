@@ -53,6 +53,17 @@ type InstanceManager struct {
 
 	// Skip instance connection for testing
 	skipInstanceConnection bool
+
+	// onUnhealthy is invoked when an instance's SSE connection drops.
+	// Must be registered via SetOnUnhealthy before the first addInstance
+	// call so watcher goroutines observe the write.
+	onUnhealthy func(insUrl string)
+}
+
+// SetOnUnhealthy registers the SSE-disconnect callback. Must be called
+// before any instance is added (init time only).
+func (insManager *InstanceManager) SetOnUnhealthy(fn func(string)) {
+	insManager.onUnhealthy = fn
 }
 
 func newInstanceManager() *InstanceManager {
@@ -123,7 +134,7 @@ func (insManager *InstanceManager) startIns(ins *instance) bool {
 			return false
 		}
 		insManager.insWG.Add(1)
-		go ins.run(insManager.insWG) // start process connection loop
+		go ins.run(insManager.insWG) // watcher goroutine reads onUnhealthy; register via SetOnUnhealthy before first addInstance
 	} else {
 		log.Info().Msgf("[instanceManager] skipping instance connection for %v (skipInstanceConnection=true)", ins.insUrl)
 		// Don't start the run loop since there's no actual connection
@@ -331,7 +342,9 @@ func (insManager *InstanceManager) isReqExists(reqId string) bool {
 	defer insManager.poolRWLock.RUnlock()
 
 	for _, ins := range insManager.insPool {
+		ins.rwLock.RLock()
 		_, exists := ins.reqSet[reqId]
+		ins.rwLock.RUnlock()
 		if exists {
 			return true
 		}
@@ -343,7 +356,16 @@ func (insManager *InstanceManager) getInsNum() int {
 	insManager.poolRWLock.RLock()
 	defer insManager.poolRWLock.RUnlock()
 
-	return len(insManager.insPool)
+	if insManager.skipInstanceConnection {
+		return len(insManager.insPool)
+	}
+	count := 0
+	for _, ins := range insManager.insPool {
+		if ins.insWatcher == nil || ins.insWatcher.isHealth() {
+			count++
+		}
+	}
+	return count
 }
 
 func (insManager *InstanceManager) getInsNumByRole(role base.InstanceRole) int {
@@ -352,11 +374,51 @@ func (insManager *InstanceManager) getInsNumByRole(role base.InstanceRole) int {
 
 	count := 0
 	for _, ins := range insManager.insPool {
-		if ins.insRole == role {
+		if ins.insRole != role {
+			continue
+		}
+		if insManager.skipInstanceConnection || ins.insWatcher == nil || ins.insWatcher.isHealth() {
 			count++
 		}
 	}
 	return count
+}
+
+// getSeparatedCapacity calculates the effective capacity for separated
+// deployment, accounting for groupID constraints. Each request requires
+// a prefill and decode in the SAME group, so effective capacity is
+// sum over groups of min(prefill_count_g, decode_count_g).
+func (insManager *InstanceManager) getSeparatedCapacity() int {
+	insManager.poolRWLock.RLock()
+	defer insManager.poolRWLock.RUnlock()
+
+	prefillByGroup := make(map[string]int)
+	decodeByGroup := make(map[string]int)
+	groups := make(map[string]bool)
+
+	for _, ins := range insManager.insPool {
+		if !insManager.skipInstanceConnection && ins.insWatcher != nil && !ins.insWatcher.isHealth() {
+			continue
+		}
+		groups[ins.groupID] = true
+		if ins.insRole == base.PrefillRoleInstance {
+			prefillByGroup[ins.groupID]++
+		} else if ins.insRole == base.DecodeRoleInstance {
+			decodeByGroup[ins.groupID]++
+		}
+	}
+
+	total := 0
+	for g := range groups {
+		p := prefillByGroup[g]
+		d := decodeByGroup[g]
+		if p < d {
+			total += p
+		} else {
+			total += d
+		}
+	}
+	return total
 }
 
 func (insManager *InstanceManager) checkReqSurvival(duration time.Duration) {

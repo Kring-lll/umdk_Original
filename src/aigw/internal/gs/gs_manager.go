@@ -138,6 +138,7 @@ type GlobalSchedulerManager struct {
 	errScheduler     *ErrSchedulerManager
 	capacityProvider *CapacityProvider
 	pendingQueue     *PendingQueue
+	errInFlight      map[string]errInFlightEntry
 	// dispatchMu serializes ERR dispatch to protect the non-thread-safe LB.
 	// Per-GSM so different models do not block each other.
 	dispatchMu sync.Mutex
@@ -240,6 +241,10 @@ func NewGlobalSchedulerManager(parentCtx context.Context, gsConfig *base.GlobalS
 		withRuntimeMode(manager.runtimeMode),
 		WithSkipInstanceConnection(manager.config.skipInstanceConnection),
 	)
+
+	if manager.errScheduler != nil {
+		manager.instanceManager.SetOnUnhealthy(manager.onInstanceUnhealthy)
+	}
 
 	// Create MetricProvider based on runtime mode
 	var metricProvider MetricProvider
@@ -345,6 +350,7 @@ func (m *GlobalSchedulerManager) initErrScheduler(errCfg *base.ErrSchedulerConfi
 	}
 
 	m.errScheduler = NewErrSchedulerManager(internalCfg)
+	m.errInFlight = make(map[string]errInFlightEntry)
 
 	if errCfg.ErrSchedulerType == "caterr" && !m.errScheduler.classifier.IsLoaded() {
 		return fmt.Errorf("[ERR] caterr classifier not loaded (vocab or centroids invalid), model %s", m.config.model)
@@ -352,18 +358,12 @@ func (m *GlobalSchedulerManager) initErrScheduler(errCfg *base.ErrSchedulerConfi
 
 	if queueSize > 0 {
 		if m.config.deployPolicy == SeparatedDeployment {
-			m.capacityProvider = NewCapacityProviderSeparated(batchSize,
+			m.capacityProvider = NewCapacityProviderSeparatedGroupAware(batchSize,
 				func() int {
 					if m.instanceManager == nil {
 						return 0
 					}
-					return m.instanceManager.getInsNumByRole(base.PrefillRoleInstance)
-				},
-				func() int {
-					if m.instanceManager == nil {
-						return 0
-					}
-					return m.instanceManager.getInsNumByRole(base.DecodeRoleInstance)
+					return m.instanceManager.getSeparatedCapacity()
 				},
 			)
 		} else {

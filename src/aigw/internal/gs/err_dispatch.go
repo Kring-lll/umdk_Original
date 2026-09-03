@@ -128,7 +128,7 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 			return
 		}
 
-		pr := m.pendingQueue.Pick(func(r *PendingRequest) int {
+		pr := m.pendingQueue.Peek(func(r *PendingRequest) int {
 			req := r.Msg.Request.(*ScheduleRequestMsg)
 			if r.SessionID == "" {
 				return int(m.errScheduler.AnonymousPriorityWith(snap, req.Request.Prompt))
@@ -142,6 +142,7 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 		req, ok := pr.Msg.Request.(*ScheduleRequestMsg)
 		if !ok {
 			pr.Msg.Response <- fmt.Errorf("unknown schedule message type in queue")
+			m.pendingQueue.Remove(pr.ReqID)
 			continue
 		}
 
@@ -149,6 +150,7 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 			select {
 			case <-req.ReqCTX.Done():
 				pr.Msg.Response <- ErrNoInstance
+				m.pendingQueue.Remove(pr.ReqID)
 				continue
 			default:
 			}
@@ -157,10 +159,10 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 		result := m.scheduler.schedule(req, nil)
 
 		if result.PrefillUrl == "" {
-			pr.Msg.Response <- ErrNoInstance
-			continue
+			return
 		}
 
+		m.pendingQueue.Remove(pr.ReqID)
 		priority := m.computePriorityWithSnapshot(snap, pr.SessionID, pr.CurStep, req.Request.Prompt)
 		m.dispatchScheduled(pr.Msg, req, result, priority)
 	}
@@ -215,6 +217,14 @@ func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *Sch
 
 	m.capacityProvider.OnDispatched()
 
+	if req.Request.ReqId != "" {
+		m.errInFlight[req.Request.ReqId] = errInFlightEntry{
+			SessionID:  req.SessionID,
+			PrefillURL: result.PrefillUrl,
+			DecodeURL:  result.DecodeUrl,
+		}
+	}
+
 	inFlight := 0
 	totalSlots := 0
 	queueSize := 0
@@ -241,6 +251,44 @@ func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *Sch
 	}
 }
 
+// errInFlightEntry records the dispatch metadata for a single in-flight ERR
+// request, keyed by reqID in m.errInFlight. Used to make cleanup idempotent:
+// a reqID can only be released once, so OnCompleted/RemoveRequest/session
+// side-effects cannot double-fire even if onInstanceUnhealthy and ErrOnResponse
+// race for the same request.
+type errInFlightEntry struct {
+	SessionID  string
+	PrefillURL string
+	DecodeURL  string
+}
+
+// errReleaseReq releases the in-flight tracking for reqID. Returns the entry
+// and true if this call was the one that released it; returns false (no-op)
+// if the request was already released or never registered.
+// Caller must hold m.dispatchMu.
+func (m *GlobalSchedulerManager) errReleaseReq(reqID string) (errInFlightEntry, bool) {
+	if reqID == "" {
+		return errInFlightEntry{}, false
+	}
+	entry, ok := m.errInFlight[reqID]
+	if !ok {
+		return errInFlightEntry{}, false
+	}
+	delete(m.errInFlight, reqID)
+	if m.capacityProvider != nil {
+		m.capacityProvider.OnCompleted()
+	}
+	if m.metricProvider != nil && entry.PrefillURL != "" {
+		if err := m.metricProvider.RemoveRequest(&LlmRequest{ReqId: reqID}, &InstanceContext{
+			InstanceID:       entry.PrefillURL,
+			DecodeInstanceID: entry.DecodeURL,
+		}); err != nil {
+			log.Debug().Msgf("[ERR] RemoveRequest for req %s: %v", reqID, err)
+		}
+	}
+	return entry, true
+}
+
 // ErrOnResponse is called when an HTTP response completes.
 // insURL is the instance the request was forwarded to; empty if never dispatched.
 // Caller does NOT hold dispatchMu — counter adjustments and drain acquire it internally.
@@ -249,28 +297,17 @@ func (m *GlobalSchedulerManager) ErrOnResponse(sessionID, reqID, prefillURL, dec
 		return
 	}
 
-	switch finishReason {
-	case "stop":
-		m.errScheduler.OnFinish(sessionID)
-	case "cancelled":
-		m.errScheduler.OnCancel(sessionID)
-		log.Warn().Msgf("[ERR] session %s stream cancelled (insURL=%s)", sessionID, prefillURL)
-	default:
-		m.errScheduler.RestartIdleTimer(sessionID)
-	}
-
 	m.dispatchMu.Lock()
-	if prefillURL != "" {
-		if m.capacityProvider != nil {
-			m.capacityProvider.OnCompleted()
-		}
-		if reqID != "" {
-			if err := m.metricProvider.RemoveRequest(&LlmRequest{ReqId: reqID}, &InstanceContext{
-				InstanceID:       prefillURL,
-				DecodeInstanceID: decodeURL,
-			}); err != nil {
-				log.Debug().Msgf("[ERR] RemoveRequest failed for req %s: %v", reqID, err)
-			}
+	_, released := m.errReleaseReq(reqID)
+	if prefillURL == "" || released {
+		switch finishReason {
+		case "stop":
+			m.errScheduler.OnFinish(sessionID)
+		case "cancelled":
+			m.errScheduler.OnCancel(sessionID)
+			log.Warn().Msgf("[ERR] session %s stream cancelled (insURL=%s)", sessionID, prefillURL)
+		default:
+			m.errScheduler.RestartIdleTimer(sessionID)
 		}
 	}
 	m.tryDispatchFromQueue()
@@ -278,31 +315,55 @@ func (m *GlobalSchedulerManager) ErrOnResponse(sessionID, reqID, prefillURL, dec
 }
 
 // ErrOnCancel is called when an HTTP connection is closed abnormally.
+// Caller does NOT hold dispatchMu — counter adjustments and drain acquire it internally.
 func (m *GlobalSchedulerManager) ErrOnCancel(sessionID, reqID, prefillURL, decodeURL string) {
 	if m.errScheduler == nil {
 		return
 	}
 
-	log.Warn().Msgf("[ERR] session %s connection closed (insURL=%s)", sessionID, prefillURL)
-	m.errScheduler.OnCancel(sessionID)
-
 	m.dispatchMu.Lock()
-	if prefillURL != "" {
-		if m.capacityProvider != nil {
-			m.capacityProvider.OnCompleted()
+	_, released := m.errReleaseReq(reqID)
+	if prefillURL == "" || released {
+		log.Warn().Msgf("[ERR] session %s connection closed (insURL=%s)", sessionID, prefillURL)
+		m.errScheduler.OnCancel(sessionID)
+		if m.pendingQueue != nil {
+			m.pendingQueue.RemoveBySession(sessionID)
 		}
-		if reqID != "" {
-			if err := m.metricProvider.RemoveRequest(&LlmRequest{ReqId: reqID}, &InstanceContext{
-				InstanceID:       prefillURL,
-				DecodeInstanceID: decodeURL,
-			}); err != nil {
-				log.Debug().Msgf("[ERR] RemoveRequest failed for req %s: %v", reqID, err)
-			}
-		}
-	}
-	if m.pendingQueue != nil {
-		m.pendingQueue.RemoveBySession(sessionID)
 	}
 	m.tryDispatchFromQueue()
 	m.dispatchMu.Unlock()
+}
+
+// onInstanceUnhealthy is called by InstanceManager when an instance's SSE
+// connection drops. It cleans up all in-flight tracking for requests that
+// were dispatched to the now-unhealthy instance, then drains the queue.
+// Caller does NOT hold dispatchMu — cleanup and drain acquire it internally.
+func (m *GlobalSchedulerManager) onInstanceUnhealthy(insUrl string) {
+	if m.errScheduler == nil {
+		return
+	}
+
+	m.dispatchMu.Lock()
+	var cleaned int
+	for reqID, entry := range m.errInFlight {
+		if entry.PrefillURL != insUrl && entry.DecodeURL != insUrl {
+			continue
+		}
+		if _, released := m.errReleaseReq(reqID); !released {
+			continue
+		}
+		cleaned++
+		if entry.SessionID != "" {
+			m.errScheduler.OnCancel(entry.SessionID)
+			if m.pendingQueue != nil {
+				m.pendingQueue.RemoveBySession(entry.SessionID)
+			}
+		}
+	}
+	m.tryDispatchFromQueue()
+	m.dispatchMu.Unlock()
+
+	if cleaned > 0 {
+		log.Warn().Msgf("[ERR] instance %s went unhealthy, cleaned %d in-flight request(s)", insUrl, cleaned)
+	}
 }
