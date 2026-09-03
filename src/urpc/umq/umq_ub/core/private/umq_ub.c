@@ -2729,11 +2729,28 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm)
             EID_ARGS(*eid), id);
         return -UMQ_ERR_EPERM;
     }
+    /* Lock-protected bind_ctx access: umq_ub_unbind_impl sets bind_ctx=NULL
+     * under the same lock before freeing, so we either see a valid bind_ctx
+     * or NULL — never a freed pointer. Copy tseg_table out under the lock;
+     * after unlock only the local copy is used, never queue->bind_ctx. */
+    remote_imported_tseg_info_t *remote_info = qcfg->dev_ctx->remote_imported_info;
+    if (remote_info == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, remote_imported_info is NULL\n",
+            EID_ARGS(*eid), id);
+        return -UMQ_ERR_ENODEV;
+    }
+    (void)util_mutex_lock(remote_info->remote_eid_table_lock);
     if (queue->bind_ctx == NULL) {
+        (void)util_mutex_unlock(remote_info->remote_eid_table_lock);
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq has not been binded\n", EID_ARGS(*eid), id);
         return -UMQ_ERR_ENODEV;
     }
+    urma_target_seg_t **tseg_table = queue->bind_ctx->tseg_table;
+    (void)util_mutex_unlock(remote_info->remote_eid_table_lock);
 
+    /* dummy_eid for error log: remote eid unknown after dropping bind_ctx
+     * dereference. */
+    urma_eid_t dummy_eid = {{0}};
     uint16_t buf_num = imm.ub_plus.msg_num;
     uint16_t msg_id = imm.ub_plus.msg_id;
     umq_imm_head_t *umq_imm_head = (umq_imm_head_t *)(uintptr_t)rx_buf->buf_data;
@@ -2803,7 +2820,7 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm)
 
         src_sge[i].addr = ref_sge[i].addr;
         src_sge[i].len = src_buf_length;
-        src_sge[i].tseg = umq_ub_tseg_lookup(queue->bind_ctx->tseg_table, ref_sge[i].mempool_id);
+        src_sge[i].tseg = umq_ub_tseg_lookup(tseg_table, ref_sge[i].mempool_id);
         if (src_sge[i].tseg == NULL) {
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, imported memory handle not exist\n",
                 EID_ARGS(*eid), id);
@@ -2816,8 +2833,8 @@ int umq_ub_read(uint64_t umqh_tp, umq_buf_t *rx_buf, umq_ub_imm_t imm)
         if (status != URMA_SUCCESS) {
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ""
                 ", remote jetty_id: %u, urma_post_jetty_send_wr failed, status: %d\n", EID_ARGS(*eid), id,
-                EID_ARGS(queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid),
-                queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.id, (int)status);
+                EID_ARGS(dummy_eid),
+                0, (int)status);
             if (i == 0) {
                 goto FREE_CTX_BUF;
             } else {
@@ -2881,7 +2898,19 @@ static int process_send_imm(umq_buf_t *rx_buf, umq_ub_imm_t imm, uint64_t umqh)
         if (imm.mem_import.mempool_id >= UMQ_MAX_TSEG_NUM) {
             UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "umq ub mempool_id: %u invalid\n", imm.mem_import.mempool_id);
         } else {
-            urpc_bitmap_set1(queue->bind_ctx->tseg_imported, imm.mem_import.mempool_id);
+            /* Lock-protected bind_ctx access: umq_ub_unbind_impl sets
+             * bind_ctx=NULL under the same lock before freeing, so we
+             * either see a valid bind_ctx or NULL — never a freed
+             * pointer. */
+            remote_imported_tseg_info_t *remote_info =
+                umq_ub_queue_cfg_get(queue)->dev_ctx->remote_imported_info;
+            if (remote_info != NULL) {
+                (void)util_mutex_lock(remote_info->remote_eid_table_lock);
+                if (queue->bind_ctx != NULL) {
+                    urpc_bitmap_set1(queue->bind_ctx->tseg_imported, imm.mem_import.mempool_id);
+                }
+                (void)util_mutex_unlock(remote_info->remote_eid_table_lock);
+            }
         }
         umq_buf_free(rx_buf);
         ret = UMQ_CONTINUE_FLAG;
@@ -3231,7 +3260,28 @@ int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *
 {
     ub_queue_cfg_t *qcfg = umq_ub_queue_cfg_get(queue);
     uint32_t max_sge_num = qcfg->max_tx_sge;
+    urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
+    uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
+    /* Lock-protected bind_ctx access: umq_ub_unbind_impl sets bind_ctx=NULL
+     * under the same lock before freeing, so we either see a valid bind_ctx
+     * or NULL — never a freed pointer. tjetty is copied out under the lock;
+     * after unlock only the local copy is used, never queue->bind_ctx.
+     * Note: tjetty's own lifetime is managed by urma_unimport_jetty in the
+     * unbind path; fully closing that window needs tjetty refcounting and
+     * is left to a separate change. */
+    remote_imported_tseg_info_t *remote_info = qcfg->dev_ctx->remote_imported_info;
+    if (remote_info == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq has not been binded\n", EID_ARGS(*eid), id);
+        return -UMQ_ERR_ENODEV;
+    }
+    (void)util_mutex_lock(remote_info->remote_eid_table_lock);
+    if (queue->bind_ctx == NULL) {
+        (void)util_mutex_unlock(remote_info->remote_eid_table_lock);
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq has not been binded\n", EID_ARGS(*eid), id);
+        return -UMQ_ERR_ENODEV;
+    }
     urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO];
+    (void)util_mutex_unlock(remote_info->remote_eid_table_lock);
     urma_sge_t *sges_ptr;
     umq_buf_t *buffer = qbuf;
     uint32_t wr_index = 0;
@@ -3239,8 +3289,6 @@ int umq_ub_plus_fill_wr_impl(umq_buf_t *qbuf, ub_queue_t *queue, urma_jfs_wr_t *
     urma_target_seg_t **tseg_list = qcfg->dev_ctx->tseg_list;
     uint32_t remote_rx_buf_size = queue->remote_rx_buf_size;
     uint32_t sge_num = 0;
-    urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
-    uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
 
     umq_buf_t *real_buf = NULL;
     while (buffer != NULL) {
@@ -3710,16 +3758,33 @@ int umq_ub_send_imm(ub_queue_t *queue, uint64_t imm_value, urma_sge_t *sge, uint
     ub_queue_cfg_t *qcfg = umq_ub_queue_cfg_get(queue);
     urma_eid_t *eid = &queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.eid;
     uint32_t id = queue->jetty[UB_QUEUE_JETTY_IO]->jetty_id.id;
-    if (queue->bind_ctx == NULL) {
+    /* Lock-protected bind_ctx access: umq_ub_unbind_impl sets bind_ctx=NULL
+     * under the same lock before freeing, so we either see a valid bind_ctx
+     * or NULL — never a freed pointer. tjetty is copied out under the lock;
+     * after unlock only the local copy is used, never queue->bind_ctx.
+     * urma_post_jetty_send_wr is a blocking syscall and stays outside the
+     * lock. Note: tjetty's own lifetime is managed by urma_unimport_jetty
+     * in the unbind path; fully closing that window needs tjetty
+     * refcounting and is left to a separate change. */
+    remote_imported_tseg_info_t *remote_info = qcfg->dev_ctx->remote_imported_info;
+    if (remote_info == NULL) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq has not been binded\n", EID_ARGS(*eid), id);
         return -UMQ_ERR_ENODEV;
     }
+    (void)util_mutex_lock(remote_info->remote_eid_table_lock);
+    if (queue->bind_ctx == NULL) {
+        (void)util_mutex_unlock(remote_info->remote_eid_table_lock);
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, umq has not been binded\n", EID_ARGS(*eid), id);
+        return -UMQ_ERR_ENODEV;
+    }
+    urma_target_jetty_t *tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO];
+    (void)util_mutex_unlock(remote_info->remote_eid_table_lock);
 
     urma_jfs_wr_t urma_wr = {
         .send = {.src = {.sge = sge, .num_sge = (sge == NULL) ? 0 : 1}, .imm_data = imm_value },
         .user_ctx = user_ctx,
         .flag = { .bs = { .complete_enable = 1, .inline_flag = 0, } },
-        .tjetty = queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO],
+        .tjetty = tjetty,
         .opcode = URMA_OPC_SEND_IMM};
     urma_jfs_wr_t *bad_wr = NULL;
     uint64_t start_timestamp = umq_perf_get_start_timestamp();
@@ -3732,8 +3797,8 @@ int umq_ub_send_imm(ub_queue_t *queue, uint64_t imm_value, urma_sge_t *sge, uint
     if (status != URMA_SUCCESS) {
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ_URMA_API, "local eid: " EID_FMT ", local jetty_id: %u, remote eid: " EID_FMT ", "
             "remote jetty_id: %u, urma_post_jetty_send_wr failed, status: %d\n", EID_ARGS(*eid), id,
-            EID_ARGS(queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.eid),
-            queue->bind_ctx->tjetty[UB_QUEUE_JETTY_IO]->id.id, (int)status);
+            EID_ARGS(tjetty->id.eid),
+            tjetty->id.id, (int)status);
         return umq_status_convert(status);
     }
     umq_ub_io_packet_stats(queue, UB_PACKET_STATS_TYPE_SEND, 1, qcfg->dev_ctx->io_lock_free);
