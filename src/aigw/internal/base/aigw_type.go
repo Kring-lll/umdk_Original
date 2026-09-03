@@ -145,7 +145,7 @@ type LoadBalancerConfig struct {
 // LoadBalancerConfig. BatchSize (shared by LBs and ERR capacity) stays in
 // LoadBalancerConfig and is passed into initErrScheduler separately.
 type ErrSchedulerConfig struct {
-	ErrSchedulerType   string `json:"errSchedulerType"`   // "mej", "err", "caterr", "" or "none" = disabled
+	ErrSchedulerType   string `json:"errSchedulerType"`   // "mej", "err", "caterr", "fifo", "" or "none" = disabled
 	QueueSize          int    `json:"queueSize"`          // pending queue max size (0 = passthrough mode, >0 = queue mode)
 	WarmupSessions     int    `json:"warmupSessions"`     // total observations threshold for warmup completion (default: 100; 0 = ignore total)
 	WarmupPerCat       int    `json:"warmupPerCat"`        // per-category observations threshold, CatERR only (default: 10; 0 = ignore per-category)

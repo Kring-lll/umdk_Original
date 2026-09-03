@@ -274,7 +274,7 @@ func validateErrSchedulerConfig(gsCfg *base.GlobalSchedulerConfig) error {
 	if t == "" || t == "none" {
 		return nil
 	}
-	if t != "mej" && t != "err" && t != "caterr" {
+	if t != "mej" && t != "err" && t != "caterr" && t != "fifo" {
 		return fmt.Errorf("invalid errSchedulerType %q, model %q", t, gsCfg.Model)
 	}
 

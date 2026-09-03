@@ -19,7 +19,7 @@ import (
 
 // ErrSchedulerConfig holds configuration for the ERR scheduler.
 type ErrSchedulerConfig struct {
-	SchedulerType      string // "mej", "err", "caterr"
+	SchedulerType      string // "mej", "err", "caterr", "fifo"
 	WarmupSessions     int
 	WarmupPerCat       int
 	WindowSize         int
@@ -183,6 +183,8 @@ func (m *ErrSchedulerManager) initAlgorithm() {
 		m.algorithm = NewErrAlg(m.globalDist)
 	case "caterr":
 		m.algorithm = NewCatErrAlg(m.classifier, m.catDists, &m.catMu)
+	case "fifo":
+		m.algorithm = NewFifoAlg()
 	default:
 		log.Warn().Msgf("[ERR] unknown scheduler type %s, falling back to mej", m.config.SchedulerType)
 		m.algorithm = NewMejAlg()
@@ -200,6 +202,9 @@ func (m *ErrSchedulerManager) OnRequest(sessionID, model, prompt string) int {
 }
 
 func (m *ErrSchedulerManager) AnonymousPriority(prompt string) float64 {
+	if m.algorithm != nil && m.algorithm.Name() == "fifo" {
+		return 0
+	}
 	medianStep := m.medianStepForAnonymous(prompt)
 	if medianStep <= 0 {
 		medianStep = 1
@@ -215,6 +220,9 @@ func (m *ErrSchedulerManager) AnonymousPriority(prompt string) float64 {
 
 // AnonymousPriorityWith uses the provided snapshot for consistent reads within one Pick.
 func (m *ErrSchedulerManager) AnonymousPriorityWith(snap *algoSnapshot, prompt string) float64 {
+	if m.algorithm != nil && m.algorithm.Name() == "fifo" {
+		return 0
+	}
 	medianStep := m.medianStepForAnonymousWith(snap, prompt)
 	if medianStep <= 0 {
 		medianStep = 1

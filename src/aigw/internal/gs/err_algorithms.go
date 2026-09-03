@@ -120,3 +120,15 @@ func (a *CatErrAlg) PriorityWith(snap *algoSnapshot, _ string, curStep int, prom
 }
 
 func (a *CatErrAlg) Name() string { return "caterr" }
+
+// FifoAlg implements FIFO: priority is always 0 so Peek's tie-break
+// (EnqueueTime, oldest first) becomes the sole ordering criterion.
+type FifoAlg struct{}
+
+func NewFifoAlg() *FifoAlg { return &FifoAlg{} }
+
+func (a *FifoAlg) Priority(_ string, _ int, _ string) float64 { return 0 }
+
+func (a *FifoAlg) PriorityWith(_ *algoSnapshot, _ string, _ int, _ string) float64 { return 0 }
+
+func (a *FifoAlg) Name() string { return "fifo" }
