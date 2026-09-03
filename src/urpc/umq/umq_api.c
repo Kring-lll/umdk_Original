@@ -734,6 +734,7 @@ CLONE_SO:
 #endif
     if (umq_fw->dlhandler != NULL) {
         dlclose(umq_fw->dlhandler);
+        umq_fw->dlhandler = NULL;
     }
     umq_fw->enable = false;
     return UMQ_FAIL;
@@ -1488,7 +1489,7 @@ int umq_dev_add(umq_trans_info_t *trans_info)
     }
 #endif
 
-    if (trans_info == NULL || trans_info->trans_mode >= UMQ_TRANS_MODE_MAX) {
+    if (trans_info == NULL || trans_info->trans_mode >= UMQ_TRANS_MODE_MAX || trans_info->trans_mode < 0) {
         UMQ_VLOG_ERR(VLOG_UMQ, "trans info invalid\n");
         return -UMQ_ERR_EINVAL;
     }
@@ -1559,7 +1560,7 @@ int umq_get_route_list(const umq_route_key_t *route_key, umq_trans_mode_t umq_tr
     }
 #endif
 
-    if (umq_trans_mode >= UMQ_TRANS_MODE_MAX) {
+    if (umq_trans_mode >= UMQ_TRANS_MODE_MAX || umq_trans_mode < 0) {
         UMQ_VLOG_ERR(VLOG_UMQ, "trans info mode[%u] is invalid\n", umq_trans_mode);
         return -UMQ_ERR_EINVAL;
     }

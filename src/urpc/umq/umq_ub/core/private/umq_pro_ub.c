@@ -376,7 +376,7 @@ int umq_ub_post_tx(uint64_t umqh, umq_buf_t *qbuf, umq_buf_t **bad_qbuf, umq_io_
                 real_buf = buffer;
             }
 
-            if (real_buf->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
+            if (real_buf->mempool_id >= QBUF_POOL_MEMPOOL_ID_MAX) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "UMQ(ID:%u), opcode: %u, ub only supports using pooled memory\n",
                     queue->umq_id, opcode);
                 ret = -UMQ_ERR_EFAULT;
@@ -659,7 +659,7 @@ int umq_ub_post_rx_inner_impl(ub_queue_t *queue, umq_buf_t *qbuf, umq_buf_t **ba
             sges_ptr->len = buffer->data_size;
             sges_ptr->user_tseg = NULL;
 
-            if (buffer->mempool_id == QBUF_POOL_MEMPOOL_ID_MAX) {
+            if (buffer->mempool_id >= QBUF_POOL_MEMPOOL_ID_MAX) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "eid: " EID_FMT ", jetty_id: %u, ub only supports using pooled memory\n",
                     EID_ARGS(*eid), id);
                 ret = -UMQ_ERR_EFAULT;
@@ -2131,6 +2131,11 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
             return ret;
         }
         qbuf_cnt += ret;
+        if ((uint32_t)qbuf_cnt >= max_batch) {
+            umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
+            return qbuf_cnt;
+        }
+        max_batch -= (uint32_t)qbuf_cnt;
     }
 
     if (!umq_ub_poll_get_jetty_node(queue)) {
