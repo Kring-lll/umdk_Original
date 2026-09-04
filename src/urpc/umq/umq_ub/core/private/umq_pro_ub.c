@@ -1580,8 +1580,14 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
         umq_ub_ack_import_tseg(queue);
     }
 
-    max_batch -= qbuf_cnt;
-    urma_cr_t cr[max_batch];
+    if (qbuf_cnt >= max_batch) {
+        /* FC error stubs filled all remaining slots; clamp to skip IO poll and
+         * avoid uint32_t underflow in max_batch -= qbuf_cnt. */
+        max_batch = 0;
+    } else {
+        max_batch -= qbuf_cnt;
+    }
+    urma_cr_t cr[UMQ_BATCH_SIZE];
     if (max_batch == 0 || is_umq_ub_share_rq(queue->create_flag)) {
         umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
         goto OUT;
@@ -1718,7 +1724,7 @@ static int umq_ub_flush_sqe(urma_jetty_t *jetty, umq_buf_t **buf, uint32_t buf_c
     }
 
     uint32_t max_batach = buf_count > UMQ_BATCH_SIZE ? UMQ_BATCH_SIZE : buf_count;
-    urma_cr_t cr[max_batach];
+    urma_cr_t cr[UMQ_BATCH_SIZE];
     int cnt = 0;
     int cr_cnt = umq_symbol_urma()->urma_flush_jetty(jetty, max_batach, cr);
     for (int i = 0; i < cr_cnt; i++) {
@@ -1963,7 +1969,7 @@ static void umq_ub_process_cr_err_for_jetty_pool(ub_queue_t *queue, urma_cr_t *c
 
     umq_ub_jetty_node_list_t *jetty_node_list = umq_ub_queue_jetty_node_list_get(queue);
     if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
-        ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0 && jetty_node_list != NULL &&
+        (option != NULL && (option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0 && jetty_node_list != NULL &&
         tp_handle_idx < jetty_node_list->list_len)) {
         umq_ub_jetty_node_mark_err(jetty_node_list->node_list[tp_handle_idx]);
     } else if (is_umq_ub_logic_queue(queue->create_flag)) {
@@ -2174,7 +2180,15 @@ int umq_ub_poll_tx_single(ub_queue_t *queue, umq_buf_t **buf, uint32_t buf_count
         return qbuf_cnt;
     }
 
-    urma_cr_t cr[max_batch];
+    urma_cr_t cr[UMQ_BATCH_SIZE];
+    /* buf[0..qbuf_cnt) has been filled by FC poll error stubs; IO poll may only
+     * use the remaining slots, same as the RX path (max_batch -= qbuf_cnt). */
+    if ((uint32_t)qbuf_cnt >= max_batch) {
+        umq_ub_poll_release_jetty_node(queue, 0, tp_handle_idx, option, false);
+        umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
+        return qbuf_cnt;
+    }
+    max_batch -= (uint32_t)qbuf_cnt;
     // jfs_jfc and polling_node track the jetty_pool_node whose IO jfc is polled this round.
     // NULL polling_node means the queue owns its jetty (no pool); flush then uses queue->jetty.
     urma_jfc_t *jfs_jfc = queue->jfs_jfc[UB_QUEUE_JETTY_IO];

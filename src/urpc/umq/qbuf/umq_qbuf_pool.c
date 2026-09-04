@@ -673,16 +673,20 @@ static void qbuf_dbg_print_summary(void)
                 qbuf_lc_labels[p], (unsigned long long)cnt, avg, mx);
     }
     {
-        umq_qbuf_pool_stats_t pool_stats;
-        memset(&pool_stats, 0, sizeof(pool_stats));
-        umq_qbuf_pool_info_get(&pool_stats);
-        umq_tiny_qbuf_pool_info_get(&pool_stats);
-        umq_huge_qbuf_pool_info_get(&pool_stats);
+        umq_qbuf_pool_stats_t *pool_stats = (umq_qbuf_pool_stats_t *)malloc(sizeof(umq_qbuf_pool_stats_t));
+        if (pool_stats == NULL) {
+            return;
+        }
+        memset(pool_stats, 0, sizeof(*pool_stats));
+        umq_qbuf_pool_info_get(pool_stats);
+        umq_tiny_qbuf_pool_info_get(pool_stats);
+        umq_huge_qbuf_pool_info_get(pool_stats);
         char pool_buf[QBUF_DFX_BUF_SIZE];
-        int ret = umq_qbuf_pool_stats_to_str(&pool_stats, pool_buf, sizeof(pool_buf));
+        int ret = umq_qbuf_pool_stats_to_str(pool_stats, pool_buf, sizeof(pool_buf));
         if (ret > 0) {
             (void)fprintf(stderr, "[UMQ TIMING] pool state:\n%s\n", pool_buf);
         }
+        free(pool_stats);
     }
 }
 // ===== NON-POOL POINTER DIAGNOSTIC =====
@@ -2065,6 +2069,7 @@ static void init_split_mode_layout(const qbuf_pool_cfg_t *cfg, uint32_t count)
     uint64_t blk_nums[UMQ_QBUF_SIZE_CLASS_MAX];
     uint64_t total_blk_num = 0;
     uint64_t total_header_size = 0;
+    size_t hdr_sz = sizeof(umq_buf_t);
     char *data_ptr = (char *)cfg->buf_addr;
 
     // Build descending (largest block_size first) write order over non-lazy SCs only.
@@ -2091,7 +2096,7 @@ static void init_split_mode_layout(const qbuf_pool_cfg_t *cfg, uint32_t count)
         uint64_t blk_num = g_qbuf_pool.per_sc_block_counts[sc];
         blk_nums[sc] = blk_num;
         total_blk_num += blk_num;
-        total_header_size += blk_num * sizeof(umq_buf_t);
+        total_header_size += blk_num * hdr_sz;
         data_ptr = (char *)(((uintptr_t)data_ptr + blk_size - 1) & ~((uintptr_t)blk_size - 1));
         g_qbuf_pool.data_region_start[sc] = data_ptr;
         data_ptr += blk_num * blk_size;
