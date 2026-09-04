@@ -98,9 +98,8 @@ func TestLoadConfig(t *testing.T) {
 					Decode:              "false",
 					BatchSize:           100,
 					ReservedBlockNumber: 10,
-					MinMatchedLength:    50,
-				VirtualNodes:        160, // Default value set by validation
-				FallbackNum:         3,   // Default value set by validation
+					VirtualNodes:        160, // Default value set by validation
+					FallbackNum:         3,   // Default value set by validation
 				},
 			},
 		},
@@ -177,7 +176,6 @@ func TestValidateConfig(t *testing.T) {
 					Decode:              "false",
 					BatchSize:           100,
 					ReservedBlockNumber: 10,
-					MinMatchedLength:    50,
 				},
 			},
 		},
@@ -239,7 +237,6 @@ func TestValidateConfig(t *testing.T) {
 					Decode:              "false",
 					BatchSize:           100,
 					ReservedBlockNumber: 10,
-					MinMatchedLength:    50,
 				},
 			},
 		},
@@ -402,7 +399,6 @@ func TestValidateGlobalSchedulersConfig(t *testing.T) {
 				Decode:              "false",
 				BatchSize:           100,
 				ReservedBlockNumber: 10,
-				MinMatchedLength:    50,
 				VirtualNodes:        160, // Default value for consistent hash
 				FallbackNum:         3,   // Default value for consistent hash
 			},
@@ -426,7 +422,6 @@ func TestValidateGlobalSchedulersConfig(t *testing.T) {
 				Decode:              "false",
 				BatchSize:           100,
 				ReservedBlockNumber: 10,
-				MinMatchedLength:    50,
 				VirtualNodes:        160, // Default value for consistent hash
 				FallbackNum:         3,   // Default value for consistent hash
 			},
@@ -450,7 +445,6 @@ func TestValidateGlobalSchedulersConfig(t *testing.T) {
 				Decode:              "false",
 				BatchSize:           100,
 				ReservedBlockNumber: 10,
-				MinMatchedLength:    50,
 				VirtualNodes:        160, // Default value for consistent hash
 				FallbackNum:         3,   // Default value for consistent hash
 			},
@@ -474,7 +468,6 @@ func TestValidateGlobalSchedulersConfig(t *testing.T) {
 				Decode:              "false",
 				BatchSize:           100,
 				ReservedBlockNumber: 10,
-				MinMatchedLength:    50,
 				VirtualNodes:        160, // Default value for consistent hash
 				FallbackNum:         3,   // Default value for consistent hash
 			},
@@ -498,7 +491,6 @@ func TestValidateGlobalSchedulersConfig(t *testing.T) {
 				Decode:              "false",
 				BatchSize:           100,
 				ReservedBlockNumber: 10,
-				MinMatchedLength:    50,
 				VirtualNodes:        160, // Default value for consistent hash
 				FallbackNum:         3,   // Default value for consistent hash
 			},
@@ -522,7 +514,6 @@ func TestValidateGlobalSchedulersConfig(t *testing.T) {
 				Decode:              "false",
 				BatchSize:           100,
 				ReservedBlockNumber: 10,
-				MinMatchedLength:    50,
 			},
 		},
 	}
@@ -544,7 +535,6 @@ func TestValidateGlobalSchedulersConfig(t *testing.T) {
 				Decode:              "false",
 				BatchSize:           100,
 				ReservedBlockNumber: 10,
-				MinMatchedLength:    50,
 				VirtualNodes:        160, // Default value for consistent hash
 				FallbackNum:         3,   // Default value for consistent hash
 			},
@@ -628,23 +618,6 @@ func TestValidateLoadBalancerInvalidReservedBlockNumber(t *testing.T) {
 
 	err := validateLoadBalancer(gsCfg)
 	expectedErr := fmt.Errorf("invalid ReservedBlockNumber value: %v, should > 0", -1)
-	assert.EqualError(t, err, expectedErr.Error())
-}
-
-// TestValidateLoadBalancerInvalidMinMatchedLength tests the validateLoadBalancer function when the minimum matched
-// length is invalid
-func TestValidateLoadBalancerInvalidMinMatchedLength(t *testing.T) {
-	gsCfg := &base.GlobalSchedulerConfig{
-		DeployPolicy: "roundRobin",
-		LoadBalancer: base.LoadBalancerConfig{
-			BatchSize:           1,
-			ReservedBlockNumber: 1,
-			MinMatchedLength:    -1,
-		},
-	}
-
-	err := validateLoadBalancer(gsCfg)
-	expectedErr := fmt.Errorf("invalid MinMatchedLength value: %v, should > 0", -1)
 	assert.EqualError(t, err, expectedErr.Error())
 }
 

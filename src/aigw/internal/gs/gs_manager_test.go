@@ -55,7 +55,6 @@ func newTestDefaultGsConfig(model string) *base.GlobalSchedulerConfig {
 			Decode:              "decode",
 			BatchSize:           128,
 			ReservedBlockNumber: 1,
-			MinMatchedLength:    0,
 			PowerOfTwo:          false,
 		},
 		InsConnectType:         "",

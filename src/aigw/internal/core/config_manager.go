@@ -244,9 +244,6 @@ func validateLoadBalancer(gsCfg *base.GlobalSchedulerConfig) error {
 		return fmt.Errorf("invalid ReservedBlockNumber value: %v, should > 0",
 			gsCfg.LoadBalancer.ReservedBlockNumber)
 	}
-	if gsCfg.LoadBalancer.MinMatchedLength <= 0 {
-		return fmt.Errorf("invalid MinMatchedLength value: %v, should > 0", gsCfg.LoadBalancer.MinMatchedLength)
-	}
 	// loadImbalanceThreshold is consumed only by the prefixCache load
 	// balancer (0 disables the imbalance intervention, prefix-only selection).
 	// The non-negativity guard runs unconditionally for all LB types as a
@@ -666,7 +663,6 @@ func NewDefaultGsConfig(model string) *base.GlobalSchedulerConfig {
 			Decode:              "decode",
 			BatchSize:           128,
 			ReservedBlockNumber: 1,
-			MinMatchedLength:    0,
 			PowerOfTwo:          false,
 		},
 		InsConnectType:         "",

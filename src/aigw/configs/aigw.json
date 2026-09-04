@@ -65,7 +65,6 @@
         "batchSize": 32,
         "enablePowerOfTwo": false,
         "reservedBlockNumber": 50,
-        "minMatchedLength": 200,
         "pretrainTTFTPath": ""
       },
       "instanceConnectType": "sse"

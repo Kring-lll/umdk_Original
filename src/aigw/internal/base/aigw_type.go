@@ -133,7 +133,6 @@ type LoadBalancerConfig struct {
 	Decode              string `json:"decode"`
 	BatchSize           int    `json:"batchSize"`
 	ReservedBlockNumber int    `json:"reservedBlockNumber"`
-	MinMatchedLength    int    `json:"minMatchedLength"`
 	PowerOfTwo          bool   `json:"enablePowerOfTwo"`
 	// LoadImbalanceThreshold is the token-load imbalance threshold for the
 	// prefixCache load balancer. When max(TokenNum)-min(TokenNum) across all

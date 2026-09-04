@@ -50,7 +50,6 @@
         "decode": "false",
         "batchSize": 100,
         "reservedBlockNumber": 10,
-        "minMatchedLength": 50,
         "powerOfTwo": false,
         "virtualNodes": 160,
         "fallbackNum": 3,

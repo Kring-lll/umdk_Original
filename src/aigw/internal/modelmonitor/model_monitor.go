@@ -66,7 +66,6 @@ func (m *ModelManager) addGs(data ModelData) {
 		BatchSize:           32,
 		PowerOfTwo:          false,
 		ReservedBlockNumber: 20,
-		MinMatchedLength:    200,
 	}
 
 	if data.DeployPolicy == "Mix" {
