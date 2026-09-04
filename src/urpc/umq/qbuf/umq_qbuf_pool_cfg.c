@@ -38,8 +38,21 @@ static int umq_tiny_pool_cfg_check(const umq_init_cfg_t *cfg, umq_qbuf_pool_plan
     }
 
     plan->tiny_io_buf_size = tiny_block_count * plan->tiny_block_size;
+    if (plan->tiny_io_buf_size / plan->tiny_block_size != tiny_block_count) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "tiny_io_buf_size overflow: block count %llu * block size %u\n",
+                     (unsigned long long)tiny_block_count, plan->tiny_block_size);
+        return -UMQ_ERR_EINVAL;
+    }
     if (cfg->buf_mode == UMQ_BUF_SPLIT) {
-        plan->tiny_io_buf_size += tiny_block_count * sizeof(umq_buf_t);
+        size_t hdr_sz = sizeof(umq_buf_t);
+        uint64_t hdr_total = tiny_block_count * (uint64_t)hdr_sz;
+        if (hdr_total / hdr_sz != tiny_block_count ||
+            plan->tiny_io_buf_size > UINT64_MAX - hdr_total) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "tiny_io_buf_size overflow: block count %llu * hdr size %zu\n",
+                         (unsigned long long)tiny_block_count, hdr_sz);
+            return -UMQ_ERR_EINVAL;
+        }
+        plan->tiny_io_buf_size += hdr_total;
     }
 
     if (plan->tiny_io_buf_size > UMQ_TINY_QBUF_POOL_MAX_SIZE) {
@@ -66,8 +79,9 @@ int umq_qbuf_pool_cfg_check(const umq_init_cfg_t *cfg, umq_qbuf_pool_plan_t *pla
     plan->rx_block_count = cfg->buf_pool_cfg.rx_block_count;
     if (plan->rx_block_count > 0) {
         uint64_t rx_blk_size = umq_buf_size_small();
-        plan->rx_io_buf_size = (uint64_t)plan->rx_block_count * (rx_blk_size + sizeof(umq_buf_t));
-        if (plan->rx_io_buf_size / (rx_blk_size + sizeof(umq_buf_t)) != plan->rx_block_count) {
+        size_t blk_with_hdr = rx_blk_size + sizeof(umq_buf_t);
+        plan->rx_io_buf_size = (uint64_t)plan->rx_block_count * blk_with_hdr;
+        if (plan->rx_io_buf_size / blk_with_hdr != plan->rx_block_count) {
             UMQ_VLOG_ERR(VLOG_UMQ, "rx_io_buf_size overflow: rx_block_count %llu * blk_size %llu\n",
                          (unsigned long long)plan->rx_block_count,
                          (unsigned long long)(rx_blk_size + sizeof(umq_buf_t)));
