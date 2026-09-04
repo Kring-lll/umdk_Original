@@ -38,8 +38,20 @@ static int umq_tiny_pool_cfg_check(const umq_init_cfg_t *cfg, umq_qbuf_pool_plan
     }
 
     plan->tiny_io_buf_size = tiny_block_count * plan->tiny_block_size;
+    if (plan->tiny_io_buf_size / plan->tiny_block_size != tiny_block_count) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "tiny_io_buf_size overflow: block count %llu * block size %u\n",
+                     (unsigned long long)tiny_block_count, plan->tiny_block_size);
+        return -UMQ_ERR_EINVAL;
+    }
     if (cfg->buf_mode == UMQ_BUF_SPLIT) {
-        plan->tiny_io_buf_size += tiny_block_count * sizeof(umq_buf_t);
+        uint64_t hdr_total = tiny_block_count * sizeof(umq_buf_t);
+        if (hdr_total / sizeof(umq_buf_t) != tiny_block_count ||
+            plan->tiny_io_buf_size > UINT64_MAX - hdr_total) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "tiny_io_buf_size overflow: block count %llu * hdr size %zu\n",
+                         (unsigned long long)tiny_block_count, sizeof(umq_buf_t));
+            return -UMQ_ERR_EINVAL;
+        }
+        plan->tiny_io_buf_size += hdr_total;
     }
 
     if (plan->tiny_io_buf_size > UMQ_TINY_QBUF_POOL_MAX_SIZE) {
