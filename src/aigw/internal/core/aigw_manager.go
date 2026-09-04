@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -440,6 +441,7 @@ func (manager *AigwManager) SelectOptimalNode(in *GetSuggestionIn,
 	if runeCounts > manager.config.Limits.MaxPromptRunes {
 		return nil, fmt.Errorf("prompt is too long, characters nums: %v", runeCounts)
 	}
+	internalizeReqID(in)
 
 	m, err := manager.FindOrCreateGs(in.Model)
 	if err != nil {
@@ -464,6 +466,19 @@ func (manager *AigwManager) SelectOptimalNode(in *GetSuggestionIn,
 	return manager.scheduleRequest(m, in, instanceIDs)
 }
 
+// internalReqSeq uniquely suffixes caller-supplied request UUIDs. Upstreams
+// generate UUIDs independently (or use a plain timestamp), so concurrent
+// requests may collide; registry keys (instance reqSet, errInFlight) require
+// per-request uniqueness inside this process.
+var internalReqSeq atomic.Uint64
+
+// internalizeReqID rewrites in.UUID to "<original>#<seq>" so concurrent
+// requests with identical caller-supplied UUIDs get distinct registry keys.
+// The original UUID stays as a prefix for log traceability.
+func internalizeReqID(in *GetSuggestionIn) {
+	in.UUID = fmt.Sprintf("%s#%d", in.UUID, internalReqSeq.Add(1))
+}
+
 // GetSuggestion sends a schedule request to AIGW, and AIGW will give schedule suggestion.
 func (manager *AigwManager) GetSuggestion(in *GetSuggestionIn) (*base.GetSuggestionOut, error) {
 	err := utils.CheckStringLength(in.Model)
@@ -476,6 +491,7 @@ func (manager *AigwManager) GetSuggestion(in *GetSuggestionIn) (*base.GetSuggest
 		log.Error().Msgf("[GetSuggestion]The length of UUID is invalid. %v", err)
 		return nil, fmt.Errorf("[GetSuggestion]The length of UUID is invalid. %v", err)
 	}
+	internalizeReqID(in)
 	m := manager.getGsManager(in.Model)
 	if m == nil {
 		return nil, fmt.Errorf("global scheduler manager with model %v not found", in.Model)

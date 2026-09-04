@@ -36,6 +36,11 @@ const (
 	halfInterval        = 100
 	defaultInsNumPerGs  = 128
 	defaultReqLifeCycle = 10 * time.Second
+	// defaultErrReqSurvivalSec bounds how long a dispatched ERR request may
+	// stay in-flight before the survival scan force-releases it. Mirrors the
+	// SessionTimeoutSec default (agent stuck-without-change bottom line),
+	// far above any legitimate single-round latency.
+	defaultErrReqSurvivalSec = 660
 )
 
 // DeploymentPolicy is the deployment mode
@@ -865,6 +870,11 @@ func (m *GlobalSchedulerManager) GetInsNum() int {
 
 func (m *GlobalSchedulerManager) checkReqSurvival() {
 	m.instanceManager.checkReqSurvival(m.config.reqSurvivalDuration)
+	if m.errScheduler != nil {
+		m.dispatchMu.Lock()
+		m.checkErrInFlightSurvival()
+		m.dispatchMu.Unlock()
+	}
 }
 
 func (m *GlobalSchedulerManager) reqManagerLoop() {

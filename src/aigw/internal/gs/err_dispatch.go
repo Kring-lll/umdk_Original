@@ -219,9 +219,10 @@ func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *Sch
 
 	if req.Request.ReqId != "" {
 		m.errInFlight[req.Request.ReqId] = errInFlightEntry{
-			SessionID:  req.SessionID,
-			PrefillURL: result.PrefillUrl,
-			DecodeURL:  result.DecodeUrl,
+			SessionID:    req.SessionID,
+			PrefillURL:   result.PrefillUrl,
+			DecodeURL:    result.DecodeUrl,
+			DispatchTime: time.Now(),
 		}
 	}
 
@@ -257,9 +258,51 @@ func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *Sch
 // side-effects cannot double-fire even if onInstanceUnhealthy and ErrOnResponse
 // race for the same request.
 type errInFlightEntry struct {
-	SessionID  string
-	PrefillURL string
-	DecodeURL  string
+	SessionID    string
+	PrefillURL   string
+	DecodeURL    string
+	DispatchTime time.Time
+}
+
+// ErrInFlightCount returns the number of dispatched-but-unreleased ERR
+// requests. Returns 0 when ERR scheduling is disabled.
+func (m *GlobalSchedulerManager) ErrInFlightCount() int {
+	if m.errScheduler == nil {
+		return 0
+	}
+	m.dispatchMu.Lock()
+	defer m.dispatchMu.Unlock()
+	return len(m.errInFlight)
+}
+
+// checkErrInFlightSurvival force-releases in-flight entries whose completion
+// callback was lost (e.g. a handler panic after dispatch), mirroring what
+// checkReqSurvival does for the LB's reqSet. Threshold is SessionTimeoutSec
+// (well above any legitimate single-round latency); 0 falls back to
+// defaultErrReqSurvivalSec. Caller must hold m.dispatchMu.
+func (m *GlobalSchedulerManager) checkErrInFlightSurvival() {
+	threshold := time.Duration(m.errScheduler.config.SessionTimeoutSec) * time.Second
+	if threshold <= 0 {
+		threshold = defaultErrReqSurvivalSec * time.Second
+	}
+	now := time.Now()
+	for reqID, entry := range m.errInFlight {
+		if now.Sub(entry.DispatchTime) < threshold {
+			continue
+		}
+		if _, released := m.errReleaseReq(reqID); !released {
+			continue
+		}
+		log.Warn().Msgf("[ERR] req %s (session %s) zombie-released after %v, completion callback lost",
+			reqID, entry.SessionID, threshold)
+		if entry.SessionID != "" {
+			m.errScheduler.OnCancel(entry.SessionID)
+			if m.pendingQueue != nil {
+				m.pendingQueue.RemoveBySession(entry.SessionID)
+			}
+		}
+	}
+	m.tryDispatchFromQueue()
 }
 
 // errReleaseReq releases the in-flight tracking for reqID. Returns the entry

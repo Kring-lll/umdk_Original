@@ -560,8 +560,10 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 	if err != nil {
 		log.Error().Msgf("Forward request failed: %v", err)
 		http.Error(w, fmt.Sprintf("Forward request failed: %v", err), http.StatusBadGateway)
-		if sessionID != "" {
+		if suggestion.TargetPrefillUrl != "" {
 			// Request was dispatched (OnDispatched already counted it); free its slot.
+			// Guard on the dispatch target, not sessionID: anonymous requests
+			// have no session but still hold an in-flight slot.
 			s.manager.ErrOnCancel(model, sessionID, in.UUID, suggestion.TargetPrefillUrl, suggestion.TargetDecodeUrl)
 		}
 		return
