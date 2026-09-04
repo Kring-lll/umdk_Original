@@ -883,6 +883,10 @@ urma_status_t urma_alloc_jfs(urma_context_t *urma_ctx, urma_jfs_cfg_t *cfg, urma
     URMA_CHECK_OP_INVALID_RETURN_STATUS(urma_ctx, ops, alloc_jfs);
 
     urma_status_t status = ops->alloc_jfs(urma_ctx, cfg, jfs);
+    if (status != URMA_SUCCESS || (*jfs) == NULL) {
+        URMA_LOG_ERR("failed to exec ops->alloc_jfs\n");
+        return status == URMA_SUCCESS ? URMA_ENOMEM : status;
+    }
     atomic_fetch_add(&urma_ctx->ref.atomic_cnt, 1);
     (*jfs)->urma_jfs_opt.is_actived = false;
 
@@ -1340,6 +1344,10 @@ urma_status_t urma_alloc_jfr(urma_context_t *urma_ctx, urma_jfr_cfg_t *cfg, urma
      */
 
     urma_status_t status = ops->alloc_jfr(urma_ctx, cfg, jfr);
+    if (status != URMA_SUCCESS || (*jfr) == NULL) {
+        URMA_LOG_ERR("failed to exec ops->alloc_jfr\n");
+        return status == URMA_SUCCESS ? URMA_ENOMEM : status;
+    }
     atomic_fetch_add(&urma_ctx->ref.atomic_cnt, 1);
     (*jfr)->urma_jfr_opt.is_actived = false;
 
