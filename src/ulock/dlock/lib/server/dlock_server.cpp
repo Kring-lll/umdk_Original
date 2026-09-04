@@ -497,7 +497,7 @@ dlock_status_t dlock_server::read_entropy_pool(int fd, uint8_t *seed, int seed_l
         if ((read_bytes > 0) && (read_bytes <= seed_len)) {
             seed_len -= read_bytes;
             seed += read_bytes;
-        } else if ((read_bytes != EINTR) || ((read_bytes == 0) && (seed_len != 0))) {
+        } else if ((read_bytes < 0 && errno != EINTR) || ((read_bytes == 0) && (seed_len != 0))) {
             return DLOCK_FAIL;
         }
     }
