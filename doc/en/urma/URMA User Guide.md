@@ -2049,8 +2049,8 @@ URMA supports user-mode log redirection, allowing logs to be uniformly directed 
 
 ```c
 typedef void(*urma_log_cb_t)(int level, char *message);
-urma_status_t **urma_register_log_func**(urma_log_cb_t func);
-urma_status_t **urma_unregister_log_func**(void);
+urma_status_t urma_register_log_func(urma_log_cb_t func);
+urma_status_t urma_unregister_log_func(void);
 ```
 
 ---
@@ -2305,18 +2305,18 @@ Taking memory access as an example, the functional principles of UB access contr
 
 - Call urma_register_seg with the following configuration to let the software stack auto-allocate:
 
-urma_seg_cfg_t.urma_reg_seg_flag_t.token_id_valid = 0;
+seg_cfg.flag.bs.token_id_valid = 0;
 
 - First call urma_alloc_token_id to allocate a TokenID, then specify that TokenID when calling urma_register_seg:
 
 ```c
-urma_seg_cfg_t.token_id = token_id;
-urma_seg_cfg_t.urma_reg_seg_flag_t.token_id_valid = 1;
+seg_cfg.token_id = token_id;
+seg_cfg.flag.bs.token_id_valid = 1;
 ```
 
 2.  The token verification policy can be specified when registering a segment:
 
-urma_seg_cfg_t.urma_reg_seg_flag_t.token_policy = 0;
+seg_cfg.flag.bs.token_policy = 0;
 
 1.  Token Verification Policies
 
