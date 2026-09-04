@@ -392,6 +392,9 @@ static const char *umq_urma_func_str(umq_urma_func_type_t func_type)
 
 static void umq_trace_output_single(umq_trace_buf_t *cur_rec, uint32_t thread_id)
 {
+    if (cur_rec == NULL) {
+        return;
+    }
     uint32_t record_cnt = cur_rec->record_cnt;
     uint32_t previous_output_cnt = cur_rec->previous_output_cnt;
     uint32_t new_records;
