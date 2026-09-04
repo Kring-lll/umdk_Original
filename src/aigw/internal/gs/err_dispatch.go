@@ -37,6 +37,16 @@ func (m *GlobalSchedulerManager) dispatchErr(msg *ControlMessage) {
 		return
 	}
 
+	// Advisory callers forward the request themselves, so aigw never observes
+	// completion: ERR must not track the session, queue the request, or take
+	// in-flight slots. LB selection and the priority hint still apply.
+	if req.Advisory {
+		m.dispatchMu.Lock()
+		m.dispatchAdvisory(msg)
+		m.dispatchMu.Unlock()
+		return
+	}
+
 	sessionID := req.SessionID
 	curStep := 0
 	cat := ""
@@ -164,7 +174,7 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 
 		m.pendingQueue.Remove(pr.ReqID)
 		priority := m.computePriorityWithSnapshot(snap, pr.SessionID, pr.CurStep, req.Request.Prompt)
-		m.dispatchScheduled(pr.Msg, req, result, priority)
+		m.dispatchScheduled(pr.Msg, req, result, priority, false)
 	}
 }
 
@@ -173,6 +183,18 @@ func (m *GlobalSchedulerManager) computePriorityWithSnapshot(snap *algoSnapshot,
 		return int(m.errScheduler.AnonymousPriorityWith(snap, prompt))
 	}
 	return int(m.errScheduler.PriorityWith(snap, sessionID, curStep, prompt))
+}
+
+// dispatchAdvisory serves query-only requests: LB picks an instance and the
+// priority hint is computed, but ERR takes no in-flight slot and registers
+// nothing. AddRequest still feeds the LB view — the instance-side
+// REQUEST_IS_FINISHED event or the reqSet survival scan cleans it up, which
+// is the original lifecycle for caller-forwarded requests.
+// Caller must hold m.dispatchMu.
+func (m *GlobalSchedulerManager) dispatchAdvisory(msg *ControlMessage) {
+	req := msg.Request.(*ScheduleRequestMsg)
+	priority := int(m.errScheduler.AnonymousPriority(req.Request.Prompt))
+	m.dispatchScheduled(msg, req, m.scheduler.schedule(req, nil), priority, true)
 }
 
 // dispatchDirect dispatches immediately without queueing (passthrough mode).
@@ -187,14 +209,16 @@ func (m *GlobalSchedulerManager) dispatchDirect(msg *ControlMessage, priority in
 		return
 	}
 
-	m.dispatchScheduled(msg, req, result, priority)
+	m.dispatchScheduled(msg, req, result, priority, false)
 }
 
-// dispatchScheduled is the shared dispatch step for both passthrough and queue modes.
-// Feeds RR's instance capacity (AddRequest), KVC hooks, model-level in-flight tracking,
-// writes the response with priority hint. Caller must hold m.dispatchMu.
+// dispatchScheduled is the shared dispatch step for all modes. Feeds RR's
+// instance capacity (AddRequest), KVC hooks, model-level in-flight tracking,
+// writes the response with priority hint. advisory requests skip the ERR
+// in-flight bookkeeping only (their completion is never observed by aigw).
+// Caller must hold m.dispatchMu.
 func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *ScheduleRequestMsg,
-	result *ScheduleResult, priority int) {
+	result *ScheduleResult, priority int, advisory bool) {
 
 	m.recordScheduleStats(result)
 
@@ -215,14 +239,16 @@ func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *Sch
 		m.kvcSessionMgr.OnRequestScheduled(sessionID, agentID, result.PrefillUrl, nil)
 	}
 
-	m.capacityProvider.OnDispatched()
+	if !advisory {
+		m.capacityProvider.OnDispatched()
 
-	if req.Request.ReqId != "" {
-		m.errInFlight[req.Request.ReqId] = errInFlightEntry{
-			SessionID:    req.SessionID,
-			PrefillURL:   result.PrefillUrl,
-			DecodeURL:    result.DecodeUrl,
-			DispatchTime: time.Now(),
+		if req.Request.ReqId != "" {
+			m.errInFlight[req.Request.ReqId] = errInFlightEntry{
+				SessionID:    req.SessionID,
+				PrefillURL:   result.PrefillUrl,
+				DecodeURL:    result.DecodeUrl,
+				DispatchTime: time.Now(),
+			}
 		}
 	}
 
@@ -298,7 +324,9 @@ func (m *GlobalSchedulerManager) checkErrInFlightSurvival() {
 		if entry.SessionID != "" {
 			m.errScheduler.OnCancel(entry.SessionID)
 			if m.pendingQueue != nil {
-				m.pendingQueue.RemoveBySession(entry.SessionID)
+				for _, pr := range m.pendingQueue.RemoveBySession(entry.SessionID) {
+					pr.Msg.Response <- ErrNoInstance
+				}
 			}
 		}
 	}
@@ -370,7 +398,9 @@ func (m *GlobalSchedulerManager) ErrOnCancel(sessionID, reqID, prefillURL, decod
 		log.Warn().Msgf("[ERR] session %s connection closed (insURL=%s)", sessionID, prefillURL)
 		m.errScheduler.OnCancel(sessionID)
 		if m.pendingQueue != nil {
-			m.pendingQueue.RemoveBySession(sessionID)
+			for _, pr := range m.pendingQueue.RemoveBySession(sessionID) {
+				pr.Msg.Response <- ErrNoInstance
+			}
 		}
 	}
 	m.tryDispatchFromQueue()
@@ -399,7 +429,9 @@ func (m *GlobalSchedulerManager) onInstanceUnhealthy(insUrl string) {
 		if entry.SessionID != "" {
 			m.errScheduler.OnCancel(entry.SessionID)
 			if m.pendingQueue != nil {
-				m.pendingQueue.RemoveBySession(entry.SessionID)
+				for _, pr := range m.pendingQueue.RemoveBySession(entry.SessionID) {
+					pr.Msg.Response <- ErrNoInstance
+				}
 			}
 		}
 	}

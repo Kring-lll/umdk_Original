@@ -460,9 +460,6 @@ func validateGlobalSchedulersConfig(gsConfigs []base.GlobalSchedulerConfig) erro
 		if err := validateErrSchedulerConfig(scheduler); err != nil {
 			return err
 		}
-		if err := utils.CheckStringLength(scheduler.TokenizeModelName); err != nil {
-			return fmt.Errorf("tokenizeModelName error: %v", err)
-		}
 		if err := utils.CheckStringLength(scheduler.Model); err != nil {
 			return fmt.Errorf("model error: %v", err)
 		}

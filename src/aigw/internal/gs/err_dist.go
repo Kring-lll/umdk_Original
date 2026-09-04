@@ -56,11 +56,15 @@ type distEntry struct {
 // entry. Seeded entries (from SeedFromCounts) are immutable.
 // When windowSize > 0, a FIFO sliding window bounds memory usage.
 type EmpiricalDist struct {
-	mu            sync.Mutex // protects rawValues and sessionValues only
+	mu            sync.Mutex // protects rawValues, sessionValues and gen
 	windowSize    int
 	rawValues     *list.List
 	sessionValues map[string]*list.Element
 	dirty         bool
+	// gen advances on every data mutation. A Refresh that copied data at gen G
+	// skips its Store if gen moved past G, so a slow stale build can never
+	// overwrite a fresher snapshot published meanwhile.
+	gen           uint64
 	snapshot      atomic.Pointer[distSnapshot]
 	lastRefreshNs int64 // protected by d.mu
 }
@@ -83,6 +87,8 @@ func (d *EmpiricalDist) Snapshot() *distSnapshot {
 // Refresh builds a new snapshot from rawValues and atomically swaps it in.
 // Call after AddValue/SeedFromCounts to publish fresh E[rem|k] tables.
 // Readers may briefly see the previous snapshot until the swap completes.
+// If data mutated since the copy was taken, the Store is skipped: a
+// concurrent Refresh already has fresher data and will publish it.
 func (d *EmpiricalDist) Refresh() {
 	d.mu.Lock()
 	if !d.dirty {
@@ -104,6 +110,7 @@ func (d *EmpiricalDist) Refresh() {
 	for e := d.rawValues.Front(); e != nil; e = e.Next() {
 		steps = append(steps, e.Value.(distEntry).steps)
 	}
+	genAtCopy := d.gen
 	d.mu.Unlock()
 
 	// Build outside the lock
@@ -123,6 +130,13 @@ func (d *EmpiricalDist) Refresh() {
 		}
 		suffixSum := prefixSum[n] - prefixSum[idx]
 		erCache[curStep] = float64(suffixSum-int64(curStep)*int64(nRem)) / float64(nRem)
+	}
+
+	d.mu.Lock()
+	stale := d.gen != genAtCopy
+	d.mu.Unlock()
+	if stale {
+		return
 	}
 
 	d.snapshot.Store(&distSnapshot{
@@ -178,6 +192,7 @@ func (d *EmpiricalDist) AddValue(sessionID string, steps int) {
 		d.sessionValues[sessionID] = d.rawValues.Back()
 	}
 	d.dirty = true
+	d.gen++
 	d.mu.Unlock()
 }
 
@@ -198,6 +213,7 @@ func (d *EmpiricalDist) SeedFromCounts(counts map[int]int) {
 		}
 	}
 	d.dirty = true
+	d.gen++
 	d.mu.Unlock()
 	d.Refresh()
 }

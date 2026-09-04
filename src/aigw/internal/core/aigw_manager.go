@@ -53,6 +53,10 @@ type GetSuggestionIn struct {
 	Body map[string]interface{}
 	// SessionID for ERR scheduling (extracted from agent_hint.session_id)
 	SessionID string
+	// Advisory marks query-only requests whose forwarding is done by the
+	// caller (get-suggestion endpoint, SDK select_nodes). aigw never observes
+	// their completion, so ERR neither queues them nor takes in-flight slots.
+	Advisory bool
 }
 
 // AigwManager is the core manager of AIGW
@@ -401,6 +405,7 @@ func (manager *AigwManager) scheduleRequest(m *gs.GlobalSchedulerManager, in *Ge
 			Headers:              in.Headers,
 			Body:                 in.Body,
 			SessionID:            in.SessionID,
+			Advisory:             in.Advisory,
 		},
 		Response: rsp,
 	}
@@ -442,6 +447,7 @@ func (manager *AigwManager) SelectOptimalNode(in *GetSuggestionIn,
 		return nil, fmt.Errorf("prompt is too long, characters nums: %v", runeCounts)
 	}
 	internalizeReqID(in)
+	in.Advisory = true
 
 	m, err := manager.FindOrCreateGs(in.Model)
 	if err != nil {

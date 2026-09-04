@@ -47,6 +47,9 @@ type ScheduleRequestMsg struct {
 	Body    map[string]interface{} // Request body for hash key extraction
 	// SessionID for ERR scheduling (extracted from agent_hint.session_id)
 	SessionID string
+	// Advisory: the caller forwards the request itself (get-suggestion /
+	// SDK), so ERR must not queue it nor take in-flight slots.
+	Advisory bool
 }
 
 // ExecuteDispatchMsg is used for dispatching schedule request.

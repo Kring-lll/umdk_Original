@@ -121,17 +121,23 @@ func (q *PendingQueue) Size() int {
 	return len(q.requests)
 }
 
-func (q *PendingQueue) RemoveBySession(sessionID string) {
+// RemoveBySession removes all queued requests of the session and returns
+// them. Callers must write a terminal error to each removed request's
+// Response channel so its handler does not hang until client timeout.
+func (q *PendingQueue) RemoveBySession(sessionID string) []*PendingRequest {
 	if sessionID == "" {
-		return
+		return nil
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	var removed []*PendingRequest
 	for id, req := range q.requests {
 		if req.SessionID == sessionID {
 			delete(q.requests, id)
+			removed = append(removed, req)
 		}
 	}
+	return removed
 }
 
 // PeekLowestStep returns the request with the smallest CurStep without removing it.

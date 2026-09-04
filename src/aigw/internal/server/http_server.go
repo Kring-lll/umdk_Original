@@ -380,11 +380,12 @@ func (s *HttpServer) scheduleForOpenAi(w http.ResponseWriter, r *http.Request) {
 	}
 
 	in := &core.GetSuggestionIn{
-		UUID:    req.UUID,
-		Model:   req.Model,
-		Prompt:  prompt,
-		Ctx:     r.Context(),
-		Headers: extractHeaders(r),
+		UUID:     req.UUID,
+		Model:    req.Model,
+		Prompt:   prompt,
+		Ctx:      r.Context(),
+		Headers:  extractHeaders(r),
+		Advisory: true,
 	}
 
 	out, err := s.manager.GetSuggestion(in)
