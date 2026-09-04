@@ -175,6 +175,10 @@ static void umq_perftest_client_run_latency_base_interrupt(uint64_t umqh, umq_pe
     uint64_t start_cycle = 0;
     uint64_t end_cycle = 0;
     uint32_t test_round = lat_arg->cfg->test_round;
+    if (test_round > SIZE_MAX / sizeof(uint64_t)) {
+        LOG_PRINT("test_round %u too large, allocation size would overflow\n", test_round);
+        return;
+    }
     g_perftest_latency_ctx.cycles = (uint64_t *)malloc(sizeof(uint64_t) * test_round);
     if (g_perftest_latency_ctx.cycles == NULL) {
         LOG_PRINT("alloc cycles failed\n");
@@ -245,6 +249,10 @@ static void umq_perftest_client_run_latency_base_polling(uint64_t umqh, umq_perf
 {
     uint64_t start_cycle = 0;
     uint64_t end_cycle = 0;
+    if (lat_arg->cfg->test_round > SIZE_MAX / sizeof(uint64_t)) {
+        LOG_PRINT("test_round %u too large, allocation size would overflow\n", lat_arg->cfg->test_round);
+        return;
+    }
     g_perftest_latency_ctx.cycles = (uint64_t *)malloc(sizeof(uint64_t) * lat_arg->cfg->test_round);
     if (g_perftest_latency_ctx.cycles == NULL) {
         LOG_PRINT("alloc cycles failed\n");
@@ -653,6 +661,10 @@ static void umq_perftest_client_run_latency_pro_polling(
 {
     uint64_t start_cycle = 0;
     uint32_t size = lat_arg->cfg->config.size;
+    if (lat_arg->cfg->test_round > SIZE_MAX / sizeof(uint64_t)) {
+        LOG_PRINT("test_round %u too large, allocation size would overflow\n", lat_arg->cfg->test_round);
+        return;
+    }
     g_perftest_latency_ctx.cycles = (uint64_t *)malloc(sizeof(uint64_t) * lat_arg->cfg->test_round);
     if (g_perftest_latency_ctx.cycles == NULL) {
         LOG_PRINT("alloc cycles failed\n");
@@ -778,6 +790,10 @@ static void umq_perftest_client_run_latency_pro_interrupt(
 {
     uint64_t start_cycle = 0;
     uint32_t test_round = lat_arg->cfg->test_round;
+    if (test_round > SIZE_MAX / sizeof(uint64_t)) {
+        LOG_PRINT("test_round %u too large, allocation size would overflow\n", test_round);
+        return;
+    }
     g_perftest_latency_ctx.cycles = (uint64_t *)malloc(sizeof(uint64_t) * test_round);
     if (g_perftest_latency_ctx.cycles == NULL) {
         LOG_PRINT("alloc cycles failed\n");
