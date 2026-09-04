@@ -199,7 +199,8 @@ umq_buf_t *umq_rx_qbuf_data_to_head(void *data)
      * to block_size to find the true block start. */
     char *data_buf_start = (char *)g_rx_buffer_addr;
     uint32_t block_size = UMQ_RX_QBUF_BLOCK_SIZE;
-    uint64_t blk_num = g_rx_total_len / (block_size + sizeof(umq_buf_t));
+    size_t blk_with_hdr = block_size + sizeof(umq_buf_t);
+    uint64_t blk_num = g_rx_total_len / blk_with_hdr;
     char *data_buf_end = data_buf_start + blk_num * block_size;
     char *hdr_buf_start = data_buf_end;
 
