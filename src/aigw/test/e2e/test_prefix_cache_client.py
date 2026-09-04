@@ -685,7 +685,6 @@ def test_prefix_cache_partial_match(model):
     time.sleep(0.5)
 
     # Step 1: Store complete prompt on worker-19000 (16 words -> 16 tokens)
-    # Prompt must have at least 16 words to match minMatchedLength threshold (50% of 16 blocks = 8)
     full_prompt_19000 = (
         "Python is a programming language that is widely used for web development data analysis and "
         "machine learning"

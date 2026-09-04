@@ -160,6 +160,12 @@ type AlgorithmParams struct {
 	TbtThreshold      float64 // ms
 	TtftThreshold     float64 // ms
 
+	// LoadImbalanceThreshold is the token-load imbalance threshold for the
+	// prefixCache load balancer: when max(TokenNum)-min(TokenNum) across all
+	// ready pods exceeds it, scheduling prioritizes load balancing over
+	// prefix cache hit. 0 disables the intervention.
+	LoadImbalanceThreshold int
+
 	StatsFunc func(statType stats.StatType)
 
 	PowerOfTwo  bool
@@ -281,7 +287,7 @@ func (m *GlobalSchedulerManager) setConfig(gsConfig *base.GlobalSchedulerConfig)
 		WithDeploymentPolicy(gsConfig.DeployPolicy),
 		WithSLOThreshold(gsConfig.MaxTimeToFirstToken, gsConfig.MaxTimeBetweenTokens),
 		WithLBType(lbCfg.Mixed, lbCfg.Prefill, lbCfg.Decode),
-		WithAlgorithmThreshold(lbCfg.ReservedBlockNumber, lbCfg.BatchSize, lbCfg.PowerOfTwo, gsConfig.BlockSize),
+		WithAlgorithmThreshold(lbCfg.ReservedBlockNumber, lbCfg.BatchSize, lbCfg.PowerOfTwo, gsConfig.BlockSize, lbCfg.LoadImbalanceThreshold),
 		WithInsConnectType(gsConfig.InsConnectType),
 		WithPretrainTTFTPath(lbCfg.PretrainTTFTPath),
 	}

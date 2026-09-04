@@ -50,7 +50,6 @@
         "decode": "",
         "batchSize": 32,
         "reservedBlockNumber": 50,
-        "minMatchedLength": 200
       }
     },
     {
@@ -66,7 +65,6 @@
         "decode": "roundRobin",
         "batchSize": 32,
         "reservedBlockNumber": 50,
-        "minMatchedLength": 200
       }
     }
   ],

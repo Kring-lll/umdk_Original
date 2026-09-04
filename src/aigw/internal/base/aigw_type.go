@@ -133,9 +133,14 @@ type LoadBalancerConfig struct {
 	Decode              string `json:"decode"`
 	BatchSize           int    `json:"batchSize"`
 	ReservedBlockNumber int    `json:"reservedBlockNumber"`
-	MinMatchedLength    int    `json:"minMatchedLength"`
 	PowerOfTwo          bool   `json:"enablePowerOfTwo"`
-	PretrainTTFTPath    string `json:"pretrainTTFTPath"`
+	// LoadImbalanceThreshold is the token-load imbalance threshold for the
+	// prefixCache load balancer. When max(TokenNum)-min(TokenNum) across all
+	// ready pods exceeds this value, scheduling prioritizes load balancing
+	// (lowest-load pod) over prefix cache hit. 0 disables the imbalance
+	// intervention (behaves like the original prefix-only selection).
+	LoadImbalanceThreshold int    `json:"loadImbalanceThreshold"`
+	PretrainTTFTPath       string `json:"pretrainTTFTPath"`
 	// Consistent hash load balancer configuration
 	VirtualNodes int `json:"virtualNodes"` // Number of virtual nodes per worker (default: 160)
 	FallbackNum  int `json:"fallbackNum"`  // Number of fallback nodes on hash miss (default: 3)

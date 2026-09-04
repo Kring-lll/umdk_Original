@@ -45,7 +45,6 @@
         "mixed": "roundRobin",
         "batchSize": 32,
         "reservedBlockNumber": 10,
-        "minMatchedLength": 50
       },
       "renderClient": {
         "endpointTemplate": "http://127.0.0.1:18000",
