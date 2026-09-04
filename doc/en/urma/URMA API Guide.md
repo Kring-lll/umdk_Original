@@ -1222,6 +1222,9 @@ typedef struct urma_provider_ops {
     urma_context_t *(*create_context)(urma_device_t *dev, uint32_t eid_index, int dev_fd);
     urma_status_t (*delete_context)(urma_context_t *ctx);
     urma_status_t (*get_uasid)(uint32_t *uasid); /* obsolete */
+    /* Log Ops */
+    urma_status_t (*register_log_func)(urma_log_cb_t func);
+    urma_status_t (*unregister_log_func)(void);
 } urma_provider_ops_t;
 \`\`\`
 
@@ -1387,7 +1390,7 @@ typedef struct urma_device_attr {
     urma_guid_t guid; /* [Public] */
     urma_device_cap_t dev_cap; /* [Public] capabilities of device. */
     uint8_t port_cnt; /* [Public] port number of device. */
-    struct urma_port_attr_t port_attr[MAX_PORT_CNT];
+    struct urma_port_attr port_attr[MAX_PORT_CNT];
     uint32_t reserved_jetty_id_min;
     uint32_t reserved_jetty_id_max;
 } urma_device_attr_t;
@@ -1435,7 +1438,7 @@ typedef struct urma_device_cap {
     uint32_t max_fetch_and_xor_size;
     urma_atomic_feature_t atomic_feat; /* [Public] support atomic feature of device */
     uint16_t trans_mode; /* [Public] bit OR of supported transport modes */
-    uint16_t sub_trans_mode_cap; /* [Public] bit OR of supported transport modes cap, urma_sub_trans_mode_cap_t */
+    uint16_t reserved;
     uint16_t congestion_ctrl_alg; /* [Public] one or more mode from urma_congestion_ctrl_alg_t */
     uint32_t ceq_cnt; /* [Public] ceq_cnt */
     uint32_t max_tp_in_tpg; /* [Public] max tp in tpg */
@@ -1450,6 +1453,7 @@ typedef struct urma_device_cap {
     urma_tp_type_cap_t rc_tp_cap;
     urma_tp_type_cap_t um_tp_cap;
     urma_tp_feature_t tp_feature;
+    struct urma_sl_info priority_info[URMA_MAX_PRIORITY_CNT];
 } urma_device_cap_t;
 \`\`\`
 
@@ -1506,17 +1510,7 @@ typedef union urma_atomic_feature {
 } urma_atomic_feature_t;
 \`\`\`
 
-11. [urma_sub_trans_mode_cap_t](#_ZH-CN_TOPIC_0000002528411323-chtext)
-
-\`\`\`c
-typedef enum urma_sub_trans_mode_cap {
-    URMA_RC_TP_DST_ORDERING = 0x1, /* rc mode with tp dst ordering */
-    URMA_RC_TA_DST_ORDERING = 0x1 << 1, /* rc mode with ta dst ordering */
-    URMA_RC_USER_TP = 0x1 << 2, /* rc mode with user tp */
-} urma_sub_trans_mode_cap_t;
-\`\`\`
-
-12. [urma_congestion_ctrl_alg_t](#_ZH-CN_TOPIC_0000002528409915-chtext)
+11. [urma_congestion_ctrl_alg_t](#_ZH-CN_TOPIC_0000002528409915-chtext)
 
 Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_types.h)
 
@@ -1524,17 +1518,18 @@ Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_typ
 typedef enum urma_congestion_ctrl_alg {
     URMA_CC_NONE = 0x1 << URMA_TP_CC_NONE,
     URMA_CC_DCQCN = 0x1 << URMA_TP_CC_DCQCN,
-    URMA_CC_DCQCN_AND_NETWORK_CC = 0x1 << URMA_TP_CC_DCQCN_AND_NETWORK_CC,
+    URMA_CC_CAQM = 0x1 << URMA_TP_CC_CAQM,
     URMA_CC_LDCP = 0x1 << URMA_TP_CC_LDCP,
-    URMA_CC_LDCP_AND_CAQM = 0x1 << URMA_TP_CC_LDCP_AND_CAQM,
-    URMA_CC_LDCP_AND_OPEN_CC = 0x1 << URMA_TP_CC_LDCP_AND_OPEN_CC,
-    URMA_CC_HC3 = 0x1 << URMA_TP_CC_HC3,
+    URMA_CC_LDCP_L2_HEADER = 0x1 << URMA_TP_CC_LDCP_L2_HEADER,
+    URMA_CC_LDCP_TP_HEADER = 0x1 << URMA_TP_CC_LDCP_TP_HEADER,
     URMA_CC_DIP = 0x1 << URMA_TP_CC_DIP,
-    URMA_CC_ACC = 0x1 << URMA_TP_CC_ACC
+    URMA_CC_ACC = 0x1 << URMA_TP_CC_ACC,
+    URMA_CC_CUSTOM_1 = 0x1 << URMA_TP_CC_CUSTOM_1,
+    URMA_CC_CUSTOM_2 = 0x1 << URMA_TP_CC_CUSTOM_2,
 } urma_congestion_ctrl_alg_t;
 \`\`\`
 
-13. [urma_order_type_cap_t](#_ZH-CN_TOPIC_0000002491667086-chtext)
+12. [urma_order_type_cap_t](#_ZH-CN_TOPIC_0000002491667086-chtext)
 
 Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_types.h)
 
@@ -1551,7 +1546,7 @@ typedef union urma_order_type_cap {
 } urma_order_type_cap_t;
 \`\`\`
 
-14. [urma_tp_type_cap_t](#_ZH-CN_TOPIC_0000002491827052-chtext)
+13. [urma_tp_type_cap_t](#_ZH-CN_TOPIC_0000002491827052-chtext)
 
 Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_types.h)
 
@@ -1567,7 +1562,7 @@ typedef union urma_tp_type_cap {
 } urma_tp_type_cap_t;
 \`\`\`
 
-15. [urma_tp_feature_t](#_ZH-CN_TOPIC_0000002523906825-chtext)
+14. [urma_tp_feature_t](#_ZH-CN_TOPIC_0000002523906825-chtext)
 
 Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_types.h)
 
@@ -1582,7 +1577,34 @@ typedef union urma_tp_feature {
 } urma_tp_feature_t;
 \`\`\`
 
-16. [urma_port_attr_t](#_ZH-CN_TOPIC_0000002521872505-chtext)
+15. urma_sl_info
+
+Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_types.h)
+
+\`\`\`c
+struct urma_sl_info {
+    uint32_t SL;
+    union urma_tp_type_en tp_type;
+};
+\`\`\`
+
+16. urma_tp_type_en
+
+Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_types.h)
+
+\`\`\`c
+union urma_tp_type_en {
+    struct {
+        uint32_t rtp : 1;
+        uint32_t ctp : 1;
+        uint32_t utp : 1;
+        uint32_t reserved : 29;
+    } bs;
+    uint32_t value;
+};
+\`\`\`
+
+17. [urma_port_attr_t](#_ZH-CN_TOPIC_0000002521872505-chtext)
 
 A URMA physical device can contain one or more ports. The active MTU cannot exceed the max MTU value.
 
@@ -1598,7 +1620,7 @@ typedef struct urma_port_attr {
 } urma_port_attr_t;
 \`\`\`
 
-17. [urma_mtu_t](#_ZH-CN_TOPIC_0000002521872507-chtext)
+18. [urma_mtu_t](#_ZH-CN_TOPIC_0000002521872507-chtext)
 
 Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_types.h)
 
@@ -1613,7 +1635,7 @@ typedef enum urma_mtu {
 } urma_mtu_t;
 \`\`\`
 
-18. [urma_port_state_t](#_ZH-CN_TOPIC_0000002521992517-chtext)
+19. [urma_port_state_t](#_ZH-CN_TOPIC_0000002521992517-chtext)
 
 Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_types.h)
 
@@ -1628,7 +1650,7 @@ typedef enum urma_port_state {
 } urma_port_state_t;
 \`\`\`
 
-19. [urma_link_width_t](#_ZH-CN_TOPIC_0000002489752734-chtext)
+20. [urma_link_width_t](#_ZH-CN_TOPIC_0000002489752734-chtext)
 
 Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_types.h)
 
@@ -1643,7 +1665,7 @@ typedef enum urma_link_width {
 } urma_link_width_t;
 \`\`\`
 
-20. [urma_speed_t](#_ZH-CN_TOPIC_0000002489912710-chtext)
+21. [urma_speed_t](#_ZH-CN_TOPIC_0000002489912710-chtext)
 
 Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_types.h)
 
@@ -1926,15 +1948,15 @@ Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_typ
 
 \`\`\`c
 typedef struct urma_context {
-    struct urma_device_t *dev; /* [Private] point to the corresponding urma device. */
-    struct urma_ops_t *ops; /* [Private] operation of urma device. */
+    struct urma_device *dev; /* [Private] point to the corresponding urma device. */
+    struct urma_ops *ops; /* [Private] operation of urma device. */
     int dev_fd; /* [Private] fd of urma device's sysfs file. */
     int async_fd; /* [Private] fd of urma device's async event file. */
     pthread_mutex_t mutex; /* [Private] mutex of urma context. */
     urma_eid_t eid; /* [Public] eid of urma device. */
     uint32_t eid_index;
     uint32_t uasid; /* [Public] uasid of current process. */
-    struct urma_ref_t ref; /* [Private] reference count of urma context. */
+    struct urma_ref ref; /* [Private] reference count of urma context. */
     urma_context_aggr_mode_t aggr_mode; /* [Public] aggregated mode of urma context. */
 } urma_context_t;
 \`\`\`
@@ -1947,17 +1969,30 @@ Definition file: [urma_provider.h](../../../src/urma/lib/urma/core/include/urma_
 typedef struct urma_ops {
     /* OPs name */
     const char *name;
+
     /* Jetty OPs */
     urma_jfc_t *(*create_jfc)(urma_context_t *ctx, urma_jfc_cfg_t *jfc_cfg);
     urma_status_t (*modify_jfc)(urma_jfc_t *jfc, urma_jfc_attr_t *attr);
     urma_status_t (*delete_jfc)(urma_jfc_t *jfc);
     urma_status_t (*delete_jfc_batch)(urma_jfc_t **jfc, int jfc_num, urma_jfc_t **bad_jfc);
+    urma_status_t (*alloc_jfc)(urma_context_t *ctx, urma_jfc_cfg_t *cfg, urma_jfc_t **jfc);
+    urma_status_t (*set_jfc_opt)(urma_jfc_t *jfc, uint64_t opt, void *buf, uint32_t len);
+    urma_status_t (*active_jfc)(urma_jfc_t *jfc);
+    urma_status_t (*get_jfc_opt)(urma_jfc_t *jfc, uint64_t opt, void *buf, uint32_t len);
+    urma_status_t (*deactive_jfc)(urma_jfc_t *jfc);
+    urma_status_t (*free_jfc)(urma_jfc_t *jfc);
     urma_jfs_t *(*create_jfs)(urma_context_t *ctx, urma_jfs_cfg_t *jfs);
     urma_status_t (*modify_jfs)(urma_jfs_t *jfs, urma_jfs_attr_t *attr);
     urma_status_t (*query_jfs)(urma_jfs_t *jfs, urma_jfs_cfg_t *cfg, urma_jfs_attr_t *attr);
     int (*flush_jfs)(urma_jfs_t *jfs, int cr_cnt, urma_cr_t *cr);
     urma_status_t (*delete_jfs)(urma_jfs_t *jfs);
     urma_status_t (*delete_jfs_batch)(urma_jfs_t **jfs_arr, int jfs_num, urma_jfs_t **bad_jfs);
+    urma_status_t (*alloc_jfs)(urma_context_t *ctx, urma_jfs_cfg_t *cfg, urma_jfs_t **jfs);
+    urma_status_t (*set_jfs_opt)(urma_jfs_t *jfs, uint64_t opt, void *buf, uint32_t len);
+    urma_status_t (*active_jfs)(urma_jfs_t *jfs);
+    urma_status_t (*get_jfs_opt)(urma_jfs_t *jfs, uint64_t opt, void *buf, uint32_t len);
+    urma_status_t (*deactive_jfs)(urma_jfs_t *jfs);
+    urma_status_t (*free_jfs)(urma_jfs_t *jfs);
     urma_jfr_t *(*create_jfr)(urma_context_t *ctx, urma_jfr_cfg_t *jfr);
     urma_status_t (*modify_jfr)(urma_jfr_t *jfr, urma_jfr_attr_t *attr);
     urma_status_t (*query_jfr)(urma_jfr_t *jfr, urma_jfr_cfg_t *cfg, urma_jfr_attr_t *attr);
@@ -1968,7 +2003,13 @@ typedef struct urma_ops {
     urma_status_t (*advise_jfr)(urma_jfs_t *jfs, urma_target_jetty_t *tjfr);
     urma_status_t (*unadvise_jfr)(urma_jfs_t *jfs, urma_target_jetty_t *tjfr);
     urma_status_t (*advise_jfr_async)(urma_jfs_t *jfs, urma_target_jetty_t *tjfr, urma_advise_async_cb_func cb_fun,
-    void *cb_arg);
+                                      void *cb_arg);
+    urma_status_t (*alloc_jfr)(urma_context_t *ctx, urma_jfr_cfg_t *cfg, urma_jfr_t **jfr);
+    urma_status_t (*set_jfr_opt)(urma_jfr_t *jfr, uint64_t opt, void *buf, uint32_t len);
+    urma_status_t (*active_jfr)(urma_jfr_t *jfr);
+    urma_status_t (*get_jfr_opt)(urma_jfr_t *jfr, uint64_t opt, void *buf, uint32_t len);
+    urma_status_t (*deactive_jfr)(urma_jfr_t *jfr);
+    urma_status_t (*free_jfr)(urma_jfr_t *jfr);
     urma_jetty_t *(*create_jetty)(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cfg);
     urma_status_t (*modify_jetty)(urma_jetty_t *jetty, urma_jetty_attr_t *jetty_attr);
     urma_status_t (*query_jetty)(urma_jetty_t *jetty, urma_jetty_cfg_t *cfg, urma_jetty_attr_t *attr);
@@ -1980,34 +2021,41 @@ typedef struct urma_ops {
     urma_status_t (*advise_jetty)(urma_jetty_t *jetty, urma_target_jetty_t *tjetty);
     urma_status_t (*unadvise_jetty)(urma_jetty_t *jetty, urma_target_jetty_t *tjetty);
     urma_status_t (*advise_jetty_async)(urma_jetty_t *jetty, urma_target_jetty_t *tjetty,
-    urma_advise_async_cb_func cb_fun, void *cb_arg);
+        urma_advise_async_cb_func cb_fun, void *cb_arg);
     urma_status_t (*bind_jetty)(urma_jetty_t *jetty, urma_target_jetty_t *tjetty);
     urma_status_t (*unbind_jetty)(urma_jetty_t *jetty);
+    urma_status_t (*alloc_jetty)(urma_context_t *ctx, urma_jetty_cfg_t *cfg, urma_jetty_t **jetty);
+    urma_status_t (*set_jetty_opt)(urma_jetty_t *jetty, uint64_t opt, void *buf, uint32_t len);
+    urma_status_t (*active_jetty)(urma_jetty_t *jetty);
+    urma_status_t (*get_jetty_opt)(urma_jetty_t *jetty, uint64_t opt, void *buf, uint32_t len);
+    urma_status_t (*deactive_jetty)(urma_jetty_t *jetty);
+    urma_status_t (*free_jetty)(urma_jetty_t *jetty);
     urma_jetty_grp_t *(*create_jetty_grp)(urma_context_t *ctx, urma_jetty_grp_cfg_t *cfg);
     urma_status_t (*delete_jetty_grp)(urma_jetty_grp_t *jetty_grp);
     urma_jfce_t *(*create_jfce)(urma_context_t *ctx);
     urma_status_t (*delete_jfce)(urma_jfce_t *jfce);
     /**
-    * Get tpn of current jetty
-    * @param[in] jetty: the jetty pointer created before
-    * Return: 0 or positive as correct tpn; negative as get tpn failure
-    */
+     * Get tpn of current jetty
+     * @param[in] jetty: the jetty pointer created before
+     * Return: 0 or positive as correct tpn; negative as get tpn failure
+     */
     int (*get_tpn)(urma_jetty_t *jetty);
     int (*modify_tp)(urma_context_t *ctx, uint32_t tpn, urma_tp_cfg_t *cfg, urma_tp_attr_t *attr,
-    urma_tp_attr_mask_t mask);
+        urma_tp_attr_mask_t mask);
     /* Control plane OPs */
     urma_status_t (*get_tp_list)(urma_context_t *ctx, urma_get_tp_cfg_t *cfg, uint32_t *tp_cnt,
-    urma_tp_info_t *tp_list);
+        urma_tp_info_t *tp_list);
     urma_status_t (*set_tp_attr)(const urma_context_t *ctx, const uint64_t tp_handle, const uint8_t tp_attr_cnt,
-    const uint32_t tp_attr_bitmap, const urma_tp_attr_value_t *tp_attr);
+                                 const uint32_t tp_attr_bitmap, const urma_tp_attr_value_t *tp_attr);
     urma_status_t (*get_tp_attr)(const urma_context_t *ctx, const uint64_t tp_handle, uint8_t *tp_attr_cnt,
-    uint32_t *tp_attr_bitmap, urma_tp_attr_value_t *tp_attr);
+                                 uint32_t *tp_attr_bitmap, urma_tp_attr_value_t *tp_attr);
     urma_target_jetty_t *(*import_jetty_ex)(urma_context_t *ctx, urma_rjetty_t *rjetty, urma_token_t *token_value,
-    urma_active_tp_cfg_t *active_tp_cfg);
+        urma_active_tp_cfg_t *active_tp_cfg);
     urma_target_jetty_t *(*import_jfr_ex)(urma_context_t *ctx, urma_rjfr_t *rjfr, urma_token_t *token_value,
-    urma_active_tp_cfg_t *active_tp_cfg);
+        urma_active_tp_cfg_t *active_tp_cfg);
     urma_status_t (*bind_jetty_ex)(urma_jetty_t *jetty, urma_target_jetty_t *tjetty,
-    urma_active_tp_cfg_t *active_tp_cfg);
+        urma_active_tp_cfg_t *active_tp_cfg);
+
     /* Segment OPs */
     urma_token_id_t *(*alloc_token_id)(urma_context_t *ctx);
     urma_token_id_t *(*alloc_token_id_ex)(urma_context_t *ctx, urma_token_id_flag_t flag);
@@ -2015,13 +2063,16 @@ typedef struct urma_ops {
     urma_target_seg_t *(*register_seg)(urma_context_t *ctx, urma_seg_cfg_t *seg_cfg);
     urma_status_t (*unregister_seg)(urma_target_seg_t *target_seg);
     urma_target_seg_t *(*import_seg)(urma_context_t *ctx, urma_seg_t *seg, urma_token_t *token, uint64_t addr,
-    urma_import_seg_flag_t flag);
+                                     urma_import_seg_flag_t flag);
     urma_status_t (*unimport_seg)(urma_target_seg_t *target_seg);
+
     /* Events OPs */
     urma_status_t (*get_async_event)(urma_context_t *ctx, urma_async_event_t *event);
     void (*ack_async_event)(urma_async_event_t *event);
+
     /* Other OPs */
     int (*user_ctl)(urma_context_t *ctx, urma_user_ctl_in_t *in, urma_user_ctl_out_t *out);
+
     /* Dataplane OPs */
     urma_status_t (*post_jfs_wr)(urma_jfs_t *jfs, urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr);
     urma_status_t (*post_jfr_wr)(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr);
@@ -2031,13 +2082,16 @@ typedef struct urma_ops {
     urma_status_t (*rearm_jfc)(urma_jfc_t *jfc, bool solicited_only);
     int (*wait_jfc)(urma_jfce_t *jfce, uint32_t jfc_cnt, int time_out, urma_jfc_t *jfc[]);
     void (*ack_jfc)(urma_jfc_t *jfc[], uint32_t nevents[], uint32_t jfc_cnt);
+
     /* Jetty async OPs */
     urma_target_jetty_t *(*import_jetty_async)(urma_notifier_t *notifier, const urma_rjetty_t *rjetty,
-    const urma_token_t *token_value, uint64_t user_ctx, int timeout);
+                                               const urma_token_t *token_value, uint64_t user_ctx, int timeout);
     urma_status_t (*unimport_jetty_async)(urma_target_jetty_t *target_jetty);
+
     urma_status_t (*bind_jetty_async)(urma_notifier_t *notifier, urma_jetty_t *jetty, urma_target_jetty_t *tjetty,
-    uint64_t user_ctx, int timeout);
+                                      uint64_t user_ctx, int timeout);
     urma_status_t (*unbind_jetty_async)(urma_jetty_t *jetty);
+
     urma_notifier_t *(*create_notifier)(urma_context_t *ctx);
     urma_status_t (*delete_notifier)(urma_notifier_t *notifier);
     int (*wait_notify)(urma_notifier_t *notifier, uint32_t cnt, urma_notify_t *notify, int timeout);
@@ -2261,6 +2315,7 @@ typedef struct urma_token_id {
     uint32_t token_id;
     uint64_t handle;
     urma_ref_t ref;
+    urma_token_id_flag_t flag;
 } urma_token_id_t;
 \`\`\`
 
@@ -2424,10 +2479,47 @@ typedef struct urma_jfc {
     pthread_cond_t event_cond;
     uint32_t comp_events_acked;
     uint32_t async_events_acked;
+    urma_jfc_opt_t urma_jfc_opt;
 } urma_jfc_t;
 \`\`\`
 
-10. [urma_jfc_id_t](#_ZH-CN_TOPIC_0000002521992525-chtext)
+10. urma_jfc_opt_t
+
+Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_types.h)
+
+\`\`\`c
+#define URMA_OPT_REVERSED_NUM 4
+
+union urma_jfc_opt_mask {
+    struct {
+        uint64_t urma_jfc_cqe_base_addr : 1;
+        uint64_t urma_jfc_db_addr : 1;
+        uint64_t urma_jfc_id : 1;
+        uint64_t urma_jfc_pi : 1;
+        uint64_t urma_jfc_pi_type : 1;
+        uint64_t urma_jfc_ci : 1;
+        uint64_t urma_jfc_db_status : 1;
+        uint64_t reserved : 57;
+    } bs;
+    uint64_t value;
+};
+
+typedef struct urma_jfc_opt {
+    union urma_jfc_opt_mask jfc_opt_mask; /* bit0:cqe_base_addr, bit1:db_addr, bit2:id, bit3:pi, bit4:pi_type,
+                                            bit5:ci, bit6:db_status */
+    bool is_actived;
+    uint64_t urma_jfc_cqe_base_addr; /* [Optional] CQ Queue Address (VA) */
+    uint32_t urma_jfc_id;      /* [Optional] the id of jfc */
+    uint64_t urma_jfc_db_addr; /* [Optional] CQ Queue Doorbell Address (VA) */
+    uint8_t urma_jfc_db_status; /* [Optional] JFC Doorbell status, used for live migration (0 invalid, 1 valid) */
+    uint16_t urma_jfc_pi;     /* [Optional] PI value of the JFC */
+    uint16_t urma_jfc_pi_type; /* [Optional] PI type, 0: absolute value, 1: cumulative value */
+    uint16_t urma_jfc_ci;     /* [Optional] CI value of the JFC */
+    uint64_t reserved[URMA_OPT_REVERSED_NUM];
+} urma_jfc_opt_t;
+\`\`\`
+
+11. [urma_jfc_id_t](#_ZH-CN_TOPIC_0000002521992525-chtext)
 
 typedef struct [urma_jetty_id_t](#_ZH-CN_TOPIC_0000002492112454-chtext) urma_jfc_id_t;
 
@@ -2982,6 +3074,7 @@ typedef struct urma_jfs {
     pthread_mutex_t event_mutex;
     pthread_cond_t event_cond;
     uint32_t async_events_acked;
+    urma_jfs_opt_t urma_jfs_opt;
 } urma_jfs_t;
 \`\`\`
 
@@ -3428,7 +3521,10 @@ typedef union urma_jfr_flag {
         /* (0x2): OI, initiator ordering */
         /* (0x3): OL, low layer ordering */
         /* (0x4): UNO, unreliable non ordering */
-        uint32_t reserved : 19;
+        uint32_t has_drv_ext : 1; /* 0: no extension data.
+        1: extension data is appended after urma_rjetty_t. */
+        uint32_t non_blocking : 1;
+        uint32_t reserved : 17;
     } bs;
     uint32_t value;
 } urma_jfr_flag_t;
@@ -3644,7 +3740,7 @@ Import remote JFR information, including registering its token locally.
 
 @param[in] [Required] rjfr: the information of remote jfr to import into user node, trans_mode required, trans_mode same to create_jfr trans_mode;
 
-@param[in] [Required] token_value: token_value to put into output jetty/protection table;
+@param[in] [Required] token_value: token to put into output jetty/protection table;
 
 5. Return Value
 
@@ -4161,9 +4257,13 @@ Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_typ
 \`\`\`c
 typedef union urma_jetty_flag {
     struct {
-        uint32_t share_jfr : 1; /* 0: URMA_NO_SHARE_JFR.
-        1: URMA_SHARE_JFR. */
-        uint32_t reserved : 31;
+        uint32_t share_jfr    : 1; /* 0: URMA_NO_SHARE_JFR.
+                                      1: URMA_SHARE_JFR. */
+        uint32_t non_blocking : 1;
+        uint32_t has_drv_ext  : 1; /* Driver-defined behavior for create/import jetty, such as affinity control. */
+        uint32_t has_user_info : 1; /* 0: no extension data.
+                                       1: extension data is appended after jetty object. */
+        uint32_t reserved     : 28;
     } bs;
     uint32_t value;
 } urma_jetty_flag_t;
@@ -5391,7 +5491,7 @@ Definition file: [urma_types.h](../../../src/urma/lib/urma/core/include/urma_typ
 ```c
 typedef struct urma_ubva {
     urma_eid_t eid;
-    uint32_t uasid; // 24 bit for UB; 16 bit for IB
+    uint32_t uasid; // 24 bit for UB
     uint64_t va;
 } __attribute__((packed)) urma_ubva_t;
 ```
@@ -5865,7 +5965,9 @@ typedef union urma_get_tp_cfg_flag {
         uint32_t uboe : 1;
         uint32_t pre_defined : 1;
         uint32_t dynamic_defined : 1;
-        uint32_t reserved : 26;
+        uint32_t udp : 5;
+        uint32_t group_id : 15;
+        uint32_t reserved : 6;
     } bs;
     uint32_t value;
 } urma_get_tp_cfg_flag_t;

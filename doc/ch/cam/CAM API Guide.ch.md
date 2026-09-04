@@ -214,7 +214,7 @@ fused_deep_moe(
 6. Batch_size小于16时非目标场景，其性能相对于小算子拼接可能劣化，建议性能对比后决策使用。
 7. 除满足上述形状约束外，其他参数取值要求：
  - 需要满足：BS取值范围[0, 256]
- - 需要满足: token_length取值范围[1024， 7168]且(token_length % 256) == 0
+ - 需要满足: token_length取值范围[512， 7168]且(token_length % 256) == 0
  - 需要满足: gmm1_hidden_size取值范围[1024， 6144]且(gmm1_hidden_size % 1024) == 0
  - 需要满足: share_gmm1_hidden_size取值范围[1024， 6144]且(share_gmm1_hidden_size % 1024) == 0
  - 需要满足: topk取值范围[0, 12]且应保证小于等于专家数

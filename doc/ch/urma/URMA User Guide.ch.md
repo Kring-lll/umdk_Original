@@ -2126,8 +2126,8 @@ URMA支持用户态日志接管，可以通过注册函数将日志统一导到�
 
 ```c
 typedef void(*urma_log_cb_t)(int level, char *message);
-urma_status_t **urma_register_log_func**(urma_log_cb_t func);
-urma_status_t **urma_unregister_log_func**(void);
+urma_status_t urma_register_log_func(urma_log_cb_t func);
+urma_status_t urma_unregister_log_func(void);
 ```
 
 ---
@@ -2411,18 +2411,18 @@ UB 提供了事务层的访问控制功能，访问控制功能的应用场景�
 
 - 调用urma_register_seg配置如下让软件栈自动分配
 
-urma_seg_cfg_t.urma_reg_seg_flag_t.token_id_valid = 0;
+urma_seg_cfg_t.flag.bs.token_id_valid = 0;
 
 - 先调用urma_alloc_token_id分配TokenID，之后调用urma_register_seg时指定该TokenID
 
 ```c
 urma_seg_cfg_t.token_id = token_id;
-urma_seg_cfg_t.urma_reg_seg_flag_t.token_id_valid = 1;
+urma_seg_cfg_t.flag.bs.token_id_valid = 1;
 ```
 
 2.  在注册segment时可以指定token的验证策略
 
-urma_seg_cfg_t.urma_reg_seg_flag_t.token_policy = 0;
+urma_seg_cfg_t.flag.bs.token_policy = 0;
 
 1.  token验证策略
 
