@@ -536,8 +536,8 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
 
 如有问题或建议，请通过以下方式联系：
 
-- 提交Issue：[gitcode Issues](https://gitcode.com/openeuler/umdk/issues)
-- 发送邮件：aigw 团队
+- 提交Issue：[GitHub Issues](https://github.com/your-repo/aigw/issues)
+- 发送邮件：[your-email@example.com]
 
 ---
 
