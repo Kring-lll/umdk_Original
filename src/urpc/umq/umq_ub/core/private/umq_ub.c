@@ -3970,7 +3970,7 @@ int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
         return 0;
     }
 
-    urma_jfc_t *temp_jfc[jfc_cnt];
+    urma_jfc_t *temp_jfc[2];
     uint64_t tp_wait_start = umq_trace_timestamp_get();
     uint64_t start_timestamp = umq_perf_get_start_timestamp();
     int p_num = umq_symbol_urma()->urma_wait_jfc(jfr_jfce, jfc_cnt, time_out, temp_jfc);
@@ -3980,7 +3980,7 @@ int umq_ub_wait_rx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
     if (p_num <= 0) {
         return p_num;
     }
-    uint32_t nevents[p_num];
+    uint32_t nevents[2];
     for (int i = 0; i < p_num; i++) {
         nevents[i] = 1;
         jfc[i] = temp_jfc[i];
@@ -4006,7 +4006,7 @@ int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
         jfc_cnt++;
     }
 
-    urma_jfc_t *temp_jfc[jfc_cnt];
+    urma_jfc_t *temp_jfc[2];
     uint64_t tp_wait_start = umq_trace_timestamp_get();
     uint64_t start_timestamp = umq_perf_get_start_timestamp();
     int p_num = umq_symbol_urma()->urma_wait_jfc(qcfg->jfs_jfce, jfc_cnt, time_out, temp_jfc);
@@ -4016,7 +4016,7 @@ int umq_ub_wait_tx_interrupt(ub_queue_t *queue, int time_out, urma_jfc_t *jfc[])
     if (p_num <= 0) {
         return p_num;
     }
-    uint32_t nevents[p_num];
+    uint32_t nevents[2];
     for (int i = 0; i < p_num; i++) {
         nevents[i] = 1;
         jfc[i] = temp_jfc[i];
@@ -4040,7 +4040,7 @@ int umq_ub_wait_tp_handle_tx_interrupt(urma_jfce_t *jfs_jfce, int time_out, urma
         jfc_cnt++;
     }
 
-    urma_jfc_t *temp_jfc[jfc_cnt];
+    urma_jfc_t *temp_jfc[2];
     uint64_t tp_wait_start = umq_trace_timestamp_get();
     uint64_t start_timestamp = umq_perf_get_start_timestamp();
     int p_num = umq_symbol_urma()->urma_wait_jfc(jfs_jfce, jfc_cnt, time_out, temp_jfc);
@@ -4050,7 +4050,7 @@ int umq_ub_wait_tp_handle_tx_interrupt(urma_jfce_t *jfs_jfce, int time_out, urma
     if (p_num <= 0) {
         return p_num;
     }
-    uint32_t nevents[p_num];
+    uint32_t nevents[2];
     for (int i = 0; i < p_num; i++) {
         nevents[i] = 1;
         jfc[i] = temp_jfc[i];

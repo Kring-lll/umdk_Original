@@ -138,7 +138,7 @@ static void umq_perftest_show_feature(uint32_t feature)
     LOG_PRINT("umq init with feature: %s\n", feature_str);
 }
 
-static int umq_perftest_start_perf(umq_perftest_config_t *cfg)
+static int umq_perftest_start_perf(const umq_perftest_config_t *cfg)
 {
     if (cfg->enable_perf) {
         if (umq_stats_perf_start() != 0) {
@@ -155,7 +155,7 @@ static int umq_perftest_start_perf(umq_perftest_config_t *cfg)
     return 0;
 }
 
-static void umq_perftest_show_perf(umq_perftest_config_t *cfg)
+static void umq_perftest_show_perf(const umq_perftest_config_t *cfg)
 {
     if (!cfg->enable_perf) {
         return;
