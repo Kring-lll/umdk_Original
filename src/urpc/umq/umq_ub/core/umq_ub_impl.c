@@ -3122,7 +3122,16 @@ int umq_ub_mempool_info_set_impl(uint64_t umqh_tp, const uint8_t *mempool_info, 
     // mempool_info_len is the actual byte length of the variable-length entry
     // (header + seg_size bytes, where seg_size may exceed sizeof(urma_seg_t) on
     // bonding devices), so the buffer and copy must follow it, not sizeof().
-    uint8_t buf[sizeof(umq_imm_head_t) + mempool_info_len];
+    if (mempool_info_len > UINT32_MAX - (uint32_t)sizeof(umq_imm_head_t)) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "umq ub set mempool info len %u overflow\n", mempool_info_len);
+        return -UMQ_ERR_EINVAL;
+    }
+    uint32_t buf_size = (uint32_t)sizeof(umq_imm_head_t) + mempool_info_len;
+    uint8_t *buf = (uint8_t *)malloc(buf_size);
+    if (buf == NULL) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "mempool info set malloc failed, size %u\n", buf_size);
+        return -UMQ_ERR_ENOMEM;
+    }
     umq_imm_head_t *umq_imm_head = (umq_imm_head_t *)(uintptr_t)buf;
     umq_imm_head->version = UMQ_IMM_VERSION;
     umq_imm_head->type = IMM_PROTOCAL_TYPE_IMPORT_MEM;
@@ -3133,10 +3142,11 @@ int umq_ub_mempool_info_set_impl(uint64_t umqh_tp, const uint8_t *mempool_info, 
     umq_buf_t import_buf;
     (void)memset(&import_buf, 0, sizeof(import_buf));
     import_buf.buf_data = (char *)buf;
-    import_buf.data_size = (uint32_t)sizeof(buf);
+    import_buf.data_size = buf_size;
 
     int ret = umq_ub_data_plan_import_mem(umqh_tp, &import_buf, 0, UMQ_UB_ACK_IMPORT_TYPE_NO_ACK);
     if (ret != UMQ_SUCCESS) {
+        free(buf);
         return ret;
     }
 
@@ -3148,6 +3158,7 @@ int umq_ub_mempool_info_set_impl(uint64_t umqh_tp, const uint8_t *mempool_info, 
     (void)util_mutex_lock(remote_info->remote_eid_table_lock);
     if (queue->bind_ctx == NULL) {
         (void)util_mutex_unlock(remote_info->remote_eid_table_lock);
+        free(buf);
         return UMQ_SUCCESS; /* import succeeded but queue was unbound after */
     }
     (void)util_rwlock_wrlock(queue->bind_ctx->tseg_table->tseg_hmap_lock);
@@ -3157,6 +3168,7 @@ int umq_ub_mempool_info_set_impl(uint64_t umqh_tp, const uint8_t *mempool_info, 
     }
     (void)util_rwlock_unlock(queue->bind_ctx->tseg_table->tseg_hmap_lock);
     (void)util_mutex_unlock(remote_info->remote_eid_table_lock);
+    free(buf);
     return UMQ_SUCCESS;
 }
 
