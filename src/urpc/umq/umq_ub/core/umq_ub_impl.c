@@ -2083,7 +2083,7 @@ int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicited, umq_interrupt_option_t *
                 umq_trace_end_record(UMQ_TRACE_TYPE_REARM, umq_trace_timestamp_get());
                 return -UMQ_ERR_EINVAL;
             }
-
+            (void)util_mutex_lock(jetty_node_list->lock);
             if (!urpc_bitmap_is_set(jetty_node_list->bitmap, option->tp_handle_idx)) {
                 UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "tx_handle_idx %u does not exist\n", option->tp_handle_idx);
                 umq_trace_end_record(UMQ_TRACE_TYPE_REARM, umq_trace_timestamp_get());
@@ -2094,6 +2094,7 @@ int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicited, umq_interrupt_option_t *
             uint64_t tp_rearm_start = umq_trace_timestamp_get();
             status = umq_symbol_urma()->urma_rearm_jfc(
                 jetty_node_list->node_list[option->tp_handle_idx]->jfs_jfc[UB_QUEUE_JETTY_IO], solicited);
+            (void)util_mutex_unlock(jetty_node_list->lock);
             uint64_t rearm_delta = umq_trace_write_delta(tp_rearm_start);
             umq_trace_sub_record(UMQ_TRACE_TYPE_REARM, UMQ_URMA_FUNC_REARM_JFC, tp_rearm_start, rearm_delta);
             if (status != URMA_SUCCESS) {
@@ -2107,8 +2108,10 @@ int umq_ub_rearm_impl(uint64_t umqh_tp, bool solicited, umq_interrupt_option_t *
 
             if (queue->flow_control != NULL) {
                 uint64_t fc_rearm_start = umq_trace_timestamp_get();
+                (void)util_mutex_lock(jetty_node_list->lock);
                 status = umq_symbol_urma()->urma_rearm_jfc(
                     jetty_node_list->node_list[option->tp_handle_idx]->jfs_jfc[UB_QUEUE_JETTY_FLOW_CONTROL], solicited);
+                (void)util_mutex_unlock(jetty_node_list->lock);
                 rearm_delta = umq_trace_write_delta(fc_rearm_start);
                 umq_trace_sub_record(UMQ_TRACE_TYPE_REARM, UMQ_URMA_FUNC_FC_REARM_JFC, fc_rearm_start, rearm_delta);
                 if (status != URMA_SUCCESS) {
