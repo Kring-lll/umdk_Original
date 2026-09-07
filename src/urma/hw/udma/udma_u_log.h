@@ -15,6 +15,13 @@
 #include "urma_types.h"
 #include <ummu_api.h>
 
+#ifndef UMMU_LOG_BACKEND_DEFINED
+typedef struct ummu_log_backend {
+	void (*emit)(int level, char *message);
+} ummu_log_backend_t;
+#define UMMU_LOG_BACKEND_DEFINED
+#endif
+
 #define MAX_LOG_LEN 512
 #define UDMA_LOG_TAG "UDMA"
 #define UDMA_LOG_ENV_STR "UDMA_LOG_LEVEL"
