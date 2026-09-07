@@ -1,4 +1,4 @@
-# case 4: interleaved alloc/free on thread_0 鈥?status tracks alloced evolution
+# case 4: interleaved alloc/free on thread_0 — status tracks alloced evolution
 # free <idx> uses thread_0's alloced index (shifts after each erase); conservation holds
 init count=2 blockSizes=4K,64K mode=split scaleCap=on threads=1
 thread_0 alloc 4096     # t0 alloced=[0] sc0

@@ -11,7 +11,7 @@
  */
 
 /* Core TU: tool state + command dispatch. No longer #includes umq_qbuf_pool.c
- * 鈥?the .c is compiled into the tool target via CMakeLists.txt (alongside
+ * — the .c is compiled into the tool target via CMakeLists.txt (alongside
  * umq_qbuf_pool_base.c and umq_dfx_api_str.c). All access to umq pool state
  * goes through the public DFX API (umq_stats_qbuf_pool_get +
  * umq_qbuf_pool_stats_to_str) and the public umq_qbuf_pool.h functions
@@ -57,7 +57,7 @@ static uint32_t BlkSizeToScFallback(uint32_t blk_size)
 }
 
 
-/* stress mode globals 鈥?set by DoStressRepeatBlock via StressModeGuard RAII.
+/* stress mode globals — set by DoStressRepeatBlock via StressModeGuard RAII.
  * DrainWorkerResult reads g_stress_mode to skip g_actions writes + per-buf
  * printf so memory stays bounded for days-long infinite-loop runs. g_stress
  * counters are bumped in DrainWorkerResult (main thread only, no atomic
@@ -96,7 +96,7 @@ uint64_t NowMicros()
 }
 
 /* GetRssKb: read VmRSS from /proc/self/status (Linux-only, matches `ps` RSS).
- * Used by stress snapshot to track memory growth 鈥?if RSS grows linearly with
+ * Used by stress snapshot to track memory growth — if RSS grows linearly with
  * iterations, there's a leak; if it's stable, alloc/free is balanced. */
 static uint64_t GetRssKb()
 {
@@ -156,18 +156,18 @@ uint32_t BlkSizeToSc(uint32_t blk_size, const umq_qbuf_sc_info_t *sc_info, uint3
 }
 
 /* PoolMemBreakdown: breakdown of memory the pool has claimed from OS.
- * Used by DoInfo / DoStatus to print "Pool OS Mem Claimed" 鈥?to verify that
+ * Used by DoInfo / DoStatus to print "Pool OS Mem Claimed" — to verify that
  * RSS growth is NOT from the pool (which is bounded by these three counters).
  *
  * The pool claims OS memory at exactly 3 places (see umq_qbuf_pool.c):
- *   1) initial   鈥?umq_io_buf_addr() (cfg.total_size, allocated via
+ *   1) initial   — umq_io_buf_addr() (cfg.total_size, allocated via
  *                  umq_io_buf_malloc by DoInit following the standard API
  *                  chain). Recorded as g_qbuf_pool.total_size.
- *   2) expansion 鈥?slot->buffer (memalign in slot_with_data_init /
+ *   2) expansion — slot->buffer (memalign in slot_with_data_init /
  *                  slot_without_data_init). Sum tracked by CAS-protected
  *                  g_qbuf_pool.exp_total_mem_pool_size (see
  *                  try_inc_atomic_exp_mem_size / slot_uninit).
- *   3) escape    鈥?buf_data (memalign in umq_qbuf_alloc_escape). Per-buf size =
+ *   3) escape    — buf_data (memalign in umq_qbuf_alloc_escape). Per-buf size =
  *                  sc_info[sc].blk_size + umq_buf_t_size. Count tracked by
  *                  g_escape_buf_cnt[sc] (per-size-class).
  *
@@ -176,7 +176,7 @@ uint32_t BlkSizeToSc(uint32_t blk_size, const umq_qbuf_sc_info_t *sc_info, uint3
  *   - worker pthread stacks / shared lib Private_Dirty
  *   - slot metadata calloc / async_expand_pool_param (transient, <1 KB total)
  *
- * All 3 components derived from existing DFX fields 鈥?no production code change. */
+ * All 3 components derived from existing DFX fields — no production code change. */
 struct PoolMemBreakdown {
     uint64_t initial;   /* cfg.total_size (umq_io_buf_addr, allocated by umq_io_buf_malloc) */
     uint64_t expansion; /* exp_total_mem_pool_size (CAS-tracked) */
@@ -204,7 +204,7 @@ static PoolMemBreakdown CalcPoolOsMemClaimed(const umq_qbuf_pool_stats_t &stats)
 
 /* ===================== worker thread ===================== */
 /* WorkerMain: worker thread loop. Waits for task, executes it, signals done.
- * Worker owns its alloced/alloc_ops vectors 鈥?free returns bufs to this
+ * Worker owns its alloced/alloc_ops vectors — free returns bufs to this
  * worker's TLS (g_thread_cache is __thread). */
 void *WorkerMain(void *arg)
 {
@@ -218,7 +218,7 @@ void *WorkerMain(void *arg)
         while (!w->task.has_task) {
             pthread_cond_wait(&w->task.ready, &w->task.mtx);
         }
-        /* Record worker-side start timestamp 鈥?proves task picked up by
+        /* Record worker-side start timestamp — proves task picked up by
          * worker thread (vs. main thread). Concurrent workers will have
          * start timestamps within microseconds of each other. */
         w->task.worker_start_us = NowMicros();
@@ -253,10 +253,10 @@ void *WorkerMain(void *arg)
             case ThreadTask::FREE_IDX: {
                 /* Stable orig_idx lookup: scan alloced for each buf whose orig_idx
                  * matches the user-requested index. orig_idx is assigned at drain
-                 * time (DrainWorkerResult) and doesn't shift on erase 鈥?so
+                 * time (DrainWorkerResult) and doesn't shift on erase — so
                  * `free 0; free 1; free 2; free 3; free 4` correctly frees 5
                  * bufs in original allocation order, regardless of prior frees.
-                 * Supports multi-idx syntax `free 0,1,2` 鈥?one command frees
+                 * Supports multi-idx syntax `free 0,1,2` — one command frees
                  * multiple bufs, so parallel blocks can free multiple bufs per
                  * worker without violating "thread_K appears more than once" rule. */
                 int freed_cnt = 0;
@@ -267,7 +267,7 @@ void *WorkerMain(void *arg)
                                            [target](const AllocedBuf &ab) { return ab.orig_idx == target; });
                     if (it == w->alloced.end()) {
                         ++not_found_cnt;
-                        continue; /* orig_idx not found 鈥?already freed or never allocated */
+                        continue; /* orig_idx not found — already freed or never allocated */
                     }
                     AllocedBuf &ab = *it;
                     umq_buf_t *buf = ab.buf;
@@ -315,7 +315,7 @@ void *WorkerMain(void *arg)
                 uint32_t cnt = (uint32_t)w->alloced.size();
                 w->alloced.clear();
                 w->alloc_ops.clear();
-                w->next_orig_idx = 0; /* reset stable index counter 鈥?next alloc starts from 0 */
+                w->next_orig_idx = 0; /* reset stable index counter — next alloc starts from 0 */
                 if (QBUF_LIST_FIRST(&nd_list) != nullptr) {
                     umq_qbuf_free(&nd_list);
                 }
@@ -332,7 +332,7 @@ void *WorkerMain(void *arg)
                 pthread_mutex_unlock(&w->task.mtx);
                 return NULL;
         }
-        /* Record worker-side end timestamp 鈥?combined with start_us,
+        /* Record worker-side end timestamp — combined with start_us,
          * gives worker execution interval [start, end]. Concurrent workers
          * will have overlapping intervals (proves parallel execution). */
         w->task.worker_end_us = NowMicros();
@@ -342,7 +342,7 @@ void *WorkerMain(void *arg)
     }
 }
 
-/* Dispatch: synchronous 鈥?fill task, signal worker, block on done.
+/* Dispatch: synchronous — fill task, signal worker, block on done.
  * Used by serial commands. After return, worker is idle and task results
  * (task.ret / task.alloc_list / task.first_blk_size) are stable for the
  * caller to read. */
@@ -371,7 +371,7 @@ void Dispatch(size_t widx, ThreadTask::Type type, uint32_t size, uint32_t num, u
     pthread_mutex_unlock(&w.task.mtx);
 }
 
-/* DispatchAsync: asynchronous 鈥?fill task, signal worker, RETURN WITHOUT
+/* DispatchAsync: asynchronous — fill task, signal worker, RETURN WITHOUT
  * waiting for done. The worker begins executing in parallel with other
  * workers dispatched in the same parallel/join block. Results must be
  * drained by SyncAll() before the caller touches w.task fields again. */
@@ -398,12 +398,12 @@ void DispatchAsync(size_t widx, ThreadTask::Type type, uint32_t size, uint32_t n
     pthread_mutex_unlock(&w.task.mtx);
 }
 
-/* SyncAll: barrier 鈥?for every worker with has_async==true, wait for done,
+/* SyncAll: barrier — for every worker with has_async==true, wait for done,
  * drain the result, clear has_async. After return, no worker is mutating
  * TLS, so DFX (umq_stats_qbuf_pool_get) is safe to call from main thread.
  *
  * Verbose mode: collects per-worker wait_us (time spent in
- * pthread_cond_wait for done 鈥?small if worker already finished before
+ * pthread_cond_wait for done — small if worker already finished before
  * we got to it = parallel execution) and prints a summary to stderr.
  * In a serial implementation every wait would be ~worker_exec_time; in
  * parallel execution, the first wait is ~max(worker_exec_time) and
@@ -458,8 +458,8 @@ void SyncAll()
                 latest_worker_end = w->task.worker_end_us;
             }
             fprintf(stderr,
-                    "[sync] t%u drained: worker ran [%lu..%lu]渭s (dur=%lu渭s), "
-                    "main waited %lu渭s for done\n",
+                    "[sync] t%u drained: worker ran [%lu..%lu]μs (dur=%luμs), "
+                    "main waited %luμs for done\n",
                     w->idx, (unsigned long)w->task.worker_start_us, (unsigned long)w->task.worker_end_us,
                     (unsigned long)(w->task.worker_end_us - w->task.worker_start_us), (unsigned long)wait_us);
         }
@@ -475,8 +475,8 @@ void SyncAll()
         uint64_t parallel_window = (earliest_worker_start < UINT64_MAX) ? (latest_worker_end - earliest_worker_start) :
                                                                           0;
         fprintf(stderr,
-                "[sync] barrier complete: total=%lu渭s, parallel_exec_window=%lu渭s, "
-                "per-worker wait: min=%lu渭s max=%lu渭s avg=%lu渭s\n",
+                "[sync] barrier complete: total=%luμs, parallel_exec_window=%luμs, "
+                "per-worker wait: min=%luμs max=%luμs avg=%luμs\n",
                 (unsigned long)barrier_total, (unsigned long)parallel_window, (unsigned long)wait_min,
                 (unsigned long)wait_max, (unsigned long)(pending_count > 0 ? wait_sum / pending_count : 0));
         fprintf(stderr, "[sync]   (if serial, expected total ~= sum of per-worker durations; "
@@ -484,7 +484,7 @@ void SyncAll()
     }
 }
 
-/* FreeAllOnWorkers: dispatch FREE_ALL to every worker (reinit path 鈥?bufs
+/* FreeAllOnWorkers: dispatch FREE_ALL to every worker (reinit path — bufs
  * still valid, workers still alive, free returns to each worker's TLS). */
 void FreeAllOnWorkers()
 {
@@ -507,7 +507,7 @@ void StopWorkers()
     }
 }
 
-/* Cleanup at program exit: do NOT auto-free worker allocs 鈥?let testers
+/* Cleanup at program exit: do NOT auto-free worker allocs — let testers
  * free themselves so leak scenarios are observable via 'status' (alloced>0).
  * Leak check per-worker, then stop workers + uninit pool + free buf.
  * SyncAll first so any pending async tasks (e.g. user forgot 'join' or
@@ -527,7 +527,7 @@ void Cleanup()
     }
     if (g_buf_addr != nullptr) {
         /* umq_io_buf_free frees the internal g_buffer_addr (allocated by
-         * umq_io_buf_malloc) and resets g_total_len 鈥?required before reinit
+         * umq_io_buf_malloc) and resets g_total_len — required before reinit
          * so the next umq_io_buf_malloc allocates fresh instead of returning
          * the stale pointer. */
         umq_io_buf_free();
@@ -548,23 +548,24 @@ int DoInit(const std::vector<std::string> &args)
     /* expSlotSz: per-expansion slot target memory (cfg.expansion_size, default 32MB when 0).
      * poolMaxSz: total buf pool ceiling = initial pool + all expansion slots
      *            (cfg.umq_buf_pool_max_size, default 2GB when 0, hard cap 6GB).
-     * The two are independent 鈥?poolMaxSz caps the cumulative expansion memory
+     * The two are independent — poolMaxSz caps the cumulative expansion memory
      * (via derived expansion_mem_size_max), expSlotSz only suggests per-slot
      * granularity. Setting expSlotSz > poolMaxSz yields expansion slots that
      * can never fit under the cap, so any expansion trigger fails with ENOMEM. */
     uint64_t expSlotSz = 0;
     uint64_t poolMaxSz = 0;
     /* blockSizes: explicit per-SC block sizes (cfg.explicit_block_sizes[],
-     * umq_qbuf_pool_base.h:106). Format: "4K,64K" or "4096,65536" 鈥?comma
-     * separated, count must match `count` param. REQUIRED (no fallback) 鈥?     * previous `mult` parameter was removed because all cases now use
+     * umq_qbuf_pool_base.h:106). Format: "4K,64K" or "4096,65536" — comma
+     * separated, count must match `count` param. REQUIRED (no fallback) —
+     * previous `mult` parameter was removed because all cases now use
      * blockSizes= directly. Production sets this to UmqSetting::UMQ_EXPLICIT_BLOCK_SIZES
      * via memcpy (umq_backend.cpp:67-69). */
     uint32_t blockSizes[UMQ_SIZE_CLASS_MAX] = {0};
     bool blockSizesSet = false;
     /* blockCounts: per-SC initial block counts (cfg.per_sc_block_counts[],
-     * umq_qbuf_pool_base.h:103). Format: "1024,16" 鈥?comma separated, count must
+     * umq_qbuf_pool_base.h:103). Format: "1024,16" — comma separated, count must
      * match `count` param. Value 0 means lazy SC (no initial reserve, expansion pool
-     * only 鈥?replaces the old lazy_init_block_size_threshold
+     * only — replaces the old lazy_init_block_size_threshold
      * When not set, cfg.per_sc_block_counts stays all-zero; production
      * init_size_class_config() uses total_size to auto-derive block counts.
      * Replaces the removed per_sc_weights[] (commit 099abae). */
@@ -573,17 +574,17 @@ int DoInit(const std::vector<std::string> &args)
     uint64_t tlsDepths[UMQ_SIZE_CLASS_MAX] = {0};
     bool tlsDepthsSet = false;
     /* escapeEnable: malloc escape fallback switch (cfg.disable_malloc_escape =
-     * !escapeEnable). Default true 鈥?escape enabled, matches production default.
+     * !escapeEnable). Default true — escape enabled, matches production default.
      * When off, umq_qbuf_escape_alloc returns EINVAL immediately (umq_qbuf_pool.c:2034)
      * and umq_normal_qbuf_alloc skips internal escape paths (:2143/:2182). */
     bool escapeEnable = true;
     /* expThreshold: expansion trigger water level % (cfg.expansion_threshold,
-     * default 30 when 0 鈥?QBUF_POOL_DEFAULT_EXPANSION_THRESHOLD). Controls
+     * default 30 when 0 — QBUF_POOL_DEFAULT_EXPANSION_THRESHOLD). Controls
      * trigger_expand_block_num = expansion_block_count * threshold / 100.
      * Production validates [1, 100] (umq_qbuf_pool.c:1225-1228). */
     uint32_t expThreshold = 0;
     /* tlsExpandBudget: per-thread TLS bytes cap (cfg.tls_expand_qbuf_pool_depth,
-     * default 7/8 of tlsBudget when 0 鈥?umq_qbuf_pool_expand_max). Caps
+     * default 7/8 of tlsBudget when 0 — umq_qbuf_pool_expand_max). Caps
      * per-thread TLS fetch: local_total_bytes + delta > tlsExpandBudget
      * truncates delta (umq_qbuf_pool.c:1666-1669). Independent from
      * tlsBudget (global cap across all threads). */
@@ -611,7 +612,7 @@ int DoInit(const std::vector<std::string> &args)
         } else if (k == "blockSizes") {
             /* Parse "4K,64K" / "4096,65536" / "4K,32K,128K" into blockSizes[].
              * Each token supports K/M/G suffix (ParseSize). Token count must
-             * equal `count` 鈥?checked after loop. */
+             * equal `count` — checked after loop. */
             uint32_t bi = 0;
             std::string tok;
             for (size_t p = 0; p <= v.size(); ++p) {
@@ -725,9 +726,9 @@ int DoInit(const std::vector<std::string> &args)
     }
 
     /* Standard API init chain (mirrors umq_ub_impl.c:708-746):
-     *   1. umq_buf_size_pow_small_set 鈥?set base block size global
-     *   2. umq_qbuf_pool_cfg_check 鈥?validate config + compute normal_io_buf_size
-     *   3. umq_io_buf_malloc 鈥?allocate via standard API (sets internal
+     *   1. umq_buf_size_pow_small_set — set base block size global
+     *   2. umq_qbuf_pool_cfg_check — validate config + compute normal_io_buf_size
+     *   3. umq_io_buf_malloc — allocate via standard API (sets internal
      *      g_buffer_addr/g_total_len that umq_qbuf_pool_init reads for
      *      expansion_mem_size_max derivation)
      *   4. Build qbuf_pool_cfg_t from plan + umq_io_buf_addr/size
@@ -823,7 +824,7 @@ int DoInit(const std::vector<std::string> &args)
     }
 
     /* RX pool: production sets rx_block_count = UBS_RX_PORT_NUM * UBS_RX_DEPTH (default 4*1024=4096).
-     * Each RX block = 4K data + 128B header = 4224B; total = 4096 * 4224 鈮?16.5MB. */
+     * Each RX block = 4K data + 128B header = 4224B; total = 4096 * 4224 ≈ 16.5MB. */
     const uint32_t rx_blk_count = 4096;
     const uint32_t rx_blk_size = UMQ_RX_QBUF_BLOCK_SIZE;
     const uint64_t rx_total_size = (uint64_t)rx_blk_count * (rx_blk_size + sizeof(umq_buf_t));
@@ -841,7 +842,7 @@ int DoInit(const std::vector<std::string> &args)
     }
 
     /* Tiny pool: production defaults block_count=8192, block_size=1024.
-     * Each tiny block = 1K data + 128B header = 1152B; total = 8192 * 1152 鈮?9MB. */
+     * Each tiny block = 1K data + 128B header = 1152B; total = 8192 * 1152 ≈ 9MB. */
     const uint32_t tiny_blk_count = TINY_QBUF_POOL_DEFAULT_BLOCK_COUNT;
     const uint32_t tiny_blk_size = UMQ_TINY_QBUF_BLOCK_SIZE;
     const uint64_t tiny_total_size = (uint64_t)tiny_blk_count * (tiny_blk_size + sizeof(umq_buf_t));
@@ -859,7 +860,7 @@ int DoInit(const std::vector<std::string> &args)
     }
     g_inited = true;
 
-    /* start worker threads 鈥?each gets its own TLS (g_thread_cache) */
+    /* start worker threads — each gets its own TLS (g_thread_cache) */
     g_workers.clear();
     for (uint32_t i = 0; i < threads; ++i) {
         std::unique_ptr<Worker> w(new Worker());
@@ -881,7 +882,7 @@ int DoInit(const std::vector<std::string> &args)
 
     /* Build blockSizes/weights display strings for printf + action log.
      * When not set, show "default" so the log reflects which path was taken
-     * (all-zero 鈫?production all-1 fallback). */
+     * (all-zero → production all-1 fallback). */
     char blockSizesStr[128] = {0};
     {
         int n = 0;
@@ -992,7 +993,7 @@ int DoAlloc(const std::vector<std::string> &args, size_t widx, bool async)
         /* Reserve g_actions slot at dispatch time so the actions log
          * preserves dispatch order regardless of completion order.
          * DrainWorkerResult() will back-fill the string at SyncAll() time.
-         * In stress mode, skip the reservation 鈥?pending_action_idx = SIZE_MAX
+         * In stress mode, skip the reservation — pending_action_idx = SIZE_MAX
          * sentinel tells DrainWorkerResult not to touch g_actions. */
         if (!g_stress_mode) {
             g_actions.push_back(std::string());
@@ -1017,13 +1018,13 @@ int DoAlloc(const std::vector<std::string> &args, size_t widx, bool async)
 /* DrainWorkerResult: drain the worker's just-finished ALLOC task into
  * w.alloced / g_actions / w.alloc_ops. Called from DoAlloc (serial path)
  * and SyncAll (parallel path). Worker must be idle (task.finished==true,
- * mutex held by caller) when invoked 鈥?this guarantees DFX reads are safe.
+ * mutex held by caller) when invoked — this guarantees DFX reads are safe.
  *
  * FREE_IDX/FREE_ALL tasks: action string was already back-filled at dispatch
  * time (see DoFree async path). SyncAll still calls us to clear has_async,
  * but we skip the alloc-drain path for non-ALLOC tasks. The only thing we
  * do for FREE tasks is patch the action string if ret indicates failure
- * (FREE_IDX returns -1 on out-of-range idx 鈥?but the dispatch-time check
+ * (FREE_IDX returns -1 on out-of-range idx — but the dispatch-time check
  * already rejected that case, so this is a defensive backstop). */
 void DrainWorkerResult(Worker &w)
 {
@@ -1058,7 +1059,7 @@ void DrainWorkerResult(Worker &w)
     /* ALLOC task path: drain alloc_list, resolve sc, back-fill action. */
     if (w.task.ret != 0) {
         g_stress.total_alloc_errors++;
-        /* Worker alloc failed 鈥?back-fill error action, leave alloced empty. */
+        /* Worker alloc failed — back-fill error action, leave alloced empty. */
         if (!g_stress_mode) {
             char act[128];
             snprintf(act, sizeof(act), "[t%u] alloc %u FAILED ret=%d", w.idx, w.task.size, w.task.ret);
@@ -1099,9 +1100,9 @@ void DrainWorkerResult(Worker &w)
     }
 
     /* For async path: g_actions slot already reserved at dispatch time
-     * (SIZE_MAX sentinel in stress mode 鈥?see DoAlloc async path).
+     * (SIZE_MAX sentinel in stress mode — see DoAlloc async path).
      * For serial path: reserve now (Dispatch returned, no slot was reserved).
-     * In stress mode, skip the reservation entirely 鈥?actions_idx stays at
+     * In stress mode, skip the reservation entirely — actions_idx stays at
      * SIZE_MAX sentinel; status display recognises this and skips the action
      * cross-reference (since g_actions wasn't pushed for this op). */
     size_t actions_idx;
@@ -1116,8 +1117,8 @@ void DrainWorkerResult(Worker &w)
 
     /* Drain the buf list into w.alloced, print sc routing for each buf.
      * In stress mode, skip per-buf printf to keep output bounded for
-     * long-running tests (millions of iters 脳 N bufs would flood stdout).
-     * orig_idx_start: captured before the buf loop 鈥?first buf of this op
+     * long-running tests (millions of iters × N bufs would flood stdout).
+     * orig_idx_start: captured before the buf loop — first buf of this op
      * gets orig_idx = orig_idx_start, subsequent bufs get +1, +2, ...
      * Display uses buf#<orig_idx> so user can directly `free <orig_idx>`. */
     uint32_t orig_idx_start = w.next_orig_idx;
@@ -1151,7 +1152,7 @@ void DrainWorkerResult(Worker &w)
         buf = next;
         ++idx;
     }
-    /* Bump stress counters (single-threaded 鈥?main thread calls us).
+    /* Bump stress counters (single-threaded — main thread calls us).
      * Per-sc detail is not tracked here; see DFX stats (DoStatus section 3). */
     g_stress.total_allocs++;
     g_stress.total_bufs_alloced += idx;
@@ -1188,7 +1189,7 @@ int DoFree(const std::vector<std::string> &args, size_t widx, bool async)
         uint32_t cnt = (uint32_t)w.alloced.size();
         if (async) {
             /* Reserve g_actions slot now; back-fill string after SyncAll.
-             * FREE_ALL touches w.alloced inside WorkerMain 鈥?safe because
+             * FREE_ALL touches w.alloced inside WorkerMain — safe because
              * the parallel-mode rule forbids the same worker from having
              * an ALLOC task in the same block (no alloc+free mix), so no
              * DrainWorkerResult on this worker will race with this FREE.
@@ -1215,7 +1216,7 @@ int DoFree(const std::vector<std::string> &args, size_t widx, bool async)
         }
         Dispatch(widx, ThreadTask::FREE_ALL);
         cnt = (w.task.ret > 0) ? (uint32_t)w.task.ret : 0;
-        /* Bump stress counters in serial path too 鈥?async path bumps in
+        /* Bump stress counters in serial path too — async path bumps in
          * DrainWorkerResult, but serial DoFree reads task.ret directly
          * without going through DrainWorkerResult. */
         if (w.task.ret >= 0) {
@@ -1317,7 +1318,7 @@ int DoFree(const std::vector<std::string> &args, size_t widx, bool async)
  * Reads new g_qbuf_pool fields (block_sizes[], data_region_start[], per-sc
  * block_pool[]/exp_pool_with_data[] arrays) and calls new routing functions
  * (select_size_class, blk_size_to_sc, get_batch_count). If these print sane
- * values, the multi-level code path was initialised and executed 鈥?proving
+ * values, the multi-level code path was initialised and executed — proving
  * the tool exercises the new (not legacy single-level) mempool code. */
 int DoInfo(const std::vector<std::string> &args)
 {
@@ -1383,7 +1384,7 @@ int DoInfo(const std::vector<std::string> &args)
     return 0;
 }
 
-/* DoStatus: minimal test-facing view 鈥?only two things a tester needs:
+/* DoStatus: minimal test-facing view — only two things a tester needs:
  *   1) actions: what the user did so far (init/alloc/free sequence)
  *   2) pool state: per-sc layer sizes (global / tls / alloced / expansion)
  * Intentionally terse, contrasts with DoInfo which dumps everything. */
@@ -1397,11 +1398,11 @@ int DoStatus(const std::vector<std::string> &args)
     /* one outer frame wrapping all sections */
     printf("====================[ status ]====================\n");
 
-    /* section 0 (optional): stress progress / summary 鈥?shown when
+    /* section 0 (optional): stress progress / summary — shown when
      * g_stress_mode is active (inside stress_repeat loop) or after a
      * stress_repeat finished (iters_done > 0). Bounded counters; never
      * grows with iter count. stress_repeat runs infinitely, so no
-     * `/total` 鈥?only current iter count + (running|interrupted) state. */
+     * `/total` — only current iter count + (running|interrupted) state. */
     if (g_stress_mode || g_stress.iters_done > 0) {
         uint64_t now = NowMicros();
         uint64_t uptime_s = (now - g_stress.start_time_us) / 1000000;
@@ -1422,11 +1423,11 @@ int DoStatus(const std::vector<std::string> &args)
                sum_alloced);
     }
 
-    /* section 1: actions history (skipped in stress mode 鈥?g_actions not
+    /* section 1: actions history (skipped in stress mode — g_actions not
      * pushed for stress_repeat iters; show only what was recorded before
      * entering stress mode, typically just `init`). */
     if (g_stress_mode) {
-        printf("actions (%zu, stress mode 鈥?per-iter actions not recorded):\n", g_actions.size());
+        printf("actions (%zu, stress mode — per-iter actions not recorded):\n", g_actions.size());
     } else {
         printf("actions (%zu):\n", g_actions.size());
     }
@@ -1434,7 +1435,7 @@ int DoStatus(const std::vector<std::string> &args)
         printf("  [%zu] %s\n", i + 1, g_actions[i].c_str());
     }
 
-    /* section 2: currently held allocs 鈥?per-worker alloc ops still alive,
+    /* section 2: currently held allocs — per-worker alloc ops still alive,
      * excluding alloc-then-freed pairs (what each thread is still holding).
      * Shows the orig_idx range so user knows which `free N` to use. */
     printf("held allocs:\n");
@@ -1443,7 +1444,7 @@ int DoStatus(const std::vector<std::string> &args)
         for (size_t i = 0; i < w->alloc_ops.size(); ++i) {
             const AllocOp &op = w->alloc_ops[i];
             if (op.remaining == 0) {
-                continue; /* fully freed 鈥?drop the alloc+free pair */
+                continue; /* fully freed — drop the alloc+free pair */
             }
             any_held = true;
             /* Build orig_idx hint: e.g. "free 3-4" for 2 bufs, "free 0" for 1 buf */
@@ -1455,7 +1456,7 @@ int DoStatus(const std::vector<std::string> &args)
                 snprintf(origHint, sizeof(origHint), " (free %u)", op.orig_idx_start);
             }
             if (op.size == 0) {
-                /* without_data alloc 鈥?no sc concept, mark as nodata so tester
+                /* without_data alloc — no sc concept, mark as nodata so tester
                  * doesn't confuse it with sc=0 with_data bufs. */
                 printf("  [t%u][%zu] alloc 0 -> nodata, %u/%u buf%s held%s\n", w->idx, op.actions_idx + 1,
                        op.remaining, op.total, op.total > 1 ? "s" : "", origHint);
@@ -1466,7 +1467,7 @@ int DoStatus(const std::vector<std::string> &args)
         }
     }
     if (!any_held) {
-        printf("  (none 鈥?all allocs freed)\n");
+        printf("  (none — all allocs freed)\n");
     }
 
     /* section 3: per-sc global/alloced/exp + per-thread TLS (sc per row + tid).
@@ -1500,7 +1501,7 @@ int DoStatus(const std::vector<std::string> &args)
                 continue;
             }
             if (ab.buf->mempool_without_data == 1) {
-                /* without_data buf 鈥?buf_size=sizeof(umq_buf_t), would
+                /* without_data buf — buf_size=sizeof(umq_buf_t), would
                  * BlkSizeToSc-fallback to sc=0 incorrectly. Count separately
                  * so per-sc alloced column reflects only with_data bufs. */
                 ++nodata_cnt;
@@ -1555,7 +1556,7 @@ int DoStatus(const std::vector<std::string> &args)
             /* tls->tid is the OS kernel TID (set by production code via
              * syscall(SYS_gettid) in umq_qbuf_pool.c get_thread_cache path).
              * Compare against Worker.kernel_tid (also via syscall), not
-             * Worker.tid (which is pthread_t address 鈥?different namespace). */
+             * Worker.tid (which is pthread_t address — different namespace). */
             if (g_workers[k]->kernel_tid == tls->tid) {
                 match = (uint32_t)k;
                 break;
@@ -1567,7 +1568,7 @@ int DoStatus(const std::vector<std::string> &args)
                    (unsigned long)tls->sc_capacity_with_data[i]);
         }
     }
-    /* pool's OS memory claim 鈥?single line in status (info command shows the
+    /* pool's OS memory claim — single line in status (info command shows the
      * full breakdown). Helps tester verify at a glance that pool claim is
      * constant (= initial 200MB) regardless of repeat count, so any RSS growth
      * beyond this number is tool residue (g_actions vector / glibc cache). */
@@ -1650,7 +1651,7 @@ std::vector<std::vector<std::string>> TokenizeBlock(const std::vector<std::strin
  *   2) sub-command must be 'alloc' or 'free'
  *   3) no worker mixes alloc+free in the same block (avoids w.alloced
  *      being mutated by a FREE task while a same-worker ALLOC drain
- *      might race 鈥?though the rule also serves readability)
+ *      might race — though the rule also serves readability)
  * Returns 0 ok, -1 invalid (error message printed). */
 int ValidateParallelBlock(const std::vector<std::vector<std::string>> &block)
 {
@@ -1682,7 +1683,7 @@ int ValidateParallelBlock(const std::vector<std::vector<std::string>> &block)
             worker_cmd[widx] = cmd;
         } else if (it->second != cmd) {
             fprintf(stderr,
-                    "ERROR: parallel block: thread_%zu mixes alloc+free (forbidden 鈥?"
+                    "ERROR: parallel block: thread_%zu mixes alloc+free (forbidden — "
                     "use two separate parallel blocks)\n",
                     widx);
             return -1;
@@ -1699,12 +1700,13 @@ int ValidateParallelBlock(const std::vector<std::vector<std::string>> &block)
 
 /* ValidateRepeatBlock: enforce the repeat-mode safety rules.
  *   1) block may contain thread_K commands and any number of parallel/join
- *      sub-blocks (multiple parallel blocks per repeat iteration are fine 鈥? *      e.g. alloc block followed by free block)
+ *      sub-blocks (multiple parallel blocks per repeat iteration are fine —
+ *      e.g. alloc block followed by free block)
  *   2) block must NOT contain info/status/init/quit (control commands
  *      that would corrupt repeat semantics)
  *   3) no nested repeat or stress_repeat (would be confusing + parser
  *      state complexity)
- *   4) `snapshot N` directive is allowed 鈥?handled by the outer repeat
+ *   4) `snapshot N` directive is allowed — handled by the outer repeat
  *      loop (DoRepeatBlock / DoStressRepeatBlock), ExecuteBlockLines skips it
  * Returns 0 ok, -1 invalid. */
 int ValidateRepeatBlock(const std::vector<std::vector<std::string>> &block)
@@ -1738,7 +1740,7 @@ int ExecuteBlockLines(const std::vector<std::vector<std::string>> &block)
         const std::vector<std::string> &toks = block[i];
         const std::string &cmd = toks[0];
         if (cmd == "snapshot") {
-            /* Snapshot directive 鈥?handled by the outer repeat loop
+            /* Snapshot directive — handled by the outer repeat loop
              * (DoRepeatBlock / DoStressRepeatBlock pre-scan and apply).
              * Skip here as a no-op. */
             continue;
@@ -1766,7 +1768,7 @@ int ExecuteBlockLines(const std::vector<std::vector<std::string>> &block)
             i = j; /* skip past 'join' */
             continue;
         }
-        /* thread_K command 鈥?serial execution */
+        /* thread_K command — serial execution */
         if (cmd.compare(0, 7, "thread_") == 0) {
             size_t widx = (size_t)strtoul(cmd.c_str() + 7, nullptr, 10);
             if (toks.size() < 2) {
@@ -1802,8 +1804,8 @@ int ExecuteBlockLines(const std::vector<std::vector<std::string>> &block)
  * log reflects dispatch order because DoAlloc/DoFree(async) reserve the
  * slot at dispatch time and DrainWorkerResult/SyncAll back-fill by slot idx.
  *
- * Verbose mode prints two-phase timing: dispatch (should be tiny, 渭s) +
- * barrier wait (should be ~max worker execution time, NOT sum 鈥?proving
+ * Verbose mode prints two-phase timing: dispatch (should be tiny, μs) +
+ * barrier wait (should be ~max worker execution time, NOT sum — proving
  * workers ran concurrently rather than sequentially). */
 int DoParallelBlock(const std::vector<std::vector<std::string>> &block)
 {
@@ -1829,11 +1831,11 @@ int DoParallelBlock(const std::vector<std::vector<std::string>> &block)
     uint64_t disp_end = verbose ? NowMicros() : 0;
     if (verbose) {
         fprintf(stderr,
-                "[parallel] dispatched %zu commands in %lu渭s, "
+                "[parallel] dispatched %zu commands in %luμs, "
                 "entering barrier (workers now running concurrently)\n",
                 block.size(), (unsigned long)(disp_end - disp_start));
     }
-    /* Barrier 鈥?wait for all workers, drain results. */
+    /* Barrier — wait for all workers, drain results. */
     SyncAll();
     if (errors > 0) {
         fprintf(stderr, "ERROR: parallel block had %d dispatch error(s)\n", errors);
@@ -1914,7 +1916,7 @@ static void OnStopSignal(int sig)
 {
     (void)sig;
     if (g_stop_requested) {
-        /* Second signal 鈥?restore default and re-raise so process dies. */
+        /* Second signal — restore default and re-raise so process dies. */
         struct sigaction dfl;
         memset(&dfl, 0, sizeof(dfl));
         dfl.sa_handler = SIG_DFL;
@@ -1951,26 +1953,27 @@ struct SignalGuard {
     }
 };
 
-/* DoStressRepeatBlock: like DoRepeatBlock but executes in stress mode 鈥? * DrainWorkerResult skips g_actions writes and per-buf printf so memory
+/* DoStressRepeatBlock: like DoRepeatBlock but executes in stress mode —
+ * DrainWorkerResult skips g_actions writes and per-buf printf so memory
  * stays bounded for days-long runs (g_actions, alloc_ops, alloced all
  * bounded; alloc_ops is cleared at iter boundary when alloced.empty()).
  *
  * User MUST ensure alloc/free pairing at iter boundary; this function does
  * NOT enforce conservation. If user leaks (alloced not empty at iter end),
  * alloc_ops is left untouched to preserve FREE_IDX cross-ref, and memory
- * grows linearly with leaked ops 鈥?that's user's responsibility. The exit-
+ * grows linearly with leaked ops — that's user's responsibility. The exit-
  * time Cleanup NOTE will still report the leak.
  *
  * Optional `snapshot N` directive prints a one-line progress summary every
- * N iters to stdout (does NOT push to any vector 鈥?output goes to stdout
+ * N iters to stdout (does NOT push to any vector — output goes to stdout
  * only, so memory stays bounded regardless of iter count).
  *
- * Runs INFINITELY 鈥?no count parameter. The loop breaks only on:
- *   - ExecuteBlockLines returning non-zero (alloc/free failure) 鈥?exits 1
- *   - SIGINT/SIGTERM (Ctrl-C) 鈥?sets g_stop_requested, breaks after
+ * Runs INFINITELY — no count parameter. The loop breaks only on:
+ *   - ExecuteBlockLines returning non-zero (alloc/free failure) — exits 1
+ *   - SIGINT/SIGTERM (Ctrl-C) — sets g_stop_requested, breaks after
  *     current iter completes, prints interrupt message + final summary,
  *     returns 0 (graceful exit; user can then `status` or `quit`)
- *   - Second signal 鈥?OnStopSignal re-installs default handler and
+ *   - Second signal — OnStopSignal re-installs default handler and
  *     re-raises; process dies immediately (for stuck cleanup) */
 int DoStressRepeatBlock(const std::vector<std::vector<std::string>> &block)
 {
@@ -1990,7 +1993,7 @@ int DoStressRepeatBlock(const std::vector<std::vector<std::string>> &block)
     }
     if (snapshot_interval == 0) {
         fprintf(stderr,
-                "WARNING: stress_repeat without `snapshot N` 鈥?no periodic progress "
+                "WARNING: stress_repeat without `snapshot N` — no periodic progress "
                 "will be printed; consider adding `snapshot 1000` to the block\n");
     }
     /* Reset counters, install signal handlers, mark stress mode. */
@@ -2011,7 +2014,7 @@ int DoStressRepeatBlock(const std::vector<std::vector<std::string>> &block)
             return -1;
         }
         /* Per-iter memory bounding: if user paired alloc/free correctly,
-         * alloced is empty at iter end 鈥?safe to clear alloc_ops (no held
+         * alloced is empty at iter end — safe to clear alloc_ops (no held
          * bufs reference it) AND reset next_orig_idx (next iter starts from 0,
          * keeping orig_idx bounded across infinite iterations). This mirrors
          * FREE_ALL's reset behavior for the `free <idx>` pattern (case_23)

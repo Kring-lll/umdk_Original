@@ -1,6 +1,6 @@
-# case 22: stress_repeat infinite 鈥?RSS stability verification
+# case 22: stress_repeat infinite — RSS stability verification
 #
-# Long-running stress test. Runs INFINITELY 鈥?Ctrl-C to stop.
+# Long-running stress test. Runs INFINITELY — Ctrl-C to stop.
 # Use this to verify memory stays bounded over extended uptime:
 #
 #   # Terminal 1: run the tool
@@ -34,7 +34,7 @@ thread_6 free all
 thread_7 alloc 4096 50
 thread_7 free all
 
-# Infinite stress 鈥?Ctrl-C to stop. snapshot every 10000 iters (~10s).
+# Infinite stress — Ctrl-C to stop. snapshot every 10000 iters (~10s).
 stress_repeat
   parallel
     thread_0 alloc 4096 10

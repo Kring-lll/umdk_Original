@@ -1,7 +1,8 @@
 # case 11: cross-sc parallel (C7)
 # Different workers concurrently allocate from different size_class sc's.
 # Because each sc has its own block_pool[sc].global_mutex (per-sc spinlock
-# granularity), there is no contention between sc0 and sc1 fetches 鈥?# the lock isn't shared. Verifies:
+# granularity), there is no contention between sc0 and sc1 fetches —
+# the lock isn't shared. Verifies:
 #   - Per-sc spinlock isolation (different sc's don't serialize)
 #   - Per-sc conservation: global_sc0 + tls_sc0 + alloced_sc0 = init_sc0
 #     and the same for sc1 (each sc is independent)
@@ -45,7 +46,7 @@ join
 # Expect: sc1 alloced += 40 (4x5x2 multi-block); sc0 alloced += 200 (4x50)
 status
 
-# Cleanup 鈥?all sc's freed in parallel (free doesn't care about sc routing)
+# Cleanup — all sc's freed in parallel (free doesn't care about sc routing)
 parallel
   thread_0 free all
   thread_1 free all

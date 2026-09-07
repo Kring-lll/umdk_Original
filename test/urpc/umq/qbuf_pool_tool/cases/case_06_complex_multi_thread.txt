@@ -1,4 +1,4 @@
-# case 6: complex multi-thread (threads=3) 鈥?mixed sc alloc, interleaved
+# case 6: complex multi-thread (threads=3) — mixed sc alloc, interleaved
 # free idx/all, per-thread leak. Verifies:
 #  - per-thread TLS isolation (t0/t1/t2 different tid, separate fetch bytes)
 #  - conservation per sc (global + tls + alloced constant throughout)

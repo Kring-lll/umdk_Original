@@ -1,4 +1,4 @@
-# case 2: status command 鈥?minimal test-facing view (single worker)
+# case 2: status command — minimal test-facing view (single worker)
 # shows: (1) actions, (2) held allocs, (3) per-sc layers + per-thread TLS
 init count=2 blockSizes=4K,64K mode=split scaleCap=on threads=1
 status

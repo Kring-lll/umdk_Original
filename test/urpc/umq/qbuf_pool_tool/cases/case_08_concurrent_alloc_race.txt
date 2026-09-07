@@ -8,7 +8,7 @@
 #   - Per-thread TLS rows in status all show independent fetch bytes
 init count=2 blockSizes=4K,64K mode=split scaleCap=on threads=8
 
-# Stage 1: concurrent alloc 鈥?8 workers x 50 bufs sc0 = 400 bufs total
+# Stage 1: concurrent alloc — 8 workers x 50 bufs sc0 = 400 bufs total
 parallel
   thread_0 alloc 4096 50
   thread_1 alloc 4096 50

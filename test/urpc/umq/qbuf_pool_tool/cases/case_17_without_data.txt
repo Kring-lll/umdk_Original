@@ -1,6 +1,6 @@
 # case 17: without_data alloc path (request_size=0)
 #
-# Verifies the without_data mempool path 鈥?a separate buf pool that borrows
+# Verifies the without_data mempool path — a separate buf pool that borrows
 # only the umq_buf_t header (descriptor) without a data region. Distinct
 # from with_data bufs (which carry data_size > 0 and route to a size_class).
 #
@@ -43,7 +43,7 @@ info
 thread_0 alloc 0 5
 status
 
-# Stage 2: free all 鈥?returns to TLS not global (same as with_data FAQ Q1)
+# Stage 2: free all — returns to TLS not global (same as with_data FAQ Q1)
 # Expect:
 #   status alloced sc0=0, "without_data: 0 bufs" (alloced cleared)
 #   DFX WithoutData: CurBuf=5 (returned to TLS), AccFreeCnt=5
