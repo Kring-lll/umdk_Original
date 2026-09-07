@@ -1108,29 +1108,6 @@ int umq_ub_shared_credit_req_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
     return UMQ_SUCCESS;
 }
 
-static uint16_t umq_ub_next_credit_req_count_update(uint16_t reply_credits,
-    uint16_t request, uint8_t ratio, ub_flow_control_t *fc)
-{
-    uint32_t new_request;
-    if (reply_credits >= request) {
-        new_request = (uint32_t)(request * fc->credit_multiple);
-    } else {
-        if (ratio == 0) {
-            new_request = (uint32_t)(request / fc->credit_multiple);
-        } else {
-            new_request = request + UMQ_UB_FC_CREDIT_STEP;
-        }
-    }
-    if (new_request > fc->max_credits_request) {
-        new_request = fc->max_credits_request;
-    }
-    if (new_request == 0 || new_request == 1) {
-        new_request = UMQ_UB_MIN_CREDITS_PER_REQUEST;
-    }
-
-    return (uint16_t)new_request;
-}
-
 void umq_ub_shared_credit_resp_handle(ub_queue_t *queue, umq_ub_imm_t *imm)
 {
     ub_flow_control_t *fc = queue->flow_control;
