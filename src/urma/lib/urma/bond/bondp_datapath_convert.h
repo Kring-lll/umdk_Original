@@ -74,7 +74,8 @@ uint32_t bondp_user_tseg_total_len(const urma_user_tseg_t *ut);
 
 /* Validate and return the bonding extension of @ut, NULL on any violation
  * (has_user_info not set, bad lengths/version/peer_cnt, peer_idx out of
- * range or duplicated). */
+ * range). peer_idx duplication is checked only at clone time (outside the
+ * send lock) to keep the O(peer_cnt^2) scan off the locked check/map path. */
 const urma_bond_user_tseg_ext_v0_t *bondp_user_tseg_get_ext(const urma_user_tseg_t *ut);
 
 /* Find the token_id of peer peer_idx == target_idx; 0 on success, -1 if not found. */
