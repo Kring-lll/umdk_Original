@@ -352,6 +352,7 @@ func (m *GlobalSchedulerManager) initErrScheduler(errCfg *base.ErrSchedulerConfi
 		TfidfCentroidsPath: errCfg.TfidfCentroidsPath,
 		SessionTimeoutSec:  errCfg.SessionTimeoutSec,
 		TaskIdleTimeoutSec: errCfg.TaskIdleTimeoutSec,
+		QueueBoostSec:      errCfg.QueueBoostSec,
 	}
 
 	m.errScheduler = NewErrSchedulerManager(internalCfg)

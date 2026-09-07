@@ -53,6 +53,10 @@ type GetSuggestionIn struct {
 	Body map[string]interface{}
 	// SessionID for ERR scheduling (extracted from agent_hint.session_id)
 	SessionID string
+	// UserPrompt carries user-role message text (system prompts excluded)
+	// for ERR/CatERR classification, so TF-IDF is not dominated by large
+	// system prompts. Empty falls back to the full Prompt.
+	UserPrompt string
 	// Advisory marks query-only requests whose forwarding is done by the
 	// caller (get-suggestion endpoint, SDK select_nodes). aigw never observes
 	// their completion, so ERR neither queues them nor takes in-flight slots.
@@ -381,6 +385,7 @@ func (manager *AigwManager) scheduleRequest(m *gs.GlobalSchedulerManager, in *Ge
 		return nil, e1
 	}
 	req.SessionID = in.SessionID
+	req.UserPrompt = in.UserPrompt
 	// do tokenization and execute lightGBM prediction
 	if err := m.PreprocessForSchedule(req); err != nil {
 		return nil, err

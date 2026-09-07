@@ -155,6 +155,7 @@ type ErrSchedulerConfig struct {
 	TfidfCentroidsPath string `json:"tfidfCentroidsPath"` // path to K-means centroids JSON (CatERR)
 	SessionTimeoutSec  int    `json:"sessionTimeoutSec"`  // session idle timeout after tool_calls/other, seconds (default: 660)
 	TaskIdleTimeoutSec int    `json:"taskIdleTimeoutSec"` // session idle timeout after stop, seconds (default: 60)
+	QueueBoostSec      int    `json:"queueBoostSec"`      // starvation floor: force queued requests to top priority after this many seconds (default: 240; 0 = default; negative = disabled)
 }
 
 // GlobalSchedulerConfig struct contains configuration for a global scheduler

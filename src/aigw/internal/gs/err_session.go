@@ -131,6 +131,28 @@ func (t *SessionTracker) GetIteration(sessionID string) int {
 	return 0
 }
 
+// RollbackRequest reverts one OnRequest increment after a queued request
+// timed out before dispatch: the failed attempt must not count as a step.
+// The session survives so the retry re-enters at the same k with its earned
+// priority. Arms the long idle timer so a session whose client gave up
+// entirely is still cleaned up.
+func (t *SessionTracker) RollbackRequest(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s, ok := t.sessions[sessionID]
+	if !ok {
+		return
+	}
+	if s.Iteration > 1 {
+		s.Iteration--
+	}
+	s.LastActiveTime = time.Now()
+	t.armIdleTimer(s, t.sessionTimeout, true)
+}
+
 // OnFinish returns the total step count and arms the short idle timer.
 func (t *SessionTracker) OnFinish(sessionID string) int {
 	if sessionID == "" {

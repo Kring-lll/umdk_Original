@@ -81,6 +81,7 @@
       "errScheduler": {
         "errSchedulerType": "none/mej/err/caterr/fifo",
         "queueSize": 100,
+        "queueBoostSec": 240,
         "warmupSessions": 100,
         "warmupPerCat": 10,
         "windowSize": 5000,

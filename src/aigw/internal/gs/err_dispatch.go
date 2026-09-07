@@ -51,7 +51,7 @@ func (m *GlobalSchedulerManager) dispatchErr(msg *ControlMessage) {
 	curStep := 0
 	cat := ""
 	if m.errScheduler != nil {
-		curStep = m.errScheduler.OnRequest(sessionID, m.config.model, req.Request.Prompt)
+		curStep = m.errScheduler.OnRequest(sessionID, m.config.model, classifyPrompt(req))
 		cat = m.errScheduler.SessionCategory(sessionID)
 	}
 
@@ -72,9 +72,23 @@ func (m *GlobalSchedulerManager) dispatchErr(msg *ControlMessage) {
 	if m.pendingQueue != nil {
 		m.dispatchWithQueue(msg, curStep)
 	} else {
-		priority := m.computePrioritySingle(sessionID, curStep, req.Request.Prompt)
+		priority := m.computePrioritySingle(sessionID, curStep, classifyPrompt(req))
 		m.dispatchDirect(msg, priority)
 	}
+}
+
+// classifyPrompt returns the text used for ERR/CatERR classification and
+// priority computation: the user-role content when the client supplied it
+// (avoids large system prompts dominating the TF-IDF vector), else the full
+// concatenated prompt (legacy behavior).
+func classifyPrompt(req *ScheduleRequestMsg) string {
+	if req != nil && req.Request != nil {
+		if req.Request.UserPrompt != "" {
+			return req.Request.UserPrompt
+		}
+		return req.Request.Prompt
+	}
+	return ""
 }
 
 func (m *GlobalSchedulerManager) computePrioritySingle(sessionID string, curStep int, prompt string) int {
@@ -138,15 +152,28 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 			return
 		}
 
+		boostDur := time.Duration(m.errScheduler.config.QueueBoostSec) * time.Second
 		pr := m.pendingQueue.Peek(func(r *PendingRequest) int {
 			req := r.Msg.Request.(*ScheduleRequestMsg)
+			var p int
 			if r.SessionID == "" {
-				return int(m.errScheduler.AnonymousPriorityWith(snap, req.Request.Prompt))
+				p = int(m.errScheduler.AnonymousPriorityWith(snap, classifyPrompt(req)))
+			} else {
+				p = int(m.errScheduler.PriorityWith(snap, r.SessionID, r.CurStep, classifyPrompt(req)))
 			}
-			return int(m.errScheduler.PriorityWith(snap, r.SessionID, r.CurStep, req.Request.Prompt))
+			// Starvation floor: past the boost threshold the request outranks
+			// everything; within the 0 tier EnqueueTime (oldest first) orders.
+			if boostDur > 0 && time.Since(r.EnqueueTime) >= boostDur {
+				p = 0
+			}
+			return p
 		})
 		if pr == nil {
 			return
+		}
+		if boostDur > 0 && time.Since(pr.EnqueueTime) >= boostDur {
+			log.Warn().Msgf("[ERR] session %s queue-boosted to top priority after waiting %v (threshold %v)",
+				pr.SessionID, time.Since(pr.EnqueueTime).Round(time.Second), boostDur)
 		}
 
 		req, ok := pr.Msg.Request.(*ScheduleRequestMsg)
@@ -173,7 +200,7 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 		}
 
 		m.pendingQueue.Remove(pr.ReqID)
-		priority := m.computePriorityWithSnapshot(snap, pr.SessionID, pr.CurStep, req.Request.Prompt)
+		priority := m.computePriorityWithSnapshot(snap, pr.SessionID, pr.CurStep, classifyPrompt(req))
 		m.dispatchScheduled(pr.Msg, req, result, priority, false)
 	}
 }
@@ -193,7 +220,7 @@ func (m *GlobalSchedulerManager) computePriorityWithSnapshot(snap *algoSnapshot,
 // Caller must hold m.dispatchMu.
 func (m *GlobalSchedulerManager) dispatchAdvisory(msg *ControlMessage) {
 	req := msg.Request.(*ScheduleRequestMsg)
-	priority := int(m.errScheduler.AnonymousPriority(req.Request.Prompt))
+	priority := int(m.errScheduler.AnonymousPriority(classifyPrompt(req)))
 	m.dispatchScheduled(msg, req, m.scheduler.schedule(req, nil), priority, true)
 }
 
@@ -268,6 +295,7 @@ func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *Sch
 		result.PrefillUrl, inFlight, totalSlots, queueSize)
 
 	req.Request.Prompt = ""
+	req.Request.UserPrompt = ""
 	req.Request.PromptToken = nil
 
 	msg.Response <- &SuggestionResultMsg{
@@ -396,11 +424,37 @@ func (m *GlobalSchedulerManager) ErrOnCancel(sessionID, reqID, prefillURL, decod
 	_, released := m.errReleaseReq(reqID)
 	if prefillURL == "" || released {
 		log.Warn().Msgf("[ERR] session %s connection closed (insURL=%s)", sessionID, prefillURL)
-		m.errScheduler.OnCancel(sessionID)
+
+		var removed []*PendingRequest
 		if m.pendingQueue != nil {
-			for _, pr := range m.pendingQueue.RemoveBySession(sessionID) {
+			removed = m.pendingQueue.RemoveBySession(sessionID)
+			for _, pr := range removed {
 				pr.Msg.Response <- ErrNoInstance
 			}
+		}
+
+		if prefillURL == "" {
+			// Never dispatched. If this request was queued it hit the
+			// client's wait budget: the attempt completed no step, so roll
+			// back k and keep the session — the retry re-enters at the same
+			// k with its earned priority instead of restarting at k=1.
+			queued := false
+			for _, pr := range removed {
+				if pr.ReqID == reqID {
+					queued = true
+					break
+				}
+			}
+			if queued {
+				m.errScheduler.OnQueueTimeout(sessionID)
+			} else {
+				// rejected before queueing (validation / fast-fail): the
+				// session keeps its progress, but arm the idle timer so an
+				// abandoned session is still cleaned up
+				m.errScheduler.RestartIdleTimer(sessionID)
+			}
+		} else {
+			m.errScheduler.OnCancel(sessionID)
 		}
 	}
 	m.tryDispatchFromQueue()

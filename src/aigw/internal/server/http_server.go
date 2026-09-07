@@ -316,6 +316,50 @@ func processMessages(messages []base.OpenAiMessage) string {
 	return prompt
 }
 
+// extractUserText returns the concatenated user-role message contents,
+// skipping framework-injected <system-reminder> wrappers. It feeds ERR/CatERR
+// classification so the TF-IDF vector reflects the user's task text instead of
+// being dominated by large agent system prompts.
+func extractUserText(messages []base.OpenAiMessage) string {
+	userText := ""
+	for _, m := range messages {
+		if m.Role != "user" {
+			continue
+		}
+		c := strings.TrimSpace(m.Content)
+		if c == "" || strings.HasPrefix(c, "<system-reminder") {
+			continue
+		}
+		userText += unwrapContentField(c) + " "
+	}
+	return userText
+}
+
+// unwrapContentField extracts the inner "content" string when the user message
+// embeds a JSON envelope (e.g. jiuwenswarm's channel format
+// `你收到一条消息：{"source":"tui",...,"content":"<task>",...}`). The envelope's
+// metadata fields (source/files/trusted_dirs/...) are classification noise that
+// can flip the category. Falls back to the raw text when no parseable JSON
+// object with a string "content" field is present.
+func unwrapContentField(s string) string {
+	i := strings.Index(s, "{")
+	if i < 0 {
+		return s
+	}
+	j := strings.LastIndex(s, "}")
+	if j <= i {
+		return s
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(s[i:j+1]), &obj); err != nil {
+		return s
+	}
+	if c, ok := obj["content"].(string); ok && strings.TrimSpace(c) != "" {
+		return c
+	}
+	return s
+}
+
 // extractHeaders extracts HTTP headers relevant to consistent hash routing
 // from the request into a map[string]string. Only session-affinity related
 // headers are extracted to avoid passing unnecessary data.
@@ -380,12 +424,13 @@ func (s *HttpServer) scheduleForOpenAi(w http.ResponseWriter, r *http.Request) {
 	}
 
 	in := &core.GetSuggestionIn{
-		UUID:     req.UUID,
-		Model:    req.Model,
-		Prompt:   prompt,
-		Ctx:      r.Context(),
-		Headers:  extractHeaders(r),
-		Advisory: true,
+		UUID:       req.UUID,
+		Model:      req.Model,
+		Prompt:     prompt,
+		UserPrompt: extractUserText(req.Messages),
+		Ctx:        r.Context(),
+		Headers:    extractHeaders(r),
+		Advisory:   true,
 	}
 
 	out, err := s.manager.GetSuggestion(in)
@@ -488,19 +533,26 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		prompt += m.Role + ":" + m.Content + " "
 	}
 
+	// User-role text for ERR/CatERR classification (system prompts excluded).
+	userMsgs := make([]base.OpenAiMessage, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		userMsgs = append(userMsgs, base.OpenAiMessage{Role: m.Role, Content: m.Content})
+	}
+
 	var bodyMap map[string]interface{}
 	json.Unmarshal(body, &bodyMap)
 
 	sessionID := gs.ExtractSessionID(bodyMap)
 
 	in := &core.GetSuggestionIn{
-		UUID:      fmt.Sprintf("req-%d", time.Now().UnixNano()),
-		Model:     model,
-		Prompt:    prompt,
-		Ctx:       r.Context(),
-		Headers:   extractHeaders(r),
-		Body:      bodyMap,
-		SessionID: sessionID,
+		UUID:       fmt.Sprintf("req-%d", time.Now().UnixNano()),
+		Model:      model,
+		Prompt:     prompt,
+		UserPrompt: extractUserText(userMsgs),
+		Ctx:        r.Context(),
+		Headers:    extractHeaders(r),
+		Body:       bodyMap,
+		SessionID:  sessionID,
 	}
 
 	suggestion, err := s.manager.GetSuggestion(in)

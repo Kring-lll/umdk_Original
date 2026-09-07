@@ -28,6 +28,7 @@ type ErrSchedulerConfig struct {
 	TfidfCentroidsPath string
 	SessionTimeoutSec  int
 	TaskIdleTimeoutSec int
+	QueueBoostSec      int
 }
 
 // algoSnapshot holds immutable dist snapshots for one Pick iteration.
@@ -61,9 +62,17 @@ func catDistKeys(m map[string]map[int]int) []string {
 	return keys
 }
 
+// defaultQueueBoostSec is the starvation floor: a request queued longer than
+// this is forced to top (0) priority so sustained overload cannot starve it
+// into the client's first-chunk budget. Negative disables the floor.
+const defaultQueueBoostSec = 240
+
 func NewErrSchedulerManager(cfg ErrSchedulerConfig) *ErrSchedulerManager {
 	if cfg.SchedulerType == "" || cfg.SchedulerType == "none" {
 		return nil
+	}
+	if cfg.QueueBoostSec == 0 {
+		cfg.QueueBoostSec = defaultQueueBoostSec
 	}
 
 	isCaterr := cfg.SchedulerType == "caterr"
@@ -335,6 +344,13 @@ func (m *ErrSchedulerManager) OnFinish(sessionID string) int {
 
 	log.Debug().Msgf("[ERR] session=%s finished: steps=%d cat=%s", sessionID, steps, m.sessionTracker.GetCategory(sessionID))
 	return steps
+}
+
+// OnQueueTimeout handles a queued request that hit the client's wait budget
+// before dispatch: roll back its iteration so the retry re-enters at the
+// same step instead of the session restarting at k=1.
+func (m *ErrSchedulerManager) OnQueueTimeout(sessionID string) {
+	m.sessionTracker.RollbackRequest(sessionID)
 }
 
 func (m *ErrSchedulerManager) OnCancel(sessionID string) {
