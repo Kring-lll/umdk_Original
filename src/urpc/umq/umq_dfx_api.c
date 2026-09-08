@@ -6,6 +6,7 @@
  */
 
 #include "perf.h"
+#include "umq_dfx_api.h"
 #include "umq_errno.h"
 #include "umq_huge_qbuf_pool.h"
 #include "umq_inner.h"
