@@ -225,43 +225,41 @@ public:
         ubOffset += TileShape::ROW * BYTE_PER_BLK;
         ubPerTokenMul = ubCFp32;
 
-        if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
+        AlignUbOffset();
+        epSendCountLocal_ = resource.ubBuf.template GetBufferByByte<int32_t>(ubOffset);
+        ubOffset += calcInfo.moeSendNum_ * sizeof(int32_t);
+        AlignUbOffset();
+        AscendC::GlobalTensor<int32_t> epSendCountGM;
+        epSendCountGM.SetGlobalBuffer((__gm__ int32_t *)calcInfo.epSendCount_);
+        uint32_t epSendCountSize = calcInfo.moeSendNum_;
+        AscendC::DataCopyExtParams epSendCntParams = {1U, static_cast<uint32_t>(epSendCountSize * sizeof(uint32_t)),
+                                                      0U, 0U, 0U};
+        AscendC::DataCopyPadExtParams<int32_t> copyPadParams{false, 0U, 0U, 0U};
+        AscendC::DataCopyPad(epSendCountLocal_, epSendCountGM, epSendCntParams, copyPadParams);
+        AscendC::SetFlag<AscendC::HardEvent::MTE2_S>(eventMTE2S);
+        AscendC::WaitFlag<AscendC::HardEvent::MTE2_S>(eventMTE2S);
+
+        if constexpr (EXEC_FLAG & EXEC_FLAG_ZERO_BUFFER) {
             AlignUbOffset();
-            epSendCountLocal_ = resource.ubBuf.template GetBufferByByte<int32_t>(ubOffset);
-            ubOffset += calcInfo.moeSendNum_ * sizeof(int32_t);
+            ShmemCalRecv(ubOffset, calcInfo.allEpRecvCount_, calcInfo.allExpertTokenNums_);
+
             AlignUbOffset();
-            AscendC::GlobalTensor<int32_t> epSendCountGM;
-            epSendCountGM.SetGlobalBuffer((__gm__ int32_t *)calcInfo.epSendCount_);
-            uint32_t epSendCountSize = calcInfo.moeSendNum_;
-            AscendC::DataCopyExtParams epSendCntParams = {1U, static_cast<uint32_t>(epSendCountSize * sizeof(uint32_t)),
-                                                          0U, 0U, 0U};
-            AscendC::DataCopyPadExtParams<int32_t> copyPadParams{false, 0U, 0U, 0U};
-            AscendC::DataCopyPad(epSendCountLocal_, epSendCountGM, epSendCntParams, copyPadParams);
+            allEpRecvCountLocal_ = resource.ubBuf.template GetBufferByByte<int32_t>(ubOffset);
+            ubOffset += calcInfo.epWorldSize_ * calcInfo.moeExpertNum_ *sizeof(uint32_t);
+            AlignUbOffset();
+            AscendC::GlobalTensor<int32_t> allEpRecvCountGM;
+            allEpRecvCountGM.SetGlobalBuffer((__gm__ int32_t *)calcInfo.allEpRecvCount_);
+            uint32_t allEpRecvCountSize = calcInfo.epWorldSize_ * calcInfo.moeExpertNum_;
+            AscendC::DataCopyExtParams allEpRecvCountParams = {
+                1U,
+                static_cast<uint32_t>(allEpRecvCountSize * sizeof(uint32_t)),
+                0U,
+                0U,
+                0U
+            };
+            AscendC::DataCopyPad(allEpRecvCountLocal_, allEpRecvCountGM, allEpRecvCountParams, copyPadParams);
             AscendC::SetFlag<AscendC::HardEvent::MTE2_S>(eventMTE2S);
             AscendC::WaitFlag<AscendC::HardEvent::MTE2_S>(eventMTE2S);
-
-            if constexpr (EXEC_FLAG & EXEC_FLAG_ZERO_BUFFER) {
-                AlignUbOffset();
-                ShmemCalRecv(ubOffset, calcInfo.allEpRecvCount_, calcInfo.allExpertTokenNums_);
-
-                AlignUbOffset();
-                allEpRecvCountLocal_ = resource.ubBuf.template GetBufferByByte<int32_t>(ubOffset);
-                ubOffset += calcInfo.epWorldSize_ * calcInfo.moeExpertNum_ *sizeof(uint32_t);
-                AlignUbOffset();
-                AscendC::GlobalTensor<int32_t> allEpRecvCountGM;
-                allEpRecvCountGM.SetGlobalBuffer((__gm__ int32_t *)calcInfo.allEpRecvCount_);
-                uint32_t allEpRecvCountSize = calcInfo.epWorldSize_ * calcInfo.moeExpertNum_;
-                AscendC::DataCopyExtParams allEpRecvCountParams = {
-                    1U,
-                    static_cast<uint32_t>(allEpRecvCountSize * sizeof(uint32_t)),
-                    0U,
-                    0U,
-                    0U
-                };
-                AscendC::DataCopyPad(allEpRecvCountLocal_, allEpRecvCountGM, allEpRecvCountParams, copyPadParams);
-                AscendC::SetFlag<AscendC::HardEvent::MTE2_S>(eventMTE2S);
-                AscendC::WaitFlag<AscendC::HardEvent::MTE2_S>(eventMTE2S);
-            }
         }
     }
 
@@ -386,9 +384,7 @@ public:
             return;
         }
 
-        if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
-            expertOffset = expertIdx * calcInfo.epWorldSize_;
-        }
+        expertOffset = expertIdx * calcInfo.epWorldSize_;
 
         // W4A8 constants
         constexpr float DEFAULT_MUL_SCALE = 16.0f;
@@ -611,24 +607,22 @@ public:
 
             AscendC::WaitFlag<AscendC::HardEvent::V_MTE3>(eventUbDVMTE3List[ubListId]);
 
-            if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
-                if (expertIdx == UINT32_MAX) {
-                    auto gmTileD = gmD[tileOffsetD];
-                    copyUbToGmD(gmTileD, ubD,
-                        (EXEC_FLAG & EXEC_FLAG_W4A8) ? newlayoutGmTileD : layoutGmTileD,
-                        (EXEC_FLAG & EXEC_FLAG_W4A8) ? newlayoutUbD : layoutUbD);
-                } else if constexpr (EXEC_FLAG & EXEC_FLAG_ZERO_BUFFER) {
-                    ShmemDoCombineSend(ubD,
-                        (EXEC_FLAG & EXEC_FLAG_W4A8) ? newlayoutGmTileD : layoutGmTileD,
-                        (EXEC_FLAG & EXEC_FLAG_W4A8) ? newlayoutUbD : layoutUbD,
-                        groupOffsetD, expertIdx, tileOffsetD,
-                        calcInfo.combineSend_);
-                } else {
-                    DoCombineSend(ubD,
-                        (EXEC_FLAG & EXEC_FLAG_W4A8) ? newlayoutGmTileD : layoutGmTileD,
-                        (EXEC_FLAG & EXEC_FLAG_W4A8) ? newlayoutUbD : layoutUbD,
-                        groupOffsetD, expertIdx, tileOffsetD);
-                }
+            if (expertIdx == UINT32_MAX) {
+                auto gmTileD = gmD[tileOffsetD];
+                copyUbToGmD(gmTileD, ubD,
+                    (EXEC_FLAG & EXEC_FLAG_W4A8) ? newlayoutGmTileD : layoutGmTileD,
+                    (EXEC_FLAG & EXEC_FLAG_W4A8) ? newlayoutUbD : layoutUbD);
+            } else if constexpr (EXEC_FLAG & EXEC_FLAG_ZERO_BUFFER) {
+                ShmemDoCombineSend(ubD,
+                    (EXEC_FLAG & EXEC_FLAG_W4A8) ? newlayoutGmTileD : layoutGmTileD,
+                    (EXEC_FLAG & EXEC_FLAG_W4A8) ? newlayoutUbD : layoutUbD,
+                    groupOffsetD, expertIdx, tileOffsetD,
+                    calcInfo.combineSend_);
+            } else {
+                DoCombineSend(ubD,
+                    (EXEC_FLAG & EXEC_FLAG_W4A8) ? newlayoutGmTileD : layoutGmTileD,
+                    (EXEC_FLAG & EXEC_FLAG_W4A8) ? newlayoutUbD : layoutUbD,
+                    groupOffsetD, expertIdx, tileOffsetD);
             }
 
             AscendC::SetFlag<AscendC::HardEvent::MTE3_V>(eventUbDMTE3VList[ubListId]);

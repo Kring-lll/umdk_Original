@@ -603,7 +603,7 @@ public:
                 combiner->TPipeSet(nullptr);
                 resource.pipe.Destroy();
             }
-        } else if constexpr (EXEC_FLAG & EXEC_FLAG_DEEP_FUSE) {
+        } else {
             // Restore the pre-combine receive event issued by the original non-round GMM2 path.
             if (AscendC::GetSubBlockIdx() == 0) {
                 AscendC::CrossCoreSetFlag<0x0, PIPE_MTE3>(MoeDistributeCombineImpl::RECV_SYNC_EVENT_ID);
