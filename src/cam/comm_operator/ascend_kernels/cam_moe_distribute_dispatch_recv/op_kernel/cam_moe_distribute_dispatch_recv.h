@@ -15,6 +15,7 @@
 #include "kernel_tiling/kernel_tiling.h"
 #include "cam_moe_distribute_dispatch_recv_tiling.h"
 #include "comm_args.h"
+#include "comm_group.h"
 
 namespace MoeDistributeDispatchImpl {
 constexpr uint64_t CAM_MAX_RANK_SIZE = 384;  // max NPUs supported by the Cam comm library
@@ -63,7 +64,12 @@ private:
 
     __aicore__ inline GM_ADDR GetPeerAddrByRankId(const int32_t rankId)
     {
-        return (GM_ADDR)peerMemsAddrGMTensor_.GetValue(rankId);
+        // Match the HCCL windowsIn path in the AFD-bundled CAM package.
+        if (rankId == moeRankId_) {
+            return (GM_ADDR)epWinContext_->localWindowsIn;
+        }
+        return (GM_ADDR)((HcclRankRelationResV2 *)
+            epWinContext_->remoteRes[rankId].nextDevicePtr)->windowsIn;
     }
 
     __aicore__ inline void DispatchRecv();
@@ -101,7 +107,7 @@ private:
     GlobalTensor<int64_t> epRecvCountRoutedGMTensor_;
     GlobalTensor<int64_t> epRecvCountSharedGMTensor_;
     GlobalTensor<int64_t> batchInfoGMTensor_;
-    GlobalTensor<GM_ADDR> peerMemsAddrGMTensor_;
+    __gm__ HcclOpResParam *epWinContext_{nullptr};
 
     uint64_t ubReuseSize_{0};
 
@@ -171,7 +177,8 @@ __aicore__ inline void CamMoeDistributeDispatchRecv<TemplateMC2TypeFunc>::Init(
     epRecvCountRoutedGMTensor_.SetGlobalBuffer((__gm__ int64_t *)epRecvCountRoutedOut);
     epRecvCountSharedGMTensor_.SetGlobalBuffer((__gm__ int64_t *)epRecvCountSharedOut);
     batchInfoGMTensor_.SetGlobalBuffer((__gm__ int64_t *)batchInfoOut);
-    peerMemsAddrGMTensor_.SetGlobalBuffer(&((__gm__ Moe::CommArgs *)commArgs)->peerMems[0], CAM_MAX_RANK_SIZE);
+    // commArgs is an ABI placeholder; MC2 initializes the HCCL resource context.
+    epWinContext_ = (__gm__ HcclOpResParam *)AscendC::GetHcclContext<HCCL_GROUP_ID_0>();
 
     tpipe_ = pipe;
     tpipe_->Reset();
