@@ -1584,7 +1584,11 @@ int umq_ub_poll_rx(uint64_t umqh, umq_buf_t **buf, uint32_t buf_count, umq_io_op
         umq_ub_ack_import_tseg(queue);
     }
 
-    max_batch -= qbuf_cnt;
+    if (qbuf_cnt >= max_batch) {
+        max_batch = 0;
+    } else {
+        max_batch -= qbuf_cnt;
+    }
     urma_cr_t cr[max_batch];
     if (max_batch == 0 || is_umq_ub_share_rq(queue->create_flag)) {
         umq_trace_end_record(UMQ_TRACE_TYPE_POLL, umq_trace_timestamp_get());
