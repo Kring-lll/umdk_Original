@@ -241,27 +241,24 @@ static void *qbuf_dfx_print_callback(void *arg)
     if (pthread_setname_np(pthread_self(), QBUF_DFX_PTHREAD_NAME) != 0) {
         UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "set thread name %s failed, errno %d\n", QBUF_DFX_PTHREAD_NAME, errno);
     }
+    char *pool_buf = (char *)malloc(QBUF_DFX_BUF_SIZE);
+    if (pool_buf == NULL) {
+        UMQ_LIMIT_VLOG_WARN(VLOG_UMQ, "malloc pool_buf failed");
+        return NULL;
+    }
     while (g_dfx_print_running) {
         usleep(g_dfx_print_interval_ms * QBUF_MS_PER_SEC);
         if (!g_dfx_print_running || !g_qbuf_pool.inited) {
             break;
         }
-        umq_qbuf_pool_stats_t pool_stats;
-        memset(&pool_stats, 0, sizeof(pool_stats));
-        umq_qbuf_pool_info_get(&pool_stats);
-        umq_tiny_qbuf_pool_info_get(&pool_stats);
-        umq_huge_qbuf_pool_info_get(&pool_stats);
         char *pool_buf = (char *)malloc(QBUF_DFX_BUF_SIZE);
-        if (pool_buf == NULL) {
-            continue;
-        }
-        int ret = umq_qbuf_pool_stats_to_str(&pool_stats, pool_buf, QBUF_DFX_BUF_SIZE);
+        int ret = qbuf_pool_stats_dump(pool_buf, QBUF_DFX_BUF_SIZE);
         if (ret > 0) {
             fprintf(stdout, "\n[UMQ DFX] qbuf pool periodic report:\n%s\n", pool_buf);
             fflush(stdout);
         }
-        free(pool_buf);
     }
+    free(pool_buf);
     return NULL;
 }
 
@@ -284,21 +281,34 @@ static void qbuf_dfx_print_thread_start(void)
     }
 }
 
+static int qbuf_pool_stats_dump(char *pool_buf, uint32_t size)
+{
+    umq_qbuf_pool_stats_t *pool_stats = (umq_qbuf_pool_stats_t *)malloc(sizeof(umq_qbuf_pool_stats_t));
+    if (pool_stats == NULL) {
+        return 0;
+    }
+    memset(pool_stats, 0, sizeof(*pool_stats));
+    umq_qbuf_pool_info_get(pool_stats);
+    umq_tiny_qbuf_pool_info_get(pool_stats);
+    umq_huge_qbuf_pool_info_get(pool_stats);
+
+    int ret = umq_qbuf_pool_stats_to_str(pool_stats, pool_buf, (int)size);
+    free(pool_stats);
+    return ret;
+}
+
 static void qbuf_dfx_print_once(void)
 {
     if (!g_qbuf_pool.inited) {
         return;
     }
-    umq_qbuf_pool_stats_t pool_stats;
-    memset(&pool_stats, 0, sizeof(pool_stats));
-    umq_qbuf_pool_info_get(&pool_stats);
-    umq_tiny_qbuf_pool_info_get(&pool_stats);
-    umq_huge_qbuf_pool_info_get(&pool_stats);
+
     char *pool_buf = (char *)malloc(QBUF_DFX_BUF_SIZE);
     if (pool_buf == NULL) {
         return;
     }
-    int ret = umq_qbuf_pool_stats_to_str(&pool_stats, pool_buf, QBUF_DFX_BUF_SIZE);
+
+    int ret = qbuf_pool_stats_dump(pool_buf, QBUF_DFX_BUF_SIZE);
     if (ret > 0) {
         fprintf(stdout, "\n[UMQ DFX] qbuf pool final report:\n%s\n", pool_buf);
         fflush(stdout);
