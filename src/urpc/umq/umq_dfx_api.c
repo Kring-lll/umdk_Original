@@ -5,6 +5,7 @@
  * Create: 2026-2-4
  */
 
+#include "umq_dfx_api.h"
 #include "perf.h"
 #include "umq_errno.h"
 #include "umq_huge_qbuf_pool.h"
