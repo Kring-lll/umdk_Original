@@ -3338,14 +3338,6 @@ public:
             return;
         }
 
-        // Restore the paired AIV indexing used by the original shared epilogue and quantization path.
-        isRecvCore = ((aivIdx % ODD_EVEN_BASE) == 0);
-        isSendCore = ((aivIdx % ODD_EVEN_BASE) == 1);
-        recvCoreIdx = aivIdx / subBlockNum;
-        sendCoreIdx = aivIdx / subBlockNum;
-        sendCoreNum = aiCoreGroupNum;
-        recvCoreNum = aiCoreGroupNum;
-
         auto gmShareSwigluOutput = reinterpret_cast<__gm__ float *>(params.gmShareSwigluOut);
 
         BlockScheduler blockScheduler;
@@ -3402,7 +3394,7 @@ public:
         MatrixCoord quantShape(totalTokenCount, nOut);
         MatrixCoord quantBlockShape((uint16_t)(subBlockNum * quantRowOnce), nOut);
         startLoopIdx =
-            ((sendCoreIdx < startCoreIdx) ? (sendCoreIdx + aiCoreGroupNum) : sendCoreIdx) - startCoreIdx;
+            ((compCoreIdx < startCoreIdx) ? (compCoreIdx + aiCoreGroupNum) : compCoreIdx) - startCoreIdx;
         if constexpr (EXEC_FLAG & EXEC_FLAG_W4A8) {
             BlockQuantW4A8<ArchTag> blockQuant(resource, quantParams);
             coreLoops = RunQuantTiles(blockQuant, quantShape, quantBlockShape, startLoopIdx, aiCoreGroupNum);

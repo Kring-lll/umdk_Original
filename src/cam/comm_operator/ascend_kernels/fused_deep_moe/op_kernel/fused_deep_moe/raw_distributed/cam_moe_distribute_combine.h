@@ -340,11 +340,7 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     activeMaskBsCnt_ = axisBS_;
     axisH_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.h;
     axisK_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.k;
-    if constexpr (EXEC_FLAG & (EXEC_FLAG_DEEP_FUSE | EXEC_FLAG_SHARED_EXPERT)) {
-        aivNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.aicNum;
-    } else {
-        aivNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.aivNum;
-    }
+    aivNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.aicNum;
     ubSize_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.totalUbSize;
     moeExpertNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNum;
     moeExpertPerRankNum_ = tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.moeExpertNumPerRank;
@@ -385,9 +381,7 @@ __aicore__ inline void CamMoeDistributeCombine<TemplateMC2TypeFunc>::Init(
     }
 
     InitStatusTargetSum();
-    if constexpr (EXEC_FLAG & (EXEC_FLAG_DEEP_FUSE | EXEC_FLAG_SHARED_EXPERT)) {
-        coreIdx_ = AscendC::GetBlockIdx() / AscendC::GetSubBlockNum(); // AscendC::GetBlockIdx() / 2;
-    }
+    coreIdx_ = AscendC::GetBlockIdx() / AscendC::GetSubBlockNum();
     SplitCoreCal();
 
     calcInfo_.epRankId_ = epRankId_;
