@@ -3487,14 +3487,13 @@ int umq_qbuf_headroom_reset(umq_buf_t *qbuf, uint16_t headroom_size)
         UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "qbuf pool has not been inited\n");
         return -UMQ_ERR_ENOMEM;
     }
+    if (qbuf->buf_size <= (uint32_t)sizeof(umq_buf_t)) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "umq_qbuf_headroom_reset: buf_size=%u underflow (<= %zu)\n",
+            qbuf->buf_size, sizeof(umq_buf_t));
+        return -UMQ_ERR_EINVAL;
+    }
     uint32_t block_size;
     if (g_qbuf_pool.mode == UMQ_BUF_SPLIT) {
-        if (qbuf->buf_size < (uint32_t)sizeof(umq_buf_t)) {
-            UMQ_LIMIT_VLOG_ERR(VLOG_UMQ,
-                "umq_qbuf_headroom_reset: buf_size=%u underflow (< %zu)\n",
-                qbuf->buf_size, sizeof(umq_buf_t));
-            return -UMQ_ERR_EINVAL;
-        }
         block_size = qbuf->buf_size - (uint32_t)sizeof(umq_buf_t);
     } else {
         block_size = qbuf->buf_size;
@@ -3537,10 +3536,16 @@ static ALWAYS_INLINE umq_buf_t *umq_qbuf_data_to_head_escape(void *data)
     if (g_qbuf_pool.mode == UMQ_BUF_SPLIT) {
         uint64_t buffer_head = (uint64_t)(uintptr_t)data & (~(QBUF_MEMALIGN_SIZE - 1));
         uint64_t id = ((uint64_t)(uintptr_t)data - buffer_head) / blk_size;
+        if (id >= found_pool->sub_slot_blk_count) {
+            return NULL;
+        }
         return (umq_buf_t *)(uintptr_t)(buffer_head + found_pool->sub_slot_data_buf_size + id * sizeof(umq_buf_t));
     }
     uint64_t buffer_head = (uint64_t)(uintptr_t)data & (~(QBUF_MEMALIGN_SIZE - 1));
     uint64_t id = ((uint64_t)(uintptr_t)data - buffer_head) / blk_size;
+    if (id >= found_pool->sub_slot_blk_count) {
+        return NULL;
+    }
     return (umq_buf_t *)(uintptr_t)(buffer_head + id * blk_size);
 }
 umq_buf_t *umq_qbuf_data_to_head(void *data)
