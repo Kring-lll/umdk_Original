@@ -890,8 +890,6 @@ static ge::graphStatus FusedDeepMoeTilingFuncImpl(gert::TilingContext &context)
     if (calShareExpert) {
         tilingKey |= EXEC_FLAG_SHARED_EXPERT;
     }
-    // 只支持深融合：即使 localExpertNum == 1 也走深融合流程
-    tilingKey |= EXEC_FLAG_DEEP_FUSE;
     if (tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.isTensorList) {
         tilingKey |= EXEC_FLAG_TENSOR_LIST;
     }
