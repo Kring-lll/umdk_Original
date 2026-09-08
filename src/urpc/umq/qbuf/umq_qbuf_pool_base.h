@@ -405,11 +405,12 @@ int expand_global_pool(bool with_data, uint32_t sc, uint64_t g_buf_cnt);
 #ifdef UMQ_QBUF_DEBUG
 // 线程局部标志: 当fetch_from_global走expansion pool或mmap扩容时置true
 // 用于umq_normal_qbuf_alloc区分_lc=1(fetch_global) vs _lc=2(fetch_expansion)
-extern __thread bool g_dbg_expansion_happened;
-extern int g_qbuf_debug_enabled;
+bool umq_qbuf_dbg_expansion_happened_get(void);
+void umq_qbuf_dbg_expansion_happened_set(void);
+int* umq_qbuf_debug_enabled_get(void);
 static inline bool qbuf_debug_on(void)
 {
-    return __builtin_expect(__atomic_load_n(&g_qbuf_debug_enabled, __ATOMIC_RELAXED), 0) != 0;
+    return __builtin_expect(__atomic_load_n(umq_qbuf_debug_enabled_get(), __ATOMIC_RELAXED), 0) != 0;
 }
 #endif
 void async_expand_global_pool(bool with_data, uint32_t sc, uint64_t g_buf_cnt);
@@ -526,7 +527,9 @@ static ALWAYS_INLINE int32_t fetch_from_global(global_block_pool_t *global_pool,
 #ifdef UMQ_QBUF_DEBUG
         // 统计expansion pool路径: 从预分配的expansion slot中取到buf
         // 置flag让alloc层知道此申请走的是expansion而非纯global pool
-        if (qbuf_debug_on() && _exp_cnt > 0) g_dbg_expansion_happened = true;
+        if (qbuf_debug_on() && _exp_cnt > 0) {
+            umq_qbuf_dbg_expansion_happened_set();
+        }
 #endif
     }
     while (count < batch_count) {
@@ -551,7 +554,9 @@ static ALWAYS_INLINE int32_t fetch_from_global(global_block_pool_t *global_pool,
 #ifdef UMQ_QBUF_DEBUG
         // 统计mmap扩容路径: expand_global_pool成功调用了mmap分配新内存
         // 这是最慢的路径(通常>1ms)，置flag让alloc层记录为_lc=2
-        if (qbuf_debug_on()) g_dbg_expansion_happened = true;
+        if (qbuf_debug_on()) {
+            umq_qbuf_dbg_expansion_happened_set();
+        }
 #endif
 
         count += fetch_from_expansion_pools(with_data, sc, batch_count - count, info.local_head, info.local_buf_cnt);
@@ -932,7 +937,7 @@ static ALWAYS_INLINE void umq_qbuf_alloc_data_with_combine(local_block_pool_t *l
     uint32_t headroom_size_temp = param->headroom_size;
     uint32_t total_data_size = request_size;
     uint32_t remaining_size = request_size;
-    uint32_t max_data_size = block_size - sizeof(umq_buf_t);
+    uint32_t max_data_size = block_size - (uint32_t)sizeof(umq_buf_t);
     uint32_t max_data_capacity = max_data_size - headroom_size_temp;
     bool first_fragment = true;
 
@@ -1008,7 +1013,7 @@ static ALWAYS_INLINE uint32_t umq_qbuf_base_actual_buf_count(const qbuf_pool_bas
         return count > UINT32_MAX ? UINT32_MAX : (uint32_t)count;
     }
 
-    uint32_t align_size = base->block_size - sizeof(umq_buf_t);
+    uint32_t align_size = base->block_size - (uint32_t)sizeof(umq_buf_t);
     uint64_t count = (uint64_t)num * ((request_size + headroom_size + align_size - 1) / align_size);
     return count > UINT32_MAX ? UINT32_MAX : (uint32_t)count;
 }

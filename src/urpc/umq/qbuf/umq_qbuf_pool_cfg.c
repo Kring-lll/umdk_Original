@@ -177,7 +177,7 @@ int umq_qbuf_pool_cfg_check(const umq_init_cfg_t *cfg, umq_qbuf_pool_plan_t *pla
         return -UMQ_ERR_EINVAL;
     }
 
-    uint64_t without_data_expand_mem_size = (uint64_t)QBUF_POOL_INITIAL_NODATA_BUF_CNT * sizeof(umq_buf_t);
+    uint64_t without_data_expand_mem_size = (uint64_t)QBUF_POOL_INITIAL_NODATA_BUF_CNT * (uint64_t)sizeof(umq_buf_t);
 
     if (cfg->buf_mode == UMQ_BUF_SPLIT) {
         normal_io_buf_size += without_data_expand_mem_size;

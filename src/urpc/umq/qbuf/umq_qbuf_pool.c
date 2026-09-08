@@ -487,11 +487,12 @@ static const char *qbuf_lc_labels[QBUF_LC_PATHS] = {
 
 static qbuf_debug_stats_t g_dbg_stats = {0};
 static __thread bool g_dfx_in_async_expand = false; // mark current thread is in async expand path
-__thread bool g_dbg_expansion_happened = false; // 线程局部标志: expansion pool/mmap路径标识，fetch前reset，alloc后读取
+// 线程局部标志: expansion pool/mmap路径标识，fetch前reset，alloc后读取
+static __thread bool g_dbg_expansion_happened = false;
 static volatile uint64_t g_dbg_alloc_count = 0;     // total allocs for summary interval
 #define QBUF_DBG_SUMMARY_INTERVAL 10000             // print summary every N allocs
 
-int g_qbuf_debug_enabled = 0;
+static int g_qbuf_debug_enabled = 0;
 // Check if debug mode is on. Guarded by qbuf_debug_on() to skip overhead when off.
 // When UMQ_QBUF_DEBUG is defined, qbuf_debug_on() is provided by umq_qbuf_pool_base.h.
 #ifndef UMQ_QBUF_DEBUG
@@ -499,9 +500,24 @@ static inline bool qbuf_debug_on(void) { return false; }
 #endif
 
 #ifdef UMQ_QBUF_DEBUG
+bool umq_qbuf_dbg_expansion_happened_get(void)
+{
+    return g_dbg_expansion_happened;
+}
+
+void umq_qbuf_dbg_expansion_happened_set(void)
+{
+    g_dbg_expansion_happened = true;
+}
+
+int* umq_qbuf_debug_enabled_get(void)
+{
+    return &g_qbuf_debug_enabled;
+}
+
 __attribute__((noinline, cold)) static void qbuf_dbg_record_alloc_nodata(uint64_t _t0)
 {
-    int _lc = g_dbg_expansion_happened ? 2 : 1;
+    int _lc = umq_qbuf_dbg_expansion_happened_get() ? 2 : 1;
     uint64_t _dt = qbuf_mono_ns() - _t0;
     g_dbg_stats.alloc_ns_total += _dt;
     g_dbg_stats.alloc_count++;
@@ -518,7 +534,7 @@ __attribute__((noinline, cold)) static void qbuf_dbg_record_alloc_nodata(uint64_
 
 __attribute__((noinline, cold)) static void qbuf_dbg_record_alloc_data(uint64_t _t0, uint32_t sc)
 {
-    int _lc = g_dbg_expansion_happened ? 2 : 1;
+    int _lc = umq_qbuf_dbg_expansion_happened_get() ? 2 : 1;
     uint64_t _dt = qbuf_mono_ns() - _t0;
     g_dbg_stats.alloc_ns_total += _dt;
     g_dbg_stats.alloc_count++;
@@ -570,7 +586,7 @@ __attribute__((noinline, cold)) static void qbuf_dbg_record_free(uint64_t _t0)
 // No recompilation needed; safe to call from any thread at any time.
 void umq_qbuf_set_debug(int enable)
 {
-    __atomic_store_n(&g_qbuf_debug_enabled, enable ? 1 : 0, __ATOMIC_RELEASE);
+    __atomic_store_n(umq_qbuf_debug_enabled_get(), enable ? 1 : 0, __ATOMIC_RELEASE);
     umq_get_log_config()->ctx.level = enable ? UTIL_VLOG_LEVEL_DEBUG : UTIL_VLOG_LEVEL_INFO;
     UMQ_VLOG_INFO(VLOG_UMQ, "qbuf debug %s (env UMQ_QBUF_DEBUG=1 to enable at startup)\n",
                   enable ? "ENABLED" : "DISABLED");
@@ -3121,6 +3137,10 @@ int umq_qbuf_escape_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_
     }
     uint32_t need = request_size + headroom_size;
     uint32_t sc = select_size_class(need);
+    if (sc == UMQ_QBUF_SIZE_CLASS_MAX) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "umq alloc size too large, request_size: %u, headroom: %u, need: %u\n", request_size, headroom_size, need);
+        return -UMQ_ERR_EINVAL;
+    }
     return umq_qbuf_alloc_escape(list, sc);
 }
 
