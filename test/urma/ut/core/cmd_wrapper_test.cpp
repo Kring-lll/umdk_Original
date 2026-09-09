@@ -8,6 +8,29 @@
 
 using namespace urma_test_core;
 
+TEST(UrmaCoreTest, CmdDeleteJettyBatchFailurePreservesOwnedReceiveConfig)
+{
+    CmdIoctlFailureFixture fixture;
+    ASSERT_TRUE(fixture.Init());
+    auto *cfg = static_cast<urma_jfr_cfg_t *>(calloc(1, sizeof(urma_jfr_cfg_t)));
+    ASSERT_NE(nullptr, cfg);
+    cfg->depth = 8;
+    fixture.jetty.jetty_cfg.flag.bs.share_jfr = URMA_NO_SHARE_JFR;
+    fixture.jetty.jetty_cfg.jfr_cfg = cfg;
+    urma_jetty_t *jettys[] = {&fixture.jetty};
+    urma_jetty_t *badJetty = nullptr;
+
+    SetCoreIoctlResult(-1, EBUSY);
+    EXPECT_EQ(-1, urma_cmd_delete_jetty_batch(jettys, 1, &badJetty));
+    EXPECT_EQ(&fixture.jetty, badJetty);
+    ASSERT_EQ(cfg, fixture.jetty.jetty_cfg.jfr_cfg);
+    EXPECT_EQ(8U, cfg->depth);
+
+    SetCoreIoctlResult(0, 0);
+    EXPECT_EQ(0, urma_cmd_delete_jetty_batch(jettys, 1, &badJetty));
+    EXPECT_EQ(nullptr, fixture.jetty.jetty_cfg.jfr_cfg);
+}
+
 TEST(UrmaCoreTest, CmdTokenAndSegmentWrappersPropagateIoctlFailure)
 {
     CmdIoctlFailureFixture fixture;

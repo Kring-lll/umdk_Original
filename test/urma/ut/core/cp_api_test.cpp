@@ -8,6 +8,41 @@
 
 using namespace urma_test_core;
 
+TEST(UrmaCoreTest, CpApiAllocJfrFailurePreservesOutputAndContextReference)
+{
+    CoreApiFixture fixture;
+    fixture.ops.alloc_jfr = [](urma_context_t *, urma_jfr_cfg_t *, urma_jfr_t **) {
+        return URMA_ENOMEM;
+    };
+    urma_jfr_t *jfr = nullptr;
+    EXPECT_EQ(URMA_ENOMEM, urma_alloc_jfr(&fixture.ctx, &fixture.jfr.jfr_cfg, &jfr));
+    EXPECT_EQ(nullptr, jfr);
+    EXPECT_EQ(1UL, fixture.ctx.ref.atomic_cnt.load());
+
+    jfr = &fixture.jfr;
+    EXPECT_EQ(URMA_ENOMEM, urma_alloc_jfr(&fixture.ctx, &fixture.jfr.jfr_cfg, &jfr));
+    EXPECT_TRUE(fixture.jfr.urma_jfr_opt.is_actived);
+    EXPECT_EQ(1UL, fixture.ctx.ref.atomic_cnt.load());
+}
+
+TEST(UrmaCoreTest, CpApiFreeJfcFailurePreservesReferencesUntilSuccessfulRetry)
+{
+    CoreApiFixture fixture;
+    fixture.jfc.urma_jfc_opt.is_actived = false;
+    fixture.ctx.ref.atomic_cnt.store(2);
+    fixture.jfce.ref.atomic_cnt.store(1);
+    fixture.ops.free_jfc = MockJfcStatus;
+    urma_test::SetHwMockStatus(URMA_EAGAIN);
+    EXPECT_EQ(URMA_EAGAIN, urma_free_jfc(&fixture.jfc));
+    EXPECT_EQ(2UL, fixture.ctx.ref.atomic_cnt.load());
+    EXPECT_EQ(1UL, fixture.jfce.ref.atomic_cnt.load());
+
+    urma_test::SetHwMockStatus(URMA_SUCCESS);
+    EXPECT_EQ(URMA_SUCCESS, urma_free_jfc(&fixture.jfc));
+    EXPECT_EQ(1UL, fixture.ctx.ref.atomic_cnt.load());
+    EXPECT_EQ(0UL, fixture.jfce.ref.atomic_cnt.load());
+}
+
 TEST(UrmaCoreTest, CpApiJfcValidatesInputsAndDispatchesOps)
 {
     CoreApiFixture fixture;
