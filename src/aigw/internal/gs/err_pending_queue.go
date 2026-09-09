@@ -22,6 +22,10 @@ type PendingRequest struct {
 	CurStep     int
 	Msg         *ControlMessage
 	EnqueueTime time.Time
+
+	// StarveClock: effective enqueue time for the starvation floor —
+	// EnqueueTime minus carried wait debt. Boost and tie ordering use it.
+	StarveClock time.Time
 }
 
 // PendingQueue is a per-model pending queue using a hash map.
@@ -56,6 +60,9 @@ func (q *PendingQueue) Add(req *PendingRequest) error {
 	if req.EnqueueTime.IsZero() {
 		req.EnqueueTime = time.Now()
 	}
+	if req.StarveClock.IsZero() {
+		req.StarveClock = req.EnqueueTime
+	}
 	if _, exists := q.requests[req.ReqID]; exists {
 		return ErrDuplicateReqID
 	}
@@ -67,8 +74,9 @@ func (q *PendingQueue) Add(req *PendingRequest) error {
 }
 
 // Peek returns the highest-priority request without removing it from the
-// queue. Priority is computed on-the-fly by fn. Ties broken by EnqueueTime
-// (oldest first). Call Remove(reqID) only after the request is dispatched.
+// queue. Priority is computed on-the-fly by fn. Ties broken by StarveClock
+// (oldest effective wait first). Call Remove(reqID) only after the request
+// is dispatched.
 func (q *PendingQueue) Peek(fn func(*PendingRequest) int) *PendingRequest {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -83,7 +91,7 @@ func (q *PendingQueue) Peek(fn func(*PendingRequest) int) *PendingRequest {
 	for _, req := range q.requests {
 		pri := fn(req)
 		if best == nil || pri < bestPri ||
-			(pri == bestPri && req.EnqueueTime.Before(best.EnqueueTime)) {
+			(pri == bestPri && req.StarveClock.Before(best.StarveClock)) {
 			bestPri = pri
 			best = req
 		}

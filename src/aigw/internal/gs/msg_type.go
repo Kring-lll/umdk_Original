@@ -10,12 +10,46 @@ package gs
 
 import (
 	"context"
+	"sync"
 )
 
 // ControlMessage is base struct for control plane message.
 type ControlMessage struct {
 	Request  interface{}
-	Response chan<- interface{}
+	Response chan interface{}
+
+	// deliveryMu serializes the result handoff (dispatcher Deliver vs
+	// requester Abandon), closing the cancel-vs-dispatch race.
+	deliveryMu sync.Mutex
+	abandoned  bool
+}
+
+// Deliver publishes v to the requester. False means the requester already
+// abandoned: v is dropped and the caller must undo any accounting it took.
+// The channel is buffered (one terminal value), so the send never blocks.
+func (m *ControlMessage) Deliver(v interface{}) bool {
+	m.deliveryMu.Lock()
+	defer m.deliveryMu.Unlock()
+	if m.abandoned {
+		return false
+	}
+	m.Response <- v
+	return true
+}
+
+// Abandon marks the requester as gone and returns a result the dispatcher
+// published concurrently, if any — a dispatched suggestion the caller must
+// release.
+func (m *ControlMessage) Abandon() interface{} {
+	m.deliveryMu.Lock()
+	defer m.deliveryMu.Unlock()
+	m.abandoned = true
+	select {
+	case v := <-m.Response:
+		return v
+	default:
+		return nil
+	}
 }
 
 // RegisterInstanceMsg is the message used for registering new instance.

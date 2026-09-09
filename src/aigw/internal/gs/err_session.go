@@ -22,6 +22,10 @@ type ErrSessionState struct {
 	Category       string
 	LastActiveTime time.Time
 	idleTimer      *time.Timer
+
+	// QueueWaitCarry: queue wait that never earned a dispatch, carried
+	// into the next attempt's starvation clock. Consumed on enqueue.
+	QueueWaitCarry time.Duration
 }
 
 // SessionTracker manages per-session state for ERR scheduling.
@@ -136,7 +140,7 @@ func (t *SessionTracker) GetIteration(sessionID string) int {
 // The session survives so the retry re-enters at the same k with its earned
 // priority. Arms the long idle timer so a session whose client gave up
 // entirely is still cleaned up.
-func (t *SessionTracker) RollbackRequest(sessionID string) {
+func (t *SessionTracker) RollbackRequest(sessionID string, waited time.Duration) {
 	if sessionID == "" {
 		return
 	}
@@ -149,8 +153,25 @@ func (t *SessionTracker) RollbackRequest(sessionID string) {
 	if s.Iteration > 1 {
 		s.Iteration--
 	}
+	s.QueueWaitCarry += waited
 	s.LastActiveTime = time.Now()
 	t.armIdleTimer(s, t.sessionTimeout, true)
+}
+
+// TakeQueueWaitCarry returns and resets the session's carried wait debt.
+func (t *SessionTracker) TakeQueueWaitCarry(sessionID string) time.Duration {
+	if sessionID == "" {
+		return 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s, ok := t.sessions[sessionID]
+	if !ok {
+		return 0
+	}
+	carry := s.QueueWaitCarry
+	s.QueueWaitCarry = 0
+	return carry
 }
 
 // OnFinish returns the total step count and arms the short idle timer.

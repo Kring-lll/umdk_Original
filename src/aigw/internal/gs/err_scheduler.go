@@ -8,6 +8,7 @@
 package gs
 
 import (
+	"strings"
 	"encoding/json"
 	"os"
 	"sync"
@@ -191,7 +192,9 @@ func (m *ErrSchedulerManager) initAlgorithm() {
 	case "err":
 		m.algorithm = NewErrAlg(m.globalDist)
 	case "caterr":
-		m.algorithm = NewCatErrAlg(m.classifier, m.catDists, &m.catMu)
+		alg := NewCatErrAlg(m.classifier, m.catDists, &m.catMu)
+		alg.CategoryFor = m.sessionTracker.GetCategory
+		m.algorithm = alg
 	case "fifo":
 		m.algorithm = NewFifoAlg()
 	default:
@@ -203,11 +206,37 @@ func (m *ErrSchedulerManager) initAlgorithm() {
 func (m *ErrSchedulerManager) OnRequest(sessionID, model, prompt string) int {
 	curStep := m.sessionTracker.OnRequest(sessionID, model)
 	if m.config.SchedulerType == "caterr" && m.classifier.IsLoaded() && sessionID != "" {
-		if cat := m.classifier.Classify(prompt); cat != "" {
-			m.sessionTracker.SetCategory(sessionID, cat)
-		}
+		m.lockSessionCategory(sessionID, prompt)
 	}
 	return curStep
+}
+
+// lockSessionCategory assigns the session's category exactly once (first
+// classifiable request decides). Sub-agent sessions (SDK pattern
+// "{parent}_sub_{type}_{uuid}") inherit the parent's category instead of
+// classifying their delegation text; unclassifiable requests lock nothing.
+func (m *ErrSchedulerManager) lockSessionCategory(sessionID, prompt string) {
+	if m.sessionTracker.GetCategory(sessionID) != "" {
+		return
+	}
+	if parent := parentSessionID(sessionID); parent != "" {
+		if cat := m.sessionTracker.GetCategory(parent); cat != "" {
+			m.sessionTracker.SetCategory(sessionID, cat)
+			return
+		}
+	}
+	if cat := m.classifier.Classify(prompt); cat != "" {
+		m.sessionTracker.SetCategory(sessionID, cat)
+	}
+}
+
+// parentSessionID returns the parent of an SDK sub-agent session id
+// ("{parent}_sub_{type}_{uuid}"), or "" when the id carries no sub marker.
+func parentSessionID(sessionID string) string {
+	if idx := strings.Index(sessionID, "_sub_"); idx > 0 {
+		return sessionID[:idx]
+	}
+	return ""
 }
 
 func (m *ErrSchedulerManager) AnonymousPriority(prompt string) float64 {
@@ -255,6 +284,12 @@ func (m *ErrSchedulerManager) medianStepForAnonymous(prompt string) int {
 				return dist.Median()
 			}
 		}
+		m.catMu.RLock()
+		med, ok := pooledMedianStep(m.catDists)
+		m.catMu.RUnlock()
+		if ok {
+			return med
+		}
 	}
 	if m.globalDist != nil {
 		return m.globalDist.Median()
@@ -271,11 +306,38 @@ func (m *ErrSchedulerManager) medianStepForAnonymousWith(snap *algoSnapshot, pro
 				}
 			}
 		}
+		// Unclassifiable (zero vocabulary hit): synthesize the step from the
+		// pooled categories so the request ranks as a typical task instead
+		// of bottoming out at step 1.
+		if med, ok := pooledMedianStep(snap.cats); ok {
+			return med
+		}
 	}
 	if snap.global != nil {
 		return snap.global.Median()
 	}
 	return 0
+}
+
+// pooledMedianStep: count-weighted mean of per-category medians.
+func pooledMedianStep[D interface {
+	TotalCount() int
+	Median() int
+}](cats map[string]D) (int, bool) {
+	var weighted float64
+	var total int64
+	for _, s := range cats {
+		n := int64(s.TotalCount())
+		if n <= 0 {
+			continue
+		}
+		weighted += float64(s.Median()) * float64(n)
+		total += n
+	}
+	if total == 0 {
+		return 0, false
+	}
+	return int(weighted / float64(total)), true
 }
 
 func (m *ErrSchedulerManager) Priority(sessionID string, curStep int, prompt string) float64 {
@@ -349,8 +411,20 @@ func (m *ErrSchedulerManager) OnFinish(sessionID string) int {
 // OnQueueTimeout handles a queued request that hit the client's wait budget
 // before dispatch: roll back its iteration so the retry re-enters at the
 // same step instead of the session restarting at k=1.
-func (m *ErrSchedulerManager) OnQueueTimeout(sessionID string) {
-	m.sessionTracker.RollbackRequest(sessionID)
+func (m *ErrSchedulerManager) OnQueueTimeout(sessionID string, waited time.Duration) {
+	m.sessionTracker.RollbackRequest(sessionID, waited)
+}
+
+// RollbackInFlightAttempt rolls back the k++ of a dispatched attempt that
+// completed nothing the client saw. The session survives for the retry.
+func (m *ErrSchedulerManager) RollbackInFlightAttempt(sessionID string) {
+	m.sessionTracker.RollbackRequest(sessionID, 0)
+}
+
+// TakeQueueWaitCarry hands the session's accumulated starvation debt to the
+// next enqueue (read-and-reset).
+func (m *ErrSchedulerManager) TakeQueueWaitCarry(sessionID string) time.Duration {
+	return m.sessionTracker.TakeQueueWaitCarry(sessionID)
 }
 
 func (m *ErrSchedulerManager) OnCancel(sessionID string) {
