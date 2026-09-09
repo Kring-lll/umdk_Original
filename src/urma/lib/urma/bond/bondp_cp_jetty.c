@@ -1438,7 +1438,7 @@ static int bondp_add_jetty_p_vjetty_id_info(bondp_context_t *bdp_ctx, bondp_comp
                                                          jetty_id, bdp_jetty);
         if (ret == BONDP_HASH_MAP_COLLIDE_ERROR &&
             jetty_id > 0 && jetty_id < BONDP_MAX_WELL_KNOWN_JETTY_ID) {
-            URMA_LOG_INFO("Add repeated wk-jetty id[%d]: ret=%d, p_jetty_id=%u, v_jetty_id=%u\n",
+            URMA_LOG_DEBUG("Add repeated wk-jetty id[%d]: ret=%d, p_jetty_id=%u, v_jetty_id=%u\n",
                           i, ret, pjetty_id.id, jetty_id);
         } else if (ret != 0) {
             URMA_LOG_ERR("Failed to add p_vjetty_id[%d]: ret=%d, p_jetty_id=%u, v_jetty_id=%u\n",
