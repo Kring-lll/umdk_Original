@@ -516,9 +516,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Init(
     gmBias2_ = gmm2_bias;
     gmShareBias1_ = share_gmm1_bias;
     gmShareBias2_ = share_gmm2_bias;
-    if constexpr (EXEC_FLAG & EXEC_FLAG_ZERO_BUFFER) {
-        shmemWorkspaceGM_ = (GM_ADDR)(tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.shmemWorkspacePtr);
-    }
+    shmemWorkspaceGM_ = (GM_ADDR)(tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.shmemWorkspacePtr);
     workspaceGM_ = workspaceGM;
     metaInfoGm_ = (GM_ADDR)(tilingData->disGmmDeqSwigluQuantGmmDeqComInfo.metaInfoPtr);
     gmexpertScales_ = expert_scales;
@@ -659,7 +657,7 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     gmShareX2Scale = workspaceGM_ + workspaceOffset;
     workspaceOffset += RoundUp<GM_ALIGN_BYTE>(shareExpertTokenNum * sizeof(float));
 
-    if constexpr (EXEC_FLAG & EXEC_FLAG_ZERO_BUFFER) {
+    {
         uint32_t roundNum = 1;
         MoeDistributeCombineImpl::CamMoeDistributeCombine<TemplateMC2TypeFunc> combiner;
         for (uint32_t roundIdx = 0;; ++roundIdx) {
@@ -796,59 +794,5 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
         &roundNum);
         return;
     }
-
-    // W4A8: select tile shape based on EXEC_FLAG
-    using Gmm1L1TileShapeLocal = typename std::conditional<
-        static_cast<bool>(EXEC_FLAG & EXEC_FLAG_W4A8),
-        GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L1K_W4A8>,
-        GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L1K_W8A8>>::type;
-    using Gmm1L0TileShapeLocal = typename std::conditional<
-        static_cast<bool>(EXEC_FLAG & EXEC_FLAG_W4A8),
-        GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L0K_W4A8>,
-        GemmShape<GMM1_L1M, GMM1_L1N, GMM1_L0K_W8A8>>::type;
-    GmmDeqSwigluQuant<TemplateMC2TypeFunc, Gmm1L1TileShapeLocal, Gmm1L0TileShapeLocal, Gmm1EpilogueTileShape,
-                      Gmm1BlockScheduler>(
-        gmm1ProblemShape, groupCount_, gmGroupList, gmX1, layoutX1, gmShareWeight1_, layoutShareWeight1,
-        gmWeight1_, layoutWeight1, gmShareBias1_, gmBias1_,
-        gmShareWeight1Scale_, layoutShareW1Scale, gmScale1_, layoutW1Scale,
-        gmX1Scale, layoutX1Scale, gmX2, layoutX2, gmX2Scale, layoutX2Scale, gmShareX1, gmShareX1Scale,
-        gmShareSwigluOut, gmShareX2, layoutShareX2, gmShareX2Scale, gmSwigluOut, gmWorkspace, gmCVSwap, gmX_,
-        gmSmoothScales_, gmShareSmoothScales_, gmexpertIds_, gmExpandIdx, gmEpSendCount, xActiveMask_, gmResvered,
-        gmExpertTokenNums_, gmAllExpertTokenNums, metaInfoGm_, gmTokenFlag,
-        tilingData_->disGmmDeqSwigluQuantGmmDeqComInfo, roundBufferTokenNum, gmCombineSend);
-    AscendC::PipeBarrier<PIPE_ALL>();
-    Arch::CrossCoreFlag gmm1AivFinished{0};
-    if constexpr (g_coreType == AscendC::AIV) {
-        Arch::CrossCoreBarrier<0x0, PIPE_MTE3>();
-        Arch::CrossCoreSetFlag<0x2, PIPE_MTE3>(gmm1AivFinished);
-    } else {
-        Arch::CrossCoreWaitFlag(gmm1AivFinished);
-    }
-
-    MoeDistributeCombineImpl::CamMoeDistributeCombine<TemplateMC2TypeFunc> combiner;
-    if (g_coreType == AscendC::AIV) {
-        combiner.Init(gmGmm2DepOut, gmexpertIds_, gmExpandIdx, (GM_ADDR)(gmEpSendCount + epRankId_ * epRankSize_ *
-                      moeExpertNumPerRank_ * sizeof(int32_t)), nullptr, gmexpertScales_, xActiveMask_, gmOutput_,
-                      workspaceGM_, nullptr, tilingData_, gmAllExpertTokenNums, gmAllEpRecvCount, gmCombineSend,
-                      statusDataSpaceOffset_);
-    }
-    // W4A8: select tile shape based on EXEC_FLAG
-    using Gmm2L1TileShapeLocal = typename std::conditional<
-        static_cast<bool>(EXEC_FLAG & EXEC_FLAG_W4A8),
-        GemmShape<GMM2_L1M, GMM2_L1N, GMM2_L1K_W4A8>,
-        GemmShape<GMM2_L1M, GMM2_L1N, GMM2_L1K_W8A8>>::type;
-    using Gmm2L0TileShapeLocal = typename std::conditional<
-        static_cast<bool>(EXEC_FLAG & EXEC_FLAG_W4A8),
-        GemmShape<GMM2_L1M, GMM2_L1N, GMM2_L0K_W4A8>,
-        GemmShape<GMM2_L1M, GMM2_L1N, GMM2_L0K_W8A8>>::type;
-    GmmDeq<TemplateMC2TypeFunc, Gmm2L1TileShapeLocal, Gmm2L0TileShapeLocal, Gmm2EpilogueTileShape,
-           Gmm2BlockScheduler>(gmm2ProblemShape, groupCount_, gmGroupList, gmX2, layoutX2, gmWeight2_, layoutWeight2,
-                               gmBias2_, gmShareBias2_,
-                               gmScale2_, layoutW2Scale, gmX2Scale, layoutX2Scale, gmGmm2DepOut, layoutOutput, bs_,
-                               shareGmm2ProblemShape, gmShareX2, gmShareWeight2_, gmShareOutput_, gmShareWeight2Scale_,
-                               gmShareX2Scale, layoutShareX2, layoutShareWeight2, layoutShareX2Scale,
-                               layoutShareOutput, epRankId_, gmWorkspace, &combiner, metaInfoGm_,
-                               statusDataSpaceOffset_, gmEpSendCount, epRankSize_, moeExpertNum_,
-                               moeExpertNumPerRank_, roundBufferTokenNum);
 }
 #endif  // FUSED_DEEP_MOE_H
