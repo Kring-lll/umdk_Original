@@ -1207,3 +1207,97 @@ TEST(UrmaCoreTest, CpApiRemoteJettyAndSegContextHelpersUseLocalAndProviderPaths)
     ASSERT_NE(nullptr, seg);
     urma_put_seg_ctx(seg);
 }
+
+TEST(UrmaCoreTest, CpApiJfrRejectsInvalidOrderingBeforeProviderDispatch)
+{
+    CoreApiFixture fixture;
+    fixture.ops.create_jfr = MockCreateJfr;
+    fixture.ops.active_jfr = MockJfrStatus;
+    fixture.jfr.urma_jfr_opt.is_actived = false;
+    for (uint32_t order : {static_cast<uint32_t>(URMA_OI), 255U}) {
+        fixture.jfr.jfr_cfg.flag.bs.order_type = order;
+        EXPECT_EQ(nullptr, urma_create_jfr(&fixture.ctx, &fixture.jfr.jfr_cfg));
+        EXPECT_EQ(EINVAL, errno);
+        EXPECT_EQ(URMA_EINVAL, urma_active_jfr(&fixture.jfr));
+        EXPECT_EQ(1UL, fixture.ctx.ref.atomic_cnt.load());
+        EXPECT_FALSE(fixture.jfr.urma_jfr_opt.is_actived);
+    }
+    fixture.jfr.jfr_cfg.flag.bs.order_type = URMA_DEF_ORDER;
+    EXPECT_NE(nullptr, urma_create_jfr(&fixture.ctx, &fixture.jfr.jfr_cfg));
+    EXPECT_EQ(URMA_OL, fixture.jfr.jfr_cfg.flag.bs.order_type);
+    EXPECT_EQ(URMA_SUCCESS, urma_active_jfr(&fixture.jfr));
+}
+
+TEST(UrmaCoreTest, CpApiImportJfrValidatesModeOrderingAndTransportType)
+{
+    CoreApiFixture fixture;
+    fixture.ops.import_jfr = MockImportJfr;
+    fixture.ops.import_jfr_ex = MockImportJfrEx;
+    urma_rjfr_t rjfr = {};
+    urma_token_t token = {};
+    urma_import_jfr_ex_cfg_t cfg = {};
+    auto expectInvalid = [&]() {
+        EXPECT_EQ(nullptr, urma_import_jfr(&fixture.ctx, &rjfr, &token));
+        EXPECT_EQ(EINVAL, errno);
+        EXPECT_EQ(nullptr, urma_import_jfr_ex(&fixture.ctx, &rjfr, &token, &cfg));
+        EXPECT_EQ(EINVAL, errno);
+        EXPECT_EQ(1UL, fixture.ctx.ref.atomic_cnt.load());
+    };
+    rjfr.trans_mode = static_cast<urma_transport_mode_t>(0xdead);
+    rjfr.flag.bs.order_type = URMA_OL;
+    expectInvalid();
+    rjfr.trans_mode = URMA_TM_RC;
+    rjfr.flag.bs.order_type = 255;
+    expectInvalid();
+    rjfr.flag.bs.order_type = URMA_OL;
+    for (uint32_t tp : {static_cast<uint32_t>(URMA_UTP), 255U}) {
+        (void)memcpy(&rjfr.tp_type, &tp, sizeof(tp));
+        expectInvalid();
+    }
+    rjfr.tp_type = URMA_RTP;
+    rjfr.trans_mode = URMA_TM_UM;
+    rjfr.flag.bs.order_type = URMA_NO;
+    expectInvalid();
+    rjfr.tp_type = URMA_UTP;
+    rjfr.flag.bs.order_type = URMA_DEF_ORDER;
+    EXPECT_NE(nullptr, urma_import_jfr(&fixture.ctx, &rjfr, &token));
+    EXPECT_EQ(URMA_NO, rjfr.flag.bs.order_type);
+    EXPECT_NE(nullptr, urma_import_jfr_ex(&fixture.ctx, &rjfr, &token, &cfg));
+}
+
+TEST(UrmaCoreTest, CpApiJettyRejectsForeignGroupWithoutChangingMembership)
+{
+    CoreApiFixture fixture;
+    CoreApiFixture other;
+    urma_jetty_grp_t group = {};
+    urma_jetty_grp_t original = {};
+    urma_jetty_t *members[] = {&fixture.jetty};
+    group.urma_ctx = &other.ctx;
+    other.sysfsDev.dev_attr.dev_cap.max_jetty_in_jetty_grp = 1;
+    group.jetty_list = members;
+    group.jetty_cnt = 1;
+    fixture.jetty.jetty_cfg.jetty_grp = &group;
+    fixture.ops.create_jetty = [](urma_context_t *, urma_jetty_cfg_t *) -> urma_jetty_t * {
+        ADD_FAILURE() << "foreign group reached provider";
+        return nullptr;
+    };
+    fixture.ops.alloc_jetty = MockAllocJetty;
+    fixture.ops.set_jetty_opt = MockJettyOpt;
+    urma_jetty_t *allocated = nullptr;
+    EXPECT_EQ(nullptr, urma_create_jetty(&fixture.ctx, &fixture.jetty.jetty_cfg));
+    EXPECT_EQ(EINVAL, errno);
+    EXPECT_EQ(URMA_EINVAL, urma_alloc_jetty(&fixture.ctx, &fixture.jetty.jetty_cfg, &allocated));
+    EXPECT_EQ(nullptr, allocated);
+    fixture.jetty.urma_jetty_opt.is_actived = false;
+    original.urma_ctx = &fixture.ctx;
+    original.jetty_cnt = 1;
+    original.jetty_list = members;
+    fixture.jetty.jetty_cfg.jetty_grp = &original;
+    urma_jetty_grp_t *newGroup = &group;
+    EXPECT_EQ(URMA_EINVAL, urma_set_jetty_opt(&fixture.jetty, URMA_JETTY_BIND_JTG,
+                                            &newGroup, sizeof(newGroup)));
+    EXPECT_EQ(&original, fixture.jetty.jetty_cfg.jetty_grp);
+    EXPECT_EQ(1U, original.jetty_cnt);
+    EXPECT_EQ(&fixture.jetty, members[0]);
+    EXPECT_EQ(1UL, fixture.ctx.ref.atomic_cnt.load());
+}
