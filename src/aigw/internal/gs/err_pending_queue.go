@@ -23,8 +23,7 @@ type PendingRequest struct {
 	Msg         *ControlMessage
 	EnqueueTime time.Time
 
-	// StarveClock: effective enqueue time for the starvation floor —
-	// EnqueueTime minus carried wait debt. Boost and tie ordering use it.
+	// StarveClock: EnqueueTime minus carried wait debt; boost and tie ordering use it.
 	StarveClock time.Time
 }
 

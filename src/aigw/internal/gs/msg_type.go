@@ -26,7 +26,6 @@ type ControlMessage struct {
 
 // Deliver publishes v to the requester. False means the requester already
 // abandoned: v is dropped and the caller must undo any accounting it took.
-// The channel is buffered (one terminal value), so the send never blocks.
 func (m *ControlMessage) Deliver(v interface{}) bool {
 	m.deliveryMu.Lock()
 	defer m.deliveryMu.Unlock()
@@ -37,9 +36,8 @@ func (m *ControlMessage) Deliver(v interface{}) bool {
 	return true
 }
 
-// Abandon marks the requester as gone and returns a result the dispatcher
-// published concurrently, if any — a dispatched suggestion the caller must
-// release.
+// Abandon marks the requester as gone and returns a concurrently published
+// result, if any — a dispatched suggestion the caller must release.
 func (m *ControlMessage) Abandon() interface{} {
 	m.deliveryMu.Lock()
 	defer m.deliveryMu.Unlock()
@@ -81,8 +79,7 @@ type ScheduleRequestMsg struct {
 	Body    map[string]interface{} // Request body for hash key extraction
 	// SessionID for ERR scheduling (extracted from agent_hint.session_id)
 	SessionID string
-	// Advisory: the caller forwards the request itself (get-suggestion /
-	// SDK), so ERR must not queue it nor take in-flight slots.
+	// Advisory: the caller forwards the request itself, so ERR neither queues it nor takes slots.
 	Advisory bool
 }
 
