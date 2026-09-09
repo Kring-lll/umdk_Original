@@ -13,6 +13,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "urma_version.h"
+
 #include "urma_types.h"
 
 #ifdef __cplusplus

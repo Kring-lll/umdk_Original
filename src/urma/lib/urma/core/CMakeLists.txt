@@ -10,15 +10,20 @@ option(URMA_PERF_USE_CNTVCT "Use ARM CNTVCT_EL0 register for perf timestamp inst
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} URMA_DIR_SRCS)
 
+# Historical adapters are shared-only; their headers are not installed.
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/compat URMA_COMPAT_SRCS)
+
 add_library(urma SHARED
+    ${URMA_COMPAT_SRCS}
+    ${URMA_VERSION_NOTE}
     ${URMA_DIR_SRCS}
 )
 
 add_library(urma_static STATIC
     ${URMA_DIR_SRCS}
 )
-set(PROJECT_VERSION "0.0.3")
-set(PROJECT_VERSION_MAJOR "0")
+
+target_compile_definitions(urma PRIVATE URMA_BUILD_SHARED=1)
 
 set_target_properties(urma
     PROPERTIES
@@ -35,14 +40,25 @@ set_target_properties(urma_static
 
 target_include_directories(urma
     PUBLIC
+        ${URMA_VERSION_INCLUDE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 target_include_directories(urma_static
     PUBLIC
+        ${URMA_VERSION_INCLUDE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# Stable ABI symbol node; do not derive its name from the package version.
+set(URMA_SYMBOL_VERSION_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/urma.map")
+set_property(TARGET urma APPEND_STRING PROPERTY LINK_FLAGS
+    " -Wl,--version-script,${URMA_SYMBOL_VERSION_SCRIPT} -Wl,-z,now")
+set_property(TARGET urma APPEND PROPERTY LINK_DEPENDS "${URMA_SYMBOL_VERSION_SCRIPT}")
+# Consumers of this target resolve PLT relocations at startup.
+# LINK_FLAGS above retains compatibility with CMake 3.12.
+set_property(TARGET urma APPEND PROPERTY INTERFACE_LINK_LIBRARIES "-Wl,-z,now")
 
 target_link_libraries(urma urma_common -ldl -lrt)
 target_link_libraries(urma_static urma_common -ldl -lrt)
@@ -56,6 +72,7 @@ install(TARGETS urma
     DESTINATION /usr/lib64
 )
 install(FILES
+    ${URMA_VERSION_INCLUDE_DIR}/urma_version.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/urma_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/urma_cmd.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/urma_opcode.h
