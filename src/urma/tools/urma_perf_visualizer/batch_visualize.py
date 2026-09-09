@@ -15,6 +15,7 @@ Arguments:
 """
 
 import argparse
+import concurrent.futures
 import os
 import sys
 import json
@@ -30,6 +31,12 @@ JSON_FILENAME = 'urma_perf_data.json'
 HTML_FILENAME = 'urma_perf_chart.html'
 SUMMARY_HTML = 'urma_perf_summary.html'
 
+# Parallel workers for log processing. Parsing/JSON/HTML generation is pure
+# CPU-bound Python, which the GIL serializes inside threads, so a process
+# pool is used for real parallelism. Slightly oversubscribed (2x cores) so
+# file reads of the next log overlap with parsing of the current one.
+MAX_WORKERS = min(32, (os.cpu_count() or 4) * 2)
+
 
 def find_log_files(patha):
     """Recursively find all urma_perf.log files under patha."""
@@ -43,17 +50,20 @@ def find_log_files(patha):
 def process_log(log_path):
     """Parse a log file and generate JSON+HTML in the same directory.
 
-    Returns (True, rtt_values) on success, (False, []) on failure.
-    rtt_values is a list of ints from BOND_SEND_RTT max/p9999/p99 fields.
+    Runs inside a worker process: prints nothing and returns
+    (success, rtt_values, messages) so the main process can print the
+    messages without interleaving. rtt_values is a list of ints from
+    BOND_SEND_RTT max/p9999/p99 fields.
     """
+    msgs = []
     log_dir = os.path.dirname(log_path)
     parsed = parse_log(log_path)
 
-    print('  Parsed %d wr_complete, %d inflight, %d rtt_avg, %d sqe_total, '
-          '%d pjetty_inflight, %d latency snapshots'
-          % (len(parsed['wr_complete']), len(parsed['inflight']),
-             len(parsed['rtt_avg']), len(parsed['sqe_total']),
-             len(parsed['pjetty_inflight']), len(parsed['latency'])))
+    msgs.append('  Parsed %d wr_complete, %d inflight, %d rtt_avg, %d sqe_total, '
+                '%d pjetty_inflight, %d latency snapshots'
+                % (len(parsed['wr_complete']), len(parsed['inflight']),
+                   len(parsed['rtt_avg']), len(parsed['sqe_total']),
+                   len(parsed['pjetty_inflight']), len(parsed['latency'])))
 
     # Extract BOND_SEND_RTT values (max, p9999, p99) for top-200 distribution
     rtt_values = []
@@ -68,8 +78,8 @@ def process_log(log_path):
     parsed.pop('_diag', None)
 
     if not any(parsed.values()):
-        print('  Warning: no data found in %s, skipping' % log_path)
-        return False, []
+        msgs.append('  Warning: no data found in %s, skipping' % log_path)
+        return False, rtt_values, msgs
 
     data = build_json(parsed)
 
@@ -82,10 +92,10 @@ def process_log(log_path):
     with open(html_path, 'w', encoding='utf-8') as f:
         f.write(html)
 
-    print('  JSON -> %s' % json_path)
-    print('  HTML -> %s' % html_path)
-    print('  BOND_SEND_RTT samples for top-200: %d' % len(rtt_values))
-    return True, rtt_values
+    msgs.append('  JSON -> %s' % json_path)
+    msgs.append('  HTML -> %s' % html_path)
+    msgs.append('  BOND_SEND_RTT samples for top-200: %d' % len(rtt_values))
+    return True, rtt_values, msgs
 
 
 def generate_summary_html(patha_abs, log_paths, rtt_data):
@@ -131,11 +141,16 @@ def generate_summary_html(patha_abs, log_paths, rtt_data):
                   for cn in case_names}
 
     # --- Compute global top-200 distribution ---
+    # For each directory appearing in the top-200, keep its sample count and
+    # the max latency among its top-200 samples; sort by max latency desc.
     global_top200 = sorted(rtt_data, key=lambda x: x[0], reverse=True)[:200]
     global_dist = {}
     for val, case, sub, full in global_top200:
-        global_dist[full] = global_dist.get(full, 0) + 1
-    global_dist_sorted = sorted(global_dist.items(), key=lambda x: -x[1])
+        entry = global_dist.setdefault(full, {'count': 0, 'max': 0})
+        entry['count'] += 1
+        if val > entry['max']:
+            entry['max'] = val
+    global_dist_sorted = sorted(global_dist.items(), key=lambda x: -x[1]['max'])
 
     # --- Compute per-case top-200 distribution ---
     case_values = {}
@@ -146,12 +161,15 @@ def generate_summary_html(patha_abs, log_paths, rtt_data):
         top200 = sorted(vals, key=lambda x: x[0], reverse=True)[:200]
         dist = {}
         for val, sub in top200:
-            dist[sub] = dist.get(sub, 0) + 1
-        per_case_dist[case_name] = sorted(dist.items(), key=lambda x: -x[1])
+            entry = dist.setdefault(sub, {'count': 0, 'max': 0})
+            entry['count'] += 1
+            if val > entry['max']:
+                entry['max'] = val
+        per_case_dist[case_name] = sorted(dist.items(), key=lambda x: -x[1]['max'])
 
     dist_data = {
-        'global': [[name, cnt] for name, cnt in global_dist_sorted],
-        'per_case': {cn: [[name, cnt] for name, cnt in dist]
+        'global': [[name, e['count'], e['max']] for name, e in global_dist_sorted],
+        'per_case': {cn: [[name, e['count'], e['max']] for name, e in dist]
                      for cn, dist in per_case_dist.items()},
     }
 
@@ -269,16 +287,16 @@ __CASE_OPTIONS__
     </div>
     <div id="distView" class="dist-view">
         <div class="dist-section">
-            <h2 class="toggle-header" onclick="toggleSection(this)">Global Top-200 BOND_SEND_RTT Distribution (pmax / p9999 / p99)</h2>
+            <h2 class="toggle-header" onclick="toggleSection(this)">Global Top-200 BOND_SEND_RTT (pmax / p9999 / p99, sorted by max)</h2>
             <div class="toggle-content">
                 <table id="globalDistTable">
-                    <thead><tr><th>Directory</th><th>Count</th></tr></thead>
+                    <thead><tr><th>Directory</th><th>Count</th><th>Max RTT [ns]</th></tr></thead>
                     <tbody></tbody>
                 </table>
             </div>
         </div>
         <div class="dist-section">
-            <h2 class="toggle-header" onclick="toggleSection(this)">Per-Case Top-200 Distribution</h2>
+            <h2 class="toggle-header" onclick="toggleSection(this)">Per-Case Top-200 (sorted by max)</h2>
             <div class="toggle-content" id="perCaseDist"></div>
         </div>
     </div>
@@ -335,7 +353,7 @@ __CASE_OPTIONS__
         }
 
         function renderDist() {
-            // Global distribution table
+            // Global distribution table (sorted by max latency desc)
             var tbody = document.querySelector('#globalDistTable tbody');
             tbody.innerHTML = '';
             var globalData = distData.global || [];
@@ -346,12 +364,16 @@ __CASE_OPTIONS__
                 var tdCount = document.createElement('td');
                 tdCount.className = 'count';
                 tdCount.textContent = globalData[i][1];
+                var tdMax = document.createElement('td');
+                tdMax.className = 'count';
+                tdMax.textContent = globalData[i][2];
                 tr.appendChild(tdName);
                 tr.appendChild(tdCount);
+                tr.appendChild(tdMax);
                 tbody.appendChild(tr);
             }
 
-            // Per-case distribution
+            // Per-case distribution (sorted by max latency desc)
             var perCaseDiv = document.getElementById('perCaseDist');
             perCaseDiv.innerHTML = '';
             var perCase = distData.per_case || {};
@@ -368,7 +390,7 @@ __CASE_OPTIONS__
                 contentDiv.className = 'toggle-content';
                 var table = document.createElement('table');
                 var thead = document.createElement('thead');
-                thead.innerHTML = '<tr><th>Sub-path</th><th>Count</th></tr>';
+                thead.innerHTML = '<tr><th>Sub-path</th><th>Count</th><th>Max RTT [ns]</th></tr>';
                 table.appendChild(thead);
                 var tbody2 = document.createElement('tbody');
                 for (var i = 0; i < entries.length; i++) {
@@ -378,8 +400,12 @@ __CASE_OPTIONS__
                     var td2 = document.createElement('td');
                     td2.className = 'count';
                     td2.textContent = entries[i][1];
+                    var td3 = document.createElement('td');
+                    td3.className = 'count';
+                    td3.textContent = entries[i][2];
                     tr.appendChild(td1);
                     tr.appendChild(td2);
+                    tr.appendChild(td3);
                     tbody2.appendChild(tr);
                 }
                 table.appendChild(tbody2);
@@ -425,11 +451,36 @@ def main():
         print('No urma_perf.log files found under %s' % patha_abs, file=sys.stderr)
         sys.exit(1)
 
-    print('Found %d urma_perf.log file(s):\n' % len(log_paths))
+    print('Found %d urma_perf.log file(s):' % len(log_paths))
+    print('Processing with %d worker processes\n' % MAX_WORKERS)
+
+    # Process logs in parallel. as_completed gives live progress; results are
+    # stored per path and re-aggregated in log_paths order below so the
+    # summary (dropdown order, top-200 data) is deterministic.
+    results = {}  # log_path -> (success, rtt_values)
+    with concurrent.futures.ProcessPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        future_to_path = {executor.submit(process_log, lp): lp for lp in log_paths}
+        done = 0
+        for future in concurrent.futures.as_completed(future_to_path):
+            lp = future_to_path[future]
+            done += 1
+            try:
+                success, rtt_values, msgs = future.result()
+            except Exception as exc:  # worker crashed: record and keep going
+                success, rtt_values, msgs = False, [], ['  Error: %r' % exc]
+            print('[%d/%d] %s' % (done, len(log_paths), lp))
+            for m in msgs:
+                print(m)
+            print()
+            results[lp] = (success, rtt_values)
 
     processed = []
     all_rtt_data = []  # (value, case_name, sub_display, full_display)
     for log_path in log_paths:
+        success, rtt_values = results[log_path]
+        if not success:
+            continue
+        processed.append(log_path)
         log_dir = os.path.dirname(log_path)
         rel_to_patha = os.path.relpath(log_dir, patha_abs)
         parts = rel_to_patha.split(os.sep)
@@ -437,14 +488,8 @@ def main():
         sub_path = os.sep.join(parts[1:]) if len(parts) > 1 else ''
         sub_display = sub_path.replace(os.sep, '/') if sub_path else '(root)'
         full_display = (case_name + '/' + sub_display) if sub_path else case_name
-
-        print('Processing: %s' % log_path)
-        success, rtt_values = process_log(log_path)
-        if success:
-            processed.append(log_path)
-            for val in rtt_values:
-                all_rtt_data.append((val, case_name, sub_display, full_display))
-        print()
+        for val in rtt_values:
+            all_rtt_data.append((val, case_name, sub_display, full_display))
 
     print('Generating summary HTML...')
     generate_summary_html(patha_abs, processed, all_rtt_data)

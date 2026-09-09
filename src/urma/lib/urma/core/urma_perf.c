@@ -115,6 +115,27 @@ static inline uint64_t urma_cntvct_avg_to_ns(uint64_t cntvct_sum, uint64_t cnt)
     return (uint64_t)(((__uint128_t)cntvct_sum * mult) >> shift) / cnt;
 }
 
+/* BOND_SQE_INFLIGHT_DIFF is a WR-count spread pre-scaled by
+ * URMA_PERF_INFLIGHT_DIFF_SCALE, not a duration in CNTVCT ticks: report its
+ * raw values as-is. Applying urma_cntvct_to_ns() would inflate them by
+ * 1e9/CNTFRQ (x10 on a 100MHz counter), which is why the old display code
+ * had to divide by 100 (SCALE x cntvct ratio). */
+static inline uint64_t urma_perf_value_to_ns(uint32_t type, uint64_t raw)
+{
+    if (type == BOND_SQE_INFLIGHT_DIFF) {
+        return raw;
+    }
+    return urma_cntvct_to_ns(raw);
+}
+
+static inline uint64_t urma_perf_avg_to_ns(uint32_t type, uint64_t sum, uint64_t cnt)
+{
+    if (type == BOND_SQE_INFLIGHT_DIFF) {
+        return sum / cnt;
+    }
+    return urma_cntvct_avg_to_ns(sum, cnt);
+}
+
 #endif /* URMA_PERF_USE_CNTVCT */
 
 // Control sampling range（1ns ~ 4s）
@@ -330,11 +351,11 @@ static void urma_perf_fill_type_stats(urma_perf_stats_t *perf_info, urma_perf_re
 {
     uint64_t cnt = record->type_record[type].cnt;
 #ifdef URMA_PERF_USE_CNTVCT
-    uint64_t maxinum = urma_cntvct_to_ns(record->type_record[type].max);
-    uint64_t mininum = urma_cntvct_to_ns(record->type_record[type].min);
-    uint64_t p90 = urma_cntvct_to_ns(urma_perf_cal_quantile(record, type, (uint64_t)(0.9 * cnt + 0.99)));
-    uint64_t p99 = urma_cntvct_to_ns(urma_perf_cal_quantile(record, type, (uint64_t)(0.99 * cnt + 0.999)));
-    uint64_t p9999 = urma_cntvct_to_ns(urma_perf_cal_quantile(record, type, (uint64_t)(0.9999 * cnt + 0.99999)));
+    uint64_t maxinum = urma_perf_value_to_ns(type, record->type_record[type].max);
+    uint64_t mininum = urma_perf_value_to_ns(type, record->type_record[type].min);
+    uint64_t p90 = urma_perf_value_to_ns(type, urma_perf_cal_quantile(record, type, (uint64_t)(0.9 * cnt + 0.99)));
+    uint64_t p99 = urma_perf_value_to_ns(type, urma_perf_cal_quantile(record, type, (uint64_t)(0.99 * cnt + 0.999)));
+    uint64_t p9999 = urma_perf_value_to_ns(type, urma_perf_cal_quantile(record, type, (uint64_t)(0.9999 * cnt + 0.99999)));
 #else
     uint64_t maxinum = record->type_record[type].max;
     uint64_t mininum = record->type_record[type].min;
@@ -347,7 +368,7 @@ static void urma_perf_fill_type_stats(urma_perf_stats_t *perf_info, urma_perf_re
     perf_info->type_record[type].sample_num = cnt;
 #ifdef URMA_PERF_USE_CNTVCT
     perf_info->type_record[type].average = cnt != 0 ?
-        urma_cntvct_avg_to_ns(record->type_record[type].accumulation, cnt) : 0;
+        urma_perf_avg_to_ns(type, record->type_record[type].accumulation, cnt) : 0;
 #else
     perf_info->type_record[type].average = cnt != 0 ? (record->type_record[type].accumulation / cnt) : 0;
 #endif
@@ -651,12 +672,12 @@ urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length)
             "  %-20s | %-10lu | %-10lu | %-10lu | %-10lu | %-10lu | %-10lu | %-10lu | %-12lu \n",
             perf_type_names[i],
             perf_info.type_record[i].sample_num,
-            perf_info.type_record[i].average / (i == BOND_SQE_INFLIGHT_DIFF ? 100 : 1),
-            perf_info.type_record[i].mininum / (i == BOND_SQE_INFLIGHT_DIFF ? 100 : 1),
-            perf_info.type_record[i].maxinum / (i == BOND_SQE_INFLIGHT_DIFF ? 100 : 1),
-            perf_info.type_record[i].p90 / (i == BOND_SQE_INFLIGHT_DIFF ? 100 : 1),
-            perf_info.type_record[i].p99 / (i == BOND_SQE_INFLIGHT_DIFF ? 100 : 1),
-            perf_info.type_record[i].p9999 / (i == BOND_SQE_INFLIGHT_DIFF ? 100 : 1),
+            perf_info.type_record[i].average / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].mininum / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].maxinum / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].p90 / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].p99 / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].p9999 / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
             perf_info.type_record[i].max_under_127ms);
     }
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,

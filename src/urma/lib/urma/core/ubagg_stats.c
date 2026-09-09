@@ -22,21 +22,27 @@ static atomic_uint g_ubagg_switch_cnt;
 static atomic_ullong g_ubagg_sqe_total[URMA_UBAGG_SQE_TOTAL_DIM][URMA_UBAGG_SQE_TOTAL_DIM];
 
 /* Global current in-flight WR count per path [local_idx][target_idx].
- * Mirrors the sum of all bondp_comp_t::sqe_cnt across comps. */
+ * Mirrors the sum of all bondp_comp_t::sqe_cnt across comps. Reported via
+ * urma_get_path_info(), so it belongs to the path perf interface and is only
+ * tracked while path perf is enabled (urma_ubagg_path_is_enabled()). */
 static atomic_uint g_ubagg_inflight[URMA_UBAGG_SQE_TOTAL_DIM][URMA_UBAGG_SQE_TOTAL_DIM];
 
 /* Global count of virtual jetties (comps) that currently have >= 1 in-flight WR.
  * Maintained via 0<->non-zero transition of each comp's per-pjetty
  * inflight_per_pjetty[local_idx] counters. Each pjetty is tracked
- * independently so multiple active pjetties are all counted. */
+ * independently so multiple active pjetties are all counted. Reported via
+ * urma_get_path_info(), so it is only tracked while path perf is enabled. */
 static atomic_uint g_ubagg_pjetty_inflight_cnt;
 
 /* Windowed RTT accumulators per path [local_idx][target_idx], reset after each
  * urma_get_perf_info() dump so each call reports the avg RTT of the adjacent
- * time window since the previous call. Only accumulated while path perf is
- * enabled (urma_ubagg_path_start/stop). */
+ * time window since the previous call. Only accumulated while urma perf is
+ * enabled (urma_perf_is_enabled(); urma_start_path_perf() merely resets the
+ * window). */
 static atomic_ullong g_ubagg_rtt_sum[URMA_UBAGG_SQE_TOTAL_DIM][URMA_UBAGG_SQE_TOTAL_DIM];
 static atomic_uint g_ubagg_rtt_cnt[URMA_UBAGG_SQE_TOTAL_DIM][URMA_UBAGG_SQE_TOTAL_DIM];
+/* Switch for the path perf interface (urma_start_path_perf()/urma_stop_path_perf()):
+ * gates recording of per-path in-flight WR and per-pjetty in-flight counts. */
 static atomic_bool g_ubagg_path_enabled;
 
 /* Windowed count of successfully completed WRs since the previous urma_get_perf_info()
@@ -69,8 +75,14 @@ void urma_ubagg_sqe_total_init(void)
     }
 }
 
+/* sqe_total is reported via urma_get_perf_info(), so it belongs to the original
+ * perf interface and is only recorded while urma perf is enabled
+ * (urma_start_perf()/urma_stop_perf()). */
 void urma_ubagg_sqe_total_inc(uint32_t local_idx, uint32_t target_idx, uint32_t wr_count)
 {
+    if (!urma_perf_is_enabled()) {
+        return;
+    }
     if (local_idx >= URMA_UBAGG_SQE_TOTAL_DIM || target_idx >= URMA_UBAGG_SQE_TOTAL_DIM) {
         return;
     }
@@ -99,8 +111,14 @@ void urma_ubagg_path_init(void)
     atomic_init(&g_ubagg_wr_complete_cnt, 0);
 }
 
+/* wr_complete_cnt is reported via urma_get_perf_info(), so it belongs to the
+ * original perf interface and is only recorded while urma perf is enabled
+ * (urma_start_perf()/urma_stop_perf()). */
 void urma_ubagg_wr_complete_inc(void)
 {
+    if (!urma_perf_is_enabled()) {
+        return;
+    }
     (void)atomic_fetch_add(&g_ubagg_wr_complete_cnt, 1);
 }
 

@@ -522,47 +522,83 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             padding-bottom: 8px;
             border-bottom: 1px solid #e0e0e0;
         }
+        .chart-header {
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 0;
+        }
+        .chart-header::before {
+            content: '▶';
+            font-size: 12px;
+            color: #5470c6;
+            transition: transform 0.2s;
+        }
+        .chart-header.open::before { transform: rotate(90deg); }
+        .chart-body { display: none; }
+        .chart-body.open { display: block; padding-top: 12px; }
+        .global-toggle {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
     </style>
 </head>
 <body>
     <h1>URMA Performance Visualization</h1>
+    <div class="global-toggle">
+        <button class="qbtn" onclick="expandAll(true)">Expand All</button>
+        <button class="qbtn" onclick="expandAll(false)">Collapse All</button>
+    </div>
 
     <div class="section-title">Path / Port Statistics (toggle view)</div>
     <div class="chart-card">
-        <h2>In-Flight WR Count</h2>
-        <div class="quantile-buttons" id="btns_inflight">
-            <button class="qbtn active" data-view="path" onclick="switchView('inflight', 'path')">Per Path</button>
-            <button class="qbtn" data-view="port" onclick="switchView('inflight', 'port')">Per Port</button>
+        <h2 class="chart-header" onclick="toggleChart(this)">In-Flight WR Count</h2>
+        <div class="chart-body">
+            <div class="quantile-buttons" id="btns_inflight">
+                <button class="qbtn active" data-view="path" onclick="switchView('inflight', 'path')">Per Path</button>
+                <button class="qbtn" data-view="port" onclick="switchView('inflight', 'port')">Per Port</button>
+            </div>
+            <div id="chart_inflight" class="chart"></div>
         </div>
-        <div id="chart_inflight" class="chart"></div>
     </div>
     <div class="chart-card">
-        <h2>RTT Average [ns]</h2>
-        <div class="quantile-buttons" id="btns_rtt">
-            <button class="qbtn active" data-view="path" onclick="switchView('rtt', 'path')">Per Path</button>
-            <button class="qbtn" data-view="port" onclick="switchView('rtt', 'port')">Per Port</button>
+        <h2 class="chart-header" onclick="toggleChart(this)">RTT Average [ns]</h2>
+        <div class="chart-body">
+            <div class="quantile-buttons" id="btns_rtt">
+                <button class="qbtn active" data-view="path" onclick="switchView('rtt', 'path')">Per Path</button>
+                <button class="qbtn" data-view="port" onclick="switchView('rtt', 'port')">Per Port</button>
+            </div>
+            <div id="chart_rtt" class="chart"></div>
         </div>
-        <div id="chart_rtt" class="chart"></div>
     </div>
     <div class="chart-card">
-        <h2>SQE Total</h2>
-        <div class="quantile-buttons" id="btns_sqe">
-            <button class="qbtn active" data-view="path" onclick="switchView('sqe', 'path')">Per Path</button>
-            <button class="qbtn" data-view="port" onclick="switchView('sqe', 'port')">Per Port</button>
+        <h2 class="chart-header" onclick="toggleChart(this)">SQE Total</h2>
+        <div class="chart-body">
+            <div class="quantile-buttons" id="btns_sqe">
+                <button class="qbtn active" data-view="path" onclick="switchView('sqe', 'path')">Per Path</button>
+                <button class="qbtn" data-view="port" onclick="switchView('sqe', 'port')">Per Port</button>
+            </div>
+            <div id="chart_sqe" class="chart"></div>
         </div>
-        <div id="chart_sqe" class="chart"></div>
     </div>
 
     <div class="section-title">Counters</div>
     <div class="chart-card">
-        <h2>WR Complete Count (per window)</h2>
-        <div id="chart_wr_complete" class="chart"></div>
-        <div class="summary" id="summary_wr_complete"></div>
+        <h2 class="chart-header" onclick="toggleChart(this)">WR Complete Count (per window)</h2>
+        <div class="chart-body">
+            <div id="chart_wr_complete" class="chart"></div>
+            <div class="summary" id="summary_wr_complete"></div>
+        </div>
     </div>
     <div class="chart-card">
-        <h2>PJetty In-Flight Count (instantaneous)</h2>
-        <div id="chart_pjetty" class="chart"></div>
-        <div class="summary" id="summary_pjetty"></div>
+        <h2 class="chart-header" onclick="toggleChart(this)">PJetty In-Flight Count (instantaneous)</h2>
+        <div class="chart-body">
+            <div id="chart_pjetty" class="chart"></div>
+            <div class="summary" id="summary_pjetty"></div>
+        </div>
     </div>
 
     <div class="section-title">Latency Statistics (toggle quantile)</div>
@@ -781,27 +817,74 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }
     }
 
-    // -- Initialize all charts --
-    createPathChart('chart_inflight', 'inflight', 'inflight_wr', 'inflight_wr_port', 'In-Flight WRs');
-    createPathChart('chart_rtt', 'rtt', 'rtt_avg', 'rtt_avg_port', 'RTT [ns]');
-    createPathChart('chart_sqe', 'sqe', 'sqe_total', 'sqe_total_port', 'SQE Total');
+    // -- Collapsible sections with lazy chart init --
+    // All sections are collapsed by default. A chart is created only when
+    // its section is first expanded (ECharts cannot init inside a
+    // display:none container), which also keeps initial load fast.
+    var lazyInits = {};   // containerId -> init function
 
-    createSingleChart('chart_wr_complete', 'wr_complete_cnt', 'Count', '#5470c6');
-    createSingleChart('chart_pjetty', 'pjetty_inflight_cnt', 'Count', '#ee6666');
+    function toggleChart(headerEl) {
+        var body = headerEl.nextElementSibling;
+        if (!body || !body.classList.contains('chart-body')) return;
+        var opening = !body.classList.contains('open');
+        headerEl.classList.toggle('open', opening);
+        body.classList.toggle('open', opening);
+        if (!opening) return;
+        var container = body.querySelector('.chart');
+        if (!container) return;
+        if (lazyInits[container.id] && !container._inited) {
+            lazyInits[container.id]();
+            container._inited = true;
+        } else {
+            var inst = echarts.getInstanceByDom(container);
+            if (inst) inst.resize();
+        }
+    }
+
+    function expandAll(open) {
+        var headers = document.querySelectorAll('.chart-header');
+        for (var i = 0; i < headers.length; i++) {
+            var body = headers[i].nextElementSibling;
+            if (body && body.classList.contains('open') !== open) {
+                toggleChart(headers[i]);
+            }
+        }
+    }
+
+    lazyInits['chart_inflight'] = function() {
+        createPathChart('chart_inflight', 'inflight', 'inflight_wr', 'inflight_wr_port', 'In-Flight WRs');
+    };
+    lazyInits['chart_rtt'] = function() {
+        createPathChart('chart_rtt', 'rtt', 'rtt_avg', 'rtt_avg_port', 'RTT [ns]');
+    };
+    lazyInits['chart_sqe'] = function() {
+        createPathChart('chart_sqe', 'sqe', 'sqe_total', 'sqe_total_port', 'SQE Total');
+    };
+    lazyInits['chart_wr_complete'] = function() {
+        createSingleChart('chart_wr_complete', 'wr_complete_cnt', 'Count', '#5470c6');
+    };
+    lazyInits['chart_pjetty'] = function() {
+        createSingleChart('chart_pjetty', 'pjetty_inflight_cnt', 'Count', '#ee6666');
+    };
 
     document.getElementById('summary_wr_complete').innerHTML =
         makeSummary(DATA.wr_complete_cnt.values);
     document.getElementById('summary_pjetty').innerHTML =
         makeSummary(DATA.pjetty_inflight_cnt.values);
 
-    // Latency groups
+    // Latency groups (each card collapsed by default, lazy init)
     var latContainer = document.getElementById('latency_charts');
     DATA.latency_groups.forEach(function(group, gi) {
         var id = 'lat_' + gi;
         var card = document.createElement('div');
         card.className = 'chart-card';
-        card.innerHTML =
-            '<h2>' + group.name + ' Latency</h2>' +
+        var header = document.createElement('h2');
+        header.className = 'chart-header';
+        header.textContent = group.name + ' Latency';
+        header.onclick = function() { toggleChart(this); };
+        var bodyDiv = document.createElement('div');
+        bodyDiv.className = 'chart-body';
+        bodyDiv.innerHTML =
             '<div class="quantile-buttons" id="btns_' + id + '">' +
                 QUANTILES.map(function(q) {
                     return '<button class="qbtn' + (q === 'avg' ? ' active' : '') +
@@ -811,8 +894,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
                 }).join('') +
             '</div>' +
             '<div id="chart_' + id + '" class="chart"></div>';
+        card.appendChild(header);
+        card.appendChild(bodyDiv);
         latContainer.appendChild(card);
-        latencyChartStates[id] = initLatencyChart('chart_' + id, gi);
+        lazyInits['chart_' + id] = function() {
+            latencyChartStates[id] = initLatencyChart('chart_' + id, gi);
+        };
     });
 
     // Responsive
