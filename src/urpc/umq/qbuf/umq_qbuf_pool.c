@@ -468,11 +468,11 @@ static const char *qbuf_lc_labels[QBUF_LC_PATHS] = {
 
 static qbuf_debug_stats_t g_dbg_stats = {0};
 static __thread bool g_dfx_in_async_expand = false; // mark current thread is in async expand path
-__thread bool g_dbg_expansion_happened = false; // per-thread expansion path flag
+static __thread bool g_dbg_expansion_happened = false; // per-thread expansion path flag
 static volatile uint64_t g_dbg_alloc_count = 0;     // total allocs for summary interval
 #define QBUF_DBG_SUMMARY_INTERVAL 10000             // print summary every N allocs
 
-int g_qbuf_debug_enabled = 0;
+static int g_qbuf_debug_enabled = 0;
 // Check if debug mode is on. Guarded by qbuf_debug_on() to skip overhead when off.
 // When UMQ_QBUF_DEBUG is defined, qbuf_debug_on() is provided by umq_qbuf_pool_base.h.
 #ifndef UMQ_QBUF_DEBUG
@@ -480,6 +480,21 @@ static inline bool qbuf_debug_on(void) { return false; }
 #endif
 
 #ifdef UMQ_QBUF_DEBUG
+bool umq_qbuf_dbg_expansion_happened_get(void)
+{
+    return g_dbg_expansion_happened;
+}
+
+void umq_qbuf_dbg_expansion_happened_set(void)
+{
+    g_dbg_expansion_happened = true;
+}
+
+int* umq_qbuf_debug_enabled_get(void)
+{
+    return &g_qbuf_debug_enabled;
+}
+
 __attribute__((noinline, cold)) static void qbuf_dbg_record_alloc_nodata(uint64_t _t0)
 {
     int _lc = g_dbg_expansion_happened ? 2 : 1;
@@ -3125,6 +3140,11 @@ int umq_qbuf_escape_alloc(uint32_t request_size, uint32_t num, umq_alloc_option_
     }
     uint32_t need = request_size + headroom_size;
     uint32_t sc = select_size_class(need);
+    if (sc == UMQ_QBUF_SIZE_CLASS_MAX) {
+        UMQ_LIMIT_VLOG_ERR(VLOG_UMQ, "umq alloc size too large, request_size: %u, headroom: %u, need: %u\n",
+            request_size, headroom_size, need);
+        return -UMQ_ERR_EINVAL;
+    }
     return umq_qbuf_alloc_escape(list, sc);
 }
 
