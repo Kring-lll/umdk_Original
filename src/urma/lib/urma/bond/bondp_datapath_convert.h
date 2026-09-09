@@ -66,7 +66,8 @@ static inline bool jfs_wr_sge_is_remote(const urma_jfs_wr_t *wr, bool is_src)
 }
 
 /* Parse helpers for the bonding user_tseg extension (import-free remote SGE).
- * The buffer must be the whole block produced by urma_get_user_tseg. */
+ * The buffer must be the whole block produced by urma_get_user_tseg /
+ * urma_fill_user_tseg. */
 
 /* Total byte length of a bonding user_tseg buffer; 0 when it has no valid
  * extension or exceeds BONDP_USER_TSEG_MAX_LEN. */
