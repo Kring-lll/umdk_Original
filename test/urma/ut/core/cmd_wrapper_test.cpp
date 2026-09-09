@@ -5,6 +5,8 @@
  */
 
 #include "core_fixture.h"
+#include <future>
+#include <thread>
 
 using namespace urma_test_core;
 
@@ -909,4 +911,55 @@ TEST(UrmaCoreTest, CmdAsyncEventsMapAndAckAllStableObjectTypes)
 
     (void)pthread_cond_destroy(&jettyGrp.event_cond);
     (void)pthread_mutex_destroy(&jettyGrp.event_mutex);
+}
+
+namespace {
+template <typename Object, typename DeleteBatch>
+void CheckBatchWait(Object *object, DeleteBatch deleteBatch, uint32_t *compAcked = nullptr)
+{
+    g_coreBatchAsyncEventsReported = 2;
+    object->async_events_acked = 1;
+    if (compAcked != nullptr) {
+        g_coreBatchCompEventsReported = 2;
+        *compAcked = 1;
+    }
+    Object *objects[] = {object};
+    Object *bad = nullptr;
+    auto result = std::async(std::launch::async, [&]() { return deleteBatch(objects, 1, &bad); });
+    while (!g_coreBatchDeleteStarted.load()) {
+        std::this_thread::yield();
+    }
+    EXPECT_EQ(std::future_status::timeout, result.wait_for(std::chrono::milliseconds(20)));
+    (void)pthread_mutex_lock(&object->event_mutex);
+    object->async_events_acked = 2;
+    (void)pthread_mutex_unlock(&object->event_mutex);
+    if (compAcked != nullptr) {
+        EXPECT_EQ(std::future_status::timeout, result.wait_for(std::chrono::milliseconds(20)));
+        (void)pthread_mutex_lock(&object->event_mutex);
+        *compAcked = 2;
+        (void)pthread_mutex_unlock(&object->event_mutex);
+    }
+    EXPECT_EQ(0, result.get());
+}
+} // namespace
+
+TEST(UrmaCoreTest, CmdBatchDeletionWaitsForActualAcknowledgements)
+{
+    // Bound a broken wait in a child so it cannot hang the entire test suite.
+    ASSERT_EXIT({
+        alarm(5);
+        CmdIoctlFailureFixture fixture;
+        if (!fixture.Init()) {
+            _exit(2);
+        }
+        SetCoreIoctlResult(0, 0);
+        CheckBatchWait(&fixture.jfs, urma_cmd_delete_jfs_batch);
+        g_coreBatchDeleteStarted.store(false);
+        CheckBatchWait(&fixture.jfr, urma_cmd_delete_jfr_batch);
+        g_coreBatchDeleteStarted.store(false);
+        CheckBatchWait(&fixture.jetty, urma_cmd_delete_jetty_batch);
+        g_coreBatchDeleteStarted.store(false);
+        CheckBatchWait(&fixture.jfc, urma_cmd_delete_jfc_batch, &fixture.jfc.comp_events_acked);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+    }, ::testing::ExitedWithCode(0), "");
 }

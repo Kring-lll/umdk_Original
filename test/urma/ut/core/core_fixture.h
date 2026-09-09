@@ -72,6 +72,9 @@ extern uint32_t g_coreAsyncEventType;
 extern uint64_t g_coreAsyncEventData;
 extern uint32_t g_coreQueryJettyFlag;
 extern uint32_t g_coreBatchBadIndex;
+extern uint32_t g_coreBatchAsyncEventsReported;
+extern uint32_t g_coreBatchCompEventsReported;
+extern std::atomic<bool> g_coreBatchDeleteStarted;
 extern std::string g_coreSysfsRedirectRoot;
 extern std::string g_coreProviderDliPath;
 extern int g_coreDlopenCount;
@@ -141,6 +144,9 @@ struct CoreApiFixture {
         urma_test::ResetHwMockState();
         g_coreQueryJettyFlag = URMA_SHARE_JFR;
         g_coreBatchBadIndex = 0;
+        g_coreBatchAsyncEventsReported = 0;
+        g_coreBatchCompEventsReported = 0;
+        g_coreBatchDeleteStarted.store(false);
         g_coreAsyncEventType = URMA_EVENT_PORT_ACTIVE;
         g_coreAsyncEventData = 0x7;
         std::snprintf(dev.name, sizeof(dev.name), "core_ut");
@@ -1235,36 +1241,38 @@ inline void FillCoreBatchDeleteOutput(urma_cmd_hdr_t *hdr, urma_cmd_attr_t *attr
             case URMA_CMD_DELETE_JFC_BATCH:
                 if (attrs[i].type == DELETE_JFC_BATCH_OUT_BAD_JFC_INDEX) {
                     WriteCoreAttrValue(attrs[i], g_coreBatchBadIndex);
-                } else if (attrs[i].type == DELETE_JFC_BATCH_OUT_COMP_EVENTS_REPORTED ||
-                    attrs[i].type == DELETE_JFC_BATCH_OUT_ASYNC_EVENTS_REPORTED) {
-                    WriteCoreAttrValue(attrs[i], 0);
+                } else if (attrs[i].type == DELETE_JFC_BATCH_OUT_COMP_EVENTS_REPORTED) {
+                    WriteCoreAttrValue(attrs[i], g_coreBatchCompEventsReported);
+                } else if (attrs[i].type == DELETE_JFC_BATCH_OUT_ASYNC_EVENTS_REPORTED) {
+                    WriteCoreAttrValue(attrs[i], g_coreBatchAsyncEventsReported);
                 }
                 break;
             case URMA_CMD_DELETE_JFS_BATCH:
                 if (attrs[i].type == DELETE_JFS_BATCH_OUT_BAD_JFS_INDEX) {
                     WriteCoreAttrValue(attrs[i], g_coreBatchBadIndex);
                 } else if (attrs[i].type == DELETE_JFS_BATCH_OUT_ASYNC_EVENTS_REPORTED) {
-                    WriteCoreAttrValue(attrs[i], 0);
+                    WriteCoreAttrValue(attrs[i], g_coreBatchAsyncEventsReported);
                 }
                 break;
             case URMA_CMD_DELETE_JFR_BATCH:
                 if (attrs[i].type == DELETE_JFR_BATCH_OUT_BAD_JFR_INDEX) {
                     WriteCoreAttrValue(attrs[i], g_coreBatchBadIndex);
                 } else if (attrs[i].type == DELETE_JFR_BATCH_OUT_ASYNC_EVENTS_REPORTED) {
-                    WriteCoreAttrValue(attrs[i], 0);
+                    WriteCoreAttrValue(attrs[i], g_coreBatchAsyncEventsReported);
                 }
                 break;
             case URMA_CMD_DELETE_JETTY_BATCH:
                 if (attrs[i].type == DELETE_JETTY_BATCH_OUT_BAD_JETTY_INDEX) {
                     WriteCoreAttrValue(attrs[i], g_coreBatchBadIndex);
                 } else if (attrs[i].type == DELETE_JETTY_BATCH_OUT_ASYNC_EVENTS_REPORTED) {
-                    WriteCoreAttrValue(attrs[i], 0);
+                    WriteCoreAttrValue(attrs[i], g_coreBatchAsyncEventsReported);
                 }
                 break;
             default:
                 break;
         }
     }
+    g_coreBatchDeleteStarted.store(true);
 }
 
 inline void FillCoreWaitNotifyOutput(urma_cmd_attr_t *attrs, size_t attrNum)
