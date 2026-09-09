@@ -436,6 +436,12 @@ func (manager *AigwManager) scheduleRequest(m *gs.GlobalSchedulerManager, in *Ge
 			return nil, fmt.Errorf("unexpected type of suggestion result")
 		}
 	case <-ctx.Done():
+		// The dispatcher may have published concurrently with the context
+		// firing: a drained suggestion means the request is in flight and
+		// nobody else will release it.
+		if sug, ok := msg.Abandon().(*gs.SuggestionResultMsg); ok && sug.PrefillUrl != "" {
+			manager.ErrOnCancel(in.Model, in.SessionID, in.UUID, sug.PrefillUrl, sug.DecodeUrl)
+		}
 		return nil, fmt.Errorf("wait for schedule response timeout")
 	}
 }

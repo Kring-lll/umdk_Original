@@ -320,6 +320,24 @@ func processMessages(messages []base.OpenAiMessage) string {
 // skipping framework-injected <system-reminder> wrappers. It feeds ERR/CatERR
 // classification so the TF-IDF vector reflects the user's task text instead of
 // being dominated by large agent system prompts.
+// internalUserPrefixes: SDK-injected user-role payloads that must not feed
+// the classification input. Mirrors openjiuwen INTERNAL_USER_PREFIXES —
+// keep in sync when the SDK list evolves.
+var internalUserPrefixes = []string{
+	"<system-reminder", "<memory_block_current", "<memory_block_dialogue",
+	"<memory_block_round", "<memory_block_session", "<recovered_context",
+	"[STATE_REINJECTION",
+}
+
+func isInternalUserMessage(content string) bool {
+	for _, p := range internalUserPrefixes {
+		if strings.HasPrefix(content, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func extractUserText(messages []base.OpenAiMessage) string {
 	userText := ""
 	for _, m := range messages {
@@ -327,7 +345,7 @@ func extractUserText(messages []base.OpenAiMessage) string {
 			continue
 		}
 		c := strings.TrimSpace(m.Content)
-		if c == "" || strings.HasPrefix(c, "<system-reminder") {
+		if c == "" || isInternalUserMessage(c) {
 			continue
 		}
 		userText += unwrapContentField(c) + " "
@@ -630,6 +648,12 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		w.Header().Set("Connection", "keep-alive")
 		w.WriteHeader(http.StatusOK)
 
+		// A client that abandons the stream without closing the connection
+		// stops reading; once its TCP window fills, these writes would block
+		// forever (net/http sets no write deadline, and the proxy timeout
+		// only bounds the upstream exchange). The per-write deadline turns
+		// that hang into a write error, handled as a cancellation.
+		wrc := http.NewResponseController(w)
 		for {
 			event, err := result.StreamReader.ReadEvent()
 			if err == io.EOF {
@@ -646,14 +670,26 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 			if fr := parseFinishReason(event.Data); fr != "" {
 				finishReason = fr
 			}
-			if event.Event != "" {
-				fmt.Fprintf(w, "event: %s\n", event.Event)
+			if err := wrc.SetWriteDeadline(time.Now().Add(streamWriteTimeout)); err != nil {
+				log.Debug().Msgf("SetWriteDeadline unsupported: %v", err)
 			}
-			fmt.Fprintf(w, "data: %s\n\n", event.Data)
+			if event.Event != "" {
+				if _, err := fmt.Fprintf(w, "event: %s\n", event.Event); err != nil {
+					log.Warn().Msgf("SSE write error (client gone): %v", err)
+					finishReason = "cancelled"
+					break
+				}
+			}
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", event.Data); err != nil {
+				log.Warn().Msgf("SSE write error (client gone): %v", err)
+				finishReason = "cancelled"
+				break
+			}
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}
 		}
+		wrc.SetWriteDeadline(time.Time{})
 	} else {
 		for k, v := range result.Headers {
 			if k == "Transfer-Encoding" || k == "Connection" {
@@ -709,6 +745,11 @@ func injectPriority(body []byte, priority int) []byte {
 }
 
 // parseFinishReason parses finish_reason from an SSE data line.
+// streamWriteTimeout bounds each write to the SSE client, matching the
+// client chunk-interval budget: a stuck write means the client is gone.
+// Var (not const) so tests can shorten it.
+var streamWriteTimeout = 2 * time.Minute
+
 func parseFinishReason(data string) string {
 	if data == "" || data == "[DONE]" {
 		return ""
