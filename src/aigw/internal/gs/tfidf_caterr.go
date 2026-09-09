@@ -139,7 +139,7 @@ func (c *CatErrClassifier) Classify(prompt string) string {
 
 	tokens := tokenizePrompt(prompt)
 	if len(tokens) == 0 {
-		return c.labels[0]
+		return ""
 	}
 
 	vec := c.computeTfidf(tokens)
@@ -155,6 +155,12 @@ func (c *CatErrClassifier) Classify(prompt string) string {
 			bestSim = sim
 			bestIdx = i
 		}
+	}
+
+	// Zero vector (no vocabulary hit): "cannot classify" must not assert
+	// the first cluster — "" routes the caller to the mixture fallback.
+	if bestSim <= 0 {
+		return ""
 	}
 
 	return c.labels[bestIdx]

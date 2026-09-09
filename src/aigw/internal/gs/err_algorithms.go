@@ -75,6 +75,25 @@ type CatErrAlg struct {
 	Classifier *CatErrClassifier
 	CatDists   map[string]*EmpiricalDist
 	mu         *sync.RWMutex
+
+	// CategoryFor resolves a session's locked category (session stickiness).
+	// Nil in tests without a tracker; the prompt is classified instead.
+	CategoryFor func(sessionID string) string
+}
+
+// categoryFor returns the session's LOCKED category when one exists
+// (stickiness: first classifiable request decides, surviving later
+// input-form changes), else the prompt's own classification.
+func (a *CatErrAlg) categoryFor(sessionID, prompt string) string {
+	if sessionID != "" && a.CategoryFor != nil {
+		if cat := a.CategoryFor(sessionID); cat != "" {
+			return cat
+		}
+	}
+	if a.Classifier != nil && a.Classifier.IsLoaded() {
+		return a.Classifier.Classify(prompt)
+	}
+	return ""
 }
 
 func NewCatErrAlg(classifier *CatErrClassifier, catDists map[string]*EmpiricalDist,
@@ -86,37 +105,70 @@ func NewCatErrAlg(classifier *CatErrClassifier, catDists map[string]*EmpiricalDi
 	}
 }
 
-func (a *CatErrAlg) Priority(_ string, curStep int, prompt string) float64 {
+func (a *CatErrAlg) Priority(sessionID string, curStep int, prompt string) float64 {
 	if curStep <= 0 {
 		curStep = 1
 	}
-	if a.Classifier != nil && a.Classifier.IsLoaded() {
-		category := a.Classifier.Classify(prompt)
-		if category != "" {
-			a.mu.RLock()
-			dist, ok := a.CatDists[category]
-			a.mu.RUnlock()
-			if ok && dist.TotalCount() > 0 {
-				return dist.ExpectedRemaining(curStep)
-			}
+	if category := a.categoryFor(sessionID, prompt); category != "" {
+		a.mu.RLock()
+		dist, ok := a.CatDists[category]
+		a.mu.RUnlock()
+		if ok && dist.TotalCount() > 0 {
+			return dist.ExpectedRemaining(curStep)
+		}
+	}
+	if a.mu != nil {
+		a.mu.RLock()
+		mix, ok := mixtureExpectedRemaining(a.CatDists, curStep)
+		a.mu.RUnlock()
+		if ok {
+			return mix
 		}
 	}
 	return -float64(curStep)
 }
 
-func (a *CatErrAlg) PriorityWith(snap *algoSnapshot, _ string, curStep int, prompt string) float64 {
+func (a *CatErrAlg) PriorityWith(snap *algoSnapshot, sessionID string, curStep int, prompt string) float64 {
 	if curStep <= 0 {
 		curStep = 1
 	}
-	if a.Classifier != nil && a.Classifier.IsLoaded() {
-		category := a.Classifier.Classify(prompt)
-		if category != "" && snap != nil && snap.cats != nil {
+	if category := a.categoryFor(sessionID, prompt); category != "" {
+		if snap != nil && snap.cats != nil {
 			if s, ok := snap.cats[category]; ok && s.TotalCount() > 0 {
 				return s.ExpectedRemaining(curStep)
 			}
 		}
 	}
+	if snap != nil {
+		if mix, ok := mixtureExpectedRemaining(snap.cats, curStep); ok {
+			return mix
+		}
+	}
 	return -float64(curStep)
+}
+
+// mixtureExpectedRemaining ranks an unclassifiable request as a typical
+// task: the count-weighted average of per-category E[rem|k]. (-k would
+// outrank every classified session — all positive E[rem]; labels[0] would
+// park it in the worst tier.)
+func mixtureExpectedRemaining[D interface {
+	TotalCount() int
+	ExpectedRemaining(int) float64
+}](cats map[string]D, curStep int) (float64, bool) {
+	var weighted float64
+	var total int64
+	for _, s := range cats {
+		n := int64(s.TotalCount())
+		if n <= 0 {
+			continue
+		}
+		weighted += s.ExpectedRemaining(curStep) * float64(n)
+		total += n
+	}
+	if total == 0 {
+		return 0, false
+	}
+	return weighted / float64(total), true
 }
 
 func (a *CatErrAlg) Name() string { return "caterr" }
