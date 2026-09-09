@@ -145,7 +145,7 @@ func (a *CatErrAlg) PriorityWith(snap *algoSnapshot, sessionID string, curStep i
 }
 
 // mixtureExpectedRemaining ranks an unclassifiable request as a typical
-// task (count-weighted E[rem|k]); -k would outrank every classified session.
+// task: the count-weighted average of per-category E[rem|k].
 func mixtureExpectedRemaining[D interface {
 	TotalCount() int
 	ExpectedRemaining(int) float64
