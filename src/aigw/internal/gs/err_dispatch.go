@@ -38,8 +38,7 @@ func (m *GlobalSchedulerManager) dispatchErr(msg *ControlMessage) {
 		return
 	}
 
-	// Advisory callers forward the request themselves, so aigw never observes
-	// completion: ERR must not queue, track, or take slots.
+	// Advisory callers forward themselves: ERR must not queue, track, or take slots.
 	if req.Advisory {
 		m.dispatchMu.Lock()
 		m.dispatchAdvisory(msg)
@@ -96,8 +95,7 @@ func (m *GlobalSchedulerManager) computePrioritySingle(sessionID string, curStep
 	return int(m.errScheduler.Priority(sessionID, curStep, prompt))
 }
 
-// dispatchWithQueue enqueues a request; on a full queue it rejects the
-// less-progress side. Caller must hold m.dispatchMu.
+// dispatchWithQueue enqueues a request. Caller must hold m.dispatchMu.
 func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, curStep int) {
 	req := msg.Request.(*ScheduleRequestMsg)
 
@@ -125,8 +123,6 @@ func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, curStep 
 		SessionID: req.SessionID,
 		CurStep:   curStep,
 		Msg:       msg,
-		// Fold carried starvation debt from prior starved attempts into the
-		// starvation clock: a starved retry re-enters at the boost floor.
 		StarveClock: time.Now().Add(-m.errScheduler.TakeQueueWaitCarry(req.SessionID)),
 	}); err != nil {
 		msg.Response <- err
@@ -162,8 +158,6 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 			} else {
 				p = int(m.errScheduler.PriorityWith(snap, r.SessionID, r.CurStep, classifyPrompt(req)))
 			}
-			// Starvation floor: sentinel below every priority domain (MEJ's
-			// -curStep makes 0 the WORST rank); tier ordered by StarveClock.
 			if boostDur > 0 && time.Since(r.StarveClock) >= boostDur {
 				p = math.MinInt32
 			}
@@ -217,9 +211,8 @@ func (m *GlobalSchedulerManager) computePriorityWithSnapshot(snap *algoSnapshot,
 	return int(m.errScheduler.PriorityWith(snap, sessionID, curStep, prompt))
 }
 
-// dispatchAdvisory serves query-only requests: LB picks an instance and the
-// priority hint, but ERR takes no slot and registers nothing. AddRequest
-// stays — its cleanup is the instance-side k8s lifecycle. Caller must hold m.dispatchMu.
+// dispatchAdvisory: query-only requests — LB + hint, no ERR books;
+// AddRequest stays on the k8s lifecycle. Caller must hold m.dispatchMu.
 func (m *GlobalSchedulerManager) dispatchAdvisory(msg *ControlMessage) {
 	req := msg.Request.(*ScheduleRequestMsg)
 	priority := int(m.errScheduler.AnonymousPriority(classifyPrompt(req)))
@@ -243,8 +236,7 @@ func (m *GlobalSchedulerManager) dispatchDirect(msg *ControlMessage, priority in
 }
 
 // rollbackFailedAttempt undoes the k++ of a pre-dispatch failure and
-// carries the starved wait into the session. Exactly once per attempt:
-// callers answer the request immediately after.
+// carries the starved wait into the session. Exactly once per attempt.
 func (m *GlobalSchedulerManager) rollbackFailedAttempt(sessionID string, waited time.Duration) {
 	if m.errScheduler != nil {
 		m.errScheduler.OnQueueTimeout(sessionID, waited)
@@ -345,8 +337,7 @@ func (m *GlobalSchedulerManager) undoDispatched(req *ScheduleRequestMsg,
 	}
 }
 
-// errInFlightEntry is keyed by reqID in m.errInFlight; release is
-// idempotent (first releaser wins), so racing cleanup paths cannot double-fire.
+// errInFlightEntry: keyed by reqID; release is idempotent (first releaser wins).
 type errInFlightEntry struct {
 	SessionID    string
 	PrefillURL   string
