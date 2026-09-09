@@ -1258,7 +1258,7 @@ int umq_ub_create_urma_ctx(urma_device_t *urma_dev, uint32_t eid_index, umq_ub_c
             .enable_rnr_retry = true,
         };
         in.addr = (uint64_t)(uintptr_t)&cfg;
-        in.len = sizeof(cfg);
+        in.len = (uint32_t)sizeof(cfg);
         in.opcode = BONDP_USER_CTL_SET_CTX_CFG;
         status = umq_symbol_urma()->urma_user_ctl(ub_ctx->urma_ctx, &in, &out);
         if (status != URMA_SUCCESS) {
