@@ -76,14 +76,11 @@ type CatErrAlg struct {
 	CatDists   map[string]*EmpiricalDist
 	mu         *sync.RWMutex
 
-	// CategoryFor resolves a session's locked category (session stickiness).
-	// Nil in tests without a tracker; the prompt is classified instead.
+	// CategoryFor resolves a session's locked category; nil falls back to prompt classification.
 	CategoryFor func(sessionID string) string
 }
 
-// categoryFor returns the session's LOCKED category when one exists
-// (stickiness: first classifiable request decides, surviving later
-// input-form changes), else the prompt's own classification.
+// categoryFor: the session's locked category if set, else classify the prompt.
 func (a *CatErrAlg) categoryFor(sessionID, prompt string) string {
 	if sessionID != "" && a.CategoryFor != nil {
 		if cat := a.CategoryFor(sessionID); cat != "" {
@@ -148,9 +145,7 @@ func (a *CatErrAlg) PriorityWith(snap *algoSnapshot, sessionID string, curStep i
 }
 
 // mixtureExpectedRemaining ranks an unclassifiable request as a typical
-// task: the count-weighted average of per-category E[rem|k]. (-k would
-// outrank every classified session — all positive E[rem]; labels[0] would
-// park it in the worst tier.)
+// task (count-weighted E[rem|k]); -k would outrank every classified session.
 func mixtureExpectedRemaining[D interface {
 	TotalCount() int
 	ExpectedRemaining(int) float64

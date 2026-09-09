@@ -39,8 +39,7 @@ func (m *GlobalSchedulerManager) dispatchErr(msg *ControlMessage) {
 	}
 
 	// Advisory callers forward the request themselves, so aigw never observes
-	// completion: ERR must not track the session, queue the request, or take
-	// in-flight slots. LB selection and the priority hint still apply.
+	// completion: ERR must not queue, track, or take slots.
 	if req.Advisory {
 		m.dispatchMu.Lock()
 		m.dispatchAdvisory(msg)
@@ -78,10 +77,8 @@ func (m *GlobalSchedulerManager) dispatchErr(msg *ControlMessage) {
 	}
 }
 
-// classifyPrompt returns the text used for ERR/CatERR classification and
-// priority computation: the user-role content when the client supplied it
-// (avoids large system prompts dominating the TF-IDF vector), else the full
-// concatenated prompt (legacy behavior).
+// classifyPrompt returns the classification input: user-role content when
+// supplied (system prompts would dominate the TF-IDF vector), else the full prompt.
 func classifyPrompt(req *ScheduleRequestMsg) string {
 	if req != nil && req.Request != nil {
 		if req.Request.UserPrompt != "" {
@@ -99,10 +96,8 @@ func (m *GlobalSchedulerManager) computePrioritySingle(sessionID string, curStep
 	return int(m.errScheduler.Priority(sessionID, curStep, prompt))
 }
 
-// dispatchWithQueue enqueues a request. On full queue, rejects the request
-// with lower curStep (less progress, better UX) or evicts the lowest-curStep
-// queued request if the new one has more progress.
-// Caller must hold m.dispatchMu.
+// dispatchWithQueue enqueues a request; on a full queue it rejects the
+// less-progress side. Caller must hold m.dispatchMu.
 func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, curStep int) {
 	req := msg.Request.(*ScheduleRequestMsg)
 
@@ -167,10 +162,8 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 			} else {
 				p = int(m.errScheduler.PriorityWith(snap, r.SessionID, r.CurStep, classifyPrompt(req)))
 			}
-			// Starvation floor: the sentinel must sit below every algorithm's
-			// priority domain — MEJ produces negative -curStep, where 0 would
-			// be the WORST rank. Within the tier StarveClock (total starved
-			// wait, carried debt included) orders.
+			// Starvation floor: sentinel below every priority domain (MEJ's
+			// -curStep makes 0 the WORST rank); tier ordered by StarveClock.
 			if boostDur > 0 && time.Since(r.StarveClock) >= boostDur {
 				p = math.MinInt32
 			}
@@ -197,9 +190,7 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 				pr.Msg.Response <- ErrNoInstance
 				m.pendingQueue.Remove(pr.ReqID)
 				if pr.SessionID != "" {
-					// Rollback happens here, exactly once: the request
-					// already left the queue, so the handler-side three-state
-					// cleanup cannot see it.
+					// Rollback here, exactly once: the request left the queue.
 					m.errScheduler.OnQueueTimeout(pr.SessionID, time.Since(pr.StarveClock))
 				}
 				continue
@@ -227,11 +218,8 @@ func (m *GlobalSchedulerManager) computePriorityWithSnapshot(snap *algoSnapshot,
 }
 
 // dispatchAdvisory serves query-only requests: LB picks an instance and the
-// priority hint is computed, but ERR takes no in-flight slot and registers
-// nothing. AddRequest still feeds the LB view — the instance-side
-// REQUEST_IS_FINISHED event or the reqSet survival scan cleans it up, which
-// is the original lifecycle for caller-forwarded requests.
-// Caller must hold m.dispatchMu.
+// priority hint, but ERR takes no slot and registers nothing. AddRequest
+// stays — its cleanup is the instance-side k8s lifecycle. Caller must hold m.dispatchMu.
 func (m *GlobalSchedulerManager) dispatchAdvisory(msg *ControlMessage) {
 	req := msg.Request.(*ScheduleRequestMsg)
 	priority := int(m.errScheduler.AnonymousPriority(classifyPrompt(req)))
@@ -246,7 +234,6 @@ func (m *GlobalSchedulerManager) dispatchDirect(msg *ControlMessage, priority in
 	result := m.scheduler.schedule(req, nil)
 
 	if result.PrefillUrl == "" {
-		// Never queued — rollback happens here (see rollbackFailedAttempt).
 		m.rollbackFailedAttempt(req.SessionID, 0)
 		msg.Response <- &SuggestionResultMsg{}
 		return
@@ -255,22 +242,17 @@ func (m *GlobalSchedulerManager) dispatchDirect(msg *ControlMessage, priority in
 	m.dispatchScheduled(msg, req, result, priority, false)
 }
 
-// rollbackFailedAttempt undoes the k++ of an attempt that failed before
-// dispatch (queue-full reject/evict, LB empty, AddRequest failure) and
-// carries its starved wait into the session for the retry. Exactly once per
-// attempt: callers answer the request immediately, so the handler-side
-// three-state cleanup never finds a queued entry.
+// rollbackFailedAttempt undoes the k++ of a pre-dispatch failure and
+// carries the starved wait into the session. Exactly once per attempt:
+// callers answer the request immediately after.
 func (m *GlobalSchedulerManager) rollbackFailedAttempt(sessionID string, waited time.Duration) {
 	if m.errScheduler != nil {
 		m.errScheduler.OnQueueTimeout(sessionID, waited)
 	}
 }
 
-// dispatchScheduled is the shared dispatch step for all modes. Feeds RR's
-// instance capacity (AddRequest), KVC hooks, model-level in-flight tracking,
-// writes the response with priority hint. advisory requests skip the ERR
-// in-flight bookkeeping only (their completion is never observed by aigw).
-// Caller must hold m.dispatchMu.
+// dispatchScheduled is the shared dispatch step for all modes: LB view,
+// KVC hooks, ERR in-flight books, response. Caller must hold m.dispatchMu.
 func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *ScheduleRequestMsg,
 	result *ScheduleResult, priority int, advisory bool) {
 
@@ -282,7 +264,6 @@ func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *Sch
 			GroupID:          result.PrefillGroupID,
 			DecodeInstanceID: result.DecodeUrl,
 		}); err != nil {
-			// Already dequeued — rollback happens here (see rollbackFailedAttempt).
 			if !advisory {
 				m.rollbackFailedAttempt(req.SessionID, 0)
 			}
@@ -339,9 +320,8 @@ func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *Sch
 	}
 }
 
-// undoDispatched rolls back every book dispatchScheduled took for a dispatch
-// the requester abandoned (in-flight slot, errInFlight entry, LB view) and
-// rolls k back. Caller must hold m.dispatchMu.
+// undoDispatched rolls back a dispatch the requester abandoned.
+// Caller must hold m.dispatchMu.
 func (m *GlobalSchedulerManager) undoDispatched(req *ScheduleRequestMsg,
 	result *ScheduleResult, advisory bool) {
 	log.Warn().Msgf("[ERR] req %s (session %s) dispatch abandoned by requester — releasing accounting",
@@ -365,11 +345,8 @@ func (m *GlobalSchedulerManager) undoDispatched(req *ScheduleRequestMsg,
 	}
 }
 
-// errInFlightEntry records the dispatch metadata for a single in-flight ERR
-// request, keyed by reqID in m.errInFlight. Used to make cleanup idempotent:
-// a reqID can only be released once, so OnCompleted/RemoveRequest/session
-// side-effects cannot double-fire even if onInstanceUnhealthy and ErrOnResponse
-// race for the same request.
+// errInFlightEntry is keyed by reqID in m.errInFlight; release is
+// idempotent (first releaser wins), so racing cleanup paths cannot double-fire.
 type errInFlightEntry struct {
 	SessionID    string
 	PrefillURL   string
@@ -377,8 +354,7 @@ type errInFlightEntry struct {
 	DispatchTime time.Time
 }
 
-// ErrInFlightCount returns the number of dispatched-but-unreleased ERR
-// requests. Returns 0 when ERR scheduling is disabled.
+// ErrInFlightCount returns dispatched-but-unreleased ERR requests (0 if ERR is off).
 func (m *GlobalSchedulerManager) ErrInFlightCount() int {
 	if m.errScheduler == nil {
 		return 0
@@ -388,11 +364,8 @@ func (m *GlobalSchedulerManager) ErrInFlightCount() int {
 	return len(m.errInFlight)
 }
 
-// checkErrInFlightSurvival force-releases in-flight entries whose completion
-// callback was lost (e.g. a handler panic after dispatch), mirroring what
-// checkReqSurvival does for the LB's reqSet. Threshold is SessionTimeoutSec
-// (well above any legitimate single-round latency); 0 falls back to
-// defaultErrReqSurvivalSec. Caller must hold m.dispatchMu.
+// checkErrInFlightSurvival force-releases entries whose completion callback
+// was lost; threshold is SessionTimeoutSec. Caller must hold m.dispatchMu.
 func (m *GlobalSchedulerManager) checkErrInFlightSurvival() {
 	threshold := time.Duration(m.errScheduler.config.SessionTimeoutSec) * time.Second
 	if threshold <= 0 {
@@ -406,18 +379,15 @@ func (m *GlobalSchedulerManager) checkErrInFlightSurvival() {
 		if _, released := m.errReleaseReq(reqID); !released {
 			continue
 		}
-		// Release ONLY the leaked entry: the session may still be alive and
-		// mid-task; dead sessions are cleaned up by their own idle timer.
+		// Release ONLY the leaked entry — the session may still be alive.
 		log.Warn().Msgf("[ERR] req %s (session %s) zombie-released after %v, completion callback lost",
 			reqID, entry.SessionID, threshold)
 	}
 	m.tryDispatchFromQueue()
 }
 
-// errReleaseReq releases the in-flight tracking for reqID. Returns the entry
-// and true if this call was the one that released it; returns false (no-op)
-// if the request was already released or never registered.
-// Caller must hold m.dispatchMu.
+// errReleaseReq idempotently releases reqID; reports whether this call was
+// the releaser. Caller must hold m.dispatchMu.
 func (m *GlobalSchedulerManager) errReleaseReq(reqID string) (errInFlightEntry, bool) {
 	if reqID == "" {
 		return errInFlightEntry{}, false
@@ -456,8 +426,6 @@ func (m *GlobalSchedulerManager) ErrOnResponse(sessionID, reqID, prefillURL, dec
 		case "stop":
 			m.errScheduler.OnFinish(sessionID)
 		case "cancelled":
-			// The client never received this step: roll k back, keep the
-			// session for the SDK retry.
 			m.errScheduler.RollbackInFlightAttempt(sessionID)
 			log.Warn().Msgf("[ERR] session %s stream cancelled (insURL=%s), k rolled back awaiting retry", sessionID, prefillURL)
 		default:
@@ -489,9 +457,7 @@ func (m *GlobalSchedulerManager) ErrOnCancel(sessionID, reqID, prefillURL, decod
 		}
 
 		if prefillURL == "" {
-			// Never dispatched: the attempt completed no step, so roll back k
-			// and carry the starved wait (StarveClock age) into the session —
-			// the retry re-enters at the same step, already at the boost floor.
+			// Never dispatched: roll back k, carry the starved wait.
 			queued := false
 			starved := time.Duration(0)
 			for _, pr := range removed {
@@ -505,14 +471,10 @@ func (m *GlobalSchedulerManager) ErrOnCancel(sessionID, reqID, prefillURL, decod
 			if queued {
 				m.errScheduler.OnQueueTimeout(sessionID, starved)
 			} else {
-				// rejected before queueing (validation / fast-fail): the
-				// session keeps its progress, but arm the idle timer so an
-				// abandoned session is still cleaned up
+				// Rejected before queueing: keep the progress, arm the idle timer.
 				m.errScheduler.RestartIdleTimer(sessionID)
 			}
 		} else {
-			// Dispatched but the client saw nothing of it: roll k back and
-			// keep the session for the retry (idle timer collects it if none).
 			m.errScheduler.RollbackInFlightAttempt(sessionID)
 		}
 	}
@@ -520,9 +482,8 @@ func (m *GlobalSchedulerManager) ErrOnCancel(sessionID, reqID, prefillURL, decod
 	m.dispatchMu.Unlock()
 }
 
-// onInstanceUnhealthy releases all in-flight tracking for requests
-// dispatched to the now-unhealthy instance, then drains the queue.
-// Caller does NOT hold dispatchMu — cleanup and drain acquire it internally.
+// onInstanceUnhealthy releases in-flight tracking for requests dispatched
+// to the now-unhealthy instance, then drains the queue.
 func (m *GlobalSchedulerManager) onInstanceUnhealthy(insUrl string) {
 	if m.errScheduler == nil {
 		return
@@ -539,8 +500,6 @@ func (m *GlobalSchedulerManager) onInstanceUnhealthy(insUrl string) {
 		}
 		cleaned++
 		if entry.SessionID != "" {
-			// k rolls back, session kept; queued siblings are not collateral
-			// — they re-dispatch to a healthy instance.
 			m.errScheduler.RollbackInFlightAttempt(entry.SessionID)
 		}
 	}
