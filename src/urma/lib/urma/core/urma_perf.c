@@ -651,12 +651,12 @@ urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length)
             "  %-20s | %-10lu | %-10lu | %-10lu | %-10lu | %-10lu | %-10lu | %-10lu | %-12lu \n",
             perf_type_names[i],
             perf_info.type_record[i].sample_num,
-            perf_info.type_record[i].average / (i == BOND_SQE_INFLIGHT_DIFF ? 100 : 1),
-            perf_info.type_record[i].mininum / (i == BOND_SQE_INFLIGHT_DIFF ? 100 : 1),
-            perf_info.type_record[i].maxinum / (i == BOND_SQE_INFLIGHT_DIFF ? 100 : 1),
-            perf_info.type_record[i].p90 / (i == BOND_SQE_INFLIGHT_DIFF ? 100 : 1),
-            perf_info.type_record[i].p99 / (i == BOND_SQE_INFLIGHT_DIFF ? 100 : 1),
-            perf_info.type_record[i].p9999 / (i == BOND_SQE_INFLIGHT_DIFF ? 100 : 1),
+            perf_info.type_record[i].average / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].mininum / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].maxinum / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].p90 / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].p99 / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].p9999 / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
             perf_info.type_record[i].max_under_127ms);
     }
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,

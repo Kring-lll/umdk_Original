@@ -114,7 +114,7 @@ static void bondp_record_inflight_diff(const bondp_comp_t *comp)
         (void)urma_perf_record_single_port(BOND_SQE_INFLIGHT_DIFF);
         return;
     }
-    (void)urma_step_perf(BOND_SQE_INFLIGHT_DIFF, (cur_max - cur_min) * 10);
+    (void)urma_step_perf(BOND_SQE_INFLIGHT_DIFF, (cur_max - cur_min) * URMA_PERF_INFLIGHT_DIFF_SCALE);
 }
 
 static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, int target_idx,
@@ -132,10 +132,14 @@ static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, int target
     if (ret == URMA_SUCCESS) {
         atomic_fetch_add(&comp->sqe_cnt[send_idx][target_idx], wr_count);
         urma_ubagg_sqe_total_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)wr_count);
-        urma_ubagg_inflight_path_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)wr_count);
-        uint32_t old_pjetty = atomic_fetch_add(&comp->inflight_per_pjetty[send_idx], (uint32_t)wr_count);
-        if (old_pjetty == 0) {
-            urma_ubagg_pjetty_inflight_inc();
+        /* Per-path/pjetty in-flight stats: only tracked while path perf is
+         * enabled (urma_start_path_perf()/urma_stop_path_perf()). */
+        if (urma_ubagg_path_is_enabled()) {
+            urma_ubagg_inflight_path_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)wr_count);
+            uint32_t old_pjetty = atomic_fetch_add(&comp->inflight_per_pjetty[send_idx], (uint32_t)wr_count);
+            if (old_pjetty == 0) {
+                urma_ubagg_pjetty_inflight_inc();
+            }
         }
         bondp_record_inflight_diff(comp);
     } else {
@@ -411,10 +415,12 @@ static void failback_resend_wr(bondp_comp_t *bdp_comp, uint64_t resend_wr_id)
     }
 
     atomic_fetch_sub(&bdp_comp->sqe_cnt[old_send_idx][old_target_idx], 1);
-    urma_ubagg_inflight_path_dec((uint32_t)old_send_idx, (uint32_t)old_target_idx, 1);
-    uint32_t old_pjetty = atomic_fetch_sub(&bdp_comp->inflight_per_pjetty[old_send_idx], 1);
-    if (old_pjetty == 1) {
-        urma_ubagg_pjetty_inflight_dec();
+    if (urma_ubagg_path_is_enabled()) {
+        urma_ubagg_inflight_path_dec((uint32_t)old_send_idx, (uint32_t)old_target_idx, 1);
+        uint32_t old_pjetty = atomic_fetch_sub(&bdp_comp->inflight_per_pjetty[old_send_idx], 1);
+        if (old_pjetty == 1) {
+            urma_ubagg_pjetty_inflight_dec();
+        }
     }
     if (bondp_resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
         URMA_LOG_ERR("Failed failback resend on post, wr_id=%lu, vjetty_id=%u, tjetty_id=%u, "
@@ -459,10 +465,12 @@ static void bondp_translate_bad_wr(bondp_comp_t *bdp_comp, int send_idx, int tar
     }
     atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], bad_idx);
     urma_ubagg_sqe_total_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)bad_idx);
-    urma_ubagg_inflight_path_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)bad_idx);
-    uint32_t old_pjetty = atomic_fetch_add(&bdp_comp->inflight_per_pjetty[send_idx], (uint32_t)bad_idx);
-    if (old_pjetty == 0) {
-        urma_ubagg_pjetty_inflight_inc();
+    if (urma_ubagg_path_is_enabled()) {
+        urma_ubagg_inflight_path_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)bad_idx);
+        uint32_t old_pjetty = atomic_fetch_add(&bdp_comp->inflight_per_pjetty[send_idx], (uint32_t)bad_idx);
+        if (old_pjetty == 0) {
+            urma_ubagg_pjetty_inflight_inc();
+        }
     }
     bondp_record_inflight_diff(bdp_comp);
     urma_jfs_wr_t *user_cur = (urma_jfs_wr_t *)wr;
@@ -775,10 +783,13 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             }
             atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], success_node);
             urma_ubagg_sqe_total_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)success_node);
-            urma_ubagg_inflight_path_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)success_node);
-            uint32_t old_pjetty = atomic_fetch_add(&bdp_comp->inflight_per_pjetty[send_idx], (uint32_t)success_node);
-            if (old_pjetty == 0) {
-                urma_ubagg_pjetty_inflight_inc();
+            if (urma_ubagg_path_is_enabled()) {
+                urma_ubagg_inflight_path_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)success_node);
+                uint32_t old_pjetty = atomic_fetch_add(&bdp_comp->inflight_per_pjetty[send_idx],
+                                                       (uint32_t)success_node);
+                if (old_pjetty == 0) {
+                    urma_ubagg_pjetty_inflight_inc();
+                }
             }
             bondp_record_inflight_diff(bdp_comp);
             for (int j = success_node; j < wr_total; j++) {
@@ -1335,10 +1346,12 @@ static void resend_matched_jfs_wrs(bondp_comp_t *bdp_comp, uint64_t base_wr_id,
         }
 
         atomic_fetch_sub(&bdp_comp->sqe_cnt[old_send_idx][old_target_idx], 1);
-        urma_ubagg_inflight_path_dec((uint32_t)old_send_idx, (uint32_t)old_target_idx, 1);
-        uint32_t old_pjetty = atomic_fetch_sub(&bdp_comp->inflight_per_pjetty[old_send_idx], 1);
-        if (old_pjetty == 1) {
-            urma_ubagg_pjetty_inflight_dec();
+        if (urma_ubagg_path_is_enabled()) {
+            urma_ubagg_inflight_path_dec((uint32_t)old_send_idx, (uint32_t)old_target_idx, 1);
+            uint32_t old_pjetty = atomic_fetch_sub(&bdp_comp->inflight_per_pjetty[old_send_idx], 1);
+            if (old_pjetty == 1) {
+                urma_ubagg_pjetty_inflight_dec();
+            }
         }
         if (bondp_resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
             URMA_LOG_ERR("Failed to resend %s jfs wr, wr_id=%lu\n", reason, resend_wr_id);
@@ -1581,10 +1594,12 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         uint64_t user_ctx = wr_entry->user_ctx;
         uint32_t retry_cnt = wr_entry->rnr_retry_cnt;
         atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
-        urma_ubagg_inflight_path_dec((uint32_t)send_idx, (uint32_t)target_idx, 1);
-        uint32_t old_pjetty = atomic_fetch_sub(&bdp_comp->inflight_per_pjetty[send_idx], 1);
-        if (old_pjetty == 1) {
-            urma_ubagg_pjetty_inflight_dec();
+        if (urma_ubagg_path_is_enabled()) {
+            urma_ubagg_inflight_path_dec((uint32_t)send_idx, (uint32_t)target_idx, 1);
+            uint32_t old_pjetty = atomic_fetch_sub(&bdp_comp->inflight_per_pjetty[send_idx], 1);
+            if (old_pjetty == 1) {
+                urma_ubagg_pjetty_inflight_dec();
+            }
         }
         wr_entry->rnr_retry_pending = true;
         if (retry_cnt == 0) {
@@ -1711,10 +1726,12 @@ CONVERT_CR:
         return CONVERT_SKIP;
     }
     atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
-    urma_ubagg_inflight_path_dec((uint32_t)send_idx, (uint32_t)target_idx, 1);
-    uint32_t old_pjetty = atomic_fetch_sub(&bdp_comp->inflight_per_pjetty[send_idx], 1);
-    if (old_pjetty == 1) {
-        urma_ubagg_pjetty_inflight_dec();
+    if (urma_ubagg_path_is_enabled()) {
+        urma_ubagg_inflight_path_dec((uint32_t)send_idx, (uint32_t)target_idx, 1);
+        uint32_t old_pjetty = atomic_fetch_sub(&bdp_comp->inflight_per_pjetty[send_idx], 1);
+        if (old_pjetty == 1) {
+            urma_ubagg_pjetty_inflight_dec();
+        }
     }
     urma_ubagg_wr_complete_inc();
 
@@ -1836,10 +1853,12 @@ static cr_convert_ret_t bondp_handle_cr_no_store(bondp_context_t *bdp_ctx, int i
         comp->rqe_cnt[idx] -= 1;
     } else {
         atomic_fetch_sub(&comp->sqe_cnt[idx][0], 1);
-        urma_ubagg_inflight_path_dec((uint32_t)idx, 0, 1);
-        uint32_t old_pjetty = atomic_fetch_sub(&comp->inflight_per_pjetty[idx], 1);
-        if (old_pjetty == 1) {
-            urma_ubagg_pjetty_inflight_dec();
+        if (urma_ubagg_path_is_enabled()) {
+            urma_ubagg_inflight_path_dec((uint32_t)idx, 0, 1);
+            uint32_t old_pjetty = atomic_fetch_sub(&comp->inflight_per_pjetty[idx], 1);
+            if (old_pjetty == 1) {
+                urma_ubagg_pjetty_inflight_dec();
+            }
         }
         urma_ubagg_wr_complete_inc();
     }

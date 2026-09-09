@@ -24,6 +24,13 @@ extern "C" {
 #define URMA_UBAGG_SQE_TOTAL_DIM 20
 #endif
 
+/* BOND_SQE_INFLIGHT_DIFF samples are single-digit counts that would be
+ * dropped by the perf bucket granularity (bucket 0 covers [0,1) and
+ * urma_step_perf skips delta==0), so they are scaled up by this factor
+ * when recorded and divided back by the same factor when displayed.
+ * Keep both sides consistent via this single macro. */
+#define URMA_PERF_INFLIGHT_DIFF_SCALE   10
+
 typedef enum urma_perf_type {
     UB_JETTY_POST_SEND,
     BOND_JETTY_POST_SEND,
@@ -50,7 +57,8 @@ typedef enum urma_perf_type {
 typedef struct urma_perf_stats {
     uint64_t retry_count;
     /* Count of WRs completed (successful poll) during the time window since
-     * the previous urma_get_perf_info() call. Snapshot+reset on each dump. */
+     * the previous urma_get_perf_info() call. Snapshot+reset on each dump.
+     * Recorded only while perf is enabled (urma_start_perf()). */
     uint64_t wr_complete_cnt;
     /* Per-path average WR RTT [local_idx][target_idx] over the time window
      * since the previous urma_get_perf_info() call. Read from the global
@@ -90,15 +98,23 @@ urma_status_t urma_stop_perf(void);
 urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length);
 
 /**
- * Start path statistics monitoring (per-path in-flight WR tracking and
- * windowed per-path RTT accumulation). Resets the RTT window.
+ * Start path statistics monitoring (switch for the path perf interface):
+ * enables recording of the per-path in-flight WR counts and the per-vjetty
+ * in-flight jetty count reported by urma_get_path_info(), and resets the
+ * windowed per-path RTT accumulators (the RTT window itself is reported via
+ * urma_get_perf_info() and its accumulation is controlled by
+ * urma_start_perf()/urma_stop_perf()). For accurate in-flight counts, call
+ * this before posting traffic; toggling it while WRs are in flight skews
+ * the counters.
  * Return: 0 on success, other value on error
  */
 urma_status_t urma_start_path_perf(void);
 
 /**
- * Stop path statistics monitoring. RTT accumulation halts; in-flight WR
- * snapshots remain available.
+ * Stop path statistics monitoring. In-flight WR recording halts and the last
+ * snapshot remains available via urma_get_path_info(). Per-path RTT
+ * accumulation is not affected by this call; it follows
+ * urma_start_perf()/urma_stop_perf().
  * Return: 0 on success, other value on error
  */
 urma_status_t urma_stop_path_perf(void);
