@@ -23,8 +23,8 @@ type ErrSessionState struct {
 	LastActiveTime time.Time
 	idleTimer      *time.Timer
 
-	// QueueWaitCarry: queue wait that never earned a dispatch, carried
-	// into the next attempt's starvation clock. Consumed on enqueue.
+	// QueueWaitCarry: undischarged queue wait, folded into the next
+	// attempt's starvation clock on enqueue.
 	QueueWaitCarry time.Duration
 }
 
@@ -158,7 +158,6 @@ func (t *SessionTracker) RollbackRequest(sessionID string, waited time.Duration)
 	t.armIdleTimer(s, t.sessionTimeout, true)
 }
 
-// TakeQueueWaitCarry returns and resets the session's carried wait debt.
 func (t *SessionTracker) TakeQueueWaitCarry(sessionID string) time.Duration {
 	if sessionID == "" {
 		return 0

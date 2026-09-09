@@ -211,10 +211,9 @@ func (m *ErrSchedulerManager) OnRequest(sessionID, model, prompt string) int {
 	return curStep
 }
 
-// lockSessionCategory assigns the session's category exactly once (first
-// classifiable request decides). Sub-agent sessions (SDK pattern
-// "{parent}_sub_{type}_{uuid}") inherit the parent's category instead of
-// classifying their delegation text; unclassifiable requests lock nothing.
+// lockSessionCategory assigns the session's category exactly once.
+// Sub-agent sessions ("{parent}_sub_...") inherit the parent's category;
+// unclassifiable requests lock nothing.
 func (m *ErrSchedulerManager) lockSessionCategory(sessionID, prompt string) {
 	if m.sessionTracker.GetCategory(sessionID) != "" {
 		return
@@ -415,14 +414,10 @@ func (m *ErrSchedulerManager) OnQueueTimeout(sessionID string, waited time.Durat
 	m.sessionTracker.RollbackRequest(sessionID, waited)
 }
 
-// RollbackInFlightAttempt rolls back the k++ of a dispatched attempt that
-// completed nothing the client saw. The session survives for the retry.
 func (m *ErrSchedulerManager) RollbackInFlightAttempt(sessionID string) {
 	m.sessionTracker.RollbackRequest(sessionID, 0)
 }
 
-// TakeQueueWaitCarry hands the session's accumulated starvation debt to the
-// next enqueue (read-and-reset).
 func (m *ErrSchedulerManager) TakeQueueWaitCarry(sessionID string) time.Duration {
 	return m.sessionTracker.TakeQueueWaitCarry(sessionID)
 }
