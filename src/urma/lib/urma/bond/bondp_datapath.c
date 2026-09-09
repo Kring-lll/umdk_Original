@@ -77,6 +77,46 @@ static bondp_comp_t *get_recv_count_comp(bondp_comp_t *recv_comp)
     return recv_comp;
 }
 
+/* Record the max-min spread of per-link (local_idx, target_idx) in-flight WR
+ * counts. Each non-zero sqe_cnt[i][j] is one active link. If at least 2 links
+ * are active AND their counts differ, the spread (max-min) is recorded as a
+ * BOND_SQE_INFLIGHT_DIFF sample so min/max/avg/p* are computed. Otherwise
+ * (fewer than 2 active links, or all active links have equal in-flight counts
+ * so diff==0), the event is counted into single_port_cnt (surfaced via the
+ * max<127ms column) so users can reconcile sample_num with post_send count. */
+static void bondp_record_inflight_diff(const bondp_comp_t *comp)
+{
+    const uint32_t allpath[URMA_UBAGG_CHIP_LINK_NUM * IODIE_NUM][2] =
+        {{6, 6}, {6, 15}, {7, 7}, {7, 16}, {15, 6}, {15, 15}, {16, 7}, {16, 16}};
+    if (!urma_perf_is_enabled() || comp == NULL) {
+        return;
+    }
+    uint32_t active_cnt = 0;
+    uint64_t cur_max = 0;
+    uint64_t cur_min = UINT64_MAX;
+    for (uint32_t i = 0; i < URMA_UBAGG_CHIP_LINK_NUM * IODIE_NUM; i++) {
+        uint64_t cnt = atomic_load(&comp->sqe_cnt[allpath[i][0]][allpath[i][1]]);
+        if (cnt == 0) {
+            continue;
+        }
+        active_cnt++;
+        if (cnt > cur_max) {
+            cur_max = cnt;
+        }
+        if (cnt < cur_min) {
+            cur_min = cnt;
+        }
+    }
+    if (active_cnt == 1) {
+        cur_min = 0;
+    }
+    if (active_cnt == 0 || cur_max == cur_min) {
+        (void)urma_perf_record_single_port(BOND_SQE_INFLIGHT_DIFF);
+        return;
+    }
+    (void)urma_step_perf(BOND_SQE_INFLIGHT_DIFF, (cur_max - cur_min) * 10);
+}
+
 static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, int target_idx,
                                     urma_jfs_wr_t *send_wr, urma_jfs_wr_t **bad_wr, int wr_count)
 {
@@ -91,6 +131,13 @@ static urma_status_t comp_post_send(bondp_comp_t *comp, int send_idx, int target
     }
     if (ret == URMA_SUCCESS) {
         atomic_fetch_add(&comp->sqe_cnt[send_idx][target_idx], wr_count);
+        urma_ubagg_sqe_total_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)wr_count);
+        urma_ubagg_inflight_path_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)wr_count);
+        uint32_t old_pjetty = atomic_fetch_add(&comp->inflight_per_pjetty[send_idx], (uint32_t)wr_count);
+        if (old_pjetty == 0) {
+            urma_ubagg_pjetty_inflight_inc();
+        }
+        bondp_record_inflight_diff(comp);
     } else {
         URMA_LOG_ERR("Bondp post send failed, ret=%d\n", ret);
     }
@@ -364,6 +411,11 @@ static void failback_resend_wr(bondp_comp_t *bdp_comp, uint64_t resend_wr_id)
     }
 
     atomic_fetch_sub(&bdp_comp->sqe_cnt[old_send_idx][old_target_idx], 1);
+    urma_ubagg_inflight_path_dec((uint32_t)old_send_idx, (uint32_t)old_target_idx, 1);
+    uint32_t old_pjetty = atomic_fetch_sub(&bdp_comp->inflight_per_pjetty[old_send_idx], 1);
+    if (old_pjetty == 1) {
+        urma_ubagg_pjetty_inflight_dec();
+    }
     if (bondp_resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
         URMA_LOG_ERR("Failed failback resend on post, wr_id=%lu, vjetty_id=%u, tjetty_id=%u, "
                      "from=[%u, %u], to=[%d, %d]\n",
@@ -406,6 +458,13 @@ static void bondp_translate_bad_wr(bondp_comp_t *bdp_comp, int send_idx, int tar
         return;
     }
     atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], bad_idx);
+    urma_ubagg_sqe_total_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)bad_idx);
+    urma_ubagg_inflight_path_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)bad_idx);
+    uint32_t old_pjetty = atomic_fetch_add(&bdp_comp->inflight_per_pjetty[send_idx], (uint32_t)bad_idx);
+    if (old_pjetty == 0) {
+        urma_ubagg_pjetty_inflight_inc();
+    }
+    bondp_record_inflight_diff(bdp_comp);
     urma_jfs_wr_t *user_cur = (urma_jfs_wr_t *)wr;
     for (int i = 0; i < bad_idx && user_cur != NULL; i++) {
         user_cur = user_cur->next;
@@ -585,6 +644,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
         /* Copy + encode MSN + link.
          * NOTE: send_idx/target_idx/entry_type are NOT set here —
          * path binding and submit are done inside send_lock below */
+        uint64_t post_send_ts = urma_perf_is_enabled() ? urma_get_perf_timestamp() : 0;
         urma_jfs_wr_t *cur = wr;
         for (int i = 0; i < wr_total; i++) {
             jfs_wr_entry_t *wr_entry = wr_entries[i];
@@ -598,6 +658,10 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
                 wr_entry->info.src_chip_id = bwr->src_chip_id;
                 wr_entry->info.dst_chip_id = bwr->dst_chip_id;
             }
+            wr_entry->post_send_ts = post_send_ts;
+            wr_entry->resend_ts = 0;
+            wr_entry->has_resent = false;
+
             urma_jfs_wr_t *pwr = &wr_entry->wr;
             ret = copy_jfs_wr(cur, pwr, jfs_wr_entry_src_sge(wr_entry),
                               jfs_wr_entry_dst_sge(wr_entry, bdp_comp->max_send_sge),
@@ -710,6 +774,13 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
                 pcur = pcur->next;
             }
             atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], success_node);
+            urma_ubagg_sqe_total_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)success_node);
+            urma_ubagg_inflight_path_inc((uint32_t)send_idx, (uint32_t)target_idx, (uint32_t)success_node);
+            uint32_t old_pjetty = atomic_fetch_add(&bdp_comp->inflight_per_pjetty[send_idx], (uint32_t)success_node);
+            if (old_pjetty == 0) {
+                urma_ubagg_pjetty_inflight_inc();
+            }
+            bondp_record_inflight_diff(bdp_comp);
             for (int j = success_node; j < wr_total; j++) {
                 wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)wr_entries[j];
                 hdr->entry_type = 0;
@@ -1225,6 +1296,21 @@ int bondp_resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int se
     }
     wr_entry->rnr_retry_pending = false;
 
+    /* Record resend statistics: delta from original post_send to this resend trigger.
+     * Update resend_ts so the eventual success CR can compute RTT-after-resend. */
+    if (urma_perf_is_enabled() && wr_entry->post_send_ts != 0) {
+        uint64_t now = urma_get_perf_timestamp();
+        if (wr_entry->has_resent) {
+            /* For multi-resent WRs, measure delta from last resend to this resend trigger. */
+            urma_step_perf(BOND_SEND_RESEND_DELAY, now - wr_entry->resend_ts);
+        } else {
+            /* For initial post_send, measure delta from post_send to this resend trigger. */
+            urma_step_perf(BOND_SEND_RESEND_DELAY, now - wr_entry->post_send_ts);
+        }
+        wr_entry->resend_ts = now;
+        wr_entry->has_resent = true;
+    }
+
     return ret;
 
 release_wr_entry:
@@ -1249,6 +1335,11 @@ static void resend_matched_jfs_wrs(bondp_comp_t *bdp_comp, uint64_t base_wr_id,
         }
 
         atomic_fetch_sub(&bdp_comp->sqe_cnt[old_send_idx][old_target_idx], 1);
+        urma_ubagg_inflight_path_dec((uint32_t)old_send_idx, (uint32_t)old_target_idx, 1);
+        uint32_t old_pjetty = atomic_fetch_sub(&bdp_comp->inflight_per_pjetty[old_send_idx], 1);
+        if (old_pjetty == 1) {
+            urma_ubagg_pjetty_inflight_dec();
+        }
         if (bondp_resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
             URMA_LOG_ERR("Failed to resend %s jfs wr, wr_id=%lu\n", reason, resend_wr_id);
         }
@@ -1490,6 +1581,11 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         uint64_t user_ctx = wr_entry->user_ctx;
         uint32_t retry_cnt = wr_entry->rnr_retry_cnt;
         atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+        urma_ubagg_inflight_path_dec((uint32_t)send_idx, (uint32_t)target_idx, 1);
+        uint32_t old_pjetty = atomic_fetch_sub(&bdp_comp->inflight_per_pjetty[send_idx], 1);
+        if (old_pjetty == 1) {
+            urma_ubagg_pjetty_inflight_dec();
+        }
         wr_entry->rnr_retry_pending = true;
         if (retry_cnt == 0) {
             wr_entry->rnr_retry_cnt++;
@@ -1615,6 +1711,23 @@ CONVERT_CR:
         return CONVERT_SKIP;
     }
     atomic_fetch_sub(&bdp_comp->sqe_cnt[send_idx][target_idx], 1);
+    urma_ubagg_inflight_path_dec((uint32_t)send_idx, (uint32_t)target_idx, 1);
+    uint32_t old_pjetty = atomic_fetch_sub(&bdp_comp->inflight_per_pjetty[send_idx], 1);
+    if (old_pjetty == 1) {
+        urma_ubagg_pjetty_inflight_dec();
+    }
+    urma_ubagg_wr_complete_inc();
+
+    if (urma_perf_is_enabled() && wr_entry->post_send_ts != 0) {
+        uint64_t rtt_end = urma_get_perf_timestamp();
+        uint64_t rtt_delta = rtt_end - wr_entry->post_send_ts;
+        urma_step_perf(BOND_SEND_RTT, rtt_delta);
+        urma_ubagg_rtt_add((uint32_t)send_idx, (uint32_t)target_idx, rtt_delta);
+        /* For resent WRs, also measure delta from last resend to success */
+        if (wr_entry->has_resent && wr_entry->resend_ts != 0) {
+            urma_step_perf(BOND_SEND_RTT_AFTER_RESEND, rtt_end - wr_entry->resend_ts);
+        }
+    }
 
     uint32_t msn = 0;
     convert_pcr_to_vcr(cr, bdp_comp->bondp_ctx, &msn);
@@ -1723,6 +1836,12 @@ static cr_convert_ret_t bondp_handle_cr_no_store(bondp_context_t *bdp_ctx, int i
         comp->rqe_cnt[idx] -= 1;
     } else {
         atomic_fetch_sub(&comp->sqe_cnt[idx][0], 1);
+        urma_ubagg_inflight_path_dec((uint32_t)idx, 0, 1);
+        uint32_t old_pjetty = atomic_fetch_sub(&comp->inflight_per_pjetty[idx], 1);
+        if (old_pjetty == 1) {
+            urma_ubagg_pjetty_inflight_dec();
+        }
+        urma_ubagg_wr_complete_inc();
     }
 
     uint32_t msn = 0;

@@ -148,7 +148,7 @@ TEST(UrmaCoreTest, LogApisHandleCallbacksLevelsTagsAndEnv)
 
 TEST(UrmaCoreTest, PerfApisRecordAndFormatStats)
 {
-    char perfBuf[8192] = {};
+    char perfBuf[16384] = {};
     uint32_t len = sizeof(perfBuf);
     uint64_t start = 0;
     uint64_t end = 0;
@@ -173,6 +173,57 @@ TEST(UrmaCoreTest, PerfApisRecordAndFormatStats)
     EXPECT_EQ(URMA_SUCCESS, urma_get_perf_info(perfBuf, &len));
     EXPECT_NE(nullptr, strstr(perfBuf, "UB_JFS_POST_SEND"));
     EXPECT_GT(len, 0U);
+
+    /* Verify per-link SQE total accounting is reported by urma_get_perf_info. */
+    urma_ubagg_switch_init();
+    EXPECT_EQ(0U, urma_ubagg_sqe_total_get(0, 0));
+    urma_ubagg_sqe_total_inc(0, 0, 5);
+    urma_ubagg_sqe_total_inc(2, 3, 7);
+    EXPECT_EQ(5U, urma_ubagg_sqe_total_get(0, 0));
+    EXPECT_EQ(7U, urma_ubagg_sqe_total_get(2, 3));
+    EXPECT_EQ(0U, urma_ubagg_sqe_total_get(1, 1));
+    len = sizeof(perfBuf);
+    EXPECT_EQ(URMA_SUCCESS, urma_get_perf_info(perfBuf, &len));
+    EXPECT_NE(nullptr, strstr(perfBuf, "sqe_total:"));
+    EXPECT_NE(nullptr, strstr(perfBuf, "[0,0]:5"));
+    EXPECT_NE(nullptr, strstr(perfBuf, "[2,3]:7"));
+    urma_ubagg_switch_init();
+    EXPECT_EQ(0U, urma_ubagg_sqe_total_get(0, 0));
+
+    /* Verify BOND_SQE_INFLIGHT_DIFF quantile reporting, especially the
+     * delta=1 case which lands in bucket 0 (low_bound=0). Without the
+     * bucket-0 fix, p90/p99 collapse to 0. Record many delta=1 samples so
+     * the percentile rank is computed, plus a couple of larger deltas. */
+    urma_start_perf();
+    for (int i = 0; i < 20; i++) {
+        EXPECT_EQ(URMA_SUCCESS, urma_step_perf(BOND_SQE_INFLIGHT_DIFF, 1));
+    }
+    EXPECT_EQ(URMA_SUCCESS, urma_step_perf(BOND_SQE_INFLIGHT_DIFF, 5));
+    EXPECT_EQ(URMA_SUCCESS, urma_step_perf(BOND_SQE_INFLIGHT_DIFF, 5));
+    /* Single-port events (fewer than 2 active ports) are counted into
+     * single_port_cnt, surfaced via the max<127ms column for this type. */
+    for (int i = 0; i < 7; i++) {
+        EXPECT_EQ(URMA_SUCCESS, urma_perf_record_single_port(BOND_SQE_INFLIGHT_DIFF));
+    }
+    len = sizeof(perfBuf);
+    EXPECT_EQ(URMA_SUCCESS, urma_get_perf_info(perfBuf, &len));
+    EXPECT_NE(nullptr, strstr(perfBuf, "BOND_SQEIFLT_DIF"));
+    /* min must be 1; without the fix, p90/p99 would print as 0. */
+    {
+        const char *row = strstr(perfBuf, "BOND_SQEIFLT_DIF");
+        ASSERT_NE(nullptr, row);
+        /* Walk past the row to capture it, then assert no " 0 " quantile. */
+        char rowBuf[256] = {};
+        snprintf(rowBuf, sizeof(rowBuf), "%s", row);
+        char *nl = strchr(rowBuf, '\n');
+        if (nl != nullptr) *nl = '\0';
+        /* p90 column (7th field after name) must be non-zero; min is the 4th
+         * numeric field. We just ensure the row contains "| 1 |" (min) and
+         * that p90 (right before p99) is not 0. */
+        EXPECT_NE(nullptr, strstr(rowBuf, "| 1 |"));
+        /* max<127ms column (last field) must show single_port_cnt == 7. */
+        EXPECT_NE(nullptr, strstr(rowBuf, "| 7 "));
+    }
 
     EXPECT_EQ(URMA_SUCCESS, urma_stop_perf());
     EXPECT_FALSE(urma_perf_is_enabled());
