@@ -118,4 +118,54 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+          Activated with -Pshade to produce a fat/uber jar that bundles all
+          runtime dependencies (fastjson2, jna) together with the compiled
+          classes and native libraries (libubswitch.dll, libubswitch.so) from
+          src/main/resources. Requires online Maven access to resolve the
+          shade plugin's transitive dependencies.
+        -->
+        <profile>
+            <id>shade</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <version>3.5.1</version>
+                        <executions>
+                            <execution>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>shade</goal>
+                                </goals>
+                                <configuration>
+                                    <createDependencyReducedPom>false</createDependencyReducedPom>
+                                    <filters>
+                                        <filter>
+                                            <artifact>*:*</artifact>
+                                            <excludes>
+                                                <exclude>META-INF/*.SF</exclude>
+                                                <exclude>META-INF/*.DSA</exclude>
+                                                <exclude>META-INF/*.RSA</exclude>
+                                            </excludes>
+                                        </filter>
+                                    </filters>
+                                    <artifactSet>
+                                        <excludes>
+                                            <exclude>org.junit.jupiter:*</exclude>
+                                            <exclude>org.junit.platform:*</exclude>
+                                            <exclude>com.fasterxml.jackson.core:*</exclude>
+                                        </excludes>
+                                    </artifactSet>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
