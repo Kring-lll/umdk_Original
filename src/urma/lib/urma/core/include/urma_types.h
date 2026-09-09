@@ -294,6 +294,7 @@ typedef struct urma_device_cap {
     urma_tp_type_cap_t um_tp_cap;
     urma_tp_feature_t tp_feature;
     struct urma_sl_info priority_info[URMA_MAX_PRIORITY_CNT];
+    uint64_t reserved[8];
 } urma_device_cap_t;
 
 typedef struct urma_guid {
@@ -710,6 +711,7 @@ typedef struct urma_rjfr {
     urma_transport_mode_t trans_mode;
     urma_import_jetty_flag_t flag;
     urma_tp_type_t tp_type;
+    //
 } urma_rjfr_t;
 
 typedef struct urma_tp {
@@ -782,6 +784,7 @@ typedef struct urma_rjetty {
     urma_target_type_t type;
     urma_import_jetty_flag_t flag;
     urma_tp_type_t tp_type;
+    uint64_t reserved[2];
 } urma_rjetty_t;
 
 typedef struct urma_target_jetty {
