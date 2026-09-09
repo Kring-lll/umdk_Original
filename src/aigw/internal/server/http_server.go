@@ -648,11 +648,9 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		w.Header().Set("Connection", "keep-alive")
 		w.WriteHeader(http.StatusOK)
 
-		// A client that abandons the stream without closing the connection
-		// stops reading; once its TCP window fills, these writes would block
-		// forever (net/http sets no write deadline, and the proxy timeout
-		// only bounds the upstream exchange). The per-write deadline turns
-		// that hang into a write error, handled as a cancellation.
+		// net/http sets no write deadline and the proxy timeout only bounds
+		// the upstream exchange: without this, a client that abandons the
+		// stream (without closing) blocks these writes forever.
 		wrc := http.NewResponseController(w)
 		for {
 			event, err := result.StreamReader.ReadEvent()

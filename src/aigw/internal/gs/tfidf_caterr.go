@@ -157,8 +157,6 @@ func (c *CatErrClassifier) Classify(prompt string) string {
 		}
 	}
 
-	// Zero vector (no vocabulary hit): "cannot classify" must not assert
-	// the first cluster — "" routes the caller to the mixture fallback.
 	if bestSim <= 0 {
 		return ""
 	}
