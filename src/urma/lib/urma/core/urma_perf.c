@@ -115,6 +115,27 @@ static inline uint64_t urma_cntvct_avg_to_ns(uint64_t cntvct_sum, uint64_t cnt)
     return (uint64_t)(((__uint128_t)cntvct_sum * mult) >> shift) / cnt;
 }
 
+/* BOND_SQE_INFLIGHT_DIFF is a WR-count spread pre-scaled by
+ * URMA_PERF_INFLIGHT_DIFF_SCALE, not a duration in CNTVCT ticks: report its
+ * raw values as-is. Applying urma_cntvct_to_ns() would inflate them by
+ * 1e9/CNTFRQ (x10 on a 100MHz counter), which is why the old display code
+ * had to divide by 100 (SCALE x cntvct ratio). */
+static inline uint64_t urma_perf_value_to_ns(uint32_t type, uint64_t raw)
+{
+    if (type == BOND_SQE_INFLIGHT_DIFF) {
+        return raw;
+    }
+    return urma_cntvct_to_ns(raw);
+}
+
+static inline uint64_t urma_perf_avg_to_ns(uint32_t type, uint64_t sum, uint64_t cnt)
+{
+    if (type == BOND_SQE_INFLIGHT_DIFF) {
+        return sum / cnt;
+    }
+    return urma_cntvct_avg_to_ns(sum, cnt);
+}
+
 #endif /* URMA_PERF_USE_CNTVCT */
 
 // Control sampling range（1ns ~ 4s）
@@ -124,6 +145,21 @@ static inline uint64_t urma_cntvct_avg_to_ns(uint64_t cntvct_sum, uint64_t cnt)
 #define UBCORE_PERF_SUB_BUCKETS  (1 << UBCORE_PERF_SUB_BUCKET_SHIFT)
 #define UBCORE_PERF_BUCKETS          (UBCORE_PERF_BUCKET_SHIFT * UBCORE_PERF_SUB_BUCKETS)
 
+#define URMA_PERF_RTT_THRESHOLD_NS  (127ULL * 1000 * 1000) /* 127ms in nanoseconds */
+
+#ifdef URMA_PERF_USE_CNTVCT
+/* Convert ns threshold to raw CNTVCT ticks for fast comparison in urma_step_perf */
+static uint64_t urma_perf_ns_to_cntvct(uint64_t ns)
+{
+    uint32_t mult = atomic_load_explicit(&g_cntvct_mult, memory_order_relaxed);
+    uint32_t shift = atomic_load_explicit(&g_cntvct_shift, memory_order_relaxed);
+    if (mult == 0) {
+        return 0;
+    }
+    return (ns << shift) / mult;
+}
+#endif
+
 typedef struct urma_perf_record {
     struct {
         uint64_t accumulation;
@@ -131,6 +167,13 @@ typedef struct urma_perf_record {
         uint64_t max;
         uint64_t cnt;
         uint64_t bucket[UBCORE_PERF_BUCKETS];
+        uint64_t max_under_127ms;
+        /* For count-type metrics (e.g. BOND_SQE_INFLIGHT_DIFF): number of
+         * post_send events where no spread sample could be recorded — either
+         * fewer than 2 active links, or all active links had equal in-flight
+         * counts (diff==0). Surfaced via the max<127ms column for that type
+         * so users can reconcile sample_num with the total post_send count. */
+        uint64_t single_port_cnt;
     } type_record[URMA_PERF_RECORD_TYPE_MAX];
     // record context data validity control
     bool is_used;
@@ -157,7 +200,11 @@ static const char* perf_type_names[] = {
     "BOND_WAIT_JFC",
     "UB_ACK_JFC",
     "UB_REARM_JFC",
-    "BOND_REARM_JFC"
+    "BOND_REARM_JFC",
+    "BOND_SEND_RTT",
+    "BOND_RESEND_DLY",
+    "BOND_RTT_AFT_RES",
+    "BOND_SQEIFLT_DIF"
 };
 
 static atomic_bool g_urma_perf_context_inited = ATOMIC_VAR_INIT(false);
@@ -182,6 +229,8 @@ static void urma_perf_reset_record_item(bool reset_all_thread, uint32_t thread_i
             g_urma_perf_record_ctx.record_table[i].type_record[j].accumulation = 0;
             g_urma_perf_record_ctx.record_table[i].type_record[j].max = 0;
             g_urma_perf_record_ctx.record_table[i].type_record[j].cnt = 0;
+            g_urma_perf_record_ctx.record_table[i].type_record[j].max_under_127ms = 0;
+            g_urma_perf_record_ctx.record_table[i].type_record[j].single_port_cnt = 0;
             for (int k = 0; k < UBCORE_PERF_BUCKETS; ++k) {
                 g_urma_perf_record_ctx.record_table[i].type_record[j].bucket[k] = 0;
             }
@@ -283,6 +332,14 @@ static uint64_t urma_perf_cal_quantile(urma_perf_record_t *record, uint32_t type
     if (bucket_idx >= UBCORE_PERF_BUCKETS) {
         return bucket_low_bound(UBCORE_PERF_BUCKETS - 1);
     }
+    /* Bucket 0 covers [0,1). urma_step_perf() skips delta==0, so any sample in
+     * bucket 0 has an actual value of 1. For small-integer count metrics such
+     * as BOND_SQE_INFLIGHT_DIFF, delta=1 maps here via bucket_low_bound(0)==0;
+     * returning low(=0) collapses p90/p99 to 0. Return 1 for the count metric
+     * so quantiles reflect the true value. Latency types are left unchanged. */
+    if (bucket_idx == 0 && type == BOND_SQE_INFLIGHT_DIFF) {
+        return 1;
+    }
     if (record->type_record[type].bucket[bucket_idx] == 0) {
         return low;
     }
@@ -294,11 +351,11 @@ static void urma_perf_fill_type_stats(urma_perf_stats_t *perf_info, urma_perf_re
 {
     uint64_t cnt = record->type_record[type].cnt;
 #ifdef URMA_PERF_USE_CNTVCT
-    uint64_t maxinum = urma_cntvct_to_ns(record->type_record[type].max);
-    uint64_t mininum = urma_cntvct_to_ns(record->type_record[type].min);
-    uint64_t p90 = urma_cntvct_to_ns(urma_perf_cal_quantile(record, type, (uint64_t)(0.9 * cnt + 0.99)));
-    uint64_t p99 = urma_cntvct_to_ns(urma_perf_cal_quantile(record, type, (uint64_t)(0.99 * cnt + 0.999)));
-    uint64_t p9999 = urma_cntvct_to_ns(urma_perf_cal_quantile(record, type, (uint64_t)(0.9999 * cnt + 0.99999)));
+    uint64_t maxinum = urma_perf_value_to_ns(type, record->type_record[type].max);
+    uint64_t mininum = urma_perf_value_to_ns(type, record->type_record[type].min);
+    uint64_t p90 = urma_perf_value_to_ns(type, urma_perf_cal_quantile(record, type, (uint64_t)(0.9 * cnt + 0.99)));
+    uint64_t p99 = urma_perf_value_to_ns(type, urma_perf_cal_quantile(record, type, (uint64_t)(0.99 * cnt + 0.999)));
+    uint64_t p9999 = urma_perf_value_to_ns(type, urma_perf_cal_quantile(record, type, (uint64_t)(0.9999 * cnt + 0.99999)));
 #else
     uint64_t maxinum = record->type_record[type].max;
     uint64_t mininum = record->type_record[type].min;
@@ -311,7 +368,7 @@ static void urma_perf_fill_type_stats(urma_perf_stats_t *perf_info, urma_perf_re
     perf_info->type_record[type].sample_num = cnt;
 #ifdef URMA_PERF_USE_CNTVCT
     perf_info->type_record[type].average = cnt != 0 ?
-        urma_cntvct_avg_to_ns(record->type_record[type].accumulation, cnt) : 0;
+        urma_perf_avg_to_ns(type, record->type_record[type].accumulation, cnt) : 0;
 #else
     perf_info->type_record[type].average = cnt != 0 ? (record->type_record[type].accumulation / cnt) : 0;
 #endif
@@ -321,11 +378,27 @@ static void urma_perf_fill_type_stats(urma_perf_stats_t *perf_info, urma_perf_re
     perf_info->type_record[type].p90 = maxinum > p90 ? p90 : maxinum;
     perf_info->type_record[type].p99 = maxinum > p99 ? p99 : maxinum;
     perf_info->type_record[type].p9999 = maxinum > p9999 ? p9999 : maxinum;
+#ifdef URMA_PERF_USE_CNTVCT
+    perf_info->type_record[type].max_under_127ms =
+        urma_cntvct_to_ns(record->type_record[type].max_under_127ms);
+#else
+    perf_info->type_record[type].max_under_127ms = record->type_record[type].max_under_127ms;
+#endif
+    /* For count-type metrics, repurpose the max<127ms column to show the
+     * number of post_send events that had fewer than 2 active ports (so no
+     * spread could be computed). This lets users reconcile sample_num with
+     * the total post_send count. */
+    if (type == BOND_SQE_INFLIGHT_DIFF) {
+        perf_info->type_record[type].max_under_127ms = record->type_record[type].single_port_cnt;
+    }
 }
 
 static void urma_perf_record_agg(urma_perf_record_t *total_perf_record, urma_perf_record_t *perf_record)
 {
     for (uint32_t i = 0; i < URMA_PERF_RECORD_TYPE_MAX; i++) {
+        /* Aggregate single_port_cnt even when cnt==0, so threads that only
+         * observed single-port events (no spread samples) are still counted. */
+        total_perf_record->type_record[i].single_port_cnt += perf_record->type_record[i].single_port_cnt;
         if (perf_record->type_record[i].cnt == 0) {
             continue;
         }
@@ -336,6 +409,9 @@ static void urma_perf_record_agg(urma_perf_record_t *total_perf_record, urma_per
         }
         if (perf_record->type_record[i].max > total_perf_record->type_record[i].max) {
             total_perf_record->type_record[i].max = perf_record->type_record[i].max;
+        }
+        if (perf_record->type_record[i].max_under_127ms > total_perf_record->type_record[i].max_under_127ms) {
+            total_perf_record->type_record[i].max_under_127ms = perf_record->type_record[i].max_under_127ms;
         }
         total_perf_record->type_record[i].cnt += perf_record->type_record[i].cnt;
         for (uint32_t j = 0; j < UBCORE_PERF_BUCKETS; j++) {
@@ -356,13 +432,31 @@ static void urma_perf_dump_info(urma_perf_stats_t *perf_info)
     }
 
     for (uint32_t i = 0; i < URMA_PERF_RECORD_TYPE_MAX; i++) {
-        if (total_perf_record.type_record[i].cnt == 0) {
+        /* Emit a row if there are spread samples OR single-port events
+         * (single_port_cnt) so single-port-only scenarios still show up. */
+        if (total_perf_record.type_record[i].cnt == 0 &&
+            total_perf_record.type_record[i].single_port_cnt == 0) {
             continue;
         }
         urma_perf_fill_type_stats(perf_info, &total_perf_record, i);
     }
 
     perf_info->retry_count = urma_ubagg_switch_get();
+    perf_info->wr_complete_cnt = urma_ubagg_wr_complete_snapshot_and_reset();
+
+    /* Snapshot+reset windowed per-path RTT accumulators into rtt_avg so each
+     * urma_get_perf_info() call reports the avg RTT of the adjacent window. */
+    {
+        uint64_t rtt_sum[URMA_UBAGG_SQE_TOTAL_DIM * URMA_UBAGG_SQE_TOTAL_DIM];
+        uint64_t rtt_cnt[URMA_UBAGG_SQE_TOTAL_DIM * URMA_UBAGG_SQE_TOTAL_DIM];
+        urma_ubagg_rtt_snapshot_and_reset(rtt_sum, rtt_cnt);
+        for (uint32_t li = 0; li < URMA_UBAGG_SQE_TOTAL_DIM; li++) {
+            for (uint32_t ti = 0; ti < URMA_UBAGG_SQE_TOTAL_DIM; ti++) {
+                uint32_t idx = li * URMA_UBAGG_SQE_TOTAL_DIM + ti;
+                perf_info->rtt_avg[li][ti] = (rtt_cnt[idx] > 0) ? (rtt_sum[idx] / rtt_cnt[idx]) : 0;
+            }
+        }
+    }
 }
 
 bool urma_perf_is_enabled()
@@ -487,6 +581,36 @@ urma_status_t urma_step_perf(urma_perf_record_type_t type, uint64_t delta)
                                          delta : cur_record->type_record[type].min;
     cur_record->type_record[type].max = (delta > cur_record->type_record[type].max) ?
                                          delta : cur_record->type_record[type].max;
+#ifdef URMA_PERF_USE_CNTVCT
+    uint64_t threshold = urma_perf_ns_to_cntvct(URMA_PERF_RTT_THRESHOLD_NS);
+#else
+    uint64_t threshold = URMA_PERF_RTT_THRESHOLD_NS;
+#endif
+    if (threshold > 0 && delta < threshold &&
+        delta > cur_record->type_record[type].max_under_127ms) {
+        cur_record->type_record[type].max_under_127ms = delta;
+    }
+    return URMA_SUCCESS;
+}
+
+/* Record a post_send event where fewer than 2 ports had non-zero in-flight WRs
+ * (so no spread could be computed). Counted into single_port_cnt and surfaced
+ * via the max<127ms column for BOND_SQE_INFLIGHT_DIFF. Does NOT touch cnt/min/
+ * max/accumulation/buckets, so p* and avg stay based on actual spread samples. */
+urma_status_t urma_perf_record_single_port(urma_perf_record_type_t type)
+{
+    urma_perf_record_t *cur_record;
+
+    if ((!urma_perf_is_enabled()) || (g_perf_record_index >= URMA_PERF_THREAD_MAX_NUM)) {
+        return URMA_ENOPERM;
+    }
+    if (type >= URMA_PERF_RECORD_TYPE_MAX) {
+        URMA_LOG_ERR("Urma perf record single port invalid param\n");
+        return URMA_EINVAL;
+    }
+
+    cur_record = &g_urma_perf_record_ctx.record_table[g_perf_record_index];
+    cur_record->type_record[type].single_port_cnt++;
     return URMA_SUCCESS;
 }
 
@@ -504,38 +628,123 @@ urma_status_t urma_get_perf_info(char *perf_buf, uint32_t *length)
     urma_perf_dump_info(&perf_info);
 
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
-        "+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
+        "+----------------------+------------+------------+------------+------------+------------+------------+------------+--------------+\n");
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
         "  retry_count: %-20lu\n", perf_info.retry_count);
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
-        "+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
+        "  wr_complete_cnt: %-16lu\n", perf_info.wr_complete_cnt);
+    /* Per-path average WR RTT over the window since the previous call. */
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used, "  rtt_avg:");
+    for (uint32_t li = 0; li < URMA_UBAGG_SQE_TOTAL_DIM; li++) {
+        for (uint32_t ti = 0; ti < URMA_UBAGG_SQE_TOTAL_DIM; ti++) {
+            if (perf_info.rtt_avg[li][ti] == 0) {
+                continue;
+            }
+            buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+                " [%u,%u]:%lu", li, ti, perf_info.rtt_avg[li][ti]);
+        }
+    }
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used, "\n");
+    /* Per-link cumulative SQE total: [local_idx,target_idx]:count, non-zero only. */
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used, "  sqe_total:");
+    for (uint32_t li = 0; li < URMA_UBAGG_SQE_TOTAL_DIM; li++) {
+        for (uint32_t ti = 0; ti < URMA_UBAGG_SQE_TOTAL_DIM; ti++) {
+            uint64_t cnt = urma_ubagg_sqe_total_get(li, ti);
+            if (cnt == 0) {
+                continue;
+            }
+            buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+                " [%u,%u]:%lu", li, ti, cnt);
+        }
+    }
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used, "\n");
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
-        "  Type                 | samples  | avg[ns]  | min[ns]  | max[ns]  | p90[ns]  | p99[ns]  | p9999[ns]\n");
+        "+----------------------+------------+------------+------------+------------+------------+------------+------------+--------------+\n");
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
-        "+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
+        "  Type                 | samples    | avg[ns]    | min[ns]    | max[ns]    | p90[ns]    | p99[ns]    | p9999[ns]  | max<127ms    \n");
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+        "+----------------------+------------+------------+------------+------------+------------+------------+------------+--------------+\n");
     for (uint32_t i = 0; i < URMA_PERF_RECORD_TYPE_MAX; i++) {
         if (perf_info.type_record[i].sample_num == 0) {
             continue;
         }
         buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
-            "  %-20s | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu | %-8lu  \n",
+            "  %-20s | %-10lu | %-10lu | %-10lu | %-10lu | %-10lu | %-10lu | %-10lu | %-12lu \n",
             perf_type_names[i],
             perf_info.type_record[i].sample_num,
-            perf_info.type_record[i].average,
-            perf_info.type_record[i].mininum,
-            perf_info.type_record[i].maxinum,
-            perf_info.type_record[i].p90,
-            perf_info.type_record[i].p99,
-            perf_info.type_record[i].p9999);
+            perf_info.type_record[i].average / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].mininum / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].maxinum / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].p90 / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].p99 / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].p9999 / (i == BOND_SQE_INFLIGHT_DIFF ? URMA_PERF_INFLIGHT_DIFF_SCALE : 1),
+            perf_info.type_record[i].max_under_127ms);
     }
     buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
-        "+----------------------+----------+----------+----------+----------+----------+----------+----------+\n");
+        "+----------------------+------------+------------+------------+------------+------------+------------+------------+--------------+\n");
     if (*length < (uint32_t)buffer_used + 1) {
         URMA_LOG_ERR("Urma perf get info failed, need %d bytes buffer, but only %u provided\n",
             buffer_used + 1, *length);
         return URMA_EINVAL;
     }
     (void)memcpy(perf_buf, temp_buf, (size_t)(buffer_used + 1));
+    *length = buffer_used + 1;
+    return URMA_SUCCESS;
+}
+
+urma_status_t urma_start_path_perf(void)
+{
+    urma_ubagg_path_start();
+    return URMA_SUCCESS;
+}
+
+urma_status_t urma_stop_path_perf(void)
+{
+    urma_ubagg_path_stop();
+    return URMA_SUCCESS;
+}
+
+urma_status_t urma_get_path_info(char *path_buf, uint32_t *length)
+{
+    char temp_buf[16384] = {0};
+    int buffer_used = 0;
+
+    if (path_buf == NULL || length == NULL) {
+        URMA_LOG_ERR("Urma path info get failed, path_buf or length is invalid\n");
+        return URMA_EINVAL;
+    }
+
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+        "+----------------------------------------------------------------------------+\n");
+
+    /* (1) Current per-path in-flight WR count (non-zero only). */
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+        "  inflight_wr:");
+    for (uint32_t li = 0; li < URMA_UBAGG_SQE_TOTAL_DIM; li++) {
+        for (uint32_t ti = 0; ti < URMA_UBAGG_SQE_TOTAL_DIM; ti++) {
+            uint64_t cnt = urma_ubagg_inflight_path_get(li, ti);
+            if (cnt == 0) {
+                continue;
+            }
+            buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+                " [%u,%u]:%lu", li, ti, cnt);
+        }
+    }
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used, "\n");
+
+    /* (2) Count of virtual jetties with in-flight WRs. */
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+        "  pjetty_inflight_cnt: %u\n", urma_ubagg_pjetty_inflight_get());
+
+    buffer_used += snprintf(temp_buf + buffer_used, sizeof(temp_buf) - buffer_used,
+        "+----------------------------------------------------------------------------+\n");
+
+    if (*length < (uint32_t)buffer_used + 1) {
+        URMA_LOG_ERR("Urma path info get failed, need %d bytes buffer, but only %u provided\n",
+            buffer_used + 1, *length);
+        return URMA_EINVAL;
+    }
+    (void)memcpy(path_buf, temp_buf, (size_t)(buffer_used + 1));
     *length = buffer_used + 1;
     return URMA_SUCCESS;
 }

@@ -272,8 +272,12 @@ typedef struct bondp_comp {
 #endif
 #ifndef __cplusplus
     atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
+    /* Per-pjetty (local_idx) inflight WR count; drives global pjetty-inflight
+     * count via 0<->non-zero transition detection on each element. */
+    atomic_uint inflight_per_pjetty[URMA_UBAGG_DEV_MAX_NUM];
 #else
     std::atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
+    std::atomic_uint inflight_per_pjetty[URMA_UBAGG_DEV_MAX_NUM];
 #endif
     // recv
     uint32_t max_recv_sge;

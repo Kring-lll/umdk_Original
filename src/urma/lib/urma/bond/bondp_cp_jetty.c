@@ -801,6 +801,9 @@ urma_jfs_t *bondp_create_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg)
             atomic_init(&bdp_jfs->sqe_cnt[i][j], 0);
         }
     }
+    for (uint32_t k = 0; k < URMA_UBAGG_DEV_MAX_NUM; k++) {
+        atomic_init(&bdp_jfs->inflight_per_pjetty[k], 0);
+    }
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
     uint32_t cfg_active_port_count = 0;
@@ -1513,6 +1516,9 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         for (uint32_t j = 0; j < URMA_UBAGG_DEV_MAX_NUM; j++) {
             atomic_init(&bdp_jetty->sqe_cnt[i][j], 0);
         }
+    }
+    for (uint32_t k = 0; k < URMA_UBAGG_DEV_MAX_NUM; k++) {
+        atomic_init(&bdp_jetty->inflight_per_pjetty[k], 0);
     }
 
     const bondp_port_id_t *cfg_active_port_ids = NULL;
