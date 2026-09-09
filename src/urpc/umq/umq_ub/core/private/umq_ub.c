@@ -16,6 +16,7 @@
 #include "qbuf_list.h"
 #include "umq_ub_api.h"
 #include "umq_ub_private.h"
+#include "umq_ub_context.h"
 #include "umq_symbol_private.h"
 
 #define DEFAULT_RNR_RETRY 6      // Retry 6 times
@@ -208,9 +209,8 @@ DEC_REF:
 
 /*
  * Import the peer-provided segment context. The seg blob was produced on the
- * peer by urma_get_seg_ctx and forwarded verbatim, so it is a valid urma_seg_t
- * (including any has_user_info extension tail on bonding devices) and can be
- * handed straight to urma_import_seg without reassembly. token_value carries
+ * peer by urma_get_seg_ctx and forwarded verbatim. Validate its extension
+ * length before handing it to urma_import_seg without reassembly. token_value carries
  * the tseg->user_ctx the peer stashed in the header.
  */
 static urma_target_seg_t *import_mem(urma_context_t *urma_ctx, urma_seg_t *seg,
@@ -223,6 +223,11 @@ static urma_target_seg_t *import_mem(urma_context_t *urma_ctx, urma_seg_t *seg,
 
     if (seg_size < sizeof(urma_seg_t)) {
         UMQ_VLOG_ERR(VLOG_UMQ, "import_mem seg_size %u smaller than urma_seg_t %zu\n", seg_size, sizeof(urma_seg_t));
+        return NULL;
+    }
+
+    if (!umq_ub_user_info_valid(seg, seg_size, sizeof(*seg), seg->attr.bs.has_user_info)) {
+        UMQ_VLOG_ERR(VLOG_UMQ, "Truncated segment user information, seg_size=%u\n", seg_size);
         return NULL;
     }
 
@@ -617,7 +622,8 @@ static urma_target_jetty_t *umq_ub_connect_jetty(ub_queue_t *queue, umq_ub_bind_
         length = info->fc_info->rjetty_size;
     }
 
-    if (length < sizeof(urma_rjetty_t)) {
+    if (length < sizeof(urma_rjetty_t) ||
+        !umq_ub_user_info_valid(rjetty, length, sizeof(*rjetty), rjetty->flag.bs.has_user_info)) {
         UMQ_VLOG_ERR(VLOG_UMQ_URMA_API, "UMQ(ID:%u), umq_ub_connect_jetty failed, jetty[%d], length[%u] invalid\n",
             queue->umq_id, i, length);
         errno = UMQ_ERR_EINVAL;
