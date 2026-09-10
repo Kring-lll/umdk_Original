@@ -606,8 +606,8 @@ func startManagers(aigwConfig *base.AigwConfig) error {
 			MaxRetry:          proxyCfg.MaxRetry,
 			RetryBaseInterval: time.Duration(proxyCfg.RetryBaseInterval) * time.Millisecond,
 			RetryMaxInterval:  time.Duration(proxyCfg.RetryMaxInterval) * time.Millisecond,
-			FirstChunkTimeout:  time.Duration(proxyCfg.FirstChunkTimeoutSec) * time.Second,
-			ClientWriteTimeout:  time.Duration(proxyCfg.ClientWriteTimeoutSec) * time.Second,
+			FirstChunkTimeout:    time.Duration(proxyCfg.FirstChunkTimeoutSec) * time.Second,
+			ChunkIntervalTimeout: time.Duration(proxyCfg.ChunkIntervalTimeoutSec) * time.Second,
 			CircuitBreaker: &proxy.CircuitBreakerConfig{
 				Enabled:          proxyCfg.CircuitBreaker.Enabled,
 				FailureThreshold: proxyCfg.CircuitBreaker.FailureThreshold,

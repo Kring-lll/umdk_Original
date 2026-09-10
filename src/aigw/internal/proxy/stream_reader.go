@@ -31,18 +31,16 @@ type StreamReader struct {
 	watchdogDone chan struct{}
 }
 
-// Two read-idle tiers, mirroring the client's own stream timeouts so the
+// Two read-idle tiers, mirroring the client's own stream budgets so the
 // slot frees roughly when the last possible reader gives up:
-//   first byte:  defaultUpstreamFirstChunkTimeout (300s = client
+//   first byte:  firstChunkTimeout (default 300s = client
 //                stream_first_chunk_timeout; the engine may legitimately
 //                queue+prefill for minutes before the first token)
-//   byte gap:    defaultUpstreamChunkGapTimeout (60s = client
+//   byte gap:    chunkIntervalTimeout (default 120s = client
 //                stream_idle_timeout; measured inter-chunk gaps are
-//                sub-second, so a 60s gap means the engine died mid-stream)
-var (
-	defaultUpstreamFirstChunkTimeout = 300 * time.Second
-	defaultUpstreamChunkGapTimeout   = 60 * time.Second
-)
+//                sub-second, so a gap this long means the engine died
+//                mid-stream)
+// Both come from the proxy config — see ProxyConfig.
 
 // SSEEvent represents a single Server-Sent Event.
 type SSEEvent struct {
@@ -54,7 +52,7 @@ type SSEEvent struct {
 
 // NewStreamReader creates a stream reader with the default idle timeouts.
 func NewStreamReader(body io.ReadCloser) *StreamReader {
-	return newStreamReader(body, defaultUpstreamFirstChunkTimeout, defaultUpstreamChunkGapTimeout)
+	return newStreamReader(body, defaultUpstreamFirstChunkTimeout, defaultChunkIntervalTimeout)
 }
 
 // newStreamReader creates a stream reader whose reads abort after firstIdle
