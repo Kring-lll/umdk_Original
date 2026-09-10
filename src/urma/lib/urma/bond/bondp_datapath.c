@@ -1273,7 +1273,7 @@ int bondp_resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int se
     if (wr_entry == NULL || !wr_entry->is_bond_cqe_head) {
         return URMA_EINVAL;
     }
-    jfs_wr_entry_t *entries[BONDP_BATCH_POST_MAX_NUM];
+    jfs_wr_entry_t *entries[BONDP_BATCH_POST_MAX_NUM] = {NULL};
     jfs_wr_entry_t *cur = wr_entry;
     int total_cnt = 0;
     while (cur != NULL) {
@@ -1293,28 +1293,27 @@ int bondp_resend_jfs_wr(bondp_comp_t *bdp_comp, jfs_wr_entry_t *wr_entry, int se
         ret = check_jfs_wr_path(vwr, send_idx, target_idx);
         if (ret != URMA_SUCCESS) {
             for (int j = 0; j < converted_cnt && entries[j]->target_vjetty != NULL; ++j) {
-                convert_jfs_pwr_to_vwr(&entries[j]->wr, &entries[j]->target_vjetty->v_tjetty);
+                convert_jfs_pwr_to_vwr(&entries[j]->wr, &entries[j]->target_vjetty->v_tjetty,
+                                       jfs_wr_entry_ut_ext_ptr_save(entries[j], bdp_comp->max_send_sge,
+                                                                    bdp_comp->max_send_rsge));
             }
             goto release_wr_entry;
         }
-        convert_jfs_vwr_to_pwr(vwr, send_idx, target_idx);
+        convert_jfs_vwr_to_pwr(vwr, send_idx, target_idx,
+                               jfs_wr_entry_bare_ut_scratch(entries[i], bdp_comp->max_send_sge,
+                                                            bdp_comp->max_send_rsge),
+                               jfs_wr_entry_ut_ext_ptr_save(entries[i], bdp_comp->max_send_sge,
+                                                            bdp_comp->max_send_rsge));
         ++converted_cnt;
     }
-    /* Import-free remote SGEs keep pointing at the deep copy inside this entry
-     * (restored by the previous post), so no re-clone from outside is needed;
-     * convert just re-resolves the peer token for the new target_idx. */
-    convert_jfs_vwr_to_pwr(wr, send_idx, target_idx,
-                           jfs_wr_entry_bare_ut_scratch(wr_entry, bdp_comp->max_send_sge,
-                                                        bdp_comp->max_send_rsge),
-                           jfs_wr_entry_ut_ext_ptr_save(wr_entry, bdp_comp->max_send_sge,
-                                                        bdp_comp->max_send_rsge));
 
     urma_jfs_wr_t *bad_wr = NULL;
-    wr->next = NULL;
-    ret = comp_post_send(wr_entry->bdp_comp, send_idx, target_idx, wr, &bad_wr);
-    convert_jfs_pwr_to_vwr(wr, vtjetty,
-                           jfs_wr_entry_ut_ext_ptr_save(wr_entry, bdp_comp->max_send_sge,
-                                                        bdp_comp->max_send_rsge));
+    ret = comp_post_send(bdp_comp, send_idx, target_idx, &entries[0]->wr, &bad_wr);
+    for (int j = 0; j < total_cnt; ++j) {
+        convert_jfs_pwr_to_vwr(&entries[j]->wr, &entries[j]->target_vjetty->v_tjetty,
+                               jfs_wr_entry_ut_ext_ptr_save(entries[j], bdp_comp->max_send_sge,
+                                                            bdp_comp->max_send_rsge));
+    }
     if (ret != URMA_SUCCESS) {
         goto release_wr_entry;
     }
