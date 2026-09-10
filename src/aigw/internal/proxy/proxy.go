@@ -36,14 +36,14 @@ type ProxyManager struct {
 	circuitBreaker     *CircuitBreaker // Circuit breaker for fault tolerance
 }
 
-// Stream timeout defaults mirror the client (openjiuwen) LLM budgets:
-// first-chunk 300s, inter-chunk 120s. The inter-chunk budget bounds both a
-// silent engine read after the first byte and a stuck client write (writes
-// on an active stream complete in milliseconds — measured TTOT p95=203ms —
-// so a gap this long means that side is dead).
+// Stream timeout defaults mirror the openjiuwen SDK defaults: first-chunk
+// 300s, inter-chunk 60s. The inter-chunk budget bounds both a silent engine
+// read after the first byte and a stuck client write (writes on an active
+// stream complete in milliseconds — measured TTOT p95=203ms — so a gap this
+// long means that side is dead).
 var (
 	defaultUpstreamFirstChunkTimeout = 300 * time.Second
-	defaultChunkIntervalTimeout      = 120 * time.Second
+	defaultChunkIntervalTimeout      = 60 * time.Second
 )
 
 // ProxyConfig is the configuration for ProxyManager.
