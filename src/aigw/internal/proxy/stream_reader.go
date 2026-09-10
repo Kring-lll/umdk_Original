@@ -13,6 +13,9 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
+
+	"huawei.com/aigw/pkg/log"
 )
 
 // StreamReader reads Server-Sent Events (SSE) from an HTTP response body.
@@ -22,7 +25,16 @@ type StreamReader struct {
 	closed  bool
 	mu      sync.Mutex
 	closeCh chan struct{}
+
+	idleReset   chan struct{} // watchdog reset signal (buffered 1)
+	watchdogDone chan struct{}
 }
+
+// defaultStreamIdleTimeout bounds a read blocked with no bytes arriving:
+// a dead upstream (engine crash, wedged coordinator) would otherwise block
+// the handler until Client.Timeout/zombie scan — 600s exceeds any client
+// first-chunk budget, so nothing worth reading is still pending past it.
+var defaultStreamIdleTimeout = 600 * time.Second
 
 // SSEEvent represents a single Server-Sent Event.
 type SSEEvent struct {
@@ -32,12 +44,44 @@ type SSEEvent struct {
 	Retry int    // Retry interval (ms)
 }
 
-// NewStreamReader creates a new SSE stream reader.
+// NewStreamReader creates a stream reader with the default idle timeout.
 func NewStreamReader(body io.ReadCloser) *StreamReader {
-	return &StreamReader{
-		reader:  bufio.NewReader(body),
-		body:    body,
-		closeCh: make(chan struct{}),
+	return newStreamReader(body, defaultStreamIdleTimeout)
+}
+
+// newStreamReader creates a stream reader whose reads abort after idle with
+// no bytes from the upstream (idle <= 0 disables the watchdog).
+func newStreamReader(body io.ReadCloser, idle time.Duration) *StreamReader {
+	sr := &StreamReader{
+		reader:       bufio.NewReader(body),
+		body:         body,
+		closeCh:      make(chan struct{}),
+		idleReset:    make(chan struct{}, 1),
+		watchdogDone: make(chan struct{}),
+	}
+	if idle > 0 {
+		go sr.idleWatchdog(idle)
+	}
+	return sr
+}
+
+// idleWatchdog closes the body after a full idle interval, unblocking the
+// pending ReadEvent as a read-on-closed-body error.
+func (sr *StreamReader) idleWatchdog(idle time.Duration) {
+	defer close(sr.watchdogDone)
+	t := time.NewTimer(idle)
+	defer t.Stop()
+	for {
+		select {
+		case <-sr.closeCh:
+			return
+		case <-sr.idleReset:
+			t.Reset(idle)
+		case <-t.C:
+			log.Warn().Msgf("[Proxy] stream idle for %v with no data — closing upstream response (dead upstream?)", idle)
+			sr.body.Close()
+			return
+		}
 	}
 }
 
@@ -51,10 +95,21 @@ func (sr *StreamReader) ReadEvent() (*SSEEvent, error) {
 		return nil, io.EOF
 	}
 
+	select {
+	case sr.idleReset <- struct{}{}:
+	default:
+	}
+
 	event := &SSEEvent{}
 
 	for {
 		line, err := sr.reader.ReadString('\n')
+
+		// Non-EOF read errors (closed body, connection reset) must surface:
+		// looping would busy-spin holding the reader lock forever.
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
 
 		// If EOF with no content read, return EOF (unless we have accumulated event data)
 		if err == io.EOF && line == "" {
