@@ -309,14 +309,16 @@ CatERR 使用 TF-IDF + K-means 对 prompt 分类，每个类别维护独立的 E
 | `queueBoostSec` | 饥饿保底：排队超过该秒数后强制提升到最高优先级（默认 240，0=默认，负数=关闭）。计时含跨尝试累计：排队超时/被驱逐的 session 把已等待时长记为债务，重试入队时折算进饥饿时钟——超时重试入队即享保底，不再从零重计 |
 #### 流式转发超时（两个预算 × 四类死法）
 
-流式转发链路为 `引擎 → aigw → 调用方`，两侧各可能死两种方式，共用两个预算参数处理：
+流式转发链路为 `引擎 → aigw → 调用方`，两侧各可能死两种方式，共用两个预算参数处理。**两个值必须跟随 jiuwenswarm 的 LLM 配置**（`resources/config.yaml` 的 `model_client_config` 段）——aigw 的每个超时应等于调用方自己的耐心，对端放弃后再等没有意义：
 
-| 参数 | 含义 | 默认 | 覆盖的死法 |
+| aigw 参数 | 跟随的 jiuwenswarm 参数 | 默认 | 覆盖的死法 |
 |---|---|---|---|
-| `proxy.firstChunkTimeoutSec` | **首 token 预算**：等引擎响应流**首字节**的最长时间（0=默认，负=关闭；首字节到达后自动切换到 60s 字节间隔档，该档=客户端 stream_idle_timeout，实测 chunk 间隔 p95=203ms 零误杀，不可单独配置） | 300（=客户端 stream_first_chunk_timeout，引擎合法排队+预填充可达分钟级） | ① 引擎首 token 吐不出（崩溃/挂死但 TCP 未断）；② 引擎吐到一半挂掉（字节间隔档触发） |
-| `proxy.clientWriteTimeoutSec` | **写预算**：往调用方转发 SSE 时**单次写入**的最长时间（0=默认，负=关闭） | 120 | ③④ 调用方停止读取但未关连接（httpx 放弃行为/进程挂死，TCP 窗口塞满后写永久阻塞）——活跃流的写毫秒级完成，写阻塞该时长无合法形态 |
+| `proxy.firstChunkTimeoutSec` | `stream_first_chunk_timeout`（**首 token 预算**：等引擎响应流首字节的最长时间；0=默认，负=关闭。首字节到达后自动切到 chunk 间隔档） | 300 | ① 引擎首 token 吐不出（崩溃/挂死但 TCP 未断；引擎合法排队+预填充可达分钟级） |
+| `proxy.chunkIntervalTimeoutSec` | `stream_idle_timeout`（**token 间预算**：相邻 token 的最大间隔；0=默认，负=关闭。**一参两用**——读方向引擎静默超此值判半流死亡，写方向调用方写阻塞超此值判客户端死亡） | 120 | ② 引擎吐到一半挂掉 ③④ 调用方停止读取但未关连接（TCP 窗口塞满后写永久阻塞） |
 
-两个参数都按活动重置（读按字节、写按次），慢引擎上跑几十分钟的**活跃**长流不受影响；net/http 默认不设写超时、读超时受 proxy.timeout 总预算限制过大，不设则以上四类死法都会把在飞槽位挂死到 3600s 僵尸扫描（校准轮实测：引擎轮中崩溃后 12 个槽位全挂死 17 分钟+，调用方风暴放弃后 7 个槽位占满 21 分钟） |
+> 值的出处：openjiuwen SDK 源码默认为 300/60，但 jiuwenswarm 产品配置（config.yaml）将 idle 调到 120（兼容 reasoning 模型思考期静默）——部署实际生效的是产品配置层，aigw 默认值跟产品配置对齐。**两侧改配置时必须同步**：jiuwenswarm 调 `stream_idle_timeout` 时 aigw 的 `chunkIntervalTimeoutSec` 要跟着调，否则 aigw 会在客户端还活着时提前掐流（配置小了）或客户端死后多挂槽位（配置大了）。
+
+两档按活动重置（读按字节、写按次），慢引擎上跑几十分钟的**活跃**长流不受影响；不设则四类死法都会把在飞槽位挂死到 3600s 僵尸扫描（校准轮实测：引擎轮中崩溃后 12 个槽位全挂死 17 分钟+，调用方风暴放弃后 7 个槽位占满 21 分钟）
 | `sessionTimeoutSec` | agent 工作中长时间无变化的兜底清理超时。超时后删除 session 并打 Warn 日志 |
 | `taskIdleTimeoutSec` | 判断 session 已结束的超时时间。session 完成后等待此时间再静默清理 |
 

@@ -87,17 +87,25 @@ type ProxyConfig struct {
 	RetryMaxInterval  int                  `json:"retryMaxInterval"`  // Retry max interval in milliseconds
 	Enable            bool                 `json:"enable"`            // Enable request forwarding
 	CircuitBreaker    CircuitBreakerConfig `json:"circuitBreaker"`    // Circuit breaker configuration
-	// FirstChunkTimeoutSec bounds the wait for the FIRST byte of an
-	// upstream (engine) response: 0 = default (300s, the client's own
-	// first-chunk budget — the engine may legitimately queue and prefill
-	// for minutes), negative disables. After the first byte the gap tier
-	// (60s, the client's inter-chunk budget) applies instead.
-	FirstChunkTimeoutSec int `json:"firstChunkTimeoutSec"`
-	// ClientWriteTimeoutSec bounds each write to the client on the response
-	// stream: 0 = default (120s), negative disables. A client that abandons
-	// the stream without closing the connection stops reading; once its TCP
-	// window fills, writes would otherwise block forever.
-	ClientWriteTimeoutSec int `json:"clientWriteTimeoutSec"`
+	// Stream timeout budgets. Both MUST track the jiuwenswarm LLM config
+	// (resources/config.yaml, model_client_config): firstChunkTimeoutSec ←
+	// stream_first_chunk_timeout, chunkIntervalTimeoutSec ←
+	// stream_idle_timeout. The defaults below match the product config
+	// (the openjiuwen SDK ships 60s idle, jiuwenswarm raises it to 120s).
+	// Keep both sides in sync when either changes.
+	//
+	// FirstChunkTimeoutSec: max wait for the FIRST byte of an engine
+	// response (0 = default 300s = client stream_first_chunk_timeout;
+	// negative disables). The engine may legitimately queue and prefill for
+	// minutes before the first token.
+	//
+	// ChunkIntervalTimeoutSec: max gap between tokens, spent waiting in
+	// either direction — a silent engine after the first byte (dead
+	// mid-stream) or a client write stuck this long (abandoned without
+	// closing, TCP window full). 0 = default 120s = client
+	// stream_idle_timeout; negative disables.
+	FirstChunkTimeoutSec    int `json:"firstChunkTimeoutSec"`
+	ChunkIntervalTimeoutSec int `json:"chunkIntervalTimeoutSec"`
 }
 
 // CircuitBreakerConfig struct contains configuration for circuit breaker
