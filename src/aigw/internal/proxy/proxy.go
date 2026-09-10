@@ -28,6 +28,7 @@ type ProxyManager struct {
 	rwLock             sync.RWMutex
 	client             *http.Client
 	timeout            time.Duration
+	streamIdleTimeout  time.Duration
 	maxRetry           int
 	retryBaseInterval  time.Duration  // Base interval for exponential backoff
 	retryMaxInterval   time.Duration  // Maximum interval cap for backoff
@@ -41,6 +42,9 @@ type ProxyConfig struct {
 	RetryBaseInterval  time.Duration      // Base interval for exponential backoff (default: 100ms)
 	RetryMaxInterval   time.Duration      // Maximum interval cap for backoff (default: 5s)
 	CircuitBreaker     *CircuitBreakerConfig // Circuit breaker configuration (optional)
+	// StreamIdleTimeout aborts a response read silent for this long.
+	// 0 = defaultStreamIdleTimeout; negative disables.
+	StreamIdleTimeout time.Duration
 }
 
 // NewProxyManager creates a new ProxyManager with configuration.
@@ -66,6 +70,9 @@ func NewProxyManager(parentCtx context.Context, config *ProxyConfig) *ProxyManag
 	if config.RetryMaxInterval == 0 {
 		config.RetryMaxInterval = 5 * time.Second
 	}
+	if config.StreamIdleTimeout == 0 {
+		config.StreamIdleTimeout = defaultStreamIdleTimeout
+	}
 
 	ctx, cancel := context.WithCancel(parentCtx)
 
@@ -82,6 +89,7 @@ func NewProxyManager(parentCtx context.Context, config *ProxyConfig) *ProxyManag
 			Timeout: config.Timeout,
 		},
 		timeout:            config.Timeout,
+		streamIdleTimeout:  config.StreamIdleTimeout,
 		maxRetry:           config.MaxRetry,
 		retryBaseInterval:  config.RetryBaseInterval,
 		retryMaxInterval:   config.RetryMaxInterval,
@@ -262,7 +270,7 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 	// body — wrapping them in a StreamReader would let the SSE parser
 	// silently drop the non-SSE error payload.
 	if req.Stream && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		result.StreamReader = NewStreamReader(resp.Body)
+		result.StreamReader = newStreamReader(resp.Body, pm.streamIdleTimeout)
 		return result, nil
 	}
 
@@ -274,6 +282,13 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 	}
 
 	return result, nil
+}
+
+// SetStreamIdleTimeoutForTest overrides the stream idle watchdog bound.
+func (pm *ProxyManager) SetStreamIdleTimeoutForTest(d time.Duration) {
+	pm.rwLock.Lock()
+	pm.streamIdleTimeout = d
+	pm.rwLock.Unlock()
 }
 
 // GetCircuitBreakerStats returns the circuit breaker statistics.
