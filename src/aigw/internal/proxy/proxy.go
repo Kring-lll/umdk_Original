@@ -28,12 +28,19 @@ type ProxyManager struct {
 	rwLock             sync.RWMutex
 	client             *http.Client
 	timeout            time.Duration
-	streamIdleTimeout  time.Duration
+	upstreamIdleTimeout time.Duration
+	clientWriteTimeout time.Duration
 	maxRetry           int
 	retryBaseInterval  time.Duration  // Base interval for exponential backoff
 	retryMaxInterval   time.Duration  // Maximum interval cap for backoff
 	circuitBreaker     *CircuitBreaker // Circuit breaker for fault tolerance
 }
+
+// defaultClientWriteTimeout bounds each write to the SSE client. 120s
+// matches the client-side chunk-interval budget of the current agent stack
+// (jiuwenswarm: stream frame timeout 120s between chunks) — a write stuck
+// past it means the client stopped reading (abandoned without closing).
+var defaultClientWriteTimeout = 2 * time.Minute
 
 // ProxyConfig is the configuration for ProxyManager.
 type ProxyConfig struct {
@@ -42,9 +49,12 @@ type ProxyConfig struct {
 	RetryBaseInterval  time.Duration      // Base interval for exponential backoff (default: 100ms)
 	RetryMaxInterval   time.Duration      // Maximum interval cap for backoff (default: 5s)
 	CircuitBreaker     *CircuitBreakerConfig // Circuit breaker configuration (optional)
-	// StreamIdleTimeout aborts a response read silent for this long.
-	// 0 = defaultStreamIdleTimeout; negative disables.
-	StreamIdleTimeout time.Duration
+	// UpstreamIdleTimeout aborts an upstream (engine) response read silent
+	// for this long. 0 = defaultUpstreamIdleTimeout; negative disables.
+	UpstreamIdleTimeout time.Duration
+	// ClientWriteTimeout bounds each write to the client on the response
+	// stream. 0 = defaultClientWriteTimeout; negative disables.
+	ClientWriteTimeout time.Duration
 }
 
 // NewProxyManager creates a new ProxyManager with configuration.
@@ -70,8 +80,11 @@ func NewProxyManager(parentCtx context.Context, config *ProxyConfig) *ProxyManag
 	if config.RetryMaxInterval == 0 {
 		config.RetryMaxInterval = 5 * time.Second
 	}
-	if config.StreamIdleTimeout == 0 {
-		config.StreamIdleTimeout = defaultStreamIdleTimeout
+	if config.UpstreamIdleTimeout == 0 {
+		config.UpstreamIdleTimeout = defaultUpstreamIdleTimeout
+	}
+	if config.ClientWriteTimeout == 0 {
+		config.ClientWriteTimeout = defaultClientWriteTimeout
 	}
 
 	ctx, cancel := context.WithCancel(parentCtx)
@@ -89,7 +102,8 @@ func NewProxyManager(parentCtx context.Context, config *ProxyConfig) *ProxyManag
 			Timeout: config.Timeout,
 		},
 		timeout:            config.Timeout,
-		streamIdleTimeout:  config.StreamIdleTimeout,
+		upstreamIdleTimeout: config.UpstreamIdleTimeout,
+		clientWriteTimeout: config.ClientWriteTimeout,
 		maxRetry:           config.MaxRetry,
 		retryBaseInterval:  config.RetryBaseInterval,
 		retryMaxInterval:   config.RetryMaxInterval,
@@ -270,7 +284,7 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 	// body — wrapping them in a StreamReader would let the SSE parser
 	// silently drop the non-SSE error payload.
 	if req.Stream && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		result.StreamReader = newStreamReader(resp.Body, pm.streamIdleTimeout)
+		result.StreamReader = newStreamReader(resp.Body, pm.upstreamIdleTimeout)
 		return result, nil
 	}
 
@@ -284,10 +298,25 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 	return result, nil
 }
 
-// SetStreamIdleTimeoutForTest overrides the stream idle watchdog bound.
-func (pm *ProxyManager) SetStreamIdleTimeoutForTest(d time.Duration) {
+// SetUpstreamIdleTimeoutForTest overrides the upstream idle watchdog bound.
+func (pm *ProxyManager) SetUpstreamIdleTimeoutForTest(d time.Duration) {
 	pm.rwLock.Lock()
-	pm.streamIdleTimeout = d
+	pm.upstreamIdleTimeout = d
+	pm.rwLock.Unlock()
+}
+
+// ClientWriteTimeout returns the per-write bound for the client response
+// stream (negative = no deadline).
+func (pm *ProxyManager) ClientWriteTimeout() time.Duration {
+	pm.rwLock.RLock()
+	defer pm.rwLock.RUnlock()
+	return pm.clientWriteTimeout
+}
+
+// SetClientWriteTimeoutForTest overrides the client write bound.
+func (pm *ProxyManager) SetClientWriteTimeoutForTest(d time.Duration) {
+	pm.rwLock.Lock()
+	pm.clientWriteTimeout = d
 	pm.rwLock.Unlock()
 }
 

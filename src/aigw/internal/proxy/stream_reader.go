@@ -30,11 +30,11 @@ type StreamReader struct {
 	watchdogDone chan struct{}
 }
 
-// defaultStreamIdleTimeout bounds a read blocked with no bytes arriving:
+// defaultUpstreamIdleTimeout bounds a read blocked with no bytes arriving:
 // a dead upstream (engine crash, wedged coordinator) would otherwise block
 // the handler until Client.Timeout/zombie scan — 600s exceeds any client
 // first-chunk budget, so nothing worth reading is still pending past it.
-var defaultStreamIdleTimeout = 600 * time.Second
+var defaultUpstreamIdleTimeout = 600 * time.Second
 
 // SSEEvent represents a single Server-Sent Event.
 type SSEEvent struct {
@@ -46,7 +46,7 @@ type SSEEvent struct {
 
 // NewStreamReader creates a stream reader with the default idle timeout.
 func NewStreamReader(body io.ReadCloser) *StreamReader {
-	return newStreamReader(body, defaultStreamIdleTimeout)
+	return newStreamReader(body, defaultUpstreamIdleTimeout)
 }
 
 // newStreamReader creates a stream reader whose reads abort after idle with
