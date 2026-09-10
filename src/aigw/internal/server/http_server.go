@@ -651,6 +651,7 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		// net/http sets no write deadline and the proxy timeout only bounds
 		// the upstream exchange: without this, a client that abandons the
 		// stream (without closing) blocks these writes forever.
+		writeTimeout := s.proxyMgr.ClientWriteTimeout()
 		wrc := http.NewResponseController(w)
 		for {
 			event, err := result.StreamReader.ReadEvent()
@@ -668,8 +669,10 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 			if fr := parseFinishReason(event.Data); fr != "" {
 				finishReason = fr
 			}
-			if err := wrc.SetWriteDeadline(time.Now().Add(streamWriteTimeout)); err != nil {
-				log.Debug().Msgf("SetWriteDeadline unsupported: %v", err)
+			if writeTimeout > 0 {
+				if err := wrc.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+					log.Debug().Msgf("SetWriteDeadline unsupported: %v", err)
+				}
 			}
 			if event.Event != "" {
 				if _, err := fmt.Fprintf(w, "event: %s\n", event.Event); err != nil {
@@ -743,11 +746,6 @@ func injectPriority(body []byte, priority int) []byte {
 }
 
 // parseFinishReason parses finish_reason from an SSE data line.
-// streamWriteTimeout bounds each write to the SSE client, matching the
-// client chunk-interval budget: a stuck write means the client is gone.
-// Var (not const) so tests can shorten it.
-var streamWriteTimeout = 2 * time.Minute
-
 func parseFinishReason(data string) string {
 	if data == "" || data == "[DONE]" {
 		return ""
