@@ -303,11 +303,16 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
 
     new_jetty->remote_jetty = NULL;
     new_jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+    /* Drain flush readers before replacing the physical jetty. */
+    (void)pthread_spin_lock(&bdp_jetty->send_lock);
     bdp_jetty->p_jetty[local_idx] = new_jetty;
+    (void)pthread_spin_unlock(&bdp_jetty->send_lock);
 
     ret = bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty);
     if (ret != 0) {
+        (void)pthread_spin_lock(&bdp_jetty->send_lock);
         bdp_jetty->p_jetty[local_idx] = old_jetty;
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
         (void)urma_delete_jetty(new_jetty);
         return -1;
     }
