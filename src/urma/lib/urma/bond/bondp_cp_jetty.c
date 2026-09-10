@@ -590,11 +590,11 @@ bondp_port_id_t bondp_active_index_to_port_id(uint32_t active_index)
     bondp_port_id_t id = {0};
     id.bs.die_id = 1;
     if (active_index < (uint32_t)IODIE_NUM) {
-        id.bs.chip_id  = (uint16_t)(active_index + 1);
+        id.bs.chip_id = (uint16_t)(active_index + 1);
         id.bs.port_idx = UINT8_MAX;
     } else {
         uint32_t off = active_index - (uint32_t)IODIE_NUM;
-        id.bs.chip_id  = (uint16_t)(off / PORT_EID_MAX_NUM_PER_DEV + 1);
+        id.bs.chip_id = (uint16_t)(off / PORT_EID_MAX_NUM_PER_DEV + 1);
         id.bs.port_idx = (uint16_t)(off % PORT_EID_MAX_NUM_PER_DEV);
     }
     return id;
@@ -1438,8 +1438,8 @@ static int bondp_add_jetty_p_vjetty_id_info(bondp_context_t *bdp_ctx, bondp_comp
                                                          jetty_id, bdp_jetty);
         if (ret == BONDP_HASH_MAP_COLLIDE_ERROR &&
             jetty_id > 0 && jetty_id < BONDP_MAX_WELL_KNOWN_JETTY_ID) {
-            URMA_LOG_INFO("Add repeated wk-jetty id[%d]: ret=%d, p_jetty_id=%u, v_jetty_id=%u\n",
-                          i, ret, pjetty_id.id, jetty_id);
+            URMA_LOG_DEBUG("Add repeated wk-jetty id[%d]: ret=%d, p_jetty_id=%u, v_jetty_id=%u\n",
+                           i, ret, pjetty_id.id, jetty_id);
         } else if (ret != 0) {
             URMA_LOG_ERR("Failed to add p_vjetty_id[%d]: ret=%d, p_jetty_id=%u, v_jetty_id=%u\n",
                          i, ret, pjetty_id.id, jetty_id);
@@ -1536,7 +1536,15 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         goto FREE_JETTY;
     }
 
-    if (bondp_hc_start(bdp_ctx, jetty_cfg->jfs_cfg.priority) != 0) {
+    /* bondp_hc_start creates the probe jettys and schedules the probe task.
+     * Hold ctx->mutex to serialize with bondp_hc_uninit: both
+     * bondp_delete_context and bondp_set_bonding_mode tear the health check
+     * down under this mutex, so without it a concurrent uninit could delete
+     * the same probe jettys hc_start is creating (double delete). */
+    (void)pthread_mutex_lock(&ctx->mutex);
+    int hc_ret = bondp_hc_start(bdp_ctx, jetty_cfg->jfs_cfg.priority);
+    (void)pthread_mutex_unlock(&ctx->mutex);
+    if (hc_ret != 0) {
         URMA_LOG_ERR("Failed to start health check\n");
         goto FREE_JETTY;
     }

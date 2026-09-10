@@ -1900,7 +1900,7 @@ int umq_ub_get_jetty_node(ub_queue_t *queue, uint32_t wr_cnt)
     }
 
     __atomic_store_n(&node->umq_ref, our_ref, __ATOMIC_RELEASE);
-    __atomic_store_n(&queue->jetty_node, (jetty_pool_node_t *)(uintptr_t)node, __ATOMIC_RELEASE);
+    __atomic_store_n(&queue->jetty_node, (uint64_t)(uintptr_t)node, __ATOMIC_RELEASE);
     pthread_spin_unlock(&queue->get_jetty_node_lock);
 
 GOT_NODE:
@@ -1967,7 +1967,7 @@ static void umq_ub_process_cr_err_for_jetty_pool(ub_queue_t *queue, urma_cr_t *c
 
     umq_ub_jetty_node_list_t *jetty_node_list = umq_ub_queue_jetty_node_list_get(queue);
     if (is_umq_ub_main_queue(queue->create_flag) && is_umq_ub_share_transport(queue->create_flag) &&
-        ((option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0 && jetty_node_list != NULL &&
+        ((option != NULL) && (option->flag & UMQ_IO_OPTION_FLAG_TP_HANDLE_IDX) != 0 && jetty_node_list != NULL &&
         tp_handle_idx < jetty_node_list->list_len)) {
         umq_ub_jetty_node_mark_err(jetty_node_list->node_list[tp_handle_idx]);
     } else if (is_umq_ub_logic_queue(queue->create_flag)) {
