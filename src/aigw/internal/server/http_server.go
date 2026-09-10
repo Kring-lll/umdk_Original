@@ -651,7 +651,7 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		// net/http sets no write deadline and the proxy timeout only bounds
 		// the upstream exchange: without this, a client that abandons the
 		// stream (without closing) blocks these writes forever.
-		writeTimeout := s.proxyMgr.ClientWriteTimeout()
+		writeTimeout := s.proxyMgr.ChunkIntervalTimeout()
 		wrc := http.NewResponseController(w)
 		for {
 			event, err := result.StreamReader.ReadEvent()

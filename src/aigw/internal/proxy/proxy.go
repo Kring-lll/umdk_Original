@@ -28,19 +28,23 @@ type ProxyManager struct {
 	rwLock             sync.RWMutex
 	client             *http.Client
 	timeout            time.Duration
-	firstChunkTimeout  time.Duration
-	clientWriteTimeout time.Duration
+	firstChunkTimeout    time.Duration
+	chunkIntervalTimeout time.Duration
 	maxRetry           int
 	retryBaseInterval  time.Duration  // Base interval for exponential backoff
 	retryMaxInterval   time.Duration  // Maximum interval cap for backoff
 	circuitBreaker     *CircuitBreaker // Circuit breaker for fault tolerance
 }
 
-// defaultClientWriteTimeout bounds each write to the SSE client. Writes on
-// an active stream complete in milliseconds (measured forwarding-path TTOT
-// p95 = 203ms), so a write stuck this long has no legitimate form — the
-// client stopped reading (abandoned without closing, TCP window full).
-var defaultClientWriteTimeout = 2 * time.Minute
+// Stream timeout defaults mirror the client (openjiuwen) LLM budgets:
+// first-chunk 300s, inter-chunk 120s. The inter-chunk budget bounds both a
+// silent engine read after the first byte and a stuck client write (writes
+// on an active stream complete in milliseconds — measured TTOT p95=203ms —
+// so a gap this long means that side is dead).
+var (
+	defaultUpstreamFirstChunkTimeout = 300 * time.Second
+	defaultChunkIntervalTimeout      = 120 * time.Second
+)
 
 // ProxyConfig is the configuration for ProxyManager.
 type ProxyConfig struct {
@@ -51,11 +55,12 @@ type ProxyConfig struct {
 	CircuitBreaker     *CircuitBreakerConfig // Circuit breaker configuration (optional)
 	// FirstChunkTimeout bounds the wait for the first byte of an upstream
 	// (engine) response. 0 = defaultUpstreamFirstChunkTimeout; negative
-	// disables (the 60s gap tier still applies after the first byte).
+	// disables.
 	FirstChunkTimeout time.Duration
-	// ClientWriteTimeout bounds each write to the client on the response
-	// stream. 0 = defaultClientWriteTimeout; negative disables.
-	ClientWriteTimeout time.Duration
+	// ChunkIntervalTimeout bounds the gap between tokens in either
+	// direction (silent engine read / stuck client write). 0 =
+	// defaultChunkIntervalTimeout; negative disables.
+	ChunkIntervalTimeout time.Duration
 }
 
 // NewProxyManager creates a new ProxyManager with configuration.
@@ -84,8 +89,8 @@ func NewProxyManager(parentCtx context.Context, config *ProxyConfig) *ProxyManag
 	if config.FirstChunkTimeout == 0 {
 		config.FirstChunkTimeout = defaultUpstreamFirstChunkTimeout
 	}
-	if config.ClientWriteTimeout == 0 {
-		config.ClientWriteTimeout = defaultClientWriteTimeout
+	if config.ChunkIntervalTimeout == 0 {
+		config.ChunkIntervalTimeout = defaultChunkIntervalTimeout
 	}
 
 	ctx, cancel := context.WithCancel(parentCtx)
@@ -103,8 +108,8 @@ func NewProxyManager(parentCtx context.Context, config *ProxyConfig) *ProxyManag
 			Timeout: config.Timeout,
 		},
 		timeout:            config.Timeout,
-		firstChunkTimeout:  config.FirstChunkTimeout,
-		clientWriteTimeout: config.ClientWriteTimeout,
+		firstChunkTimeout:    config.FirstChunkTimeout,
+		chunkIntervalTimeout: config.ChunkIntervalTimeout,
 		maxRetry:           config.MaxRetry,
 		retryBaseInterval:  config.RetryBaseInterval,
 		retryMaxInterval:   config.RetryMaxInterval,
@@ -285,11 +290,7 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 	// body — wrapping them in a StreamReader would let the SSE parser
 	// silently drop the non-SSE error payload.
 	if req.Stream && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		gap := defaultUpstreamChunkGapTimeout
-		if pm.firstChunkTimeout < gap {
-			gap = pm.firstChunkTimeout
-		}
-		result.StreamReader = newStreamReader(resp.Body, pm.firstChunkTimeout, gap)
+		result.StreamReader = newStreamReader(resp.Body, pm.firstChunkTimeout, pm.chunkIntervalTimeout)
 		return result, nil
 	}
 
@@ -310,18 +311,19 @@ func (pm *ProxyManager) SetFirstChunkTimeoutForTest(d time.Duration) {
 	pm.rwLock.Unlock()
 }
 
-// ClientWriteTimeout returns the per-write bound for the client response
-// stream (negative = no deadline).
-func (pm *ProxyManager) ClientWriteTimeout() time.Duration {
+// ChunkIntervalTimeout returns the inter-token budget (negative = no
+// deadline): the bound for a silent engine read after the first byte and
+// for a stuck client write alike.
+func (pm *ProxyManager) ChunkIntervalTimeout() time.Duration {
 	pm.rwLock.RLock()
 	defer pm.rwLock.RUnlock()
-	return pm.clientWriteTimeout
+	return pm.chunkIntervalTimeout
 }
 
-// SetClientWriteTimeoutForTest overrides the client write bound.
-func (pm *ProxyManager) SetClientWriteTimeoutForTest(d time.Duration) {
+// SetChunkIntervalTimeoutForTest overrides the inter-token budget.
+func (pm *ProxyManager) SetChunkIntervalTimeoutForTest(d time.Duration) {
 	pm.rwLock.Lock()
-	pm.clientWriteTimeout = d
+	pm.chunkIntervalTimeout = d
 	pm.rwLock.Unlock()
 }
 
