@@ -3687,8 +3687,10 @@ umq_buf_mode_t umq_qbuf_mode_get(void)
  */
 #define DFX_COPY_TIMING(dst, src) do { \
     (dst)->wait_async_expand_count = __atomic_load_n(&(src)->fetch_timing.wait_async_expand_count, __ATOMIC_RELAXED); \
-    (dst)->wait_async_expand_total_us = __atomic_load_n(&(src)->fetch_timing.wait_async_expand_total_us, __ATOMIC_RELAXED); \
-    (dst)->wait_async_expand_max_us = __atomic_load_n(&(src)->fetch_timing.wait_async_expand_max_us, __ATOMIC_RELAXED); \
+    (dst)->wait_async_expand_total_us = \
+        __atomic_load_n(&(src)->fetch_timing.wait_async_expand_total_us, __ATOMIC_RELAXED); \
+    (dst)->wait_async_expand_max_us = \
+        __atomic_load_n(&(src)->fetch_timing.wait_async_expand_max_us, __ATOMIC_RELAXED); \
     (dst)->sync_expand_count = __atomic_load_n(&(src)->fetch_timing.sync_expand_count, __ATOMIC_RELAXED); \
     (dst)->sync_expand_total_us = __atomic_load_n(&(src)->fetch_timing.sync_expand_total_us, __ATOMIC_RELAXED); \
     (dst)->sync_expand_max_us = __atomic_load_n(&(src)->fetch_timing.sync_expand_max_us, __ATOMIC_RELAXED); \
@@ -4102,10 +4104,10 @@ bool umq_qbuf_wait_expansion_done(bool with_data, uint32_t sc)
  */
 #define RECORD_TIMING_STAT(pool, cnt, tot, mx, val) do { \
     __atomic_fetch_add(&(pool)->fetch_timing.cnt, 1, __ATOMIC_RELAXED); \
-    __atomic_fetch_add(&(pool)->fetch_timing.tot, val, __ATOMIC_RELAXED); \
+    __atomic_fetch_add(&(pool)->fetch_timing.tot, (val), __ATOMIC_RELAXED); \
     uint64_t _old_max = __atomic_load_n(&(pool)->fetch_timing.mx, __ATOMIC_RELAXED); \
-    if (val > _old_max) { \
-        __atomic_store_n(&(pool)->fetch_timing.mx, val, __ATOMIC_RELAXED); \
+    if ((val) > _old_max) { \
+        __atomic_store_n(&(pool)->fetch_timing.mx, (val), __ATOMIC_RELAXED); \
     } \
 } while (0)
 
