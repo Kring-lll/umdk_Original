@@ -307,6 +307,7 @@ CatERR 使用 TF-IDF + K-means 对 prompt 分类，每个类别维护独立的 E
 | `warmupSessions` | 预热完成至少需要的 session 数量。预热阶段使用 MEJ 算法，达到阈值后切换到所选算法 |
 | `trainDataPath` | 预训练步数分布文件。加载后直接计入 warmup 计数，可跳过预热阶段 |
 | `queueBoostSec` | 饥饿保底：排队超过该秒数后强制提升到最高优先级（默认 240，0=默认，负数=关闭）。计时含跨尝试累计：排队超时/被驱逐的 session 把已等待时长记为债务，重试入队时折算进饥饿时钟——超时重试入队即享保底，不再从零重计 |
+| `proxy.streamIdleTimeoutSec` | 上游流读空闲超时：已转发的请求在响应流上超过该秒数无任何字节（引擎崩溃/协调器挂死）即中止读取并释放在飞槽位（默认 300，0=默认，负数=关闭）。按字节活动判定——每收到数据即重置，慢引擎的活跃长流不受影响；仅真正的静默上游触发 |
 | `sessionTimeoutSec` | agent 工作中长时间无变化的兜底清理超时。超时后删除 session 并打 Warn 日志 |
 | `taskIdleTimeoutSec` | 判断 session 已结束的超时时间。session 完成后等待此时间再静默清理 |
 
