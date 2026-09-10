@@ -26,15 +26,23 @@ type StreamReader struct {
 	mu      sync.Mutex
 	closeCh chan struct{}
 
-	idleReset   chan struct{} // watchdog reset signal (buffered 1)
+	idleReset    chan struct{} // watchdog reset signal (buffered 1)
+	firstByteCh  chan struct{} // closed when the first data byte arrives
 	watchdogDone chan struct{}
 }
 
-// defaultUpstreamIdleTimeout bounds a read blocked with no bytes arriving:
-// a dead upstream (engine crash, wedged coordinator) would otherwise block
-// the handler until Client.Timeout/zombie scan — 600s exceeds any client
-// first-chunk budget, so nothing worth reading is still pending past it.
-var defaultUpstreamIdleTimeout = 600 * time.Second
+// Two read-idle tiers, mirroring the client's own stream timeouts so the
+// slot frees roughly when the last possible reader gives up:
+//   first byte:  defaultUpstreamFirstChunkTimeout (300s = client
+//                stream_first_chunk_timeout; the engine may legitimately
+//                queue+prefill for minutes before the first token)
+//   byte gap:    defaultUpstreamChunkGapTimeout (60s = client
+//                stream_idle_timeout; measured inter-chunk gaps are
+//                sub-second, so a 60s gap means the engine died mid-stream)
+var (
+	defaultUpstreamFirstChunkTimeout = 300 * time.Second
+	defaultUpstreamChunkGapTimeout   = 60 * time.Second
+)
 
 // SSEEvent represents a single Server-Sent Event.
 type SSEEvent struct {
@@ -44,31 +52,42 @@ type SSEEvent struct {
 	Retry int    // Retry interval (ms)
 }
 
-// NewStreamReader creates a stream reader with the default idle timeout.
+// NewStreamReader creates a stream reader with the default idle timeouts.
 func NewStreamReader(body io.ReadCloser) *StreamReader {
-	return newStreamReader(body, defaultUpstreamIdleTimeout)
+	return newStreamReader(body, defaultUpstreamFirstChunkTimeout, defaultUpstreamChunkGapTimeout)
 }
 
-// newStreamReader creates a stream reader whose reads abort after idle with
-// no bytes from the upstream (idle <= 0 disables the watchdog).
-func newStreamReader(body io.ReadCloser, idle time.Duration) *StreamReader {
+// newStreamReader creates a stream reader whose reads abort after firstIdle
+// (no first byte yet) or gapIdle (silence between bytes); <= 0 disables the
+// respective tier.
+func newStreamReader(body io.ReadCloser, firstIdle, gapIdle time.Duration) *StreamReader {
 	sr := &StreamReader{
 		reader:       bufio.NewReader(body),
 		body:         body,
 		closeCh:      make(chan struct{}),
 		idleReset:    make(chan struct{}, 1),
+		firstByteCh:  make(chan struct{}),
 		watchdogDone: make(chan struct{}),
 	}
-	if idle > 0 {
-		go sr.idleWatchdog(idle)
+	if firstIdle > 0 || gapIdle > 0 {
+		go sr.idleWatchdog(firstIdle, gapIdle)
 	}
 	return sr
 }
 
 // idleWatchdog closes the body after a full idle interval, unblocking the
-// pending ReadEvent as a read-on-closed-body error.
-func (sr *StreamReader) idleWatchdog(idle time.Duration) {
+// pending ReadEvent as a read-on-closed-body error. The first tier bounds
+// the wait for the first byte; once data has arrived, later resets use the
+// shorter gap tier.
+func (sr *StreamReader) idleWatchdog(firstIdle, gapIdle time.Duration) {
 	defer close(sr.watchdogDone)
+	idle := firstIdle
+	if idle <= 0 {
+		idle = gapIdle
+	}
+	if idle <= 0 {
+		return
+	}
 	t := time.NewTimer(idle)
 	defer t.Stop()
 	for {
@@ -76,9 +95,18 @@ func (sr *StreamReader) idleWatchdog(idle time.Duration) {
 		case <-sr.closeCh:
 			return
 		case <-sr.idleReset:
+			// A reset carrying data means the first byte arrived: tighten
+			// to the gap tier from now on.
+			select {
+			case <-sr.firstByteCh:
+				if gapIdle > 0 {
+					idle = gapIdle
+				}
+			default:
+			}
 			t.Reset(idle)
 		case <-t.C:
-			log.Warn().Msgf("[Proxy] stream idle for %v with no data — closing upstream response (dead upstream?)", idle)
+			log.Warn().Msgf("[Proxy] stream silent for %v (dead upstream?) — closing response body", idle)
 			sr.body.Close()
 			return
 		}
@@ -98,6 +126,13 @@ func (sr *StreamReader) ReadEvent() (*SSEEvent, error) {
 	select {
 	case sr.idleReset <- struct{}{}:
 	default:
+	}
+	if line, err := sr.reader.Peek(1); err == nil && len(line) > 0 {
+		select {
+		case <-sr.firstByteCh:
+		default:
+			close(sr.firstByteCh)
+		}
 	}
 
 	event := &SSEEvent{}
