@@ -702,8 +702,11 @@ int urma_cmd_delete_jfs_batch(urma_jfs_t **jfs_arr, int jfs_num, urma_jfs_t **ba
     }
 
     do {
+        async_events_acked = 0;
         for (int i = 0; i < jfs_num; ++i) {
+            (void)pthread_mutex_lock(&jfs_arr[i]->event_mutex);
             async_events_acked += jfs_arr[i]->async_events_acked;
+            (void)pthread_mutex_unlock(&jfs_arr[i]->event_mutex);
         }
     } while (async_events_acked != arg.out.async_events_reported);
 
@@ -1088,8 +1091,11 @@ int urma_cmd_delete_jfr_batch(urma_jfr_t **jfr_arr, int jfr_num, urma_jfr_t **ba
     }
 
     do {
+        async_events_acked = 0;
         for (int i = 0; i < jfr_num; ++i) {
+            (void)pthread_mutex_lock(&jfr_arr[i]->event_mutex);
             async_events_acked += jfr_arr[i]->async_events_acked;
+            (void)pthread_mutex_unlock(&jfr_arr[i]->event_mutex);
         }
     } while (async_events_acked != arg.out.async_events_reported);
 
@@ -1254,9 +1260,13 @@ int urma_cmd_delete_jfc_batch(urma_jfc_t **jfc_arr, int jfc_num, urma_jfc_t **ba
     }
 
     do {
+        async_events_acked = 0;
+        comp_events_acked = 0;
         for (int i = 0; i < jfc_num; ++i) {
+            (void)pthread_mutex_lock(&jfc_arr[i]->event_mutex);
             comp_events_acked += jfc_arr[i]->comp_events_acked;
             async_events_acked += jfc_arr[i]->async_events_acked;
+            (void)pthread_mutex_unlock(&jfc_arr[i]->event_mutex);
         }
     } while (comp_events_acked != arg.out.comp_events_reported || async_events_acked != arg.out.async_events_reported);
 
@@ -2148,8 +2158,11 @@ int urma_cmd_delete_jetty_batch(urma_jetty_t **jetty_arr, int jetty_num, urma_je
     }
 
     do {
+        async_events_acked = 0;
         for (int i = 0; i < jetty_num; ++i) {
+            (void)pthread_mutex_lock(&jetty_arr[i]->event_mutex);
             async_events_acked += jetty_arr[i]->async_events_acked;
+            (void)pthread_mutex_unlock(&jetty_arr[i]->event_mutex);
         }
     } while (async_events_acked != arg.out.async_events_reported);
 
