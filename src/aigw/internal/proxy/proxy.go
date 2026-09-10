@@ -28,7 +28,7 @@ type ProxyManager struct {
 	rwLock             sync.RWMutex
 	client             *http.Client
 	timeout            time.Duration
-	upstreamIdleTimeout time.Duration
+	firstChunkTimeout  time.Duration
 	clientWriteTimeout time.Duration
 	maxRetry           int
 	retryBaseInterval  time.Duration  // Base interval for exponential backoff
@@ -36,10 +36,10 @@ type ProxyManager struct {
 	circuitBreaker     *CircuitBreaker // Circuit breaker for fault tolerance
 }
 
-// defaultClientWriteTimeout bounds each write to the SSE client. 120s
-// matches the client-side chunk-interval budget of the current agent stack
-// (jiuwenswarm: stream frame timeout 120s between chunks) — a write stuck
-// past it means the client stopped reading (abandoned without closing).
+// defaultClientWriteTimeout bounds each write to the SSE client. Writes on
+// an active stream complete in milliseconds (measured forwarding-path TTOT
+// p95 = 203ms), so a write stuck this long has no legitimate form — the
+// client stopped reading (abandoned without closing, TCP window full).
 var defaultClientWriteTimeout = 2 * time.Minute
 
 // ProxyConfig is the configuration for ProxyManager.
@@ -49,9 +49,10 @@ type ProxyConfig struct {
 	RetryBaseInterval  time.Duration      // Base interval for exponential backoff (default: 100ms)
 	RetryMaxInterval   time.Duration      // Maximum interval cap for backoff (default: 5s)
 	CircuitBreaker     *CircuitBreakerConfig // Circuit breaker configuration (optional)
-	// UpstreamIdleTimeout aborts an upstream (engine) response read silent
-	// for this long. 0 = defaultUpstreamIdleTimeout; negative disables.
-	UpstreamIdleTimeout time.Duration
+	// FirstChunkTimeout bounds the wait for the first byte of an upstream
+	// (engine) response. 0 = defaultUpstreamFirstChunkTimeout; negative
+	// disables (the 60s gap tier still applies after the first byte).
+	FirstChunkTimeout time.Duration
 	// ClientWriteTimeout bounds each write to the client on the response
 	// stream. 0 = defaultClientWriteTimeout; negative disables.
 	ClientWriteTimeout time.Duration
@@ -80,8 +81,8 @@ func NewProxyManager(parentCtx context.Context, config *ProxyConfig) *ProxyManag
 	if config.RetryMaxInterval == 0 {
 		config.RetryMaxInterval = 5 * time.Second
 	}
-	if config.UpstreamIdleTimeout == 0 {
-		config.UpstreamIdleTimeout = defaultUpstreamIdleTimeout
+	if config.FirstChunkTimeout == 0 {
+		config.FirstChunkTimeout = defaultUpstreamFirstChunkTimeout
 	}
 	if config.ClientWriteTimeout == 0 {
 		config.ClientWriteTimeout = defaultClientWriteTimeout
@@ -102,7 +103,7 @@ func NewProxyManager(parentCtx context.Context, config *ProxyConfig) *ProxyManag
 			Timeout: config.Timeout,
 		},
 		timeout:            config.Timeout,
-		upstreamIdleTimeout: config.UpstreamIdleTimeout,
+		firstChunkTimeout:  config.FirstChunkTimeout,
 		clientWriteTimeout: config.ClientWriteTimeout,
 		maxRetry:           config.MaxRetry,
 		retryBaseInterval:  config.RetryBaseInterval,
@@ -284,7 +285,11 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 	// body — wrapping them in a StreamReader would let the SSE parser
 	// silently drop the non-SSE error payload.
 	if req.Stream && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		result.StreamReader = newStreamReader(resp.Body, pm.upstreamIdleTimeout)
+		gap := defaultUpstreamChunkGapTimeout
+		if pm.firstChunkTimeout < gap {
+			gap = pm.firstChunkTimeout
+		}
+		result.StreamReader = newStreamReader(resp.Body, pm.firstChunkTimeout, gap)
 		return result, nil
 	}
 
@@ -298,10 +303,10 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 	return result, nil
 }
 
-// SetUpstreamIdleTimeoutForTest overrides the upstream idle watchdog bound.
-func (pm *ProxyManager) SetUpstreamIdleTimeoutForTest(d time.Duration) {
+// SetFirstChunkTimeoutForTest overrides the first-chunk watchdog bound.
+func (pm *ProxyManager) SetFirstChunkTimeoutForTest(d time.Duration) {
 	pm.rwLock.Lock()
-	pm.upstreamIdleTimeout = d
+	pm.firstChunkTimeout = d
 	pm.rwLock.Unlock()
 }
 
