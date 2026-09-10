@@ -87,23 +87,21 @@ type ProxyConfig struct {
 	RetryMaxInterval  int                  `json:"retryMaxInterval"`  // Retry max interval in milliseconds
 	Enable            bool                 `json:"enable"`            // Enable request forwarding
 	CircuitBreaker    CircuitBreakerConfig `json:"circuitBreaker"`    // Circuit breaker configuration
-	// Stream timeout budgets. Both MUST track the jiuwenswarm LLM config
-	// (resources/config.yaml, model_client_config): firstChunkTimeoutSec ←
-	// stream_first_chunk_timeout, chunkIntervalTimeoutSec ←
-	// stream_idle_timeout. The defaults below match the product config
-	// (the openjiuwen SDK ships 60s idle, jiuwenswarm raises it to 120s).
-	// Keep both sides in sync when either changes.
+	// Stream timeout budgets, mirroring the openjiuwen SDK defaults so aigw
+	// gives up roughly when the last possible reader does:
+	// firstChunkTimeoutSec ← stream_first_chunk_timeout (300s),
+	// chunkIntervalTimeoutSec ← stream_idle_timeout (60s).
+	// Deployments that override the client budgets (e.g. jiuwenswarm's
+	// config.yaml raises idle to 120s) must raise these to match.
 	//
 	// FirstChunkTimeoutSec: max wait for the FIRST byte of an engine
-	// response (0 = default 300s = client stream_first_chunk_timeout;
-	// negative disables). The engine may legitimately queue and prefill for
-	// minutes before the first token.
+	// response. The engine may legitimately queue and prefill for minutes
+	// before the first token.
 	//
 	// ChunkIntervalTimeoutSec: max gap between tokens, spent waiting in
 	// either direction — a silent engine after the first byte (dead
 	// mid-stream) or a client write stuck this long (abandoned without
-	// closing, TCP window full). 0 = default 120s = client
-	// stream_idle_timeout; negative disables.
+	// closing, TCP window full).
 	FirstChunkTimeoutSec    int `json:"firstChunkTimeoutSec"`
 	ChunkIntervalTimeoutSec int `json:"chunkIntervalTimeoutSec"`
 }
