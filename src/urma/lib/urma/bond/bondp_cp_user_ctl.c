@@ -403,10 +403,20 @@ static int bondp_user_ctl_set_bonding_port(urma_context_t *ctx, urma_user_ctl_in
     uint32_t enabled_count = 0;
     for (uint32_t i = 0; i < port_in->port_count; ++i) {
         uint8_t port_idx = port_in->port_ids[i].bs.port_idx;
-        if (port_idx != UINT8_MAX &&
-            (port_idx < URMA_ACTIVE_PORT_MIN || port_idx > URMA_ACTIVE_PORT_MAX)) {
-            URMA_LOG_ERR("Invalid bonding port_idx=%u at index=%u.\n", port_idx, i);
-            return -EINVAL;
+        if (bdp_ctx->bonding_level == BONDP_BONDING_LEVEL_PORT) {
+            /* PORT level: only port EIDs in [URMA_ACTIVE_PORT_MIN, URMA_ACTIVE_PORT_MAX]. */
+            if (port_idx < URMA_ACTIVE_PORT_MIN || port_idx > URMA_ACTIVE_PORT_MAX) {
+                URMA_LOG_ERR("Invalid bonding port_idx=%u at index=%u, bonding_level=PORT.\n",
+                             port_idx, i);
+                return -EINVAL;
+            }
+        } else {
+            /* IODIE level: only the primary EID (UINT8_MAX). */
+            if (port_idx != UINT8_MAX) {
+                URMA_LOG_ERR("Invalid bonding port_idx=%u at index=%u, bonding_level=IODIE.\n",
+                             port_idx, i);
+                return -EINVAL;
+            }
         }
         uint32_t active_index = 0;
         if (convert_bond_port_id_to_active_index(bdp_ctx, port_in->port_ids[i], &active_index) != 0) {
