@@ -255,6 +255,9 @@ typedef struct bondp_comp {
     // send
     bool modify_to_error;
     pthread_spinlock_t send_lock;
+    /* Jetty only: acquire before send_lock when replacing a physical jetty. */
+    pthread_mutex_t pjetty_mutex;
+    bool vjetty_deleted;
     uint32_t max_send_sge;
     uint32_t max_send_rsge;
     wr_buf_t send_wr_buf;
