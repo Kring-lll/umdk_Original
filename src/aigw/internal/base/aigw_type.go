@@ -87,13 +87,19 @@ type ProxyConfig struct {
 	RetryMaxInterval  int                  `json:"retryMaxInterval"`  // Retry max interval in milliseconds
 	Enable            bool                 `json:"enable"`            // Enable request forwarding
 	CircuitBreaker    CircuitBreakerConfig `json:"circuitBreaker"`    // Circuit breaker configuration
-	// StreamIdleTimeoutSec bounds how long an upstream response may stay
-	// silent (no bytes) before the read is aborted and the in-flight slot
-	// released: 0 = default (300s, the client first-chunk budget), negative
-	// disables. Total-age limits cannot use small values without killing
-	// legitimately long streams; this one resets on every byte, so only a
-	// silent (dead) upstream fires it.
-	StreamIdleTimeoutSec int `json:"streamIdleTimeoutSec"`
+	// UpstreamIdleTimeoutSec bounds how long the upstream (engine) response
+	// may stay silent (no bytes) before the read is aborted and the
+	// in-flight slot released: 0 = default (300s, the client first-chunk
+	// budget), negative disables. Resets on every byte, so only a silent
+	// (dead) upstream fires it — age-based limits cannot be this small
+	// without killing legitimately long streams.
+	UpstreamIdleTimeoutSec int `json:"upstreamIdleTimeoutSec"`
+	// ClientWriteTimeoutSec bounds each write to the client on the response
+	// stream: 0 = default (120s, the client chunk-interval budget), negative
+	// disables. A client that abandons the stream without closing the
+	// connection stops reading; once its TCP window fills, writes would
+	// otherwise block forever.
+	ClientWriteTimeoutSec int `json:"clientWriteTimeoutSec"`
 }
 
 // CircuitBreakerConfig struct contains configuration for circuit breaker
