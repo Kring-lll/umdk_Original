@@ -23,6 +23,7 @@ typedef struct bondp_env {
     uint64_t rnr_retry_max;
     uint32_t rnr_retry_jitter_ratio;
     uint32_t health_check_batch_node_num;
+    uint32_t loc_health_recheck_cnt;
     uint32_t failover_route[IODIE_NUM][IODIE_NUM][URMA_ACTIVE_PORT_PER_DIE][URMA_FAILOVER_LINK_NUM];
     bondp_path_t path[IODIE_NUM * IODIE_NUM * URMA_ACTIVE_PORT_PER_DIE + 1];
 } bondp_env_t;

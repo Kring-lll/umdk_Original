@@ -19,6 +19,7 @@
 
 #include "bondp_context_table.h"
 #include "bondp_cp_tjetty.h"
+#include "bondp_env.h"
 #include "bondp_topo_info.h"
 #include "bondp_types.h"
 #include "bondp_worker.h"
@@ -61,6 +62,11 @@ typedef struct bondp_hc_path {
     uint8_t local_idx;
     uint8_t target_idx;
     uint8_t no_cqe_round;
+    /* Consecutive successful probes received while this link was failed.
+     * Incremented per probe round on success, reset on any failed probe or
+     * on success while healthy. Only touched on the single HC worker thread,
+     * so a plain field is safe. */
+    uint32_t succ_probe_cnt;
     bool probe_checked;
 } bondp_hc_path_t;
 
@@ -143,6 +149,7 @@ static bondp_hc_path_t *hc_append_path(bondp_hc_node_t *node, uint8_t local_idx,
     path->local_idx = local_idx;
     path->target_idx = target_idx;
     path->no_cqe_round = 0;
+    path->succ_probe_cnt = 0;
     path->probe_checked = false;
     return path;
 }
@@ -312,17 +319,32 @@ static void hc_process_probe_cr(bondp_hc_ctx_t *hc_ctx, int local_idx, const urm
     path->no_cqe_round = 0;
     path->probe_checked = true;
 
+    /* Sustained-success counter: incremented on each successful probe while
+     * the link is failed, reset otherwise (failed probe, or success while
+     * already healthy). Updated in-lock because 'path' may be replaced by a
+     * concurrent register (array growth). */
+    if (ok && !prev) {
+        path->succ_probe_cnt++;
+    } else {
+        path->succ_probe_cnt = 0;
+    }
+    uint32_t succ_cnt = path->succ_probe_cnt;
+
     bondp_context_t *bdp_ctx = NULL;
     if (ok && bdp_tjetty != NULL) {
         bdp_ctx = CONTAINER_OF_FIELD(bdp_tjetty->v_tjetty.urma_ctx, bondp_context_t, v_ctx);
     }
     pthread_rwlock_unlock(&node->lock);
 
-    if (ok && !prev) {
-        URMA_LOG_INFO("Health probe link [%d, %d] recovered.\n", local_idx, target_idx);
+    /* Recover the path only after loc_health_recheck_cnt+1 consecutive
+     * successful probes while failed, so a single stale pre-failure ACK
+     * cannot prematurely re-enable the link. */
+    if (ok && !prev && succ_cnt > g_bondp_env.loc_health_recheck_cnt) {
+        URMA_LOG_INFO("Health probe link [%d, %d] recovered, succ_cnt=%u.\n",
+                      local_idx, target_idx, succ_cnt);
         hc_set_tjetty_list_target_valid(node, (uint32_t)local_idx, target_idx);
     }
-    if (bdp_ctx != NULL) {
+    if (bdp_ctx != NULL && (prev || succ_cnt > g_bondp_env.loc_health_recheck_cnt)) {
         hc_set_local_idx_jettys_hc_valid(bdp_ctx, (uint32_t)local_idx);
     }
 }
@@ -1032,6 +1054,7 @@ int bondp_hc_register_tjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
         /* Register the tjetty at this path slot */
         hc_path->tjetty = bdp_tjetty;
         hc_path->no_cqe_round = 0;
+        hc_path->succ_probe_cnt = 0;
 
         /* Import health probe seg at node level if not already present */
         if (hc_path->tseg == NULL) {
@@ -1104,6 +1127,7 @@ static void hc_unregister_tjetty_path(bondp_hc_node_t *node, bondp_target_jetty_
         bondp_target_jetty_t *backup = hc_find_tjetty_for_path(node, i, j);
         path->tjetty = backup;
         path->no_cqe_round = 0;
+        path->succ_probe_cnt = 0;
 
         if (backup == NULL) {
             continue;
