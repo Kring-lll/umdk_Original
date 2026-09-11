@@ -127,6 +127,8 @@ type ForwardRequest struct {
 	Body      []byte            // Request body
 	DpRank    *int              // DP rank for header injection (optional)
 	Stream    bool              // Whether to stream the response
+	// Label identifies the request in watchdog kill logs (session/req id).
+	Label string
 }
 
 // ForwardResult represents the result of a forwarded request.
@@ -290,7 +292,7 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 	// body — wrapping them in a StreamReader would let the SSE parser
 	// silently drop the non-SSE error payload.
 	if req.Stream && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		result.StreamReader = newStreamReader(resp.Body, pm.firstChunkTimeout, pm.chunkIntervalTimeout)
+		result.StreamReader = newStreamReader(resp.Body, pm.firstChunkTimeout, pm.chunkIntervalTimeout, req.Label)
 		return result, nil
 	}
 
