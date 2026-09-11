@@ -15,6 +15,7 @@
 #include "ub_util.h"
 #include "urma_log.h"
 
+#include "bondp_cp_seg.h"
 #include "bondp_cp_tjetty.h"
 #include "bondp_provider_ops.h"
 #include "bondp_types.h"
@@ -237,6 +238,18 @@ static int bondp_user_ctl_get_seg_ctx(urma_context_t *ctx, urma_user_ctl_in_t *i
 
     bondp_tseg_t *bdp_tseg = CONTAINER_OF_FIELD(tseg, bondp_tseg_t, v_tseg);
 
+    /* Hold use_cnt while snapshotting bdp_tseg so a concurrent
+     * bondp_unregister_seg sees a live object (use_cnt > 1 -> EAGAIN) and
+     * cannot free bdp_tseg under us. Order matches the datapath: take the ref
+     * first, then reject if an unregister is in flight. */
+    bondp_tseg_get(tseg);
+    if (atomic_load(&bdp_tseg->deleting)) {
+        URMA_LOG_ERR("seg is being unregistered, reject get seg ctx. token_id=%u.\n",
+                     tseg->seg.token_id);
+        bondp_tseg_put(tseg);
+        return URMA_EAGAIN;
+    }
+
     uint32_t peer_cnt = 0;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
         if (bdp_tseg->p_tseg[i] != NULL) {
@@ -250,6 +263,7 @@ static int bondp_user_ctl_get_seg_ctx(urma_context_t *ctx, urma_user_ctl_in_t *i
                                                       ext_len);
     if (new_seg == NULL) {
         URMA_LOG_ERR("Failed to alloc seg.\n");
+        bondp_tseg_put(tseg);
         return -ENOMEM;
     }
 
@@ -260,11 +274,13 @@ static int bondp_user_ctl_get_seg_ctx(urma_context_t *ctx, urma_user_ctl_in_t *i
     int ret = bondp_fill_seg_ext_from_tseg(bdp_tseg, ext, ext_len);
     if (ret != 0) {
         free(new_seg);
+        bondp_tseg_put(tseg);
         return ret;
     }
 
     urma_seg_t **out_seg = (urma_seg_t **)(uintptr_t)out->addr;
     *out_seg = new_seg;
+    bondp_tseg_put(tseg);
     return 0;
 }
 
@@ -347,6 +363,14 @@ static int bondp_user_ctl_get_user_tseg(urma_context_t *ctx, urma_user_ctl_in_t 
 
     bondp_tseg_t *bdp_tseg = CONTAINER_OF_FIELD(tseg, bondp_tseg_t, v_tseg);
 
+    bondp_tseg_get(tseg);
+    if (atomic_load(&bdp_tseg->deleting)) {
+        URMA_LOG_ERR("seg is being unregistered, reject get user tseg. token_id=%u.\n",
+                     tseg->seg.token_id);
+        bondp_tseg_put(tseg);
+        return URMA_EAGAIN;
+    }
+
     uint32_t peer_cnt = 0;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
         if (bdp_tseg->p_tseg[i] != NULL) {
@@ -360,6 +384,7 @@ static int bondp_user_ctl_get_user_tseg(urma_context_t *ctx, urma_user_ctl_in_t 
                                                                 ext_len);
     if (new_ut == NULL) {
         URMA_LOG_ERR("Failed to alloc user tseg.\n");
+        bondp_tseg_put(tseg);
         return -ENOMEM;
     }
 
@@ -372,11 +397,13 @@ static int bondp_user_ctl_get_user_tseg(urma_context_t *ctx, urma_user_ctl_in_t 
     int ret = bondp_fill_user_tseg_ext_from_tseg(bdp_tseg, ext, ext_len);
     if (ret != 0) {
         free(new_ut);
+        bondp_tseg_put(tseg);
         return ret;
     }
 
     urma_user_tseg_t **out_ut = (urma_user_tseg_t **)(uintptr_t)out->addr;
     *out_ut = new_ut;
+    bondp_tseg_put(tseg);
     return 0;
 }
 
