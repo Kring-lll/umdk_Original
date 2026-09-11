@@ -625,6 +625,7 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		Body:      forwardBody,
 		Stream:    stream,
 		DpRank:    suggestion.DpRank,
+		Label:     sessionID + "/" + in.UUID,
 	}
 
 	result, err := s.proxyMgr.ForwardRequest(r.Context(), forwardReq)
@@ -643,6 +644,7 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 	var finishReason string
 
 	if stream && result.StreamReader != nil {
+		defer result.StreamReader.Close()
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
