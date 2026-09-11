@@ -258,17 +258,12 @@ DELETE_PSEG:
 
 static int bondp_delete_vseg(bondp_tseg_t *bdp_seg)
 {
-    unsigned long ref_cnt;
-
     if (bdp_seg == NULL) {
         URMA_LOG_ERR("invalid param.\n");
         return URMA_FAIL;
     }
-    ref_cnt = atomic_load(&(bdp_seg->use_cnt.atomic_cnt));
     urma_target_seg_t *target_seg = &bdp_seg->v_tseg;
     target_seg->handle = bdp_seg->v_orig_handle;
-    URMA_LOG_DEBUG("Unregistering vseg, token_id=%u, handle=%lu, use_cnt=%lu.\n",
-                   bdp_seg->v_tseg.seg.token_id, target_seg->handle, ref_cnt);
 
     if (urma_cmd_unregister_seg(target_seg) != 0) {
         URMA_LOG_ERR("Failed to unregister segment, token_id=%u, handle=%lu.\n",
