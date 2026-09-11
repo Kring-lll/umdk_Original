@@ -256,11 +256,16 @@ typedef struct bondp_comp {
     atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     atomic_bool hc_valid[URMA_UBAGG_DEV_MAX_NUM];
     atomic_uint msn;
+    /* Snapshot of the context-wide health check round taken at this
+     * vjetty's failover time; hc_valid may only be set for probes posted
+     * loc_health_recheck_cnt+1 rounds after this snapshot. */
+    atomic_uint failover_hc_round[URMA_UBAGG_DEV_MAX_NUM];
 #else
     std::atomic_bool valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_bool rebuild_done[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_bool hc_valid[URMA_UBAGG_DEV_MAX_NUM];
     std::atomic_uint msn;
+    std::atomic_uint failover_hc_round[URMA_UBAGG_DEV_MAX_NUM];
 #endif
 #ifndef __cplusplus
     atomic_uint sqe_cnt[URMA_UBAGG_DEV_MAX_NUM][URMA_UBAGG_DEV_MAX_NUM];
@@ -300,6 +305,15 @@ typedef struct bondp_target_jetty {
     uint16_t hc_node_idx;    /* narrowed from uint32_t, < MAX_NODE_NUM */
     uint8_t active_count;    /* narrowed from uint32_t, <= URMA_UBAGG_DEV_MAX_NUM */
     uint8_t mask; // mask value refer to bondp_tjetty_flag_mask_t
+    /* Snapshot of the context-wide health check round (bondp_hc_ctx->round)
+     * taken at failover time; only success CQEs observed at least
+     * loc_health_recheck_cnt+1 rounds after the snapshot may trigger
+     * recovery, filtering stale pre-failover ACKs. */
+#ifndef __cplusplus
+    atomic_uint failover_hc_round;
+#else
+    std::atomic_uint failover_hc_round;
+#endif
     bondp_p_target_jetty_t p_tjettys[];
 } bondp_target_jetty_t;
 

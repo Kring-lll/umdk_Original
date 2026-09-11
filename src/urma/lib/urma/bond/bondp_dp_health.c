@@ -19,6 +19,7 @@
 
 #include "bondp_context_table.h"
 #include "bondp_cp_tjetty.h"
+#include "bondp_env.h"
 #include "bondp_topo_info.h"
 #include "bondp_types.h"
 #include "bondp_worker.h"
@@ -61,6 +62,14 @@ typedef struct bondp_hc_path {
     uint8_t local_idx;
     uint8_t target_idx;
     uint8_t no_cqe_round;
+    /* Round (hc_ctx->round) at which the current in-flight probe was
+     * posted. Since each path has at most one probe in flight, this record
+     * is guaranteed to belong to the next CQE polled on this path, so the
+     * recovery check compares the CQE's own posting round against the
+     * failover snapshot instead of the observation-time round. Only touched
+     * on the single HC worker thread (under node->lock for path
+     * replacement safety), so a plain field is safe. */
+    uint32_t probe_round;
     bool probe_checked;
 } bondp_hc_path_t;
 
@@ -81,6 +90,11 @@ struct bondp_hc_ctx {
     atomic_uint_fast64_t probe_task_id;
     atomic_bool started;    /* Probe jettys and task are started lazily by bondp_hc_start */
     atomic_bool stopping;   /* Set by uninit to stop the probe task from rescheduling */
+    /* Context-wide health check round: incremented once per hc_probe_fn
+     * execution, regardless of how many nodes/probes each round processes.
+     * Compared against each tjetty's failover_hc_round snapshot to filter
+     * stale pre-failover success CQEs. */
+    atomic_uint round;
     uint32_t probe_cur_idx; /* Current polling position for batched node probing */
     uint32_t node_num;
     bondp_hc_node_t nodes[MAX_NODE_NUM];
@@ -143,6 +157,7 @@ static bondp_hc_path_t *hc_append_path(bondp_hc_node_t *node, uint8_t local_idx,
     path->local_idx = local_idx;
     path->target_idx = target_idx;
     path->no_cqe_round = 0;
+    path->probe_round = 0;
     path->probe_checked = false;
     return path;
 }
@@ -220,13 +235,22 @@ static void hc_rebuild_probe_jetty(bondp_hc_ctx_t *hc_ctx, bondp_probe_res_t *re
     }
 }
 
-static void hc_set_tjetty_list_target_valid(bondp_hc_node_t *node, uint32_t local_idx, uint32_t target_idx)
+static void hc_set_tjetty_list_target_valid(bondp_hc_node_t *node, uint32_t local_idx,
+                                            uint32_t target_idx, uint32_t probe_round)
 {
     bondp_target_jetty_t *bdp_tjetty = NULL;
     uint32_t recovered_cnt = 0;
 
     pthread_rwlock_rdlock(&node->lock);
     UB_LIST_FOR_EACH (bdp_tjetty, hc_entry, &node->tjetty_list) {
+        /* Level-1 filter: each target jetty recovers its own slots only
+         * after its own failover cooldown has elapsed. A success probe on
+         * one tjetty must not re-enable another tjetty that failed more
+         * recently. */
+        if (probe_round <= atomic_load(&bdp_tjetty->failover_hc_round) +
+                              g_bondp_env.loc_health_recheck_cnt) {
+            continue;
+        }
         bondp_p_target_jetty_t *p_tjetty = bondp_find_p_tjetty(bdp_tjetty, local_idx, target_idx);
         if (p_tjetty != NULL) {
             atomic_store(&p_tjetty->valid, true);
@@ -242,7 +266,8 @@ static void hc_set_tjetty_list_target_valid(bondp_hc_node_t *node, uint32_t loca
     }
 }
 
-static void hc_set_local_idx_jettys_hc_valid(bondp_context_t *bdp_ctx, uint32_t local_idx)
+static void hc_set_local_idx_jettys_hc_valid(bondp_context_t *bdp_ctx, uint32_t local_idx,
+                                             uint32_t probe_round)
 {
     if (bdp_ctx == NULL || local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
         return;
@@ -256,6 +281,13 @@ static void hc_set_local_idx_jettys_hc_valid(bondp_context_t *bdp_ctx, uint32_t 
         bondp_comp_t *comp = item->comp;
         if (item->key.type != JETTY || comp == NULL ||
             comp->p_jetty[local_idx] == NULL) {
+            continue;
+        }
+        /* Level-2 filter: this vjetty's own failover cooldown must have
+         * elapsed before hc_valid may be set. Checked before consuming
+         * rebuild_done so a blocked comp keeps its recovery armed. */
+        if (probe_round <= atomic_load(&comp->failover_hc_round[local_idx]) +
+                               g_bondp_env.loc_health_recheck_cnt) {
             continue;
         }
         if (!atomic_exchange(&comp->rebuild_done[local_idx], false)) {
@@ -312,18 +344,31 @@ static void hc_process_probe_cr(bondp_hc_ctx_t *hc_ctx, int local_idx, const urm
     path->no_cqe_round = 0;
     path->probe_checked = true;
 
+    /* A success CQE only proves the link is up if its probe was posted at
+     * least loc_health_recheck_cnt+1 rounds after the failover snapshot; a
+     * probe posted before the failure may ACK stale. probe_round was
+     * recorded at posting time on this path (single in-flight probe), so
+     * this identifies the CQE's own round, not the observation-time round.
+     * Captured under the lock; the recovery helpers below apply per-tjetty
+     * and per-comp cooldown filters on top of it. */
+    bool round_ok = true;
+    uint32_t probe_round = path->probe_round;
+    if (bdp_tjetty != NULL) {
+        round_ok = probe_round >
+            atomic_load(&bdp_tjetty->failover_hc_round) + g_bondp_env.loc_health_recheck_cnt;
+    }
+
     bondp_context_t *bdp_ctx = NULL;
     if (ok && bdp_tjetty != NULL) {
         bdp_ctx = CONTAINER_OF_FIELD(bdp_tjetty->v_tjetty.urma_ctx, bondp_context_t, v_ctx);
     }
     pthread_rwlock_unlock(&node->lock);
 
-    if (ok && !prev) {
-        URMA_LOG_INFO("Health probe link [%d, %d] recovered.\n", local_idx, target_idx);
-        hc_set_tjetty_list_target_valid(node, (uint32_t)local_idx, target_idx);
+    if (ok && !prev && round_ok) {
+        hc_set_tjetty_list_target_valid(node, (uint32_t)local_idx, target_idx, probe_round);
     }
-    if (bdp_ctx != NULL) {
-        hc_set_local_idx_jettys_hc_valid(bdp_ctx, (uint32_t)local_idx);
+    if (bdp_ctx != NULL && round_ok) {
+        hc_set_local_idx_jettys_hc_valid(bdp_ctx, (uint32_t)local_idx, probe_round);
     }
 }
 
@@ -437,6 +482,9 @@ static void hc_probe_link(bondp_hc_ctx_t *hc_ctx, bondp_hc_node_t *node, bondp_h
     if (ret == URMA_SUCCESS) {
         res->inflight++;
         path->no_cqe_round = 1;
+        /* Record the posting round: with one probe in flight per path, this
+         * value identifies the next CQE polled on this path. */
+        path->probe_round = atomic_load(&hc_ctx->round);
     } else {
         URMA_LOG_WARN("Failed to send health probe, node_idx=%u, local_idx=%u, target_idx=%u, ret=%d.\n",
                       node->node_idx, local_idx, target_idx, ret);
@@ -486,6 +534,11 @@ static void hc_probe_fn(bondp_worker_task_reason_t reason, void *arg)
     if (hc_ctx->node_num == 0) {
         return;
     }
+
+    /* Advance the context-wide round once per health check execution, so
+     * the round difference is decoupled from node count (batched probing)
+     * and from the number of probes posted per round. */
+    atomic_fetch_add(&hc_ctx->round, 1);
 
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
         if (hc_ctx->probes[i].jetty == NULL) {
@@ -1032,6 +1085,7 @@ int bondp_hc_register_tjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
         /* Register the tjetty at this path slot */
         hc_path->tjetty = bdp_tjetty;
         hc_path->no_cqe_round = 0;
+        hc_path->probe_round = 0;
 
         /* Import health probe seg at node level if not already present */
         if (hc_path->tseg == NULL) {
@@ -1104,6 +1158,7 @@ static void hc_unregister_tjetty_path(bondp_hc_node_t *node, bondp_target_jetty_
         bondp_target_jetty_t *backup = hc_find_tjetty_for_path(node, i, j);
         path->tjetty = backup;
         path->no_cqe_round = 0;
+        path->probe_round = 0;
 
         if (backup == NULL) {
             continue;
@@ -1166,6 +1221,30 @@ void bondp_hc_unregister_tjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *
     bdp_tjetty->hc_node_idx = 0;
     pthread_rwlock_unlock(&node->lock);
     URMA_LOG_DEBUG("Health check tjetty unregistered, node_idx=%u.\n", node->node_idx);
+}
+
+void bondp_hc_snapshot_failover_round(bondp_target_jetty_t *bdp_tjetty,
+                                      bondp_comp_t *bdp_comp, uint32_t send_idx)
+{
+    bondp_hc_ctx_t *hc_ctx = NULL;
+    if (bdp_tjetty != NULL) {
+        bondp_context_t *bdp_ctx =
+            CONTAINER_OF_FIELD(bdp_tjetty->v_tjetty.urma_ctx, bondp_context_t, v_ctx);
+        hc_ctx = bdp_ctx->hc_ctx;
+    } else if (bdp_comp != NULL && bdp_comp->bondp_ctx != NULL) {
+        hc_ctx = bdp_comp->bondp_ctx->hc_ctx;
+    }
+    if (hc_ctx == NULL) {
+        return;
+    }
+
+    uint32_t round = atomic_load(&hc_ctx->round);
+    if (bdp_tjetty != NULL) {
+        atomic_store(&bdp_tjetty->failover_hc_round, round);
+    }
+    if (bdp_comp != NULL && send_idx < URMA_UBAGG_DEV_MAX_NUM) {
+        atomic_store(&bdp_comp->failover_hc_round[send_idx], round);
+    }
 }
 
 void bondp_hc_tjetty_sync_valid(const bondp_target_jetty_t *bdp_tjetty)
