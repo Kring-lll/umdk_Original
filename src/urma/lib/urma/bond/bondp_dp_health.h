@@ -23,6 +23,10 @@ struct urma_bond_id_info_out;
 
 #define BONDP_HC_DEFAULT_PROBE_INTERVAL_MS (1000)
 #define BONDP_HC_DEFAULT_BATCH_NODE_NUM    (8)
+/* Consecutive successful probes (while the link is failed) required before
+ * the link may be marked recovered. Configurable via
+ * BOND_LOC_HEALTH_RECHECK_CNT, see bondp_env.c. */
+#define BONDP_LOC_HEALTH_RECHECK_CNT       (4)
 
 typedef struct bondp_hc_cfg {
     /*

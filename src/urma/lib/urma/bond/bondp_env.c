@@ -21,6 +21,7 @@
 #define BONDP_ENV_ENABLE_RNR_RETRY         "BOND_ENABLE_RNR_RETRY"
 #define BONDP_ENV_HEALTH_CHECK_INTERVAL    "BOND_HEALTH_CHECK_INTERVAL"
 #define BONDP_ENV_HEALTH_CHECK_NODE_NUM    "BOND_HEALTH_CHECK_BATCH_NODE_NUM"
+#define BONDP_ENV_LOC_HEALTH_RECHECK_CNT   "BOND_LOC_HEALTH_RECHECK_CNT"
 #define BONDP_ENV_RNR_RETRY_SLEEP_MS       "BOND_RNR_RETRY_SLEEP_MS"
 #define BONDP_ENV_RNR_RETRY_MAX            "BOND_RNR_RETRY_MAX"
 #define BONDP_ENV_RNR_RETRY_JITTER_RATIO   "BOND_RNR_RETRY_JITTER_RATIO"
@@ -150,6 +151,7 @@ static void read_all_env(bondp_env_t *env)
     const uint64_t default_rnr_retry_max = 15;
     const uint32_t default_rnr_retry_jitter_ratio = 0;
     const uint32_t default_health_check_batch_node_num = BONDP_HC_DEFAULT_BATCH_NODE_NUM;
+    const uint32_t default_loc_health_recheck_cnt = BONDP_LOC_HEALTH_RECHECK_CNT;
     env->enable_health_check = read_env_bool(
         BONDP_ENV_ENABLE_HEALTH_CHECK, default_enable_health_check);
     env->enable_failover = read_env_bool(
@@ -168,8 +170,11 @@ static void read_all_env(bondp_env_t *env)
         BONDP_ENV_RNR_RETRY_JITTER_RATIO, default_rnr_retry_jitter_ratio);
     uint64_t health_check_batch_node_num = read_env_uint64(
         BONDP_ENV_HEALTH_CHECK_NODE_NUM, default_health_check_batch_node_num);
+    uint64_t loc_health_recheck_cnt = read_env_uint64(
+        BONDP_ENV_LOC_HEALTH_RECHECK_CNT, default_loc_health_recheck_cnt);
     env->rnr_retry_jitter_ratio = default_rnr_retry_jitter_ratio;
     env->health_check_batch_node_num = default_health_check_batch_node_num;
+    env->loc_health_recheck_cnt = (uint32_t)loc_health_recheck_cnt;
     read_env_balance_route_all(env);
 
     const uint64_t time_100ms = 100;
@@ -205,7 +210,7 @@ static void print_all_env(const bondp_env_t *env)
 {
     URMA_LOG_INFO("Health check config: enable_failover=%s, enable_failback=%s, enable_health_check=%s, "
                   "enable_rnr_retry=%s, interval=%lums, batch_node_num=%u, "
-                  "rnr_retry_sleep=%lums, rnr_retry_max=%lu, "
+                  "loc_health_recheck_cnt=%u, rnr_retry_sleep=%lums, rnr_retry_max=%lu, "
                   "rnr_retry_jitter_ratio=%u\n",
                   env->enable_failover ? "true" : "false",
                   env->enable_failback ? "true" : "false",
@@ -213,6 +218,7 @@ static void print_all_env(const bondp_env_t *env)
                   env->enable_rnr_retry ? "true" : "false",
                   env->health_check_interval_ms,
                   env->health_check_batch_node_num,
+                  env->loc_health_recheck_cnt,
                   env->rnr_retry_sleep_ms,
                   env->rnr_retry_max,
                   env->rnr_retry_jitter_ratio);

@@ -19,6 +19,7 @@
 
 #include "bondp_context_table.h"
 #include "bondp_cp_tjetty.h"
+#include "bondp_env.h"
 #include "bondp_topo_info.h"
 #include "bondp_types.h"
 #include "bondp_worker.h"
@@ -61,6 +62,16 @@ typedef struct bondp_hc_path {
     uint8_t local_idx;
     uint8_t target_idx;
     uint8_t no_cqe_round;
+    /* Consecutive probe rounds (each with at least one success CQE) received
+     * while this link was failed. Updated at most once per probe round by
+     * hc_round_finalize_node, after all CQEs of the round have been polled.
+     * Only touched on the single HC worker thread, so plain fields are safe. */
+    uint32_t succ_probe_cnt;
+    /* Per-round CQE flags, set by hc_process_probe_cr and consumed/cleared by
+     * hc_round_finalize_node: round_polled = any probe CQE arrived this round;
+     * round_succ = at least one of them was successful. */
+    bool round_polled;
+    bool round_succ;
     bool probe_checked;
 } bondp_hc_path_t;
 
@@ -143,6 +154,9 @@ static bondp_hc_path_t *hc_append_path(bondp_hc_node_t *node, uint8_t local_idx,
     path->local_idx = local_idx;
     path->target_idx = target_idx;
     path->no_cqe_round = 0;
+    path->succ_probe_cnt = 0;
+    path->round_polled = false;
+    path->round_succ = false;
     path->probe_checked = false;
     return path;
 }
@@ -292,38 +306,100 @@ static void hc_process_probe_cr(bondp_hc_ctx_t *hc_ctx, int local_idx, const urm
     bool ok = (cr->status == URMA_CR_SUCCESS);
 
     /* paths may be replaced by a concurrent register (array growth), so the
-     * lookup must hold the read lock. Recovery helpers take the lock themselves
-     * and are called after unlocking to avoid recursive rdlock. */
+     * lookup must hold the read lock. */
     pthread_rwlock_rdlock(&node->lock);
     bondp_hc_path_t *path = hc_find_path(node, (uint32_t)local_idx, target_idx);
     if (path == NULL) {
         pthread_rwlock_unlock(&node->lock);
         return;
     }
-    bondp_target_jetty_t *bdp_tjetty = path->tjetty;
-    bool prev = true;
-    if (bdp_tjetty != NULL) {
-        const bondp_p_target_jetty_t *p_tjetty = bondp_find_p_tjetty_const(bdp_tjetty,
-                                                                           (uint32_t)local_idx,
-                                                                           target_idx);
-        prev = (p_tjetty != NULL) ? atomic_load(&p_tjetty->valid) : true;
-    }
     atomic_store(&path->valid, ok);
     path->no_cqe_round = 0;
     path->probe_checked = true;
 
-    bondp_context_t *bdp_ctx = NULL;
-    if (ok && bdp_tjetty != NULL) {
-        bdp_ctx = CONTAINER_OF_FIELD(bdp_tjetty->v_tjetty.urma_ctx, bondp_context_t, v_ctx);
+    /* Only record this round's outcome here; the counter update and the
+     * recovery decision are deferred to hc_round_finalize_node so each path
+     * is counted at most once per probe round. */
+    path->round_polled = true;
+    if (ok) {
+        path->round_succ = true;
     }
     pthread_rwlock_unlock(&node->lock);
+}
 
-    if (ok && !prev) {
-        URMA_LOG_INFO("Health probe link [%d, %d] recovered.\n", local_idx, target_idx);
-        hc_set_tjetty_list_target_valid(node, (uint32_t)local_idx, target_idx);
-    }
-    if (bdp_ctx != NULL) {
-        hc_set_local_idx_jettys_hc_valid(bdp_ctx, (uint32_t)local_idx);
+/*
+ * End-of-round accounting: after all probe CQEs of this hc_probe_fn round
+ * have been polled, update each path's sustained-success counter exactly
+ * once and perform the deferred recovery. Paths without a CQE this round
+ * (not probed in the previous batch, or CQE still in flight) keep their
+ * counter unchanged.
+ */
+static void hc_round_finalize_node(bondp_hc_node_t *node)
+{
+    for (uint32_t p = 0; p < node->path_cnt; ++p) {
+        bool restore_target = false;
+        bool set_hc_valid = false;
+        uint32_t local_idx = 0;
+        uint32_t target_idx = 0;
+        uint32_t succ_cnt = 0;
+        bondp_context_t *bdp_ctx = NULL;
+
+        pthread_rwlock_rdlock(&node->lock);
+        if (p >= node->path_cnt) {
+            pthread_rwlock_unlock(&node->lock);
+            break;
+        }
+        bondp_hc_path_t *path = &node->paths[p];
+        bool round_polled = path->round_polled;
+        bool round_succ = path->round_succ;
+        path->round_polled = false;
+        path->round_succ = false;
+
+        bondp_target_jetty_t *bdp_tjetty = path->tjetty;
+        if (!round_polled || bdp_tjetty == NULL) {
+            /* CQE arrived for a detached path: its counter is meaningless. */
+            if (round_polled && bdp_tjetty == NULL) {
+                path->succ_probe_cnt = 0;
+            }
+            pthread_rwlock_unlock(&node->lock);
+            continue;
+        }
+
+        local_idx = path->local_idx;
+        target_idx = path->target_idx;
+        const bondp_p_target_jetty_t *p_tjetty =
+            bondp_find_p_tjetty_const(bdp_tjetty, local_idx, target_idx);
+        bool prev = (p_tjetty != NULL) ? atomic_load(&p_tjetty->valid) : true;
+
+        /* Single update per probe round: +1 only when this path saw a
+         * success CQE while the link is failed; otherwise (failed CQE, or
+         * success while already healthy) reset. */
+        if (round_succ && !prev) {
+            path->succ_probe_cnt++;
+        } else {
+            path->succ_probe_cnt = 0;
+        }
+        succ_cnt = path->succ_probe_cnt;
+
+        if (round_succ) {
+            /* Recover the path only after loc_health_recheck_cnt+1
+             * consecutive successful rounds while failed, so a single
+             * stale pre-failure ACK cannot re-enable the link. */
+            restore_target = !prev && succ_cnt > g_bondp_env.loc_health_recheck_cnt;
+            set_hc_valid = prev || restore_target;
+            bdp_ctx = CONTAINER_OF_FIELD(bdp_tjetty->v_tjetty.urma_ctx, bondp_context_t, v_ctx);
+        }
+        pthread_rwlock_unlock(&node->lock);
+
+        /* Recovery helpers take node->lock themselves: call after unlocking. */
+        if (restore_target) {
+            URMA_LOG_INFO("Health probe link [%u, %u] recovered, succ_cnt=%u.\n",
+                          local_idx, target_idx, succ_cnt);
+            hc_set_tjetty_list_target_valid(node, local_idx, target_idx);
+        }
+        if (set_hc_valid) {
+            hc_set_local_idx_jettys_hc_valid(bdp_ctx, local_idx);
+        }
     }
 }
 
@@ -492,6 +568,13 @@ static void hc_probe_fn(bondp_worker_task_reason_t reason, void *arg)
             continue;
         }
         hc_poll_probe_cq(hc_ctx, (int)i);
+    }
+
+    /* Per-round accounting: after all CQEs of this round have been polled,
+     * update each path's sustained-success counter at most once and run the
+     * deferred recovery checks. */
+    for (uint32_t i = 0; i < hc_ctx->node_num; ++i) {
+        hc_round_finalize_node(&hc_ctx->nodes[i]);
     }
 
     uint32_t batch_cnt = MIN(hc_ctx->cfg.batch_node_num, hc_ctx->node_num);
@@ -1032,6 +1115,9 @@ int bondp_hc_register_tjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
         /* Register the tjetty at this path slot */
         hc_path->tjetty = bdp_tjetty;
         hc_path->no_cqe_round = 0;
+        hc_path->succ_probe_cnt = 0;
+        hc_path->round_polled = false;
+        hc_path->round_succ = false;
 
         /* Import health probe seg at node level if not already present */
         if (hc_path->tseg == NULL) {
@@ -1104,6 +1190,9 @@ static void hc_unregister_tjetty_path(bondp_hc_node_t *node, bondp_target_jetty_
         bondp_target_jetty_t *backup = hc_find_tjetty_for_path(node, i, j);
         path->tjetty = backup;
         path->no_cqe_round = 0;
+        path->succ_probe_cnt = 0;
+        path->round_polled = false;
+        path->round_succ = false;
 
         if (backup == NULL) {
             continue;
