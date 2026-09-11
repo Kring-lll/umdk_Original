@@ -1552,6 +1552,9 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
         atomic_store(&bdp_comp->valid[send_idx], false);
+        /* Drop any not-yet-consumed recovery signal: the link failed again
+         * before failback ran, a stale hc_valid must not re-enable it. */
+        atomic_store(&bdp_comp->hc_valid[send_idx], false);
         if (cr->status == URMA_CR_LOC_ACCESS_ERR &&
             send_idx >= 0 && (uint32_t)send_idx < URMA_UBAGG_DEV_MAX_NUM) {
             atomic_store(&bdp_comp->bondp_ctx->port_status_bad[send_idx], true);
@@ -1562,6 +1565,11 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         if (skip_p_tjetty != NULL) {
             atomic_store(&skip_p_tjetty->valid, false);
         }
+        /* Snapshot the health check round at failover time on both the
+         * target jetty (level-1 recovery filter) and this vjetty (level-2
+         * hc_valid filter): only probes posted loc_health_recheck_cnt+1
+         * rounds later may trigger link recovery. */
+        bondp_hc_snapshot_failover_round(bdp_tjetty, bdp_comp, (uint32_t)send_idx);
         if (is_need_rebuild_jetty(cr) && comp_ctx->enable_failback) {
             int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);
             if (ret != 0 && ret != -EEXIST) {
