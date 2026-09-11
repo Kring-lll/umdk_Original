@@ -300,6 +300,17 @@ typedef struct bondp_target_jetty {
     uint16_t hc_node_idx;    /* narrowed from uint32_t, < MAX_NODE_NUM */
     uint8_t active_count;    /* narrowed from uint32_t, <= URMA_UBAGG_DEV_MAX_NUM */
     uint8_t mask; // mask value refer to bondp_tjetty_flag_mask_t
+#ifndef __cplusplus
+    /* Health check round: incremented on every health probe WR posted to this tjetty */
+    atomic_uint hc_round;
+    /* Health check round recorded at the moment of the last datapath failover on
+     * this tjetty. A success probe CQE may only trigger link recovery when its
+     * round is greater than this value, filtering out stale pre-failover ACKs. */
+    atomic_uint failover_hc_round;
+#else
+    std::atomic_uint hc_round;
+    std::atomic_uint failover_hc_round;
+#endif
     bondp_p_target_jetty_t p_tjettys[];
 } bondp_target_jetty_t;
 
