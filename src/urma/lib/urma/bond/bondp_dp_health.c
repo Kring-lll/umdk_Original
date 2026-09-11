@@ -61,6 +61,10 @@ typedef struct bondp_hc_path {
     uint8_t local_idx;
     uint8_t target_idx;
     uint8_t no_cqe_round;
+    /* Health check round of the most recent probe posted on this path. Each
+     * path has at most one in-flight probe, and both the post and the CQE
+     * handling run on the single HC worker thread, so a plain field is safe. */
+    uint32_t probe_round;
     bool probe_checked;
 } bondp_hc_path_t;
 
@@ -313,16 +317,23 @@ static void hc_process_probe_cr(bondp_hc_ctx_t *hc_ctx, int local_idx, const urm
     path->probe_checked = true;
 
     bondp_context_t *bdp_ctx = NULL;
+    bool round_ok = true;
     if (ok && bdp_tjetty != NULL) {
         bdp_ctx = CONTAINER_OF_FIELD(bdp_tjetty->v_tjetty.urma_ctx, bondp_context_t, v_ctx);
+        /* Only probes posted after the last failover round may trigger link
+         * recovery; a success CQE for a pre-failover probe is stale. Compare
+         * the round of this path's own in-flight probe, not the tjetty-wide
+         * accumulated counter, so a probe on another path cannot un-stale
+         * this CQE. */
+        round_ok = path->probe_round > atomic_load(&bdp_tjetty->failover_hc_round);
     }
     pthread_rwlock_unlock(&node->lock);
 
-    if (ok && !prev) {
+    if (ok && !prev && round_ok) {
         URMA_LOG_INFO("Health probe link [%d, %d] recovered.\n", local_idx, target_idx);
         hc_set_tjetty_list_target_valid(node, (uint32_t)local_idx, target_idx);
     }
-    if (bdp_ctx != NULL) {
+    if (bdp_ctx != NULL && round_ok) {
         hc_set_local_idx_jettys_hc_valid(bdp_ctx, (uint32_t)local_idx);
     }
 }
@@ -431,6 +442,12 @@ static void hc_probe_link(bondp_hc_ctx_t *hc_ctx, bondp_hc_node_t *node, bondp_h
         },
         .next = NULL,
     };
+
+    /* Count this probe as a new health check round on the target jetty and
+     * record it on this path. Incremented before post so that any concurrent
+     * failover snapshot of hc_round already covers this in-flight probe; a
+     * failed post is not rolled back, which is harmless for the comparison. */
+    path->probe_round = atomic_fetch_add(&bdp_tjetty->hc_round, 1) + 1;
 
     urma_jfs_wr_t *bad_wr = NULL;
     urma_status_t ret = urma_post_jetty_send_wr(res->jetty, &wr, &bad_wr);

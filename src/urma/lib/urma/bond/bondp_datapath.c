@@ -1541,6 +1541,10 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
             atomic_store(&bdp_comp->bondp_ctx->port_status_bad[send_idx], true);
         }
         bondp_target_jetty_t *bdp_tjetty = wr_entry->target_vjetty;
+        /* Record the health check round at failover time. Health probe success
+         * CQEs for probes posted at or before this round are stale and must not
+         * trigger link recovery. */
+        atomic_store(&bdp_tjetty->failover_hc_round, atomic_load(&bdp_tjetty->hc_round));
         bondp_hc_tjetty_sync_valid(bdp_tjetty);
         bondp_p_target_jetty_t *skip_p_tjetty = bondp_find_p_tjetty(bdp_tjetty, send_idx, target_idx);
         if (skip_p_tjetty != NULL) {
