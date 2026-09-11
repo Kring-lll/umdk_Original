@@ -292,7 +292,10 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 	// body — wrapping them in a StreamReader would let the SSE parser
 	// silently drop the non-SSE error payload.
 	if req.Stream && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		result.StreamReader = newStreamReader(resp.Body, pm.firstChunkTimeout, pm.chunkIntervalTimeout, req.Label)
+		pm.rwLock.RLock()
+		firstIdle, gapIdle := pm.firstChunkTimeout, pm.chunkIntervalTimeout
+		pm.rwLock.RUnlock()
+		result.StreamReader = newStreamReader(resp.Body, firstIdle, gapIdle, req.Label)
 		return result, nil
 	}
 
