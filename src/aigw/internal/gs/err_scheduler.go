@@ -414,8 +414,8 @@ func (m *ErrSchedulerManager) OnQueueTimeout(sessionID string, waited time.Durat
 	m.sessionTracker.RollbackRequest(sessionID, waited)
 }
 
-func (m *ErrSchedulerManager) RollbackInFlightAttempt(sessionID string) {
-	m.sessionTracker.RollbackRequest(sessionID, 0)
+func (m *ErrSchedulerManager) RollbackInFlightAttempt(sessionID string, queueWait time.Duration) {
+	m.sessionTracker.RollbackRequest(sessionID, queueWait)
 }
 
 func (m *ErrSchedulerManager) TakeQueueWaitCarry(sessionID string) time.Duration {
