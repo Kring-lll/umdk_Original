@@ -200,7 +200,9 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 
 		m.pendingQueue.Remove(pr.ReqID)
 		priority := m.computePriorityWithSnapshot(snap, pr.SessionID, pr.CurStep, classifyPrompt(req))
-		m.dispatchScheduled(pr.Msg, req, result, priority, false)
+		// StarveClock age at dispatch = inherited carry + this attempt's
+		// queue wait — re-credited in full on an in-flight abort.
+		m.dispatchScheduled(pr.Msg, req, result, priority, false, time.Since(pr.StarveClock))
 	}
 }
 
@@ -216,7 +218,7 @@ func (m *GlobalSchedulerManager) computePriorityWithSnapshot(snap *algoSnapshot,
 func (m *GlobalSchedulerManager) dispatchAdvisory(msg *ControlMessage) {
 	req := msg.Request.(*ScheduleRequestMsg)
 	priority := int(m.errScheduler.AnonymousPriority(classifyPrompt(req)))
-	m.dispatchScheduled(msg, req, m.scheduler.schedule(req, nil), priority, true)
+	m.dispatchScheduled(msg, req, m.scheduler.schedule(req, nil), priority, true, 0)
 }
 
 // dispatchDirect dispatches immediately without queueing (passthrough mode).
@@ -232,7 +234,7 @@ func (m *GlobalSchedulerManager) dispatchDirect(msg *ControlMessage, priority in
 		return
 	}
 
-	m.dispatchScheduled(msg, req, result, priority, false)
+	m.dispatchScheduled(msg, req, result, priority, false, 0)
 }
 
 // rollbackFailedAttempt undoes the k++ of a pre-dispatch failure and
@@ -246,7 +248,7 @@ func (m *GlobalSchedulerManager) rollbackFailedAttempt(sessionID string, waited 
 // dispatchScheduled is the shared dispatch step for all modes: LB view,
 // KVC hooks, ERR in-flight books, response. Caller must hold m.dispatchMu.
 func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *ScheduleRequestMsg,
-	result *ScheduleResult, priority int, advisory bool) {
+	result *ScheduleResult, priority int, advisory bool, queueWait time.Duration) {
 
 	m.recordScheduleStats(result)
 
@@ -279,6 +281,7 @@ func (m *GlobalSchedulerManager) dispatchScheduled(msg *ControlMessage, req *Sch
 				PrefillURL:   result.PrefillUrl,
 				DecodeURL:    result.DecodeUrl,
 				DispatchTime: time.Now(),
+				QueueWait:    queueWait,
 			}
 		}
 	}
@@ -333,7 +336,7 @@ func (m *GlobalSchedulerManager) undoDispatched(req *ScheduleRequestMsg,
 	}
 	entry, released := m.errReleaseReq(req.Request.ReqId)
 	if released && entry.SessionID != "" {
-		m.errScheduler.RollbackInFlightAttempt(entry.SessionID)
+		m.errScheduler.RollbackInFlightAttempt(entry.SessionID, entry.QueueWait)
 	}
 }
 
@@ -343,6 +346,12 @@ type errInFlightEntry struct {
 	PrefillURL   string
 	DecodeURL    string
 	DispatchTime time.Time
+	// QueueWait is this attempt's total starvation-clock age at dispatch
+	// (inherited carry included). On an in-flight abort the retry re-enters
+	// the queue with this much credit, so a request that starved 288s,
+	// got dispatched, and was cancelled 12s into the client's budget does
+	// not restart its boost clock from zero.
+	QueueWait time.Duration
 }
 
 // ErrInFlightCount returns dispatched-but-unreleased ERR requests (0 if ERR is off).
@@ -411,13 +420,13 @@ func (m *GlobalSchedulerManager) ErrOnResponse(sessionID, reqID, prefillURL, dec
 	}
 
 	m.dispatchMu.Lock()
-	_, released := m.errReleaseReq(reqID)
+	entry, released := m.errReleaseReq(reqID)
 	if prefillURL == "" || released {
 		switch finishReason {
 		case "stop":
 			m.errScheduler.OnFinish(sessionID)
 		case "cancelled":
-			m.errScheduler.RollbackInFlightAttempt(sessionID)
+			m.errScheduler.RollbackInFlightAttempt(sessionID, entry.QueueWait)
 			log.Warn().Msgf("[ERR] session %s stream cancelled (insURL=%s), k rolled back awaiting retry", sessionID, prefillURL)
 		default:
 			m.errScheduler.RestartIdleTimer(sessionID)
@@ -435,7 +444,7 @@ func (m *GlobalSchedulerManager) ErrOnCancel(sessionID, reqID, prefillURL, decod
 	}
 
 	m.dispatchMu.Lock()
-	_, released := m.errReleaseReq(reqID)
+	entry, released := m.errReleaseReq(reqID)
 	if prefillURL == "" || released {
 		log.Warn().Msgf("[ERR] session %s connection closed (insURL=%s)", sessionID, prefillURL)
 
@@ -466,7 +475,7 @@ func (m *GlobalSchedulerManager) ErrOnCancel(sessionID, reqID, prefillURL, decod
 				m.errScheduler.RestartIdleTimer(sessionID)
 			}
 		} else {
-			m.errScheduler.RollbackInFlightAttempt(sessionID)
+			m.errScheduler.RollbackInFlightAttempt(sessionID, entry.QueueWait)
 		}
 	}
 	m.tryDispatchFromQueue()
@@ -491,7 +500,7 @@ func (m *GlobalSchedulerManager) onInstanceUnhealthy(insUrl string) {
 		}
 		cleaned++
 		if entry.SessionID != "" {
-			m.errScheduler.RollbackInFlightAttempt(entry.SessionID)
+			m.errScheduler.RollbackInFlightAttempt(entry.SessionID, entry.QueueWait)
 		}
 	}
 	m.tryDispatchFromQueue()
