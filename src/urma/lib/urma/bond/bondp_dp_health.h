@@ -18,11 +18,16 @@ extern "C" {
 
 struct bondp_context;
 struct bondp_target_jetty;
+struct bondp_comp;
 struct urma_bond_seg_info_out;
 struct urma_bond_id_info_out;
 
 #define BONDP_HC_DEFAULT_PROBE_INTERVAL_MS (1000)
 #define BONDP_HC_DEFAULT_BATCH_NODE_NUM    (8)
+/* Extra probe rounds (after the failover snapshot) required before a success
+ * CQE may trigger link recovery. Configurable via
+ * BOND_LOC_HEALTH_RECHECK_CNT, see bondp_env.c. */
+#define BONDP_LOC_HEALTH_RECHECK_CNT       (4)
 
 typedef struct bondp_hc_cfg {
     /*
@@ -67,6 +72,11 @@ int bondp_hc_fill_seg_info(const struct bondp_context *bdp_ctx,
  * jettys.
  */
 void bondp_hc_tjetty_sync_valid(const struct bondp_target_jetty *bdp_tjetty);
+/* Snapshot the current health check round on both the target jetty and the
+ * failing vjetty (per send_idx) at failover time; recovery actions compare
+ * probes' posting rounds against these snapshots. */
+void bondp_hc_snapshot_failover_round(struct bondp_target_jetty *bdp_tjetty,
+                                      struct bondp_comp *bdp_comp, uint32_t send_idx);
 
 #ifdef __cplusplus
 }
