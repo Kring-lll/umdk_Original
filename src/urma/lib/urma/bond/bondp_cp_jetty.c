@@ -1397,13 +1397,21 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
 
 static int bondp_delete_vjetty(bondp_comp_t *bdp_jetty)
 {
+    if (bdp_jetty->vjetty_deleted) {
+        return 0;
+    }
+
     unsigned long ref_cnt;
 
     ref_cnt = atomic_load(&(bdp_jetty->use_cnt.atomic_cnt));
 
     URMA_LOG_DEBUG("Deleting vjetty, jetty_id=%u, modify_to_error=%d, use_cnt=%lu.\n",
                    bdp_jetty->v_jetty.jetty_id.id, bdp_jetty->modify_to_error, ref_cnt);
-    return urma_cmd_delete_jetty(&bdp_jetty->v_jetty);
+    int ret = urma_cmd_delete_jetty(&bdp_jetty->v_jetty);
+    if (ret == 0) {
+        bdp_jetty->vjetty_deleted = true;
+    }
+    return ret;
 }
 
 static int bondp_delete_pjetty(bondp_comp_t *bdp_jetty)
@@ -1420,6 +1428,7 @@ static int bondp_delete_pjetty(bondp_comp_t *bdp_jetty)
         if (p_ret != 0) {
             URMA_LOG_ERR("Failed to delete pjetty, idx=%d, ret=%d.\n", i, p_ret);
             ret = p_ret;
+            continue;
         }
         bdp_jetty->p_jetty[i] = NULL;
     }
@@ -1666,17 +1675,20 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
     }
 
     bondp_fb_cancel_tasks(bdp_ctx, jetty_id);
+    ret = bondp_delete_vjetty(bdp_jetty);
+    if (ret != URMA_SUCCESS) {
+        URMA_LOG_ERR("Failed to delete vjetty\n");
+        return ret;
+    }
+    /* Retain failed physical jettys and skip virtual deletion on retry. */
+    ret = bondp_delete_pjetty(bdp_jetty);
+    if (ret != URMA_SUCCESS) {
+        URMA_LOG_ERR("Failed to delete pjetty\n");
+        return ret;
+    }
     bondp_uninit_connection_table(bdp_jetty);
     /* Drop all outstanding WRs and their target jetty/segment references. */
     bondp_uninit_wr_buf(&bdp_jetty->send_wr_buf);
-    if (bondp_delete_vjetty(bdp_jetty) != URMA_SUCCESS) {
-        URMA_LOG_ERR("Failed to delete vjetty\n");
-        ret = URMA_FAIL;
-    }
-    if (bondp_delete_pjetty(bdp_jetty) != URMA_SUCCESS) {
-        URMA_LOG_ERR("Failed to delete pjetty\n");
-        ret = URMA_FAIL;
-    }
     (void)pthread_spin_destroy(&bdp_jetty->send_lock);
     free(bdp_jetty);
 
