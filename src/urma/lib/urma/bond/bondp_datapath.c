@@ -1884,7 +1884,9 @@ int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
     int cr_cnt_remaining = cr_cnt;
 
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM && cr_cnt_remaining > 0; i++) {
+        (void)pthread_spin_lock(&bdp_jetty->send_lock);
         if (bdp_jetty->p_jetty[i] == NULL) {
+            (void)pthread_spin_unlock(&bdp_jetty->send_lock);
             continue;
         }
 
@@ -1892,6 +1894,7 @@ int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
                               ? URMA_UBAGG_MAX_CR_CNT_PER_DEV
                               : cr_cnt_remaining;
         int pcr_cnt = urma_flush_jetty(bdp_jetty->p_jetty[i], pcr_cnt_max, pcr_buf);
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
         if (pcr_cnt < 0) {
             URMA_LOG_ERR("Failed to flush pjetty[%d], pcr_cnt=%d\n", i, pcr_cnt);
             return pcr_cnt;
