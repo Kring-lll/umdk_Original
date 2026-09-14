@@ -97,6 +97,20 @@ func (t *SessionTracker) cleanupIdleSession(sessionID string, timeout time.Durat
 
 // OnRequest increments the iteration counter and returns k. First request returns k=1.
 func (t *SessionTracker) OnRequest(sessionID, model string) int {
+	return t.onRequest(sessionID, model, 1)
+}
+
+// OnRequestWithBase is OnRequest for a session whose first attempt should
+// count as a continuation of a parent's progress (SDK sub-agents): the
+// session is created at baseIteration instead of 1.
+func (t *SessionTracker) OnRequestWithBase(sessionID, model string, baseIteration int) int {
+	if baseIteration < 1 {
+		baseIteration = 1
+	}
+	return t.onRequest(sessionID, model, baseIteration)
+}
+
+func (t *SessionTracker) onRequest(sessionID, model string, initial int) int {
 	if sessionID == "" {
 		return 1
 	}
@@ -110,10 +124,10 @@ func (t *SessionTracker) OnRequest(sessionID, model string) int {
 			SessionID:      sessionID,
 			Model:          model,
 			LastActiveTime: now,
-			Iteration:      1,
+			Iteration:      initial,
 		}
 		t.sessions[sessionID] = s
-		return 1
+		return initial
 	}
 
 	s.Iteration++

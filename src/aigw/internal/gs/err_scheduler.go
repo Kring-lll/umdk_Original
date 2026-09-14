@@ -204,7 +204,19 @@ func (m *ErrSchedulerManager) initAlgorithm() {
 }
 
 func (m *ErrSchedulerManager) OnRequest(sessionID, model, prompt string) int {
-	curStep := m.sessionTracker.OnRequest(sessionID, model)
+	curStep := 1
+	if parent := parentSessionID(sessionID); parent != "" {
+		// Sub-agents run synchronously inside the parent's tool call: the
+		// parent is blocked waiting, so the sub-agent's progress IS the
+		// parent's progress. Starting at k=1 would rank it as a fresh
+		// longest-remaining task (SJF's worst tier) exactly when the
+		// parent is closest to completion; inherit the parent's k so
+		// both rank identically.
+		curStep = m.sessionTracker.OnRequestWithBase(sessionID, model,
+			m.sessionTracker.GetIteration(parent))
+	} else {
+		curStep = m.sessionTracker.OnRequest(sessionID, model)
+	}
 	if m.config.SchedulerType == "caterr" && m.classifier.IsLoaded() && sessionID != "" {
 		m.lockSessionCategory(sessionID, prompt)
 	}
