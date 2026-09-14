@@ -1840,6 +1840,7 @@ urma_perftest parameter values are generally not validated; users should configu
 - In software rate limiting scenarios, the actual effective value will be smaller than the configured value; the smaller the packet length, the larger the deviation.
 - The rate limit value must be less than the actual maximum bandwidth.
 - When configuring --rate_units P, --rate_limit must not be too small, otherwise it may appear stuck. burst_size must not exceed pps, otherwise execution is impossible.
+- When allocating huge pages, anonymous pages are used. If the environment does not support anonymous pages of corresponding size, the --hugepage_size option will cause the memory allocation to fail.
 - send_imm tests are not supported on some chips such as DPU smart NICs.
 
 1.  Example
