@@ -190,6 +190,18 @@ static inline jfs_wr_entry_t *jfs_wr_buf_get(wr_buf_t *buf, uint64_t wr_id)
     return wr_entry->wr_id == wr_id && wr_id != 0 ? wr_entry : NULL;
 }
 
+/*
+ * Pure address computation without touching the entry: used by prefetch
+ * helpers that must not stall on the very cache miss they want to hide.
+ * The returned address is always inside the fixed-size entries array
+ * (wr_id maps modulo max_wr_num), but may point at an unused/reused entry;
+ * callers must not dereference it without jfs_wr_buf_get() validation.
+ */
+static inline jfs_wr_entry_t *jfs_wr_buf_entry_addr(wr_buf_t *buf, uint64_t wr_id)
+{
+    return (jfs_wr_entry_t *)__wr_buf_idx(buf, __wr_id_to_idx(wr_id, buf->max_wr_num));
+}
+
 static inline jfr_wr_entry_t *jfr_wr_buf_get(wr_buf_t *buf, uint64_t wr_id)
 {
     jfr_wr_entry_t *wr_entry;
