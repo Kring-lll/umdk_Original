@@ -8,6 +8,7 @@
  * History: 2025-02-19   Create File
  */
 
+#include "bondp_pjetty.h"
 #include <stdlib.h>
 #include <threads.h>
 
@@ -1320,19 +1321,18 @@ static bondp_comp_t *get_comp_by_cr(bondp_context_t *bdp_ctx, int dev_idx, urma_
                 tl_slots[i].local_id == cr->local_id &&
                 tl_slots[i].type == (uint8_t)p_vjetty_type) {
                 bondp_comp_t *comp = tl_slots[i].comp;
+                /* Validate cached pointers under the same lock as deletion admission. */
+                pthread_rwlock_rdlock(&bdp_ctx->p_vjetty_id_table.lock);
                 if (atomic_load(&bdp_ctx->p_vjetty_id_table.gen) != tl_gen) {
+                    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
                     break;
+                }
+                if (atomic_load(&comp->deleting)) {
+                    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+                    return NULL;
                 }
                 atomic_fetch_add(&comp->use_cnt.atomic_cnt, 1);
-                if (atomic_load(&bdp_ctx->p_vjetty_id_table.gen) != tl_gen) {
-                    atomic_fetch_sub(&comp->use_cnt.atomic_cnt, 1);
-                    for (int j = 0; j < TL_COMP_CACHE_SLOTS; j++) {
-                        tl_slots[j].comp = NULL;
-                    }
-                    tl_fill_pos = 0;
-                    tl_evict_pos = 0;
-                    break;
-                }
+                pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
                 return comp;
             }
         }
@@ -1345,7 +1345,7 @@ static bondp_comp_t *get_comp_by_cr(bondp_context_t *bdp_ctx, int dev_idx, urma_
     pthread_rwlock_rdlock(&bdp_ctx->p_vjetty_id_table.lock);
     bondp_comp_t *comp = bdp_p_vjetty_id_table_lookup_comp_without_lock(
         &bdp_ctx->p_vjetty_id_table, pjetty_id, p_vjetty_type);
-    if (comp == NULL) {
+    if (comp == NULL || atomic_load(&comp->deleting)) {
         pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
         return NULL;
     }
@@ -1353,6 +1353,13 @@ static bondp_comp_t *get_comp_by_cr(bondp_context_t *bdp_ctx, int dev_idx, urma_
     cur_gen = atomic_load(&bdp_ctx->p_vjetty_id_table.gen);
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
 
+    if (tl_gen != cur_gen) {
+        for (int i = 0; i < TL_COMP_CACHE_SLOTS; i++) {
+            tl_slots[i].comp = NULL;
+        }
+        tl_fill_pos = 0;
+        tl_evict_pos = 0;
+    }
     tl_gen = cur_gen;
     int slot;
     if (tl_fill_pos < TL_COMP_CACHE_SLOTS) {
@@ -1882,24 +1889,34 @@ int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
     bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
 
     int cr_cnt_remaining = cr_cnt;
+    int ret;
+
+    /* Keep the owner alive between physical generations and until the flush exits. */
+    (void)pthread_rwlock_rdlock(&bdp_ctx->p_vjetty_id_table.lock);
+    if (atomic_load(&bdp_jetty->deleting)) {
+        (void)pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+        return -URMA_EAGAIN;
+    }
+    atomic_fetch_add(&bdp_jetty->use_cnt.atomic_cnt, 1);
+    (void)pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
 
     for (int i = 0; i < URMA_UBAGG_DEV_MAX_NUM && cr_cnt_remaining > 0; i++) {
-        if (bdp_jetty->p_jetty[i] == NULL) {
+        bondp_pjetty_ref_t *ref = bondp_pjetty_get(bdp_jetty, i);
+        if (ref == NULL) {
             continue;
         }
 
         int pcr_cnt_max = cr_cnt_remaining > URMA_UBAGG_MAX_CR_CNT_PER_DEV
                               ? URMA_UBAGG_MAX_CR_CNT_PER_DEV
                               : cr_cnt_remaining;
-        int pcr_cnt = urma_flush_jetty(bdp_jetty->p_jetty[i], pcr_cnt_max, pcr_buf);
+        int pcr_cnt = urma_flush_jetty(ref->jetty, pcr_cnt_max, pcr_buf);
         if (pcr_cnt < 0) {
             URMA_LOG_ERR("Failed to flush pjetty[%d], pcr_cnt=%d\n", i, pcr_cnt);
-            return pcr_cnt;
+            bondp_pjetty_put(bdp_jetty, ref);
+            ret = pcr_cnt;
+            goto put_comp;
         }
         URMA_LOG_DEBUG("flush pjetty[%d], pcr_cnt=%d\n", i, pcr_cnt);
-        if (pcr_cnt == 0) {
-            continue;
-        }
 
         for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
             urma_cr_t *pcr = &pcr_buf[cr_id];
@@ -1911,14 +1928,20 @@ int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
                 conv_ret = bondp_handle_cr_with_store(bdp_ctx, i, pcr);
             }
             if (conv_ret == CONVERT_FAIL) {
-                return -1;
+                bondp_pjetty_put(bdp_jetty, ref);
+                ret = -1;
+                goto put_comp;
             }
             if (conv_ret == CONVERT_SUCCESS) {
                 cr[cr_cnt - cr_cnt_remaining] = *pcr;
                 cr_cnt_remaining--;
             }
         }
+        bondp_pjetty_put(bdp_jetty, ref);
     }
 
-    return cr_cnt - cr_cnt_remaining;
+    ret = cr_cnt - cr_cnt_remaining;
+put_comp:
+    atomic_fetch_sub(&bdp_jetty->use_cnt.atomic_cnt, 1);
+    return ret;
 }

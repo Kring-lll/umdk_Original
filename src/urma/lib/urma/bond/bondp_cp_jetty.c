@@ -7,6 +7,7 @@
  * Note:
  * History: 2025-02-06
  */
+#include "bondp_pjetty.h"
 #include <errno.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -1381,11 +1382,13 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
         if (bdp_rplc_jfc) {
             p_cfg.shared.jfc = bdp_rplc_jfc->p_jfc[i];
         }
-        urma_jetty_t *jetty = urma_create_jetty(bdp_ctx->p_ctxs[i], &p_cfg);
-        if (jetty == NULL) {
+        bondp_pjetty_ref_t *ref = bondp_pjetty_create(bdp_ctx->p_ctxs[i], &p_cfg);
+        if (ref == NULL) {
             URMA_LOG_ERR("Failed to create pjetty %d.\n", i);
             return -1;
         }
+        urma_jetty_t *jetty = ref->jetty;
+        bdp_jetty->pjetty_refs[i] = ref;
         jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
         bdp_jetty->p_jetty[i] = jetty;
         atomic_store(&bdp_jetty->valid[i], true);
@@ -1421,6 +1424,8 @@ static int bondp_delete_pjetty(bondp_comp_t *bdp_jetty)
             URMA_LOG_ERR("Failed to delete pjetty, idx=%d, ret=%d.\n", i, p_ret);
             ret = p_ret;
         }
+        free(bdp_jetty->pjetty_refs[i]);
+        bdp_jetty->pjetty_refs[i] = NULL;
         bdp_jetty->p_jetty[i] = NULL;
     }
     return ret;
@@ -1569,6 +1574,12 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         goto DELETE_VJETTY;
     }
 
+    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
+        if (bdp_jetty->pjetty_refs[i] != NULL) {
+            bdp_jetty->pjetty_refs[i]->mapped = true;
+        }
+    }
+
     if (bondp_init_connection_table(bdp_jetty) != 0) {
         URMA_LOG_ERR("Failed to create jetty ctx\n");
         goto DEL_P_VJETTY_ID;
@@ -1666,6 +1677,10 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
     }
 
     bondp_fb_cancel_tasks(bdp_ctx, jetty_id);
+    int reclaim_ret = bondp_pjetty_reap(bdp_jetty);
+    if (reclaim_ret != URMA_SUCCESS) {
+        return reclaim_ret;
+    }
     bondp_uninit_connection_table(bdp_jetty);
     /* Drop all outstanding WRs and their target jetty/segment references. */
     bondp_uninit_wr_buf(&bdp_jetty->send_wr_buf);
