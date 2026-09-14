@@ -31,6 +31,13 @@
 #define BONDP_POST_SEND_MAX_RETRY          3
 /* Max consecutive fast returns before forcing a full scan */
 #define BONDP_FAST_RETURN_THRESHOLD        64
+/*
+ * Software-prefetch distance (in CRs) for send wr_entry cache lines in the
+ * CR processing loops.  The entry for CR[n] is prefetched while CR[n-DISTANCE]
+ * is being processed, so the cross-core miss latency (~100-200 cycles)
+ * overlaps DISTANCE * (per-CR processing time, ~120 cycles).
+ */
+#define BONDP_PREFETCH_DISTANCE            4
 
 static urma_jetty_id_t *get_comp_urma_jetty_id(bondp_comp_t *bdp_comp)
 {
@@ -1377,6 +1384,46 @@ static inline void put_comp(bondp_comp_t *bdp_comp)
     atomic_fetch_sub(&bdp_comp->use_cnt.atomic_cnt, 1);
 }
 
+/*
+ * Prefetch the wr_entry cache lines for a send CR, BONDP_PREFETCH_DISTANCE
+ * iterations before it is processed, so the cross-core miss latency overlaps
+ * the processing of the preceding CRs.
+ *
+ * The entry address is computed with pure pointer arithmetic via
+ * jfs_wr_buf_entry_addr() -- no load into the entry -- so issuing the
+ * prefetch never stalls on the miss it is meant to hide.  No wr_id
+ * validation is needed here: the address is always inside the fixed-size
+ * entries array and __builtin_prefetch is a non-faulting hint.
+ *
+ * The comp is protected by a real use_cnt reference (get_comp_by_cr/
+ * put_comp): bondp_delete_jetty() frees send_wr_buf.entries and the comp
+ * itself once use_cnt drops to zero, so the wr_buf fields read by the
+ * address computation are guaranteed alive while the reference is held.
+ *
+ * Entries start at 8-byte-aligned offsets (wr_entry_size is only rounded
+ * up to 8), so the 144-byte header spans 3-4 cache lines depending on the
+ * entry's offset within a 64-byte line.  Four prefetches cover the whole
+ * header plus the first embedded sge_data lines, which jfs_wr_put_refs()
+ * reads on every successful completion.
+ */
+static inline void prefetch_send_cr_wr_entry(bondp_context_t *bdp_ctx, int dev_idx,
+                                             urma_cr_t *cr)
+{
+    if (is_recv_cr(cr) || is_fake_cr(cr)) {
+        return;
+    }
+    bondp_comp_t *comp = get_comp_by_cr(bdp_ctx, dev_idx, cr);
+    if (comp == NULL) {
+        return;
+    }
+    jfs_wr_entry_t *wr_entry = jfs_wr_buf_entry_addr(&comp->send_wr_buf, cr->user_ctx);
+    __builtin_prefetch(wr_entry, 0, 3);
+    __builtin_prefetch((char *)wr_entry + 64, 0, 3);
+    __builtin_prefetch((char *)wr_entry + 128, 0, 3);
+    __builtin_prefetch((char *)wr_entry + 192, 0, 3);
+    put_comp(comp);
+}
+
 static cr_convert_ret_t handle_recv_cr_without_backup(bondp_context_t *bdp_ctx, int idx, urma_cr_t *cr)
 {
     bondp_comp_t *recv_comp = get_comp_by_cr(bdp_ctx, idx, cr);
@@ -1798,7 +1845,22 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
         }
         if (pcr_cnt > 0) {
             hot_polled = true;
+            /* Prime: prefetch the first DISTANCE send CR wr_entries. */
+            if (!single_dev) {
+                int pf_init = pcr_cnt > BONDP_PREFETCH_DISTANCE
+                                  ? BONDP_PREFETCH_DISTANCE : pcr_cnt;
+                for (int cr_id = 0; cr_id < pf_init; cr_id++) {
+                    prefetch_send_cr_wr_entry(bdp_ctx, hot_idx, &pcr_buf[cr_id]);
+                }
+            }
             for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
+                /* Slide: prefetch DISTANCE ahead while processing this CR. */
+                if (!single_dev) {
+                    int pf_id = cr_id + BONDP_PREFETCH_DISTANCE;
+                    if (pf_id < pcr_cnt) {
+                        prefetch_send_cr_wr_entry(bdp_ctx, hot_idx, &pcr_buf[pf_id]);
+                    }
+                }
                 urma_cr_t *pcr = &pcr_buf[cr_id];
                 if (!need_full_scan && (is_failover_cr(pcr) || is_fake_cr(pcr))) {
                     need_full_scan = true;
@@ -1851,7 +1913,22 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
         if (pcr_cnt == 0) {
             continue;
         }
+        /* Prime: prefetch the first DISTANCE send CR wr_entries. */
+        if (!single_dev) {
+            int pf_init = pcr_cnt > BONDP_PREFETCH_DISTANCE
+                              ? BONDP_PREFETCH_DISTANCE : pcr_cnt;
+            for (int cr_id = 0; cr_id < pf_init; cr_id++) {
+                prefetch_send_cr_wr_entry(bdp_ctx, idx, &pcr_buf[cr_id]);
+            }
+        }
         for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
+            /* Slide: prefetch DISTANCE ahead while processing this CR. */
+            if (!single_dev) {
+                int pf_id = cr_id + BONDP_PREFETCH_DISTANCE;
+                if (pf_id < pcr_cnt) {
+                    prefetch_send_cr_wr_entry(bdp_ctx, idx, &pcr_buf[pf_id]);
+                }
+            }
             urma_cr_t *pcr = &pcr_buf[cr_id];
             cr_convert_ret_t conv_ret;
             if (single_dev) {
@@ -1901,7 +1978,22 @@ int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
             continue;
         }
 
+        /* Prime: prefetch the first DISTANCE send CR wr_entries. */
+        if (!is_single_dev_mode(bdp_ctx)) {
+            int pf_init = pcr_cnt > BONDP_PREFETCH_DISTANCE
+                              ? BONDP_PREFETCH_DISTANCE : pcr_cnt;
+            for (int cr_id = 0; cr_id < pf_init; cr_id++) {
+                prefetch_send_cr_wr_entry(bdp_ctx, i, &pcr_buf[cr_id]);
+            }
+        }
         for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
+            /* Slide: prefetch DISTANCE ahead while processing this CR. */
+            if (!is_single_dev_mode(bdp_ctx)) {
+                int pf_id = cr_id + BONDP_PREFETCH_DISTANCE;
+                if (pf_id < pcr_cnt) {
+                    prefetch_send_cr_wr_entry(bdp_ctx, i, &pcr_buf[pf_id]);
+                }
+            }
             urma_cr_t *pcr = &pcr_buf[cr_id];
             cr_convert_ret_t conv_ret;
 
