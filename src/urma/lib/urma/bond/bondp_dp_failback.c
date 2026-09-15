@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "bondp_context_table.h"
+#include "bondp_pjetty.h"
 #include "bondp_types.h"
 #include "bondp_worker.h"
 #include "ub_hmap.h"
@@ -251,74 +252,49 @@ static int fb_task_del(bondp_fb_ctx_t *fb_ctx, const bondp_fb_task_key_t *key)
     return -ENOENT;
 }
 
-static int bondp_update_pjetty_id_mapping(
-    bondp_context_t *bdp_ctx, urma_jetty_id_t old_id,
-    urma_jetty_id_t new_id, bondp_comp_t *bdp_jetty)
-{
-    int ret = 0;
-
-    pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
-    ret = bdp_p_vjetty_id_table_del_without_lock(&bdp_ctx->p_vjetty_id_table, old_id, JETTY);
-    if (ret != 0) {
-        pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
-        URMA_LOG_ERR("Failed to delete stale pjetty id mapping: " URMA_JETTY_ID_FMT ", ret=%d\n",
-                     URMA_JETTY_ID_ARGS(&old_id), ret);
-        return -1;
-    }
-    ret = bdp_p_vjetty_id_table_add_without_lock(
-        &bdp_ctx->p_vjetty_id_table, new_id, JETTY, bdp_jetty->v_jetty.jetty_id.id, bdp_jetty);
-    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
-    if (ret != 0) {
-        URMA_LOG_ERR("Failed to add recreated pjetty id mapping: " URMA_JETTY_ID_FMT ", ret=%d\n",
-                     URMA_JETTY_ID_ARGS(&new_id), ret);
-        return -1;
-    }
-    return 0;
-}
-
 static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
 {
-    int ret;
-
-    if (bdp_jetty == NULL || bdp_jetty->bondp_ctx == NULL ||
-        local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+    if (bdp_jetty == NULL || bdp_jetty->bondp_ctx == NULL || local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
         return -1;
     }
-
+    if (bondp_jetty_ctrl_lock(bdp_jetty) != URMA_SUCCESS) {
+        return -1;
+    }
+    bondp_pjetty_ref_t *old_ref = bondp_pjetty_get(bdp_jetty, local_idx);
+    if (old_ref == NULL) {
+        bondp_jetty_ctrl_unlock(bdp_jetty);
+        return -1;
+    }
+    urma_jetty_cfg_t p_cfg = old_ref->jetty->jetty_cfg;
     bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
-
-    urma_jetty_t *old_jetty = bdp_jetty->p_jetty[local_idx];
-    if (old_jetty == NULL) {
-        URMA_LOG_ERR("pjetty at idx=%u is NULL, cannot rebuild\n", local_idx);
+    bondp_pjetty_ref_t *new_ref = bondp_pjetty_create(bdp_ctx->p_ctxs[local_idx], &p_cfg);
+    if (new_ref == NULL) {
+        bondp_jetty_ctrl_unlock(bdp_jetty);
+        bondp_pjetty_put(bdp_jetty, old_ref);
         return -1;
     }
-    urma_jetty_cfg_t p_cfg = old_jetty->jetty_cfg;
-    urma_jetty_id_t old_id = old_jetty->jetty_id;
-
-    urma_jetty_t *new_jetty = urma_create_jetty(bdp_ctx->p_ctxs[local_idx], &p_cfg);
-    if (new_jetty == NULL) {
-        URMA_LOG_ERR("Failed to recreate pjetty at idx=%d\n", local_idx);
-        return -1;
-    }
-
-    new_jetty->remote_jetty = NULL;
-    new_jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
-    bdp_jetty->p_jetty[local_idx] = new_jetty;
-
-    ret = bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty);
+    new_ref->jetty->remote_jetty = NULL;
+    new_ref->jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
+    /* Publish only after the new completion mapping exists. Keep the old mapping for readers. */
+    (void)pthread_rwlock_wrlock(&bdp_ctx->p_vjetty_id_table.lock);
+    int ret = bdp_p_vjetty_id_table_add_without_lock(&bdp_ctx->p_vjetty_id_table,
+        new_ref->id, JETTY, bdp_jetty->v_jetty.jetty_id.id, bdp_jetty);
+    (void)pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
     if (ret != 0) {
-        bdp_jetty->p_jetty[local_idx] = old_jetty;
-        (void)urma_delete_jetty(new_jetty);
+        bondp_pjetty_retire(bdp_jetty, new_ref);
+        bondp_jetty_ctrl_unlock(bdp_jetty);
+        bondp_pjetty_put(bdp_jetty, old_ref);
         return -1;
     }
-
-    ret = urma_delete_jetty(old_jetty);
-    if (ret != URMA_SUCCESS) {
-        URMA_LOG_WARN("Failed to delete old pjetty at idx=%d\n", local_idx);
-    }
-
-    URMA_LOG_INFO("Failback pjetty rebuilt, idx=%d old=" URMA_JETTY_ID_FMT " new=" URMA_JETTY_ID_FMT "\n",
-                  local_idx, URMA_JETTY_ID_ARGS(&old_id), URMA_JETTY_ID_ARGS(&new_jetty->jetty_id));
+    new_ref->mapped = true;
+    (void)pthread_spin_lock(&bdp_jetty->send_lock);
+    bdp_jetty->pjetty_refs[local_idx] = new_ref;
+    bdp_jetty->p_jetty[local_idx] = new_ref->jetty;
+    old_ref->next = bdp_jetty->retired_pjettys;
+    bdp_jetty->retired_pjettys = old_ref;
+    (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+    bondp_jetty_ctrl_unlock(bdp_jetty);
+    bondp_pjetty_put(bdp_jetty, old_ref);
     return 0;
 }
 
