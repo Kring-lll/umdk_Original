@@ -183,7 +183,7 @@ urma_shared_library(
         "lib/urma/core",
         "lib/urma/core/include",
     ],
-    copts = URMA_COMMON_COPTS + ["-DURMA_BUILD_SHARED=1"],
+    copts = URMA_COMMON_COPTS + URMA_PERF_COPTS + ["-DURMA_BUILD_SHARED=1"],
     compile_deps = [":urma_common_headers", ":urma_version_headers"],
     dynamic_lib_names = ["urma_common"],
     linkopts = ["-ldl", "-lrt", "-Wl,@$(location version/urma.ldflags)",
