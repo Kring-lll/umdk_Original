@@ -2,6 +2,24 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2021-2025. All rights reserved.
 
 
+# One version source for the public API, shared libraries and ELF notes.
+set(PROJECT_VERSION "1.0.0")
+string(REPLACE "." ";" URMA_VERSION_PARTS "${PROJECT_VERSION}")
+list(GET URMA_VERSION_PARTS 0 PROJECT_VERSION_MAJOR)
+list(GET URMA_VERSION_PARTS 1 PROJECT_VERSION_MINOR)
+list(GET URMA_VERSION_PARTS 2 PROJECT_VERSION_PATCH)
+math(EXPR URMA_VERSION_CODE
+    "(${PROJECT_VERSION_MAJOR} << 32) | (${PROJECT_VERSION_MINOR} << 16) | ${PROJECT_VERSION_PATCH}")
+set(URMA_VERSION_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
+file(MAKE_DIRECTORY "${URMA_VERSION_INCLUDE_DIR}")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/urma/core/include/urma_version.h.in"
+    "${URMA_VERSION_INCLUDE_DIR}/urma_version.h" @ONLY)
+include_directories("${URMA_VERSION_INCLUDE_DIR}")
+set(URMA_VERSION_NOTE "${CMAKE_CURRENT_BINARY_DIR}/urma_version_note.S")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/urma_version_note.S.in"
+    "${URMA_VERSION_NOTE}" @ONLY)
+
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 set(CMAKE_FLAGS_PUBILC " -Wall -Werror -Wformat -Wfloat-equal -Wtrampolines -g -O2 -rdynamic \
@@ -68,6 +86,8 @@ set(CMAKE_SKIP_RPATH TRUE)
 
 message(STATUS "CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 enable_testing()
+
+enable_language(ASM)
 
 add_subdirectory(common)
 add_subdirectory(lib)
