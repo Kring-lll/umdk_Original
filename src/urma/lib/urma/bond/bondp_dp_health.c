@@ -250,7 +250,7 @@ static void hc_set_tjetty_list_target_valid(bondp_hc_node_t *node, uint32_t loca
     pthread_rwlock_unlock(&node->lock);
 
     if (recovered_cnt != 0) {
-        URMA_LOG_INFO("Path restored: target jettys recovered, node_idx=%u, "
+        URMA_LOG_WARN("Path restored: target jettys recovered, node_idx=%u, "
                       "path=[%u, %u], cnt=%u\n",
                       node->node_idx, local_idx, target_idx, recovered_cnt);
     }
@@ -282,7 +282,7 @@ static void hc_set_local_idx_jettys_hc_valid(bondp_context_t *bdp_ctx, uint32_t 
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
 
     if (ready_cnt != 0) {
-        URMA_LOG_INFO("Path ready: local jettys ready for failback, "
+        URMA_LOG_WARN("Path ready: local jettys ready for failback, "
                       "local_idx=%u, cnt=%u\n",
                       local_idx, ready_cnt);
     }
