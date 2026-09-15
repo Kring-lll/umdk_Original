@@ -266,6 +266,8 @@ typedef struct bondp_comp {
     // send
     bool modify_to_error;
     pthread_spinlock_t send_lock;
+    /* Serialize physical jetty control operations with generation replacement. */
+    pthread_mutex_t pjetty_ctrl_lock;
     uint32_t max_send_sge;
     uint32_t max_send_rsge;
     wr_buf_t send_wr_buf;

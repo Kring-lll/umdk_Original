@@ -5,10 +5,35 @@
  */
 
 #include <stdlib.h>
-#include "bondp_pjetty.h"
 #include "bondp_context_table.h"
 #include "urma_api.h"
 #include "urma_log.h"
+
+#include "bondp_pjetty.h"
+
+int bondp_jetty_ctrl_lock(bondp_comp_t *comp)
+{
+    bondp_hash_table_t *table = &comp->bondp_ctx->p_vjetty_id_table;
+    (void)pthread_rwlock_rdlock(&table->lock);
+    if (atomic_load(&comp->deleting)) {
+        (void)pthread_rwlock_unlock(&table->lock);
+        return URMA_EAGAIN;
+    }
+    /* Count waiting operations too, so deletion cannot destroy their mutex. */
+    atomic_fetch_add(&comp->use_cnt.atomic_cnt, 1);
+    (void)pthread_rwlock_unlock(&table->lock);
+    if (pthread_mutex_lock(&comp->pjetty_ctrl_lock) != 0) {
+        atomic_fetch_sub(&comp->use_cnt.atomic_cnt, 1);
+        return URMA_FAIL;
+    }
+    return URMA_SUCCESS;
+}
+
+void bondp_jetty_ctrl_unlock(bondp_comp_t *comp)
+{
+    (void)pthread_mutex_unlock(&comp->pjetty_ctrl_lock);
+    atomic_fetch_sub(&comp->use_cnt.atomic_cnt, 1);
+}
 
 bondp_pjetty_ref_t *bondp_pjetty_create(urma_context_t *ctx, urma_jetty_cfg_t *cfg)
 {
@@ -27,6 +52,9 @@ bondp_pjetty_ref_t *bondp_pjetty_create(urma_context_t *ctx, urma_jetty_cfg_t *c
 
 bondp_pjetty_ref_t *bondp_pjetty_get(bondp_comp_t *comp, uint32_t idx)
 {
+    if (idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        return NULL;
+    }
     bondp_pjetty_ref_t *ref = NULL;
     bondp_hash_table_t *table = &comp->bondp_ctx->p_vjetty_id_table;
     (void)pthread_rwlock_rdlock(&table->lock);

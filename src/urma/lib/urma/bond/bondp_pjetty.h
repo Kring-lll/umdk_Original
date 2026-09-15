@@ -12,6 +12,10 @@
 extern "C" {
 #endif
 
+/* Successful lock holds the owner until unlock; no table/spin lock is retained. */
+int bondp_jetty_ctrl_lock(bondp_comp_t *comp);
+void bondp_jetty_ctrl_unlock(bondp_comp_t *comp);
+
 bondp_pjetty_ref_t *bondp_pjetty_create(urma_context_t *ctx, urma_jetty_cfg_t *cfg);
 /* A successful get holds the component until put completes reclamation. */
 bondp_pjetty_ref_t *bondp_pjetty_get(bondp_comp_t *comp, uint32_t idx);

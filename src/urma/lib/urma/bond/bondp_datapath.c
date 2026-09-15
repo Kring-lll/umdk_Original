@@ -8,7 +8,6 @@
  * History: 2025-02-19   Create File
  */
 
-#include "bondp_pjetty.h"
 #include <stdlib.h>
 #include <threads.h>
 
@@ -20,6 +19,7 @@
 #include "bondp_dp_failback.h"
 #include "bondp_dp_health.h"
 #include "bondp_dp_rnr_retry.h"
+#include "bondp_pjetty.h"
 #include "bondp_types.h"
 #include "ub_get_clock.h"
 #include "urma_api.h"
@@ -1317,24 +1317,25 @@ static bondp_comp_t *get_comp_by_cr(bondp_context_t *bdp_ctx, int dev_idx, urma_
             if (tl_slots[i].comp == NULL) {
                 break;
             }
-            if (tl_slots[i].dev_idx == dev_idx &&
-                tl_slots[i].local_id == cr->local_id &&
-                tl_slots[i].type == (uint8_t)p_vjetty_type) {
-                bondp_comp_t *comp = tl_slots[i].comp;
-                /* Validate cached pointers under the same lock as deletion admission. */
-                pthread_rwlock_rdlock(&bdp_ctx->p_vjetty_id_table.lock);
-                if (atomic_load(&bdp_ctx->p_vjetty_id_table.gen) != tl_gen) {
-                    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
-                    break;
-                }
-                if (atomic_load(&comp->deleting)) {
-                    pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
-                    return NULL;
-                }
-                atomic_fetch_add(&comp->use_cnt.atomic_cnt, 1);
-                pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
-                return comp;
+            if (tl_slots[i].dev_idx != dev_idx ||
+                tl_slots[i].local_id != cr->local_id ||
+                tl_slots[i].type != (uint8_t)p_vjetty_type) {
+                continue;
             }
+            bondp_comp_t *comp = tl_slots[i].comp;
+            /* Validate cached pointers under the same lock as deletion admission. */
+            pthread_rwlock_rdlock(&bdp_ctx->p_vjetty_id_table.lock);
+            if (atomic_load(&bdp_ctx->p_vjetty_id_table.gen) != tl_gen) {
+                pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+                break;
+            }
+            if (atomic_load(&comp->deleting)) {
+                pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+                return NULL;
+            }
+            atomic_fetch_add(&comp->use_cnt.atomic_cnt, 1);
+            pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
+            return comp;
         }
     }
     /* Slow path: cache miss → rwlock + hash-table lookup. */
@@ -1881,6 +1882,28 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
     return cr_cnt - cr_cnt_remaining;
 }
 
+static int bondp_convert_flush_crs(bondp_context_t *bdp_ctx, int dev_idx, int pcr_cnt,
+                                   urma_cr_t *pcr_buf, urma_cr_t *cr)
+{
+    int converted = 0;
+    for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
+        urma_cr_t *pcr = &pcr_buf[cr_id];
+        cr_convert_ret_t conv_ret;
+        if (is_single_dev_mode(bdp_ctx)) {
+            conv_ret = bondp_handle_cr_no_store(bdp_ctx, dev_idx, pcr);
+        } else {
+            conv_ret = bondp_handle_cr_with_store(bdp_ctx, dev_idx, pcr);
+        }
+        if (conv_ret == CONVERT_FAIL) {
+            return -1;
+        }
+        if (conv_ret == CONVERT_SUCCESS) {
+            cr[converted++] = *pcr;
+        }
+    }
+    return converted;
+}
+
 int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
 {
     static thread_local urma_cr_t pcr_buf[URMA_UBAGG_MAX_CR_CNT_PER_DEV];
@@ -1918,25 +1941,12 @@ int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
         }
         URMA_LOG_DEBUG("flush pjetty[%d], pcr_cnt=%d\n", i, pcr_cnt);
 
-        for (int cr_id = 0; cr_id < pcr_cnt; cr_id++) {
-            urma_cr_t *pcr = &pcr_buf[cr_id];
-            cr_convert_ret_t conv_ret;
-
-            if (is_single_dev_mode(bdp_ctx)) {
-                conv_ret = bondp_handle_cr_no_store(bdp_ctx, i, pcr);
-            } else {
-                conv_ret = bondp_handle_cr_with_store(bdp_ctx, i, pcr);
-            }
-            if (conv_ret == CONVERT_FAIL) {
-                bondp_pjetty_put(bdp_jetty, ref);
-                ret = -1;
-                goto put_comp;
-            }
-            if (conv_ret == CONVERT_SUCCESS) {
-                cr[cr_cnt - cr_cnt_remaining] = *pcr;
-                cr_cnt_remaining--;
-            }
+        ret = bondp_convert_flush_crs(bdp_ctx, i, pcr_cnt, pcr_buf, &cr[cr_cnt - cr_cnt_remaining]);
+        if (ret < 0) {
+            bondp_pjetty_put(bdp_jetty, ref);
+            goto put_comp;
         }
+        cr_cnt_remaining -= ret;
         bondp_pjetty_put(bdp_jetty, ref);
     }
 

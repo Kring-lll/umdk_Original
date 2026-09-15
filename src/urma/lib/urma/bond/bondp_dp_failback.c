@@ -4,7 +4,6 @@
  * Description: Bond provider failback helpers.
  */
 
-#include "bondp_pjetty.h"
 #include <errno.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -16,6 +15,7 @@
 #include <unistd.h>
 
 #include "bondp_context_table.h"
+#include "bondp_pjetty.h"
 #include "bondp_types.h"
 #include "bondp_worker.h"
 #include "ub_hmap.h"
@@ -257,14 +257,19 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
     if (bdp_jetty == NULL || bdp_jetty->bondp_ctx == NULL || local_idx >= URMA_UBAGG_DEV_MAX_NUM) {
         return -1;
     }
+    if (bondp_jetty_ctrl_lock(bdp_jetty) != URMA_SUCCESS) {
+        return -1;
+    }
     bondp_pjetty_ref_t *old_ref = bondp_pjetty_get(bdp_jetty, local_idx);
     if (old_ref == NULL) {
+        bondp_jetty_ctrl_unlock(bdp_jetty);
         return -1;
     }
     urma_jetty_cfg_t p_cfg = old_ref->jetty->jetty_cfg;
     bondp_context_t *bdp_ctx = bdp_jetty->bondp_ctx;
     bondp_pjetty_ref_t *new_ref = bondp_pjetty_create(bdp_ctx->p_ctxs[local_idx], &p_cfg);
     if (new_ref == NULL) {
+        bondp_jetty_ctrl_unlock(bdp_jetty);
         bondp_pjetty_put(bdp_jetty, old_ref);
         return -1;
     }
@@ -277,6 +282,7 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
     (void)pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
     if (ret != 0) {
         bondp_pjetty_retire(bdp_jetty, new_ref);
+        bondp_jetty_ctrl_unlock(bdp_jetty);
         bondp_pjetty_put(bdp_jetty, old_ref);
         return -1;
     }
@@ -287,6 +293,7 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
     old_ref->next = bdp_jetty->retired_pjettys;
     bdp_jetty->retired_pjettys = old_ref;
     (void)pthread_spin_unlock(&bdp_jetty->send_lock);
+    bondp_jetty_ctrl_unlock(bdp_jetty);
     bondp_pjetty_put(bdp_jetty, old_ref);
     return 0;
 }
