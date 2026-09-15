@@ -4,6 +4,34 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("//bazel:urma_deps.bzl", "LIBUMMU_RUNTIME_LINKOPTS")
 load("//bazel:urma_shared.bzl", "urma_dynamic_linkopts", "urma_linklib_inputs", "urma_shared_library", "urma_shared_library_static_dep")
 
+# Keep header, note and SONAMEs aligned with the CMake version source.
+genrule(
+    name = "urma_version_files",
+    srcs = [
+        "CMakeLists.txt",
+        "lib/urma/core/include/urma_version.h.in",
+        "urma_version_note.S.in",
+    ],
+    tools = ["//bazel:generate_version.sh"],
+    outs = [
+        "version/urma_version.h",
+        "version/urma_version_note.S",
+        "version/urma.ldflags",
+        "version/urma_common.ldflags",
+        "version/urma_ubagg.ldflags",
+        "version/tpsa.ldflags",
+    ],
+    cmd = "bash $(location //bazel:generate_version.sh) " +
+          "$(location CMakeLists.txt) " +
+          "$(location lib/urma/core/include/urma_version.h.in) " +
+          "$(location urma_version_note.S.in) $(RULEDIR)/version",
+)
+
+cc_library(
+    name = "urma_version_headers",
+    hdrs = ["version/urma_version.h"],
+    includes = ["version"],
+)
 config_setting(
     name = "perf_cycle_enabled",
     values = {"define": "perf_cycle=true"},
@@ -120,12 +148,12 @@ cc_library(
 
 urma_shared_library(
     name = "urma_common",
-    srcs = URMA_COMMON_SRCS,
+    srcs = URMA_COMMON_SRCS + ["version/urma_version_note.S"],
     hdrs = glob(["common/include/**/*.h"]),
     includes = ["common/include"],
     copts = URMA_COMMON_COPTS,
-    linkopts = URMA_COMMON_LINKOPTS,
-    soname = "liburma_common.so",
+    linkopts = URMA_COMMON_LINKOPTS + ["-Wl,@$(location version/urma_common.ldflags)"],
+    additional_linker_inputs = ["version/urma_common.ldflags"],
 )
 
 cc_library(
@@ -139,26 +167,28 @@ cc_library(
         "lib/urma/core",
         "lib/urma/core/include",
     ],
-    deps = [":urma_common_headers"],
+    deps = [":urma_common_headers", ":urma_version_headers"],
 )
 
 urma_shared_library(
     name = "urma",
-    srcs = glob(["lib/urma/core/*.c"]),
+    srcs = glob(["lib/urma/core/*.c", "lib/urma/core/compat/*.c"]) + ["version/urma_version_note.S"],
     hdrs = glob([
         "lib/urma/core/include/**/*.h",
         "lib/urma/core/*.h",
+        "lib/urma/core/compat/*.h",
     ]),
     includes = [
         "common/include",
         "lib/urma/core",
         "lib/urma/core/include",
     ],
-    copts = URMA_COMMON_COPTS,
-    compile_deps = [":urma_common_headers"],
+    copts = URMA_COMMON_COPTS + ["-DURMA_BUILD_SHARED=1"],
+    compile_deps = [":urma_common_headers", ":urma_version_headers"],
     dynamic_lib_names = ["urma_common"],
-    linkopts = ["-ldl", "-lrt"],
-    soname = "liburma.so",
+    linkopts = ["-ldl", "-lrt", "-Wl,@$(location version/urma.ldflags)",
+                "-Wl,--version-script,$(location lib/urma/core/urma.map)"],
+    additional_linker_inputs = ["version/urma.ldflags", "lib/urma/core/urma.map"],
 )
 
 urma_shared_library(
@@ -180,7 +210,8 @@ urma_shared_library(
         ":urma_headers",
     ],
     dynamic_lib_names = ["urma", "urma_common"],
-    soname = "liburma_ubagg.so",
+    linkopts = ["-Wl,@$(location version/urma_ubagg.ldflags)"],
+    additional_linker_inputs = ["version/urma_ubagg.ldflags"],
 )
 
 urma_shared_library_static_dep(
@@ -205,10 +236,11 @@ urma_shared_library_static_dep(
     ],
     # No -lssl/-lcrypto: avoid DT_NEEDED on libssl.so.1.1 (OpenSSL 3-only targets).
     linkopts = [
+        "-Wl,@$(location version/tpsa.ldflags)",
         "-lnl-genl-3",
         "-lnl-3",
     ],
-    soname = "libtpsa.so",
+    additional_linker_inputs = ["version/tpsa.ldflags"],
 )
 
 cc_library(

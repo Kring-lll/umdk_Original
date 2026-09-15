@@ -1,6 +1,6 @@
 # URMA 版本规约
 
-版本统一定义于 src/urma/CMakeLists.txt，当前为 1.0.0。
+版本统一定义于 src/urma/CMakeLists.txt，当前为 0.1.0。
 安装的 urma_version.h 由 urma_api.h 引入，对外提供
 URMA_API_VERSION_MAJOR、URMA_API_VERSION_MINOR、URMA_API_VERSION_PATCH、
 URMA_API_VERSION_NUMBER 和 URMA_API_VERSION_ENCODE(major, minor, patch)。
@@ -10,8 +10,8 @@ URMA_API_VERSION_NUMBER 和 URMA_API_VERSION_ENCODE(major, minor, patch)。
 
 调用方可在首次包含头文件之前声明版本要求：
 
-    #define URMA_API_REQUIRED_MAJOR 1
-    #define URMA_API_MIN_VERSION URMA_API_VERSION_ENCODE(1, 0, 0)
+    #define URMA_API_REQUIRED_MAJOR 0
+    #define URMA_API_MIN_VERSION URMA_API_VERSION_ENCODE(0, 1, 0)
     #include <urma_api.h>
 
 主版本不匹配或版本低于要求时，通过 #error 触发编译失败。
@@ -22,12 +22,12 @@ URMA_API_VERSION_NUMBER 和 URMA_API_VERSION_ENCODE(major, minor, patch)。
     #error "URMA API >= 3.2 is required"
     #endif
 
-第二个示例在当前 1.0.0 版本下会按预期编译失败。
+第二个示例在当前 0.1.0 版本下会按预期编译失败。
 
 ## 二进制兼容性
 
-liburma.so.1.0.0 的 SONAME 为 liburma.so.1，现有导出符号归属于稳定的
-URMA_1.0 符号版本节点。新链接的调用方会为引用的符号记录该节点。
+liburma.so.0.1.0 的 SONAME 为 liburma.so.0，现有导出符号归属于稳定的
+URMA_0.1 符号版本节点。新链接的调用方会为引用的符号记录该节点。
 兼容版本必须保留已有节点；不兼容的 ABI 变更需要升级 SONAME 主版本。
 当前节点使用显式源码符号基线，发布前必须与实际发布库的 ELF 符号表核对。
 
@@ -48,13 +48,13 @@ liburma 和 liburma_common 中的 .note.urma.version 是维测元信息，
 
 在 Linux 环境完成构建后，可执行以下命令验证：
 
-    readelf -d liburma.so.1.0.0
-    readelf --version-info liburma.so.1.0.0
-    readelf --dyn-syms --wide liburma.so.1.0.0
-    readelf -n liburma.so.1.0.0
+    readelf -d liburma.so.0.1.0
+    readelf --version-info liburma.so.0.1.0
+    readelf --dyn-syms --wide liburma.so.0.1.0
+    readelf -n liburma.so.0.1.0
 
-预期 SONAME 为 liburma.so.1，符号版本节点为 URMA_1.0。
-URMA note 的描述数据为 8 字节，采用本机字节序，值为 0x0000000100000000。
+预期 SONAME 为 liburma.so.0，符号版本节点为 URMA_0.1。
+URMA note 的描述数据为 8 字节，采用本机字节序，值为 0x0000000000010000。
 
 ## 接口演进中的后向兼容
 
@@ -63,10 +63,10 @@ lib/urma/core/compat 中，不对外安装。
 兼容 C 源文件只编入动态库目标。
 静态链接只提供当前 API，不承诺对旧二进制的兼容性。
 
-发布兼容的 1.1.0 版本时，保留 SONAME 主版本 1 和 URMA_1.0 节点。
-未变更的符号留在原节点，新增符号放入继承 URMA_1.0 的 URMA_1.1 节点，
+发布兼容的 0.2.0 版本时，保留 SONAME 主版本 0 和 URMA_0.1 节点。
+未变更的符号留在原节点，新增符号放入继承 URMA_0.1 的 URMA_0.2 节点，
 不要将所有符号移入最新节点。
-ABI 已变更的函数保留 foo@URMA_1.0，同时通过 foo@@URMA_1.1 指定新的默认版本。
+ABI 已变更的函数保留 foo@URMA_0.1，同时通过 foo@@URMA_0.2 指定新的默认版本。
 两个均使用单个 @ 的别名无法为新链接指定默认版本。
 
 以下仅为未来接口变更的示例，不是已发布的 URMA API：
@@ -102,8 +102,8 @@ compat/urma_symver.h：
     {
         return foo_current(args);
     }
-    URMA_SYMVER_COMPAT(urma_compat_foo_v1, foo, "URMA_1.0");
-    URMA_SYMVER_DEFAULT(urma_compat_foo_current, foo, "URMA_1.1");
+    URMA_SYMVER_COMPAT(urma_compat_foo_v1, foo, "URMA_0.1");
+    URMA_SYMVER_DEFAULT(urma_compat_foo_current, foo, "URMA_0.2");
     #else
     int foo(const struct foo_args *args)
     {
@@ -114,13 +114,13 @@ compat/urma_symver.h：
 每个符号别名必须与其实现定义在同一个编译单元中。
 对应上述示例，未来的版本脚本应包含：
 
-    URMA_1.0 {
+    URMA_0.1 {
         global: foo; /* Also retain every existing baseline symbol. */
         local: *;
     };
-    URMA_1.1 {
+    URMA_0.2 {
         global: foo;
-    } URMA_1.0;
+    } URMA_0.1;
 
 不能将历史结构体直接强制转换为当前布局。
 必须显式转换字段、默认值、错误结果、所有权和生命周期。
@@ -133,4 +133,4 @@ compat/urma_symver.h：
 同时测试使用当前头文件编译的新程序。
 通过 readelf --dyn-syms --wide 和 --version-info 检查历史 @ 与当前 @@ 条目，
 并确认 urma_compat_* 实现名称未对外导出。
-当前 1.0.0 不添加虚构的历史接口或 1.1 节点。
+当前 0.1.0 不添加虚构的历史接口或 0.2 节点。

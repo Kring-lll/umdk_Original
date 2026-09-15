@@ -3,7 +3,7 @@
 
 
 # One version source for the public API, shared libraries and ELF notes.
-set(PROJECT_VERSION "1.0.0")
+set(PROJECT_VERSION "0.1.0")
 string(REPLACE "." ";" URMA_VERSION_PARTS "${PROJECT_VERSION}")
 list(GET URMA_VERSION_PARTS 0 PROJECT_VERSION_MAJOR)
 list(GET URMA_VERSION_PARTS 1 PROJECT_VERSION_MINOR)

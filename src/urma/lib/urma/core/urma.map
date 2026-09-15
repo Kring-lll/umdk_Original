@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: MIT */
 /*
- * Frozen 1.0.0 source baseline, including existing provider/helper exports.
+ * Frozen 0.1.0 source baseline, including existing provider/helper exports.
  * Never regenerate from newer headers. Retain historical ABI entries.
- * New nodes inherit URMA_1.0. Verify against release ELF before publishing.
+ * New nodes inherit URMA_0.1. Verify against release ELF before publishing.
  */
-URMA_1.0 {
+URMA_0.1 {
     global:
         g_thread_tag;
         g_urma_log_level;
