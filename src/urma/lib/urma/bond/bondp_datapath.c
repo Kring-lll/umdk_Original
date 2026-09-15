@@ -436,7 +436,9 @@ static int translate_send_bad_wr(const urma_jfs_wr_t *prealloc_wr_list, urma_jfs
         *bad_wr = wr;
         return 0;
     }
-
+    if (jfs_wr_is_cqe_wr(pwr)) {
+        cqe_count++;
+    }
     *bad_wr = vwr;
     return cqe_count;
 }
@@ -572,15 +574,15 @@ OUT:
     return ret;
 }
 
-static int adjust_bad_wr_on_bond_cqe_head(jfs_wr_entry_t *wr_entries[], urma_jfs_wr_t *wr,
-    urma_jfs_wr_t *bad_pwr, urma_jfs_wr_t **bad_wr, int wr_total, int *success_node)
+static int regroup_wr_entry_on_bad_wr(jfs_wr_entry_t *wr_entries[], urma_jfs_wr_t *wr,
+    urma_jfs_wr_t *bad_pwr, urma_jfs_wr_t **bad_wr, int *reported_node)
 {
     urma_jfs_wr_t *pcur = &wr_entries[0]->wr;
     urma_jfs_wr_t *vwr = wr;
     int cqe_count = 0;
-    int success = 0;
+    int bad_idx = 0;
     while (pcur != NULL && pcur != bad_pwr) {
-        success++;
+        bad_idx++;
         if (jfs_wr_is_cqe_wr(pcur)) {
             cqe_count++;
         }
@@ -588,31 +590,30 @@ static int adjust_bad_wr_on_bond_cqe_head(jfs_wr_entry_t *wr_entries[], urma_jfs
     }
     if (pcur == NULL) {
         URMA_LOG_ERR("Failed to locate send bad_wr in the wr_entries list.\n");
-        *success_node = 0;
+        *reported_node = 0;
         if (bad_wr != NULL) {
             *bad_wr = wr;
         }
         return 0;
     }
-    /* If bad_wr is in the middle of a CQE group, roll back to the group head so the entire group
-     * is released atomically. This avoids dangling ring pointers and buffer leaks. */
-    if (success > 0 && !wr_entries[success]->is_bond_cqe_head) {
-        jfs_wr_entry_t *cur_head = wr_entries[success];
-        while (cur_head != NULL && !cur_head->is_bond_cqe_head) {
-            cur_head = cur_head->next;
-        }
-        for (int i = 0; i < wr_total; i++) {
-            if (wr_entries[i] == cur_head) {
-                success = i;
-                break;
-            }
-        }
+
+    jfs_wr_entry_t *bad_entry = wr_entries[bad_idx];
+    if (jfs_wr_is_cqe_wr(&bad_entry->wr)) {
+        cqe_count++;
     }
-    *success_node = success;
-    for (int i = 0; i < success && vwr != NULL; i++) {
-        vwr = vwr->next;
+    if (!bad_entry->is_bond_cqe_tail) {
+        int head_idx = bad_idx;
+        while (head_idx > 0 && !wr_entries[head_idx]->is_bond_cqe_head) {
+            head_idx--;
+        }
+        bad_entry->next = wr_entries[head_idx];  /* 重新闭环 */
+        bad_entry->is_bond_cqe_tail = true;
     }
+    *reported_node = bad_idx;
     if (bad_wr != NULL) {
+        for (int i = 0; i < bad_idx && vwr != NULL; i++) {
+            vwr = vwr->next;
+        }
         *bad_wr = vwr;
     }
     return cqe_count;
@@ -744,7 +745,7 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
             wr_count++;
             cur = cur->next;
         }
-        int success_node = 0;
+        int reported_node = 0;
         /* Validate the path (incl. import-free user_tseg ext) while the WRs
          * are still in virtual form, before committing the entries. Walk the
          * user WR chain in parallel so a failure can report the caller's WR
@@ -815,10 +816,9 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
         urma_jfs_wr_t *bad_pwr = NULL;
         ret = comp_post_send(bdp_comp, send_idx, target_idx, &wr_entries[0]->wr, &bad_pwr);
         if (ret != URMA_SUCCESS) {
-            int cqe_count = adjust_bad_wr_on_bond_cqe_head(wr_entries, wr, bad_pwr, bad_wr,
-                wr_total, &success_node);
+            int cqe_count = regroup_wr_entry_on_bad_wr(wr_entries, wr, bad_pwr, bad_wr, &reported_node);
             atomic_fetch_add(&bdp_comp->sqe_cnt[send_idx][target_idx], cqe_count);
-            for (int j = success_node; j < wr_total; j++) {
+            for (int j = reported_node + 1; j < wr_total; j++) {
                 wr_buf_entry_hdr_t *hdr = (wr_buf_entry_hdr_t *)wr_entries[j];
                 hdr->entry_type = 0;
                 wr_entries[j]->send_idx = 0;
@@ -841,11 +841,13 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
         }
         return URMA_SUCCESS;
     ROLLBACK:
-        for (int j = success_node; j < wr_count; j++) {
+        for (int j = reported_node; j < wr_count; j++) {
             jfs_wr_put_refs(&wr_entries[j]->wr);
         }
-        jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, &wr_entries[success_node],
-                                 allocated - success_node);
+        if (reported_node+ 1 < allocated) {
+            jfs_wr_buf_release_batch(&bdp_comp->send_wr_buf, &wr_entries[reported_node + 1],
+                                 allocated - reported_node - 1);
+        }
         return ret;
     CLEANUP:
         for (int j = 0; j < wr_count; j++) {
