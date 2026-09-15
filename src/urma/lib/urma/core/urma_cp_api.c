@@ -26,6 +26,7 @@
 #define BONDP_USER_CTL_GET_RJETTY  9
 #define BONDP_USER_CTL_GET_SEG_CTX 10
 #define BONDP_USER_CTL_GET_USER_TSEG 14
+#define BONDP_USER_CTL_FILL_USER_TSEG 16
 
 #define URMA_CHECK_CTX_INVALID_RETURN_STATUS(urma_ctx)                                                                 \
     do {                                                                                                               \
@@ -883,6 +884,9 @@ urma_status_t urma_alloc_jfs(urma_context_t *urma_ctx, urma_jfs_cfg_t *cfg, urma
     URMA_CHECK_OP_INVALID_RETURN_STATUS(urma_ctx, ops, alloc_jfs);
 
     urma_status_t status = ops->alloc_jfs(urma_ctx, cfg, jfs);
+    if (status != URMA_SUCCESS) {
+        return status;
+    }
     atomic_fetch_add(&urma_ctx->ref.atomic_cnt, 1);
     (*jfs)->urma_jfs_opt.is_actived = false;
 
@@ -1033,6 +1037,16 @@ urma_status_t urma_deactive_jfs(urma_jfs_t *jfs)
     return URMA_SUCCESS;
 }
 
+static inline int urma_check_tp_type_valid(urma_transport_mode_t trans_mode, uint32_t tp_type)
+{
+    if (tp_type > URMA_UTP || (trans_mode != URMA_TM_UM && tp_type == URMA_UTP) ||
+        (trans_mode == URMA_TM_UM && tp_type == URMA_RTP)) {
+        return -1;
+    }
+
+    return 0;
+}
+
 urma_jfr_t *urma_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *jfr_cfg)
 {
     if (ctx == NULL || jfr_cfg == NULL || jfr_cfg->jfc == NULL) {
@@ -1048,7 +1062,8 @@ urma_jfr_t *urma_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *jfr_cfg)
     }
 
     uint32_t order_type = jfr_cfg->flag.bs.order_type;
-    if (urma_convert_order_type(jfr_cfg->trans_mode, &order_type) != 0) {
+    if (urma_check_order_type(jfr_cfg->trans_mode, order_type) != 0 ||
+        urma_convert_order_type(jfr_cfg->trans_mode, &order_type) != 0) {
         URMA_LOG_ERR("Failed to convert order_type for trans_mode=%d, order_type=%u.\n",
                      (int)jfr_cfg->trans_mode, jfr_cfg->flag.bs.order_type);
         errno = EINVAL;
@@ -1255,8 +1270,16 @@ urma_target_jetty_t *urma_import_jfr(urma_context_t *ctx, urma_rjfr_t *rjfr, urm
         return NULL;
     }
 
+    if (!urma_check_trans_mode_valid(rjfr->trans_mode) ||
+        urma_check_tp_type_valid(rjfr->trans_mode, rjfr->tp_type) != 0) {
+        URMA_LOG_ERR("Invalid transport mode or TP type.\n");
+        errno = EINVAL;
+        return NULL;
+    }
+
     uint32_t order_type = rjfr->flag.bs.order_type;
-    if (urma_convert_order_type(rjfr->trans_mode, &order_type) != 0) {
+    if (urma_check_order_type(rjfr->trans_mode, order_type) != 0 ||
+        urma_convert_order_type(rjfr->trans_mode, &order_type) != 0) {
         URMA_LOG_ERR("Failed to convert order_type for trans_mode=%d, order_type=%u.\n",
                      (int)rjfr->trans_mode, rjfr->flag.bs.order_type);
         errno = EINVAL;
@@ -1286,8 +1309,16 @@ urma_target_jetty_t *urma_import_jfr_ex(urma_context_t *ctx, urma_rjfr_t *rjfr, 
         return NULL;
     }
 
+    if (!urma_check_trans_mode_valid(rjfr->trans_mode) ||
+        urma_check_tp_type_valid(rjfr->trans_mode, rjfr->tp_type) != 0) {
+        URMA_LOG_ERR("Invalid transport mode or TP type.\n");
+        errno = EINVAL;
+        return NULL;
+    }
+
     uint32_t order_type = rjfr->flag.bs.order_type;
-    if (urma_convert_order_type(rjfr->trans_mode, &order_type) != 0) {
+    if (urma_check_order_type(rjfr->trans_mode, order_type) != 0 ||
+        urma_convert_order_type(rjfr->trans_mode, &order_type) != 0) {
         URMA_LOG_ERR("Failed to convert order_type for trans_mode=%d, order_type=%u.\n",
                      (int)rjfr->trans_mode, rjfr->flag.bs.order_type);
         errno = EINVAL;
@@ -1340,6 +1371,9 @@ urma_status_t urma_alloc_jfr(urma_context_t *urma_ctx, urma_jfr_cfg_t *cfg, urma
      */
 
     urma_status_t status = ops->alloc_jfr(urma_ctx, cfg, jfr);
+    if (status != URMA_SUCCESS) {
+        return status;
+    }
     atomic_fetch_add(&urma_ctx->ref.atomic_cnt, 1);
     (*jfr)->urma_jfr_opt.is_actived = false;
 
@@ -1420,7 +1454,8 @@ urma_status_t urma_active_jfr(urma_jfr_t *jfr)
     }
 
     uint32_t order_type = cfg->flag.bs.order_type;
-    if (urma_convert_order_type(cfg->trans_mode, &order_type) != 0) {
+    if (urma_check_order_type(cfg->trans_mode, order_type) != 0 ||
+        urma_convert_order_type(cfg->trans_mode, &order_type) != 0) {
         URMA_LOG_ERR("Failed to convert order_type for trans_mode=%d, order_type=%u.\n",
                      (int)cfg->trans_mode, cfg->flag.bs.order_type);
         return URMA_EINVAL;
@@ -1523,16 +1558,6 @@ urma_status_t urma_delete_jfce(urma_jfce_t *jfce)
 
     atomic_fetch_sub(&urma_ctx->ref.atomic_cnt, 1);
     return URMA_SUCCESS;
-}
-
-static inline int urma_check_tp_type_valid(urma_transport_mode_t trans_mode, uint32_t tp_type)
-{
-    if ((trans_mode != URMA_TM_UM && tp_type == URMA_UTP) ||
-        (trans_mode == URMA_TM_UM && tp_type == URMA_RTP)) {
-        return -1;
-    }
-
-    return 0;
 }
 
 static int urma_create_jetty_check_trans_mode(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cfg)
@@ -1654,7 +1679,7 @@ static int urma_add_jetty_to_jetty_grp(urma_jetty_t *jetty, urma_jetty_grp_t *je
 {
     uint32_t i;
 
-    urma_device_cap_t *cap = &jetty->urma_ctx->dev->sysfs_dev->dev_attr.dev_cap;
+    urma_device_cap_t *cap = &jetty_grp->urma_ctx->dev->sysfs_dev->dev_attr.dev_cap;
     (void)pthread_mutex_lock(&jetty_grp->list_mutex);
     for (i = 0; i < cap->max_jetty_in_jetty_grp; i++) {
         if (jetty_grp->jetty_list[i] == NULL) {
@@ -1677,7 +1702,7 @@ static int urma_delete_jetty_to_jetty_grp(urma_jetty_t *jetty, urma_jetty_grp_t 
         return 0;
     }
 
-    urma_device_cap_t *cap = &jetty->urma_ctx->dev->sysfs_dev->dev_attr.dev_cap;
+    urma_device_cap_t *cap = &jetty_grp->urma_ctx->dev->sysfs_dev->dev_attr.dev_cap;
     (void)pthread_mutex_lock(&jetty_grp->list_mutex);
     for (i = 0; i < cap->max_jetty_in_jetty_grp; i++) {
         if (jetty_grp->jetty_list[i] == jetty) {
@@ -2103,6 +2128,40 @@ static urma_status_t urma_fetch_bond_user_info(urma_context_t *urma_ctx, uint32_
     return (urma_ctx->ops->user_ctl(urma_ctx, &in, &out) == 0) ? URMA_SUCCESS : URMA_FAIL;
 }
 
+/* Caller-buffer variant of urma_fetch_bond_user_info: the provider fills the
+ * whole user_tseg blob into @buf in place; @cap is the buffer capacity and
+ * *@len receives the blob size. -ENOSPC (capacity too small) is reported as
+ * URMA_ENOMEM with *@len carrying the required size. */
+static urma_status_t urma_fetch_bond_user_tseg(urma_context_t *urma_ctx, urma_target_seg_t *tseg,
+                                               urma_user_tseg_t *buf, uint32_t cap, uint32_t *len)
+{
+    if (urma_ctx->ops->user_ctl == NULL) {
+        URMA_LOG_ERR("Invalid parameter.\n");
+        return URMA_EINVAL;
+    }
+
+    urma_user_ctl_in_t in = {
+        .addr = (uint64_t)(uintptr_t)tseg,
+        .len = sizeof(urma_target_seg_t),
+        .opcode = BONDP_USER_CTL_FILL_USER_TSEG,
+    };
+    urma_user_ctl_out_t out = {
+        .addr = (uint64_t)(uintptr_t)buf,
+        .len = cap,
+    };
+
+    int ret = urma_ctx->ops->user_ctl(urma_ctx, &in, &out);
+    if (ret == 0) {
+        *len = out.len;
+        return URMA_SUCCESS;
+    }
+    if (ret == -ENOSPC) {
+        *len = out.len;
+        return URMA_ENOMEM;
+    }
+    return URMA_FAIL;
+}
+
 static uint32_t urma_calc_user_info_total_len(const void *base, uint32_t base_len, bool has_user_info)
 {
     if (!has_user_info) {
@@ -2441,7 +2500,7 @@ urma_status_t urma_alloc_jetty(urma_context_t *urma_ctx, urma_jetty_cfg_t *cfg, 
 
     atomic_fetch_add(&urma_ctx->ref.atomic_cnt, 1);
     urma_status_t status = ops->alloc_jetty(urma_ctx, cfg, jetty);
-    if (*jetty == NULL) {
+    if (status != URMA_SUCCESS || *jetty == NULL) {
         atomic_fetch_sub(&urma_ctx->ref.atomic_cnt, 1);
         URMA_LOG_ERR("alloc_jetty failed.\n");
         return status;
@@ -2983,6 +3042,61 @@ void urma_put_user_tseg(urma_user_tseg_t *user_tseg)
     }
 
     free(user_tseg);
+}
+
+urma_status_t urma_fill_user_tseg(urma_target_seg_t *tseg, urma_token_t *token,
+                                  urma_user_tseg_t *user_tseg, uint32_t *size)
+{
+    if (tseg == NULL || token == NULL || user_tseg == NULL || size == NULL) {
+        URMA_LOG_ERR("Invalid parameter.\n");
+        return URMA_EINVAL;
+    }
+    /* Only a locally registered seg carries a stable token id for the owner
+     * to export; imported segs are out of scope. */
+    if (tseg->token_id == NULL) {
+        URMA_LOG_ERR("Only locally registered seg supports fill user tseg.\n");
+        return URMA_EINVAL;
+    }
+
+    urma_context_t *urma_ctx = tseg->urma_ctx;
+    urma_status_t status = urma_validate_ctx_for_remote_query(urma_ctx);
+    if (status != URMA_SUCCESS) {
+        return status;
+    }
+
+    bool has_user_info = false;
+    if (urma_is_bonding_dev(urma_ctx->dev->name)) {
+        uint32_t len = 0;
+        status = urma_fetch_bond_user_tseg(urma_ctx, tseg, user_tseg, *size, &len);
+        if (status == URMA_ENOMEM) {
+            /* The buffer is too small; *size carries the required size so the
+             * caller can retry with a bigger buffer. */
+            *size = len;
+            return status;
+        }
+        if (status != URMA_SUCCESS) {
+            return status;
+        }
+        has_user_info = (user_tseg->attr.bs.has_user_info != 0);
+    } else {
+        if (*size < sizeof(urma_user_tseg_t)) {
+            *size = sizeof(urma_user_tseg_t);
+            URMA_LOG_ERR("User tseg buffer too small.\n");
+            return URMA_ENOMEM;
+        }
+    }
+
+    /* Same overwrite dance as urma_get_user_tseg: the provider only needs the
+     * has_user_info bit to survive this overwrite. */
+    user_tseg->attr = tseg->seg.attr;
+    if (has_user_info) {
+        user_tseg->attr.bs.has_user_info = 1;
+    }
+    user_tseg->token_id = tseg->seg.token_id;
+    user_tseg->token_value = *token;
+    *size = urma_calc_user_info_total_len(user_tseg, sizeof(urma_user_tseg_t),
+                                          user_tseg->attr.bs.has_user_info != 0);
+    return URMA_SUCCESS;
 }
 
 urma_token_id_t *urma_alloc_token_id(urma_context_t *ctx)
