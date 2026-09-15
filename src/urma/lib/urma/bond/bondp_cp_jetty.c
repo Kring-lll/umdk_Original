@@ -26,6 +26,7 @@
 #include "bondp_dp_health.h"
 #include "bondp_dp_rnr_retry.h"
 #include "bondp_hash_table.h"
+#include "bondp_pjetty.h"
 #include "bondp_types.h"
 #include "urma_ubagg.h"
 
@@ -1381,11 +1382,13 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
         if (bdp_rplc_jfc) {
             p_cfg.shared.jfc = bdp_rplc_jfc->p_jfc[i];
         }
-        urma_jetty_t *jetty = urma_create_jetty(bdp_ctx->p_ctxs[i], &p_cfg);
-        if (jetty == NULL) {
+        bondp_pjetty_ref_t *ref = bondp_pjetty_create(bdp_ctx->p_ctxs[i], &p_cfg);
+        if (ref == NULL) {
             URMA_LOG_ERR("Failed to create pjetty %d.\n", i);
             return -1;
         }
+        urma_jetty_t *jetty = ref->jetty;
+        bdp_jetty->pjetty_refs[i] = ref;
         jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
         bdp_jetty->p_jetty[i] = jetty;
         atomic_store(&bdp_jetty->valid[i], true);
@@ -1421,6 +1424,8 @@ static int bondp_delete_pjetty(bondp_comp_t *bdp_jetty)
             URMA_LOG_ERR("Failed to delete pjetty, idx=%d, ret=%d.\n", i, p_ret);
             ret = p_ret;
         }
+        free(bdp_jetty->pjetty_refs[i]);
+        bdp_jetty->pjetty_refs[i] = NULL;
         bdp_jetty->p_jetty[i] = NULL;
     }
     return ret;
@@ -1508,6 +1513,11 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
     atomic_init(&bdp_jetty->use_cnt.atomic_cnt, 0);
     atomic_init(&bdp_jetty->deleting, false);
     (void)pthread_spin_init(&bdp_jetty->send_lock, PTHREAD_PROCESS_PRIVATE);
+    if (pthread_mutex_init(&bdp_jetty->pjetty_ctrl_lock, NULL) != 0) {
+        (void)pthread_spin_destroy(&bdp_jetty->send_lock);
+        free(bdp_jetty);
+        return NULL;
+    }
     bdp_jetty->modify_to_error = false;
     for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
         for (uint32_t j = 0; j < URMA_UBAGG_DEV_MAX_NUM; j++) {
@@ -1569,6 +1579,12 @@ urma_jetty_t *bondp_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *jetty_cf
         goto DELETE_VJETTY;
     }
 
+    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
+        if (bdp_jetty->pjetty_refs[i] != NULL) {
+            bdp_jetty->pjetty_refs[i]->mapped = true;
+        }
+    }
+
     if (bondp_init_connection_table(bdp_jetty) != 0) {
         URMA_LOG_ERR("Failed to create jetty ctx\n");
         goto DEL_P_VJETTY_ID;
@@ -1603,6 +1619,7 @@ DELETE_PJETTY:
     bondp_delete_pjetty(bdp_jetty);
 FREE_JETTY:
     bondp_uninit_wr_buf(&bdp_jetty->send_wr_buf);
+    (void)pthread_mutex_destroy(&bdp_jetty->pjetty_ctrl_lock);
     (void)pthread_spin_destroy(&bdp_jetty->send_lock);
     free(bdp_jetty);
     return NULL;
@@ -1666,6 +1683,10 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
     }
 
     bondp_fb_cancel_tasks(bdp_ctx, jetty_id);
+    int reclaim_ret = bondp_pjetty_reap(bdp_jetty);
+    if (reclaim_ret != URMA_SUCCESS) {
+        return reclaim_ret;
+    }
     bondp_uninit_connection_table(bdp_jetty);
     /* Drop all outstanding WRs and their target jetty/segment references. */
     bondp_uninit_wr_buf(&bdp_jetty->send_wr_buf);
@@ -1677,6 +1698,7 @@ urma_status_t bondp_delete_jetty(urma_jetty_t *jetty)
         URMA_LOG_ERR("Failed to delete pjetty\n");
         ret = URMA_FAIL;
     }
+    (void)pthread_mutex_destroy(&bdp_jetty->pjetty_ctrl_lock);
     (void)pthread_spin_destroy(&bdp_jetty->send_lock);
     free(bdp_jetty);
 
@@ -1693,8 +1715,14 @@ urma_status_t bondp_modify_jetty(urma_jetty_t *jetty, urma_jetty_attr_t *attr)
     urma_status_t ret = URMA_SUCCESS, final_ret = URMA_SUCCESS;
     bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
 
+    ret = bondp_jetty_ctrl_lock(bdp_jetty);
+    if (ret != URMA_SUCCESS) {
+        return ret;
+    }
     if (((attr->mask & JETTY_STATE) != 0) && attr->state == URMA_JETTY_STATE_ERROR) {
+        (void)pthread_spin_lock(&bdp_jetty->send_lock);
         bdp_jetty->modify_to_error = true;
+        (void)pthread_spin_unlock(&bdp_jetty->send_lock);
     }
     URMA_LOG_DEBUG("bondp modify_jetty v_jetty id is %u, old_state is %d.\n",
                    bdp_jetty->v_jetty.jetty_id.id, attr->state);
@@ -1710,5 +1738,6 @@ urma_status_t bondp_modify_jetty(urma_jetty_t *jetty, urma_jetty_attr_t *attr)
         URMA_LOG_DEBUG("bondp modify_jetty p_jetty id is %u, new_state is %d.\n",
                        bdp_jetty->p_jetty[i]->jetty_id.id, attr->state);
     }
+    bondp_jetty_ctrl_unlock(bdp_jetty);
     return final_ret;
 }
