@@ -24,13 +24,13 @@
 #endif
 
 #include "urma_opcode.h"
+#include "urma_version.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #define URMA_GET_VERSION(a, b)      (((a) << 16) + ((b) > 65535 ? 65535 : (b)))
-#define URMA_API_VERSION            ((0 << 16) + 9) // Current Version: 0.9
 #define MAX_PORT_CNT                8
 #define URMA_MAX_JETTY_IN_JETTY_GRP 32U
 #define URMA_MAX_NAME               64

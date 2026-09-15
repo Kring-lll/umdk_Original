@@ -7,6 +7,7 @@ if(NOT "${PERF_CYCLE}" STREQUAL "enable")
 endif()
 
 add_library(urma_common SHARED
+    ${URMA_VERSION_NOTE}
     ${URMA_COMMON_SRCS}
 )
 add_library(urma_common_static STATIC

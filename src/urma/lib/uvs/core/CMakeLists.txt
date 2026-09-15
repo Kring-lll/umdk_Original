@@ -7,8 +7,6 @@ add_library(tpsa SHARED
     ${TPSA_SO_DIR_SRCS}
 )
 
-set(PROJECT_VERSION "0.0.3")
-set(PROJECT_VERSION_MAJOR "0")
 
 set_target_properties(tpsa
     PROPERTIES

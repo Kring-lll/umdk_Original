@@ -11,8 +11,6 @@ add_library(urma_ubagg SHARED
     ${CMAKE_CURRENT_SOURCE_DIR}/bondp_dp_rnr_retry.c
 )
 
-set(PROJECT_VERSION "0.0.3")
-set(PROJECT_VERSION_MAJOR "0")
 
 set_target_properties(urma_ubagg
     PROPERTIES

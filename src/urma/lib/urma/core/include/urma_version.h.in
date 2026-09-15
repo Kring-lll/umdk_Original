@@ -1,0 +1,46 @@
+/* SPDX-License-Identifier: MIT */
+#ifndef URMA_VERSION_H
+#define URMA_VERSION_H
+
+#include <stdint.h>
+
+/* Major occupies bits 63:32; minor and patch each occupy 16 bits. */
+#define URMA_API_VERSION_ENCODE(major, minor, patch) \
+    (((major) * UINT64_C(1) << 32) | \
+     ((minor) * UINT64_C(1) << 16) | \
+     ((patch) * UINT64_C(1)))
+
+#define URMA_API_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define URMA_API_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define URMA_API_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define URMA_API_VERSION_STRING "@PROJECT_VERSION@"
+#define URMA_API_VERSION_NUMBER \
+    URMA_API_VERSION_ENCODE(URMA_API_VERSION_MAJOR, URMA_API_VERSION_MINOR, URMA_API_VERSION_PATCH)
+#define URMA_API_VERSION URMA_API_VERSION_NUMBER
+
+/* Keep the public fields within the 32/16/16-bit representation. */
+#if URMA_API_VERSION_MAJOR < 0 || URMA_API_VERSION_MAJOR > 0xffffffffULL
+#error "URMA API major version exceeds 32 bits"
+#endif
+#if URMA_API_VERSION_MINOR < 0 || URMA_API_VERSION_MINOR > 0xffffULL
+#error "URMA API minor version exceeds 16 bits"
+#endif
+#if URMA_API_VERSION_PATCH < 0 || URMA_API_VERSION_PATCH > 0xffffULL
+#error "URMA API patch version exceeds 16 bits"
+#endif
+
+/* Define requirements before the first inclusion of urma_api.h. */
+#if defined(URMA_API_REQUIRED_MAJOR)
+#if URMA_API_VERSION_MAJOR != URMA_API_REQUIRED_MAJOR
+#error "URMA API major version does not match URMA_API_REQUIRED_MAJOR"
+#endif
+#endif
+
+/* Define before including urma_api.h, e.g. URMA_API_VERSION_ENCODE(0, 1, 0). */
+#if defined(URMA_API_MIN_VERSION)
+#if URMA_API_VERSION_NUMBER < URMA_API_MIN_VERSION
+#error "URMA API version is below URMA_API_MIN_VERSION"
+#endif
+#endif
+
+#endif /* URMA_VERSION_H */
