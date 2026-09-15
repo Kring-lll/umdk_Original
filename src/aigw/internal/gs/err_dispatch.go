@@ -154,7 +154,12 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 			req := r.Msg.Request.(*ScheduleRequestMsg)
 			var p int
 			if r.SessionID == "" {
-				p = int(m.errScheduler.AnonymousPriorityWith(snap, classifyPrompt(req)))
+				// Anonymous internal calls (context compression / checkpoints)
+				// are small, latency-sensitive, and synchronously block the
+				// parent session — whose idle timer keeps running while the
+				// anonymous request queues (v5: 812s max under CatERR killed
+				// the parent's session). Rank them at the boost tier.
+				p = math.MinInt32
 			} else {
 				p = int(m.errScheduler.PriorityWith(snap, r.SessionID, r.CurStep, classifyPrompt(req)))
 			}
