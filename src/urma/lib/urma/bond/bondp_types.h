@@ -224,6 +224,14 @@ typedef enum pjetty_error_done_type {
 /** A struct to mimic Polymorphism in creating/deleting some components of urma.
  * This will introduce extra memory cost due to union size taking the largest size.
  */
+typedef struct bondp_pjetty_ref {
+    urma_jetty_t *jetty;
+    urma_jetty_id_t id;
+    uint32_t readers;
+    bool mapped;
+    struct bondp_pjetty_ref *next;
+} bondp_pjetty_ref_t;
+
 typedef struct bondp_comp {
     union {
         void *base;
@@ -237,6 +245,9 @@ typedef struct bondp_comp {
         urma_jfr_t *p_jfr[URMA_UBAGG_DEV_MAX_NUM];
         urma_jetty_t *p_jetty[URMA_UBAGG_DEV_MAX_NUM];
     };
+    /* Physical generations and readers are protected by send_lock. */
+    bondp_pjetty_ref_t *pjetty_refs[URMA_UBAGG_DEV_MAX_NUM];
+    bondp_pjetty_ref_t *retired_pjettys;
     int dev_num;
     uint32_t enabled_indices[URMA_UBAGG_DEV_MAX_NUM];
     uint32_t enabled_count;
@@ -255,6 +266,8 @@ typedef struct bondp_comp {
     // send
     bool modify_to_error;
     pthread_spinlock_t send_lock;
+    /* Serialize physical jetty control operations with generation replacement. */
+    pthread_mutex_t pjetty_ctrl_lock;
     uint32_t max_send_sge;
     uint32_t max_send_rsge;
     wr_buf_t send_wr_buf;
