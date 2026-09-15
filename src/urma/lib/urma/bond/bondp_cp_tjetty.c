@@ -18,6 +18,7 @@
 #include "urma_log.h"
 
 #include "bondp_dp_health.h"
+#include "bondp_pjetty.h"
 #include "bondp_topo_info.h"
 #include "bondp_types.h"
 #include "urma_ubagg.h"
@@ -184,7 +185,13 @@ int bondp_get_rjetty(urma_context_t *ctx, urma_user_ctl_in_t *in,
     bondp_rjetty_ext_priv_t *ext_hdr = bondp_rjetty_get_priv_ext(new_rjetty);
     ext_hdr->len = (uint32_t)ext_len;
     urma_bond_jetty_ext_v0_t *ext = (urma_bond_jetty_ext_v0_t *)ext_hdr->data;
-    int ret = bondp_fill_compact_rjetty_ext(bdp_ctx, bdp_jetty, ext, ext_len);
+    int ret = bondp_jetty_ctrl_lock(bdp_jetty);
+    if (ret == URMA_SUCCESS) {
+        ret = bondp_fill_compact_rjetty_ext(bdp_ctx, bdp_jetty, ext, ext_len);
+        bondp_jetty_ctrl_unlock(bdp_jetty);
+    } else {
+        ret = -EAGAIN;
+    }
     if (ret != 0) {
         free(new_rjetty);
         return ret;
@@ -715,22 +722,22 @@ urma_status_t bondp_unimport_jetty(urma_target_jetty_t *target_jetty)
     return URMA_SUCCESS;
 }
 
-urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
+static void bondp_rollback_pjetty_bind(bondp_comp_t *bdp_jetty)
 {
-    bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
-    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(tjetty, bondp_target_jetty_t, v_tjetty);
+    for (uint32_t p = 0; p < URMA_UBAGG_DEV_MAX_NUM; ++p) {
+        uint32_t local_idx = bdp_jetty->active_indices[p];
+        if (bdp_jetty->p_jetty[local_idx] != NULL &&
+            bdp_jetty->p_jetty[local_idx]->remote_jetty != NULL) {
+            urma_unbind_jetty(bdp_jetty->p_jetty[local_idx]);
+            bdp_jetty->p_jetty[local_idx]->remote_jetty = NULL;
+        }
+    }
+}
+
+static urma_status_t bondp_bind_pjettys(bondp_comp_t *bdp_jetty, bondp_target_jetty_t *bdp_tjetty)
+{
     bool target_used[URMA_UBAGG_DEV_MAX_NUM] = {0};
     bool bind_done = false;
-
-    if (jetty->remote_jetty) {
-        URMA_LOG_ERR("Jetty already has a binded target jetty\n");
-        return URMA_EINVAL;
-    }
-
-    if (bdp_jetty->active_count == 0 || bdp_tjetty->active_count == 0) {
-        URMA_LOG_ERR("No valid active slice to bind\n");
-        return URMA_FAIL;
-    }
 
     for (uint32_t n = 0; n < bdp_jetty->active_count; ++n) {
         uint32_t local_idx = bdp_jetty->active_indices[n];
@@ -749,7 +756,8 @@ urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
                 break;
             }
             if (urma_bind_jetty(pjetty, ptjetty) != 0) {
-                goto UNBIND;
+                bondp_rollback_pjetty_bind(bdp_jetty);
+                return URMA_FAIL;
             }
             bind_done = true;
             URMA_LOG_DEBUG("Binded pjetty successfully, local_idx=%u, target_idx=%u, jetty_id=%u, tjetty_id=%u\n",
@@ -758,32 +766,44 @@ urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
         }
     }
 
-    if (!bind_done) {
-        return URMA_FAIL;
+    return bind_done ? URMA_SUCCESS : URMA_FAIL;
+
+}
+
+urma_status_t bondp_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty)
+{
+    bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
+    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(tjetty, bondp_target_jetty_t, v_tjetty);
+    urma_status_t ret = bondp_jetty_ctrl_lock(bdp_jetty);
+    if (ret != URMA_SUCCESS) {
+        return ret;
     }
-
-    bdp_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
-    bondp_tjetty_get(&bdp_tjetty->v_tjetty);
-    return URMA_SUCCESS;
-
-UNBIND:
-    for (uint32_t p = 0; p < URMA_UBAGG_DEV_MAX_NUM; ++p) {
-        uint32_t local_idx = bdp_jetty->active_indices[p];
-        if (bdp_jetty->p_jetty[local_idx] != NULL &&
-            bdp_jetty->p_jetty[local_idx]->remote_jetty != NULL) {
-            urma_unbind_jetty(bdp_jetty->p_jetty[local_idx]);
-            bdp_jetty->p_jetty[local_idx]->remote_jetty = NULL;
+    if (jetty->remote_jetty) {
+        URMA_LOG_ERR("Jetty already has a binded target jetty\n");
+        ret = URMA_EINVAL;
+    } else if (bdp_jetty->active_count == 0 || bdp_tjetty->active_count == 0) {
+        URMA_LOG_ERR("No valid active slice to bind\n");
+        ret = URMA_FAIL;
+    } else {
+        ret = bondp_bind_pjettys(bdp_jetty, bdp_tjetty);
+        if (ret == URMA_SUCCESS) {
+            bdp_jetty->v_jetty.remote_jetty = &bdp_tjetty->v_tjetty;
+            bondp_tjetty_get(&bdp_tjetty->v_tjetty);
         }
     }
-    return URMA_FAIL;
+    bondp_jetty_ctrl_unlock(bdp_jetty);
+    return ret;
 }
 
 urma_status_t bondp_unbind_jetty(urma_jetty_t *jetty)
 {
     bondp_comp_t *bdp_jetty = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
+    urma_status_t ret = bondp_jetty_ctrl_lock(bdp_jetty);
+    if (ret != URMA_SUCCESS) {
+        return ret;
+    }
     urma_target_jetty_t *tjetty = jetty->remote_jetty;
     bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(tjetty, bondp_target_jetty_t, v_tjetty);
-    urma_status_t ret = URMA_SUCCESS;
 
     for (uint32_t p = 0; p < URMA_UBAGG_DEV_MAX_NUM; ++p) {
         uint32_t local_idx = bdp_jetty->active_indices[p];
@@ -804,6 +824,7 @@ urma_status_t bondp_unbind_jetty(urma_jetty_t *jetty)
         bdp_jetty->v_jetty.remote_jetty = NULL;
         bondp_tjetty_put(tjetty);
     }
+    bondp_jetty_ctrl_unlock(bdp_jetty);
     return ret;
 }
 
