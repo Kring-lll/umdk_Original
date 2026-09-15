@@ -109,6 +109,11 @@ URMA_COMMON_COPTS = [
     "-fPIC",
 ] + URMA_ARCH_COPTS
 
+URMA_PERF_COPTS = select({
+    ":cpu_aarch64": ["-DURMA_PERF_USE_CNTVCT"],
+    "//conditions:default": [],
+})
+
 URMA_TOOL_COPTS = URMA_COMMON_COPTS + [
     "-fPIE",
 ]
@@ -183,8 +188,13 @@ urma_shared_library(
         "lib/urma/core",
         "lib/urma/core/include",
     ],
+<<<<<<< master
     copts = URMA_COMMON_COPTS + ["-DURMA_BUILD_SHARED=1"],
     compile_deps = [":urma_common_headers", ":urma_version_headers"],
+=======
+    copts = URMA_COMMON_COPTS + URMA_PERF_COPTS + ["-DURMA_BUILD_SHARED=1"],
+    compile_deps = [":urma_common_headers", ":urma_version_headers"],
+>>>>>>> master
     dynamic_lib_names = ["urma_common"],
     linkopts = ["-ldl", "-lrt", "-Wl,@$(location version/urma.ldflags)",
                 "-Wl,--version-script,$(location lib/urma/core/urma.map)"],
