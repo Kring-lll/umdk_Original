@@ -16,6 +16,10 @@
  *   bit  4     = default 1 (always set)
  *   bits 3-0   = port number (1-8)
  *
+ * Jetty ids (fixed, deterministic — see JETTY_ID_BASE):
+ *   NPU port index p (0..7) -> jetty_id = 32 + p (i.e. 32..39); one jetty id per
+ *   physical port, unique within the NPU device and identical on every run.
+ *
  * Routing:
  *   NPU: 1016 routes (all NPU ports except own 8), each 1 outPort -- the local port
  *        that connects to the same L1 as the destination NPU port.
@@ -46,6 +50,7 @@ import com.huawei.umdk.snc.entity.SwDevice;
 import com.huawei.umdk.snc.entity.SwForwardingChip;
 import com.huawei.umdk.snc.entity.SwPortEntity;
 import com.huawei.umdk.snc.entity.SwitchLevel;
+import com.huawei.umdk.snc.util.HashUtils;
 
 public final class FullRackTopologyGenerator {
 
@@ -61,14 +66,27 @@ public final class FullRackTopologyGenerator {
     private static final int L1SW_PORT_COUNT = 128;
     private static final int L2SW_PORTS_PER_CHIP = 128;
 
+    /**
+     * Fixed jetty id of the first physical port of every NPU.
+     *
+     * <p>Allocation rule (stable, deterministic, must not change): the jetty id
+     * of port index {@code p} (0-based, {@code p} in {@code [0, 7]}) is
+     * {@code JETTY_ID_BASE + p}, i.e. {@code 32..39}. The value therefore only
+     * depends on the port index, is identical on every generator invocation, and
+     * stays inside the legal range {@code [32, 1023]} while being unique within
+     * each NPU device.
+     */
+    public static final int JETTY_ID_BASE = HashUtils.JETTY_ID_MIN;
+
     private FullRackTopologyGenerator() {
     }
 
     /**
      * Builds the full 148-device rack topology directly in memory as a
-     * {@link SuperNode}, with correct CNA-based routing tables but without
-     * any ECMP default or cross-chassis routes (those are added later by
-     * {@link CoverageRouteAugmentor}).
+     * {@link SuperNode}, with correct CNA-based routing tables (NPU /32
+     * single-out-port routes, L1SW /32 routes to NPU and L2, L2SW /32 routes
+     * to L1). This is the single source of truth for both topology and
+     * routing used by the test suite.
      *
      * @return a SuperNode containing all 148 devices
      */
@@ -231,7 +249,10 @@ public final class FullRackTopologyGenerator {
         for (int p = 0; p < PORTS_PER_NPU; p++) {
             int l1swIdx = p / 2 + 1;
             int peerPortId = (b - 1) * 8 + (n - 1) * 2 + (p % 2);
-            NpuPortEntity port = new NpuPortEntity(eidStr(r, b, n, p), "0A0A0A01");
+            // Fixed jetty id: JETTY_ID_BASE + port index (32..39), one per
+            // physical port, identical on every run (see JETTY_ID_BASE).
+            NpuPortEntity port = new NpuPortEntity(eidStr(r, b, n, p), "0A0A0A01",
+                JETTY_ID_BASE + p);
             port.setPortName(npuPortName(b, n, p));
             port.setId(p);
             port.setChipIndex(2);
