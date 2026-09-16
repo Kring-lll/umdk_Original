@@ -40,13 +40,11 @@ set_target_properties(urma_static
 
 target_include_directories(urma
     PUBLIC
-        ${URMA_VERSION_INCLUDE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 target_include_directories(urma_static
     PUBLIC
-        ${URMA_VERSION_INCLUDE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
@@ -72,7 +70,6 @@ install(TARGETS urma
     DESTINATION /usr/lib64
 )
 install(FILES
-    ${URMA_VERSION_INCLUDE_DIR}/urma_version.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/urma_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/urma_cmd.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/urma_opcode.h

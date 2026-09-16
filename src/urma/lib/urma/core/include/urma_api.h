@@ -13,9 +13,21 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "urma_version.h"
-
 #include "urma_types.h"
+
+/* Define requirements before the first inclusion of urma_api.h. */
+#if defined(URMA_API_REQUIRED_MAJOR)
+#if URMA_API_VERSION_MAJOR != URMA_API_REQUIRED_MAJOR
+#error "URMA API major version does not match URMA_API_REQUIRED_MAJOR"
+#endif
+#endif
+
+/* Define before including urma_api.h, e.g. URMA_API_VERSION_ENCODE(0, 1, 0). */
+#if defined(URMA_API_MIN_VERSION)
+#if URMA_API_VERSION_NUMBER < URMA_API_MIN_VERSION
+#error "URMA API version is below URMA_API_MIN_VERSION"
+#endif
+#endif
 
 #ifdef __cplusplus
 extern "C" {

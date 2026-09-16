@@ -4,17 +4,15 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("//bazel:urma_deps.bzl", "LIBUMMU_RUNTIME_LINKOPTS")
 load("//bazel:urma_shared.bzl", "urma_dynamic_linkopts", "urma_linklib_inputs", "urma_shared_library", "urma_shared_library_static_dep")
 
-# Keep header, note and SONAMEs aligned with the CMake version source.
+# Generate note and SONAMEs from the URMA CMake version.
 genrule(
     name = "urma_version_files",
     srcs = [
         "CMakeLists.txt",
-        "lib/urma/core/include/urma_version.h.in",
         "urma_version_note.S.in",
     ],
     tools = ["//bazel:generate_version.sh"],
     outs = [
-        "version/urma_version.h",
         "version/urma_version_note.S",
         "version/urma.ldflags",
         "version/urma_common.ldflags",
@@ -23,15 +21,9 @@ genrule(
     ],
     cmd = "bash $(location //bazel:generate_version.sh) " +
           "$(location CMakeLists.txt) " +
-          "$(location lib/urma/core/include/urma_version.h.in) " +
           "$(location urma_version_note.S.in) $(RULEDIR)/version",
 )
 
-cc_library(
-    name = "urma_version_headers",
-    hdrs = ["version/urma_version.h"],
-    includes = ["version"],
-)
 config_setting(
     name = "perf_cycle_enabled",
     values = {"define": "perf_cycle=true"},
@@ -172,7 +164,7 @@ cc_library(
         "lib/urma/core",
         "lib/urma/core/include",
     ],
-    deps = [":urma_common_headers", ":urma_version_headers"],
+    deps = [":urma_common_headers"],
 )
 
 urma_shared_library(
@@ -189,7 +181,7 @@ urma_shared_library(
         "lib/urma/core/include",
     ],
     copts = URMA_COMMON_COPTS + URMA_PERF_COPTS + ["-DURMA_BUILD_SHARED=1"],
-    compile_deps = [":urma_common_headers", ":urma_version_headers"],
+    compile_deps = [":urma_common_headers"],
     dynamic_lib_names = ["urma_common"],
     linkopts = ["-ldl", "-lrt", "-Wl,@$(location version/urma.ldflags)",
                 "-Wl,--version-script,$(location lib/urma/core/urma.map)"],

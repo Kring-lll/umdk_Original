@@ -635,7 +635,6 @@ stage_payload()
     copy_exec "${bin_dir}/urma_ping" "${rootfs}${BINDIR}/urma_ping"
     copy_exec "${bin_dir}/urma_sample" "${rootfs}${BINDIR}/urma_sample"
 
-    copy_file "${bin_dir}/version/urma_version.h" "${rootfs}${INCLUDEDIR}/urma_version.h"
     copy_file "${WORKSPACE_DIR}/lib/urma/core/include/urma_api.h" "${rootfs}${INCLUDEDIR}/urma_api.h"
     copy_file "${WORKSPACE_DIR}/lib/urma/core/include/urma_cmd.h" "${rootfs}${INCLUDEDIR}/urma_cmd.h"
     copy_file "${WORKSPACE_DIR}/lib/urma/core/include/urma_opcode.h" "${rootfs}${INCLUDEDIR}/urma_opcode.h"

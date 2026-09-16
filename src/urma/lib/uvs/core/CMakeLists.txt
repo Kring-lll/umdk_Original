@@ -8,6 +8,9 @@ add_library(tpsa SHARED
 )
 
 
+set(PROJECT_VERSION "0.1.0")
+set(PROJECT_VERSION_MAJOR "0")
+
 set_target_properties(tpsa
     PROPERTIES
         C_STANDARD 99
