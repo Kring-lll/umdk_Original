@@ -1,6 +1,23 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) Huawei Technologies Co., Ltd. 2021-2025. All rights reserved.
 
+# API/ABI note versions; keep aligned with urma_types.h.
+set(URMA_API_VERSION "0.1.0")
+set(URMA_ABI_VERSION "0.1.0")
+foreach(kind API ABI)
+    string(REPLACE "." ";" URMA_${kind}_VERSION_PARTS "${URMA_${kind}_VERSION}")
+    list(GET URMA_${kind}_VERSION_PARTS 0 URMA_${kind}_VERSION_MAJOR)
+    list(GET URMA_${kind}_VERSION_PARTS 1 URMA_${kind}_VERSION_MINOR)
+    list(GET URMA_${kind}_VERSION_PARTS 2 URMA_${kind}_VERSION_PATCH)
+    math(EXPR URMA_${kind}_VERSION_CODE
+        "(${URMA_${kind}_VERSION_MAJOR} << 32) | (${URMA_${kind}_VERSION_MINOR} << 16) | ${URMA_${kind}_VERSION_PATCH}")
+endforeach()
+set(URMA_VERSION_NOTE "${CMAKE_CURRENT_BINARY_DIR}/urma_version_note.S")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/urma_version_note.S.in"
+    "${URMA_VERSION_NOTE}" @ONLY)
+
+enable_language(ASM)
+
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
     set(URMA_PERF_USE_CNTVCT_DEFAULT ON)
 else()
@@ -10,11 +27,7 @@ option(URMA_PERF_USE_CNTVCT "Use ARM CNTVCT_EL0 register for perf timestamp inst
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} URMA_DIR_SRCS)
 
-# Historical adapters are shared-only; their headers are not installed.
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/compat URMA_COMPAT_SRCS)
-
 add_library(urma SHARED
-    ${URMA_COMPAT_SRCS}
     ${URMA_VERSION_NOTE}
     ${URMA_DIR_SRCS}
 )
@@ -23,42 +36,31 @@ add_library(urma_static STATIC
     ${URMA_DIR_SRCS}
 )
 
-target_compile_definitions(urma PRIVATE URMA_BUILD_SHARED=1)
-
 set_target_properties(urma
     PROPERTIES
         C_STANDARD 99
-        VERSION ${PROJECT_VERSION}
-        SOVERSION ${PROJECT_VERSION_MAJOR}
+        VERSION ${URMA_ABI_VERSION}
+        SOVERSION ${URMA_ABI_VERSION_MAJOR}
+        LINK_FLAGS "-Wl,--version-script,${CMAKE_CURRENT_SOURCE_DIR}/liburma.map"
+        LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/liburma.map"
 )
 set_target_properties(urma_static
     PROPERTIES
         C_STANDARD 99
-        VERSION ${PROJECT_VERSION}
-        SOVERSION ${PROJECT_VERSION_MAJOR}
+        VERSION ${URMA_ABI_VERSION}
+        SOVERSION ${URMA_ABI_VERSION_MAJOR}
 )
 
 target_include_directories(urma
     PUBLIC
-        ${URMA_VERSION_INCLUDE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 target_include_directories(urma_static
     PUBLIC
-        ${URMA_VERSION_INCLUDE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
-
-# Stable ABI symbol node; do not derive its name from the package version.
-set(URMA_SYMBOL_VERSION_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/urma.map")
-set_property(TARGET urma APPEND_STRING PROPERTY LINK_FLAGS
-    " -Wl,--version-script,${URMA_SYMBOL_VERSION_SCRIPT} -Wl,-z,now")
-set_property(TARGET urma APPEND PROPERTY LINK_DEPENDS "${URMA_SYMBOL_VERSION_SCRIPT}")
-# Consumers of this target resolve PLT relocations at startup.
-# LINK_FLAGS above retains compatibility with CMake 3.12.
-set_property(TARGET urma APPEND PROPERTY INTERFACE_LINK_LIBRARIES "-Wl,-z,now")
 
 target_link_libraries(urma urma_common -ldl -lrt)
 target_link_libraries(urma_static urma_common -ldl -lrt)
@@ -72,7 +74,6 @@ install(TARGETS urma
     DESTINATION /usr/lib64
 )
 install(FILES
-    ${URMA_VERSION_INCLUDE_DIR}/urma_version.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/urma_api.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/urma_cmd.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/urma_opcode.h

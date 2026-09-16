@@ -104,7 +104,6 @@ def urma_shared_library_static_dep(
         cxxopts = [],
         static_deps = [],
         linkopts = [],
-        additional_linker_inputs = [],
         soname = None,
         visibility = None):
     """Shared library that statically links ``static_deps`` (e.g. tpsa + urma_common)."""
@@ -136,7 +135,6 @@ def urma_shared_library_static_dep(
         name = name,
         linkshared = True,
         deps = [":" + internal],
-        additional_linker_inputs = additional_linker_inputs,
         linkopts = static_linkopts,
         visibility = vis,
     )
