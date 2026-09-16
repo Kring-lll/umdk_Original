@@ -309,7 +309,9 @@ modprobe ubagg
 - **内核版本**：与编译所用内核一致。举例：编译 OpenEuler 6.6.0 需使用对应 Linux-6.6.0 主线版本的 Linux 内核。
 
 - **运行时依赖**：
-  - liburma.so、liburma_common.so、liburma_ubagg.so（用户态库）
+  - liburma.so.0（当前 liburma 用户态运行库）。其他用户态库按构建方式提供：CMake 构建使用 liburma_common.so.0、liburma_ubagg.so.0，使用 UVS 时还需 libtpsa.so.0；当前 Bazel 构建保持 liburma_common.so、liburma_ubagg.so 和 libtpsa.so 的原有 SONAME。
+  - 部署或裁剪容器时，保留完整版本文件及 SONAME 链接，例如 liburma.so.0 → liburma.so.0.1.0；通常同时保留开发链接 liburma.so → liburma.so.0。仅复制名为 liburma.so 的文件不能满足对 liburma.so.0 的运行时加载要求。
+  - 建议使用项目提供的 RPM 包或 Bazel 打包安装脚本部署。手工部署时确保链接目标存在，库所在目录可被动态链接器搜索到，并通过 readelf -d <可执行文件或动态库> 核对 NEEDED/SONAME，按实际依赖保留所需库；不要只按无版本的 .so 文件名复制。
   - ubcore.ko、ubagg.ko、uburma.ko（内核模块）
 
 ---

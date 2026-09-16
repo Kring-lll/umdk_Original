@@ -540,8 +540,10 @@ create_version_file()
         echo "commit_id=${commit_id}"
         echo "build_time=$(date '+%Y-%m-%d %H:%M:%S %z')"
         echo "build_command=${build_cmd}"
-        echo "COMMON_VERSION=$(extract_cmake_version "${WORKSPACE_DIR}/CMakeLists.txt")"
-        echo "URMA_VERSION=$(extract_cmake_version "${WORKSPACE_DIR}/CMakeLists.txt")"
+        echo "COMMON_VERSION=$(extract_cmake_version "${WORKSPACE_DIR}/../CMakeLists.txt")"
+        echo "URMA_VERSION=$(extract_cmake_version "${WORKSPACE_DIR}/lib/urma/core/CMakeLists.txt")"
+        echo "UVS_VERSION=$(extract_cmake_version "${WORKSPACE_DIR}/lib/uvs/core/CMakeLists.txt")"
+        echo "UBAGG_VERSION=$(extract_cmake_version "${WORKSPACE_DIR}/lib/urma/bond/CMakeLists.txt")"
         echo "libummu_remote=$(workspace_var LIBUMMU_REMOTE)"
         echo "libummu_commit=$(workspace_var LIBUMMU_COMMIT)"
         echo "LIBUMMU_VERSION=$(workspace_var LIBUMMU_VERSION)"
@@ -617,16 +619,16 @@ stage_payload()
     local common_version
     local library_version
 
-    common_version=$(project_version COMMON_VERSION "${WORKSPACE_DIR}/CMakeLists.txt")
-    library_version=$(project_version URMA_VERSION "${WORKSPACE_DIR}/CMakeLists.txt")
+    common_version=$(project_version COMMON_VERSION "${WORKSPACE_DIR}/../CMakeLists.txt")
+    library_version=$(project_version URMA_VERSION "${WORKSPACE_DIR}/lib/urma/core/CMakeLists.txt")
 
     rm -rf "${stage_dir}"
     mkdir -p "${rootfs}${LIBDIR}" "${rootfs}${BINDIR}" "${rootfs}${INCLUDEDIR}/udma"
 
     stage_versioned_so "${bin_dir}/liburma.so" "${rootfs}${LIBDIR}" "liburma" "${library_version}"
     stage_versioned_so "${bin_dir}/liburma_common.so" "${rootfs}${LIBDIR}" "liburma_common" "${common_version}"
-    stage_versioned_so "${bin_dir}/libtpsa.so" "${rootfs}${LIBDIR}" "libtpsa" "${library_version}"
-    stage_versioned_so "${bin_dir}/liburma_ubagg.so" "${rootfs}${LIBDIR}" "liburma_ubagg" "${library_version}"
+    stage_versioned_so "${bin_dir}/libtpsa.so" "${rootfs}${LIBDIR}" "libtpsa" "$(project_version UVS_VERSION "${WORKSPACE_DIR}/lib/uvs/core/CMakeLists.txt")"
+    stage_versioned_so "${bin_dir}/liburma_ubagg.so" "${rootfs}${LIBDIR}" "liburma_ubagg" "$(project_version UBAGG_VERSION "${WORKSPACE_DIR}/lib/urma/bond/CMakeLists.txt")"
     copy_exec "${bin_dir}/liburma-udma.so" "${rootfs}${LIBDIR}/liburma-udma.so"
     stage_libummu_payload "${rootfs}" "${bin_dir}"
 
@@ -635,7 +637,6 @@ stage_payload()
     copy_exec "${bin_dir}/urma_ping" "${rootfs}${BINDIR}/urma_ping"
     copy_exec "${bin_dir}/urma_sample" "${rootfs}${BINDIR}/urma_sample"
 
-    copy_file "${bin_dir}/version/urma_version.h" "${rootfs}${INCLUDEDIR}/urma_version.h"
     copy_file "${WORKSPACE_DIR}/lib/urma/core/include/urma_api.h" "${rootfs}${INCLUDEDIR}/urma_api.h"
     copy_file "${WORKSPACE_DIR}/lib/urma/core/include/urma_cmd.h" "${rootfs}${INCLUDEDIR}/urma_cmd.h"
     copy_file "${WORKSPACE_DIR}/lib/urma/core/include/urma_opcode.h" "${rootfs}${INCLUDEDIR}/urma_opcode.h"

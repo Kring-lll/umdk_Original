@@ -24,7 +24,51 @@
 #endif
 
 #include "urma_opcode.h"
-#include "urma_version.h"
+
+/* Major occupies bits 63:32; minor and patch each occupy 16 bits. */
+#define URMA_API_VERSION_ENCODE(major, minor, patch) \
+    (((major) * UINT64_C(1) << 32) | \
+     ((minor) * UINT64_C(1) << 16) | \
+     ((patch) * UINT64_C(1)))
+
+#define URMA_API_VERSION_MAJOR 0
+#define URMA_API_VERSION_MINOR 1
+#define URMA_API_VERSION_PATCH 0
+#define URMA_API_VERSION_STRING "0.1.0"
+#define URMA_API_VERSION_NUMBER \
+    URMA_API_VERSION_ENCODE(URMA_API_VERSION_MAJOR, URMA_API_VERSION_MINOR, URMA_API_VERSION_PATCH)
+#define URMA_API_VERSION URMA_API_VERSION_NUMBER
+
+/* ABI major/minor identify the URMA_0.1 symbol node in liburma.map.
+ * Maintain ABI independently of API; retain historical nodes when evolving.
+ */
+#define URMA_ABI_VERSION_MAJOR 0
+#define URMA_ABI_VERSION_MINOR 1
+#define URMA_ABI_VERSION_PATCH 0
+#define URMA_ABI_VERSION_STRING "0.1.0"
+#define URMA_ABI_VERSION_ENCODE(major, minor, patch) \
+    URMA_API_VERSION_ENCODE(major, minor, patch)
+#define URMA_ABI_VERSION_NUMBER \
+    URMA_ABI_VERSION_ENCODE(URMA_ABI_VERSION_MAJOR, URMA_ABI_VERSION_MINOR, URMA_ABI_VERSION_PATCH)
+#define URMA_ABI_VERSION URMA_ABI_VERSION_NUMBER
+
+/* Keep the public fields within the 32/16/16-bit representation. */
+#if URMA_API_VERSION_MAJOR < 0 || URMA_API_VERSION_MAJOR > 0xffffffffULL
+#error "URMA API major version exceeds 32 bits"
+#endif
+#if URMA_API_VERSION_MINOR < 0 || URMA_API_VERSION_MINOR > 0xffffULL
+#error "URMA API minor version exceeds 16 bits"
+#endif
+#if URMA_API_VERSION_PATCH < 0 || URMA_API_VERSION_PATCH > 0xffffULL
+#error "URMA API patch version exceeds 16 bits"
+#endif
+#if URMA_ABI_VERSION_MAJOR < 0 || URMA_ABI_VERSION_MAJOR > 0xffffffffULL || \
+    URMA_ABI_VERSION_MINOR < 0 || URMA_ABI_VERSION_MINOR > 0xffffULL || \
+    URMA_ABI_VERSION_PATCH < 0 || URMA_ABI_VERSION_PATCH > 0xffffULL
+#error "URMA ABI version exceeds the 32/16/16-bit encoding"
+#endif
+
+
 
 #ifdef __cplusplus
 extern "C" {

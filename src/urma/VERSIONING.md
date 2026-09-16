@@ -1,33 +1,46 @@
 # URMA 版本规约
 
-版本统一定义于 src/urma/CMakeLists.txt，当前为 0.1.0。
-安装的 urma_version.h 由 urma_api.h 引入，对外提供
+当前版本为 0.1.0。版本值和编码直接定义于现有的 urma_types.h，
+urma_api.h、urma_provider.h 和 urma_cmd.h 通过包含关系使用这些定义。
+调用方自行编写版本要求检查，不再生成或安装额外的版本头文件。对外提供
 URMA_API_VERSION_MAJOR、URMA_API_VERSION_MINOR、URMA_API_VERSION_PATCH、
 URMA_API_VERSION_NUMBER 和 URMA_API_VERSION_ENCODE(major, minor, patch)。
 版本采用无符号 64 位编码，主版本、次版本和补丁版本分别占 32、16、16 位。
 
 ## 源码兼容性
 
-调用方可在首次包含头文件之前声明版本要求：
-
-    #define URMA_API_REQUIRED_MAJOR 0
-    #define URMA_API_MIN_VERSION URMA_API_VERSION_ENCODE(0, 1, 0)
-    #include <urma_api.h>
-
-主版本不匹配或版本低于要求时，通过 #error 触发编译失败。
-编译器仍会执行类型检查。调用方也可以自行编写检查：
+头文件仅提供版本信息，不规定调用方所需的最低版本或主版本。
+调用方在自己的源码中包含头文件后编写检查，例如：
 
     #include <urma_api.h>
-    #if URMA_API_VERSION < URMA_API_VERSION_ENCODE(3, 2, 0)
-    #error "URMA API >= 3.2 is required"
+    #if URMA_API_VERSION_MAJOR != 0
+    #error "URMA API major 0 is required"
+    #endif
+    #if URMA_API_VERSION_NUMBER < URMA_API_VERSION_ENCODE(0, 1, 0)
+    #error "URMA API >= 0.1.0 is required"
     #endif
 
-第二个示例在当前 0.1.0 版本下会按预期编译失败。
+将示例最低版本改成 0.1.1 后，在当前头文件下由调用方的 #error 触发编译失败。
+编译器仍会执行类型检查；库内部只保留版本字段自身的范围校验。
+
+## API 与 ABI 版本
+
+urma_types.h 同时提供 URMA_API_VERSION_* 和 URMA_ABI_VERSION_*，
+两者当前均为 0.1.0，采用相同的无符号 64 位编码格式，但版本数值独立维护。
+各组提供 MAJOR、MINOR、PATCH、STRING、NUMBER、ENCODE 和版本别名。
+
+URMA_ABI_VERSION_MAJOR=0、URMA_ABI_VERSION_MINOR=1 对应 liburma.map
+中的 URMA_0.1 符号节点；URMA_PRIVATE_0.1 为内部使用的导出符号节点，
+名称中的 PRIVATE 不代表这些符号被隐藏。未列出的符号才由 local: * 隐藏。
+补丁版本不参与当前符号节点命名。以后 API 与 ABI 不要求同步递增。
+
+ABI 宏是头文件提供的信息，不会代替 SONAME、符号版本或动态链接器检查。
+ABI 演进需同步审核符号脚本和 SONAME，并保留需要兼容的历史符号节点。
 
 ## 二进制兼容性
 
-liburma.so.0.1.0 的 SONAME 为 liburma.so.0，现有导出符号归属于稳定的
-URMA_0.1 符号版本节点。新链接的调用方会为引用的符号记录该节点。
+liburma.so.0.1.0 的 SONAME 为 liburma.so.0，公开符号归属于 URMA_0.1 节点，内部使用的导出符号归属于
+URMA_PRIVATE_0.1 节点。新链接的调用方会为引用的符号记录该节点。
 兼容版本必须保留已有节点；不兼容的 ABI 变更需要升级 SONAME 主版本。
 当前节点使用显式源码符号基线，发布前必须与实际发布库的 ELF 符号表核对。
 
@@ -43,7 +56,7 @@ LD_BIND_NOW=1，以要求启动时完成符号解析。
 它既不能证明类型和内存布局兼容，也不能拒绝所有不带符号版本的替换库：
 动态链接器可能允许回退到无版本符号。
 
-liburma 和 liburma_common 中的 .note.urma.version 是维测元信息，
+liburma 中的 .note.urma.version 是维测元信息，
 不会自动触发加载器兼容性检查。
 
 在 Linux 环境完成构建后，可执行以下命令验证：
@@ -137,166 +150,72 @@ compat/urma_symver.h：
 
 ## 修改位置、目的和影响
 
-下列路径相对于 umdk 仓库根目录。用户态版本基线已由 1.0.0 重设为 0.1.0。
+以下路径相对于 umdk。保留当前提交历史，在现有代码上调整版本实现。
 
-| 修改位置 | 改动与目的 | 影响 |
-|---|---|---|
-| src/urma/CMakeLists.txt | 统一设置 PROJECT_VERSION=0.1.0，生成版本头和 ELF note，并启用 ASM | API 字段为 0/1/0；相关库 VERSION=0.1.0、SOVERSION=0 |
-| src/urma/lib/urma/core/include/urma_version.h.in | 定义公开版本宏、字段范围检查、指定主版本及最低版本检查 | 调用方可通过预处理器在编译期拒绝不满足要求的头文件 |
-| src/urma/lib/urma/core/include/urma_api.h | 引入生成的版本头 | API 使用者可直接使用版本规约宏 |
-| src/urma/lib/urma/core/include/urma_types.h | 删除旧的 URMA_API_VERSION=0.9 定义，改为引入统一版本头 | 消除重定义和包含顺序导致的版本冲突 |
-| src/urma/urma_version_note.S.in | 定义 URMA ELF note 模板，写入 8 字节版本编码 | liburma 和 liburma_common 可通过 readelf 查看维测版本 |
-| src/urma/common/CMakeLists.txt | 将 note 汇编编入动态库并继承统一版本 | liburma_common 与 liburma 使用一致的版本来源 |
-| src/urma/lib/urma/core/CMakeLists.txt | 接入 note、版本脚本、立即绑定、生成头文件安装和私有兼容源码 | 构建 liburma.so.0.1.0；兼容头文件不对外安装 |
-| src/urma/lib/urma/bond/CMakeLists.txt、src/urma/lib/uvs/core/CMakeLists.txt | 删除各自的旧版本覆盖 | liburma_ubagg、libtpsa 继承 0.1.0，SONAME 主版本为 0 |
-| src/urma/lib/urma/core/urma.map | 使用 URMA_0.1 显式符号基线并隐藏未列出的符号 | 本次版本调整保持 367 个列出符号不变；发布前仍需与实际 ELF 核对 |
-| src/urma/lib/urma/core/compat/urma_symver.h | 提供历史 @ 和默认 @@ 符号版本宏 | 后续可由私有包装函数转换旧参数并调用当前实现 |
-| src/urma/BUILD.bazel | 接入生成头文件、note、符号脚本、SONAME 参数和兼容源码 | Bazel 路径使用与 CMake 相同的版本来源 |
-| src/urma/bazel/generate_version.sh | 从 CMakeLists.txt 和模板生成版本文件 | 不在 Bazel 中另行维护版本常量 |
-| src/urma/bazel/BUILD.bazel、src/urma/bazel/urma_shared.bzl | 声明生成脚本，并向链接动作传递额外输入 | 版本脚本及 SONAME 参数成为构建依赖 |
-| src/urma/urma_bazel.sh | 修正版本读取位置，安装生成的 urma_version.h | 打包版本、动态库文件名和公开头文件保持一致 |
-| src/urma/VERSIONING.md | 记录规约、修改位置及使用步骤 | 作为版本维护与验证入口 |
-
-此次调整没有修改实际接口签名、结构体布局或业务语义。
-但 SONAME 从 liburma.so.1 变为 liburma.so.0，符号节点从 URMA_1.0 变为
-URMA_0.1，这是基线重设，不能当作对旧 1.0.0 二进制的无缝替换。
-已经依赖旧 SONAME 或旧符号节点的程序通常需要重新链接。
-
-此前内核仓库中的 UBCORE KAPI/ABI 为 1.0.0，本轮 umdk 调整未修改内核版本。
-用户态 API 版本、内核 KAPI/ABI 和通信协议检查属于不同边界，不能仅根据
-版本字符串是否相同判断 liburma 与内核是否兼容。
-
-## 构建和安装
-
-CMake 和 Bazel 是两条可选构建路径，不需要依次执行。
-以下命令面向已配置依赖的 Linux 构建环境。
-不依赖 .vscode/settings.json；通过命令行明确指定源码和构建目录。
-不要直接修改生成的 urma_version.h 或 urma_version_note.S。
-
-### CMake 路径
-
-在 umdk 仓库根目录执行：
-
-    cmake -S src -B build/urma-version \
-        -DBUILD_ALL=disable -DBUILD_URMA=enable
-    cmake --build build/urma-version --parallel
-
-该入口仍可能配置 URMA 的工具、provider 等子目录，需要满足相应依赖。
-可用以下命令只构建两个主要库目标：
-
-    cmake --build build/urma-version --target urma urma_common --parallel
-
-生成文件和主要产物位置：
-
-| 文件 | 路径 |
+| 位置 | 改动与用途 |
 |---|---|
-| 版本头 | build/urma-version/urma/include/urma_version.h |
-| note 汇编 | build/urma-version/urma/urma_version_note.S |
-| liburma | build/urma-version/urma/lib/urma/core/liburma.so.0.1.0 |
-| liburma_common | build/urma-version/urma/common/liburma_common.so.0.1.0 |
+| src/urma/lib/urma/core/include/urma_types.h | 直接定义 API/ABI 0/1/0 版本字段、64 位编码和字符串，校验版本字段范围 |
+| 同目录 urma_api.h、urma_provider.h、urma_cmd.h | 通过包含关系提供版本值，不在库内执行调用方的版本要求检查 |
+| src/urma/lib/urma/core/CMakeLists.txt | 仅设置 liburma 的版本 0.1.0，启用 ASM 并生成 note |
+| src/urma/lib/urma/core/urma_version_note.S.in | note 模板放在 liburma core 目录，描述值为 65536 |
+| src/urma/lib/urma/core/CMakeLists.txt | 链接 note 和版本脚本、编译兼容实现；移除生成版本头的包含和安装规则 |
+| src/urma/common/CMakeLists.txt | 恢复原有配置，不向 liburma_common 添加 note 或修改其版本 |
+| src/urma/lib/uvs/core/CMakeLists.txt | 恢复原版本 0.0.3、主版本 0 |
+| src/urma/lib/urma/bond/CMakeLists.txt | 保留原版本 0.0.3、主版本 0 |
+| src/urma/lib/urma/core/liburma.map | 保留 URMA_0.1 和 URMA_PRIVATE_0.1 显式符号基线 |
+| src/urma/lib/urma/core/compat/urma_symver.h | 保留历史 @ 和默认 @@ 符号映射宏 |
+| src/urma/BUILD.bazel、bazel/generate_version.sh | 仅生成 note 与 SONAME 参数，移除生成版本头目标和依赖 |
+| src/urma/urma_bazel.sh | 按统一库版本打包，只安装现有公共头文件 |
 
-完成所需目标构建后，可先安装到暂存目录查看结果：
+不修改 umdk/src/CMakeLists.txt 和 src/urma/CMakeLists.txt。升级 liburma 版本时，
+同步 urma_types.h 中的数值及 src/urma/lib/urma/core/CMakeLists.txt 的配置；
+common、bond 和 UVS 保持各自原有版本，不随 liburma 升级。
+模板形式的独立版本头已删除，使用源码头文件不再依赖构建时生成头文件。
 
+此次调整不修改实际接口签名、结构体布局或业务语义。
+0.1.0 基线不能直接视为对依赖 liburma.so.1、URMA_1.0 的旧程序兼容，
+这类程序通常需要重新链接。内核 UBCORE KAPI/ABI 此前仍为 1.0.0，
+本轮不修改内核版本。
+
+## 构建、使用和验证
+
+CMake 和 Bazel 是可选构建路径。以下命令用于依赖已配置好的 Linux 环境，
+无需 .vscode/settings.json。从 umdk 根目录使用 CMake：
+
+    cmake -S src -B build/urma-version -DBUILD_ALL=disable -DBUILD_URMA=enable
+    cmake --build build/urma-version --parallel
     DESTDIR="$PWD/build/urma-stage" cmake --install build/urma-version
 
-安装规则使用 /usr/lib64 和 /usr/include/ub/umdk/urma 等绝对路径。
-DESTDIR 会为这些路径增加暂存前缀；仅设置 CMAKE_INSTALL_PREFIX 不会改写
-已有的绝对安装目标。完整安装可能要求先完成其他子目标构建。
+note 生成于 build/urma-version/urma/lib/urma/core/urma_version_note.S。
+liburma 输出位于 build/urma-version/urma/lib/urma/core/liburma.so.0.1.0。
+安装规则使用 /usr/lib64 和 /usr/include/ub/umdk/urma 等绝对路径，
+DESTDIR 用于增加暂存目录前缀。
 
-### Bazel 路径
-
-在 umdk/src/urma 目录执行，先配置 WORKSPACE 中所需的外部依赖：
+也可以在 src/urma 目录使用 Bazel：
 
     bazel build //:urma //:urma_common
 
-生成文件位于 bazel-bin/version：
-
-    bazel-bin/version/urma_version.h
-    bazel-bin/version/urma_version_note.S
-    bazel-bin/version/urma.ldflags
-    bazel-bin/version/urma_common.ldflags
-    bazel-bin/version/urma_ubagg.ldflags
-    bazel-bin/version/tpsa.ldflags
-
-构建输出使用 bazel-bin/liburma.so 等名称，ELF 内部的 SONAME 由生成参数
-指定为 liburma.so.0。打包阶段再生成带完整版本的文件名和软链接。
-
-构建并打包可使用现有辅助脚本：
+liburma 的 note 和 SONAME 参数文件生成于 bazel-bin/version。
+库输出为 bazel-bin/liburma.so 等名称，内部 SONAME 为 liburma.so.0。
+需要打包时运行：
 
     bash urma_bazel.sh compile --config=release
 
-产物为当前目录下的 urma-bazel-<timestamp>.tar.gz。
-安装时指定实际生成的包名：
+辅助脚本可能安装缺失依赖并获取 libummu 源码；其 install 操作会写入
+系统目录、刷新 ldconfig，并在可用时重启 rsyslog。
 
-    bash urma_bazel.sh install /path/to/urma-bazel-<timestamp>.tar.gz
+应用包含现有的 urma_api.h 后，在自身源码中按前文示例检查版本：
 
-辅助脚本会检查依赖，可能通过 yum 安装缺失包；compile 会获取配置的
-libummu 源码，install 会写入系统目录、刷新 ldconfig，并在可用时重启
-rsyslog。请在适合构建或安装的 Linux 环境使用。
+    cc app.c -I/usr/include/ub/umdk/urma -L/usr/lib64 -Wl,-z,now -lurma -o app
 
-## 调用方如何使用
+调用方将示例中的最低版本改为 URMA_API_VERSION_ENCODE(0, 1, 1)，
+应由调用方代码触发编译错误。
 
-### 编译期要求与普通链接
+发布前执行前文的 readelf 检查，确认 SONAME 为 liburma.so.0、
+符号节点为 URMA_0.1、note 为 8 字节且值为 65536。
+还需运行未修改的旧版本二进制和使用当前头文件的新程序。
+新增私有兼容源文件后需重新运行 CMake 配置。保持旧语义、只安装当前公共头文件，
+不要将历史结构体或私有兼容接口暴露给应用。
 
-在应用首次包含 URMA 头文件之前声明版本要求：
-
-    #define URMA_API_REQUIRED_MAJOR 0
-    #define URMA_API_MIN_VERSION URMA_API_VERSION_ENCODE(0, 1, 0)
-    #include <urma_api.h>
-
-安装到系统后的链接示例：
-
-    cc app.c -I/usr/include/ub/umdk/urma \
-        -L/usr/lib64 -Wl,-z,now -lurma -o app
-
-应用无需直接包含私有的 compat/urma_symver.h。
-版本不满足要求时由头文件触发编译错误；二进制加载时由 SONAME、
-所需符号版本和符号解析执行检查。
-
-如果仅希望在编译期验证版本头，可创建 version_check.c：
-
-    #define URMA_API_REQUIRED_MAJOR 0
-    #define URMA_API_MIN_VERSION URMA_API_VERSION_ENCODE(0, 1, 0)
-    #include <urma_version.h>
-    _Static_assert(URMA_API_VERSION_NUMBER == 0x0000000000010000ULL,
-                   "unexpected URMA version");
-
-使用安装后的头文件进行检查：
-
-    cc -std=c11 -fsyntax-only -I/usr/include/ub/umdk/urma version_check.c
-
-将 REQUIRED_MAJOR 改为 1，或者将最低版本改为
-URMA_API_VERSION_ENCODE(0, 1, 1)，应分别触发编译失败。
-
-### 查看实际二进制信息
-
-在 umdk 仓库根目录，以 CMake 产物为例：
-
-    readelf -d build/urma-version/urma/lib/urma/core/liburma.so.0.1.0
-    readelf --version-info build/urma-version/urma/lib/urma/core/liburma.so.0.1.0
-    readelf --dyn-syms --wide build/urma-version/urma/lib/urma/core/liburma.so.0.1.0
-    readelf -n build/urma-version/urma/lib/urma/core/liburma.so.0.1.0
-    readelf -n build/urma-version/urma/common/liburma_common.so.0.1.0
-
-预期结果：
-
-- SONAME 为 liburma.so.0。
-- 现有符号版本节点为 URMA_0.1。
-- URMA note 描述数据长度为 8 字节，版本值为 65536。
-- 字节序由目标平台决定；小端显示为 00 00 01 00 00 00 00 00。
-- 新链接应用应记录所需的 URMA_0.1 节点，可用 readelf --version-info app 检查。
-
-## 后续维护步骤与验证状态
-
-1. 在 src/urma/CMakeLists.txt 修改统一版本，重新配置并构建；不要手改生成物。
-2. 对于兼容演进，保留旧节点及其接口；仅为新增接口或新 ABI 实现增加节点。
-3. 若需兼容旧接口，在私有 compat 目录保存旧布局并实现转换，按前文示例
-   为旧实现使用 @、当前默认实现使用 @@。CMake 新增兼容源文件后需重新配置。
-4. 仅安装当前公共头文件。无法保持历史语义时，不能以包装或符号别名宣称兼容。
-5. 核对 ELF 导出集合，运行旧版未修改二进制和新版调用程序，验证行为及加载结果。
-
-已完成的检查包括：旧版本引用检索、367 个基线符号集合比较、
-Bash 语法检查、版本生成器实际运行，以及差异格式检查。
-生成器已验证输出 0.1.0 版本头、值为 65536 的 note 汇编和四个 .so.0
-SONAME 参数文件。尚未完成完整 CMake/Bazel 编译、实际 ELF 检查和
-动态加载兼容性测试，上述构建与验证步骤不能视为已经执行通过。
+本地可执行版本生成脚本与静态一致性检查；完整 CMake/Bazel 构建、
+实际 ELF 检查和动态加载测试仍需目标 Linux 环境完成。
