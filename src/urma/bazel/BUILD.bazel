@@ -1,3 +1,1 @@
 # Bazel package for Starlark helpers (no CMake).
-
-exports_files(["generate_version.sh"])
