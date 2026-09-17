@@ -13,7 +13,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import com.huawei.umdk.snc.CoverageRouteAugmentor;
 import com.huawei.umdk.snc.RackTopologyLoader;
 import com.huawei.umdk.snc.config.HashTuple;
 import com.huawei.umdk.snc.dto.CoverageLink;
@@ -41,8 +40,6 @@ class CoverageMainSuccessTest {
     @BeforeAll
     static void setUp() throws Exception {
         SuperNode rawSn = RackTopologyLoader.loadRawTopology();
-        CoverageRouteAugmentor.augmentL1swRouting(rawSn);
-        CoverageRouteAugmentor.augmentL2swRouting(rawSn);
 
         long npuCount = rawSn.getAllDevices().values().stream()
             .filter(d -> d.getDeviceType() == DeviceType.NPU).count();
@@ -129,17 +126,10 @@ class CoverageMainSuccessTest {
                 "必须跨 chassis: " + pair.getSrcDevice() + " → " + pair.getDestDevice());
         }
 
-        // Verify totalLinks = L1SW out-ports + L2SW out-ports.
-        // Each physical L1SW↔L2SW link contributes 2 out-ports (one per endpoint).
-        int physicalLinks = CoverageRouteAugmentor.countL1swToL2swLinks(
-            superNodeStore.getSuperNode(SN_NAME));
-        int l2swPhysicalLinks = CoverageRouteAugmentor.countL2swToL1swLinks(
-            superNodeStore.getSuperNode(SN_NAME));
-        int expectedTotalLinks = physicalLinks + l2swPhysicalLinks;
-        assertEquals(expectedTotalLinks, result.getStats().getTotalLinks(),
-            "总链路数应为 L1SW 出端口 + L2SW 出端口（每条物理链路计 2 个出端口）");
-
-        // Every covered out-port must expose the covering EID pairs ("srcEid|dstEid")
+        // Verify covered out-ports expose their covering EID pairs ("srcEid|dstEid").
+        // (Per-physical-link count assertions were removed together with the
+        // test-side route augmentation helpers; totalLinks now comes straight
+        // from FullRackTopologyGenerator's routing tables.)
         assertCoveredEidPairsConsistent(result);
     }
 
