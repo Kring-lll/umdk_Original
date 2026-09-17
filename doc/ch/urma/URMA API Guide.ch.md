@@ -19,6 +19,9 @@
         - [1.2.1 trans_mode、tp_type、order_type 组合拦截总表](#121-trans_modetp_typeorder_type-组合拦截总表)
         - [1.2.2 校验规则说明](#122-校验规则说明)
         - [1.2.3 其他约束](#123-其他约束)
+    - [1.3 使用流程约束](#13-使用流程约束)
+        - [1.3.1 一般约束](#131-一般约束)
+        - [1.3.2 内核态用户约束](#132-内核态用户约束)
 
 - [2 URMA用户态API](#2-urma用户态api)
     - [2.1 编程示例](#21-编程示例)
@@ -729,6 +732,25 @@ URMA 在创建 JFS、JFR、Jetty 以及导入远端 Jetty 等资源时会校验 
 
 - UM 模式（`URMA_TM_UM`）下的 WR 不支持 fence、place_order 和 comp_order。
 - 完成乱序模式（`outorder_comp=1`）下的 WR 不支持 fence、place_order 和 comp_order。
+
+## 1.3 使用流程约束
+
+本节描述导入/解绑等控制面接口在使用流程上的约束。感知TP用户需通过 `get_tp_list` 或 `create_tpid` 获取可用TP列表后再调用带 `import_jfr_ex` 或 `import_jetty_ex` 的扩展接口完成建链；不感知TP的用户直接调用`import_jetty`接口即可。
+
+### 1.3.1 一般约束
+
+针对感知TP的用户态用户（通过 [2.3.3.3 urma_get_tp_list](#2333-urma_get_tp_list) 获取TP）, urma 因无法明确用户释放逻辑，会统一在unimport后释放tpid资源，并在get_tp_list中分配tp资源，因此不支持在unimport后直接调用import接口：
+
+- 感知用户在调用 [2.3.1.6.8 urma_unimport_jetty](#23168-urma_unimport_jetty)、[2.3.1.5.8 urma_unimport_jfr](#23158-urma_unimport_jfr)、[2.3.1.6.13 urma_unbind_jetty](#231613-urma_unbind_jetty) 之后，不能直接调用 [2.3.1.6.7 urma_import_jetty_ex](#23167-urma_import_jetty_ex)、[2.3.1.5.7 urma_import_jfr_ex](#23157-urma_import_jfr_ex)、[2.3.1.6.12 urma_bind_jetty_ex](#231612-urma_bind_jetty_ex)。
+- 必须重新调用 [2.3.3.3 urma_get_tp_list](#2333-urma_get_tp_list) -> [2.3.1.6.7 urma_import_jetty_ex](#23167-urma_import_jetty_ex) 的流程，否则可能因TP句柄失效导致建链异常。
+- 针对直接调用 [2.3.1.6.6 urma_import_jetty](#23166-urma_import_jetty) 接口的不感知用户没有该限制。
+
+### 1.3.2 内核态用户约束
+
+针对使用ubcore接口的内核态感知用户（通过 [3.13.2 ubcore_get_tp_list](#3132-ubcore_get_tp_list) 获取TP后，调用带 `active_tp_cfg` 的扩展接口）：
+
+- 必须完整调用 [3.13.2 ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.3.7 ubcore_import_jfr_ex](#3437-ubcore_import_jfr_ex) / [3.4.4.8 ubcore_import_jetty_ex](#3448-ubcore_import_jetty_ex) / [3.4.4.11 ubcore_bind_jetty_ex](#34411-ubcore_bind_jetty_ex) -> [3.4.3.8 ubcore_unimport_jfr](#3438-ubcore_unimport_jfr) / [3.4.4.9 ubcore_unimport_jetty](#3449-ubcore_unimport_jetty) / [3.4.4.12 ubcore_unbind_jetty](#34412-ubcore_unbind_jetty) 的流程，否则会有tp资源残留。
+- 内核态不感知用户（直接调用 [3.4.3.6 ubcore_import_jfr](#3436-ubcore_import_jfr) / [3.4.4.7 ubcore_import_jetty](#3447-ubcore_import_jetty) / [3.4.4.10 ubcore_bind_jetty](#34410-ubcore_bind_jetty) 等接口）没有该约束。
 
 ---
 
@@ -3784,6 +3806,12 @@ typedef enum urma_jetty_grp_policy {
 
 [3.3.1.5.6](#23156-urma_import_jfr) [urma_import_jfr](#23156-urma_import_jfr)()扩展接口，增加入参urma_import_jfr_ex_cfg_t *cfg。
 
+![](figures/urma_notice.png)
+
+使用流程约束：感知TP的用户在调用[3.3.1.5.8](#23158-urma_unimport_jfr) [urma_unimport_jfr](#23158-urma_unimport_jfr)之后，不能直接调用本接口，必须重新调用[3.3.3.3](#2333-urma_get_tp_list) [urma_get_tp_list](#2333-urma_get_tp_list) -> [urma_import_jfr_ex](#23157-urma_import_jfr_ex)的流程，详见[1.3.1](#131-一般约束) [一般约束](#131-一般约束)。
+
+如果import_jfr_ex失败，urma并不清楚用户是否会重试，也会统一释放tp资源，防止资源泄露。因此，如果import_jfr_ex接口失败，仍需重新调用urma_get_tp_list接口获取tp资源，再执行import_jfr_ex接口。
+
 4.  参数
 
 @param[in] [Required] ctx: the urma context created before;
@@ -3850,6 +3878,10 @@ unimport远端JFR。操作成功后，进程不可访问这个远端JFR。
 ![](figures/urma_notice.png)
 
 由调用者保证参数target_jfr来自[3.3.1.5.6](#23156-urma_import_jfr) [urma_import_jfr](#23156-urma_import_jfr)接口返回，参数内部指针等合法性由这些接口保证，本接口不再重复进行校验；否则可能导致调用者进程异常退出。
+
+![](figures/urma_notice.png)
+
+使用流程约束：感知TP的用户在调用本接口之后，不能直接调用[3.3.1.5.7](#23157-urma_import_jfr_ex) [urma_import_jfr_ex](#23157-urma_import_jfr_ex)，必须重新调用[3.3.3.3](#2333-urma_get_tp_list) [urma_get_tp_list](#2333-urma_get_tp_list) -> [urma_import_jfr_ex](#23157-urma_import_jfr_ex)的流程，详见[1.3.1](#131-一般约束) [一般约束](#131-一般约束)。直接调用[urma_import_jfr](#23156-urma_import_jfr)的不感知用户没有该限制。
 
 5.  返回值
 
@@ -4472,6 +4504,10 @@ typedef struct urma_rjetty {
 
 [3.3.1.6.6](#23166-urma_import_jetty) [urma_import_jetty](#23166-urma_import_jetty)的扩展接口，增加参数[urma_import_jetty_ex_cfg_t](#_ZH-CN_TOPIC_0000002521872549-chtext) *cfg。
 
+![](figures/urma_notice.png)
+
+使用流程约束：感知TP的用户在调用[3.3.1.6.8](#23168-urma_unimport_jetty) [urma_unimport_jetty](#23168-urma_unimport_jetty)之后，不能直接调用本接口，必须重新调用[3.3.3.3](#2333-urma_get_tp_list) [urma_get_tp_list](#2333-urma_get_tp_list) -> [urma_import_jetty_ex](#23167-urma_import_jetty_ex)的流程，详见[1.3.1](#131-一般约束) [一般约束](#131-一般约束)。
+
 4.  参数
 
 @param[in] [Required] ctx: the urma context created before;
@@ -4513,6 +4549,12 @@ unimport远端Jetty信息。操作成功后，进程不可访问这个远端jett
 ![](figures/urma_info.png)
 
 由调用者保证参数tjetty来自[3.3.1.6.6](#23166-urma_import_jetty) [urma_import_jetty](#23166-urma_import_jetty)接口返回，参数内部指针等合法性由这些接口保证，本接口不再重复进行校验；否则可能导致调用者进程异常退出。
+
+![](figures/urma_notice.png)
+
+使用流程约束：感知TP的用户在调用本接口之后，不能直接调用[3.3.1.6.7](#23167-urma_import_jetty_ex) [urma_import_jetty_ex](#23167-urma_import_jetty_ex)，必须重新调用[3.3.3.3](#2333-urma_get_tp_list) [urma_get_tp_list](#2333-urma_get_tp_list) -> [urma_import_jetty_ex](#23167-urma_import_jetty_ex)的流程，详见[1.3.1](#131-一般约束) [一般约束](#131-一般约束)。直接调用[urma_import_jetty](#23166-urma_import_jetty)的不感知用户没有该限制。
+
+如果import_jetty_ex失败，urma并不清楚用户是否会重试，也会统一释放tp资源，防止资源泄露。因此，如果import_jetty_ex接口失败，仍需重新调用urma_get_tp_list接口获取tp资源，再执行import_jetty_ex接口。
 
 5.  返回值
 
@@ -4634,6 +4676,12 @@ Return: 0 on success, URMA_EEXIST if the jetty has been binded, other value on e
 
 [3.3.1.6.9](#23169-urma_bind_jetty) [urma_bind_jetty](#23169-urma_bind_jetty)扩展接口，增加参数urma_bind_jetty_ex_cfg_t *cfg。
 
+![](figures/urma_notice.png)
+
+使用流程约束：感知TP的用户在调用[3.3.1.6.13](#231613-urma_unbind_jetty) [urma_unbind_jetty](#231613-urma_unbind_jetty)之后，不能直接调用本接口，必须重新调用[3.3.3.3](#2333-urma_get_tp_list) [urma_get_tp_list](#2333-urma_get_tp_list) -> [urma_bind_jetty_ex](#231612-urma_bind_jetty_ex)的流程，详见[1.3.1](#131-一般约束) [一般约束](#131-一般约束)。
+
+如果bind_jetty_ex失败，urma并不清楚用户是否会重试，也会统一释放tp资源，防止资源泄露。因此，如果bind_jetty_ex接口失败，仍需重新调用urma_get_tp_list接口获取tp资源，再执行bind_jetty_ex接口。
+
 4.  参数
 
 @param[in] [Required] jetty: local jetty to construct the transport channel;
@@ -4673,6 +4721,10 @@ typedef struct [urma_active_tp_cfg](#_ZH-CN_TOPIC_0000002525470775-chtext) urma_
 2\. 解绑定成功后，Jetty无法发送任何消息，需等待重新和某个target Jetty建立新的绑定关系，才可以通过该Jetty发送消息。
 
 3\. 支持多线程操作重入操作
+
+![](figures/urma_notice.png)
+
+使用流程约束：感知TP的用户在调用本接口之后，不能直接调用[3.3.1.6.12](#231612-urma_bind_jetty_ex) [urma_bind_jetty_ex](#231612-urma_bind_jetty_ex)，必须重新调用[3.3.3.3](#2333-urma_get_tp_list) [urma_get_tp_list](#2333-urma_get_tp_list) -> [urma_bind_jetty_ex](#231612-urma_bind_jetty_ex)的流程，详见[1.3.1](#131-一般约束) [一般约束](#131-一般约束)。直接调用[urma_bind_jetty](#231611-urma_bind_jetty)的不感知用户没有该限制。
 
 4.  参数
 
@@ -10700,6 +10752,12 @@ ubcore_udata *udata);
 
 导入RM类型的JFR隐含与远端节点建链功能。导入UM类型的JFR隐含创建unreliable tp（其实是远端地址句柄）功能，记录在target jetty的tp中。
 
+![](figures/urma_notice.png)
+
+一般约束：感知TP的用户态用户在调用[3.4.3.8](#3438-ubcore_unimport_jfr) [ubcore_unimport_jfr](#3438-ubcore_unimport_jfr)之后，不能直接调用本接口，必须重新调用[3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [ubcore_import_jfr_ex](#3437-ubcore_import_jfr_ex)的流程。
+
+内核态用户约束：针对使用ubcore接口的内核态感知用户，必须完整调用[3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.3.7](#3437-ubcore_import_jfr_ex) [ubcore_import_jfr_ex](#3437-ubcore_import_jfr_ex) -> [3.4.3.8](#3438-ubcore_unimport_jfr) [ubcore_unimport_jfr](#3438-ubcore_unimport_jfr)的流程，否则会有tp资源残留。内核态不感知用户（直接调用[3.4.3.6](#3436-ubcore_import_jfr) [ubcore_import_jfr](#3436-ubcore_import_jfr)）没有该约束，详见[1.3.2](#132-内核态用户约束) [内核态用户约束](#132-内核态用户约束)。
+
 4.  参数
 
 @param[in] dev: the ubcore device handle;
@@ -10750,6 +10808,12 @@ int ubcore_unimport_jfr([4.4.3.6.5](#34365-ubcore_tjetty) [ubcore_tjetty](#34365
 反导入远端JFR。unimport JFR时，隐含：减少tp的引用计数，减到零时触发拆链流程。
 
 反导入target jetty将会释放tjfr结构体，应用需要保证已经使用target JFR发起的请求都已经poll JFC得到完成记录（包括错误）。
+
+![](figures/urma_notice.png)
+
+一般约束：感知TP的用户态用户在调用本接口之后，不能直接调用[3.4.3.7](#3437-ubcore_import_jfr_ex) [ubcore_import_jfr_ex](#3437-ubcore_import_jfr_ex)，必须重新调用[3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [ubcore_import_jfr_ex](#3437-ubcore_import_jfr_ex)的流程。
+
+内核态用户约束：针对使用ubcore接口的内核态感知用户，必须完整调用[3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.3.7](#3437-ubcore_import_jfr_ex) [ubcore_import_jfr_ex](#3437-ubcore_import_jfr_ex) -> [3.4.3.8](#3438-ubcore_unimport_jfr) [ubcore_unimport_jfr](#3438-ubcore_unimport_jfr)的流程，否则会有tp资源残留。内核态不感知用户没有该约束，详见[1.3.2](#132-内核态用户约束) [内核态用户约束](#132-内核态用户约束)。
 
 4.  参数
 
@@ -11070,6 +11134,12 @@ ubcore_udata *udata);
 
 当导入jetty_group，只支持导入RM和UM类型的jetty group。如果导入RM模式的jetty，如果尚未与对端建链，隐含与对端建链，创建的tp指针保存在target jetty指针中。如果导入UM类的数据结构，将会创建目的地址句柄。支持多次导入相同配置的jetty group。应用需要保证jetty group配置真实有效，否则数据面无法将数据通过tjetty发送到对端。
 
+![](figures/urma_notice.png)
+
+一般约束：感知TP的用户态用户在调用[3.4.4.9](#3449-ubcore_unimport_jetty) [ubcore_unimport_jetty](#3449-ubcore_unimport_jetty)之后，不能直接调用本接口，必须重新调用[3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [ubcore_import_jetty_ex](#3448-ubcore_import_jetty_ex)的流程。
+
+内核态用户约束：针对使用ubcore接口的内核态感知用户，必须完整调用[3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.4.8](#3448-ubcore_import_jetty_ex) [ubcore_import_jetty_ex](#3448-ubcore_import_jetty_ex) -> [3.4.4.9](#3449-ubcore_unimport_jetty) [ubcore_unimport_jetty](#3449-ubcore_unimport_jetty)的流程，否则会有tp资源残留。内核态不感知用户（直接调用[3.4.4.7](#3447-ubcore_import_jetty) [ubcore_import_jetty](#3447-ubcore_import_jetty)）没有该约束，详见[1.3.2](#132-内核态用户约束) [内核态用户约束](#132-内核态用户约束)。
+
 4.  参数
 
 @param[in] dev: the ubcore device handle;
@@ -11099,6 +11169,12 @@ int ubcore_unimport_jetty([4.4.3.6.5](#34365-ubcore_tjetty) [ubcore_tjetty](#343
 反导入远端jetty或者jetty group。unimport Jetty隐含：减少tjetty保存的tp的引用计数，减到零时触发拆链流程。
 
 反导入target jetty将会释放tjetty结构体，应用需要保证已经使用target jetty发起的请求都已经poll JFC得到完成记录（包括错误）。
+
+![](figures/urma_notice.png)
+
+一般约束：感知TP的用户态用户在调用本接口之后，不能直接调用[3.4.4.8](#3448-ubcore_import_jetty_ex) [ubcore_import_jetty_ex](#3448-ubcore_import_jetty_ex)，必须重新调用[3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [ubcore_import_jetty_ex](#3448-ubcore_import_jetty_ex)的流程。
+
+内核态用户约束：针对使用ubcore接口的内核态感知用户，必须完整调用[3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.4.8](#3448-ubcore_import_jetty_ex) [ubcore_import_jetty_ex](#3448-ubcore_import_jetty_ex) -> [3.4.4.9](#3449-ubcore_unimport_jetty) [ubcore_unimport_jetty](#3449-ubcore_unimport_jetty)的流程，否则会有tp资源残留。内核态不感知用户没有该约束，详见[1.3.2](#132-内核态用户约束) [内核态用户约束](#132-内核态用户约束)。
 
 4.  参数
 
@@ -11159,6 +11235,12 @@ ubcore_active_tp_cfg *active_tp_cfg, ubcore_udata *udata);
 
 bind可以一方单独完成，不依赖对端已经导入jetty，也不要求对端同时调用bind jetty接口。bind功能还隐含创建RC类型TP，保存在tjetty中。主动调用bind完成者才具有发送和接收功能。被动响应bind请求的一方，底层会创建RC类型的TP与jetty关联，能接收消息、但不能发送消息。
 
+![](figures/urma_notice.png)
+
+一般约束：感知TP的用户态用户在调用[3.4.4.12](#34412-ubcore_unbind_jetty) [ubcore_unbind_jetty](#34412-ubcore_unbind_jetty)之后，不能直接调用本接口，必须重新调用[3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [ubcore_bind_jetty_ex](#34411-ubcore_bind_jetty_ex)的流程。
+
+内核态用户约束：针对使用ubcore接口的内核态感知用户，必须完整调用[3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.4.11](#34411-ubcore_bind_jetty_ex) [ubcore_bind_jetty_ex](#34411-ubcore_bind_jetty_ex) -> [3.4.4.12](#34412-ubcore_unbind_jetty) [ubcore_unbind_jetty](#34412-ubcore_unbind_jetty)的流程，否则会有tp资源残留。内核态不感知用户（直接调用[3.4.4.10](#34410-ubcore_bind_jetty) [ubcore_bind_jetty](#34410-ubcore_bind_jetty)）没有该约束，详见[1.3.2](#132-内核态用户约束) [内核态用户约束](#132-内核态用户约束)。
+
 4.  参数
 
 @param[in] jetty: local jetty to bind;
@@ -11190,6 +11272,12 @@ int ubcore_unbind_jetty([4.4.4.1.3](#34413-ubcore_jetty) [ubcore_jetty](#34413-u
 3.  描述
 
 解除本地jetty与远端jetty的绑定关系。通信的双方必须各自调用该接口，解除已经建立的绑定关系。隐含销毁jetty关联的RC TP（保存在tjetty中），但不销毁对端的RC TP。
+
+![](figures/urma_notice.png)
+
+一般约束：感知TP的用户态用户在调用本接口之后，不能直接调用[3.4.4.11](#34411-ubcore_bind_jetty_ex) [ubcore_bind_jetty_ex](#34411-ubcore_bind_jetty_ex)，必须重新调用[3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [ubcore_bind_jetty_ex](#34411-ubcore_bind_jetty_ex)的流程。
+
+内核态用户约束：针对使用ubcore接口的内核态感知用户，必须完整调用[3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.4.11](#34411-ubcore_bind_jetty_ex) [ubcore_bind_jetty_ex](#34411-ubcore_bind_jetty_ex) -> [3.4.4.12](#34412-ubcore_unbind_jetty) [ubcore_unbind_jetty](#34412-ubcore_unbind_jetty)的流程，否则会有tp资源残留。内核态不感知用户没有该约束，详见[1.3.2](#132-内核态用户约束) [内核态用户约束](#132-内核态用户约束)。
 
 4.  参数
 

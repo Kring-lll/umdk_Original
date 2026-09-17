@@ -17,6 +17,9 @@
         - [1.2.1 trans_mode, tp_type, order_type Combination Interception Table](#121-trans_mode-tp_type-order_type-combination-interception-table)
         - [1.2.2 Validation Rule Description](#122-validation-rule-description)
         - [1.2.3 Other Constraints](#123-other-constraints)
+    - [1.3 Usage Flow Constraints](#13-usage-flow-constraints)
+        - [1.3.1 General Constraints](#131-general-constraints)
+        - [1.3.2 Kernel-mode User Constraints](#132-kernel-mode-user-constraints)
 
 - [2 URMA User-mode API](#2-urma-user-mode-api)
     - [2.1 Programming Examples](#21-programming-examples)
@@ -728,6 +731,25 @@ When `order_type` is set to `URMA_DEF_ORDER` (0), URMA automatically converts it
 
 - WRs under UM mode (`URMA_TM_UM`) do not support fence, place_order, and comp_order.
 - WRs under out-of-order completion mode (`outorder_comp=1`) do not support fence, place_order, and comp_order.
+
+## 1.3 Usage Flow Constraints
+
+This section describes the usage-flow constraints of control-plane interfaces such as import/unbind. TP-aware users must obtain the available TP list via `get_tp_list` and then call the extended interfaces carrying a `tp_handle` to establish a connection; TP-unaware users may directly call the basic import interfaces.
+
+### 1.3.1 General Constraints
+
+For TP-aware user-mode users (those who obtain a TP via [2.3.3.3 urma_get_tp_list](#2333-urma_get_tp_list) and then call the extended interfaces carrying a `tp_handle`):
+
+- After calling [2.3.1.6.8 urma_unimport_jetty](#23168-urma_unimport_jetty), [2.3.1.5.8 urma_unimport_jfr](#23158-urma_unimport_jfr), or [2.3.1.6.13 urma_unbind_jetty](#231613-urma_unbind_jetty), TP-aware users must not directly call [2.3.1.6.7 urma_import_jetty_ex](#23167-urma_import_jetty_ex), [2.3.1.5.7 urma_import_jfr_ex](#23157-urma_import_jfr_ex), or [2.3.1.6.12 urma_bind_jetty_ex](#231612-urma_bind_jetty_ex).
+- The flow of [2.3.3.3 urma_get_tp_list](#2333-urma_get_tp_list) -> [2.3.1.6.7 urma_import_jetty_ex](#23167-urma_import_jetty_ex) must be re-invoked, otherwise connection establishment may fail due to an invalid TP handle.
+- This restriction does not apply to TP-unaware users who directly call [2.3.1.6.6 urma_import_jetty](#23166-urma_import_jetty).
+
+### 1.3.2 Kernel-mode User Constraints
+
+For kernel-mode TP-aware users using ubcore interfaces (those who obtain a TP via [3.13.2 ubcore_get_tp_list](#3132-ubcore_get_tp_list) and then call the extended interfaces carrying an `active_tp_cfg`):
+
+- The complete flow of [3.13.2 ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.3.7 ubcore_import_jfr_ex](#3437-ubcore_import_jfr_ex) / [3.4.4.8 ubcore_import_jetty_ex](#3448-ubcore_import_jetty_ex) / [3.4.4.11 ubcore_bind_jetty_ex](#34411-ubcore_bind_jetty_ex) -> [3.4.3.8 ubcore_unimport_jfr](#3438-ubcore_unimport_jfr) / [3.4.4.9 ubcore_unimport_jetty](#3449-ubcore_unimport_jetty) / [3.4.4.12 ubcore_unbind_jetty](#34412-ubcore_unbind_jetty) must be invoked, otherwise TP resources may be left over.
+- This constraint does not apply to kernel-mode TP-unaware users (those who directly call the basic interfaces such as [3.4.3.6 ubcore_import_jfr](#3436-ubcore_import_jfr) / [3.4.4.7 ubcore_import_jetty](#3447-ubcore_import_jetty) / [3.4.4.10 ubcore_bind_jetty](#34410-ubcore_bind_jetty)).
 
 ---
 
@@ -3781,6 +3803,10 @@ Definition file: [urma_api.h](../../../src/urma/lib/urma/core/include/urma_api.h
 
 Extended interface for [3.3.1.5.6](#23156-urma_import_jfr) [urma_import_jfr](#23156-urma_import_jfr)(), adds an input parameter urma_import_jfr_ex_cfg_t *cfg.
 
+![](figures/urma_notice.png)
+
+Usage flow constraint: After calling [3.3.1.5.8](#23158-urma_unimport_jfr) [urma_unimport_jfr](#23158-urma_unimport_jfr), TP-aware users must not directly call this interface; the flow of [3.3.3.3](#2333-urma_get_tp_list) [urma_get_tp_list](#2333-urma_get_tp_list) -> [urma_import_jfr_ex](#23157-urma_import_jfr_ex) must be re-invoked. See [1.3.1](#131-general-constraints) [General Constraints](#131-general-constraints).
+
 4. Parameters
 
 @param[in] [Required] ctx: the urma context created before;
@@ -3847,6 +3873,10 @@ Unimport the remote JFR. After successful operation, the process cannot access t
 ![](figures/urma_notice.png)
 
 The caller must ensure that the parameter target_jfr comes from the [3.3.1.5.6](#23156-urma_import_jfr) [urma_import_jfr](#23156-urma_import_jfr) interface; the validity of internal pointers and other parameters is guaranteed by these interfaces, and this interface will not re-validate them; otherwise, it may cause abnormal termination of the caller's process.
+
+![](figures/urma_notice.png)
+
+Usage flow constraint: After calling this interface, TP-aware users must not directly call [3.3.1.5.7](#23157-urma_import_jfr_ex) [urma_import_jfr_ex](#23157-urma_import_jfr_ex); the flow of [3.3.3.3](#2333-urma_get_tp_list) [urma_get_tp_list](#2333-urma_get_tp_list) -> [urma_import_jfr_ex](#23157-urma_import_jfr_ex) must be re-invoked. See [1.3.1](#131-general-constraints) [General Constraints](#131-general-constraints). This restriction does not apply to TP-unaware users who directly call [urma_import_jfr](#23156-urma_import_jfr).
 
 5. Return Value
 
@@ -4469,6 +4499,10 @@ Definition file: [urma_api.h](../../../src/urma/lib/urma/core/include/urma_api.h
 
 Extended interface for [3.3.1.6.6](#23166-urma_import_jetty) [urma_import_jetty](#23166-urma_import_jetty), adds parameter [urma_import_jetty_ex_cfg_t](#_ZH-CN_TOPIC_0000002521872549-chtext) *cfg.
 
+![](figures/urma_notice.png)
+
+Usage flow constraint: After calling [3.3.1.6.8](#23168-urma_unimport_jetty) [urma_unimport_jetty](#23168-urma_unimport_jetty), TP-aware users must not directly call this interface; the flow of [3.3.3.3](#2333-urma_get_tp_list) [urma_get_tp_list](#2333-urma_get_tp_list) -> [urma_import_jetty_ex](#23167-urma_import_jetty_ex) must be re-invoked. See [1.3.1](#131-general-constraints) [General Constraints](#131-general-constraints).
+
 4. Parameters
 
 @param[in] [Required] ctx: the urma context created before;
@@ -4510,6 +4544,10 @@ Unimport remote Jetty information. After successful operation, the process canno
 ![](figures/urma_info.png)
 
 The caller must ensure that the parameter tjetty comes from the [3.3.1.6.6](#23166-urma_import_jetty) [urma_import_jetty](#23166-urma_import_jetty) interface; the validity of internal pointers and other parameters is guaranteed by these interfaces, and this interface will not re-validate them; otherwise, it may cause abnormal termination of the caller's process.
+
+![](figures/urma_notice.png)
+
+Usage flow constraint: After calling this interface, TP-aware users must not directly call [3.3.1.6.7](#23167-urma_import_jetty_ex) [urma_import_jetty_ex](#23167-urma_import_jetty_ex); the flow of [3.3.3.3](#2333-urma_get_tp_list) [urma_get_tp_list](#2333-urma_get_tp_list) -> [urma_import_jetty_ex](#23167-urma_import_jetty_ex) must be re-invoked. See [1.3.1](#131-general-constraints) [General Constraints](#131-general-constraints). This restriction does not apply to TP-unaware users who directly call [urma_import_jetty](#23166-urma_import_jetty).
 
 5. Return Value
 
@@ -4631,6 +4669,10 @@ Definition file: [urma_api.h](../../../src/urma/lib/urma/core/include/urma_api.h
 
 Extended interface for [3.3.1.6.11](#231611-urma_bind_jetty) [urma_bind_jetty](#231611-urma_bind_jetty), adds parameter urma_bind_jetty_ex_cfg_t *cfg.
 
+![](figures/urma_notice.png)
+
+Usage flow constraint: After calling [3.3.1.6.13](#231613-urma_unbind_jetty) [urma_unbind_jetty](#231613-urma_unbind_jetty), TP-aware users must not directly call this interface; the flow of [3.3.3.3](#2333-urma_get_tp_list) [urma_get_tp_list](#2333-urma_get_tp_list) -> [urma_bind_jetty_ex](#231612-urma_bind_jetty_ex) must be re-invoked. See [1.3.1](#131-general-constraints) [General Constraints](#131-general-constraints).
+
 4. Parameters
 
 @param[in] [Required] jetty: local jetty to construct the transport channel;
@@ -4670,6 +4712,10 @@ Unbind a remote Jetty and disconnect.
 2. After a successful unbind, the Jetty cannot send any messages. It must wait to establish a new binding relationship with a target Jetty before it can send messages again.
 
 3. Supports reentrant multi-threaded operations.
+
+![](figures/urma_notice.png)
+
+Usage flow constraint: After calling this interface, TP-aware users must not directly call [3.3.1.6.12](#231612-urma_bind_jetty_ex) [urma_bind_jetty_ex](#231612-urma_bind_jetty_ex); the flow of [3.3.3.3](#2333-urma_get_tp_list) [urma_get_tp_list](#2333-urma_get_tp_list) -> [urma_bind_jetty_ex](#231612-urma_bind_jetty_ex) must be re-invoked. See [1.3.1](#131-general-constraints) [General Constraints](#131-general-constraints). This restriction does not apply to TP-unaware users who directly call [urma_bind_jetty](#231611-urma_bind_jetty).
 
 4. Parameters
 
@@ -10695,6 +10741,12 @@ Import remote JFR information via the control plane, including jfr id (containin
 
 Importing an RM-type JFR implicitly establishes a link with the remote node. Importing a UM-type JFR implicitly creates an unreliable tp (essentially a remote address handle), which is recorded in the tp of the target jetty.
 
+![](figures/urma_notice.png)
+
+General constraint: After calling [3.4.3.8](#3438-ubcore_unimport_jfr) [ubcore_unimport_jfr](#3438-ubcore_unimport_jfr), TP-aware user-mode users must not directly call this interface; the flow of [3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [ubcore_import_jfr_ex](#3437-ubcore_import_jfr_ex) must be re-invoked.
+
+Kernel-mode user constraint: For kernel-mode TP-aware users using ubcore interfaces, the complete flow of [3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.3.7](#3437-ubcore_import_jfr_ex) [ubcore_import_jfr_ex](#3437-ubcore_import_jfr_ex) -> [3.4.3.8](#3438-ubcore_unimport_jfr) [ubcore_unimport_jfr](#3438-ubcore_unimport_jfr) must be invoked, otherwise TP resources may be left over. This constraint does not apply to kernel-mode TP-unaware users (who directly call [3.4.3.6](#3436-ubcore_import_jfr) [ubcore_import_jfr](#3436-ubcore_import_jfr)). See [1.3.2](#132-kernel-mode-user-constraints) [Kernel-mode User Constraints](#132-kernel-mode-user-constraints).
+
 4.  Parameters
 
 @param[in] dev: the ubcore device handle;
@@ -10745,6 +10797,12 @@ int ubcore_unimport_jfr([4.4.3.6.5](#34365-ubcore_tjetty) [ubcore_tjetty](#34365
 Unimport a remote JFR. Unimporting a JFR implicitly decreases the reference count of the tp. When the count reaches zero, the disconnection process is triggered.
 
 Unimporting a target jetty will release the tjfr structure. The application must ensure that all requests initiated using the target JFR have been polled from the JFC to obtain completion records (including errors).
+
+![](figures/urma_notice.png)
+
+General constraint: After calling this interface, TP-aware user-mode users must not directly call [3.4.3.7](#3437-ubcore_import_jfr_ex) [ubcore_import_jfr_ex](#3437-ubcore_import_jfr_ex); the flow of [3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [ubcore_import_jfr_ex](#3437-ubcore_import_jfr_ex) must be re-invoked.
+
+Kernel-mode user constraint: For kernel-mode TP-aware users using ubcore interfaces, the complete flow of [3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.3.7](#3437-ubcore_import_jfr_ex) [ubcore_import_jfr_ex](#3437-ubcore_import_jfr_ex) -> [3.4.3.8](#3438-ubcore_unimport_jfr) [ubcore_unimport_jfr](#3438-ubcore_unimport_jfr) must be invoked, otherwise TP resources may be left over. This constraint does not apply to kernel-mode TP-unaware users. See [1.3.2](#132-kernel-mode-user-constraints) [Kernel-mode User Constraints](#132-kernel-mode-user-constraints).
 
 4.  Parameters
 
@@ -11065,6 +11123,12 @@ Via the control plane, the user inputs remote jetty or jetty group information, 
 
 When importing a jetty group, only RM and UM type jetty groups are supported. If importing an RM-mode jetty and no link has been established with the peer, a link is implicitly established. The created tp pointer is stored in the target jetty pointer. If importing a UM data structure, a destination address handle is created. Supports importing the same jetty group configuration multiple times. The application must ensure that the jetty group configuration is valid; otherwise, the data plane cannot send data to the peer through the tjetty.
 
+![](figures/urma_notice.png)
+
+General constraint: After calling [3.4.4.9](#3449-ubcore_unimport_jetty) [ubcore_unimport_jetty](#3449-ubcore_unimport_jetty), TP-aware user-mode users must not directly call this interface; the flow of [3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [ubcore_import_jetty_ex](#3448-ubcore_import_jetty_ex) must be re-invoked.
+
+Kernel-mode user constraint: For kernel-mode TP-aware users using ubcore interfaces, the complete flow of [3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.4.8](#3448-ubcore_import_jetty_ex) [ubcore_import_jetty_ex](#3448-ubcore_import_jetty_ex) -> [3.4.4.9](#3449-ubcore_unimport_jetty) [ubcore_unimport_jetty](#3449-ubcore_unimport_jetty) must be invoked, otherwise TP resources may be left over. This constraint does not apply to kernel-mode TP-unaware users (who directly call [3.4.4.7](#3447-ubcore_import_jetty) [ubcore_import_jetty](#3447-ubcore_import_jetty)). See [1.3.2](#132-kernel-mode-user-constraints) [Kernel-mode User Constraints](#132-kernel-mode-user-constraints).
+
 4.  Parameters
 
 @param[in] dev: the ubcore device handle;
@@ -11094,6 +11158,12 @@ int ubcore_unimport_jetty([4.4.3.6.5](#34365-ubcore_tjetty) [ubcore_tjetty](#343
 Unimport a remote jetty or jetty group. Unimporting a Jetty implicitly decreases the reference count of the tp stored in the tjetty. When the count reaches zero, the disconnection process is triggered.
 
 Unimporting a target jetty will release the tjetty structure. The application must ensure that all requests initiated using the target jetty have been polled from the JFC to obtain completion records (including errors).
+
+![](figures/urma_notice.png)
+
+General constraint: After calling this interface, TP-aware user-mode users must not directly call [3.4.4.8](#3448-ubcore_import_jetty_ex) [ubcore_import_jetty_ex](#3448-ubcore_import_jetty_ex); the flow of [3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [ubcore_import_jetty_ex](#3448-ubcore_import_jetty_ex) must be re-invoked.
+
+Kernel-mode user constraint: For kernel-mode TP-aware users using ubcore interfaces, the complete flow of [3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.4.8](#3448-ubcore_import_jetty_ex) [ubcore_import_jetty_ex](#3448-ubcore_import_jetty_ex) -> [3.4.4.9](#3449-ubcore_unimport_jetty) [ubcore_unimport_jetty](#3449-ubcore_unimport_jetty) must be invoked, otherwise TP resources may be left over. This constraint does not apply to kernel-mode TP-unaware users. See [1.3.2](#132-kernel-mode-user-constraints) [Kernel-mode User Constraints](#132-kernel-mode-user-constraints).
 
 4.  Parameters
 
@@ -11154,6 +11224,12 @@ Via the control plane, the bind interface is for RC-type jetties. It binds a loc
 
 Binding can be done one-sidedly, without depending on the peer having already imported the jetty, and without requiring the peer to call the bind jetty interface simultaneously. The bind function also implicitly creates an RC-type TP, which is stored in the tjetty. Only the party that actively calls bind has send and receive capabilities. The party that passively responds to the bind request will have an RC-type TP created and associated with the jetty at the lower layer, enabling message reception but not message transmission.
 
+![](figures/urma_notice.png)
+
+General constraint: After calling [3.4.4.12](#34412-ubcore_unbind_jetty) [ubcore_unbind_jetty](#34412-ubcore_unbind_jetty), TP-aware user-mode users must not directly call this interface; the flow of [3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [ubcore_bind_jetty_ex](#34411-ubcore_bind_jetty_ex) must be re-invoked.
+
+Kernel-mode user constraint: For kernel-mode TP-aware users using ubcore interfaces, the complete flow of [3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.4.11](#34411-ubcore_bind_jetty_ex) [ubcore_bind_jetty_ex](#34411-ubcore_bind_jetty_ex) -> [3.4.4.12](#34412-ubcore_unbind_jetty) [ubcore_unbind_jetty](#34412-ubcore_unbind_jetty) must be invoked, otherwise TP resources may be left over. This constraint does not apply to kernel-mode TP-unaware users (who directly call [3.4.4.10](#34410-ubcore_bind_jetty) [ubcore_bind_jetty](#34410-ubcore_bind_jetty)). See [1.3.2](#132-kernel-mode-user-constraints) [Kernel-mode User Constraints](#132-kernel-mode-user-constraints).
+
 4.  Parameters
 
 @param[in] jetty: local jetty to bind;
@@ -11185,6 +11261,12 @@ int ubcore_unbind_jetty([4.4.4.1.3](#34413-ubcore_jetty) [ubcore_jetty](#34413-u
 3.  Description
 
 Unbind the binding relationship between a local jetty and a remote jetty. Both communicating parties must each call this interface to release the established binding. It implicitly destroys the RC TP associated with the jetty (stored in the tjetty) but does not destroy the peer's RC TP.
+
+![](figures/urma_notice.png)
+
+General constraint: After calling this interface, TP-aware user-mode users must not directly call [3.4.4.11](#34411-ubcore_bind_jetty_ex) [ubcore_bind_jetty_ex](#34411-ubcore_bind_jetty_ex); the flow of [3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [ubcore_bind_jetty_ex](#34411-ubcore_bind_jetty_ex) must be re-invoked.
+
+Kernel-mode user constraint: For kernel-mode TP-aware users using ubcore interfaces, the complete flow of [3.13.2](#3132-ubcore_get_tp_list) [ubcore_get_tp_list](#3132-ubcore_get_tp_list) -> [3.4.4.11](#34411-ubcore_bind_jetty_ex) [ubcore_bind_jetty_ex](#34411-ubcore_bind_jetty_ex) -> [3.4.4.12](#34412-ubcore_unbind_jetty) [ubcore_unbind_jetty](#34412-ubcore_unbind_jetty) must be invoked, otherwise TP resources may be left over. This constraint does not apply to kernel-mode TP-unaware users. See [1.3.2](#132-kernel-mode-user-constraints) [Kernel-mode User Constraints](#132-kernel-mode-user-constraints).
 
 4.  Parameters
 
