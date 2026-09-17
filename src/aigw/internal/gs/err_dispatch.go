@@ -90,7 +90,7 @@ func classifyPrompt(req *ScheduleRequestMsg) string {
 
 func (m *GlobalSchedulerManager) computePrioritySingle(sessionID string, curStep int, prompt string) int {
 	if sessionID == "" {
-		return int(m.errScheduler.AnonymousPriority(prompt))
+		return math.MinInt32
 	}
 	return int(m.errScheduler.Priority(sessionID, curStep, prompt))
 }
@@ -213,7 +213,7 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 
 func (m *GlobalSchedulerManager) computePriorityWithSnapshot(snap *algoSnapshot, sessionID string, curStep int, prompt string) int {
 	if sessionID == "" {
-		return int(m.errScheduler.AnonymousPriorityWith(snap, prompt))
+		return math.MinInt32
 	}
 	return int(m.errScheduler.PriorityWith(snap, sessionID, curStep, prompt))
 }
