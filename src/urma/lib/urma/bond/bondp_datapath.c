@@ -25,12 +25,43 @@
 #include "urma_log.h"
 #include "urma_private.h"
 #include "urma_provider.h"
+#include "urma_ubagg.h"
 
 #include "bondp_datapath.h"
 
 #define BONDP_POST_SEND_MAX_RETRY          3
 /* Max consecutive fast returns before forcing a full scan */
 #define BONDP_FAST_RETURN_THRESHOLD        64
+
+bool bondp_jetty_is_unavailable(const urma_jetty_t *jetty)
+{
+    if (jetty == NULL) {
+        return false;
+    }
+
+    const bondp_comp_t *comp = CONTAINER_OF_FIELD(jetty, bondp_comp_t, v_jetty);
+    bool has_pjetty = false;
+    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; i++) {
+        if (comp->p_jetty[i] == NULL) {
+            continue;
+        }
+        has_pjetty = true;
+        if (atomic_load(&comp->valid[i])) {
+            return false;
+        }
+    }
+    return has_pjetty;
+}
+
+bondp_port_id_t bondp_get_cr_local_port_id(const urma_cr_t *cr)
+{
+    uint32_t port_idx = bondp_get_cr_port_idx(cr);
+    if (port_idx == UINT32_MAX) {
+        bondp_port_id_t invalid_id = {.value = UINT16_MAX};
+        return invalid_id;
+    }
+    return bondp_active_index_to_port_id(port_idx);
+}
 
 static urma_jetty_id_t *get_comp_urma_jetty_id(bondp_comp_t *bdp_comp)
 {
@@ -1811,6 +1842,7 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
                     return -1;
                 }
                 if (conv_ret == CONVERT_SUCCESS) {
+                    bondp_set_cr_port_idx(pcr, (uint32_t)hot_idx);
                     cr[cr_cnt - cr_cnt_remaining] = *pcr;
                     cr_cnt_remaining--;
                 }
@@ -1864,6 +1896,7 @@ int bondp_poll_jfc(urma_jfc_t *jfc, int cr_cnt, urma_cr_t *cr)
                 return -1;
             }
             if (conv_ret == CONVERT_SUCCESS) {
+                bondp_set_cr_port_idx(pcr, (uint32_t)idx);
                 cr[cr_cnt - cr_cnt_remaining] = *pcr;
                 cr_cnt_remaining--;
             }
@@ -1914,6 +1947,7 @@ int bondp_flush_jetty(urma_jetty_t *jetty, int cr_cnt, urma_cr_t *cr)
                 return -1;
             }
             if (conv_ret == CONVERT_SUCCESS) {
+                bondp_set_cr_port_idx(pcr, (uint32_t)i);
                 cr[cr_cnt - cr_cnt_remaining] = *pcr;
                 cr_cnt_remaining--;
             }
