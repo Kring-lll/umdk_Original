@@ -268,22 +268,6 @@ func (m *ErrSchedulerManager) AnonymousPriority(prompt string) float64 {
 }
 
 // AnonymousPriorityWith uses the provided snapshot for consistent reads within one Pick.
-func (m *ErrSchedulerManager) AnonymousPriorityWith(snap *algoSnapshot, prompt string) float64 {
-	if m.algorithm != nil && m.algorithm.Name() == "fifo" {
-		return 0
-	}
-	medianStep := m.medianStepForAnonymousWith(snap, prompt)
-	if medianStep <= 0 {
-		medianStep = 1
-	}
-	if m.IsWarmingUp() {
-		return -float64(medianStep)
-	}
-	if m.algorithm != nil {
-		return m.algorithm.PriorityWith(snap, "", medianStep, prompt)
-	}
-	return -float64(medianStep)
-}
 
 func (m *ErrSchedulerManager) medianStepForAnonymous(prompt string) int {
 	if m.config.SchedulerType == "caterr" && m.classifier.IsLoaded() {
