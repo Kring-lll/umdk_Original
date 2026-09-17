@@ -256,7 +256,12 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 	}
 
 	// 8. Handle streaming vs non-streaming
-	if req.Stream {
+	// Only 2xx responses are handed out as SSE streams. Non-2xx responses
+	// (4xx from upstream, 5xx already returned as error above) are buffered
+	// into Body so the handler can forward the real status code and error
+	// body — wrapping them in a StreamReader would let the SSE parser
+	// silently drop the non-SSE error payload.
+	if req.Stream && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		result.StreamReader = NewStreamReader(resp.Body)
 		return result, nil
 	}
