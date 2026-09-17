@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -42,12 +43,24 @@ type GetSuggestionIn struct {
 	UUID   string
 	Prompt string
 	Model  string
+	// Ctx bounds the schedule wait. Nil falls back to manager.ctx.
+	Ctx context.Context
 	// Headers and Body are used for consistent hash key extraction.
 	// Headers maps HTTP header names to values (e.g., "X-Session-Id" -> "session-123").
 	Headers map[string]string
 	// Body contains the parsed request body fields for hash key extraction
 	// (e.g., "user", "session_id", "session_params.session_id").
 	Body map[string]interface{}
+	// SessionID for ERR scheduling (extracted from agent_hint.session_id)
+	SessionID string
+	// UserPrompt carries user-role message text (system prompts excluded)
+	// for ERR/CatERR classification, so TF-IDF is not dominated by large
+	// system prompts. Empty falls back to the full Prompt.
+	UserPrompt string
+	// Advisory marks query-only requests whose forwarding is done by the
+	// caller (get-suggestion endpoint, SDK select_nodes). aigw never observes
+	// their completion, so ERR neither queues them nor takes in-flight slots.
+	Advisory bool
 }
 
 // AigwManager is the core manager of AIGW
@@ -371,14 +384,22 @@ func (manager *AigwManager) scheduleRequest(m *gs.GlobalSchedulerManager, in *Ge
 	if e1 != nil {
 		return nil, e1
 	}
+	req.SessionID = in.SessionID
+	req.UserPrompt = in.UserPrompt
 	// do tokenization and execute lightGBM prediction
 	if err := m.PreprocessForSchedule(req); err != nil {
 		return nil, err
 	}
 
-	// create a context with timeout
-	ctx, cancel := context.WithTimeout(manager.ctx, waitResponseTimeout)
-	defer cancel()
+	// Use the upstream HTTP context to bound the schedule wait (ERR queue mode
+	// may wait longer than a fixed timeout). SDK callers without a context
+	// fall back to the original 3s timeout.
+	ctx := in.Ctx
+	if ctx == nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(manager.ctx, waitResponseTimeout)
+		defer cancel()
+	}
 
 	rsp := make(chan interface{}, 1)
 	msg := &gs.ControlMessage{
@@ -388,6 +409,8 @@ func (manager *AigwManager) scheduleRequest(m *gs.GlobalSchedulerManager, in *Ge
 			CandidateInstanceIDs: candidateInstanceIDs,
 			Headers:              in.Headers,
 			Body:                 in.Body,
+			SessionID:            in.SessionID,
+			Advisory:             in.Advisory,
 		},
 		Response: rsp,
 	}
@@ -405,6 +428,7 @@ func (manager *AigwManager) scheduleRequest(m *gs.GlobalSchedulerManager, in *Ge
 				TargetPrefillUrl: result.PrefillUrl,
 				TargetDecodeUrl:  result.DecodeUrl,
 				DpRank:           result.DpRank,
+				Priority:         result.Priority,
 			}, nil
 		case error:
 			return nil, result
@@ -427,6 +451,8 @@ func (manager *AigwManager) SelectOptimalNode(in *GetSuggestionIn,
 	if runeCounts > manager.config.Limits.MaxPromptRunes {
 		return nil, fmt.Errorf("prompt is too long, characters nums: %v", runeCounts)
 	}
+	internalizeReqID(in)
+	in.Advisory = true
 
 	m, err := manager.FindOrCreateGs(in.Model)
 	if err != nil {
@@ -451,6 +477,19 @@ func (manager *AigwManager) SelectOptimalNode(in *GetSuggestionIn,
 	return manager.scheduleRequest(m, in, instanceIDs)
 }
 
+// internalReqSeq uniquely suffixes caller-supplied request UUIDs. Upstreams
+// generate UUIDs independently (or use a plain timestamp), so concurrent
+// requests may collide; registry keys (instance reqSet, errInFlight) require
+// per-request uniqueness inside this process.
+var internalReqSeq atomic.Uint64
+
+// internalizeReqID rewrites in.UUID to "<original>#<seq>" so concurrent
+// requests with identical caller-supplied UUIDs get distinct registry keys.
+// The original UUID stays as a prefix for log traceability.
+func internalizeReqID(in *GetSuggestionIn) {
+	in.UUID = fmt.Sprintf("%s#%d", in.UUID, internalReqSeq.Add(1))
+}
+
 // GetSuggestion sends a schedule request to AIGW, and AIGW will give schedule suggestion.
 func (manager *AigwManager) GetSuggestion(in *GetSuggestionIn) (*base.GetSuggestionOut, error) {
 	err := utils.CheckStringLength(in.Model)
@@ -463,6 +502,7 @@ func (manager *AigwManager) GetSuggestion(in *GetSuggestionIn) (*base.GetSuggest
 		log.Error().Msgf("[GetSuggestion]The length of UUID is invalid. %v", err)
 		return nil, fmt.Errorf("[GetSuggestion]The length of UUID is invalid. %v", err)
 	}
+	internalizeReqID(in)
 	m := manager.getGsManager(in.Model)
 	if m == nil {
 		return nil, fmt.Errorf("global scheduler manager with model %v not found", in.Model)
@@ -473,6 +513,27 @@ func (manager *AigwManager) GetSuggestion(in *GetSuggestionIn) (*base.GetSuggest
 	}
 
 	return manager.scheduleRequest(m, in, nil)
+}
+
+// ErrOnResponse is called when an HTTP response completes for a session.
+// It notifies the ERR scheduler to free capacity, update distributions,
+// and dispatch any pending queued requests.
+// insURL is the instance the request was forwarded to (from the HTTP handler's
+// suggestion); empty means the request was never dispatched (nothing to free).
+func (manager *AigwManager) ErrOnResponse(model, sessionID, reqID, prefillURL, decodeURL, finishReason string) {
+	m := manager.getGsManager(model)
+	if m == nil {
+		return
+	}
+	m.ErrOnResponse(sessionID, reqID, prefillURL, decodeURL, finishReason)
+}
+
+func (manager *AigwManager) ErrOnCancel(model, sessionID, reqID, prefillURL, decodeURL string) {
+	m := manager.getGsManager(model)
+	if m == nil {
+		return
+	}
+	m.ErrOnCancel(sessionID, reqID, prefillURL, decodeURL)
 }
 
 func (manager *AigwManager) createGBM(gbmPath string, vectorPath string) error {

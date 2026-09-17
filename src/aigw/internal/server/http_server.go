@@ -12,6 +12,7 @@ import "C"
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -23,6 +24,7 @@ import (
 	"huawei.com/aigw/internal/apipool"
 	"huawei.com/aigw/internal/base"
 	"huawei.com/aigw/internal/core"
+	"huawei.com/aigw/internal/gs"
 	"huawei.com/aigw/internal/proxy"
 	"huawei.com/aigw/pkg/crypto"
 	"huawei.com/aigw/pkg/log"
@@ -314,6 +316,50 @@ func processMessages(messages []base.OpenAiMessage) string {
 	return prompt
 }
 
+// extractUserText returns the concatenated user-role message contents,
+// skipping framework-injected <system-reminder> wrappers. It feeds ERR/CatERR
+// classification so the TF-IDF vector reflects the user's task text instead of
+// being dominated by large agent system prompts.
+func extractUserText(messages []base.OpenAiMessage) string {
+	userText := ""
+	for _, m := range messages {
+		if m.Role != "user" {
+			continue
+		}
+		c := strings.TrimSpace(m.Content)
+		if c == "" || strings.HasPrefix(c, "<system-reminder") {
+			continue
+		}
+		userText += unwrapContentField(c) + " "
+	}
+	return userText
+}
+
+// unwrapContentField extracts the inner "content" string when the user message
+// embeds a JSON envelope (e.g. jiuwenswarm's channel format
+// `你收到一条消息：{"source":"tui",...,"content":"<task>",...}`). The envelope's
+// metadata fields (source/files/trusted_dirs/...) are classification noise that
+// can flip the category. Falls back to the raw text when no parseable JSON
+// object with a string "content" field is present.
+func unwrapContentField(s string) string {
+	i := strings.Index(s, "{")
+	if i < 0 {
+		return s
+	}
+	j := strings.LastIndex(s, "}")
+	if j <= i {
+		return s
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(s[i:j+1]), &obj); err != nil {
+		return s
+	}
+	if c, ok := obj["content"].(string); ok && strings.TrimSpace(c) != "" {
+		return c
+	}
+	return s
+}
+
 // extractHeaders extracts HTTP headers relevant to consistent hash routing
 // from the request into a map[string]string. Only session-affinity related
 // headers are extracted to avoid passing unnecessary data.
@@ -378,10 +424,13 @@ func (s *HttpServer) scheduleForOpenAi(w http.ResponseWriter, r *http.Request) {
 	}
 
 	in := &core.GetSuggestionIn{
-		UUID:    req.UUID,
-		Model:   req.Model,
-		Prompt:  prompt,
-		Headers: extractHeaders(r),
+		UUID:       req.UUID,
+		Model:      req.Model,
+		Prompt:     prompt,
+		UserPrompt: extractUserText(req.Messages),
+		Ctx:        r.Context(),
+		Headers:    extractHeaders(r),
+		Advisory:   true,
 	}
 
 	out, err := s.manager.GetSuggestion(in)
@@ -484,20 +533,42 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		prompt += m.Role + ":" + m.Content + " "
 	}
 
+	// User-role text for ERR/CatERR classification (system prompts excluded).
+	userMsgs := make([]base.OpenAiMessage, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		userMsgs = append(userMsgs, base.OpenAiMessage{Role: m.Role, Content: m.Content})
+	}
+
 	var bodyMap map[string]interface{}
 	json.Unmarshal(body, &bodyMap)
 
+	sessionID := gs.ExtractSessionID(bodyMap)
+
 	in := &core.GetSuggestionIn{
-		UUID:    fmt.Sprintf("req-%d", time.Now().UnixNano()),
-		Model:   model,
-		Prompt:  prompt,
-		Headers: extractHeaders(r),
-		Body:    bodyMap,
+		UUID:       fmt.Sprintf("req-%d", time.Now().UnixNano()),
+		Model:      model,
+		Prompt:     prompt,
+		UserPrompt: extractUserText(userMsgs),
+		Ctx:        r.Context(),
+		Headers:    extractHeaders(r),
+		Body:       bodyMap,
+		SessionID:  sessionID,
 	}
 
 	suggestion, err := s.manager.GetSuggestion(in)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to get scheduling suggestion: %v", err), http.StatusInternalServerError)
+		statusCode := http.StatusInternalServerError
+		if errors.Is(err, gs.ErrQueueFull) || errors.Is(err, gs.ErrNoInstance) {
+			statusCode = http.StatusServiceUnavailable
+			log.Warn().Msgf("Scheduling unavailable: %v", err)
+		} else {
+			log.Error().Msgf("Failed to get scheduling suggestion: %v", err)
+		}
+		http.Error(w, fmt.Sprintf("Failed to get scheduling suggestion: %v", err), statusCode)
+		if sessionID != "" {
+			// No suggestion → request was never dispatched → nothing to free.
+			s.manager.ErrOnCancel(model, sessionID, in.UUID, "", "")
+		}
 		return
 	}
 
@@ -507,20 +578,33 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 	}
 	if targetURL == "" {
 		http.Error(w, "No available worker instance", http.StatusServiceUnavailable)
+		if sessionID != "" {
+			// Suggestion exists but has no instance URL (PrefillUrl == "").
+			s.manager.ErrOnCancel(model, sessionID, in.UUID, suggestion.TargetPrefillUrl, suggestion.TargetDecodeUrl)
+		}
 		return
 	}
+	// Strip the "@rank" suffix: it is an aigw-internal DP-aware instance
+	// identifier (see dp_worker.go), not part of the real downstream HTTP URL.
+	// The DP rank is conveyed to the downstream via suggestion.DpRank (header).
+	targetURL, _, _ = gs.ParseDPAwareWorkerURL(targetURL)
 	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
 		targetURL = "http://" + targetURL
 	}
 
-	log.Debug().Msgf("Forwarding request to: %s, DpRank: %v", targetURL, suggestion.DpRank)
+	log.Debug().Msgf("Forwarding request to: %s, DpRank: %v, Priority: %v", targetURL, suggestion.DpRank, suggestion.Priority)
+
+	forwardBody := body
+	if suggestion.Priority != nil {
+		forwardBody = injectPriority(body, *suggestion.Priority)
+	}
 
 	forwardReq := &proxy.ForwardRequest{
 		Method:    "POST",
 		TargetURL: targetURL,
 		Route:     "/v1/chat/completions",
 		Headers:   r.Header,
-		Body:      body,
+		Body:      forwardBody,
 		Stream:    stream,
 		DpRank:    suggestion.DpRank,
 	}
@@ -529,8 +613,16 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 	if err != nil {
 		log.Error().Msgf("Forward request failed: %v", err)
 		http.Error(w, fmt.Sprintf("Forward request failed: %v", err), http.StatusBadGateway)
+		if suggestion.TargetPrefillUrl != "" {
+			// Request was dispatched (OnDispatched already counted it); free its slot.
+			// Guard on the dispatch target, not sessionID: anonymous requests
+			// have no session but still hold an in-flight slot.
+			s.manager.ErrOnCancel(model, sessionID, in.UUID, suggestion.TargetPrefillUrl, suggestion.TargetDecodeUrl)
+		}
 		return
 	}
+
+	var finishReason string
 
 	if stream && result.StreamReader != nil {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -542,11 +634,17 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 			event, err := result.StreamReader.ReadEvent()
 			if err == io.EOF {
 				log.Debug().Msg("SSE stream completed")
-				return
+				break
 			}
 			if err != nil {
 				log.Error().Msgf("SSE read error: %v", err)
-				return
+				if finishReason == "" {
+					finishReason = "cancelled"
+				}
+				break
+			}
+			if fr := parseFinishReason(event.Data); fr != "" {
+				finishReason = fr
 			}
 			if event.Event != "" {
 				fmt.Fprintf(w, "event: %s\n", event.Event)
@@ -567,7 +665,85 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		if _, err := w.Write(result.Body); err != nil {
 			log.Warn().Msgf("Error writing response: %v", err)
 		}
+		finishReason = parseFinishReasonFromJSON(result.Body)
 	}
+
+	if suggestion.TargetPrefillUrl != "" {
+		if finishReason == "" {
+			finishReason = "unknown"
+		}
+		// Free the instance slot this request used (== OnDispatched's key, since
+		// suggestion.TargetPrefillUrl == result.PrefillUrl). HTTP-level, not session.
+		s.manager.ErrOnResponse(model, sessionID, in.UUID, suggestion.TargetPrefillUrl, suggestion.TargetDecodeUrl, finishReason)
+	}
+}
+
+// injectPriority injects the ERR priority value into the request body's
+// agent_hint.priority_control.priority field. priority is int (truncated E[rem])
+// so the value used for local queue ordering == the value the downstream sees.
+func injectPriority(body []byte, priority int) []byte {
+	var bodyMap map[string]interface{}
+	if err := json.Unmarshal(body, &bodyMap); err != nil {
+		return body
+	}
+
+	agentHint, ok := bodyMap["agent_hint"].(map[string]interface{})
+	if !ok {
+		agentHint = make(map[string]interface{})
+	}
+
+	priorityControl, ok := agentHint["priority_control"].(map[string]interface{})
+	if !ok {
+		priorityControl = make(map[string]interface{})
+	}
+
+	priorityControl["priority"] = priority
+	agentHint["priority_control"] = priorityControl
+	bodyMap["agent_hint"] = agentHint
+
+	modified, err := json.Marshal(bodyMap)
+	if err != nil {
+		return body
+	}
+	return modified
+}
+
+// parseFinishReason parses finish_reason from an SSE data line.
+func parseFinishReason(data string) string {
+	if data == "" || data == "[DONE]" {
+		return ""
+	}
+	var chunk struct {
+		Choices []struct {
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		return ""
+	}
+	if len(chunk.Choices) > 0 && chunk.Choices[0].FinishReason != "" {
+		return chunk.Choices[0].FinishReason
+	}
+	return ""
+}
+
+// parseFinishReasonFromJSON parses finish_reason from a non-streaming JSON response body.
+func parseFinishReasonFromJSON(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var resp struct {
+		Choices []struct {
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return ""
+	}
+	if len(resp.Choices) > 0 {
+		return resp.Choices[0].FinishReason
+	}
+	return ""
 }
 
 func (s *HttpServer) forwardToProvider(w http.ResponseWriter, r *http.Request, model string, stream bool, body []byte) {
