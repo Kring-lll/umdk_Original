@@ -4,7 +4,8 @@
  * Description: SNC (Supernode Network Controller) service
  * Create: 2026-07-07
  * Note:
- * History: 2026-07-07  Create File; 2026-07-16 key=value log format; 2026-08-27 add planPathsCoverage
+ * History: 2026-07-07  Create File; 2026-07-16 key=value log format; 2026-08-27 add planPathsCoverage;
+ *          2026-09-13 add planPathsCoverageEx (NPU<->L1SW hash by (DstCNA, jettyId))
  */
 package com.huawei.umdk.snc;
 
@@ -308,6 +309,32 @@ public class SncService {
         return result;
     }
 
+    /**
+     * Extended coverage planning: besides the L1SW↔L2SW out-ports, the
+     * NPU→L1SW egress port is selected by the {@code (DstCNA, jettyId)}
+     * two-tuple hash and the NPU↔L1SW out-ports are covered as well. The CNA of
+     * the selected NPU port is used as the SCNA of the downstream L1SW/L2SW
+     * hash selections; the ACK direction is resolved symmetrically. The result
+     * carries {@code scope = NPU_L1_L2} and per-layer statistics.
+     *
+     * @param request coverage request ({@code superNodeName} is required)
+     * @return coverage result with per-layer coverage statistics
+     * @throws SNCStateException        when the current state is not DATAREADY
+     * @throws IllegalArgumentException when {@code request} is null
+     */
+    public CoveragePathsResult planPathsCoverageEx(CoveragePathsRequest request) {
+        if (state != State.DATAREADY) {
+            throw new SNCStateException("SNC is not in DATAREADY state, current state: " + state);
+        }
+        if (request == null) {
+            throw new IllegalArgumentException("CoveragePathsRequest must not be null");
+        }
+        CoveragePathsResult result = pathService.planPathsCoverageEx(request);
+        LOG.info("planPathsCoverageEx: status=" + result.getStatus()
+            + ", scope=" + result.getScope());
+        return result;
+    }
+
     public void notifyLinkEvent(SuperNode supernode, LinkEvent event) {
         checkNotUninit();
         if (supernode == null) {
@@ -372,7 +399,6 @@ public class SncService {
 
     // 路由计算加实例化
     public synchronized void routeCalculate() {
-        checkNotUninit();
         if (routeCalculated) {
             LOG.info("route has calculated");
             return;
@@ -390,7 +416,6 @@ public class SncService {
     }
 
     public Map<String, Map<String, RoutingEntry>> makeRoutes(SuperNode superNode) {
-        checkNotUninit();
         if (!routeCalculated) {
             throw new IllegalStateException("calculate routeCalculate first");
         }
@@ -424,7 +449,6 @@ public class SncService {
     }
 
     public Map<String, RoutingEntry> getNodeRoute(String deviceName, int chipIndex) {
-        checkNotUninit();
         if (deviceName == null) {
             throw new IllegalArgumentException("device info is null");
         }
