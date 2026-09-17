@@ -639,7 +639,19 @@ static urma_status_t bondp_post_send_wr_list_and_store(bondp_comp_t *bdp_comp,
                 }
                 goto CLEANUP;
             }
+            /* Fast-path check: reject without touching use_cnt once deleting is set.
+             * No put on this path: refs were not taken yet. */
+            ret = check_wr_tseg_not_deleting(pwr);
+            if (ret != URMA_SUCCESS) {
+                if (bad_wr != NULL) {
+                    *bad_wr = cur;
+                }
+                goto CLEANUP;
+            }
             jfs_wr_get_refs(pwr);
+            /* Post-get double-check closes the Dekker pair with unregister:
+             * fetch_add + this load guarantee either we see deleting and
+             * self-balance via put, or unregister sees our +1 and keeps waiting. */
             ret = check_wr_tseg_not_deleting(pwr);
             if (ret != URMA_SUCCESS) {
                 jfs_wr_put_refs(pwr);
