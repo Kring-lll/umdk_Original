@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)
+![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)
 ![License](https://img.shields.io/badge/License-Proprietary-red)
 ![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen)
 
@@ -31,7 +31,7 @@ AIGW (AI Gateway) 是一个企业级的大语言模型推理网关，专为大�
 
 | 功能 | 描述 |
 |------|------|
-| **智能调度** | 支持Token、时间感知、容量等多种负载均衡策略 |
+| **智能调度** | 支持Token、时间感知、容量、ERR等多种负载均衡策略 |
 | **智能路由** | 区分prefill和decode阶段，实现上下文感知的请求分发 |
 | **缓存管理** | Redis和本地缓存双重缓存机制，有效降低重复请求开销 |
 | **延迟预测** | 基于LightGBM和EMA算法的机器学习预测，优化调度决策 |
@@ -249,6 +249,84 @@ AIGW/
 | `token` | Token敏感场景 | 基于Token数量分配 |
 | `prefillTimeAware` | Prefill阶段 | 预填充时间感知调度 |
 | `decode` | Decode阶段 | 解码阶段专用策略 |
+
+---
+
+## ERR 调度器（MEJ/ERR/CatERR）
+
+ERR（Expected Remaining Round）调度器在 instance 模式下为多轮 agent 会话提供优先级队列调度。通过跟踪每个 session 的剩余步数分布（E[rem|k]），优先调度即将完成的会话（SJF），减少整体完成时间。
+
+### 工作原理
+
+```
+请求到达 → ERR OnRequest(k++) → 计算 priority = -E[rem|k]
+         → capacity 有空 → 直接 dispatch（RR 选实例）
+         → capacity 满 → 入队等待
+         → 实例完成请求 → ErrOnResponse → OnCompleted → drain 队列
+                         → Pick 最高 priority（最低 E[rem]）dispatch
+```
+
+### 四种算法
+
+| 算法 | 说明 | 分类 | 适用 |
+|------|------|------|------|
+| `fifo` | FIFO（First In First Out）| 无 | 按入队时间排序，不依赖 session 追踪，作为 baseline 对比 |
+| `mej` | MEJ（Minimum Expected Job）| 无 | 所有会话混合，根据某次会话中已完成的轮数k，选择k最大的优先调度 |
+| `err` | ERR（Expected Remaining）| 无 | 所有会话混合，根据会话历史数据和k，推算剩余的轮数期望，选择剩余轮数最少的优先调度 |
+| `caterr` | CatERR（Categorized ERR）| TF-IDF 分类 | 根据prompt将会话分类为code/office场景，再做ERR调度 |
+
+CatERR 使用 TF-IDF + K-means 对 prompt 分类，每个类别维护独立的 E[rem] 分布。office 会话（步数少）一般优先于 code 会话（步数多）被调度。
+
+### 配置示例
+
+```jsonc
+{
+  "globalSchedulers": [{
+    "model": "DeepSeek-R1",
+    "mode": "instance",           // ERR 仅在 instance 模式生效
+    "loadBalancer": { "batchSize": 8, "mixed": "roundRobin" },
+    "errScheduler": {
+      "errSchedulerType": "caterr",   // "fifo" | "mej" | "err" | "caterr" | "none"
+      "queueSize": 100,
+      "queueBoostSec": 240,              // 0 = 默认 240，负数 = 关闭
+      "warmupSessions": 100,         // 预热完成至少需要的 session 数量
+      "sessionTimeoutSec": 660,      // agent 工作中长时间无变化的兜底清理时间（秒）
+      "taskIdleTimeoutSec": 660,      // stop 后静默清理（秒）；默认与 sessionTimeoutSec 对齐（压缩会阻塞下一请求）
+      "trainDataPath": "data/err_train.json",
+      "tfidfVocabPath": "data/caterr/tfidf_vocab.json",      // CatERR 必填
+      "tfidfCentroidsPath": "data/caterr/tfidf_centroids.json"  // CatERR 必填
+    }
+  }]
+}
+```
+
+### 部分字段说明
+
+| 字段 | 说明 |
+|------|------|
+| `warmupSessions` | 预热完成至少需要的 session 数量。预热阶段使用 MEJ 算法，达到阈值后切换到所选算法 |
+| `trainDataPath` | 预训练步数分布文件。加载后直接计入 warmup 计数，可跳过预热阶段 |
+| `queueBoostSec` | 饥饿保底：排队超过该秒数后强制提升到最高优先级（默认 240，0=默认，负数=关闭）。计时含跨尝试累计：排队超时/被驱逐的 session 把已等待时长记为债务，重试入队时折算进饥饿时钟——超时重试入队即享保底，不再从零重计 |
+#### 流式转发超时（两个预算 × 四类死法）
+
+流式转发链路为 `引擎 → aigw → 调用方`，两侧各可能死两种方式，共用两个预算参数处理。**两个值必须跟随 jiuwenswarm 的 LLM 配置**（`resources/config.yaml` 的 `model_client_config` 段）——aigw 的每个超时应等于调用方自己的耐心，对端放弃后再等没有意义：
+
+| aigw 参数 | 跟随的 jiuwen 参数（openjiuwen SDK 默认值） | 默认 | 覆盖的死法 |
+|---|---|---|---|
+| `proxy.firstChunkTimeoutSec` | `stream_first_chunk_timeout`（**首 token 预算**：等引擎响应流首字节的最长时间；0=默认，负=关闭。首字节到达后自动切到 chunk 间隔档） | 300 | ① 引擎首 token 吐不出（崩溃/挂死但 TCP 未断；引擎合法排队+预填充可达分钟级） |
+| `proxy.chunkIntervalTimeoutSec` | `stream_idle_timeout`（**token 间预算**：相邻 token 的最大间隔；0=默认，负=关闭。**一参两用**——读方向引擎静默超此值判半流死亡，写方向调用方写阻塞超此值判客户端死亡） | 60 | ② 引擎吐到一半挂掉 ③④ 调用方停止读取但未关连接（TCP 窗口塞满后写永久阻塞） |
+
+> 默认值跟 openjiuwen SDK 源码默认（300/60）。若部署侧覆盖了客户端预算（如 jiuwenswarm 产品配置 config.yaml 将 idle 调到 120），**aigw 必须同步调高对应键**，否则 aigw 会在客户端还活着时提前掐流。
+
+两档按活动重置（读按字节、写按次），慢引擎上跑几十分钟的**活跃**长流不受影响；不设则四类死法都会把在飞槽位挂死到 3600s 僵尸扫描（校准轮实测：引擎轮中崩溃后 12 个槽位全挂死 17 分钟+，调用方风暴放弃后 7 个槽位占满 21 分钟）
+| `sessionTimeoutSec` | agent 工作中长时间无变化的兜底清理超时。超时后删除 session 并打 Warn 日志 |
+| `taskIdleTimeoutSec` | 判断 session 已结束的超时时间。session 完成后等待此时间再静默清理 |
+
+### Session 跟踪
+
+ERR 通过请求 body 的 `agent_hint.session_id` 跟踪多轮会话。客户端（如 jiuwenswarm）在开启 AscendAffinity 模式时自动注入该字段。
+
+匿名请求（无 session_id）仍可正常调度，但不记步数分布（priority 固定 -1）。
 
 ---
 

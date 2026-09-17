@@ -49,6 +49,12 @@ type LlmRequest struct {
 	PredictPrefillTime float64 // predict prefill time, unit is ms
 	PrefillTimeStampMs int64   // record the start timestamp of prefill, unit is ms
 	TimeStamp          int64   // unit is second
+
+	SessionID string // session ID for ERR scheduling
+
+	// UserPrompt is the user-role message text (system prompts excluded),
+	// used as classification input by ERR/CatERR instead of the full Prompt.
+	UserPrompt string
 }
 
 // GetRequestType returns the type of request
