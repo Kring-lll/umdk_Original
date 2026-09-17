@@ -69,8 +69,8 @@ public class RouteMspTest {
         long l1SwNodeCna = topologyMap.get(templateType).getNodeMap().get("type:l1_sw|index:1").
             getAddrList().getFirst().getAddr();
         assertRouteCost(routeTable, l1SwNodeCna, 1);
-        long npuPortCna = topologyMap.get(templateType).getNodeMap().get("type:npu|slot:3|ubpu:2|die:2").
-            getPortMap().get(0).getAddrList().getFirst().getAddr();
+        long npuPortCna = topologyMap.get(templateType).getNodeMap().get("type:npu|slot:2|ubpu:1|die:2").
+            getPortMap().get(6).getAddrList().getFirst().getAddr();
         assertRouteCost(routeTable, npuPortCna, 2);
     }
 
@@ -105,8 +105,8 @@ public class RouteMspTest {
         // 目的为32个npu：每个npu 2个 port cna和1个 pg cna
         Assertions.assertEquals(32 * (2 + 1), routeTable.getRouteEntries().size());
         // 到npu的路由是2跳
-        long npuPortCna = topologyMap.get(templateType).getNodeMap().get("type:npu|slot:3|ubpu:1|die:2").
-            getPortMap().get(6).getAddrList().getFirst().getAddr();
+        long npuPortCna = topologyMap.get(templateType).getNodeMap().get("type:npu|slot:2|ubpu:1|die:2").
+            getPortMap().get(0).getAddrList().getFirst().getAddr();
         assertRouteCost(routeTable, npuPortCna, 2);
     }
 
