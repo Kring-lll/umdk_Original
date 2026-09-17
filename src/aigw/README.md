@@ -291,7 +291,7 @@ CatERR 使用 TF-IDF + K-means 对 prompt 分类，每个类别维护独立的 E
       "queueBoostSec": 240,              // 0 = 默认 240，负数 = 关闭
       "warmupSessions": 100,         // 预热完成至少需要的 session 数量
       "sessionTimeoutSec": 660,      // agent 工作中长时间无变化的兜底清理时间（秒）
-      "taskIdleTimeoutSec": 60,       // 判断 session 已结束的超时时间（秒）
+      "taskIdleTimeoutSec": 660,      // stop 后静默清理（秒）；默认与 sessionTimeoutSec 对齐（压缩会阻塞下一请求）
       "trainDataPath": "data/err_train.json",
       "tfidfVocabPath": "data/caterr/tfidf_vocab.json",      // CatERR 必填
       "tfidfCentroidsPath": "data/caterr/tfidf_centroids.json"  // CatERR 必填
