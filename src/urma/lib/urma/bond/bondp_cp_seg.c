@@ -12,6 +12,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "urma_api.h"
 #include "urma_cmd.h"
@@ -358,34 +359,23 @@ FREE_BDP_SEG:
     return NULL;
 }
 
-static urma_status_t bondp_unregister_seg_inner(urma_target_seg_t *target_seg)
-{
-    int ret = URMA_SUCCESS;
-    bondp_tseg_t *bdp_seg = CONTAINER_OF_FIELD(target_seg, bondp_tseg_t, v_tseg);
-
-    if (bondp_delete_vseg(bdp_seg) != 0) {
-        URMA_LOG_ERR("Failed to delete vseg, token_id=%u, handle=%lu.\n",
-                     target_seg->seg.token_id, target_seg->handle);
-        ret = URMA_FAIL;
-    }
-
-    free(bdp_seg);
-    return ret;
-}
-
 static void bondp_get_local_seg(urma_target_seg_t *target_seg)
 {
     bondp_tseg_t *bdp_seg = CONTAINER_OF_FIELD(target_seg, bondp_tseg_t, v_tseg);
     atomic_fetch_add(&bdp_seg->use_cnt.atomic_cnt, 1);
 }
 
+/* Pure decrement: put never frees. A put-free on "count drops to base" can
+ * misread a freed chunk's stale counter and double free. Only unregister frees. */
 static void bondp_put_local_seg(urma_target_seg_t *target_seg)
 {
     bondp_tseg_t *bdp_seg = CONTAINER_OF_FIELD(target_seg, bondp_tseg_t, v_tseg);
-    if (atomic_fetch_sub(&bdp_seg->use_cnt.atomic_cnt, 1) == 1) {
-        bondp_unregister_seg_inner(target_seg);
-    }
+    (void)atomic_fetch_sub(&bdp_seg->use_cnt.atomic_cnt, 1);
 }
+
+/* Drain-wait tuning for bondp_unregister_seg. */
+#define BONDP_SEG_DRAIN_POLL_US    100
+#define BONDP_SEG_DRAIN_TIMEOUT_MS 3000
 
 urma_status_t bondp_unregister_seg(urma_target_seg_t *target_seg)
 {
@@ -396,21 +386,46 @@ urma_status_t bondp_unregister_seg(urma_target_seg_t *target_seg)
     if (!atomic_compare_exchange_strong(&bdp_seg->deleting, &expected, true)) {
         return URMA_EAGAIN;
     }
+
+    /*
+     * Drain in-flight WR references until use_cnt settles at the base value 1.
+     * Transient +1/-1 from rejected posts is self-balancing and harmless.
+     * Seq_cst deleting-store + this load form a Dekker pair with the post side
+     * (fetch_add then load deleting): either the post side sees deleting and
+     * aborts, or this load sees its +1 and we keep waiting. use_cnt == 1 means
+     * no one holds or can acquire a reference, so the frees below are safe.
+     */
+    uint64_t waited_us = 0;
+    const uint64_t timeout_us = BONDP_SEG_DRAIN_TIMEOUT_MS * 1000;
     unsigned long use_cnt = atomic_load(&bdp_seg->use_cnt.atomic_cnt);
-    if (use_cnt > 1) {
-        /* In-flight WRs still reference this seg; caller must stop posting and retry. */
-        atomic_store(&bdp_seg->deleting, false);
-        URMA_LOG_ERR("Failed to unregister seg, still in use. token_id=%u, use_cnt=%lu\n",
-                     target_seg->seg.token_id, use_cnt);
-        return URMA_EAGAIN;
+    while (use_cnt > 1) {
+        if (waited_us >= timeout_us) {
+            /* Roll back so the seg stays usable; caller stops posting, polls
+             * outstanding WRs and retries. */
+            atomic_store(&bdp_seg->deleting, false);
+            URMA_LOG_ERR("Failed to unregister seg, still in use. token_id=%u, use_cnt=%lu\n",
+                         target_seg->seg.token_id, use_cnt);
+            return URMA_EAGAIN;
+        }
+        usleep(BONDP_SEG_DRAIN_POLL_US);
+        waited_us += BONDP_SEG_DRAIN_POLL_US;
+        use_cnt = atomic_load(&bdp_seg->use_cnt.atomic_cnt);
     }
+
     if (bondp_delete_pseg(bdp_seg) != 0) {
         URMA_LOG_ERR("Failed to delete pseg for vseg, token_id=%u, handle=%lu.\n",
                      target_seg->seg.token_id, target_seg->handle);
         ret = URMA_FAIL;
     }
+    if (bondp_delete_vseg(bdp_seg) != 0) {
+        URMA_LOG_ERR("Failed to delete vseg, token_id=%u, handle=%lu.\n",
+                     target_seg->seg.token_id, target_seg->handle);
+        ret = URMA_FAIL;
+    }
 
-    bondp_put_local_seg(target_seg);
+    /* Single free point: only unregister frees, after deleting is set and the
+     * reference counter has drained to the base value. */
+    free(bdp_seg);
     return ret;
 }
 
