@@ -56,11 +56,9 @@ const (
 	defaultErrWarmupSessions  = 100
 	defaultErrWarmupPerCat    = 10
 	defaultErrSessionTimeout  = 660
-	// 660 = sessionTimeoutSec default: compression after a stop blocks the
-	// parent session's next request for as long as the anonymous compression
-	// call queues (v5: up to 812s under CatERR) — a short post-stop timer
-	// here would erase the session (k, category, earned priority) while the
-	// parent is silently waiting on the compressor.
+	// Matches sessionTimeoutSec: post-stop compression blocks the parent's
+	// next request for as long as the anonymous call queues (v5: 812s max);
+	// a short timer here erases the session mid-wait.
 	defaultErrTaskIdleTimeout = 660
 )
 
