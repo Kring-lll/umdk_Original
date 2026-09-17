@@ -171,7 +171,7 @@ type ErrSchedulerConfig struct {
 	TfidfVocabPath     string `json:"tfidfVocabPath"`     // path to TF-IDF vocab JSON (CatERR)
 	TfidfCentroidsPath string `json:"tfidfCentroidsPath"` // path to K-means centroids JSON (CatERR)
 	SessionTimeoutSec  int    `json:"sessionTimeoutSec"`  // session idle timeout after tool_calls/other, seconds (default: 660)
-	TaskIdleTimeoutSec int    `json:"taskIdleTimeoutSec"` // session idle timeout after stop, seconds (default: 60)
+	TaskIdleTimeoutSec int    `json:"taskIdleTimeoutSec"` // session idle timeout after stop, seconds (default: 660)
 	QueueBoostSec      int    `json:"queueBoostSec"`      // starvation floor: force queued requests to top priority after this many seconds (default: 240; 0 = default; negative = disabled)
 }
 
