@@ -36,6 +36,11 @@ const (
 	halfInterval        = 100
 	defaultInsNumPerGs  = 128
 	defaultReqLifeCycle = 10 * time.Second
+	// defaultErrReqSurvivalSec bounds how long a dispatched ERR request may
+	// stay in-flight before the survival scan force-releases it. Mirrors the
+	// SessionTimeoutSec default (agent stuck-without-change bottom line),
+	// far above any legitimate single-round latency.
+	defaultErrReqSurvivalSec = 660
 )
 
 // DeploymentPolicy is the deployment mode
@@ -134,6 +139,15 @@ type GlobalSchedulerManager struct {
 	runtimeMode    base.RuntimeMode
 	metricProvider MetricProvider
 
+	// ERR scheduler components (nil if ERR disabled)
+	errScheduler     *ErrSchedulerManager
+	capacityProvider *CapacityProvider
+	pendingQueue     *PendingQueue
+	errInFlight      map[string]errInFlightEntry
+	// dispatchMu serializes ERR dispatch to protect the non-thread-safe LB.
+	// Per-GSM so different models do not block each other.
+	dispatchMu sync.Mutex
+
 	// kvcSessionMgr drives vLLM KVC offload/prefetch on agent lifecycle events.
 	// nil when KVC management is disabled (SdkMode or kvc.enabled=false). Wired in H1.
 	kvcSessionMgr *KvcSessionManager
@@ -211,6 +225,11 @@ func NewGlobalSchedulerManager(parentCtx context.Context, gsConfig *base.GlobalS
 		}
 	}
 
+	// Initialize ERR scheduler after opts (runtimeMode is set via WithRuntimeMode).
+	if e := manager.initErrScheduler(&gsConfig.ErrScheduler, gsConfig.LoadBalancer.BatchSize); e != nil {
+		return nil, e
+	}
+
 	var cacheOptions []cachecenter.ManagerOption
 	if manager.cacheDriverOps != nil {
 		adp := cachecenter.NewRedisCacheCenter(manager.cacheDriverOps, int(manager.config.reqSurvivalDuration))
@@ -227,6 +246,10 @@ func NewGlobalSchedulerManager(parentCtx context.Context, gsConfig *base.GlobalS
 		withRuntimeMode(manager.runtimeMode),
 		WithSkipInstanceConnection(manager.config.skipInstanceConnection),
 	)
+
+	if manager.errScheduler != nil {
+		manager.instanceManager.SetOnUnhealthy(manager.onInstanceUnhealthy)
+	}
 
 	// Create MetricProvider based on runtime mode
 	var metricProvider MetricProvider
@@ -302,6 +325,79 @@ func (m *GlobalSchedulerManager) setConfig(gsConfig *base.GlobalSchedulerConfig)
 	}
 
 	return nil
+}
+
+// initErrScheduler initializes ERR scheduler, capacity provider, and pending queue.
+// Returns an error if a required prerequisite is missing (e.g. CatERR without
+// TF-IDF data) so startup is blocked rather than silently degrading.
+func (m *GlobalSchedulerManager) initErrScheduler(errCfg *base.ErrSchedulerConfig, batchSize int) error {
+	if errCfg.ErrSchedulerType == "" || errCfg.ErrSchedulerType == "none" {
+		log.Info().Msgf("[ERR] ERR scheduler disabled for model %s", m.config.model)
+		return nil
+	}
+
+	queueSize := errCfg.QueueSize
+	if m.runtimeMode != base.ServiceMode && queueSize > 0 {
+		log.Warn().Msgf("[ERR] queue mode requires ServiceMode; falling back to passthrough for model %s", m.config.model)
+		queueSize = 0
+	}
+
+	internalCfg := ErrSchedulerConfig{
+		SchedulerType:      errCfg.ErrSchedulerType,
+		WarmupSessions:     errCfg.WarmupSessions,
+		WarmupPerCat:       errCfg.WarmupPerCat,
+		WindowSize:         errCfg.WindowSize,
+		TrainDataPath:      errCfg.TrainDataPath,
+		TfidfVocabPath:     errCfg.TfidfVocabPath,
+		TfidfCentroidsPath: errCfg.TfidfCentroidsPath,
+		SessionTimeoutSec:  errCfg.SessionTimeoutSec,
+		TaskIdleTimeoutSec: errCfg.TaskIdleTimeoutSec,
+		QueueBoostSec:      errCfg.QueueBoostSec,
+	}
+
+	m.errScheduler = NewErrSchedulerManager(internalCfg)
+	m.errInFlight = make(map[string]errInFlightEntry)
+
+	if errCfg.ErrSchedulerType == "caterr" && !m.errScheduler.classifier.IsLoaded() {
+		return fmt.Errorf("[ERR] caterr classifier not loaded (vocab or centroids invalid), model %s", m.config.model)
+	}
+
+	if queueSize > 0 {
+		if m.config.deployPolicy == SeparatedDeployment {
+			m.capacityProvider = NewCapacityProviderSeparatedGroupAware(batchSize,
+				func() int {
+					if m.instanceManager == nil {
+						return 0
+					}
+					return m.instanceManager.getSeparatedCapacity()
+				},
+			)
+		} else {
+			m.capacityProvider = NewCapacityProvider(batchSize, func() int {
+				if m.instanceManager == nil {
+					return 0
+				}
+				return m.instanceManager.getInsNum()
+			})
+		}
+		m.pendingQueue = NewPendingQueue(queueSize)
+		log.Info().Msgf("[ERR] queue mode enabled: queueSize=%d, batchSize=%d, algo=%s",
+			queueSize, batchSize, errCfg.ErrSchedulerType)
+	} else {
+		log.Info().Msgf("[ERR] passthrough mode: batchSize=%d, algo=%s",
+			batchSize, errCfg.ErrSchedulerType)
+	}
+	return nil
+}
+
+// HasQueueMode returns true if ERR queue mode (queueSize > 0) is enabled.
+func (m *GlobalSchedulerManager) HasQueueMode() bool {
+	return m.pendingQueue != nil
+}
+
+// HasErrScheduler returns true if ERR scheduler is enabled.
+func (m *GlobalSchedulerManager) HasErrScheduler() bool {
+	return m.errScheduler != nil
 }
 
 // LastAccessAt returns gs last accessed time
@@ -451,6 +547,13 @@ func (m *GlobalSchedulerManager) registerInstance(ctrlMsg *ControlMessage) {
 	}
 
 	log.Info().Msgf("instance %s registered successfully", registerMsg.Name)
+
+	// Registration increases capacity — trigger drain if ERR queue mode is active
+	if m.errScheduler != nil && m.pendingQueue != nil {
+		m.dispatchMu.Lock()
+		m.tryDispatchFromQueue()
+		m.dispatchMu.Unlock()
+	}
 }
 
 func (m *GlobalSchedulerManager) unregisterInstance(ctrlMsg *ControlMessage) {
@@ -479,6 +582,16 @@ func (m *GlobalSchedulerManager) unregisterInstance(ctrlMsg *ControlMessage) {
 	}
 
 	log.Info().Msgf("instance (%v:%v) unregistered successfully", unregisterMsg.IP, unregisterMsg.Port)
+
+	// If all instances are gone, fail all queued requests (503)
+	if m.errScheduler != nil && m.pendingQueue != nil && m.instanceManager.getInsNum() == 0 {
+		m.dispatchMu.Lock()
+		for _, pr := range m.pendingQueue.DrainAll() {
+			log.Warn().Msgf("[ERR] queue flushed on instance unregister: session %s 503", pr.SessionID)
+			pr.Msg.Response <- ErrNoInstance
+		}
+		m.dispatchMu.Unlock()
+	}
 }
 
 // PutControlMessage sends control message to GS.
@@ -553,6 +666,13 @@ func (m *GlobalSchedulerManager) handleSchedule(msg *ControlMessage) {
 			}
 		}
 
+		// ERR dispatch path (handles priority computation, queue, and LB scheduling)
+		if m.errScheduler != nil {
+			m.dispatchErr(msg)
+			return
+		}
+
+		// Original dispatch path (no ERR)
 		result := m.scheduler.schedule(request, nil)
 		m.recordScheduleStats(result)
 
@@ -751,6 +871,11 @@ func (m *GlobalSchedulerManager) GetInsNum() int {
 
 func (m *GlobalSchedulerManager) checkReqSurvival() {
 	m.instanceManager.checkReqSurvival(m.config.reqSurvivalDuration)
+	if m.errScheduler != nil {
+		m.dispatchMu.Lock()
+		m.checkErrInFlightSurvival()
+		m.dispatchMu.Unlock()
+	}
 }
 
 func (m *GlobalSchedulerManager) reqManagerLoop() {
