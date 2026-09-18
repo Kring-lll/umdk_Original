@@ -23,13 +23,11 @@
 using namespace AscendC;
 using namespace matmul;
 using namespace GroupedMatmulDequantSwigluQuant;
-extern "C" __global__ __aicore__ void grouped_matmul_swiglu_quant_v2_layered(GM_ADDR x, GM_ADDR xScale,
-                                                                     GM_ADDR groupList, GM_ADDR layerIndex,
-                                                                     GM_ADDR allWeight, GM_ADDR allWeightScale,
-                                                                     GM_ADDR allWeightAssistanceMatrix,
-                                                                     GM_ADDR bias,
-                                                                     GM_ADDR smoothScale, GM_ADDR y, GM_ADDR yScale,
-                                                                     GM_ADDR workspace, GM_ADDR tiling)
+extern "C" __global__ __aicore__ void
+grouped_matmul_swiglu_quant_v2_layered(GM_ADDR x, GM_ADDR xScale, GM_ADDR groupList, GM_ADDR layerIndex,
+                                       GM_ADDR allWeight, GM_ADDR allWeightScale, GM_ADDR allWeightAssistanceMatrix,
+                                       GM_ADDR bias, GM_ADDR smoothScale, GM_ADDR y, GM_ADDR yScale, GM_ADDR workspace,
+                                       GM_ADDR tiling)
 {
     TPipe tPipe;
     GM_ADDR userWorkspace = GetUserWorkspace(workspace);

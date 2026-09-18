@@ -26,12 +26,11 @@ using namespace AscendC;
 
 constexpr uint32_t BUFFER_NUM = 1;
 
-template <class mmType>
-class GMMA4W4MidProcess {
-public:
+template <class mmType> class GMMA4W4MidProcess {
+  public:
     using bT = typename mmType::BT;
 
-public:
+  public:
     __aicore__ inline GMMA4W4MidProcess(typename mmType::MT &matmul) : mm(matmul)
     {
     }
@@ -39,12 +38,12 @@ public:
                                 const GMMSwigluQuantV2BaseParams *__restrict gmmSwigluQuantV2BaseParamsIN);
     __aicore__ inline void Process(WorkSpaceSplitConfig &workspaceSplitConfig, int64_t workspaceSplitLoopIdx);
 
-private:
+  private:
     __aicore__ inline void MMCompute(uint32_t groupIdx, MNConfig &mnConfig, WorkSpaceSplitConfig &workspaceSplitConfig);
     __aicore__ inline void SetMNConfig(const int32_t splitValue, MNConfig &mnConfig);
     __aicore__ inline void UpdateMnConfig(MNConfig &mnConfig, bool resetOutputOffset);
 
-private:
+  private:
     typename mmType::MT &mm;
     const uint32_t HALF_ALIGN = 16;
     GlobalTensor<int4b_t> xGM;
@@ -113,8 +112,9 @@ __aicore__ inline void GMMA4W4MidProcess<mmType>::SetMNConfig(const int32_t spli
     mnConfig.baseM = gmmSwigluQuantV2BaseParams->baseM;
     mnConfig.baseN = gmmSwigluQuantV2BaseParams->baseN;
     mnConfig.singleM = gmmSwigluQuantV2BaseParams->baseM;
-    mnConfig.singleN = gmmSwigluQuantV2BaseParams->singleN != 0 && gmmSwigluQuantV2BaseParams->quantGroupNum == 1? 
-                         gmmSwigluQuantV2BaseParams->singleN : gmmSwigluQuantV2BaseParams->baseN;                    
+    mnConfig.singleN = gmmSwigluQuantV2BaseParams->singleN != 0 && gmmSwigluQuantV2BaseParams->quantGroupNum == 1
+                           ? gmmSwigluQuantV2BaseParams->singleN
+                           : gmmSwigluQuantV2BaseParams->baseN;
 }
 
 template <typename mmType>
@@ -129,8 +129,9 @@ __aicore__ inline void GMMA4W4MidProcess<mmType>::Process(WorkSpaceSplitConfig &
         mnConfig.baseM = gmmSwigluQuantV2BaseParams->baseM;
         mnConfig.baseN = gmmSwigluQuantV2BaseParams->baseN;
         mnConfig.singleM = gmmSwigluQuantV2BaseParams->baseM;
-        mnConfig.singleN = gmmSwigluQuantV2BaseParams->singleN != 0 && gmmSwigluQuantV2BaseParams->quantGroupNum == 1? 
-                            gmmSwigluQuantV2BaseParams->singleN : gmmSwigluQuantV2BaseParams->baseN;
+        mnConfig.singleN = gmmSwigluQuantV2BaseParams->singleN != 0 && gmmSwigluQuantV2BaseParams->quantGroupNum == 1
+                               ? gmmSwigluQuantV2BaseParams->singleN
+                               : gmmSwigluQuantV2BaseParams->baseN;
         mnConfig.k = gmmSwigluQuantV2BaseParams->K; // tilingData
         mnConfig.n = gmmSwigluQuantV2BaseParams->N; // tilingData
         mnConfig.blockDimN = Ceil(mnConfig.n, mnConfig.singleN);
@@ -154,9 +155,9 @@ __aicore__ inline void GMMA4W4MidProcess<mmType>::Process(WorkSpaceSplitConfig &
                 totalTmp += static_cast<int32_t>(groupListGM.GetValue(groupIdx));
                 currSplitValue = totalTmp;
             }
-            currSplitValue = currSplitValue > (workspaceSplitLoopIdx + 1) * gmmSwigluQuantV2BaseParams->mLimit ?
-                                 (workspaceSplitLoopIdx + 1) * gmmSwigluQuantV2BaseParams->mLimit :
-                                 currSplitValue;
+            currSplitValue = currSplitValue > (workspaceSplitLoopIdx + 1) * gmmSwigluQuantV2BaseParams->mLimit
+                                 ? (workspaceSplitLoopIdx + 1) * gmmSwigluQuantV2BaseParams->mLimit
+                                 : currSplitValue;
 
             int32_t splitValue = (currSplitValue - prevSplitValue);
             prevSplitValue = currSplitValue;
@@ -205,8 +206,9 @@ __aicore__ inline void GMMA4W4MidProcess<mmType>::MMCompute(uint32_t groupIdx, M
         // layer are element offsets (per-layer single-tensor semantics).
         {
             if constexpr (mmType::BT::format == CubeFormat::NZ && mmType::BT::isTrans == true) {
-                weightOffset = static_cast<uint64_t>(groupIdx) * gmmSwigluQuantV2BaseParams->N * gmmSwigluQuantV2BaseParams->K +
-                               tailN * 64;
+                weightOffset =
+                    static_cast<uint64_t>(groupIdx) * gmmSwigluQuantV2BaseParams->N * gmmSwigluQuantV2BaseParams->K +
+                    tailN * 64;
                 weightSlice = weightGM[weightOffset + loopK * quantGroupSize * gmmSwigluQuantV2BaseParams->N];
             } else if constexpr (mmType::BT::format == CubeFormat::NZ && mmType::BT::isTrans == false) {
                 weightOffset =

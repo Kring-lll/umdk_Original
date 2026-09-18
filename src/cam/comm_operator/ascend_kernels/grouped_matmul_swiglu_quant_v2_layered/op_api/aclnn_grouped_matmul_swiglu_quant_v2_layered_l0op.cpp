@@ -23,15 +23,13 @@ OP_TYPE_REGISTER(GroupedMatmulSwigluQuantV2Layered);
 
 constexpr int64_t SWIGLU_SPLIT_SIZE = 64L;
 
-const std::tuple<aclTensor *, aclTensor *> GroupedMatmulSwigluQuantV2Layered(const aclTensor *x,
-                         const aclTensorList *weight,
-                         const aclTensorList *weightScale,
-                         const aclTensor *xScale, const aclTensorList *weightAssistanceMatrix,
-                         const aclTensor *bias, const aclTensor *smoothScale,
-                         const aclTensor *groupList, const aclTensor *layerIndex, int64_t dequantMode,
-                         int64_t dequantDtype,
-                         int64_t quantMode, int64_t quantDtype, bool transposeWeight, int64_t groupListType,
-                         const aclIntArray *tuningConfigOptional, aclOpExecutor *executor)
+const std::tuple<aclTensor *, aclTensor *>
+GroupedMatmulSwigluQuantV2Layered(const aclTensor *x, const aclTensorList *weight, const aclTensorList *weightScale,
+                                  const aclTensor *xScale, const aclTensorList *weightAssistanceMatrix,
+                                  const aclTensor *bias, const aclTensor *smoothScale, const aclTensor *groupList,
+                                  const aclTensor *layerIndex, int64_t dequantMode, int64_t dequantDtype,
+                                  int64_t quantMode, int64_t quantDtype, bool transposeWeight, int64_t groupListType,
+                                  const aclIntArray *tuningConfigOptional, aclOpExecutor *executor)
 {
     L0_DFX(GroupedMatmulSwigluQuantV2Layered, x, weight, weightScale, xScale, weightAssistanceMatrix, smoothScale,
            groupList, layerIndex, dequantMode, dequantDtype, quantMode, quantDtype, transposeWeight,
@@ -49,8 +47,8 @@ const std::tuple<aclTensor *, aclTensor *> GroupedMatmulSwigluQuantV2Layered(con
     auto scaleOut = executor->AllocTensor(scaleOutShape, DataType::DT_FLOAT, ge::FORMAT_ND);
     if (op::GetCurrentPlatformInfo().GetCurNpuArch() == NpuArch::DAV_3510) {
         n = transposeWeight ? (*weightScale)[0]->GetViewShape().GetDim(1) : // 转置情况下weightScale的第1维是n
-                            (*weightScale)[0]->GetViewShape().GetDim(2); // 非转置情况下weightScale的第2维是n
-        nAfterHalve = static_cast<int64_t>(n / 2); // outShape需要为[M, N / 2]
+                (*weightScale)[0]->GetViewShape().GetDim(2);                // 非转置情况下weightScale的第2维是n
+        nAfterHalve = static_cast<int64_t>(n / 2);                          // outShape需要为[M, N / 2]
         gert::Shape outShapeV2({m, nAfterHalve});
         gert::Shape scaleOutShapeV2;
         // 当quantMode等于2时，out_scale 的形状为三维
@@ -62,14 +60,15 @@ const std::tuple<aclTensor *, aclTensor *> GroupedMatmulSwigluQuantV2Layered(con
         }
         out = executor->AllocTensor(outShapeV2, static_cast<ge::DataType>(quantDtype), ge::FORMAT_ND);
         // 当quantMode等于2时，outScale的DataType为FLOAT8_E8M0
-        scaleOut = quantMode == 2 ? executor->AllocTensor(scaleOutShapeV2, DataType::DT_FLOAT8_E8M0, ge::FORMAT_ND) :
-                                    executor->AllocTensor(scaleOutShapeV2, DataType::DT_FLOAT, ge::FORMAT_ND);
+        scaleOut = quantMode == 2 ? executor->AllocTensor(scaleOutShapeV2, DataType::DT_FLOAT8_E8M0, ge::FORMAT_ND)
+                                  : executor->AllocTensor(scaleOutShapeV2, DataType::DT_FLOAT, ge::FORMAT_ND);
     }
-    auto ret = INFER_SHAPE(GroupedMatmulSwigluQuantV2Layered,
-                    OP_INPUT(x, xScale, groupList, layerIndex, weight, weightScale, weightAssistanceMatrix, bias,
-                             smoothScale),
-                    OP_OUTPUT(out, scaleOut), OP_ATTR(dequantMode, dequantDtype, quantMode, quantDtype, transposeWeight,
-                    groupListType, tuningConfigOptional));
+    auto ret = INFER_SHAPE(
+        GroupedMatmulSwigluQuantV2Layered,
+        OP_INPUT(x, xScale, groupList, layerIndex, weight, weightScale, weightAssistanceMatrix, bias, smoothScale),
+        OP_OUTPUT(out, scaleOut),
+        OP_ATTR(dequantMode, dequantDtype, quantMode, quantDtype, transposeWeight, groupListType,
+                tuningConfigOptional));
     if (ret != ACLNN_SUCCESS) {
         OP_LOGE(ACLNN_ERR_PARAM_INVALID, "InferShape failed.");
         return std::tuple(nullptr, nullptr);
@@ -78,8 +77,9 @@ const std::tuple<aclTensor *, aclTensor *> GroupedMatmulSwigluQuantV2Layered(con
     ret = ADD_TO_LAUNCHER_LIST_AICORE(
         GroupedMatmulSwigluQuantV2Layered,
         OP_INPUT(x, xScale, groupList, layerIndex, weight, weightScale, weightAssistanceMatrix, bias, smoothScale),
-        OP_OUTPUT(out, scaleOut), OP_ATTR(dequantMode, dequantDtype, quantMode, quantDtype, transposeWeight,
-                        groupListType, tuningConfigOptional));
+        OP_OUTPUT(out, scaleOut),
+        OP_ATTR(dequantMode, dequantDtype, quantMode, quantDtype, transposeWeight, groupListType,
+                tuningConfigOptional));
     if (ret != ACLNN_SUCCESS) {
         OP_LOGE(ACLNN_ERR_PARAM_INVALID, "ADD_TO_LAUNCHER_LIST_AICORE failed.");
         return std::tuple(nullptr, nullptr);

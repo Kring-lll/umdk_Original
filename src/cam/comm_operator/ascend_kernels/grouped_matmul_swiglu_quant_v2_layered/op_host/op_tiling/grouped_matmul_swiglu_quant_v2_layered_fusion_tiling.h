@@ -23,12 +23,13 @@ namespace optiling {
 namespace GroupedMatmulSwigluQuantV2LayeredTiling {
 
 class GroupedMatmulSwigluQuantV2LayeredFusionTiling : public GroupedMatmulSwigluQuantV2LayeredTiling {
-public:
-    explicit GroupedMatmulSwigluQuantV2LayeredFusionTiling(gert::TilingContext* context) : GroupedMatmulSwigluQuantV2LayeredTiling(context) {};
+  public:
+    explicit GroupedMatmulSwigluQuantV2LayeredFusionTiling(gert::TilingContext *context)
+        : GroupedMatmulSwigluQuantV2LayeredTiling(context) {};
 
     ~GroupedMatmulSwigluQuantV2LayeredFusionTiling() override = default;
 
-protected:
+  protected:
     bool IsCapable() override;
 
     ge::graphStatus DoOpTiling() override;
@@ -39,7 +40,8 @@ protected:
     ge::graphStatus ParseInputAndAttr();
     void FillTilingData() override;
     void PrintTilingData() override;
-private:
+
+  private:
     GMMSwigluQuantV2TilingFusionData tilingData_;
     uint64_t workspaceSize_;
     uint32_t blockDim_;
@@ -54,6 +56,6 @@ private:
     int8_t isSingleTensor_;
 };
 
-}
-}
+} // namespace GroupedMatmulSwigluQuantV2LayeredTiling
+} // namespace optiling
 #endif // __OP_HOST_OP_TILING_GROUPED_MATMUL_SWIGLU_QUANT_V2_LAYERED_FUSION_TILING_H__

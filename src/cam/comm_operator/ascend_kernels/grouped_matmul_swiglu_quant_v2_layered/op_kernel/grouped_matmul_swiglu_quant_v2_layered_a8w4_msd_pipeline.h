@@ -28,9 +28,8 @@ using namespace matmul;
 
 namespace GroupedMatmulDequantSwigluQuant {
 
-template <class mmType>
-class GMMSwigluQuantPipelineSchedule {
-private:
+template <class mmType> class GMMSwigluQuantPipelineSchedule {
+  private:
     typename mmType::MT &mm;
     TPipe *pipe;
     const GMMSwigluQuantV2BaseParams *__restrict gmmSwigluQuantV2BaseParams;
@@ -52,7 +51,7 @@ private:
     __aicore__ inline void UpdateWorkSpaceSplitConfig(WorkSpaceSplitConfig &workspaceSplitConfig,
                                                       int32_t workspaceSplitLoopIdx);
 
-public:
+  public:
     __aicore__ inline GMMSwigluQuantPipelineSchedule(
         typename mmType::MT &mm_, const GMMSwigluQuantV2BaseParams *__restrict gmmSwigluQuantV2BaseParamsIN,
         const GMMSwigluQuantV2 *__restrict gmmSwigluIN, TPipe *tPipeIN)
@@ -90,8 +89,7 @@ __aicore__ inline void GMMSwigluQuantPipelineSchedule<mmType>::Init(GM_ADDR x, G
     InitWorkSpaceSplitConfig(workspaceSplitConfig);
 }
 
-template <class mmType>
-__aicore__ inline void GMMSwigluQuantPipelineSchedule<mmType>::Process()
+template <class mmType> __aicore__ inline void GMMSwigluQuantPipelineSchedule<mmType>::Process()
 {
     // 1.对每次workspace切分做大循环。
     preProcess.Init(gmAddrParams, gmmSwigluQuantV2BaseParams);
@@ -197,9 +195,9 @@ GMMSwigluQuantPipelineSchedule<mmType>::UpdateWorkSpaceSplitConfig(WorkSpaceSpli
             curTaskNumTmp += groupListGM.GetValue(workspaceSplitConfig.rightMatrixExpertEndIndex);
             curTaskNum = curTaskNumTmp - workspaceSplitConfig.leftMatrixStartIndex;
         }
-        int32_t nextTaskIdx = workspaceSplitConfig.rightMatrixExpertEndIndex >= gmmSwigluQuantV2->groupListLen - 1 ?
-                                  gmmSwigluQuantV2->groupListLen - 1 :
-                                  workspaceSplitConfig.rightMatrixExpertEndIndex + 1;
+        int32_t nextTaskIdx = workspaceSplitConfig.rightMatrixExpertEndIndex >= gmmSwigluQuantV2->groupListLen - 1
+                                  ? gmmSwigluQuantV2->groupListLen - 1
+                                  : workspaceSplitConfig.rightMatrixExpertEndIndex + 1;
         if (gmmSwigluQuantV2BaseParams->groupListType == 0) {
             nextTaskNum = groupListGM.GetValue(nextTaskIdx) - workspaceSplitConfig.leftMatrixStartIndex;
         } else {
@@ -226,9 +224,9 @@ GMMSwigluQuantPipelineSchedule<mmType>::UpdateWorkSpaceSplitConfig(WorkSpaceSpli
 
     if (workspaceSplitConfig.isLastLoop) {
         workspaceSplitConfig.rightMatrixExpertEndIndex =
-            workspaceSplitConfig.rightMatrixExpertEndIndex >= gmmSwigluQuantV2->groupListLen ?
-                gmmSwigluQuantV2->groupListLen - 1 :
-                workspaceSplitConfig.rightMatrixExpertEndIndex;
+            workspaceSplitConfig.rightMatrixExpertEndIndex >= gmmSwigluQuantV2->groupListLen
+                ? gmmSwigluQuantV2->groupListLen - 1
+                : workspaceSplitConfig.rightMatrixExpertEndIndex;
     }
 }
 

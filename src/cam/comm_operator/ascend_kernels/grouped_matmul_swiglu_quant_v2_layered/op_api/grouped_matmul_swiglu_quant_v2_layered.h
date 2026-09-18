@@ -14,14 +14,13 @@
 
 namespace l0op {
 
-const std::tuple<aclTensor *, aclTensor *> GroupedMatmulSwigluQuantV2Layered(const aclTensor *x, const aclTensorList *weight,
-                         const aclTensorList *weightScale,
-                         const aclTensor *xScale, const aclTensorList *weightAssistanceMatrix,
-                         const aclTensor *bias, const aclTensor *smoothScale,
-                         const aclTensor *groupList, const aclTensor *layerIndex, int64_t dequantMode,
-                         int64_t dequantDtype,
-                         int64_t quantMode, int64_t quantDtype, bool transposeWeight, int64_t groupListType,
-                         const aclIntArray *tuningConfigOptional, aclOpExecutor *executor);
+const std::tuple<aclTensor *, aclTensor *>
+GroupedMatmulSwigluQuantV2Layered(const aclTensor *x, const aclTensorList *weight, const aclTensorList *weightScale,
+                                  const aclTensor *xScale, const aclTensorList *weightAssistanceMatrix,
+                                  const aclTensor *bias, const aclTensor *smoothScale, const aclTensor *groupList,
+                                  const aclTensor *layerIndex, int64_t dequantMode, int64_t dequantDtype,
+                                  int64_t quantMode, int64_t quantDtype, bool transposeWeight, int64_t groupListType,
+                                  const aclIntArray *tuningConfigOptional, aclOpExecutor *executor);
 }
 
 #endif

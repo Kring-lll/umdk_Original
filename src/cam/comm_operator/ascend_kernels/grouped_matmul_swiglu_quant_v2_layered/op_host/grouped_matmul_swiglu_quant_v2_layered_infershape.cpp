@@ -36,9 +36,9 @@ constexpr int64_t DYNAMIC_GRAPH_FIRST_INFERSHAPE_DIM_VALUE = -1;
 
 static std::set<std::string> GmmDavidSupportSoc = {"Ascend950"};
 static const std::unordered_set<ge::DataType> DavidSupportedInputDtypes = {
-    ge::DataType::DT_FLOAT8_E5M2, ge::DataType::DT_FLOAT8_E4M3FN,
-    ge::DataType::DT_FLOAT4_E2M1, ge::DataType::DT_INT8, ge::DataType::DT_HIFLOAT8};
-bool  isSupportedInputDtypeForDavid(ge::DataType dtype)
+    ge::DataType::DT_FLOAT8_E5M2, ge::DataType::DT_FLOAT8_E4M3FN, ge::DataType::DT_FLOAT4_E2M1, ge::DataType::DT_INT8,
+    ge::DataType::DT_HIFLOAT8};
+bool isSupportedInputDtypeForDavid(ge::DataType dtype)
 {
     return DavidSupportedInputDtypes.find(dtype) != DavidSupportedInputDtypes.end();
 }
@@ -58,8 +58,8 @@ static ge::graphStatus InferShape4GroupedMatmulSwigluQuantV2Layered(gert::InferS
         OP_CHECK_NULL_WITH_CONTEXT(context, attrs);
         const bool *transposeWeightPtr = attrs->GetBool(WEIGHTSCALE_INDEX);
         const bool transposeWeight = (transposeWeightPtr != nullptr ? *transposeWeightPtr : false);
-        nDimIndex = transposeWeight ? weightScaleShape->GetDimNum() - OUT_DIM_LEN :
-                                        weightScaleShape->GetDimNum() - DIM_LEN;
+        nDimIndex =
+            transposeWeight ? weightScaleShape->GetDimNum() - OUT_DIM_LEN : weightScaleShape->GetDimNum() - DIM_LEN;
         int64_t dimValue = static_cast<int64_t>(weightScaleShape->GetDim(nDimIndex));
         int64_t n = 0;
         if (dimValue == DYNAMIC_GRAPH_FIRST_INFERSHAPE_DIM_VALUE) {
@@ -99,9 +99,9 @@ static graphStatus InferDataType4GroupedMatmulSwigluQuantV2Layered(gert::InferDa
     OP_CHECK_NULL_WITH_CONTEXT(context, context);
     auto attrs = context->GetAttrs();
     OP_CHECK_NULL_WITH_CONTEXT(context, attrs);
-    const int64_t* outDtype = attrs->GetInt(GMMSQ_INDEX_ATTR_QUANT_DTYPE);
+    const int64_t *outDtype = attrs->GetInt(GMMSQ_INDEX_ATTR_QUANT_DTYPE);
     OP_CHECK_NULL_WITH_CONTEXT(context, outDtype);
-    const int64_t* quantMode = attrs->GetInt(GMMSQ_INDEX_ATTR_QUANT_MODE);
+    const int64_t *quantMode = attrs->GetInt(GMMSQ_INDEX_ATTR_QUANT_MODE);
     OP_CHECK_NULL_WITH_CONTEXT(context, quantMode);
 
     fe::PlatformInfo platformInfo;
@@ -111,21 +111,27 @@ static graphStatus InferDataType4GroupedMatmulSwigluQuantV2Layered(gert::InferDa
         auto xDtype = context->GetInputDataType(X_INDEX);
         auto weightDtype = context->GetDynamicInputDataType(WEIGHT_INDEX, 0);
         OP_CHECK_IF(!isSupportedInputDtypeForDavid(xDtype) || !isSupportedInputDtypeForDavid(weightDtype),
-                OP_LOGE(context->GetNodeName(), "Invalid Input on this platform, expected FLOAT8_E4M3,"
+                    OP_LOGE(context->GetNodeName(),
+                            "Invalid Input on this platform, expected FLOAT8_E4M3,"
                             "FLOAT8_E5M2, FLOAT4_E2M1, INT_8, HIFLOAT8, but actual value of x is %s, weight is %s.",
                             ge::TypeUtils::DataTypeToSerialString(xDtype).c_str(),
-                            ge::TypeUtils::DataTypeToSerialString(weightDtype).c_str()), return GRAPH_FAILED);
-        
+                            ge::TypeUtils::DataTypeToSerialString(weightDtype).c_str()),
+                    return GRAPH_FAILED);
+
         OP_CHECK_IF(*quantMode != QUANT_MODE_MX_TYPE && *quantMode != QUANT_MODE_PERTOKEN_TYPE,
-                OP_LOGE(context->GetNodeName(), "On this platform, quantMode should be 0(Pertoken) or 2(MX),"
-                            " but actual value is %ld.", *quantMode), return GRAPH_FAILED); 
+                    OP_LOGE(context->GetNodeName(),
+                            "On this platform, quantMode should be 0(Pertoken) or 2(MX),"
+                            " but actual value is %ld.",
+                            *quantMode),
+                    return GRAPH_FAILED);
     }
     auto weightScaleDtype = context->GetDynamicInputDataType(WEIGHTSCALE_INDEX, 0);
     if (*quantMode == QUANT_MODE_MX_TYPE) {
         if (weightScaleDtype == ge::DataType::DT_FLOAT8_E8M0) {
             context->SetOutputDataType(1, DataType::DT_FLOAT8_E8M0);
-        }  else {
-            OP_LOGE(context->GetNodeName(), "In mx quant mode, quantMode should be 2, but actual value is %ld.", *quantMode);
+        } else {
+            OP_LOGE(context->GetNodeName(), "In mx quant mode, quantMode should be 2, but actual value is %ld.",
+                    *quantMode);
             return GRAPH_FAILED;
         }
     } else if (*quantMode == QUANT_MODE_PERTOKEN_TYPE) {

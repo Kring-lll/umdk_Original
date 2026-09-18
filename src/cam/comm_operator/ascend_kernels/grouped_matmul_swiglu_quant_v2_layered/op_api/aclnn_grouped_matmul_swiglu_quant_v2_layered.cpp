@@ -23,10 +23,10 @@ using namespace gmm_dsq;
 using namespace gmm_dsq_base;
 
 class GmmDsqHandlerFactory {
-private:
+  private:
     std::unordered_map<NpuArch, std::unique_ptr<GroupedMatmulSwigluQuantHandler>> handlers_;
 
-public:
+  public:
     void registerHandler(NpuArch npuArch, std::unique_ptr<GroupedMatmulSwigluQuantHandler> handler)
     {
         handlers_[npuArch] = std::move(handler);
@@ -39,21 +39,22 @@ public:
     }
 };
 
-static aclnnStatus aclnnGroupedMatmulSwigluQuantGetWorkspaceSizeCommon(const char* interfaceName,
-    GroupedMatmulSwigluQuantParamsBase &params, uint64_t *workspaceSize, aclOpExecutor **executor)
+static aclnnStatus aclnnGroupedMatmulSwigluQuantGetWorkspaceSizeCommon(const char *interfaceName,
+                                                                       GroupedMatmulSwigluQuantParamsBase &params,
+                                                                       uint64_t *workspaceSize,
+                                                                       aclOpExecutor **executor)
 {
     GmmDsqHandlerFactory factory;
     auto npuArch = op::GetCurrentPlatformInfo().GetCurNpuArch();
-    factory.registerHandler(NpuArch::DAV_2201,
-        std::make_unique<gmm_dsq_base::GroupedMatmulSwigluQuantBaseHandler>());
+    factory.registerHandler(NpuArch::DAV_2201, std::make_unique<gmm_dsq_base::GroupedMatmulSwigluQuantBaseHandler>());
     factory.registerHandler(NpuArch::DAV_3510,
-        std::make_unique<gmmSwigluQuantV2::GroupedMatmulSwigluQuantBaseHandler>());
+                            std::make_unique<gmmSwigluQuantV2::GroupedMatmulSwigluQuantBaseHandler>());
 
     if (auto *handler = factory.getHandler(npuArch)) {
         handler->Initialize(interfaceName, params, workspaceSize, executor);
         return handler->Process();
     } else {
-         OP_LOGE(ACLNN_ERR_PARAM_INVALID, "interfaceName failed: the soc verison is not support");
+        OP_LOGE(ACLNN_ERR_PARAM_INVALID, "interfaceName failed: the soc verison is not support");
     }
 
     return ACLNN_ERR_PARAM_INVALID;
@@ -63,40 +64,40 @@ static aclnnStatus aclnnGroupedMatmulSwigluQuantGetWorkspaceSizeCommon(const cha
 extern "C" {
 #endif
 
-aclnnStatus aclnnGroupedMatmulSwigluQuantV2LayeredGetWorkspaceSize(const aclTensor *x,
-        const aclTensorList *allWeight, const aclTensorList *allWeightScale,
-        const aclTensorList *allWeightAssistMatrix, const aclTensor *bias,
-        const aclTensor *xScale, const aclTensor *smoothScale,
-        const aclTensor *groupList, const aclTensor *layerIndex, int64_t dequantMode,
-        int64_t dequantDtype, int64_t quantMode,
-        int64_t groupListType, const aclIntArray *tuningConfigOptional,
-        aclTensor *output, aclTensor *outputScale,
-        uint64_t *workspaceSize, aclOpExecutor **executor)
+aclnnStatus aclnnGroupedMatmulSwigluQuantV2LayeredGetWorkspaceSize(
+    const aclTensor *x, const aclTensorList *allWeight, const aclTensorList *allWeightScale,
+    const aclTensorList *allWeightAssistMatrix, const aclTensor *bias, const aclTensor *xScale,
+    const aclTensor *smoothScale, const aclTensor *groupList, const aclTensor *layerIndex, int64_t dequantMode,
+    int64_t dequantDtype, int64_t quantMode, int64_t groupListType, const aclIntArray *tuningConfigOptional,
+    aclTensor *output, aclTensor *outputScale, uint64_t *workspaceSize, aclOpExecutor **executor)
 {
     OP_CHECK_COMM_INPUT(workspaceSize, executor);
     L2_DFX_PHASE_1(aclnnGroupedMatmulSwigluQuantV2Layered,
-                   DFX_IN(x, allWeight, allWeightScale, xScale, groupList, layerIndex),
-                   DFX_OUT(output, outputScale));
+                   DFX_IN(x, allWeight, allWeightScale, xScale, groupList, layerIndex), DFX_OUT(output, outputScale));
     CHECK_COND((output != nullptr), ACLNN_ERR_PARAM_INVALID,
                "Expected a proper Tensor but got null for argument output.");
     GroupedMatmulSwigluQuantParamsBase params =
         GroupedMatmulSwigluQuantParamsBuilder::Create(x, allWeight, allWeightScale, output, outputScale)
-        .SetXScale(xScale).SetSmoothScale(smoothScale)
-        .SetGroupList(groupList).SetGroupListType(groupListType)
-        .SetWeightAssistMatrix(allWeightAssistMatrix)
-        .SetLayerIndex(layerIndex)
-        .SetDequantAttr(dequantMode, dequantDtype)
-        .SetQuantAttr(quantMode, static_cast<int64_t> (output->GetDataType()))
-        .SetTransposeAttr(false).SetBias(bias)
-        .SetScenario()
-        .SetTuningConfig(tuningConfigOptional).Build();
+            .SetXScale(xScale)
+            .SetSmoothScale(smoothScale)
+            .SetGroupList(groupList)
+            .SetGroupListType(groupListType)
+            .SetWeightAssistMatrix(allWeightAssistMatrix)
+            .SetLayerIndex(layerIndex)
+            .SetDequantAttr(dequantMode, dequantDtype)
+            .SetQuantAttr(quantMode, static_cast<int64_t>(output->GetDataType()))
+            .SetTransposeAttr(false)
+            .SetBias(bias)
+            .SetScenario()
+            .SetTuningConfig(tuningConfigOptional)
+            .Build();
 
     // 调用公共接口
     return aclnnGroupedMatmulSwigluQuantGetWorkspaceSizeCommon(__FUNCTION__, params, workspaceSize, executor);
 }
 
 aclnnStatus aclnnGroupedMatmulSwigluQuantV2Layered(void *workspace, uint64_t workspaceSize, aclOpExecutor *executor,
-                                            aclrtStream stream)
+                                                   aclrtStream stream)
 {
     L2_DFX_PHASE_2(aclnnGroupedMatmulSwigluQuantV2Layered);
     CHECK_COND(CommonOpExecutorRun(workspace, workspaceSize, executor, stream) == ACLNN_SUCCESS, ACLNN_ERR_INNER,

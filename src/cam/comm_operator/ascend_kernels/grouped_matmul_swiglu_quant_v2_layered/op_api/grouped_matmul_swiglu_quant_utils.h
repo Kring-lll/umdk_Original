@@ -36,10 +36,10 @@ constexpr size_t WEIGHT_ND_DIM_LIMIT = 3UL;
 
 struct GroupedMatmulSwigluQuantParamsBase {
     const aclTensor *x = nullptr;
-    const aclTensorList *weight = nullptr;              // all_weight: one element per layer
-    const aclTensorList *weightScale = nullptr;         // all_weight_scale: one element per layer
-    const aclTensorList *weightAssistMatrix = nullptr;  // all_weight_assist_matrix: one element per layer
-    const aclTensor *layerIndex = nullptr;              // device-side current layer index, shape [1]
+    const aclTensorList *weight = nullptr;             // all_weight: one element per layer
+    const aclTensorList *weightScale = nullptr;        // all_weight_scale: one element per layer
+    const aclTensorList *weightAssistMatrix = nullptr; // all_weight_assist_matrix: one element per layer
+    const aclTensor *layerIndex = nullptr;             // device-side current layer index, shape [1]
     const aclTensor *xScale = nullptr;
     const aclTensor *bias = nullptr;
     const aclTensor *smoothScale = nullptr;
@@ -58,9 +58,10 @@ struct GroupedMatmulSwigluQuantParamsBase {
 };
 
 class GroupedMatmulSwigluQuantParamsBuilder {
-public:
+  public:
     static GroupedMatmulSwigluQuantParamsBuilder Create(const aclTensor *x, const aclTensorList *weight,
-        const aclTensorList *weightScale, const aclTensor *output, const aclTensor *outputScale)
+                                                        const aclTensorList *weightScale, const aclTensor *output,
+                                                        const aclTensor *outputScale)
     {
         GroupedMatmulSwigluQuantParamsBuilder b;
         b.p_.x = x;
@@ -142,17 +143,17 @@ public:
     GroupedMatmulSwigluQuantParamsBuilder &SetScenario()
     {
         p_.isA8W4 = ((this->p_.x->GetDataType() == DataType::DT_INT8 &&
-                    ((*this->p_.weight)[0])->GetDataType() == DataType::DT_INT4) ||
-                    (this->p_.x->GetDataType() == DataType::DT_INT8 &&
-                    ((*this->p_.weight)[0])->GetDataType() == DataType::DT_INT32));
+                      ((*this->p_.weight)[0])->GetDataType() == DataType::DT_INT4) ||
+                     (this->p_.x->GetDataType() == DataType::DT_INT8 &&
+                      ((*this->p_.weight)[0])->GetDataType() == DataType::DT_INT32));
         p_.isA4W4 = ((this->p_.x->GetDataType() == DataType::DT_INT4 &&
-                    ((*this->p_.weight)[0])->GetDataType() == DataType::DT_INT4) ||
-                    (this->p_.x->GetDataType() == DataType::DT_INT4 &&
-                    ((*this->p_.weight)[0])->GetDataType() == DataType::DT_INT32) ||
-                    (this->p_.x->GetDataType() == DataType::DT_INT32 &&
-                    ((*this->p_.weight)[0])->GetDataType() == DataType::DT_INT4) ||
-                    (this->p_.x->GetDataType() == DataType::DT_INT32 &&
-                    ((*this->p_.weight)[0])->GetDataType() == DataType::DT_INT32));
+                      ((*this->p_.weight)[0])->GetDataType() == DataType::DT_INT4) ||
+                     (this->p_.x->GetDataType() == DataType::DT_INT4 &&
+                      ((*this->p_.weight)[0])->GetDataType() == DataType::DT_INT32) ||
+                     (this->p_.x->GetDataType() == DataType::DT_INT32 &&
+                      ((*this->p_.weight)[0])->GetDataType() == DataType::DT_INT4) ||
+                     (this->p_.x->GetDataType() == DataType::DT_INT32 &&
+                      ((*this->p_.weight)[0])->GetDataType() == DataType::DT_INT32));
         return *this;
     }
 
@@ -161,15 +162,15 @@ public:
         return p_;
     }
 
-private:
+  private:
     GroupedMatmulSwigluQuantParamsBase p_;
 };
 
 class GroupedMatmulSwigluQuantHandler {
-public:
+  public:
     virtual ~GroupedMatmulSwigluQuantHandler() = default;
 
-protected:
+  protected:
     bool CheckTensorListNull(const aclTensorList *&tensors) const
     {
         OP_CHECK_NULL(tensors, return false);
@@ -203,8 +204,7 @@ protected:
         }
 
         if (!gmmDsqParams_.weight || !gmmDsqParams_.weightScale) {
-            OP_LOGE(ACLNN_ERR_PARAM_NULLPTR,
-            "The weight or weightScale is nullptr.");
+            OP_LOGE(ACLNN_ERR_PARAM_NULLPTR, "The weight or weightScale is nullptr.");
             return false;
         }
         return true;
@@ -262,13 +262,13 @@ protected:
     }
 
     void CreateEmptyTensor(const aclDataType dataType, const aclTensorList *&tensorList,
-            aclTensorList *&emptyTensorList) const
+                           aclTensorList *&emptyTensorList) const
     {
         if (tensorList != nullptr) {
             return;
         }
 
-        FVector<aclTensor*> emptyTensors;
+        FVector<aclTensor *> emptyTensors;
         aclTensor *emptyTensor = l0Executor_->AllocTensor({0}, static_cast<op::DataType>(dataType));
         emptyTensors.emplace_back(emptyTensor);
         emptyTensorList = l0Executor_->AllocTensorList(emptyTensors.data(), emptyTensors.size());
@@ -311,16 +311,15 @@ protected:
     {
         aclTensorList *emptyWeightAssistMatrixList = nullptr;
         CheckOptionalTensorListEmpty(gmmDsqParams_.weightAssistMatrix);
-        CreateEmptyTensor(aclDataType::ACL_FLOAT, gmmDsqParams_.weightAssistMatrix,
-            emptyWeightAssistMatrixList);
+        CreateEmptyTensor(aclDataType::ACL_FLOAT, gmmDsqParams_.weightAssistMatrix, emptyWeightAssistMatrixList);
 
         CHECK_COND(DataContiguousWeight(gmmDsqParams_.weight) == ACLNN_SUCCESS, ACLNN_ERR_INNER_NULLPTR,
-                    "Contiguous weight failed.");
+                   "Contiguous weight failed.");
         CHECK_COND(DataContiguous(gmmDsqParams_.weightScale) == ACLNN_SUCCESS, ACLNN_ERR_INNER_NULLPTR,
-                    "Contiguous weightScale failed.");
+                   "Contiguous weightScale failed.");
         if (gmmDsqParams_.weightAssistMatrix != nullptr && gmmDsqParams_.weightAssistMatrix->Size() != 0) {
             CHECK_COND(DataContiguous(gmmDsqParams_.weightAssistMatrix) == ACLNN_SUCCESS, ACLNN_ERR_INNER_NULLPTR,
-                    "Contiguous weightAssistMatrix failed.");
+                       "Contiguous weightAssistMatrix failed.");
         }
 
         gmmDsqParams_.x = l0op::Contiguous(gmmDsqParams_.x, l0Executor_);
@@ -333,8 +332,9 @@ protected:
         return ACLNN_SUCCESS;
     }
 
-public:
-    void Initialize(const char *interfaceName, GroupedMatmulSwigluQuantParamsBase &params, uint64_t *workspaceSize, aclOpExecutor **executor)
+  public:
+    void Initialize(const char *interfaceName, GroupedMatmulSwigluQuantParamsBase &params, uint64_t *workspaceSize,
+                    aclOpExecutor **executor)
     {
         interfaceName_ = interfaceName;
         gmmDsqParams_ = params;
@@ -361,7 +361,7 @@ public:
         }
         auto ret = CheckParams();
         CHECK_RET(ret == ACLNN_SUCCESS, ret);
-        
+
         for (size_t i = 0; i < gmmDsqParams_.weight->Size(); i++) {
             auto *w = (*gmmDsqParams_.weight)[i];
             if (IsPrivateFormat(w->GetStorageFormat())) {
@@ -370,7 +370,8 @@ public:
         }
 
         // 空Tensor场景
-        if (gmmDsqParams_.output->IsEmpty() || gmmDsqParams_.groupList->IsEmpty() || gmmDsqParams_.outputScale->IsEmpty()) {
+        if (gmmDsqParams_.output->IsEmpty() || gmmDsqParams_.groupList->IsEmpty() ||
+            gmmDsqParams_.outputScale->IsEmpty()) {
             *workspaceSize_ = 0ULL;
             uniqueExecutor.ReleaseTo(executor_);
             return ACLNN_SUCCESS;
@@ -378,15 +379,12 @@ public:
 
         ret = CovertDataContiguous();
         CHECK_RET(ret == ACLNN_SUCCESS, ret);
-        auto ret0 = l0op::GroupedMatmulSwigluQuantV2Layered(gmmDsqParams_.x, gmmDsqParams_.weight, gmmDsqParams_.weightScale,
-                                                gmmDsqParams_.xScale, gmmDsqParams_.weightAssistMatrix,
-                                                gmmDsqParams_.bias,
-                                                gmmDsqParams_.smoothScale, gmmDsqParams_.groupList,
-                                                gmmDsqParams_.layerIndex,
-                                                gmmDsqParams_.dequantMode, gmmDsqParams_.dequantDtype,
-                                                gmmDsqParams_.quantMode, gmmDsqParams_.quantDtype,
-                                                gmmDsqParams_.transposeWeight, gmmDsqParams_.groupListType,
-                                                gmmDsqParams_.tuningConfig, uniqueExecutor.get());
+        auto ret0 = l0op::GroupedMatmulSwigluQuantV2Layered(
+            gmmDsqParams_.x, gmmDsqParams_.weight, gmmDsqParams_.weightScale, gmmDsqParams_.xScale,
+            gmmDsqParams_.weightAssistMatrix, gmmDsqParams_.bias, gmmDsqParams_.smoothScale, gmmDsqParams_.groupList,
+            gmmDsqParams_.layerIndex, gmmDsqParams_.dequantMode, gmmDsqParams_.dequantDtype, gmmDsqParams_.quantMode,
+            gmmDsqParams_.quantDtype, gmmDsqParams_.transposeWeight, gmmDsqParams_.groupListType,
+            gmmDsqParams_.tuningConfig, uniqueExecutor.get());
         CHECK_RET(ret0 != std::tuple(nullptr, nullptr), ACLNN_ERR_INNER_NULLPTR);
 
         auto out0 = std::get<OUTPUT_IDX_0>(ret0);
@@ -402,7 +400,7 @@ public:
         return ACLNN_SUCCESS;
     }
 
-protected:
+  protected:
     string interfaceName_;
     GroupedMatmulSwigluQuantParamsBase gmmDsqParams_;
     uint64_t *workspaceSize_;

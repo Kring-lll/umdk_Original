@@ -70,7 +70,7 @@ const std::initializer_list<DataType> QUANTSCALEOUT_DTYPE_SUPPORT_LIST = {DataTy
 const std::initializer_list<DataType> QUANTSCALEOUT_DTYPE_SUPPORT_LIST_PERTOKEN = {DataType::DT_FLOAT};
 
 class GroupedMatmulSwigluQuantBaseHandler : public GroupedMatmulSwigluQuantHandler {
-protected:
+  protected:
     bool IsTransposeForMxShape(const aclTensor *tensor) const
     {
         auto shape = tensor->GetViewShape();
@@ -139,7 +139,8 @@ protected:
             op::Shape viewShape = inputTensor->GetViewShape();
             uint32_t viewShapeDimsNum = viewShape.GetDimNum();
             shape.SetScalar();
-            // 2: the second last dimension; in for-loops, it indicates dimensions before the second last remain unchanged.
+            // 2: the second last dimension; in for-loops, it indicates dimensions before the second last remain
+            // unchanged.
             for (uint32_t i = 0; i < viewShapeDimsNum - 2; ++i) {
                 shape.AppendDim(viewShape.GetDim(i));
             }
@@ -204,14 +205,13 @@ protected:
             return false;
         }
         ge::DataType dequantDtype = static_cast<ge::DataType>(gmmDsqParams_.dequantDtype);
-        if (gmmDsqParams_.quantMode == QUNAT_MODE_MX && dequantDtype != ge::DT_FLOAT) {	 
-             OP_LOGE(ACLNN_ERR_PARAM_INVALID,	 
-                     "In mx quant mode, dequantDtype should be 0, but actual value is %lu.", 	 
-                     gmmDsqParams_.dequantDtype);	 
-             return false;	 
+        if (gmmDsqParams_.quantMode == QUNAT_MODE_MX && dequantDtype != ge::DT_FLOAT) {
+            OP_LOGE(ACLNN_ERR_PARAM_INVALID, "In mx quant mode, dequantDtype should be 0, but actual value is %lu.",
+                    gmmDsqParams_.dequantDtype);
+            return false;
         }
-        if (gmmDsqParams_.quantMode == QUNAT_MODE_PERTOKEN && dequantDtype != ge::DT_FLOAT && dequantDtype != ge::DT_BF16 &&
-            dequantDtype != ge::DT_FLOAT16) {
+        if (gmmDsqParams_.quantMode == QUNAT_MODE_PERTOKEN && dequantDtype != ge::DT_FLOAT &&
+            dequantDtype != ge::DT_BF16 && dequantDtype != ge::DT_FLOAT16) {
             OP_LOGE(ACLNN_ERR_PARAM_INVALID,
                     "In pertoken quant mode, dequantDtype should be 0, 1, 27, but actual value is %lu.",
                     gmmDsqParams_.dequantDtype);
@@ -298,8 +298,8 @@ protected:
         int64_t m = gmmDsqParams_.x->GetViewShape().GetDim(0); // 从x的第0维获取m
         int64_t k = gmmDsqParams_.x->GetViewShape().GetDim(1); // 从x的第1维获取k
         // 转置情况下从weight的第1维获取n，非转置情况下从weight的第2维获取n
-        int64_t n = gmmDsqParams_.transposeWeight ? ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(1) :
-                                                    ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(2);
+        int64_t n = gmmDsqParams_.transposeWeight ? ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(1)
+                                                  : ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(2);
         int64_t e = ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(0); // 从weight的第0维获取e
 
         // x的shape期望为[M, K]
@@ -357,8 +357,8 @@ protected:
         int64_t m = gmmDsqParams_.x->GetViewShape().GetDim(0); // 从x的第0维获取m
         int64_t k = gmmDsqParams_.x->GetViewShape().GetDim(1); // 从x的第1维获取k
         // 转置情况下从weight的第1维获取n，非转置情况下从weight的第2维获取n
-        int64_t n = gmmDsqParams_.transposeWeight ? ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(1) :
-                                                    ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(2);
+        int64_t n = gmmDsqParams_.transposeWeight ? ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(1)
+                                                  : ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(2);
         int64_t e = ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(0); // 从weight的第0维获取e
 
         // x的shape期望为[M, K]
@@ -472,12 +472,11 @@ protected:
     {
         int64_t kValue = gmmDsqParams_.x->GetViewShape().GetDim(1);
         // 转置情况下从weight的第1维获取n，非转置情况下从weight的第2维获取n
-        int64_t nValue = gmmDsqParams_.transposeWeight ? ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(1) :
-                                                         ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(2);
+        int64_t nValue = gmmDsqParams_.transposeWeight ? ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(1)
+                                                       : ((*gmmDsqParams_.weight)[0])->GetViewShape().GetDim(2);
         // mxfp4场景不支持k=2
         if (kValue == MXFP4_K_CONSTRAINT) {
-            OP_LOGE(ACLNN_ERR_PARAM_INVALID,
-                    "When the dtypes of x and weight inputs are DT_FLOAT4_E2M1, the K value \
+            OP_LOGE(ACLNN_ERR_PARAM_INVALID, "When the dtypes of x and weight inputs are DT_FLOAT4_E2M1, the K value \
 should be greater than 2, but actual value is %lu.",
                     kValue);
             return false;
@@ -488,8 +487,7 @@ should be greater than 2, but actual value is %lu.",
         // 2：检查N是否为偶数
         int64_t nModValue = nValue % MXFP4_N_CONSTRAINT;
         if (kModValue != 0) {
-            OP_LOGE(ACLNN_ERR_PARAM_INVALID,
-                    "When the dtypes of x and weight inputs are DT_FLOAT4_E2M1, the K value \
+            OP_LOGE(ACLNN_ERR_PARAM_INVALID, "When the dtypes of x and weight inputs are DT_FLOAT4_E2M1, the K value \
 should be even, but actual value is %lu.",
                     kValue);
             return false;
@@ -499,8 +497,7 @@ should be even, but actual value is %lu.",
         DataType outputDtype = gmmDsqParams_.output->GetDataType();
         if (outputDtype == DataType::DT_FLOAT4_E2M1) {
             if (!(nValue >= MXFP4_N_CONSTRAINT && nModValue == 0)) {
-                OP_LOGE(ACLNN_ERR_PARAM_INVALID,
-                        "When the output dtype is DT_FLOAT4_E2M1, the N value should be even \
+                OP_LOGE(ACLNN_ERR_PARAM_INVALID, "When the output dtype is DT_FLOAT4_E2M1, the N value should be even \
 and greater or equal to 4, but actual value is %lu.",
                         nValue);
                 return false;
@@ -669,7 +666,6 @@ and greater or equal to 4, but actual value is %lu.",
         return true;
     }
 
-
     bool CheckInputOutShapeForMX()
     {
         if (!CheckMXTranspose()) {
@@ -712,26 +708,35 @@ and greater or equal to 4, but actual value is %lu.",
         const aclTensor *groupList = gmmDsqParams_.groupList;
         const aclTensor *output = gmmDsqParams_.output;
         const aclTensor *outputScale = gmmDsqParams_.outputScale;
-        if(std::find(X_DTYPE_SUPPORT_LIST.begin(), X_DTYPE_SUPPORT_LIST.end(), xDtype) == X_DTYPE_SUPPORT_LIST.end() &&
-           std::find(X_DTYPE_SUPPORT_LIST_MXFP4.begin(), X_DTYPE_SUPPORT_LIST_MXFP4.end(), xDtype) == X_DTYPE_SUPPORT_LIST_MXFP4.end() && 
-           std::find(XW_DTYPE_SUPPORT_LIST_PERTOKEN.begin(), XW_DTYPE_SUPPORT_LIST_PERTOKEN.end(), xDtype) == XW_DTYPE_SUPPORT_LIST_PERTOKEN.end()){
-            OP_LOGE(ACLNN_ERR_PARAM_INVALID, "Quant case with x dtype %s is not supported; supported types are: INT8, FLOAT8_E4M3FN, "
-                        "FLOAT8_E5M2, HIFLOAT8, and FLOAT4_E2M1.", op::ToString(xDtype).GetString());
+        if (std::find(X_DTYPE_SUPPORT_LIST.begin(), X_DTYPE_SUPPORT_LIST.end(), xDtype) == X_DTYPE_SUPPORT_LIST.end() &&
+            std::find(X_DTYPE_SUPPORT_LIST_MXFP4.begin(), X_DTYPE_SUPPORT_LIST_MXFP4.end(), xDtype) ==
+                X_DTYPE_SUPPORT_LIST_MXFP4.end() &&
+            std::find(XW_DTYPE_SUPPORT_LIST_PERTOKEN.begin(), XW_DTYPE_SUPPORT_LIST_PERTOKEN.end(), xDtype) ==
+                XW_DTYPE_SUPPORT_LIST_PERTOKEN.end()) {
+            OP_LOGE(ACLNN_ERR_PARAM_INVALID,
+                    "Quant case with x dtype %s is not supported; supported types are: INT8, FLOAT8_E4M3FN, "
+                    "FLOAT8_E5M2, HIFLOAT8, and FLOAT4_E2M1.",
+                    op::ToString(xDtype).GetString());
             return false;
         }
-        if(std::find(WEIGHT_DTYPE_SUPPORT_LIST.begin(), WEIGHT_DTYPE_SUPPORT_LIST.end(), weightDtype) == WEIGHT_DTYPE_SUPPORT_LIST.end() &&
-           std::find(WEIGHT_DTYPE_SUPPORT_LIST_MXFP4.begin(), WEIGHT_DTYPE_SUPPORT_LIST_MXFP4.end(), weightDtype) == WEIGHT_DTYPE_SUPPORT_LIST_MXFP4.end() && 
-           std::find(XW_DTYPE_SUPPORT_LIST_PERTOKEN.begin(), XW_DTYPE_SUPPORT_LIST_PERTOKEN.end(), weightDtype) == XW_DTYPE_SUPPORT_LIST_PERTOKEN.end()){
-            OP_LOGE(ACLNN_ERR_PARAM_INVALID, "Quant case with weight dtype %s is not supported; supported types are: INT8, FLOAT8_E4M3FN, "
-                        "FLOAT8_E5M2, HIFLOAT8, and FLOAT4_E2M1.", op::ToString(weightDtype).GetString());
+        if (std::find(WEIGHT_DTYPE_SUPPORT_LIST.begin(), WEIGHT_DTYPE_SUPPORT_LIST.end(), weightDtype) ==
+                WEIGHT_DTYPE_SUPPORT_LIST.end() &&
+            std::find(WEIGHT_DTYPE_SUPPORT_LIST_MXFP4.begin(), WEIGHT_DTYPE_SUPPORT_LIST_MXFP4.end(), weightDtype) ==
+                WEIGHT_DTYPE_SUPPORT_LIST_MXFP4.end() &&
+            std::find(XW_DTYPE_SUPPORT_LIST_PERTOKEN.begin(), XW_DTYPE_SUPPORT_LIST_PERTOKEN.end(), weightDtype) ==
+                XW_DTYPE_SUPPORT_LIST_PERTOKEN.end()) {
+            OP_LOGE(ACLNN_ERR_PARAM_INVALID,
+                    "Quant case with weight dtype %s is not supported; supported types are: INT8, FLOAT8_E4M3FN, "
+                    "FLOAT8_E5M2, HIFLOAT8, and FLOAT4_E2M1.",
+                    op::ToString(weightDtype).GetString());
             return false;
         }
         if (gmmDsqParams_.quantMode == 2 &&
             (xDtype == DataType::DT_FLOAT8_E4M3FN || xDtype == DataType::DT_FLOAT8_E5M2) &&
             (weightDtype == DataType::DT_FLOAT8_E4M3FN || weightDtype == DataType::DT_FLOAT8_E5M2)) {
             return CheckFp8DtypeValid(x, xScale, groupList, output, outputScale);
-        } else if (gmmDsqParams_.quantMode == 2 &&
-                   xDtype == DataType::DT_FLOAT4_E2M1 && weightDtype == DataType::DT_FLOAT4_E2M1) {
+        } else if (gmmDsqParams_.quantMode == 2 && xDtype == DataType::DT_FLOAT4_E2M1 &&
+                   weightDtype == DataType::DT_FLOAT4_E2M1) {
             return CheckFp4DtypeValid(x, xScale, groupList, output, outputScale);
         } else if (gmmDsqParams_.quantMode == 0) {
             return CheckPertokenDtypeValid(x, xScale, groupList, output, outputScale);

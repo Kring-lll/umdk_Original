@@ -26,8 +26,7 @@ constexpr int64_t NZ_WEIGHT_MULTI_TENSOR_DIM = 4;
 constexpr float EFFECTIVE_TASK_RATIO = 0.95f;
 constexpr int32_t MIN_BASE_M = 16;
 
-template <typename T>
-static inline auto AlignUp(T a, T base) -> T
+template <typename T> static inline auto AlignUp(T a, T base) -> T
 {
     if (base == 0) {
         return 0;
@@ -35,15 +34,13 @@ static inline auto AlignUp(T a, T base) -> T
     return (a + base - 1) / base * base;
 }
 
-template <typename T1, typename T2>
-auto CeilDiv(T1 a, T2 b) -> T1
+template <typename T1, typename T2> auto CeilDiv(T1 a, T2 b) -> T1
 {
     if (b == 0) {
         return 0;
     }
     return (a + b - 1) / b;
 }
-
 
 static inline uint32_t SixteenAlign(uint32_t a, bool up = false)
 {
@@ -155,12 +152,9 @@ ge::graphStatus GroupedMatmulSwigluQuantV2LayeredBaseTiling::ParseInputAndAttr()
     auto layerTensor = context_->GetDynamicInputTensor(LAYER_INDEX, 0);
     OP_CHECK_NULL_WITH_CONTEXT(context_, layerTensor);
     OP_CHECK_IF(layerTensor->GetDataType() != ge::DataType::DT_INT64,
-        OP_LOGE(context_->GetNodeName(), "layer_index must be INT64."),
-        return ge::GRAPH_FAILED);
-    OP_CHECK_IF(layerTensor->GetStorageShape().GetDimNum() != 1 ||
-                layerTensor->GetStorageShape().GetDim(0) != 1,
-        OP_LOGE(context_->GetNodeName(), "layer_index must be a 1-element tensor."),
-        return ge::GRAPH_FAILED);
+                OP_LOGE(context_->GetNodeName(), "layer_index must be INT64."), return ge::GRAPH_FAILED);
+    OP_CHECK_IF(layerTensor->GetStorageShape().GetDimNum() != 1 || layerTensor->GetStorageShape().GetDim(0) != 1,
+                OP_LOGE(context_->GetNodeName(), "layer_index must be a 1-element tensor."), return ge::GRAPH_FAILED);
 
     // layered: all_weight / all_weight_scale / all_weight_assist_matrix lists must be the same
     // length (one element per layer). The value of layer_index lives on device and cannot be
@@ -178,13 +172,13 @@ ge::graphStatus GroupedMatmulSwigluQuantV2LayeredBaseTiling::ParseInputAndAttr()
         wAssistListLen++;
     }
     OP_CHECK_IF(weightListLen == 0 || weightListLen != wScaleListLen,
-        OP_LOGE(context_->GetNodeName(),
-                "all_weight and all_weight_scale list lengths differ: %u vs %u.", weightListLen, wScaleListLen),
-        return ge::GRAPH_FAILED);
+                OP_LOGE(context_->GetNodeName(), "all_weight and all_weight_scale list lengths differ: %u vs %u.",
+                        weightListLen, wScaleListLen),
+                return ge::GRAPH_FAILED);
     OP_CHECK_IF(wAssistListLen != 0 && wAssistListLen != weightListLen,
-        OP_LOGE(context_->GetNodeName(),
-                "all_weight_assist_matrix list length %u differs from all_weight %u.", wAssistListLen, weightListLen),
-        return ge::GRAPH_FAILED);
+                OP_LOGE(context_->GetNodeName(), "all_weight_assist_matrix list length %u differs from all_weight %u.",
+                        wAssistListLen, weightListLen),
+                return ge::GRAPH_FAILED);
 
     // layered: every layer element carries all experts (single-tensor semantics per layer)
     isSingleTensor_ = 1;
@@ -229,8 +223,9 @@ ge::graphStatus GroupedMatmulSwigluQuantV2LayeredBaseTiling::ParseInputAndAttr()
         isNz_ = true;
     }
     const auto tuningConfigPtr = attr->GetAttrPointer<gert::ContinuousVector>(ATTR_INDEX_TUNING_CONFIG);
-    tuningConfig_ = tuningConfigPtr != nullptr && tuningConfigPtr->GetSize() > 1?
-                    (reinterpret_cast<const int64_t*>(tuningConfigPtr->GetData()))[0] : 0;
+    tuningConfig_ = tuningConfigPtr != nullptr && tuningConfigPtr->GetSize() > 1
+                        ? (reinterpret_cast<const int64_t *>(tuningConfigPtr->GetData()))[0]
+                        : 0;
 
     if (isA4W4_) {
         n_ = wScaleTensor->GetStorageShape().GetDim(wScaleDimNum - DIM_1);
@@ -265,7 +260,7 @@ ge::graphStatus GroupedMatmulSwigluQuantV2LayeredBaseTiling::ParseInputAndAttr()
 }
 
 int32_t GroupedMatmulSwigluQuantV2LayeredBaseTiling::FindBestSingleN(const uint32_t &aicNum, int64_t baseM,
-                                                                    int64_t baseN) const
+                                                                     int64_t baseN) const
 {
     uint64_t quantGroupNum = quantGroupNum_;
     if (n_ < baseN || tuningConfig_ <= 0 || !(quantGroupNum == 1)) {
@@ -304,7 +299,7 @@ int32_t GroupedMatmulSwigluQuantV2LayeredBaseTiling::FindBestSingleN(const uint3
 }
 
 bool GroupedMatmulSwigluQuantV2LayeredBaseTiling::TryFullLoadA(int32_t baseM, int64_t baseN, int64_t baseK,
-                                                                uint64_t l1Size)
+                                                               uint64_t l1Size)
 {
     // 暂时只支持A4W4
     float sizeofweightDtype = 0.5f;
@@ -320,12 +315,11 @@ bool GroupedMatmulSwigluQuantV2LayeredBaseTiling::TryFullLoadA(int32_t baseM, in
     return false;
 }
 
-
 ge::graphStatus GroupedMatmulSwigluQuantV2LayeredBaseTiling::DynamicTilingSingleN(gert::TilingContext *context,
-                                                                            const uint32_t &aicNum,
-                                                int64_t baseM, int64_t baseN, int64_t baseK)
+                                                                                  const uint32_t &aicNum, int64_t baseM,
+                                                                                  int64_t baseN, int64_t baseK)
 {
-    //get info
+    // get info
     auto platformInfoPtr = context->GetPlatformInfo();
     OP_CHECK_NULL_WITH_CONTEXT(context, platformInfoPtr);
     auto ascendcPlatform = platform_ascendc::PlatformAscendC(platformInfoPtr);

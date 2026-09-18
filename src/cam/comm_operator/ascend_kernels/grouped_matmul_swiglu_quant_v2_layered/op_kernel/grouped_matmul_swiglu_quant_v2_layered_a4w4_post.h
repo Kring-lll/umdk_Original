@@ -26,7 +26,7 @@ using namespace AscendC;
 #define DOUBLE_BUFFER 2
 constexpr float DEFAULT_MUL_SCALE = 16.0f;
 class GMMA4W4PostProcess {
-public:
+  public:
     __aicore__ inline GMMA4W4PostProcess(){};
     __aicore__ inline void Init(const GMAddrParams gmAddrParams,
                                 const GMMSwigluQuantV2BaseParams *__restrict gmmSwigluQuantV2BaseParamsIN,
@@ -35,7 +35,7 @@ public:
     __aicore__ inline void Process(WorkSpaceSplitConfig &workspaceSplitConfig, int64_t workspaceSplitLoopIdx,
                                    TPipe *pipe);
 
-private:
+  private:
     __aicore__ inline void UpdateVecConfig(uint32_t blockIdx, VecConfig &vecConfig,
                                            WorkSpaceSplitConfig &workspaceSplitConfig, int64_t workspaceSplitLoopIdx,
                                            TPipe *pipe);
@@ -77,7 +77,8 @@ private:
     int64_t aivCoreNum = 0;
 };
 
-__aicore__ inline void GMMA4W4PostProcess::Init(const GMAddrParams gmAddrParams,
+__aicore__ inline void
+GMMA4W4PostProcess::Init(const GMAddrParams gmAddrParams,
                          const GMMSwigluQuantV2BaseParams *__restrict gmmSwigluQuantV2BaseParamsIN,
                          const GMMSwigluQuantV2 *__restrict gmmSwigluIN)
 {
@@ -175,7 +176,7 @@ __aicore__ inline void GMMA4W4PostProcess::Swiglu(uint32_t loopIdx, VecConfig &v
 }
 
 __aicore__ inline void GMMA4W4PostProcess::ApplySmoothScale(uint32_t loopIdx, VecConfig &vecConfig,
-                                                                WorkSpaceSplitConfig &workspaceSplitConfig)
+                                                            WorkSpaceSplitConfig &workspaceSplitConfig)
 {
     LocalTensor<float> mmLocal = mmOutQueue.DeQue<float>();
 
@@ -268,8 +269,8 @@ __aicore__ inline void GMMA4W4PostProcess::UpdateVecConfig(uint32_t blockIdx, Ve
                                                            int64_t workspaceSplitLoopIdx, TPipe *pipe)
 {
     // 第一步 读取grouplist reduceSum 计算总数据个数
-    vecConfig.M = workspaceSplitLoopIdx < workspaceSplitConfig.loopCount - 1 ? workspaceSplitConfig.notLastTaskSize :
-                                                                               workspaceSplitConfig.lastLoopTaskSize;
+    vecConfig.M = workspaceSplitLoopIdx < workspaceSplitConfig.loopCount - 1 ? workspaceSplitConfig.notLastTaskSize
+                                                                             : workspaceSplitConfig.lastLoopTaskSize;
     // 第二步 计算分核
     uint32_t eachCoreTaskNum = (vecConfig.M + aivCoreNum - 1) / aivCoreNum;
     vecConfig.usedCoreNum = vecConfig.M >= aivCoreNum ? aivCoreNum : vecConfig.M;
@@ -304,15 +305,14 @@ __aicore__ inline void GMMA4W4PostProcess::UpdateVecConfig(uint32_t blockIdx, Ve
     // 第三步 计算总数据量
     vecConfig.outLoopNum =
         (vecConfig.taskNum + gmmSwigluQuantV2->maxProcessRowNum - 1) / gmmSwigluQuantV2->maxProcessRowNum;
-    vecConfig.tailLoopNum = vecConfig.taskNum % gmmSwigluQuantV2->maxProcessRowNum ?
-                                vecConfig.taskNum % gmmSwigluQuantV2->maxProcessRowNum :
-                                gmmSwigluQuantV2->maxProcessRowNum;
+    vecConfig.tailLoopNum = vecConfig.taskNum % gmmSwigluQuantV2->maxProcessRowNum
+                                ? vecConfig.taskNum % gmmSwigluQuantV2->maxProcessRowNum
+                                : gmmSwigluQuantV2->maxProcessRowNum;
 
     // 第四步 申请空间
     // 2 * row * n * sizeof(float) + row * n / 2 * sizeof(int8) + alignUp<row, 8> * sizeof(float) + n * sizeof(float) +
     // n / 2 *sizeof(float) + 64 < 191 * 1024
-    pipe->InitBuffer(mmOutQueue, 1,
-                     gmmSwigluQuantV2->maxProcessRowNum * gmmSwigluQuantV2->tokenLen * sizeof(float));
+    pipe->InitBuffer(mmOutQueue, 1, gmmSwigluQuantV2->maxProcessRowNum * gmmSwigluQuantV2->tokenLen * sizeof(float));
     pipe->InitBuffer(quantOutQueue, 1,
                      gmmSwigluQuantV2->maxProcessRowNum * gmmSwigluQuantV2->tokenLen / SWIGLU_REDUCE_FACTOR *
                          sizeof(int8_t));
@@ -343,8 +343,8 @@ __aicore__ inline void GMMA4W4PostProcess::Process(WorkSpaceSplitConfig &workspa
             quantScaleOutQueue.EnQue(quantScaleLocal);
             quantOutQueue.EnQue(quantLocal);
             for (uint32_t outLoopIdx = 0; outLoopIdx < vecConfig.outLoopNum; outLoopIdx++) {
-                vecConfig.innerLoopNum = outLoopIdx == (vecConfig.outLoopNum - 1) ? vecConfig.tailLoopNum :
-                                                                                    gmmSwigluQuantV2->maxProcessRowNum;
+                vecConfig.innerLoopNum = outLoopIdx == (vecConfig.outLoopNum - 1) ? vecConfig.tailLoopNum
+                                                                                  : gmmSwigluQuantV2->maxProcessRowNum;
                 int32_t eventIdMTE3ToMTE2 = static_cast<int32_t>(GetTPipePtr()->FetchEventID(HardEvent::MTE3_MTE2));
                 SetFlag<HardEvent::MTE3_MTE2>(eventIdMTE3ToMTE2);
                 WaitFlag<HardEvent::MTE3_MTE2>(eventIdMTE3ToMTE2);

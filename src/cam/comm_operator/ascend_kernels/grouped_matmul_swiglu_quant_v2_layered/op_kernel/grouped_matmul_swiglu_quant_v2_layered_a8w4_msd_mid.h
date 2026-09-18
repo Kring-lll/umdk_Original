@@ -69,12 +69,11 @@ __aicore__ inline void DataCopyPad2DA8W4(const GlobalTensor<T> dst, const LocalT
     DataCopyPad(dst, src, params);
 }
 
-template <class mmType>
-class GMMA8W4MidProcess {
-public:
+template <class mmType> class GMMA8W4MidProcess {
+  public:
     using bT = typename mmType::BT;
 
-public:
+  public:
     __aicore__ inline GMMA8W4MidProcess(typename mmType::MT &matmul) : mm(matmul)
     {
     }
@@ -82,12 +81,12 @@ public:
                                 const GMMSwigluQuantV2BaseParams *__restrict gmmSwigluQuantV2BaseParamsIN);
     __aicore__ inline void Process(WorkSpaceSplitConfig &workspaceSplitConfig, int64_t workspaceSplitLoopIdx);
 
-private:
+  private:
     __aicore__ inline void MMCompute(uint32_t groupIdx, MNConfig &mnConfig, WorkSpaceSplitConfig &workspaceSplitConfig);
     __aicore__ inline void SetMNConfig(const int32_t splitValue, MNConfig &mnConfig);
     __aicore__ inline void UpdateMnConfig(MNConfig &mnConfig);
 
-private:
+  private:
     typename mmType::MT &mm;
     const uint32_t HALF_ALIGN = 16;
     GlobalTensor<int4b_t> xGM;
@@ -134,8 +133,7 @@ GMMA8W4MidProcess<mmType>::Init(const GMAddrParams gmAddrParams,
     }
 }
 
-template <typename mmType>
-__aicore__ inline void GMMA8W4MidProcess<mmType>::UpdateMnConfig(MNConfig &mnConfig)
+template <typename mmType> __aicore__ inline void GMMA8W4MidProcess<mmType>::UpdateMnConfig(MNConfig &mnConfig)
 {
     if constexpr (bT::format == CubeFormat::NZ) {
         mnConfig.wBaseOffset += AlignUp<16>(mnConfig.k) * AlignUp<32>(mnConfig.n); // 16: nz format last two dim size
@@ -193,9 +191,9 @@ __aicore__ inline void GMMA8W4MidProcess<mmType>::Process(WorkSpaceSplitConfig &
                 totalTmp += static_cast<int32_t>(groupListGM.GetValue(groupIdx));
                 currSplitValue = totalTmp;
             }
-            currSplitValue = currSplitValue > (workspaceSplitLoopIdx + 1) * gmmSwigluQuantV2BaseParams->mLimit ?
-                                 (workspaceSplitLoopIdx + 1) * gmmSwigluQuantV2BaseParams->mLimit :
-                                 currSplitValue;
+            currSplitValue = currSplitValue > (workspaceSplitLoopIdx + 1) * gmmSwigluQuantV2BaseParams->mLimit
+                                 ? (workspaceSplitLoopIdx + 1) * gmmSwigluQuantV2BaseParams->mLimit
+                                 : currSplitValue;
 
             int32_t splitValue = (currSplitValue - prevSplitValue) * 2; // 2: int8 has been split in 2 int4
             prevSplitValue = currSplitValue;

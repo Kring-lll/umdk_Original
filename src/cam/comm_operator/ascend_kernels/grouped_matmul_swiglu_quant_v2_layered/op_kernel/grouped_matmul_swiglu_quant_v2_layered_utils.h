@@ -19,30 +19,28 @@
 #include "layered/layered_tensor_addr.h"
 
 // A8W4 MSD scenario
-#if defined(ORIG_DTYPE_X) && defined(DT_INT8) && ORIG_DTYPE_X == DT_INT8 && defined(ORIG_DTYPE_ALL_WEIGHT) && \
+#if defined(ORIG_DTYPE_X) && defined(DT_INT8) && ORIG_DTYPE_X == DT_INT8 && defined(ORIG_DTYPE_ALL_WEIGHT) &&          \
     defined(DT_INT4) && ORIG_DTYPE_ALL_WEIGHT == DT_INT4
-        #define GMM_SWIGLU_QUANT_V2_A8W4_MSD
-        using DTYPE_X_A8W4_MSD = AscendC::int4b_t;
+#define GMM_SWIGLU_QUANT_V2_A8W4_MSD
+using DTYPE_X_A8W4_MSD = AscendC::int4b_t;
 // A4W4 scenario
-#elif defined(ORIG_DTYPE_X) && defined(DT_INT4) && ORIG_DTYPE_X == DT_INT4 && defined(ORIG_DTYPE_ALL_WEIGHT) && \
+#elif defined(ORIG_DTYPE_X) && defined(DT_INT4) && ORIG_DTYPE_X == DT_INT4 && defined(ORIG_DTYPE_ALL_WEIGHT) &&        \
     defined(DT_INT4) && ORIG_DTYPE_ALL_WEIGHT == DT_INT4
-        #define GMM_SWIGLU_QUANT_V2_A4W4
+#define GMM_SWIGLU_QUANT_V2_A4W4
 // A8W8 scenario
-#elif defined(ORIG_DTYPE_X) && defined(DT_INT8) && ORIG_DTYPE_X == DT_INT8 && defined(ORIG_DTYPE_ALL_WEIGHT) && \
+#elif defined(ORIG_DTYPE_X) && defined(DT_INT8) && ORIG_DTYPE_X == DT_INT8 && defined(ORIG_DTYPE_ALL_WEIGHT) &&        \
     defined(DT_INT8) && ORIG_DTYPE_ALL_WEIGHT == DT_INT8
-        #define GMM_SWIGLU_QUANT_V2_A8W8
+#define GMM_SWIGLU_QUANT_V2_A8W8
 #endif // scenario dispatch
 
 #if defined(FORMAT_ALL_WEIGHT) && FORMAT_ALL_WEIGHT == FORMAT_FRACTAL_NZ
-    constexpr CubeFormat wFormat = CubeFormat::NZ;
+constexpr CubeFormat wFormat = CubeFormat::NZ;
 #elif defined(FORMAT_ALL_WEIGHT) && FORMAT_ALL_WEIGHT == FORMAT_ND
-    constexpr CubeFormat wFormat = CubeFormat::ND;
+constexpr CubeFormat wFormat = CubeFormat::ND;
 #endif // weight format dispatch
-
 
 namespace GroupedMatmulDequantSwigluQuant {
 using namespace AscendC;
-
 
 constexpr uint32_t UB_BLOCK_UNIT_SIZE = 32;
 constexpr uint32_t FLOAT_UB_BLOCK_UNIT_SIZE = 8;
@@ -64,13 +62,12 @@ constexpr int64_t SIZE_OF_HALF_2 = 2;
 constexpr uint8_t NUM_8 = 8;
 constexpr float QUANT_SCALE_INT8 = 127.0f;
 
-constexpr MatmulConfig matmulCFGUnitFlag{false, false, true, 0, 0, 0, false, false, false, false, false, 0, 0, 0,
-                                        0, 0, 0, 0, false};
+constexpr MatmulConfig matmulCFGUnitFlag{false, false, true, 0, 0, 0, false, false, false, false,
+                                         false, 0,     0,    0, 0, 0, 0,     0,     false};
 constexpr MatmulConfig NZ_CFG_MDL = GetMDLConfig(false, false, 0, true, false, false, false);
 constexpr MatmulConfig CUSTOM_CFG_MDL = GetMDLConfig(false, false, 0, true, false, false, true);
 
-template <class AT_, class BT_, class CT_, class BiasT_, const MatmulConfig& MMCFG_>
-struct MMImplType {
+template <class AT_, class BT_, class CT_, class BiasT_, const MatmulConfig &MMCFG_> struct MMImplType {
     using AT = AT_;
     using BT = BT_;
     using CT = CT_;
@@ -78,8 +75,7 @@ struct MMImplType {
     using MT = matmul::MatmulImpl<AT, BT, CT, BiasT, MMCFG_>;
 };
 
-template <class AT_, class BT_, class CT_>
-struct MMImplTypeCustom {
+template <class AT_, class BT_, class CT_> struct MMImplTypeCustom {
     using AT = AT_;
     using BT = BT_;
     using CT = CT_;
@@ -158,8 +154,7 @@ struct GMAddrParams {
     int64_t workSpaceOffset3;
 };
 
-template <uint32_t base, typename T = uint32_t>
-__aicore__ inline auto AlignUp(T a) -> T
+template <uint32_t base, typename T = uint32_t> __aicore__ inline auto AlignUp(T a) -> T
 {
     if (unlikely(base == 0)) {
         return a;
@@ -167,8 +162,7 @@ __aicore__ inline auto AlignUp(T a) -> T
     return (a + base - 1) / base * base;
 }
 
-template <typename T>
-__aicore__ inline auto AlignUp(T a, T base) -> T
+template <typename T> __aicore__ inline auto AlignUp(T a, T base) -> T
 {
     if (unlikely(base == 0)) {
         return a;
@@ -176,8 +170,7 @@ __aicore__ inline auto AlignUp(T a, T base) -> T
     return (a + base - 1) / base * base;
 }
 
-template <>
-__aicore__ inline uint32_t AlignUp<4, uint32_t>(uint32_t a)
+template <> __aicore__ inline uint32_t AlignUp<4, uint32_t>(uint32_t a)
 {
     // to be Multiple of 4, result should be in a format of b(xxxx,x100).
     // This means last two bits should be zero, requiring that
@@ -190,24 +183,21 @@ __aicore__ inline uint32_t AlignUp<4, uint32_t>(uint32_t a)
     return (a + 3) & ~3; // & ~3: set last two bits of (a+3) to be zero
 }
 
-template <>
-__aicore__ inline uint32_t AlignUp<8, uint32_t>(uint32_t a)
+template <> __aicore__ inline uint32_t AlignUp<8, uint32_t>(uint32_t a)
 {
     // In general, if we want to get the least multiple of b (b is the power of 2) for a,
     // it comes to a conclusion from the above comment: result = (a + (b - 1)) & (~b)
     return (a + 7) & ~7; // & ~7: set last four bits of (a+7) to be zero
 }
 
-template <>
-__aicore__ inline uint32_t AlignUp<16, uint32_t>(uint32_t a)
+template <> __aicore__ inline uint32_t AlignUp<16, uint32_t>(uint32_t a)
 {
     // In general, if we want to get the least multiple of b (b is the power of 2) for a,
     // it comes to a conclusion from the above comment: result = (a + (b - 1)) & (~b)
     return (a + 15) & ~15; // & ~15: set last four bits of (a+15) to be zero
 }
 
-template <>
-__aicore__ inline uint32_t AlignUp<32, uint32_t>(uint32_t a)
+template <> __aicore__ inline uint32_t AlignUp<32, uint32_t>(uint32_t a)
 {
     // refer to the above comments.
     return (a + 31) & ~31; // & ~31: set last five bits of (a+31) to be zero}
@@ -287,14 +277,13 @@ __aicore__ inline void CastFp32ToInt8Template(LocalTensor<int8_t> &dstLocal, Loc
     }
 }
 
-template <typename T>
-__aicore__ inline __gm__ T* GetTensorAddr(uint16_t index, GM_ADDR tensorPtr)
+template <typename T> __aicore__ inline __gm__ T *GetTensorAddr(uint16_t index, GM_ADDR tensorPtr)
 {
-    __gm__ uint64_t* dataAddr = reinterpret_cast<__gm__ uint64_t*>(tensorPtr);
+    __gm__ uint64_t *dataAddr = reinterpret_cast<__gm__ uint64_t *>(tensorPtr);
     uint64_t tensorPtrOffset = *dataAddr;
 
-    __gm__ uint64_t* retPtr = dataAddr + (tensorPtrOffset >> 3);
-    return reinterpret_cast<__gm__ T*>(*(retPtr + index));
+    __gm__ uint64_t *retPtr = dataAddr + (tensorPtrOffset >> 3);
+    return reinterpret_cast<__gm__ T *>(*(retPtr + index));
 }
 
 // layered: GetLayerTensorAddr comes from the shared layered/layered_tensor_addr.h

@@ -39,15 +39,15 @@ REGISTER_OPS_TILING_TEMPLATE(GroupedMatmulSwigluQuantV2Layered, GroupedMatmulSwi
 static ge::graphStatus GroupedMatmulSwigluQuantV2LayeredTilingFunc(gert::TilingContext *context)
 {
     OP_CHECK_IF(context == nullptr,
-            OPS_REPORT_CUBE_INNER_ERR("GroupedMatmulSwigluQuantV2LayeredTilingFunc", "Tilingcontext is null"),
-            return ge::GRAPH_FAILED);
+                OPS_REPORT_CUBE_INNER_ERR("GroupedMatmulSwigluQuantV2LayeredTilingFunc", "Tilingcontext is null"),
+                return ge::GRAPH_FAILED);
     auto compileInfoPtr = context->GetCompileInfo<GMMSwigluV2CompileInfo>();
     if (compileInfoPtr->supportL12BtBf16) {
         std::vector<int32_t> registerList = {2};
         OP_LOGD("GroupedMatmulSwigluQuantV2LayeredTilingFunc", "Using the tiling strategy in the mxfp8");
         return TilingRegistry::GetInstance().DoTilingImpl(context, registerList);
-    }else {
-        std::vector<int32_t> registerList = {0,1};
+    } else {
+        std::vector<int32_t> registerList = {0, 1};
         OP_LOGD("GroupedMatmulSwigluQuantV2LayeredTilingFunc", "Using the tiling strategy in the int8");
         return TilingRegistry::GetInstance().DoTilingImpl(context, registerList);
     }

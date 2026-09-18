@@ -149,22 +149,32 @@ constexpr int64_t A8W4_BASEN = 256;
 constexpr int64_t SIZE_OF_HALF_2 = 2;
 
 class GroupedMatmulSwigluQuantV2LayeredTiling : public Ops::Transformer::OpTiling::TilingBaseClass {
-public:
-    explicit GroupedMatmulSwigluQuantV2LayeredTiling(gert::TilingContext* context)
-        : Ops::Transformer::OpTiling::TilingBaseClass(context)
-    {
-    };
+  public:
+    explicit GroupedMatmulSwigluQuantV2LayeredTiling(gert::TilingContext *context)
+        : Ops::Transformer::OpTiling::TilingBaseClass(context) {};
 
     ~GroupedMatmulSwigluQuantV2LayeredTiling() override = default;
 
-protected:
-    ge::graphStatus GetPlatformInfo() override {return ge::GRAPH_SUCCESS;};
+  protected:
+    ge::graphStatus GetPlatformInfo() override
+    {
+        return ge::GRAPH_SUCCESS;
+    };
 
-    ge::graphStatus GetShapeAttrsInfo() override {return ge::GRAPH_SUCCESS;};
+    ge::graphStatus GetShapeAttrsInfo() override
+    {
+        return ge::GRAPH_SUCCESS;
+    };
 
-    ge::graphStatus DoLibApiTiling() override {return ge::GRAPH_SUCCESS;};
+    ge::graphStatus DoLibApiTiling() override
+    {
+        return ge::GRAPH_SUCCESS;
+    };
 
-    ge::graphStatus GetWorkspaceSize() override {return ge::GRAPH_SUCCESS;};
+    ge::graphStatus GetWorkspaceSize() override
+    {
+        return ge::GRAPH_SUCCESS;
+    };
 
     virtual void FillTilingData() = 0;
     virtual void PrintTilingData() = 0;
