@@ -16,16 +16,19 @@ using tensor_list = std::vector<at::Tensor>;
 using namespace at;
 using namespace std;
 
+// quantMode == 2 selects mx-style quantization (per-64-block scale pairs).
+constexpr int64_t QUANT_MODE_MX = 2;
+
 // Output shapes follow the op infershape: m from x_scale dim0, n from the
 // per-channel weight scale last dim (halved by swiglu).
 static void AllocSwigluQuantOutputs(const at::Tensor &xScale, const at::TensorList &allWeightScale,
-                                     const int64_t quantMode, at::Tensor &yOut, at::Tensor &yScaleOut)
+                                    const int64_t quantMode, at::Tensor &yOut, at::Tensor &yScaleOut)
 {
     int64_t m = xScale.size(0);
     int64_t n = allWeightScale[0].size(-1);
     int64_t nAfterHalve = n / 2;
     yOut = at::empty({m, nAfterHalve}, xScale.options().dtype(at::kChar));
-    if (quantMode == 2) {
+    if (quantMode == QUANT_MODE_MX) {
         // mx-style quant: per-64-block scale pairs
         int64_t nAfterSplit = (nAfterHalve + 63) / 64;
         yScaleOut = at::empty({m, nAfterSplit, 2}, xScale.options().dtype(at::kFloat));

@@ -1,12 +1,12 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
- * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
- * See LICENSE in the root of the software repository for the full text of the License.
- */
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
 
 /*!
  * \file grouped_matmul_swiglu_quant_v2_utils.h
@@ -19,16 +19,16 @@
 #include "layered/layered_tensor_addr.h"
 
 // A8W4 MSD scenario
-#if defined(ORIG_DTYPE_X) && defined(DT_INT8) && ORIG_DTYPE_X == DT_INT8 && defined(ORIG_DTYPE_ALL_WEIGHT) &&          \
+#if defined(ORIG_DTYPE_X) && defined(DT_INT8) && ORIG_DTYPE_X == DT_INT8 && defined(ORIG_DTYPE_ALL_WEIGHT) &&        \
     defined(DT_INT4) && ORIG_DTYPE_ALL_WEIGHT == DT_INT4
 #define GMM_SWIGLU_QUANT_V2_A8W4_MSD
 using DTYPE_X_A8W4_MSD = AscendC::int4b_t;
 // A4W4 scenario
-#elif defined(ORIG_DTYPE_X) && defined(DT_INT4) && ORIG_DTYPE_X == DT_INT4 && defined(ORIG_DTYPE_ALL_WEIGHT) &&        \
+#elif defined(ORIG_DTYPE_X) && defined(DT_INT4) && ORIG_DTYPE_X == DT_INT4 && defined(ORIG_DTYPE_ALL_WEIGHT) &&      \
     defined(DT_INT4) && ORIG_DTYPE_ALL_WEIGHT == DT_INT4
 #define GMM_SWIGLU_QUANT_V2_A4W4
 // A8W8 scenario
-#elif defined(ORIG_DTYPE_X) && defined(DT_INT8) && ORIG_DTYPE_X == DT_INT8 && defined(ORIG_DTYPE_ALL_WEIGHT) &&        \
+#elif defined(ORIG_DTYPE_X) && defined(DT_INT8) && ORIG_DTYPE_X == DT_INT8 && defined(ORIG_DTYPE_ALL_WEIGHT) &&      \
     defined(DT_INT8) && ORIG_DTYPE_ALL_WEIGHT == DT_INT8
 #define GMM_SWIGLU_QUANT_V2_A8W8
 #endif // scenario dispatch

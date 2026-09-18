@@ -1,12 +1,12 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
- * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
- * See LICENSE in the root of the software repository for the full text of the License.
- */
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
 
 /* !
  * \file grouped_matmul_swiglu_quant_v2_base_tiling.cpp
@@ -263,7 +263,8 @@ int32_t GroupedMatmulSwigluQuantV2LayeredBaseTiling::FindBestSingleN(const uint3
                                                                      int64_t baseN) const
 {
     uint64_t quantGroupNum = quantGroupNum_;
-    if (n_ < baseN || tuningConfig_ <= 0 || !(quantGroupNum == 1)) {
+    // baseN is used as a divisor below, so reject the degenerate zero case early.
+    if (baseN <= 0 || n_ < baseN || tuningConfig_ <= 0 || !(quantGroupNum == 1)) {
         return baseN;
     }
     int32_t mDim = CeilDiv(tuningConfig_, baseM);

@@ -1,12 +1,12 @@
 /**
- * Copyright (c) 2025 Huawei Technologies Co., Ltd.
- * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
- * CANN Open Software License Agreement Version 2.0 (the "License").
- * Please refer to the License for details. You may not use this file except in compliance with the License.
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
- * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
- * See LICENSE in the root of the software repository for the full text of the License.
- */
+ * Copyright (c) 2025 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
 
 #ifndef OP_HOST_OP_API_ACLNN_GMM_DSQ_BASE_H
 #define OP_HOST_OP_API_ACLNN_GMM_DSQ_BASE_H
@@ -40,6 +40,7 @@ constexpr size_t GROUP_LIST_DIM_LIMIT = 1UL;
 constexpr size_t QUANTOUT_DIM_LIMIT = 2UL;
 constexpr size_t QUANTSCALEOUT_DIM_LIMIT = 1UL;
 constexpr size_t INT4_PER_INT32 = 8UL;
+constexpr size_t LAST_SECOND_DIM_INDEX = 2UL;
 constexpr size_t NZ_ALIGN_K = 16UL;
 constexpr size_t NZ_ALIGN_N = 32UL;
 constexpr size_t SMOOTH_SCALE_1D_DIM_LIMIT = 1UL;
@@ -473,7 +474,7 @@ class GroupedMatmulSwigluQuantBaseHandler : public GroupedMatmulSwigluQuantHandl
         // 轴大于等于2才判断是否转置
         if (viewShapeDim >= 2 && IsTransposeLastTwoDims(tensorS4)) {
             transposeTensor = true;
-            changeDimIdx = viewShapeDim - 2;
+            changeDimIdx = viewShapeDim - LAST_SECOND_DIM_INDEX;
         }
         tensorShape[changeDimIdx] = tensorShape.GetDim(changeDimIdx) * INT4_PER_INT32;
         bool isNz = tensorS4->GetStorageFormat() == op::Format::FORMAT_FRACTAL_NZ;
