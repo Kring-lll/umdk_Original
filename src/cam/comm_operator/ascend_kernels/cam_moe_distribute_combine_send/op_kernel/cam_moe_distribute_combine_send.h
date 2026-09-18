@@ -67,7 +67,7 @@ private:
     uint32_t routeExpertNumPerMoe_{0};
     uint32_t expertNumPerMoe_{0};
     uint32_t expertNum_{0};
-    uint32_t batchSize_{0};
+    uint32_t maxSeqLen_{0};
     uint32_t hiddenSize_{0};
     uint32_t topk_{0};
     uint64_t totalUbSize_{0};
@@ -109,7 +109,7 @@ __aicore__ inline void CamMoeDistributeCombineSend<TemplateMC2TypeFunc>::Init(GM
     routeExpertNumPerMoe_ = tilingData->moeDistributeCombineInfo.routeExpertNumPerMoe;
     expertNumPerMoe_ = sharedExpertNumPerMoe_ + routeExpertNumPerMoe_;
     expertNum_ = expertNumPerMoe_ * moeRankNum_;
-    batchSize_ = tilingData->moeDistributeCombineInfo.batchSize;
+    maxSeqLen_ = tilingData->moeDistributeCombineInfo.maxSeqLen;
     hiddenSize_ = tilingData->moeDistributeCombineInfo.hiddenSize;
     topk_ = tilingData->moeDistributeCombineInfo.topk;
     totalUbSize_ = tilingData->moeDistributeCombineInfo.totalUbSize;
@@ -137,7 +137,8 @@ __aicore__ inline void CamMoeDistributeCombineSend<TemplateMC2TypeFunc>::Init(GM
     tpExpertTokenNumTensor_ = ubBuffer_.GetWithOffset<uint32_t>(bufSize / sizeof(uint32_t), bufOffset);
     bufOffset += bufSize;
 
-    bufSize = MathCeil(sizeof(uint32_t) * expertNumPerMoe_ * 2, UB_ALIGN);
+    // One send counter for each TP rank.
+    bufSize = MathCeil(sizeof(uint32_t) * tpSize_, UB_ALIGN);
     tpExpertTokenSendCntTensor_ = ubBuffer_.GetWithOffset<uint32_t>(bufSize / sizeof(uint32_t), bufOffset);
     bufOffset += bufSize;
 
@@ -204,7 +205,7 @@ __aicore__ inline void CamMoeDistributeCombineSend<TemplateMC2TypeFunc>::Combine
     }
     uint32_t totalTokenNumPerAivEnd = totalTokenNumPerAivStart + totalTokenNumPerAiv;
 
-    Duplicate(tpExpertTokenSendCntTensor_, (uint32_t)0, expertNumPerMoe_ * 2);
+    Duplicate(tpExpertTokenSendCntTensor_, (uint32_t)0, tpSize_);
     SyncFunc<HardEvent::V_S>();
 
     uint32_t currSendId = 0;
@@ -297,7 +298,7 @@ __aicore__ inline void CamMoeDistributeCombineSend<TemplateMC2TypeFunc>::Combine
     }
     uint32_t totalTokenNumPerAivEnd = totalTokenNumPerAivStart + totalTokenNumPerAiv;
 
-    Duplicate(tpExpertTokenSendCntTensor_, (uint32_t)0, expertNumPerMoe_ * 2);
+    Duplicate(tpExpertTokenSendCntTensor_, (uint32_t)0, tpSize_);
     SyncFunc<HardEvent::V_S>();
 
     for (uint32_t i = 0; i < tpSize_; ++i) {
