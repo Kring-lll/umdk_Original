@@ -179,6 +179,7 @@ udma_u_alloc_hugepage_priv(struct udma_u_context *ctx, uint32_t len)
 		UDMA_LOG_ERR("mmap failed, buffer size=%u.\n", priv->va_len);
 		goto err_mmap;
 	}
+	UDMA_LOG_ERR("CCCC alloc hp: %p.\n", priv->va_base);
 
 	ret = madvise(priv->va_base, priv->va_len, MADV_DONTFORK);
 	if (ret) {
@@ -242,6 +243,7 @@ void udma_u_free_hugepage(struct udma_u_context *ctx, struct udma_u_hugepage *hu
 		return;
 	}
 
+	UDMA_LOG_ERR("DDDD free hp: %p.\n", hugepage->priv->va_base);
 	(void)munmap(hugepage->priv->va_base, hugepage->priv->va_len);
 	udma_u_hugepage_del(ctx, hugepage->priv);
 	pthread_mutex_unlock(&ctx->hugepage_lock);
