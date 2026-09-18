@@ -216,6 +216,7 @@ int udma_u_alloc_db(struct urma_context *urma_ctx, struct udma_u_doorbell *db)
 			     db->id, db->type);
 		return EINVAL;
 	}
+	UDMA_LOG_ERR("AAAA alloc db: %p.\n", db->addr);
 
 	if (db->type == UDMA_MMAP_JETTY_DSQE)
 		db->addr = db->addr + udma_get_dsqe_db_offset(udma_u_ctx, db);
@@ -233,6 +234,8 @@ void udma_u_free_db(struct urma_context *urma_ctx, struct udma_u_doorbell *db)
 	if (db->type == UDMA_MMAP_JETTY_DSQE)
 		db->addr = db->addr - udma_get_dsqe_db_offset(udma_u_ctx, db);
 
+	UDMA_LOG_ERR("BBBB free db: %p.\n", db->addr);
 	munmap((void *)db->addr, (size_t)udma_u_ctx->page_size);
+
 	db->addr = NULL;
 }

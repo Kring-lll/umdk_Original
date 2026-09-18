@@ -307,6 +307,7 @@ static int bondp_rebuild_pjetty(bondp_comp_t *bdp_jetty, uint32_t local_idx)
 
     ret = bondp_update_pjetty_id_mapping(bdp_ctx, old_id, new_jetty->jetty_id, bdp_jetty);
     if (ret != 0) {
+        URMA_LOG_ERR("EEEE.\n");
         bdp_jetty->p_jetty[local_idx] = old_jetty;
         (void)urma_delete_jetty(new_jetty);
         return -1;
