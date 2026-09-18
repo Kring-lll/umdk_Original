@@ -183,7 +183,15 @@ mkdir build
 cd build
 ```
 
-3. 配置并编译安装：
+3. 配置并编译安装（工具链须支持 C、C++ 和 ASM）：
+
+   liburma 的构建通过 enable_language(ASM) 启用汇编。工具链需提供支持目标架构和 ELF 格式的汇编器，例如 GCC 配套的 GNU assembler；通常由 GCC 驱动编译带预处理的 .S 文件。
+
+   CMake 使用 src/urma/lib/urma/core/urma_version_note.S.in 模板，在构建目录下生成 urma/lib/urma/core/urma_version_note.S（按上述步骤即 UMDK/src/build/urma/lib/urma/core/urma_version_note.S），并且仅将版本 note 链接到 liburma.so；liburma_common.so 不参与此次 note 修改。该文件在配置阶段自动生成，不应手工编辑。
+
+   交叉编译时，在首次配置中通过工具链文件或 CMake 参数指定同一目标工具链的 CMAKE_C_COMPILER、CMAKE_CXX_COMPILER 和 CMAKE_ASM_COMPILER，并配置相应的目标系统及 sysroot。对于 .S 文件，CMAKE_ASM_COMPILER 通常设为目标 GCC 驱动。当前 URMA 构建还使用 CROSS_COMPILE 指定 C 编译器，因此该变量应与 CMAKE_C_COMPILER 指向同一个编译器可执行文件，而不是仅填写工具链前缀。
+
+   若出现 ASM 编译器无法识别或目标文件架构不匹配，先核对编译器路径及目标架构，使用 cmake --build . --verbose 查看实际命令，并用 readelf -h 检查目标文件的 Machine 字段。切换工具链时使用新的构建目录，避免复用旧的编译器缓存。
 
 ```bash
 cmake .. -D BUILD_ALL=disable -D BUILD_URMA=enable

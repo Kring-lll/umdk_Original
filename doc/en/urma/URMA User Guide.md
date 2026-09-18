@@ -183,7 +183,15 @@ mkdir build
 cd build
 ```
 
-3. Configure, compile, and install:
+3. Configure, compile, and install using a toolchain that supports C, C++, and ASM:
+
+   The liburma build enables assembly through enable_language(ASM). The toolchain must provide an assembler supporting the target architecture and ELF format, such as GNU assembler supplied with GCC. Preprocessed .S files are normally compiled through the GCC driver.
+
+   CMake uses src/urma/lib/urma/core/urma_version_note.S.in to generate urma/lib/urma/core/urma_version_note.S inside the build directory (UMDK/src/build/urma/lib/urma/core/urma_version_note.S with the steps above). The version note is linked only into liburma.so; liburma_common.so is not part of this note change. The file is generated during configuration and should not be edited manually.
+
+   When cross-compiling, specify CMAKE_C_COMPILER, CMAKE_CXX_COMPILER, and CMAKE_ASM_COMPILER from the same target toolchain at initial configuration, using a toolchain file or CMake arguments, and configure the target system and sysroot as required. CMAKE_ASM_COMPILER is normally the target GCC driver for .S files. The current URMA build also uses CROSS_COMPILE to select its C compiler, so this variable must point to the same compiler executable as CMAKE_C_COMPILER, not merely a toolchain prefix.
+
+   If the ASM compiler is not recognized or object architectures do not match, check the compiler paths and targets, inspect the actual commands with cmake --build . --verbose, and check the Machine field with readelf -h on the object files. Use a new build directory when switching toolchains to avoid reusing cached compiler settings.
 
 ```bash
 cmake .. -D BUILD_ALL=disable -D BUILD_URMA=enable

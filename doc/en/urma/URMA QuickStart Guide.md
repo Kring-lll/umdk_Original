@@ -309,7 +309,9 @@ modprobe ubagg
 - **Kernel Version**: Must match the kernel used for compilation. For example: compiling for OpenEuler 6.6.0 requires the corresponding Linux-6.6.0 mainline kernel.
 
 - **Runtime Dependencies**:
-  - liburma.so, liburma_common.so, liburma_ubagg.so (user-mode libraries)
+  - liburma.so.0 (the current liburma runtime library). Other user-mode libraries depend on the build path: CMake builds use liburma_common.so.0 and liburma_ubagg.so.0, plus libtpsa.so.0 when UVS is used; current Bazel builds retain the original SONAMEs liburma_common.so, liburma_ubagg.so, and libtpsa.so.
+  - When deploying or trimming a container image, preserve the fully versioned files and SONAME links, for example liburma.so.0 → liburma.so.0.1.0. Normally also preserve the development link liburma.so → liburma.so.0. Copying only a file named liburma.so does not satisfy a runtime dependency on liburma.so.0.
+  - Use the project's RPM packages or the Bazel packaging and installation script where possible. For manual deployment, ensure that symlink targets exist and the library directory is in the dynamic linker's search path. Inspect NEEDED/SONAME with readelf -d <executable-or-shared-library> and retain the actual dependencies; do not copy libraries based only on unversioned .so filenames.
   - ubcore.ko, ubagg.ko, uburma.ko (kernel modules)
 
 ---
