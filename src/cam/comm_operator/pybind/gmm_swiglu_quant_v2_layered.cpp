@@ -1,3 +1,11 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
+ * Description: add gmm_swiglu_quant_v2_layered pybind extention file
+ * Create: 2026-09-18
+ * Note:
+ * History: 2026-09-18
+ */
 #include <torch/extension.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include "pytorch_npu_helper.hpp"
