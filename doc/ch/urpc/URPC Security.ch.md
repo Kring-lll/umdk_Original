@@ -55,4 +55,4 @@ typedef struct urpc_ssl_config {
 
 2.cipher_list/cipher_suites密码套件由用户配置，有效性、安全性由用户保证，用户需配置符合安全要求的有效密码套件；
 
-3.启用SSL模块后，URPC会从/dev/random设备读取随机种子，系统熵不足的情况下，读取/dev/random设备可能因没有足够随机数而阻塞。通过启用system start haveged.service服务可以解决此问题。
+3.启用SSL模块后，URPC会从/dev/random设备读取随机种子，系统熵不足的情况下，读取/dev/random设备可能因没有足够随机数而阻塞。

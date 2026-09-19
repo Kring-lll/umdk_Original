@@ -35,9 +35,12 @@ UMQ支持在UB模式下启用流量控制功能，根据对端UMQ的接收队列
 子UMQ流控报文统计信息结构体umq_packet_stats_t主要有以下关键信息：
 * send_cnt：流控报文发送的次数
 * send_success：流控报文成功发送的次数
-* recv_cnt：流控请求接收的次数
+* recv_cnt：流控报文接收的次数
+* send_eagain_cnt：因流控EAGAIN导致的流控报文发送失败次数
 * send_error_cnt：流控报文发送失败的次数
-* recv_error_cnt：流控请求接收失败的次数
+* recv_error_cnt：流控报文接收失败的次数
+* recv_duplicate_req_cnt：收到的重复流控请求报文次数
+* recv_duplicate_rsp_cnt：收到的重复流控响应报文次数
 
 统计查询接口使用示例如下：
 ```

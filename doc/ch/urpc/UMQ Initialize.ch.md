@@ -4,7 +4,7 @@
 统一消息队列（UMQ）初始化接口，负责加载UMQ框架、配置运行参数并创建初始数据传输环境。在使用任何UMQ功能之前，必须首先正确初始化UMQ环境。
 
 ## 概述
-- 加载umq framework的so
+- 初始化启用的 umq framework；在非 UMQ_STATIC_LIB（动态库）模式下加载对应 so（UB 为 libumq_ub.so）
 - 基于模式创建并初始化设备
 - 注册内存并初始化small内存池
 - 初始化dfx

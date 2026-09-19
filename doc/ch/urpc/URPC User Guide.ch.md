@@ -25,22 +25,22 @@ make install # 可选项，如果需要安装URPC则执行此命令
 ## UMQ
 
 ### 使用bazel编译UMQ
-使用下述命令即可生成所有umq组件所需的动态库文件：
+当前 Bazel 配置提供 UMQ 静态库目标；如需动态库，请使用上文的 CMake 构建方式。
 ```bash
 cd src/urpc/
-bazel build //umq:libumq_so # so将在/src/urpc/bazel-bin/目录下生成
+bazel build --noenable_bzlmod --copt=-DUMQ_QBUF_DEBUG //:umq # 使用支持 WORKSPACE 的 Bazel 版本，构建静态库目标
 ```
 #### 注意
-* 使用blzmod编译（默认模式或者显式指明`--enable_bzlmod`），版本依赖具体参考`src/urpc/MODULE.bazel`。
-* UMQ编译同时兼容WORKSPACE定义依赖项，即禁用blzmod编译（显式指明`--noenable_bzlmod`），版本依赖具体参考`src/urpc/WORKSPACE`。
+* 当前 `MODULE.bazel` 未声明 `//:umq` 所需的 `boringssl` 和 `urma` 仓库，不能据此保证默认 Bzlmod 模式可构建该目标。
+* 使用支持 WORKSPACE 的 Bazel 版本，并显式指定 `--noenable_bzlmod`；依赖定义见 `src/urpc/WORKSPACE`，其中 URMA 使用 `/usr` 下的本地安装。当前源码还需要显式传入 `--copt=-DUMQ_QBUF_DEBUG`，以提供 qbuf 调试记录函数的定义。
 
 #### 编译模式
-* bazel编译默认会使用opt模式进行编译，即包括`O2`优化、剥离符号表(`-Wl,-S`)等操作。
-* `--config=release`，release版本是在默认优化上进行深度符号表剥离(`-Wl,-s`)。
-* `--config=debug`, debug版本将进行`O0`优化同时完全保留符号表信息。
+* 默认配置为 `--compilation_mode=opt --strip=always`；具体优化参数由所用 C/C++ 工具链决定。
+* `--config=release` 额外设置链接参数 `-Wl,-s`；该参数不表示生成 `//:umq` 静态归档时会剥离其符号。
+* `--config=debug` 设置 `--compilation_mode=dbg --strip=never`；具体编译参数由所用 C/C++ 工具链决定。
 
 #### openssl依赖
-* bazel默认（或者指定`--//umq:openssl_mode=bazel`）会使用`.bazelrc`内定义的openssl版本（静态编译）。如果用户希望使用系统内的so，可以加上``--//umq:openssl_mode=system`来指明使用系统版本。
+* 当前 Bazel 的 `//:umq` 目标依赖 BoringSSL，其版本由 `src/urpc/WORKSPACE` 中的提交号固定。当前构建文件未定义 `//umq:openssl_mode` 配置目标，因此不支持通过 `--//umq:openssl_mode=bazel` 或 `--//umq:openssl_mode=system` 切换依赖。
 
 # 3. 安装使用
 - rpm -ivh /root/rpmbuild/RPMS/aarch64/umdk-urpc-*.rpm

@@ -216,7 +216,7 @@ Return value is a list of tensors，which stores combine_x and expert_token_nums
  - top_k range：[0， 12] and it should be lower than expert number.
  - BS range：[0，256]
  - num_experts range：(0， 512]
- - Required: token length range: [1024, 7168] and (hidden_size % 256) == 0
+ - Required: token length range: [512, 7168]
  - Required: gmm1_hidden_size range: [1024, 6144] and (gmm1_hidden_size % 1024) == 0
  - Required: share_gmm1_hidden_size range: [1024, 6144] and (share_gmm1_hidden_size % 1024) == 0
  - Required：HCCL_BUFFSIZE should be greater than [(ep_rank_size * max_batch_size * moe_expert_num_per_rank * total_length * sizeof(x) * 2) / 1024 / 1024], which should be round up to the nearest integer.

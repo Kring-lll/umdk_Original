@@ -36,9 +36,12 @@ The sub-UMQ credit statistics structure umq_credit_private_stats_t mainly contai
 The sub-UMQ flow control packet statistics structure umq_packet_stats_t mainly contains the following key information:
 * send_cnt: Number of times flow control packets are sent
 * send_success: Number of times flow control packets are successfully sent
-* recv_cnt: Number of times flow control requests are received
+* recv_cnt: Number of times flow control packets are received
+* send_eagain_cnt: Number of times flow control packet sending fails due to flow control EAGAIN
 * send_error_cnt: Number of times flow control packet sending fails
-* recv_error_cnt: Number of times flow control request reception fails
+* recv_error_cnt: Number of times flow control packet reception fails
+* recv_duplicate_req_cnt: Number of duplicate flow control request packets received
+* recv_duplicate_rsp_cnt: Number of duplicate flow control response packets received
 
 The following is an example of using the statistics query interface:
 ```

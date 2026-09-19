@@ -44,7 +44,7 @@ External Data Structures：[dlock_types.h](../../../../src/ulock/dlock/lib/inclu
 2. The client uses "umo_atomic64_destroy" to destroy a distributed object.
 3. The client uses "umo_atomic64_get" to acquire a created distributed object.
 4. After acquiring the distributed object, the client can call "umo_atomic64_faa" to request the server to perform an atomic Fetch and Add operation on the object, returning the original value.
-5. After acquiring the distributed object, the client can call "umo_atomic64_cas" to request the server to perform an atomic Compare and Swap operation on the object, returning the new value after modification.
+5. After acquiring the distributed object, the client can call "umo_atomic64_cas" to request the server to perform an atomic Compare and Swap operation on the object, returning the DLock status code.
 6. After acquiring the distributed object, the client can call "umo_atomic64_get_snapshot" to request the server to get the current value of the object.
 7. The client uses "umo_atomic64_release" to release an acquired distributed object.
 

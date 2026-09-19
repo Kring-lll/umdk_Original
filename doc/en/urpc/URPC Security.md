@@ -47,6 +47,6 @@ typedef struct urpc_ssl_config {
 } urpc_ssl_config_t;
 ```
 ### Notes:
-1. The `urpc_ssl_config_set` interface must be called after `urpc_init`; otherwise, it returns `-EPERM`;
+1. The `urpc_ssl_config_set` interface must be called after `urpc_init`; otherwise, it returns `-URPC_ERR_EPERM`;
 2. The cipher_list/cipher_suites cipher suites are configured by the user. Their validity and security are guaranteed by the user. The user must configure effective cipher suites that meet security requirements;
-3. After enabling the SSL module, URPC reads random seeds from the `/dev/random` device. If system entropy is insufficient, reading the `/dev/random` device may block due to insufficient random numbers. This issue can be resolved by enabling the `system start haveged.service` service.
+3. After enabling the SSL module, URPC reads random seeds from the `/dev/random` device. If system entropy is insufficient, reading the `/dev/random` device may block due to insufficient random numbers.

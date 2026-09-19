@@ -4,7 +4,7 @@ UMS是一种北向兼容标准socket API，南向基于UB网络进行数据传�
 
 ### 1.1 int socket(int domain, int type, int protocal);
 创建一个socket：
-1. type仅支持SOCK_STREAM，protocol仅支持IPPROTO_IP或IPPROTO_TCP
+1. socket 类型仅支持 SOCK_STREAM。直接使用 AF_SMC 时，protocol 为 0（IPv4）或 1（IPv6）；通过 libums-preload 透明替换时，AF_INET/AF_INET6 的 SOCK_STREAM socket 使用 IPPROTO_IP 或 IPPROTO_TCP，由替换库转换为对应的 AF_SMC 协议号。
 2. 在直接使用UMS的场景，需指定domain为AF_SMC，在透明替换的场景，需指定domain值为AF_INET或AF_INET6，两种场景详情见UMS使用手册。
 
 ### 1.2 ssize_t send(int sockfd, const void *buf, size_t len, int flags);
@@ -28,7 +28,7 @@ UMS是一种北向兼容标准socket API，南向基于UB网络进行数据传�
 ### 1.8 int listen(int sockfd, int backlog);
 将socket转换成可以接收连接的server端socket。
 
-### 1.9 int accept(int listenfd, struct sockaddr *addr, int *addrlen);
+### 1.9 int accept(int listenfd, struct sockaddr *addr, socklen_t *addrlen);
 接收client端的连接。
 
 ### 1.10 int shutdown(int sockfd, int howto);
@@ -41,8 +41,8 @@ UMS是一种北向兼容标准socket API，南向基于UB网络进行数据传�
 设置与套接字相关的参数，目前并不支持所有socket选项，选项支持情况如下表:
 | level       | optname          |      支持情况        |
 | ----------- | ---------------- |   -----------        |
-| SOL_SOCKET  | SO_SNDBUF        |  管理面和数据通路都支持，数据面实际使用时会归一化到16KB*(2^n) (向上取整)  |
-| SOL_SOCKET  | SO_RCVBUF        |  管理面和数据通路都支持，数据面实际使用时会归一化到16KB*(2^n) (向上取整)  |
+| SOL_SOCKET  | SO_SNDBUF        |  管理面和数据通路都支持；实际数据缓冲区按 16 KiB × 2^n 分档并向上取整，单个数据缓冲区最大为 2 MiB；创建缓冲区返回非 `-ENOMEM` 错误时会尝试较小档位（包括数据缓冲区分配失败返回 `-EAGAIN` 的情况）  |
+| SOL_SOCKET  | SO_RCVBUF        |  管理面和数据通路都支持；实际数据缓冲区按 16 KiB × 2^n 分档并向上取整，单个数据缓冲区最大为 2 MiB且还受 scatterlist 容量限制；创建缓冲区返回非 `-ENOMEM` 错误时会尝试较小档位（包括数据缓冲区分配失败返回 `-EAGAIN` 的情况）  |
 | SOL_SOCKET  | SO_REUSEADDR     |  管理面支持即可  |
 | SOL_SOCKET  | SO_RCVTIMEO      |  管理面和数据面都支持  |
 | IPPROTO_TCP | TCP_USER_TIMEOUT |  管理面支持，数据通路不支持  |
@@ -50,7 +50,7 @@ UMS是一种北向兼容标准socket API，南向基于UB网络进行数据传�
 | IPPROTO_TCP | TCP_KEEPINTVL    |  管理面支持，数据通路不支持  |
 | IPPROTO_TCP | TCP_KEEPIDLE     |  管理面支持，数据通路不支持  |
 | IPPROTO_TCP | TCP_KEEPCNT      |  管理面支持，数据通路不支持  |
-| IPPROTO_TCP | TCP_KEEPALIVE    |  管理面支持，数据通路不支持  |
+| SOL_SOCKET  | SO_KEEPALIVE     |  管理面支持，数据通路不支持  |
 
 ### 1.13 int getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen);
 获取与套接字相关的参数。
@@ -103,13 +103,14 @@ sysctl -w net.ums.[属性名]=[值]
 支持的属性名和配置值范围见下表:
 | 状态项       | 取值范围     |      说明            |
 | -----------  | ----------- |   -----------        |
-| autocorking_size  | [1, 1073741824]       |  UMS中的聚合大小，单位为字节      |
+| autocorking_size  | [1, 1073741823]       |  UMS中的聚合大小，单位为字节      |
 | rcv_buf           | [16384, 2147483648)   |  接收缓冲区的大小配置，单位为字节  |
 | snd_buf           | [16384, 2147483648)   |  发送缓冲区的大小配置，单位为字节  |
+| dim_enable        | [0, 1]                 |  动态中断调节开关，默认 0；4.x 内核构建不包含 DIM 实现，设置该参数不会启用动态中断调节；其他构建还需设备支持 `modify_jfc`，并在 JFC 的 DIM 初始化时读取该值，修改不会自动更新已有 DIM 实例  |
 
 **注意**
 1. 聚合大小实际使用时不会超过发送缓冲区的一半。如果配置过大，该字段的配置不会生效，会直接使用发送缓冲区的一半的值作为实际聚合大小。
-2. 建议用户根据需求在模块挂载后进行配置，配置后生效一次。
+2. 这些 sysctl 参数可在模块加载后重复修改。通过 socket() 创建 UMS socket 时读取 snd_buf、rcv_buf 和 autocorking_size，后续修改不会自动更新已有 socket。接受连接生成的 socket 继承监听 socket 的缓冲区设置；当前接受连接路径未读取 autocorking_size，也未从监听 socket 复制该值。4.x 内核构建不包含 DIM 实现，dim_enable 不会启用动态中断调节；其他构建还需设备支持 modify_jfc，且该参数仅在 JFC 的 DIM 初始化时读取，修改不会自动更新已有 DIM 实例。建议在创建业务 socket 和初始化 JFC DIM 前完成相应配置。
 
 ### 2.3 UMS 运行时模块参数
 UMS 内核模块参数的语义、取值与加载时配置详见 [UMS User Guide - 3.4 内核模块参数配置](./UMS%20User%20Guide.ch.md#34-内核模块参数配置)，本节仅说明运行时访问方式。
@@ -121,7 +122,7 @@ UMS 内核模块参数的语义、取值与加载时配置详见 [UMS User Guide
 | 参数名 | 运行时行为 |
 | ------ | ---------- |
 | `ub_token_mode` | 不可读写；加载时一次性解析，实际生效值需从内核日志确认 |
-| `ub_token_disable` | **已废弃**，不可读写；加载时一次性映射为 `ub_token_mode`（`0`→LEGACY，`1`→DISABLE） |
+| `ub_token_disable` | **已废弃**，不可读写；仅当 `ub_token_mode` 保持未设置哨兵值 `UINT_MAX` 且本参数不为 `UINT_MAX` 时用于选择实际模式（`0`→LEGACY，其他非哨兵值→DISABLE） |
 
 如需查看加载后实际生效的 token 模式，可通过内核日志确认：模块加载时会打印 `ub_token_mode=SECURE/LEGACY/DISABLE(<值>)`。
 ```bash
@@ -130,18 +131,18 @@ dmesg | grep "UMS_" | grep "ub_token_mode="
 
 **可读写参数（权限 0644）**
 
-以下参数指定允许注册为 ums_agent 的进程 UID/GID（仅 `ub_token_mode=0` 即 SECURE 模式下生效）。可通过 `/sys/module/ums/parameters/<参数名>` 查询与修改：
+以下参数用于校验 ums_agent 注册请求中的 UID/GID，各 token 模式下均进行校验；仅 SECURE 模式在注册成功后将 agent 标记为可用。可通过 `/sys/module/ums/parameters/<参数名>` 查询与修改：
 ```bash
 # 查询
 cat /sys/module/ums/parameters/ums_agent_uid
 cat /sys/module/ums/parameters/ums_agent_gid
 
-# 修改（仅 ums_agent 离线时可修改，ums_agent 在线时写入返回 -EBUSY）
+# 修改（内核将 agent 标记为可用时，写入返回 -EBUSY；否则允许写入合法值）
 echo <UID> > /sys/module/ums/parameters/ums_agent_uid
 echo <GID> > /sys/module/ums/parameters/ums_agent_gid
 ```
 
 | 参数名 | sysfs 权限 | 运行时行为 |
 | ------ | ---------- | ---------- |
-| `ums_agent_uid` | 0644 | 可读；ums_agent 离线时可写，在线时写入返回 `-EBUSY` |
-| `ums_agent_gid` | 0644 | 可读；ums_agent 离线时可写，在线时写入返回 `-EBUSY` |
+| `ums_agent_uid` | 0644 | 可读；内核将 agent 标记为可用时，写入返回 `-EBUSY`；否则允许写入合法值 |
+| `ums_agent_gid` | 0644 | 可读；内核将 agent 标记为可用时，写入返回 `-EBUSY`；否则允许写入合法值 |

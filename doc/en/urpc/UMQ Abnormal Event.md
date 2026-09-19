@@ -16,7 +16,7 @@ UMQ Abnormal Event is the ability provided by UMQ components to report asynchron
 **Instructions for Use**:
     (1) The user calls the umq_async_event_fd_get interface to obtain the file descriptor for monitoring exception events. When calling, the corresponding trans_info should be passed according to the device registration method：
         ·For dynamically registered devices, use trans_info from umq_dev_add
-        ·For statically registered devices, use trans_info from umq_init
+        ·For statically registered devices, use trans_info from the umq_init_cfg_t passed to the umq_init interface
 
     (2) The user uses the epoll mechanism to monitor the readable events of the fd for the exception event. Once a readable event is available, the user can use the `umq_get_async_event` interface to retrieve the exception event.
 

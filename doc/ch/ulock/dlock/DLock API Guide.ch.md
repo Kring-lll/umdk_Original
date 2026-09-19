@@ -43,7 +43,7 @@
 2. 客户端使用umo_atomic64_destroy接口销毁创建的分布式状态对象；
 3. 客户端使用umo_atomic64_get接口可获取创建的分布式状态对象；
 4. 客户端获取分布式状态对象后，可调用umo_atomic64_faa接口，向服务端请求对该对象做原子Fetch and Add操作，返回原值；
-5. 客户端获取分布式状态对象后，可调用umo_atomic64_cas接口，向服务端请求对该对象做原子Compare and Swap操作，返回修改后的新值；
+5. 客户端获取分布式状态对象后，可调用umo_atomic64_cas接口，向服务端请求对该对象做原子Compare and Swap操作，返回DLock状态码；
 6. 客户端获取分布式状态对象后，可调用umo_atomic64_get_snapshot接口，向服务端请求获取该对象当前值。
 7. 客户端使用umo_atomic64_release接口可以释放已获取的分布式状态对象。
 

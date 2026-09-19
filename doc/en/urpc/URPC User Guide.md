@@ -24,23 +24,25 @@ make install # optional, install URPC if needed
 ## UMQ
 
 ### Compile UMQ with bazel
-Run the following command to generate the dynamic library files used by UMQ:
+Run the following command to build the UMQ static library:
 ```bash
 cd src/urpc/
-bazel build //umq:libumq_so # files will be generated in the /src/urpc/bazel-bin/
+bazel build --noenable_bzlmod --copt=-DUMQ_QBUF_DEBUG //:umq # output: bazel-bin/libumq.a
 ```
 #### Note
 
-* Compile using blzmod (default mode or explicitly specify `--enable_bzlmod`). See `src/urpc/MODULE.bazel` for version dependencies.
-* UMQ compilation is also compatible with WORKSPACE-defined dependencies, i.e., disable blzmod compilation (explicitly specify `--noenable_bzlmod`). See `src/urpc/WORKSPACE` for version dependencies.
+* The current `//:umq` target depends on the `@boringssl` and `@urma` repositories declared in `src/urpc/WORKSPACE`; build it with WORKSPACE dependency resolution by specifying `--noenable_bzlmod` (and `--enable_workspace` on Bazel versions where WORKSPACE is disabled by default).
+* `src/urpc/MODULE.bazel` declares and overrides an OpenSSL module, but it does not declare the `@boringssl` or `@urma` repositories required by `//:umq`, so the current build is not compatible with Bzlmod-only dependency resolution.
 
 #### Build Modes
-* By default, opt mode will be used for compilation, which includes optimizations such as `O2` and stripping of symbol tables(`-Wl,-S`).
-* `--config=release`, the release version fully strips the symbol table(`-Wl, -s`) on top of the default optimizations.
-* `--config=debug`, the debug version performs `O0` optimization and fully preserving the symbol table information.
+* By default, `.bazelrc` sets `--compilation_mode=opt` and `--strip=always`.
+* `--config=release` additionally sets `--linkopt=-Wl,-s` for linking; this does not strip the `libumq.a` static archive.
+* `--config=debug` sets `--compilation_mode=dbg` and `--strip=never`.
 
-#### Openssl Dependency
-* By default(or when `--//umq:openssl_mode=bazel` is specified), openssl will use the specified version defined in `.bazelrc`. If user wants to use openssl directly from system, add `--//umq:openssl_mode=system`.
+The effective optimization flags depend on the selected C/C++ toolchain.
+
+#### BoringSSL Dependency
+* The current `//:umq` target depends on BoringSSL (`@boringssl//:ssl` and `@boringssl//:crypto`), whose revision is pinned in `src/urpc/WORKSPACE`. This target does not provide an `openssl_mode` switch.
 
 # 3. Usage Guide
 - rpm -ivh /root/rpmbuild/RPMS/aarch64/umdk-urpc-*.rpm

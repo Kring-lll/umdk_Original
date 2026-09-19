@@ -4,10 +4,10 @@
 The Unified Message Queue (UMQ) initialization interface is responsible for loading the UMQ framework, configuring runtime parameters, and creating the initial data transmission environment. The UMQ environment must be correctly initialized before using any UMQ functionality.
 
 ## Overview
-- Load the UMQ framework shared object (so)
+- Initialize each enabled UMQ framework; when built without `UMQ_STATIC_LIB`, load its corresponding shared object (`libumq_ub.so` for UB)
 - Create and initialize devices based on the mode
 - Register memory and initialize the small memory pool
-- Initialize dfx
+- Obtain the transport DFX operations; start Perf recording separately with `umq_stats_perf_start()`
 
 ## Timing of Invocation
 - UMQ must be initialized first when the application starts
@@ -22,13 +22,13 @@ The Unified Message Queue (UMQ) initialization interface is responsible for load
   | UMQ_FEATURE_API_PRO                 | Use enhanced UMQ APIs                        |
   | UMQ_FEATURE_ENABLE_TOKEN_POLICY     | Enables the token policy                         |
   | UMQ_FEATURE_ENABLE_STATS            | Enables packet statistics                        |
-  | UMQ_FEATURE_ENABLE_PERF             | Enables latency statistics                       |
+  | UMQ_FEATURE_ENABLE_PERF             | Enables feature-gated latency probes; recording must be started separately |
   | UMQ_FEATURE_ENABLE_FLOW_CONTROL     | Enables flow control                             |
 - headroom_size: Configures the size of the user data header, [0, 512] bytes
 - io_lock_free: Can be set to true when I/O threads are safe to improve performance
-- trans_info_num: The number of data plane transmission device information entries, supports up to 128
+- trans_info_num: The number of data plane transmission device information entries, supports up to 16
 - flow_control: Configures flow control parameters
-- block_cfg: Configures the size of blocks in the small memory pool, supports four types: 8K, 16K, 32K, 64K
+- buf_pool_cfg.small_block_size: Selects the small-block size using `BLOCK_SIZE_4K`, `BLOCK_SIZE_8K`, `BLOCK_SIZE_16K`, `BLOCK_SIZE_32K`, `BLOCK_SIZE_64K`, `BLOCK_SIZE_128K`, `BLOCK_SIZE_256K`, `BLOCK_SIZE_512K`, or `BLOCK_SIZE_1M`; the remaining buffer-pool configuration must also pass validation
 - trans_info: Data plane transmission device information, used to initialize the corresponding device
 
 # Description
@@ -38,7 +38,7 @@ The Unified Message Queue (UMQ) initialization interface is responsible for load
 Devices are initialized according to the transmission device information.
 
 ### UB Device Initialization
-For UB devices, UMQ supports creating multiple devices using multiple EIDs simultaneously, with each device corresponding to one EID. UMQ allows users to initialize all devices at once via `umq_init` or to dynamically add devices after initialization. When initializing devices, users can specify either an `eid` or a `dev_name` + `eid_idx` combination. The `trans_info_num` determines the actual number of valid `trans_info` entries.
+For UB devices, UMQ supports creating multiple devices using multiple EIDs simultaneously, with each device corresponding to one EID. UMQ allows users to initialize all devices at once via `umq_init` or to dynamically add devices after initialization. When initializing devices, users can specify either an `eid` or a `dev_name` + `eid_idx` combination. Set `dev_info.assign_mode` to match the selection data: use `UMQ_DEV_ASSIGN_MODE_EID` for `eid`, or `UMQ_DEV_ASSIGN_MODE_DEV` for `dev_name` + `eid_idx`. The `trans_info_num` determines the actual number of valid `trans_info` entries.
 
 **One-time Initialization**
 
@@ -56,9 +56,11 @@ One-time initialization UB device example:
         .trans_info_num = 2,
     };
     init_cfg.trans_info[0].trans_mode = UMQ_TRANS_MODE_UB;
+    init_cfg.trans_info[0].dev_info.assign_mode = UMQ_DEV_ASSIGN_MODE_DEV;
     sprintf(init_cfg.trans_info[0].dev_info.dev.dev_name, "%s", "udma2");
     init_cfg.trans_info[0].dev_info.dev.eid_idx = 7;
     init_cfg.trans_info[1].trans_mode = UMQ_TRANS_MODE_UB;
+    init_cfg.trans_info[1].dev_info.assign_mode = UMQ_DEV_ASSIGN_MODE_DEV;
     sprintf(init_cfg.trans_info[1].dev_info.dev.dev_name, "%s", "udma5");
     init_cfg.trans_info[1].dev_info.dev.eid_idx = 7;
     umq_init(&init_cfg);
@@ -75,8 +77,9 @@ Execution Steps:
 Dynamic initialization UB device example:
 
 ```
-    umq_trans_info_t trans_info;
+    umq_trans_info_t trans_info = {0};
     trans_info.trans_mode = UMQ_TRANS_MODE_UB;
+    trans_info.dev_info.assign_mode = UMQ_DEV_ASSIGN_MODE_DEV;
     sprintf(trans_info.dev_info.dev.dev_name, "%s", "udma5");
     trans_info.dev_info.dev.eid_idx = 7;
     umq_dev_add(&trans_info);
@@ -86,4 +89,4 @@ Dynamic initialization UB device example:
 Currently, dfx supports the latency statistics (perf) module.
 
 ### Perf Initialization
-Perf is a latency measurement module. During initialization, it only allocates memory and initializes locks. It becomes effective when the `UMQ_FEATURE_ENABLE_PERF` parameter in the feature is configured. The remaining initialization is completed upon the first call to the measurement function on the data plane.
+Perf is a latency measurement module. Call `umq_stats_perf_start()` to initialize and start recording. On the first start, it allocates the recording context, initializes records and histograms for the default thread-ID range, and registers thread cleanup callbacks. Records for other threads are initialized on demand when a timestamp is requested. Probe points that check feature flags additionally require `UMQ_FEATURE_ENABLE_PERF`.
