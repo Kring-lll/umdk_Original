@@ -1,0 +1,7 @@
+Copyright (c) Huawei Technologies Co., Ltd. All rights reserved.
+
+The UMDK core libraries are licensed under the MIT License.
+Kernel code under src/usock/ums/kmod is licensed under the GNU General
+Public License, version 2.
+
+The applicable license texts are provided in the LICENSES directory.
