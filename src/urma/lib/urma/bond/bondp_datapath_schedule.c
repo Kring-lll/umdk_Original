@@ -368,6 +368,13 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
     uint32_t selected_pos = select_random_path(least_load_cnt);
     *send_idx = least_load_path[selected_pos].local_idx;
     *target_idx = least_load_path[selected_pos].target_idx;
+    URMA_LOG_DEBUG("Balance schedule selected path: local_idx=%d, target_idx=%d\n", *send_idx, *target_idx);
+    for (uint32_t i = 0; i < bdp_tjetty->p_tjetty_count; i++) {
+        uint32_t local_idx = bdp_tjetty->p_tjettys[i].local_indice;
+        uint32_t remote_idx = bdp_tjetty->p_tjettys[i].remote_indice;
+        URMA_LOG_DEBUG("Balance schedule path[%u]: local_idx=%u, target_idx=%u, sqe_cnt=%u\n",
+                       i, local_idx, remote_idx, atomic_load(&bdp_comp->sqe_cnt[local_idx][remote_idx]));
+    }
     return 0;
 }
 
