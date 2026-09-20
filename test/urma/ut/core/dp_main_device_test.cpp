@@ -76,6 +76,23 @@ TEST(UrmaCoreTest, DpApiWrappersValidateInputsAndDispatchOps)
     EXPECT_EQ(URMA_SUCCESS, urma_post_jetty_recv_wr(&fixture.jetty, &recvWr, &badRecv));
 }
 
+TEST(UrmaCoreTest, PostJfrWrChecksItsOwnOpsEntry)
+{
+    CoreApiFixture fixture;
+    urma_jfr_wr_t recvWr = {};
+    urma_jfr_wr_t *badRecv = nullptr;
+
+    // post_jfr_wr must be usable even when the provider does not implement post_jfs_wr.
+    fixture.ops.post_jfs_wr = nullptr;
+    fixture.ops.post_jfr_wr = MockPostJfrWr;
+    EXPECT_EQ(URMA_SUCCESS, urma_post_jfr_wr(&fixture.jfr, &recvWr, &badRecv));
+
+    // Conversely, a missing post_jfr_wr must be rejected instead of invoking a NULL op.
+    fixture.ops.post_jfs_wr = MockPostJfsWr;
+    fixture.ops.post_jfr_wr = nullptr;
+    EXPECT_EQ(URMA_EINVAL, urma_post_jfr_wr(&fixture.jfr, &recvWr, &badRecv));
+}
+
 TEST(UrmaCoreTest, FormatConvertAndDpErrorBranchesCoverStableContracts)
 {
     CoreApiFixture fixture;
@@ -97,10 +114,12 @@ TEST(UrmaCoreTest, FormatConvertAndDpErrorBranchesCoverStableContracts)
 
     EXPECT_EQ(URMA_EINVAL, urma_send(&fixture.jfs, &fixture.tjfr, &srcSeg, 2, 4, flag, 0));
 
+    // The datapath wrapper only dispatches to the provider op; sge contents are not part of
+    // its contract, so the call still reaches the provider and the provider status is returned.
     fixture.ops.post_jfr_wr = MockPostJfrWr;
     recvWr.src.num_sge = 1;
     recvWr.src.sge = &invalidSge;
-    EXPECT_EQ(URMA_EINVAL, urma_post_jfr_wr(&fixture.jfr, &recvWr, &badRecv));
+    EXPECT_EQ(URMA_SUCCESS, urma_post_jfr_wr(&fixture.jfr, &recvWr, &badRecv));
 
     urma_ack_jfc(jfcList, nevents, 1);
 }

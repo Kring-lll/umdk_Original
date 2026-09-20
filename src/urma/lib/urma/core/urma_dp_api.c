@@ -343,7 +343,7 @@ urma_status_t urma_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_t
     /* check parameter */
     urma_ops_t *dp_ops = get_ops_by_urma_jfr(jfr);
     urma_device_t *urma_dev = get_device_by_urma_jfr(jfr);
-    if (dp_ops == NULL || dp_ops->post_jfs_wr == NULL || wr == NULL || bad_wr == NULL ||
+    if (dp_ops == NULL || dp_ops->post_jfr_wr == NULL || wr == NULL || bad_wr == NULL ||
         urma_dev == NULL) {
         URMA_LOG_ERR("Invalid parameter.\n");
         return URMA_EINVAL;
