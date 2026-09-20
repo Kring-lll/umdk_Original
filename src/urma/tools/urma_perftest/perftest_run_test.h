@@ -18,6 +18,9 @@
 
 extern volatile sig_atomic_t g_exit_flag;
 
+/* Send PERFTEST_EXIT_CMD to the peer on the mgmt channel so it aborts its wait loops. */
+void notify_peer_exit(const perftest_config_t *cfg);
+
 int run_read_lat(perftest_context_t *ctx, perftest_config_t *cfg);
 int run_write_lat(perftest_context_t *ctx, perftest_config_t *cfg);
 int run_send_lat(perftest_context_t *ctx, perftest_config_t *cfg);
