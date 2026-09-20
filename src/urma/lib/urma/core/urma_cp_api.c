@@ -1282,11 +1282,6 @@ static urma_target_jetty_t *urma_import_jfr_compat(urma_context_t *ctx, urma_rjf
 
     URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, import_jfr_ex);
 
-    if (rjfr->flag.bs.share_tp != 0) {
-        URMA_LOG_ERR("Share TP is not supported.\n");
-        return NULL;
-    }
-
     atomic_fetch_add(&ctx->ref.atomic_cnt, 1);
     urma_target_jetty_t *tjetty = ops->import_jfr_ex(ctx, rjfr, token_value, &active_tp_cfg);
     if (tjetty == NULL) {
@@ -2027,11 +2022,6 @@ static urma_target_jetty_t *urma_import_jetty_compat(urma_context_t *ctx, urma_r
     urma_active_tp_cfg_t active_tp_cfg = {0};
 
     URMA_CHECK_OP_INVALID_RETURN_POINTER(ctx, ops, import_jetty_ex);
-
-    if (rjetty->flag.bs.share_tp != 0) {
-        URMA_LOG_ERR("Share TP is not supported.\n");
-        return NULL;
-    }
 
     atomic_fetch_add(&ctx->ref.atomic_cnt, 1);
     urma_target_jetty_t *tjetty = ops->import_jetty_ex(ctx, rjetty, token_value, &active_tp_cfg);
