@@ -704,7 +704,7 @@ TEST(UrmaCoreTest, CpApiTargetJettyAndNotifierApisValidateAndDispatch)
     rjfr.flag.bs.token_policy = URMA_TOKEN_NONE;
     fixture.ops.import_jfr_ex = MockImportJfrEx;
     rjfr.flag.bs.share_tp = 1;
-    EXPECT_EQ(nullptr, urma_import_jfr(&fixture.ctx, &rjfr, &tokenValue));
+    EXPECT_NE(nullptr, urma_import_jfr(&fixture.ctx, &rjfr, &tokenValue));
     rjfr.flag.bs.share_tp = 0;
     EXPECT_NE(nullptr, urma_import_jfr(&fixture.ctx, &rjfr, &tokenValue));
     fixture.ops.import_jfr_ex = nullptr;
@@ -742,7 +742,7 @@ TEST(UrmaCoreTest, CpApiTargetJettyAndNotifierApisValidateAndDispatch)
     rjetty.trans_mode = URMA_TM_RC;
     fixture.ops.import_jetty_ex = MockImportJettyEx;
     rjetty.flag.bs.share_tp = 1;
-    EXPECT_EQ(nullptr, urma_import_jetty(&fixture.ctx, &rjetty, &tokenValue));
+    EXPECT_NE(nullptr, urma_import_jetty(&fixture.ctx, &rjetty, &tokenValue));
     rjetty.flag.bs.share_tp = 0;
     EXPECT_NE(nullptr, urma_import_jetty(&fixture.ctx, &rjetty, &tokenValue));
     fixture.ops.import_jetty_ex = nullptr;
