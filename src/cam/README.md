@@ -2,6 +2,49 @@
 
  **CAM**  is short for  **C**ommunication  **A**cceleration for  **M**atrix on Ascend NPU. CAM provides EP (Expert Parallelism) communication kernels, high performance KVCache transfer for PD disaggregation and KVC pooling, AFD communication kernels, RL weights transfer and so on. CAM is easily to be run in single kernel mode or integrated into vllm or SGLang framework. 
 
+## Compact routed-only communication
+
+Dispatch and combine use exactly `R` routed expert slots per MoE rank, with
+zero-based local expert IDs and no shared-expert slot. This wire layout is
+incompatible with the original shared-expert and reserved-slot layouts. Upgrade
+the CANN kernel package, Python extension, and every participant together.
+
+| Python interface | Compact contract |
+|------------------|------------------|
+| `moe_dispatch_send_async` | Routed expert IDs are in `[0, moe_rank_num * R)`. |
+| `moe_dispatch_recv_async` | Returns `[expand_x, dynamic_scales, batch_info, ep_recv_count_routed]`. |
+| `moe_combine_send_async` | Takes `expand_x, comm_args, batch_info`; the shared-expert tensor argument is removed. |
+| `moe_combine_recv_async` | Produces the weighted sum of routed expert outputs. |
+
+`dispatch_recv` and `combine_send` take `max_seq_len` in the position previously
+named `batch_size`. `batch_info` has `5 + tp_size + R * tp_size` int64 elements;
+its expert range is zero-based and inclusive. Pass the returned metadata to
+combine without adding a reserved slot. Empty MoE ranks must still call combine
+send to publish completion.
+
+The communication kernels obtain peer windows from the HCCL context associated
+with `group_name`; `comm_args` remains a FLOAT16 interface placeholder. The
+receive-side `x` / `expand_x` inputs are floating-point tensors of shape `[1]`
+that select the output dtype. MoE global rank IDs start at `attn_rank_num`. The legacy
+`CommArgs` shared-header layout is retained for compatibility with existing
+users. The extension exposes
+`CAM_ROUTED_ONLY_CONTRACT = "cam_async_routed_only_compact_v2"`; this identifies
+the Python ABI and does not verify the separately installed CANN kernel binary.
+
+The single communication interface check is:
+
+```bash
+python test/cam/test_moe_async_interfaces.py
+# After installing matching torch, torch_npu, and the built extension:
+python test/cam/test_moe_async_interfaces.py --installed
+```
+
+The default mode checks source interfaces. `--installed` also calls all four
+Python and Torch interfaces on Meta tensors to check output order, shapes, and
+dtypes. Device compilation and multi-NPU numerical validation require an Ascend
+environment. Detailed migration documents and CPU verification models stay
+in the local migration workspace and are excluded from this repository update.
+
 # Roadmap
 
 - [x]  **EP Communication: Dispatch & Combine** 
