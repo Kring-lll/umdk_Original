@@ -135,12 +135,46 @@ static void catch_sigint(int sig)
     request_exit();
 }
 
-static void notify_peer_exit(void)
+void notify_peer_exit(const perftest_config_t *cfg)
 {
-    if (g_perftest_cfg != NULL) {
+    if (cfg != NULL) {
         char cmd = PERFTEST_EXIT_CMD;
-        (void)comm_send(g_perftest_cfg, 0, &cmd, sizeof(cmd));
+        (void)comm_send(cfg, 0, &cmd, sizeof(cmd));
     }
+}
+
+/*
+ * Detect a peer-initiated abort inside once-mode wait loops: when the peer's run
+ * fails (e.g. a post rejected by the device) it sends PERFTEST_EXIT_CMD on the
+ * mgmt channel and exits. Without this check the local loops wait for data that
+ * will never arrive and the process never exits.
+ * Throttled by a thread-local spin counter so a hot wait loop only pays one
+ * mgmt poll per PERFTEST_PEER_EXIT_CHECK_EVERY calls.
+ */
+#define PERFTEST_PEER_EXIT_CHECK_EVERY (4096)
+
+static bool peer_exit_requested(const perftest_config_t *cfg)
+{
+    static __thread uint32_t spins;
+
+    if (g_exit_flag) {
+        return true;
+    }
+    if (++spins < PERFTEST_PEER_EXIT_CHECK_EVERY) {
+        return false;
+    }
+    spins = 0;
+
+    int pr = comm_poll(cfg, 0, 0);
+    if (pr > 0) {
+        char buf[1] = {0};
+        ssize_t n = comm_recv(cfg, 0, buf, sizeof(buf));
+        if (n <= 0 || buf[0] == PERFTEST_EXIT_CMD) {
+            request_exit();
+            return true;
+        }
+    }
+    return false;
 }
 
 static uint32_t get_rqe_prefill_multiple_simplex(
@@ -259,6 +293,10 @@ static int poll_jfc_until_expected_cqe(perftest_context_t *ctx, perftest_config_
      */
     int cqe_expected = cfg->jfs_post_list / cfg->cq_mod;
     do {
+        if (peer_exit_requested(cfg)) {
+            LOG_ERROR("Peer exited while waiting for send CQEs, id:%u\n", id);
+            return -1;
+        }
         int cqe_cnt = urma_poll_jfc(ctx->jfc_s[id], cfg->jfc_depth, cr);
         if (cqe_cnt > 0) {
             for (int i = 0; i < cqe_cnt; i++) {
@@ -346,6 +384,7 @@ static void *run_read_lat_simplex(void *arg)
     return NULL;
 
 free_cr:
+    arg_typed->failed = true;
     free(cr);
     return NULL;
 }
@@ -439,6 +478,7 @@ static void *run_write_lat_simplex(void *arg)
     return NULL;
 
 free_cr:
+    arg_typed->failed = true;
     free(cr);
     return NULL;
 }
@@ -538,6 +578,10 @@ static void *run_send_lat_simplex(void *arg)
              */
             int cqe_expected = (int)cfg->jfs_post_list;
             do {
+                if (peer_exit_requested(cfg)) {
+                    LOG_ERROR("Peer exited while waiting for recv CQEs, id:%u\n", id);
+                    goto free_cr;
+                }
                 int cqe_cnt = urma_poll_jfc(ctx->jfc_r[id], cfg->jfc_depth, cr);
                 if (cqe_cnt > 0) {
                     for (int i = 0; i < cqe_cnt; i++) {
@@ -634,6 +678,7 @@ static void *run_send_lat_simplex(void *arg)
     return NULL;
 
 free_cr:
+    arg_typed->failed = true;
     free(cr);
     return NULL;
 }
@@ -1369,11 +1414,18 @@ static int run_lat_test(perftest_context_t *ctx, perftest_config_t *cfg, void *(
     }
 
     void *thread_ret;
+    bool thread_failed = false;
     for (uint32_t i = 0; i < cfg->pair_num; i++) {
         (void)pthread_join(args[i].thread_id, &thread_ret);
+        thread_failed = thread_failed || args[i].failed;
     }
 
     free(args);
+
+    if (thread_failed) {
+        LOG_ERROR("Run lat thread failed, abort test.\n");
+        return -1;
+    }
 
     for (uint64_t id = 0; id < cfg->jettys; id++) {
         if (cfg->time_type.bs.iterations == 1) {
@@ -1439,6 +1491,7 @@ static void *run_read_lat_duplex(void *arg)
     return NULL;
 
 free_cr:
+    arg_typed->failed = true;
     free(cr);
     return NULL;
 }
@@ -1567,6 +1620,7 @@ static void *run_write_lat_duplex(void *arg)
     return NULL;
 
 free_cr:
+    arg_typed->failed = true;
     free(cr);
     return NULL;
 }
@@ -1700,6 +1754,10 @@ static void *run_send_lat_duplex(void *arg)
              */
             int cqe_expected = (int)cfg->jfs_post_list;
             do {
+                if (peer_exit_requested(cfg)) {
+                    LOG_ERROR("Peer exited while waiting for recv CQEs, id:%u\n", id);
+                    goto free_cr;
+                }
                 int cqe_cnt = urma_poll_jfc(ctx->jfc_r[id], cfg->jfc_depth, cr);
                 if (cqe_cnt > 0) {
                     for (int i = 0; i < cqe_cnt; i++) {
@@ -1785,6 +1843,7 @@ static void *run_send_lat_duplex(void *arg)
     return NULL;
 
 free_cr:
+    arg_typed->failed = true;
     free(cr);
     return NULL;
 }
@@ -1878,6 +1937,10 @@ static int run_once_bw(perftest_context_t *ctx, perftest_config_t *cfg)
 
     while (tot_scnt < tot_iters || tot_ccnt < tot_iters ||
            (cfg->time_type.bs.duration == 1 && run_ctx->state != END_STATE)) {
+        if (peer_exit_requested(cfg)) {
+            LOG_ERROR("Peer exited, abort bw run, tot_scnt:%lu, tot_ccnt:%lu.\n", tot_scnt, tot_ccnt);
+            goto free_cr;
+        }
         /* main loop to run over all the jetty and post each time n messages */
         for (index = 0; index < cfg->jettys; index++) {
             if (cfg->is_rate_limit == true && is_send_burst == false) {
@@ -2129,6 +2192,11 @@ static int run_once_bw_recv(perftest_context_t *ctx, perftest_config_t *cfg)
     uint64_t tot_iters = cfg->iters * cfg->jettys;
 
     while (rcnt < tot_iters || (cfg->time_type.bs.duration == 1 && run_ctx->state != END_STATE)) {
+        if (peer_exit_requested(cfg)) {
+            LOG_ERROR("Peer exited, abort recv bw run, rcnt:%lu.\n", rcnt);
+            ret = -1;
+            goto cleaning;
+        }
         if (cfg->use_jfce == true) {
             if (wait_jfc_event(ctx->jfce_r[0], cfg->wait_jfc_timeout) != 0) {
                 LOG_ERROR("Couldn't wait jfc event.\n");
@@ -2360,6 +2428,11 @@ static int run_once_bi_bw(perftest_context_t *ctx, perftest_config_t *cfg)
 
     while ((cfg->time_type.bs.duration == 1 && run_ctx->state != END_STATE) ||
            tot_ccnt < tot_iters || tot_rcnt < tot_iters) {
+        if (peer_exit_requested(cfg)) {
+            LOG_ERROR("Peer exited, abort bi bw run, tot_ccnt:%lu, tot_rcnt:%lu.\n", tot_ccnt, tot_rcnt);
+            ret = -1;
+            goto cleaning;
+        }
         for (index = 0; index < jettys; index++) {
             while (before_first_recv == false &&
                    (run_ctx->scnt[index] < cfg->iters || cfg->time_type.bs.duration == 1) &&
@@ -3357,13 +3430,13 @@ static int run_bw_once(perftest_context_t *ctx, perftest_config_t *cfg)
         if (prepare_run_bw_infinite(ctx, cfg) != 0) {
             LOG_ERROR("Failed to prepare and run infinite, api_type: %d.\n",
                       (int)cfg->api_type);
-            notify_peer_exit();
+            notify_peer_exit(cfg);
             (void)signal(SIGINT, SIG_DFL);
             return -1;
         }
         /* A completed duration test must keep the management channel available for final synchronization. */
         if (g_exit_flag) {
-            notify_peer_exit();
+            notify_peer_exit(cfg);
         }
         (void)signal(SIGINT, SIG_DFL);
     } else {
@@ -3542,7 +3615,7 @@ static int run_send_bw_infinite(perftest_context_t *ctx, perftest_config_t *cfg)
 
     /* A completed duration test must keep the management channel available for final synchronization. */
     if (ret != 0 || g_exit_flag) {
-        notify_peer_exit();
+        notify_peer_exit(cfg);
     }
     (void)signal(SIGINT, SIG_DFL);
 

@@ -71,6 +71,10 @@ static int run_test(perftest_context_t *ctx, perftest_config_t *cfg)
 
     if (ret != 0) {
         LOG_ERROR("Failed to run test: %d.\n", (int)cfg->cmd);
+        if (!g_exit_flag) {
+            /* Tell the peer to abort its wait loops instead of hanging forever. */
+            notify_peer_exit(cfg);
+        }
         return ret;
     }
     if (!g_exit_flag) {
