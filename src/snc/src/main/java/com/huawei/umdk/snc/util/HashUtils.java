@@ -56,10 +56,24 @@ public final class HashUtils {
 
     private static final UbSwitchDieLibrary LIB_DIE;
 
+    // One-shot runtime path logs: avoid log spam on every call while still
+    // leaving a trace in the test/build log of which implementation actually
+    // served the first invocation. Together with the static-block load
+    // diagnostics and the UbSwitchHash entry-point logs this forms a
+    // three-layer evidence chain: load result -> dispatch decision -> actual
+    // fallback execution.
+    private static boolean ecmpCallPathLogged;
+    private static boolean dieCallPathLogged;
+
     static {
         UbSwitchEcmpLibrary ecmpLib;
         try {
             ecmpLib = DllLoader.load(ECMP_NATIVE_LIBRARY_NAME, UbSwitchEcmpLibrary.class);
+            // Mirror the load-failure diagnostics so that the chosen path
+            // (native vs. fallback) is visible from the test/build log on
+            // both branches, not only on failure.
+            System.err.println("[HashUtils] Native library '" + ECMP_NATIVE_LIBRARY_NAME
+                + "' loaded; using native implementation for ubswitch_Hash_ecmp.");
         } catch (Throwable t) {
             // Native library unavailable; HashUtils falls back to the
             // pure-Java UbSwitchHash implementation.
@@ -69,6 +83,8 @@ public final class HashUtils {
             System.err.println("[HashUtils] Failed to load native library '"
                 + ECMP_NATIVE_LIBRARY_NAME + "': " + t);
             t.printStackTrace(System.err);
+            System.err.println("[HashUtils] Using pure-Java fallback (UbSwitchHash"
+                + ".ubswitchHashEcmp) for ubswitch_Hash_ecmp.");
             ecmpLib = null;
         }
         LIB_ECMP = ecmpLib;
@@ -76,6 +92,11 @@ public final class HashUtils {
         UbSwitchDieLibrary dieLib;
         try {
             dieLib = DllLoader.load(DIE_NATIVE_LIBRARY_NAME, UbSwitchDieLibrary.class);
+            // Mirror the load-failure diagnostics so that the chosen path
+            // (native vs. fallback) is visible from the test/build log on
+            // both branches, not only on failure.
+            System.err.println("[HashUtils] Native library '" + DIE_NATIVE_LIBRARY_NAME
+                + "' loaded; using native implementation for ubswitch_Hash_dieEcmp.");
         } catch (Throwable t) {
             // Native library unavailable; HashUtils falls back to the
             // pure-Java UbSwitchHash implementation.
@@ -85,6 +106,8 @@ public final class HashUtils {
             System.err.println("[HashUtils] Failed to load native library '"
                 + DIE_NATIVE_LIBRARY_NAME + "': " + t);
             t.printStackTrace(System.err);
+            System.err.println("[HashUtils] Using pure-Java fallback (UbSwitchHash"
+                + ".ubswitchHashDieEcmp) for ubswitch_Hash_dieEcmp.");
             dieLib = null;
         }
         LIB_DIE = dieLib;
@@ -159,12 +182,25 @@ public final class HashUtils {
                                  int ecmpCnt, int hashFunc, int hashSeed) {
         int mappedFunc = mapHashMode(hashFunc);
         if (LIB_ECMP != null) {
+            if (!ecmpCallPathLogged) {
+                System.err.println("[HashUtils] nativeHash dispatching to native"
+                    + " library for ubswitch_Hash_ecmp (hashFunc=" + hashFunc
+                    + ", mappedFunc=" + mappedFunc + ", ecmpCnt=" + ecmpCnt + ").");
+                ecmpCallPathLogged = true;
+            }
             int rawHash = LIB_ECMP.ubswitch_Hash_ecmp(dip, sip, dport, sport,
                     protocol, mappedFunc, ecmpCnt);
             if (ecmpCnt == 0) {
                 return rawHash;
             }
             return Math.floorMod(rawHash, ecmpCnt);
+        }
+        if (!ecmpCallPathLogged) {
+            System.err.println("[HashUtils] nativeHash dispatching to pure-Java"
+                + " fallback (UbSwitchHash.ubswitchHashEcmp) for ubswitch_Hash_ecmp"
+                + " (hashFunc=" + hashFunc + ", mappedFunc=" + mappedFunc
+                + ", ecmpCnt=" + ecmpCnt + ").");
+            ecmpCallPathLogged = true;
         }
         return UbSwitchHash.ubswitchHashEcmp(dip, sip, dport, sport, protocol,
                                              mappedFunc, ecmpCnt);
@@ -255,8 +291,23 @@ public final class HashUtils {
                                             int ecmpCnt, int hashFunc,
                                             int functionSelect) {
         if (LIB_DIE != null) {
+            if (!dieCallPathLogged) {
+                System.err.println("[HashUtils] nativeHashDstCnaJetty dispatching"
+                    + " to native library for ubswitch_Hash_dieEcmp (dstCna="
+                    + dstCna + ", jettyId=" + jettyId + ", ecmpCnt=" + ecmpCnt
+                    + ", functionSelect=" + functionSelect + ").");
+                dieCallPathLogged = true;
+            }
             return LIB_DIE.ubswitch_Hash_dieEcmp(
                 0, dstCna, jettyId & 0xFF, ecmpCnt, functionSelect);
+        }
+        if (!dieCallPathLogged) {
+            System.err.println("[HashUtils] nativeHashDstCnaJetty dispatching"
+                + " to pure-Java fallback (UbSwitchHash.ubswitchHashDieEcmp)"
+                + " for ubswitch_Hash_dieEcmp (dstCna=" + dstCna
+                + ", jettyId=" + jettyId + ", ecmpCnt=" + ecmpCnt
+                + ", functionSelect=" + functionSelect + ").");
+            dieCallPathLogged = true;
         }
         return UbSwitchHash.ubswitchHashDieEcmp(
             0, dstCna, jettyId & 0xFF, ecmpCnt, functionSelect);

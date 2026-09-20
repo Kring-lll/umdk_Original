@@ -40,6 +40,16 @@ package com.huawei.umdk.snc.util;
  */
 public final class UbSwitchHash {
 
+    // One-shot entry-point log: emitted on the first invocation of each
+    // public method. Because UbSwitchHash is *only* reached via the fallback
+    // branch in HashUtils, the presence of this log line in the test/build
+    // output is independent corroboration that the pure-Java fallback path
+    // was actually executed (not merely that the native library failed to
+    // load). Its absence, conversely, proves the native library served the
+    // call. The flag avoids log spam on repeated calls.
+    private static boolean ecmpEntryLogged;
+    private static boolean dieEntryLogged;
+
     private UbSwitchHash() {
     }
 
@@ -145,6 +155,12 @@ public final class UbSwitchHash {
      */
     public static int ubswitchHashEcmp(String dip, String sip, int dport, int sport,
                                       int protocol, int hashFunc, int ecmpCnt) {
+        if (!ecmpEntryLogged) {
+            System.err.println("[UbSwitchHash] ubswitchHashEcmp invoked"
+                + " — pure-Java fallback is serving ubswitch_Hash_ecmp"
+                + " (hashFunc=" + hashFunc + ", ecmpCnt=" + ecmpCnt + ").");
+            ecmpEntryLogged = true;
+        }
         int h = (hashFunc == 1)
             ? hashFnv1a(dip, sip, dport, sport, protocol, hashFunc)
             : hashSimple(dip, sip, dport, sport, protocol, hashFunc);
@@ -203,6 +219,13 @@ public final class UbSwitchHash {
      */
     public static int ubswitchHashDieEcmp(int srcCna, int dstCna, int lb,
                                           int ecmpCnt, int functionSelect) {
+        if (!dieEntryLogged) {
+            System.err.println("[UbSwitchHash] ubswitchHashDieEcmp invoked"
+                + " — pure-Java fallback is serving ubswitch_Hash_dieEcmp"
+                + " (dstCna=" + dstCna + ", lb=" + lb
+                + ", ecmpCnt=" + ecmpCnt + ", functionSelect=" + functionSelect + ").");
+            dieEntryLogged = true;
+        }
         if (functionSelect != 0 && functionSelect != 1) {
             return -1;
         }
