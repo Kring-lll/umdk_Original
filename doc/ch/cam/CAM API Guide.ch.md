@@ -166,3 +166,7 @@ umdk_cam_op_lib.gather_selection_kv_cache(
 |F_MAX_BLOCK_NUM|单个 batch 在 full 侧最多挂载的逻辑 block 数，即 `full_kv_block_table` 列数|
 |K_ROPE|RoPE 维度，对应 `qk_rope_head_dim`；非 int8 场景独立存储|
 |KV_CACHE|KV / NoPE 最后一维长度；非 int8 时约等于 `kv_lora_rank`，int8 时为 NoPE + RoPE + scale 拼接后的长度|
+
+ #### 2.1.2 gather_selection_sparse_flash_attention ▶
+##### 属性 `scale_value`
+类型为 `float`，默认 `1.0`，须为有限正数。Python 传入整型（如 `1`）时会自动转换为 float，**不视为类型错误**（Torch schema 为 `float`，dispatcher 隐式转换）。

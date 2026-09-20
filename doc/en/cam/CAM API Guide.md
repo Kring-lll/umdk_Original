@@ -167,3 +167,7 @@ The function returns `selection_kv_actual_seq`.
 |F_MAX_BLOCK_NUM|Maximum number of logical blocks mounted for one batch on the full side, i.e. column count of `full_kv_block_table`|
 |K_ROPE|RoPE dimension, corresponding to `qk_rope_head_dim`; stored separately in non-int8 cases|
 |KV_CACHE|Last-dimension length of KV / NoPE; approximately `kv_lora_rank` for non-int8, and NoPE + RoPE + scale packed length for int8|
+
+ #### 2.1.2 gather_selection_sparse_flash_attention ▶
+##### Attribute `scale_value`
+Type `float`, default `1.0`, must be finite and > 0. A Python `int` (e.g. `1`) is accepted and automatically converted to float — **not a type error** (Torch schema is `float`; the dispatcher coerces).
