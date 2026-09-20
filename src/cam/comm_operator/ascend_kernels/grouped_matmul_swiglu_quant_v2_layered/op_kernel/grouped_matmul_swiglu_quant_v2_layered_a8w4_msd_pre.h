@@ -48,6 +48,9 @@ class GMMA8W4PreProcess {
     __aicore__ inline void CustomInitBuffer(TPipe *pipe);
 
   private:
+    __aicore__ inline void InitInput(const GMAddrParams &gmAddrParams,
+                                     const GMMSwigluQuantV2BaseParams *__restrict gmmSwigluQuantV2BaseParamsIN);
+
     TQue<QuePosition::VECIN, BUFFER_NUM_A8W4_PRE> vecInQueueX, vecInQueueXBak;
     TQue<QuePosition::VECOUT, BUFFER_NUM_A8W4_PRE> vecOutQueueA1;
     TQue<QuePosition::VECOUT, BUFFER_NUM_A8W4_PRE> vecOutQueueA2;
@@ -83,19 +86,24 @@ class GMMA8W4PreProcess {
     uint32_t groupNum{0};
 };
 
-__aicore__ inline void
-GMMA8W4PreProcess::Init(const GMAddrParams gmAddrParams,
-                        const GMMSwigluQuantV2BaseParams *__restrict gmmSwigluQuantV2BaseParamsIN)
+__aicore__ inline void GMMA8W4PreProcess::InitInput(
+    const GMAddrParams &gmAddrParams, const GMMSwigluQuantV2BaseParams *__restrict gmmSwigluQuantV2BaseParamsIN)
+{
+    xGM.SetGlobalBuffer((__gm__ int8_t *)gmAddrParams.xGM);
+    yGm1.SetGlobalBuffer((__gm__ int8_t *)gmAddrParams.workSpaceGM);
+    yGm2.SetGlobalBuffer((__gm__ int8_t *)gmAddrParams.workSpaceGM + gmAddrParams.workSpaceOffset1);
+    gmmSwigluQuantV2BaseParams = gmmSwigluQuantV2BaseParamsIN;
+    vK = gmmSwigluQuantV2BaseParams->K;
+    groupNum = static_cast<uint32_t>(gmmSwigluQuantV2BaseParams->groupNum);
+    // M * K * 7B (1B + 0.5B + 0.5B + 2B + 4B) <= UBsize - 256B
+    blockDim = GetBlockNum() * GetTaskRation();
+}
+
+__aicore__ inline void GMMA8W4PreProcess::Init(
+    const GMAddrParams gmAddrParams, const GMMSwigluQuantV2BaseParams *__restrict gmmSwigluQuantV2BaseParamsIN)
 {
     if ASCEND_IS_AIV {
-        xGM.SetGlobalBuffer((__gm__ int8_t *)gmAddrParams.xGM);
-        yGm1.SetGlobalBuffer((__gm__ int8_t *)gmAddrParams.workSpaceGM);
-        yGm2.SetGlobalBuffer((__gm__ int8_t *)gmAddrParams.workSpaceGM + gmAddrParams.workSpaceOffset1);
-        gmmSwigluQuantV2BaseParams = gmmSwigluQuantV2BaseParamsIN;
-        vK = gmmSwigluQuantV2BaseParams->K;
-        groupNum = static_cast<uint32_t>(gmmSwigluQuantV2BaseParams->groupNum);
-        // M * K * 7B (1B + 0.5B + 0.5B + 2B + 4B) <= UBsize - 256B
-        blockDim = GetBlockNum() * GetTaskRation();
+        InitInput(gmAddrParams, gmmSwigluQuantV2BaseParamsIN);
     }
 }
 

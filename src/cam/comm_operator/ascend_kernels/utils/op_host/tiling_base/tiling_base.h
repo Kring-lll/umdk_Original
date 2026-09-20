@@ -212,7 +212,7 @@ class TilingBaseClass {
         oss << "(ori_shape:" << GetShapeDebugStr(shape->GetOriginShape()) << "),";
         oss << "(format: "
             << ge::TypeUtils::FormatToSerialString(
-                   static_cast<ge::Format>(ge::GetPrimaryFormat(tensor->GetStorageFormat())))
+                static_cast<ge::Format>(ge::GetPrimaryFormat(tensor->GetStorageFormat())))
             << "),";
         oss << "(ori_format: " << ge::TypeUtils::FormatToSerialString(tensor->GetOriginFormat()) << ") ";
         return oss.str();

@@ -67,6 +67,11 @@ class GMMA4W4PostProcess {
     __aicore__ inline void ApplySmoothScale(uint32_t loopIdx, VecConfig &vecConfig,
                                             WorkSpaceSplitConfig &workspaceSplitConfig);
 
+    __aicore__ inline void InitCoreParams(const GMMSwigluQuantV2BaseParams *baseParams);
+    __aicore__ inline void InitGmTensors(const GMAddrParams &gmAddrParams, const GMMSwigluQuantV2 *gmmSwigluIN);
+    __aicore__ inline void InitSmoothScaleGm(const GMAddrParams &gmAddrParams);
+    __aicore__ inline void InitMmOutGmTensors(const GMAddrParams &gmAddrParams);
+
     const GMMSwigluQuantV2 *__restrict gmmSwigluQuantV2;
     const GMMSwigluQuantV2BaseParams *__restrict gmmSwigluQuantV2BaseParams;
     GlobalTensor<float> perTokenScaleGM;
@@ -86,27 +91,47 @@ class GMMA4W4PostProcess {
     int64_t aivCoreNum = 0;
 };
 
-__aicore__ inline void
-GMMA4W4PostProcess::Init(const GMAddrParams gmAddrParams,
-                         const GMMSwigluQuantV2BaseParams *__restrict gmmSwigluQuantV2BaseParamsIN,
-                         const GMMSwigluQuantV2 *__restrict gmmSwigluIN)
+__aicore__ inline void GMMA4W4PostProcess::InitCoreParams(const GMMSwigluQuantV2BaseParams *baseParams)
+{
+    aicCoreNum = GetBlockNum();
+    aivCoreNum = aicCoreNum * NUM_2;
+    blockIdx = GetBlockIdx();
+    gmmSwigluQuantV2BaseParams = baseParams;
+}
+
+__aicore__ inline void GMMA4W4PostProcess::InitGmTensors(const GMAddrParams &gmAddrParams,
+                                                         const GMMSwigluQuantV2 *gmmSwigluIN)
+{
+    gmmSwigluQuantV2 = gmmSwigluIN;
+    InitSmoothScaleGm(gmAddrParams);
+    InitMmOutGmTensors(gmAddrParams);
+    groupListGM.SetGlobalBuffer((__gm__ int64_t *)gmAddrParams.groupListGM, gmmSwigluQuantV2->groupListLen);
+    perTokenScaleGM.SetGlobalBuffer((__gm__ float *)gmAddrParams.xScaleGM, gmmSwigluQuantV2BaseParams->M);
+    quantOutputGM.SetGlobalBuffer((__gm__ int8_t *)gmAddrParams.yGM, gmmSwigluQuantV2BaseParams->M *
+                                                                         gmmSwigluQuantV2->tokenLen /
+                                                                         SWIGLU_REDUCE_FACTOR);
+    quantScaleOutputGM.SetGlobalBuffer((__gm__ float *)gmAddrParams.yScaleGM, gmmSwigluQuantV2BaseParams->M);
+}
+
+__aicore__ inline void GMMA4W4PostProcess::InitMmOutGmTensors(const GMAddrParams &gmAddrParams)
+{
+    mmOutGM1.SetGlobalBuffer((__gm__ half *)((__gm__ int8_t *)gmAddrParams.workSpaceGM));
+    mmOutGM2.SetGlobalBuffer(
+        (__gm__ half *)((__gm__ int8_t *)gmAddrParams.workSpaceGM + gmAddrParams.workSpaceOffset1));
+}
+
+__aicore__ inline void GMMA4W4PostProcess::InitSmoothScaleGm(const GMAddrParams &gmAddrParams)
+{
+    smoothScaleGM.SetGlobalBuffer((__gm__ float *)gmAddrParams.smoothScaleGM);
+}
+
+__aicore__ inline void GMMA4W4PostProcess::Init(
+    const GMAddrParams gmAddrParams, const GMMSwigluQuantV2BaseParams *__restrict gmmSwigluQuantV2BaseParamsIN,
+    const GMMSwigluQuantV2 *__restrict gmmSwigluIN)
 {
     if ASCEND_IS_AIV {
-        aicCoreNum = GetBlockNum();
-        aivCoreNum = aicCoreNum * NUM_2;
-        blockIdx = GetBlockIdx();
-        gmmSwigluQuantV2BaseParams = gmmSwigluQuantV2BaseParamsIN;
-        gmmSwigluQuantV2 = gmmSwigluIN;
-        groupListGM.SetGlobalBuffer((__gm__ int64_t *)gmAddrParams.groupListGM, gmmSwigluQuantV2->groupListLen);
-        mmOutGM1.SetGlobalBuffer((__gm__ half *)((__gm__ int8_t *)gmAddrParams.workSpaceGM));
-        mmOutGM2.SetGlobalBuffer(
-            (__gm__ half *)((__gm__ int8_t *)gmAddrParams.workSpaceGM + gmAddrParams.workSpaceOffset1));
-        perTokenScaleGM.SetGlobalBuffer((__gm__ float *)gmAddrParams.xScaleGM, gmmSwigluQuantV2BaseParams->M);
-        smoothScaleGM.SetGlobalBuffer((__gm__ float *)gmAddrParams.smoothScaleGM);
-        quantOutputGM.SetGlobalBuffer((__gm__ int8_t *)gmAddrParams.yGM, gmmSwigluQuantV2BaseParams->M *
-                                                                             gmmSwigluQuantV2->tokenLen /
-                                                                             SWIGLU_REDUCE_FACTOR);
-        quantScaleOutputGM.SetGlobalBuffer((__gm__ float *)gmAddrParams.yScaleGM, gmmSwigluQuantV2BaseParams->M);
+        InitCoreParams(gmmSwigluQuantV2BaseParamsIN);
+        InitGmTensors(gmAddrParams, gmmSwigluIN);
     }
 }
 
