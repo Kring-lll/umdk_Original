@@ -75,7 +75,7 @@ uint32_t bondp_fb_switch_path(bondp_comp_t *bdp_comp)
         }
         recovered_cnt++;
         atomic_store(&bdp_comp->valid[i], true);
-        URMA_LOG_WARN("Path restored: local jetty recovered, vjetty_id=%u, local_idx=%u\n",
+        URMA_LOG_WARN("QQQQ Path restored: local jetty recovered, vjetty_id=%u, local_idx=%u\n",
                       bdp_comp->v_jetty.jetty_id.id, i);
     }
     return recovered_cnt;

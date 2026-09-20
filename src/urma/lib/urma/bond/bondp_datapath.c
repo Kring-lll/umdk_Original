@@ -1599,7 +1599,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         }
 
         if (!comp_ctx->enable_failover) {
-            URMA_LOG_WARN("Path switched, resend=no, wr_id=%lu, "
+            URMA_LOG_WARN("QQQQ Path switched, resend=no, wr_id=%lu, "
                           "vjetty_id=%u, vtjetty_id=%u, from=[%u, %u], cr_status=%d, "
                           "local_eid=" EID_FMT ", remote_eid=" EID_FMT "\n",
                           wr_id, bdp_comp->v_jetty.jetty_id.id,
@@ -1621,7 +1621,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
              * When all ports are invalid and no port is available to resend the wr,
              * this error CQE is returned directly to the upper layer.
              */
-            URMA_LOG_ERR("Path switched failed, no valid path, wr_id=%lu, "
+            URMA_LOG_ERR("QQQQ Path switched failed, no valid path, wr_id=%lu, "
                          "vjetty_id=%u, vtjetty_id=%u, from=[%u, %u], cr_status=%d, "
                          "local_eid=" EID_FMT ", remote_eid=" EID_FMT "\n",
                          wr_id, bdp_comp->v_jetty.jetty_id.id,
@@ -1633,7 +1633,7 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
             goto CONVERT_CR;
         }
 
-        URMA_LOG_WARN("Path switched, resend=yes, wr_id=%lu, "
+        URMA_LOG_WARN("QQQQ Path switched, resend=yes, wr_id=%lu, "
                       "vjetty_id=%u, vtjetty_id=%u, "
                       "from=[%u, %u], to=[%d, %d], cr_status=%d, "
                       "local_eid=" EID_FMT ", remote_eid=" EID_FMT "\n",

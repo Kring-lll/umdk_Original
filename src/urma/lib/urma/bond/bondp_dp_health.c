@@ -244,13 +244,16 @@ static void hc_set_tjetty_list_target_valid(bondp_hc_node_t *node, uint32_t loca
         bondp_p_target_jetty_t *p_tjetty = bondp_find_p_tjetty(bdp_tjetty, local_idx, target_idx);
         if (p_tjetty != NULL) {
             atomic_store(&p_tjetty->valid, true);
+            URMA_LOG_WARN("QQQQ Path restored, target jetty recovered, vtjetty=(" EID_FMT ",%u) p=[%u,%u] set=1\n",
+                           EID_ARGS(bdp_tjetty->v_tjetty.id.eid), bdp_tjetty->v_tjetty.id.id,
+                           local_idx, target_idx);
             recovered_cnt++;
         }
     }
     pthread_rwlock_unlock(&node->lock);
 
     if (recovered_cnt != 0) {
-        URMA_LOG_WARN("Path restored: target jettys recovered, node_idx=%u, "
+        URMA_LOG_WARN("QQQQ Path restored: target jettys recovered, node_idx=%u, "
                       "path=[%u, %u], cnt=%u\n",
                       node->node_idx, local_idx, target_idx, recovered_cnt);
     }
@@ -282,7 +285,7 @@ static void hc_set_local_idx_jettys_hc_valid(bondp_context_t *bdp_ctx, uint32_t 
     pthread_rwlock_unlock(&bdp_ctx->p_vjetty_id_table.lock);
 
     if (ready_cnt != 0) {
-        URMA_LOG_WARN("Path ready: local jettys ready for failback, "
+        URMA_LOG_WARN("QQQQ Path ready: local jettys ready for failback, "
                       "local_idx=%u, cnt=%u\n",
                       local_idx, ready_cnt);
     }
@@ -1220,7 +1223,7 @@ void bondp_hc_tjetty_sync_valid(const bondp_target_jetty_t *bdp_tjetty)
             }
             bool v = atomic_load(&path->valid);
             if (!v) {
-                atomic_store(&p_tjetty->valid, v);
+                atomic_store(&p_tjetty->valid, false);
             }
         }
     }

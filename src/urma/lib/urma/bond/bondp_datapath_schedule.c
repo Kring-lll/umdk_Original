@@ -368,12 +368,22 @@ static int schedule_send_balance(const bondp_comp_t *bdp_comp, const bondp_targe
     uint32_t selected_pos = select_random_path(least_load_cnt);
     *send_idx = least_load_path[selected_pos].local_idx;
     *target_idx = least_load_path[selected_pos].target_idx;
-    URMA_LOG_DEBUG("Balance schedule selected path: local_idx=%d, target_idx=%d\n", *send_idx, *target_idx);
+    URMA_LOG_ERR("Sched VJ=%u VTJ=(" EID_FMT ",%u) sel=[%d,%d] cand=%u\n",
+                   bdp_comp->v_jetty.jetty_id.id, EID_ARGS(bdp_tjetty->v_tjetty.id.eid),
+                   bdp_tjetty->v_tjetty.id.id, *send_idx, *target_idx, least_load_cnt);
     for (uint32_t i = 0; i < bdp_tjetty->p_tjetty_count; i++) {
         uint32_t local_idx = bdp_tjetty->p_tjettys[i].local_indice;
         uint32_t remote_idx = bdp_tjetty->p_tjettys[i].remote_indice;
-        URMA_LOG_DEBUG("Balance schedule path[%u]: local_idx=%u, target_idx=%u, sqe_cnt=%u\n",
-                       i, local_idx, remote_idx, atomic_load(&bdp_comp->sqe_cnt[local_idx][remote_idx]));
+        const bondp_p_target_jetty_t *p_tjetty = &bdp_tjetty->p_tjettys[i];
+        bool local_valid = atomic_load(&bdp_comp->valid[local_idx]);
+        bool target_valid = atomic_load(&p_tjetty->valid);
+        bool local_jetty = bdp_comp->p_jetty[local_idx] != NULL;
+        bool target_jetty = p_tjetty->p_tjetty != NULL;
+        uint32_t sqe_cnt = atomic_load(&bdp_comp->sqe_cnt[local_idx][remote_idx]);
+
+        URMA_LOG_ERR("SSched p[%u]=[%u,%u] sqe=%u L_v=%d T_v=%d L_j=%d T_j=%d\n",
+                       i, local_idx, remote_idx, sqe_cnt, local_valid, target_valid,
+                       local_jetty, target_jetty);
     }
     return 0;
 }
