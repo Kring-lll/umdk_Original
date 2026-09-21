@@ -161,6 +161,7 @@ typedef struct perftest_thread_arg {
     perftest_context_t *ctx;
     uint32_t id;
     pthread_t thread_id;
+    bool failed; /* set by the run thread itself on post/poll failure */
 } perftest_thread_arg_t;
 
 /* calculate sge addr offset and step forward. */
