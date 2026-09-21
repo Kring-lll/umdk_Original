@@ -786,18 +786,18 @@ private:
     GlobalTensor<int32_t> selKvActualSeqGm_;
 
     LocalTensor<int32_t> topkIndicesLocal_;
-   LocalTensor<int32_t> insertStatusSameSeqLocal_;
-   LocalTensor<int32_t> hitFromSrcSeqLocal_;
-   LocalTensor<int32_t> sortBuf_;
+    LocalTensor<int32_t> insertStatusSameSeqLocal_;
+    LocalTensor<int32_t> hitFromSrcSeqLocal_;
+    LocalTensor<int32_t> sortBuf_;
 
-   TQue<QuePosition::VECIN, 1> selTopKIdxQue_;
-   TQueBind<QuePosition::VECIN, QuePosition::VECOUT, 1> kvCacheQue_;
-   TBuf<QuePosition::VECCALC> workBuf_;
+    TQue<QuePosition::VECIN, 1> selTopKIdxQue_;
+    TQueBind<QuePosition::VECIN, QuePosition::VECOUT, 1> kvCacheQue_;
+    TBuf<QuePosition::VECCALC> workBuf_;
 
-   enum class LAYOUT : uint32_t {
-       BSND = 0,
-       TND = 1
-   };
+    enum class LAYOUT : uint32_t {
+        BSND = 0,
+        TND = 1
+    };
 };
 
 } // namespace GatherSelectionKvCacheNs
