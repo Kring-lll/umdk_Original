@@ -26,6 +26,8 @@ constexpr int32_t TOPK_NUMS = 8;
 constexpr int32_t SORT_OFFSET = 4;
 constexpr int32_t SORTED_STAT_TOPK_IDX_OFFSET = 3;
 constexpr int32_t SORTED_STAT_TOPK_OFFSET = 2;
+constexpr int32_t MASK_U64_NUM = 2;
+constexpr int32_t VECTOR_REPEAT_STRIDE = 8;
 
 template <typename T>
 class GatherSelectionKvCacheSplitBsReuseVec {
@@ -243,8 +245,8 @@ private:
             uint64_t mask0 = UINT64_MAX;
             mask0 = mask0 << duplicateNum;
             mask0 = mask0 & (UINT64_MAX >> ONE_REPEAT_SORT_NUM);
-            uint64_t mask[2] = {mask0, 0}; // 2 two mask
-            AscendC::Duplicate(tmpBlockStatLocal[duplicateIndex], -1, mask, 1, 1, 8); // 8 means repeat strides
+            uint64_t mask[MASK_U64_NUM] = {mask0, 0};
+            AscendC::Duplicate(tmpBlockStatLocal[duplicateIndex], -1, mask, 1, 1, VECTOR_REPEAT_STRIDE);
             PipeBarrier<PIPE_V>();
         }
 
@@ -302,8 +304,9 @@ private:
             uint64_t mask0 = UINT64_MAX;
             mask0 = mask0 << duplicateNum;
             mask0 = mask0 & (UINT64_MAX >> ONE_REPEAT_SORT_NUM);
-            uint64_t mask[2] = {mask0, 0}; // 2 two mask
-            AscendC::Duplicate(topkFloatLocal[duplicateIndex], -1.0f, mask, 1, 1, 8); // tail lanes -> -1.0f
+            uint64_t mask[MASK_U64_NUM] = {mask0, 0};
+            // tail lanes -> -1.0f
+            AscendC::Duplicate(topkFloatLocal[duplicateIndex], -1.0f, mask, 1, 1, VECTOR_REPEAT_STRIDE);
             PipeBarrier<PIPE_V>();
             // Per-lane offset in tempTensor: 0 on the real front lanes, laneIndex on the
             // pad tail lanes. Then topkFloat_tail = (-1) - laneIndex = distinct negatives.
