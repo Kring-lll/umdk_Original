@@ -1577,7 +1577,11 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
 
     if (is_failover_cr(cr) && !bdp_comp->modify_to_error) {
         (void)pthread_spin_lock(&bdp_comp->send_lock);
-        atomic_store(&bdp_comp->valid[send_idx], false);
+        bool old_pjetty_valid = atomic_exchange(&bdp_comp->valid[send_idx], false);
+        if (old_pjetty_valid) {
+            URMA_LOG_WARN("QQQQ pjetty valid changed, vjetty_id=%u, local_idx=%d, old=1, new=0, reason=failover_cr, cr_status=%d\n",
+                          bdp_comp->v_jetty.jetty_id.id, send_idx, cr->status);
+        }
         if (cr->status == URMA_CR_LOC_ACCESS_ERR &&
             send_idx >= 0 && (uint32_t)send_idx < URMA_UBAGG_DEV_MAX_NUM) {
             atomic_store(&bdp_comp->bondp_ctx->port_status_bad[send_idx], true);
@@ -1586,7 +1590,12 @@ static cr_convert_ret_t handle_send_cr_with_store(bondp_context_t *bdp_ctx, int 
         bondp_hc_tjetty_sync_valid(bdp_tjetty);
         bondp_p_target_jetty_t *skip_p_tjetty = bondp_find_p_tjetty(bdp_tjetty, send_idx, target_idx);
         if (skip_p_tjetty != NULL) {
-            atomic_store(&skip_p_tjetty->valid, false);
+            bool old_ptjetty_valid = atomic_exchange(&skip_p_tjetty->valid, false);
+            if (old_ptjetty_valid) {
+                URMA_LOG_WARN("QQQQ ptjetty valid changed, vtjetty_id=%u, ptjetty_id=%u, path=[%d,%d], old=1, new=0, reason=failover_cr, cr_status=%d\n",
+                              bdp_tjetty->v_tjetty.id.id, skip_p_tjetty->p_tjetty->id.id,
+                              send_idx, target_idx, cr->status);
+            }
         }
         if (is_need_rebuild_jetty(cr) && comp_ctx->enable_failback) {
             int ret = bondp_fb_add_task(bdp_comp->bondp_ctx, bdp_comp->v_jetty.jetty_id.id, send_idx);

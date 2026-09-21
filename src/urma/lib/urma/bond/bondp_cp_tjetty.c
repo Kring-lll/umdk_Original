@@ -451,7 +451,12 @@ static int bondp_import_pjetty_default(
                              local_idx, target_idx, rvjetty_info->slave_id[target_idx].id);
                 return -1;
             }
-            atomic_store(&p_tjetty->valid, true);
+            bool old_valid = atomic_exchange(&p_tjetty->valid, true);
+            if (!old_valid) {
+                URMA_LOG_WARN("QQQQ ptjetty valid changed, vtjetty_id=%u, ptjetty_id=%u, path=[%u,%u], old=0, new=1, reason=import\n",
+                              bdp_tjetty->v_tjetty.id.id, p_tjetty->p_tjetty->id.id,
+                              local_idx, target_idx);
+            }
         }
     }
     return 0;
@@ -503,7 +508,12 @@ static int bondp_import_pjetty_custom(
                              local_idx, target_idx, rvjetty_info->slave_id[target_idx].id);
                 return -1;
             }
-            atomic_store(&p_tjetty->valid, true);
+            bool old_valid = atomic_exchange(&p_tjetty->valid, true);
+            if (!old_valid) {
+                URMA_LOG_WARN("QQQQ ptjetty valid changed, vtjetty_id=%u, ptjetty_id=%u, path=[%u,%u], old=0, new=1, reason=import\n",
+                              bdp_tjetty->v_tjetty.id.id, p_tjetty->p_tjetty->id.id,
+                              local_idx, target_idx);
+            }
             local_used[local_idx] = true;
             imported = true;
             break;
@@ -544,7 +554,14 @@ static int bondp_unimport_pjetty(bondp_target_jetty_t *bdp_tjetty)
     int ret = URMA_SUCCESS;
 
     for (uint32_t i = 0; i < bdp_tjetty->p_tjetty_count; ++i) {
-        atomic_store(&bdp_tjetty->p_tjettys[i].valid, false);
+        bondp_p_target_jetty_t *p_tjetty = &bdp_tjetty->p_tjettys[i];
+        bool old_valid = atomic_exchange(&p_tjetty->valid, false);
+        if (old_valid) {
+            URMA_LOG_WARN("QQQQ ptjetty valid changed, vtjetty_id=%u, ptjetty_id=%u, path=[%u,%u], old=1, new=0, reason=unimport\n",
+                          bdp_tjetty->v_tjetty.id.id,
+                          p_tjetty->p_tjetty == NULL ? 0 : p_tjetty->p_tjetty->id.id,
+                          p_tjetty->local_indice, p_tjetty->remote_indice);
+        }
     }
     for (uint32_t i = 0; i < bdp_tjetty->p_tjetty_count; ++i) {
         if (bdp_tjetty->p_tjettys[i].p_tjetty == NULL) {
@@ -877,7 +894,12 @@ static int bondp_import_pjfr_default(bondp_context_t *bdp_ctx, bondp_target_jett
                              local_idx, target_idx, udata_out->slave_id[target_idx].id);
                 return -1;
             }
-            atomic_store(&p_tjetty->valid, true);
+            bool old_valid = atomic_exchange(&p_tjetty->valid, true);
+            if (!old_valid) {
+                URMA_LOG_WARN("QQQQ ptjetty valid changed, vtjetty_id=%u, ptjetty_id=%u, path=[%u,%u], old=0, new=1, reason=import\n",
+                              bdp_tjetty->v_tjetty.id.id, p_tjetty->p_tjetty->id.id,
+                              local_idx, target_idx);
+            }
         }
     }
     return 0;
@@ -928,7 +950,12 @@ static int bondp_import_pjfr_custom(bondp_context_t *bdp_ctx, bondp_target_jetty
                              local_idx, target_idx, udata_out->slave_id[target_idx].id);
                 return -1;
             }
-            atomic_store(&p_tjetty->valid, true);
+            bool old_valid = atomic_exchange(&p_tjetty->valid, true);
+            if (!old_valid) {
+                URMA_LOG_WARN("QQQQ ptjetty valid changed, vtjetty_id=%u, ptjetty_id=%u, path=[%u,%u], old=0, new=1, reason=import\n",
+                              bdp_tjetty->v_tjetty.id.id, p_tjetty->p_tjetty->id.id,
+                              local_idx, target_idx);
+            }
             local_used[local_idx] = true;
             imported = true;
             break;

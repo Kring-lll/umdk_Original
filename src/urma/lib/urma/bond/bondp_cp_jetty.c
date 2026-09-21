@@ -1388,7 +1388,11 @@ static int bondp_create_pjetty(bondp_context_t *bdp_ctx, bondp_comp_t *bdp_jetty
         }
         jetty->jetty_cfg.user_ctx = (uint64_t)bdp_jetty;
         bdp_jetty->p_jetty[i] = jetty;
-        atomic_store(&bdp_jetty->valid[i], true);
+        bool old_valid = atomic_exchange(&bdp_jetty->valid[i], true);
+        if (!old_valid) {
+            URMA_LOG_WARN("QQQQ pjetty valid changed, vjetty_id=%u, pjetty_id=%u, local_idx=%u, old=0, new=1, reason=create\n",
+                          bdp_jetty->v_jetty.jetty_id.id, jetty->jetty_id.id, i);
+        }
         URMA_LOG_DEBUG("Created pjetty successfully, idx=%u, jetty_id=%u, dev=%s, eid_idx=%u\n",
                        i, jetty->jetty_id.id, bdp_ctx->p_ctxs[i]->dev->name, bdp_ctx->p_ctxs[i]->eid_index);
     }

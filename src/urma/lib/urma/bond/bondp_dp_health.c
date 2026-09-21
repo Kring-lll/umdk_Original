@@ -1223,7 +1223,13 @@ void bondp_hc_tjetty_sync_valid(const bondp_target_jetty_t *bdp_tjetty)
             }
             bool v = atomic_load(&path->valid);
             if (!v) {
-                atomic_store(&p_tjetty->valid, false);
+                bool old_valid = atomic_exchange(&p_tjetty->valid, false);
+                if (old_valid) {
+                    URMA_LOG_WARN("QQQQ ptjetty valid changed, vtjetty_id=%u, ptjetty_id=%u, path=[%u,%u], old=1, new=0, reason=health_path_invalid\n",
+                                  cur->v_tjetty.id.id,
+                                  p_tjetty->p_tjetty == NULL ? 0 : p_tjetty->p_tjetty->id.id,
+                                  path->local_idx, path->target_idx);
+                }
             }
         }
     }
