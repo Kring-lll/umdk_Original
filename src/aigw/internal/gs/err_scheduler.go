@@ -428,19 +428,31 @@ func (m *ErrSchedulerManager) RestartIdleTimer(sessionID string) {
 
 func (m *ErrSchedulerManager) IsWarmingUp() bool {
 	if m.config.SchedulerType == "caterr" {
-		if m.config.WarmupPerCat == 0 {
-			return false
-		}
 		labels := m.classifier.Labels()
 		m.catMu.RLock()
 		defer m.catMu.RUnlock()
-		if len(labels) == 0 {
-			return true
-		}
-		for _, label := range labels {
-			dist, ok := m.catDists[label]
-			if !ok || dist.TotalCount() < m.config.WarmupPerCat {
+		// Warmup is all-or-nothing: every enabled gate must pass before the
+		// algorithm ranks with distributions. The total gate (sum across
+		// categories) and the per-category gate are independent dimensions;
+		// a gate set to 0 opts out of that dimension.
+		if m.config.WarmupSessions > 0 {
+			total := 0
+			for _, dist := range m.catDists {
+				total += dist.TotalCount()
+			}
+			if total < m.config.WarmupSessions {
 				return true
+			}
+		}
+		if m.config.WarmupPerCat > 0 {
+			if len(labels) == 0 {
+				return true
+			}
+			for _, label := range labels {
+				dist, ok := m.catDists[label]
+				if !ok || dist.TotalCount() < m.config.WarmupPerCat {
+					return true
+				}
 			}
 		}
 		return false

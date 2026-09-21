@@ -51,7 +51,7 @@ func (a *ErrAlg) Priority(_ string, curStep int, _ string) float64 {
 	if curStep <= 0 {
 		curStep = 1
 	}
-	if a.Dist == nil {
+	if a.Dist == nil || a.Dist.TotalCount() == 0 {
 		return -float64(curStep)
 	}
 	return a.Dist.ExpectedRemaining(curStep)
@@ -61,7 +61,7 @@ func (a *ErrAlg) PriorityWith(snap *algoSnapshot, _ string, curStep int, _ strin
 	if curStep <= 0 {
 		curStep = 1
 	}
-	if snap != nil && snap.global != nil {
+	if snap != nil && snap.global != nil && snap.global.TotalCount() > 0 {
 		return snap.global.ExpectedRemaining(curStep)
 	}
 	return a.Priority("", curStep, "")
@@ -70,7 +70,8 @@ func (a *ErrAlg) PriorityWith(snap *algoSnapshot, _ string, curStep int, _ strin
 func (a *ErrAlg) Name() string { return "err" }
 
 // CatErrAlg implements CatERR: classify prompt, use per-category E[rem|curStep].
-// Falls back to MEJ on classification failure or missing category distribution.
+// A category without distribution data ranks at the count-weighted mixture
+// across populated categories; with no data anywhere it falls back to MEJ.
 type CatErrAlg struct {
 	Classifier *CatErrClassifier
 	CatDists   map[string]*EmpiricalDist

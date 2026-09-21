@@ -289,7 +289,9 @@ CatERR 使用 TF-IDF + K-means 对 prompt 分类，每个类别维护独立的 E
       "errSchedulerType": "caterr",   // "fifo" | "mej" | "err" | "caterr" | "none"
       "queueSize": 100,
       "queueBoostSec": 240,              // 0 = 默认 240，负数 = 关闭
-      "warmupSessions": 100,         // 预热完成至少需要的 session 数量
+      "warmupSessions": 100,         // 总观测量门（caterr=全类别总和）；0 = 不启用
+      "warmupPerCat": 10,            // 每类观测量门（仅 caterr）；caterr 需两门全过才退出预热
+      "windowSize": 5000,            // 步数分布滑动窗口（0 = 不限）
       "sessionTimeoutSec": 660,      // agent 工作中长时间无变化的兜底清理时间（秒）
       "taskIdleTimeoutSec": 660,      // stop 后静默清理（秒）；默认与 sessionTimeoutSec 对齐（压缩会阻塞下一请求）
       "trainDataPath": "data/err_train.json",
@@ -304,8 +306,16 @@ CatERR 使用 TF-IDF + K-means 对 prompt 分类，每个类别维护独立的 E
 
 | 字段 | 说明 |
 |------|------|
-| `warmupSessions` | 预热完成至少需要的 session 数量。预热阶段使用 MEJ 算法，达到阈值后切换到所选算法 |
+| `errSchedulerType` | 调度算法：`mej`（按已完成步数 -k）/ `err`（按期望剩余步数 E[rem\|k]）/ `caterr`（先分类再按类别 E[rem\|k]）/ `fifo`（基线）。空或 `none` = 关闭 ERR 调度 |
+| `queueSize` | 待调度队列最大长度。`0` = 直通模式（不排队）；`>0` = 队列模式（容量满后按优先级排队/驱逐） |
+| `warmupSessions` | 预热完成至少需要的总观测量（caterr 为全类别观测总和）。预热阶段所有请求按 MEJ 排序，达到阈值后切换到所选算法；`0` = 不启用总量门 |
+| `warmupPerCat` | 每个类别至少需要的观测量（**仅 caterr 使用**）。caterr 退出预热需**所有启用的门都满足**（总量门 AND 每类门），任一门未达标全体请求保持 MEJ；`0` = 不启用每类门 |
+| `windowSize` | 步数分布滑动窗口大小：观测量超出后淘汰最旧样本，使分布跟随流量漂移（`0` = 不限，默认 5000） |
 | `trainDataPath` | 预训练步数分布文件。加载后直接计入 warmup 计数，可跳过预热阶段 |
+| `tfidfVocabPath` | CatERR 的 TF-IDF 词表文件（caterr 必填） |
+| `tfidfCentroidsPath` | CatERR 的 K-means 质心文件（caterr 必填） |
+| `sessionTimeoutSec` | agent 工作中长时间无变化的兜底清理超时（tool_calls/非 stop 结束后重臂）。超时后删除 session 并打 Warn 日志（默认 660） |
+| `taskIdleTimeoutSec` | stop 后的静默清理超时（默认 660，与 sessionTimeoutSec 对齐——stop 后的压缩调用会阻塞下一请求，短了会误删 session） |
 | `queueBoostSec` | 饥饿保底：排队超过该秒数后强制提升到最高优先级（默认 240，0=默认，负数=关闭）。计时含跨尝试累计：排队超时/被驱逐的 session 把已等待时长记为债务，重试入队时折算进饥饿时钟——超时重试入队即享保底，不再从零重计 |
 #### 流式转发超时（两个预算 × 四类死法）
 
@@ -321,8 +331,6 @@ CatERR 使用 TF-IDF + K-means 对 prompt 分类，每个类别维护独立的 E
 > **`proxy.timeout` 必须大于 `firstChunkTimeoutSec`**（建议不小于整条流的最长合法时长）：它是代理 HTTP 客户端的总超时，覆盖**整个请求含响应体读取**——配低了健康长流会在两档看门狗起作用之前被它先行截断。代码内默认仅 30s（远低于 300s 首字档），启用代理转发时必须显式配置（如 3600）。
 
 两档按活动重置（读按字节、写按次），慢引擎上跑几十分钟的**活跃**长流不受影响；不设则四类死法都会把在飞槽位挂死到 3600s 僵尸扫描（校准轮实测：引擎轮中崩溃后 12 个槽位全挂死 17 分钟+，调用方风暴放弃后 7 个槽位占满 21 分钟）
-| `sessionTimeoutSec` | agent 工作中长时间无变化的兜底清理超时。超时后删除 session 并打 Warn 日志 |
-| `taskIdleTimeoutSec` | 判断 session 已结束的超时时间。session 完成后等待此时间再静默清理 |
 
 ### Session 跟踪
 
