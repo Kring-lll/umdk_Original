@@ -317,26 +317,26 @@ CatERR 使用 TF-IDF + K-means 对 prompt 分类，每个类别维护独立的 E
 | `sessionTimeoutSec` | agent 工作中长时间无变化的兜底清理超时（tool_calls/非 stop 结束后重臂）。超时后删除 session 并打 Warn 日志（默认 660） |
 | `taskIdleTimeoutSec` | stop 后的静默清理超时（默认 660，与 sessionTimeoutSec 对齐——stop 后的压缩调用会阻塞下一请求，短了会误删 session） |
 | `queueBoostSec` | 饥饿保底：排队超过该秒数后强制提升到最高优先级（默认 240，0=默认，负数=关闭）。计时含跨尝试累计：排队超时/被驱逐的 session 把已等待时长记为债务，重试入队时折算进饥饿时钟——超时重试入队即享保底，不再从零重计 |
-#### 流式转发超时（两个预算 × 四类死法）
+#### 流式转发超时（两个预算 × 四类故障场景）
 
 流式转发链路为 `引擎 → aigw → 调用方`，两侧各可能死两种方式，共用两个预算参数处理。**两个值必须跟随 jiuwenswarm 的 LLM 配置**（`resources/config.yaml` 的 `model_client_config` 段）——aigw 的每个超时应等于调用方自己的耐心，对端放弃后再等没有意义：
 
-| aigw 参数 | 跟随的 jiuwen 参数（openjiuwen SDK 默认值） | 默认 | 覆盖的死法 |
+| aigw 参数 | 跟随的 jiuwen 参数（openjiuwen SDK 默认值） | 默认 | 覆盖的故障场景 |
 |---|---|---|---|
 | `proxy.firstChunkTimeoutSec` | `stream_first_chunk_timeout`（**首 token 预算**：等引擎响应流首字节的最长时间；0=默认，负=关闭。首字节到达后自动切到 chunk 间隔档） | 300 | ① 引擎首 token 吐不出（崩溃/挂死但 TCP 未断；引擎合法排队+预填充可达分钟级） |
 | `proxy.chunkIntervalTimeoutSec` | `stream_idle_timeout`（**token 间预算**：相邻 token 的最大间隔；0=默认，负=关闭。**一参两用**——读方向引擎静默超此值判半流死亡，写方向调用方写阻塞超此值判客户端死亡） | 60 | ② 引擎吐到一半挂掉 ③④ 调用方停止读取但未关连接（TCP 窗口塞满后写永久阻塞） |
 
-> 默认值跟 openjiuwen SDK 源码默认（300/60）。若部署侧覆盖了客户端预算（如 jiuwenswarm 产品配置 config.yaml 将 idle 调到 120），**aigw 必须同步调高对应键**，否则 aigw 会在客户端还活着时提前掐流。
+> 默认值跟 openjiuwen SDK 源码默认（300/60）。若客户端侧覆盖了默认预算（如 jiuwenswarm 产品配置 config.yaml 将 idle 调到 120），**aigw 必须同步调高对应键**，否则 aigw 会在客户端还活着时提前掐流。
 
 > **`proxy.timeout` 必须大于 `firstChunkTimeoutSec`**（建议不小于整条流的最长合法时长）：它是代理 HTTP 客户端的总超时，覆盖**整个请求含响应体读取**——配低了健康长流会在两档看门狗起作用之前被它先行截断。代码内默认仅 30s（远低于 300s 首字档），启用代理转发时必须显式配置（如 3600）。
 
-两档按活动重置（读按字节、写按次），慢引擎上跑几十分钟的**活跃**长流不受影响；不设则四类死法都会把在飞槽位挂死到 3600s 僵尸扫描（校准轮实测：引擎轮中崩溃后 12 个槽位全挂死 17 分钟+，调用方风暴放弃后 7 个槽位占满 21 分钟）
+两档按活动重置（读按字节、写按次），长时间运行的**活跃**长流不受影响；若关闭两档（负数），上述故障场景挂住的在飞请求只能等周期性存活扫描兜底释放（阈值同 `sessionTimeoutSec`），期间容量持续被占用。
 
 ### Session 跟踪
 
 ERR 通过请求 body 的 `agent_hint.session_id` 跟踪多轮会话。客户端（如 jiuwenswarm）在开启 AscendAffinity 模式时自动注入该字段。
 
-匿名请求（无 session_id）仍可正常调度，但不记步数分布（priority 固定 -1）。
+匿名请求（无 session_id，如上下文压缩等内部调用）以最高优先级（boost 层）调度，保证小而延迟敏感的内部调用不阻塞父会话；但不记步数分布。
 
 ---
 

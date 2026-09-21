@@ -57,8 +57,8 @@ const (
 	defaultErrWarmupPerCat    = 10
 	defaultErrSessionTimeout  = 660
 	// Matches sessionTimeoutSec: post-stop compression blocks the parent's
-	// next request for as long as the anonymous call queues (v5: 812s max);
-	// a short timer here erases the session mid-wait.
+	// next request for as long as the anonymous call queues; a short
+	// timer here erases the session mid-wait.
 	defaultErrTaskIdleTimeout = 660
 )
 

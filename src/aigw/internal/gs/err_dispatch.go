@@ -154,11 +154,10 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 			req := r.Msg.Request.(*ScheduleRequestMsg)
 			var p int
 			if r.SessionID == "" {
-				// Anonymous internal calls (context compression / checkpoints)
-				// are small, latency-sensitive, and synchronously block the
-				// parent session — whose idle timer keeps running while the
-				// anonymous request queues (v5: 812s max under CatERR killed
-				// the parent's session). Rank them at the boost tier.
+			// Anonymous internal calls (context compression / checkpoints)
+			// are small, latency-sensitive, and synchronously block the
+			// parent session — whose idle timer keeps running while the
+			// anonymous request queues. Rank them at the boost tier.
 				p = math.MinInt32
 			} else {
 				p = int(m.errScheduler.PriorityWith(snap, r.SessionID, r.CurStep, classifyPrompt(req)))
@@ -353,9 +352,8 @@ type errInFlightEntry struct {
 	DispatchTime time.Time
 	// QueueWait is this attempt's total starvation-clock age at dispatch
 	// (inherited carry included). On an in-flight abort the retry re-enters
-	// the queue with this much credit, so a request that starved 288s,
-	// got dispatched, and was cancelled 12s into the client's budget does
-	// not restart its boost clock from zero.
+	// the queue with this much credit, so a request cancelled shortly
+	// after dispatch does not restart its boost clock from zero.
 	QueueWait time.Duration
 }
 
