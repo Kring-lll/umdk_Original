@@ -281,11 +281,11 @@ func validateErrSchedulerConfig(gsCfg *base.GlobalSchedulerConfig) error {
 		return fmt.Errorf("invalid errSchedulerType %q, model %q", t, gsCfg.Model)
 	}
 
-	if errCfg.WarmupSessions < 0 {
-		return fmt.Errorf("invalid warmupSessions %d, should >= 0, model %q", errCfg.WarmupSessions, gsCfg.Model)
+	if errCfg.WarmupSessions == 0 {
+		errCfg.WarmupSessions = defaultErrWarmupSessions
 	}
-	if errCfg.WarmupPerCat < 0 {
-		return fmt.Errorf("invalid warmupPerCat %d, should >= 0, model %q", errCfg.WarmupPerCat, gsCfg.Model)
+	if errCfg.WarmupPerCat == 0 {
+		errCfg.WarmupPerCat = defaultErrWarmupPerCat
 	}
 	if errCfg.QueueSize < 0 {
 		return fmt.Errorf("invalid queueSize %d, should >= 0, model %q", errCfg.QueueSize, gsCfg.Model)
@@ -300,10 +300,6 @@ func validateErrSchedulerConfig(gsCfg *base.GlobalSchedulerConfig) error {
 		return fmt.Errorf("invalid taskIdleTimeoutSec %d, should >= 0, model %q", errCfg.TaskIdleTimeoutSec, gsCfg.Model)
 	}
 
-	if errCfg.WarmupSessions == 0 && errCfg.WarmupPerCat == 0 {
-		errCfg.WarmupSessions = defaultErrWarmupSessions
-		errCfg.WarmupPerCat = defaultErrWarmupPerCat
-	}
 	if errCfg.SessionTimeoutSec == 0 {
 		errCfg.SessionTimeoutSec = defaultErrSessionTimeout
 	}
