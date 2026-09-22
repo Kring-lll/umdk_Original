@@ -48,6 +48,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     m.def("moe_dispatch_send_async", &cam_dispatch_send_async_impl_autograd, "moe_dispatch_send_async");
     m.def("gmm_swiglu_quant_v2_layered", &cam_gmm_swiglu_quant_v2_layered_impl_autograd,
           "gmm_swiglu_quant_v2_layered");
+    m.def("gmm_layered", &cam_gmm_layered_impl_autograd, "gmm_layered");
 }
 
 TORCH_LIBRARY(umdk_cam_op_lib, m) {
@@ -131,4 +132,7 @@ TORCH_LIBRARY(umdk_cam_op_lib, m) {
     m.def("gmm_swiglu_quant_v2_layered(Tensor x, Tensor[] all_weight, Tensor[] all_weight_scale, \
     Tensor[] all_weight_assist_matrix, Tensor x_scale, Tensor group_list, Tensor layer_index, \
     int dequant_mode=0, int quant_mode=0, int group_list_type=0, int[]? tuning_config=None) -> Tensor[]");
+    m.def("gmm_layered(Tensor[] x, Tensor[] all_weight, Tensor[] all_bias, Tensor[] all_scale, \
+    Tensor layer_index, Tensor? per_token_scale=None, int[]? group_list=None, int group_list_type=0, \
+    int split_item=0, ScalarType? output_dtype=None) -> Tensor[]");
 }

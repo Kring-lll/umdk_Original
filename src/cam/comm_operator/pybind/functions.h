@@ -229,4 +229,16 @@ std::vector<at::Tensor> cam_gmm_swiglu_quant_v2_layered_impl_autograd(
     const int64_t groupListType,
     const c10::optional<std::vector<int64_t>> &tuningConfigOptional);
 
+std::vector<at::Tensor> cam_gmm_layered_impl_autograd(
+    const at::TensorList &x,
+    const at::TensorList &allWeight,
+    const at::TensorList &allBias,
+    const at::TensorList &allScale,
+    const at::Tensor &layerIndex,
+    const c10::optional<at::Tensor> &perTokenScaleOptional,
+    const c10::optional<std::vector<int64_t>> &groupListOptional,
+    const int64_t groupListType,
+    const int64_t splitItem,
+    const c10::optional<at::ScalarType> &outputDtype);
+
 #endif // COMMON_OPS_CSRC_FUNCTIONS_H_
