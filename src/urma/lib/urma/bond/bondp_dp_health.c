@@ -299,11 +299,15 @@ static void hc_process_probe_cr(bondp_hc_ctx_t *hc_ctx, int local_idx, const urm
     hc_decode_user_ctx(cr->user_ctx, &node_idx, &target_idx);
 
     if (node_idx >= hc_ctx->node_num) {
+        URMA_LOG_WARN("QQQQ Ignore health probe completion with invalid node_idx=%u, local_idx=%d.\n",
+                      node_idx, local_idx);
         return;
     }
     bondp_hc_node_t *node = &hc_ctx->nodes[node_idx];
 
     if (target_idx >= URMA_UBAGG_DEV_MAX_NUM) {
+        URMA_LOG_WARN("QQQQ Ignore health probe completion with invalid target_idx=%u, node_idx=%u, local_idx=%d.\n",
+                      target_idx, node_idx, local_idx);
         return;
     }
     bool ok = (cr->status == URMA_CR_SUCCESS);
@@ -315,6 +319,9 @@ static void hc_process_probe_cr(bondp_hc_ctx_t *hc_ctx, int local_idx, const urm
     bondp_hc_path_t *path = hc_find_path(node, (uint32_t)local_idx, target_idx);
     if (path == NULL) {
         pthread_rwlock_unlock(&node->lock);
+        URMA_LOG_WARN("QQQQ Ignore health probe completion without registered path, "
+                       "node_idx=%u, local_idx=%d, target_idx=%u, status=%d.\n",
+                       node_idx, local_idx, target_idx, cr->status);
         return;
     }
     bondp_target_jetty_t *bdp_tjetty = path->tjetty;
@@ -335,8 +342,17 @@ static void hc_process_probe_cr(bondp_hc_ctx_t *hc_ctx, int local_idx, const urm
     }
     pthread_rwlock_unlock(&node->lock);
 
+    if (!ok) {
+        URMA_LOG_WARN("QQQQ Health probe failed, node_idx=%u, local_idx=%d, target_idx=%u, "
+                      "status=%d, previous_target_valid=%d.\n",
+                      node_idx, local_idx, target_idx, cr->status, prev);
+    } else {
+        URMA_LOG_WARN("QQQQ Health probe succeeded, node_idx=%u, local_idx=%d, target_idx=%u, "
+                       "previous_target_valid=%d.\n", node_idx, local_idx, target_idx, prev);
+    }
     if (ok && !prev) {
-        URMA_LOG_WARN("Health probe link [%d, %d] recovered.\n", local_idx, target_idx);
+        URMA_LOG_WARN("QQQQ Health probe link recovered, node_idx=%u, path=[%d,%u].\n",
+                      node_idx, local_idx, target_idx);
         hc_set_tjetty_list_target_valid(node, (uint32_t)local_idx, target_idx);
     }
     if (bdp_ctx != NULL) {
@@ -393,13 +409,23 @@ static void hc_probe_link(bondp_hc_ctx_t *hc_ctx, bondp_hc_node_t *node, bondp_h
 
     bondp_probe_res_t *res = &hc_ctx->probes[local_idx];
     if (res->jetty == NULL || res->seg == NULL || res->buf == NULL) {
+        URMA_LOG_WARN("QQQQ Health check skip probe: local resource unavailable, "
+                      "node_idx=%u, local_idx=%u, target_idx=%u, jetty=%p, seg=%p, buf=%p.\n",
+                      node->node_idx, local_idx, target_idx, (void *)res->jetty,
+                      (void *)res->seg, res->buf);
         return;
     }
 
     if (res->inflight >= HC_PROBE_QUEUE_DEPTH) {
+        URMA_LOG_WARN("QQQQ Health check skip probe: queue full, node_idx=%u, local_idx=%u, "
+                      "target_idx=%u, inflight=%u.\n",
+                      node->node_idx, local_idx, target_idx, res->inflight);
         return;
     }
     if (path->no_cqe_round != 0) {
+        URMA_LOG_WARN("QQQQ Health check skip probe: waiting completion, node_idx=%u, "
+                      "local_idx=%u, target_idx=%u, wait_round=%u.\n",
+                      node->node_idx, local_idx, target_idx, path->no_cqe_round);
         if (path->no_cqe_round != UINT8_MAX) {
             path->no_cqe_round++;
         }
@@ -408,17 +434,27 @@ static void hc_probe_link(bondp_hc_ctx_t *hc_ctx, bondp_hc_node_t *node, bondp_h
 
     bondp_target_jetty_t *bdp_tjetty = path->tjetty;
     if (bdp_tjetty == NULL) {
+        URMA_LOG_WARN("QQQQ Health check skip probe: target jetty not mounted, "
+                      "node_idx=%u, local_idx=%u, target_idx=%u.\n",
+                      node->node_idx, local_idx, target_idx);
         return;
     }
 
     bondp_p_target_jetty_t *p_tjetty = bondp_find_p_tjetty(bdp_tjetty, local_idx, target_idx);
     if (p_tjetty == NULL) {
+        URMA_LOG_WARN("QQQQ Health check skip probe: physical target path missing, "
+                      "v_tjetty_id=%u, node_idx=%u, local_idx=%u, target_idx=%u.\n",
+                      bdp_tjetty->v_tjetty.id.id, node->node_idx, local_idx, target_idx);
         return;
     }
 
     urma_target_jetty_t *tjetty = p_tjetty->p_tjetty;
     urma_target_seg_t *tseg = path->tseg;
     if (tjetty == NULL || tseg == NULL) {
+        URMA_LOG_WARN("QQQQ Health check skip probe: target resource unavailable, "
+                      "v_tjetty_id=%u, node_idx=%u, local_idx=%u, target_idx=%u, "
+                      "tjetty=%p, tseg=%p.\n", bdp_tjetty->v_tjetty.id.id,
+                      node->node_idx, local_idx, target_idx, (void *)tjetty, (void *)tseg);
         return;
     }
 
@@ -454,6 +490,9 @@ static void hc_probe_link(bondp_hc_ctx_t *hc_ctx, bondp_hc_node_t *node, bondp_h
     if (ret == URMA_SUCCESS) {
         res->inflight++;
         path->no_cqe_round = 1;
+        URMA_LOG_WARN("QQQQ Health check posted probe, node_idx=%u, local_idx=%u, "
+                      "target_idx=%u, tjetty_id=%u, inflight=%u.\n",
+                      node->node_idx, local_idx, target_idx, tjetty->id.id, res->inflight);
     } else {
         URMA_LOG_WARN("Failed to send health probe, node_idx=%u, local_idx=%u, target_idx=%u, ret=%d.\n",
                       node->node_idx, local_idx, target_idx, ret);
@@ -465,6 +504,9 @@ static bool hc_probe_node(bondp_hc_ctx_t *hc_ctx, bondp_hc_node_t *node)
 {
     bool any_connected = false;
     bool all_checked = true;
+    uint32_t connected_path_cnt = 0;
+    uint32_t pending_path_cnt = 0;
+    uint32_t path_cnt;
 
     pthread_rwlock_rdlock(&node->lock);
     for (uint32_t p = 0; p < node->path_cnt; ++p) {
@@ -473,10 +515,12 @@ static bool hc_probe_node(bondp_hc_ctx_t *hc_ctx, bondp_hc_node_t *node)
             continue;
         }
         any_connected = true;
+        connected_path_cnt++;
         if (path->probe_checked) {
             continue;
         }
         all_checked = false;
+        pending_path_cnt++;
         hc_probe_link(hc_ctx, node, path);
     }
 
@@ -485,7 +529,12 @@ static bool hc_probe_node(bondp_hc_ctx_t *hc_ctx, bondp_hc_node_t *node)
             node->paths[p].probe_checked = false;
         }
     }
+    path_cnt = node->path_cnt;
     pthread_rwlock_unlock(&node->lock);
+
+    URMA_LOG_WARN("QQQQ Health check scanned node, node_idx=%u, path_count=%u, "
+                  "connected_path_count=%u, pending_path_count=%u, all_checked=%d.\n",
+                  node->node_idx, path_cnt, connected_path_cnt, pending_path_cnt, all_checked);
 
     return any_connected;
 }
@@ -514,7 +563,10 @@ static void hc_probe_fn(bondp_worker_task_reason_t reason, void *arg)
     uint32_t batch_cnt = MIN(hc_ctx->cfg.batch_node_num, hc_ctx->node_num);
     uint32_t node_idx = hc_ctx->probe_cur_idx % hc_ctx->node_num;
     uint32_t probe_cnt = 0;
-    for (uint32_t scan_cnt = 0; scan_cnt < hc_ctx->node_num && probe_cnt < batch_cnt; ++scan_cnt) {
+    uint32_t scan_cnt = 0;
+    URMA_LOG_WARN("QQQQ Health check scan round started, start_node_idx=%u, batch_node_count=%u, "
+                  "node_count=%u.\n", node_idx, batch_cnt, hc_ctx->node_num);
+    for (; scan_cnt < hc_ctx->node_num && probe_cnt < batch_cnt; ++scan_cnt) {
         bondp_hc_node_t *node = &hc_ctx->nodes[node_idx];
         if (hc_probe_node(hc_ctx, node)) {
             probe_cnt++;
@@ -522,6 +574,9 @@ static void hc_probe_fn(bondp_worker_task_reason_t reason, void *arg)
         node_idx = (node_idx + 1) % hc_ctx->node_num;
     }
     hc_ctx->probe_cur_idx = node_idx;
+    URMA_LOG_WARN("QQQQ Health check scan round finished, scanned_node_count=%u, "
+                  "connected_node_count=%u, next_node_idx=%u.\n",
+                  scan_cnt, probe_cnt, hc_ctx->probe_cur_idx);
 
     /* Reschedule next global probe only if not being torn down. The
      * stopping flag is checked again to close the window between a concurrent
@@ -996,9 +1051,14 @@ int bondp_hc_register_tjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
         return -EINVAL;
     }
     if (bdp_ctx->hc_ctx == NULL || !rjetty_info->is_health_check_enable) {
+        URMA_LOG_WARN("QQQQ Health check skip tjetty registration, v_tjetty_id=%u, "
+                      "has_hc_ctx=%d, remote_hc_enabled=%d.\n", bdp_tjetty->v_tjetty.id.id,
+                      bdp_ctx->hc_ctx != NULL, rjetty_info->is_health_check_enable);
         return 0;
     }
     if (bdp_tjetty->mask & BONDP_TJETTY_FLAG_HC_REGISTERED) {
+        URMA_LOG_WARN("QQQQ Health check skip duplicate tjetty registration, v_tjetty_id=%u.\n",
+                      bdp_tjetty->v_tjetty.id.id);
         return -1;
     }
 
@@ -1007,7 +1067,8 @@ int bondp_hc_register_tjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
     const urma_eid_t *dst_eid = &bdp_tjetty->v_tjetty.id.eid;
     uint32_t node_idx = 0;
     if (bondp_topo_query_node_idx(dst_eid, &node_idx) != 0) {
-        URMA_LOG_WARN("Failed to resolve node id from eid, skip health check registration.\n");
+        URMA_LOG_WARN("QQQQ Health check skip tjetty registration: failed to resolve node, "
+                      "v_tjetty_id=%u.\n", bdp_tjetty->v_tjetty.id.id);
         return 0;
     }
     bondp_hc_node_t *node = &hc_ctx->nodes[node_idx];
@@ -1019,6 +1080,7 @@ int bondp_hc_register_tjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
     };
 
     bool any_registered = false;
+    uint32_t registered_path_cnt = 0;
 
     /* Slot check and seg import must be atomic under the write lock to prevent
      * duplicate imports when multiple tjettys target the same [i][j] slot. */
@@ -1027,12 +1089,20 @@ int bondp_hc_register_tjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
     for (k = 0; k < bdp_tjetty->p_tjetty_count; ++k) {
         bondp_p_target_jetty_t *tjetty_path = &bdp_tjetty->p_tjettys[k];
         if (tjetty_path->p_tjetty == NULL) {
+            URMA_LOG_WARN("QQQQ Health check skip mount path: physical target jetty missing, "
+                          "v_tjetty_id=%u, node_idx=%u, local_idx=%u, target_idx=%u.\n",
+                          bdp_tjetty->v_tjetty.id.id, node_idx, tjetty_path->local_indice,
+                          tjetty_path->remote_indice);
             continue;
         }
         uint32_t i = tjetty_path->local_indice;
         uint32_t j = tjetty_path->remote_indice;
         const urma_seg_base_t *base = &rjetty_info->health_check_seg.slaves[j];
         if (bdp_ctx->p_ctxs[i] == NULL || base->len == 0) {
+            URMA_LOG_WARN("QQQQ Health check skip mount path: local context or remote segment missing, "
+                          "v_tjetty_id=%u, node_idx=%u, local_idx=%u, target_idx=%u, "
+                          "has_local_ctx=%d, seg_len=%lu.\n", bdp_tjetty->v_tjetty.id.id,
+                          node_idx, i, j, bdp_ctx->p_ctxs[i] != NULL, base->len);
             continue;
         }
         any_registered = true;
@@ -1049,6 +1119,10 @@ int bondp_hc_register_tjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
             }
         }
         if (hc_path->tjetty != NULL) {
+            URMA_LOG_WARN("QQQQ Health check skip mount path: occupied by v_tjetty_id=%u, "
+                          "requested_v_tjetty_id=%u, node_idx=%u, local_idx=%u, target_idx=%u.\n",
+                          hc_path->tjetty->v_tjetty.id.id, bdp_tjetty->v_tjetty.id.id,
+                          node_idx, i, j);
             continue;
         }
 
@@ -1066,6 +1140,7 @@ int bondp_hc_register_tjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
                 goto ERR_ROLLBACK;
             }
         }
+        registered_path_cnt++;
     }
 
     if (any_registered) {
@@ -1075,7 +1150,9 @@ int bondp_hc_register_tjetty(bondp_context_t *bdp_ctx, bondp_target_jetty_t *bdp
     }
     pthread_rwlock_unlock(&node->lock);
 
-    URMA_LOG_DEBUG("Health check tjetty registered, node_idx=%u.\n", node->node_idx);
+    URMA_LOG_WARN("QQQQ Health check tjetty registration finished, v_tjetty_id=%u, "
+                  "node_idx=%u, eligible=%d, mounted_path_count=%u.\n",
+                  bdp_tjetty->v_tjetty.id.id, node->node_idx, any_registered, registered_path_cnt);
     return 0;
 
 ERR_ROLLBACK:

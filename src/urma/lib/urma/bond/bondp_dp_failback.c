@@ -75,7 +75,7 @@ uint32_t bondp_fb_switch_path(bondp_comp_t *bdp_comp)
         }
         recovered_cnt++;
         atomic_store(&bdp_comp->valid[i], true);
-        URMA_LOG_WARN("QQQQ Path restored: local jetty recovered, vjetty_id=%u, local_idx=%u\n",
+        URMA_LOG_WARN("Failback restored local jetty, vjetty_id=%u, local_idx=%u.\n",
                       bdp_comp->v_jetty.jetty_id.id, i);
     }
     return recovered_cnt;
@@ -367,6 +367,8 @@ static void bondp_mark_rebuild_done_async(bondp_worker_task_reason_t reason, voi
     if (reason == BONDP_WORKER_TASK_EXECUTED && arg_typed->bdp_jetty != NULL &&
         arg_typed->pjetty_idx < URMA_UBAGG_DEV_MAX_NUM) {
         atomic_store(&arg_typed->bdp_jetty->rebuild_done[arg_typed->pjetty_idx], true);
+        URMA_LOG_DEBUG("Failback rebuild completed, vjetty_id=%u, local_idx=%u.\n",
+                       arg_typed->bdp_jetty->v_jetty.jetty_id.id, arg_typed->pjetty_idx);
     }
 
     if (arg_typed->fb_ctx != NULL) {
@@ -414,6 +416,8 @@ static void bondp_rebuild_pjetty_async(bondp_worker_task_reason_t reason, void *
                      fb_task->vjetty_id, fb_task->pjetty_idx);
         goto del_task;
     }
+    URMA_LOG_DEBUG("Failback rebuilt physical jetty, vjetty_id=%u, local_idx=%u.\n",
+                   fb_task->vjetty_id, fb_task->pjetty_idx);
 
     bondp_fb_mark_done_arg_t *mark_arg = calloc(1, sizeof(*mark_arg));
     if (mark_arg == NULL) {
