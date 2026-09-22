@@ -16,6 +16,7 @@
 #include "urma_api.h"
 #include "urma_cmd.h"
 #include "urma_log.h"
+#include "urma_private.h"
 
 #include "bondp_dp_health.h"
 #include "bondp_topo_info.h"
@@ -595,12 +596,14 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         return NULL;
     }
 
+    PERF_PROFILING_START(BOND_IMPORT_JETTY);
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
     // disable cfg jetty
     bondp_comp_t *cfg_jetty = NULL;
     bondp_target_jetty_t *bdp_tjetty = calloc(1, sizeof(bondp_target_jetty_t));
     if (bdp_tjetty == NULL) {
         URMA_LOG_ERR("Failed to alloc target jetty\n");
+        PERF_PROFILING_END(BOND_IMPORT_JETTY);
         errno = ENOMEM;
         return NULL;
     }
@@ -670,6 +673,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
     URMA_LOG_DEBUG("Successfully imported target jetty=" URMA_JETTY_ID_FMT "\n",
                    URMA_JETTY_ID_ARGS(&rjetty->jetty_id));
 
+    PERF_PROFILING_END(BOND_IMPORT_JETTY);
     return &bdp_tjetty->v_tjetty;
 
 UNIMPORT_PJETTY:
@@ -680,6 +684,7 @@ UNIMPORT_VJETTY:
     }
 FREE_TJETTY:
     free(bdp_tjetty);
+    PERF_PROFILING_END(BOND_IMPORT_JETTY);
     return NULL;
 }
 

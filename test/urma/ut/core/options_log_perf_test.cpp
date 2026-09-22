@@ -165,6 +165,8 @@ TEST(UrmaCoreTest, PerfApisRecordAndFormatStats)
     EXPECT_EQ(URMA_SUCCESS, urma_step_perf(UB_JFS_POST_SEND, 0));
     EXPECT_EQ(URMA_SUCCESS, urma_step_perf(UB_JFS_POST_SEND, 1));
     EXPECT_EQ(URMA_SUCCESS, urma_step_perf(UB_JFS_POST_SEND, 1024));
+    EXPECT_EQ(URMA_SUCCESS, urma_step_perf(UB_IMPORT_JETTY, 2048));
+    EXPECT_EQ(URMA_SUCCESS, urma_step_perf(BOND_IMPORT_JETTY, 4096));
     EXPECT_EQ(URMA_EINVAL, urma_get_perf_info(nullptr, &len));
     EXPECT_EQ(URMA_EINVAL, urma_get_perf_info(perfBuf, nullptr));
     len = 1;
@@ -172,6 +174,8 @@ TEST(UrmaCoreTest, PerfApisRecordAndFormatStats)
     len = sizeof(perfBuf);
     EXPECT_EQ(URMA_SUCCESS, urma_get_perf_info(perfBuf, &len));
     EXPECT_NE(nullptr, strstr(perfBuf, "UB_JFS_POST_SEND"));
+    EXPECT_NE(nullptr, strstr(perfBuf, "UB_IMPORT_JETTY"));
+    EXPECT_NE(nullptr, strstr(perfBuf, "BOND_IMPORT_JETTY"));
     EXPECT_GT(len, 0U);
 
     EXPECT_EQ(URMA_SUCCESS, urma_stop_perf());

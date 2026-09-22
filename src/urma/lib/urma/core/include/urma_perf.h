@@ -36,6 +36,12 @@ typedef enum urma_perf_type {
     UB_ACK_JFC,
     UB_REARM_JFC,
     BOND_REARM_JFC,
+    /*
+     * Control-plane import of a remote jetty. Appended after the data-plane
+     * types so that the existing type values stay unchanged.
+     */
+    UB_IMPORT_JETTY,
+    BOND_IMPORT_JETTY,
     URMA_PERF_RECORD_TYPE_MAX,
 } urma_perf_record_type_t;
 
