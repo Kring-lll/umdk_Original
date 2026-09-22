@@ -157,7 +157,15 @@ static const char* perf_type_names[] = {
     "BOND_WAIT_JFC",
     "UB_ACK_JFC",
     "UB_REARM_JFC",
-    "BOND_REARM_JFC"
+    "BOND_REARM_JFC",
+    "UB_IMPORT_JETTY",
+    "BOND_ALLOC_TJETTY",
+    "BOND_IMPORT_VJETTY",
+    "BOND_IMPORT_TOPO",
+    "BOND_IMPORT_PATH",
+    "BOND_IMPORT_TIDX",
+    "BOND_IMPORT_PJETTY",
+    "BOND_HC_PTETTY"
 };
 
 static atomic_bool g_urma_perf_context_inited = ATOMIC_VAR_INIT(false);

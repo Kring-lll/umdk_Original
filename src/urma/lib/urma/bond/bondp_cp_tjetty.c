@@ -16,6 +16,7 @@
 #include "urma_api.h"
 #include "urma_cmd.h"
 #include "urma_log.h"
+#include "urma_private.h"
 
 #include "bondp_dp_health.h"
 #include "bondp_topo_info.h"
@@ -595,18 +596,26 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         return NULL;
     }
 
+    PERF_PROFILING_START(BOND_ALLOC_TJETTY);
     bondp_context_t *bdp_ctx = CONTAINER_OF_FIELD(ctx, bondp_context_t, v_ctx);
     // disable cfg jetty
     bondp_comp_t *cfg_jetty = NULL;
+
     bondp_target_jetty_t *bdp_tjetty = calloc(1, sizeof(bondp_target_jetty_t));
     if (bdp_tjetty == NULL) {
         URMA_LOG_ERR("Failed to alloc target jetty\n");
+        PERF_PROFILING_END(BOND_ALLOC_TJETTY);
         errno = ENOMEM;
         return NULL;
     }
     atomic_init(&bdp_tjetty->use_cnt.atomic_cnt, 1);
+    PERF_PROFILING_END(BOND_ALLOC_TJETTY);
 
+    /* Covers the whole remote jetty info stage: the user-info path fills the
+     * vjetty from the rjetty extension, the default path imports it. */
+    PERF_PROFILING_START(BOND_IMPORT_VJETTY);
     urma_bond_id_info_out_t rvjetty_info = {0};
+    int ret = 0;
     if (rjetty->flag.bs.has_drv_ext) {
         const bondp_rjetty_t *bdp_rjetty = (const bondp_rjetty_t *)rjetty;
         if (bdp_rjetty->jetty != NULL) {
@@ -618,6 +627,7 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         if (bondp_fill_bond_id_info_from_rjetty_ext(rjetty, &rvjetty_info) != 0) {
             const bondp_rjetty_ext_priv_t *ext_hdr = bondp_rjetty_get_priv_ext_const(rjetty);
             URMA_LOG_ERR("Invalid rjetty ext, length=%u.\n", ext_hdr->len);
+            PERF_PROFILING_END(BOND_IMPORT_VJETTY);
             goto FREE_TJETTY;
         }
         bdp_tjetty->v_tjetty.urma_ctx = ctx;
@@ -628,19 +638,28 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         bdp_tjetty->v_tjetty.policy = rjetty->policy;
         bdp_tjetty->v_tjetty.tp_type = rjetty->tp_type;
     } else {
-        if (bondp_import_vjetty(ctx, rjetty, token_value, bdp_tjetty, &rvjetty_info) != 0) {
+        ret = bondp_import_vjetty(ctx, rjetty, token_value, bdp_tjetty, &rvjetty_info);
+        if (ret != 0) {
             URMA_LOG_ERR("Failed to import vjetty, [" EID_FMT "]=%u\n",
                          EID_ARGS(rjetty->jetty_id.eid), rjetty->jetty_id.id);
+            PERF_PROFILING_END(BOND_IMPORT_VJETTY);
             goto FREE_TJETTY;
         }
     }
+    PERF_PROFILING_END(BOND_IMPORT_VJETTY);
 
-    if (bondp_rebuild_connected_by_topo(&rjetty->jetty_id.eid, &rvjetty_info) != 0) {
+    PERF_PROFILING_START(BOND_IMPORT_TOPO);
+    ret = bondp_rebuild_connected_by_topo(&rjetty->jetty_id.eid, &rvjetty_info);
+    PERF_PROFILING_END(BOND_IMPORT_TOPO);
+    if (ret != 0) {
         URMA_LOG_ERR("Failed to rebuild connected matrix by topo.\n");
         goto UNIMPORT_VJETTY;
     }
 
-    if (bondp_tjetty_ensure_paths(&bdp_tjetty, bdp_ctx, &rvjetty_info) != 0) {
+    PERF_PROFILING_START(BOND_IMPORT_PATH);
+    ret = bondp_tjetty_ensure_paths(&bdp_tjetty, bdp_ctx, &rvjetty_info);
+    PERF_PROFILING_END(BOND_IMPORT_PATH);
+    if (ret != 0) {
         goto UNIMPORT_VJETTY;
     }
 
@@ -648,17 +667,26 @@ urma_target_jetty_t *bondp_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjet
         bdp_tjetty->mask |= BONDP_TJETTY_FLAG_MSN_ENABLED;
     }
 
-    if (init_target_active_indices(bdp_ctx, bdp_tjetty, &rvjetty_info) != 0) {
+    PERF_PROFILING_START(BOND_IMPORT_TIDX);
+    ret = init_target_active_indices(bdp_ctx, bdp_tjetty, &rvjetty_info);
+    PERF_PROFILING_END(BOND_IMPORT_TIDX);
+    if (ret != 0) {
         URMA_LOG_ERR("Failed to init target active indices\n");
         goto UNIMPORT_VJETTY;
     }
 
-    if (bondp_import_pjetty(bdp_ctx, bdp_tjetty, rjetty, token_value, &rvjetty_info) != 0) {
+    PERF_PROFILING_START(BOND_IMPORT_PJETTY);
+    ret = bondp_import_pjetty(bdp_ctx, bdp_tjetty, rjetty, token_value, &rvjetty_info);
+    PERF_PROFILING_END(BOND_IMPORT_PJETTY);
+    if (ret != 0) {
         URMA_LOG_ERR("Failed to import pjetty\n");
         goto UNIMPORT_PJETTY;
     }
 
-    if (bondp_hc_register_tjetty(bdp_ctx, bdp_tjetty, &rvjetty_info) != 0) {
+    PERF_PROFILING_START(BOND_HC_PTETTY);
+    ret = bondp_hc_register_tjetty(bdp_ctx, bdp_tjetty, &rvjetty_info);
+    PERF_PROFILING_END(BOND_HC_PTETTY);
+    if (ret != 0) {
         URMA_LOG_ERR("Failed to register health check tjetty\n");
         goto UNIMPORT_PJETTY;
     }
