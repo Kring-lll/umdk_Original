@@ -281,7 +281,6 @@ func validateErrSchedulerConfig(gsCfg *base.GlobalSchedulerConfig) error {
 		return fmt.Errorf("invalid errSchedulerType %q, model %q", t, gsCfg.Model)
 	}
 
-	// Warmup gate tri-state semantics are documented in the README.
 	if errCfg.WarmupSessions == 0 {
 		errCfg.WarmupSessions = defaultErrWarmupSessions
 	}
