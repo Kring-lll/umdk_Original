@@ -119,10 +119,10 @@ func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, curStep 
 	}
 
 	if err := m.pendingQueue.Add(&PendingRequest{
-		ReqID:     req.Request.ReqId,
-		SessionID: req.SessionID,
-		CurStep:   curStep,
-		Msg:       msg,
+		ReqID:       req.Request.ReqId,
+		SessionID:   req.SessionID,
+		CurStep:     curStep,
+		Msg:         msg,
 		StarveClock: time.Now().Add(-m.errScheduler.TakeQueueWaitCarry(req.SessionID)),
 	}); err != nil {
 		msg.Response <- err
@@ -145,7 +145,9 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 		if m.pendingQueue.IsEmpty() {
 			return
 		}
-		if m.capacityProvider != nil && !m.capacityProvider.HasCapacity() {
+		// With engine-signal admission active, the aigw-side global capacity
+		// gate is superseded (the waiting-based gate below is the authority).
+		if m.kvAdmission == nil && m.capacityProvider != nil && !m.capacityProvider.HasCapacity() {
 			return
 		}
 
@@ -154,10 +156,10 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 			req := r.Msg.Request.(*ScheduleRequestMsg)
 			var p int
 			if r.SessionID == "" {
-			// Anonymous internal calls (context compression / checkpoints)
-			// are small, latency-sensitive, and synchronously block the
-			// parent session — whose idle timer keeps running while the
-			// anonymous request queues. Rank them at the boost tier.
+				// Anonymous internal calls (context compression / checkpoints)
+				// are small, latency-sensitive, and synchronously block the
+				// parent session — whose idle timer keeps running while the
+				// anonymous request queues. Rank them at the boost tier.
 				p = math.MinInt32
 			} else {
 				p = int(m.errScheduler.PriorityWith(snap, r.SessionID, r.CurStep, classifyPrompt(req)))
@@ -199,6 +201,13 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 		result := m.scheduler.schedule(req, nil)
 
 		if result.PrefillUrl == "" {
+			return
+		}
+
+		// Admission gate: hold the request in queue when the target engine
+		// reports waiting>0 (or signals are stale and the fallback
+		// in-flight gate says no). Stays queued — never rejected.
+		if m.kvAdmission != nil && !m.kvAdmission.AllowDispatch(result.PrefillUrl) {
 			return
 		}
 

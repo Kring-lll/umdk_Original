@@ -29,10 +29,10 @@ type OpenAiRequest struct {
 
 // GetSuggestionOut specified the out parameters for GetSuggestion.
 type GetSuggestionOut struct {
-	TargetPrefillUrl string   `json:"targetPrefill"`
-	TargetDecodeUrl  string   `json:"targetDecode"`
-	DpRank           *int     `json:"dpRank,omitempty"`  // DP rank for data parallel routing
-	Priority         *int     `json:"priority,omitempty"` // ERR scheduling priority
+	TargetPrefillUrl string `json:"targetPrefill"`
+	TargetDecodeUrl  string `json:"targetDecode"`
+	DpRank           *int   `json:"dpRank,omitempty"`   // DP rank for data parallel routing
+	Priority         *int   `json:"priority,omitempty"` // ERR scheduling priority
 }
 
 // RegisterInstanceIn specified the input parameters for RegisterInstance.
@@ -175,6 +175,32 @@ type ErrSchedulerConfig struct {
 	QueueBoostSec      int    `json:"queueBoostSec"`      // starvation floor: force queued requests to top priority after this many seconds (default: 240; 0 = default; negative = disabled)
 }
 
+// KvAdmission mode values.
+const (
+	KvAdmissionOff    = "off"
+	KvAdmissionSignal = "signal"
+	KvAdmissionFrozen = "frozen"
+)
+
+// KvAdmissionConfig configures engine-signal admission control: dispatch is
+// gated on the target engine's own waiting queue (observed via the motor
+// coordinator's metrics endpoint) instead of aigw-side counting. It replaces
+// the original double gate (global capacity provider + LB ReqNum<batchSize)
+// whenever active, and requires ERR queue mode.
+type KvAdmissionConfig struct {
+	Mode string `json:"mode"` // "signal" | "frozen" | "off" (default; original gates stay)
+	// MetricsURL is the motor coordinator observation endpoint
+	// (e.g. http://127.0.0.1:1027/metrics?type=instance); explicit full URL,
+	// not derived from the instance URL (obs and infer are separately exposed).
+	MetricsURL           string `json:"metricsUrl"`
+	PollMs               int    `json:"pollMs"`               // signal poll cadence (default 1000)
+	BurstCapPerCycle     int    `json:"burstCapPerCycle"`     // max admits per instance per poll cycle (default 1)
+	HysteresisCycles     int    `json:"hysteresisCycles"`     // clear cycles required before resuming after waiting>0 (default 1)
+	StaleAfterMs         int    `json:"staleAfterMs"`         // signal age treated as fresh (default 8000: motor cache 3s + poll offset)
+	RecoverHealthyCycles int    `json:"recoverHealthyCycles"` // consecutive good polls before trusting signals (default 2)
+	SoftCap              int    `json:"softCap"`              // frozen mode: per-instance in-flight cap
+}
+
 // GlobalSchedulerConfig struct contains configuration for a global scheduler
 type GlobalSchedulerConfig struct {
 	Model                string             `json:"model"`
@@ -185,6 +211,7 @@ type GlobalSchedulerConfig struct {
 	TokenizeModelName    string             `json:"tokenizeModelName"`
 	LoadBalancer         LoadBalancerConfig `json:"loadBalancer"`
 	ErrScheduler         ErrSchedulerConfig `json:"errScheduler"`
+	KvAdmission          KvAdmissionConfig  `json:"kvAdmission"`
 	// Mode selects scheduling path: "instance" (default when empty) | "provider".
 	Mode string `json:"mode,omitempty"`
 	// ProviderPool holds config for mode=provider.

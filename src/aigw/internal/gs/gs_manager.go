@@ -144,6 +144,9 @@ type GlobalSchedulerManager struct {
 	capacityProvider *CapacityProvider
 	pendingQueue     *PendingQueue
 	errInFlight      map[string]errInFlightEntry
+	// kvAdmission gates dispatch on engine-observed waiting (nil = original
+	// double gate: global capacity provider + LB ReqNum<batchSize).
+	kvAdmission *KvAdmissionController
 	// dispatchMu serializes ERR dispatch to protect the non-thread-safe LB.
 	// Per-GSM so different models do not block each other.
 	dispatchMu sync.Mutex
@@ -285,7 +288,36 @@ func NewGlobalSchedulerManager(parentCtx context.Context, gsConfig *base.GlobalS
 
 	manager.dispatcher = newGlobalScheduleDispatcher(manager.ctx)
 
+	if e := manager.initKvAdmission(&gsConfig.KvAdmission, gsConfig.LoadBalancer.BatchSize, gsLB); e != nil {
+		return nil, e
+	}
+
 	return manager, nil
+}
+
+// initKvAdmission wires engine-signal admission. It requires ERR queue mode:
+// the gate holds requests in the pending queue, which passthrough mode
+// (queueSize=0) does not have by definition — in that case the config is
+// legal but the controller stays inactive.
+func (m *GlobalSchedulerManager) initKvAdmission(cfg *base.KvAdmissionConfig, batchSize int, lb loadBalancer) error {
+	if cfg.Mode == "" || cfg.Mode == base.KvAdmissionOff {
+		return nil
+	}
+	if m.pendingQueue == nil || m.runtimeMode != base.ServiceMode {
+		log.Warn().Msgf("[KvAdmission] mode=%s requires ERR queue mode in ServiceMode; staying inactive (model %s)",
+			cfg.Mode, m.config.model)
+		return nil
+	}
+	ctrl := NewKvAdmissionController(*cfg, batchSize, m.instanceManager.InsReqNum)
+	m.kvAdmission = ctrl
+	if lb, ok := lb.(interface{ SetCandidateFilter(func(string) bool) }); ok {
+		lb.SetCandidateFilter(ctrl.LBCandidate)
+	}
+	if cfg.Mode == base.KvAdmissionSignal {
+		ctrl.Start(m.ctx, m.wg)
+	}
+	log.Info().Msgf("[KvAdmission] active: mode=%s batchSize=%d (model %s)", cfg.Mode, batchSize, m.config.model)
+	return nil
 }
 
 func (m *GlobalSchedulerManager) setConfig(gsConfig *base.GlobalSchedulerConfig) error {

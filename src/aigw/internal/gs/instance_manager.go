@@ -337,6 +337,24 @@ func (insManager *InstanceManager) predictTokensByEMA(req *LlmRequest) int {
 	return req.PromptLen + decodeLen
 }
 
+// InsReqNum returns aigw's per-instance in-flight request count (0 when the
+// instance is unknown). Used by the admission controller's degraded path.
+func (insManager *InstanceManager) InsReqNum(insUrl string) int {
+	if insManager == nil {
+		return 0
+	}
+	insManager.poolRWLock.RLock()
+	ins := insManager.insPool[insUrl]
+	insManager.poolRWLock.RUnlock()
+	if ins == nil {
+		return 0
+	}
+	ins.rwLock.RLock()
+	n := ins.reqNum
+	ins.rwLock.RUnlock()
+	return n
+}
+
 func (insManager *InstanceManager) isReqExists(reqId string) bool {
 	insManager.poolRWLock.RLock()
 	defer insManager.poolRWLock.RUnlock()

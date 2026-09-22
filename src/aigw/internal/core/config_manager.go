@@ -53,9 +53,9 @@ const (
 	defaultTokenizationRatio      = float64(0.35)
 
 	// ERR scheduler defaults
-	defaultErrWarmupSessions  = 100
-	defaultErrWarmupPerCat    = 10
-	defaultErrSessionTimeout  = 660
+	defaultErrWarmupSessions = 100
+	defaultErrWarmupPerCat   = 10
+	defaultErrSessionTimeout = 660
 	// Matches sessionTimeoutSec: post-stop compression blocks the parent's
 	// next request for as long as the anonymous call queues; a short
 	// timer here erases the session mid-wait.
@@ -271,6 +271,42 @@ func validateInsConnectType(gsCfg *base.GlobalSchedulerConfig) error {
 	return nil
 }
 
+func validateKvAdmissionConfig(gsCfg *base.GlobalSchedulerConfig) error {
+	cfg := &gsCfg.KvAdmission
+	if cfg.Mode == "" {
+		cfg.Mode = base.KvAdmissionOff
+	}
+	if cfg.Mode != base.KvAdmissionOff && cfg.Mode != base.KvAdmissionSignal && cfg.Mode != base.KvAdmissionFrozen {
+		return fmt.Errorf("invalid kvAdmission.mode %q, model %q", cfg.Mode, gsCfg.Model)
+	}
+	if cfg.PollMs <= 0 {
+		cfg.PollMs = 1000
+	}
+	if cfg.BurstCapPerCycle <= 0 {
+		cfg.BurstCapPerCycle = 1
+	}
+	if cfg.HysteresisCycles <= 0 {
+		cfg.HysteresisCycles = 1
+	}
+	if cfg.StaleAfterMs <= 0 {
+		cfg.StaleAfterMs = 8000
+	}
+	if cfg.RecoverHealthyCycles <= 0 {
+		cfg.RecoverHealthyCycles = 2
+	}
+	switch cfg.Mode {
+	case base.KvAdmissionSignal:
+		if cfg.MetricsURL == "" {
+			return fmt.Errorf("kvAdmission.mode=signal requires metricsUrl, model %q", gsCfg.Model)
+		}
+	case base.KvAdmissionFrozen:
+		if cfg.SoftCap <= 0 {
+			return fmt.Errorf("kvAdmission.mode=frozen requires softCap, model %q", gsCfg.Model)
+		}
+	}
+	return nil
+}
+
 func validateErrSchedulerConfig(gsCfg *base.GlobalSchedulerConfig) error {
 	errCfg := &gsCfg.ErrScheduler
 	t := errCfg.ErrSchedulerType
@@ -457,6 +493,9 @@ func validateGlobalSchedulersConfig(gsConfigs []base.GlobalSchedulerConfig) erro
 			return err
 		}
 		if err := validateErrSchedulerConfig(scheduler); err != nil {
+			return err
+		}
+		if err := validateKvAdmissionConfig(scheduler); err != nil {
 			return err
 		}
 		if err := utils.CheckStringLength(scheduler.Model); err != nil {
