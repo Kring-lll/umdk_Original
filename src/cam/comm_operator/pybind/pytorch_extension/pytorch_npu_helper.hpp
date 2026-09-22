@@ -295,6 +295,9 @@ inline aclTensor *ConvertType(const at::Tensor &at_tensor)
             default:
                 format = ACL_FORMAT_ND;
         }
+        if (acl_data_type != ACL_STRING) {
+            storageDims.push_back(at_tensor.storage().nbytes() / itemsize);
+        }
     }
 
     if (at_tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
@@ -585,9 +588,10 @@ typedef void (*ReleaseHugeMem)(void *, bool);
         auto workspace_status = call(getWorkspaceSizeFunc, converted_params);                                          \
         TORCH_CHECK(workspace_status == 0, "call " #aclnn_api " failed, detail:", aclGetRecentErrMsg());               \
         void *workspace_addr = nullptr;                                                                                \
+        at::Tensor workspace_tensor;                                                                                   \
         if (workspace_size != 0) {                                                                                     \
             at::TensorOptions options = at::TensorOptions(torch_npu::utils::get_npu_device_type());                    \
-            auto workspace_tensor = at::empty({static_cast<int64_t>(workspace_size)}, options.dtype(c10::kByte));      \
+            workspace_tensor = at::empty({static_cast<int64_t>(workspace_size)}, options.dtype(c10::kByte));           \
             workspace_addr = const_cast<void *>(workspace_tensor.storage().data());                                    \
         }                                                                                                              \
         auto acl_call = [converted_params, workspace_addr, workspace_size, acl_stream, executor]() -> int {            \

@@ -96,6 +96,53 @@ Return value is a list of tensors，which stores combine_x and expert_token_nums
  - Required: share_gmm1_weight, share_gmm1_weight_scale, share_gmm2_weight, share_gmm2_weight_scale must exist at the same time if shared expert computation is enabled
  - Required: expert_smooth_scales must exist if routed expert smooth quantization is enabled, furthermore, share_smooth_scales must exist if shared expert computation is enabled
 
+ #### 1.1.2 gmm_layered ▶
+##### 1.1.2.1 Prototype
+```python
+umdk_cam_op_lib.gmm_layered(
+    Tensor[] x,
+    Tensor[] all_weight,
+    Tensor[] all_bias,
+    Tensor[] all_scale,
+    Tensor layer_index,
+    Tensor? per_token_scale=None,
+    int[]? group_list=None,
+    int group_list_type=0,
+    int split_item=0,
+    ScalarType? output_dtype=None)
+-> output: Tensor[]
+```
+##### 1.1.2.2 Interface Description
+A layer-selecting grouped matmul for MoE deep-layer scenarios, where every layer's expert weights stay resident in device memory. Instead of invoking a GMM once per layer, this interface takes **all layers'** weights, biases and quantization scales in a single call (one list element per layer, each covering all experts of that layer), reads the current layer number `layer_index` on the device, and transfers/computes only that layer's slice. This removes the per-layer host-side addressing and dispatch overhead.
+
+The operator is built for A8W4/A8W8 symmetric quantization: the activation `x` is per-token-quantized int8, the weight is int8 or int4 packed in int32, and the scale is packed uint64 (A8W4/A8W8) or bf16/float (A8W8). Layer selection happens inside the kernel, so switching layers carries no extra host cost.
+##### 1.1.2.3 Input Parameters
+| **📌Parameter** | **🔧Type** | **✅Required** | **📋Value Range** | **📝Description** |
+|----------|----------|--------------|--------------|----------|
+|x|Tensor[]|Required|Contains 1 tensor, shape (m, k), dtype int8, format ND|Activation matrix for this layer, already quantized per token|
+|all_weight|Tensor[]|Required|List length equals the layer count L; each tensor holds that layer's all-expert weight, shape (e, k, n) for A8W8 or (e, k, n/8) for A8W4 (int32 packing 8 int4 values), dtype int8 or int4, format ND/NZ|Per-layer weight matrices|
+|all_bias|Tensor[]|Required|List length equals the layer count L; each tensor has shape (e, n), dtype int32, float or bf16 (int32 for the A8W8 int32 accumulation bias, float/bf16 for the dequantized A8W4 bias)|Per-layer bias list|
+|all_scale|Tensor[]|Required|List length equals the layer count L; each tensor has shape (e, n), dtype uint64, bf16 or float. uint64 is the packed dequantization scale for A8W4/A8W8; bf16/float is a per-channel quantization scale|Per-layer quantization / dequantization scales|
+|layer_index|Tensor|Required|Shape (1), dtype int64, range [0, L)|Current layer number, read on the device; no host-side synchronization needed|
+|per_token_scale|Tensor|Optional|Shape (m), dtype float32|Per-token dequantization scale; required by the A8W4 MSD dequantization path|
+|group_list|int[]|Optional|Length equals the expert count e; elements are positive and sum to m. With `group_list_type=1` they are per-expert token counts; with `group_list_type=0` they are a prefix sum, which the host normalizes to counts|Token distribution across experts|
+|group_list_type|int|Optional|0 or 1, default 0. 0 means cumsum (prefix sum), 1 means count|Semantics of `group_list`|
+|split_item|int|Optional|0/1/2/3, default 0, selecting whether the inputs and the outputs are split|Splitting mode of inputs and outputs|
+|output_dtype|ScalarType|Optional|torch.int8, torch.float16, torch.bfloat16 or torch.int32. When omitted it is derived from the scenario (bfloat16 for A8W4, the dtype of x for A8W8)|Data type of the output `y`|
+##### 1.1.2.4 Return Value
+The function returns a tensor list, currently always containing exactly one tensor.
+| **📌Parameter** | **🔧Type** | **📋Value Range** | **📝Description** |
+|----------|----------|--------------|----------|
+|y|Tensor[]|Shape (sum(group_list), n). The dtype is given by `output_dtype` or derived from the scenario|Per-expert results concatenated in `group_list` order|
+##### 1.1.2.5 Constraints and Precautions ⚠️
+1. Input shapes must strictly satisfy the shape definitions above.
+2. The three lists `all_weight`, `all_bias` and `all_scale` must have identical length, equal to the layer count L.
+3. `layer_index` is read directly by the device-side kernel, so it need not be synchronized back to the host before the call. Consequently the host cannot observe an out-of-range layer number: an out-of-range index falls back to layer 0 instead of raising an error.
+4. `k` must satisfy `k % 16 == 0` and `n` must satisfy `n % 64 == 0` (FRACTAL_NZ layout constraint).
+5. With `split_item=3` a single `y` is returned; the current implementation always returns a single tensor. Multi-tensor split scenarios will be covered in a later version.
+6. The A8W4 MSD dequantization path rewrites the activation `x` **in place** (the kernel binds the same buffer as both its input and its output). A caller that needs the same `x` for further comparisons or further calls must clone it first.
+7. The operator currently supports the Ascend910_93 (Atlas A3) environment.
+
 ### 2. KVCache Offload
 UMDK provides KVCache Offload interfaces via "umdk_cam_op_lib": the Full KV Cache resides in Host memory, while the Selected KV Cache resides in HBM. Based on sparse-attention selection results, only the KV required for computation is transferred.
 

@@ -13,6 +13,7 @@
       "fused_deep_moe",
       "fused_deep_moe_fwk",
       "fused_deep_moe_w4a8",
+      "grouped_matmul_layered",
       "moe_combine_lowlatency_zb",
       "moe_combine_normal_zb",
       "moe_dispatch_layout_zb",
@@ -64,6 +65,10 @@
       "family": "fused_deep_moe",
       "variant": "arch35",
       "_note": "Ascend950/A5 MX path; lives only under ascend950. Shares fused_deep_moe.* filenames with base/w4a8 but different SOC so no mutex."
+    },
+    "grouped_matmul_layered": {
+      "requires_shmem": false,
+      "_note": "Layer-selecting GroupedMatmul (ascend910_93, A8W4/A8W8). Resolves the current layer on device via layer_index and reads that layer's weight/scale/bias from the per-layer all_* tensor lists. Registers as op type GroupedMatmulLayered."
     },
     "moe_combine_lowlatency_zb": {
       "requires_shmem": true

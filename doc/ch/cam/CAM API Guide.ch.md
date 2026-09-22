@@ -95,6 +95,53 @@ fused_deep_moe(
  - 需要满足: 若要进行内置共享专家计算，则共享专家所需的share_gmm1_weight、share_gmm1_weight_scale、share_gmm2_weight、share_gmm2_weight_scale需同时存在
  - 需要满足: 若要进行smooth quant，需传入expert_smooth_scales，若同时进行内置共享专家计算则share_smooth_scales也必须存在
 
+ #### 1.1.2 gmm_layered ▶
+##### 1.1.2.1 接口原型
+```python
+umdk_cam_op_lib.gmm_layered(
+    Tensor[] x,
+    Tensor[] all_weight,
+    Tensor[] all_bias,
+    Tensor[] all_scale,
+    Tensor layer_index,
+    Tensor? per_token_scale=None,
+    int[]? group_list=None,
+    int group_list_type=0,
+    int split_item=0,
+    ScalarType? output_dtype=None)
+-> output: Tensor[]
+```
+##### 1.1.2.2 接口描述
+用于MoE深层（多层专家权重常驻显存）场景的选层矩阵乘算子。与逐层调用GMM不同，本接口将**所有层**的权重、偏置、量化系数一次性传入（每一层对应列表中一个元素，该元素覆盖本层的全部专家），并在device侧读取当前层号`layer_index`，仅搬运和计算该层的分片，从而省去每层一次的host侧寻址与下发开销。
+
+算子基于A8W4/A8W8对称量化：激活`x`为per-token量化后的int8，权重为int8或int32打包的int4，量化系数为打包的uint64（A8W4/A8W8）或bf16/float（A8W8）。层选择在kernel侧完成，因此切换层不产生额外的host开销。
+##### 1.1.2.3 入参
+| **📌参数** | **🔧类型** | **✅是否必选** | **📋取值说明** | **📝描述** |
+|----------|----------|--------------|--------------|----------|
+|x|Tensor[]|必选|包含1个Tensor，形状:(m, k)，数据类型为int8，数据格式支持ND|本层待处理的激活矩阵，已按token完成量化|
+|all_weight|Tensor[]|必选|列表长度等于层数L；每个Tensor为该层的全专家权重，形状:(e, k, n)（A8W8）或(e, k, n/8)（A8W4，int32打包8个int4），数据类型支持int8、int4，数据格式支持ND/NZ|各层的权重矩阵列表|
+|all_bias|Tensor[]|必选|列表长度等于层数L；每个Tensor形状:(e, n)，数据类型支持int32、float、bf16（int32对应A8W8的int32累加偏置，float/bf16对应A8W4反量化后的偏置）|各层的偏置列表|
+|all_scale|Tensor[]|必选|列表长度等于层数L；每个Tensor形状:(e, n)，数据类型支持uint64、bf16、float。A8W4/A8W8为uint64打包的反量化系数，bf16/float为per-channel量化系数|各层的量化/反量化系数列表|
+|layer_index|Tensor|必选|形状:(1)，数据类型为int64，取值范围[0, L)|当前层号，在device侧读取，用户无需同步回host|
+|per_token_scale|Tensor|可选|形状:(m)，数据类型为float32|per-token反量化系数，A8W4 MSD反量化路径必选|
+|group_list|int[]|可选|长度等于专家数e，元素为正整数且累加等于m；`group_list_type=1`时为各专家token数，`group_list_type=0`时为前缀和，host侧会归一化为计数|各专家的token分布|
+|group_list_type|int|可选|取值0或1，默认0。0表示cumsum（前缀和），1表示count（计数）|`group_list`的语义|
+|split_item|int|可选|取值0/1/2/3，默认0，分别对应入参不切分/切分、输出不切分/切分|输入输出的切分方式|
+|output_dtype|ScalarType|可选|支持torch.int8、torch.float16、torch.bfloat16、torch.int32；不传时按场景推导（A8W4推导为bfloat16，A8W8沿用x的数据类型）|输出`y`的数据类型|
+##### 1.1.2.4 返回值
+函数返回值是一个Tensor列表，当前固定包含1个Tensor。
+| **📌参数** | **🔧类型** | **📋取值说明** | **📝描述** |
+|----------|----------|--------------|----------|
+|y|Tensor[]|形状：(sum(group_list), n)。数据类型由`output_dtype`指定或按场景推导|各专家按`group_list`顺序拼接的计算结果|
+##### 1.1.2.5 约束和注意事项 ⚠️
+1. 入参形状需严格满足上述入参描述中的形状定义。
+2. `all_weight`、`all_bias`、`all_scale`三个列表的长度必须一致，均等于层数L。
+3. `layer_index`由device侧kernel直接读取，因此无需在调用前从device同步回host；但这也意味着**host侧无法感知层号越界**，越界时行为为回落到第0层而非报错。
+4. `k`需满足`k % 16 == 0`，`n`需满足`n % 64 == 0`（FRACTAL_NZ排布约束）。
+5. `split_item=3`时返回单个`y`；当前实现固定按单Tensor返回，多Tensor切分场景请参考后续版本。
+6. A8W4的MSD反量化路径会**原地改写激活**`x`（kernel将同一块buffer同时作为输入与输出），因此同一份`x`若需参与多次比较或多次调用，调用方应先自行clone。
+7. 当前算子支持Ascend910_93（Atlas A3）环境调用。
+
 ### 2. KVCache Offload
 CAM 在 umdk_cam_op_lib 库中提供 KVCache Offload 相关接口：Full KV Cache 保存在 Host memory，Selected KV Cache 保存在 HBM；根据 sparse attention 选择结果，仅搬运需要参与计算的 KV。
 
