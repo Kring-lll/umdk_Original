@@ -63,6 +63,11 @@ type KvAdmissionController struct {
 	degradedSince time.Time
 	degradedTotal time.Duration
 
+	// kick is invoked after each poll cycle while the gate is open: the
+	// poller drives dispatch retries itself instead of waiting for the
+	// next arrival/completion event or the 10s survival ticker.
+	kick func()
+
 	client *http.Client
 }
 
@@ -101,9 +106,35 @@ func (c *KvAdmissionController) Start(ctx context.Context, wg *sync.WaitGroup) {
 				return
 			case <-ticker.C:
 				c.pollOnce(ctx)
+				c.kickIfOpen()
 			}
 		}
 	}()
+}
+
+// SetDispatchKick installs the post-poll dispatch trigger (signal mode).
+func (c *KvAdmissionController) SetDispatchKick(f func()) {
+	if c == nil {
+		return
+	}
+	c.kick = f
+}
+
+// kickIfOpen triggers a dispatch attempt after a poll cycle when the gate
+// is open. Called outside c.mu; the kick re-acquires the dispatch lock and
+// its gate check re-takes c.mu — same order as the event-driven path, so
+// no lock inversion. No kick while closed: avoids hold-log spam.
+func (c *KvAdmissionController) kickIfOpen() {
+	if c == nil || c.kick == nil {
+		return
+	}
+	c.mu.Lock()
+	open := c.mode == base.KvAdmissionSignal && c.healthyLocked() &&
+		c.signal.waiting == 0 && c.pauseRemaining == 0
+	c.mu.Unlock()
+	if open {
+		c.kick()
+	}
 }
 
 func (c *KvAdmissionController) pollOnce(ctx context.Context) {

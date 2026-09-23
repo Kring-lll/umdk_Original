@@ -310,6 +310,11 @@ func (m *GlobalSchedulerManager) initKvAdmission(cfg *base.KvAdmissionConfig, ba
 	}
 	ctrl := NewKvAdmissionController(*cfg, batchSize, m.instanceManager.InsReqNum)
 	m.kvAdmission = ctrl
+	ctrl.SetDispatchKick(func() {
+		m.dispatchMu.Lock()
+		m.tryDispatchFromQueue()
+		m.dispatchMu.Unlock()
+	})
 	if lb, ok := lb.(interface{ SetCandidateFilter(func(string) bool) }); ok {
 		lb.SetCandidateFilter(ctrl.LBCandidate)
 	}
