@@ -168,7 +168,11 @@ func (c *KvAdmissionController) AllowDispatch(insUrl string) bool {
 	}
 
 	if c.mode == base.KvAdmissionFrozen {
-		return inFlight < c.softCap
+		if inFlight >= c.softCap {
+			log.Debug().Msgf("[KvAdmission] frozen-cap: ins=%s inflight=%d softCap=%d", insUrl, inFlight, c.softCap)
+			return false
+		}
+		return true
 	}
 
 	if !c.healthyLocked() {
@@ -182,9 +186,12 @@ func (c *KvAdmissionController) AllowDispatch(insUrl string) bool {
 	c.exitDegradedLocked()
 
 	if c.signal.waiting > 0 || c.pauseRemaining > 0 {
+		log.Debug().Msgf("[KvAdmission] hold: ins=%s waiting=%d pauseRem=%d sigAge=%s run=%d inflight=%d",
+			insUrl, c.signal.waiting, c.pauseRemaining, time.Since(c.lastOk).Round(time.Millisecond), c.signal.running, inFlight)
 		return false
 	}
 	if c.admits[insUrl] >= c.burstCap {
+		log.Debug().Msgf("[KvAdmission] burst-cap: ins=%s admits=%d/%d inflight=%d", insUrl, c.admits[insUrl], c.burstCap, inFlight)
 		return false
 	}
 	c.admits[insUrl]++
