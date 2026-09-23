@@ -177,7 +177,10 @@ func (w *sseWatcher) checkConnAndRetry() error {
 		w.enable = false
 		w.Unlock()
 		log.Debug().Msgf("[watcher]ins %v connection failed, update snapshot immediately", w.ins.insUrl)
-		w.ins.insMgr.updatePoolShot() // update snapshot immediately when the connection failed
+		w.ins.insMgr.updatePoolShot()
+		if fn := w.ins.insMgr.OnUnhealthySnapshot(); fn != nil {
+			fn(w.ins.insUrl)
+		}
 	}
 	if w.retryCount == 0 {
 		err := w.resp.Body.Close()

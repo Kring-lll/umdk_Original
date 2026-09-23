@@ -10,12 +10,15 @@ package server
 
 import "C"
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +26,7 @@ import (
 	"huawei.com/aigw/internal/apipool"
 	"huawei.com/aigw/internal/base"
 	"huawei.com/aigw/internal/core"
+	"huawei.com/aigw/internal/gs"
 	"huawei.com/aigw/internal/proxy"
 	"huawei.com/aigw/pkg/crypto"
 	"huawei.com/aigw/pkg/log"
@@ -380,10 +384,13 @@ func (s *HttpServer) scheduleForOpenAi(w http.ResponseWriter, r *http.Request) {
 	}
 
 	in := &core.GetSuggestionIn{
-		UUID:    req.UUID,
-		Model:   req.Model,
-		Prompt:  prompt,
-		Headers: extractHeaders(r),
+		UUID:       req.UUID,
+		Model:      req.Model,
+		Prompt:     prompt,
+		UserPrompt: extractUserText(req.Messages),
+		Ctx:        r.Context(),
+		Headers:    extractHeaders(r),
+		Advisory:   true,
 	}
 
 	out, err := s.manager.GetSuggestion(in)
@@ -486,20 +493,42 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		prompt += m.Role + ":" + m.Content + " "
 	}
 
+	// User-role text for ERR/CatERR classification (system prompts excluded).
+	userMsgs := make([]base.OpenAiMessage, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		userMsgs = append(userMsgs, base.OpenAiMessage{Role: m.Role, Content: m.Content})
+	}
+
 	var bodyMap map[string]interface{}
 	json.Unmarshal(body, &bodyMap)
 
+	sessionID := gs.ExtractSessionID(bodyMap)
+
 	in := &core.GetSuggestionIn{
-		UUID:    fmt.Sprintf("req-%d", time.Now().UnixNano()),
-		Model:   model,
-		Prompt:  prompt,
-		Headers: extractHeaders(r),
-		Body:    bodyMap,
+		UUID:       fmt.Sprintf("req-%d", time.Now().UnixNano()),
+		Model:      model,
+		Prompt:     prompt,
+		UserPrompt: extractUserText(userMsgs),
+		Ctx:        r.Context(),
+		Headers:    extractHeaders(r),
+		Body:       bodyMap,
+		SessionID:  sessionID,
 	}
 
 	suggestion, err := s.manager.GetSuggestion(in)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to get scheduling suggestion: %v", err), http.StatusInternalServerError)
+		statusCode := http.StatusInternalServerError
+		if errors.Is(err, gs.ErrQueueFull) || errors.Is(err, gs.ErrNoInstance) || errors.Is(err, gs.ErrDuplicateReqID) {
+			statusCode = http.StatusServiceUnavailable
+			log.Warn().Msgf("Scheduling unavailable: %v", err)
+		} else {
+			log.Error().Msgf("Failed to get scheduling suggestion: %v", err)
+		}
+		http.Error(w, fmt.Sprintf("Failed to get scheduling suggestion: %v", err), statusCode)
+		if sessionID != "" {
+			// No suggestion → request was never dispatched → nothing to free.
+			s.manager.ErrOnCancel(model, sessionID, in.UUID, "", "")
+		}
 		return
 	}
 
@@ -509,55 +538,103 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 	}
 	if targetURL == "" {
 		http.Error(w, "No available worker instance", http.StatusServiceUnavailable)
+		if sessionID != "" {
+			// Suggestion exists but has no instance URL (PrefillUrl == "").
+			s.manager.ErrOnCancel(model, sessionID, in.UUID, suggestion.TargetPrefillUrl, suggestion.TargetDecodeUrl)
+		}
 		return
 	}
+	// Strip the "@rank" suffix: it is an aigw-internal DP-aware instance
+	// identifier (see dp_worker.go), not part of the real downstream HTTP URL.
+	// The DP rank is conveyed to the downstream via suggestion.DpRank (header).
+	targetURL, _, _ = gs.ParseDPAwareWorkerURL(targetURL)
 	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
 		targetURL = "http://" + targetURL
 	}
 
-	log.Debug().Msgf("Forwarding request to: %s, DpRank: %v", targetURL, suggestion.DpRank)
+	log.Debug().Msgf("Forwarding request to: %s, DpRank: %v, Priority: %v", targetURL, suggestion.DpRank, suggestion.Priority)
+
+	forwardBody := body
+	if suggestion.Priority != nil {
+		forwardBody = injectPriority(body, *suggestion.Priority)
+	}
 
 	forwardReq := &proxy.ForwardRequest{
 		Method:    "POST",
 		TargetURL: targetURL,
 		Route:     "/v1/chat/completions",
 		Headers:   r.Header,
-		Body:      body,
+		Body:      forwardBody,
 		Stream:    stream,
 		DpRank:    suggestion.DpRank,
+		Label:     sessionID + "/" + in.UUID,
 	}
 
 	result, err := s.proxyMgr.ForwardRequest(r.Context(), forwardReq)
 	if err != nil {
 		log.Error().Msgf("Forward request failed: %v", err)
 		http.Error(w, fmt.Sprintf("Forward request failed: %v", err), http.StatusBadGateway)
+		if suggestion.TargetPrefillUrl != "" {
+			// Request was dispatched (OnDispatched already counted it); free its slot.
+			// Guard on the dispatch target, not sessionID: anonymous requests
+			// have no session but still hold an in-flight slot.
+			s.manager.ErrOnCancel(model, sessionID, in.UUID, suggestion.TargetPrefillUrl, suggestion.TargetDecodeUrl)
+		}
 		return
 	}
 
+	var finishReason string
+
 	if stream && result.StreamReader != nil {
+		defer result.StreamReader.Close()
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.WriteHeader(http.StatusOK)
 
+		// net/http sets no write deadline and the proxy timeout only bounds
+		// the upstream exchange: without this, a client that abandons the
+		// stream (without closing) blocks these writes forever.
+		writeTimeout := s.proxyMgr.ChunkIntervalTimeout()
+		wrc := http.NewResponseController(w)
 		for {
 			event, err := result.StreamReader.ReadEvent()
 			if err == io.EOF {
 				log.Debug().Msg("SSE stream completed")
-				return
+				break
 			}
 			if err != nil {
 				log.Error().Msgf("SSE read error: %v", err)
-				return
+				if finishReason == "" {
+					finishReason = "cancelled"
+				}
+				break
+			}
+			if fr := parseFinishReason(event.Data); fr != "" {
+				finishReason = fr
+			}
+			if writeTimeout > 0 {
+				if err := wrc.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+					log.Debug().Msgf("SetWriteDeadline unsupported: %v", err)
+				}
 			}
 			if event.Event != "" {
-				fmt.Fprintf(w, "event: %s\n", event.Event)
+				if _, err := fmt.Fprintf(w, "event: %s\n", event.Event); err != nil {
+					log.Warn().Msgf("SSE write error (client gone): %v", err)
+					finishReason = "cancelled"
+					break
+				}
 			}
-			fmt.Fprintf(w, "data: %s\n\n", event.Data)
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", event.Data); err != nil {
+				log.Warn().Msgf("SSE write error (client gone): %v", err)
+				finishReason = "cancelled"
+				break
+			}
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}
 		}
+		wrc.SetWriteDeadline(time.Time{})
 	} else {
 		for k, v := range result.Headers {
 			if k == "Transfer-Encoding" || k == "Connection" {
@@ -569,7 +646,182 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 		if _, err := w.Write(result.Body); err != nil {
 			log.Warn().Msgf("Error writing response: %v", err)
 		}
+		finishReason = parseFinishReasonFromJSON(result.Body)
 	}
+
+	if suggestion.TargetPrefillUrl != "" {
+		if finishReason == "" {
+			finishReason = "unknown"
+		}
+		// Free the instance slot this request used (== OnDispatched's key, since
+		// suggestion.TargetPrefillUrl == result.PrefillUrl). HTTP-level, not session.
+		s.manager.ErrOnResponse(model, sessionID, in.UUID, suggestion.TargetPrefillUrl, suggestion.TargetDecodeUrl, finishReason)
+	}
+}
+
+// injectPriority injects the ERR priority value into the request body's
+// agent_hint.priority_control.priority field. priority is int (truncated E[rem])
+// so the value used for local queue ordering == the value the downstream sees.
+func injectPriority(body []byte, priority int) []byte {
+	start, end, rawHint, found := locateAgentHintValue(body)
+	newHint := rebuildAgentHint(rawHint, priority, found)
+	if newHint == nil {
+		return body
+	}
+	if found {
+		out := make([]byte, 0, len(body)-(end-start)+len(newHint))
+		out = append(out, body[:start]...)
+		out = append(out, newHint...)
+		out = append(out, body[end:]...)
+		return out
+	}
+	return insertAgentHintBeforeClosingBrace(body, newHint)
+}
+
+// locateAgentHintValue walks only the top-level object keys to find the
+// agent_hint value's exact byte range. Nested occurrences inside messages
+// are invisible to the Decoder's value-skip, so a message that happens to
+// contain "agent_hint" as a string cannot confuse the lookup.
+func locateAgentHintValue(body []byte) (start, end int, raw json.RawMessage, found bool) {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	tok, err := dec.Token()
+	if err != nil {
+		return 0, 0, nil, false
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return 0, 0, nil, false
+	}
+	for dec.More() {
+		tok, err = dec.Token()
+		if err != nil {
+			return 0, 0, nil, false
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return 0, 0, nil, false
+		}
+		preOffset := dec.InputOffset()
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return 0, 0, nil, false
+		}
+		if key == "agent_hint" {
+			region := body[preOffset:dec.InputOffset()]
+			idx := bytes.Index(region, value)
+			if idx < 0 {
+				return 0, 0, nil, false
+			}
+			abs := int(preOffset) + idx
+			return abs, abs + len(value), value, true
+		}
+	}
+	return 0, 0, nil, false
+}
+
+// rebuildAgentHint parses the tiny agent_hint object (a few fields), sets
+// the priority, and marshals it back. Only this small object is
+// re-serialized — every other value in the body stays as raw bytes.
+func rebuildAgentHint(raw []byte, priority int, exists bool) []byte {
+	var hint map[string]json.RawMessage
+	if exists {
+		if err := json.Unmarshal(raw, &hint); err != nil {
+			return nil
+		}
+	} else {
+		hint = make(map[string]json.RawMessage)
+	}
+
+	var pc map[string]json.RawMessage
+	if rawPC, ok := hint["priority_control"]; ok {
+		if err := json.Unmarshal(rawPC, &pc); err != nil {
+			return nil
+		}
+	} else {
+		pc = make(map[string]json.RawMessage)
+	}
+
+	pc["priority"] = json.RawMessage(strconv.Itoa(priority))
+	newPC, err := json.Marshal(pc)
+	if err != nil {
+		return nil
+	}
+	hint["priority_control"] = json.RawMessage(newPC)
+
+	newHint, err := json.Marshal(hint)
+	if err != nil {
+		return nil
+	}
+	return newHint
+}
+
+// insertAgentHintBeforeClosingBrace splices "agent_hint":<value> into the
+// top-level object before its closing brace.
+func insertAgentHintBeforeClosingBrace(body []byte, value []byte) []byte {
+	i := len(body) - 1
+	for i >= 0 && (body[i] == ' ' || body[i] == '\n' || body[i] == '\r' || body[i] == '\t') {
+		i--
+	}
+	if i < 0 || body[i] != '}' {
+		return body
+	}
+	j := i - 1
+	for j >= 0 && (body[j] == ' ' || body[j] == '\n' || body[j] == '\r' || body[j] == '\t') {
+		j--
+	}
+	isEmpty := j >= 0 && body[j] == '{'
+
+	const agentHintKey = ",\"agent_hint\":"
+	var out []byte
+	if isEmpty {
+		out = make([]byte, 0, len(body)+len(value)+len(agentHintKey))
+		out = append(out, body[:j+1]...)
+		out = append(out, agentHintKey[1:]...) // skip the comma for {}
+	} else {
+		out = make([]byte, 0, len(body)+len(value)+len(agentHintKey))
+		out = append(out, body[:i]...)
+		out = append(out, agentHintKey...)
+	}
+	out = append(out, value...)
+	out = append(out, body[i:]...)
+	return out
+}
+
+// parseFinishReason parses finish_reason from an SSE data line.
+func parseFinishReason(data string) string {
+	if data == "" || data == "[DONE]" {
+		return ""
+	}
+	var chunk struct {
+		Choices []struct {
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		return ""
+	}
+	if len(chunk.Choices) > 0 && chunk.Choices[0].FinishReason != "" {
+		return chunk.Choices[0].FinishReason
+	}
+	return ""
+}
+
+// parseFinishReasonFromJSON parses finish_reason from a non-streaming JSON response body.
+func parseFinishReasonFromJSON(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var resp struct {
+		Choices []struct {
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return ""
+	}
+	if len(resp.Choices) > 0 {
+		return resp.Choices[0].FinishReason
+	}
+	return ""
 }
 
 func (s *HttpServer) forwardToProvider(w http.ResponseWriter, r *http.Request, model string, stream bool, body []byte) {

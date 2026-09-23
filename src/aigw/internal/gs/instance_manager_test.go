@@ -9,7 +9,10 @@
 package gs
 
 import (
+	"fmt"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -409,4 +412,49 @@ func TestLoadInsFromCacheEmptyInstances(t *testing.T) {
 	insManager.loadInsFromCache(instances)
 
 	assert.Equal(t, 0, len(insManager.insPool), "insPool should be empty")
+}
+
+// TestIsReqExistsConcurrent verifies that isReqExists is safe to call
+// concurrently with addReq/delReq. Before the fix, ins.reqSet was read
+// without ins.rwLock, causing `fatal error: concurrent map read and map write`
+// under high concurrency (32 agents, 30s crash on 149 server).
+func TestIsReqExistsConcurrent(t *testing.T) {
+	insManager := &InstanceManager{
+		insPool:    make(map[string]*instance),
+		poolRWLock: sync.RWMutex{},
+	}
+	ins := &instance{
+		insUrl:   "localhost:9999",
+		insRole:  base.MixedRoleInstance,
+		reqSet:   make(map[string]*LlmRequest),
+		reqQueue: newRequestQueue(),
+	}
+	insManager.insPool["localhost:9999"] = ins
+
+	var stop atomic.Bool
+	var wg sync.WaitGroup
+
+	// Writer: continuously add/del requests
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; !stop.Load(); i++ {
+			reqID := fmt.Sprintf("concurrent-req-%d", i)
+			ins.addReq(&LlmRequest{ReqId: reqID, Prompt: "x"})
+			ins.delReq(&LlmRequest{ReqId: reqID}, false)
+		}
+	}()
+
+	// Reader: continuously call isReqExists
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; !stop.Load(); i++ {
+			insManager.isReqExists(fmt.Sprintf("concurrent-req-%d", i))
+		}
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	stop.Store(true)
+	wg.Wait()
 }
