@@ -528,31 +528,99 @@ func TestValidateGlobalSchedulersConfig(t *testing.T) {
 	}
 	err = validateGlobalSchedulersConfig(invalidLoadBalancerMixedTypeConfig)
 	assert.Error(t, err)
+}
 
-	// Invalid tokenizer config file
-	invalidTokenizerCfgFileConfig := []base.GlobalSchedulerConfig{
+// TestValidateErrSchedulerConfigDefaultsWrittenBack verifies that default values
+// set by validateErrSchedulerConfig are written back to the original slice
+// (not lost on a range copy). Regression test for the "for _, scheduler := range"
+// bug where defaults were written to a copy.
+func TestValidateErrSchedulerConfigDefaultsWrittenBack(t *testing.T) {
+	gsConfigs := []base.GlobalSchedulerConfig{
 		{
-			Model:                "model1",
-			BlockSize:            64,
+			Model:                "test-model",
+			BlockSize:            128,
 			DeployPolicy:         "mixed",
-			MaxTimeToFirstToken:  100,
-			MaxTimeBetweenTokens: 200,
-			TokenizeModelName:    "",
+			MaxTimeToFirstToken:  200,
+			MaxTimeBetweenTokens: 50,
+			TokenizeModelName:    "test-model",
 			LoadBalancer: base.LoadBalancerConfig{
 				Mixed:               "roundRobin",
-				Prefill:             "true",
-				Decode:              "false",
-				BatchSize:           100,
-				ReservedBlockNumber: 10,
-				MinMatchedLength:    50,
-				VirtualNodes:        160, // Default value for consistent hash
-				FallbackNum:         3,   // Default value for consistent hash
+				Prefill:             "roundRobin",
+				Decode:              "roundRobin",
+				BatchSize:           1,
+				ReservedBlockNumber: 50,
+				MinMatchedLength:    200,
+			},
+			ErrScheduler: base.ErrSchedulerConfig{
+				ErrSchedulerType: "err",
+				QueueSize:        10,
+				// WarmupSessions, WarmupPerCat, SessionTimeoutSec, TaskIdleTimeoutSec all left as 0
+				// — validateErrSchedulerConfig should fill in defaults.
 			},
 		},
 	}
-	err = validateGlobalSchedulersConfig(invalidTokenizerCfgFileConfig)
-	assert.Error(t, err)
+
+	err := validateGlobalSchedulersConfig(gsConfigs)
+	assert.NoError(t, err)
+
+	// After validation, the original slice must contain the defaulted values.
+	assert.Equal(t, defaultErrWarmupSessions, gsConfigs[0].ErrScheduler.WarmupSessions,
+		"WarmupSessions default must be written back to original slice")
+	assert.Equal(t, defaultErrWarmupPerCat, gsConfigs[0].ErrScheduler.WarmupPerCat,
+		"WarmupPerCat default must be written back to original slice")
+	assert.Equal(t, defaultErrSessionTimeout, gsConfigs[0].ErrScheduler.SessionTimeoutSec,
+		"SessionTimeoutSec default must be written back to original slice")
+	assert.Equal(t, defaultErrTaskIdleTimeout, gsConfigs[0].ErrScheduler.TaskIdleTimeoutSec,
+		"TaskIdleTimeoutSec default must be written back to original slice")
 }
+
+// TestValidateErrSchedulerWarmupGateTriState verifies the tri-state warmup
+// gate semantics: 0 (unset) = per-key default, negative = gate disabled,
+// positive = explicit threshold — each key judged independently, so setting
+// one key never silently disables the other, and negatives pass through.
+func TestValidateErrSchedulerWarmupGateTriState(t *testing.T) {
+	baseCfg := func(warmupSessions, warmupPerCat int) []base.GlobalSchedulerConfig {
+		return []base.GlobalSchedulerConfig{{
+			Model:                "test-model",
+			BlockSize:            128,
+			DeployPolicy:         "mixed",
+			MaxTimeToFirstToken:  200,
+			MaxTimeBetweenTokens: 50,
+			TokenizeModelName:    "test-model",
+			LoadBalancer: base.LoadBalancerConfig{
+				Mixed: "roundRobin", Prefill: "roundRobin", Decode: "roundRobin",
+				BatchSize: 1, ReservedBlockNumber: 50, MinMatchedLength: 200,
+			},
+			ErrScheduler: base.ErrSchedulerConfig{
+				ErrSchedulerType: "err",
+				QueueSize:        10,
+				WarmupSessions:   warmupSessions,
+				WarmupPerCat:     warmupPerCat,
+			},
+		}}
+	}
+
+	// Setting only the total gate must default the per-category gate, not
+	// disable it.
+	cfgs := baseCfg(200, 0)
+	assert.NoError(t, validateGlobalSchedulersConfig(cfgs))
+	assert.Equal(t, 200, cfgs[0].ErrScheduler.WarmupSessions)
+	assert.Equal(t, defaultErrWarmupPerCat, cfgs[0].ErrScheduler.WarmupPerCat,
+		"unset per-cat gate must take its default, not be disabled")
+
+	// Negative values pass through: both gates explicitly disabled.
+	cfgs = baseCfg(-1, -1)
+	assert.NoError(t, validateGlobalSchedulersConfig(cfgs))
+	assert.Equal(t, -1, cfgs[0].ErrScheduler.WarmupSessions)
+	assert.Equal(t, -1, cfgs[0].ErrScheduler.WarmupPerCat)
+
+	// Mixed: one gate disabled, the other defaulted.
+	cfgs = baseCfg(-1, 0)
+	assert.NoError(t, validateGlobalSchedulersConfig(cfgs))
+	assert.Equal(t, -1, cfgs[0].ErrScheduler.WarmupSessions)
+	assert.Equal(t, defaultErrWarmupPerCat, cfgs[0].ErrScheduler.WarmupPerCat)
+}
+
 
 // TestValidateGlobalConfig tests the validateGlobalConfig method.
 func TestValidateGlobalConfig(t *testing.T) {
@@ -923,4 +991,30 @@ func TestValidateTokenizerConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestValidateGlobalSchedulersConfigEmptyTokenizer: TokenizeModelName is
+// optional — the runtime falls back to tokenizationRatio when no tokenizer
+// is configured (see executeTokenizer). Validation must not reject it.
+func TestValidateGlobalSchedulersConfigEmptyTokenizer(t *testing.T) {
+	cfg := []base.GlobalSchedulerConfig{
+		{
+			Model:                "model1",
+			BlockSize:            64,
+			DeployPolicy:         "mixed",
+			MaxTimeToFirstToken:  100,
+			MaxTimeBetweenTokens: 200,
+			TokenizeModelName:    "", // no tokenizer, valid
+			LoadBalancer: base.LoadBalancerConfig{
+				Mixed:               "roundRobin",
+				Prefill:             "true",
+				Decode:              "false",
+				BatchSize:           100,
+				ReservedBlockNumber: 10,
+				MinMatchedLength:    50,
+			},
+		},
+	}
+	err := validateGlobalSchedulersConfig(cfg)
+	assert.NoError(t, err, "empty tokenizeModelName must pass validation (rune-count fallback at runtime)")
 }

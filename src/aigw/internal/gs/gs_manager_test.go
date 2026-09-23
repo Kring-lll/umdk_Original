@@ -10,6 +10,8 @@ package gs
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -548,4 +550,558 @@ func TestRecordScheduleStats_UnknownPolicy_Failure(t *testing.T) {
 	m.recordScheduleStats(result)
 	assert.Equal(t, uint64(1), st.Counts[stats.ScheduleSuccess])
 	assert.Equal(t, uint64(0), st.Counts[stats.ScheduleFailure])
+}
+
+// TestInitErrScheduler_SdkModeGuard verifies that queue mode is forced to
+// passthrough when runtimeMode is not ServiceMode (i.e. SdkMode).
+func TestInitErrScheduler_SdkModeGuard(t *testing.T) {
+	cfg := &base.ErrSchedulerConfig{
+		ErrSchedulerType:  "err",
+		QueueSize:         100,
+		SessionTimeoutSec: 66,
+		TaskIdleTimeoutSec: 6,
+	}
+
+	// SdkMode + queueSize>0 -> should fall back to passthrough (pendingQueue nil)
+	m := &GlobalSchedulerManager{
+		runtimeMode: base.SdkMode,
+		config:      globalSchedulerManagerConfig{model: "test-model"},
+	}
+	err := m.initErrScheduler(cfg, 8)
+	assert.NoError(t, err)
+	assert.NotNil(t, m.errScheduler, "errScheduler should still be created")
+	assert.Nil(t, m.pendingQueue, "pendingQueue must be nil in SdkMode (forced passthrough)")
+	assert.Nil(t, m.capacityProvider, "capacityProvider must be nil in passthrough mode")
+
+	// ServiceMode + queueSize>0 -> queue mode should be enabled
+	m2 := &GlobalSchedulerManager{
+		runtimeMode: base.ServiceMode,
+		config:      globalSchedulerManagerConfig{model: "test-model"},
+	}
+	err2 := m2.initErrScheduler(cfg, 8)
+	assert.NoError(t, err2)
+	assert.NotNil(t, m2.errScheduler)
+	assert.NotNil(t, m2.pendingQueue, "pendingQueue should be created in ServiceMode with queueSize>0")
+	assert.NotNil(t, m2.capacityProvider)
+}
+
+// TestNewGlobalSchedulerManager_SdkModeErrPassthrough verifies the full constructor
+// path: when WithRuntimeMode(SdkMode) is passed as an option, initErrScheduler must
+// see the correct runtimeMode and fall back to passthrough (pendingQueue == nil).
+// Regression test for the init-order bug where setConfig ran before opts were applied.
+func TestNewGlobalSchedulerManager_SdkModeErrPassthrough(t *testing.T) {
+	parentCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := &base.GlobalSchedulerConfig{
+		Model:                "test-sdk-model",
+		BlockSize:            128,
+		DeployPolicy:         "mixed",
+		MaxTimeToFirstToken:  200,
+		MaxTimeBetweenTokens: 50,
+		LoadBalancer: base.LoadBalancerConfig{
+			Mixed:               "roundRobin",
+			Prefill:             "roundRobin",
+			Decode:              "roundRobin",
+			BatchSize:           1,
+			ReservedBlockNumber: 50,
+		},
+		ErrScheduler: base.ErrSchedulerConfig{
+			ErrSchedulerType:   "err",
+			QueueSize:          100,
+			SessionTimeoutSec:  66,
+			TaskIdleTimeoutSec: 6,
+		},
+	}
+
+	// SdkMode + queueSize > 0 → must fall back to passthrough
+	mgr, err := NewGlobalSchedulerManager(parentCtx, cfg,
+		WithRuntimeMode(base.SdkMode),
+		WithInsNumLimit(10),
+	)
+	assert.NoError(t, err)
+	assert.NotNil(t, mgr.errScheduler, "errScheduler should be created even in SdkMode")
+	assert.Nil(t, mgr.pendingQueue, "pendingQueue must be nil in SdkMode (passthrough)")
+
+	// ServiceMode + queueSize > 0 → queue mode must be enabled
+	cfg2 := *cfg
+	cfg2.ErrScheduler.QueueSize = 10
+	mgr2, err := NewGlobalSchedulerManager(parentCtx, &cfg2,
+		WithRuntimeMode(base.ServiceMode),
+		WithInsNumLimit(10),
+	)
+	assert.NoError(t, err)
+	assert.NotNil(t, mgr2.errScheduler)
+	assert.NotNil(t, mgr2.pendingQueue, "pendingQueue should be created in ServiceMode")
+}
+
+// TestInitErrSchedulerCatErrMissingVocab verifies that initErrScheduler
+// returns an error (blocking startup) when the vocab file does not exist.
+func TestInitErrSchedulerCatErrMissingVocab(t *testing.T) {
+	cfg := &base.ErrSchedulerConfig{
+		ErrSchedulerType:   "caterr",
+		QueueSize:          10,
+		TfidfVocabPath:     "/nonexistent/vocab.json",
+		TfidfCentroidsPath: "/nonexistent/centroids.json",
+		SessionTimeoutSec:  660,
+		TaskIdleTimeoutSec: 60,
+	}
+
+	m := &GlobalSchedulerManager{
+		runtimeMode: base.ServiceMode,
+		config:      globalSchedulerManagerConfig{model: "test-model"},
+	}
+	err := m.initErrScheduler(cfg, 1)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "classifier not loaded")
+}
+
+// TestInitErrSchedulerCatErrCorruptVocab verifies that a corrupt vocab file
+// (invalid JSON) blocks startup.
+func TestInitErrSchedulerCatErrCorruptVocab(t *testing.T) {
+	tmpDir := t.TempDir()
+	vocabPath := filepath.Join(tmpDir, "vocab.json")
+	centroidsPath := filepath.Join(tmpDir, "centroids.json")
+
+	os.WriteFile(vocabPath, []byte(`{not valid json`), 0644)
+	os.WriteFile(centroidsPath, []byte(`{"centroids":[[1.0]],"labels":["a"]}`), 0644)
+
+	cfg := &base.ErrSchedulerConfig{
+		ErrSchedulerType:   "caterr",
+		QueueSize:          10,
+		TfidfVocabPath:     vocabPath,
+		TfidfCentroidsPath: centroidsPath,
+		SessionTimeoutSec:  660,
+		TaskIdleTimeoutSec: 60,
+	}
+
+	m := &GlobalSchedulerManager{
+		runtimeMode: base.ServiceMode,
+		config:      globalSchedulerManagerConfig{model: "test-model"},
+	}
+	err := m.initErrScheduler(cfg, 1)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "classifier not loaded")
+}
+
+// TestInitErrSchedulerCatErrCorruptCentroids verifies that corrupt centroids
+// (label/centroid count mismatch) blocks startup.
+func TestInitErrSchedulerCatErrCorruptCentroids(t *testing.T) {
+	tmpDir := t.TempDir()
+	vocabPath := filepath.Join(tmpDir, "vocab.json")
+	centroidsPath := filepath.Join(tmpDir, "centroids.json")
+
+	os.WriteFile(vocabPath, []byte(`{"GVocab":["a","b"],"GIdf":{"a":1.0,"b":1.0}}`), 0644)
+	// 3 centroids but only 2 labels — mismatch
+	os.WriteFile(centroidsPath, []byte(`{"centroids":[[1.0,0.0],[0.0,1.0],[1.0,1.0]],"labels":["cat_a","cat_b"]}`), 0644)
+
+	cfg := &base.ErrSchedulerConfig{
+		ErrSchedulerType:   "caterr",
+		QueueSize:          10,
+		TfidfVocabPath:     vocabPath,
+		TfidfCentroidsPath: centroidsPath,
+		SessionTimeoutSec:  660,
+		TaskIdleTimeoutSec: 60,
+	}
+
+	m := &GlobalSchedulerManager{
+		runtimeMode: base.ServiceMode,
+		config:      globalSchedulerManagerConfig{model: "test-model"},
+	}
+	err := m.initErrScheduler(cfg, 1)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "classifier not loaded")
+}
+
+// TestInitErrSchedulerCatErrDimensionMismatch verifies that vocab and centroids
+// with mismatched dimensions (vocab has 3 terms but centroids have 2 dims)
+// does not crash at classify time. The classifier loads successfully (LoadCentroids
+// only checks label/centroid count), but Classify returns "" because cosineSim
+// gets length-mismatched vectors.
+func TestInitErrSchedulerCatErrDimensionMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	vocabPath := filepath.Join(tmpDir, "vocab.json")
+	centroidsPath := filepath.Join(tmpDir, "centroids.json")
+
+	// Vocab: 3 terms
+	os.WriteFile(vocabPath, []byte(`{"GVocab":["a","b","c"],"GIdf":{"a":1.0,"b":1.0,"c":1.0}}`), 0644)
+	// Centroids: 2 dims (mismatch with vocab's 3 dims)
+	os.WriteFile(centroidsPath, []byte(`{"centroids":[[1.0,0.0],[0.0,1.0]],"labels":["cat_a","cat_b"]}`), 0644)
+
+	cfg := &base.ErrSchedulerConfig{
+		ErrSchedulerType:   "caterr",
+		QueueSize:          10,
+		TfidfVocabPath:     vocabPath,
+		TfidfCentroidsPath: centroidsPath,
+		SessionTimeoutSec:  660,
+		TaskIdleTimeoutSec: 60,
+	}
+
+	m := &GlobalSchedulerManager{
+		runtimeMode: base.ServiceMode,
+		config:      globalSchedulerManagerConfig{model: "test-model"},
+	}
+	// initErrScheduler succeeds — IsLoaded only checks label/centroid count
+	err := m.initErrScheduler(cfg, 1)
+	assert.NoError(t, err)
+	assert.NotNil(t, m.errScheduler)
+
+	// Classify with dimension mismatch does not crash; cosineSim returns 0 for
+	// all centroids → falls back to labels[0]. This is a degraded mode, not a crash.
+	cat := m.errScheduler.classifier.Classify("a b c")
+	assert.NotPanics(t, func() { m.errScheduler.classifier.Classify("a b c") })
+	_ = cat // result is labels[0] due to all-zero cosineSim — degraded but safe
+}
+
+// TestInitErrSchedulerCatErrValidFiles verifies that valid vocab + centroids
+// files allow startup and classifier is loaded.
+func TestInitErrSchedulerCatErrValidFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	vocabPath := filepath.Join(tmpDir, "vocab.json")
+	centroidsPath := filepath.Join(tmpDir, "centroids.json")
+
+	os.WriteFile(vocabPath, []byte(`{"GVocab":["code","debug","office","meeting"],"GIdf":{"code":1.0,"debug":1.0,"office":1.0,"meeting":1.0}}`), 0644)
+	os.WriteFile(centroidsPath, []byte(`{"centroids":[[1.0,1.0,0.0,0.0],[0.0,0.0,1.0,1.0]],"labels":["code","office"]}`), 0644)
+
+	cfg := &base.ErrSchedulerConfig{
+		ErrSchedulerType:   "caterr",
+		QueueSize:          10,
+		TfidfVocabPath:     vocabPath,
+		TfidfCentroidsPath: centroidsPath,
+		SessionTimeoutSec:  660,
+		TaskIdleTimeoutSec: 60,
+	}
+
+	m := &GlobalSchedulerManager{
+		runtimeMode: base.ServiceMode,
+		config:      globalSchedulerManagerConfig{model: "test-model"},
+	}
+	err := m.initErrScheduler(cfg, 1)
+	assert.NoError(t, err)
+	assert.NotNil(t, m.errScheduler)
+	assert.True(t, m.errScheduler.classifier.IsLoaded())
+
+	// Classify should work
+	cat := m.errScheduler.classifier.Classify("code debug")
+	assert.Equal(t, "code", cat)
+}
+
+// TestInitErrSchedulerSeparatedDeployment verifies that separated deployment
+// uses NewCapacityProviderSeparated (min(prefill, decode) * batchSize).
+func TestInitErrSchedulerSeparatedDeployment(t *testing.T) {
+	cfg := &base.ErrSchedulerConfig{
+		ErrSchedulerType:   "err",
+		QueueSize:          10,
+		SessionTimeoutSec:  660,
+		TaskIdleTimeoutSec: 60,
+	}
+
+	m := &GlobalSchedulerManager{
+		runtimeMode:   base.ServiceMode,
+		config:        globalSchedulerManagerConfig{model: "test-model", deployPolicy: SeparatedDeployment},
+	}
+	err := m.initErrScheduler(cfg, 2)
+	assert.NoError(t, err)
+	assert.NotNil(t, m.errScheduler)
+	assert.NotNil(t, m.pendingQueue, "pendingQueue should be created in ServiceMode")
+	assert.NotNil(t, m.capacityProvider, "capacityProvider should be created in queue mode")
+
+	// Without instances, min(prefill=0, decode=0) * 2 = 0
+	assert.Equal(t, 0, m.capacityProvider.TotalSlots())
+	assert.Equal(t, 0, m.capacityProvider.InstanceCount())
+
+	// Verify it's using group-aware separated mode
+	assert.NotNil(t, m.capacityProvider.separatedCapacity, "separatedCapacity should be set in separated mode")
+	assert.Nil(t, m.capacityProvider.prefillCount, "prefillCount should be nil in group-aware mode")
+	assert.Nil(t, m.capacityProvider.decodeCount, "decodeCount should be nil in group-aware mode")
+	assert.Nil(t, m.capacityProvider.instanceCount, "instanceCount should be nil in separated mode")
+}
+
+// TestInitErrSchedulerMixedDeployment verifies that mixed deployment
+// uses NewCapacityProvider (instanceCount * batchSize).
+func TestInitErrSchedulerMixedDeployment(t *testing.T) {
+	cfg := &base.ErrSchedulerConfig{
+		ErrSchedulerType:   "err",
+		QueueSize:          10,
+		SessionTimeoutSec:  660,
+		TaskIdleTimeoutSec: 60,
+	}
+
+	m := &GlobalSchedulerManager{
+		runtimeMode:   base.ServiceMode,
+		config:        globalSchedulerManagerConfig{model: "test-model", deployPolicy: MixedDeployment},
+	}
+	err := m.initErrScheduler(cfg, 2)
+	assert.NoError(t, err)
+	assert.NotNil(t, m.capacityProvider)
+	assert.NotNil(t, m.capacityProvider.instanceCount, "instanceCount should be set in mixed mode")
+	assert.Nil(t, m.capacityProvider.prefillCount, "prefillCount should be nil in mixed mode")
+	assert.Nil(t, m.capacityProvider.decodeCount, "decodeCount should be nil in mixed mode")
+}
+
+// TestErrOnResponseUnknownFinishReason verifies that empty/unknown finish_reason
+// triggers RestartIdleTimer (not OnFinish or OnCancel).
+func TestErrOnResponseUnknownFinishReason(t *testing.T) {
+	m := &GlobalSchedulerManager{
+		errScheduler: NewErrSchedulerManager(ErrSchedulerConfig{
+			SchedulerType:      "err",
+			WarmupSessions:     0,
+			SessionTimeoutSec:  660,
+			TaskIdleTimeoutSec: 60,
+		}),
+	}
+	m.errScheduler.OnRequest("sess-unknown", "model", "test")
+
+	// "unknown" / "" / "tool_calls" → should arm idle timer, not record steps
+	m.ErrOnResponse("sess-unknown", "req-1", "", "", "unknown")
+	m.errScheduler.globalDist.Refresh()
+	assert.Equal(t, 0, m.errScheduler.globalDist.TotalCount(), "unknown finishReason should not record steps")
+
+	// Session should still exist (not cancelled)
+	assert.Equal(t, 1, m.errScheduler.SessionIteration("sess-unknown"))
+
+	// Empty finishReason should behave the same as "unknown"
+	m.ErrOnResponse("sess-unknown", "req-2", "", "", "")
+	m.errScheduler.globalDist.Refresh()
+	assert.Equal(t, 0, m.errScheduler.globalDist.TotalCount())
+	assert.Equal(t, 1, m.errScheduler.SessionIteration("sess-unknown"))
+
+	// "tool_calls" should also behave the same
+	m.ErrOnResponse("sess-unknown", "req-3", "", "", "tool_calls")
+	m.errScheduler.globalDist.Refresh()
+	assert.Equal(t, 0, m.errScheduler.globalDist.TotalCount())
+	assert.Equal(t, 1, m.errScheduler.SessionIteration("sess-unknown"))
+}
+
+// TestErrOnResponseStopFinishReason verifies that "stop" calls OnFinish
+// (records step count into distribution).
+func TestErrOnResponseStopFinishReason(t *testing.T) {
+	m := &GlobalSchedulerManager{
+		errScheduler: NewErrSchedulerManager(ErrSchedulerConfig{
+			SchedulerType:      "err",
+			WarmupSessions:     0,
+			SessionTimeoutSec:  660,
+			TaskIdleTimeoutSec: 60,
+		}),
+	}
+	m.errScheduler.OnRequest("sess-stop", "model", "test")
+	m.errScheduler.OnRequest("sess-stop", "model", "test")
+	m.errScheduler.OnRequest("sess-stop", "model", "test")
+
+	m.ErrOnResponse("sess-stop", "req-1", "", "", "stop")
+
+	// After OnFinish, steps should be recorded in distribution
+	m.errScheduler.globalDist.Refresh()
+	assert.Equal(t, 1, m.errScheduler.globalDist.TotalCount(), "stop should record step count into distribution")
+}
+
+// TestErrOnResponseCancelledFinishReason verifies that "cancelled" calls OnCancel
+// (removes session without recording steps).
+func TestErrOnResponseCancelledFinishReason(t *testing.T) {
+	m := &GlobalSchedulerManager{
+		errScheduler: NewErrSchedulerManager(ErrSchedulerConfig{
+			SchedulerType:      "err",
+			WarmupSessions:     0,
+			SessionTimeoutSec:  660,
+			TaskIdleTimeoutSec: 60,
+		}),
+	}
+	m.errScheduler.OnRequest("sess-cancel", "model", "test")
+	m.errScheduler.OnRequest("sess-cancel", "model", "test")
+
+	m.ErrOnResponse("sess-cancel", "req-1", "", "", "cancelled")
+	m.errScheduler.globalDist.Refresh()
+	assert.Equal(t, 0, m.errScheduler.globalDist.TotalCount(), "cancelled should not record steps")
+
+	// Session survives with k rolled back (attempt completed nothing the
+	// client saw; the SDK retry re-enters the same step)
+	assert.Equal(t, 1, m.errScheduler.SessionIteration("sess-cancel"),
+		"cancelled rolls k back, session survives for the retry")
+}
+
+// TestInitErrSchedulerPassthroughMode verifies that queueSize=0 creates
+// errScheduler but no pendingQueue and no capacityProvider.
+func TestInitErrSchedulerPassthroughMode(t *testing.T) {
+	cfg := &base.ErrSchedulerConfig{
+		ErrSchedulerType:   "err",
+		QueueSize:          0,
+		SessionTimeoutSec:  660,
+		TaskIdleTimeoutSec: 60,
+	}
+
+	m := &GlobalSchedulerManager{
+		runtimeMode: base.ServiceMode,
+		config:      globalSchedulerManagerConfig{model: "test-model"},
+	}
+	err := m.initErrScheduler(cfg, 1)
+	assert.NoError(t, err)
+	assert.NotNil(t, m.errScheduler, "errScheduler should be created even in passthrough")
+	assert.Nil(t, m.pendingQueue, "pendingQueue must be nil when queueSize=0")
+	assert.Nil(t, m.capacityProvider, "capacityProvider must be nil in passthrough mode")
+	assert.False(t, m.HasQueueMode())
+	assert.True(t, m.HasErrScheduler())
+}
+
+// TestInitErrSchedulerQueueMode verifies that queueSize>0 creates all components.
+func TestInitErrSchedulerQueueMode(t *testing.T) {
+	cfg := &base.ErrSchedulerConfig{
+		ErrSchedulerType:   "err",
+		QueueSize:          50,
+		SessionTimeoutSec:  660,
+		TaskIdleTimeoutSec: 60,
+	}
+
+	m := &GlobalSchedulerManager{
+		runtimeMode: base.ServiceMode,
+		config:      globalSchedulerManagerConfig{model: "test-model"},
+	}
+	err := m.initErrScheduler(cfg, 1)
+	assert.NoError(t, err)
+	assert.NotNil(t, m.errScheduler)
+	assert.NotNil(t, m.pendingQueue, "pendingQueue should be created when queueSize>0")
+	assert.NotNil(t, m.capacityProvider, "capacityProvider should be created when queueSize>0")
+	assert.True(t, m.HasQueueMode())
+	assert.True(t, m.HasErrScheduler())
+}
+
+// helper: minimal GSM with ERR scheduler + capacityProvider + errInFlight map
+func newErrTestGSM(t *testing.T) *GlobalSchedulerManager {
+	t.Helper()
+	m := &GlobalSchedulerManager{
+		runtimeMode: base.ServiceMode,
+		config:      globalSchedulerManagerConfig{model: "test-model"},
+	}
+	cfg := &base.ErrSchedulerConfig{
+		ErrSchedulerType:   "err",
+		QueueSize:          50,
+		SessionTimeoutSec:  660,
+		TaskIdleTimeoutSec: 60,
+	}
+	err := m.initErrScheduler(cfg, 1)
+	assert.NoError(t, err)
+	return m
+}
+
+// TestErrInFlightRegistryIdempotentRelease verifies that errReleaseReq is
+// idempotent: calling it twice for the same reqID only decrements once.
+func TestErrInFlightRegistryIdempotentRelease(t *testing.T) {
+	m := newErrTestGSM(t)
+
+	m.dispatchMu.Lock()
+	m.errInFlight["req-1"] = errInFlightEntry{
+		SessionID:  "sess-A",
+		PrefillURL: "http://ins-1",
+	}
+	m.capacityProvider.OnDispatched()
+	assert.Equal(t, int32(1), m.capacityProvider.InFlight())
+
+	// First release: should succeed
+	_, released := m.errReleaseReq("req-1")
+	assert.True(t, released)
+	assert.Equal(t, int32(0), m.capacityProvider.InFlight())
+	assert.Len(t, m.errInFlight, 0)
+
+	// Second release: no-op
+	_, released = m.errReleaseReq("req-1")
+	assert.False(t, released)
+	assert.Equal(t, int32(0), m.capacityProvider.InFlight(), "inFlight must not go negative")
+	m.dispatchMu.Unlock()
+}
+
+// TestOnInstanceUnhealthyNoDoubleDecrement is the BUG-1 regression test.
+// Before the registry fix, onInstanceUnhealthy used a pre-fetched req list
+// (outside dispatchMu). If ErrOnResponse completed the request between
+// fetch and lock, OnCompleted was called twice → inFlight under-counted
+// and the session was erroneously OnCancel'd.
+//
+// With the registry fix: errReleaseReq is idempotent, so even if
+// ErrOnResponse fires first, onInstanceUnhealthy finds nothing to clean.
+func TestOnInstanceUnhealthyNoDoubleDecrement(t *testing.T) {
+	m := newErrTestGSM(t)
+
+	// Simulate dispatch of req-1 to ins-1
+	m.dispatchMu.Lock()
+	m.errInFlight["req-1"] = errInFlightEntry{
+		SessionID:  "sess-A",
+		PrefillURL: "http://ins-1",
+	}
+	m.capacityProvider.OnDispatched()
+	m.dispatchMu.Unlock()
+
+	// Session registered
+	m.errScheduler.OnRequest("sess-A", "test-model", "prompt")
+	assert.Equal(t, 1, m.errScheduler.SessionIteration("sess-A"))
+
+	// Normal completion: ErrOnResponse("stop") cleans req-1
+	m.ErrOnResponse("sess-A", "req-1", "http://ins-1", "", "stop")
+	assert.Equal(t, int32(0), m.capacityProvider.InFlight(), "inFlight should be 0 after completion")
+
+	// Now instance goes unhealthy — onInstanceUnhealthy should find nothing
+	m.onInstanceUnhealthy("http://ins-1")
+
+	// inFlight must NOT go negative (would have before fix)
+	assert.Equal(t, int32(0), m.capacityProvider.InFlight(), "no double-decrement")
+
+	// Session should NOT be re-cancelled (OnFinish already ran, session
+	// should still be tracked until idle timeout — NOT deleted by OnCancel)
+	assert.Equal(t, 1, m.errScheduler.SessionIteration("sess-A"),
+		"session must survive — OnCancel must not fire for already-completed request")
+}
+
+// TestErrOnCancelDuplicateIdempotent verifies that a duplicate ErrOnCancel
+// for the same reqID does not double-decrement or wipe a re-registered session.
+func TestErrOnCancelDuplicateIdempotent(t *testing.T) {
+	m := newErrTestGSM(t)
+
+	// Dispatch req-1
+	m.dispatchMu.Lock()
+	m.errInFlight["req-1"] = errInFlightEntry{
+		SessionID:  "sess-A",
+		PrefillURL: "http://ins-1",
+	}
+	m.capacityProvider.OnDispatched()
+	m.dispatchMu.Unlock()
+
+	m.errScheduler.OnRequest("sess-A", "test-model", "prompt")
+
+	// First ErrOnCancel: normal cleanup
+	m.ErrOnCancel("sess-A", "req-1", "http://ins-1", "")
+	assert.Equal(t, int32(0), m.capacityProvider.InFlight())
+	assert.Equal(t, 1, m.errScheduler.SessionIteration("sess-A"),
+		"in-flight abort rolls k back, session survives for the retry")
+
+	// The retry re-enters at the same step number (k was rolled back to 1)
+	assert.Equal(t, 2, m.errScheduler.OnRequest("sess-A", "test-model", "prompt2"),
+		"session continues — retry re-enters the same step")
+
+	// Late duplicate ErrOnCancel for same req-1: must NOT roll back again
+	m.ErrOnCancel("sess-A", "req-1", "http://ins-1", "")
+	assert.Equal(t, int32(0), m.capacityProvider.InFlight(), "no double-decrement")
+	assert.Equal(t, 2, m.errScheduler.SessionIteration("sess-A"),
+		"session must survive a late duplicate cancel without a second rollback")
+}
+
+// TestOnInstanceUnhealthySeparatedURLMatch verifies that in separated mode,
+// onInstanceUnhealthy matches by either prefillURL or decodeURL.
+func TestOnInstanceUnhealthySeparatedURLMatch(t *testing.T) {
+	m := newErrTestGSM(t)
+
+	// Dispatch req-1 with both prefill and decode URLs
+	m.dispatchMu.Lock()
+	m.errInFlight["req-1"] = errInFlightEntry{
+		SessionID:  "sess-A",
+		PrefillURL: "http://prefill-1",
+		DecodeURL:  "http://decode-1",
+	}
+	m.capacityProvider.OnDispatched()
+	m.dispatchMu.Unlock()
+
+	m.errScheduler.OnRequest("sess-A", "test-model", "prompt")
+
+	// Decode instance goes unhealthy → should clean req-1
+	m.onInstanceUnhealthy("http://decode-1")
+	assert.Equal(t, int32(0), m.capacityProvider.InFlight(), "should be cleaned by decode URL match")
+	assert.Len(t, m.errInFlight, 0)
+	assert.Equal(t, 1, m.errScheduler.SessionIteration("sess-A"),
+		"instance death rolls k back, session survives for the retry")
 }
