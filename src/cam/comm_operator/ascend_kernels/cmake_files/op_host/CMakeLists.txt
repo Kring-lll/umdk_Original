@@ -99,10 +99,7 @@ if(EXISTS "${CANN_ROOT}/include/aclnn")
 endif()
 
 # Collect all host-side source files (recursive: operators may keep upstream op_tiling/ subdirs)
-file(GLOB_RECURSE ops_srcs
-    ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/*.cc
-)
+file(GLOB_RECURSE ops_srcs ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 
 # =====================================================
 # Step 1: Generate ACLNN stubs, op_proto.cc, fallback files
