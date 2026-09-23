@@ -18,6 +18,8 @@
 #include "umq_ub_private.h"
 #include "umq_symbol_private.h"
 
+_Static_assert(sizeof(bondp_port_id_t) == sizeof(uint16_t), "bondp_port_id_t must be 16 bits");
+
 #define DEFAULT_RNR_RETRY 6      // Retry 6 times
 #define DEFAULT_ERR_TIMEOUT 2
 #define UB_IMPORT_HDR_U32_COUNT 5  // u32 count of ub_import_mempool_info_t fixed header (20B)
@@ -1519,9 +1521,7 @@ int umq_bondp_port_id_set(umq_used_ports_t *used_ports, bondp_port_id_t *used_po
             }
         }
 
-        used_port[i].bs.chip_id = used_ports->port[i].bs.chip_id;
-        used_port[i].bs.die_id = used_ports->port[i].bs.die_id;
-        used_port[i].bs.port_idx = used_ports->port[i].bs.port_idx;
+        (void)umq_bondp_port_id_from_umq(&used_ports->port[i], &used_port[i]);
     }
     return UMQ_SUCCESS;
 }
@@ -1571,18 +1571,6 @@ static int umq_share_rq_validate(umq_ub_ctx_t *dev_ctx, umq_create_option_t *opt
 
     if (!is_umq_ub_main_queue(share_rq->create_flag)) {
         UMQ_VLOG_ERR(VLOG_UMQ, "only main umq can be used as share_rq\n");
-        return -UMQ_ERR_EINVAL;
-    }
-
-    if (is_umq_ub_share_transport(option->create_flag) &&
-        !is_umq_ub_share_transport(share_rq->create_flag)) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "creating_queue has SHARE_TRANSPORT, but share_rq does not have SHARE_TRANSPORT\n");
-        return -UMQ_ERR_EINVAL;
-    }
-
-    if (is_umq_ub_share_transport(share_rq->create_flag) &&
-        !is_umq_ub_share_transport(option->create_flag)) {
-        UMQ_VLOG_ERR(VLOG_UMQ, "share_rq has SHARE_TRANSPORT, but creating_queue does not have SHARE_TRANSPORT\n");
         return -UMQ_ERR_EINVAL;
     }
 

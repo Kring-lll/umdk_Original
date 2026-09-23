@@ -547,7 +547,7 @@ typedef struct ub_queue_cfg {
     uint32_t fc_rx_depth;
     uint32_t require_rx_count;
     uint32_t prefill_rqe_cnt;
-    bool prefill_done;          // until prefill_rqe_cnt = rqe_post_factor * rx_depth, prefill is done
+    bool prefill_done;          // set at the default depth or an explicitly marked final RX prefill batch
     uint8_t priority;           // priority of the queue
     uint8_t max_rx_sge;         // max sge number of receive array
     uint8_t max_tx_sge;         // max sge number of send array
@@ -926,6 +926,13 @@ static ALWAYS_INLINE void umq_ub_io_packet_stats(ub_queue_t *queue, ub_packet_st
     } else {
         (void)__atomic_add_fetch(&packet_stats[type], cnt, __ATOMIC_RELAXED);
     }
+}
+
+static ALWAYS_INLINE void umq_bondp_port_id_from_umq(const umq_port_id_t *src, bondp_port_id_t *dst)
+{
+    dst->bs.chip_id = src->bs.chip_id;
+    dst->bs.die_id = src->bs.die_id;
+    dst->bs.port_idx = src->bs.port_idx;
 }
 
 #ifdef __cplusplus
