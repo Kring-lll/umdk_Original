@@ -11,6 +11,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestReadEvent_BasicEvent(t *testing.T) {
@@ -341,4 +342,284 @@ func TestReadEvent_VariousFieldFormats(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestStreamReaderIdleWatchdogDeadUpstream: a body that never delivers any
+// byte (dead engine / wedged coordinator) must unblock ReadEvent within the
+// idle timeout instead of hanging until Client.Timeout or the zombie scan —
+// the cal_deadlock forensic showed handlers stuck for 17+ minutes holding
+// every in-flight slot after an engine crash.
+func TestStreamReaderIdleWatchdogDeadUpstream(t *testing.T) {
+	pr, _ := io.Pipe() // never written, never closed
+	defer pr.Close()
+
+	sr := newStreamReader(pr, 150*time.Millisecond, 150*time.Millisecond, "")
+	defer sr.Close()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := sr.ReadEvent()
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil || err == io.EOF {
+			t.Fatalf("expected a read error from the closed body, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ReadEvent still blocked after the idle timeout — dead upstream hangs the handler")
+	}
+}
+
+// TestStreamReaderIdleWatchdogResetByData: chunks arriving within the idle
+// interval keep the stream alive; the watchdog must not fire on a healthy
+// slow stream.
+func TestStreamReaderIdleWatchdogResetByData(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	sr := newStreamReader(pr, time.Hour, 120*time.Millisecond, "")
+	defer sr.Close()
+
+	go func() {
+		for i := 0; i < 3; i++ {
+			pw.Write([]byte("data: chunk\n\n"))
+			time.Sleep(60 * time.Millisecond) // half the idle interval
+		}
+		pw.Close()
+	}()
+
+	for i := 0; i < 3; i++ {
+		ev, err := sr.ReadEvent()
+		if err != nil {
+			t.Fatalf("event %d: unexpected error %v (watchdog fired on a live stream)", i, err)
+		}
+		if ev.Data != "chunk" {
+			t.Fatalf("event %d: got %q", i, ev.Data)
+		}
+	}
+	// Then EOF on close.
+	if _, err := sr.ReadEvent(); err != io.EOF {
+		t.Fatalf("expected EOF after writer close, got %v", err)
+	}
+}
+
+
+// TestReadEventSurfacesReadError: a non-EOF read error (closed body,
+// connection reset) must surface to the caller — the old code looped on it
+// forever, busy-spinning under the reader lock.
+func TestReadEventSurfacesReadError(t *testing.T) {
+	pr, _ := io.Pipe()
+	pr.Close() // reader side closed: subsequent reads return ErrClosedPipe
+	sr := newStreamReader(pr, time.Hour, time.Hour, "")
+	defer sr.Close()
+	if _, err := sr.ReadEvent(); err == nil || err == io.EOF {
+		t.Fatalf("expected a read error, got %v", err)
+	}
+}
+
+// TestStreamReaderWatchdogDisabled: idle <= 0 disables the watchdog — a
+// silent upstream blocks (legacy behavior for negative config).
+func TestStreamReaderWatchdogDisabled(t *testing.T) {
+	pr, _ := io.Pipe()
+	defer pr.Close()
+	sr := newStreamReader(pr, -1, -1, "")
+	// No sr.Close() here: it takes the reader lock that the blocked
+	// ReadEvent below holds forever — with the watchdog disabled nothing
+	// can unblock it, so closing would deadlock the test.
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := sr.ReadEvent()
+		done <- err
+	}()
+	select {
+	case <-done:
+		t.Fatal("watchdog disabled must leave the read blocked")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestStreamReaderTwoTierGapAfterFirstByte: once the first byte has arrived,
+// silence is judged by the (shorter) gap tier, not the first-chunk tier —
+// an engine that dies mid-stream must not hold the slot for the full
+// first-chunk budget.
+func TestStreamReaderTwoTierGapAfterFirstByte(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	// First chunk arrives, then silence forever.
+	go func() {
+		pw.Write([]byte("data: first\n\n"))
+	}()
+	sr := newStreamReader(pr, time.Hour, 200*time.Millisecond, "")
+	defer sr.Close()
+
+	if ev, err := sr.ReadEvent(); err != nil || ev.Data != "first" {
+		t.Fatalf("first event: %v %v", ev, err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := sr.ReadEvent()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || err == io.EOF {
+			t.Fatalf("expected read error from watchdog, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("gap tier did not fire — mid-stream death holds the slot for the first-chunk budget")
+	}
+}
+
+// TestStreamReaderConsumerStallDoesNotMisfire: THE misfire regression — a
+// consumer stalled (e.g. blocked writing to a slow client) must not fire
+// the read watchdog while the upstream keeps streaming. The old
+// implementation reset the watchdog at ReadEvent entry, so the consumer's
+// pace was the clock: under real load (24 sessions, GIL pauses) healthy
+// streams were killed at exactly the gap timeout. The watchdog now
+// measures actual byte arrival on the producer side.
+func TestStreamReaderConsumerStallDoesNotMisfire(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	// Gap far shorter than the consumer stall below: any consumer-paced
+	// measurement would fire; only producer-side measurement survives.
+	sr := newStreamReader(pr, 200*time.Millisecond, 200*time.Millisecond, "")
+	defer sr.Close()
+
+	go func() {
+		for i := 0; i < 20; i++ {
+			pw.Write([]byte("data: chunk\n\n"))
+			time.Sleep(50 * time.Millisecond)
+		}
+		pw.Close()
+	}()
+
+	// Consumer stalls 600ms = 3x the gap timeout (simulated blocked write).
+	time.Sleep(600 * time.Millisecond)
+
+	for i := 0; i < 20; i++ {
+		if _, err := sr.ReadEvent(); err != nil {
+			t.Fatalf("misfire: consumer stall killed a healthy upstream stream: %v", err)
+		}
+	}
+	if _, err := sr.ReadEvent(); err != io.EOF {
+		t.Fatalf("expected EOF after writer close, got %v", err)
+	}
+}
+
+// TestStreamReaderGapDisabledDisarmsAfterFirstByte: with the gap tier
+// disabled (<= 0), the first-chunk tier must disarm once the first byte
+// arrives — the old code kept it armed for the whole stream life, making
+// 300/-1 kill 91% of streams at 300s of inter-READ silence.
+func TestStreamReaderGapDisabledDisarmsAfterFirstByte(t *testing.T) {
+	pr, pw := io.Pipe()
+	go pw.Write([]byte("data: first\n\n"))
+	sr := newStreamReader(pr, 10*time.Hour, -1, "")
+	defer sr.Close()
+
+	if ev, err := sr.ReadEvent(); err != nil || ev.Data != "first" {
+		t.Fatalf("first event: %v %v", ev, err)
+	}
+
+	// Upstream goes silent; the reader must stay alive (watchdog disarmed).
+	done := make(chan error, 1)
+	go func() {
+		_, err := sr.ReadEvent()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("stream killed after first byte with gap disabled: %v", err)
+	case <-time.After(400 * time.Millisecond):
+		// still blocked = alive
+	}
+}
+
+// TestStreamReaderLongConsumerStallWithSlowChunks: deployment-shaped variant
+// of the misfire regression — seconds-scale gap timeout, tens-of-seconds
+// consumer stall, upstream chunking at realistic SSE pacing (one chunk per
+// ~2s, as motor delivers). The producer must keep resetting the watchdog
+// through the entire stall.
+func TestStreamReaderLongConsumerStallWithSlowChunks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long timing test")
+	}
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	sr := newStreamReader(pr, 3*time.Second, 3*time.Second, "")
+	defer sr.Close()
+
+	go func() {
+		for i := 0; i < 15; i++ {
+			pw.Write([]byte("data: chunk\n\n"))
+			time.Sleep(2 * time.Second)
+		}
+		pw.Close()
+	}()
+
+	// Consumer stalls 9s (3x the gap) mid-stream, then resumes.
+	time.Sleep(9 * time.Second)
+	for i := 0; i < 15; i++ {
+		if _, err := sr.ReadEvent(); err != nil {
+			t.Fatalf("misfire at deployment scale: %v", err)
+		}
+	}
+}
+
+// TestStreamReaderConcurrentTorture: concurrent Close + watchdog fire +
+// consumer reads exercise every shutdown interleaving. Race detector
+// verifies no data race; functional assertion is "everything terminates
+// without deadlock".
+func TestStreamReaderConcurrentTorture(t *testing.T) {
+	done := make(chan struct{})
+	defer close(done)
+
+	for i := 0; i < 20; i++ {
+		pr, pw := io.Pipe()
+		sr := newStreamReader(pr, 50*time.Millisecond, 50*time.Millisecond, "torture")
+
+		// Writer: floods then abandons (no Close — producer must handle
+		// watchdog-killed body and consumer-driven shutdown alike).
+		go func() {
+			defer pw.Close()
+			for j := 0; j < 100; j++ {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				if _, err := pw.Write([]byte("data: x\n\n")); err != nil {
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}()
+
+		// Consumer: reads some events then Closes mid-stream (handler-exit
+		// shape — Close while the producer is mid-send).
+		go func(sr *StreamReader) {
+			deadline := time.After(3 * time.Second)
+			for {
+				select {
+				case <-deadline:
+					sr.Close()
+					return
+				default:
+				}
+				if _, err := sr.ReadEvent(); err != nil {
+					sr.Close()
+					return
+				}
+			}
+		}(sr)
+
+		// Close from another goroutine at an arbitrary moment too.
+		go func(sr *StreamReader) {
+			time.Sleep(time.Duration(i*10) * time.Millisecond)
+			sr.Close()
+		}(sr)
+	}
+	time.Sleep(2 * time.Second)
 }
