@@ -479,7 +479,7 @@ func (m *GlobalSchedulerManager) registerInstance(ctrlMsg *ControlMessage) {
 	var err error
 	defer func() { ctrlMsg.Response <- err }()
 
-	if m.GetInsNum() >= m.config.maxInsNumPerGS {
+	if m.GetRegisteredInsNum() >= m.config.maxInsNumPerGS {
 		err = fmt.Errorf("the number of instance exceeds the maximum limit of gs(%v)",
 			m.config.maxInsNumPerGS)
 		log.ErrorAlarmMsgf(log.PerGSInstanceLimitExceeded, log.Report, fmt.Sprintf("%v", err))
@@ -864,9 +864,15 @@ func (m *GlobalSchedulerManager) PreprocessForSchedule(req *LlmRequest) error {
 	return nil
 }
 
-// GetInsNum get the number of instances in the instance pool
+// GetInsNum get the number of healthy instances in the instance pool
 func (m *GlobalSchedulerManager) GetInsNum() int {
 	return m.instanceManager.getInsNum()
+}
+
+// GetRegisteredInsNum counts registered instances regardless of health —
+// registration quotas use this so a degraded pool cannot hide headroom.
+func (m *GlobalSchedulerManager) GetRegisteredInsNum() int {
+	return m.instanceManager.getRegisteredInsNum()
 }
 
 func (m *GlobalSchedulerManager) checkReqSurvival() {

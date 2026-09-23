@@ -133,6 +133,12 @@ func (t *SessionTracker) onRequest(sessionID, model string, initial int) int {
 	s.Iteration++
 	s.LastActiveTime = now
 	s.Model = model
+	// The idle timer is cancelled, not re-armed: an in-flight request must
+	// not be killed by a between-requests timer (healthy streams stay
+	// active for hours). Contract: every OnRequest is eventually followed
+	// by exactly one re-arming call — OnFinish, RestartIdleTimer, or
+	// RollbackRequest — from the dispatch lifecycle; the idle timer only
+	// measures between-request silence.
 	t.cancelIdleTimer(s)
 	return s.Iteration
 }

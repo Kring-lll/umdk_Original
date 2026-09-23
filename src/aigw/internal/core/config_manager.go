@@ -53,9 +53,9 @@ const (
 	defaultTokenizationRatio      = float64(0.35)
 
 	// ERR scheduler defaults
-	defaultErrWarmupSessions  = 100
-	defaultErrWarmupPerCat    = 10
-	defaultErrSessionTimeout  = 660
+	defaultErrWarmupSessions = 100
+	defaultErrWarmupPerCat   = 10
+	defaultErrSessionTimeout = 660
 	// Matches sessionTimeoutSec: post-stop compression blocks the parent's
 	// next request for as long as the anonymous call queues; a short
 	// timer here erases the session mid-wait.
@@ -455,6 +455,14 @@ func validateGlobalSchedulersConfig(gsConfigs []base.GlobalSchedulerConfig) erro
 		}
 		if err := validateInsConnectType(scheduler); err != nil {
 			return err
+		}
+		// Empty means "no tokenizer" (rune-count fallback); a non-empty
+		// name must pass the length check (restored — was accidentally
+		// removed with the mandatory-tokenizer validation).
+		if scheduler.TokenizeModelName != "" {
+			if err := utils.CheckStringLength(scheduler.TokenizeModelName); err != nil {
+				return fmt.Errorf("tokenizeModelName error: %v", err)
+			}
 		}
 		if err := validateErrSchedulerConfig(scheduler); err != nil {
 			return err

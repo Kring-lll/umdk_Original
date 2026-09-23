@@ -10,6 +10,7 @@ package server
 
 import "C"
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -514,7 +516,7 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 	suggestion, err := s.manager.GetSuggestion(in)
 	if err != nil {
 		statusCode := http.StatusInternalServerError
-		if errors.Is(err, gs.ErrQueueFull) || errors.Is(err, gs.ErrNoInstance) {
+		if errors.Is(err, gs.ErrQueueFull) || errors.Is(err, gs.ErrNoInstance) || errors.Is(err, gs.ErrDuplicateReqID) {
 			statusCode = http.StatusServiceUnavailable
 			log.Warn().Msgf("Scheduling unavailable: %v", err)
 		} else {
@@ -659,30 +661,127 @@ func (s *HttpServer) forwardToInstance(w http.ResponseWriter, r *http.Request, m
 // agent_hint.priority_control.priority field. priority is int (truncated E[rem])
 // so the value used for local queue ordering == the value the downstream sees.
 func injectPriority(body []byte, priority int) []byte {
-	var bodyMap map[string]interface{}
-	if err := json.Unmarshal(body, &bodyMap); err != nil {
+	start, end, rawHint, found := locateAgentHintValue(body)
+	newHint := rebuildAgentHint(rawHint, priority, found)
+	if newHint == nil {
 		return body
 	}
-
-	agentHint, ok := bodyMap["agent_hint"].(map[string]interface{})
-	if !ok {
-		agentHint = make(map[string]interface{})
+	if found {
+		out := make([]byte, 0, len(body)-(end-start)+len(newHint))
+		out = append(out, body[:start]...)
+		out = append(out, newHint...)
+		out = append(out, body[end:]...)
+		return out
 	}
+	return insertAgentHintBeforeClosingBrace(body, newHint)
+}
 
-	priorityControl, ok := agentHint["priority_control"].(map[string]interface{})
-	if !ok {
-		priorityControl = make(map[string]interface{})
-	}
-
-	priorityControl["priority"] = priority
-	agentHint["priority_control"] = priorityControl
-	bodyMap["agent_hint"] = agentHint
-
-	modified, err := json.Marshal(bodyMap)
+// locateAgentHintValue walks only the top-level object keys to find the
+// agent_hint value's exact byte range. Nested occurrences inside messages
+// are invisible to the Decoder's value-skip, so a message that happens to
+// contain "agent_hint" as a string cannot confuse the lookup.
+func locateAgentHintValue(body []byte) (start, end int, raw json.RawMessage, found bool) {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	tok, err := dec.Token()
 	if err != nil {
+		return 0, 0, nil, false
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return 0, 0, nil, false
+	}
+	for dec.More() {
+		tok, err = dec.Token()
+		if err != nil {
+			return 0, 0, nil, false
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return 0, 0, nil, false
+		}
+		preOffset := dec.InputOffset()
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return 0, 0, nil, false
+		}
+		if key == "agent_hint" {
+			region := body[preOffset:dec.InputOffset()]
+			idx := bytes.Index(region, value)
+			if idx < 0 {
+				return 0, 0, nil, false
+			}
+			abs := int(preOffset) + idx
+			return abs, abs + len(value), value, true
+		}
+	}
+	return 0, 0, nil, false
+}
+
+// rebuildAgentHint parses the tiny agent_hint object (a few fields), sets
+// the priority, and marshals it back. Only this small object is
+// re-serialized — every other value in the body stays as raw bytes.
+func rebuildAgentHint(raw []byte, priority int, exists bool) []byte {
+	var hint map[string]json.RawMessage
+	if exists {
+		if err := json.Unmarshal(raw, &hint); err != nil {
+			return nil
+		}
+	} else {
+		hint = make(map[string]json.RawMessage)
+	}
+
+	var pc map[string]json.RawMessage
+	if rawPC, ok := hint["priority_control"]; ok {
+		if err := json.Unmarshal(rawPC, &pc); err != nil {
+			return nil
+		}
+	} else {
+		pc = make(map[string]json.RawMessage)
+	}
+
+	pc["priority"] = json.RawMessage(strconv.Itoa(priority))
+	newPC, err := json.Marshal(pc)
+	if err != nil {
+		return nil
+	}
+	hint["priority_control"] = json.RawMessage(newPC)
+
+	newHint, err := json.Marshal(hint)
+	if err != nil {
+		return nil
+	}
+	return newHint
+}
+
+// insertAgentHintBeforeClosingBrace splices "agent_hint":<value> into the
+// top-level object before its closing brace.
+func insertAgentHintBeforeClosingBrace(body []byte, value []byte) []byte {
+	i := len(body) - 1
+	for i >= 0 && (body[i] == ' ' || body[i] == '\n' || body[i] == '\r' || body[i] == '\t') {
+		i--
+	}
+	if i < 0 || body[i] != '}' {
 		return body
 	}
-	return modified
+	j := i - 1
+	for j >= 0 && (body[j] == ' ' || body[j] == '\n' || body[j] == '\r' || body[j] == '\t') {
+		j--
+	}
+	isEmpty := j >= 0 && body[j] == '{'
+
+	const agentHintKey = ",\"agent_hint\":"
+	var out []byte
+	if isEmpty {
+		out = make([]byte, 0, len(body)+len(value)+len(agentHintKey))
+		out = append(out, body[:j+1]...)
+		out = append(out, agentHintKey[1:]...) // skip the comma for {}
+	} else {
+		out = make([]byte, 0, len(body)+len(value)+len(agentHintKey))
+		out = append(out, body[:i]...)
+		out = append(out, agentHintKey...)
+	}
+	out = append(out, value...)
+	out = append(out, body[i:]...)
+	return out
 }
 
 // parseFinishReason parses finish_reason from an SSE data line.

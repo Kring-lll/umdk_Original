@@ -14,6 +14,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"huawei.com/aigw/internal/base"
@@ -54,16 +55,22 @@ type InstanceManager struct {
 	// Skip instance connection for testing
 	skipInstanceConnection bool
 
-	// onUnhealthy is invoked when an instance's SSE connection drops.
-	// Must be registered via SetOnUnhealthy before the first addInstance
-	// call so watcher goroutines observe the write.
-	onUnhealthy func(insUrl string)
+	// onUnhealthy holds the SSE-disconnect callback, read by watcher
+	// goroutines — atomic so registration is safe regardless of timing.
+	onUnhealthy atomic.Pointer[func(string)]
 }
 
-// SetOnUnhealthy registers the SSE-disconnect callback. Must be called
-// before any instance is added (init time only).
+// SetOnUnhealthy registers the SSE-disconnect callback.
 func (insManager *InstanceManager) SetOnUnhealthy(fn func(string)) {
-	insManager.onUnhealthy = fn
+	insManager.onUnhealthy.Store(&fn)
+}
+
+// OnUnhealthySnapshot returns the registered callback, or nil.
+func (insManager *InstanceManager) OnUnhealthySnapshot() func(string) {
+	if p := insManager.onUnhealthy.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 func newInstanceManager() *InstanceManager {
@@ -352,6 +359,17 @@ func (insManager *InstanceManager) isReqExists(reqId string) bool {
 	return false
 }
 
+// getRegisteredInsNum counts every registered instance, healthy or not —
+// registration quotas must not shrink when an instance's connection drops,
+// or over-registration slips through while the pool is degraded.
+func (insManager *InstanceManager) getRegisteredInsNum() int {
+	insManager.poolRWLock.RLock()
+	defer insManager.poolRWLock.RUnlock()
+	return len(insManager.insPool)
+}
+
+// getInsNum counts healthy instances (SSE-connected) — used for capacity
+// math where only reachable instances can serve traffic.
 func (insManager *InstanceManager) getInsNum() int {
 	insManager.poolRWLock.RLock()
 	defer insManager.poolRWLock.RUnlock()

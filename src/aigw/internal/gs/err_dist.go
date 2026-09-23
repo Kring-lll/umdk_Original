@@ -20,7 +20,6 @@ import (
 // A Refresh() call builds a new snapshot and atomically swaps it in.
 type distSnapshot struct {
 	sortedVals []int
-	prefixSum  []int64 // prefix[i] = sum of sortedVals[0..i-1]
 	erCache    map[int]float64
 	totalCount int
 }
@@ -29,6 +28,10 @@ func (s *distSnapshot) ExpectedRemaining(curStep int) float64 {
 	if s == nil || len(s.sortedVals) == 0 {
 		return 0.0
 	}
+	// curStep beyond every observed completion misses the cache and yields
+	// 0.0 — the intended extrapolation: such a session has progressed past
+	// all known completion points, so it inherits E[rem|k=maxStep]=0 (the
+	// highest priority), consistent with MEJ's -k monotonicity.
 	return s.erCache[curStep]
 }
 
@@ -141,7 +144,6 @@ func (d *EmpiricalDist) Refresh() {
 
 	d.snapshot.Store(&distSnapshot{
 		sortedVals: steps,
-		prefixSum:  prefixSum,
 		erCache:    erCache,
 		totalCount: n,
 	})
@@ -176,8 +178,13 @@ func (d *EmpiricalDist) evictFront() {
 	d.rawValues.Remove(front)
 }
 
+// maxTrackedStep bounds the step values entering the distribution: an
+// outlier session (miscounted or pathological) would otherwise inflate the
+// erCache key space to O(maxStep) on every snapshot rebuild.
+const maxTrackedStep = 1000
+
 func (d *EmpiricalDist) AddValue(sessionID string, steps int) {
-	if steps <= 0 {
+	if steps <= 0 || steps > maxTrackedStep {
 		return
 	}
 	d.mu.Lock()
@@ -202,7 +209,7 @@ func (d *EmpiricalDist) SeedFromCounts(counts map[int]int) {
 	}
 	d.mu.Lock()
 	for steps, cnt := range counts {
-		if steps <= 0 || cnt <= 0 {
+		if steps <= 0 || steps > maxTrackedStep || cnt <= 0 {
 			continue
 		}
 		for i := 0; i < cnt; i++ {
@@ -224,6 +231,14 @@ func (d *EmpiricalDist) ExpectedRemaining(curStep int) float64 {
 
 func (d *EmpiricalDist) TotalCount() int {
 	return d.snapshot.Load().TotalCount()
+}
+
+// LiveCount reports the current observation count directly from the raw
+// window, bypassing the snapshot refresh cooldown.
+func (d *EmpiricalDist) LiveCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.rawValues.Len()
 }
 
 func (d *EmpiricalDist) Median() int {

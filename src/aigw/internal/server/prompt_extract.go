@@ -51,13 +51,21 @@ func extractUserText(messages []base.OpenAiMessage) string {
 	return userText
 }
 
+// jiuwenEnvelopePrefix is the fixed prefix of jiuwenswarm's channel envelope;
+// it doubles as the upstream identity check — other agents' messages never
+// carry it and are returned verbatim.
+const jiuwenEnvelopePrefix = "你收到一条消息："
+
 // unwrapContentField extracts the inner "content" string when the user message
-// embeds a JSON envelope (e.g. jiuwenswarm's channel format
-// `你收到一条消息：{"source":"tui",...,"content":"<task>",...}`). The envelope's
-// metadata fields (source/files/trusted_dirs/...) are classification noise that
-// can flip the category. Falls back to the raw text when no parseable JSON
-// object with a string "content" field is present.
+// embeds a jiuwenswarm JSON envelope. The envelope's metadata fields
+// (source/files/trusted_dirs/...) are classification noise that can flip the
+// category. Only the known envelope prefix gates the JSON parse — arbitrary
+// task text containing {...} fragments must not be reinterpreted. Falls back
+// to the raw text when no parseable object with a string "content" is found.
 func unwrapContentField(s string) string {
+	if !strings.HasPrefix(s, jiuwenEnvelopePrefix) {
+		return s
+	}
 	i := strings.Index(s, "{")
 	if i < 0 {
 		return s
