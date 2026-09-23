@@ -396,14 +396,6 @@ urma_status_t bondp_unregister_seg(urma_target_seg_t *target_seg)
     if (!atomic_compare_exchange_strong(&bdp_seg->deleting, &expected, true)) {
         return URMA_EAGAIN;
     }
-    unsigned long use_cnt = atomic_load(&bdp_seg->use_cnt.atomic_cnt);
-    if (use_cnt > 1) {
-        /* In-flight WRs still reference this seg; caller must stop posting and retry. */
-        atomic_store(&bdp_seg->deleting, false);
-        URMA_LOG_ERR("Failed to unregister seg, still in use. token_id=%u, use_cnt=%lu\n",
-                     target_seg->seg.token_id, use_cnt);
-        return URMA_EAGAIN;
-    }
     if (bondp_delete_pseg(bdp_seg) != 0) {
         URMA_LOG_ERR("Failed to delete pseg for vseg, token_id=%u, handle=%lu.\n",
                      target_seg->seg.token_id, target_seg->handle);
