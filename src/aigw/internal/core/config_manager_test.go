@@ -99,8 +99,8 @@ func TestLoadConfig(t *testing.T) {
 					BatchSize:           100,
 					ReservedBlockNumber: 10,
 					MinMatchedLength:    50,
-					VirtualNodes:        160, // Default value set by validation
-					FallbackNum:         3,   // Default value set by validation
+				VirtualNodes:        160, // Default value set by validation
+				FallbackNum:         3,   // Default value set by validation
 				},
 			},
 		},
