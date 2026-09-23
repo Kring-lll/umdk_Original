@@ -10,6 +10,7 @@ package gs
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -21,10 +22,17 @@ import (
 	"huawei.com/aigw/pkg/log"
 )
 
+// quotaAgeFallback bounds how long a perfectly static engine (no prefill,
+// unchanged gauges) can hold the quota exhausted: one forced reset pe
+// window keeps an idle-engine backlog draining. Matches the motor cache
+// refresh cadence (~3s).
+const quotaAgeFallback = 3 * time.Second
+
 type engineSignal struct {
-	running int
-	waiting int
-	kvUsage float64
+	running      int
+	waiting      int
+	kvUsage      float64
+	queriesTotal float64 // monotonic prefill counter — snapshot version signal
 }
 
 // KvAdmissionController gates dispatch on engine-observed state. Signal mode
@@ -67,6 +75,13 @@ type KvAdmissionController struct {
 	// poller drives dispatch retries itself instead of waiting for the
 	// next arrival/completion event or the 10s survival ticker.
 	kick func()
+
+	// Quota is versioned: admits reset only when the observed snapshot
+	// CONTENT changes (one motor refresh = at most burstCap admissions —
+	// info rate equals action rate, no over-consumption of a stale view),
+	// or after quotaAgeFallback on a perfectly static engine.
+	quotaVersion string
+	quotaResetAt time.Time
 
 	client *http.Client
 }
@@ -153,8 +168,9 @@ func (c *KvAdmissionController) pollOnce(ctx context.Context) {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.admits = map[string]int{} // new poll cycle
 	if !ok {
+		// Failed poll grants no quota: resetting here would admit on
+		// zero fresh information.
 		c.healthyStreak = 0
 		return
 	}
@@ -177,6 +193,18 @@ func (c *KvAdmissionController) pollOnce(ctx context.Context) {
 		c.pauseRemaining = c.hysteresis + 1
 	} else if c.pauseRemaining > 0 {
 		c.pauseRemaining--
+	}
+
+	// Versioned quota: reset only when the snapshot content changed (a new
+	// motor refresh) or on the age fallback for a fully static engine. A
+	// poll that re-reads the cached refresh does NOT grant new quota, so
+	// one snapshot is consumed at most once (per instance quota, K=1).
+	version := fmt.Sprintf("%d/%d/%.4f/%.0f",
+		c.signal.running, c.signal.waiting, c.signal.kvUsage, c.signal.queriesTotal)
+	if version != c.quotaVersion || time.Since(c.quotaResetAt) >= quotaAgeFallback {
+		c.admits = map[string]int{}
+		c.quotaVersion = version
+		c.quotaResetAt = time.Now()
 	}
 }
 
@@ -305,6 +333,8 @@ func parseEngineSignals(body []byte) map[string]engineSignal {
 			s.waiting = int(value)
 		case "kv_cache_usage_perc", "gpu_cache_usage_perc":
 			s.kvUsage = value
+		case "prefix_cache_queries_total":
+			s.queriesTotal = value
 		default:
 			continue
 		}
