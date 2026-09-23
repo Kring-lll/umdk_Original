@@ -625,8 +625,11 @@ __aicore__ inline void FusedDeepMoe<TemplateMC2TypeFunc>::Process()
     GM_ADDR gmCVSwap = nullptr;
     if constexpr (EXEC_FLAG & EXEC_FLAG_W4A8) {
         gmCVSwap = workspaceGM_ + workspaceOffset;
-        uint32_t maxN = shareGmm1OutputDim_ > gmm1OutputDim_ ? shareGmm1OutputDim_ : gmm1OutputDim_;
-        int64_t gmm1CSize = static_cast<int64_t>(maxTokenNum_) * maxN * sizeof(int32_t) * CONSTANT_TWO;
+        // 布局：[0, bs_*shareGmm1OutputDim_) 共享专家 C（全部 bs 个 token，M 翻倍）；
+        // [bs_*shareGmm1OutputDim_, bs_*shareGmm1OutputDim_ + maxTokenNum_*gmm1OutputDim_) 路由专家每轮 C（W4A8 M 翻倍）
+        int64_t gmm1CSize = (static_cast<int64_t>(maxTokenNum_) * gmm1OutputDim_ +
+                             static_cast<int64_t>(bs_) * shareGmm1OutputDim_) *
+                            sizeof(int32_t) * CONSTANT_TWO;
         workspaceOffset += RoundUp<GM_ALIGN_BYTE>(gmm1CSize);
     }
 

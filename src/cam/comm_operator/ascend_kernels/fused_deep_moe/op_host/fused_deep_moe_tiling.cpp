@@ -785,8 +785,9 @@ static ge::graphStatus SetWorkSpace(gert::TilingContext &context, const char *no
     bool isW4a8 = CheckOptionalInputExist(context, INPUT_GMM1_BIAS_INDEX);
     size_t gmm1CSize = 0;
     if (isW4a8) {
-        size_t maxN = shareGmm1HLen > gmm1HLen ? shareGmm1HLen : gmm1HLen;
-        gmm1CSize = maxTokenNum * maxN * sizeof(int32_t) * CONSTANT_TWO;
+        // 布局：[0, batchSize*shareGmm1HLen) 共享专家 C（全部 bs 个 token，M 翻倍）；
+        // [batchSize*shareGmm1HLen, batchSize*shareGmm1HLen + maxTokenNum*gmm1HLen) 路由专家每轮 C（W4A8 M 翻倍）
+        gmm1CSize = (maxTokenNum * gmm1HLen + batchSize * shareGmm1HLen) * sizeof(int32_t) * CONSTANT_TWO;
         gmm1CSize = CeilUp(gmm1CSize, GM_ALIGN_SIZE);
     }
     
