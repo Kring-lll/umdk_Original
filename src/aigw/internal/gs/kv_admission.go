@@ -10,7 +10,6 @@ package gs
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -21,12 +20,6 @@ import (
 	"huawei.com/aigw/internal/base"
 	"huawei.com/aigw/pkg/log"
 )
-
-// quotaAgeFallback bounds how long a perfectly static engine (no prefill,
-// unchanged gauges) can hold the quota exhausted: one forced reset pe
-// window keeps an idle-engine backlog draining. Matches the motor cache
-// refresh cadence (~3s).
-const quotaAgeFallback = 3 * time.Second
 
 type engineSignal struct {
 	running      int
@@ -74,18 +67,24 @@ type KvAdmissionController struct {
 	// kick is invoked after each poll cycle while the gate is open: the
 	// poller drives dispatch retries itself instead of waiting for the
 	// next arrival/completion event or the 10s survival ticker.
+	// Init-time only: set before Start, read only by the poller goroutine.
 	kick func()
 
 	// Quota is versioned: admits reset only when the observed snapshot
-	// CONTENT changes (one motor refresh = at most burstCap admissions —
+	// content changes (one motor refresh = at most burstCap admissions —
 	// info rate equals action rate, no over-consumption of a stale view),
-	// or after quotaAgeFallback on a perfectly static engine.
-	quotaVersion string
-	quotaResetAt time.Time
+	// or after the age fallback on a perfectly static engine. Full-precision
+	// struct comparison catches any gauge change, including decode-only
+	// scenarios where the prefill counter stays flat.
+	lastQuotaSignal  engineSignal
+	quotaResetAt     time.Time
+	quotaAgeFallback time.Duration
+
 	// lastAdmitAt suppresses the age fallback while a dispatched request's
 	// consequence is still in flight (unobserved): a recently-admitted
-	// request makes a static snapshot EXPECTED, not a sign of a broken
-	// observation pipeline.
+	// request makes a static snapshot EXPECTED. The gap uses staleAfter
+	// (not quotaAgeFallback) because the consequence-visible delay is
+	// cache phase + poll pickup — an equal-length guard races the refresh.
 	lastAdmitAt time.Time
 
 	client *http.Client
@@ -94,19 +93,20 @@ type KvAdmissionController struct {
 func NewKvAdmissionController(cfg base.KvAdmissionConfig, batchSize int,
 	reqNum func(insUrl string) int) *KvAdmissionController {
 	return &KvAdmissionController{
-		mode:         cfg.Mode,
-		metricsURL:   cfg.MetricsURL,
-		pollInterval: time.Duration(cfg.PollMs) * time.Millisecond,
-		staleAfter:   time.Duration(cfg.StaleAfterMs) * time.Millisecond,
-		burstCap:     cfg.BurstCapPerCycle,
-		hysteresis:   cfg.HysteresisCycles,
-		recoverCyc:   cfg.RecoverHealthyCycles,
-		softCap:      cfg.SoftCap,
-		batchSize:    batchSize,
-		reqNum:       reqNum,
-		admits:       map[string]int{},
-		highWater:    map[string]int{},
-		client:       &http.Client{Timeout: time.Second},
+		mode:             cfg.Mode,
+		metricsURL:       cfg.MetricsURL,
+		pollInterval:     time.Duration(cfg.PollMs) * time.Millisecond,
+		staleAfter:       time.Duration(cfg.StaleAfterMs) * time.Millisecond,
+		burstCap:         cfg.BurstCapPerCycle,
+		hysteresis:       cfg.HysteresisCycles,
+		recoverCyc:       cfg.RecoverHealthyCycles,
+		softCap:          cfg.SoftCap,
+		batchSize:        batchSize,
+		quotaAgeFallback: time.Duration(cfg.QuotaAgeFallbackMs) * time.Millisecond,
+		reqNum:           reqNum,
+		admits:           map[string]int{},
+		highWater:        map[string]int{},
+		client:           &http.Client{Timeout: time.Second},
 	}
 }
 
@@ -204,21 +204,11 @@ func (c *KvAdmissionController) pollOnce(ctx context.Context) {
 	// motor refresh) or on the age fallback for a fully static engine. A
 	// poll that re-reads the cached refresh does NOT grant new quota, so
 	// one snapshot is consumed at most once (per instance quota, K=1).
-	version := fmt.Sprintf("%d/%d/%.4f/%.0f",
-		c.signal.running, c.signal.waiting, c.signal.kvUsage, c.signal.queriesTotal)
-	// The fallback additionally requires no recent admission: a dispatched
-	// request whose consequence has not been observed yet makes a static
-	// snapshot expected — the heartbeat quota must not fire mid-flight.
-	// The admission gap uses staleAfter (not quotaAgeFallback): the
-	// consequence-visible delay is cache phase (≤3s) + poll pickup (≤1s),
-	// so an equal-length 3s guard still races the refresh cycle. Only a
-	// snapshot static for the full staleness bound (8s) justifies a
-	// heartbeat — by then the observation itself is suspect.
-	fallbackDue := time.Since(c.quotaResetAt) >= quotaAgeFallback &&
+	fallbackDue := time.Since(c.quotaResetAt) >= c.quotaAgeFallback &&
 		time.Since(c.lastAdmitAt) >= c.staleAfter
-	if version != c.quotaVersion || fallbackDue {
+	if c.signal != c.lastQuotaSignal || fallbackDue {
 		c.admits = map[string]int{}
-		c.quotaVersion = version
+		c.lastQuotaSignal = c.signal
 		c.quotaResetAt = time.Now()
 	}
 }

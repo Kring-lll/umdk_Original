@@ -320,7 +320,7 @@ func (manager *AigwManager) RegisterInstance(in *base.RegisterInstanceIn) error 
 	var currentInsNum = 0
 	manager.rwLock.RLock()
 	for _, v := range manager.gsTable {
-		currentInsNum += v.GetInsNum()
+		currentInsNum += v.GetRegisteredInsNum()
 	}
 	manager.rwLock.RUnlock()
 	if currentInsNum >= manager.config.Limits.TotalInsNum {
@@ -512,10 +512,6 @@ func (manager *AigwManager) GetSuggestion(in *GetSuggestionIn) (*base.GetSuggest
 	m := manager.getGsManager(in.Model)
 	if m == nil {
 		return nil, fmt.Errorf("global scheduler manager with model %v not found", in.Model)
-	}
-
-	if m.CheckReqExists(in.UUID) {
-		return nil, fmt.Errorf("the request %v is exists", in.UUID)
 	}
 
 	return manager.scheduleRequest(m, in, nil)

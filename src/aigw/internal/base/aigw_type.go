@@ -199,6 +199,7 @@ type KvAdmissionConfig struct {
 	StaleAfterMs         int    `json:"staleAfterMs"`         // signal age treated as fresh (default 8000: motor cache 3s + poll offset)
 	RecoverHealthyCycles int    `json:"recoverHealthyCycles"` // consecutive good polls before trusting signals (default 2)
 	SoftCap              int    `json:"softCap"`              // frozen mode: per-instance in-flight cap
+	QuotaAgeFallbackMs   int    `json:"quotaAgeFallbackMs"`   // force quota reset after this long on a static engine, ms (default 3000 = motor refresh cadence)
 }
 
 // GlobalSchedulerConfig struct contains configuration for a global scheduler

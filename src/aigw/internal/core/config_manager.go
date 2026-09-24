@@ -294,6 +294,9 @@ func validateKvAdmissionConfig(gsCfg *base.GlobalSchedulerConfig) error {
 	if cfg.RecoverHealthyCycles <= 0 {
 		cfg.RecoverHealthyCycles = 2
 	}
+	if cfg.QuotaAgeFallbackMs <= 0 {
+		cfg.QuotaAgeFallbackMs = 3000
+	}
 	switch cfg.Mode {
 	case base.KvAdmissionSignal:
 		if cfg.MetricsURL == "" {
@@ -491,6 +494,14 @@ func validateGlobalSchedulersConfig(gsConfigs []base.GlobalSchedulerConfig) erro
 		}
 		if err := validateInsConnectType(scheduler); err != nil {
 			return err
+		}
+		// Empty means "no tokenizer" (rune-count fallback); a non-empty
+		// name must pass the length check (restored — was accidentally
+		// removed with the mandatory-tokenizer validation).
+		if scheduler.TokenizeModelName != "" {
+			if err := utils.CheckStringLength(scheduler.TokenizeModelName); err != nil {
+				return fmt.Errorf("tokenizeModelName error: %v", err)
+			}
 		}
 		if err := validateErrSchedulerConfig(scheduler); err != nil {
 			return err
