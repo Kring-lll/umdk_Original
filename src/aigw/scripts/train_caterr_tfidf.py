@@ -120,9 +120,23 @@ def main():
         interactive_fill(args)
 
     # Heavy deps imported lazily so --help/--interactive work without them.
+    import re
     import numpy as np
     from sklearn.cluster import KMeans
     from sklearn.feature_extraction.text import TfidfVectorizer
+
+    def go_style_tokens(text):
+        """Replicates aigw's Go tokenizePrompt (tfidf_caterr.go): lowercase,
+        ASCII runs of 2+ [a-z0-9_] as words, each Han character as its own
+        token, plus a bigram over consecutive Han characters. No stop-word
+        filtering here — sklearn's stop_words applies downstream, and the Go
+        runtime applies none (the trained vocabulary is the single filter)."""
+        text = text.lower()
+        tokens = list(re.findall(r"[a-z0-9_]{2,}", text))
+        han = [ch for ch in text if "\u4e00" <= ch <= "\u9fff"]
+        tokens.extend(han)
+        tokens.extend(a + b for a, b in zip(han, han[1:]))
+        return tokens
 
     # Validate inputs (helpful errors instead of crashing later).
     if not os.path.isdir(args.deepswe_tasks):
@@ -155,7 +169,7 @@ def main():
     vectorizer = TfidfVectorizer(
         max_features=args.max_features,
         stop_words="english",
-        ngram_range=(1, 2),
+        analyzer=go_style_tokens,
         sublinear_tf=True,
     )
     tfidf_matrix = vectorizer.fit_transform(all_prompts)

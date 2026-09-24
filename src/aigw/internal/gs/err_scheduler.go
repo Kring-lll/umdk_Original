@@ -8,9 +8,9 @@
 package gs
 
 import (
-	"strings"
 	"encoding/json"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,8 +35,8 @@ type ErrSchedulerConfig struct {
 // algoSnapshot holds immutable dist snapshots for one Pick iteration.
 // Guarantees all E[rem|k] queries within a single Pick use the same table.
 type algoSnapshot struct {
-	global *distSnapshot              // for ERR; nil for CatERR
-	cats   map[string]*distSnapshot   // for CatERR; nil for ERR
+	global *distSnapshot            // for ERR; nil for CatERR
+	cats   map[string]*distSnapshot // for CatERR; nil for ERR
 }
 
 type ErrSchedulerManager struct {
@@ -48,6 +48,10 @@ type ErrSchedulerManager struct {
 	classifier     *CatErrClassifier
 	sessionTracker *SessionTracker
 	completedCount int64
+
+	// warmupAnnounced makes the completion log exactly-once; guarded by the
+	// dispatch mutex all OnFinish callers hold.
+	warmupAnnounced bool
 }
 
 type trainDataFile struct {
@@ -79,8 +83,8 @@ func NewErrSchedulerManager(cfg ErrSchedulerConfig) *ErrSchedulerManager {
 	isCaterr := cfg.SchedulerType == "caterr"
 
 	m := &ErrSchedulerManager{
-		config:         cfg,
-		classifier:     NewCatErrClassifier(),
+		config:     cfg,
+		classifier: NewCatErrClassifier(),
 		sessionTracker: NewSessionTracker(
 			time.Duration(cfg.TaskIdleTimeoutSec)*time.Second,
 			time.Duration(cfg.SessionTimeoutSec)*time.Second,
@@ -394,7 +398,8 @@ func (m *ErrSchedulerManager) OnFinish(sessionID string) int {
 
 	if m.IsWarmingUp() {
 		atomic.AddInt64(&m.completedCount, 1)
-		if !m.IsWarmingUp() {
+		if !m.warmupAnnounced && m.warmupCompleteLive() {
+			m.warmupAnnounced = true
 			log.Info().Msgf("[ERR] warmup complete, activating %s", m.config.SchedulerType)
 		}
 	}
@@ -424,6 +429,42 @@ func (m *ErrSchedulerManager) OnCancel(sessionID string) {
 
 func (m *ErrSchedulerManager) RestartIdleTimer(sessionID string) {
 	m.sessionTracker.RestartIdleTimer(sessionID)
+}
+
+// warmupCompleteLive mirrors IsWarmingUp against live counters instead of
+// snapshots: the completion log must not depend on the 1s snapshot refresh
+// cooldown, or the threshold-crossing completion can go unannounced.
+func (m *ErrSchedulerManager) warmupCompleteLive() bool {
+	if m.config.SchedulerType == "caterr" {
+		labels := m.classifier.Labels()
+		m.catMu.RLock()
+		defer m.catMu.RUnlock()
+		if m.config.WarmupSessions > 0 {
+			total := 0
+			for _, dist := range m.catDists {
+				total += dist.LiveCount()
+			}
+			if total < m.config.WarmupSessions {
+				return false
+			}
+		}
+		if m.config.WarmupPerCat > 0 {
+			if len(labels) == 0 {
+				return false
+			}
+			for _, label := range labels {
+				dist, ok := m.catDists[label]
+				if !ok || dist.LiveCount() < m.config.WarmupPerCat {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	if m.config.WarmupSessions > 0 && m.globalDist.LiveCount() < m.config.WarmupSessions {
+		return false
+	}
+	return true
 }
 
 func (m *ErrSchedulerManager) IsWarmingUp() bool {

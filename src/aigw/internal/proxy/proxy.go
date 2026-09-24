@@ -23,17 +23,17 @@ import (
 
 // ProxyManager manages HTTP request forwarding to backend workers.
 type ProxyManager struct {
-	ctx                context.Context
-	cancel             context.CancelFunc
-	rwLock             sync.RWMutex
-	client             *http.Client
-	timeout            time.Duration
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	rwLock               sync.RWMutex
+	client               *http.Client
+	timeout              time.Duration
 	firstChunkTimeout    time.Duration
 	chunkIntervalTimeout time.Duration
-	maxRetry           int
-	retryBaseInterval  time.Duration  // Base interval for exponential backoff
-	retryMaxInterval   time.Duration  // Maximum interval cap for backoff
-	circuitBreaker     *CircuitBreaker // Circuit breaker for fault tolerance
+	maxRetry             int
+	retryBaseInterval    time.Duration   // Base interval for exponential backoff
+	retryMaxInterval     time.Duration   // Maximum interval cap for backoff
+	circuitBreaker       *CircuitBreaker // Circuit breaker for fault tolerance
 }
 
 // Stream timeout defaults mirror the openjiuwen SDK defaults: first-chunk
@@ -41,6 +41,10 @@ type ProxyManager struct {
 // read after the first byte and a stuck client write (writes on an active
 // stream complete in milliseconds — measured TTOT p95=203ms — so a gap this
 // long means that side is dead).
+// drainLimitBytes caps how much of a failed attempt's body is read
+// before closing, enough to keep the connection reusable.
+const drainLimitBytes = 4096
+
 var (
 	defaultUpstreamFirstChunkTimeout = 300 * time.Second
 	defaultChunkIntervalTimeout      = 60 * time.Second
@@ -48,11 +52,11 @@ var (
 
 // ProxyConfig is the configuration for ProxyManager.
 type ProxyConfig struct {
-	Timeout            time.Duration      // Request timeout (default: 30s)
-	MaxRetry           int                // Maximum retry attempts (default: 3)
-	RetryBaseInterval  time.Duration      // Base interval for exponential backoff (default: 100ms)
-	RetryMaxInterval   time.Duration      // Maximum interval cap for backoff (default: 5s)
-	CircuitBreaker     *CircuitBreakerConfig // Circuit breaker configuration (optional)
+	Timeout           time.Duration         // Request timeout (default: 30s)
+	MaxRetry          int                   // Maximum retry attempts (default: 3)
+	RetryBaseInterval time.Duration         // Base interval for exponential backoff (default: 100ms)
+	RetryMaxInterval  time.Duration         // Maximum interval cap for backoff (default: 5s)
+	CircuitBreaker    *CircuitBreakerConfig // Circuit breaker configuration (optional)
 	// FirstChunkTimeout bounds the wait for the first byte of an upstream
 	// (engine) response. 0 = defaultUpstreamFirstChunkTimeout; negative
 	// disables.
@@ -67,10 +71,10 @@ type ProxyConfig struct {
 func NewProxyManager(parentCtx context.Context, config *ProxyConfig) *ProxyManager {
 	if config == nil {
 		config = &ProxyConfig{
-			Timeout:            30 * time.Second,
-			MaxRetry:           3,
-			RetryBaseInterval:  100 * time.Millisecond,
-			RetryMaxInterval:   5 * time.Second,
+			Timeout:           30 * time.Second,
+			MaxRetry:          3,
+			RetryBaseInterval: 100 * time.Millisecond,
+			RetryMaxInterval:  5 * time.Second,
 		}
 	}
 
@@ -102,42 +106,42 @@ func NewProxyManager(parentCtx context.Context, config *ProxyConfig) *ProxyManag
 	}
 
 	return &ProxyManager{
-		ctx:                ctx,
-		cancel:             cancel,
+		ctx:    ctx,
+		cancel: cancel,
 		client: &http.Client{
 			Timeout: config.Timeout,
 		},
-		timeout:            config.Timeout,
+		timeout:              config.Timeout,
 		firstChunkTimeout:    config.FirstChunkTimeout,
 		chunkIntervalTimeout: config.ChunkIntervalTimeout,
-		maxRetry:           config.MaxRetry,
-		retryBaseInterval:  config.RetryBaseInterval,
-		retryMaxInterval:   config.RetryMaxInterval,
-		circuitBreaker:     cb,
+		maxRetry:             config.MaxRetry,
+		retryBaseInterval:    config.RetryBaseInterval,
+		retryMaxInterval:     config.RetryMaxInterval,
+		circuitBreaker:       cb,
 	}
 }
 
 // ForwardRequest represents parameters for forwarding an HTTP request.
 type ForwardRequest struct {
-	Method    string            // HTTP method (GET, POST, etc.)
-	TargetURL string            // Target URL without @rank (e.g., "http://worker:8000")
-	Route     string            // API route (e.g., "/v1/chat/completions")
-	FullURL   string            // When non-empty, used verbatim instead of TargetURL+Route
-	Headers   http.Header       // Original request headers
-	Body      []byte            // Request body
-	DpRank    *int              // DP rank for header injection (optional)
-	Stream    bool              // Whether to stream the response
+	Method    string      // HTTP method (GET, POST, etc.)
+	TargetURL string      // Target URL without @rank (e.g., "http://worker:8000")
+	Route     string      // API route (e.g., "/v1/chat/completions")
+	FullURL   string      // When non-empty, used verbatim instead of TargetURL+Route
+	Headers   http.Header // Original request headers
+	Body      []byte      // Request body
+	DpRank    *int        // DP rank for header injection (optional)
+	Stream    bool        // Whether to stream the response
 	// Label identifies the request in watchdog kill logs (session/req id).
 	Label string
 }
 
 // ForwardResult represents the result of a forwarded request.
 type ForwardResult struct {
-	StatusCode  int
-	Headers     http.Header
-	Body        []byte         // Non-streaming response
+	StatusCode   int
+	Headers      http.Header
+	Body         []byte        // Non-streaming response
 	StreamReader *StreamReader // Streaming response
-	Error       error
+	Error        error
 }
 
 // ForwardRequest forwards an HTTP request to the target worker.
@@ -258,6 +262,14 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 			break
 		}
 
+		// The failed attempt's body is unused: drain-and-close so the
+		// connection can be reused instead of leaking on the next attempt.
+		if resp != nil && resp.Body != nil {
+			io.Copy(io.Discard, io.LimitReader(resp.Body, drainLimitBytes))
+			resp.Body.Close()
+			resp = nil
+		}
+
 		log.Warn().Msgf("[Proxy] request attempt %d failed: network=%v status=%d",
 			retry+1, lastErr, lastStatusCode)
 	}
@@ -270,6 +282,9 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 		}
 		if lastErr != nil {
 			return nil, lastErr
+		}
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
 		}
 		return nil, fmt.Errorf("server error: %d", lastStatusCode)
 	}

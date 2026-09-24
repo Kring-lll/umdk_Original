@@ -17,12 +17,12 @@ import (
 // separated deployment uses min(prefill, decode) since each request
 // occupies one slot in both pools.
 type CapacityProvider struct {
-	batchSize          int
-	instanceCount      func() int
-	prefillCount       func() int
-	decodeCount        func() int
-	separatedCapacity  func() int
-	inFlight           atomic.Int32
+	batchSize         int
+	instanceCount     func() int
+	prefillCount      func() int
+	decodeCount       func() int
+	separatedCapacity func() int
+	inFlight          atomic.Int32
 }
 
 func NewCapacityProvider(batchSize int, instanceCount func() int) *CapacityProvider {
@@ -63,6 +63,8 @@ func NewCapacityProviderSeparatedGroupAware(batchSize int, groupAwareCapacity fu
 	}
 }
 
+// TotalSlots assumes batchSize × instance count stays far below int32 range
+// (~2.1e9); overflowing would pin HasCapacity to false.
 func (c *CapacityProvider) TotalSlots() int {
 	if c == nil {
 		return 0

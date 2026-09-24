@@ -125,6 +125,11 @@ func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, curStep 
 		Msg:         msg,
 		StarveClock: time.Now().Add(-m.errScheduler.TakeQueueWaitCarry(req.SessionID)),
 	}); err != nil {
+		// OnRequest already counted this attempt: undo it before rejecting,
+		// same as the other pre-dispatch failure paths.
+		if req.SessionID != "" {
+			m.errScheduler.RollbackInFlightAttempt(req.SessionID, 0)
+		}
 		msg.Response <- err
 		return
 	}

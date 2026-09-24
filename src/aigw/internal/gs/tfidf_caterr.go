@@ -17,8 +17,6 @@ import (
 	"unicode"
 
 	"huawei.com/aigw/pkg/log"
-
-	"github.com/bbalet/stopwords"
 )
 
 // CatErrClassifier classifies prompts into categories using TF-IDF vectors
@@ -196,8 +194,11 @@ func (c *CatErrClassifier) computeTfidf(tokens []string) []float64 {
 }
 
 // tokenizePrompt splits a prompt into lowercase tokens.
-// ASCII: 2+ char alphanumeric words, English stop words filtered.
-// CJK (Han) characters: emitted as individual tokens for char-bigram clustering.
+// ASCII: 2+ char alphanumeric words. CJK (Han) characters: emitted as
+// individual tokens for char-bigram clustering. No stop-word filtering here:
+// the loaded vocabulary is the single source of truth (words the training
+// pipeline filtered never entered it; words it kept must all stay matchable),
+// so classification never second-guesses the vocabulary with a second list.
 func tokenizePrompt(text string) []string {
 	if text == "" {
 		return nil
@@ -209,10 +210,7 @@ func tokenizePrompt(text string) []string {
 	var current strings.Builder
 	flushWord := func() {
 		if current.Len() >= 2 {
-			word := current.String()
-			if !isStopWord(word) {
-				tokens = append(tokens, word)
-			}
+			tokens = append(tokens, current.String())
 		}
 		current.Reset()
 	}
@@ -245,10 +243,6 @@ func buildNgrams(tokens []string) []string {
 		terms = append(terms, tokens[i]+" "+tokens[i+1])
 	}
 	return terms
-}
-
-func isStopWord(word string) bool {
-	return strings.TrimSpace(stopwords.CleanString(word, "en", false)) == ""
 }
 
 func cosineSim(a, b []float64) float64 {
