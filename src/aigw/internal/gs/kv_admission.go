@@ -82,6 +82,11 @@ type KvAdmissionController struct {
 	// or after quotaAgeFallback on a perfectly static engine.
 	quotaVersion string
 	quotaResetAt time.Time
+	// lastAdmitAt suppresses the age fallback while a dispatched request's
+	// consequence is still in flight (unobserved): a recently-admitted
+	// request makes a static snapshot EXPECTED, not a sign of a broken
+	// observation pipeline.
+	lastAdmitAt time.Time
 
 	client *http.Client
 }
@@ -201,7 +206,12 @@ func (c *KvAdmissionController) pollOnce(ctx context.Context) {
 	// one snapshot is consumed at most once (per instance quota, K=1).
 	version := fmt.Sprintf("%d/%d/%.4f/%.0f",
 		c.signal.running, c.signal.waiting, c.signal.kvUsage, c.signal.queriesTotal)
-	if version != c.quotaVersion || time.Since(c.quotaResetAt) >= quotaAgeFallback {
+	// The fallback additionally requires no recent admission: a dispatched
+	// request whose consequence has not been observed yet makes a static
+	// snapshot expected — the heartbeat quota must not fire mid-flight.
+	fallbackDue := time.Since(c.quotaResetAt) >= quotaAgeFallback &&
+		time.Since(c.lastAdmitAt) >= quotaAgeFallback
+	if version != c.quotaVersion || fallbackDue {
 		c.admits = map[string]int{}
 		c.quotaVersion = version
 		c.quotaResetAt = time.Now()
@@ -254,6 +264,7 @@ func (c *KvAdmissionController) AllowDispatch(insUrl string) bool {
 		return false
 	}
 	c.admits[insUrl]++
+	c.lastAdmitAt = time.Now()
 	return true
 }
 
