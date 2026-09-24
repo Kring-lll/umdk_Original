@@ -1,3 +1,8 @@
+<<<<<<< HEAD
+=======
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the AFD plugin project
+>>>>>>> ebeae1d9725ca36529a3523b8ed90002acbad312
 """Check all four routed-only UMDK operators against an independent CPU oracle.
 
 Example (four 910C devices, two Attention ranks and two MoE ranks)::

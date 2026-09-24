@@ -1,3 +1,8 @@
+<<<<<<< HEAD
+=======
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the AFD plugin project
+>>>>>>> ebeae1d9725ca36529a3523b8ed90002acbad312
 """HCCL benchmarks for the four UMDK routed async CAM operators.
 
 Run with torchrun on Ascend 910C; --help and --dry-run need only Python.

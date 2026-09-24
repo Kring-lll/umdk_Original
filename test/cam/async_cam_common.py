@@ -1,3 +1,8 @@
+<<<<<<< HEAD
+=======
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the AFD plugin project
+>>>>>>> ebeae1d9725ca36529a3523b8ed90002acbad312
 """Routed-only UMDK CAM harness with CPU-safe imports.
 
 The pure Python planner is also used by ``--dry-run``. Native execution requires
