@@ -343,6 +343,21 @@ typedef struct bondp_path {
     uint32_t least_load;
 } bondp_path_t;
 
+typedef union bondp_port_id_flag {
+    struct {
+        uint16_t has_chip_id : 1;
+        uint16_t has_die_id  : 1;
+        uint16_t has_port_id : 1;
+        uint16_t reserved    : 13;
+    } bs;
+    uint16_t value;
+} bondp_port_id_flag_t;
+
+typedef struct bondp_port_info {
+    bondp_port_id_flag_t flag;
+    bondp_port_id_t port_id;
+} bondp_port_info_t;
+
 /* Return true when a bonding jetty has at least one valid physical jetty. */
 bool bondp_jetty_is_available(const urma_jetty_t *jetty);
 
