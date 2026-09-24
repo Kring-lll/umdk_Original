@@ -152,6 +152,8 @@ public final class HashUtils {
                                  int ecmpCnt, int hashFunc, int hashSeed) {
         int mappedFunc = mapHashMode(hashFunc);
         if (LIB_ECMP != null) {
+            LOG.info("nativeHash: native path via ubswitch_Hash_ecmp, hashFunc=%s, mappedFunc=%s, hash algorithm=%s",
+                    hashFunc, mappedFunc, UbSwitchHash.hashAlgoName(mappedFunc));
             int rawHash = LIB_ECMP.ubswitch_Hash_ecmp(dip, sip, dport, sport,
                     protocol, mappedFunc, ecmpCnt);
             if (ecmpCnt == 0) {
@@ -248,6 +250,8 @@ public final class HashUtils {
                                             int ecmpCnt, int hashFunc,
                                             int functionSelect) {
         if (LIB_DIE != null) {
+            LOG.info("nativeHashDstCnaJetty: native path via ubswitch_Hash_dieEcmp, functionSelect=%s, hash algorithm=%s",
+                    functionSelect, UbSwitchHash.dieHashAlgoName(functionSelect));
             return LIB_DIE.ubswitch_Hash_dieEcmp(
                 0, dstCna, jettyId & 0xFF, ecmpCnt, functionSelect);
         }
