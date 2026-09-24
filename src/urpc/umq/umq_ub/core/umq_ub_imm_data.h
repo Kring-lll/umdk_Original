@@ -10,6 +10,8 @@
 
 #include <stdint.h>
 
+#include "umq_types.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -18,10 +20,33 @@ extern "C" {
 #define UMQ_UB_IMM_IN_USER_BUF 1  // user buffer with umq defined imm data
 
 /* io_imm.rsvd1 occupies bits 20-39 (20 bits): reserved for the umq backend, never
- * touched by type(0-1)/umq_id(2-19)/user_data(40-63). Callers may stash
- * ubsocket-level markers here (e.g. UBS_IMM_BIG_CTRL_BIT at bit 20); umq_ub_fill_wr
- * propagates this window into the wire imm so receivers can read it back. */
+ * touched by type(0-1)/umq_id(2-19)/user_data(40-63). Bits 22-37 carry the
+ * provider-supplied local RX port and must not be propagated by a later TX.
+ * The remaining bits may carry ubsocket-level markers such as
+ * UBS_IMM_BIG_CTRL_BIT at bit 20. */
 #define UMQ_UB_IMM_RSV1_MASK (0xFFFFF00000ULL)
+#define UMQ_UB_IMM_RX_PORT_SHIFT (22U)
+#define UMQ_UB_IMM_RX_PORT_MASK (UINT64_C(0xFFFF) << UMQ_UB_IMM_RX_PORT_SHIFT)
+#define UMQ_UB_IMM_RSV1_PASSTHRU_MASK (UMQ_UB_IMM_RSV1_MASK & ~UMQ_UB_IMM_RX_PORT_MASK)
+#define UMQ_UB_RX_PORT_UNAVAILABLE UINT32_C(0)
+
+/* The provider encodes bondp_port_id_t as a 16-bit 4/4/8 value. */
+static inline uint16_t umq_ub_imm_decode_rx_port(uint64_t imm_data)
+{
+    return (uint16_t)((imm_data & UMQ_UB_IMM_RX_PORT_MASK) >> UMQ_UB_IMM_RX_PORT_SHIFT);
+}
+
+static inline void umq_ub_buf_reset_rx_port(umq_buf_t *buf)
+{
+    buf->port_id_value = 0;
+    buf->port_id_value_valid = 0;
+}
+
+static inline void umq_ub_buf_set_rx_port(umq_buf_t *buf, uint16_t port_id_value)
+{
+    buf->port_id_value = port_id_value;
+    buf->port_id_value_valid = (buf->port_id_value != UMQ_UB_RX_PORT_UNAVAILABLE);
+}
 
 typedef enum umq_ub_fc_credit_type {
     IMM_TYPE_FC_CREDIT_INIT = 0,

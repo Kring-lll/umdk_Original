@@ -11,6 +11,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "bondp_api.h"
 #include "urma_types.h"
 #include "uvs_api.h"
 
@@ -57,6 +58,12 @@ typedef urma_status_t (*urma_post_jetty_send_wr_t)(urma_jetty_t *jetty,
 typedef urma_status_t (*urma_post_jetty_recv_wr_t)(urma_jetty_t *jetty,
     urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr);
 typedef urma_status_t (*urma_post_jfr_wr_t)(urma_jfr_t *jfr, urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr);
+typedef urma_status_t (*bondp_post_jetty_send_wr_t)(urma_jetty_t *jetty, urma_jfs_wr_t *wr,
+    bondp_port_id_t port_id, urma_jfs_wr_t **bad_wr);
+typedef urma_status_t (*bondp_post_jetty_recv_wr_t)(urma_jetty_t *jetty, urma_jfr_wr_t *wr,
+    bondp_port_id_t port_id, urma_jfr_wr_t **bad_wr);
+typedef urma_status_t (*bondp_post_jfr_wr_t)(urma_jfr_t *jfr, urma_jfr_wr_t *wr,
+    bondp_port_id_t port_id, urma_jfr_wr_t **bad_wr);
 typedef urma_status_t (*urma_get_rjetty_t)(urma_jetty_t *jetty, urma_rjetty_t **rjetty, uint32_t *length);
 typedef void (*urma_put_rjetty_t)(urma_rjetty_t *rjetty);
 
@@ -136,6 +143,9 @@ typedef struct umq_symbol_urma {
     urma_post_jetty_send_wr_t urma_post_jetty_send_wr;
     urma_post_jetty_recv_wr_t urma_post_jetty_recv_wr;
     urma_post_jfr_wr_t urma_post_jfr_wr;
+    bondp_post_jetty_send_wr_t bondp_post_jetty_send_wr;
+    bondp_post_jetty_recv_wr_t bondp_post_jetty_recv_wr;
+    bondp_post_jfr_wr_t bondp_post_jfr_wr;
     urma_get_rjetty_t urma_get_rjetty;
     urma_put_rjetty_t urma_put_rjetty;
 

@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: MIT
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
- * Description: UMQ dynamic symbol loading for URMA and UVS
+ * Description: UMQ dynamic symbol loading for URMA, UBAGG and UVS
  * Create: 2026-3-23
  * Note: Only used by UB transport mode
  */
@@ -16,9 +16,10 @@
 
 #include <dlfcn.h>
 
-// Global URMA/UVS symbol instance
+// Global URMA/UBAGG/UVS symbol instance
 static umq_symbol_urma_t g_umq_symbol_urma = {0};
 static void *g_umq_urma_dlhandler = NULL;
+static void *g_umq_ubagg_dlhandler = NULL;
 static void *g_umq_tpsa_dlhandler = NULL;
 
 #define LOAD_SYMBOL(sym, handle, type, name) \
@@ -46,6 +47,19 @@ int umq_symbol_urma_load(umq_symbol_urma_t *sym)
         g_umq_urma_dlhandler = dlopen("liburma.so", RTLD_LAZY | RTLD_GLOBAL);
         if (g_umq_urma_dlhandler == NULL) {
             UMQ_VLOG_ERR(VLOG_UMQ, "open liburma.so failed, err: %s\n", dlerror());
+            return -1;
+        }
+    }
+
+    // Load UBAGG symbols if not already loaded
+    if (g_umq_ubagg_dlhandler == NULL) {
+        g_umq_ubagg_dlhandler = dlopen("liburma_ubagg.so", RTLD_LAZY | RTLD_GLOBAL);
+        if (g_umq_ubagg_dlhandler == NULL) {
+            // RPM installs UBAGG in the URMA provider directory.
+            g_umq_ubagg_dlhandler = dlopen("/usr/lib64/urma/liburma_ubagg.so", RTLD_LAZY | RTLD_GLOBAL);
+        }
+        if (g_umq_ubagg_dlhandler == NULL) {
+            UMQ_VLOG_ERR(VLOG_UMQ, "open liburma_ubagg.so failed, err: %s\n", dlerror());
             return -1;
         }
     }
@@ -99,6 +113,9 @@ int umq_symbol_urma_load(umq_symbol_urma_t *sym)
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_post_jetty_send_wr_t, urma_post_jetty_send_wr);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_post_jetty_recv_wr_t, urma_post_jetty_recv_wr);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_post_jfr_wr_t, urma_post_jfr_wr);
+    LOAD_SYMBOL(sym, g_umq_ubagg_dlhandler, bondp_post_jetty_send_wr_t, bondp_post_jetty_send_wr);
+    LOAD_SYMBOL(sym, g_umq_ubagg_dlhandler, bondp_post_jetty_recv_wr_t, bondp_post_jetty_recv_wr);
+    LOAD_SYMBOL(sym, g_umq_ubagg_dlhandler, bondp_post_jfr_wr_t, bondp_post_jfr_wr);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_get_rjetty_t, urma_get_rjetty);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_put_rjetty_t, urma_put_rjetty);
 
@@ -134,11 +151,11 @@ int umq_symbol_urma_load(umq_symbol_urma_t *sym)
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_stop_perf_t, urma_stop_perf);
     LOAD_SYMBOL(sym, g_umq_urma_dlhandler, urma_get_perf_info_t, urma_get_perf_info);
 
-    UMQ_VLOG_INFO(VLOG_UMQ, "URMA and UVS symbols loaded successfully\n");
+    UMQ_VLOG_INFO(VLOG_UMQ, "URMA, UBAGG and UVS symbols loaded successfully\n");
     return 0;
 }
 
-#else /* UMQ_STATIC_LIB — build-time link via -lurma -ltpsa */
+#else /* UMQ_STATIC_LIB — build-time link via -lurma -lurma_ubagg -ltpsa */
 
 // Function pointers are bound to the real symbols at link time; no dlopen handler.
 static umq_symbol_urma_t g_umq_symbol_urma = {
@@ -182,6 +199,9 @@ static umq_symbol_urma_t g_umq_symbol_urma = {
     .urma_post_jetty_send_wr = urma_post_jetty_send_wr,
     .urma_post_jetty_recv_wr = urma_post_jetty_recv_wr,
     .urma_post_jfr_wr = urma_post_jfr_wr,
+    .bondp_post_jetty_send_wr = bondp_post_jetty_send_wr,
+    .bondp_post_jetty_recv_wr = bondp_post_jetty_recv_wr,
+    .bondp_post_jfr_wr = bondp_post_jfr_wr,
     .urma_get_rjetty = urma_get_rjetty,
     .urma_put_rjetty = urma_put_rjetty,
 
