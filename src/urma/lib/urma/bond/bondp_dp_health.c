@@ -343,9 +343,9 @@ static void hc_process_probe_cr(bondp_hc_ctx_t *hc_ctx, int local_idx, const urm
         URMA_LOG_WARN("QQQQ Health probe succeeded, node_idx=%u, local_idx=%d, target_idx=%u, "
                        "previous_target_valid=%d.\n", node_idx, local_idx, target_idx, prev);
     }
-    if (ok && !prev) {
-        URMA_LOG_WARN("QQQQ Health probe link recovered, node_idx=%u, path=[%d,%u].\n",
-                      node_idx, local_idx, target_idx);
+    if (ok) {
+        // URMA_LOG_WARN("QQQQ Health probe link recovered, node_idx=%u, path=[%d,%u].\n",
+        //               node_idx, local_idx, target_idx);
         hc_set_tjetty_list_target_valid(node, (uint32_t)local_idx, target_idx);
     }
     if (bdp_ctx != NULL) {
