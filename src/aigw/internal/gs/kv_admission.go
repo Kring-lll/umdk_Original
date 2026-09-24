@@ -209,8 +209,13 @@ func (c *KvAdmissionController) pollOnce(ctx context.Context) {
 	// The fallback additionally requires no recent admission: a dispatched
 	// request whose consequence has not been observed yet makes a static
 	// snapshot expected — the heartbeat quota must not fire mid-flight.
+	// The admission gap uses staleAfter (not quotaAgeFallback): the
+	// consequence-visible delay is cache phase (≤3s) + poll pickup (≤1s),
+	// so an equal-length 3s guard still races the refresh cycle. Only a
+	// snapshot static for the full staleness bound (8s) justifies a
+	// heartbeat — by then the observation itself is suspect.
 	fallbackDue := time.Since(c.quotaResetAt) >= quotaAgeFallback &&
-		time.Since(c.lastAdmitAt) >= quotaAgeFallback
+		time.Since(c.lastAdmitAt) >= c.staleAfter
 	if version != c.quotaVersion || fallbackDue {
 		c.admits = map[string]int{}
 		c.quotaVersion = version
