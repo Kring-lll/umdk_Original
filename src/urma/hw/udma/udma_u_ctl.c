@@ -585,7 +585,7 @@ static urma_jetty_t *udma_u_create_jetty_ex(urma_context_t *ctx, struct udma_u_j
 
 	udma_u_init_jetty_param_ex(jetty, cfg_ex);
 
-	if(udma_u_create_common_jetty(ctx, jetty, &cfg_ex->base_cfg))
+	if (udma_u_create_common_jetty(ctx, jetty, &cfg_ex->base_cfg))
 		goto err_jetty_create_common_jetty;
 
 	return &jetty->base;

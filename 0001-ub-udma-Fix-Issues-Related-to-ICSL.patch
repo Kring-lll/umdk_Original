@@ -1,0 +1,273 @@
+From ac1fc4d2e6446cdb10af4ccb803770c09f406782 Mon Sep 17 00:00:00 2001
+From: kwx884906 <kwx884906@huawei.com>
+Date: Thu, 24 Sep 2026 14:53:42 +0800
+Subject: [PATCH 1/1] ub: udma: Fix Issues Related to ICSL
+
+driver inclusion
+category: bugfix
+bugzilla: https://atomgit.com/openeuler/umdk/issues/1000
+CVE: NA
+
+-----------------------------------------------------------
+
+This patch fixes the Issues Related to ICSL
+
+Fixes: 260ceef1798e ("ub: udma: Support user ctl function.")
+
+Signed-off-by: kwx884906 <kwx884906@huawei.com>
+---
+ src/urma/hw/udma/udma_u_common.h |  2 +-
+ src/urma/hw/udma/udma_u_ctl.c    |  2 +-
+ src/urma/hw/udma/udma_u_jetty.c  | 14 ++++++--------
+ src/urma/hw/udma/udma_u_jfc.c    |  6 +++---
+ src/urma/hw/udma/udma_u_jfr.c    | 10 +++++-----
+ src/urma/hw/udma/udma_u_jfs.c    | 10 +++++-----
+ src/urma/hw/udma/udma_u_log.c    |  4 ++--
+ src/urma/hw/udma/udma_u_ops.c    |  5 +++--
+ 8 files changed, 26 insertions(+), 27 deletions(-)
+
+diff --git a/src/urma/hw/udma/udma_u_common.h b/src/urma/hw/udma/udma_u_common.h
+index 5ae53d8..32c3c8b 100644
+--- a/src/urma/hw/udma/udma_u_common.h
++++ b/src/urma/hw/udma/udma_u_common.h
+@@ -86,7 +86,7 @@ typedef int (*dtu_u_mmap_func)(uint64_t va_base, uint64_t va_size, void **dtu_va
+ typedef void (*dtu_u_munmap_func)(void **g_dtu_va, uint64_t va_size, uint32_t *dtu_va_refcount);
+ 
+ /* 32 */
+-#define UDMA_JETTY_TABLE_NUM 1 << 5
++#define UDMA_JETTY_TABLE_NUM (1 << 5)
+ 
+ struct udma_u_context {
+ 	urma_context_t		urma_ctx;
+diff --git a/src/urma/hw/udma/udma_u_ctl.c b/src/urma/hw/udma/udma_u_ctl.c
+index 8188924..afebd07 100644
+--- a/src/urma/hw/udma/udma_u_ctl.c
++++ b/src/urma/hw/udma/udma_u_ctl.c
+@@ -585,7 +585,7 @@ static urma_jetty_t *udma_u_create_jetty_ex(urma_context_t *ctx, struct udma_u_j
+ 
+ 	udma_u_init_jetty_param_ex(jetty, cfg_ex);
+ 
+-	if(udma_u_create_common_jetty(ctx, jetty, &cfg_ex->base_cfg))
++	if (udma_u_create_common_jetty(ctx, jetty, &cfg_ex->base_cfg))
+ 		goto err_jetty_create_common_jetty;
+ 
+ 	return &jetty->base;
+diff --git a/src/urma/hw/udma/udma_u_jetty.c b/src/urma/hw/udma/udma_u_jetty.c
+index 11888b6..eba6f15 100644
+--- a/src/urma/hw/udma/udma_u_jetty.c
++++ b/src/urma/hw/udma/udma_u_jetty.c
+@@ -33,7 +33,6 @@ static int exec_jetty_active_cmd(struct udma_u_jetty *jetty, urma_jetty_cfg_t *c
+ 
+ 	cmd.buf_addr = (uintptr_t)jetty->sq.qbuf;
+ 	cmd.buf_len = jetty->sq.qbuf_size;
+-	cmd.db_addr = (uintptr_t)jetty->sq.db.addr;
+ 	cmd.jetty_addr = (uintptr_t)&jetty->sq;
+ 	cmd.sqe_bb_cnt = jetty->sq.sqe_bb_cnt;
+ 	cmd.pi_type = jetty->sq.pi_type;
+@@ -76,7 +75,6 @@ int exec_jetty_create_cmd(urma_context_t *ctx, struct udma_u_jetty *jetty,
+ 
+ 	cmd.buf_addr = (uintptr_t)jetty->sq.qbuf;
+ 	cmd.buf_len = jetty->sq.qbuf_size;
+-	cmd.db_addr = (uintptr_t)jetty->sq.db.addr;
+ 	cmd.jetty_addr = (uintptr_t)&jetty->sq;
+ 	cmd.sqe_bb_cnt = jetty->sq.sqe_bb_cnt;
+ 	cmd.pi_type = jetty->sq.pi_type;
+@@ -245,7 +243,7 @@ urma_jetty_t *udma_u_create_jetty(urma_context_t *ctx, urma_jetty_cfg_t *cfg)
+ 
+ 	jetty->jetty_type = UDMA_URMA_NORMAL_JETTY_TYPE;
+ 	if (exec_jetty_create_cmd(ctx, jetty, cfg)) {
+-		if(jetty->sq.dtu_en) {
++		if (jetty->sq.dtu_en) {
+ 			jetty->sq.dtu_en = false;
+ 			if (!udma_u_alloc_queue_buf(&jetty->sq, jetty->sq.sqe_bb_cnt * cfg->jfs_cfg.depth,
+ 			    UDMA_JFS_WQEBB, jetty->sq.aligned_size, true)) {
+@@ -758,7 +756,7 @@ urma_status_t udma_u_alloc_jetty(urma_context_t *ctx, urma_jetty_cfg_t *cfg,
+ {
+ 	struct udma_u_context *udma_ctx = to_udma_u_ctx(ctx);
+ 	struct udma_u_jetty *udma_jetty;
+-	urma_cmd_udrv_priv_t udata;
++	urma_cmd_udrv_priv_t udata = {};
+ 	int ret;
+ 
+ 	udma_jetty = (struct udma_u_jetty *)calloc(1, sizeof(struct udma_u_jetty));
+@@ -782,7 +780,7 @@ urma_status_t udma_u_alloc_jetty(urma_context_t *ctx, urma_jetty_cfg_t *cfg,
+ 
+ urma_status_t udma_u_free_jetty(urma_jetty_t *jetty)
+ {
+-	urma_cmd_udrv_priv_t udata;
++	urma_cmd_udrv_priv_t udata = {};
+ 	int ret;
+ 
+ 	ret = urma_cmd_free_jetty(jetty, &udata);
+@@ -947,7 +945,7 @@ urma_status_t udma_u_set_jetty_field(struct udma_u_jetty_queue *sq, uint64_t opt
+ urma_status_t udma_u_set_jetty_opt(urma_jetty_t *jetty, uint64_t opt, void *buf, uint32_t len)
+ {
+ 	struct udma_u_jetty *udma_jetty = to_udma_u_jetty(jetty);
+-	urma_cmd_udrv_priv_t udata;
++	urma_cmd_udrv_priv_t udata = {};
+ 	urma_status_t verify_ret;
+ 	urma_status_t urma_ret;
+ 	int ret;
+@@ -1065,7 +1063,7 @@ static void udma_u_get_jetty_cfg_field(urma_jetty_cfg_t *jetty_cfg, uint64_t opt
+ urma_status_t udma_u_get_jetty_opt(urma_jetty_t *jetty, uint64_t opt, void *buf, uint32_t len)
+ {
+ 	struct udma_u_jetty *udma_jetty = to_udma_u_jetty(jetty);
+-	urma_cmd_udrv_priv_t udata;
++	urma_cmd_udrv_priv_t udata = {};
+ 	urma_status_t urma_ret;
+ 	int ret;
+ 
+@@ -1190,7 +1188,7 @@ err_active_jetty_cmd:
+ 
+ urma_status_t udma_u_deactive_jetty(urma_jetty_t *jetty)
+ {
+-	urma_cmd_udrv_priv_t udata;
++	urma_cmd_udrv_priv_t udata = {};
+ 	int ret;
+ 
+ 	ret = udma_u_delete_jetty_prepare(jetty);
+diff --git a/src/urma/hw/udma/udma_u_jfc.c b/src/urma/hw/udma/udma_u_jfc.c
+index d9243bd..09ae861 100644
+--- a/src/urma/hw/udma/udma_u_jfc.c
++++ b/src/urma/hw/udma/udma_u_jfc.c
+@@ -257,9 +257,9 @@ urma_status_t udma_u_active_jfc(urma_jfc_t *jfc)
+ 	return URMA_SUCCESS;
+ 
+ err_create_jfc:
+-    if (!ujfc->db_cstm) {
+-	    udma_u_free_sw_db(ujfc->cq.ctx, ujfc->sw_db, UDMA_JFC_TYPE_DB);
+-	}
++	if (!ujfc->db_cstm)
++		udma_u_free_sw_db(ujfc->cq.ctx, ujfc->sw_db, UDMA_JFC_TYPE_DB);
++	
+ err_alloc_sw_db:
+ 	udma_u_delete_cq(&ujfc->cq);
+ 
+diff --git a/src/urma/hw/udma/udma_u_jfr.c b/src/urma/hw/udma/udma_u_jfr.c
+index 9fec82b..252773d 100644
+--- a/src/urma/hw/udma/udma_u_jfr.c
++++ b/src/urma/hw/udma/udma_u_jfr.c
+@@ -297,10 +297,10 @@ static void udma_u_free_jfr_prepare(urma_jfr_t *jfr)
+ 	if (jfr->jfr_cfg.jfc)
+ 		udma_u_clean_jfc(jfr->jfr_cfg.jfc, jfr->jfr_id.id);
+ 
+-	udma_u_free_sw_db(udma_ctx, (uint32_t *)udma_jfr->long_sleeptime, UDMA_JFR_PAYLOAD);
+-
+-	if (!udma_jfr->swdb_cstm)
++	if (!udma_jfr->swdb_cstm) {
++		udma_u_free_sw_db(udma_ctx, (uint32_t *)udma_jfr->long_sleeptime, UDMA_JFR_PAYLOAD);
+ 		udma_u_free_sw_db(udma_ctx, udma_jfr->sw_db, UDMA_JFR_TYPE_DB);
++	}
+ 
+ 	udma_u_free_queue_buf(&udma_jfr->rq);
+ 	udma_u_free_idx_que(&udma_jfr->idx_que);
+@@ -460,13 +460,13 @@ static void fill_wqe_idx(struct udma_u_jfr *jfr, uint32_t wqe_idx)
+ static void fill_recv_sge_to_wqe(urma_jfr_wr_t *wr, void *wqe, struct udma_u_jfr *jfr)
+ {
+ 	struct udma_wqe_sge *sge = (struct udma_wqe_sge *)wqe;
+-	uint32_t total_len = 0;
++	uint64_t total_len = 0;
+ 	uint32_t i, cnt;
+ 
+ 	for (i = 0, cnt = 0; i < wr->src.num_sge; i++) {
+ 		if (!wr->src.sge[i].len)
+ 			continue;
+-		total_len += wr->src.sge[i].len;
++		total_len += (uint64_t)wr->src.sge[i].len;
+ 		set_data_of_sge(sge + cnt, wr->src.sge + i);
+ 		cnt++;
+ 	}
+diff --git a/src/urma/hw/udma/udma_u_jfs.c b/src/urma/hw/udma/udma_u_jfs.c
+index 4fa55fe..c298e5d 100644
+--- a/src/urma/hw/udma/udma_u_jfs.c
++++ b/src/urma/hw/udma/udma_u_jfs.c
+@@ -1258,8 +1258,8 @@ urma_status_t udma_u_alloc_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg,
+ 			      urma_jfs_t **jfs)
+ {
+ 	struct udma_u_context *udma_ctx = to_udma_u_ctx(ctx);
++	urma_cmd_udrv_priv_t udata = {};
+ 	struct udma_u_jfs *udma_jfs;
+-	urma_cmd_udrv_priv_t udata;
+ 	int ret;
+ 
+ 	udma_jfs = (struct udma_u_jfs *)calloc(1, sizeof(struct udma_u_jfs));
+@@ -1283,7 +1283,7 @@ urma_status_t udma_u_alloc_jfs(urma_context_t *ctx, urma_jfs_cfg_t *cfg,
+ 
+ urma_status_t udma_u_free_jfs(urma_jfs_t *jfs)
+ {
+-	urma_cmd_udrv_priv_t udata;
++	urma_cmd_udrv_priv_t udata = {};
+ 	int ret;
+ 
+ 	ret = urma_cmd_free_jfs(jfs, &udata);
+@@ -1300,7 +1300,7 @@ urma_status_t udma_u_free_jfs(urma_jfs_t *jfs)
+ urma_status_t udma_u_set_jfs_opt(urma_jfs_t *jfs, uint64_t opt, void *buf, uint32_t len)
+ {
+ 	struct udma_u_jfs *udma_jfs = to_udma_u_jfs(jfs);
+-	urma_cmd_udrv_priv_t udata;
++	urma_cmd_udrv_priv_t udata = {};
+ 	urma_status_t verify_ret;
+ 	urma_status_t urma_ret;
+ 	int ret;
+@@ -1332,7 +1332,7 @@ urma_status_t udma_u_set_jfs_opt(urma_jfs_t *jfs, uint64_t opt, void *buf, uint3
+ urma_status_t udma_u_get_jfs_opt(urma_jfs_t *jfs, uint64_t opt, void *buf, uint32_t len)
+ {
+ 	struct udma_u_jfs *udma_jfs = to_udma_u_jfs(jfs);
+-	urma_cmd_udrv_priv_t udata;
++	urma_cmd_udrv_priv_t udata = {};
+ 	urma_status_t urma_ret;
+ 	int ret;
+ 
+@@ -1438,7 +1438,7 @@ err_active_jfs_cmd:
+ 
+ urma_status_t udma_u_deactive_jfs(urma_jfs_t *jfs)
+ {
+-	urma_cmd_udrv_priv_t udata;
++	urma_cmd_udrv_priv_t udata = {};
+ 	int ret;
+ 
+ 	ret = urma_cmd_deactive_jfs(jfs, &udata);
+diff --git a/src/urma/hw/udma/udma_u_log.c b/src/urma/hw/udma/udma_u_log.c
+index 1ff41f2..82cb671 100644
+--- a/src/urma/hw/udma/udma_u_log.c
++++ b/src/urma/hw/udma/udma_u_log.c
+@@ -79,11 +79,11 @@ int udma_vlog(const char *function, int line, enum udma_vlog_level level, const
+ 	int ret;
+ 
+ 	/* add log head info, "[UDMA_LOG_TAG][function:line] format" */
+-	ret = snprintf(newformat, MAX_LOG_LEN, "[%s][%s:%d] %s", UDMA_LOG_TAG, function, line, format);
++	ret = snprintf(newformat, MAX_LOG_LEN + 1, "[%s][%s:%d] %s", UDMA_LOG_TAG, function, line, format);
+ 	if (ret <= 0 || ret >= (int)sizeof(newformat))
+ 		return ret;
+ 
+-	ret = vsnprintf(logmsg, MAX_LOG_LEN, newformat, va);
++	ret = vsnprintf(logmsg, MAX_LOG_LEN + 1, newformat, va);
+ 	if (ret == -1 || ret >= (int)sizeof(newformat)) {
+ 		(void)printf("logmsg size exceeds MAX_LOG_LEN size :%d.\n", MAX_LOG_LEN);
+ 		return ret;
+diff --git a/src/urma/hw/udma/udma_u_ops.c b/src/urma/hw/udma/udma_u_ops.c
+index 964aeca..f6606a7 100644
+--- a/src/urma/hw/udma/udma_u_ops.c
++++ b/src/urma/hw/udma/udma_u_ops.c
+@@ -286,7 +286,7 @@ static urma_context_t *udma_u_create_context(urma_device_t *dev, uint32_t eid_in
+ 	}
+ 
+ 	if (pthread_mutex_init(&udma_ctx->hugepage_lock, NULL)) {
+-		UDMA_LOG_ERR("Failed to init doorbell list mutex.\n");
++		UDMA_LOG_ERR("Failed to init hugepage mutex.\n");
+ 		goto err_hugepage_lock;
+ 	}
+ 	udma_ctx->hugepage_list = NULL;
+@@ -349,7 +349,8 @@ static urma_status_t udma_u_delete_context(urma_context_t *ctx)
+ 	urma_status_t ret = URMA_SUCCESS;
+ 
+ 	udma_u_destroy_jt_table(udma_ctx);
+-	udma_u_free_reserved_sq();
++	if (udma_ctx->sq_reserved)
++		udma_u_free_reserved_sq();
+ 	udma_u_free_db(ctx, &udma_ctx->db);
+ 	if (udma_ctx->dtu_enable) {
+ 		udma_ctx->dtu_munmap_fun_ptr(&g_dtu_va, udma_ctx->dtu_va_size, &g_dtu_va_refcount);
+-- 
+2.33.0
+
