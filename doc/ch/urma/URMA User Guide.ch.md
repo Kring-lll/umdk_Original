@@ -378,7 +378,7 @@ URMA管控面负责针对可靠连接模式提供建链管理手段，此协议�
 
 （10）处于reused状态的任一节点，若用户先触发拆链，此节点发送拆链通知（1420），则此节点切换到NOTIFY sent on reuse暂态，此节点自动切换（1423）到Target established状态；此节点若收到拆链通知（1424），则切换到NOTIFY received瞬态，销毁传输层资源后，自动切换（1407）到reset状态；
 
-（10）处于reused状态的任一节点，若先收到拆链通知（1421），则此节点切换到NOTIFY received on reuse暂态，此节点自动切换（1422）到Initiator established状态；若此节点上用户触发拆链并发送拆链通知（1424），则此节点切换到NOTIFY sent瞬态，并启动切换（1425）到reset状态，至此拆链流程结束。
+（11）处于reused状态的任一节点，若先收到拆链通知（1421），则此节点切换到NOTIFY received on reuse暂态，此节点自动切换（1422）到Initiator established状态；若此节点上用户触发拆链并发送拆链通知（1424），则此节点切换到NOTIFY sent瞬态，并启动切换（1425）到reset状态，至此拆链流程结束。
 
 图示说明如下：
 
@@ -432,7 +432,7 @@ URMA管控面负责针对可靠连接模式提供建链管理手段，此协议�
 
 2.  交换事务层、传输层信息；
 
-3.  导入对端事务层对象，完成建链。
+3.  导入对端事务层对象；对于本地和远端 Jetty 均为 RC 模式的场景，还需调用 `urma_bind_jetty_ex` 绑定本地 Jetty 与已导入的远端 Jetty，完成建链。
 
 建链和拆链流程参考下图：
 
@@ -471,7 +471,7 @@ urma_token_t *token_value, urma_import_jetty_ex_cfg_t *cfg);
 * users should obey this rule in case of unexpected errors.
 * @param[in] [Required] jetty: local jetty to construct the transport channel;
 * @param[in] [Required] tjetty: target jetty imported before;
-* Return: 0 on success, URMA_EEXIST if the jetty has been binded, other value on error;
+* Return: 0 on success, other value on error;
 * @param[in] [Required] cfg: tp active configuration to exchange with target;
 * Note: A local jetty can be binded with only one remote jetty. Only supported by jetty under URMA_TM_RC.
 */
@@ -504,7 +504,7 @@ urma_token_t *token_value);
 * Bind jetty: construct the transport channel between local jetty and remote jetty.
 * @param[in] [Required] jetty: local jetty to construct the transport channel;
 * @param[in] [Required] tjetty: target jetty imported before;
-* Return: 0 on success, URMA_EEXIST if the jetty has been binded, other value on error
+* Return: 0 on success, other value on error;
 * Note: A local jetty can be binded with only one remote jetty. Only supported by jetty under URMA_TM_RC.
 */
 urma_status_t urma_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty);
@@ -528,11 +528,11 @@ URMA的上下文管理需要在应用运行初期执行，后续的Jetty、Segme
 
 3.  使用说明
 
-    1.  调用*urma_init*函数配置使用的平台和配置uasid。uasid不指定时由系统随机分配，指定uasid时可能导致函数执行失败。
+    1.  调用*urma_init*初始化URMA环境。API约定conf为NULL时随机分配uasid；conf非NULL且uasid为0时也应随机分配非0值。当前核心的UASID分配仍为TODO，裸UDMA provider忽略conf，其上下文配置中的uasid保持为0。
 
     <!-- -->
 
-    1.  调用*urma_query_device*函数查询设备的属性，获取eid等信息。如果应用已经获取设备的eid，则该步骤可不执行。
+    1.  调用*urma_query_device*查询设备属性；调用*urma_get_eid_list*获取EID及其eid_index，选择用于创建上下文的索引，并在使用后调用*urma_free_eid_list*释放列表。如果已知所需的有效eid_index，可省略EID列表查询。
 
     2.  调用*urma_create_context*函数创建设备上下文。一个进程创建的资源总和（包括硬件doorbell寄存器，Jetty，Segment等），与其他进程相互隔离。
 
@@ -544,7 +544,7 @@ URMA的上下文管理需要在应用运行初期执行，后续的Jetty、Segme
 typedef struct urma_context {
     struct urma_device *dev; /* [Private] point to the corresponding urma device. */
     struct urma_ops *ops; /* [Private] operation of urma device. */
-    int dev_fd; /* [Private] fd of urma device's sysfs file. */
+    int dev_fd; /* [Private] device file descriptor; the core opens the URMA character device when needed. */
     int async_fd; /* [Private] fd of urma device's async event file. */
     pthread_mutex_t mutex; /* [Private] mutex of urma context. */
     urma_eid_t eid; /* [Public] eid of urma device. */
@@ -557,19 +557,19 @@ typedef struct urma_context {
 
 1.  struct urma_device *dev: 这是一个指向 urma_device 结构体的指针，它包含了与特定 URMA 设备相关的信息，如设备的属性、操作函数等。
 
-2.  struct urma_ops *ops: 这也是一个指针，指向 urma_ops 结构体，它定义了与 URMA 设备交互的操作集合，如打开、关闭、读写等。
+2.  struct urma_ops *ops: 指向当前上下文的provider操作表，包含Jetty和Segment资源管理、异步事件处理、工作请求提交及完成记录轮询等操作。
 
-3.  int dev_fd: 这是一个整型变量，表示到 URMA 设备 sysfs 文件的文件描述符。sysfs 是 Linux 内核提供的一种接口，允许用户空间程序通过文件系统接口访问内核数据结构，如设备的状态信息。
+3.  int dev_fd: 设备文件描述符。对于由核心库打开设备的上下文，它对应/dev/uburma/<设备名>；若设备由driver创建，核心路径不打开该节点，具体由provider处理。
 
-4.  int async_fd: 这也是一个整型变量，表示到 URMA 设备异步事件文件的文件描述符。这个文件描述符用于接收设备产生的异步事件通知，比如数据传输完成、错误发生等。
+4.  int async_fd: URMA设备异步事件通道的文件描述符，用于获取JFC/JFS/JFR错误、端口状态变化等异步事件；完成记录由urma_poll_jfc从JFC获取。
 
-5.  pthread_mutex_t mutex: 这是一个互斥锁，用于同步对 urma_context_t 结构体中数据的访问。在多线程环境中，互斥锁保证了在任何时候只有一个线程可以修改结构体中的数据，防止数据竞争。
+5.  pthread_mutex_t mutex: 上下文内部互斥锁，用于需要该锁保护的控制操作；它不表示urma_context_t所有字段的访问均自动互斥。
 
 6.  urma_eid_t eid: 这是一个 urma_eid_t 类型的变量，表示 URMA 设备的全局唯一标识符（eid，Endpoint ID）。在 RoCE（RDMA over Converged Ethernet）网络中，eid 是用来标识网络上的一个端点。
 
-7.  uint32_t eid_index: 这是一个无符号32位整数，可能用于索引或标识与 eid 相关的额外信息，比如在设备上下文中这个eid的特定位置。
+7.  uint32_t eid_index: 设备EID的索引，由创建上下文时传入，用于选择该上下文使用的EID。
 
-8.  uint32_t uasid: 这也是一个无符号32位整数，表示当前进程的 User Assisted Segment Identifier (UASID)。
+8.  uint32_t uasid: 当前进程的 UASID。
 
 9.  struct urma_ref ref: 这是一个 urma_ref 结构体的实例，用于跟踪 urma_context_t 的引用计数。
 
@@ -581,7 +581,7 @@ typedef struct urma_context {
 
 URMA执行资源管理通过Jetty进行管理。Jetty为URMA软件操作对象，借助Jetty UBEP和软件实现消息交互。Jetty主要用于消息语义接收、发送以及内存语义的命令下发。Jetty为进程独享，根据用途的不同Jetty可细分为Jetty、Jetty For Send（JFS）、Jetty For Receive（JFR）、Jetty For Complete（JFC）。
 
-1.  **Jetty（码头，港口）**：Jetty是URMA中的全功能通信对象，它既支持发送（发送数据到其他Jetty）也支持接收（接收来自其他Jetty的数据）。Jetty对象包含一个发送队列（SQ，Send Queue Buffer）用于提交工作单元（WQE，Work Queue Entry），同时它还关联了一个JFC（Jetty for Complete，完成的Jetty）来管理数据传输的完成状态。Jetty可以独立使用，或者在单向模型中，作为JFS和JFR的组合。
+1.  **Jetty（码头，港口）**：Jetty是URMA中的全功能通信对象，它既支持发送（发送数据到其他Jetty）也支持接收（接收来自其他Jetty的数据）。Jetty通过发送配置和接收配置管理双向通信，发送与接收的完成记录分别由相应配置中的JFC管理。当前URMA_TRANSPORT_UB设备创建Jetty时必须配置共享JFR。
 
 2.  **JFS（Jetty for Sending）**：JFS是Jetty的一个变体，它专用于发送操作。在单向模型的Initiator（发起者）侧，JFS用于提交DMA任务或者发送消息。JFS仅包含一个SQ，不支持接收操作，只做Send操作或单边UDMA操作。JFS通常与JFR配合使用，节省接收缓冲资源。
 
@@ -595,7 +595,7 @@ URMA执行资源管理通过Jetty进行管理。Jetty为URMA软件操作对象�
 
 2.  注意事项
 
-创建JFC时指定相关的JFCE，才能以中断模式等待完成事件和获取完成记录，JFCE:接收完成事件的通道，内核态JFCE实现为文件，用户态实现为打开的JFCE文件句柄
+创建JFC时关联JFCE，才能通过urma_wait_jfc等待完成事件通知；完成记录还需通过urma_poll_jfc获取，轮询模式无需绑定JFCE。JFCE是完成事件通道，urma_jfce_t中的fd是该通道的文件描述符。
 
 3.  使用说明
 
@@ -617,7 +617,7 @@ URMA执行资源管理通过Jetty进行管理。Jetty为URMA软件操作对象�
 
 1.  概述
 
-Segment是URMA对被内存事务指令访问的内存进行管理和访问的抽象数据结构。Segment是一段连续的UBA地址空间，同时分配物理内存来对应到一个segment。在URMA单边内存访问的编程模型中，Segment是基础的内存管理对象，Target侧创建Segment并注册，Initiator侧申请使用远端的Segment，构造出Target Segment（包含TokenId，ubva等），然后才能继续访问远端内存。
+Segment是URMA对已提供内存范围进行注册和访问的抽象数据结构；注册接口接收调用方提供的VA和长度，具体内存授权、注册及映射行为由provider实现。在URMA单边内存访问的编程模型中，Target侧创建并注册Segment；采用导入方式时，Initiator侧根据远端Segment信息调用urma_import_seg构造Target Segment后访问。对于provider支持的免导入操作，也可在远端SGE中提供user_tseg。
 
 **UBVA地址模型**
 
@@ -625,29 +625,29 @@ Segment是URMA对被内存事务指令访问的内存进行管理和访问的抽
 
 urma语义的内存管理
 
-**注册内存registe_seg：允许设备访问进程的一段内存**
+**注册内存urma_register_seg：允许设备访问进程的一段内存**
 
-- 权限：本地写、远程读、远程写、远程原子
+- 权限：仅本地访问（URMA_ACCESS_LOCAL_ONLY）、远程读（URMA_ACCESS_READ）、远程写（URMA_ACCESS_WRITE）、远程原子（URMA_ACCESS_ATOMIC）。
 
-- 与RDMA不同点：无需提前创建PD，需要传入key（可能修改）
+- 注册接口无需传入PD；是否使用token由token_policy决定。
 
-**访问远端内存之前，先导入内存import_seg**
+**通过urma_import_seg导入远端内存**
 
-- 添加Segment访问表项，验证本进程具有访问segment的权限
+- 核心层检查必要参数后调用provider执行导入；在裸UDMA实现中，导入仅检查token_policy并创建本地target segment，addr和flag被忽略；其他provider的访问授权行为由其实现决定。
 
 - RDMA应用无需导入mr，直接通过带外通道将server进程的va和rkey交换到到client，client即可使用va和rkey进行rdma操作
 
-- URMA每个client注册segment传入不同的派生key
+- 使用token校验时，注册方配置token_value，访问方提供用于远端访问校验的token；URMA_TOKEN_NONE表示不使用token校验。
 
-- 使用bond设备进行import_segment时，seg中的eid不能为空，否则发不到对端 ；使用裸udma设备并不会有此限制且udma并不会对seg中的内容进行检查判空
+- bond启用Segment缓存且按token_id和外层EID命中时，复用缓存的物理Segment信息和连接矩阵；未复用缓存时，普通路径调用urma_cmd_import_seg，带用户扩展的路径使用外层seg->ubva.eid重建连接矩阵。随后物理Segment导入跳过空peer EID，无有效路由则失败。裸UDMA导入不检查EID是否为零但检查token_policy；核心层还检查ctx、seg及token。
 
   1.  注意事项
 
 \(1\) 本地用户对远端内存读写时，本地buf和远端内存必须提前调用urma_register_seg注册到设备, 不使用必须调用urma_unregister_seg注销。
 
-\(2\) 应用使用远端内存读写之前，必须调用urma_import_seg获取target_segment
+\(2\) 采用导入方式时，先调用urma_import_seg获取target_segment；也可在provider支持的远端SGE中提供user_tseg进行免导入访问。当前裸UDMA provider的WRITE、WRITE_IMM和READ支持远端user_tseg；WRITE_NOTIFY的数据目标dst.sge[0]支持user_tseg，但通知目标dst.sge[1]必须使用导入后的tseg。bond路径会拒绝WRITE_NOTIFY中任一远端SGE使用user_tseg；其他操作需核对provider支持范围。
 
-\(3\) 注册segment时，如果声明了remote write或者remote atomic权限，那么应用也必须同时声明local write权限，否则注册失败
+\(3\) 注册segment时，URMA_ACCESS_LOCAL_ONLY不能与远程读、写或原子权限组合；声明URMA_ACCESS_WRITE必须同时声明URMA_ACCESS_READ，声明URMA_ACCESS_ATOMIC必须同时声明URMA_ACCESS_READ和URMA_ACCESS_WRITE，否则注册失败
 
 2.  使用说明
 
@@ -655,9 +655,9 @@ urma语义的内存管理
 
 \(2\) 释放本地内存：调用urma_unregister_seg注销segment。
 
-\(3\) 使用远端内存：urma_import_segment获取targ_segment和mva。
+\(3\) 使用远端内存：采用导入方式时调用urma_import_seg获取urma_target_seg_t对象；支持的免导入操作可在远端SGE中提供user_tseg。addr为可选映射地址，具体映射行为由provider实现，裸UDMA实现会忽略addr和flag。
 
-\(4\) 释放远端内存：unimport_segment注销segment。
+\(4\) 释放远端内存的导入对象：调用urma_unimport_seg取消导入；远端内存的注册仍由其所属进程管理。
 
 ```c
 typedef struct urma_seg {
@@ -696,15 +696,11 @@ register与import出的对象为urma_target_seg_t
 
 - 用户（Initiator）在Jetty的发送队列（SQ）中发起一次URMA读事务。
 
-- udma驱动从SQ队列中读取一个服务队列元素（SQE），解析其中的指令信息。
+- UDMA用户态provider根据工作请求构造SQE并提交给设备。
 
-- 用户端的事务处理单元（TP）将读请求封装成报文，发送给目标端（Target）。
+- SQE中的远端源信息来自工作请求的wr->rw.src.sge，本地目标缓冲区来自wr->rw.dst.sge。
 
-- 目标端接收到请求后，事务引擎从指定的内存区域读取数据。
-
-- 目标端的TP将数据封装成报文，发送回用户端。
-
-- 用户端接收数据后，将其放置到mr指定的缓冲区。
+- 读结果写入目标SGE指定的本地缓冲区；应用通过urma_poll_jfc获取相应完成记录，使用完成事件通知时先通过JFCE等待通知。
 
 <!-- -->
 
@@ -714,15 +710,11 @@ register与import出的对象为urma_target_seg_t
 
 - 用户在Jetty的发送队列中发起一次URMA写事务。
 
-- 用户从SQ读取SQE并解析信息。
-
-- 用户根据SQE的信息，从本地内存中获取数据，组装成报文，发送给目标端。
+- UDMA用户态provider根据工作请求中的本地源SGE和远端目标SGE构造SQE并提交给设备。
 
 - 目标端接收到报文后，事务引擎将数据存储到指定的内存区域。
 
-- 目标端执行完操作后，发送事务完成确认（TAACK）给用户端。
-
-- 用户端的TP接收到TAACK后，将其封装成报文并发送给用户
+- 应用通过urma_poll_jfc获取相应完成记录；使用完成事件通知时，先通过JFCE等待通知。
 
 ### 5.2.4 异常事件
 
@@ -774,15 +766,15 @@ urma异常场景
 
 * 功能：这个接口用于从URMA的异步事件队列中获取事件。当内核检测到与URMA资源（如Jetty、JFC、JFS等）相关的异常或状态变化时，它会将这些事件记录到异步事件队列中。用户态的驱动程序通过调用urma_get_async_event来轮询这个队列，获取最新的异常事件。
 
-* 参数：通常需要一个urma_context_t类型的上下文指针，这个指针是在urma_create_context时创建的，用于与内核进行通信。
+* 参数：ctx为必填的urma_context_t指针，指向已创建的上下文；event为必填的urma_async_event_t输出指针，指向用于接收事件的存储空间。
 
 * 返回值：urma_get_async_event会返回urma_status_t告知用户函数的完成情况，调用成功返回0，其他值表示接口调用失败，参数中的event的指针指向获取的事件。
 
 2.  **urma_ack_async_event:**
 
-* 功能：urma_ack_async_event用于向内核确认已经处理了某个异常事件。当用户态驱动程序通过urma_get_async_event获取到一个事件后，处理完相关逻辑，通常需要调用urma_ack_async_event来告诉内核这个事件已经被处理，可以被清理或进一步处理
+* 功能：urma_ack_async_event用于确认应用已经处理获取到的异步事件。具体操作由provider实现；UDMA对相关资源事件更新用户态确认计数，并通知等待事件确认的线程。
 
-* 参数：通常需要提供之前从urma_get_async_event获取的urma_async_event_t结构体，这样内核可以知道哪个事件已经被确认
+* 参数：必须提供指向此前由urma_get_async_event成功获取的事件的urma_async_event_t指针。接口返回void。
 
 #### 5.2.4.1 flush jetty
 
@@ -851,11 +843,11 @@ UB传输层的设备属性依赖于UB驱动的实现。
 | max_jfc_depth | √ | x | x | jfc支持配置队列深度的最大值 | √ | √ | √ |
 | max_jfs_depth | √ | x | x | jfs支持配置队列深度的最大值 | √ | √ | √ |
 | max_jfr_depth | √ | x | x | jfr支持配置队列深度的最大值 | √ | √ | √ |
-| max_jfs_inline_len | √ | x | x | jfs支持消息inline的最大值，单位byte | √ | √ | x |
+| max_jfs_inline_size | √ | x | x | jfs支持消息inline的最大值，单位byte；对应API字段max_jfs_inline_len | √ | √ | x |
 | max_jfs_sge | √ | x | x | jfs支持单个wr里面包含sge的最大个数 | √ | √ | √ |
 | max_jfr_sge | √ | x | x | jfr支持单个wr里面包含sge的最大个数 | √ | √ | √ |
 | max_msg_size | √ | x | x | 设备支持传输消息的最大值，单位byte | √ | √ | x |
-| tp_mode | √ | x | x | 设备传输层模式，枚举值：SRM（shared reliable message）、RC（reliable connection）、UM（unreliable message） | √ | √ | √ |
+| trans_mode | √ | x | x | 设备支持的传输模式位掩码：URMA_TM_RM（reliable message）、URMA_TM_RC（reliable connection）、URMA_TM_UM（unreliable message） | √ | √ | √ |
 | port_count | √ | x | x | 设备拥有的port数 | √ | √ | √ |
 | max_mtu | √ | x | x | 端口可配置的最大MTU值，枚举值：MTU_256, MTU_512, MTU_1024等 | √ | √ | √ |
 | state | √ | x | √ | 端口状态，枚举值：PORT_DOWN, PORT_INIT, PORT_ARMED，PORT_ACTIVE，PORT_ACTIVE_DEFER | √ | √ | √ |
@@ -1271,10 +1263,10 @@ UMDK支持向接收端发送立即数，见urma_post_jfs_wr接口，所发送的
 | 数据面接口 | 双边操作 | send | 支持携带IMM数据 | — | 支持携带IMM数据 | √ | √ |
 | 数据面接口 | 双边操作 | send | with invalid | — | Send with invalid | √ | √ |
 | 数据面接口 | 双边操作 | recv | — | — | Receive操作 | √ | √ |
-| 数据面接口 | 原子操作 | cas | — | — | Compare and swap | × | × |
-| 数据面接口 | 原子操作 | cas | 支持mask | — | CAS with mask | × | × |
-| 数据面接口 | 原子操作 | faa | — | — | Fetch and add | × | × |
-| 数据面接口 | 原子操作 | faa | 支持mask | — | FAA with mask | × | × |
+| 数据面接口 | 原子操作 | cas | — | — | Compare and swap | 待核实 | 待核实 |
+| 数据面接口 | 原子操作 | cas | 支持mask | — | CAS with mask | 待核实 | 待核实 |
+| 数据面接口 | 原子操作 | faa | — | — | Fetch and add | 待核实 | 待核实 |
+| 数据面接口 | 原子操作 | faa | 支持mask | — | FAA with mask | 待核实 | 待核实 |
 | 数据面接口 | 完成操作 | poll_jfc | 支持产生多个CR | — | Poll JFC获取完成记录 | √ | √ |
 | 数据面接口 | 完成操作 | poll_jfc | CR解析 | status | 携带完成状态 | √ | √ |
 | 数据面接口 | 完成操作 | poll_jfc | CR解析 | flag.s_r | 携带是接收还是发送完成 | √ | √ |
@@ -1353,7 +1345,7 @@ UMDK支持向接收端发送立即数，见urma_post_jfs_wr接口，所发送的
 | DFX接口 | urma_perftest | perftest测试类型配置 | read_bw | — | 读带宽测试 | √ | √ |
 | DFX接口 | urma_perftest | perftest测试类型配置 | write_bw | — | 写带宽测试 | √ | √ |
 | DFX接口 | urma_perftest | perftest测试类型配置 | atomic_bw | — | 原子操作带宽测试 | √ | √ |
-| DFX接口 | urma_perftest | perftest运行参数配置 | all | — | 运行2~2^15范围内2整数次幂递增长度 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | all | — | 运行2~2^23范围内2的整数次幂递增长度；发送测试受RTP/CTP分别最大2^16/2^12限制 | √ | √ |
 | DFX接口 | urma_perftest | perftest运行参数配置 | atomic_type | — | 选择原子操作类型：cas/faa | √ | √ |
 | DFX接口 | urma_perftest | perftest运行参数配置 | simplex_mode | — | 选择单工模式jfs/jfr运行 | √ | √ |
 | DFX接口 | urma_perftest | perftest运行参数配置 | bidirectional | — | 选择双向模式运行 | √ | √ |
@@ -1377,8 +1369,8 @@ UMDK支持向接收端发送立即数，见urma_post_jfs_wr接口，所发送的
 | DFX接口 | urma_perftest | perftest运行参数配置 | priority | — | jetty调度优先级 | √ | √ |
 | DFX接口 | urma_perftest | perftest运行参数配置 | trans_mode | — | 传输模式：RC/RM/UM | √ | √ |
 | DFX接口 | urma_perftest | perftest运行参数配置 | port | — | 指定端口号 | √ | √ |
-| DFX接口 | urma_perftest | perftest运行参数配置 | cq_num | — | 发送端指定数量wr产生一个cr | √ | √ |
-| DFX接口 | urma_perftest | perftest运行参数配置 | jfs_post_list | — | 接收端wr链表串联数量 | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | cq_mod | — | 发送端每完成指定数量的WR后产生一个CQE | √ | √ |
+| DFX接口 | urma_perftest | perftest运行参数配置 | jfr_post_list | — | 接收端WR链表串联数量 | √ | √ |
 | DFX接口 | urma_perftest | perftest运行参数配置 | jfr_depth | — | 配置jfr深度 | √ | √ |
 | DFX接口 | urma_perftest | perftest运行参数配置 | size | — | 配置传输字节长度 | √ | √ |
 | DFX接口 | urma_perftest | perftest运行参数配置 | server | — | server端IP地址 | √ | √ |
@@ -1529,7 +1521,7 @@ bonding设备不感知TP。
 
 3\. 不同 jetty 的单路径、多路径模式以及传输模式可以支持的能力有所差异；
 
-4\. 在使用聚合设备的场景下，传输层使用 TP/CTP 的选择仅和创建 jetty 和 jfs/jfr 的时候设定的参数有关，urma_import_jetty 中传入的 rjetty 的 tp_type 参数会被忽略。
+4\. 在使用聚合设备的场景下，调用 urma_import_jetty 时仍须正确填写 rjetty 的 tp_type。核心接口会校验其与 trans_mode、order_type 的组合，校验失败时返回 NULL 并设置 errno 为 EINVAL；聚合层导入成员 Jetty 时会继续传递该参数。
 
 5\. 健康检查与故障回切（failback）仅支持 Jetty，不支持 JFR、JFS。健康检查通过为每条路径创建带外探测 Jetty（复用 JFR 接收资源）实现对链路状态的周期性探测；故障回切在探测恢复后通过重建 Jetty 将流量切回主路径。上述两条路径均依赖 Jetty 对象，独立创建的 JFR、JFS 不具备健康检查与故障回切能力。
 
@@ -1765,7 +1757,7 @@ Options:
 | -e            | use_jfce            | bool     | 是否采用事件通知机制                                                                                                                                                                                                                                       | 否           | \-                                   | 默认关闭                       |
 | \--eid idx    | eid index           | uint32_t | EID（Entity ID）是网络通信中设备的唯一标识符，它在URMA的上下文中用于定义和管理网络通信的端点。                                                                                                                                                             |              |                                      |                                |
 | -E            | err_timeout         | uint8_t  | 创建jfs或jetty时，指定作为发送端的错误超时参数，超时时间为4.096*(2^err_timeout)                                                                                                                                                                          | 是           | 0\~31                                | 17                             |
-| -f            | use_flat_api        | bool     | 指定采用urma_send/urma_recv/urma_read/urma_write等四种数据面接口，必须搭配jfs/jfr使用,flat API 是相对于更底层的接口,仅在 simplex mode 下有效                                                                                                               | 否           | \-                                   | 默认关闭                       |
+| -f            | use_flat_api        | bool     | 指定采用urma_send/urma_recv/urma_read/urma_write等四种数据面接口（原子操作测试不支持该选项），必须搭配jfs/jfr使用，flat API 是相对于更底层的接口，仅在 simplex mode 下有效；延迟测试使用 flat API 时，jfs_post_list 必须为 1                                                                                                               | 否           | \-                                   | 默认关闭                       |
 | -F            | cpu_freq_f          | bool     | 采用不同算法获取CPU负载差异较大时，是否上报异常告警                                                                                                                                                                                                        | 否           | \-                                   | 默认关闭                       |
 | -h            | help                | \-       | 打印使用说明                                                                                                                                                                                                                                               | 否           | \-                                   | \-                             |
 | -I(ASCII 73)  | inline_size         | uint32_t | 内联值                                                                                                                                                                                                                                                     | 是           | 0\~912                               | 时延测试默认220，带宽测试默认0 |
@@ -1788,7 +1780,7 @@ Options:
 | -w            | warm_up             | bool     | 指定运行perftest之前开启预热模式,仅在读/写/原子操作的带宽测试中可生效                                                                                                                                                                                      | 否           | \-                                   | 默认关闭                       |
 | -y            | infinite            | uint32_t | 带宽测试下指定无限模式；可选参数指定间隔打印数据的时间，单位秒，默认为2秒                                                                                                                                                                                                                                   | 可选         | \-                                   | 2                              |
 | \--           | single_path         | bool     | 聚合设备工作模式选项，开启意味着所有网络流量都将通过聚合设备中的一个选定的物理接口传输                                                                                                                                                                     | 可选         |                                      | false                          |
-|               | inf_period_ms       | uint32_t | 配置ms级打印带宽信息。infinite mode为持续进行的带宽（BW）测试。最小粒度50ms，并且必须是50ms的倍数，同时需要配置-y的时候生效。当既配置-y时间，又配置\--inf_period_ms参数，会已\--inf_period_ms为主。注意：会存在2ms内的误差                                                                                                | 可选         | 50的倍数                             | 0                              |
+|               | inf_period_ms       | uint32_t | 配置 infinite BW 模式打印带宽信息的周期，单位为 ms；非零值必须不小于 50 且为 50 的倍数；显式配置非零 `--inf_period_ms` 时必须同时配置 -y，否则退出。与 -y 指定的秒级周期同时配置时，以\--inf_period_ms 为主；值为 0 时按 -y 的秒级周期换算，-y 默认 2 秒时有效周期为 2000 ms | 可选         | 0 或 50 的倍数                     | 0                              |
 | \-            | rate_limit          | uint32_t | 设置限速值，默认单位是Gbps                                                                                                                                                                                                                                 | 可选         | 无限定                               | 0                              |
 | \-            | rate_units          | char     | 限速值的单位，MBps (M), Gbps (G)(default) or Kpps (P)                                                                                                                                                                                                      | 可选         | [MGP]                              | G                              |
 | \-            | burst_size          | uint32_t | 每次连续发送多少个报文，用于均衡流量,这个选项允许你指定在使用流量限制器（rate limiter）时，每次发送数据包（packets）的批量大小                                                                                                                             | 可选         | 无限定，配置过大会导致限速不准确     | jfs_depth配置值                |
@@ -1805,13 +1797,13 @@ Options:
 |               | enable_sync_stream  | bool     | 在多Jetty带宽测试中使能同步多流发送                                                                                                                                                                                                                         | 可选         |                                      | 默认关闭                       |
 |               | enable_user_tp      | bool     | 使能用户态建链，当这个选项被启用时，用户 TP 可以用于数据传输，而无需使用通用虚拟交换机（UVS）                                                                                                                                                              | 可选         |                                      | 默认关闭                       |
 |               | oor_en              | bool     | 用户态建链开启乱序选择                                                                                                                                                                                                                                     | 可选         |                                      | 默认关闭                       |
-|               | spray_en            | bool     | 用户态建链开启多路径                                                                                                                                                                                                                                       | 可选         |                                      | 默认关闭                       |
+|               | spray_en            | bool     | 用户态建链开启多路径；在 tp_aware + UBOE 场景中也用于设置 TP 多路径属性                                                                                                                                                                                    | 可选         |                                      | 默认关闭                       |
 |               | cc_en               | bool     | 用户态建链开启拥塞控制算法                                                                                                                                                                                                                                 | 可选         |                                      | 默认关闭                       |
 |               | cc_alg              | uint32_t | 用户态建链配置拥塞控制算法                                                                                                                                                                                                                                 | 可选         | [0, 7]                             | 0                              |
 |               | retry_num           | uint32_t | 用户态建链配置重试次数                                                                                                                                                                                                                                     | 可选         |                                      | 7                              |
 |               | ack_timeout         | uint32_t | 用户态建链配置ack超时时间                                                                                                                                                                                                                                  | 可选         |                                      | 15                             |
 |               | sge_num             | uint32_t | 配置单wr多sge测试                                                                                                                                                                                                                                          | 可选         |                                      | 默认关闭                       |
-|               | enable_write_dirty  | bool     | 使能写入脏数据的功能                                                                                                                                                                                                                                       | 可选         |                                      | false                          |
+|               | enable_write_dirty  | bool     | 使能写入脏数据的功能；配置结构体的写脏周期默认由 PERFTEST_WRITE_DIRTY_PERIOD 设为 50 ms；仅在 BW 测试中创建写脏线程；当周期小于 PERFTEST_DEF_INF_PERIOD_MS（50 ms）时线程创建后不执行写脏循环并退出                                                                                                                                 | 可选         |                                      | false                          |
 |               | pair_num            | uint32_t | server端应设置为client个数；client端应设置为server个数；设置后，会自动修改jetty数目保持一致                                                                                                                                                                | 可选         |                                      | 1                              |
 |               | async_import        | \-       | 启用异步建链                                                                                                                                                                                                                                               | 可选         |                                      |                                |
 |               | tp_aware            | bool     | 用于启用传输路径（Transport Path，TP）感知的连接                                                                                                                                                                                                           | 可选         |                                      | false                          |
@@ -1841,11 +1833,11 @@ Options:
 
 8.  原子操作语义配置-s不等于8时，产生告警提示并返回失败；
 
-9.  当配置jfs_post_list/jfr_post_list超过1，在带宽测试中，迭代模式(-n)下，若迭代次数不能整除jfs_post_list/jfr_post_list则产生告警提示并返回失败；
+9.  当配置jfs_post_list超过1时，在迭代模式(-n)下，若迭代次数小于jfs_post_list或不能整除jfs_post_list则产生告警提示并返回失败；LAT测试还要求迭代次数至少为jfs_post_list的5倍。当配置jfr_post_list超过1时，仅带宽测试或send_lat测试支持该配置；在迭代模式(-n)下，若迭代次数小于jfr_post_list或不能整除jfr_post_list则产生告警提示并返回失败，其他测试类型直接返回失败；
 
-10. 当配置jfs_post_list超过1，在带宽测试中，cq_mod为0时，将强制取其等于jfs_post_list；
+10. 当配置jfs_post_list超过1时，经前置规则处理后若cq_mod仍为0，则强制取其等于jfs_post_list；其中size>8192、all未启用且use_jfce未启用时，cq_mod为0会在前置处理中先置为1；
 
-11. 当配置jfs_post_list超过1，在带宽测试中，cq_mod不为0时，若jfs_post_list不能整除cq_mod，则产生告警提示并返回失败；
+11. 当配置jfs_post_list超过1时，先将超过jfs_depth的cq_mod截为jfs_depth；对调整后的最终cq_mod，若其大于jfs_post_list或jfs_post_list不能被其整除，则产生告警提示并返回失败；
 
 12. 在收发带宽测试中，当jfr_depth/jfs_depth不能被jfr_post_list整除时，会上报异常告警，但不会返回失败；
 
@@ -1867,7 +1859,7 @@ Options:
 
 - 配置时延模式(-D)，则迭代次数自动初始化为0，no_peak自动打开，此时若配置-e或者-a，则产生告警提示并返回失败；
 
-  1.  当配置jfs_post_list超过1，在带宽测试中，若jfs_depth小于jfs_post_list，则产生告警并返回失败；
+  1.  当配置jfs_post_list超过1，若jfs_depth小于jfs_post_list，则产生告警并返回失败；
 
   2.  UM模式下，参数size的大小不应该超过MTU大小，如果size大小超过MTU，其行为不可预测，可能会成功也可能会失败。
 
@@ -2132,8 +2124,8 @@ URMA支持用户态日志接管，可以通过注册函数将日志统一导到�
 
 ```c
 typedef void(*urma_log_cb_t)(int level, char *message);
-urma_status_t **urma_register_log_func**(urma_log_cb_t func);
-urma_status_t **urma_unregister_log_func**(void);
+urma_status_t urma_register_log_func(urma_log_cb_t func);
+urma_status_t urma_unregister_log_func(void);
 ```
 
 ---
@@ -2413,115 +2405,72 @@ UB 提供了事务层的访问控制功能，访问控制功能的应用场景�
 
 ### 9.1.3 权限分配流程
 
-1.  Home在注册segment时，需要应用指定TokenValue，软件栈可以使用两种方式分配分配返回TokenID：
+1.  Home 在注册 segment 时，是否需要指定 TokenValue 取决于 `token_policy`：使用 `URMA_TOKEN_NONE` 时无需提供 TokenValue；使用其他策略时在 `seg_cfg.token_value` 中提供。软件栈可以使用两种方式分配返回 TokenID：
 
-- 调用urma_register_seg配置如下让软件栈自动分配
-
-urma_seg_cfg_t.urma_reg_seg_flag_t.token_id_valid = 0;
-
-- 先调用urma_alloc_token_id分配TokenID，之后调用urma_register_seg时指定该TokenID
+- 对 `URMA_TRANSPORT_UB`，调用 `urma_register_seg` 配置如下可由公共实现自动分配 TokenID。公共路径要求 `va` 非零；`len` 应按具体 provider/UMMU 的约束设置；远端访问权限可按场景配置为只读、读写或原子读写：
 
 ```c
-urma_seg_cfg_t.token_id = token_id;
-urma_seg_cfg_t.urma_reg_seg_flag_t.token_id_valid = 1;
+urma_seg_cfg_t seg_cfg = {0};
+seg_cfg.va = (uint64_t)buf;
+seg_cfg.len = len;
+seg_cfg.flag.bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE;
+seg_cfg.flag.bs.token_id_valid = URMA_TOKEN_ID_INVALID;
+urma_register_seg(ctx, &seg_cfg);
+```
+
+- 先调用 `urma_alloc_token_id` 分配 TokenID，之后调用 `urma_register_seg` 时指定该 TokenID；`access` 应按远端访问场景配置：只读使用 `URMA_ACCESS_READ`，读写使用 `URMA_ACCESS_READ | URMA_ACCESS_WRITE`，需要原子访问时使用 `URMA_ACCESS_READ | URMA_ACCESS_WRITE | URMA_ACCESS_ATOMIC`；下例采用读写权限：
+
+```c
+urma_token_id_t *token_id = urma_alloc_token_id(ctx);
+urma_seg_cfg_t seg_cfg = {0};
+seg_cfg.va = (uint64_t)buf;
+seg_cfg.len = len;
+seg_cfg.token_id = token_id;
+seg_cfg.flag.bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE;
+seg_cfg.flag.bs.token_id_valid = URMA_TOKEN_ID_VALID;
+urma_register_seg(ctx, &seg_cfg);
 ```
 
 2.  在注册segment时可以指定token的验证策略
 
-urma_seg_cfg_t.urma_reg_seg_flag_t.token_policy = 0;
+```c
+seg_cfg.flag.bs.token_policy = URMA_TOKEN_NONE;
+```
 
-1.  token验证策略
+1.  token验证策略（协议常量；具体 provider 支持范围见下表）
 
-| 值 | URMA定义 | 策略 |
+| 值 | URMA定义 | 当前代码可证实的行为 |
 | --- | --- | --- |
-| 0 | URMA_TOKEN_NONE | 只传输 TokenID 或 TCID，不带 TokenValue，这种方式性能最高，但是存在非授权访问风险。 |
-| 1 | URMA_TOKEN_PLAIN_TEXT | 传输 TokenID 或 TCID 和 TokenValue 明文，这种方式具有一定安全性，但是存在网络中间节点非法获取 TokenValue 的风险。 |
-| 2 | URMA_TOKEN_SIGNED | 传输 TokenID 或 TCID 和 TokenValue，并加密保护，而 PLD 是明文，这种方式网络中间节点无法获取 TokenValue，但是可看到 PLD 内容。 |
-| 3 | URMA_TOKEN_ALL_ENCRYPTED | 传输 TokenID 或 TCID 和 TokenValue，并加密保护，PLD 也加密，这种方式最安全，但是带来的硬件开销较大。 |
+| 0 | URMA_TOKEN_NONE | 当前 UDMA 不因该策略值拒绝注册或导入；公共导入接口在此值下不要求 TokenValue。注册成功仍受 access、token_id、len 及 UMMU/provider 约束。 |
+| 1 | URMA_TOKEN_PLAIN_TEXT | 当前 UDMA 不因该策略值拒绝注册或导入；公共导入接口在此值下要求 TokenValue。注册成功仍受 access、token_id、len 及 UMMU/provider 约束。 |
+| 2 | URMA_TOKEN_SIGNED | 协议常量；当前 UDMA 注册和导入路径拒绝。 |
+| 3 | URMA_TOKEN_ALL_ENCRYPTED | 协议常量；当前 UDMA 注册和导入路径拒绝。 |
 
 ![](figures/urma_warning.png)
 
-以上验证策略能力需要硬件支持，
+上述值由协议常量定义，具体 provider 的支持范围需要单独核实；当前 UDMA provider 仅接受 `URMA_TOKEN_NONE` 和 `URMA_TOKEN_PLAIN_TEXT`。
 
 3.  应用可以将Home的Token信息使用带外通道（例如TLS/IP通道）或者URMA提供的公知jetty通道分发给User。
 
-4.  User在import 远端Home内存时，需要携带token_value+token_id信息。
+4.  User 在 import 远端 Home 内存时，`seg` 中携带 `token_id`；当 `token_policy` 非 `URMA_TOKEN_NONE` 时还必须提供 `token_value`，`URMA_TOKEN_NONE` 时可不提供 `token_value`。
 
-5.  token安全传输
+5.  Token 安全传输、查找和 Initiator 隔离策略
 
-    a.  **Token安全分发**：
+    UMS 代码定义三种 UB Token 传输模式：
 
-    <!-- -->
+    - **SECURE**：CLC 传递 token policy、TokenID 等元数据和模式；内核通过 generic netlink 的 `UMS_CMD_TOKEN_SUBMIT` 将本地 Token 交给本地 UMS agent；agent 将 Token 编码为 `UMS_AGENT_MSG_TOKEN_TRANSFER` 消息并通过 TLS 发送。对端 agent 收到后通过 generic netlink 的 `UMS_CMD_TOKEN_DELIVER` 将 Token 交给其本地内核，内核保存 `peer_seg_token`，并在导入 peer segment 时使用其中的 TokenValue。
+    - **LEGACY**：CLC 消息明文携带 jetty 和 segment TokenValue。
+    - **DISABLE**：CLC 使用 `UBCORE_TOKEN_NONE` 并携带零 TokenValue；UMS 注册 segment 时也使用 `UBCORE_TOKEN_NONE` 和零 TokenValue，表示不启用 UB Token 访问控制。
 
-    1.  Target（目标方）和Initiator之间需要建立一个安全的通道，这可以通过身份证书、密码或者密钥管理系统（KMS）来实现。
-
-    2.  分发Token时有两种方式：
-
-        - 通过安全的带外通道（Out-of-Band, OoB）完成Token ID和Token Value的分发与派生。
-
-        - Target通过安全的带外通道与Initiator交换对称密钥，然后在内核态使用此对称密钥在UMDK（Unified Memory Device Kit）内部进一步交换Token ID和Token Value。
-
-    <!-- -->
-
-    b.  **Token的查找和使用**：
-
-    <!-- -->
-
-    3.  在使用Token时，Target侧通过报文中的Token ID来索引找到Token Value。
-
-    4.  Initiator侧有三种方式查找和使用Token：
-
-        - 分布式网络编程场景：通过TargetJetty或TargetSeg对象找到Token。
-
-        - SVA/DSVA场景：根据虚拟地址（VA）查找Token，无需TargetSeg，此时需要UMMU（Unified Memory Management Unit）支持访问CPU的页表。
-
-        - Device场景：将Token信息绑定在设备内部某个引擎或队列的Context中，设备访问Host内存时直接从Context中获取。
-
-    <!-- -->
-
-    c.  **Token安全级别**：
-
-    <!-- -->
-
-    5.  不同的性能要求对应不同的安全策略：
-
-        - 只传输Token ID，无需Token Value，性能最高。
-
-        - 传输Token ID和Token Value明文，有一定的安全性，但存在网络中间节点攻击的风险。
-
-        - 传输Token ID和签名值，Payload（负载）明文，网络中间节点无法获取Token Value，但能看到payload内容。
-
-        - 传输Token ID和签名值，payload加密，最安全，但硬件开销较大。
-
-    <!-- -->
-
-    d.  **Token的Initiator隔离策略**：
-
-    <!-- -->
-
-    6.  为了区分不同Initiator的权限，Token分发时可以采取两种策略：
-
-        - 以算代存：Target侧只存放原始Token Value，分发时基于Initiator的EID等信息派生，Initiator访问时携带派生Token Value和派生素材，Target侧验证派生Token的正确性。
-
-        - 以存代算：Target侧为每个Initiator存储不同的Token Value，Initiator访问时携带Token Value，Target侧直接比较报文中的Token Value。
+    当前检索代码未核实按 Initiator EID 派生 Token、按 VA 或设备 Context 查找 Token，以及为每个 Initiator 隔离 TokenValue 等机制；这些内容只能作为协议或设计说明。
 
 ### 9.1.4 权限无效化流程
 
-UB 访问控制功能存在两种粒度的访问权限无效化机制：
+公共 URMA API 覆盖 TokenID 分配/释放、segment 注册/注销及导入/解导入；对 UB，注销公共路径会按条件释放由公共实现自动分配的 TokenID。
 
-⚫ 权限组粒度无效化：
+此外，协议定义 `URMA_OPC_SEND_INVALIDATE`，其报文携带远端 segment TokenID；`urma_send_wr_t.tseg` 仅用于 send with invalidate。发送端 UDMA 用户态实现在构造 SEND_WITH_INV WQE 时，从目标 segment 读取 TID 和 TokenValue 并写入 WQE。UDMA 用户态实现处理 SEND_WITH_INV 接收完成时，在 `udma_u_parse_opcode_for_res` 中读取 CQE 携带的 TID，并调用 `ummu_free_tid` 尝试释放接收端本地的对应 TID；调用失败时记录错误。该 TID 对发送端而言属于远端 segment。
 
-权限组粒度无效化，是由 Home 发起，Home 侧 UMMU 相关软硬件具体执行，无效化 Home 侧UMMU 中的 TokenID 和对应的 TokenValue。此时，持有该 TokenID 和 TokenValue 的权限组内所有 User 访问权限均被无效化。
-
-⚫ 用户粒度无效化：
-
-用户粒度无效化是指无效化权限组内具体 User 的访问权限，同时保证最小化影响权限持续有效的 User，是由 User 发起。步骤如下：
-
-\(1\) 多个 User 均申请获得 Home 的内存访问凭据（可以是分别向 Home 申请，也可以是多个User 之间共享获得），包括 TokenID 和相应的 TokenValue。
-
-\(2\) Home 更新 TokenValue，向权限持续有效的 User 分发更新后的 Tokenvalue，权限失效的User 将不会收到更新后的 TokenValue。
-
-\(3\) Home 仅接受基于更新后的 TokenValue 申请内存访问，从而实现无效化未收到更新后的TokenValue 的 User 的内存访问权限。
+当前可确认的实现是 TID 级失效；上述路径没有更新 TokenValue，也没有按 User 筛选撤销对象。当前仓库未发现更新已注册 TokenValue 或按 User 粒度撤销的北向接口，因此原有权限组粒度和用户粒度 TokenValue 轮换流程只能标注为协议或设计说明，不能表述为现有 API 行为。
 
 ## 9.2 内存访问控制
 
