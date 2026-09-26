@@ -376,7 +376,7 @@ The state machine transitions for connection setup, disconnection, shared peer t
 
 (10) For any node in the reused state: if the user triggers disconnection first and this node sends a disconnection notification (1420), this node transitions to the NOTIFY sent on reuse transient state and automatically transitions (1423) to the Target established state. If this node receives a disconnection notification (1424), it transitions to the NOTIFY received transient state, destroys transport layer resources, and automatically transitions (1407) to the reset state.
 
-(10) For any node in the reused state: if a disconnection notification is received first (1421), this node transitions to the NOTIFY received on reuse transient state and automatically transitions (1422) to the Initiator established state. If the user on this node triggers disconnection and sends a disconnection notification (1424), this node transitions to the NOTIFY sent transient state and initiates a transition (1425) to the reset state. The disconnection flow ends here.
+(11) For any node in the reused state: if a disconnection notification is received first (1421), this node transitions to the NOTIFY received on reuse transient state and automatically transitions (1422) to the Initiator established state. If the user on this node triggers disconnection and sends a disconnection notification (1424), this node transitions to the NOTIFY sent transient state and initiates a transition (1425) to the reset state. The disconnection flow ends here.
 
 State descriptions:
 
@@ -430,7 +430,7 @@ Based on connection primitives, users may choose to use transport-layer-aware co
 
 2.  Exchange transaction layer and transport layer information.
 
-3.  Import the peer transaction layer object to complete connection setup.
+3.  Import the peer transaction layer object; when both the local and remote Jetty use RC mode, also call `urma_bind_jetty_ex` to bind the local Jetty to the imported remote Jetty and complete connection setup.
 
 The connection setup and disconnection flows are shown in the figure below:
 
@@ -469,7 +469,7 @@ urma_token_t *token_value, urma_import_jetty_ex_cfg_t *cfg);
 * users should obey this rule in case of unexpected errors.
 * @param[in] [Required] jetty: local jetty to construct the transport channel;
 * @param[in] [Required] tjetty: target jetty imported before;
-* Return: 0 on success, URMA_EEXIST if the jetty has been binded, other value on error;
+* Return: 0 on success, other value on error;
 * @param[in] [Required] cfg: tp active configuration to exchange with target;
 * Note: A local jetty can be binded with only one remote jetty. Only supported by jetty under URMA_TM_RC.
 */
@@ -502,7 +502,7 @@ urma_token_t *token_value);
 * Bind jetty: construct the transport channel between local jetty and remote jetty.
 * @param[in] [Required] jetty: local jetty to construct the transport channel;
 * @param[in] [Required] tjetty: target jetty imported before;
-* Return: 0 on success, URMA_EEXIST if the jetty has been binded, other value on error
+* Return: 0 on success, other value on error;
 * Note: A local jetty can be binded with only one remote jetty. Only supported by jetty under URMA_TM_RC.
 */
 urma_status_t urma_bind_jetty(urma_jetty_t *jetty, urma_target_jetty_t *tjetty);
@@ -526,9 +526,9 @@ URMA context management must be executed at the initial stage of application run
 
 3.  Instructions for Use
 
-    1.  Call the *urma_init* function to configure the platform and set the uasid. If the uasid is not specified, the system will randomly assign one. Specifying a uasid may cause the function to fail.
+    1.  Call the *urma_init* function to initialize the URMA environment. According to the API contract, if `conf` is NULL, the UASID is randomly assigned; if `conf` is non-NULL and `uasid` is 0, a nonzero value should also be randomly assigned. UASID allocation in the current core is still TODO; the bare UDMA provider ignores `conf`, so `uasid` in its context configuration remains 0.
 
-    2.  Call the *urma_query_device* function to query the device's attributes and obtain information such as the eid. If the application has already obtained the device's eid, this step can be skipped.
+    2.  Call *urma_query_device* to query device attributes; call *urma_get_eid_list* to obtain the EIDs and their eid_index, select the index to use for context creation, and in the end call *urma_free_eid_list* to release the list. If the required valid eid_index is known, the EID list query can be omitted.
 
     3.  Call the *urma_create_context* function to create a device context. The sum of resources created by one process (including hardware doorbell registers, Jetty, Segment, etc.) is isolated from other processes.
 
@@ -540,7 +540,7 @@ URMA context management must be executed at the initial stage of application run
 typedef struct urma_context {
     struct urma_device *dev; /* [Private] point to the corresponding urma device. */
     struct urma_ops *ops; /* [Private] operation of urma device. */
-    int dev_fd; /* [Private] fd of urma device's sysfs file. */
+    int dev_fd; /* [Private] device file descriptor; the core opens the URMA character device when needed. */
     int async_fd; /* [Private] fd of urma device's async event file. */
     pthread_mutex_t mutex; /* [Private] mutex of urma context. */
     urma_eid_t eid; /* [Public] eid of urma device. */
@@ -553,19 +553,19 @@ typedef struct urma_context {
 
 1.  **struct urma_device *dev**: A pointer to the urma_device structure, which contains information related to a specific URMA device, such as device attributes and operation functions.
 
-2.  **struct urma_ops *ops**: A pointer to the urma_ops structure, which defines the set of operations for interacting with a URMA device, such as open, close, read, write, etc.
+2.  **struct urma_ops *ops**: Points to the provider operation table of the current context, including operations for Jetty and Segment resource management, asynchronous event handling, work request submission, and completion record polling.
 
-3.  **int dev_fd**: An integer variable representing the file descriptor to the URMA device's sysfs file. sysfs is a Linux kernel interface that allows user-space programs to access kernel data structures — such as device status information — through the file system interface.
+3.  **int dev_fd**: The device file descriptor. For a context whose device is opened by the core library, it corresponds to `/dev/uburma/<device name>`; if the device is created by the driver, the core path does not open this node, and the provider handles it.
 
-4.  **int async_fd**: An integer variable representing the file descriptor to the URMA device's asynchronous event file. This file descriptor is used to receive asynchronous event notifications generated by the device, such as data transfer completion and error occurrence.
+4.  **int async_fd**: The file descriptor for the URMA device's asynchronous event channel, used to obtain asynchronous events such as JFC/JFS/JFR errors and port status changes; completion records are obtained from the JFC through urma_poll_jfc.
 
-5.  **pthread_mutex_t mutex**: A mutex lock used to synchronize access to the data within the urma_context_t structure. In a multi-threaded environment, the mutex ensures that only one thread can modify the data in the structure at any time, preventing data races.
+5.  **pthread_mutex_t mutex**: An internal context mutex used for control operations that require its protection; it does not mean that access to all fields of urma_context_t is automatically mutually exclusive.
 
 6.  **urma_eid_t eid**: A variable of type urma_eid_t, representing the globally unique identifier (EID, Endpoint ID) of the URMA device. In RoCE networks, the EID is used to identify an endpoint on the network.
 
-7.  **uint32_t eid_index**: An unsigned 32-bit integer, possibly used to index or identify additional information related to the EID, such as the specific position of this EID within the device context.
+7.  **uint32_t eid_index**: The index of the device EID, passed when creating the context and used to select the EID for that context.
 
-8.  **uint32_t uasid**: An unsigned 32-bit integer representing the User Assisted Segment Identifier (UASID) of the current process.
+8.  **uint32_t uasid**: The UASID of the current process.
 
 9.  **struct urma_ref ref**: An instance of the urma_ref structure, used to track the reference count of urma_context_t.
 
@@ -577,7 +577,7 @@ typedef struct urma_context {
 
 URMA execution resource management is performed through Jetty. Jetty is a URMA software operation object; with the help of Jetty, UBEP and software implement message interaction. Jetty is primarily used for message-semantic receive and send operations, as well as command submission for memory semantics. Jetty is exclusive to a process. According to their purpose, Jetty can be subdivided into Jetty, Jetty For Send (JFS), Jetty For Receive (JFR), and Jetty For Complete (JFC).
 
-1.  **Jetty**: Jetty is a full-featured communication object in URMA. It supports both sending (sending data to other Jetties) and receiving (receiving data from other Jetties). A Jetty object contains a Send Queue (SQ, Send Queue Buffer) for submitting Work Queue Entries (WQE), and it is also associated with a JFC (Jetty for Complete) to manage the completion status of data transfers. Jetty can be used independently, or in the unidirectional model, as a combination of JFS and JFR.
+1.  **Jetty**: Jetty is a full-featured communication object in URMA. It supports both sending (sending data to other Jetties) and receiving (receiving data from other Jetties). Jetty manages bidirectional communication through send and receive configurations, and completion records for sending and receiving are managed by the JFCs in the corresponding configurations, respectively. Currently, creating a Jetty on a URMA_TRANSPORT_UB device requires a shared JFR to be configured.
 
 2.  **JFS (Jetty for Sending)**: JFS is a variant of Jetty dedicated to send operations. In the unidirectional model, on the Initiator side, JFS is used to submit DMA tasks or send messages. JFS contains only an SQ, does not support receive operations, and only performs Send operations or one-sided UDMA operations. JFS is typically used in conjunction with JFR to conserve receive buffer resources.
 
@@ -591,7 +591,7 @@ Before performing specific read, write, send, receive, etc. operations, the rele
 
 2.  Precautions
 
-When creating a JFC, specify the associated JFCE in order to wait for completion events and obtain completion records in interrupt mode. JFCE: the channel for receiving completion events. In kernel mode, JFCE is implemented as a file; in user mode, it is implemented as an opened JFCE file handle.
+When creating a JFC, associate a JFCE to wait for completion event notifications through urma_wait_jfc; completion records must also be obtained through urma_poll_jfc, and polling mode does not require binding a JFCE. JFCE is the completion event channel, and the fd in urma_jfce_t is the file descriptor of this channel.
 
 3.  Instructions for Use
 
@@ -613,7 +613,7 @@ When creating a JFC, specify the associated JFCE in order to wait for completion
 
 1.  Overview
 
-Segment is the abstract data structure through which URMA manages and accesses memory accessed by memory transaction instructions. A Segment is a contiguous block of UBA address space, with physical memory allocated to correspond to the segment. In the URMA one-sided memory access programming model, Segment is the fundamental memory management object. The Target side creates and registers a Segment, and the Initiator side applies to use the remote Segment, constructing a Target Segment (containing TokenId, ubva, etc.), after which it can proceed to access remote memory.
+Segment is the abstract data structure through which URMA registers and accesses a provided memory range; the registration interface receives the VA and length supplied by the caller, while the specific memory authorization, registration, and mapping behavior is implemented by the provider. In the URMA one-sided memory access programming model, the Target creates and registers a Segment; when using the import method, the Initiator calls urma_import_seg based on the remote Segment information to construct a Target Segment before accessing it. For import-free operations supported by the provider, user_tseg can also be provided in the remote SGE.
 
 **UBVA Address Model**
 
@@ -621,29 +621,29 @@ Segment is the abstract data structure through which URMA manages and accesses m
 
 URMA-semantic memory management.
 
-**Register memory (register_seg): Allow the device to access a segment of the process's memory**
+**Register memory (urma_register_seg): Allow the device to access a segment of the process's memory**
 
-- Permissions: local write, remote read, remote write, remote atomic.
+- Permissions: local-only access (URMA_ACCESS_LOCAL_ONLY), remote read (URMA_ACCESS_READ), remote write (URMA_ACCESS_WRITE), remote atomic (URMA_ACCESS_ATOMIC).
 
-- Difference from RDMA: No need to create a PD in advance; a key must be passed in (may be modified).
+- The registration interface does not require a PD; whether to use a token is determined by token_policy.
 
-**Before accessing remote memory, first import the memory (import_seg)**
+**Import remote memory through urma_import_seg**
 
-- Add a Segment access table entry to verify that this process has the permission to access the segment.
+- The core layer checks required parameters before invoking the provider to perform the import; in the bare UDMA implementation, import checks only token_policy and creates a local target segment, while addr and flag are ignored; access authorization behavior of other providers is determined by their implementations.
 
 - RDMA applications do not need to import MR; they directly exchange the server process's va and rkey with the client through an out-of-band channel, after which the client can use the va and rkey to perform RDMA operations.
 
-- In URMA, each client registers a segment and passes in a different derived key.
+- When token validation is used, the registering side configures `token_value`, and the accessing side provides a token for remote-access validation; `URMA_TOKEN_NONE` indicates that token validation is not used.
 
-- When using a bond device for import_segment, the eid in the seg must not be empty; otherwise, it cannot be sent to the peer. There is no such restriction when using a bare udma device, and udma does not check the content of seg for emptiness.
+- For a bond device with Segment caching enabled, a cache hit keyed by `token_id` and the outer `seg->ubva.eid` reuses the cached peer physical-Segment data and connection matrix. Without cache reuse, the normal path calls `urma_cmd_import_seg`; the user-extension path rebuilds the connection matrix from the outer `seg->ubva.eid`. Physical-Segment import skips peers with an empty EID and fails if no valid route remains. Bare UDMA import does not reject a zero EID, but it validates `token_policy`; the core API also rejects a null context or Segment and requires a token when the policy is not `URMA_TOKEN_NONE`.
 
   1.  Precautions
 
 (1) When a local user reads from or writes to remote memory, both the local buffer and the remote memory must be registered with the device by calling urma_register_seg in advance. If not in use, urma_unregister_seg must be called to deregister.
 
-(2) Before an application uses remote memory for reading or writing, urma_import_seg must be called to obtain the target_segment.
+(2) When using the import approach, first call urma_import_seg to obtain target_segment; alternatively, a provider-supported remote SGE may use user_tseg for import-free access. Bare UDMA's WRITE, WRITE_IMM, and READ encodings support remote user_tseg; its WRITE_NOTIFY data destination dst.sge[0] also accepts user_tseg, while notification destination dst.sge[1] must use an imported tseg. The bond path rejects user_tseg in any WRITE_NOTIFY destination SGE; check provider support for other operations.
 
-(3) When registering a segment, if the remote write or remote atomic permission is declared, the application must also declare the local write permission; otherwise, the registration fails.
+(3) When registering a segment, URMA_ACCESS_LOCAL_ONLY cannot be combined with remote read, write, or atomic permissions; URMA_ACCESS_WRITE must be declared together with URMA_ACCESS_READ, and URMA_ACCESS_ATOMIC must be declared together with both URMA_ACCESS_READ and URMA_ACCESS_WRITE; otherwise, registration fails.
 
 2.  Instructions for Use
 
@@ -651,9 +651,9 @@ URMA-semantic memory management.
 
 (2) Freeing local memory: call urma_unregister_seg to deregister the segment.
 
-(3) Using remote memory: urma_import_segment to obtain targ_segment and mva.
+(3) Using remote memory: when using the import method, call urma_import_seg to obtain a urma_target_seg_t object; supported import-free operations can provide user_tseg in the remote SGE. addr is an optional mapping address; the specific mapping behavior is implemented by the provider, and bare UDMA ignores addr and flag.
 
-(4) Freeing remote memory: unimport_segment to deregister the segment.
+(4) Freeing the remote-memory import object: call urma_unimport_seg to cancel the import; registration of the remote memory remains managed by its owning process.
 
 ```c
 typedef struct urma_seg {
@@ -686,9 +686,9 @@ The programming framework for implementing memory semantics based on Segment is 
 
 **One-sided Memory Access**:
 
-- **Read**: The user (Initiator) initiates a URMA read transaction in the Jetty's Send Queue (SQ). The udma driver reads a Service Queue Element (SQE) from the SQ queue and parses the instruction information. The user's Transaction Processing Unit (TP) encapsulates the read request into a packet and sends it to the target (Target). After the target receives the request, the transaction engine reads data from the specified memory region. The target's TP encapsulates the data into a packet and sends it back to the user. After receiving the data, the user places it into the buffer specified by mr.
+- **Read**: The UDMA user-space provider constructs an SQE from the work request and posts it to the SQ. `wr->rw.src.sge[0]` supplies the single supported remote source SGE; its address and segment/token fields populate the remote-address and control fields, while the target TP ID, EID, and Jetty type are filled from `tjetty`. The local destination consists of the nonzero SGEs in `wr->rw.dst.sge`, which are copied into the SQE, and the read result is written to those destination buffers. The device doorbell is updated immediately unless the SQ doorbell status or `wr->flag.bs.db_bypass` defers it; a deferred doorbell is updated when doorbell status is cleared. When completion is enabled in the WR, the application can obtain a completion record with `urma_poll_jfc`; in JFC event mode, it waits with `urma_wait_jfc`, polls with `urma_poll_jfc`, acknowledges with `urma_ack_jfc`, and rearms with `urma_rearm_jfc`.
 
-- **Write**: The user initiates a URMA write transaction in the Jetty's Send Queue. The user reads the SQE from the SQ and parses the information. Based on the SQE information, the user retrieves data from local memory, assembles it into a packet, and sends it to the target. After the target receives the packet, the transaction engine stores the data into the specified memory region. After the target completes the operation, it sends a Transaction Acknowledgment (TAACK) to the user. After receiving the TAACK, the user's TP encapsulates it into a packet and sends it to the user.
+- **Write**: The user initiates a URMA write transaction in the Jetty's Send Queue. The UDMA user-space provider constructs an SQE from the local source SGE and remote destination SGE in the work request and submits it to the device. After the target receives the packet, the transaction engine stores the data into the specified memory region. The application obtains the corresponding completion record through urma_poll_jfc; when using completion event notifications, it first waits for the notification through JFCE.
 
 ### 5.2.4 Asynchronous Events
 
@@ -738,15 +738,15 @@ Before an application deletes an object (e.g., JFS, JFR, JFC, Jetty), if it has 
 
 *  Function: This interface is used to obtain events from the URMA asynchronous event queue. When the kernel detects an exception or state change related to URMA resources (such as Jetty, JFC, JFS, etc.), it records these events into the asynchronous event queue. The user-mode driver polls this queue by calling urma_get_async_event to obtain the latest exception events.
 
-*  Parameters: Typically requires a context pointer of type urma_context_t, which was created during urma_create_context and is used to communicate with the kernel.
+*  Parameters: ctx is a required urma_context_t pointer that points to the created context; event is a required urma_async_event_t output pointer that points to storage for receiving the event.
 
 *  Return Value: urma_get_async_event returns urma_status_t to inform the user of the function's completion status. A return value of 0 indicates success; other values indicate that the interface call failed, and the event pointer in the parameters points to the obtained event.
 
 2.  **urma_ack_async_event:**
 
-*  Function: urma_ack_async_event is used to acknowledge to the kernel that an exception event has been processed. After the user-mode driver obtains an event through urma_get_async_event and processes the relevant logic, it typically needs to call urma_ack_async_event to tell the kernel that this event has been processed and can be cleaned up or further handled.
+*  Function: urma_ack_async_event is used to acknowledge that the application has processed the obtained asynchronous event. The specific operation is implemented by the provider; for related resource events, UDMA updates the user-space acknowledgment count and notifies threads waiting for event acknowledgment.
 
-*  Parameters: Typically requires the urma_async_event_t structure previously obtained from urma_get_async_event, so the kernel knows which event has been acknowledged.
+*  Parameters: Requires a pointer to the urma_async_event_t event previously obtained successfully through urma_get_async_event. Its event type and associated resource identify the provider-side acknowledgment operation and, for supported resource events, the user-space event-tracking state to update. The interface returns void.
 
 #### 5.2.4.1 flush jetty
 
@@ -815,11 +815,11 @@ The device attributes of the UB transport layer depend on the UB driver implemen
 | max_jfc_depth | √ | x | x | Maximum configurable queue depth for JFC | √ | √ | √ |
 | max_jfs_depth | √ | x | x | Maximum configurable queue depth for JFS | √ | √ | √ |
 | max_jfr_depth | √ | x | x | Maximum configurable queue depth for JFR | √ | √ | √ |
-| max_jfs_inline_len | √ | x | x | Maximum inline size supported by JFS for messages, in bytes | √ | √ | x |
+| max_jfs_inline_size | √ | x | x | Maximum inline size supported by JFS for messages, in bytes; corresponding API field: max_jfs_inline_len | √ | √ | x |
 | max_jfs_sge | √ | x | x | Maximum number of SGEs supported by JFS in a single WR | √ | √ | √ |
 | max_jfr_sge | √ | x | x | Maximum number of SGEs supported by JFR in a single WR | √ | √ | √ |
 | max_msg_size | √ | x | x | Maximum message size supported by the device for transmission, in bytes | √ | √ | x |
-| tp_mode | √ | x | x | Device transport layer mode, enumeration values: SRM (shared reliable message), RC (reliable connection), UM (unreliable message) | √ | √ | √ |
+| trans_mode | √ | x | x | Device-supported transport mode bitmask: URMA_TM_RM (reliable message), URMA_TM_RC (reliable connection), URMA_TM_UM (unreliable message) | √ | √ | √ |
 | port_count | √ | x | x | Number of ports the device has | √ | √ | √ |
 | max_mtu | √ | x | x | Maximum configurable MTU value for the port, enumeration values: MTU_256, MTU_512, MTU_1024, etc. | √ | √ | √ |
 | state | √ | x | √ | Port status, enumeration values: PORT_DOWN, PORT_INIT, PORT_ARMED, PORT_ACTIVE, PORT_ACTIVE_DEFER | √ | √ | √ |
@@ -1229,9 +1229,9 @@ The following scenarios trigger the JFC to generate a completion record:
 | Data Plane Interface | Two-sided Operations | send | Support IMM data | — | Support IMM data | √ | √ |
 | Data Plane Interface | Two-sided Operations | send | with invalid | — | Send with invalid | √ | √ |
 | Data Plane Interface | Two-sided Operations | recv | — | — | Receive operation | √ | √ |
-| Data Plane Interface | Atomic Operations | cas | — | — | Compare and swap | × | × |
+| Data Plane Interface | Atomic Operations | cas | — | — | Compare and swap | To be verified | To be verified |
 | Data Plane Interface | Atomic Operations | cas | Support mask | — | CAS with mask | × | × |
-| Data Plane Interface | Atomic Operations | faa | — | — | Fetch and add | × | × |
+| Data Plane Interface | Atomic Operations | faa | — | — | Fetch and add | Pending verification | Pending verification |
 | Data Plane Interface | Atomic Operations | faa | Support mask | — | FAA with mask | × | × |
 | Data Plane Interface | Completion Operations | poll_jfc | Support multiple CRs | — | Poll JFC for completion records | √ | √ |
 | Data Plane Interface | Completion Operations | poll_jfc | CR parsing | status | Completion status | √ | √ |
@@ -1311,7 +1311,7 @@ The following scenarios trigger the JFC to generate a completion record:
 | DFX Interface | urma_perftest | Test type config | read_bw | — | Read bandwidth test | √ | √ |
 | DFX Interface | urma_perftest | Test type config | write_bw | — | Write bandwidth test | √ | √ |
 | DFX Interface | urma_perftest | Test type config | atomic_bw | — | Atomic bandwidth test | √ | √ |
-| DFX Interface | urma_perftest | Run param config | all | — | Run 2~2^15 range by powers of 2 | √ | √ |
+| DFX Interface | urma_perftest | Run param config | all | — | Run sizes from 2 to 2^23 by powers of 2; send tests are limited to maximum sizes of 2^16 for RTP and 2^12 for CTP | √ | √ |
 | DFX Interface | urma_perftest | Run param config | atomic_type | — | Atomic type: cas/faa | √ | √ |
 | DFX Interface | urma_perftest | Run param config | simplex_mode | — | Simplex jfs/jfr mode | √ | √ |
 | DFX Interface | urma_perftest | Run param config | bidirectional | — | Bidirectional mode | √ | √ |
@@ -1335,8 +1335,8 @@ The following scenarios trigger the JFC to generate a completion record:
 | DFX Interface | urma_perftest | Run param config | priority | — | Jetty scheduling priority | √ | √ |
 | DFX Interface | urma_perftest | Run param config | trans_mode | — | Transport mode: RC/RM/UM | √ | √ |
 | DFX Interface | urma_perftest | Run param config | port | — | Port number | √ | √ |
-| DFX Interface | urma_perftest | Run param config | cq_num | — | CR generation per N WRs | √ | √ |
-| DFX Interface | urma_perftest | Run param config | jfs_post_list | — | Receiver WR list chain count | √ | √ |
+| DFX Interface | urma_perftest | Run param config | cq_mod | — | Generate one CQE after the sender completes the specified number of WRs | √ | √ |
+| DFX Interface | urma_perftest | Run param config | jfr_post_list | — | Receiver WR list chain count | √ | √ |
 | DFX Interface | urma_perftest | Run param config | jfr_depth | — | JFR depth | √ | √ |
 | DFX Interface | urma_perftest | Run param config | size | — | Transfer byte size | √ | √ |
 | DFX Interface | urma_perftest | Run param config | server | — | Server IP address | √ | √ |
@@ -1484,7 +1484,7 @@ The bonding device is TP-unaware.
 
 3. The capabilities supported by different jetties' single-path, multi-path modes, and transport modes may differ.
 
-4. When using aggregation devices, the choice of TP/CTP for the transport layer depends only on the parameters set when creating the jetty and jfs/jfr. The CTP parameter in the rjetty flag passed to urma_import_jetty will be ignored.
+4. When using aggregation devices, the rjetty tp_type must still be correctly specified when calling urma_import_jetty. The core API validates its combination with trans_mode and order_type; if validation fails, it returns NULL and sets errno to EINVAL. When the aggregation layer imports a member Jetty, it continues to pass this parameter through.
 
 5. Health check and fault failback are only supported by Jetty, not by JFR or JFS. Health check performs periodic probing of link status by creating an out-of-band probe Jetty for each path (reusing JFR receive resources); fault failback, after a recovery is detected, rebuilds the Jetty to switch traffic back to the primary path. Both paths depend on the Jetty object; independently created JFR or JFS do not provide health check or fault failback capabilities.
 
@@ -1514,7 +1514,6 @@ The aggregation device already supports most URMA APIs. The following lists the 
 | urma_flush_jfs | Clear JFS software queue; functional interface — not needed if app does not require all submitted SQEs to be reported |
 | urma_advise_jfr/urma_unadvise_jfr | Non-UB functional API |
 | urma_query_jetty | Query jetty status and receiver watermark; primarily DFX, non-essential. Note: jetty receiver watermark feature not currently supported on KP950 HW |
-| urma_flush_jetty | Clear jetty send software queue; functional interface — not needed if app does not require all submitted SQEs to be reported |
 | urma_advise_jetty_async | Non-UB functional API |
 | urma_create_jetty_grp/urma_delete_jetty_grp | Create/delete jetty group; functional interface |
 | urma_get_tpn | Current control plane does not support this capability |
@@ -1718,7 +1717,7 @@ Options:
 | -e            | use_jfce            | bool     | Use event notification mechanism.                                                                                                                                                                                                                          | No           | -                                    | Disabled                       |
 | \--eid idx    | eid index           | uint32_t | EID index. EID is the unique identifier for endpoints in URMA communication.                                                                                                                                                                              |              |                                      |                                |
 | -E            | err_timeout         | uint8_t  | Error timeout when creating JFS or jetty as sender. Timeout = 4.096*(2^err_timeout).                                                                                                                                                                     | Yes          | 0~31                                 | 17                             |
-| -f            | use_flat_api        | bool     | Use urma_send/urma_recv/urma_read/urma_write data plane APIs. Must be paired with JFS/JFR. Only effective in simplex mode.                                                                                                                             | No           | -                                    | Disabled                       |
+| -f            | use_flat_api        | bool     | Use urma_send/urma_recv/urma_read/urma_write data plane APIs. Must be paired with JFS/JFR. Only effective in simplex mode. The -f option is not supported for atomic operation tests. When -f is used for latency tests, jfs_post_list must be 1.                                                                                                                             | No           | -                                    | Disabled                       |
 | -F            | cpu_freq_f          | bool     | Report warning when CPU frequency differs significantly between measurement methods.                                                                                                                                                                       | No           | -                                    | Disabled                       |
 | -h            | help                | -        | Print usage information.                                                                                                                                                                                                                                   | No           | -                                    | -                              |
 | -I(ASCII 73)  | inline_size         | uint32_t | Inline size.                                                                                                                                                                                                                                               | Yes          | 0~912                                | Lat: 220; BW: 0                |
@@ -1741,7 +1740,7 @@ Options:
 | -w            | warm_up             | bool     | Enable warm-up before perftest. Only effective for read/write/atomic BW tests.                                                                                                                                                                            | No           | -                                    | Disabled                       |
 | -y            | infinite            | uint32_t | Infinite mode for BW tests. Optional parameter specifies print interval in seconds (default 2).                                                                                                                                                           | Optional     | -                                    | 2                              |
 | \--           | single_path         | bool     | Aggregation device single-path mode. All traffic goes through one selected physical interface.                                                                                                                                                            | Optional     |                                      | false                          |
-|               | inf_period_ms       | uint32_t | Print bandwidth at ms granularity. Must be a multiple of 50. Effective with -y. ~2ms tolerance.                                                                                                                                                            | Optional     | Multiple of 50                       | 0                              |
+|               | inf_period_ms       | uint32_t | Configure the print period for infinite BW mode in milliseconds; non-zero values must be at least 50 and multiples of 50. A non-zero `--inf_period_ms` requires -y; otherwise, the program exits. When used with the seconds period specified by -y, `--inf_period_ms` takes precedence; when set to 0, the period is converted from -y seconds, and with the default -y value of 2 seconds the effective period is 2000 ms | Optional     | 0 or multiples of 50                | 0                              |
 | -             | rate_limit          | uint32_t | Rate limit value. Default unit: Gbps.                                                                                                                                                                                                                      | Optional     | Unrestricted                         | 0                              |
 | -             | rate_units          | char     | Rate limit units: MBps (M), Gbps (G)(default), or Kpps (P).                                                                                                                                                                                               | Optional     | [MGP]                                | G                              |
 | -             | burst_size          | uint32_t | Number of packets to send consecutively per burst when using rate limiter.                                                                                                                                                                                | Optional     | Unrestricted (large values reduce accuracy) | jfs_depth config value     |
@@ -1758,13 +1757,13 @@ Options:
 |               | enable_sync_stream  | bool     | Enable synchronized multi-stream transmission in multi-Jetty bandwidth tests.                                                                                                                                                                            | Optional     |                                      | Disabled                       |
 |               | enable_user_tp      | bool     | Enable user-mode connection setup. When enabled, user TP can be used without UVS.                                                                                                                                                                         | Optional     |                                      | Disabled                       |
 |               | oor_en              | bool     | Enable out-of-order for user-mode connection setup.                                                                                                                                                                                                       | Optional     |                                      | Disabled                       |
-|               | spray_en            | bool     | Enable multipathing for user-mode connection setup.                                                                                                                                                                                                       | Optional     |                                      | Disabled                       |
+|               | spray_en            | bool     | Enable multipathing for user-mode connection setup; also used to set TP multipathing attributes in tp_aware + UBOE scenarios.                                                                                                                                                                                                       | Optional     |                                      | Disabled                       |
 |               | cc_en               | bool     | Enable congestion control for user-mode connection setup.                                                                                                                                                                                                 | Optional     |                                      | Disabled                       |
 |               | cc_alg              | uint32_t | Congestion control algorithm for user-mode connection setup.                                                                                                                                                                                              | Optional     | [0, 7]                               | 0                              |
 |               | retry_num           | uint32_t | Retry count for user-mode connection setup.                                                                                                                                                                                                               | Optional     |                                      | 7                              |
 |               | ack_timeout         | uint32_t | ACK timeout for user-mode connection setup.                                                                                                                                                                                                               | Optional     |                                      | 15                             |
 |               | sge_num             | uint32_t | Number of SGEs per WR.                                                                                                                                                                                                                                    | Optional     |                                      | Disabled                       |
-|               | enable_write_dirty  | bool     | Enable write dirty functionality.                                                                                                                                                                                                                         | Optional     |                                      | false                          |
+|               | enable_write_dirty  | bool     | Enable write dirty functionality; the write-dirty period in the configuration structure defaults to 50 ms via PERFTEST_WRITE_DIRTY_PERIOD; the write-dirty thread is created only in BW tests; when the period is less than PERFTEST_DEF_INF_PERIOD_MS (50 ms), the thread does not execute the write-dirty loop after creation and exits                                                                                                                                 | Optional     |                                      | false                          |
 |               | pair_num            | uint32_t | Server: set to client count; Client: set to server count. Auto-adjusts jetty count to match.                                                                                                                                                             | Optional     |                                      | 1                              |
 |               | async_import        | -        | Enable asynchronous connection establishment.                                                                                                                                                                                                             | Optional     |                                      |                                |
 |               | tp_aware            | bool     | Enable transport-path-aware connection.                                                                                                                                                                                                                   | Optional     |                                      | false                          |
@@ -1796,11 +1795,11 @@ urma_perftest parameter values are generally not validated; users should configu
 
 8.  Atomic operation semantics: configuring -s to a value other than 8 triggers a warning and returns failure.
 
-9.  When jfs_post_list/jfr_post_list exceeds 1 in BW tests with iteration mode (-n): if the iteration count is not divisible by jfs_post_list/jfr_post_list, a warning is generated and failure is returned.
+9.  When jfs_post_list exceeds 1, in iteration mode (-n), if the iteration count is less than jfs_post_list or is not divisible by jfs_post_list, a warning is generated and failure is returned; LAT tests additionally require the iteration count to be at least five times jfs_post_list. When jfr_post_list exceeds 1, this configuration is supported only in BW or send_lat tests; in iteration mode (-n), if the iteration count is less than jfr_post_list or is not divisible by jfr_post_list, a warning is generated and failure is returned, while other test types return failure directly.
 
-10. When jfs_post_list exceeds 1 in BW tests and cq_mod is 0, it is forced equal to jfs_post_list.
+10. When jfs_post_list exceeds 1, if cq_mod is still 0 after the preceding rules are applied, it is forced equal to jfs_post_list; in particular, when size > 8192, all is not enabled, and use_jfce is not enabled, cq_mod = 0 is first set to 1 during the preceding processing.
 
-11. When jfs_post_list exceeds 1 in BW tests and cq_mod is not 0: if jfs_post_list is not divisible by cq_mod, a warning is generated and failure is returned.
+11. When jfs_post_list exceeds 1, cq_mod is first truncated to jfs_depth if it exceeds jfs_depth; for the adjusted final cq_mod, if it exceeds jfs_post_list or jfs_post_list is not divisible by it, a warning is generated and failure is returned.
 
 12. In send/recv BW tests, when jfr_depth/jfs_depth is not divisible by jfr_post_list, an exception warning is reported but failure is not returned.
 
@@ -1816,7 +1815,7 @@ urma_perftest parameter values are generally not validated; users should configu
     - With -a configured, the default packet size range is 2~8388608.
     - Duration mode (-D): iteration count is auto-initialized to 0, no_peak is auto-enabled. Configuring -e or -a in this mode triggers a warning and returns failure.
 
-16. When jfs_post_list exceeds 1 in BW tests: if jfs_depth < jfs_post_list, a warning is generated and failure is returned.
+16. When jfs_post_list exceeds 1: if jfs_depth < jfs_post_list, a warning is generated and failure is returned.
 
 17. In UM mode, the size parameter should not exceed the MTU. Behavior is unpredictable if size exceeds MTU.
 
@@ -2054,8 +2053,8 @@ URMA supports user-mode log redirection, allowing logs to be uniformly directed 
 
 ```c
 typedef void(*urma_log_cb_t)(int level, char *message);
-urma_status_t **urma_register_log_func**(urma_log_cb_t func);
-urma_status_t **urma_unregister_log_func**(void);
+urma_status_t urma_register_log_func(urma_log_cb_t func);
+urma_status_t urma_unregister_log_func(void);
 ```
 
 ---
@@ -2306,101 +2305,72 @@ Taking memory access as an example, the functional principles of UB access contr
 
 ### 9.1.3 Permission Assignment Flow
 
-1.  When the Home registers a segment, the application must specify the TokenValue. The software stack can allocate and return the TokenID in two ways:
+1.  When the Home registers a segment, whether the application needs to specify the TokenValue depends on `token_policy`: when using `URMA_TOKEN_NONE`, no TokenValue is required; when using other policies, provide it in `seg_cfg.token_value`. The software stack can allocate and return the TokenID in two ways:
 
-- Call urma_register_seg with the following configuration to let the software stack auto-allocate:
-
-urma_seg_cfg_t.urma_reg_seg_flag_t.token_id_valid = 0;
-
-- First call urma_alloc_token_id to allocate a TokenID, then specify that TokenID when calling urma_register_seg:
+- For `URMA_TRANSPORT_UB`, call `urma_register_seg` with the following configuration so that the common implementation automatically allocates the TokenID. The common path requires `va` to be non-zero; `len` should be set according to the constraints of the specific provider/UMMU; remote access permissions can be configured as read-only, read/write, or atomic read/write depending on the scenario:
 
 ```c
-urma_seg_cfg_t.token_id = token_id;
-urma_seg_cfg_t.urma_reg_seg_flag_t.token_id_valid = 1;
+urma_seg_cfg_t seg_cfg = {0};
+seg_cfg.va = (uint64_t)buf;
+seg_cfg.len = len;
+seg_cfg.flag.bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE;
+seg_cfg.flag.bs.token_id_valid = URMA_TOKEN_ID_INVALID;
+urma_register_seg(ctx, &seg_cfg);
+```
+
+- First call `urma_alloc_token_id` to allocate a TokenID, then specify that TokenID when calling `urma_register_seg`; configure `access` according to the remote access scenario: use `URMA_ACCESS_READ` for read-only access, `URMA_ACCESS_READ | URMA_ACCESS_WRITE` for read/write access, and `URMA_ACCESS_READ | URMA_ACCESS_WRITE | URMA_ACCESS_ATOMIC` when atomic access is required. The following example uses read/write permissions:
+
+```c
+urma_token_id_t *token_id = urma_alloc_token_id(ctx);
+urma_seg_cfg_t seg_cfg = {0};
+seg_cfg.va = (uint64_t)buf;
+seg_cfg.len = len;
+seg_cfg.token_id = token_id;
+seg_cfg.flag.bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE;
+seg_cfg.flag.bs.token_id_valid = URMA_TOKEN_ID_VALID;
+urma_register_seg(ctx, &seg_cfg);
 ```
 
 2.  The token verification policy can be specified when registering a segment:
 
-urma_seg_cfg_t.urma_reg_seg_flag_t.token_policy = 0;
+```c
+seg_cfg.flag.bs.token_policy = URMA_TOKEN_NONE;
+```
 
-1.  Token Verification Policies
+1.  Token Verification Policies (protocol constants; supported values depend on hardware and provider implementation)
 
-| Value | URMA Definition | Policy |
+| Value | URMA Definition | Behavior Currently Verifiable from Code |
 |---|---|---|
-| 0 | URMA_TOKEN_NONE | Only the TokenID or TCID is transmitted without the TokenValue. This approach has the highest performance but carries the risk of unauthorized access. |
-| 1 | URMA_TOKEN_PLAIN_TEXT | The TokenID or TCID and TokenValue are transmitted in plain text. This provides some security but carries the risk that intermediate network nodes may illegally obtain the TokenValue. |
-| 2 | URMA_TOKEN_SIGNED | The TokenID or TCID and TokenValue are transmitted with encryption protection, while the PLD is in plain text. Intermediate network nodes cannot obtain the TokenValue, but can see the PLD content. |
-| 3 | URMA_TOKEN_ALL_ENCRYPTED | The TokenID or TCID and TokenValue are transmitted with encryption protection, and the PLD is also encrypted. This is the most secure approach but incurs significant hardware overhead. |
+| 0 | URMA_TOKEN_NONE | Current UDMA does not reject registration or import based on this policy value; the public import interface does not require TokenValue for this value. Successful registration remains subject to access, token_id, len, and UMMU/provider constraints. |
+| 1 | URMA_TOKEN_PLAIN_TEXT | Current UDMA does not reject registration or import based on this policy value; the public import interface requires TokenValue for this value. Successful registration remains subject to access, token_id, len, and UMMU/provider constraints. |
+| 2 | URMA_TOKEN_SIGNED | Protocol constant; current UDMA registration and import paths reject. |
+| 3 | URMA_TOKEN_ALL_ENCRYPTED | Protocol constant; current UDMA registration and import paths reject. |
 
 ![](figures/urma_warning.png)
 
-The above verification policy capabilities require hardware support.
+The above values are defined by protocol constants; support must be verified separately for each provider. In the UDMA provider, the verified segment and JFR configurations accept only `URMA_TOKEN_NONE` and `URMA_TOKEN_PLAIN_TEXT`.
 
 3.  The application can distribute the Home's Token information to the User using an out-of-band channel (e.g., TLS/IP channel) or the well-known jetty channel provided by URMA.
 
-4.  When the User imports remote Home memory, it must carry the token_value + token_id information.
+4.  When the User imports remote Home memory, the `seg` argument carries `token_id`; the `token_value` argument must be non-NULL when `token_policy` is not `URMA_TOKEN_NONE` and may be `NULL` when `token_policy` is `URMA_TOKEN_NONE`.
 
-5.  Token Secure Transport
+5.  Token Secure Transport, Lookup, and Initiator Isolation Strategies
 
-    a.  **Secure Token Distribution**:
+    UMS code defines three UB Token transport modes:
 
-    1.  A secure channel must be established between the Target and the Initiator. This can be achieved through identity certificates, passwords, or a Key Management System (KMS).
+    - **SECURE**: CLC passes token policy, TokenID, other metadata, and the mode; the kernel hands the local Token to the local UMS agent through generic netlink `UMS_CMD_TOKEN_SUBMIT`; the agent encodes the Token as a `UMS_AGENT_MSG_TOKEN_TRANSFER` message and sends it over TLS. After receiving it, the peer agent hands the Token to its local kernel through generic netlink `UMS_CMD_TOKEN_DELIVER`; the kernel stores `peer_seg_token` and uses its TokenValue when importing the peer segment.
+    - **LEGACY**: The CLC message carries the jetty and segment TokenValue in plain text.
+    - **DISABLE**: CLC uses `UBCORE_TOKEN_NONE` and carries a zero TokenValue; UMS also uses `UBCORE_TOKEN_NONE` and a zero TokenValue when registering a segment, indicating that UB Token access control is disabled.
 
-    2.  There are two ways to distribute Tokens:
-
-        - Token ID and Token Value distribution and derivation through a secure out-of-band (OoB) channel.
-
-        - The Target exchanges a symmetric key with the Initiator through a secure out-of-band channel, then uses this symmetric key within UMDK (Unified Memory Device Kit) in kernel mode to further exchange the Token ID and Token Value.
-
-    b.  **Token Lookup and Use**:
-
-    3.  When using a Token, the Target side indexes and finds the Token Value using the Token ID in the packet.
-
-    4.  The Initiator side has three ways to look up and use a Token:
-
-        - Distributed network programming scenario: Find the Token through the TargetJetty or TargetSeg object.
-
-        - SVA/DSVA scenario: Look up the Token based on the Virtual Address (VA) without needing a TargetSeg. This requires UMMU (Unified Memory Management Unit) support for accessing the CPU's page tables.
-
-        - Device scenario: Bind the Token information to the context of a specific engine or queue within the device; when the device accesses Host memory, it retrieves the Token directly from the context.
-
-    c.  **Token Security Levels**:
-
-    5.  Different performance requirements correspond to different security policies:
-
-        - Transmit only the Token ID, without the Token Value: highest performance.
-
-        - Transmit Token ID and Token Value in plain text: provides some security, but carries the risk of attacks from intermediate network nodes.
-
-        - Transmit Token ID and signed value, with payload in plain text: intermediate network nodes cannot obtain the Token Value, but can see the payload content.
-
-        - Transmit Token ID and signed value, with encrypted payload: most secure, but incurs significant hardware overhead.
-
-    d.  **Token Initiator Isolation Strategy**:
-
-    6.  To differentiate the permissions of different Initiators, two strategies can be adopted during Token distribution:
-
-        - Compute-instead-of-store: The Target side stores only the original Token Value and derives a value based on the Initiator's EID and other information at distribution time. The Initiator carries the derived Token Value and derivation materials when accessing. The Target side verifies the correctness of the derived Token.
-
-        - Store-instead-of-compute: The Target side stores a different Token Value for each Initiator. The Initiator carries the Token Value when accessing. The Target side directly compares the Token Value in the packet.
+    The currently inspected code does not verify mechanisms for deriving Tokens based on the Initiator's EID, looking up Tokens by VA or device Context, or isolating TokenValue for each Initiator; these items can only serve as protocol or design descriptions.
 
 ### 9.1.4 Permission Invalidation Flow
 
-UB access control provides two granularities of access permission invalidation mechanisms:
+The public URMA API covers TokenID allocation/release, segment registration/unregistration, and import/unimport. For UB, the public unregistration path releases TokenIDs automatically allocated by the public implementation under applicable conditions.
 
-- Permission-group granularity invalidation:
+In addition, the protocol defines `URMA_OPC_SEND_INVALIDATE`, whose message carries the remote segment TokenID; `urma_send_wr_t.tseg` is used only for send with invalidate. When constructing a SEND_WITH_INV WQE, the UDMA user-space implementation reads the TID and TokenValue from the target segment and writes them into the WQE. When processing a SEND_WITH_INV receive completion, the UDMA user-space implementation reads the TID carried by the CQE in `udma_u_parse_opcode_for_res` and calls `ummu_free_tid` to attempt to release the corresponding local TID on the receiving end; it records an error if the call fails. From the sender's perspective, this TID belongs to the remote segment.
 
-Permission-group granularity invalidation is initiated by the Home side and specifically executed by the Home-side UMMU-related software and hardware. It invalidates the TokenID and corresponding TokenValue in the Home-side UMMU. At this point, the access permissions of all Users within the permission group holding that TokenID and TokenValue are invalidated.
-
-- User granularity invalidation:
-
-User granularity invalidation refers to invalidating the access permissions of a specific User within a permission group while minimizing the impact on Users whose permissions should remain valid. It is initiated by the User. The steps are as follows:
-
-(1) Multiple Users all apply for and obtain the Home's memory access credentials (either by applying to the Home individually or by sharing among multiple Users), including the TokenID and the corresponding TokenValue.
-
-(2) The Home updates the TokenValue and distributes the updated TokenValue to Users whose permissions should remain valid. Users whose permissions are to be invalidated will not receive the updated TokenValue.
-
-(3) The Home only accepts memory access requests based on the updated TokenValue, thereby invalidating the memory access permissions of Users who did not receive the updated TokenValue.
+The currently confirmed implementation provides TID-level invalidation; the above path does not update the TokenValue or revoke objects by filtering Users. No northbound API for updating a registered TokenValue or revoking access at User granularity was found in the current repository. Therefore, the original permission-group and User-granularity TokenValue rotation flows can only be labeled as protocol or design descriptions and cannot be described as existing API behavior.
 
 ## 9.2 Memory Access Control
 
