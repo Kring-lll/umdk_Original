@@ -152,7 +152,8 @@ func (d *EmpiricalDist) Refresh() {
 func (d *EmpiricalDist) MaybeRefresh() {
 	d.mu.Lock()
 	now := time.Now().UnixNano()
-	if now-d.lastRefreshNs < refreshCooldownNs {
+	elapsed := now - d.lastRefreshNs
+	if elapsed < refreshCooldownNs {
 		d.mu.Unlock()
 		return
 	}
