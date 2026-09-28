@@ -31,9 +31,10 @@ type OpenAiRequest struct {
 
 // GetSuggestionOut specified the out parameters for GetSuggestion.
 type GetSuggestionOut struct {
-	TargetPrefillUrl string `json:"targetPrefill"`
-	TargetDecodeUrl  string `json:"targetDecode"`
-	DpRank           *int   `json:"dpRank,omitempty"` // DP rank for data parallel routing
+	TargetPrefillUrl string   `json:"targetPrefill"`
+	TargetDecodeUrl  string   `json:"targetDecode"`
+	DpRank           *int     `json:"dpRank,omitempty"`  // DP rank for data parallel routing
+	Priority         *int     `json:"priority,omitempty"` // ERR scheduling priority
 }
 
 // RegisterInstanceIn specified the input parameters for RegisterInstance.
@@ -88,6 +89,23 @@ type ProxyConfig struct {
 	RetryMaxInterval  int                  `json:"retryMaxInterval"`  // Retry max interval in milliseconds
 	Enable            bool                 `json:"enable"`            // Enable request forwarding
 	CircuitBreaker    CircuitBreakerConfig `json:"circuitBreaker"`    // Circuit breaker configuration
+	// Stream timeout budgets, mirroring the openjiuwen SDK defaults so aigw
+	// gives up roughly when the last possible reader does:
+	// firstChunkTimeoutSec ← stream_first_chunk_timeout (300s),
+	// chunkIntervalTimeoutSec ← stream_idle_timeout (60s).
+	// Deployments that override the client budgets (e.g. jiuwenswarm's
+	// config.yaml raises idle to 120s) must raise these to match.
+	//
+	// FirstChunkTimeoutSec: max wait for the FIRST byte of an engine
+	// response. The engine may legitimately queue and prefill for minutes
+	// before the first token.
+	//
+	// ChunkIntervalTimeoutSec: max gap between tokens, spent waiting in
+	// either direction — a silent engine after the first byte (dead
+	// mid-stream) or a client write stuck this long (abandoned without
+	// closing, TCP window full).
+	FirstChunkTimeoutSec    int `json:"firstChunkTimeoutSec"`
+	ChunkIntervalTimeoutSec int `json:"chunkIntervalTimeoutSec"`
 }
 
 // CircuitBreakerConfig struct contains configuration for circuit breaker
@@ -142,6 +160,23 @@ type LoadBalancerConfig struct {
 	DpSize       int `json:"dpSize"`       // Data parallel size for DP-aware routing
 }
 
+// ErrSchedulerConfig holds ERR-scheduler-specific parameters, separate from
+// LoadBalancerConfig. BatchSize (shared by LBs and ERR capacity) stays in
+// LoadBalancerConfig and is passed into initErrScheduler separately.
+type ErrSchedulerConfig struct {
+	ErrSchedulerType   string `json:"errSchedulerType"`   // "mej", "err", "caterr", "fifo", "" or "none" = disabled
+	QueueSize          int    `json:"queueSize"`          // pending queue max size (0 = passthrough mode, >0 = queue mode)
+	WarmupSessions     int    `json:"warmupSessions"`     // total observations threshold for warmup completion (0 = default 100; negative = total gate disabled)
+	WarmupPerCat       int    `json:"warmupPerCat"`       // per-category observations threshold, CatERR only (0 = default 10; negative = per-category gate disabled)
+	WindowSize         int    `json:"windowSize"`         // EmpiricalDist sliding window size (0 = unbounded, default: 5000)
+	TrainDataPath      string `json:"trainDataPath"`      // path to pre-trained distributions JSON (CatERR only; ERR can warm up online)
+	TfidfVocabPath     string `json:"tfidfVocabPath"`     // path to TF-IDF vocab JSON (CatERR)
+	TfidfCentroidsPath string `json:"tfidfCentroidsPath"` // path to K-means centroids JSON (CatERR)
+	SessionTimeoutSec  int    `json:"sessionTimeoutSec"`  // session idle timeout after tool_calls/other, seconds (default: 660)
+	TaskIdleTimeoutSec int    `json:"taskIdleTimeoutSec"` // session idle timeout after stop, seconds (default: 660)
+	QueueBoostSec      int    `json:"queueBoostSec"`      // starvation floor: force queued requests to top priority after this many seconds (default: 240; 0 = default; negative = disabled)
+}
+
 // GlobalSchedulerConfig struct contains configuration for a global scheduler
 type GlobalSchedulerConfig struct {
 	Model                string             `json:"model"`
@@ -151,6 +186,7 @@ type GlobalSchedulerConfig struct {
 	MaxTimeBetweenTokens float64            `json:"maxTimeBetweenTokens"`
 	TokenizeModelName    string             `json:"tokenizeModelName"`
 	LoadBalancer         LoadBalancerConfig `json:"loadBalancer"`
+	ErrScheduler         ErrSchedulerConfig `json:"errScheduler"`
 	// Mode selects scheduling path: "instance" (default when empty) | "provider".
 	Mode string `json:"mode,omitempty"`
 	// ProviderPool holds config for mode=provider.
