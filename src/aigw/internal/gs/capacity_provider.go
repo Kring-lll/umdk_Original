@@ -112,20 +112,19 @@ func (c *CapacityProvider) InFlight() int32 {
 }
 
 // OnCompleted decrements the in-flight counter. Never goes below 0.
+// All writers (OnDispatched/OnCompleted) are serialized by the GSM
+// dispatchMu — see dispatchScheduled/errReleaseReq and the survival scan —
+// so check-then-decrement needs no CAS retry loop; the atomic type only
+// covers the unsynchronized readers (HasCapacity/FreeSlots/InFlight).
 func (c *CapacityProvider) OnCompleted() {
 	if c == nil {
 		return
 	}
-	for {
-		cur := c.inFlight.Load()
-		if cur <= 0 {
-			log.Warn().Msgf("[Capacity] OnCompleted no-op: inFlight already 0")
-			return
-		}
-		if c.inFlight.CompareAndSwap(cur, cur-1) {
-			return
-		}
+	if cur := c.inFlight.Load(); cur <= 0 {
+		log.Warn().Msgf("[Capacity] OnCompleted no-op: inFlight already 0")
+		return
 	}
+	c.inFlight.Add(-1)
 }
 
 func (c *CapacityProvider) InstanceCount() int {
