@@ -101,7 +101,13 @@ func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, curStep 
 
 	if m.pendingQueue.IsFull() {
 		victim := m.pendingQueue.PeekLowestStep()
-		if victim != nil && curStep <= victim.CurStep {
+		// Anonymous requests rank at the boost tier in queue order; their
+		// admission must match that semantics. curStep is 1 for them, so the
+		// progress-protection rule below would always reject them on a full
+		// queue — stalling the parent session's synchronous compression
+		// call. Never reject anonymous: they evict the least-progressed
+		// victim and enter at the boost tier instead.
+		if victim != nil && curStep <= victim.CurStep && req.SessionID != "" {
 			log.Warn().Msgf("[ERR] queue full, rejecting session %s (curStep=%d) — victim has curStep=%d (more progress, kept)",
 				req.SessionID, curStep, victim.CurStep)
 			m.rollbackFailedAttempt(req.SessionID, 0)
@@ -119,10 +125,10 @@ func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, curStep 
 	}
 
 	if err := m.pendingQueue.Add(&PendingRequest{
-		ReqID:     req.Request.ReqId,
-		SessionID: req.SessionID,
-		CurStep:   curStep,
-		Msg:       msg,
+		ReqID:       req.Request.ReqId,
+		SessionID:   req.SessionID,
+		CurStep:     curStep,
+		Msg:         msg,
 		StarveClock: time.Now().Add(-m.errScheduler.TakeQueueWaitCarry(req.SessionID)),
 	}); err != nil {
 		// OnRequest already counted this attempt: undo it before rejecting,
@@ -159,10 +165,10 @@ func (m *GlobalSchedulerManager) tryDispatchFromQueue() {
 			req := r.Msg.Request.(*ScheduleRequestMsg)
 			var p int
 			if r.SessionID == "" {
-			// Anonymous internal calls (context compression / checkpoints)
-			// are small, latency-sensitive, and synchronously block the
-			// parent session — whose idle timer keeps running while the
-			// anonymous request queues. Rank them at the boost tier.
+				// Anonymous internal calls (context compression / checkpoints)
+				// are small, latency-sensitive, and synchronously block the
+				// parent session — whose idle timer keeps running while the
+				// anonymous request queues. Rank them at the boost tier.
 				p = math.MinInt32
 			} else {
 				p = int(m.errScheduler.PriorityWith(snap, r.SessionID, r.CurStep, classifyPrompt(req)))
