@@ -43,8 +43,13 @@ type ScheduleRequestMsg struct {
 	ReqCTX               context.Context // used to request cancellation
 	CandidateInstanceIDs []string        // used for SDK mode restrict scheduling to these instances, if nil means all
 	// Fields for consistent hash routing
-	Headers map[string]string   // HTTP headers for hash key extraction
+	Headers map[string]string      // HTTP headers for hash key extraction
 	Body    map[string]interface{} // Request body for hash key extraction
+	// SessionID for ERR scheduling (extracted from agent_hint.session_id)
+	SessionID string
+	// Advisory: the caller forwards the request itself (get-suggestion /
+	// SDK), so ERR must not queue it nor take in-flight slots.
+	Advisory bool
 }
 
 // ExecuteDispatchMsg is used for dispatching schedule request.
@@ -56,5 +61,6 @@ type ExecuteDispatchMsg struct {
 type SuggestionResultMsg struct {
 	PrefillUrl string
 	DecodeUrl  string
-	DpRank     *int // DP rank for data parallel routing
+	DpRank     *int     // DP rank for data parallel routing
+	Priority   *int     // ERR scheduling priority (nil if ERR disabled)
 }
