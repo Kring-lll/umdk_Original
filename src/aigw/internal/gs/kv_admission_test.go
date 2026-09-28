@@ -3,7 +3,7 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
  * Description: regression tests for engine-signal admission control —
  * waiting-gate, burst cap, hysteresis, degraded fallback (T = highWater or
- * batchSize), frozen mode, LB candidate filter, Gate A bypass.
+ * batchSize), LB candidate filter, Gate A bypass.
  * Create: 2026-09-22
  */
 
@@ -37,7 +37,6 @@ func newTestAdmission(t *testing.T, mode string, reqNum func(string) int) *KvAdm
 		HysteresisCycles:     1,
 		StaleAfterMs:         8000,
 		RecoverHealthyCycles: 2,
-		SoftCap:              8,
 	}, 8, reqNum)
 }
 
@@ -129,13 +128,6 @@ func TestDegradedGateUsesHighWater(t *testing.T) {
 	assert.True(t, c.AllowDispatch("http://ins-1"), "T=highWater=12: 11 admits")
 }
 
-func TestFrozenGate(t *testing.T) {
-	c := newTestAdmission(t, base.KvAdmissionFrozen, func(string) int { return 7 })
-	assert.True(t, c.AllowDispatch("http://ins-1"))
-	c.reqNum = func(string) int { return 8 }
-	assert.False(t, c.AllowDispatch("http://ins-1"), "frozen: in-flight >= softCap denies")
-}
-
 func TestLBCandidateFilter(t *testing.T) {
 	c := newTestAdmission(t, base.KvAdmissionSignal, nil)
 	c.markHealthy(1)
@@ -143,9 +135,6 @@ func TestLBCandidateFilter(t *testing.T) {
 
 	c.healthyStreak = 0 // degrade
 	assert.True(t, c.LBCandidate("http://ins-1"), "degraded: filter is a no-op")
-
-	f := newTestAdmission(t, base.KvAdmissionFrozen, nil)
-	assert.True(t, f.LBCandidate("http://ins-1"), "frozen: filter is a no-op")
 }
 
 func TestMultiInstanceDegrades(t *testing.T) {
