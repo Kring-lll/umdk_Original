@@ -12,6 +12,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "urma_api.h"
 #include "urma_cmd.h"
@@ -209,9 +210,16 @@ static int bondp_delete_pseg(bondp_tseg_t *bdp_seg)
         URMA_LOG_DEBUG("Unregistering pseg, idx=%d, token_id=%u.\n",
                        i, bdp_seg->p_tseg[i]->seg.token_id);
         bdp_seg->p_tseg[i]->handle = bdp_seg->p_orig_handle[i];
+        /* unregister_seg releases the pseg, so cache seg info before the call for the log below */
+        const char *dev_name = bdp_seg->bondp_ctx->p_ctxs[i]->dev->name;
+        uint64_t seg_va = bdp_seg->p_tseg[i]->seg.ubva.va;
+        uint64_t seg_len = bdp_seg->p_tseg[i]->seg.len;
         if (urma_unregister_seg(bdp_seg->p_tseg[i]) != URMA_SUCCESS) {
             URMA_LOG_ERR("Failed to unregister pseg %d\n", i);
             ret = URMA_FAIL;
+        } else {
+            URMA_LOG_ERR("DDDD Unregistered pseg, dev_name=%s, va=%lu, len=%lu, pid=%d.\n",
+                         dev_name, seg_va, seg_len, getpid());
         }
         bdp_seg->p_tseg[i] = NULL;
     }
@@ -240,6 +248,9 @@ static int bondp_create_pseg(bondp_context_t *bdp_ctx, bondp_tseg_t *bdp_seg, ur
             goto DELETE_PSEG;
         }
         URMA_LOG_DEBUG("Registered pseg successfully, idx=%d, token_id=%u\n", i, p_tseg->seg.token_id);
+        URMA_LOG_ERR("AAAA Registered pseg, dev_name=%s, va=%lu, len=%lu, pid=%d.\n",
+                     bdp_ctx->p_ctxs[i]->dev->name, p_tseg->seg.ubva.va,
+                     p_tseg->seg.len, getpid());
 
         if (p_tseg->token_id == NULL) {
             p_tseg->token_id = seg_cfg->token_id;
@@ -348,6 +359,9 @@ urma_target_seg_t *bondp_register_seg(urma_context_t *ctx, urma_seg_cfg_t *seg_c
         URMA_LOG_ERR("Failed to create vseg\n");
         goto DELETE_PSEG;
     }
+    URMA_LOG_ERR("BBBB Registered seg, dev_name=%s, va=%lu, len=%lu, pid=%d.\n",
+                 ctx->dev->name, bdp_seg->v_tseg.seg.ubva.va,
+                 bdp_seg->v_tseg.seg.len, getpid());
 
     return &bdp_seg->v_tseg;
 
@@ -367,6 +381,10 @@ static urma_status_t bondp_unregister_seg_inner(urma_target_seg_t *target_seg)
         URMA_LOG_ERR("Failed to delete vseg, token_id=%u, handle=%lu.\n",
                      target_seg->seg.token_id, target_seg->handle);
         ret = URMA_FAIL;
+    } else {
+        URMA_LOG_ERR("EEEE Unregistered seg, dev_name=%s, va=%lu, len=%lu, pid=%d.\n",
+                     bdp_seg->bondp_ctx->v_ctx.dev->name, target_seg->seg.ubva.va,
+                     target_seg->seg.len, getpid());
     }
 
     free(bdp_seg);
@@ -393,6 +411,9 @@ urma_status_t bondp_unregister_seg(urma_target_seg_t *target_seg)
     bondp_tseg_t *bdp_seg = CONTAINER_OF_FIELD(target_seg, bondp_tseg_t, v_tseg);
     bool expected = false;
 
+    URMA_LOG_ERR("CCCC Unregistering seg, dev_name=%s, va=%lu, len=%lu, pid=%d.\n",
+                 bdp_seg->bondp_ctx->v_ctx.dev->name, target_seg->seg.ubva.va,
+                 target_seg->seg.len, getpid());
     if (!atomic_compare_exchange_strong(&bdp_seg->deleting, &expected, true)) {
         return URMA_EAGAIN;
     }
