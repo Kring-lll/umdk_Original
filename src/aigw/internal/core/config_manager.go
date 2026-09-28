@@ -276,7 +276,7 @@ func validateKvAdmissionConfig(gsCfg *base.GlobalSchedulerConfig) error {
 	if cfg.Mode == "" {
 		cfg.Mode = base.KvAdmissionOff
 	}
-	if cfg.Mode != base.KvAdmissionOff && cfg.Mode != base.KvAdmissionSignal && cfg.Mode != base.KvAdmissionFrozen {
+	if cfg.Mode != base.KvAdmissionOff && cfg.Mode != base.KvAdmissionSignal {
 		return fmt.Errorf("invalid kvAdmission.mode %q, model %q", cfg.Mode, gsCfg.Model)
 	}
 	if cfg.PollMs <= 0 {
@@ -301,10 +301,6 @@ func validateKvAdmissionConfig(gsCfg *base.GlobalSchedulerConfig) error {
 	case base.KvAdmissionSignal:
 		if cfg.MetricsURL == "" {
 			return fmt.Errorf("kvAdmission.mode=signal requires metricsUrl, model %q", gsCfg.Model)
-		}
-	case base.KvAdmissionFrozen:
-		if cfg.SoftCap <= 0 {
-			return fmt.Errorf("kvAdmission.mode=frozen requires softCap, model %q", gsCfg.Model)
 		}
 	}
 	return nil

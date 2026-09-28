@@ -32,7 +32,6 @@ type engineSignal struct {
 // polls the motor coordinator's metrics endpoint (~1s) and holds dispatch
 // while the engine reports waiting>0; the engine's own scheduler is the
 // authority on its capacity, so any KVC optimization is automatically
-// accounted for. Frozen mode skips polling entirely and gates on a fixed
 // per-instance in-flight cap (replay rounds). When signals are unavailable
 // (stale beyond StaleAfterMs), the controller degrades to aigw-side counting
 // against T = highWater if learned, else the configured batchSize.
@@ -44,7 +43,6 @@ type KvAdmissionController struct {
 	burstCap     int
 	hysteresis   int
 	recoverCyc   int
-	softCap      int
 	batchSize    int
 
 	// reqNum reports aigw's per-instance in-flight count.
@@ -100,7 +98,6 @@ func NewKvAdmissionController(cfg base.KvAdmissionConfig, batchSize int,
 		burstCap:         cfg.BurstCapPerCycle,
 		hysteresis:       cfg.HysteresisCycles,
 		recoverCyc:       cfg.RecoverHealthyCycles,
-		softCap:          cfg.SoftCap,
 		batchSize:        batchSize,
 		quotaAgeFallback: time.Duration(cfg.QuotaAgeFallbackMs) * time.Millisecond,
 		reqNum:           reqNum,
@@ -110,7 +107,7 @@ func NewKvAdmissionController(cfg base.KvAdmissionConfig, batchSize int,
 	}
 }
 
-// Start launches the signal poller (signal mode only; frozen needs no input).
+// Start launches the signal poller (signal mode only).
 func (c *KvAdmissionController) Start(ctx context.Context, wg *sync.WaitGroup) {
 	if c == nil || c.mode != base.KvAdmissionSignal {
 		return
@@ -231,14 +228,6 @@ func (c *KvAdmissionController) AllowDispatch(insUrl string) bool {
 		c.highWater[insUrl] = inFlight
 	}
 
-	if c.mode == base.KvAdmissionFrozen {
-		if inFlight >= c.softCap {
-			log.Debug().Msgf("[KvAdmission] frozen-cap: ins=%s inflight=%d softCap=%d", insUrl, inFlight, c.softCap)
-			return false
-		}
-		return true
-	}
-
 	if !c.healthyLocked() {
 		c.enterDegradedLocked()
 		threshold := prevHigh
@@ -265,7 +254,7 @@ func (c *KvAdmissionController) AllowDispatch(insUrl string) bool {
 
 // LBCandidate is the LB-layer fast filter: skip instances whose engine
 // reports waiting>0. It is a no-op unless signals are fresh, so degraded and
-// frozen modes leave instance selection to the LB's own ordering.
+// degraded mode leaves instance selection to the LB's own ordering.
 func (c *KvAdmissionController) LBCandidate(insUrl string) bool {
 	if c == nil {
 		return true
