@@ -116,16 +116,11 @@ func (c *CapacityProvider) OnCompleted() {
 	if c == nil {
 		return
 	}
-	for {
-		cur := c.inFlight.Load()
-		if cur <= 0 {
-			log.Warn().Msgf("[Capacity] OnCompleted no-op: inFlight already 0")
-			return
-		}
-		if c.inFlight.CompareAndSwap(cur, cur-1) {
-			return
-		}
+	if cur := c.inFlight.Load(); cur <= 0 {
+		log.Warn().Msgf("[Capacity] OnCompleted no-op: inFlight already 0")
+		return
 	}
+	c.inFlight.Add(-1)
 }
 
 func (c *CapacityProvider) InstanceCount() int {
