@@ -101,7 +101,13 @@ func (m *GlobalSchedulerManager) dispatchWithQueue(msg *ControlMessage, curStep 
 
 	if m.pendingQueue.IsFull() {
 		victim := m.pendingQueue.PeekLowestStep()
-		if victim != nil && curStep <= victim.CurStep {
+		// Anonymous requests rank at the boost tier in queue order; their
+		// admission must match that semantics. curStep is 1 for them, so the
+		// progress-protection rule below would always reject them on a full
+		// queue — stalling the parent session's synchronous compression
+		// call. Never reject anonymous: they evict the least-progressed
+		// victim and enter at the boost tier instead.
+		if victim != nil && curStep <= victim.CurStep && req.SessionID != "" {
 			log.Warn().Msgf("[ERR] queue full, rejecting session %s (curStep=%d) — victim has curStep=%d (more progress, kept)",
 				req.SessionID, curStep, victim.CurStep)
 			m.rollbackFailedAttempt(req.SessionID, 0)
