@@ -320,20 +320,46 @@ func parseEngineSignals(body []byte) map[string]engineSignal {
 		if i := strings.LastIndexByte(name, ':'); i >= 0 {
 			short = name[i+1:]
 		}
-		s := sigs[labels["instance_id"]]
+		// Lines carrying an instance_id (motor coordinator format) keep the
+		// per-instance assignment semantics. Lines without one (vLLM bare
+		// /metrics under --data-parallel-size expose one line per DP engine
+		// with an engine="N" label) aggregate into a single pseudo-instance:
+		// counters sum across engines and utilization takes the max, so any
+		// engine's activity changes the snapshot and the versioned quota
+		// refreshes. Plain assignment here would keep only the LAST engine's
+		// values — an idle engine's static counters then freeze the quota,
+		// degrading dispatch to the age-fallback cadence.
+		key := labels["instance_id"]
+		perInstance := key != ""
+		s := sigs[key]
 		switch short {
 		case "num_requests_running":
-			s.running = int(value)
+			if perInstance {
+				s.running = int(value)
+			} else {
+				s.running += int(value)
+			}
 		case "num_requests_waiting":
-			s.waiting = int(value)
+			if perInstance {
+				s.waiting = int(value)
+			} else {
+				s.waiting += int(value)
+			}
 		case "kv_cache_usage_perc", "gpu_cache_usage_perc":
+			if !perInstance && value < s.kvUsage {
+				continue // aggregate: keep the most loaded engine
+			}
 			s.kvUsage = value
 		case "prefix_cache_queries_total":
-			s.queriesTotal = value
+			if perInstance {
+				s.queriesTotal = value
+			} else {
+				s.queriesTotal += value
+			}
 		default:
 			continue
 		}
-		sigs[labels["instance_id"]] = s
+		sigs[key] = s
 	}
 	return sigs
 }
