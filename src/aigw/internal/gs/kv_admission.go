@@ -30,6 +30,36 @@ type engineSignal struct {
 	// (bare-metrics) signal; 0 for motor-style per-instance lines. A change
 	// in topology changes the snapshot version, resetting the quota epoch.
 	engines int
+	// Per-role engine census. A request in a PD deployment needs BOTH a
+	// prefill slot and a decode slot, so the unit only has capacity when
+	// both roles have a free engine; mixed/DP engines serve alone.
+	prefillEngines int
+	decodeEngines  int
+	mixedEngines   int
+	freePrefill    int // prefill engines with waiting==0
+	freeDecode     int // decode engines with waiting==0
+	freeMixed      int // mixed/DP engines with waiting==0
+}
+
+// capacity is the number of requests the unit can accept this cycle: each
+// engine with an empty waiting queue can take one. PD units require both
+// stages free (a request occupies prefill then decode), so the count is the
+// min of the free engines per role.
+func (s engineSignal) capacity() int {
+	if s.prefillEngines == 0 && s.decodeEngines == 0 {
+		return s.freeMixed
+	}
+	if s.prefillEngines > 0 && s.decodeEngines > 0 {
+		p, d := s.freePrefill, s.freeDecode
+		if p > d {
+			p = d
+		}
+		return p
+	}
+	if s.prefillEngines > 0 {
+		return s.freePrefill
+	}
+	return s.freeDecode
 }
 
 // KvAdmissionController gates dispatch on engine-observed state. Signal mode
@@ -51,6 +81,11 @@ type KvAdmissionController struct {
 
 	// reqNum reports aigw's per-instance in-flight count.
 	reqNum func(insUrl string) int
+	// instanceCount reports the number of aigw-registered instances: one
+	// registration fronting multiple motor instances aggregates them into a
+	// single admission unit, several registrations without an
+	// instance_id<->insUrl mapping stay degraded.
+	instanceCount func() int
 
 	mu             sync.Mutex
 	signal         engineSignal
@@ -93,7 +128,11 @@ type KvAdmissionController struct {
 }
 
 func NewKvAdmissionController(cfg base.KvAdmissionConfig, batchSize int,
-	reqNum func(insUrl string) int) *KvAdmissionController {
+	reqNum func(insUrl string) int,
+	instanceCount func() int) *KvAdmissionController {
+	if instanceCount == nil {
+		instanceCount = func() int { return 1 }
+	}
 	return &KvAdmissionController{
 		mode:             cfg.Mode,
 		metricsURL:       cfg.MetricsURL,
@@ -105,6 +144,7 @@ func NewKvAdmissionController(cfg base.KvAdmissionConfig, batchSize int,
 		batchSize:        batchSize,
 		quotaAgeFallback: time.Duration(cfg.QuotaAgeFallbackMs) * time.Millisecond,
 		reqNum:           reqNum,
+		instanceCount:    instanceCount,
 		admits:           map[string]int{},
 		highWater:        map[string]int{},
 		client:           &http.Client{Timeout: time.Second},
@@ -181,21 +221,32 @@ func (c *KvAdmissionController) pollOnce(ctx context.Context) {
 		return
 	}
 	if len(sigs) > 1 {
-		c.multiInstance = true
-		if !c.multiWarned {
-			c.multiWarned = true
-			log.Warn().Msgf("[KvAdmission] multiple instance_ids in metrics; no aigw<->motor mapping yet, staying degraded")
+		if c.instanceCount() > 1 {
+			// Multiple aigw registrations AND multiple instance_ids: without
+			// an instance_id<->insUrl mapping the per-unit split is unknown,
+			// so stay degraded (per-insUrl high-water thresholds).
+			c.multiInstance = true
+			if !c.multiWarned {
+				c.multiWarned = true
+				log.Warn().Msgf("[KvAdmission] multiple instance_ids in metrics; no aigw<->motor mapping yet, staying degraded")
+			}
+			return
 		}
-		return
+		// ONE registered instance fronting multiple motor instances (engine
+		// pods, e.g. PD prefill+decode): all of them serve that registration,
+		// so aggregate into a single admission unit.
+		sigs = map[string]engineSignal{"": aggregateSignals(sigs)}
 	}
-	for _, s := range sigs { // single engine: the sole entry applies to all instances
+	for _, s := range sigs { // single unit: the sole entry applies to all instances
 		c.signal = s
 	}
 	c.lastOk = time.Now()
 	c.healthyStreak++
-	if c.signal.waiting > 0 {
-		// hysteresis clear cycles are denied before resuming; +1 covers
-		// the cycle in which waiting was last seen positive.
+	if c.signal.capacity() == 0 {
+		// Full stop: no engine in every required role has an empty queue.
+		// Hysteresis clear cycles are denied before resuming; +1 covers the
+		// cycle in which the stop was last observed. Partial availability
+		// (some engines free) does NOT arm the pause — those engines admit.
 		c.pauseRemaining = c.hysteresis + 1
 	} else if c.pauseRemaining > 0 {
 		c.pauseRemaining--
@@ -242,19 +293,20 @@ func (c *KvAdmissionController) AllowDispatch(insUrl string) bool {
 	}
 	c.exitDegradedLocked()
 
-	if c.signal.waiting > 0 || c.pauseRemaining > 0 {
-		log.Debug().Msgf("[KvAdmission] hold: ins=%s waiting=%d pauseRem=%d sigAge=%s run=%d inflight=%d",
-			insUrl, c.signal.waiting, c.pauseRemaining, time.Since(c.lastOk).Round(time.Millisecond), c.signal.running, inFlight)
+	if c.signal.capacity() == 0 || c.pauseRemaining > 0 {
+		log.Debug().Msgf("[KvAdmission] hold: ins=%s capacity=%d waiting=%d pauseRem=%d sigAge=%s run=%d inflight=%d",
+			insUrl, c.signal.capacity(), c.signal.waiting, c.pauseRemaining, time.Since(c.lastOk).Round(time.Millisecond), c.signal.running, inFlight)
 		return false
 	}
-	// burstCap 0 = auto: one admit per engine per cycle. Bare-metrics
-	// aggregation hides N DP engines behind one pseudo-instance, so the
-	// motor per-instance default of 1 would throttle the whole cluster to
-	// one admit per poll; scaling by the observed engine count restores the
-	// per-engine semantics. An explicit value always wins.
+	// burstCap 0 = auto: one admit per FREE engine per cycle (min across
+	// roles for PD). Bare-metrics aggregation hides N DP engines behind one
+	// pseudo-instance, so the motor per-instance default of 1 would throttle
+	// the whole cluster to one admit per poll; the free-engine count
+	// restores the per-engine semantics and tracks partial availability. An
+	// explicit value always wins.
 	cap := c.burstCap
 	if cap <= 0 {
-		cap = c.signal.engines
+		cap = c.signal.capacity()
 		if cap < 1 {
 			cap = 1
 		}
@@ -280,7 +332,7 @@ func (c *KvAdmissionController) LBCandidate(insUrl string) bool {
 	if c.mode != base.KvAdmissionSignal || !c.healthyLocked() {
 		return true
 	}
-	return c.signal.waiting == 0
+	return c.signal.capacity() > 0
 }
 
 func (c *KvAdmissionController) healthyLocked() bool {
@@ -322,8 +374,16 @@ func (c *KvAdmissionController) DegradationStats() (count int64, total time.Dura
 // last ':' so a renamed aggregator prefix still parses, while near-misses
 // like num_requests_waiting_by_reason do not.
 func parseEngineSignals(body []byte) map[string]engineSignal {
+	// Per admission-key engine census: one entry per distinct engine seen in
+	// ANY recognized metric line (engine identity = dp_rank, else the engine
+	// label, else the single unlabeled source). The waiting line later fills
+	// in the queue depth; an engine with no waiting line counts as free.
+	type engineState struct {
+		role    string
+		waiting int
+	}
 	sigs := map[string]engineSignal{}
-	bareEngines := map[string]bool{}
+	engines := map[string]map[string]*engineState{}
 	for _, line := range strings.Split(string(body), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -337,59 +397,111 @@ func parseEngineSignals(body []byte) map[string]engineSignal {
 		if i := strings.LastIndexByte(name, ':'); i >= 0 {
 			short = name[i+1:]
 		}
-		// Lines carrying an instance_id (motor coordinator format) keep the
-		// per-instance assignment semantics. Lines without one (vLLM bare
-		// /metrics under --data-parallel-size expose one line per DP engine
-		// with an engine="N" label) aggregate into a single pseudo-instance:
-		// counters sum across engines and utilization takes the max, so any
-		// engine's activity changes the snapshot and the versioned quota
-		// refreshes. Plain assignment here would keep only the LAST engine's
-		// values — an idle engine's static counters then freeze the quota,
-		// degrading dispatch to the age-fallback cadence.
+		switch short {
+		case "num_requests_running", "num_requests_waiting",
+			"kv_cache_usage_perc", "gpu_cache_usage_perc", "prefix_cache_queries_total":
+		default:
+			continue
+		}
+
 		key := labels["instance_id"]
-		perInstance := key != ""
-		if !perInstance {
-			if e := labels["engine"]; e != "" {
-				bareEngines[e] = true
-			}
+		// Lines carrying an instance_id (motor coordinator format) describe
+		// that instance; lines without one (vLLM bare /metrics under
+		// --data-parallel-size, one line per DP engine with an engine="N"
+		// label) all describe the single registered instance and aggregate.
+		engineID := labels["dp_rank"]
+		if engineID == "" {
+			engineID = labels["engine"]
+		}
+		byKey := engines[key]
+		if byKey == nil {
+			byKey = map[string]*engineState{}
+			engines[key] = byKey
+		}
+		e := byKey[engineID]
+		if e == nil {
+			e = &engineState{role: normalizeRole(labels["role"])}
+			byKey[engineID] = e
 		}
 		s := sigs[key]
 		switch short {
 		case "num_requests_running":
-			if perInstance {
-				s.running = int(value)
-			} else {
-				s.running += int(value)
-			}
+			s.running += int(value)
 		case "num_requests_waiting":
-			if perInstance {
-				s.waiting = int(value)
-			} else {
-				s.waiting += int(value)
-			}
+			s.waiting += int(value)
+			e.waiting = int(value)
 		case "kv_cache_usage_perc", "gpu_cache_usage_perc":
-			if !perInstance && value < s.kvUsage {
-				continue // aggregate: keep the most loaded engine
+			if value > s.kvUsage {
+				s.kvUsage = value
 			}
-			s.kvUsage = value
 		case "prefix_cache_queries_total":
-			if perInstance {
-				s.queriesTotal = value
-			} else {
-				s.queriesTotal += value
-			}
-		default:
-			continue
+			s.queriesTotal += value
 		}
 		sigs[key] = s
 	}
-	if len(bareEngines) > 0 {
-		if s, ok := sigs[""]; ok {
-			s.engines = len(bareEngines)
-			sigs[""] = s
+
+	for key, byKey := range engines {
+		s := sigs[key]
+		for _, e := range byKey {
+			s.engines++
+			free := e.waiting <= 0
+			switch e.role {
+			case "prefill":
+				s.prefillEngines++
+				if free {
+					s.freePrefill++
+				}
+			case "decode":
+				s.decodeEngines++
+				if free {
+					s.freeDecode++
+				}
+			default:
+				s.mixedEngines++
+				if free {
+					s.freeMixed++
+				}
+			}
 		}
+		sigs[key] = s
 	}
 	return sigs
+}
+
+// aggregateSignals merges per-instance signals into one admission unit:
+// counters sum, utilization maxes, and the per-role engine census sums so a
+// PD unit's capacity stays min(freePrefill, freeDecode) across the pods.
+func aggregateSignals(sigs map[string]engineSignal) engineSignal {
+	var agg engineSignal
+	for _, s := range sigs {
+		agg.running += s.running
+		agg.waiting += s.waiting
+		agg.queriesTotal += s.queriesTotal
+		if s.kvUsage > agg.kvUsage {
+			agg.kvUsage = s.kvUsage
+		}
+		agg.engines += s.engines
+		agg.prefillEngines += s.prefillEngines
+		agg.decodeEngines += s.decodeEngines
+		agg.mixedEngines += s.mixedEngines
+		agg.freePrefill += s.freePrefill
+		agg.freeDecode += s.freeDecode
+		agg.freeMixed += s.freeMixed
+	}
+	return agg
+}
+
+// normalizeRole folds label variants onto the canonical role names; anything
+// unknown (including the empty bare-metrics case) counts as mixed.
+func normalizeRole(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "prefill", "p":
+		return "prefill"
+	case "decode", "d":
+		return "decode"
+	default:
+		return "mixed"
+	}
 }
 
 func parsePromLine(line string) (name string, labels map[string]string, value float64, ok bool) {

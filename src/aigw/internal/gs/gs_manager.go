@@ -308,7 +308,8 @@ func (m *GlobalSchedulerManager) initKvAdmission(cfg *base.KvAdmissionConfig, ba
 			cfg.Mode, m.config.model)
 		return nil
 	}
-	ctrl := NewKvAdmissionController(*cfg, batchSize, m.instanceManager.InsReqNum)
+	ctrl := NewKvAdmissionController(*cfg, batchSize, m.instanceManager.InsReqNum,
+		m.instanceManager.getInsNum)
 	m.kvAdmission = ctrl
 	ctrl.SetDispatchKick(func() {
 		m.dispatchMu.Lock()
