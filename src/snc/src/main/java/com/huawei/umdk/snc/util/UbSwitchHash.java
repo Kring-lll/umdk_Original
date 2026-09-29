@@ -128,6 +128,38 @@ public final class UbSwitchHash {
     }
 
     /**
+     * Returns the human-readable name of the hash algorithm that
+     * {@link #ubswitchHashEcmp} executes for the given {@code hash_func}
+     * selector — the single extension point for algorithm-name logging.
+     *
+     * <p>Whenever a new selector code is added to the dispatch in
+     * {@link #ubswitchHashEcmp}, add its name here so the log stays
+     * truthful. Per the C contract ({@code ubswitch_ecmp.c}),
+     * {@code 1} selects FNV-1a and every other value executes the simple
+     * accumulator, so the default case reports {@code "simple"} for any
+     * currently unrecognized selector; the raw selector value is logged
+     * alongside the name, keeping unexpected codes visible in the log.
+     *
+     * <p>Note: the selector is the value received by this class. Public-API
+     * callers (e.g. {@code HashUtils.nativeHash}) apply
+     * {@code HashUtils.mapHashMode} — a 1&harr;6 swap — before dispatch,
+     * so a public {@code hashFunc} of {@code 1} arrives here as {@code 6}
+     * and executes the simple accumulator.
+     *
+     * <p>Package-private on purpose: {@code HashUtils} calls this on the
+     * native-library path (with the mapped selector), so the algorithm
+     * name can never drift between the native and the pure-Java paths.
+     */
+    static String hashAlgoName(int hashFunc) {
+        switch (hashFunc) {
+            case 1:
+                return "FNV-1a";
+            default:
+                return "simple";
+        }
+    }
+
+    /**
      * Java port of {@code ubswitch_Hash_ecmp}: inter-chassis L1SW&lt;-&gt;L2SW
      * and L1SW-&gt;NPU selection.
      *
@@ -148,8 +180,9 @@ public final class UbSwitchHash {
      *         {@code ecmpCnt == 0}
      */
     public static int ubswitchHashEcmp(String dip, String sip, int dport, int sport,
-                                      int protocol, int hashFunc, int ecmpCnt) {
-        LOG.info("ubswitchHashEcmp: entered pure-Java fallback");
+                                       int protocol, int hashFunc, int ecmpCnt) {
+        LOG.info("ubswitchHashEcmp: entered pure-Java fallback, hashFunc=%s, hash algorithm=%s",
+                hashFunc, hashAlgoName(hashFunc));
         int h = (hashFunc == 1)
             ? hashFnv1a(dip, sip, dport, sport, protocol, hashFunc)
             : hashSimple(dip, sip, dport, sport, protocol, hashFunc);
@@ -182,6 +215,21 @@ public final class UbSwitchHash {
     }
 
     /**
+     * Returns the human-readable name of the hash algorithm that
+     * {@link #ubswitchHashDieEcmp} executes for the given
+     * {@code function_select} value: CRC-8/ATM for {@code 0} and {@code 1};
+     * {@code "unsupported"} for any other value, for which no hash executes
+     * and {@code -1} is returned.
+     *
+     * <p>Package-private on purpose: {@code HashUtils} calls this on the
+     * native-library path, so the algorithm name can never drift between
+     * the native and the pure-Java paths.
+     */
+    static String dieHashAlgoName(int functionSelect) {
+        return (functionSelect == 0 || functionSelect == 1) ? "CRC-8/ATM" : "unsupported";
+    }
+
+    /**
      * Java port of {@code ubswitch_Hash_dieEcmp}: NPU-&gt;L1SW uplink
      * selection, CRC-8/ATM over the 9-byte stream
      * {@code (src_cna[4 BE], dst_cna[4 BE], lb[1])}.
@@ -208,7 +256,8 @@ public final class UbSwitchHash {
      */
     public static int ubswitchHashDieEcmp(int srcCna, int dstCna, int lb,
                                           int ecmpCnt, int functionSelect) {
-        LOG.info("ubswitchHashDieEcmp: entered pure-Java fallback");
+        LOG.info("ubswitchHashDieEcmp: entered pure-Java fallback, functionSelect=%s, hash algorithm=%s",
+                functionSelect, dieHashAlgoName(functionSelect));
         if (functionSelect != 0 && functionSelect != 1) {
             return -1;
         }

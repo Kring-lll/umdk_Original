@@ -428,7 +428,6 @@ public class CoveragePlanEngine {
 
     static class PrecomputedTopo {
         Map<String, NpuPortConn> npuPortConns = new HashMap<>();
-        Map<String, Map<Integer, Map<String, List<String>>>> l2swChipRemotePorts = new HashMap<>();
         Map<String, DeviceEntity> devices;
         Set<String> l2swNames;
     }
@@ -474,6 +473,10 @@ public class CoveragePlanEngine {
         int dstL1swChipIdx;
         String dstL1swInPortName;
         String dstL1swOutPortName;
+        /** CNA of the dst NPU port where forward hop4 actually delivered the
+         *  packet. May differ from {@code dst.cna} when hop3 hashes to a
+         *  different L1SW in the dst rack; drives the ACK SCNA. */
+        String dstNpuEntryCna;
         String srcChassis;
         String dstChassis;
         List<CoveredLinkDetail> forwardLinkDetails = new ArrayList<>();
@@ -644,28 +647,6 @@ public class CoveragePlanEngine {
             }
         }
 
-        for (DeviceEntity dev : devices.values()) {
-            if (dev.getDeviceType() != DeviceType.SW) continue;
-            SwDevice sw = (SwDevice) dev;
-            if (sw.getSwitchLevel() != SwitchLevel.L2) continue;
-            if (dev.getForwardingChips() == null) continue;
-            for (ForwardingChip chip : dev.getForwardingChips().values()) {
-                if (chip.getPorts() == null) continue;
-                Map<String, List<String>> remotePorts = new HashMap<>();
-                for (PortEntity port : chip.getPorts().values()) {
-                    if (isL1Sw(devices.get(port.getRemoteDevice()))) {
-                        String remoteDev = port.getRemoteDevice();
-                        remotePorts.computeIfAbsent(remoteDev, k -> new ArrayList<>())
-                            .add(port.getPortName());
-                    }
-                }
-                if (!remotePorts.isEmpty()) {
-                    topo.l2swChipRemotePorts.computeIfAbsent(dev.getDeviceName(), k -> new HashMap<>())
-                        .put(chip.getChipIndex(), remotePorts);
-                }
-            }
-        }
-
         return topo;
     }
 
@@ -803,14 +784,25 @@ public class CoveragePlanEngine {
         if (l2swInPort == null) { fwdFail5++; logFwdFail(); return result; }
         int l2swChipIdx = l2swInPort.getChipIndex();
 
-        String dstL1swTarget = dst.remoteL1sw;
+        // hop 3: L2SW -> destination L1SW. ECMP member set = out-ports of the
+        // L2SW route found by LPM on dst.cna (same source as all other hops —
+        // no route-scope expansion, no physical connection merging). ecmpCnt is
+        // exactly the route entry's outPort count. After hash selects one port,
+        // the physical peer of that port (an L1SW in the dst rack) becomes the
+        // next hop, resolved via topology below.
         ForwardingChip l2swChip = l2swDev.getForwardingChips().get(l2swChipIdx);
-        Map<String, List<String>> fwdChipRemote = topo.l2swChipRemotePorts
-            .getOrDefault(l2swName, Collections.emptyMap())
-            .get(l2swChipIdx);
-        List<String> l2swDstPorts = fwdChipRemote != null
-            ? fwdChipRemote.get(dstL1swTarget) : null;
-        if (l2swDstPorts == null || l2swDstPorts.isEmpty()) { fwdFail8++; logFwdFail(); return result; }
+        RoutingEntry l2swRoute = lookupRoute(superNode, l2swName, l2swChipIdx, dst.cna);
+        if (l2swRoute == null || l2swRoute.getOutPortInfos() == null) { fwdFail8++; logFwdFail(); return result; }
+        List<String> l2swDstPorts = new ArrayList<>();
+        for (OutPortInfo opi : l2swRoute.getOutPortInfos().values()) {
+            PortEntity pe = l2swChip.getPorts() == null
+                ? null : l2swChip.getPorts().get(opi.getPortName());
+            if (pe != null && pe.getRemoteDevice() != null
+                && isL1Sw(topo.devices.get(pe.getRemoteDevice()))) {
+                l2swDstPorts.add(opi.getPortName());
+            }
+        }
+        if (l2swDstPorts.isEmpty()) { fwdFail8++; logFwdFail(); return result; }
 
         int l2swPortIdx = nativePortIdx(src.cna, dst.cna, dataUdpSrcPort,
             ackUdpSrcPort, l2swDstPorts.size());
@@ -873,6 +865,13 @@ public class CoveragePlanEngine {
         result.dstL1swChipIdx = dstL1swChipIdx;
         result.dstL1swInPortName = dstL1swInPortName;
         result.dstL1swOutPortName = dstL1swOutPortName;
+        // CNA of the dst NPU port where forward hop4 actually delivered the
+        // packet (may differ from dst.cna when hop3 hashes to a different
+        // L1SW in the dst rack). Drives the ACK SCNA so that the reverse
+        // hash input reflects the real entry port, not the EID's port.
+        DeviceEntity dstNpuDev = topo.devices.get(dst.deviceName);
+        PortEntity dstNpuEntryPort = findPortInDevice(dstNpuDev, dstL1swOutPort.getRemotePort());
+        result.dstNpuEntryCna = dstNpuEntryPort != null ? dstNpuEntryPort.getCna() : dst.cna;
         result.srcChassis = srcConn.l1swChassis;
         DeviceEntity dstChassisDev = topo.devices.get(dst.remoteL1sw);
         String dstChassis = dstChassisDev != null ? dstChassisDev.getRack() : null;
@@ -898,27 +897,14 @@ public class CoveragePlanEngine {
         ReversePathTrace result = new ReversePathTrace();
         result.viable = false;
 
-        String dstNpuKey = dst.deviceName + ":" + dst.portName;
-        NpuPortConn dstConn = topo.npuPortConns.get(dstNpuKey);
-        if (dstConn == null) {
-            System.out.println("DEBUG: dstConn null for " + dstNpuKey);
-            return result;
-        }
-
-        boolean l1swMatch = dstConn.l1swName.equals(fwdTrace.dstL1swName);
-        boolean portMatch = dstConn.l1swPortName.equals(fwdTrace.dstL1swOutPortName);
-        if (!l1swMatch || !portMatch) {
-            revFailA++;
-            if (revFailA <= 2) {
-                System.out.println("  DEBUG revA: l1swMatch=" + l1swMatch + " portMatch=" + portMatch
-                    + " dstConn.l1swPortName=" + dstConn.l1swPortName
-                    + " fwdTrace.dstL1swOutPortName=" + fwdTrace.dstL1swOutPortName);
-            }
-            logRevFail();
-            return result;
-        }
-
-        int dstL1swRevChipIdx = dstConn.l1swChipIdx;
+        // ACK starts from the dst L1SW where forward hop4 actually delivered
+        // the packet. The dst NPU entry port may differ from dst.portName when
+        // forward hop3 hashes to a different L1SW in the dst rack — this is
+        // normal forwarding behavior (the NPU accepts the packet on any of its
+        // ports; EID is endpoint identity, not a port constraint). The ACK
+        // egress (NPU -> L1SW) is not simulated here; reverse starts at the
+        // forward dst L1SW and hashes back toward the source.
+        int dstL1swRevChipIdx = fwdTrace.dstL1swChipIdx;
 
         RoutingEntry dstL1swRevRoute = lookupRoute(superNode, fwdTrace.dstL1swName,
             dstL1swRevChipIdx, src.cna);
@@ -936,7 +922,12 @@ public class CoveragePlanEngine {
         }
         if (dstL1swRevL2swPorts.isEmpty()) { revFailB++; logRevFail(); return result; }
 
-        int dstL1swRevPortIdx = nativePortIdx(dst.cna, src.cna, ackUdpSrcPort,
+        // ACK SCNA = CNA of the dst NPU port where forward hop4 actually
+        // delivered the packet (may differ from dst.cna when hop3 hashed to
+        // a different L1SW in the dst rack).
+        String revScna = fwdTrace.dstNpuEntryCna != null ? fwdTrace.dstNpuEntryCna : dst.cna;
+
+        int dstL1swRevPortIdx = nativePortIdx(revScna, src.cna, ackUdpSrcPort,
             dataUdpSrcPort, dstL1swRevL2swPorts.size());
         String dstL1swRevOutPortName = dstL1swRevL2swPorts.get(dstL1swRevPortIdx);
 
@@ -952,16 +943,27 @@ public class CoveragePlanEngine {
         if (l2swRevInPort == null) return result;
         int l2swRevChipIdx = l2swRevInPort.getChipIndex();
 
-        String srcL1swTarget = src.remoteL1sw;
+        // hop R3: L2SW -> source L1SW. ECMP member set = out-ports of the
+        // L2SW route found by LPM on src.cna (ACK direction uses src.cna as
+        // destination). No route-scope expansion, no physical connection
+        // merging. ecmpCnt is exactly the route entry's outPort count. After
+        // hash selects one port, the physical peer of that port (an L1SW in
+        // the src rack) becomes the next hop, resolved via topology below.
         ForwardingChip l2swRevChip = l2swRevDev.getForwardingChips().get(l2swRevChipIdx);
-        Map<String, List<String>> revChipRemote = topo.l2swChipRemotePorts
-            .getOrDefault(l2swRevName, Collections.emptyMap())
-            .get(l2swRevChipIdx);
-        List<String> l2swRevSrcPorts = revChipRemote != null
-            ? revChipRemote.get(srcL1swTarget) : null;
-        if (l2swRevSrcPorts == null || l2swRevSrcPorts.isEmpty()) { revFailE++; logRevFail(); return result; }
+        RoutingEntry l2swRevRoute = lookupRoute(superNode, l2swRevName, l2swRevChipIdx, src.cna);
+        if (l2swRevRoute == null || l2swRevRoute.getOutPortInfos() == null) { revFailE++; logRevFail(); return result; }
+        List<String> l2swRevSrcPorts = new ArrayList<>();
+        for (OutPortInfo opi : l2swRevRoute.getOutPortInfos().values()) {
+            PortEntity pe = l2swRevChip.getPorts() == null
+                ? null : l2swRevChip.getPorts().get(opi.getPortName());
+            if (pe != null && pe.getRemoteDevice() != null
+                && isL1Sw(topo.devices.get(pe.getRemoteDevice()))) {
+                l2swRevSrcPorts.add(opi.getPortName());
+            }
+        }
+        if (l2swRevSrcPorts.isEmpty()) { revFailE++; logRevFail(); return result; }
 
-        int l2swRevPortIdx = nativePortIdx(dst.cna, src.cna, ackUdpSrcPort,
+        int l2swRevPortIdx = nativePortIdx(revScna, src.cna, ackUdpSrcPort,
             dataUdpSrcPort, l2swRevSrcPorts.size());
         String l2swRevOutPortName = l2swRevSrcPorts.get(l2swRevPortIdx);
 
