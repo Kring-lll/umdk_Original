@@ -77,6 +77,64 @@ unlabeled_metric 42
 	assert.Len(t, sigs, 1, "by_reason must not create a second signal; unlabeled metrics are ignored")
 }
 
+// TestParseEngineSignalsVLLMBareAggregation: vLLM bare /metrics under
+// --data-parallel-size exposes one line per DP engine (engine="N" label, no
+// instance_id). The engines must aggregate into ONE pseudo-instance —
+// counters summed, utilization maxed — so any engine's activity changes the
+// versioned-quota snapshot instead of freezing on the last engine's values.
+func TestParseEngineSignalsVLLMBareAggregation(t *testing.T) {
+	body := []byte(`vllm:num_requests_running{engine="0",model_name="ds"} 1
+vllm:num_requests_running{engine="1",model_name="ds"} 2
+vllm:num_requests_running{engine="7",model_name="ds"} 0
+vllm:num_requests_waiting{engine="0",model_name="ds"} 0
+vllm:num_requests_waiting{engine="1",model_name="ds"} 1
+vllm:gpu_cache_usage_perc{engine="0",model_name="ds"} 0.3
+vllm:gpu_cache_usage_perc{engine="1",model_name="ds"} 0.9
+vllm:prefix_cache_queries_total{engine="0",model_name="ds"} 100
+vllm:prefix_cache_queries_total{engine="1",model_name="ds"} 50
+`)
+	sigs := parseEngineSignals(body)
+	assert.Len(t, sigs, 1, "all engines aggregate into one pseudo-instance")
+	s, ok := sigs[""]
+	assert.True(t, ok)
+	assert.Equal(t, 3, s.running, "running sums across engines")
+	assert.Equal(t, 1, s.waiting, "waiting sums across engines")
+	assert.InDelta(t, 0.9, s.kvUsage, 0.0001, "kvUsage takes the most loaded engine")
+	assert.InDelta(t, 150.0, s.queriesTotal, 0.0001, "queriesTotal sums across engines")
+
+	// Version property: any single engine's activity must change the
+	// aggregated snapshot, so the versioned quota refreshes no matter which
+	// DP engine the coordinator routes the request to.
+	body2 := []byte(`vllm:num_requests_running{engine="0",model_name="ds"} 2
+vllm:num_requests_running{engine="1",model_name="ds"} 2
+vllm:num_requests_running{engine="7",model_name="ds"} 0
+vllm:num_requests_waiting{engine="0",model_name="ds"} 0
+vllm:num_requests_waiting{engine="1",model_name="ds"} 1
+vllm:gpu_cache_usage_perc{engine="0",model_name="ds"} 0.3
+vllm:gpu_cache_usage_perc{engine="1",model_name="ds"} 0.9
+vllm:prefix_cache_queries_total{engine="0",model_name="ds"} 100
+vllm:prefix_cache_queries_total{engine="1",model_name="ds"} 50
+`)
+	sigs2 := parseEngineSignals(body2)
+	assert.NotEqual(t, sigs[""], sigs2[""],
+		"one engine's running change must change the aggregated signal (quota version refresh)")
+}
+
+// TestParseEngineSignalsSingleEngineUnlabeled: a single-engine metrics source
+// without instance_id or engine labels keeps exact values (sum of one line).
+func TestParseEngineSignalsSingleEngineUnlabeled(t *testing.T) {
+	body := []byte(`vllm:num_requests_running{model_name="qwen"} 4
+vllm:num_requests_waiting{model_name="qwen"} 2
+vllm:kv_cache_usage_perc 0.5
+`)
+	sigs := parseEngineSignals(body)
+	s, ok := sigs[""]
+	assert.True(t, ok)
+	assert.Equal(t, 4, s.running)
+	assert.Equal(t, 2, s.waiting)
+	assert.InDelta(t, 0.5, s.kvUsage, 0.0001)
+}
+
 func TestSignalGateWaiting(t *testing.T) {
 	c := newTestAdmission(t, base.KvAdmissionSignal, nil)
 	c.markHealthy(0)
