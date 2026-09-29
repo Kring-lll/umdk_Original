@@ -282,8 +282,8 @@ func validateKvAdmissionConfig(gsCfg *base.GlobalSchedulerConfig) error {
 	if cfg.PollMs <= 0 {
 		cfg.PollMs = 1000
 	}
-	if cfg.BurstCapPerCycle <= 0 {
-		cfg.BurstCapPerCycle = 1
+	if cfg.BurstCapPerCycle < 0 {
+		cfg.BurstCapPerCycle = 0
 	}
 	if cfg.HysteresisCycles <= 0 {
 		cfg.HysteresisCycles = 1

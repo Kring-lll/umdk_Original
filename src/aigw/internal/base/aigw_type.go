@@ -193,7 +193,7 @@ type KvAdmissionConfig struct {
 	// not derived from the instance URL (obs and infer are separately exposed).
 	MetricsURL           string `json:"metricsUrl"`
 	PollMs               int    `json:"pollMs"`               // signal poll cadence (default 1000)
-	BurstCapPerCycle     int    `json:"burstCapPerCycle"`     // max admits per instance per poll cycle (default 1)
+	BurstCapPerCycle     int    `json:"burstCapPerCycle"`     // max admits per instance per poll cycle (0 = auto: 1 per engine, engine count from bare metrics; explicit value wins)
 	HysteresisCycles     int    `json:"hysteresisCycles"`     // clear cycles required before resuming after waiting>0 (default 1)
 	StaleAfterMs         int    `json:"staleAfterMs"`         // signal age treated as fresh (default 8000: motor cache 3s + poll offset)
 	RecoverHealthyCycles int    `json:"recoverHealthyCycles"` // consecutive good polls before trusting signals (default 2)
