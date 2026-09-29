@@ -106,6 +106,24 @@ type ProxyConfig struct {
 	ChunkIntervalTimeoutSec int `json:"chunkIntervalTimeoutSec"`
 }
 
+// LoraConfig contains static LoRA registry configuration.
+type LoraConfig struct {
+	Root             string `json:"root"`
+	StatePath        string `json:"statePath"`
+	OperationTimeout string `json:"operationTimeout"`
+}
+
+// OnlineRLConfig contains static RL child-process configuration.
+type OnlineRLConfig struct {
+	Command        []string `json:"command"`
+	ConfigPath     string   `json:"configPath"`
+	Endpoint       string   `json:"endpoint"`
+	HookTimeout    string   `json:"hookTimeout"`
+	HookRetries    int      `json:"hookRetries"`
+	DrainTimeout   string   `json:"drainTimeout"`
+	ControlTimeout string   `json:"controlTimeout"`
+}
+
 // CircuitBreakerConfig struct contains configuration for circuit breaker
 type CircuitBreakerConfig struct {
 	Enabled          bool `json:"enabled"`          // Enable circuit breaker
@@ -193,7 +211,7 @@ type KvAdmissionConfig struct {
 	// not derived from the instance URL (obs and infer are separately exposed).
 	MetricsURL           string `json:"metricsUrl"`
 	PollMs               int    `json:"pollMs"`               // signal poll cadence (default 1000)
-	BurstCapPerCycle     int    `json:"burstCapPerCycle"`     // max admits per instance per poll cycle (0 = auto: 1 per engine, engine count from bare metrics; explicit value wins)
+	BurstCapPerCycle     int    `json:"burstCapPerCycle"`     // max admits per instance per poll cycle (0 = auto: one per free engine, min across prefill/decode roles; explicit value wins)
 	HysteresisCycles     int    `json:"hysteresisCycles"`     // clear cycles required before resuming after waiting>0 (default 1)
 	StaleAfterMs         int    `json:"staleAfterMs"`         // signal age treated as fresh (default 8000: motor cache 3s + poll offset)
 	RecoverHealthyCycles int    `json:"recoverHealthyCycles"` // consecutive good polls before trusting signals (default 2)
@@ -211,12 +229,16 @@ type GlobalSchedulerConfig struct {
 	LoadBalancer         LoadBalancerConfig `json:"loadBalancer"`
 	ErrScheduler         ErrSchedulerConfig `json:"errScheduler"`
 	KvAdmission          KvAdmissionConfig  `json:"kvAdmission"`
-	// Mode selects scheduling path: "instance" (default when empty) | "provider".
+	// Mode selects scheduling path: "instance" (default when empty) | "provider" | "scheduler".
+	// "scheduler" = forward to a downstream Scheduler component (northbound proxy);
+	// Adapter does not schedule itself, only forwards request + agent_hint.
 	Mode string `json:"mode,omitempty"`
 	// ProviderPool holds config for mode=provider.
-	ProviderPool           *ProviderPoolConfig `json:"providerPool,omitempty"`
-	InsConnectType         string              `json:"instanceConnectType"`
-	SkipInstanceConnection bool                `json:"skipInstanceConnection"` // Skip connecting to instances during registration (for testing with mock instances)
+	ProviderPool *ProviderPoolConfig `json:"providerPool,omitempty"`
+	// SchedulerTarget holds config for mode=scheduler.
+	SchedulerTarget        *SchedulerTargetConfig `json:"schedulerTarget,omitempty"`
+	InsConnectType         string                 `json:"instanceConnectType"`
+	SkipInstanceConnection bool                   `json:"skipInstanceConnection"` // Skip connecting to instances during registration (for testing with mock instances)
 
 	CacheRefreshIntervalMs uint32  `json:"cacheRefreshIntervalMs"`
 	TokenizationRatio      float64 `json:"tokenizationRatio"`
@@ -232,6 +254,26 @@ type ProviderPoolConfig struct {
 	Cooldown        *CooldownConfig    `json:"cooldown,omitempty"`
 	Retry           *RetryConfig       `json:"retry,omitempty"`
 	Deployments     []DeploymentConfig `json:"deployments"`
+}
+
+// SchedulerTargetConfig configures a downstream Scheduler endpoint for mode=scheduler.
+// Adapter forwards the client request body unmodified (agent_hint passed through as-is;
+// no session fallback — the Scheduler resolves session_id from headers) to BaseURL +
+// the fixed OpenAI completion route. Auth is injected as a Bearer token; TLS is optional.
+type SchedulerTargetConfig struct {
+	BaseURL string    `json:"baseURL"` // e.g. "http://scheduler-coordinator:8080"
+	APIKey  string    `json:"apiKey"`  // Bearer token injected as Authorization
+	TLS     TLSConfig `json:"tls,omitempty"`
+}
+
+// TLSConfig configures TLS for an outbound connection. Field names mirror the
+// ZookeeperConfig TLS fields (enableTls/tlsCaFile/tlsCrtFile/tlsServerName) for
+// consistency with existing config conventions.
+type TLSConfig struct {
+	EnableTLS  bool   `json:"enableTls"`
+	CAFile     string `json:"tlsCaFile"`
+	CrtFile    string `json:"tlsCrtFile"`
+	ServerName string `json:"tlsServerName"`
 }
 
 // CooldownConfig configures per-endpoint cooldown behavior.
@@ -294,11 +336,18 @@ type AigwConfig struct {
 	Predictor      PredictorConfig         `json:"predictor"`
 	GsConfigs      []GlobalSchedulerConfig `json:"globalSchedulers"`
 	Tokenizers     []TokenizerConfig       `json:"tokenizers"`
-	GlobalConfig   GlobalConfig            `json:"global"`
-	Limits         Limits                  `json:"limits"`
-	Discovery      DiscoveryConfig         `json:"discovery"` // Service discovery configuration
-	Proxy          ProxyConfig             `json:"proxy"`     // Request proxy/forwarding configuration
-	Kvc            KvcConfig               `json:"kvc"`       // KVC management (Phase 2; ServiceMode only)
+	// SchedulerNorthbound is the global downstream Scheduler target (northbound passthrough mode).
+	// When set, any model not explicitly registered as instance/provider is forwarded to this
+	// Scheduler as-is (body.model passes through untouched). Decouples the routing key from the
+	// request model name so one Scheduler can serve many models with many instances.
+	SchedulerNorthbound *SchedulerTargetConfig `json:"schedulerNorthbound,omitempty"`
+	GlobalConfig        GlobalConfig           `json:"global"`
+	Limits              Limits                 `json:"limits"`
+	Discovery           DiscoveryConfig        `json:"discovery"` // Service discovery configuration
+	Proxy               ProxyConfig            `json:"proxy"`     // Request proxy/forwarding configuration
+	Kvc                 KvcConfig              `json:"kvc"`       // KVC management (Phase 2; ServiceMode only)
+	Lora                LoraConfig             `json:"lora"`
+	OnlineRL            OnlineRLConfig         `json:"onlineRL"`
 }
 
 // String is the string method of AigwConfig
