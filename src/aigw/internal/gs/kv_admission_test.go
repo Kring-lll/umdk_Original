@@ -37,7 +37,33 @@ func newTestAdmission(t *testing.T, mode string, reqNum func(string) int) *KvAdm
 		HysteresisCycles:     1,
 		StaleAfterMs:         8000,
 		RecoverHealthyCycles: 2,
-	}, 8, reqNum)
+	}, 8, reqNum, func() int { return 1 })
+}
+
+// pollApplyDirect mirrors pollOnce's application logic including the
+// multi-instance degrade decision (pollApply always aggregates for the
+// single-registration test controller).
+func (c *KvAdmissionController) pollApplyDirect(sigs map[string]engineSignal) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(sigs) > 1 {
+		if c.instanceCount() > 1 {
+			c.multiInstance = true
+			return
+		}
+		sigs = map[string]engineSignal{"": aggregateSignals(sigs)}
+	}
+	c.multiInstance = false
+	for _, s := range sigs {
+		c.signal = s
+	}
+	c.lastOk = time.Now()
+	if c.healthyStreak < c.recoverCyc {
+		c.healthyStreak = c.recoverCyc
+	}
+	c.admits = map[string]int{}
+	c.lastQuotaSignal = c.signal
+	c.quotaResetAt = time.Now()
 }
 
 // pollApply applies a parsed signals map the way a successful poll would
@@ -46,10 +72,17 @@ func newTestAdmission(t *testing.T, mode string, reqNum func(string) int) *KvAdm
 func (c *KvAdmissionController) pollApply(sigs map[string]engineSignal) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for _, s := range sigs {
-		c.signal = s
+	// Mirror pollOnce: multiple instance signals under the single test
+	// registration aggregate into one admission unit (never multiInstance —
+	// the test controller reports one aigw registration).
+	if len(sigs) == 1 {
+		for _, s := range sigs {
+			c.signal = s
+		}
+	} else if len(sigs) > 1 {
+		c.signal = aggregateSignals(sigs)
 	}
-	c.multiInstance = len(sigs) > 1
+	c.multiInstance = false
 	c.lastOk = time.Now()
 	if c.healthyStreak < c.recoverCyc {
 		c.healthyStreak = c.recoverCyc
@@ -63,7 +96,14 @@ func (c *KvAdmissionController) pollApply(sigs map[string]engineSignal) {
 func (c *KvAdmissionController) markHealthy(waiting int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.signal = engineSignal{running: 8 - waiting, waiting: waiting}
+	free := 1
+	if waiting > 0 {
+		free = 0
+	}
+	c.signal = engineSignal{
+		running: 8 - waiting, waiting: waiting,
+		engines: 1, mixedEngines: 1, freeMixed: free,
+	}
 	c.multiInstance = false
 	c.lastOk = time.Now()
 	if c.healthyStreak < c.recoverCyc {
@@ -239,9 +279,105 @@ func TestBurstCapAutoMotorDefaultsToOne(t *testing.T) {
 		`vllm:num_requests_running{instance_id="0"} 1
 vllm:prefix_cache_queries_total{instance_id="0"} 10
 `)))
-	assert.Zero(t, c.signal.engines)
+	// The engine census counts the single motor endpoint as one engine; the
+	// free count (not the raw topology) drives the auto cap.
+	assert.Equal(t, 1, c.signal.engines)
+	assert.Equal(t, 1, c.signal.freeMixed)
 	assert.True(t, c.AllowDispatch("http://ins-1"))
 	assert.False(t, c.AllowDispatch("http://ins-1"), "motor auto cap is 1 per instance")
+}
+
+// TestPDCapacityTakesRoleMin: a PD unit only has capacity when BOTH roles
+// have a free engine; the count is the min of the free engines per role.
+func TestPDCapacityTakesRoleMin(t *testing.T) {
+	// 2 prefill engines (1 busy) + 3 decode engines (all free): capacity 1.
+	sigs := parseEngineSignals([]byte(
+		`vllm:num_requests_waiting{dp_rank="0",role="prefill",instance_id="0"} 0
+vllm:num_requests_waiting{dp_rank="1",role="prefill",instance_id="0"} 2
+vllm:num_requests_waiting{dp_rank="0",role="decode",instance_id="1"} 0
+vllm:num_requests_waiting{dp_rank="1",role="decode",instance_id="1"} 0
+vllm:num_requests_waiting{dp_rank="2",role="decode",instance_id="1"} 0
+`))
+	c := newTestAdmission(t, base.KvAdmissionSignal, nil)
+	c.pollApply(sigs)
+	assert.Equal(t, 2, c.signal.prefillEngines)
+	assert.Equal(t, 3, c.signal.decodeEngines)
+	assert.Equal(t, 1, c.signal.freePrefill, "one prefill engine is busy")
+	assert.Equal(t, 3, c.signal.freeDecode)
+	assert.Equal(t, 1, c.signal.capacity(), "PD capacity is min(freeP, freeD)")
+
+	// All prefill busy → zero capacity → hold even though decode is free.
+	sigs2 := parseEngineSignals([]byte(
+		`vllm:num_requests_waiting{dp_rank="0",role="prefill",instance_id="0"} 1
+vllm:num_requests_waiting{dp_rank="1",role="prefill",instance_id="0"} 2
+vllm:num_requests_waiting{dp_rank="0",role="decode",instance_id="1"} 0
+`))
+	c2 := newTestAdmission(t, base.KvAdmissionSignal, nil)
+	c2.pollApply(sigs2)
+	assert.Zero(t, c2.signal.capacity(), "no prefill capacity means no dispatch")
+	assert.False(t, c2.AllowDispatch("http://ins-1"))
+}
+
+// TestMotorDPWithinInstanceAggregates: multiple dp_rank lines under one
+// instance_id must aggregate (sum), not overwrite each other — the latent
+// bug the bare-metrics fix also covered for the motor format.
+func TestMotorDPWithinInstanceAggregates(t *testing.T) {
+	sigs := parseEngineSignals([]byte(
+		`vllm:num_requests_running{dp_rank="0",role="mixed",instance_id="0"} 1
+vllm:num_requests_running{dp_rank="1",role="mixed",instance_id="0"} 2
+vllm:num_requests_running{dp_rank="2",role="mixed",instance_id="0"} 3
+vllm:num_requests_waiting{dp_rank="0",role="mixed",instance_id="0"} 0
+vllm:num_requests_waiting{dp_rank="1",role="mixed",instance_id="0"} 1
+vllm:num_requests_waiting{dp_rank="2",role="mixed",instance_id="0"} 0
+`))
+	s := sigs["0"]
+	assert.Equal(t, 6, s.running, "running sums across dp_ranks")
+	assert.Equal(t, 1, s.waiting, "waiting sums across dp_ranks")
+	assert.Equal(t, 3, s.engines)
+	assert.Equal(t, 2, s.freeMixed, "two of three engines are free")
+	assert.Equal(t, 2, s.capacity())
+}
+
+// TestMultiInstanceAggregatesWhenSingleRegistration: one aigw registration
+// fronting multiple motor instances (PD pods) aggregates them into a single
+// admission unit with the PD min semantics preserved.
+func TestMultiInstanceAggregatesWhenSingleRegistration(t *testing.T) {
+	sigs := parseEngineSignals([]byte(
+		`vllm:num_requests_waiting{dp_rank="0",role="prefill",instance_id="0"} 0
+vllm:num_requests_waiting{dp_rank="0",role="decode",instance_id="1"} 0
+vllm:num_requests_waiting{dp_rank="1",role="decode",instance_id="1"} 3
+`))
+	assert.Len(t, sigs, 2, "two motor instances parsed separately")
+
+	c := newTestAdmission(t, base.KvAdmissionSignal, nil) // instanceCount = 1
+	c.pollApply(sigs)
+	assert.Equal(t, 1, c.signal.prefillEngines)
+	assert.Equal(t, 2, c.signal.decodeEngines)
+	assert.Equal(t, 1, c.signal.freeDecode, "one decode engine is busy")
+	assert.Equal(t, 1, c.signal.capacity(), "aggregated PD unit takes the role min")
+	assert.False(t, c.multiInstance, "single registration must not degrade")
+}
+
+// TestPartialAvailabilityAdmits: one busy engine among free ones must not
+// hold the whole unit — the free engines still admit (per-engine gating,
+// replacing the old any-waiting-holds-all semantics).
+func TestPartialAvailabilityAdmits(t *testing.T) {
+	c := newTestAdmission(t, base.KvAdmissionSignal, nil)
+	c.burstCap = 0 // auto
+	c.pollApply(parseEngineSignals([]byte(
+		`vllm:num_requests_waiting{engine="0"} 0
+vllm:num_requests_waiting{engine="1"} 5
+vllm:num_requests_waiting{engine="2"} 0
+vllm:num_requests_waiting{engine="3"} 0
+`)))
+	assert.Equal(t, 3, c.signal.capacity(), "three of four engines are free")
+	allowed := 0
+	for i := 0; i < 5; i++ {
+		if c.AllowDispatch("http://ins-1") {
+			allowed++
+		}
+	}
+	assert.Equal(t, 3, allowed, "auto cap admits the free-engine count, not zero")
 }
 
 func TestSignalGateHysteresis(t *testing.T) {
@@ -297,6 +433,47 @@ vllm:num_requests_running{instance_id="1"} 5
 	c.multiInstance = true
 	c.mu.Unlock()
 	assert.True(t, c.LBCandidate("http://ins-1"), "unmappable multi-instance signals degrade the filter")
+}
+
+// TestMultiInstanceDegradesAndRecovers: with several aigw registrations,
+// unmappable multi-instance signals degrade to the per-insUrl high-water
+// path; when the registration count drops back to one, the aggregate
+// single-unit gating must resume (multiInstance must not latch forever).
+func TestMultiInstanceDegradesAndRecovers(t *testing.T) {
+	c := newTestAdmission(t, base.KvAdmissionSignal, nil)
+	c.instanceCount = func() int { return 2 } // two aigw registrations
+
+	sigs := parseEngineSignals([]byte(
+		`vllm:num_requests_running{dp_rank="0",role="mixed",instance_id="0"} 3
+vllm:num_requests_running{dp_rank="0",role="mixed",instance_id="1"} 5
+vllm:num_requests_waiting{dp_rank="0",role="mixed",instance_id="0"} 0
+vllm:num_requests_waiting{dp_rank="0",role="mixed",instance_id="1"} 0
+`))
+	c.pollApplyDirect(sigs)
+	assert.True(t, c.multiInstance, "unmappable signals with multiple registrations degrade")
+	assert.True(t, c.LBCandidate("http://ins-1"), "degraded filter is a no-op")
+
+	// Registration count drops to one: the next poll must aggregate and
+	// clear the degraded state.
+	c.instanceCount = func() int { return 1 }
+	c.pollApplyDirect(sigs)
+	assert.False(t, c.multiInstance, "single registration must recover from the degraded state")
+	assert.Equal(t, 2, c.signal.engines)
+	assert.True(t, c.LBCandidate("http://ins-1"), "healthy aggregate passes the filter")
+}
+
+// TestEngineWithoutWaitingLineCountsFree: an engine that emits recognized
+// metrics but no waiting line counts as free (waiting defaults to zero) —
+// the documented parser assumption for partial metric sets.
+func TestEngineWithoutWaitingLineCountsFree(t *testing.T) {
+	sigs := parseEngineSignals([]byte(
+		`vllm:num_requests_running{engine="0"} 2
+vllm:num_requests_running{engine="1"} 0
+`))
+	s := sigs[""]
+	assert.Equal(t, 2, s.engines)
+	assert.Equal(t, 2, s.freeMixed, "engines without waiting lines default free")
+	assert.Equal(t, 2, s.capacity())
 }
 
 func TestDegradationStats(t *testing.T) {
@@ -497,7 +674,7 @@ func TestVersionGatedQuota_SameSnapshotNoReset(t *testing.T) {
 
 	// First poll: fresh signal grants quota.
 	c.mu.Lock()
-	c.signal = engineSignal{running: 5, waiting: 0, kvUsage: 0.5, queriesTotal: 100}
+	c.signal = engineSignal{running: 5, waiting: 0, kvUsage: 0.5, queriesTotal: 100, engines: 1, mixedEngines: 1, freeMixed: 1}
 	c.lastOk = time.Now()
 	c.healthyStreak = c.recoverCyc
 	c.mu.Unlock()
@@ -510,7 +687,7 @@ func TestVersionGatedQuota_SameSnapshotNoReset(t *testing.T) {
 	// Second poll with IDENTICAL signal (motor cache not refreshed):
 	// quota must NOT reset.
 	c.mu.Lock()
-	c.signal = engineSignal{running: 5, waiting: 0, kvUsage: 0.5, queriesTotal: 100}
+	c.signal = engineSignal{running: 5, waiting: 0, kvUsage: 0.5, queriesTotal: 100, engines: 1, mixedEngines: 1, freeMixed: 1}
 	c.lastOk = time.Now()
 	c.mu.Unlock()
 	c.pollVersionReset()
@@ -527,7 +704,7 @@ func TestVersionGatedQuota_ChangedSnapshotResets(t *testing.T) {
 
 	// First snapshot.
 	c.mu.Lock()
-	c.signal = engineSignal{running: 5, waiting: 0, kvUsage: 0.5, queriesTotal: 100}
+	c.signal = engineSignal{running: 5, waiting: 0, kvUsage: 0.5, queriesTotal: 100, engines: 1, mixedEngines: 1, freeMixed: 1}
 	c.lastOk = time.Now()
 	c.healthyStreak = c.recoverCyc
 	c.mu.Unlock()
@@ -538,7 +715,7 @@ func TestVersionGatedQuota_ChangedSnapshotResets(t *testing.T) {
 
 	// New refresh: queriesTotal incremented (prefill happened).
 	c.mu.Lock()
-	c.signal = engineSignal{running: 4, waiting: 0, kvUsage: 0.48, queriesTotal: 101}
+	c.signal = engineSignal{running: 4, waiting: 0, kvUsage: 0.48, queriesTotal: 101, engines: 1, mixedEngines: 1, freeMixed: 1}
 	c.lastOk = time.Now()
 	c.mu.Unlock()
 	c.pollVersionReset()
@@ -556,7 +733,7 @@ func TestVersionGatedQuota_AgeFallback(t *testing.T) {
 
 	// First snapshot.
 	c.mu.Lock()
-	c.signal = engineSignal{running: 5, waiting: 0, kvUsage: 0.5, queriesTotal: 100}
+	c.signal = engineSignal{running: 5, waiting: 0, kvUsage: 0.5, queriesTotal: 100, engines: 1, mixedEngines: 1, freeMixed: 1}
 	c.lastOk = time.Now()
 	c.healthyStreak = c.recoverCyc
 	c.mu.Unlock()
@@ -570,7 +747,7 @@ func TestVersionGatedQuota_AgeFallback(t *testing.T) {
 
 	// Same signal, but quotaResetAt is now past the fallback.
 	c.mu.Lock()
-	c.signal = engineSignal{running: 5, waiting: 0, kvUsage: 0.5, queriesTotal: 100}
+	c.signal = engineSignal{running: 5, waiting: 0, kvUsage: 0.5, queriesTotal: 100, engines: 1, mixedEngines: 1, freeMixed: 1}
 	c.lastOk = time.Now()
 	c.mu.Unlock()
 	c.pollVersionReset()

@@ -26,9 +26,10 @@ type engineSignal struct {
 	waiting      int
 	kvUsage      float64
 	queriesTotal float64 // monotonic prefill counter — snapshot version signal
-	// engines is the number of distinct DP engines behind an aggregated
-	// (bare-metrics) signal; 0 for motor-style per-instance lines. A change
-	// in topology changes the snapshot version, resetting the quota epoch.
+	// engines is the number of distinct engines behind the unit (bare
+	// engine= labels, motor dp_rank endpoints, or the single unlabeled
+	// source). A change in topology changes the snapshot version, resetting
+	// the quota epoch.
 	engines int
 	// Per-role engine census. A request in a PD deployment needs BOTH a
 	// prefill slot and a decode slot, so the unit only has capacity when
@@ -237,6 +238,10 @@ func (c *KvAdmissionController) pollOnce(ctx context.Context) {
 		// so aggregate into a single admission unit.
 		sigs = map[string]engineSignal{"": aggregateSignals(sigs)}
 	}
+	// A healthy poll produced a usable signal: leave (or clear) the degraded
+	// multi-instance state so a later registration drop recovers single-unit
+	// gating instead of degrading forever.
+	c.multiInstance = false
 	for _, s := range sigs { // single unit: the sole entry applies to all instances
 		c.signal = s
 	}
