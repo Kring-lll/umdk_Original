@@ -40,6 +40,25 @@ func newTestAdmission(t *testing.T, mode string, reqNum func(string) int) *KvAdm
 	}, 8, reqNum)
 }
 
+// pollApply applies a parsed signals map the way a successful poll would
+// (test harness): single-entry signals become the operating signal and a
+// fresh quota epoch starts.
+func (c *KvAdmissionController) pollApply(sigs map[string]engineSignal) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, s := range sigs {
+		c.signal = s
+	}
+	c.multiInstance = len(sigs) > 1
+	c.lastOk = time.Now()
+	if c.healthyStreak < c.recoverCyc {
+		c.healthyStreak = c.recoverCyc
+	}
+	c.admits = map[string]int{}
+	c.lastQuotaSignal = c.signal
+	c.quotaResetAt = time.Now()
+}
+
 // markHealthy injects fresh healthy signals (test harness for the poller).
 func (c *KvAdmissionController) markHealthy(waiting int) {
 	c.mu.Lock()
@@ -152,6 +171,77 @@ func TestSignalGateBurstCap(t *testing.T) {
 
 	c.markHealthy(0) // new cycle resets the cap
 	assert.True(t, c.AllowDispatch("http://ins-1"))
+}
+
+// TestBurstCapAutoScalesWithEngines: burstCapPerCycle=0 (auto) must admit
+// one per engine per cycle under bare-metrics aggregation — the DP cluster
+// is one pseudo-instance, so a fixed default of 1 would throttle the whole
+// cluster to one admit per poll.
+func TestBurstCapAutoScalesWithEngines(t *testing.T) {
+	c := newTestAdmission(t, base.KvAdmissionSignal, nil)
+	c.burstCap = 0 // auto
+	c.markHealthy(0)
+	c.pollApply(parseEngineSignals([]byte(
+		`vllm:num_requests_running{engine="0"} 1
+vllm:num_requests_running{engine="1"} 1
+vllm:num_requests_running{engine="2"} 1
+vllm:num_requests_running{engine="3"} 1
+vllm:num_requests_running{engine="4"} 1
+vllm:num_requests_running{engine="5"} 1
+vllm:num_requests_running{engine="6"} 1
+vllm:num_requests_running{engine="7"} 1
+vllm:prefix_cache_queries_total{engine="0"} 10
+vllm:prefix_cache_queries_total{engine="1"} 11
+vllm:prefix_cache_queries_total{engine="2"} 12
+vllm:prefix_cache_queries_total{engine="3"} 13
+vllm:prefix_cache_queries_total{engine="4"} 14
+vllm:prefix_cache_queries_total{engine="5"} 15
+vllm:prefix_cache_queries_total{engine="6"} 16
+vllm:prefix_cache_queries_total{engine="7"} 17
+`)))
+	assert.Equal(t, 8, c.signal.engines, "distinct engine labels are counted")
+
+	allowed := 0
+	for i := 0; i < 12; i++ {
+		if c.AllowDispatch("http://ins-1") {
+			allowed++
+		}
+	}
+	assert.Equal(t, 8, allowed, "auto cap admits one per engine per cycle")
+}
+
+// TestBurstCapExplicitOverridesAuto: an explicit burstCapPerCycle wins over
+// the engine-count auto default.
+func TestBurstCapExplicitOverridesAuto(t *testing.T) {
+	c := newTestAdmission(t, base.KvAdmissionSignal, nil)
+	c.burstCap = 2 // explicit
+	c.markHealthy(0)
+	c.pollApply(parseEngineSignals([]byte(
+		`vllm:num_requests_running{engine="0"} 1
+vllm:num_requests_running{engine="1"} 1
+`)))
+	allowed := 0
+	for i := 0; i < 6; i++ {
+		if c.AllowDispatch("http://ins-1") {
+			allowed++
+		}
+	}
+	assert.Equal(t, 2, allowed, "explicit cap is respected even with engines>1")
+}
+
+// TestBurstCapAutoMotorDefaultsToOne: motor-style instance_id signals carry
+// no engine labels — auto stays 1 per instance per cycle.
+func TestBurstCapAutoMotorDefaultsToOne(t *testing.T) {
+	c := newTestAdmission(t, base.KvAdmissionSignal, nil)
+	c.burstCap = 0
+	c.markHealthy(0)
+	c.pollApply(parseEngineSignals([]byte(
+		`vllm:num_requests_running{instance_id="0"} 1
+vllm:prefix_cache_queries_total{instance_id="0"} 10
+`)))
+	assert.Zero(t, c.signal.engines)
+	assert.True(t, c.AllowDispatch("http://ins-1"))
+	assert.False(t, c.AllowDispatch("http://ins-1"), "motor auto cap is 1 per instance")
 }
 
 func TestSignalGateHysteresis(t *testing.T) {
