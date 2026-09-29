@@ -26,6 +26,10 @@ type engineSignal struct {
 	waiting      int
 	kvUsage      float64
 	queriesTotal float64 // monotonic prefill counter — snapshot version signal
+	// engines is the number of distinct DP engines behind an aggregated
+	// (bare-metrics) signal; 0 for motor-style per-instance lines. A change
+	// in topology changes the snapshot version, resetting the quota epoch.
+	engines int
 }
 
 // KvAdmissionController gates dispatch on engine-observed state. Signal mode
@@ -243,8 +247,20 @@ func (c *KvAdmissionController) AllowDispatch(insUrl string) bool {
 			insUrl, c.signal.waiting, c.pauseRemaining, time.Since(c.lastOk).Round(time.Millisecond), c.signal.running, inFlight)
 		return false
 	}
-	if c.admits[insUrl] >= c.burstCap {
-		log.Debug().Msgf("[KvAdmission] burst-cap: ins=%s admits=%d/%d inflight=%d", insUrl, c.admits[insUrl], c.burstCap, inFlight)
+	// burstCap 0 = auto: one admit per engine per cycle. Bare-metrics
+	// aggregation hides N DP engines behind one pseudo-instance, so the
+	// motor per-instance default of 1 would throttle the whole cluster to
+	// one admit per poll; scaling by the observed engine count restores the
+	// per-engine semantics. An explicit value always wins.
+	cap := c.burstCap
+	if cap <= 0 {
+		cap = c.signal.engines
+		if cap < 1 {
+			cap = 1
+		}
+	}
+	if c.admits[insUrl] >= cap {
+		log.Debug().Msgf("[KvAdmission] burst-cap: ins=%s admits=%d/%d inflight=%d", insUrl, c.admits[insUrl], cap, inFlight)
 		return false
 	}
 	c.admits[insUrl]++
@@ -307,6 +323,7 @@ func (c *KvAdmissionController) DegradationStats() (count int64, total time.Dura
 // like num_requests_waiting_by_reason do not.
 func parseEngineSignals(body []byte) map[string]engineSignal {
 	sigs := map[string]engineSignal{}
+	bareEngines := map[string]bool{}
 	for _, line := range strings.Split(string(body), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -331,6 +348,11 @@ func parseEngineSignals(body []byte) map[string]engineSignal {
 		// degrading dispatch to the age-fallback cadence.
 		key := labels["instance_id"]
 		perInstance := key != ""
+		if !perInstance {
+			if e := labels["engine"]; e != "" {
+				bareEngines[e] = true
+			}
+		}
 		s := sigs[key]
 		switch short {
 		case "num_requests_running":
@@ -360,6 +382,12 @@ func parseEngineSignals(body []byte) map[string]engineSignal {
 			continue
 		}
 		sigs[key] = s
+	}
+	if len(bareEngines) > 0 {
+		if s, ok := sigs[""]; ok {
+			s.engines = len(bareEngines)
+			sigs[""] = s
+		}
 	}
 	return sigs
 }
