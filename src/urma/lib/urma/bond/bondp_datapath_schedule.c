@@ -480,7 +480,11 @@ int schedule_recv_n(bondp_comp_t *bdp_comp, uint32_t wr_num, uint32_t recv_wr_cn
         return -1;
     }
     uint32_t *rqe_cnt;
-    if (bdp_comp->comp_type == BONDP_COMP_JETTY && bdp_comp->v_jetty.jetty_cfg.shared.jfr != NULL) {
+    /* shared.jfr aliases the deprecated jfr_cfg union member: only follow it for
+     * a jetty in shared-JFR mode (see the guard in bondp_datapath.c). */
+    if (bdp_comp->comp_type == BONDP_COMP_JETTY &&
+        bdp_comp->v_jetty.jetty_cfg.flag.bs.share_jfr == URMA_SHARE_JFR &&
+        bdp_comp->v_jetty.jetty_cfg.shared.jfr != NULL) {
         bondp_comp_t *jfr = CONTAINER_OF_FIELD(bdp_comp->v_jetty.jetty_cfg.shared.jfr, bondp_comp_t, v_jfr);
         rqe_cnt = jfr->rqe_cnt;
     } else {

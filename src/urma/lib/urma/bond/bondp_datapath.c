@@ -91,7 +91,10 @@ static wr_buf_t *get_recv_wr_buf(bondp_comp_t *bdp_comp)
         return NULL;
     }
     if (bdp_comp->comp_type == BONDP_COMP_JETTY) {
-        urma_jfr_t *jfr = bdp_comp->v_jetty.jetty_cfg.shared.jfr;
+        /* shared.jfr aliases the deprecated jfr_cfg union member, so only read it
+         * when the jetty really is in shared-JFR mode. */
+        urma_jfr_t *jfr = bdp_comp->v_jetty.jetty_cfg.flag.bs.share_jfr == URMA_SHARE_JFR ?
+            bdp_comp->v_jetty.jetty_cfg.shared.jfr : NULL;
         if (jfr == NULL) {
             URMA_LOG_ERR("JETTY shared jfr is NULL\n");
             return NULL;
@@ -109,7 +112,9 @@ static bondp_comp_t *get_recv_count_comp(bondp_comp_t *recv_comp)
     if (recv_comp == NULL) {
         return NULL;
     }
-    if (recv_comp->comp_type == BONDP_COMP_JETTY && recv_comp->v_jetty.jetty_cfg.shared.jfr != NULL) {
+    if (recv_comp->comp_type == BONDP_COMP_JETTY &&
+        recv_comp->v_jetty.jetty_cfg.flag.bs.share_jfr == URMA_SHARE_JFR &&
+        recv_comp->v_jetty.jetty_cfg.shared.jfr != NULL) {
         return CONTAINER_OF_FIELD(recv_comp->v_jetty.jetty_cfg.shared.jfr, bondp_comp_t, v_jfr);
     }
     return recv_comp;
@@ -157,7 +162,12 @@ static urma_status_t comp_post_recv(bondp_comp_t *comp, int recv_idx, urma_jfr_w
 
 static uint32_t bondp_get_max_recv_sge(const bondp_comp_t *bdp_comp)
 {
-    if (bdp_comp->comp_type == BONDP_COMP_JETTY) {
+    /* shared.jfr is optional in urma_jetty_cfg_t and aliases the deprecated
+     * jfr_cfg union member: only dereference it for a shared-JFR jetty, and
+     * never when it is NULL (same rule as the core: urma_cp_api.c). */
+    if (bdp_comp->comp_type == BONDP_COMP_JETTY &&
+        bdp_comp->v_jetty.jetty_cfg.flag.bs.share_jfr == URMA_SHARE_JFR &&
+        bdp_comp->v_jetty.jetty_cfg.shared.jfr != NULL) {
         bondp_comp_t *bdp_jfr = CONTAINER_OF_FIELD(bdp_comp->v_jetty.jetty_cfg.shared.jfr, bondp_comp_t, v_jfr);
         return bdp_jfr->max_recv_sge;
     }
