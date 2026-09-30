@@ -37,9 +37,16 @@ type engineSignal struct {
 	prefillEngines int
 	decodeEngines  int
 	mixedEngines   int
-	freePrefill    int // prefill engines with waiting==0
-	freeDecode     int // decode engines with waiting==0
-	freeMixed      int // mixed/DP engines with waiting==0
+	// Per-role admit capacity: each engine with queue depth W contributes
+	// max(0, budget - W) admits (budget = the configured per-engine admit
+	// budget; with the default of 1 this is exactly the count of engines
+	// with an empty queue). Raising the budget keeps each engine's pipeline
+	// at a target depth, admitting while the engine still drains — the
+	// binary idle-only model starves under sustained load because queues
+	// rarely reach zero.
+	freePrefill int
+	freeDecode  int
+	freeMixed   int
 }
 
 // capacity is the number of requests the unit can accept this cycle: each
@@ -87,6 +94,9 @@ type KvAdmissionController struct {
 	// single admission unit, several registrations without an
 	// instance_id<->insUrl mapping stay degraded.
 	instanceCount func() int
+	// engineBudget is the per-engine admit budget baked into the census at
+	// parse time (see engineSignal.freePrefill).
+	engineBudget int
 
 	mu             sync.Mutex
 	signal         engineSignal
@@ -134,7 +144,7 @@ func NewKvAdmissionController(cfg base.KvAdmissionConfig, batchSize int,
 	if instanceCount == nil {
 		instanceCount = func() int { return 1 }
 	}
-	return &KvAdmissionController{
+	c := &KvAdmissionController{
 		mode:             cfg.Mode,
 		metricsURL:       cfg.MetricsURL,
 		pollInterval:     time.Duration(cfg.PollMs) * time.Millisecond,
@@ -146,10 +156,15 @@ func NewKvAdmissionController(cfg base.KvAdmissionConfig, batchSize int,
 		quotaAgeFallback: time.Duration(cfg.QuotaAgeFallbackMs) * time.Millisecond,
 		reqNum:           reqNum,
 		instanceCount:    instanceCount,
+		engineBudget:     cfg.AdmitBudgetPerEngine,
 		admits:           map[string]int{},
 		highWater:        map[string]int{},
 		client:           &http.Client{Timeout: time.Second},
 	}
+	if c.engineBudget <= 0 {
+		c.engineBudget = 1
+	}
+	return c
 }
 
 // Start launches the signal poller (signal mode only).
@@ -207,7 +222,7 @@ func (c *KvAdmissionController) pollOnce(ctx context.Context) {
 			body, rerr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
 			if rerr == nil && resp.StatusCode == http.StatusOK {
-				sigs = parseEngineSignals(body)
+				sigs = parseEngineSignals(body, c.engineBudget)
 				ok = len(sigs) > 0
 			}
 		}
@@ -378,7 +393,7 @@ func (c *KvAdmissionController) DegradationStats() (count int64, total time.Dura
 // Prometheus text exposition. Metric names are matched on the part after the
 // last ':' so a renamed aggregator prefix still parses, while near-misses
 // like num_requests_waiting_by_reason do not.
-func parseEngineSignals(body []byte) map[string]engineSignal {
+func parseEngineSignals(body []byte, budget int) map[string]engineSignal {
 	// Per admission-key engine census: one entry per distinct engine seen in
 	// ANY recognized metric line (engine identity = dp_rank, else the engine
 	// label, else the single unlabeled source). The waiting line later fills
@@ -449,23 +464,27 @@ func parseEngineSignals(body []byte) map[string]engineSignal {
 		s := sigs[key]
 		for _, e := range byKey {
 			s.engines++
-			free := e.waiting <= 0
+			// Per-engine admit contribution: budget minus queue depth,
+			// clamped at zero. budget=1 degenerates to the idle-only count
+			// (waiting==0 contributes exactly 1); a larger budget keeps
+			// each engine's pipeline at the target depth, admitting while
+			// the engine still drains — the idle-only model starves under
+			// sustained load because queues rarely reach zero between
+			// refresh cycles.
+			slack := budget - e.waiting
+			if slack < 0 {
+				slack = 0
+			}
 			switch e.role {
 			case "prefill":
 				s.prefillEngines++
-				if free {
-					s.freePrefill++
-				}
+				s.freePrefill += slack
 			case "decode":
 				s.decodeEngines++
-				if free {
-					s.freeDecode++
-				}
+				s.freeDecode += slack
 			default:
 				s.mixedEngines++
-				if free {
-					s.freeMixed++
-				}
+				s.freeMixed += slack
 			}
 		}
 		sigs[key] = s

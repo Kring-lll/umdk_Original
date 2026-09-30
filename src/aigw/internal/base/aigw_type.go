@@ -212,6 +212,7 @@ type KvAdmissionConfig struct {
 	MetricsURL           string `json:"metricsUrl"`
 	PollMs               int    `json:"pollMs"`               // signal poll cadence (default 1000)
 	BurstCapPerCycle     int    `json:"burstCapPerCycle"`     // max admits per instance per poll cycle (0 = auto: one per free engine, min across prefill/decode roles; explicit value wins)
+	AdmitBudgetPerEngine int    `json:"admitBudgetPerEngine"` // per-engine admit budget per poll cycle: an engine with queue depth W contributes (budget - W) admits, clamped at zero; 0 = default 1 (only fully idle engines admit). Raise to keep each engine's pipeline at a target depth when the engine drains multiple requests per refresh cycle.
 	HysteresisCycles     int    `json:"hysteresisCycles"`     // clear cycles required before resuming after waiting>0 (default 1)
 	StaleAfterMs         int    `json:"staleAfterMs"`         // signal age treated as fresh (default 8000: motor cache 3s + poll offset)
 	RecoverHealthyCycles int    `json:"recoverHealthyCycles"` // consecutive good polls before trusting signals (default 2)
