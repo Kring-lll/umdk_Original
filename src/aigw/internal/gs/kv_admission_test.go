@@ -127,7 +127,7 @@ vllm:num_requests_waiting_by_reason{instance_id="0",reason="capacity"} 2
 motor:active_prefill_workers 3
 unlabeled_metric 42
 `)
-	sigs := parseEngineSignals(body)
+	sigs := parseEngineSignals(body, 1)
 	s, ok := sigs["0"]
 	assert.True(t, ok)
 	assert.Equal(t, 8, s.running)
@@ -152,7 +152,7 @@ vllm:gpu_cache_usage_perc{engine="1",model_name="ds"} 0.9
 vllm:prefix_cache_queries_total{engine="0",model_name="ds"} 100
 vllm:prefix_cache_queries_total{engine="1",model_name="ds"} 50
 `)
-	sigs := parseEngineSignals(body)
+	sigs := parseEngineSignals(body, 1)
 	assert.Len(t, sigs, 1, "all engines aggregate into one pseudo-instance")
 	s, ok := sigs[""]
 	assert.True(t, ok)
@@ -174,7 +174,7 @@ vllm:gpu_cache_usage_perc{engine="1",model_name="ds"} 0.9
 vllm:prefix_cache_queries_total{engine="0",model_name="ds"} 100
 vllm:prefix_cache_queries_total{engine="1",model_name="ds"} 50
 `)
-	sigs2 := parseEngineSignals(body2)
+	sigs2 := parseEngineSignals(body2, 1)
 	assert.NotEqual(t, sigs[""], sigs2[""],
 		"one engine's running change must change the aggregated signal (quota version refresh)")
 }
@@ -186,7 +186,7 @@ func TestParseEngineSignalsSingleEngineUnlabeled(t *testing.T) {
 vllm:num_requests_waiting{model_name="qwen"} 2
 vllm:kv_cache_usage_perc 0.5
 `)
-	sigs := parseEngineSignals(body)
+	sigs := parseEngineSignals(body, 1)
 	s, ok := sigs[""]
 	assert.True(t, ok)
 	assert.Equal(t, 4, s.running)
@@ -238,7 +238,7 @@ vllm:prefix_cache_queries_total{engine="4"} 14
 vllm:prefix_cache_queries_total{engine="5"} 15
 vllm:prefix_cache_queries_total{engine="6"} 16
 vllm:prefix_cache_queries_total{engine="7"} 17
-`)))
+`), 1))
 	assert.Equal(t, 8, c.signal.engines, "distinct engine labels are counted")
 
 	allowed := 0
@@ -259,7 +259,7 @@ func TestBurstCapExplicitOverridesAuto(t *testing.T) {
 	c.pollApply(parseEngineSignals([]byte(
 		`vllm:num_requests_running{engine="0"} 1
 vllm:num_requests_running{engine="1"} 1
-`)))
+`), 1))
 	allowed := 0
 	for i := 0; i < 6; i++ {
 		if c.AllowDispatch("http://ins-1") {
@@ -278,7 +278,7 @@ func TestBurstCapAutoMotorDefaultsToOne(t *testing.T) {
 	c.pollApply(parseEngineSignals([]byte(
 		`vllm:num_requests_running{instance_id="0"} 1
 vllm:prefix_cache_queries_total{instance_id="0"} 10
-`)))
+`), 1))
 	// The engine census counts the single motor endpoint as one engine; the
 	// free count (not the raw topology) drives the auto cap.
 	assert.Equal(t, 1, c.signal.engines)
@@ -297,7 +297,7 @@ vllm:num_requests_waiting{dp_rank="1",role="prefill",instance_id="0"} 2
 vllm:num_requests_waiting{dp_rank="0",role="decode",instance_id="1"} 0
 vllm:num_requests_waiting{dp_rank="1",role="decode",instance_id="1"} 0
 vllm:num_requests_waiting{dp_rank="2",role="decode",instance_id="1"} 0
-`))
+`), 1)
 	c := newTestAdmission(t, base.KvAdmissionSignal, nil)
 	c.pollApply(sigs)
 	assert.Equal(t, 2, c.signal.prefillEngines)
@@ -311,7 +311,7 @@ vllm:num_requests_waiting{dp_rank="2",role="decode",instance_id="1"} 0
 		`vllm:num_requests_waiting{dp_rank="0",role="prefill",instance_id="0"} 1
 vllm:num_requests_waiting{dp_rank="1",role="prefill",instance_id="0"} 2
 vllm:num_requests_waiting{dp_rank="0",role="decode",instance_id="1"} 0
-`))
+`), 1)
 	c2 := newTestAdmission(t, base.KvAdmissionSignal, nil)
 	c2.pollApply(sigs2)
 	assert.Zero(t, c2.signal.capacity(), "no prefill capacity means no dispatch")
@@ -329,7 +329,7 @@ vllm:num_requests_running{dp_rank="2",role="mixed",instance_id="0"} 3
 vllm:num_requests_waiting{dp_rank="0",role="mixed",instance_id="0"} 0
 vllm:num_requests_waiting{dp_rank="1",role="mixed",instance_id="0"} 1
 vllm:num_requests_waiting{dp_rank="2",role="mixed",instance_id="0"} 0
-`))
+`), 1)
 	s := sigs["0"]
 	assert.Equal(t, 6, s.running, "running sums across dp_ranks")
 	assert.Equal(t, 1, s.waiting, "waiting sums across dp_ranks")
@@ -346,7 +346,7 @@ func TestMultiInstanceAggregatesWhenSingleRegistration(t *testing.T) {
 		`vllm:num_requests_waiting{dp_rank="0",role="prefill",instance_id="0"} 0
 vllm:num_requests_waiting{dp_rank="0",role="decode",instance_id="1"} 0
 vllm:num_requests_waiting{dp_rank="1",role="decode",instance_id="1"} 3
-`))
+`), 1)
 	assert.Len(t, sigs, 2, "two motor instances parsed separately")
 
 	c := newTestAdmission(t, base.KvAdmissionSignal, nil) // instanceCount = 1
@@ -369,7 +369,7 @@ func TestPartialAvailabilityAdmits(t *testing.T) {
 vllm:num_requests_waiting{engine="1"} 5
 vllm:num_requests_waiting{engine="2"} 0
 vllm:num_requests_waiting{engine="3"} 0
-`)))
+`), 1))
 	assert.Equal(t, 3, c.signal.capacity(), "three of four engines are free")
 	allowed := 0
 	for i := 0; i < 5; i++ {
@@ -425,7 +425,7 @@ func TestMultiInstanceDegrades(t *testing.T) {
 	sigs := parseEngineSignals([]byte(
 		`vllm:num_requests_running{instance_id="0"} 3
 vllm:num_requests_running{instance_id="1"} 5
-`))
+`), 1)
 	assert.Len(t, sigs, 2)
 
 	c := newTestAdmission(t, base.KvAdmissionSignal, nil)
@@ -448,7 +448,7 @@ func TestMultiInstanceDegradesAndRecovers(t *testing.T) {
 vllm:num_requests_running{dp_rank="0",role="mixed",instance_id="1"} 5
 vllm:num_requests_waiting{dp_rank="0",role="mixed",instance_id="0"} 0
 vllm:num_requests_waiting{dp_rank="0",role="mixed",instance_id="1"} 0
-`))
+`), 1)
 	c.pollApplyDirect(sigs)
 	assert.True(t, c.multiInstance, "unmappable signals with multiple registrations degrade")
 	assert.True(t, c.LBCandidate("http://ins-1"), "degraded filter is a no-op")
@@ -481,7 +481,7 @@ vllm:num_requests_waiting{dp_rank="2",role="union",instance_id="100",pod_ip="10.
 vllm:gpu_cache_usage_perc{dp_rank="0",role="union",instance_id="100",pod_ip="10.0.0.1"} 0.4
 vllm:gpu_cache_usage_perc{dp_rank="1",role="union",instance_id="100",pod_ip="10.0.0.1"} 0.7
 vllm:gpu_cache_usage_perc{dp_rank="2",role="union",instance_id="100",pod_ip="10.0.0.1"} 0.2
-`))
+`), 1)
 	s := sigs["100"]
 	assert.Equal(t, 3, s.engines, "dp_rank labels expose the engine census")
 	assert.Equal(t, 3, s.mixedEngines, "union role counts as mixed")
@@ -491,11 +491,58 @@ vllm:gpu_cache_usage_perc{dp_rank="2",role="union",instance_id="100",pod_ip="10.
 	assert.InDelta(t, 0.7, s.kvUsage, 0.0001)
 }
 
+// TestAdmitBudgetKeepsPipelineFull: with a per-engine admit budget above
+// one, an engine with a draining queue still admits — the contribution is
+// (budget - waiting), so a budget of 3 with waiting=1 admits 2 more. The
+// default budget of 1 keeps the idle-only semantics (waiting>=1 admits 0).
+func TestAdmitBudgetKeepsPipelineFull(t *testing.T) {
+	// budget=3: two engines, one idle (waiting=0 → 3), one draining
+	// (waiting=1 → 2): unit capacity 5.
+	sigs := parseEngineSignals([]byte(
+		`vllm:num_requests_waiting{engine="0"} 0
+vllm:num_requests_waiting{engine="1"} 1
+`), 3)
+	s := sigs[""]
+	assert.Equal(t, 2, s.engines)
+	assert.Equal(t, 5, s.freeMixed, "budget 3: idle engine contributes 3, draining engine 3-1=2")
+	assert.Equal(t, 5, s.capacity())
+
+	// Same cluster with the default budget of 1: only the idle engine
+	// admits — the draining one contributes zero.
+	sigs1 := parseEngineSignals([]byte(
+		`vllm:num_requests_waiting{engine="0"} 0
+vllm:num_requests_waiting{engine="1"} 1
+`), 1)
+	assert.Equal(t, 1, sigs1[""].freeMixed, "budget 1 keeps the idle-only semantics")
+
+	// Deeply queued engines clamp at zero, never negative.
+	sigsDeep := parseEngineSignals([]byte(
+		`vllm:num_requests_waiting{engine="0"} 7
+`), 3)
+	assert.Equal(t, 0, sigsDeep[""].freeMixed, "queue deeper than the budget clamps at zero")
+
+	// End to end: auto burstCap picks up the budget-scaled capacity.
+	c := newTestAdmission(t, base.KvAdmissionSignal, nil)
+	c.burstCap = 0 // auto
+	c.engineBudget = 3
+	c.pollApply(parseEngineSignals([]byte(
+		`vllm:num_requests_waiting{engine="0"} 0
+vllm:num_requests_waiting{engine="1"} 1
+`), 3))
+	allowed := 0
+	for i := 0; i < 8; i++ {
+		if c.AllowDispatch("http://ins-1") {
+			allowed++
+		}
+	}
+	assert.Equal(t, 5, allowed, "auto cap admits the budget-scaled capacity")
+}
+
 func TestEngineWithoutWaitingLineCountsFree(t *testing.T) {
 	sigs := parseEngineSignals([]byte(
 		`vllm:num_requests_running{engine="0"} 2
 vllm:num_requests_running{engine="1"} 0
-`))
+`), 1)
 	s := sigs[""]
 	assert.Equal(t, 2, s.engines)
 	assert.Equal(t, 2, s.freeMixed, "engines without waiting lines default free")
