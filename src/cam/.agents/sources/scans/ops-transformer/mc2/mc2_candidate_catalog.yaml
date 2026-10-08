@@ -1,0 +1,128 @@
+# MC2 matmul-collective candidate catalog (950 Scout)
+# first_case chosen: native RS Case accepted.
+# Schema local to this folder. Do not run tools/build_catalog.py.
+
+schema_version: '1.0-mc2-family-scout'
+source:
+  registry_ref: ops-transformer
+  commit: 9311b63bcd065b9779eb08a7d634e9463ee41ef1
+  scan_path: /home/wangyibo/ops-transformer_bak
+status: scout-passed
+review: passed
+pick_policy: novelty > production-representativeness > source-clarity > op-name
+first_case: ascend950-matmul-native-reduce-scatter
+first_case_status: accepted
+first_case_path: cases/compute-communication/mc2/ascend950-matmul-native-reduce-scatter/
+
+mechanisms:
+
+- id: mc2-m1-asw-hccl-chunk
+  name: ASW Cube MM + HCCL collective chunk coupling
+  status: first-case-accepted
+  bucket: first-case
+  coupling_family: M1
+  live_950_ops:
+    - all_gather_matmul_v2          # confirmed: M-tile gather → MM
+    - matmul_reduce_scatter_v2      # confirmed: M-tile MM → RS (native); 4P/8P default may be A2A+vec sibling
+    - matmul_all_reduce             # confirmed M1 member: AllReduce<false>(repeat=tileCnt) + Commit; not handle-per-chunk
+  not_live_950:
+    - all_gather_matmul             # v1 wrapper
+    - matmul_reduce_scatter         # v1 wrapper
+    - matmul_all_reduce_add_rms_norm
+    - grouped_mat_mul_all_reduce
+  kernel_stack: mc2/common/op_kernel/mc2_mat_mul_asw_kernel.h
+  comm_job_vs_mechanism: >
+    Job names AllGather / ReduceScatter / AllReduce.
+    AG/RS native: Hccl::* per chunk + Wait(handle).
+    RS may instead be A2A+vec reduce (TPL_CCU_ALL2ALL_VEC_REDUCE) — not native RS.
+    AR native: one AllReduce<false>(..., tileCnt) + per-turn Commit + Wait(same handle × N).
+    Do not claim M1 is handle-per-M-tile.
+  overlap_unit:
+    ag: M-tile
+    rs: M-tile
+    ar: M-tile / AllReduce repeat
+  confirmed:
+    ag: M-tile / rank-M gather → MM
+    rs: M-tile MM → ReduceScatter
+    ar: M-tile MM → AllReduce repeat
+  ownership:
+    ag: local/remote A shard → gathered input → full C
+    rs: MM C chunk → RS input → rank-local C shard
+    ar: MM partial chunk → AR input → full Y
+  why_first_case_pool: >
+    Canonical Case is native RS. AG is reverse sibling on that card.
+    AR is M1 member / morphology evidence; no AR Case.
+  close_read_ar: sources/scans/ops-transformer/mc2/close_reads/mc2_mm_all_reduce_native.md
+  verdict_ar: sources/scans/ops-transformer/mc2/close_reads/mc2_m1_ar_verdict.md
+  knowledge: knowledge/engineering-experience/mc2-compute-collective-coupling.md
+  do_not: open AG/AR Cases; do not treat handle-per-chunk as M1 invariant
+
+- id: mc2-m2-pipeline-a2a
+  name: pipeline_builder + HcclCommunicator + transpose + AllToAll
+  status: second-case-accepted
+  bucket: second-case
+  coupling_family: M2
+  live_950_ops:
+    - allto_all_matmul              # A2A → permute → MM
+    - matmul_allto_all              # MM → permute → A2A
+  kernel_stack: mc2/common/op_kernel/mc2_templates/
+  close_read: sources/scans/ops-transformer/mc2/close_reads/mc2_m2_a2a_mm.md
+  case: ascend950-alltoall-matmul-pipeline
+  case_status: accepted
+  case_path: cases/compute-communication/mc2/ascend950-alltoall-matmul-pipeline/
+  canonical_op: allto_all_matmul
+  comm_job_vs_mechanism: >
+    Job AllToAll. Mechanism MC2AlltoAllPrimitives AlltoAll<false>
+    via HcclCommunicator. Commit = communication progress.
+    Wait = consumer gate. Commit is not cross-rank visibility.
+    AICSync=false (AIV0).
+  overlap_unit: taskIndex; pipeline permits overlap (unmeasured)
+  same_device_sync: CrossCoreSetFlag 8/9 AIC↔AIV; SyncAll AIV
+  do_not: two Cases for the two orders; not 43; Commit ≠ visibility
+
+- id: mc2-m3-gmm-alltoallv
+  name: AllToAllV + grouped MM (expert chunk)
+  status: scout-candidate
+  bucket: ep-adjacent-defer
+  coupling_family: M3
+  live_950_ops:
+    - allto_allv_grouped_mat_mul
+    - grouped_mat_mul_allto_allv
+    - allto_allv_quant_grouped_mat_mul
+    - quant_grouped_mat_mul_allto_allv
+  comm_job_vs_mechanism: HcclA2avOp AlltoAllV<true> — not Case B MTE window
+  why_not_first: easy to confuse with EP; GMM already taught by 60/C
+  do_not: first MC2 teaching Case
+
+- id: mc2-m4-quant-window-collective
+  name: AIV-only MTE window quant collective (no MM)
+  status: out-of-family
+  bucket: not-matmul-collective
+  coupling_family: M4
+  live_950_ops:
+    - quant_reduce_scatter
+    - quant_all_reduce
+  comm_job_vs_mechanism: window DataCopy + vec reduce; HCCL alg name in tiling is not the kernel primitive
+  do_not: first MC2 Case; do not merge into Case B
+
+not_cases:
+  - examples/mc2/all_gather_add   # A2/A3 AllGather+Add; not 950; not Matmul
+  - moe_distribute_* / mega_moe   # Cases B/D
+  - SHMEM/UDMA kernel-direct textbook  # different path from production Hccl::
+
+relation_to_existing:
+  - case: ascend950-basic-matmul
+    relation: consumer
+    note: compute baseline = 43; ASW Cube inside MC2 is not a new GEMM Case
+  - case: ascend950-moe-ep-dispatch-combine
+    relation: unrelated-family
+    note: HCCL/window appearing ≠ EP routing
+  - knowledge: moe-fusion-materialization-and-sync
+    relation: cite-visibility-only
+    note: do not fold MC2 into MoE Knowledge
+  - knowledge: mc2-compute-collective-coupling
+    relation: extracted-from
+    note: accepted; four invariants, not four op names
+  - knowledge: fa-pipeline-online-softmax-and-paged
+    relation: unrelated
+    note: Cube-Vector FA pipeline is not MC2 overlap

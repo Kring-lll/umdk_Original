@@ -1,0 +1,1319 @@
+# Generated catalog schema v2.1. YAML is the source of truth.
+# Do not hand-edit candidate_catalog.md — run: python3 tools/build_catalog.py
+# Schema: sources/catalog_schema.yaml
+# Frozen: enums, two-track scores, typed dtypes, lifecycle status,
+# evidence kinds, registry_ref, structured competes_with.
+# Does NOT modify cases/. Same 15 candidate IDs as v1.
+
+schema_version: '2.1'
+source:
+  registry_ref: catlass
+  commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  branch: master
+  scan_path: /home/wangyibo/catlass
+scoring:
+  intrinsic_max: 80
+  project_priority_scale: 1-5
+  note: uniqueness_score is not used. Sort is defined in sources/catalog_schema.yaml.
+candidates:
+- id: catlass-43-ascend950-basic-matmul
+  name: Ascend950 Basic Matmul (Pingpong / TLA)
+  status: curated
+  bucket: priority-curation
+  source_path:
+    example: examples/43_ascend950_basic_matmul/
+    kernel: include/catlass/gemm/kernel/basic_matmul_tla.hpp
+    block: include/catlass/gemm/block/block_mmad_pingpong_tla.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: gemm
+  hardware:
+  - ascend950
+  compute_engine: cube
+  memory_pattern:
+  - continuous
+  - reuse
+  - double-buffer
+  pipeline_pattern:
+  - double-buffer
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp32
+    output:
+    - fp32
+    accumulator:
+    - fp32
+    scale: []
+  shape_characteristics: general MNK; L1 tile m1/n1/k1; L0 tile m0/n0/k0
+  scores:
+    representative: 5
+    optimization: 5
+    reusability: 5
+    implementation: 5
+    documentation: 4
+    intrinsic_case_score: 79
+    project_priority: 5
+  key_techniques:
+  - claim: Canonical Cube path is GM → L1 → L0A/L0B → Mmad → L0C → Fixpipe → GM, assembled as Kernel +
+      BlockMmad + DispatchPolicy.
+    evidence:
+    - kind: source-code
+      path: include/catlass/gemm/kernel/basic_matmul_tla.hpp
+    - kind: source-code
+      path: include/catlass/gemm/block/block_mmad_pingpong_tla.hpp
+    - kind: design-doc
+      path: docs/zh/2_Design/01_kernel_design/04_matmul_summary.md
+  - claim: L1/L0/L0C stage counts, UnitFlag vs L0C double buffer, and L1 resident are DispatchPolicy template
+      knobs, not hardcoded in the example.
+    evidence:
+    - kind: design-doc
+      path: examples/43_ascend950_basic_matmul/README.md
+    - kind: source-code
+      path: examples/43_ascend950_basic_matmul/basic_matmul_tla.cpp
+  - claim: MmadPingpongMutex exists in source but is not the live example path. README calls Mutex an A5
+      addition; dispatch_policy.hpp static_assert allows only Arch::Ascend950. Record the conflict; do not
+      resolve it in this Case.
+    evidence:
+    - kind: design-doc
+      path: examples/43_ascend950_basic_matmul/README.md
+    - kind: source-code
+      path: include/catlass/gemm/dispatch_policy.hpp
+    - kind: source-code
+      path: examples/43_ascend950_basic_matmul/basic_matmul_tla.cpp
+      note: Mutex policy is commented; default example uses MmadPingpong.
+    not: This entry does not decide Mutex hardware scope.
+  - claim: PreloadAsyncWithCallback issues next-iteration copy before current Mmad; README warns extra
+      scalar cost on small shapes.
+    evidence:
+    - kind: design-doc
+      path: examples/43_ascend950_basic_matmul/README.md
+  - claim: This 950 example recommends leaving enableShuffleK=false. That is sample guidance, not a measured
+      950-wide requirement.
+    evidence:
+    - kind: design-doc
+      path: examples/43_ascend950_basic_matmul/README.md
+    - kind: source-code
+      path: examples/43_ascend950_basic_matmul/basic_matmul_tla.cpp
+      note: comment "950 false make better performance"
+    not: This file does not contain a 950 vs A2 benchmark table.
+  - claim: BasicMatmulTla::CanImplement returns true unconditionally. DeviceGemm only forwards that
+      result. This example's CanImplement is not a legality guard. Do not generalize to all CATLASS kernels.
+    evidence:
+    - kind: source-code
+      path: include/catlass/gemm/kernel/basic_matmul_tla.hpp
+    - kind: source-code
+      path: include/catlass/gemm/device/device_gemm.hpp
+    not: Other kernels may have non-trivial CanImplement; 73 is real-but-partial (A+B vs L1_SIZE),
+      not a complete L1 guard. Host error strings are not the predicate.
+  - claim: Upstream optest covers this example.
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_43_ascend950_basic_matmul.py
+  learn: Canonical Cube GEMM dataflow and how DispatchPolicy turns buffers into pipeline stages.
+  case_card: cases/compute/gemm/ascend950-basic-matmul/
+  competes_with:
+  - source: catlass
+    relation: complement
+    review_state: selected
+    why: StreamK reuses this Cube Block; remainder MN tiles K partition
+    ref: catlass-66-ascend950-streamk-matmul
+  - source: catlass
+    relation: complement
+    review_state: selected
+    why: SplitK reuses this Cube Block; every-MN K partition
+    ref: catlass-68-ascend950-multi-core-splitk
+  - source: catlass
+    relation: complement
+    review_state: selected
+    why: Same MN Identity layering; Block is MmadMx not pingpong
+    ref: catlass-53-ascend950-fp8-mx-matmul
+  - source: catlass
+    relation: complement
+    review_state: selected
+    why: Same MN Cube layering; 73 is full-K A load + cross-N A reuse
+    ref: catlass-73-ascend950-matmul-full-loadA
+  - source: catlass
+    relation: duplicate
+    review_state: rejected
+    why: Same Common/Pingpong pattern on a2
+    ref: examples/00_basic_matmul
+  - source: asc-devkit
+    relation: alternative
+    review_state: pending
+    why: Official basic AscendC matmul samples may be simpler teaching kernels
+  notes: >
+    Case Card written. Live path only: fp32 MmadPingpong + UnitFlag.
+    Mutex/Preload/ShuffleK are non-active. Do not ingest 00_basic_matmul as a second Case.
+    K-partition children: 66 StreamK, 68 SplitK.
+    Index: knowledge/engineering-experience/gemm-k-partition-strategies.md.
+    CanImplement index: knowledge/engineering-experience/canimplement-is-not-all-constraints.md.
+    Block variants: 53 MmadMx, 73 FullLoadA.
+- id: catlass-49-ascend950-flash-attention-infer
+  name: Ascend950 Flash Attention Infer
+  status: no-case
+  bucket: contrast-done
+  notes: >
+    Contrast passed (sources/scans/attention-cross-source/sparse_vs_49_vs_fia.md).
+    FA-pipeline peer of Sparse Case and FIA 950; KV-domain is contiguous kvSeq, not select_idx.
+    Do not open a Case. Do not call this a Sparse alternative.
+    Knowledge: knowledge/engineering-experience/fa-pipeline-online-softmax-and-paged.md (accepted).
+  source_path:
+    example: examples/49_ascend950_flash_attention_infer/
+    kernel: examples/49_ascend950_flash_attention_infer/fai_kernel.h
+    qk_block: include/catlass/gemm/block/block_mmad_fai_qk_tla.hpp
+    pv_block: include/catlass/gemm/block/block_mmad_fai_pv_tla.hpp
+    softmax: include/catlass/epilogue/block/block_epilogue_fa_softmax_ascend950.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: flash-attention-decode
+  hardware:
+  - ascend950
+  compute_engine: vector+cube
+  memory_pattern:
+  - continuous
+  - reuse
+  - workspace
+  - irregular
+  pipeline_pattern:
+  - vector-cube-overlap
+  - multi-stage
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp16
+    - bf16
+    output:
+    - fp16
+    - bf16
+    accumulator:
+    - fp32
+    scale: []
+  shape_characteristics: decode qSeqlen small, kvSeqlen long; optional paged KV
+  scores:
+    representative: 5
+    optimization: 5
+    reusability: 4
+    implementation: 5
+    documentation: 3
+    intrinsic_case_score: 75
+    project_priority: 4
+  key_techniques:
+  - claim: FA infer kernel is QK BlockMmad + online-softmax epilogue + PV BlockMmad + rescale-O, not one
+      fused Mmad.
+    evidence:
+    - kind: source-code
+      path: examples/49_ascend950_flash_attention_infer/fai_kernel.h
+      note: class FAInferKernel<BlockMmadQK, BlockMmadPV, EpilogueOnlineSoftmax, EpilogueRescaleO, PAGED_CACHE_FLAG>
+  - claim: AIC/AIV split is explicit in the kernel.
+    evidence:
+    - kind: source-code
+      path: examples/49_ascend950_flash_attention_infer/fai_kernel.h
+      note: ASCEND_IS_AIC branch in Init
+  - claim: Paged Attention is a compile-time flag plus runtime cacheMode, not a separate operator.
+    evidence:
+    - kind: design-doc
+      path: examples/49_ascend950_flash_attention_infer/README.md
+    - kind: source-code
+      path: examples/49_ascend950_flash_attention_infer/fai_kernel.h
+  - claim: Upstream optest covers this example.
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_49_ascend950_flash_attention_infer.py
+  learn: Assemble Flash Attention from two BlockMmad plus Vector epilogue.
+  competes_with:
+  - source: ops-transformer
+    relation: peer
+    review_state: done
+    why: Same FA-pipeline family; FIA KV-domain is mask-truncated S2, not Sparse select_idx
+  - source: sgl-kernel-npu
+    relation: peer
+    review_state: done
+    why: Same FA-pipeline family; Sparse KV-domain is selected pages
+  - source: catlass
+    relation: sibling
+    review_state: pending
+    why: Same FA algebra, prefill tiling
+    ref: catlass-70-ascend950-fa-chunk-prefill
+- id: catlass-71-ascend950-mx-gmm-finalize-routing
+  name: Ascend950 MX GMM + Finalize Routing
+  status: no-case
+  bucket: contrast-done
+  source_path:
+    example: examples/71_ascend950_fp8_mx_grouped_matmul_finalize_routing/
+    design: examples/71_ascend950_fp8_mx_grouped_matmul_finalize_routing/71_ascend950_fp8_mx_grouped_matmul_finalize_routing.md
+    kernel: include/catlass/gemm/kernel/grouped_mx_matmul_finalize_routing_tla.hpp
+    epilogue: include/catlass/epilogue/block/block_epilogue_finalize_routing.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: moe-finalize-routing
+  hardware:
+  - ascend950
+  compute_engine: vector+cube
+  memory_pattern:
+  - continuous
+  - workspace
+  - scatter
+  - irregular
+  pipeline_pattern:
+  - vector-cube-overlap
+  - producer-consumer
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp8_e4m3
+    - fp8_e5m2
+    output:
+    - fp32
+    accumulator:
+    - fp32
+    scale:
+    - e8m0
+  shape_characteristics: grouped M; scatter to batch rows via rowIndex
+  scores:
+    representative: 5
+    optimization: 4
+    reusability: 4
+    implementation: 5
+    documentation: 5
+    intrinsic_case_score: 73
+    project_priority: 4
+  key_techniques:
+  - claim: AIC writes grouped MX GEMM into GM workspace; AIV does zero, optional shared-expert add, logit
+      weighting, scatter-add.
+    evidence:
+    - kind: design-doc
+      path: examples/71_ascend950_fp8_mx_grouped_matmul_finalize_routing/71_ascend950_fp8_mx_grouped_matmul_finalize_routing.md
+    - kind: source-code
+      path: include/catlass/epilogue/block/block_epilogue_finalize_routing.hpp
+  - claim: communication_pattern is none — scatter-add is on-device memory, not HCCL combine.
+    evidence:
+    - kind: design-doc
+      path: examples/71_ascend950_fp8_mx_grouped_matmul_finalize_routing/71_ascend950_fp8_mx_grouped_matmul_finalize_routing.md
+    - kind: inference
+      note: No Hccl/AllToAll in this example's documented flow. Confirm before treating as compute-communication.
+  - claim: Deterministic ColumnBlockSwizzle vs no_deter ASWT tail-split are two schedules with the same
+      math.
+    evidence:
+    - kind: design-doc
+      path: examples/71_ascend950_fp8_mx_grouped_matmul_finalize_routing/README.md
+  - claim: Upstream optest covers this example.
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_71_ascend950_fp8_mx_grouped_matmul_finalize_routing.py
+  learn: MoE Combine compute side — Cube GMM plus Vector scatter-add. Not a communication Case.
+  competes_with:
+  - source: ops-transformer
+    relation: alternative
+    review_state: pending
+    why: MoE combine / finalize routing production kernels
+  - source: sgl-kernel-npu
+    relation: alternative
+    review_state: pending
+    why: DeepEP / MoE combine
+  - source: catlass
+    relation: complement
+    review_state: pending
+    why: GMM without routing epilogue
+    ref: catlass-60-ascend950-grouped-matmul-slice-m
+- id: catlass-64-ascend950-matmul-evg
+  name: Ascend950 Matmul EVG Epilogue
+  status: candidate
+  bucket: knowledge-first
+  source_path:
+    example: examples/64_ascend950_matmul_evg/
+    design: docs/zh/2_Design/03_evg/
+    fusion: include/catlass/epilogue/fusion/
+    visitor_kernel: include/catlass/gemm/kernel/basic_matmul_tla_visitor.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: matmul-epilogue-fusion
+  hardware:
+  - ascend950
+  compute_engine: vector+cube
+  memory_pattern:
+  - continuous
+  - workspace
+  - reuse
+  pipeline_pattern:
+  - copy-compute-copy
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp16
+    - fp32
+    output:
+    - fp16
+    - fp32
+    accumulator:
+    - fp32
+    scale: []
+  shape_characteristics: general GEMM plus elemwise / bias / broadcast
+  scores:
+    representative: 4
+    optimization: 4
+    reusability: 5
+    implementation: 5
+    documentation: 5
+    intrinsic_case_score: 71
+    project_priority: 3
+  key_techniques:
+  - claim: EVG composes Add/Silu/Bias/Tanh as TreeVisitor or TopologicalVisitor without rewriting BlockMmad.
+    evidence:
+    - kind: design-doc
+      path: docs/zh/2_Design/03_evg/01_evg_design.md
+    - kind: source-code
+      path: include/catlass/epilogue/fusion/tree_visitor.hpp
+  - claim: GM workspace vs L0C→UB are two epilogue datapaths (add vs add_ub examples).
+    evidence:
+    - kind: design-doc
+      path: examples/64_ascend950_matmul_evg/README.md
+    - kind: design-doc
+      path: docs/zh/2_Design/03_evg/03_evg_quick_start.md
+  - claim: Upstream optest covers this example.
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_64_ascend950_matmul_evg.py
+  learn: Declarative epilogue composition. Prefer knowledge cards over a single operator Case.
+  competes_with:
+  - source: catlass
+    relation: sibling
+    review_state: pending
+    why: Hand-written fused epilogue vs EVG
+    ref: catlass-65-ascend950-mx-gmm-swiglu-quant
+  - source: cannbot-skills
+    relation: complement
+    review_state: pending
+    why: Agent skill may already describe epilogue fusion
+  - source: ops-transformer
+    relation: alternative
+    review_state: pending
+    why: Production fused matmul+activation
+- id: catlass-66-ascend950-streamk-matmul
+  name: Ascend950 StreamK Matmul
+  status: reviewed
+  bucket: priority-curation
+  source_path:
+    example: examples/66_ascend950_streamk_matmul/
+    kernel: include/catlass/gemm/kernel/streamk_matmul_tla.hpp
+    scheduler: include/catlass/gemm/block/block_swizzle.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: gemm-streamk
+  hardware:
+  - ascend950
+  compute_engine: vector+cube
+  memory_pattern:
+  - continuous
+  - workspace
+  - reduce
+  - double-buffer
+  pipeline_pattern:
+  - double-buffer
+  - multi-stage
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp32
+    output:
+    - fp32
+    accumulator:
+    - fp32
+    scale: []
+  shape_characteristics: remainder-tile StreamK (mnTiles % nAic split K); shipped CLI/optest MN is 256x512 (mnTiles=2)
+  scores:
+    representative: 4
+    optimization: 5
+    reusability: 4
+    implementation: 5
+    documentation: 4
+    intrinsic_case_score: 71
+    project_priority: 5
+  key_techniques:
+  - claim: Live path is mix fp32 StreamkMatmulTla. Cube Block is 43 pingpong. AIV inlines
+      Add on workspace slots; not StreamkReduceAdd / not cube-only.
+    evidence:
+    - kind: source-code
+      path: examples/66_ascend950_streamk_matmul/streamk_matmul.cpp
+    - kind: source-code
+      path: examples/66_ascend950_streamk_matmul/CMakeLists.txt
+      note: catlass_example_add_executable mix
+    - kind: source-code
+      path: include/catlass/gemm/kernel/streamk_matmul_tla.hpp
+  - claim: Only mnTiles % nAic remainder MN tiles split K across AIC. Complete waves write output C like 43.
+      Workspace is 2 x L1_M x L1_N accumulator tiles per AIC.
+    evidence:
+    - kind: source-code
+      path: include/catlass/gemm/block/block_swizzle.hpp
+      note: StreamkGemmIdentityBlockSwizzle streamkBlocks = B % C
+    - kind: source-code
+      path: include/catlass/gemm/kernel/streamk_matmul_tla.hpp
+      note: GetWorkspaceSize; gmW[2*blockIdx] and gmW[2*blockIdx+1]
+  - claim: Suggested when B/C > 1 and B%C <= 0.8C, with B = MN tile count.
+    evidence:
+    - kind: design-doc
+      path: examples/66_ascend950_streamk_matmul/README.md
+    not: Predicate is documented guidance, not a measured sweep. Shipped CLI 256x512 has B=2.
+  - claim: Not the same template as multi-core SplitK (68).
+    evidence:
+    - kind: source-code
+      path: include/catlass/gemm/kernel/streamk_matmul_tla.hpp
+    - kind: source-code
+      path: include/catlass/gemm/kernel/multi_core_splitk_matmul_tla.hpp
+  - claim: Upstream optest covers this example (fp32 default; extra fp16 JIT path).
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_66_ascend950_streamk_matmul.py
+    not: JIT TileShapeScalerTLA shrinks fp32 L1-K to 64; shipped example keeps 128.
+  learn: Remainder MN tiles (mnTiles % nAic) K scatter + 2-slot workspace + remainder AIV reduce. Pair with 68. Cube Block is 43.
+  case_card: cases/compute/gemm/ascend950-streamk-matmul/
+  competes_with:
+  - source: catlass
+    relation: baseline
+    review_state: selected
+    why: Same MmadPingpong Block and fp32 256/128/32 tiles
+    ref: catlass-43-ascend950-basic-matmul
+  - source: catlass
+    relation: sibling
+    review_state: selected
+    why: Different K-split policy; pair Cases
+    ref: catlass-68-ascend950-multi-core-splitk
+  - source: catlass
+    relation: duplicate
+    review_state: rejected
+    why: A2 StreamK ancestor
+    ref: examples/37_streamk_matmul
+  notes: >
+    Case Card written. Live path only: fp32 mix StreamkMatmulTla + MmadPingpong.
+    Split is remainder MN tiles (mnTiles % nAic), not a default complete-wave tail.
+    README StreamK heuristic is design-doc (B=mnTiles, C=nAic); CLI mnTiles=2 is not that regime.
+    Example vs JIT L1-K conflict recorded, not resolved.
+    Index: knowledge/engineering-experience/gemm-k-partition-strategies.md.
+- id: catlass-60-ascend950-grouped-matmul-slice-m
+  name: Ascend950 Grouped Matmul Slice-M
+  status: curated
+  bucket: priority-curation
+  source_path:
+    example: examples/60_ascend950_grouped_matmul_slice_m/
+    kernel: include/catlass/gemm/kernel/grouped_matmul_slice_m_tla.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: grouped-gemm
+  hardware:
+  - ascend950
+  compute_engine: cube
+  memory_pattern:
+  - continuous
+  - irregular
+  pipeline_pattern:
+  - double-buffer
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp16
+    output:
+    - fp16
+    accumulator:
+    - fp32
+    scale: []
+  shape_characteristics: many groups; A sliced on M; irregular groupList
+  scores:
+    representative: 5
+    optimization: 3
+    reusability: 5
+    implementation: 5
+    documentation: 3
+    intrinsic_case_score: 70
+    project_priority: 5
+  key_techniques:
+  - claim: Slice-M GMM maps groupList to Cube tiles; A is split on M, B is per-group.
+    evidence:
+    - kind: design-doc
+      path: examples/60_ascend950_grouped_matmul_slice_m/README.md
+    - kind: source-code
+      path: include/catlass/gemm/kernel/grouped_matmul_slice_m.hpp
+  - claim: Optimization value is mostly scheduling/groupList, reusing Pingpong BlockMmad.
+    evidence:
+    - kind: inference
+      note: Kernel is a thin grouped wrapper over BlockMmad; no extra pipeline stages beyond pingpong.
+    - kind: source-code
+      path: include/catlass/gemm/kernel/grouped_matmul_slice_m_tla.hpp
+  - claim: Upstream optest covers this example.
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_60_ascend950_grouped_matmul_slice_m.py
+  - claim: Live groupList is prefix-sum boundaries. Kernel subtracts adjacent entries. Segmented
+      per-group sizes are not the live path.
+    evidence:
+    - kind: source-code
+      path: include/catlass/gemm/kernel/grouped_matmul_slice_m_tla.hpp
+    - kind: test
+      path: tests/optest/tests/test_60_ascend950_grouped_matmul_slice_m.py
+    not: Do not describe groupList as a list of expert token counts.
+  learn: Kernel maps prefix-sum groupList onto regular Cube tiles using the same pingpong BlockMmad as 43.
+  case_card: cases/compute/grouped-gemm/ascend950-grouped-matmul-slice-m/
+  competes_with:
+  - source: catlass
+    relation: complement
+    review_state: selected
+    why: Same MmadPingpong Block as 43; 60 adds Kernel groupList scheduling
+    ref: catlass-43-ascend950-basic-matmul
+  - source: ops-transformer
+    relation: alternative
+    review_state: pending
+    why: Production grouped matmul / MoE GEMM
+  - source: sgl-kernel-npu
+    relation: alternative
+    review_state: pending
+    why: MoE grouped GEMM
+  - source: catlass
+    relation: duplicate
+    review_state: rejected
+    why: A2 slice-M ancestor
+    ref: examples/02_grouped_matmul_slice_m
+  notes: >
+    Case Card written. Live path only: fp16 GroupedMatmulSliceMTla + MmadPingpong + prefix-sum
+    groupList. Example vs optest swizzle heuristics are recorded, not resolved.
+- id: catlass-46-ascend950-matmul-fixpipe-opti
+  name: Ascend950 Matmul Fixpipe Opti
+  status: candidate
+  bucket: priority-curation
+  source_path:
+    example: examples/46_ascend950_matmul_fixpipe_opti/
+    design: examples/46_ascend950_matmul_fixpipe_opti/46_ascend950_matmul_fixpipe_opti.md
+    kernel: include/catlass/gemm/kernel/matmul_mix_fixpipe_opti.hpp
+    epilogue: include/catlass/epilogue/block/block_epilogue_fixpipe.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: gemm-fixpipe
+  hardware:
+  - ascend950
+  compute_engine: vector+cube
+  memory_pattern:
+  - continuous
+  - double-buffer
+  pipeline_pattern:
+  - vector-cube-overlap
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp16
+    output:
+    - fp32
+    accumulator:
+    - fp32
+    scale: []
+  shape_characteristics: large MN, small K, N often unaligned
+  scores:
+    representative: 4
+    optimization: 5
+    reusability: 4
+    implementation: 4
+    documentation: 4
+    intrinsic_case_score: 68
+    project_priority: 4
+  key_techniques:
+  - claim: 950 adds L0C→UB Fixpipe; dualDstCtrl splits one Cube L0C to two Vector UBs.
+    evidence:
+    - kind: design-doc
+      path: examples/46_ascend950_matmul_fixpipe_opti/46_ascend950_matmul_fixpipe_opti.md
+    - kind: source-code
+      path: include/catlass/epilogue/block/block_epilogue_fixpipe.hpp
+  - claim: This optimization targets Fixpipe-bound cases such as N-unaligned writes. In the example's
+      aligned-MN benchmark, no speedup was observed (~0.99×).
+    evidence:
+    - kind: benchmark
+      path: examples/46_ascend950_matmul_fixpipe_opti/46_ascend950_matmul_fixpipe_opti.md
+      note: Table [M,N,K] vs matmul_fixpipe vs opti; e.g. 2048x2038x256 → 1.55×; 2048x2048x256 → 0.99×
+  - claim: Upstream optest covers this example.
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_46_ascend950_matmul_fixpipe_opti.py
+  learn: 950-only L0C→UB path. Use when Fixpipe-bound (N unaligned, small K).
+  notes: >
+    Close-read done. Case Card blocked on 4 KiB UB-stage vs SPLIT_M payload
+    (131072 vs 126976). dualDstCtl=1 dst-address semantics are sourced
+    (compact M/2×N at the same LocalTensor base in each sub-block UB);
+    that does not close the 4 KiB gap. See close_reads/46_ub_footprint.md Q6.
+  competes_with:
+  - source: catlass
+    relation: baseline
+    review_state: pending
+    why: Default Fixpipe-to-GM baseline
+    ref: catlass-43-ascend950-basic-matmul
+  - source: asc-devkit
+    relation: alternative
+    review_state: pending
+    why: May document Fixpipe APIs without this dualDst pattern
+- id: catlass-53-ascend950-fp8-mx-matmul
+  name: Ascend950 MXFP8 Matmul
+  status: reviewed
+  bucket: priority-curation
+  source_path:
+    example: examples/53_ascend950_fp8_mx_matmul/
+    kernel: include/catlass/gemm/kernel/mx_matmul_tla.hpp
+    block: include/catlass/gemm/block/block_mmad_mx_tla.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: mx-quant-gemm
+  hardware:
+  - ascend950
+  compute_engine: cube
+  memory_pattern:
+  - continuous
+  - reuse
+  pipeline_pattern:
+  - double-buffer
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp8_e4m3
+    output:
+    - fp32
+    accumulator:
+    - fp32
+    scale:
+    - e8m0
+  shape_characteristics: e4m3 NT; e8m0 group-32; shipped 256x512x1024
+  scores:
+    representative: 4
+    optimization: 4
+    reusability: 4
+    implementation: 5
+    documentation: 4
+    intrinsic_case_score: 67
+    project_priority: 5
+  key_techniques:
+  - claim: Live path is cube e4m3 MxMatmulTla + MmadMx + Identity swizzle. Scale is e8m0
+      group-32 inside the Cube Block, not BlockEpilogue. AIV empty.
+    evidence:
+    - kind: source-code
+      path: examples/53_ascend950_fp8_mx_matmul/fp8_mx_matmul.cpp
+    - kind: source-code
+      path: examples/53_ascend950_fp8_mx_matmul/CMakeLists.txt
+      note: catlass_example_add_executable cube
+    - kind: source-code
+      path: include/catlass/gemm/block/block_mmad_mx_tla.hpp
+  - claim: README scale shape (m, ceil(k/64), 2) is MakeMxScaleLayout C0=2 packing of
+      mxScaleK=CeilDiv(K,32), not a second MX group size.
+    evidence:
+    - kind: design-doc
+      path: examples/53_ascend950_fp8_mx_matmul/README.md
+    - kind: source-code
+      path: include/catlass/catlass.hpp
+      note: MX_SCALE_GROUP_NUM=32
+    - kind: source-code
+      path: examples/53_ascend950_fp8_mx_matmul/gen_data.py
+      note: _BLOCK_SIZE = 32
+  - claim: Layout encodes transpose; default binary only runs trans_a=0, trans_b=1.
+    evidence:
+    - kind: design-doc
+      path: examples/53_ascend950_fp8_mx_matmul/README.md
+    - kind: source-code
+      path: examples/53_ascend950_fp8_mx_matmul/fp8_mx_matmul.cpp
+  - claim: Representative of 54 FP4 / 59 A8W4 MX family; those are not separate Cases in this batch.
+    evidence:
+    - kind: inference
+      note: 54/59 READMEs share the same scale-layout contract and MmadMx policy.
+  - claim: Upstream optest covers the ASWT sibling binary, not the Identity example.
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_53_ascend950_fp8_mx_matmul_aswt.py
+    not: Default fp8_mx_matmul.cpp uses GemmIdentityBlockSwizzle.
+  learn: MX block-scale contract on MmadMx. Identity executable is the Case; ASWT is a sibling binary. Do not ingest 54/59.
+  case_card: cases/compute/gemm/ascend950-fp8-mx-matmul/
+  competes_with:
+  - source: catlass
+    relation: baseline
+    review_state: selected
+    why: Same MN Identity layering; Block policy is MmadMx not pingpong
+    ref: catlass-43-ascend950-basic-matmul
+  - source: catlass
+    relation: duplicate
+    review_state: rejected
+    why: Same MX contract, different packed dtype
+    ref: examples/54_ascend950_fp4_mx_matmul
+  - source: ops-transformer
+    relation: alternative
+    review_state: pending
+    why: Production MX/FP8 matmul
+  - source: sgl-kernel-npu
+    relation: alternative
+    review_state: pending
+    why: Quantized GEMM
+  notes: >
+    Reviewed. Live path only: e4m3 Identity MmadMx. ASWT optest recorded, not taught.
+    e5m2 is not this Case's dtypes. README k/64 is C0 packing of group-32.
+- id: catlass-65-ascend950-mx-gmm-swiglu-quant
+  name: Ascend950 MX GMM + SwiGLU + MX Quant
+  status: candidate
+  bucket: cross-source-review
+  source_path:
+    example: examples/65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant/
+    kernel: include/catlass/gemm/kernel/grouped_mx_matmul_slice_m_swiglu_mx_quant_tla.hpp
+    epilogue: include/catlass/epilogue/block/block_epilogue_swiglu_mx_quant.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: grouped-gemm-swiglu-quant
+  hardware:
+  - ascend950
+  compute_engine: vector+cube
+  memory_pattern:
+  - continuous
+  - reuse
+  - workspace
+  pipeline_pattern:
+  - vector-cube-overlap
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp8_e4m3
+    output:
+    - fp8_e4m3
+    accumulator:
+    - fp32
+    scale:
+    - e8m0
+  shape_characteristics: N 128-aligned; two GEMM results live in UB
+  scores:
+    representative: 4
+    optimization: 4
+    reusability: 4
+    implementation: 4
+    documentation: 4
+    intrinsic_case_score: 64
+    project_priority: 4
+  key_techniques:
+  - claim: One loop runs two matmul blocks (act/gate); both C tiles plus SwiGLU temps share UB (~180K),
+      so L1/L0 tiles are half of example 53.
+    evidence:
+    - kind: design-doc
+      path: examples/65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant/README.md
+    - kind: source-code
+      path: include/catlass/gemm/kernel/grouped_mx_matmul_slice_m_swiglu_mx_quant_tla.hpp
+    not: 180K is author measurement in README, not an independent benchmark table.
+  - claim: Rows not covered by groupList are not written (uninitialized tail).
+    evidence:
+    - kind: design-doc
+      path: examples/65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant/README.md
+  - claim: Upstream optest covers this example.
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_65_ascend950_fp8_mx_grouped_matmul_slice_m_swiglu_mx_quant.py
+  learn: Fusion is UB-limited. Do not keep 53's tile when two C tiles must coexist.
+  competes_with:
+  - source: ops-transformer
+    relation: alternative
+    review_state: pending
+    why: Fused MoE FFN (GMM+SwiGLU)
+  - source: sgl-kernel-npu
+    relation: alternative
+    review_state: pending
+    why: Same fused expert FFN
+  - source: catlass
+    relation: sibling
+    review_state: pending
+    why: EVG vs hand-fused epilogue
+    ref: catlass-64-ascend950-matmul-evg
+- id: catlass-73-ascend950-matmul-full-loadA
+  name: Ascend950 Matmul Full Load A
+  status: reviewed
+  bucket: priority-curation
+  source_path:
+    example: examples/73_ascend950_matmul_full_loadA/
+    kernel: include/catlass/gemm/kernel/matmul_full_loadA_tla.hpp
+    block: include/catlass/gemm/block/block_mmad_pingpong_full_loadA_ascend950_tla.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: gemm-full-k-a
+  hardware:
+  - ascend950
+  compute_engine: cube
+  memory_pattern:
+  - continuous
+  - reuse
+  pipeline_pattern:
+  - double-buffer
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp16
+    output:
+    - fp16
+    accumulator:
+    - fp32
+    scale: []
+  shape_characteristics: full-K A load + cross-N A reuse; Host Identity if M<=256 else FullLoad swizzle
+  scores:
+    representative: 4
+    optimization: 4
+    reusability: 4
+    implementation: 4
+    documentation: 4
+    intrinsic_case_score: 64
+    project_priority: 4
+  key_techniques:
+  - claim: Live teaching is full-K A load + cross-N A reuse. Cube fp16 MatmulFullLoadATla
+      + MmadAscend950FullLoadA copies (L1_M, problem K) with L1A_STAGES=1; B pingpongs.
+      ENABLE_L1_RESIDENT is false and is not this mechanism.
+    evidence:
+    - kind: source-code
+      path: examples/73_ascend950_matmul_full_loadA/matmul_full_loadA_tla.cpp
+    - kind: source-code
+      path: include/catlass/gemm/block/block_mmad_pingpong_full_loadA_ascend950_tla.hpp
+  - claim: CanImplement checks A_bytes + B_pingpong <= L1_SIZE. It does not check L1A_TILE_SIZE
+      (=L1/2) or the README half-L1 sentence. Named half-L1 is not the copy bound.
+    evidence:
+    - kind: source-code
+      path: include/catlass/gemm/kernel/matmul_full_loadA_tla.hpp
+    - kind: source-code
+      path: include/catlass/gemm/block/block_mmad_pingpong_full_loadA_ascend950_tla.hpp
+      note: L1A_TILE_SIZE = L1_SIZE/2; GetBufferByByte has no length clip
+    - kind: design-doc
+      path: examples/73_ascend950_matmul_full_loadA/README.md
+      note: half-L1 story
+  - claim: Benefit grows with N (A reused); small N can be slower than basic matmul.
+    evidence:
+    - kind: design-doc
+      path: examples/73_ascend950_matmul_full_loadA/README.md
+    not: Qualitative README claim; no us table in this example.
+  - claim: Both Host scheduler branches are live. M<=256 Identity<3,0> (CLI 256x512x256);
+      M>256 FullLoad swizzle <1,0> (example Host for optest 512x512x256). Do not pick
+      one as the only live scheduler. JIT default Identity is example-vs-JIT, not a Host choice.
+    evidence:
+    - kind: source-code
+      path: examples/73_ascend950_matmul_full_loadA/matmul_full_loadA_tla.cpp
+    - kind: source-code
+      path: tests/optest/kernels/73_ascend950_matmul_full_loadA/ascend950_matmul_full_loadA_impl.cpp
+  - claim: Upstream optest covers this example (fp16 512x512x256).
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_73_ascend950_matmul_full_loadA.py
+  learn: Term is full-K A load + cross-N A reuse, not L1 resident A. CanImplement is a
+    partial guard. Host keeps both Identity and FullLoad swizzle branches.
+  case_card: cases/compute/gemm/ascend950-matmul-full-loadA/
+  competes_with:
+  - source: catlass
+    relation: duplicate
+    review_state: rejected
+    why: A2 full-load-A ancestor
+    ref: examples/25_matmul_full_loadA
+  - source: catlass
+    relation: baseline
+    review_state: selected
+    why: Same MN Cube layering; 73 is full-K A load + cross-N A reuse, not L1 resident A
+    ref: catlass-43-ascend950-basic-matmul
+  notes: >
+    Reviewed. Frozen term: full-K A load + cross-N A reuse. Not L1 resident A.
+    Host Identity (M<=256) and FullLoad swizzle (M>256) are both live.
+    Host cout "cannot be full loaded" is not the CanImplement predicate.
+    Mini-read sources/scans/catlass/close_reads/73_l1a_vs_canimplement.md.
+    Index: knowledge/engineering-experience/canimplement-is-not-all-constraints.md.
+    README half-L1 vs CanImplement sum vs L1A_TILE_SIZE recorded, not resolved.
+- id: catlass-70-ascend950-fa-chunk-prefill
+  name: Ascend950 Flash Attention Chunk Prefill
+  status: candidate
+  bucket: cross-source-review
+  source_path:
+    example: examples/70_ascend950_flash_attention_chunk_prefill/
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: flash-attention-prefill
+  hardware:
+  - ascend950
+  compute_engine: vector+cube
+  memory_pattern:
+  - continuous
+  - irregular
+  - workspace
+  pipeline_pattern:
+  - vector-cube-overlap
+  - multi-stage
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp16
+    - bf16
+    output:
+    - fp16
+    - bf16
+    accumulator:
+    - fp32
+    scale: []
+  shape_characteristics: long Q/KV; GQA; PAGE_ND/PAGE_NZ; optional varied len
+  scores:
+    representative: 4
+    optimization: 4
+    reusability: 3
+    implementation: 4
+    documentation: 3
+    intrinsic_case_score: 60
+    project_priority: 3
+  key_techniques:
+  - claim: Prefill supports GQA, chunk/blocksize, PAGE_ND vs PAGE_NZ, optional varied-len — features listed
+      in README, not inferred from 49.
+    evidence:
+    - kind: design-doc
+      path: examples/70_ascend950_flash_attention_chunk_prefill/README.md
+  - claim: Same FA algebra as 49, different tiling; do not copy 49 qSeqlen tiles here.
+    evidence:
+    - kind: inference
+      note: Both use QK/PV + softmax family components; 70 README is prefill/chunk specific. Confirm with
+        a source-code pass before Case Card.
+  - claim: Upstream optest covers this example.
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_70_ascend950_flash_attention_chunk_prefill.py
+  learn: Ask decode vs prefill before reusing FA tiles.
+  competes_with:
+  - source: catlass
+    relation: sibling
+    review_state: pending
+    why: Decode vs prefill
+    ref: catlass-49-ascend950-flash-attention-infer
+  - source: ops-transformer
+    relation: alternative
+    review_state: pending
+    why: Production prefill FA
+  - source: sgl-kernel-npu
+    relation: alternative
+    review_state: pending
+    why: Chunk prefill / paged layout
+- id: catlass-68-ascend950-multi-core-splitk
+  name: Ascend950 Multi-Core SplitK Matmul
+  status: reviewed
+  bucket: priority-curation
+  source_path:
+    example: examples/68_ascend950_multi_core_splitk_matmul/
+    kernel: include/catlass/gemm/kernel/multi_core_splitk_matmul_tla.hpp
+    scheduler: include/catlass/gemm/block/block_swizzle.hpp
+    reduce: include/catlass/gemm/kernel/splitk_matmul.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: gemm-splitk
+  hardware:
+  - ascend950
+  compute_engine: vector+cube
+  memory_pattern:
+  - continuous
+  - workspace
+  - reduce
+  - double-buffer
+  pipeline_pattern:
+  - double-buffer
+  - multi-stage
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp32
+    output:
+    - fp32
+    accumulator:
+    - fp32
+    scale: []
+  shape_characteristics: every MN tile splits K; README window B <= C/2; shipped 256x512x1024 has B=2
+  scores:
+    representative: 4
+    optimization: 3
+    reusability: 4
+    implementation: 4
+    documentation: 3
+    intrinsic_case_score: 59
+    project_priority: 4
+  key_techniques:
+  - claim: Live path is mix fp32 MultiCoreSplitkMatmulTla. AIC writes splitkFactor full M×N
+      accumulator planes; AIV SplitkReduceAdd owns GM C. Cube Block is 43 pingpong.
+    evidence:
+    - kind: source-code
+      path: examples/68_ascend950_multi_core_splitk_matmul/multi_core_splitk_matmul.cpp
+    - kind: source-code
+      path: examples/68_ascend950_multi_core_splitk_matmul/CMakeLists.txt
+      note: catlass_example_add_executable mix
+    - kind: source-code
+      path: include/catlass/gemm/kernel/multi_core_splitk_matmul_tla.hpp
+    - kind: source-code
+      path: include/catlass/gemm/kernel/splitk_matmul.hpp
+      note: SplitkReduceAdd only; SplitkMatmul kernel class is not live
+  - claim: GetSplitkFactor starts at 2; if aicCoreNum/blockNum > 0 it becomes that quotient
+      (can be 1); then min with kTileNum. Cap by kTileNum means not every AIC is guaranteed work.
+    evidence:
+    - kind: source-code
+      path: include/catlass/gemm/kernel/multi_core_splitk_matmul_tla.hpp
+      note: GetSplitkFactor
+  - claim: Suggested when CeilDiv(M,m1)*CeilDiv(N,n1) <= C/2.
+    evidence:
+    - kind: design-doc
+      path: examples/68_ascend950_multi_core_splitk_matmul/README.md
+    not: Documented heuristic, not a benchmark sweep. Binary always SplitKs.
+  - claim: Upstream optest covers this example (fp32 256x512x1024).
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_68_ascend950_multi_core_splitk_matmul.py
+    not: JIT TileShapeScalerTLA shrinks fp32 L1-K to 64; shipped example keeps 128.
+  learn: SplitK when MN cannot fill cores; StreamK when the issue is a tail round. Cube Block is 43.
+  case_card: cases/compute/gemm/ascend950-multi-core-splitk-matmul/
+  competes_with:
+  - source: catlass
+    relation: baseline
+    review_state: selected
+    why: Same MmadPingpong Block and fp32 256/128/32 tiles
+    ref: catlass-43-ascend950-basic-matmul
+  - source: catlass
+    relation: sibling
+    review_state: selected
+    why: Pair Cases; different K-split policy
+    ref: catlass-66-ascend950-streamk-matmul
+  - source: catlass
+    relation: duplicate
+    review_state: rejected
+    why: A2 splitk ancestor
+    ref: examples/09_splitk_matmul
+  notes: >
+    Case Card written. Live path only: fp32 mix MultiCoreSplitkMatmulTla + MmadPingpong.
+    README B<=C/2 is design-doc. Reduce uses 192 KiB computeLength, not 950 UB_SIZE.
+    Example vs JIT L1-K conflict recorded, not resolved.
+    Index: knowledge/engineering-experience/gemm-k-partition-strategies.md.
+- id: catlass-56-ascend950-basic-conv2d-tla
+  name: Ascend950 Basic Conv2d TLA
+  status: candidate
+  bucket: deferred
+  source_path:
+    example: examples/56_ascend950_basic_conv2d_tla/
+    kernel: include/catlass/conv/kernel/basic_conv2d_tla.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: conv2d-implicit-gemm
+  hardware:
+  - ascend950
+  compute_engine: cube
+  memory_pattern:
+  - continuous
+  - strided
+  pipeline_pattern:
+  - double-buffer
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp16
+    output:
+    - fp16
+    accumulator:
+    - fp32
+    scale: []
+  shape_characteristics: 2D conv pad/stride/dilation; 950 L0C 256K
+  scores:
+    representative: 4
+    optimization: 3
+    reusability: 3
+    implementation: 4
+    documentation: 3
+    intrinsic_case_score: 56
+    project_priority: 2
+  key_techniques:
+  - claim: 950 example reuses 33_basic_conv2d design with TLA; L0C_SIZE is 256K on 950.
+    evidence:
+    - kind: design-doc
+      path: examples/56_ascend950_basic_conv2d_tla/README.md
+    - kind: source-code
+      path: include/catlass/conv/kernel/basic_conv2d_tla.hpp
+  - claim: v0.1 first Case batch does not include Conv, so this waits even if later useful.
+    evidence:
+    - kind: inference
+      note: CURATION_PLAN §50 Phase 3 lists Vector/Reduce/GEMV/GEMM/Irregular, not Conv.
+  - claim: Upstream optest covers this example.
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_56_ascend950_basic_conv2d_tla.py
+  learn: Conv-as-GEMM mapping and 950 L0C cap. Not v0.1.
+  competes_with:
+  - source: ops-nn
+    relation: alternative
+    review_state: pending
+    why: Production conv kernels
+  - source: catlass
+    relation: duplicate
+    review_state: rejected
+    why: A2 non-TLA twin
+    ref: examples/33_basic_conv2d
+- id: catlass-17-gemv-aiv
+  name: GEMV on Vector (AIV)
+  status: candidate
+  bucket: deferred
+  source_path:
+    example: examples/17_gemv_aiv/
+    kernel: include/catlass/gemv/kernel/kernel_gemv_aiv.hpp
+    block: include/catlass/gemv/block/block_gemv_aiv.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: gemv
+  hardware:
+  - a2
+  compute_engine: vector
+  memory_pattern:
+  - continuous
+  - reduce
+  - double-buffer
+  pipeline_pattern:
+  - copy-compute-copy
+  - double-buffer
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp16
+    output:
+    - fp16
+    accumulator:
+    - fp32
+    scale: []
+  shape_characteristics: y = A x; UB tiles
+  scores:
+    representative: 5
+    optimization: 3
+    reusability: 4
+    implementation: 4
+    documentation: 2
+    intrinsic_case_score: 63
+    project_priority: 2
+  key_techniques:
+  - claim: AIV GEMV partitions UB into A/X/Y/workspace with multi-stage LocalTensors (A 128K, X 16K, Y
+      16K, workspace 32K in this block).
+    evidence:
+    - kind: source-code
+      path: include/catlass/gemv/block/block_gemv_aiv.hpp
+  - claim: This is Vector GEMV, not Cube M=1. 50_ascend950_basic_matmul_gemv is M=1 Basic Matmul.
+    evidence:
+    - kind: source-code
+      path: include/catlass/gemv/block/block_gemv_aiv.hpp
+      note: DispatchPolicy GemvAtlasA2, TileVmad
+    - kind: inference
+      note: 50 README is the BasicMatmul DispatchPolicy with M=1 in the run command.
+  - claim: UB byte sizes are A2 block constants; do not treat as 950 facts.
+    evidence:
+    - kind: source-code
+      path: include/catlass/gemv/block/block_gemv_aiv.hpp
+    - kind: inference
+      note: hardware enum is a2 only.
+  - claim: Upstream optest covers this example.
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_17_gemv_aiv.py
+  learn: CATLASS Vector GEMV. Defer until ops-math / 950 GEMV comparison.
+  competes_with:
+  - source: ops-math
+    relation: alternative
+    review_state: pending
+    why: Likely stronger Vector GEMV / gemv coverage
+  - source: catlass
+    relation: duplicate
+    review_state: rejected
+    why: Cube GEMV overlaps Basic Matmul
+    ref: examples/18_gemv_aic
+  - source: catlass
+    relation: duplicate
+    review_state: rejected
+    why: M=1 Cube, not this pattern
+    ref: examples/50_ascend950_basic_matmul_gemv
+- id: catlass-19-mla
+  name: MLA / AMLA Paged Decode
+  status: candidate
+  bucket: deferred
+  source_path:
+    example: examples/19_mla/
+    kernel: examples/19_mla/mla_kernel.cpp
+    tp1: examples/19_mla/mla_kernel_tp1_spec.cpp
+    qk_block: include/catlass/gemm/block/block_mmad_mla_qk.hpp
+  source_commit: a8b4fffbd9cabc021dfd47253e907a1cde59de25
+  category: compute
+  algorithm: multi-latent-attention
+  hardware:
+  - a2
+  compute_engine: vector+cube
+  memory_pattern:
+  - irregular
+  - workspace
+  - gather
+  pipeline_pattern:
+  - vector-cube-overlap
+  - multi-stage
+  communication_pattern: none
+  dtypes:
+    input:
+    - fp16
+    - bf16
+    output:
+    - fp16
+    - bf16
+    accumulator:
+    - fp32
+    scale: []
+  shape_characteristics: decode/MTP qSeqlen 1-4; paged KV; RoPE; TP 1/2/4/8
+  scores:
+    representative: 4
+    optimization: 4
+    reusability: 3
+    implementation: 5
+    documentation: 3
+    intrinsic_case_score: 63
+    project_priority: 2
+  key_techniques:
+  - claim: Example ships separate kernels for MLA TP2/4/8, MLA TP1, and AMLA TP1.
+    evidence:
+    - kind: design-doc
+      path: examples/19_mla/README.md
+    - kind: source-code
+      path: examples/19_mla/mla_kernel.cpp
+  - claim: qSeqlen supported range in gen_data is 1-4 (decode/MTP).
+    evidence:
+    - kind: design-doc
+      path: examples/19_mla/README.md
+  - claim: Not a 950 drop-in.
+    evidence:
+    - kind: inference
+      note: Example lives under A2-style examples with no CATLASS_ARCH=3510 in README.
+  - claim: Upstream optest covers this example.
+    evidence:
+    - kind: test
+      path: tests/optest/tests/test_19_mla.py
+  learn: MLA as FA variant with latent KV, RoPE, TP specs. Wait for 950 / ops-transformer.
+  competes_with:
+  - source: ops-transformer
+    relation: alternative
+    review_state: pending
+    why: Production MLA
+  - source: sgl-kernel-npu
+    relation: alternative
+    review_state: pending
+    why: DeepSeek MLA
+  - source: vllm-ascend
+    relation: complement
+    review_state: pending
+    why: Serving integration, not kernel SoT
+  - source: catlass
+    relation: sibling
+    review_state: pending
+    why: FA decode skeleton
+    ref: catlass-49-ascend950-flash-attention-infer
+rejected:
+- id: catlass-00-basic-matmul
+  reason: Same Common/Pingpong pattern as 43 on a2.
+- id: catlass-50-ascend950-basic-matmul-gemv
+  reason: M=1 Basic Matmul, not Vector GEMV.
+- id: catlass-54-ascend950-fp4-mx-matmul
+  reason: Same MX contract as 53.
+- id: catlass-59-ascend950-a8w4-mx-matmul
+  reason: Mixed MX dtype, same dataflow as 53.
+- id: catlass-67-ascend950-batched-matmul
+  reason: Weaker than 43/60.
+- id: catlass-69-ascend950-tail-multi-core-splitk
+  reason: Dominated by 66/68.
+- id: catlass-41-sparse-matmul-tla
+  reason: Not in the frozen 15; a2 4:2 sparse. Revisit after irregular-memory gap check.
+- id: catlass-102-dynamic-optimized-matmul
+  reason: Host template selection → knowledge, not a Case. Still listed under competes_with nowhere in
+    the 15.
+- id: catlass-18-gemv-aic
+  reason: Cube GEMV overlaps 43.
+- id: experimental-950-mx-fa-infer
+  reason: Experimental MX variant of 49.
+- id: catlass-80-gmm-gelu
+  reason: Weaker fusion than 64/65.

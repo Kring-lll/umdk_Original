@@ -1,0 +1,360 @@
+# vllm-ascend Scout catalog. YAML is the source of truth for this scan.
+# Candidates are engineering patterns, not file counts.
+# Do not run tools/build_catalog.py.
+
+schema_version: '2.1-vllm-ascend-scout'
+source:
+  registry_ref: vllm-ascend
+  official_remote: https://github.com/vllm-project/vllm-ascend.git
+  scan_path: /home/wangyibo/vllm-ascend
+  origin_on_scan_path: https://github.com/vllm-project/vllm-ascend.git
+  commit: d8268faea90dd9b999a0a82f6d133751d57b5770
+  branch: main
+  identity_note: >
+    Official vllm-project checkout. main @ origin/main. Not a fork.
+  live_gate_note: >
+    enable_custom_op() returns False on AscendDeviceType.A5 (issue 7157).
+    950 ACLNN kernels exist in csrc/ and build_aclnn.sh; do not claim they are
+    the default A5 inference path until a close-read pins a bypass.
+    Which of the two custom-op surfaces that gate applies to is unresolved.
+scout_status: passed
+scoring:
+  axes: [engineering_novelty, cross_source_value, production_relevance, evidence_quality]
+  scale: 1-5
+  scout_rank: 3*novelty + 3*cross + 2*prod + 2*evidence
+  note: >
+    Display order = work line P1 → P2 → P3.
+    Within each line, bucket / scout_rank guide close-read priority.
+    P1/P2/P3 is a dependency order, not a score ranking.
+    Do not re-sort this file by bucket then scout_rank.
+
+candidates:
+
+# --- P1 Attention backend → custom op ---
+
+- id: vllma-indexer-selection-producer
+  name: Lightning indexer produces select_idx / sparse_indices
+  status: candidate
+  bucket: priority-curation
+  line: p1
+  source_path:
+    kernel: csrc/attention/vllm_quant_lightning_indexer/
+    metadata: csrc/attention/vllm_quant_lightning_indexer_metadata/
+    framework: vllm_ascend/models/deepseek_v4/indexer.py
+    sfa_torch_npu: vllm_ascend/device/device_op.py  # A5DeviceAdaptor.indexer_select_post_process
+  category: compute
+  algorithm: sparse-selection-producer
+  hardware: [ascend950, a3, a2]
+  execution:
+    task_type: mix
+    engines: [cube, vector]
+  memory_pattern: [paged, gather, irregular]
+  pipeline_pattern: [producer-consumer]
+  communication_pattern: none
+  shape_characteristics: >
+    Top-k over Q_index @ K_index (optionally quantized) → sparse_indices;
+    paged key via block_table; sparse_count (950 README 512 vs A3 2048).
+  scores:
+    engineering_novelty: 5
+    cross_source_value: 5
+    production_relevance: 5
+    evidence_quality: 4
+    scout_rank: 48
+  relation_to_existing:
+    - case: sparse-attention
+      relation: upstream-producer
+      shared_mechanism: select_idx / sparse_indices consumed by sparse FA
+      new_mechanism: how the framework produces that map (indexer), not the FA loop
+    - knowledge: fa-pipeline-online-softmax-and-paged
+      relation: not-absorbed
+      note: FA Knowledge explicitly excludes select_idx; indexer is the missing producer
+  key_techniques:
+    - claim: README math is ReLU-filtered QK then weighted Top-k → sparse_indices for sparse attention.
+      evidence:
+        - kind: design-doc
+          path: csrc/attention/vllm_quant_lightning_indexer/README.md
+    - claim: DeepSeek-V4 select_topk calls torch.ops._C_ascend.npu_vllm_quant_lightning_indexer.
+      evidence:
+        - kind: source-code
+          path: vllm_ascend/models/deepseek_v4/indexer.py
+    - claim: SFA A5 path currently prefers torch_npu.npu_lightning_indexer / npu_quant_lightning_indexer.
+      evidence:
+        - kind: source-code
+          path: vllm_ascend/device/device_op.py
+    - claim: sgl-kernel-npu lightning indexer was 950-CMake-off / deferred; this tree has AddConfig ascend950 + arch35.
+      evidence:
+        - kind: source-code
+          path: csrc/attention/vllm_quant_lightning_indexer/op_host/vllm_quant_lightning_indexer_def.cpp
+  learn: >
+    First close-read. Pin which implementation A5 actually runs (in-tree vs torch_npu)
+    given enable_custom_op()==False. If new, Case is indexer only — do not merge with Sparse Case.
+  notes: AscendSFAIndexerBackend is cache-only; it does not run this kernel.
+
+- id: vllma-sparse-attention-consumer
+  name: Sparse FA consumes selection + block_table
+  status: candidate
+  bucket: contrast-first
+  line: p1
+  source_path:
+    a5_aclnn: csrc/attention/kv_quant_sparse_attn_sharedkv/
+    a5_adaptor: vllm_ascend/device/device_op.py  # get_dsa_sparse_attn_op
+    binding_sasa: csrc/attention/sparse_attention_score/
+    binding_sfa: csrc/attention/sparse_flash_attention/
+    framework: vllm_ascend/attention/{dsa_v1,sfa_v1}.py
+  category: compute
+  algorithm: block-sparse-paged-attention
+  hardware: [ascend950, a3, a2]
+  scores:
+    engineering_novelty: 2
+    cross_source_value: 5
+    production_relevance: 5
+    evidence_quality: 4
+    scout_rank: 33
+  relation_to_existing:
+    - case: sparse-attention
+      relation: contrast-pending
+      expected_relation: likely-sparse-family-consumer
+      confirmed:
+        - A5-built consumer (kv_quant_sparse_attn_sharedkv on build_aclnn A5 list)
+        - consumes sparse-selection-style input
+      unresolved:
+        - selection coordinate
+        - page lifetime
+        - QK / softmax / PV structure
+        - whether Sparse Case + FA Knowledge fully absorb it
+      shared_mechanism: name/use looks like a selected-page FA consumer
+      new_mechanism: unknown until P1 close-read
+  key_techniques:
+    - claim: A5 ACLNN package builds kv_quant_sparse_attn_sharedkv, not sparse_attention_score.
+      evidence:
+        - kind: source-code
+          path: csrc/build_aclnn.sh
+    - claim: sparse_attention_score kernel still takes selectIdx (SASA family).
+      evidence:
+        - kind: source-code
+          path: csrc/attention/sparse_attention_score/op_kernel/sparse_attention_score.cpp
+    - claim: MiniMax-M3 calls npu_sparse_attention_score via torch.ops._C_ascend.
+      evidence:
+        - kind: source-code
+          path: vllm_ascend/models/minimax_m3/ops/msa_m3_npu.py
+  learn: >
+    Contrast Sparse Case first. Name/use as a Sparse-family consumer
+    is not a proven mechanism alternative. Do not freeze relation: alternative
+    until P1 close-read. Do not fuse with indexer.
+
+- id: vllma-indexer-kv-compress-epilog
+  name: A5 fused quant+scatter into indexer/KV cache
+  status: candidate
+  bucket: contrast-after-indexer
+  line: p1-next
+  source_path:
+    indexer: csrc/attention/indexer_compress_epilog_v2/
+    kv: csrc/attention/kv_compress_epilog/
+    adaptor: vllm_ascend/device/device_op.py
+  category: compute
+  algorithm: paged-cache-update
+  hardware: [ascend950]
+  scores:
+    engineering_novelty: 3
+    cross_source_value: 3
+    production_relevance: 4
+    evidence_quality: 3
+    scout_rank: 29
+  relation_to_existing:
+    - case: sparse-attention
+      relation: sibling
+      shared_mechanism: paged slot_mapping / block_table
+      new_mechanism: fused compress+quant scatter (maybe just KV utility)
+  learn: >
+    Selection/KV-storage adjacent utility, not “who produces the select map”.
+    Close-read after indexer; do not expand P1 into the whole DSA KV-cache pipeline.
+
+- id: vllma-fia-mla-fa-pipeline
+  name: torch_npu FIA / MLA backend
+  status: no-case
+  bucket: absorb
+  line: p1-filter
+  source_path:
+    backend: vllm_ascend/attention/mla_v1.py
+    adaptor: vllm_ascend/device/device_op.py
+  algorithm: flash-attention
+  hardware: [ascend950, a3, a2]
+  scores:
+    engineering_novelty: 1
+    cross_source_value: 4
+    production_relevance: 5
+    evidence_quality: 5
+    scout_rank: 28
+  relation_to_existing:
+    - knowledge: fa-pipeline-online-softmax-and-paged
+      relation: peer
+    - case: '49-fia-contrast'
+      relation: absorbed
+  learn: Absorb into FA Knowledge. sparse_mode on FIA is still mask geometry. No Case.
+
+# --- P2 MoE / DeepEP ---
+
+- id: vllma-moe-ep-dispatch-combine
+  name: Framework MC2 / AllToAll EP via torch_npu distribute
+  status: no-case
+  bucket: absorb
+  line: p2
+  source_path:
+    dispatcher: vllm_ascend/ops/fused_moe/token_dispatcher.py
+    comm: vllm_ascend/ops/fused_moe/moe_comm_method.py
+  algorithm: moe-ep-dispatch-combine
+  hardware: [ascend950, a3, a2]
+  scores:
+    engineering_novelty: 1
+    cross_source_value: 5
+    production_relevance: 5
+    evidence_quality: 5
+    scout_rank: 32
+  relation_to_existing:
+    - case: 'B'
+      relation: alternative
+      shared_mechanism: npu_moe_distribute_dispatch/combine (+ v2)
+      new_mechanism: none expected (Python Buffer / torch.ops packaging)
+  learn: Verify A/B loop. If only Python → torch_npu → existing dispatch, Layer 1 eats it.
+
+- id: vllma-moe-gmm-swiglu
+  name: Expert FFN grouped matmul + SwiGLU quant
+  status: no-case
+  bucket: absorb
+  line: p2
+  source_path:
+    mlp: vllm_ascend/ops/fused_moe/moe_mlp.py
+    a5: vllm_ascend/device/device_op.py
+    in_tree: csrc/gmm/grouped_matmul_swiglu_quant_v2/
+  algorithm: gmm-swiglu-mx
+  hardware: [ascend950, a3, a2]
+  scores:
+    engineering_novelty: 1
+    cross_source_value: 4
+    production_relevance: 5
+    evidence_quality: 4
+    scout_rank: 27
+  relation_to_existing:
+    - case: 'C'
+      relation: alternative
+    - case: '60'
+      relation: extension
+    - case: '53'
+      relation: extension
+  learn: A5 DeviceOperator uses torch_npu npu_grouped_matmul_swiglu_quant_v2. Custom GMM gated by enable_custom_op().
+
+- id: vllma-megamoe-fused-mc2
+  name: FUSED_MC2 / MegaMoe if cann_ops_transformer present
+  status: no-case
+  bucket: absorb
+  line: p2
+  source_path:
+    flag: vllm_ascend/ascend_config.py  # _MEGA_MOE_SUPPORTED
+    impl: vllm_ascend/ops/fused_moe/moe_comm_method.py  # FusedMC2CommImpl
+  algorithm: fused-ep-ffn
+  hardware: [ascend950]
+  scores:
+    engineering_novelty: 1
+    cross_source_value: 4
+    production_relevance: 3
+    evidence_quality: 3
+    scout_rank: 22
+  relation_to_existing:
+    - case: 'D'
+      relation: alternative
+  learn: Only if cann_ops_transformer importable. In-tree dispatch_ffn_combine is A2/A3 only.
+
+- id: vllma-tp-mm-reduce-scatter
+  name: TP npu_mm_reduce_scatter_base
+  status: no-case
+  bucket: absorb
+  line: p2
+  source_path:
+    linear: vllm_ascend/ops/linear_op.py
+    adaptor: vllm_ascend/device/device_op.py
+  algorithm: matmul-reduce-scatter
+  hardware: [ascend950, a3, a2]
+  scores:
+    engineering_novelty: 1
+    cross_source_value: 5
+    production_relevance: 4
+    evidence_quality: 4
+    scout_rank: 27
+  relation_to_existing:
+    - case: mc2-rs
+      relation: alternative
+    - knowledge: mc2-compute-collective-coupling
+      relation: fill-four-questions
+  learn: Job name matches M1 RS. Fill ownership / progress / visibility / transform. No third MC2 Case. A5 default comm_mode ai_cpu.
+
+- id: vllma-eplb-scheduling
+  name: Expert-parallel load balancing controller
+  status: deferred
+  bucket: deferred
+  line: p2
+  source_path:
+    worker: vllm_ascend/worker/v2/eplb.py
+    moe: vllm_ascend/ops/fused_moe/eplb.py
+  algorithm: expert-load-balance
+  hardware: [ascend950, a3, a2]
+  scores:
+    engineering_novelty: 2
+    cross_source_value: 2
+    production_relevance: 3
+    evidence_quality: 2
+    scout_rank: 18
+  learn: Framework scheduling unless a new dispatch contract appears. Do not open a Case from Python EPLB alone.
+
+# --- P3 custom-op surfaces (not one serial chain) ---
+
+- id: vllma-custom-op-lifecycle
+  name: Framework implementation selection across two custom-op surfaces
+  status: candidate
+  bucket: knowledge-first
+  line: p3
+  source_path:
+    surface_a_vendor:
+      build: csrc/build_aclnn.sh
+      install: vllm_ascend/_cann_ops_custom
+    surface_b_torch_ext:
+      setup: setup.py
+      binding: csrc/torch_binding.cpp
+    gate: vllm_ascend/utils.py  # enable_custom_op
+    adaptor: vllm_ascend/device/device_op.py
+  category: integration
+  algorithm: framework-custom-op-contract
+  hardware: [ascend950, a3, a2]
+  scores:
+    engineering_novelty: 4
+    cross_source_value: 4
+    production_relevance: 5
+    evidence_quality: 5
+    scout_rank: 40
+  relation_to_existing:
+    - knowledge: none-yet
+      relation: new-layer-if-evidence
+  key_techniques:
+    - claim: Two compile surfaces must not be collapsed into one serial chain.
+      evidence:
+        - kind: source-code
+          path: csrc/build_aclnn.sh
+        - kind: source-code
+          path: setup.py
+        - kind: source-code
+          path: csrc/torch_binding.cpp
+    - claim: A5 enable_custom_op() currently returns False (issue 7157); which surface it gates is unresolved.
+      evidence:
+        - kind: source-code
+          path: vllm_ascend/utils.py
+  learn: >
+    Framework semantic op → implementation selection, then a fork:
+
+        torch_npu / ACLNN              _C_ascend torch extension
+            vendor / CANN op               in-tree C++ binding
+            Host / kernel                  Host / kernel
+
+    Do not write Framework → torch.ops → ACLNN/csrc → kernel as one pipeline.
+    Which surface enable_custom_op() gates on A5, and whether _C_ascend
+    direct calls bypass it, is P1/P3 close-read — Scout does not conclude.
+    Do not preset knowledge/engineering-experience/framework-to-custom-op-contracts.md.
+    If evidence is enough after P1/P2, Knowledge or workflows/ — never cases/compute/.

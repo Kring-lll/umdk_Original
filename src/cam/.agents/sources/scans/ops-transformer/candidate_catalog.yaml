@@ -1,0 +1,820 @@
+# ops-transformer Scout catalog. YAML is the source of truth for this scan.
+# Extra fields vs CATLASS schema v2.1: relation_to_existing, scout scores,
+# variants, `line` (frozen-done | backlog). Do not run tools/build_catalog.py.
+# MoE line frozen 2026-08-21. Remaining candidates are ops-transformer backlog.
+
+schema_version: '2.1-ops-transformer-scout'
+source:
+  registry_ref: ops-transformer
+  commit: 9311b63bcd065b9779eb08a7d634e9463ee41ef1
+  branch: master
+  scan_path: /home/wangyibo/ops-transformer_bak
+  official_remote: https://gitcode.com/cann/ops-transformer.git
+  origin_on_scan_path: git@gitcode.com:wang_yibo/ops-transformer.git
+  moe_line: frozen
+  identity_note: >
+    Local origin is a personal fork on master. cann/ops-transformer was not fetched
+    this close-read. DeepEP A3 dirs are absent on this master (were Add-4-op only).
+  execution_schema: >
+    execution.task_type is the kernel launch class (aiv_only | mix | aic_only).
+    execution.engines is which engines actually work (vector | cube | communication).
+    MIX binary with empty AIC is still engines [vector].
+scoring:
+  axes: [engineering_novelty, cross_source_value, production_relevance, evidence_quality]
+  scale: 1-5
+  scout_rank: 3*novelty + 3*cross + 2*prod + 2*evidence
+  note: Sort by bucket then scout_rank desc. Uniqueness is not a score.
+
+candidates:
+
+# --- moe-line frozen-done ---
+
+- id: opsxf-moe-init-routing
+  name: MoE init-routing / token permute
+  status: curated
+  bucket: priority-curation
+  line: frozen-done
+  case_card: cases/compute/moe/ascend950-moe-local-permutation/
+  source_path:
+    kernel: moe/moe_init_routing_v3/
+    variants_root: moe/
+  category: compute
+  algorithm: moe-init-routing
+  hardware: [ascend950, a3, a2]
+  execution:
+    task_type: mix
+    engines: [vector]
+  memory_pattern: [irregular, gather, scatter]
+  pipeline_pattern: [copy-compute-copy]
+  communication_pattern: none
+  dtypes:
+    input: [fp16, bf16, fp32]
+    output: [fp16, bf16, int8]
+    accumulator: []
+    scale: []
+  shape_characteristics: tokens expanded by top-k; expert-major expanded_x; counts/prefix for GMM
+  variants:
+    - moe_init_routing_v3 (950; optional dynamic/MX quant; activeExpertRange)
+    - moe_init_routing_v2 (RegBase)
+    - moe_init_routing / moe_init_routing_quant*
+    - moe_token_permute* (aclnn alias → v2/v3 on 950)
+  scores:
+    engineering_novelty: 5
+    cross_source_value: 4
+    production_relevance: 5
+    evidence_quality: 4
+    scout_rank: 45
+  relation_to_existing:
+    - case: '60'
+      relation: extension
+      shared_mechanism: groupList / expert token counts consumed by grouped matmul
+      new_mechanism: sort+expand+scatter of tokens; permute API alias
+    - case: '53'
+      relation: extension
+      shared_mechanism: v3 headers mention MX-class quant on expanded_x (not GEMM)
+      new_mechanism: routing-side quant, not block-scale matmul
+  key_techniques:
+    - claim: Init-routing sorts expert_idx, builds expanded_row_idx, histograms expert counts, scatters tokens into expert-major expanded_x.
+      evidence:
+        - kind: design-doc
+          path: moe/moe_init_routing_v3/README.md
+        - kind: source-code
+          path: moe/moe_init_routing_v3/op_kernel/
+    - claim: On 950, MoeTokenPermute aclnn dispatches to MoeInitRoutingV3/V2; do not treat permute as a second kernel family.
+      evidence:
+        - kind: design-doc
+          path: moe/moe_token_permute/README.md
+        - kind: inference
+          note: CMake/op_api wrap confirmed in Scout; not a close-read of every alias.
+    - claim: UT+ST exist; no in-tree us/GB/s tables.
+      evidence:
+        - kind: test
+          path: moe/moe_init_routing_v3/tests/
+  learn: Produces the token layout GMM/EP consume. First Cube-adjacent MoE step without being a GEMM.
+  notes: MIX_AIV_1_0 on v2/v3. Pair with gating (upstream) and GMM (downstream).
+
+- id: opsxf-moe-distribute-ep
+  name: MoE EP dispatch / combine (moe_distribute)
+  status: curated
+  bucket: priority-curation
+  line: frozen-done
+  case_card: cases/compute-communication/moe/ascend950-moe-ep-dispatch-combine/
+  source_path:
+    dispatch: mc2/moe_distribute_dispatch_v2/
+    combine: mc2/moe_distribute_combine_v2/
+    common: mc2/common/
+  category: compute-communication
+  algorithm: moe-ep-alltoallv
+  hardware: [ascend950, a3, a2]
+  execution:
+    task_type: mix
+    engines: [vector, communication]
+  memory_pattern: [irregular, shared-window, workspace]
+  pipeline_pattern: [communication-compute-overlap]
+  communication_pattern: alltoall
+  dtypes:
+    input: [fp16, bf16, int8]
+    output: [fp16, bf16, int8]
+    accumulator: []
+    scale: []
+  shape_characteristics: EP AllToAllV of expanded tokens; optional quantMode 0-4 including MX
+  variants:
+    - dispatch/combine v2 (950 production pair; v3/v4/v5 aclnn in v2 dirs)
+    - v1 legacy
+    - v3 A3 low-latency
+    - setup/teardown async split
+    - combine_add_rms_norm
+  scores:
+    engineering_novelty: 5
+    cross_source_value: 3
+    production_relevance: 5
+    evidence_quality: 4
+    scout_rank: 42
+  relation_to_existing:
+    - case: null
+      relation: unrelated
+      shared_mechanism: none of 43/60/66/68/53/73 is communication
+      new_mechanism: HCCL/MTE window AllToAllV EP; pair dispatch+combine; not moe_re_routing
+  key_techniques:
+    - claim: moe_distribute_dispatch_v2 does optional quant then EP AllToAllV; TP in v2 README is reserved/deprecated.
+      evidence:
+        - kind: design-doc
+          path: mc2/moe_distribute_dispatch_v2/README.md
+        - kind: source-code
+          path: mc2/common/op_kernel/moe_distribute_base.h
+    - claim: Production EP stack is not DeepEP (dispatch_layout/normal). Different dirs, HW, and window type.
+      evidence:
+        - kind: source-code
+          path: mc2/dispatch_layout/
+        - kind: design-doc
+          path: mc2/dispatch_layout/README.md
+    - claim: UT on v2; dump_analysis for hangs. README HCCL_BUFFSIZE is design-doc, not benchmark.
+      evidence:
+        - kind: test
+          path: mc2/moe_distribute_dispatch_v2/tests/
+        - kind: design-doc
+          path: mc2/tools/dump_analysis/
+  learn: Tokens leave single-device MoE. Close-read dispatch and combine as one mechanism.
+  notes: 950 list includes v2 and v3. First close-read should be the v2 pair used with 950 GMM.
+
+- id: opsxf-gmm-swiglu-mx
+  name: Grouped Matmul + SwiGLU + quant (v2)
+  status: curated
+  bucket: priority-curation
+  line: frozen-done
+  case_card: cases/compute/grouped-gemm/ascend950-gmm-swiglu-mx-quant/
+  source_path:
+    op: gmm/grouped_matmul_swiglu_quant_v2/
+    infra: gmm/common/cgmct/
+  category: compute
+  algorithm: grouped-gemm-swiglu-quant
+  hardware: [ascend950, a3, a2]
+  execution:
+    task_type: mix
+    engines: [cube, vector]
+  memory_pattern: [continuous, reuse, workspace]
+  pipeline_pattern: [vector-cube-overlap]
+  communication_pattern: none
+  dtypes:
+    input: [fp8_e4m3, fp8_e4m3, int8]
+    output: [fp8_e4m3, int8]
+    accumulator: [fp32]
+    scale: [e8m0]
+  shape_characteristics: per-expert GMM then SwiGLU; 950 MX vs A2 int8/MSD
+  variants:
+    - arch35 MX + AIC→AIV builder (950)
+    - legacy A8W8/A8W4/A4W4 MIX (A2)
+    - grouped_matmul_swiglu_quant v1 (A2 only; not 950)
+  scores:
+    engineering_novelty: 3
+    cross_source_value: 5
+    production_relevance: 5
+    evidence_quality: 4
+    scout_rank: 42
+  relation_to_existing:
+    - case: '60'
+      relation: extension
+      shared_mechanism: grouped M, groupList, Cube GMM
+      new_mechanism: fused SwiGLU+quant epilogue in the same op
+    - case: '53'
+      relation: extension
+      shared_mechanism: MX block-scale GEMM (950 path)
+      new_mechanism: grouping + MIX epilogue; not Identity MX example
+    - case: '43'
+      relation: baseline
+      shared_mechanism: Cube GM→L1→L0→Mmad
+      new_mechanism: none worth a Case
+    - case: '73'
+      relation: extension
+      shared_mechanism: host TryFullLoadA in this op's tiling headers
+      new_mechanism: tiling admission, not FullLoadA kernel Case
+  key_techniques:
+    - claim: 950 path is MX GMM + SwiGLU + MX quant via cgmct; A2 path is int8/MSD MIX. Do not mix dtypes in one Case.
+      evidence:
+        - kind: design-doc
+          path: gmm/grouped_matmul_swiglu_quant_v2/README.md
+        - kind: source-code
+          path: gmm/grouped_matmul_swiglu_quant_v2/op_kernel/arch35/
+    - claim: CATLASS catalog 65 is the template cousin; shared Block ≠ new CATLASS Case and ≠ skip this production op.
+      evidence:
+        - kind: inference
+          note: catalog catlass-65-ascend950-mx-gmm-swiglu-quant; not a Case yet.
+    - claim: ST+CSV UT; README has no us table.
+      evidence:
+        - kind: test
+          path: gmm/grouped_matmul_swiglu_quant_v2/tests/
+  learn: The only Cube step in the recommended MoE chain. Extension of 60+53, not a 43 clone.
+  notes: Live 950 dtype must be pinned in close-read (e4m3 vs e5m2 vs int8).
+
+- id: opsxf-moe-finalize-routing
+  name: MoE finalize-routing / token unpermute
+  status: curated
+  bucket: priority-curation
+  line: frozen-done
+  case_card: cases/compute/moe/ascend950-moe-local-permutation/
+  source_path:
+    kernel: moe/moe_finalize_routing_v2/
+  category: compute
+  algorithm: moe-finalize-routing
+  hardware: [ascend950, a3, a2]
+  execution:
+    task_type: aiv_only
+    engines: [vector]
+  memory_pattern: [scatter, irregular]
+  pipeline_pattern: [copy-compute-copy]
+  communication_pattern: none
+  dtypes:
+    input: [fp16, bf16, fp32]
+    output: [fp16, bf16, fp32]
+    accumulator: [fp32]
+    scale: []
+  shape_characteristics: top-k weighted sum back to token order; dropPad modes
+  variants:
+    - moe_finalize_routing_v2 (950; AIV_ONLY)
+    - moe_finalize_routing v1 (no 950)
+    - moe_token_unpermute* alias → v2 on RegBase
+    - '*_grad'
+  scores:
+    engineering_novelty: 4
+    cross_source_value: 3
+    production_relevance: 5
+    evidence_quality: 4
+    scout_rank: 38
+  relation_to_existing:
+    - case: '60'
+      relation: unrelated
+      shared_mechanism: none (this is AIV combine, not GMM)
+      new_mechanism: weighted scatter-add using expanded_row_idx
+    - case: null
+      relation: alternative
+      shared_mechanism: CATLASS 71 fuses GMM+finalize; this op is the unfused combine
+      new_mechanism: standalone AIV finalize
+  key_techniques:
+    - claim: Finalize sums expert outputs by expanded_row_idx, scaled by gate probs, optional residual/bias.
+      evidence:
+        - kind: design-doc
+          path: moe/moe_finalize_routing_v2/README.md
+        - kind: source-code
+          path: moe/moe_finalize_routing_v2/op_kernel/
+    - claim: token_unpermute wraps v2 on 950. Inverse of init-routing, not of EP combine.
+      evidence:
+        - kind: inference
+          note: EP combine restores rank layout; finalize restores token order.
+  learn: Closes the on-device MoE loop. Do not merge with moe_distribute_combine.
+  notes: relation alternative to CATLASS 71 is catalog-only.
+
+- id: opsxf-moe-gating-topk
+  name: MoE gating Top-K
+  status: curated
+  bucket: priority-curation
+  line: frozen-done
+  folded_into: cases/compute/moe/ascend950-moe-local-permutation/
+  notes_case: Upstream contract of Case A. No standalone Case Card.
+  source_path:
+    kernel: moe/moe_gating_top_k/
+  category: compute
+  algorithm: moe-gating
+  hardware: [ascend950, a3, a2]
+  execution:
+    task_type: aiv_only
+    engines: [vector]
+  memory_pattern: [continuous]
+  pipeline_pattern: [copy-compute-copy]
+  communication_pattern: none
+  dtypes:
+    input: [fp16, bf16, fp32]
+    output: [fp16, bf16, fp32]
+    accumulator: []
+    scale: []
+  shape_characteristics: logits [T,E] → expert indices and weights; grouped top-k
+  variants:
+    - moe_gating_top_k (unified; 950)
+    - moe_gating_top_k_softmax / _v2
+    - moe_fused_topk (910 only)
+    - backward
+  scores:
+    engineering_novelty: 3
+    cross_source_value: 2
+    production_relevance: 5
+    evidence_quality: 4
+    scout_rank: 31
+  relation_to_existing:
+    - case: null
+      relation: unrelated
+      shared_mechanism: none
+      new_mechanism: router logits to ids/weights; no Cube
+  key_techniques:
+    - claim: Unified gating_top_k covers softmax/sigmoid/grouped selection; softmax_v2 feeds init_routing_v3.
+      evidence:
+        - kind: design-doc
+          path: moe/moe_gating_top_k/README.md
+        - kind: design-doc
+          path: moe/moe_init_routing_v3/README.md
+  learn: Upstream of Case A only. Folded; no standalone Card.
+  notes: SoftmaxV2 vs GatingTopK leftover is non-blocking.
+
+# --- backlog (MoE frozen) ---
+
+- id: opsxf-gmm-grouped-matmul
+  name: Production GroupedMatmul (plain)
+  status: candidate
+  bucket: deferred
+  line: backlog
+  source_path:
+    op: gmm/grouped_matmul/
+    infra: gmm/common/cgmct/
+    legacy: gmm/grouped_matmul/op_kernel/gmm_infra/
+  category: compute
+  algorithm: grouped-gemm
+  hardware: [ascend950, a3, a2]
+  execution:
+    task_type: mix
+    engines: [cube, vector]
+  memory_pattern: [continuous, reuse, double-buffer]
+  pipeline_pattern: [double-buffer, vector-cube-overlap]
+  communication_pattern: none
+  dtypes:
+    input: [fp16, bf16, fp32, int8, fp8_e4m3]
+    output: [fp16, bf16, fp32]
+    accumulator: [fp32]
+    scale: [e8m0]
+  shape_characteristics: M-group or K-group; groupList prefix or count; ND/NZ weight
+  variants:
+    - arch35 non-quant + ASWT
+    - MX Blaze / cgmct
+    - int8 / antiquant / MSD
+    - K-group SplitK tiling
+    - fast_kernel_launch <<<>>> demo (910b bf16; not this op)
+  scores:
+    engineering_novelty: 2
+    cross_source_value: 5
+    production_relevance: 5
+    evidence_quality: 4
+    scout_rank: 39
+  relation_to_existing:
+    - case: '60'
+      relation: extension
+      shared_mechanism: grouped M, prefix-sum groupList, Cube GMM
+      new_mechanism: production tiling-key zoo, quant, K-group
+    - case: '53'
+      relation: extension
+      shared_mechanism: MX GMM branches
+      new_mechanism: grouping + host checkers
+    - case: '73'
+      relation: extension
+      shared_mechanism: FullLoadA sum vs L1 in pre-tiling
+      new_mechanism: tiling knob, not example kernel
+    - case: '66'
+      relation: unrelated
+      shared_mechanism: cgmct StreamK type names exist
+      new_mechanism: live path unverified; not remainder-tile StreamK
+    - case: '68'
+      relation: unrelated
+      shared_mechanism: SplitKSingleX names
+      new_mechanism: K-group capacity split, not 68 workspace planes
+    - case: '43'
+      relation: baseline
+      shared_mechanism: Cube pingpong inside cgmct
+      new_mechanism: none
+  key_techniques:
+    - claim: Dual infra — gmm_infra Catlass-namespace (910B) vs gmm/common/cgmct (950). Same family, two stacks.
+      evidence:
+        - kind: source-code
+          path: gmm/grouped_matmul/op_kernel/gmm_infra/
+        - kind: source-code
+          path: gmm/common/cgmct/
+    - claim: Kernel FullLoadA admits full-K A when M*K + B_depth < L1_SIZE (sum, not half-L1).
+      evidence:
+        - kind: source-code
+          path: gmm/grouped_matmul/op_kernel/grouped_matmul_pre_tiling.h
+    - claim: ST includes V4 SplitK; that is not CATLASS 68 until close-read says so.
+      evidence:
+        - kind: test
+          path: gmm/grouped_matmul/tests/
+  learn: Production 60. Do not open a Case unless close-read finds a mechanism 60 lacks (likely quant/K-group only).
+  notes: Prefer as contrast while close-reading swiglu_v2, not as a standalone GEMM Case.
+
+- id: opsxf-mega-moe
+  name: MegaMoe fused EP FFN
+  status: accepted
+  bucket: priority-curation
+  line: frozen-done
+  case_card: cases/compute-communication/moe/ascend950-mega-moe-fused-ep-ffn/
+  source_path:
+    op: mc2/mega_moe/
+  category: compute-communication
+  algorithm: mega-moe-fusion
+  hardware: [ascend950]
+  execution:
+    task_type: mix
+    engines: [cube, vector, communication]
+  memory_pattern: [irregular, shared-window, workspace]
+  pipeline_pattern: [communication-compute-overlap, multi-stage]
+  communication_pattern: alltoall
+  dtypes:
+    input: [fp8_e4m3, fp8_e5m2]
+    output: [fp16, bf16]
+    accumulator: [fp32]
+    scale: [e8m0]
+  shape_characteristics: Dispatch + GMM1 + SwiGLU + GMM2 + Combine in one op; MX gs=32
+  variants: []
+  scores:
+    engineering_novelty: 4
+    cross_source_value: 5
+    production_relevance: 4
+    evidence_quality: 3
+    scout_rank: 41
+  relation_to_existing:
+    - case: '60'
+      relation: extension
+      shared_mechanism: grouped expert GEMM
+      new_mechanism: fused with EP comm in one kernel
+    - case: '53'
+      relation: extension
+      shared_mechanism: MXFP8 group-32
+      new_mechanism: two GMMs + SwiGLU + combine
+    - case: null
+      relation: unrelated
+      shared_mechanism: none of 66/68/73 established
+      new_mechanism: RDMA/peermem combine vs moe_distribute window
+  key_techniques:
+    - claim: README decomposes four stages; MX quant then GMM+SwiGLU then second GMM then weighted combine.
+      evidence:
+        - kind: design-doc
+          path: mc2/mega_moe/README.md
+    - claim: arch22 vendors Catlass templates; comm is not CATLASS.
+      evidence:
+        - kind: source-code
+          path: mc2/mega_moe/op_kernel/arch22/
+    - claim: UT present; 950-only. Accepted Case D; do not reopen as a GEMM walk.
+      evidence:
+        - kind: test
+          path: mc2/mega_moe/tests/
+  learn: Compressed B+C+GMM2. Close-read `sources/scans/ops-transformer/close_reads/mega_moe.md` vs split Knowledge. Not a fourth GEMM Case. Host tiling key hardcoded MTE.
+  notes: API-visible handoffs internalized; workspace/window still hold lifetime. Visibility semantics kept (two CrossRankSync).
+
+- id: opsxf-gmm-finalize-routing
+  name: GroupedMatmul + finalize routing (fused)
+  status: no-case
+  bucket: contrast-done
+  line: frozen-done
+  source_path:
+    op: gmm/grouped_matmul_finalize_routing/
+  category: compute
+  algorithm: gmm-finalize-routing
+  hardware: [ascend950, a2, a3]
+  execution:
+    task_type: mix
+    engines: [cube, vector]
+  memory_pattern: [scatter, workspace, irregular]
+  pipeline_pattern: [vector-cube-overlap]
+  communication_pattern: none
+  dtypes:
+    input: [int8, fp8_e4m3]
+    output: [fp16, bf16, fp32]
+    accumulator: [fp32]
+    scale: [e8m0]
+  shape_characteristics: GMM then rowIndex scatter-add (MoE combine math, single-device)
+  variants:
+    - 220 int8 MIX
+    - 310/arch35 MX cgmct
+  scores:
+    engineering_novelty: 3
+    cross_source_value: 4
+    production_relevance: 4
+    evidence_quality: 3
+    scout_rank: 35
+  relation_to_existing:
+    - case: '60'
+      relation: extension
+      shared_mechanism: grouped Cube GEMM
+      new_mechanism: fused AIV finalize/scatter
+    - case: '53'
+      relation: extension
+      shared_mechanism: MX path on 950
+      new_mechanism: fused routing epilogue
+  key_techniques:
+    - claim: Single-device MoE combine fused into GMM; not EP AllToAll.
+      evidence:
+        - kind: design-doc
+          path: gmm/grouped_matmul_finalize_routing/README.md
+    - claim: Cousin of CATLASS 71 catalog example.
+      evidence:
+        - kind: inference
+          note: catlass-71-ascend950-mx-gmm-finalize-routing
+  learn: Contrast done. Cousin of CATLASS 71. Absorb into 60/A/C; do not open a Case. Map is row_index[slot]→token, not Case A expanded_row_idx.
+
+- id: opsxf-fa-fused-infer
+  name: Fused infer attention (FIA)
+  status: no-case
+  bucket: contrast-done
+  line: attention-peer
+  notes: >
+    Contrast passed. 950 live is PFA/IFA arch35, not SplitFuse.
+    FA-pipeline peer; sparse_mode is mask geometry, not select_idx.
+    Do not open a Case. Do not call this a Sparse alternative.
+  source_path:
+    op: attention/fused_infer_attention_score/
+  category: compute
+  algorithm: flash-attention-infer
+  hardware: [ascend950, a3, a2]
+  execution:
+    task_type: mix
+    engines: [cube, vector]
+  memory_pattern: [continuous, irregular, workspace]
+  pipeline_pattern: [vector-cube-overlap, multi-stage]
+  communication_pattern: none
+  dtypes:
+    input: [fp16, bf16]
+    output: [fp16, bf16]
+    accumulator: [fp32]
+    scale: []
+  shape_characteristics: decode+prefill; paged KV; MLA keys exist as tiling variants
+  variants:
+    - FIA 950 primary
+    - incre_flash_attention / prompt_flash_attention (legacy; IFA ×950)
+  scores:
+    engineering_novelty: 4
+    cross_source_value: 3
+    production_relevance: 5
+    evidence_quality: 4
+    scout_rank: 39
+  relation_to_existing:
+    - case: ascend950-block-sparse-paged-attention
+      relation: peer
+      shared_mechanism: FA pipeline + optional logical→physical block_table
+      new_mechanism: none as a Case; KV-domain is mask-truncated S2
+    - case: null
+      relation: peer
+      shared_mechanism: CATLASS 49 contiguous kvSeq FA infer
+      new_mechanism: production tiling keys / PFA-IFA family; still no Case
+  key_techniques:
+    - claim: 950 infer path is FIA, not IFA. MIX 1:2 default; some MLA keys 1:1.
+      evidence:
+        - kind: design-doc
+          path: attention/fused_infer_attention_score/README.md
+        - kind: design-doc
+          path: docs/zh/ascend950_op_list.md
+    - claim: UT+ST; ST perf not_key is not a benchmark.
+      evidence:
+        - kind: test
+          path: attention/fused_infer_attention_score/tests/
+  learn: Contrast done vs Sparse Case and CATLASS 49. Peer of FA-pipeline family. No Case.
+
+# --- knowledge-first ---
+
+- id: opsxf-cgmct-infra
+  name: cgmct / gmm_infra production Cube layer
+  status: candidate
+  bucket: deferred
+  line: backlog
+  source_path:
+    cgmct: gmm/common/cgmct/
+    gmm_infra: gmm/grouped_matmul/op_kernel/gmm_infra/
+    mc2_mm: mc2/common/op_kernel/mc2_mat_mul_asw_kernel.h
+  category: compute
+  algorithm: cube-infra
+  hardware: [ascend950, a2]
+  execution:
+    task_type: mix
+    engines: [cube]
+  memory_pattern: [reuse, double-buffer]
+  pipeline_pattern: [double-buffer]
+  communication_pattern: none
+  dtypes:
+    input: []
+    output: []
+    accumulator: []
+    scale: []
+  shape_characteristics: shared templates, not a user op
+  variants:
+    - BlockSchedulerGmmAswtWithTailSplit
+    - block_mmad_mx
+    - KernelMultiBlockStreamK / BuiltInStreamKScheduler (live unknown)
+    - FullLoadA tiling helpers
+    - mc2_mat_mul_asw_*
+  scores:
+    engineering_novelty: 2
+    cross_source_value: 5
+    production_relevance: 4
+    evidence_quality: 3
+    scout_rank: 35
+  relation_to_existing:
+    - case: '43'
+      relation: extension
+      shared_mechanism: Kernel/Block/Tile layering
+      new_mechanism: aclnn tiling keys, two infra forks
+    - case: '60'
+      relation: extension
+      shared_mechanism: ASWT grouped scheduler
+      new_mechanism: production composition
+    - case: '53'
+      relation: extension
+      shared_mechanism: mx block_mmad
+      new_mechanism: none
+    - case: '73'
+      relation: extension
+      shared_mechanism: FullLoadA L1 sum check
+      new_mechanism: used as tiling, not as 73 kernel
+    - case: '66'
+      relation: unrelated
+      shared_mechanism: StreamK type names in headers
+      new_mechanism: unverified live path
+  key_techniques:
+    - claim: cgmct is the 950 shared GMM layer. gmm_infra is the 910B Catlass-namespace fork. Do not Case the headers alone.
+      evidence:
+        - kind: source-code
+          path: gmm/common/cgmct/policy/dispatch_policy.h
+        - kind: source-code
+          path: gmm/common/cgmct/block/block_scheduler_policy.h
+  learn: Extract how 43/60/53/73 names survive in production. No Case until a live op path is pinned.
+  notes: Natural home for a later knowledge note; not v0.1 Case.
+
+# --- deferred / backlog ---
+
+- id: opsxf-mc2-matmul-comm
+  name: Matmul–collective fusion (AG/AR/RS/A2A)
+  status: case-accepted
+  bucket: live-teaching
+  line: mc2
+  source_path:
+    family: mc2/
+    scout: sources/scans/ops-transformer/mc2/
+    do_not_use_as_950_sot: examples/mc2/all_gather_add/
+  category: compute-communication
+  algorithm: matmul-collective
+  hardware: [ascend950, a3, a2]
+  execution:
+    task_type: mix
+    engines: [cube, vector, communication]
+  memory_pattern: [continuous, workspace]
+  pipeline_pattern: [communication-compute-overlap]
+  communication_pattern: allgather
+  dtypes:
+    input: [fp16, bf16]
+    output: [fp16, bf16]
+    accumulator: [fp32]
+    scale: []
+  shape_characteristics: one calc two comm tiling; order AG→MM vs MM→AR vs A2A→MM
+  variants:
+    - all_gather_matmul / v2
+    - matmul_all_reduce (+ add_rms_norm)
+    - matmul_reduce_scatter / v2
+    - allto_all_matmul / matmul_allto_all
+    - grouped_mat_mul_allto_allv / allto_allv_grouped_mat_mul
+  scores:
+    engineering_novelty: 5
+    cross_source_value: 2
+    production_relevance: 4
+    evidence_quality: 3
+    scout_rank: 35
+  relation_to_existing:
+    - case: '43'
+      relation: extension
+      shared_mechanism: Cube matmul templates
+      new_mechanism: HCCL overlap; not a GEMM Case
+    - case: null
+      relation: unrelated
+      shared_mechanism: none of 60/66/68/53/73 is collective
+      new_mechanism: MC2 pipeline_builder / comm_stage
+  key_techniques:
+    - claim: 950 matmul-collective is a new family vs GEMM/EP Cases; Scout in sources/scans/ops-transformer/mc2/.
+      evidence:
+        - kind: source-code
+          path: mc2/common/op_kernel/mc2_templates/
+        - kind: source-code
+          path: mc2/common/op_kernel/mc2_mat_mul_asw_kernel.h
+  learn: RS Case accepted. M2 Case accepted. No Knowledge. Do not treat all_gather_add as 950 SoT.
+  notes: >
+    M1: cases/compute-communication/mc2/ascend950-matmul-native-reduce-scatter/.
+    M2: cases/compute-communication/mc2/ascend950-alltoall-matmul-pipeline/.
+    Commit = progress; Wait = consumer gate. AR/M3 deferred.
+
+- id: opsxf-deepep-a3
+  name: DeepEP A3 dispatch/combine stack
+  status: candidate
+  bucket: deferred
+  line: backlog
+  source_path:
+    layout: mc2/dispatch_layout/
+    dispatch: mc2/dispatch_normal/
+    combine: mc2/combine_normal/
+  category: compute-communication
+  algorithm: deepep
+  hardware: [a3]
+  execution:
+    task_type: mix
+    engines: [vector, communication]
+  memory_pattern: [shared-window, irregular]
+  pipeline_pattern: [communication-compute-overlap]
+  communication_pattern: dispatch
+  dtypes:
+    input: [fp16, bf16]
+    output: [fp16, bf16]
+    accumulator: []
+    scale: []
+  shape_characteristics: layout → notify → dispatch_normal → combine_normal
+  variants:
+    - added on Add-4-op HEAD
+  scores:
+    engineering_novelty: 4
+    cross_source_value: 2
+    production_relevance: 2
+    evidence_quality: 2
+    scout_rank: 24
+  relation_to_existing:
+    - case: null
+      relation: unrelated
+      shared_mechanism: none
+      new_mechanism: MTE DeepEP vs moe_distribute AllToAllV
+  key_techniques:
+    - claim: Different stack from moe_distribute_*. A3-only. This-branch extra vs typical CANN tag.
+      evidence:
+        - kind: design-doc
+          path: mc2/dispatch_layout/README.md
+        - kind: source-code
+          path: mc2/notify_dispatch/
+  learn: Do not close-read in the 950 MoE batch.
+  notes: This checkout's DeepEP dirs are A3/Add-4-op. Live 950 DeepEP is in sgl-kernel-npu (source 3).
+
+- id: opsxf-moe-routing-map
+  name: MoE permute/unpermute with routing map
+  status: candidate
+  bucket: deferred
+  line: backlog
+  source_path:
+    permute: moe/moe_token_permute_with_routing_map/
+    unpermute: moe/moe_token_unpermute_with_routing_map/
+  category: compute
+  algorithm: moe-routing-map
+  hardware: [ascend950, a3, a2]
+  execution:
+    task_type: aiv_only
+    engines: [vector]
+  memory_pattern: [gather, scatter, irregular]
+  pipeline_pattern: [copy-compute-copy]
+  communication_pattern: none
+  dtypes:
+    input: [fp16, bf16, fp32]
+    output: [fp16, bf16, fp32]
+    accumulator: []
+    scale: []
+  shape_characteristics: dense expert×token mask instead of top-k indices
+  variants:
+    - with_ep range-slice (no 950)
+    - moe_re_routing (post-AllToAll local shuffle)
+  scores:
+    engineering_novelty: 3
+    cross_source_value: 2
+    production_relevance: 3
+    evidence_quality: 3
+    scout_rank: 25
+  relation_to_existing:
+    - case: null
+      relation: unrelated
+      shared_mechanism: none of the six
+      new_mechanism: map encoding vs top-k index encoding
+  key_techniques:
+    - claim: Parallel to init/finalize, different routing tensor. Not required for first chain.
+      evidence:
+        - kind: design-doc
+          path: moe/moe_token_permute_with_routing_map/README.md
+  learn: Sibling encoding. Close-read only if MegaMoE/map APIs need it.
+
+rejected:
+  - id: opsxf-plain-ffn
+    reason: ffn/ffn README ×950; expert compute is gmm/
+  - id: opsxf-token-permute-as-own-case
+    reason: alias of init_routing on 950
+  - id: opsxf-second-basic-matmul
+    reason: cgmct reuses 43; no Case
+  - id: opsxf-gmm-as-streamk-case
+    reason: names exist; mechanism ≠ 66/68 until live-path close-read
+  - id: opsxf-gmm-as-fullloada-case
+    reason: FullLoadA is tiling admission; 73 already teaches the Agent trap
+  - id: opsxf-nsa-floyd-delta
+    reason: ×950 or unrelated train algos
+  - id: opsxf-experimental-default
+    reason: experimental/ not default Case source
+  - id: opsxf-quant-gmm-dequant
+    reason: 310P aclnn stub

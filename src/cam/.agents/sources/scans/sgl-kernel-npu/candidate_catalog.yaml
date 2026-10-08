@@ -1,0 +1,636 @@
+# sgl-kernel-npu Scout catalog. YAML is the source of truth for this scan.
+# Extra fields vs CATLASS schema v2.1: relation_to_existing, scout scores,
+# variants. Do not run tools/build_catalog.py on this file.
+# Does NOT modify cases/ knowledge/ skills/.
+
+schema_version: '2.1-sgl-kernel-npu-scout'
+source:
+  registry_ref: sgl-kernel-npu
+  commit: 8d76a8da75315ae9add5cfd2458b8028289f1ada
+  branch: main
+  scan_path: /home/wangyibo/sgl-kernel-npu
+  official_remote: https://github.com/sgl-project/sgl-kernel-npu.git
+  origin_on_scan_path: https://github.com/wangyibo1005/sgl-kernel-npu.git
+  identity_note: >
+    Local origin is a personal fork on main. Scan commit is
+    8d76a8da75315ae9add5cfd2458b8028289f1ada. Sparse Attention Case evidence
+    paths were verified on official sgl-project/sgl-kernel-npu main at
+    ee334193e5278d7b3a64afcc2e3ee5243133c4a0 (byte-identical to the scan for
+    those three files). Whole-tree fetch was not done. Submodules
+    third_party/catlass and third_party/pto-isa are not initialized.
+    License MIT (not CANN-OSLA).
+  execution_schema: >
+    execution.task_type is the kernel launch class (aiv_only | mix | aic_only).
+    execution.engines is which engines actually work (vector | cube | communication).
+    MIX binary with empty AIC is still engines [vector].
+  communication_note: >
+    communication_pattern is the API/job name (often alltoall). The kernel
+    mechanism is MTE-window dest-push unless a close-read says otherwise.
+    DeepEP Buffer strategies (HCCS/RDMA/low-latency) are serving packaging,
+    not a new window protocol. Do not score strategy switch as engineering_novelty.
+scoring:
+  axes: [engineering_novelty, cross_source_value, production_relevance, evidence_quality]
+  scale: 1-5
+  scout_rank: 3*novelty + 3*cross + 2*prod + 2*evidence
+  note: >
+    File order = bucket then scout_rank desc. Work order is scan_notes
+    (DeepEP contrast first, then sparse), which is not scout_rank order.
+  existing_cases: >
+    CATLASS 43/60/66/68/53/73 plus ops-transformer MoE A/B/C/D (MegaMoe).
+    Do not re-teach split-pipeline Layer 1 or MegaMoe Layer 2; use them as baseline.
+
+candidates:
+
+# --- priority-curation (file order = scout_rank desc; work order in scan_notes) ---
+
+- id: sgl-deepep-fused-moe-a5
+  name: DeepEP fused_deep_moe (A5 / 950)
+  status: accepted
+  bucket: priority-curation
+  case_decision: none
+  close_read: sources/scans/sgl-kernel-npu/close_reads/fused_deep_moe_a5_vs_megamoe.md
+  verdict: sources/scans/sgl-kernel-npu/close_reads/deepep_a5_cross_source_verdict.md
+  source_path:
+    kernel_entry: csrc/deepep/ops/op_kernel/fused_deep_moe.cpp
+    a5: csrc/deepep/ops/op_kernel/fused_deep_moe_a5/
+    host: csrc/deepep/ops/op_host/fused_deep_moe_a5/
+    doc: python/deep_ep/doc/FUSED_DEEP_MOE.md
+  category: compute-communication
+  algorithm: fused-ep-ffn
+  hardware: [ascend950, a3]
+  execution:
+    task_type: mix
+    engines: [cube, vector, communication]
+  memory_pattern: [irregular, shared-window, workspace]
+  pipeline_pattern: [communication-compute-overlap, multi-stage]
+  communication_pattern: alltoall
+  communication_job: alltoall
+  communication_mechanism: mte-window-dest-push
+  dtypes:
+    input: [bf16, fp16, fp8_e4m3]
+    output: [bf16, fp16]
+    accumulator: [fp32]
+    scale: []
+  shape_characteristics: >
+    x [bs,H] + topk_idx/weights → dispatch + GMM1 + SwiGLU/quant + GMM2 + combine
+    in one op. A5: bs[1,256], H[512,7168], experts divisible by EP; w8a8/w4a4.
+  variants:
+    - A5 fused_deep_moe_a5 (DAV_C310 / ascend950; includes system moe_distribute_base.h)
+    - A3 fused_deep_moe.h MIX 1C2V (not the 950 SoT)
+  scores:
+    engineering_novelty: 4
+    cross_source_value: 5
+    production_relevance: 5
+    evidence_quality: 4
+    scout_rank: 45
+  relation_to_existing:
+    - case: 'D'
+      relation: alternative
+      shared_mechanism: fused Dispatch + GMM1 + SwiGLU + GMM2 + Combine; MX/quant expert FFN
+      new_mechanism: none — Python Buffer / A5 host contract / shared-expert flags are packaging
+    - case: 'C'
+      relation: extension
+      shared_mechanism: grouped expert GEMM + SwiGLU + quant
+      new_mechanism: fused with EP inside one kernel (same class as MegaMoe, not a new GEMM Case)
+    - case: '60'
+      relation: extension
+      shared_mechanism: grouped M / expert rows
+      new_mechanism: none that warrants a fourth GEMM Case
+    - case: '53'
+      relation: extension
+      shared_mechanism: low-precision expert GEMM (A5 w8a8/w4a4; MX in kernel tree)
+      new_mechanism: EP fusion, not Identity MX
+  key_techniques:
+    - claim: fused_deep_moe is hyper-fusion of Dispatch + 2×GMM + Combine; A5 path is not the A3 kernel.
+      evidence:
+        - kind: design-doc
+          path: python/deep_ep/doc/FUSED_DEEP_MOE.md
+        - kind: source-code
+          path: csrc/deepep/ops/op_kernel/fused_deep_moe.cpp
+    - claim: 950 fused build includes CANN ops-transformer moe_distribute_base.h and CATLASS_ARCH=3510.
+      evidence:
+        - kind: source-code
+          path: csrc/deepep/ops/op_kernel/CMakeLists.txt
+    - claim: A5 Python tests exist; homepage DeepEP tables are repo-level benchmark, not this op’s msprof.
+      evidence:
+        - kind: test
+          path: tests/python/deepep/test_fused_deep_moe_a5.py
+        - kind: benchmark
+          path: README.md
+  learn: Case D alternative. Layer 2 Q1–Q3 still classify it (push vs pull is B/D morphology). No new Case, no new Knowledge.
+  notes: Pin A5/C310. Buffer FuseMode 1 “InitRouting” docstring is wrong.
+
+- id: sgl-sparse-attention-score
+  name: Sparse block attention (arch35)
+  status: accepted
+  bucket: priority-curation
+  close_read: sources/scans/sgl-kernel-npu/close_reads/sparse_attention_score_arch35.md
+  live_path: sources/scans/sgl-kernel-npu/close_reads/sparse_attention_score_arch35_live_path.md
+  case_decision: accepted
+  case_card: cases/compute/attention/ascend950-block-sparse-paged-attention/
+  upstream_presence:
+    verified: true
+    repo: sgl-project/sgl-kernel-npu
+    branch: main
+    commit: ee334193e5278d7b3a64afcc2e3ee5243133c4a0
+    scanned_fork_commit: 8d76a8da75315ae9add5cfd2458b8028289f1ada
+    paths_verified:
+      - csrc/sparse_attention_score/op_host/tiling/sparse_attention_score_tiling.cpp
+      - csrc/sparse_attention_score/op_kernel/arch35/sparse_attention_score_kernel_arch35.h
+      - csrc/sparse_attention_score/op_kernel/attn_infra/gemm/block/block_mmad_qk_arch35_ABf16_C_to_UB.hpp
+  source_path:
+    kernel: csrc/sparse_attention_score/op_kernel/
+    arch35: csrc/sparse_attention_score/op_kernel/arch35/
+    doc: csrc/sparse_attention_score/README.md
+  category: compute
+  algorithm: sparse-paged-attention
+  hardware: [ascend950, a3, a2]
+  execution:
+    task_type: mix
+    engines: [cube, vector]
+  memory_pattern: [irregular, gather, workspace]
+  pipeline_pattern: [vector-cube-overlap]
+  communication_pattern: none
+  dtypes:
+    input: [fp16, bf16, fp8_e4m3]
+    output: [fp16, bf16]
+    accumulator: [fp32]
+    scale: []
+  shape_characteristics: TND query + paged KV blocks + select_idx top-k blocks; MiniMax-M3 post-indexer
+  variants:
+    - arch35 (910_93 / 950 tiling code 4)
+    - arch22 (910B)
+    - full-quant arch35 path
+  scores:
+    engineering_novelty: 5
+    cross_source_value: 4
+    production_relevance: 4
+    evidence_quality: 4
+    scout_rank: 43
+  relation_to_existing:
+    - case: ascend950-block-sparse-paged-attention
+      relation: this-source-case
+      shared_mechanism: none of 43/60/66/68/53/73/A–D is sparse paged FA
+      new_mechanism: block-sparse paged attention after an indexer; Cube+online softmax
+    - case: '43'
+      relation: unrelated
+      shared_mechanism: Cube GEMM tiles exist inside attention — not a Basic Matmul Case
+      new_mechanism: FA dataflow, not MN GEMM teaching
+  key_techniques:
+    - claim: Native 2-layer kernel replaces Triton split-K; indexer is out of this op (Triton in sglang).
+      evidence:
+        - kind: design-doc
+          path: csrc/sparse_attention_score/README.md
+        - kind: source-code
+          path: csrc/sparse_attention_score/op_kernel/arch35/sparse_attention_score_kernel_arch35.h
+    - claim: Built on 950 (not gated by SGL_KERNEL_ENABLE_A3_ONLY_OPS). README example SOC is 910_93.
+      evidence:
+        - kind: source-code
+          path: csrc/CMakeLists.txt
+        - kind: design-doc
+          path: csrc/sparse_attention_score/README.md
+  learn: First sgl-kernel-npu family not eaten by A–D. Sparsity is the outer KV-block loop; select_idx is logical block id. Canonical Regular bf16 10002; fp16/fp8 are siblings on one Case. Accepted against sgl-project main ee334193; no Knowledge yet.
+  notes: >
+    Lightning indexer is a separate A3-only op; do not merge into this candidate.
+    Case Card: cases/compute/attention/ascend950-block-sparse-paged-attention/
+    status accepted. Host 10001 fall-through is not a supported-dtype contract.
+
+- id: sgl-deepep-ep-dispatch-combine
+  name: DeepEP split dispatch / combine (A5 headers)
+  status: accepted
+  bucket: priority-curation
+  case_decision: none
+  close_read: sources/scans/sgl-kernel-npu/close_reads/deepep_a5_split_vs_case_b.md
+  verdict: sources/scans/sgl-kernel-npu/close_reads/deepep_a5_cross_source_verdict.md
+  source_path:
+    dispatch_a5: csrc/deepep/ops/op_kernel/moe_distribute_dispatch_v2_a5.h
+    combine_a5: csrc/deepep/ops/op_kernel/moe_distribute_combine_v2_a5.h
+    normal_a5: csrc/deepep/ops/op_kernel/cam_moe_dispatch_normal_a5.h
+    python: python/deep_ep/doc/NORMAL_API.md
+  category: compute-communication
+  algorithm: moe-ep-alltoallv
+  hardware: [ascend950, a3, a2]
+  execution:
+    task_type: mix
+    engines: [vector, communication]
+  memory_pattern: [irregular, shared-window, workspace]
+  pipeline_pattern: [communication-compute-overlap]
+  communication_pattern: alltoall
+  communication_job: alltoall
+  communication_mechanism: mte-window-dest-push
+  dtypes:
+    input: [bf16, fp16, int8, fp8_e4m3]
+    output: [bf16, fp16, int8]
+    accumulator: []
+    scale: []
+  shape_characteristics: Buffer.dispatch/combine; token-major x + topk; A3/A5 normal vs A2 ops2
+  variants:
+    - A5 moe_distribute_v2_a5 + cam_moe_normal_a5
+    - A3 moe_distribute_v2.h / cam_moe_normal
+    - A2 ops2 + LOW_LATENCY / A2_DEEPEP.md
+  scores:
+    engineering_novelty: 3
+    cross_source_value: 5
+    production_relevance: 5
+    evidence_quality: 4
+    scout_rank: 42
+  relation_to_existing:
+    - case: 'B'
+      relation: alternative
+      shared_mechanism: EP dispatch+combine routing loop; Combine restores token-major; not Finalize
+      new_mechanism: none — Buffer/handle and HCCS/RDMA/low-latency are serving packaging
+    - case: 'A'
+      relation: unrelated
+      shared_mechanism: none — InitRouting is not Dispatch’s predecessor
+      new_mechanism: DeepEP consumes token-major + expert ids (same as Case B)
+  key_techniques:
+    - claim: Python Buffer.dispatch/combine is the production EP pair; docs cover intra- and inter-node.
+      evidence:
+        - kind: design-doc
+          path: python/deep_ep/doc/NORMAL_API.md
+        - kind: source-code
+          path: csrc/deepep/ops/op_kernel/moe_distribute_dispatch_v2_a5.h
+    - claim: Tests cover dispatch/combine and vs-alltoall; low-latency is a decode variant, not a second 950 mechanism until close-read.
+      evidence:
+        - kind: test
+          path: tests/python/deepep/test_combine.py
+        - kind: test
+          path: tests/python/deepep/test_low_latency.py
+  learn: Case B alternative. expandIdx = assist_info triples. No new Case.
+  notes: Contrast done. Do not reopen as a MoE chain.
+
+# --- cross-source-review ---
+
+- id: sgl-deepep-dispatch-ffn-combine
+  name: DispatchFFNCombine fused (InitRouting inside)
+  status: candidate
+  bucket: cross-source-review
+  source_path:
+    kernel: csrc/deepep/ops/op_kernel/dispatch_ffn_combine.cpp
+    routing: csrc/deepep/ops/op_kernel/dispatch_ffn_combine_kernel/moe_init_routing_quant_v2/
+  category: compute-communication
+  algorithm: fused-init-ep-ffn
+  hardware: [a3]
+  execution:
+    task_type: mix
+    engines: [cube, vector, communication]
+  memory_pattern: [irregular, workspace]
+  pipeline_pattern: [multi-stage]
+  communication_pattern: alltoall
+  dtypes:
+    input: [bf16]
+    output: [bf16]
+    accumulator: [fp32]
+    scale: []
+  shape_characteristics: FuseMode=2; MoeInitRoutingQuantV2 + AllToAll + GMM + Combine
+  variants: []
+  scores:
+    engineering_novelty: 4
+    cross_source_value: 4
+    production_relevance: 2
+    evidence_quality: 3
+    scout_rank: 34
+  relation_to_existing:
+    - case: 'A'
+      relation: extension
+      shared_mechanism: InitRouting-style permute inside the fused kernel
+      new_mechanism: fused with EP+FFN — different routing loop packaging than split A or B
+    - case: 'D'
+      relation: sibling
+      shared_mechanism: fused EP+FFN
+      new_mechanism: includes InitRouting; 950 CMake skips this op
+  key_techniques:
+    - claim: Documented as FuseMode.DISPATCH_FFN_COMBINE; 950 sets DEEPEP_SKIP_DISPATCH_FFN_COMBINE.
+      evidence:
+        - kind: design-doc
+          path: python/deep_ep/doc/FUSED_DEEP_MOE.md
+        - kind: source-code
+          path: csrc/deepep/ops/op_kernel/CMakeLists.txt
+        - kind: test
+          path: tests/python/deepep/test_dispatch_ffn_combine.py
+  learn: Interesting fusion of Case A’s map into MegaMoe-class kernel — but not 950 live. Do not close-read first.
+  notes: A3/backlog relative to Weaver 950-first.
+
+- id: sgl-catlass-wrappers
+  name: SGLang CATLASS torch.ops wrappers
+  status: candidate
+  bucket: cross-source-review
+  source_path:
+    basic: csrc/catlass/
+    third_party: third_party/catlass
+  category: compute
+  algorithm: gemm-wrapper
+  hardware: [ascend950, a3]
+  execution:
+    task_type: mix
+    engines: [cube, vector]
+  memory_pattern: [continuous, double-buffer]
+  pipeline_pattern: [double-buffer]
+  communication_pattern: none
+  dtypes:
+    input: [fp16, bf16, fp32, fp8_e4m3]
+    output: [fp16, bf16, fp32]
+    accumulator: [fp32]
+    scale: []
+  shape_characteristics: ND matmul; FP8 GMM/matmul A3-only in this CMake
+  variants:
+    - catlass_matmul_basic (950 allowed)
+    - catlass_gmm_fp8 / catlass_matmul_fp8 (A3-only)
+  scores:
+    engineering_novelty: 1
+    cross_source_value: 3
+    production_relevance: 2
+    evidence_quality: 3
+    scout_rank: 19
+  relation_to_existing:
+    - case: '43'
+      relation: duplicate
+      shared_mechanism: CATLASS basic matmul
+      new_mechanism: PyTorch binding only
+    - case: '60'
+      relation: sibling
+      shared_mechanism: GMM wrapper name on A3 fp8 path
+      new_mechanism: none proven on 950 (fp8 GMM not in 950 CMake)
+  key_techniques:
+    - claim: Wrappers call CATLASS templates; NZ format_mode unimplemented on basic.
+      evidence:
+        - kind: design-doc
+          path: csrc/catlass/README.md
+        - kind: test
+          path: tests/python/sgl_kernel_npu/test_catlass_matmul_basic.py
+  learn: Knowledge-only. Do not open a Case.
+  notes: Submodule not initialized on this checkout.
+
+# --- deferred ---
+
+- id: sgl-lightning-indexer
+  name: Lightning indexer (sparse Top-K)
+  status: candidate
+  bucket: deferred
+  source_path:
+    op: csrc/lightning_indexer/
+  category: compute
+  algorithm: sparse-indexer
+  hardware: [a3]
+  execution:
+    task_type: mix
+    engines: [cube, vector]
+  memory_pattern: [irregular]
+  pipeline_pattern: [vector-cube-overlap]
+  communication_pattern: none
+  dtypes:
+    input: [fp16, bf16]
+    output: [int32]
+    accumulator: []
+    scale: []
+  shape_characteristics: KV-block scores → top-k indices for sparse attention
+  variants: []
+  scores:
+    engineering_novelty: 4
+    cross_source_value: 3
+    production_relevance: 2
+    evidence_quality: 3
+    scout_rank: 31
+  relation_to_existing:
+    - case: null
+      relation: complement
+      shared_mechanism: producer of select_idx for sparse_attention_score
+      new_mechanism: indexer kernel; MiniMax path in sglang may still use Triton
+  key_techniques:
+    - claim: A3-only host/kernel; README in-tree.
+      evidence:
+        - kind: design-doc
+          path: csrc/lightning_indexer/README.md
+        - kind: test
+          path: tests/python/sgl_kernel_npu/test_lightning_indexer.py
+  learn: Pair with sparse_attention_score only if 950 indexer path is proven.
+  notes: 950 CMake off.
+
+- id: sgl-mla-preprocess
+  name: MLA preprocess fusion
+  status: candidate
+  bucket: deferred
+  source_path:
+    op: csrc/mla_preprocess/
+  category: compute
+  algorithm: mla-prolog
+  hardware: [a3]
+  execution:
+    task_type: mix
+    engines: [cube, vector]
+  memory_pattern: [continuous, workspace]
+  pipeline_pattern: [multi-stage]
+  communication_pattern: none
+  dtypes:
+    input: [fp16, bf16]
+    output: [fp16, bf16]
+    accumulator: []
+    scale: []
+  shape_characteristics: RMSNorm → dequant → MatMul → RoPE → ReshapeAndCache
+  variants: []
+  scores:
+    engineering_novelty: 4
+    cross_source_value: 3
+    production_relevance: 2
+    evidence_quality: 3
+    scout_rank: 31
+  relation_to_existing:
+    - case: null
+      relation: unrelated
+      shared_mechanism: CATLASS 19 / ops-transformer mla_prolog are catalog-only
+      new_mechanism: SGLang fused prolog; 950 CMake off
+  key_techniques:
+    - claim: A3-only in csrc/CMakeLists.txt; tests exist.
+      evidence:
+        - kind: design-doc
+          path: csrc/mla_preprocess/README.md
+        - kind: test
+          path: tests/python/sgl_kernel_npu/test_mla_preprocess.py
+  learn: Later with FIA/MLA backlog, not with MoE.
+  notes: SGL_KERNEL_ENABLE_A3_ONLY_OPS.
+
+- id: sgl-attn-laser-ada
+  name: Laser / Ada block-sparse attention tree
+  status: candidate
+  bucket: deferred
+  source_path:
+    tree: csrc/attentions/csrc/ops/
+  category: compute
+  algorithm: flash-attention-variant
+  hardware: [a3, a2]
+  execution:
+    task_type: mix
+    engines: [cube, vector]
+  memory_pattern: [continuous, workspace]
+  pipeline_pattern: [vector-cube-overlap]
+  communication_pattern: none
+  dtypes:
+    input: [fp16, bf16]
+    output: [fp16, bf16]
+    accumulator: [fp32]
+    scale: []
+  shape_characteristics: laser_attention / ada_block_sparse_attention / sparse_block_estimate
+  variants:
+    - laser_attention
+    - ada_block_sparse_attention
+    - sparse_block_estimate
+  scores:
+    engineering_novelty: 4
+    cross_source_value: 3
+    production_relevance: 2
+    evidence_quality: 2
+    scout_rank: 29
+  relation_to_existing:
+    - case: null
+      relation: alternative
+      shared_mechanism: FA-class Cube+Vector
+      new_mechanism: not 950-first; FIA backlog is the ops-transformer counterpart
+  key_techniques:
+    - claim: Separate attentions/ tree with CubeForward/VectorForward; not in 950 A3_ONLY gate list as sgl_kernel_npu default.
+      evidence:
+        - kind: source-code
+          path: csrc/attentions/csrc/ops/laser_attention/op_kernel/laser_attention.cpp
+  learn: Do not Case as 43. Defer with FIA.
+  notes: Inventory family only.
+
+- id: sgl-fla-mamba
+  name: FLA GDN / causal conv1d (Mamba)
+  status: candidate
+  bucket: deferred
+  source_path:
+    gdn: csrc/recurrent_gated_delta_rule/
+    chunk: csrc/mega_chunk_gdn/
+    conv: csrc/causal_conv1d/
+  category: compute
+  algorithm: linear-attention-ssm
+  hardware: [ascend950, a3]
+  execution:
+    task_type: mix
+    engines: [vector, cube]
+  memory_pattern: [continuous, workspace]
+  pipeline_pattern: [multi-stage]
+  communication_pattern: none
+  dtypes:
+    input: [fp16, bf16]
+    output: [fp16, bf16]
+    accumulator: []
+    scale: []
+  shape_characteristics: gated delta rule / chunk GDN / causal conv1d
+  variants:
+    - recurrent_gated_delta_rule (A3-only)
+    - mega_chunk_gdn (A3-only)
+    - causal_conv1d vs causal_conv1d_update (update stays on 950)
+  scores:
+    engineering_novelty: 4
+    cross_source_value: 2
+    production_relevance: 2
+    evidence_quality: 3
+    scout_rank: 28
+  relation_to_existing:
+    - case: null
+      relation: unrelated
+      shared_mechanism: none
+      new_mechanism: SSM / linear attention; not Transformer MoE
+  key_techniques:
+    - claim: Prefill GDN/FLA gated A3-only; conv1d_update remains on 950.
+      evidence:
+        - kind: source-code
+          path: csrc/CMakeLists.txt
+        - kind: test
+          path: tests/python/sgl_kernel_npu/test_recurrent_gated_delta_rule.py
+  learn: Different model family. Defer.
+  notes: >
+    hardware is the union of variants: GDN/FLA prefill is A3-only;
+    causal_conv1d_update stays in the 950 CMake. Do not record [a3] only.
+
+- id: sgl-lora-and-cache
+  name: LoRA BGMV/SGMV + KV cache / speculative helpers
+  status: candidate
+  bucket: deferred
+  source_path:
+    lora: csrc/lora/
+    cache: csrc/cache_location_assign/
+    tree: csrc/build_tree/
+  category: compute
+  algorithm: lora-kv-speculative
+  hardware: [ascend950, a3]
+  execution:
+    task_type: aiv_only
+    engines: [vector]
+  memory_pattern: [gather, scatter]
+  pipeline_pattern: [copy-compute-copy]
+  communication_pattern: none
+  dtypes:
+    input: [fp16, bf16]
+    output: [fp16, bf16]
+    accumulator: []
+    scale: []
+  shape_characteristics: LoRA expand/shrink; paged cache loc; eagle tree
+  variants:
+    - bgmv/sgmv/sgemmv/sgemmc
+    - alloc_extend / assign_cache / cache_location_assign
+    - build_tree
+  scores:
+    engineering_novelty: 3
+    cross_source_value: 1
+    production_relevance: 3
+    evidence_quality: 3
+    scout_rank: 22
+  relation_to_existing:
+    - case: null
+      relation: unrelated
+      shared_mechanism: none of the GEMM/MoE Cases
+      new_mechanism: inference serving ops
+  key_techniques:
+    - claim: LoRA and cache kernels stay in 950 CMake; tests under tests/python/sgl_kernel_npu/.
+      evidence:
+        - kind: test
+          path: tests/python/sgl_kernel_npu/test_lora_kernels.py
+        - kind: source-code
+          path: csrc/lora/op_kernel/bgmv_expand_kernel.cpp
+  learn: Serving glue, not the next engineering Case.
+  notes: 950-built but low Weaver teaching value vs DeepEP/attn.
+
+- id: sgl-deepep-a2
+  name: DeepEP A2 / ops2 + RDMA internode
+  status: candidate
+  bucket: deferred
+  source_path:
+    ops2: csrc/deepep/ops2/
+    doc: python/deep_ep/doc/A2_DEEPEP.md
+  category: compute-communication
+  algorithm: deepep-a2
+  hardware: [a2]
+  execution:
+    task_type: mix
+    engines: [vector, communication]
+  memory_pattern: [shared-window, workspace]
+  pipeline_pattern: [communication-compute-overlap]
+  communication_pattern: alltoall
+  dtypes:
+    input: [bf16, int8]
+    output: [bf16]
+    accumulator: []
+    scale: []
+  shape_characteristics: HCCS intra + RDMA inter; 8192 tokens/batch normal (README)
+  variants: []
+  scores:
+    engineering_novelty: 3
+    cross_source_value: 2
+    production_relevance: 1
+    evidence_quality: 3
+    scout_rank: 21
+  relation_to_existing:
+    - case: 'B'
+      relation: sibling
+      shared_mechanism: EP dispatch/combine
+      new_mechanism: A2 topology / RDMA; not 950
+  key_techniques:
+    - claim: ops2 is the A2 twin; README quotes A2 token caps.
+      evidence:
+        - kind: design-doc
+          path: python/deep_ep/doc/A2_DEEPEP.md
+        - kind: source-code
+          path: csrc/deepep/ops2/op_kernel/moe_distribute_dispatch_v2.h
+  learn: Out of 950-first scope.
+  notes: Keep as hardware variant of sgl-deepep-ep-dispatch-combine.

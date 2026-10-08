@@ -1,0 +1,142 @@
+# AscendWeaver source registry.
+# registry_ref + commit is the reproducible identity.
+# scan_path on a catalog is a one-time Scout field, not identity.
+
+sources:
+  - name: catlass
+    type: official
+    organization: cann
+    repository: cann/catlass
+    remote_url: git@gitcode.com:cann/catlass.git
+    license: CANN-OSLA-2.0
+    focus:
+      - matmul
+      - gemv
+      - gmm
+      - cube
+      - layout
+      - pipeline
+    priority: P0
+    hardware:
+      - ascend950
+      - a3
+      - a2
+    notes: Official CANN template library for Cube/GEMM-class operators.
+
+  - name: asc-devkit
+    type: official
+    organization: cann
+    repository: null
+    remote_url: null
+    license: null
+    focus:
+      - ascendc
+      - basic-api
+      - data-movement
+      - best-practice
+      - hardware-pattern
+    priority: P0
+
+  - name: ops-transformer
+    type: official
+    organization: cann
+    repository: cann/ops-transformer
+    remote_url: https://gitcode.com/cann/ops-transformer.git
+    license: CANN-OSLA-2.0
+    focus:
+      - transformer
+      - attention
+      - moe
+      - communication
+      - compute-communication
+    priority: P0
+    hardware:
+      - ascend950
+      - a3
+      - a2
+    notes: >
+      Official CANN transformer/MoE/MC2 operator library.
+      This Scout used local checkout /home/wangyibo/ops-transformer_bak
+      (origin git@gitcode.com:wang_yibo/ops-transformer.git, branch Add-4-op).
+
+  - name: ops-nn
+    type: official
+    organization: cann
+    repository: null
+    remote_url: null
+    license: null
+    focus:
+      - normalization
+      - activation
+      - neural-network
+    priority: P1
+
+  - name: ops-math
+    type: official
+    organization: cann
+    repository: null
+    remote_url: null
+    license: null
+    focus:
+      - math
+      - elementwise
+      - reduce
+      - basic-compute
+    priority: P1
+
+  - name: sgl-kernel-npu
+    type: community-production
+    organization: sgl-project
+    repository: sgl-project/sgl-kernel-npu
+    remote_url: https://github.com/sgl-project/sgl-kernel-npu.git
+    license: MIT
+    focus:
+      - llm
+      - attention
+      - moe
+      - quantization
+      - deep-ep
+    priority: P0
+    hardware:
+      - ascend950
+      - a3
+      - a2
+    notes: >
+      Official SGLang Ascend kernel library. Scout used local checkout
+      /home/wangyibo/sgl-kernel-npu (origin wangyibo1005/sgl-kernel-npu, branch
+      main, scanned commit 8d76a8da75315ae9add5cfd2458b8028289f1ada). Sparse
+      Attention Case evidence paths verified on sgl-project/sgl-kernel-npu
+      main @ ee334193e5278d7b3a64afcc2e3ee5243133c4a0.
+
+  - name: vllm-ascend
+    type: community-production
+    organization: null
+    repository: null
+    remote_url: null
+    license: null
+    focus:
+      - llm
+      - custom-op
+      - inference
+      - integration
+    priority: P1
+
+  - name: cannbot-skills
+    type: agent-skill
+    organization: cann
+    repository: cann/cannbot-skills
+    remote_url: git@gitcode.com:cann/cannbot-skills.git
+    license: CANN-OSL-2.0
+    focus:
+      - knowledge-discovery
+      - skill-design
+      - workflow
+      - templates
+      - ascendc-development
+    priority: P0
+    notes: >
+      Knowledge discovery source, not a Case source. Do not Scout kernels
+      or open Case Cards from this repo. Local checkout /home/wangyibo/cannbot-skills
+      @ c4c425641d11127945d22e5a752fcad77646be97. First audit:
+      sources/scans/cannbot-skills/. Promote facts/rules into knowledge/,
+      procedures into skills/workflows/; leave orchestration unused.
