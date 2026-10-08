@@ -6950,6 +6950,45 @@ typedef struct bondp_set_bonding_port_in {
 
 Return: 0 on success, `URMA_EAGAIN` when the context is still referenced by existing objects, other value on error.
 
+##### 2.5.1.1.4 Bond 指定端口 WR 下发
+
+[urma_ubagg.h](../../../src/urma/lib/urma/bond/include/urma_ubagg.h) 提供四个在指定 bond 成员端口上下发 WR 的接口：
+
+```c
+urma_status_t bondp_post_jfs_wr_hint(urma_jfs_t *jfs, bondp_wr_hint_t *hint,
+    urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr);
+urma_status_t bondp_post_jetty_send_wr_hint(urma_jetty_t *jetty, bondp_wr_hint_t *hint,
+    urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr);
+urma_status_t bondp_post_jfr_wr_hint(urma_jfr_t *jfr, bondp_wr_hint_t *hint,
+    urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr);
+urma_status_t bondp_post_jetty_recv_wr_hint(urma_jetty_t *jetty, bondp_wr_hint_t *hint,
+    urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr);
+```
+
+- `bondp_post_jfs_wr_hint` / `bondp_post_jetty_send_wr_hint`：下发发送 WR，消耗指定目标端口上的 RQE。`hint->dst_id` 选择远端接收端口，该端口必须是本次 WR 可达的目标。
+- `bondp_post_jfr_wr_hint` / `bondp_post_jetty_recv_wr_hint`：在指定端口上下发接收 WR。`hint->src_id` 选择本地接收端口，该端口必须是 JFR/Jetty 的成员口。
+
+端口通过 `bondp_wr_hint_t` 类型的 `hint` 参数指定：
+
+```c
+typedef struct bondp_wr_hint {
+    uint32_t version;         /* 必须为 BONDP_WR_HINT_VERSION_V0 */
+    uint32_t size;            /* 必须与当前 liburma 所期望的 bondp_wr_hint_t 大小一致 */
+    uint64_t mask;            /* 0 表示不指定，完全走 bondp 内部调度 */
+    bondp_port_id_t src_id;   /* chip/die/port 坐标; 子字段有效性由 SRC_* 位决定 */
+    bondp_port_id_t dst_id;   /* chip/die/port 坐标; 子字段有效性由 DST_* 位决定 */
+    uint64_t reserved[4];     /* 必须为 0，预留给后续拓展 */
+} bondp_wr_hint_t;
+```
+
+`hint` 不允许为 NULL，且必须整体清零初始化：`version` 必须为 `BONDP_WR_HINT_VERSION_V0`，`size` 必须为 `sizeof(bondp_wr_hint_t)`，`reserved` 各项必须为 0。`mask` 为 `bondp_wr_hint_mask_t` 位组合。`mask == 0` 表示不指定端口，WR 完全走 bond 正常调度；否则，发送接口要求 `mask` 恰为 `BONDP_WR_HINT_MASK_DST_CHIP_ID | BONDP_WR_HINT_MASK_DST_DIE_ID | BONDP_WR_HINT_MASK_DST_PORT_ID` 并填全 `dst_id` 三个子字段，接收接口要求 `SRC_*` 对应的三位并填全 `src_id` 三个子字段；部分指定或两侧混合指定将以 `URMA_EINVAL` 失败。
+
+接收接口上无效或不属于该 JFR/Jetty 的 `src_id` 同样返回 `URMA_EINVAL`。发送接口上，无效或不可达的 `dst_id`，或指定端口在下发时已失效，返回 `URMA_EAGAIN`，由调用方决定是否重试；接收接口在指定端口路径已失效时同样返回 `URMA_EAGAIN`。
+
+发送接口上，若 WR 同时携带驱动扩展的 chip 亲和信息（`has_drv_ext`），端口 hint 优先，本次下发的 WR 忽略该 chip 亲和信息。
+
+以该方式下发的发送 WR 被钉在指定目标端口上，不会被改道到其他目标端口：若该端口故障，将向上层返回 error CQE，而不是经备用路径重发。同一故障路径上正常调度的发送 WR 仍会正常切换到备用路径。
+
 ### 2.5.2 日志
 
 #### 2.5.2.1 urma_register_log_func

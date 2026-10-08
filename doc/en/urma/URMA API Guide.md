@@ -6939,6 +6939,45 @@ Constraints and ordering:
 
 Return: 0 on success, `URMA_EAGAIN` when the context is still referenced by existing objects, other value on error.
 
+##### 2.5.1.1.4 Bond per-port WR posting
+
+[urma_ubagg.h](../../../src/urma/lib/urma/bond/include/urma_ubagg.h) provides four interfaces for posting WRs on a specified bond member port:
+
+```c
+urma_status_t bondp_post_jfs_wr_hint(urma_jfs_t *jfs, bondp_wr_hint_t *hint,
+    urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr);
+urma_status_t bondp_post_jetty_send_wr_hint(urma_jetty_t *jetty, bondp_wr_hint_t *hint,
+    urma_jfs_wr_t *wr, urma_jfs_wr_t **bad_wr);
+urma_status_t bondp_post_jfr_wr_hint(urma_jfr_t *jfr, bondp_wr_hint_t *hint,
+    urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr);
+urma_status_t bondp_post_jetty_recv_wr_hint(urma_jetty_t *jetty, bondp_wr_hint_t *hint,
+    urma_jfr_wr_t *wr, urma_jfr_wr_t **bad_wr);
+```
+
+- `bondp_post_jfs_wr_hint` / `bondp_post_jetty_send_wr_hint`: post a send WR that consumes RQEs on the given target port. `hint->dst_id` selects the remote receiving port, which must be a reachable target of this WR.
+- `bondp_post_jfr_wr_hint` / `bondp_post_jetty_recv_wr_hint`: post a receive WR on the given port. `hint->src_id` selects the local receiving port, which must be a member of the JFR/Jetty.
+
+The port is specified through the `hint` parameter of type `bondp_wr_hint_t`:
+
+```c
+typedef struct bondp_wr_hint {
+    uint32_t version;         /* must be BONDP_WR_HINT_VERSION_V0 */
+    uint32_t size;            /* must match the bondp_wr_hint_t size expected by the loaded liburma */
+    uint64_t mask;            /* 0 means no port is pinned; fully scheduled */
+    bondp_port_id_t src_id;   /* chip/die/port coordinates; validity of the sub-fields is decided by the SRC_* mask bits */
+    bondp_port_id_t dst_id;   /* chip/die/port coordinates; validity of the sub-fields is decided by the DST_* mask bits */
+    uint64_t reserved[4];     /* must be 0, reserved for future extension */
+} bondp_wr_hint_t;
+```
+
+`hint` must not be NULL and must be zero-initialized as a whole: `version` must be `BONDP_WR_HINT_VERSION_V0`, `size` must be `sizeof(bondp_wr_hint_t)`, and every `reserved` word must be 0. `mask` is a combination of `bondp_wr_hint_mask_t` bits. `mask == 0` means no port is pinned and the WRs follow the normal bond scheduling. Otherwise, the send interfaces require `mask` to be exactly `BONDP_WR_HINT_MASK_DST_CHIP_ID | BONDP_WR_HINT_MASK_DST_DIE_ID | BONDP_WR_HINT_MASK_DST_PORT_ID` with all three `dst_id` sub-fields filled in, and the receive interfaces require the `SRC_*` counterpart with all three `src_id` sub-fields filled in; a partial or mixed mask fails the call with `URMA_EINVAL`.
+
+An invalid or non-member `src_id` on the receive interfaces also fails with `URMA_EINVAL`. On the send interfaces, an invalid or unreachable `dst_id`, or a specified port that is already invalid at post time, returns `URMA_EAGAIN` and the caller decides whether to retry; the receive interfaces also return `URMA_EAGAIN` when the specified port path is already invalid.
+
+On the send interfaces, when a WR carries driver-extension chip affinity info (`has_drv_ext`), the port hint takes precedence and the chip affinity info is ignored for that WR.
+
+A send WR posted this way is pinned to the specified target port and is never rerouted to another target port: if that port fails, the error CQE is returned instead of resending through a backup path. Normally scheduled send WRs on the same failed path are still failed over to a backup path.
+
 ### 2.5.2 Logging
 
 #### 2.5.2.1 urma_register_log_func
