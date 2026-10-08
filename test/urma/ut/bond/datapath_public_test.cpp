@@ -403,7 +403,7 @@ TEST(UrmaBondTest, DatapathPostSendStoreAndPollCompletionRoundTrip)
         &fixture.ctx.p_vjetty_id_table, physicalJfsId, JFS, fixture.comp.v_jfs.jfs_id.id, &fixture.comp));
 
     wr.user_ctx = 0xbeef;
-    EXPECT_EQ(0, schedule_send(wr.tjetty, &fixture.comp, &scheduledSendIdx, &scheduledTargetIdx, nullptr));
+    EXPECT_EQ(0, schedule_send(wr.tjetty, &fixture.comp, &scheduledSendIdx, &scheduledTargetIdx, nullptr, nullptr));
     EXPECT_EQ(0, scheduledSendIdx);
     EXPECT_EQ(0, scheduledTargetIdx);
     EXPECT_EQ(URMA_SUCCESS, copy_jfs_wr(&wr, &copiedWr, copiedSrc, copiedDst, BONDP_MAX_SGE_NUM, BONDP_MAX_SGE_NUM));

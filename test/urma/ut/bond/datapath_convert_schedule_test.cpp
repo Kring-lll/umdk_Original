@@ -261,30 +261,30 @@ TEST(UrmaBondTest, DatapathScheduleCoversModesAndErrors)
 
     fixture.comp.v_jetty.remote_jetty = &fixture.target.v_tjetty;
     fixture.ctx.bonding_mode = BONDP_BONDING_MODE_STANDALONE;
-    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr));
+    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr, nullptr));
     EXPECT_EQ(0, schedule_recv(&fixture.comp, &recvIdx));
 
     fixture.ctx.bonding_mode = BONDP_BONDING_MODE_ACTIVE_BACKUP;
-    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr));
+    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr, nullptr));
     EXPECT_EQ(0, schedule_recv(&fixture.comp, &recvIdx));
 
     fixture.ctx.bonding_mode = BONDP_BONDING_MODE_BALANCE;
     fixture.comp.sqe_cnt[0][0].store(2);
     fixture.comp.sqe_cnt[1][1].store(1);
-    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, &chipInfo));
-    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr));
+    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, &chipInfo, nullptr));
+    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr, nullptr));
 
     fixture.comp.active_count = 0;
-    EXPECT_EQ(-1, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr));
+    EXPECT_EQ(-1, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr, nullptr));
     EXPECT_EQ(-1, schedule_recv(&fixture.comp, &recvIdx));
 
     fixture.comp.active_count = 1;
     fixture.target.active_count = 0;
-    EXPECT_EQ(-1, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr));
+    EXPECT_EQ(-1, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr, nullptr));
 
     fixture.target.active_count = 1;
     fixture.ctx.bonding_mode = static_cast<bondp_bonding_mode_t>(0xff);
-    EXPECT_EQ(-1, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr));
+    EXPECT_EQ(-1, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr, nullptr));
     EXPECT_EQ(-1, schedule_recv(&fixture.comp, &recvIdx));
 }
 
@@ -300,15 +300,15 @@ TEST(UrmaBondTest, DatapathScheduleCoversAffinityAndBatchReceiveBoundaries)
     fixture.ctx.bonding_mode = BONDP_BONDING_MODE_BALANCE;
     fixture.comp.sqe_cnt[0][0].store(1);
     fixture.comp.sqe_cnt[1][1].store(1);
-    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr));
+    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr, nullptr));
     EXPECT_TRUE((sendIdx == 0 && targetIdx == 0) || (sendIdx == 1 && targetIdx == 1));
 
     fixture.comp.comp_type = BONDP_COMP_JFR;
     fixture.comp.v_jfr.jfr_cfg.trans_mode = URMA_TM_RC;
-    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr));
+    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr, nullptr));
 
     fixture.comp.comp_type = static_cast<bondp_comp_type_t>(0xff);
-    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr));
+    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, nullptr, nullptr));
 
     fixture.comp.comp_type = BONDP_COMP_JETTY;
     /* v_jfs/v_jfr/v_jetty share one union: the writes above clobbered the
@@ -321,13 +321,13 @@ TEST(UrmaBondTest, DatapathScheduleCoversAffinityAndBatchReceiveBoundaries)
     targetIdx = -1;
     fixture.ctx.bonding_level = BONDP_BONDING_LEVEL_PORT;
     /* PORT level resolves the path through the 1-primary/N-backup route table */
-    EXPECT_EQ(URMA_SUCCESS, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, &chipInfo));
+    EXPECT_EQ(URMA_SUCCESS, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, &chipInfo, nullptr));
 
     fixture.ctx.bonding_level = static_cast<bondp_bonding_level_t>(0xff);
     /* an unsupported level is reported as EINVAL only when failover is enabled;
      * otherwise the affinity miss surfaces as URMA_FAIL. */
     fixture.ctx.enable_failover = true;
-    EXPECT_EQ(URMA_EINVAL, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, &chipInfo));
+    EXPECT_EQ(URMA_EINVAL, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx, &chipInfo, nullptr));
 
     EXPECT_EQ(URMA_EINVAL, schedule_recv_n(&fixture.comp, 1, nullptr));
     EXPECT_EQ(0, schedule_recv_n(&fixture.comp, 0, recvCnt));
@@ -341,4 +341,82 @@ TEST(UrmaBondTest, DatapathScheduleCoversAffinityAndBatchReceiveBoundaries)
 
     fixture.comp.active_count = 0;
     EXPECT_EQ(-1, schedule_recv_n(&fixture.comp, 1, recvCnt));
+}
+
+TEST(UrmaBondTest, DatapathScheduleSendFixedPinsAndValidatesTargetPort)
+{
+    BondPathFixture fixture;
+    int sendIdx = -1;
+
+    /* Fixture topology: local 0 -> target 0, local 1 -> target 1. */
+    EXPECT_EQ(0, schedule_send_fixed(&fixture.target.v_tjetty, &fixture.comp, 0, &sendIdx));
+    EXPECT_EQ(0, sendIdx);
+    EXPECT_EQ(0, schedule_send_fixed(&fixture.target.v_tjetty, &fixture.comp, 1, &sendIdx));
+    EXPECT_EQ(1, sendIdx);
+
+    /* No path reaches an out-of-range target port. */
+    EXPECT_EQ(-1, schedule_send_fixed(&fixture.target.v_tjetty, &fixture.comp, 2, &sendIdx));
+
+    /* An invalid local port cannot serve as the egress even if the path exists. */
+    fixture.comp.valid[1] = false;
+    EXPECT_EQ(-1, schedule_send_fixed(&fixture.target.v_tjetty, &fixture.comp, 1, &sendIdx));
+    fixture.comp.valid[1] = true;
+
+    /* An invalid remote path is skipped. */
+    SetTargetJettyPath(fixture.target, 0, 0, &fixture.phyTarget[0][0], false);
+    EXPECT_EQ(-1, schedule_send_fixed(&fixture.target.v_tjetty, &fixture.comp, 0, &sendIdx));
+    SetTargetJettyPath(fixture.target, 0, 0, &fixture.phyTarget[0][0], true);
+}
+
+TEST(UrmaBondTest, DatapathScheduleSendWithHintPinsDstPort)
+{
+    BondPathFixture fixture;
+    int sendIdx = -1;
+    int targetIdx = -1;
+
+    /* convert_bond_port_id_to_active_index requires live physical contexts. */
+    fixture.ctx.p_ctxs[0] = &fixture.phyCtx;
+    fixture.ctx.p_ctxs[1] = &fixture.phyCtx;
+
+    bondp_wr_hint_t hint = {};
+    hint.version = BONDP_WR_HINT_VERSION_V0;
+    hint.size = sizeof(bondp_wr_hint_t);
+    hint.mask = BONDP_WR_HINT_MASK_DST_CHIP_ID | BONDP_WR_HINT_MASK_DST_DIE_ID |
+                BONDP_WR_HINT_MASK_DST_PORT_ID;
+
+    /* Primary EIDs of chip 1/2 map to active indices 0/1. */
+    hint.dst_id.bs.chip_id = 1;
+    hint.dst_id.bs.die_id = 1;
+    hint.dst_id.bs.port_idx = UINT8_MAX;
+    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx,
+                               nullptr, &hint));
+    EXPECT_EQ(0, targetIdx);
+    EXPECT_EQ(0, sendIdx);
+
+    hint.dst_id.bs.chip_id = 2;
+    EXPECT_EQ(0, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx,
+                               nullptr, &hint));
+    EXPECT_EQ(1, targetIdx);
+    EXPECT_EQ(1, sendIdx);
+
+    /* A port EID of chip 1 converts to index 2 but no tjetty path reaches it. */
+    fixture.ctx.dev_num = 3;
+    fixture.ctx.p_ctxs[2] = &fixture.phyCtx;
+    hint.dst_id.bs.chip_id = 1;
+    hint.dst_id.bs.port_idx = 0;
+    EXPECT_EQ(-1, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx,
+                                nullptr, &hint));
+
+    /* Invalid port coordinates fail the conversion. */
+    hint.dst_id.bs.chip_id = 0;
+    EXPECT_EQ(-1, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx,
+                                nullptr, &hint));
+    hint.dst_id.bs.chip_id = 1;
+    hint.dst_id.bs.die_id = 2;
+    EXPECT_EQ(-1, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx,
+                                nullptr, &hint));
+    hint.dst_id.bs.die_id = 1;
+    hint.dst_id.bs.port_idx = PORT_NUM + 1;
+    EXPECT_EQ(-1, schedule_send(&fixture.target.v_tjetty, &fixture.comp, &sendIdx, &targetIdx,
+                                nullptr, &hint));
 }

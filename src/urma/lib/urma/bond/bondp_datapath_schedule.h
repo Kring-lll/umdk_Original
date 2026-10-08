@@ -15,6 +15,7 @@
 
 #include "bondp_connection.h"
 #include "bondp_wr_buf.h"
+#include "urma_ubagg.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,7 +27,9 @@ extern "C" {
 #define CHIP_ROUTE_NUM         3
 
 int schedule_send(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp, int *send_idx, int *target_idx,
-    bondp_chip_id_info_t *info);
+    bondp_chip_id_info_t *info, const bondp_wr_hint_t *hint);
+int schedule_send_fixed(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp, int fixed_target_idx,
+    int *send_idx);
 
 int schedule_recv(bondp_comp_t *bdp_comp, int *recv_idx);
 int schedule_recv_n(bondp_comp_t *bdp_comp, uint32_t wr_num, uint32_t recv_wr_cnt[URMA_UBAGG_DEV_MAX_NUM]);
