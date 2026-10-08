@@ -342,3 +342,70 @@ TEST(UrmaBondTest, DatapathScheduleCoversAffinityAndBatchReceiveBoundaries)
     fixture.comp.active_count = 0;
     EXPECT_EQ(-1, schedule_recv_n(&fixture.comp, 1, recvCnt));
 }
+
+TEST(UrmaBondTest, DatapathScheduleSendFixedPinsAndValidatesTargetPort)
+{
+    BondPathFixture fixture;
+    int sendIdx = -1;
+
+    /* Fixture topology: local 0 -> target 0, local 1 -> target 1. */
+    EXPECT_EQ(0, schedule_send_fixed(&fixture.target.v_tjetty, &fixture.comp, 0, &sendIdx));
+    EXPECT_EQ(0, sendIdx);
+    EXPECT_EQ(0, schedule_send_fixed(&fixture.target.v_tjetty, &fixture.comp, 1, &sendIdx));
+    EXPECT_EQ(1, sendIdx);
+
+    /* No path reaches an out-of-range target port. */
+    EXPECT_EQ(-1, schedule_send_fixed(&fixture.target.v_tjetty, &fixture.comp, 2, &sendIdx));
+
+    /* An invalid local port cannot serve as the egress even if the path exists. */
+    fixture.comp.valid[1] = false;
+    EXPECT_EQ(-1, schedule_send_fixed(&fixture.target.v_tjetty, &fixture.comp, 1, &sendIdx));
+    fixture.comp.valid[1] = true;
+
+    /* An invalid remote path is skipped. */
+    SetTargetJettyPath(fixture.target, 0, 0, &fixture.phyTarget[0][0], false);
+    EXPECT_EQ(-1, schedule_send_fixed(&fixture.target.v_tjetty, &fixture.comp, 0, &sendIdx));
+    SetTargetJettyPath(fixture.target, 0, 0, &fixture.phyTarget[0][0], true);
+}
+
+TEST(UrmaBondTest, DatapathBondPortIdConvertCoversPrimaryAndPortEids)
+{
+    BondPathFixture fixture;
+    uint32_t activeIdx = 0;
+    bondp_port_id_t portId = {};
+    portId.bs.die_id = 1;
+
+    /* convert_bond_port_id_to_active_index requires live physical contexts. */
+    fixture.ctx.p_ctxs[0] = &fixture.phyCtx;
+    fixture.ctx.p_ctxs[1] = &fixture.phyCtx;
+
+    /* Primary EIDs of chip 1/2 map to active indices 0/1. */
+    portId.bs.port_idx = UINT8_MAX;
+    portId.bs.chip_id = 1;
+    EXPECT_EQ(0, convert_bond_port_id_to_active_index(&fixture.ctx, portId, &activeIdx));
+    EXPECT_EQ(0U, activeIdx);
+    portId.bs.chip_id = 2;
+    EXPECT_EQ(0, convert_bond_port_id_to_active_index(&fixture.ctx, portId, &activeIdx));
+    EXPECT_EQ(1U, activeIdx);
+
+    /* A port EID of chip 1 maps to active index 2 when the slot is live. */
+    fixture.ctx.dev_num = 3;
+    fixture.ctx.p_ctxs[2] = &fixture.phyCtx;
+    portId.bs.chip_id = 1;
+    portId.bs.port_idx = 0;
+    EXPECT_EQ(0, convert_bond_port_id_to_active_index(&fixture.ctx, portId, &activeIdx));
+    EXPECT_EQ(2U, activeIdx);
+
+    /* Invalid coordinates or a dead physical slot fail the conversion. */
+    portId.bs.chip_id = 0;
+    EXPECT_NE(0, convert_bond_port_id_to_active_index(&fixture.ctx, portId, &activeIdx));
+    portId.bs.chip_id = 1;
+    portId.bs.die_id = 2;
+    EXPECT_NE(0, convert_bond_port_id_to_active_index(&fixture.ctx, portId, &activeIdx));
+    portId.bs.die_id = 1;
+    portId.bs.port_idx = PORT_NUM + 1;
+    EXPECT_NE(0, convert_bond_port_id_to_active_index(&fixture.ctx, portId, &activeIdx));
+    portId.bs.port_idx = 0;
+    fixture.ctx.p_ctxs[2] = NULL;
+    EXPECT_NE(0, convert_bond_port_id_to_active_index(&fixture.ctx, portId, &activeIdx));
+}

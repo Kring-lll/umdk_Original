@@ -448,6 +448,43 @@ int schedule_send(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp, int *send
     }
 }
 
+int schedule_send_fixed(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp,
+                        int fixed_target_idx, int *send_idx)
+{
+    bondp_target_jetty_t *bdp_tjetty = CONTAINER_OF_FIELD(tjetty, bondp_target_jetty_t, v_tjetty);
+    if (bdp_tjetty == NULL) {
+        return -1;
+    }
+
+    bool target_used[URMA_UBAGG_DEV_MAX_NUM] = {0};
+    for (uint32_t i = 0; i < bdp_comp->active_count; i++) {
+        uint32_t loc_idx = bdp_comp->active_indices[i];
+        for (uint32_t j = 0; j < bdp_tjetty->p_tjetty_count; j++) {
+            const bondp_p_target_jetty_t *path = &bdp_tjetty->p_tjettys[j];
+            if (path->local_indice != loc_idx) {
+                continue;
+            }
+            uint32_t tar_idx = path->remote_indice;
+            if (path->p_tjetty == NULL || target_used[tar_idx]) {
+                continue;
+            }
+            target_used[tar_idx] = true;
+            if ((int)tar_idx != fixed_target_idx) {
+                break;
+            }
+            if (!atomic_load(&path->valid) || !atomic_load(&bdp_comp->valid[loc_idx])) {
+                break;
+            }
+            if (bdp_comp->comp_type == BONDP_COMP_JETTY && bdp_comp->p_jetty[loc_idx] == NULL) {
+                break;
+            }
+            *send_idx = (int)loc_idx;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 int schedule_recv(bondp_comp_t *bdp_comp, int *recv_idx)
 {
     if (bdp_comp->active_count == 0) {
