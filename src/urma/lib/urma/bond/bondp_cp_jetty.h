@@ -38,7 +38,7 @@ urma_jfr_t *bondp_create_jfr(urma_context_t *ctx, urma_jfr_cfg_t *cfg);
 
 urma_status_t bondp_delete_jfr(urma_jfr_t *jfr);
 
-urma_status_t bondp_modify_jfr(urma_jfr_t *jfr, urma_jfr_attr_t *attr);
+urma_status_t bondp_modify_jfr_sched(urma_jfr_t *jfr, urma_jfr_attr_t *attr);
 
 urma_status_t bondp_query_jfr(urma_jfr_t *jfr, urma_jfr_cfg_t *cfg, urma_jfr_attr_t *attr);
 
