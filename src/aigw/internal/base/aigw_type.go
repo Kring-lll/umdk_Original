@@ -33,7 +33,8 @@ type OpenAiRequest struct {
 type GetSuggestionOut struct {
 	TargetPrefillUrl string `json:"targetPrefill"`
 	TargetDecodeUrl  string `json:"targetDecode"`
-	DpRank           *int   `json:"dpRank,omitempty"` // DP rank for data parallel routing
+	DpRank           *int   `json:"dpRank,omitempty"`   // DP rank for data parallel routing
+	Priority         *int   `json:"priority,omitempty"` // ERR scheduling priority
 }
 
 // RegisterInstanceIn specified the input parameters for RegisterInstance.
@@ -88,6 +89,41 @@ type ProxyConfig struct {
 	RetryMaxInterval  int                  `json:"retryMaxInterval"`  // Retry max interval in milliseconds
 	Enable            bool                 `json:"enable"`            // Enable request forwarding
 	CircuitBreaker    CircuitBreakerConfig `json:"circuitBreaker"`    // Circuit breaker configuration
+	// Stream timeout budgets, mirroring the openjiuwen SDK defaults so aigw
+	// gives up roughly when the last possible reader does:
+	// firstChunkTimeoutSec ← stream_first_chunk_timeout (300s),
+	// chunkIntervalTimeoutSec ← stream_idle_timeout (60s).
+	// Deployments that override the client budgets (e.g. jiuwenswarm's
+	// config.yaml raises idle to 120s) must raise these to match.
+	//
+	// FirstChunkTimeoutSec: max wait for the FIRST byte of an engine
+	// response. The engine may legitimately queue and prefill for minutes
+	// before the first token.
+	//
+	// ChunkIntervalTimeoutSec: max gap between tokens, spent waiting in
+	// either direction — a silent engine after the first byte (dead
+	// mid-stream) or a client write stuck this long (abandoned without
+	// closing, TCP window full).
+	FirstChunkTimeoutSec    int `json:"firstChunkTimeoutSec"`
+	ChunkIntervalTimeoutSec int `json:"chunkIntervalTimeoutSec"`
+}
+
+// LoraConfig contains static LoRA registry configuration.
+type LoraConfig struct {
+	Root             string `json:"root"`
+	StatePath        string `json:"statePath"`
+	OperationTimeout string `json:"operationTimeout"`
+}
+
+// OnlineRLConfig contains static RL child-process configuration.
+type OnlineRLConfig struct {
+	Command        []string `json:"command"`
+	ConfigPath     string   `json:"configPath"`
+	Endpoint       string   `json:"endpoint"`
+	HookTimeout    string   `json:"hookTimeout"`
+	HookRetries    int      `json:"hookRetries"`
+	DrainTimeout   string   `json:"drainTimeout"`
+	ControlTimeout string   `json:"controlTimeout"`
 }
 
 // CircuitBreakerConfig struct contains configuration for circuit breaker
@@ -142,6 +178,49 @@ type LoadBalancerConfig struct {
 	DpSize       int `json:"dpSize"`       // Data parallel size for DP-aware routing
 }
 
+// ErrSchedulerConfig holds ERR-scheduler-specific parameters, separate from
+// LoadBalancerConfig. BatchSize (shared by LBs and ERR capacity) stays in
+// LoadBalancerConfig and is passed into initErrScheduler separately.
+type ErrSchedulerConfig struct {
+	ErrSchedulerType   string `json:"errSchedulerType"`   // "mej", "err", "caterr", "fifo", "" or "none" = disabled
+	QueueSize          int    `json:"queueSize"`          // pending queue max size (0 = passthrough mode, >0 = queue mode)
+	WarmupSessions     int    `json:"warmupSessions"`     // total observations threshold for warmup completion (0 = default 100; negative = total gate disabled)
+	WarmupPerCat       int    `json:"warmupPerCat"`       // per-category observations threshold, CatERR only (0 = default 10; negative = per-category gate disabled)
+	WindowSize         int    `json:"windowSize"`         // EmpiricalDist sliding window size (0 = unbounded, default: 5000)
+	TrainDataPath      string `json:"trainDataPath"`      // path to pre-trained distributions JSON (CatERR only; ERR can warm up online)
+	TfidfVocabPath     string `json:"tfidfVocabPath"`     // path to TF-IDF vocab JSON (CatERR)
+	TfidfCentroidsPath string `json:"tfidfCentroidsPath"` // path to K-means centroids JSON (CatERR)
+	SessionTimeoutSec  int    `json:"sessionTimeoutSec"`  // session idle timeout after tool_calls/other, seconds (default: 660)
+	TaskIdleTimeoutSec int    `json:"taskIdleTimeoutSec"` // session idle timeout after stop, seconds (default: 660)
+	QueueBoostSec      int    `json:"queueBoostSec"`      // starvation floor: force queued requests to top priority after this many seconds (default: 240; 0 = default; negative = disabled)
+}
+
+// KvAdmission mode values.
+const (
+	KvAdmissionOff    = "off"
+	KvAdmissionSignal = "signal"
+)
+
+// KvAdmissionConfig configures engine-signal admission control: dispatch is
+// gated on the target engine's own waiting queue (observed via the motor
+// coordinator's metrics endpoint) instead of aigw-side counting. It replaces
+// the original double gate (global capacity provider + LB ReqNum<batchSize)
+// whenever active, and requires ERR queue mode.
+type KvAdmissionConfig struct {
+	Mode string `json:"mode"` // "signal" | "off" (default; original gates stay)
+	// MetricsURL is the motor coordinator observation endpoint
+	// (e.g. http://127.0.0.1:1027/metrics?type=instance); explicit full URL,
+	// not derived from the instance URL (obs and infer are separately exposed).
+	MetricsURL           string `json:"metricsUrl"`
+	PollMs               int    `json:"pollMs"`               // signal poll cadence (default 1000)
+	BurstCapPerCycle     int    `json:"burstCapPerCycle"`     // max admits per instance per poll cycle (0 = auto: one per free engine, min across prefill/decode roles; explicit value wins)
+	AdmitBudgetPerEngine int    `json:"admitBudgetPerEngine"` // per-engine admit budget per poll cycle: an engine with queue depth W contributes (budget - W) admits, clamped at zero; 0 = default 1 (only fully idle engines admit). Raise to keep each engine's pipeline at a target depth when the engine drains multiple requests per refresh cycle.
+	HysteresisCycles     int    `json:"hysteresisCycles"`     // clear cycles required before resuming after waiting>0 (default 1)
+	StaleAfterMs         int    `json:"staleAfterMs"`         // signal age treated as fresh (default 8000: motor cache 3s + poll offset)
+	RecoverHealthyCycles int    `json:"recoverHealthyCycles"` // consecutive good polls before trusting signals (default 2)
+	QuotaAgeFallbackMs   int    `json:"quotaAgeFallbackMs"`   // force quota reset after this long on a static engine, ms (default 3000 = motor refresh cadence)
+}
+
 // GlobalSchedulerConfig struct contains configuration for a global scheduler
 type GlobalSchedulerConfig struct {
 	Model                string             `json:"model"`
@@ -151,12 +230,18 @@ type GlobalSchedulerConfig struct {
 	MaxTimeBetweenTokens float64            `json:"maxTimeBetweenTokens"`
 	TokenizeModelName    string             `json:"tokenizeModelName"`
 	LoadBalancer         LoadBalancerConfig `json:"loadBalancer"`
-	// Mode selects scheduling path: "instance" (default when empty) | "provider".
+	ErrScheduler         ErrSchedulerConfig `json:"errScheduler"`
+	KvAdmission          KvAdmissionConfig  `json:"kvAdmission"`
+	// Mode selects scheduling path: "instance" (default when empty) | "provider" | "scheduler".
+	// "scheduler" = forward to a downstream Scheduler component (northbound proxy);
+	// Adapter does not schedule itself, only forwards request + agent_hint.
 	Mode string `json:"mode,omitempty"`
 	// ProviderPool holds config for mode=provider.
-	ProviderPool           *ProviderPoolConfig `json:"providerPool,omitempty"`
-	InsConnectType         string              `json:"instanceConnectType"`
-	SkipInstanceConnection bool                `json:"skipInstanceConnection"` // Skip connecting to instances during registration (for testing with mock instances)
+	ProviderPool *ProviderPoolConfig `json:"providerPool,omitempty"`
+	// SchedulerTarget holds config for mode=scheduler.
+	SchedulerTarget        *SchedulerTargetConfig `json:"schedulerTarget,omitempty"`
+	InsConnectType         string                 `json:"instanceConnectType"`
+	SkipInstanceConnection bool                   `json:"skipInstanceConnection"` // Skip connecting to instances during registration (for testing with mock instances)
 
 	CacheRefreshIntervalMs uint32  `json:"cacheRefreshIntervalMs"`
 	TokenizationRatio      float64 `json:"tokenizationRatio"`
@@ -179,6 +264,26 @@ type ProviderPoolConfig struct {
 	Cooldown        *CooldownConfig    `json:"cooldown,omitempty"`
 	Retry           *RetryConfig       `json:"retry,omitempty"`
 	Deployments     []DeploymentConfig `json:"deployments"`
+}
+
+// SchedulerTargetConfig configures a downstream Scheduler endpoint for mode=scheduler.
+// Adapter forwards the client request body unmodified (agent_hint passed through as-is;
+// no session fallback — the Scheduler resolves session_id from headers) to BaseURL +
+// the fixed OpenAI completion route. Auth is injected as a Bearer token; TLS is optional.
+type SchedulerTargetConfig struct {
+	BaseURL string    `json:"baseURL"` // e.g. "http://scheduler-coordinator:8080"
+	APIKey  string    `json:"apiKey"`  // Bearer token injected as Authorization
+	TLS     TLSConfig `json:"tls,omitempty"`
+}
+
+// TLSConfig configures TLS for an outbound connection. Field names mirror the
+// ZookeeperConfig TLS fields (enableTls/tlsCaFile/tlsCrtFile/tlsServerName) for
+// consistency with existing config conventions.
+type TLSConfig struct {
+	EnableTLS  bool   `json:"enableTls"`
+	CAFile     string `json:"tlsCaFile"`
+	CrtFile    string `json:"tlsCrtFile"`
+	ServerName string `json:"tlsServerName"`
 }
 
 // CooldownConfig configures per-endpoint cooldown behavior.
@@ -241,11 +346,18 @@ type AigwConfig struct {
 	Predictor      PredictorConfig         `json:"predictor"`
 	GsConfigs      []GlobalSchedulerConfig `json:"globalSchedulers"`
 	Tokenizers     []TokenizerConfig       `json:"tokenizers"`
-	GlobalConfig   GlobalConfig            `json:"global"`
-	Limits         Limits                  `json:"limits"`
-	Discovery      DiscoveryConfig         `json:"discovery"` // Service discovery configuration
-	Proxy          ProxyConfig             `json:"proxy"`     // Request proxy/forwarding configuration
-	Kvc            KvcConfig               `json:"kvc"`       // KVC management (Phase 2; ServiceMode only)
+	// SchedulerNorthbound is the global downstream Scheduler target (northbound passthrough mode).
+	// When set, any model not explicitly registered as instance/provider is forwarded to this
+	// Scheduler as-is (body.model passes through untouched). Decouples the routing key from the
+	// request model name so one Scheduler can serve many models with many instances.
+	SchedulerNorthbound *SchedulerTargetConfig `json:"schedulerNorthbound,omitempty"`
+	GlobalConfig        GlobalConfig           `json:"global"`
+	Limits              Limits                 `json:"limits"`
+	Discovery           DiscoveryConfig        `json:"discovery"` // Service discovery configuration
+	Proxy               ProxyConfig            `json:"proxy"`     // Request proxy/forwarding configuration
+	Kvc                 KvcConfig              `json:"kvc"`       // KVC management (Phase 2; ServiceMode only)
+	Lora                LoraConfig             `json:"lora"`
+	OnlineRL            OnlineRLConfig         `json:"onlineRL"`
 }
 
 // String is the string method of AigwConfig

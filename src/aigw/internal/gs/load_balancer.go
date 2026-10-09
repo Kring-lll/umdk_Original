@@ -120,6 +120,24 @@ type baseLoadBalancer struct {
 	predictType    PredictorType                 // none/ema/lightgbm
 
 	instanceRoleType base.InstanceRole // role type of instances used in load balancing
+
+	// candidateFilter overrides the default candidate predicate
+	// (ReqNum < batchSize) while engine-signal admission is active; nil
+	// keeps the original behavior. It is a fast filter only — the ERR
+	// dispatch layer's admission gate remains the authority.
+	candidateFilter func(insUrl string) bool
+}
+
+// SetCandidateFilter installs the admission-aware instance candidate filter.
+func (b *baseLoadBalancer) SetCandidateFilter(f func(insUrl string) bool) {
+	b.candidateFilter = f
+}
+
+func (b *baseLoadBalancer) candidateOK(m *InstanceMetric, batchSize int) bool {
+	if b.candidateFilter != nil {
+		return b.candidateFilter(m.InsUrl)
+	}
+	return m.ReqNum < batchSize
 }
 
 // predict length include prompt and decode
@@ -191,7 +209,7 @@ func (lb *rrLoadBalancer) schedule(request *ScheduleRequestMsg, options *Schedul
 	for i := 0; i < len(metrics); i++ {
 		idx := (lb.reqCount + i) % len(metrics)
 		metric := metrics[idx]
-		if metric.ReqNum < lb.batchSize {
+		if lb.candidateOK(metric, lb.batchSize) {
 			targetUrl = metric.InsUrl
 			lb.reqCount += 1
 			targetGroupID = metric.GroupID
@@ -245,7 +263,7 @@ func (lb *leastConnLoadBalancer) schedule(request *ScheduleRequestMsg, options *
 	})
 
 	var targetIns *InstanceMetric
-	if metrics[0].ReqNum >= lb.batchSize {
+	if !lb.candidateOK(metrics[0], lb.batchSize) {
 		targetIns = nil
 	} else {
 		targetIns = metrics[0]

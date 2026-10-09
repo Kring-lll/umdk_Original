@@ -51,6 +51,15 @@ const (
 
 	defaultCacheRefreshIntervalMs = 100
 	defaultTokenizationRatio      = float64(0.35)
+
+	// ERR scheduler defaults
+	defaultErrWarmupSessions = 100
+	defaultErrWarmupPerCat   = 10
+	defaultErrSessionTimeout = 660
+	// Matches sessionTimeoutSec: post-stop compression blocks the parent's
+	// next request for as long as the anonymous call queues; a short
+	// timer here erases the session mid-wait.
+	defaultErrTaskIdleTimeout = 660
 )
 
 var validCommonLBTypes = map[string]bool{
@@ -262,6 +271,102 @@ func validateInsConnectType(gsCfg *base.GlobalSchedulerConfig) error {
 	return nil
 }
 
+func validateKvAdmissionConfig(gsCfg *base.GlobalSchedulerConfig) error {
+	cfg := &gsCfg.KvAdmission
+	if cfg.Mode == "" {
+		cfg.Mode = base.KvAdmissionOff
+	}
+	if cfg.Mode != base.KvAdmissionOff && cfg.Mode != base.KvAdmissionSignal {
+		return fmt.Errorf("invalid kvAdmission.mode %q, model %q", cfg.Mode, gsCfg.Model)
+	}
+	if cfg.PollMs <= 0 {
+		cfg.PollMs = 1000
+	}
+	if cfg.BurstCapPerCycle < 0 {
+		cfg.BurstCapPerCycle = 0
+	}
+	if cfg.AdmitBudgetPerEngine <= 0 {
+		cfg.AdmitBudgetPerEngine = 1
+	}
+	if cfg.HysteresisCycles <= 0 {
+		cfg.HysteresisCycles = 1
+	}
+	if cfg.StaleAfterMs <= 0 {
+		cfg.StaleAfterMs = 8000
+	}
+	if cfg.RecoverHealthyCycles <= 0 {
+		cfg.RecoverHealthyCycles = 2
+	}
+	if cfg.QuotaAgeFallbackMs <= 0 {
+		cfg.QuotaAgeFallbackMs = 3000
+	}
+	switch cfg.Mode {
+	case base.KvAdmissionSignal:
+		if cfg.MetricsURL == "" {
+			return fmt.Errorf("kvAdmission.mode=signal requires metricsUrl, model %q", gsCfg.Model)
+		}
+	}
+	return nil
+}
+
+func validateErrSchedulerConfig(gsCfg *base.GlobalSchedulerConfig) error {
+	errCfg := &gsCfg.ErrScheduler
+	t := errCfg.ErrSchedulerType
+	if t == "" || t == "none" {
+		return nil
+	}
+	if t != "mej" && t != "err" && t != "caterr" && t != "fifo" {
+		return fmt.Errorf("invalid errSchedulerType %q, model %q", t, gsCfg.Model)
+	}
+
+	if errCfg.WarmupSessions == 0 {
+		errCfg.WarmupSessions = defaultErrWarmupSessions
+	}
+	if errCfg.WarmupPerCat == 0 {
+		errCfg.WarmupPerCat = defaultErrWarmupPerCat
+	}
+	if errCfg.QueueSize < 0 {
+		return fmt.Errorf("invalid queueSize %d, should >= 0, model %q", errCfg.QueueSize, gsCfg.Model)
+	}
+	if errCfg.WindowSize < 0 {
+		return fmt.Errorf("invalid windowSize %d, should >= 0, model %q", errCfg.WindowSize, gsCfg.Model)
+	}
+	if errCfg.SessionTimeoutSec < 0 {
+		return fmt.Errorf("invalid sessionTimeoutSec %d, should >= 0, model %q", errCfg.SessionTimeoutSec, gsCfg.Model)
+	}
+	if errCfg.TaskIdleTimeoutSec < 0 {
+		return fmt.Errorf("invalid taskIdleTimeoutSec %d, should >= 0, model %q", errCfg.TaskIdleTimeoutSec, gsCfg.Model)
+	}
+
+	if errCfg.SessionTimeoutSec == 0 {
+		errCfg.SessionTimeoutSec = defaultErrSessionTimeout
+	}
+	if errCfg.TaskIdleTimeoutSec == 0 {
+		errCfg.TaskIdleTimeoutSec = defaultErrTaskIdleTimeout
+	}
+
+	if t == "caterr" {
+		if errCfg.TfidfVocabPath == "" || errCfg.TfidfCentroidsPath == "" {
+			return fmt.Errorf("caterr requires tfidfVocabPath and tfidfCentroidsPath, model %q", gsCfg.Model)
+		}
+		if _, err := os.Stat(errCfg.TfidfVocabPath); err != nil {
+			return fmt.Errorf("caterr tfidfVocabPath %q not accessible: %v, model %q",
+				errCfg.TfidfVocabPath, err, gsCfg.Model)
+		}
+		if _, err := os.Stat(errCfg.TfidfCentroidsPath); err != nil {
+			return fmt.Errorf("caterr tfidfCentroidsPath %q not accessible: %v, model %q",
+				errCfg.TfidfCentroidsPath, err, gsCfg.Model)
+		}
+		if errCfg.TrainDataPath != "" {
+			if _, err := os.Stat(errCfg.TrainDataPath); err != nil {
+				return fmt.Errorf("caterr trainDataPath %q not accessible: %v, model %q",
+					errCfg.TrainDataPath, err, gsCfg.Model)
+			}
+		}
+	}
+	return nil
+}
+
 func validateMonitorConfig(cfg *base.MonitorConfig) error {
 	address := strings.TrimSpace(cfg.Address)
 	alarmPath := strings.TrimSpace(cfg.AlarmPath)
@@ -353,13 +458,14 @@ func validatePredictorConfig(cfg *base.PredictorConfig) error {
 }
 
 func validateGlobalSchedulersConfig(gsConfigs []base.GlobalSchedulerConfig) error {
-	for _, scheduler := range gsConfigs {
+	for i := range gsConfigs {
+		scheduler := &gsConfigs[i]
 		log.Info().Msgf("checking global scheduler config, model %v", scheduler.Model)
-		if err := validateModeField(&scheduler); err != nil {
+		if err := validateModeField(scheduler); err != nil {
 			return err
 		}
 		if scheduler.Mode == "provider" {
-			if err := validateProviderPool(&scheduler); err != nil {
+			if err := validateProviderPool(scheduler); err != nil {
 				return err
 			}
 			log.Info().Msgf("finished to check provider pool config, model %v", scheduler.Model)
@@ -382,14 +488,25 @@ func validateGlobalSchedulersConfig(gsConfigs []base.GlobalSchedulerConfig) erro
 			return fmt.Errorf("invalid tbt SLO %v, value should > 0", tbt)
 		}
 
-		if err := validateLoadBalancer(&scheduler); err != nil {
+		if err := validateLoadBalancer(scheduler); err != nil {
 			return err
 		}
-		if err := validateInsConnectType(&scheduler); err != nil {
+		if err := validateInsConnectType(scheduler); err != nil {
 			return err
 		}
-		if err := utils.CheckStringLength(scheduler.TokenizeModelName); err != nil {
-			return fmt.Errorf("tokenizeModelName error: %v", err)
+		// Empty means "no tokenizer" (rune-count fallback); a non-empty
+		// name must pass the length check (restored — was accidentally
+		// removed with the mandatory-tokenizer validation).
+		if scheduler.TokenizeModelName != "" {
+			if err := utils.CheckStringLength(scheduler.TokenizeModelName); err != nil {
+				return fmt.Errorf("tokenizeModelName error: %v", err)
+			}
+		}
+		if err := validateErrSchedulerConfig(scheduler); err != nil {
+			return err
+		}
+		if err := validateKvAdmissionConfig(scheduler); err != nil {
+			return err
 		}
 		if err := utils.CheckStringLength(scheduler.Model); err != nil {
 			return fmt.Errorf("model error: %v", err)

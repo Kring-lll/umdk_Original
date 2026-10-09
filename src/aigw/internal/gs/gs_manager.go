@@ -37,6 +37,11 @@ const (
 	halfInterval        = 100
 	defaultInsNumPerGs  = 128
 	defaultReqLifeCycle = 10 * time.Second
+	// defaultErrReqSurvivalSec bounds how long a dispatched ERR request may
+	// stay in-flight before the survival scan force-releases it. Mirrors the
+	// SessionTimeoutSec default (agent stuck-without-change bottom line),
+	// far above any legitimate single-round latency.
+	defaultErrReqSurvivalSec = 660
 )
 
 // DeploymentPolicy is the deployment mode
@@ -135,6 +140,18 @@ type GlobalSchedulerManager struct {
 	runtimeMode    base.RuntimeMode
 	metricProvider MetricProvider
 
+	// ERR scheduler components (nil if ERR disabled)
+	errScheduler     *ErrSchedulerManager
+	capacityProvider *CapacityProvider
+	pendingQueue     *PendingQueue
+	errInFlight      map[string]errInFlightEntry
+	// kvAdmission gates dispatch on engine-observed waiting (nil = original
+	// double gate: global capacity provider + LB ReqNum<batchSize).
+	kvAdmission *KvAdmissionController
+	// dispatchMu serializes ERR dispatch to protect the non-thread-safe LB.
+	// Per-GSM so different models do not block each other.
+	dispatchMu sync.Mutex
+
 	// kvcSessionMgr drives vLLM KVC offload/prefetch on agent lifecycle events.
 	// nil when KVC management is disabled (SdkMode or kvc.enabled=false). Wired in H1.
 	kvcSessionMgr *KvcSessionManager
@@ -219,6 +236,11 @@ func NewGlobalSchedulerManager(parentCtx context.Context, gsConfig *base.GlobalS
 		}
 	}
 
+	// Initialize ERR scheduler after opts (runtimeMode is set via WithRuntimeMode).
+	if e := manager.initErrScheduler(&gsConfig.ErrScheduler, gsConfig.LoadBalancer.BatchSize); e != nil {
+		return nil, e
+	}
+
 	var cacheOptions []cachecenter.ManagerOption
 	if manager.cacheDriverOps != nil {
 		adp := cachecenter.NewRedisCacheCenter(manager.cacheDriverOps, int(manager.config.reqSurvivalDuration))
@@ -235,6 +257,10 @@ func NewGlobalSchedulerManager(parentCtx context.Context, gsConfig *base.GlobalS
 		withRuntimeMode(manager.runtimeMode),
 		WithSkipInstanceConnection(manager.config.skipInstanceConnection),
 	)
+
+	if manager.errScheduler != nil {
+		manager.instanceManager.SetOnUnhealthy(manager.onInstanceUnhealthy)
+	}
 
 	// Create MetricProvider based on runtime mode
 	var metricProvider MetricProvider
@@ -270,7 +296,42 @@ func NewGlobalSchedulerManager(parentCtx context.Context, gsConfig *base.GlobalS
 
 	manager.dispatcher = newGlobalScheduleDispatcher(manager.ctx)
 
+	if e := manager.initKvAdmission(&gsConfig.KvAdmission, gsConfig.LoadBalancer.BatchSize, gsLB); e != nil {
+		return nil, e
+	}
+
 	return manager, nil
+}
+
+// initKvAdmission wires engine-signal admission. It requires ERR queue mode:
+// the gate holds requests in the pending queue, which passthrough mode
+// (queueSize=0) does not have by definition — in that case the config is
+// legal but the controller stays inactive.
+func (m *GlobalSchedulerManager) initKvAdmission(cfg *base.KvAdmissionConfig, batchSize int, lb loadBalancer) error {
+	if cfg.Mode == "" || cfg.Mode == base.KvAdmissionOff {
+		return nil
+	}
+	if m.pendingQueue == nil || m.runtimeMode != base.ServiceMode {
+		log.Warn().Msgf("[KvAdmission] mode=%s requires ERR queue mode in ServiceMode; staying inactive (model %s)",
+			cfg.Mode, m.config.model)
+		return nil
+	}
+	ctrl := NewKvAdmissionController(*cfg, batchSize, m.instanceManager.InsReqNum,
+		m.instanceManager.getInsNum)
+	m.kvAdmission = ctrl
+	ctrl.SetDispatchKick(func() {
+		m.dispatchMu.Lock()
+		m.tryDispatchFromQueue()
+		m.dispatchMu.Unlock()
+	})
+	if lb, ok := lb.(interface{ SetCandidateFilter(func(string) bool) }); ok {
+		lb.SetCandidateFilter(ctrl.LBCandidate)
+	}
+	if cfg.Mode == base.KvAdmissionSignal {
+		ctrl.Start(m.ctx, m.wg)
+	}
+	log.Info().Msgf("[KvAdmission] active: mode=%s batchSize=%d (model %s)", cfg.Mode, batchSize, m.config.model)
+	return nil
 }
 
 func (m *GlobalSchedulerManager) setConfig(gsConfig *base.GlobalSchedulerConfig) error {
@@ -323,6 +384,79 @@ func (m *GlobalSchedulerManager) setConfig(gsConfig *base.GlobalSchedulerConfig)
 	}
 
 	return nil
+}
+
+// initErrScheduler initializes ERR scheduler, capacity provider, and pending queue.
+// Returns an error if a required prerequisite is missing (e.g. CatERR without
+// TF-IDF data) so startup is blocked rather than silently degrading.
+func (m *GlobalSchedulerManager) initErrScheduler(errCfg *base.ErrSchedulerConfig, batchSize int) error {
+	if errCfg.ErrSchedulerType == "" || errCfg.ErrSchedulerType == "none" {
+		log.Info().Msgf("[ERR] ERR scheduler disabled for model %s", m.config.model)
+		return nil
+	}
+
+	queueSize := errCfg.QueueSize
+	if m.runtimeMode != base.ServiceMode && queueSize > 0 {
+		log.Warn().Msgf("[ERR] queue mode requires ServiceMode; falling back to passthrough for model %s", m.config.model)
+		queueSize = 0
+	}
+
+	internalCfg := ErrSchedulerConfig{
+		SchedulerType:      errCfg.ErrSchedulerType,
+		WarmupSessions:     errCfg.WarmupSessions,
+		WarmupPerCat:       errCfg.WarmupPerCat,
+		WindowSize:         errCfg.WindowSize,
+		TrainDataPath:      errCfg.TrainDataPath,
+		TfidfVocabPath:     errCfg.TfidfVocabPath,
+		TfidfCentroidsPath: errCfg.TfidfCentroidsPath,
+		SessionTimeoutSec:  errCfg.SessionTimeoutSec,
+		TaskIdleTimeoutSec: errCfg.TaskIdleTimeoutSec,
+		QueueBoostSec:      errCfg.QueueBoostSec,
+	}
+
+	m.errScheduler = NewErrSchedulerManager(internalCfg)
+	m.errInFlight = make(map[string]errInFlightEntry)
+
+	if errCfg.ErrSchedulerType == "caterr" && !m.errScheduler.classifier.IsLoaded() {
+		return fmt.Errorf("[ERR] caterr classifier not loaded (vocab or centroids invalid), model %s", m.config.model)
+	}
+
+	if queueSize > 0 {
+		if m.config.deployPolicy == SeparatedDeployment {
+			m.capacityProvider = NewCapacityProviderSeparatedGroupAware(batchSize,
+				func() int {
+					if m.instanceManager == nil {
+						return 0
+					}
+					return m.instanceManager.getSeparatedCapacity()
+				},
+			)
+		} else {
+			m.capacityProvider = NewCapacityProvider(batchSize, func() int {
+				if m.instanceManager == nil {
+					return 0
+				}
+				return m.instanceManager.getInsNum()
+			})
+		}
+		m.pendingQueue = NewPendingQueue(queueSize)
+		log.Info().Msgf("[ERR] queue mode enabled: queueSize=%d, batchSize=%d, algo=%s",
+			queueSize, batchSize, errCfg.ErrSchedulerType)
+	} else {
+		log.Info().Msgf("[ERR] passthrough mode: batchSize=%d, algo=%s",
+			batchSize, errCfg.ErrSchedulerType)
+	}
+	return nil
+}
+
+// HasQueueMode returns true if ERR queue mode (queueSize > 0) is enabled.
+func (m *GlobalSchedulerManager) HasQueueMode() bool {
+	return m.pendingQueue != nil
+}
+
+// HasErrScheduler returns true if ERR scheduler is enabled.
+func (m *GlobalSchedulerManager) HasErrScheduler() bool {
+	return m.errScheduler != nil
 }
 
 // LastAccessAt returns gs last accessed time
@@ -404,7 +538,7 @@ func (m *GlobalSchedulerManager) registerInstance(ctrlMsg *ControlMessage) {
 	var err error
 	defer func() { ctrlMsg.Response <- err }()
 
-	if m.GetInsNum() >= m.config.maxInsNumPerGS {
+	if m.GetRegisteredInsNum() >= m.config.maxInsNumPerGS {
 		err = fmt.Errorf("the number of instance exceeds the maximum limit of gs(%v)",
 			m.config.maxInsNumPerGS)
 		log.ErrorAlarmMsgf(log.PerGSInstanceLimitExceeded, log.Report, fmt.Sprintf("%v", err))
@@ -472,6 +606,13 @@ func (m *GlobalSchedulerManager) registerInstance(ctrlMsg *ControlMessage) {
 	}
 
 	log.Info().Msgf("instance %s registered successfully", registerMsg.Name)
+
+	// Registration increases capacity — trigger drain if ERR queue mode is active
+	if m.errScheduler != nil && m.pendingQueue != nil {
+		m.dispatchMu.Lock()
+		m.tryDispatchFromQueue()
+		m.dispatchMu.Unlock()
+	}
 }
 
 func (m *GlobalSchedulerManager) unregisterInstance(ctrlMsg *ControlMessage) {
@@ -500,6 +641,16 @@ func (m *GlobalSchedulerManager) unregisterInstance(ctrlMsg *ControlMessage) {
 	}
 
 	log.Info().Msgf("instance (%v:%v) unregistered successfully", unregisterMsg.IP, unregisterMsg.Port)
+
+	// If all instances are gone, fail all queued requests (503)
+	if m.errScheduler != nil && m.pendingQueue != nil && m.instanceManager.getInsNum() == 0 {
+		m.dispatchMu.Lock()
+		for _, pr := range m.pendingQueue.DrainAll() {
+			log.Warn().Msgf("[ERR] queue flushed on instance unregister: session %s 503", pr.SessionID)
+			pr.Msg.Response <- ErrNoInstance
+		}
+		m.dispatchMu.Unlock()
+	}
 }
 
 // PutControlMessage sends control message to GS.
@@ -574,6 +725,13 @@ func (m *GlobalSchedulerManager) handleSchedule(msg *ControlMessage) {
 			}
 		}
 
+		// ERR dispatch path (handles priority computation, queue, and LB scheduling)
+		if m.errScheduler != nil {
+			m.dispatchErr(msg)
+			return
+		}
+
+		// Original dispatch path (no ERR)
 		result := m.scheduler.schedule(request, nil)
 		m.recordScheduleStats(result)
 
@@ -765,13 +923,24 @@ func (m *GlobalSchedulerManager) PreprocessForSchedule(req *LlmRequest) error {
 	return nil
 }
 
-// GetInsNum get the number of instances in the instance pool
+// GetInsNum get the number of healthy instances in the instance pool
 func (m *GlobalSchedulerManager) GetInsNum() int {
 	return m.instanceManager.getInsNum()
 }
 
+// GetRegisteredInsNum counts registered instances regardless of health —
+// registration quotas use this so a degraded pool cannot hide headroom.
+func (m *GlobalSchedulerManager) GetRegisteredInsNum() int {
+	return m.instanceManager.getRegisteredInsNum()
+}
+
 func (m *GlobalSchedulerManager) checkReqSurvival() {
 	m.instanceManager.checkReqSurvival(m.config.reqSurvivalDuration)
+	if m.errScheduler != nil {
+		m.dispatchMu.Lock()
+		m.checkErrInFlightSurvival()
+		m.dispatchMu.Unlock()
+	}
 }
 
 func (m *GlobalSchedulerManager) reqManagerLoop() {

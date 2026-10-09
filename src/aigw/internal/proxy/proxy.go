@@ -23,34 +23,58 @@ import (
 
 // ProxyManager manages HTTP request forwarding to backend workers.
 type ProxyManager struct {
-	ctx                context.Context
-	cancel             context.CancelFunc
-	rwLock             sync.RWMutex
-	client             *http.Client
-	timeout            time.Duration
-	maxRetry           int
-	retryBaseInterval  time.Duration  // Base interval for exponential backoff
-	retryMaxInterval   time.Duration  // Maximum interval cap for backoff
-	circuitBreaker     *CircuitBreaker // Circuit breaker for fault tolerance
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	rwLock               sync.RWMutex
+	client               *http.Client
+	timeout              time.Duration
+	firstChunkTimeout    time.Duration
+	chunkIntervalTimeout time.Duration
+	maxRetry             int
+	retryBaseInterval    time.Duration   // Base interval for exponential backoff
+	retryMaxInterval     time.Duration   // Maximum interval cap for backoff
+	circuitBreaker       *CircuitBreaker // Circuit breaker for fault tolerance
 }
+
+// Stream timeout defaults mirror the openjiuwen SDK defaults: first-chunk
+// 300s, inter-chunk 60s. The inter-chunk budget bounds both a silent engine
+// read after the first byte and a stuck client write (writes on an active
+// stream complete in milliseconds — measured TTOT p95=203ms — so a gap this
+// long means that side is dead).
+// drainLimitBytes caps how much of a failed attempt's body is read
+// before closing, enough to keep the connection reusable.
+const drainLimitBytes = 4096
+
+var (
+	defaultUpstreamFirstChunkTimeout = 300 * time.Second
+	defaultChunkIntervalTimeout      = 60 * time.Second
+)
 
 // ProxyConfig is the configuration for ProxyManager.
 type ProxyConfig struct {
-	Timeout            time.Duration      // Request timeout (default: 30s)
-	MaxRetry           int                // Maximum retry attempts (default: 3)
-	RetryBaseInterval  time.Duration      // Base interval for exponential backoff (default: 100ms)
-	RetryMaxInterval   time.Duration      // Maximum interval cap for backoff (default: 5s)
-	CircuitBreaker     *CircuitBreakerConfig // Circuit breaker configuration (optional)
+	Timeout           time.Duration         // Request timeout (default: 30s)
+	MaxRetry          int                   // Maximum retry attempts (default: 3)
+	RetryBaseInterval time.Duration         // Base interval for exponential backoff (default: 100ms)
+	RetryMaxInterval  time.Duration         // Maximum interval cap for backoff (default: 5s)
+	CircuitBreaker    *CircuitBreakerConfig // Circuit breaker configuration (optional)
+	// FirstChunkTimeout bounds the wait for the first byte of an upstream
+	// (engine) response. 0 = defaultUpstreamFirstChunkTimeout; negative
+	// disables.
+	FirstChunkTimeout time.Duration
+	// ChunkIntervalTimeout bounds the gap between tokens in either
+	// direction (silent engine read / stuck client write). 0 =
+	// defaultChunkIntervalTimeout; negative disables.
+	ChunkIntervalTimeout time.Duration
 }
 
 // NewProxyManager creates a new ProxyManager with configuration.
 func NewProxyManager(parentCtx context.Context, config *ProxyConfig) *ProxyManager {
 	if config == nil {
 		config = &ProxyConfig{
-			Timeout:            30 * time.Second,
-			MaxRetry:           3,
-			RetryBaseInterval:  100 * time.Millisecond,
-			RetryMaxInterval:   5 * time.Second,
+			Timeout:           30 * time.Second,
+			MaxRetry:          3,
+			RetryBaseInterval: 100 * time.Millisecond,
+			RetryMaxInterval:  5 * time.Second,
 		}
 	}
 
@@ -66,6 +90,12 @@ func NewProxyManager(parentCtx context.Context, config *ProxyConfig) *ProxyManag
 	if config.RetryMaxInterval == 0 {
 		config.RetryMaxInterval = 5 * time.Second
 	}
+	if config.FirstChunkTimeout == 0 {
+		config.FirstChunkTimeout = defaultUpstreamFirstChunkTimeout
+	}
+	if config.ChunkIntervalTimeout == 0 {
+		config.ChunkIntervalTimeout = defaultChunkIntervalTimeout
+	}
 
 	ctx, cancel := context.WithCancel(parentCtx)
 
@@ -76,38 +106,42 @@ func NewProxyManager(parentCtx context.Context, config *ProxyConfig) *ProxyManag
 	}
 
 	return &ProxyManager{
-		ctx:                ctx,
-		cancel:             cancel,
+		ctx:    ctx,
+		cancel: cancel,
 		client: &http.Client{
 			Timeout: config.Timeout,
 		},
-		timeout:            config.Timeout,
-		maxRetry:           config.MaxRetry,
-		retryBaseInterval:  config.RetryBaseInterval,
-		retryMaxInterval:   config.RetryMaxInterval,
-		circuitBreaker:     cb,
+		timeout:              config.Timeout,
+		firstChunkTimeout:    config.FirstChunkTimeout,
+		chunkIntervalTimeout: config.ChunkIntervalTimeout,
+		maxRetry:             config.MaxRetry,
+		retryBaseInterval:    config.RetryBaseInterval,
+		retryMaxInterval:     config.RetryMaxInterval,
+		circuitBreaker:       cb,
 	}
 }
 
 // ForwardRequest represents parameters for forwarding an HTTP request.
 type ForwardRequest struct {
-	Method    string            // HTTP method (GET, POST, etc.)
-	TargetURL string            // Target URL without @rank (e.g., "http://worker:8000")
-	Route     string            // API route (e.g., "/v1/chat/completions")
-	FullURL   string            // When non-empty, used verbatim instead of TargetURL+Route
-	Headers   http.Header       // Original request headers
-	Body      []byte            // Request body
-	DpRank    *int              // DP rank for header injection (optional)
-	Stream    bool              // Whether to stream the response
+	Method    string      // HTTP method (GET, POST, etc.)
+	TargetURL string      // Target URL without @rank (e.g., "http://worker:8000")
+	Route     string      // API route (e.g., "/v1/chat/completions")
+	FullURL   string      // When non-empty, used verbatim instead of TargetURL+Route
+	Headers   http.Header // Original request headers
+	Body      []byte      // Request body
+	DpRank    *int        // DP rank for header injection (optional)
+	Stream    bool        // Whether to stream the response
+	// Label identifies the request in watchdog kill logs (session/req id).
+	Label string
 }
 
 // ForwardResult represents the result of a forwarded request.
 type ForwardResult struct {
-	StatusCode  int
-	Headers     http.Header
-	Body        []byte         // Non-streaming response
+	StatusCode   int
+	Headers      http.Header
+	Body         []byte        // Non-streaming response
 	StreamReader *StreamReader // Streaming response
-	Error       error
+	Error        error
 }
 
 // ForwardRequest forwards an HTTP request to the target worker.
@@ -228,6 +262,14 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 			break
 		}
 
+		// The failed attempt's body is unused: drain-and-close so the
+		// connection can be reused instead of leaking on the next attempt.
+		if resp != nil && resp.Body != nil {
+			io.Copy(io.Discard, io.LimitReader(resp.Body, drainLimitBytes))
+			resp.Body.Close()
+			resp = nil
+		}
+
 		log.Warn().Msgf("[Proxy] request attempt %d failed: network=%v status=%d",
 			retry+1, lastErr, lastStatusCode)
 	}
@@ -240,6 +282,9 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 		}
 		if lastErr != nil {
 			return nil, lastErr
+		}
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
 		}
 		return nil, fmt.Errorf("server error: %d", lastStatusCode)
 	}
@@ -256,8 +301,16 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 	}
 
 	// 8. Handle streaming vs non-streaming
-	if req.Stream {
-		result.StreamReader = NewStreamReader(resp.Body)
+	// Only 2xx responses are handed out as SSE streams. Non-2xx responses
+	// (4xx from upstream, 5xx already returned as error above) are buffered
+	// into Body so the handler can forward the real status code and error
+	// body — wrapping them in a StreamReader would let the SSE parser
+	// silently drop the non-SSE error payload.
+	if req.Stream && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		pm.rwLock.RLock()
+		firstIdle, gapIdle := pm.firstChunkTimeout, pm.chunkIntervalTimeout
+		pm.rwLock.RUnlock()
+		result.StreamReader = newStreamReader(resp.Body, firstIdle, gapIdle, req.Label)
 		return result, nil
 	}
 
@@ -269,6 +322,29 @@ func (pm *ProxyManager) ForwardRequest(ctx context.Context, req *ForwardRequest)
 	}
 
 	return result, nil
+}
+
+// SetFirstChunkTimeoutForTest overrides the first-chunk watchdog bound.
+func (pm *ProxyManager) SetFirstChunkTimeoutForTest(d time.Duration) {
+	pm.rwLock.Lock()
+	pm.firstChunkTimeout = d
+	pm.rwLock.Unlock()
+}
+
+// ChunkIntervalTimeout returns the inter-token budget (negative = no
+// deadline): the bound for a silent engine read after the first byte and
+// for a stuck client write alike.
+func (pm *ProxyManager) ChunkIntervalTimeout() time.Duration {
+	pm.rwLock.RLock()
+	defer pm.rwLock.RUnlock()
+	return pm.chunkIntervalTimeout
+}
+
+// SetChunkIntervalTimeoutForTest overrides the inter-token budget.
+func (pm *ProxyManager) SetChunkIntervalTimeoutForTest(d time.Duration) {
+	pm.rwLock.Lock()
+	pm.chunkIntervalTimeout = d
+	pm.rwLock.Unlock()
 }
 
 // GetCircuitBreakerStats returns the circuit breaker statistics.
