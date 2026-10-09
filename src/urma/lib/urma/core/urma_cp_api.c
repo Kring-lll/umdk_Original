@@ -2067,15 +2067,22 @@ urma_target_jetty_t *urma_import_jetty(urma_context_t *ctx, urma_rjetty_t *rjett
     rjetty->flag.bs.order_type = order_type;
 
     urma_ops_t *ops = ctx->ops;
-    if (urma_check_ctrlplane_compat(ops->import_jetty)) {
-        return urma_import_jetty_compat(ctx, rjetty, token_value);
-    }
+    urma_target_jetty_t *tjetty = NULL;
 
-    atomic_fetch_add(&ctx->ref.atomic_cnt, 1);
-    urma_target_jetty_t *tjetty = ops->import_jetty(ctx, rjetty, token_value);
-    if (tjetty == NULL) {
-        atomic_fetch_sub(&ctx->ref.atomic_cnt, 1);
+    /* Bonding devices are excluded here because the bond provider records the
+     * aggregated cost itself and imports each physical jetty through this API. */
+    UDMA_PERF_PROFILING_START(UB_IMPORT_JETTY, ctx->dev->name);
+    if (urma_check_ctrlplane_compat(ops->import_jetty)) {
+        tjetty = urma_import_jetty_compat(ctx, rjetty, token_value);
+    } else {
+        atomic_fetch_add(&ctx->ref.atomic_cnt, 1);
+        tjetty = ops->import_jetty(ctx, rjetty, token_value);
+        if (tjetty == NULL) {
+            atomic_fetch_sub(&ctx->ref.atomic_cnt, 1);
+        }
     }
+    UDMA_PERF_PROFILING_END(UB_IMPORT_JETTY, ctx->dev->name);
+
     return tjetty;
 }
 
