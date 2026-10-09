@@ -55,15 +55,24 @@ func (m *GlobalSchedulerManager) dispatchErr(msg *ControlMessage) {
 	}
 
 	queueSize := 0
-	freeSlots := 0
 	if m.pendingQueue != nil {
 		queueSize = m.pendingQueue.Size()
 	}
-	if m.capacityProvider != nil {
-		freeSlots = m.capacityProvider.FreeSlots()
+	// Show the gate that actually decides admission: with engine-signal
+	// admission active the capacityProvider's free count (batchSize-based)
+	// is short-circuited and its negative values under real engine capacity
+	// read as exhaustion; the admission capacity is the live signal.
+	if m.kvAdmission != nil {
+		log.Debug().Msgf("[ERR] recv: session=%s curStep=%d cat=%s curQueue=%d gate=admission capacity=%d",
+			sessionID, curStep, cat, queueSize, m.kvAdmission.SignalCapacity())
+	} else {
+		freeSlots := 0
+		if m.capacityProvider != nil {
+			freeSlots = m.capacityProvider.FreeSlots()
+		}
+		log.Debug().Msgf("[ERR] recv: session=%s curStep=%d cat=%s curQueue=%d free=%d",
+			sessionID, curStep, cat, queueSize, freeSlots)
 	}
-	log.Debug().Msgf("[ERR] recv: session=%s curStep=%d cat=%s curQueue=%d free=%d",
-		sessionID, curStep, cat, queueSize, freeSlots)
 
 	m.dispatchMu.Lock()
 	defer m.dispatchMu.Unlock()

@@ -378,6 +378,18 @@ func (c *KvAdmissionController) exitDegradedLocked() {
 	}
 }
 
+// SignalCapacity returns the current admission capacity of the unit (free
+// engines at the configured budget, min across roles for PD). For logging
+// and diagnostics; the gating decision itself is AllowDispatch.
+func (c *KvAdmissionController) SignalCapacity() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.signal.capacity()
+}
+
 // DegradationStats reports degraded episodes and cumulative degraded time.
 func (c *KvAdmissionController) DegradationStats() (count int64, total time.Duration) {
 	c.mu.Lock()
