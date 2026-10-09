@@ -105,6 +105,11 @@ static urma_ops_t g_bond_ops = {
     .ack_jfc = bondp_ack_jfc,
 };
 
+bool bondp_is_bond_ctx(const urma_context_t *ctx)
+{
+    return ctx != NULL && ctx->ops == &g_bond_ops;
+}
+
 urma_status_t bondp_init(urma_init_attr_t *conf)
 {
     int ret;
