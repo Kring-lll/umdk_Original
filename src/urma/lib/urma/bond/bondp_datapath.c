@@ -564,6 +564,9 @@ static urma_status_t bondp_post_send_wr_no_store(bondp_comp_t *bdp_comp,
     /* Reject an overlong WR list before the MSN batch is consumed. */
     if (wr_total > BONDP_MAX_WR_LIST_NUM) {
         URMA_LOG_ERR("Bondp supports at most %d wr_list.\n", BONDP_MAX_WR_LIST_NUM);
+        if (bad_wr != NULL) {
+            *bad_wr = wr;
+        }
         return URMA_EINVAL;
     }
     /*
@@ -1587,14 +1590,26 @@ static void resend_matched_jfs_wrs(bondp_comp_t *bdp_comp, uint64_t base_wr_id,
         if (resend_wr_entry->entry_type != WR_BUF_ENTRY_JFS ||
             resend_wr_entry->bdp_comp != bdp_comp ||
             resend_wr_entry->send_idx != old_send_idx ||
-            resend_wr_entry->target_idx != old_target_idx ||
-            (resend_wr_entry->fixed_port && new_target_idx != (int)old_target_idx)) {
+            resend_wr_entry->target_idx != old_target_idx) {
             continue;
         }
 
         const uint64_t resend_wr_id = resend_wr_entry->wr_id;
+        int resend_send_idx = new_send_idx;
+        int resend_target_idx = new_target_idx;
+        if (resend_wr_entry->fixed_port) {
+            /* A pinned WR keeps its fixed target port and only switches the
+             * local exit. The old egress is already invalid at this point, so
+             * a miss here means no exit reaches the pinned target; the WR
+             * stays put and its own CQE reports the error to the caller. */
+            resend_target_idx = (int)old_target_idx;
+            if (schedule_send_fixed(&resend_wr_entry->target_vjetty->v_tjetty, bdp_comp,
+                                    resend_target_idx, &resend_send_idx) != 0) {
+                continue;
+            }
+        }
         atomic_fetch_sub(&bdp_comp->sqe_cnt[old_send_idx][old_target_idx], 1);
-        if (bondp_resend_jfs_wr(bdp_comp, resend_wr_entry, new_send_idx, new_target_idx) != 0) {
+        if (bondp_resend_jfs_wr(bdp_comp, resend_wr_entry, resend_send_idx, resend_target_idx) != 0) {
             URMA_LOG_ERR("Failed to resend %s jfs wr, wr_id=%lu\n", reason, resend_wr_id);
         }
     }

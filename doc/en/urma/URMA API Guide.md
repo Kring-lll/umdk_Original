@@ -6974,7 +6974,7 @@ typedef struct bondp_wr_hint {
 
 An invalid or non-member `src_id` on the receive interfaces also fails with `URMA_EINVAL`. On the send interfaces, an invalid or unreachable `dst_id`, or a specified port that is already invalid at post time, returns `URMA_EAGAIN` and the caller decides whether to retry; the receive interfaces also return `URMA_EAGAIN` when the specified port path is already invalid.
 
-On `URMA_EAGAIN` the whole batch is left unsubmitted and `*bad_wr` points to the first WR of the batch.
+On `URMA_EAGAIN` the whole batch is left unsubmitted. When a nonzero port hint is rejected because the specified path is unavailable, `*bad_wr` points to the first WR of the batch. A send-side segment lifetime check can also return `URMA_EAGAIN` before submission; in that case the whole batch is still unsubmitted, but `*bad_wr` identifies the WR referencing the segment being unregistered, and the WRs before it must not be treated as submitted.
 
 On the send interfaces, when a WR carries driver-extension chip affinity info (`has_drv_ext`), the port hint takes precedence and the chip affinity info is ignored for that WR.
 

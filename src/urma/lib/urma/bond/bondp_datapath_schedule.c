@@ -475,6 +475,14 @@ int schedule_send_fixed(urma_target_jetty_t *tjetty, bondp_comp_t *bdp_comp,
             if (bdp_comp->comp_type == BONDP_COMP_JETTY && bdp_comp->p_jetty[loc_idx] == NULL) {
                 continue;
             }
+            /* Same as the normal schedule: a RC pjetty is bound to exactly one
+             * remote p_tjetty, so only a path whose physical target matches
+             * that binding may use this egress. */
+            if (get_comp_urma_trans_mode(bdp_comp) == URMA_TM_RC &&
+                bdp_comp->comp_type == BONDP_COMP_JETTY &&
+                bdp_comp->p_jetty[loc_idx]->remote_jetty != path->p_tjetty) {
+                continue;
+            }
             *send_idx = (int)loc_idx;
             return 0;
         }

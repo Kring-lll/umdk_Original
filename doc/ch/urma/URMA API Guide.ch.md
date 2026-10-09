@@ -6985,7 +6985,7 @@ typedef struct bondp_wr_hint {
 
 接收接口上无效或不属于该 JFR/Jetty 的 `src_id` 同样返回 `URMA_EINVAL`。发送接口上，无效或不可达的 `dst_id`，或指定端口在下发时已失效，返回 `URMA_EAGAIN`，由调用方决定是否重试；接收接口在指定端口路径已失效时同样返回 `URMA_EAGAIN`。
 
-返回 `URMA_EAGAIN` 时整批 WR 均未提交，`*bad_wr` 指向本批第一个 WR。
+返回 `URMA_EAGAIN` 时整批 WR 均未提交。非零端口 hint 因指定路径不可用被拒绝时，`*bad_wr` 指向本批第一个 WR；发送侧 segment 生命周期检查也可能在提交前返回 `URMA_EAGAIN`，此时整批同样未提交，但 `*bad_wr` 指向引用正在注销 segment 的 WR，其之前的 WR 不能视为已提交。
 
 发送接口上，若 WR 同时携带驱动扩展的 chip 亲和信息（`has_drv_ext`），端口 hint 优先，本次下发的 WR 忽略该 chip 亲和信息。
 
