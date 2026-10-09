@@ -372,8 +372,16 @@ TEST(UrmaBondTest, DatapathScheduleSendFixedPinsAndValidatesTargetPort)
      * egress 0 is scanned after a non-matching path of the same egress. */
     SetTargetJettyPath(fixture.target, 0, 1, &fixture.phyTarget[0][1], true);
     fixture.comp.valid[1] = false;
+    /* The fixture is a RC jetty with egress 0 bound to phyTarget[0][0]: path
+     * (0->1) fails the binding check and egress 1 is dead, so nothing serves
+     * the pinned target yet. */
+    EXPECT_EQ(-1, schedule_send_fixed(&fixture.target.v_tjetty, &fixture.comp, 1, &sendIdx));
+    /* Rebind egress 0 to the pinned target: the live path (0->1) must win
+     * although the other egress is dead. */
+    fixture.comp.p_jetty[0]->remote_jetty = &fixture.phyTarget[0][1];
     EXPECT_EQ(0, schedule_send_fixed(&fixture.target.v_tjetty, &fixture.comp, 1, &sendIdx));
     EXPECT_EQ(0, sendIdx);
+    fixture.comp.p_jetty[0]->remote_jetty = &fixture.phyTarget[0][0];
     fixture.comp.valid[1] = true;
 }
 
@@ -446,9 +454,9 @@ TEST(UrmaBondTest, DatapathRemotePortIdConvertIsPureCoordinateMath)
     portId.bs.die_id = 2;
     EXPECT_NE(0, convert_remote_bond_port_id_to_active_index(portId, &activeIdx));
     portId.bs.die_id = 1;
-    portId.bs.port_idx = PORT_NUM + 1;
-    EXPECT_NE(0, convert_remote_bond_port_id_to_active_index(portId, &activeIdx));
     portId.bs.port_idx = PORT_NUM;
+    /* chip1/PORT_NUM must not alias chip2/port0 in the matrix mapping. */
+    EXPECT_NE(0, convert_remote_bond_port_id_to_active_index(portId, &activeIdx));
     portId.bs.chip_id = 2;
     EXPECT_NE(0, convert_remote_bond_port_id_to_active_index(portId, &activeIdx));
 }

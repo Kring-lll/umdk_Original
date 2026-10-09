@@ -6981,7 +6981,7 @@ typedef struct bondp_wr_hint {
 } bondp_wr_hint_t;
 ```
 
-`hint` 不允许为 NULL，且必须整体清零初始化：`version` 必须为 `BONDP_WR_HINT_VERSION_V0`，`size` 必须为 `sizeof(bondp_wr_hint_t)`，`reserved` 各项必须为 0。`mask` 为 `bondp_wr_hint_mask_t` 位组合。`mask == 0` 表示不指定端口，WR 完全走 bond 正常调度；否则，发送接口要求 `mask` 恰为 `BONDP_WR_HINT_MASK_DST_CHIP_ID | BONDP_WR_HINT_MASK_DST_DIE_ID | BONDP_WR_HINT_MASK_DST_PORT_ID` 并填全 `dst_id` 三个子字段，接收接口要求 `SRC_*` 对应的三位并填全 `src_id` 三个子字段；部分指定或两侧混合指定将以 `URMA_EINVAL` 失败。
+`hint` 不允许为 NULL。初始化时先整体清零，再将 `version` 置为 `BONDP_WR_HINT_VERSION_V0`、`size` 置为 `sizeof(bondp_wr_hint_t)`，`reserved` 各项保持为 0。`mask` 为 `bondp_wr_hint_mask_t` 位组合。`mask == 0` 表示不指定端口，WR 完全走 bond 正常调度；否则，发送接口要求 `mask` 恰为 `BONDP_WR_HINT_MASK_DST_CHIP_ID | BONDP_WR_HINT_MASK_DST_DIE_ID | BONDP_WR_HINT_MASK_DST_PORT_ID` 并填全 `dst_id` 三个子字段，接收接口要求 `SRC_*` 对应的三位并填全 `src_id` 三个子字段；部分指定或两侧混合指定将以 `URMA_EINVAL` 失败。
 
 接收接口上无效或不属于该 JFR/Jetty 的 `src_id` 同样返回 `URMA_EINVAL`。发送接口上，无效或不可达的 `dst_id`，或指定端口在下发时已失效，返回 `URMA_EAGAIN`，由调用方决定是否重试；接收接口在指定端口路径已失效时同样返回 `URMA_EAGAIN`。
 

@@ -620,7 +620,9 @@ int convert_remote_bond_port_id_to_active_index(bondp_port_id_t port_id, uint32_
         *active_index = port_id.bs.chip_id - 1;
         return 0;
     }
-    if (port_id.bs.port_idx > PORT_NUM) {
+    /* Port EIDs are numbered [0, PORT_NUM - 1]; a wider range would alias
+     * chip1/PORT_NUM onto chip2/port0 in the matrix mapping. */
+    if (port_id.bs.port_idx >= PORT_NUM) {
         URMA_LOG_ERR("Invalid remote port_id.port_idx=%u.\n", port_id.bs.port_idx);
         return -1;
     }
