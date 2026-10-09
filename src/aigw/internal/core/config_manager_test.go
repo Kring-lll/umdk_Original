@@ -529,7 +529,8 @@ func TestValidateGlobalSchedulersConfig(t *testing.T) {
 	err = validateGlobalSchedulersConfig(invalidLoadBalancerMixedTypeConfig)
 	assert.Error(t, err)
 
-	// Invalid tokenizer config file
+	// Invalid tokenizer name (empty is legal since the E4 decoupling;
+	// a non-empty name must pass the length check)
 	invalidTokenizerCfgFileConfig := []base.GlobalSchedulerConfig{
 		{
 			Model:                "model1",
@@ -537,7 +538,7 @@ func TestValidateGlobalSchedulersConfig(t *testing.T) {
 			DeployPolicy:         "mixed",
 			MaxTimeToFirstToken:  100,
 			MaxTimeBetweenTokens: 200,
-			TokenizeModelName:    "",
+			TokenizeModelName:    strings.Repeat("m", 300),
 			LoadBalancer: base.LoadBalancerConfig{
 				Mixed:               "roundRobin",
 				Prefill:             "true",
