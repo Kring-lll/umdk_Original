@@ -7,14 +7,17 @@
  * History: 2026-07-21  Create file
  */
 
+#include <stdint.h>
 #include <sys/epoll.h>
 #include <time.h>
 
+#include "bondp_cp_tjetty.h"
+#include "include/urma_ubagg.h"
 #include "ub_util.h"
 #include "urma_api.h"
 #include "urma_log.h"
 #include "urma_private.h"
-
+#include "bondp_provider_ops.h"
 #include "bondp_types.h"
 
 #include "bondp_dp_interrupt.h"
@@ -239,7 +242,26 @@ static int init_elment_vjetty(urma_async_event_t *v_event, urma_async_event_t *p
     return ret;
 }
 
-urma_status_t bondp_get_async_event(urma_context_t *ctx, urma_async_event_t *v_event)
+static bondp_port_id_t bondp_pjfr_to_port_id(const urma_jfr_t *p_jfr)
+{
+    bondp_port_id_t invalid = {.value = UINT16_MAX};
+    if (p_jfr == NULL) {
+        return invalid;
+    }
+    bondp_comp_t *bdp_jfr = (bondp_comp_t *)(uintptr_t)p_jfr->jfr_cfg.user_ctx;
+    if (bdp_jfr == NULL) {
+        return invalid;
+    }
+    for (uint32_t i = 0; i < URMA_UBAGG_DEV_MAX_NUM; ++i) {
+        if (bdp_jfr->p_jfr[i] == p_jfr) {
+            return bondp_active_index_to_port_id(i);
+        }
+    }
+    return invalid;
+}
+
+urma_status_t bondp_get_async_event_internal(urma_context_t *ctx, urma_async_event_t *v_event,
+    bondp_port_id_t *port_id)
 {
     if (ctx == NULL || ctx->async_fd < 0 || v_event == NULL) {
         URMA_LOG_ERR("Invalid parameter\n");
@@ -271,6 +293,9 @@ urma_status_t bondp_get_async_event(urma_context_t *ctx, urma_async_event_t *v_e
             free(p_event);
             return status;
         }
+        if (port_id != NULL && p_event->event_type == URMA_EVENT_JFR_LIMIT) {
+            *port_id = bondp_pjfr_to_port_id(p_event->element.jfr);
+        }
         v_event->urma_ctx = ctx;
         if (init_elment_vjetty(v_event, p_event) != 0) {
             free(p_event);
@@ -283,6 +308,23 @@ urma_status_t bondp_get_async_event(urma_context_t *ctx, urma_async_event_t *v_e
         return URMA_SUCCESS;
     }
     return URMA_FAIL;
+}
+
+urma_status_t bondp_get_async_event(urma_context_t *ctx, urma_async_event_t *event, bondp_port_id_t *port_id)
+{
+    if (ctx == NULL || event == NULL || port_id == NULL) {
+        return URMA_EINVAL;
+    }
+    if (!bondp_is_bond_ctx(ctx)) {
+        return URMA_EINVAL;
+    }
+    port_id->value = UINT16_MAX;
+    return bondp_get_async_event_internal(ctx, event, port_id);
+}
+
+urma_status_t bondp_get_async_event_sched(urma_context_t *ctx, urma_async_event_t *v_event)
+{
+    return bondp_get_async_event_internal(ctx, v_event, NULL);
 }
 
 void bondp_ack_async_event(urma_async_event_t *event)
